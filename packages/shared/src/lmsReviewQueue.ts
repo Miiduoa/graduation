@@ -39,6 +39,17 @@ export function sortGradeQueue<T extends { score: number | null; submittedAt: st
   });
 }
 
+/** True when a published review timestamp is older than the latest submission. */
+export function feedbackPredatesSubmission(
+  reviewedAt: string | null | undefined,
+  submittedAt: string | null | undefined,
+): boolean {
+  if (!reviewedAt || !submittedAt) return false;
+  const reviewed = parseTaipeiInstant(reviewedAt);
+  const submitted = parseTaipeiInstant(submittedAt);
+  return reviewed !== null && submitted !== null && reviewed < submitted;
+}
+
 /**
  * Pending review when there is no usable feedback yet, or the saved review
  * predates the student's current submission (resubmit after feedback).
@@ -75,6 +86,33 @@ export function sortFeedbackQueue<T extends FeedbackQueueEntry>(rows: readonly T
     if (pending !== 0) return pending;
     return (parseTaipeiInstant(b.submittedAt) ?? 0) - (parseTaipeiInstant(a.submittedAt) ?? 0);
   });
+}
+
+/**
+ * Next receipt still awaiting review in queue order, after the given account.
+ * Uses the latest sorted snapshot (e.g. after a successful save refreshed the row).
+ */
+export function nextAwaitingFeedbackReview<
+  T extends FeedbackQueueEntry & { platformAccountId: string },
+>(rows: readonly T[], afterPlatformAccountId: string): T | null {
+  const ordered = sortFeedbackQueue(rows);
+  const awaiting = ordered.filter((entry) => needsFeedbackReview(entry));
+  if (awaiting.length === 0) return null;
+  const index = awaiting.findIndex(
+    (entry) => entry.platformAccountId === afterPlatformAccountId,
+  );
+  if (index === -1) return awaiting[0] ?? null;
+  return awaiting[index + 1] ?? null;
+}
+
+/** 1-based position within the awaiting-review queue, or null when not awaiting. */
+export function awaitingFeedbackPosition<
+  T extends FeedbackQueueEntry & { platformAccountId: string },
+>(rows: readonly T[], platformAccountId: string): { index: number; total: number } | null {
+  const awaiting = sortFeedbackQueue(rows).filter((entry) => needsFeedbackReview(entry));
+  const index = awaiting.findIndex((entry) => entry.platformAccountId === platformAccountId);
+  if (index === -1) return null;
+  return { index: index + 1, total: awaiting.length };
 }
 
 export function gradeQueueLabel(filter: GradeQueueFilter): string {

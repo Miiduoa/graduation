@@ -423,19 +423,19 @@ export function Button(props: {
     small: {
       paddingVertical: theme.space.xs,
       paddingHorizontal: theme.space.md,
-      fontSize: 13,
+      fontSize: theme.typography.bodySmall.fontSize,
       radius: theme.radius.sm,
     },
     default: {
       paddingVertical: theme.space.sm,
       paddingHorizontal: theme.space.lg,
-      fontSize: 15,
+      fontSize: theme.typography.body.fontSize,
       radius: theme.radius.md,
     },
     large: {
       paddingVertical: theme.space.md,
       paddingHorizontal: theme.space.xl,
-      fontSize: 16,
+      fontSize: theme.typography.h3.fontSize,
       radius: theme.radius.lg,
     },
   };

@@ -36,7 +36,7 @@ it('restores saved appearance on a direct entry without mounting settings', () =
   render(<AppearancePreferences />);
   expect(document.documentElement.dataset.theme).toBe('dark');
   expect(document.documentElement.style.getPropertyValue('--brand')).toBe('');
-  expect(document.documentElement.style.getPropertyValue('--font-body-size')).toBe('17px');
+  expect(document.documentElement.style.getPropertyValue('--font-body-size')).toBe('1.0625rem');
   expect(document.documentElement.dataset.reducedMotion).toBe('true');
 });
 it('updates all open pages after another tab changes or clears preferences', () => {

@@ -681,6 +681,7 @@ test('budget filtering excludes unknown prices and clears cleanly', async () => 
   expect(view.queryByText('豪華餐')).toBeNull();
   expect(view.queryByText('未標價餐')).toBeNull();
   fireEvent.press(view.getByText('全部餐廳'));
+  fireEvent.press(view.getByLabelText('展開校園餐廳甲的菜單'));
   expect(view.getByText('豪華餐')).toBeTruthy();
   expect(view.getByText('未標價餐')).toBeTruthy();
 });
@@ -696,16 +697,54 @@ test('long restaurant menus expand in place while retaining a compact initial li
   });
   const view = render(<CafeteriaAiFirstScreen />);
   await act(async () => {});
-  expect(view.getByText('餐點 3')).toBeTruthy();
-  expect(view.queryByText('餐點 4')).toBeNull();
+  expect(view.getByText('餐點 1')).toBeTruthy();
+  expect(view.queryByText('餐點 2')).toBeNull();
   fireEvent.press(view.getByLabelText('展開校園餐廳甲的菜單'));
   expect(view.getByText('餐點 5')).toBeTruthy();
   fireEvent.press(view.getByLabelText('收合校園餐廳甲的菜單'));
   expect(view.queryByText('餐點 5')).toBeNull();
 });
 
+test('expanded menus keep their storefront destination and reset when the school changes', async () => {
+  jest.mocked(loadDiningCatalog).mockResolvedValueOnce({
+    venues: catalog.venues,
+    menus: [menu, { ...menu, id: 'second', name: '第二道餐點' }],
+  });
+  const navigate = jest.fn();
+  const view = render(<CafeteriaAiFirstScreen navigation={{ navigate }} />);
+  await act(async () => {});
+  expect(view.queryByText('第二道餐點')).toBeNull();
+  fireEvent.press(view.getByLabelText('展開校園餐廳甲的菜單'));
+  expect(view.getByText('第二道餐點')).toBeTruthy();
+  fireEvent.press(view.getByLabelText('查看校園餐廳甲的店家資訊'));
+  expect(navigate).toHaveBeenLastCalledWith('校園', {
+    screen: 'Storefront',
+    params: { cafeteriaId: 'venue-a' },
+  });
+  jest.mocked(loadDiningCatalog).mockResolvedValueOnce({
+    venues: [{ ...catalog.venues[0], id: 'new-venue', name: '另一校的餐廳' }],
+    menus: [
+      { ...menu, id: 'new-one', cafeteriaId: 'new-venue', name: '新校餐點' },
+      { ...menu, id: 'new-two', cafeteriaId: 'new-venue', name: '另一道新校餐點' },
+    ],
+  });
+  mockSchool = { id: 'other-school' };
+  view.rerender(<CafeteriaAiFirstScreen navigation={{ navigate }} />);
+  await act(async () => {});
+  expect(view.queryByText('第二道餐點')).toBeNull();
+  expect(view.queryByText('另一道新校餐點')).toBeNull();
+  expect(view.getByLabelText('展開另一校的餐廳的菜單')).toBeTruthy();
+  fireEvent.changeText(view.getByLabelText('餐點或店名'), '另一道');
+  expect(view.getByText('另一道新校餐點')).toBeTruthy();
+  fireEvent.press(view.getByLabelText('查看另一校的餐廳的店家資訊'));
+  expect(navigate).toHaveBeenLastCalledWith('校園', {
+    screen: 'Storefront',
+    params: { cafeteriaId: 'new-venue' },
+  });
+});
+
 test.each(['search', 'budget'] as const)(
-  '%s results retain three previews until explicitly expanded',
+  '%s results retain one preview until explicitly expanded',
   async (mode) => {
     jest.mocked(loadDiningCatalog).mockResolvedValueOnce({
       venues: catalog.venues,
@@ -722,10 +761,10 @@ test.each(['search', 'budget'] as const)(
     await act(async () => {});
     if (mode === 'search') fireEvent.changeText(view.getByLabelText('餐點或店名'), '飯食');
     else fireEvent.press(view.getByText('100 元內'));
-    expect(view.getByText('飯食 3')).toBeTruthy();
-    expect(view.queryByText('飯食 4')).toBeNull();
+    expect(view.getByText('飯食 1')).toBeTruthy();
+    expect(view.queryByText('飯食 2')).toBeNull();
     expect(view.getByText('5 道符合 · 共 6 道')).toBeTruthy();
-    expect(view.getByText('再看 2 道')).toBeTruthy();
+    expect(view.getByText('看全部 5 道餐點')).toBeTruthy();
     fireEvent.press(view.getByLabelText('展開校園餐廳甲的菜單'));
     expect(view.getByText('飯食 5')).toBeTruthy();
     expect(view.queryByText('限定套餐')).toBeNull();

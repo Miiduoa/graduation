@@ -41,20 +41,31 @@ export function FoodText({
   children,
   title = false,
   alert = false,
+  subdued = false,
+  status = false,
 }: {
   children: React.ReactNode;
   title?: boolean;
   alert?: boolean;
+  subdued?: boolean;
+  status?: boolean;
 }) {
   const theme = useTheme();
+  const color = alert
+    ? theme.colors.danger
+    : subdued
+      ? theme.colors.muted
+      : status
+        ? theme.colors.textSecondary
+        : theme.colors.text;
   return (
     <Text
       accessibilityRole={alert ? 'alert' : title ? 'header' : undefined}
       style={{
-        color: alert ? theme.colors.danger : theme.colors.text,
-        fontSize: title ? 21 : 16,
-        lineHeight: title ? 29 : 25,
-        fontWeight: title ? '600' : '400',
+        color,
+        fontSize: title ? 21 : status ? 15 : 16,
+        lineHeight: title ? 29 : status ? 22 : 25,
+        fontWeight: title ? '600' : status ? '500' : '400',
       }}
     >
       {children}
@@ -68,6 +79,7 @@ export function FoodButton({
   selected = false,
   accessibilityLabel,
   expanded,
+  variant = 'secondary',
 }: {
   children: string;
   onPress(): void;
@@ -75,8 +87,10 @@ export function FoodButton({
   selected?: boolean;
   accessibilityLabel?: string;
   expanded?: boolean;
+  variant?: 'primary' | 'secondary';
 }) {
   const theme = useTheme();
+  const primary = variant === 'primary';
   return (
     <Pressable
       accessibilityRole="button"
@@ -86,14 +100,35 @@ export function FoodButton({
       onPress={onPress}
       style={{
         minHeight: 48,
-        padding: 12,
+        paddingVertical: 12,
+        paddingHorizontal: 14,
         borderRadius: 8,
-        borderWidth: 1,
+        borderWidth: primary ? 0 : 1,
         borderColor: selected ? theme.colors.accent : theme.colors.border,
-        opacity: disabled ? 0.5 : 1,
+        backgroundColor: primary
+          ? disabled
+            ? theme.colors.disabledBg
+            : theme.colors.accent
+          : selected
+            ? theme.colors.accentSoft
+            : theme.colors.surface,
+        opacity: disabled && !primary ? 0.5 : 1,
       }}
     >
-      <FoodText>{children}</FoodText>
+      <Text
+        style={{
+          color: primary
+            ? disabled
+              ? theme.colors.disabledText
+              : theme.colors.onAccent
+            : theme.colors.text,
+          fontSize: 16,
+          lineHeight: 24,
+          fontWeight: primary || selected ? '600' : '400',
+        }}
+      >
+        {children}
+      </Text>
     </Pressable>
   );
 }
@@ -115,7 +150,7 @@ export function FoodField({
   const theme = useTheme();
   return (
     <View style={{ gap: 5 }}>
-      <FoodText>{label}</FoodText>
+      <FoodText subdued>{label}</FoodText>
       <TextInput
         accessibilityLabel={label}
         value={value}
@@ -131,6 +166,7 @@ export function FoodField({
           borderWidth: 1,
           borderRadius: 8,
           borderColor: theme.colors.border,
+          backgroundColor: theme.colors.surface,
           color: theme.colors.text,
           fontSize: 16,
         }}
@@ -138,10 +174,104 @@ export function FoodField({
     </View>
   );
 }
+export function FoodQuantityStepper({
+  label,
+  value,
+  onChange,
+  disabled = false,
+  min = 1,
+  max = 20,
+}: {
+  label: string;
+  value: string;
+  onChange(value: string): void;
+  disabled?: boolean;
+  min?: number;
+  max?: number;
+}) {
+  const theme = useTheme();
+  const parsed = /^\d+$/.test(value) ? Number(value) : 0;
+  const setAmount = (next: number) => onChange(String(Math.max(min, Math.min(max, next))));
+  return (
+    <View style={{ gap: 8 }}>
+      <FoodText subdued>{label}</FoodText>
+      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={`減少${label.replace(/數量$/, '')}數量`}
+          accessibilityState={{ disabled: disabled || parsed <= min }}
+          disabled={disabled || parsed <= min}
+          onPress={() => setAmount(parsed - 1)}
+          style={{
+            minWidth: 48,
+            minHeight: 48,
+            alignItems: 'center',
+            justifyContent: 'center',
+            borderWidth: 1,
+            borderRadius: 8,
+            borderColor: theme.colors.border,
+            backgroundColor: theme.colors.surface,
+            opacity: disabled || parsed <= min ? 0.45 : 1,
+          }}
+        >
+          <Text style={{ color: theme.colors.text, fontSize: 22, fontWeight: '600' }}>−</Text>
+        </Pressable>
+        <TextInput
+          accessibilityLabel={label}
+          value={value}
+          onChangeText={onChange}
+          editable={!disabled}
+          keyboardType="number-pad"
+          maxLength={2}
+          style={{
+            minWidth: 64,
+            minHeight: 48,
+            textAlign: 'center',
+            borderWidth: 1,
+            borderRadius: 8,
+            borderColor: theme.colors.border,
+            backgroundColor: theme.colors.surface,
+            color: theme.colors.text,
+            fontSize: 18,
+            fontWeight: '600',
+          }}
+        />
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={`增加${label.replace(/數量$/, '')}數量`}
+          accessibilityState={{ disabled: disabled || parsed >= max }}
+          disabled={disabled || parsed >= max}
+          onPress={() => setAmount(parsed < min ? min : parsed + 1)}
+          style={{
+            minWidth: 48,
+            minHeight: 48,
+            alignItems: 'center',
+            justifyContent: 'center',
+            borderWidth: 1,
+            borderRadius: 8,
+            borderColor: theme.colors.border,
+            backgroundColor: theme.colors.surface,
+            opacity: disabled || parsed >= max ? 0.45 : 1,
+          }}
+        >
+          <Text style={{ color: theme.colors.text, fontSize: 22, fontWeight: '600' }}>＋</Text>
+        </Pressable>
+      </View>
+    </View>
+  );
+}
 export function FoodCard({ children }: { children: React.ReactNode }) {
   const theme = useTheme();
   return (
-    <View style={{ borderTopWidth: 1, borderColor: theme.colors.border, paddingTop: 18, gap: 12 }}>
+    <View
+      style={{
+        borderTopWidth: 1,
+        borderColor: theme.colors.border,
+        paddingTop: 18,
+        gap: 12,
+        backgroundColor: theme.colors.background,
+      }}
+    >
       {children}
     </View>
   );
@@ -489,7 +619,7 @@ export function FoodReadState({
 }) {
   return (
     <>
-      {resource.loading ? <FoodText>正在讀取最新狀態…</FoodText> : null}
+      {resource.loading ? <FoodText status>正在讀取最新狀態…</FoodText> : null}
       {resource.error ? <FoodText alert>{resource.error}</FoodText> : null}
       <FoodButton disabled={resource.loading || disabled} onPress={() => void resource.load()}>
         重新讀取
