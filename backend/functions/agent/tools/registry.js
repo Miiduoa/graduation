@@ -1,5 +1,6 @@
 'use strict';
 
+const { assertToolInputBounds } = require('../inputLimits');
 const getTodaySchedule = require('./getTodaySchedule');
 const getAssignments = require('./getAssignments');
 const getAnnouncements = require('./getAnnouncements');
@@ -71,6 +72,8 @@ const byName = new Map(tools.map((t) => [t.name, t]));
 async function runTool(name, ctx, input) {
   const tool = byName.get(name);
   if (!tool) throw new Error(`Unknown tool: ${name}`);
+  // Mitigate Zod3 GHSA-mrhx-c7xc-m3w5: bound before inputSchema.parse inside execute.
+  assertToolInputBounds(input);
   return tool.execute(ctx, input);
 }
 

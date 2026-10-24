@@ -19,10 +19,16 @@ def parse_args(argv=None):
     extensions.add_argument('--course-access-candidate', action='store_true', help='Build the disabled-by-default course review candidate; never deploy or migrate')
     extensions.add_argument('--public-cafeterias-candidate', action='store_true', help='Build the public read-only cafeteria catalog; never deploy or migrate')
     extensions.add_argument('--food-ordering-candidate', action='store_true', help='Build the six-patch ordering candidate; never deploy, migrate or combine other candidates')
+    extensions.add_argument('--security-candidate', action='store_true', help='Build the production-bound runtime dependency security image (deploy/nuni-api/security); never deploy, migrate, or alter default overlays')
     return parser.parse_args(argv)
 
 
 def build(args):
+    if args.security_candidate:
+        spec = importlib.util.spec_from_file_location('nuni_api_security_prepare', root / 'security' / 'prepare.py')
+        extension = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(extension)
+        raise SystemExit(extension.main([]))
     if args.imports_compatible_rollback:
         rollback = json.loads((root / 'composed/rollback-source.json').read_text())
         project = root.parents[1]

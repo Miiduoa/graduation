@@ -1,5 +1,6 @@
 const nodeCrypto = require('crypto');
 const { zodToJsonSchema } = require('zod-to-json-schema');
+const { MAX_TOTAL_UTF8_BYTES, utf8ByteLength } = require('./agent/inputLimits');
 
 const DEFAULT_PROVIDER_ORDER = ['groq', 'gemini'];
 const OLLAMA_BASE_URL_DEFAULT = 'http://localhost:11434/v1';
@@ -7,6 +8,14 @@ const OLLAMA_DEFAULT_MODEL = 'qwen3:8b';
 const DEFAULT_GROQ_MODEL = 'llama-3.3-70b-versatile';
 const MAX_WEB_SOURCES = 4;
 const WEB_TIMEOUT_MS = 7000;
+/** Cap raw tool-call argument strings before JSON.parse. */
+const MAX_TOOL_ARGUMENTS_UTF8_BYTES = MAX_TOTAL_UTF8_BYTES;
+/** Cap provider chat/completions JSON body before parse (stream + length checks). */
+const MAX_PROVIDER_RESPONSE_BYTES = 2 * 1024 * 1024;
+/** Cap non-2xx provider error body prefix kept for diagnostics (cancel rest). */
+const MAX_PROVIDER_ERROR_PREFIX_BYTES = 2 * 1024;
+/** Cap tool_calls scheduled per model round before Promise.all. */
+const MAX_TOOL_CALLS_PER_ROUND = 8;
 
 const PERSONAL_INTENTS = new Set([
   'assignment_status',
@@ -207,6 +216,129 @@ function parseRetryAfter(headers, attempt) {
   return Math.min(8000, 1000 * 2 ** attempt);
 }
 
+async function cancelResponseBody(response) {
+  if (!response?.body) return;
+  try {
+    if (typeof response.body.cancel === 'function') {
+      await response.body.cancel();
+      return;
+    }
+    if (typeof response.body.getReader === 'function') {
+      const reader = response.body.getReader();
+      await reader.cancel();
+    }
+  } catch {
+    /* ignore cancel errors */
+  }
+}
+
+/**
+ * Stream-aware byte reader. Never calls unbounded .text() when a body stream exists.
+ * - strict: throw + cancel once bytes exceed max (success JSON path)
+ * - prefix: keep at most max bytes then cancel remainder (error diagnostics)
+ */
+async function readResponseBytesBounded(response, maxBytes, { mode = 'strict' } = {}) {
+  const declared = response.headers?.get?.('content-length');
+  if (mode === 'strict' && declared != null && String(declared).trim() !== '') {
+    if (!/^\d+$/.test(String(declared)) || Number(declared) > maxBytes) {
+      await cancelResponseBody(response);
+      throw new Error('Provider response exceeds size limit');
+    }
+  }
+
+  if (response.body && typeof response.body.getReader === 'function') {
+    const reader = response.body.getReader();
+    const chunks = [];
+    let size = 0;
+    try {
+      for (;;) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        if (!value?.byteLength) continue;
+
+        if (mode === 'prefix') {
+          const remaining = maxBytes - size;
+          if (remaining <= 0) {
+            await reader.cancel();
+            break;
+          }
+          if (value.byteLength > remaining) {
+            chunks.push(Buffer.from(value.subarray(0, remaining)));
+            size += remaining;
+            await reader.cancel();
+            break;
+          }
+          chunks.push(Buffer.from(value));
+          size += value.byteLength;
+          continue;
+        }
+
+        size += value.byteLength;
+        if (size > maxBytes) {
+          await reader.cancel();
+          throw new Error('Provider response exceeds size limit');
+        }
+        chunks.push(Buffer.from(value));
+      }
+    } catch (error) {
+      try {
+        await reader.cancel();
+      } catch {
+        /* ignore cancel errors */
+      }
+      throw error;
+    }
+    return Buffer.concat(chunks);
+  }
+
+  // Non-stream test-double fallback only; production fetch Response always streams.
+  if (typeof response.text === 'function') {
+    const text = await response.text();
+    const buf = Buffer.from(text, 'utf8');
+    if (mode === 'prefix') {
+      return buf.length > maxBytes ? buf.subarray(0, maxBytes) : buf;
+    }
+    if (buf.length > maxBytes) {
+      throw new Error('Provider response exceeds size limit');
+    }
+    return buf;
+  }
+
+  if (mode === 'strict' && typeof response.json === 'function') {
+    // Legacy test doubles may only implement json(). Real fetch Response always
+    // exposes body (preferred) or text(); this path is intentionally last.
+    return null;
+  }
+
+  return Buffer.alloc(0);
+}
+
+/**
+ * Read a Response body with a hard byte cap before JSON.parse.
+ * Uses streamed reads when available; never trusts Content-Length alone.
+ */
+async function readResponseJsonBounded(response, maxBytes = MAX_PROVIDER_RESPONSE_BYTES) {
+  const bytes = await readResponseBytesBounded(response, maxBytes, { mode: 'strict' });
+  if (bytes == null && typeof response.json === 'function') {
+    return response.json();
+  }
+  return JSON.parse(Buffer.from(bytes).toString('utf8'));
+}
+
+/** Bounded error-body prefix for provider !ok paths; cancels remainder of stream. */
+async function readResponseErrorPrefix(
+  response,
+  maxBytes = MAX_PROVIDER_ERROR_PREFIX_BYTES,
+) {
+  try {
+    const bytes = await readResponseBytesBounded(response, maxBytes, { mode: 'prefix' });
+    return Buffer.from(bytes || Buffer.alloc(0)).toString('utf8');
+  } catch {
+    await cancelResponseBody(response);
+    return '';
+  }
+}
+
 async function fetchJson(
   url,
   { fetchImpl = globalThis.fetch, timeoutMs = WEB_TIMEOUT_MS, ...options } = {},
@@ -226,7 +358,7 @@ async function fetchJson(
       },
     });
     if (!response.ok) return null;
-    return await response.json();
+    return await readResponseJsonBounded(response, MAX_PROVIDER_RESPONSE_BYTES);
   } catch {
     return null;
   } finally {
@@ -600,16 +732,17 @@ async function callOpenAiCompatChat({
         status: response.status,
         retryAfterMs: parseRetryAfter(response.headers, attempt),
       };
+      await cancelResponseBody(response);
       await sleep(lastError.retryAfterMs);
       continue;
     }
 
     if (!response.ok) {
-      const body = await response.text().catch(() => '');
+      const body = await readResponseErrorPrefix(response);
       throw new Error(`${provider} failed: HTTP ${response.status} ${body.slice(0, 160)}`);
     }
 
-    const data = await response.json();
+    const data = await readResponseJsonBounded(response, MAX_PROVIDER_RESPONSE_BYTES);
     const message = data?.choices?.[0]?.message;
     const rawToolCalls = message?.tool_calls;
     const toolCalls =
@@ -656,15 +789,16 @@ async function callGeminiGenerate({ fetchImpl = globalThis.fetch, apiKey, model,
   });
 
   if (response.status === 429) {
+    await cancelResponseBody(response);
     await sleep(parseRetryAfter(response.headers, 0));
     return null;
   }
   if (!response.ok) {
-    const body = await response.text().catch(() => '');
+    const body = await readResponseErrorPrefix(response);
     throw new Error(`gemini failed: HTTP ${response.status} ${body.slice(0, 160)}`);
   }
 
-  const data = await response.json();
+  const data = await readResponseJsonBounded(response, MAX_PROVIDER_RESPONSE_BYTES);
   return {
     provider: 'gemini',
     model,
@@ -827,23 +961,45 @@ async function callAssistantModelWithTools({
       return { ...result, transcriptMessages, toolsInvoked, toolCallsTrace, cards };
     }
 
+    // Cap tool_calls before scheduling work (no existing max_tool_calls in codebase).
+    const scheduledCalls = result.toolCalls.slice(0, MAX_TOOL_CALLS_PER_ROUND);
+
     const assistantMsg = {
       role: 'assistant',
       content: result.content || null,
-      tool_calls: result.toolCalls,
+      tool_calls: scheduledCalls,
     };
 
     const toolResults = await Promise.all(
-      result.toolCalls.map(async (call) => {
+      scheduledCalls.map(async (call) => {
         const name = call?.function?.name;
         recordToolName(name);
-        let args = {};
-        try {
-          const raw = call?.function?.arguments;
-          args = raw && String(raw).trim() ? JSON.parse(raw) : {};
-        } catch {
-          args = {};
+        const raw = call?.function?.arguments;
+        const rawStr = raw == null ? '' : String(raw);
+
+        if (utf8ByteLength(rawStr) > MAX_TOOL_ARGUMENTS_UTF8_BYTES) {
+          const errOut = { error: 'tool arguments too large' };
+          recordToolCall(name, {}, errOut);
+          return {
+            role: 'tool',
+            tool_call_id: call.id,
+            content: JSON.stringify(errOut),
+          };
         }
+
+        let args;
+        try {
+          args = rawStr.trim() ? JSON.parse(rawStr) : {};
+        } catch {
+          const errOut = { error: 'malformed tool arguments' };
+          recordToolCall(name, {}, errOut);
+          return {
+            role: 'tool',
+            tool_call_id: call.id,
+            content: JSON.stringify(errOut),
+          };
+        }
+
         try {
           if (!name) throw new Error('missing tool name');
           const output = await runTool(name, toolCtx, args);
@@ -854,7 +1010,7 @@ async function callAssistantModelWithTools({
             content: JSON.stringify(output),
           };
         } catch (e) {
-          const errOut = { error: String(e?.message || e) };
+          const errOut = { error: String(e?.message || e).slice(0, 200) };
           recordToolCall(name, args, errOut);
           return {
             role: 'tool',
@@ -886,6 +1042,10 @@ async function callAssistantModelWithTools({
 module.exports = {
   SAFE_AGENT_ACTIONS,
   SENSITIVE_AGENT_ACTIONS,
+  MAX_PROVIDER_ERROR_PREFIX_BYTES,
+  MAX_PROVIDER_RESPONSE_BYTES,
+  MAX_TOOL_ARGUMENTS_UTF8_BYTES,
+  MAX_TOOL_CALLS_PER_ROUND,
   answerWithServerWebSearch,
   buildAgentSystemPrompt,
   buildToolDefinitions,
@@ -897,6 +1057,8 @@ module.exports = {
   normalizeAssistantActions,
   parseProviderOrder,
   rankKnowledgeChunks,
+  readResponseErrorPrefix,
+  readResponseJsonBounded,
   resolvePermissionScope,
   shouldUseServerWebSearch,
 };
