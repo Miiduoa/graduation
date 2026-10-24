@@ -53,22 +53,27 @@ export function useClasses(beginRequest?: BeginCourseRequest) {
   );
 }
 
+export type MutationFormIntent = 'primary' | 'secondary';
+
 export function MutationForm({
   label,
+  secondaryLabel,
   children,
   submit,
   success,
 }: {
   label: string;
+  /** Optional continuous-review action; only offered when not retrying an uncertain submit. */
+  secondaryLabel?: string;
   children: ReactNode;
-  submit: (data: FormData, key: string) => Promise<void>;
+  submit: (data: FormData, key: string, intent: MutationFormIntent) => Promise<void>;
   success?: string;
 }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [done, setDone] = useState(false);
   const [uncertain, setUncertain] = useState(false);
-  const attempt = useRef<{ data: FormData; key: string } | null>(null);
+  const attempt = useRef<{ data: FormData; key: string; intent: MutationFormIntent } | null>(null);
   const running = useRef(false);
   const mounted = useRef(true);
   useEffect(() => {
@@ -81,13 +86,18 @@ export function MutationForm({
     event.preventDefault();
     if (running.current) return;
     const form = event.currentTarget;
-    if (!attempt.current) attempt.current = { data: new FormData(form), key: crypto.randomUUID() };
+    const submitter = (event.nativeEvent as SubmitEvent).submitter as HTMLButtonElement | null;
+    const intent: MutationFormIntent =
+      attempt.current?.intent ??
+      (submitter?.value === 'secondary' ? 'secondary' : 'primary');
+    if (!attempt.current)
+      attempt.current = { data: new FormData(form), key: crypto.randomUUID(), intent };
     running.current = true;
     setBusy(true);
     setError('');
     setDone(false);
     try {
-      await submit(attempt.current.data, attempt.current.key);
+      await submit(attempt.current.data, attempt.current.key, attempt.current.intent);
       if (!mounted.current) return;
       attempt.current = null;
       setUncertain(false);
@@ -121,9 +131,21 @@ export function MutationForm({
           {success}
         </p>
       )}
-      <button className={styles.button} disabled={busy} type="submit">
-        {busy ? '處理中…' : uncertain ? '確認送出結果' : label}
-      </button>
+      <div className={styles.actions}>
+        <button className={styles.button} disabled={busy} type="submit" value="primary">
+          {busy ? '處理中…' : uncertain ? '確認送出結果' : label}
+        </button>
+        {secondaryLabel && !uncertain ? (
+          <button
+            className={`${styles.button} ${styles.secondary}`}
+            disabled={busy}
+            type="submit"
+            value="secondary"
+          >
+            {busy ? '處理中…' : secondaryLabel}
+          </button>
+        ) : null}
+      </div>
     </form>
   );
 }

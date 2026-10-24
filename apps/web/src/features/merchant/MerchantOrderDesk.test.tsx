@@ -235,6 +235,20 @@ it('retains an uncertain handover with its original key when a newer shift is ob
   expect(mocks.request.mock.calls.filter(([path]) => path.endsWith('/handover'))).toHaveLength(1);
 });
 
+it('keeps unpaid counter work under desk confirmation before moving prep into the active lane', async () => {
+  mount();
+  const incoming = await screen.findByLabelText('待收款與確認');
+  expect(incoming.textContent).toContain('先登記櫃檯已收款項');
+  expect(screen.queryByLabelText('進行中訂單')).toBeNull();
+  await confirm('登記櫃檯收款', '我已實際收到這筆訂單的款項');
+  await screen.findByText('取餐 A101 · 已付款，待店家接單');
+  expect(screen.getByLabelText('待收款與確認').textContent).toContain('確認是否接單');
+  await confirm('接單', '我已確認這筆訂單與處理內容');
+  await screen.findByLabelText('進行中訂單');
+  expect(screen.queryByLabelText('待收款與確認')).toBeNull();
+  expect(screen.getByLabelText('進行中訂單').textContent).toMatch(/開始備餐|備餐/);
+});
+
 it('completes real cashier, preparation, token handoff and counted-cash handover with explicit confirmations', async () => {
   shift = null;
   mount();

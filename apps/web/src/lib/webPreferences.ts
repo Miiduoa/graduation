@@ -49,6 +49,7 @@ export const defaultWebPreferences: StoredWebPreferences = {
   },
 };
 
+/** rem 等價於既有 px 階梯（以 16px root 換算），保留 small／medium／large 相對關係與預設渲染尺寸。 */
 const fontScaleMap: Record<
   FontSizePreference,
   {
@@ -62,31 +63,31 @@ const fontScaleMap: Record<
   }
 > = {
   small: {
-    body: '14px',
-    bodySm: '12px',
-    h1: '22px',
-    h2: '18px',
-    h3: '16px',
-    label: '12px',
-    labelSm: '10px',
+    body: '0.875rem', // 14px
+    bodySm: '0.75rem', // 12px
+    h1: '1.375rem', // 22px
+    h2: '1.125rem', // 18px
+    h3: '1rem', // 16px
+    label: '0.75rem', // 12px
+    labelSm: '0.625rem', // 10px
   },
   medium: {
-    body: '15px',
-    bodySm: '13px',
-    h1: '24px',
-    h2: '20px',
-    h3: '17px',
-    label: '13px',
-    labelSm: '11px',
+    body: '0.9375rem', // 15px
+    bodySm: '0.8125rem', // 13px
+    h1: '1.5rem', // 24px
+    h2: '1.25rem', // 20px
+    h3: '1.0625rem', // 17px
+    label: '0.8125rem', // 13px
+    labelSm: '0.6875rem', // 11px
   },
   large: {
-    body: '17px',
-    bodySm: '15px',
-    h1: '26px',
-    h2: '22px',
-    h3: '19px',
-    label: '14px',
-    labelSm: '12px',
+    body: '1.0625rem', // 17px
+    bodySm: '0.9375rem', // 15px
+    h1: '1.625rem', // 26px
+    h2: '1.375rem', // 22px
+    h3: '1.1875rem', // 19px
+    label: '0.875rem', // 14px
+    labelSm: '0.75rem', // 12px
   },
 };
 

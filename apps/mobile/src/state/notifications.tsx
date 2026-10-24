@@ -14,10 +14,13 @@ import {
   query,
   orderBy,
   limit,
+  startAfter,
   doc,
   setDoc,
   serverTimestamp,
   writeBatch,
+  type QueryDocumentSnapshot,
+  type DocumentData,
 } from 'firebase/firestore';
 import { getDb, hasUsableFirebaseConfig } from '../firebase';
 import { useAuth } from './auth';
@@ -42,13 +45,20 @@ export type Notification = {
   data?: Record<string, any>;
 };
 
+/** 未讀數僅涵蓋目前已載入頁面，不是全信箱總數。 */
+export type UnreadScope = 'loaded';
+
 type NotificationsContextValue = {
   notifications: Notification[];
   unreadCount: number;
+  unreadScope: UnreadScope;
   loading: boolean;
+  loadingMore: boolean;
+  hasMore: boolean;
   error: string | null;
-  markAsRead: (id: string) => Promise<void>;
-  markAllAsRead: () => Promise<void>;
+  markAsRead: (id: string) => Promise<boolean>;
+  markAllAsRead: () => Promise<boolean>;
+  loadMore: () => Promise<void>;
   reload: () => void;
 };
 
@@ -58,8 +68,36 @@ type NotificationState = {
   owner: NotificationOwner;
   items: Notification[];
   loading: boolean;
+  loadingMore: boolean;
+  hasMore: boolean;
   error: string | null;
 };
+
+const PAGE_SIZE = 50;
+
+function mapNotificationDoc(d: QueryDocumentSnapshot<DocumentData>): Notification {
+  const data = d.data();
+  return {
+    id: d.id,
+    type: data.type ?? 'system',
+    title: data.title ?? '',
+    body: data.body ?? '',
+    createdAt: data.createdAt,
+    read: data.read ?? false,
+    data: data.data ?? {},
+  };
+}
+
+function dedupeById(rows: Notification[]): Notification[] {
+  const seen = new Set<string>();
+  const out: Notification[] = [];
+  for (const row of rows) {
+    if (seen.has(row.id)) continue;
+    seen.add(row.id);
+    out.push(row);
+  }
+  return out;
+}
 
 export function NotificationsProvider(props: { children: React.ReactNode }) {
   const auth = useAuth();
@@ -70,10 +108,14 @@ export function NotificationsProvider(props: { children: React.ReactNode }) {
   activeOwner.current = owner;
   const mounted = useRef(false);
   const isCurrent = useCallback(() => mounted.current && activeOwner.current === owner, [owner]);
+  const cursorRef = useRef<QueryDocumentSnapshot<DocumentData> | null>(null);
+  const loadMoreLock = useRef(false);
   const [state, setState] = useState<NotificationState>(() => ({
     owner,
     items: [],
     loading: !!(owner.uid && owner.db),
+    loadingMore: false,
+    hasMore: false,
     error: null,
   }));
   const [reloadTrigger, setReloadTrigger] = useState(0);
@@ -86,8 +128,17 @@ export function NotificationsProvider(props: { children: React.ReactNode }) {
   }, []);
 
   useEffect(() => {
+    cursorRef.current = null;
+    loadMoreLock.current = false;
     if (!owner.db || !owner.uid) {
-      setState({ owner, items: [], loading: false, error: null });
+      setState({
+        owner,
+        items: [],
+        loading: false,
+        loadingMore: false,
+        hasMore: false,
+        error: null,
+      });
       return;
     }
     let cancelled = false;
@@ -95,31 +146,35 @@ export function NotificationsProvider(props: { children: React.ReactNode }) {
       owner,
       items: previous.owner === owner ? previous.items : [],
       loading: true,
+      loadingMore: false,
+      hasMore: previous.owner === owner ? previous.hasMore : false,
       error: null,
     }));
     (async () => {
       try {
         const ref = collection(owner.db!, 'users', owner.uid!, 'notifications');
-        const snap = await getDocs(query(ref, orderBy('createdAt', 'desc'), limit(50)));
+        const snap = await getDocs(query(ref, orderBy('createdAt', 'desc'), limit(PAGE_SIZE)));
         if (cancelled || !isCurrent()) return;
-        const items = snap.docs.map((d) => {
-          const data = d.data();
-          return {
-            id: d.id,
-            type: data.type ?? 'system',
-            title: data.title ?? '',
-            body: data.body ?? '',
-            createdAt: data.createdAt,
-            read: data.read ?? false,
-            data: data.data ?? {},
-          } as Notification;
+        const items = snap.docs.map(mapNotificationDoc);
+        cursorRef.current = snap.docs.length > 0 ? snap.docs[snap.docs.length - 1]! : null;
+        setState({
+          owner,
+          items,
+          loading: false,
+          loadingMore: false,
+          hasMore: snap.docs.length >= PAGE_SIZE,
+          error: null,
         });
-        setState({ owner, items, loading: false, error: null });
       } catch (failure: any) {
         if (!cancelled && isCurrent()) {
           setState((previous) =>
             previous.owner === owner
-              ? { ...previous, loading: false, error: failure?.message ?? '載入通知失敗' }
+              ? {
+                  ...previous,
+                  loading: false,
+                  loadingMore: false,
+                  error: failure?.message ?? '載入通知失敗',
+                }
               : previous,
           );
         }
@@ -137,8 +192,11 @@ export function NotificationsProvider(props: { children: React.ReactNode }) {
     [state.owner, state.items, owner],
   );
   const loading = state.owner === owner ? state.loading : !!(owner.uid && owner.db);
+  const loadingMore = state.owner === owner ? state.loadingMore : false;
+  const hasMore = state.owner === owner ? state.hasMore : false;
   const error = state.owner === owner ? state.error : null;
   const unreadCount = notifications.filter((notification) => !notification.read).length;
+  const unreadScope: UnreadScope = 'loaded';
 
   const reportReadOutcome = useCallback(
     (input: Record<string, unknown>, success: boolean, message: string, failure?: unknown) => {
@@ -162,10 +220,11 @@ export function NotificationsProvider(props: { children: React.ReactNode }) {
   );
 
   const markAsRead = useCallback(
-    async (id: string) => {
-      if (!owner.uid || !owner.db || !isCurrent()) return;
+    async (id: string): Promise<boolean> => {
+      if (!owner.uid || !owner.db || !isCurrent()) return false;
       const original = notifications.find((notification) => notification.id === id);
-      if (!original || original.read) return;
+      if (!original) return false;
+      if (original.read) return true;
       const optimistic = { ...original, read: true };
       setState((previous) =>
         previous.owner === owner
@@ -181,16 +240,17 @@ export function NotificationsProvider(props: { children: React.ReactNode }) {
           { read: true, readAt: serverTimestamp() },
           { merge: true },
         );
-        if (!isCurrent()) return;
+        if (!isCurrent()) return false;
         reportReadOutcome(
-          { action: 'single', notificationId: id },
+          { action: 'single', notificationId: id, scope: 'loaded' },
           true,
           '使用者在通知中心將單則通知標為已讀',
         );
+        return true;
       } catch (failure) {
-        if (!isCurrent()) return;
+        if (!isCurrent()) return false;
         reportReadOutcome(
-          { action: 'single', notificationId: id },
+          { action: 'single', notificationId: id, scope: 'loaded' },
           false,
           '通知標為已讀失敗',
           failure,
@@ -203,15 +263,17 @@ export function NotificationsProvider(props: { children: React.ReactNode }) {
               }
             : previous,
         );
+        return false;
       }
     },
     [owner, isCurrent, notifications, reportReadOutcome],
   );
 
-  const markAllAsRead = useCallback(async () => {
-    if (!owner.uid || !owner.db || !isCurrent()) return;
+  const markAllAsRead = useCallback(async (): Promise<boolean> => {
+    if (!owner.uid || !owner.db || !isCurrent()) return false;
+    // 明確範圍：僅目前已載入頁面的未讀，不含尚未分頁載入的歷史。
     const unread = notifications.filter((notification) => !notification.read);
-    if (!unread.length) return;
+    if (!unread.length) return true;
     const originals = new Map(unread.map((row) => [row.id, row]));
     const optimistic = new Map(unread.map((row) => [row.id, { ...row, read: true }]));
     setState((previous) =>
@@ -234,11 +296,16 @@ export function NotificationsProvider(props: { children: React.ReactNode }) {
         });
       }
       await batch.commit();
-      if (!isCurrent()) return;
+      if (!isCurrent()) return false;
       reportReadOutcome(
-        { action: 'all', notificationIds: unread.map((row) => row.id) },
+        {
+          action: 'all_loaded',
+          scope: 'loaded',
+          notificationIds: unread.map((row) => row.id),
+          count: unread.length,
+        },
         true,
-        `使用者在通知中心將 ${unread.length} 則通知全部標為已讀`,
+        `使用者在通知中心將已載入的 ${unread.length} 則通知標為已讀`,
       );
       if (unread.length >= 3) {
         void import('../services/companionEngine')
@@ -247,12 +314,17 @@ export function NotificationsProvider(props: { children: React.ReactNode }) {
           })
           .catch(() => {});
       }
+      return true;
     } catch (failure) {
-      if (!isCurrent()) return;
+      if (!isCurrent()) return false;
       reportReadOutcome(
-        { action: 'all', notificationIds: unread.map((row) => row.id) },
+        {
+          action: 'all_loaded',
+          scope: 'loaded',
+          notificationIds: unread.map((row) => row.id),
+        },
         false,
-        '全部通知標為已讀失敗',
+        '已載入通知全部標為已讀失敗',
         failure,
       );
       setState((previous) =>
@@ -265,8 +337,53 @@ export function NotificationsProvider(props: { children: React.ReactNode }) {
             }
           : previous,
       );
+      return false;
     }
   }, [owner, isCurrent, notifications, reportReadOutcome]);
+
+  const loadMore = useCallback(async () => {
+    if (!owner.uid || !owner.db || !isCurrent()) return;
+    if (!hasMore || loading || loadingMore || loadMoreLock.current) return;
+    const cursor = cursorRef.current;
+    if (!cursor) return;
+    loadMoreLock.current = true;
+    setState((previous) =>
+      previous.owner === owner ? { ...previous, loadingMore: true, error: null } : previous,
+    );
+    try {
+      const ref = collection(owner.db, 'users', owner.uid, 'notifications');
+      const snap = await getDocs(
+        query(ref, orderBy('createdAt', 'desc'), startAfter(cursor), limit(PAGE_SIZE)),
+      );
+      if (!isCurrent()) return;
+      const page = snap.docs.map(mapNotificationDoc);
+      cursorRef.current = snap.docs.length > 0 ? snap.docs[snap.docs.length - 1]! : cursor;
+      setState((previous) =>
+        previous.owner === owner
+          ? {
+              ...previous,
+              items: dedupeById([...previous.items, ...page]),
+              loadingMore: false,
+              hasMore: snap.docs.length >= PAGE_SIZE,
+            }
+          : previous,
+      );
+    } catch (failure: any) {
+      if (isCurrent()) {
+        setState((previous) =>
+          previous.owner === owner
+            ? {
+                ...previous,
+                loadingMore: false,
+                error: failure?.message ?? '載入更多通知失敗',
+              }
+            : previous,
+        );
+      }
+    } finally {
+      loadMoreLock.current = false;
+    }
+  }, [owner, isCurrent, hasMore, loading, loadingMore]);
 
   const reload = useCallback(() => {
     if (isCurrent()) setReloadTrigger((value) => value + 1);
@@ -275,13 +392,29 @@ export function NotificationsProvider(props: { children: React.ReactNode }) {
     () => ({
       notifications,
       unreadCount,
+      unreadScope,
       loading,
+      loadingMore,
+      hasMore,
       error,
       markAsRead,
       markAllAsRead,
+      loadMore,
       reload,
     }),
-    [notifications, unreadCount, loading, error, markAsRead, markAllAsRead, reload],
+    [
+      notifications,
+      unreadCount,
+      unreadScope,
+      loading,
+      loadingMore,
+      hasMore,
+      error,
+      markAsRead,
+      markAllAsRead,
+      loadMore,
+      reload,
+    ],
   );
 
   return (

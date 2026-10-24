@@ -31,7 +31,8 @@
   font-size: 13px;
   color: var(--muted);
 }
-.join {
+.join,
+.compose {
   display: flex;
   align-items: end;
   flex-wrap: wrap;
@@ -40,6 +41,22 @@
   border: 1px solid var(--border);
   border-radius: var(--radius);
   background: var(--accent-soft);
+  margin-bottom: 24px;
+}
+.compose {
+  align-items: stretch;
+  flex-direction: column;
+}
+.compose textarea {
+  min-height: 120px;
+  width: 100%;
+  padding: 10px 14px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  color: var(--text);
+  background: var(--surface);
+  font: inherit;
+  resize: vertical;
 }
 .join > div {
   flex: 1 1 100%;
@@ -148,6 +165,31 @@
 }
 .confirm button {
   margin-right: 10px;
+}
+.ownershipPanel {
+  width: 100%;
+  margin-top: 8px;
+  padding: 16px 0 0;
+  border-top: 1px solid var(--border);
+}
+.ownershipPanel h3 {
+  margin: 0 0 8px;
+  font-size: 16px;
+  font-weight: 600;
+}
+.ownershipPanel > p {
+  margin: 0 0 14px;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.7;
+}
+.ownershipList {
+  list-style: none;
+  margin: 0 0 12px;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
 }
 .page input:focus-visible,
 .page select:focus-visible,
