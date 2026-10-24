@@ -25,6 +25,7 @@ import { useLocationHash } from '@/lib/useLocationHash';
 import { gradeReadOwner, markPublishedGradeReadByLanding } from '@/lib/lmsStudentGrades';
 import { useClientHydrated } from '@/lib/useClientHydrated';
 import { materialBrowserStorage, useMaterialReadIds } from '@/lib/useMaterialClientState';
+import { parseTaipeiInstant, taipeiParts } from '@campus/shared/src/taipeiTime';
 import styles from '../../home.module.css';
 
 function workKind(assignment: CourseAssignment) {
@@ -153,7 +154,7 @@ function Assignment({
       ) : closed ? (
         <p>作業已截止。如需補交，請聯絡授課教師。</p>
       ) : (
-        <form onSubmit={submit}>
+        <form id={`${workKind(assignment)}-${assignment.id}-submit`} onSubmit={submit}>
           <label htmlFor={`answer-${assignment.id}`}>文字作業內容</label>
           <textarea
             id={`answer-${assignment.id}`}
@@ -237,6 +238,29 @@ function accessDenied(error: unknown) {
   ].includes(error.message);
 }
 
+function weekStartTaipei(now: Date): number | null {
+  const parts = taipeiParts(now);
+  if (!parts) return null;
+  const shifted = new Date(now.getTime() + 8 * 60 * 60 * 1000);
+  const weekday = shifted.getUTCDay() || 7;
+  return Date.UTC(parts.year, parts.month - 1, parts.day) - (weekday - 1) * 24 * 60 * 60 * 1000;
+}
+
+function weekAssignments(assignments: CourseAssignment[], now = new Date()): CourseAssignment[] {
+  const start = weekStartTaipei(now);
+  if (start === null) return [];
+  const end = start + 7 * 24 * 60 * 60 * 1000;
+  return assignments.filter((item) => {
+    if (!item.dueAt) return false;
+    const due = parseTaipeiInstant(item.dueAt);
+    if (due === null) return false;
+    const dueDay = taipeiParts(due);
+    if (!dueDay) return false;
+    const dueUtc = Date.UTC(dueDay.year, dueDay.month - 1, dueDay.day);
+    return dueUtc >= start && dueUtc < end;
+  });
+}
+
 function CourseContent({ courseId, uid }: { courseId: string; uid: string }) {
   const [course, setCourse] = useState<CourseWork | null>(null);
   const [error, setError] = useState('');
@@ -246,7 +270,10 @@ function CourseContent({ courseId, uid }: { courseId: string; uid: string }) {
   const hash = useLocationHash();
   const revealed = useRef('');
   const readIds = useMaterialReadIds(uid);
+  const hashId = hash.replace(/^#/, '').split('#')[0];
   const linked = parseCourseWorkHash(hash);
+  const weekHash = hashId === 'week';
+  const submitHash = hashId.endsWith('-submit') ? hashId : '';
   useLayoutEffect(() => {
     active.current = true;
     return () => {
@@ -276,6 +303,20 @@ function CourseContent({ courseId, uid }: { courseId: string; uid: string }) {
     void load();
   }, [load]);
   useEffect(() => {
+    if (course && weekHash && revealed.current !== 'week') {
+      const frame = window.requestAnimationFrame(() => {
+        if (!landOnCourseWork('week')) return;
+        revealed.current = 'week';
+      });
+      return () => window.cancelAnimationFrame(frame);
+    }
+    if (course && submitHash && revealed.current !== submitHash) {
+      const frame = window.requestAnimationFrame(() => {
+        if (!landOnCourseWork(submitHash)) return;
+        revealed.current = submitHash;
+      });
+      return () => window.cancelAnimationFrame(frame);
+    }
     if (!course || !linked) return;
     const target = `${linked.kind}-${linked.id}`;
     const exists =
@@ -302,7 +343,7 @@ function CourseContent({ courseId, uid }: { courseId: string; uid: string }) {
       }
     });
     return () => window.cancelAnimationFrame(frame);
-  }, [course, courseId, linked, uid]);
+  }, [course, courseId, linked, uid, weekHash, submitHash]);
   function refresh() {
     if (!active.current) return;
     // Keep same-scope forms mounted while the server refreshes sibling submissions.
@@ -339,6 +380,28 @@ function CourseContent({ courseId, uid }: { courseId: string; uid: string }) {
               重新整理
             </button>
           </div>
+          <section
+            className={`${styles.section} ${styles.courseWorkTarget}`}
+            id="week"
+            tabIndex={-1}
+            aria-labelledby="course-week-title"
+          >
+            <h2 id="course-week-title">本週</h2>
+            <p className={styles.sectionNote}>這門課本週到期的作業與評量。</p>
+            {weekAssignments(course.assignments).length ? (
+              <ul className={styles.list}>
+                {weekAssignments(course.assignments).map((item) => (
+                  <li key={item.id}>
+                    <a href={`#assignment-${encodeURIComponent(item.id)}`} className={styles.task}>
+                      <strong>{item.title}</strong>
+                    </a>
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <p>本週沒有到期的作業。</p>
+            )}
+          </section>
           <section className={styles.section} aria-labelledby="course-materials-title">
             <h2 id="course-materials-title">教材櫃</h2>
             <p className={styles.sectionNote}>

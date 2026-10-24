@@ -1,22 +1,43 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { ActivityIndicator, Text, View } from 'react-native';
+import { ActivityIndicator, ScrollView, Text, View } from 'react-native';
 import { useAuth } from '../state/auth';
 import { useSchool } from '../state/school';
 import { useTheme } from '../state/theme';
 import { AIDetailScreen, AICard, AIButton } from '../ui/aiFirst';
 import { safeNavigate } from '../utils/safeNavigate';
 import { resolveCourseHubTarget, type CourseHubTarget } from '../utils/courseHubRoute';
-import { loadCourseHub, type CourseHubData, type CourseHubScope } from '../features/courseHub';
+import { loadCourseHub, type CourseHubData, type CourseHubScope, type HubAssignment } from '../features/courseHub';
 import { webBrowserOpenWithPuTronClassGate } from '../services/tronClassWebUiGate';
+import { parseTaipeiInstant, taipeiParts } from '@campus/shared/src/taipeiTime';
+import { revealAssignmentSubmitArea } from './nuni/scrollAssignment';
 
 type Props = {
   navigation?: Parameters<typeof safeNavigate>[0] & { goBack?: () => void };
   route?: { params?: Record<string, unknown> };
 };
+
+function weekAssignments(items: HubAssignment[], now = new Date()): HubAssignment[] {
+  const parts = taipeiParts(now);
+  if (!parts) return [];
+  const shifted = new Date(now.getTime() + 8 * 60 * 60 * 1000);
+  const weekday = shifted.getUTCDay() || 7;
+  const start = Date.UTC(parts.year, parts.month - 1, parts.day) - (weekday - 1) * 86400000;
+  const end = start + 7 * 86400000;
+  return items.filter((item) => {
+    if (!item.dueAt) return false;
+    const due = parseTaipeiInstant(item.dueAt);
+    if (due === null) return false;
+    const dueParts = taipeiParts(due);
+    if (!dueParts) return false;
+    const dueUtc = Date.UTC(dueParts.year, dueParts.month - 1, dueParts.day);
+    return dueUtc >= start && dueUtc < end;
+  });
+}
 export default function CourseHubAiFirstScreen({ navigation, route }: Props) {
   const { user } = useAuth();
   const { school } = useSchool();
   const target = resolveCourseHubTarget(route?.params);
+  const section = typeof route?.params?.section === 'string' ? route.params.section : undefined;
   const scopeKey = JSON.stringify([user?.uid, school.id, target]);
   const activeScope = useRef(scopeKey);
   activeScope.current = scopeKey;
@@ -26,6 +47,7 @@ export default function CourseHubAiFirstScreen({ navigation, route }: Props) {
       uid={user?.uid ?? ''}
       schoolId={school.id}
       target={target}
+      section={section}
       navigation={navigation}
       scopeKey={scopeKey}
       activeScope={activeScope}
@@ -36,6 +58,7 @@ function CourseContent({
   uid,
   schoolId,
   target,
+  section,
   navigation,
   scopeKey,
   activeScope,
@@ -43,12 +66,15 @@ function CourseContent({
   uid: string;
   schoolId: string;
   target: CourseHubTarget | null;
+  section?: string;
   navigation: Props['navigation'];
   scopeKey: string;
   activeScope: React.MutableRefObject<string>;
 }) {
   const theme = useTheme();
   const mounted = useRef(true);
+  const scrollRef = useRef<ScrollView>(null);
+  const weekRef = useRef<View>(null);
   const generation = useRef(0);
   const pending = useRef(false);
   const [data, setData] = useState<CourseHubData | null>(null);
@@ -90,6 +116,13 @@ function CourseContent({
       generation.current += 1;
     };
   }, [load]);
+  useEffect(() => {
+    if (section !== 'week' || loading || !data) return;
+    const timer = setTimeout(() => {
+      revealAssignmentSubmitArea(scrollRef.current, weekRef.current);
+    }, 50);
+    return () => clearTimeout(timer);
+  }, [section, loading, data]);
   const open = async (url: string) => {
     if (!isCurrent() || pending.current || !data) return;
     pending.current = true;
@@ -126,6 +159,7 @@ function CourseContent({
       title={data?.name ?? '課程總覽'}
       subtitle={target?.source === 'tronclass' ? '校方 TronClass 課程' : 'Campus One 課程'}
       onBack={() => navigation?.goBack?.()}
+      scrollRef={scrollRef}
     >
       {!target || !uid ? (
         <AICard title={!uid ? '登入後查看課程' : '請先選擇課程'}>
@@ -153,6 +187,26 @@ function CourseContent({
         </AICard>
       ) : data ? (
         <>
+          <View ref={weekRef} nativeID="week" testID="course-week" collapsable={false}>
+          <AICard title="本週">
+            <View style={gap}>
+              {weekAssignments(data.assignments.status === 'ready' ? data.assignments.items : []).length ? (
+                weekAssignments(data.assignments.status === 'ready' ? data.assignments.items : []).map(
+                  (item) => (
+                    <Text
+                      key={item.id}
+                      style={{ ...theme.typography.body, color: theme.colors.text, fontWeight: '700' }}
+                    >
+                      {item.title}
+                    </Text>
+                  ),
+                )
+              ) : (
+                <Text style={body}>本週沒有到期的作業。</Text>
+              )}
+            </View>
+          </AICard>
+          </View>
           <AICard title="課程資訊">
             <View style={gap}>
               {data.details.length ? <Text style={body}>{data.details.join(' · ')}</Text> : null}

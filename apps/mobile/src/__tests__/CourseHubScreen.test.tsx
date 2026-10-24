@@ -1,9 +1,10 @@
 import React from 'react';
-import { act, fireEvent, render } from '@testing-library/react-native';
+import { act, fireEvent, render, waitFor } from '@testing-library/react-native';
 import CourseHub from '../screens/CourseHubAiFirstScreen';
 import { loadCourseHub, type CourseHubData } from '../features/courseHub';
 import { safeNavigate } from '../utils/safeNavigate';
 import { webBrowserOpenWithPuTronClassGate } from '../services/tronClassWebUiGate';
+import { revealAssignmentSubmitArea } from '../screens/nuni/scrollAssignment';
 let mockUser: { uid: string } | null = { uid: 'alice' };
 let mockSchool = { id: 'pu' };
 jest.mock('../state/auth', () => ({ useAuth: () => ({ user: mockUser }) }));
@@ -15,6 +16,9 @@ jest.mock('../features/courseHub', () => ({ loadCourseHub: jest.fn() }));
 jest.mock('../utils/safeNavigate', () => ({ safeNavigate: jest.fn() }));
 jest.mock('../services/tronClassWebUiGate', () => ({
   webBrowserOpenWithPuTronClassGate: jest.fn(),
+}));
+jest.mock('../screens/nuni/scrollAssignment', () => ({
+  revealAssignmentSubmitArea: jest.fn(),
 }));
 const data: CourseHubData = {
   name: '資訊倫理',
@@ -109,6 +113,14 @@ test('TronClass route opens exactly the selected official course and never Fires
     'https://tronclass.pu.edu.tw/course/321/content',
   );
 });
+test('section week scrolls to the week block', async () => {
+  const view = render(
+    <CourseHub route={{ params: { groupId: 'course-a', groupName: '資訊倫理', section: 'week' } }} />,
+  );
+  expect(await view.findByTestId('course-week')).toBeTruthy();
+  await waitFor(() => expect(revealAssignmentSubmitArea).toHaveBeenCalled());
+});
+
 test.each(['account', 'school', 'course'])(
   'changing %s excludes a pending old response and invalidates its request guard',
   async (kind) => {

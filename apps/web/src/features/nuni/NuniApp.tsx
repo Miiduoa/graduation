@@ -10,7 +10,8 @@ import {
   type NuniUnit,
   type NuniWorkspace,
 } from '@campus/shared/src/nuni';
-import { taipeiWallTimeToIso } from '@campus/shared/src/taipeiTime';
+import { parseTaipeiInstant, taipeiParts, taipeiWallTimeToIso } from '@campus/shared/src/taipeiTime';
+import { landOnCourseWork } from '@/lib/courseWorkLanding';
 import { AppHeader } from '@/components/AppHeader';
 import { NuniSignIn } from '@/components/NuniSignIn';
 import { SiteShell } from '@/components/SiteShell';
@@ -30,6 +31,28 @@ import styles from './NuniApp.module.css';
 
 export function NuniHeader() {
   return <AppHeader />;
+}
+
+function weekStartTaipei(now: Date): number | null {
+  const parts = taipeiParts(now);
+  if (!parts) return null;
+  const shifted = new Date(now.getTime() + 8 * 60 * 60 * 1000);
+  const weekday = shifted.getUTCDay() || 7;
+  return Date.UTC(parts.year, parts.month - 1, parts.day) - (weekday - 1) * 24 * 60 * 60 * 1000;
+}
+
+function weekAssignments(assignments: NuniAssignment[], now = new Date()): NuniAssignment[] {
+  const start = weekStartTaipei(now);
+  if (start === null) return [];
+  const end = start + 7 * 24 * 60 * 60 * 1000;
+  return assignments.filter((item) => {
+    if (!item.dueAt) return false;
+    const due = parseTaipeiInstant(item.dueAt);
+    if (due === null) return false;
+    const dueDay = taipeiParts(due);
+    if (!dueDay) return false;
+    return Date.UTC(dueDay.year, dueDay.month - 1, dueDay.day) >= start && Date.UTC(dueDay.year, dueDay.month - 1, dueDay.day) < end;
+  });
 }
 
 function Login() {
@@ -60,12 +83,20 @@ function Workspace({ id }: { id: string }) {
   const [unitsEpoch, setUnitsEpoch] = useState(0);
   const [outlineVersion, setOutlineVersion] = useState(0);
   const refreshOutline = () => setOutlineVersion((value) => value + 1);
+  const weekHash = hash.replace(/^#/, '').split('#')[0] === 'week';
   useEffect(() => {
     // A task link must open its panel, including browser back/forward in the same course.
     if (hash.startsWith('#quiz-')) setTab('quizzes');
     else if (hash.startsWith('#assignment-')) setTab('assignments');
     else if (hash.startsWith('#material-')) setTab('materials');
   }, [hash]);
+  useEffect(() => {
+    if (!weekHash || !data) return;
+    const frame = window.requestAnimationFrame(() => {
+      landOnCourseWork('week');
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [weekHash, data]);
   const [refreshing, setRefreshing] = useState(false);
   const generation = useRef(0);
   const unitGeneration = useRef(0);
@@ -196,6 +227,26 @@ function Workspace({ id }: { id: string }) {
           {error} 已保留目前內容，可再次更新。
         </p>
       )}
+      <section
+        className={styles.panel}
+        id="week"
+        tabIndex={-1}
+        aria-labelledby="nuni-week-title"
+      >
+        <h2 id="nuni-week-title">本週</h2>
+        <p className={styles.muted}>這門課本週到期的作業與評量。</p>
+        {weekAssignments(data.assignments).length ? (
+          <ul>
+            {weekAssignments(data.assignments).map((item) => (
+              <li key={item.id}>
+                <a href={`#assignment-${encodeURIComponent(item.id)}`}>{item.title}</a>
+              </li>
+            ))}
+          </ul>
+        ) : (
+          <p>本週沒有到期的作業。</p>
+        )}
+      </section>
       <div className={styles.courseTabs} role="tablist" aria-label="課程內容">
         {(
           [
