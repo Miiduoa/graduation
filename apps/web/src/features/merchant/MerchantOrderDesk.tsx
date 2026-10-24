@@ -24,6 +24,7 @@ import {
   type FoodDraftCache,
   type FoodIntent,
 } from '@/features/food/foodState';
+import { merchantOrderBucket, merchantOrderNextStep } from '@/features/food/foodOrderGuidance';
 import styles from '@/features/food/Food.module.css';
 import { PickupScanner } from './PickupScanner';
 
@@ -97,6 +98,7 @@ export function MerchantOrderDesk({
   >(cache, `${scope}:order-fields`, {});
   const [confirmed, setConfirmed] = useState(false);
   const [receipt, setReceipt] = useState('');
+  const [shiftOpen, setShiftOpen] = useState(true);
   const execute = (intent: FoodIntent) => {
     const args = [tenantId, locationId] as const;
     switch (intent.action) {
@@ -154,6 +156,16 @@ export function MerchantOrderDesk({
     },
   });
   const locked = !data.data || task.busy || !!task.pending || task.storageBlocked;
+  const incomingOrders = useMemo(
+    () =>
+      (data.data?.queue.orders ?? []).filter((order) => merchantOrderBucket(order) === 'incoming'),
+    [data.data],
+  );
+  const activeOrders = useMemo(
+    () =>
+      (data.data?.queue.orders ?? []).filter((order) => merchantOrderBucket(order) === 'active'),
+    [data.data],
+  );
   useEffect(() => {
     if (!confirmedShift || !data.data || task.busy || task.pending) return;
     const shift = data.data.shift;
@@ -248,112 +260,9 @@ export function MerchantOrderDesk({
       {receipt && <p role="status">{receipt}</p>}
       {data.data && (
         <div className={styles.stack}>
-          <section className={styles.row} aria-label="收銀班別">
-            <h3>{data.data.shift ? '目前收銀班別' : '開始收銀'}</h3>
-            {data.data.shift ? (
-              <>
-                <p>
-                  開班時間 {foodTime(data.data.shift.openedAt)} · 期初現金{' '}
-                  {foodMoney(data.data.shift.openingCash)} · 校內記帳{' '}
-                  {foodMoney(data.data.shift.campusLedgerTotal)}
-                </p>
-                {data.data.shift.allowedActions.includes('handover') && (
-                  <div className={styles.fields}>
-                    <Input
-                      label="交班實點現金（元）"
-                      type="number"
-                      min={0}
-                      max={10000000}
-                      step={1}
-                      disabled={locked}
-                      value={counted}
-                      onChange={(event) => {
-                        setCounted(event.target.value);
-                        setShiftConfirm(false);
-                      }}
-                    />
-                    <Textarea
-                      label="交班備註（選填）"
-                      maxLength={300}
-                      disabled={locked}
-                      value={handoverNote}
-                      onChange={(event) => {
-                        setHandoverNote(event.target.value);
-                        setShiftConfirm(false);
-                      }}
-                    />
-                    <label className={styles.check}>
-                      <input
-                        type="checkbox"
-                        disabled={locked}
-                        checked={openNext}
-                        onChange={(event) => {
-                          setOpenNext(event.target.checked);
-                          setShiftConfirm(false);
-                        }}
-                      />
-                      交班後開啟下一班
-                    </label>
-                    {openNext && (
-                      <Input
-                        label="下一班期初現金（元）"
-                        type="number"
-                        min={0}
-                        max={10000000}
-                        step={1}
-                        disabled={locked}
-                        value={nextCash}
-                        onChange={(event) => {
-                          setNextCash(event.target.value);
-                          setShiftConfirm(false);
-                        }}
-                      />
-                    )}
-                    <p>
-                      交班會結束這一班的收銀紀錄。未完成餐點仍在原班別，線上付款不計入抽屜現金。
-                    </p>
-                    <label className={styles.check}>
-                      <input
-                        type="checkbox"
-                        checked={shiftConfirm}
-                        disabled={locked}
-                        onChange={(event) => setShiftConfirm(event.target.checked)}
-                      />
-                      我已清點現金，確認交班內容
-                    </label>
-                    <Button
-                      disabled={
-                        locked ||
-                        !shiftConfirm ||
-                        !cashValid(counted) ||
-                        (openNext && !cashValid(nextCash))
-                      }
-                      onClick={() => {
-                        if (
-                          !shiftConfirm ||
-                          locked ||
-                          !cashValid(counted) ||
-                          (openNext && !cashValid(nextCash))
-                        )
-                          return;
-                        void task.send({
-                          action: 'handover',
-                          input: {
-                            countedCashMinor: Number(counted),
-                            openNext,
-                            ...(openNext ? { nextOpeningCashMinor: Number(nextCash) } : {}),
-                            ...(handoverNote.trim() ? { note: handoverNote.trim() } : {}),
-                            idempotencyKey: foodKey(),
-                          },
-                        });
-                      }}
-                    >
-                      確認交班
-                    </Button>
-                  </div>
-                )}
-              </>
-            ) : (
+          {!data.data.shift ? (
+            <section className={styles.row} aria-label="收銀班別">
+              <h3>開始收銀</h3>
               <div className={styles.fields}>
                 <p>先開啟班別，才可登記櫃檯收到的款項。</p>
                 <Input
@@ -391,105 +300,68 @@ export function MerchantOrderDesk({
                   確認開班
                 </Button>
               </div>
-            )}
-          </section>
-          <section aria-label="待處理訂單">
-            <h3>待處理訂單</h3>
+            </section>
+          ) : null}
+          <section aria-label="待處理訂單" className={styles.stack}>
+            <div>
+              <h3>待處理訂單</h3>
+              <p className={styles.muted}>先處理待收款與確認，再進行備餐與取餐。</p>
+            </div>
             {!data.data.queue.orders.length && <p>這一頁沒有待處理的訂單。</p>}
-            {data.data.queue.orders.map((order) => (
-              <article className={styles.row} key={order.id}>
-                <h4>
-                  取餐 {order.pickupDisplayCode} · {foodStateLabels[order.state]}
+            {incomingOrders.length > 0 && (
+              <div className={styles.orderGroup} aria-label="待收款與確認">
+                <h4 className={styles.orderGroupTitle}>
+                  待收款與確認 <span>{incomingOrders.length}</span>
                 </h4>
-                <p>
-                  訂單 {order.id} · 預計 {foodTime(order.requestedPickupAt)}
-                </p>
-                {order.lines.map((line, index) => (
-                  <p key={index}>
-                    {[
-                      `${line.nameSnapshot} × ${line.quantity}`,
-                      line.selectedOptions.map((option) => option.nameSnapshot).join('、'),
-                      line.customerNote,
-                    ]
-                      .filter(Boolean)
-                      .join(' · ')}
-                  </p>
+                {incomingOrders.map((order) => (
+                  <MerchantOrderCard
+                    key={order.id}
+                    order={order}
+                    locked={locked}
+                    selected={selected}
+                    onSelect={(action) => {
+                      setSelected({ action, orderId: order.id });
+                      setConfirmed(false);
+                    }}
+                    onTicket={(action, ticketId) =>
+                      void task.send({
+                        action,
+                        orderId: order.id,
+                        ticketId,
+                        input: { idempotencyKey: foodKey() },
+                      })
+                    }
+                  />
                 ))}
-                {order.viewerScope === 'cash-register' && (
-                  <>
-                    <p className={styles.amount}>應付 {foodMoney(order.total)}</p>
-                    <p>
-                      {order.paymentChannel ? channelLabels[order.paymentChannel] : '尚未登記付款'}
-                    </p>
-                  </>
-                )}
-                <div className={styles.bar}>
-                  {order.allowedActions
-                    .filter((action) => action in actionLabels)
-                    .map((action) => (
-                      <Button
-                        key={action}
-                        disabled={locked}
-                        onClick={() => {
-                          setSelected({ action, orderId: order.id });
-                          setConfirmed(false);
-                        }}
-                      >
-                        {actionLabels[action]}：{order.pickupDisplayCode}
-                      </Button>
-                    ))}
-                </div>
-                {(order.kitchenTickets ?? []).map((ticket) => (
-                  <div className={styles.bar} key={ticket.id}>
-                    <p>
-                      {{ hot: '熱食', cold: '冷食', drinks: '飲品', combo: '組餐' }[ticket.station]}
-                      工作單 ·{' '}
-                      {
-                        {
-                          queued: '待準備',
-                          preparing: '準備中',
-                          ready: '已完成',
-                          fulfilled: '已交付',
-                          cancelled: '已取消',
-                        }[ticket.state]
-                      }
-                    </p>
-                    {ticket.allowedActions.includes('start-preparation') &&
-                      order.allowedActions.includes('start-preparation') && (
-                        <Button
-                          disabled={locked}
-                          onClick={() =>
-                            void task.send({
-                              action: 'start-preparation',
-                              orderId: order.id,
-                              ticketId: ticket.id,
-                              input: { idempotencyKey: foodKey() },
-                            })
-                          }
-                        >
-                          開始備餐：{ticket.id}
-                        </Button>
-                      )}
-                    {ticket.allowedActions.includes('mark-ready') &&
-                      order.allowedActions.includes('mark-ready') && (
-                        <Button
-                          disabled={locked}
-                          onClick={() =>
-                            void task.send({
-                              action: 'mark-ready',
-                              orderId: order.id,
-                              ticketId: ticket.id,
-                              input: { idempotencyKey: foodKey() },
-                            })
-                          }
-                        >
-                          餐點已備妥：{ticket.id}
-                        </Button>
-                      )}
-                  </div>
+              </div>
+            )}
+            {activeOrders.length > 0 && (
+              <div className={styles.orderGroup} aria-label="進行中訂單">
+                <h4 className={styles.orderGroupTitle}>
+                  備餐與取餐 <span>{activeOrders.length}</span>
+                </h4>
+                {activeOrders.map((order) => (
+                  <MerchantOrderCard
+                    key={order.id}
+                    order={order}
+                    locked={locked}
+                    selected={selected}
+                    onSelect={(action) => {
+                      setSelected({ action, orderId: order.id });
+                      setConfirmed(false);
+                    }}
+                    onTicket={(action, ticketId) =>
+                      void task.send({
+                        action,
+                        orderId: order.id,
+                        ticketId,
+                        input: { idempotencyKey: foodKey() },
+                      })
+                    }
+                  />
                 ))}
-              </article>
-            ))}
+              </div>
+            )}
             <div className={styles.bar}>
               {cursor && (
                 <Button disabled={task.busy} onClick={() => setCursor(undefined)}>
@@ -503,6 +375,118 @@ export function MerchantOrderDesk({
               )}
             </div>
           </section>
+          {data.data.shift ? (
+            <details
+              className={styles.shiftDetails}
+              aria-label="收銀班別"
+              open={shiftOpen}
+              onToggle={(event) => setShiftOpen(event.currentTarget.open)}
+            >
+              <summary>
+                <span className={styles.shiftSummaryTitle}>目前收銀班別</span>
+                <span className={styles.muted}>
+                  開班 {foodTime(data.data.shift.openedAt)} · 期初{' '}
+                  {foodMoney(data.data.shift.openingCash)} · 校內記帳{' '}
+                  {foodMoney(data.data.shift.campusLedgerTotal)}
+                </span>
+              </summary>
+              {data.data.shift.allowedActions.includes('handover') ? (
+                <div className={styles.fields}>
+                  <p>交班會結束這一班的收銀紀錄。未完成餐點仍在原班別，線上付款不計入抽屜現金。</p>
+                  <Input
+                    label="交班實點現金（元）"
+                    type="number"
+                    min={0}
+                    max={10000000}
+                    step={1}
+                    disabled={locked}
+                    value={counted}
+                    onChange={(event) => {
+                      setCounted(event.target.value);
+                      setShiftConfirm(false);
+                    }}
+                  />
+                  <Textarea
+                    label="交班備註（選填）"
+                    maxLength={300}
+                    disabled={locked}
+                    value={handoverNote}
+                    onChange={(event) => {
+                      setHandoverNote(event.target.value);
+                      setShiftConfirm(false);
+                    }}
+                  />
+                  <label className={styles.check}>
+                    <input
+                      type="checkbox"
+                      disabled={locked}
+                      checked={openNext}
+                      onChange={(event) => {
+                        setOpenNext(event.target.checked);
+                        setShiftConfirm(false);
+                      }}
+                    />
+                    交班後開啟下一班
+                  </label>
+                  {openNext && (
+                    <Input
+                      label="下一班期初現金（元）"
+                      type="number"
+                      min={0}
+                      max={10000000}
+                      step={1}
+                      disabled={locked}
+                      value={nextCash}
+                      onChange={(event) => {
+                        setNextCash(event.target.value);
+                        setShiftConfirm(false);
+                      }}
+                    />
+                  )}
+                  <label className={styles.check}>
+                    <input
+                      type="checkbox"
+                      checked={shiftConfirm}
+                      disabled={locked}
+                      onChange={(event) => setShiftConfirm(event.target.checked)}
+                    />
+                    我已清點現金，確認交班內容
+                  </label>
+                  <Button
+                    disabled={
+                      locked ||
+                      !shiftConfirm ||
+                      !cashValid(counted) ||
+                      (openNext && !cashValid(nextCash))
+                    }
+                    onClick={() => {
+                      if (
+                        !shiftConfirm ||
+                        locked ||
+                        !cashValid(counted) ||
+                        (openNext && !cashValid(nextCash))
+                      )
+                        return;
+                      void task.send({
+                        action: 'handover',
+                        input: {
+                          countedCashMinor: Number(counted),
+                          openNext,
+                          ...(openNext ? { nextOpeningCashMinor: Number(nextCash) } : {}),
+                          ...(handoverNote.trim() ? { note: handoverNote.trim() } : {}),
+                          idempotencyKey: foodKey(),
+                        },
+                      });
+                    }}
+                  >
+                    確認交班
+                  </Button>
+                </div>
+              ) : (
+                <p className={styles.muted}>這一班目前沒有交班操作。</p>
+              )}
+            </details>
+          ) : null}
           {selected && chosen && form && (
             <section className={styles.row} aria-label="確認訂單操作">
               <h3>
@@ -605,5 +589,99 @@ export function MerchantOrderDesk({
         </div>
       )}
     </section>
+  );
+}
+
+function MerchantOrderCard({
+  order,
+  locked,
+  selected,
+  onSelect,
+  onTicket,
+}: {
+  order: NuniFoodStaffOrderQueueItem;
+  locked: boolean;
+  selected: { action: string; orderId: string } | null;
+  onSelect(action: string): void;
+  onTicket(action: 'start-preparation' | 'mark-ready', ticketId: string): void;
+}) {
+  const next = merchantOrderNextStep(order);
+  const highlighted = selected?.orderId === order.id;
+  return (
+    <article className={styles.row} data-selected={highlighted || undefined}>
+      <h4>
+        取餐 {order.pickupDisplayCode} · {foodStateLabels[order.state]}
+      </h4>
+      <p className={styles.nextStep}>{next}</p>
+      <p>
+        訂單 {order.id} · 預計 {foodTime(order.requestedPickupAt)}
+      </p>
+      {order.lines.map((line, index) => (
+        <p key={index}>
+          {[
+            `${line.nameSnapshot} × ${line.quantity}`,
+            line.selectedOptions.map((option) => option.nameSnapshot).join('、'),
+            line.customerNote,
+          ]
+            .filter(Boolean)
+            .join(' · ')}
+        </p>
+      ))}
+      {order.viewerScope === 'cash-register' && (
+        <>
+          <p className={styles.amount}>應付 {foodMoney(order.total)}</p>
+          <p>{order.paymentChannel ? channelLabels[order.paymentChannel] : '尚未登記付款'}</p>
+        </>
+      )}
+      <div className={styles.bar}>
+        {order.allowedActions
+          .filter((action) => action in actionLabels)
+          .map((action) => (
+            <Button
+              key={action}
+              variant={
+                action === 'accept' ||
+                action === 'record-counter-payment' ||
+                action === 'fulfill-pickup'
+                  ? 'primary'
+                  : 'default'
+              }
+              disabled={locked}
+              onClick={() => onSelect(action)}
+            >
+              {actionLabels[action]}：{order.pickupDisplayCode}
+            </Button>
+          ))}
+      </div>
+      {(order.kitchenTickets ?? []).map((ticket) => (
+        <div className={styles.bar} key={ticket.id}>
+          <p>
+            {{ hot: '熱食', cold: '冷食', drinks: '飲品', combo: '組餐' }[ticket.station]}
+            工作單 ·{' '}
+            {
+              {
+                queued: '待準備',
+                preparing: '準備中',
+                ready: '已完成',
+                fulfilled: '已交付',
+                cancelled: '已取消',
+              }[ticket.state]
+            }
+          </p>
+          {ticket.allowedActions.includes('start-preparation') &&
+            order.allowedActions.includes('start-preparation') && (
+              <Button disabled={locked} onClick={() => onTicket('start-preparation', ticket.id)}>
+                開始備餐：{ticket.id}
+              </Button>
+            )}
+          {ticket.allowedActions.includes('mark-ready') &&
+            order.allowedActions.includes('mark-ready') && (
+              <Button disabled={locked} onClick={() => onTicket('mark-ready', ticket.id)}>
+                餐點已備妥：{ticket.id}
+              </Button>
+            )}
+        </div>
+      ))}
+    </article>
   );
 }

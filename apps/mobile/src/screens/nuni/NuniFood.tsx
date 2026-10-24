@@ -19,6 +19,7 @@ import {
   FoodButton,
   FoodCard,
   FoodField,
+  FoodQuantityStepper,
   FoodReadState,
   FoodStorageRecovery,
   FoodText,
@@ -252,10 +253,18 @@ function FoodRealm({
   );
 }
 
-type CartLine = { quantity: string; selectedOptionIds: string[]; note: string };
+type CartLine = { quantity: string; selectedOptionIds: string[]; note: string; inBasket?: boolean };
+type MenuStage = 'menu' | 'customize' | 'basket';
 type MenuIntent =
   | { kind: 'quote'; input: NuniFoodQuoteInput }
   | { kind: 'order'; input: NuniFoodCreateOrderInput };
+type LineIssue = { kind: 'quantity' | 'options' | 'item'; message: string };
+const emptyLine = (): CartLine => ({ quantity: '0', selectedOptionIds: [], note: '' });
+const activeCartEntries = (cart: Record<string, CartLine>) =>
+  Object.entries(cart).filter(
+    ([, value]) =>
+      value.inBasket !== false && value.quantity !== '' && Number(value.quantity) !== 0,
+  );
 function OrderLines({ lines }: { lines: NuniFoodQuoteLine[] }) {
   return (
     <>
@@ -263,15 +272,62 @@ function OrderLines({ lines }: { lines: NuniFoodQuoteLine[] }) {
         <View key={`${line.menuItemId}:${index}`} style={{ gap: 4 }}>
           <FoodText>{`${line.nameSnapshot} × ${line.quantity} · ${money(line.lineTotal)}`}</FoodText>
           {line.selectedOptions.length ? (
-            <FoodText>
+            <FoodText subdued>
               {line.selectedOptions.map((option) => option.nameSnapshot).join('、')}
             </FoodText>
           ) : null}
-          {line.customerNote ? <FoodText>{`備註：${line.customerNote}`}</FoodText> : null}
+          {line.customerNote ? <FoodText subdued>{`備註：${line.customerNote}`}</FoodText> : null}
         </View>
       ))}
     </>
   );
+}
+function describeOptions(item: NuniFoodMenuItem, line: CartLine) {
+  const names = item.optionGroups.flatMap((group) =>
+    group.options
+      .filter((option) => line.selectedOptionIds.includes(option.id))
+      .map((option) => option.name),
+  );
+  return names.length ? names.join('、') : item.optionGroups.length ? '尚未選配料' : '未加選配料';
+}
+function toggleOption(
+  line: CartLine,
+  group: NuniFoodMenuItem['optionGroups'][number],
+  optionId: string,
+) {
+  if (line.selectedOptionIds.includes(optionId))
+    return line.selectedOptionIds.filter((id) => id !== optionId);
+  const previous =
+    group.maximumSelections === 1
+      ? line.selectedOptionIds.filter((id) => !group.options.some((option) => option.id === id))
+      : line.selectedOptionIds;
+  return [...previous, optionId];
+}
+function validateLine(item: NuniFoodMenuItem | undefined, line: CartLine): LineIssue | null {
+  if (!item || !item.available || !item.allowedActions.includes('add-to-quote'))
+    return { kind: 'item', message: `${item?.name ?? '此餐點'}目前無法加入。` };
+  if (!/^\d+$/.test(line.quantity) || Number(line.quantity) < 1 || Number(line.quantity) > 20)
+    return { kind: 'quantity', message: `${item.name}數量需為 1–20 份。` };
+  for (const group of item.optionGroups) {
+    const count = group.options.filter((option) =>
+      line.selectedOptionIds.includes(option.id),
+    ).length;
+    if (count < group.minimumSelections || count > group.maximumSelections)
+      return {
+        kind: 'options',
+        message: `「${item.name}」請選擇「${group.name}」（${group.minimumSelections}–${group.maximumSelections} 項）。`,
+      };
+  }
+  if (
+    line.selectedOptionIds.some(
+      (id) =>
+        !item.optionGroups.some((group) =>
+          group.options.some((option) => option.id === id && option.available),
+        ),
+    )
+  )
+    return { kind: 'options', message: `「${item.name}」有無法使用的配料，請重新選擇。` };
+  return null;
 }
 function FoodMenu({
   context,
@@ -291,7 +347,10 @@ function FoodMenu({
   const [cart, setCart] = useNuniDraftState<Record<string, CartLine>>(`${scope}:cart`, {});
   const [minutes, setMinutes] = useNuniDraftState(`${scope}:minutes`, '30');
   const [quote, setQuote] = useState<NuniFoodQuoteProjection | null>(null);
+  const [stage, setStage] = useState<MenuStage>('menu');
+  const [focusId, setFocusId] = useState<string | null>(null);
   const [error, setError] = useState('');
+  const [lineErrors, setLineErrors] = useState<Record<string, string>>({});
   const [now, setNow] = useState(Date.now());
   const loader = useCallback(
     () => client.getMenu(tenantId, locationId),
@@ -309,6 +368,9 @@ function FoodMenu({
       else {
         setCart({});
         setQuote(null);
+        setStage('menu');
+        setFocusId(null);
+        setLineErrors({});
         onOrder((receipt as NuniFoodOrderCommandResult).orderId);
       }
     },
@@ -318,59 +380,104 @@ function FoodMenu({
     return () => clearInterval(timer);
   }, []);
   const locked = mutation.locked || !!quote;
+  const catalog = resource.data?.sections.flatMap((section) => section.items) ?? [];
+  const selected = activeCartEntries(cart);
+  const cartCount = selected.reduce((sum, [, line]) => {
+    const quantity = Number(line.quantity);
+    return sum + (Number.isFinite(quantity) && quantity > 0 ? quantity : 0);
+  }, 0);
+  const focusItem = focusId ? catalog.find((item) => item.id === focusId) : undefined;
+  const focusLine = focusId ? (cart[focusId] ?? emptyLine()) : emptyLine();
   const update = (id: string, patch: Partial<CartLine>) =>
     setCart((previous) => ({
       ...previous,
-      [id]: { quantity: '0', selectedOptionIds: [], note: '', ...previous[id], ...patch },
+      [id]: { ...emptyLine(), ...previous[id], ...patch },
     }));
+  const openCustomize = (item: NuniFoodMenuItem) => {
+    if (locked || !item.available || !item.allowedActions.includes('add-to-quote')) return;
+    setError('');
+    setLineErrors((previous) => {
+      const next = { ...previous };
+      delete next[item.id];
+      return next;
+    });
+    setCart((previous) => {
+      const current = previous[item.id];
+      if (current && current.quantity !== '' && Number(current.quantity) > 0) return previous;
+      return {
+        ...previous,
+        [item.id]: { ...emptyLine(), ...current, quantity: '1', inBasket: false },
+      };
+    });
+    setFocusId(item.id);
+    setStage('customize');
+  };
+  const saveCustomize = () => {
+    if (!focusItem || locked) return;
+    const line = cart[focusItem.id] ?? emptyLine();
+    const issue = validateLine(focusItem, line);
+    if (issue) {
+      setError('');
+      setLineErrors((previous) => ({ ...previous, [focusItem.id]: issue.message }));
+      return;
+    }
+    setLineErrors((previous) => {
+      const next = { ...previous };
+      delete next[focusItem.id];
+      return next;
+    });
+    setError('');
+    update(focusItem.id, { inBasket: true });
+    setFocusId(null);
+    setStage('menu');
+  };
+  const removeLine = (id: string) => {
+    if (locked) return;
+    setCart((previous) => {
+      return {
+        ...previous,
+        [id]: { ...emptyLine(), ...previous[id], quantity: '0' },
+      };
+    });
+    setLineErrors((previous) => {
+      const next = { ...previous };
+      delete next[id];
+      return next;
+    });
+    if (focusId === id) {
+      setFocusId(null);
+      setStage('menu');
+    }
+  };
   const prepareQuote = () => {
     if (locked || !resource.data || resource.loading || resource.error) return;
     setError('');
+    const nextErrors: Record<string, string> = {};
     try {
-      const items = resource.data.sections.flatMap((section) => section.items);
-      const selected = Object.entries(cart).filter(
-        ([, value]) => value.quantity !== '' && Number(value.quantity) !== 0,
-      );
       const minutesNumber = Number(minutes);
-      if (
-        !/^\d+$/.test(minutes) ||
-        minutesNumber < 1 ||
-        minutesNumber > 1440 ||
-        selected.length === 0 ||
-        selected.length > 20
-      )
-        throw new Error('selection');
+      if (!/^\d+$/.test(minutes) || minutesNumber < 1 || minutesNumber > 1440) {
+        setError('預計取餐時間需為 1–1,440 分鐘後。');
+        return;
+      }
+      if (selected.length === 0) {
+        setError('請先選至少一道餐點。');
+        return;
+      }
+      if (selected.length > 20) {
+        setError('一次最多確認 20 道品項。');
+        return;
+      }
       const input: NuniFoodQuoteInput = {
         locationId,
         requestedPickupAt: new Date(Date.now() + minutesNumber * 60_000).toISOString(),
         idempotencyKey: key(),
         items: selected.map(([id, value]) => {
-          const item = items.find((candidate) => candidate.id === id);
-          if (
-            !item ||
-            !item.available ||
-            !item.allowedActions.includes('add-to-quote') ||
-            !/^\d+$/.test(value.quantity) ||
-            Number(value.quantity) < 1 ||
-            Number(value.quantity) > 20
-          )
-            throw new Error('item');
-          for (const group of item.optionGroups) {
-            const count = group.options.filter((option) =>
-              value.selectedOptionIds.includes(option.id),
-            ).length;
-            if (count < group.minimumSelections || count > group.maximumSelections)
-              throw new Error('options');
+          const item = catalog.find((candidate) => candidate.id === id);
+          const issue = validateLine(item, value);
+          if (issue) {
+            nextErrors[id] = issue.message;
+            throw new Error(issue.kind);
           }
-          if (
-            value.selectedOptionIds.some(
-              (id) =>
-                !item.optionGroups.some((group) =>
-                  group.options.some((option) => option.id === id && option.available),
-                ),
-            )
-          )
-            throw new Error('options');
           return {
             menuItemId: id,
             quantity: Number(value.quantity),
@@ -379,63 +486,250 @@ function FoodMenu({
           };
         }),
       };
+      setLineErrors({});
       void mutation.send({ kind: 'quote', input });
-    } catch {
-      setError('請確認品項數量（每項 1–20 份）、必選配料與預計取餐時間（1–1,440 分鐘後）。');
+    } catch (failure) {
+      setLineErrors(nextErrors);
+      const first = Object.values(nextErrors)[0];
+      setError(
+        first
+          ? ''
+          : failure instanceof Error && failure.message === 'quantity'
+            ? '請確認品項數量（每項 1–20 份）。'
+            : '請確認品項數量（每項 1–20 份）、必選配料與預計取餐時間（1–1,440 分鐘後）。',
+      );
     }
   };
-  const renderItem = (item: NuniFoodMenuItem) => {
-    const line = cart[item.id] ?? { quantity: '0', selectedOptionIds: [], note: '' };
-    const disabled = locked || !item.available || !item.allowedActions.includes('add-to-quote');
+  const renderBrowseItem = (item: NuniFoodMenuItem) => {
+    const line = cart[item.id];
+    const qty = line && line.quantity !== '' ? Number(line.quantity) : 0;
+    const inCart = line?.inBasket !== false && qty > 0;
+    const canAdd = item.available && item.allowedActions.includes('add-to-quote');
     return (
       <FoodCard key={item.id}>
         <FoodText title>{item.name}</FoodText>
-        <FoodText>{item.description}</FoodText>
+        {item.description ? <FoodText subdued>{item.description}</FoodText> : null}
         <FoodText>{money(item.basePrice)}</FoodText>
         {item.allergenTags.length ? (
-          <FoodText>{`過敏原：${item.allergenTags.join('、')}`}</FoodText>
+          <FoodText subdued>{`過敏原：${item.allergenTags.join('、')}`}</FoodText>
         ) : null}
-        {!item.available ? <FoodText>目前售完</FoodText> : null}
-        <FoodField
-          label={`${item.name}數量`}
-          numeric
-          max={2}
-          value={line.quantity}
+        {!item.available ? <FoodText status>目前售完</FoodText> : null}
+        {inCart ? (
+          <>
+            <FoodText status>{`已選 ${qty} 份 · ${describeOptions(item, line)}`}</FoodText>
+            {line.note.trim() ? <FoodText subdued>{`備註：${line.note.trim()}`}</FoodText> : null}
+          </>
+        ) : null}
+        {lineErrors[item.id] ? <FoodText alert>{lineErrors[item.id]}</FoodText> : null}
+        {canAdd ? (
+          <FoodButton
+            disabled={locked}
+            accessibilityLabel={inCart ? `調整${item.name}` : `選擇${item.name}`}
+            onPress={() => openCustomize(item)}
+          >
+            {inCart ? `調整：${item.name}` : `選擇：${item.name}`}
+          </FoodButton>
+        ) : item.available ? (
+          <FoodText subdued>這道餐點目前不能線上點。</FoodText>
+        ) : null}
+      </FoodCard>
+    );
+  };
+  const renderCustomize = () => {
+    if (!focusItem) return null;
+    const disabled =
+      locked || !focusItem.available || !focusItem.allowedActions.includes('add-to-quote');
+    return (
+      <FoodCard>
+        <FoodText title>{focusItem.name}</FoodText>
+        {focusItem.description ? <FoodText subdued>{focusItem.description}</FoodText> : null}
+        <FoodText>{money(focusItem.basePrice)}</FoodText>
+        {focusItem.allergenTags.length ? (
+          <FoodText subdued>{`過敏原：${focusItem.allergenTags.join('、')}`}</FoodText>
+        ) : null}
+        <FoodQuantityStepper
+          label={`${focusItem.name}數量`}
+          value={focusLine.quantity === '0' ? '1' : focusLine.quantity}
           disabled={disabled}
-          onChange={(quantity) => update(item.id, { quantity })}
+          onChange={(quantity) => update(focusItem.id, { quantity })}
         />
-        {item.optionGroups.map((group) => (
+        {focusItem.optionGroups.map((group) => (
           <View key={group.id} style={{ gap: 8 }}>
             <FoodText>{`${group.name}（選 ${group.minimumSelections}–${group.maximumSelections} 項）`}</FoodText>
             {group.options.map((option) => (
               <FoodButton
                 key={option.id}
-                selected={line.selectedOptionIds.includes(option.id)}
-                disabled={disabled || !option.available}
+                selected={focusLine.selectedOptionIds.includes(option.id)}
+                disabled={
+                  disabled ||
+                  !option.available ||
+                  (!focusLine.selectedOptionIds.includes(option.id) &&
+                    group.maximumSelections !== 1 &&
+                    group.options.filter((value) => focusLine.selectedOptionIds.includes(value.id))
+                      .length >= group.maximumSelections)
+                }
                 onPress={() =>
-                  update(item.id, {
-                    selectedOptionIds: line.selectedOptionIds.includes(option.id)
-                      ? line.selectedOptionIds.filter((id) => id !== option.id)
-                      : [...line.selectedOptionIds, option.id],
+                  update(focusItem.id, {
+                    selectedOptionIds: toggleOption(focusLine, group, option.id),
                   })
                 }
-              >{`${item.name}：${option.name}（${money(option.priceDelta)}）`}</FoodButton>
+              >{`${focusItem.name}：${option.name}（${money(option.priceDelta)}）`}</FoodButton>
             ))}
           </View>
         ))}
+        {lineErrors[focusItem.id] ? <FoodText alert>{lineErrors[focusItem.id]}</FoodText> : null}
         <FoodField
-          label={`${item.name}備註`}
-          value={line.note}
+          label={`${focusItem.name}備註`}
+          value={focusLine.note}
           disabled={disabled}
-          onChange={(note) => update(item.id, { note })}
+          onChange={(note) => update(focusItem.id, { note })}
         />
+        <FoodButton variant="primary" disabled={disabled} onPress={saveCustomize}>
+          放入購物籃
+        </FoodButton>
+        <FoodButton
+          disabled={locked}
+          onPress={() => {
+            if (
+              focusLine.quantity === '0' ||
+              focusLine.quantity === '' ||
+              Number(focusLine.quantity) === 0
+            )
+              removeLine(focusItem.id);
+            else {
+              setFocusId(null);
+              setStage('menu');
+            }
+            setError('');
+          }}
+        >
+          返回菜單
+        </FoodButton>
+        {selected.some(([id]) => id === focusItem.id) ? (
+          <FoodButton disabled={locked} onPress={() => removeLine(focusItem.id)}>
+            {`從購物籃移除：${focusItem.name}`}
+          </FoodButton>
+        ) : null}
       </FoodCard>
     );
   };
+  const renderBasket = () => (
+    <>
+      <FoodText title>確認購物籃</FoodText>
+      <FoodText subdued>{`共 ${selected.length} 道 · ${cartCount} 份`}</FoodText>
+      {!selected.length ? <FoodText>購物籃還是空的，請先選餐。</FoodText> : null}
+      {selected.map(([id, line]) => {
+        const item = catalog.find((candidate) => candidate.id === id);
+        if (!item)
+          return (
+            <FoodCard key={id}>
+              <FoodText>這道餐點已不在目前菜單中</FoodText>
+              <FoodText alert>{lineErrors[id] || '請移除後重新選餐。'}</FoodText>
+              <FoodButton disabled={locked} onPress={() => removeLine(id)}>
+                移除下架餐點
+              </FoodButton>
+            </FoodCard>
+          );
+        const disabled = locked || !item.available || !item.allowedActions.includes('add-to-quote');
+        return (
+          <FoodCard key={id}>
+            <FoodText title>{item.name}</FoodText>
+            <FoodText subdued>{describeOptions(item, line)}</FoodText>
+            <FoodQuantityStepper
+              label={`${item.name}數量`}
+              value={line.quantity}
+              min={0}
+              disabled={disabled}
+              onChange={(quantity) => update(id, { quantity })}
+            />
+            {item.optionGroups.map((group) => (
+              <View key={group.id} style={{ gap: 8 }}>
+                <FoodText>{`${group.name}（選 ${group.minimumSelections}–${group.maximumSelections} 項）`}</FoodText>
+                {group.options.map((option) => (
+                  <FoodButton
+                    key={option.id}
+                    selected={line.selectedOptionIds.includes(option.id)}
+                    disabled={
+                      disabled ||
+                      !option.available ||
+                      (!line.selectedOptionIds.includes(option.id) &&
+                        group.maximumSelections !== 1 &&
+                        group.options.filter((value) => line.selectedOptionIds.includes(value.id))
+                          .length >= group.maximumSelections)
+                    }
+                    onPress={() =>
+                      update(id, {
+                        selectedOptionIds: toggleOption(line, group, option.id),
+                      })
+                    }
+                  >{`${item.name}：${option.name}（${money(option.priceDelta)}）`}</FoodButton>
+                ))}
+              </View>
+            ))}
+            {lineErrors[id] ? <FoodText alert>{lineErrors[id]}</FoodText> : null}
+            <FoodField
+              label={`${item.name}備註`}
+              value={line.note}
+              disabled={disabled}
+              onChange={(note) => update(id, { note })}
+            />
+            <FoodButton disabled={locked} onPress={() => removeLine(id)}>
+              {`移除：${item.name}`}
+            </FoodButton>
+          </FoodCard>
+        );
+      })}
+      {/* Keep quantity fields visible while a pending mutation locks the form. */}
+      {locked && !selected.length
+        ? catalog
+            .filter((item) => cart[item.id])
+            .map((item) => (
+              <FoodQuantityStepper
+                key={`locked-${item.id}`}
+                label={`${item.name}數量`}
+                value={cart[item.id]?.quantity ?? '0'}
+                disabled
+                onChange={() => undefined}
+              />
+            ))
+        : null}
+      <FoodField
+        label="幾分鐘後取餐"
+        numeric
+        max={4}
+        disabled={locked}
+        value={minutes}
+        onChange={setMinutes}
+      />
+      <FoodButton
+        variant="primary"
+        disabled={locked || resource.loading || !!resource.error || !selected.length}
+        onPress={prepareQuote}
+      >
+        確認餐點與金額
+      </FoodButton>
+      <FoodButton
+        disabled={locked}
+        onPress={() => {
+          setStage('menu');
+          setError('');
+        }}
+      >
+        繼續選餐
+      </FoodButton>
+    </>
+  );
   return (
     <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={page}>
       <FoodButton onPress={onBack}>返回門市列表</FoodButton>
       <FoodText title>{resource.data?.location.name ?? '選擇餐點'}</FoodText>
+      <FoodText status>
+        {stage === 'customize'
+          ? '調整這道餐點'
+          : stage === 'basket'
+            ? '檢查購物籃與取餐時間'
+            : '選餐後再確認購物籃'}
+      </FoodText>
       <FoodReadState resource={resource} disabled={mutation.busy} />
       {mutation.error ? <FoodText alert>{mutation.error}</FoodText> : null}
       <FoodStorageRecovery mutation={mutation} />
@@ -443,6 +737,7 @@ function FoodMenu({
         <>
           <FoodText>這次送出內容已保留。返回後仍會使用同一次操作確認。</FoodText>
           <FoodButton
+            variant="primary"
             disabled={
               mutation.busy ||
               mutation.storageBlocked ||
@@ -466,13 +761,14 @@ function FoodMenu({
             <FoodText key={fee.code}>{`${fee.label}：${money(fee.amount)}`}</FoodText>
           ))}
           <FoodText>{`應付總額 ${money(quote.total)}`}</FoodText>
-          <FoodText>{`預計取餐 ${foodTime(quote.requestedPickupAt)}`}</FoodText>
-          <FoodText>{`金額與庫存保留至 ${foodTime(quote.expiresAt)}`}</FoodText>
+          <FoodText status>{`預計取餐 ${foodTime(quote.requestedPickupAt)}`}</FoodText>
+          <FoodText subdued>{`金額與庫存保留至 ${foodTime(quote.expiresAt)}`}</FoodText>
           <FoodText>送出後請到店付款。這個步驟不會線上扣款。</FoodText>
           {Date.parse(quote.expiresAt) <= now ? (
             <FoodText alert>這次報價已過期，請重新確認金額。</FoodText>
           ) : null}
           <FoodButton
+            variant="primary"
             disabled={
               mutation.locked ||
               resource.loading ||
@@ -490,32 +786,58 @@ function FoodMenu({
           >
             確認送出訂單，到店付款
           </FoodButton>
-          <FoodButton disabled={mutation.locked} onPress={() => setQuote(null)}>
+          <FoodButton
+            disabled={mutation.locked}
+            onPress={() => {
+              setQuote(null);
+              setStage('basket');
+            }}
+          >
             返回修改餐點
           </FoodButton>
         </FoodCard>
       ) : resource.data ? (
         <>
-          {resource.data.sections.map((section) => (
-            <View key={section.id} style={{ gap: 14 }}>
-              <FoodText title>{section.name}</FoodText>
-              {section.items.map(renderItem)}
-            </View>
-          ))}
-          <FoodField
-            label="幾分鐘後取餐"
-            numeric
-            max={4}
-            disabled={locked}
-            value={minutes}
-            onChange={setMinutes}
-          />
-          <FoodButton
-            disabled={locked || resource.loading || !!resource.error}
-            onPress={prepareQuote}
-          >
-            確認餐點與金額
-          </FoodButton>
+          {stage !== 'customize' ? (
+            <FoodButton
+              variant={stage === 'basket' ? 'secondary' : 'primary'}
+              disabled={locked || !selected.length}
+              accessibilityLabel={
+                selected.length ? `查看購物籃，已選 ${cartCount} 份` : '購物籃還是空的'
+              }
+              onPress={() => {
+                setStage('basket');
+                setError('');
+              }}
+            >
+              {selected.length ? `查看購物籃（${cartCount} 份）` : '購物籃（尚無餐點）'}
+            </FoodButton>
+          ) : null}
+          {locked && stage === 'menu'
+            ? selected.map(([id, line]) => {
+                const item = catalog.find((candidate) => candidate.id === id);
+                if (!item) return null;
+                return (
+                  <FoodQuantityStepper
+                    key={`locked-menu-${id}`}
+                    label={`${item.name}數量`}
+                    value={line.quantity}
+                    disabled
+                    onChange={() => undefined}
+                  />
+                );
+              })
+            : null}
+          {stage === 'customize'
+            ? renderCustomize()
+            : stage === 'basket'
+              ? renderBasket()
+              : resource.data.sections.map((section) => (
+                  <View key={section.id} style={{ gap: 14 }}>
+                    <FoodText title>{section.name}</FoodText>
+                    {section.items.map(renderBrowseItem)}
+                  </View>
+                ))}
         </>
       ) : null}
     </ScrollView>
