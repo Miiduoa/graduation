@@ -5,13 +5,17 @@ import { usePathname } from 'next/navigation';
 import type { ReactNode } from 'react';
 import { useAuth } from '@/components/AuthGuard';
 import { SchoolAccountRequired } from '@/components/SchoolAccountRequired';
+import { useOptionalSelectedSchool } from '@/components/SelectedSchoolProvider';
 import { SiteShell } from '@/components/SiteShell';
 import { useAcademicRecords } from '@/lib/useAcademicRecords';
 import { useSignInOptions } from '@/lib/signInOptions';
 import type { AcademicKind, AcademicSnapshot } from '@/lib/academicClient';
 import { loadFailureCopy } from '@campus/shared/src/loadFailureCopy';
+import { findSchoolById } from '@campus/shared/src/schools';
 import styles from './academic.module.css';
 import { PersonalImportSummary } from '@/components/imports/PersonalImportSummary';
+
+const PROVIDENCE_E_CAMPUS = 'https://alcat.pu.edu.tw/';
 
 type Props<K extends AcademicKind> = {
   kind: K;
@@ -29,6 +33,11 @@ function Records<K extends AcademicKind>({
   const { state, refresh } = useAcademicRecords(kind);
   const path = usePathname();
   const options = useSignInOptions();
+  const browsing = useOptionalSelectedSchool();
+  const browsingId = browsing?.selectedSchoolId;
+  // Official e-campus deep link is only for the connected Providence adapter.
+  const showProvidenceCampus =
+    !browsing || browsingId === 'pu' || browsingId === 'tw-pu';
   if (!state || state.status === 'loading') {
     return (
       <div className={styles.status} role="status">
@@ -89,23 +98,34 @@ function Records<K extends AcademicKind>({
               重新連線學校帳號
             </Link>
           )}
-          <a
-            className="btn"
-            href="https://alcat.pu.edu.tw/"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            前往 e 校園 ↗
-          </a>
+          {showProvidenceCampus ? (
+            <a
+              className="btn"
+              href={PROVIDENCE_E_CAMPUS}
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              前往 e 校園 ↗
+            </a>
+          ) : (
+            <p className={styles.notice}>
+              目前瀏覽的是
+              {browsing?.selectedSchool?.name || '其他校園'}
+              ；這項校務讀取尚未接到該校官方系統，請改到學校教務單位查詢。
+            </p>
+          )}
         </div>
       </section>
     );
   }
+  const sourceSchool =
+    findSchoolById(state.snapshot.schoolId)?.name ||
+    (state.snapshot.schoolId === 'pu' ? '靜宜大學' : '學校');
   return (
     <>
       <div className={styles.source}>
         <span>
-          來源：靜宜大學 e 校園 ·{' '}
+          來源：{sourceSchool} e 校園 ·{' '}
           {new Date(state.snapshot.fetchedAt).toLocaleString('zh-TW', {
             timeZone: 'Asia/Taipei',
             month: 'numeric',

@@ -10,5 +10,10 @@
     "outDir": "dist-cjs",
     "rootDir": "src"
   },
-  "include": ["src/postLoginRoles.ts", "src/lms/**/*.ts", "src/companion/**/*.ts"]
+  "include": [
+    "src/postLoginRoles.ts",
+    "src/lms/**/*.ts",
+    "src/companion/**/*.ts",
+    "src/timetable/schoolPeriods.ts"
+  ]
 }

@@ -1,10 +1,11 @@
 'use client';
 
-import { use, useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { SiteShell } from '@/components/SiteShell';
+import { SchoolScopePlaceholder } from '@/components/SchoolScopePlaceholder';
 import { useAuth } from '@/components/AuthGuard';
-import { resolveSchoolPageContext, type SchoolSearchParams } from '@/lib/pageContext';
+import { useCampusBrowseContext } from '@/lib/useCampusBrowseContext';
 import { watchMyOrders, type MyOrder } from '@/lib/myOrders';
 import {
   describePickupNumber,
@@ -182,7 +183,7 @@ function OrdersRoute({ schoolId }: { schoolId: string }) {
         <p>這裡是 App 餐廳訂單。登入後可查看取餐號碼與狀態。</p>
         <Link
           className={home.primary}
-          href={`/login?returnUrl=${encodeURIComponent(`/orders?schoolId=${encodeURIComponent(schoolId)}`)}`}
+          href={`/login?returnUrl=${encodeURIComponent(`/orders?campus=${encodeURIComponent(schoolId)}`)}`}
         >
           登入
         </Link>
@@ -192,37 +193,50 @@ function OrdersRoute({ schoolId }: { schoolId: string }) {
   return <OrdersList key={`${user.uid}:${schoolId}`} uid={user.uid} schoolId={schoolId} />;
 }
 
-export default function OrdersPage(props: { searchParams?: Promise<SchoolSearchParams> }) {
-  const searchParams = props.searchParams ? use(props.searchParams) : undefined;
-  const school = resolveSchoolPageContext(searchParams);
+export default function OrdersPage() {
   const orderingOn = isWebOnlineOrderingEnabled();
+  const campus = useCampusBrowseContext();
+  const ready = campus.status === 'ready' && !!campus.schoolId;
   return (
     <SiteShell
       title={orderingOn ? '我的訂單' : ONLINE_ORDERING_OFF_TEXT}
       subtitle={
         orderingOn ? '取餐號碼和訂單狀態以店家那邊為準，會自動更新。' : ONLINE_ORDERING_OFF_TEXT
       }
-      schoolName={orderingOn ? school.schoolName : undefined}
-      schoolCode={orderingOn ? school.schoolCode : undefined}
+      schoolName={orderingOn && ready ? campus.schoolName : undefined}
     >
       <div className={styles.page}>
-        {orderingOn ? (
+        {orderingOn && ready ? (
           <p className={styles.routeNote}>
             此頁是 App「餐廳」留下的訂單。站內點餐、付款與取餐憑證請到{' '}
             <Link href="/food">點餐與取餐</Link>
             ；瀏覽菜單請到{' '}
-            <Link href={`/cafeteria?schoolId=${encodeURIComponent(school.schoolId)}`}>
+            <Link href={`/cafeteria?schoolId=${encodeURIComponent(campus.schoolId!)}`}>
               餐廳資訊
             </Link>
             。
           </p>
-        ) : (
+        ) : !orderingOn ? (
           <p className={styles.routeNote}>
             這裡顯示 App 餐廳的取餐號碼。其他訂單請到 <Link href="/food">訂單與取餐進度</Link>{' '}
             查看。
           </p>
+        ) : null}
+        {!ready ? (
+          campus.status === 'loading' ? (
+            <p role="status">正在確認所選校園…</p>
+          ) : campus.status === 'error' ? (
+            <p role="alert">無法取得校園目錄，請稍後再試。</p>
+          ) : orderingOn ? (
+            <SchoolScopePlaceholder />
+          ) : (
+            <div>
+              <h2>{ONLINE_ORDERING_OFF_TEXT}</h2>
+            </div>
+          )
+        ) : (
+          <OrdersRoute key={campus.schoolId!} schoolId={campus.schoolId!} />
         )}
-        <OrdersRoute schoolId={school.schoolId} />
       </div>
     </SiteShell>
   );

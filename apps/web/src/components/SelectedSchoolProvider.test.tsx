@@ -237,6 +237,81 @@ it('uses an explicit schoolId deep link ahead of a saved browsing preference', (
   expect(JSON.parse(localStorage.getItem(schoolPreferenceKey(defaults.ownerKey))!)).toEqual({ schoolId: 'school-a' });
 });
 
+it('resolves a unique legacy school code against the live catalog ahead of preference', () => {
+  localStorage.setItem(
+    schoolPreferenceKey(defaults.ownerKey),
+    JSON.stringify({ schoolId: 'school-a' }),
+  );
+  navigation.search = '?school=B';
+  render(<View />);
+  expect(screen.getByTestId('selected-school').textContent).toBe('乙校');
+  expect(JSON.parse(localStorage.getItem(schoolPreferenceKey(defaults.ownerKey))!)).toEqual({
+    schoolId: 'school-a',
+  });
+});
+
+it('maps a unique bundled school code then requires live catalog membership', () => {
+  localStorage.setItem(
+    schoolPreferenceKey(defaults.ownerKey),
+    JSON.stringify({ schoolId: 'school-a' }),
+  );
+  navigation.search = '?school=NTHU';
+  render(
+    <View
+      schools={[
+        ...schools,
+        { id: 'nthu', name: '國立清華大學', code: 'NTHU' },
+      ]}
+    />,
+  );
+  expect(screen.getByTestId('selected-school').textContent).toBe('國立清華大學');
+});
+
+it('rejects a bundled-only school code that is missing from the live directory', () => {
+  localStorage.setItem(
+    schoolPreferenceKey(defaults.ownerKey),
+    JSON.stringify({ schoolId: 'school-a' }),
+  );
+  navigation.search = '?school=NTHU';
+  render(<View />);
+  expect(screen.getByTestId('selected-school').textContent).toBe('不限校園');
+  expect(screen.getByRole('status').textContent).toContain('不在目前目錄');
+  expect(capturedSelection.requestedUnavailable).toBe(true);
+});
+
+it('does not silently choose Providence for an ambiguous or invalid school code', () => {
+  navigation.search = '?school=SHARED';
+  render(
+    <View
+      schools={[
+        { id: 'alpha', name: '甲校', code: 'SHARED' },
+        { id: 'beta', name: '乙校', code: 'SHARED' },
+        { id: 'pu', name: '靜宜大學', code: 'PU' },
+      ]}
+    />,
+  );
+  expect(screen.getByTestId('selected-school').textContent).toBe('不限校園');
+  expect(capturedSelection.requestedUnavailable).toBe(true);
+  expect(capturedSelection.selectedSchoolId).toBeNull();
+
+  navigation.search = '?school=NOT-A-REAL-CODE';
+  render(
+    <View schools={[{ id: 'pu', name: '靜宜大學', code: 'PU' }, ...schools]} />,
+  );
+  expect(screen.getAllByTestId('selected-school').at(-1)?.textContent).toBe('不限校園');
+});
+
+it('keeps campus=all ahead of schoolId, school code and preference', () => {
+  localStorage.setItem(
+    schoolPreferenceKey(defaults.ownerKey),
+    JSON.stringify({ schoolId: 'school-a' }),
+  );
+  navigation.search = '?campus=all&schoolId=school-b&school=B';
+  render(<View schools={[{ id: 'pu', name: '靜宜大學', code: 'PU' }, ...schools]} />);
+  expect(screen.getByTestId('selected-school').textContent).toBe('不限校園');
+  expect(capturedSelection.requestedUnavailable).toBe(false);
+});
+
 it('clears an old code when changing to a school listed only by the live directory', () => {
   navigation.search = '?school=PU&schoolId=pu&campus=pu';
   render(<View schools={[{ id: 'tw-new-university', name: '新大學' }]} />);
