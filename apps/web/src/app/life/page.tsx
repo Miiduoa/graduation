@@ -1,7 +1,8 @@
 'use client';
 
 import Link from 'next/link';
-import { useRef, useState } from 'react';
+import { Suspense, useRef, useState } from 'react';
+import { useSearchParams } from 'next/navigation';
 import { useOptionalSelectedSchool } from '@/components/SelectedSchoolProvider';
 import { buildCampusNavigationSearch, campusServiceHref } from '@/lib/campusNavigation';
 import { SiteShell } from '@/components/SiteShell';
@@ -77,7 +78,7 @@ const ITEMS: LifeService[] = [
   {
     href: '/lost-found',
     title: '失物招領',
-    text: '用 Google 帳號登入後，查看或刊登遺失與拾獲物品。',
+    text: '使用學校帳號登入後，查看或刊登遺失與拾獲物品。',
     action: '找失物',
     icon: 'lost-found',
     group: 'community',
@@ -175,13 +176,14 @@ function ServiceLink({ item, href }: { item: LifeService; href: string }) {
   );
 }
 
-export default function LifePage() {
+function LifeDirectory() {
   const [query, setQuery] = useState('');
   const [category, setCategory] = useState<ServiceCategory>('all');
   const searchInput = useRef<HTMLInputElement>(null);
+  const params = useSearchParams();
   const selection = useOptionalSelectedSchool();
   const scope = buildCampusNavigationSearch(
-    null,
+    params,
     selection?.selectedSchool,
     Boolean(selection && !selection.loading && selection.catalogStatus === 'ready'),
   );
@@ -355,5 +357,21 @@ export default function LifePage() {
         )}
       </div>
     </SiteShell>
+  );
+}
+
+function LifeLoadingFallback() {
+  return (
+    <SiteShell title="生活" subtitle="找教室、搭公車、查館藏，先選你要做的事。">
+      <p role="status">正在載入生活服務…</p>
+    </SiteShell>
+  );
+}
+
+export default function LifePage() {
+  return (
+    <Suspense fallback={<LifeLoadingFallback />}>
+      <LifeDirectory />
+    </Suspense>
   );
 }
