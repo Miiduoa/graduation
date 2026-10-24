@@ -44,7 +44,7 @@ fi
 
 case "${1:-serve}" in
     serve|--serve)
-        echo "🚀 啟動 Campus AI Server (port 8100)..."
+        echo "🚀 啟動 Campus AI Server (default bind 127.0.0.1; public bind requires REQUIRE_FIREBASE_AUTH=true)..."
         python server.py
         ;;
     --prepare)

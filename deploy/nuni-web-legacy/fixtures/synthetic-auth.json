@@ -1,0 +1,15 @@
+{
+  "tenantId": "synthetic-campus",
+  "kind": "google-workspace",
+  "clientId": "synthetic-campus-web",
+  "nonce": "nnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnn",
+  "code": "synthetic-provider-code",
+  "codeVerifier": "vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv",
+  "idToken": "synthetic-provider-id-token",
+  "campusToken": "synthetic-campus-access-token",
+  "handle": "ws_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "handleAlt": "ws_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+  "webPublicOrigin": "https://legacy.test",
+  "redirectUri": "https://legacy.test/auth/account/callback",
+  "issuer": "https://accounts.google.com"
+}
