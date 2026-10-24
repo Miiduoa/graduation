@@ -3,8 +3,10 @@ import { callableErrorBody, HttpsError } from './httpsError';
 import type { CallableRequest } from './groupInviteHandlers';
 import {
   assertJoinCodeAttemptsAllowed,
+  assertTimetableShareCreatesAllowed,
   checkUidRateLimit,
   recordInvalidJoinCode,
+  recordTimetableShareCreate,
 } from './uidRateLimit';
 
 const JSON_HEADERS = {
@@ -97,6 +99,22 @@ function mapThrownError(error: unknown): HttpsError {
   return new HttpsError('internal', 'INTERNAL');
 }
 
+async function invokeHostedCallable(
+  name: string,
+  request: CallableRequest,
+  db: FnRuntime['db'],
+): Promise<unknown> {
+  if (name === 'joinGroupByCode' || name === 'leaveGroup') {
+    const { createGroupInviteHandlers } = await import('./groupInviteHandlers');
+    return createGroupInviteHandlers({ db })[name](request);
+  }
+  if (name === 'createTimetableShare' || name === 'revokeTimetableShare') {
+    const { createTimetableShareHandlers } = await import('./timetableShareHandlers');
+    return createTimetableShareHandlers({ db })[name](request);
+  }
+  throw new HttpsError('not-found', `Unknown function: ${name}`);
+}
+
 export async function dispatchFnRequest(
   name: string,
   request: Request,
@@ -162,14 +180,16 @@ export async function dispatchFnRequest(
       if (name === 'joinGroupByCode') {
         assertJoinCodeAttemptsAllowed(uid);
       }
+      if (name === 'createTimetableShare') {
+        assertTimetableShareCreatesAllowed(uid);
+        recordTimetableShareCreate(uid);
+      }
     }
     const callableRequest: CallableRequest = {
       data: (body as { data: unknown }).data,
       auth,
     };
-    const { createGroupInviteHandlers } = await import('./groupInviteHandlers');
-    const handlers = createGroupInviteHandlers({ db: resolved.db });
-    const result = await handlers[name](callableRequest);
+    const result = await invokeHostedCallable(name, callableRequest, resolved.db);
     return jsonResponse(200, { result }, cors);
   } catch (error) {
     const mapped = mapThrownError(error);

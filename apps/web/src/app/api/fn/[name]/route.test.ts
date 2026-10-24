@@ -37,6 +37,18 @@ it('returns 503 尚未啟用 when no service account is configured', async () =>
   expect(await response.json()).toEqual({
     error: { status: 'UNAVAILABLE', message: '尚未啟用' },
   });
+  const share = await POST(
+    new Request('https://nuni.tw/api/fn/createTimetableShare', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: 'Bearer nope' },
+      body: JSON.stringify({ data: { schoolId: 'pu' } }),
+    }),
+    { params: Promise.resolve({ name: 'createTimetableShare' }) },
+  );
+  expect(share.status).toBe(503);
+  expect(await share.json()).toEqual({
+    error: { status: 'UNAVAILABLE', message: '尚未啟用' },
+  });
 });
 
 it('returns 404 for createGroup even though the handler still exists', async () => {
