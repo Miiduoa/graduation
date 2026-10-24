@@ -48,6 +48,15 @@ export function UnifiedCalendarScreen(props: Record<string, unknown>) {
         >
           <Text style={{ fontSize: 13, color: theme.colors.accent }}>課表請看「我的課表」 →</Text>
         </Pressable>
+        <Pressable
+          accessibilityRole="button"
+          onPress={() => rootNavigateNested('學習', 'PersonalCalendar')}
+          style={{ paddingVertical: 6 }}
+        >
+          <Text style={{ fontSize: 13, color: theme.colors.accent }}>
+            個人行程請看「個人行事曆」 →
+          </Text>
+        </Pressable>
         <PersonalImportSummary kind="events" />
       </View>
 

@@ -59,6 +59,37 @@ it('keeps existing page content and unsaved edits when the directory cannot load
   expect(await screen.findByRole('combobox', { name: '瀏覽校園' })).toBeTruthy();
   expect((screen.getByLabelText('未儲存筆記') as HTMLInputElement).value).toBe('既有課程草稿');
 });
+it('retries a 429 school catalog once and becomes ready', async () => {
+  let directoryCalls = 0;
+  fetcher.mockImplementation((url: string) => {
+    if (url === '/api/nuni/session') return Promise.resolve(response({ authenticated: false }));
+    if (url !== '/api/schools') return Promise.resolve(response({ authenticated: false }));
+    directoryCalls += 1;
+    if (directoryCalls === 1) {
+      return Promise.resolve(
+        new Response(JSON.stringify({}), {
+          status: 429,
+          headers: { 'Content-Type': 'application/json', 'Retry-After': '0' },
+        }),
+      );
+    }
+    return Promise.resolve(
+      response({ schools: [{ id: 'pu', name: '靜宜大學', status: 'open' }] }),
+    );
+  });
+  function Status() {
+    const school = useSelectedSchool();
+    return <output data-testid="catalog-status">{school.catalogStatus}</output>;
+  }
+  render(
+    <CampusProviders>
+      <Status />
+    </CampusProviders>,
+  );
+  await waitFor(() => expect(screen.getByTestId('catalog-status').textContent).toBe('ready'));
+  expect(directoryCalls).toBe(2);
+});
+
 it('uses real directory state and does not transfer an account school choice to another account', async () => {
   fetcher.mockImplementation((url: string) =>
     Promise.resolve(

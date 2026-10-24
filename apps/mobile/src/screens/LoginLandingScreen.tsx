@@ -112,6 +112,16 @@ export default function LoginLandingScreen() {
             safeNavigate(navigation, 'PersonalTimetable', term ? { term } : undefined)
           }
         />
+        <Pressable
+          testID="public-PersonalCalendar"
+          accessibilityRole="button"
+          accessibilityLabel="個人行事曆"
+          style={({ pressed }) => [s.publicButton, pressed && s.rowPressed]}
+          onPress={() => safeNavigate(navigation, 'PersonalCalendar')}
+        >
+          <Text style={s.publicTitle}>個人行事曆</Text>
+          <Text style={s.publicDetail}>新增、編輯自己的活動與考試；不必學校帳號。</Text>
+        </Pressable>
         <View style={s.panel}>
           <Text accessibilityRole="header" style={s.title}>
             Google 帳號

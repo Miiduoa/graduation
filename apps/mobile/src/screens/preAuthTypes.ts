@@ -10,6 +10,7 @@ export type PreAuthStackParamList = {
   SSOLogin: undefined;
   PersonalImport: { kind?: 'timetable' | 'grades' | 'events' } | undefined;
   PersonalTimetable: { term?: string } | undefined;
+  PersonalCalendar: undefined;
   NuniWorkspace: {
     tab?: 'courses' | 'food' | 'merchant' | 'account';
     workspaceId?: string;

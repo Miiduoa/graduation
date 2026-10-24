@@ -168,6 +168,7 @@ function CafeteriaContent({ schoolId, schoolName }: { schoolId: string; schoolNa
           <Link
             href={`/orders?schoolId=${encodeURIComponent(schoolId)}`}
             className={styles.ordersLink}
+            aria-label="我的訂單（App 餐廳訂單）"
           >
             <CampusIcon name="orders" size={17} /> 我的訂單
           </Link>

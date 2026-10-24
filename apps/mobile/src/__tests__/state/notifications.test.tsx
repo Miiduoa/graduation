@@ -22,9 +22,11 @@ jest.mock('../../services/companionEngine', () => ({
 jest.mock('firebase/firestore', () => ({
   collection: (_db: unknown, ...path: string[]) => path.join('/'),
   doc: (_db: unknown, ...path: string[]) => path.join('/'),
+  // Keep returning the collection path so existing account-fence assertions stay stable.
   query: (ref: unknown) => ref,
-  orderBy: jest.fn(),
-  limit: jest.fn(),
+  orderBy: jest.fn((...args: unknown[]) => ({ orderBy: args })),
+  limit: jest.fn((n: number) => ({ limit: n })),
+  startAfter: jest.fn((cursor: unknown) => ({ startAfter: cursor })),
   getDocs: jest.fn(),
   setDoc: jest.fn(),
   serverTimestamp: () => 'server-time',
@@ -40,8 +42,14 @@ function deferred<T>() {
   });
   return { promise, resolve, reject };
 }
-function snapshot(id: string, read = false) {
-  return { docs: [{ id, data: () => ({ title: id, read }) }] };
+function snapshot(ids: string | string[], read = false) {
+  const list = Array.isArray(ids) ? ids : [ids];
+  return {
+    docs: list.map((id) => ({
+      id,
+      data: () => ({ title: id, read }),
+    })),
+  };
 }
 type Context = ReturnType<typeof useNotifications>;
 let latest: Context;
@@ -219,4 +227,66 @@ test('failed same-account writes restore unread state and allow a successful ret
   expect(latest.notifications[0]?.read).toBe(true);
   expect(latest.unreadCount).toBe(0);
   expect(mockCommit).toHaveBeenCalledTimes(1);
+});
+
+test('paginates beyond the first 50 rows with stable cursors and dedupe', async () => {
+  const { startAfter, limit } = jest.requireMock('firebase/firestore') as {
+    startAfter: jest.Mock;
+    limit: jest.Mock;
+  };
+  const firstPage = Array.from({ length: 50 }, (_, i) => `n-${i}`);
+  const secondPage = ['n-49', 'n-50', 'n-51']; // n-49 duplicates first page edge
+  jest
+    .mocked(getDocs)
+    .mockReset()
+    .mockResolvedValueOnce(snapshot(firstPage) as never)
+    .mockResolvedValueOnce(snapshot(secondPage) as never);
+  render(tree());
+  await waitFor(() => expect(latest.notifications).toHaveLength(50));
+  expect(latest.hasMore).toBe(true);
+  expect(latest.unreadScope).toBe('loaded');
+  expect(limit).toHaveBeenCalledWith(50);
+  await act(async () => latest.loadMore());
+  expect(startAfter).toHaveBeenCalled();
+  expect(latest.notifications.map((row) => row.id)).toEqual([...firstPage, 'n-50', 'n-51']);
+  expect(latest.hasMore).toBe(false);
+  expect(latest.unreadCount).toBe(52);
+});
+
+test('mark-all only covers the loaded page and exposes loaded unread scope', async () => {
+  jest.mocked(getDocs).mockReset().mockResolvedValue(snapshot(['a', 'b']) as never);
+  render(tree());
+  await waitFor(() => expect(latest.notifications.map((row) => row.id)).toEqual(['a', 'b']));
+  expect(latest.unreadScope).toBe('loaded');
+  expect(latest.unreadCount).toBe(2);
+  await act(async () => {
+    const ok = await latest.markAllAsRead();
+    expect(ok).toBe(true);
+  });
+  expect(latest.unreadCount).toBe(0);
+  expect(mockUpdate).toHaveBeenCalledTimes(2);
+  expect(mockUpdate).toHaveBeenCalledWith('users/a/notifications/a', {
+    read: true,
+    readAt: 'server-time',
+  });
+  expect(mockUpdate).toHaveBeenCalledWith('users/a/notifications/b', {
+    read: true,
+    readAt: 'server-time',
+  });
+  expect(mockCommit).toHaveBeenCalledTimes(1);
+});
+
+test('loadMore failure surfaces retryable error without wiping loaded rows', async () => {
+  const firstPage = Array.from({ length: 50 }, (_, i) => `p-${i}`);
+  jest
+    .mocked(getDocs)
+    .mockReset()
+    .mockResolvedValueOnce(snapshot(firstPage) as never)
+    .mockRejectedValueOnce(new Error('page-2 offline'));
+  render(tree());
+  await waitFor(() => expect(latest.notifications).toHaveLength(50));
+  await act(async () => latest.loadMore());
+  expect(latest.error).toBe('page-2 offline');
+  expect(latest.notifications).toHaveLength(50);
+  expect(latest.loadingMore).toBe(false);
 });

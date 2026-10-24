@@ -7,7 +7,7 @@ import {
   type NuniWorkspace,
 } from '@campus/shared/src/nuni';
 import { COURSE_WORK_LANDING_ATTR, COURSE_WORK_MISSING_QUIZ } from '@/lib/courseWorkLanding';
-import { CourseQuizzes } from './CourseQuizzes';
+import { CourseQuizzes, quizReceiptDomId } from './CourseQuizzes';
 
 const mocks = vi.hoisted(() => ({
   request: vi.fn(),
@@ -823,4 +823,136 @@ it('lets students open reference links from quiz prompts and feedback', async ()
       .getByRole('link', { name: 'https://example.edu/feedback' })
       .getAttribute('href'),
   ).toBe('https://example.edu/feedback');
+});
+
+it('saves quiz feedback and advances only after authoritative text matches', async () => {
+  session(teacherId);
+  const peer = answer({
+    platformAccountId: otherId,
+    displayName: '陳同學',
+    answer: '第二份作答',
+    submittedAt: '2026-10-08T07:00:00.000Z',
+  });
+  mocks.request
+    .mockResolvedValueOnce({ quizzes: [quiz({ responseCount: 2 })] })
+    .mockResolvedValueOnce({ responses: [answer(), peer] })
+    .mockResolvedValueOnce(
+      answer({ teacherFeedback: '給林同學的回饋', reviewedAt: '2026-10-08T09:00:00.000Z' }),
+    );
+  render(<CourseQuizzes workspace={workspace('owner-teacher')} />);
+  fireEvent.click(await screen.findByRole('button', { name: '查看作答' }));
+  const firstRow = await waitFor(() => {
+    const node = document.getElementById(quizReceiptDomId(workspaceId, quizId, studentId));
+    expect(node).toBeTruthy();
+    return node!;
+  });
+  fireEvent.click(within(firstRow).getByText('填寫回饋'));
+  const first = within(firstRow).getByLabelText('給 林同學 的回饋');
+  fireEvent.change(first, { target: { value: '給林同學的回饋' } });
+  fireEvent.click(within(firstRow).getByRole('button', { name: '儲存回饋並查看下一份' }));
+  await screen.findByText('回饋已儲存。已移到 陳同學 的作答。');
+  expect(screen.getByText(/目前批改這一份/)).toBeTruthy();
+});
+
+it('keeps the quiz receipt visible and does not advance when replay returns different feedback', async () => {
+  session(teacherId);
+  const peer = answer({
+    platformAccountId: otherId,
+    displayName: '陳同學',
+    answer: '第二份作答',
+    submittedAt: '2026-10-08T07:00:00.000Z',
+  });
+  mocks.request
+    .mockResolvedValueOnce({ quizzes: [quiz({ responseCount: 2 })] })
+    .mockResolvedValueOnce({ responses: [answer(), peer] })
+    .mockRejectedValueOnce(new TypeError('lost response'))
+    .mockResolvedValueOnce(
+      answer({
+        teacherFeedback: '另一位老師已補充新的回饋',
+        reviewedAt: '2026-10-08T10:00:00.000Z',
+      }),
+    );
+  render(<CourseQuizzes workspace={workspace('owner-teacher')} />);
+  fireEvent.click(await screen.findByRole('button', { name: '查看作答' }));
+  const firstRow = await waitFor(() => {
+    const node = document.getElementById(quizReceiptDomId(workspaceId, quizId, studentId));
+    expect(node).toBeTruthy();
+    return node!;
+  });
+  fireEvent.click(within(firstRow).getByText('填寫回饋'));
+  const editor = within(firstRow).getByLabelText('給 林同學 的回饋') as HTMLTextAreaElement;
+  fireEvent.change(editor, { target: { value: '原本送出的回饋' } });
+  fireEvent.click(within(firstRow).getByRole('button', { name: '儲存回饋並查看下一份' }));
+  await within(firstRow).findByRole('button', { name: '確認送出結果' });
+  fireEvent.click(within(firstRow).getByRole('button', { name: '確認送出結果' }));
+  expect(
+    await within(firstRow).findByText('這份回饋已有新的內容，上方顯示目前儲存的版本。'),
+  ).toBeTruthy();
+  expect(screen.queryByText(/已移到 陳同學/)).toBeNull();
+  expect(editor.value).toBe('另一位老師已補充新的回饋');
+  expect(within(firstRow).getByText(/目前批改這一份/)).toBeTruthy();
+});
+it('scopes quiz save-and-next reveal to the activity that submitted feedback', async () => {
+  session(teacherId);
+  const peer = answer({
+    platformAccountId: otherId,
+    displayName: '陳同學',
+    answer: '第二份作答',
+    submittedAt: '2026-10-08T07:00:00.000Z',
+  });
+  const secondQuiz = quiz({
+    id: quizId2,
+    title: '另一份測驗',
+    responseCount: 2,
+  });
+  mocks.request.mockImplementation(async (path, _context, input) => {
+    if (path === listPath && !input) return { quizzes: [quiz({ responseCount: 2 }), secondQuiz] };
+    if (path.endsWith(`/quizzes/${quizId}/responses`) && !input) {
+      return { responses: [answer(), peer] };
+    }
+    if (path.endsWith(`/quizzes/${quizId2}/responses`) && !input) {
+      return {
+        responses: [
+          answer({ quizId: quizId2 }),
+          { ...peer, quizId: quizId2 },
+        ],
+      };
+    }
+    if (path.endsWith('/feedback') && String(path).includes(quizId2)) {
+      return answer({
+        quizId: quizId2,
+        teacherFeedback: '給林同學的回饋',
+        reviewedAt: '2026-10-08T09:00:00.000Z',
+      });
+    }
+    throw new Error(`Unexpected ${path}`);
+  });
+  render(<CourseQuizzes workspace={workspace('owner-teacher')} />);
+  const openButtons = await screen.findAllByRole('button', { name: '查看作答' });
+  for (const button of openButtons) fireEvent.click(button);
+  await waitFor(() =>
+    expect(
+      document.getElementById(quizReceiptDomId(workspaceId, quizId2, studentId)),
+    ).toBeTruthy(),
+  );
+  const firstPeer = document.getElementById(
+    quizReceiptDomId(workspaceId, quizId, otherId),
+  )!;
+  const secondPeer = document.getElementById(
+    quizReceiptDomId(workspaceId, quizId2, otherId),
+  )!;
+  const firstScroll = vi.fn();
+  const secondScroll = vi.fn();
+  firstPeer.scrollIntoView = firstScroll;
+  secondPeer.scrollIntoView = secondScroll;
+  const secondLin = document.getElementById(
+    quizReceiptDomId(workspaceId, quizId2, studentId),
+  )!;
+  const editor = within(secondLin).getByLabelText('給 林同學 的回饋');
+  fireEvent.click(within(secondLin).getByText('填寫回饋'));
+  fireEvent.change(editor, { target: { value: '給林同學的回饋' } });
+  fireEvent.click(within(secondLin).getByRole('button', { name: '儲存回饋並查看下一份' }));
+  await screen.findByText('回饋已儲存。已移到 陳同學 的作答。');
+  await waitFor(() => expect(secondScroll).toHaveBeenCalled());
+  expect(firstScroll).not.toHaveBeenCalled();
 });
