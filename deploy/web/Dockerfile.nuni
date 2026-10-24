@@ -8,6 +8,7 @@ FROM base AS build
 WORKDIR /build
 RUN npm install --global pnpm@10.28.2 --ignore-scripts --no-audit --no-fund
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
+COPY patches ./patches
 COPY apps/web/package.json ./apps/web/package.json
 COPY packages/shared/package.json ./packages/shared/package.json
 COPY vendor/xlsx-0.20.3.tgz ./vendor/xlsx-0.20.3.tgz

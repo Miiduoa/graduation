@@ -393,7 +393,7 @@ describe('assistant agent policy', () => {
       prefix: 'groq_bad_request ',
     });
     const fetchImpl = jest.fn(async (url) => {
-      if (String(url).includes('groq.com')) return huge.response;
+      if (new URL(String(url)).hostname === 'api.groq.com') return huge.response;
       // Non-retryable failure for Ollama fallback (avoid 5xx sleep retries).
       return mockResponse({ ok: false, status: 400, text: 'unavailable' });
     });
@@ -425,7 +425,7 @@ describe('assistant agent policy', () => {
       prefix: 'gemini_bad_request ',
     });
     const fetchImpl = jest.fn(async (url) => {
-      if (String(url).includes('generativelanguage.googleapis.com')) return huge.response;
+      if (new URL(String(url)).hostname === 'generativelanguage.googleapis.com') return huge.response;
       return mockResponse({ ok: false, status: 400, text: 'unavailable' });
     });
 

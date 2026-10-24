@@ -17,7 +17,11 @@ const {
 
 const SCRIPT = path.join(__dirname, 'dependency-security-gate.cjs');
 const REPO_EXCEPTIONS = DEFAULT_EXCEPTIONS;
-const WORK_DIR = path.join(__dirname, '..', '..');
+const FUNCTIONS_AUDIT_HIGH_FIXTURE = path.join(
+  __dirname,
+  'fixtures',
+  'functions-audit-high.json',
+);
 
 function tempDir() {
   return fs.mkdtempSync(path.join(os.tmpdir(), 'dep-sec-gate-'));
@@ -800,19 +804,21 @@ test('npm：critical 父節點不可因下游 object 較低嚴重程度而通過
 });
 
 test('真實 Functions npm 報告仍可解析；CLI 對 npm high 以 exit 1 進入政策並擋未審查', () => {
-  const functionsReport = path.join(WORK_DIR, 'audit-functions-after.json');
-  assert.ok(fs.existsSync(functionsReport), '缺少 ../audit-functions-after.json fixture');
+  assert.ok(
+    fs.existsSync(FUNCTIONS_AUDIT_HIGH_FIXTURE),
+    '缺少 scripts/fixtures/functions-audit-high.json fixture',
+  );
   const dir = tempDir();
   const exceptions = emptyExceptions(dir);
 
   const parsed = extractFindings(
-    JSON.parse(fs.readFileSync(functionsReport, 'utf8')),
+    JSON.parse(fs.readFileSync(FUNCTIONS_AUDIT_HIGH_FIXTURE, 'utf8')),
     'npm',
   );
   assert.ok(parsed.some((f) => f.package === 'zod' && f.severity === 'high'));
 
   const result = evaluate({
-    reportPath: functionsReport,
+    reportPath: FUNCTIONS_AUDIT_HIGH_FIXTURE,
     format: 'npm',
     scope: 'functions-prod',
     exceptionsPath: exceptions,
