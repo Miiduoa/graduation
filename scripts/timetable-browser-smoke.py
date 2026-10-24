@@ -60,17 +60,33 @@ async def main():
             await expect(nthu_timetable.get_by_role('status')).to_contain_text('尚未取得這所學校的節次時間')
             await expect(nthu_timetable.get_by_text('星期三 · 第 2–3 節（時間未確認） · 測試教室', exact=True)).to_be_visible()
             assert await nthu_timetable.get_by_role('table').count() == 0, 'NTHU borrowed another school\'s period grid'
+            assert await page.get_by_text('08:10').count() == 0, 'Unsupported school must not reuse the PU clock'
+            assert await page.get_by_role('button', name='格子', exact=True).count() == 0
             assert await page.get_by_role('button', name='移動課程', exact=True).count() == 0, 'Unverified NTHU periods allowed course movement'
+            assert await page.get_by_role('button', name=re.compile(r'^編輯 ')).count() == 0
             assert await page.get_by_role('button', name='新增課程', exact=True).count() == 0, 'Unverified NTHU periods allowed grid editing'
             assert await page.get_by_text('資料庫管理', exact=True).count() == 0, 'PU courses leaked into NTHU'
+            assert await page.get_by_role('button', name='今天空堂', exact=True).count() == 0
+            assert await page.get_by_role('button', name='排讀書時間', exact=True).count() == 0
+            await page.screenshot(path=str(OUT / 'nthu-scoped.png'), full_page=True, animations='disabled')
             await page.locator('header summary[aria-label^="切換校園："]').click()
             await page.get_by_role('combobox', name='瀏覽校園').select_option('')
             await expect(page.get_by_role('status').filter(has_text='請先選擇一所學校')).to_be_visible()
+            assert await page.get_by_text('清大測試課程', exact=True).count() == 0, 'NTHU content leaked into campus=all'
+            assert await page.get_by_text('資料庫管理', exact=True).count() == 0, 'PU content leaked into campus=all'
             assert await page.get_by_role('button', name='移動課程', exact=True).count() == 0, 'Private timetable leaked into campus=all'
+            assert await page.get_by_role('button', name='格子', exact=True).count() == 0
+            assert await page.get_by_role('button', name=re.compile(r'^編輯 ')).count() == 0
+            assert await page.get_by_role('button', name='新增課程', exact=True).count() == 0
+            assert await page.get_by_role('button', name='今天空堂', exact=True).count() == 0
+            assert await page.get_by_role('button', name='排讀書時間', exact=True).count() == 0
             await page.locator('header summary[aria-label^="切換校園："]').click()
             await page.get_by_role('combobox', name='瀏覽校園').select_option('pu')
+            await expect(page.get_by_role('button', name='移動課程', exact=True)).to_be_visible()
+            await expect(page.get_by_role('button', name='格子', exact=True)).to_be_visible()
             await expect(page.get_by_role('button', name=re.compile(r'^編輯 資料庫管理')).first).to_be_visible()
             assert await page.get_by_text('清大測試課程', exact=True).count() == 0, 'NTHU courses leaked into PU'
+            assert await page.get_by_role('button', name=re.compile(r'^編輯 清大測試課程')).count() == 0, 'NTHU courses leaked into PU'
             legacy = await page.evaluate('JSON.parse(localStorage.getItem("campus-one-personal-timetable:local"))')
             nthu = await page.evaluate('JSON.parse(localStorage.getItem("campus-one-personal-timetable:local:nthu"))')
             assert legacy['schoolId'] == 'pu' and legacy['courses'][0]['id'] == 'browser-database'
