@@ -192,17 +192,32 @@ export async function handlePlatformSocial(request: NextRequest, segments: strin
   }
 }
 
-export async function schoolDirectory(request: NextRequest) {
-  try {
-    query(request, {});
-    const value = nuniRecord(
-      await fetchJson(`${apiOrigin()}/v1/auth/schools/directory`, {
-        headers: { Accept: 'application/json' },
-      }),
-    );
-    if (!Array.isArray(value.schools) || value.schools.length > 500)
-      throw new NuniError(502, 'INVALID_RESPONSE');
-    const schools = value.schools.map((raw) => {
+const SCHOOL_DIRECTORY_FRESH_MS = 60_000;
+const SCHOOL_DIRECTORY_STALE_MS = 10 * 60_000;
+type DirectorySchool = { id: string; name: string; status: unknown };
+type DirectoryPayload = { schools: DirectorySchool[] };
+let directoryCache: { schools: DirectorySchool[]; at: number } | null = null;
+let directoryInflight: Promise<DirectoryPayload> | null = null;
+
+export function resetSchoolDirectoryCache() {
+  directoryCache = null;
+  directoryInflight = null;
+}
+
+function isDirectoryUpstreamFailure(error: unknown) {
+  return error instanceof NuniError && (error.status === 429 || error.status >= 500);
+}
+
+async function readSchoolDirectory(): Promise<DirectoryPayload> {
+  const value = nuniRecord(
+    await fetchJson(`${apiOrigin()}/v1/auth/schools/directory`, {
+      headers: { Accept: 'application/json' },
+    }),
+  );
+  if (!Array.isArray(value.schools) || value.schools.length > 500)
+    throw new NuniError(502, 'INVALID_RESPONSE');
+  return {
+    schools: value.schools.map((raw) => {
       const school = nuniRecord(raw);
       if (
         typeof school.tenantId !== 'string' ||
@@ -214,8 +229,44 @@ export async function schoolDirectory(request: NextRequest) {
       )
         throw new NuniError(502, 'INVALID_RESPONSE');
       return { id: school.tenantId, name: school.displayName, status: school.status };
+    }),
+  };
+}
+
+async function pullSchoolDirectory(): Promise<DirectoryPayload> {
+  try {
+    const payload = await readSchoolDirectory();
+    directoryCache = { schools: payload.schools, at: Date.now() };
+    return payload;
+  } catch (error) {
+    if (
+      directoryCache &&
+      Date.now() - directoryCache.at < SCHOOL_DIRECTORY_STALE_MS &&
+      isDirectoryUpstreamFailure(error)
+    ) {
+      return { schools: directoryCache.schools };
+    }
+    throw error;
+  }
+}
+
+async function loadSchoolDirectory(): Promise<DirectoryPayload> {
+  const cached = directoryCache;
+  if (cached && Date.now() - cached.at < SCHOOL_DIRECTORY_FRESH_MS) {
+    return { schools: cached.schools };
+  }
+  if (!directoryInflight) {
+    directoryInflight = pullSchoolDirectory().finally(() => {
+      directoryInflight = null;
     });
-    return jsonResponse({ schools });
+  }
+  return directoryInflight;
+}
+
+export async function schoolDirectory(request: NextRequest) {
+  try {
+    query(request, {});
+    return jsonResponse(await loadSchoolDirectory());
   } catch (error) {
     return errorResponse(error);
   }
