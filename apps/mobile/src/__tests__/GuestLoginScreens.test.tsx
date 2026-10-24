@@ -449,3 +449,20 @@ test('public landing shows the current browsing campus and opens its library wit
   expect(safeNavigate).toHaveBeenCalledWith(mockNavigation, 'Library');
   expect(signInWithStudentId).not.toHaveBeenCalled();
 });
+
+test('public landing exposes school-scoped CourseCatalog Health Dormitory Career entries', () => {
+  const view = render(<LoginLandingScreen />);
+  expect(view.getByText(/查看靜宜大學課綱或校方課程查詢入口/)).toBeTruthy();
+  fireEvent.press(view.getByTestId('public-CourseCatalog'));
+  expect(safeNavigate).toHaveBeenCalledWith(mockNavigation, 'CourseCatalog');
+  fireEvent.press(view.getByTestId('public-Health'));
+  expect(safeNavigate).toHaveBeenCalledWith(mockNavigation, 'Health');
+  fireEvent.press(view.getByTestId('public-Dormitory'));
+  expect(safeNavigate).toHaveBeenCalledWith(mockNavigation, 'Dormitory');
+  fireEvent.press(view.getByTestId('public-Career'));
+  expect(safeNavigate).toHaveBeenCalledWith(mockNavigation, 'Career');
+  mockSchool = { id: 'ncku', name: '國立成功大學', shortName: '成大' };
+  view.rerender(<LoginLandingScreen />);
+  expect(view.getByText(/前往國立成功大學住宿相關校方入口/)).toBeTruthy();
+  expect(signInWithStudentId).not.toHaveBeenCalled();
+});

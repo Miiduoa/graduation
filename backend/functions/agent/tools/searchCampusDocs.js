@@ -27,7 +27,7 @@ async function execute(ctx, rawInput) {
   }
 
   const { answerWithServerWebSearch } = require('../../assistantAgent');
-  const webAnswer = await answerWithServerWebSearch(query).catch(() => null);
+  const webAnswer = await answerWithServerWebSearch(query, { schoolId: ctx.schoolId }).catch(() => null);
   if (!webAnswer || !webAnswer.content) {
     return { campusChunks: [], webFallback: null };
   }

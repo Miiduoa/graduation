@@ -7,6 +7,10 @@ export type PreAuthStackParamList = {
   BusSchedule: undefined;
   公告總覽: undefined;
   公告詳情: { id: string };
+  CourseCatalog: undefined;
+  Health: undefined;
+  Dormitory: undefined;
+  Career: undefined;
   SSOLogin: undefined;
   PersonalImport: { kind?: 'timetable' | 'grades' | 'events' } | undefined;
   PersonalTimetable: { term?: string } | undefined;

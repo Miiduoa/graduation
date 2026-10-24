@@ -7,6 +7,8 @@ export async function askCampusAssistant(input: {
   scope: CampusAssistantScope;
   messages: CampusAssistantMessage[];
   isCurrent: () => boolean;
+  /** Display name for selected school — never infer authorization from browsing alone. */
+  schoolName?: string | null;
 }): Promise<{ content: string; hasActions: boolean }> {
   const check = () => {
     if (
@@ -32,10 +34,13 @@ export async function askCampusAssistant(input: {
     unknown,
     { content?: string; error?: unknown; actions?: unknown[]; run?: { status?: string } }
   >(getFunctionsInstance(), 'askCampusAssistant');
+  const schoolName =
+    typeof input.schoolName === 'string' ? input.schoolName.trim().slice(0, 160) : '';
   const result = await callable({
     messages,
     context: {
       schoolId: input.scope.schoolId,
+      ...(schoolName ? { schoolName } : {}),
       screen: 'campus-assistant',
       locale: 'zh-TW',
       timezone: 'Asia/Taipei',
