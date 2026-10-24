@@ -229,10 +229,27 @@ function FoodLocations({
   );
   const locations = useFoodRead(load);
   const [selected, setSelected] = useFoodDraft(cache, `food:${tenantId}:location`, '');
+  if (selected) {
+    return (
+      <FoodMenu
+        key={`${tenantId}:${selected}`}
+        client={client}
+        cache={cache}
+        accountId={accountId}
+        tenantId={tenantId}
+        locationId={selected}
+        onBack={() => setSelected('')}
+        onOrder={onOrder}
+      />
+    );
+  }
   return (
     <div className={styles.stack}>
       <div className={styles.bar}>
-        <h2>選一家店</h2>
+        <div>
+          <h2>選一家店</h2>
+          <p className={styles.muted}>先選餐點，再確認取餐時間與金額。</p>
+        </div>
         <Button disabled={locations.loading} onClick={() => void locations.reload()}>
           更新店家
         </Button>
@@ -244,7 +261,7 @@ function FoodLocations({
           {!locations.data.locations.length && <p>目前沒有可點餐的門市。</p>}
           <div className={styles.grid}>
             {locations.data.locations.map((location) => (
-              <section className={styles.panel} key={location.id}>
+              <section className={`${styles.panel} ${styles.locationCard}`} key={location.id}>
                 <h3>{location.name}</h3>
                 <p>
                   {[
@@ -265,8 +282,13 @@ function FoodLocations({
                 )}
                 {location.merchantMode === 'full' &&
                 location.allowedActions.includes('view-menu') ? (
-                  <Button onClick={() => setSelected(location.id)}>
-                    查看菜單：{location.name}
+                  <Button
+                    variant="primary"
+                    fullWidth
+                    aria-label={`查看菜單：${location.name}`}
+                    onClick={() => setSelected(location.id)}
+                  >
+                    查看菜單
                   </Button>
                 ) : (
                   <p>目前提供店家資訊，尚未開放站內點餐。</p>
@@ -286,17 +308,6 @@ function FoodLocations({
             )}
           </div>
         </>
-      )}
-      {selected && (
-        <FoodMenu
-          key={`${tenantId}:${selected}`}
-          client={client}
-          cache={cache}
-          accountId={accountId}
-          tenantId={tenantId}
-          locationId={selected}
-          onOrder={onOrder}
-        />
       )}
     </div>
   );
