@@ -53,6 +53,12 @@ import {
 import type { TCCourse, TCActivity, TCModule, TCAttendance } from '../../services/tronClassClient';
 import { getCloudFunctionUrl, getFirebaseAuthHeaders } from '../../services/cloudFunctions';
 import { getAuthInstance } from '../../firebase';
+import {
+  PU_GRADE_POINT_POLICY,
+  convertPuPercentScoreToGradePoint,
+} from './puGradePointPolicy';
+
+export { PU_GRADE_POINT_POLICY, convertPuPercentScoreToGradePoint };
 
 function toValidDate(value: string | null | undefined): Date | null {
   if (!value) return null;
@@ -64,18 +70,12 @@ function isExpectedWebBackendSessionMiss(error: unknown): boolean {
   return error instanceof Error && error.message.includes('Web 版需要後端 TronClass session');
 }
 
-/** 靜宜百分制 → 四點制（僅供校務成績列本身的 gradePoint 欄位；學分頁不另推演換算）。 */
+/**
+ * 靜宜百分制 → 4.3 制績點（相容既有匯出；無效分數回傳 0，mapper 請改用 convertPuPercentScoreToGradePoint）。
+ * 對照表見 puGradePointPolicy（學則 PU-101B0-B-0101-2026020901）。
+ */
 export function puScoreToGradePoint(score: number): number {
-  if (score >= 90) return 4.0;
-  if (score >= 85) return 3.7;
-  if (score >= 80) return 3.3;
-  if (score >= 77) return 3.0;
-  if (score >= 73) return 2.7;
-  if (score >= 70) return 2.3;
-  if (score >= 67) return 2.0;
-  if (score >= 63) return 1.7;
-  if (score >= 60) return 1.0;
-  return 0.0;
+  return convertPuPercentScoreToGradePoint(score) ?? 0;
 }
 
 type PuGradeItem = {
@@ -108,13 +108,18 @@ export function mapPuOfficialGrades(
     const parsedScore = typeof rawScore === 'number' ? rawScore
       : typeof rawScore === 'string' && rawScore !== '' ? Number(rawScore) : NaN;
     const score = Number.isFinite(parsedScore) ? parsedScore : undefined;
+    const converted =
+      score === undefined ? null : convertPuPercentScoreToGradePoint(score);
     return {
       id: `pu-grade-${item.semester}-${i}`,
       courseId: `pu-crs-${item.semester}-${i}`,
       courseName: item.courseName,
       credits: item.credits,
       grade: score,
-      gradePoint: score === undefined ? undefined : puScoreToGradePoint(score),
+      gradePoint: converted ?? undefined,
+      gradePointScale:
+        converted === null ? undefined : PU_GRADE_POINT_POLICY.gradePointScale,
+      gradePointProvenance: converted === null ? undefined : 'local-reference',
       score,
       letterGrade: score === undefined && typeof rawScore === 'string' ? rawScore : undefined,
       semester: item.semester,

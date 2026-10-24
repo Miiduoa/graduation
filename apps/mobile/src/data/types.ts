@@ -372,6 +372,14 @@ export type Grade = {
   gradePoints?: number;
   grade?: number;
   gradePoint?: number;
+  /**
+   * 績點分母尺度（例如靜宜本機換算為 4.3）。缺省表示來源未宣告尺度，UI 不得臆測。
+   */
+  gradePointScale?: number;
+  /**
+   * 績點出處：local-reference＝依校方公開對照表本機換算；source-provided＝來源列直接提供。
+   */
+  gradePointProvenance?: 'local-reference' | 'source-provided';
   score?: number;
   midtermScore?: number;
   finalScore?: number;

@@ -230,6 +230,7 @@ test('reference GPA uses validated rows only; mixed school / missing points / ze
     totalCredits: 2,
     totalPoints: 6,
     retakeCollapsed: 0,
+    gradePointScale: null,
   });
 
   expect(computeReferenceGpa([grade({ gradePoint: undefined, gradePoints: undefined })])).toBeNull();
@@ -238,6 +239,7 @@ test('reference GPA uses validated rows only; mixed school / missing points / ze
     totalCredits: 2,
     totalPoints: 0,
     retakeCollapsed: 0,
+    gradePointScale: null,
   });
   expect(computeReferenceGpa([grade({ gradePoint: 4, credits: 0 })])).toBeNull();
 });
@@ -263,6 +265,10 @@ test('PU adapter-shaped rows without publishedAt still render nonempty', async (
   await expandFirstSemester(view);
   expect(view.getByText('E校園微積分')).toBeTruthy();
   expect(view.getByText(/本頁參考 GPA/)).toBeTruthy();
+  expect(view.getByText('4.00')).toBeTruthy();
+  expect(view.getByText('/ 4.30')).toBeTruthy();
+  expect(view.getByLabelText('開啟靜宜大學學則績點對照')).toBeTruthy();
+  expect(view.queryByText('/ 4.00')).toBeNull();
   expect(mockGetGPA).not.toHaveBeenCalled();
 });
 
@@ -302,10 +308,47 @@ test('reference GPA label uses page records; ignores unscoped getGPA bait', asyn
   const view = render(<CreditAuditScreen />);
   await view.findByText(/本頁參考 GPA/);
   await view.findByText('2.00');
-  expect(view.getByText(/依本頁已接受修課紀錄/)).toBeTruthy();
-  expect(view.getByText(/非正式累計 GPA/)).toBeTruthy();
+  expect(view.getByText(/依本頁已接受列加權/)).toBeTruthy();
+  expect(view.getByText(/非正式累計/)).toBeTruthy();
+  // 無已知一致尺度 → 不注入 /4.00
+  expect(view.queryByText('/ 4.00')).toBeNull();
   expect(view.queryByText('9.90')).toBeNull();
+  expect(view.queryByLabelText('開啟靜宜大學學則績點對照')).toBeNull();
   expect(mockGetGPA).not.toHaveBeenCalled();
+});
+
+test('GPA refuses to blend different or partly unknown point scales', () => {
+  const known = grade({ id: 'known', gradePoint: 4, gradePointScale: 4.3 });
+  expect(computeReferenceGpa([
+    known, grade({ id: 'other-scale', courseId: 'other', gradePoint: 4, gradePointScale: 4 }),
+  ])).toBeNull();
+  expect(computeReferenceGpa([
+    known, grade({ id: 'unknown-scale', courseId: 'other', gradePoint: 4 }),
+  ])).toBeNull();
+});
+
+test('Pass plus numeric zero yields GPA 0 from numeric credits only; retakes count both in GPA', async () => {
+  const rows = mapPuOfficialGrades(
+    [
+      { semester: '1121', courseName: '程式設計', credits: 3, score: 0 },
+      { semester: '1131', courseName: '程式設計', credits: 3, score: 0 },
+      { semester: '1131', courseName: '專題實作', credits: 2, score: 'Pass' },
+    ],
+    { studentId: 'user-a', schoolId: 'tw-pu', gradeSource: 'school-official' },
+  );
+  expect(computeReferenceGpa(rows)).toEqual({
+    gpa: 0,
+    totalCredits: 6,
+    totalPoints: 0,
+    retakeCollapsed: 1,
+    gradePointScale: 4.3,
+  });
+  mockListGrades.mockResolvedValue(rows);
+  const view = render(<CreditAuditScreen />);
+  await view.findByText('0.00');
+  expect(view.getByText('/ 4.30')).toBeTruthy();
+  expect(view.getByText(/符號通過／未通過不納入平均/)).toBeTruthy();
+  expect(view.getByText(/重複修課合併 1 筆/)).toBeTruthy();
 });
 
 test('late school response A→B→A never restores B records or clears newer busy', async () => {
@@ -375,6 +418,8 @@ test('other school shows scoped totals without PU thresholds or graduation met c
   expect(view.queryByText('切換系所')).toBeNull();
   expect(view.queryByText(/參考已達標|畢業門檻 128/)).toBeNull();
   expect(view.queryByText(/靜宜大學（一般系所）/)).toBeNull();
+  expect(view.queryByText('/ 4.00')).toBeNull();
+  expect(view.queryByText(/靜宜績點依學則/)).toBeNull();
   await expandFirstSemester(view);
   expect(view.getByText('成大微積分')).toBeTruthy();
 });
