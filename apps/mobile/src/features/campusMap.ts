@@ -2,6 +2,8 @@ import { collection, getDocsFromServer, query, where } from 'firebase/firestore'
 import { getDb, isFirebaseMockMode } from '../firebase';
 import type { CampusCoordinate } from '@campus/shared/src/campusGeo';
 import { parseCampusMapRecord } from '@campus/shared/src/campusMapRecords';
+import type { CampusMapPlaceLike } from '@campus/shared/src/providenceCampus';
+import { withProvidenceCampusPlaces } from '@campus/shared/src/providenceCampus';
 
 export type CampusMapPlace = {
   id: string;
@@ -14,7 +16,60 @@ export type CampusMapPlace = {
   floor?: string;
   facilities: string[];
 };
-export async function loadCampusMapPlaces(schoolId: string): Promise<CampusMapPlace[]> {
+
+/** 地點來源最多等這麼久；連線卡住時不能讓畫面永遠停在「正在載入」。 */
+export const MAP_SOURCE_TIMEOUT_MS = 8000;
+
+export class MapSourceTimeoutError extends Error {
+  constructor() {
+    super('Map source timed out');
+    this.name = 'MapSourceTimeoutError';
+  }
+}
+
+/**
+ * 對整段讀取（含 canonical → migration）設總時限。
+ * 逾時後晚到的 fulfill / reject 不會變成未處理 rejection，也不會再改寫結果。
+ */
+export function withTimeout<T>(work: Promise<T>, timeoutMs: number): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => reject(new MapSourceTimeoutError()), timeoutMs);
+    work.then(
+      (value) => {
+        clearTimeout(timer);
+        resolve(value);
+      },
+      (error: unknown) => {
+        clearTimeout(timer);
+        reject(error);
+      },
+    );
+  });
+}
+
+export function toCampusMapPlaces(locations: readonly CampusMapPlaceLike[]): CampusMapPlace[] {
+  return locations.map((place) => ({
+    id: place.id,
+    name: place.name,
+    category: place.category,
+    description: place.description,
+    lat: place.lat,
+    lng: place.lng,
+    building: place.building,
+    floor: place.floor,
+    facilities: place.facilities ? [...place.facilities] : [],
+  }));
+}
+
+/** 靜宜有內建目錄時先顯示／失敗時保留；其他學校原樣。 */
+export function mergeCampusMapPlaces(
+  schoolId: string,
+  locations: readonly CampusMapPlace[],
+): CampusMapPlace[] {
+  return toCampusMapPlaces(withProvidenceCampusPlaces(schoolId, locations));
+}
+
+async function readCampusMapPlaces(schoolId: string): Promise<CampusMapPlace[]> {
   if (!schoolId || schoolId.includes('/') || isFirebaseMockMode())
     throw new Error('Map source unavailable');
   const db = getDb();
@@ -30,6 +85,13 @@ export async function loadCampusMapPlaces(schoolId: string): Promise<CampusMapPl
       return place ? [place] : [];
     })
     .sort((left, right) => left.name.localeCompare(right.name, 'zh-Hant'));
+}
+
+export async function loadCampusMapPlaces(
+  schoolId: string,
+  { timeoutMs = MAP_SOURCE_TIMEOUT_MS }: { timeoutMs?: number } = {},
+): Promise<CampusMapPlace[]> {
+  return withTimeout(readCampusMapPlaces(schoolId), timeoutMs);
 }
 
 export type MapCoordinate = CampusCoordinate;

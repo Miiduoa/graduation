@@ -101,3 +101,4 @@ export * from './wakeAwareRequest';
 export * from './foodPageCopy';
 export * from './signedInSocialReads';
 export * from './imports';
+export * from './providenceCampus';

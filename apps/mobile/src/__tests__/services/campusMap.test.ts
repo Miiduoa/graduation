@@ -4,7 +4,18 @@ import {
   loadCampusMapPlaces,
   buildWalkingDirectionsUrl,
   buildCampusMapHtml,
+  MapSourceTimeoutError,
+  MAP_SOURCE_TIMEOUT_MS,
+  mergeCampusMapPlaces,
+  withTimeout,
 } from '../../features/campusMap';
+import {
+  PROVIDENCE_BUS_STOPS,
+  PROVIDENCE_CAMPUS_PLACES,
+  providencePlaceSourceUrl,
+  isProvidencePendingVerification,
+  locationMatchesSearch,
+} from '@campus/shared/src/providenceCampus';
 jest.mock('../../firebase', () => ({
   getDb: () => 'db',
   isFirebaseMockMode: jest.fn(() => false),
@@ -22,10 +33,23 @@ function snapshot(items: Array<Record<string, unknown>>) {
     docs: items.map((data, index) => ({ id: `place-${index}`, data: () => data })),
   } as Awaited<ReturnType<typeof getDocsFromServer>>;
 }
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  let reject!: (error: unknown) => void;
+  const promise = new Promise<T>((done, fail) => {
+    resolve = done;
+    reject = fail;
+  });
+  return { resolve, reject, promise };
+}
 beforeEach(() => {
   jest.clearAllMocks();
+  jest.useRealTimers();
   jest.mocked(isFirebaseMockMode).mockReturnValue(false);
   jest.mocked(getDocsFromServer).mockResolvedValue(snapshot([row]));
+});
+afterEach(() => {
+  jest.useRealTimers();
 });
 test('uses authoritative school data and maps only source-supplied details', async () => {
   const result = await loadCampusMapPlaces('pu');
@@ -149,4 +173,113 @@ test('hides historical demo POIs without hiding legitimate published places', as
   jest.mocked(getDocsFromServer).mockResolvedValueOnce({ empty: false, docs } as never);
   const places = await loadCampusMapPlaces('tw-nchu');
   expect(places.map((place) => place.name)).toEqual(['學校提供的校舍']);
+});
+
+test('times out a hung canonical-plus-migration read without unhandled rejection', async () => {
+  jest.useFakeTimers();
+  const hang = deferred<ReturnType<typeof snapshot>>();
+  jest.mocked(getDocsFromServer).mockReturnValueOnce(hang.promise as never);
+  const pending = loadCampusMapPlaces('pu', { timeoutMs: MAP_SOURCE_TIMEOUT_MS });
+  const expectation = expect(pending).rejects.toBeInstanceOf(MapSourceTimeoutError);
+  await jest.advanceTimersByTimeAsync(MAP_SOURCE_TIMEOUT_MS);
+  await expectation;
+  hang.resolve(snapshot([row]));
+  await Promise.resolve();
+});
+
+test('withTimeout clears the timer on success and still surfaces real failures', async () => {
+  await expect(withTimeout(Promise.resolve(['ok']), 1000)).resolves.toEqual(['ok']);
+  await expect(withTimeout(Promise.reject(new Error('denied')), 1000)).rejects.toThrow('denied');
+});
+
+test('confirmed empty Providence source merges bundled buildings and bus stops', () => {
+  const merged = mergeCampusMapPlaces('pu', []);
+  expect(merged.some((place) => place.name === '主顧樓')).toBe(true);
+  expect(merged.some((place) => place.id === 'pu-library')).toBe(true);
+  expect(merged.filter((place) => place.category === '公車站')).toHaveLength(PROVIDENCE_BUS_STOPS.length);
+});
+
+test('keeps nonempty server records authoritative and only fills missing bus stops', () => {
+  const server = [
+    {
+      id: 'library',
+      name: '蓋夏圖書館',
+      category: '圖書館',
+      description: '',
+      lat: 24.226282,
+      lng: 120.581377,
+      facilities: [],
+    },
+  ];
+  const merged = mergeCampusMapPlaces('pu', server);
+  expect(merged.filter((place) => place.name === '蓋夏圖書館')).toEqual(server);
+  expect(merged.some((place) => place.name === '主顧樓')).toBe(false);
+  expect(merged.some((place) => place.category === '公車站')).toBe(true);
+});
+
+test('never lends Providence places to another school', () => {
+  expect(mergeCampusMapPlaces('nthu', [])).toEqual([]);
+  expect(
+    mergeCampusMapPlaces('nthu', [
+      {
+        id: 'a',
+        name: '清華一館',
+        category: '教學',
+        description: '',
+        lat: 24.79,
+        lng: 120.99,
+        facilities: [],
+      },
+    ]),
+  ).toHaveLength(1);
+});
+
+test('colliding ids do not inherit bundled provenance or pending labels', () => {
+  const colliding = {
+    id: 'pu-library',
+    name: '別校圖書館',
+    category: '圖書館',
+    description: '',
+    lat: 25.01,
+    lng: 121.54,
+    facilities: [] as string[],
+  };
+  expect(providencePlaceSourceUrl('pu', colliding)).toBeNull();
+  expect(isProvidencePendingVerification('pu', colliding)).toBe(false);
+  const library = PROVIDENCE_CAMPUS_PLACES.find((place) => place.id === 'pu-library')!;
+  expect(providencePlaceSourceUrl('pu', library)).toMatch(/^https:\/\//);
+  expect(providencePlaceSourceUrl('nthu', library)).toBeNull();
+  expect(isProvidencePendingVerification('nthu', library)).toBe(false);
+});
+
+test('keeps unique bus ids and canonical server coordinates on colliding stop ids', () => {
+  const server = [
+    {
+      id: 'pu-bus-main-a',
+      name: 'renamed',
+      category: '公車站',
+      description: 'server',
+      lat: 24.3,
+      lng: 120.6,
+      facilities: [] as string[],
+    },
+  ];
+  const merged = mergeCampusMapPlaces('pu', server);
+  const matches = merged.filter((place) => place.id === 'pu-bus-main-a');
+  expect(matches).toHaveLength(1);
+  expect(matches[0]).toMatchObject({ name: 'renamed', lat: 24.3, lng: 120.6 });
+  expect(new Set(merged.map((place) => place.id)).size).toBe(merged.length);
+});
+
+test('static facilities search only hits cross-checked buildings', () => {
+  const byTerm = (term: string) =>
+    PROVIDENCE_CAMPUS_PLACES.filter((place) => locationMatchesSearch(place, term)).map(
+      (place) => place.id,
+    );
+  expect(byTerm('影印').sort()).toEqual(['pu-library', 'pu-zhishan']);
+  expect(byTerm('宿舍').sort()).toEqual(['pu-sigao', 'pu-xijia']);
+  expect(byTerm('廁所')).toEqual([]);
+  expect(
+    PROVIDENCE_CAMPUS_PLACES.some((place) => place.facilities?.includes('廁所')),
+  ).toBe(false);
 });

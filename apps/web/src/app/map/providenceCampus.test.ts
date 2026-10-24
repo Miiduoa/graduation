@@ -30,7 +30,7 @@ it('keeps every Providence place inside the published campus bounds area', () =>
     expect(place.lat).toBeLessThan(24.235);
     expect(place.lng).toBeGreaterThan(120.57);
     expect(place.lng).toBeLessThan(120.59);
-    expect(providencePlaceSourceUrl(place)).toMatch(/^https:\/\//);
+    expect(providencePlaceSourceUrl('pu', place)).toMatch(/^https:\/\//);
   }
   expect(PROVIDENCE_CAMPUS_CENTER.lat).toBeGreaterThan(PROVIDENCE_CAMPUS_BOUNDS.south);
   expect(PROVIDENCE_CAMPUS_CENTER.lat).toBeLessThan(PROVIDENCE_CAMPUS_BOUNDS.north);
@@ -57,7 +57,12 @@ it('carries audited verification states, transit codes and no unverified ATM', (
       (place) => place.id,
     ),
   ).toEqual(['pu-parking-p1', 'pu-parking-p2', 'pu-parking-moto', 'pu-gate-osm']);
-  expect(isProvidencePendingVerification(PROVIDENCE_CAMPUS_PLACES.find((place) => place.id === 'pu-gate-osm')!)).toBe(true);
+  expect(
+    isProvidencePendingVerification(
+      'pu',
+      PROVIDENCE_CAMPUS_PLACES.find((place) => place.id === 'pu-gate-osm')!,
+    ),
+  ).toBe(true);
   for (const stop of PROVIDENCE_BUS_STOPS) {
     expect(stop.transitStopIds?.length).toBeGreaterThan(0);
     for (const id of stop.transitStopIds!) expect(id).toMatch(/^TCOD_[A-Za-z0-9_-]+$/);
@@ -71,14 +76,20 @@ it('carries audited verification states, transit codes and no unverified ATM', (
   expect(walkingEstimateLabel(-1)).toBe('');
 });
 
-it('only matches dorm, restroom and print searches to cross-checked buildings', () => {
+it('matches dorm and print searches without claiming verified public toilets', () => {
   const byTerm = (term: string) =>
     PROVIDENCE_CAMPUS_PLACES.filter((place) => locationMatchesSearch(place, term)).map(
       (place) => place.id,
     );
   expect(byTerm('宿舍').sort()).toEqual(['pu-sigao', 'pu-xijia']);
-  expect(byTerm('廁所').sort()).toEqual(['pu-sigao', 'pu-xijia']);
+  expect(byTerm('廁所')).toEqual([]);
   expect(byTerm('影印').sort()).toEqual(['pu-library', 'pu-zhishan']);
+  for (const dormId of ['pu-xijia', 'pu-sigao'] as const) {
+    const dorm = PROVIDENCE_CAMPUS_PLACES.find((place) => place.id === dormId)!;
+    expect(dorm.facilities?.includes('廁所')).toBe(false);
+    expect(dorm.description).toMatch(/僅供住宿生/);
+    expect(dorm.description).toMatch(/訪客是否可使用尚未核實/);
+  }
   expect(PROVIDENCE_CAMPUS_SOURCE.dormXijiaUrl).toMatch(/^https:\/\/osadorm\.pu\.edu\.tw\//);
   expect(PROVIDENCE_CAMPUS_SOURCE.libraryPrintUrl).toMatch(/^https:\/\/b028\.pu\.edu\.tw\//);
 });
@@ -99,7 +110,61 @@ it('keeps Firestore places authoritative and only adds missing bus stops', () =>
   expect(merged.some((place) => place.name === '主顧樓')).toBe(false);
 });
 
+it('keeps unique bus ids and the canonical server stop when a bundled id is reused', () => {
+  const serverStop: MapLocation = {
+    id: 'pu-bus-main-a',
+    name: 'renamed',
+    category: '公車站',
+    description: 'server canonical',
+    lat: 24.3,
+    lng: 120.6,
+  };
+  const merged = withProvidenceCampusPlaces('pu', [serverStop]);
+  const matches = merged.filter((place) => place.id === 'pu-bus-main-a');
+  expect(matches).toHaveLength(1);
+  expect(matches[0]).toMatchObject({
+    name: 'renamed',
+    lat: 24.3,
+    lng: 120.6,
+    description: 'server canonical',
+  });
+  expect(new Set(merged.map((place) => place.id)).size).toBe(merged.length);
+});
+
 it('never lends Providence places or stops to another school', () => {
   expect(withProvidenceCampusPlaces('nthu', [])).toEqual([]);
   expect(withProvidenceCampusPlaces('nthu', [firestoreLibrary])).toEqual([firestoreLibrary]);
+});
+
+it('does not attach bundled provenance to a colliding id with different content', () => {
+  const colliding: MapLocation = {
+    id: 'pu-library',
+    name: '別校同名館舍',
+    category: '圖書館',
+    description: '',
+    lat: 25.017,
+    lng: 121.54,
+  };
+  expect(providencePlaceSourceUrl('pu', colliding)).toBeNull();
+  expect(isProvidencePendingVerification('pu', colliding)).toBe(false);
+  const parkingCollision: MapLocation = {
+    id: 'pu-parking-p1',
+    name: 'P1 停車場',
+    category: '停車',
+    description: '校方改過的說明',
+    lat: 24.23,
+    lng: 120.59,
+  };
+  expect(isProvidencePendingVerification('pu', parkingCollision)).toBe(false);
+  expect(providencePlaceSourceUrl('pu', parkingCollision)).toBeNull();
+});
+
+it('attaches provenance only for Providence when id, name and coordinates match', () => {
+  const library = PROVIDENCE_CAMPUS_PLACES.find((place) => place.id === 'pu-library')!;
+  expect(providencePlaceSourceUrl('pu', library)).toBe(library.sourceUrl);
+  expect(isProvidencePendingVerification('pu', library)).toBe(false);
+  const gate = PROVIDENCE_CAMPUS_PLACES.find((place) => place.id === 'pu-gate-osm')!;
+  expect(isProvidencePendingVerification('pu', gate)).toBe(true);
+  expect(providencePlaceSourceUrl('nthu', library)).toBeNull();
+  expect(isProvidencePendingVerification('nthu', gate)).toBe(false);
 });

@@ -36,6 +36,7 @@ it('returns only verified university-run maps for the selected school identity',
   expect(getOfficialCampusMapUrl('ncu')).toBe('https://www.ncu.edu.tw/p/412-1000-105.php?Lang=zh-tw');
   expect(getOfficialCampusMapUrl('ntu')).toBe('https://www.ntu.edu.tw/about/map.html');
   expect(getOfficialCampusMapUrl('tw-nchu')).toBe('https://www.nchu.edu.tw/about/mid/869');
+  expect(getOfficialCampusMapUrl('nchu')).toBe(getOfficialCampusMapUrl('tw-nchu'));
   expect(getOfficialCampusMapUrl('ncku')).toBe('https://web.ncku.edu.tw/p/412-1000-29366.php');
   expect(getOfficialCampusMapUrl('ntust')).toBe('https://www.ntust.edu.tw/p/412-1000-102.php?Lang=zh-tw');
   expect(getOfficialCampusMapUrl('nycu')).toContain('www.nycu.edu.tw/aa/ch/app/artwebsite/view');
