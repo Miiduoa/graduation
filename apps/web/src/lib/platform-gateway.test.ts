@@ -1,7 +1,12 @@
 // @vitest-environment node
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { NextRequest } from 'next/server';
-import { handlePlatformAdmin, handlePlatformSocial, schoolDirectory } from './platform-gateway';
+import {
+  handlePlatformAdmin,
+  handlePlatformSocial,
+  resetSchoolDirectoryCache,
+  schoolDirectory,
+} from './platform-gateway';
 import { SESSION_COOKIE, openCookie, sealCookie, sessionContext } from './nuni/server';
 const account = 'pa_33333333-3333-4333-8333-333333333333';
 const fetcher = vi.fn();
@@ -30,6 +35,7 @@ function req(
   });
 }
 beforeEach(() => {
+  resetSchoolDirectoryCache();
   vi.stubEnv('CAMPUS_BACKEND', 'nuni');
   vi.stubEnv('BFF_SESSION_SECRET', 'unit-test-session-secret-longer-than-32-characters');
   vi.stubEnv('WEB_PUBLIC_ORIGIN', 'https://nuni.tw');
@@ -37,8 +43,10 @@ beforeEach(() => {
   vi.stubGlobal('fetch', fetcher.mockReset());
 });
 afterEach(() => {
+  resetSchoolDirectoryCache();
   vi.unstubAllEnvs();
   vi.unstubAllGlobals();
+  vi.restoreAllMocks();
 });
 it('rejects absent sessions and stale account context before API requests', async () => {
   expect((await handlePlatformAdmin(req('platform-admin/schools'), ['schools'])).status).toBe(401);
@@ -193,14 +201,70 @@ it('forwards a scoped social request using only the sealed current session', asy
   expect(fetcher.mock.calls[0][1].headers.Authorization).toBe(`Platform ${active().sessionHandle}`);
   expect(response.headers.get('Cache-Control')).toBe('no-store, private');
 });
+const directory = {
+  schools: [{ tenantId: 'pu', displayName: '靜宜大學', status: 'open', internal: 'private' }],
+};
+
 it('projects only actual public school metadata', async () => {
-  fetcher.mockResolvedValue(
-    json({
-      schools: [{ tenantId: 'pu', displayName: '靜宜大學', status: 'open', internal: 'private' }],
-    }),
-  );
+  fetcher.mockResolvedValue(json(directory));
   const response = await schoolDirectory(req('schools'));
   expect(await response.json()).toEqual({
     schools: [{ id: 'pu', name: '靜宜大學', status: 'open' }],
   });
+});
+
+it('reuses a successful school directory within 60 seconds', async () => {
+  const now = vi.spyOn(Date, 'now');
+  let current = 1_700_000_000_000;
+  now.mockImplementation(() => current);
+  fetcher.mockResolvedValue(json(directory));
+  expect((await schoolDirectory(req('schools'))).status).toBe(200);
+  current += 59_000;
+  expect(await (await schoolDirectory(req('schools'))).json()).toEqual({
+    schools: [{ id: 'pu', name: '靜宜大學', status: 'open' }],
+  });
+  expect(fetcher).toHaveBeenCalledTimes(1);
+  now.mockRestore();
+});
+
+it('returns cached schools when the upstream directory is rate limited', async () => {
+  const now = vi.spyOn(Date, 'now');
+  let current = 1_700_000_000_000;
+  now.mockImplementation(() => current);
+  fetcher.mockResolvedValueOnce(json(directory)).mockResolvedValueOnce(json({}, 429));
+  expect((await schoolDirectory(req('schools'))).status).toBe(200);
+  current += 61_000;
+  const response = await schoolDirectory(req('schools'));
+  expect(response.status).toBe(200);
+  expect(await response.json()).toEqual({
+    schools: [{ id: 'pu', name: '靜宜大學', status: 'open' }],
+  });
+  expect(fetcher).toHaveBeenCalledTimes(2);
+  now.mockRestore();
+});
+
+it('returns the upstream error when a rate-limited directory has no cache', async () => {
+  fetcher.mockResolvedValue(json({}, 429));
+  const response = await schoolDirectory(req('schools'));
+  expect(response.status).toBe(429);
+  expect(await response.json()).toEqual({ error: 'REQUEST_FAILED' });
+});
+
+it('shares one upstream school directory request across concurrent callers', async () => {
+  let release!: (value: Response) => void;
+  fetcher.mockImplementation(
+    () =>
+      new Promise((resolve) => {
+        release = resolve;
+      }),
+  );
+  const pending = Promise.all([schoolDirectory(req('schools')), schoolDirectory(req('schools'))]);
+  expect(fetcher).toHaveBeenCalledTimes(1);
+  release(json(directory));
+  const responses = await pending;
+  expect(responses.map((item) => item.status)).toEqual([200, 200]);
+  expect(await responses[0].json()).toEqual({
+    schools: [{ id: 'pu', name: '靜宜大學', status: 'open' }],
+  });
+  expect(fetcher).toHaveBeenCalledTimes(1);
 });
