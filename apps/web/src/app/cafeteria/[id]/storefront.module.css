@@ -22,7 +22,7 @@
 
 .quickActions {
   position: sticky;
-  top: 0;
+  top: env(safe-area-inset-top, 0px);
   z-index: 10;
   display: flex;
   justify-content: space-between;
@@ -84,7 +84,7 @@
 .infoPanel,
 .updates {
   min-width: 0;
-  scroll-margin-top: 96px;
+  scroll-margin-top: calc(96px + env(safe-area-inset-top, 0px));
 }
 
 .menuHeader,
@@ -544,6 +544,9 @@
   outline: 3px solid var(--focus-ring);
   outline-offset: 3px;
 }
+.page .categories button:focus-visible {
+  outline-offset: -3px;
+}
 .page button:disabled {
   cursor: not-allowed;
   opacity: 0.6;
@@ -598,7 +601,7 @@
   .menuPanel,
   .infoPanel,
   .updates {
-    scroll-margin-top: 148px;
+    scroll-margin-top: calc(148px + env(safe-area-inset-top, 0px));
   }
   .menuHeader {
     margin-bottom: 16px;
