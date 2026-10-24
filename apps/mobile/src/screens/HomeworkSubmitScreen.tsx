@@ -1,4 +1,4 @@
-import React, { useCallback, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -21,6 +21,7 @@ import {
 } from '../data/assignmentGrade';
 import { onAssignmentSubmitted } from '../services/companionHooks';
 import { safeNavigate } from '../utils/safeNavigate';
+import { revealAssignmentSubmitArea } from './nuni/scrollAssignment';
 
 type RouteParams = {
   courseId?: string;
@@ -31,6 +32,7 @@ type RouteParams = {
   title?: string;
   dueAt?: string;
   description?: string;
+  scrollToSubmit?: boolean;
 };
 
 type RouteProps = {
@@ -145,6 +147,15 @@ export default function HomeworkSubmitScreen(props: RouteProps) {
   }, [allowLate, dueAt]);
 
   const blocked = unpublished || closed || overdueLocked || quizLike || !!submittedAt;
+  const scrollRef = useRef<ScrollView | null>(null);
+  const submitRef = useRef<View | null>(null);
+  useEffect(() => {
+    if (!params.scrollToSubmit || loading) return;
+    const timer = setTimeout(() => {
+      revealAssignmentSubmitArea(scrollRef.current as never, submitRef.current as never);
+    }, 50);
+    return () => clearTimeout(timer);
+  }, [loading, params.scrollToSubmit]);
   const overdue = useMemo(() => {
     if (!dueAt) return false;
     const due = Date.parse(dueAt);
@@ -182,7 +193,10 @@ export default function HomeworkSubmitScreen(props: RouteProps) {
       style={{ flex: 1, backgroundColor: '#F2F2F7' }}
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}
     >
-      <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: 80 }}>
+      <ScrollView
+        ref={scrollRef}
+        contentContainerStyle={{ padding: 16, paddingBottom: 80 }}
+      >
         <View
           style={{
             backgroundColor: '#fff',
@@ -362,7 +376,7 @@ export default function HomeworkSubmitScreen(props: RouteProps) {
                 作業已截止。如需補交，請聯絡授課教師。
               </Text>
             ) : (
-              <>
+              <View ref={submitRef} collapsable={false}>
                 <View style={{ marginTop: 16 }}>
                   <Text style={{ fontSize: 14, fontWeight: '600', color: '#1C1C1E', marginBottom: 6 }}>
                     文字作業內容
@@ -409,7 +423,7 @@ export default function HomeworkSubmitScreen(props: RouteProps) {
                     <Text style={{ color: '#fff', fontSize: 16, fontWeight: '700' }}>繳交作業</Text>
                   )}
                 </Pressable>
-              </>
+              </View>
             )}
           </>
         )}

@@ -413,3 +413,10 @@ it('lands on material and published assignment or quiz hashes and marks each as 
     }),
   ).toBe(false);
 });
+
+it('lands on the week section from the today page', async () => {
+  window.history.replaceState(null, '', '/course/course#week');
+  await mount();
+  const week = await screen.findByRole('region', { name: '本週' });
+  await waitFor(() => expect(week.getAttribute(COURSE_WORK_LANDING_ATTR)).toBe('true'));
+});

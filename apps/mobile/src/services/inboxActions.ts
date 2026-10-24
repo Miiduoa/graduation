@@ -152,6 +152,7 @@ export function resolveInboxAction(
 export type InboxNavigationContext = {
   role: CourseNavigationRole;
   isTeachingRole: boolean;
+  scrollToSubmit?: boolean;
 };
 
 function emitInboxNavigationSignal(resolved: ResolvedInboxAction) {
@@ -211,6 +212,7 @@ export function navigateFromInboxTask(
         hwId,
         hwTitle: task.title,
         ...(dueAt ? { dueAt } : {}),
+        ...(navCtx.scrollToSubmit ? { scrollToSubmit: true } : {}),
       });
       emitInboxNavigationSignal(resolved);
       return true;

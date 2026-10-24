@@ -1,83 +1,19 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useState } from 'react';
 import Link from 'next/link';
-import { buildPersonalToday, type PersonalImportRecord } from '@campus/shared';
-import { usePersonalImportScope, usePersonalImports } from '@/lib/usePersonalImports';
+import { buildPersonalToday } from '@campus/shared';
+import { usePersonalImportScope } from '@/lib/usePersonalImports';
 import { useAuth } from '@/components/AuthGuard';
 import { SchoolSelector } from '@/components/SchoolSelector';
 import { CampusIcon } from '@/components/CampusIcon';
 import { useOptionalSelectedSchool } from '@/components/SelectedSchoolProvider';
 import { useOptionalNuniSession } from '@/features/nuni/Session';
-import { loadPersonalTimetable, type StoredTimetable } from '@/lib/timetable/store';
+import { usePersonalTodayRecords } from '@/lib/usePersonalTodayRecords';
 import home from '@/app/home.module.css';
 import styles from './TodayTimetable.module.css';
 
-function manualRecords(timetable: StoredTimetable): PersonalImportRecord[] {
-  return timetable.courses.map((course) => ({
-    id: `manual:${course.id}`,
-    kind: 'timetable',
-    title: course.name,
-    schoolId: timetable.schoolId,
-    academicYear: timetable.meta.year || '未填',
-    semester: timetable.meta.semester || '未填',
-    dayOfWeek: course.day,
-    startPeriod: course.start,
-    endPeriod: course.end,
-    teacher: course.teacher,
-    location: course.room,
-    batchId: 'manual',
-    importedAt: timetable.updatedAt,
-    source: { type: 'paste', line: 0, rawText: '' },
-  }));
-}
-
-function usePersonalTodayRecords() {
-  const context = usePersonalImportScope();
-  const { user } = useAuth();
-  const imported = usePersonalImports(context.scope);
-  const [manual, setManual] = useState<PersonalImportRecord[] | null>(null);
-  const [loadError, setLoadError] = useState('');
-  const [attempt, setAttempt] = useState(0);
-  const { owner, schoolId } = context.scope;
-  const uid = user?.uid ?? null;
-  const retry = useCallback(() => setAttempt((value) => value + 1), []);
-  useEffect(() => {
-    let active = true;
-    let generation = 0;
-    const refresh = async () => {
-      const request = ++generation;
-      try {
-        const data = await loadPersonalTimetable(uid, schoolId, owner);
-        if (active && request === generation) {
-          setManual(manualRecords(data));
-          setLoadError('');
-        }
-      } catch {
-        if (active && request === generation) {
-          setManual(null);
-          setLoadError('手動課表暫時讀不到，請保留瀏覽器資料後重試。');
-        }
-      }
-    };
-    const visible = () => {
-      if (document.visibilityState === 'visible') void refresh();
-    };
-    void refresh();
-    window.addEventListener('focus', visible);
-    window.addEventListener('storage', visible);
-    document.addEventListener('visibilitychange', visible);
-    return () => {
-      active = false;
-      window.removeEventListener('focus', visible);
-      window.removeEventListener('storage', visible);
-      document.removeEventListener('visibilitychange', visible);
-    };
-  }, [uid, owner, schoolId, attempt]);
-  const loaded = !imported.loading && (manual !== null || !!loadError);
-  const error = imported.error || loadError;
-  return { context, imported, manual, retry, loaded, error, schoolId };
-}
+export { usePersonalTodayRecords } from '@/lib/usePersonalTodayRecords';
 
 export function TodayTimetable({ now }: { now: Date | null }) {
   const context = usePersonalImportScope();
