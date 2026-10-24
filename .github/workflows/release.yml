@@ -144,7 +144,7 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: Setup Expo & EAS
-        uses: expo/expo-github-action@v8
+        uses: expo/expo-github-action@v9
         with:
           expo-version: latest
           eas-version: 24.12.0
@@ -231,7 +231,7 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: Setup Expo & EAS
-        uses: expo/expo-github-action@v8
+        uses: expo/expo-github-action@v9
         with:
           expo-version: latest
           eas-version: 24.12.0
