@@ -1,0 +1,93 @@
+# Scoped Python AI server gates (cloud lock only).
+# Does NOT cover the full local ML graph (chromadb / mlx-lm / torch wheels).
+# See docs/security/python-ai-server.md for Chroma embedded boundary + unfixed advisories.
+name: Python AI Server Security
+
+on:
+  pull_request:
+    paths:
+      - "backend/ai-server/**"
+      - ".github/workflows/python-ai-server-security.yml"
+      - "docs/security/python-ai-server.md"
+  push:
+    branches: [main]
+    paths:
+      - "backend/ai-server/**"
+      - ".github/workflows/python-ai-server-security.yml"
+      - "docs/security/python-ai-server.md"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: python-ai-server-security-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  cloud-lock-and-tests:
+    name: Cloud lock pip-audit + boundary tests
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend/ai-server
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install cloud lock (require hashes)
+        run: |
+          python -m pip install --upgrade pip
+          # Application test env: hashed cloud lock ONLY (do not install audit tooling here).
+          pip install --require-hashes -r requirements-cloud.txt
+
+      - name: Install pip-audit in isolated tool venv
+        run: |
+          # Keep pip-audit + its deps out of the application venv so boundary tests
+          # exercise the compiled lock metadata, not a mutated solver graph.
+          python -m venv "${RUNNER_TEMP}/audittoolvenv"
+          "${RUNNER_TEMP}/audittoolvenv/bin/python" -m pip install --upgrade pip
+          "${RUNNER_TEMP}/audittoolvenv/bin/pip" install "pip-audit==2.10.1"
+
+      - name: pip-audit cloud lock (fail closed on any advisory or audit error)
+        run: |
+          REPORT_DIR="${RUNNER_TEMP}/python-ai-server-audit"
+          mkdir -p "$REPORT_DIR"
+          REPORT="$REPORT_DIR/cloud-lock-pip-audit.json"
+          # Fail on vulnerabilities and on audit/tool errors; keep the JSON report.
+          # Audit tool reads the requirements lock independently of the app venv.
+          "${RUNNER_TEMP}/audittoolvenv/bin/pip-audit" -r requirements-cloud.txt \
+            --progress-spinner off \
+            --format json \
+            --output "$REPORT"
+          echo "pip-audit: no known vulnerabilities in cloud lock"
+          ls -la "$REPORT_DIR"
+
+      - name: Upload pip-audit report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: python-ai-server-cloud-pip-audit
+          path: ${{ runner.temp }}/python-ai-server-audit/
+          if-no-files-found: ignore
+
+      - name: Focused boundary unit tests
+        env:
+          ENABLE_RAG: "false"
+          ENABLE_WEB_SEARCH: "false"
+          ENABLE_SELF_TRAIN_LOOP: "false"
+          LLM_PROVIDER: groq
+          REQUIRE_FIREBASE_AUTH: "true"
+          AI_SERVER_HOST: "127.0.0.1"
+        run: |
+          # Must run against the hashed cloud install only (no pip-audit in this env).
+          python -m unittest discover -s tests -v
+
+      - name: Reminder — full ML graph not covered
+        run: |
+          echo "::notice::Cloud lock audit/tests passed for requirements-cloud.txt only. chromadb (local RAG) may still have unfixed advisories; see docs/security/python-ai-server.md"

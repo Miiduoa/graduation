@@ -61,3 +61,24 @@ updates:
     labels:
       - dependencies
       - security-automation
+
+  # Python AI server — cloud lock + local manifest directory. No automerge.
+  # Full ML wheel graph may still need manual review (see docs/security/python-ai-server.md).
+  - package-ecosystem: pip
+    directory: /backend/ai-server
+    schedule:
+      interval: weekly
+      day: monday
+      time: "09:45"
+      timezone: Asia/Taipei
+    open-pull-requests-limit: 5
+    groups:
+      ai-server-pip-patch-minor:
+        patterns:
+          - "*"
+        update-types:
+          - patch
+          - minor
+    labels:
+      - dependencies
+      - security-automation
