@@ -1,0 +1,78 @@
+{
+  "schema": "campus.nuni-api-security-source/v1",
+  "repository": "https://github.com/Miiduoa/nuni-prod.git",
+  "baseCommit": "9de47b4b3492325e430562c37bcad552867162db",
+  "productionTree": "b0a10ac814cd03fbfb45132566035acce8339f17",
+  "candidateTree": "add9614a93c65b4587ca5649a83803614c786f28",
+  "imageTag": "nuni-api-security:20261024-json",
+  "previousImageTag": "nuni-api-security:20261024",
+  "previousCandidateTree": "d006ec857bd1b5be5b0281c94077d61f9af51d05",
+  "platform": "linux/amd64",
+  "runtimeNodeImage": "node:24.22.1-alpine@sha256:06d7adf3e0ef61a13f1d28682726366f97a15aa1888c934d3ecec86c33918b53",
+  "rollbackImage": "registry.fly.io/nuni-api@sha256:be815455fbb2ccce844b69f004e416e44465e3421f9da654d0cd5db8379c3dc2",
+  "rollbackRevision": "b0a10ac814cd03fbfb45132566035acce8339f17",
+  "rollbackMachines": {
+    "started": "857656ef1e7798",
+    "stoppedDoNotStart": "d897e35f345428"
+  },
+  "serverPath": "/app/apps/api/dist/index.js",
+  "patchedVersions": {
+    "fastify": "5.12.7",
+    "zod": "4.6.7",
+    "@grpc/grpc-js": "1.14.5",
+    "brace-expansion": "5.0.12",
+    "fast-uri@3": "3.1.9",
+    "fast-uri@4": "4.2.3"
+  },
+  "pnpmOverrides": {
+    "@fastify/ajv-compiler>fast-uri": "3.1.9",
+    "ajv>fast-uri": "3.1.9",
+    "fast-json-stringify>fast-uri": "4.2.3",
+    "brace-expansion": "5.0.12",
+    "@grpc/grpc-js": "1.14.5",
+    "zod@>=4.0.0 <4.6.6": "4.6.7",
+    "fastify": "5.12.7"
+  },
+  "sourceBinding": {
+    "certainty": "oci-revision-and-indexed-tree-proven",
+    "notes": [
+      "Live machines report image digest be815455\u2026 and org.opencontainers.image.revision b0a10ac\u2026 (inventory evidence).",
+      "Git tree object b0a10ac\u2026 is the indexed write-tree of materials-api-final / materials-api-final-repro (base 9de47b4 + cumulative overlays).",
+      "Local materials-b0a10ac814cd-20261020/21 images share that revision label and the same vulnerable runtime package versions; their layer digests differ from be815455\u2026 and are binding aids only.",
+      "Repo default source.json tree 6776b19a\u2026 is old v20; composed candidateTree dbb75af7\u2026 has drifted and must not be deployed as current production.",
+      "Production bind patch 0000 reconstructs b0a10ac\u2026 from base 9de47b4 without using default candidate overlays.",
+      "Patch 0002 is applied after dependency pin tree d006ec\u2026 and only maps Fastify JSON body parser client errors to HTTP 400."
+    ]
+  },
+  "runtimeGrantInventory": {
+    "policy": "Retain production runtime-grant-matrix.json bytes from tree b0a10ac\u2026 unchanged (authority/policies not modified). Overlay is no longer dependency-only: 0002 changes apps/api error handling only. Grant analysis provenance sourceHash remains productionTree b0a10ac\u2026; do not regenerate the matrix for this JSON parser fix.",
+    "sourceHash": "b0a10ac814cd03fbfb45132566035acce8339f17",
+    "matrixUnchangedFrom": "b0a10ac814cd03fbfb45132566035acce8339f17",
+    "overlayKind": "runtime-deps-plus-json-body-parser-400"
+  },
+  "patches": [
+    {
+      "file": "0000-production-tree-b0a10ac.patch",
+      "sha256": "5d85e8300896b04acf1c7fcad065510ce1f7a28f723da857bed4727d30924812",
+      "purpose": "Bind archived base 9de47b4 to the exact production Git tree b0a10ac\u2026 (platform admin/social + composed cafeteria/course/import + materials pagination). Not a default candidate overlay."
+    },
+    {
+      "file": "0001-runtime-deps-security.patch",
+      "sha256": "2c251df1656d8f308133711b33a224e8a26161fc3cda7166864c348b77b5b2de",
+      "purpose": "Patch compatible runtime dependency pins + private pnpm lock + Node 24.22.1 Alpine digest/CA hardening in apps/api/Dockerfile. Source build only; no forced npm install into compiled runtime."
+    },
+    {
+      "file": "0002-json-body-parser-400.patch",
+      "sha256": "f6d423666dcf487d6b2a5f5aeb01ba969a0d3c5729e464cb8298837a250f7709",
+      "purpose": "Map Fastify FST_ERR_CTP_INVALID_JSON_BODY / FST_ERR_CTP_EMPTY_JSON_BODY (statusCode 400 only) to HTTP 400 INVALID_JSON_BODY without leaking parser text or trusting arbitrary thrown statusCode. Preserve DomainError/AuthError 401/403. Adds focused inject tests."
+    }
+  ],
+  "forbiddenVulnerableVersions": [
+    "fastify@5.10.0",
+    "zod@4.4.3",
+    "brace-expansion@5.0.9",
+    "fast-uri@3.1.5",
+    "fast-uri@4.1.2",
+    "@grpc/grpc-js@1.14.4"
+  ]
+}

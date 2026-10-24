@@ -41,6 +41,8 @@ from config import (
     AI_ADMIN_TOKEN,
     AI_ALLOWED_ORIGINS,
     PORT,
+    assert_bind_allowed,
+    resolve_bind_host,
 )
 import llm_client
 from reflexion import maybe_retry_with_reflexion, needs_quality_reflexion
@@ -83,6 +85,14 @@ async def _scheduled_growth_loop():
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     global _campus_knowledge, _growth_task
+
+    bind_host = resolve_bind_host()
+    assert_bind_allowed(bind_host)
+    logger.info(
+        "Bind host=%s authRequired=%s (public bind requires Firebase auth)",
+        bind_host,
+        REQUIRE_FIREBASE_AUTH,
+    )
 
     logger.info("LLM provider: %s", LLM_PROVIDER)
     register_default_tools()
@@ -470,4 +480,14 @@ async def status():
 
 
 if __name__ == "__main__":
-    uvicorn.run("server:app", host="0.0.0.0", port=PORT, reload=False)
+    # Local default is loopback. Public bind (e.g. 0.0.0.0) requires
+    # REQUIRE_FIREBASE_AUTH=true — same contract as Docker/Render, no insecure opt-out.
+    host = resolve_bind_host()
+    assert_bind_allowed(host)
+    if not REQUIRE_FIREBASE_AUTH:
+        logger.info(
+            "Starting without Firebase auth on %s — keep this loopback-only; "
+            "set REQUIRE_FIREBASE_AUTH=true before any non-loopback bind.",
+            host,
+        )
+    uvicorn.run("server:app", host=host, port=PORT, reload=False)

@@ -186,6 +186,7 @@ service cloud.firestore {
     function campusPostLikeReactionOk() {
       let before = resource.data;
       let after = request.resource.data;
+      // affectedKeys covers add/remove/change; changedKeys alone misses field insert/delete.
       let diff = after.diff(before).affectedKeys();
       return diff.hasOnly(['likes', 'likedBy', 'updatedAt'])
         && after.likedBy is list

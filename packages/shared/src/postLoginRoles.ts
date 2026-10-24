@@ -117,11 +117,13 @@ function collectServiceOrgRoles(serviceRolesDoc: Record<string, unknown> | null 
 }
 
 /**
- * 以 users.role 為權威；僅在 student-like 時用證據推斷 primaryRole。
+ * 以 server-owned users.role 為權威；僅在 student-like 時用校籍／TC／service 證據推斷 primaryRole。
+ * 忽略 userDoc.primaryRole：該欄曾可被 client 寫入，不得覆寫權威角色或用來提權。
  */
 export function resolveUserRoles(input: ResolveUserRolesInput): ResolveUserRolesResult {
   const reasons: string[] = [];
-  const author = normRole(input.userDoc.primaryRole || input.userDoc.role || 'student');
+  // Canonical authority is users.role only. Never prefer client-writable primaryRole.
+  const author = normRole(input.userDoc.role || 'student');
   const basePrimary = toResolvedAppRole(author);
   const teachingRoles: string[] = [];
   const orgRoles: string[] = [];
@@ -129,7 +131,10 @@ export function resolveUserRoles(input: ResolveUserRolesInput): ResolveUserRoles
 
   const tcProfileRole = input.tcProfile?.role ? normRole(input.tcProfile.role) : '';
   const tcCourses = input.tcCourses ?? [];
-  const memberRole = normRole(input.schoolMemberDoc?.role);
+  // Fail closed: elevated membership is evidence only when status is exactly 'active'
+  // (aligns with Firestore hasRole / isSchoolMember). Missing / unknown / inactive → ignore role.
+  const memberRole =
+    input.schoolMemberDoc?.status === 'active' ? normRole(input.schoolMemberDoc?.role) : '';
 
   if (hasTeachingEvidence(tcCourses)) {
     teachingRoles.push('teacher');

@@ -1,0 +1,84 @@
+# Dependabot：每週掃描並開 PR（不自動合併）。
+# 涵蓋 pnpm workspace 根、Functions 獨立 npm 鎖檔、以及 GitHub Actions。
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: "09:00"
+      timezone: Asia/Taipei
+    open-pull-requests-limit: 8
+    # 此目錄使用 pnpm；Dependabot 會依 lockfile 處理。
+    versioning-strategy: increase
+    groups:
+      pnpm-patch-minor:
+        patterns:
+          - "*"
+        update-types:
+          - patch
+          - minor
+    labels:
+      - dependencies
+      - security-automation
+
+  - package-ecosystem: npm
+    directory: /backend/functions
+    schedule:
+      interval: weekly
+      day: monday
+      time: "09:15"
+      timezone: Asia/Taipei
+    open-pull-requests-limit: 5
+    versioning-strategy: increase
+    groups:
+      functions-patch-minor:
+        patterns:
+          - "*"
+        update-types:
+          - patch
+          - minor
+    labels:
+      - dependencies
+      - security-automation
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: "09:30"
+      timezone: Asia/Taipei
+    open-pull-requests-limit: 5
+    groups:
+      github-actions-patch-minor:
+        patterns:
+          - "*"
+        update-types:
+          - patch
+          - minor
+    labels:
+      - dependencies
+      - security-automation
+
+  # Python AI server — cloud lock + local manifest directory. No automerge.
+  # Full ML wheel graph may still need manual review (see docs/security/python-ai-server.md).
+  - package-ecosystem: pip
+    directory: /backend/ai-server
+    schedule:
+      interval: weekly
+      day: monday
+      time: "09:45"
+      timezone: Asia/Taipei
+    open-pull-requests-limit: 5
+    groups:
+      ai-server-pip-patch-minor:
+        patterns:
+          - "*"
+        update-types:
+          - patch
+          - minor
+    labels:
+      - dependencies
+      - security-automation

@@ -1,0 +1,302 @@
+diff --git a/apps/api/Dockerfile b/apps/api/Dockerfile
+index d852247..4fd579d 100644
+--- a/apps/api/Dockerfile
++++ b/apps/api/Dockerfile
+@@ -1,4 +1,5 @@
+-FROM node:24-alpine AS base
++FROM node:24.22.1-alpine@sha256:06d7adf3e0ef61a13f1d28682726366f97a15aa1888c934d3ecec86c33918b53 AS base
++RUN apk add --no-cache --upgrade 'ca-certificates>=20261020-r0' 'ca-certificates-bundle>=20261020-r0'
+ ENV PNPM_HOME=/pnpm
+ ENV PATH=$PNPM_HOME:$PATH
+ RUN corepack enable
+diff --git a/apps/api/package.json b/apps/api/package.json
+index 5588bf6..5c44336 100644
+--- a/apps/api/package.json
++++ b/apps/api/package.json
+@@ -45,10 +45,10 @@
+     "@opentelemetry/sdk-metrics": "2.10.0",
+     "@opentelemetry/sdk-node": "0.221.0",
+     "dotenv": "17.4.2",
+-    "fastify": "5.10.0",
++    "fastify": "5.12.7",
+     "jose": "6.2.4",
+     "pg": "8.22.0",
+-    "zod": "4.4.3"
++    "zod": "4.6.7"
+   },
+   "devDependencies": {
+     "@campus/source-test-utils": "workspace:*",
+diff --git a/package.json b/package.json
+index 88ae733..ba72010 100644
+--- a/package.json
++++ b/package.json
+@@ -5,16 +5,19 @@
+   "packageManager": "pnpm@10.28.2",
+   "pnpm": {
+     "overrides": {
+-      "@fastify/ajv-compiler>fast-uri": "3.1.5",
+-      "ajv>fast-uri": "3.1.5",
+-      "fast-json-stringify>fast-uri": "4.1.2",
+-      "brace-expansion": "5.0.9",
++      "@fastify/ajv-compiler>fast-uri": "3.1.9",
++      "ajv>fast-uri": "3.1.9",
++      "fast-json-stringify>fast-uri": "4.2.3",
++      "brace-expansion": "5.0.12",
+       "esbuild": "0.28.1",
+       "js-yaml@>=4.0.0 <4.3.1": "4.3.1",
+       "nanoid@<3.3.18": "3.3.18",
+       "postcss": "8.5.23",
+       "sharp": "0.35.0",
+-      "uuid": "11.1.1"
++      "uuid": "11.1.1",
++      "@grpc/grpc-js": "1.14.5",
++      "zod@>=4.0.0 <4.6.6": "4.6.7",
++      "fastify": "5.12.7"
+     }
+   },
+   "scripts": {
+diff --git a/pnpm-lock.yaml b/pnpm-lock.yaml
+index d941655..6c48105 100644
+--- a/pnpm-lock.yaml
++++ b/pnpm-lock.yaml
+@@ -5,16 +5,19 @@ settings:
+   excludeLinksFromLockfile: false
+ 
+ overrides:
+-  '@fastify/ajv-compiler>fast-uri': 3.1.5
+-  ajv>fast-uri: 3.1.5
+-  fast-json-stringify>fast-uri: 4.1.2
+-  brace-expansion: 5.0.9
++  '@fastify/ajv-compiler>fast-uri': 3.1.9
++  ajv>fast-uri: 3.1.9
++  fast-json-stringify>fast-uri: 4.2.3
++  brace-expansion: 5.0.12
+   esbuild: 0.28.1
+   js-yaml@>=4.0.0 <4.3.1: 4.3.1
+   nanoid@<3.3.18: 3.3.18
+   postcss: 8.5.23
+   sharp: 0.35.0
+   uuid: 11.1.1
++  '@grpc/grpc-js': 1.14.5
++  zod@>=4.0.0 <4.6.6: 4.6.7
++  fastify: 5.12.7
+ 
+ importers:
+ 
+@@ -81,8 +84,8 @@ importers:
+         specifier: 17.4.2
+         version: 17.4.2
+       fastify:
+-        specifier: 5.10.0
+-        version: 5.10.0
++        specifier: 5.12.7
++        version: 5.12.7
+       jose:
+         specifier: 6.2.4
+         version: 6.2.4
+@@ -90,8 +93,8 @@ importers:
+         specifier: 8.22.0
+         version: 8.22.0
+       zod:
+-        specifier: 4.4.3
+-        version: 4.4.3
++        specifier: 4.6.7
++        version: 4.6.7
+     devDependencies:
+       '@campus/source-test-utils':
+         specifier: workspace:*
+@@ -258,8 +261,8 @@ importers:
+   packages/contracts:
+     dependencies:
+       zod:
+-        specifier: 4.4.3
+-        version: 4.4.3
++        specifier: 4.6.7
++        version: 4.6.7
+     devDependencies:
+       vitest:
+         specifier: 4.1.10
+@@ -1114,8 +1117,8 @@ packages:
+   '@fastify/rate-limit@11.1.0':
+     resolution: {integrity: sha512-BeJ9tizLvmTXGD7deYU5G04OtHhwk5uHxbpEPVp09gKvUBIXmau/4Bshxhu9ci54MvVWfGjCEx4RzvsTntojwA==}
+ 
+-  '@grpc/grpc-js@1.14.4':
+-    resolution: {integrity: sha512-k9Dj3DV/itK9D06Y8f190Qgop7/Ui+D0njFV3LHMPwPT75DpXLQohE9Wmz0QElrJnzsjB7KPWiKJbOl7IPDArQ==}
++  '@grpc/grpc-js@1.14.5':
++    resolution: {integrity: sha512-7VZM+SVdEcUUqSQeNI3zM8Qs/BhQKZndPo2h5VkYkAM8Iz0wJIa8mKV5ekQGqG8UUsnkQ0NMxIxwkIHYvj0qOw==}
+     engines: {node: '>=12.10.0'}
+ 
+   '@grpc/proto-loader@0.8.1':
+@@ -2413,8 +2416,8 @@ packages:
+     resolution: {integrity: sha512-apC2+fspHGI3mMKj+dGevkGo/tCqVB8jMb6i+OX+E29p0Iposz07fABkRIfVUPNd5A5VbuOz1bZbnmkKLYF+wQ==}
+     engines: {node: '>= 5.10.0'}
+ 
+-  brace-expansion@5.0.9:
+-    resolution: {integrity: sha512-ScQ4IuvIEF1TMlP7Zt+vjJ//9zlPb2SDcxWxM3bk8s6t6GGdJ7KO1dCcTidOPJKePW30LE/2cT7wCyPho9/Wxg==}
++  brace-expansion@5.0.12:
++    resolution: {integrity: sha512-YovQ3rzhaLMIrDjNDMkNS01tea93qhEhG5xy8f6+R0l+dw3Ki+5sCoIoI942iuLZTHWogWktgwVDhU09iNEimQ==}
+     engines: {node: 20 || >=22}
+ 
+   braces@3.0.3:
+@@ -2939,17 +2942,17 @@ packages:
+   fast-querystring@1.1.2:
+     resolution: {integrity: sha512-g6KuKWmFXc0fID8WWH0jit4g0AGBoJhCkJMb1RmbsSEUNvQ+ZC8D6CUZ+GtF8nMzSPXnhiePyyqqipzNNEnHjg==}
+ 
+-  fast-uri@3.1.5:
+-    resolution: {integrity: sha512-gHwA1O9LDIcKunMKhObS/HimwtehO1nPUECKAu5TpKgaO19fcWEl4bliWe1jWxVFvIXztJjjQ4L8XQ1EU9f7Jw==}
++  fast-uri@3.1.9:
++    resolution: {integrity: sha512-hS/0Wt3Ya043oKXs0sIxrMpKQITXhMLIrVAKKXi4gozGC9v7YRWVnXIZzjNPTO02M9BdxLCWqK1yRXgNziVyJQ==}
+ 
+-  fast-uri@4.1.2:
+-    resolution: {integrity: sha512-TyGmBcbDTZXcb2cj5MV89DrF42DKvb3y5DDUNh95iO+IMeAzMkVSxK1PZRrRIpc9yg8U2GhGdbofNa0LS/a4Bw==}
++  fast-uri@4.2.3:
++    resolution: {integrity: sha512-I1PXwP5eAhlNlcdpjt9CgB59op2ZvZfxw+BkqGFVIUOgNpCVTcTqp3HhTX7brxj5vsip+nSY4nTvff+eIA76hg==}
+ 
+   fastify-plugin@6.0.0:
+     resolution: {integrity: sha512-fZOty7z3O7vOliF6d8bHE3wiEh1KcNnKEQensSgTk9C1DvN6nRLS++XVd86v33Hw/8u9Un8A1zDrQ8ujcQDHEg==}
+ 
+-  fastify@5.10.0:
+-    resolution: {integrity: sha512-A9L0ziuWGQHgEEVgF3davQ9vbD93IuX+lo2IsxapQmu5b/Y/ynn9m9K5JHt9dvyJXOFc5iN0Zk5GHEOqnzhWjg==}
++  fastify@5.12.7:
++    resolution: {integrity: sha512-v4pEPsTRPuqlDIYiQFB+BHjVN4SdHX9u0ABk0ZDUKbbdY1vsNryUd1j4Z+jQEZajvYIVk047Kimva9/AJ79GYw==}
+ 
+   fastq@1.20.1:
+     resolution: {integrity: sha512-GGToxJ/w1x32s/D2EKND7kTil4n8OVk/9mycTc4VDza13lOvpUZTGX3mFSCtV9ksdGBVzvsyAVLM6mHFThxXxw==}
+@@ -3761,8 +3764,8 @@ packages:
+   process-warning@4.0.1:
+     resolution: {integrity: sha512-3c2LzQ3rY9d0hc1emcsHhfT9Jwz0cChib/QN89oME2R451w5fy3f0afAhERFZAwrbDU43wk12d0ORBpDVME50Q==}
+ 
+-  process-warning@5.0.0:
+-    resolution: {integrity: sha512-a39t9ApHNx2L4+HBnQKqxxHNs1r7KF+Intd8Q/g1bUh6q0WIp9voPXJ/x0j+ZL45KF1pJd9+q2jLIRMfvEshkA==}
++  process-warning@5.1.1:
++    resolution: {integrity: sha512-oCkNVj4OKnKEcocVBcDfiIugN1/cE6rgfT3nCtzeqZPA8+rIxMaQ0xXzIkGP8Gj2qUaP1UR7uhJ1VD8lUCpzCg==}
+ 
+   progress@2.0.3:
+     resolution: {integrity: sha512-7PiHtLll5LdnKIMw100I+8xJXR5gW2QwWYkT6iJva0bXitZKa/XMrSbdmg3r2Xnaidz9Qumd0VPaMrZlF9V9sA==}
+@@ -4560,8 +4563,8 @@ packages:
+   zod@3.25.76:
+     resolution: {integrity: sha512-gzUt/qt81nXsFGKIFcC3YnfEAx5NkunCfnDlvuBSSFS02bcXu4Lmea0AFIUwbLWxWPx3d9p8S5QoaujKcNQxcQ==}
+ 
+-  zod@4.4.3:
+-    resolution: {integrity: sha512-ytENFjIJFl2UwYglde2jchW2Hwm4GJFLDiSXWdTrJQBIN9Fcyp7n4DhxJEiWNAJMV1/BqWfW/kkg71UDcHJyTQ==}
++  zod@4.6.7:
++    resolution: {integrity: sha512-g8W2D2kU6a8untc053fX1uVBKzM7yqAxW/3zwk83+6RyF2+SKOuV+c0wBDhUwzV1PaGapmZH+rmcUzPf+3CGwg==}
+ 
+   zxing-wasm@3.1.1:
+     resolution: {integrity: sha512-g0sPJBIubO6zLcJh1jftLPIN6xziaqLsvLgtpGKwDrEhyXXqla3E3yjFrznlr78UHIOMzbJPi0HDWKs/KgaB7A==}
+@@ -5694,7 +5697,7 @@ snapshots:
+     dependencies:
+       ajv: 8.20.0
+       ajv-formats: 3.0.1(ajv@8.20.0)
+-      fast-uri: 3.1.5
++      fast-uri: 3.1.9
+ 
+   '@fastify/cors@11.3.0':
+     dependencies:
+@@ -5734,7 +5737,7 @@ snapshots:
+       fastify-plugin: 6.0.0
+       toad-cache: 3.7.4
+ 
+-  '@grpc/grpc-js@1.14.4':
++  '@grpc/grpc-js@1.14.5':
+     dependencies:
+       '@grpc/proto-loader': 0.8.1
+       '@js-sdsl/ordered-map': 4.4.2
+@@ -6089,7 +6092,7 @@ snapshots:
+ 
+   '@opentelemetry/otlp-grpc-exporter-base@0.221.0(@opentelemetry/api@1.9.1)':
+     dependencies:
+-      '@grpc/grpc-js': 1.14.4
++      '@grpc/grpc-js': 1.14.5
+       '@opentelemetry/api': 1.9.1
+       '@opentelemetry/core': 2.10.0(@opentelemetry/api@1.9.1)
+       '@opentelemetry/otlp-exporter-base': 0.221.0(@opentelemetry/api@1.9.1)
+@@ -6732,7 +6735,7 @@ snapshots:
+   ajv@8.20.0:
+     dependencies:
+       fast-deep-equal: 3.1.3
+-      fast-uri: 3.1.5
++      fast-uri: 3.1.9
+       json-schema-traverse: 1.0.0
+       require-from-string: 2.0.2
+ 
+@@ -6905,7 +6908,7 @@ snapshots:
+     dependencies:
+       big-integer: 1.6.52
+ 
+-  brace-expansion@5.0.9:
++  brace-expansion@5.0.12:
+     dependencies:
+       balanced-match: 4.0.4
+ 
+@@ -7443,7 +7446,7 @@ snapshots:
+       '@fastify/merge-json-schemas': 0.2.1
+       ajv: 8.20.0
+       ajv-formats: 3.0.1(ajv@8.20.0)
+-      fast-uri: 4.1.2
++      fast-uri: 4.2.3
+       json-schema-ref-resolver: 3.0.0
+       rfdc: 1.4.1
+ 
+@@ -7451,13 +7454,13 @@ snapshots:
+     dependencies:
+       fast-decode-uri-component: 1.0.1
+ 
+-  fast-uri@3.1.5: {}
++  fast-uri@3.1.9: {}
+ 
+-  fast-uri@4.1.2: {}
++  fast-uri@4.2.3: {}
+ 
+   fastify-plugin@6.0.0: {}
+ 
+-  fastify@5.10.0:
++  fastify@5.12.7:
+     dependencies:
+       '@fastify/ajv-compiler': 4.0.5
+       '@fastify/error': 4.2.0
+@@ -7469,7 +7472,7 @@ snapshots:
+       find-my-way: 9.7.0
+       light-my-request: 6.6.0
+       pino: 10.3.1
+-      process-warning: 5.0.0
++      process-warning: 5.1.1
+       rfdc: 1.4.1
+       secure-json-parse: 4.1.0
+       semver: 7.8.5
+@@ -8044,7 +8047,7 @@ snapshots:
+ 
+   minimatch@10.2.5:
+     dependencies:
+-      brace-expansion: 5.0.9
++      brace-expansion: 5.0.12
+ 
+   minipass@7.1.3: {}
+ 
+@@ -8245,7 +8248,7 @@ snapshots:
+       on-exit-leak-free: 2.1.2
+       pino-abstract-transport: 3.0.0
+       pino-std-serializers: 7.1.0
+-      process-warning: 5.0.0
++      process-warning: 5.1.1
+       quick-format-unescaped: 4.0.4
+       real-require: 0.2.0
+       safe-stable-stringify: 2.5.0
+@@ -8318,7 +8321,7 @@ snapshots:
+ 
+   process-warning@4.0.1: {}
+ 
+-  process-warning@5.0.0: {}
++  process-warning@5.1.1: {}
+ 
+   progress@2.0.3: {}
+ 
+@@ -9121,7 +9124,7 @@ snapshots:
+ 
+   zod@3.25.76: {}
+ 
+-  zod@4.4.3: {}
++  zod@4.6.7: {}
+ 
+   zxing-wasm@3.1.1(@types/emscripten@1.41.5):
+     dependencies:

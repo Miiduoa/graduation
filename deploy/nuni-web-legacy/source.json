@@ -1,0 +1,49 @@
+{
+  "repository": "https://github.com/Miiduoa/nuni-prod.git",
+  "baseCommit": "9de47b4b3492325e430562c37bcad552867162db",
+  "candidateTree": "48f4e7e2d70d0446624b69498680d0749540a3ac",
+  "appsWebTreeAtBase": "f80e7a9dc9a942da9fe40b357ad71cdcc986400e",
+  "imageTag": "nuni-legacy-security:20261024",
+  "publishedImage": "registry.fly.io/nuni-web@sha256:2be2cd9152f6214987eecd6e14c25cb4ea5897e2737517879c5134b39057650a",
+  "platform": "linux/amd64",
+  "runtimeNodeImage": "node:24.22.1-alpine@sha256:06d7adf3e0ef61a13f1d28682726366f97a15aa1888c934d3ecec86c33918b53",
+  "targetNextVersion": "16.4.2",
+  "expectedRootOverrides": {
+    "sharp": "0.35.5",
+    "source-map-js": "1.2.2"
+  },
+  "rollbackLegacyImage": "registry.fly.io/nuni-web@sha256:120b9d015a94810d6180bce0af6f03442963fd7fd52c0570235d2f54609c208c",
+  "rollbackLegacyBuildId": "xVY40D5clmp9Yz0poHPFw",
+  "rollbackLegacyNextVersion": "16.2.11",
+  "sourceBinding": {
+    "certainty": "best-supported-not-label-proven",
+    "notes": [
+      "Pinned legacy stage digest has null Config.Labels, so git SHA cannot be proven from the image alone.",
+      "nuni-v2-web local tags do not share IMAGE ID/digest with the pinned legacy image and ship Next 15.",
+      "baseCommit matches exact root+apps/web package.json SHA-256 from the pinned image, product route parity (127/127; Next internals only on image), filesystem mtime proximity (commit 20:22 vs image ~20:25 +0800 2026-09-29), Dockerfile standalone layout, and archived main tip / graduation API source.json baseCommit.",
+      "Same-day package-matching commits still have four distinct apps/web trees; tip 9de47b4 is selected, not invented from nuni-v2."
+    ]
+  },
+  "publicBuildArgs": {
+    "NEXT_PUBLIC_AUTH_MODE": "campus-account",
+    "NEXT_PUBLIC_API_URL": "https://api.nuni.tw",
+    "NEXT_PUBLIC_ON_DEVICE_AI_RELEASE": "true",
+    "NEXT_PUBLIC_ON_DEVICE_AI_RELEASE_ORIGIN": "https://api.nuni.tw",
+    "NEXT_PUBLIC_PRIVACY_NOTICE_VERSION": "privacy-notice-2026-09-14",
+    "NEXT_PUBLIC_POLICY_PUBLISHER": "nuni",
+    "NEXT_PUBLIC_SUPPORT_EMAIL": "support@nuni.university.edu.tw",
+    "NEXT_PUBLIC_PRIVACY_CONTACT_EMAIL": "privacy@nuni.university.edu.tw"
+  },
+  "patches": [
+    {
+      "file": "0001-next-16.4.2-security.patch",
+      "sha256": "c8d4e6378ab6917ed0ca338a6921dba673b9d542bae2fbdbcd1c380846256c0c",
+      "purpose": "Rebuild legacy Web from source at Next.js 16.4.2 (same current-safe pin as Campus One web), replacing vulnerable 16.2.11 without runtime-only forced installs into precompiled output."
+    },
+    {
+      "file": "0002-sharp-source-map-js-security.patch",
+      "sha256": "e950e154259fe5f1672775fee2172468a97d1baa05bc171fcd8647710e54e2b4",
+      "purpose": "Pin sharp 0.35.5 and source-map-js 1.2.2 via root pnpm overrides (same initial-base override semantics) and regenerate the lockfile so the rebuilt standalone no longer ships GHSA-rgj7-g3m4-5g8c / GHSA-wq5f-xc86-pv6w / GHSA-68fv-2mgg-jv7q. No runtime forced install into precompiled Next."
+    }
+  ]
+}
