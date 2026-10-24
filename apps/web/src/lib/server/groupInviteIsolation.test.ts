@@ -22,3 +22,18 @@ it('does not import the Functions index, trigger runners, or custom-claims helpe
   expect(joined).not.toMatch(/setCustomUserClaims/);
   expect(joined).not.toMatch(/createCustomToken/);
 });
+
+it('keeps createGroup off the HTTP allowlist', () => {
+  const hosted = readFileSync(join(root, 'src/lib/hostedCallables.ts'), 'utf8');
+  expect(hosted).not.toMatch(/createGroup/);
+  expect(hosted).toMatch(/joinGroupByCode/);
+  expect(hosted).toMatch(/leaveGroup/);
+});
+
+it('stubs firebase-admin on the webpack browser bundle', () => {
+  const config = readFileSync(join(root, 'next.config.ts'), 'utf8');
+  expect(config).toMatch(/isServer/);
+  expect(config).toMatch(/firebase-admin\$/);
+  expect(config).toMatch(/nodeNativeStub/);
+  expect(config).toMatch(/firebase-admin': \{ browser: '\.\/src\/lib\/nodeNativeStub\.ts' \}/);
+});

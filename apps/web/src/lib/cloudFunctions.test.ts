@@ -8,7 +8,9 @@ it('points hosted group invite callables at this Next.js app without a functions
   const env = { NEXT_PUBLIC_FIREBASE_PROJECT_ID: 'campus-one-tw' };
   expect(getCloudFunctionUrl('joinGroupByCode', { env })).toBe('/api/fn/joinGroupByCode');
   expect(getCloudFunctionUrl('leaveGroup', { env })).toBe('/api/fn/leaveGroup');
-  expect(getCloudFunctionUrl('createGroup', { env })).toBe('/api/fn/createGroup');
+  expect(getCloudFunctionUrl('createGroup', { env })).toBe(
+    'https://asia-east1-campus-one-tw.cloudfunctions.net/createGroup',
+  );
   expect(getCloudFunctionUrl('askCampusAssistant', { env })).toBe(
     'https://asia-east1-campus-one-tw.cloudfunctions.net/askCampusAssistant',
   );

@@ -1,6 +1,11 @@
 import { isHostedWebCallable } from '@/lib/hostedCallables';
 import { callableErrorBody, HttpsError } from './httpsError';
 import type { CallableRequest } from './groupInviteHandlers';
+import {
+  assertJoinCodeAttemptsAllowed,
+  checkUidRateLimit,
+  recordInvalidJoinCode,
+} from './uidRateLimit';
 
 const JSON_HEADERS = {
   'Content-Type': 'application/json; charset=utf-8',
@@ -126,17 +131,22 @@ export async function dispatchFnRequest(
 
   let resolved = runtime;
   if (resolved === undefined) {
-    const { getFirebaseAdmin } = await import('./firebaseAdmin');
-    const admin = await getFirebaseAdmin();
-    resolved = admin
-      ? { db: admin.db as unknown as FnRuntime['db'], verifyIdToken: admin.verifyIdToken }
-      : null;
+    try {
+      const { getFirebaseAdmin } = await import('./firebaseAdmin');
+      const admin = await getFirebaseAdmin();
+      resolved = admin
+        ? { db: admin.db as unknown as FnRuntime['db'], verifyIdToken: admin.verifyIdToken }
+        : null;
+    } catch {
+      resolved = null;
+    }
   }
 
   if (!resolved) {
     return callableResponse(new HttpsError('unavailable', '尚未啟用'), request);
   }
 
+  let uid: string | undefined;
   try {
     const body = await readJsonBody(request);
     if (!body || typeof body !== 'object' || Array.isArray(body) || !('data' in body)) {
@@ -146,6 +156,13 @@ export async function dispatchFnRequest(
       request.headers.get('authorization'),
       resolved.verifyIdToken,
     );
+    uid = auth?.uid;
+    if (uid) {
+      checkUidRateLimit(uid);
+      if (name === 'joinGroupByCode') {
+        assertJoinCodeAttemptsAllowed(uid);
+      }
+    }
     const callableRequest: CallableRequest = {
       data: (body as { data: unknown }).data,
       auth,
@@ -156,6 +173,9 @@ export async function dispatchFnRequest(
     return jsonResponse(200, { result }, cors);
   } catch (error) {
     const mapped = mapThrownError(error);
+    if (uid && name === 'joinGroupByCode' && mapped.code === 'not-found') {
+      recordInvalidJoinCode(uid);
+    }
     return callableResponse(mapped, request);
   }
 }

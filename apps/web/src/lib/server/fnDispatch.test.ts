@@ -3,6 +3,11 @@ import { afterEach, beforeEach, expect, it } from 'vitest';
 import { dispatchFnRequest, type FnRuntime } from './fnDispatch';
 import { createMemoryGroupStore } from './memoryGroupStore';
 import { resetFirebaseAdminForTests } from './firebaseAdmin';
+import {
+  createUidRateLimiter,
+  resetUidRateLimitForTests,
+  setUidRateLimiterForTests,
+} from './uidRateLimit';
 
 function request(
   path: string,
@@ -42,11 +47,13 @@ function runtime(options?: {
 
 beforeEach(() => {
   resetFirebaseAdminForTests();
+  resetUidRateLimitForTests();
   delete process.env.FIREBASE_SERVICE_ACCOUNT_JSON;
 });
 
 afterEach(() => {
   resetFirebaseAdminForTests();
+  resetUidRateLimitForTests();
   delete process.env.FIREBASE_SERVICE_ACCOUNT_JSON;
 });
 
@@ -71,14 +78,31 @@ it('returns 404 for Firestore trigger names and never treats them as hosted', as
 
 it('returns 503 尚未啟用 when the service account is not configured', async () => {
   const res = await dispatchFnRequest(
-    'createGroup',
-    request('createGroup', { body: { data: {} }, headers: { Authorization: 'Bearer nope' } }),
+    'joinGroupByCode',
+    request('joinGroupByCode', { body: { data: {} }, headers: { Authorization: 'Bearer nope' } }),
     null,
   );
   expect(res.status).toBe(503);
   expect(await res.json()).toEqual({
     error: { status: 'UNAVAILABLE', message: '尚未啟用' },
   });
+});
+
+it('returns 404 for createGroup even when a runtime is provided', async () => {
+  const { runtime: deps, store } = runtime();
+  const res = await dispatchFnRequest(
+    'createGroup',
+    request('createGroup', {
+      body: { data: { name: '讀書會', type: 'study', schoolId: 'pu' } },
+      headers: { Authorization: 'Bearer valid-token' },
+    }),
+    deps,
+  );
+  expect(res.status).toBe(404);
+  expect(await res.json()).toEqual({
+    error: { status: 'NOT_FOUND', message: 'Unknown function: createGroup' },
+  });
+  expect(store.docs.size).toBe(0);
 });
 
 it('returns 401 when a configured handler is called without a bearer token', async () => {
@@ -215,45 +239,10 @@ it('lets a non-owner last member leave and never decrements below zero', async (
   expect(store.docs.get('users/alice/groups/one')?.status).toBe('left');
 });
 
-it('creates a group, owner membership, and user mirror in one transaction', async () => {
-  const store = createMemoryGroupStore([['schools/pu/members/alice', { status: 'active' }]]);
-  const { runtime: deps } = runtime({ store });
-  const res = await dispatchFnRequest(
-    'createGroup',
-    request('createGroup', {
-      body: { data: { name: '讀書會', type: 'study', schoolId: 'pu' } },
-      headers: { Authorization: 'Bearer valid-token' },
-    }),
-    deps,
-  );
-  expect(res.status).toBe(200);
-  const body = await res.json();
-  expect(body.result.success).toBe(true);
-  const groupId = body.result.groupId as string;
-  expect(store.docs.get(`groups/${groupId}`)).toMatchObject({
-    name: '讀書會',
-    type: 'study',
-    schoolId: 'pu',
-    memberCount: 1,
-    createdBy: 'alice',
-    verification: { status: 'unverified' },
-  });
-  expect(store.docs.get(`groups/${groupId}/members/alice`)).toMatchObject({
-    uid: 'alice',
-    role: 'owner',
-    status: 'active',
-  });
-  expect(store.docs.get(`users/alice/groups/${groupId}`)).toMatchObject({
-    groupId,
-    role: 'owner',
-    status: 'active',
-  });
-});
-
 it('does not reflect a disallowed Origin', async () => {
   const res = await dispatchFnRequest(
-    'createGroup',
-    request('createGroup', {
+    'joinGroupByCode',
+    request('joinGroupByCode', {
       body: { data: {} },
       headers: { Origin: 'https://evil.example' },
     }),
@@ -261,3 +250,63 @@ it('does not reflect a disallowed Origin', async () => {
   );
   expect(res.headers.get('access-control-allow-origin')).toBeNull();
 });
+
+it('returns 429 after more than 10 authenticated requests per uid per minute', async () => {
+  const { runtime: deps } = runtime({
+    store: createMemoryGroupStore([['schools/pu/members/alice', { status: 'active' }]]),
+  });
+  for (let i = 0; i < 10; i += 1) {
+    const res = await dispatchFnRequest(
+      'joinGroupByCode',
+      request('joinGroupByCode', {
+        body: { data: { schoolId: 'pu', joinCode: 'NOPE0000' } },
+        headers: { Authorization: 'Bearer valid-token' },
+      }),
+      deps,
+    );
+    expect(res.status).toBe(404);
+  }
+  const limited = await dispatchFnRequest(
+    'joinGroupByCode',
+    request('joinGroupByCode', {
+      body: { data: { schoolId: 'pu', joinCode: 'NOPE0000' } },
+      headers: { Authorization: 'Bearer valid-token' },
+    }),
+    deps,
+  );
+  expect(limited.status).toBe(429);
+  expect(await limited.json()).toEqual({
+    error: { status: 'RESOURCE_EXHAUSTED', message: 'Too many requests' },
+  });
+});
+
+it('returns 429 after 20 invalid join codes from the same uid', async () => {
+  setUidRateLimiterForTests(
+    createUidRateLimiter({ requestsPerMinute: 1000, invalidJoinCodesPerHour: 20 }),
+  );
+  const { runtime: deps } = runtime({
+    store: createMemoryGroupStore([['schools/pu/members/alice', { status: 'active' }]]),
+  });
+  for (let i = 0; i < 20; i += 1) {
+    const res = await dispatchFnRequest(
+      'joinGroupByCode',
+      request('joinGroupByCode', {
+        body: { data: { schoolId: 'pu', joinCode: 'NOPE0000' } },
+        headers: { Authorization: 'Bearer valid-token' },
+      }),
+      deps,
+    );
+    expect(res.status).toBe(404);
+  }
+  const limited = await dispatchFnRequest(
+    'joinGroupByCode',
+    request('joinGroupByCode', {
+      body: { data: { schoolId: 'pu', joinCode: 'NOPE0000' } },
+      headers: { Authorization: 'Bearer valid-token' },
+    }),
+    deps,
+  );
+  expect(limited.status).toBe(429);
+  expect((await limited.json()).error.status).toBe('RESOURCE_EXHAUSTED');
+});
+

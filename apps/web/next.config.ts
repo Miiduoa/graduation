@@ -1,5 +1,8 @@
+import path from 'node:path';
 import type { NextConfig } from 'next';
 import { legacyEnabled, legacyRewrites } from './src/lib/legacy-routing';
+
+const firebaseAdminBrowserStub = path.join(__dirname, 'src/lib/nodeNativeStub.ts');
 
 // 本機測試環境（Firebase 模擬器、demo- 專案）才放行 127.0.0.1／localhost，正式建置不會加。
 const emulatorTestEnv =
@@ -50,12 +53,25 @@ const nextConfig: NextConfig = {
       'firebase-admin': { browser: './src/lib/nodeNativeStub.ts' },
     },
   },
-  webpack: (config) => {
+  webpack: (config, { isServer }) => {
     config.resolve.alias = {
       ...config.resolve.alias,
       'onnxruntime-node$': false,
       sharp$: false,
     };
+    if (!isServer) {
+      config.resolve.alias = {
+        ...config.resolve.alias,
+        'firebase-admin': firebaseAdminBrowserStub,
+        'firebase-admin$': firebaseAdminBrowserStub,
+        'firebase-admin/app': firebaseAdminBrowserStub,
+        'firebase-admin/app$': firebaseAdminBrowserStub,
+        'firebase-admin/auth': firebaseAdminBrowserStub,
+        'firebase-admin/auth$': firebaseAdminBrowserStub,
+        'firebase-admin/firestore': firebaseAdminBrowserStub,
+        'firebase-admin/firestore$': firebaseAdminBrowserStub,
+      };
+    }
     return config;
   },
   async rewrites() {

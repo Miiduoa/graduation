@@ -60,7 +60,7 @@ try {
   });
   const after404 = rssKb(child.pid);
 
-  const unconfigured = await fetch(`http://127.0.0.1:${port}/api/fn/createGroup`, {
+  const unconfigured = await fetch(`http://127.0.0.1:${port}/api/fn/joinGroupByCode`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: 'Bearer nope' },
     body: JSON.stringify({ data: {} }),
@@ -73,10 +73,10 @@ try {
     rssMb: {
       afterBoot: Number((afterBoot / 1024).toFixed(1)),
       afterUnknown404: Number((after404 / 1024).toFixed(1)),
-      afterCreateGroup503: Number((after503 / 1024).toFixed(1)),
+      afterJoinGroupByCode503: Number((after503 / 1024).toFixed(1)),
       deltaAfterRoutesMb: Number(((after503 - afterBoot) / 1024).toFixed(1)),
     },
-    statuses: { unknown: unknown.status, createGroup: unconfigured.status },
+    statuses: { unknown: unknown.status, joinGroupByCode: unconfigured.status },
     firebaseAdminMappedAtBoot: adminMappedAtBoot,
     firebaseAdminMappedAfterRoutes: adminMappedAfter,
   };
