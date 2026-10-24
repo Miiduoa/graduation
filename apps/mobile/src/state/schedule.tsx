@@ -397,10 +397,14 @@ function ScheduleScopeProvider({
 
   const isMountedRef = useRef(true);
   const refreshGenerationRef = useRef(0);
+  const activeRefreshRef = useRef(0);
   const sourceSchoolRef = useRef(schoolId);
   sourceSchoolRef.current = schoolId;
   const profileSchoolRef = useRef(profileSchoolId);
-  profileSchoolRef.current = profileSchoolId;
+  if (profileSchoolRef.current !== profileSchoolId) {
+    profileSchoolRef.current = profileSchoolId;
+    refreshGenerationRef.current += 1;
+  }
 
   useEffect(() => {
     isMountedRef.current = true;
@@ -498,41 +502,6 @@ function ScheduleScopeProvider({
   const hasFetchedRef = useRef(false);
   const fetchAbortRef = useRef<AbortController | null>(null);
   const refreshScheduleRef = useRef<() => Promise<Course[]>>(async () => []);
-
-  useEffect(() => {
-    if (!userId) {
-      return;
-    }
-
-    if (SHOULD_SKIP_REMOTE_SCHEDULE_SYNC) {
-      hasFetchedRef.current = true;
-      return;
-    }
-
-    if (!loading && courses.length === 0 && !hasFetchedRef.current) {
-      hasFetchedRef.current = true;
-      fetchAbortRef.current = new AbortController();
-
-      (async () => {
-        try {
-          await refreshScheduleRef.current();
-        } catch (error) {
-          if (isMountedRef.current) {
-            console.warn('[Schedule] Auto-fetch failed:', error);
-          }
-        } finally {
-          fetchAbortRef.current = null;
-        }
-      })();
-    }
-
-    return () => {
-      if (fetchAbortRef.current) {
-        fetchAbortRef.current.abort();
-        fetchAbortRef.current = null;
-      }
-    };
-  }, [userId, loading, courses.length]);
 
   useEffect(() => {
     if (!loading) {
@@ -659,6 +628,7 @@ function ScheduleScopeProvider({
     const generation = ++refreshGenerationRef.current;
 
     if (!userId || !schoolId || toPublicSchoolId(profileSchoolId) !== schoolId) return courses;
+    activeRefreshRef.current = generation;
 
     const applyCourses = (next: Course[]): Course[] => {
       if (!isRefreshCurrent(generation, sourceSchool)) return courses;
@@ -745,7 +715,7 @@ function ScheduleScopeProvider({
       }
       return courses;
     } finally {
-      if (isRefreshCurrent(generation, sourceSchool)) {
+      if (isMountedRef.current && activeRefreshRef.current === generation) {
         setLoading(false);
       }
     }
@@ -754,6 +724,51 @@ function ScheduleScopeProvider({
   useEffect(() => {
     refreshScheduleRef.current = refreshSchedule;
   }, [refreshSchedule]);
+
+  useEffect(() => {
+    hasFetchedRef.current = false;
+  }, [profileSchoolId]);
+
+  useEffect(() => {
+    if (!userId) {
+      return;
+    }
+
+    if (SHOULD_SKIP_REMOTE_SCHEDULE_SYNC) {
+      hasFetchedRef.current = true;
+      return;
+    }
+
+    // Await confirmed matching canonical profile before consuming the one-shot.
+    // Late profile arrival / revocation is fenced via deps + isRefreshCurrent.
+    if (!schoolId || toPublicSchoolId(profileSchoolId) !== schoolId) {
+      return;
+    }
+
+    if (!loading && courses.length === 0 && !hasFetchedRef.current) {
+      hasFetchedRef.current = true;
+      fetchAbortRef.current = new AbortController();
+
+      (async () => {
+        try {
+          await refreshScheduleRef.current();
+        } catch (error) {
+          if (isMountedRef.current) {
+            console.warn('[Schedule] Auto-fetch failed:', error);
+          }
+        } finally {
+          fetchAbortRef.current = null;
+        }
+      })();
+    }
+
+    return () => {
+      if (fetchAbortRef.current) {
+        fetchAbortRef.current.abort();
+        fetchAbortRef.current = null;
+      }
+    };
+  }, [userId, loading, courses.length, schoolId, profileSchoolId]);
 
   const exportToCalendar = useCallback(async (): Promise<CalendarEvent[]> => {
     const calendarEvents: CalendarEvent[] = [];

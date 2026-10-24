@@ -270,6 +270,80 @@ test('unresolved school profile cannot read PU cache or fetch private enrollment
   expect(mockGetCachedCourses).not.toHaveBeenCalled();
 });
 
+test('deferred matching profile auto-fetches; mismatch and wrong uid do not', async () => {
+  mockAuth.profile = null;
+  mockListEnrollments.mockResolvedValue([
+    { courseId: 'deferred-1', status: 'enrolled', schoolId: 'pu' },
+  ]);
+  mockGetCourse.mockResolvedValue(course('deferred-1', 'Deferred Class', 'pu'));
+
+  const view = render(tree());
+  await waitFor(() => expect(latest.loading).toBe(false));
+  expect(mockListEnrollments).not.toHaveBeenCalled();
+  expect(latest.courseIds).toEqual([]);
+
+  mockAuth.profile = { uid: 'user-a', schoolId: 'pu' };
+  view.rerender(tree());
+  await waitFor(() => expect(mockListEnrollments).toHaveBeenCalled());
+  await view.findByText('Deferred Class');
+  expect(latest.courseIds).toEqual(['deferred-1']);
+
+  view.unmount();
+  jest.clearAllMocks();
+  await AsyncStorage.clear();
+  mockGetCachedCourses.mockResolvedValue(null);
+  mockGetCachedTCCourses.mockResolvedValue([]);
+  mockGetAnyCachedCourses.mockResolvedValue(null);
+  mockGetAnyCachedTCCourses.mockResolvedValue(null);
+  mockListEnrollments.mockResolvedValue([
+    { courseId: 'mismatch-1', status: 'enrolled', schoolId: 'pu' },
+  ]);
+  mockGetCourse.mockResolvedValue(course('mismatch-1', 'Mismatch Class', 'pu'));
+
+  mockAuth.user = { uid: 'user-a' };
+  mockAuth.profile = null;
+  mockSchool.school = { id: 'pu' };
+  mockSchool.schoolId = 'pu';
+
+  const mismatchView = render(tree());
+  await waitFor(() => expect(latest.loading).toBe(false));
+  expect(mockListEnrollments).not.toHaveBeenCalled();
+
+  mockAuth.profile = { uid: 'user-a', schoolId: 'nthu' };
+  mismatchView.rerender(tree());
+  await waitFor(() => expect(latest.loading).toBe(false));
+  expect(mockListEnrollments).not.toHaveBeenCalled();
+  expect(latest.courseIds).toEqual([]);
+
+  mockAuth.profile = { uid: 'other-user', schoolId: 'pu' };
+  mismatchView.rerender(tree());
+  await waitFor(() => expect(latest.loading).toBe(false));
+  expect(mockListEnrollments).not.toHaveBeenCalled();
+  expect(latest.courseIds).toEqual([]);
+});
+
+test('profile revocation and restoration fences the old request and retries the current session', async () => {
+  const prior = deferred<unknown[]>();
+  mockListEnrollments.mockImplementationOnce(() => prior.promise).mockResolvedValue([
+    { courseId: 'current', status: 'enrolled', schoolId: 'pu' },
+  ]);
+  mockGetCourse.mockImplementation(async (id: string) => course(id, id, 'pu'));
+  const view = render(tree());
+  await waitFor(() => expect(mockListEnrollments).toHaveBeenCalledTimes(1));
+  mockAuth.profile = null;
+  view.rerender(tree());
+  mockAuth.profile = { uid: 'user-a', schoolId: 'pu' };
+  view.rerender(tree());
+  await act(async () => {
+    prior.resolve([{ courseId: 'revoked', status: 'enrolled', schoolId: 'pu' }]);
+  });
+  await view.findByText('current');
+  expect(mockGetCourse).not.toHaveBeenCalledWith('revoked', 'pu');
+  expect(latest.loading).toBe(false);
+  expect(latest.courseIds).toEqual(['current']);
+  expect(mockListEnrollments).toHaveBeenCalledTimes(2);
+});
+
 test('unscoped legacy courses and events are not imported into a scope', async () => {
   await AsyncStorage.setItem(
     '@schedule_courses',

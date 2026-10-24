@@ -71,6 +71,24 @@ function fromSchoolCourse(course: AcademicCourse): PersonalCourse {
   });
 }
 
+/** Strict HH:mm (00:00–23:59); returns minutes past midnight, or null. */
+function clockMinutes(value: string | undefined): number | null {
+  if (!value || !/^([01]\d|2[0-3]):[0-5]\d$/.test(value)) return null;
+  const [hour, minute] = value.split(':').map(Number);
+  return hour * 60 + minute;
+}
+
+/** Known actual clock only when both ends are strict HH:mm and end > start. */
+function actualClockLabel(
+  startTime: string | undefined,
+  endTime: string | undefined,
+): string | null {
+  const start = clockMinutes(startTime);
+  const end = clockMinutes(endTime);
+  if (start === null || end === null || end <= start || !startTime || !endTime) return null;
+  return `${startTime}–${endTime}`;
+}
+
 export function PersonalTimetable() {
   const context = usePersonalImportScope();
   if (context.loading) return <p role="status">正在確認課表…</p>;
@@ -365,35 +383,51 @@ function TimetableWorkspace({ schoolId }: { schoolId: string }) {
         )}
         <p>自行匯入 {importedCourses.length + missingImportTimes.length} 筆</p>
         <ul className={styles.list}>
-          {visibleCourses.map((course) => (
-            <li key={course.id}>
-              <strong>{course.name}</strong>
-              <p>
-                {WEEKDAY_LABELS[course.day - 1] || '星期未填'} ·{' '}
-                {course.start > 0
-                  ? `第 ${course.start}–${course.end} 節（時間未確認）`
-                  : '時間未確認'}
-                {' · '}
-                {course.room || '教室未填'}
-              </p>
-            </li>
-          ))}
-          {missingImportTimes.map((record) => (
-            <li key={`record:${record.id}`}>
-              <strong>{record.title}</strong>
-              <p>
-                {['', '星期一', '星期二', '星期三', '星期四', '星期五', '星期六', '星期日'][
-                  record.dayOfWeek || 0
-                ] || '星期未填'}
-                {' · '}
-                {record.startTime && record.endTime
-                  ? `${record.startTime}–${record.endTime}`
-                  : '時間未確認'}
-                {' · '}
-                {record.location || '教室未填'}
-              </p>
-            </li>
-          ))}
+          {visibleCourses.map((course) => {
+            const importId = course.id.startsWith('import:') ? course.id.slice('import:'.length) : '';
+            const source =
+              importId &&
+              imported.records.find(
+                (row) =>
+                  row.id === importId &&
+                  row.kind === 'timetable' &&
+                  row.schoolId === schoolId &&
+                  `${row.academicYear}|${row.semester}` === activeTerm,
+              );
+            const clock = source ? actualClockLabel(source.startTime, source.endTime) : null;
+            return (
+              <li key={course.id}>
+                <strong>{course.name}</strong>
+                <p>
+                  {WEEKDAY_LABELS[course.day - 1] || '星期未填'} ·{' '}
+                  {clock
+                    ? clock
+                    : course.start > 0
+                      ? `第 ${course.start}–${course.end} 節（時間未確認）`
+                      : '時間未確認'}
+                  {' · '}
+                  {course.room || '教室未填'}
+                </p>
+              </li>
+            );
+          })}
+          {missingImportTimes.map((record) => {
+            const clock = actualClockLabel(record.startTime, record.endTime);
+            return (
+              <li key={`record:${record.id}`}>
+                <strong>{record.title}</strong>
+                <p>
+                  {['', '星期一', '星期二', '星期三', '星期四', '星期五', '星期六', '星期日'][
+                    record.dayOfWeek || 0
+                  ] || '星期未填'}
+                  {' · '}
+                  {clock || '時間未確認'}
+                  {' · '}
+                  {record.location || '教室未填'}
+                </p>
+              </li>
+            );
+          })}
         </ul>
         {!visibleCourses.length && !missingImportTimes.length && (
           <p>這所學校還沒有個人課程紀錄。</p>
