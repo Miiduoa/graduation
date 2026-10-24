@@ -4,11 +4,14 @@ import { beforeEach, expect, it, vi } from 'vitest';
 
 const state = vi.hoisted(() => ({
   uid: 'alice' as string | null,
+  schoolId: 'pu',
   rows: [] as Array<{ id: string; data: Record<string, unknown> }>,
   emitters: [] as Array<() => void>,
   paths: [] as string[],
 }));
-vi.mock('@/components/AuthGuard', () => ({ useAuth: () => ({ user: state.uid ? { uid: state.uid } : null, loading: false, error: null }) }));
+vi.mock('@/components/AuthGuard', () => ({
+  useAuth: () => ({ user: state.uid ? { uid: state.uid } : null, loading: false, error: null }),
+}));
 vi.mock('@/components/SiteShell', () => ({
   SiteShell: ({
     children,
@@ -29,7 +32,13 @@ vi.mock('@/components/SiteShell', () => ({
     </main>
   ),
 }));
-vi.mock('@/lib/pageContext', () => ({ resolveSchoolPageContext: () => ({ schoolId: 'pu', schoolName: '靜宜大學', schoolCode: 'PU' }) }));
+vi.mock('@/lib/pageContext', () => ({
+  resolveSchoolPageContext: () => ({
+    schoolId: state.schoolId,
+    schoolName: '靜宜大學',
+    schoolCode: 'PU',
+  }),
+}));
 vi.mock('@/lib/firebase', () => ({ getDb: () => ({}), isFirebaseConfigured: () => true }));
 vi.mock('firebase/firestore', () => ({
   collection: (_db: unknown, ...path: string[]) => ({ path: path.join('/') }),
@@ -38,7 +47,8 @@ vi.mock('firebase/firestore', () => ({
   limit: () => null,
   onSnapshot: (ref: { path: string }, next: (snapshot: unknown) => void) => {
     state.paths.push(ref.path);
-    const emit = () => next({ docs: state.rows.map(row => ({ id: row.id, data: () => row.data })) });
+    const emit = () =>
+      next({ docs: state.rows.map((row) => ({ id: row.id, data: () => row.data })) });
     state.emitters.push(emit);
     emit();
     return () => undefined;
@@ -51,12 +61,44 @@ const placed = { toDate: () => new Date('2026-10-13T04:05:00.000Z') };
 beforeEach(() => {
   vi.unstubAllEnvs();
   state.uid = 'alice';
+  state.schoolId = 'pu';
   state.paths = [];
   state.emitters = [];
   state.rows = [
-    { id: 'co_numbered_aaa111', data: { status: 'ready', queueNumber: 7, cafeteria: '校園餐廳', total: 100, createdAt: placed, items: [{ name: '雞腿飯', quantity: 1 }] } },
-    { id: 'co_waiting_bbb222', data: { status: 'pending', queueNumber: null, cafeteria: '校園餐廳', total: 60, createdAt: placed, items: [{ name: '紅茶', quantity: 2 }] } },
-    { id: 'co_cancel_ccc333', data: { status: 'cancelled', queueNumber: null, cancelledQueueNumber: 5, cancelledBy: 'merchant', cafeteria: '校園餐廳', createdAt: placed, items: [] } },
+    {
+      id: 'co_numbered_aaa111',
+      data: {
+        status: 'ready',
+        queueNumber: 7,
+        cafeteria: '校園餐廳',
+        total: 100,
+        createdAt: placed,
+        items: [{ name: '雞腿飯', quantity: 1 }],
+      },
+    },
+    {
+      id: 'co_waiting_bbb222',
+      data: {
+        status: 'pending',
+        queueNumber: null,
+        cafeteria: '校園餐廳',
+        total: 60,
+        createdAt: placed,
+        items: [{ name: '紅茶', quantity: 2 }],
+      },
+    },
+    {
+      id: 'co_cancel_ccc333',
+      data: {
+        status: 'cancelled',
+        queueNumber: null,
+        cancelledQueueNumber: 5,
+        cancelledBy: 'merchant',
+        cafeteria: '校園餐廳',
+        createdAt: placed,
+        items: [],
+      },
+    },
   ];
 });
 
@@ -75,8 +117,12 @@ it('我的訂單（網頁）：讀伺服器上學生自己的訂單，號碼、�
 
 it('店家給號碼或取消後即時更新', async () => {
   render(<OrdersPage />);
-  state.rows = state.rows.map(row => row.id === 'co_waiting_bbb222' ? { ...row, data: { ...row.data, status: 'confirmed', queueNumber: 9 } } : row);
-  await act(async () => state.emitters.forEach(emit => emit()));
+  state.rows = state.rows.map((row) =>
+    row.id === 'co_waiting_bbb222'
+      ? { ...row, data: { ...row.data, status: 'confirmed', queueNumber: 9 } }
+      : row,
+  );
+  await act(async () => state.emitters.forEach((emit) => emit()));
   expect(screen.getByText('取餐號碼 9')).toBeTruthy();
   expect(screen.queryByText('號碼還沒拿到，請到櫃台確認。')).toBeNull();
 });
@@ -92,12 +138,13 @@ it('沒登入、線上點餐還沒開：標題、副標題、內文都只寫「�
   expect(state.paths).toEqual([]);
 });
 
-it('沒有訂單、線上點餐還沒開：只寫「目前還不能線上點餐」，不叫學生去點餐', () => {
+it('沒有訂單、線上點餐還沒開：保留既有訂單入口，不叫學生去點餐', () => {
   state.rows = [];
   render(<OrdersPage />);
   expect(screen.getAllByRole('heading', { name: '目前還不能線上點餐' }).length).toBeGreaterThan(0);
-  expect(screen.queryByText(/還沒有訂單|要點餐|餐廳|會自動更新/)).toBeNull();
-  expect(screen.queryByRole('link')).toBeNull();
+  expect(screen.queryByText(/還沒有訂單|要點餐|會自動更新/)).toBeNull();
+  expect(screen.getAllByRole('link')).toHaveLength(1);
+  expect(screen.getByRole('link', { name: '訂單與取餐進度' }).getAttribute('href')).toBe('/food');
 });
 
 it('線上點餐打開、沒登入：請先登入，不讀訂單', () => {
@@ -107,6 +154,44 @@ it('線上點餐打開、沒登入：請先登入，不讀訂單', () => {
   expect(screen.getByRole('heading', { name: '我的訂單' })).toBeTruthy();
   expect(screen.getByText('取餐號碼和訂單狀態以店家那邊為準，會自動更新。')).toBeTruthy();
   expect(screen.getByText('登入後查看訂單')).toBeTruthy();
-  expect(screen.getByRole('link', { name: '登入' }).getAttribute('href')).toBe('/login?returnUrl=%2Forders');
+  expect(screen.getByRole('link', { name: '登入' }).getAttribute('href')).toBe(
+    '/login?returnUrl=%2Forders%3FschoolId%3Dpu',
+  );
   expect(state.paths).toEqual([]);
+});
+
+it('preserves the selected school through sign-in and reads that school after sign-in', () => {
+  vi.stubEnv('NEXT_PUBLIC_ONLINE_ORDERING', 'true');
+  state.schoolId = 'nthu';
+  state.uid = null;
+  const view = render(<OrdersPage />);
+  expect(screen.getByRole('link', { name: '登入' }).getAttribute('href')).toBe(
+    '/login?returnUrl=%2Forders%3FschoolId%3Dnthu',
+  );
+  expect(state.paths).toEqual([]);
+  state.uid = 'alice';
+  view.rerender(<OrdersPage />);
+  expect(state.paths).toEqual(['users/alice/schools/nthu/orders']);
+});
+
+it('does not classify an unknown server status as finished', () => {
+  state.rows = [{ id: 'co_unknown', data: { status: 'awaiting-review', items: [] } }];
+  render(<OrdersPage />);
+  expect(screen.getByRole('heading', { name: /進行中/ })).toBeTruthy();
+  expect(screen.queryByRole('heading', { name: /已結束/ })).toBeNull();
+  expect(screen.getByText('訂單進度尚待確認。')).toBeTruthy();
+});
+
+it('線上點餐打開、有訂單：區分進行中與已結束，並標明 App 訂單與站內點餐路徑', () => {
+  vi.stubEnv('NEXT_PUBLIC_ONLINE_ORDERING', 'true');
+  render(<OrdersPage />);
+  expect(screen.getByRole('heading', { name: /進行中/ })).toBeTruthy();
+  expect(screen.getByRole('heading', { name: /已結束/ })).toBeTruthy();
+  expect(screen.getByText('餐點好了，請到店取餐。')).toBeTruthy();
+  expect(screen.getByText('等待店家提供取餐號碼')).toBeTruthy();
+  expect(screen.getByRole('link', { name: '點餐與取餐' }).getAttribute('href')).toBe('/food');
+  expect(screen.getByRole('link', { name: '餐廳資訊' }).getAttribute('href')).toBe(
+    '/cafeteria?schoolId=pu',
+  );
+  expect(screen.getByText(/此頁是 App「餐廳」留下的訂單/)).toBeTruthy();
 });

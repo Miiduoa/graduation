@@ -1,0 +1,123 @@
+.page {
+  display: grid;
+  gap: 24px;
+  max-width: 720px;
+  min-width: 0;
+}
+
+.routeNote {
+  margin: 0;
+  padding: 14px 16px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: var(--muted);
+  font-size: 14px;
+  line-height: 1.7;
+}
+
+.routeNote a {
+  color: var(--text);
+  font-weight: 600;
+  text-underline-offset: 3px;
+}
+
+.list {
+  display: grid;
+  gap: 20px;
+}
+
+.group {
+  display: grid;
+  gap: 12px;
+}
+
+.groupTitle {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 650;
+}
+
+.groupTitle span {
+  margin-left: 8px;
+  color: var(--muted);
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+}
+
+.card {
+  display: grid;
+  gap: 8px;
+  padding: 18px 20px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+}
+
+.card[data-tone='active'] {
+  border-color: color-mix(in srgb, var(--brand) 40%, var(--border));
+}
+
+.status {
+  margin: 0;
+  font-weight: 650;
+  line-height: 1.5;
+}
+
+.pickup {
+  margin: 0;
+  font-size: clamp(22px, 4vw, 28px);
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.3;
+}
+
+.pickup[data-tone='danger'] {
+  color: var(--danger, #b42318);
+  font-size: 17px;
+}
+
+.detail {
+  margin: 0;
+  line-height: 1.6;
+}
+
+.meta {
+  margin: 0;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.next {
+  margin: 4px 0 0;
+  font-weight: 600;
+  line-height: 1.6;
+}
+
+.empty,
+.signIn {
+  display: grid;
+  gap: 12px;
+  max-width: 36rem;
+}
+
+.empty h2,
+.signIn h2 {
+  margin: 0;
+  font-size: 22px;
+  font-weight: 650;
+}
+
+.empty p,
+.signIn p {
+  margin: 0;
+  color: var(--muted);
+  line-height: 1.7;
+}
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+}

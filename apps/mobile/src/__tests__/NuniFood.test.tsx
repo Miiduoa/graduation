@@ -212,12 +212,30 @@ async function respond(path: string, _context?: string, input?: any) {
       lines: input.items.map((item: any) => ({
         ...lines()[0],
         quantity: item.quantity,
-        lineTotal: price(90 * item.quantity),
+        selectedOptions: item.selectedOptionIds.map((id: string) => ({
+          optionId: id,
+          nameSnapshot: id === 'white' ? '白飯' : '糙米',
+          priceDelta: price(id === 'white' ? 0 : 5),
+        })),
+        unitPrice: price(item.selectedOptionIds.includes('white') ? 85 : 90),
+        lineTotal: price((item.selectedOptionIds.includes('white') ? 85 : 90) * item.quantity),
         ...(item.customerNote ? { customerNote: item.customerNote } : {}),
       })),
-      subtotal: price(180),
+      subtotal: price(
+        input.items.reduce(
+          (sum: number, item: any) =>
+            sum + (item.selectedOptionIds.includes('white') ? 85 : 90) * item.quantity,
+          0,
+        ),
+      ),
       fees: [],
-      total: price(180),
+      total: price(
+        input.items.reduce(
+          (sum: number, item: any) =>
+            sum + (item.selectedOptionIds.includes('white') ? 85 : 90) * item.quantity,
+          0,
+        ),
+      ),
       expiresAt,
       allowedActions: ['create-order'],
     };
@@ -298,12 +316,20 @@ const writes = () => mockRequest.mock.calls.filter((call) => call[2] !== undefin
 async function openMenu(view: ReturnType<typeof render>) {
   fireEvent.press(await view.findByRole('button', { name: '查看餐點：第一校區' }));
   fireEvent.press(await view.findByRole('button', { name: '選餐：餐坊' }));
+  await view.findByRole('button', { name: '選擇雞腿飯' });
+}
+async function customizeRice(view: ReturnType<typeof render>, quantity = '2') {
+  fireEvent.press(view.getByRole('button', { name: /選擇雞腿飯|調整雞腿飯/ }));
   await view.findByLabelText('雞腿飯數量');
+  fireEvent.changeText(view.getByLabelText('雞腿飯數量'), quantity);
+  fireEvent.press(view.getByRole('button', { name: '雞腿飯：糙米（5 元）' }));
+  fireEvent.press(view.getByRole('button', { name: '放入購物籃' }));
+  await view.findByRole('button', { name: '查看購物籃，已選 2 份' });
 }
 async function fillQuote(view: ReturnType<typeof render>) {
   await openMenu(view);
-  fireEvent.changeText(view.getByLabelText('雞腿飯數量'), '2');
-  fireEvent.press(view.getByRole('button', { name: '雞腿飯：糙米（5 元）' }));
+  await customizeRice(view);
+  fireEvent.press(view.getByRole('button', { name: '查看購物籃，已選 2 份' }));
   fireEvent.press(view.getByRole('button', { name: '確認餐點與金額' }));
   await view.findByText('應付總額 180 元');
 }
@@ -372,12 +398,144 @@ test('student selects required options, reviews whole TWD quote and explicitly p
 test('missing required option and out-of-range quantities do not request a quote', async () => {
   const view = render(ui());
   await openMenu(view);
+  fireEvent.press(view.getByRole('button', { name: '選擇雞腿飯' }));
+  await view.findByLabelText('雞腿飯數量');
   fireEvent.changeText(view.getByLabelText('雞腿飯數量'), '2');
-  fireEvent.press(view.getByRole('button', { name: '確認餐點與金額' }));
-  expect(view.getByRole('alert')).toHaveTextContent(/必選配料/);
+  fireEvent.press(view.getByRole('button', { name: '放入購物籃' }));
+  expect(view.getByRole('alert')).toHaveTextContent(/米飯/);
   fireEvent.press(view.getByRole('button', { name: '雞腿飯：糙米（5 元）' }));
+  fireEvent.press(view.getByRole('button', { name: '放入購物籃' }));
+  await view.findByRole('button', { name: '查看購物籃，已選 2 份' });
+  fireEvent.press(view.getByRole('button', { name: '查看購物籃，已選 2 份' }));
   fireEvent.changeText(view.getByLabelText('雞腿飯數量'), '21');
   fireEvent.press(view.getByRole('button', { name: '確認餐點與金額' }));
+  expect(view.getAllByRole('alert').some((node) => /1–20|數量/.test(node.props.children))).toBe(
+    true,
+  );
+  expect(writes()).toHaveLength(0);
+});
+test('menu customization and basket navigation preserve chosen options and notes before quoting', async () => {
+  const view = render(ui());
+  await openMenu(view);
+  expect(view.queryByLabelText('雞腿飯數量')).toBeNull();
+  expect(view.queryByLabelText('雞腿飯備註')).toBeNull();
+  fireEvent.press(view.getByRole('button', { name: '選擇雞腿飯' }));
+  fireEvent.changeText(view.getByLabelText('雞腿飯數量'), '2');
+  fireEvent.changeText(view.getByLabelText('雞腿飯備註'), '醬汁另外放');
+  fireEvent.press(view.getByRole('button', { name: '放入購物籃' }));
+  expect(view.getAllByRole('alert')).toHaveLength(1);
+  expect(view.getByRole('alert')).toHaveTextContent(/米飯/);
+  expect(writes()).toHaveLength(0);
+  fireEvent.press(view.getByRole('button', { name: '雞腿飯：糙米（5 元）' }));
+  fireEvent.press(view.getByRole('button', { name: '放入購物籃' }));
+  fireEvent.press(view.getByRole('button', { name: '查看購物籃，已選 2 份' }));
+  expect(view.getByLabelText('雞腿飯備註').props.value).toBe('醬汁另外放');
+  expect(
+    view.getByRole('button', { name: '雞腿飯：糙米（5 元）' }).props.accessibilityState.selected,
+  ).toBe(true);
+  fireEvent.press(view.getByRole('button', { name: '繼續選餐' }));
+  expect(view.queryByLabelText('雞腿飯數量')).toBeNull();
+  fireEvent.press(view.getByRole('button', { name: '調整雞腿飯' }));
+  expect(view.getByLabelText('雞腿飯數量').props.value).toBe('2');
+  expect(view.getByLabelText('雞腿飯備註').props.value).toBe('醬汁另外放');
+  expect(writes()).toHaveLength(0);
+});
+test('returning from a new customization keeps a draft without putting an unfinished dish in the basket', async () => {
+  const view = render(ui());
+  await openMenu(view);
+  fireEvent.press(view.getByRole('button', { name: '選擇雞腿飯' }));
+  fireEvent.changeText(view.getByLabelText('雞腿飯數量'), '3');
+  fireEvent.changeText(view.getByLabelText('雞腿飯備註'), '醬汁另外放');
+  fireEvent.press(view.getByRole('button', { name: '雞腿飯：糙米（5 元）' }));
+  fireEvent.press(view.getByRole('button', { name: '返回菜單' }));
+  expect(view.getByRole('button', { name: '購物籃還是空的' })).toBeDisabled();
+  fireEvent.press(view.getByRole('button', { name: '選擇雞腿飯' }));
+  expect(view.getByLabelText('雞腿飯數量').props.value).toBe('3');
+  expect(view.getByLabelText('雞腿飯備註').props.value).toBe('醬汁另外放');
+  expect(
+    view.getByRole('button', { name: '雞腿飯：糙米（5 元）' }).props.accessibilityState.selected,
+  ).toBe(true);
+  fireEvent.press(view.getByRole('button', { name: '放入購物籃' }));
+  expect(view.getByRole('button', { name: '查看購物籃，已選 3 份' })).toBeEnabled();
+  expect(writes()).toHaveLength(0);
+});
+test.each(['zero', 'remove'] as const)(
+  '%s keeps customization available when the dish is selected again',
+  async (method) => {
+    const view = render(ui());
+    await openMenu(view);
+    fireEvent.press(view.getByRole('button', { name: '選擇雞腿飯' }));
+    fireEvent.changeText(view.getByLabelText('雞腿飯備註'), '少醬');
+    fireEvent.press(view.getByRole('button', { name: '雞腿飯：糙米（5 元）' }));
+    fireEvent.press(view.getByRole('button', { name: '放入購物籃' }));
+    fireEvent.press(view.getByRole('button', { name: '查看購物籃，已選 1 份' }));
+    if (method === 'zero') fireEvent.press(view.getByRole('button', { name: '減少雞腿飯數量' }));
+    else fireEvent.press(view.getByRole('button', { name: '移除：雞腿飯' }));
+    expect(view.getByText('購物籃還是空的，請先選餐。')).toBeTruthy();
+    expect(view.getByRole('button', { name: '確認餐點與金額' })).toBeDisabled();
+    fireEvent.press(view.getByRole('button', { name: '繼續選餐' }));
+    fireEvent.press(view.getByRole('button', { name: '選擇雞腿飯' }));
+    expect(view.getByLabelText('雞腿飯數量').props.value).toBe('1');
+    expect(view.getByLabelText('雞腿飯備註').props.value).toBe('少醬');
+    expect(
+      view.getByRole('button', { name: '雞腿飯：糙米（5 元）' }).props.accessibilityState.selected,
+    ).toBe(true);
+    fireEvent.press(view.getByRole('button', { name: '放入購物籃' }));
+    fireEvent.press(view.getByRole('button', { name: '查看購物籃，已選 1 份' }));
+    fireEvent.press(view.getByRole('button', { name: '確認餐點與金額' }));
+    await view.findByText('應付總額 90 元');
+    expect(writes()[0][2].items).toEqual([
+      { menuItemId: 'rice', quantity: 1, selectedOptionIds: ['brown'], customerNote: '少醬' },
+    ]);
+  },
+);
+test('choosing a different single-choice option replaces the previous choice', async () => {
+  mockRequest.mockImplementation(async (path, context, input) => {
+    const result = await respond(path, context, input);
+    if (path === `${realm}/locations/location-one/menu`)
+      (result as any).sections[0].items[0].optionGroups[0].options.push({
+        id: 'white',
+        name: '白飯',
+        priceDelta: price(0),
+        available: true,
+      });
+    return result;
+  });
+  const view = render(ui());
+  await openMenu(view);
+  fireEvent.press(view.getByRole('button', { name: '選擇雞腿飯' }));
+  fireEvent.press(view.getByRole('button', { name: '雞腿飯：糙米（5 元）' }));
+  fireEvent.press(view.getByRole('button', { name: '雞腿飯：白飯（0 元）' }));
+  expect(
+    view.getByRole('button', { name: '雞腿飯：糙米（5 元）' }).props.accessibilityState.selected,
+  ).toBe(false);
+  expect(
+    view.getByRole('button', { name: '雞腿飯：白飯（0 元）' }).props.accessibilityState.selected,
+  ).toBe(true);
+  fireEvent.press(view.getByRole('button', { name: '放入購物籃' }));
+  expect(view.queryByRole('alert')).toBeNull();
+  fireEvent.press(view.getByRole('button', { name: '查看購物籃，已選 1 份' }));
+  fireEvent.press(view.getByRole('button', { name: '確認餐點與金額' }));
+  await view.findByText('應付總額 85 元');
+  expect(writes()[0][2].items[0].selectedOptionIds).toEqual(['white']);
+});
+test('a dish removed from the refreshed menu remains removable from the basket', async () => {
+  let removed = false;
+  mockRequest.mockImplementation(async (path, context, input) => {
+    const result = await respond(path, context, input);
+    if (removed && path === `${realm}/locations/location-one/menu`)
+      (result as any).sections[0].items = [];
+    return result;
+  });
+  const view = render(ui());
+  await openMenu(view);
+  await customizeRice(view);
+  fireEvent.press(view.getByRole('button', { name: '查看購物籃，已選 2 份' }));
+  removed = true;
+  fireEvent.press(view.getByRole('button', { name: '重新讀取' }));
+  await view.findByText('這道餐點已不在目前菜單中');
+  fireEvent.press(view.getByRole('button', { name: '移除下架餐點' }));
+  expect(view.getByText('購物籃還是空的，請先選餐。')).toBeTruthy();
   expect(writes()).toHaveLength(0);
 });
 test('expired quote cannot create an order', async () => {
