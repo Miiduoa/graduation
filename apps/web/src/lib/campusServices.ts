@@ -116,6 +116,14 @@ export const CAMPUS_SERVICES = [
     category: 'connect',
   },
   {
+    name: '校園活動',
+    text: '瀏覽校園公開活動與講座資訊',
+    href: '/events',
+    access: 'public',
+    keywords: '活動 報名 講座 event',
+    category: 'campus',
+  },
+  {
     name: '社團活動',
     text: '查看已加入的社團',
     href: '/clubs',

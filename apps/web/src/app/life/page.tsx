@@ -76,6 +76,15 @@ const ITEMS: LifeService[] = [
     keywords: '消息 通知 最新 校方 news announcement',
   },
   {
+    href: '/events',
+    title: '校園活動',
+    text: '瀏覽公開活動與講座資訊；部分活動可在確認學校帳號後報名。',
+    action: '看活動',
+    icon: 'calendar',
+    group: 'public',
+    keywords: '活動 報名 講座 event',
+  },
+  {
     href: '/lost-found',
     title: '失物招領',
     text: '使用學校帳號登入後，查看或刊登遺失與拾獲物品。',
