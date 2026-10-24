@@ -1,6 +1,6 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  ActivityIndicator,
+  Animated,
   Pressable,
   RefreshControl,
   ScrollView,
@@ -12,20 +12,54 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import { useAuth } from '../state/auth';
 import { loadStudentHome } from '../data/studentHome';
-import type { CourseSpace, InboxTask } from '../data/types';
+import type { InboxTask } from '../data/types';
 import { safeNavigate } from '../utils/safeNavigate';
-import { OpenOrderCard } from '../components/OpenOrderCard';
-import { TodayTimetablePanel } from '../components/TodayTimetablePanel';
 import { rootNavigateNested } from '../app/rootNavigation';
 import { useTabBarContentBottomPadding } from '../ui/navigationTheme';
 import { theme } from '../ui/theme';
 import { useThemeStyleSheet } from '../ui/useThemeStyleSheet';
-import { navigateFromInboxTask, resolveInboxAction } from '../services/inboxActions';
-import { TodaySensePanel } from '../components/TodaySensePanel';
+import { navigateFromInboxTask } from '../services/inboxActions';
+import { hasTCSession } from '../services/tronClassClient';
+import { useTodayTimetableData } from '../hooks/useTodayTimetableData';
+import {
+  formatClassMeta,
+  formatClock,
+  formatTodayHeaderDate,
+  formatTodoDueLine,
+  formatUpdatedAt,
+  isDueWithinHours,
+  isTodoOverdue,
+  pickNextAction,
+  sortTodayClasses,
+  sortTodayTodos,
+  TODAY_COPY,
+  type NextAction,
+  type TodayTodo,
+} from '@campus/shared/src/pickNextAction';
 
 type HomeState =
   | { scope: string; status: 'loading' | 'error' }
-  | { scope: string; status: 'ready'; courses: CourseSpace[]; tasks: InboxTask[] };
+  | { scope: string; status: 'ready'; tasks: InboxTask[] };
+
+type TodoRow = TodayTodo & { task?: InboxTask };
+
+function todosFromInbox(tasks: InboxTask[]): TodoRow[] {
+  return tasks.flatMap((task) => {
+    if (task.kind !== 'assignment' && task.kind !== 'quiz') return [];
+    const due = task.dueAt instanceof Date ? task.dueAt.getTime() : NaN;
+    if (!Number.isFinite(due)) return [];
+    return [
+      {
+        id: task.id,
+        title: task.title,
+        courseName: task.groupName,
+        courseId: task.groupId,
+        dueAt: due,
+        task,
+      },
+    ];
+  });
+}
 
 export default function StudentTodayScreen() {
   const s = useThemeStyleSheet(createStyles);
@@ -38,31 +72,59 @@ export default function StudentTodayScreen() {
   const currentScope = useRef(scope);
   currentScope.current = scope;
   const [state, setState] = useState<HomeState>({ scope, status: 'loading' });
-  const [now, setNow] = useState<Date | null>(null);
+  const [now, setNow] = useState(() => new Date());
+  const [updatedAt, setUpdatedAt] = useState<Date | null>(null);
   const [timetableRefresh, setTimetableRefresh] = useState(0);
+  const [lmsConnected, setLmsConnected] = useState<boolean | null>(null);
+  const [leavingIds, setLeavingIds] = useState<string[]>([]);
+  const previousTodos = useRef<string[]>([]);
+  const scrollY = useRef(0);
+  const scrollRef = useRef<ScrollView>(null);
   const generation = useRef(0);
   const current = state.scope === scope ? state : null;
   const data = current?.status === 'ready' ? current : null;
   const loading = !current || current.status === 'loading';
-  const error =
-    current?.status === 'error' ? '無法讀取校務課程。請確認登入狀態與網路連線後重試。' : '';
-  const load = useCallback(async () => {
-    const request = ++generation.current;
-    setState({ scope, status: 'loading' });
-    try {
-      if (!uid) throw new Error('請先登入。');
-      const { courses, tasks } = await loadStudentHome(uid, schoolId);
-      if (request === generation.current && currentScope.current === scope)
-        setState({ scope, status: 'ready', courses, tasks });
-    } catch {
-      if (request === generation.current && currentScope.current === scope)
-        setState({ scope, status: 'error' });
-    }
-  }, [uid, schoolId, scope]);
+  const error = current?.status === 'error';
+  const unsigned = !uid;
+  const { status: timetableStatus, classes, termKey, retry: retryTimetable } =
+    useTodayTimetableData(now, timetableRefresh);
+
+  const load = useCallback(
+    async (silent = false) => {
+      const request = ++generation.current;
+      if (!silent) setState({ scope, status: 'loading' });
+      try {
+        if (!uid) {
+          if (request === generation.current && currentScope.current === scope)
+            setState({ scope, status: 'ready', tasks: [] });
+          return;
+        }
+        const [{ tasks }, connected] = await Promise.all([
+          loadStudentHome(uid, schoolId),
+          hasTCSession().catch(() => false),
+        ]);
+        if (request === generation.current && currentScope.current === scope) {
+          setState({ scope, status: 'ready', tasks });
+          setLmsConnected(connected);
+          setUpdatedAt(new Date());
+        }
+      } catch {
+        if (request === generation.current && currentScope.current === scope)
+          setState({ scope, status: 'error' });
+      }
+    },
+    [uid, schoolId, scope],
+  );
+
   useFocusEffect(
     useCallback(() => {
-      void load();
+      const y = scrollY.current;
+      const frame = requestAnimationFrame(() => {
+        scrollRef.current?.scrollTo({ y, animated: false });
+      });
+      void load(true);
       return () => {
+        cancelAnimationFrame(frame);
         generation.current += 1;
       };
     }, [load]),
@@ -74,358 +136,564 @@ export default function StudentTodayScreen() {
     return () => clearInterval(timer);
   }, []);
 
-  const openCourse = (courseId: string) =>
-    safeNavigate(navigation, 'CourseHub', { courseSpaceId: courseId, groupId: courseId });
+  const todos = useMemo(() => todosFromInbox(data?.tasks ?? []), [data?.tasks]);
+  useEffect(() => {
+    const ids = todos.map((item) => item.id);
+    const gone = previousTodos.current.filter((id) => !ids.includes(id));
+    previousTodos.current = ids;
+    if (!gone.length) return;
+    setLeavingIds(gone);
+    const timer = setTimeout(() => setLeavingIds([]), 200);
+    return () => clearTimeout(timer);
+  }, [todos]);
+
+  const action = pickNextAction(classes, todos, now);
+  const classRows = sortTodayClasses(classes, now);
+  const todoRows = sortTodayTodos(todos) as TodoRow[];
+  const firstLoad = unsigned
+    ? timetableStatus === 'loading'
+    : !updatedAt && (loading || timetableStatus === 'loading');
+  const lmsUnconnected = !unsigned && !error && lmsConnected === false && todos.length === 0;
+
+  const openCourse = (courseId?: string) => {
+    if (courseId)
+      safeNavigate(navigation, 'CourseHub', {
+        courseSpaceId: courseId,
+        groupId: courseId,
+        section: 'week',
+      });
+    else rootNavigateNested('學習', 'PersonalTimetable', termKey ? { term: termKey } : undefined);
+  };
+  const openTodo = (row: TodoRow, scrollToSubmit = false) => {
+    if (
+      row.task &&
+      navigateFromInboxTask(navigation, row.task, {
+        role: auth.profile?.role,
+        isTeachingRole: false,
+        scrollToSubmit,
+      })
+    )
+      return;
+    if (row.courseId)
+      safeNavigate(navigation, 'HomeworkSubmit', {
+        courseId: row.courseId,
+        hwId: row.id,
+        hwTitle: row.title,
+        dueAt: new Date(row.dueAt).toISOString(),
+        ...(scrollToSubmit ? { scrollToSubmit: true } : {}),
+      });
+  };
+  const openWeek = () =>
+    rootNavigateNested('學習', 'PersonalTimetable', termKey ? { term: termKey } : undefined);
+  const openImport = () => rootNavigateNested('學習', 'PersonalImport', { kind: 'timetable' });
+
   return (
     <SafeAreaView style={s.page} edges={['top']}>
       <ScrollView
+        ref={scrollRef}
         contentContainerStyle={[s.content, { paddingBottom: bottom + 24 }]}
+        onScroll={(event) => {
+          scrollY.current = event.nativeEvent.contentOffset.y;
+        }}
+        scrollEventThrottle={16}
         refreshControl={
           <RefreshControl
-            refreshing={loading}
+            refreshing={loading && !!data}
             onRefresh={() => {
               setTimetableRefresh((key) => key + 1);
-              void load();
+              void load(true);
             }}
             tintColor={theme.colors.accent}
           />
         }
       >
-        <View style={s.topLine}>
-          <Text style={s.brand}>CAMPUS ONE</Text>
-          <Text style={s.date}>
-            {now?.toLocaleDateString('zh-TW', {
-              timeZone: 'Asia/Taipei',
-              month: 'numeric',
-              day: 'numeric',
-              weekday: 'short',
-            }) ?? ''}
+        <View>
+          <Text style={s.date}>{formatTodayHeaderDate(now)}</Text>
+          <Text accessibilityRole="header" style={s.heading}>
+            今天
           </Text>
+          {updatedAt ? <Text style={s.updated}>{formatUpdatedAt(updatedAt)}</Text> : null}
         </View>
-        <Text accessibilityRole="header" style={s.heading}>
-          今天
-        </Text>
-        <Text style={s.caption}>從課程、作業或校務服務開始。</Text>
-        <TodayTimetablePanel
-          refreshKey={timetableRefresh}
-          onOpenImport={() => rootNavigateNested('學習', 'PersonalImport', { kind: 'timetable' })}
-          onOpenTimetable={(term) =>
-            rootNavigateNested('學習', 'PersonalTimetable', term ? { term } : undefined)
-          }
-        />
-        <OpenOrderCard navigation={navigation} />
-        <View style={s.entry}>
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel="Campus One 課程與作業"
-            onPress={() => safeNavigate(navigation, 'NuniWorkspace')}
-            style={({ pressed }) => [s.tool, s.workspaceEntry, pressed && s.pressed]}
-          >
-            <View style={s.entryCopy}>
-              <Text style={s.toolText}>Campus One 課程與作業</Text>
-              <Text style={s.taskMeta}>加入課程、查看教材、繳交作業與測驗</Text>
-            </View>
-            <Text accessibilityElementsHidden importantForAccessibility="no" style={s.arrow}>
-              →
-            </Text>
-          </Pressable>
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel="校務服務"
-            onPress={() => safeNavigate(navigation, 'CoursesHome')}
-            style={({ pressed }) => [s.tool, pressed && s.pressed]}
-          >
-            <View style={s.entryCopy}>
-              <Text style={s.toolText}>校務服務</Text>
-              <Text style={s.taskMeta}>已連結學校的課表、成績與出缺紀錄</Text>
-            </View>
-            <Text accessibilityElementsHidden importantForAccessibility="no" style={s.arrow}>
-              →
-            </Text>
-          </Pressable>
-        </View>
-        <View style={s.tools}>
-          {(
-            [
-              ['Map', '校園地圖'],
-              ['PersonalTimetable', '我的課表'],
-              ['AIAgentConsole', '校園助理'],
-            ] as const
-          ).map(([route, label]) => (
-            <Pressable
-              key={route}
-              accessibilityRole="button"
-              onPress={() =>
-                route === 'PersonalTimetable'
-                  ? rootNavigateNested('學習', 'PersonalTimetable')
-                  : safeNavigate(navigation, route)
-              }
-              style={({ pressed }) => [s.quickTool, pressed && s.pressed]}
-            >
-              <Text style={s.quickToolText}>{label}</Text>
-            </Pressable>
-          ))}
-        </View>
-        {!!error && (
-          <View accessibilityRole="alert" style={s.error}>
-            <Text style={s.errorText}>{error}</Text>
-            <Pressable
-              accessibilityRole="button"
-              onPress={load}
-              style={({ pressed }) => [s.retry, pressed && s.pressed]}
-            >
-              <Text style={s.link}>重新讀取</Text>
-            </Pressable>
-          </View>
-        )}
-        {loading && !data ? (
-          <ActivityIndicator color={theme.colors.accent} style={{ marginVertical: 36 }} />
+        {firstLoad ? (
+          <TodaySkeleton styles={s} />
         ) : (
           <>
-            {data && (
-              <>
-                <Text accessibilityRole="header" style={s.sectionTitle}>
-                  校務待辦
-                </Text>
-                {data.tasks.length ? (
-                  data.tasks.map((task) => (
-                    <Pressable
-                      key={task.id}
-                      accessibilityRole="button"
-                      accessibilityLabel={`${task.title}，${resolveInboxAction(task)?.label ?? '查看課程'}`}
-                      style={({ pressed }) => [s.task, pressed && s.pressed]}
-                      onPress={() => {
-                        if (
-                          !navigateFromInboxTask(navigation, task, {
-                            role: auth.profile?.role,
-                            isTeachingRole: false,
-                          })
-                        )
-                          openCourse(task.groupId);
-                      }}
-                    >
-                      <View style={s.taskMarker} accessibilityElementsHidden />
-                      <View style={{ flex: 1 }}>
-                        <Text style={s.taskTitle}>{task.title}</Text>
-                        <Text style={s.taskMeta}>
-                          {task.groupName}
-                          {task.dueAt ? ` · ${task.dueAt.toLocaleDateString('zh-TW')} 截止` : ''}
-                        </Text>
-                      </View>
-                      <Text
-                        accessibilityElementsHidden
-                        importantForAccessibility="no"
-                        style={s.arrow}
-                      >
-                        →
-                      </Text>
-                    </Pressable>
-                  ))
-                ) : (
-                  <Text style={s.empty}>
-                    目前沒有校務待辦。Campus One 作業與測驗請到「課程與作業」查看。
-                  </Text>
-                )}
-                <TodaySensePanel
-                  uid={uid}
-                  schoolId={schoolId}
-                  tasks={data.tasks}
-                  phase="ready"
-                  now={now}
-                  navigation={navigation}
-                  role={auth.profile?.role}
-                />
-                <Text accessibilityRole="header" style={s.sectionTitle}>
-                  校務課程
-                </Text>
-                {data.courses.length ? (
-                  data.courses.map((course) => (
-                    <Pressable
-                      key={course.id}
-                      accessibilityRole="button"
-                      style={({ pressed }) => [s.course, pressed && s.pressed]}
-                      onPress={() => openCourse(course.groupId)}
-                    >
-                      <View style={s.courseTop}>
-                        <Text style={s.label}>課程</Text>
-                        <Text
-                          accessibilityElementsHidden
-                          importantForAccessibility="no"
-                          style={s.arrow}
-                        >
-                          →
-                        </Text>
-                      </View>
-                      <Text style={s.courseTitle}>{course.name}</Text>
-                      <Text style={s.taskMeta}>
-                        {course.unreadCount ? `${course.unreadCount} 則新動態` : '查看課程內容'}
-                      </Text>
-                    </Pressable>
-                  ))
-                ) : (
-                  <Text style={s.empty}>尚未加入課程。若已選課，請向授課教師確認成員名單。</Text>
-                )}
-              </>
-            )}
+            <NextActionCard
+              action={action}
+              unsigned={unsigned}
+              todosError={error}
+              now={now}
+              styles={s}
+              onOpenClass={openCourse}
+              onOpenTodo={(todo) => openTodo(todo, true)}
+              onOpenWeek={openWeek}
+            />
+            <TodayClassList
+              classes={classRows}
+              status={timetableStatus}
+              now={now}
+              styles={s}
+              onOpenClass={openCourse}
+              onRetry={() => void retryTimetable()}
+              onImport={openImport}
+              onOpenTimetable={openWeek}
+            />
+            <TodoList
+              todos={todoRows}
+              unsigned={unsigned}
+              error={error}
+              lmsUnconnected={lmsUnconnected}
+              leavingIds={leavingIds}
+              now={now}
+              styles={s}
+              onOpen={openTodo}
+              onRetry={() => void load()}
+            />
           </>
         )}
       </ScrollView>
     </SafeAreaView>
   );
 }
+
+function TodaySkeleton({ styles: s }: { styles: ReturnType<typeof createStyles> }) {
+  return (
+    <View accessibilityState={{ busy: true }} testID="today-skeleton">
+      <View style={s.skeletonCard} />
+      <View style={s.skeletonLine} />
+      <View style={s.skeletonLine} />
+      <View style={s.skeletonLine} />
+    </View>
+  );
+}
+
+function NextActionCard({
+  action,
+  unsigned,
+  todosError,
+  now,
+  styles: s,
+  onOpenClass,
+  onOpenTodo,
+  onOpenWeek,
+}: {
+  action: NextAction;
+  unsigned: boolean;
+  todosError: boolean;
+  now: Date;
+  styles: ReturnType<typeof createStyles>;
+  onOpenClass: (courseId?: string) => void;
+  onOpenTodo: (todo: TodoRow) => void;
+  onOpenWeek: () => void;
+}) {
+  const fade = useRef(new Animated.Value(1)).current;
+  const key =
+    unsigned && action.type !== 'class'
+      ? 'unsigned'
+      : action.type === 'class'
+        ? `class:${action.class.id}`
+        : action.type === 'assignment'
+          ? `todo:${action.todo.id}`
+          : action.type === 'allDone'
+            ? `done:${action.todo?.id ?? ''}`
+            : 'empty';
+  const prev = useRef(key);
+  useEffect(() => {
+    if (prev.current === key) return;
+    prev.current = key;
+    fade.setValue(0);
+    Animated.timing(fade, { toValue: 1, duration: 150, useNativeDriver: true }).start();
+  }, [fade, key]);
+
+  if (unsigned && action.type !== 'class') {
+    return (
+      <Animated.View style={[s.cardLight, { opacity: fade }]} testID="next-action">
+        <Text style={s.lightHeadline}>{TODAY_COPY.unsigned}</Text>
+      </Animated.View>
+    );
+  }
+  if (action.type === 'empty') {
+    if (todosError) {
+      return <Animated.View style={[s.cardLight, { opacity: fade }]} testID="next-action" />;
+    }
+    return (
+      <Animated.View style={[s.cardLight, { opacity: fade }]} testID="next-action">
+        <Text style={s.lightHeadline}>{TODAY_COPY.emptyDay}</Text>
+        <Pressable accessibilityRole="button" onPress={onOpenWeek} style={s.lightButton}>
+          <Text style={s.lightButtonText}>{TODAY_COPY.viewWeek}</Text>
+        </Pressable>
+      </Animated.View>
+    );
+  }
+  if (action.type === 'allDone' && !action.todo) {
+    return (
+      <Animated.View style={[s.cardLight, { opacity: fade }]} testID="next-action">
+        <Text style={s.lightHeadline}>{TODAY_COPY.allClassesDone}</Text>
+      </Animated.View>
+    );
+  }
+  if (action.type === 'allDone' && action.todo) {
+    const todo = action.todo as TodoRow;
+    return (
+      <Pressable
+        accessibilityRole="button"
+        onPress={() => onOpenClass(todo.courseId)}
+        style={({ pressed }) => [s.card, pressed && s.pressed]}
+        testID="next-action"
+      >
+        <Animated.View style={{ opacity: fade, flex: 1 }}>
+          <Text style={s.kind}>{TODAY_COPY.allClassesDone}</Text>
+          <Text style={s.headline}>{todo.title}</Text>
+          <Text style={s.meta}>{formatTodoDueLine(todo, now)}</Text>
+          <Pressable
+            accessibilityRole="button"
+            onPress={() => onOpenTodo(todo)}
+            style={s.cardButton}
+          >
+            <Text style={s.cardButtonText}>{TODAY_COPY.goSubmit}</Text>
+          </Pressable>
+        </Animated.View>
+      </Pressable>
+    );
+  }
+  if (action.type === 'class') {
+    return (
+      <Pressable
+        accessibilityRole="button"
+        onPress={() => onOpenClass(action.class.courseId)}
+        style={({ pressed }) => [s.card, pressed && s.pressed]}
+        testID="next-action"
+      >
+        <Animated.View style={{ opacity: fade, flex: 1 }}>
+          <Text style={s.kind}>{TODAY_COPY.nextClass}</Text>
+          <Text style={s.headline}>{action.class.title}</Text>
+          <Text style={s.meta}>{formatClassMeta(action.class)}</Text>
+          <View style={s.cardButton}>
+            <Text style={s.cardButtonText}>{TODAY_COPY.viewCourse}</Text>
+          </View>
+        </Animated.View>
+      </Pressable>
+    );
+  }
+  const todo = action.todo as TodoRow;
+  return (
+    <Pressable
+      accessibilityRole="button"
+      onPress={() => onOpenClass(todo.courseId)}
+      style={({ pressed }) => [s.card, pressed && s.pressed]}
+      testID="next-action"
+    >
+      <Animated.View style={{ opacity: fade, flex: 1 }}>
+        <Text style={s.kind}>{TODAY_COPY.dueToday}</Text>
+        <Text style={s.headline}>{todo.title}</Text>
+        <Text style={s.meta}>{formatTodoDueLine(todo, now)}</Text>
+        <Pressable accessibilityRole="button" onPress={() => onOpenTodo(todo)} style={s.cardButton}>
+          <Text style={s.cardButtonText}>{TODAY_COPY.goSubmit}</Text>
+        </Pressable>
+      </Animated.View>
+    </Pressable>
+  );
+}
+
+function TodayClassList({
+  classes,
+  status,
+  now,
+  styles: s,
+  onOpenClass,
+  onRetry,
+  onImport,
+  onOpenTimetable,
+}: {
+  classes: ReturnType<typeof sortTodayClasses>;
+  status: string;
+  now: Date;
+  styles: ReturnType<typeof createStyles>;
+  onOpenClass: (courseId?: string) => void;
+  onRetry: () => void;
+  onImport: () => void;
+  onOpenTimetable: () => void;
+}) {
+  const visible = classes.slice(0, 4);
+  const extra = classes.length > 4;
+  return (
+    <View style={s.section}>
+      <Text accessibilityRole="header" style={s.sectionTitle}>
+        今天課表
+      </Text>
+      {status === 'loading' ? (
+        <>
+          <View style={s.skeletonLine} />
+          <View style={s.skeletonLine} />
+        </>
+      ) : status === 'error' ? (
+        <>
+          <Text accessibilityRole="alert" style={s.empty}>
+            {TODAY_COPY.timetableUnavailable}
+          </Text>
+          <Pressable accessibilityRole="button" onPress={onRetry} style={s.textButton}>
+            <Text style={s.link}>{TODAY_COPY.retry}</Text>
+          </Pressable>
+        </>
+      ) : status === 'empty' ? (
+        <>
+          <Text style={s.empty}>{TODAY_COPY.noTimetable}</Text>
+          <Pressable accessibilityRole="button" onPress={onImport} style={s.textButton}>
+            <Text style={s.link}>{TODAY_COPY.importTimetable}</Text>
+          </Pressable>
+        </>
+      ) : visible.length === 0 ? (
+        <Text style={s.empty}>今天沒有排課。</Text>
+      ) : (
+        <View style={s.list}>
+          {visible.map((item, index) => {
+            const ended = item.endAt <= now.getTime();
+            return (
+              <Pressable
+                key={item.id}
+                accessibilityRole="button"
+                onPress={() => onOpenClass(item.courseId)}
+                style={({ pressed }) => [
+                  s.row,
+                  index > 0 && s.rowBorder,
+                  ended && s.ended,
+                  pressed && s.pressed,
+                ]}
+              >
+                <Text style={s.time}>{formatClock(item.startAt)}</Text>
+                <View style={s.rowBody}>
+                  <Text style={s.rowTitle}>{item.title}</Text>
+                  <Text style={s.rowMeta}>{item.location || '教室未填'}</Text>
+                </View>
+              </Pressable>
+            );
+          })}
+          {extra ? (
+            <Pressable accessibilityRole="button" onPress={onOpenTimetable} style={s.more}>
+              <Text style={s.link}>{TODAY_COPY.viewFullTimetable}</Text>
+            </Pressable>
+          ) : null}
+        </View>
+      )}
+    </View>
+  );
+}
+
+function TodoList({
+  todos,
+  unsigned,
+  error,
+  lmsUnconnected,
+  leavingIds,
+  now,
+  styles: s,
+  onOpen,
+  onRetry,
+}: {
+  todos: TodoRow[];
+  unsigned: boolean;
+  error: boolean;
+  lmsUnconnected: boolean;
+  leavingIds: string[];
+  now: Date;
+  styles: ReturnType<typeof createStyles>;
+  onOpen: (todo: TodoRow) => void;
+  onRetry: () => void;
+}) {
+  const visible = todos.slice(0, 3);
+  const extra = Math.max(0, todos.length - visible.length);
+  const leaving = new Set(leavingIds);
+  return (
+    <View style={s.section}>
+      <Text accessibilityRole="header" style={s.sectionTitle}>
+        待處理
+      </Text>
+      {unsigned ? (
+        <Text style={s.empty}>{TODAY_COPY.unsigned}</Text>
+      ) : error ? (
+        <>
+          <Text accessibilityRole="alert" style={s.empty}>
+            無法讀取校務課程。請確認登入狀態與網路連線後重試。
+          </Text>
+          <Pressable accessibilityRole="button" onPress={onRetry} style={s.textButton}>
+            <Text style={s.link}>{TODAY_COPY.retry}</Text>
+          </Pressable>
+        </>
+      ) : lmsUnconnected && todos.length === 0 ? (
+        <Text style={s.empty}>{TODAY_COPY.lmsUnconnected}</Text>
+      ) : visible.length === 0 ? null : (
+        <View style={s.list}>
+          {visible.map((item, index) => {
+            const overdue = isTodoOverdue(item, now);
+            const soon = isDueWithinHours(item, now, 6);
+            return (
+              <Pressable
+                key={item.id}
+                accessibilityRole="button"
+                accessibilityLabel={`${item.title}，${item.courseName}`}
+                onPress={() => onOpen(item)}
+                style={({ pressed }) => [
+                  s.row,
+                  index > 0 && s.rowBorder,
+                  leaving.has(item.id) && s.leaving,
+                  pressed && s.pressed,
+                ]}
+              >
+                <View style={s.rowBody}>
+                  <Text style={s.rowTitle}>{item.title}</Text>
+                  <Text style={[s.rowMeta, overdue ? s.overdue : soon ? s.dueSoon : null]}>
+                    {item.courseName} · {formatTodoDueLine(item, now)}
+                  </Text>
+                </View>
+              </Pressable>
+            );
+          })}
+          {extra > 0 ? (
+            <View style={s.more}>
+              <Text style={s.link}>{TODAY_COPY.moreTodos(extra)}</Text>
+            </View>
+          ) : null}
+        </View>
+      )}
+    </View>
+  );
+}
+
+const CREAM = '#FFFDF8';
+const BRAND = '#314D40';
+
 const createStyles = () =>
   StyleSheet.create({
     page: { flex: 1, backgroundColor: theme.colors.bg },
     content: {
-      paddingHorizontal: 24,
+      paddingHorizontal: 20,
       paddingTop: 22,
       width: '100%',
       maxWidth: 680,
       alignSelf: 'center',
-    },
-    topLine: {
-      flexDirection: 'row',
-      flexWrap: 'wrap',
-      justifyContent: 'space-between',
-      alignItems: 'center',
-      gap: 10,
-      marginBottom: 18,
-    },
-    brand: {
-      fontSize: 11,
-      fontWeight: '700',
-      letterSpacing: 2,
-      color: theme.colors.textSecondary,
+      gap: 28,
     },
     date: {
       color: theme.colors.muted,
-      fontSize: 12,
-      lineHeight: 19,
+      fontSize: 13,
+      lineHeight: 18,
       fontVariant: ['tabular-nums'],
     },
     heading: {
       color: theme.colors.text,
-      fontSize: 32,
-      lineHeight: 42,
-      fontWeight: '600',
-      letterSpacing: -0.6,
+      fontSize: 28,
+      lineHeight: 34,
+      fontWeight: '700',
     },
-    caption: {
+    updated: {
       color: theme.colors.muted,
-      fontSize: 14,
-      lineHeight: 23,
-      marginTop: 8,
-      marginBottom: 6,
+      fontSize: 13,
+      lineHeight: 18,
+      fontVariant: ['tabular-nums'],
+      marginTop: 4,
     },
-    entry: { marginTop: 10, marginBottom: 10 },
-    entryCopy: { flex: 1, gap: 4, minWidth: 0 },
-    workspaceEntry: {
-      backgroundColor: theme.colors.focusSurface,
-      paddingHorizontal: 18,
-      borderWidth: 1,
-      borderColor: theme.colors.border,
-      borderLeftWidth: 3,
-      borderLeftColor: theme.colors.accent,
-      borderRadius: 10,
-      marginBottom: 6,
-    },
-    pressed: { backgroundColor: theme.colors.surfaceInteractive },
-    label: { color: theme.colors.textSecondary, fontSize: 11, letterSpacing: 1 },
-    sectionTitle: {
-      color: theme.colors.text,
-      fontSize: 18,
-      fontWeight: '600',
-      marginTop: 26,
-      marginBottom: 14,
-      lineHeight: 26,
-    },
-    task: {
-      flexDirection: 'row',
-      gap: 12,
-      alignItems: 'center',
-      minHeight: 76,
-      paddingVertical: 18,
-      borderBottomWidth: 1,
-      borderBottomColor: theme.colors.border,
-    },
-    taskMarker: {
-      width: 3,
-      height: 28,
-      backgroundColor: theme.colors.accent,
-      borderRadius: 2,
-    },
-    taskTitle: { fontSize: 15, fontWeight: '600', color: theme.colors.text, lineHeight: 24 },
-    taskMeta: { fontSize: 12, lineHeight: 20, color: theme.colors.muted, marginTop: 5 },
-    arrow: { color: theme.colors.accent, fontSize: 21 },
-    courseTop: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
-    course: {
-      backgroundColor: theme.colors.surface,
-      borderWidth: 1,
-      borderColor: theme.colors.border,
-      borderRadius: 10,
+    card: {
+      backgroundColor: BRAND,
+      minHeight: 132,
+      borderRadius: 16,
       padding: 20,
+      shadowOpacity: 0,
+    },
+    cardLight: {
+      backgroundColor: CREAM,
+      minHeight: 132,
+      borderRadius: 16,
+      padding: 20,
+    },
+    kind: { color: 'rgba(255,255,255,0.72)', fontSize: 13, lineHeight: 18, fontWeight: '600' },
+    headline: { color: '#FFFFFF', fontSize: 20, lineHeight: 26, fontWeight: '700', marginTop: 6 },
+    lightHeadline: {
+      color: theme.colors.text,
+      fontSize: 20,
+      lineHeight: 26,
+      fontWeight: '700',
+    },
+    meta: {
+      color: 'rgba(255,255,255,0.72)',
+      fontSize: 13,
+      lineHeight: 18,
+      marginTop: 6,
+      fontVariant: ['tabular-nums'],
+    },
+    cardButton: {
+      marginTop: 16,
+      alignSelf: 'flex-end',
+      height: 44,
+      minHeight: 44,
+      paddingHorizontal: 16,
+      borderRadius: 12,
+      backgroundColor: '#FFFFFF',
+      justifyContent: 'center',
+    },
+    cardButtonText: { color: BRAND, fontSize: 15, fontWeight: '700' },
+    lightButton: {
+      marginTop: 16,
+      alignSelf: 'flex-end',
+      height: 44,
+      minHeight: 44,
+      paddingHorizontal: 16,
+      borderRadius: 12,
+      backgroundColor: BRAND,
+      justifyContent: 'center',
+    },
+    lightButtonText: { color: '#FFFFFF', fontSize: 15, fontWeight: '700' },
+    section: { gap: 8 },
+    sectionTitle: {
+      color: theme.colors.muted,
+      fontSize: 13,
+      lineHeight: 18,
+      fontWeight: '600',
+      textTransform: 'none',
+    },
+    list: { backgroundColor: CREAM, borderRadius: 12, overflow: 'hidden' },
+    row: {
+      minHeight: 56,
+      paddingHorizontal: 16,
+      paddingVertical: 8,
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 12,
+    },
+    rowBorder: {
+      borderTopWidth: StyleSheet.hairlineWidth,
+      borderTopColor: theme.colors.border,
+      marginLeft: 68,
+      paddingLeft: 0,
+    },
+    time: {
+      width: 52,
+      color: theme.colors.muted,
+      fontSize: 13,
+      lineHeight: 18,
+      fontVariant: ['tabular-nums'],
+    },
+    rowBody: { flex: 1, minWidth: 0, gap: 2 },
+    rowTitle: { color: theme.colors.text, fontSize: 16, lineHeight: 22, fontWeight: '600' },
+    rowMeta: { color: theme.colors.muted, fontSize: 13, lineHeight: 18, fontVariant: ['tabular-nums'] },
+    dueSoon: { color: theme.colors.accent, fontWeight: '700' },
+    overdue: { color: theme.colors.danger, fontWeight: '700' },
+    ended: { opacity: 0.48 },
+    leaving: { opacity: 0 },
+    more: { minHeight: 44, justifyContent: 'center', paddingHorizontal: 16 },
+    empty: { color: theme.colors.muted, fontSize: 13, lineHeight: 18 },
+    textButton: { minHeight: 44, justifyContent: 'center', alignSelf: 'flex-start' },
+    link: { color: theme.colors.accent, fontWeight: '600', fontSize: 13, lineHeight: 18 },
+    skeletonCard: {
+      height: 132,
+      borderRadius: 16,
+      backgroundColor: theme.colors.surface2,
+      marginBottom: 12,
+    },
+    skeletonLine: {
+      height: 16,
+      borderRadius: 8,
+      backgroundColor: theme.colors.surface2,
       marginBottom: 10,
     },
-    courseTitle: {
-      color: theme.colors.text,
-      fontWeight: '600',
-      fontSize: 18,
-      lineHeight: 27,
-      marginTop: 8,
-    },
-    empty: { color: theme.colors.muted, fontSize: 13, lineHeight: 23, paddingVertical: 16 },
-    tools: { flexDirection: 'row', gap: 8, marginTop: 2, marginBottom: 16 },
-    quickTool: {
-      flex: 1,
-      minWidth: 0,
-      minHeight: 48,
-      paddingHorizontal: 6,
-      paddingVertical: 12,
-      alignItems: 'center',
-      justifyContent: 'center',
-      borderWidth: 1,
-      borderColor: theme.colors.border,
-      borderRadius: 8,
-      backgroundColor: theme.colors.surface,
-    },
-    quickToolText: {
-      color: theme.colors.text,
-      fontSize: 13,
-      lineHeight: 20,
-      fontWeight: '600',
-      textAlign: 'center',
-    },
-    tool: {
-      paddingVertical: 18,
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: 12,
-      minHeight: 60,
-      justifyContent: 'space-between',
-      borderBottomWidth: 1,
-      borderBottomColor: theme.colors.border,
-    },
-    toolText: {
-      color: theme.colors.text,
-      fontSize: 15,
-      lineHeight: 23,
-      fontWeight: '600',
-      flexShrink: 1,
-    },
-    retry: {
-      minHeight: 44,
-      justifyContent: 'center',
-      alignSelf: 'flex-start',
-      paddingHorizontal: 8,
-      marginLeft: -8,
-      marginTop: 6,
-    },
-    error: {
-      padding: 16,
-      backgroundColor: theme.colors.dangerSoft,
-      marginBottom: 18,
-      borderRadius: 4,
-    },
-    errorText: { color: theme.colors.text, fontSize: 13, lineHeight: 22 },
-    link: { color: theme.colors.accent, marginTop: 10, fontWeight: '600' },
+    pressed: { opacity: 0.86 },
   });

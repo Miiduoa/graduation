@@ -6,13 +6,32 @@ import { useTheme } from '../state/theme';
 import { AIDetailScreen, AICard, AIButton } from '../ui/aiFirst';
 import { safeNavigate } from '../utils/safeNavigate';
 import { resolveCourseHubTarget, type CourseHubTarget } from '../utils/courseHubRoute';
-import { loadCourseHub, type CourseHubData, type CourseHubScope } from '../features/courseHub';
+import { loadCourseHub, type CourseHubData, type CourseHubScope, type HubAssignment } from '../features/courseHub';
 import { webBrowserOpenWithPuTronClassGate } from '../services/tronClassWebUiGate';
+import { parseTaipeiInstant, taipeiParts } from '@campus/shared/src/taipeiTime';
 
 type Props = {
   navigation?: Parameters<typeof safeNavigate>[0] & { goBack?: () => void };
   route?: { params?: Record<string, unknown> };
 };
+
+function weekAssignments(items: HubAssignment[], now = new Date()): HubAssignment[] {
+  const parts = taipeiParts(now);
+  if (!parts) return [];
+  const shifted = new Date(now.getTime() + 8 * 60 * 60 * 1000);
+  const weekday = shifted.getUTCDay() || 7;
+  const start = Date.UTC(parts.year, parts.month - 1, parts.day) - (weekday - 1) * 86400000;
+  const end = start + 7 * 86400000;
+  return items.filter((item) => {
+    if (!item.dueAt) return false;
+    const due = parseTaipeiInstant(item.dueAt);
+    if (due === null) return false;
+    const dueParts = taipeiParts(due);
+    if (!dueParts) return false;
+    const dueUtc = Date.UTC(dueParts.year, dueParts.month - 1, dueParts.day);
+    return dueUtc >= start && dueUtc < end;
+  });
+}
 export default function CourseHubAiFirstScreen({ navigation, route }: Props) {
   const { user } = useAuth();
   const { school } = useSchool();
@@ -153,6 +172,26 @@ function CourseContent({
         </AICard>
       ) : data ? (
         <>
+          <View nativeID="week" testID="course-week">
+          <AICard title="本週">
+            <View style={gap}>
+              {weekAssignments(data.assignments.status === 'ready' ? data.assignments.items : []).length ? (
+                weekAssignments(data.assignments.status === 'ready' ? data.assignments.items : []).map(
+                  (item) => (
+                    <Text
+                      key={item.id}
+                      style={{ ...theme.typography.body, color: theme.colors.text, fontWeight: '700' }}
+                    >
+                      {item.title}
+                    </Text>
+                  ),
+                )
+              ) : (
+                <Text style={body}>本週沒有到期的作業。</Text>
+              )}
+            </View>
+          </AICard>
+          </View>
           <AICard title="課程資訊">
             <View style={gap}>
               {data.details.length ? <Text style={body}>{data.details.join(' · ')}</Text> : null}
