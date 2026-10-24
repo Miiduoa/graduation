@@ -1,5 +1,11 @@
 import { expect, it } from 'vitest';
-import { normalizeFunctionsBaseUrl, resolveFunctionsHttpUrl } from './functionsUrl';
+import {
+  areFunctionsConfigured,
+  FunctionsUnconfiguredError,
+  isFunctionsUnconfiguredError,
+  normalizeFunctionsBaseUrl,
+  resolveFunctionsHttpUrl,
+} from './functionsUrl';
 
 it('keeps Firebase Cloud Functions URLs when no override is set', () => {
   expect(
@@ -43,4 +49,25 @@ it('lets the emulator win over a Fly base URL', () => {
       emulator: { host: 'localhost', port: 5001 },
     }),
   ).toBe('http://localhost:5001/campus-one-tw/asia-east1/joinLiveSession');
+});
+
+it('treats an empty base URL as unconfigured unless the emulator is on', () => {
+  expect(areFunctionsConfigured('', false)).toBe(false);
+  expect(areFunctionsConfigured(null, false)).toBe(false);
+  expect(areFunctionsConfigured('   ', false)).toBe(false);
+  expect(areFunctionsConfigured('', true)).toBe(true);
+});
+
+it('treats a Fly base URL as configured', () => {
+  expect(areFunctionsConfigured('https://nuni-functions.fly.dev', false)).toBe(true);
+  expect(areFunctionsConfigured('nuni-functions.fly.dev/', false)).toBe(true);
+});
+
+it('identifies the unconfigured error without treating it as a retryable failure', () => {
+  const error = new FunctionsUnconfiguredError('雲端助理尚未啟用');
+  expect(isFunctionsUnconfiguredError(error)).toBe(true);
+  expect(isFunctionsUnconfiguredError({ code: 'functions-unconfigured' })).toBe(true);
+  expect(isFunctionsUnconfiguredError({ code: 'unconfigured' })).toBe(true);
+  expect(isFunctionsUnconfiguredError({ code: 'functions/unavailable' })).toBe(false);
+  expect(isFunctionsUnconfiguredError(new Error('這次未能取得回覆，請稍後重試'))).toBe(false);
 });

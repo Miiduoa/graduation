@@ -1,15 +1,20 @@
 import { beforeEach, expect, it, vi } from 'vitest';
 import { loadAcademicRecords } from './academicClient';
 
-const { call, auth } = vi.hoisted(() => ({
+const { call, auth, functions } = vi.hoisted(() => ({
   call: vi.fn(),
   auth: { currentUser: { uid: 'student-a' } as { uid: string } | null },
+  functions: { configured: true },
 }));
 vi.mock('firebase/functions', () => ({ httpsCallable: () => call }));
 vi.mock('./firebase', () => ({
   getAuth: () => auth,
   isFirebaseConfigured: () => true,
   getFunctionsInstance: () => ({}),
+}));
+vi.mock('./functionsUrl', async (original) => ({
+  ...(await original<typeof import('./functionsUrl')>()),
+  areFunctionsConfigured: () => functions.configured,
 }));
 const response = () => ({
   success: true,
@@ -30,6 +35,7 @@ const response = () => ({
 beforeEach(() => {
   vi.clearAllMocks();
   auth.currentUser = { uid: 'student-a' };
+  functions.configured = true;
   call.mockResolvedValue({ data: response() });
 });
 it('requests only the record kind and preserves source text grades', async () => {
@@ -37,6 +43,20 @@ it('requests only the record kind and preserves source text grades', async () =>
   expect(call).toHaveBeenCalledWith({ dataType: 'grades' });
   expect(result.records.grades[0].score).toBe('Pass');
   expect(result.ownerUid).toBe('student-a');
+});
+
+it('does not call Cloud Functions when the functions base URL is unset', async () => {
+  functions.configured = false;
+  await expect(loadAcademicRecords('grades', 'student-a')).rejects.toMatchObject({
+    reason: 'unconfigured',
+  });
+  expect(call).not.toHaveBeenCalled();
+});
+
+it('calls Cloud Functions when the functions base URL is set', async () => {
+  functions.configured = true;
+  await loadAcademicRecords('grades', 'student-a');
+  expect(call).toHaveBeenCalledWith({ dataType: 'grades' });
 });
 it.each([
   { ownerUid: 'student-b' },

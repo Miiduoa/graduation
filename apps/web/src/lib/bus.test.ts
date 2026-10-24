@@ -3,10 +3,15 @@ import { httpsCallable } from 'firebase/functions';
 import { fetchBusRoutes } from './firebase';
 import { loadBusArrivals, loadBusRoutes, normalizeBusArrivals, normalizeBusRoutes } from './bus';
 
+const functions = vi.hoisted(() => ({ configured: true }));
 vi.mock('./firebase', () => ({
   fetchBusRoutes: vi.fn(),
   getFunctionsInstance: () => ({}),
   isFirebaseConfigured: () => true,
+}));
+vi.mock('./functionsUrl', async (original) => ({
+  ...(await original<typeof import('./functionsUrl')>()),
+  areFunctionsConfigured: () => functions.configured,
 }));
 vi.mock('firebase/functions', () => ({ httpsCallable: vi.fn() }));
 const now = Date.parse('2026-10-08T01:00:00Z');
@@ -17,7 +22,10 @@ const realtime = (overrides = {}) => ({
   arrivals: [{ stopId: 'stop', routeName: '300', estimatedArrival: 480, status: 0, direction: 0 }],
   ...overrides,
 });
-beforeEach(() => vi.clearAllMocks());
+beforeEach(() => {
+  vi.clearAllMocks();
+  functions.configured = true;
+});
 
 it.each([
   { source: 'static', isRealtime: false },
@@ -88,6 +96,30 @@ it('requires usable station identifiers and omits demo or foreign-school routes'
       ],
     },
   ]);
+});
+
+it('does not call Cloud Functions when the functions base URL is unset', async () => {
+  functions.configured = false;
+  const call = vi.fn();
+  vi.mocked(httpsCallable).mockReturnValue(call as never);
+  expect(await loadBusArrivals({ schoolId: 'pu', stopId: 'stop', city: 'Taichung' })).toEqual({
+    status: 'unconfigured',
+    arrivals: [],
+    fetchedAt: null,
+  });
+  expect(httpsCallable).not.toHaveBeenCalled();
+  expect(call).not.toHaveBeenCalled();
+});
+
+it('calls Cloud Functions when the functions base URL is set', async () => {
+  const call = vi.fn().mockResolvedValue({
+    data: { ...realtime(), fetchedAt: new Date().toISOString() },
+  });
+  vi.mocked(httpsCallable).mockReturnValue(call as never);
+  const input = { schoolId: 'pu', stopId: 'stop', city: 'Taichung' };
+  expect(await loadBusArrivals(input)).toMatchObject({ status: 'ready' });
+  expect(httpsCallable).toHaveBeenCalled();
+  expect(call).toHaveBeenCalledWith(input);
 });
 
 it('keeps arrival failures distinct from an empty successful service response', async () => {

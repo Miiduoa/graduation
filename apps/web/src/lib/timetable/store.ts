@@ -25,6 +25,7 @@ import {
   type TimetableMeta,
 } from '@campus/shared';
 import { getAuth, getDb, getFunctionsInstance, isFirebaseConfigured } from '@/lib/firebase';
+import { areFunctionsConfigured } from '@/lib/functionsUrl';
 
 const LOCAL_KEY = 'campus-one-personal-timetable';
 
@@ -450,6 +451,7 @@ export async function loadAppealTeacherStatus(
   offeringIds: string[],
 ): Promise<Record<string, boolean>> {
   if (!offeringIds.length) return {};
+  if (!areFunctionsConfigured()) return {};
   try {
     const call = httpsCallable<
       { schoolId: string; offeringIds: string[] },

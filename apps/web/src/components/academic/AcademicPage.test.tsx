@@ -137,6 +137,15 @@ it('shows failure and retries without falling back to demo or previously loaded 
   await screen.findByText('真實來源科目');
 });
 
+it('shows that academic Cloud Functions are not enabled instead of a retryable failure', async () => {
+  vi.mocked(loadAcademicRecords).mockRejectedValueOnce(new AcademicConnectionError('unconfigured'));
+  render(<GradesPage />);
+  expect(await screen.findByText('學校資料雲端讀取尚未啟用')).toBeTruthy();
+  expect(screen.getByText(/目前尚未接上雲端函式服務/)).toBeTruthy();
+  expect(screen.queryByRole('button', { name: '重新讀取' })).toBeNull();
+  expect(screen.queryByText(/請稍後再試/)).toBeNull();
+});
+
 it('asks to check the network only when the academic fetch fails at the network layer', async () => {
   vi.mocked(loadAcademicRecords).mockRejectedValueOnce(
     new AcademicConnectionError('unavailable', new TypeError('Failed to fetch')),

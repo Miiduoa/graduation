@@ -13,7 +13,7 @@ type RecordState<K extends AcademicKind> = {
   scope: string;
   status: 'loading' | 'ready' | 'error';
   snapshot?: AcademicSnapshot<K>;
-  reason?: 'reconnect' | 'unavailable' | 'permission';
+  reason?: 'reconnect' | 'unavailable' | 'permission' | 'unconfigured';
   error?: unknown;
 };
 

@@ -4,7 +4,11 @@ import { beforeEach, expect, it, vi } from 'vitest';
 import AssistantPage from './page';
 import { callCampusAssistant, type CampusAssistantEnvelope } from '@/lib/campusAssistantClient';
 
-const state = vi.hoisted(() => ({ uid: 'alice' as string | null, query: '' }));
+const state = vi.hoisted(() => ({
+  uid: 'alice' as string | null,
+  query: '',
+  functionsConfigured: true,
+}));
 vi.mock('next/navigation', () => ({ useSearchParams: () => new URLSearchParams(state.query) }));
 vi.mock('@/components/AuthGuard', () => ({
   useAuth: () => ({ user: state.uid ? { uid: state.uid } : null, loading: false, error: null }),
@@ -36,6 +40,10 @@ vi.mock('@/lib/campusAssistantClient', async (original) => ({
   ...(await original<typeof import('@/lib/campusAssistantClient')>()),
   callCampusAssistant: vi.fn(),
 }));
+vi.mock('@/lib/functionsUrl', async (original) => ({
+  ...(await original<typeof import('@/lib/functionsUrl')>()),
+  areFunctionsConfigured: () => state.functionsConfigured,
+}));
 vi.mock('./AgentCards', () => ({
   AgentCardList: ({ cards }: { cards: Array<{ kind: string }> }) => (
     <div>{cards.map((card) => card.kind).join(',')}</div>
@@ -46,6 +54,7 @@ beforeEach(() => {
   vi.unstubAllEnvs();
   state.uid = 'alice';
   state.query = '';
+  state.functionsConfigured = true;
 });
 function ask(content = '私人課表') {
   fireEvent.change(screen.getByLabelText('你的問題'), { target: { value: content } });
@@ -263,6 +272,27 @@ it('drops the previous campus conversation and cancels pending requests after a 
   ask('新校圖書館');
   await screen.findByText('清華的服務回覆');
   expect(vi.mocked(callCampusAssistant).mock.calls[1][0].schoolId).toBe('nthu');
+});
+
+it('shows that the cloud assistant is not enabled instead of a retryable failure', () => {
+  state.functionsConfigured = false;
+  render(<AssistantPage />);
+  expect(screen.getByRole('heading', { name: '雲端助理尚未啟用' })).toBeTruthy();
+  expect(screen.getByText(/正式站尚未接上雲端函式服務/)).toBeTruthy();
+  expect((screen.getByLabelText('你的問題') as HTMLTextAreaElement).disabled).toBe(true);
+  expect((screen.getByRole('button', { name: '送出' }) as HTMLButtonElement).disabled).toBe(true);
+  expect(screen.queryByText('這次未能取得回覆。你的問題已保留，請稍後重試。')).toBeNull();
+  expect(screen.queryByRole('button', { name: '重試' })).toBeNull();
+  fireEvent.submit(screen.getByRole('form', { name: '傳送問題' }));
+  expect(callCampusAssistant).not.toHaveBeenCalled();
+});
+
+it('keeps the composer enabled when Cloud Functions are configured', () => {
+  state.functionsConfigured = true;
+  render(<AssistantPage />);
+  expect(screen.getByRole('heading', { name: '今天需要什麼幫忙？' })).toBeTruthy();
+  expect((screen.getByLabelText('你的問題') as HTMLTextAreaElement).disabled).toBe(false);
+  expect(screen.queryByText('雲端助理尚未啟用')).toBeNull();
 });
 
 it('does not send campus-specific requests before a campus is selected', () => {
