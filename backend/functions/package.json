@@ -19,7 +19,7 @@
     "test": "pnpm run build:shared && ONLINE_ORDERING_ENABLED=true jest"
   },
   "dependencies": {
-    "firebase-admin": "13.10.0",
+    "firebase-admin": "14.5.0",
     "firebase-functions": "^6.0.0",
     "jose": "^6.2.3",
     "node-fetch": "^3.3.2",
