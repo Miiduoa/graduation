@@ -6,6 +6,7 @@ const {
 const { onSchedule } = require('firebase-functions/v2/scheduler');
 const { onCall: firebaseOnCall, onRequest, HttpsError } = require('firebase-functions/v2/https');
 const { createAccountGuardedOnCall } = require('./accountLifecycle');
+const { createSchoolLoginProfileWriter } = require('./schoolLoginProfile');
 const onCall = createAccountGuardedOnCall({ onCall: firebaseOnCall, getDb: () => db });
 const { defineSecret } = require('firebase-functions/params');
 const { initializeApp } = require('firebase-admin/app');
@@ -199,6 +200,7 @@ async function fetchTdxApi(path, accessToken) {
 initializeApp();
 
 const db = getFirestore();
+const writeSchoolLoginProfile = createSchoolLoginProfileWriter({ db });
 const messaging = getMessaging();
 const { sendPushToUser, sendPushToMultipleUsers } = createNotificationService({
   db,
@@ -206,6 +208,7 @@ const { sendPushToUser, sendPushToMultipleUsers } = createNotificationService({
 });
 const {
   assertActiveSchoolMember,
+  assertSchoolAdmin,
   assertSchoolAdminOrEditor,
   assertServiceRole,
   getActiveSchoolMembership,
@@ -301,24 +304,30 @@ async function writeSchoolSsoConfig({
     updatedBy,
   };
 
-  const writes = [publicRef.set(publicPayload, { merge: true })];
-
-  if (encryptedPayload) {
-    writes.push(
-      privateRef.set(
+  const auditRef = db.collection('schools').doc(schoolId).collection('adminLogs').doc();
+  await db.runTransaction(async (tx) => {
+    await assertSchoolAdmin(schoolId, updatedBy, tx);
+    tx.set(publicRef, publicPayload, { merge: true });
+    if (encryptedPayload) {
+      tx.set(
+        privateRef,
         {
           encryptedPayload,
           updatedAt: FieldValue.serverTimestamp(),
           updatedBy,
         },
         { merge: true },
-      ),
-    );
-  } else {
-    writes.push(privateRef.delete().catch(() => null));
-  }
-
-  await Promise.all(writes);
+      );
+    } else {
+      tx.delete(privateRef);
+    }
+    tx.create(auditRef, {
+      action: 'update_sso_config',
+      details: 'school identity-provider configuration updated',
+      actorUid: updatedBy,
+      createdAt: FieldValue.serverTimestamp(),
+    });
+  });
 }
 
 async function syncAuthClaims(uid, userData = {}) {
@@ -379,10 +388,6 @@ function buildAvailabilityUpdate(currentData = {}, delta) {
   }
 
   return updates;
-}
-
-function resolveProvisionedRole({ existingLink, existingUser }) {
-  return existingLink?.role || existingUser?.role || 'student';
 }
 
 const PROVIDENCE_UNIVERSITY_SCHOOL_ID = 'pu';
@@ -567,44 +572,23 @@ async function upsertPuStudentProfile({
   displayName,
   email,
   department,
-  isNewUser,
 }) {
-  const userRef = db.collection('users').doc(uid);
-  const memberRef = db
-    .collection('schools')
-    .doc(PROVIDENCE_UNIVERSITY_SCHOOL_ID)
-    .collection('members')
-    .doc(uid);
-  const role = 'student';
-  const memberRole = toSchoolMemberRole(role);
-
-  await userRef.set(
-    {
+  return writeSchoolLoginProfile({
+    uid,
+    schoolId: PROVIDENCE_UNIVERSITY_SCHOOL_ID,
+    profile: {
       email,
       displayName,
       studentId,
       department: department || '',
-      role,
-      schoolId: PROVIDENCE_UNIVERSITY_SCHOOL_ID,
-      primarySchoolId: PROVIDENCE_UNIVERSITY_SCHOOL_ID,
-      lastLoginAt: FieldValue.serverTimestamp(),
-      ...(isNewUser ? { createdAt: FieldValue.serverTimestamp() } : {}),
+      role: 'student',
     },
-    { merge: true },
-  );
-
-  await memberRef.set(
-    {
-      status: 'active',
-      role: memberRole,
+    membershipFields: {
       studentId,
       displayName,
       department: department || '',
-      lastLoginAt: FieldValue.serverTimestamp(),
-      ...(isNewUser ? { joinedAt: FieldValue.serverTimestamp() } : {}),
     },
-    { merge: true },
-  );
+  });
 }
 
 async function provisionUniversalDevAccount({ account, schoolId }) {
@@ -1896,23 +1880,22 @@ exports.signInPuStudentId = onRequest(
         });
         isNewUser = userResult.isNewUser;
 
-        await upsertPuStudentProfile({
+        const schoolRole = await upsertPuStudentProfile({
           uid,
           studentId,
           displayName,
           email,
           department,
-          isNewUser,
         });
 
         await syncAuthClaims(uid, {
-          role: 'student',
+          role: schoolRole.role,
           schoolId: PROVIDENCE_UNIVERSITY_SCHOOL_ID,
         });
 
         customToken = await auth.createCustomToken(uid, {
           schoolId: PROVIDENCE_UNIVERSITY_SCHOOL_ID,
-          role: 'student',
+          role: schoolRole.role,
         });
       }
 
@@ -2215,31 +2198,10 @@ exports.verifySSOCallback = onRequest(
 
       if (ssoLinkDoc.exists) {
         uid = ssoLinkDoc.data().firebaseUid;
-        resolvedRole = resolveProvisionedRole({
-          existingLink: ssoLinkDoc.data(),
-          existingUser: existingUserDoc?.exists ? existingUserDoc.data() : null,
-        });
-
-        const userRef = db.collection('users').doc(uid);
-        await userRef.update({
-          lastLoginAt: FieldValue.serverTimestamp(),
-          displayName: userInfo.name || userInfo.displayName,
-          email: userInfo.email,
-          role: resolvedRole,
-        });
-
-        await db
-          .collection('schools')
-          .doc(schoolId)
-          .collection('members')
-          .doc(uid)
-          .set(
-            {
-              status: 'active',
-              role: toSchoolMemberRole(resolvedRole),
-            },
-            { merge: true },
-          );
+        resolvedRole =
+          ssoLinkDoc.data().role ||
+          (existingUserDoc?.exists ? existingUserDoc.data().role : null) ||
+          'student';
       } else {
         const userRecord = await auth.createUser({
           email: userInfo.email || `${userInfo.sub}@${schoolId}.sso.local`,
@@ -2262,35 +2224,32 @@ exports.verifySSOCallback = onRequest(
           role: resolvedRole,
           createdAt: FieldValue.serverTimestamp(),
         });
-
-        await db
-          .collection('users')
-          .doc(uid)
-          .set({
-            email: userInfo.email,
-            displayName: userInfo.name || userInfo.displayName,
-            studentId: userInfo.studentId || userInfo.employee_id,
-            department: userInfo.department || userInfo.ou,
-            role: resolvedRole,
-            schoolId,
-            createdAt: FieldValue.serverTimestamp(),
-            lastLoginAt: FieldValue.serverTimestamp(),
-          });
-
-        await db
-          .collection('schools')
-          .doc(schoolId)
-          .collection('members')
-          .doc(uid)
-          .set(
-            {
-              status: 'active',
-              role: toSchoolMemberRole(resolvedRole),
-              joinedAt: FieldValue.serverTimestamp(),
-            },
-            { merge: true },
-          );
       }
+
+      const schoolRole = await writeSchoolLoginProfile({
+        uid,
+        schoolId,
+        profile: {
+          email:
+            userInfo.email ||
+            (existingUserDoc?.exists ? existingUserDoc.data().email : null) ||
+            `${userInfo.sub}@${schoolId}.sso.local`,
+          displayName:
+            userInfo.name ||
+            userInfo.displayName ||
+            (existingUserDoc?.exists ? existingUserDoc.data().displayName : null) ||
+            '同學',
+          role: resolvedRole,
+          ...(isNewUser
+            ? {
+                studentId: userInfo.studentId || userInfo.employee_id || '',
+                department: userInfo.department || userInfo.ou || '',
+              }
+            : {}),
+        },
+        ssoLinkRef,
+      });
+      resolvedRole = schoolRole.role;
 
       const customToken = await auth.createCustomToken(uid, {
         schoolId,
@@ -2414,7 +2373,7 @@ exports.updateSSOConfig = onCall(
       throw new HttpsError('invalid-argument', 'Missing schoolId or SSO configuration');
     }
 
-    await assertSchoolAdminOrEditor(schoolId, uid);
+    await assertSchoolAdmin(schoolId, uid);
 
     const normalizedConfig = config || publicConfig;
     const splitConfig = config
@@ -2965,39 +2924,43 @@ exports.updateSchoolMemberRole = onCall(
       throw new HttpsError('invalid-argument', 'Invalid school member role update');
     }
 
-    const actorMembership = await assertSchoolAdminOrEditor(schoolId, uid);
-    const targetRef = db.collection('schools').doc(schoolId).collection('members').doc(targetUid);
-    const targetDoc = await targetRef.get();
-
-    if (!targetDoc.exists) {
-      throw new HttpsError('not-found', 'School member not found');
-    }
-
-    if (role === 'admin' && actorMembership.role !== 'admin') {
-      throw new HttpsError('permission-denied', 'Only admins can promote another admin');
-    }
-
-    if (uid === targetUid && targetDoc.data()?.role === 'admin' && role !== 'admin') {
-      throw new HttpsError('failed-precondition', 'Admin self-demotion is blocked');
-    }
-
+    const schoolRef = db.collection('schools').doc(schoolId);
+    const actorRef = schoolRef.collection('members').doc(uid);
+    const targetRef = schoolRef.collection('members').doc(targetUid);
+    const accountRef = db.collection('users').doc(uid);
+    const auditRef = schoolRef.collection('adminLogs').doc();
     const actorEmail = trimString(request.auth?.token?.email, 320);
-    await targetRef.set(
-      {
+
+    await db.runTransaction(async (tx) => {
+      const [actorDoc, targetDoc, accountDoc] = await tx.getAll(actorRef, targetRef, accountRef);
+      const actor = actorDoc.exists ? actorDoc.data() : null;
+      if (!actor || actor.role !== 'admin' || (actor.status && actor.status !== 'active')) {
+        throw new HttpsError('permission-denied', '只有學校管理員可以調整成員權限。');
+      }
+      const account = accountDoc.exists ? accountDoc.data() : {};
+      if (account.accountDeletionInProgress === true || account.status === 'deleted') {
+        throw new HttpsError('failed-precondition', '帳號正在刪除或已停用。');
+      }
+      if (!targetDoc.exists) {
+        throw new HttpsError('not-found', 'School member not found');
+      }
+      if (uid === targetUid && role !== 'admin') {
+        throw new HttpsError('failed-precondition', 'Admin self-demotion is blocked');
+      }
+
+      tx.update(targetRef, {
         role,
         updatedAt: FieldValue.serverTimestamp(),
         updatedBy: uid,
         updatedByEmail: actorEmail || null,
-      },
-      { merge: true },
-    );
-
-    await logAdminAction({
-      schoolId,
-      action: 'update_member_role',
-      details: `member=${targetUid};role=${role}`,
-      actorUid: uid,
-      actorEmail,
+      });
+      tx.create(auditRef, {
+        action: 'update_member_role',
+        details: `member=${targetUid};role=${role}`,
+        actorUid: uid,
+        actorEmail,
+        createdAt: FieldValue.serverTimestamp(),
+      });
     });
 
     return { success: true };
@@ -3020,8 +2983,7 @@ exports.updateSchoolServiceRole = onCall(
       throw new HttpsError('invalid-argument', 'Missing schoolId or targetUid');
     }
 
-    await assertSchoolAdminOrEditor(schoolId, uid);
-    await assertActiveSchoolMember(schoolId, targetUid);
+    await assertSchoolAdmin(schoolId, uid);
     const actorEmail = trimString(request.auth?.token?.email, 320);
     const normalized = normalizeServiceRoleRecord({
       status: request.data?.status,
@@ -3032,12 +2994,27 @@ exports.updateSchoolServiceRole = onCall(
       health: request.data?.health,
     });
 
-    await db
-      .collection('schools')
-      .doc(schoolId)
-      .collection('serviceRoles')
-      .doc(targetUid)
-      .set(
+    const schoolRef = db.collection('schools').doc(schoolId);
+    const targetRef = schoolRef.collection('members').doc(targetUid);
+    const accountRef = db.collection('users').doc(targetUid);
+    const serviceRef = schoolRef.collection('serviceRoles').doc(targetUid);
+    const auditRef = schoolRef.collection('adminLogs').doc();
+    await db.runTransaction(async (tx) => {
+      await assertSchoolAdmin(schoolId, uid, tx);
+      const [targetDoc, accountDoc] = await tx.getAll(targetRef, accountRef);
+      const target = targetDoc.exists ? targetDoc.data() : null;
+      if (!target || (target.status && target.status !== 'active')) {
+        throw new HttpsError('permission-denied', 'User is not an active member of this school');
+      }
+      const account = accountDoc.exists ? accountDoc.data() : {};
+      if (
+        normalized.status === 'active' &&
+        (account.accountDeletionInProgress === true || account.status === 'deleted')
+      ) {
+        throw new HttpsError('failed-precondition', '無法授權已停用或正在刪除的帳號。');
+      }
+      tx.set(
+        serviceRef,
         {
           ...normalized,
           updatedAt: FieldValue.serverTimestamp(),
@@ -3046,13 +3023,13 @@ exports.updateSchoolServiceRole = onCall(
         },
         { merge: true },
       );
-
-    await logAdminAction({
-      schoolId,
-      action: 'update_service_role',
-      details: `member=${targetUid};domains=${SERVICE_ROLE_DOMAINS.filter((domain) => normalized[domain]).join(',') || 'none'};status=${normalized.status}`,
-      actorUid: uid,
-      actorEmail,
+      tx.create(auditRef, {
+        action: 'update_service_role',
+        details: `member=${targetUid};domains=${SERVICE_ROLE_DOMAINS.filter((domain) => normalized[domain]).join(',') || 'none'};status=${normalized.status}`,
+        actorUid: uid,
+        actorEmail,
+        createdAt: FieldValue.serverTimestamp(),
+      });
     });
 
     return { success: true };
@@ -3074,41 +3051,44 @@ exports.upsertSchoolCafeteriaConfig = onCall(
       throw new HttpsError('invalid-argument', 'Missing schoolId');
     }
 
-    await assertSchoolAdminOrEditor(schoolId, uid);
+    await assertSchoolAdmin(schoolId, uid);
     const actorEmail = trimString(request.auth?.token?.email, 320);
     const normalized = normalizeCafeteriaConfigInput(request.data);
     const cafeteriaRef = getCafeteriaRef(schoolId, normalized.cafeteriaId);
-    const existingDoc = await cafeteriaRef.get();
-
-    await cafeteriaRef.set(
-      {
-        schoolId,
-        name: normalized.name,
-        merchantId: normalized.cafeteriaId,
-        pilotStatus: normalized.pilotStatus,
-        orderingEnabled: normalized.orderingEnabled,
-        location: normalized.location ?? FieldValue.delete(),
-        openingHours: normalized.openingHours ?? FieldValue.delete(),
-        brandKey: normalized.brandKey ?? FieldValue.delete(),
-        updatedAt: FieldValue.serverTimestamp(),
-        updatedBy: uid,
-        updatedByEmail: actorEmail || null,
-        ...(existingDoc.exists
-          ? {}
-          : {
-              activeOperatorCount: 0,
-              createdAt: FieldValue.serverTimestamp(),
-            }),
-      },
-      { merge: true },
-    );
-
-    await logAdminAction({
-      schoolId,
-      action: existingDoc.exists ? 'update_cafeteria_config' : 'create_cafeteria_config',
-      details: `cafeteria=${normalized.cafeteriaId};pilot=${normalized.pilotStatus};ordering=${normalized.orderingEnabled}`,
-      actorUid: uid,
-      actorEmail,
+    const auditRef = db.collection('schools').doc(schoolId).collection('adminLogs').doc();
+    await db.runTransaction(async (tx) => {
+      await assertSchoolAdmin(schoolId, uid, tx);
+      const existingDoc = await tx.get(cafeteriaRef);
+      tx.set(
+        cafeteriaRef,
+        {
+          schoolId,
+          name: normalized.name,
+          merchantId: normalized.cafeteriaId,
+          pilotStatus: normalized.pilotStatus,
+          orderingEnabled: normalized.orderingEnabled,
+          location: normalized.location ?? FieldValue.delete(),
+          openingHours: normalized.openingHours ?? FieldValue.delete(),
+          brandKey: normalized.brandKey ?? FieldValue.delete(),
+          updatedAt: FieldValue.serverTimestamp(),
+          updatedBy: uid,
+          updatedByEmail: actorEmail || null,
+          ...(existingDoc.exists
+            ? {}
+            : {
+                activeOperatorCount: 0,
+                createdAt: FieldValue.serverTimestamp(),
+              }),
+        },
+        { merge: true },
+      );
+      tx.create(auditRef, {
+        action: existingDoc.exists ? 'update_cafeteria_config' : 'create_cafeteria_config',
+        details: `cafeteria=${normalized.cafeteriaId};pilot=${normalized.pilotStatus};ordering=${normalized.orderingEnabled}`,
+        actorUid: uid,
+        actorEmail,
+        createdAt: FieldValue.serverTimestamp(),
+      });
     });
 
     return {
@@ -3134,40 +3114,61 @@ exports.upsertCafeteriaOperatorAssignment = onCall(
       throw new HttpsError('invalid-argument', 'Missing schoolId or cafeteriaId');
     }
 
-    await assertSchoolAdminOrEditor(schoolId, uid);
+    await assertSchoolAdmin(schoolId, uid);
     const cafeteriaRef = getCafeteriaRef(schoolId, cafeteriaId);
-    const cafeteriaDoc = await cafeteriaRef.get();
-    if (!cafeteriaDoc.exists) {
-      throw new HttpsError('not-found', 'Cafeteria not found');
-    }
-
     const actorEmail = trimString(request.auth?.token?.email, 320);
     const normalized = normalizeCafeteriaOperatorInput(request.data);
     const operatorRef = cafeteriaRef.collection('operators').doc(normalized.targetUid);
-    const existingDoc = await operatorRef.get();
-
-    await operatorRef.set(
-      {
-        status: normalized.status,
-        role: normalized.role,
-        displayName: normalized.displayName ?? null,
-        email: normalized.email ?? null,
+    const targetAccountRef = db.collection('users').doc(normalized.targetUid);
+    const auditRef = db.collection('schools').doc(schoolId).collection('adminLogs').doc();
+    const activeOperatorCount = await db.runTransaction(async (tx) => {
+      await assertSchoolAdmin(schoolId, uid, tx);
+      const [cafeteriaDoc, existingDoc, accountDoc] = await tx.getAll(
+        cafeteriaRef,
+        operatorRef,
+        targetAccountRef,
+      );
+      if (!cafeteriaDoc.exists) throw new HttpsError('not-found', 'Cafeteria not found');
+      const account = accountDoc.exists ? accountDoc.data() : {};
+      if (
+        normalized.status === 'active' &&
+        (account.accountDeletionInProgress === true || account.status === 'deleted')
+      ) {
+        throw new HttpsError('failed-precondition', '無法授權已停用或正在刪除的帳號。');
+      }
+      const activeOperators = await tx.get(
+        cafeteriaRef.collection('operators').where('status', '==', 'active'),
+      );
+      const count =
+        activeOperators.size -
+        (existingDoc.exists && existingDoc.data().status === 'active' ? 1 : 0) +
+        (normalized.status === 'active' ? 1 : 0);
+      tx.set(
+        operatorRef,
+        {
+          status: normalized.status,
+          role: normalized.role,
+          displayName: normalized.displayName ?? null,
+          email: normalized.email ?? null,
+          updatedAt: FieldValue.serverTimestamp(),
+          updatedBy: uid,
+          updatedByEmail: actorEmail || null,
+          ...(existingDoc.exists ? {} : { createdAt: FieldValue.serverTimestamp() }),
+        },
+        { merge: true },
+      );
+      tx.update(cafeteriaRef, {
+        activeOperatorCount: count,
         updatedAt: FieldValue.serverTimestamp(),
-        updatedBy: uid,
-        updatedByEmail: actorEmail || null,
-        ...(existingDoc.exists ? {} : { createdAt: FieldValue.serverTimestamp() }),
-      },
-      { merge: true },
-    );
-
-    const activeOperatorCount = await syncCafeteriaOperatorCount(schoolId, cafeteriaId);
-
-    await logAdminAction({
-      schoolId,
-      action: 'upsert_cafeteria_operator',
-      details: `cafeteria=${cafeteriaId};uid=${normalized.targetUid};role=${normalized.role};status=${normalized.status}`,
-      actorUid: uid,
-      actorEmail,
+      });
+      tx.create(auditRef, {
+        action: 'upsert_cafeteria_operator',
+        details: `cafeteria=${cafeteriaId};uid=${normalized.targetUid};role=${normalized.role};status=${normalized.status}`,
+        actorUid: uid,
+        actorEmail,
+        createdAt: FieldValue.serverTimestamp(),
+      });
+      return count;
     });
 
     return {
@@ -3193,39 +3194,13 @@ exports.clearSchoolAdminTestData = onCall(
     }
 
     await assertSchoolAdminOrEditor(schoolId, uid);
-    const actorEmail = trimString(request.auth?.token?.email, 320);
-    const [announcementsSnap, eventsSnap] = await Promise.all([
-      db.collection('schools').doc(schoolId).collection('announcements').get(),
-      db.collection('schools').doc(schoolId).collection('clubEvents').get(),
-    ]);
-
-    const refs = [
-      ...announcementsSnap.docs.map((docSnap) => docSnap.ref),
-      ...eventsSnap.docs.map((docSnap) => docSnap.ref),
-    ];
-    for (const chunk of chunkItems(refs)) {
-      const batch = db.batch();
-      for (const ref of chunk) {
-        batch.delete(ref);
-      }
-      await batch.commit();
-    }
-
-    await logAdminAction({
-      schoolId,
-      action: 'clear_testing_data',
-      details: `announcements=${announcementsSnap.size};events=${eventsSnap.size}`,
-      actorUid: uid,
-      actorEmail,
-    });
-
-    return {
-      success: true,
-      deleted: {
-        announcements: announcementsSnap.size,
-        events: eventsSnap.size,
-      },
-    };
+    // Existing records have no trusted test-data provenance. Keep older clients
+    // fail-closed rather than treating all published school content as test data.
+    throw new HttpsError(
+      'failed-precondition',
+      '為避免誤刪正式資料，已停用整批清空功能。請逐筆確認後刪除公告或活動。',
+      { reason: 'unsafe-bulk-cleanup-disabled' },
+    );
   },
 );
 
