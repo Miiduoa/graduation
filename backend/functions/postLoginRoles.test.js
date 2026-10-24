@@ -32,4 +32,35 @@ describe('resolveUserRoles', () => {
     expect(r.primaryRole).toBe('staff');
     expect(r.orgRoles).toContain('schoolEditor');
   });
+
+  test('inactive school admin is not membership evidence', () => {
+    const r = resolveUserRoles({
+      userDoc: { role: 'student' },
+      schoolMemberDoc: { role: 'admin', status: 'inactive' },
+      tcCourses: [],
+    });
+    expect(r.primaryRole).toBe('student');
+    expect(r.orgRoles).not.toContain('schoolAdmin');
+  });
+
+  test('missing member status is not membership evidence', () => {
+    const r = resolveUserRoles({
+      userDoc: { role: 'student' },
+      schoolMemberDoc: { role: 'admin' },
+      tcCourses: [],
+    });
+    expect(r.primaryRole).toBe('student');
+    expect(r.orgRoles).not.toContain('schoolAdmin');
+  });
+
+  test('TC teacher evidence still elevates when school admin is inactive', () => {
+    const r = resolveUserRoles({
+      userDoc: { role: 'student' },
+      schoolMemberDoc: { role: 'admin', status: 'inactive' },
+      tcProfile: { role: 'teacher' },
+      tcCourses: [],
+    });
+    expect(r.primaryRole).toBe('teacher');
+    expect(r.orgRoles).not.toContain('schoolAdmin');
+  });
 });

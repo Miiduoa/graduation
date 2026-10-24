@@ -50,19 +50,38 @@ jobs:
           cache: 'pnpm'
 
       - name: Install dependencies
+        id: install
         run: pnpm install --frozen-lockfile
 
       - name: Production dependency audit
-        # 保留 moderate 以上完整報告；自動阻擋門檻目前為 critical。
-        # 通過此步驟不代表 high 已修復；可達性與處置記錄見 CAMPUS_ONE_INTEGRATION.md。
+        # 只收集一次 JSON；audit exit 僅接受 0（乾淨）或 1（有效弱點報告）。
+        # 政策閘門阻擋 critical 與未審查 high；moderate／low 仍寫入報告追蹤。
+        # 通過此步驟不代表已無 high；殘餘接受見 docs/security/dependency-risk-acceptance.json。
+        # if: always（且 install 成功）讓三個 scope 都能留下 artifact，不略過最終 job 失敗。
+        if: always() && steps.install.outcome == 'success'
         run: |
-          pnpm audit --prod --audit-level moderate --json > audit-report.json || true
-          pnpm audit --prod --audit-level critical
+          set +e
+          pnpm audit --prod --json > audit-report.json
+          audit_exit=$?
+          set -e
+          node scripts/dependency-security-gate.cjs \
+            --report audit-report.json \
+            --format pnpm-legacy \
+            --scope workspace-prod \
+            --audit-exit-code "$audit_exit"
 
       - name: Build toolchain dependency audit
+        if: always() && steps.install.outcome == 'success'
         run: |
-          pnpm audit --json > toolchain-audit-report.json || true
-          pnpm audit --audit-level critical
+          set +e
+          pnpm audit --json > toolchain-audit-report.json
+          audit_exit=$?
+          set -e
+          node scripts/dependency-security-gate.cjs \
+            --report toolchain-audit-report.json \
+            --format pnpm-legacy \
+            --scope workspace-all \
+            --audit-exit-code "$audit_exit"
 
       - name: Verify isolated Functions deployment package
         run: node scripts/verify-functions-package.cjs
@@ -72,7 +91,7 @@ jobs:
           EAS_JSON_PACKAGE_ROOT: ${{ runner.temp }}/eas-config-schema/node_modules/@expo/eas-json
         run: |
           npm install --prefix "$RUNNER_TEMP/eas-config-schema" --ignore-scripts --no-audit --no-fund @expo/eas-json@24.9.0
-          node --test scripts/firebase-ci-workflow.test.cjs scripts/wait-for-firestore-indexes.test.cjs scripts/firebase-release-preflight.test.cjs scripts/verify-eas-build.test.mjs scripts/prepare-eas-submit.test.mjs scripts/prepare-eas-build.test.mjs scripts/verify-nuni-integration.test.mjs
+          node --test scripts/dependency-security-gate.test.cjs packages/shared/tests/postLoginRoles.test.cjs scripts/firebase-ci-workflow.test.cjs scripts/wait-for-firestore-indexes.test.cjs scripts/firebase-release-preflight.test.cjs scripts/verify-eas-build.test.mjs scripts/prepare-eas-submit.test.mjs scripts/prepare-eas-build.test.mjs scripts/verify-nuni-integration.test.mjs
           node --test scripts/nuni-course-source.test.mjs scripts/nuni-course-api-boundary.test.mjs scripts/nuni-materials-api-boundary.test.mjs scripts/nuni-merchant-api-boundary.test.mjs scripts/nuni-merchant-source.test.mjs scripts/nuni-merchant-native-transport.test.mjs scripts/seed-cafeterias.test.cjs
           python3 deploy/nuni-api/food-ordering/build_test.py
 
@@ -104,10 +123,18 @@ jobs:
           python3 -m unittest discover -s scripts/personal-import-sync -p '*_test.py'
 
       - name: Audit Functions deployment dependencies
+        if: always() && steps.install.outcome == 'success'
         working-directory: backend/functions
         run: |
-          npm audit --omit=dev --json > ../../functions-deploy-audit.json || true
-          npm audit --omit=dev --audit-level=critical
+          set +e
+          npm audit --omit=dev --json > ../../functions-deploy-audit.json
+          audit_exit=$?
+          set -e
+          node ../../scripts/dependency-security-gate.cjs \
+            --report ../../functions-deploy-audit.json \
+            --format npm \
+            --scope functions-prod \
+            --audit-exit-code "$audit_exit"
 
       - name: Secret scan
         uses: gitleaks/gitleaks-action@v2
