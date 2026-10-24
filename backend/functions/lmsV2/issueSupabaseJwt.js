@@ -25,6 +25,7 @@
 
 const { onCall, HttpsError } = require('firebase-functions/v2/https');
 const { defineSecret } = require('firebase-functions/params');
+const { readSecretValue } = require('../secretParams');
 const admin = require('firebase-admin');
 const { SignJWT } = require('jose');
 
@@ -115,11 +116,9 @@ exports.issueSupabaseJwt = onCall(
       throw new HttpsError('unauthenticated', 'must be signed in');
     }
 
-    const supabaseUrl = process.env.SUPABASE_URL || SUPABASE_URL_SECRET.value();
-    const serviceKey =
-      process.env.SUPABASE_SERVICE_ROLE_KEY || SUPABASE_SERVICE_ROLE_KEY_SECRET.value();
-    const jwtSecret =
-      process.env.SUPABASE_JWT_SECRET || SUPABASE_JWT_SECRET_SECRET.value();
+    const supabaseUrl = readSecretValue(SUPABASE_URL_SECRET, 'SUPABASE_URL');
+    const serviceKey = readSecretValue(SUPABASE_SERVICE_ROLE_KEY_SECRET, 'SUPABASE_SERVICE_ROLE_KEY');
+    const jwtSecret = readSecretValue(SUPABASE_JWT_SECRET_SECRET, 'SUPABASE_JWT_SECRET');
 
     if (!supabaseUrl || !serviceKey || !jwtSecret) {
       throw new HttpsError(

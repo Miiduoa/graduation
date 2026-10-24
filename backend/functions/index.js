@@ -8,6 +8,7 @@ const { onCall: firebaseOnCall, onRequest, HttpsError } = require('firebase-func
 const { createAccountGuardedOnCall } = require('./accountLifecycle');
 const onCall = createAccountGuardedOnCall({ onCall: firebaseOnCall, getDb: () => db });
 const { defineSecret } = require('firebase-functions/params');
+const { readSecretValue } = require('./secretParams');
 const { initializeApp } = require('firebase-admin/app');
 const { getFirestore, FieldValue, Timestamp } = require('firebase-admin/firestore');
 const { getMessaging } = require('firebase-admin/messaging');
@@ -2021,7 +2022,7 @@ exports.startSSOAuth = onRequest(
         return;
       }
 
-      const encryptionKey = SSO_CONFIG_ENCRYPTION_KEY.value();
+      const encryptionKey = readSecretValue(SSO_CONFIG_ENCRYPTION_KEY, 'SSO_CONFIG_ENCRYPTION_KEY');
       const fullConfig = await getFullSchoolSsoConfig(schoolId, encryptionKey);
       if (!fullConfig?.ssoConfig) {
         res.status(404).json({ error: 'SSO is not configured for this school' });
@@ -2121,7 +2122,7 @@ exports.verifySSOCallback = onRequest(
         return;
       }
 
-      const encryptionKey = SSO_CONFIG_ENCRYPTION_KEY.value();
+      const encryptionKey = readSecretValue(SSO_CONFIG_ENCRYPTION_KEY, 'SSO_CONFIG_ENCRYPTION_KEY');
       const fullConfig = await getFullSchoolSsoConfig(schoolId, encryptionKey);
       const ssoConfig = fullConfig?.ssoConfig || null;
       const availability = evaluateSsoConfiguration(fullConfig || {});
@@ -2351,7 +2352,7 @@ exports.getSSOConfig = onRequest(
     try {
       assertTrustedOrigin(req);
 
-      const encryptionKey = SSO_CONFIG_ENCRYPTION_KEY.value();
+      const encryptionKey = readSecretValue(SSO_CONFIG_ENCRYPTION_KEY, 'SSO_CONFIG_ENCRYPTION_KEY');
       const fullConfig = await getFullSchoolSsoConfig(schoolId, encryptionKey);
 
       if (!fullConfig) {
@@ -2429,7 +2430,7 @@ exports.updateSSOConfig = onCall(
       Boolean(splitConfig.publicConfig.ssoConfig),
     );
 
-    const encryptionKey = SSO_CONFIG_ENCRYPTION_KEY.value();
+    const encryptionKey = readSecretValue(SSO_CONFIG_ENCRYPTION_KEY, 'SSO_CONFIG_ENCRYPTION_KEY');
     await writeSchoolSsoConfig({
       schoolId,
       publicConfig: splitConfig.publicConfig,
@@ -4527,8 +4528,8 @@ exports.getBusArrivals = onCall(
     }
 
     // 嘗試呼叫 TDX API
-    const clientId = TDX_CLIENT_ID.value();
-    const clientSecret = TDX_CLIENT_SECRET.value();
+    const clientId = readSecretValue(TDX_CLIENT_ID, 'TDX_CLIENT_ID');
+    const clientSecret = readSecretValue(TDX_CLIENT_SECRET, 'TDX_CLIENT_SECRET');
 
     if (!clientId || !clientSecret) {
       // 沒有 TDX 金鑰：回傳靜態資料

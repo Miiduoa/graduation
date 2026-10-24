@@ -57,6 +57,24 @@ describe('executeAgentWrite input bounds', () => {
     expect(executeSpy).not.toHaveBeenCalled();
   });
 
+  test('rejects oversized input before reading the user profile', async () => {
+    mockStore = transactionStore([]);
+    const answers = Array.from({ length: MAX_ARRAY_ITEMS + 1 }, (_, index) => ({
+      questionId: `q${index}`,
+      value: 'x',
+    }));
+
+    await expect(
+      executeAgentWrite({
+        auth: { uid: 'nobody' },
+        data: {
+          toolName: 'submitQuizAttempt',
+          input: { quizId: 'quiz', courseSpaceId: 'course', answers },
+        },
+      }),
+    ).rejects.toMatchObject({ code: 'resource-exhausted' });
+  });
+
   test('still rejects unauthenticated callers before tool execution', async () => {
     const tool = byName.get('submitQuizAttempt');
     const executeSpy = jest.spyOn(tool, 'execute');
