@@ -140,7 +140,7 @@ export type DataSource = {
 
   // 課程
   listCourses: (schoolId?: string, options?: QueryOptions) => Promise<Course[]>;
-  getCourse: (id: string) => Promise<Course | null>;
+  getCourse: (id: string, schoolId?: string) => Promise<Course | null>;
   searchCourses: (query: string, schoolId?: string) => Promise<Course[]>;
   listCourseSpaces: (userId: string, schoolId?: string) => Promise<CourseSpace[]>;
   getCourseSpace: (

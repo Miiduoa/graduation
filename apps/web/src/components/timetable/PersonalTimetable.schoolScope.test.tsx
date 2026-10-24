@@ -60,10 +60,19 @@ vi.mock('@/components/SchoolAccountRequired', () => ({
 }));
 
 const record = (schoolId: string, id: string, title: string) => ({
-  id, batchId: 'batch', kind: 'timetable', schoolId,
-  title, academicYear: '115', semester: '1',
-  dayOfWeek: 1, startPeriod: 3, endPeriod: 4,
-  teacher: '', location: '', importedAt: '2026-10-14T00:00:00Z',
+  id,
+  batchId: 'batch',
+  kind: 'timetable',
+  schoolId,
+  title,
+  academicYear: '115',
+  semester: '1',
+  dayOfWeek: 1,
+  startPeriod: 3,
+  endPeriod: 4,
+  teacher: '',
+  location: '',
+  importedAt: '2026-10-14T00:00:00Z',
 });
 
 beforeEach(() => {
@@ -73,7 +82,10 @@ beforeEach(() => {
   context.owner = 'guest';
   context.records = [];
   context.load.mockImplementation(async (_uid: string | null, schoolId: string) => ({
-    schoolId, courses: [], meta: cleanMeta({}), shareWithFriends: false,
+    schoolId,
+    courses: [],
+    meta: cleanMeta({}),
+    shareWithFriends: false,
     updatedAt: '2026-10-14T00:00:00Z',
   }));
 });
@@ -89,7 +101,20 @@ it('shows only imported courses belonging to the selected university', async () 
   expect(await screen.findByText(/自行匯入 1 筆/)).toBeTruthy();
   expect(screen.getAllByText('清大新課表').length).toBeGreaterThan(0);
   expect(screen.queryByText('靜宜舊課表')).toBeNull();
+  expect(screen.getByText(/尚未取得這所學校的節次時間/)).toBeTruthy();
+  expect(screen.queryByText(/08:10/)).toBeNull();
+  expect(screen.queryByRole('button', { name: '格子' })).toBeNull();
+  expect(screen.queryByRole('button', { name: '新增課程' })).toBeNull();
   expect(context.academic).toHaveBeenCalledWith('courses', false);
+});
+
+it('restores the configured grid after switching from an unknown period school', async () => {
+  const view = render(<PersonalTimetable />);
+  await screen.findByText(/尚未取得這所學校的節次時間/);
+  context.schoolId = 'pu';
+  view.rerender(<PersonalTimetable />);
+  expect(await screen.findByRole('button', { name: '格子' })).toBeTruthy();
+  expect(screen.queryByText(/尚未取得這所學校的節次時間/)).toBeNull();
 });
 
 it('does not show a manual and imported copy of the same class as conflicting courses', async () => {
@@ -97,7 +122,18 @@ it('does not show a manual and imported copy of the same class as conflicting co
   context.records = [record('pu', 'imported', '同一門課')];
   context.load.mockResolvedValue({
     schoolId: 'pu',
-    courses: [{ id: 'manual', name: '同一門課', day: 1, start: 3, end: 4, teacher: '', room: '', color: 'blue' }],
+    courses: [
+      {
+        id: 'manual',
+        name: '同一門課',
+        day: 1,
+        start: 3,
+        end: 4,
+        teacher: '',
+        room: '',
+        color: 'blue',
+      },
+    ],
     meta: cleanMeta({ year: '115', semester: '1' }),
     shareWithFriends: false,
     updatedAt: '2026-10-20T00:00:00Z',
@@ -132,9 +168,14 @@ it('does not silently load Providence data when no campus is selected', () => {
 });
 
 it('shows the newest academic term even when an older term was imported later', async () => {
-  context.records = [record('nthu', 'new', '本學期課程'), {
-    ...record('nthu', 'old', '舊學期課程'), academicYear: '114', semester: '2',
-  }];
+  context.records = [
+    record('nthu', 'new', '本學期課程'),
+    {
+      ...record('nthu', 'old', '舊學期課程'),
+      academicYear: '114',
+      semester: '2',
+    },
+  ];
   render(<PersonalTimetable />);
   expect((await screen.findAllByText('本學期課程')).length).toBeGreaterThan(0);
   expect(screen.queryByText('舊學期課程')).toBeNull();
@@ -142,9 +183,14 @@ it('shows the newest academic term even when an older term was imported later', 
 
 it('keeps the academic term selected on Today when opening the full timetable', async () => {
   window.history.replaceState({}, '', '/timetable?term=114%7C2');
-  context.records = [record('nthu', 'new', '本學期課程'), {
-    ...record('nthu', 'old', '舊學期課程'), academicYear: '114', semester: '2',
-  }];
+  context.records = [
+    record('nthu', 'new', '本學期課程'),
+    {
+      ...record('nthu', 'old', '舊學期課程'),
+      academicYear: '114',
+      semester: '2',
+    },
+  ];
   render(<PersonalTimetable />);
   expect((await screen.findAllByText('舊學期課程')).length).toBeGreaterThan(0);
   expect(screen.queryByText('本學期課程')).toBeNull();

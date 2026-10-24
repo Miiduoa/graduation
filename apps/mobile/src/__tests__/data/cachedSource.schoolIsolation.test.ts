@@ -48,3 +48,13 @@ test('NCKU announcement cache does not serve NTPU copy', async () => {
   await expect(cached.getAnnouncement('a1', 'ncku')).resolves.toMatchObject({ title: '成大選課' });
   expect(getAnnouncement).not.toHaveBeenCalled();
 });
+
+test('an implicit-school course read is not reused after its source changes schools', async () => {
+  let schoolId = 'pu';
+  const getCourse = jest.fn(async () => ({ id: 'shared', schoolId, name: schoolId }));
+  const cached = createCachedSource({ getCourse } as unknown as DataSource);
+  await expect(cached.getCourse('shared')).resolves.toMatchObject({ schoolId: 'pu' });
+  schoolId = 'ntu';
+  await expect(cached.getCourse('shared')).resolves.toMatchObject({ schoolId: 'ntu' });
+  expect(getCourse).toHaveBeenCalledTimes(2);
+});
