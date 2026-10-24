@@ -98,7 +98,7 @@ export function useLostFoundGenerationScope(recordId = '') {
     if (liveSchoolRef.current !== snapshot.schoolId) return false;
     if (snapshot.recordId !== recordId) return false;
     const authUid = readLiveAuthUid();
-    if (authUid !== undefined && authUid !== snapshot.uid) {
+    if (authUid !== undefined && authUid !== (snapshot.uid ?? null)) {
       validScopeTokens.delete(snapshot.token);
       return false;
     }
