@@ -15,5 +15,6 @@ export type PreAuthStackParamList = {
     tab?: 'courses' | 'food' | 'merchant' | 'account';
     workspaceId?: string;
     assignmentId?: string;
+    materialId?: string;
   } | undefined;
 };
