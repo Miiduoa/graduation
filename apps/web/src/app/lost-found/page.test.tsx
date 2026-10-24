@@ -40,10 +40,13 @@ it('shows a login prompt instead of a 404 when the visitor is unsigned', async (
       </Suspense>,
     );
   });
-  expect(await screen.findByText('登入後才能看失物招領和評論')).toBeTruthy();
-  expect(screen.getByRole('link', { name: '登入' }).getAttribute('href')).toBe(
-    '/login?returnUrl=%2Flost-found%3FschoolId%3Dpu',
+  expect(await screen.findByText('查看失物招領需要學校帳號。')).toBeTruthy();
+  const login = screen.getByRole('link', { name: '連線學校帳號' });
+  expect(login.getAttribute('href')).toBe(
+    '/login?reconnect=school&returnUrl=%2Flost-found%3FschoolId%3Dpu',
   );
+  expect(login.getAttribute('href')).not.toMatch(/google/i);
+  expect(screen.queryByRole('link', { name: '登入' })).toBeNull();
   expect(listLostFoundItems).not.toHaveBeenCalled();
   expect(screen.queryByText('找不到這個頁面')).toBeNull();
   expect(screen.queryByText('暫時無法讀取失物招領，請稍後再試。')).toBeNull();
