@@ -110,6 +110,15 @@ it('搜尋結果維持已選校園的連結參數與原有帳號需求', () => {
   expect(screen.getByText('使用學校帳號，以同學給你的代號加好友。')).toBeTruthy();
 });
 
+it('失物招領說明指向學校帳號，不承諾 Google 可完成', () => {
+  render(<LifePage />);
+  const search = screen.getByRole('searchbox', { name: '快速找服務' });
+  fireEvent.change(search, { target: { value: '失物' } });
+  expect(screen.getByText('使用學校帳號登入後，查看或刊登遺失與拾獲物品。')).toBeTruthy();
+  expect(screen.queryByText(/Google 帳號登入後，查看或刊登遺失/)).toBeNull();
+  expect(screen.getByRole('link', { name: /失物招領/ }).getAttribute('href')).toBe('/lost-found');
+});
+
 it('學校資訊入口保留已選校園，並可被免登入搜尋找到', () => {
   selectedSchool.mockReturnValue({
     selectedSchool: { id: 'nthu' },

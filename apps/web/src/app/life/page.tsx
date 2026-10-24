@@ -77,7 +77,7 @@ const ITEMS: LifeService[] = [
   {
     href: '/lost-found',
     title: '失物招領',
-    text: '用 Google 帳號登入後，查看或刊登遺失與拾獲物品。',
+    text: '使用學校帳號登入後，查看或刊登遺失與拾獲物品。',
     action: '找失物',
     icon: 'lost-found',
     group: 'community',
