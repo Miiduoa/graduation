@@ -513,7 +513,7 @@ function PersonalTimetableWorkspace({ initialTerm }: { initialTerm?: string }) {
               key={friend.uid}
               text={`看 ${friend.name || friend.uid.slice(0, 6)} 的課表`}
               onPress={async () => {
-                const theirs = await loadFriendTimetable(friend.uid).catch(() => null);
+                const theirs = await loadFriendTimetable(friend.uid, schoolId).catch(() => null);
                 if (!theirs) {
                   setNotice('還看不到這份課表。要先成為好友，且對方有開放。');
                   return;

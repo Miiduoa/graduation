@@ -5,6 +5,9 @@ import { SiteShell } from '@/components/SiteShell';
 import {
   WEEKDAY_LABELS,
   courseTimeLabel,
+  periodEnd,
+  periodProfileForSchool,
+  periodStart,
   sharedTimetableTitle,
   type PersonalCourse,
   type TimetableMeta,
@@ -12,11 +15,35 @@ import {
 import { loadSharedTimetable } from '@/lib/timetable/store';
 import styles from '@/components/academic/academic.module.css';
 
-export default function SharedTimetablePage({ params }: { params: Promise<{ token: string }> }) {
-  const { token } = use(params);
+function periodRangeCopy(start: number, end: number): string {
+  return start === end ? `第 ${start} 節` : `第 ${start}–${end} 節`;
+}
+
+/** Snapshot clock labels follow the share's schoolId only — never browsing school or PU default. */
+function snapshotCourseTimeLabel(
+  course: Pick<PersonalCourse, 'day' | 'start' | 'end'>,
+  schoolId: string | null,
+): string {
+  if (course.day === 0 || course.start === 0) return '時間待定';
+  const profile = periodProfileForSchool(schoolId);
+  if (!profile) return `${periodRangeCopy(course.start, course.end)}，時間待確認`;
+  const start = periodStart(course.start, profile);
+  const end = periodEnd(course.end, profile);
+  if (!start || !end) return `${periodRangeCopy(course.start, course.end)}，時間待確認`;
+  return courseTimeLabel(course, profile);
+}
+
+function SharedTimetableSnapshot({ token }: { token: string }) {
   const [state, setState] = useState<
     | { status: 'loading' }
-    | { status: 'ready'; name: string; courses: PersonalCourse[]; meta: TimetableMeta; expiresAt: string }
+    | {
+        status: 'ready';
+        name: string;
+        courses: PersonalCourse[];
+        meta: TimetableMeta;
+        expiresAt: string;
+        schoolId: string | null;
+      }
     | { status: 'error'; message: string }
   >({ status: 'loading' });
 
@@ -24,7 +51,15 @@ export default function SharedTimetablePage({ params }: { params: Promise<{ toke
     let alive = true;
     loadSharedTimetable(token)
       .then((data) => {
-        if (alive) setState({ status: 'ready', ...data });
+        if (!alive) return;
+        setState({
+          status: 'ready',
+          name: data.name,
+          courses: data.courses,
+          meta: data.meta,
+          expiresAt: data.expiresAt,
+          schoolId: data.schoolId ?? null,
+        });
       })
       .catch((error: Error) => {
         const message =
@@ -65,7 +100,7 @@ export default function SharedTimetablePage({ params }: { params: Promise<{ toke
                   {entries.length ? (
                     entries.map((course) => (
                       <article className={styles.course} key={course.id}>
-                        <time>{courseTimeLabel(course)}</time>
+                        <time>{snapshotCourseTimeLabel(course, state.schoolId)}</time>
                         <h4>{course.name}</h4>
                         <p>{course.room || '教室未填'}</p>
                       </article>
@@ -81,4 +116,9 @@ export default function SharedTimetablePage({ params }: { params: Promise<{ toke
       )}
     </SiteShell>
   );
+}
+
+export default function SharedTimetablePage({ params }: { params: Promise<{ token: string }> }) {
+  const { token } = use(params);
+  return <SharedTimetableSnapshot key={token} token={token} />;
 }

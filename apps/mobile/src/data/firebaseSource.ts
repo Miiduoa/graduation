@@ -2,6 +2,7 @@
 import type { DataSource } from './source';
 import { lostFoundSource } from './lostFoundSource';
 import { createOrderThroughServer } from './orderSource';
+import { toPublicSchoolId } from './schoolIds';
 import type {
   Announcement,
   ActionQueueItem,
@@ -1302,8 +1303,20 @@ export const firebaseSource: DataSource = {
     );
   },
 
-  async getCourse(id) {
-    return fetchDocument<Course>('courses', id);
+  async getCourse(id, schoolId) {
+    if (!id || id.includes('/')) return null;
+    if (!schoolId) return fetchDocument<Course>('courses', id);
+    const selectedSchoolId = toPublicSchoolId(schoolId) ?? schoolId;
+    const canonical = await fetchDocumentAtPath<Course>(
+      buildSchoolCollectionPath(selectedSchoolId, 'courses', id),
+    );
+    if (canonical) {
+      if (canonical.schoolId && toPublicSchoolId(canonical.schoolId) !== selectedSchoolId) return null;
+      return { ...canonical, schoolId: selectedSchoolId };
+    }
+    const legacy = await fetchDocument<Course>('courses', id);
+    if (!legacy || toPublicSchoolId(legacy.schoolId) !== selectedSchoolId) return null;
+    return { ...legacy, schoolId: selectedSchoolId };
   },
 
   async searchCourses(searchQuery, schoolId) {
