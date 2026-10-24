@@ -19,6 +19,14 @@ it('finds school info through contact keywords', () => {
   expect(services.some((service) => service.href === '/school-info')).toBe(true);
 });
 
+it('exposes a separate public campus-events entry beside clubs', () => {
+  const events = searchCampusServices('講座').find((service) => service.href === '/events');
+  expect(events?.name).toBe('校園活動');
+  expect(events?.access).toBe('public');
+  expect(searchCampusServices('社團').some((service) => service.href === '/clubs')).toBe(true);
+  expect(searchCampusServices('社團').some((service) => service.href === '/events')).toBe(false);
+});
+
 it('does not rewrite non-food services when ordering is off', () => {
   expect(presentCampusService({ href: '/bus', text: '查詢路線與站牌' }).text).toBe('查詢路線與站牌');
   expect(presentCampusService({ href: '/food', text: '選餐點、查訂單、出示取餐憑證' }).text).toBe(

@@ -51,14 +51,14 @@ it('分類與關鍵字共同篩選，清除搜尋會保留分類及輸入焦點'
   render(<LifePage />);
   const search = screen.getByRole('searchbox', { name: '快速找服務' });
   fireEvent.click(screen.getByRole('button', { name: '免登入' }));
-  expect(screen.getAllByRole('link')).toHaveLength(6);
+  expect(screen.getAllByRole('link')).toHaveLength(7);
   expect(screen.getByRole('button', { name: '免登入' }).getAttribute('aria-pressed')).toBe('true');
   fireEvent.change(search, { target: { value: '教室' } });
   expect(screen.getAllByRole('link')).toHaveLength(1);
   expect(screen.getByRole('link', { name: /校園地圖/ })).toBeTruthy();
   fireEvent.click(screen.getByRole('button', { name: '清除搜尋' }));
   expect(document.activeElement).toBe(search);
-  expect(screen.getAllByRole('link')).toHaveLength(6);
+  expect(screen.getAllByRole('link')).toHaveLength(7);
   expect(screen.getByRole('button', { name: '免登入' }).getAttribute('aria-pressed')).toBe('true');
 });
 
@@ -70,13 +70,13 @@ it('空結果可以恢復完整目錄，Escape 也可清除輸入', () => {
   expect(screen.queryAllByRole('link')).toHaveLength(0);
   expect(screen.getByRole('status').textContent).toBe('找到 0 項服務');
   fireEvent.click(screen.getByRole('button', { name: '顯示全部服務' }));
-  expect(screen.getAllByRole('link')).toHaveLength(11);
+  expect(screen.getAllByRole('link')).toHaveLength(12);
   expect(document.activeElement).toBe(search);
   fireEvent.change(search, { target: { value: '教室' } });
   fireEvent.keyDown(search, { key: 'Escape', isComposing: true });
   expect(screen.getAllByRole('link')).toHaveLength(1);
   fireEvent.keyDown(search, { key: 'Escape' });
-  expect(screen.getAllByRole('link')).toHaveLength(11);
+  expect(screen.getAllByRole('link')).toHaveLength(12);
 });
 
 it('搜尋不會繞過訂單開關，也不會將報修顯示為可使用服務', () => {
@@ -122,6 +122,22 @@ it('學校資訊入口保留已選校園，並可被免登入搜尋找到', () =
   const link = screen.getByRole('link', { name: /學校資訊/ });
   const href = new URL(link.getAttribute('href')!, 'https://campus.example');
   expect(href.pathname).toBe('/school-info');
+  expect(href.searchParams.get('schoolId')).toBe('nthu');
+  expect(href.searchParams.get('campus')).toBe('nthu');
+});
+
+it('校園活動入口可被搜尋，並保留已選校園參數', () => {
+  selectedSchool.mockReturnValue({
+    selectedSchool: { id: 'nthu' },
+    loading: false,
+    catalogStatus: 'ready',
+  });
+  render(<LifePage />);
+  const search = screen.getByRole('searchbox', { name: '快速找服務' });
+  fireEvent.change(search, { target: { value: '講座' } });
+  const link = screen.getByRole('link', { name: /校園活動/ });
+  const href = new URL(link.getAttribute('href')!, 'https://campus.example');
+  expect(href.pathname).toBe('/events');
   expect(href.searchParams.get('schoolId')).toBe('nthu');
   expect(href.searchParams.get('campus')).toBe('nthu');
 });
