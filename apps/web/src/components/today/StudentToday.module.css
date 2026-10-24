@@ -108,6 +108,11 @@
   color: var(--muted);
 }
 
+.metaDanger {
+  color: var(--danger);
+  font-weight: 700;
+}
+
 .action {
   margin-top: auto;
   align-self: flex-end;
@@ -132,6 +137,10 @@
 
 .fade {
   transition: opacity 150ms ease;
+}
+
+.fadeOut {
+  opacity: 0;
 }
 
 @media (prefers-reduced-motion: reduce) {

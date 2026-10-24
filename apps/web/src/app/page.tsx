@@ -11,6 +11,7 @@ import { browserRequest, useNuniSession } from '@/features/nuni/Session';
 import { loadHomeData, type HomeCourse, type HomeData } from '@/lib/homeOverview';
 import { loadNuniHomeData } from '@/lib/nuniHomeOverview';
 import { useClientHydrated } from '@/lib/useClientHydrated';
+import { useOptionalSelectedSchool } from '@/components/SelectedSchoolProvider';
 import { isTeacherRole, useSchoolRole } from '@/lib/useSchoolRole';
 import { StudentTodayPage } from '@/components/today/StudentToday';
 import { todayTodosFromHomeTasks } from '@/lib/todayScreen';
@@ -28,7 +29,8 @@ export default function HomePage() {
   const context = hydrated ? nuni.session?.context : undefined;
   const accountId = hydrated ? nuni.session?.platformAccountId : undefined;
   const uid = hydrated ? user?.uid : undefined;
-  const role = useSchoolRole(uid, 'pu');
+  const school = useOptionalSelectedSchool();
+  const role = useSchoolRole(uid, school?.selectedSchoolId || 'pu');
   const owner =
     context && accountId ? `nuni:${context}:${accountId}` : uid ? `school:${uid}` : null;
   const sessionLoading = !hydrated || authLoading || nuni.loading;

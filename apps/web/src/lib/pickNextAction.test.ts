@@ -81,12 +81,39 @@ describe('pickNextAction', () => {
     });
   });
 
-  it('逾期作業不當成 24 小時內截止，清單可寫已逾期天數', () => {
+  it('只有逾期未交、今天沒課時選最早逾期的那筆，不當成空狀態', () => {
+    const laterOverdue = todo({
+      id: 'hw-new',
+      dueAt: Date.parse('2026-10-24T23:59:00+08:00'),
+    });
     const overdue = todo({
       dueAt: Date.parse('2026-10-23T23:59:00+08:00'),
     });
-    expect(pickNextAction([], [overdue], now)).toEqual({ type: 'empty' });
+    expect(pickNextAction([], [laterOverdue, overdue], now)).toEqual({ type: 'overdue', todo: overdue });
     expect(formatTodoDueLine(overdue, now)).toBe(TODAY_COPY.overdueDays(2));
+  });
+
+  it('正在上的課也算 30 分鐘內有課', () => {
+    const current = new Date('2026-10-25T11:00:00+08:00');
+    expect(pickNextAction([klass()], [todo()], current)).toEqual({ type: 'class', class: klass() });
+  });
+
+  it('今天沒課且沒有任何未交待辦才是空狀態', () => {
+    const laterDue = todo({ dueAt: Date.parse('2026-10-28T23:59:00+08:00') });
+    expect(pickNextAction([], [laterDue], now)).toEqual({ type: 'assignment', todo: laterDue });
+    expect(pickNextAction([], [], now)).toEqual({ type: 'empty' });
+  });
+
+  it('今天課都結束但仍有逾期未交時選逾期', () => {
+    const ended = klass({
+      startAt: Date.parse('2026-10-25T08:00:00+08:00'),
+      endAt: Date.parse('2026-10-25T10:00:00+08:00'),
+    });
+    const overdue = todo({ dueAt: Date.parse('2026-10-23T23:59:00+08:00') });
+    expect(pickNextAction([ended], [overdue], new Date('2026-10-25T12:00:00+08:00'))).toEqual({
+      type: 'overdue',
+      todo: overdue,
+    });
   });
 
   it('今天的課都結束後帶最近一筆作業', () => {

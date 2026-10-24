@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useRef } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { buildPersonalToday } from '@campus/shared';
 import {
@@ -142,6 +142,14 @@ function TodaySkeleton() {
   );
 }
 
+function prefersReducedMotion(): boolean {
+  return (
+    typeof window !== 'undefined' &&
+    typeof window.matchMedia === 'function' &&
+    window.matchMedia('(prefers-reduced-motion: reduce)').matches
+  );
+}
+
 function NextActionCard({
   action,
   unsigned,
@@ -155,45 +163,91 @@ function NextActionCard({
   now: Date;
   weekHref: string;
 }) {
-  const prev = useRef(actionKey(action, unsigned));
-  const key = actionKey(action, unsigned);
-  useEffect(() => {
-    prev.current = key;
-  }, [key]);
+  const incomingKey = actionKey(action, unsigned);
+  const [shown, setShown] = useState({ action, unsigned });
+  const [visible, setVisible] = useState(true);
+  const shownKey = actionKey(shown.action, shown.unsigned);
 
+  useEffect(() => {
+    if (incomingKey === shownKey) return;
+    const animate = !prefersReducedMotion() && isContentKey(shownKey) && isContentKey(incomingKey);
+    if (!animate) {
+      setShown({ action, unsigned });
+      setVisible(true);
+      return;
+    }
+    setVisible(false);
+    let frame = 0;
+    const timer = window.setTimeout(() => {
+      setShown({ action, unsigned });
+      frame = window.requestAnimationFrame(() => {
+        frame = window.requestAnimationFrame(() => setVisible(true));
+      });
+    }, 150);
+    return () => {
+      window.clearTimeout(timer);
+      if (frame) window.cancelAnimationFrame(frame);
+    };
+  }, [incomingKey, shownKey, action, unsigned]);
+
+  return (
+    <div
+      className={`${cardTone(shown.action, shown.unsigned)} ${styles.fade} ${visible ? '' : styles.fadeOut}`}
+      data-testid="next-action"
+    >
+      <NextActionBody
+        action={shown.action}
+        unsigned={shown.unsigned}
+        todosError={todosError}
+        now={now}
+        weekHref={weekHref}
+      />
+    </div>
+  );
+}
+
+function cardTone(action: NextAction, unsigned: boolean): string {
+  if (unsigned && action.type !== 'class') return styles.cardLight;
+  if (action.type === 'empty' || (action.type === 'allDone' && !action.todo)) return styles.cardLight;
+  return styles.card;
+}
+
+function NextActionBody({
+  action,
+  unsigned,
+  todosError,
+  now,
+  weekHref,
+}: {
+  action: NextAction;
+  unsigned: boolean;
+  todosError: string;
+  now: Date;
+  weekHref: string;
+}) {
   if (unsigned && action.type !== 'class') {
-    return (
-      <div className={`${styles.cardLight} ${styles.fade}`} data-testid="next-action">
-        <p className={styles.headline}>{TODAY_COPY.unsigned}</p>
-      </div>
-    );
+    return <p className={styles.headline}>{TODAY_COPY.unsigned}</p>;
   }
 
   if (action.type === 'empty') {
-    if (todosError) {
-      return <div className={`${styles.cardLight} ${styles.fade}`} data-testid="next-action" />;
-    }
+    if (todosError) return null;
     return (
-      <div className={`${styles.cardLight} ${styles.fade}`} data-testid="next-action">
+      <>
         <p className={styles.headline}>{TODAY_COPY.emptyDay}</p>
         <Link className={styles.action} href={weekHref}>
           {TODAY_COPY.viewWeek}
         </Link>
-      </div>
+      </>
     );
   }
 
   if (action.type === 'allDone' && !action.todo) {
-    return (
-      <div className={`${styles.cardLight} ${styles.fade}`} data-testid="next-action">
-        <p className={styles.headline}>{TODAY_COPY.allClassesDone}</p>
-      </div>
-    );
+    return <p className={styles.headline}>{TODAY_COPY.allClassesDone}</p>;
   }
 
   if (action.type === 'allDone' && action.todo) {
     return (
-      <div className={`${styles.card} ${styles.fade}`} data-testid="next-action">
+      <>
         <Link href={courseWeekHref(action.todo.courseId)} className={styles.cardMain}>
           <p className={styles.kind}>{TODAY_COPY.allClassesDone}</p>
           <p className={styles.headline}>{action.todo.title}</p>
@@ -202,14 +256,14 @@ function NextActionCard({
         <Link className={styles.action} href={assignmentSubmitHref(action.todo)}>
           {TODAY_COPY.goSubmit}
         </Link>
-      </div>
+      </>
     );
   }
 
   if (action.type === 'class') {
     const href = courseWeekHref(action.class.courseId);
     return (
-      <div className={`${styles.card} ${styles.fade}`} data-testid="next-action">
+      <>
         <Link href={href} className={styles.cardMain}>
           <p className={styles.kind}>{TODAY_COPY.nextClass}</p>
           <p className={styles.headline}>{action.class.title}</p>
@@ -218,23 +272,25 @@ function NextActionCard({
         <Link className={styles.action} href={href}>
           {TODAY_COPY.viewCourse}
         </Link>
-      </div>
+      </>
     );
   }
 
-  if (action.type !== 'assignment') return null;
+  if (action.type !== 'assignment' && action.type !== 'overdue') return null;
 
   return (
-    <div className={`${styles.card} ${styles.fade}`} data-testid="next-action">
+    <>
       <Link href={courseWeekHref(action.todo.courseId)} className={styles.cardMain}>
-        <p className={styles.kind}>{TODAY_COPY.dueToday}</p>
+        <p className={styles.kind}>{action.type === 'overdue' ? TODAY_COPY.overdue : TODAY_COPY.dueToday}</p>
         <p className={styles.headline}>{action.todo.title}</p>
-        <p className={styles.meta}>{formatTodoDueLine(action.todo, now)}</p>
+        <p className={`${styles.meta} ${action.type === 'overdue' ? styles.metaDanger : ''}`}>
+          {formatTodoDueLine(action.todo, now)}
+        </p>
       </Link>
       <Link className={styles.action} href={assignmentSubmitHref(action.todo)}>
         {TODAY_COPY.goSubmit}
       </Link>
-    </div>
+    </>
   );
 }
 
@@ -242,8 +298,18 @@ function actionKey(action: NextAction, unsigned: boolean): string {
   if (unsigned && action.type !== 'class') return 'unsigned';
   if (action.type === 'class') return `class:${action.class.id}`;
   if (action.type === 'assignment') return `todo:${action.todo.id}`;
+  if (action.type === 'overdue') return `overdue:${action.todo.id}`;
   if (action.type === 'allDone') return `done:${action.todo?.id ?? ''}`;
   return 'empty';
+}
+
+function isContentKey(key: string): boolean {
+  return (
+    key.startsWith('class:') ||
+    key.startsWith('todo:') ||
+    key.startsWith('overdue:') ||
+    key.startsWith('done:')
+  );
 }
 
 function TodayClassList({

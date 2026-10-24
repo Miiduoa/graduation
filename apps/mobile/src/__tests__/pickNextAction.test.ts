@@ -74,9 +74,26 @@ test('跨午夜只算台北同一曆日', () => {
   ).toEqual({ type: 'assignment', todo: dueSoon });
 });
 
-test('逾期兩天寫已逾期 2 天，且不佔 24 小時截止', () => {
+test('只有逾期未交、今天沒課時選最早逾期的那筆，不當成空狀態', () => {
+  const laterOverdue = todo({
+    id: 'hw-new',
+    dueAt: Date.parse('2026-10-24T23:59:00+08:00'),
+  });
   const overdue = todo({ dueAt: Date.parse('2026-10-23T23:59:00+08:00') });
-  expect(pickNextAction([], [overdue], now)).toEqual({ type: 'empty' });
+  expect(pickNextAction([], [laterOverdue, overdue], now)).toEqual({ type: 'overdue', todo: overdue });
   expect(formatTodoDueLine(overdue, now)).toBe(TODAY_COPY.overdueDays(2));
   expect(formatTodayHeaderDate(now)).toBe('10月25日 週日');
+});
+
+test('正在上的課也算 30 分鐘內有課', () => {
+  expect(pickNextAction([klass()], [todo()], new Date('2026-10-25T11:00:00+08:00'))).toEqual({
+    type: 'class',
+    class: klass(),
+  });
+});
+
+test('今天沒課且沒有任何未交待辦才是空狀態', () => {
+  const laterDue = todo({ dueAt: Date.parse('2026-10-28T23:59:00+08:00') });
+  expect(pickNextAction([], [laterDue], now)).toEqual({ type: 'assignment', todo: laterDue });
+  expect(pickNextAction([], [], now)).toEqual({ type: 'empty' });
 });

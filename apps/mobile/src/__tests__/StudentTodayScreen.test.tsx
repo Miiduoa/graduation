@@ -108,7 +108,7 @@ test('opens the assignment submit screen from a todo row', async () => {
 
 test('a failed refresh hides old records and never turns the failure into an empty inbox', async () => {
   const view = render(<StudentTodayScreen />);
-  await view.findByText('繳交期末報告');
+  await view.findAllByText('繳交期末報告');
   jest.mocked(loadStudentHome).mockRejectedValueOnce(new Error('permission-denied'));
   fireEvent(view.UNSAFE_getByType(RefreshControl), 'refresh');
   await view.findByText('無法讀取校務課程。請確認登入狀態與網路連線後重試。');
@@ -117,7 +117,7 @@ test('a failed refresh hides old records and never turns the failure into an emp
   expect(view.queryByText(SENSE_EMPTY_TEXT)).toBeNull();
   expect(view.queryByText(SENSE_SECTION_TITLE)).toBeNull();
   fireEvent.press(view.getByText(TODAY_COPY.retry));
-  await view.findByText('繳交期末報告');
+  await view.findAllByText('繳交期末報告');
 });
 
 test.each(['account', 'school'])(
@@ -126,7 +126,7 @@ test.each(['account', 'school'])(
     const old = deferred<ReturnType<typeof result>>();
     const next = deferred<ReturnType<typeof result>>();
     const view = render(<StudentTodayScreen />);
-    await view.findByText('繳交期末報告');
+    await view.findAllByText('繳交期末報告');
     jest.mocked(loadStudentHome).mockReturnValueOnce(old.promise).mockReturnValueOnce(next.promise);
     fireEvent(view.UNSAFE_getByType(RefreshControl), 'refresh');
     mockAuth =
@@ -163,12 +163,37 @@ test('keeps other blocks when the timetable cannot be read', async () => {
   await view.findByText(TODAY_COPY.timetableUnavailable);
   fireEvent.press(view.getByText(TODAY_COPY.retry));
   expect(mockTimetable.retry).toHaveBeenCalled();
-  expect(await view.findByText('繳交期末報告')).toBeTruthy();
+  expect((await view.findAllByText('繳交期末報告')).length).toBeGreaterThan(0);
 });
 
 test('does not keep sense cards or sample recommendations on today', async () => {
   const view = render(<StudentTodayScreen />);
-  await view.findByText('繳交期末報告');
+  await view.findAllByText('繳交期末報告');
   expect(view.queryByText(SENSE_SECTION_TITLE)).toBeNull();
   expect(view.queryByText(/為你推薦|智慧|AI 幫你/)).toBeNull();
+});
+
+test('shows the earliest overdue item instead of the empty-day sentence', async () => {
+  const data = result();
+  data.tasks[0].dueAt = new Date(Date.now() - 2 * 24 * 60 * 60 * 1000);
+  jest.mocked(loadStudentHome).mockResolvedValue(data);
+  const view = render(<StudentTodayScreen />);
+  expect(await view.findByText(TODAY_COPY.overdue)).toBeTruthy();
+  expect(view.getByText(TODAY_COPY.goSubmit)).toBeTruthy();
+  expect(view.queryByText(TODAY_COPY.emptyDay)).toBeNull();
+  expect(view.getAllByText(/已逾期/).length).toBeGreaterThan(0);
+});
+
+test('還有 N 件 opens all todos', async () => {
+  const data = result();
+  data.tasks = [0, 1, 2, 3].map((index) => ({
+    ...data.tasks[0],
+    id: `assignment-${index}`,
+    assignmentId: `homework-${index}`,
+    title: `作業 ${index}`,
+  }));
+  jest.mocked(loadStudentHome).mockResolvedValue(data);
+  const view = render(<StudentTodayScreen />);
+  fireEvent.press(await view.findByText(TODAY_COPY.moreTodos(1)));
+  expect(rootNavigateNested).toHaveBeenCalledWith('學習', 'LearnHome');
 });

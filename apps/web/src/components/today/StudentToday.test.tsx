@@ -3,6 +3,7 @@ import type { ComponentProps } from 'react';
 import { beforeEach, expect, it, vi } from 'vitest';
 import { TODAY_COPY, type TodayClass, type TodayTodo } from '@campus/shared/src/pickNextAction';
 import { StudentToday } from './StudentToday';
+import styles from './StudentToday.module.css';
 
 const now = new Date('2026-10-25T09:50:00+08:00');
 
@@ -98,6 +99,31 @@ it('shows the empty-day sentence and the week button', () => {
   view({ classes: [], todos: [], timetableStatus: 'ready' });
   expect(screen.getByText(TODAY_COPY.emptyDay)).toBeTruthy();
   expect(screen.getByRole('link', { name: TODAY_COPY.viewWeek })).toBeTruthy();
+});
+
+it('puts the earliest overdue item on the main card instead of the empty-day sentence', () => {
+  view({
+    now: new Date('2026-10-25T02:00:00+08:00'),
+    classes: [],
+    todos: [
+      todo({
+        id: 'hw-new',
+        title: '作業四 繳交',
+        dueAt: Date.parse('2026-10-24T23:59:00+08:00'),
+      }),
+      todo({ dueAt: Date.parse('2026-10-23T23:59:00+08:00') }),
+    ],
+    timetableStatus: 'ready',
+  });
+  const card = screen.getByTestId('next-action');
+  expect(card.textContent).toContain(TODAY_COPY.overdue);
+  expect(card.textContent).toContain('作業三 繳交');
+  expect(card.textContent).toContain(TODAY_COPY.overdueDays(2));
+  expect(card.querySelector(`.${styles.metaDanger}`)).toBeTruthy();
+  expect(screen.queryByText(TODAY_COPY.emptyDay)).toBeNull();
+  expect(screen.getByRole('link', { name: TODAY_COPY.goSubmit }).getAttribute('href')).toBe(
+    '/course/cs-db#assignment-hw-3-submit',
+  );
 });
 
 it('says today classes are done after the last period', () => {

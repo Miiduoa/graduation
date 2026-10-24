@@ -45,6 +45,7 @@ export type TodayTodo = {
 export type NextAction =
   | { type: 'class'; class: TodayClass }
   | { type: 'assignment'; todo: TodayTodo }
+  | { type: 'overdue'; todo: TodayTodo }
   | { type: 'empty' }
   | { type: 'allDone'; todo: TodayTodo | null };
 
@@ -99,6 +100,7 @@ function laterClassesToday(classes: readonly TodayClass[], nowMs: number): Today
   return upcomingClasses(classes, nowMs).filter((item) => item.startAt > nowMs);
 }
 
+/** 30 分鐘內有課：正在上的課（已開始、尚未結束）也算。 */
 function classStartingSoon(classes: readonly TodayClass[], nowMs: number): TodayClass | null {
   return (
     upcomingClasses(classes, nowMs).find(
@@ -126,6 +128,20 @@ function nearestTodo(todos: readonly TodayTodo[], nowMs: number): TodayTodo | nu
   return ranked[0] ?? null;
 }
 
+function earliestOverdue(todos: readonly TodayTodo[], nowMs: number): TodayTodo | null {
+  const overdue = todos
+    .filter((item) => Number.isFinite(item.dueAt) && item.dueAt < nowMs)
+    .sort((a, b) => a.dueAt - b.dueAt || a.id.localeCompare(b.id));
+  return overdue[0] ?? null;
+}
+
+function earliestOpenTodo(todos: readonly TodayTodo[]): TodayTodo | null {
+  const open = todos
+    .filter((item) => Number.isFinite(item.dueAt))
+    .sort((a, b) => a.dueAt - b.dueAt || a.id.localeCompare(b.id));
+  return open[0] ?? null;
+}
+
 export function pickNextAction(
   classes: readonly TodayClass[],
   todos: readonly TodayTodo[],
@@ -143,10 +159,16 @@ export function pickNextAction(
   const later = laterClassesToday(classes, nowMs)[0];
   if (later) return { type: 'class', class: later };
 
+  const overdue = earliestOverdue(todos, nowMs);
+  if (overdue) return { type: 'overdue', todo: overdue };
+
   const todayClasses = classes.filter((item) => classOnToday(item, nowMs));
   if (todayClasses.length > 0 && todayClasses.every((item) => item.endAt <= nowMs)) {
     return { type: 'allDone', todo: nearestTodo(todos, nowMs) };
   }
+
+  const leftover = earliestOpenTodo(todos);
+  if (leftover) return { type: 'assignment', todo: leftover };
 
   return { type: 'empty' };
 }

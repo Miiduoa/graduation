@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { ActivityIndicator, Text, View } from 'react-native';
+import { ActivityIndicator, ScrollView, Text, View } from 'react-native';
 import { useAuth } from '../state/auth';
 import { useSchool } from '../state/school';
 import { useTheme } from '../state/theme';
@@ -9,6 +9,7 @@ import { resolveCourseHubTarget, type CourseHubTarget } from '../utils/courseHub
 import { loadCourseHub, type CourseHubData, type CourseHubScope, type HubAssignment } from '../features/courseHub';
 import { webBrowserOpenWithPuTronClassGate } from '../services/tronClassWebUiGate';
 import { parseTaipeiInstant, taipeiParts } from '@campus/shared/src/taipeiTime';
+import { revealAssignmentSubmitArea } from './nuni/scrollAssignment';
 
 type Props = {
   navigation?: Parameters<typeof safeNavigate>[0] & { goBack?: () => void };
@@ -36,6 +37,7 @@ export default function CourseHubAiFirstScreen({ navigation, route }: Props) {
   const { user } = useAuth();
   const { school } = useSchool();
   const target = resolveCourseHubTarget(route?.params);
+  const section = typeof route?.params?.section === 'string' ? route.params.section : undefined;
   const scopeKey = JSON.stringify([user?.uid, school.id, target]);
   const activeScope = useRef(scopeKey);
   activeScope.current = scopeKey;
@@ -45,6 +47,7 @@ export default function CourseHubAiFirstScreen({ navigation, route }: Props) {
       uid={user?.uid ?? ''}
       schoolId={school.id}
       target={target}
+      section={section}
       navigation={navigation}
       scopeKey={scopeKey}
       activeScope={activeScope}
@@ -55,6 +58,7 @@ function CourseContent({
   uid,
   schoolId,
   target,
+  section,
   navigation,
   scopeKey,
   activeScope,
@@ -62,12 +66,15 @@ function CourseContent({
   uid: string;
   schoolId: string;
   target: CourseHubTarget | null;
+  section?: string;
   navigation: Props['navigation'];
   scopeKey: string;
   activeScope: React.MutableRefObject<string>;
 }) {
   const theme = useTheme();
   const mounted = useRef(true);
+  const scrollRef = useRef<ScrollView>(null);
+  const weekRef = useRef<View>(null);
   const generation = useRef(0);
   const pending = useRef(false);
   const [data, setData] = useState<CourseHubData | null>(null);
@@ -109,6 +116,13 @@ function CourseContent({
       generation.current += 1;
     };
   }, [load]);
+  useEffect(() => {
+    if (section !== 'week' || loading || !data) return;
+    const timer = setTimeout(() => {
+      revealAssignmentSubmitArea(scrollRef.current, weekRef.current);
+    }, 50);
+    return () => clearTimeout(timer);
+  }, [section, loading, data]);
   const open = async (url: string) => {
     if (!isCurrent() || pending.current || !data) return;
     pending.current = true;
@@ -145,6 +159,7 @@ function CourseContent({
       title={data?.name ?? '課程總覽'}
       subtitle={target?.source === 'tronclass' ? '校方 TronClass 課程' : 'Campus One 課程'}
       onBack={() => navigation?.goBack?.()}
+      scrollRef={scrollRef}
     >
       {!target || !uid ? (
         <AICard title={!uid ? '登入後查看課程' : '請先選擇課程'}>
@@ -172,7 +187,7 @@ function CourseContent({
         </AICard>
       ) : data ? (
         <>
-          <View nativeID="week" testID="course-week">
+          <View ref={weekRef} nativeID="week" testID="course-week" collapsable={false}>
           <AICard title="本週">
             <View style={gap}>
               {weekAssignments(data.assignments.status === 'ready' ? data.assignments.items : []).length ? (

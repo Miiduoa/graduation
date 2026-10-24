@@ -247,6 +247,7 @@ export default function StudentTodayScreen() {
               now={now}
               styles={s}
               onOpen={openTodo}
+              onOpenAll={() => rootNavigateNested('學習', 'LearnHome')}
               onRetry={() => void load()}
             />
           </>
@@ -294,15 +295,29 @@ function NextActionCard({
         ? `class:${action.class.id}`
         : action.type === 'assignment'
           ? `todo:${action.todo.id}`
-          : action.type === 'allDone'
-            ? `done:${action.todo?.id ?? ''}`
-            : 'empty';
+          : action.type === 'overdue'
+            ? `overdue:${action.todo.id}`
+            : action.type === 'allDone'
+              ? `done:${action.todo?.id ?? ''}`
+              : 'empty';
   const prev = useRef(key);
   useEffect(() => {
     if (prev.current === key) return;
+    const from = prev.current;
     prev.current = key;
+    const content = (value: string) =>
+      value.startsWith('class:') ||
+      value.startsWith('todo:') ||
+      value.startsWith('overdue:') ||
+      value.startsWith('done:');
+    if (!content(from) || !content(key)) {
+      fade.setValue(1);
+      return;
+    }
     fade.setValue(0);
-    Animated.timing(fade, { toValue: 1, duration: 150, useNativeDriver: true }).start();
+    const anim = Animated.timing(fade, { toValue: 1, duration: 150, useNativeDriver: false });
+    anim.start();
+    return () => anim.stop();
   }, [fade, key]);
 
   if (unsigned && action.type !== 'class') {
@@ -375,7 +390,9 @@ function NextActionCard({
       </Pressable>
     );
   }
+  if (action.type !== 'assignment' && action.type !== 'overdue') return null;
   const todo = action.todo as TodoRow;
+  const overdue = action.type === 'overdue';
   return (
     <Pressable
       accessibilityRole="button"
@@ -384,9 +401,9 @@ function NextActionCard({
       testID="next-action"
     >
       <Animated.View style={{ opacity: fade, flex: 1 }}>
-        <Text style={s.kind}>{TODAY_COPY.dueToday}</Text>
+        <Text style={s.kind}>{overdue ? TODAY_COPY.overdue : TODAY_COPY.dueToday}</Text>
         <Text style={s.headline}>{todo.title}</Text>
-        <Text style={s.meta}>{formatTodoDueLine(todo, now)}</Text>
+        <Text style={[s.meta, overdue ? s.metaDanger : null]}>{formatTodoDueLine(todo, now)}</Text>
         <Pressable accessibilityRole="button" onPress={() => onOpenTodo(todo)} style={s.cardButton}>
           <Text style={s.cardButtonText}>{TODAY_COPY.goSubmit}</Text>
         </Pressable>
@@ -488,6 +505,7 @@ function TodoList({
   now,
   styles: s,
   onOpen,
+  onOpenAll,
   onRetry,
 }: {
   todos: TodoRow[];
@@ -498,6 +516,7 @@ function TodoList({
   now: Date;
   styles: ReturnType<typeof createStyles>;
   onOpen: (todo: TodoRow) => void;
+  onOpenAll: () => void;
   onRetry: () => void;
 }) {
   const visible = todos.slice(0, 3);
@@ -549,9 +568,9 @@ function TodoList({
             );
           })}
           {extra > 0 ? (
-            <View style={s.more}>
+            <Pressable accessibilityRole="button" onPress={onOpenAll} style={s.more}>
               <Text style={s.link}>{TODAY_COPY.moreTodos(extra)}</Text>
-            </View>
+            </Pressable>
           ) : null}
         </View>
       )}
@@ -677,6 +696,7 @@ const createStyles = () =>
     rowMeta: { color: theme.colors.muted, fontSize: 13, lineHeight: 18, fontVariant: ['tabular-nums'] },
     dueSoon: { color: theme.colors.accent, fontWeight: '700' },
     overdue: { color: theme.colors.danger, fontWeight: '700' },
+    metaDanger: { color: theme.colors.danger, fontWeight: '700' },
     ended: { opacity: 0.48 },
     leaving: { opacity: 0 },
     more: { minHeight: 44, justifyContent: 'center', paddingHorizontal: 16 },

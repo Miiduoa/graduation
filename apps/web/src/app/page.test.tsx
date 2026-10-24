@@ -12,6 +12,9 @@ import { SENSE_EMPTY_TEXT, SENSE_SECTION_TITLE } from '@campus/shared/src/todayS
 
 const state = vi.hoisted(() => ({
   uid: 'alice' as string | null,
+  selectedSchoolId: 'pu' as string | null,
+  schoolRole: null as string | null,
+  schoolRoleCalls: [] as Array<[string | null | undefined, string]>,
   session: null as null | { context: string; platformAccountId: string },
   sessionLoading: false,
   sessionError: '',
@@ -68,6 +71,19 @@ vi.mock('@/components/AuthGuard', () => ({
     signOutUser: vi.fn(),
   }),
 }));
+vi.mock('@/components/SelectedSchoolProvider', () => ({
+  useOptionalSelectedSchool: () => ({ selectedSchoolId: state.selectedSchoolId, loading: false }),
+}));
+vi.mock('@/lib/useSchoolRole', async (original) => {
+  const actual = await original<typeof import('@/lib/useSchoolRole')>();
+  return {
+    ...actual,
+    useSchoolRole: (uid: string | null | undefined, schoolId: string) => {
+      state.schoolRoleCalls.push([uid, schoolId]);
+      return state.schoolRole;
+    },
+  };
+});
 vi.mock('@/lib/homeOverview', async (original) => {
   const actual = await original<typeof import('@/lib/homeOverview')>();
   return { ...actual, loadHomeData: vi.fn() };
@@ -98,6 +114,9 @@ beforeEach(() => {
   vi.mocked(loadNuniHomeData).mockReset();
   window.scrollTo = vi.fn();
   state.uid = 'alice';
+  state.selectedSchoolId = 'pu';
+  state.schoolRole = null;
+  state.schoolRoleCalls = [];
   state.session = null;
   state.sessionLoading = false;
   state.sessionError = '';
@@ -141,7 +160,7 @@ it('clears visible school account data and ignores an old response after account
   await act(async () => finishAlice(data('Alice private course')));
   expect(screen.queryByText('Alice private course 作業')).toBeNull();
   await act(async () => finishBob(data('Bob course')));
-  expect(screen.getByText('Bob course 作業')).toBeTruthy();
+  expect(screen.getAllByText('Bob course 作業').length).toBeGreaterThan(0);
   state.uid = null;
   view.rerender(<HomePage />);
   expect(screen.queryByText('Bob course 作業')).toBeNull();
@@ -176,10 +195,12 @@ it('uses the Nuni account for home and links directly to pending work', async ()
   });
   render(<HomePage />);
   expect(await screen.findByRole('heading', { name: '我的身分' })).toBeTruthy();
-  const taskLink = await screen.findByRole('link', { name: /週五提案/ });
-  expect(taskLink.getAttribute('href')).toBe('/classroom/course/design#assignment-draft');
+  const taskLinks = await screen.findAllByRole('link', { name: /週五提案/ });
+  expect(taskLinks.some((link) => link.getAttribute('href') === '/classroom/course/design#assignment-draft')).toBe(
+    true,
+  );
   expect(loadHomeData).not.toHaveBeenCalled();
-  expect(screen.getByText(/已逾期 \d+ 天/)).toBeTruthy();
+  expect(screen.getAllByText(/已逾期 \d+ 天/).length).toBeGreaterThan(0);
 });
 
 it('uses the same identity lookup copy as the account page when the lookup fails', async () => {
@@ -243,7 +264,7 @@ it('hides all previous Nuni data immediately during session revalidation and ign
         }),
     );
   const view = render(<HomePage />);
-  expect(await screen.findByText('Alice private course 作業')).toBeTruthy();
+  expect((await screen.findAllByText('Alice private course 作業')).length).toBeGreaterThan(0);
   state.sessionLoading = true;
   view.rerender(<HomePage />);
   expect(screen.queryByText('Alice private course 作業')).toBeNull();
@@ -252,7 +273,7 @@ it('hides all previous Nuni data immediately during session revalidation and ign
   view.rerender(<HomePage />);
   await waitFor(() => expect(loadNuniHomeData).toHaveBeenCalledTimes(2));
   await act(async () => finishNew(data('Bob course')));
-  expect(screen.getByText('Bob course 作業')).toBeTruthy();
+  expect(screen.getAllByText('Bob course 作業').length).toBeGreaterThan(0);
   state.pendingLogout = true;
   view.rerender(<HomePage />);
   expect(screen.queryByText('Bob course 作業')).toBeNull();
@@ -265,7 +286,7 @@ it('removes a loaded overview when refreshing discovers revoked access', async (
     .mockResolvedValueOnce(data('Private course'))
     .mockRejectedValueOnce(new NuniError(403, 'ACCESS_DENIED'));
   render(<HomePage />);
-  expect(await screen.findByText('Private course 作業')).toBeTruthy();
+  expect((await screen.findAllByText('Private course 作業')).length).toBeGreaterThan(0);
   await act(async () => {
     window.dispatchEvent(new Event('pageshow'));
   });
@@ -302,9 +323,26 @@ it('revalidates an expired course session before retrying with the new account c
   vi.mocked(loadNuniHomeData).mockResolvedValueOnce(data('New account course'));
   state.session = { context: 'renewed', platformAccountId: 'student-b' };
   view.rerender(<HomePage />);
-  await screen.findByText('New account course 作業');
+  await screen.findAllByText('New account course 作業');
   expect(loadNuniHomeData).toHaveBeenLastCalledWith(expect.any(Function), 'student-b');
   expect(screen.queryByRole('alert')).toBeNull();
+});
+
+it('looks up the school role from the selected school instead of always using pu', async () => {
+  state.selectedSchoolId = 'nthu';
+  state.schoolRole = 'teacher';
+  vi.mocked(loadHomeData).mockResolvedValue(data('資料結構', { tasks: [] }));
+  const view = render(<HomePage />);
+  expect(state.schoolRoleCalls.some((call) => call[0] === 'alice' && call[1] === 'nthu')).toBe(true);
+  expect(await screen.findByRole('link', { name: /老師工作台/ })).toBeTruthy();
+  state.selectedSchoolId = 'ncku';
+  state.schoolRole = null;
+  view.rerender(<HomePage />);
+  expect(state.schoolRoleCalls.some((call) => call[0] === 'alice' && call[1] === 'ncku')).toBe(true);
+  expect(screen.queryByRole('link', { name: /老師工作台/ })).toBeNull();
+  state.selectedSchoolId = null;
+  view.rerender(<HomePage />);
+  expect(state.schoolRoleCalls.some((call) => call[0] === 'alice' && call[1] === 'pu')).toBe(true);
 });
 
 it('shows the LMS-unconnected sentence instead of pretending there is no homework', async () => {
@@ -368,7 +406,7 @@ it('hydrates the signed-in home page against the server loading markup', async (
       root = hydrateRoot(container, app, { onRecoverableError });
     });
     expect(onRecoverableError).not.toHaveBeenCalled();
-    expect(await screen.findByText('資料庫系統 作業')).toBeTruthy();
+    expect((await screen.findAllByText('資料庫系統 作業')).length).toBeGreaterThan(0);
   } finally {
     await act(async () => root?.unmount());
     container.remove();
