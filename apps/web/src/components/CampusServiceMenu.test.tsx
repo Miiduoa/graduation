@@ -76,9 +76,10 @@ it('retains all existing services and search while adding a separate classroom e
   expect(screen.getByRole('link', { name: '跨校交流' }).getAttribute('href')).toBe('/social');
   expect(screen.getByRole('link', { name: '店家合作' }).getAttribute('href')).toBe('/merchant');
   expect(screen.getByRole('link', { name: '點餐與取餐' }).getAttribute('href')).toBe('/food');
+  expect(screen.getByRole('link', { name: '學校資訊' }).getAttribute('href')).toBe('/school-info');
   expect(screen.getByText('目前還不能線上點餐')).toBeTruthy();
   expect(screen.queryByText('選餐點、查訂單、出示取餐憑證')).toBeNull();
-  expect(screen.getAllByRole('link')).toHaveLength(33);
+  expect(screen.getAllByRole('link')).toHaveLength(34);
 });
 
 it('preserves school context without copying unrelated session or return parameters', () => {
