@@ -1545,4 +1545,3 @@ export const publicSchoolInfoDirectory: Readonly<Record<string, PublicSchoolInfo
   Object.freeze(directory);
 
 export const publicSchoolInfoRecordCount = records.length;
-
