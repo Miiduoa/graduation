@@ -2254,7 +2254,7 @@ test('course appeals need a course from the student own timetable and only its t
     await db.doc('schools/pu/members/stu').set({ status: 'active', role: 'student' });
     await db.doc('schools/pu/members/teach').set({ status: 'active', role: 'teacher' });
     await db.doc('users/stu/personalTimetable/current').set({
-      courses: [], courseIds: ['db'], offeringIds: ['資料庫｜王老師'],
+      schoolId: 'pu', courses: [], courseIds: ['db'], offeringIds: ['資料庫｜王老師'],
     });
   });
   const stu = testEnv.authenticatedContext('stu').firestore();
@@ -2300,6 +2300,201 @@ test('course appeals need a course from the student own timetable and only its t
   // 學生撤回也不能順便改內容
   await assertSucceeds(stu.doc('courseAppeals/a2').set({ ...appeal, title: '第二件事情' }));
   await assertFails(stu.doc('courseAppeals/a2').update({ status: 'withdrawn', body: '偷偷改掉說明內容' }));
+});
+
+test('school-scoped personal timetables isolate saves, friend reads, and appeal authority', async () => {
+  const courseA = { id: 'a1', name: '靜宜課', day: 1, start: 1, end: 2 };
+  const courseB = { id: 'b1', name: '成大課', day: 2, start: 3, end: 4 };
+  const offeringB = '成大課｜乙老師';
+  const timetableA = {
+    schoolId: 'pu',
+    shareWithFriends: true,
+    courses: [courseA],
+    courseIds: ['a1', 'b1'],
+    offeringIds: ['靜宜課｜甲老師', offeringB],
+    meta: { label: 'pu' },
+  };
+  const timetableB = {
+    schoolId: 'ncku',
+    shareWithFriends: true,
+    courses: [courseB],
+    courseIds: ['b1'],
+    offeringIds: [offeringB],
+    meta: { label: 'ncku' },
+  };
+  const appealB = {
+    schoolId: 'ncku',
+    studentUid: 'alice',
+    courseId: 'b1',
+    courseName: '成大課',
+    offeringId: offeringB,
+    title: '出缺席紀錄',
+    body: '當天有請假單可以補',
+    status: 'pending',
+    teacherNote: '',
+  };
+
+  await seedFirestore(async (db) => {
+    for (const schoolId of ['pu', 'ncku']) {
+      for (const uid of ['alice', 'bob']) {
+        await db.doc(`schools/${schoolId}/members/${uid}`).set({ status: 'active', role: 'student' });
+      }
+    }
+    await db.doc('friendships/req_pu_alice_bob').set({
+      schoolId: 'pu', fromUid: 'alice', toUid: 'bob', status: 'accepted',
+    });
+  });
+
+  const alice = testEnv.authenticatedContext('alice').firestore();
+  const bob = testEnv.authenticatedContext('bob').firestore();
+  const mallory = testEnv.authenticatedContext('mallory').firestore();
+  const pathA = 'users/alice/schools/pu/personalTimetable/current';
+  const pathB = 'users/alice/schools/ncku/personalTimetable/current';
+
+  await assertSucceeds(alice.doc(pathA).set(timetableA));
+  await assertSucceeds(alice.doc(pathB).set(timetableB));
+  await assertSucceeds(alice.doc(pathA).get());
+  await assertSucceeds(alice.doc(pathB).get());
+
+  await assertFails(alice.doc(pathA).set({ ...timetableA, schoolId: 'ncku' }));
+  await assertFails(alice.doc(pathB).set({ ...timetableB, schoolId: 'pu' }));
+  await assertFails(alice.doc(pathA).set({ ...timetableA, schoolId: 'other' }));
+
+  await assertSucceeds(bob.doc(pathA).get());
+  await assertFails(bob.doc(pathB).get());
+  await assertFails(bob.doc(pathA).update({ courses: [] }));
+  await assertFails(mallory.doc(pathA).set(timetableA));
+  await assertFails(mallory.doc(pathB).delete());
+
+  // A 校索引（即使含相同 course/offering 名稱）不能授權 B 校申訴
+  await seedFirestore(async (db) => {
+    await db.doc(pathB).delete();
+  });
+  await assertFails(alice.doc('courseAppeals/cross-school').set(appealB));
+
+  // 正確的 B 校 scoped 索引可以授權
+  await seedFirestore(async (db) => {
+    await db.doc(pathB).set(timetableB);
+  });
+  await assertSucceeds(alice.doc('courseAppeals/ncku-ok').set(appealB));
+
+  // 錯誤學校／缺 provenance 的 legacy 不能授權
+  await seedFirestore(async (db) => {
+    await db.doc(pathB).delete();
+    await db.doc('users/alice/personalTimetable/current').set({
+      schoolId: 'pu',
+      courses: [courseB],
+      courseIds: ['b1'],
+      offeringIds: [offeringB],
+    });
+  });
+  await assertFails(alice.doc('courseAppeals/legacy-wrong-school').set({
+    ...appealB, title: 'legacy wrong school',
+  }));
+
+  await seedFirestore(async (db) => {
+    await db.doc('users/alice/personalTimetable/current').set({
+      courses: [courseB],
+      courseIds: ['b1'],
+      offeringIds: [offeringB],
+    });
+  });
+  await assertFails(alice.doc('courseAppeals/legacy-missing-school').set({
+    ...appealB, title: 'legacy missing school',
+  }));
+
+  // canonical 空文件存在時壓過 matching legacy
+  await seedFirestore(async (db) => {
+    await db.doc('users/alice/personalTimetable/current').set({
+      schoolId: 'ncku',
+      courses: [courseB],
+      courseIds: ['b1'],
+      offeringIds: [offeringB],
+    });
+    await db.doc(pathB).set({
+      schoolId: 'ncku',
+      shareWithFriends: false,
+      courses: [],
+      courseIds: [],
+      offeringIds: [],
+      meta: {},
+    });
+  });
+  await assertFails(alice.doc('courseAppeals/canonical-empty-wins').set({
+    ...appealB, title: 'canonical empty wins',
+  }));
+
+  // matching legacy fallback only when canonical is absent
+  await seedFirestore(async (db) => {
+    await db.doc(pathB).delete();
+  });
+  await assertSucceeds(alice.doc('courseAppeals/legacy-match').set({
+    ...appealB, title: 'legacy exact match',
+  }));
+});
+
+test('accepted same-school friends can probe missing canonical timetable before legacy fallback', async () => {
+  const pathA = 'users/alice/schools/pu/personalTimetable/current';
+  const legacy = {
+    schoolId: 'pu',
+    shareWithFriends: true,
+    courses: [{ id: 'a1', name: '靜宜課', day: 1, start: 1, end: 2 }],
+    courseIds: ['a1'],
+    offeringIds: ['靜宜課｜甲老師'],
+    meta: {},
+  };
+
+  await seedFirestore(async (db) => {
+    for (const schoolId of ['pu', 'ncku']) {
+      for (const uid of ['alice', 'bob', 'carol', 'mallory']) {
+        await db.doc(`schools/${schoolId}/members/${uid}`).set({ status: 'active', role: 'student' });
+      }
+    }
+    await db.doc('friendships/req_pu_alice_bob').set({
+      schoolId: 'pu', fromUid: 'alice', toUid: 'bob', status: 'accepted',
+    });
+    await db.doc('friendships/req_ncku_alice_carol').set({
+      schoolId: 'ncku', fromUid: 'alice', toUid: 'carol', status: 'accepted',
+    });
+    // legacy-only explicitly shared for school A; canonical absent
+    await db.doc('users/alice/personalTimetable/current').set(legacy);
+  });
+
+  const bob = testEnv.authenticatedContext('bob').firestore();
+  const carol = testEnv.authenticatedContext('carol').firestore();
+  const mallory = testEnv.authenticatedContext('mallory').firestore();
+  const alice = testEnv.authenticatedContext('alice').firestore();
+
+  await assertSucceeds(bob.doc(pathA).get());
+  await assertSucceeds(bob.doc('users/alice/personalTimetable/current').get());
+  await assertFails(mallory.doc(pathA).get());
+  await assertFails(carol.doc(pathA).get());
+  await assertFails(bob.collection('users/alice/schools/pu/personalTimetable').get());
+  await assertSucceeds(alice.collection('users/alice/schools/pu/personalTimetable').get());
+
+  await seedFirestore(async (db) => {
+    await db.doc(pathA).set({
+      schoolId: 'pu',
+      shareWithFriends: false,
+      courses: [],
+      courseIds: [],
+      offeringIds: [],
+      meta: {},
+    });
+  });
+  await assertFails(bob.doc(pathA).get());
+
+  await seedFirestore(async (db) => {
+    await db.doc(pathA).set({
+      schoolId: 'ncku',
+      shareWithFriends: true,
+      courses: [],
+      courseIds: [],
+      offeringIds: [],
+      meta: {},
+    });
+  });
+  await assertFails(bob.doc(pathA).get());
 });
 
 test('same-name courses taught by two teachers stay apart', async () => {

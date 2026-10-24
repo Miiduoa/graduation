@@ -1274,6 +1274,30 @@ service cloud.firestore {
           allow write: if false;
         }
 
+        // Canonical per-school personal timetable (legacy users/{uid}/personalTimetable retained)
+        match /personalTimetable/{docId} {
+          // Missing current: allow same-school accepted friends to GET (empty) so clients can fall back to legacy.
+          // Existing current: still require shareWithFriends + exact schoolId.
+          allow get: if isSelf(uid) || (
+            docId == 'current'
+            && isSchoolMember(schoolId)
+            && acceptedFriendsWith(uid, schoolId)
+            && (
+              !exists(/databases/$(database)/documents/users/$(uid)/schools/$(schoolId)/personalTimetable/current)
+              || (
+                resource.data.shareWithFriends == true
+                && resource.data.schoolId == schoolId
+              )
+            )
+          );
+          allow list: if isSelf(uid);
+          allow create, update: if isSelf(uid)
+            && request.resource.data.schoolId == schoolId
+            && request.resource.data.courses is list
+            && request.resource.data.courses.size() <= 80;
+          allow delete: if isSelf(uid);
+        }
+
         match /{document=**} {
           allow read: if isSelf(uid);
           allow write: if false;
@@ -1531,11 +1555,25 @@ service cloud.firestore {
         && request.auth.uid in get(/databases/$(database)/documents/schools/$(appeal.schoolId)/courseTeachers/$(appeal.offeringId)).data.get('teacherUids', []);
     }
 
-    // 送申訴的課一定要在學生自己的課表裡（不能自己打課名）
+    // 送申訴的課一定要在該校課表裡：優先看 school-scoped 文件；僅在 canonical 不存在時才讀 legacy，且 schoolId 必須完全一致
     function appealCourseInOwnTimetable(appeal) {
-      return exists(/databases/$(database)/documents/users/$(request.auth.uid)/personalTimetable/current)
-        && appeal.courseId in get(/databases/$(database)/documents/users/$(request.auth.uid)/personalTimetable/current).data.get('courseIds', [])
-        && appeal.offeringId in get(/databases/$(database)/documents/users/$(request.auth.uid)/personalTimetable/current).data.get('offeringIds', []);
+      let scopedPath = /databases/$(database)/documents/users/$(request.auth.uid)/schools/$(appeal.schoolId)/personalTimetable/current;
+      let legacyPath = /databases/$(database)/documents/users/$(request.auth.uid)/personalTimetable/current;
+      return (
+        (
+          exists(scopedPath)
+          && get(scopedPath).data.get('schoolId', '') == appeal.schoolId
+          && appeal.courseId in get(scopedPath).data.get('courseIds', [])
+          && appeal.offeringId in get(scopedPath).data.get('offeringIds', [])
+        )
+        || (
+          !exists(scopedPath)
+          && exists(legacyPath)
+          && get(legacyPath).data.get('schoolId', '') == appeal.schoolId
+          && appeal.courseId in get(legacyPath).data.get('courseIds', [])
+          && appeal.offeringId in get(legacyPath).data.get('offeringIds', [])
+        )
+      );
     }
 
     match /courseAppeals/{appealId} {

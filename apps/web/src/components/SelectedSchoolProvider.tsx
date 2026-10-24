@@ -11,7 +11,7 @@ import {
   type ReactNode,
 } from 'react';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
-import { findSchoolById } from '@campus/shared/src/schools';
+import { findSchoolById, findSchoolsByCode, normalizeSchoolCode } from '@campus/shared/src/schools';
 import { defaultBrowseSchoolId } from '@/lib/defaultBrowseSchool';
 
 export type BrowseSchool = {
@@ -42,7 +42,50 @@ type SelectionContext = {
   catalogError?: string;
   onRetryCatalog?: () => void;
   selectionError: string | null;
+  /** Explicit URL/code asked for a campus that is not in the live directory. */
+  requestedUnavailable: boolean;
 };
+
+/**
+ * Resolve browsing campus from the URL, then saved preference.
+ * Precedence: campus (incl. all) > schoolId > unique legacy school code > preference.
+ * Live catalog membership is required; bundled codes only map a unique id.
+ */
+export function resolveBrowseQuerySchoolId(
+  catalog: readonly BrowseSchool[],
+  query: { campus?: string | null; schoolId?: string | null; school?: string | null },
+  stored: boolean,
+  savedSchoolId: string | null,
+): string | null {
+  const campus = query.campus?.trim();
+  if (campus === 'all') return null;
+  if (campus) return campus;
+
+  const schoolId = query.schoolId?.trim();
+  if (schoolId === 'all') return null;
+  if (schoolId) return schoolId;
+
+  const code = normalizeSchoolCode(query.school);
+  if (code) {
+    const live = catalog.filter(
+      (school) => normalizeSchoolCode(school.code) === code || school.id.toUpperCase() === code,
+    );
+    if (live.length === 1) return live[0].id;
+    if (live.length > 1) return `__ambiguous__:${code}`;
+
+    const bundled = findSchoolsByCode(code);
+    if (bundled.length === 1) return bundled[0].id;
+    // Ambiguous or unknown explicit codes must not fall through to preference / Providence.
+    return `__unresolved__:${code}`;
+  }
+
+  return defaultBrowseSchoolId(
+    catalog.map((school) => school.id),
+    null,
+    stored,
+    savedSchoolId,
+  );
+}
 
 const SelectedSchoolContext = createContext<SelectionContext | null>(null);
 
@@ -138,10 +181,13 @@ export function SelectedSchoolProvider({
       return true;
     });
   }, [schools]);
-  const queryId = params?.get('campus') ?? params?.get('schoolId');
-  const requestedId = defaultBrowseSchoolId(
-    catalog.map((school) => school.id),
-    queryId,
+  const requestedId = resolveBrowseQuerySchoolId(
+    catalog,
+    {
+      campus: params?.get('campus'),
+      schoolId: params?.get('schoolId'),
+      school: params?.get('school'),
+    },
     stored,
     savedSchoolId,
   );
@@ -196,6 +242,7 @@ export function SelectedSchoolProvider({
         catalogError,
         onRetryCatalog,
         selectionError: unavailable ? '先前選擇的校園不在目前目錄，請重新選擇。' : storageError,
+        requestedUnavailable: unavailable,
       }}
     >
       {children}
