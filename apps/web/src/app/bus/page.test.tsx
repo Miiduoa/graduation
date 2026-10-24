@@ -1,10 +1,13 @@
-import { cleanup, render, screen } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
+import { SelectedSchoolProvider } from '@/components/SelectedSchoolProvider';
 import BusPage from './page';
 
-const navigation = vi.hoisted(() => ({ query: '' }));
+const navigation = vi.hoisted(() => ({ query: '', replace: vi.fn() }));
 vi.mock('next/navigation', () => ({
   useSearchParams: () => new URLSearchParams(navigation.query),
+  usePathname: () => '/bus',
+  useRouter: () => ({ replace: navigation.replace }),
 }));
 vi.mock('@/components/SiteShell', () => ({
   SiteShell: ({ children, schoolName }: { children: React.ReactNode; schoolName?: string }) => (
@@ -25,6 +28,7 @@ vi.mock('@/components/TransitExplorer', () => ({
 
 beforeEach(() => {
   navigation.query = '';
+  navigation.replace.mockReset();
   vi.stubEnv('TDX_CLIENT_ID', undefined);
   vi.stubEnv('TDX_CLIENT_SECRET', undefined);
 });
@@ -69,6 +73,43 @@ it('keeps official transit access visible even before a campus is selected', () 
   expect(screen.getByRole('link', { name: '其他縣市與公路客運查詢 ↗' }).getAttribute('href')).toBe('https://www.taiwanbus.tw/');
   expect(screen.getByTestId('bus-school').textContent).toBe('pu');
   expect(screen.queryByText('請先選擇一所學校')).toBeNull();
+});
+
+it('offers a catalog retry when the selected campus cannot be confirmed', async () => {
+  const onRetryCatalog = vi.fn();
+  localStorage.clear();
+  render(
+    <SelectedSchoolProvider
+      ownerKey={null}
+      loading={false}
+      schools={[]}
+      catalogStatus="error"
+      onRetryCatalog={onRetryCatalog}
+    >
+      <BusPage />
+    </SelectedSchoolProvider>,
+  );
+  expect(await screen.findByRole('heading', { name: '無法確認所選校園' })).toBeTruthy();
+  fireEvent.click(screen.getByRole('button', { name: '重新讀取' }));
+  expect(onRetryCatalog).toHaveBeenCalledTimes(1);
+});
+
+it('shows Providence buses when the catalog is ready for the selected campus', async () => {
+  localStorage.clear();
+  navigation.query = '?schoolId=pu&campus=pu';
+  render(
+    <SelectedSchoolProvider
+      ownerKey={null}
+      loading={false}
+      schools={[{ id: 'pu', name: '靜宜大學', status: 'open' }]}
+      catalogStatus="ready"
+    >
+      <BusPage />
+    </SelectedSchoolProvider>,
+  );
+  expect((await screen.findByTestId('bus-school')).textContent).toBe('pu');
+  expect(screen.getByText('靜宜大學')).toBeTruthy();
+  expect(screen.queryByText('無法確認所選校園')).toBeNull();
 });
 
 it.each([
