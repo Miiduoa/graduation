@@ -20,7 +20,8 @@ const contentSecurityPolicy = [
   "style-src 'self' 'unsafe-inline' https:",
   "script-src 'self' 'unsafe-inline' 'unsafe-eval' 'wasm-unsafe-eval'",
   "worker-src 'self' blob:",
-  "connect-src 'self' https://*.googleapis.com https://*.firebaseio.com https://*.cloudfunctions.net https://*.fly.dev https://*.web.app https://*.firebaseapp.com https://huggingface.co https://*.huggingface.co https://*.hf.co wss:" + emulatorConnectSrc,
+  "connect-src 'self' https://*.googleapis.com https://*.firebaseio.com https://*.cloudfunctions.net https://*.fly.dev https://*.web.app https://*.firebaseapp.com https://huggingface.co https://*.huggingface.co https://*.hf.co wss:" +
+    emulatorConnectSrc,
 ].join('; ');
 
 const securityHeaders = [
@@ -41,11 +42,12 @@ const nextConfig: NextConfig = {
   // @huggingface/transformers 當 server external，不可再列入 transpilePackages，
   // 否則與 serverExternalPackages 衝突，Turbopack 建置會失敗。
   // 原生 Node 綁定不進瀏覽器包；權重也不進伺服器映像。
-  serverExternalPackages: ['onnxruntime-node'],
+  serverExternalPackages: ['onnxruntime-node', 'firebase-admin'],
   turbopack: {
     resolveAlias: {
       'onnxruntime-node': { browser: './src/lib/nodeNativeStub.ts' },
       sharp: { browser: './src/lib/nodeNativeStub.ts' },
+      'firebase-admin': { browser: './src/lib/nodeNativeStub.ts' },
     },
   },
   webpack: (config) => {
@@ -73,7 +75,10 @@ const nextConfig: NextConfig = {
         headers: [
           {
             key: 'Content-Security-Policy',
-            value: contentSecurityPolicy.replace("frame-ancestors 'none'", "frame-ancestors 'self'"),
+            value: contentSecurityPolicy.replace(
+              "frame-ancestors 'none'",
+              "frame-ancestors 'self'",
+            ),
           },
         ],
       },
