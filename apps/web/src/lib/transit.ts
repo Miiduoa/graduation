@@ -25,13 +25,26 @@ export type TransitArrival = {
 export type TransitQuery =
   | { action: 'campus'; schoolId: string }
   | { action: 'campus-next'; schoolId: string }
+  | { action: 'direct'; schoolId: string; destination: string; lat?: number; lon?: number }
   | { action: 'search'; city: TransitCity; text: string }
   | { action: 'nearby'; city: TransitCity; lat: number; lon: number; radius: number }
   | { action: 'arrivals'; city: TransitCity; stopId: string };
 export type TransitFailure = 'not-configured' | 'invalid-query' | 'rate-limited' | 'upstream' | 'network';
+export type DirectDestinationView = {
+  query: string; label: string; kind: 'landmark' | 'campus-place' | 'stop';
+  lat: number | null; lon: number | null;
+};
+export type DirectTripView = {
+  route: string; boardStopName: string; alightStopName: string;
+  walkMeters: number; walkMinutes: number; arrival: TransitArrival | null;
+};
 export type TransitResult =
   | { status: 'ready'; kind: 'stops'; stops: TransitStop[]; limited: boolean; fetchedAt: string; stale?: true }
   | { status: 'ready'; kind: 'arrivals'; arrivals: TransitArrival[]; fetchedAt: string; stale?: true; routeStops?: RouteStopSequence[] }
+  | {
+    status: 'ready'; kind: 'direct'; destination: DirectDestinationView | null;
+    origin: Position; trips: DirectTripView[]; googleMapsUrl: string; fetchedAt: string; stale?: true;
+  }
   | { status: 'unavailable'; reason: TransitFailure };
 export const TRANSIT_FRESHNESS_MS = 90_000;
 export const CAMPUS_TRANSIT: Record<string, { city: TransitCity; stopName: string }> = {
@@ -1008,5 +1021,60 @@ export async function queryTransit(query: TransitQuery, signal: AbortSignal): Pr
       ...(result.stale === true ? { stale: true as const } : {}),
       ...(routeStops ? { routeStops } : {}) };
   }
+  if (result.kind === 'direct' && Array.isArray(result.trips) && typeof result.googleMapsUrl === 'string' &&
+    isRecord(result.origin) && isPosition(result.origin) && result.trips.length <= 8 &&
+    result.googleMapsUrl.startsWith('https://www.google.com/maps/dir/?') && result.googleMapsUrl.length <= 1200) {
+    const destination = readDirectDestination(result.destination);
+    const trips = result.trips.flatMap((row) => {
+      const trip = readDirectTrip(row);
+      return trip ? [trip] : [];
+    });
+    if (trips.length !== result.trips.length) throw new Error('invalid-response');
+    return {
+      status: 'ready', kind: 'direct', destination, origin: { lat: result.origin.lat, lon: result.origin.lon },
+      trips, googleMapsUrl: result.googleMapsUrl, fetchedAt: result.fetchedAt,
+      ...(result.stale === true ? { stale: true as const } : {}),
+    };
+  }
   throw new Error('invalid-response');
+}
+
+function readDirectDestination(value: unknown): DirectDestinationView | null {
+  if (value === null) return null;
+  if (!isRecord(value) || typeof value.query !== 'string' || typeof value.label !== 'string' ||
+    !value.query.trim() || value.query.length > 40 || !value.label.trim() || value.label.length > 80 ||
+    (value.kind !== 'landmark' && value.kind !== 'campus-place' && value.kind !== 'stop') ||
+    (value.lat !== null && (typeof value.lat !== 'number' || !Number.isFinite(value.lat))) ||
+    (value.lon !== null && (typeof value.lon !== 'number' || !Number.isFinite(value.lon)))) {
+    throw new Error('invalid-response');
+  }
+  return { query: value.query, label: value.label, kind: value.kind, lat: value.lat, lon: value.lon };
+}
+
+function isArrivalRow(row: unknown): row is TransitArrival {
+  return isRecord(row) && typeof row.id === 'string' && typeof row.route === 'string' && typeof row.destination === 'string' &&
+    (row.direction === null || Number.isInteger(row.direction)) && (row.status === null || Number.isInteger(row.status)) &&
+    (row.seconds === null || (typeof row.seconds === 'number' && Number.isFinite(row.seconds))) &&
+    (row.updatedAt === null || typeof row.updatedAt === 'string') &&
+    (row.stopName === undefined || typeof row.stopName === 'string') &&
+    (row.scheduledAt === undefined || row.scheduledAt === null || typeof row.scheduledAt === 'string');
+}
+
+function readDirectTrip(value: unknown): DirectTripView | null {
+  if (!isRecord(value) || typeof value.route !== 'string' || !value.route.trim() || value.route.length > 40 ||
+    typeof value.boardStopName !== 'string' || !value.boardStopName.trim() || value.boardStopName.length > 80 ||
+    typeof value.alightStopName !== 'string' || !value.alightStopName.trim() || value.alightStopName.length > 80 ||
+    typeof value.walkMeters !== 'number' || !Number.isFinite(value.walkMeters) || value.walkMeters < 0 ||
+    typeof value.walkMinutes !== 'number' || !Number.isInteger(value.walkMinutes) || value.walkMinutes < 1) {
+    return null;
+  }
+  if (value.arrival !== null && !isArrivalRow(value.arrival)) return null;
+  return {
+    route: value.route.trim(),
+    boardStopName: value.boardStopName.trim(),
+    alightStopName: value.alightStopName.trim(),
+    walkMeters: Math.round(value.walkMeters),
+    walkMinutes: value.walkMinutes,
+    arrival: value.arrival,
+  };
 }
