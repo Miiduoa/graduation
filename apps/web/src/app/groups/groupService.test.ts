@@ -11,8 +11,7 @@ vi.mock('@/lib/firebase', () => ({
   getDb: () => ({}),
   isFirebaseConfigured: () => runtime.configured,
   getAuth: () => ({ currentUser: runtime.user, app: { options: { projectId: 'campus-test' } } }),
-  getCloudFunctionUrl: (name: string) =>
-    `https://asia-east1-campus-test.cloudfunctions.net/${name}`,
+  getCloudFunctionUrl: (name: string) => `/api/fn/${name}`,
 }));
 vi.mock('@/lib/functionsUrl', async (original) => ({
   ...(await original<typeof import('@/lib/functionsUrl')>()),
@@ -133,24 +132,29 @@ it('propagates source errors instead of substituting demo groups or empty result
   await expect(loadMyGroups('alice', 'pu')).rejects.toThrow();
 });
 
-it('does not call Cloud Functions when the functions base URL is unset', async () => {
+it('calls the same-origin group invite routes when the functions base URL is unset', async () => {
   runtime.functionsConfigured = false;
+  await joinByCode('alice', 'pu', 'ABCD1234', () => true);
+  expect(fetchMock.mock.calls[0][0]).toBe('/api/fn/joinGroupByCode');
+});
+
+it('surfaces 尚未啟用 when the same-origin route is not configured', async () => {
+  fetchMock.mockResolvedValueOnce({
+    ok: false,
+    status: 503,
+    json: async () => ({ error: { status: 'UNAVAILABLE', message: '尚未啟用' } }),
+  } as Response);
   await expect(joinByCode('alice', 'pu', 'ABCD1234', () => true)).rejects.toMatchObject({
     code: 'functions-unconfigured',
     message: '加入與退出群組尚未啟用',
   });
-  expect(fetchMock).not.toHaveBeenCalled();
-  await expect(leaveMemberGroup('alice', 'pu', 'firestore-1', () => true)).rejects.toMatchObject({
-    code: 'functions-unconfigured',
-  });
-  expect(fetchMock).not.toHaveBeenCalled();
 });
 
 it('calls the existing invitation endpoint using the captured user token and confirms both server membership records', async () => {
   const group = await joinByCode('alice', 'pu', ' abcd1234 ', () => true);
   expect(group.id).toBe('firestore-1');
   const [url, request] = fetchMock.mock.calls[0];
-  expect(url).toBe('https://asia-east1-campus-test.cloudfunctions.net/joinGroupByCode');
+  expect(url).toBe('/api/fn/joinGroupByCode');
   expect(request.headers.Authorization).toBe('Bearer alice-token');
   expect(JSON.parse(request.body)).toEqual({ data: { schoolId: 'pu', joinCode: 'ABCD1234' } });
   expect(getDocFromServer).toHaveBeenCalledWith({ path: 'users/alice/groups/firestore-1' });

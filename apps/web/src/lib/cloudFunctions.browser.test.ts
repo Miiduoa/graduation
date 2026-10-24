@@ -40,6 +40,7 @@ it('keeps the configured Fly API in a browser bundle with no runtime public env'
   expect(
     client.getCloudFunctionUrl('getRepairServiceCapability', { projectId: 'demo-browser' }),
   ).toBe('https://nuni-functions.fly.dev/getRepairServiceCapability');
+  expect(client.getCloudFunctionUrl('joinGroupByCode')).toBe('/api/fn/joinGroupByCode');
 });
 
 it('does not treat Spark Cloud Functions hostnames as configured after browser compilation', async () => {
@@ -48,6 +49,10 @@ it('does not treat Spark Cloud Functions hostnames as configured after browser c
   });
   expect(client.areFunctionsConfigured()).toBe(false);
   expect(client.getFunctionsBaseUrl()).toBeNull();
+  expect(client.getCloudFunctionUrl('joinGroupByCode')).toBe('/api/fn/joinGroupByCode');
+  expect(client.getCloudFunctionUrl('askCampusAssistant', { projectId: 'campus-one-tw' })).toBe(
+    'https://asia-east1-campus-one-tw.cloudfunctions.net/askCampusAssistant',
+  );
 });
 
 it('treats the emulator as configured even without a Fly base URL', async () => {

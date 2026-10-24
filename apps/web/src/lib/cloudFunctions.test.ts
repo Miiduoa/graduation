@@ -4,6 +4,24 @@ import { areFunctionsConfigured } from './functionsUrl';
 
 const fly = 'https://nuni-functions.fly.dev';
 
+it('points hosted group invite callables at this Next.js app without a functions base URL', () => {
+  const env = { NEXT_PUBLIC_FIREBASE_PROJECT_ID: 'campus-one-tw' };
+  expect(getCloudFunctionUrl('joinGroupByCode', { env })).toBe('/api/fn/joinGroupByCode');
+  expect(getCloudFunctionUrl('leaveGroup', { env })).toBe('/api/fn/leaveGroup');
+  expect(getCloudFunctionUrl('createGroup', { env })).toBe(
+    'https://asia-east1-campus-one-tw.cloudfunctions.net/createGroup',
+  );
+  expect(getCloudFunctionUrl('askCampusAssistant', { env })).toBe(
+    'https://asia-east1-campus-one-tw.cloudfunctions.net/askCampusAssistant',
+  );
+  expect(areFunctionsConfigured(undefined, false)).toBe(false);
+  expect(
+    getCloudFunctionUrl('joinGroupByCode', {
+      env: { ...env, NEXT_PUBLIC_FUNCTIONS_BASE_URL: fly },
+    }),
+  ).toBe('/api/fn/joinGroupByCode');
+});
+
 it('uses the Fly base URL when the emulator is off', () => {
   const env = {
     NEXT_PUBLIC_FUNCTIONS_BASE_URL: fly,
