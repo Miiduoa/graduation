@@ -150,7 +150,11 @@ function createAuthzHelpers(db) {
       .doc(uid)
       .get();
 
-    return normalizeServiceRoleRecord(docSnap.exists ? docSnap.data() : {});
+    const stored = docSnap.exists ? docSnap.data() : {};
+    return normalizeServiceRoleRecord({
+      ...stored,
+      status: stored?.status === 'active' ? 'active' : 'inactive',
+    });
   }
 
   async function assertSchoolAdminOrEditor(schoolId, uid) {
@@ -161,9 +165,35 @@ function createAuthzHelpers(db) {
     return membership;
   }
 
+  async function assertSchoolAdmin(schoolId, uid, transaction = null) {
+    if (!schoolId || !uid) {
+      throw new HttpsError('permission-denied', 'School administrator access required');
+    }
+    const membershipRef = db.collection('schools').doc(schoolId).collection('members').doc(uid);
+    const accountRef = db.collection('users').doc(uid);
+    const [membershipDoc, accountDoc] = transaction
+      ? await transaction.getAll(membershipRef, accountRef)
+      : await Promise.all([membershipRef.get(), accountRef.get()]);
+    const membership = membershipDoc.exists ? membershipDoc.data() : null;
+    if (
+      !membership ||
+      membership.role !== 'admin' ||
+      (membership.status && membership.status !== 'active')
+    ) {
+      throw new HttpsError('permission-denied', 'School administrator access required');
+    }
+    const account = accountDoc.exists ? accountDoc.data() : {};
+    if (account.accountDeletionInProgress === true || account.status === 'deleted') {
+      throw new HttpsError('failed-precondition', '帳號正在刪除或已停用。', {
+        reason: 'account-deletion',
+      });
+    }
+    return membership;
+  }
+
   async function assertServiceRole(schoolId, uid, domain) {
     const membership = await assertActiveSchoolMember(schoolId, uid);
-    if (['admin', 'editor'].includes(membership.role)) {
+    if (membership.role === 'admin') {
       return {
         membership,
         override: true,
@@ -213,6 +243,7 @@ function createAuthzHelpers(db) {
     assertActiveSchoolMember,
     assertCafeteriaOperator,
     assertSchoolAdminOrEditor,
+    assertSchoolAdmin,
     assertServiceRole,
     getCafeteriaOperatorRecord,
     getActiveSchoolMembership,

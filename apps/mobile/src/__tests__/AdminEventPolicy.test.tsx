@@ -22,11 +22,11 @@ jest.mock('../state/school', () => ({
 jest.mock('../firebase', () => ({ getDb: () => mockDb, getFunctionsInstance: () => ({}) }));
 jest.mock('firebase/firestore', () => ({
   collection: (_: unknown, ...path: string[]) => path.join('/'),
-  query: (path: string) => path,
+  query: (path: string, ..._rest: unknown[]) => path,
   documentId: () => '__name__',
-  startAfter: jest.fn(),
-  orderBy: jest.fn(),
-  limit: jest.fn(),
+  startAfter: jest.fn((cursor: unknown) => ({ type: 'startAfter', cursor })),
+  orderBy: jest.fn((...args: unknown[]) => ({ type: 'orderBy', args })),
+  limit: jest.fn((n: number) => ({ type: 'limit', n })),
   getDocs: jest.fn().mockResolvedValue({ docs: [] }),
 }));
 jest.mock('../features/engagement', () => ({ useAmbientCues: () => ({ cue: null }) }));
@@ -135,7 +135,7 @@ test('admin list and CSV use the controlled count while unknown legacy numbers s
   await view.findByText('新受理活動');
   expect(view.getByText('👥 1 / 1 人')).toBeTruthy();
   expect(view.getByText('👥 待確認 / 3 人')).toBeTruthy();
-  fireEvent.press(view.getByText('匯出目前篩選結果 CSV'));
+  fireEvent.press(view.getByText('匯出目前已載入／篩選 CSV'));
   await waitFor(() => expect(mockWrite).toHaveBeenCalled());
   const csv = mockWrite.mock.calls[0][0];
   expect(csv).toContain('"managed","新受理活動"');
