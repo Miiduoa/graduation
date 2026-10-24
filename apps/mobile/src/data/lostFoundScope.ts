@@ -17,11 +17,11 @@ type ScopeSnapshot = {
   token: symbol;
 };
 
-/** Prefer live Firebase auth when a signed-in uid is present; otherwise undefined (unavailable). */
-function readLiveAuthUid(): string | undefined {
+/** null means confirmed signed-out; undefined means the SDK is unavailable (for example demo mode). */
+function readLiveAuthUid(): string | null | undefined {
   try {
     const uid = getAuthInstance().currentUser?.uid;
-    return typeof uid === 'string' && uid ? uid : undefined;
+    return typeof uid === 'string' && uid ? uid : null;
   } catch {
     return undefined;
   }
@@ -98,7 +98,10 @@ export function useLostFoundGenerationScope(recordId = '') {
     if (liveSchoolRef.current !== snapshot.schoolId) return false;
     if (snapshot.recordId !== recordId) return false;
     const authUid = readLiveAuthUid();
-    if (typeof authUid === 'string' && authUid !== snapshot.uid) return false;
+    if (authUid !== undefined && authUid !== snapshot.uid) {
+      validScopeTokens.delete(snapshot.token);
+      return false;
+    }
     return true;
   }, [
     snapshot.token,

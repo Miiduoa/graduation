@@ -128,6 +128,23 @@ test('actual auth uid disagreement invalidates even if useAuth snapshot lags', a
   expect(latestIsCurrent?.()).toBe(false);
 });
 
+test('confirmed SDK logout invalidates a held callback before useAuth rerenders', async () => {
+  let latestIsCurrent: (() => boolean) | null = null;
+  function Capture() {
+    const scope = useLostFoundGenerationScope();
+    latestIsCurrent = scope.isCurrent;
+    return <Text>{scope.scope}</Text>;
+  }
+  render(<Capture />);
+  await act(async () => undefined);
+  const beforeLogout = latestIsCurrent!;
+  expect(beforeLogout()).toBe(true);
+  mockAuthUid = null;
+  expect(beforeLogout()).toBe(false);
+  mockAuthUid = 'alice';
+  expect(beforeLogout()).toBe(false);
+});
+
 test('blur/unmount invalidates old isCurrent; remounted focus gets a fresh valid closure', async () => {
   let latestIsCurrent: (() => boolean) | null = null;
   let latestFocused = false;
