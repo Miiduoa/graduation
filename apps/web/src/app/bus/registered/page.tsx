@@ -3,7 +3,6 @@
 import { Suspense, useCallback, useEffect, useRef, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { SiteShell } from '@/components/SiteShell';
-import { fallbackBusSchool } from '@/lib/defaultBrowseSchool';
 import { useCampusBrowseContext } from '@/lib/useCampusBrowseContext';
 import {
   BUS_FRESHNESS_MS,
@@ -268,9 +267,14 @@ function BusContext() {
     schoolId: search.get('schoolId') ?? undefined,
     campus: search.get('campus') ?? undefined,
   });
-  const { schoolId, schoolName } = fallbackBusSchool(browse.schoolId, browse.schoolName, browse.status);
+  const schoolId = browse.status === 'ready' ? browse.schoolId : null;
+  const schoolName = browse.status === 'ready' ? browse.schoolName : '';
   return (
-    <SiteShell title="公車與交通" subtitle="查看候車站牌，確認到站資訊。" schoolName={schoolName}>
+    <SiteShell
+      title="公車與交通"
+      subtitle="查看候車站牌，確認到站資訊。"
+      schoolName={schoolId ? schoolName : undefined}
+    >
       {browse.status === 'loading' || browse.status === 'error' || !schoolId ? (
         <section className={styles.empty} role="status">
           <h2>

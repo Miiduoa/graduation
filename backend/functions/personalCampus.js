@@ -3,6 +3,7 @@
 const nodeCrypto = require('node:crypto');
 const { HttpsError } = require('firebase-functions/v2/https');
 const { FieldValue, Timestamp } = require('firebase-admin/firestore');
+const { MAX_PERIOD_SLOTS } = require('./generated/shared/timetable/schoolPeriods');
 
 const SHARE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 const MAX_COURSES = 80;
@@ -22,6 +23,47 @@ function optionalText(value, maximum) {
   return value.trim();
 }
 
+/** Explicit school segment only: lowercase letters/numbers/hyphen/underscore, 1–80 chars. */
+function requireSchoolId(value) {
+  if (typeof value !== 'string') {
+    throw new HttpsError('invalid-argument', '請先選擇學校，再分享課表。');
+  }
+  const schoolId = value.trim();
+  if (!schoolId || schoolId.length > 80 || !/^[a-z0-9_-]+$/.test(schoolId)) {
+    throw new HttpsError('invalid-argument', '請先選擇學校，再分享課表。');
+  }
+  return schoolId;
+}
+
+async function loadShareableTimetable(db, uid, schoolId) {
+  const userRef = db.collection('users').doc(uid);
+  const scopedRef = userRef
+    .collection('schools')
+    .doc(schoolId)
+    .collection('personalTimetable')
+    .doc('current');
+  const scopedSnap = await scopedRef.get();
+  if (scopedSnap.exists) {
+    const record = scopedSnap.data() || {};
+    if (record.schoolId !== schoolId) {
+      throw new HttpsError('failed-precondition', '無法確認這份課表所屬的學校，請重新載入後再分享。');
+    }
+    return record;
+  }
+
+  const legacyRef = userRef.collection('personalTimetable').doc('current');
+  const legacySnap = await legacyRef.get();
+  if (!legacySnap.exists) {
+    throw new HttpsError('not-found', '還沒有可分享的課表。');
+  }
+  const legacy = legacySnap.data() || {};
+  // Read-only fallback: exact schoolId match only; missing/mismatched provenance is rejected.
+  if (legacy.schoolId !== schoolId) {
+    throw new HttpsError('failed-precondition', '無法確認這份課表所屬的學校，請重新載入後再分享。');
+  }
+  return legacy;
+}
+
 function cleanCourse(input = {}) {
   let day = Number(input.day);
   let start = Number(input.start);
@@ -31,8 +73,8 @@ function cleanCourse(input = {}) {
     start = 0;
     end = 0;
   } else {
-    if (!Number.isInteger(start) || start < 1 || start > 13) start = 1;
-    if (!Number.isInteger(end) || end < start || end > 13) end = start;
+    if (!Number.isInteger(start) || start < 1 || start > MAX_PERIOD_SLOTS) start = 1;
+    if (!Number.isInteger(end) || end < start || end > MAX_PERIOD_SLOTS) end = start;
   }
   return {
     id: optionalText(input.id, 120).slice(0, 120) || nodeCrypto.randomUUID(),
@@ -50,6 +92,7 @@ function cleanCourse(input = {}) {
 
 function publicShare(data) {
   return {
+    schoolId: typeof data.schoolId === 'string' ? data.schoolId : null,
     name: data.name || '課表',
     courses: Array.isArray(data.courses) ? data.courses : [],
     meta: data.meta || {},
@@ -61,11 +104,8 @@ function createCreateTimetableShareHandler({ db }) {
   return async (request) => {
     const uid = request.auth?.uid;
     if (!uid) throw new HttpsError('unauthenticated', '請先登入再建立分享連結。');
-    const schoolId = text(request.data?.schoolId || 'personal', 80, 'schoolId');
-    const timetableRef = db.collection('users').doc(uid).collection('personalTimetable').doc('current');
-    const snapshot = await timetableRef.get();
-    if (!snapshot.exists) throw new HttpsError('not-found', '還沒有可分享的課表。');
-    const record = snapshot.data() || {};
+    const schoolId = requireSchoolId(request.data?.schoolId);
+    const record = await loadShareableTimetable(db, uid, schoolId);
     // 分享出去的資料不帶老師姓名
     const courses = Array.isArray(record.courses)
       ? record.courses.slice(0, MAX_COURSES).map((course) => ({ ...cleanCourse(course), teacher: '' }))
