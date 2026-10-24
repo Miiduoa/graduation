@@ -46,7 +46,7 @@ permissions:
 jobs:
   reject-non-main:
     if: github.event_name == 'workflow_dispatch' && github.ref != 'refs/heads/main'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
       - name: Fail unless this is main
@@ -58,7 +58,7 @@ jobs:
           fi
 
   guards:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
@@ -72,7 +72,7 @@ jobs:
   release:
     if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
     needs: guards
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 30
     environment: production
     concurrency:
@@ -129,7 +129,7 @@ jobs:
         run: |
           set -euo pipefail
           IMAGE="registry.fly.io/nuni-web:source-${EXPECTED_RELEASE_SHA}"
-          docker build --platform linux/amd64 -f deploy/web/Dockerfile.nuni -t "$IMAGE" \
+          docker buildx build --platform linux/amd64 --provenance=false --load -f deploy/web/Dockerfile.nuni -t "$IMAGE" \
             --build-arg CAMPUS_RELEASE_SHA \
             --build-arg NEXT_PUBLIC_SITE_URL \
             --build-arg NEXT_PUBLIC_FUNCTIONS_BASE_URL \
