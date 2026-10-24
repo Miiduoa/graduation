@@ -135,10 +135,11 @@ test('admin list and CSV use the controlled count while unknown legacy numbers s
   await view.findByText('新受理活動');
   expect(view.getByText('👥 1 / 1 人')).toBeTruthy();
   expect(view.getByText('👥 待確認 / 3 人')).toBeTruthy();
-  fireEvent.press(view.getByText('匯出目前篩選結果 CSV'));
+  fireEvent.press(view.getByText('匯出已載入且符合篩選的 CSV'));
   await waitFor(() => expect(mockWrite).toHaveBeenCalled());
   const csv = mockWrite.mock.calls[0][0];
   expect(csv).toContain('"managed","新受理活動"');
-  expect(csv).toMatch(/"1","1"(?:\r?\n|$)/);
+  expect(csv).toContain('"capacity","registeredCount","exportScope"');
+  expect(csv).toMatch(/"1","1","loaded_filtered_complete"(?:\r?\n|$)/);
   expect(csv).toContain('待確認');
 });

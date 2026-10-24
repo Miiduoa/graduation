@@ -310,9 +310,12 @@ function DiningContent({
         </AICard>
       ) : null}
       <View style={styles.searchArea}>
-        <Text accessibilityRole="header" style={styles.heading}>
-          今天想吃什麼？
-        </Text>
+        {isMobileOnlineOrderingEnabled() ? (
+          <AIButton
+            label="前往平台點餐"
+            onPress={() => safeNavigate(navigation, 'NuniWorkspace', { tab: 'food' })}
+          />
+        ) : null}
         <View style={styles.searchField}>
           <Ionicons name="search-outline" size={20} color={aiTokens.muted} />
           <TextInput
@@ -421,7 +424,7 @@ function DiningContent({
         ) : (
           restaurants.map(({ venue, menus, total, lowestPrice }) => {
             const isExpanded = expanded.includes(venue.id);
-            const preview = isExpanded ? menus : menus.slice(0, 3);
+            const preview = isExpanded ? menus : menus.slice(0, 1);
             return (
               <AICard key={venue.id} style={styles.restaurant}>
                 <View style={styles.restaurantHeader}>
@@ -464,7 +467,7 @@ function DiningContent({
                           : `NT$${menu.price.toLocaleString('zh-TW')}`}
                       </Text>
                     </View>
-                    {menu.description ? (
+                    {menu.description && (isExpanded || needle) ? (
                       <Text numberOfLines={isExpanded ? undefined : 2} style={styles.muted}>
                         {menu.description}
                       </Text>
@@ -494,13 +497,11 @@ function DiningContent({
                       }
                       style={styles.storefrontButton}
                     >
-                      <Text style={{ color: aiTokens.ai, fontWeight: '600' }}>
-                        店家資訊與完整菜單
-                      </Text>
+                      <Text style={{ color: aiTokens.ai, fontWeight: '600' }}>店家資訊</Text>
                       <Ionicons name="arrow-forward" size={17} color={aiTokens.ai} />
                     </Pressable>
                   ) : null}
-                  {menus.length > 3 ? (
+                  {menus.length > 1 ? (
                     <Pressable
                       accessibilityRole="button"
                       accessibilityLabel={`${isExpanded ? '收合' : '展開'}${venue.name}的菜單`}
@@ -515,7 +516,7 @@ function DiningContent({
                       style={styles.expandButton}
                     >
                       <Text style={styles.muted}>
-                        {isExpanded ? '收合菜單' : `再看 ${menus.length - 3} 道`}
+                        {isExpanded ? '收合菜單' : `看全部 ${menus.length} 道餐點`}
                       </Text>
                       <Ionicons
                         name={isExpanded ? 'chevron-up' : 'chevron-down'}
@@ -531,12 +532,7 @@ function DiningContent({
         )
       ) : null}
       <View style={styles.footnote}>
-        {isMobileOnlineOrderingEnabled() ? (
-          <AIButton
-            label="前往平台點餐"
-            onPress={() => safeNavigate(navigation, 'NuniWorkspace', { tab: 'food' })}
-          />
-        ) : (
+        {isMobileOnlineOrderingEnabled() ? null : (
           <Text style={styles.muted}>{ONLINE_ORDERING_OFF_TEXT}</Text>
         )}
         <Text style={styles.muted}>營業時間、餐點供應與價格，以店家現場資訊為準。</Text>
@@ -600,8 +596,7 @@ function DiningContent({
 
 function diningStyles() {
   return StyleSheet.create({
-    searchArea: { paddingHorizontal: aiTokens.space.md, paddingTop: 20, gap: 14 },
-    heading: { color: aiTokens.text, fontSize: 26, fontWeight: '700', letterSpacing: -0.6 },
+    searchArea: { paddingHorizontal: aiTokens.space.md, paddingTop: 8, gap: 12 },
     searchField: {
       flexDirection: 'row',
       alignItems: 'center',

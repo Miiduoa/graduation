@@ -200,7 +200,12 @@ it('切換校園時取消舊訂閱，忽略遲到的 A 校回呼，並改讀 B �
 
 it('尚未選校、載入中或目錄錯誤時不訂閱訂單', () => {
   vi.stubEnv('NEXT_PUBLIC_ONLINE_ORDERING', 'true');
-  state.campus = { status: 'unselected', schoolId: null, schoolName: '', schoolSearch: '?campus=all' };
+  state.campus = {
+    status: 'unselected',
+    schoolId: null,
+    schoolName: '',
+    schoolSearch: '?campus=all',
+  };
   const view = render(<OrdersPage />);
   expect(screen.getByText('先選擇要瀏覽的校園')).toBeTruthy();
   expect(state.paths).toEqual([]);
@@ -227,12 +232,13 @@ it('沒登入、線上點餐還沒開：標題、副標題、內文都只寫「�
   expect(state.paths).toEqual([]);
 });
 
-it('沒有訂單、線上點餐還沒開：只寫「目前還不能線上點餐」，不叫學生去點餐', () => {
+it('沒有訂單、線上點餐還沒開：保留既有訂單入口，不叫學生去點餐', () => {
   state.rows = [];
   render(<OrdersPage />);
   expect(screen.getAllByRole('heading', { name: '目前還不能線上點餐' }).length).toBeGreaterThan(0);
-  expect(screen.queryByText(/還沒有訂單|要點餐|餐廳|會自動更新/)).toBeNull();
-  expect(screen.queryByRole('link')).toBeNull();
+  expect(screen.queryByText(/還沒有訂單|要點餐|會自動更新/)).toBeNull();
+  expect(screen.getAllByRole('link')).toHaveLength(1);
+  expect(screen.getByRole('link', { name: '訂單與取餐進度' }).getAttribute('href')).toBe('/food');
 });
 
 it('線上點餐打開、沒登入：請先登入，不讀訂單', () => {
@@ -246,4 +252,45 @@ it('線上點餐打開、沒登入：請先登入，不讀訂單', () => {
     '/login?returnUrl=%2Forders%3Fcampus%3Dpu',
   );
   expect(state.paths).toEqual([]);
+});
+
+it('preserves the selected school through sign-in and reads that school after sign-in', () => {
+  vi.stubEnv('NEXT_PUBLIC_ONLINE_ORDERING', 'true');
+  state.campus = {
+    status: 'ready',
+    schoolId: 'nthu',
+    schoolName: '國立清華大學',
+    schoolSearch: '?schoolId=nthu&campus=nthu',
+  };
+  state.uid = null;
+  const view = render(<OrdersPage />);
+  expect(screen.getByRole('link', { name: '登入' }).getAttribute('href')).toBe(
+    '/login?returnUrl=%2Forders%3Fcampus%3Dnthu',
+  );
+  expect(state.paths).toEqual([]);
+  state.uid = 'alice';
+  view.rerender(<OrdersPage />);
+  expect(state.paths).toEqual(['users/alice/schools/nthu/orders']);
+});
+
+it('does not classify an unknown server status as finished', () => {
+  state.rows = [{ id: 'co_unknown', data: { status: 'awaiting-review', items: [] } }];
+  render(<OrdersPage />);
+  expect(screen.getByRole('heading', { name: /進行中/ })).toBeTruthy();
+  expect(screen.queryByRole('heading', { name: /已結束/ })).toBeNull();
+  expect(screen.getByText('訂單進度尚待確認。')).toBeTruthy();
+});
+
+it('線上點餐打開、有訂單：區分進行中與已結束，並標明 App 訂單與站內點餐路徑', () => {
+  vi.stubEnv('NEXT_PUBLIC_ONLINE_ORDERING', 'true');
+  render(<OrdersPage />);
+  expect(screen.getByRole('heading', { name: /進行中/ })).toBeTruthy();
+  expect(screen.getByRole('heading', { name: /已結束/ })).toBeTruthy();
+  expect(screen.getByText('餐點好了，請到店取餐。')).toBeTruthy();
+  expect(screen.getByText('等待店家提供取餐號碼')).toBeTruthy();
+  expect(screen.getByRole('link', { name: '點餐與取餐' }).getAttribute('href')).toBe('/food');
+  expect(screen.getByRole('link', { name: '餐廳資訊' }).getAttribute('href')).toBe(
+    '/cafeteria?schoolId=pu',
+  );
+  expect(screen.getByText(/此頁是 App「餐廳」留下的訂單/)).toBeTruthy();
 });

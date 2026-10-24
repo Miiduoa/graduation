@@ -42,11 +42,27 @@ export function PersonalImportSummary({ kind }: { kind: PersonalImportKind }) {
   return (
     <View style={{ gap: 8, paddingVertical: 10 }}>
       <Button
-        text={`匯入${names[kind]}／查看個人紀錄`}
+        text={
+          kind === 'events'
+            ? '開啟個人行事曆'
+            : `匯入${names[kind]}／查看個人紀錄`
+        }
         onPress={() => {
+          if (kind === 'events') {
+            safeNavigate(navigation, 'PersonalCalendar');
+            return;
+          }
           safeNavigate(navigation, 'PersonalImport', { kind });
         }}
       />
+      {kind === 'events' ? (
+        <Button
+          text="從截圖或檔案匯入行程"
+          onPress={() => {
+            safeNavigate(navigation, 'PersonalImport', { kind: 'events' });
+          }}
+        />
+      ) : null}
       <Text style={{ color: theme.colors.muted }}>
         {!scope
           ? '正在確認帳號，暫時不顯示個人資料。'
@@ -54,7 +70,7 @@ export function PersonalImportSummary({ kind }: { kind: PersonalImportKind }) {
             ? '正在讀取這台裝置的個人匯入紀錄…'
             : visible.error
               ? '個人匯入紀錄暫時讀不到，請開啟匯入頁重試。'
-              : `這台裝置已存 ${visible?.records.length || 0} 筆個人${names[kind]}。尚未同步或經學校確認。`}
+              : `這台裝置已存 ${visible?.records.length || 0} 筆個人${names[kind]}。個人資料不是學校正式紀錄。`}
       </Text>
       {kind !== 'timetable'
         ? visible?.records

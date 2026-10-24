@@ -8,9 +8,8 @@ import {
 } from '../services/notifications';
 
 import { rootNavigateNested, rootNavigationRef } from './rootNavigation';
-import { navigateFromInboxTask } from '../services/inboxActions';
-import { isTeachingRole } from '../utils/campusOs';
-import { inboxTaskFromAssignmentPushData } from '../utils/inboxTaskFromNotification';
+import { applyNotificationDestination } from '../utils/applyNotificationDestination';
+import { resolveNotificationDestination } from '../utils/notificationDestination';
 import type { UserRole } from '../data/types';
 
 type NavigationLike = {
@@ -38,66 +37,21 @@ function getNotificationResponseKey(response: {
   return `${identifier ?? 'unknown'}:${actionIdentifier}:${JSON.stringify(data ?? {})}`;
 }
 
-function navigateFromNotificationData(rawData: unknown, profileRole?: UserRole | null) {
-  const data = rawData && typeof rawData === 'object' ? (rawData as Record<string, unknown>) : {};
-
-  switch (data.type) {
-    case 'ai_proactive':
-      rootNavigateNested('Today', 'TodayHome');
-      break;
-    case 'announcement':
-      if (typeof data.announcementId === 'string' && data.announcementId) {
-        rootNavigateNested('Today', '公告詳情', { id: data.announcementId });
-      }
-      break;
-    case 'event':
-      if (typeof data.eventId === 'string' && data.eventId) {
-        rootNavigateNested('Today', '活動詳情', { id: data.eventId });
-      }
-      break;
-    case 'group_post':
-      if (typeof data.groupId === 'string' && typeof data.postId === 'string') {
-        rootNavigateNested('訊息', 'GroupPost', {
-          groupId: data.groupId,
-          postId: data.postId,
-        });
-      }
-      break;
-    case 'assignment':
-    case 'assignment_due':
-    case 'homework':
-    case 'quiz': {
-      const task = inboxTaskFromAssignmentPushData(data);
-      const navigated =
-        task &&
-        navigateFromInboxTask(rootNavigationRef, task, {
-          role: profileRole,
-          isTeachingRole: isTeachingRole(profileRole),
-        });
-      if (!navigated && typeof data.groupId === 'string' && typeof data.assignmentId === 'string') {
-        rootNavigateNested('訊息', 'AssignmentDetail', {
-          groupId: data.groupId,
-          assignmentId: data.assignmentId,
-        });
-      }
-      break;
-    }
-    case 'friend_request':
-    case 'friend_invite':
-      rootNavigateNested('訊息', 'FriendsManage');
-      break;
-    case 'friend_accepted':
-      rootNavigateNested('訊息', 'FriendsManage');
-      break;
-    case 'message':
-      if (typeof data.peerId === 'string' && data.peerId) {
-        rootNavigateNested('訊息', 'Chat', { kind: 'dm', peerId: data.peerId });
-      }
-      break;
-    default:
-      rootNavigateNested('我的', 'Notifications');
-      break;
+/** 推播與通知中心共用解析；無法開啟時退回通知列表，不臆造目的地。 */
+export function navigateFromNotificationData(
+  rawData: unknown,
+  profileRole?: UserRole | null,
+  schoolId?: string | null,
+) {
+  const destination = resolveNotificationDestination(
+    { data: rawData },
+    { role: profileRole, schoolId },
+  );
+  if (!destination.ok) {
+    rootNavigateNested('我的', 'Notifications');
+    return false;
   }
+  return applyNotificationDestination(destination, { role: profileRole });
 }
 
 /**
@@ -107,9 +61,12 @@ export function usePushNotifications(
   _navigationRef: NavigationLike,
   uid: string | undefined,
   profileRole?: UserRole | null,
+  schoolId?: string | null,
 ) {
   const roleRef = useRef<UserRole | null | undefined>(profileRole);
+  const schoolRef = useRef<string | null | undefined>(schoolId);
   roleRef.current = profileRole;
+  schoolRef.current = schoolId;
   const responseListener = useRef<RemovableSubscription | null>(null);
   const lastHandledResponseKeyRef = useRef<string | null>(null);
 
@@ -137,6 +94,7 @@ export function usePushNotifications(
 
   useEffect(() => {
     let cancelled = false;
+    lastHandledResponseKeyRef.current = null;
     if (Platform.OS === 'web' || !uid) {
       return () => {
         cancelled = true;
@@ -147,6 +105,7 @@ export function usePushNotifications(
       response: NotificationResponseLike,
       options?: { clearLastResponse?: boolean },
     ) => {
+      if (cancelled) return;
       const responseKey = getNotificationResponseKey(response);
       if (lastHandledResponseKeyRef.current === responseKey) {
         if (options?.clearLastResponse) {
@@ -160,7 +119,8 @@ export function usePushNotifications(
       if (!rootNavigationRef.isReady()) return;
 
       lastHandledResponseKeyRef.current = responseKey;
-      navigateFromNotificationData(rawPayload, roleRef.current);
+      // 使用當下 ref 的學校範圍，拒絕跨校成績等通知目的地。
+      navigateFromNotificationData(rawPayload, roleRef.current, schoolRef.current);
 
       if (options?.clearLastResponse) {
         await clearLastNotificationResponseAsync().catch((error) => {
@@ -206,5 +166,5 @@ export function usePushNotifications(
         responseListener.current = null;
       }
     };
-  }, [uid]);
+  }, [uid, schoolId]);
 }

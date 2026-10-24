@@ -5,10 +5,12 @@ import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
 import { SiteShell } from '@/components/SiteShell';
 import { TransitExplorer } from '@/components/TransitExplorer';
+import { useOptionalSelectedSchool } from '@/components/SelectedSchoolProvider';
 import { useCampusBrowseContext } from '@/lib/useCampusBrowseContext';
 
 export function BusContext({ availabilityNotice }: { availabilityNotice?: ReactNode }) {
   const search = useSearchParams();
+  const selection = useOptionalSelectedSchool();
   const browse = useCampusBrowseContext({
     school: search.get('school') ?? undefined,
     schoolId: search.get('schoolId') ?? undefined,
@@ -30,6 +32,11 @@ export function BusContext({ availabilityNotice }: { availabilityNotice?: ReactN
                 : '請先選擇一所學校'}
           </h2>
           <p>選擇校園後才能查看對應的站牌資訊，不會載入其他學校的路線。</p>
+          {browse.status === 'error' && selection?.onRetryCatalog ? (
+            <button className="btn" type="button" onClick={selection.onRetryCatalog}>
+              重新讀取
+            </button>
+          ) : null}
         </section>
       ) : (
         <TransitExplorer

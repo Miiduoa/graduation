@@ -56,10 +56,16 @@ export function FoodWorkspace({
     <SiteShell title="點餐與取餐" subtitle={foodPageSubtitle(orderingOn)}>
       <div className={styles.stack}>
         {cleanupError ? <p role="alert">{cleanupError}</p> : null}
-        <nav className={styles.bar} aria-label="餐飲服務">
-          <Link href="/cafeteria">餐廳資訊</Link>
-          <Link href="/orders">原有餐廳訂單</Link>
-          <Link href="/merchant">店家工作台</Link>
+        <nav className={styles.serviceNav} aria-label="餐飲服務">
+          <Link href="/cafeteria" className={styles.serviceLink}>
+            餐廳資訊
+          </Link>
+          <Link href="/orders" className={styles.serviceLink}>
+            App 餐廳訂單
+          </Link>
+          <Link href="/merchant" className={styles.serviceLink}>
+            店家工作台
+          </Link>
         </nav>
         {checkingAccount ? (
           <p role="status">正在確認帳號…</p>
@@ -133,37 +139,44 @@ function FoodAccount({
   const tenantId = available.some((realm) => realm.tenantId === tenant)
     ? tenant
     : (available[0]?.tenantId ?? '');
+  const selectedRealm = available.find((realm) => realm.tenantId === tenantId);
   const [created, setCreated] = useState<{ tenantId: string; orderId: string } | null>(null);
   return (
-    <div className={styles.stack}>
-      <div className={styles.bar}>
+    <div className={styles.accountStack}>
+      <div className={`${styles.bar} ${styles.accountBar}`}>
         {orderingOn ? (
-          <Button aria-pressed={tab === 'menu'} onClick={() => setTab('menu')}>
-            我要點餐
-          </Button>
+          <>
+            <Button aria-pressed={tab === 'menu'} onClick={() => setTab('menu')}>
+              我要點餐
+            </Button>
+            <Button aria-pressed={tab === 'orders'} onClick={() => setTab('orders')}>
+              我的訂單與取餐
+            </Button>
+          </>
         ) : null}
-        <Button aria-pressed={tab === 'orders'} onClick={() => setTab('orders')}>
-          我的訂單與取餐
-        </Button>
-        <Button disabled={realms.loading} onClick={() => void realms.reload()}>
-          更新場域
+        <Button variant="ghost" disabled={realms.loading} onClick={() => void realms.reload()}>
+          重新整理
         </Button>
       </div>
-      {realms.loading && <p role="status">正在查詢場域…</p>}
+      {realms.loading && <p role="status">正在查詢可用校園…</p>}
       {realms.error && <p role="alert">{realms.error}</p>}
       {realms.data && (
         <>
-          {available.length ? (
+          {available.length > 1 ? (
             <Select
-              label={tab === 'menu' ? '點餐場域' : '訂單場域'}
+              label={tab === 'menu' ? '選擇點餐校園' : '選擇訂單校園'}
               value={tenantId}
               options={available.map((realm) => ({ value: realm.tenantId, label: realm.name }))}
               onChange={(event) => setTenant(event.target.value)}
             />
+          ) : available.length === 1 && selectedRealm ? (
+            <p className={styles.realmContext}>
+              {tab === 'menu' ? '點餐校園' : '訂單校園'}：{selectedRealm.name}
+            </p>
           ) : (
             <p>
               {tab === 'menu'
-                ? '目前沒有開放點餐的場域。既有訂單仍可從「我的訂單與取餐」查看。'
+                ? '目前沒有開放點餐的校園。既有訂單仍可從「我的訂單與取餐」查看。'
                 : '這個帳號目前沒有訂單紀錄。'}
             </p>
           )}
@@ -248,7 +261,7 @@ function FoodLocations({
       <div className={styles.bar}>
         <div>
           <h2>選一家店</h2>
-          <p className={styles.muted}>先選餐點，再確認取餐時間與金額。</p>
+          <p className={styles.muted}>依樓層或區域找到店家，選餐後再確認取餐時間與金額。</p>
         </div>
         <Button disabled={locations.loading} onClick={() => void locations.reload()}>
           更新店家
@@ -260,46 +273,55 @@ function FoodLocations({
         <>
           {!locations.data.locations.length && <p>目前沒有可點餐的門市。</p>}
           <div className={styles.grid}>
-            {locations.data.locations.map((location) => (
-              <section className={`${styles.panel} ${styles.locationCard}`} key={location.id}>
-                <h3>{location.name}</h3>
-                <p>
-                  {[
-                    location.zoneLabel,
-                    location.state === 'open' &&
-                    location.description === '店家進駐已核准，尚待完成營運設定。'
-                      ? ''
-                      : location.description,
-                  ]
-                    .filter(Boolean)
-                    .join(' · ')}
-                </p>
-                {location.sourceLabel && (
-                  <p className={styles.muted}>
-                    資訊來源：{location.sourceLabel}
-                    {location.sourceUpdatedAt ? ` · ${location.sourceUpdatedAt}` : ''}
-                  </p>
-                )}
-                {location.merchantMode === 'full' &&
-                location.allowedActions.includes('view-menu') ? (
-                  <Button
-                    variant="primary"
-                    fullWidth
-                    aria-label={`查看菜單：${location.name}`}
-                    onClick={() => setSelected(location.id)}
-                  >
-                    查看菜單
-                  </Button>
-                ) : (
-                  <p>目前提供店家資訊，尚未開放站內點餐。</p>
-                )}
-                {location.externalOrderUrl && (
-                  <a href={location.externalOrderUrl} target="_blank" rel="noopener noreferrer">
-                    前往店家訂餐網站
-                  </a>
-                )}
-              </section>
-            ))}
+            {locations.data.locations.map((location) => {
+              const canViewMenu =
+                location.merchantMode === 'full' && location.allowedActions.includes('view-menu');
+              const stateLabel =
+                location.state === 'closed'
+                  ? '目前暫停營業'
+                  : location.state === 'open'
+                    ? '營業中'
+                    : '';
+              const meta = [
+                location.zoneLabel,
+                stateLabel,
+                location.state === 'open' &&
+                location.description === '店家進駐已核准，尚待完成營運設定。'
+                  ? ''
+                  : location.description,
+              ]
+                .filter(Boolean)
+                .join(' · ');
+              return (
+                <section className={`${styles.panel} ${styles.locationCard}`} key={location.id}>
+                  <h3>{location.name}</h3>
+                  {meta ? <p>{meta}</p> : null}
+                  {location.sourceLabel && (
+                    <p className={styles.muted}>
+                      資訊來源：{location.sourceLabel}
+                      {location.sourceUpdatedAt ? ` · ${location.sourceUpdatedAt}` : ''}
+                    </p>
+                  )}
+                  {canViewMenu ? (
+                    <Button
+                      variant="primary"
+                      fullWidth
+                      aria-label={`查看菜單：${location.name}`}
+                      onClick={() => setSelected(location.id)}
+                    >
+                      查看菜單
+                    </Button>
+                  ) : (
+                    <p>目前提供店家資訊，尚未開放站內點餐。</p>
+                  )}
+                  {location.externalOrderUrl && (
+                    <a href={location.externalOrderUrl} target="_blank" rel="noopener noreferrer">
+                      前往店家訂餐網站
+                    </a>
+                  )}
+                </section>
+              );
+            })}
           </div>
           <div className={styles.bar}>
             {cursor && <Button onClick={() => setCursor(undefined)}>回到第一頁店家</Button>}
