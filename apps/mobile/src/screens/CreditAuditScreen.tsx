@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ScrollView, Text, View, Pressable } from 'react-native';
+import { Alert, Linking, ScrollView, Text, View, Pressable } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { Screen, Card, Pill, Button, LoadingState, ErrorState, AuthGuard } from '../ui/components';
 import { TAB_BAR_CONTENT_BOTTOM_PADDING } from '../ui/navigationTheme';
@@ -18,6 +18,7 @@ import {
   matchDepartment,
   mapCourseTypeDetailed,
 } from '../data/puGradRequirements';
+import { PU_GRADE_POINT_POLICY } from '../data/apiAdapters/puGradePointPolicy';
 import {
   computeCreditTotals,
   isPassed,
@@ -470,22 +471,42 @@ export function CreditAuditScreen(props: Props) {
               <Text style={{ color: theme.colors.text, fontWeight: '700', fontSize: 40 }}>
                 {gpaData.gpa.toFixed(2)}
               </Text>
-              <Text
-                style={{
-                  color: theme.colors.muted,
-                  fontWeight: '700',
-                  fontSize: 20,
-                  marginLeft: 4,
-                }}
-              >
-                / 4.00
-              </Text>
+              {gpaData.gradePointScale != null ? (
+                <Text
+                  style={{
+                    color: theme.colors.muted,
+                    fontWeight: '700',
+                    fontSize: 20,
+                    marginLeft: 4,
+                  }}
+                >
+                  / {gpaData.gradePointScale.toFixed(2)}
+                </Text>
+              ) : null}
             </View>
             <Text style={{ color: theme.colors.muted, marginTop: 6, fontSize: 13, lineHeight: 18 }}>
-              依本頁已接受修課紀錄的績點與學分加權（已粗估合併重複修課
-              {gpaData.retakeCollapsed > 0 ? ` ${gpaData.retakeCollapsed} 筆` : ''}
-              ）。非正式累計 GPA。
+              依本頁已接受列加權；含全部有績點的修習嘗試，符號通過／未通過不納入平均。非正式累計
+              GPA。
             </Text>
+            {isPu && grades.some((g) =>
+              g.gradePointProvenance === 'local-reference' &&
+              (g.gradeSource === 'school-official' || g.gradeSource === 'school-official-offline'),
+            ) ? (
+              <Pressable
+                accessibilityRole="link"
+                accessibilityLabel="開啟靜宜大學學則績點對照"
+                onPress={() => {
+                  void Linking.openURL(PU_GRADE_POINT_POLICY.regulationsPdfUrl).catch(() => {
+                    Alert.alert('學則連結暫時無法開啟', '請稍後重試，或到靜宜大學綜合業務組網站查看學則。');
+                  });
+                }}
+                style={({ pressed }) => ({ marginTop: 6, opacity: pressed ? 0.7 : 1 })}
+              >
+                <Text style={{ color: theme.colors.accent, fontSize: 13, lineHeight: 18 }}>
+                  績點換算依據：靜宜學則（2026/02 修訂）→
+                </Text>
+              </Pressable>
+            ) : null}
             <Text style={{ color: theme.colors.muted, marginTop: 4, fontSize: 13 }}>
               計入 {gpaData.totalCredits} 學分・加權總績點 {gpaData.totalPoints.toFixed(1)}
             </Text>

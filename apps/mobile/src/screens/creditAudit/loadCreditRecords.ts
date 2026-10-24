@@ -8,6 +8,8 @@ export type GpaSnapshot = {
   totalCredits: number;
   totalPoints: number;
   retakeCollapsed: number;
+  /** 納入列一致的已知績點尺度；null 時 UI 省略分母 */
+  gradePointScale: number | null;
 };
 
 export type CreditLoadSuccess = {
@@ -84,6 +86,7 @@ export async function loadCreditRecords(args: {
         totalCredits: reference.totalCredits,
         totalPoints: reference.totalPoints,
         retakeCollapsed: reference.retakeCollapsed,
+        gradePointScale: reference.gradePointScale,
       }
     : null;
 

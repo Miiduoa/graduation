@@ -49,11 +49,22 @@ export function scoreDisplay(grade: Grade): string {
   return '未評分';
 }
 
+/**
+ * 符號通過／未通過（學則 P／通過、I／未通過等）。
+ * 此類紀錄可計／不計學分，但不納入學業平均。
+ */
 function explicitPassResult(grade: Grade): boolean | null {
   const label = grade.letterGrade?.trim().toLowerCase();
   if (['pass', 'p', '通過', '及格', '通過(pass)'].includes(label ?? '')) return true;
-  if (['fail', 'f', '未通過', '不及格', '未通過(fail)'].includes(label ?? '')) return false;
+  if (['fail', 'f', 'i', '未通過', '不及格', '未通過(fail)'].includes(label ?? '')) {
+    return false;
+  }
   return null;
+}
+
+/** 符號通過／未通過列：保留標籤與學分語意，但不進入 GPA 平均。 */
+export function isSymbolicPassFailExcludedFromGpa(grade: Grade): boolean {
+  return explicitPassResult(grade) !== null;
 }
 
 export function isUngraded(grade: Grade): boolean {
@@ -206,41 +217,86 @@ export type ReferenceGpa = {
   gpa: number;
   totalCredits: number;
   totalPoints: number;
-  /** 粗估合併的重複修課筆數 */
+  /**
+   * 輸入集合中因同名／同碼重複修課而多出的筆數（僅供說明；GPA 本身不剔除重修）。
+   */
   retakeCollapsed: number;
+  /**
+   * 納入平均之列若皆宣告同一已知 gradePointScale 則回傳該值；否則 null（UI 省略分母）。
+   */
+  gradePointScale: number | null;
 };
+
+function resolveDeclaredScale(grade: Grade): number | null {
+  const scale = grade.gradePointScale;
+  if (typeof scale === 'number' && Number.isFinite(scale) && scale > 0) return scale;
+  return null;
+}
+
+function isGradePointInScale(gp: number, scale: number | null): boolean {
+  if (gp < 0) return false;
+  if (scale === null) return true;
+  return gp <= scale + 1e-9;
+}
 
 /**
  * 僅依「本頁已接受」成績列推導參考 GPA。
- * 使用列上有限的 gradePoints／gradePoint 與正學分；缺漏或不完整則回傳 null（不可用）。
- * 績點 0 且學分 > 0 仍可算出 0.00；分母為 0 則不可用。不做通用分數換算、不稱正式累計 GPA。
+ * - 使用同一驗證集合的全部修習嘗試（不因重修去重）。
+ * - 符號 P／Pass／通過、I／未通過排除於平均，標籤仍可顯示。
+ * - 未評分／待處理且無有效績點者排除；有數值分數卻缺績點 → 整份不可用（不捏造 0）。
+ * - 無百分制分數但來源已提供有限績點的等第列可計入；不自行發明對照。
+ * - 績點 0 且學分 > 0 可算出 0.00；分母為 0 則不可用。
+ * - 不做通用分數換算、不稱正式累計 GPA。
  */
 export function computeReferenceGpa(grades: Grade[]): ReferenceGpa | null {
-  const { kept, collapsed } = collapseRetakeAttempts(grades);
+  const { collapsed } = collapseRetakeAttempts(grades);
   let totalPoints = 0;
   let totalCredits = 0;
+  const includedScales: number[] = [];
+  let sawMissingScale = false;
 
-  for (const g of kept) {
+  for (const g of grades) {
     const credits = Number.isFinite(g.credits) ? g.credits : 0;
     if (credits <= 0) continue;
-    if (isUngraded(g)) continue;
 
+    // 符號通過／未通過：不納入平均
+    if (isSymbolicPassFailExcludedFromGpa(g)) continue;
+
+    const score = numericScore(g);
     const gp = resolveSourceGradePoint(g);
+
     if (gp === null) {
-      // 有學分的已評分列卻缺績點 → 集合不完整，不可用
-      return null;
+      // 有數值分數卻缺績點 → 集合不完整，不可用
+      if (score !== null) return null;
+      // 待處理／未知標籤且無績點 → 略過
+      continue;
     }
+
+    const scale = resolveDeclaredScale(g);
+    if (!isGradePointInScale(gp, scale)) return null;
+    if (scale === null) sawMissingScale = true;
+    else includedScales.push(scale);
+
     totalCredits += credits;
     totalPoints += gp * credits;
   }
 
   if (totalCredits <= 0) return null;
 
+  let gradePointScale: number | null = null;
+  if (includedScales.length > 0) {
+    const first = includedScales[0];
+    // 不同尺度的績點不能直接加權；已知與未知尺度混合也無法確認可比性。
+    if (sawMissingScale || includedScales.some((s) => Math.abs(s - first) >= 1e-9)) return null;
+    gradePointScale = first;
+  }
+
   return {
     gpa: totalPoints / totalCredits,
     totalCredits,
     totalPoints,
     retakeCollapsed: collapsed,
+    gradePointScale,
   };
 }
 

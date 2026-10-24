@@ -69,7 +69,7 @@ beforeEach(() => {
 });
 
 describe('PU / NCHU grade adapter contracts', () => {
-  test('PU semester row identifiers do not count retaken course credits twice', () => {
+  test('PU semester row identifiers do not count retaken course credits twice; GPA keeps all attempts', () => {
     const rows = mapPuOfficialGrades(
       [
         { semester: '1121', courseName: '程式設計', credits: 3, score: 65 },
@@ -83,10 +83,15 @@ describe('PU / NCHU grade adapter contracts', () => {
       totalCourses: 2,
       retakeCollapsed: 1,
     });
-    expect(computeReferenceGpa(rows)).toMatchObject({ totalCredits: 6, retakeCollapsed: 1 });
+    // 學分去重一次；GPA 含兩次「程式設計」＋一次「程式設計（二）」→ 9 學分
+    expect(computeReferenceGpa(rows)).toMatchObject({
+      totalCredits: 9,
+      retakeCollapsed: 1,
+      gradePointScale: 4.3,
+    });
   });
 
-  test('real adapter score labels retain Pass and pending instead of turning them into zero', () => {
+  test('real adapter score labels retain Pass and pending; Pass excluded from GPA mean', () => {
     const rows = mapPuOfficialGrades(
       ['Pass', '成績處理中', '0', '88分', ''].map((score, i) => ({
         semester: '1131',
@@ -106,7 +111,14 @@ describe('PU / NCHU grade adapter contracts', () => {
       failedCount: 1,
       ungradedCount: 3,
     });
-    expect(computeReferenceGpa(rows)).toBeNull();
+    // Pass 排除；僅數值 0（績點 0）計入 → GPA 0.00
+    expect(computeReferenceGpa(rows)).toEqual({
+      gpa: 0,
+      totalCredits: 2,
+      totalPoints: 0,
+      retakeCollapsed: 0,
+      gradePointScale: 4.3,
+    });
     const nchu = mapNchuOfficialGrades(
       ['Pass', '', '0'].map((grade, i) => ({
         courseId: `c${i}`,
@@ -125,9 +137,11 @@ describe('PU / NCHU grade adapter contracts', () => {
       failedCount: 1,
       ungradedCount: 1,
     });
+    // 數值 0 缺績點 → 不可用（不捏造）
+    expect(computeReferenceGpa(nchu)).toBeNull();
   });
 
-  test('mapPuOfficialGrades binds schoolId + source, sets gradePoint, omits publishedAt', () => {
+  test('mapPuOfficialGrades binds schoolId + source, 4.3 local GP, omits publishedAt', () => {
     const rows = mapPuOfficialGrades(
       [
         {
@@ -139,6 +153,8 @@ describe('PU / NCHU grade adapter contracts', () => {
           credits: 3,
           score: 92,
         },
+        { semester: '1122', courseName: '微積分', credits: 3, score: 85 },
+        { semester: '1122', courseName: '英文', credits: 2, score: 59 },
       ],
       {
         studentId: '410000001',
@@ -147,7 +163,7 @@ describe('PU / NCHU grade adapter contracts', () => {
       },
     );
 
-    expect(rows).toHaveLength(1);
+    expect(rows).toHaveLength(3);
     expect(rows[0]).toMatchObject({
       userId: '410000001',
       schoolId: 'tw-pu',
@@ -156,11 +172,25 @@ describe('PU / NCHU grade adapter contracts', () => {
       credits: 3,
       score: 92,
       grade: 92,
-      gradePoint: puScoreToGradePoint(92),
+      gradePoint: 4.3,
+      gradePointScale: 4.3,
+      gradePointProvenance: 'local-reference',
       semester: '1122',
     });
+    expect(puScoreToGradePoint(92)).toBe(4.3);
+    expect(rows[1]).toMatchObject({
+      score: 85,
+      gradePoint: 4.0,
+      gradePointScale: 4.3,
+      gradePointProvenance: 'local-reference',
+    });
+    expect(rows[2]).toMatchObject({
+      score: 59,
+      gradePoint: 1.3,
+      gradePointScale: 4.3,
+    });
     expect(rows[0].publishedAt).toBeUndefined();
-    expect(filterScopedGrades(rows, '410000001', 'pu')).toHaveLength(1);
+    expect(filterScopedGrades(rows, '410000001', 'pu')).toHaveLength(3);
   });
 
   test('mapPuOfficialGrades offline provenance stays distinct from fresh school update', () => {
