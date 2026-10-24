@@ -35,8 +35,28 @@ beforeEach(() => {
 it('requests only the record kind and preserves source text grades', async () => {
   const result = await loadAcademicRecords('grades', 'student-a');
   expect(call).toHaveBeenCalledWith({ dataType: 'grades' });
+  expect(call.mock.calls[0]?.[0]).toEqual({ dataType: 'grades' });
   expect(result.records.grades[0].score).toBe('Pass');
   expect(result.ownerUid).toBe('student-a');
+  expect(result.schoolId).toBe('pu');
+});
+it('accepts an explicit Providence expected school without sending it to the callable', async () => {
+  const result = await loadAcademicRecords('grades', 'student-a', 'pu');
+  expect(call).toHaveBeenCalledTimes(1);
+  expect(call).toHaveBeenCalledWith({ dataType: 'grades' });
+  expect(result.schoolId).toBe('pu');
+});
+it('rejects an unsupported expected school before calling the network', async () => {
+  await expect(loadAcademicRecords('grades', 'student-a', 'nthu')).rejects.toMatchObject({
+    reason: 'unavailable',
+  });
+  await expect(loadAcademicRecords('grades', 'student-a', 'all')).rejects.toMatchObject({
+    reason: 'unavailable',
+  });
+  await expect(loadAcademicRecords('grades', 'student-a', 'tw-pu')).rejects.toMatchObject({
+    reason: 'unavailable',
+  });
+  expect(call).not.toHaveBeenCalled();
 });
 it.each([
   { ownerUid: 'student-b' },

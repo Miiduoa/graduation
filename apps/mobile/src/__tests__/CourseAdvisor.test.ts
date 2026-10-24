@@ -80,7 +80,7 @@ test('loads genuine catalog records and preserves source/time', async () => {
   await expect(loadAdvisorCatalog('pu', '1151', ' 資料 ', signal)).resolves.toEqual(catalog);
   expect(queryCatalog).toHaveBeenCalledWith(
     { semester: '1151', keyword: '資料' },
-    { signal, limit: 200 },
+    { signal, limit: 200, schoolId: 'pu' },
   );
 });
 test.each([

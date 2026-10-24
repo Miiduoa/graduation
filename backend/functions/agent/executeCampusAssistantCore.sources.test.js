@@ -111,9 +111,33 @@ test.each([
     }
     expect(mockReads.every((read) => read.path.startsWith('schools/pu/'))).toBe(true);
     expect(modelInput.messages.at(-1)).toEqual({ role: 'user', content: '查詢校園公開資料' });
-    expect(mockWebSearch).toHaveBeenCalledWith('查詢校園公開資料');
+    expect(mockWebSearch).toHaveBeenCalledWith('查詢校園公開資料', { schoolId: 'pu' });
   },
 );
+
+test('web search fallback forwards the selected authorized schoolId', async () => {
+  mockWebSearch.mockResolvedValueOnce({
+    content: 'NTU 路線摘要',
+    sources: [{ title: 'Maps', url: 'https://maps.example', snippet: 'route', source: 'Google Maps' }],
+    confidence: 'medium',
+    suggestions: ['看來源'],
+  });
+  const result = await executeCampusAssistantCore({
+    request: {
+      auth: null,
+      data: {
+        messages: [{ role: 'user', content: '怎麼去火車站？' }],
+        context: { schoolId: 'ntu' },
+      },
+    },
+    runId: 'school-web-forward',
+    startedAt: Date.now(),
+    routingIntent: 'general',
+  });
+  expect(mockWebSearch).toHaveBeenCalledWith('怎麼去火車站？', { schoolId: 'ntu' });
+  expect(result.content).toContain('NTU 路線摘要');
+  expect(result.debug.route).toBe('agent_web_search');
+});
 
 test('an authenticated profile fixes the school context before any campus read', async () => {
   mockDocuments.set('users/alice', {
@@ -576,7 +600,7 @@ test('the actual callable accepts the 4000-character Web question and preserves 
   expect(content).toHaveLength(4000);
   expect(result.run.status).toBe('completed');
   expect(mockModel.mock.calls[0][0].messages.at(-1)).toEqual({ role: 'user', content });
-  expect(mockWebSearch).toHaveBeenCalledWith(content.slice(0, 500));
+  expect(mockWebSearch).toHaveBeenCalledWith(content.slice(0, 500), { schoolId: 'pu' });
 });
 
 describe('線上點餐關著時，助理不會留下訂單或下單按鈕', () => {

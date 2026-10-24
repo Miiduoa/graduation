@@ -60,10 +60,30 @@ afterEach(() => {
 });
 
 jest.unmock('@react-navigation/native');
-jest.mock('../state/theme', () => ({ useThemeMode: () => ({ themeMode: 'light' }) }));
+jest.mock('../state/theme', () => ({
+  useThemeMode: () => ({ themeMode: 'light', mode: 'light', theme: require('../ui/theme').getCurrentTheme() }),
+  useTheme: () => require('../ui/theme').getCurrentTheme(),
+}));
 jest.mock('../state/nuniSession', () => ({
   useNuniSession: () => ({ session: null, loading: false, error: '', pendingLogout: false }),
 }));
+jest.mock('../state/schedule', () => ({
+  useSchedule: () => ({
+    courses: [],
+    addCourse: jest.fn(),
+    removeCourse: jest.fn(),
+    updateCourse: jest.fn(),
+  }),
+}));
+jest.mock('../ui/navigationTheme', () => {
+  const actual = jest.requireActual('../ui/navigationTheme');
+  return {
+    ...actual,
+    useTabBarContentBottomPadding: () => 80,
+    TAB_BAR_CONTENT_BOTTOM_PADDING: 80,
+  };
+});
+jest.mock('@expo/vector-icons', () => ({ Ionicons: () => null }));
 jest.mock('../screens/NuniWorkspaceScreen', () => ({
   NuniWorkspaceScreen: () => {
     const { Text } = require('react-native');

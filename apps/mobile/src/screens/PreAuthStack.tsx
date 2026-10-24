@@ -11,11 +11,41 @@ import { SSOLoginScreen } from './SSOLoginScreen';
 import { NuniWorkspaceScreen } from './NuniWorkspaceScreen';
 import PersonalImportScreen from './PersonalImportScreen';
 import PersonalTimetableScreen from './PersonalTimetableScreen';
+import { CourseCatalogScreen } from './CourseCatalogScreen';
+import { HealthScreen } from './HealthScreen';
+import { UnavailableFeatureScreen, type ServiceScreenProps } from './UnavailableFeatureScreen';
 import type { PreAuthStackParamList } from './preAuthTypes';
 import { createStackScreenOptions } from '../ui/navigationTheme';
 import { useThemeMode } from '../state/theme';
 
 const Stack = createNativeStackNavigator<PreAuthStackParamList, undefined>();
+
+/** Public guest stack may only deep-link into registered PreAuth routes. */
+const PUBLIC_UNAVAILABLE_ACTIONS = [{ label: '查看校方公告', route: '公告總覽' }];
+
+/**
+ * Preserve route.name for schoolPublicServices resolvers; override default
+ * UnavailableFeatureScreen actions that point at unregistered private / activity routes.
+ */
+function PublicDormitoryScreen(props: ServiceScreenProps) {
+  return (
+    <UnavailableFeatureScreen
+      {...props}
+      route={{ ...props.route, name: 'Dormitory' }}
+      actions={PUBLIC_UNAVAILABLE_ACTIONS}
+    />
+  );
+}
+
+function PublicCareerScreen(props: ServiceScreenProps) {
+  return (
+    <UnavailableFeatureScreen
+      {...props}
+      route={{ ...props.route, name: 'Career' }}
+      actions={PUBLIC_UNAVAILABLE_ACTIONS}
+    />
+  );
+}
 
 /**
  * 平台帳號與學校帳號各自驗證，與 MeStack 共用同一入口。
@@ -51,6 +81,26 @@ export function PreAuthStack() {
         name="公告詳情"
         component={CampusAnnouncementDetailScreen}
         options={{ headerShown: false }}
+      />
+      <Stack.Screen
+        name="CourseCatalog"
+        component={CourseCatalogScreen}
+        options={{ title: '課綱查詢' }}
+      />
+      <Stack.Screen
+        name="Health"
+        component={HealthScreen}
+        options={{ headerShown: false, title: '校園健康' }}
+      />
+      <Stack.Screen
+        name="Dormitory"
+        component={PublicDormitoryScreen}
+        options={{ headerShown: false, title: '宿舍服務' }}
+      />
+      <Stack.Screen
+        name="Career"
+        component={PublicCareerScreen}
+        options={{ headerShown: false, title: '職涯' }}
       />
       <Stack.Screen name="SSOLogin" component={SSOLoginScreen} options={{ title: '學校登入' }} />
       <Stack.Screen name="PersonalImport" component={PersonalImportScreen} options={{ title: '匯入我的資料' }} />

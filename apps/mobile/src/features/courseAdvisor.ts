@@ -1,5 +1,9 @@
 import { httpsCallable } from 'firebase/functions';
 import { doc, getDocFromServer } from 'firebase/firestore';
+import {
+  resolveCourseCatalogCapability,
+  resolveOfficialCourseQueryLink,
+} from '@campus/shared/src';
 import { getAuthInstance, getDb, getFunctionsInstance, isFirebaseMockMode } from '../firebase';
 import { getCourseSpace } from '../data/courseSpaceSource';
 import {
@@ -8,7 +12,9 @@ import {
   type CatalogQueryResult,
 } from '../services/courseCatalogClient';
 
-export const OFFICIAL_CATALOG_URL = 'https://mypu.pu.edu.tw/Framework/Academic/CourseCatalogSys/';
+export const OFFICIAL_CATALOG_URL =
+  resolveOfficialCourseQueryLink('pu')?.url ??
+  'https://mypu.pu.edu.tw/Framework/Academic/CourseCatalogSys/';
 export type AdvisorScope = { userId: string; schoolId: string; groupId?: string };
 export type AdvisorMessage = { role: 'user' | 'assistant'; content: string };
 export class AdvisorError extends Error {}
@@ -47,11 +53,13 @@ export async function loadAdvisorCatalog(
   keyword: string,
   signal: AbortSignal,
 ): Promise<CatalogQueryResult> {
-  if (schoolId !== 'pu') throw new AdvisorError('這所學校的課程查詢尚未開放。');
+  if (!resolveCourseCatalogCapability(schoolId)) {
+    throw new AdvisorError('這所學校的課程查詢尚未開放。');
+  }
   if (!/^\d{3}[1-4]$/.test(semester)) throw new AdvisorError('請輸入學期代碼，例如 1151。');
   const result = await queryCatalog(
     { semester, keyword: keyword.trim() || undefined },
-    { signal, limit: 200 },
+    { signal, limit: 200, schoolId },
   );
   if (signal.aborted) throw new AdvisorError('查詢已取消。');
   if (result.error || !['live', 'cache'].includes(result.source)) {
