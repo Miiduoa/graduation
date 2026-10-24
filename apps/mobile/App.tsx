@@ -182,6 +182,7 @@ const linkingBase: LinkingOptions<RootTabParamList> = {
           Ordering: 'ordering/:menuId',
           MenuSubscription: 'menu-subscription',
           Library: 'library',
+          SchoolInfo: 'school-info',
           Health: 'health',
           Dormitory: 'dormitory',
           PrintService: 'print',

@@ -17,6 +17,7 @@ import PoiDetailAiFirstScreen from './PoiDetailAiFirstScreen';
 import BusAiFirstScreen from './BusAiFirstScreen';
 import MenuDetailAiFirstScreen from './MenuDetailAiFirstScreen';
 import LibraryAiFirstScreen from './LibraryAiFirstScreen';
+import SchoolInfoScreen from './SchoolInfoScreen';
 import { OrderingScreen } from './OrderingScreen';
 import { MenuSubscriptionScreen } from './MenuSubscriptionScreen';
 import { LibraryCatalogScreen } from './LibraryCatalogScreen';
@@ -148,6 +149,11 @@ export function MapStack() {
         name="Library"
         component={LibraryAiFirstScreen}
         options={{ title: '圖書館', headerShown: false }}
+      />
+      <Stack.Screen
+        name="SchoolInfo"
+        component={SchoolInfoScreen}
+        options={{ title: '學校資訊', headerShown: false }}
       />
       <Stack.Screen
         name="Clubs"
