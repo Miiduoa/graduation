@@ -4,6 +4,7 @@ import {
   type TransitCity, type TransitFailure, type TransitQuery, type TransitResult, type TransitRoute, type TransitStop,
 } from './transit';
 import { catalogProvidenceLaneDestination, searchTaichungCatalog } from './transit-catalog';
+import { buildDirectPlan, isDirectQueryText } from './transit-direct';
 
 const BASE = 'https://tdx.transportdata.tw';
 const text = (value: unknown) => typeof value === 'string' ? value.trim().slice(0, 120) : '';
@@ -19,6 +20,12 @@ export function validateTransitQuery(value: unknown): TransitQuery {
     return { action: 'campus', schoolId: value.schoolId };
   if (value.action === 'campus-next' && typeof value.schoolId === 'string' && Object.hasOwn(CAMPUS_NEXT, value.schoolId))
     return { action: 'campus-next', schoolId: value.schoolId };
+  if (value.action === 'direct' && value.schoolId === 'pu' && typeof value.destination === 'string' && isDirectQueryText(value.destination)) {
+    const origin = isPosition(value) ? { lat: value.lat, lon: value.lon } : null;
+    return origin
+      ? { action: 'direct', schoolId: 'pu', destination: value.destination.trim(), lat: origin.lat, lon: origin.lon }
+      : { action: 'direct', schoolId: 'pu', destination: value.destination.trim() };
+  }
   if (!isCity(value.city)) throw new TransitError('invalid-query');
   if (value.action === 'nearby' && isPosition(value) && typeof value.radius === 'number' && [300, 600, 1000].includes(value.radius))
     return { action: 'nearby', city: value.city, lat: value.lat, lon: value.lon, radius: value.radius };
@@ -228,6 +235,13 @@ function routeStopsQuery(city: TransitCity, routeUid: string): [string, URLSearc
   params.set('$filter', `RouteUID eq ${literal(routeUid)}`);
   return [`StopOfRoute/City/${city}`, params];
 }
+function campusNextArrivalQuery(spec: (typeof CAMPUS_NEXT)[keyof typeof CAMPUS_NEXT]): [string, URLSearchParams] {
+  const params = new URLSearchParams({ '$format': 'JSON', '$top': '200' });
+  const routeFilter = spec.routes.map((route) => `RouteUID eq ${literal(route.routeUid)}`).join(' or ');
+  // 專用道只查靜宜大學(專用道)，不可用全市 contains「專用道」（會抓到市政府、秋紅谷、科博館）。
+  params.set('$filter', `contains(StopName/Zh_tw,${literal(spec.stopName)}) and ((${routeFilter}) or contains(StopName/Zh_tw,'專用道'))`);
+  return [`EstimatedTimeOfArrival/City/${spec.city}`, params];
+}
 /** 同時對 TDX 的請求上限；超過時短暫排隊，而不是立刻回忙碌。 */
 const MAX_RUNNING = 4;
 const SLOT_WAIT_MS = 3_000;
@@ -396,13 +410,75 @@ export function createTransitService(options: {
     })();
   }
 
+  async function loadCampusLive(spec: (typeof CAMPUS_NEXT)[keyof typeof CAMPUS_NEXT]) {
+    const [path, params] = campusNextArrivalQuery(spec);
+    const eta = await query(path, params, 15_000);
+    const fetchUids = new Set(spec.routes.map((route) => route.routeUid));
+    const cachedUids = spec.city === PROVIDENCE_PRELOAD_ROUTES.city ? PROVIDENCE_PRELOAD_ROUTES.routeUids : [];
+    const fetched = await loadRouteSequences(spec.city, fetchUids, true);
+    const cached = await loadRouteSequences(spec.city, cachedUids, false);
+    const destinations = new Map([...cached.destinations, ...fetched.destinations]);
+    const sequences = [...cached.sequences, ...fetched.sequences];
+    return {
+      arrivals: normalizeTransitArrivals(eta.rows, null, destinations, sequences),
+      sequences,
+      fetchedAt: eta.stale ? eta.fetchedAt : now(),
+      stale: eta.stale,
+    };
+  }
+
   return async function execute(value: unknown): Promise<TransitResult> {
     try {
       startPreload();
       const input = validateTransitQuery(value);
+      if (input.action === 'direct') {
+        const credentials = options.credentials();
+        const origin = input.lat !== undefined && input.lon !== undefined ? { lat: input.lat, lon: input.lon } : null;
+        let arrivals: TransitArrival[] = [];
+        let sequences: RouteStopSequence[] = [];
+        let fetchedAt = now();
+        let stale = false;
+        if (credentials.clientId !== undefined || credentials.clientSecret !== undefined) {
+          const live = await loadCampusLive(CAMPUS_NEXT.pu);
+          arrivals = live.arrivals;
+          sequences = live.sequences;
+          fetchedAt = live.fetchedAt;
+          stale = live.stale;
+        }
+        const plan = buildDirectPlan({
+          query: input.destination,
+          origin,
+          sequences,
+          arrivals,
+          now: fetchedAt,
+        });
+        return {
+          status: 'ready',
+          kind: 'direct',
+          destination: plan.destination && {
+            query: plan.destination.query,
+            label: plan.destination.label,
+            kind: plan.destination.kind,
+            lat: plan.destination.lat,
+            lon: plan.destination.lon,
+          },
+          origin: plan.origin,
+          trips: plan.trips.map((trip) => ({
+            route: trip.route,
+            boardStopName: trip.boardStopName,
+            alightStopName: trip.alightStopName,
+            walkMeters: trip.walkMeters,
+            walkMinutes: trip.walkMinutes,
+            arrival: trip.arrival,
+          })),
+          googleMapsUrl: plan.googleMapsUrl,
+          fetchedAt: new Date(fetchedAt).toISOString(),
+          ...(stale ? { stale: true as const } : {}),
+        };
+      }
       const campus = input.action === 'campus' ? CAMPUS_TRANSIT[input.schoolId] : null;
       const campusNext = input.action === 'campus-next' && hasCampusNext(input.schoolId) ? CAMPUS_NEXT[input.schoolId] : null;
-      const city = campus ? campus.city : campusNext ? campusNext.city : (input as Exclude<TransitQuery, { action: 'campus' | 'campus-next' }>).city;
+      const city = campus ? campus.city : campusNext ? campusNext.city : (input as Exclude<TransitQuery, { action: 'campus' | 'campus-next' | 'direct' }>).city;
       // Catalog IDs identify static source records, never TDX StopUIDs. In
       // particular, an old App must not receive made-up or mismatched arrivals.
       if (input.action === 'arrivals' && input.stopId.startsWith('TCOD_'))
@@ -418,14 +494,15 @@ export function createTransitService(options: {
       const params = new URLSearchParams({ '$format': 'JSON', '$top': '200' });
       if (input.action === 'arrivals' || input.action === 'campus-next') {
         const stopId = input.action === 'arrivals' ? input.stopId : null;
-        if (input.action === 'arrivals') {
-          params.set('$filter', `StopUID eq ${literal(input.stopId)}`);
-        } else {
+        if (input.action === 'campus-next') {
           if (!campusNext) throw new TransitError('invalid-query');
-          const routeFilter = campusNext.routes.map((route) => `RouteUID eq ${literal(route.routeUid)}`).join(' or ');
-          // 專用道只查靜宜大學(專用道)，不可用全市 contains「專用道」（會抓到市政府、秋紅谷、科博館）。
-          params.set('$filter', `contains(StopName/Zh_tw,${literal(campusNext.stopName)}) and ((${routeFilter}) or contains(StopName/Zh_tw,'專用道'))`);
+          const live = await loadCampusLive(campusNext);
+          const routeStops = compactCampusRouteStops(live.sequences);
+          return { status: 'ready', kind: 'arrivals', arrivals: live.arrivals,
+            fetchedAt: new Date(live.fetchedAt).toISOString(), ...(live.stale ? { stale: true as const } : {}),
+            ...(routeStops.length ? { routeStops } : {}) };
         }
+        params.set('$filter', `StopUID eq ${literal(input.stopId)}`);
         const eta = await query(`EstimatedTimeOfArrival/City/${city}`, params, 15_000);
         const rows = eta.rows;
         // 到站沒給終點時才向 TDX 補站序；靜宜四條預載路線可再用已在快取的站序改寫離開校園後的方向。
@@ -438,20 +515,14 @@ export function createTransitService(options: {
           missing.add(routeUid);
           if (missing.size >= 8) break;
         }
-        const fetchUids = campusNext
-          ? new Set(campusNext.routes.map((route) => route.routeUid))
-          : missing;
         const cachedUids = city === PROVIDENCE_PRELOAD_ROUTES.city ? PROVIDENCE_PRELOAD_ROUTES.routeUids : [];
-        const fetched = await loadRouteSequences(city, fetchUids, true);
+        const fetched = await loadRouteSequences(city, missing, true);
         const cached = await loadRouteSequences(city, cachedUids, false);
         const destinations = new Map([...cached.destinations, ...fetched.destinations]);
         const sequences = [...cached.sequences, ...fetched.sequences];
         // 保留資料的 fetchedAt 是當時真正向 TDX 取得的時間；倒數仍依每筆來源時間，逾 90 秒不顯示。
-        // 站序已為終點補查載入，這裡只附上校園附近一小段給畫面畫站牌線，不再向 TDX 多打一次。
-        const routeStops = input.action === 'campus-next' ? compactCampusRouteStops(sequences) : [];
         return { status: 'ready', kind: 'arrivals', arrivals: normalizeTransitArrivals(rows, stopId, destinations, sequences),
-          fetchedAt: new Date(eta.stale ? eta.fetchedAt : now()).toISOString(), ...(eta.stale ? { stale: true as const } : {}),
-          ...(routeStops.length ? { routeStops } : {}) };
+          fetchedAt: new Date(eta.stale ? eta.fetchedAt : now()).toISOString(), ...(eta.stale ? { stale: true as const } : {}) };
       }
       if (input.action === 'nearby') {
         // Round only the cache centre; pad the query and filter exact distances afterward.
