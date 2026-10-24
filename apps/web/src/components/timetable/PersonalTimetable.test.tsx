@@ -315,6 +315,15 @@ describe('timetable share feedback', () => {
     expect(screen.getByText(shareCopiedCopy('2026-10-13T00:00:00Z'))).toBeTruthy();
   });
 
+  it('does not tell a signed-in account that sharing is still disconnected', async () => {
+    await ready();
+    expect(screen.getByRole('button', { name: '複製分享連結' })).toBeTruthy();
+    expect(screen.queryByText(/登入學校帳號後就能分享課表連結/)).toBeNull();
+    expect(screen.queryByText(/網站的學校帳號登入還沒開放/)).toBeNull();
+    expect(screen.queryByText(/這個功能還沒接通。分享連結/)).toBeNull();
+    expect(screen.queryByRole('link', { name: '登入學校帳號' })).toBeNull();
+  });
+
   it('does not copy an old account link after switching accounts', async () => {
     const pending = deferred<{ path: string; expiresAt: string }>();
     mocks.share.mockReturnValueOnce(pending.promise);
