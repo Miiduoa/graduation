@@ -10,6 +10,11 @@ import type {
 } from '@campus/shared/src/nuni';
 import { nuniErrorMessage } from '@campus/shared/src/nuni';
 import { formatTaipeiDateTime } from '@campus/shared/src/taipeiTime';
+import {
+  loadCourseMaterialsPage,
+  restartCourseMaterialsPage,
+  type CourseMaterialPageProgress,
+} from '@/lib/courseMaterials';
 import { MutationForm, useClasses } from './CourseUI';
 import { buildCourseOutline, courseActivityStatus, courseTaskTotals } from './courseOutline';
 import shared from './NuniApp.module.css';
@@ -37,17 +42,39 @@ export function CourseLearningPath({
   const classes = useClasses();
   const courseApi = useRef(classes);
   const [materials, setMaterials] = useState<NuniMaterial[] | null>(null);
+  const [materialsProgress, setMaterialsProgress] = useState<CourseMaterialPageProgress<NuniMaterial> | null>(
+    null,
+  );
   const [quizzes, setQuizzes] = useState<NuniQuiz[] | null>(null);
   const [error, setError] = useState('');
   const [reading, setReading] = useState(true);
+  const [loadingMoreMaterials, setLoadingMoreMaterials] = useState(false);
   const [epoch, setEpoch] = useState(0);
   const [now, setNow] = useState(() => Date.now());
   const request = useRef(0);
+  const moreRequest = useRef(0);
+  const materialsProgressRef = useRef<CourseMaterialPageProgress<NuniMaterial> | null>(null);
   const teacher = workspace.memberRole !== 'student';
-  const complete = units !== null && materials !== null && quizzes !== null;
+  const materialsComplete = materialsProgress?.complete === true;
+  const materialsDenied = materialsProgress?.denied === true;
+  const materialsNeedRestart = materialsProgress?.needsRestart === true;
+  const quizzesLimited = (quizzes?.length ?? 0) >= 100;
+  const materialsIncomplete =
+    materials !== null &&
+    !materialsDenied &&
+    (!materialsComplete || !!materialsProgress?.error || materialsNeedRestart);
+  const complete = units !== null && materials !== null && quizzes !== null && !materialsDenied;
   const groups = buildCourseOutline(units ?? [], materials ?? [], assignments, quizzes ?? []);
   const overall = courseTaskTotals(assignments, quizzes ?? [], now);
-  const hasLimitedResult = (materials?.length ?? 0) >= 100 || (quizzes?.length ?? 0) >= 100;
+  const canClaimTaskMetrics = complete && !quizzesLimited;
+
+  useEffect(() => {
+    courseApi.current = classes;
+  });
+
+  useEffect(() => {
+    materialsProgressRef.current = materialsProgress;
+  }, [materialsProgress]);
 
   useEffect(() => {
     const tick = setInterval(() => setNow(Date.now()), 60000);
@@ -57,19 +84,37 @@ export function CourseLearningPath({
   useEffect(() => {
     let active = true;
     const sequence = ++request.current;
+    moreRequest.current += 1;
+    // Reset and reload when the course, refresh token, or explicit retry epoch changes.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setReading(true);
     setError('');
     setMaterials(null);
+    setMaterialsProgress(null);
     setQuizzes(null);
+    setLoadingMoreMaterials(false);
+    const fence = { cancelled: () => !active || request.current !== sequence };
     void Promise.allSettled([
-      courseApi.current.materials(workspace.id),
+      loadCourseMaterialsPage(courseApi.current, workspace.id, null, fence),
       courseApi.current.quizzes(workspace.id),
     ]).then(([materialsResult, quizzesResult]) => {
-      if (!active || request.current !== sequence) return;
-      if (materialsResult.status === 'fulfilled') setMaterials(materialsResult.value);
+      if (fence.cancelled()) return;
+      if (materialsResult.status === 'fulfilled') {
+        const value = materialsResult.value;
+        if (value !== 'cancelled') {
+          setMaterialsProgress(value);
+          setMaterials(value.denied ? null : value.items);
+        }
+      }
       if (quizzesResult.status === 'fulfilled') setQuizzes(quizzesResult.value);
       const messages = [
-        materialsResult.status === 'rejected' ? `教材：${nuniErrorMessage(materialsResult.reason)}` : '',
+        materialsResult.status === 'rejected'
+          ? `教材：${nuniErrorMessage(materialsResult.reason)}`
+          : materialsResult.status === 'fulfilled' &&
+              materialsResult.value !== 'cancelled' &&
+              materialsResult.value.denied
+            ? '教材：目前沒有這門課的教材權限。'
+            : '',
         quizzesResult.status === 'rejected' ? `測驗：${nuniErrorMessage(quizzesResult.reason)}` : '',
       ].filter(Boolean);
       setError(messages.join(' '));
@@ -79,6 +124,57 @@ export function CourseLearningPath({
       active = false;
     };
   }, [workspace.id, epoch, refreshVersion]);
+
+  async function loadMoreMaterials() {
+    const current = materialsProgressRef.current;
+    if (!current || reading || loadingMoreMaterials || current.denied || current.needsRestart) return;
+    if (!current.nextCursor) return;
+    const sequence = request.current;
+    const token = ++moreRequest.current;
+    setLoadingMoreMaterials(true);
+    const fence = {
+      cancelled: () => request.current !== sequence || moreRequest.current !== token,
+    };
+    const result = await loadCourseMaterialsPage(
+      courseApi.current,
+      workspace.id,
+      { ...current, error: null },
+      fence,
+    );
+    if (fence.cancelled() || result === 'cancelled') return;
+    setMaterialsProgress(result);
+    setMaterials(result.denied ? null : result.items);
+    if (result.denied) {
+      setError('教材：目前沒有這門課的教材權限。');
+    }
+    setLoadingMoreMaterials(false);
+  }
+
+  async function restartMaterials() {
+    const current = materialsProgressRef.current;
+    if (!current || reading || loadingMoreMaterials || current.denied || !current.needsRestart) {
+      return;
+    }
+    const sequence = request.current;
+    const token = ++moreRequest.current;
+    setLoadingMoreMaterials(true);
+    const fence = {
+      cancelled: () => request.current !== sequence || moreRequest.current !== token,
+    };
+    const result = await restartCourseMaterialsPage(
+      courseApi.current,
+      workspace.id,
+      current,
+      fence,
+    );
+    if (fence.cancelled() || result === 'cancelled') return;
+    setMaterialsProgress(result);
+    setMaterials(result.denied ? null : result.items);
+    if (result.denied) {
+      setError('教材：目前沒有這門課的教材權限。');
+    }
+    setLoadingMoreMaterials(false);
+  }
 
   return (
     <section className={styles.root} aria-label="學習路徑">
@@ -92,7 +188,7 @@ export function CourseLearningPath({
           {reading ? '整理中…' : '更新章節內容'}
         </button>
       </div>
-      {!teacher && complete && (
+      {!teacher && canClaimTaskMetrics && (
         <div className={styles.summary} role="status">
           <div><strong>{overall.pending}</strong><span>可處理的待辦</span></div>
           <div><strong>{overall.completed} / {overall.assigned}</strong><span>已繳交或作答</span></div>
@@ -112,7 +208,18 @@ export function CourseLearningPath({
       {error && <p className={shared.notice} role="alert">{error} 可再次更新，尚未取得的內容不計入進度。</p>}
       {reading && <p role="status">正在核對教材與測驗…</p>}
       {!complete && !reading && <p className={styles.context}>部分資料尚未取得，以下只顯示已確認的內容，不推算整門課的完成比例。</p>}
-      {hasLimitedResult && <p className={styles.context}>教材或測驗已達目前 API 的 100 筆顯示上限，清單和進度可能不完整。</p>}
+      {quizzesLimited && (
+        <p className={styles.context}>
+          測驗已達目前 API 的 100 筆顯示上限，清單和繳交／作答進度可能不完整。
+        </p>
+      )}
+      {materialsIncomplete && materials && (
+        <p className={styles.context}>
+          教材尚有較早頁面未載入（目前已確認 {materials.length} 則）
+          {materialsProgress?.error ? `：${materialsProgress.error}` : ''}
+          ，章節內教材筆數可能不完整。
+        </p>
+      )}
       {complete && groups.length === 1 && groups[0].id === null && !groups[0].materials.length && !groups[0].assignments.length && !groups[0].quizzes.length && (
         <p className={styles.context}>這門課尚未有教材、作業或測驗。老師可先建立章節再發布內容。</p>
       )}
@@ -127,9 +234,15 @@ export function CourseLearningPath({
                   <p className={styles.sequence}>{section.id ? `章節 ${index + 1}` : '未分章節'}</p>
                   <h3 id={`outline-unit-${index}`}>{section.title}</h3>
                 </div>
-                <span className={styles.unitCount}>{section.materials.length} 教材 · {section.assignments.length} 作業 · {section.quizzes.length} 測驗</span>
+                <span className={styles.unitCount}>
+                  {section.materials.length} 教材
+                  {materialsIncomplete ? '（尚未載完）' : ''}
+                  {' · '}
+                  {section.assignments.length} 作業 · {section.quizzes.length} 測驗
+                  {quizzesLimited ? '（測驗可能未齊）' : ''}
+                </span>
               </div>
-              {!teacher && complete && totals.assigned > 0 && (
+              {!teacher && canClaimTaskMetrics && totals.assigned > 0 && (
                 <p className={styles.progressText}>已完成 {totals.completed} / {totals.assigned} 項繳交或作答 · 待辦 {totals.pending} 項</p>
               )}
               {section.missingUnit && <p className={styles.context}>部分內容原本所屬的章節已無法核對，暫時集中顯示於此，未變更任何原始資料。</p>}
@@ -158,6 +271,33 @@ export function CourseLearningPath({
           );
         })}
       </div>
+      {materials && !materialsDenied && materialsNeedRestart && (
+        <button
+          type="button"
+          className={`${shared.button} ${shared.secondary}`}
+          disabled={loadingMoreMaterials || reading}
+          onClick={() => void restartMaterials()}
+        >
+          {loadingMoreMaterials ? '重新讀取教材中…' : '重新讀取教材'}
+        </button>
+      )}
+      {materials &&
+        !materialsDenied &&
+        !materialsNeedRestart &&
+        (materialsProgress?.nextCursor || materialsProgress?.error) && (
+        <button
+          type="button"
+          className={`${shared.button} ${shared.secondary}`}
+          disabled={loadingMoreMaterials || reading}
+          onClick={() => void loadMoreMaterials()}
+        >
+          {loadingMoreMaterials
+            ? '載入較早教材中…'
+            : materialsProgress?.error
+              ? '重試載入較早教材'
+              : '繼續載入較早教材'}
+        </button>
+      )}
       {teacher && workspace.state === 'active' && units !== null && (
         <details className={`${shared.panel} ${shared.compose}`}>
           <summary>建立新章節</summary>

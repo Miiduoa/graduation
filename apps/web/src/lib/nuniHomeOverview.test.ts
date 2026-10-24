@@ -441,3 +441,28 @@ it('retries only materials and does not request assignments or quizzes', async (
     `class-workspaces/${studentId}/materials`,
   ]);
 });
+it('keeps a legacy-100 home feed but does not seed search as complete for that course', async () => {
+  const items = Array.from({ length: 100 }, (_, index) => ({
+    id: `cwm_00000000-0000-4000-8000-${String(index).padStart(12, '0')}`,
+    workspaceId: studentId,
+    title: `講義 ${index + 1}`,
+    body: 'https://example.test/week.pdf',
+    unitId: null,
+    unitTitle: null,
+    createdByPlatformAccountId: accountId,
+    createdAt: new Date().toISOString(),
+  }));
+  transport.mockImplementation(async (path: string) => {
+    if (path.endsWith('/materials')) return { materials: items };
+    throw new Error(`Unexpected ${path}`);
+  });
+  const result = await loadNuniHomeMaterials(transport, accountId, [
+    { id: studentId, name: '資料庫', role: 'student', unreadCount: 0 },
+  ]);
+  expect(result.materials.length).toBeGreaterThan(0);
+  expect(result.materialSearchSeed).toEqual({
+    items: [],
+    courseIds: [],
+    truncated: true,
+  });
+});

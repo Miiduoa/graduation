@@ -1,14 +1,15 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, expect, it, vi } from 'vitest';
 import type { NuniAssignment, NuniUnit, NuniWorkspace } from '@campus/shared/src/nuni';
+import { NuniError } from '@campus/shared/src/nuni';
 import { CourseLearningPath } from './CourseLearningPath';
 
-const state = vi.hoisted(() => ({ request: vi.fn(), refresh: vi.fn() }));
+const state = vi.hoisted(() => ({ request: vi.fn(), refresh: vi.fn(), context: 'a'.repeat(43) }));
 vi.mock('./Session', () => ({
   browserRequest: (...args: unknown[]) => state.request(...args),
   useNuniSession: () => ({
     session: {
-      context: 'a'.repeat(43),
+      context: state.context,
       platformAccountId: 'pa_11111111-1111-4111-8111-111111111111',
     },
     refresh: state.refresh,
@@ -48,11 +49,18 @@ const material = {
   createdByPlatformAccountId: 'pa_11111111-1111-4111-8111-111111111111',
   createdAt: '2026-10-10T00:00:00Z',
 };
+const olderMaterial = {
+  ...material,
+  id: 'cwm_55555555-5555-4555-8555-555555555555',
+  title: '更早的課前閱讀',
+  createdAt: '2026-09-01T00:00:00Z',
+};
 
 beforeEach(() => {
   vi.clearAllMocks();
+  state.context = 'a'.repeat(43);
   state.request.mockImplementation(async (path: string) => {
-    if (path.endsWith('/materials')) return { materials: [material] };
+    if (path.endsWith('/materials/page')) return { materials: [material], nextCursor: null };
     if (path.endsWith('/quizzes')) return { quizzes: [] };
     throw new Error('Unexpected request: ' + path);
   });
@@ -87,7 +95,7 @@ it('organizes real lessons by unit, shows receipt-based pending work and links t
 it('creates a unit using the authenticated course API and only reports success after a receipt', async () => {
   const onUnitCreated = vi.fn();
   state.request.mockImplementation(async (path: string, context: string, input?: Record<string, unknown>) => {
-    if (path.endsWith('/materials')) return { materials: [] };
+    if (path.endsWith('/materials/page')) return { materials: [], nextCursor: null };
     if (path.endsWith('/quizzes')) return { quizzes: [] };
     if (path.endsWith('/units') && input?.title) return { ...unit, title: input.title };
     throw new Error('Unexpected request: ' + path);
@@ -130,4 +138,248 @@ it('does not invent completion metrics when unit or activity API reads are missi
   expect(screen.getByRole('link', { name: /關聯式模型練習/ })).toBeTruthy();
   fireEvent.click(screen.getByRole('button', { name: '重試章節清單' }));
   expect(reloadUnits).toHaveBeenCalledOnce();
+});
+
+it('continues materials pages so path links reach older items and marks counts incomplete', async () => {
+  state.request.mockImplementation(async (path: string, _context?: string, _input?: unknown, _method?: unknown, query?: { cursor?: string }) => {
+    if (path.endsWith('/quizzes')) return { quizzes: [] };
+    if (path.endsWith('/materials/page')) {
+      if (!query?.cursor) return { materials: [material], nextCursor: 'older-page' };
+      if (query.cursor === 'older-page') return { materials: [olderMaterial], nextCursor: null };
+    }
+    throw new Error(path);
+  });
+  const onNavigate = vi.fn();
+  render(
+    <CourseLearningPath
+      workspace={workspace}
+      assignments={[]}
+      units={[unit]}
+      unitsError=""
+      reloadUnits={vi.fn()}
+      onUnitCreated={vi.fn()}
+      onNavigate={onNavigate}
+    />,
+  );
+  expect(await screen.findByRole('link', { name: /第一週課前閱讀/ })).toBeTruthy();
+  expect(screen.getByText(/教材尚有較早頁面未載入/)).toBeTruthy();
+  expect(screen.getByText(/1 教材（尚未載完）/)).toBeTruthy();
+  fireEvent.click(screen.getByRole('button', { name: '繼續載入較早教材' }));
+  const older = await screen.findByRole('link', { name: /更早的課前閱讀/ });
+  expect(older.getAttribute('href')).toBe(`#material-${olderMaterial.id}`);
+  fireEvent.click(older);
+  expect(onNavigate).toHaveBeenCalledWith('materials');
+  expect(screen.queryByText(/尚未載完/)).toBeNull();
+});
+
+it('keeps path rows and retries after a later materials page failure', async () => {
+  let olderAttempts = 0;
+  state.request.mockImplementation(async (path: string, _context?: string, _input?: unknown, _method?: unknown, query?: { cursor?: string }) => {
+    if (path.endsWith('/quizzes')) return { quizzes: [] };
+    if (path.endsWith('/materials/page')) {
+      if (!query?.cursor) return { materials: [material], nextCursor: 'older-page' };
+      olderAttempts += 1;
+      if (olderAttempts === 1) throw new TypeError('Failed to fetch');
+      return { materials: [olderMaterial], nextCursor: null };
+    }
+    throw new Error(path);
+  });
+  render(
+    <CourseLearningPath
+      workspace={workspace}
+      assignments={[]}
+      units={[unit]}
+      unitsError=""
+      reloadUnits={vi.fn()}
+      onUnitCreated={vi.fn()}
+    />,
+  );
+  await screen.findByRole('link', { name: /第一週課前閱讀/ });
+  fireEvent.click(screen.getByRole('button', { name: '繼續載入較早教材' }));
+  expect(await screen.findByRole('button', { name: '重試載入較早教材' })).toBeTruthy();
+  expect(screen.getByRole('link', { name: /第一週課前閱讀/ })).toBeTruthy();
+  fireEvent.click(screen.getByRole('button', { name: '重試載入較早教材' }));
+  expect(await screen.findByRole('link', { name: /更早的課前閱讀/ })).toBeTruthy();
+});
+
+it('restarts path materials after an invalid cursor without retrying the broken cursor', async () => {
+  const cursors: Array<string | undefined> = [];
+  state.request.mockImplementation(async (path: string, _context?: string, _input?: unknown, _method?: unknown, query?: { cursor?: string }) => {
+    if (path.endsWith('/quizzes')) return { quizzes: [] };
+    if (path.endsWith('/materials/page')) {
+      cursors.push(query?.cursor);
+      if (!query?.cursor) {
+        if (cursors.filter((value) => value === undefined).length === 1) {
+          return { materials: [material], nextCursor: 'older-page' };
+        }
+        return { materials: [material, olderMaterial], nextCursor: null };
+      }
+      throw new NuniError(422, 'CLASS_WORKSPACE_MATERIAL_CURSOR_INVALID');
+    }
+    throw new Error(path);
+  });
+  render(
+    <CourseLearningPath
+      workspace={workspace}
+      assignments={[]}
+      units={[unit]}
+      unitsError=""
+      reloadUnits={vi.fn()}
+      onUnitCreated={vi.fn()}
+    />,
+  );
+  await screen.findByRole('link', { name: /第一週課前閱讀/ });
+  fireEvent.click(screen.getByRole('button', { name: '繼續載入較早教材' }));
+  expect(await screen.findByRole('button', { name: '重新讀取教材' })).toBeTruthy();
+  expect(screen.queryByRole('button', { name: '重試載入較早教材' })).toBeNull();
+  expect(screen.getByRole('link', { name: /第一週課前閱讀/ })).toBeTruthy();
+  fireEvent.click(screen.getByRole('button', { name: '重新讀取教材' }));
+  expect(await screen.findByRole('link', { name: /更早的課前閱讀/ })).toBeTruthy();
+  expect(cursors).toEqual([undefined, 'older-page', undefined]);
+});
+
+it('restarts path materials after an A→B→A cursor cycle', async () => {
+  const cursors: Array<string | undefined> = [];
+  state.request.mockImplementation(async (path: string, _context?: string, _input?: unknown, _method?: unknown, query?: { cursor?: string }) => {
+    if (path.endsWith('/quizzes')) return { quizzes: [] };
+    if (path.endsWith('/materials/page')) {
+      cursors.push(query?.cursor);
+      if (!query?.cursor) {
+        if (cursors.filter((value) => value === undefined).length === 1) {
+          return { materials: [material], nextCursor: 'cursor-a' };
+        }
+        return { materials: [material, olderMaterial], nextCursor: null };
+      }
+      if (query.cursor === 'cursor-a') {
+        return {
+          materials: [{ ...olderMaterial, id: 'cwm_66666666-6666-4666-8666-666666666666', title: '中間頁課前閱讀' }],
+          nextCursor: 'cursor-b',
+        };
+      }
+      if (query.cursor === 'cursor-b') {
+        return {
+          materials: [
+            {
+              ...olderMaterial,
+              id: 'cwm_77777777-7777-4777-8777-777777777777',
+              title: '循環頁課前閱讀',
+            },
+          ],
+          nextCursor: 'cursor-a',
+        };
+      }
+    }
+    throw new Error(path);
+  });
+  render(
+    <CourseLearningPath
+      workspace={workspace}
+      assignments={[]}
+      units={[unit]}
+      unitsError=""
+      reloadUnits={vi.fn()}
+      onUnitCreated={vi.fn()}
+    />,
+  );
+  await screen.findByRole('link', { name: /第一週課前閱讀/ });
+  fireEvent.click(screen.getByRole('button', { name: '繼續載入較早教材' }));
+  await screen.findByRole('link', { name: /中間頁課前閱讀/ });
+  fireEvent.click(screen.getByRole('button', { name: '繼續載入較早教材' }));
+  expect(await screen.findByRole('button', { name: '重新讀取教材' })).toBeTruthy();
+  expect(screen.getByText(/重複游標/)).toBeTruthy();
+  expect(cursors).toEqual([undefined, 'cursor-a', 'cursor-b']);
+  fireEvent.click(screen.getByRole('button', { name: '重新讀取教材' }));
+  expect(await screen.findByRole('link', { name: /更早的課前閱讀/ })).toBeTruthy();
+  expect(cursors).toEqual([undefined, 'cursor-a', 'cursor-b', undefined]);
+});
+
+it('evicts known materials when a later page is denied', async () => {
+  state.request.mockImplementation(async (path: string, _context?: string, _input?: unknown, _method?: unknown, query?: { cursor?: string }) => {
+    if (path.endsWith('/quizzes')) return { quizzes: [] };
+    if (path.endsWith('/materials/page')) {
+      if (!query?.cursor) return { materials: [material], nextCursor: 'older-page' };
+      throw new NuniError(403, 'REQUEST_FAILED');
+    }
+    throw new Error(path);
+  });
+  render(
+    <CourseLearningPath
+      workspace={workspace}
+      assignments={[]}
+      units={[unit]}
+      unitsError=""
+      reloadUnits={vi.fn()}
+      onUnitCreated={vi.fn()}
+    />,
+  );
+  await screen.findByRole('link', { name: /第一週課前閱讀/ });
+  fireEvent.click(screen.getByRole('button', { name: '繼續載入較早教材' }));
+  await screen.findByRole('alert');
+  expect(screen.queryByRole('link', { name: /第一週課前閱讀/ })).toBeNull();
+});
+
+it('does not claim quiz completion metrics when quizzes hit the legacy 100 cap', async () => {
+  const quizzes = Array.from({ length: 100 }, (_, index) => ({
+    id: `cwq_11111111-1111-4111-8111-${String(index).padStart(12, '0')}`,
+    workspaceId,
+    title: `測驗 ${index + 1}`,
+    prompt: '作答',
+    state: 'open' as const,
+    createdAt: '2026-10-10T00:00:00Z',
+    closedAt: null,
+    dueAt: null,
+    unitId: unit.id,
+    unitTitle: unit.title,
+    responseCount: 0,
+    myResponse: null,
+  }));
+  state.request.mockImplementation(async (path: string) => {
+    if (path.endsWith('/materials/page')) return { materials: [material], nextCursor: null };
+    if (path.endsWith('/quizzes')) return { quizzes };
+    throw new Error(path);
+  });
+  render(
+    <CourseLearningPath
+      workspace={workspace}
+      assignments={[assignment]}
+      units={[unit]}
+      unitsError=""
+      reloadUnits={vi.fn()}
+      onUnitCreated={vi.fn()}
+    />,
+  );
+  await screen.findByRole('link', { name: /第一週課前閱讀/ });
+  expect(screen.getByText(/測驗已達目前 API 的 100 筆顯示上限/)).toBeTruthy();
+  expect(screen.queryByText('已繳交或作答')).toBeNull();
+});
+
+it('ignores a pending later materials page after refresh', async () => {
+  let finishOlder!: (value: unknown) => void;
+  state.request.mockImplementation(async (path: string, _context?: string, _input?: unknown, _method?: unknown, query?: { cursor?: string }) => {
+    if (path.endsWith('/quizzes')) return { quizzes: [] };
+    if (path.endsWith('/materials/page')) {
+      if (!query?.cursor) return { materials: [material], nextCursor: 'older-page' };
+      return new Promise((resolve) => {
+        finishOlder = resolve;
+      });
+    }
+    throw new Error(path);
+  });
+  render(
+    <CourseLearningPath
+      workspace={workspace}
+      assignments={[]}
+      units={[unit]}
+      unitsError=""
+      reloadUnits={vi.fn()}
+      onUnitCreated={vi.fn()}
+    />,
+  );
+  await screen.findByRole('link', { name: /第一週課前閱讀/ });
+  fireEvent.click(screen.getByRole('button', { name: '繼續載入較早教材' }));
+  await waitFor(() => expect(finishOlder).toBeTypeOf('function'));
+  fireEvent.click(screen.getByRole('button', { name: '更新章節內容' }));
+  await screen.findByRole('link', { name: /第一週課前閱讀/ });
+  await act(async () => finishOlder({ materials: [olderMaterial], nextCursor: 'stale-next' }));
+  expect(screen.queryByRole('link', { name: /更早的課前閱讀/ })).toBeNull();
 });

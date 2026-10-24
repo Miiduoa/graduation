@@ -34,6 +34,8 @@ type MaterialRead = {
   sourceId: string | null;
   error: string | null;
   truncated: boolean;
+  /** Legacy latest-100 is complete only when the cap was not hit. */
+  seedComplete: boolean;
 };
 
 const emptyMaterialRead: MaterialRead = {
@@ -42,6 +44,7 @@ const emptyMaterialRead: MaterialRead = {
   sourceId: null,
   error: null,
   truncated: false,
+  seedComplete: false,
 };
 
 function mergeMaterialReads(rows: MaterialRead[]): {
@@ -56,12 +59,14 @@ function mergeMaterialReads(rows: MaterialRead[]): {
       first.title.localeCompare(second.title, 'zh-TW'),
   );
   const error = rows.find((row) => row.error)?.error ?? null;
+  const completeRows = rows.filter((row) => row.seedComplete && row.sourceId);
   return {
     materials,
     materialsError: error,
     materialSearchSeed: {
-      items: rows.flatMap((row) => row.searchable),
-      courseIds: rows.flatMap((row) => (row.sourceId ? [row.sourceId] : [])),
+      // Truncated legacy reads stay on the home feed, but must not seed search as complete.
+      items: completeRows.flatMap((row) => row.searchable),
+      courseIds: completeRows.map((row) => row.sourceId!),
       truncated: rows.some((row) => row.truncated),
     },
   };
@@ -91,12 +96,14 @@ async function readCourseMaterials(
         createdAt: item.createdAt,
         href: courseMaterialHref(course.id, item.id),
       }));
+    const truncated = items.length >= 100;
     return {
       home,
       searchable,
       sourceId: course.id,
       error: null,
-      truncated: items.length >= 100,
+      truncated,
+      seedComplete: !truncated,
     };
   } catch (error) {
     if (error instanceof NuniError && [403, 404].includes(error.status)) {
