@@ -11,6 +11,7 @@ import { SSOLoginScreen } from './SSOLoginScreen';
 import { NuniWorkspaceScreen } from './NuniWorkspaceScreen';
 import PersonalImportScreen from './PersonalImportScreen';
 import PersonalTimetableScreen from './PersonalTimetableScreen';
+import PersonalCalendarScreen from './PersonalCalendarScreen';
 import type { PreAuthStackParamList } from './preAuthTypes';
 import { createStackScreenOptions } from '../ui/navigationTheme';
 import { useThemeMode } from '../state/theme';
@@ -55,6 +56,11 @@ export function PreAuthStack() {
       <Stack.Screen name="SSOLogin" component={SSOLoginScreen} options={{ title: '學校登入' }} />
       <Stack.Screen name="PersonalImport" component={PersonalImportScreen} options={{ title: '匯入我的資料' }} />
       <Stack.Screen name="PersonalTimetable" component={PersonalTimetableScreen} options={{ title: '我的課表' }} />
+      <Stack.Screen
+        name="PersonalCalendar"
+        component={PersonalCalendarScreen}
+        options={{ title: '個人行事曆' }}
+      />
       <Stack.Screen
         name="NuniWorkspace"
         component={NuniWorkspaceScreen}

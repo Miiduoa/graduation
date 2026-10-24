@@ -64,7 +64,12 @@ export async function loadPersonalImports(
 ): Promise<PersonalImportLedger> {
   const raw = await AsyncStorage.getItem(personalImportStorageKey(scope));
   if (!raw) return empty();
-  const value = JSON.parse(raw) as PersonalImportLedger;
+  let value: PersonalImportLedger;
+  try {
+    value = JSON.parse(raw) as PersonalImportLedger;
+  } catch {
+    throw new Error('儲存的匯入資料無法讀取，請保留此裝置上的資料並稍後重試。');
+  }
   if (
     !value ||
     value.version !== 1 ||
