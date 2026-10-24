@@ -1,5 +1,10 @@
 /** Same-origin Next.js callables hosted at `/api/fn/{name}`. Keep this list tiny. */
-export const HOSTED_WEB_CALLABLES = ['joinGroupByCode', 'leaveGroup'] as const;
+export const HOSTED_WEB_CALLABLES = [
+  'joinGroupByCode',
+  'leaveGroup',
+  'createTimetableShare',
+  'revokeTimetableShare',
+] as const;
 
 export type HostedWebCallable = (typeof HOSTED_WEB_CALLABLES)[number];
 

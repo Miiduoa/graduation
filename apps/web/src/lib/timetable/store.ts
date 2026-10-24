@@ -24,8 +24,14 @@ import {
   type PersonalCourse,
   type TimetableMeta,
 } from '@campus/shared';
-import { getAuth, getDb, getFunctionsInstance, isFirebaseConfigured } from '@/lib/firebase';
-import { areFunctionsConfigured } from '@/lib/functionsUrl';
+import {
+  getAuth,
+  getCloudFunctionUrl,
+  getDb,
+  getFunctionsInstance,
+  isFirebaseConfigured,
+} from '@/lib/firebase';
+import { areFunctionsConfigured, FunctionsUnconfiguredError } from '@/lib/functionsUrl';
 
 const LOCAL_KEY = 'campus-one-personal-timetable';
 
@@ -50,9 +56,11 @@ function emptyTimetable(schoolId: string): StoredTimetable {
 /** Corrupted on-device records are not an empty timetable. Never overwrite them silently. */
 export class TimetableLocalReadError extends Error {
   constructor(readonly reason: 'corrupt' | 'unavailable') {
-    super(reason === 'corrupt'
-      ? '這台裝置的課表資料格式異常，原始資料仍保留。請勿清除瀏覽器資料。'
-      : '目前無法讀取這台裝置的課表，請確認瀏覽器儲存權限。');
+    super(
+      reason === 'corrupt'
+        ? '這台裝置的課表資料格式異常，原始資料仍保留。請勿清除瀏覽器資料。'
+        : '目前無法讀取這台裝置的課表，請確認瀏覽器儲存權限。',
+    );
     this.name = 'TimetableLocalReadError';
   }
 }
@@ -68,9 +76,13 @@ type LocalTimetableRead = {
 function hasTimetableContent(value: unknown): boolean {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
   const data = value as Partial<StoredTimetable>;
-  return Array.isArray(data.courses) && data.courses.length <= 80 &&
+  return (
+    Array.isArray(data.courses) &&
+    data.courses.length <= 80 &&
     data.courses.every((row) => row && typeof row === 'object' && !Array.isArray(row)) &&
-    (data.meta === undefined || !!data.meta && typeof data.meta === 'object' && !Array.isArray(data.meta));
+    (data.meta === undefined ||
+      (!!data.meta && typeof data.meta === 'object' && !Array.isArray(data.meta)))
+  );
 }
 
 function readLocalSnapshot(ownerKey: string, schoolId: string): LocalTimetableRead {
@@ -83,7 +95,8 @@ function readLocalSnapshot(ownerKey: string, schoolId: string): LocalTimetableRe
     throw new TimetableLocalReadError('unavailable');
   }
   const raw = scopedRaw ?? legacyRaw;
-  if (raw === null) return { timetable: emptyTimetable(schoolId), found: false, scoped: false, recordedAt: 0 };
+  if (raw === null)
+    return { timetable: emptyTimetable(schoolId), found: false, scoped: false, recordedAt: 0 };
   let parsed: StoredTimetable;
   try {
     parsed = JSON.parse(raw) as StoredTimetable;
@@ -310,16 +323,62 @@ export async function loadFriendTimetable(
   return readShared(legacy);
 }
 
-export async function createServerShare(schoolId: string, name: string) {
-  if (!isFirebaseConfigured() || !getAuth()?.currentUser) {
+async function callTimetableShare(
+  name: 'createTimetableShare' | 'revokeTimetableShare',
+  input: Record<string, unknown>,
+): Promise<Record<string, unknown>> {
+  const user = getAuth()?.currentUser;
+  if (!isFirebaseConfigured() || !user) {
     throw new Error('need-login');
   }
-  const call = httpsCallable<
-    { schoolId: string; name: string },
-    { token: string; path: string; expiresAt: string }
-  >(getFunctionsInstance(), 'createTimetableShare');
-  const { data } = await call({ schoolId, name });
-  return data;
+  const idToken = await user.getIdToken();
+  const response = await fetch(getCloudFunctionUrl(name), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${idToken}` },
+    body: JSON.stringify({ data: input }),
+    cache: 'no-store',
+  });
+  const payload = (await response.json()) as {
+    error?: { message?: unknown };
+    result?: unknown;
+    data?: unknown;
+  };
+  const errorMessage =
+    payload?.error && typeof payload.error === 'object' ? String(payload.error.message || '') : '';
+  if (response.status === 503 || /尚未啟用/.test(errorMessage)) {
+    throw new FunctionsUnconfiguredError('課表分享尚未啟用');
+  }
+  if (!response.ok || payload.error) {
+    throw new Error(errorMessage || 'share-failed');
+  }
+  const result = payload.result ?? payload.data;
+  if (!result || typeof result !== 'object') {
+    throw new Error('share-failed');
+  }
+  return result as Record<string, unknown>;
+}
+
+export async function createServerShare(
+  schoolId: string,
+  name: string,
+  snapshot?: { courses: PersonalCourse[]; meta: TimetableMeta },
+) {
+  const result = await callTimetableShare('createTimetableShare', {
+    schoolId,
+    name,
+    ...(snapshot ? { courses: snapshot.courses, meta: snapshot.meta } : {}),
+  });
+  const token = typeof result.token === 'string' ? result.token : '';
+  const path = typeof result.path === 'string' ? result.path : '';
+  const expiresAt = typeof result.expiresAt === 'string' ? result.expiresAt : '';
+  if (!token || !path || !expiresAt) throw new Error('share-failed');
+  return { token, path, expiresAt };
+}
+
+export async function revokeServerShare(token: string) {
+  const result = await callTimetableShare('revokeTimetableShare', { token });
+  if (result.ok !== true) throw new Error('share-failed');
+  return { ok: true as const };
 }
 
 export async function loadSharedTimetable(token: string) {
@@ -430,11 +489,7 @@ async function ensureTimetableIndex(
   const data = snap.data() as { courses?: unknown; courseIds?: unknown; schoolId?: unknown };
   if (data.schoolId !== schoolId) return;
   if (Array.isArray(data.courseIds)) return;
-  await setDoc(
-    ref,
-    { schoolId, ...timetableIndex(cleanCourses(data.courses)) },
-    { merge: true },
-  );
+  await setDoc(ref, { schoolId, ...timetableIndex(cleanCourses(data.courses)) }, { merge: true });
 }
 
 /** 課表裡這門課的開課代號（課名｜老師），老師工作台用它找到對的老師。 */

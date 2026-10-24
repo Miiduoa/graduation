@@ -434,6 +434,19 @@ jobs:
           NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN: ${{ secrets.FIREBASE_AUTH_DOMAIN || 'mock.firebaseapp.com' }}
           NEXT_PUBLIC_FIREBASE_PROJECT_ID: ${{ secrets.FIREBASE_PROJECT_ID || 'mock-project' }}
 
+      - name: Scan browser bundle for Admin SDK material
+        run: |
+          set -euo pipefail
+          if command -v rg >/dev/null 2>&1; then
+            if rg -n 'firebase-admin|private_key|FIREBASE_SERVICE_ACCOUNT_JSON' apps/web/.next/static; then
+              echo '::error::apps/web/.next/static contains firebase-admin or service-account material'
+              exit 1
+            fi
+          elif grep -R -n -E 'firebase-admin|private_key|FIREBASE_SERVICE_ACCOUNT_JSON' apps/web/.next/static; then
+            echo '::error::apps/web/.next/static contains firebase-admin or service-account material'
+            exit 1
+          fi
+
       - name: Upload build artifacts
         uses: actions/upload-artifact@v4
         with:
