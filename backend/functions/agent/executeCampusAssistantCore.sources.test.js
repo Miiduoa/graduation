@@ -232,20 +232,16 @@ test('the actual callable completes a model reply with real compose, tools, scop
   );
 });
 
-test('the actual guest callable ignores client-supplied announcements when the model is unavailable', async () => {
-  const result = await askCampusAssistant.run({
-    data: {
-      messages: [{ role: 'user', content: '查公告' }],
-      context: { schoolId: 'pu', announcements: [{ id: 'fabricated', title: '客戶端捏造的公告' }] },
-    },
-    rawRequest: { ip: 'source-contract-guest' },
-  });
-  expect(result.content).toContain('校方發布的公告');
-  expect(result.content).not.toContain('客戶端捏造的公告');
-  expect(result.citations).toContainEqual(
-    expect.objectContaining({ type: 'announcement', id: 'notice' }),
-  );
-  expect(result.run.status).toBe('completed');
+test('the actual guest callable is unauthenticated before it can use client-supplied announcements', async () => {
+  await expect(
+    askCampusAssistant.run({
+      data: {
+        messages: [{ role: 'user', content: '查公告' }],
+        context: { schoolId: 'pu', announcements: [{ id: 'fabricated', title: '客戶端捏造的公告' }] },
+      },
+      rawRequest: { ip: 'source-contract-guest' },
+    }),
+  ).rejects.toMatchObject({ code: 'unauthenticated' });
 });
 
 test('the actual assignment callable returns own pending work and ignores fabricated client work', async () => {
@@ -566,10 +562,13 @@ test('a school change between runtime and core discards prefetched private data 
 });
 
 test('the actual callable accepts the 4000-character Web question and preserves its tail for the model', async () => {
+  mockDocuments.set('users/alice', { schoolId: 'pu', role: 'student' });
+  mockDocuments.set('schools/pu/members/alice', { status: 'active' });
   const suffix = '最後條件：請依公告原文回答。';
   const content = ('請查詢校園公告。' + '以下是補充背景。'.repeat(600)).slice(0, 4000 - suffix.length) + suffix;
   mockModel.mockResolvedValue({ provider: 'test-model', content: '已根據公告資料整理回覆。', errors: [], cards: [] });
   const result = await askCampusAssistant.run({
+    auth: { uid: 'alice', token: { role: 'student' } },
     data: { messages: [{ role: 'user', content }], context: { schoolId: 'pu' } },
     rawRequest: { ip: 'long-question-test' },
   });

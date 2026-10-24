@@ -10,6 +10,7 @@ const { getFirestore, FieldValue } = require('firebase-admin/firestore');
 const { createAuthzHelpers } = require('../../authz');
 const { fetchAssistantUserProfile } = require('../../lib/assistantFetchers');
 const { runTool, byName } = require('../tools/registry');
+const { assertToolInputBounds } = require('../inputLimits');
 const { assertOnlineOrderingEnabled } = require('../../lib/onlineOrdering');
 
 const REGION = 'asia-east1';
@@ -77,6 +78,9 @@ module.exports = onCall(
       throw new HttpsError('invalid-argument', 'Unsupported tool');
     }
     if (toolName === 'createOrder') assertOnlineOrderingEnabled();
+    // Bound input before any Firestore read so the Fly HTTP path rejects oversized
+    // payloads even when the caller has no school membership.
+    assertToolInputBounds(request.data?.input);
 
     const userProfile = await fetchAssistantUserProfile(uid);
     const schoolId = userProfile?.schoolId ?? null;
