@@ -6,7 +6,7 @@ import {
   type NuniSubmission,
   type NuniWorkspace,
 } from '@campus/shared/src/nuni';
-import { AssignmentCard } from './AssignmentCard';
+import { AssignmentCard, assignmentReceiptDomId } from './AssignmentCard';
 
 const state = vi.hoisted(() => ({
   context: 'session-a',
@@ -843,5 +843,168 @@ it('hides the file picker after the teacher stops accepting work', () => {
   );
   expect(screen.queryByRole('button', { name: '拍照' })).toBeNull();
   expect(screen.getByText('已停止收件')).toBeTruthy();
+});
+
+it('saves feedback and opens the next awaiting receipt only after server success', async () => {
+  const peer = {
+    ...submission,
+    platformAccountId: 'pa_33333333-3333-4333-8333-333333333333',
+    displayName: '陳同學',
+    body: '第二份繳交',
+    submittedAt: '2026-10-08T07:00:00.000Z',
+  };
+  state.request
+    .mockResolvedValueOnce({ submissions: [submission, peer] })
+    .mockResolvedValueOnce(reviewed('給林同學的回饋內容'));
+  render(<AssignmentCard item={assignment} workspace={workspace} reload={reload} />);
+  const feedback = await openSubmissions();
+  const firstReceipt = screen.getByRole('article', { name: '林同學的繳交' });
+  expect(within(firstReceipt).getByText('待回饋第 1／2 份')).toBeTruthy();
+  fireEvent.change(feedback, { target: { value: '給林同學的回饋內容' } });
+  fireEvent.click(within(firstReceipt).getByRole('button', { name: '儲存回饋並查看下一份' }));
+  await screen.findByText('回饋已儲存。已移到 陳同學 的繳交。');
+  const peerReceipt = screen.getByRole('article', { name: '陳同學的繳交' });
+  expect(
+    within(peerReceipt).getByText(/待回饋第 1／1 份/),
+  ).toBeTruthy();
+  expect(within(peerReceipt).getByText(/目前批改這一份/)).toBeTruthy();
+  expect(within(peerReceipt).getByLabelText('給陳同學的回饋')).toBeTruthy();
+  expect(within(peerReceipt).getByRole('button', { name: '儲存回饋' })).toBeTruthy();
+});
+
+it('keeps the draft and selected receipt when save-and-next fails', async () => {
+  const peer = {
+    ...submission,
+    platformAccountId: 'pa_33333333-3333-4333-8333-333333333333',
+    displayName: '陳同學',
+    body: '第二份繳交',
+    submittedAt: '2026-10-08T07:00:00.000Z',
+  };
+  state.request
+    .mockResolvedValueOnce({ submissions: [submission, peer] })
+    .mockRejectedValueOnce(new NuniError(500, 'REQUEST_FAILED'));
+  render(<AssignmentCard item={assignment} workspace={workspace} reload={reload} />);
+  const feedback = await openSubmissions();
+  const firstReceipt = screen.getByRole('article', { name: '林同學的繳交' });
+  fireEvent.change(feedback, { target: { value: '失敗仍應保留的草稿' } });
+  fireEvent.click(within(firstReceipt).getByRole('button', { name: '儲存回饋並查看下一份' }));
+  await within(firstReceipt).findByRole('alert');
+  expect(feedback.value).toBe('失敗仍應保留的草稿');
+  expect(screen.queryByText('已移到 陳同學 的繳交。')).toBeNull();
+  expect(within(firstReceipt).getByRole('button', { name: '確認送出結果' })).toBeTruthy();
+});
+
+it('does not advance save-and-next when an authoritative replay returns different feedback', async () => {
+  const peer = {
+    ...submission,
+    platformAccountId: 'pa_33333333-3333-4333-8333-333333333333',
+    displayName: '陳同學',
+    body: '第二份繳交',
+    submittedAt: '2026-10-08T07:00:00.000Z',
+  };
+  state.request
+    .mockResolvedValueOnce({ submissions: [submission, peer] })
+    .mockRejectedValueOnce(new TypeError('lost response'))
+    .mockResolvedValueOnce(reviewed('另一位老師已補充新的回饋'));
+  render(<AssignmentCard item={assignment} workspace={workspace} reload={reload} />);
+  const feedback = await openSubmissions();
+  const firstReceipt = screen.getByRole('article', { name: '林同學的繳交' });
+  fireEvent.change(feedback, { target: { value: '原本送出的回饋' } });
+  fireEvent.click(within(firstReceipt).getByRole('button', { name: '儲存回饋並查看下一份' }));
+  await within(firstReceipt).findByRole('button', { name: '確認送出結果' });
+  fireEvent.click(within(firstReceipt).getByRole('button', { name: '確認送出結果' }));
+  expect(
+    await within(firstReceipt).findByText('這份回饋已有新的內容，上方顯示目前儲存的版本。'),
+  ).toBeTruthy();
+  expect(screen.queryByText(/已移到 陳同學/)).toBeNull();
+  expect(within(firstReceipt).getByText(/目前批改這一份/)).toBeTruthy();
+  expect(feedback.value).toBe('另一位老師已補充新的回饋');
+});
+
+it('reveals the next receipt only inside the activity that saved, not a sibling assignment', async () => {
+  const peer = {
+    ...submission,
+    platformAccountId: 'pa_33333333-3333-4333-8333-333333333333',
+    displayName: '陳同學',
+    body: '第二份繳交',
+    submittedAt: '2026-10-08T07:00:00.000Z',
+  };
+  const otherAssignment: NuniAssignment = {
+    ...assignment,
+    id: 'cwa_99999999-9999-4999-8999-999999999999',
+    title: '另一份作業',
+  };
+  state.request.mockImplementation(async (path) => {
+    const route = String(path);
+    if (route.endsWith('/submissions')) {
+      const activityId = route.includes(otherAssignment.id) ? otherAssignment.id : assignment.id;
+      return {
+        submissions: [
+          { ...submission, assignmentId: activityId },
+          { ...peer, assignmentId: activityId },
+        ],
+      };
+    }
+    if (route.endsWith('/feedback')) {
+      if (!route.includes(otherAssignment.id)) {
+        throw new Error(`feedback targeted wrong activity: ${route}`);
+      }
+      return {
+        ...reviewed('給林同學的回饋內容'),
+        assignmentId: otherAssignment.id,
+      };
+    }
+    throw new Error(`unexpected ${route}`);
+  });
+  render(
+    <>
+      <AssignmentCard item={assignment} workspace={workspace} reload={reload} />
+      <AssignmentCard item={otherAssignment} workspace={workspace} reload={reload} />
+    </>,
+  );
+  const firstCard = screen.getByRole('article', { name: assignment.title });
+  const secondCard = screen.getByRole('article', { name: otherAssignment.title });
+  fireEvent.click(within(firstCard).getByRole('button', { name: '查看繳交內容' }));
+  await waitFor(() =>
+    expect(
+      document.getElementById(
+        assignmentReceiptDomId(workspace.id, assignment.id, submission.platformAccountId),
+      ),
+    ).toBeTruthy(),
+  );
+  fireEvent.click(within(secondCard).getByRole('button', { name: '查看繳交內容' }));
+  await waitFor(() =>
+    expect(
+      document.getElementById(
+        assignmentReceiptDomId(workspace.id, otherAssignment.id, submission.platformAccountId),
+      ),
+    ).toBeTruthy(),
+  );
+  const firstActivityLin = document.getElementById(
+    assignmentReceiptDomId(workspace.id, assignment.id, submission.platformAccountId),
+  )!;
+  const secondActivityLin = document.getElementById(
+    assignmentReceiptDomId(workspace.id, otherAssignment.id, submission.platformAccountId),
+  )!;
+  expect(firstActivityLin).not.toBe(secondActivityLin);
+
+  const secondScroll = vi.fn();
+  const firstScroll = vi.fn();
+  firstActivityLin.scrollIntoView = firstScroll;
+  const secondPeer = document.getElementById(
+    assignmentReceiptDomId(workspace.id, otherAssignment.id, peer.platformAccountId),
+  )!;
+  secondPeer.scrollIntoView = secondScroll;
+
+  const secondLinArticle = within(secondActivityLin).getByRole('article', {
+    name: '林同學的繳交',
+  });
+  fireEvent.click(within(secondLinArticle).getByText('留下回饋'));
+  const editor = within(secondLinArticle).getByLabelText('給林同學的回饋') as HTMLTextAreaElement;
+  fireEvent.change(editor, { target: { value: '給林同學的回饋內容' } });
+  fireEvent.click(within(secondLinArticle).getByRole('button', { name: '儲存回饋並查看下一份' }));
+  await screen.findByText('回饋已儲存。已移到 陳同學 的繳交。');
+  await waitFor(() => expect(secondScroll).toHaveBeenCalled());
+  expect(firstScroll).not.toHaveBeenCalled();
 });
 

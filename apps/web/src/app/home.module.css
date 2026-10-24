@@ -39,7 +39,7 @@
 }
 .page a:focus-visible {
   outline: 3px solid var(--focus-ring);
-  outline-offset: 5px;
+  outline-offset: 2px;
 }
 .skip {
   position: absolute;
@@ -564,15 +564,16 @@
   border-top: 1px solid var(--line);
   min-width: 0;
   max-width: 100%;
-  overflow-x: clip;
+  /* 不用 overflow-x: clip，避免 focus outline 被裁切；橫向溢出由子項 min-width/wrap 處理 */
 }
 .task {
   display: flex;
   align-items: center;
   gap: 14px;
-  padding: 18px 0;
+  padding: 18px 2px;
   border-bottom: 1px solid var(--line);
   max-width: 100%;
+  min-width: 0;
   transition: background var(--motion-fast) ease;
 }
 .taskMarker {
@@ -604,12 +605,14 @@
 }
 .taskContent strong {
   display: block;
-  font-size: 14px;
+  font-size: var(--font-body-size);
+  line-height: var(--font-body-line-height);
   font-weight: 600;
 }
 .taskContent > span {
   display: block;
-  font-size: 12px;
+  font-size: var(--font-body-sm-size);
+  line-height: var(--font-body-sm-line-height);
   color: var(--soft);
   margin-top: 3px;
   overflow-wrap: anywhere;
@@ -627,9 +630,12 @@
 }
 .deadline,
 .overdue {
+  min-width: 0;
+  max-width: 45%;
   text-align: right;
-  font-size: 14px;
-  white-space: nowrap;
+  font-size: var(--font-body-size);
+  line-height: var(--font-body-line-height);
+  overflow-wrap: anywhere;
 }
 .overdue {
   color: var(--danger);
@@ -637,7 +643,8 @@
 .deadline small,
 .overdue small {
   display: block;
-  font-size: 10px;
+  font-size: var(--font-body-sm-size);
+  line-height: var(--font-body-sm-line-height);
 }
 .arrow {
   color: var(--muted);
@@ -739,7 +746,18 @@
   gap: 12px;
   padding: 16px 0;
   border-bottom: 1px solid var(--line);
+  min-height: 56px;
   transition: background var(--motion-fast) ease;
+}
+.services > a:active {
+  background: color-mix(in srgb, var(--brand) 6%, transparent);
+}
+.services > a:active .serviceIcon {
+  background: var(--accent-soft);
+  border-color: var(--border-strong);
+}
+.services > a:active .serviceArrow {
+  transform: translateX(2px);
 }
 .serviceIcon {
   display: grid;
@@ -768,14 +786,18 @@
 }
 .services strong {
   display: block;
-  font-size: 14px;
+  font-size: var(--font-body-size);
+  line-height: var(--font-body-line-height);
   font-weight: 600;
+  overflow-wrap: anywhere;
 }
 .services small {
   display: block;
-  font-size: 12px;
+  font-size: var(--font-body-sm-size);
+  line-height: var(--font-body-sm-line-height);
   color: var(--soft);
   margin-top: 2px;
+  overflow-wrap: anywhere;
 }
 .services > a > span:last-child {
   margin-left: auto;
@@ -904,9 +926,6 @@
   }
   .task {
     gap: 10px;
-  }
-  .taskContent strong {
-    font-size: 13px;
   }
   .sidebar {
     gap: 24px;
@@ -1330,6 +1349,10 @@
     border-radius: 12px;
     background: var(--surface);
   }
+  .services > a:active {
+    background: var(--panel);
+    border-color: var(--border-strong);
+  }
   .serviceIcon {
     width: 32px;
     height: 32px;
@@ -1341,12 +1364,7 @@
     width: 19px;
     height: 19px;
   }
-  .services strong {
-    font-size: var(--font-body-sm-size);
-  }
   .services small {
-    font-size: 11px;
-    line-height: 1.5;
     margin-top: 4px;
   }
   .services .serviceArrow {
@@ -1359,7 +1377,9 @@
   animation: none !important;
   transition: none !important;
 }
-:global([data-reduced-motion='true']) .page :is(.primary, .course, .serviceArrow) {
+:global([data-reduced-motion='true']) .page :is(.primary, .course, .serviceArrow),
+:global([data-reduced-motion='true']) .page .services > a:active .serviceArrow,
+:global([data-reduced-motion='true']) .page .services > a:hover .serviceArrow {
   transform: none !important;
 }
 @media (prefers-reduced-motion: reduce) {
@@ -1367,7 +1387,9 @@
     animation: none !important;
     transition: none !important;
   }
-  .page :is(.primary, .course, .serviceArrow) {
+  .page :is(.primary, .course, .serviceArrow),
+  .page .services > a:active .serviceArrow,
+  .page .services > a:hover .serviceArrow {
     transform: none !important;
   }
 }
@@ -1408,11 +1430,24 @@
   }
   .task > :is(.deadline, .overdue) {
     grid-column: 2;
+    max-width: none;
     text-align: left;
-    font-size: 13px;
+    font-size: var(--font-body-size);
+    line-height: var(--font-body-line-height);
   }
   .task > .arrow {
     grid-column: 3;
     grid-row: 1 / 3;
+  }
+}
+@media (max-width: 320px) {
+  .taskContent,
+  .taskContent strong,
+  .taskContent > span,
+  .services strong,
+  .services small,
+  .task > :is(.deadline, .overdue) {
+    overflow-wrap: anywhere;
+    word-break: break-word;
   }
 }
