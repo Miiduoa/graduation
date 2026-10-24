@@ -10,6 +10,7 @@ import {
 import { rootNavigateNested, rootNavigationRef } from './rootNavigation';
 import { applyNotificationDestination } from '../utils/applyNotificationDestination';
 import { resolveNotificationDestination } from '../utils/notificationDestination';
+import { isPersonalEventReminderPayload } from '../services/personalEventReminderModel';
 import type { UserRole } from '../data/types';
 
 type NavigationLike = {
@@ -106,6 +107,10 @@ export function usePushNotifications(
       options?: { clearLastResponse?: boolean },
     ) => {
       if (cancelled) return;
+      const rawPayload = response?.notification?.request?.content?.data;
+      // Personal local reminders have an independent consumer; ignore BEFORE dedup/nav/clear.
+      if (isPersonalEventReminderPayload(rawPayload)) return;
+
       const responseKey = getNotificationResponseKey(response);
       if (lastHandledResponseKeyRef.current === responseKey) {
         if (options?.clearLastResponse) {
@@ -113,8 +118,6 @@ export function usePushNotifications(
         }
         return;
       }
-
-      const rawPayload = response?.notification?.request?.content?.data;
 
       if (!rootNavigationRef.isReady()) return;
 

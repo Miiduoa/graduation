@@ -21,6 +21,7 @@ import { getDb, getAuthInstance, isFirebaseMockMode } from '../firebase';
 import { withRetry, withTimeout } from '../utils/retry';
 import { trackEvent } from './analytics';
 import { linkingOpenWithPuTronClassGate } from './tronClassWebUiGate';
+import { isPersonalEventReminderPayload } from './personalEventReminderModel';
 
 Notifications.setNotificationHandler({
   handleNotification: async () => ({
@@ -483,11 +484,16 @@ export function addNotificationReceivedListener(
   callback: (notification: Notifications.Notification) => void,
 ): Notifications.EventSubscription {
   return Notifications.addNotificationReceivedListener((notification) => {
-    // 追蹤通知接收
-    trackEvent('notification_received', {
-      title: notification.request.content.title ?? '',
-      channelId: String((notification.request.content.data as any)?.channelId ?? 'default'),
-    });
+    const data = notification.request.content.data;
+    // Personal-event local reminders: never record title/body/payload; fixed nonsensitive category only.
+    if (isPersonalEventReminderPayload(data)) {
+      trackEvent('notification_received', { category: 'personal_event_reminder_local' });
+    } else {
+      trackEvent('notification_received', {
+        title: notification.request.content.title ?? '',
+        channelId: String((data as any)?.channelId ?? 'default'),
+      });
+    }
     callback(notification);
   });
 }
@@ -499,12 +505,16 @@ export function addNotificationResponseReceivedListener(
   callback: (response: Notifications.NotificationResponse) => void,
 ): Notifications.EventSubscription {
   return Notifications.addNotificationResponseReceivedListener((response) => {
-    // 追蹤通知點擊
-    trackEvent('notification_clicked', {
-      title: response.notification.request.content.title ?? '',
-      actionIdentifier: response.actionIdentifier,
-      data: JSON.stringify(response.notification.request.content.data || {}),
-    });
+    const data = response.notification.request.content.data;
+    if (isPersonalEventReminderPayload(data)) {
+      trackEvent('notification_clicked', { category: 'personal_event_reminder_local' });
+    } else {
+      trackEvent('notification_clicked', {
+        title: response.notification.request.content.title ?? '',
+        actionIdentifier: response.actionIdentifier,
+        data: JSON.stringify(data || {}),
+      });
+    }
     callback(response);
   });
 }
