@@ -1,6 +1,6 @@
 import { expect, it } from 'vitest';
 import { ONLINE_ORDERING_OFF_TEXT } from './onlineOrdering';
-import { presentCampusService, searchCampusServices } from './campusServices';
+import { CAMPUS_SERVICES, presentCampusService, searchCampusServices } from './campusServices';
 
 it('keeps announcements and bus, and shows ordering-off copy for /food', () => {
   const services = searchCampusServices('');
@@ -12,6 +12,12 @@ it('keeps announcements and bus, and shows ordering-off copy for /food', () => {
   const food = services.find((service) => service.href === '/food');
   expect(food?.text).toBe(ONLINE_ORDERING_OFF_TEXT);
   expect(food?.text).not.toContain('選餐點');
+});
+
+it('lists lost-found as a school-account service, not a platform Google task', () => {
+  const lostFound = CAMPUS_SERVICES.find((service) => service.href === '/lost-found');
+  expect(lostFound?.access).toBe('school');
+  expect(lostFound?.access).not.toBe('platform');
 });
 
 it('finds school info through contact keywords', () => {

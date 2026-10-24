@@ -183,7 +183,7 @@ export const CAMPUS_SERVICES = [
     name: '失物招領',
     text: '查看本校遺失與拾獲刊登',
     href: '/lost-found',
-    access: 'platform',
+    access: 'school',
     keywords: '失物 招領 遺失 拾獲 lost found',
     category: 'campus',
   },
