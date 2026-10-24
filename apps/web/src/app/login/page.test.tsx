@@ -10,6 +10,7 @@ const { replace, signIn, state } = vi.hoisted(() => ({
     user: { uid: 'one' } as { uid: string } | null,
     studentId: false,
     loading: false,
+    optionsLoading: false,
     optionsError: false,
     retryOptions: vi.fn(),
   },
@@ -50,7 +51,7 @@ vi.mock('@/lib/signInOptions', async (original) => ({
   useSignInOptions: () => ({
     google: true,
     studentId: state.studentId,
-    loading: false,
+    loading: state.optionsLoading,
     error: state.optionsError,
     retry: state.retryOptions,
   }),
@@ -61,6 +62,7 @@ beforeEach(() => {
   state.user = { uid: 'one' };
   state.studentId = false;
   state.loading = false;
+  state.optionsLoading = false;
   state.optionsError = false;
   signIn.mockResolvedValue({ uid: 'one' });
 });
@@ -83,11 +85,15 @@ it('returns an already signed-in school user to the requested page only when stu
 it('does not send a Google-only session into a school form that cannot sign in', () => {
   render(<LoginPage />);
   expect(replace).not.toHaveBeenCalled();
-  expect(screen.getByText(STUDENT_ID_PREPARING_COPY)).toBeTruthy();
+  expect(
+    screen.getByText('學校帳號登入目前未開放，暫時無法連線這項服務。你原本要開啟的頁面已保留。'),
+  ).toBeTruthy();
+  expect(screen.queryByText(STUDENT_ID_PREPARING_COPY)).toBeNull();
   expect(screen.queryByLabelText('學號')).toBeNull();
   expect(screen.queryByRole('button', { name: '連線學校帳號' })).toBeNull();
   expect(screen.queryByText('使用靜宜大學學號登入')).toBeNull();
-  expect(screen.getByTestId('platform-sign-in')).toBeTruthy();
+  expect(screen.queryByTestId('platform-sign-in')).toBeNull();
+  expect(screen.getByRole('link', { name: '改用一般登入' }).getAttribute('href')).toBe('/login');
   expect(screen.getByRole('link', { name: '不登入，繼續瀏覽' })).toBeTruthy();
 });
 it('allows a signed-in user to reconnect to school before returning', async () => {
@@ -135,13 +141,59 @@ it('offers school verification for an academic task without a misleading Google 
   );
 });
 
-it('keeps Google visible for an academic task when student ID is not available', () => {
+it('keeps a school task school-only when student ID is not available', () => {
   state.user = null;
   render(<LoginPage />);
-  expect(screen.getByTestId('platform-sign-in').getAttribute('data-return-url')).toBe('/grades');
-  expect(screen.getByText(STUDENT_ID_PREPARING_COPY)).toBeTruthy();
+  expect(screen.queryByTestId('platform-sign-in')).toBeNull();
+  expect(screen.getByRole('heading', { level: 1 }).textContent).toBe('連線學校帳號');
+  expect(
+    screen.getByText('學校帳號登入目前未開放，暫時無法連線這項服務。你原本要開啟的頁面已保留。'),
+  ).toBeTruthy();
+  expect(screen.queryByText(STUDENT_ID_PREPARING_COPY)).toBeNull();
   expect(screen.queryByLabelText('學號')).toBeNull();
+  expect(screen.getByRole('link', { name: '改用一般登入' }).getAttribute('href')).toBe('/login');
   expect(screen.getByRole('link', { name: '不登入，繼續瀏覽' })).toBeTruthy();
+  expect(replace).not.toHaveBeenCalled();
+});
+
+it('treats lost-found as a school destination under Google-only sign-in options', () => {
+  state.user = null;
+  state.params = new URLSearchParams('returnUrl=%2Flost-found%3FschoolId%3Dpu');
+  render(<LoginPage />);
+  expect(screen.queryByTestId('platform-sign-in')).toBeNull();
+  expect(screen.getByRole('heading', { level: 1 }).textContent).toBe('連線學校帳號');
+  expect(
+    screen.getByText('這個頁面要用學校帳號，Google 帳號無法代替。'),
+  ).toBeTruthy();
+  expect(screen.getByRole('link', { name: '不登入，繼續瀏覽' }).getAttribute('href')).toBe(
+    '/#public-services',
+  );
+  expect(replace).not.toHaveBeenCalled();
+});
+
+it('keeps an explicit school reconnect channel without auto-return', () => {
+  state.user = { uid: 'one' };
+  state.studentId = true;
+  state.params = new URLSearchParams({
+    returnUrl: '/lost-found?schoolId=pu',
+    reconnect: 'school',
+  });
+  render(<LoginPage />);
+  expect(replace).not.toHaveBeenCalled();
+  expect(screen.queryByTestId('platform-sign-in')).toBeNull();
+  expect(screen.getByRole('heading', { level: 1 }).textContent).toBe('重新連線學校帳號');
+  expect(screen.getByRole('button', { name: '連線學校帳號' })).toBeTruthy();
+});
+
+it('does not repeatedly redirect while school options are still loading', () => {
+  state.user = { uid: 'one' };
+  state.studentId = false;
+  state.optionsLoading = true;
+  render(<LoginPage />);
+  expect(replace).not.toHaveBeenCalled();
+  expect(screen.queryByTestId('platform-sign-in')).toBeNull();
+  expect(screen.getByText('正在確認登入方式…')).toBeTruthy();
+  expect(screen.queryByLabelText('學號')).toBeNull();
 });
 
 it.each([
@@ -151,6 +203,7 @@ it.each([
   '/cafeteria',
   '/cafeteria/stall?schoolId=pu',
   '/library',
+  '/school-info',
 ])(
   'keeps public destination %s optional and preserves the task with either account or guest browsing',
   (destination) => {
@@ -288,11 +341,23 @@ it('retains the full original academic task after school verification', async ()
 it('does not accept school credentials while student ID is unavailable', () => {
   state.user = null;
   render(<LoginPage />);
-  expect(screen.getByText(STUDENT_ID_PREPARING_COPY)).toBeTruthy();
+  expect(
+    screen.getByText('學校帳號登入目前未開放，暫時無法連線這項服務。你原本要開啟的頁面已保留。'),
+  ).toBeTruthy();
   expect(screen.queryByLabelText('密碼')).toBeNull();
   expect(screen.queryByText('使用靜宜大學學號登入')).toBeNull();
-  expect(screen.getByTestId('platform-sign-in')).toBeTruthy();
+  expect(screen.queryByTestId('platform-sign-in')).toBeNull();
   expect(signIn).not.toHaveBeenCalled();
+});
+
+it('still offers Google for ordinary platform tasks when student ID is unavailable', () => {
+  state.user = null;
+  state.params = new URLSearchParams('returnUrl=%2Fsocial');
+  render(<LoginPage />);
+  expect(screen.getByRole('heading', { level: 1 }).textContent).toBe('登入');
+  expect(screen.getByTestId('platform-sign-in').getAttribute('data-return-url')).toBe('/social');
+  expect(screen.getByText(STUDENT_ID_PREPARING_COPY)).toBeTruthy();
+  expect(replace).not.toHaveBeenCalled();
 });
 
 function fillSchoolLogin() {

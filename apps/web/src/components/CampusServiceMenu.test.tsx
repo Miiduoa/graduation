@@ -32,6 +32,7 @@ const originalServices = [
   ['/grades', '成績'],
   ['/credit-planner', '學分規劃'],
   ['/groups', '課程與群組'],
+  ['/events', '校園活動'],
   ['/clubs', '社團活動'],
   ['/community', '校園交流'],
   ['/friends', '找人'],
@@ -76,9 +77,10 @@ it('retains all existing services and search while adding a separate classroom e
   expect(screen.getByRole('link', { name: '跨校交流' }).getAttribute('href')).toBe('/social');
   expect(screen.getByRole('link', { name: '店家合作' }).getAttribute('href')).toBe('/merchant');
   expect(screen.getByRole('link', { name: '點餐與取餐' }).getAttribute('href')).toBe('/food');
+  expect(screen.getByRole('link', { name: '學校資訊' }).getAttribute('href')).toBe('/school-info');
   expect(screen.getByText('目前還不能線上點餐')).toBeTruthy();
   expect(screen.queryByText('選餐點、查訂單、出示取餐憑證')).toBeNull();
-  expect(screen.getAllByRole('link')).toHaveLength(33);
+  expect(screen.getAllByRole('link')).toHaveLength(35);
 });
 
 it('preserves school context without copying unrelated session or return parameters', () => {
@@ -251,6 +253,19 @@ it('identifies a nested service without selecting a route with only a matching p
   rerender(<CampusServiceMenu />);
   screen.getByText('所有服務').closest('details')!.open = true;
   expect(screen.getByRole('link', { name: '公告' }).getAttribute('aria-current')).toBeNull();
+});
+
+it('marks 生活 active for campus event list and detail without replacing 社團活動', () => {
+  navigation.pathname = '/events';
+  const { rerender } = render(<AppHeader />);
+  expect(screen.getByRole('link', { name: '生活' }).getAttribute('aria-current')).toBe('page');
+  fireEvent.click(screen.getByText('所有服務'));
+  expect(screen.getByRole('link', { name: '校園活動' }).getAttribute('href')).toBe('/events');
+  expect(screen.getByRole('link', { name: '社團活動' }).getAttribute('href')).toBe('/clubs');
+  navigation.pathname = '/events/talk-1';
+  navigation.search = 'schoolId=nthu&source=school-club-events';
+  rerender(<AppHeader />);
+  expect(screen.getByRole('link', { name: '生活' }).getAttribute('aria-current')).toBe('page');
 });
 
 it('selects only the specific account service and closes its overview link on the current page', () => {

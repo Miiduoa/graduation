@@ -57,6 +57,7 @@ const serviceIcons: Record<string, CampusIconName> = {
   '/announcements': 'announcements',
   '/cafeteria': 'cafeteria',
   '/library': 'library',
+  '/school-info': 'services',
 };
 
 function MaterialList({ items }: { items: HomeMaterial[] }) {

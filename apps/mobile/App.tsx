@@ -31,6 +31,12 @@ import { DemoRoleProvider } from './src/state/demoRole';
 import { DemoStoreProvider } from './src/state/demoStore';
 import { AuthProvider, useAuth } from './src/state/auth';
 import { PersonalImportSyncBridge } from './src/components/PersonalImportSyncBridge';
+import { PersonalEventReminderBridge } from './src/components/PersonalEventReminderBridge';
+import {
+  markPublicNavigationReady,
+  markPublicNavigationUnready,
+  publicNavigationRef,
+} from './src/app/publicNavigation';
 import { NuniSessionProvider } from './src/state/nuniSession';
 import { ThemeProvider, useThemeMode } from './src/state/theme';
 import { NotificationsProvider } from './src/state/notifications';
@@ -76,6 +82,8 @@ import { initializeRuntimeDataSource } from './src/config/runtime';
 import { usePermissions } from './src/hooks/usePermissions';
 import { useUnreadMessagingCount } from './src/hooks/useUnreadMessagingCount';
 import {
+  markSchoolNavigationReady,
+  markSchoolNavigationUnready,
   rootNavigateNested,
   rootNavigationRef,
   type RootTabParamList,
@@ -165,6 +173,12 @@ const linkingBase: LinkingOptions<RootTabParamList> = {
           CourseGradebook: 'course-gradebook',
           Grades: 'grades',
           Calendar: 'learn/calendar',
+          PersonalCalendar: {
+            path: 'personal-calendar/:eventId?',
+            parse: {
+              eventId: (value: string | undefined) => (value && value.length ? value : undefined),
+            },
+          },
           AICourseAdvisor: 'ai-advisor',
           AdminCourseVerify: 'course-verify',
         },
@@ -182,6 +196,7 @@ const linkingBase: LinkingOptions<RootTabParamList> = {
           Ordering: 'ordering/:menuId',
           MenuSubscription: 'menu-subscription',
           Library: 'library',
+          SchoolInfo: 'school-info',
           Health: 'health',
           Dormitory: 'dormitory',
           PrintService: 'print',
@@ -751,8 +766,20 @@ function PublicNavigation() {
       primary: theme.colors.accent,
     },
   };
+  useEffect(() => {
+    return () => {
+      markPublicNavigationUnready();
+    };
+  }, []);
   return (
-    <NavigationContainer theme={navTheme} linking={preAuthLinking}>
+    <NavigationContainer
+      ref={publicNavigationRef}
+      theme={navTheme}
+      linking={preAuthLinking}
+      onReady={() => {
+        markPublicNavigationReady();
+      }}
+    >
       <View style={{ flex: 1, backgroundColor: theme.colors.bg }}>
         <PreAuthStack />
       </View>
@@ -898,12 +925,21 @@ function SchoolNavigation() {
     },
   };
 
+  useEffect(() => {
+    return () => {
+      markSchoolNavigationUnready();
+    };
+  }, []);
+
   return (
     <NavigationContainer
       ref={rootNavigationRef}
       theme={navTheme}
       linking={linkingConfig}
-      onReady={flushPendingMessagingDeepLink}
+      onReady={() => {
+        markSchoolNavigationReady();
+        flushPendingMessagingDeepLink();
+      }}
       fallback={<FullScreenLoader />}
       onUnhandledAction={(action) => {
         // Keep unhandled links recoverable without exposing internal route names.
@@ -1063,6 +1099,7 @@ function AppInner() {
       <NuniSessionProvider>
         <AuthProvider>
           <PersonalImportSyncBridge />
+          <PersonalEventReminderBridge />
           <NotificationsProvider>
             <ToastProvider>
               <AuthAwareStateProviders>

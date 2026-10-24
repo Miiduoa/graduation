@@ -38,12 +38,22 @@ export function currentReturnPath(
   return collapseInternalPathHash(`${path}${query}${fragment}`);
 }
 
-export function loginHref(returnPath: string): string {
+export function loginHref(
+  returnPath: string,
+  options?: { reconnect?: 'school' },
+): string {
   const safe = collapseInternalPathHash(sanitizeInternalPath(returnPath));
-  const href = `/login?returnUrl=${encodeURIComponent(safe)}`;
+  const reconnect =
+    options?.reconnect === 'school' ? 'reconnect=school&' : '';
+  const href = `/login?${reconnect}returnUrl=${encodeURIComponent(safe)}`;
   // Next.js <Link> keeps the current document fragment when the target has none.
   // Encoded %23 in returnUrl is not a fragment, so end with # to replace it.
   return safe.includes('#') ? `${href}#` : href;
+}
+
+/** School-only tasks must open the school account channel, not platform OAuth. */
+export function schoolLoginHref(returnPath: string): string {
+  return loginHref(returnPath, { reconnect: 'school' });
 }
 
 export function followLoginHref(
