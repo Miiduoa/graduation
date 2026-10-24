@@ -12,6 +12,7 @@ it('does not import the Functions index, trigger runners, or custom-claims helpe
     'src/lib/server/fnDispatch.ts',
     'src/lib/server/firebaseAdmin.ts',
     'src/lib/server/groupInviteHandlers.ts',
+    'src/lib/server/timetableShareHandlers.ts',
   ];
   const joined = files.map((file) => readFileSync(join(root, file), 'utf8')).join('\n');
   expect(joined).not.toMatch(/backend\/functions\/index/);
@@ -28,6 +29,8 @@ it('keeps createGroup off the HTTP allowlist', () => {
   expect(hosted).not.toMatch(/createGroup/);
   expect(hosted).toMatch(/joinGroupByCode/);
   expect(hosted).toMatch(/leaveGroup/);
+  expect(hosted).toMatch(/createTimetableShare/);
+  expect(hosted).toMatch(/revokeTimetableShare/);
 });
 
 it('stubs firebase-admin on the webpack browser bundle', () => {

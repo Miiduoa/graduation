@@ -24,6 +24,20 @@ it('resets the per-minute window after 60 seconds', () => {
   expect(() => limiter.check('alice')).not.toThrow();
 });
 
+it('rejects a 21st timetable share create within an hour', () => {
+  const limiter = createUidRateLimiter({
+    requestsPerMinute: 1000,
+    timetableSharesPerHour: 20,
+  });
+  for (let i = 0; i < 20; i += 1) {
+    limiter.check('alice');
+    limiter.assertTimetableShareCreatesAllowed('alice');
+    limiter.recordTimetableShareCreate('alice');
+  }
+  limiter.check('alice');
+  expect(() => limiter.assertTimetableShareCreatesAllowed('alice')).toThrow(HttpsError);
+});
+
 it('rejects a 21st invalid join code within an hour', () => {
   const limiter = createUidRateLimiter({
     requestsPerMinute: 1000,
