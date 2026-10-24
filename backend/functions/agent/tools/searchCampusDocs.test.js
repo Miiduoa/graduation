@@ -34,7 +34,17 @@ describe('searchCampusDocs tool', () => {
     const out = await searchCampusDocs.execute({ schoolId: 's1' }, { query: '診斷書' });
     expect(out.campusChunks).toEqual([]);
     expect(out.webFallback?.content).toBe('公開摘要');
-    expect(mockWebSearch).toHaveBeenCalledWith('診斷書');
+    expect(mockWebSearch).toHaveBeenCalledWith('診斷書', { schoolId: 's1' });
+  });
+
+  test('forwards selected schoolId for NTU/NCKU/NTPU web fallback', async () => {
+    mockFetchChunks.mockResolvedValue([]);
+    mockWebSearch.mockResolvedValue({ content: 'ok', sources: [] });
+    for (const schoolId of ['ntu', 'ncku', 'ntpu']) {
+      mockWebSearch.mockClear();
+      await searchCampusDocs.execute({ schoolId }, { query: '校規' });
+      expect(mockWebSearch).toHaveBeenCalledWith('校規', { schoolId });
+    }
   });
 
   test('bounds only the retrieval query while accepting a long conversation question', async () => {
@@ -43,6 +53,6 @@ describe('searchCampusDocs tool', () => {
     const query = `請查公告${'完整背景。'.repeat(700)}`;
     await expect(searchCampusDocs.execute({ schoolId: 'pu' }, { query })).resolves.toEqual({ campusChunks: [], webFallback: null });
     expect(mockFetchChunks).toHaveBeenCalledWith(expect.objectContaining({ queryText: query.slice(0, 500) }));
-    expect(mockWebSearch).toHaveBeenCalledWith(query.slice(0, 500));
+    expect(mockWebSearch).toHaveBeenCalledWith(query.slice(0, 500), { schoolId: 'pu' });
   });
 });

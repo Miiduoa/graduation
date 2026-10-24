@@ -1,6 +1,6 @@
 import React from 'react';
 import { act, fireEvent, render, waitFor } from '@testing-library/react-native';
-import { Alert } from 'react-native';
+import { Alert, Linking } from 'react-native';
 import Constants from 'expo-constants';
 import { DormitoryScreen } from '../screens/DormitoryScreen';
 import { UnavailableFeatureScreen } from '../screens/UnavailableFeatureScreen';
@@ -57,6 +57,7 @@ beforeEach(() => {
   mockSchool = 'pu';
   configure('production');
   jest.mocked(linkingOpenWithPuTronClassGate).mockResolvedValue(true);
+  jest.spyOn(Linking, 'openURL').mockResolvedValue(undefined);
   jest.spyOn(Alert, 'alert').mockImplementation(() => {});
 });
 afterEach(() => jest.restoreAllMocks());
@@ -93,11 +94,13 @@ test('the actual release placeholder opens the existing official housing URL and
   const view = render(<UnavailableFeatureScreen route={{ name: 'Dormitory' }} />);
   const action = view.getByRole('button', { name: '前往靜宜住宿服務組官網' });
   await act(async () => fireEvent.press(action));
-  expect(linkingOpenWithPuTronClassGate).toHaveBeenCalledWith('https://osadorm.pu.edu.tw/');
+  expect(Linking.openURL).toHaveBeenCalledWith('https://osadorm.pu.edu.tw/');
   expect(Alert.alert).not.toHaveBeenCalled();
-  jest.mocked(linkingOpenWithPuTronClassGate).mockResolvedValueOnce(false);
+  jest.mocked(Linking.openURL).mockRejectedValueOnce(new Error('offline'));
   await act(async () => fireEvent.press(action));
-  expect(Alert.alert).toHaveBeenCalledWith('無法開啟官網', 'https://osadorm.pu.edu.tw/');
+  expect(Alert.alert).toHaveBeenCalledWith('無法開啟官網', '請確認網路連線後再試一次。');
+  await act(async () => fireEvent.press(action));
+  expect(Linking.openURL).toHaveBeenCalledTimes(3);
   expect(view.getByRole('button', { name: '查看校方公告' })).toBeTruthy();
 });
 

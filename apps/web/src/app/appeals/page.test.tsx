@@ -9,13 +9,22 @@ const store = vi.hoisted(() => ({
   listCourseAppeals: vi.fn(async () => [] as unknown[]),
   loadAppealTeacherStatus: vi.fn(async () => ({}) as Record<string, boolean>),
   loadPersonalTimetable: vi.fn(),
-  withdrawCourseAppeal: vi.fn(),
+  withdrawCourseAppeal: vi.fn(async () => undefined),
 }));
 vi.mock('@/lib/timetable/store', () => store);
-const auth = vi.hoisted(() => ({ user: { uid: 'stu' }, loading: false }));
+const auth = vi.hoisted(() => ({
+  user: { uid: 'stu' } as { uid: string } | null,
+  loading: false,
+}));
 vi.mock('@/components/AuthGuard', () => ({ useAuth: () => auth }));
-const school = vi.hoisted(() => ({ selectedSchoolId: 'pu' }));
+const school = vi.hoisted(() => ({
+  selectedSchoolId: 'pu' as string | null,
+  loading: false,
+}));
 vi.mock('@/components/SelectedSchoolProvider', () => ({ useSelectedSchool: () => school }));
+vi.mock('@/components/SchoolScopePlaceholder', () => ({
+  SchoolScopePlaceholder: () => <p role="status">選擇校園</p>,
+}));
 vi.mock('@/components/AppHeader', () => ({ AppHeader: () => <header>Campus One</header> }));
 vi.mock('@/components/PWAInstallBanner', () => ({ PWAInstallBanner: () => null }));
 
@@ -47,12 +56,20 @@ const NO_TEACHER = '這門課還沒對應老師，申訴暫時只有學校看得
 
 beforeEach(() => {
   vi.clearAllMocks();
+  auth.user = { uid: 'stu' };
+  auth.loading = false;
+  school.selectedSchoolId = 'pu';
+  school.loading = false;
   store.loadPersonalTimetable.mockResolvedValue({
     courses: [course],
     meta: {},
     shareWithFriends: false,
     schoolId: 'pu',
   });
+  store.listCourseAppeals.mockResolvedValue([]);
+  store.loadAppealTeacherStatus.mockResolvedValue({});
+  store.createCourseAppeal.mockResolvedValue('r1');
+  store.withdrawCourseAppeal.mockResolvedValue(undefined);
 });
 
 it('沒有對應老師時，頂卡、清單和送出後都說只有學校看得到，不說等老師看', async () => {

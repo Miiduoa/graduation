@@ -14,7 +14,14 @@ let mockSchool = 'pu';
 jest.mock('../state/auth', () => ({
   useAuth: () => ({ user: mockUid ? { uid: mockUid } : null }),
 }));
-jest.mock('../state/school', () => ({ useSchool: () => ({ school: { id: mockSchool } }) }));
+jest.mock('../state/school', () => ({
+  useSchool: () => ({
+    school: {
+      id: mockSchool,
+      name: mockSchool === 'pu' ? '靜宜大學' : `學校（${mockSchool}）`,
+    },
+  }),
+}));
 jest.mock('../features/campusAssistant', () => ({ askCampusAssistant: jest.fn() }));
 jest.mock('@expo/vector-icons', () => ({ Ionicons: () => null }));
 const request = askCampusAssistant as jest.Mock;

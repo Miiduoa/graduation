@@ -94,6 +94,11 @@ import {
   rememberReflexion,
 } from './aiReflexion';
 import { getDemoPersonaPromptAddon } from './personaAiContext';
+import {
+  isProvidenceSchoolId,
+  resolveSchoolAssistantIdentity,
+  buildSchoolScopedAssistantSystemPromptHeader,
+} from '@campus/shared/src';
 
 export type AIProvider = 'offline' | 'cloud' | 'mock' | 'local-llm' | 'gemini';
 
@@ -728,8 +733,9 @@ function buildSystemPrompt(context: AIContext): string {
   // demo 模式：注入 persona 身份背景，讓 AI 知道現在面對的是哪個角色，
   //   避免對 teacher/admin/vendor 用「學生視角」答題或回「我沒有資料」。
   const personaAddon = getDemoPersonaPromptAddon(context.userId);
+  const identity = resolveSchoolAssistantIdentity(context.schoolId);
   const parts = [
-    '# 你是「小靜」— 靜宜大學最聰明的 AI 校園助理',
+    buildSchoolScopedAssistantSystemPromptHeader(context.schoolId),
     '',
     '你的目標是用 App 真實資料、工具執行器、動作草稿與多步驟推理，提供接近通用助理的校園代理體驗。',
     '不要宣稱自己和任何雲端模型有相同參數量；使用者問模型參數時要誠實說明限制與可提升的能力面。',
@@ -773,35 +779,29 @@ function buildSystemPrompt(context: AIContext): string {
     '- 簡單問題 2-3 句，複雜問題有結構但不囉嗦',
     '- **每次回答結尾都要加上「建議選項：」提供 2-3 個相關的後續操作**',
     '',
-    '## 靜宜大學知識庫',
-    '',
-    '### 基本資訊',
-    '靜宜大學 (Providence University)，位於台中市沙鹿區台灣大道七段200號。',
-    '1956年創校，天主教大學，校訓「進德修業」，約11000名學生。',
-    '',
-    '### 學院：外語學院（英文/西語/日語）、人社院（中文/大傳/法律/社工/生態/台文）、管理學院（企管/國企/會計/財金/觀光）、理學院（統資/資科/應化/化粧品/食營）、資訊學院（資工/資管）、國際學院',
-    '',
-    '### 建築',
-    '主顧樓（行政中心+主顧咖啡）、伯鐸樓（B1美食街+教室）、濟時樓（1F學餐+全家）、至善樓（1F衛保+2F諮商）、蓋夏圖書館（藏書60萬+自習區+討論室）、文興樓（外語學院）、思敏樓（管院）、聖方濟樓（理學院）、任垣樓（資訊學院）、體育館（球場+游泳池+健身房）、希嘉/思高學苑（宿舍）',
-    '',
-    '### 校園餐飲（學生最常問！）',
-    '- 以 App 今日菜單、餐廳資料與 DataSource 回傳內容為準。',
-    '- 若菜單沒有價格，不要自行排序最便宜；請說「價格未提供」並建議現場或餐廳頁確認。',
-    '- 若餐廳未開通接單、營業狀態未知或品項無法確認，不可說已下單；改為草稿或導到點餐頁。',
-    '- 現在是' + mealTime + '，推薦時考慮營業時間',
-    '',
-    '### 重要服務',
-    '教務處(主顧樓2F)、學務處(主顧樓3F)、衛保組(至善樓1F,週一~五09:00-16:30)、諮商中心(至善樓2F,免費,04-2632-8001#11501)、圖書館(蓋夏,週一~五08:00-21:30,週六日09:00-17:00)',
-    '',
-    '### 學術制度',
-    '畢業128學分（通識28-32+院必修+系必修+選修）、60分及格、二一制度、選課（初選→加退選→期中退選）、暑修、大二起可申請雙主修/輔系',
-    '',
-    '### 交通',
-    '300/307/308路→台中車站(40-50min)、304→清水、統聯/35路→高鐵台中站(30min)、校門口有YouBike',
-    '',
-    '### 周邊',
-    '沙鹿火車站(10min車程)、三井Outlet(15min)、高美濕地(20min)、沙鹿夜市(週三六)、全聯/美廉社(步行5min)',
-    '',
+    ...(isProvidenceSchoolId(context.schoolId)
+      ? [
+          `## ${identity.schoolName}知識庫（僅靜宜選校可用）`,
+          '',
+          '### 基本資訊',
+          ...identity.verifiedFactLines,
+          '',
+          '### 校園餐飲',
+          '- 以 App 今日菜單、餐廳資料與 DataSource 回傳內容為準。',
+          '- 若菜單沒有價格，不要自行排序最便宜；請說「價格未提供」並建議現場或餐廳頁確認。',
+          '- 若餐廳未開通接單、營業狀態未知或品項無法確認，不可說已下單；改為草稿或導到點餐頁。',
+          '- 現在是' + mealTime + '，推薦時考慮營業時間',
+          '',
+          '### 交通（僅離線參考，即時班次以台中公車 App 為準）',
+          '300/307/308路→台中車站、304→清水、統聯/35路→高鐵台中站',
+          '',
+        ]
+      : [
+          `## ${identity.schoolName}資料範圍`,
+          ...identity.verifiedFactLines.map((line) => `- ${line}`),
+          '- 校園餐飲、公告、地圖僅能引用已載入的該校公開資料；沒有來源時明說無法確認。',
+          '',
+        ]),
     '## 建議選項',
     '回答結尾可加「建議選項：」+ 1~3個簡短選項（2~6字），如：建議選項：查看詳情、推薦餐點、開啟導航',
     '',
@@ -3891,8 +3891,9 @@ function buildAgentSystemPrompt(context: AIContext): string {
   // demo persona context — 同 buildSystemPrompt 的處理
   const personaAddon = getDemoPersonaPromptAddon(context.userId);
 
+  const identity = resolveSchoolAssistantIdentity(context.schoolId);
   return [
-    '# 你是「小靜」— 靜宜大學 AI 校園全能代理',
+    buildSchoolScopedAssistantSystemPromptHeader(context.schoolId),
     '',
     personaAddon,
     '## 核心身份',
@@ -3923,10 +3924,11 @@ function buildAgentSystemPrompt(context: AIContext): string {
     '- 主動關聯：回答課表時也提醒相關作業',
     '- 結尾加「建議選項：」提供 2-3 個後續操作',
     '',
-    '## 靜宜大學基本資訊',
-    '位於台中市沙鹿區台灣大道七段200號，1956年創校，天主教大學。',
-    '學院：外語/人社/管理/理學/資訊/國際。畢業需128學分。',
-    '校園服務：蓋夏圖書館、濟時樓學餐、伯鐸樓美食街、至善樓衛保+諮商。',
+    `## ${identity.schoolName}基本資訊`,
+    ...identity.verifiedFactLines,
+    ...(isProvidenceSchoolId(context.schoolId)
+      ? ['校園服務請以已載入資料與校方公告為準；不可捏造開放時間或學分數。']
+      : []),
     '',
     `## 當前環境`,
     `時間：${DAY[now.getDay()]} ${now.toLocaleDateString('zh-TW')} ${hour}:${String(now.getMinutes()).padStart(2, '0')}`,
