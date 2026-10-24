@@ -372,9 +372,12 @@ export const hybridSource: DataSource = {
     return fetchWithFallback(sid, 'listCourses', () => mockSource.listCourses(schoolId, options));
   },
 
-  getCourse: async (id: string): Promise<Course | null> => {
-    const schoolId = resolveSchoolId(undefined, id);
-    return fetchWithFallback(schoolId, 'getCourse', () => mockSource.getCourse(id), id);
+  getCourse: async (id: string, schoolId?: string): Promise<Course | null> => {
+    const sid = resolveSchoolId(schoolId, id);
+    const course = await fetchWithFallback(
+      sid, 'getCourse', () => mockSource.getCourse(id, sid), id, sid,
+    );
+    return course && (!course.schoolId || toPublicSchoolId(course.schoolId) === sid) ? course : null;
   },
   searchCourses: async (searchQuery: string, schoolId?: string) => {
     const sid = resolveSchoolId(schoolId);

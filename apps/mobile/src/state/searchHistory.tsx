@@ -65,15 +65,15 @@ export function SearchHistoryProvider(props: {
       };
       return [newItem, ...filtered].slice(0, MAX_HISTORY_ITEMS);
     });
-  }, []);
+  }, [setHistory]);
 
   const removeSearch = useCallback((timestamp: number) => {
     setHistory((prev) => prev.filter((item) => item.timestamp !== timestamp));
-  }, []);
+  }, [setHistory]);
 
   const clearHistory = useCallback(() => {
     setHistory([]);
-  }, []);
+  }, [setHistory]);
 
   const recentSearches = useCallback(
     (type?: SearchHistoryItem['type'], limit = 5): SearchHistoryItem[] => {

@@ -112,6 +112,37 @@ test('a revoked teaching binding immediately removes access', async () => {
   await expect(handle({ auth: { uid: 't1' }, data: { schoolId: 'pu' } })).rejects.toMatchObject({ code: 'permission-denied' });
 });
 
+test('another school admin assignment cannot widen or restore a selected-school editor teaching scope', async () => {
+  const records = {
+    ...data,
+    'schools/pu/members/t1': { role: 'editor', status: 'active' },
+    'schools/ntu/members/t1': { role: 'admin', status: 'active' },
+    'schools/ntu/courseTeachers/資料庫｜王老師': { teacherUids: ['t1'] },
+    'users/ntu-private': { displayName: '他校學生' },
+    'courseAppeals/ntu-private': {
+      ...base, schoolId: 'ntu', studentUid: 'ntu-private', courseName: '資料庫', offeringId: '資料庫｜王老師',
+    },
+  };
+  const reads = [];
+  let revoke = false;
+  const handle = createListTeacherAppealsHandler({ db: fakeDb(records, (path) => {
+    reads.push(path);
+    if (revoke && path === 'users/test-student-a') {
+      records['schools/pu/courseTeachers/資料庫｜王老師'] = { teacherUids: [] };
+    }
+  }) });
+  const request = { auth: { uid: 't1' }, data: { schoolId: ' pu ' } };
+
+  expect((await handle(request)).rows.map((row) => row.id)).toEqual(['a1']);
+  expect(reads).not.toContain('users/ntu-private');
+
+  revoke = true;
+  await expect(handle(request)).rejects.toMatchObject({ code: 'permission-denied' });
+  expect(records['schools/ntu/members/t1']).toEqual({ role: 'admin', status: 'active' });
+  expect(records['schools/ntu/courseTeachers/資料庫｜王老師'].teacherUids).toEqual(['t1']);
+  expect(reads).not.toContain('users/ntu-private');
+});
+
 test('student ID comes from the profile, the PU uid, or the login email', () => {
   expect(studentNumberOf('x', { studentId: 's1100001' })).toBe('S1100001');
   expect(studentNumberOf('pu-s1234567', {})).toBe('S1234567');
@@ -125,7 +156,8 @@ test('a student learns only whether courses in their own timetable have a teache
     'schools/pu/members/test-student-a': { role: 'student', status: 'active' },
     'schools/pu/courseTeachers/空的｜張老師': { teacherUids: [] },
     'schools/pu/courseTeachers/統計學｜林老師': { teacherUids: ['t9'] },
-    'users/test-student-a/personalTimetable/current': {
+    'users/test-student-a/schools/pu/personalTimetable/current': {
+      schoolId: 'pu',
       offeringIds: ['資料庫｜王老師', '英文｜陳老師', '空的｜張老師'],
     },
   });
@@ -146,7 +178,7 @@ test('a student learns only whether courses in their own timetable have a teache
 test('with no mapping at all every course comes back as not assigned', async () => {
   const db = fakeDb({
     'schools/pu/members/s9': { role: 'student', status: 'active' },
-    'users/s9/personalTimetable/current': { offeringIds: ['資料庫｜王老師'] },
+    'users/s9/schools/pu/personalTimetable/current': { schoolId: 'pu', offeringIds: ['資料庫｜王老師'] },
     // 舊申訴沒有開課代號：不會出現在查詢裡
     'courseAppeals/old': { schoolId: 'pu', studentUid: 's9', courseName: '資料庫', status: 'pending' },
   });
@@ -161,7 +193,7 @@ test('a course later removed from the timetable is still checked for the student
   const db = fakeDb({
     ...data,
     'schools/pu/members/test-student-a': { role: 'student', status: 'active' },
-    'users/test-student-a/personalTimetable/current': { offeringIds: [] },
+    'users/test-student-a/schools/pu/personalTimetable/current': { schoolId: 'pu', offeringIds: [] },
   });
   const result = await createAppealTeacherStatusHandler({ db })({
     auth: { uid: 'test-student-a' },
@@ -170,3 +202,204 @@ test('a course later removed from the timetable is still checked for the student
   // a1（王老師）、a3（李老師）都是自己的申訴
   expect(result).toEqual({ assigned: { '資料庫｜王老師': true, '資料庫｜李老師': true } });
 });
+
+test('same UID with PU and NTU scoped indexes only authorizes the requested school offerings', async () => {
+  const sharedOffering = '微積分｜周老師';
+  const db = fakeDb({
+    'schools/pu/members/multi': { role: 'student', status: 'active' },
+    'schools/ntu/members/multi': { role: 'student', status: 'active' },
+    'schools/pu/courseTeachers/資料庫｜王老師': { teacherUids: ['t1'] },
+    'schools/pu/courseTeachers/微積分｜周老師': { teacherUids: ['t-pu'] },
+    'schools/ntu/courseTeachers/微積分｜周老師': { teacherUids: ['t-ntu'] },
+    'schools/ntu/courseTeachers/程式設計｜吳老師': { teacherUids: ['t-ntu2'] },
+    'users/multi/schools/pu/personalTimetable/current': {
+      schoolId: 'pu',
+      offeringIds: ['資料庫｜王老師', sharedOffering],
+    },
+    'users/multi/schools/ntu/personalTimetable/current': {
+      schoolId: 'ntu',
+      offeringIds: [sharedOffering, '程式設計｜吳老師'],
+    },
+  });
+  const handle = createAppealTeacherStatusHandler({ db });
+  expect(
+    await handle({
+      auth: { uid: 'multi' },
+      data: { schoolId: 'pu', offeringIds: ['資料庫｜王老師', sharedOffering, '程式設計｜吳老師'] },
+    }),
+  ).toEqual({ assigned: { '資料庫｜王老師': true, [sharedOffering]: true } });
+  expect(
+    await handle({
+      auth: { uid: 'multi' },
+      data: { schoolId: 'ntu', offeringIds: ['資料庫｜王老師', sharedOffering, '程式設計｜吳老師'] },
+    }),
+  ).toEqual({ assigned: { [sharedOffering]: true, '程式設計｜吳老師': true } });
+});
+
+test('matching legacy timetable authorizes when the canonical school path is absent', async () => {
+  const db = fakeDb({
+    'schools/pu/members/legacy': { role: 'student', status: 'active' },
+    'schools/pu/courseTeachers/資料庫｜王老師': { teacherUids: ['t1'] },
+    'users/legacy/personalTimetable/current': {
+      schoolId: 'pu',
+      offeringIds: ['資料庫｜王老師', '英文｜陳老師'],
+    },
+  });
+  const result = await createAppealTeacherStatusHandler({ db })({
+    auth: { uid: 'legacy' },
+    data: { schoolId: 'pu', offeringIds: ['資料庫｜王老師', '英文｜陳老師', '統計學｜林老師'] },
+  });
+  expect(result).toEqual({ assigned: { '資料庫｜王老師': true, '英文｜陳老師': false } });
+});
+
+test('legacy mismatch or missing schoolId does not authorize offerings', async () => {
+  const handleMismatch = createAppealTeacherStatusHandler({
+    db: fakeDb({
+      'schools/pu/members/legacy-bad': { role: 'student', status: 'active' },
+      'schools/pu/courseTeachers/資料庫｜王老師': { teacherUids: ['t1'] },
+      'users/legacy-bad/personalTimetable/current': {
+        schoolId: 'ntu',
+        offeringIds: ['資料庫｜王老師'],
+      },
+    }),
+  });
+  expect(
+    await handleMismatch({
+      auth: { uid: 'legacy-bad' },
+      data: { schoolId: 'pu', offeringIds: ['資料庫｜王老師'] },
+    }),
+  ).toEqual({ assigned: {} });
+
+  const handleMissing = createAppealTeacherStatusHandler({
+    db: fakeDb({
+      'schools/pu/members/legacy-none': { role: 'student', status: 'active' },
+      'schools/pu/courseTeachers/資料庫｜王老師': { teacherUids: ['t1'] },
+      'users/legacy-none/personalTimetable/current': {
+        offeringIds: ['資料庫｜王老師'],
+      },
+    }),
+  });
+  expect(
+    await handleMissing({
+      auth: { uid: 'legacy-none' },
+      data: { schoolId: 'pu', offeringIds: ['資料庫｜王老師'] },
+    }),
+  ).toEqual({ assigned: {} });
+});
+
+test('canonical mismatch or missing schoolId does not fall back to legacy', async () => {
+  const db = fakeDb({
+    'schools/pu/members/no-fallback': { role: 'student', status: 'active' },
+    'schools/pu/courseTeachers/資料庫｜王老師': { teacherUids: ['t1'] },
+    'users/no-fallback/schools/pu/personalTimetable/current': {
+      schoolId: 'ntu',
+      offeringIds: ['資料庫｜王老師'],
+    },
+    'users/no-fallback/personalTimetable/current': {
+      schoolId: 'pu',
+      offeringIds: ['資料庫｜王老師'],
+    },
+  });
+  expect(
+    await createAppealTeacherStatusHandler({ db })({
+      auth: { uid: 'no-fallback' },
+      data: { schoolId: 'pu', offeringIds: ['資料庫｜王老師'] },
+    }),
+  ).toEqual({ assigned: {} });
+
+  const missingProvenance = fakeDb({
+    'schools/pu/members/no-fallback-2': { role: 'student', status: 'active' },
+    'schools/pu/courseTeachers/資料庫｜王老師': { teacherUids: ['t1'] },
+    'users/no-fallback-2/schools/pu/personalTimetable/current': {
+      offeringIds: ['資料庫｜王老師'],
+    },
+    'users/no-fallback-2/personalTimetable/current': {
+      schoolId: 'pu',
+      offeringIds: ['資料庫｜王老師'],
+    },
+  });
+  expect(
+    await createAppealTeacherStatusHandler({ db: missingProvenance })({
+      auth: { uid: 'no-fallback-2' },
+      data: { schoolId: 'pu', offeringIds: ['資料庫｜王老師'] },
+    }),
+  ).toEqual({ assigned: {} });
+});
+
+test('prior school-specific own appeals still authorize removed offerings', async () => {
+  const db = fakeDb({
+    'schools/pu/members/alumni': { role: 'student', status: 'active' },
+    'schools/ntu/members/alumni': { role: 'student', status: 'active' },
+    'schools/pu/courseTeachers/資料庫｜王老師': { teacherUids: ['t1'] },
+    'schools/ntu/courseTeachers/資料庫｜王老師': { teacherUids: ['t-ntu'] },
+    'users/alumni/schools/pu/personalTimetable/current': { schoolId: 'pu', offeringIds: [] },
+    'users/alumni/schools/ntu/personalTimetable/current': { schoolId: 'ntu', offeringIds: [] },
+    'courseAppeals/pu-only': {
+      schoolId: 'pu',
+      studentUid: 'alumni',
+      courseName: '資料庫',
+      offeringId: '資料庫｜王老師',
+      status: 'pending',
+    },
+    'courseAppeals/ntu-only': {
+      schoolId: 'ntu',
+      studentUid: 'alumni',
+      courseName: '資料庫',
+      offeringId: '資料庫｜王老師',
+      status: 'pending',
+    },
+  });
+  const handle = createAppealTeacherStatusHandler({ db });
+  expect(
+    await handle({
+      auth: { uid: 'alumni' },
+      data: { schoolId: 'pu', offeringIds: ['資料庫｜王老師'] },
+    }),
+  ).toEqual({ assigned: { '資料庫｜王老師': true } });
+  expect(
+    await handle({
+      auth: { uid: 'alumni' },
+      data: { schoolId: 'ntu', offeringIds: ['資料庫｜王老師'] },
+    }),
+  ).toEqual({ assigned: { '資料庫｜王老師': true } });
+});
+
+test('an identical offering in another school cannot authorize the selected school', async () => {
+  const handle = createAppealTeacherStatusHandler({ db: fakeDb({
+    'schools/pu/members/multi': { role: 'student', status: 'active' },
+    'schools/pu/courseTeachers/資料庫｜王老師': { teacherUids: ['t-pu'] },
+    'users/multi/schools/ntu/personalTimetable/current': {
+      schoolId: 'ntu', offeringIds: ['資料庫｜王老師'],
+    },
+  }) });
+  expect(await handle({
+    auth: { uid: 'multi' }, data: { schoolId: 'pu', offeringIds: ['資料庫｜王老師'] },
+  })).toEqual({ assigned: {} });
+});
+
+test.each([
+  { schoolId: 'pu', offeringIds: [] },
+  { schoolId: ' pu ', offeringIds: ['資料庫｜王老師'] },
+])('an existing canonical record never revives legacy offerings: %o', async (canonical) => {
+  const handle = createAppealTeacherStatusHandler({ db: fakeDb({
+    'schools/pu/members/student': { role: 'student', status: 'active' },
+    'schools/pu/courseTeachers/資料庫｜王老師': { teacherUids: ['t1'] },
+    'users/student/schools/pu/personalTimetable/current': canonical,
+    'users/student/personalTimetable/current': {
+      schoolId: 'pu', offeringIds: ['資料庫｜王老師'],
+    },
+  }) });
+  expect(await handle({
+    auth: { uid: 'student' }, data: { schoolId: 'pu', offeringIds: ['資料庫｜王老師'] },
+  })).toEqual({ assigned: {} });
+});
+
+test.each([undefined, null, '', '.', '..', 'pu/ntu', 'PU', 'a b', 123])(
+  'teacher endpoints reject unsafe or absent school ids before reading: %p', async (schoolId) => {
+    const db = fakeDb({});
+    for (const create of [createAppealTeacherStatusHandler, createListTeacherAppealsHandler]) {
+      await expect(create({ db })({ auth: { uid: 'student' }, data: { schoolId } }))
+        .rejects.toMatchObject({ code: 'invalid-argument' });
+    }
+  },
+);
