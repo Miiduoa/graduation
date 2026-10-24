@@ -33,31 +33,44 @@ function requireSchoolId(value) {
   return schoolId;
 }
 
+async function loadTeacherAppealAccess(db, schoolId, uid) {
+  const [member, account] = await Promise.all([
+    db.doc(`schools/${schoolId}/members/${uid}`).get(),
+    db.doc(`users/${uid}`).get(),
+  ]);
+  if (!member.exists || member.data().status !== 'active') {
+    throw new HttpsError('permission-denied', '不是這間學校的有效成員。');
+  }
+  const profile = account.exists ? account.data() : {};
+  if (profile.accountDeletionInProgress === true || profile.status === 'deleted') {
+    throw new HttpsError('failed-precondition', '帳號正在刪除或已停用。');
+  }
+  if (member.data().role === 'admin') return { isAdmin: true, offeringIds: [] };
+  const assigned = await db
+    .collection(`schools/${schoolId}/courseTeachers`)
+    .where('teacherUids', 'array-contains', uid)
+    .get();
+  if (assigned.docs.length === 0) {
+    throw new HttpsError('permission-denied', '你尚未被指派處理這間學校的課程申訴。');
+  }
+  return { isAdmin: false, offeringIds: assigned.docs.map((item) => item.id) };
+}
+
 function createListTeacherAppealsHandler({ db }) {
   return async (request) => {
     const uid = request.auth && request.auth.uid;
     if (!uid) throw new HttpsError('unauthenticated', '請先登入。');
     const schoolId = requireSchoolId(request.data?.schoolId);
-    const member = await db.doc(`schools/${schoolId}/members/${uid}`).get();
-    const role = member.exists ? member.data().role : null;
-    const active = member.exists && (member.data().status || 'active') === 'active';
-    const isEditor = active && (role === 'admin' || role === 'editor');
-    if (!active || (!isEditor && role !== 'teacher')) {
-      throw new HttpsError('permission-denied', '這頁給老師用。');
-    }
+    const access = await loadTeacherAppealAccess(db, schoolId, uid);
 
     let courses = null;
     let docs = [];
-    if (isEditor) {
+    if (access.isAdmin) {
       const snap = await db.collection('courseAppeals').where('schoolId', '==', schoolId).get();
       docs = snap.docs;
     } else {
-      const mine = await db
-        .collection(`schools/${schoolId}/courseTeachers`)
-        .where('teacherUids', 'array-contains', uid)
-        .get();
       // 文件編號是開課代號（課名｜老師），同名但不同老師的課分得開
-      const offeringIds = mine.docs.map((item) => item.id);
+      const offeringIds = access.offeringIds;
       courses = offeringIds.map((id) => {
         const [name, teacher] = id.split('｜');
         return teacher ? `${name}（${teacher}）` : name;
@@ -80,6 +93,16 @@ function createListTeacherAppealsHandler({ db }) {
         profiles.set(studentUid, snap.exists ? snap.data() : null);
       }),
     );
+
+    // Membership, account availability or the trusted teaching assignment can
+    // be revoked while the student profiles are loading. Do not return old scope.
+    const current = await loadTeacherAppealAccess(db, schoolId, uid);
+    if (
+      (access.isAdmin && !current.isAdmin) ||
+      (!current.isAdmin && access.offeringIds.some((id) => !current.offeringIds.includes(id)))
+    ) {
+      throw new HttpsError('permission-denied', '課程申訴權限已變更，請重新讀取。');
+    }
 
     const rows = docs.map((item) => {
       const data = item.data();

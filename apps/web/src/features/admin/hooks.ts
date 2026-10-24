@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { adminError, adminRequest } from './api';
+import { NuniError } from '@campus/shared/src/nuni';
 
 export function useAdminResource<T>(
   path: string | null,
@@ -33,7 +34,11 @@ export function useAdminResource<T>(
             context,
             revision,
             value:
-              previous?.path === path && previous.context === context ? previous.value : undefined,
+              !(error instanceof NuniError && (error.status === 401 || error.status === 403)) &&
+              previous?.path === path &&
+              previous.context === context
+                ? previous.value
+                : undefined,
             error: adminError(error),
           }));
       });
