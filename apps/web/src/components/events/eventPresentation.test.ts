@@ -46,6 +46,22 @@ it('rejects invalid sources and treats missing dates as unknown', () => {
   expect(formatCampusEventDateTime(undefined)).toBe('時間未提供');
 });
 
+it('keeps the activity fragment through school login without stacking document hashes', () => {
+  const href = buildCampusEventLoginHref('/events/evt-1?schoolId=nthu#registration#leftover');
+  const url = new URL(href, 'https://campus.example');
+  expect(url.searchParams.get('reconnect')).toBe('school');
+  expect(url.searchParams.get('returnUrl')).toBe('/events/evt-1?schoolId=nthu#registration');
+  expect(href.endsWith('#')).toBe(true);
+});
+
+it('rejects an external login return destination', () => {
+  const href = buildCampusEventLoginHref('https://outside.example/events');
+  const url = new URL(href, 'https://campus.example');
+  expect(url.pathname).toBe('/login');
+  expect(url.searchParams.get('reconnect')).toBe('school');
+  expect(url.searchParams.get('returnUrl')).toBe('/');
+});
+
 it('dedupe keys distinguish identical ids across sources', () => {
   expect(campusEventKey({ id: 'same', source: 'school-club-events' })).toBe(
     'school-club-events:same',

@@ -97,7 +97,7 @@ it('searches only loaded items with truthful copy', async () => {
   expect(screen.queryByRole('link', { name: '社團聚' })).toBeNull();
   fireEvent.change(screen.getByRole('searchbox'), { target: { value: '沒有這個' } });
   expect(screen.getByRole('heading', { name: '已載入的活動中沒有符合的結果' })).toBeTruthy();
-  expect(screen.getByText(/不會向伺服器查詢尚未載入的內容/)).toBeTruthy();
+  expect(screen.getByText(/搜尋範圍為已載入的活動，可載入更多後再找/)).toBeTruthy();
 });
 
 it('preserves items and cursor when load-more fails', async () => {

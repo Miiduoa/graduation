@@ -122,8 +122,8 @@ export function EventDetail({
   if (view.status === 'invalid-source') {
     return (
       <section className={styles.status} role="alert">
-        <h2>活動來源無效</h2>
-        <p>請從活動列表重新開啟；相同編號可能存在於不同資料來源，請勿直接改寫網址。</p>
+        <h2>無法開啟此活動</h2>
+        <p>請返回活動列表，重新選擇活動。</p>
         <Link className="btn" href={listHref}>
           回到活動列表
         </Link>

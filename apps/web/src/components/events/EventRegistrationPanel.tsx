@@ -82,13 +82,12 @@ function GuestRegistrationNotice({
     return (
       <section className={styles.panel} role="alert">
         <h3>暫時無法確認學校登入方式</h3>
-        <p>還沒取得登入服務回應，還不能判斷這所學校能否報名。</p>
+        <p>暫時無法取得登入方式，請稍後再試。</p>
         <button type="button" className="btn" onClick={options.retry}>
           重新確認
         </button>
-        <p className={styles.notice}>返回目標仍會保留：可稍後再回到這個活動頁。</p>
         <Link className="btn" href={loginHref}>
-          保留此頁並前往登入說明
+          查看學校登入說明
         </Link>
       </section>
     );
@@ -98,27 +97,24 @@ function GuestRegistrationNotice({
     if (!options.google) {
       return (
         <section className={styles.panel} role="status">
-          <h3>目前無法新辦學校活動報名資格</h3>
+          <h3>學校登入尚未開放</h3>
           <p>
-            這所學校目前沒有開放可用的學校帳號登入方式，因此無法透過本頁取得新的報名資格。若你先前已完成學校資格驗證且伺服器仍確認有效，仍可在支援的活動使用報名。
+            報名需要有效的學校帳號。目前無法連線學校帳號，你仍可查看活動資訊。
           </p>
           <Link className="btn" href={loginHref}>
-            保留此活動頁並查看登入說明
+            查看學校登入說明
           </Link>
         </section>
       );
     }
     return (
       <section className={styles.panel} role="status">
-        <h3>目前無法用 Google 取得學校活動報名資格</h3>
+        <h3>報名需要學校帳號</h3>
         <p>
-          目前公開登入只提供 Google，無法取得學校活動報名所需的學校帳號資格；新的學校帳號登入也尚未開放。若你先前已完成學校資格驗證且伺服器仍確認有效，仍可在支援的活動使用報名。
-        </p>
-        <p className={styles.notice}>
-          瀏覽中的學校若與你的有效學校資格不同，也不會因此取得報名資格。
+          目前只開放 Google 平台登入，學校登入尚未開放，因此暫時無法報名。你仍可查看活動資訊。
         </p>
         <Link className="btn" href={loginHref}>
-          保留此活動頁並查看登入說明
+          查看學校登入說明
         </Link>
       </section>
     );
@@ -127,12 +123,12 @@ function GuestRegistrationNotice({
   if (selectedSchoolId !== PROVIDENCE_SCHOOL_ID) {
     return (
       <section className={styles.panel} role="status">
-        <h3>這所學校目前不能靠登入表單取得報名資格</h3>
+        <h3>這所學校尚未開放登入</h3>
         <p>
-          目前學校帳號登入表單只支援靜宜大學，不會把其他學校的瀏覽狀態授權成可報名資格。若你已有與此瀏覽學校相符、且伺服器確認有效的學校資格，仍可在支援的活動使用報名。
+          目前的學校登入只支援靜宜大學。你仍可瀏覽活動，報名需使用該校的有效學校帳號。
         </p>
         <Link className="btn" href={loginHref}>
-          保留此活動頁並查看登入說明
+          查看學校登入說明
         </Link>
       </section>
     );
@@ -140,7 +136,7 @@ function GuestRegistrationNotice({
 
   return (
     <section className={styles.panel}>
-      <h3>需要有效的學校帳號資格</h3>
+      <h3>報名需要學校帳號</h3>
       <p>瀏覽活動不需登入。若要報名，請先連線與目前瀏覽學校相符的學校帳號。</p>
       <Link className="btn primary" href={loginHref}>
         連線學校帳號後回到此活動
@@ -171,8 +167,8 @@ function MembershipNotice({
   if (membership.status === 'stale') {
     return (
       <section className={styles.panel} role="status">
-        <h3>學校資格尚待伺服器確認</h3>
-        <p>目前只讀到本機快取，還不能確定可否報名。請稍後再試，或重新連線學校帳號。</p>
+        <h3>學校資格尚未確認</h3>
+        <p>暫時無法確認報名資格。請稍後再試，或重新連線學校帳號。</p>
         <Link className="btn" href={buildCampusEventLoginHref(returnPath)}>
           重新連線學校帳號
         </Link>
@@ -182,8 +178,8 @@ function MembershipNotice({
   if (membership.status === 'permission') {
     return (
       <section className={styles.panel} role="status">
-        <h3>目前帳號沒有這所學校的有效成員資格</h3>
-        <p>瀏覽中的學校與伺服器確認的學校成員資格不符，或資格已失效。不會送出報名請求。</p>
+        <h3>目前帳號無法報名這所學校的活動</h3>
+        <p>請確認你的學校資格，或重新連線學校帳號。</p>
         <Link className="btn" href={buildCampusEventLoginHref(returnPath)}>
           重新連線學校帳號
         </Link>
@@ -195,7 +191,7 @@ function MembershipNotice({
       <section className={styles.panel} role="status">
         <h3>瀏覽學校與帳號學校不一致</h3>
         <p>
-          你的學校帳號與目前瀏覽的學校不符。請切換到相符的學校後再報名；其他學校的登入不會授權這所學校的活動。
+          請切換到帳號所屬的學校後再報名。
         </p>
       </section>
     );
@@ -203,7 +199,7 @@ function MembershipNotice({
   return (
     <section className={styles.panel} role="alert">
       <h3>暫時無法確認學校資格</h3>
-      <p>還沒取得伺服器確認的學校成員資料，暫不開放報名操作。</p>
+      <p>請重新載入頁面，或稍後再試。</p>
     </section>
   );
 }
@@ -214,8 +210,8 @@ function InformationalRegistrationPanel({ event }: { event: CampusEvent }) {
     <section className={styles.panel} aria-labelledby={titleId}>
       <h3 id={titleId}>僅供瀏覽</h3>
       <p>
-        這筆來自「{campusEventSourceLabel(event.source)}
-        」，目前只提供資訊瀏覽，不能用本系統報名或取消。相同編號若出現在其他資料來源，也不會自動對應到可報名活動。
+        這筆「{campusEventSourceLabel(event.source)}
+        」目前只提供活動資訊。報名方式請查看主辦單位公告。
       </p>
     </section>
   );

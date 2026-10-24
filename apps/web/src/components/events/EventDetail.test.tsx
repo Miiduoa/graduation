@@ -42,7 +42,7 @@ it('rejects invalid source without probing collections by id alone', async () =>
       sourceParam="made-up"
     />,
   );
-  expect(await screen.findByRole('heading', { name: '活動來源無效' })).toBeTruthy();
+  expect(await screen.findByRole('heading', { name: '無法開啟此活動' })).toBeTruthy();
   expect(loadCampusEvent).not.toHaveBeenCalled();
   expect(screen.getByRole('link', { name: '回到活動列表' }).getAttribute('href')).toBe(
     '/events?schoolId=nthu&campus=nthu',

@@ -176,7 +176,7 @@ it('keeps noncanonical sources informational only and never calls registration A
     />,
   );
   expect(await screen.findByRole('heading', { name: '僅供瀏覽' })).toBeTruthy();
-  expect(screen.getByText(/不能用本系統報名或取消/)).toBeTruthy();
+  expect(screen.getByText(/目前只提供活動資訊。報名方式請查看主辦單位公告/)).toBeTruthy();
   expect(registration.loadEventRegistrationStates).not.toHaveBeenCalled();
   expect(registration.prepareCampusEventIntent).not.toHaveBeenCalled();
 });
@@ -204,11 +204,12 @@ it('tells Google-only guests honestly and preserves return target without claimi
     />,
   );
   expect(
-    await screen.findByRole('heading', { name: '目前無法用 Google 取得學校活動報名資格' }),
+    await screen.findByRole('heading', { name: '報名需要學校帳號' }),
   ).toBeTruthy();
+  expect(screen.getByText(/Google 平台登入，學校登入尚未開放/)).toBeTruthy();
   expect(screen.queryByText(/登入即可報名/)).toBeNull();
   expect(screen.queryByText(/工作階段/)).toBeNull();
-  const link = screen.getByRole('link', { name: '保留此活動頁並查看登入說明' });
+  const link = screen.getByRole('link', { name: '查看學校登入說明' });
   expect(link.getAttribute('href')).toContain('reconnect=school');
   expect(decodeURIComponent(link.getAttribute('href')!.split('returnUrl=')[1]!)).toBe(
     '/events/evt-1?schoolId=nthu&source=school-club-events',
@@ -224,11 +225,11 @@ it('does not promise Providence school form covers a different selected school',
     />,
   );
   expect(
-    await screen.findByRole('heading', { name: '這所學校目前不能靠登入表單取得報名資格' }),
+    await screen.findByRole('heading', { name: '這所學校尚未開放登入' }),
   ).toBeTruthy();
   expect(screen.getByText(/只支援靜宜大學/)).toBeTruthy();
   expect(
-    screen.getByRole('link', { name: '保留此活動頁並查看登入說明' }).getAttribute('href'),
+    screen.getByRole('link', { name: '查看學校登入說明' }).getAttribute('href'),
   ).toContain('returnUrl=');
 });
 
@@ -244,7 +245,7 @@ it('surfaces sign-in capability errors with retry while preserving return path',
   fireEvent.click(screen.getByRole('button', { name: '重新確認' }));
   expect(options.retry).toHaveBeenCalled();
   expect(
-    screen.getByRole('link', { name: '保留此頁並前往登入說明' }).getAttribute('href'),
+    screen.getByRole('link', { name: '查看學校登入說明' }).getAttribute('href'),
   ).toContain('returnUrl=');
 });
 
@@ -276,7 +277,7 @@ it('blocks revoked membership and stale cache before actions', async () => {
     />,
   );
   expect(
-    await screen.findByRole('heading', { name: '目前帳號沒有這所學校的有效成員資格' }),
+    await screen.findByRole('heading', { name: '目前帳號無法報名這所學校的活動' }),
   ).toBeTruthy();
 
   membership.watch.mockImplementation((_uid, _receive, fail) => {
@@ -290,7 +291,7 @@ it('blocks revoked membership and stale cache before actions', async () => {
       returnPath="/events/evt-2?schoolId=nthu&source=school-club-events"
     />,
   );
-  expect(await screen.findByRole('heading', { name: '學校資格尚待伺服器確認' })).toBeTruthy();
+  expect(await screen.findByRole('heading', { name: '學校資格尚未確認' })).toBeTruthy();
 });
 
 it('guest and ready hook renders settle without repeat reads when membership objects are fresh each time', async () => {
@@ -301,7 +302,7 @@ it('guest and ready hook renders settle without repeat reads when membership obj
     />,
   );
   expect(
-    await screen.findByRole('heading', { name: '目前無法用 Google 取得學校活動報名資格' }),
+    await screen.findByRole('heading', { name: '報名需要學校帳號' }),
   ).toBeTruthy();
   await act(async () => {
     await Promise.resolve();
@@ -523,7 +524,7 @@ it('confirms cancel only after dialog confirm and drops stale finally enablement
     failMembership?.('permission');
   });
   expect(
-    await screen.findByRole('heading', { name: '目前帳號沒有這所學校的有效成員資格' }),
+    await screen.findByRole('heading', { name: '目前帳號無法報名這所學校的活動' }),
   ).toBeTruthy();
 
   await act(async () => {
@@ -565,7 +566,7 @@ it('invalidates authorization synchronously on permission fail before a deferred
     failMembership?.('permission');
   });
   expect(
-    await screen.findByRole('heading', { name: '目前帳號沒有這所學校的有效成員資格' }),
+    await screen.findByRole('heading', { name: '目前帳號無法報名這所學校的活動' }),
   ).toBeTruthy();
 
   await act(async () => {
@@ -737,7 +738,7 @@ it('re-authorization at the same uid cannot revive an old captured guard', async
     failMembership?.('permission');
   });
   expect(
-    await screen.findByRole('heading', { name: '目前帳號沒有這所學校的有效成員資格' }),
+    await screen.findByRole('heading', { name: '目前帳號無法報名這所學校的活動' }),
   ).toBeTruthy();
   expect(oldGuard()).toBe(false);
 

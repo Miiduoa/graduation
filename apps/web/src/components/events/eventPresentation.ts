@@ -1,5 +1,6 @@
 import type { CampusEvent, CampusEventSource } from '@/lib/campusEvents';
 import { eventRegistrationLabel, type EventRegistrationState } from '@/lib/campusEventRegistration';
+import { schoolLoginHref } from '@/lib/navigation';
 
 const EVENT_SOURCES: CampusEventSource[] = [
   'school-club-events',
@@ -86,7 +87,7 @@ export function buildCampusEventDetailHref(
 }
 
 export function buildCampusEventLoginHref(returnPath: string): string {
-  return `/login?reconnect=school&returnUrl=${encodeURIComponent(returnPath)}`;
+  return schoolLoginHref(returnPath);
 }
 
 export function campusEventRegistrationCountLabel(state: EventRegistrationState): string | null {
