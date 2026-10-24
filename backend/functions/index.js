@@ -1277,10 +1277,16 @@ exports.listPulseAggregates = onCall(
     region: REGION,
   },
   async (request) => {
+    const uid = request.auth?.uid;
+    if (!uid) {
+      throw new HttpsError('unauthenticated', 'Must be logged in');
+    }
+
     const schoolId = String(request.data?.schoolId || '').trim();
     if (!schoolId) {
       throw new HttpsError('invalid-argument', 'Missing schoolId');
     }
+    await assertActiveSchoolMember(schoolId, uid);
 
     const snap = await db
       .collection('schools')
@@ -3331,11 +3337,17 @@ exports.searchBooks = onCall(
     region: REGION,
   },
   async (request) => {
+    const uid = request.auth?.uid;
+    if (!uid) {
+      throw new HttpsError('unauthenticated', 'Must be logged in');
+    }
+
     const { schoolId, query, limit = 20 } = request.data;
 
     if (!schoolId) {
       throw new HttpsError('invalid-argument', 'Missing schoolId');
     }
+    await assertActiveSchoolMember(schoolId, uid);
 
     let booksRef = db.collection('schools').doc(schoolId).collection('libraryBooks');
 
@@ -4509,6 +4521,11 @@ exports.getBusArrivals = onCall(
     secrets: [TDX_CLIENT_ID, TDX_CLIENT_SECRET],
   },
   async (request) => {
+    const uid = request.auth?.uid;
+    if (!uid) {
+      throw new HttpsError('unauthenticated', 'Must be logged in');
+    }
+
     const { schoolId, stopId, city, routeId } = request.data;
 
     if (!schoolId || !stopId) {
