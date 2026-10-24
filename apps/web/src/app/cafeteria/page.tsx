@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { SiteShell } from '@/components/SiteShell';
 import { CampusIcon } from '@/components/CampusIcon';
 import {
+  MENU_STALE_TEXT,
   SHOWCASE_ORDER_BUTTON_TEXT,
   isMenuStale,
   studentCafeteriaAction,
@@ -435,7 +436,7 @@ function RestaurantCard({
           </button>
         ) : null}
         {isMenuStale(cafeteria.menuSyncedAt) && items.length > 0 ? (
-          <p className={styles.stale}>菜單較久未更新，價格請以店家為準。</p>
+          <p className={styles.stale}>{MENU_STALE_TEXT}</p>
         ) : null}
       </div>
       <footer className={styles.cardFooter}>

@@ -267,8 +267,12 @@
   padding-top: 4px;
 }
 .cart {
+  --cart-top: max(24px, env(safe-area-inset-top, 0px));
   position: sticky;
-  top: 160px;
+  top: var(--cart-top);
+  max-height: calc(100dvh - var(--cart-top) - 24px);
+  overflow-y: auto;
+  scrollbar-gutter: stable;
   min-width: 0;
   display: grid;
   gap: 18px;
@@ -276,7 +280,7 @@
   border: 1px solid var(--border);
   border-radius: var(--radius);
   background: var(--surface);
-  scroll-margin-top: 180px;
+  scroll-margin-top: calc(var(--cart-top) + 16px);
 }
 .cart h3 {
   margin: 0;
@@ -342,6 +346,9 @@
   outline: 3px solid var(--focus-ring);
   outline-offset: 3px;
 }
+.menuBody .sectionNav a:focus-visible {
+  outline-offset: -3px;
+}
 .validation {
   padding: 14px 18px;
   border-radius: var(--radius-sm);
@@ -359,6 +366,9 @@
   }
   .cart {
     position: static;
+    max-height: none;
+    overflow-y: visible;
+    scrollbar-gutter: auto;
   }
   .mobileCartShortcut {
     display: flex;

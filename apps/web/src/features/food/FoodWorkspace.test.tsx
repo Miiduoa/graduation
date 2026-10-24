@@ -199,6 +199,76 @@ it('replaces a single-choice option directly while preserving the other cart fie
     { menuItemId: 'rice', quantity: 1, selectedOptionIds: ['regular'] },
   ]);
 });
+
+it.each(['removed', 'unavailable'])(
+  'requires correction when a selected optional choice is %s after refreshing',
+  async (change) => {
+    let menu = menuFixture();
+    menu.sections[0].items[0].optionGroups[0].minimumSelections = 0;
+    mocks.request.mockImplementation((path, context, input) =>
+      path.endsWith('/menu') ? Promise.resolve(menu) : respond(path, context, input),
+    );
+    render(<FoodWorkspace />);
+    await choose();
+    fireEvent.click(screen.getByLabelText('加飯（+NT$20）'));
+    menu = menuFixture();
+    const group = menu.sections[0].items[0].optionGroups[0];
+    group.minimumSelections = 0;
+    if (change === 'removed') group.options = [];
+    else group.options[0].available = false;
+    fireEvent.click(button('更新菜單'));
+    await screen.findByText('部分口味已變更或暫停供應，請重新選擇。');
+    fireEvent.click(button('計算金額與確認庫存'));
+    expect(screen.getByText('餐點選項已有更新，請重新選擇口味後再確認。')).toBeTruthy();
+    expect(mocks.request.mock.calls.some(([path]) => path.endsWith('/quotes'))).toBe(false);
+    fireEvent.click(button('重設蔬菜便當選項'));
+    expect(screen.queryByText('部分口味已變更或暫停供應，請重新選擇。')).toBeNull();
+    expect(screen.queryByText('餐點選項已有更新，請重新選擇口味後再確認。')).toBeNull();
+    expect((screen.getByLabelText('蔬菜便當 數量') as HTMLInputElement).value).toBe('1');
+  },
+);
+
+it('drops a removed single-choice ID when choosing its replacement and quotes only the new option', async () => {
+  let menu = menuFixture();
+  mocks.request.mockImplementation((path, context, input) => {
+    if (path.endsWith('/menu')) return Promise.resolve(menu);
+    if (path.endsWith('/quotes')) {
+      const result = quoteFixture(input.requestedPickupAt);
+      result.lines[0].selectedOptions = [
+        {
+          optionId: 'replacement',
+          nameSnapshot: '新份量',
+          priceDelta: { amountMinor: 20, currency: 'TWD' },
+        },
+      ];
+      return Promise.resolve(result);
+    }
+    return respond(path, context, input);
+  });
+  render(<FoodWorkspace />);
+  await choose();
+  fireEvent.click(screen.getByLabelText('加飯（+NT$20）'));
+  menu = menuFixture();
+  menu.sections[0].items[0].optionGroups[0].options = [
+    {
+      id: 'replacement',
+      name: '新份量',
+      available: true,
+      priceDelta: { amountMinor: 20, currency: 'TWD' },
+    },
+  ];
+  fireEvent.click(button('更新菜單'));
+  await screen.findByText('部分口味已變更或暫停供應，請重新選擇。');
+  fireEvent.click(screen.getByLabelText('新份量（+NT$20）'));
+  expect(screen.queryByText('部分口味已變更或暫停供應，請重新選擇。')).toBeNull();
+  fireEvent.click(button('計算金額與確認庫存'));
+  await screen.findByRole('region', { name: '送出前確認' });
+  const payload = mocks.request.mock.calls.find(([path]) => path.endsWith('/quotes'))?.[2];
+  expect(payload.items).toEqual([
+    { menuItemId: 'rice', quantity: 1, selectedOptionIds: ['replacement'] },
+  ]);
+});
+
 async function quote() {
   await choose();
   fireEvent.click(screen.getByLabelText('加飯（+NT$20）'));

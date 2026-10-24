@@ -28,6 +28,11 @@ type CartLine = { quantity: number; options: string[]; note: string };
 type Cart = Record<string, CartLine>;
 const emptyLine: CartLine = { quantity: 0, options: [], note: '' };
 
+function hasStaleOptions(item: NuniFoodMenuItem, line: CartLine) {
+  const options = item.optionGroups.flatMap((group) => group.options);
+  return line.options.some((id) => !options.some((option) => option.id === id && option.available));
+}
+
 function needsOptions(item: NuniFoodMenuItem, line: CartLine) {
   return item.optionGroups.some((group) => {
     const chosen = group.options.filter((option) => line.options.includes(option.id));
@@ -179,6 +184,10 @@ export function FoodMenu({
       setValidation(`每筆訂單最多選擇 ${NUNI_FOOD_LIMITS.maxQuoteLines} 種餐點。`);
       return;
     }
+    if (selected.some((item) => hasStaleOptions(item, cart[item.id]))) {
+      setValidation('餐點選項已有更新，請重新選擇口味後再確認。');
+      return;
+    }
     if (
       !selected.length ||
       selected.some(
@@ -275,6 +284,10 @@ export function FoodMenu({
                 <h3>{section.name}</h3>
                 {section.items.map((item) => {
                   const line = cart[item.id] ?? emptyLine;
+                  const staleOptions = hasStaleOptions(item, line);
+                  const knownOptionIds = new Set(
+                    item.optionGroups.flatMap((group) => group.options.map((option) => option.id)),
+                  );
                   const unavailable =
                     locked ||
                     !item.available ||
@@ -338,6 +351,19 @@ export function FoodMenu({
                       </div>
                       {line.quantity > 0 && (
                         <div className={styles.itemCustomization}>
+                          {staleOptions && (
+                            <div role="alert">
+                              <p>部分口味已變更或暫停供應，請重新選擇。</p>
+                              <Button
+                                variant="ghost"
+                                disabled={locked}
+                                aria-label={`重設${item.name}選項`}
+                                onClick={() => update(item.id, { options: [] })}
+                              >
+                                重選口味
+                              </Button>
+                            </div>
+                          )}
                           {item.optionGroups.map((group) => (
                             <fieldset
                               className={styles.options}
@@ -359,7 +385,7 @@ export function FoodMenu({
                                     name={`${sectionPrefix}-${item.id}-${group.id}`}
                                     checked={line.options.includes(option.id)}
                                     disabled={
-                                      !option.available ||
+                                      (!option.available && !line.options.includes(option.id)) ||
                                       (group.maximumSelections !== 1 &&
                                         !line.options.includes(option.id) &&
                                         group.options.filter((value) =>
@@ -372,8 +398,11 @@ export function FoodMenu({
                                           ? [
                                               ...line.options.filter(
                                                 (id) =>
-                                                  group.maximumSelections !== 1 ||
-                                                  !group.options.some((value) => value.id === id),
+                                                  knownOptionIds.has(id) &&
+                                                  (group.maximumSelections !== 1 ||
+                                                    !group.options.some(
+                                                      (value) => value.id === id,
+                                                    )),
                                               ),
                                               option.id,
                                             ]
@@ -450,8 +479,12 @@ export function FoodMenu({
                       <strong>
                         {item.name} × {cart[item.id].quantity}
                       </strong>
-                      {needsOptions(item, cart[item.id]) && (
-                        <span className={styles.muted}>尚有必選項目</span>
+                      {hasStaleOptions(item, cart[item.id]) ? (
+                        <span className={styles.muted}>請重新選擇口味</span>
+                      ) : (
+                        needsOptions(item, cart[item.id]) && (
+                          <span className={styles.muted}>尚有必選項目</span>
+                        )
                       )}
                       {!item.available && (
                         <span className={styles.muted}>暫停供應，請調整餐點</span>
