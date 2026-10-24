@@ -1,9 +1,13 @@
-import { fireEvent, render, screen } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import type { ReactNode } from 'react';
 import { afterEach, expect, it, vi } from 'vitest';
 import LifePage from './page';
 
 const selectedSchool = vi.hoisted(() => vi.fn());
+const navigation = vi.hoisted(() => ({
+  search: '',
+  suspend: false,
+}));
 
 vi.mock('@/components/SiteShell', () => ({
   SiteShell: ({ children }: { children: ReactNode }) => <main>{children}</main>,
@@ -13,9 +17,21 @@ vi.mock('@/components/SelectedSchoolProvider', () => ({
   useOptionalSelectedSchool: selectedSchool,
 }));
 
+vi.mock('next/navigation', () => ({
+  useSearchParams: () => {
+    if (navigation.suspend) {
+      throw new Promise(() => {});
+    }
+    return new URLSearchParams(navigation.search);
+  },
+}));
+
 afterEach(() => {
+  cleanup();
   vi.unstubAllEnvs();
   selectedSchool.mockReset();
+  navigation.search = '';
+  navigation.suspend = false;
 });
 
 it('線上點餐還沒開：生活頁不放「我的訂單」', () => {
@@ -133,4 +149,164 @@ it('學校資訊入口保留已選校園，並可被免登入搜尋找到', () =
   expect(href.pathname).toBe('/school-info');
   expect(href.searchParams.get('schoolId')).toBe('nthu');
   expect(href.searchParams.get('campus')).toBe('nthu');
+});
+
+it('目錄尚未就緒時立即沿用 URL 校園範圍，不沿用過期選定學校', () => {
+  navigation.search = 'campus=nthu&school=PU&schoolId=pu';
+  selectedSchool.mockReturnValue({
+    selectedSchool: { id: 'pu', code: 'PU' },
+    loading: true,
+    catalogStatus: 'loading',
+  });
+  render(<LifePage />);
+  const publicAndPrivate = [
+    '/map',
+    '/library',
+    '/school-info',
+    '/lost-found',
+    '/friends',
+    '/timetable',
+  ];
+  for (const pathname of publicAndPrivate) {
+    const link = screen.getByRole('link', {
+      name: new RegExp(
+        ({
+          '/map': '校園地圖',
+          '/library': '圖書館',
+          '/school-info': '學校資訊',
+          '/lost-found': '失物招領',
+          '/friends': '找人',
+          '/timetable': '共同空堂',
+        } as Record<string, string>)[pathname],
+      ),
+    });
+    const href = new URL(link.getAttribute('href')!, 'https://campus.example');
+    expect(href.pathname).toBe(pathname);
+    expect([...href.searchParams.entries()]).toEqual([
+      ['school', 'PU'],
+      ['schoolId', 'pu'],
+      ['campus', 'nthu'],
+    ]);
+  }
+});
+
+it('未就緒時只保留 school/schoolId/campus，並維持 URL 編碼且不傳播無關參數', () => {
+  navigation.search =
+    'school=PU%20Main&schoolId=nthu%2Fmain&campus=north%2Bgate&token=secret&returnUrl=%2Fadmin';
+  selectedSchool.mockReturnValue({
+    selectedSchool: { id: 'pu' },
+    loading: false,
+    catalogStatus: 'loading',
+  });
+  render(<LifePage />);
+  const href = new URL(
+    screen.getByRole('link', { name: /圖書館/ }).getAttribute('href')!,
+    'https://campus.example',
+  );
+  expect(href.pathname).toBe('/library');
+  expect(href.searchParams.get('school')).toBe('PU Main');
+  expect(href.searchParams.get('schoolId')).toBe('nthu/main');
+  expect(href.searchParams.get('campus')).toBe('north+gate');
+  expect(href.searchParams.has('token')).toBe(false);
+  expect(href.searchParams.has('returnUrl')).toBe(false);
+  expect(href.search).toBe('?school=PU+Main&schoolId=nthu%2Fmain&campus=north%2Bgate');
+});
+
+it('未就緒時保留 campus=all 與未知校園查詢，不改寫成既有選定學校', () => {
+  navigation.search = 'campus=all';
+  selectedSchool.mockReturnValue({
+    selectedSchool: { id: 'pu', code: 'PU' },
+    loading: true,
+    catalogStatus: 'loading',
+  });
+  render(<LifePage />);
+  expect(
+    new URL(screen.getByRole('link', { name: /校園地圖/ }).getAttribute('href')!, 'https://campus.example')
+      .searchParams.get('campus'),
+  ).toBe('all');
+  cleanup();
+
+  navigation.search = 'campus=not-a-real-school&school=???';
+  render(<LifePage />);
+  const unknown = new URL(
+    screen.getByRole('link', { name: /圖書館/ }).getAttribute('href')!,
+    'https://campus.example',
+  );
+  expect([...unknown.searchParams.entries()]).toEqual([
+    ['school', '???'],
+    ['campus', 'not-a-real-school'],
+  ]);
+  expect(unknown.searchParams.get('schoolId')).toBeNull();
+});
+
+it('目錄就緒後以 provider 選定為準，空選定則使用 campus=all', () => {
+  navigation.search = 'campus=nthu&school=PU&schoolId=pu&token=x';
+  selectedSchool.mockReturnValue({
+    selectedSchool: { id: 'nthu' },
+    loading: false,
+    catalogStatus: 'ready',
+  });
+  render(<LifePage />);
+  const ready = new URL(
+    screen.getByRole('link', { name: /學校資訊/ }).getAttribute('href')!,
+    'https://campus.example',
+  );
+  expect([...ready.searchParams.entries()]).toEqual([
+    ['schoolId', 'nthu'],
+    ['campus', 'nthu'],
+    ['school', 'NTHU'],
+  ]);
+  cleanup();
+
+  selectedSchool.mockReturnValue({
+    selectedSchool: null,
+    loading: false,
+    catalogStatus: 'ready',
+  });
+  render(<LifePage />);
+  const cleared = new URL(
+    screen.getByRole('link', { name: /校園地圖/ }).getAttribute('href')!,
+    'https://campus.example',
+  );
+  expect([...cleared.searchParams.entries()]).toEqual([['campus', 'all']]);
+});
+
+it('URL 校園參數不影響生活頁搜尋與分類狀態', () => {
+  navigation.search = 'campus=nthu&school=NTHU&schoolId=nthu';
+  selectedSchool.mockReturnValue({
+    selectedSchool: { id: 'pu' },
+    loading: true,
+    catalogStatus: 'loading',
+  });
+  render(<LifePage />);
+  const search = screen.getByRole('searchbox', { name: '快速找服務' }) as HTMLInputElement;
+  expect(search.value).toBe('');
+  expect(screen.getByRole('button', { name: '全部' }).getAttribute('aria-pressed')).toBe('true');
+  expect(screen.getByRole('status').textContent).toBe('共 11 項服務');
+  fireEvent.change(search, { target: { value: '公車' } });
+  expect(screen.getAllByRole('link')).toHaveLength(1);
+  expect(screen.getByRole('link', { name: /公車/ }).getAttribute('href')).toContain('campus=nthu');
+});
+
+it('無校園 URL 的載入路徑不發明預設學校', () => {
+  navigation.search = '';
+  selectedSchool.mockReturnValue({
+    selectedSchool: { id: 'pu' },
+    loading: true,
+    catalogStatus: 'loading',
+  });
+  render(<LifePage />);
+  for (const link of screen.getAllByRole('link')) {
+    expect(link.getAttribute('href')).toMatch(/^\/[a-z-]+$/);
+  }
+});
+
+it('Suspense 備援只顯示安全載入狀態，沒有錯誤範圍的可互動服務連結', () => {
+  navigation.suspend = true;
+  navigation.search = 'campus=nthu';
+  render(<LifePage />);
+  expect(screen.getByRole('status').textContent).toBe('正在載入生活服務…');
+  expect(screen.queryAllByRole('link')).toHaveLength(0);
+  expect(screen.queryByText('校園地圖')).toBeNull();
+  expect(screen.queryByText('圖書館')).toBeNull();
 });
