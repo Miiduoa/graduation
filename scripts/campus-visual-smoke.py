@@ -73,6 +73,90 @@ async def check_oled(page):
     ), 'Browser chrome does not match the OLED theme'
 
 
+async def check_task_text_scaling(page):
+    """Exercise signed-in task markup with the built CSS, without an account."""
+    previous = await page.evaluate('''() => ({
+        fontSize: document.documentElement.style.fontSize,
+        theme: document.documentElement.getAttribute('data-theme')
+    })''')
+    viewport = page.viewport_size
+    await page.evaluate(r'''() => {
+        const css = [...document.styleSheets]
+            .flatMap(sheet => [...sheet.cssRules].map(rule => rule.cssText)).join('\n');
+        const names = [...new Set([...css.matchAll(/\.([-_a-zA-Z][-_a-zA-Z0-9]*)/g)]
+            .map(match => match[1]))];
+        const main = document.querySelector('#today-content');
+        const namespaces = [...(main?.classList ?? [])]
+            .map(value => value.match(/^(.+)_main(?:__[-_a-zA-Z0-9]+)?$/)?.[1])
+            .filter(Boolean);
+        if (namespaces.length !== 1) throw new Error('Missing unique rendered home namespace');
+        const c = name => {
+            const expected = namespaces[0] + '_' + name;
+            const matches = names.filter(value => value === expected || value.startsWith(expected + '__'));
+            if (matches.length !== 1) throw new Error('Missing unique built home class: ' + name);
+            return matches[0];
+        };
+        const fixture = document.createElement('div');
+        fixture.dataset.taskTypographyFixture = 'true';
+        fixture.className = c('page');
+        fixture.innerHTML = `<main class="${c('main')}">
+          <div class="${c('columns')}"><div class="${c('dayContent')}">
+            <section class="${c('workPanel')}"><ul class="${c('list')}"><li>
+              <a href="#" class="${c('task')}">
+                <span class="${c('taskMarker')}" aria-hidden="true">□</span>
+                <span class="${c('taskContent')}" data-task-title>
+                  <strong>資料結構期末報告</strong><span>資料結構 · 作業</span>
+                </span>
+                <span class="${c('overdue')}" data-task-deadline>
+                  <time datetime="2026-10-22T15:59:00Z">10/22 23:59</time>
+                  <small>已過參考期限・仍可繳交</small>
+                </span>
+                <span class="${c('arrow')}" aria-hidden="true">→</span>
+              </a>
+            </li></ul></section>
+          </div></div>
+        </main>`;
+        document.body.append(fixture);
+    }''')
+    try:
+        for theme in ['light', 'dark']:
+            await page.locator('html').evaluate('(el, theme) => el.dataset.theme = theme', theme)
+            for width in [320, 360, 390, 768]:
+                await page.set_viewport_size({'width': width, 'height': 844})
+                for root_size in [16, 32]:
+                    await page.locator('html').evaluate(
+                        '(el, size) => el.style.fontSize = size + "px"', root_size
+                    )
+                    await page.evaluate('''() => new Promise(resolve =>
+                        requestAnimationFrame(() => requestAnimationFrame(resolve)))''')
+                    measurements = await page.locator('[data-task-typography-fixture]').evaluate('''el => {
+                        const title = el.querySelector('[data-task-title]');
+                        const deadline = el.querySelector('[data-task-deadline]');
+                        return {
+                            titleWidth: title.getBoundingClientRect().width,
+                            titleSize: parseFloat(getComputedStyle(title.querySelector('strong')).fontSize),
+                            deadlineWidth: deadline.clientWidth,
+                            deadlineScrollWidth: deadline.scrollWidth,
+                        };
+                    }''')
+                    scenario = f'{theme}, {width}px viewport, {root_size}px root: {measurements}'
+                    await no_overflow(page)
+                    assert measurements['titleWidth'] >= 2 * measurements['titleSize'], scenario
+                    assert measurements['deadlineScrollWidth'] <= measurements['deadlineWidth'] + 1, scenario
+                    if theme == 'dark':
+                        assert await page.locator('body').evaluate(
+                            'el => getComputedStyle(el).backgroundColor === "rgb(0, 0, 0)"'
+                        ), scenario
+    finally:
+        await page.evaluate('''previous => {
+            document.querySelector('[data-task-typography-fixture]')?.remove();
+            document.documentElement.style.fontSize = previous.fontSize;
+            if (previous.theme === null) document.documentElement.removeAttribute('data-theme');
+            else document.documentElement.setAttribute('data-theme', previous.theme);
+        }''', previous)
+        await page.set_viewport_size(viewport)
+
+
 async def main():
     results = []
     errors = []
@@ -203,6 +287,8 @@ async def main():
             await no_overflow(page)
             await page.screenshot(path=str(OUT / 'home-large-text.png'), full_page=True, animations='disabled')
             await check_mobile_navigation(page)
+            await check_task_text_scaling(page)
+            results.append('course task titles and long deadlines reflow at 200% text size in both themes')
             await goto_path(page, '/life?campus=pu')
             await no_overflow(page)
             await check_mobile_navigation(page)
