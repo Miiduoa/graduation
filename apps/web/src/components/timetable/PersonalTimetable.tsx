@@ -49,6 +49,7 @@ import {
 } from '@/lib/timetable/store';
 import { SchoolAccountRequired } from '@/components/SchoolAccountRequired';
 import { isFunctionsUnconfiguredError } from '@/lib/functionsUrl';
+import { loginHref } from '@/lib/navigation';
 import { listAcceptedFriends } from '@/lib/timetable/friends';
 import { useAcademicRecords } from '@/lib/useAcademicRecords';
 import type { AcademicCourse } from '@/lib/academicRecords';
@@ -57,6 +58,9 @@ import { TimetableGrid, UnscheduledCourses } from './TimetableGrid';
 import { validateCourseDraft } from './courseEditorModel';
 import { planningReadiness } from './timetableMovement';
 import movement from './timetableMovement.module.css';
+
+export const SHARE_NEEDS_SCHOOL_LOGIN_COPY =
+  '登入學校帳號後就能分享課表連結；目前課表先存在這台瀏覽器。';
 
 function shareFailureCopy(error: unknown): string {
   if (isFunctionsUnconfiguredError(error)) return '課表分享尚未啟用';
@@ -719,7 +723,8 @@ function TimetableWorkspace({ schoolId }: { schoolId: string }) {
       </div>
       {!uid && (
         <p className={styles.notice}>
-          這個功能還沒接通。分享連結要等學校帳號接上才能用，課表仍可先在這台瀏覽器整理。
+          {SHARE_NEEDS_SCHOOL_LOGIN_COPY}{' '}
+          <Link href={loginHref('/timetable')}>登入學校帳號</Link>
         </p>
       )}
       {shareUrl && (

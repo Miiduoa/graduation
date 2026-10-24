@@ -1,7 +1,7 @@
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { cleanMeta } from '@campus/shared';
-import { PersonalTimetable } from './PersonalTimetable';
+import { PersonalTimetable, SHARE_NEEDS_SCHOOL_LOGIN_COPY } from './PersonalTimetable';
 
 const context = vi.hoisted(() => ({
   schoolId: 'nthu',
@@ -158,6 +158,19 @@ it('resets the timetable and importer when the browsing school changes', async (
   expect(screen.getAllByText('靜宜舊課表').length).toBeGreaterThan(0);
   expect(screen.queryByText('清大新課表')).toBeNull();
   expect(context.academic).toHaveBeenCalledWith('courses', true);
+});
+
+it('offers school login for sharing instead of saying the feature is not connected', async () => {
+  context.schoolId = 'pu';
+  render(<PersonalTimetable />);
+  await screen.findByRole('button', { name: '新增課程' });
+  expect(screen.getByText(SHARE_NEEDS_SCHOOL_LOGIN_COPY, { exact: false })).toBeTruthy();
+  expect(screen.queryByText(/這個功能還沒接通/)).toBeNull();
+  expect(screen.queryByText(/分享連結要等學校帳號接上才能用/)).toBeNull();
+  expect(screen.getByRole('link', { name: '登入學校帳號' }).getAttribute('href')).toBe(
+    '/login?returnUrl=%2Ftimetable',
+  );
+  expect(screen.queryByRole('button', { name: '複製分享連結' })).toBeNull();
 });
 
 it('does not silently load Providence data when no campus is selected', () => {
