@@ -7,6 +7,8 @@ import { fileURLToPath } from 'node:url';
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const require = createRequire(import.meta.url);
 const pdfRoot = path.dirname(require.resolve('pdfjs-dist/package.json'));
+const fflateRoot = path.dirname(require.resolve('fflate/package.json'));
+const fflateVersion = require(path.join(fflateRoot, 'package.json')).version;
 const expectedSheetHash = '8dc73fc3b00203e72d176e85b50938627c7b086e607c682e8d3c22c02bb99fe8';
 const sha = (buffer) => createHash('sha256').update(buffer).digest('hex');
 if (sha(await readFile(path.join(root, 'vendor/xlsx-0.20.3.tgz'))) !== expectedSheetHash)
@@ -66,7 +68,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
           sha256: expectedSheetHash,
         },
         pdfjs: { version: '6.4.299', assets: sources },
-        fflate: '0.8.2',
+        fflate: fflateVersion,
         esbuild: '0.28.2',
         readerSha256: sha(bundle),
       },
@@ -78,7 +80,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
   const licenses = [
     ['SheetJS CE 0.20.3', path.join(path.dirname(require.resolve('xlsx')), 'LICENSE')],
     ['PDF.js 6.4.299', path.join(pdfRoot, 'LICENSE')],
-    ['fflate 0.8.2', path.join(path.dirname(require.resolve('fflate')), '../LICENSE')],
+    [`fflate ${fflateVersion}`, path.join(fflateRoot, 'LICENSE')],
   ];
   let licenseText = '';
   for (const [title, file] of licenses)

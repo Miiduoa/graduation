@@ -2,7 +2,9 @@ module.exports = {
   preset: 'jest-expo',
   setupFilesAfterEnv: ['<rootDir>/jest.setup.js'],
   transformIgnorePatterns: [
-    'node_modules/(?!((jest-)?react-native|@react-native(-community)?)|expo(nent)?|@expo(nent)?/.*|@expo-google-fonts/.*|react-navigation|@react-navigation/.*|@sentry/react-native|native-base|react-native-svg|firebase|@firebase/.*)',
+    // decode-uri-component@0.5.1 is ESM-only (security override); allow Babel so Jest can load it.
+    // Runtime interop is owned by patches/query-string@7.1.3.patch (not a Jest mapper/shim).
+    'node_modules/(?!((jest-)?react-native|@react-native(-community)?)|expo(nent)?|@expo(nent)?/.*|@expo-google-fonts/.*|react-navigation|@react-navigation/.*|@sentry/react-native|native-base|react-native-svg|firebase|@firebase/.*|decode-uri-component)',
   ],
   moduleNameMapper: {
     '^@firebase/auth/dist/rn/index\\.js$': '<rootDir>/jest/firebase-auth-rn-mock.js',
