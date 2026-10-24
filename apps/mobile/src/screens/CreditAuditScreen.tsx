@@ -204,7 +204,7 @@ export function CreditAuditScreen(props: Props) {
                 尚無可用的修課紀錄
               </Text>
               <Text style={{ color: theme.colors.muted, textAlign: 'center', lineHeight: 20 }}>
-                目前帳號在「{school.name}」還沒有已發布、可確認範圍的成績。讀取成功後會顯示在這裡；系統不會自動選課，也不會代替學校做正式畢業認定。
+                你在「{school.name}」尚無可用的修課紀錄。若成績剛發布或同步，請稍後重新讀取。
               </Text>
               <Button text="重新整理" kind="primary" onPress={() => void load()} />
             </View>
@@ -227,11 +227,14 @@ export function CreditAuditScreen(props: Props) {
         style={{ flex: 1 }}
         contentContainerStyle={{ gap: 12, paddingBottom: TAB_BAR_CONTENT_BOTTOM_PADDING }}
       >
-        <Card title="說明">
+        <Card title="試算依據">
           <Text style={{ color: theme.colors.muted, fontSize: 13, lineHeight: 20 }}>
             {isPu
-              ? '以下依靜宜大學公開修業參考模型粗估學分進度，僅供個人參考。入學年度、重修、抵免與轉學分規則可能與正式審查不同；本畫面不會自動選課，也不代表學校正式畢業資格。'
-              : `目前學校為「${school.name}」。這裡只整理你在此校、此帳號的修課紀錄與分類加總，沒有套用靜宜大學畢業門檻，也不推估正式畢業資格。本畫面不會自動選課或核發正式證明。`}
+              ? '依靜宜參考模型試算；入學年度、學制、重修與抵免規則，請以學校正式審查為準。'
+              : `「${school.name}」尚未設定畢業規則。以下整理你在此校的修課紀錄與參考加總。`}
+          </Text>
+          <Text style={{ color: theme.colors.muted, fontSize: 13, lineHeight: 20, marginTop: 6 }}>
+            參考通過學分以60分或來源明示通過加總；各學制及課程的及格標準可能不同。
           </Text>
         </Card>
 
@@ -284,7 +287,7 @@ export function CreditAuditScreen(props: Props) {
 
               {deptIsUnknown ? (
                 <Text style={{ color: theme.colors.muted, fontSize: 12, lineHeight: 18 }}>
-                  尚未對應到明確系所，以下為一般參考預設，不是自動官方偵測，也不是已驗證門檻。請自行選擇較接近的系所，或以學校正式規定為準。
+                  尚未對應你的系所，目前使用一般參考模型。請切換系所，並核對你的入學年度規定。
                 </Text>
               ) : detectedDept && detectedDept.id !== 'default' && !manualDeptId ? (
                 <Text style={{ color: theme.colors.muted, fontSize: 12, lineHeight: 18 }}>
@@ -439,7 +442,7 @@ export function CreditAuditScreen(props: Props) {
                 {totalEarned}
               </Text>
               <Text style={{ color: theme.colors.muted, fontSize: 12, marginTop: 8, lineHeight: 18 }}>
-                僅依通過課程加總，未套用他校畢業門檻，也不代表正式畢業資格。
+                此校未套用畢業門檻，請核對正式修業規定。
               </Text>
             </>
           )}
@@ -835,7 +838,7 @@ export function CreditAuditScreen(props: Props) {
               style={{ color: theme.colors.muted, fontSize: 13, lineHeight: 20, marginBottom: 8 }}
             >
               依「{currentDept.shortName}」參考模型，粗估還差約 {remaining}{' '}
-              學分。實際選課與畢業審查請以學校規定為準；本畫面不會自動幫你選課。
+              學分。請核對入學年度與系所規定，再安排後續選課。
             </Text>
             {CATEGORY_ORDER.filter((k) => {
               if (k === 'pe' || k === 'service') return false;
