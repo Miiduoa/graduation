@@ -16,12 +16,14 @@ function sha256(path) {
 test('source.json binds production tree b0a10ac, rollback digest, and patch checksums', () => {
   assert.equal(manifest.productionTree, 'b0a10ac814cd03fbfb45132566035acce8339f17');
   assert.equal(manifest.baseCommit, '9de47b4b3492325e430562c37bcad552867162db');
-  assert.equal(manifest.candidateTree, 'd006ec857bd1b5be5b0281c94077d61f9af51d05');
+  assert.equal(manifest.candidateTree, 'add9614a93c65b4587ca5649a83803614c786f28');
+  assert.equal(manifest.previousCandidateTree, 'd006ec857bd1b5be5b0281c94077d61f9af51d05');
   assert.equal(
     manifest.rollbackImage,
     'registry.fly.io/nuni-api@sha256:be815455fbb2ccce844b69f004e416e44465e3421f9da654d0cd5db8379c3dc2',
   );
-  assert.equal(manifest.imageTag, 'nuni-api-security:20261024');
+  assert.equal(manifest.imageTag, 'nuni-api-security:20261024-json');
+  assert.equal(manifest.previousImageTag, 'nuni-api-security:20261024');
   assert.equal(manifest.platform, 'linux/amd64');
   assert.equal(
     manifest.runtimeNodeImage,
@@ -32,7 +34,9 @@ test('source.json binds production tree b0a10ac, rollback digest, and patch chec
   assert.equal(manifest.patchedVersions['@grpc/grpc-js'], '1.14.5');
   assert.equal(manifest.patchedVersions['brace-expansion'], '5.0.12');
   assert.equal(manifest.runtimeGrantInventory.sourceHash, manifest.productionTree);
-  assert.equal(manifest.patches.length, 2);
+  assert.equal(manifest.runtimeGrantInventory.matrixUnchangedFrom, manifest.productionTree);
+  assert.match(manifest.runtimeGrantInventory.policy, /no longer dependency-only/i);
+  assert.equal(manifest.patches.length, 3);
   for (const patch of manifest.patches) {
     assert.equal(sha256(join(root, 'patches', patch.file)), patch.sha256, patch.file);
   }
@@ -58,6 +62,22 @@ test('security patches mention patched pins and forbid vulnerable runtime versio
       .join('\n');
     assert.doesNotMatch(added, new RegExp(bad.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
   }
+});
+
+test('0002 JSON body parser patch maps known Fastify codes to 400 without trusting arbitrary statusCode', () => {
+  const patch = readFileSync(join(root, 'patches/0002-json-body-parser-400.patch'), 'utf8');
+  assert.match(patch, /FST_ERR_CTP_INVALID_JSON_BODY/);
+  assert.match(patch, /FST_ERR_CTP_EMPTY_JSON_BODY/);
+  assert.match(patch, /INVALID_JSON_BODY/);
+  assert.match(patch, /error\.statusCode === 400/);
+  assert.match(patch, /json-body-parser-errors\.test\.ts/);
+  assert.doesNotMatch(patch, /runtime-grant-matrix\.json/);
+  assert.doesNotMatch(patch, /\.sql/);
+  // Must not widen to “any statusCode from thrown object”.
+  assert.doesNotMatch(
+    patch,
+    /\+.*statusCode >= 400[\s\S]*INVALID_JSON_BODY|\+.*typeof error\.statusCode === "number"[\s\S]*INVALID_JSON_BODY/,
+  );
 });
 
 test('prepare.py materializes candidate tree when local archived source is available', (t) => {

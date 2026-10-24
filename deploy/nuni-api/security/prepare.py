@@ -3,7 +3,8 @@
 
 Never deploys, migrates, pushes, or mutates production. Default candidate
 overlays under deploy/nuni-api/ are not applied; production is bound by the
-checksummed 0000 patch to tree b0a10ac…, then 0001 applies dependency pins.
+checksummed 0000 patch to tree b0a10ac…, then 0001 applies dependency pins,
+then 0002 maps Fastify JSON body parser client errors to HTTP 400.
 """
 from __future__ import annotations
 
