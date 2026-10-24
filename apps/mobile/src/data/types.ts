@@ -348,6 +348,17 @@ export type Enrollment = {
   enrolledAt?: string;
 };
 
+/**
+ * 成績列來源語意（僅校務 adapter 邊界可掛 school-official*；UI 不自行補造）。
+ * - school-official：校務 adapter 本次已驗證 session 的學校讀取
+ * - school-official-offline：同 adapter 可證明 owner 的離線後備（若有）；不可用於無 owner 全域快取
+ * - firebase-course：Firestore 課程成績（需真實 publishedAt；文件內偽造的 school-official* 會在讀取邊界被覆蓋）
+ */
+export type GradeSourceKind =
+  | 'school-official'
+  | 'school-official-offline'
+  | 'firebase-course';
+
 export type Grade = {
   id: string;
   userId: string;
@@ -374,6 +385,12 @@ export type Grade = {
   courseClass?: string;
   /** 英文課程名 */
   courseNameEn?: string;
+  /**
+   * 來源邊界標註。僅校務 adapter 可掛 school-official*；
+   * Firestore 讀取邊界會標成 firebase-course（文件欄位不可冒充校務權威）。
+   * 缺省／非校務收據列需 schoolId + publishedAt，否則拒絕。
+   */
+  gradeSource?: GradeSourceKind;
 };
 
 export type Assignment = {
