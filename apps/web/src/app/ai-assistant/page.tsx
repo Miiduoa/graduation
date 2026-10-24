@@ -12,6 +12,7 @@ import {
   CampusAssistantError,
   type CampusAssistantEnvelope,
 } from '@/lib/campusAssistantClient';
+import { areFunctionsConfigured } from '@/lib/functionsUrl';
 import {
   assistantSources,
   assistantSuggestions,
@@ -31,9 +32,12 @@ type Message =
   | { role: 'user'; content: string }
   | { role: 'assistant'; content: string; response: CampusAssistantEnvelope };
 function requestError(error: unknown): string {
+  if (error instanceof CampusAssistantError && error.code === 'unconfigured')
+    return '雲端助理尚未啟用。';
   if (error instanceof CampusAssistantError && error.code === 'session-changed')
     return '登入狀態已變更，請重新登入後再試。';
   const code = (error as { code?: string } | null)?.code;
+  if (code === 'unconfigured' || code === 'functions-unconfigured') return '雲端助理尚未啟用。';
   if (code === 'functions/unauthenticated') return '登入已逾時，請重新登入後再試。';
   if (code === 'functions/permission-denied')
     return '目前帳號無法查詢這項資料。你可以修改問題後再試。';
@@ -60,6 +64,7 @@ function AssistantConversation({
   const sessionId = useRef<string | null>(null);
   const request = useRef<AbortController | null>(null);
   const composer = useRef<HTMLTextAreaElement>(null);
+  const functionsReady = areFunctionsConfigured();
 
   useEffect(
     () => () => {
@@ -72,7 +77,7 @@ function AssistantConversation({
   async function send(event: FormEvent) {
     event.preventDefault();
     const content = draft.trim();
-    if (!content || request.current) return;
+    if (!content || request.current || !functionsReady) return;
     if (!isWebOnlineOrderingEnabled() && isWebOrderStatusQuestion(content)) {
       setMessages((previous) => [
         ...previous,
@@ -141,7 +146,11 @@ function AssistantConversation({
     <section className={styles.conversation} aria-label="校園助理對話">
       <div className={styles.toolbar}>
         <p className={home.intro}>
-          {groupId ? '正在這門課的範圍內詢問。' : '查詢課務、校園地點或服務資訊。'}
+          {!functionsReady
+            ? '雲端助理尚未啟用。'
+            : groupId
+              ? '正在這門課的範圍內詢問。'
+              : '查詢課務、校園地點或服務資訊。'}
         </p>
         {(messages.length > 0 || pending) && (
           <button type="button" className={home.secondary} onClick={clearConversation}>
@@ -151,9 +160,11 @@ function AssistantConversation({
       </div>
       {messages.length === 0 && !pending && (
         <div className={styles.empty}>
-          <h2>今天需要什麼幫忙？</h2>
+          <h2>{functionsReady ? '今天需要什麼幫忙？' : '雲端助理尚未啟用'}</h2>
           <p>
-            寫下問題，可以補充課程名稱、日期或地點。若要排課、找空堂，請用課表裡的「幫我安排」。
+            {functionsReady
+              ? '寫下問題，可以補充課程名稱、日期或地點。若要排課、找空堂，請用課表裡的「幫我安排」。'
+              : '正式站尚未接上雲端函式服務，因此無法詢問助理。設定完成前請改用課表、地圖、公車與公開公告。'}
           </p>
           <nav aria-label="直接開啟服務" className={styles.serviceLinks}>
             <Link href="/timetable">我的課表</Link>
@@ -245,8 +256,9 @@ function AssistantConversation({
           value={draft}
           maxLength={4000}
           rows={3}
-          readOnly={pending}
-          placeholder="例如：圖書館怎麼走？"
+          readOnly={pending || !functionsReady}
+          disabled={!functionsReady}
+          placeholder={functionsReady ? '例如：圖書館怎麼走？' : '雲端助理尚未啟用'}
           onChange={(event) => {
             setDraft(event.target.value);
             setError('');
@@ -260,12 +272,18 @@ function AssistantConversation({
         )}
         <div className={styles.submitRow}>
           <p id="assistant-note" className={styles.note}>
-            {isWebOnlineOrderingEnabled()
-              ? '回覆可能有誤；申請、繳費與訂單請以服務頁面的紀錄為準。'
-              : '回覆可能有誤；申請、繳費請以服務頁面的紀錄為準。'}
+            {!functionsReady
+              ? '尚未接上雲端函式服務，輸入與送出已停用。'
+              : isWebOnlineOrderingEnabled()
+                ? '回覆可能有誤；申請、繳費與訂單請以服務頁面的紀錄為準。'
+                : '回覆可能有誤；申請、繳費請以服務頁面的紀錄為準。'}
           </p>
-          <button type="submit" className={home.primary} disabled={pending || !draft.trim()}>
-            {pending ? '查詢中…' : error ? '重試' : '送出'}
+          <button
+            type="submit"
+            className={home.primary}
+            disabled={!functionsReady || pending || !draft.trim()}
+          >
+            {pending ? '查詢中…' : functionsReady && error ? '重試' : '送出'}
           </button>
         </div>
       </form>

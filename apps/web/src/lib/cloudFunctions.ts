@@ -1,4 +1,10 @@
-import { normalizeFunctionsBaseUrl, resolveFunctionsHttpUrl } from './functionsUrl';
+import {
+  areFunctionsConfigured,
+  normalizeFunctionsBaseUrl,
+  resolveFunctionsHttpUrl,
+} from './functionsUrl';
+
+export { areFunctionsConfigured };
 
 type EnvMap = Record<string, string | undefined>;
 

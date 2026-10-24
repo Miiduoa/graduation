@@ -12,6 +12,7 @@ import {
   type QueryDocumentSnapshot,
 } from 'firebase/firestore';
 import { getAuth, getCloudFunctionUrl, getDb, isFirebaseConfigured } from '@/lib/firebase';
+import { areFunctionsConfigured, FunctionsUnconfiguredError } from '@/lib/functionsUrl';
 import { fetchSchoolDirectoryProfiles } from '@/lib/community/firestore';
 
 export type OwnershipTransferMember = {
@@ -186,6 +187,10 @@ export async function transferGroupOwnership(
     throw new Error('轉讓參數不完整，請重新選擇接收對象。');
   }
 
+  if (!areFunctionsConfigured()) {
+    throw new FunctionsUnconfiguredError('群組擁有權轉讓尚未啟用');
+  }
+
   const auth = getAuth()!;
   const user = auth.currentUser!;
   const token = await user.getIdToken();
@@ -251,6 +256,9 @@ export function transferGroupOwnershipErrorMessage(error: unknown): string {
       : error && typeof error === 'object' && 'message' in error
         ? String((error as { message?: unknown }).message ?? '')
         : '';
+  if (/尚未啟用/.test(message)) {
+    return message;
+  }
   if (/登入|帳號|工作階段/.test(message)) {
     return '請先登入學校帳號後再轉讓擁有權。';
   }

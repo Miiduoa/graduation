@@ -1,16 +1,65 @@
 import { beforeEach, expect, it, vi } from 'vitest';
-import { callCampusAssistant, type CampusAssistantEnvelope } from './campusAssistantClient';
+import {
+  callCampusAssistant,
+  confirmCreateOrder,
+  type CampusAssistantEnvelope,
+} from './campusAssistantClient';
 
-const state = vi.hoisted(() => ({ uid: 'alice' as string | null, configured: true, callable: vi.fn() }));
-vi.mock('./firebase', () => ({ getAuth: () => ({ currentUser: state.uid ? { uid: state.uid } : null }), getFunctionsInstance: () => ({}), isFirebaseConfigured: () => state.configured }));
+const state = vi.hoisted(() => ({
+  uid: 'alice' as string | null,
+  configured: true,
+  functionsConfigured: true,
+  callable: vi.fn(),
+}));
+vi.mock('./firebase', () => ({
+  getAuth: () => ({ currentUser: state.uid ? { uid: state.uid } : null }),
+  getFunctionsInstance: () => ({}),
+  isFirebaseConfigured: () => state.configured,
+}));
+vi.mock('./functionsUrl', async (original) => ({
+  ...(await original<typeof import('./functionsUrl')>()),
+  areFunctionsConfigured: () => state.functionsConfigured,
+}));
 vi.mock('firebase/functions', () => ({ httpsCallable: () => state.callable }));
-const input = { userId: 'alice', schoolId: 'pu', groupId: 'course-one', sessionId: 'conversation-one', messages: [{ role: 'user' as const, content: '我的作業？' }] };
-beforeEach(() => { state.uid = 'alice'; state.configured = true; state.callable.mockReset(); });
+const input = {
+  userId: 'alice',
+  schoolId: 'pu',
+  groupId: 'course-one',
+  sessionId: 'conversation-one',
+  messages: [{ role: 'user' as const, content: '我的作業？' }],
+};
+beforeEach(() => {
+  state.uid = 'alice';
+  state.configured = true;
+  state.functionsConfigured = true;
+  state.callable.mockReset();
+});
 
 it('rejects unavailable configuration without inventing an answer', async () => {
   state.configured = false;
   await expect(callCampusAssistant(input)).rejects.toMatchObject({ code: 'unavailable' });
   expect(state.callable).not.toHaveBeenCalled();
+});
+
+it('does not call Cloud Functions when the functions base URL is unset', async () => {
+  state.functionsConfigured = false;
+  await expect(callCampusAssistant(input)).rejects.toMatchObject({ code: 'unconfigured' });
+  expect(state.callable).not.toHaveBeenCalled();
+  await expect(
+    confirmCreateOrder({
+      schoolId: 'pu',
+      requestId: 'req-1',
+      cafeteriaId: 'cafe',
+      items: [{ menuItemId: 'rice', name: '雞腿飯', price: 100, quantity: 1 }],
+    }),
+  ).resolves.toMatchObject({ success: false, errorCode: 'functions_unconfigured' });
+  expect(state.callable).not.toHaveBeenCalled();
+});
+
+it('calls Cloud Functions when the functions base URL is set', async () => {
+  state.callable.mockResolvedValue({ data: { content: '目前有兩項作業。', run: { status: 'completed' } } });
+  await expect(callCampusAssistant(input)).resolves.toMatchObject({ content: '目前有兩項作業。' });
+  expect(state.callable).toHaveBeenCalledTimes(1);
 });
 
 it('propagates a backend failure instead of returning a local success', async () => {

@@ -3,6 +3,7 @@ import { act, fireEvent, render, screen } from '@testing-library/react';
 import { beforeEach, expect, it, vi } from 'vitest';
 import GroupsPage from './page';
 import ClubsPage from '../clubs/page';
+import { FunctionsUnconfiguredError } from '@/lib/functionsUrl';
 import { joinByCode, leaveMemberGroup, loadMyGroups, type MemberGroup } from './groupService';
 
 const account = vi.hoisted(() => ({
@@ -113,6 +114,21 @@ it('does not show joined or send duplicate mutations before the verified respons
   await act(async () => operation.resolve({ ...club, id: 'new-club', name: '新加入社團' }));
   expect(screen.getByText('已加入「新加入社團」。')).toBeTruthy();
   expect(screen.getByText('新加入社團')).toBeTruthy();
+});
+
+it('shows that join is not enabled instead of asking the member to retry', async () => {
+  vi.mocked(joinByCode).mockRejectedValueOnce(
+    new FunctionsUnconfiguredError('加入與退出群組尚未啟用'),
+  );
+  render(<GroupsPage />);
+  await screen.findByText('本人社團');
+  fireEvent.change(screen.getByLabelText('邀請碼'), { target: { value: 'ABC12345' } });
+  fireEvent.click(screen.getByRole('button', { name: '加入群組' }));
+  expect(await screen.findByText('加入與退出群組尚未啟用')).toBeTruthy();
+  expect(screen.queryByText(/請先更新列表確認成員狀態，再決定是否重試/)).toBeNull();
+  expect((screen.getByRole('button', { name: '加入群組' }) as HTMLButtonElement).disabled).toBe(
+    false,
+  );
 });
 
 it('requires a fresh server read after an unconfirmed mutation instead of allowing blind resubmission', async () => {

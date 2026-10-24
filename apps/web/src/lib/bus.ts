@@ -1,5 +1,6 @@
 import { httpsCallable } from 'firebase/functions';
 import { fetchBusRoutes, getFunctionsInstance, isFirebaseConfigured } from './firebase';
+import { areFunctionsConfigured } from './functionsUrl';
 
 export type BusStop = { id: string; name: string; order: number };
 export type CampusBusRoute = {
@@ -12,7 +13,7 @@ export type CampusBusRoute = {
 export type BusArrival = { routeName: string; direction: string; label: string };
 export type BusArrivals =
   | { status: 'ready'; arrivals: BusArrival[]; fetchedAt: string }
-  | { status: 'unavailable' | 'error'; arrivals: []; fetchedAt: null };
+  | { status: 'unavailable' | 'error' | 'unconfigured'; arrivals: []; fetchedAt: null };
 type ObjectData = Record<string, unknown>;
 const object = (value: unknown): ObjectData =>
   value && typeof value === 'object' ? (value as ObjectData) : {};
@@ -114,6 +115,7 @@ export async function loadBusArrivals(input: {
   city: string;
 }): Promise<BusArrivals> {
   if (!isFirebaseConfigured()) return { status: 'unavailable', arrivals: [], fetchedAt: null };
+  if (!areFunctionsConfigured()) return { status: 'unconfigured', arrivals: [], fetchedAt: null };
   try {
     const response = await httpsCallable<typeof input, unknown>(
       getFunctionsInstance(),

@@ -42,6 +42,20 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
+it('shows that realtime arrivals are not enabled instead of a retryable failure', async () => {
+  vi.mocked(loadBusArrivals).mockResolvedValue({
+    status: 'unconfigured',
+    arrivals: [],
+    fetchedAt: null,
+  });
+  render(<BusPage />);
+  expect(await screen.findByText(/即時到站查詢尚未啟用/)).toBeTruthy();
+  expect(screen.queryByText(/請重新查詢/)).toBeNull();
+  expect(
+    (screen.getByRole('button', { name: '更新到站資訊' }) as HTMLButtonElement).disabled,
+  ).toBe(true);
+});
+
 it('offers the official service without inventing an arrival when realtime data is unavailable', async () => {
   render(<BusPage />);
   expect(await screen.findByText(/目前沒有可確認的即時到站資訊/)).toBeTruthy();

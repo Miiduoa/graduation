@@ -36,9 +36,26 @@ it('keeps the configured Fly API in a browser bundle with no runtime public env'
     NEXT_PUBLIC_FUNCTIONS_BASE_URL: 'https://nuni-functions.fly.dev',
   });
   expect(client.getFunctionsBaseUrl()).toBe('https://nuni-functions.fly.dev');
+  expect(client.areFunctionsConfigured()).toBe(true);
   expect(
     client.getCloudFunctionUrl('getRepairServiceCapability', { projectId: 'demo-browser' }),
   ).toBe('https://nuni-functions.fly.dev/getRepairServiceCapability');
+});
+
+it('does not treat Spark Cloud Functions hostnames as configured after browser compilation', async () => {
+  const client = await browserBundle({
+    NEXT_PUBLIC_FIREBASE_PROJECT_ID: 'campus-one-tw',
+  });
+  expect(client.areFunctionsConfigured()).toBe(false);
+  expect(client.getFunctionsBaseUrl()).toBeNull();
+});
+
+it('treats the emulator as configured even without a Fly base URL', async () => {
+  const client = await browserBundle({
+    NEXT_PUBLIC_USE_FIREBASE_EMULATOR: 'true',
+    NEXT_PUBLIC_FIREBASE_PROJECT_ID: 'demo-browser',
+  });
+  expect(client.areFunctionsConfigured()).toBe(true);
 });
 
 it('keeps emulator routing ahead of Fly routing after browser compilation', async () => {

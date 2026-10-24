@@ -9,6 +9,7 @@
 import { httpsCallable } from 'firebase/functions';
 import { doc, onSnapshot } from 'firebase/firestore';
 import { getAuth, getDb, getFunctionsInstance, isFirebaseConfigured } from './firebase';
+import { areFunctionsConfigured } from './functionsUrl';
 
 export type AgentCardKind =
   | 'directions_card'
@@ -49,7 +50,9 @@ export interface CallCampusAssistantInput {
 }
 
 export class CampusAssistantError extends Error {
-  constructor(public readonly code: 'unavailable' | 'session-changed' | 'invalid-response') {
+  constructor(
+    public readonly code: 'unavailable' | 'unconfigured' | 'session-changed' | 'invalid-response',
+  ) {
     super(code);
     this.name = 'CampusAssistantError';
   }
@@ -62,6 +65,9 @@ export async function callCampusAssistant(
 ): Promise<CampusAssistantEnvelope> {
   if (!isFirebaseConfigured()) {
     throw new CampusAssistantError('unavailable');
+  }
+  if (!areFunctionsConfigured()) {
+    throw new CampusAssistantError('unconfigured');
   }
   const assertCurrentSession = () => {
     if (signal?.aborted) throw new DOMException('Request aborted', 'AbortError');
@@ -146,6 +152,13 @@ export interface CreateOrderResult {
 export async function confirmCreateOrder(input: CreateOrderInput): Promise<CreateOrderResult> {
   if (!isFirebaseConfigured()) {
     return { success: false, errorCode: 'no_firebase', errorMessage: 'Firebase 設定不可用' };
+  }
+  if (!areFunctionsConfigured()) {
+    return {
+      success: false,
+      errorCode: 'functions_unconfigured',
+      errorMessage: '雲端函式尚未啟用',
+    };
   }
   try {
     const callable = httpsCallable<CreateOrderInput, CreateOrderResult>(

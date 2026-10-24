@@ -70,7 +70,7 @@ function Arrivals({
         <h2 id="arrival-heading">{stopName} 到站資訊</h2>
         <button
           className={styles.secondary}
-          disabled={loading}
+          disabled={loading || data?.status === 'unconfigured'}
           onClick={() => {
             setLoading(true);
             void refresh();
@@ -82,6 +82,11 @@ function Arrivals({
       {loading && !data && (
         <p role="status" className={styles.empty}>
           正在向交通資料服務查詢。
+        </p>
+      )}
+      {data?.status === 'unconfigured' && (
+        <p role="status" className={styles.empty}>
+          即時到站查詢尚未啟用，請使用官方公車網站。
         </p>
       )}
       {data?.status === 'error' && (

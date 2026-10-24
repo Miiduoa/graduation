@@ -7,6 +7,7 @@ import {
   transferGroupOwnershipErrorMessage,
 } from './groupOwnershipService';
 
+const runtime = vi.hoisted(() => ({ functionsConfigured: true }));
 const authState = vi.hoisted(() => {
   const user = {
     uid: 'alice',
@@ -32,6 +33,10 @@ vi.mock('@/lib/firebase', () => ({
   getAuth: () => authState.auth,
   getDb: () => ({}),
   getCloudFunctionUrl: (name: string) => `https://fn.test/${name}`,
+}));
+vi.mock('@/lib/functionsUrl', async (original) => ({
+  ...(await original<typeof import('@/lib/functionsUrl')>()),
+  areFunctionsConfigured: () => runtime.functionsConfigured,
 }));
 
 const firestore = vi.hoisted(() => {
@@ -63,6 +68,7 @@ vi.mock('@/lib/community/firestore', () => ({
 }));
 
 beforeEach(() => {
+  runtime.functionsConfigured = true;
   authState.setUid('alice');
   firestore.docs.length = 0;
   vi.stubGlobal(
@@ -130,6 +136,25 @@ it('lists only active non-owner members with real directory display names', asyn
   expect(page.members.map((row) => row.uid)).toEqual(['bob', 'carol']);
   expect(page.members[0].displayName).toBe('名:bob');
   expect(firestore.fetchSchoolDirectoryProfiles).toHaveBeenCalledWith('pu', ['bob', 'carol']);
+});
+
+it('does not call Cloud Functions when the functions base URL is unset', async () => {
+  runtime.functionsConfigured = false;
+  await expect(
+    transferGroupOwnership('alice', {
+      groupId: 'g1',
+      targetUid: 'bob',
+      operationId: 'op-1',
+      expectedCurrentOwnerUid: 'alice',
+    }),
+  ).rejects.toMatchObject({
+    code: 'functions-unconfigured',
+    message: '群組擁有權轉讓尚未啟用',
+  });
+  expect(fetch).not.toHaveBeenCalled();
+  expect(transferGroupOwnershipErrorMessage(new Error('群組擁有權轉讓尚未啟用'))).toBe(
+    '群組擁有權轉讓尚未啟用',
+  );
 });
 
 it('posts transfer with stable operation id and rejects identity mismatch', async () => {
