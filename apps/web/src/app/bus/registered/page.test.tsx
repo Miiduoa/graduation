@@ -102,10 +102,10 @@ it('uses the selected campus rather than a stale school ID for registered bus ro
   expect(screen.queryByRole('link', { name: /臺中市官方公車查詢/ })).toBeNull();
 });
 
-it('opens Providence registered routes when no campus has been chosen', async () => {
+it('does not load Providence registered routes when no campus has been chosen', async () => {
   navigation.query = 'campus=all&schoolId=pu';
   render(<BusPage />);
-  await screen.findByText('實際路線');
-  expect(loadBusRoutes).toHaveBeenCalledWith('pu');
-  expect(screen.queryByText('請先選擇一所學校')).toBeNull();
+  expect(await screen.findByText('請先選擇一所學校')).toBeTruthy();
+  expect(loadBusRoutes).not.toHaveBeenCalled();
+  expect(screen.queryByText('實際路線')).toBeNull();
 });

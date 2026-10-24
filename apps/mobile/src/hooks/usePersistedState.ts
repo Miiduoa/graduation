@@ -14,6 +14,12 @@ type PersistedStateOptions<T> = {
   serialize?: Serialize<T>;
 };
 
+type ScopedState<T> = {
+  scope: { storageKey: string; legacyKeySignature: string };
+  value: T;
+  loaded: boolean;
+};
+
 export function usePersistedState<T>({
   storageKey,
   legacyKeys = [],
@@ -21,18 +27,30 @@ export function usePersistedState<T>({
   deserialize = JSON.parse as Deserialize<T>,
   serialize = JSON.stringify,
 }: PersistedStateOptions<T>) {
-  const [value, setValue] = useState<T>(defaultValue);
-  const [loaded, setLoaded] = useState(false);
   const defaultValueRef = useLatestValue(defaultValue);
   const deserializeRef = useLatestValue(deserialize);
   const serializeRef = useLatestValue(serialize);
   const legacyKeysRef = useLatestValue(legacyKeys);
 
-  const legacyKeySignature = useMemo(() => legacyKeys.join('|'), [legacyKeys]);
+  const legacyKeySignature = JSON.stringify(legacyKeys);
+  // A fresh visit to A after A -> B -> A must reject callbacks from the first visit.
+  const scope = useMemo(() => ({ storageKey, legacyKeySignature }), [storageKey, legacyKeySignature]);
+
+  const [state, setState] = useState<ScopedState<T>>(() => ({
+    scope,
+    value: defaultValue,
+    loaded: false,
+  }));
+
+  if (state.scope !== scope) {
+    setState({ scope, value: defaultValue, loaded: false });
+  }
+
+  const active =
+    state.scope === scope ? state : { scope, value: defaultValue, loaded: false };
 
   useEffect(() => {
     let cancelled = false;
-    setLoaded(false);
 
     loadPersistedValue({
       storageKey,
@@ -41,39 +59,75 @@ export function usePersistedState<T>({
       deserialize: deserializeRef.current,
     })
       .then((nextValue) => {
-        if (!cancelled) {
-          setValue((prevValue) => (Object.is(prevValue, nextValue) ? prevValue : nextValue));
+        if (cancelled) {
+          return;
         }
+        setState((prev) => {
+          if (prev.scope !== scope) {
+            return prev;
+          }
+          const value = Object.is(prev.value, nextValue) ? prev.value : nextValue;
+          if (prev.loaded && Object.is(prev.value, value)) {
+            return prev;
+          }
+          return { scope, value, loaded: true };
+        });
       })
       .finally(() => {
-        if (!cancelled) {
-          setLoaded(true);
+        if (cancelled) {
+          return;
         }
+        setState((prev) => {
+          if (prev.scope !== scope || prev.loaded) {
+            return prev;
+          }
+          return { ...prev, loaded: true };
+        });
       });
 
     return () => {
       cancelled = true;
     };
-  }, [storageKey, legacyKeySignature]);
+  }, [scope, storageKey]);
 
   useEffect(() => {
-    if (!loaded) {
+    if (!active.loaded || active.scope !== scope) {
       return;
     }
 
-    savePersistedValue(storageKey, value, serializeRef.current).catch((error) => {
+    savePersistedValue(storageKey, active.value, serializeRef.current).catch((error) => {
       console.error(`[PersistedState] Failed to save ${storageKey}:`, error);
     });
-  }, [loaded, storageKey, value, serializeRef]);
+  }, [active.loaded, active.scope, active.value, scope, storageKey, serializeRef]);
+
+  const setValue = useCallback(
+    (update: T | ((prev: T) => T)) => {
+      setState((prev) => {
+        if (prev.scope !== scope) {
+          return prev;
+        }
+        const nextValue =
+          typeof update === 'function' ? (update as (prev: T) => T)(prev.value) : update;
+        return Object.is(nextValue, prev.value) ? prev : { ...prev, value: nextValue };
+      });
+    },
+    [scope],
+  );
 
   const reset = useCallback(() => {
-    setValue(defaultValueRef.current);
-  }, [defaultValueRef]);
+    setState((prev) => {
+      if (prev.scope !== scope) {
+        return prev;
+      }
+      const nextValue = defaultValueRef.current;
+      return Object.is(nextValue, prev.value) ? prev : { ...prev, value: nextValue };
+    });
+  }, [scope, defaultValueRef]);
 
   return {
-    value,
+    value: active.value,
     setValue,
-    loaded,
+    loaded: active.loaded,
     reset,
   };
 }

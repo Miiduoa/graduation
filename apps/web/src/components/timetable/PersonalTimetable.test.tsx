@@ -12,20 +12,35 @@ import { PersonalTimetable } from './PersonalTimetable';
 const mocks = vi.hoisted(() => ({
   auth: { user: { uid: 'alice' } as { uid: string } | null, loading: false },
   school: { selectedSchoolId: 'pu', loading: false },
-  load: vi.fn(), save: vi.fn(), share: vi.fn(),
-  friends: vi.fn(), invites: vi.fn(), friendTimetable: vi.fn(), meetup: vi.fn(),
+  load: vi.fn(),
+  save: vi.fn(),
+  share: vi.fn(),
+  friends: vi.fn(),
+  invites: vi.fn(),
+  friendTimetable: vi.fn(),
+  meetup: vi.fn(),
 }));
 vi.mock('@/components/AuthGuard', () => ({ useAuth: () => mocks.auth }));
 vi.mock('@/components/SelectedSchoolProvider', () => ({
   useSelectedSchool: () => mocks.school,
-  useOptionalSelectedSchool: () => ({ ...mocks.school, selectedSchool: mocks.school.selectedSchoolId ? { id: mocks.school.selectedSchoolId, name: '靜宜大學' } : null, catalogStatus: 'ready' }),
+  useOptionalSelectedSchool: () => ({
+    ...mocks.school,
+    selectedSchool: mocks.school.selectedSchoolId
+      ? { id: mocks.school.selectedSchoolId, name: '靜宜大學' }
+      : null,
+    catalogStatus: 'ready',
+  }),
 }));
 vi.mock('@/lib/usePersonalImports', () => ({
   usePersonalImportScope: () => {
     const owner = mocks.auth.user ? `school:${mocks.auth.user.uid}` : 'guest';
     const schoolId = mocks.school.selectedSchoolId || 'personal';
-    return { scope: { owner, schoolId }, scopeKey: `${owner}:${schoolId}`,
-      loading: mocks.auth.loading || mocks.school.loading, schoolName: '靜宜大學' };
+    return {
+      scope: { owner, schoolId },
+      scopeKey: `${owner}:${schoolId}`,
+      loading: mocks.auth.loading || mocks.school.loading,
+      schoolName: '靜宜大學',
+    };
   },
   usePersonalImports: () => ({ records: [], error: '', loading: false }),
 }));
@@ -39,13 +54,30 @@ vi.mock('@/lib/timetable/store', () => ({
   createServerShare: mocks.share,
   listMyMeetups: mocks.invites,
   loadFriendTimetable: mocks.friendTimetable,
-  respondMeetup: vi.fn(), createMeetup: mocks.meetup,
+  respondMeetup: vi.fn(),
+  createMeetup: mocks.meetup,
 }));
 vi.mock('@/lib/timetable/friends', () => ({ listAcceptedFriends: mocks.friends }));
 vi.mock('@/lib/useAcademicRecords', () => ({
-  useAcademicRecords: () => ({ state: { snapshot: { schoolId: 'pu', records: { courses: [
-    { id: 'school-course', name: '匯入資料庫', periods: [3, 4], dayOfWeek: 2, teacherName: '林老師', location: '主顧303' },
-  ] } } } }),
+  useAcademicRecords: () => ({
+    state: {
+      snapshot: {
+        schoolId: 'pu',
+        records: {
+          courses: [
+            {
+              id: 'school-course',
+              name: '匯入資料庫',
+              periods: [3, 4],
+              dayOfWeek: 2,
+              teacherName: '林老師',
+              location: '主顧303',
+            },
+          ],
+        },
+      },
+    },
+  }),
 }));
 
 function timetable(name = '原本課程') {
@@ -60,11 +92,16 @@ function timetable(name = '原本課程') {
 function deferred<T>() {
   let resolve!: (value: T) => void;
   let reject!: (reason: Error) => void;
-  const promise = new Promise<T>((yes, no) => { resolve = yes; reject = no; });
+  const promise = new Promise<T>((yes, no) => {
+    resolve = yes;
+    reject = no;
+  });
   return { promise, resolve, reject };
 }
 const clipboardDescriptor = Object.getOwnPropertyDescriptor(navigator, 'clipboard');
-const dialogDescriptors = ['showModal', 'close'].map((name) => [name, Object.getOwnPropertyDescriptor(HTMLDialogElement.prototype, name)] as const);
+const dialogDescriptors = ['showModal', 'close'].map(
+  (name) => [name, Object.getOwnPropertyDescriptor(HTMLDialogElement.prototype, name)] as const,
+);
 beforeEach(() => {
   vi.clearAllMocks();
   mocks.auth.user = { uid: 'alice' };
@@ -73,14 +110,26 @@ beforeEach(() => {
   mocks.school.loading = false;
   mocks.load.mockReset().mockResolvedValue(timetable());
   mocks.save.mockReset().mockResolvedValue({ stored: 'cloud' });
-  mocks.share.mockReset().mockResolvedValue({ path: '/timetable/share/test', expiresAt: '2026-10-13T00:00:00Z' });
+  mocks.share
+    .mockReset()
+    .mockResolvedValue({ path: '/timetable/s/test', expiresAt: '2026-10-13T00:00:00Z' });
   mocks.friends.mockReset().mockResolvedValue([]);
   mocks.invites.mockResolvedValue([]);
   mocks.friendTimetable.mockReset().mockResolvedValue(null);
   mocks.meetup.mockReset().mockResolvedValue('created');
   // jsdom has no native top layer; these stubs exercise the component lifecycle, not browser focus containment.
-  Object.defineProperty(HTMLDialogElement.prototype, 'showModal', { configurable: true, value: function (this: HTMLDialogElement) { this.setAttribute('open', ''); } });
-  Object.defineProperty(HTMLDialogElement.prototype, 'close', { configurable: true, value: function (this: HTMLDialogElement) { this.removeAttribute('open'); } });
+  Object.defineProperty(HTMLDialogElement.prototype, 'showModal', {
+    configurable: true,
+    value: function (this: HTMLDialogElement) {
+      this.setAttribute('open', '');
+    },
+  });
+  Object.defineProperty(HTMLDialogElement.prototype, 'close', {
+    configurable: true,
+    value: function (this: HTMLDialogElement) {
+      this.removeAttribute('open');
+    },
+  });
 });
 afterEach(() => {
   cleanup();
@@ -120,7 +169,9 @@ describe('personal timetable data retention', () => {
     expect((editor.getByRole('button', { name: '取消' }) as HTMLButtonElement).disabled).toBe(true);
     await act(async () => pending.reject(new Error('response lost')));
     expect((editor.getByLabelText('課名') as HTMLInputElement).value).toBe('不能消失的草稿');
-    expect((editor.getByRole('button', { name: '儲存' }) as HTMLButtonElement).disabled).toBe(false);
+    expect((editor.getByRole('button', { name: '儲存' }) as HTMLButtonElement).disabled).toBe(
+      false,
+    );
     expect(editor.getByRole('status').textContent).toContain('無法確認儲存結果');
     fireEvent.click(editor.getByRole('button', { name: '儲存' }));
     await waitFor(() => expect(screen.queryByRole('region', { name: '編輯課程' })).toBeNull());
@@ -131,10 +182,18 @@ describe('personal timetable data retention', () => {
     mocks.save.mockRejectedValue(new Error('offline'));
     await ready();
     fireEvent.click(existingCourseButton());
-    fireEvent.click(within(screen.getByRole('region', { name: '編輯課程' })).getByRole('button', { name: '刪除' }));
+    fireEvent.click(
+      within(screen.getByRole('region', { name: '編輯課程' })).getByRole('button', {
+        name: '刪除',
+      }),
+    );
     expect(mocks.save).not.toHaveBeenCalled();
     fireEvent.click(screen.getByRole('button', { name: '確認刪除' }));
-    await waitFor(() => expect(within(screen.getByRole('region', { name: '編輯課程' })).getByRole('status').textContent).toMatch(/無法確認儲存結果/));
+    await waitFor(() =>
+      expect(
+        within(screen.getByRole('region', { name: '編輯課程' })).getByRole('status').textContent,
+      ).toMatch(/無法確認儲存結果/),
+    );
     expect(screen.getByRole('region', { name: '編輯課程' })).toBeTruthy();
     expect(existingCourseButton()).toBeTruthy();
   });
@@ -143,7 +202,9 @@ describe('personal timetable data retention', () => {
     mocks.save.mockRejectedValue(new Error('offline'));
     await ready();
     const section = within(screen.getByRole('region', { name: '匯入課表' }));
-    expect(section.getByRole('link', { name: '匯入截圖或檔案' }).getAttribute('href')).toBe('/import?kind=timetable');
+    expect(section.getByRole('link', { name: '匯入截圖或檔案' }).getAttribute('href')).toBe(
+      '/import?kind=timetable',
+    );
     fireEvent.click(section.getByRole('button', { name: '從學校課表帶入' }));
     expect(section.getByText('匯入資料庫')).toBeTruthy();
     fireEvent.click(section.getByRole('button', { name: '存在這台裝置' }));
@@ -183,7 +244,9 @@ describe('personal timetable data retention', () => {
 
   it('ignores an old account read that arrives after the next account has loaded', async () => {
     const old = deferred<ReturnType<typeof timetable>>();
-    mocks.load.mockImplementation((uid: string) => uid === 'alice' ? old.promise : Promise.resolve(timetable('新帳號課程')));
+    mocks.load.mockImplementation((uid: string) =>
+      uid === 'alice' ? old.promise : Promise.resolve(timetable('新帳號課程')),
+    );
     const view = render(<PersonalTimetable />);
     mocks.auth.user = { uid: 'bob' };
     view.rerender(<PersonalTimetable />);
@@ -216,19 +279,25 @@ describe('personal timetable data retention', () => {
 });
 
 describe('timetable share feedback', () => {
-  it.each(['denied', 'unavailable'])('retains a manual-copy link when clipboard is %s', async (mode) => {
-    Object.defineProperty(navigator, 'clipboard', {
-      configurable: true,
-      value: mode === 'denied' ? { writeText: vi.fn().mockRejectedValue(new Error('not allowed')) } : undefined,
-    });
-    await ready();
-    fireEvent.click(screen.getByRole('button', { name: '複製分享連結' }));
-    await screen.findByText(/瀏覽器(未完成|無法自動)複製/);
-    const input = screen.getByRole('textbox', { name: '分享連結' }) as HTMLInputElement;
-    expect(input.value).toBe(`${window.location.origin}/timetable/share/test`);
-    expect(input.readOnly).toBe(true);
-    expect(screen.queryByText(shareCopiedCopy('2026-10-13T00:00:00Z'))).toBeNull();
-  });
+  it.each(['denied', 'unavailable'])(
+    'retains a manual-copy link when clipboard is %s',
+    async (mode) => {
+      Object.defineProperty(navigator, 'clipboard', {
+        configurable: true,
+        value:
+          mode === 'denied'
+            ? { writeText: vi.fn().mockRejectedValue(new Error('not allowed')) }
+            : undefined,
+      });
+      await ready();
+      fireEvent.click(screen.getByRole('button', { name: '複製分享連結' }));
+      await screen.findByText(/瀏覽器(未完成|無法自動)複製/);
+      const input = screen.getByRole('textbox', { name: '分享連結' }) as HTMLInputElement;
+      expect(input.value).toBe(`${window.location.origin}/timetable/s/test`);
+      expect(input.readOnly).toBe(true);
+      expect(screen.queryByText(shareCopiedCopy('2026-10-13T00:00:00Z'))).toBeNull();
+    },
+  );
 
   it('reports copied only after clipboard resolves and prevents repeated link creation', async () => {
     const pending = deferred<void>();
@@ -256,7 +325,9 @@ describe('timetable share feedback', () => {
     mocks.auth.user = { uid: 'bob' };
     view.rerender(<PersonalTimetable />);
     await screen.findByRole('button', { name: '新增課程' });
-    await act(async () => pending.resolve({ path: '/timetable/share/old-account', expiresAt: '2026-10-13T00:00:00Z' }));
+    await act(async () =>
+      pending.resolve({ path: '/timetable/s/old-account', expiresAt: '2026-10-13T00:00:00Z' }),
+    );
     expect(writeText).not.toHaveBeenCalled();
     expect(screen.queryByRole('textbox', { name: '分享連結' })).toBeNull();
   });
@@ -277,7 +348,9 @@ describe('direct timetable editing', () => {
 
   it('keeps continuation periods occupied and opens the original course', async () => {
     await ready();
-    expect(screen.queryByRole('button', { name: `${WEEKDAY_LABELS[0]}第 2 節新增課程` })).toBeNull();
+    expect(
+      screen.queryByRole('button', { name: `${WEEKDAY_LABELS[0]}第 2 節新增課程` }),
+    ).toBeNull();
     fireEvent.click(screen.getByRole('button', { name: /編輯 原本課程.*第 2 節，續堂/ }));
     const editor = within(screen.getByRole('region', { name: '編輯課程' }));
     expect((editor.getByLabelText('開始節次') as HTMLSelectElement).value).toBe('1');
@@ -290,7 +363,9 @@ describe('direct timetable editing', () => {
 
   it('renders every overlapping course instead of hiding the later one', async () => {
     const stored = timetable();
-    stored.courses.push(cleanCourse({ id: 'second', name: '重疊的課程', day: 1, start: 2, end: 3 }));
+    stored.courses.push(
+      cleanCourse({ id: 'second', name: '重疊的課程', day: 1, start: 2, end: 3 }),
+    );
     mocks.load.mockResolvedValue(stored);
     await ready();
     const table = within(screen.getByRole('table', { name: '一週格子課表' }));
@@ -310,7 +385,13 @@ describe('direct timetable editing', () => {
       expect(pending.getByRole('button', { name: /時間未定課程/ })).toBeTruthy();
     }
     fireEvent.click(screen.getByRole('button', { name: /時間未定課程/ }));
-    expect((within(screen.getByRole('region', { name: '編輯課程' })).getByLabelText('星期') as HTMLSelectElement).value).toBe('0');
+    expect(
+      (
+        within(screen.getByRole('region', { name: '編輯課程' })).getByLabelText(
+          '星期',
+        ) as HTMLSelectElement
+      ).value,
+    ).toBe('0');
   });
 
   it('rejects a blank name without sending or replacing it with a placeholder', async () => {
@@ -330,10 +411,16 @@ describe('direct timetable editing', () => {
     fireEvent.click(editor.getByRole('button', { name: '儲存' }));
     expect(mocks.save).not.toHaveBeenCalled();
     expect(editor.getByText('結束節次不能早於開始節次。')).toBeTruthy();
-    fireEvent.change(editor.getByRole('combobox', { name: /結束節次/ }), { target: { value: '6' } });
+    fireEvent.change(editor.getByRole('combobox', { name: /結束節次/ }), {
+      target: { value: '6' },
+    });
     fireEvent.click(editor.getByRole('button', { name: '儲存' }));
     await waitFor(() => expect(mocks.save).toHaveBeenCalledOnce());
-    expect(mocks.save.mock.calls[0][1].courses.at(-1)).toMatchObject({ start: 5, end: 6, name: '新課程' });
+    expect(mocks.save.mock.calls[0][1].courses.at(-1)).toMatchObject({
+      start: 5,
+      end: 6,
+      name: '新課程',
+    });
   });
 
   it('asks before deleting and initially focuses the non-destructive action', async () => {
@@ -366,7 +453,10 @@ describe('direct timetable editing', () => {
     const before = new Event('beforeunload', { cancelable: true });
     window.dispatchEvent(before);
     expect(before.defaultPrevented).toBe(true);
-    fireEvent(screen.getByRole('dialog', { name: '新增課程' }), new Event('cancel', { cancelable: true }));
+    fireEvent(
+      screen.getByRole('dialog', { name: '新增課程' }),
+      new Event('cancel', { cancelable: true }),
+    );
     expect(screen.getByRole('dialog', { name: '放棄這次修改？' })).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: '放棄修改' }));
     const after = new Event('beforeunload', { cancelable: true });
@@ -381,23 +471,28 @@ describe('direct timetable editing', () => {
     expect(screen.getByText(/還沒有課程，可使用上方/)).toBeTruthy();
   });
 
-  it.each(['unavailable', 'failed'])('does not treat a %s friend timetable as all-day availability', async (result) => {
-    mocks.friends.mockResolvedValue([{ uid: 'bob', name: '小林' }]);
-    if (result === 'failed') mocks.friendTimetable.mockRejectedValue(new Error('offline'));
-    await ready();
-    const select = await screen.findByRole('combobox', { name: '朋友' });
-    fireEvent.change(select, { target: { value: 'bob' } });
-    expect(screen.getByText(/不會把缺少資料誤判為整天空堂/)).toBeTruthy();
-    expect(screen.queryByRole('button', { name: '約吃飯' })).toBeNull();
-    expect(screen.queryByRole('button', { name: '約讀書' })).toBeNull();
-    expect(mocks.meetup).not.toHaveBeenCalled();
-  });
+  it.each(['unavailable', 'failed'])(
+    'does not treat a %s friend timetable as all-day availability',
+    async (result) => {
+      mocks.friends.mockResolvedValue([{ uid: 'bob', name: '小林' }]);
+      if (result === 'failed') mocks.friendTimetable.mockRejectedValue(new Error('offline'));
+      await ready();
+      const select = await screen.findByRole('combobox', { name: '朋友' });
+      fireEvent.change(select, { target: { value: 'bob' } });
+      expect(screen.getByText(/不會把缺少資料誤判為整天空堂/)).toBeTruthy();
+      expect(screen.queryByRole('button', { name: '約吃飯' })).toBeNull();
+      expect(screen.queryByRole('button', { name: '約讀書' })).toBeNull();
+      expect(mocks.meetup).not.toHaveBeenCalled();
+    },
+  );
 
   it('still offers invitations when both schedules are available', async () => {
     mocks.friends.mockResolvedValue([{ uid: 'bob', name: '小林' }]);
     mocks.friendTimetable.mockResolvedValue(timetable('好友課程'));
     await ready();
-    fireEvent.change(await screen.findByRole('combobox', { name: '朋友' }), { target: { value: 'bob' } });
+    fireEvent.change(await screen.findByRole('combobox', { name: '朋友' }), {
+      target: { value: 'bob' },
+    });
     expect(screen.getAllByRole('button', { name: '約吃飯' }).length).toBeGreaterThan(0);
   });
 });

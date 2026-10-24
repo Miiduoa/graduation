@@ -153,6 +153,31 @@ function writeLocal(ownerKey: string, timetable: StoredTimetable) {
   localStorage.setItem(`${LOCAL_KEY}:${ownerKey}:${timetable.schoolId}`, JSON.stringify(timetable));
 }
 
+function personalTimetableDoc(uid: string, schoolId: string) {
+  return doc(getDb(), 'users', uid, 'schools', schoolId, 'personalTimetable', 'current');
+}
+
+function legacyPersonalTimetableDoc(uid: string) {
+  return doc(getDb(), 'users', uid, 'personalTimetable', 'current');
+}
+
+function cloudTimetableForSchool(
+  data: StoredTimetable & { updatedAt?: unknown },
+  schoolId: string,
+): StoredTimetable | null {
+  if (!hasTimetableContent(data) || typeof data.schoolId !== 'string') return null;
+  // Exact school marker only — wrong or missing scope must not become this campus.
+  if (data.schoolId !== schoolId) return null;
+  return {
+    ...emptyTimetable(schoolId),
+    ...data,
+    updatedAt: new Date(savedAtMillis(data.updatedAt) || Date.now()).toISOString(),
+    courses: cleanCourses(data.courses),
+    meta: cleanMeta(data.meta),
+    schoolId,
+  };
+}
+
 export async function loadPersonalTimetable(
   uid: string | null,
   schoolId: string,
@@ -173,9 +198,9 @@ export async function loadPersonalTimetable(
   // Scoped records are explicit device-only saves, not a cloud cache. A newer
   // legacy cloud timestamp must not replace edits or revive a deleted course.
   if (initial.scoped) return initial.timetable;
-  let snap;
+  let canonical;
   try {
-    snap = await getDoc(doc(getDb(), 'users', uid, 'personalTimetable', 'current'));
+    canonical = await getDoc(personalTimetableDoc(uid, schoolId));
   } catch (error) {
     const latest = readCurrentLocal();
     if (latest.found) return latest.timetable;
@@ -186,35 +211,63 @@ export async function loadPersonalTimetable(
   const localSnapshot = readCurrentLocal();
   const local = localSnapshot.timetable;
   if (localSnapshot.scoped) return local;
-  if (!snap.exists()) {
+
+  if (canonical.exists()) {
+    const data = canonical.data() as (StoredTimetable & { updatedAt?: unknown }) | null | undefined;
+    const parsed =
+      data && typeof data === 'object' ? cloudTimetableForSchool(data, schoolId) : null;
+    if (!parsed) {
+      // Recoverable local copy still wins; otherwise wrong scope is empty and
+      // missing/malformed provenance must not pretend the campus has no cloud doc.
+      if (localSnapshot.found) return local;
+      if (
+        data &&
+        typeof data === 'object' &&
+        typeof data.schoolId === 'string' &&
+        data.schoolId !== schoolId
+      ) {
+        return local;
+      }
+      throw new Error('雲端課表格式異常，無法確認課表內容。請保留本機資料並重新讀取。');
+    }
+    // Canonical document present (including empty courses) wins over legacy.
+    if (localSnapshot.found && localSnapshot.recordedAt > savedAtMillis(data?.updatedAt)) {
+      return local;
+    }
+    return parsed;
+  }
+
+  let legacy;
+  try {
+    legacy = await getDoc(legacyPersonalTimetableDoc(uid));
+  } catch (error) {
+    if (localSnapshot.found) return local;
+    throw error;
+  }
+  if (!legacy.exists()) {
     if (localSnapshot.found || localOwner) return local;
     // Compatibility for old callers: adopt a guest copy only after the account
     // is confirmed empty. Scoped platform and school accounts stay isolated.
     return readLocal('local', schoolId);
   }
-  const data = snap.data() as StoredTimetable & { updatedAt?: unknown };
-  if (!hasTimetableContent(data) ||
-      (data.schoolId !== undefined && typeof data.schoolId !== 'string')) {
+  const legacyData = legacy.data() as StoredTimetable & { updatedAt?: unknown };
+  const fromLegacy = cloudTimetableForSchool(legacyData, schoolId);
+  // Read-only legacy fallback only when schoolId matches exactly.
+  if (!fromLegacy) {
+    // Legacy wrong/missing school: no adoption. Malformed payload still throws.
     if (localSnapshot.found) return local;
-    throw new Error('雲端課表格式異常，無法確認課表內容。請保留本機資料並重新讀取。');
-  }
-  // Early cloud timetables had no school marker because the timetable only
-  // supported PU. Allow that legacy copy only when PU is explicitly selected;
-  // an untagged remote document cannot become a different university's data.
-  if (data.schoolId && data.schoolId !== schoolId) return local;
-  if (!data.schoolId && schoolId !== 'pu') return local;
-  // Unscoped legacy copies still use their original timestamps for recovery.
-  if (localSnapshot.found && localSnapshot.recordedAt > savedAtMillis(data.updatedAt)) {
+    if (
+      !hasTimetableContent(legacyData) ||
+      (legacyData.schoolId !== undefined && typeof legacyData.schoolId !== 'string')
+    ) {
+      throw new Error('雲端課表格式異常，無法確認課表內容。請保留本機資料並重新讀取。');
+    }
     return local;
   }
-  return {
-    ...emptyTimetable(schoolId),
-    ...data,
-    updatedAt: new Date(savedAtMillis(data.updatedAt) || Date.now()).toISOString(),
-    courses: cleanCourses(data.courses),
-    meta: cleanMeta(data.meta),
-    schoolId: data.schoolId || schoolId,
-  };
+  if (localSnapshot.found && localSnapshot.recordedAt > savedAtMillis(legacyData.updatedAt)) {
+    return local;
+  }
+  return fromLegacy;
 }
 
 export async function savePersonalTimetable(
@@ -236,18 +289,24 @@ export async function savePersonalTimetable(
   return { stored: 'local' };
 }
 
-export async function loadFriendTimetable(friendUid: string): Promise<StoredTimetable | null> {
-  if (!isFirebaseConfigured()) return null;
-  const snap = await getDoc(doc(getDb(), 'users', friendUid, 'personalTimetable', 'current'));
-  if (!snap.exists()) return null;
-  const data = snap.data() as StoredTimetable;
-  if (data.shareWithFriends === false) return null;
-  return {
-    ...emptyTimetable(data.schoolId || 'pu'),
-    ...data,
-    courses: cleanCourses(data.courses),
-    meta: cleanMeta(data.meta),
+export async function loadFriendTimetable(
+  friendUid: string,
+  schoolId: string,
+): Promise<StoredTimetable | null> {
+  if (!friendUid || !schoolId || !isFirebaseConfigured()) return null;
+  const readShared = (snap: { exists(): boolean; data(): unknown }) => {
+    if (!snap.exists()) return null;
+    const data = snap.data() as StoredTimetable | undefined;
+    if (!data) return null;
+    if (data.shareWithFriends === false) return null;
+    return cloudTimetableForSchool(data, schoolId);
   };
+  const canonical = await getDoc(personalTimetableDoc(friendUid, schoolId));
+  const fromCanonical = readShared(canonical);
+  if (fromCanonical) return fromCanonical;
+  if (canonical.exists()) return null;
+  const legacy = await getDoc(legacyPersonalTimetableDoc(friendUid));
+  return readShared(legacy);
 }
 
 export async function createServerShare(schoolId: string, name: string) {
@@ -272,6 +331,7 @@ export async function loadSharedTimetable(token: string) {
   if (!expires || expires.getTime() <= Date.now()) throw new Error('expired');
   return {
     name: String(data.name || '課表'),
+    schoolId: typeof data.schoolId === 'string' ? data.schoolId : null,
     courses: cleanCourses(data.courses),
     meta: cleanMeta(data.meta || {}),
     expiresAt: expires.toISOString(),
@@ -351,7 +411,8 @@ async function ensureTimetableIndex(
   schoolId: string,
   localCourses?: PersonalCourse[],
 ) {
-  const ref = doc(getDb(), 'users', uid, 'personalTimetable', 'current');
+  // Appeal workflow only — writes the canonical per-school path, never another campus.
+  const ref = personalTimetableDoc(uid, schoolId);
   const snap = await getDoc(ref);
   if (!snap.exists()) {
     // 課表只存在這台裝置上：先存上去，申訴才對得到課
@@ -365,9 +426,14 @@ async function ensureTimetableIndex(
     }
     return;
   }
-  const data = snap.data() as { courses?: unknown; courseIds?: unknown };
+  const data = snap.data() as { courses?: unknown; courseIds?: unknown; schoolId?: unknown };
+  if (data.schoolId !== schoolId) return;
   if (Array.isArray(data.courseIds)) return;
-  await setDoc(ref, timetableIndex(cleanCourses(data.courses)), { merge: true });
+  await setDoc(
+    ref,
+    { schoolId, ...timetableIndex(cleanCourses(data.courses)) },
+    { merge: true },
+  );
 }
 
 /** 課表裡這門課的開課代號（課名｜老師），老師工作台用它找到對的老師。 */
