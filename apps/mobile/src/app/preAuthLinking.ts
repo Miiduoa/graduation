@@ -19,6 +19,12 @@ export const preAuthLinking: LinkingOptions<PreAuthStackParamList> = {
       公告詳情: 'announcement/:id',
       NuniWorkspace: 'campus-one',
       SSOLogin: 'sso-login',
+      PersonalCalendar: {
+        path: 'personal-calendar/:eventId?',
+        parse: {
+          eventId: (value: string | undefined) => (value && value.length ? value : undefined),
+        },
+      },
     },
   },
   getStateFromPath: (path, options) => getStateFromPath(rewriteLegacyShopsPath(path), options),
