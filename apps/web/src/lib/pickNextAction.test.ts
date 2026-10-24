@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   formatTodayHeaderDate,
   formatTodoDueLine,
+  formatUpcomingDueLine,
   pickNextAction,
   sortTodayClasses,
   TODAY_COPY,
@@ -98,9 +99,10 @@ describe('pickNextAction', () => {
     expect(pickNextAction([klass()], [todo()], current)).toEqual({ type: 'class', class: klass() });
   });
 
-  it('今天沒課且沒有任何未交待辦才是空狀態', () => {
+  it('今天沒課且超過 24 小時才截止的未交是下一件作業，不是今天截止', () => {
     const laterDue = todo({ dueAt: Date.parse('2026-10-28T23:59:00+08:00') });
-    expect(pickNextAction([], [laterDue], now)).toEqual({ type: 'assignment', todo: laterDue });
+    expect(pickNextAction([], [laterDue], now)).toEqual({ type: 'upcoming', todo: laterDue });
+    expect(formatUpcomingDueLine(laterDue)).toBe('10/28 週三 23:59 截止');
     expect(pickNextAction([], [], now)).toEqual({ type: 'empty' });
   });
 
@@ -145,6 +147,7 @@ describe('today screen copy and ordering', () => {
     expect(TODAY_COPY.noTimetable).toBe('還沒有課表。');
     expect(TODAY_COPY.importTimetable).toBe('匯入課表');
     expect(TODAY_COPY.lmsUnconnected).toBe('這裡會顯示課程平台上的作業，目前還沒連上。');
+    expect(TODAY_COPY.nextAssignment).toBe('下一件作業');
   });
 
   it('已上完的課排到下面', () => {

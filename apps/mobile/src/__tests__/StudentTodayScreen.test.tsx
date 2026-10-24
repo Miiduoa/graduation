@@ -4,7 +4,7 @@ import { RefreshControl } from 'react-native';
 import StudentTodayScreen from '../screens/StudentTodayScreen';
 import { loadStudentHome } from '../data/studentHome';
 import type { CourseSpace, InboxTask } from '../data/types';
-import { TODAY_COPY, type TodayClass } from '@campus/shared/src/pickNextAction';
+import { formatUpcomingDueLine, TODAY_COPY, type TodayClass } from '@campus/shared/src/pickNextAction';
 import { rootNavigateNested } from '../app/rootNavigation';
 import { hasTCSession } from '../services/tronClassClient';
 import { SENSE_EMPTY_TEXT, SENSE_SECTION_TITLE } from '@campus/shared/src/todaySense';
@@ -171,6 +171,20 @@ test('does not keep sense cards or sample recommendations on today', async () =>
   await view.findAllByText('繳交期末報告');
   expect(view.queryByText(SENSE_SECTION_TITLE)).toBeNull();
   expect(view.queryByText(/為你推薦|智慧|AI 幫你/)).toBeNull();
+});
+
+test('shows upcoming work due after 24 hours as the next assignment, not due today', async () => {
+  const data = result();
+  const dueAt = new Date(Date.now() + 3 * 24 * 60 * 60 * 1000);
+  data.tasks[0].dueAt = dueAt;
+  jest.mocked(loadStudentHome).mockResolvedValue(data);
+  const view = render(<StudentTodayScreen />);
+  expect(await view.findByText(TODAY_COPY.nextAssignment)).toBeTruthy();
+  expect(
+    view.getByText(formatUpcomingDueLine({ id: data.tasks[0].id, title: data.tasks[0].title, courseName: data.tasks[0].groupName, dueAt: dueAt.getTime() })),
+  ).toBeTruthy();
+  expect(view.queryByText(TODAY_COPY.dueToday)).toBeNull();
+  expect(view.getByText(TODAY_COPY.goSubmit)).toBeTruthy();
 });
 
 test('shows the earliest overdue item instead of the empty-day sentence', async () => {

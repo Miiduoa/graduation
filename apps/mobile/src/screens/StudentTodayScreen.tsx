@@ -26,6 +26,7 @@ import {
   formatClock,
   formatTodayHeaderDate,
   formatTodoDueLine,
+  formatUpcomingDueLine,
   formatUpdatedAt,
   isDueWithinHours,
   isTodoOverdue,
@@ -295,11 +296,13 @@ function NextActionCard({
         ? `class:${action.class.id}`
         : action.type === 'assignment'
           ? `todo:${action.todo.id}`
-          : action.type === 'overdue'
-            ? `overdue:${action.todo.id}`
-            : action.type === 'allDone'
-              ? `done:${action.todo?.id ?? ''}`
-              : 'empty';
+          : action.type === 'upcoming'
+            ? `upcoming:${action.todo.id}`
+            : action.type === 'overdue'
+              ? `overdue:${action.todo.id}`
+              : action.type === 'allDone'
+                ? `done:${action.todo?.id ?? ''}`
+                : 'empty';
   const prev = useRef(key);
   useEffect(() => {
     if (prev.current === key) return;
@@ -308,6 +311,7 @@ function NextActionCard({
     const content = (value: string) =>
       value.startsWith('class:') ||
       value.startsWith('todo:') ||
+      value.startsWith('upcoming:') ||
       value.startsWith('overdue:') ||
       value.startsWith('done:');
     if (!content(from) || !content(key)) {
@@ -390,9 +394,12 @@ function NextActionCard({
       </Pressable>
     );
   }
-  if (action.type !== 'assignment' && action.type !== 'overdue') return null;
+  if (action.type !== 'assignment' && action.type !== 'overdue' && action.type !== 'upcoming') return null;
   const todo = action.todo as TodoRow;
   const overdue = action.type === 'overdue';
+  const kind =
+    overdue ? TODAY_COPY.overdue : action.type === 'upcoming' ? TODAY_COPY.nextAssignment : TODAY_COPY.dueToday;
+  const meta = action.type === 'upcoming' ? formatUpcomingDueLine(todo) : formatTodoDueLine(todo, now);
   return (
     <Pressable
       accessibilityRole="button"
@@ -401,9 +408,9 @@ function NextActionCard({
       testID="next-action"
     >
       <Animated.View style={{ opacity: fade, flex: 1 }}>
-        <Text style={s.kind}>{overdue ? TODAY_COPY.overdue : TODAY_COPY.dueToday}</Text>
+        <Text style={s.kind}>{kind}</Text>
         <Text style={s.headline}>{todo.title}</Text>
-        <Text style={[s.meta, overdue ? s.metaDanger : null]}>{formatTodoDueLine(todo, now)}</Text>
+        <Text style={[s.meta, overdue ? s.metaDanger : null]}>{meta}</Text>
         <Pressable accessibilityRole="button" onPress={() => onOpenTodo(todo)} style={s.cardButton}>
           <Text style={s.cardButtonText}>{TODAY_COPY.goSubmit}</Text>
         </Pressable>

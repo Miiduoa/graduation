@@ -101,6 +101,20 @@ it('shows the empty-day sentence and the week button', () => {
   expect(screen.getByRole('link', { name: TODAY_COPY.viewWeek })).toBeTruthy();
 });
 
+it('shows upcoming work due after 24 hours as the next assignment, not due today', () => {
+  view({
+    now: new Date('2026-10-25T02:00:00+08:00'),
+    classes: [],
+    todos: [todo({ dueAt: Date.parse('2026-10-28T23:59:00+08:00') })],
+    timetableStatus: 'ready',
+  });
+  const card = screen.getByTestId('next-action');
+  expect(card.textContent).toContain(TODAY_COPY.nextAssignment);
+  expect(card.textContent).toContain('10/28 週三 23:59 截止');
+  expect(card.textContent).not.toContain(TODAY_COPY.dueToday);
+  expect(screen.getByRole('link', { name: TODAY_COPY.goSubmit })).toBeTruthy();
+});
+
 it('puts the earliest overdue item on the main card instead of the empty-day sentence', () => {
   view({
     now: new Date('2026-10-25T02:00:00+08:00'),

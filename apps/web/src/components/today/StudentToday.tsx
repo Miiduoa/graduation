@@ -7,6 +7,7 @@ import {
   formatClassMeta,
   formatTodayHeaderDate,
   formatTodoDueLine,
+  formatUpcomingDueLine,
   formatUpdatedAt,
   isDueWithinHours,
   isTodoOverdue,
@@ -276,15 +277,21 @@ function NextActionBody({
     );
   }
 
-  if (action.type !== 'assignment' && action.type !== 'overdue') return null;
+  if (action.type !== 'assignment' && action.type !== 'overdue' && action.type !== 'upcoming') return null;
 
   return (
     <>
       <Link href={courseWeekHref(action.todo.courseId)} className={styles.cardMain}>
-        <p className={styles.kind}>{action.type === 'overdue' ? TODAY_COPY.overdue : TODAY_COPY.dueToday}</p>
+        <p className={styles.kind}>
+          {action.type === 'overdue'
+            ? TODAY_COPY.overdue
+            : action.type === 'upcoming'
+              ? TODAY_COPY.nextAssignment
+              : TODAY_COPY.dueToday}
+        </p>
         <p className={styles.headline}>{action.todo.title}</p>
         <p className={`${styles.meta} ${action.type === 'overdue' ? styles.metaDanger : ''}`}>
-          {formatTodoDueLine(action.todo, now)}
+          {action.type === 'upcoming' ? formatUpcomingDueLine(action.todo) : formatTodoDueLine(action.todo, now)}
         </p>
       </Link>
       <Link className={styles.action} href={assignmentSubmitHref(action.todo)}>
@@ -298,6 +305,7 @@ function actionKey(action: NextAction, unsigned: boolean): string {
   if (unsigned && action.type !== 'class') return 'unsigned';
   if (action.type === 'class') return `class:${action.class.id}`;
   if (action.type === 'assignment') return `todo:${action.todo.id}`;
+  if (action.type === 'upcoming') return `upcoming:${action.todo.id}`;
   if (action.type === 'overdue') return `overdue:${action.todo.id}`;
   if (action.type === 'allDone') return `done:${action.todo?.id ?? ''}`;
   return 'empty';
@@ -307,6 +315,7 @@ function isContentKey(key: string): boolean {
   return (
     key.startsWith('class:') ||
     key.startsWith('todo:') ||
+    key.startsWith('upcoming:') ||
     key.startsWith('overdue:') ||
     key.startsWith('done:')
   );

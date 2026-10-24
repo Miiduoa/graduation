@@ -14,6 +14,7 @@ export const TODAY_COPY = {
   importTimetable: '匯入課表',
   lmsUnconnected: '這裡會顯示課程平台上的作業，目前還沒連上。',
   nextClass: '下一堂課',
+  nextAssignment: '下一件作業',
   dueToday: '今天截止',
   viewCourse: '看課程',
   goSubmit: '去繳交',
@@ -45,6 +46,7 @@ export type TodayTodo = {
 export type NextAction =
   | { type: 'class'; class: TodayClass }
   | { type: 'assignment'; todo: TodayTodo }
+  | { type: 'upcoming'; todo: TodayTodo }
   | { type: 'overdue'; todo: TodayTodo }
   | { type: 'empty' }
   | { type: 'allDone'; todo: TodayTodo | null };
@@ -168,7 +170,7 @@ export function pickNextAction(
   }
 
   const leftover = earliestOpenTodo(todos);
-  if (leftover) return { type: 'assignment', todo: leftover };
+  if (leftover) return { type: 'upcoming', todo: leftover };
 
   return { type: 'empty' };
 }
@@ -232,6 +234,13 @@ export function formatTodoDueLine(todo: TodayTodo, now: Date): string {
     return days >= 1 ? TODAY_COPY.overdueDays(days) : TODAY_COPY.overdue;
   }
   return `${formatClock(todo.dueAt)} 截止・${remainingHoursText(todo.dueAt, nowMs)}`;
+}
+
+export function formatUpcomingDueLine(todo: TodayTodo): string {
+  const parts = taipeiParts(todo.dueAt);
+  const weekday = taipeiWeekdayIndex(new Date(todo.dueAt));
+  if (!parts || weekday === null || !Number.isFinite(todo.dueAt)) return '';
+  return `${parts.month}/${parts.day} ${WEEKDAYS[weekday]} ${pad(parts.hour24)}:${pad(parts.minute)} 截止`;
 }
 
 export function isDueWithinHours(todo: TodayTodo, now: Date, hours: number): boolean {

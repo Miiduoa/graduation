@@ -1,6 +1,7 @@
 import {
   formatTodayHeaderDate,
   formatTodoDueLine,
+  formatUpcomingDueLine,
   pickNextAction,
   TODAY_COPY,
   type TodayClass,
@@ -92,8 +93,10 @@ test('正在上的課也算 30 分鐘內有課', () => {
   });
 });
 
-test('今天沒課且沒有任何未交待辦才是空狀態', () => {
+test('今天沒課且超過 24 小時才截止的未交是下一件作業，不是今天截止', () => {
   const laterDue = todo({ dueAt: Date.parse('2026-10-28T23:59:00+08:00') });
-  expect(pickNextAction([], [laterDue], now)).toEqual({ type: 'assignment', todo: laterDue });
+  expect(pickNextAction([], [laterDue], now)).toEqual({ type: 'upcoming', todo: laterDue });
+  expect(formatUpcomingDueLine(laterDue)).toBe('10/28 週三 23:59 截止');
+  expect(TODAY_COPY.nextAssignment).toBe('下一件作業');
   expect(pickNextAction([], [], now)).toEqual({ type: 'empty' });
 });
