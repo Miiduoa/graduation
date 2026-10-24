@@ -1,6 +1,6 @@
 import { collection, doc, getDocFromServer, getDocsFromServer } from 'firebase/firestore';
 import { getAuth, getCloudFunctionUrl, getDb, isFirebaseConfigured } from '@/lib/firebase';
-import { areFunctionsConfigured, FunctionsUnconfiguredError } from '@/lib/functionsUrl';
+import { FunctionsUnconfiguredError } from '@/lib/functionsUrl';
 
 export type MemberGroup = {
   id: string;
@@ -92,9 +92,6 @@ async function callForUser(
   current: CurrentScope,
 ): Promise<Record<string, unknown>> {
   assertCurrent(uid, current);
-  if (!areFunctionsConfigured()) {
-    throw new FunctionsUnconfiguredError('加入與退出群組尚未啟用');
-  }
   const auth = getAuth()!;
   const user = auth.currentUser!;
   const token = await user.getIdToken();
@@ -114,8 +111,15 @@ async function callForUser(
     });
     const payload = await response.json();
     assertCurrent(uid, current);
-    if (getAuth()?.currentUser !== user || !response.ok || payload.error)
-      throw new Error('Operation was not confirmed');
+    if (getAuth()?.currentUser !== user) throw new Error('Login session changed');
+    const errorMessage =
+      payload && typeof payload === 'object' && payload.error && typeof payload.error === 'object'
+        ? String((payload.error as { message?: unknown }).message || '')
+        : '';
+    if (response.status === 503 || /尚未啟用/.test(errorMessage)) {
+      throw new FunctionsUnconfiguredError('加入與退出群組尚未啟用');
+    }
+    if (!response.ok || payload.error) throw new Error('Operation was not confirmed');
     const result = payload.result ?? payload.data;
     if (!result || typeof result !== 'object' || result.success !== true)
       throw new Error('Operation was not confirmed');
