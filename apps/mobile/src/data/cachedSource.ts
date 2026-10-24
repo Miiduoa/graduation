@@ -413,7 +413,7 @@ const CACHEABLE_GET_METHODS: Record<string, string> = {
   getGroup: 'group',
 };
 
-const SCHOOL_SCOPED_GET_METHODS = new Set(['getAnnouncement', 'getEvent']);
+const SCHOOL_SCOPED_GET_METHODS = new Set(['getAnnouncement', 'getEvent', 'getCourse']);
 
 export function schoolScopedCacheKey(prefix: string, schoolId: string, id: string): string {
   return `${prefix}_${schoolId}_${id}`;
@@ -606,6 +606,10 @@ export function createCachedSource(
         const cachePrefix = CACHEABLE_GET_METHODS[prop];
         const getMethod = originalMethod as (id: string, ...args: unknown[]) => Promise<unknown>;
         return async (id: string, ...args: unknown[]) => {
+          // An implicit school may change while the same course id is reused.
+          if (prop === 'getCourse' && !(typeof args[0] === 'string' && args[0])) {
+            return getMethod.call(target, id, ...args);
+          }
           const schoolId =
             SCHOOL_SCOPED_GET_METHODS.has(prop) && typeof args[0] === 'string' && args[0]
               ? args[0]

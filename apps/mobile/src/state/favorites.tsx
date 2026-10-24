@@ -80,9 +80,9 @@ export function FavoritesProvider(props: {
       const nextList = list.includes(id) ? list.filter((x) => x !== id) : [...list, id];
       return { ...prev, [kind]: nextList };
     });
-  }, []);
+  }, [setFavorites]);
 
-  const clearAll = useCallback(() => setFavorites(emptyState), []);
+  const clearAll = useCallback(() => setFavorites(emptyState), [setFavorites]);
 
   // 修復：完整列出所有依賴項
   const value = useMemo(

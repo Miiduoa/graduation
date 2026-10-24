@@ -25,6 +25,7 @@ import {
   type TimetableMeta,
 } from '@campus/shared';
 import { getDb, getFunctionsInstance } from '../firebase';
+import { isProvidenceSchoolId, toPublicSchoolId } from '../data/schoolIds';
 
 const KEY = 'campus-one-personal-timetable';
 
@@ -36,26 +37,81 @@ export type StoredTimetable = {
   schoolId: string;
 };
 
+function canonicalSchoolId(schoolId: string): string {
+  return toPublicSchoolId(schoolId) ?? schoolId;
+}
+
+function sameSchool(a?: string | null, b?: string | null): boolean {
+  if (!a || !b) return false;
+  return canonicalSchoolId(a) === canonicalSchoolId(b);
+}
+
+/** Prefer canonical key, then historical alias keys; never delete older keys. */
+function localSchoolKeySuffixes(schoolId: string): string[] {
+  const canonical = canonicalSchoolId(schoolId);
+  if (isProvidenceSchoolId(schoolId)) {
+    return [...new Set([canonical, 'tw-pu', schoolId])];
+  }
+  return [...new Set([canonical, schoolId])];
+}
+
+function cloudScopedRef(uid: string, schoolId: string) {
+  return doc(
+    getDb(),
+    'users',
+    uid,
+    'schools',
+    canonicalSchoolId(schoolId),
+    'personalTimetable',
+    'current',
+  );
+}
+
+function cloudLegacyRef(uid: string) {
+  return doc(getDb(), 'users', uid, 'personalTimetable', 'current');
+}
+
 function empty(schoolId: string): StoredTimetable {
   return {
     courses: [],
     meta: cleanMeta({}),
     shareWithFriends: true,
     updatedAt: new Date().toISOString(),
-    schoolId,
+    schoolId: canonicalSchoolId(schoolId),
+  };
+}
+
+function asStored(data: StoredTimetable, schoolId: string): StoredTimetable {
+  const canonical = canonicalSchoolId(schoolId);
+  return {
+    ...empty(canonical),
+    ...data,
+    courses: cleanCourses(data.courses),
+    meta: cleanMeta(data.meta),
+    schoolId: canonical,
   };
 }
 
 async function readLocalTimetable(owner: string, schoolId: string, allowLegacy: boolean) {
-  const scoped = await AsyncStorage.getItem(`${KEY}:${owner}:${schoolId}`);
+  const canonical = canonicalSchoolId(schoolId);
+  let scoped: string | null = null;
+  for (const suffix of localSchoolKeySuffixes(schoolId)) {
+    const raw = await AsyncStorage.getItem(`${KEY}:${owner}:${suffix}`);
+    if (raw !== null) {
+      scoped = raw;
+      break;
+    }
+  }
   const raw = scoped !== null ? scoped : allowLegacy ? await AsyncStorage.getItem(`${KEY}:${owner}`) : null;
-  if (raw === null) return empty(schoolId);
+  if (raw === null) return empty(canonical);
   const invalid = () => new Error('儲存的課表無法讀取，已保留原始資料。請稍後重試，或先備份再處理。');
   let parsed: StoredTimetable;
   try { parsed = JSON.parse(raw) as StoredTimetable; } catch { throw invalid(); }
   // Only an explicitly different-school legacy record may be ignored.
-  if (scoped === null && typeof parsed?.schoolId === 'string' && parsed.schoolId !== schoolId) return empty(schoolId);
-  if (!parsed || parsed.schoolId !== schoolId || !Array.isArray(parsed.courses) ||
+  if (scoped === null && typeof parsed?.schoolId === 'string' && !sameSchool(parsed.schoolId, schoolId)) {
+    return empty(canonical);
+  }
+  if (!parsed || !sameSchool(parsed.schoolId, schoolId) || !Array.isArray(parsed.courses) ||
     !parsed.meta || typeof parsed.meta !== 'object' || Array.isArray(parsed.meta) ||
     typeof parsed.meta.year !== 'string' || typeof parsed.meta.semester !== 'string' ||
     typeof parsed.shareWithFriends !== 'boolean' ||
@@ -65,7 +121,22 @@ async function readLocalTimetable(owner: string, schoolId: string, allowLegacy: 
       (course.day === 0 ? course.start !== 0 || course.end !== 0 : course.start < 1 || course.end < course.start || course.end > MAX_PERIOD_SLOTS))) {
     throw invalid();
   }
-  return { ...parsed, courses: cleanCourses(parsed.courses), meta: cleanMeta(parsed.meta) };
+  return {
+    ...parsed,
+    schoolId: canonical,
+    courses: cleanCourses(parsed.courses),
+    meta: cleanMeta(parsed.meta),
+  };
+}
+
+function withLocalFallback(schoolId: string, fallback: StoredTimetable): StoredTimetable {
+  const canonical = canonicalSchoolId(schoolId);
+  return {
+    ...empty(canonical),
+    ...fallback,
+    courses: cleanCourses(fallback.courses),
+    schoolId: canonical,
+  };
 }
 
 export async function loadPersonalTimetable(
@@ -74,37 +145,46 @@ export async function loadPersonalTimetable(
   localOwner?: string,
 ): Promise<StoredTimetable> {
   const owner = localOwner || uid || 'local';
+  const canonical = canonicalSchoolId(schoolId);
   const fallback = await readLocalTimetable(owner, schoolId, !localOwner);
-  if (!uid || localOwner) return { ...empty(schoolId), ...fallback, courses: cleanCourses(fallback.courses) };
+  if (!uid || localOwner) return withLocalFallback(canonical, fallback);
+  let scopedSnap;
   try {
-    const snap = await getDoc(doc(getDb(), 'users', uid, 'personalTimetable', 'current'));
-    if (!snap.exists())
-      return { ...empty(schoolId), ...fallback, courses: cleanCourses(fallback.courses) };
-    const data = snap.data() as StoredTimetable;
-    if (data.schoolId !== schoolId) return { ...empty(schoolId), ...fallback, courses: cleanCourses(fallback.courses) };
-    return {
-      ...empty(schoolId),
-      ...data,
-      courses: cleanCourses(data.courses),
-      meta: cleanMeta(data.meta),
-    };
+    scopedSnap = await getDoc(cloudScopedRef(uid, canonical));
   } catch {
-    return { ...empty(schoolId), ...fallback, courses: cleanCourses(fallback.courses) };
+    // Failed scoped read must not trigger legacy fallback.
+    return withLocalFallback(canonical, fallback);
+  }
+  if (scopedSnap.exists()) {
+    const data = scopedSnap.data() as StoredTimetable;
+    if (!sameSchool(data.schoolId, canonical)) return withLocalFallback(canonical, fallback);
+    return asStored(data, canonical);
+  }
+  try {
+    const legacySnap = await getDoc(cloudLegacyRef(uid));
+    if (!legacySnap.exists()) return withLocalFallback(canonical, fallback);
+    const data = legacySnap.data() as StoredTimetable;
+    if (!sameSchool(data.schoolId, canonical)) return withLocalFallback(canonical, fallback);
+    return asStored(data, canonical);
+  } catch {
+    return withLocalFallback(canonical, fallback);
   }
 }
 
 export async function savePersonalTimetable(uid: string | null, timetable: StoredTimetable, localOwner?: string) {
+  const canonical = canonicalSchoolId(timetable.schoolId);
   // A failed read must not be replaced by a newly created empty timetable.
   await readLocalTimetable(localOwner || uid || 'local', timetable.schoolId, !localOwner);
   const next = {
     ...timetable,
+    schoolId: canonical,
     courses: cleanCourses(timetable.courses),
     meta: cleanMeta(timetable.meta),
     updatedAt: new Date().toISOString(),
   };
-  await AsyncStorage.setItem(`${KEY}:${localOwner || uid || 'local'}:${timetable.schoolId}`, JSON.stringify(next));
+  await AsyncStorage.setItem(`${KEY}:${localOwner || uid || 'local'}:${canonical}`, JSON.stringify(next));
   if (!uid || localOwner) return { stored: 'local' as const };
-  await setDoc(doc(getDb(), 'users', uid, 'personalTimetable', 'current'), {
+  await setDoc(cloudScopedRef(uid, canonical), {
     ...next,
     // 送申訴時規則用這兩個清單確認課在自己的課表裡
     ...timetableIndex(next.courses),
@@ -125,11 +205,34 @@ export function personalTimetableRecords(timetable: StoredTimetable): PersonalIm
   }));
 }
 
-export async function loadFriendTimetable(friendUid: string) {
-  const snap = await getDoc(doc(getDb(), 'users', friendUid, 'personalTimetable', 'current'));
-  if (!snap.exists() || snap.data()?.shareWithFriends === false) return null;
-  const data = snap.data() as StoredTimetable;
-  return { ...data, courses: cleanCourses(data.courses) };
+export async function loadFriendTimetable(friendUid: string, schoolId: string) {
+  if (!schoolId?.trim()) {
+    throw new Error('schoolId is required');
+  }
+  const canonical = canonicalSchoolId(schoolId);
+  let scopedSnap;
+  try {
+    scopedSnap = await getDoc(cloudScopedRef(friendUid, canonical));
+  } catch {
+    // Failed scoped read must not trigger legacy fallback.
+    return null;
+  }
+  if (scopedSnap.exists()) {
+    const data = scopedSnap.data() as StoredTimetable;
+    if (data.shareWithFriends !== true) return null;
+    if (!sameSchool(data.schoolId, canonical)) return null;
+    return asStored(data, canonical);
+  }
+  try {
+    const legacySnap = await getDoc(cloudLegacyRef(friendUid));
+    if (!legacySnap.exists()) return null;
+    const data = legacySnap.data() as StoredTimetable;
+    if (data.shareWithFriends !== true) return null;
+    if (!sameSchool(data.schoolId, canonical)) return null;
+    return asStored(data, canonical);
+  } catch {
+    return null;
+  }
 }
 
 /** 同一個時間、同一件事只會有一筆（文件編號固定），連按也不會多送。 */
@@ -219,23 +322,49 @@ async function ensureTimetableIndex(
   schoolId: string,
   localCourses?: PersonalCourse[],
 ) {
-  const ref = doc(getDb(), 'users', uid, 'personalTimetable', 'current');
-  const snap = await getDoc(ref);
-  if (!snap.exists()) {
-    // 課表只存在這台裝置上：先存上去，申訴才對得到課
-    if (localCourses?.length) {
-      const courses = cleanCourses(localCourses);
-      await setDoc(
-        ref,
-        { schoolId, courses, ...timetableIndex(courses), updatedAt: serverTimestamp() },
-        { merge: true },
-      );
-    }
+  const canonical = canonicalSchoolId(schoolId);
+  const scopedRef = cloudScopedRef(uid, canonical);
+  const scopedSnap = await getDoc(scopedRef);
+  if (scopedSnap.exists()) {
+    const data = scopedSnap.data() as { schoolId?: string; courses?: unknown; courseIds?: unknown };
+    if (!sameSchool(data.schoolId, canonical)) throw new Error('課表與目前學校不符，請重新讀取。');
+    if (Array.isArray(data.courseIds)) return;
+    await setDoc(scopedRef, {
+      schoolId: canonical,
+      ...timetableIndex(cleanCourses(data.courses)),
+    }, { merge: true });
     return;
   }
-  const data = snap.data() as { courses?: unknown; courseIds?: unknown };
-  if (Array.isArray(data.courseIds)) return;
-  await setDoc(ref, timetableIndex(cleanCourses(data.courses)), { merge: true });
+
+  let seedCourses: PersonalCourse[] | null = null;
+  let seedMeta = cleanMeta({});
+  // Creating an appeal index does not grant friends access to a private timetable.
+  let shareWithFriends = false;
+  const legacySnap = await getDoc(cloudLegacyRef(uid));
+  if (legacySnap.exists()) {
+    const data = legacySnap.data() as StoredTimetable;
+    if (sameSchool(data.schoolId, canonical)) {
+      seedMeta = cleanMeta(data.meta || {});
+      shareWithFriends = data.shareWithFriends === true;
+      if (Array.isArray(data.courses) && data.courses.length) {
+        seedCourses = cleanCourses(data.courses);
+      }
+    }
+  }
+  if (localCourses?.length) seedCourses = cleanCourses(localCourses);
+  if (!seedCourses?.length) return;
+  await setDoc(
+    scopedRef,
+    {
+      schoolId: canonical,
+      courses: seedCourses,
+      meta: seedMeta,
+      shareWithFriends,
+      ...timetableIndex(seedCourses),
+      updatedAt: serverTimestamp(),
+    },
+    { merge: true },
+  );
 }
 
 /** 課表裡這門課的開課代號（課名｜老師），老師工作台用它找到對的老師。 */

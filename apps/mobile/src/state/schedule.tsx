@@ -22,6 +22,7 @@ import {
   getCachedTCCourses,
   getAnyCachedTCCourses,
 } from '../services/puDataCache';
+import { isProvidenceSchoolId, toPublicSchoolId } from '../data/schoolIds';
 import type { PUCourse } from '../services/puDirectScraper';
 import type { TCCourse } from '../services/tronClassClient';
 
@@ -296,12 +297,33 @@ function tcCourseToCourse(tc: TCCourse): Course {
   };
 }
 
-/** 嘗試從 puDataCache 載入課程（E校園 + TronClass） */
-export async function loadCoursesFromCache(): Promise<Course[]> {
+function canLoadPuScheduleCache(
+  selectedSchoolId?: string | null,
+  profileSchoolId?: string | null,
+): boolean {
+  // PU/TronClass cache is Providence-only; never grant it from platform identity alone.
+  if (!isProvidenceSchoolId(selectedSchoolId)) return false;
+  const profile = typeof profileSchoolId === 'string' ? profileSchoolId.trim() : '';
+  return isProvidenceSchoolId(profile);
+}
+
+export type LoadCoursesFromCacheOptions = {
+  schoolId?: string | null;
+  profileSchoolId?: string | null;
+};
+
+/** 僅在所選校園與已確認的校務帳號皆為靜宜時讀取 E 校園／TronClass 快取。 */
+export async function loadCoursesFromCache(
+  options: LoadCoursesFromCacheOptions = {},
+): Promise<Course[]> {
+  if (!canLoadPuScheduleCache(options.schoolId, options.profileSchoolId)) {
+    return [];
+  }
+
   const results: Course[] = [];
 
   try {
-    // 1. E校園課表快取
+    // Retain offline recovery after the selected and account schools were checked above.
     const puResult = (await getCachedCourses()) ?? (await getAnyCachedCourses());
     if (puResult?.courses?.length) {
       for (let i = 0; i < puResult.courses.length; i++) {
@@ -314,10 +336,8 @@ export async function loadCoursesFromCache(): Promise<Course[]> {
   }
 
   try {
-    // 2. TronClass 課程快取
     const tcCourses = (await getCachedTCCourses()) ?? (await getAnyCachedTCCourses());
     if (tcCourses?.length) {
-      // 避免與 PU 課程重複（用課程代碼比對）
       const existingCodes = new Set(results.map((c) => c.code.toLowerCase()));
       for (const tc of tcCourses) {
         const code = (tc.course_code ?? '').toLowerCase();
@@ -341,11 +361,19 @@ type ScheduleProviderProps = {
   children: ReactNode;
 };
 
-export function ScheduleProvider({ children }: ScheduleProviderProps) {
-  const { user } = useAuth();
-  const { schoolId } = useSchool();
-  const currentUserId = user?.uid ?? null;
+type ScheduleScopeProviderProps = {
+  children: ReactNode;
+  userId: string | null;
+  schoolId: string | null;
+  profileSchoolId: string | null;
+};
 
+function ScheduleScopeProvider({
+  children,
+  userId,
+  schoolId,
+  profileSchoolId,
+}: ScheduleScopeProviderProps) {
   const [courses, setCourses] = useState<Course[]>([]);
   const [personalEvents, setPersonalEvents] = useState<ScheduleEvent[]>([]);
   const [loading, setLoading] = useState(true);
@@ -359,20 +387,42 @@ export function ScheduleProvider({ children }: ScheduleProviderProps) {
   });
   const [selectedDate, setSelectedDate] = useState(new Date());
   const storageKeys = useMemo(
-    () => getScheduleStorageKeys(currentUserId, schoolId),
-    [currentUserId, schoolId],
+    () => getScheduleStorageKeys(userId, schoolId),
+    [userId, schoolId],
+  );
+  const cacheOptions = useMemo(
+    () => ({ schoolId, profileSchoolId }),
+    [schoolId, profileSchoolId],
   );
 
-  // 追蹤元件是否已卸載
   const isMountedRef = useRef(true);
+  const refreshGenerationRef = useRef(0);
+  const activeRefreshRef = useRef(0);
+  const sourceSchoolRef = useRef(schoolId);
+  sourceSchoolRef.current = schoolId;
+  const profileSchoolRef = useRef(profileSchoolId);
+  if (profileSchoolRef.current !== profileSchoolId) {
+    profileSchoolRef.current = profileSchoolId;
+    refreshGenerationRef.current += 1;
+  }
+
   useEffect(() => {
     isMountedRef.current = true;
     return () => {
       isMountedRef.current = false;
+      refreshGenerationRef.current += 1;
     };
   }, []);
 
-  // 修復：使用 useMemo 避免每次 render 都重建 schedule 物件
+  const isRefreshCurrent = useCallback((generation: number, sourceSchool: string | null) => {
+    return (
+      isMountedRef.current &&
+      refreshGenerationRef.current === generation &&
+      sourceSchoolRef.current === sourceSchool &&
+      toPublicSchoolId(profileSchoolRef.current) === sourceSchool
+    );
+  }, []);
+
   const schedule = useMemo(() => {
     const result: WeekSchedule = {};
     for (let day = 0; day <= 6; day++) {
@@ -394,7 +444,6 @@ export function ScheduleProvider({ children }: ScheduleProviderProps) {
       });
     }
 
-    // Sort each day by start time
     Object.keys(result).forEach((day) => {
       result[parseInt(day)].sort((a, b) => timeToMinutes(a.startTime) - timeToMinutes(b.startTime));
     });
@@ -402,7 +451,8 @@ export function ScheduleProvider({ children }: ScheduleProviderProps) {
     return result;
   }, [courses, personalEvents, filter.showClasses, filter.showPersonal]);
 
-  // Load saved data
+  // Private courses/events: scoped keys only. Never import unscoped legacy ownership.
+  // View/filter/semester may reuse global convenience prefs.
   useEffect(() => {
     let cancelled = false;
 
@@ -411,8 +461,8 @@ export function ScheduleProvider({ children }: ScheduleProviderProps) {
       try {
         const [storedCourses, storedEvents, storedSemester, storedView, storedFilter] =
           await Promise.all([
-            getFirstStorageValue([storageKeys.COURSES, LEGACY_STORAGE_KEYS.COURSES]),
-            getFirstStorageValue([storageKeys.EVENTS, LEGACY_STORAGE_KEYS.EVENTS]),
+            AsyncStorage.getItem(storageKeys.COURSES),
+            AsyncStorage.getItem(storageKeys.EVENTS),
             getFirstStorageValue([storageKeys.SEMESTER, LEGACY_STORAGE_KEYS.SEMESTER]),
             getFirstStorageValue([storageKeys.VIEW, LEGACY_STORAGE_KEYS.VIEW]),
             getFirstStorageValue([storageKeys.FILTER, LEGACY_STORAGE_KEYS.FILTER]),
@@ -449,68 +499,10 @@ export function ScheduleProvider({ children }: ScheduleProviderProps) {
     };
   }, [storageKeys]);
 
-  // Auto-fetch courses from server when user logs in
-  // 使用 ref 追蹤是否已經嘗試過獲取，避免重複請求
   const hasFetchedRef = useRef(false);
-  const previousContextRef = useRef<string | null>(null);
   const fetchAbortRef = useRef<AbortController | null>(null);
   const refreshScheduleRef = useRef<() => Promise<Course[]>>(async () => []);
 
-  useEffect(() => {
-    const currentContextKey = `${currentUserId ?? 'anonymous'}:${schoolId ?? 'default'}`;
-    const contextChanged = previousContextRef.current !== currentContextKey;
-    previousContextRef.current = currentContextKey;
-
-    if (contextChanged) {
-      hasFetchedRef.current = false;
-      if (fetchAbortRef.current) {
-        fetchAbortRef.current.abort();
-        fetchAbortRef.current = null;
-      }
-    }
-
-    // 用戶改變時重置
-    if (!currentUserId) {
-      return;
-    }
-
-    if (SHOULD_SKIP_REMOTE_SCHEDULE_SYNC) {
-      hasFetchedRef.current = true;
-      return;
-    }
-
-    // 只有在用戶登入、載入完成、沒有課程且未獲取過時才獲取
-    if (currentUserId && !loading && courses.length === 0 && !hasFetchedRef.current) {
-      hasFetchedRef.current = true;
-
-      // 創建新的 AbortController 用於追蹤請求
-      fetchAbortRef.current = new AbortController();
-
-      // 使用 IIFE 處理非同步操作並正確捕獲錯誤
-      (async () => {
-        try {
-          await refreshScheduleRef.current();
-        } catch (error) {
-          // refreshSchedule 內部已經處理了錯誤，這裡只需要記錄
-          if (isMountedRef.current) {
-            console.warn('[Schedule] Auto-fetch failed:', error);
-          }
-        } finally {
-          fetchAbortRef.current = null;
-        }
-      })();
-    }
-
-    // 清理函數：元件卸載或依賴變化時中止請求
-    return () => {
-      if (fetchAbortRef.current) {
-        fetchAbortRef.current.abort();
-        fetchAbortRef.current = null;
-      }
-    };
-  }, [currentUserId, schoolId, loading, courses.length]);
-
-  // Save courses when changed
   useEffect(() => {
     if (!loading) {
       AsyncStorage.setItem(storageKeys.COURSES, JSON.stringify(courses)).catch((e) =>
@@ -519,7 +511,6 @@ export function ScheduleProvider({ children }: ScheduleProviderProps) {
     }
   }, [courses, loading, storageKeys.COURSES]);
 
-  // Save personal events when changed
   useEffect(() => {
     if (!loading) {
       AsyncStorage.setItem(storageKeys.EVENTS, JSON.stringify(personalEvents)).catch((e) =>
@@ -633,96 +624,151 @@ export function ScheduleProvider({ children }: ScheduleProviderProps) {
   );
 
   const refreshSchedule = useCallback(async (): Promise<Course[]> => {
-    if (!user?.uid) return courses;
+    const sourceSchool = schoolId;
+    const generation = ++refreshGenerationRef.current;
+
+    if (!userId || !schoolId || toPublicSchoolId(profileSchoolId) !== schoolId) return courses;
+    activeRefreshRef.current = generation;
+
+    const applyCourses = (next: Course[]): Course[] => {
+      if (!isRefreshCurrent(generation, sourceSchool)) return courses;
+      setCourses(next);
+      return next;
+    };
 
     if (SHOULD_SKIP_REMOTE_SCHEDULE_SYNC) {
-      // 跳過遠端同步，但仍嘗試從本地快取載入
-      const cachedCourses = await loadCoursesFromCache();
-      if (isMountedRef.current && cachedCourses.length > 0) {
-        setCourses(cachedCourses);
-        return cachedCourses;
-      } else {
-        const filtered = courses.filter((course) => !isDemoCourse(course));
-        setCourses(filtered);
-        return filtered;
+      const cachedCourses = await loadCoursesFromCache(cacheOptions);
+      if (!isRefreshCurrent(generation, sourceSchool)) return courses;
+      if (cachedCourses.length > 0) {
+        return applyCourses(cachedCourses);
       }
+      const filtered = courses.filter((course) => !isDemoCourse(course));
+      return applyCourses(filtered);
     }
 
-    setLoading(true);
-    setError(null);
+    if (isRefreshCurrent(generation, sourceSchool)) {
+      setLoading(true);
+      setError(null);
+    }
 
     try {
       if (!hasDataSource()) {
         console.warn('[Schedule] DataSource not set, trying puDataCache...');
-        const cachedCourses = await loadCoursesFromCache();
-        if (isMountedRef.current && cachedCourses.length > 0) {
-          setCourses(cachedCourses);
-          return cachedCourses;
+        const cachedCourses = await loadCoursesFromCache(cacheOptions);
+        if (!isRefreshCurrent(generation, sourceSchool)) return courses;
+        if (cachedCourses.length > 0) {
+          return applyCourses(cachedCourses);
         }
         return courses;
       }
 
       const ds = getDataSource();
-
       const enrollments = await ds.listEnrollments(
-        user.uid,
+        userId,
         currentSemester,
         schoolId ?? undefined,
       );
-      const enrolledCourses: Course[] = [];
+      if (!isRefreshCurrent(generation, sourceSchool)) return courses;
 
+      const enrolledCourses: Course[] = [];
       for (const enrollment of enrollments) {
-        if (enrollment.status === 'enrolled') {
-          const course = await ds.getCourse(enrollment.courseId);
-          if (course) {
+        if (enrollment.status === 'enrolled' &&
+          (!enrollment.schoolId || toPublicSchoolId(enrollment.schoolId) === sourceSchool)) {
+          const course = await ds.getCourse(enrollment.courseId, schoolId ?? undefined);
+          if (!isRefreshCurrent(generation, sourceSchool)) return courses;
+          if (course && (!course.schoolId || toPublicSchoolId(course.schoolId) === sourceSchool)) {
             enrolledCourses.push(course);
           }
         }
       }
 
-      // 檢查元件是否仍然掛載
-      if (!isMountedRef.current) return;
+      if (!isRefreshCurrent(generation, sourceSchool)) return courses;
 
       if (enrolledCourses.length > 0) {
-        setCourses(enrolledCourses);
-        return enrolledCourses;
-      } else {
-        // DataSource 沒有 enrollments → 嘗試從 puDataCache 載入
-        console.log('[Schedule] No enrollments from DataSource, trying puDataCache...');
-        const cachedCourses = await loadCoursesFromCache();
-        if (!isMountedRef.current) return cachedCourses;
-        if (cachedCourses.length > 0) {
-          console.log(`[Schedule] Loaded ${cachedCourses.length} courses from puDataCache`);
-          setCourses(cachedCourses);
-          return cachedCourses;
-        }
-        return [];
+        return applyCourses(enrolledCourses);
       }
+
+      console.log('[Schedule] No enrollments from DataSource, trying puDataCache...');
+      const cachedCourses = await loadCoursesFromCache(cacheOptions);
+      if (!isRefreshCurrent(generation, sourceSchool)) return courses;
+      if (cachedCourses.length > 0) {
+        console.log(`[Schedule] Loaded ${cachedCourses.length} courses from puDataCache`);
+        return applyCourses(cachedCourses);
+      }
+      return applyCourses([]);
     } catch (e) {
-      if (!isMountedRef.current) return courses;
+      if (!isRefreshCurrent(generation, sourceSchool)) return courses;
       console.error('[Schedule] Failed to fetch courses:', e);
-      // 即使遠端失敗，也嘗試從快取載入
       try {
-        const cachedCourses = await loadCoursesFromCache();
-        if (isMountedRef.current && cachedCourses.length > 0) {
+        const cachedCourses = await loadCoursesFromCache(cacheOptions);
+        if (!isRefreshCurrent(generation, sourceSchool)) return courses;
+        if (cachedCourses.length > 0) {
           console.log(`[Schedule] Fallback: loaded ${cachedCourses.length} courses from cache`);
-          setCourses(cachedCourses);
-          setError(null); // 快取成功就清除錯誤
-          return cachedCourses;
+          setError(null);
+          return applyCourses(cachedCourses);
         }
-      } catch (_) { /* ignore */ }
-      setError(e instanceof Error ? e.message : '刷新失敗');
+      } catch (_) {
+        /* ignore */
+      }
+      if (isRefreshCurrent(generation, sourceSchool)) {
+        setError(e instanceof Error ? e.message : '刷新失敗');
+      }
       return courses;
     } finally {
-      if (isMountedRef.current) {
+      if (isMountedRef.current && activeRefreshRef.current === generation) {
         setLoading(false);
       }
     }
-  }, [user?.uid, currentSemester, schoolId, courses]);
+  }, [userId, currentSemester, schoolId, profileSchoolId, courses, cacheOptions, isRefreshCurrent]);
 
   useEffect(() => {
     refreshScheduleRef.current = refreshSchedule;
   }, [refreshSchedule]);
+
+  useEffect(() => {
+    hasFetchedRef.current = false;
+  }, [profileSchoolId]);
+
+  useEffect(() => {
+    if (!userId) {
+      return;
+    }
+
+    if (SHOULD_SKIP_REMOTE_SCHEDULE_SYNC) {
+      hasFetchedRef.current = true;
+      return;
+    }
+
+    // Await confirmed matching canonical profile before consuming the one-shot.
+    // Late profile arrival / revocation is fenced via deps + isRefreshCurrent.
+    if (!schoolId || toPublicSchoolId(profileSchoolId) !== schoolId) {
+      return;
+    }
+
+    if (!loading && courses.length === 0 && !hasFetchedRef.current) {
+      hasFetchedRef.current = true;
+      fetchAbortRef.current = new AbortController();
+
+      (async () => {
+        try {
+          await refreshScheduleRef.current();
+        } catch (error) {
+          if (isMountedRef.current) {
+            console.warn('[Schedule] Auto-fetch failed:', error);
+          }
+        } finally {
+          fetchAbortRef.current = null;
+        }
+      })();
+    }
+
+    return () => {
+      if (fetchAbortRef.current) {
+        fetchAbortRef.current.abort();
+        fetchAbortRef.current = null;
+      }
+    };
+  }, [userId, loading, courses.length, schoolId, profileSchoolId]);
 
   const exportToCalendar = useCallback(async (): Promise<CalendarEvent[]> => {
     const calendarEvents: CalendarEvent[] = [];
@@ -732,7 +778,7 @@ export function ScheduleProvider({ children }: ScheduleProviderProps) {
       .forEach((event) => {
         calendarEvents.push({
           id: event.id,
-          userId: user?.uid || '',
+          userId: userId || '',
           title: event.title,
           description: event.courseCode ? `${event.courseCode} - ${event.instructor}` : undefined,
           startAt: event.startTime,
@@ -750,9 +796,8 @@ export function ScheduleProvider({ children }: ScheduleProviderProps) {
       });
 
     return calendarEvents;
-  }, [schedule, user]);
+  }, [schedule, userId]);
 
-  // 使用 useMemo 確保 context value 穩定
   const contextValue = useMemo(
     () => ({
       schedule,
@@ -803,4 +848,24 @@ export function ScheduleProvider({ children }: ScheduleProviderProps) {
   );
 
   return <ScheduleContext.Provider value={contextValue}>{children}</ScheduleContext.Provider>;
+}
+
+/** Public export: remounts scoped state on canonical school + Firebase account change. */
+export function ScheduleProvider({ children }: ScheduleProviderProps) {
+  const { user, profile } = useAuth();
+  const { school, schoolId } = useSchool();
+  const canonicalSchoolId = toPublicSchoolId(school?.id ?? schoolId) ?? null;
+  const accountId = user?.uid ?? null;
+  const scopeKey = `${canonicalSchoolId ?? 'default'}:${accountId ?? 'anonymous'}`;
+
+  return (
+    <ScheduleScopeProvider
+      key={scopeKey}
+      userId={accountId}
+      schoolId={canonicalSchoolId}
+      profileSchoolId={profile?.uid === user?.uid ? profile?.schoolId ?? null : null}
+    >
+      {children}
+    </ScheduleScopeProvider>
+  );
 }

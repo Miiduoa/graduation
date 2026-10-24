@@ -73,7 +73,7 @@ beforeEach(() => {
     schoolId: 'pu',
   });
   mocks.save.mockResolvedValue({ stored: 'local' });
-  mocks.share.mockResolvedValue({ path: '/timetable/share/test', expiresAt });
+  mocks.share.mockResolvedValue({ path: '/timetable/s/test', expiresAt });
   mocks.friends.mockResolvedValue([]);
   mocks.invite.mockResolvedValue([]);
   mocks.friend.mockResolvedValue(null);
@@ -93,23 +93,31 @@ async function ready() {
 }
 function deferred<T>() {
   let resolve!: (value: T) => void;
-  const promise = new Promise<T>((finish) => { resolve = finish; });
+  const promise = new Promise<T>((finish) => {
+    resolve = finish;
+  });
   return { promise, resolve };
 }
 
-it.each(['denied', 'unavailable'])('preserves manual copy and never reports copied if clipboard is %s', async (mode) => {
-  Object.defineProperty(navigator, 'clipboard', {
-    configurable: true,
-    value: mode === 'denied' ? { writeText: vi.fn().mockRejectedValue(new Error('blocked')) } : undefined,
-  });
-  await ready();
-  fireEvent.click(screen.getByRole('button', { name: '複製分享連結' }));
-  await screen.findByText(/瀏覽器(未完成|無法自動)複製/);
-  const link = screen.getByRole('textbox', { name: '分享連結' }) as HTMLInputElement;
-  expect(link.value).toBe(`${window.location.origin}/timetable/share/test`);
-  expect(link.readOnly).toBe(true);
-  expect(screen.queryByText(shareCopiedCopy(expiresAt))).toBeNull();
-});
+it.each(['denied', 'unavailable'])(
+  'preserves manual copy and never reports copied if clipboard is %s',
+  async (mode) => {
+    Object.defineProperty(navigator, 'clipboard', {
+      configurable: true,
+      value:
+        mode === 'denied'
+          ? { writeText: vi.fn().mockRejectedValue(new Error('blocked')) }
+          : undefined,
+    });
+    await ready();
+    fireEvent.click(screen.getByRole('button', { name: '複製分享連結' }));
+    await screen.findByText(/瀏覽器(未完成|無法自動)複製/);
+    const link = screen.getByRole('textbox', { name: '分享連結' }) as HTMLInputElement;
+    expect(link.value).toBe(`${window.location.origin}/timetable/s/test`);
+    expect(link.readOnly).toBe(true);
+    expect(screen.queryByText(shareCopiedCopy(expiresAt))).toBeNull();
+  },
+);
 
 it('only reports clipboard success after write completes and blocks duplicate requests', async () => {
   const pending = deferred<void>();
@@ -137,7 +145,7 @@ it('does not write the previous account share URL when account changes during cr
   mocks.auth.user = { uid: 'bob' };
   view.rerender(<PersonalTimetable />);
   await screen.findByRole('button', { name: '新增課程' });
-  await act(async () => pending.resolve({ path: '/timetable/share/old', expiresAt }));
+  await act(async () => pending.resolve({ path: '/timetable/s/old', expiresAt }));
   expect(writeText).not.toHaveBeenCalled();
   expect(screen.queryByRole('textbox', { name: '分享連結' })).toBeNull();
 });
