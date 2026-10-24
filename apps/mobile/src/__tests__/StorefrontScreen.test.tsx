@@ -10,12 +10,15 @@ import {
   loadStorefrontPosts,
   isFollowingStorefront,
   loadStorefrontComments,
+  followStorefront,
+  addStorefrontComment,
 } from '../services/storefront';
 
 const navigation = { navigate: jest.fn(), goBack: jest.fn() };
 let mockUser: { uid: string } | null = { uid: 'alice' };
+let mockSchool = { id: 'pu' };
 jest.mock('../state/auth', () => ({ useAuth: () => ({ user: mockUser }) }));
-jest.mock('../state/school', () => ({ useSchool: () => ({ school: { id: 'pu' } }) }));
+jest.mock('../state/school', () => ({ useSchool: () => ({ school: mockSchool }) }));
 jest.mock('../ui/navigationTheme', () => ({ useTabBarContentBottomPadding: () => 80 }));
 jest.mock('@expo/vector-icons', () => ({ Ionicons: () => null }));
 jest.mock('../services/storefront', () => ({
@@ -34,6 +37,7 @@ const caption = '會開啟店家自己的網站，訂單和付款由店家處理
 beforeEach(() => {
   jest.clearAllMocks();
   mockUser = { uid: 'alice' };
+  mockSchool = { id: 'pu' };
   jest.mocked(loadStorefrontPosts).mockResolvedValue([]);
   jest.mocked(loadStorefrontMenus).mockResolvedValue([]);
   jest.mocked(isFollowingStorefront).mockResolvedValue(false);
@@ -53,9 +57,9 @@ test('unsigned visitors keep public shop info and menus, skip social reads, and 
     location: '學生餐廳',
     openingHours: '週一至週五 11:00–14:00',
   } as never);
-  jest.mocked(loadStorefrontMenus).mockResolvedValue([
-    { id: 'meal', name: '蔬菜吐司', price: 60 },
-  ] as never);
+  jest
+    .mocked(loadStorefrontMenus)
+    .mockResolvedValue([{ id: 'meal', name: '蔬菜吐司', price: 60 }] as never);
   jest.mocked(loadStorefrontPosts).mockResolvedValue([
     {
       id: 'post-1',
@@ -77,7 +81,8 @@ test('unsigned visitors keep public shop info and menus, skip social reads, and 
   ).toBeNull();
   expect(view.queryByText('返回餐廳列表')).toBeNull();
   expect(view.queryByText('回餐廳列表')).toBeNull();
-  expect(await view.findByText('蔬菜吐司 · NT$60')).toBeTruthy();
+  expect(await view.findByText('蔬菜吐司')).toBeTruthy();
+  expect(view.getByText('NT$60')).toBeTruthy();
   expect(await view.findByText(commentsPrompt)).toBeTruthy();
   expect(view.queryByText('登入後才能看失物招領和評論')).toBeNull();
   expect(loadStorefrontPosts).toHaveBeenCalledWith('pu', 'stall', undefined);
@@ -99,12 +104,14 @@ test('permission-denied comment reads keep shop data and menus instead of failin
     location: '學生餐廳',
     openingHours: '週一到週五',
   } as never);
-  jest.mocked(loadStorefrontMenus).mockResolvedValue([
-    { id: 'meal', name: '蔬菜吐司', price: 60 },
-  ] as never);
-  jest.mocked(loadStorefrontPosts).mockRejectedValueOnce(
-    Object.assign(new Error('permission-denied'), { code: 'permission-denied' }),
-  );
+  jest
+    .mocked(loadStorefrontMenus)
+    .mockResolvedValue([{ id: 'meal', name: '蔬菜吐司', price: 60 }] as never);
+  jest
+    .mocked(loadStorefrontPosts)
+    .mockRejectedValueOnce(
+      Object.assign(new Error('permission-denied'), { code: 'permission-denied' }),
+    );
   jest
     .mocked(isFollowingStorefront)
     .mockRejectedValueOnce(
@@ -119,7 +126,8 @@ test('permission-denied comment reads keep shop data and menus instead of failin
     <StorefrontScreen navigation={navigation} route={{ params: { cafeteriaId: 'stall' } }} />,
   );
   expect(await view.findByText('紙感小店')).toBeTruthy();
-  expect(await view.findByText('蔬菜吐司 · NT$60')).toBeTruthy();
+  expect(await view.findByText('蔬菜吐司')).toBeTruthy();
+  expect(view.getByText('NT$60')).toBeTruthy();
   expect(await view.findByText(commentsPrompt)).toBeTruthy();
   expect(view.queryByText('暫時讀不到這間店。')).toBeNull();
   expect(view.queryByText('目前沒有資料')).toBeNull();
@@ -304,13 +312,14 @@ test('hides sold-out marks on unverified storefront menus', async () => {
     merchantMode: 'info_only',
     reviewStatus: 'unverified',
   } as never);
-  jest.mocked(loadStorefrontMenus).mockResolvedValueOnce([
-    { id: 'meal', name: '蔬菜吐司', price: 60, soldOut: true },
-  ] as never);
+  jest
+    .mocked(loadStorefrontMenus)
+    .mockResolvedValueOnce([{ id: 'meal', name: '蔬菜吐司', price: 60, soldOut: true }] as never);
   const view = render(
     <StorefrontScreen navigation={navigation} route={{ params: { cafeteriaId: 'stall' } }} />,
   );
-  expect(await view.findByText('蔬菜吐司 · NT$60')).toBeTruthy();
+  expect(await view.findByText('蔬菜吐司')).toBeTruthy();
+  expect(view.getByText('NT$60')).toBeTruthy();
   expect(view.queryByText(/售完/)).toBeNull();
   expect(view.queryByText('供應中')).toBeNull();
 });
@@ -328,9 +337,7 @@ test('does not mark a verified shop page', async () => {
   );
   expect(await view.findByText('紙感小店')).toBeTruthy();
   expect(view.queryByText('這是示範店家，菜單和價格不是真的，不能點餐。')).toBeNull();
-  expect(
-    view.queryByText(UNVERIFIED_CAFETERIA_NOTICE),
-  ).toBeNull();
+  expect(view.queryByText(UNVERIFIED_CAFETERIA_NOTICE)).toBeNull();
   expect(view.queryByTestId('cafeteria-review-notice')).toBeNull();
   expect(view.queryByText('返回餐廳列表')).toBeNull();
 });
@@ -346,4 +353,228 @@ test('外連確認頁按鈕與小字同一套文案', async () => {
   expect(view.getAllByText('到店家網站訂餐').length).toBeGreaterThan(0);
   expect(view.getByText(caption)).toBeTruthy();
   expect(view.queryByText(/點餐|下單/)).toBeNull();
+});
+
+test('storefront always provides a visible back action', async () => {
+  jest.mocked(loadStorefront).mockResolvedValueOnce({
+    id: 'stall',
+    name: '校內咖啡店',
+    merchantMode: 'info_only',
+    reviewStatus: 'verified',
+  } as never);
+  const view = render(
+    <StorefrontScreen navigation={navigation} route={{ params: { cafeteriaId: 'stall' } }} />,
+  );
+  await act(async () => {});
+  fireEvent.press(view.getByLabelText('返回'));
+  expect(navigation.goBack).toHaveBeenCalledTimes(1);
+});
+
+test('menu search and budget filter combine without treating unknown prices as zero', async () => {
+  jest.mocked(loadStorefront).mockResolvedValueOnce({
+    id: 'stall',
+    name: '校內咖啡店',
+    merchantMode: 'info_only',
+    reviewStatus: 'verified',
+  } as never);
+  jest.mocked(loadStorefrontMenus).mockResolvedValueOnce([
+    { id: 'tea', name: 'Milk Tea', price: 60 },
+    { id: 'latte', name: 'Latte', price: 120 },
+    { id: 'cake', name: 'Cake' },
+  ]);
+  const view = render(
+    <StorefrontScreen navigation={navigation} route={{ params: { cafeteriaId: 'stall' } }} />,
+  );
+  await act(async () => {});
+  fireEvent.press(view.getByText('100 元內'));
+  expect(view.getByText('Milk Tea')).toBeTruthy();
+  expect(view.queryByText('Latte')).toBeNull();
+  expect(view.queryByText('Cake')).toBeNull();
+  fireEvent.changeText(view.getByLabelText('搜尋這間店的餐點'), ' latte ');
+  expect(view.getByText('找不到符合的餐點。')).toBeTruthy();
+  fireEvent.press(view.getByText('清除篩選'));
+  expect(view.getByText('Latte')).toBeTruthy();
+  expect(view.getByText('Cake')).toBeTruthy();
+  fireEvent.changeText(view.getByLabelText('搜尋這間店的餐點'), ' MILK ');
+  expect(view.getByText('Milk Tea')).toBeTruthy();
+  expect(view.queryByText('Latte')).toBeNull();
+});
+
+test('a failed menu read is distinct from an empty menu and can be retried', async () => {
+  jest.mocked(loadStorefront).mockResolvedValue({
+    id: 'stall',
+    name: '校內咖啡店',
+    merchantMode: 'info_only',
+    reviewStatus: 'verified',
+  } as never);
+  jest
+    .mocked(loadStorefrontMenus)
+    .mockRejectedValueOnce(new Error('offline'))
+    .mockResolvedValueOnce([{ id: 'meal', name: '蔬菜吐司', price: 60 }]);
+  const view = render(
+    <StorefrontScreen navigation={navigation} route={{ params: { cafeteriaId: 'stall' } }} />,
+  );
+  await act(async () => {});
+  expect(view.getByText('菜單暫時無法讀取，店家資訊仍可查看。')).toBeTruthy();
+  expect(view.queryByText('還沒有菜單。')).toBeNull();
+  await act(async () => fireEvent.press(view.getByText('重新讀取菜單')));
+  expect(view.getByText('蔬菜吐司')).toBeTruthy();
+  expect(view.queryByText('菜單暫時無法讀取，店家資訊仍可查看。')).toBeNull();
+});
+
+test('follow failure leaves the previous state and repeated taps do not duplicate the request', async () => {
+  jest.mocked(loadStorefront).mockResolvedValueOnce({
+    id: 'stall',
+    name: '校內咖啡店',
+    merchantMode: 'info_only',
+    reviewStatus: 'verified',
+  } as never);
+  let reject!: (reason: Error) => void;
+  jest.mocked(followStorefront).mockImplementationOnce(
+    () =>
+      new Promise((_resolve, fail) => {
+        reject = fail;
+      }),
+  );
+  const view = render(
+    <StorefrontScreen navigation={navigation} route={{ params: { cafeteriaId: 'stall' } }} />,
+  );
+  await act(async () => {});
+  const button = view.getByText('追蹤店家');
+  fireEvent.press(button);
+  fireEvent.press(button);
+  expect(followStorefront).toHaveBeenCalledTimes(1);
+  await act(async () => reject(new Error('offline')));
+  expect(view.getByText('追蹤狀態沒有更新，請稍後再試。')).toBeTruthy();
+  expect(view.getByText('追蹤店家')).toBeTruthy();
+  expect(view.queryByText('取消追蹤')).toBeNull();
+});
+
+test('failed comments keep the draft and retry cannot duplicate a pending submission', async () => {
+  jest.mocked(loadStorefront).mockResolvedValueOnce({
+    id: 'stall',
+    name: '校內咖啡店',
+    merchantMode: 'info_only',
+    reviewStatus: 'verified',
+  } as never);
+  jest
+    .mocked(loadStorefrontPosts)
+    .mockResolvedValueOnce([
+      { id: 'post', title: '今日消息', text: '今日供應', kind: 'post', liked: false, likeCount: 0 },
+    ]);
+  let reject!: (reason: Error) => void;
+  jest.mocked(addStorefrontComment).mockImplementationOnce(
+    () =>
+      new Promise((_resolve, fail) => {
+        reject = fail;
+      }),
+  );
+  const view = render(
+    <StorefrontScreen navigation={navigation} route={{ params: { cafeteriaId: 'stall' } }} />,
+  );
+  await act(async () => {});
+  await act(async () => fireEvent.press(view.getByText('店家貼文')));
+  fireEvent.changeText(view.getByLabelText('留言內容'), ' 明天有供應嗎？ ');
+  const button = view.getByText('送出留言');
+  fireEvent.press(button);
+  fireEvent.press(button);
+  expect(addStorefrontComment).toHaveBeenCalledTimes(1);
+  expect(addStorefrontComment).toHaveBeenCalledWith(
+    'pu',
+    'stall',
+    'post',
+    'alice',
+    '明天有供應嗎？',
+  );
+  await act(async () => reject(new Error('offline')));
+  expect(view.getByLabelText('留言內容').props.value).toBe(' 明天有供應嗎？ ');
+  expect(view.getByText('留言沒有送出，內容已保留，請再試一次。')).toBeTruthy();
+});
+
+test('changing schools immediately discards the previous shop, posts and search', async () => {
+  jest
+    .mocked(loadStorefront)
+    .mockResolvedValueOnce({
+      id: 'stall',
+      name: '原學校餐廳',
+      merchantMode: 'info_only',
+      reviewStatus: 'verified',
+    } as never)
+    .mockImplementationOnce(() => new Promise(() => {}));
+  jest
+    .mocked(loadStorefrontMenus)
+    .mockResolvedValueOnce([{ id: 'meal', name: '原學校餐點', price: 60 }])
+    .mockImplementationOnce(() => new Promise(() => {}));
+  jest
+    .mocked(loadStorefrontPosts)
+    .mockResolvedValueOnce([
+      {
+        id: 'post',
+        title: '原學校消息',
+        text: '原學校公告',
+        kind: 'post',
+        liked: false,
+        likeCount: 0,
+      },
+    ])
+    .mockImplementationOnce(() => new Promise(() => {}));
+  const view = render(
+    <StorefrontScreen navigation={navigation} route={{ params: { cafeteriaId: 'stall' } }} />,
+  );
+  await act(async () => {});
+  await act(async () => fireEvent.press(view.getByText('店家貼文')));
+  expect(view.getByText('原學校消息')).toBeTruthy();
+  mockSchool = { id: 'other' };
+  await act(async () =>
+    view.rerender(
+      <StorefrontScreen navigation={navigation} route={{ params: { cafeteriaId: 'stall' } }} />,
+    ),
+  );
+  expect(view.queryByText('原學校消息')).toBeNull();
+  expect(view.queryByText('原學校餐點')).toBeNull();
+  expect(view.queryByText('原學校餐廳')).toBeNull();
+  expect(loadStorefront).toHaveBeenLastCalledWith('other', 'stall');
+});
+
+test('switching between menu and posts preserves a comment draft', async () => {
+  jest.mocked(loadStorefront).mockResolvedValueOnce({
+    id: 'stall',
+    name: '校內咖啡店',
+    merchantMode: 'info_only',
+    reviewStatus: 'verified',
+  } as never);
+  jest
+    .mocked(loadStorefrontPosts)
+    .mockResolvedValueOnce([
+      { id: 'post', title: '今日消息', text: '今日供應', kind: 'post', liked: false, likeCount: 0 },
+    ]);
+  const view = render(
+    <StorefrontScreen navigation={navigation} route={{ params: { cafeteriaId: 'stall' } }} />,
+  );
+  await act(async () => {});
+  fireEvent.press(view.getByText('店家貼文'));
+  fireEvent.changeText(view.getByLabelText('留言內容'), '明天有供應嗎？');
+  fireEvent.press(view.getByText('菜單'));
+  expect(view.queryByLabelText('留言內容')).toBeNull();
+  fireEvent.press(view.getByText('店家貼文'));
+  expect(view.getByLabelText('留言內容').props.value).toBe('明天有供應嗎？');
+});
+
+test('a directly opened storefront returns to restaurants when no previous screen exists', async () => {
+  jest.mocked(loadStorefront).mockResolvedValueOnce({
+    id: 'stall',
+    name: '校內咖啡店',
+    merchantMode: 'info_only',
+    reviewStatus: 'verified',
+  } as never);
+  const view = render(
+    <StorefrontScreen
+      navigation={{ ...navigation, canGoBack: () => false }}
+      route={{ params: { cafeteriaId: 'stall' } }}
+    />,
+  );
+  await act(async () => {});
+  fireEvent.press(view.getByLabelText('返回'));
+  expect(navigation.goBack).not.toHaveBeenCalled();
+  expect(navigation.navigate).toHaveBeenCalledWith('Cafeteria');
 });

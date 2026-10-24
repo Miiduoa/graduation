@@ -90,10 +90,115 @@ beforeEach(() => {
 });
 const button = (name: string) => screen.getByRole('button', { name }) as HTMLButtonElement;
 async function choose() {
-  fireEvent.click(await screen.findByRole('button', { name: '查看菜單：米飯店' }));
+  await waitFor(() =>
+    expect(
+      screen.queryByRole('region', { name: '點餐菜單' }) ||
+        screen.queryByRole('button', { name: '查看菜單：米飯店' }),
+    ).toBeTruthy(),
+  );
+  const store = screen.queryByRole('button', { name: '查看菜單：米飯店' });
+  if (store) fireEvent.click(store);
   await screen.findByLabelText('蔬菜便當 數量');
   fireEvent.change(screen.getByLabelText('蔬菜便當 數量'), { target: { value: '1' } });
 }
+
+it('opens a focused menu and restores the same cart after returning to the store list', async () => {
+  render(<FoodWorkspace />);
+  fireEvent.click(await screen.findByRole('button', { name: '查看菜單：米飯店' }));
+  await screen.findByLabelText('蔬菜便當 數量');
+  expect(screen.queryByRole('button', { name: '查看菜單：米飯店' })).toBeNull();
+  expect(screen.queryByLabelText('加飯（+NT$20）')).toBeNull();
+  fireEvent.click(button('增加蔬菜便當'));
+  fireEvent.click(screen.getByLabelText('加飯（+NT$20）'));
+  expect(screen.getByText('餐點試算')).toBeTruthy();
+  fireEvent.click(button('返回店家列表'));
+  expect(screen.queryByRole('region', { name: '點餐菜單' })).toBeNull();
+  fireEvent.click(await screen.findByRole('button', { name: '查看菜單：米飯店' }));
+  const quantity = (await screen.findByLabelText('蔬菜便當 數量')) as HTMLInputElement;
+  expect(quantity.value).toBe('1');
+  expect((screen.getByLabelText('加飯（+NT$20）') as HTMLInputElement).checked).toBe(true);
+  fireEvent.click(button('減少蔬菜便當'));
+  expect(quantity.value).toBe('0');
+  expect(screen.queryByLabelText('加飯（+NT$20）')).toBeNull();
+  expect(button('計算金額與確認庫存').disabled).toBe(true);
+  expect(
+    mocks.request.mock.calls.some(([path, , input]) => path.endsWith('/quotes') && input),
+  ).toBe(false);
+});
+
+it.each(['-1', '1.5', '21'])(
+  'rejects invalid meal quantity %s without changing the cart or submitting',
+  async (quantity) => {
+    render(<FoodWorkspace />);
+    await choose();
+    fireEvent.change(screen.getByLabelText('蔬菜便當 數量'), { target: { value: quantity } });
+    expect(screen.getByRole('alert').textContent).toContain('0–20 之間的整數');
+    expect((screen.getByLabelText('蔬菜便當 數量') as HTMLInputElement).value).toBe('1');
+    expect(
+      mocks.request.mock.calls.some(([path, , input]) => path.endsWith('/quotes') && input),
+    ).toBe(false);
+  },
+);
+
+it('invalidates a confirmed quote when the quantity changes and enforces stepper boundaries', async () => {
+  render(<FoodWorkspace />);
+  await quote();
+  fireEvent.click(screen.getByLabelText('我已確認餐點、取餐時間與應付金額'));
+  fireEvent.click(button('增加蔬菜便當'));
+  expect(screen.queryByRole('region', { name: '送出前確認' })).toBeNull();
+  expect((screen.getByLabelText('蔬菜便當 數量') as HTMLInputElement).value).toBe('2');
+  fireEvent.change(screen.getByLabelText('蔬菜便當 數量'), { target: { value: '20' } });
+  expect(button('增加蔬菜便當').disabled).toBe(true);
+  fireEvent.click(button('清除已選餐點'));
+  expect((screen.getByLabelText('蔬菜便當 數量') as HTMLInputElement).value).toBe('0');
+  expect(button('減少蔬菜便當').disabled).toBe(true);
+  expect(button('計算金額與確認庫存').disabled).toBe(true);
+  expect(
+    mocks.request.mock.calls.some(([path, , input]) => path.endsWith('/orders') && input),
+  ).toBe(false);
+});
+
+it('replaces a single-choice option directly while preserving the other cart fields', async () => {
+  const menu = menuFixture();
+  menu.sections[0].items[0].optionGroups[0].options.push({
+    id: 'regular',
+    name: '一般份量',
+    priceDelta: { amountMinor: 0, currency: 'TWD' },
+    available: true,
+  });
+  mocks.request.mockImplementation((path, context, input) => {
+    if (path.endsWith('/menu')) return Promise.resolve(menu);
+    if (path.endsWith('/quotes')) {
+      const result = quoteFixture(input.requestedPickupAt);
+      const price = { amountMinor: 100, currency: 'TWD' as const };
+      result.lines[0].selectedOptions = [
+        {
+          optionId: 'regular',
+          nameSnapshot: '一般份量',
+          priceDelta: { amountMinor: 0, currency: 'TWD' },
+        },
+      ];
+      result.lines[0].unitPrice = price;
+      result.lines[0].lineTotal = price;
+      result.subtotal = price;
+      result.total = price;
+      return Promise.resolve(result);
+    }
+    return respond(path, context, input);
+  });
+  render(<FoodWorkspace />);
+  await choose();
+  fireEvent.click(screen.getByLabelText('加飯（+NT$20）'));
+  fireEvent.click(screen.getByLabelText('一般份量（+NT$0）'));
+  expect((screen.getByLabelText('加飯（+NT$20）') as HTMLInputElement).checked).toBe(false);
+  expect((screen.getByLabelText('一般份量（+NT$0）') as HTMLInputElement).checked).toBe(true);
+  fireEvent.click(button('計算金額與確認庫存'));
+  await screen.findByRole('region', { name: '送出前確認' });
+  const payload = mocks.request.mock.calls.find(([path]) => path.endsWith('/quotes'))?.[2];
+  expect(payload.items).toEqual([
+    { menuItemId: 'rice', quantity: 1, selectedOptionIds: ['regular'] },
+  ]);
+});
 async function quote() {
   await choose();
   fireEvent.click(screen.getByLabelText('加飯（+NT$20）'));

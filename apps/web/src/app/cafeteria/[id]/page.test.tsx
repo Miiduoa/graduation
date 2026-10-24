@@ -1,11 +1,13 @@
 import { Suspense } from 'react';
-import { act, render, screen } from '@testing-library/react';
+import { act, fireEvent, render, screen, within } from '@testing-library/react';
 import { beforeEach, expect, it, vi } from 'vitest';
 import StorefrontPage from './page';
 import type { Cafeteria, MenuItem } from '@/lib/firebase';
 import { fetchCafeteriaDetail } from '@/lib/cafeteriaCatalog';
 import { UNVERIFIED_CAFETERIA_NOTICE } from '@campus/shared/src/cafeteriaCatalog';
 import {
+  addStorefrontComment,
+  followStorefront,
   isFollowingStorefront,
   loadStorefrontComments,
   loadStorefrontPosts,
@@ -84,12 +86,18 @@ beforeEach(() => {
   state.posts = [];
   state.menus = [];
   vi.mocked(isFollowingStorefront).mockReset().mockResolvedValue(false);
+  vi.mocked(followStorefront).mockReset().mockResolvedValue(undefined);
+  vi.mocked(addStorefrontComment).mockReset().mockResolvedValue(undefined);
   vi.mocked(loadStorefrontComments).mockReset().mockResolvedValue([]);
-  vi.mocked(loadStorefrontPosts).mockReset().mockImplementation(async () => state.posts);
-  vi.mocked(fetchCafeteriaDetail).mockReset().mockImplementation(async () => ({
-    cafeteria: state.shop,
-    menus: state.menus,
-  }));
+  vi.mocked(loadStorefrontPosts)
+    .mockReset()
+    .mockImplementation(async () => state.posts);
+  vi.mocked(fetchCafeteriaDetail)
+    .mockReset()
+    .mockImplementation(async () => ({
+      cafeteria: state.shop,
+      menus: state.menus,
+    }));
 });
 
 it('lets a regular account open a storefront and leave to the shop order page', async () => {
@@ -104,17 +112,19 @@ it('lets a regular account open a storefront and leave to the shop order page', 
     );
   });
   expect(await screen.findByText('紙感小店')).toBeTruthy();
-  expect(screen.getByText('店家自己的主頁。')).toBeTruthy();
+  expect(screen.getByText('菜單與店家資訊')).toBeTruthy();
   expect(screen.queryByText('店家自己的主頁。一般帳號即可查看、追蹤與留言。')).toBeNull();
   expect(
     screen.queryByText('價格、是否賣完、是否接單以店家訂餐頁為準。Nuni 不處理這筆的付款與退款。'),
   ).toBeNull();
   expect(screen.queryByRole('link', { name: '返回餐廳列表' })).toBeNull();
-  expect(screen.queryByRole('link', { name: '回餐廳列表' })).toBeNull();
+  expect(screen.getByRole('link', { name: '回餐廳列表' }).getAttribute('href')).toBe(
+    '/cafeteria?schoolId=pu',
+  );
   expect(screen.getByRole('link', { name: '到店家網站訂餐' }).getAttribute('href')).toContain(
     '/cafeteria/stall/order',
   );
-  expect(screen.getByText('這間店要到店家自己的頁面訂餐。')).toBeTruthy();
+  expect(screen.getByRole('navigation', { name: '店面內容' })).toBeTruthy();
   expect(
     screen.getByText('會開啟店家自己的網站，訂單和付款由店家處理，Campus One 查不到這筆訂單'),
   ).toBeTruthy();
@@ -142,7 +152,8 @@ it('does not show an outbound order button when the shop has no ordering URL', a
       </Suspense>,
     );
   });
-  expect(await screen.findByText('學生餐廳 · 週一至週五 11:00–14:00')).toBeTruthy();
+  expect(await screen.findByText('學生餐廳')).toBeTruthy();
+  expect(screen.getByText('週一至週五 11:00–14:00')).toBeTruthy();
   expect(screen.queryByRole('link', { name: '到店家網站訂餐' })).toBeNull();
   expect(screen.queryByRole('link', { name: /點餐|下單|訂餐/ })).toBeNull();
   expect(screen.queryByText('這間店要到店家自己的頁面訂餐。')).toBeNull();
@@ -254,7 +265,7 @@ it('does not read comments, likes or follows before login and shows a login prom
     );
   });
   expect(await screen.findByText('紙感小店')).toBeTruthy();
-  expect(screen.getByText('蔬菜吐司 · NT$60')).toBeTruthy();
+  expect(screen.getByRole('heading', { name: '蔬菜吐司' })).toBeTruthy();
   expect(screen.getByText(commentsPrompt)).toBeTruthy();
   expect(screen.queryByText('登入後才能看失物招領和評論')).toBeNull();
   const login = screen.getByRole('link', { name: '登入' });
@@ -308,7 +319,7 @@ it('keeps shop data and menus when comment reads are blocked', async () => {
     );
   });
   expect(await screen.findByText('紙感小店')).toBeTruthy();
-  expect(screen.getByText('蔬菜吐司 · NT$60')).toBeTruthy();
+  expect(screen.getByRole('heading', { name: '蔬菜吐司' })).toBeTruthy();
   expect(screen.getByText(commentsPrompt)).toBeTruthy();
   expect(screen.queryByText('暫時讀不到這間店。')).toBeNull();
   expect(screen.queryByText('目前沒有資料')).toBeNull();
@@ -383,7 +394,7 @@ it('hides sold-out marks on unverified and demo storefront menus', async () => {
       </Suspense>,
     );
   });
-  expect(await screen.findByText('蔬菜吐司 · NT$60')).toBeTruthy();
+  expect(await screen.findByRole('heading', { name: '蔬菜吐司' })).toBeTruthy();
   expect(screen.queryByText(/售完/)).toBeNull();
   expect(screen.queryByText('供應中')).toBeNull();
 });
@@ -402,9 +413,187 @@ it('does not mark a verified shop page', async () => {
   });
   expect(await screen.findByText('紙感小店')).toBeTruthy();
   expect(screen.queryByText('這是示範店家，菜單和價格不是真的，不能點餐。')).toBeNull();
-  expect(
-    screen.queryByText(UNVERIFIED_CAFETERIA_NOTICE),
-  ).toBeNull();
+  expect(screen.queryByText(UNVERIFIED_CAFETERIA_NOTICE)).toBeNull();
   expect(screen.queryByTestId('cafeteria-review-notice')).toBeNull();
   expect(screen.queryByRole('link', { name: '返回餐廳列表' })).toBeNull();
+});
+
+async function mountStorefront() {
+  const props = {
+    params: Promise.resolve({ id: 'stall' }),
+    searchParams: Promise.resolve({ schoolId: 'pu' }),
+  };
+  const view = await act(async () =>
+    render(
+      <Suspense fallback={<p>載入店面</p>}>
+        <StorefrontPage {...props} />
+      </Suspense>,
+    ),
+  );
+  return { ...view, props };
+}
+
+it('combines menu category and case-insensitive search, then clears both filters', async () => {
+  state.shop = { ...showcaseShop, reviewStatus: 'verified' } as never;
+  state.menus = [
+    { ...toastMenu, category: '輕食', description: '新鮮生菜' },
+    {
+      ...toastMenu,
+      id: 'coffee',
+      name: '冷萃咖啡',
+      category: '飲品',
+      description: 'Cold brew',
+      price: 85,
+    },
+    { ...toastMenu, id: 'tea', name: '紅茶', category: '飲品', price: 30 },
+  ];
+  await mountStorefront();
+  fireEvent.click(screen.getByRole('button', { name: '飲品' }));
+  expect(screen.queryByRole('heading', { name: '蔬菜吐司' })).toBeNull();
+  fireEvent.change(screen.getByRole('searchbox', { name: '搜尋這間店的餐點' }), {
+    target: { value: 'COLD' },
+  });
+  expect(screen.getByRole('heading', { name: '冷萃咖啡' })).toBeTruthy();
+  expect(screen.getByText('NT$85')).toBeTruthy();
+  expect(screen.queryByRole('heading', { name: '紅茶' })).toBeNull();
+  fireEvent.change(screen.getByRole('searchbox'), { target: { value: '不存在的餐點' } });
+  fireEvent.click(screen.getByRole('button', { name: '清除篩選' }));
+  expect(screen.getByRole('heading', { name: '蔬菜吐司' })).toBeTruthy();
+  expect(screen.getByRole('heading', { name: '紅茶' })).toBeTruthy();
+  expect((screen.getByRole('searchbox') as HTMLInputElement).value).toBe('');
+});
+
+it('offers an actual retry without confusing catalog failure with a missing shop', async () => {
+  vi.mocked(fetchCafeteriaDetail).mockRejectedValueOnce(new Error('unavailable'));
+  await mountStorefront();
+  expect(screen.getByRole('alert')).toBeTruthy();
+  expect(screen.queryByText('找不到這間店。')).toBeNull();
+  expect(screen.getByRole('link', { name: '回餐廳列表' }).getAttribute('href')).toBe(
+    '/cafeteria?schoolId=pu',
+  );
+  await act(async () => fireEvent.click(screen.getByRole('button', { name: '再試一次' })));
+  expect(await screen.findByText('紙感小店')).toBeTruthy();
+  expect(fetchCafeteriaDetail).toHaveBeenLastCalledWith('pu', 'stall');
+});
+
+it('locks follow while saving and keeps the previous state when the request fails', async () => {
+  let rejectFollow!: (reason: Error) => void;
+  vi.mocked(followStorefront).mockImplementationOnce(
+    () =>
+      new Promise((_, reject) => {
+        rejectFollow = reject;
+      }),
+  );
+  await mountStorefront();
+  const follow = screen.getByRole('button', { name: '追蹤店家' });
+  fireEvent.click(follow);
+  fireEvent.click(follow);
+  expect(followStorefront).toHaveBeenCalledTimes(1);
+  expect((follow as HTMLButtonElement).disabled).toBe(true);
+  await act(async () => rejectFollow(new Error('offline')));
+  expect(screen.getByRole('alert').textContent).toContain('沒有更新追蹤狀態');
+  expect(screen.getByRole('button', { name: '追蹤店家' }).getAttribute('aria-pressed')).toBe(
+    'false',
+  );
+});
+
+it('preserves a failed comment and prevents double submission', async () => {
+  state.posts = [
+    {
+      id: 'post-1',
+      title: '今日優惠',
+      text: '買一送一',
+      kind: 'promo',
+      createdAt: '',
+      likeCount: 0,
+      liked: false,
+    },
+  ];
+  let rejectComment!: (reason: Error) => void;
+  vi.mocked(addStorefrontComment).mockImplementationOnce(
+    () =>
+      new Promise((_, reject) => {
+        rejectComment = reject;
+      }),
+  );
+  await mountStorefront();
+  const post = within(screen.getByRole('article', { name: '今日優惠' }));
+  const input = post.getByRole('textbox', { name: '留言' }) as HTMLTextAreaElement;
+  fireEvent.change(input, { target: { value: '請問今天有營業嗎？' } });
+  fireEvent.submit(input.closest('form')!);
+  fireEvent.submit(input.closest('form')!);
+  expect(addStorefrontComment).toHaveBeenCalledTimes(1);
+  await act(async () => rejectComment(new Error('offline')));
+  expect(input.value).toBe('請問今天有營業嗎？');
+  expect(post.getByRole('alert').textContent).toContain('內容已保留');
+  await act(async () => fireEvent.submit(input.closest('form')!));
+  expect(input.value).toBe('');
+  expect(post.getByText('請問今天有營業嗎？')).toBeTruthy();
+});
+
+it('clears account social content on logout without refetching public menu data', async () => {
+  state.menus = [toastMenu];
+  state.posts = [
+    {
+      id: 'post-1',
+      title: '今日優惠',
+      text: '買一送一',
+      kind: 'promo',
+      createdAt: '',
+      likeCount: 0,
+      liked: false,
+    },
+  ];
+  vi.mocked(loadStorefrontComments).mockResolvedValue([
+    { id: 'comment-1', authorId: 'alice', text: '帳號內留言' },
+  ]);
+  const view = await mountStorefront();
+  expect(screen.getByText('帳號內留言')).toBeTruthy();
+  expect(fetchCafeteriaDetail).toHaveBeenCalledTimes(1);
+  state.user = null;
+  await act(async () =>
+    view.rerender(
+      <Suspense fallback={<p>載入店面</p>}>
+        <StorefrontPage {...view.props} />
+      </Suspense>,
+    ),
+  );
+  expect(screen.queryByText('帳號內留言')).toBeNull();
+  expect(screen.getByRole('heading', { name: '蔬菜吐司' })).toBeTruthy();
+  expect(fetchCafeteriaDetail).toHaveBeenCalledTimes(1);
+  expect(screen.getByText(commentsPrompt)).toBeTruthy();
+});
+
+it('keeps unsent comment drafts while retrying follow status and refreshing posts', async () => {
+  state.posts = [
+    {
+      id: 'post-1',
+      title: '今日優惠',
+      text: '買一送一',
+      kind: 'promo',
+      createdAt: '',
+      likeCount: 0,
+      liked: false,
+    },
+  ];
+  vi.mocked(isFollowingStorefront).mockRejectedValueOnce(new Error('offline'));
+  await mountStorefront();
+  fireEvent.change(screen.getByRole('textbox', { name: '留言' }), {
+    target: { value: '還沒送出的留言' },
+  });
+  let finishReload!: (posts: StorefrontPost[]) => void;
+  vi.mocked(loadStorefrontPosts).mockImplementationOnce(
+    () =>
+      new Promise((resolve) => {
+        finishReload = resolve;
+      }),
+  );
+  await act(async () => fireEvent.click(screen.getByRole('button', { name: '重新確認追蹤' })));
+  expect((screen.getByRole('textbox', { name: '留言' }) as HTMLTextAreaElement).value).toBe(
+    '還沒送出的留言',
+  );
+  await act(async () => finishReload(state.posts));
+  expect((screen.getByRole('textbox', { name: '留言' }) as HTMLTextAreaElement).value).toBe(
+    '還沒送出的留言',
+  );
 });

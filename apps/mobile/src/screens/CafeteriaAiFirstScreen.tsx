@@ -1,5 +1,14 @@
-import React, { useEffect, useRef, useState, useSyncExternalStore } from 'react';
-import { ActivityIndicator, Modal, Text, TextInput, View } from 'react-native';
+import React, { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
+import {
+  ActivityIndicator,
+  Modal,
+  Pressable,
+  StyleSheet,
+  Text,
+  TextInput,
+  View,
+} from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
 import { AIDetailScreen, AICard, AIButton, aiTokens } from '../ui/aiFirst';
 import { getThemeVersion, subscribeToTheme } from '../ui/theme';
 import { useAuth } from '../state/auth';
@@ -35,7 +44,10 @@ import { safeNavigate } from '../utils/safeNavigate';
 import { isMobileOnlineOrderingEnabled, ONLINE_ORDERING_OFF_TEXT } from '../utils/onlineOrdering';
 
 type Props = {
-  navigation?: { goBack?: () => void; navigate?: (route: string) => void };
+  navigation?: {
+    goBack?: () => void;
+    navigate?: (route: string, params?: Record<string, unknown>) => void;
+  };
 };
 export default function CafeteriaAiFirstScreen({ navigation }: Props) {
   useSyncExternalStore(subscribeToTheme, getThemeVersion, getThemeVersion);
@@ -67,6 +79,9 @@ function DiningContent({
 }) {
   const [catalog, setCatalog] = useState<DiningCatalog | null>(null);
   const [keyword, setKeyword] = useState('');
+  const [filter, setFilter] = useState<'all' | 'menu' | 'budget'>('all');
+  const [expanded, setExpanded] = useState<string[]>([]);
+  const styles = diningStyles();
   const [selected, setSelected] = useState<DiningMenu | null>(null);
   const [pending, setPending] = useState<DiningIntent | null>(null);
   const [receipt, setReceipt] = useState<DiningReceipt | null>(null);
@@ -142,11 +157,41 @@ function DiningContent({
       }
     }
   };
-  const visibleMenus = (catalog?.menus ?? []).filter(
-    (menu) =>
-      menu.name.includes(keyword.trim()) ||
-      catalog?.venues.find((venue) => venue.id === menu.cafeteriaId)?.name.includes(keyword.trim()),
-  );
+  const needle = keyword.trim().normalize('NFKC').toLocaleLowerCase('zh-TW');
+  const restaurants = useMemo(() => {
+    const menusByVenue = new Map<string, DiningMenu[]>();
+    for (const menu of catalog?.menus ?? []) {
+      const items = menusByVenue.get(menu.cafeteriaId) ?? [];
+      items.push(menu);
+      menusByVenue.set(menu.cafeteriaId, items);
+    }
+    const matches = (value: string) =>
+      value.normalize('NFKC').toLocaleLowerCase('zh-TW').includes(needle);
+    return (catalog?.venues ?? []).flatMap((venue) => {
+      const allMenus = menusByVenue.get(venue.id) ?? [];
+      const venueMatches = !needle || matches(`${venue.name} ${venue.location}`);
+      const matchedMenus = allMenus.filter(
+        (menu) =>
+          (venueMatches || matches(`${menu.name} ${menu.description}`)) &&
+          (filter !== 'budget' || (menu.price !== null && menu.price <= 100)),
+      );
+      if ((!venueMatches && !matchedMenus.length) || (filter !== 'all' && !matchedMenus.length))
+        return [];
+      const prices = allMenus.flatMap((menu) => (menu.price !== null ? [menu.price] : []));
+      return [
+        {
+          venue,
+          menus: matchedMenus,
+          total: allMenus.length,
+          lowestPrice: prices.length ? Math.min(...prices) : null,
+        },
+      ];
+    });
+  }, [catalog, filter, needle]);
+  const clearFilters = () => {
+    setKeyword('');
+    setFilter('all');
+  };
   const venueName = (menu: DiningMenu) =>
     catalog?.venues.find((venue) => venue.id === menu.cafeteriaId)?.name ?? '未提供餐廳資料';
   // 訂單還沒結束前一直盯著：店家給號碼就換成真的號碼，店家取消就拿掉號碼
@@ -179,35 +224,18 @@ function DiningContent({
   return (
     <AIDetailScreen
       title="校園餐廳"
-      subtitle="看看餐點，確認店家是否開放接單。"
-      onBack={() => navigation?.goBack?.()}
-    >
-      <AICard title="平台點餐與取餐">
-        {isMobileOnlineOrderingEnabled() ? (
-          <>
-            <Text style={{ color: aiTokens.textSecondary, lineHeight: 24 }}>
-              使用 Google 帳號選餐、查看訂單與出示取餐憑證。學校原有餐廳服務仍保留在下方。
-            </Text>
-            <AIButton
-              label="前往平台點餐"
-              onPress={() => safeNavigate(navigation, 'NuniWorkspace', { tab: 'food' })}
-            />
-          </>
-        ) : (
-          <Text style={{ color: aiTokens.textSecondary, lineHeight: 24 }}>
-            {ONLINE_ORDERING_OFF_TEXT}
-          </Text>
-        )}
-      </AICard>
-      {scope.userId && navigation?.navigate ? (
-        <View style={{ alignItems: 'flex-start' }}>
+      subtitle="選店、看菜單，再決定吃什麼。"
+      onBack={navigation?.goBack}
+      rightAction={
+        scope.userId && navigation?.navigate ? (
           <AIButton
             label="我的訂單"
             variant="ghost"
             onPress={() => navigation.navigate?.('StudentOrders')}
           />
-        </View>
-      ) : null}
+        ) : undefined
+      }
+    >
       {receipt ? (
         <AICard title={statuses[receipt.status] ?? '訂單紀錄'}>
           <Text style={{ color: aiTokens.text }}>
@@ -281,101 +309,238 @@ function DiningContent({
           </View>
         </AICard>
       ) : null}
-      <AICard title="找餐點">
-        <View style={{ gap: 12 }}>
+      <View style={styles.searchArea}>
+        <Text accessibilityRole="header" style={styles.heading}>
+          今天想吃什麼？
+        </Text>
+        <View style={styles.searchField}>
+          <Ionicons name="search-outline" size={20} color={aiTokens.muted} />
           <TextInput
             accessibilityLabel="餐點或店名"
             value={keyword}
             maxLength={100}
             onChangeText={setKeyword}
-            placeholder="搜尋餐點或店名"
+            placeholder="搜尋店名、餐點或位置"
             placeholderTextColor={aiTokens.muted}
-            style={{
-              color: aiTokens.text,
-              borderColor: aiTokens.border,
-              borderWidth: 1,
-              borderRadius: 12,
-              padding: 12,
-              minHeight: 48,
-            }}
+            returnKeyType="search"
+            autoCorrect={false}
+            style={styles.searchInput}
           />
-          <AIButton
-            label={loading ? '讀取中' : '更新菜單'}
-            variant="ghost"
-            disabled={loading || busy}
-            onPress={() => void load()}
-          />
-          <Text style={{ color: aiTokens.muted }}>
-            目前僅提供已開通店家的到店付款。線上付款尚未開放。
-          </Text>
-          {loading ? <ActivityIndicator accessibilityLabel="讀取餐廳" color={aiTokens.ai} /> : null}
-          {error && !pending ? (
-            <View style={{ gap: 12 }}>
-              <Text accessibilityRole="alert" style={{ color: aiTokens.danger }}>
-                {error}
-              </Text>
-              {error === NETWORK_RETRY_TEXT ? (
-                <AIButton label="重新整理" variant="ghost" onPress={() => void load()} />
-              ) : null}
-            </View>
+          {keyword ? (
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="清除搜尋"
+              onPress={() => setKeyword('')}
+              style={styles.clearButton}
+            >
+              <Ionicons name="close-circle" size={20} color={aiTokens.muted} />
+            </Pressable>
           ) : null}
         </View>
-      </AICard>
-      {catalog ? (
-        <>
-          {visibleMenus.length === 0 ? (
-            <AICard
-              title={
-                !keyword.trim() && catalog.venues.length === 0
-                  ? CAFETERIA_EMPTY_SCHOOL_TEXT
-                  : '目前沒有符合的餐點'
-              }
+        <View style={styles.filters}>
+          {(
+            [
+              ['all', '全部餐廳'],
+              ['menu', '有菜單'],
+              ['budget', '100 元內'],
+            ] as const
+          ).map(([value, label]) => (
+            <Pressable
+              key={value}
+              accessibilityRole="button"
+              accessibilityState={{ selected: filter === value }}
+              onPress={() => setFilter(value)}
+              style={[styles.filter, filter === value && styles.filterSelected]}
             >
-              <Text style={{ color: aiTokens.muted }}>
-                {!keyword.trim() && catalog.venues.length === 0
-                  ? '這間學校還沒提供餐廳資料，不會沿用其他學校的店家。'
-                  : '試著換個關鍵字，或稍後更新菜單。'}
+              <Text
+                style={{
+                  color: filter === value ? aiTokens.ai : aiTokens.textSecondary,
+                  fontWeight: filter === value ? '700' : '500',
+                }}
+              >
+                {label}
               </Text>
-            </AICard>
-          ) : (
-            visibleMenus.map((menu) => (
-              <AICard key={menu.id} title={menu.name} source={venueName(menu)}>
-                <View style={{ gap: 10 }}>
-                  <Text style={{ color: aiTokens.text }}>
-                    {menu.price === null ? '價格未提供' : `NT$${menu.price}`}
-                  </Text>
-                  {menu.description ? (
-                    <Text style={{ color: aiTokens.muted }}>{menu.description}</Text>
-                  ) : null}
-                  {menu.orderable && scope.userId ? (
-                    <AIButton
-                      label={`選擇${menu.name}`}
-                      disabled={busy || Boolean(pending)}
-                      onPress={() => {
-                        if (isCurrent()) setSelected(menu);
-                      }}
-                    />
-                  ) : (
-                    <Text style={{ color: aiTokens.muted }}>
-                      此餐點目前未開放線上訂購，請向店家確認。
+            </Pressable>
+          ))}
+        </View>
+        <View style={styles.resultBar}>
+          <Text accessibilityLiveRegion="polite" style={styles.muted}>
+            {loading
+              ? '正在讀取餐廳…'
+              : catalog
+                ? `${restaurants.length} 間餐廳${filter === 'budget' ? '有百元內餐點' : ''}`
+                : '餐廳資料'}
+          </Text>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="更新菜單"
+            accessibilityState={{ disabled: loading || busy }}
+            disabled={loading || busy}
+            onPress={() => void load()}
+            style={styles.refreshButton}
+          >
+            <Ionicons name="refresh-outline" size={17} color={aiTokens.muted} />
+            <Text style={styles.muted}>{loading ? '讀取中' : '更新菜單'}</Text>
+          </Pressable>
+        </View>
+      </View>
+      {loading ? (
+        <View style={styles.loading}>
+          <ActivityIndicator accessibilityLabel="讀取餐廳" color={aiTokens.ai} />
+          <Text style={styles.muted}>餐廳與菜單載入中</Text>
+        </View>
+      ) : null}
+      {error && !pending ? (
+        <AICard title="餐廳資料暫時無法讀取">
+          <Text accessibilityRole="alert" style={{ color: aiTokens.danger, lineHeight: 22 }}>
+            {error}
+          </Text>
+          {error === NETWORK_RETRY_TEXT ? (
+            <AIButton label="重新整理" variant="ghost" onPress={() => void load()} />
+          ) : null}
+        </AICard>
+      ) : null}
+      {catalog ? (
+        restaurants.length === 0 ? (
+          <AICard
+            title={
+              !needle && filter === 'all' && catalog.venues.length === 0
+                ? CAFETERIA_EMPTY_SCHOOL_TEXT
+                : '找不到符合的餐廳或餐點'
+            }
+          >
+            <Text style={styles.muted}>
+              {catalog.venues.length === 0
+                ? '這間學校還沒提供餐廳資料，之後再來看看。'
+                : '試試其他關鍵字，或清除篩選查看全部餐廳。'}
+            </Text>
+            {needle || filter !== 'all' ? (
+              <AIButton label="清除篩選" variant="ghost" onPress={clearFilters} />
+            ) : null}
+          </AICard>
+        ) : (
+          restaurants.map(({ venue, menus, total, lowestPrice }) => {
+            const isExpanded = expanded.includes(venue.id);
+            const preview = isExpanded ? menus : menus.slice(0, 3);
+            return (
+              <AICard key={venue.id} style={styles.restaurant}>
+                <View style={styles.restaurantHeader}>
+                  <View style={styles.restaurantIcon} accessibilityElementsHidden>
+                    <Ionicons name="restaurant-outline" size={23} color={aiTokens.ai} />
+                  </View>
+                  <View style={{ flex: 1, gap: 5 }}>
+                    <Text accessibilityRole="header" style={styles.restaurantName}>
+                      {venue.name}
                     </Text>
-                  )}
+                    <Text style={styles.muted}>{venue.location || '位置資訊未提供'}</Text>
+                  </View>
+                </View>
+                <View style={styles.restaurantMeta}>
+                  {cafeteriaReviewBadge(venue.reviewStatus) ? (
+                    <Text style={styles.reviewBadge}>
+                      {cafeteriaReviewBadge(venue.reviewStatus)}
+                    </Text>
+                  ) : null}
+                  <Text style={styles.muted}>
+                    {total === 0
+                      ? '尚未提供菜單'
+                      : needle || filter === 'budget'
+                        ? `${menus.length} 道符合 · 共 ${total} 道`
+                        : `${total} 道餐點`}
+                  </Text>
+                  {lowestPrice !== null ? (
+                    <Text style={styles.priceFrom}>
+                      菜單 NT${lowestPrice.toLocaleString('zh-TW')} 起
+                    </Text>
+                  ) : null}
+                </View>
+                {preview.map((menu) => (
+                  <View key={menu.id} style={styles.menuRow}>
+                    <View style={styles.menuHeading}>
+                      <Text style={styles.menuName}>{menu.name}</Text>
+                      <Text style={styles.price}>
+                        {menu.price === null
+                          ? '未標價'
+                          : `NT$${menu.price.toLocaleString('zh-TW')}`}
+                      </Text>
+                    </View>
+                    {menu.description ? (
+                      <Text numberOfLines={isExpanded ? undefined : 2} style={styles.muted}>
+                        {menu.description}
+                      </Text>
+                    ) : null}
+                    {menu.orderable && scope.userId ? (
+                      <AIButton
+                        label={`選擇${menu.name}`}
+                        variant="ghost"
+                        disabled={busy || Boolean(pending)}
+                        onPress={() => {
+                          if (isCurrent()) setSelected(menu);
+                        }}
+                      />
+                    ) : null}
+                  </View>
+                ))}
+                {!menus.length ? (
+                  <Text style={styles.menuEmpty}>可以先看店家資訊，餐點請向店家確認。</Text>
+                ) : null}
+                <View style={styles.restaurantActions}>
+                  {navigation?.navigate ? (
+                    <Pressable
+                      accessibilityRole="button"
+                      accessibilityLabel={`查看${venue.name}的店家資訊`}
+                      onPress={() =>
+                        safeNavigate(navigation, 'Storefront', { cafeteriaId: venue.id })
+                      }
+                      style={styles.storefrontButton}
+                    >
+                      <Text style={{ color: aiTokens.ai, fontWeight: '600' }}>
+                        店家資訊與完整菜單
+                      </Text>
+                      <Ionicons name="arrow-forward" size={17} color={aiTokens.ai} />
+                    </Pressable>
+                  ) : null}
+                  {menus.length > 3 ? (
+                    <Pressable
+                      accessibilityRole="button"
+                      accessibilityLabel={`${isExpanded ? '收合' : '展開'}${venue.name}的菜單`}
+                      accessibilityState={{ expanded: isExpanded }}
+                      onPress={() =>
+                        setExpanded((current) =>
+                          current.includes(venue.id)
+                            ? current.filter((id) => id !== venue.id)
+                            : [...current, venue.id],
+                        )
+                      }
+                      style={styles.expandButton}
+                    >
+                      <Text style={styles.muted}>
+                        {isExpanded ? '收合菜單' : `再看 ${menus.length - 3} 道`}
+                      </Text>
+                      <Ionicons
+                        name={isExpanded ? 'chevron-up' : 'chevron-down'}
+                        size={17}
+                        color={aiTokens.muted}
+                      />
+                    </Pressable>
+                  ) : null}
                 </View>
               </AICard>
-            ))
-          )}
-          {catalog.venues.map((venue) => (
-            <AICard key={venue.id} title={venue.name}>
-              {cafeteriaReviewBadge(venue.reviewStatus) ? (
-                <Text style={{ color: aiTokens.muted }}>
-                  {cafeteriaReviewBadge(venue.reviewStatus)}
-                </Text>
-              ) : null}
-              <Text style={{ color: aiTokens.muted }}>{venue.location || '位置資訊未提供'}</Text>
-            </AICard>
-          ))}
-        </>
+            );
+          })
+        )
       ) : null}
+      <View style={styles.footnote}>
+        {isMobileOnlineOrderingEnabled() ? (
+          <AIButton
+            label="前往平台點餐"
+            onPress={() => safeNavigate(navigation, 'NuniWorkspace', { tab: 'food' })}
+          />
+        ) : (
+          <Text style={styles.muted}>{ONLINE_ORDERING_OFF_TEXT}</Text>
+        )}
+        <Text style={styles.muted}>營業時間、餐點供應與價格，以店家現場資訊為準。</Text>
+      </View>
       <Modal
         visible={Boolean(selected)}
         transparent
@@ -431,4 +596,119 @@ function DiningContent({
       </Modal>
     </AIDetailScreen>
   );
+}
+
+function diningStyles() {
+  return StyleSheet.create({
+    searchArea: { paddingHorizontal: aiTokens.space.md, paddingTop: 20, gap: 14 },
+    heading: { color: aiTokens.text, fontSize: 26, fontWeight: '700', letterSpacing: -0.6 },
+    searchField: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      borderWidth: 1,
+      borderColor: aiTokens.border,
+      backgroundColor: aiTokens.surface,
+      borderRadius: 14,
+      paddingLeft: 14,
+      minHeight: 52,
+    },
+    searchInput: {
+      flex: 1,
+      minWidth: 0,
+      color: aiTokens.text,
+      fontSize: 16,
+      paddingVertical: 14,
+      paddingHorizontal: 10,
+    },
+    clearButton: { minWidth: 44, minHeight: 48, alignItems: 'center', justifyContent: 'center' },
+    filters: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+    filter: {
+      minHeight: 44,
+      justifyContent: 'center',
+      borderWidth: 1,
+      borderColor: aiTokens.border,
+      paddingHorizontal: 15,
+      paddingVertical: 10,
+      borderRadius: 22,
+      backgroundColor: aiTokens.surface,
+    },
+    filterSelected: { backgroundColor: aiTokens.aiSoft, borderColor: aiTokens.ai },
+    resultBar: {
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+      flexWrap: 'wrap',
+      gap: 8,
+    },
+    refreshButton: {
+      flexDirection: 'row',
+      minHeight: 44,
+      alignItems: 'center',
+      gap: 6,
+      paddingHorizontal: 4,
+    },
+    muted: { color: aiTokens.muted, fontSize: 13, lineHeight: 21 },
+    loading: { alignItems: 'center', padding: 32, gap: 12 },
+    restaurant: { marginBottom: 16, padding: 18 },
+    restaurantHeader: { flexDirection: 'row', gap: 12, alignItems: 'center' },
+    restaurantIcon: {
+      width: 46,
+      height: 46,
+      borderRadius: 13,
+      backgroundColor: aiTokens.aiSoft,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    restaurantName: { color: aiTokens.text, fontSize: 19, lineHeight: 26, fontWeight: '700' },
+    restaurantMeta: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 10,
+      flexWrap: 'wrap',
+      paddingTop: 10,
+      paddingBottom: 8,
+    },
+    reviewBadge: {
+      color: aiTokens.muted,
+      backgroundColor: aiTokens.panel,
+      fontSize: 12,
+      paddingVertical: 4,
+      paddingHorizontal: 8,
+      borderRadius: 6,
+    },
+    priceFrom: { color: aiTokens.textSecondary, fontSize: 13, fontVariant: ['tabular-nums'] },
+    menuRow: {
+      borderTopWidth: StyleSheet.hairlineWidth,
+      borderTopColor: aiTokens.border,
+      paddingVertical: 13,
+      gap: 7,
+    },
+    menuHeading: { flexDirection: 'row', alignItems: 'flex-start', gap: 12 },
+    menuName: { flex: 1, color: aiTokens.text, fontWeight: '500', fontSize: 15, lineHeight: 22 },
+    price: {
+      color: aiTokens.text,
+      fontWeight: '600',
+      fontSize: 15,
+      lineHeight: 22,
+      fontVariant: ['tabular-nums'],
+    },
+    menuEmpty: { color: aiTokens.muted, lineHeight: 22, paddingVertical: 12 },
+    restaurantActions: {
+      flexDirection: 'row',
+      flexWrap: 'wrap',
+      justifyContent: 'space-between',
+      borderTopWidth: StyleSheet.hairlineWidth,
+      borderTopColor: aiTokens.border,
+      gap: 4,
+    },
+    storefrontButton: {
+      minHeight: 46,
+      flexDirection: 'row',
+      gap: 8,
+      alignItems: 'center',
+      paddingRight: 8,
+    },
+    expandButton: { minHeight: 46, flexDirection: 'row', gap: 6, alignItems: 'center' },
+    footnote: { padding: aiTokens.space.md, gap: 8 },
+  });
 }
