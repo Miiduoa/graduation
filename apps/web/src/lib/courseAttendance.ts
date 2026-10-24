@@ -9,8 +9,8 @@ import {
   query,
   where,
 } from 'firebase/firestore';
-import { httpsCallable } from 'firebase/functions';
-import { getDb, getFunctionsInstance, isFirebaseConfigured } from './firebase';
+import { getAuth, getCloudFunctionUrl, getDb, isFirebaseConfigured } from './firebase';
+import { FunctionsUnconfiguredError, isFunctionsUnconfiguredError } from './functionsUrl';
 
 export interface AttendanceRecord {
   uid: string;
@@ -157,14 +157,50 @@ export async function loadAttendanceCode(courseId: string, sessionId: string): P
     throw new Error('找不到簽到碼，請結束這次點名後重新開啟。');
   return snapshot.data().qrToken;
 }
-async function call<T>(name: string, input: Record<string, unknown>): Promise<T> {
+function callableCode(status: string): string {
+  return status.toLowerCase().replaceAll('_', '-');
+}
+
+function withCallableCode(message: string, status: string): Error {
+  const error = new Error(message);
+  (error as Error & { code: string }).code = `functions/${callableCode(status)}`;
+  return error;
+}
+
+async function call<T>(
+  name: 'startLiveSession' | 'endLiveSession' | 'joinLiveSession',
+  input: Record<string, unknown>,
+): Promise<T> {
   if (!isFirebaseConfigured()) throw new Error('校園服務尚未連線。');
-  const response = await httpsCallable<Record<string, unknown>, T>(
-    getFunctionsInstance(),
-    name,
-  )(input);
-  if (!(response.data as { success?: boolean })?.success) throw new Error('無法確認操作結果。');
-  return response.data;
+  const user = getAuth()?.currentUser;
+  if (!user) throw withCallableCode('登入已失效，請重新登入。', 'UNAUTHENTICATED');
+  const idToken = await user.getIdToken();
+  const response = await fetch(getCloudFunctionUrl(name), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${idToken}` },
+    body: JSON.stringify({ data: input }),
+    cache: 'no-store',
+  });
+  const payload = (await response.json()) as {
+    error?: { status?: unknown; message?: unknown };
+    result?: unknown;
+    data?: unknown;
+  };
+  const errorMessage =
+    payload?.error && typeof payload.error === 'object' ? String(payload.error.message || '') : '';
+  if (response.status === 503 || /尚未啟用/.test(errorMessage)) {
+    throw new FunctionsUnconfiguredError('點名尚未啟用');
+  }
+  if (!response.ok || payload.error) {
+    const status =
+      payload?.error && typeof payload.error === 'object' ? String(payload.error.status || '') : '';
+    throw withCallableCode(errorMessage || '無法確認操作結果。', status || 'UNKNOWN');
+  }
+  const result = payload.result ?? payload.data;
+  if (!result || typeof result !== 'object' || (result as { success?: boolean }).success !== true) {
+    throw new Error('無法確認操作結果。');
+  }
+  return result as T;
 }
 export function startCourseAttendance(groupId: string, requestId: string) {
   return call<StartAttendanceResult>('startLiveSession', {
@@ -184,6 +220,7 @@ export function joinCourseAttendance(groupId: string, sessionId: string, qrToken
   );
 }
 export function attendanceError(error: unknown): string {
+  if (isFunctionsUnconfiguredError(error)) return '點名尚未啟用';
   const code = (error as { code?: string })?.code?.replace('functions/', '');
   if (code === 'permission-denied') return '無法使用這次點名，請確認課程資格與簽到碼。';
   if (code === 'unauthenticated') return '登入已失效，請重新登入。';
