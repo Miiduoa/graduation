@@ -196,7 +196,7 @@
       "wasm/qcms_bg.wasm": "663d86126d5f5fcb1c61490f94353e2a8375660b8c5498ab3ebab5a34b08800e"
     }
   },
-  "fflate": "0.8.2",
+  "fflate": "0.8.3",
   "esbuild": "0.28.2",
-  "readerSha256": "6cecb69f073c96e175aecd35a2b7c10b8c85ecfda374c1323f19798c8c3760ae"
+  "readerSha256": "9b06d855946aafcdf5c511dffb8fa671cc756c93c3eb0d66ce29666b984d3566"
 }

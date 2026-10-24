@@ -132,6 +132,10 @@ module.exports = onCall(
         { success: false, error: msg },
         Date.now() - t0,
       );
+      // Preserve typed bounds / auth errors (e.g. resource-exhausted from inputLimits).
+      if (e instanceof HttpsError) {
+        throw e;
+      }
       throw new HttpsError('invalid-argument', msg || 'Tool execution failed');
     }
   },

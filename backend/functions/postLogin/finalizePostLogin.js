@@ -154,10 +154,11 @@ async function runFinalizePostLogin(request) {
     serviceRolesDoc = srSnap.exists ? normalizeServiceRoleRecord(srSnap.data() || {}) : null;
   }
 
+  // users.role is server-owned canonical authority. Do not pass client-writable
+  // primaryRole into resolveUserRoles (legacy pollution must never escalate claims).
   const resolved = resolveUserRoles({
     userDoc: {
       role: userDoc.role,
-      primaryRole: userDoc.primaryRole,
       email: userDoc.email,
       studentId: userDoc.studentId,
     },
