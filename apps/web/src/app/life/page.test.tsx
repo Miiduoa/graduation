@@ -67,14 +67,14 @@ it('分類與關鍵字共同篩選，清除搜尋會保留分類及輸入焦點'
   render(<LifePage />);
   const search = screen.getByRole('searchbox', { name: '快速找服務' });
   fireEvent.click(screen.getByRole('button', { name: '免登入' }));
-  expect(screen.getAllByRole('link')).toHaveLength(6);
+  expect(screen.getAllByRole('link')).toHaveLength(7);
   expect(screen.getByRole('button', { name: '免登入' }).getAttribute('aria-pressed')).toBe('true');
   fireEvent.change(search, { target: { value: '教室' } });
   expect(screen.getAllByRole('link')).toHaveLength(1);
   expect(screen.getByRole('link', { name: /校園地圖/ })).toBeTruthy();
   fireEvent.click(screen.getByRole('button', { name: '清除搜尋' }));
   expect(document.activeElement).toBe(search);
-  expect(screen.getAllByRole('link')).toHaveLength(6);
+  expect(screen.getAllByRole('link')).toHaveLength(7);
   expect(screen.getByRole('button', { name: '免登入' }).getAttribute('aria-pressed')).toBe('true');
 });
 
@@ -86,13 +86,13 @@ it('空結果可以恢復完整目錄，Escape 也可清除輸入', () => {
   expect(screen.queryAllByRole('link')).toHaveLength(0);
   expect(screen.getByRole('status').textContent).toBe('找到 0 項服務');
   fireEvent.click(screen.getByRole('button', { name: '顯示全部服務' }));
-  expect(screen.getAllByRole('link')).toHaveLength(11);
+  expect(screen.getAllByRole('link')).toHaveLength(12);
   expect(document.activeElement).toBe(search);
   fireEvent.change(search, { target: { value: '教室' } });
   fireEvent.keyDown(search, { key: 'Escape', isComposing: true });
   expect(screen.getAllByRole('link')).toHaveLength(1);
   fireEvent.keyDown(search, { key: 'Escape' });
-  expect(screen.getAllByRole('link')).toHaveLength(11);
+  expect(screen.getAllByRole('link')).toHaveLength(12);
 });
 
 it('搜尋不會繞過訂單開關，也不會將報修顯示為可使用服務', () => {
@@ -282,7 +282,7 @@ it('URL 校園參數不影響生活頁搜尋與分類狀態', () => {
   const search = screen.getByRole('searchbox', { name: '快速找服務' }) as HTMLInputElement;
   expect(search.value).toBe('');
   expect(screen.getByRole('button', { name: '全部' }).getAttribute('aria-pressed')).toBe('true');
-  expect(screen.getByRole('status').textContent).toBe('共 11 項服務');
+  expect(screen.getByRole('status').textContent).toBe('共 12 項服務');
   fireEvent.change(search, { target: { value: '公車' } });
   expect(screen.getAllByRole('link')).toHaveLength(1);
   expect(screen.getByRole('link', { name: /公車/ }).getAttribute('href')).toContain('campus=nthu');
@@ -309,4 +309,20 @@ it('Suspense 備援只顯示安全載入狀態，沒有錯誤範圍的可互動�
   expect(screen.queryAllByRole('link')).toHaveLength(0);
   expect(screen.queryByText('校園地圖')).toBeNull();
   expect(screen.queryByText('圖書館')).toBeNull();
+});
+
+it('校園活動入口可被搜尋，並保留已選校園參數', () => {
+  selectedSchool.mockReturnValue({
+    selectedSchool: { id: 'nthu' },
+    loading: false,
+    catalogStatus: 'ready',
+  });
+  render(<LifePage />);
+  const search = screen.getByRole('searchbox', { name: '快速找服務' });
+  fireEvent.change(search, { target: { value: '講座' } });
+  const link = screen.getByRole('link', { name: /校園活動/ });
+  const href = new URL(link.getAttribute('href')!, 'https://campus.example');
+  expect(href.pathname).toBe('/events');
+  expect(href.searchParams.get('schoolId')).toBe('nthu');
+  expect(href.searchParams.get('campus')).toBe('nthu');
 });

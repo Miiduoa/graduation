@@ -123,6 +123,8 @@ function Header() {
             aria-current={
               pathname === '/life' ||
               pathname?.startsWith('/lost-found') ||
+              pathname === '/events' ||
+              pathname?.startsWith('/events/') ||
               ['/map', '/bus', '/cafeteria', '/food', '/community', '/friends'].includes(
                 pathname || '',
               )
