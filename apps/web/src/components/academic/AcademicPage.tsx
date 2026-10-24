@@ -48,6 +48,7 @@ function Records<K extends AcademicKind>({
   if (state.status === 'error' || !state.snapshot) {
     const reconnect = state.reason === 'reconnect';
     const permission = state.reason === 'permission';
+    const unconfigured = state.reason === 'unconfigured';
     if (reconnect || permission) {
       if (options.loading) {
         return (
@@ -61,21 +62,25 @@ function Records<K extends AcademicKind>({
       }
     }
     return (
-      <section className={styles.status} role="alert">
+      <section className={styles.status} role={unconfigured ? 'status' : 'alert'}>
         <p className={styles.eyebrow}>學校資料</p>
         <h2>
           {reconnect
             ? '請重新連線學校帳號'
             : permission
               ? '目前帳號無法讀取這份資料'
-              : '暫時無法讀取學校資料'}
+              : unconfigured
+                ? '學校資料雲端讀取尚未啟用'
+                : '暫時無法讀取學校資料'}
         </h2>
         <p>
           {reconnect
             ? '學校登入已到期，重新登入後就能更新課表與成績。'
             : permission
               ? '請確認目前使用的是你的學校帳號。'
-              : `${loadFailureCopy(state.error, { online: navigator.onLine })}。這次未取得資料，不會以舊紀錄代替。`}
+              : unconfigured
+                ? '目前尚未接上雲端函式服務，無法從學校系統讀取這份資料。請改到學校官方系統查詢。'
+                : `${loadFailureCopy(state.error, { online: navigator.onLine })}。這次未取得資料，不會以舊紀錄代替。`}
         </p>
         <div className={styles.actions}>
           {reconnect || permission ? (
@@ -85,12 +90,12 @@ function Records<K extends AcademicKind>({
             >
               連線學校帳號
             </Link>
-          ) : (
+          ) : unconfigured ? null : (
             <button className="btn primary" onClick={() => void refresh()}>
               重新讀取
             </button>
           )}
-          {!reconnect && !permission && options.studentId && (
+          {!reconnect && !permission && !unconfigured && options.studentId && (
             <Link
               className="btn"
               href={`/login?reconnect=school&returnUrl=${encodeURIComponent(path)}`}

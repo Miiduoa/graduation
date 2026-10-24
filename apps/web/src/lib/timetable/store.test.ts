@@ -7,7 +7,7 @@ const firestore = vi.hoisted(() => ({
   paths: [] as string[],
 }));
 const auth = vi.hoisted(() => ({ currentUser: { uid: 'u-1' } as { uid: string } | null }));
-const firebase = vi.hoisted(() => ({ configured: true }));
+const firebase = vi.hoisted(() => ({ configured: true, functionsConfigured: true }));
 
 vi.mock('firebase/firestore', () => ({
   collection: vi.fn(),
@@ -33,11 +33,17 @@ vi.mock('@/lib/firebase', () => ({
   getFunctionsInstance: () => ({}),
   isFirebaseConfigured: () => firebase.configured,
 }));
+vi.mock('@/lib/functionsUrl', async (original) => ({
+  ...(await original<typeof import('@/lib/functionsUrl')>()),
+  areFunctionsConfigured: () => firebase.functionsConfigured,
+}));
 
+import { httpsCallable } from 'firebase/functions';
 import {
   TIMETABLE_DEVICE_ONLY_STORED_COPY,
   TIMETABLE_DEVICE_ONLY_SUBMIT_COPY,
   createCourseAppeal,
+  loadAppealTeacherStatus,
   loadFriendTimetable,
   loadPersonalTimetable,
   savePersonalTimetable,
@@ -86,6 +92,7 @@ beforeEach(() => {
   firestore.paths = [];
   auth.currentUser = { uid: 'u-1' };
   firebase.configured = true;
+  firebase.functionsConfigured = true;
 });
 
 it('keeps imported timetables on this device and does not send them to the cloud', async () => {
@@ -557,4 +564,22 @@ it('does not let a guest device copy replace an existing account cloud record fo
   mockCloud({ canonical: { data: storedTimetable([remote]) } });
   expect((await loadPersonalTimetable('u-1', 'pu')).courses).toEqual([remote]);
   expect(localStorage.getItem('campus-one-personal-timetable:local:pu')).toBe(guest);
+});
+
+it('does not call Cloud Functions for teacher status when the functions base URL is unset', async () => {
+  firebase.functionsConfigured = false;
+  const call = vi.fn();
+  vi.mocked(httpsCallable).mockReturnValue(call as never);
+  expect(await loadAppealTeacherStatus('pu', ['資料庫｜王老師'])).toEqual({});
+  expect(httpsCallable).not.toHaveBeenCalled();
+});
+
+it('calls Cloud Functions for teacher status when the functions base URL is set', async () => {
+  const call = vi.fn().mockResolvedValue({ data: { assigned: { '資料庫｜王老師': true } } });
+  vi.mocked(httpsCallable).mockReturnValue(call as never);
+  expect(await loadAppealTeacherStatus('pu', ['資料庫｜王老師'])).toEqual({
+    '資料庫｜王老師': true,
+  });
+  expect(httpsCallable).toHaveBeenCalled();
+  expect(call).toHaveBeenCalledWith({ schoolId: 'pu', offeringIds: ['資料庫｜王老師'] });
 });

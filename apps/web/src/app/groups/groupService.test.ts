@@ -5,6 +5,7 @@ import { joinByCode, leaveMemberGroup, loadMyGroups } from './groupService';
 const runtime = vi.hoisted(() => ({
   user: null as null | { uid: string; getIdToken: () => Promise<string> },
   configured: true,
+  functionsConfigured: true,
 }));
 vi.mock('@/lib/firebase', () => ({
   getDb: () => ({}),
@@ -12,6 +13,10 @@ vi.mock('@/lib/firebase', () => ({
   getAuth: () => ({ currentUser: runtime.user, app: { options: { projectId: 'campus-test' } } }),
   getCloudFunctionUrl: (name: string) =>
     `https://asia-east1-campus-test.cloudfunctions.net/${name}`,
+}));
+vi.mock('@/lib/functionsUrl', async (original) => ({
+  ...(await original<typeof import('@/lib/functionsUrl')>()),
+  areFunctionsConfigured: () => runtime.functionsConfigured,
 }));
 vi.mock('firebase/firestore', () => ({
   collection: (_db: unknown, ...path: string[]) => ({ path: path.join('/') }),
@@ -58,6 +63,7 @@ function response(result: unknown, ok = true) {
 beforeEach(() => {
   vi.clearAllMocks();
   runtime.configured = true;
+  runtime.functionsConfigured = true;
   runtime.user = { uid: 'alice', getIdToken: vi.fn().mockResolvedValue('alice-token') };
   records.clear();
   seedGroup();
@@ -125,6 +131,19 @@ it('propagates source errors instead of substituting demo groups or empty result
   await expect(loadMyGroups('alice', 'pu')).rejects.toThrow('permission-denied');
   runtime.configured = false;
   await expect(loadMyGroups('alice', 'pu')).rejects.toThrow();
+});
+
+it('does not call Cloud Functions when the functions base URL is unset', async () => {
+  runtime.functionsConfigured = false;
+  await expect(joinByCode('alice', 'pu', 'ABCD1234', () => true)).rejects.toMatchObject({
+    code: 'functions-unconfigured',
+    message: '加入與退出群組尚未啟用',
+  });
+  expect(fetchMock).not.toHaveBeenCalled();
+  await expect(leaveMemberGroup('alice', 'pu', 'firestore-1', () => true)).rejects.toMatchObject({
+    code: 'functions-unconfigured',
+  });
+  expect(fetchMock).not.toHaveBeenCalled();
 });
 
 it('calls the existing invitation endpoint using the captured user token and confirms both server membership records', async () => {

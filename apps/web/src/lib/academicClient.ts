@@ -1,5 +1,6 @@
 import { httpsCallable } from 'firebase/functions';
 import { getAuth, getFunctionsInstance, isFirebaseConfigured } from './firebase';
+import { areFunctionsConfigured } from './functionsUrl';
 import {
   normalizeCourseRecords,
   normalizeGradeRecords,
@@ -17,7 +18,7 @@ export type AcademicSnapshot<K extends AcademicKind> = {
 };
 export class AcademicConnectionError extends Error {
   constructor(
-    public readonly reason: 'reconnect' | 'unavailable' | 'permission',
+    public readonly reason: 'reconnect' | 'unavailable' | 'permission' | 'unconfigured',
     cause?: unknown,
   ) {
     super(reason, cause === undefined ? undefined : { cause });
@@ -31,6 +32,9 @@ export async function loadAcademicRecords<K extends AcademicKind>(
 ): Promise<AcademicSnapshot<K>> {
   if (!uid || !isFirebaseConfigured() || getAuth()?.currentUser?.uid !== uid) {
     throw new AcademicConnectionError('unavailable');
+  }
+  if (!areFunctionsConfigured()) {
+    throw new AcademicConnectionError('unconfigured');
   }
   try {
     const call = httpsCallable<{ dataType: AcademicKind }, unknown>(

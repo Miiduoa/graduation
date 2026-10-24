@@ -12,6 +12,10 @@ vi.mock('next/navigation', () => ({ useSearchParams: () => new URLSearchParams()
 vi.mock('@/components/AuthGuard', () => ({ useAuth: () => ({ user: { uid: 'alice' }, loading: false, error: null }) }));
 vi.mock('@/components/SiteShell', () => ({ SiteShell: ({ children }: { children: ReactNode }) => <main>{children}</main> }));
 vi.mock('@/lib/campusAssistantClient', async original => ({ ...await original<typeof import('@/lib/campusAssistantClient')>(), callCampusAssistant: vi.fn() }));
+vi.mock('@/lib/functionsUrl', async (original) => ({
+  ...(await original<typeof import('@/lib/functionsUrl')>()),
+  areFunctionsConfigured: () => true,
+}));
 
 const navigationUrl = 'https://www.google.com/maps/dir/?api=1&origin=24.1%2C120.1&destination=24.2%2C120.2&travelmode=walking';
 const output = {

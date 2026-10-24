@@ -1,5 +1,6 @@
 import { collection, doc, getDocFromServer, getDocsFromServer } from 'firebase/firestore';
 import { getAuth, getCloudFunctionUrl, getDb, isFirebaseConfigured } from '@/lib/firebase';
+import { areFunctionsConfigured, FunctionsUnconfiguredError } from '@/lib/functionsUrl';
 
 export type MemberGroup = {
   id: string;
@@ -91,6 +92,9 @@ async function callForUser(
   current: CurrentScope,
 ): Promise<Record<string, unknown>> {
   assertCurrent(uid, current);
+  if (!areFunctionsConfigured()) {
+    throw new FunctionsUnconfiguredError('加入與退出群組尚未啟用');
+  }
   const auth = getAuth()!;
   const user = auth.currentUser!;
   const token = await user.getIdToken();

@@ -1,5 +1,6 @@
 import { expect, it } from 'vitest';
 import { getCloudFunctionUrl, getFunctionsBaseUrl } from './cloudFunctions';
+import { areFunctionsConfigured } from './functionsUrl';
 
 const fly = 'https://nuni-functions.fly.dev';
 
@@ -10,6 +11,12 @@ it('uses the Fly base URL when the emulator is off', () => {
   };
   expect(getFunctionsBaseUrl(env)).toBe(fly);
   expect(getCloudFunctionUrl('joinLiveSession', { env })).toBe(`${fly}/joinLiveSession`);
+});
+
+it('reports the Fly URL as configured and an empty URL as unconfigured', () => {
+  expect(areFunctionsConfigured(fly, false)).toBe(true);
+  expect(areFunctionsConfigured('', false)).toBe(false);
+  expect(areFunctionsConfigured(null, true)).toBe(true);
 });
 
 it('lets the emulator win over NEXT_PUBLIC_FUNCTIONS_BASE_URL', () => {

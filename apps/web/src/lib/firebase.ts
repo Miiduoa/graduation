@@ -52,6 +52,7 @@ import {
   type Functions,
 } from 'firebase/functions';
 import { getCloudFunctionUrl as resolveCloudFunctionUrl, getFunctionsBaseUrl } from './cloudFunctions';
+import { areFunctionsConfigured, FunctionsUnconfiguredError } from './functionsUrl';
 import {
   findUniversalDevAccountByEmail,
   buildGroupCollectionPath,
@@ -180,7 +181,7 @@ export function getAuth(): Auth | null {
   return auth;
 }
 
-export { getFunctionsBaseUrl };
+export { getFunctionsBaseUrl, areFunctionsConfigured };
 
 export function getCloudFunctionUrl(functionName: string): string {
   return resolveCloudFunctionUrl(functionName, {
@@ -1518,6 +1519,9 @@ export async function borrowLibraryBook(params: {
   schoolId: string;
   bookId: string;
 }): Promise<{ success?: boolean; loanId?: string; dueAt?: string }> {
+  if (!areFunctionsConfigured()) {
+    throw new FunctionsUnconfiguredError('圖書館借還尚未啟用');
+  }
   const borrowBook = httpsCallable<
     { schoolId: string; bookId: string },
     { success?: boolean; loanId?: string; dueAt?: string }
@@ -1530,6 +1534,9 @@ export async function returnLibraryBook(params: {
   schoolId: string;
   loanId: string;
 }): Promise<{ success?: boolean }> {
+  if (!areFunctionsConfigured()) {
+    throw new FunctionsUnconfiguredError('圖書館借還尚未啟用');
+  }
   const returnBook = httpsCallable<
     { schoolId: string; loanId: string },
     { success?: boolean }

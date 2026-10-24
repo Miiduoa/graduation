@@ -6,6 +6,7 @@ import { SiteShell } from '@/components/SiteShell';
 import { useAuth } from '@/components/AuthGuard';
 import { useBrowsingSchoolPageContext } from '@/lib/useBrowsingSchoolPageContext';
 import { SchoolScopePlaceholder } from '@/components/SchoolScopePlaceholder';
+import { isFunctionsUnconfiguredError } from '@/lib/functionsUrl';
 import { joinByCode, leaveMemberGroup, loadMyGroups, type MemberGroup } from './groupService';
 import { GroupOwnershipTransfer } from './GroupOwnershipTransfer';
 import styles from './groups.module.css';
@@ -98,13 +99,20 @@ function MemberDirectory({ uid, schoolId, mode }: { uid: string; schoolId: strin
         setConfirmLeave(null);
         setNotice({ text: `已退出「${group.name}」。`, error: false });
       }
-    } catch {
+    } catch (error) {
       if (current()) {
-        setMustRefresh(true);
-        setNotice({
-          text: '未能確認操作結果。請先更新列表確認成員狀態，再決定是否重試。',
-          error: true,
-        });
+        if (isFunctionsUnconfiguredError(error)) {
+          setNotice({
+            text: error instanceof Error ? error.message : '加入與退出群組尚未啟用',
+            error: true,
+          });
+        } else {
+          setMustRefresh(true);
+          setNotice({
+            text: '未能確認操作結果。請先更新列表確認成員狀態，再決定是否重試。',
+            error: true,
+          });
+        }
       }
     } finally {
       actionLock.current = false;
