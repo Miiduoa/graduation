@@ -281,6 +281,10 @@ it('recovers from load errors and reads the actual audit response shape', async 
   await screen.findByText('改學校資料');
   expect(screen.getByText('營運人員 · 第一學校 · 代為操作')).toBeTruthy();
   expect(screen.getByText('查看變更內容')).toBeTruthy();
+  expect(
+    screen.getByText(/此列表顯示平台管理 API 本次回傳的操作紀錄（目前 1 筆）/),
+  ).toBeTruthy();
+  expect(screen.getByText(/請勿將本頁視為已保證的完整歷史匯出/)).toBeTruthy();
 });
 
 it('keeps existing non-operator sessions intact until explicit logout', () => {

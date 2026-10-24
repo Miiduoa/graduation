@@ -482,9 +482,10 @@ const createStyles = () => StyleSheet.create({
   inputWrapper: {
     flexDirection: 'row',
     alignItems: 'center',
+    minHeight: 48,
     borderWidth: 1,
     borderRadius: theme.radius.md,
-    backgroundColor: theme.colors.surface2,
+    backgroundColor: theme.colors.surface,
     overflow: 'hidden',
   },
   inputDisabled: {
@@ -493,9 +494,11 @@ const createStyles = () => StyleSheet.create({
   },
   input: {
     flex: 1,
+    minHeight: 48,
     paddingVertical: 12,
     paddingHorizontal: 16,
-    fontSize: 15,
+    fontSize: theme.typography.body.fontSize,
+    lineHeight: theme.typography.body.lineHeight,
     color: theme.colors.text,
   },
   inputWithLeftIcon: {
@@ -505,13 +508,19 @@ const createStyles = () => StyleSheet.create({
     marginLeft: 14,
   },
   inputRightIcon: {
+    minWidth: 44,
+    minHeight: 44,
+    alignItems: 'center',
+    justifyContent: 'center',
     padding: 12,
   },
   inputRightIconPressed: {
     backgroundColor: theme.colors.surfaceInteractiveStrong,
+    opacity: 0.85,
   },
   hint: {
-    fontSize: 12,
+    fontSize: theme.typography.caption.fontSize,
+    lineHeight: theme.typography.caption.lineHeight,
     color: theme.colors.muted,
     marginTop: 6,
   },

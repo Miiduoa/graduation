@@ -1,5 +1,5 @@
 /* eslint-disable */
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { ScrollView, Text, View, Pressable, Alert, TextInput } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import {
@@ -33,6 +33,13 @@ import {
 } from 'firebase/firestore';
 import { useAsyncList } from '../hooks/useAsyncList';
 import { fetchSchoolDirectoryProfiles } from '../services/memberDirectory';
+import {
+  createGroupOwnershipOrigin,
+  isGroupOwnershipOriginCurrent,
+  transferGroupOwnership,
+  transferGroupOwnershipErrorMessage,
+  type GroupOwnershipOrigin,
+} from '../services/groupOwnership';
 
 type MemberRole = 'owner' | 'instructor' | 'moderator' | 'member';
 
@@ -95,6 +102,22 @@ export function GroupMembersScreen(props: any) {
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedFilter, setSelectedFilter] = useState<'all' | 'instructors' | 'members'>('all');
   const [managingMember, setManagingMember] = useState<string | null>(null);
+  const [transferringOwnership, setTransferringOwnership] = useState(false);
+  const [pendingTransferTarget, setPendingTransferTarget] = useState<string | null>(null);
+  const ownershipGeneration = useRef(0);
+  const ownershipMounted = useRef(true);
+  useEffect(() => {
+    ownershipMounted.current = true;
+    ownershipGeneration.current += 1;
+    // New scope gets a clean transfer UI; in-flight origins keep their own operationId.
+    setTransferringOwnership(false);
+    setPendingTransferTarget(null);
+    setManagingMember(null);
+    return () => {
+      ownershipMounted.current = false;
+      ownershipGeneration.current += 1;
+    };
+  }, [auth.user?.uid, school.id, groupId]);
 
   const { items: groupMeta, reload: reloadGroup } = useAsyncList<Group>(async () => {
     if (isFirebaseMockMode()) return [];
@@ -115,7 +138,10 @@ export function GroupMembersScreen(props: any) {
     return snap.docs.map((d) => ({ uid: d.id, ...(d.data() as any) }));
   }, [db, groupId]);
 
-  const { items: myMemberRows } = useAsyncList<{ role?: MemberRole }>(async () => {
+  const { items: myMemberRows, reload: reloadMyMembership } = useAsyncList<{
+    role?: MemberRole;
+    status?: string;
+  }>(async () => {
     if (isFirebaseMockMode()) return [];
     if (!groupId || !auth.user) return [];
     const snap = await getDoc(doc(db, 'groups', groupId, 'members', auth.user.uid));
@@ -189,8 +215,9 @@ export function GroupMembersScreen(props: any) {
       return;
     }
 
-    if (newRole === 'owner' && myRole !== 'owner') {
-      Alert.alert('無法更改', '只有擁有者可以轉讓擁有權');
+    // Ownership must go through the privileged transfer callable — never client role writes.
+    if (newRole === 'owner') {
+      Alert.alert('請使用擁有權轉讓', '請改用「轉讓擁有權」完成轉移，不能直接把角色改成擁有者。');
       return;
     }
 
@@ -221,6 +248,128 @@ export function GroupMembersScreen(props: any) {
         },
       },
     ]);
+  };
+
+  const runOwnershipTransfer = async (origin: GroupOwnershipOrigin, displayName: string) => {
+    const live = {
+      generation: ownershipGeneration.current,
+      uid: auth.user?.uid,
+      schoolId: school.id,
+      groupId,
+    };
+    if (!isGroupOwnershipOriginCurrent(origin, live) || !ownershipMounted.current) {
+      return;
+    }
+    setTransferringOwnership(true);
+    setPendingTransferTarget(origin.targetUid);
+    try {
+      const result = await transferGroupOwnership({
+        groupId: origin.groupId,
+        targetUid: origin.targetUid,
+        operationId: origin.operationId,
+        expectedCurrentOwnerUid: origin.uid,
+      });
+      if (!ownershipMounted.current || !isGroupOwnershipOriginCurrent(origin, {
+        generation: ownershipGeneration.current,
+        uid: auth.user?.uid,
+        schoolId: school.id,
+        groupId,
+      })) {
+        return;
+      }
+      // Receipt / callable result is not proof of current ownership — re-read actor seat.
+      const actorSnap = await getDoc(doc(db, 'groups', origin.groupId, 'members', origin.uid));
+      if (!ownershipMounted.current || !isGroupOwnershipOriginCurrent(origin, {
+        generation: ownershipGeneration.current,
+        uid: auth.user?.uid,
+        schoolId: school.id,
+        groupId,
+      })) {
+        return;
+      }
+      const actorNow = actorSnap.exists() ? (actorSnap.data() as { role?: string; status?: string }) : {};
+      if (actorNow.status !== 'active' || actorNow.role === 'owner') {
+        Alert.alert(
+          '請更新列表',
+          '轉讓已送出，但目前還無法確認你已失去擁有者身分。請更新成員列表後再操作。',
+        );
+        reload();
+        reloadGroup();
+        reloadMyMembership();
+        return;
+      }
+      reload();
+      reloadGroup();
+      reloadMyMembership();
+      setManagingMember(null);
+      setPendingTransferTarget(null);
+      Alert.alert(
+        '已轉讓擁有權',
+        `「${displayName}」現在是群組擁有者。你的角色已改為「${getRoleLabel(
+          typeof result.actorNewRole === 'string' ? result.actorNewRole : actorNow.role || 'member',
+        )}」，之後若要退出此群組，可再執行退出。`,
+      );
+    } catch (error) {
+      if (!ownershipMounted.current || !isGroupOwnershipOriginCurrent(origin, {
+        generation: ownershipGeneration.current,
+        uid: auth.user?.uid,
+        schoolId: school.id,
+        groupId,
+      })) {
+        return;
+      }
+      Alert.alert('轉讓失敗', transferGroupOwnershipErrorMessage(error), [
+        { text: '關閉', style: 'cancel' },
+        {
+          text: '用同一操作重試',
+          onPress: () => void runOwnershipTransfer(origin, displayName),
+        },
+      ]);
+    } finally {
+      if (
+        ownershipMounted.current &&
+        isGroupOwnershipOriginCurrent(origin, {
+          generation: ownershipGeneration.current,
+          uid: auth.user?.uid,
+          schoolId: school.id,
+          groupId,
+        })
+      ) {
+        setTransferringOwnership(false);
+      }
+    }
+  };
+
+  const promptTransferOwnership = (member: Member) => {
+    if (!groupId || !auth.user || myRole !== 'owner') return;
+    if (member.uid === auth.user.uid || member.role === 'owner') return;
+    if (auth.loading || auth.profileLoading) {
+      Alert.alert('請稍候', '正在確認登入身分，請稍後再轉讓擁有權。');
+      return;
+    }
+
+    const profile = profilesById[member.uid];
+    const displayName = profile?.displayName || member.uid.slice(0, 8);
+    const origin = createGroupOwnershipOrigin({
+      generation: ownershipGeneration.current,
+      uid: auth.user.uid,
+      schoolId: school.id,
+      groupId,
+      targetUid: member.uid,
+    });
+
+    Alert.alert(
+      '確認轉讓擁有權',
+      `確定將此群組的擁有權轉給「${displayName}」？\n\n轉讓成功後，對方會成為唯一擁有者；你會改為一般成員，之後才能退出此群組。`,
+      [
+        { text: '取消', style: 'cancel' },
+        {
+          text: '確認轉讓',
+          style: 'destructive',
+          onPress: () => void runOwnershipTransfer(origin, displayName),
+        },
+      ],
+    );
   };
 
   const handleRemoveMember = async (uid: string) => {
@@ -515,6 +664,24 @@ export function GroupMembersScreen(props: any) {
                           ))}
                         </View>
                       </View>
+
+                      {myRole === 'owner' && m.role !== 'owner' && (
+                        <View style={{ marginTop: 12 }}>
+                          <Button
+                            text={
+                              transferringOwnership && pendingTransferTarget === m.uid
+                                ? '轉讓中...'
+                                : '轉讓擁有權'
+                            }
+                            kind="outline"
+                            disabled={transferringOwnership || Boolean(auth.loading) || Boolean(auth.profileLoading)}
+                            onPress={() => promptTransferOwnership(m)}
+                          />
+                          <Text style={{ color: theme.colors.muted, fontSize: 12, marginTop: 6 }}>
+                            轉讓後對方會成為唯一擁有者；你會改為一般成員。
+                          </Text>
+                        </View>
+                      )}
 
                       <View
                         style={{ marginTop: 14, flexDirection: 'row', gap: 10, flexWrap: 'wrap' }}

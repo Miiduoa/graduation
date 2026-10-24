@@ -53,15 +53,19 @@ async def main():
             # when navigating back and forth in the same browser session.
             await page.locator('header summary[aria-label^="切換校園："]').click()
             await page.get_by_role('combobox', name='瀏覽校園').select_option('nthu')
-            # NTHU has no period profile: safe ordinal list only — no clock grid/editor.
-            await expect(page.get_by_text('清大測試課程', exact=True)).to_be_visible()
-            assert await page.get_by_text('資料庫管理', exact=True).count() == 0, 'PU courses leaked into NTHU'
-            await expect(page.get_by_role('status').filter(has_text='尚未取得這所學校的節次時間')).to_be_visible()
+            # NTHU has no verified period profile, so its scoped courses remain
+            # readable without borrowing PU's editable grid or clock times.
+            nthu_timetable = page.get_by_role('region', name='個人課表', exact=True)
+            await expect(nthu_timetable.get_by_text('清大測試課程', exact=True)).to_be_visible()
+            await expect(nthu_timetable.get_by_role('status')).to_contain_text('尚未取得這所學校的節次時間')
+            await expect(nthu_timetable.get_by_text('星期三 · 第 2–3 節（時間未確認） · 測試教室', exact=True)).to_be_visible()
+            assert await nthu_timetable.get_by_role('table').count() == 0, 'NTHU borrowed another school\'s period grid'
             assert await page.get_by_text('08:10').count() == 0, 'Unsupported school must not reuse the PU clock'
             assert await page.get_by_role('button', name='格子', exact=True).count() == 0
-            assert await page.get_by_role('button', name='移動課程', exact=True).count() == 0
+            assert await page.get_by_role('button', name='移動課程', exact=True).count() == 0, 'Unverified NTHU periods allowed course movement'
             assert await page.get_by_role('button', name=re.compile(r'^編輯 ')).count() == 0
-            assert await page.get_by_role('button', name='新增課程', exact=True).count() == 0
+            assert await page.get_by_role('button', name='新增課程', exact=True).count() == 0, 'Unverified NTHU periods allowed grid editing'
+            assert await page.get_by_text('資料庫管理', exact=True).count() == 0, 'PU courses leaked into NTHU'
             assert await page.get_by_role('button', name='今天空堂', exact=True).count() == 0
             assert await page.get_by_role('button', name='排讀書時間', exact=True).count() == 0
             await page.screenshot(path=str(OUT / 'nthu-scoped.png'), full_page=True, animations='disabled')

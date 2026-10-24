@@ -24,15 +24,23 @@
   background: var(--surface);
   color: var(--text);
   font: inherit;
+  font-size: var(--font-body-size);
+  line-height: var(--font-body-line-height);
   box-shadow: none;
-  transition: border-color 120ms ease;
+  transition:
+    border-color var(--motion-fast, 160ms) ease,
+    background-color var(--motion-fast, 160ms) ease;
 }
 .input:hover:not(:disabled) {
   border-color: var(--brand);
 }
+.input:active:not(:disabled):not(:focus-visible) {
+  background: var(--panel);
+}
 .input:focus-visible {
   outline: 3px solid var(--focus-ring);
   outline-offset: 3px;
+  background: var(--surface);
 }
 .input[aria-invalid='true'] {
   border-color: var(--danger);
