@@ -222,8 +222,18 @@
   border-radius: var(--radius-lg);
   transition:
     border-color 180ms ease,
+    background-color 180ms ease,
     box-shadow 180ms ease,
     transform 180ms ease;
+}
+
+.service:active {
+  background: var(--panel);
+  border-color: var(--border-strong);
+}
+
+.service:active .action svg {
+  transform: translateX(2px);
 }
 
 .icon {
@@ -438,8 +448,9 @@
 
   .publicGrid .service:hover {
     border-color: var(--border-strong);
-    box-shadow: var(--shadow-sm);
-    transform: translateY(-2px);
+    box-shadow: none;
+    transform: none;
+    background: var(--bg-soft);
   }
 
   .service:hover .action svg {
@@ -546,7 +557,8 @@
 }
 
 :global([data-reduced-motion='true']) .publicGrid .service:hover,
-:global([data-reduced-motion='true']) .service:hover .action svg {
+:global([data-reduced-motion='true']) .service:hover .action svg,
+:global([data-reduced-motion='true']) .service:active .action svg {
   transform: none;
 }
 
@@ -557,7 +569,8 @@
   }
 
   .publicGrid .service:hover,
-  .service:hover .action svg {
+  .service:hover .action svg,
+  .service:active .action svg {
     transform: none;
   }
 }
