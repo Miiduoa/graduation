@@ -304,7 +304,47 @@ it('requires options and final confirmation, then shows the actual order and kee
   expect(payload.items).toEqual([
     { menuItemId: 'rice', quantity: 1, selectedOptionIds: ['large'] },
   ]);
-  expect(screen.getByRole('link', { name: '原有餐廳訂單' }).getAttribute('href')).toBe('/orders');
+  expect(screen.getByRole('link', { name: 'App 餐廳訂單' }).getAttribute('href')).toBe('/orders');
+  expect(screen.queryByRole('region', { name: '訂單紀錄' })).toBeNull();
+  expect(screen.getByRole('region', { name: '訂單詳情' })).toBeTruthy();
+  expect(screen.getByText('付款尚未完成。請依畫面指示結帳，或到櫃檯向店員確認。')).toBeTruthy();
+  expect(screen.queryByLabelText('選擇點餐校園')).toBeNull();
+  expect(screen.queryByLabelText('選擇訂單校園')).toBeNull();
+  expect(screen.getByText(/訂單校園：第一校園/)).toBeTruthy();
+});
+
+it('surfaces pickup as the next step for a ready order without inventing credentials', async () => {
+  order = readyOrder();
+  render(<FoodWorkspace initialTenant="campus-one" initialOrder="order-1" />);
+  await screen.findByText('米飯店 · 可以取餐');
+  const detail = screen.getByRole('region', { name: '訂單詳情' });
+  expect(detail.textContent).toContain('餐點好了。請到店出示取餐憑證。');
+  expect(screen.getByRole('button', { name: '出示取餐憑證' })).toBeTruthy();
+  expect(screen.queryByLabelText('一次性取餐憑證')).toBeNull();
+  expect(screen.queryByText('已結束的訂單')).toBeNull();
+  expect(screen.getByText('進行中的訂單')).toBeTruthy();
+});
+
+it('hides the order history while a detail is open and restores the list on back', async () => {
+  order = orderFixture();
+  render(<FoodWorkspace initialTenant="campus-one" initialOrder="order-1" />);
+  await screen.findByText('米飯店 · 待付款');
+  expect(screen.queryByRole('region', { name: '訂單紀錄' })).toBeNull();
+  fireEvent.click(screen.getByRole('button', { name: '返回訂單列表' }));
+  const list = await screen.findByRole('region', { name: '訂單紀錄' });
+  expect(list).toBeTruthy();
+  expect(screen.getByText('查看訂單，確認付款進度與方式。')).toBeTruthy();
+  expect(screen.queryByRole('region', { name: '訂單詳情' })).toBeNull();
+});
+
+it('shows summary-ready next step in the list without requiring credential fields', async () => {
+  order = readyOrder();
+  render(<FoodWorkspace initialTenant="campus-one" initialOrder="order-1" />);
+  await screen.findByText('米飯店 · 可以取餐');
+  fireEvent.click(screen.getByRole('button', { name: '返回訂單列表' }));
+  await screen.findByRole('region', { name: '訂單紀錄' });
+  expect(screen.getByText('餐點好了，查看訂單並出示取餐憑證。')).toBeTruthy();
+  expect(screen.queryByLabelText('一次性取餐憑證')).toBeNull();
 });
 
 it('retries the identical order after an unknown result and transient account error, without a second key', async () => {
@@ -432,7 +472,9 @@ it('keeps placed orders visible and does not invite a new order while online ord
   expect(screen.queryByRole('button', { name: '查看菜單：米飯店' })).toBeNull();
   expect(screen.queryByText('先看菜單與金額，確認後才送出訂單。')).toBeNull();
   await screen.findByText('米飯店 · 待付款');
-  expect(screen.getByRole('link', { name: '原有餐廳訂單' }).getAttribute('href')).toBe('/orders');
+  expect(screen.getByRole('link', { name: 'App 餐廳訂單' }).getAttribute('href')).toBe('/orders');
+  expect(screen.queryByRole('button', { name: '我的訂單與取餐' })).toBeNull();
+  expect(screen.getByRole('button', { name: '重新整理' })).toBeTruthy();
 });
 
 it('does not read private food data without a platform session', () => {
@@ -440,6 +482,27 @@ it('does not read private food data without a platform session', () => {
   render(<FoodWorkspace />);
   expect(screen.getByRole('link', { name: '登入後點餐' })).toBeTruthy();
   expect(mocks.request).not.toHaveBeenCalled();
+});
+
+it('does not invite a second payment while authorization is still settling', async () => {
+  order = {
+    ...orderFixture(),
+    allowedActions: ['create-payment-session', 'cancel'],
+    paymentSession: {
+      id: 'payment-1',
+      orderId: 'order-1',
+      method: 'credit-card',
+      progress: 'authorized-awaiting-settlement',
+      checkoutUrl: 'https://pay.example/checkout',
+      expiresAt: future,
+      allowedActions: [],
+    },
+  };
+  render(<FoodWorkspace initialTenant="campus-one" initialOrder="order-1" />);
+  await screen.findByText('付款確認中，請稍候或更新這筆訂單。');
+  expect(screen.queryByRole('button', { name: '信用卡結帳' })).toBeNull();
+  expect(screen.queryByRole('link', { name: '前往安全付款頁面' })).toBeNull();
+  expect(screen.queryByText(/請選擇付款方式/)).toBeNull();
 });
 
 it('uses only offered payment methods and never treats a failed checkout session as paid', async () => {

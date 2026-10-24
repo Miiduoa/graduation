@@ -2009,6 +2009,479 @@ test('owners cannot write during deletion or clear its guards, while active prof
   await assertFails(ref.update({ notificationDeliveryDisabled: false }));
 });
 
+describe('P1 authorization: users role authority fields', () => {
+  const { deleteField } = require('firebase/firestore');
+
+  test('deny create with polluted primaryRole / authority fields; allow student create', async () => {
+    const newbie = testEnv.authenticatedContext('newbie').firestore();
+    await assertSucceeds(
+      newbie.doc('users/newbie').set({
+        displayName: 'Newbie',
+        role: 'student',
+        createdAt: '2026-10-24T00:00:00.000Z',
+      }),
+    );
+    await assertSucceeds(
+      testEnv.authenticatedContext('sparse').firestore().doc('users/sparse').set({ displayName: 'Sparse' }),
+    );
+
+    const pollutedCreates = [
+      ['pollute-admin', { primaryRole: 'admin' }],
+      ['pollute-teacher', { primaryRole: 'teacher' }],
+      ['pollute-editor', { primaryRole: 'editor', postLoginRoles: ['admin'] }],
+      [
+        'pollute-flags',
+        {
+          teachingRoles: ['teacher'],
+          orgRoles: ['schoolAdmin'],
+          lastPostLoginResolvedAt: '2026-10-24T00:00:00.000Z',
+        },
+      ],
+      ['pollute-role', { role: 'admin' }],
+    ];
+    for (const [uid, extra] of pollutedCreates) {
+      const db = testEnv.authenticatedContext(uid).firestore();
+      await assertFails(
+        db.doc(`users/${uid}`).set({
+          displayName: 'Evil',
+          role: extra.role === 'admin' ? 'admin' : 'student',
+          createdAt: '2026-10-24T00:00:00.000Z',
+          ...extra,
+        }),
+      );
+    }
+  });
+
+  test('deny update that inserts/changes/removes primaryRole and other authority fields', async () => {
+    await seedFirestore(async (db) => {
+      await db.doc('users/alice').set({
+        displayName: 'Alice',
+        role: 'student',
+        balance: null,
+        schoolId: 'pu',
+        primarySchoolId: 'pu',
+        createdAt: '2026-10-01T00:00:00.000Z',
+      });
+      await db.doc('users/bob').set({
+        displayName: 'Bob',
+        role: 'student',
+        primaryRole: 'student',
+        postLoginRoles: ['student'],
+        teachingRoles: [],
+        orgRoles: [],
+        balance: null,
+        schoolId: 'pu',
+        primarySchoolId: 'pu',
+        createdAt: '2026-10-01T00:00:00.000Z',
+        lastPostLoginResolvedAt: '2026-10-02T00:00:00.000Z',
+        notificationDeliveryDisabled: false,
+        accountDeletionInProgress: false,
+      });
+    });
+
+    const alice = testEnv.authenticatedContext('alice').firestore().doc('users/alice');
+    const bob = testEnv.authenticatedContext('bob').firestore().doc('users/bob');
+
+    await assertSucceeds(alice.update({ displayName: 'Alice Updated' }));
+    await assertSucceeds(alice.update({ notificationsEnabled: true }));
+
+    await assertFails(alice.update({ primaryRole: 'admin' }));
+    await assertFails(alice.update({ primaryRole: 'teacher' }));
+    await assertFails(alice.update({ primaryRole: 'editor' }));
+    await assertFails(alice.update({ postLoginRoles: ['admin'] }));
+    await assertFails(alice.update({ teachingRoles: ['teacher'] }));
+    await assertFails(alice.update({ orgRoles: ['schoolAdmin'] }));
+    await assertFails(alice.update({ lastPostLoginResolvedAt: '2099-01-01T00:00:00.000Z' }));
+    await assertFails(alice.update({ role: 'admin' }));
+
+    await assertFails(bob.update({ primaryRole: 'admin' }));
+    await assertFails(bob.update({ postLoginRoles: ['admin', 'teacher'] }));
+    await assertFails(bob.update({ teachingRoles: ['teacher'] }));
+    await assertFails(bob.update({ orgRoles: ['schoolAdmin'] }));
+    await assertFails(bob.update({ lastPostLoginResolvedAt: '2099-01-01T00:00:00.000Z' }));
+    await assertFails(bob.update({ role: 'teacher' }));
+
+    await assertFails(bob.update({ primaryRole: deleteField() }));
+    await assertFails(bob.update({ postLoginRoles: deleteField() }));
+    await assertFails(bob.update({ teachingRoles: deleteField() }));
+    await assertFails(bob.update({ orgRoles: deleteField() }));
+    await assertFails(bob.update({ lastPostLoginResolvedAt: deleteField() }));
+    await assertFails(bob.update({ role: deleteField() }));
+    await assertFails(bob.update({ notificationDeliveryDisabled: deleteField() }));
+    await assertFails(bob.update({ accountDeletionInProgress: deleteField() }));
+    await assertFails(alice.update({ notificationDeliveryDisabled: true }));
+    await assertFails(alice.update({ accountDeletionInProgress: true }));
+
+    await assertSucceeds(bob.update({ displayName: 'Bob Updated' }));
+  });
+});
+
+describe('P1 authorization: MapDiff affectedKeys allowlists', () => {
+  const { deleteField } = require('firebase/firestore');
+
+  test('campus post like/comment bump cannot delete or insert author content', async () => {
+    await seedFirestore(async (db) => {
+      await db.doc('schools/pu/members/alice').set({ role: 'member', status: 'active' });
+      await db.doc('schools/pu/members/bob').set({ role: 'member', status: 'active' });
+      await db.doc('schools/pu/campusPosts/post-1').set({
+        schoolId: 'pu',
+        boardId: 'general',
+        title: 'Hello campus',
+        body: 'Original body by bob',
+        anonymous: false,
+        authorUid: 'bob',
+        likes: 0,
+        likedBy: [],
+        commentCount: 0,
+        createdAt: '2026-10-20T00:00:00.000Z',
+        updatedAt: '2026-10-20T00:00:00.000Z',
+      });
+      await db.doc('schools/pu/campusPosts/post-2').set({
+        schoolId: 'pu',
+        boardId: 'general',
+        title: 'No likes yet',
+        body: 'Fresh',
+        anonymous: false,
+        authorUid: 'bob',
+        createdAt: '2026-10-20T00:00:00.000Z',
+        updatedAt: '2026-10-20T00:00:00.000Z',
+      });
+    });
+
+    const alice = testEnv.authenticatedContext('alice').firestore();
+    const post1 = alice.doc('schools/pu/campusPosts/post-1');
+    const post2 = alice.doc('schools/pu/campusPosts/post-2');
+
+    await assertSucceeds(
+      post2.update({
+        likes: 1,
+        likedBy: ['alice'],
+        updatedAt: '2026-10-24T00:00:00.000Z',
+      }),
+    );
+
+    await assertSucceeds(
+      post1.update({
+        likes: 1,
+        likedBy: ['alice'],
+        updatedAt: '2026-10-24T00:00:00.000Z',
+      }),
+    );
+
+    await seedFirestore(async (db) => {
+      await db.doc('schools/pu/campusPosts/post-1').set({
+        schoolId: 'pu',
+        boardId: 'general',
+        title: 'Hello campus',
+        body: 'Original body by bob',
+        anonymous: false,
+        authorUid: 'bob',
+        likes: 0,
+        likedBy: [],
+        commentCount: 2,
+        createdAt: '2026-10-20T00:00:00.000Z',
+        updatedAt: '2026-10-20T00:00:00.000Z',
+      });
+    });
+
+    await assertFails(
+      post1.update({
+        likes: 1,
+        likedBy: ['alice'],
+        updatedAt: '2026-10-24T00:00:00.000Z',
+        body: deleteField(),
+      }),
+    );
+
+    await assertFails(
+      post1.update({
+        likes: 1,
+        likedBy: ['alice'],
+        updatedAt: '2026-10-24T00:00:00.000Z',
+        title: 'Hijacked title',
+      }),
+    );
+    await assertFails(
+      post1.update({
+        likes: 1,
+        likedBy: ['alice'],
+        updatedAt: '2026-10-24T00:00:00.000Z',
+        forgedAdminNote: 'pwned',
+      }),
+    );
+
+    await assertFails(
+      post1.update({
+        commentCount: 3,
+        updatedAt: '2026-10-24T00:00:00.000Z',
+        body: deleteField(),
+      }),
+    );
+    await assertFails(
+      post1.update({
+        commentCount: 3,
+        updatedAt: '2026-10-24T00:00:00.000Z',
+        title: 'bumped-hijack',
+      }),
+    );
+    await assertFails(
+      post1.update({ commentCount: 3, updatedAt: '2026-10-24T00:00:00.000Z', forgedAdminNote: 'injected' }),
+    );
+
+    await assertSucceeds(
+      post1.update({
+        commentCount: 3,
+        updatedAt: '2026-10-24T00:00:00.000Z',
+      }),
+    );
+
+    await seedFirestore(async (db) => {
+      const snap = await db.doc('schools/pu/campusPosts/post-1').get();
+      const data = snap.data();
+      if (data.body !== 'Original body by bob' || data.title !== 'Hello campus' || data.authorUid !== 'bob') {
+        throw new Error('author content was mutated unexpectedly');
+      }
+    });
+
+    const bob = testEnv.authenticatedContext('bob').firestore();
+    await assertSucceeds(
+      bob.doc('schools/pu/campusPosts/post-1').update({
+        body: 'Edited by author',
+        title: 'Hello campus',
+        boardId: 'general',
+        updatedAt: '2026-10-24T01:00:00.000Z',
+      }),
+    );
+  });
+
+  test('nested conversation message reaction/read/recall cannot strip or forge fields', async () => {
+    await seedFirestore(async (db) => {
+      await db.doc('schools/pu/members/alice').set({ role: 'member', status: 'active' });
+      await db.doc('schools/pu/members/bob').set({ role: 'member', status: 'active' });
+      await db.doc('conversations/dm-1').set({
+        schoolId: 'pu',
+        memberIds: ['alice', 'bob'],
+        createdAt: '2026-10-20T00:00:00.000Z',
+        updatedAt: '2026-10-20T00:00:00.000Z',
+      });
+      await db.doc('conversations/dm-1/messages/m1').set({
+        conversationId: 'dm-1',
+        senderId: 'alice',
+        content: 'secret hello',
+        readBy: ['alice'],
+        createdAt: '2026-10-20T00:00:00.000Z',
+      });
+      await db.doc('conversations/dm-1/messages/m2').set({
+        conversationId: 'dm-1',
+        senderId: 'alice',
+        content: 'no reactions yet',
+        createdAt: '2026-10-20T00:00:00.000Z',
+      });
+    });
+
+    const bob = testEnv.authenticatedContext('bob').firestore();
+    const m1 = bob.doc('conversations/dm-1/messages/m1');
+    const m2 = bob.doc('conversations/dm-1/messages/m2');
+
+    await assertSucceeds(m1.update({ readBy: ['alice', 'bob'] }));
+    await assertSucceeds(
+      m2.update({
+        reactions: { '👍': ['bob'] },
+        updatedAt: '2026-10-24T00:00:00.000Z',
+      }),
+    );
+
+    await seedFirestore(async (db) => {
+      await db.doc('conversations/dm-1/messages/m1').set({
+        conversationId: 'dm-1',
+        senderId: 'alice',
+        content: 'secret hello',
+        readBy: ['alice'],
+        createdAt: '2026-10-20T00:00:00.000Z',
+      });
+    });
+
+    await assertFails(
+      m1.update({
+        readBy: ['alice', 'bob'],
+        content: deleteField(),
+      }),
+    );
+    await assertFails(
+      m1.update({
+        readBy: ['alice', 'bob'],
+        forged: true,
+      }),
+    );
+    await assertFails(
+      m1.update({
+        reactions: { '👍': ['bob'] },
+        updatedAt: '2026-10-24T00:00:00.000Z',
+        content: 'hijacked',
+      }),
+    );
+    await assertFails(m1.update({ reactions: { '👍': ['bob'] }, content: deleteField() }));
+
+    const alice = testEnv.authenticatedContext('alice').firestore();
+    await assertFails(alice.doc('conversations/dm-1/messages/m1').update({
+      recalledAt: '2026-10-24T00:00:00.000Z', content: deleteField(),
+    }));
+    await assertFails(alice.doc('conversations/dm-1/messages/m1').update({
+      recalledAt: '2026-10-24T00:00:00.000Z', forged: true,
+    }));
+    await assertSucceeds(
+      alice.doc('conversations/dm-1/messages/m1').update({
+        recalledAt: '2026-10-24T00:00:00.000Z',
+        updatedAt: '2026-10-24T00:00:00.000Z',
+      }),
+    );
+    await assertFails(
+      bob.doc('conversations/dm-1/messages/m2').update({
+        recalledAt: '2026-10-24T00:00:00.000Z',
+        updatedAt: '2026-10-24T00:00:00.000Z',
+      }),
+    );
+  });
+
+  test('root messages readBy allowlist blocks delete/insert of other fields', async () => {
+    await seedFirestore(async (db) => {
+      await db.doc('conversations/c-root').set({
+        schoolId: 'pu',
+        memberIds: ['alice', 'bob'],
+      });
+      await db.doc('schools/pu/members/alice').set({ role: 'member', status: 'active' });
+      await db.doc('schools/pu/members/bob').set({ role: 'member', status: 'active' });
+      await db.doc('messages/root-1').set({
+        conversationId: 'c-root',
+        senderId: 'alice',
+        text: 'root private',
+        readBy: ['alice'],
+        createdAt: '2026-10-20T00:00:00.000Z',
+      });
+      await db.doc('messages/root-2').set({
+        conversationId: 'c-root',
+        senderId: 'alice',
+        text: 'no readBy yet',
+        createdAt: '2026-10-20T00:00:00.000Z',
+      });
+    });
+
+    const bob = testEnv.authenticatedContext('bob').firestore();
+
+    await assertSucceeds(
+      bob.doc('messages/root-1').update({
+        readBy: ['alice', 'bob'],
+        updatedAt: '2026-10-24T00:00:00.000Z',
+      }),
+    );
+    await assertSucceeds(
+      bob.doc('messages/root-2').update({
+        readBy: ['bob'],
+        updatedAt: '2026-10-24T00:00:00.000Z',
+      }),
+    );
+
+    await seedFirestore(async (db) => {
+      await db.doc('messages/root-1').set({
+        conversationId: 'c-root',
+        senderId: 'alice',
+        text: 'root private',
+        readBy: ['alice'],
+        createdAt: '2026-10-20T00:00:00.000Z',
+      });
+    });
+
+    await assertFails(
+      bob.doc('messages/root-1').update({
+        readBy: ['alice', 'bob'],
+        updatedAt: '2026-10-24T00:00:00.000Z',
+        text: deleteField(),
+      }),
+    );
+    await assertFails(
+      bob.doc('messages/root-1').update({
+        readBy: ['alice', 'bob'],
+        updatedAt: '2026-10-24T00:00:00.000Z',
+        text: 'hijacked',
+      }),
+    );
+    await assertFails(
+      bob.doc('messages/root-1').update({
+        readBy: ['alice', 'bob'],
+        updatedAt: '2026-10-24T00:00:00.000Z',
+        injected: 'x',
+      }),
+    );
+  });
+
+  test('notification owner cannot modify protected payload while marking read', async () => {
+    await seedFirestore(async (db) => {
+      await db.doc('notifications/n1').set({
+        userId: 'alice',
+        title: 'System notice',
+        body: 'Important payload',
+        type: 'system',
+        isRead: false,
+        createdAt: '2026-10-20T00:00:00.000Z',
+      });
+      await db.doc('notifications/n2').set({
+        userId: 'alice',
+        title: 'No readAt yet',
+        body: 'Payload',
+        type: 'system',
+        isRead: false,
+        createdAt: '2026-10-20T00:00:00.000Z',
+      });
+    });
+
+    const alice = testEnv.authenticatedContext('alice').firestore();
+
+    await assertSucceeds(
+      alice.doc('notifications/n2').update({
+        isRead: true,
+        readAt: '2026-10-24T00:00:00.000Z',
+        updatedAt: '2026-10-24T00:00:00.000Z',
+      }),
+    );
+
+    await assertFails(
+      alice.doc('notifications/n1').update({
+        isRead: true,
+        readAt: '2026-10-24T00:00:00.000Z',
+        updatedAt: '2026-10-24T00:00:00.000Z',
+        body: deleteField(),
+      }),
+    );
+    await assertFails(
+      alice.doc('notifications/n1').update({
+        isRead: true,
+        readAt: '2026-10-24T00:00:00.000Z',
+        updatedAt: '2026-10-24T00:00:00.000Z',
+        title: 'Forged title',
+      }),
+    );
+    await assertFails(
+      alice.doc('notifications/n1').update({
+        isRead: true,
+        readAt: '2026-10-24T00:00:00.000Z',
+        updatedAt: '2026-10-24T00:00:00.000Z',
+        type: 'admin',
+      }),
+    );
+    await assertFails(alice.doc('notifications/n1').update({
+      isRead: true, readAt: '2026-10-24T00:00:00.000Z', forgedAdminNote: 'injected',
+    }));
+
+    await assertSucceeds(
+      alice.doc('notifications/n1').update({
+        isRead: true,
+        readAt: '2026-10-24T00:00:00.000Z',
+        updatedAt: '2026-10-24T00:00:00.000Z',
+      }),
+    );
+  });
+});
+
 test('push provider receipts are server-only even for the recipient', async () => {
   for (const name of ['pendingPushReceipts', 'pushReceiptResults']) {
     await seedFirestore(async (db) => db.collection(name).doc('one').set({ uid: 'alice' }));
@@ -2253,7 +2726,7 @@ test('course appeals need a course from the student own timetable and only its t
     await db.doc('schools/pu/members/stu').set({ status: 'active', role: 'student' });
     await db.doc('schools/pu/members/teach').set({ status: 'active', role: 'teacher' });
     await db.doc('users/stu/personalTimetable/current').set({
-      courses: [], courseIds: ['db'], offeringIds: ['資料庫｜王老師'],
+      schoolId: 'pu', courses: [], courseIds: ['db'], offeringIds: ['資料庫｜王老師'],
     });
   });
   const stu = testEnv.authenticatedContext('stu').firestore();
@@ -2299,6 +2772,201 @@ test('course appeals need a course from the student own timetable and only its t
   // 學生撤回也不能順便改內容
   await assertSucceeds(stu.doc('courseAppeals/a2').set({ ...appeal, title: '第二件事情' }));
   await assertFails(stu.doc('courseAppeals/a2').update({ status: 'withdrawn', body: '偷偷改掉說明內容' }));
+});
+
+test('school-scoped personal timetables isolate saves, friend reads, and appeal authority', async () => {
+  const courseA = { id: 'a1', name: '靜宜課', day: 1, start: 1, end: 2 };
+  const courseB = { id: 'b1', name: '成大課', day: 2, start: 3, end: 4 };
+  const offeringB = '成大課｜乙老師';
+  const timetableA = {
+    schoolId: 'pu',
+    shareWithFriends: true,
+    courses: [courseA],
+    courseIds: ['a1', 'b1'],
+    offeringIds: ['靜宜課｜甲老師', offeringB],
+    meta: { label: 'pu' },
+  };
+  const timetableB = {
+    schoolId: 'ncku',
+    shareWithFriends: true,
+    courses: [courseB],
+    courseIds: ['b1'],
+    offeringIds: [offeringB],
+    meta: { label: 'ncku' },
+  };
+  const appealB = {
+    schoolId: 'ncku',
+    studentUid: 'alice',
+    courseId: 'b1',
+    courseName: '成大課',
+    offeringId: offeringB,
+    title: '出缺席紀錄',
+    body: '當天有請假單可以補',
+    status: 'pending',
+    teacherNote: '',
+  };
+
+  await seedFirestore(async (db) => {
+    for (const schoolId of ['pu', 'ncku']) {
+      for (const uid of ['alice', 'bob']) {
+        await db.doc(`schools/${schoolId}/members/${uid}`).set({ status: 'active', role: 'student' });
+      }
+    }
+    await db.doc('friendships/req_pu_alice_bob').set({
+      schoolId: 'pu', fromUid: 'alice', toUid: 'bob', status: 'accepted',
+    });
+  });
+
+  const alice = testEnv.authenticatedContext('alice').firestore();
+  const bob = testEnv.authenticatedContext('bob').firestore();
+  const mallory = testEnv.authenticatedContext('mallory').firestore();
+  const pathA = 'users/alice/schools/pu/personalTimetable/current';
+  const pathB = 'users/alice/schools/ncku/personalTimetable/current';
+
+  await assertSucceeds(alice.doc(pathA).set(timetableA));
+  await assertSucceeds(alice.doc(pathB).set(timetableB));
+  await assertSucceeds(alice.doc(pathA).get());
+  await assertSucceeds(alice.doc(pathB).get());
+
+  await assertFails(alice.doc(pathA).set({ ...timetableA, schoolId: 'ncku' }));
+  await assertFails(alice.doc(pathB).set({ ...timetableB, schoolId: 'pu' }));
+  await assertFails(alice.doc(pathA).set({ ...timetableA, schoolId: 'other' }));
+
+  await assertSucceeds(bob.doc(pathA).get());
+  await assertFails(bob.doc(pathB).get());
+  await assertFails(bob.doc(pathA).update({ courses: [] }));
+  await assertFails(mallory.doc(pathA).set(timetableA));
+  await assertFails(mallory.doc(pathB).delete());
+
+  // A 校索引（即使含相同 course/offering 名稱）不能授權 B 校申訴
+  await seedFirestore(async (db) => {
+    await db.doc(pathB).delete();
+  });
+  await assertFails(alice.doc('courseAppeals/cross-school').set(appealB));
+
+  // 正確的 B 校 scoped 索引可以授權
+  await seedFirestore(async (db) => {
+    await db.doc(pathB).set(timetableB);
+  });
+  await assertSucceeds(alice.doc('courseAppeals/ncku-ok').set(appealB));
+
+  // 錯誤學校／缺 provenance 的 legacy 不能授權
+  await seedFirestore(async (db) => {
+    await db.doc(pathB).delete();
+    await db.doc('users/alice/personalTimetable/current').set({
+      schoolId: 'pu',
+      courses: [courseB],
+      courseIds: ['b1'],
+      offeringIds: [offeringB],
+    });
+  });
+  await assertFails(alice.doc('courseAppeals/legacy-wrong-school').set({
+    ...appealB, title: 'legacy wrong school',
+  }));
+
+  await seedFirestore(async (db) => {
+    await db.doc('users/alice/personalTimetable/current').set({
+      courses: [courseB],
+      courseIds: ['b1'],
+      offeringIds: [offeringB],
+    });
+  });
+  await assertFails(alice.doc('courseAppeals/legacy-missing-school').set({
+    ...appealB, title: 'legacy missing school',
+  }));
+
+  // canonical 空文件存在時壓過 matching legacy
+  await seedFirestore(async (db) => {
+    await db.doc('users/alice/personalTimetable/current').set({
+      schoolId: 'ncku',
+      courses: [courseB],
+      courseIds: ['b1'],
+      offeringIds: [offeringB],
+    });
+    await db.doc(pathB).set({
+      schoolId: 'ncku',
+      shareWithFriends: false,
+      courses: [],
+      courseIds: [],
+      offeringIds: [],
+      meta: {},
+    });
+  });
+  await assertFails(alice.doc('courseAppeals/canonical-empty-wins').set({
+    ...appealB, title: 'canonical empty wins',
+  }));
+
+  // matching legacy fallback only when canonical is absent
+  await seedFirestore(async (db) => {
+    await db.doc(pathB).delete();
+  });
+  await assertSucceeds(alice.doc('courseAppeals/legacy-match').set({
+    ...appealB, title: 'legacy exact match',
+  }));
+});
+
+test('accepted same-school friends can probe missing canonical timetable before legacy fallback', async () => {
+  const pathA = 'users/alice/schools/pu/personalTimetable/current';
+  const legacy = {
+    schoolId: 'pu',
+    shareWithFriends: true,
+    courses: [{ id: 'a1', name: '靜宜課', day: 1, start: 1, end: 2 }],
+    courseIds: ['a1'],
+    offeringIds: ['靜宜課｜甲老師'],
+    meta: {},
+  };
+
+  await seedFirestore(async (db) => {
+    for (const schoolId of ['pu', 'ncku']) {
+      for (const uid of ['alice', 'bob', 'carol', 'mallory']) {
+        await db.doc(`schools/${schoolId}/members/${uid}`).set({ status: 'active', role: 'student' });
+      }
+    }
+    await db.doc('friendships/req_pu_alice_bob').set({
+      schoolId: 'pu', fromUid: 'alice', toUid: 'bob', status: 'accepted',
+    });
+    await db.doc('friendships/req_ncku_alice_carol').set({
+      schoolId: 'ncku', fromUid: 'alice', toUid: 'carol', status: 'accepted',
+    });
+    // legacy-only explicitly shared for school A; canonical absent
+    await db.doc('users/alice/personalTimetable/current').set(legacy);
+  });
+
+  const bob = testEnv.authenticatedContext('bob').firestore();
+  const carol = testEnv.authenticatedContext('carol').firestore();
+  const mallory = testEnv.authenticatedContext('mallory').firestore();
+  const alice = testEnv.authenticatedContext('alice').firestore();
+
+  await assertSucceeds(bob.doc(pathA).get());
+  await assertSucceeds(bob.doc('users/alice/personalTimetable/current').get());
+  await assertFails(mallory.doc(pathA).get());
+  await assertFails(carol.doc(pathA).get());
+  await assertFails(bob.collection('users/alice/schools/pu/personalTimetable').get());
+  await assertSucceeds(alice.collection('users/alice/schools/pu/personalTimetable').get());
+
+  await seedFirestore(async (db) => {
+    await db.doc(pathA).set({
+      schoolId: 'pu',
+      shareWithFriends: false,
+      courses: [],
+      courseIds: [],
+      offeringIds: [],
+      meta: {},
+    });
+  });
+  await assertFails(bob.doc(pathA).get());
+
+  await seedFirestore(async (db) => {
+    await db.doc(pathA).set({
+      schoolId: 'ncku',
+      shareWithFriends: true,
+      courses: [],
+      courseIds: [],
+      offeringIds: [],
+      meta: {},
+    });
+  });
+  await assertFails(bob.doc(pathA).get());
 });
 
 test('same-name courses taught by two teachers stay apart', async () => {

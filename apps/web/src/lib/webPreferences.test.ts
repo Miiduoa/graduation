@@ -48,7 +48,64 @@ describe('webPreferences', () => {
     expect(document.documentElement.style.getPropertyValue('--brand2')).toBe(
       deriveSecondaryThemeColor('#FF6B35'),
     );
-    expect(document.documentElement.style.getPropertyValue('--font-h1-size')).toBe('26px');
+    expect(document.documentElement.style.getPropertyValue('--font-h1-size')).toBe('1.625rem');
+    expect(document.documentElement.style.getPropertyValue('--font-body-size')).toBe('1.0625rem');
+  });
+
+  it.each([
+    {
+      fontSize: 'small' as const,
+      body: '0.875rem',
+      bodySm: '0.75rem',
+      h1: '1.375rem',
+      h2: '1.125rem',
+      h3: '1rem',
+      label: '0.75rem',
+      labelSm: '0.625rem',
+    },
+    {
+      fontSize: 'medium' as const,
+      body: '0.9375rem',
+      bodySm: '0.8125rem',
+      h1: '1.5rem',
+      h2: '1.25rem',
+      h3: '1.0625rem',
+      label: '0.8125rem',
+      labelSm: '0.6875rem',
+    },
+    {
+      fontSize: 'large' as const,
+      body: '1.0625rem',
+      bodySm: '0.9375rem',
+      h1: '1.625rem',
+      h2: '1.375rem',
+      h3: '1.1875rem',
+      label: '0.875rem',
+      labelSm: '0.75rem',
+    },
+  ])('writes rem font tokens for $fontSize preserving the px-equivalent scale', ({
+    fontSize,
+    body,
+    bodySm,
+    h1,
+    h2,
+    h3,
+    label,
+    labelSm,
+  }) => {
+    applyWebAppearancePreferences(document, {
+      ...defaultWebPreferences.appearance,
+      fontSize,
+    });
+
+    const root = document.documentElement.style;
+    expect(root.getPropertyValue('--font-body-size')).toBe(body);
+    expect(root.getPropertyValue('--font-body-sm-size')).toBe(bodySm);
+    expect(root.getPropertyValue('--font-h1-size')).toBe(h1);
+    expect(root.getPropertyValue('--font-h2-size')).toBe(h2);
+    expect(root.getPropertyValue('--font-h3-size')).toBe(h3);
+    expect(root.getPropertyValue('--font-label-size')).toBe(label);
+    expect(root.getPropertyValue('--font-label-sm-size')).toBe(labelSm);
   });
 
   it('resets to system theme when requested', () => {

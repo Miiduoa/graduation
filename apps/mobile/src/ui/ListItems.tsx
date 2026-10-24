@@ -2,7 +2,7 @@
 import React, { memo, useCallback } from 'react';
 import { View, Text, Pressable, Platform, StyleSheet } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { getCurrentTheme, softShadowStyle } from './theme';
+import { getCurrentTheme } from './theme';
 import { useThemeVersion } from './useThemeStyleSheet';
 import { Pill, StatusBadge } from './components';
 import { formatDateTime, formatRelativeTime, toDate } from '../utils/format';
@@ -34,12 +34,11 @@ export const AnnouncementItem = memo(
         onPress={handlePress}
         style={({ pressed }) => ({
           borderRadius: theme.radius.lg,
-          backgroundColor: theme.colors.surface,
+          backgroundColor: pressed ? theme.colors.surfaceMuted : theme.colors.surface,
           borderWidth: 1,
           borderColor: pressed ? theme.colors.accent : theme.colors.border,
           padding: 18,
           gap: 10,
-          ...softShadowStyle(theme.shadows.soft),
           transform: [{ scale: pressed ? 0.985 : 1 }],
         })}
         accessible
@@ -159,11 +158,10 @@ export const EventItem = memo(
           onPress={handlePress}
           style={({ pressed }) => ({
             borderRadius: theme.radius.lg,
-            backgroundColor: theme.colors.surface,
+            backgroundColor: pressed ? theme.colors.surfaceMuted : theme.colors.surface,
             borderWidth: 1,
             borderColor: theme.colors.border,
             overflow: 'hidden',
-            ...softShadowStyle(theme.shadows.soft),
             transform: [{ scale: pressed ? 0.97 : 1 }],
           })}
         >
@@ -260,12 +258,11 @@ export const EventItem = memo(
         onPress={handlePress}
         style={({ pressed }) => ({
           borderRadius: theme.radius.lg,
-          backgroundColor: theme.colors.surface,
+          backgroundColor: pressed ? theme.colors.surfaceMuted : theme.colors.surface,
           borderWidth: 1,
           borderColor: pressed ? theme.colors.accent : theme.colors.border,
           padding: 18,
           gap: 10,
-          ...softShadowStyle(theme.shadows.soft),
           transform: [{ scale: pressed ? 0.985 : 1 }],
         })}
         accessible
@@ -375,12 +372,11 @@ export const MenuItem = memo(
           alignItems: 'center',
           padding: 16,
           borderRadius: theme.radius.lg,
-          backgroundColor: pressed ? theme.colors.surface2 : theme.colors.surface,
+          backgroundColor: pressed ? theme.colors.surfaceMuted : theme.colors.surface,
           borderWidth: 1,
           borderColor: theme.colors.border,
           opacity: isAvailable ? 1 : 0.45,
           gap: 14,
-          ...softShadowStyle(theme.shadows.soft),
           transform: [{ scale: pressed ? 0.985 : 1 }],
         })}
       >

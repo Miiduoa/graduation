@@ -4,7 +4,15 @@ import { ScrollView, Text, View, Pressable, TextInput, Alert, Modal } from 'reac
 import { Ionicons } from '@expo/vector-icons';
 import { isAvailableAsync, shareAsync } from 'expo-sharing';
 import { Paths, File } from 'expo-file-system';
-import { collection, getDocs, query, orderBy, limit } from 'firebase/firestore';
+import {
+  collection,
+  documentId,
+  getDocs,
+  query,
+  orderBy,
+  limit,
+  type QueryDocumentSnapshot,
+} from 'firebase/firestore';
 
 import {
   Screen,
@@ -23,6 +31,7 @@ import { useSchool } from '../state/school';
 import { useAuth } from '../state/auth';
 import { getDb } from '../firebase';
 import { useAdminEvents } from '../hooks/useAdminEvents';
+import { useAdminCollectionPage } from '../hooks/useAdminCollectionPage';
 import { useAsyncList } from '../hooks/useAsyncList';
 import { useAmbientCues } from '../features/engagement';
 import { AmbientCueCard } from '../ui/campusOs';
@@ -39,6 +48,19 @@ import {
   upsertSchoolAnnouncement,
   upsertSchoolEvent,
 } from '../services/admin';
+import {
+  ADMIN_LOG_EXPORT_MAX_ROWS,
+  buildAdminCsv,
+  describeAdminLogExportScope,
+  fetchAdminLogsPaged,
+  type AdminLogExportRow,
+} from '../services/adminAuditExport';
+import {
+  AdminExportSession,
+  assertExportStillCurrent,
+  type AdminExportOrigin,
+  type AdminExportToken,
+} from '../services/adminExportSession';
 import { fetchSchoolDirectoryProfiles } from '../services/memberDirectory';
 import {
   DEMO_ADMIN_ANNOUNCEMENTS,
@@ -166,16 +188,15 @@ function parseDateTimeInput(input: string): Date | null {
   return dt;
 }
 
-function escapeCsvValue(value: unknown): string {
-  const raw = value == null ? '' : String(value);
-  const escaped = raw.replace(/"/g, '""');
-  return `"${escaped}"`;
+function buildCsv(headers: string[], rows: Array<Array<unknown>>): string {
+  return buildAdminCsv(headers, rows);
 }
 
-function buildCsv(headers: string[], rows: Array<Array<unknown>>): string {
-  const headerLine = headers.map(escapeCsvValue).join(',');
-  const bodyLines = rows.map((row) => row.map(escapeCsvValue).join(','));
-  return [headerLine, ...bodyLines].join('\n');
+function loadedScopeHint(loaded: number, hasMore: boolean, noun: string): string {
+  if (hasMore) {
+    return `已載入 ${loaded} ${noun}；尚有未載入資料。搜尋、篩選與「已載入」匯出只涵蓋目前已載入列，不是全校全部。`;
+  }
+  return `已載入全部可讀取的 ${loaded} ${noun}；搜尋與匯出範圍即為此批資料。`;
 }
 
 function TabButton(props: { icon: string; label: string; active: boolean; onPress: () => void }) {
@@ -304,6 +325,45 @@ export function AdminDashboardScreen(props: any) {
   const [logKeyword, setLogKeyword] = useState('');
   const [logFilter, setLogFilter] = useState<LogFilterMode>('all');
   const [exportingLogs, setExportingLogs] = useState(false);
+  const [exportingAllLogs, setExportingAllLogs] = useState(false);
+  // auth.tsx can swap user before profile settles; loading/profileLoading must deny export.
+  const authSettling = Boolean(auth.loading || auth.profileLoading);
+  const canExportAdminData = Boolean(
+    (auth.isAdmin || auth.isEditor) && !authSettling && auth.user?.uid,
+  );
+  const exportSessionRef = useRef(
+    new AdminExportSession({
+      uid: auth.user?.uid ?? '',
+      schoolId: school.id,
+      allowed: canExportAdminData,
+    }),
+  );
+  useEffect(() => {
+    const changed = exportSessionRef.current.setIdentity({
+      uid: auth.user?.uid ?? '',
+      schoolId: school.id,
+      allowed: Boolean((auth.isAdmin || auth.isEditor) && !auth.loading && !auth.profileLoading && auth.user?.uid),
+    });
+    if (changed) {
+      setExportingAnnouncements(false);
+      setExportingEvents(false);
+      setExportingLogs(false);
+      setExportingAllLogs(false);
+    }
+  }, [
+    auth.user?.uid,
+    auth.isAdmin,
+    auth.isEditor,
+    auth.loading,
+    auth.profileLoading,
+    school.id,
+  ]);
+  useEffect(() => {
+    const session = exportSessionRef.current;
+    return () => {
+      session.unmount();
+    };
+  }, []);
 
   const [annTitle, setAnnTitle] = useState('');
   const [annBody, setAnnBody] = useState('');
@@ -338,17 +398,22 @@ export function AdminDashboardScreen(props: any) {
   const {
     items: announcements,
     loading: annLoading,
+    busy: annBusy,
+    error: annError,
+    hasMore: moreAnnouncements,
+    complete: announcementsComplete,
+    permissionDenied: annPermissionDenied,
+    loadMore: loadMoreAnnouncements,
     reload: reloadAnn,
-  } = useAsyncList<Announcement>(async () => {
-    if (demoMode) return DEMO_ADMIN_ANNOUNCEMENTS as Announcement[];
-    const qy = query(
-      collection(db, 'schools', school.id, 'announcements'),
-      orderBy('publishedAt', 'desc'),
-      limit(50),
-    );
-    const snap = await getDocs(qy);
-    return snap.docs.map((d) => ({ id: d.id, ...(d.data() as any) }));
-  }, [db, school.id, demoMode]);
+  } = useAdminCollectionPage<Announcement>({
+    schoolId: school.id,
+    uid: auth.user?.uid ?? '',
+    demoItems: demoMode ? (DEMO_ADMIN_ANNOUNCEMENTS as Announcement[]) : undefined,
+    getCollection: () => collection(db, 'schools', school.id, 'announcements'),
+    buildConstraints: () => [orderBy('publishedAt', 'desc'), orderBy(documentId(), 'desc')],
+    mapDocs: (docs: QueryDocumentSnapshot[]) =>
+      docs.map((d) => ({ id: d.id, ...(d.data() as any) })),
+  });
 
   const {
     items: events,
@@ -367,48 +432,62 @@ export function AdminDashboardScreen(props: any) {
   const {
     items: members,
     loading: memLoading,
+    busy: memBusy,
+    error: memError,
+    hasMore: moreMembers,
+    complete: membersComplete,
+    permissionDenied: memPermissionDenied,
+    loadMore: loadMoreMembers,
     reload: reloadMem,
-  } = useAsyncList<SchoolMember>(async () => {
-    if (demoMode) return DEMO_ADMIN_MEMBERS as SchoolMember[];
-    const qy = query(collection(db, 'schools', school.id, 'members'), limit(100));
-    const snap = await getDocs(qy);
-    const directoryProfiles = await fetchSchoolDirectoryProfiles(
-      school.id,
-      snap.docs.map((docSnap) => docSnap.id),
-      db,
-    );
-    const profilesById = Object.fromEntries(
-      directoryProfiles.map((profile) => [profile.uid, profile]),
-    );
-
-    return snap.docs.map((d) => {
-      const data = d.data() as any;
-      const profile = profilesById[d.id];
-      return {
-        id: d.id,
-        role: data.role ?? 'member',
-        displayName: profile?.displayName ?? d.id.slice(0, 8),
-        department: profile?.department ?? null,
-        avatarUrl: profile?.avatarUrl ?? null,
-        joinedAt: data.joinedAt,
-      } satisfies SchoolMember;
-    });
-  }, [db, school.id, demoMode]);
+  } = useAdminCollectionPage<SchoolMember>({
+    schoolId: school.id,
+    uid: auth.user?.uid ?? '',
+    demoItems: demoMode ? (DEMO_ADMIN_MEMBERS as SchoolMember[]) : undefined,
+    getCollection: () => collection(db, 'schools', school.id, 'members'),
+    buildConstraints: () => [orderBy(documentId())],
+    mapDocs: async (docs: QueryDocumentSnapshot[]) => {
+      const directoryProfiles = await fetchSchoolDirectoryProfiles(
+        school.id,
+        docs.map((docSnap) => docSnap.id),
+        db,
+      );
+      const profilesById = Object.fromEntries(
+        directoryProfiles.map((profile) => [profile.uid, profile]),
+      );
+      return docs.map((d) => {
+        const data = d.data() as any;
+        const profile = profilesById[d.id];
+        return {
+          id: d.id,
+          role: data.role ?? 'member',
+          displayName: profile?.displayName ?? d.id.slice(0, 8),
+          department: profile?.department ?? null,
+          avatarUrl: profile?.avatarUrl ?? null,
+          joinedAt: data.joinedAt,
+        } satisfies SchoolMember;
+      });
+    },
+  });
 
   const {
     items: adminLogs,
     loading: logsLoading,
+    busy: logsBusy,
+    error: logsError,
+    hasMore: moreLogs,
+    complete: logsComplete,
+    permissionDenied: logsPermissionDenied,
+    loadMore: loadMoreLogs,
     reload: reloadLogs,
-  } = useAsyncList<AdminLog>(async () => {
-    if (demoMode) return DEMO_ADMIN_LOGS as AdminLog[];
-    const qy = query(
-      collection(db, 'schools', school.id, 'adminLogs'),
-      orderBy('createdAt', 'desc'),
-      limit(20),
-    );
-    const snap = await getDocs(qy);
-    return snap.docs.map((d) => ({ id: d.id, ...(d.data() as any) }));
-  }, [db, school.id, demoMode]);
+  } = useAdminCollectionPage<AdminLog>({
+    schoolId: school.id,
+    uid: auth.user?.uid ?? '',
+    demoItems: demoMode ? (DEMO_ADMIN_LOGS as AdminLog[]) : undefined,
+    getCollection: () => collection(db, 'schools', school.id, 'adminLogs'),
+    buildConstraints: () => [orderBy('createdAt', 'desc'), orderBy(documentId(), 'desc')],
+    mapDocs: (docs: QueryDocumentSnapshot[]) =>
+      docs.map((d) => ({ id: d.id, ...(d.data() as any) }) as AdminLog),
+  });
 
   const {
     items: cafeterias,
@@ -950,51 +1029,141 @@ export function AdminDashboardScreen(props: any) {
     }
   };
 
-  const exportAnnouncementsCsv = async () => {
-    if (sortedAnnouncements.length === 0) {
+  const shareCsvFile = async (
+    filename: string,
+    csv: string,
+    token: AdminExportToken,
+    options?: { allowCacheOnlyAlert?: boolean },
+  ) => {
+    const session = exportSessionRef.current;
+    assertExportStillCurrent(session, token);
+    const file = new File(Paths.cache, filename);
+    file.write(csv);
+    assertExportStillCurrent(session, token);
+    const canShare = await isAvailableAsync();
+    assertExportStillCurrent(session, token);
+    if (!canShare) {
+      if (options?.allowCacheOnlyAlert !== false) {
+        Alert.alert('提示', '此裝置不支援分享功能，檔案已產生於快取目錄。');
+      }
+      return false;
+    }
+    await shareAsync(file.uri, {
+      mimeType: 'text/csv',
+      UTI: 'public.comma-separated-values-text',
+    });
+    assertExportStillCurrent(session, token);
+    return true;
+  };
+
+  const writeAdminLogsCsv = async (
+    rows: Array<AdminLog | AdminLogExportRow>,
+    scopeNote: string,
+    token: AdminExportToken,
+  ) => {
+    const csv = buildCsv(
+      ['id', 'action', 'details', 'actor', 'createdAt', 'exportScopeNote'],
+      rows.map((log) => [
+        log.id,
+        log.action,
+        log.details ?? '',
+        log.actorEmail || log.actorUid || '',
+        formatDateTime(log.createdAt),
+        scopeNote,
+      ]),
+    );
+    await shareCsvFile(
+      `admin-logs-${token.captured.schoolCode}-${Date.now()}.csv`,
+      csv,
+      token,
+    );
+  };
+
+  type LoadedLogsExportTicket = {
+    origin: AdminExportOrigin;
+    rows: AdminLog[];
+    hasMore: boolean;
+  };
+
+  type SnapshotExportTicket<T> = {
+    origin: AdminExportOrigin;
+    rows: T[];
+    partial: boolean;
+  };
+
+  const exportAnnouncementsCsv = async (
+    ticket?: SnapshotExportTicket<Announcement>,
+  ) => {
+    const session = exportSessionRef.current;
+    const origin = ticket?.origin ?? session.captureOrigin(school.code);
+    const rows = ticket?.rows ?? [...sortedAnnouncements];
+    const partial = ticket?.partial ?? moreAnnouncements;
+    if (!origin) {
+      Alert.alert('權限不足', '目前帳號沒有匯出公告的權限，或身分仍在確認中。');
+      return;
+    }
+    if (rows.length === 0) {
       Alert.alert('提示', '目前沒有可匯出的公告資料。');
+      return;
+    }
+    const token = session.begin('announcements', origin);
+    if (!token) {
+      // Stale Alert / identity drift: never attach old rows to a newer fence.
       return;
     }
     setExportingAnnouncements(true);
     try {
+      assertExportStillCurrent(session, token);
       const csv = buildCsv(
-        ['id', 'title', 'body', 'source', 'pinned', 'publishedAt'],
-        sortedAnnouncements.map((ann) => [
+        ['id', 'title', 'body', 'source', 'pinned', 'publishedAt', 'exportScope'],
+        rows.map((ann) => [
           ann.id,
           ann.title,
           ann.body,
           ann.source ?? '',
           ann.pinned ? '1' : '0',
           formatDateTime(ann.publishedAt),
+          partial ? 'loaded_filtered_partial' : 'loaded_filtered_complete',
         ]),
       );
-      const filename = `announcements-${school.code}-${Date.now()}.csv`;
-      const file = new File(Paths.cache, filename);
-      file.write(csv);
-      const canShare = await isAvailableAsync();
-      if (!canShare) {
-        Alert.alert('提示', '此裝置不支援分享功能，檔案已產生於快取目錄。');
-        return;
-      }
-      await shareAsync(file.uri, {
-        mimeType: 'text/csv',
-        UTI: 'public.comma-separated-values-text',
-      });
-      logAdminAction('export_announcements_csv', `count=${sortedAnnouncements.length}`);
+      await shareCsvFile(
+        `announcements-${token.captured.schoolCode}-${Date.now()}.csv`,
+        csv,
+        token,
+      );
+      assertExportStillCurrent(session, token);
+      logAdminAction(
+        'export_announcements_csv',
+        `count=${rows.length};scope=${partial ? 'loaded_partial' : 'loaded_complete'};school=${token.captured.schoolId}`,
+      );
     } catch (e: any) {
+      if (e?.name === 'AbortError' || !session.isCurrent(token)) return;
       Alert.alert('錯誤', e?.message ?? '匯出公告 CSV 失敗');
     } finally {
-      setExportingAnnouncements(false);
+      if (session.end(token)) setExportingAnnouncements(false);
     }
   };
 
-  const exportEventsCsv = async () => {
-    if (sortedEvents.length === 0) {
+  const exportEventsCsv = async (ticket?: SnapshotExportTicket<ClubEvent>) => {
+    const session = exportSessionRef.current;
+    const origin = ticket?.origin ?? session.captureOrigin(school.code);
+    const rows = ticket?.rows ?? [...sortedEvents];
+    const partial = ticket?.partial ?? moreEvents;
+    if (!origin) {
+      Alert.alert('權限不足', '目前帳號沒有匯出活動的權限，或身分仍在確認中。');
+      return;
+    }
+    if (rows.length === 0) {
       Alert.alert('提示', '目前沒有可匯出的活動資料。');
+      return;
+    }
+    const token = session.begin('events', origin);
+    if (!token) {
       return;
     }
     setExportingEvents(true);
     try {
+      assertExportStillCurrent(session, token);
       const csv = buildCsv(
         [
           'id',
@@ -1005,8 +1174,9 @@ export function AdminDashboardScreen(props: any) {
           'endsAt',
           'capacity',
           'registeredCount',
+          'exportScope',
         ],
-        sortedEvents.map((evt) => [
+        rows.map((evt) => [
           evt.id,
           evt.title,
           evt.description ?? '',
@@ -1015,63 +1185,191 @@ export function AdminDashboardScreen(props: any) {
           formatDateTime(evt.endsAt),
           evt.capacity ?? '',
           eventRegistrationCount(evt) ?? '待確認',
+          partial ? 'loaded_filtered_partial' : 'loaded_filtered_complete',
         ]),
       );
-      const filename = `events-${school.code}-${Date.now()}.csv`;
-      const file = new File(Paths.cache, filename);
-      file.write(csv);
-      const canShare = await isAvailableAsync();
-      if (!canShare) {
-        Alert.alert('提示', '此裝置不支援分享功能，檔案已產生於快取目錄。');
-        return;
-      }
-      await shareAsync(file.uri, {
-        mimeType: 'text/csv',
-        UTI: 'public.comma-separated-values-text',
-      });
-      logAdminAction('export_events_csv', `count=${sortedEvents.length}`);
+      await shareCsvFile(`events-${token.captured.schoolCode}-${Date.now()}.csv`, csv, token);
+      assertExportStillCurrent(session, token);
+      logAdminAction(
+        'export_events_csv',
+        `count=${rows.length};scope=${partial ? 'loaded_partial' : 'loaded_complete'};school=${token.captured.schoolId}`,
+      );
     } catch (e: any) {
+      if (e?.name === 'AbortError' || !session.isCurrent(token)) return;
       Alert.alert('錯誤', e?.message ?? '匯出活動 CSV 失敗');
     } finally {
-      setExportingEvents(false);
+      if (session.end(token)) setExportingEvents(false);
     }
   };
 
-  const exportAdminLogsCsv = async () => {
-    if (filteredAdminLogs.length === 0) {
+  const exportLoadedAdminLogsCsv = async (ticket: LoadedLogsExportTicket) => {
+    const session = exportSessionRef.current;
+    const token = session.begin('logs-loaded', ticket.origin);
+    if (!token) {
+      // Stale chooser callback after account/school/loading change.
+      return;
+    }
+    if (ticket.rows.length === 0) {
+      if (session.end(token)) setExportingLogs(false);
       Alert.alert('提示', '目前沒有可匯出的操作紀錄。');
       return;
     }
     setExportingLogs(true);
     try {
-      const csv = buildCsv(
-        ['id', 'action', 'details', 'actor', 'createdAt'],
-        filteredAdminLogs.map((log) => [
-          log.id,
-          log.action,
-          log.details ?? '',
-          log.actorEmail || log.actorUid || '',
-          formatDateTime(log.createdAt),
-        ]),
+      assertExportStillCurrent(session, token);
+      const scope = {
+        kind: 'loaded_filtered' as const,
+        count: ticket.rows.length,
+      };
+      const scopeNote = describeAdminLogExportScope(scope);
+      await writeAdminLogsCsv(ticket.rows, scopeNote, token);
+      assertExportStillCurrent(session, token);
+      logAdminAction(
+        'export_admin_logs_csv',
+        `count=${ticket.rows.length};scope=loaded_filtered;hasMore=${ticket.hasMore};school=${token.captured.schoolId}`,
       );
-      const filename = `admin-logs-${school.code}-${Date.now()}.csv`;
-      const file = new File(Paths.cache, filename);
-      file.write(csv);
-      const canShare = await isAvailableAsync();
-      if (!canShare) {
-        Alert.alert('提示', '此裝置不支援分享功能，檔案已產生於快取目錄。');
-        return;
-      }
-      await shareAsync(file.uri, {
-        mimeType: 'text/csv',
-        UTI: 'public.comma-separated-values-text',
-      });
-      logAdminAction('export_admin_logs_csv', `count=${filteredAdminLogs.length}`);
+      Alert.alert('匯出完成', scopeNote);
     } catch (e: any) {
+      if (e?.name === 'AbortError' || !session.isCurrent(token)) return;
       Alert.alert('錯誤', e?.message ?? '匯出操作紀錄 CSV 失敗');
     } finally {
-      setExportingLogs(false);
+      if (session.end(token)) setExportingLogs(false);
     }
+  };
+
+  const cancelAdminLogsFullExport = () => {
+    if (exportSessionRef.current.cancel('logs-full')) {
+      setExportingAllLogs(false);
+      Alert.alert('已取消', '完整操作紀錄匯出已取消；不會產生宣稱完整歷史的檔案。');
+    }
+  };
+
+  const exportAllAdminLogsCsv = async (origin: AdminExportOrigin) => {
+    if (demoMode) {
+      Alert.alert(
+        '提示',
+        '示範模式僅能匯出畫面上已載入的操作紀錄，不會向伺服器分頁擷取完整歷史。',
+      );
+      return;
+    }
+    const session = exportSessionRef.current;
+    const token = session.begin('logs-full', origin);
+    if (!token) {
+      return;
+    }
+    setExportingAllLogs(true);
+
+    try {
+      assertExportStillCurrent(session, token);
+      const result = await fetchAdminLogsPaged({
+        db,
+        schoolId: token.captured.schoolId,
+        maxRows: ADMIN_LOG_EXPORT_MAX_ROWS,
+        signal: token.controller.signal,
+      });
+      assertExportStillCurrent(session, token);
+      if (result.rows.length === 0) {
+        Alert.alert('提示', '目前沒有可匯出的操作紀錄。');
+        return;
+      }
+      const scope = {
+        kind: 'school_paged' as const,
+        fetched: result.rows.length,
+        complete: result.complete,
+        capped: result.capped,
+      };
+      const scopeNote = describeAdminLogExportScope(scope);
+      await writeAdminLogsCsv(result.rows, scopeNote, token);
+      assertExportStillCurrent(session, token);
+      logAdminAction(
+        'export_admin_logs_csv',
+        `count=${result.rows.length};scope=school_paged;complete=${result.complete};capped=${result.capped};school=${token.captured.schoolId}`,
+      );
+      Alert.alert('匯出完成', scopeNote);
+    } catch (e: any) {
+      if (e?.name === 'AbortError' || token.controller.signal.aborted || !session.isCurrent(token)) {
+        // Lifecycle invalidate/cancel: no stale success alert or share.
+        return;
+      }
+      const message = String(e?.message ?? '');
+      if (
+        /permission-denied|insufficient permissions/i.test(message) ||
+        e?.code === 'permission-denied'
+      ) {
+        Alert.alert(
+          '權限不足',
+          '讀取操作紀錄的權限已失效或被撤銷，請重新確認 Firebase 學校管理員身分後再試。',
+        );
+        return;
+      }
+      Alert.alert('錯誤', e?.message ?? '分頁匯出操作紀錄失敗');
+    } finally {
+      if (session.end(token)) setExportingAllLogs(false);
+    }
+  };
+
+  const promptAnnouncementExport = () => {
+    const origin = exportSessionRef.current.captureOrigin(school.code);
+    if (!origin) {
+      Alert.alert('權限不足', '目前帳號沒有匯出公告的權限，或身分仍在確認中。');
+      return;
+    }
+    const ticket: SnapshotExportTicket<Announcement> = {
+      origin,
+      rows: [...sortedAnnouncements],
+      partial: moreAnnouncements,
+    };
+    if (ticket.rows.length === 0) {
+      Alert.alert('提示', '目前沒有可匯出的公告資料。');
+      return;
+    }
+    void exportAnnouncementsCsv(ticket);
+  };
+
+  const promptEventExport = () => {
+    const origin = exportSessionRef.current.captureOrigin(school.code);
+    if (!origin) {
+      Alert.alert('權限不足', '目前帳號沒有匯出活動的權限，或身分仍在確認中。');
+      return;
+    }
+    const ticket: SnapshotExportTicket<ClubEvent> = {
+      origin,
+      rows: [...sortedEvents],
+      partial: moreEvents,
+    };
+    if (ticket.rows.length === 0) {
+      Alert.alert('提示', '目前沒有可匯出的活動資料。');
+      return;
+    }
+    void exportEventsCsv(ticket);
+  };
+
+  const promptAdminLogsExport = () => {
+    const origin = exportSessionRef.current.captureOrigin(school.code);
+    if (!origin) {
+      Alert.alert('權限不足', '目前帳號沒有匯出操作紀錄的權限，或身分仍在確認中。');
+      return;
+    }
+    const loadedTicket: LoadedLogsExportTicket = {
+      origin,
+      rows: [...filteredAdminLogs],
+      hasMore: moreLogs,
+    };
+    Alert.alert(
+      '匯出操作紀錄',
+      `${loadedScopeHint(adminLogs.length, moreLogs, '筆操作紀錄')}\n\n請選擇匯出範圍：`,
+      [
+        { text: '取消', style: 'cancel' },
+        {
+          text: `已載入且符合篩選（${loadedTicket.rows.length} 筆）`,
+          onPress: () => void exportLoadedAdminLogsCsv(loadedTicket),
+        },
+        {
+          text: `分頁匯出完整歷史（上限 ${ADMIN_LOG_EXPORT_MAX_ROWS} 筆）`,
+          onPress: () => void exportAllAdminLogsCsv(origin),
+        },
+      ],
+    );
   };
 
   const logAdminAction = async (action: string, details?: string) => {
@@ -1187,7 +1485,7 @@ export function AdminDashboardScreen(props: any) {
               <View style={{ flex: 1 }}>
                 <StatCard
                   icon="newspaper-outline"
-                  label="公告"
+                  label={moreAnnouncements ? '已載入公告' : '公告'}
                   value={stats.announcements}
                   color={theme.colors.accent}
                   onPress={() => setTab('announcements')}
@@ -1196,7 +1494,7 @@ export function AdminDashboardScreen(props: any) {
               <View style={{ flex: 1 }}>
                 <StatCard
                   icon="calendar-outline"
-                  label="活動"
+                  label={moreEvents ? '已載入活動' : '活動'}
                   value={stats.events}
                   color={theme.colors.success}
                   onPress={() => setTab('events')}
@@ -1205,7 +1503,7 @@ export function AdminDashboardScreen(props: any) {
               <View style={{ flex: 1 }}>
                 <StatCard
                   icon="people-outline"
-                  label="成員"
+                  label={moreMembers ? '已載入成員' : '成員'}
                   value={stats.members}
                   color="#FF9500"
                   onPress={() => setTab('members')}
@@ -1263,12 +1561,15 @@ export function AdminDashboardScreen(props: any) {
         )}
 
         {tab === 'announcements' && (
-          <Card title="公告管理" subtitle={`共 ${announcements.length} 則公告`}>
+          <Card
+            title="公告管理"
+            subtitle={loadedScopeHint(announcements.length, moreAnnouncements, '則公告')}
+          >
             <View style={{ marginBottom: 12 }}>
               <TextInput
                 value={announcementKeyword}
                 onChangeText={setAnnouncementKeyword}
-                placeholder="搜尋標題、內容、來源"
+                placeholder="搜尋已載入公告的標題、內容、來源"
                 placeholderTextColor={theme.colors.muted}
                 style={{
                   paddingVertical: 10,
@@ -1280,6 +1581,15 @@ export function AdminDashboardScreen(props: any) {
                   color: theme.colors.text,
                 }}
               />
+              {moreAnnouncements ? (
+                <Text style={{ color: theme.colors.muted, fontSize: 12, marginTop: 6 }}>
+                  搜尋只比對已載入列。若要找更早的公告，請先載入更多。
+                </Text>
+              ) : announcementsComplete ? (
+                <Text style={{ color: theme.colors.muted, fontSize: 12, marginTop: 6 }}>
+                  已載入全部可讀取公告；目前搜尋範圍即為全部。
+                </Text>
+              ) : null}
             </View>
             <View style={{ marginBottom: 12 }}>
               <SegmentedControl
@@ -1350,9 +1660,20 @@ export function AdminDashboardScreen(props: any) {
                 }
               />
               <Button
-                text={exportingAnnouncements ? '匯出中...' : '匯出目前篩選結果 CSV'}
-                disabled={exportingAnnouncements || sortedAnnouncements.length === 0}
-                onPress={exportAnnouncementsCsv}
+                text={
+                  exportingAnnouncements
+                    ? '匯出中...'
+                    : moreAnnouncements
+                      ? '匯出已載入且符合篩選的 CSV（尚有未載入）'
+                      : '匯出已載入且符合篩選的 CSV'
+                }
+                disabled={
+                  authSettling ||
+                  exportingAnnouncements ||
+                  sortedAnnouncements.length === 0 ||
+                  !canExportAdminData
+                }
+                onPress={promptAnnouncementExport}
               />
             </View>
             {annLoading ? (
@@ -1401,23 +1722,44 @@ export function AdminDashboardScreen(props: any) {
                   <Text style={{ color: theme.colors.muted }}>尚無公告</Text>
                 )}
                 {announcements.length > 0 && filteredAnnouncements.length === 0 && (
-                  <Text style={{ color: theme.colors.muted }}>找不到符合搜尋條件的公告</Text>
+                  <Text style={{ color: theme.colors.muted }}>
+                    在已載入的公告中找不到符合搜尋條件的項目
+                  </Text>
                 )}
               </View>
             )}
+            {annError && (
+              <Text style={{ color: theme.colors.danger }}>
+                {annPermissionDenied
+                  ? '讀取公告的權限已失效或被撤銷；已載入內容仍保留。'
+                  : '無法更新公告列表，已載入的內容仍保留。'}
+              </Text>
+            )}
+            {moreAnnouncements && (
+              <Button
+                text={annBusy ? '載入中...' : '載入更多公告'}
+                disabled={annBusy}
+                onPress={() => void loadMoreAnnouncements()}
+              />
+            )}
+            <Button
+              text={annBusy ? '更新中...' : '重新載入公告列表'}
+              disabled={annBusy}
+              onPress={() => void reloadAnn()}
+            />
           </Card>
         )}
 
         {tab === 'events' && (
           <Card
             title="活動管理"
-            subtitle={`已載入 ${events.length} 個活動；搜尋、排序與匯出僅涵蓋已載入項目。`}
+            subtitle={loadedScopeHint(events.length, moreEvents, '個活動')}
           >
             <View style={{ marginBottom: 12 }}>
               <TextInput
                 value={eventKeyword}
                 onChangeText={setEventKeyword}
-                placeholder="搜尋活動名稱、描述、地點"
+                placeholder="搜尋已載入活動的名稱、描述、地點"
                 placeholderTextColor={theme.colors.muted}
                 style={{
                   paddingVertical: 10,
@@ -1429,6 +1771,11 @@ export function AdminDashboardScreen(props: any) {
                   color: theme.colors.text,
                 }}
               />
+              {moreEvents ? (
+                <Text style={{ color: theme.colors.muted, fontSize: 12, marginTop: 6 }}>
+                  搜尋只比對已載入列。若要找其他活動，請先載入更多。
+                </Text>
+              ) : null}
             </View>
             <View style={{ marginBottom: 12 }}>
               <SegmentedControl
@@ -1458,9 +1805,17 @@ export function AdminDashboardScreen(props: any) {
                 }
               />
               <Button
-                text={exportingEvents ? '匯出中...' : '匯出目前篩選結果 CSV'}
-                disabled={exportingEvents || sortedEvents.length === 0}
-                onPress={exportEventsCsv}
+                text={
+                  exportingEvents
+                    ? '匯出中...'
+                    : moreEvents
+                      ? '匯出已載入且符合篩選的 CSV（尚有未載入）'
+                      : '匯出已載入且符合篩選的 CSV'
+                }
+                disabled={
+                  authSettling || exportingEvents || sortedEvents.length === 0 || !canExportAdminData
+                }
+                onPress={promptEventExport}
               />
             </View>
             {evtLoading ? (
@@ -1523,12 +1878,15 @@ export function AdminDashboardScreen(props: any) {
         )}
 
         {tab === 'members' && (
-          <Card title="成員管理" subtitle={`共 ${members.length} 位成員`}>
+          <Card
+            title="成員管理"
+            subtitle={loadedScopeHint(members.length, moreMembers, '位成員')}
+          >
             <View style={{ marginBottom: 12 }}>
               <TextInput
                 value={memberKeyword}
                 onChangeText={setMemberKeyword}
-                placeholder="搜尋姓名、系所、UID 或角色"
+                placeholder="搜尋已載入成員的姓名、系所、UID 或角色"
                 placeholderTextColor={theme.colors.muted}
                 style={{
                   paddingVertical: 10,
@@ -1540,11 +1898,20 @@ export function AdminDashboardScreen(props: any) {
                   color: theme.colors.text,
                 }}
               />
+              {moreMembers ? (
+                <Text style={{ color: theme.colors.muted, fontSize: 12, marginTop: 6 }}>
+                  沒有全校伺服器搜尋；目前只比對已載入列。請用「載入更多成員」擴大範圍。
+                </Text>
+              ) : membersComplete ? (
+                <Text style={{ color: theme.colors.muted, fontSize: 12, marginTop: 6 }}>
+                  已載入全部可讀取成員；目前搜尋範圍即為全部。
+                </Text>
+              ) : null}
             </View>
             <View style={{ marginBottom: 12, flexDirection: 'row', gap: 8 }}>
-              <Pill text={`管理員 ${stats.admins}`} kind="accent" />
-              <Pill text={`編輯者 ${members.filter((m) => m.role === 'editor').length}`} />
-              <Pill text={`一般 ${members.filter((m) => m.role === 'member').length}`} />
+              <Pill text={`已載入管理員 ${stats.admins}`} kind="accent" />
+              <Pill text={`已載入編輯者 ${members.filter((m) => m.role === 'editor').length}`} />
+              <Pill text={`已載入一般 ${members.filter((m) => m.role === 'member').length}`} />
             </View>
             {memLoading ? (
               <LoadingState title="成員" subtitle="載入中..." rows={3} />
@@ -1623,10 +1990,31 @@ export function AdminDashboardScreen(props: any) {
                   <Text style={{ color: theme.colors.muted }}>尚無成員</Text>
                 )}
                 {members.length > 0 && filteredMembers.length === 0 && (
-                  <Text style={{ color: theme.colors.muted }}>找不到符合搜尋條件的成員</Text>
+                  <Text style={{ color: theme.colors.muted }}>
+                    在已載入的成員中找不到符合搜尋條件的項目
+                  </Text>
                 )}
               </View>
             )}
+            {memError && (
+              <Text style={{ color: theme.colors.danger }}>
+                {memPermissionDenied
+                  ? '讀取成員的權限已失效或被撤銷；已載入內容仍保留。'
+                  : '無法更新成員列表，已載入的內容仍保留。'}
+              </Text>
+            )}
+            {moreMembers && (
+              <Button
+                text={memBusy ? '載入中...' : '載入更多成員'}
+                disabled={memBusy}
+                onPress={() => void loadMoreMembers()}
+              />
+            )}
+            <Button
+              text={memBusy ? '更新中...' : '重新載入成員列表'}
+              disabled={memBusy}
+              onPress={() => void reloadMem()}
+            />
           </Card>
         )}
 
@@ -1757,12 +2145,15 @@ export function AdminDashboardScreen(props: any) {
               <View
                 style={{ borderTopWidth: 1, borderTopColor: theme.colors.border, paddingTop: 12 }}
               >
-                <SectionTitle text="最近管理操作" />
+                <SectionTitle text="管理操作紀錄" />
+                <Text style={{ color: theme.colors.muted, fontSize: 12, marginTop: 6 }}>
+                  {loadedScopeHint(adminLogs.length, moreLogs, '筆操作紀錄')}
+                </Text>
                 <View style={{ marginTop: 10, gap: 8 }}>
                   <TextInput
                     value={logKeyword}
                     onChangeText={setLogKeyword}
-                    placeholder="搜尋操作、細節、操作者"
+                    placeholder="搜尋已載入紀錄的操作、細節、操作者"
                     placeholderTextColor={theme.colors.muted}
                     style={{
                       paddingVertical: 10,
@@ -1774,6 +2165,15 @@ export function AdminDashboardScreen(props: any) {
                       color: theme.colors.text,
                     }}
                   />
+                  {moreLogs ? (
+                    <Text style={{ color: theme.colors.muted, fontSize: 12 }}>
+                      畫面上的篩選只比對已載入列。完整歷史請用下方「分頁匯出」或先載入更多。
+                    </Text>
+                  ) : logsComplete ? (
+                    <Text style={{ color: theme.colors.muted, fontSize: 12 }}>
+                      已載入全部可讀取的操作紀錄；目前篩選範圍即為全部。
+                    </Text>
+                  ) : null}
                   <SegmentedControl
                     options={[
                       { key: 'all', label: '全部' },
@@ -1786,10 +2186,23 @@ export function AdminDashboardScreen(props: any) {
                     onChange={setLogFilter}
                   />
                   <Button
-                    text={exportingLogs ? '匯出中...' : '匯出目前篩選結果 CSV'}
-                    disabled={exportingLogs || filteredAdminLogs.length === 0}
-                    onPress={exportAdminLogsCsv}
+                    text={
+                      exportingLogs || exportingAllLogs
+                        ? '匯出中...'
+                        : '匯出操作紀錄 CSV（可選範圍）'
+                    }
+                    disabled={
+                      authSettling ||
+                      !canExportAdminData ||
+                      exportingLogs ||
+                      exportingAllLogs ||
+                      (filteredAdminLogs.length === 0 && adminLogs.length === 0 && !moreLogs)
+                    }
+                    onPress={promptAdminLogsExport}
                   />
+                  {exportingAllLogs ? (
+                    <Button text="取消完整匯出" kind="danger" onPress={cancelAdminLogsFullExport} />
+                  ) : null}
                 </View>
                 {logsLoading ? (
                   <Text style={{ color: theme.colors.muted, marginTop: 8 }}>載入中...</Text>
@@ -1824,11 +2237,30 @@ export function AdminDashboardScreen(props: any) {
                     ))}
                     {adminLogs.length > 0 && filteredAdminLogs.length === 0 && (
                       <Text style={{ color: theme.colors.muted }}>
-                        找不到符合篩選條件的操作紀錄
+                        在已載入的操作紀錄中找不到符合篩選條件的項目
                       </Text>
                     )}
                   </View>
                 )}
+                {logsError && (
+                  <Text style={{ color: theme.colors.danger, marginTop: 8 }}>
+                    {logsPermissionDenied
+                      ? '讀取操作紀錄的權限已失效或被撤銷；已載入內容仍保留。'
+                      : '無法更新操作紀錄，已載入的內容仍保留。'}
+                  </Text>
+                )}
+                {moreLogs && (
+                  <Button
+                    text={logsBusy ? '載入中...' : '載入更多操作紀錄'}
+                    disabled={logsBusy}
+                    onPress={() => void loadMoreLogs()}
+                  />
+                )}
+                <Button
+                  text={logsBusy ? '更新中...' : '重新載入操作紀錄'}
+                  disabled={logsBusy}
+                  onPress={() => void reloadLogs()}
+                />
               </View>
 
               <View
