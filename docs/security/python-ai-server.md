@@ -6,11 +6,11 @@
 
 ## Cloud／Docker 路徑
 
-- 直接約束：`requirements-cloud.in`（含 `python-dotenv>=1.2.2`、`fastapi>=0.162.0` 安全線）。
-- 可重現鎖：`requirements-cloud.txt`（編譯 pin＋PyPI hashes；約 23 套件）。
+- 直接約束：`requirements-cloud.in`（含 `python-dotenv>=1.2.2`、`fastapi>=0.162.0` 安全線；**`firebase-admin>=6.6.0`** 為 `REQUIRE_FIREBASE_AUTH` 執行期必要依賴，與本機 `requirements.txt` 對齊）。
+- 可重現鎖：`requirements-cloud.txt`（編譯 pin＋PyPI hashes；目前 **50** 套件／含 firebase-admin 與 grpc／google 傳遞依賴）。歷史報告中的 23 套件數為加 auth SDK 前的鎖定快照，不予改寫。
 - Docker：`pip install --require-hashes -r requirements-cloud.txt`；`uvicorn --host 0.0.0.0` 保留，並設 `AI_SERVER_HOST=0.0.0.0`。
-- 公開綁定契約：必須 `REQUIRE_FIREBASE_AUTH=true`（見 `render.yaml`）。無「關閉驗證仍可公開綁定」的 opt-out。
-- CI：`python-ai-server-security` 對 **cloud lock** 跑 `pip-audit`（任一 advisory／稽核錯誤即失敗）＋ focused tests。
+- 公開綁定契約：必須 `REQUIRE_FIREBASE_AUTH=true`（見 `render.yaml`）。無「關閉驗證仍可公開綁定」的 opt-out。合法 Bearer 路徑依賴映像內可 `import firebase_admin` 並呼叫實際 `auth.verify_id_token`（非 mock）。
+- CI：`python-ai-server-security` 對 **cloud lock** 跑 `pip-audit`（任一 advisory／稽核錯誤即失敗）＋ focused tests（含負向 401 與正向 SDK token 驗證；僅 mock Google X.509 憑證 HTTP 擷取邊界）。
   - 應用測試環境：僅 `pip install --require-hashes -r requirements-cloud.txt`。
   - `pip-audit==2.10.1` 裝在 `${RUNNER_TEMP}/audittoolvenv`（獨立 tool venv），讀 lock 檔、**不**寫入應用 venv。
   **此閘門≠完整 ML graph 稽核。**
