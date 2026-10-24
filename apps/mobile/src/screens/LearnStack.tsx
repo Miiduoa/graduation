@@ -32,7 +32,6 @@ import TeacherTodayScreen from './TeacherTodayScreen';
 import { AddCourseScreen } from './AddCourseScreen';
 import { AcademicScreen } from './AcademicScreen';
 import { CreditAuditStack } from './CreditAuditStack';
-import { UnifiedCalendarScreen } from './UnifiedCalendarScreen';
 import { AICourseAdvisorScreen } from './AICourseAdvisorScreen';
 import { CourseHubScreen } from './CourseHubScreen';
 import { CourseGradebookScreen } from './CourseGradebookScreen';
@@ -90,6 +89,7 @@ import MyOrdersScreen from './MyOrdersScreen';
 import { CampusAssistantScreen } from './CampusAssistantScreen';
 import PersonalTimetableScreen from './PersonalTimetableScreen';
 import PersonalImportScreen from './PersonalImportScreen';
+import PersonalCalendarScreen from './PersonalCalendarScreen';
 import CourseAppealsScreen from './CourseAppealsScreen';
 import ShopDockScreen from './ShopDockScreen';
 import { isDevelopmentDemoSession } from '../services/release';
@@ -555,8 +555,13 @@ export function LearnStack() {
       />
       <Stack.Screen
         name="Calendar"
-        component={UnifiedCalendarScreen}
-        options={{ title: '行事曆', headerShown: false }}
+        component={PersonalCalendarScreen}
+        options={{ title: '個人行事曆', headerShown: false }}
+      />
+      <Stack.Screen
+        name="PersonalCalendar"
+        component={PersonalCalendarScreen}
+        options={{ title: '個人行事曆', headerShown: false }}
       />
       <Stack.Screen name="PersonalImport" component={PersonalImportScreen} options={{ title: '匯入我的資料', headerShown: false }} />
       <Stack.Screen

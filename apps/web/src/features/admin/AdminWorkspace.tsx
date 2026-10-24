@@ -546,6 +546,7 @@ function SchoolDetail({
 
 function Audit({ context, suspended }: { context: string; suspended: boolean }) {
   const resource = useAdminResource('audit', context, parseAudit, !suspended);
+  const count = resource.value?.length ?? 0;
   return (
     <section className={styles.panel}>
       <div className={styles.stack}>
@@ -555,6 +556,11 @@ function Audit({ context, suspended }: { context: string; suspended: boolean }) 
             重新讀取紀錄
           </Button>
         </div>
+        <p className={styles.muted}>
+          此列表顯示平台管理 API 本次回傳的操作紀錄
+          {resource.value ? `（目前 ${count} 筆）` : ''}
+          。此端點未提供游標分頁；請勿將本頁視為已保證的完整歷史匯出。
+        </p>
         {resource.loading && <p role="status">正在讀取操作紀錄…</p>}
         {resource.error && (
           <p role="alert" className={styles.error}>

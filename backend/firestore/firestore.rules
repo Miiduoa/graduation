@@ -888,9 +888,15 @@ service cloud.firestore {
       match /members/{uid} {
         allow read: if isActiveGroupMember(groupId);
         allow create: if false;
+        // Client may not change role (including promoting to owner). Ownership transfer is server-only.
         allow update: if canManageGroup(groupId)
           && !request.resource.data.diff(resource.data).affectedKeys().hasAny(['uid', 'role', 'joinedAt']);
         allow delete: if canManageGroup(groupId);
+      }
+
+      // Private transfer receipts; Admin SDK / privileged callables only.
+      match /ownershipTransfers/{operationId} {
+        allow read, write: if false;
       }
 
       match /posts/{postId} {
