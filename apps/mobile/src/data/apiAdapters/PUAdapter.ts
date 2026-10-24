@@ -30,10 +30,8 @@ import {
   getAnyCachedAnnouncements,
   getAnyCachedCreditAudit,
   refreshCourses,
-  refreshGrades,
   refreshAnnouncements,
   seedCachedCourses,
-  seedCachedGrades as persistCachedGrades,
   seedCachedAnnouncements,
   seedCachedCreditAudit,
   getCachedTCCourses,
@@ -54,6 +52,7 @@ import {
 } from '../../services/puDataCache';
 import type { TCCourse, TCActivity, TCModule, TCAttendance } from '../../services/tronClassClient';
 import { getCloudFunctionUrl, getFirebaseAuthHeaders } from '../../services/cloudFunctions';
+import { getAuthInstance } from '../../firebase';
 
 function toValidDate(value: string | null | undefined): Date | null {
   if (!value) return null;
@@ -63,6 +62,70 @@ function toValidDate(value: string | null | undefined): Date | null {
 
 function isExpectedWebBackendSessionMiss(error: unknown): boolean {
   return error instanceof Error && error.message.includes('Web 版需要後端 TronClass session');
+}
+
+/** 靜宜百分制 → 四點制（僅供校務成績列本身的 gradePoint 欄位；學分頁不另推演換算）。 */
+export function puScoreToGradePoint(score: number): number {
+  if (score >= 90) return 4.0;
+  if (score >= 85) return 3.7;
+  if (score >= 80) return 3.3;
+  if (score >= 77) return 3.0;
+  if (score >= 73) return 2.7;
+  if (score >= 70) return 2.3;
+  if (score >= 67) return 2.0;
+  if (score >= 63) return 1.7;
+  if (score >= 60) return 1.0;
+  return 0.0;
+}
+
+type PuGradeItem = {
+  semester: string;
+  courseName: string;
+  courseNameEn?: string;
+  className?: string;
+  class?: string;
+  courseType?: string;
+  credits: number;
+  score: number | string;
+};
+
+/**
+ * 將校務成績列綁定 adapter 權威 schoolId 與來源語意。
+ * 不捏造 publishedAt；userId 沿用呼叫端傳入的學號／uid。
+ */
+export function mapPuOfficialGrades(
+  items: PuGradeItem[],
+  args: {
+    studentId: string;
+    schoolId: string;
+    gradeSource: 'school-official' | 'school-official-offline';
+    semester?: string;
+  },
+): Grade[] {
+  const rows = args.semester ? items.filter((g) => g.semester === args.semester) : items;
+  return rows.map((item, i): Grade => {
+    const rawScore = typeof item.score === 'string' ? item.score.trim() : item.score;
+    const parsedScore = typeof rawScore === 'number' ? rawScore
+      : typeof rawScore === 'string' && rawScore !== '' ? Number(rawScore) : NaN;
+    const score = Number.isFinite(parsedScore) ? parsedScore : undefined;
+    return {
+      id: `pu-grade-${item.semester}-${i}`,
+      courseId: `pu-crs-${item.semester}-${i}`,
+      courseName: item.courseName,
+      credits: item.credits,
+      grade: score,
+      gradePoint: score === undefined ? undefined : puScoreToGradePoint(score),
+      score,
+      letterGrade: score === undefined && typeof rawScore === 'string' ? rawScore : undefined,
+      semester: item.semester,
+      userId: args.studentId,
+      schoolId: args.schoolId,
+      gradeSource: args.gradeSource,
+      courseType: item.courseType || undefined,
+      courseClass: item.className || item.class || undefined,
+      courseNameEn: item.courseNameEn || undefined,
+    };
+  });
 }
 
 /**
@@ -639,48 +702,21 @@ export class PUAdapter extends BaseApiAdapter {
   // Grades
   // ---------------------------------------------------------------------------
 
-  private mapGrades(
-    data: import('../../services/puDirectScraper').PUGradeResult,
-    studentId: string,
-    semester?: string,
-  ): Grade[] {
-    const grades = semester ? data.grades.filter((g) => g.semester === semester) : data.grades;
-    return grades.map((item, i): Grade => {
-      const score =
-        typeof item.score === 'number' ? item.score : parseFloat(String(item.score)) || 0;
-      return {
-        id: `pu-grade-${item.semester}-${i}`,
-        courseId: `pu-crs-${item.semester}-${i}`,
-        courseName: item.courseName,
-        credits: item.credits,
-        grade: score,
-        gradePoint: this.scoreToGradePoint(score),
-        score,
-        semester: item.semester,
-        userId: studentId || this.studentId || '',
-        courseType: item.courseType || undefined,
-        courseClass: item.className || undefined,
-        courseNameEn: item.courseNameEn || undefined,
-      };
-    });
-  }
-
   async listGrades(studentId: string, semester?: string): Promise<Grade[]> {
-    console.log(`[PUAdapter] listGrades called — mode=${this.useDirectMode ? "direct" : "backend"}, sessionId=${!!this.sessionId}`);
-    // ── 1. 快取優先（所有模式都先讀快取） ──
-    const cached = await getCachedGrades();
-    if (cached && cached.grades.length > 0) {
-      console.log(`[PUAdapter] listGrades → PU cache hit: ${cached.grades.length} grades`);
-      return this.mapGrades(cached, studentId, semester);
+    // 原生 cookie jar 和舊快取都沒有帳號歸屬證明。成績只走伺服器驗證 owner 的 session。
+    const requester = getAuthInstance().currentUser;
+    const sessionId = this.sessionId;
+    if (!requester || requester.uid !== studentId || !sessionId) {
+      throw new Error('請重新連線學校帳號後再讀取成績。');
     }
-    console.log(`[PUAdapter] listGrades → PU cache miss`);
+    const isCurrent = () =>
+      getAuthInstance().currentUser === requester && this.sessionId === sessionId;
 
-    // ── 2. 快取過期或空 → 嘗試遠端抓取 ──
+    let remoteFailed = false;
+    let remoteEmptySuccess = false;
+
     try {
-      if (this.useDirectMode && this.directSession) {
-        const fresh = await refreshGrades(this.directSession);
-        if (fresh && fresh.grades.length > 0) return this.mapGrades(fresh, studentId, semester);
-      } else if (!this.useDirectMode) {
+      if (!this.useDirectMode) {
         type GradeResponse = {
           success: boolean;
           grades: Array<{
@@ -705,45 +741,37 @@ export class PUAdapter extends BaseApiAdapter {
         };
 
         const data = await this.fetchData<GradeResponse>("grades", { semester });
-        if (data?.success && data.grades?.length > 0) {
-          // 同步寫入快取
-          await persistCachedGrades({
-            grades: data.grades.map((g) => ({
-              semester: g.semester,
-              courseName: g.courseName,
-              courseNameEn: g.courseNameEn ?? "",
-              className: g.class ?? "",
-              courseType: g.courseType ?? "",
-              credits: g.credits,
-              score: typeof g.score === "number" ? g.score : parseFloat(String(g.score)) || 0,
-            })),
-            allSemesters: data.allSemesters ?? [],
-            summary: data.summary ?? {},
-          }).catch(() => {});
-
-          return data.grades.map((item, i): Grade => {
-            const score = typeof item.score === "number" ? item.score : parseFloat(String(item.score)) || 0;
-            return {
-              id: `pu-grade-${item.semester}-${i}`,
-              courseId: `pu-crs-${item.semester}-${i}`,
-              courseName: item.courseName,
-              credits: item.credits,
-              grade: score,
-              gradePoint: this.scoreToGradePoint(score),
-              score,
-              semester: item.semester,
-              userId: studentId || this.studentId || "",
-            };
-          });
+        if (!isCurrent()) throw new Error('帳號已變更，請重新讀取成績。');
+        if (data?.success && Array.isArray(data.grades)) {
+          if (data.grades?.length > 0) {
+            return mapPuOfficialGrades(data.grades, {
+              studentId: requester.uid,
+              schoolId: this.schoolId,
+              gradeSource: 'school-official',
+              semester,
+            });
+          }
+          remoteEmptySuccess = true;
+        } else {
+          remoteFailed = true;
         }
+      } else {
+        // 直連模式但無 session：無法確認空結果，視為讀取失敗
+        remoteFailed = true;
       }
     } catch (err) {
       console.warn("[PUAdapter] listGrades remote fetch failed:", err);
+      remoteFailed = true;
     }
 
-    // ── 3. 遠端失敗 → 讀任何快取（離線模式） ──
-    const stale = await getAnyCachedGrades();
-    if (stale && stale.grades.length > 0) return this.mapGrades(stale, studentId, semester);
+    if (!isCurrent()) throw new Error('帳號已變更，請重新讀取成績。');
+    if (remoteEmptySuccess) {
+      return [];
+    }
+
+    if (remoteFailed) {
+      throw new Error('無法讀取校務成績，請稍後再試。');
+    }
 
     return [];
   }
@@ -1154,17 +1182,7 @@ export class PUAdapter extends BaseApiAdapter {
   // ---------------------------------------------------------------------------
 
   private scoreToGradePoint(score: number): number {
-    // 靜宜大學成績對照表（四分制）
-    if (score >= 90) return 4.0;
-    if (score >= 85) return 3.7;
-    if (score >= 80) return 3.3;
-    if (score >= 77) return 3.0;
-    if (score >= 73) return 2.7;
-    if (score >= 70) return 2.3;
-    if (score >= 67) return 2.0;
-    if (score >= 63) return 1.7;
-    if (score >= 60) return 1.0;
-    return 0.0;
+    return puScoreToGradePoint(score);
   }
 
   async getGPA(

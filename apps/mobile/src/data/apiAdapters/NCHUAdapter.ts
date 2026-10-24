@@ -1,6 +1,55 @@
 import { BaseApiAdapter } from './BaseAdapter';
 import type { AdapterCapabilities, AuthCredentials } from './types';
 import type { Announcement, ClubEvent, MenuItem, Poi, Course, Grade } from '../types';
+import { getAuthInstance } from '../../firebase';
+
+type NchuGradeItem = {
+  courseId: string;
+  courseName: string;
+  credits: number;
+  grade: number | string;
+  gradePoint?: number;
+  semester: string;
+};
+
+/**
+ * 將中興校務成績列綁定 adapter 權威 schoolId 與來源語意。
+ * 不捏造 publishedAt；userId 沿用呼叫端傳入的 studentId。
+ */
+export function mapNchuOfficialGrades(
+  items: NchuGradeItem[],
+  args: {
+    studentId: string;
+    schoolId: string;
+    gradeSource?: 'school-official' | 'school-official-offline';
+  },
+): Grade[] {
+  const gradeSource = args.gradeSource ?? 'school-official';
+  return items.map((item): Grade => {
+    const rawGrade = typeof item.grade === 'string' ? item.grade.trim() : item.grade;
+    const parsedGrade =
+      typeof rawGrade === 'number'
+        ? rawGrade
+        : typeof rawGrade === 'string' && rawGrade !== ''
+          ? Number(rawGrade)
+          : NaN;
+    const numericGrade = Number.isFinite(parsedGrade) ? parsedGrade : undefined;
+    return {
+      id: `nchu-grade-${item.courseId}-${item.semester}`,
+      courseId: item.courseId,
+      courseName: item.courseName,
+      credits: item.credits,
+      grade: numericGrade,
+      letterGrade:
+        numericGrade === undefined && typeof rawGrade === 'string' ? rawGrade : undefined,
+      gradePoint: item.gradePoint,
+      semester: item.semester,
+      userId: args.studentId,
+      schoolId: args.schoolId,
+      gradeSource,
+    };
+  });
+}
 
 export class NCHUAdapter extends BaseApiAdapter {
   readonly schoolId = 'tw-nchu';
@@ -248,6 +297,16 @@ export class NCHUAdapter extends BaseApiAdapter {
   }
 
   async listGrades(studentId: string, semester?: string): Promise<Grade[]> {
+    const requester = getAuthInstance().currentUser;
+    const credentials = this.credentials;
+    if (
+      !requester ||
+      requester.uid !== studentId ||
+      !credentials?.accessToken ||
+      credentials.userId !== studentId
+    ) {
+      throw new Error('請重新連線學校帳號後再讀取成績。');
+    }
     const params = new URLSearchParams();
     params.append('studentId', studentId);
     if (semester) {
@@ -255,33 +314,23 @@ export class NCHUAdapter extends BaseApiAdapter {
     }
 
     const response = await this.request<{
-      grades: Array<{
-        courseId: string;
-        courseName: string;
-        credits: number;
-        grade: number | string;
-        gradePoint: number;
-        semester: string;
-      }>;
+      grades: NchuGradeItem[];
     }>(`/api/grades?${params.toString()}`);
 
-    if (!response.success || !response.data) {
+    if (getAuthInstance().currentUser !== requester || this.credentials !== credentials) {
+      throw new Error('帳號已變更，請重新讀取成績。');
+    }
+    if (!response.success || !Array.isArray(response.data?.grades)) {
       console.warn('[NCHUAdapter] Failed to fetch grades:', response.error);
-      return [];
+      throw new Error(response.error?.message || '無法讀取校務成績，請稍後再試。');
     }
 
-    return response.data.grades.map(
-      (item): Grade => ({
-        id: `nchu-grade-${item.courseId}-${item.semester}`,
-        courseId: item.courseId,
-        courseName: item.courseName,
-        credits: item.credits,
-        grade: typeof item.grade === 'number' ? item.grade : parseFloat(item.grade) || 0,
-        gradePoint: item.gradePoint,
-        semester: item.semester,
-        userId: studentId,
-      }),
-    );
+    // 成功但無列：空陣列（與讀取失敗區分）
+    return mapNchuOfficialGrades(response.data.grades, {
+      studentId,
+      schoolId: this.schoolId,
+      gradeSource: 'school-official',
+    });
   }
 
   async listMenu(): Promise<MenuItem[]> {
