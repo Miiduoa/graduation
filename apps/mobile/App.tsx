@@ -769,7 +769,12 @@ function SchoolNavigation() {
   authRoleRef.current = auth.profile?.role;
   authTeachingRef.current = isTeachingRole(auth.profile?.role);
 
-  usePushNotifications(rootNavigationRef, auth.user?.uid, auth.profile?.role);
+  usePushNotifications(
+    rootNavigationRef,
+    auth.user?.uid,
+    auth.profile?.role,
+    auth.profile?.schoolId,
+  );
   useAIAmbientAwareness();
   useAIBrainLifecycle();
   useProactiveAIReporter();

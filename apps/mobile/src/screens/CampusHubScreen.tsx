@@ -341,7 +341,8 @@ function CampusDirectory({
                   gap: theme.space.xs,
                   paddingHorizontal: theme.space.xs,
                   paddingVertical: theme.space.md,
-                  backgroundColor: pressed ? theme.colors.surfaceMuted : theme.colors.surface,
+                  borderRadius: theme.radius.md,
+                  backgroundColor: pressed ? theme.colors.surfaceInteractive : theme.colors.surface,
                 })}
               >
                 <AppActionIcon

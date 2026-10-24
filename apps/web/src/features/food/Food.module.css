@@ -10,6 +10,85 @@
   gap: 12px;
   justify-content: space-between;
 }
+.barActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  justify-content: flex-end;
+}
+.accountStack {
+  display: grid;
+  gap: 16px;
+  min-width: 0;
+}
+.orderListHeader {
+  margin-bottom: 16px;
+}
+.orderListHeader h2 {
+  margin: 0;
+}
+@media (max-width: 600px) {
+  .accountBar {
+    gap: 6px;
+  }
+  .accountBar button {
+    padding: 10px 8px;
+    font-size: 14px;
+  }
+}
+.serviceNav {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 16px;
+}
+.serviceLink {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  padding: 8px 2px;
+  color: var(--text);
+  font-size: 14px;
+  font-weight: 600;
+  text-decoration: none;
+  text-underline-offset: 4px;
+}
+.serviceLink:hover {
+  color: var(--brand);
+  text-decoration: underline;
+}
+.serviceLink:focus-visible {
+  outline: 3px solid var(--focus-ring);
+  outline-offset: 3px;
+  border-radius: 4px;
+}
+.realmContext {
+  margin: 0;
+  color: var(--muted);
+  font-size: 14px;
+  line-height: 1.6;
+}
+.shiftDetails {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  padding: 0 18px 18px;
+}
+.shiftDetails > summary {
+  display: grid;
+  gap: 4px;
+  cursor: pointer;
+  min-height: 52px;
+  padding: 14px 0;
+  list-style: none;
+}
+.shiftDetails > summary::-webkit-details-marker {
+  display: none;
+}
+.shiftSummaryTitle {
+  font-weight: 650;
+  font-size: 16px;
+}
 .panel {
   border: 1px solid var(--border);
   background: var(--surface);
@@ -41,8 +120,63 @@
   display: grid;
   gap: 12px;
 }
+.row[data-selected] {
+  background: color-mix(in srgb, var(--brand) 6%, transparent);
+  margin: 0 -12px;
+  padding-left: 12px;
+  padding-right: 12px;
+  border-radius: var(--radius-sm);
+}
 .row p {
   margin: 0;
+}
+.orderGroup {
+  display: grid;
+  gap: 0;
+  min-width: 0;
+}
+.orderGroupTitle {
+  margin: 8px 0 0;
+  padding-top: 8px;
+  font-size: 15px;
+  font-weight: 650;
+  color: var(--text);
+}
+.orderGroupTitle span {
+  margin-left: 8px;
+  color: var(--muted);
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+}
+.orderSummary {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+}
+.orderSummary h3 {
+  margin: 0;
+}
+.nextStep {
+  color: var(--text);
+  font-weight: 600;
+  line-height: 1.6;
+}
+.nextStepBanner {
+  display: grid;
+  gap: 6px;
+  padding: 16px 18px;
+  border: 1px solid color-mix(in srgb, var(--brand) 35%, var(--border));
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--brand) 8%, var(--surface));
+}
+.nextStepBanner p {
+  margin: 0;
+  line-height: 1.7;
+}
+.pickupBlock {
+  display: grid;
+  gap: 12px;
+  justify-items: start;
 }
 .options {
   display: grid;

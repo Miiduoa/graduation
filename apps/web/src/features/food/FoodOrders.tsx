@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Image from 'next/image';
 import QRCode from 'qrcode';
 import type {
@@ -25,6 +25,7 @@ import {
   useFoodRead,
   type FoodDraftCache,
 } from './foodState';
+import { foodCustomerNextStep, isFoodOrderInProgress } from './foodOrderGuidance';
 import styles from './Food.module.css';
 
 export function FoodOrders({
@@ -47,6 +48,8 @@ export function FoodOrders({
     `food:orders:${tenantId}:selected`,
     initialOrder,
   );
+  const listHeadingRef = useRef<HTMLHeadingElement>(null);
+  const returnFocusRef = useRef<HTMLElement | null>(null);
   const load = useCallback(
     () =>
       client.listOrders(tenantId, {
@@ -57,6 +60,39 @@ export function FoodOrders({
     [client, tenantId, cursor, state],
   );
   const orders = useFoodRead(load, { pollMs: FOOD_POLL_MS });
+  const grouped = useMemo(() => {
+    const rows = orders.data?.orders ?? [];
+    return {
+      active: rows.filter((order) => isFoodOrderInProgress(order.state)),
+      done: rows.filter((order) => !isFoodOrderInProgress(order.state)),
+    };
+  }, [orders.data]);
+  const detailOpen = !!selected;
+
+  function openOrder(orderId: string, trigger?: HTMLElement | null) {
+    returnFocusRef.current = trigger ?? null;
+    setSelected(orderId);
+    window.history.replaceState(
+      null,
+      '',
+      `/food?tenant=${encodeURIComponent(tenantId)}&order=${encodeURIComponent(orderId)}`,
+    );
+  }
+
+  function closeOrder() {
+    setSelected('');
+    window.history.replaceState(null, '', `/food?tenant=${encodeURIComponent(tenantId)}`);
+    queueMicrotask(() => {
+      const target = returnFocusRef.current;
+      returnFocusRef.current = null;
+      if (target && document.contains(target)) {
+        target.focus();
+        return;
+      }
+      listHeadingRef.current?.focus();
+    });
+  }
+
   return (
     <div className={styles.stack}>
       {selected && (
@@ -68,13 +104,22 @@ export function FoodOrders({
           tenantId={tenantId}
           orderId={selected}
           onChange={orders.reload}
-          onBack={() => setSelected('')}
+          onBack={closeOrder}
         />
       )}
-      <section className={styles.panel} aria-label="訂單紀錄">
-        <div className={styles.bar}>
-          <h2>訂單紀錄</h2>
-          <Button disabled={orders.loading} onClick={() => void orders.reload()}>
+      <section
+        className={styles.panel}
+        aria-label="訂單紀錄"
+        hidden={detailOpen}
+        inert={detailOpen || undefined}
+      >
+        <div className={`${styles.bar} ${styles.orderListHeader}`}>
+          <div>
+            <h2 ref={listHeadingRef} tabIndex={-1}>
+              訂單紀錄
+            </h2>
+          </div>
+          <Button variant="ghost" disabled={orders.loading} onClick={() => void orders.reload()}>
             更新訂單紀錄
           </Button>
         </div>
@@ -95,28 +140,32 @@ export function FoodOrders({
         {orders.data && (
           <>
             {!orders.data.orders.length && <p>這個條件下沒有訂單。</p>}
-            {orders.data.orders.map((order) => (
-              <div className={styles.row} key={order.id}>
-                <h3>{order.locationName}</h3>
-                <p>
-                  {foodStateLabels[order.state]} · {order.itemCount} 份 · {foodMoney(order.total)}
-                </p>
-                <p>預計取餐 {foodTime(order.requestedPickupAt)}</p>
-                <Button
-                  aria-label={`查看訂單：${order.id}`}
-                  onClick={() => {
-                    setSelected(order.id);
-                    window.history.replaceState(
-                      null,
-                      '',
-                      `/food?tenant=${encodeURIComponent(tenantId)}&order=${encodeURIComponent(order.id)}`,
-                    );
-                  }}
-                >
-                  查看訂單
-                </Button>
+            {grouped.active.length > 0 && (
+              <div className={styles.orderGroup}>
+                <h3 className={styles.orderGroupTitle}>進行中</h3>
+                {grouped.active.map((order) => (
+                  <OrderSummaryRow
+                    key={order.id}
+                    order={order}
+                    selected={selected === order.id}
+                    onOpen={(trigger) => openOrder(order.id, trigger)}
+                  />
+                ))}
               </div>
-            ))}
+            )}
+            {grouped.done.length > 0 && (
+              <div className={styles.orderGroup}>
+                <h3 className={styles.orderGroupTitle}>已結束</h3>
+                {grouped.done.map((order) => (
+                  <OrderSummaryRow
+                    key={order.id}
+                    order={order}
+                    selected={selected === order.id}
+                    onOpen={(trigger) => openOrder(order.id, trigger)}
+                  />
+                ))}
+              </div>
+            )}
             <div className={styles.bar}>
               {cursor && <Button onClick={() => setCursor(undefined)}>回到第一頁訂單</Button>}
               {orders.data.nextCursor && (
@@ -126,6 +175,50 @@ export function FoodOrders({
           </>
         )}
       </section>
+    </div>
+  );
+}
+
+function OrderSummaryRow({
+  order,
+  selected,
+  onOpen,
+}: {
+  order: {
+    id: string;
+    locationName: string;
+    state: string;
+    itemCount: number;
+    total: { amountMinor: number; currency: string };
+    requestedPickupAt: string;
+    allowedActions: readonly string[];
+  };
+  selected: boolean;
+  onOpen(trigger: HTMLElement | null): void;
+}) {
+  const next = foodCustomerNextStep({
+    state: order.state,
+    allowedActions: order.allowedActions,
+    mode: 'summary',
+  });
+  return (
+    <div className={styles.row} data-selected={selected || undefined}>
+      <div className={styles.orderSummary}>
+        <h3>{order.locationName}</h3>
+        <p>
+          {foodStateLabels[order.state] ?? order.state} · {order.itemCount} 份 ·{' '}
+          {foodMoney(order.total)}
+        </p>
+        <p>預計取餐 {foodTime(order.requestedPickupAt)}</p>
+        <p className={styles.nextStep}>{next}</p>
+      </div>
+      <Button
+        aria-label={`查看訂單：${order.id}`}
+        aria-current={selected ? 'true' : undefined}
+        onClick={(event) => onOpen(event.currentTarget)}
+      >
+        查看訂單
+      </Button>
     </div>
   );
 }
@@ -148,6 +241,7 @@ export function FoodOrderDetail({
   onBack(): void;
 }) {
   const scope = `food:order:${tenantId}:${orderId}`;
+  const panelRef = useRef<HTMLElement>(null);
   const load = useCallback(() => client.getOrder(tenantId, orderId), [client, tenantId, orderId]);
   const order = useFoodRead(load, {
     pollMs: FOOD_POLL_MS,
@@ -182,6 +276,9 @@ export function FoodOrderDetail({
       if (intent.action === 'pay') setCheckout(result as NuniFoodPaymentSessionProjection);
     },
   });
+  useEffect(() => {
+    panelRef.current?.focus();
+  }, [orderId]);
   const locked = !order.data || task.busy || !!task.pending || task.storageBlocked;
   const receipt = order.data;
   const payment = checkout ?? receipt?.paymentSession;
@@ -191,29 +288,51 @@ export function FoodOrderDetail({
     receipt.pickup.allowedActions.includes('present-one-time-token') &&
     !!token &&
     Date.parse(token.expiresAt) > now;
+  const nextStep = receipt
+    ? foodCustomerNextStep({
+        state: receipt.state,
+        allowedActions: receipt.allowedActions,
+        pickup: receipt.pickup,
+        payment: payment ?? null,
+        now,
+        mode: 'detail',
+      })
+    : '';
+  const inProgress = receipt ? isFoodOrderInProgress(receipt.state) : false;
   return (
-    <section className={styles.panel} aria-label="訂單詳情">
+    <section ref={panelRef} className={styles.panel} aria-label="訂單詳情" tabIndex={-1}>
       <div className={styles.bar}>
-        <h2>這次的訂單</h2>
-        <Button disabled={task.busy} onClick={onBack}>
-          收起訂單詳情
-        </Button>
-        <Button
-          disabled={task.busy || order.loading}
-          onClick={() => {
-            setShowToken(false);
-            setCheckout(null);
-            void order.reload();
-          }}
-        >
-          更新這筆訂單
-        </Button>
+        <div>
+          {receipt ? (
+            <p className={styles.eyebrow}>{inProgress ? '進行中的訂單' : '已結束的訂單'}</p>
+          ) : null}
+          <h2>這次的訂單</h2>
+        </div>
+        <div className={styles.barActions}>
+          <Button disabled={task.busy} onClick={onBack}>
+            返回訂單列表
+          </Button>
+          <Button
+            disabled={task.busy || order.loading}
+            onClick={() => {
+              setShowToken(false);
+              setCheckout(null);
+              void order.reload();
+            }}
+          >
+            更新這筆訂單
+          </Button>
+        </div>
       </div>
       {order.loading && <p role="status">正在確認訂單…</p>}
       {order.error && <p role="alert">{order.error}</p>}
       <FoodMutationStatus task={task} />
       {receipt && (
         <div className={styles.stack}>
+          <div className={styles.nextStepBanner} role="status">
+            <p className={styles.eyebrow}>下一步</p>
+            <p>{nextStep}</p>
+          </div>
           <div>
             <h3>
               {receipt.locationName} · {foodStateLabels[receipt.state]}
@@ -241,18 +360,24 @@ export function FoodOrderDetail({
             ))}
             <p className={styles.amount}>應付 {foodMoney(receipt.total)}</p>
           </div>
-          {receipt.state === 'payment-pending' && (
-            <p>付款尚未完成。請到櫃檯向店員確認付款方式；店員收到款項後才會更新訂單。</p>
-          )}
-          {receipt.allowedActions.includes('create-payment-session') && (
-            <PaymentActions
-              client={client}
-              tenantId={tenantId}
-              locationId={receipt.locationId}
-              task={task}
-              disabled={locked}
-            />
-          )}
+          {receipt.state === 'payment-pending' &&
+            !(
+              payment &&
+              (payment.progress === 'authorized-awaiting-settlement' || payment.progress === 'paid')
+            ) && <p>付款尚未完成。請到櫃檯向店員確認付款方式；店員收到款項後才會更新訂單。</p>}
+          {receipt.allowedActions.includes('create-payment-session') &&
+            !(
+              payment &&
+              (payment.progress === 'authorized-awaiting-settlement' || payment.progress === 'paid')
+            ) && (
+              <PaymentActions
+                client={client}
+                tenantId={tenantId}
+                locationId={receipt.locationId}
+                task={task}
+                disabled={locked}
+              />
+            )}
           {payment && (
             <div>
               <p>
@@ -298,8 +423,12 @@ export function FoodOrderDetail({
             </p>
           )}
           {canShow && (
-            <div>
-              <Button disabled={locked} onClick={() => setShowToken((value) => !value)}>
+            <div className={styles.pickupBlock}>
+              <Button
+                variant="primary"
+                disabled={locked}
+                onClick={() => setShowToken((value) => !value)}
+              >
                 {showToken ? '隱藏取餐憑證' : '出示取餐憑證'}
               </Button>
               {showToken && (

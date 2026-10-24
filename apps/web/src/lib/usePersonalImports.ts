@@ -9,6 +9,7 @@ import {
   PERSONAL_IMPORT_CHANGE,
   personalImportsStorageKey,
   readPersonalImports,
+  readPersonalImportSyncState,
   type PersonalImportScope,
 } from './personalImports';
 
@@ -37,6 +38,7 @@ export function usePersonalImports(scope: PersonalImportScope, enabled = true) {
     key: string;
     records: PersonalImportRecord[];
     error: string;
+    syncEnabled: boolean;
   } | null>(null);
   const owner = scope.owner;
   const schoolId = scope.schoolId;
@@ -44,12 +46,15 @@ export function usePersonalImports(scope: PersonalImportScope, enabled = true) {
     if (!enabled) return;
     const refresh = () => {
       try {
-        setState({ key, records: readPersonalImports({ owner, schoolId }), error: '' });
+        const records = readPersonalImports({ owner, schoolId });
+        const syncEnabled = readPersonalImportSyncState({ owner, schoolId }).enabled;
+        setState({ key, records, error: '', syncEnabled });
       } catch (error) {
         setState({
           key,
           records: [],
           error: error instanceof Error ? error.message : '無法讀取匯入紀錄。',
+          syncEnabled: false,
         });
       }
     };
@@ -62,5 +67,12 @@ export function usePersonalImports(scope: PersonalImportScope, enabled = true) {
     };
   }, [key, enabled, owner, schoolId]);
   const visible = enabled && state?.key === key ? state : null;
-  return { records: visible?.records ?? [], error: visible?.error ?? '', loading: !visible };
+  return {
+    records: visible?.records ?? [],
+    error: visible?.error ?? '',
+    loading: !visible,
+    syncEnabled: visible?.syncEnabled ?? false,
+    /** True only after a successful read for this scope; load failures must not look empty. */
+    ready: !!visible && !visible.error,
+  };
 }
