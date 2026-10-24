@@ -40,7 +40,7 @@ jobs:
         run: >-
           "$RUNNER_TEMP/transit-tools/node_modules/.bin/tsc"
           --noEmit --strict --target es2022 --lib es2022,dom --module commonjs --resolveJsonModule --esModuleInterop --moduleResolution node
-          apps/web/src/lib/transit.ts apps/web/src/lib/transit-server.ts apps/web/src/lib/transit-replay.ts
+          apps/web/src/lib/transit.ts apps/web/src/lib/transit-direct.ts apps/web/src/lib/transit-server.ts apps/web/src/lib/transit-replay.ts
       - name: Transit API and data contract tests
         env:
           NODE_PATH: ${{ runner.temp }}/transit-tools/node_modules
