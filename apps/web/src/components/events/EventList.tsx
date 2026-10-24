@@ -177,7 +177,7 @@ export function EventList({
       {view.skipped.length > 0 ? (
         <p className={styles.incomplete} role="status">
           有 {view.skipped.length}{' '}
-          筆活動資料不完整，已略過顯示。這不代表目前沒有活動，只是部分資料無法安全呈現。
+          筆活動資料不完整，已略過。
         </p>
       ) : null}
 
@@ -192,7 +192,7 @@ export function EventList({
       ) : filtered.length === 0 ? (
         <section className={styles.status}>
           <h2>已載入的活動中沒有符合的結果</h2>
-          <p>搜尋只會過濾目前已載入的活動，不會向伺服器查詢尚未載入的內容。</p>
+          <p>搜尋範圍為已載入的活動，可載入更多後再找。</p>
         </section>
       ) : (
         <div className={styles.list} aria-label="校園活動列表">
