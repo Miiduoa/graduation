@@ -10,6 +10,7 @@ import {
   type TransitArrival, type TransitCity, type TransitFailure, type TransitQuery, type TransitResult, type TransitRoute, type TransitStop,
 } from '@/lib/transit';
 import { CampusBusBoard } from './CampusBusBoard';
+import { DirectBusSearch } from './DirectBusSearch';
 import css from './transit.module.css';
 
 const SAVED_KEY = 'campus-one:transit-stops:v1';
@@ -352,6 +353,7 @@ function TransitExplorerContent({ schoolId, schoolName, legacy }: { schoolId: st
   }
   const board = hasCampusNext(schoolId) && mode === 'campus';
   return <div className={`${css.explorer}${board ? ` ${css.campusFirst}` : ''}`}>
+    {board && <DirectBusSearch schoolId={schoolId} />}
     {board && <CampusBusBoard schoolId={schoolId} schoolName={schoolName} />}
     {!board && <header className={css.intro}><div><p className={css.eyebrow}>公車與交通</p><h2>找到上車站牌</h2><p>先找上車地點，再確認路線和方向。沒有開啟定位，也能查詢。</p></div></header>}
     <div className={css.modeBar} role="group" aria-label="站牌查詢方式">
