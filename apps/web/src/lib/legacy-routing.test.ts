@@ -14,6 +14,7 @@ import { LOGIN_COOKIE, sealCookie } from './nuni/server';
 import {
   ACCOUNT_ENTRY_PATH,
   LEGACY_ENDPOINT_PATHS,
+  LEGACY_LIVE_HTML_PATHS,
   LEGACY_LOGIN_CALLBACK_PATHS,
   LEGACY_ORIGIN,
   legacyEnabled,
@@ -73,20 +74,28 @@ function redirectLocation(response: Response): string | null {
   return header ? new URL(header, 'https://nuni.tw').pathname : null;
 }
 
-function shouldRedirectHtml(path: string): boolean {
-  if (LEGACY_LOGIN_CALLBACK_PATHS.includes(path)) return false;
-  if (path === '/auth/find-school' || path === '/auth/platform' || path === '/auth/product-qa') {
-    return true;
-  }
+function shouldForwardLiveHtml(path: string): boolean {
   return (
+    path === '/auth/platform' ||
+    path === '/privacy/deletion-status' ||
     path.startsWith('/auth/platform/class-workspace/') ||
+    path === '/auth/platform/ops' ||
+    path.startsWith('/auth/platform/ops/') ||
+    path === '/auth/platform/school-review' ||
+    path.startsWith('/auth/platform/school-review/')
+  );
+}
+
+function shouldRedirectHtml(path: string): boolean {
+  if (LEGACY_LOGIN_CALLBACK_PATHS.includes(path) || shouldForwardLiveHtml(path)) return false;
+  return (
+    path === '/auth/find-school' ||
+    path === '/auth/product-qa' ||
     [
       '/auth/platform/account',
       '/auth/platform/class-workspace-affiliation-review',
       '/auth/platform/membership',
-      '/auth/platform/ops',
       '/auth/platform/school-apply',
-      '/auth/platform/school-review',
     ].includes(path)
   );
 }
@@ -210,7 +219,7 @@ describe('pinned legacy HTML screens are not forwarded', () => {
     for (const route of pinnedHtmlPaths()) {
       const path = examplePath(route);
       const response = await responseFor(path);
-      if (LEGACY_LOGIN_CALLBACK_PATHS.includes(route)) {
+      if (LEGACY_LOGIN_CALLBACK_PATHS.includes(route) || shouldForwardLiveHtml(route) || shouldForwardLiveHtml(path)) {
         expectMatchedRewrite(response, path);
         expect(redirectLocation(response)).toBeNull();
         continue;
@@ -230,14 +239,24 @@ describe('pinned legacy HTML screens are not forwarded', () => {
     expect(redirectLocation(response)).toBeNull();
   });
 
-  it.each(['/auth/find-school', '/auth/platform', '/auth/platform/class-workspace/join'])(
-    'sends old auth shell %s to the new account page',
-    async (path) => {
-      const response = await responseFor(path);
-      expect(getRewrittenUrl(response)).toBeNull();
-      expect(redirectLocation(response)).toBe(ACCOUNT_ENTRY_PATH);
-    },
-  );
+  it('sends the old find-school page to the new account page', async () => {
+    const response = await responseFor('/auth/find-school');
+    expect(getRewrittenUrl(response)).toBeNull();
+    expect(redirectLocation(response)).toBe(ACCOUNT_ENTRY_PATH);
+  });
+
+  it.each([
+    '/auth/platform',
+    '/auth/platform/class-workspace/join',
+    '/auth/platform/class-workspace/cw_11111111-1111-4111-8111-111111111111',
+    '/auth/platform/ops',
+    '/auth/platform/school-review',
+    '/privacy/deletion-status',
+  ])('keeps live old screen %s on the loopback app', async (path) => {
+    const response = await responseFor(path);
+    expectMatchedRewrite(response, path);
+    expect(redirectLocation(response)).toBeNull();
+  });
 });
 
 describe('pinned legacy endpoints stay on the allowlist', () => {
@@ -265,17 +284,17 @@ describe('pinned legacy endpoints stay on the allowlist', () => {
     }
   });
 
-  it('keeps optional catch-all API roots, not the HTML shells with similar names', async () => {
+  it('keeps class-workspace HTML and the plural API root as separate loopback paths', async () => {
     const response = await responseFor('/auth/platform/class-workspaces');
     expectMatchedRewrite(response, '/auth/platform/class-workspaces');
     const html = await responseFor('/auth/platform/class-workspace/join');
-    expect(getRewrittenUrl(html)).toBeNull();
-    expect(redirectLocation(html)).toBe(ACCOUNT_ENTRY_PATH);
+    expectMatchedRewrite(html, '/auth/platform/class-workspace/join');
   });
 
-  it('lists only endpoint and callback sources in the fallback rewrite table', () => {
+  it('lists live HTML, callbacks and endpoints in the fallback rewrite table', () => {
     const sources = new Set(legacyRewrites(true).fallback.map((rule) => rule.source));
     for (const path of LEGACY_LOGIN_CALLBACK_PATHS) expect(sources.has(path)).toBe(true);
+    for (const path of LEGACY_LIVE_HTML_PATHS) expect(sources.has(path)).toBe(true);
     for (const path of LEGACY_ENDPOINT_PATHS) expect(sources.has(path)).toBe(true);
     expect(sources.has('/auth/account')).toBe(false);
     expect(sources.has('/auth/find-school')).toBe(false);

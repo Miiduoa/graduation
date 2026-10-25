@@ -63,13 +63,20 @@
   gap: 4px;
 }
 
-.links a {
+.links a,
+.links button {
   display: inline-flex;
   align-items: center;
   min-height: 44px;
+  padding: 0;
+  border: 0;
+  background: none;
   color: var(--muted);
+  font: inherit;
+  text-align: left;
   text-decoration: underline;
   text-underline-offset: 4px;
+  cursor: pointer;
 }
 
 .form {

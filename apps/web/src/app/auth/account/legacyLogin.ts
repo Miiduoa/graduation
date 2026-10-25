@@ -4,7 +4,6 @@ export const ACCOUNT_LOGIN_TRANSACTION_KEY = 'campus.account-login.transaction';
 export const ACCOUNT_EXPIRES_AT_KEY = 'campus.account.expires-at';
 export const AUTH_SOURCE_KEY = 'campus.auth.source';
 
-export const FIND_SCHOOL_HREF = '/auth/find-school';
 export const CLASS_WORKSPACE_HREF = '/auth/platform/class-workspace/join';
 
 export const SCHOOL_PROVIDER_LABELS: Record<string, string> = {
@@ -22,72 +21,84 @@ export const DISCOVER_REASON_COPY: Record<string, string> = {
 
 const ALLOWED_RETURN_PATHS = new Set([
   '/',
-  '/staff',
-  '/staff/food',
-  '/academics',
-  '/life',
-  '/identity',
-  '/leave',
-  '/food',
-  '/registration',
-  '/attendance',
-  '/learning',
-  '/notifications',
-  '/calendar',
-  '/dormitory',
-  '/career',
-  '/degree-audit',
-  '/social',
-  '/iot',
-  '/ai-agent',
-  '/search',
-  '/merchant/apply',
-  '/merchant/workspace',
-  '/employee-leave',
   '/account-deletion',
+  '/admin',
+  '/ai-assistant',
+  '/announcements',
+  '/appeals',
   '/auth/platform',
-  '/auth/platform/account',
-  '/auth/platform/class-workspace/new',
   '/auth/platform/class-workspace/join',
-  '/auth/platform/class-workspace-affiliation-review',
-  '/auth/platform/school-apply',
-  '/auth/platform/school-review',
+  '/auth/platform/class-workspace/new',
   '/auth/platform/ops',
-  '/school/admin',
+  '/auth/platform/school-review',
+  '/bus',
+  '/bus/registered',
+  '/cafeteria',
+  '/calendar',
+  '/career',
+  '/classroom',
+  '/classroom/account',
+  '/classroom/grades',
+  '/clubs',
+  '/community',
+  '/credit-planner',
+  '/dms',
+  '/food',
+  '/friends',
+  '/grades',
+  '/groups',
+  '/import',
+  '/join',
+  '/library',
+  '/life',
+  '/lms-admin',
+  '/lost-found',
+  '/map',
+  '/me',
+  '/merchant',
+  '/messages',
+  '/orders',
+  '/privacy',
+  '/privacy/deletion-status',
+  '/profile',
+  '/search',
+  '/settings',
+  '/shops',
+  '/social',
+  '/support',
+  '/teacher',
+  '/terms',
+  '/timetable',
+  '/today-v2',
 ]);
 
 const ALLOWED_RETURN_PREFIXES = [
-  '/staff',
-  '/academics',
-  '/life',
-  '/identity',
-  '/leave',
-  '/food',
-  '/registration',
-  '/attendance',
-  '/learning',
-  '/notifications',
-  '/calendar',
-  '/dormitory',
-  '/career',
-  '/degree-audit',
-  '/social',
-  '/iot',
-  '/ai-agent',
-  '/search',
-  '/merchant',
-  '/employee-leave',
-  '/explore',
-  '/auth/platform',
-  '/school',
+  '/admin/students',
+  '/announcements',
+  '/auth/platform/class-workspace',
+  '/auth/platform/ops',
+  '/auth/platform/school-review',
+  '/cafeteria',
+  '/classroom/course',
+  '/community',
+  '/course',
+  '/dms',
+  '/groups',
+  '/lms-admin',
+  '/lost-found',
+  '/teacher/course',
+  '/timetable/s',
 ];
 
-const LEAVE_QUERY = new Set(['requestId', 'sectionId', 'localDate', 'courseId']);
-const FOOD_DESK_QUERY = new Set(['desk']);
-const SCHOOL_ADMIN_QUERY = new Set(['proxy', 'tenantId']);
-const FOOD_DESKS = new Set(['incoming', 'kitchen', 'menu', 'hours']);
-const SAFE_QUERY_VALUE = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,99}$/u;
-const LOOKS_LIKE_SCHEME = /^[A-Za-z][A-Za-z0-9+.-]*:/u;
+const BLOCKED_RETURN_PATHS = new Set([
+  '/login',
+  '/admin/login',
+  '/classroom/login',
+  '/auth/account',
+  '/sso-callback',
+  '/sso/acs',
+]);
+
 const CLASS_WORKSPACE_PATH = /^\/auth\/platform\/class-workspace\/cw_[0-9a-fA-F-]{36}$/u;
 const MICROSOFT_HOSTS = new Set([
   'login.microsoftonline.com',
@@ -129,20 +140,6 @@ function trimPath(path: string): string {
   return trimmed === '' ? '/' : trimmed;
 }
 
-function allowedQueryKeys(path: string): Set<string> {
-  const normalized = trimPath(path);
-  if (normalized === '/leave') return LEAVE_QUERY;
-  if (normalized === '/staff/food') return FOOD_DESK_QUERY;
-  if (normalized === '/school/admin') return SCHOOL_ADMIN_QUERY;
-  return new Set();
-}
-
-function allowedQueryValue(path: string, key: string, value: string): boolean {
-  if (!SAFE_QUERY_VALUE.test(value) || LOOKS_LIKE_SCHEME.test(value)) return false;
-  if (trimPath(path) === '/staff/food' && key === 'desk') return FOOD_DESKS.has(value);
-  return true;
-}
-
 export function sanitizeReturnPath(value: string | null | undefined): string {
   const raw = (value ?? '').trim();
   if (!raw.startsWith('/') || raw.startsWith('//') || raw.includes('\\')) return '/';
@@ -161,29 +158,15 @@ export function sanitizeReturnPath(value: string | null | undefined): string {
   ) {
     return '/';
   }
-  const path = trimPath(parsed.pathname) === '/me' ? '/identity' : parsed.pathname;
-  const normalized = trimPath(path);
+  const normalized = trimPath(parsed.pathname);
+  if (BLOCKED_RETURN_PATHS.has(normalized)) return '/';
   if (CLASS_WORKSPACE_PATH.test(normalized) && parsed.search === '') return normalized;
   const allowed =
     normalized === '/' ||
     ALLOWED_RETURN_PATHS.has(normalized) ||
     ALLOWED_RETURN_PREFIXES.some((prefix) => normalized === prefix || normalized.startsWith(`${prefix}/`));
   if (!allowed) return '/';
-  const keys = allowedQueryKeys(normalized);
-  if (keys.size === 0) return normalized;
-  const kept = new URLSearchParams();
-  const seen = new Set<string>();
-  for (const [key, item] of parsed.searchParams.entries()) {
-    if (!keys.has(key)) continue;
-    if (seen.has(key)) {
-      kept.delete(key);
-      continue;
-    }
-    seen.add(key);
-    if (allowedQueryValue(normalized, key, item)) kept.set(key, item);
-  }
-  const query = kept.toString();
-  return query ? `${normalized}?${query}` : normalized;
+  return normalized;
 }
 
 export function readReturnPath(search: string | { get(name: string): string | null }): string {
@@ -318,6 +301,79 @@ export async function discoverSchool(email: string): Promise<DiscoveredSchool> {
     );
   }
   return body as DiscoveredSchool;
+}
+
+function asSchool(value: unknown): DiscoveredSchool | null {
+  if (!value || typeof value !== 'object') return null;
+  const row = value as Record<string, unknown>;
+  const tenantId = typeof row.tenantId === 'string' ? row.tenantId : undefined;
+  const displayName = typeof row.displayName === 'string' ? row.displayName : undefined;
+  const providerKinds = Array.isArray(row.providerKinds)
+    ? row.providerKinds.filter((kind): kind is string => typeof kind === 'string')
+    : undefined;
+  const reason = typeof row.reason === 'string' ? row.reason : undefined;
+  if (row.available === false) return { available: false, tenantId, displayName, providerKinds, reason };
+  if (tenantId) return { available: true, tenantId, displayName, providerKinds, reason };
+  return null;
+}
+
+export async function searchSchoolsByName(query: string): Promise<DiscoveredSchool[]> {
+  let response: Response;
+  try {
+    response = await fetch('/auth/find-school/search', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ query }),
+      cache: 'no-store',
+    });
+  } catch {
+    throw new AccountLoginError('目前連不上校園服務，請稍後再試。', 0, 'NETWORK_UNAVAILABLE');
+  }
+  const body = await readJson(response);
+  if (!response.ok) {
+    throw new AccountLoginError(
+      typeof body.error === 'string' ? body.error : '目前無法確認學校，請稍後再試。',
+      response.status,
+      'SCHOOL_SEARCH_FAILED',
+    );
+  }
+  const rows = Array.isArray(body.schools)
+    ? body.schools
+    : Array.isArray(body.results)
+      ? body.results
+      : Array.isArray(body.items)
+        ? body.items
+        : [body];
+  return rows.map(asSchool).filter((school): school is DiscoveredSchool => school !== null);
+}
+
+export function looksLikeSchoolEmail(value: string): boolean {
+  return value.includes('@');
+}
+
+function sessionLooksSignedIn(body: Record<string, unknown>): boolean {
+  if (body.authenticated === false || body.pendingLogout === true) return false;
+  if (body.authenticated === true) return true;
+  return typeof body.platformAccountId === 'string' && body.platformAccountId.length > 0;
+}
+
+async function readSessionAt(path: string): Promise<boolean> {
+  const response = await fetch(path, { cache: 'no-store', credentials: 'same-origin' });
+  if (!response.ok) return false;
+  return sessionLooksSignedIn(await readJson(response));
+}
+
+export async function readExistingSession(): Promise<boolean> {
+  try {
+    if (await readSessionAt('/api/nuni/session')) return true;
+  } catch {
+    // School-issued sessions still live on the old /auth/session endpoint.
+  }
+  try {
+    return await readSessionAt('/auth/session');
+  } catch {
+    return false;
+  }
 }
 
 function microsoftAuthorizeUrl(issuer: string): string {

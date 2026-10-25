@@ -5,14 +5,16 @@ import { useSearchParams } from 'next/navigation';
 import {
   CLASS_WORKSPACE_HREF,
   DISCOVER_REASON_COPY,
-  FIND_SCHOOL_HREF,
   PasskeyCeremonyCancelled,
   SCHOOL_PROVIDER_LABELS,
   discoverSchool,
   listPlatformProviderKinds,
   loginErrorMessage,
+  looksLikeSchoolEmail,
   passkeyAvailable,
+  readExistingSession,
   readReturnPath,
+  searchSchoolsByName,
   signInWithPasskey,
   startGoogleContinue,
   startSchoolProvider,
@@ -56,15 +58,17 @@ function GoogleMark() {
 export function AccountEntry() {
   const search = useSearchParams();
   const returnPath = readReturnPath(search);
-  const [email, setEmail] = useState('');
+  const [gate, setGate] = useState<'checking' | 'unsigned'>('checking');
+  const [query, setQuery] = useState('');
   const [school, setSchool] = useState<DiscoveredSchool | null>(null);
+  const [matches, setMatches] = useState<DiscoveredSchool[]>([]);
   const [busy, setBusy] = useState<Busy>(null);
   const [error, setError] = useState<string | null>(null);
-  const [askingEmail, setAskingEmail] = useState(false);
+  const [asking, setAsking] = useState<'campus' | 'find' | null>(null);
   const [googleReady, setGoogleReady] = useState(false);
   const [passkeys, setPasskeys] = useState<boolean | null>(null);
   const generation = useRef(0);
-  const emailField = useRef<HTMLInputElement>(null);
+  const queryField = useRef<HTMLInputElement>(null);
   const providers = usableSchoolProviders(school?.providerKinds);
 
   useEffect(
@@ -73,6 +77,19 @@ export function AccountEntry() {
     },
     [],
   );
+
+  useEffect(() => {
+    const ignore = new AbortController();
+    void readExistingSession().then((signedIn) => {
+      if (ignore.signal.aborted) return;
+      if (signedIn) {
+        window.location.replace(returnPath);
+        return;
+      }
+      setGate('unsigned');
+    });
+    return () => ignore.abort();
+  }, [returnPath]);
 
   useEffect(() => {
     setPasskeys(passkeyAvailable());
@@ -91,15 +108,15 @@ export function AccountEntry() {
   }, []);
 
   useEffect(() => {
-    if (askingEmail) emailField.current?.focus();
-  }, [askingEmail]);
+    if (asking) queryField.current?.focus();
+  }, [asking]);
 
   async function beginCampusLogin() {
     if (school?.available && school.tenantId && providers[0]) {
       await beginSchoolProvider(providers[0]);
       return;
     }
-    setAskingEmail(true);
+    setAsking('campus');
     setError(null);
   }
 
@@ -109,11 +126,26 @@ export function AccountEntry() {
     setBusy('discover');
     setError(null);
     setSchool(null);
+    setMatches([]);
     try {
-      const found = await discoverSchool(email);
-      if (request !== generation.current) return;
-      setSchool(found);
-      if (!found.available) setError(DISCOVER_REASON_COPY[found.reason ?? 'unknown-school'] ?? DISCOVER_REASON_COPY['unknown-school']);
+      const trimmed = query.trim();
+      if (asking === 'campus' || looksLikeSchoolEmail(trimmed)) {
+        const found = await discoverSchool(trimmed);
+        if (request !== generation.current) return;
+        setSchool(found);
+        if (!found.available) {
+          setError(DISCOVER_REASON_COPY[found.reason ?? 'unknown-school'] ?? DISCOVER_REASON_COPY['unknown-school']);
+        }
+      } else {
+        const found = await searchSchoolsByName(trimmed);
+        if (request !== generation.current) return;
+        const available = found.filter((item) => item.available && item.tenantId);
+        if (available.length === 1) setSchool(available[0]);
+        else if (available.length > 1) setMatches(available);
+        else {
+          setError(DISCOVER_REASON_COPY[found[0]?.reason ?? 'unknown-school'] ?? DISCOVER_REASON_COPY['unknown-school']);
+        }
+      }
     } catch (failure) {
       if (request !== generation.current) return;
       setSchool(null);
@@ -159,6 +191,19 @@ export function AccountEntry() {
     }
   }
 
+  if (gate === 'checking') {
+    return (
+      <div className={styles.page}>
+        <main className={styles.main}>
+          <h1 className={styles.title}>登入</h1>
+          <p className={styles.note} role="status">
+            正在確認登入…
+          </p>
+        </main>
+      </div>
+    );
+  }
+
   return (
     <div className={styles.page}>
       <main className={styles.main}>
@@ -185,28 +230,34 @@ export function AccountEntry() {
             </button>
           ) : null}
           <div className={styles.links}>
-            <a className={styles.find} href={FIND_SCHOOL_HREF}>
+            <button type="button" className={styles.find} onClick={() => {
+              setAsking('find');
+              setError(null);
+            }}>
               尋找學校
-            </a>
+            </button>
             <a href={CLASS_WORKSPACE_HREF}>課班／教學</a>
           </div>
-          {askingEmail ? (
+          {asking ? (
             <form className={styles.form} onSubmit={(event) => void findSchool(event)}>
-              <label htmlFor="school-email">學校配發的信箱</label>
+              <label htmlFor="school-query">
+                {asking === 'find' ? '學校配發的信箱或校名' : '學校配發的信箱'}
+              </label>
               <input
-                ref={emailField}
-                id="school-email"
-                name="email"
-                type="email"
-                inputMode="email"
-                autoComplete="email"
-                placeholder="name@school.edu.tw"
-                value={email}
+                ref={queryField}
+                id="school-query"
+                name="query"
+                type={asking === 'find' ? 'text' : 'email'}
+                inputMode={asking === 'find' ? 'text' : 'email'}
+                autoComplete={asking === 'find' ? 'off' : 'email'}
+                placeholder={asking === 'find' ? 'name@school.edu.tw 或學校名稱' : 'name@school.edu.tw'}
+                value={query}
                 disabled={busy !== null && busy !== 'discover'}
                 onChange={(event) => {
                   generation.current += 1;
-                  setEmail(event.target.value);
+                  setQuery(event.target.value);
                   setSchool(null);
+                  setMatches([]);
                   setError(null);
                   setBusy((current) => (current === 'discover' ? null : current));
                 }}
@@ -217,7 +268,7 @@ export function AccountEntry() {
                   {error}
                 </p>
               ) : null}
-              <button className={`btn primary ${styles.primary}`} disabled={busy !== null || email.trim().length === 0}>
+              <button className={`btn primary ${styles.primary}`} disabled={busy !== null || query.trim().length === 0}>
                 {busy === 'discover' ? '正在找學校…' : '找到我的學校'}
               </button>
             </form>
@@ -225,6 +276,25 @@ export function AccountEntry() {
             <p role="alert" className={styles.error}>
               {error}
             </p>
+          ) : null}
+          {matches.length > 1 ? (
+            <div className={styles.providers}>
+              {matches.map((item) => (
+                <button
+                  key={item.tenantId}
+                  type="button"
+                  className={`btn ${styles.provider}`}
+                  disabled={busy !== null}
+                  onClick={() => {
+                    setSchool(item);
+                    setMatches([]);
+                    setError(null);
+                  }}
+                >
+                  {item.displayName ?? item.tenantId}
+                </button>
+              ))}
+            </div>
           ) : null}
           {school?.available ? (
             <div className={styles.providers}>

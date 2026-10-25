@@ -20,6 +20,12 @@ beforeEach(() => {
   sessionStorage.clear();
   fetchMock.mockImplementation(async (input) => {
     const url = String(input);
+    if (url === '/api/nuni/session' || url === '/auth/session') {
+      return new Response(JSON.stringify({ authenticated: false }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    }
     if (url === '/auth/platform/providers') {
       return new Response(JSON.stringify({ kinds: ['google-consumer'] }), {
         status: 200,
@@ -32,11 +38,12 @@ beforeEach(() => {
 
 it('shows the unsigned entry without the old preview card or long copy', async () => {
   render(<AccountPage />);
+  expect(await screen.findByRole('button', { name: '登入校園帳號' })).toBeTruthy();
   expect(screen.getByRole('heading', { name: '登入' })).toBeTruthy();
   expect(screen.getByText('請用學校核發的帳號登入。')).toBeTruthy();
-  expect(screen.getByRole('button', { name: '登入校園帳號' })).toBeTruthy();
   expect(await screen.findByRole('button', { name: '用 Google 繼續' })).toBeTruthy();
-  expect(screen.getByRole('link', { name: '尋找學校' }).getAttribute('href')).toBe('/auth/find-school');
+  expect(screen.getByRole('button', { name: '尋找學校' })).toBeTruthy();
+  expect(screen.queryByRole('link', { name: '尋找學校' })).toBeNull();
   expect(screen.getByRole('link', { name: '課班／教學' }).getAttribute('href')).toBe(
     '/auth/platform/class-workspace/join',
   );
@@ -60,6 +67,12 @@ it('keeps Google continue on the existing platform token start', async () => {
   vi.stubGlobal('location', { ...window.location, assign, origin: 'https://nuni.tw' });
   fetchMock.mockImplementation(async (input) => {
     const url = String(input);
+    if (url === '/api/nuni/session' || url === '/auth/session') {
+      return new Response(JSON.stringify({ authenticated: false }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    }
     if (url === '/auth/platform/providers') {
       return new Response(JSON.stringify({ kinds: ['google-consumer'] }), {
         status: 200,
@@ -98,6 +111,12 @@ it('keeps Google continue on the existing platform token start', async () => {
 it('opens the school-email form from 登入校園帳號 and looks up the school on the existing API', async () => {
   fetchMock.mockImplementation(async (input) => {
     const url = String(input);
+    if (url === '/api/nuni/session' || url === '/auth/session') {
+      return new Response(JSON.stringify({ authenticated: false }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    }
     if (url === '/auth/platform/providers') {
       return new Response(JSON.stringify({ kinds: [] }), {
         status: 200,
@@ -118,6 +137,7 @@ it('opens the school-email form from 登入校園帳號 and looks up the school 
     return new Response('{}', { status: 404 });
   });
   render(<AccountPage />);
+  expect(await screen.findByRole('button', { name: '登入校園帳號' })).toBeTruthy();
   expect(screen.queryByRole('button', { name: '用 Google 繼續' })).toBeNull();
   fireEvent.click(screen.getByRole('button', { name: '登入校園帳號' }));
   fireEvent.change(screen.getByLabelText('學校配發的信箱'), { target: { value: 'student@pu.edu.tw' } });
@@ -126,3 +146,82 @@ it('opens the school-email form from 登入校園帳號 and looks up the school 
   expect(screen.getByRole('button', { name: '使用學校 Google 帳號' })).toBeTruthy();
   expect(fetchMock.mock.calls.some(([url]) => String(url).endsWith('/v1/auth/account/registration-start'))).toBe(true);
 });
+
+it('opens an in-page school lookup from 尋找學校 and searches by school name', async () => {
+  fetchMock.mockImplementation(async (input) => {
+    const url = String(input);
+    if (url === '/api/nuni/session' || url === '/auth/session') {
+      return new Response(JSON.stringify({ authenticated: false }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    }
+    if (url === '/auth/platform/providers') {
+      return new Response(JSON.stringify({ kinds: [] }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    }
+    if (url === '/auth/find-school/search') {
+      return new Response(
+        JSON.stringify({
+          schools: [{ available: true, tenantId: 'tenant-1', displayName: '靜宜大學', providerKinds: ['google-workspace'] }],
+        }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } },
+      );
+    }
+    return new Response('{}', { status: 404 });
+  });
+  render(<AccountPage />);
+  fireEvent.click(await screen.findByRole('button', { name: '尋找學校' }));
+  fireEvent.change(screen.getByLabelText('學校配發的信箱或校名'), { target: { value: '靜宜大學' } });
+  fireEvent.click(screen.getByRole('button', { name: '找到我的學校' }));
+  expect(await screen.findByRole('heading', { name: '靜宜大學' })).toBeTruthy();
+  expect(fetchMock.mock.calls.some(([url, init]) => url === '/auth/find-school/search' && init?.method === 'POST')).toBe(
+    true,
+  );
+});
+
+it('sends a signed-in visitor to the allowed return path without showing the form', async () => {
+  const replace = vi.fn();
+  vi.stubGlobal('location', { ...window.location, replace, origin: 'https://nuni.tw' });
+  search.current = new URLSearchParams('returnUrl=/life');
+  fetchMock.mockImplementation(async (input) => {
+    const url = String(input);
+    if (url === '/api/nuni/session') {
+      return new Response(JSON.stringify({ authenticated: true, platformAccountId: 'pa_1' }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    }
+    return new Response(JSON.stringify({ authenticated: false }), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    });
+  });
+  render(<AccountPage />);
+  await waitFor(() => expect(replace).toHaveBeenCalledWith('/life'));
+  expect(screen.queryByRole('button', { name: '登入校園帳號' })).toBeNull();
+});
+
+it('drops a missing old return path when taking a signed-in visitor home', async () => {
+  const replace = vi.fn();
+  vi.stubGlobal('location', { ...window.location, replace, origin: 'https://nuni.tw' });
+  search.current = new URLSearchParams('returnUrl=/staff');
+  fetchMock.mockImplementation(async (input) => {
+    const url = String(input);
+    if (url === '/api/nuni/session') {
+      return new Response(JSON.stringify({ authenticated: true, platformAccountId: 'pa_1' }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    }
+    return new Response(JSON.stringify({ authenticated: false }), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    });
+  });
+  render(<AccountPage />);
+  await waitFor(() => expect(replace).toHaveBeenCalledWith('/'));
+});
+

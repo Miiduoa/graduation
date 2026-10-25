@@ -19,8 +19,19 @@ export const LEGACY_LOGIN_CALLBACK_PATHS = [
   '/auth/platform/callback',
 ];
 
+// Live old HTML that Campus One does not yet replace. Users still enter these
+// from /admin and the class-workspace join button.
+export const LEGACY_LIVE_HTML_PATHS = [
+  '/auth/platform',
+  '/auth/platform/class-workspace/:path*',
+  '/auth/platform/ops/:path*',
+  '/auth/platform/school-review/:path*',
+  '/privacy/deletion-status',
+];
+
 // Route handlers and hashed assets the current login buttons still call.
-// HTML /page routes from the pinned legacy manifest are intentionally absent.
+// HTML /page routes from the pinned legacy manifest are intentionally absent
+// except LEGACY_LIVE_HTML_PATHS and login callbacks.
 export const LEGACY_ENDPOINT_PATHS = [
   '/auth/account/token',
   '/auth/find-school/interest',
@@ -51,18 +62,14 @@ export const LEGACY_ENDPOINT_PATHS = [
   '/_next/static/:path*',
 ];
 
-// Old auth HTML screens that the new entry still links to, plus sibling
-// platform shells. Product screens such as /academics are left unmatched (404).
+// Old shells that already have a Campus One replacement. /auth/find-school
+// stays here so bookmarked URLs land on the in-page lookup, not the old page.
 const LEGACY_HTML_REDIRECT_SOURCES = [
   '/auth/find-school',
-  '/auth/platform',
   '/auth/platform/account',
-  '/auth/platform/class-workspace/:path*',
   '/auth/platform/class-workspace-affiliation-review',
   '/auth/platform/membership',
-  '/auth/platform/ops',
   '/auth/platform/school-apply',
-  '/auth/platform/school-review',
   '/auth/product-qa',
 ];
 
@@ -83,7 +90,11 @@ export function legacyRewrites(enabled: boolean): {
   return {
     beforeFiles: ASSOCIATION_PATHS.map(loopbackRewrite),
     afterFiles: [],
-    fallback: [...LEGACY_LOGIN_CALLBACK_PATHS, ...LEGACY_ENDPOINT_PATHS].map(loopbackRewrite),
+    fallback: [
+      ...LEGACY_LOGIN_CALLBACK_PATHS,
+      ...LEGACY_LIVE_HTML_PATHS,
+      ...LEGACY_ENDPOINT_PATHS,
+    ].map(loopbackRewrite),
   };
 }
 

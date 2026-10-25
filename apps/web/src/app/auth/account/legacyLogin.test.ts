@@ -5,8 +5,10 @@ import {
   PLATFORM_LOGIN_TRANSACTION_KEY,
   discoverSchool,
   listPlatformProviderKinds,
+  readExistingSession,
   readReturnPath,
   sanitizeReturnPath,
+  searchSchoolsByName,
   startGoogleContinue,
   startSchoolProvider,
   usableSchoolProviders,
@@ -27,19 +29,22 @@ afterEach(() => {
 it.each([
   ['/', '/'],
   ['/life', '/life'],
+  ['/timetable', '/timetable'],
+  ['/grades', '/grades'],
+  ['/classroom', '/classroom'],
+  ['/merchant', '/merchant'],
+  ['/admin', '/admin'],
   ['/auth/platform/class-workspace/join', '/auth/platform/class-workspace/join'],
-  ['/me', '/identity'],
+  ['/me', '/me'],
   ['https://evil.test', '/'],
   ['//evil.test', '/'],
   ['/\\evil.test', '/'],
   ['/login', '/'],
-  ['/grades', '/'],
+  ['/staff', '/'],
+  ['javascript:alert(1)', '/'],
   ['/life#secret', '/'],
-  ['/leave?requestId=abc-1', '/leave?requestId=abc-1'],
-  ['/leave?evil=1', '/leave'],
-  ['/staff/food?desk=kitchen', '/staff/food?desk=kitchen'],
-  ['/staff/food?desk=unknown', '/staff/food'],
-])('keeps only the previously allowed return path %s', (input, expected) => {
+  ['/leave?requestId=abc-1', '/'],
+])('keeps only Campus One return paths and rejects %s', (input, expected) => {
   expect(sanitizeReturnPath(input)).toBe(expected);
   expect(readReturnPath(`returnUrl=${encodeURIComponent(input)}`)).toBe(expected);
 });
@@ -115,6 +120,41 @@ it('looks up a school through the existing registration-start API', async () => 
     cache: 'no-store',
   });
   expect(usableSchoolProviders(['google-workspace', 'campus-oidc'])).toEqual(['google-workspace']);
+});
+
+it('searches schools by name through the existing find-school search endpoint', async () => {
+  fetchMock.mockResolvedValueOnce(
+    new Response(
+      JSON.stringify({
+        schools: [{ available: true, tenantId: 'tenant-1', displayName: '靜宜大學', providerKinds: ['google-workspace'] }],
+      }),
+      { status: 200, headers: { 'Content-Type': 'application/json' } },
+    ),
+  );
+  await expect(searchSchoolsByName('靜宜大學')).resolves.toEqual([
+    { available: true, tenantId: 'tenant-1', displayName: '靜宜大學', providerKinds: ['google-workspace'] },
+  ]);
+  expect(fetchMock).toHaveBeenCalledWith('/auth/find-school/search', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ query: '靜宜大學' }),
+    cache: 'no-store',
+  });
+});
+
+it('treats Campus One session as signed in before falling back to /auth/session', async () => {
+  fetchMock.mockResolvedValueOnce(
+    new Response(JSON.stringify({ authenticated: true, platformAccountId: 'pa_1' }), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    }),
+  );
+  await expect(readExistingSession()).resolves.toBe(true);
+  expect(fetchMock).toHaveBeenCalledWith('/api/nuni/session', {
+    cache: 'no-store',
+    credentials: 'same-origin',
+  });
+  expect(fetchMock).not.toHaveBeenCalledWith('/auth/session', expect.anything());
 });
 
 it('starts school login through the existing account token endpoint', async () => {

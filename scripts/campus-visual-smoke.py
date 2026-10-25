@@ -20,23 +20,31 @@ OUT = Path('artifacts/campus-visual')
 OUT.mkdir(parents=True, exist_ok=True)
 
 
-async def fixtures(route):
-    url = urlparse(route.request.url)
-    if url.hostname not in ('localhost', '127.0.0.1'):
-        await route.abort()
-    elif url.path == '/api/schools':
-        await route.fulfill(json={'schools': [
-            {'id': 'pu', 'name': '靜宜大學', 'status': 'not-open'},
-            {'id': 'nthu', 'name': '國立清華大學', 'status': 'not-open'},
-        ]})
-    elif url.path == '/api/nuni/session':
-        await route.fulfill(json={'authenticated': False})
-    elif url.path == '/auth/platform/providers':
-        await route.fulfill(json={'kinds': ['google-consumer']})
-    elif url.path.startswith('/api/transit'):
-        await route.fulfill(json={'status': 'unavailable', 'reason': 'not-configured'})
-    else:
-        await route.continue_()
+def session_fixtures(authenticated):
+    async def fixtures(route):
+        url = urlparse(route.request.url)
+        if url.hostname not in ('localhost', '127.0.0.1'):
+            await route.abort()
+        elif url.path == '/api/schools':
+            await route.fulfill(json={'schools': [
+                {'id': 'pu', 'name': '靜宜大學', 'status': 'not-open'},
+                {'id': 'nthu', 'name': '國立清華大學', 'status': 'not-open'},
+            ]})
+        elif url.path in ('/api/nuni/session', '/auth/session'):
+            await route.fulfill(json={
+                'authenticated': authenticated,
+                **({'platformAccountId': 'pa_1'} if authenticated else {}),
+            })
+        elif url.path == '/auth/platform/providers':
+            await route.fulfill(json={'kinds': ['google-consumer']})
+        elif url.path.startswith('/api/transit'):
+            await route.fulfill(json={'status': 'unavailable', 'reason': 'not-configured'})
+        else:
+            await route.continue_()
+    return fixtures
+
+
+fixtures = session_fixtures(False)
 
 
 async def no_overflow(page):
@@ -83,9 +91,8 @@ async def check_unsigned_account_entry(page):
     await expect(page.get_by_text('請用學校核發的帳號登入。', exact=True)).to_be_visible()
     await expect(page.get_by_role('button', name='登入校園帳號')).to_be_visible()
     await expect(page.get_by_role('button', name='用 Google 繼續')).to_be_visible()
-    await expect(page.get_by_role('link', name='尋找學校')).to_have_attribute(
-        'href', '/auth/find-school'
-    )
+    await expect(page.get_by_role('button', name='尋找學校')).to_be_visible()
+    await expect(page.get_by_role('link', name='尋找學校')).to_have_count(0)
     await expect(page.get_by_role('link', name='課班／教學')).to_have_attribute(
         'href', '/auth/platform/class-workspace/join'
     )
@@ -372,26 +379,63 @@ async def main():
             results.append('unsigned account entry keeps existing actions without demo copy')
 
             await page.set_viewport_size({'width': 390, 'height': 844})
-            for path, expect_account in [
-                ('/auth/find-school', True),
-                ('/auth/platform/class-workspace/join', True),
-                ('/auth/platform', True),
-                ('/academics', False),
-                ('/staff', False),
-                ('/learning', False),
+            await page.get_by_role('button', name='尋找學校').click()
+            await expect(page.get_by_label('學校配發的信箱或校名')).to_be_visible()
+            results.append('find-school action stays on the account page')
+
+            await page.get_by_role('link', name='課班／教學').click()
+            await page.wait_for_load_state('load')
+            assert urlparse(page.url).path == '/auth/platform/class-workspace/join'
+            assert '校園都在這' not in await page.title()
+            await expect(page.get_by_role('heading', name='登入', exact=True)).to_have_count(0)
+            results.append('class-workspace join stays off the new login page')
+
+            response = await page.goto(BASE + '/auth/find-school', wait_until='load')
+            assert urlparse(page.url).path == '/auth/account'
+            await check_unsigned_account_entry(page)
+            results.append('old find-school URL still lands on the new entry')
+
+            for path in [
+                '/auth/platform',
+                '/auth/platform/ops',
+                '/auth/platform/school-review',
+                '/privacy/deletion-status',
             ]:
                 response = await page.goto(BASE + path, wait_until='load')
                 body = await page.content()
                 for copy in OLD_ACCOUNT_COPY:
                     assert copy not in body, f'{path} still contains old copy'
+                assert urlparse(page.url).path == path, path
+                assert urlparse(page.url).path != '/auth/account'
+                await expect(page.get_by_role('heading', name='登入', exact=True)).to_have_count(0)
+
+            for path in ['/academics', '/staff', '/learning']:
+                response = await page.goto(BASE + path, wait_until='load')
+                body = await page.content()
+                for copy in OLD_ACCOUNT_COPY:
+                    assert copy not in body, f'{path} still contains old copy'
                 assert '校園都在這' not in await page.title()
-                if expect_account:
-                    assert urlparse(page.url).path == '/auth/account', path
-                    await check_unsigned_account_entry(page)
-                else:
-                    assert response is not None and response.status == 404, path
-                    assert urlparse(page.url).path == path
-            results.append('old HTML screens redirect to the new entry or 404 without demo copy')
+                assert response is not None and response.status == 404, path
+                assert urlparse(page.url).path == path
+            results.append('live old screens stay reachable; replaced shells 404 or redirect')
+
+            signed = await browser.new_context(
+                viewport={'width': 390, 'height': 844},
+                color_scheme='light',
+                reduced_motion='reduce',
+                service_workers='block',
+            )
+            await signed.route('**/*', session_fixtures(True))
+            signed_page = await signed.new_page()
+            signed_page.set_default_timeout(10000)
+            await signed_page.goto(BASE + '/auth/account?returnUrl=/life', wait_until='domcontentloaded')
+            await signed_page.wait_for_url(re.compile(r'/life(?:\?.*)?$'))
+            assert urlparse(signed_page.url).path == '/life'
+            await signed_page.goto(BASE + '/auth/account?returnUrl=/staff', wait_until='domcontentloaded')
+            await signed_page.wait_for_url(re.compile(r'https?://[^/]+/?$'))
+            assert urlparse(signed_page.url).path == '/'
+            await signed.close()
+            results.append('signed-in account visits follow allowed return paths')
             assert not errors, errors
         except Exception:
             await page.screenshot(path=str(OUT / 'failure.png'), full_page=True, animations='disabled')
