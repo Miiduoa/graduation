@@ -2724,6 +2724,17 @@ exports.createTimetableShare = onCall({ region: REGION }, createCreateTimetableS
 const { createListTeacherAppealsHandler, createAppealTeacherStatusHandler } = require('./teacherAppeals');
 exports.listTeacherAppeals = onCall({ region: REGION }, createListTeacherAppealsHandler({ db }));
 exports.appealTeacherStatus = onCall({ region: REGION }, createAppealTeacherStatusHandler({ db }));
+
+const {
+  createSubmitLeaveHandler,
+  createWithdrawLeaveHandler,
+  createReviewLeaveHandler,
+  createListReviewLeavesHandler,
+} = require('./leaveRequests');
+exports.submitLeaveRequest = onCall({ region: REGION }, createSubmitLeaveHandler({ db }));
+exports.withdrawLeaveRequest = onCall({ region: REGION }, createWithdrawLeaveHandler({ db }));
+exports.reviewLeaveRequest = onCall({ region: REGION }, createReviewLeaveHandler({ db }));
+exports.listLeaveReviewQueue = onCall({ region: REGION }, createListReviewLeavesHandler({ db }));
 exports.revokeTimetableShare = onCall({ region: REGION }, createRevokeTimetableShareHandler({ db }));
 exports.getTimetableShare = onRequest(
   { region: REGION, cors: true },
