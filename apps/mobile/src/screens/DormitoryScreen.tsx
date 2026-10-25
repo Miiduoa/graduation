@@ -414,13 +414,30 @@ function DormitoryBody({
       <View style={{ ...pad, gap: 12 }}>
         <AICard title={data.building || '住得安心，事情好處理'}>
           <Body>{data.room ? ('寢室 ' + data.room + (data.bed ? ' · ' + data.bed : '')) : '把入住事項、設備問題與重要日期放在一起。'}</Body>
-          <View style={{ ...flexRow, marginTop: 13 }}>
-            <Body muted>{data.repairs.filter((r) => r.status !== 'resolved').length} 筆問題待追蹤</Body>
-            <Body muted>{milestones.filter((entry) => !entry.completed).length} 個待辦日期</Body>
-            <Body muted>準備清單 {progress.completed}/{progress.total}</Body>
+          <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 9, marginTop: 16 }}>
+            {([
+              { id: 'parcels' as const, count: String(pendingParcels.length), label: '待領包裹' },
+              { id: 'repairs' as const, count: String(data.repairs.filter((r) => r.status !== 'resolved').length), label: '待追蹤問題' },
+              { id: 'dates' as const, count: String(milestones.filter((entry) => !entry.completed).length), label: '待辦日期' },
+              { id: 'checklist' as const, count: progress.completed + '/' + progress.total, label: '準備進度' },
+            ]).map((item) => (
+              <Pressable key={item.id} accessibilityRole="button"
+                accessibilityLabel={item.label + ' ' + item.count}
+                onPress={() => setView(item.id)}
+                style={{
+                  flexGrow: 1, flexBasis: '44%', minHeight: 80,
+                  borderWidth: 1, borderColor: aiTokens.border,
+                  backgroundColor: aiTokens.panel, borderRadius: aiTokens.radius.sm,
+                  paddingHorizontal: 14, paddingVertical: 13, justifyContent: 'center', gap: 3,
+                }}>
+                <Text style={{ color: aiTokens.text, fontSize: 24, fontWeight: '700', fontVariant: ['tabular-nums'] }}>{item.count}</Text>
+                <Text style={{ color: aiTokens.muted, fontSize: 13 }}>{item.label}</Text>
+              </Pressable>
+            ))}
           </View>
           <View style={{ ...flexRow, marginTop: 16 }}>
             <AIButton label="記錄設備問題" onPress={() => editRepair()} />
+            <AIButton label="記錄包裹" variant="ghost" onPress={() => editParcel()} />
             <AIButton label="宿舍指南" variant="ghost" onPress={() => setView('guide')} />
           </View>
         </AICard>
@@ -462,8 +479,12 @@ function DormitoryBody({
                 ? (nextMilestone.dueDate < today ? '已過期，請確認：' : '下一個日期：') + nextMilestone.title
                 : '目前沒有尚未完成的重要日期。'}</Body>
               {!!nextMilestone && <Body muted>{nextMilestone.dueDate.replaceAll('-', '/')} · 個人紀錄</Body>}
+              {!!overdueParcels.length && <Text style={{ color: aiTokens.text, fontSize: 13, marginTop: 8 }}>
+                {overdueParcels.length} 件包裹超過你設定的取件日期，請確認是否已領取。
+              </Text>}
               <View style={{ ...flexRow, marginTop: 14 }}>
                 <AIButton label="新增重要日期" variant="ghost" onPress={() => editDate()} />
+                <AIButton label="待領包裹" variant="ghost" onPress={() => setView('parcels')} />
                 <AIButton label="查看入住清單" variant="ghost" onPress={() => setView('checklist')} />
               </View>
             </AICard>
