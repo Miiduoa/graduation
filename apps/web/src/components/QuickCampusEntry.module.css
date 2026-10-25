@@ -1,0 +1,153 @@
+.entry {
+  display: grid;
+  gap: 18px;
+  padding: clamp(20px, 4vw, 32px);
+  margin-bottom: 26px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  border-radius: 20px;
+  box-shadow: 0 8px 26px color-mix(in srgb, var(--text) 4%, transparent);
+}
+.heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+.heading h2 {
+  font-size: clamp(21px, 3vw, 28px);
+  font-weight: 700;
+  letter-spacing: -0.035em;
+  margin: 0 0 8px;
+  line-height: 1.35;
+  color: var(--text);
+}
+.eyebrow {
+  margin: 0 0 8px;
+  color: var(--brand);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.09em;
+}
+.subtitle,
+.privacy,
+.noMatch {
+  color: var(--muted);
+  margin: 0;
+  line-height: 1.65;
+  font-size: 13px;
+}
+.allServices,
+.footerLinks a,
+.footerLinks button {
+  display: inline-flex;
+  gap: 5px;
+  align-items: center;
+  min-height: 44px;
+  color: var(--brand);
+  background: transparent;
+  text-decoration: none;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 650;
+  white-space: nowrap;
+}
+.inputRow {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+  padding: 6px 6px 6px 16px;
+  border: 1px solid var(--border-strong);
+  background: var(--bg);
+  border-radius: 14px;
+}
+.inputRow > svg {
+  flex: 0 0 auto;
+  color: var(--muted);
+}
+.inputRow input {
+  min-width: 0;
+  flex: 1;
+  border: 0;
+  color: var(--text);
+  background: transparent;
+  font: inherit;
+  font-size: 15px;
+  min-height: 44px;
+  outline: 0;
+}
+.inputRow:focus-within {
+  outline: 3px solid var(--focus-ring);
+  outline-offset: 3px;
+}
+.examples,
+.footerLinks {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+}
+.examples button {
+  font: inherit;
+  border: 1px solid var(--border);
+  background: var(--panel);
+  border-radius: 999px;
+  min-height: 38px;
+  padding: 8px 13px;
+  font-size: 13px;
+  color: var(--text);
+  cursor: pointer;
+}
+.results { display: grid; gap: 12px; }
+.resultHeading {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--muted);
+}
+.actionGrid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+.action {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-width: 0;
+  padding: 14px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  color: var(--text);
+  text-decoration: none;
+}
+.action strong,
+.action small { display: block; }
+.action strong { font-size: 14px; margin-bottom: 4px; }
+.action small { font-size: 12px; color: var(--muted); line-height: 1.4; }
+.action > svg { flex: 0 0 auto; color: var(--brand); }
+.footerLinks button {
+  border: 0;
+  cursor: pointer;
+  padding: 0;
+}
+.privacy { font-size: 12px; }
+.srOnly {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+.entry :is(a, button):focus-visible { outline: 3px solid var(--focus-ring); outline-offset: 3px; }
+@media (hover: hover) {
+  .action:hover { border-color: var(--border-strong); background: var(--accent-soft); }
+  .examples button:hover { background: var(--accent-soft); }
+}
+@media (max-width: 600px) {
+  .entry { padding: 18px; border-radius: 16px; }
+  .heading { flex-direction: column; gap: 4px; }
+  .actionGrid { grid-template-columns: 1fr; }
+  .inputRow { gap: 8px; padding-left: 10px; }
+  .inputRow > svg { display: none; }
+}
