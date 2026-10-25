@@ -94,6 +94,7 @@ const ALLOWED_RETURN_PREFIXES = [
   '/timetable/s',
 ];
 
+const OPS_RETURN_TABS = new Set(['schools', 'people', 'merchants', 'affiliation', 'audit']);
 const BLOCKED_RETURN_PATHS = new Set([
   '/login',
   '/admin/login',
@@ -144,6 +145,21 @@ function trimPath(path: string): string {
   return trimmed === '' ? '/' : trimmed;
 }
 
+function opsReturnSuffix(pathname: string, searchParams: URLSearchParams, hash: string): string | null {
+  const opsPath = pathname === '/admin/ops' || pathname === '/auth/platform/ops';
+  if (!opsPath) return searchParams.size || hash ? null : '';
+  const names = [...searchParams.keys()];
+  if (names.some((name) => name !== 'tab')) return null;
+  const queryTab = searchParams.get('tab');
+  const hashTab = hash.startsWith('#') ? hash.slice(1) : hash;
+  if (queryTab !== null && !OPS_RETURN_TABS.has(queryTab)) return null;
+  if (hash && !OPS_RETURN_TABS.has(hashTab)) return null;
+  if (queryTab && hash && queryTab !== hashTab) return null;
+  if (queryTab) return `?tab=${queryTab}`;
+  if (hashTab) return `#${hashTab}`;
+  return '';
+}
+
 export function sanitizeReturnPath(value: string | null | undefined): string {
   const raw = (value ?? '').trim();
   if (!raw.startsWith('/') || raw.startsWith('//') || raw.includes('\\')) return '/';
@@ -153,24 +169,22 @@ export function sanitizeReturnPath(value: string | null | undefined): string {
   } catch {
     return '/';
   }
-  if (
-    parsed.origin !== 'https://nuni.invalid' ||
-    parsed.username ||
-    parsed.password ||
-    parsed.hash ||
-    `${parsed.pathname}${parsed.search}` !== raw
-  ) {
+  if (parsed.origin !== 'https://nuni.invalid' || parsed.username || parsed.password) {
     return '/';
   }
+  if (`${parsed.pathname}${parsed.search}${parsed.hash}` !== raw) return '/';
   const normalized = trimPath(parsed.pathname);
   if (BLOCKED_RETURN_PATHS.has(normalized)) return '/';
-  if (CLASS_WORKSPACE_PATH.test(normalized) && parsed.search === '') return normalized;
+  if (CLASS_WORKSPACE_PATH.test(normalized) && parsed.search === '' && parsed.hash === '')
+    return normalized;
   const allowed =
     normalized === '/' ||
     ALLOWED_RETURN_PATHS.has(normalized) ||
     ALLOWED_RETURN_PREFIXES.some((prefix) => normalized === prefix || normalized.startsWith(`${prefix}/`));
   if (!allowed) return '/';
-  return normalized;
+  const suffix = opsReturnSuffix(normalized, parsed.searchParams, parsed.hash);
+  if (suffix === null) return parsed.search || parsed.hash ? '/' : normalized;
+  return `${normalized}${suffix}`;
 }
 
 export function readReturnPath(search: string | { get(name: string): string | null }): string {

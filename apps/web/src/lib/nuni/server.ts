@@ -310,18 +310,20 @@ export function platformRequest(
   session?: PlatformSession,
   input?: Record<string, unknown>,
   query?: Record<string, string>,
-  method?: 'PUT',
+  method?: 'GET' | 'POST' | 'PUT',
 ): Promise<unknown> {
   if (!/^[a-zA-Z0-9/_-]+$/.test(path)) throw new NuniError(400, 'INVALID_PATH');
   const search = new URLSearchParams(query);
+  const verb = method ?? (input !== undefined ? 'POST' : 'GET');
+  const sendJson = verb !== 'GET';
   return fetchJson(`${apiOrigin()}/v1/auth/platform/${path}${search.size ? `?${search}` : ''}`, {
-    method: method ?? (input ? 'POST' : 'GET'),
+    method: verb,
     headers: {
       Accept: 'application/json',
       ...(session ? { Authorization: `Platform ${session.sessionHandle}` } : {}),
-      ...(input ? { 'Content-Type': 'application/json' } : {}),
+      ...(sendJson ? { 'Content-Type': 'application/json' } : {}),
     },
-    ...(input ? { body: JSON.stringify(input) } : {}),
+    ...(sendJson ? { body: JSON.stringify(input ?? {}) } : {}),
   });
 }
 

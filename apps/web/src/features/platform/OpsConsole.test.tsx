@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { OpsConsole } from './OpsConsole';
 
@@ -86,4 +86,107 @@ it('shows the operator console tabs', async () => {
   fireEvent.click(screen.getByRole('tab', { name: '人員' }));
   expect(await screen.findByText('人員分頁')).toBeTruthy();
   expect(screen.getByRole('heading', { name: '加人' })).toBeTruthy();
+});
+
+const merchants = {
+  interest: [
+    {
+      id: 'interest-1',
+      brandName: '意向咖啡',
+      schoolName: '第一學校',
+      contactName: '店長',
+      contactEmail: 'interest@example.test',
+      note: null,
+      state: 'submitted',
+      createdAt: '2026-01-02T03:04:05.000Z',
+      decidedAt: null,
+    },
+  ],
+  applications: [],
+  catalog: [],
+  honesty: '意向與進件都要先審過才能往下。',
+};
+
+it('posts merchant interest decisions to platform-admin', async () => {
+  mocks.session = {
+    platformAccountId: 'pa_1',
+    context: 'a'.repeat(43),
+    isPlatformOperator: true,
+  };
+  fetcher.mockImplementation(async (url: string) => {
+    if (String(url).includes('/api/platform-admin/merchants')) {
+      return new Response(JSON.stringify(merchants), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      });
+    }
+    return new Response(JSON.stringify({}), {
+      status: 200,
+      headers: { 'content-type': 'application/json' },
+    });
+  });
+  render(<OpsConsole />);
+  fireEvent.click(screen.getByRole('tab', { name: '店家' }));
+  fireEvent.click(await screen.findByRole('button', { name: '核准意向' }));
+  await waitFor(() =>
+    expect(
+      fetcher.mock.calls.some(
+        ([url, options]) =>
+          String(url) === '/api/platform-admin/merchant-interest/interest-1/decision' &&
+          options?.method === 'POST',
+      ),
+    ).toBe(true),
+  );
+  const posted = fetcher.mock.calls.find(([url]) =>
+    String(url).includes('/merchant-interest/interest-1/decision'),
+  )!;
+  expect(JSON.parse(posted[1].body)).toMatchObject({ decision: 'approve' });
+});
+
+it('posts affiliation decisions to class-workspace-affiliation-applications', async () => {
+  mocks.session = {
+    platformAccountId: 'pa_1',
+    context: 'a'.repeat(43),
+    isPlatformOperator: true,
+  };
+  fetcher.mockImplementation(async (url: string) => {
+    if (String(url).includes('class-workspace-affiliation-applications') && !String(url).includes('/decision')) {
+      return new Response(
+        JSON.stringify({
+          applications: [
+            {
+              id: 'aff-1',
+              workspaceTitle: '設計專題',
+              tenantId: 'school-one',
+              sectionId: 'sec-1',
+              justification: '請掛靠',
+            },
+          ],
+        }),
+        { status: 200, headers: { 'content-type': 'application/json' } },
+      );
+    }
+    return new Response(JSON.stringify({}), {
+      status: 200,
+      headers: { 'content-type': 'application/json' },
+    });
+  });
+  render(<OpsConsole />);
+  fireEvent.click(screen.getByRole('tab', { name: '課班掛靠' }));
+  fireEvent.click(await screen.findByRole('button', { name: '核准掛靠' }));
+  await waitFor(() =>
+    expect(
+      fetcher.mock.calls.some(
+        ([url, options]) =>
+          String(url) ===
+            '/api/platform-admin/class-workspace-affiliation-applications/aff-1/decision' &&
+          options?.method === 'POST',
+      ),
+    ).toBe(true),
+  );
+  const posted = fetcher.mock.calls.find(([url]) => String(url).includes('/aff-1/decision'))!;
+  expect(JSON.parse(posted[1].body)).toMatchObject({
+    decision: 'approve',
+    reason: '資料已核對，准予掛靠。',
+  });
 });

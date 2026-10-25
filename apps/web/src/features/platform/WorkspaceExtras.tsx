@@ -43,10 +43,12 @@ export function WorkspaceInvite({
   workspaceId,
   canInvite,
   initialCode,
+  context,
 }: {
   workspaceId: string;
   canInvite: boolean;
   initialCode: string;
+  context: string;
 }) {
   const [code, setCode] = useState(initialCode);
   const [busy, setBusy] = useState(false);
@@ -72,8 +74,10 @@ export function WorkspaceInvite({
             setBusy(true);
             setError('');
             void platformFetch(
-              `/auth/platform/class-workspaces/${encodeURIComponent(workspaceId)}/invites`,
+              `class-workspaces/${workspaceId}/invites`,
+              'POST',
               { maxUses: 100, idempotencyKey: `web-invite-${crypto.randomUUID()}` },
+              context,
             )
               .then((result) => {
                 if (result.status === 401) {
@@ -104,12 +108,14 @@ export function WorkspaceAffiliation({
   canApply,
   affiliation,
   applications,
+  context,
   onChanged,
 }: {
   workspaceId: string;
   canApply: boolean;
   affiliation: Record<string, unknown> | null;
   applications: Record<string, unknown>[];
+  context: string;
   onChanged: () => void;
 }) {
   const [tenantId, setTenantId] = useState('');
@@ -149,13 +155,15 @@ export function WorkspaceAffiliation({
             setBusy(true);
             setError('');
             void platformFetch(
-              `/auth/platform/class-workspaces/${encodeURIComponent(workspaceId)}/affiliation-applications`,
+              `class-workspaces/${workspaceId}/affiliation-applications`,
+              'POST',
               {
                 tenantId: tenantId.trim(),
                 sectionId: sectionId.trim() || null,
                 justification: justification.trim(),
                 idempotencyKey: `web-affiliate-${crypto.randomUUID()}`,
               },
+              context,
             )
               .then((result) => {
                 if (result.status === 401) {

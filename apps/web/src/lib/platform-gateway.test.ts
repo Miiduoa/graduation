@@ -268,3 +268,77 @@ it('shares one upstream school directory request across concurrent callers', asy
   });
   expect(fetcher).toHaveBeenCalledTimes(1);
 });
+
+function operatorThen(value: unknown) {
+  fetcher
+    .mockResolvedValueOnce(
+      json({ authenticated: true, platformAccountId: account, isPlatformOperator: true }),
+    )
+    .mockResolvedValueOnce(json(value));
+}
+
+it('forwards pending school applications without the ops prefix', async () => {
+  operatorThen({ applications: [] });
+  const response = await handlePlatformAdmin(
+    req('platform-admin/school-applications?scope=pending', { auth: true }),
+    ['school-applications'],
+  );
+  expect(response.status).toBe(200);
+  expect(fetcher.mock.calls[1][0]).toBe(
+    'https://api.nuni.tw/v1/auth/platform/school-applications?scope=pending',
+  );
+  expect(fetcher.mock.calls[1][1].method).toBe('GET');
+});
+
+it('forwards school, people, merchant and affiliation writes to the matching nuni-api paths', async () => {
+  const writes: Array<[string[], string, Record<string, unknown>]> = [
+    [
+      ['school-applications', 'app-1', 'decision'],
+      'https://api.nuni.tw/v1/auth/platform/school-applications/app-1/decision',
+      { decision: 'approve', reason: '資料齊全，先建檔未開放註冊。', idempotencyKey: 'school-decide-1' },
+    ],
+    [
+      ['schools', 'school-one', 'people'],
+      'https://api.nuni.tw/v1/auth/platform/ops/schools/school-one/people',
+      { role: 'school_admin', email: 'teacher@one.edu.tw', idempotencyKey: 'people-add-123' },
+    ],
+    [
+      ['merchant-interest', 'interest-1', 'decision'],
+      'https://api.nuni.tw/v1/auth/platform/ops/merchant-interest/interest-1/decision',
+      { decision: 'approve', reason: '資料齊全，准予往下。', idempotencyKey: 'merchant-dec-1' },
+    ],
+    [
+      ['class-workspace-affiliation-applications', 'aff-1', 'decision'],
+      'https://api.nuni.tw/v1/auth/platform/class-workspace-affiliation-applications/aff-1/decision',
+      { decision: 'approve', reason: '合成掛靠測試，非正式認證', idempotencyKey: 'aff-decide-123' },
+    ],
+  ];
+  for (const [segments, url, body] of writes) {
+    operatorThen({});
+    const response = await handlePlatformAdmin(
+      req(`platform-admin/${segments.join('/')}`, { auth: true, body }),
+      segments,
+    );
+    expect(response.status).toBe(200);
+    expect(fetcher.mock.calls.at(-1)?.[0]).toBe(url);
+    expect(fetcher.mock.calls.at(-1)?.[1]).toMatchObject({
+      method: 'POST',
+      body: JSON.stringify(body),
+      headers: expect.objectContaining({ 'Content-Type': 'application/json' }),
+    });
+  }
+});
+
+it('does not forward operator writes when the Campus One session is missing', async () => {
+  expect(
+    (
+      await handlePlatformAdmin(
+        req('platform-admin/school-applications/app-1/decision', {
+          body: { decision: 'approve', reason: 'x', idempotencyKey: 'missing-session' },
+        }),
+        ['school-applications', 'app-1', 'decision'],
+      )
+    ).status,
+  ).toBe(401);
+  expect(fetcher).not.toHaveBeenCalled();
+});

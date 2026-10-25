@@ -6,21 +6,49 @@ export type PlatformResponse = {
   body: Record<string, unknown>;
 };
 
-export async function platformFetch(
-  path: string,
-  input?: Record<string, unknown>,
-  method?: 'GET' | 'POST',
+const NUNI_PATH = /^[a-z0-9-]+(?:\/[A-Za-z0-9_-]+)*$/;
+const ADMIN_PATH = /^[a-z0-9-]+(?:\/[A-Za-z0-9_-]+)*(?:\?[A-Za-z][A-Za-z0-9]{0,31}=[^#]*)?$/;
+
+async function send(
+  url: string,
+  method: 'GET' | 'POST',
+  input: Record<string, unknown> | undefined,
+  context?: string,
 ): Promise<PlatformResponse> {
-  const verb = method ?? (input ? 'POST' : 'GET');
-  const response = await fetch(path, {
-    method: verb,
+  const sendJson = method !== 'GET';
+  const response = await fetch(url, {
+    method,
     cache: 'no-store',
     credentials: 'same-origin',
-    headers: input ? { 'Content-Type': 'application/json' } : undefined,
-    body: input ? JSON.stringify(input) : undefined,
+    redirect: 'error',
+    headers: {
+      ...(context ? { 'X-Campus-Session': context } : {}),
+      ...(sendJson ? { 'Content-Type': 'application/json' } : {}),
+    },
+    ...(sendJson ? { body: JSON.stringify(input ?? {}) } : {}),
   });
   const body = ((await response.json().catch(() => ({}))) ?? {}) as Record<string, unknown>;
   return { status: response.status, ok: response.ok, body };
+}
+
+export async function platformFetch(
+  path: string,
+  method: 'GET' | 'POST',
+  input?: Record<string, unknown>,
+  context?: string,
+): Promise<PlatformResponse> {
+  if (!NUNI_PATH.test(path)) return { status: 400, ok: false, body: { error: 'INVALID_REQUEST' } };
+  return send(`/api/nuni/${path}`, method, input, context);
+}
+
+export async function adminFetch(
+  path: string,
+  method: 'GET' | 'POST',
+  input?: Record<string, unknown>,
+  context?: string,
+): Promise<PlatformResponse> {
+  if (!ADMIN_PATH.test(path)) return { status: 400, ok: false, body: { error: 'INVALID_REQUEST' } };
+  return send(`/api/platform-admin/${path}`, method, input, context);
 }
 
 export function platformError(result: PlatformResponse, fallback: string): Error {

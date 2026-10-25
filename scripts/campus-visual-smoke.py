@@ -43,7 +43,7 @@ def session_fixtures(authenticated, operator=False):
             await route.fulfill(json={'kinds': ['google-consumer']})
         elif url.path.startswith('/api/transit'):
             await route.fulfill(json={'status': 'unavailable', 'reason': 'not-configured'})
-        elif url.path == '/auth/platform/school-applications':
+        elif url.path == '/api/platform-admin/school-applications':
             if not authenticated:
                 await route.fulfill(status=401, json={'error': 'SIGN_IN_REQUIRED'})
             elif not operator:
@@ -58,14 +58,23 @@ def session_fixtures(authenticated, operator=False):
                     'contactEmail': 'wang@pending.edu.tw',
                     'justification': '請協助接入',
                 }]})
-        elif url.path == '/auth/platform/ops-api/schools':
-            if not operator:
+        elif url.path == '/api/platform-admin/schools':
+            if not authenticated:
+                await route.fulfill(status=401, json={'error': 'SIGN_IN_REQUIRED'})
+            elif not operator:
                 await route.fulfill(status=403, json={'error': 'OPERATOR_REQUIRED'})
             else:
                 await route.fulfill(json={'schools': [{
+                    'kind': 'tenant',
+                    'applicationId': None,
                     'tenantId': 'ready-school',
                     'displayName': '待開放學校',
+                    'emailDomain': 'ready.edu.tw',
                     'lifecycle': 'provisioned',
+                    'description': '',
+                    'modules': {'leave': False, 'identity': False, 'food': False},
+                    'peopleCount': 0,
+                    'merchantCount': 0,
                 }]})
         elif url.path.startswith('/api/platform-admin/'):
             if not authenticated:
@@ -496,6 +505,7 @@ async def main():
             for path, expected in [
                 ('/auth/platform', '/auth/platform'),
                 ('/auth/platform/ops', '/admin/ops'),
+                ('/auth/platform/ops/people', '/admin/ops'),
                 ('/auth/platform/school-review', '/admin/school-review'),
                 ('/privacy/deletion-status', '/privacy/deletion-status'),
             ]:
@@ -504,15 +514,19 @@ async def main():
                 for copy in OLD_ACCOUNT_COPY:
                     assert copy not in body, f'{path} still contains old copy'
                 assert urlparse(page.url).path == expected, path
+                if path == '/auth/platform/ops/people':
+                    assert parse_qs(urlparse(page.url).query).get('tab') == ['people'], path
                 assert urlparse(page.url).path != '/auth/account'
                 await expect(page.get_by_role('heading', name='登入', exact=True)).to_have_count(0)
-                if expected == '/admin/ops':
+                if expected == '/admin/ops' and path == '/auth/platform/ops':
                     await expect(page.get_by_role('heading', name='請先登入管理員帳號')).to_be_visible()
                     await page.screenshot(
                         path=str(OUT / 'ops-unsigned.png'),
                         full_page=True,
                         animations='disabled',
                     )
+                if path == '/auth/platform/ops/people':
+                    await expect(page.get_by_role('heading', name='請先登入管理員帳號')).to_be_visible()
                 if expected == '/admin/school-review':
                     await expect(page.get_by_role('heading', name='請先登入管理員帳號')).to_be_visible()
                     await page.screenshot(

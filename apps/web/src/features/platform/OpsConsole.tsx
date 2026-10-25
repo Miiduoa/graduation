@@ -16,11 +16,10 @@ import { useAdminResource } from '@/features/admin/hooks';
 import { useNuniSession } from '@/features/nuni/Session';
 import common from '@/app/servicePages.module.css';
 import admin from '@/features/admin/Admin.module.css';
-import { accountReturnHref, OPS_PATH, SCHOOL_REVIEW_PATH } from './constants';
-import { asRecords, platformFetch } from './platformFetch';
+import { accountReturnHref, isOpsTab, OPS_PATH, SCHOOL_REVIEW_PATH, type OpsTab } from './constants';
+import { adminFetch, asRecords } from './platformFetch';
+import { parseOversightMerchants } from '@/features/admin/oversightApi';
 import styles from './Platform.module.css';
-
-type OpsTab = 'schools' | 'people' | 'merchants' | 'affiliation' | 'audit';
 
 const tabs: Array<[OpsTab, string]> = [
   ['schools', '學校'],
@@ -32,8 +31,10 @@ const tabs: Array<[OpsTab, string]> = [
 
 function readTab(): OpsTab {
   if (typeof window === 'undefined') return 'schools';
+  const params = new URLSearchParams(window.location.search);
+  if (isOpsTab(params.get('tab'))) return params.get('tab') as OpsTab;
   const hash = window.location.hash.replace(/^#/, '');
-  return tabs.some(([id]) => id === hash) ? (hash as OpsTab) : 'schools';
+  return isOpsTab(hash) ? hash : 'schools';
 }
 
 export function OpsConsole() {
@@ -49,12 +50,16 @@ export function OpsConsole() {
     setTab(readTab());
     const sync = () => setTab(readTab());
     window.addEventListener('hashchange', sync);
-    return () => window.removeEventListener('hashchange', sync);
+    window.addEventListener('popstate', sync);
+    return () => {
+      window.removeEventListener('hashchange', sync);
+      window.removeEventListener('popstate', sync);
+    };
   }, []);
 
   function go(next: OpsTab) {
     setTab(next);
-    window.history.replaceState(null, '', `${OPS_PATH}#${next}`);
+    window.history.replaceState(null, '', `${OPS_PATH}?tab=${next}`);
   }
 
   return (
@@ -74,7 +79,7 @@ export function OpsConsole() {
               <Link href={OPS_PATH} aria-current="page">
                 開通
               </Link>
-              <Link href={`${OPS_PATH}#affiliation`}>掛靠</Link>
+              <Link href={`${OPS_PATH}?tab=affiliation`}>掛靠</Link>
             </nav>
           </header>
           <div className={styles.tabs} role="tablist" aria-label="管理項目">
@@ -113,7 +118,9 @@ export function OpsConsole() {
           {tab === 'merchants' ? (
             <MerchantsTab context={auth.session!.context} suspended={auth.loading} />
           ) : null}
-          {tab === 'affiliation' ? <AffiliationTab /> : null}
+          {tab === 'affiliation' ? (
+            <AffiliationTab context={auth.session!.context} />
+          ) : null}
           {tab === 'audit' ? (
             <AdminAudit
               context={auth.session!.context}
@@ -186,7 +193,11 @@ function PeopleTab({
           可以隨時再加一位老師或職員。還沒有管理員時，第一位要先設成學校管理員。已經有管理員後，才可以再加學校職員。不會蓋掉現有的人。核准學校時仍然不會自動把申請人設成管理員。
         </p>
         {tenantId && selected ? (
-          <PeopleAddForm tenantId={tenantId} schoolName={selected.displayName} />
+          <PeopleAddForm
+            tenantId={tenantId}
+            schoolName={selected.displayName}
+            context={context}
+          />
         ) : (
           <p className={styles.muted}>先選一所學校，再加人。</p>
         )}
@@ -195,7 +206,15 @@ function PeopleTab({
   );
 }
 
-function PeopleAddForm({ tenantId, schoolName }: { tenantId: string; schoolName: string }) {
+function PeopleAddForm({
+  tenantId,
+  schoolName,
+  context,
+}: {
+  tenantId: string;
+  schoolName: string;
+  context: string;
+}) {
   const [account, setAccount] = useState('');
   const [role, setRole] = useState<'school_admin' | 'school_staff'>('school_admin');
   const [busy, setBusy] = useState(false);
@@ -216,10 +235,10 @@ function PeopleAddForm({ tenantId, schoolName }: { tenantId: string; schoolName:
         };
         if (trimmed.includes('@')) body.email = trimmed;
         else body.personId = trimmed;
-        void platformFetch(`/auth/platform/ops-api/schools/${encodeURIComponent(tenantId)}/people`, body)
+        void adminFetch(`schools/${encodeURIComponent(tenantId)}/people`, 'POST', body, context)
           .then((result) => {
             if (result.status === 401) {
-              window.location.replace(accountReturnHref(OPS_PATH));
+              window.location.replace(accountReturnHref(`${OPS_PATH}?tab=people`));
               return;
             }
             if (!result.ok) throw new Error('加人沒有完成，請稍後再試。');
@@ -273,13 +292,18 @@ function MerchantsTab({ context, suspended }: { context: string; suspended: bool
     setError('');
     setNotice('');
     try {
-      const result = await platformFetch(path, {
-        decision,
-        reason: decision === 'approve' ? '資料齊全，准予往下。' : '資料不足，請補件。',
-        idempotencyKey: `web-merchant-decide-${crypto.randomUUID()}`,
-      });
+      const result = await adminFetch(
+        path,
+        'POST',
+        {
+          decision,
+          reason: decision === 'approve' ? '資料齊全，准予往下。' : '資料不足，請補件。',
+          idempotencyKey: `web-merchant-decide-${crypto.randomUUID()}`,
+        },
+        context,
+      );
       if (result.status === 401) {
-        window.location.replace(accountReturnHref(OPS_PATH));
+        window.location.replace(accountReturnHref(`${OPS_PATH}?tab=merchants`));
         return;
       }
       if (!result.ok) throw new Error('店家審核沒有完成，請稍後再試。');
@@ -305,32 +329,46 @@ function MerchantsTab({ context, suspended }: { context: string; suspended: bool
           {notice}
         </p>
       ) : null}
-      <MerchantDecisions busyId={busyId} onDecide={decide} />
+      <MerchantDecisions context={context} busyId={busyId} onDecide={decide} />
       <AdminMerchants context={context} suspended={suspended} />
     </div>
   );
 }
 
 function MerchantDecisions({
+  context,
   busyId,
   onDecide,
 }: {
+  context: string;
   busyId: string | null;
   onDecide: (path: string, id: string, decision: 'approve' | 'reject') => Promise<void>;
 }) {
-  const [interest, setInterest] = useState<Record<string, unknown>[]>([]);
-  const [applications, setApplications] = useState<Record<string, unknown>[]>([]);
+  const [interest, setInterest] = useState<ReturnType<typeof parseOversightMerchants>['interest']>([]);
+  const [applications, setApplications] = useState<
+    ReturnType<typeof parseOversightMerchants>['applications']
+  >([]);
   useEffect(() => {
     let active = true;
-    void platformFetch('/auth/platform/ops-api/merchants').then((result) => {
-      if (!active || !result.ok) return;
-      setInterest(asRecords(result.body.interest).filter((row) => row.state === 'submitted'));
-      setApplications(asRecords(result.body.applications).filter((row) => row.state === 'submitted'));
+    void adminFetch('merchants', 'GET', undefined, context).then((result) => {
+      if (!active || result.status === 401) {
+        if (result.status === 401) window.location.replace(accountReturnHref(`${OPS_PATH}?tab=merchants`));
+        return;
+      }
+      if (!result.ok) return;
+      try {
+        const parsed = parseOversightMerchants(result.body);
+        setInterest(parsed.interest.filter((row) => row.state === 'submitted'));
+        setApplications(parsed.applications.filter((row) => row.state === 'submitted'));
+      } catch {
+        setInterest([]);
+        setApplications([]);
+      }
     });
     return () => {
       active = false;
     };
-  }, []);
+  }, [context]);
   if (!interest.length && !applications.length) return null;
   return (
     <section className={styles.panel}>
@@ -347,7 +385,7 @@ function MerchantDecisions({
                 disabled={busyId === id}
                 onClick={() =>
                   void onDecide(
-                    `/auth/platform/ops-api/merchant-interest/${encodeURIComponent(id)}/decision`,
+                    `merchant-interest/${encodeURIComponent(id)}/decision`,
                     id,
                     'approve',
                   )
@@ -359,7 +397,7 @@ function MerchantDecisions({
                 disabled={busyId === id}
                 onClick={() =>
                   void onDecide(
-                    `/auth/platform/ops-api/merchant-interest/${encodeURIComponent(id)}/decision`,
+                    `merchant-interest/${encodeURIComponent(id)}/decision`,
                     id,
                     'reject',
                   )
@@ -372,18 +410,18 @@ function MerchantDecisions({
         );
       })}
       {applications.map((row) => {
-        const id = String(row.applicationId || row.id || '');
+        const id = row.applicationId;
         return (
           <article key={id} className={styles.item}>
             <strong>
-              {String(row.brandName || '進件')}／{String(row.locationName || '')}
+              {row.brandName || '進件'}／{row.locationName || ''}
             </strong>
             <div className={styles.actions}>
               <Button
                 disabled={busyId === id}
                 onClick={() =>
                   void onDecide(
-                    `/auth/platform/ops-api/merchant-applications/${encodeURIComponent(id)}/decision`,
+                    `merchant-applications/${encodeURIComponent(id)}/decision`,
                     id,
                     'approve',
                   )
@@ -395,7 +433,7 @@ function MerchantDecisions({
                 disabled={busyId === id}
                 onClick={() =>
                   void onDecide(
-                    `/auth/platform/ops-api/merchant-applications/${encodeURIComponent(id)}/decision`,
+                    `merchant-applications/${encodeURIComponent(id)}/decision`,
                     id,
                     'reject',
                   )
@@ -411,15 +449,20 @@ function MerchantDecisions({
   );
 }
 
-function AffiliationTab() {
+function AffiliationTab({ context }: { context: string }) {
   const [rows, setRows] = useState<Record<string, unknown>[]>([]);
   const [error, setError] = useState('');
   const [busyId, setBusyId] = useState<string | null>(null);
   const [reason, setReason] = useState('資料已核對，准予掛靠。');
   async function load() {
-    const result = await platformFetch('/auth/platform/class-workspace-affiliations');
+    const result = await adminFetch(
+      'class-workspace-affiliation-applications',
+      'GET',
+      undefined,
+      context,
+    );
     if (result.status === 401) {
-      window.location.replace(accountReturnHref(OPS_PATH));
+      window.location.replace(accountReturnHref(`${OPS_PATH}?tab=affiliation`));
       return;
     }
     if (result.status === 403) {
@@ -428,11 +471,12 @@ function AffiliationTab() {
       return;
     }
     if (!result.ok) throw new Error('目前讀不到掛靠申請。');
-    setRows(asRecords(result.body.applications ?? result.body.items ?? result.body.affiliations));
+    setRows(asRecords(result.body.applications));
   }
   useEffect(() => {
     void load().catch((failure: Error) => setError(failure.message));
-  }, []);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [context]);
   return (
     <section className={styles.panel}>
       <h2>課班掛靠</h2>
@@ -444,29 +488,41 @@ function AffiliationTab() {
       ) : null}
       {rows.length === 0 && !error ? <p>目前沒有待處理的掛靠申請。</p> : null}
       {rows.map((row, index) => {
-        const id = String(row.id || row.applicationId || '');
+        const id = typeof row.id === 'string' ? row.id : '';
         return (
-          <article key={id || String(row.workspaceId || `affiliation-${index}`)} className={styles.item}>
-            <strong>{String(row.workspaceTitle || row.workspaceId || '課班')}</strong>
+          <article key={id || `affiliation-${index}`} className={styles.item}>
+            <strong>
+              {typeof row.workspaceTitle === 'string'
+                ? row.workspaceTitle
+                : typeof row.workspaceId === 'string'
+                  ? row.workspaceId
+                  : '課班'}
+            </strong>
             <p className={styles.muted}>
-              {String(row.tenantName || row.tenantId || '')}
-              {row.sectionId ? ` · ${String(row.sectionId)}` : ''}
-              {row.state ? ` · ${String(row.state)}` : ''}
+              {typeof row.tenantName === 'string'
+                ? row.tenantName
+                : typeof row.tenantId === 'string'
+                  ? row.tenantId
+                  : ''}
+              {typeof row.sectionId === 'string' ? ` · ${row.sectionId}` : ''}
+              {typeof row.state === 'string' ? ` · ${row.state}` : ''}
             </p>
-            {row.justification ? <p>{String(row.justification)}</p> : null}
+            {typeof row.justification === 'string' ? <p>{row.justification}</p> : null}
             <form
               className={styles.form}
               onSubmit={(event) => {
                 event.preventDefault();
                 setBusyId(id);
                 setError('');
-                void platformFetch(
-                  `/auth/platform/class-workspace-affiliations/${encodeURIComponent(id)}/decision`,
+                void adminFetch(
+                  `class-workspace-affiliation-applications/${encodeURIComponent(id)}/decision`,
+                  'POST',
                   {
                     decision: 'approve',
                     reason: reason.trim(),
                     idempotencyKey: `web-affiliate-decide-${crypto.randomUUID()}`,
                   },
+                  context,
                 )
                   .then(async (result) => {
                     if (!result.ok) throw new Error('掛靠審核沒有完成，請稍後再試。');
@@ -492,13 +548,15 @@ function AffiliationTab() {
                   onClick={() => {
                     setBusyId(id);
                     setError('');
-                    void platformFetch(
-                      `/auth/platform/class-workspace-affiliations/${encodeURIComponent(id)}/decision`,
+                    void adminFetch(
+                      `class-workspace-affiliation-applications/${encodeURIComponent(id)}/decision`,
+                      'POST',
                       {
                         decision: 'reject',
                         reason: '資料不足，請補件後再申請。',
                         idempotencyKey: `web-affiliate-decide-${crypto.randomUUID()}`,
                       },
+                      context,
                     )
                       .then(async (result) => {
                         if (!result.ok) throw new Error('掛靠審核沒有完成，請稍後再試。');

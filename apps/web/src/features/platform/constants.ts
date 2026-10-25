@@ -7,6 +7,12 @@ export const CREATE_PATH = '/auth/platform/class-workspace/new';
 export const SCHOOL_REVIEW_PATH = '/admin/school-review';
 export const OPS_PATH = '/admin/ops';
 export const SCHOOL_APPLY_PATH = '/auth/platform/school-apply';
+export const OPS_TABS = ['schools', 'people', 'merchants', 'affiliation', 'audit'] as const;
+export type OpsTab = (typeof OPS_TABS)[number];
+
+export function isOpsTab(value: string | null | undefined): value is OpsTab {
+  return !!value && (OPS_TABS as readonly string[]).includes(value);
+}
 
 export const APPROVE_SCHOOL_REASON = '資料齊全，先建檔未開放註冊。';
 export const REJECT_SCHOOL_REASON = '資料不足，請補件後再申請。';
