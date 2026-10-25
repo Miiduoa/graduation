@@ -902,6 +902,17 @@ function getCollectionLabel(collectionName: string): string {
   return labels[collectionName] ?? collectionName;
 }
 
+/**
+ * Firestore 成績列回傳邊界：文件內任意 gradeSource（含偽造 school-official*）不得冒充校務權威。
+ * 一律標成 firebase-course，後續仍靠 schoolId／userId／publishedAt 驗證。
+ */
+export function asFirebaseCourseGrades(rows: Grade[]): Grade[] {
+  return rows.map((row) => ({
+    ...row,
+    gradeSource: 'firebase-course',
+  }));
+}
+
 // ===== Firebase DataSource 實作 =====
 
 export const firebaseSource: DataSource = {
@@ -1511,7 +1522,7 @@ export const firebaseSource: DataSource = {
     }
     constraints.push(orderBy('publishedAt', 'desc'));
     const resolvedSchoolId = await resolveUserSchoolId(userId, schoolId);
-    return fetchCanonicalUserSchoolCollection<Grade>({
+    const rows = await fetchCanonicalUserSchoolCollection<Grade>({
       uid: userId,
       schoolId: resolvedSchoolId,
       canonicalCollection: 'grades',
@@ -1521,6 +1532,7 @@ export const firebaseSource: DataSource = {
       fallbackRootCollection: 'grades',
       fallbackRootConstraints: constraints,
     });
+    return asFirebaseCourseGrades(rows);
   },
 
   async getGPA(userId, schoolId = undefined) {

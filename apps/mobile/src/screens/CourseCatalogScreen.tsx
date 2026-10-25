@@ -5,11 +5,12 @@
  * 來源：https://mypu.pu.edu.tw/Framework/Academic/CourseCatalogSys/
  */
 
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
   FlatList,
+  Linking,
   Modal,
   Pressable,
   ScrollView,
@@ -18,15 +19,23 @@ import {
   View,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import {
+  resolveCourseCatalogCapability,
+  resolveOfficialCourseQueryLink,
+  unsupportedCourseCatalogMessage,
+  type School,
+} from '@campus/shared/src';
 
-import { Screen, Pill, Button } from '../ui/components';
+import { Screen, Pill, Button, Card } from '../ui/components';
 import { TAB_BAR_CONTENT_BOTTOM_PADDING } from '../ui/navigationTheme';
 import { theme } from '../ui/theme';
 import { useAuth } from '../state/auth';
 import { useSchedule } from '../state/schedule';
+import { useSchool } from '../state/school';
+import { safeNavigate } from '../utils/safeNavigate';
 
 import {
-  CATALOG_SEMESTERS,
+  buildCatalogSemesters,
   CATALOG_WEEKDAYS,
   CATALOG_PERIODS,
   CATALOG_BUILDINGS,
@@ -34,7 +43,7 @@ import {
   CATALOG_COURSE_CATEGORIES,
   CATALOG_LANGUAGES,
   CATALOG_COLLEGES,
-  CATALOG_DEFAULT_FILTER,
+  getDefaultCatalogFilter,
   getCurrentCatalogSemester,
   type CatalogFilter,
 } from '../data/courseCatalogConstants';
@@ -141,7 +150,7 @@ function FilterPanel(props: {
       <Section title="學期">
         <ScrollView horizontal showsHorizontalScrollIndicator={false}>
           <View style={{ flexDirection: 'row', gap: 8, paddingRight: 16 }}>
-            {CATALOG_SEMESTERS.slice(0, 12).map((s) => {
+            {buildCatalogSemesters().slice(0, 12).map((s) => {
               const active = filter.semester === s.code;
               return (
                 <Pressable
@@ -412,14 +421,116 @@ function CourseCard(props: {
   );
 }
 
-// ─── 主畫面 ──────────────────────────────────────────────
+// ─── 主畫面（依選校能力閘道） ─────────────────────────────
 
-export function CourseCatalogScreen(props: { navigation?: any; route?: any }) {
+type CatalogScreenProps = { navigation?: any; route?: any };
+type ActiveScope = React.MutableRefObject<string>;
+
+function UnsupportedCourseCatalogScreen(props: {
+  school: School;
+  navigation?: any;
+}) {
+  const official = resolveOfficialCourseQueryLink(props.school.id);
+  const [linkError, setLinkError] = useState('');
+  return (
+    <Screen title="課綱查詢" subtitle={`${props.school.name} · 尚未接入內建課綱`}>
+      <Card title="這所學校尚未接入課綱查詢">
+        <Text style={{ color: theme.colors.muted, lineHeight: 22 }}>
+          {unsupportedCourseCatalogMessage(props.school.id, props.school.name)}
+        </Text>
+        <View style={{ gap: 10, marginTop: 14 }}>
+          {official ? (
+            <Button
+              text={`開啟${official.label}`}
+              kind="primary"
+              onPress={() => {
+                void Linking.openURL(official.url).catch(() => {
+                  setLinkError('無法開啟校方課程查詢頁，請稍後再試。');
+                });
+              }}
+            />
+          ) : null}
+          <Button
+            text="查看我的課表"
+            kind="ghost"
+            onPress={() => {
+              safeNavigate(props.navigation, 'PersonalTimetable');
+            }}
+          />
+          <Button
+            text="匯入我的資料"
+            kind="ghost"
+            onPress={() => {
+              safeNavigate(props.navigation, 'PersonalImport');
+            }}
+          />
+          {linkError ? (
+            <Text accessibilityRole="alert" style={{ color: '#D70015', fontSize: 12 }}>
+              {linkError}
+            </Text>
+          ) : null}
+        </View>
+      </Card>
+    </Screen>
+  );
+}
+
+export function CourseCatalogScreen(props: CatalogScreenProps) {
+  const { school } = useSchool();
+  const auth = useAuth();
+  const scopeKey = JSON.stringify({
+    schoolId: school.id,
+    uid: auth.user?.uid ?? auth.profile?.uid ?? null,
+    entryFilter: props.route?.params?.filter ?? null,
+  });
+  const activeScope = useRef(scopeKey);
+  activeScope.current = scopeKey;
+  const capability = resolveCourseCatalogCapability(school.id);
+
+  if (!capability) {
+    return (
+      <UnsupportedCourseCatalogScreen
+        key={scopeKey}
+        school={school}
+        navigation={props.navigation}
+      />
+    );
+  }
+
+  return (
+    <ProvidenceCourseCatalogScreen
+      key={scopeKey}
+      {...props}
+      school={school}
+      scopeKey={scopeKey}
+      activeScope={activeScope}
+    />
+  );
+}
+
+function ProvidenceCourseCatalogScreen(props: CatalogScreenProps & {
+  school: School;
+  scopeKey: string;
+  activeScope: ActiveScope;
+}) {
   const auth = useAuth();
   const schedule = useSchedule();
+  const { school, scopeKey, activeScope } = props;
+  const mounted = useRef(true);
+  const isCurrent = useCallback(
+    () => mounted.current && activeScope.current === scopeKey,
+    [activeScope, scopeKey],
+  );
+
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+    };
+  }, []);
 
   const initialFilter: CatalogFilter = {
-    ...CATALOG_DEFAULT_FILTER,
+    ...getDefaultCatalogFilter(),
     ...(props.route?.params?.filter ?? {}),
   };
 
@@ -427,7 +538,7 @@ export function CourseCatalogScreen(props: { navigation?: any; route?: any }) {
   const roleConfig = getCatalogRoleConfig(role);
 
   const [filter, setFilter] = useState<CatalogFilter>(initialFilter);
-  const [pendingKeyword, setPendingKeyword] = useState('');
+  const [pendingKeyword, setPendingKeyword] = useState(initialFilter.keyword ?? '');
   const [showFilter, setShowFilter] = useState(false);
   const [loading, setLoading] = useState(true); // 進畫面立刻 loading，避免閃白
   const [result, setResult] = useState<CatalogQueryResult | null>(null);
@@ -436,11 +547,17 @@ export function CourseCatalogScreen(props: { navigation?: any; route?: any }) {
 
   const runQuery = useCallback(
     async (force = false, overrideFilter?: CatalogFilter) => {
+      if (!isCurrent()) return;
       const f = overrideFilter ?? filter;
       setLoading(true);
       setError(null);
       try {
-        const r = await queryCatalog(f, { forceRefresh: force, limit: 300 });
+        const r = await queryCatalog(f, {
+          forceRefresh: force,
+          limit: 300,
+          schoolId: school.id,
+        });
+        if (!isCurrent()) return;
         setResult(r);
         if (r.error) setError(r.error);
         analytics.logEvent?.('catalog_query', {
@@ -450,29 +567,36 @@ export function CourseCatalogScreen(props: { navigation?: any; route?: any }) {
           keyword: f.keyword ?? null,
           count: r.courses.length,
           role,
+          schoolId: school.id,
         });
       } catch (err) {
+        if (!isCurrent()) return;
         setError(err instanceof Error ? err.message : '查詢失敗，請稍後再試');
       } finally {
-        setLoading(false);
-        setShowFilter(false);
-        setHasRunOnce(true);
+        if (isCurrent()) {
+          setLoading(false);
+          setShowFilter(false);
+          setHasRunOnce(true);
+        }
       }
     },
-    [filter, role],
+    [filter, role, school.id, isCurrent],
   );
 
   // 首次進入：自動觸發一次合理的預設查詢，避免空狀態
   useEffect(() => {
     const initial: CatalogFilter = { ...filter };
-    // 學生 → 預設抓本系；其餘 → 抓本學期通識，避免列表過大
-    if (auth.profile?.department && roleConfig.role === 'student') {
-      initial.department = auth.profile.department;
-    } else if (!auth.profile?.department) {
-      initial.courseType = 'general';
+    // 從搜尋或其他頁面帶入的條件直接沿用；一般入口才套用角色預設。
+    if (!props.route?.params?.filter) {
+      if (auth.profile?.department && roleConfig.role === 'student') {
+        initial.department = auth.profile.department;
+      } else if (!auth.profile?.department) {
+        initial.courseType = 'general';
+      }
     }
     setFilter(initial);
     void runQuery(false, initial);
+    // Remounted whenever school, account, or incoming search conditions change.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -489,6 +613,10 @@ export function CourseCatalogScreen(props: { navigation?: any; route?: any }) {
 
   const handleAddToSchedule = useCallback(
     (course: CatalogCourse) => {
+      if (!isCurrent()) {
+        Alert.alert('學校已切換', '目前選校已變更，請重新查詢後再加入課表。');
+        return;
+      }
       const draft = toPersonalCourseDraft(course);
       if (!draft.schedule.length) {
         Alert.alert('時間未定', '此課程未提供上課時段，無法直接加入課表。');
@@ -503,18 +631,24 @@ export function CourseCatalogScreen(props: { navigation?: any; route?: any }) {
           credits: course.credits,
           semester: course.semester,
           schedule: draft.schedule,
+          schoolId: school.id,
         });
+        if (!isCurrent()) return;
         Alert.alert('已加入課表', `${course.name} 已加入我的課表`);
-        analytics.logEvent?.('catalog_add_to_schedule', { code: course.code });
+        analytics.logEvent?.('catalog_add_to_schedule', {
+          code: course.code,
+          schoolId: school.id,
+        });
       } catch (err) {
+        if (!isCurrent()) return;
         Alert.alert('加入失敗', err instanceof Error ? err.message : '請稍後再試');
       }
     },
-    [schedule],
+    [schedule, school.id, isCurrent],
   );
 
   const currentSemLabel =
-    CATALOG_SEMESTERS.find((s) => s.code === filter.semester)?.label ??
+    buildCatalogSemesters().find((s) => s.code === filter.semester)?.label ??
     getCurrentCatalogSemester().label;
 
   // ─── 渲染 ──────────────────────────────────────────────
@@ -833,7 +967,7 @@ export function CourseCatalogScreen(props: { navigation?: any; route?: any }) {
             <Text style={{ fontSize: 16, fontWeight: '700', color: theme.colors.text }}>
               完整查詢條件
             </Text>
-            <Pressable onPress={() => setFilter(CATALOG_DEFAULT_FILTER)} hitSlop={8}>
+            <Pressable onPress={() => setFilter(getDefaultCatalogFilter())} hitSlop={8}>
               <Text style={{ color: theme.colors.muted, fontSize: 14 }}>清除</Text>
             </Pressable>
           </View>
@@ -841,7 +975,7 @@ export function CourseCatalogScreen(props: { navigation?: any; route?: any }) {
             <FilterPanel
               filter={filter}
               onChange={(patch) => setFilter((f) => ({ ...f, ...patch }))}
-              onReset={() => setFilter(CATALOG_DEFAULT_FILTER)}
+              onReset={() => setFilter(getDefaultCatalogFilter())}
               onSubmit={() => runQuery(true)}
               loading={loading}
             />

@@ -72,3 +72,28 @@ test('Providence retains its real integrated OPAC search', () => {
   expect(view.getByText('靜宜館藏搜尋面板')).toBeTruthy();
   expect(view.queryByText('開啟學校官方館藏')).toBeNull();
 });
+
+test('WebPACX campuses open their own search deep link instead of Providence OPAC', async () => {
+  mockSchool = { id: 'ncue', name: '國立彰化師範大學' };
+  const view = render(<LibraryCatalogScreen route={{ params: { initialQuery: '資料庫 & SQL' } }} />);
+  expect(view.queryByText('靜宜館藏搜尋面板')).toBeNull();
+  await act(async () => fireEvent.press(view.getByText('搜尋本校館藏')));
+  const url = new URL(jest.mocked(Linking.openURL).mock.calls[0][0]);
+  expect(url.hostname).toBe('webpacx.ncue.edu.tw');
+  expect(url.pathname).toBe('/search');
+  expect(url.searchParams.get('searchInput')).toBe('資料庫 & SQL');
+  expect(url.searchParams.get('searchField')).toBe('FullText');
+});
+
+test('Fu Jen catalog deep links stay on Sierra and never open Providence OPAC', async () => {
+  mockSchool = { id: 'fju', name: '輔仁大學' };
+  const view = render(<LibraryCatalogScreen route={{ params: { initialQuery: '資料庫' } }} />);
+  expect(view.queryByText('靜宜館藏搜尋面板')).toBeNull();
+  await act(async () => fireEvent.press(view.getByText('搜尋本校館藏')));
+  const url = new URL(jest.mocked(Linking.openURL).mock.calls[0][0]);
+  expect(url.hostname).toBe('library.lib.fju.edu.tw');
+  expect(url.port).toBe('444');
+  expect(url.pathname).toBe('/search~S0*cht/');
+  expect(url.searchParams.get('searcharg')).toBe('資料庫');
+  expect(url.searchParams.get('searchtype')).toBe('Y');
+});

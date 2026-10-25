@@ -5,6 +5,9 @@ import {
   formatUpcomingDueLine,
   pickNextAction,
   sortTodayClasses,
+  sortTodayTodos,
+  isTodoOverdue,
+  isDueWithinHours,
   TODAY_COPY,
   type TodayClass,
   type TodayTodo,
@@ -134,6 +137,25 @@ describe('pickNextAction', () => {
 });
 
 describe('today screen copy and ordering', () => {
+  it('keeps undated work visible after dated work without inventing a deadline', () => {
+    const undated = todo({ id: 'undated', dueAt: null });
+    const scheduled = todo();
+    expect(sortTodayTodos([undated, scheduled])).toEqual([scheduled, undated]);
+    expect(pickNextAction([], [undated], now)).toEqual({ type: 'upcoming', todo: undated });
+    expect(formatTodoDueLine(undated, now)).toBe('未設截止時間');
+    expect(formatUpcomingDueLine(undated)).toBe('未設截止時間');
+    expect(isTodoOverdue(undated, now)).toBe(false);
+    expect(isDueWithinHours(undated, now, 24)).toBe(false);
+  });
+
+  it('retains undated work after classes finish and excludes malformed dates', () => {
+    const undated = todo({ dueAt: null });
+    const ended = klass();
+    expect(pickNextAction([ended], [undated], new Date('2026-10-25T20:00:00+08:00')))
+      .toEqual({ type: 'allDone', todo: undated });
+    expect(sortTodayTodos([todo({ id: 'invalid', dueAt: NaN }), undated])).toEqual([undated]);
+  });
+
   it('頁首日期用台北曆日', () => {
     expect(formatTodayHeaderDate(now)).toBe('10月25日 週日');
   });

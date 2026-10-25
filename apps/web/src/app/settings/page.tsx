@@ -1,7 +1,16 @@
 'use client';
 
 import Link from 'next/link';
-import { use, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import {
+  use,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  useSyncExternalStore,
+  type ReactNode,
+} from 'react';
 import { type User } from 'firebase/auth';
 import { doc, getDocFromServer } from 'firebase/firestore';
 import { useAuth } from '@/components/AuthGuard';
@@ -43,8 +52,14 @@ import {
   type ThemePreference,
 } from '@/lib/webPreferences';
 import styles from './settings.module.css';
+import {
+  currentSettingsSection,
+  navigateSettingsSection,
+  subscribeSettingsSection,
+  validSettingsSection,
+  type SettingsSection as Section,
+} from './settingsNavigation';
 
-type Section = 'general' | 'notifications' | 'appearance' | 'privacy' | 'account';
 type NotificationToggleKey =
   | 'announcements'
   | 'events'
@@ -162,7 +177,7 @@ function saveLocalPreferences(prefs: StoredWebPreferences) {
 }
 
 export default function SettingsPage(props: {
-  searchParams?: Promise<{ school?: string; schoolId?: string }>;
+  searchParams?: Promise<{ school?: string; schoolId?: string; section?: string }>;
 }) {
   const searchParams = props.searchParams ? use(props.searchParams) : undefined;
   const { schoolSearch } = resolveSchoolPageContext(searchParams);
@@ -173,10 +188,25 @@ export default function SettingsPage(props: {
         <p role="status">確認帳號…</p>
       </SiteShell>
     );
-  return <SettingsContent key={user?.uid ?? 'guest'} user={user} schoolSearch={schoolSearch} />;
+  return (
+    <SettingsContent
+      key={user?.uid ?? 'guest'}
+      user={user}
+      schoolSearch={schoolSearch}
+      initialSection={validSettingsSection(searchParams?.section)}
+    />
+  );
 }
 
-function SettingsContent({ user, schoolSearch }: { user: User | null; schoolSearch: string }) {
+function SettingsContent({
+  user,
+  schoolSearch,
+  initialSection,
+}: {
+  user: User | null;
+  schoolSearch: string;
+  initialSection: Section;
+}) {
   const { signOutUser } = useAuth();
   const nuni = useNuniSession();
   const schoolLoginReady = useSignInOptions().studentId;
@@ -197,7 +227,23 @@ function SettingsContent({ user, schoolSearch }: { user: User | null; schoolSear
     [user],
   );
   const { success, error, info } = useToast();
-  const [activeSection, setActiveSection] = useState<Section>('general');
+  const activeSection = useSyncExternalStore(
+    subscribeSettingsSection,
+    currentSettingsSection,
+    () => initialSection,
+  );
+  const sectionContent = useRef<HTMLDivElement>(null);
+  const focusSection = useRef(false);
+  useEffect(() => {
+    if (focusSection.current) {
+      focusSection.current = false;
+      sectionContent.current?.focus();
+    }
+  }, [activeSection]);
+  function openSection(section: Section) {
+    focusSection.current = true;
+    navigateSettingsSection(section);
+  }
   const [loadingProfile, setLoadingProfile] = useState(true);
   const [savingProfile, setSavingProfile] = useState(false);
   const [savingNotifications, setSavingNotifications] = useState(false);
@@ -501,7 +547,7 @@ function SettingsContent({ user, schoolSearch }: { user: User | null; schoolSear
             <span className={styles.value}>繁體中文</span>
           </SettingRow>
           <SettingRow title="此瀏覽器的外觀" subtitle="色彩、字級與閱讀偏好會保留在這個瀏覽器。">
-            <button type="button" className="btn" onClick={() => setActiveSection('appearance')}>
+            <button type="button" className="btn" onClick={() => openSection('appearance')}>
               調整外觀
             </button>
           </SettingRow>
@@ -828,7 +874,7 @@ function SettingsContent({ user, schoolSearch }: { user: User | null; schoolSear
             title="個人資料"
             subtitle="姓名、學號與系所由你自行填寫，不會因此取得學校或課程權限。"
           >
-            <button type="button" className="btn" onClick={() => setActiveSection('account')}>
+            <button type="button" className="btn" onClick={() => openSection('account')}>
               查看資料
             </button>
           </SettingRow>
@@ -940,7 +986,7 @@ function SettingsContent({ user, schoolSearch }: { user: User | null; schoolSear
         </div>
       );
     const providerIds = user?.providerData?.map((provider) => provider.providerId) ?? [];
-    const loginMethod = providerIds.includes('google.com')
+    const loginMethod = providerIds.some((providerId) => providerId === 'google.com')
       ? 'Google 帳號'
       : providerIds.includes('password')
         ? '電子郵件與密碼'
@@ -1086,15 +1132,43 @@ function SettingsContent({ user, schoolSearch }: { user: User | null; schoolSear
     <SiteShell title="設定" subtitle="讓校園生活，照你的習慣安排。">
       <div className={styles.layout}>
         <aside className={styles.sidebar}>
-          <nav aria-label="設定分類" className={styles.navigation}>
+          <nav
+            aria-label="設定分類"
+            className={styles.navigation}
+            onKeyDown={(event) => {
+              if (event.nativeEvent.isComposing || event.altKey || event.ctrlKey || event.metaKey)
+                return;
+              const target = event.target;
+              if (!(target instanceof HTMLButtonElement)) return;
+              const index = SECTIONS.findIndex((section) => section.id === target.dataset.section);
+              if (index < 0) return;
+              let next = index;
+              if (event.key === 'ArrowRight' || event.key === 'ArrowDown')
+                next = (index + 1) % SECTIONS.length;
+              else if (event.key === 'ArrowLeft' || event.key === 'ArrowUp')
+                next = (index + SECTIONS.length - 1) % SECTIONS.length;
+              else if (event.key === 'Home') next = 0;
+              else if (event.key === 'End') next = SECTIONS.length - 1;
+              else return;
+              event.preventDefault();
+              const button = event.currentTarget.querySelector<HTMLButtonElement>(
+                `[data-section="${SECTIONS[next].id}"]`,
+              );
+              button?.focus({ preventScroll: true });
+              button?.scrollIntoView?.({ block: 'nearest', inline: 'nearest' });
+              navigateSettingsSection(SECTIONS[next].id);
+            }}
+          >
             {SECTIONS.map((section) => (
               <button
                 key={section.id}
+                id={`settings-nav-${section.id}`}
+                data-section={section.id}
                 type="button"
                 aria-label={section.label}
                 aria-current={activeSection === section.id ? 'page' : undefined}
                 aria-controls="settings-section"
-                onClick={() => setActiveSection(section.id)}
+                onClick={() => navigateSettingsSection(section.id)}
               >
                 <strong>{section.label}</strong>
                 <span>{section.description}</span>
@@ -1105,7 +1179,14 @@ function SettingsContent({ user, schoolSearch }: { user: User | null; schoolSear
             返回個人資料 <span aria-hidden="true">↗</span>
           </Link>
         </aside>
-        <div className={styles.content} id="settings-section">
+        <div
+          ref={sectionContent}
+          className={styles.content}
+          id="settings-section"
+          role="region"
+          aria-labelledby={`settings-nav-${activeSection}`}
+          tabIndex={-1}
+        >
           {!localPrefsSaved && (
             <p role="alert" className={styles.notice}>
               此瀏覽器無法儲存外觀設定，這次調整只會保留到關閉頁面。

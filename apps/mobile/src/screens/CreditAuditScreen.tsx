@@ -1,16 +1,12 @@
-// @ts-nocheck — main 上既有的型別破洞（campusCreditAudit 引用但未宣告），等 owner 修；
-// 本 PR 範圍外。
-/* eslint-disable */
-import React, { useMemo, useState, useCallback, useEffect } from 'react';
-import { ScrollView, Text, View, Pressable, Alert, ActivityIndicator } from 'react-native';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Alert, Linking, ScrollView, Text, View, Pressable } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { Screen, Card, Pill, Button, LoadingState, ErrorState, AuthGuard } from '../ui/components';
 import { TAB_BAR_CONTENT_BOTTOM_PADDING } from '../ui/navigationTheme';
 import { theme } from '../ui/theme';
 import { useAuth } from '../state/auth';
-import { shouldBlockForNoLogin, isDemoUid } from '../services/demoSession';
+import { shouldBlockForNoLogin } from '../services/demoSession';
 import { useSchool } from '../state/school';
-import { hasDataSource, getDataSource } from '../data';
 import type { Grade } from '../data/types';
 import {
   type PUCreditCat,
@@ -22,144 +18,135 @@ import {
   matchDepartment,
   mapCourseTypeDetailed,
 } from '../data/puGradRequirements';
+import { PU_GRADE_POINT_POLICY } from '../data/apiAdapters/puGradePointPolicy';
+import {
+  computeCreditTotals,
+  isPassed,
+  scoreDisplay,
+  semesterLabel,
+  semesterWeightedAverage,
+} from './creditAudit/creditMath';
+import { isProvidenceUniversitySchool } from './creditAudit/gradeScope';
+import {
+  loadCreditRecords,
+  type GpaSnapshot,
+} from './creditAudit/loadCreditRecords';
 
-// ─── Helpers ────────────────────────────────────────────
+type NavigationLike = {
+  navigate?: (name: string, params?: unknown) => void;
+  goBack?: () => void;
+  getParent?: () => { navigate?: (name: string, params?: unknown) => void } | undefined;
+};
 
-function semesterLabel(sem: string): string {
-  if (sem.length >= 4) {
-    const year = sem.substring(0, sem.length - 1);
-    const term = sem.charAt(sem.length - 1);
-    return `${year} 學年 第${term}學期`;
-  }
-  return sem;
-}
+type Props = {
+  navigation?: NavigationLike;
+};
 
-function scoreDisplay(grade: Grade): string {
-  const s = grade.grade ?? grade.score;
-  if (s === undefined || s === null) return '-';
-  if (typeof s === 'string') return s;
-  return String(Math.round(s * 10) / 10);
-}
+const CATEGORY_ORDER: PUCreditCat[] = [
+  'required',
+  'elective',
+  'general',
+  'common',
+  'pe',
+  'service',
+  'free',
+];
 
-function isPassed(grade: Grade): boolean {
-  const s = grade.grade ?? grade.score ?? 0;
-  return s >= 60;
-}
-
-// ─── Component ──────────────────────────────────────────
-export function CreditAuditScreen(props: any) {
+export function CreditAuditScreen(props: Props) {
   const auth = useAuth();
   const { school } = useSchool();
+  const uid = auth.user?.uid ?? null;
+  const schoolId = school.id;
+  const isPu = isProvidenceUniversitySchool(schoolId);
+
   const [grades, setGrades] = useState<Grade[]>([]);
-  const [gpaData, setGpaData] = useState<{
-    gpa: number;
-    totalCredits: number;
-    totalPoints: number;
-  } | null>(null);
+  const [gpaData, setGpaData] = useState<GpaSnapshot | null>(null);
+  const [gpaUnavailable, setGpaUnavailable] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [readAt, setReadAt] = useState<number | null>(null);
+  const [fromOfflineSchoolCache, setFromOfflineSchoolCache] = useState(false);
   const [expandedSem, setExpandedSem] = useState<string | null>(null);
   const [showDeptPicker, setShowDeptPicker] = useState(false);
   const [manualDeptId, setManualDeptId] = useState<string | null>(null);
 
-  // ── 自動偵測系所 ──
-  const detectedDept = useMemo(() => {
-    const dept = auth.profile?.department;
-    return matchDepartment(dept);
-  }, [auth.profile?.department]);
+  const requestGen = useRef(0);
+  const mountedRef = useRef(true);
 
-  // 使用者手動選擇的系所 > 自動偵測
-  const currentDept: DeptGradRequirement = useMemo(() => {
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+      requestGen.current += 1;
+    };
+  }, []);
+
+  const detectedDept = useMemo(() => {
+    if (!isPu) return null;
+    return matchDepartment(auth.profile?.department);
+  }, [auth.profile?.department, isPu]);
+
+  const currentDept: DeptGradRequirement | null = useMemo(() => {
+    if (!isPu) return null;
     if (manualDeptId) {
       const found = PU_DEPARTMENTS.find((d) => d.id === manualDeptId);
       if (found) return found;
     }
-    return detectedDept;
-  }, [manualDeptId, detectedDept]);
+    return detectedDept ?? PU_DEFAULT_REQUIREMENT;
+  }, [manualDeptId, detectedDept, isPu]);
 
-  // ── 載入成績 ──
-  useEffect(() => {
-    if (!auth.user?.uid || !hasDataSource()) {
+  const deptIsUnknown = Boolean(isPu && currentDept && currentDept.id === 'default' && !manualDeptId);
+
+  const load = useCallback(async () => {
+    const gen = ++requestGen.current;
+    setLoading(true);
+
+    const result = await loadCreditRecords({ uid, schoolId });
+
+    if (!mountedRef.current || gen !== requestGen.current) return;
+
+    if (result.ok === false) {
+      setError(result.errorMessage);
+      setGrades([]);
+      setGpaData(null);
+      setGpaUnavailable(false);
+      setReadAt(null);
+      setFromOfflineSchoolCache(false);
       setLoading(false);
       return;
     }
-    setLoading(true);
-    const ds = getDataSource();
-    Promise.all([
-      ds.listGrades(auth.user.uid, undefined, school.id).catch(() => [] as Grade[]),
-      ds
-        .getGPA(auth.user.uid, school.id)
-        .catch(() => ({ gpa: 0, totalCredits: 0, totalPoints: 0 })),
-    ])
-      .then(([g, gpa]) => {
-        setGrades(g);
-        setGpaData(gpa);
-        setError(null);
-      })
-      .catch((e) => setError(e?.message || '載入失敗'))
-      .finally(() => setLoading(false));
-  }, [auth.user?.uid, school.id]);
 
-  // ── 計算學分摘要（使用系所門檻） ──
-  const creditSummary = useMemo(() => {
-    const req = currentDept.credits;
-    const byCategory: Record<
-      PUCreditCat,
-      {
-        earned: number;
-        courses: number;
-        required: number;
-        passedCourses: number;
-        failedCourses: number;
-      }
-    > = {
-      required: {
-        earned: 0,
-        courses: 0,
-        required: req.required,
-        passedCourses: 0,
-        failedCourses: 0,
-      },
-      elective: {
-        earned: 0,
-        courses: 0,
-        required: req.elective,
-        passedCourses: 0,
-        failedCourses: 0,
-      },
-      general: { earned: 0, courses: 0, required: req.general, passedCourses: 0, failedCourses: 0 },
-      common: { earned: 0, courses: 0, required: req.common, passedCourses: 0, failedCourses: 0 },
-      pe: { earned: 0, courses: 0, required: req.pe, passedCourses: 0, failedCourses: 0 },
-      service: { earned: 0, courses: 0, required: req.service, passedCourses: 0, failedCourses: 0 },
-      free: { earned: 0, courses: 0, required: req.free, passedCourses: 0, failedCourses: 0 },
+    setGrades(result.grades);
+    setGpaData(result.gpa);
+    setGpaUnavailable(result.gpaUnavailable);
+    setReadAt(result.readAt);
+    setFromOfflineSchoolCache(result.fromOfflineSchoolCache);
+    setError(null);
+    setLoading(false);
+  }, [uid, schoolId]);
+
+  // 帳號／學校切換：清掉私人資料與手動系所，並以新世代載入
+  useEffect(() => {
+    setManualDeptId(null);
+    setShowDeptPicker(false);
+    setExpandedSem(null);
+    setGrades([]);
+    setGpaData(null);
+    setGpaUnavailable(false);
+    setReadAt(null);
+    setFromOfflineSchoolCache(false);
+    setError(null);
+    void load();
+    return () => {
+      requestGen.current += 1;
     };
+  }, [load]);
 
-    let totalEarned = 0;
-    let totalCourses = 0;
-    let passedCount = 0;
-    let failedCount = 0;
+  const creditSummary = useMemo(
+    () => computeCreditTotals(grades, currentDept),
+    [grades, currentDept],
+  );
 
-    for (const g of grades) {
-      const cat = mapCourseTypeDetailed(g.courseType, g.courseName);
-      const passed = isPassed(g);
-      byCategory[cat].courses += 1;
-      totalCourses += 1;
-
-      if (passed) {
-        byCategory[cat].earned += g.credits;
-        byCategory[cat].passedCourses += 1;
-        totalEarned += g.credits;
-        passedCount += 1;
-      } else {
-        byCategory[cat].failedCourses += 1;
-        failedCount += 1;
-      }
-    }
-
-    return { byCategory, totalEarned, totalCourses, passedCount, failedCount };
-  }, [grades, currentDept]);
-
-  // ── 按學期分組 ──
   const bySemester = useMemo(() => {
     const map = new Map<string, Grade[]>();
     for (const g of grades) {
@@ -170,51 +157,33 @@ export function CreditAuditScreen(props: any) {
     return [...map.entries()].sort((a, b) => b[0].localeCompare(a[0]));
   }, [grades]);
 
-  // ── 重新載入 ──
-  const handleReload = useCallback(async () => {
-    if (!auth.user?.uid || !hasDataSource()) return;
-    setLoading(true);
-    try {
-      const ds = getDataSource();
-      const [g, gpa] = await Promise.all([
-        ds.listGrades(auth.user.uid, undefined, school.id),
-        ds
-          .getGPA(auth.user.uid, school.id)
-          .catch(() => ({ gpa: 0, totalCredits: 0, totalPoints: 0 })),
-      ]);
-      setGrades(g);
-      setGpaData(gpa);
-    } catch (e: any) {
-      setError(e?.message || '載入失敗');
-    } finally {
-      setLoading(false);
-    }
-  }, [auth.user?.uid, school.id]);
-
-  // ── Guards ──
   if (shouldBlockForNoLogin({ uid: auth.user?.uid ?? null, hasUser: !!auth.user })) {
     return (
       <AuthGuard
         user={auth.user}
-        onLogin={() => props?.navigation?.navigate?.('Me')}
+        onLogin={() => props.navigation?.navigate?.('Me')}
         title="需要登入"
-        description="請登入以使用學分試算功能。登入後可查看完整的修課紀錄、學分進度與畢業審查。"
+        description="請登入後再查看修課紀錄與學分試算。登入後可看到目前帳號、目前學校的成績明細。"
       >
         <></>
       </AuthGuard>
     );
   }
 
-  if (loading) return <LoadingState title="學分試算" subtitle="載入成績資料中..." rows={3} />;
+  if (loading) {
+    return <LoadingState title="學分試算" subtitle="載入成績資料中..." rows={3} />;
+  }
 
   if (error) {
     return (
       <ErrorState
         title="學分試算"
-        subtitle="載入失敗"
+        subtitle="讀取失敗"
         hint={error}
         actionText="重試"
-        onAction={handleReload}
+        onAction={() => {
+          void load();
+        }}
         errorType="network"
       />
     );
@@ -233,12 +202,12 @@ export function CreditAuditScreen(props: any) {
                 style={{ opacity: 0.5 }}
               />
               <Text style={{ fontSize: 16, fontWeight: '700', color: theme.colors.text }}>
-                尚無成績資料
+                尚無可用的修課紀錄
               </Text>
               <Text style={{ color: theme.colors.muted, textAlign: 'center', lineHeight: 20 }}>
-                請先在「我的」頁面登入 E校園帳號，系統會自動匯入您的完整成績紀錄。
+                你在「{school.name}」尚無可用的修課紀錄。若成績剛發布或同步，請稍後重新讀取。
               </Text>
-              <Button text="重新整理" kind="primary" onPress={handleReload} />
+              <Button text="重新整理" kind="primary" onPress={() => void load()} />
             </View>
           </Card>
         </ScrollView>
@@ -246,22 +215,12 @@ export function CreditAuditScreen(props: any) {
     );
   }
 
-  const { byCategory, totalEarned, totalCourses, passedCount, failedCount } = creditSummary;
-  const totalRequired = currentDept.totalCredits;
-  const totalPct = Math.min(1, totalEarned / totalRequired);
-  const remaining = Math.max(0, totalRequired - totalEarned);
-  const satisfied = remaining <= 0;
-
-  // 學分類別顯示順序
-  const categoryOrder: PUCreditCat[] = [
-    'required',
-    'elective',
-    'general',
-    'common',
-    'pe',
-    'service',
-    'free',
-  ];
+  const { byCategory, totalEarned, totalCourses, passedCount, failedCount, ungradedCount, retakeCollapsed } =
+    creditSummary;
+  const totalRequired = currentDept?.totalCredits ?? 0;
+  const totalPct =
+    isPu && totalRequired > 0 ? Math.min(1, totalEarned / totalRequired) : 0;
+  const remaining = isPu && totalRequired > 0 ? Math.max(0, totalRequired - totalEarned) : 0;
 
   return (
     <Screen>
@@ -269,220 +228,321 @@ export function CreditAuditScreen(props: any) {
         style={{ flex: 1 }}
         contentContainerStyle={{ gap: 12, paddingBottom: TAB_BAR_CONTENT_BOTTOM_PADDING }}
       >
-        {/* ═══ 系所資訊 ═══ */}
-        <Card title="畢業門檻">
-          <View style={{ gap: 10 }}>
-            <View
-              style={{
-                flexDirection: 'row',
-                justifyContent: 'space-between',
-                alignItems: 'center',
-              }}
-            >
-              <View style={{ flex: 1 }}>
-                <Text style={{ color: theme.colors.text, fontWeight: '700', fontSize: 16 }}>
-                  {currentDept.name}
-                </Text>
-                {currentDept.college ? (
-                  <Text style={{ color: theme.colors.muted, fontSize: 12, marginTop: 2 }}>
-                    {currentDept.college} · 畢業門檻 {totalRequired} 學分
-                  </Text>
-                ) : (
-                  <Text style={{ color: theme.colors.muted, fontSize: 12, marginTop: 2 }}>
-                    畢業門檻 {totalRequired} 學分
-                  </Text>
-                )}
-              </View>
-              <Pressable
-                onPress={() => setShowDeptPicker(!showDeptPicker)}
-                style={({ pressed }) => ({
-                  paddingHorizontal: 12,
-                  paddingVertical: 6,
-                  borderRadius: theme.radius.md,
-                  backgroundColor: theme.colors.surface2,
-                  borderWidth: 1,
-                  borderColor: theme.colors.border,
-                  opacity: pressed ? 0.7 : 1,
-                })}
+        <Card title="試算依據">
+          <Text style={{ color: theme.colors.muted, fontSize: 13, lineHeight: 20 }}>
+            {isPu
+              ? '依靜宜參考模型試算；入學年度、學制、重修與抵免規則，請以學校正式審查為準。'
+              : `「${school.name}」尚未設定畢業規則。以下整理你在此校的修課紀錄與參考加總。`}
+          </Text>
+          <Text style={{ color: theme.colors.muted, fontSize: 13, lineHeight: 20, marginTop: 6 }}>
+            參考通過學分以60分或來源明示通過加總；各學制及課程的及格標準可能不同。
+          </Text>
+        </Card>
+
+        {isPu && currentDept ? (
+          <Card title="參考畢業門檻（靜宜模型）">
+            <View style={{ gap: 10 }}>
+              <View
+                style={{
+                  flexDirection: 'row',
+                  justifyContent: 'space-between',
+                  alignItems: 'center',
+                }}
               >
-                <Text style={{ color: theme.colors.accent, fontSize: 12, fontWeight: '700' }}>
-                  {showDeptPicker ? '收合' : '切換系所'}
-                </Text>
-              </Pressable>
-            </View>
-
-            {detectedDept.id !== 'default' && !manualDeptId && (
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                <Ionicons name="checkmark-circle" size={14} color={theme.colors.success} />
-                <Text style={{ color: theme.colors.success, fontSize: 11 }}>
-                  已根據 E 校園資料自動偵測為「{detectedDept.shortName}」
-                </Text>
+                <View style={{ flex: 1, paddingRight: 8 }}>
+                  <Text style={{ color: theme.colors.text, fontWeight: '700', fontSize: 16 }}>
+                    {currentDept.name}
+                  </Text>
+                  {currentDept.college ? (
+                    <Text style={{ color: theme.colors.muted, fontSize: 12, marginTop: 2 }}>
+                      {currentDept.college} · 參考總學分 {totalRequired}
+                    </Text>
+                  ) : (
+                    <Text style={{ color: theme.colors.muted, fontSize: 12, marginTop: 2 }}>
+                      參考總學分 {totalRequired}
+                    </Text>
+                  )}
+                </View>
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel={showDeptPicker ? '收合系所清單' : '切換參考系所'}
+                  onPress={() => setShowDeptPicker(!showDeptPicker)}
+                  style={({ pressed }) => ({
+                    minHeight: 44,
+                    minWidth: 44,
+                    paddingHorizontal: 12,
+                    paddingVertical: 10,
+                    borderRadius: theme.radius.md,
+                    backgroundColor: theme.colors.surface2,
+                    borderWidth: 1,
+                    borderColor: theme.colors.border,
+                    justifyContent: 'center',
+                    opacity: pressed ? 0.7 : 1,
+                  })}
+                >
+                  <Text style={{ color: theme.colors.accent, fontSize: 13, fontWeight: '700' }}>
+                    {showDeptPicker ? '收合' : '切換系所'}
+                  </Text>
+                </Pressable>
               </View>
-            )}
 
-            {currentDept.notes && (
-              <Text style={{ color: theme.colors.muted, fontSize: 11, lineHeight: 16 }}>
-                {currentDept.notes}
-              </Text>
-            )}
+              {deptIsUnknown ? (
+                <Text style={{ color: theme.colors.muted, fontSize: 12, lineHeight: 18 }}>
+                  尚未對應你的系所，目前使用一般參考模型。請切換系所，並核對你的入學年度規定。
+                </Text>
+              ) : detectedDept && detectedDept.id !== 'default' && !manualDeptId ? (
+                <Text style={{ color: theme.colors.muted, fontSize: 12, lineHeight: 18 }}>
+                  依個人資料中的系所字串對應到「{detectedDept.shortName}」參考模型，仍可能因入學年度或轉系而需手動調整。
+                </Text>
+              ) : null}
 
-            {/* 系所選擇器 */}
-            {showDeptPicker && (
-              <View style={{ gap: 6, marginTop: 4 }}>
-                {PU_DEPARTMENTS.map((dept) => {
-                  const isActive = dept.id === currentDept.id;
-                  return (
+              {currentDept.notes ? (
+                <Text style={{ color: theme.colors.muted, fontSize: 11, lineHeight: 16 }}>
+                  {currentDept.notes}
+                </Text>
+              ) : null}
+
+              {showDeptPicker ? (
+                <View style={{ gap: 6, marginTop: 4 }}>
+                  {PU_DEPARTMENTS.map((dept) => {
+                    const isActive = dept.id === currentDept.id;
+                    return (
+                      <Pressable
+                        key={dept.id}
+                        accessibilityRole="button"
+                        accessibilityLabel={`選擇參考系所 ${dept.name}`}
+                        onPress={() => {
+                          setManualDeptId(dept.id);
+                          setShowDeptPicker(false);
+                        }}
+                        style={({ pressed }) => ({
+                          flexDirection: 'row',
+                          alignItems: 'center',
+                          minHeight: 48,
+                          padding: 12,
+                          borderRadius: theme.radius.md,
+                          backgroundColor: isActive
+                            ? theme.colors.accentSoft
+                            : theme.colors.surface2,
+                          borderWidth: 1,
+                          borderColor: isActive ? theme.colors.accent : theme.colors.border,
+                          opacity: pressed ? 0.7 : 1,
+                        })}
+                      >
+                        <View style={{ flex: 1 }}>
+                          <Text
+                            style={{ color: theme.colors.text, fontWeight: '700', fontSize: 14 }}
+                          >
+                            {dept.name}
+                          </Text>
+                          <Text style={{ color: theme.colors.muted, fontSize: 12 }}>
+                            {dept.college} · 參考 {dept.totalCredits} 學分
+                          </Text>
+                        </View>
+                        {isActive ? (
+                          <Ionicons name="checkmark-circle" size={20} color={theme.colors.accent} />
+                        ) : null}
+                      </Pressable>
+                    );
+                  })}
+                  {manualDeptId ? (
                     <Pressable
-                      key={dept.id}
+                      accessibilityRole="button"
+                      accessibilityLabel="清除手動系所選擇"
                       onPress={() => {
-                        setManualDeptId(dept.id);
+                        setManualDeptId(null);
                         setShowDeptPicker(false);
                       }}
                       style={({ pressed }) => ({
-                        flexDirection: 'row',
-                        alignItems: 'center',
-                        padding: 10,
+                        minHeight: 44,
+                        padding: 12,
                         borderRadius: theme.radius.md,
-                        backgroundColor: isActive ? theme.colors.accentSoft : theme.colors.surface2,
+                        backgroundColor: theme.colors.surface2,
                         borderWidth: 1,
-                        borderColor: isActive ? theme.colors.accent : theme.colors.border,
+                        borderColor: theme.colors.border,
+                        alignItems: 'center',
+                        justifyContent: 'center',
                         opacity: pressed ? 0.7 : 1,
                       })}
                     >
-                      <View style={{ flex: 1 }}>
-                        <Text style={{ color: theme.colors.text, fontWeight: '700', fontSize: 13 }}>
-                          {dept.name}
-                        </Text>
-                        <Text style={{ color: theme.colors.muted, fontSize: 11 }}>
-                          {dept.college} · {dept.totalCredits} 學分
-                        </Text>
-                      </View>
-                      {isActive && (
-                        <Ionicons name="checkmark-circle" size={18} color={theme.colors.accent} />
-                      )}
+                      <Text style={{ color: theme.colors.accent, fontWeight: '600', fontSize: 13 }}>
+                        改回資料對應
+                      </Text>
                     </Pressable>
-                  );
-                })}
-                {/* 恢復自動偵測 */}
-                {manualDeptId && (
-                  <Pressable
-                    onPress={() => {
-                      setManualDeptId(null);
-                      setShowDeptPicker(false);
-                    }}
-                    style={({ pressed }) => ({
-                      padding: 10,
-                      borderRadius: theme.radius.md,
-                      backgroundColor: theme.colors.surface2,
-                      borderWidth: 1,
-                      borderColor: theme.colors.border,
-                      alignItems: 'center',
-                      opacity: pressed ? 0.7 : 1,
-                    })}
-                  >
-                    <Text style={{ color: theme.colors.accent, fontWeight: '600', fontSize: 12 }}>
-                      恢復自動偵測
-                    </Text>
-                  </Pressable>
-                )}
+                  ) : null}
+                </View>
+              ) : null}
+            </View>
+          </Card>
+        ) : null}
+
+        <Card title={isPu ? '參考學分進度' : '修課學分加總'}>
+          {isPu && currentDept ? (
+            <>
+              <View
+                style={{
+                  flexDirection: 'row',
+                  justifyContent: 'space-between',
+                  alignItems: 'center',
+                }}
+              >
+                <Text style={{ color: theme.colors.muted, fontSize: 13 }}>
+                  參考門檻 {totalRequired} 學分
+                </Text>
+                <Pill
+                  text={deptIsUnknown ? '門檻未驗證' : remaining <= 0 ? '參考已達標' : '參考未達標'}
+                  kind={remaining <= 0 && !deptIsUnknown ? 'accent' : 'default'}
+                />
               </View>
-            )}
-          </View>
+              <View style={{ flexDirection: 'row', alignItems: 'baseline', marginTop: 8 }}>
+                <Text style={{ color: theme.colors.text, fontWeight: '700', fontSize: 40 }}>
+                  {totalEarned}
+                </Text>
+                <Text
+                  style={{
+                    color: theme.colors.muted,
+                    fontWeight: '700',
+                    fontSize: 20,
+                    marginLeft: 4,
+                  }}
+                >
+                  / {totalRequired}
+                </Text>
+              </View>
+              <View
+                style={{
+                  marginTop: 10,
+                  height: 14,
+                  borderRadius: 7,
+                  backgroundColor: theme.colors.surface2,
+                  overflow: 'hidden',
+                }}
+              >
+                <View
+                  style={{
+                    height: '100%',
+                    width: `${Math.round(totalPct * 100)}%`,
+                    backgroundColor:
+                      remaining <= 0 && !deptIsUnknown ? '#34C759' : theme.colors.accent,
+                    borderRadius: 7,
+                  }}
+                />
+              </View>
+              <Text style={{ color: theme.colors.muted, fontSize: 12, marginTop: 8, lineHeight: 18 }}>
+                {deptIsUnknown
+                  ? '系所門檻尚未驗證，數字僅供粗估。'
+                  : remaining > 0
+                    ? `粗估還差約 ${remaining} 學分（非正式認定）。`
+                    : '粗估總學分已達參考門檻，正式結果仍以學校審查為準。'}
+              </Text>
+            </>
+          ) : (
+            <>
+              <Text style={{ color: theme.colors.muted, fontSize: 13 }}>目前帳號粗估已修學分</Text>
+              <Text style={{ color: theme.colors.text, fontWeight: '700', fontSize: 40, marginTop: 4 }}>
+                {totalEarned}
+              </Text>
+              <Text style={{ color: theme.colors.muted, fontSize: 12, marginTop: 8, lineHeight: 18 }}>
+                此校未套用畢業門檻，請核對正式修業規定。
+              </Text>
+            </>
+          )}
+          <Text style={{ color: theme.colors.muted, fontSize: 12, marginTop: 6 }}>
+            {totalCourses} 門課・通過 {passedCount}・未通過 {failedCount}
+            {ungradedCount > 0 ? `・未評分 ${ungradedCount}` : ''}
+            {retakeCollapsed > 0 ? `・重複修課合併 ${retakeCollapsed} 筆` : ''}
+          </Text>
         </Card>
 
-        {/* ═══ 總學分進度 ═══ */}
-        <Card title="畢業學分進度">
-          <View
-            style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}
-          >
-            <Text style={{ color: theme.colors.muted, fontSize: 13 }}>
-              畢業門檻 {totalRequired} 學分
+        {gpaUnavailable ? (
+          <Card title="本頁參考 GPA">
+            <Text style={{ color: theme.colors.text, fontSize: 15, lineHeight: 22 }}>
+              參考 GPA 暫時無法計算
             </Text>
-            <Pill text={satisfied ? '已達標' : '未達標'} kind={satisfied ? 'accent' : 'default'} />
-          </View>
-          <View style={{ flexDirection: 'row', alignItems: 'baseline', marginTop: 8 }}>
-            <Text style={{ color: theme.colors.text, fontWeight: '700', fontSize: 40 }}>
-              {totalEarned}
+            <Text style={{ color: theme.colors.muted, fontSize: 13, marginTop: 6, lineHeight: 18 }}>
+              修課紀錄仍可查看。僅在本頁已接受列具有完整績點與可用學分時才計算；不會以 0
+              代替，也不會改用未驗證的外部 GPA 快照。
             </Text>
-            <Text
-              style={{ color: theme.colors.muted, fontWeight: '700', fontSize: 20, marginLeft: 4 }}
-            >
-              / {totalRequired}
-            </Text>
-          </View>
-          <View
-            style={{
-              marginTop: 10,
-              height: 14,
-              borderRadius: 7,
-              backgroundColor: theme.colors.surface2,
-              overflow: 'hidden',
-            }}
-          >
-            <View
-              style={{
-                height: '100%',
-                width: `${Math.round(totalPct * 100)}%`,
-                backgroundColor: satisfied ? '#34C759' : theme.colors.accent,
-                borderRadius: 7,
-              }}
-            />
-          </View>
-          <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginTop: 8 }}>
-            <Text style={{ color: theme.colors.muted, fontSize: 12 }}>
-              {remaining > 0 ? `還需 ${remaining} 學分` : '已達畢業學分要求'}
-            </Text>
-            <Text style={{ color: theme.colors.muted, fontSize: 12 }}>
-              {totalCourses} 門課・通過 {passedCount}・未通過 {failedCount}
-            </Text>
-          </View>
-        </Card>
-
-        {/* ═══ GPA ═══ */}
-        {gpaData && gpaData.totalCredits > 0 && (
-          <Card title="GPA 總績點">
+            <Button text="重試讀取" onPress={() => void load()} />
+          </Card>
+        ) : gpaData && gpaData.totalCredits > 0 ? (
+          <Card title="本頁參考 GPA">
             <View style={{ flexDirection: 'row', alignItems: 'baseline' }}>
               <Text style={{ color: theme.colors.text, fontWeight: '700', fontSize: 40 }}>
                 {gpaData.gpa.toFixed(2)}
               </Text>
-              <Text
-                style={{
-                  color: theme.colors.muted,
-                  fontWeight: '700',
-                  fontSize: 20,
-                  marginLeft: 4,
-                }}
-              >
-                / 4.00
-              </Text>
+              {gpaData.gradePointScale != null ? (
+                <Text
+                  style={{
+                    color: theme.colors.muted,
+                    fontWeight: '700',
+                    fontSize: 20,
+                    marginLeft: 4,
+                  }}
+                >
+                  / {gpaData.gradePointScale.toFixed(2)}
+                </Text>
+              ) : null}
             </View>
-            <Text style={{ color: theme.colors.muted, marginTop: 6, fontSize: 13 }}>
-              已修 {gpaData.totalCredits} 學分・加權總績點 {gpaData.totalPoints.toFixed(1)}
+            <Text style={{ color: theme.colors.muted, marginTop: 6, fontSize: 13, lineHeight: 18 }}>
+              依本頁已接受列加權；含全部有績點的修習嘗試，符號通過／未通過不納入平均。非正式累計
+              GPA。
+            </Text>
+            {isPu && grades.some((g) =>
+              g.gradePointProvenance === 'local-reference' &&
+              (g.gradeSource === 'school-official' || g.gradeSource === 'school-official-offline'),
+            ) ? (
+              <Pressable
+                accessibilityRole="link"
+                accessibilityLabel="開啟靜宜大學學則績點對照"
+                onPress={() => {
+                  void Linking.openURL(PU_GRADE_POINT_POLICY.regulationsPdfUrl).catch(() => {
+                    Alert.alert('學則連結暫時無法開啟', '請稍後重試，或到靜宜大學綜合業務組網站查看學則。');
+                  });
+                }}
+                style={({ pressed }) => ({ marginTop: 6, opacity: pressed ? 0.7 : 1 })}
+              >
+                <Text style={{ color: theme.colors.accent, fontSize: 13, lineHeight: 18 }}>
+                  績點換算依據：靜宜學則（2026/02 修訂）→
+                </Text>
+              </Pressable>
+            ) : null}
+            <Text style={{ color: theme.colors.muted, marginTop: 4, fontSize: 13 }}>
+              計入 {gpaData.totalCredits} 學分・加權總績點 {gpaData.totalPoints.toFixed(1)}
             </Text>
           </Card>
-        )}
+        ) : null}
 
-        {/* ═══ 分類進度 ═══ */}
-        {currentDept && (
-          <>
-          <Card title="各類學分進度" subtitle={currentDept.shortName}>
-            {categoryOrder.map((k) => {
+        <Card
+          title={isPu ? '各類學分進度（參考）' : '各類修課加總'}
+          subtitle={isPu && currentDept ? currentDept.shortName : school.shortName || school.name}
+        >
+          {CATEGORY_ORDER.map((k) => {
             const b = byCategory[k];
-            // 體育和服務學習看門數，其他看學分
-            const isCountBased = k === 'pe' || k === 'service';
+            const isCountBased = isPu && (k === 'pe' || k === 'service');
             const showVal = isCountBased ? b.passedCourses : b.earned;
-            const reqVal = isCountBased
-              ? k === 'pe'
-                ? currentDept.peCoursesRequired
-                : currentDept.serviceCoursesRequired
-              : b.required;
+            const reqVal = isPu && currentDept
+              ? isCountBased
+                ? k === 'pe'
+                  ? currentDept.peCoursesRequired
+                  : currentDept.serviceCoursesRequired
+                : b.required
+              : 0;
 
-            // 跳過無門檻且無修課的類別
-            if (reqVal === 0 && b.courses === 0 && !isCountBased) return null;
+            if (isPu) {
+              if (reqVal === 0 && b.courses === 0 && !isCountBased) return null;
+            } else if (b.courses === 0) {
+              return null;
+            }
 
-            const pct = reqVal <= 0 ? (showVal > 0 ? 1 : 0) : Math.min(1, showVal / reqVal);
-            const rem = Math.max(0, reqVal - showVal);
-            const done = rem <= 0;
+            const pct =
+              isPu && reqVal > 0
+                ? Math.min(1, showVal / reqVal)
+                : showVal > 0
+                  ? 1
+                  : 0;
+            const rem = isPu ? Math.max(0, reqVal - showVal) : 0;
+            const done = isPu && reqVal > 0 ? rem <= 0 : false;
 
             return (
               <View key={k} style={{ marginBottom: 16 }}>
@@ -493,7 +553,7 @@ export function CreditAuditScreen(props: any) {
                     alignItems: 'center',
                   }}
                 >
-                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, flex: 1 }}>
                     <View
                       style={{
                         width: 10,
@@ -502,10 +562,10 @@ export function CreditAuditScreen(props: any) {
                         backgroundColor: PU_CATEGORY_COLORS[k],
                       }}
                     />
-                    <Text style={{ color: theme.colors.text, fontWeight: '700' }}>
+                    <Text style={{ color: theme.colors.text, fontWeight: '700', fontSize: 15 }}>
                       {PU_CATEGORY_LABELS[k]}
                     </Text>
-                    <Text style={{ color: theme.colors.muted, fontSize: 11 }}>
+                    <Text style={{ color: theme.colors.muted, fontSize: 12 }}>
                       ({b.courses} 門)
                     </Text>
                   </View>
@@ -513,13 +573,14 @@ export function CreditAuditScreen(props: any) {
                     style={{
                       color: done ? '#34C759' : theme.colors.muted,
                       fontWeight: '600',
-                      fontSize: 13,
+                      fontSize: 14,
                     }}
                   >
-                    {showVal}
-                    {isCountBased ? ' 門' : ''}/{reqVal}
-                    {isCountBased ? ' 門' : ''}{' '}
-                    {done ? '✓' : `(差${rem}${isCountBased ? '門' : ''})`}
+                    {isPu
+                      ? `${showVal}${isCountBased ? ' 門' : ''}/${reqVal}${
+                          isCountBased ? ' 門' : ''
+                        }${done ? ' ✓' : rem > 0 ? ` (差${rem}${isCountBased ? '門' : ''})` : ''}`
+                      : `${showVal}${isCountBased ? ' 門' : ' 學分'}`}
                   </Text>
                 </View>
                 <View
@@ -541,51 +602,60 @@ export function CreditAuditScreen(props: any) {
                     }}
                   />
                 </View>
-                {b.failedCourses > 0 && (
-                  <Text style={{ color: '#f43f5e', fontSize: 11, marginTop: 4 }}>
-                    ⚠ 有 {b.failedCourses} 門未通過
+                {b.failedCourses > 0 ? (
+                  <Text style={{ color: '#f43f5e', fontSize: 12, marginTop: 4 }}>
+                    有 {b.failedCourses} 門未通過
                   </Text>
-                )}
+                ) : null}
+                {b.ungradedCourses > 0 ? (
+                  <Text style={{ color: theme.colors.muted, fontSize: 12, marginTop: 4 }}>
+                    有 {b.ungradedCourses} 門尚未評分（不計入已修學分）
+                  </Text>
+                ) : null}
               </View>
             );
           })}
-          </Card>
+        </Card>
 
-          {/* ── 資料更新時間 ── */}
-          {(campusCreditAudit as any).fetchedAt && (
-            <Text style={{ color: theme.colors.muted, fontSize: 11, textAlign: "center", marginTop: 4 }}>
-              資料更新時間：{new Date((campusCreditAudit as any).fetchedAt).toLocaleString("zh-TW")}
-            </Text>
-          )}
-          </>
-        )}
+        {readAt ? (
+          <Text
+            style={{
+              color: theme.colors.muted,
+              fontSize: 12,
+              textAlign: 'center',
+              marginTop: 4,
+              paddingHorizontal: 12,
+            }}
+          >
+            本機讀取時間：{new Date(readAt).toLocaleString('zh-TW')}（非校方正式更新時間）
+            {fromOfflineSchoolCache
+              ? '。目前含離線快取的校務成績，不是這次即時校方更新。'
+              : ''}
+          </Text>
+        ) : null}
 
-        {/* ═══ 各學期明細 ═══ */}
         <Card title="各學期成績明細" subtitle={`共 ${bySemester.length} 個學期`}>
           <View style={{ gap: 8 }}>
             {bySemester.map(([sem, semGrades]) => {
               const isExpanded = expandedSem === sem;
-              const semCredits = semGrades.reduce((s, g) => s + (isPassed(g) ? g.credits : 0), 0);
-              const semScores = semGrades
-                .filter(
-                  (g) => typeof (g.grade ?? g.score) === 'number' && (g.grade ?? g.score ?? 0) > 0,
-                )
-                .map((g) => ({ score: (g.grade ?? g.score ?? 0) as number, credits: g.credits }));
-              const weightedAvg =
-                semScores.length > 0
-                  ? semScores.reduce((s, g) => s + g.score * g.credits, 0) /
-                    semScores.reduce((s, g) => s + g.credits, 0)
-                  : 0;
+              const semCredits = semGrades.reduce(
+                (s, g) => s + (isPassed(g) ? (Number.isFinite(g.credits) ? g.credits : 0) : 0),
+                0,
+              );
+              const weightedAvg = semesterWeightedAverage(semGrades);
 
               return (
                 <View key={sem}>
                   <Pressable
+                    accessibilityRole="button"
+                    accessibilityLabel={`${semesterLabel(sem)}，${isExpanded ? '收合' : '展開'}明細`}
                     onPress={() => setExpandedSem(isExpanded ? null : sem)}
                     style={({ pressed }) => ({
                       flexDirection: 'row',
                       justifyContent: 'space-between',
                       alignItems: 'center',
-                      padding: 12,
+                      minHeight: 56,
+                      padding: 14,
                       borderRadius: theme.radius.md,
                       backgroundColor: isExpanded ? theme.colors.surface2 : 'transparent',
                       borderWidth: 1,
@@ -594,17 +664,17 @@ export function CreditAuditScreen(props: any) {
                     })}
                   >
                     <View style={{ flex: 1 }}>
-                      <Text style={{ color: theme.colors.text, fontWeight: '700', fontSize: 14 }}>
+                      <Text style={{ color: theme.colors.text, fontWeight: '700', fontSize: 15 }}>
                         {semesterLabel(sem)}
                       </Text>
-                      <View style={{ flexDirection: 'row', gap: 12, marginTop: 4 }}>
-                        <Text style={{ color: theme.colors.muted, fontSize: 12 }}>
+                      <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 12, marginTop: 4 }}>
+                        <Text style={{ color: theme.colors.muted, fontSize: 13 }}>
                           {semGrades.length} 門課
                         </Text>
-                        <Text style={{ color: theme.colors.muted, fontSize: 12 }}>
-                          學分：{semCredits}
+                        <Text style={{ color: theme.colors.muted, fontSize: 13 }}>
+                          通過學分：{semCredits}
                         </Text>
-                        {weightedAvg > 0 && (
+                        {weightedAvg !== null ? (
                           <Text
                             style={{
                               color:
@@ -613,23 +683,27 @@ export function CreditAuditScreen(props: any) {
                                   : weightedAvg >= 60
                                     ? theme.colors.muted
                                     : '#f43f5e',
-                              fontSize: 12,
+                              fontSize: 13,
                               fontWeight: '600',
                             }}
                           >
                             加權平均：{weightedAvg.toFixed(1)}
+                          </Text>
+                        ) : (
+                          <Text style={{ color: theme.colors.muted, fontSize: 13 }}>
+                            加權平均：無法計算
                           </Text>
                         )}
                       </View>
                     </View>
                     <Ionicons
                       name={isExpanded ? 'chevron-up' : 'chevron-down'}
-                      size={20}
+                      size={22}
                       color={theme.colors.muted}
                     />
                   </Pressable>
 
-                  {isExpanded && (
+                  {isExpanded ? (
                     <View style={{ paddingHorizontal: 4, paddingTop: 4, gap: 6 }}>
                       <View
                         style={{ flexDirection: 'row', paddingHorizontal: 12, paddingVertical: 6 }}
@@ -638,7 +712,7 @@ export function CreditAuditScreen(props: any) {
                           style={{
                             flex: 4,
                             color: theme.colors.muted,
-                            fontSize: 11,
+                            fontSize: 12,
                             fontWeight: '600',
                           }}
                         >
@@ -648,7 +722,7 @@ export function CreditAuditScreen(props: any) {
                           style={{
                             flex: 1.5,
                             color: theme.colors.muted,
-                            fontSize: 11,
+                            fontSize: 12,
                             fontWeight: '600',
                             textAlign: 'center',
                           }}
@@ -659,7 +733,7 @@ export function CreditAuditScreen(props: any) {
                           style={{
                             flex: 1,
                             color: theme.colors.muted,
-                            fontSize: 11,
+                            fontSize: 12,
                             fontWeight: '600',
                             textAlign: 'center',
                           }}
@@ -670,7 +744,7 @@ export function CreditAuditScreen(props: any) {
                           style={{
                             flex: 1,
                             color: theme.colors.muted,
-                            fontSize: 11,
+                            fontSize: 12,
                             fontWeight: '600',
                             textAlign: 'center',
                           }}
@@ -681,14 +755,20 @@ export function CreditAuditScreen(props: any) {
                       {semGrades.map((g, i) => {
                         const passed = isPassed(g);
                         const cat = mapCourseTypeDetailed(g.courseType, g.courseName);
+                        const numeric =
+                          typeof (g.grade ?? g.score) === 'number' &&
+                          Number.isFinite((g.grade ?? g.score) as number)
+                            ? ((g.grade ?? g.score) as number)
+                            : null;
                         return (
                           <View
                             key={g.id || `${sem}-${i}`}
                             style={{
                               flexDirection: 'row',
                               alignItems: 'center',
+                              minHeight: 48,
                               paddingHorizontal: 12,
-                              paddingVertical: 8,
+                              paddingVertical: 10,
                               borderRadius: theme.radius.sm,
                               backgroundColor: passed ? 'transparent' : 'rgba(255,45,85,0.05)',
                               borderBottomWidth: i < semGrades.length - 1 ? 1 : 0,
@@ -699,20 +779,20 @@ export function CreditAuditScreen(props: any) {
                               <Text
                                 style={{
                                   color: theme.colors.text,
-                                  fontSize: 13,
+                                  fontSize: 14,
                                   fontWeight: '600',
                                 }}
                                 numberOfLines={2}
                               >
                                 {g.courseName}
                               </Text>
-                              {g.courseClass && (
+                              {g.courseClass ? (
                                 <Text
-                                  style={{ color: theme.colors.muted, fontSize: 10, marginTop: 2 }}
+                                  style={{ color: theme.colors.muted, fontSize: 11, marginTop: 2 }}
                                 >
                                   {g.courseClass}
                                 </Text>
-                              )}
+                              ) : null}
                             </View>
                             <View style={{ flex: 1.5, alignItems: 'center' }}>
                               <View
@@ -725,7 +805,7 @@ export function CreditAuditScreen(props: any) {
                               >
                                 <Text
                                   style={{
-                                    fontSize: 10,
+                                    fontSize: 11,
                                     fontWeight: '700',
                                     color: PU_CATEGORY_COLORS[cat],
                                   }}
@@ -739,7 +819,7 @@ export function CreditAuditScreen(props: any) {
                                 flex: 1,
                                 textAlign: 'center',
                                 color: theme.colors.text,
-                                fontSize: 13,
+                                fontSize: 14,
                                 fontWeight: '600',
                               }}
                             >
@@ -749,13 +829,15 @@ export function CreditAuditScreen(props: any) {
                               style={{
                                 flex: 1,
                                 textAlign: 'center',
-                                fontSize: 13,
+                                fontSize: 14,
                                 fontWeight: '700',
                                 color: passed
-                                  ? ((g.grade ?? g.score ?? 0) as number) >= 80
+                                  ? numeric !== null && numeric >= 80
                                     ? '#34C759'
                                     : theme.colors.text
-                                  : '#f43f5e',
+                                  : numeric === null
+                                    ? theme.colors.muted
+                                    : '#f43f5e',
                               }}
                             >
                               {scoreDisplay(g)}
@@ -764,60 +846,44 @@ export function CreditAuditScreen(props: any) {
                         );
                       })}
                     </View>
-                  )}
+                  ) : null}
                 </View>
               );
             })}
           </View>
         </Card>
 
-        {/* ═══ 缺口分析 ═══ */}
-        {remaining > 0 && (
-          <Card title="畢業缺口分析">
+        {isPu && currentDept && remaining > 0 && !deptIsUnknown ? (
+          <Card title="參考缺口（非正式）">
             <Text
               style={{ color: theme.colors.muted, fontSize: 13, lineHeight: 20, marginBottom: 8 }}
             >
-              {currentDept.shortName}畢業門檻 {totalRequired} 學分，目前已修 {totalEarned}{' '}
-              學分，還差 {remaining} 學分。
+              依「{currentDept.shortName}」參考模型，粗估還差約 {remaining}{' '}
+              學分。請核對入學年度與系所規定，再安排後續選課。
             </Text>
-            {categoryOrder
-              .filter((k) => {
-                if (k === 'pe' || k === 'service') return false; // 門數制另外處理
-                const rem = byCategory[k].required - byCategory[k].earned;
-                return rem > 0;
-              })
-              .map((k) => {
-                const rem = byCategory[k].required - byCategory[k].earned;
-                return (
-                  <View
-                    key={k}
-                    style={{
-                      padding: 12,
-                      borderRadius: theme.radius.md,
-                      backgroundColor: theme.colors.surface2,
-                      borderLeftWidth: 3,
-                      borderLeftColor: PU_CATEGORY_COLORS[k],
-                      marginBottom: 8,
-                    }}
-                  >
-                    <Text style={{ color: theme.colors.text, fontWeight: '700', fontSize: 14 }}>
-                      {PU_CATEGORY_LABELS[k]}：還需 {rem} 學分
-                    </Text>
-                    <Text
-                      style={{
-                        color: theme.colors.muted,
-                        marginTop: 4,
-                        fontSize: 12,
-                        lineHeight: 18,
-                      }}
-                    >
-                      建議選修約 {Math.ceil(rem / 3)} 門課程來補足此分類的學分缺口。
-                    </Text>
-                  </View>
-                );
-              })}
-
-            {/* 體育、服務學習門數缺口 */}
+            {CATEGORY_ORDER.filter((k) => {
+              if (k === 'pe' || k === 'service') return false;
+              return byCategory[k].required - byCategory[k].earned > 0;
+            }).map((k) => {
+              const rem = byCategory[k].required - byCategory[k].earned;
+              return (
+                <View
+                  key={k}
+                  style={{
+                    padding: 12,
+                    borderRadius: theme.radius.md,
+                    backgroundColor: theme.colors.surface2,
+                    borderLeftWidth: 3,
+                    borderLeftColor: PU_CATEGORY_COLORS[k],
+                    marginBottom: 8,
+                  }}
+                >
+                  <Text style={{ color: theme.colors.text, fontWeight: '700', fontSize: 14 }}>
+                    {PU_CATEGORY_LABELS[k]}：粗估還需約 {rem} 學分
+                  </Text>
+                </View>
+              );
+            })}
             {(() => {
               const peRem = Math.max(
                 0,
@@ -830,7 +896,7 @@ export function CreditAuditScreen(props: any) {
               if (peRem <= 0 && svcRem <= 0) return null;
               return (
                 <>
-                  {peRem > 0 && (
+                  {peRem > 0 ? (
                     <View
                       style={{
                         padding: 12,
@@ -842,11 +908,11 @@ export function CreditAuditScreen(props: any) {
                       }}
                     >
                       <Text style={{ color: theme.colors.text, fontWeight: '700', fontSize: 14 }}>
-                        體育：還需 {peRem} 門
+                        體育：粗估還需約 {peRem} 門
                       </Text>
                     </View>
-                  )}
-                  {svcRem > 0 && (
+                  ) : null}
+                  {svcRem > 0 ? (
                     <View
                       style={{
                         padding: 12,
@@ -858,27 +924,25 @@ export function CreditAuditScreen(props: any) {
                       }}
                     >
                       <Text style={{ color: theme.colors.text, fontWeight: '700', fontSize: 14 }}>
-                        服務學習：還需 {svcRem} 門
+                        服務學習：粗估還需約 {svcRem} 門
                       </Text>
                     </View>
-                  )}
+                  ) : null}
                 </>
               );
             })()}
-
             <View style={{ marginTop: 8 }}>
               <Button
                 text="開啟 AI 選課助理"
                 kind="primary"
-                onPress={() => props?.navigation?.getParent?.()?.navigate?.('AICourseAdvisor')}
+                onPress={() => props.navigation?.getParent?.()?.navigate?.('AICourseAdvisor')}
               />
             </View>
           </Card>
-        )}
+        ) : null}
 
-        {/* ═══ 底部操作 ═══ */}
         <View style={{ flexDirection: 'row', gap: 10, paddingHorizontal: 4, paddingBottom: 8 }}>
-          <Button text="重新整理" onPress={handleReload} />
+          <Button text="重新整理" onPress={() => void load()} />
         </View>
       </ScrollView>
     </Screen>

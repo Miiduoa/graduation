@@ -60,10 +60,30 @@ afterEach(() => {
 });
 
 jest.unmock('@react-navigation/native');
-jest.mock('../state/theme', () => ({ useThemeMode: () => ({ themeMode: 'light' }) }));
+jest.mock('../state/theme', () => ({
+  useThemeMode: () => ({ themeMode: 'light', mode: 'light', theme: require('../ui/theme').getCurrentTheme() }),
+  useTheme: () => require('../ui/theme').getCurrentTheme(),
+}));
 jest.mock('../state/nuniSession', () => ({
   useNuniSession: () => ({ session: null, loading: false, error: '', pendingLogout: false }),
 }));
+jest.mock('../state/schedule', () => ({
+  useSchedule: () => ({
+    courses: [],
+    addCourse: jest.fn(),
+    removeCourse: jest.fn(),
+    updateCourse: jest.fn(),
+  }),
+}));
+jest.mock('../ui/navigationTheme', () => {
+  const actual = jest.requireActual('../ui/navigationTheme');
+  return {
+    ...actual,
+    useTabBarContentBottomPadding: () => 80,
+    TAB_BAR_CONTENT_BOTTOM_PADDING: 80,
+  };
+});
+jest.mock('@expo/vector-icons', () => ({ Ionicons: () => null }));
 jest.mock('../screens/NuniWorkspaceScreen', () => ({
   NuniWorkspaceScreen: () => {
     const { Text } = require('react-native');
@@ -100,6 +120,10 @@ jest.mock('../screens/LibraryAiFirstScreen', () => {
 jest.mock('../screens/LibraryCatalogScreen', () => {
   const { Text } = require('react-native');
   return { __esModule: true, default: () => <Text testID="public-library-catalog">館藏查詢</Text> };
+});
+jest.mock('../screens/SchoolInfoScreen', () => {
+  const { Text } = require('react-native');
+  return { __esModule: true, default: () => <Text testID="public-school-info-screen">學校資訊</Text> };
 });
 jest.mock('../screens/CampusContentScreens', () => {
   const { Text } = require('react-native');
@@ -194,6 +218,7 @@ test('a warm platform link works in the school-signed-out stack and cleans up it
 test.each([
   ['Map', 'public-map-screen'],
   ['Library', 'public-library-screen'],
+  ['SchoolInfo', 'public-school-info-screen'],
   ['BusSchedule', 'public-bus-screen'],
   ['公告總覽', 'public-announcements-screen'],
 ])('signed-out users can open %s without either account', async (route, target) => {
@@ -215,6 +240,7 @@ test.each([
   ['campus://map', 'public-map-screen'],
   ['campus://library', 'public-library-screen'],
   ['campus://library/catalog', 'public-library-catalog'],
+  ['campus://school-info', 'public-school-info-screen'],
   ['campus://bus', 'public-bus-screen'],
   ['campus://announcements', 'public-announcements-screen'],
   ['campus://announcement/public-1', 'public-announcement-screen'],

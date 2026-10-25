@@ -139,3 +139,38 @@ test('hook handleResponse passes the live schoolId from SchoolNavigation args', 
   );
   expect(mockApply).toHaveBeenCalled();
 });
+
+test('personal event reminder payloads are ignored before dedup navigation and clear', async () => {
+  const {
+    clearLastNotificationResponseAsync,
+  } = require('../services/notifications') as {
+    clearLastNotificationResponseAsync: jest.Mock;
+  };
+  const nav = { current: null };
+  renderHook(() => usePushNotifications(nav, 'alice', 'student', 'pu'));
+  await waitFor(() => expect(listeners.length).toBeGreaterThan(0));
+
+  await act(async () => {
+    listeners[listeners.length - 1]!({
+      notification: {
+        request: {
+          identifier: 'per-evtrem.tok',
+          content: {
+            data: {
+              type: 'personal_event_reminder_v1',
+              v: 1,
+              t: 'tok',
+              g: 1,
+            },
+          },
+        },
+      },
+      actionIdentifier: 'default',
+    });
+  });
+
+  expect(mockResolve).not.toHaveBeenCalled();
+  expect(mockApply).not.toHaveBeenCalled();
+  expect(mockRootNavigateNested).not.toHaveBeenCalled();
+  expect(clearLastNotificationResponseAsync).not.toHaveBeenCalled();
+});

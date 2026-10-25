@@ -107,3 +107,31 @@ it('keeps Taipei University, TMU and CYCU official borrowing services separate',
     expect(buildOfficialLibraryCatalogUrl(schoolId, '資管課程')).not.toContain('webpacx.lib.pu.edu.tw');
   }
 });
+
+it('hands NCUE, NTUB and THU queries to each school WebPACX host', () => {
+  for (const [schoolId, host] of [
+    ['ncue', 'webpacx.ncue.edu.tw'],
+    ['ntub', 'webpacx.ntub.edu.tw'],
+    ['thu', 'webpac.lib.thu.edu.tw'],
+  ] as const) {
+    const url = new URL(buildOfficialLibraryCatalogUrl(schoolId, '資料庫 #1, a=b')!);
+    expect(url.hostname).toBe(host);
+    expect(url.pathname).toBe('/search');
+    expect(url.searchParams.get('searchInput')).toBe('資料庫 #1, a=b');
+    expect(url.searchParams.get('searchField')).toBe('FullText');
+    expect(url.href).not.toContain('webpacx.lib.pu.edu.tw');
+  }
+});
+
+it('hands Fu Jen queries to its Sierra catalog with the 75-character limit', () => {
+  const fju = getOfficialLibrary('fju')!;
+  expect(fju.catalogSearch).toBe('sierra');
+  expect(fju.websiteUrl).toBe('https://home.lib.fju.edu.tw/');
+  const url = new URL(buildOfficialLibraryCatalogUrl('fju', '資料庫 & SQL')!);
+  expect(url.hostname).toBe('library.lib.fju.edu.tw');
+  expect(url.port).toBe('444');
+  expect(url.pathname).toBe('/search~S0*cht/');
+  expect(url.searchParams.get('searchtype')).toBe('Y');
+  expect(url.searchParams.get('searcharg')).toBe('資料庫 & SQL');
+  expect(buildOfficialLibraryCatalogUrl('fju', '')).toBe(fju.catalogUrl);
+});

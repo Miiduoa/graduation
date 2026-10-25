@@ -1,6 +1,6 @@
 const { createListTeacherAppealsHandler, createAppealTeacherStatusHandler, studentNumberOf } = require('./teacherAppeals');
 
-function fakeDb(data) {
+function fakeDb(data, onRead = () => {}) {
   const snap = (path) => ({ exists: path in data, data: () => data[path] });
   const query = (prefix, filters) => ({
     where(field, op, value) {
@@ -18,7 +18,7 @@ function fakeDb(data) {
       return { docs };
     },
   });
-  return { doc: (path) => ({ get: async () => snap(path) }), collection: (path) => query(path, []) };
+  return { doc: (path) => ({ get: async () => { await onRead(path); return snap(path); } }), collection: (path) => query(path, []) };
 }
 
 const base = { schoolId: 'pu', title: '期中考成績', body: '第三題', status: 'pending', createdAt: new Date('2026-10-12T02:00:00Z') };
@@ -52,6 +52,95 @@ test('students and signed-out users are refused', async () => {
   const handle = createListTeacherAppealsHandler({ db: fakeDb(data) });
   await expect(handle({ auth: { uid: 's1' }, data: { schoolId: 'pu' } })).rejects.toMatchObject({ code: 'permission-denied' });
   await expect(handle({ data: { schoolId: 'pu' } })).rejects.toMatchObject({ code: 'unauthenticated' });
+});
+
+test.each(['member', 'editor', 'teacher'])('an assigned %s sees only the exact trusted offering', async (role) => {
+  const handle = createListTeacherAppealsHandler({ db: fakeDb({
+    ...data, 'schools/pu/members/t1': { role, status: 'active' },
+  }) });
+  const result = await handle({ auth: { uid: 't1' }, data: { schoolId: 'pu' } });
+  expect(result.rows.map((row) => row.id)).toEqual(['a1']);
+  expect(result.courses).toEqual(['資料庫（王老師）']);
+});
+
+test.each(['member', 'editor', 'teacher'])('an unassigned %s cannot list school appeals', async (role) => {
+  const handle = createListTeacherAppealsHandler({ db: fakeDb({
+    ...data, 'schools/pu/members/outsider': { role, status: 'active' },
+  }) });
+  await expect(handle({ auth: { uid: 'outsider' }, data: { schoolId: 'pu' } })).rejects.toMatchObject({ code: 'permission-denied' });
+});
+
+test('only a same-school active admin receives the school-wide list', async () => {
+  const handle = createListTeacherAppealsHandler({ db: fakeDb({
+    ...data, 'schools/pu/members/admin': { role: 'admin', status: 'active' },
+  }) });
+  const result = await handle({ auth: { uid: 'admin' }, data: { schoolId: 'pu' } });
+  expect(result.courses).toBeNull();
+  expect(result.rows.map((row) => row.id)).toEqual(['a1', 'a2', 'a3']);
+  await expect(handle({ auth: { uid: 'admin' }, data: { schoolId: 'other' } })).rejects.toMatchObject({ code: 'permission-denied' });
+});
+
+test.each(['inactive', undefined])('a teaching binding does not override membership status %s', async (status) => {
+  const handle = createListTeacherAppealsHandler({ db: fakeDb({
+    ...data, 'schools/pu/members/t1': { role: 'teacher', status },
+  }) });
+  await expect(handle({ auth: { uid: 't1' }, data: { schoolId: 'pu' } })).rejects.toMatchObject({ code: 'permission-denied' });
+});
+
+test.each([{ status: 'deleted' }, { accountDeletionInProgress: true }])('a teaching binding does not override unavailable account %j', async (profile) => {
+  const handle = createListTeacherAppealsHandler({ db: fakeDb({ ...data, 'users/t1': profile }) });
+  await expect(handle({ auth: { uid: 't1' }, data: { schoolId: 'pu' } })).rejects.toMatchObject({ code: 'failed-precondition' });
+});
+
+test.each(['assignment', 'membership', 'account'])('a concurrent %s revocation withholds previously loaded private appeals', async (kind) => {
+  const records = { ...data };
+  const db = fakeDb(records, (path) => {
+    if (path !== 'users/test-student-a') return;
+    if (kind === 'assignment') records['schools/pu/courseTeachers/資料庫｜王老師'] = { teacherUids: [] };
+    if (kind === 'membership') records['schools/pu/members/t1'] = { role: 'teacher', status: 'inactive' };
+    if (kind === 'account') records['users/t1'] = { accountDeletionInProgress: true };
+  });
+  await expect(createListTeacherAppealsHandler({ db })({ auth: { uid: 't1' }, data: { schoolId: 'pu' } })).rejects.toMatchObject({
+    code: kind === 'account' ? 'failed-precondition' : 'permission-denied',
+  });
+});
+
+test('a revoked teaching binding immediately removes access', async () => {
+  const handle = createListTeacherAppealsHandler({ db: fakeDb({
+    ...data, 'schools/pu/courseTeachers/資料庫｜王老師': { teacherUids: [] },
+  }) });
+  await expect(handle({ auth: { uid: 't1' }, data: { schoolId: 'pu' } })).rejects.toMatchObject({ code: 'permission-denied' });
+});
+
+test('another school admin assignment cannot widen or restore a selected-school editor teaching scope', async () => {
+  const records = {
+    ...data,
+    'schools/pu/members/t1': { role: 'editor', status: 'active' },
+    'schools/ntu/members/t1': { role: 'admin', status: 'active' },
+    'schools/ntu/courseTeachers/資料庫｜王老師': { teacherUids: ['t1'] },
+    'users/ntu-private': { displayName: '他校學生' },
+    'courseAppeals/ntu-private': {
+      ...base, schoolId: 'ntu', studentUid: 'ntu-private', courseName: '資料庫', offeringId: '資料庫｜王老師',
+    },
+  };
+  const reads = [];
+  let revoke = false;
+  const handle = createListTeacherAppealsHandler({ db: fakeDb(records, (path) => {
+    reads.push(path);
+    if (revoke && path === 'users/test-student-a') {
+      records['schools/pu/courseTeachers/資料庫｜王老師'] = { teacherUids: [] };
+    }
+  }) });
+  const request = { auth: { uid: 't1' }, data: { schoolId: ' pu ' } };
+
+  expect((await handle(request)).rows.map((row) => row.id)).toEqual(['a1']);
+  expect(reads).not.toContain('users/ntu-private');
+
+  revoke = true;
+  await expect(handle(request)).rejects.toMatchObject({ code: 'permission-denied' });
+  expect(records['schools/ntu/members/t1']).toEqual({ role: 'admin', status: 'active' });
+  expect(records['schools/ntu/courseTeachers/資料庫｜王老師'].teacherUids).toEqual(['t1']);
+  expect(reads).not.toContain('users/ntu-private');
 });
 
 test('student ID comes from the profile, the PU uid, or the login email', () => {

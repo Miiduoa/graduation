@@ -211,3 +211,13 @@ test('還有 N 件 opens all todos', async () => {
   fireEvent.press(await view.findByText(TODAY_COPY.moreTodos(1)));
   expect(rootNavigateNested).toHaveBeenCalledWith('學習', 'LearnHome');
 });
+
+test('keeps an assignment without a deadline visible and actionable', async () => {
+  const data = result();
+  data.tasks[0].dueAt = undefined;
+  jest.mocked(loadStudentHome).mockResolvedValue(data);
+  const view = render(<StudentTodayScreen />);
+  expect((await view.findAllByText('繳交期末報告')).length).toBeGreaterThan(0);
+  expect(view.getAllByText(/未設截止時間/).length).toBeGreaterThan(0);
+  expect(view.queryByText(TODAY_COPY.emptyDay)).toBeNull();
+});

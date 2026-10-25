@@ -23,6 +23,10 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Platform } from 'react-native';
 import {
+  resolveCourseCatalogCapability,
+  unsupportedCourseCatalogMessage,
+} from '@campus/shared/src';
+import {
   CATALOG_DEFAULT_FILTER,
   PERIOD_INDEX,
   type CatalogFilter,
@@ -107,6 +111,8 @@ export type CatalogQueryOptions = {
   forceRefresh?: boolean;
   signal?: AbortSignal;
   limit?: number;
+  /** Selected school id — required to prevent cross-school PU catalog leakage. */
+  schoolId?: string | null;
 };
 
 // ─── HTTP helpers ──────────────────────────────────────────
@@ -352,9 +358,42 @@ export async function queryCatalog(
   options: CatalogQueryOptions = {},
 ): Promise<CatalogQueryResult> {
   const merged: CatalogFilter = { ...CATALOG_DEFAULT_FILTER, ...filter };
+  const capability = resolveCourseCatalogCapability(options.schoolId);
+  const requestedSchoolId =
+    typeof options.schoolId === 'string' ? options.schoolId.trim() : options.schoolId;
+
+  // Callers that pass schoolId must have an integrated provider; never serve PU rows as another school.
+  // Also reject adversarial ids that could previously look up Object.prototype members as "providers".
+  if (requestedSchoolId != null && requestedSchoolId !== '') {
+    if (!capability || capability.providerId !== 'pu-mypu' || capability.schoolId !== 'pu') {
+      return {
+        filter: merged,
+        courses: [],
+        totalCount: 0,
+        source: 'sample',
+        fetchedAt: Date.now(),
+        showRemain: false,
+        error: unsupportedCourseCatalogMessage(requestedSchoolId),
+      };
+    }
+  }
+
+  // Integrated catalog today is Providence myPU only. Legacy callers omit schoolId and keep PU cache.
+  const cacheSchoolId = capability?.schoolId === 'pu' ? 'pu' : requestedSchoolId ? null : 'pu';
+  if (!cacheSchoolId) {
+    return {
+      filter: merged,
+      courses: [],
+      totalCount: 0,
+      source: 'sample',
+      fetchedAt: Date.now(),
+      showRemain: false,
+      error: unsupportedCourseCatalogMessage(requestedSchoolId),
+    };
+  }
 
   if (!options.forceRefresh) {
-    const cached = await readCache(merged);
+    const cached = await readCache(cacheSchoolId, merged);
     if (cached) return cached;
   }
 
@@ -373,7 +412,7 @@ export async function queryCatalog(
   try {
     const live = await queryLive(merged, options);
     if (live.courses.length > 0) {
-      await writeCache(merged, live);
+      await writeCache(cacheSchoolId, merged, live);
     }
     return live;
   } catch (err) {
@@ -591,13 +630,16 @@ export async function fetchOfferClass(semester: string, offerUnit: string): Prom
 
 // ─── 快取 ──────────────────────────────────────────────────
 
-function cacheKeyOf(filter: CatalogFilter): string {
-  return CACHE_KEY_PREFIX + JSON.stringify(filter);
+function cacheKeyOf(schoolId: string, filter: CatalogFilter): string {
+  return `${CACHE_KEY_PREFIX}${schoolId}:${JSON.stringify(filter)}`;
 }
 
-async function readCache(filter: CatalogFilter): Promise<CatalogQueryResult | null> {
+async function readCache(
+  schoolId: string,
+  filter: CatalogFilter,
+): Promise<CatalogQueryResult | null> {
   try {
-    const raw = await AsyncStorage.getItem(cacheKeyOf(filter));
+    const raw = await AsyncStorage.getItem(cacheKeyOf(schoolId, filter));
     if (!raw) return null;
     const parsed = JSON.parse(raw) as CatalogQueryResult;
     if (!parsed.fetchedAt || Date.now() - parsed.fetchedAt > CACHE_TTL_MS) return null;
@@ -608,9 +650,13 @@ async function readCache(filter: CatalogFilter): Promise<CatalogQueryResult | nu
   }
 }
 
-async function writeCache(filter: CatalogFilter, result: CatalogQueryResult): Promise<void> {
+async function writeCache(
+  schoolId: string,
+  filter: CatalogFilter,
+  result: CatalogQueryResult,
+): Promise<void> {
   try {
-    await AsyncStorage.setItem(cacheKeyOf(filter), JSON.stringify(result));
+    await AsyncStorage.setItem(cacheKeyOf(schoolId, filter), JSON.stringify(result));
   } catch {
     // ignore
   }

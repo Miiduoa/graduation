@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import type { ComponentProps } from 'react';
 import { beforeEach, expect, it, vi } from 'vitest';
 import { TODAY_COPY, type TodayClass, type TodayTodo } from '@campus/shared/src/pickNextAction';
@@ -35,8 +35,8 @@ beforeEach(() => {
   window.scrollTo = vi.fn();
 });
 
-function view(overrides: Partial<ComponentProps<typeof StudentToday>> = {}) {
-  return render(
+function todayElement(overrides: Partial<ComponentProps<typeof StudentToday>> = {}) {
+  return (
     <StudentToday
       now={now}
       updatedAt={now}
@@ -53,8 +53,12 @@ function view(overrides: Partial<ComponentProps<typeof StudentToday>> = {}) {
       weekHref="/timetable?campus=pu"
       timetableHref="/timetable?campus=pu"
       {...overrides}
-    />,
+    />
   );
+}
+
+function view(overrides: Partial<ComponentProps<typeof StudentToday>> = {}) {
+  return render(todayElement(overrides));
 }
 
 it('shows the next class on the only solid card', () => {
@@ -168,4 +172,138 @@ it('shows skeleton bones instead of a spinner', () => {
   expect(screen.getByTestId('today-skeleton')).toBeTruthy();
   expect(screen.queryByRole('status')).toBeNull();
   expect(screen.queryByText(/載入中|讀取中/)).toBeNull();
+});
+
+it('opens the remaining tasks in place and keeps each original course destination', () => {
+  view({
+    todos: Array.from({ length: 5 }, (_, index) =>
+      todo({
+        id: `work-${index}`,
+        title: `待辦 ${index + 1}`,
+        href: `/course/cs-db#assignment-work-${index}`,
+      }),
+    ),
+  });
+  const list = within(screen.getByTestId('today-work-list'));
+  expect(list.getAllByRole('link')).toHaveLength(3);
+  const expand = list.getByRole('button', { name: '還有 2 件' });
+  expect(expand.getAttribute('aria-expanded')).toBe('false');
+  fireEvent.click(expand);
+  expect(list.getAllByRole('link')).toHaveLength(5);
+  expect(list.getByRole('link', { name: /待辦 5/ }).getAttribute('href')).toBe(
+    '/course/cs-db#assignment-work-4',
+  );
+  fireEvent.click(list.getByRole('button', { name: '收起待辦' }));
+  expect(list.getAllByRole('link')).toHaveLength(3);
+});
+
+it('shows undated work and uses the platform task anchor on the next-action card', () => {
+  const href = '/classroom/course/cw_123#assignment-final-report';
+  view({ todos: [todo({ dueAt: null, href })] });
+  expect(screen.queryByText(TODAY_COPY.emptyDay)).toBeNull();
+  expect(screen.getAllByText(/未設截止時間/).length).toBeGreaterThan(0);
+  const links = within(screen.getByTestId('next-action')).getAllByRole('link');
+  expect(links.map((link) => link.getAttribute('href'))).toEqual([href, href]);
+});
+
+it('renders even when session storage is blocked by the browser', () => {
+  const read = vi.spyOn(Storage.prototype, 'getItem').mockImplementation(() => {
+    throw new DOMException('Blocked', 'SecurityError');
+  });
+  const write = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {
+    throw new DOMException('Blocked', 'SecurityError');
+  });
+  try {
+    const page = view();
+    expect(screen.getByRole('heading', { name: '今天' })).toBeTruthy();
+    expect(() => page.unmount()).not.toThrow();
+  } finally {
+    read.mockRestore();
+    write.mockRestore();
+  }
+});
+
+it('updates a changed task payload without waiting for its identifier to change', () => {
+  const page = view({ todos: [todo()] });
+  page.rerender(
+    todayElement({
+      todos: [
+        todo({
+          title: '修正版作業',
+          href: '/classroom/course/cw_123#assignment-revised',
+          dueAt: Date.parse('2026-10-25T10:30:00+08:00'),
+        }),
+      ],
+    }),
+  );
+  const card = screen.getByTestId('next-action');
+  expect(card.textContent).toContain('修正版作業');
+  expect(card.textContent).not.toContain('作業三 繳交');
+  expect(card.textContent).toContain('10:30 截止・還剩 1 小時');
+  expect(within(card).getByRole('link', { name: TODAY_COPY.goSubmit }).getAttribute('href')).toBe(
+    '/classroom/course/cw_123#assignment-revised',
+  );
+});
+
+it('updates the current class room and destination when the class identifier stays unchanged', () => {
+  const page = view({ classes: [klass()] });
+  page.rerender(todayElement({ classes: [klass({ location: '新教室 201', courseId: 'cs-new' })] }));
+  const card = screen.getByTestId('next-action');
+  expect(card.textContent).toContain('新教室 201');
+  expect(card.textContent).not.toContain('管理大樓 M302');
+  expect(within(card).getByRole('link', { name: TODAY_COPY.viewCourse }).getAttribute('href')).toBe(
+    '/course/cs-new#week',
+  );
+});
+
+it('drops the previous action immediately on sign-out and on a different account or school scope', () => {
+  const page = view({ scopeKey: 'account-a:pu', classes: [klass({ title: 'A 的私人課程' })] });
+  page.rerender(
+    todayElement({ scopeKey: 'account-b:pu', classes: [klass({ title: 'B 的私人課程' })] }),
+  );
+  expect(screen.getByTestId('next-action').textContent).toContain('B 的私人課程');
+  expect(screen.queryByText('A 的私人課程')).toBeNull();
+  page.rerender(
+    todayElement({ scopeKey: 'account-b:nthu', todos: [todo({ title: '新校園待辦' })] }),
+  );
+  expect(screen.getByTestId('next-action').textContent).toContain('新校園待辦');
+  expect(screen.queryByText('B 的私人課程')).toBeNull();
+  page.rerender(
+    todayElement({ scopeKey: 'account-b:nthu', unsigned: true, todos: [], classes: [] }),
+  );
+  expect(screen.getByTestId('next-action').textContent).toContain(TODAY_COPY.unsigned);
+  expect(screen.queryByText('新校園待辦')).toBeNull();
+});
+
+it('keeps the transition between different tasks within the same scope', async () => {
+  const page = view({ scopeKey: 'account-a:pu', todos: [todo()] });
+  page.rerender(
+    todayElement({
+      scopeKey: 'account-a:pu',
+      todos: [todo({ id: 'hw-new', title: '下一份作業' })],
+    }),
+  );
+  expect(screen.getByTestId('next-action').className).toContain(styles.fadeOut);
+  await waitFor(() =>
+    expect(screen.getByTestId('next-action').textContent).toContain('下一份作業'),
+  );
+  expect(screen.getByTestId('next-action').textContent).not.toContain('作業三 繳交');
+});
+
+it('keeps one action card when a guest changes from personal to a school scope', () => {
+  const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+  const warning = vi.spyOn(console, 'warn').mockImplementation(() => {});
+  try {
+    const page = view({ scopeKey: 'guest:personal', unsigned: true, timetableStatus: 'empty' });
+    expect(screen.getAllByTestId('next-action')).toHaveLength(1);
+    page.rerender(todayElement({ scopeKey: 'guest:pu', unsigned: true, timetableStatus: 'empty' }));
+    expect(screen.getAllByTestId('next-action')).toHaveLength(1);
+    expect(screen.getAllByTestId('today-work')).toHaveLength(1);
+    expect(screen.getAllByText(TODAY_COPY.unsigned)).toHaveLength(2);
+    expect(error).not.toHaveBeenCalled();
+    expect(warning).not.toHaveBeenCalled();
+  } finally {
+    error.mockRestore();
+    warning.mockRestore();
+  }
 });

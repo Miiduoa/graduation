@@ -1088,13 +1088,23 @@ test.each(['Clubs', 'Dormitory', 'DormitoryScreen', 'Career'])(
     expect(view.queryByText(`${route}Screen`)).toBeNull();
   },
 );
-test.each([
-  ['MerchantHub', '這間店還沒接到訂單系統'],
-])('Me %s no longer shows fictitious account data', async (route, explanation) => {
-  const { view, navigation } = await mount(MeStack);
-  act(() => navigation.navigate(route));
-  expect(view.getByText(new RegExp(explanation))).toBeTruthy();
+
+test('Map school information keeps real official housing and career services after retiring old routes', async () => {
+  const { view, navigation } = await mount(MapStack);
+  act(() => navigation.navigate('SchoolInfo'));
+  expect(navigation.getCurrentRoute()?.name).toBe('SchoolInfo');
+  expect(view.getByText('住宿與職涯資訊')).toBeTruthy();
+  expect(view.getByText('前往靜宜住宿服務組')).toBeTruthy();
+  expect(view.getByText('前往靜宜職涯發展暨產業促進處')).toBeTruthy();
 });
+test.each([['MerchantHub', '這間店還沒接到訂單系統']])(
+  'Me %s no longer shows fictitious account data',
+  async (route, explanation) => {
+    const { view, navigation } = await mount(MeStack);
+    act(() => navigation.navigate(route));
+    expect(view.getByText(new RegExp(explanation))).toBeTruthy();
+  },
+);
 test('Notifications mounts the live inbox instead of hardcoded samples', async () => {
   const { view, navigation } = await mount(MeStack);
   act(() => navigation.navigate('Notifications'));

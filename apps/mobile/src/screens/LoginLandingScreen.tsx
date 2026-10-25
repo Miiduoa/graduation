@@ -59,7 +59,9 @@ export default function LoginLandingScreen() {
           <Text accessibilityRole="header" style={s.heading}>
             校園生活
           </Text>
-          <Text style={s.body}>不必登入學校帳號，就能查看各校地圖、公車、圖書館與公開公告。</Text>
+          <Text style={s.body}>
+            不必登入學校帳號，就能查看目前選擇學校的地圖、公車、圖書館、課綱、健康、宿舍、職涯與公開公告。
+          </Text>
         </View>
         <SchoolBrowsingControl />
         <View style={s.publicPanel}>
@@ -72,9 +74,14 @@ export default function LoginLandingScreen() {
           {(
             [
               ['Map', '校園地圖', '搜尋地點、查看位置與步行路線'],
-              ['Library', '圖書館', '搜尋目前選擇學校的館藏與官方服務'],
+              ['Library', '圖書館', `搜尋${school.name}的館藏與官方服務`],
+              ['SchoolInfo', '學校資訊', '查看官方總機、網站與名錄地址'],
               ['BusSchedule', '公車查詢', '查看站點與官方到站資訊'],
-              ['公告總覽', '公開公告', '查看學校發布的消息'],
+              ['公告總覽', '公開公告', `查看${school.name}發布的消息`],
+              ['CourseCatalog', '課綱查詢', `查看${school.name}課綱或校方課程查詢入口`],
+              ['Health', '校園健康', `查看${school.name}諮商、就醫與健康檢查資訊`],
+              ['Dormitory', '宿舍服務', `前往${school.name}住宿相關校方入口`],
+              ['Career', '職涯資訊', `前往${school.name}職涯與就業輔導公開資訊`],
             ] as const
           ).map(([route, title, detail], index) => (
             <Pressable

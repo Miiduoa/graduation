@@ -18,6 +18,7 @@
  *  - task_execute: 執行特定任務（訂餐、請假、查天氣等）
  */
 
+import { buildSchoolScopedAssistantSystemPromptHeader } from '@campus/shared/src';
 import { localLLM, type LLMMessage, type LLMGenerateResult } from './localLLMInference';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
@@ -103,8 +104,7 @@ export interface AgentConfig {
 // System Prompt — Agent 系統提示詞
 // ═══════════════════════════════════════════════════
 
-const AGENT_SYSTEM_PROMPT = `你是靜宜大學的 AI 全能助理「靜宜小幫手」，完全在使用者的手機上運行。
-你具備以下能力：
+const AGENT_SYSTEM_PROMPT_BODY = `你具備以下能力：
 1. 思考推理：可以一步一步分析問題，制定計畫
 2. 使用工具：可以查詢校園資料、搜尋網路、計算數學、管理行事曆
 3. 任務執行：可以幫助完成各種校園相關任務
@@ -123,6 +123,7 @@ const AGENT_SYSTEM_PROMPT = `你是靜宜大學的 AI 全能助理「靜宜小�
 - 簡潔扼要，重點明確
 - 如果不確定，會誠實告知
 - 使用繁體中文
+- 不可把其他學校的路線、開放時間、學分、醫療或校規數字套用到目前選校
 
 可用工具：
 - campus_query: 查詢校園資料（課表、成績、出席、公告、餐廳菜單）
@@ -136,6 +137,18 @@ const AGENT_SYSTEM_PROMPT = `你是靜宜大學的 AI 全能助理「靜宜小�
 {"tool": "工具名稱", "params": {"參數名": "值"}}
 
 當你完成思考要給最終回答時，直接用自然語言回答。`;
+
+/** Default prompt is school-neutral; callers should pass selected-school identity when known. */
+export function buildAgentSystemPromptForSchool(
+  schoolId?: string | null,
+  schoolName?: string | null,
+): string {
+  return `${buildSchoolScopedAssistantSystemPromptHeader(schoolId, schoolName)}
+
+${AGENT_SYSTEM_PROMPT_BODY}`;
+}
+
+const AGENT_SYSTEM_PROMPT = buildAgentSystemPromptForSchool(null, null);
 
 // ═══════════════════════════════════════════════════
 // Default Agent Config

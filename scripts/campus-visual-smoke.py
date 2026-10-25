@@ -288,6 +288,63 @@ async def main():
             await expect(page.get_by_role('link', name='尋找校園服務')).not_to_be_visible()
             results.append('service menu opens within viewport and Escape restores focus')
 
+            await page.keyboard.press('Control+k')
+            menu_search = page.get_by_role('searchbox', name='搜尋服務', exact=True)
+            await expect(menu_search).to_be_focused()
+            await menu_search.fill('借書')
+            menu_result = page.locator('[data-service-link]')
+            await expect(menu_result).to_have_count(1)
+            await expect(menu_result).to_have_attribute('aria-label', '圖書館')
+            await menu_search.press('ArrowDown')
+            await expect(menu_result).to_be_focused()
+            await page.screenshot(path=str(OUT / 'service-search-mobile.png'), animations='disabled')
+            await page.keyboard.press('Enter')
+            await expect(page).to_have_url(re.compile(r'/library\?'))
+            library_scope = parse_qs(urlparse(page.url).query)
+            assert library_scope.get('campus') == ['pu']
+            assert library_scope.get('schoolId') == ['pu']
+            await expect(page.get_by_role('navigation', name='主要導覽').get_by_role(
+                'link', name='生活', exact=True
+            )).to_have_attribute('aria-current', 'page')
+            await page.keyboard.press('Control+k')
+            await expect(menu_search).to_be_focused()
+            await menu_search.fill('找不到的服務')
+            await expect(page.get_by_role('heading', name='沒有符合的服務')).to_be_visible()
+            await page.get_by_role('button', name='查看全部服務', exact=True).click()
+            await expect(menu_search).to_have_value('')
+            await expect(menu_search).to_be_focused()
+            await page.keyboard.press('Escape')
+            results.append('menu search supports keyboard navigation, campus-scoped links and empty recovery')
+
+            await goto_path(page, '/settings?campus=pu&section=appearance#reading')
+            settings_nav = page.get_by_role('navigation', name='設定分類')
+            await expect(page.get_by_role('heading', name='外觀設定', exact=True)).to_be_visible()
+            await expect(settings_nav.get_by_role('button', name='外觀', exact=True)).to_have_attribute(
+                'aria-current', 'page'
+            )
+            await expect(page.get_by_role('navigation', name='主要導覽').get_by_role(
+                'link', name='我', exact=True
+            )).to_have_attribute('aria-current', 'page')
+            await no_overflow(page)
+            await page.screenshot(path=str(OUT / 'settings-mobile.png'), full_page=True, animations='disabled')
+            await settings_nav.get_by_role('button', name='隱私', exact=True).click()
+            assert parse_qs(urlparse(page.url).query) == {'campus': ['pu'], 'section': ['privacy']}
+            assert urlparse(page.url).fragment == 'reading'
+            await page.go_back()
+            await expect(page.get_by_role('heading', name='外觀設定', exact=True)).to_be_visible()
+            await page.go_forward()
+            await expect(settings_nav.get_by_role('button', name='隱私', exact=True)).to_have_attribute(
+                'aria-current', 'page'
+            )
+            await settings_nav.get_by_role('button', name='隱私', exact=True).press('Home')
+            await expect(settings_nav.get_by_role('button', name='一般', exact=True)).to_be_focused()
+            assert parse_qs(urlparse(page.url).query) == {'campus': ['pu']}
+            await page.keyboard.press('End')
+            await expect(settings_nav.get_by_role('button', name='隱私', exact=True)).to_be_focused()
+            await no_overflow(page)
+            results.append('settings deep links, history and keyboard sections preserve campus and fragment')
+
+            await goto_path(page, '/?campus=pu')
             campus = page.locator('header summary[aria-label^="切換校園："]')
             await campus.click()
             await expect(page.get_by_role('combobox', name='瀏覽校園', exact=True)).to_be_visible()

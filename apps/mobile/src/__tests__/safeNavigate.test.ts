@@ -66,6 +66,55 @@ describe('resolveTabForRoute', () => {
 });
 
 describe('safeNavigate / same-stack', () => {
+  test('從搜尋再次開啟已拜訪分頁的課表，仍透過該分頁導航', () => {
+    const tabs = {
+      getState: () => ({
+        routeNames: ['學習', '我的'],
+        routes: [
+          {
+            name: '學習',
+            state: {
+              routeNames: ['LearnHome', 'PersonalTimetable'],
+              routes: [{ name: 'PersonalTimetable' }],
+            },
+          },
+          {
+            name: '我的',
+            state: { routeNames: ['MeHome', 'GlobalSearch'], routes: [{ name: 'GlobalSearch' }] },
+          },
+        ],
+      }),
+      getParent: () => null,
+    };
+    const nav = { ...makeNavigation(['MeHome', 'GlobalSearch']), getParent: () => tabs };
+    expect(isRouteRegistered(nav, 'PersonalTimetable')).toBe(false);
+    expect(safeNavigate(nav, 'PersonalTimetable', { term: '1151' })).toBe(true);
+    expect(nav.navigate).toHaveBeenCalledWith('學習', {
+      screen: 'PersonalTimetable',
+      params: { term: '1151' },
+    });
+    expect(Alert.alert).not.toHaveBeenCalled();
+  });
+
+  test('內層畫面仍可直接導向祖先 navigator 的合法路由', () => {
+    const parent = makeNavigation(['Main', 'Login']);
+    const nav = { ...makeNavigation(['GlobalSearch']), getParent: () => parent };
+    expect(isRouteRegistered(nav, 'Login')).toBe(true);
+    expect(safeNavigate(nav, 'Login', { returnTo: 'GlobalSearch' })).toBe(true);
+    expect(nav.navigate).toHaveBeenCalledWith('Login', { returnTo: 'GlobalSearch' });
+    expect(Alert.alert).not.toHaveBeenCalled();
+  });
+
+  test('從搜尋或首頁可直接開啟學習頁的個人課表', () => {
+    const nav = makeNavigation(['GlobalSearch']);
+    expect(safeNavigate(nav, 'PersonalTimetable', { term: '1151' })).toBe(true);
+    expect(nav.navigate).toHaveBeenCalledWith('學習', {
+      screen: 'PersonalTimetable',
+      params: { term: '1151' },
+    });
+    expect(Alert.alert).not.toHaveBeenCalled();
+  });
+
   test('route 存在當前 stack → 直接 navigate', () => {
     const navigate = jest.fn();
     const nav = makeNavigation(['Home'], navigate);

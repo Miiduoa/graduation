@@ -191,7 +191,7 @@ describe('assistant agent policy', () => {
     process.env.GEMINI_API_KEY = 'gemini-key';
     process.env.GEMINI_MODEL = 'gemini-2.0-flash';
     const fetchImpl = jest.fn(async (url) => {
-      if (String(url).includes('groq.com')) {
+      if (new URL(String(url)).hostname === 'api.groq.com') {
         return mockResponse({ ok: false, status: 400, text: 'bad request' });
       }
       return mockResponse({
@@ -263,7 +263,7 @@ describe('assistant agent policy', () => {
     process.env.GROQ_API_KEY = 'groq-key';
     process.env.GEMINI_API_KEY = 'gemini-key';
     const fetchImpl = jest.fn(async (url) => {
-      if (String(url).includes('groq.com')) {
+      if (new URL(String(url)).hostname === 'api.groq.com') {
         return mockResponse({ ok: false, status: 400, text: 'bad request' });
       }
       return mockResponse({
@@ -290,6 +290,58 @@ describe('assistant agent policy', () => {
     const result = await answerWithServerWebSearch('從靜宜大學怎麼去台中車站？');
     expect(result.content).toContain('Google Maps');
     expect(result.sources.some((source) => source.source.includes('公車'))).toBe(true);
+  });
+
+  test.each([
+    [
+      'nested elements and quoted angle brackets',
+      '<p title="a > b">公開 <span>校務 <b>公告</b></span></p>',
+      '公開 校務 公告',
+    ],
+    [
+      'non-content elements and comments',
+      '公開<script>script-secret</script><style>style-secret</style>' +
+        '<template><b>template-secret</b></template><noscript>noscript-secret</noscript>' +
+        '<!-- comment-secret --> <span>可見</span>',
+      '公開 可見',
+    ],
+    [
+      'malformed nested script opening',
+      '公開 <<script>script-secret</script> <span>可見</span>',
+      '公開 < 可見',
+    ],
+    [
+      'unclosed script content',
+      '公開<script src=x />script-secret<p>still-script-content</p>',
+      '公開',
+    ],
+    [
+      'exactly-once named and numeric entity decoding',
+      'A &amp;lt;b&amp;gt; &#38;lt;i&#38;gt; &amp;amp; &quot;B&quot; &#039; ' +
+        '&lt;u&gt;字&lt;/u&gt; &#x4e2d; &nbsp; 文',
+      'a &lt;b&gt; &lt;i&gt; &amp; "b" \' <u>字</u> 中 文',
+    ],
+    [
+      'deeply nested source HTML',
+      '<div>'.repeat(12000) + '公開內容' + '</div>'.repeat(12000),
+      '公開內容',
+    ],
+  ])('extracts source text safely from %s', async (_name, snippet, expected) => {
+    const fetchImpl = jest.fn(async (url) => mockResponse({
+      json: new URL(String(url)).hostname === 'zh.wikipedia.org'
+        ? { query: { search: [{ title: '校務資訊', snippet }] } }
+        : {},
+    }));
+
+    const result = await answerWithServerWebSearch('搜尋公開校園資訊', {
+      schoolId: 'nthu',
+      fetchImpl,
+    });
+
+    expect(result.sources).toHaveLength(1);
+    expect(result.sources[0].snippet).toBe(expected);
+    expect(result.content).toContain(expected);
+    expect(result.content).not.toContain('secret');
   });
 
   test('rejects oversized provider responses before JSON.parse', async () => {
@@ -538,5 +590,169 @@ describe('assistant agent policy', () => {
       'malformed tool arguments',
     ]);
     expect(JSON.stringify(bounded.toolCallsTrace).length).toBeLessThan(500);
+  });
+
+  test.each([
+    ['ntu', '國立臺灣大學'],
+    ['ncku', '國立成功大學'],
+    ['ntpu', '國立臺北大學'],
+    ['tw-pu', '靜宜大學'],
+    ['pu', '靜宜大學'],
+  ])(
+    'implicit route origin uses verified selected-school label for %s',
+    async (schoolId, expectedOrigin) => {
+      const result = await answerWithServerWebSearch('怎麼去火車站？', { schoolId });
+      expect(result.content).toContain(`${expectedOrigin} → 火車站`);
+      expect(result.content).toContain(encodeURIComponent(expectedOrigin));
+      if (schoolId === 'pu' || schoolId === 'tw-pu') {
+        expect(result.content).toContain('靜宜大學');
+      } else {
+        expect(result.content).not.toMatch(/靜宜大學 →/);
+        expect(result.sources.every((source) => !String(source.source || '').includes('公車'))).toBe(
+          true,
+        );
+      }
+    },
+  );
+
+  test('unknown school implicit route asks for origin and never defaults to PU', async () => {
+    const result = await answerWithServerWebSearch('怎麼去火車站？', { schoolId: 'unknown-school' });
+    expect(result.content).toContain('無法判斷出發地');
+    expect(result.content).not.toContain('靜宜大學 →');
+    expect(result.content).not.toContain('origin=%E9%9D%9C%E5%AE%9C%E5%A4%A7%E5%AD%B8');
+    expect(result.sources[0].url).toContain('maps/search');
+  });
+
+  test('explicit other origin is preserved even when selected school differs', async () => {
+    const result = await answerWithServerWebSearch('從台大怎麼去台北車站？', { schoolId: 'pu' });
+    expect(result.content).toContain('台大 → 台北車站');
+    expect(result.content).not.toMatch(/靜宜大學 →/);
+  });
+
+  test('known explicit PU route remains supported without selected school', async () => {
+    const result = await answerWithServerWebSearch('從靜宜大學怎麼去台中車站？');
+    expect(result.content).toContain('靜宜大學 → 台中車站');
+    expect(result.sources.some((source) => source.source.includes('公車'))).toBe(true);
+  });
+
+  test('weather for non-PU selected school without locality never fetches PU coordinates', async () => {
+    const fetchImpl = jest.fn();
+    const result = await answerWithServerWebSearch('今天會下雨嗎？', {
+      schoolId: 'ntu',
+      fetchImpl,
+    });
+    expect(fetchImpl).not.toHaveBeenCalled();
+    expect(result.weatherUnavailable).toBe(true);
+    expect(result.content).toMatch(/無法查|不能依所選學校自動查天氣/);
+    expect(result.content).not.toMatch(/已驗證|座標/);
+    expect(result.content).not.toContain('沙鹿');
+    expect(result.suggestions.join(' ')).not.toMatch(/靜宜/);
+  });
+
+  test('weather for unknown named locality never fetches PU coordinates', async () => {
+    const fetchImpl = jest.fn();
+    for (const query of [
+      '高雄天氣如何？',
+      '臺北今天天氣',
+      '東京今天天氣',
+      '巴黎天氣',
+      '紐約今天會下雨嗎',
+      '明天的香港天氣',
+    ]) {
+      fetchImpl.mockClear();
+      const result = await answerWithServerWebSearch(query, {
+        schoolId: 'pu',
+        fetchImpl,
+      });
+      expect(fetchImpl).not.toHaveBeenCalled();
+      expect(result.weatherUnavailable).toBe(true);
+      expect(result.weatherReason).toBe('unknown_locality');
+      expect(result.content).not.toContain('我剛剛連網查到');
+      expect(result.content).not.toContain('台中市沙鹿區靜宜大學');
+      expect(result.content).not.toMatch(/已驗證|座標/);
+    }
+
+    fetchImpl.mockClear();
+    const mixed = await answerWithServerWebSearch('東京今天天氣', {
+      schoolId: 'ncku',
+      fetchImpl,
+    });
+    expect(fetchImpl).not.toHaveBeenCalled();
+    expect(mixed.weatherUnavailable).toBe(true);
+    expect(mixed.weatherReason).toBe('unknown_locality');
+  });
+
+  test('ordinary PU 帶傘/下雨 weather uses ShaLu; explicit PU locality still works', async () => {
+    const fetchImpl = jest.fn(async () =>
+      mockResponse({
+        json: {
+          current: {
+            time: '2026-10-24T12:00',
+            temperature_2m: 28,
+            relative_humidity_2m: 70,
+            precipitation: 0,
+            rain: 0,
+            weather_code: 1,
+            wind_speed_10m: 8,
+          },
+        },
+      }),
+    );
+
+    for (const query of ['今天需要帶傘嗎？', '今天會下雨嗎？', '今天天氣？', '今天的天氣怎麼樣']) {
+      fetchImpl.mockClear();
+      const selected = await answerWithServerWebSearch(query, {
+        schoolId: 'tw-pu',
+        fetchImpl,
+      });
+      expect(selected.content).toContain('沙鹿');
+      expect(String(fetchImpl.mock.calls[0][0])).toContain('latitude=24.226');
+      expect(String(fetchImpl.mock.calls[0][0])).toContain('longitude=120.563');
+    }
+
+    fetchImpl.mockClear();
+    const explicit = await answerWithServerWebSearch('靜宜今天天氣？', {
+      schoolId: 'ntu',
+      fetchImpl,
+    });
+    expect(explicit.content).toContain('沙鹿');
+    expect(String(fetchImpl.mock.calls[0][0])).toContain('latitude=24.226');
+  });
+
+  test('school-topic web grounding uses selected school only when question is implicit', async () => {
+    const fetchImpl = jest.fn(async (url) => {
+      if (String(url).includes('wikipedia')) {
+        return mockResponse({
+          json: {
+            query: {
+              search: [
+                {
+                  title: '選課',
+                  snippet: '選課說明',
+                  timestamp: '2026-10-24T00:00:00Z',
+                },
+              ],
+            },
+          },
+        });
+      }
+      return mockResponse({ json: {} });
+    });
+
+    await answerWithServerWebSearch('選課規定是什麼？', { schoolId: 'ncku', fetchImpl });
+    const schoolTopicUrl = String(fetchImpl.mock.calls.find(([url]) => String(url).includes('wikipedia'))[0]);
+    expect(decodeURIComponent(schoolTopicUrl)).toContain('國立成功大學');
+
+    fetchImpl.mockClear();
+    await answerWithServerWebSearch('臺大宿舍規定', { schoolId: 'pu', fetchImpl });
+    const otherSchoolUrl = String(fetchImpl.mock.calls.find(([url]) => String(url).includes('wikipedia'))[0]);
+    expect(decodeURIComponent(otherSchoolUrl)).toContain('臺大宿舍規定');
+    expect(decodeURIComponent(otherSchoolUrl)).not.toContain('靜宜大學');
+
+    fetchImpl.mockClear();
+    await answerWithServerWebSearch('什麼是光合作用？', { schoolId: 'ncku', fetchImpl });
+    const generalUrl = String(fetchImpl.mock.calls.find(([url]) => String(url).includes('wikipedia'))[0]);
+    expect(decodeURIComponent(generalUrl)).toContain('光合作用');
+    expect(decodeURIComponent(generalUrl)).not.toContain('國立成功大學');
   });
 });

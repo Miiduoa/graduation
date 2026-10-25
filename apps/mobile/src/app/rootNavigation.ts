@@ -20,6 +20,38 @@ export type RootTabName = keyof RootTabParamList;
 
 export const rootNavigationRef = createNavigationContainerRef<RootTabParamList>();
 
+type SchoolReadyListener = () => void;
+const schoolReadyListeners = new Set<SchoolReadyListener>();
+let schoolNavigationReady = false;
+
+/** Compose with SchoolNavigation onReady — no reminder-owned 300ms polling. */
+export function markSchoolNavigationReady() {
+  schoolNavigationReady = true;
+  for (const listener of [...schoolReadyListeners]) {
+    try {
+      listener();
+    } catch {
+      /* readiness adapters must not throw into NavigationContainer */
+    }
+  }
+}
+
+export function markSchoolNavigationUnready() {
+  schoolNavigationReady = false;
+}
+
+export function subscribeSchoolNavigationReady(listener: SchoolReadyListener) {
+  schoolReadyListeners.add(listener);
+  if (schoolNavigationReady && rootNavigationRef.isReady()) listener();
+  return () => {
+    schoolReadyListeners.delete(listener);
+  };
+}
+
+export function isSchoolNavigationReady() {
+  return schoolNavigationReady && rootNavigationRef.isReady();
+}
+
 function dispatchWhenReady(dispatch: () => void): boolean {
   if (rootNavigationRef.isReady()) {
     dispatch();

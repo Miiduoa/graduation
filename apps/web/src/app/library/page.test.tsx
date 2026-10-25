@@ -1,14 +1,23 @@
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import LibraryPage from './page';
-const context = vi.hoisted(() => ({ schoolId: 'pu', schoolName: '靜宜大學' }));
-vi.mock('@/lib/pageContext', () => ({ resolveSchoolPageContext: () => context }));
+const context = vi.hoisted(() => ({
+  status: 'ready' as 'ready' | 'loading' | 'error' | 'unselected',
+  schoolId: 'pu' as string | null,
+  schoolName: '靜宜大學',
+  schoolSearch: '?schoolId=pu&campus=pu',
+}));
+vi.mock('@/lib/useCampusBrowseContext', () => ({
+  useCampusBrowseContext: () => context,
+}));
 vi.mock('@/components/SiteShell', () => ({
   SiteShell: ({ children }: { children: React.ReactNode }) => <main>{children}</main>,
 }));
 beforeEach(() => {
+  context.status = 'ready';
   context.schoolId = 'pu';
   context.schoolName = '靜宜大學';
+  context.schoolSearch = '?schoolId=pu&campus=pu';
 });
 afterEach(cleanup);
 it('searches the official catalog with the chosen field and user input', () => {
@@ -66,7 +75,7 @@ it('opens the chosen university library without showing Providence links or a si
   expect(screen.queryByText('蓋夏圖書館')).toBeNull();
 });
 
-it('shows a separate official catalog for schools with verified catalog links', () => {
+it('searches NCUE WebPACX directly with translated fields and no clipboard detour', () => {
   context.schoolId = 'ncue';
   context.schoolName = '國立彰化師範大學';
   render(<LibraryPage />);
@@ -74,9 +83,48 @@ it('shows a separate official catalog for schools with verified catalog links', 
     'https://webpacx.ncue.edu.tw/',
   );
   fireEvent.change(screen.getByLabelText('想找的書或關鍵字'), {
-    target: { value: '資料科學' },
+    target: { value: '資料庫 & SQL' },
   });
+  fireEvent.change(screen.getByLabelText('搜尋範圍'), { target: { value: 'Title' } });
+  const url = new URL(screen.getByRole('link', { name: '直接搜尋本校館藏 ↗' }).getAttribute('href')!);
+  expect(url.hostname).toBe('webpacx.ncue.edu.tw');
+  expect(url.pathname).toBe('/search');
+  expect(url.searchParams.get('searchField')).toBe('TI');
+  expect(url.searchParams.get('searchInput')).toBe('資料庫 & SQL');
+  expect(screen.queryByRole('button', { name: '複製關鍵字' })).toBeNull();
+  expect(screen.queryByRole('button', { name: '搜尋學校館藏 ↗' })).toBeNull();
+});
+
+it('keeps clipboard handoff for schools without a verified search format', () => {
+  context.schoolId = 'cgu';
+  context.schoolName = '長庚大學';
+  render(<LibraryPage />);
+  fireEvent.change(screen.getByLabelText('想找的書或關鍵字'), {
+    target: { value: '護理' },
+  });
+  expect(screen.getByRole('link', { name: '前往官方館藏入口 ↗' }).getAttribute('href')).toBe(
+    'https://web20.lib.cgu.edu.tw/',
+  );
   expect((screen.getByRole('button', { name: '複製關鍵字' }) as HTMLButtonElement).disabled).toBe(false);
+});
+
+it('opens Fu Jen Sierra results with the official 75-character limit', () => {
+  context.schoolId = 'fju';
+  context.schoolName = '輔仁大學';
+  render(<LibraryPage />);
+  const input = screen.getByLabelText('想找的書或關鍵字') as HTMLInputElement;
+  expect(input.maxLength).toBe(75);
+  expect(screen.getByText('此校官方館藏關鍵字上限為 75 字。')).toBeTruthy();
+  fireEvent.change(input, { target: { value: '資料庫' } });
+  const url = new URL(screen.getByRole('link', { name: '直接搜尋本校館藏 ↗' }).getAttribute('href')!);
+  expect(url.origin).toBe('https://library.lib.fju.edu.tw:444');
+  expect(url.pathname).toBe('/search~S0*cht/');
+  expect(url.searchParams.get('searchtype')).toBe('Y');
+  expect(url.searchParams.get('searcharg')).toBe('資料庫');
+  expect(screen.getByRole('link', { name: '前往我的借閱紀錄 ↗' }).getAttribute('href')).toBe(
+    'https://library.lib.fju.edu.tw:444/patroninfo*cht',
+  );
+  expect(screen.queryByRole('button', { name: '複製關鍵字' })).toBeNull();
 });
 
 

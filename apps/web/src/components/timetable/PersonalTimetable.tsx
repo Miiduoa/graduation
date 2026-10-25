@@ -41,13 +41,11 @@ import {
   loadFriendTimetable,
   loadPersonalTimetable,
   savePersonalTimetable,
-  CLOUD_NOT_READY_COPY,
   TIMETABLE_DEVICE_ONLY_STORED_COPY,
   TIMETABLE_DEVICE_ONLY_SUBMIT_COPY,
   TimetableCloudSaveError,
   type StoredTimetable,
 } from '@/lib/timetable/store';
-import { SchoolAccountRequired } from '@/components/SchoolAccountRequired';
 import { isFunctionsUnconfiguredError } from '@/lib/functionsUrl';
 import { loginHref } from '@/lib/navigation';
 import { useSignInOptions } from '@/lib/signInOptions';
@@ -72,9 +70,62 @@ function ShareNeedsSchoolAccountNotice() {
   }
   return (
     <p className={styles.notice}>
-      {SHARE_NEEDS_SCHOOL_LOGIN_COPY}{' '}
-      <Link href={loginHref('/timetable')}>登入學校帳號</Link>
+      {SHARE_NEEDS_SCHOOL_LOGIN_COPY} <Link href={loginHref('/timetable')}>登入學校帳號</Link>
     </p>
+  );
+}
+
+function FriendTimetableAccessNotice({
+  schoolId,
+  onViewOwnFree,
+  busy,
+}: {
+  schoolId: string;
+  onViewOwnFree?: () => void;
+  busy: boolean;
+}) {
+  const options = useSignInOptions();
+  return (
+    <>
+      <p
+        className={styles.notice}
+        role={options.loading ? 'status' : options.error ? 'alert' : undefined}
+      >
+        {options.loading
+          ? '正在確認學校帳號登入狀態…'
+          : options.error
+            ? '暫時無法確認學校帳號登入方式，自己的課表與空堂仍可使用。'
+            : options.studentId
+              ? '登入學校帳號，並與好友互相開放課表後，就能比較共同空堂。'
+              : '目前尚未開放學校帳號登入，暫時無法讀取好友課表。'}
+      </p>
+      <div className={styles.toolbar}>
+        {options.error ? (
+          <button type="button" className="btn" onClick={options.retry}>
+            重新確認
+          </button>
+        ) : !options.loading && options.studentId ? (
+          <Link
+            className="btn"
+            href={loginHref(`/timetable?campus=${encodeURIComponent(schoolId)}`)}
+          >
+            登入查看好友
+          </Link>
+        ) : null}
+        {onViewOwnFree ? (
+          <button type="button" className="btn" disabled={busy} onClick={onViewOwnFree}>
+            查看自己的空堂
+          </button>
+        ) : (
+          <Link
+            className="btn"
+            href={`/import?kind=timetable&campus=${encodeURIComponent(schoolId)}`}
+          >
+            匯入自己的課表
+          </Link>
+        )}
+      </div>
+    </>
   );
 }
 
@@ -154,6 +205,7 @@ function TimetableWorkspace({ schoolId }: { schoolId: string }) {
   const [importMode, setImportMode] = useState<ImportMode>('merge');
   const [drafts, setDrafts] = useState<ImportDraft[]>([]);
   const [planResult, setPlanResult] = useState<{ title: string; lines: string[] } | null>(null);
+  const planningPanel = useRef<HTMLElement>(null);
   const [studyDay, setStudyDay] = useState(() => {
     const today = new Date().getDay();
     return today >= 1 && today <= 5 ? today : 1;
@@ -174,9 +226,13 @@ function TimetableWorkspace({ schoolId }: { schoolId: string }) {
       ? ''
       : new URLSearchParams(window.location.search).get('term') || '',
   );
-  const terms = personalTimetableTerms(imported.records, schoolId).map((term) => term.key);
+  const terms = personalTimetableTerms(imported.records, schoolId);
   const activeTerm =
-    importTerm === 'manual' ? 'manual' : terms.includes(importTerm) ? importTerm : terms[0] || '';
+    importTerm === 'manual'
+      ? 'manual'
+      : terms.some((term) => term.key === importTerm)
+        ? importTerm
+        : terms[0]?.key || '';
   const importedCourses: PersonalCourse[] = imported.records
     .filter(
       (row) =>
@@ -403,8 +459,8 @@ function TimetableWorkspace({ schoolId }: { schoolId: string }) {
             <select value={activeTerm} onChange={(event) => setImportTerm(event.target.value)}>
               <option value="manual">原本的手動課表</option>
               {terms.map((term) => (
-                <option key={term} value={term}>
-                  {term.replace('|', ' 學年度 ')} 學期
+                <option key={term.key} value={term.key}>
+                  {term.academicYear} 學年度 {term.semester} 學期
                 </option>
               ))}
             </select>
@@ -664,10 +720,7 @@ function TimetableWorkspace({ schoolId }: { schoolId: string }) {
           </ul>
         </section>
       )}
-      <p className={styles.notice}>
-        {TIMETABLE_DEVICE_ONLY_STORED_COPY}
-        {uid ? '' : ` ${CLOUD_NOT_READY_COPY}`}
-      </p>
+      <p className={styles.notice}>{TIMETABLE_DEVICE_ONLY_STORED_COPY}</p>
       {uid ? (
         <label className={styles.field}>
           <input
@@ -763,8 +816,8 @@ function TimetableWorkspace({ schoolId }: { schoolId: string }) {
             <select value={activeTerm} onChange={(event) => setImportTerm(event.target.value)}>
               <option value="manual">原本的手動課表</option>
               {terms.map((term) => (
-                <option key={term} value={term}>
-                  {term.replace('|', ' 學年度 ')} 學期
+                <option key={term.key} value={term.key}>
+                  {term.academicYear} 學年度 {term.semester} 學期
                 </option>
               ))}
             </select>
@@ -909,7 +962,7 @@ function TimetableWorkspace({ schoolId }: { schoolId: string }) {
         )}
       </section>
 
-      <section className={styles.panel} aria-label="幫我安排">
+      <section className={styles.panel} aria-label="幫我安排" ref={planningPanel} tabIndex={-1}>
         <h2>幫我安排</h2>
         <p className={styles.notice}>
           {planning.ready
@@ -989,16 +1042,18 @@ function TimetableWorkspace({ schoolId }: { schoolId: string }) {
       <section className={styles.panel} aria-label="共同空堂">
         <h2>共同空堂</h2>
         {!uid ? (
-          <>
-            <SchoolAccountRequired
-              returnUrl="/timetable"
-              headingLevel={3}
-              alternative="空堂可以先看自己這台瀏覽器上的課表。"
-            />
-            <p className={styles.notice}>
-              加好友後才看得到對方課表，沒加好友不會露出任何人的時間。
-            </p>
-          </>
+          <FriendTimetableAccessNotice
+            schoolId={schoolId}
+            busy={busy}
+            onViewOwnFree={
+              planning.ready
+                ? () => {
+                    todayFree();
+                    planningPanel.current?.focus();
+                  }
+                : undefined
+            }
+          />
         ) : friends.length === 0 ? (
           <p className={styles.notice}>
             目前沒有已接受的好友，或對方還沒把課表開放給好友。去 <a href="/friends">找人</a>{' '}

@@ -47,14 +47,60 @@ describe('official library catalog destinations', () => {
     expect(buildOfficialLibraryCatalogUrl('ntnu', '資料庫')).toBe(
       'https://opac.lib.ntnu.edu.tw/',
     );
-    expect(buildOfficialLibraryCatalogUrl('ncue', '資料庫')).toBe(
-      'https://webpacx.ncue.edu.tw/',
-    );
     expect(buildOfficialLibraryCatalogUrl('cgu', '資料庫')).toBe('https://web20.lib.cgu.edu.tw/');
     expect(buildOfficialLibraryCatalogUrl('ncyu', '資料庫')).toBe('https://libaleph.ncyu.edu.tw/F');
     expect(buildOfficialLibraryCatalogUrl('ntpu', '資料庫')).toBe('https://wpac.lib.ntpu.edu.tw/webpac/search.cfm');
     expect(buildOfficialLibraryCatalogUrl('tmu', '資料庫')).toBe('https://libelis.tmu.edu.tw/webpacIndex.jsp');
     expect(buildOfficialLibraryCatalogUrl('cycu', '資料庫')).toBe('https://cylis.lib.cycu.edu.tw/search*cht');
+  });
+
+  const webpacXSchools: Record<string, string> = {
+    ncue: 'https://webpacx.ncue.edu.tw/',
+    ntub: 'https://webpacx.ntub.edu.tw/',
+    thu: 'https://webpac.lib.thu.edu.tw/',
+  };
+
+  it.each(Object.entries(webpacXSchools))(
+    '%s builds WebPACX search on its own host with translated fields',
+    (schoolId, catalogRoot) => {
+      const library = getOfficialLibrary(schoolId);
+      expect(library?.catalogSearch).toBe('webpac-x');
+      expect(library?.catalogUrl).toBe(catalogRoot);
+      const home = new URL(catalogRoot);
+      const result = new URL(buildOfficialLibraryCatalogUrl(schoolId, ' 資料庫 & SQL ', 'Title')!);
+      expect(result.origin).toBe(home.origin);
+      expect(result.pathname).toBe('/search');
+      expect(result.searchParams.get('searchField')).toBe('TI');
+      expect(result.searchParams.get('searchInput')).toBe('資料庫 & SQL');
+      expect(result.searchParams.get('searchField')).not.toBe('Title');
+      expect(buildOfficialLibraryCatalogUrl(schoolId, '  ', 'Author')).toBe(catalogRoot);
+      expect(new URL(buildOfficialLibraryCatalogUrl(schoolId, 'x', 'Author')!).searchParams.get('searchField')).toBe('PN');
+      expect(new URL(buildOfficialLibraryCatalogUrl(schoolId, 'x', 'Subject')!).searchParams.get('searchField')).toBe('SU');
+      expect(new URL(buildOfficialLibraryCatalogUrl(schoolId, 'x', 'ISBN')!).searchParams.get('searchField')).toBe('ISBN');
+      expect(new URL(buildOfficialLibraryCatalogUrl(schoolId, 'x', 'Unknown')!).searchParams.get('searchField')).toBe('FullText');
+    },
+  );
+
+  it('builds Fu Jen Sierra search with verified scope and field codes', () => {
+    const library = getOfficialLibrary('fju');
+    expect(library?.catalogSearch).toBe('sierra');
+    expect(library?.catalogUrl).toBe('https://library.lib.fju.edu.tw:444/search~S0*cht/');
+    expect(library?.accountUrl).toBe('https://library.lib.fju.edu.tw:444/patroninfo*cht');
+    expect(library?.catalogQueryMaxLength).toBe(75);
+    const result = new URL(buildOfficialLibraryCatalogUrl('fju', ' 資料庫 & SQL ', 'Title')!);
+    expect(result.origin).toBe('https://library.lib.fju.edu.tw:444');
+    expect(result.pathname).toBe('/search~S0*cht/');
+    expect(result.searchParams.get('searchtype')).toBe('t');
+    expect(result.searchParams.get('searcharg')).toBe('資料庫 & SQL');
+    expect(result.searchParams.get('SORT')).toBe('D');
+    expect(result.searchParams.get('extended')).toBe('0');
+    expect(new URL(buildOfficialLibraryCatalogUrl('fju', 'x', 'Author')!).searchParams.get('searchtype')).toBe('a');
+    expect(new URL(buildOfficialLibraryCatalogUrl('fju', 'x', 'Subject')!).searchParams.get('searchtype')).toBe('d');
+    expect(new URL(buildOfficialLibraryCatalogUrl('fju', 'x', 'ISBN')!).searchParams.get('searchtype')).toBe('i');
+    expect(new URL(buildOfficialLibraryCatalogUrl('fju', 'x', 'Nope')!).searchParams.get('searchtype')).toBe('Y');
+    expect(buildOfficialLibraryCatalogUrl('fju', '\n\t', 'FullText')).toBe(library!.catalogUrl);
+    const long = '字'.repeat(90);
+    expect(new URL(buildOfficialLibraryCatalogUrl('fju', long)!).searchParams.get('searcharg')).toHaveLength(75);
   });
 
   it('does not route an unknown campus into Providence or other schools', () => {
