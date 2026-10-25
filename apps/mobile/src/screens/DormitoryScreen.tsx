@@ -15,12 +15,14 @@ import {
 } from '../services/dormitoryStorage';
 import {
   DORM_CHECKLISTS,
+  DORM_INSPECTION_ITEMS,
   DORM_MILESTONE_LIMIT,
   DORM_PARCEL_LIMIT,
   DORM_REPAIR_SHORTCUTS,
   DORM_REPAIR_CATEGORIES,
   DORM_REPAIR_STATUSES,
   dormChecklistProgress,
+  dormInspectionProgress,
   dormStorageKey,
   emptyDormWorkspace,
   formatDormRepairForCopy,
@@ -395,6 +397,7 @@ function DormitoryBody({
   }
 
   const progress = dormChecklistProgress(data);
+  const inspectionProgress = dormInspectionProgress(data);
   const remaining = data.laundryEndAt ? Math.max(0, Math.ceil((data.laundryEndAt - clock) / 60000)) : 0;
   const today = localDormDate(new Date(clock));
   const milestones = sortedDormMilestones(data);
@@ -768,6 +771,47 @@ function DormitoryBody({
             <AICard title="入住與退宿清單">
               <Body>已完成 {progress.completed} / {progress.total} 項</Body>
               <Body muted>勾選只會保存在此裝置，不代表校方已收到申請。</Body>
+            </AICard>
+            <AICard title={'房況與設備點檢 · ' + inspectionProgress.checked + '/' + inspectionProgress.total}>
+              <Body muted>入住時逐項檢查。此處只保存個人確認，不代表校方已驗收或收到報修。</Body>
+              {!!inspectionProgress.issues && <Text style={{ color: aiTokens.text, marginTop: 8, fontSize: 13 }}>
+                {inspectionProgress.issues} 項由你標記待處理；請依校方規範通報。
+              </Text>}
+              {DORM_INSPECTION_ITEMS.map((item) => {
+                const status = data.inspection[item.id];
+                return <View key={item.id} style={{ paddingVertical: 16, gap: 11,
+                  borderBottomWidth: 1, borderBottomColor: aiTokens.border }}>
+                  <Text style={{ color: aiTokens.text, fontSize: 16, fontWeight: '600' }}>{item.title}</Text>
+                  <Body muted>{status === 'ok' ? '自行確認：正常' : status === 'issue' ? '自行確認：待處理' : '尚未檢查'}</Body>
+                  <View style={flexRow}>
+                    {([
+                      { value: 'unchecked' as const, label: '未檢查' },
+                      { value: 'ok' as const, label: '正常' },
+                      { value: 'issue' as const, label: '待處理' },
+                    ]).map((option) => (
+                      <Pressable key={option.value} accessibilityRole="radio"
+                        accessibilityState={{ checked: option.value === (status ?? 'unchecked'), disabled: conflict }}
+                        onPress={() => {
+                          if (conflict) return;
+                          const next = { ...data.inspection };
+                          if (option.value === 'unchecked') delete next[item.id];
+                          else next[item.id] = option.value;
+                          void save({ ...data, inspection: next });
+                        }}
+                        style={{ minHeight: 44, justifyContent: 'center', paddingHorizontal: 14,
+                          borderWidth: 1, borderColor: option.value === (status ?? 'unchecked') ? aiTokens.text : aiTokens.border,
+                          borderRadius: aiTokens.radius.sm,
+                          backgroundColor: option.value === (status ?? 'unchecked') ? aiTokens.panel : aiTokens.surface }}>
+                        <Text style={{ color: aiTokens.text, fontSize: 14 }}>{option.label}</Text>
+                      </Pressable>
+                    ))}
+                  </View>
+                  {status === 'issue' && <View style={{ alignItems: 'flex-start' }}>
+                    <AIButton label="記錄設備問題" variant="ghost"
+                      onPress={() => editRepair(undefined, { category: item.category, title: item.repairTitle })} />
+                  </View>}
+                </View>;
+              })}
             </AICard>
             {DORM_CHECKLISTS.map((group) => (
               <AICard key={group.stage} title={group.title}>
