@@ -35,6 +35,18 @@ export type DormRepair = {
   updatedAt: number;
 };
 
+export type DormParcel = {
+  id: string;
+  title: string;
+  pickupPoint: string;
+  dueDate: string; // Optional resident-entered date, not a school deadline
+  collected: boolean;
+  createdAt: number;
+  collectedAt: number | null;
+};
+
+export const DORM_PARCEL_LIMIT = 50;
+
 export type DormWorkspace = {
   version: 1;
   building: string;
@@ -43,6 +55,7 @@ export type DormWorkspace = {
   checkmarks: Record<string, boolean>;
   repairs: DormRepair[];
   milestones: DormMilestone[];
+  parcels: DormParcel[];
   laundryEndAt: number | null;
 };
 
@@ -125,7 +138,8 @@ export function emptyDormWorkspace(): DormWorkspace {
     checkmarks: {},
     repairs: [],
     milestones: [],
-    laundryEndAt: null,
+    parcels: [],
+    laundryEndAt: null;
   };
 }
 
@@ -151,6 +165,17 @@ export function sortedDormMilestones(value: DormWorkspace): DormMilestone[] {
     Number(a.completed) - Number(b.completed) ||
     a.dueDate.localeCompare(b.dueDate) ||
     a.createdAt - b.createdAt);
+}
+
+/** Pending parcels first, sorted by resident-entered pickup date. */
+export function sortedDormParcels(value: DormWorkspace): DormParcel[] {
+  return [...value.parcels].sort((a, b) =>
+    Number(a.collected) - Number(b.collected) ||
+    (a.collected
+      ? (b.collectedAt ?? 0) - (a.collectedAt ?? 0)
+      : (a.dueDate || '9999-12-31').localeCompare(b.dueDate || '9999-12-31')) ||
+    b.createdAt - a.createdAt ||
+    a.id.localeCompare(b.id));
 }
 
 export function normalizeDormWorkspace(raw: unknown): DormWorkspace {
@@ -204,6 +229,28 @@ export function normalizeDormWorkspace(raw: unknown): DormWorkspace {
       });
     }
   }
+  const parcels: DormParcel[] = [];
+  const parcelIds = new Set<string>();
+  if (Array.isArray(value.parcels)) {
+    for (const item of value.parcels.slice(0, DORM_PARCEL_LIMIT)) {
+      const row = asObject(item);
+      const id = boundedText(row.id, 90);
+      const title = boundedText(row.title, 90);
+      if (!id || !/^[a-zA-Z0-9_-]+$/.test(id) || parcelIds.has(id) || !title) continue;
+      parcelIds.add(id);
+      const dueDate = boundedText(row.dueDate, 10);
+      const collected = row.collected === true;
+      parcels.push({
+        id,
+        title,
+        pickupPoint: boundedText(row.pickupPoint, 100),
+        dueDate: isValidDormDate(dueDate) ? dueDate : '',
+        collected,
+        createdAt: integer(row.createdAt),
+        collectedAt: collected ? (integer(row.collectedAt) || null) : null,
+      });
+    }
+  }
   const laundryEndAt = integer(value.laundryEndAt);
   return {
     ...blank,
@@ -213,6 +260,7 @@ export function normalizeDormWorkspace(raw: unknown): DormWorkspace {
     checkmarks,
     repairs,
     milestones,
+    parcels,
     laundryEndAt: laundryEndAt || null,
   };
 }
