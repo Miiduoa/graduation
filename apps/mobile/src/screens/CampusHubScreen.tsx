@@ -14,6 +14,7 @@ import { safeNavigate } from '../utils/safeNavigate';
 import { HeaderAvatarButton } from '../components/HeaderAvatarButton';
 import { OpenOrderCard } from '../components/OpenOrderCard';
 import { SchoolBrowsingControl } from '../components/SchoolBrowsingControl';
+import { getMobileQuickActions } from '../services/quickCampusActions';
 
 type ServiceItem = {
   icon: GeneratedButtonIconId;
@@ -207,6 +208,12 @@ function CampusDirectory({ schoolId, navigation }: { schoolId: string; navigatio
       .filter((section) => section.items.length > 0);
   }, [keyword, schoolId, paymentsEnabled]);
   const matchCount = filtered.reduce((count, section) => count + section.items.length, 0);
+  const quickActions = keyword
+    ? getMobileQuickActions(query).filter(
+        (action) => !filtered.some((section) =>
+          section.items.some((item) => item.screen === action.route)),
+      )
+    : [];
   const openService = (item: ServiceItem) => {
     Keyboard.dismiss();
     safeNavigate(navigation, item.screen, undefined, {
@@ -262,11 +269,39 @@ function CampusDirectory({ schoolId, navigation }: { schoolId: string; navigatio
       </View>
       {keyword ? (
         <Text accessibilityLiveRegion="polite" style={s.searchCaption}>
-          找到 {matchCount} 項服務
+          找到 {matchCount} 項清單服務{quickActions.length ? '，另有 ' + quickActions.length + ' 項捷徑' : ''}
         </Text>
       ) : (
         <OpenOrderCard navigation={navigation} />
       )}
+      {quickActions.length > 0 ? (
+        <View style={s.section}>
+          <Text accessibilityRole="header" style={s.sectionTitle}>可以直接做</Text>
+          <View style={s.serviceList}>
+            {quickActions.map((action) => (
+              <Pressable
+                key={action.destination}
+                accessibilityRole="button"
+                accessibilityLabel={'依需求前往' + action.label}
+                onPress={() => {
+                  Keyboard.dismiss();
+                  safeNavigate(navigation, action.route, undefined, {
+                    fallbackMessage: '目前無法開啟對應服務，請稍後重試。',
+                  });
+                }}
+                style={({ pressed }) => [s.serviceRow, pressed && s.pressed]}
+              >
+                <View style={s.serviceCopy}>
+                  <Text style={s.serviceTitle}>{action.label}</Text>
+                  <Text style={s.serviceDetail}>{action.description}</Text>
+                </View>
+                <Ionicons name="arrow-forward" size={18} color={theme.colors.accent} />
+              </Pressable>
+            ))}
+          </View>
+          <Text style={s.subtitle}>這裡只會開啟功能，變更或提交仍需你確認。</Text>
+        </View>
+      ) : null}
       {filtered.map((section) => {
         const isFrequent = !keyword && section.title === '常用服務';
         return (
@@ -315,7 +350,7 @@ function CampusDirectory({ schoolId, navigation }: { schoolId: string; navigatio
           </View>
         );
       })}
-      {matchCount === 0 ? (
+      {matchCount === 0 && quickActions.length === 0 ? (
         <View style={s.emptyState}>
           <Ionicons name="search-outline" size={28} color={theme.colors.muted} />
           <Text style={s.emptyTitle}>找不到「{query.trim()}」相關的服務</Text>
