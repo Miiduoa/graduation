@@ -27,7 +27,7 @@ const SYSTEM_PROMPT = [
 
 function plainText(value, max) {
   return typeof value === 'string'
-    ? value.replace(/[\u0000-\u001f\u007f]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, max)
+    ? Array.from(value, (ch) => { const code = ch.charCodeAt(0); return code < 32 || code === 127 ? ' ' : ch; }).join('').replace(/\s+/g, ' ').trim().slice(0, max)
     : '';
 }
 
