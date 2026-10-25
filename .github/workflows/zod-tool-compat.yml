@@ -25,13 +25,15 @@ jobs:
     timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: '22'
-      - name: Install production Functions npm dependency tree
+          cache: 'pnpm'
+      - name: Install full workspace and compile Functions shared types
         run: |
-          npm ci --prefix backend/functions --ignore-scripts
-          npm run build:shared --prefix backend/functions
+          pnpm install --frozen-lockfile
+          pnpm --filter functions run build:shared
       - name: Verify existing Zod 3 runtime
         working-directory: backend/functions
         run: |
