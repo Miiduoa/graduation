@@ -71,3 +71,10 @@ describe('read-only AI semantic intent', () => {
     expect(model.mock.calls[0][0]).not.toHaveProperty('toolDefs');
   });
 });
+
+
+test('accepts a model response wrapped in a complete JSON code fence', () => {
+  const fence = String.fromCharCode(96).repeat(3);
+  const content = fence + 'json\n' + '{"summary":"先查校園地圖","destinations":["/map"],"clarifyingQuestion":null}' + '\n' + fence;
+  expect(parseModelCampusIntent(content)).toMatchObject({ status: 'understood', destinations: ['/map'] });
+});

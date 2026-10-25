@@ -53,6 +53,7 @@ export function VoiceDictationButton({
   const [error, setError] = useState('');
   const [interim, setInterim] = useState('');
   const recognitionRef = useRef<SpeechRecognizer | null>(null);
+  const lastFinalTranscript = useRef('');
   const callback = useRef(onTranscript);
 
   useEffect(() => {
@@ -84,6 +85,7 @@ export function VoiceDictationButton({
     const Constructor = browserSpeech();
     if (!Constructor || disabled) return;
     const recognition = new Constructor();
+    lastFinalTranscript.current = '';
     recognitionRef.current = recognition;
     recognition.lang = 'zh-TW';
     recognition.interimResults = true;
@@ -100,7 +102,11 @@ export function VoiceDictationButton({
         else tentative.push(transcript);
       }
       if (finished.length) {
-        callback.current(finished.join(' ').slice(0, 4000));
+        const transcript = finished.join(' ').slice(0, 4000);
+        if (transcript !== lastFinalTranscript.current) {
+          lastFinalTranscript.current = transcript;
+          callback.current(transcript);
+        }
         setInterim('');
       } else {
         setInterim(tentative.join(' ').slice(0, 80));

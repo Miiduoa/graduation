@@ -1,6 +1,5 @@
-import {
-  normalizeCampusSemanticResult,
-} from '@campus/shared/src/campusSemantic';
+import { describe, expect, it } from 'vitest';
+import { normalizeCampusSemanticResult } from '@campus/shared/src/campusSemantic';
 
 describe('cross-platform semantic navigation contract', () => {
   it('accepts multiple safe route suggestions', () => {

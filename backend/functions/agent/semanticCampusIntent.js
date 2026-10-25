@@ -34,8 +34,13 @@ function plainText(value, max) {
 function parseModelCampusIntent(content) {
   if (typeof content !== 'string' || content.length > 4500) return null;
   let parsed;
+  const raw = content.trim();
+  const fence = String.fromCharCode(96).repeat(3);
+  const json = raw.startsWith(fence) && raw.endsWith(fence)
+    ? raw.slice(raw.indexOf('\n') + 1, -fence.length).trim()
+    : raw;
   try {
-    parsed = JSON.parse(content.trim());
+    parsed = JSON.parse(json);
   } catch {
     return null;
   }
