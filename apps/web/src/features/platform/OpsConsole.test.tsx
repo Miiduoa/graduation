@@ -1,7 +1,7 @@
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { OpsConsole } from './OpsConsole';
-import { adminLoginHref, readOpsTab } from './constants';
+import { adminLoginHref, readOpsSchool, readOpsTab } from './constants';
 
 const mocks = vi.hoisted(() => ({
   session: null as null | {
@@ -455,6 +455,16 @@ it.each([{}, peopleStatus('school-b')])(
   },
 );
 
+const REVIEW_REASON = '已核實申請資料並完成校方資格確認。';
+
+async function submitReview(button: string, reason = REVIEW_REASON) {
+  fireEvent.click(await screen.findByRole('button', { name: button }));
+  fireEvent.change(await screen.findByRole('textbox', { name: '審核理由' }), {
+    target: { value: reason },
+  });
+  fireEvent.click(screen.getByRole('button', { name: button === '拒絕' ? '確認拒絕' : '確認核准' }));
+}
+
 const extraOperations = [
   { tab: 'merchants', button: '核准意向' },
   { tab: 'affiliation', button: '核准掛靠' },
@@ -557,7 +567,7 @@ it.each(extraOperations)(
       options?.method === 'POST' ? previous.promise : original(url, options),
     );
     const view = render(<OpsConsole />);
-    fireEvent.click(await screen.findByRole('button', { name: button }));
+    await submitReview(button);
     mocks.session = { ...principal, context: 'b'.repeat(43) };
     view.rerender(<OpsConsole />);
     await screen.findByRole('button', { name: button });
@@ -582,7 +592,7 @@ it.each(extraOperations)(
       options?.method === 'POST' ? previous.promise : original(url, options),
     );
     const view = render(<OpsConsole />);
-    fireEvent.click(await screen.findByRole('button', { name: button }));
+    await submitReview(button);
     mocks.loading = true;
     view.rerender(<OpsConsole />);
     expect(screen.getByText('正在確認管理權限…')).toBeTruthy();
@@ -627,6 +637,12 @@ it.each(['approve', 'reject'] as const)(
     fireEvent.click(
       within(article).getByRole('button', { name: decision === 'approve' ? '核准意向' : '拒絕' }),
     );
+    fireEvent.change(within(article).getByRole('textbox', { name: '審核理由' }), {
+      target: { value: REVIEW_REASON },
+    });
+    fireEvent.click(within(article).getByRole('button', {
+      name: decision === 'approve' ? '確認核准' : '確認拒絕',
+    }));
     await waitFor(() =>
       expect(fetcher.mock.calls.some(([, options]) => options?.method === 'POST')).toBe(true),
     );
@@ -635,7 +651,7 @@ it.each(['approve', 'reject'] as const)(
     expect(posted[1].method).toBe('POST');
     expect(JSON.parse(posted[1].body)).toEqual({
       decision,
-      reason: decision === 'approve' ? '資料齊全，准予往下。' : '資料不足，請補件。',
+      reason: REVIEW_REASON,
       idempotencyKey: expect.stringMatching(/^web-merchant-decide-.+/),
     });
     await screen.findByText(
@@ -653,6 +669,12 @@ it.each(['approve', 'reject'] as const)(
     fireEvent.click(
       within(article).getByRole('button', { name: decision === 'approve' ? '核准進件' : '拒絕' }),
     );
+    fireEvent.change(within(article).getByRole('textbox', { name: '審核理由' }), {
+      target: { value: REVIEW_REASON },
+    });
+    fireEvent.click(within(article).getByRole('button', {
+      name: decision === 'approve' ? '確認核准' : '確認拒絕',
+    }));
     await waitFor(() =>
       expect(fetcher.mock.calls.some(([, options]) => options?.method === 'POST')).toBe(true),
     );
@@ -663,7 +685,7 @@ it.each(['approve', 'reject'] as const)(
     expect(posted[1].method).toBe('POST');
     expect(JSON.parse(posted[1].body)).toEqual({
       decision,
-      reason: decision === 'approve' ? '資料齊全，准予往下。' : '資料不足，請補件。',
+      reason: REVIEW_REASON,
       expectedVersion: 7,
     });
     await screen.findByText(
@@ -697,7 +719,7 @@ it('reloads a conflicting merchant application for review without replaying the 
     return ok({}, 404);
   });
   render(<OpsConsole />);
-  fireEvent.click(await screen.findByRole('button', { name: '核准進件' }));
+  await submitReview('核准進件');
   expect(await screen.findByRole('alert')).toHaveProperty(
     'textContent',
     '這筆申請已更新，請確認最新資料後再審核。',
@@ -710,14 +732,14 @@ it('reloads a conflicting merchant application for review without replaying the 
 });
 
 it.each([
-  { button: '核准掛靠', decision: 'approve', reason: '資料已核對，准予掛靠。' },
-  { button: '拒絕', decision: 'reject', reason: '資料不足，請補件後再申請。' },
+  { button: '核准掛靠', decision: 'approve', reason: REVIEW_REASON },
+  { button: '拒絕', decision: 'reject', reason: REVIEW_REASON },
 ])(
   'keeps the existing affiliation $decision request contract',
   async ({ button, decision, reason }) => {
     setupExtraOperation('affiliation');
     render(<OpsConsole />);
-    fireEvent.click(await screen.findByRole('button', { name: button }));
+    await submitReview(button);
     await waitFor(() =>
       expect(fetcher.mock.calls.some(([, options]) => options?.method === 'POST')).toBe(true),
     );
@@ -751,7 +773,7 @@ it.each(extraOperations)(
       options?.method === 'POST' ? Promise.resolve(ok({}, 401)) : original(url, options),
     );
     render(<OpsConsole />);
-    fireEvent.click(await screen.findByRole('button', { name: button }));
+    await submitReview(button);
     await waitFor(() =>
       expect(replace).toHaveBeenCalledWith(
         `/auth/account?returnUrl=${encodeURIComponent(`/admin/ops?tab=${tab}`)}`,
@@ -759,3 +781,59 @@ it.each(extraOperations)(
     );
   },
 );
+
+it('requires a specific review reason and permits cancelling before submission', async () => {
+  setupExtraOperation('merchants');
+  render(<OpsConsole />);
+  const article = (await screen.findByText('本帳號店家 · 學校A')).closest('article')!;
+  fireEvent.click(within(article).getByRole('button', { name: '拒絕' }));
+  expect(fetcher.mock.calls.some(([, options]) => options?.method === 'POST')).toBe(false);
+  const reason = within(article).getByRole('textbox', { name: '審核理由' });
+  fireEvent.change(reason, { target: { value: '短' } });
+  expect(within(article).getByRole('button', { name: '確認拒絕' })).toHaveProperty('disabled', true);
+  fireEvent.change(reason, { target: { value: REVIEW_REASON } });
+  fireEvent.click(within(article).getByRole('button', { name: '取消' }));
+  expect(fetcher.mock.calls.some(([, options]) => options?.method === 'POST')).toBe(false);
+  expect(within(article).queryByRole('textbox', { name: '審核理由' })).toBeNull();
+});
+
+it('only accepts well-formed school identifiers in management deep links', () => {
+  expect(readOpsSchool('?tab=people&school=school-a')).toBe('school-a');
+  expect(readOpsSchool('?school=../school-b')).toBeNull();
+  expect(readOpsSchool('?school=')).toBeNull();
+});
+
+it('supports arrow-key tab navigation and restores tabs from browser history', async () => {
+  setupExtraOperation('merchants');
+  window.history.replaceState(null, '', '/admin/ops?tab=merchants');
+  render(<OpsConsole />);
+  const tab = await screen.findByRole('tab', { name: '店家' });
+  fireEvent.keyDown(tab, { key: 'ArrowRight' });
+  expect(screen.getByRole('tab', { name: '課班掛靠' }).getAttribute('aria-selected')).toBe('true');
+  expect(window.location.search).toBe('?tab=affiliation');
+  window.history.replaceState(null, '', '/admin/ops?tab=merchants');
+  fireEvent.popState(window);
+  expect(screen.getByRole('tab', { name: '店家' }).getAttribute('aria-selected')).toBe('true');
+});
+
+it('keeps different affiliation review reasons isolated', async () => {
+  setupExtraOperation('affiliation');
+  fetcher.mockImplementation(async (url: string) =>
+    url.endsWith('/class-workspace-affiliation-applications')
+      ? ok({ applications: [
+          { id: 'affiliation-1', workspaceTitle: '課班一' },
+          { id: 'affiliation-2', workspaceTitle: '課班二' },
+        ] })
+      : ok({}, 404),
+  );
+  render(<OpsConsole />);
+  const first = (await screen.findByText('課班一')).closest('article')!;
+  const second = (await screen.findByText('課班二')).closest('article')!;
+  fireEvent.click(within(first).getByRole('button', { name: '核准掛靠' }));
+  fireEvent.change(within(first).getByRole('textbox', { name: '審核理由' }), {
+    target: { value: REVIEW_REASON },
+  });
+  fireEvent.click(within(second).getByRole('button', { name: '拒絕' }));
+  expect(within(second).getByRole('textbox', { name: '審核理由' })).toHaveProperty('value', '');
+  expect(within(first).getByRole('textbox', { name: '審核理由' })).toHaveProperty('value', REVIEW_REASON);
+});
