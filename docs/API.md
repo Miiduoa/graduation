@@ -144,7 +144,7 @@ Authorization: Bearer <firebase_id_token>
 
 ```json
 {
-  "customToken": "eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9...",
+  "customToken": "<custom-token>",
   "uid": "abc123",
   "isNewUser": true
 }
