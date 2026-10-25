@@ -11,30 +11,31 @@
 .header {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 6px;
 }
 
 .date {
   margin: 0;
   color: var(--muted);
-  font-size: .8125rem;
-  line-height: 1.125rem;
+  font-size: var(--font-body-sm-size);
+  line-height: 1.4;
   font-variant-numeric: tabular-nums;
 }
 
 .title {
   margin: 0;
   color: var(--text);
-  font-size: 1.75rem;
-  line-height: 2.125rem;
+  font-size: calc(clamp(1.75rem, 2.5vw, 2rem) + var(--font-h1-size) - 1.5rem);
+  line-height: 1.3;
   font-weight: 700;
+  letter-spacing: -0.035em;
 }
 
 .updated {
   margin: 4px 0 0;
   color: var(--muted);
-  font-size: .8125rem;
-  line-height: 1.125rem;
+  font-size: var(--font-body-sm-size);
+  line-height: 1.4;
   font-variant-numeric: tabular-nums;
 }
 
@@ -75,12 +76,13 @@
 .cardLight {
   background: var(--today-cream, #fffdf8);
   color: var(--text);
+  border: 1px solid var(--border);
 }
 
 .kind {
   margin: 0;
-  font-size: .8125rem;
-  line-height: 1.125rem;
+  font-size: var(--font-body-sm-size);
+  line-height: 1.4;
   font-weight: 600;
   color: color-mix(in srgb, var(--on-brand) 82%, transparent);
 }
@@ -91,15 +93,15 @@
 
 .headline {
   margin: 6px 0 0;
-  font-size: 1.25rem;
-  line-height: 1.625rem;
+  font-size: var(--font-h2-size);
+  line-height: 1.3;
   font-weight: 700;
 }
 
 .meta {
   margin: 6px 0 0;
-  font-size: .8125rem;
-  line-height: 1.125rem;
+  font-size: var(--font-body-sm-size);
+  line-height: 1.4;
   color: color-mix(in srgb, var(--on-brand) 82%, transparent);
   font-variant-numeric: tabular-nums;
 }
@@ -117,13 +119,13 @@
   margin-top: auto;
   align-self: flex-end;
   min-height: 44px;
-  height: 44px;
-  padding: 0 16px;
+  padding: 10px 16px;
   border-radius: 12px;
   border: 0;
   background: var(--surface);
   color: var(--text);
-  font-size: .9375rem;
+  font-size: var(--font-body-size);
+  line-height: 1.4;
   font-weight: 700;
   text-decoration: none;
   display: inline-flex;
@@ -149,19 +151,28 @@
   }
 }
 
+.columns {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 24px;
+  align-items: start;
+}
+
 .section {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 12px;
   min-width: 0;
+  padding-top: 20px;
+  border-top: 1px solid var(--border);
 }
 
 .sectionTitle {
   margin: 0;
-  font-size: .8125rem;
-  line-height: 1.125rem;
-  font-weight: 600;
-  color: var(--muted);
+  font-size: calc(var(--font-h3-size) - 0.0625rem);
+  line-height: 1.5;
+  font-weight: 650;
+  color: var(--text);
   text-transform: none;
 }
 
@@ -171,6 +182,7 @@
   list-style: none;
   background: var(--today-cream, #fffdf8);
   border-radius: 12px;
+  border: 1px solid var(--border);
   overflow: hidden;
 }
 
@@ -197,7 +209,7 @@
 }
 
 .list li + li .withTime {
-  box-shadow: inset 52px 0 0 var(--today-cream, #fffdf8);
+  box-shadow: inset calc(var(--font-body-sm-size) * 4) 0 0 var(--today-cream, #fffdf8);
 }
 
 .ended {
@@ -205,10 +217,10 @@
 }
 
 .time {
-  flex: 0 0 52px;
-  width: 52px;
-  font-size: .8125rem;
-  line-height: 1.125rem;
+  flex: 0 0 4em;
+  width: 4em;
+  font-size: var(--font-body-sm-size);
+  line-height: 1.4;
   font-variant-numeric: tabular-nums;
   color: var(--muted);
 }
@@ -221,15 +233,15 @@
 }
 
 .rowTitle {
-  font-size: 1rem;
-  line-height: 1.375rem;
+  font-size: calc(var(--font-body-size) + 0.0625rem);
+  line-height: 1.4;
   font-weight: 600;
   overflow-wrap: anywhere;
 }
 
 .rowMeta {
-  font-size: .8125rem;
-  line-height: 1.125rem;
+  font-size: var(--font-body-sm-size);
+  line-height: 1.4;
   color: var(--muted);
   font-variant-numeric: tabular-nums;
 }
@@ -247,16 +259,16 @@
 .more {
   min-height: 44px;
   color: var(--brand);
-  font-size: .8125rem;
-  line-height: 1.125rem;
+  font-size: var(--font-body-sm-size);
+  line-height: 1.4;
   font-weight: 600;
 }
 
 .empty {
   margin: 0;
   color: var(--muted);
-  font-size: .8125rem;
-  line-height: 1.125rem;
+  font-size: var(--font-body-sm-size);
+  line-height: 1.7;
 }
 
 .retry,
@@ -307,4 +319,11 @@
 .row:hover,
 .more:hover {
   background: var(--accent-soft);
+}
+
+@media (max-width: 760px) {
+  .columns {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 24px;
+  }
 }

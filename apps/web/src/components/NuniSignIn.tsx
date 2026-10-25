@@ -23,18 +23,16 @@ export function NuniSignIn({
   const submitting = useRef(false);
   const [starting, setStarting] = useState(false);
   const destination = platformDestination(returnUrl);
-  const taskPath = destination.split(/[?#]/)[0];
+  const taskUrl = new URL(destination, 'https://campus.local');
+  const taskPath = taskUrl.pathname;
   const purpose = taskPath.startsWith('/merchant')
     ? '登入後繼續店家申請、查看審核進度與授權門市。'
     : taskPath === '/admin'
       ? '登入後確認管理權限，再回到管理台。'
       : taskPath.startsWith('/classroom/course/')
         ? '登入後回到這門課，繼續查看或繳交作業。'
-        : (
-              taskPath === '/classroom/grades' ||
-              (taskPath === '/grades' &&
-                /(?:^|[?&])tab=feedback(?:&|$)/.test(destination.split('#')[0] ?? ''))
-            )
+        : taskPath === '/classroom/grades' ||
+            (taskPath === '/grades' && taskUrl.searchParams.get('tab') === 'feedback')
           ? '登入後查看各門課目前的成績、等待公布與老師回饋。'
           : '使用 Google 帳號，繼續課程、作業與公開看板。';
   useEffect(() => {

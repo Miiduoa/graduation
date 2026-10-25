@@ -99,10 +99,44 @@ it('shows the unsigned sentence when the student is not signed in', () => {
   );
 });
 
+it('opens the existing week for a guest without classes on Sunday instead of restarting setup', () => {
+  view({ unsigned: true, timetableStatus: 'ready', classes: [], todos: [] });
+  expect(screen.getByRole('heading', { name: '課表準備好了。' })).toBeTruthy();
+  expect(screen.queryByRole('heading', { name: '先把課表放進來。' })).toBeNull();
+  expect(screen.getByRole('link', { name: '查看這週課表' }).getAttribute('href')).toBe(
+    '/timetable?campus=pu',
+  );
+  expect(screen.getByRole('link', { name: /更新匯入紀錄/ }).getAttribute('href')).toBe(
+    '/import?kind=timetable&campus=pu',
+  );
+});
+
 it('shows the empty-day sentence and the week button', () => {
   view({ classes: [], todos: [], timetableStatus: 'ready' });
   expect(screen.getByText(TODAY_COPY.emptyDay)).toBeTruthy();
   expect(screen.getByRole('link', { name: TODAY_COPY.viewWeek })).toBeTruthy();
+});
+
+it.each(['loading', 'empty', 'error', 'unsigned-scope'] as const)(
+  'does not declare an empty day before the timetable is confirmed (%s)',
+  (timetableStatus) => {
+    view({ timetableStatus, classes: [], todos: [] });
+    expect(screen.queryByText(TODAY_COPY.emptyDay)).toBeNull();
+    expect(screen.getByTestId('next-action').textContent?.trim()).not.toBe('');
+  },
+);
+
+it('keeps a known task actionable while timetable data is still loading', () => {
+  view({ timetableStatus: 'loading', todos: [todo()] });
+  expect(screen.getByTestId('next-action').textContent).toContain('作業三 繳交');
+  expect(screen.getByRole('link', { name: TODAY_COPY.goSubmit })).toBeTruthy();
+  expect(screen.queryByText(TODAY_COPY.emptyDay)).toBeNull();
+});
+
+it('does not declare there are no assignments when the course platform is unconnected', () => {
+  view({ timetableStatus: 'ready', lmsUnconnected: true });
+  expect(screen.queryByText(TODAY_COPY.emptyDay)).toBeNull();
+  expect(screen.getByRole('link', { name: '查看我的課程' }).getAttribute('href')).toBe('/groups');
 });
 
 it('shows upcoming work due after 24 hours as the next assignment, not due today', () => {
@@ -271,7 +305,8 @@ it('drops the previous action immediately on sign-out and on a different account
   page.rerender(
     todayElement({ scopeKey: 'account-b:nthu', unsigned: true, todos: [], classes: [] }),
   );
-  expect(screen.getByTestId('next-action').textContent).toContain(TODAY_COPY.unsigned);
+  expect(screen.queryByTestId('next-action')).toBeNull();
+  expect(screen.getByText(TODAY_COPY.unsigned)).toBeTruthy();
   expect(screen.queryByText('新校園待辦')).toBeNull();
 });
 
@@ -290,16 +325,22 @@ it('keeps the transition between different tasks within the same scope', async (
   expect(screen.getByTestId('next-action').textContent).not.toContain('作業三 繳交');
 });
 
-it('keeps one action card when a guest changes from personal to a school scope', () => {
+it('keeps one welcome area without duplicate login copy when the guest campus changes', () => {
   const error = vi.spyOn(console, 'error').mockImplementation(() => {});
   const warning = vi.spyOn(console, 'warn').mockImplementation(() => {});
   try {
     const page = view({ scopeKey: 'guest:personal', unsigned: true, timetableStatus: 'empty' });
-    expect(screen.getAllByTestId('next-action')).toHaveLength(1);
+    expect(screen.queryByTestId('next-action')).toBeNull();
     page.rerender(todayElement({ scopeKey: 'guest:pu', unsigned: true, timetableStatus: 'empty' }));
-    expect(screen.getAllByTestId('next-action')).toHaveLength(1);
+    expect(screen.queryByTestId('next-action')).toBeNull();
     expect(screen.getAllByTestId('today-work')).toHaveLength(1);
-    expect(screen.getAllByText(TODAY_COPY.unsigned)).toHaveLength(2);
+    expect(screen.getAllByText(TODAY_COPY.unsigned)).toHaveLength(1);
+    const servicePaths = screen
+      .getAllByRole('link')
+      .map((link) => new URL(link.getAttribute('href')!, 'https://campus.example').pathname);
+    for (const pathname of ['/map', '/bus', '/cafeteria', '/library']) {
+      expect(servicePaths.filter((path) => path === pathname)).toHaveLength(1);
+    }
     expect(error).not.toHaveBeenCalled();
     expect(warning).not.toHaveBeenCalled();
   } finally {

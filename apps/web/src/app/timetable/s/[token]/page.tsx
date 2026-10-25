@@ -77,6 +77,16 @@ function SharedTimetableSnapshot({ token }: { token: string }) {
     };
   }, [token]);
 
+  const unscheduled = state.status === 'ready'
+    ? state.courses.filter((course) => course.day === 0)
+    : [];
+  const semesterLabel = state.status === 'ready'
+    ? [
+        state.meta.year ? `${state.meta.year} 學年度` : '',
+        state.meta.semester ? `第 ${state.meta.semester} 學期` : '',
+      ].filter(Boolean).join('')
+    : '';
+
   return (
     <SiteShell
       title={state.status === 'ready' ? sharedTimetableTitle(state.expiresAt) : '同學分享的課表'}
@@ -90,7 +100,30 @@ function SharedTimetableSnapshot({ token }: { token: string }) {
       )}
       {state.status === 'ready' && (
         <>
-          <h2>同學分享的課表</h2>
+          <h2>{state.meta.title || state.name || '同學分享的課表'}</h2>
+          {state.meta.school || semesterLabel ? (
+            <p className={styles.notice}>
+              {[state.meta.school, semesterLabel].filter(Boolean).join(' · ')}
+            </p>
+          ) : null}
+          {unscheduled.length > 0 ? (
+            <section className={styles.panel} aria-labelledby="unscheduled-shared-courses">
+              <h3 id="unscheduled-shared-courses">尚未排入課表</h3>
+              <p className={styles.notice}>
+                有 {unscheduled.length} 門課的上課時間尚未確認，課表中的空白時段不代表確定空堂。
+              </p>
+              <ul className={styles.list}>
+                {unscheduled.map((course) => (
+                  <li key={course.id}>
+                    <div>
+                      <h4>{course.name}</h4>
+                      <p>上課時間待確認 · {course.room || '教室未填'}</p>
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            </section>
+          ) : null}
           <div className={styles.week}>
             {WEEKDAY_LABELS.map((label, index) => {
               const entries = state.courses.filter((course) => course.day === index + 1);
@@ -106,7 +139,9 @@ function SharedTimetableSnapshot({ token }: { token: string }) {
                       </article>
                     ))
                   ) : (
-                    <p className={styles.empty}>無課</p>
+                    <p className={styles.empty}>
+                      {unscheduled.length > 0 ? '尚無已排課程' : '無課'}
+                    </p>
                   )}
                 </section>
               );

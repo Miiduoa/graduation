@@ -205,7 +205,7 @@ it('offers school login for sharing only when student ID sign-in is open', async
   expect(screen.getByText(SHARE_NEEDS_SCHOOL_LOGIN_COPY, { exact: false })).toBeTruthy();
   expect(screen.queryByText(SHARE_SCHOOL_LOGIN_UNAVAILABLE_COPY)).toBeNull();
   expect(screen.getByRole('link', { name: '登入學校帳號' }).getAttribute('href')).toBe(
-    '/login?returnUrl=%2Ftimetable',
+    '/login?returnUrl=%2Ftimetable%3Fcampus%3Dpu',
   );
   expect(screen.getByRole('link', { name: '登入查看好友' }).getAttribute('href')).toBe(
     '/login?returnUrl=%2Ftimetable%3Fcampus%3Dpu',
