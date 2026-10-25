@@ -24,6 +24,8 @@ import common from '@/app/servicePages.module.css';
 import admin from '@/features/admin/Admin.module.css';
 import {
   accountReturnHref,
+  adminLoginHref,
+  currentPageReturnPath,
   isOpsTab,
   OPS_PATH,
   SCHOOL_REVIEW_PATH,
@@ -169,7 +171,7 @@ export function OpsConsole() {
                 : '登入後會確認你的平台管理權限。')}
           </p>
           <div className={common.actions}>
-            <Link className={admin.link} href="/admin/login">
+            <Link className={admin.link} href={adminLoginHref(currentPageReturnPath(OPS_PATH))}>
               前往管理員登入
             </Link>
             {auth.error ? <Button onClick={() => void auth.refresh()}>重新確認</Button> : null}

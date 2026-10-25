@@ -272,6 +272,13 @@ export function sanitizeReturnPath(value: string | null | undefined): string {
   return destination;
 }
 
+export function adminLoginReturnPath(value: string | null | undefined): string {
+  const allowed = allowedReturnPath(value);
+  if (!allowed) return '/admin';
+  const sanitized = sanitizeReturnPath(value);
+  return sanitized === '/' && allowed !== '/' ? '/admin' : sanitized;
+}
+
 type ReturnSearch = string | { get(name: string): string | null };
 
 function returnSearchParams(search: ReturnSearch): { get(name: string): string | null } {

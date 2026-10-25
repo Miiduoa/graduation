@@ -11,7 +11,9 @@ import common from '@/app/servicePages.module.css';
 import admin from '@/features/admin/Admin.module.css';
 import {
   accountReturnHref,
+  adminLoginHref,
   APPROVE_SCHOOL_REASON,
+  currentPageReturnPath,
   OPEN_SCHOOL_REASON,
   OPS_PATH,
   REJECT_SCHOOL_REASON,
@@ -91,7 +93,10 @@ export function SchoolReview() {
                 學校接入
               </Link>
             ) : (
-              <Link className={admin.link} href="/admin/login">
+              <Link
+                className={admin.link}
+                href={adminLoginHref(currentPageReturnPath(SCHOOL_REVIEW_PATH))}
+              >
                 前往管理員登入
               </Link>
             )}

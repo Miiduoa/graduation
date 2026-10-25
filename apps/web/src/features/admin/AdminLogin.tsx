@@ -1,13 +1,14 @@
 'use client';
 
 import Link from 'next/link';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { NuniError, nuniRecord, parseNuniPrincipal } from '@campus/shared/src/nuni';
 import { SiteShell } from '@/components/SiteShell';
 import { Input } from '@/components/ui/Input';
 import { Button } from '@/components/ui/Button';
 import { useNuniSession } from '@/features/nuni/Session';
+import { adminLoginReturnPath } from '@/app/auth/account/legacyLogin';
 import { useAdminMutation } from './hooks';
 import { adminError } from './api';
 import common from '@/app/servicePages.module.css';
@@ -17,6 +18,8 @@ import { AdminHeader } from './AdminHeader';
 export function AdminLogin() {
   const auth = useNuniSession();
   const router = useRouter();
+  const params = useSearchParams();
+  const destination = adminLoginReturnPath(params.get('returnUrl') ?? params.get('next'));
   const [completing, setCompleting] = useState(false);
   const mounted = useRef(false);
   useEffect(() => {
@@ -28,7 +31,7 @@ export function AdminLogin() {
   async function authenticated() {
     setCompleting(true);
     await auth.refresh();
-    if (mounted.current) router.replace('/admin');
+    if (mounted.current) router.replace(destination);
   }
   return (
     <SiteShell
@@ -45,7 +48,7 @@ export function AdminLogin() {
           <p className={styles.eyebrow}>平台管理員</p>
           <h2>管理員已登入</h2>
           <p>目前帳號已具有平台管理權限，可以直接進入管理台。</p>
-          <Link className={styles.link} href="/admin">
+          <Link className={styles.link} href={destination}>
             進入管理台
           </Link>
         </section>
@@ -77,13 +80,19 @@ export function AdminLogin() {
           </div>
         </section>
       ) : (
-        <LoginForm onAuthenticated={authenticated} />
+        <LoginForm onAuthenticated={authenticated} destination={destination} />
       )}
     </SiteShell>
   );
 }
 
-function LoginForm({ onAuthenticated }: { onAuthenticated: () => Promise<void> }) {
+function LoginForm({
+  onAuthenticated,
+  destination,
+}: {
+  onAuthenticated: () => Promise<void>;
+  destination: string;
+}) {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [complete, setComplete] = useState(false);
@@ -156,7 +165,10 @@ function LoginForm({ onAuthenticated }: { onAuthenticated: () => Promise<void> }
       <aside className={styles.loginHelp}>
         <h2>已有 Google 管理員帳號</h2>
         <p>使用 Google 帳號登入，登入後會確認平台管理權限並返回管理台。</p>
-        <Link className={styles.link} href="/classroom/login?returnUrl=%2Fadmin">
+        <Link
+          className={styles.link}
+          href={`/classroom/login?returnUrl=${encodeURIComponent(destination)}`}
+        >
           使用 Google 登入
         </Link>
         <p className={styles.muted}>一般帳號登入不會取得管理權限。</p>

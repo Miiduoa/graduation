@@ -92,6 +92,8 @@ it('allows a missed closed classroom to request makeup using a JSON POST bound t
   fireEvent.click(await screen.findByRole('button', { name: '請老師補簽' }));
   await waitFor(() => expect(requested).toBe(true));
   const posted = fetcher.mock.calls.find(([, init]) => init?.method === 'POST')!;
+  expect(posted[0]).toBe(`${base}/${sessionId}/makeup-requests`);
+  expect(posted[1].method).toBe('POST');
   expect(posted[1].body).toBe('{}');
   expect(posted[1].headers).toEqual({
     'Content-Type': 'application/json',
@@ -114,6 +116,7 @@ it('retains the closed roster and sends the teacher decision to that closed sess
   );
   const posted = fetcher.mock.calls.find(([, init]) => init?.method === 'POST')!;
   expect(posted[0]).toBe(`${base}/${sessionId}/makeup`);
+  expect(posted[1].method).toBe('POST');
   expect(JSON.parse(posted[1].body)).toEqual({ platformAccountId: studentId, decision: 'accept' });
 });
 
@@ -225,6 +228,7 @@ it('checks in without a code using JSON and the current account context', async 
   );
   const posted = fetcher.mock.calls.find(([, init]) => init?.method === 'POST')!;
   expect(posted[0]).toBe(`${base}/${sessionId}/check-in`);
+  expect(posted[1].method).toBe('POST');
   expect(posted[1].body).toBe('{}');
   expect(posted[1].headers).toEqual({
     'Content-Type': 'application/json',
@@ -261,6 +265,8 @@ it('only offers closed-session makeup decisions for pending requests in the rost
     expect(fetcher.mock.calls.some(([, init]) => init?.method === 'POST')).toBe(true),
   );
   const posted = fetcher.mock.calls.find(([, init]) => init?.method === 'POST')!;
+  expect(posted[0]).toBe(`${base}/${sessionId}/makeup`);
+  expect(posted[1].method).toBe('POST');
   expect(JSON.parse(posted[1].body)).toEqual({ platformAccountId: studentId, decision: 'accept' });
 });
 
@@ -279,6 +285,8 @@ it('ends an open session using an empty JSON object and retains its closed roste
   fireEvent.click(await screen.findByRole('button', { name: '結束課堂' }));
   expect(await screen.findByRole('button', { name: '接受補簽' })).toBeTruthy();
   const posted = fetcher.mock.calls.find(([, init]) => init?.method === 'POST')!;
+  expect(posted[0]).toBe(`${base}/${sessionId}/end`);
+  expect(posted[1].method).toBe('POST');
   expect(posted[1].body).toBe('{}');
   expect(posted[1].headers).toEqual({
     'Content-Type': 'application/json',
