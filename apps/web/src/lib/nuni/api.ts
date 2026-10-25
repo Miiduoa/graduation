@@ -55,6 +55,7 @@ const ASSIGNMENT = /^cwa_[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f
 const QUIZ = /^cwq_[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 const UNIT = /^cwu_[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 const ACCOUNT = /^pa_[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+const CLASSROOM_SESSION = /^cws_[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 
 function field(input: Record<string, unknown>, name: string, min: number, max: number): string {
   const value = input[name];
@@ -68,6 +69,23 @@ function unitInput(input: Record<string, unknown>): { unitId?: string } {
   if (typeof input.unitId !== 'string' || !UNIT.test(input.unitId))
     throw new NuniError(422, 'INVALID_INPUT');
   return { unitId: input.unitId };
+}
+
+function onlyKeys(input: Record<string, unknown>, keys: string[]) {
+  if (Object.keys(input).some((key) => !keys.includes(key)))
+    throw new NuniError(422, 'INVALID_INPUT');
+}
+
+function inviteMaxUses(input: Record<string, unknown>): number {
+  if (input.maxUses === undefined) return 30;
+  if (
+    typeof input.maxUses !== 'number' ||
+    !Number.isInteger(input.maxUses) ||
+    input.maxUses < 1 ||
+    input.maxUses > 100
+  )
+    throw new NuniError(422, 'INVALID_INPUT');
+  return input.maxUses;
 }
 
 function dueDate(input: Record<string, unknown>): string | null {
@@ -340,7 +358,21 @@ export async function handleNuni(request: NextRequest, segments: string[]): Prom
           });
         }
         if (segments[2] === 'quizzes') return jsonResponse({ quizzes: await classes.quizzes(id) });
+        if (
+          segments[2] === 'members' ||
+          segments[2] === 'affiliation' ||
+          segments[2] === 'affiliation-applications' ||
+          segments[2] === 'classroom-sessions'
+        )
+          return jsonResponse(await platformRequest(path, session));
       }
+      if (
+        segments.length === 5 &&
+        segments[2] === 'classroom-sessions' &&
+        CLASSROOM_SESSION.test(segments[3] || '') &&
+        segments[4] === 'roster'
+      )
+        return jsonResponse(await platformRequest(path, session));
       if (segments.length === 5 && isAssignment && segments[4] === 'submissions') {
         const submissions = await classes.submissions(id, activityId);
         if (!assignmentFileSubmitEnabled()) return jsonResponse({ submissions });
@@ -359,6 +391,14 @@ export async function handleNuni(request: NextRequest, segments: string[]): Prom
       const createResource =
         segments.length === 3 &&
         ['invites', 'units', 'materials', 'assignments', 'quizzes'].includes(segments[2]);
+      const classroomCreate = segments.length === 3 && segments[2] === 'classroom-sessions';
+      const affiliationApply =
+        segments.length === 3 && segments[2] === 'affiliation-applications';
+      const classroomAction =
+        segments.length === 5 &&
+        segments[2] === 'classroom-sessions' &&
+        CLASSROOM_SESSION.test(segments[3] || '') &&
+        ['check-in', 'end', 'makeup-requests', 'makeup'].includes(segments[4]);
       const activityAction =
         segments.length === 5 &&
         (isAssignment || isQuiz) &&
@@ -372,7 +412,13 @@ export async function handleNuni(request: NextRequest, segments: string[]): Prom
       if (
         !createWorkspace &&
         !joinWorkspace &&
-        (!WORKSPACE.test(id || '') || (!createResource && !activityAction && !feedbackAction))
+        (!WORKSPACE.test(id || '') ||
+          (!createResource &&
+            !classroomCreate &&
+            !affiliationApply &&
+            !classroomAction &&
+            !activityAction &&
+            !feedbackAction))
       )
         throw new NuniError(404, 'NOT_FOUND');
       let input: Record<string, unknown>;
@@ -391,7 +437,70 @@ export async function handleNuni(request: NextRequest, segments: string[]): Prom
             : await classes.closeQuiz(id, activityId),
         );
       }
+      if (classroomAction && (segments[4] === 'end' || segments[4] === 'makeup-requests')) {
+        if (Object.keys(input).length > 0) throw new NuniError(422, 'INVALID_INPUT');
+        return jsonResponse(await platformRequest(path, session, {}, undefined, 'POST'));
+      }
+      if (classroomAction && segments[4] === 'check-in') {
+        onlyKeys(input, ['code']);
+        if (
+          input.code !== undefined &&
+          (typeof input.code !== 'string' || input.code.length < 1 || input.code.length > 40)
+        )
+          throw new NuniError(422, 'INVALID_INPUT');
+        return jsonResponse(await platformRequest(path, session, input, undefined, 'POST'));
+      }
+      if (classroomAction && segments[4] === 'makeup') {
+        onlyKeys(input, ['platformAccountId', 'decision']);
+        if (
+          !ACCOUNT.test(String(input.platformAccountId || '')) ||
+          (input.decision !== 'accept' && input.decision !== 'reject')
+        )
+          throw new NuniError(422, 'INVALID_INPUT');
+        return jsonResponse(await platformRequest(path, session, input, undefined, 'POST'));
+      }
       const idempotencyKey = field(input, 'idempotencyKey', 8, 100);
+      if (classroomCreate) {
+        onlyKeys(input, ['title', 'idempotencyKey', 'unitId']);
+        return jsonResponse(
+          await platformRequest(
+            path,
+            session,
+            {
+              title: field(input, 'title', 1, 160),
+              idempotencyKey,
+              ...unitInput(input),
+            },
+            undefined,
+            'POST',
+          ),
+          201,
+        );
+      }
+      if (affiliationApply) {
+        onlyKeys(input, ['tenantId', 'sectionId', 'justification', 'idempotencyKey']);
+        if (
+          input.sectionId !== undefined &&
+          input.sectionId !== null &&
+          typeof input.sectionId !== 'string'
+        )
+          throw new NuniError(422, 'INVALID_INPUT');
+        return jsonResponse(
+          await platformRequest(
+            path,
+            session,
+            {
+              tenantId: field(input, 'tenantId', 1, 80),
+              justification: field(input, 'justification', 1, 2000),
+              idempotencyKey,
+              ...(input.sectionId === undefined ? {} : { sectionId: input.sectionId }),
+            },
+            undefined,
+            'POST',
+          ),
+          201,
+        );
+      }
       if (createWorkspace)
         return jsonResponse(
           await classes.create(field(input, 'title', 2, 120), idempotencyKey),
@@ -400,8 +509,10 @@ export async function handleNuni(request: NextRequest, segments: string[]): Prom
       if (joinWorkspace)
         return jsonResponse(await classes.join(field(input, 'code', 6, 24), idempotencyKey));
       if (createResource) {
-        if (segments[2] === 'invites')
-          return jsonResponse(await classes.invite(id, idempotencyKey), 201);
+        if (segments[2] === 'invites') {
+          onlyKeys(input, ['idempotencyKey', 'maxUses']);
+          return jsonResponse(await classes.invite(id, idempotencyKey, inviteMaxUses(input)), 201);
+        }
         if (segments[2] === 'units')
           return jsonResponse(
             await classes.createUnit(id, { title: field(input, 'title', 1, 80), idempotencyKey }),

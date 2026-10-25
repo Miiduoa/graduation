@@ -218,6 +218,8 @@ it.each([
   '/settings?section=appearance&campus=nthu',
   '/events/evt-1?schoolId=pu&campus=pu&source=school-club-events#registration',
   '/school-info?campus=ncku#contact',
+  '/admin/ops#people',
+  '/admin/school-review#pending',
 ])('sends a signed-in visitor back to %s without losing task context', async (returnPath) => {
   const replace = vi.fn();
   vi.stubGlobal('location', { ...window.location, replace, origin: 'https://nuni.tw' });

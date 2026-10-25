@@ -134,7 +134,7 @@ function PeopleDetail({ data }: { data: OversightPeople }) {
             已核發 {data.people.length} 位校方管理／職員授權。
           </p>
         </div>
-        <a className={styles.link} href="/auth/platform/ops">
+        <a className={styles.link} href="/admin/ops">
           調整校方授權
         </a>
       </div>

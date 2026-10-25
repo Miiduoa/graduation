@@ -19,13 +19,9 @@ export const LEGACY_LOGIN_CALLBACK_PATHS = [
   '/auth/platform/callback',
 ];
 
-// Live old HTML that Campus One does not yet replace. Users still enter these
-// from /admin and the class-workspace join button.
+// Live old HTML that Campus One does not yet replace.
 export const LEGACY_LIVE_HTML_PATHS = [
   '/auth/platform',
-  '/auth/platform/class-workspace/:path*',
-  '/auth/platform/ops/:path*',
-  '/auth/platform/school-review/:path*',
   '/privacy/deletion-status',
 ];
 
@@ -73,6 +69,13 @@ const LEGACY_HTML_REDIRECT_SOURCES = [
   '/auth/product-qa',
 ];
 
+const LEGACY_PLATFORM_PAGE_REDIRECTS: Array<{ source: string; destination: string }> = [
+  { source: '/auth/platform/ops', destination: '/admin/ops' },
+  { source: '/auth/platform/ops/:tab', destination: '/admin/ops?tab=:tab' },
+  { source: '/auth/platform/school-review', destination: '/admin/school-review' },
+  { source: '/auth/platform/school-review/:path*', destination: '/admin/school-review' },
+];
+
 export function legacyEnabled(env: Record<string, string | undefined> = process.env): boolean {
   return env.CAMPUS_LEGACY_ENABLED === 'true';
 }
@@ -99,11 +102,17 @@ export function legacyRewrites(enabled: boolean): {
 }
 
 export function legacyHtmlRedirects(): Redirect[] {
-  return LEGACY_HTML_REDIRECT_SOURCES.map((source) => ({
-    source,
-    destination: ACCOUNT_ENTRY_PATH,
-    permanent: false,
-  }));
+  return [
+    ...LEGACY_HTML_REDIRECT_SOURCES.map((source) => ({
+      source,
+      destination: ACCOUNT_ENTRY_PATH,
+      permanent: false,
+    })),
+    ...LEGACY_PLATFORM_PAGE_REDIRECTS.map((rule) => ({
+      ...rule,
+      permanent: false,
+    })),
+  ];
 }
 
 export function isCampusOneCallback(

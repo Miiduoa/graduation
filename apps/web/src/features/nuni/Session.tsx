@@ -96,14 +96,15 @@ export async function browserRequest(
   path: string,
   context?: string,
   input?: Record<string, unknown>,
-  method?: 'PUT',
+  method?: 'GET' | 'POST' | 'PUT',
   query?: Record<string, string>,
 ): Promise<unknown> {
+  const verb = method ?? (input !== undefined ? 'POST' : 'GET');
   if (
     !/^[a-z0-9-]+(?:\/[A-Za-z0-9_-]+)*$/.test(path) ||
     (query &&
-      (input ||
-        method ||
+      (verb !== 'GET' ||
+        input !== undefined ||
         Object.keys(query).length > 10 ||
         Object.entries(query).some(
           ([key, value]) =>
@@ -114,17 +115,18 @@ export async function browserRequest(
   )
     throw new NuniError(400, 'INVALID_REQUEST');
   const search = new URLSearchParams(query).toString();
+  const sendJson = verb !== 'GET';
   const response = await fetch(`/api/nuni/${path}${search ? `?${search}` : ''}`, {
-    method: method ?? (input ? 'POST' : 'GET'),
+    method: verb,
     cache: 'no-store',
     credentials: 'same-origin',
     redirect: 'error',
     signal: AbortSignal.timeout(12000),
     headers: {
       ...(context ? { 'X-Campus-Session': context } : {}),
-      ...(input ? { 'Content-Type': 'application/json' } : {}),
+      ...(sendJson ? { 'Content-Type': 'application/json' } : {}),
     },
-    ...(input ? { body: JSON.stringify(input) } : {}),
+    ...(sendJson ? { body: JSON.stringify(input ?? {}) } : {}),
   });
   if (!response.ok) {
     let code = 'REQUEST_FAILED';

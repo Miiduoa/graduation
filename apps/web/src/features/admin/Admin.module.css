@@ -655,6 +655,10 @@
     align-items: stretch;
   }
 
+  .filterRow > * {
+    flex: 0 1 auto;
+  }
+
   .disclosure summary,
   .disclosureBody {
     padding-inline: 18px;

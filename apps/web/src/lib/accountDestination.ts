@@ -18,6 +18,8 @@ export function platformDestination(value?: string | null): string {
       '/classroom/account',
       '/classroom/grades',
       '/admin',
+      '/admin/ops',
+      '/admin/school-review',
       '/merchant',
       '/merchant/apply',
       '/merchant/workspace',

@@ -75,20 +75,19 @@ function redirectLocation(response: Response): string | null {
 }
 
 function shouldForwardLiveHtml(path: string): boolean {
-  return (
-    path === '/auth/platform' ||
-    path === '/privacy/deletion-status' ||
-    path.startsWith('/auth/platform/class-workspace/') ||
-    path === '/auth/platform/ops' ||
-    path.startsWith('/auth/platform/ops/') ||
-    path === '/auth/platform/school-review' ||
-    path.startsWith('/auth/platform/school-review/')
-  );
+  return path === '/auth/platform' || path === '/privacy/deletion-status';
 }
 
-function shouldRedirectHtml(path: string): boolean {
-  if (LEGACY_LOGIN_CALLBACK_PATHS.includes(path) || shouldForwardLiveHtml(path)) return false;
-  return (
+function htmlRedirectDestination(path: string): string | null {
+  if (path === '/auth/platform/ops' || path.startsWith('/auth/platform/ops/')) return '/admin/ops';
+  if (
+    path === '/auth/platform/school-review' ||
+    path.startsWith('/auth/platform/school-review/')
+  ) {
+    return '/admin/school-review';
+  }
+  if (LEGACY_LOGIN_CALLBACK_PATHS.includes(path) || shouldForwardLiveHtml(path)) return null;
+  if (
     path === '/auth/find-school' ||
     path === '/auth/product-qa' ||
     [
@@ -97,7 +96,10 @@ function shouldRedirectHtml(path: string): boolean {
       '/auth/platform/membership',
       '/auth/platform/school-apply',
     ].includes(path)
-  );
+  ) {
+    return ACCOUNT_ENTRY_PATH;
+  }
+  return null;
 }
 
 async function responseFor(path: string, search = '') {
@@ -225,8 +227,9 @@ describe('pinned legacy HTML screens are not forwarded', () => {
         continue;
       }
       expect(getRewrittenUrl(response), path).toBeNull();
-      if (shouldRedirectHtml(route) || shouldRedirectHtml(path)) {
-        expect(redirectLocation(response), path).toBe(ACCOUNT_ENTRY_PATH);
+      const destination = htmlRedirectDestination(route) || htmlRedirectDestination(path);
+      if (destination) {
+        expect(redirectLocation(response), path).toBe(destination);
       } else {
         expect(redirectLocation(response), path).toBeNull();
       }
@@ -245,16 +248,41 @@ describe('pinned legacy HTML screens are not forwarded', () => {
     expect(redirectLocation(response)).toBe(ACCOUNT_ENTRY_PATH);
   });
 
+  it.each(['/auth/platform', '/privacy/deletion-status'])(
+    'keeps live old screen %s on the loopback app',
+    async (path) => {
+      const response = await responseFor(path);
+      expectMatchedRewrite(response, path);
+      expect(redirectLocation(response)).toBeNull();
+    },
+  );
+
   it.each([
-    '/auth/platform',
+    ['/auth/platform/ops', '/admin/ops'],
+    ['/auth/platform/ops/people', '/admin/ops'],
+    ['/auth/platform/school-review', '/admin/school-review'],
+    ['/auth/platform/school-review/pending', '/admin/school-review'],
+  ])('sends old platform screen %s to %s', async (path, destination) => {
+    const response = await responseFor(path, '?tab=people');
+    expect(getRewrittenUrl(response)).toBeNull();
+    expect(redirectLocation(response)).toBe(destination);
+  });
+
+  it('keeps the matching ops subpage as a tab query', async () => {
+    const response = await responseFor('/auth/platform/ops/people');
+    expect(getRewrittenUrl(response)).toBeNull();
+    const location = new URL(response.headers.get('location')!, 'https://nuni.tw');
+    expect(location.pathname).toBe('/admin/ops');
+    expect(location.search).toBe('?tab=people');
+  });
+
+  it.each([
     '/auth/platform/class-workspace/join',
+    '/auth/platform/class-workspace/new',
     '/auth/platform/class-workspace/cw_11111111-1111-4111-8111-111111111111',
-    '/auth/platform/ops',
-    '/auth/platform/school-review',
-    '/privacy/deletion-status',
-  ])('keeps live old screen %s on the loopback app', async (path) => {
+  ])('lets Campus One serve class-workspace page %s', async (path) => {
     const response = await responseFor(path);
-    expectMatchedRewrite(response, path);
+    expect(getRewrittenUrl(response)).toBeNull();
     expect(redirectLocation(response)).toBeNull();
   });
 });
@@ -284,11 +312,12 @@ describe('pinned legacy endpoints stay on the allowlist', () => {
     }
   });
 
-  it('keeps class-workspace HTML and the plural API root as separate loopback paths', async () => {
+  it('keeps class-workspace HTML and the plural API root as separate paths', async () => {
     const response = await responseFor('/auth/platform/class-workspaces');
     expectMatchedRewrite(response, '/auth/platform/class-workspaces');
     const html = await responseFor('/auth/platform/class-workspace/join');
-    expectMatchedRewrite(html, '/auth/platform/class-workspace/join');
+    expect(getRewrittenUrl(html)).toBeNull();
+    expect(redirectLocation(html)).toBeNull();
   });
 
   it('lists live HTML, callbacks and endpoints in the fallback rewrite table', () => {
@@ -299,6 +328,12 @@ describe('pinned legacy endpoints stay on the allowlist', () => {
     expect(sources.has('/auth/account')).toBe(false);
     expect(sources.has('/auth/find-school')).toBe(false);
     expect(sources.has('/privacy/:path*')).toBe(false);
+    expect(sources.has('/auth/platform/class-workspace/:path*')).toBe(false);
+    expect(sources.has('/auth/platform/ops/:path*')).toBe(false);
+    expect(sources.has('/auth/platform/school-review/:path*')).toBe(false);
+    expect(sources.has('/auth/platform/ops-api/:path*')).toBe(true);
+    expect(sources.has('/auth/platform/class-workspaces/:path*')).toBe(true);
+    expect(sources.has('/auth/platform/school-applications/:path*')).toBe(true);
   });
 });
 

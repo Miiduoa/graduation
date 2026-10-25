@@ -217,19 +217,22 @@ export async function adminRequest(
   context?: string,
   input?: Record<string, unknown>,
   signal?: AbortSignal,
+  method?: 'GET' | 'POST',
 ): Promise<unknown> {
   const timeout = AbortSignal.timeout(12000);
+  const verb = method ?? (input !== undefined ? 'POST' : 'GET');
+  const sendJson = verb !== 'GET';
   const response = await fetch(`/api/platform-admin/${path}`, {
-    method: input ? 'POST' : 'GET',
+    method: verb,
     cache: 'no-store',
     credentials: 'same-origin',
     redirect: 'error',
     signal: signal ? AbortSignal.any([signal, timeout]) : timeout,
     headers: {
       ...(context ? { 'X-Campus-Session': context } : {}),
-      ...(input ? { 'Content-Type': 'application/json' } : {}),
+      ...(sendJson ? { 'Content-Type': 'application/json' } : {}),
     },
-    ...(input ? { body: JSON.stringify(input) } : {}),
+    ...(sendJson ? { body: JSON.stringify(input ?? {}) } : {}),
   });
   const value: unknown = await response.json().catch(() => null);
   if (!response.ok) {

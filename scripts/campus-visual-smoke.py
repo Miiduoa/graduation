@@ -20,7 +20,7 @@ OUT = Path('artifacts/campus-visual')
 OUT.mkdir(parents=True, exist_ok=True)
 
 
-def session_fixtures(authenticated):
+def session_fixtures(authenticated, operator=False):
     async def fixtures(route):
         url = urlparse(route.request.url)
         if url.hostname not in ('localhost', '127.0.0.1'):
@@ -33,11 +33,11 @@ def session_fixtures(authenticated):
         elif url.path in ('/api/nuni/session', '/auth/session'):
             await route.fulfill(json={
                 'authenticated': authenticated,
-                # Match the browser session parser with a synthetic, unprivileged
-                # principal. These values never authenticate a server request.
+                # Match the browser session parser with a synthetic principal,
+                # unprivileged by default. These fixtures never authenticate a server request.
                 **({
                     'platformAccountId': 'pa_00000000-0000-4000-8000-000000000001',
-                    'isPlatformOperator': False,
+                    'isPlatformOperator': operator,
                     'context': 'a' * 43,
                 } if authenticated else {}),
             })
@@ -45,6 +45,46 @@ def session_fixtures(authenticated):
             await route.fulfill(json={'kinds': ['google-consumer']})
         elif url.path.startswith('/api/transit'):
             await route.fulfill(json={'status': 'unavailable', 'reason': 'not-configured'})
+        elif url.path == '/api/platform-admin/school-applications':
+            if not authenticated:
+                await route.fulfill(status=401, json={'error': 'SIGN_IN_REQUIRED'})
+            elif not operator:
+                await route.fulfill(status=403, json={'error': 'OPERATOR_REQUIRED'})
+            else:
+                await route.fulfill(json={'applications': [{
+                    'id': 'app-1',
+                    'displayName': '待審學校',
+                    'proposedTenantId': 'pending-school',
+                    'proposedEmailDomain': 'pending.edu.tw',
+                    'contactName': '王老師',
+                    'contactEmail': 'wang@pending.edu.tw',
+                    'justification': '請協助接入',
+                }]})
+        elif url.path == '/api/platform-admin/schools':
+            if not authenticated:
+                await route.fulfill(status=401, json={'error': 'SIGN_IN_REQUIRED'})
+            elif not operator:
+                await route.fulfill(status=403, json={'error': 'OPERATOR_REQUIRED'})
+            else:
+                await route.fulfill(json={'schools': [{
+                    'kind': 'tenant',
+                    'applicationId': None,
+                    'tenantId': 'ready-school',
+                    'displayName': '待開放學校',
+                    'emailDomain': 'ready.edu.tw',
+                    'lifecycle': 'provisioned',
+                    'description': '',
+                    'modules': {'leave': False, 'identity': False, 'food': False},
+                    'peopleCount': 0,
+                    'merchantCount': 0,
+                }]})
+        elif url.path.startswith('/api/platform-admin/'):
+            if not authenticated:
+                await route.fulfill(status=401, json={'error': 'SIGN_IN_REQUIRED'})
+            elif not operator:
+                await route.fulfill(status=403, json={'error': 'OPERATOR_REQUIRED'})
+            else:
+                await route.fulfill(json={'schools': [], 'records': [], 'items': []})
         else:
             await route.continue_()
     return fixtures
@@ -597,6 +637,12 @@ async def main():
             assert urlparse(page.url).path == '/auth/platform/class-workspace/join'
             assert '校園都在這' not in await page.title()
             await expect(page.get_by_role('heading', name='登入', exact=True)).to_have_count(0)
+            await expect(page.get_by_role('heading', name='加入課班')).to_be_visible()
+            await page.screenshot(
+                path=str(OUT / 'class-join-unsigned.png'),
+                full_page=True,
+                animations='disabled',
+            )
             results.append('class-workspace join stays off the new login page')
 
             response = await page.goto(BASE + '/auth/find-school', wait_until='load')
@@ -604,19 +650,38 @@ async def main():
             await check_unsigned_account_entry(page)
             results.append('old find-school URL still lands on the new entry')
 
-            for path in [
-                '/auth/platform',
-                '/auth/platform/ops',
-                '/auth/platform/school-review',
-                '/privacy/deletion-status',
+            for path, expected in [
+                ('/auth/platform', '/auth/platform'),
+                ('/auth/platform/ops', '/admin/ops'),
+                ('/auth/platform/ops/people', '/admin/ops'),
+                ('/auth/platform/school-review', '/admin/school-review'),
+                ('/privacy/deletion-status', '/privacy/deletion-status'),
             ]:
                 response = await page.goto(BASE + path, wait_until='load')
                 body = await page.content()
                 for copy in OLD_ACCOUNT_COPY:
                     assert copy not in body, f'{path} still contains old copy'
-                assert urlparse(page.url).path == path, path
+                assert urlparse(page.url).path == expected, path
+                if path == '/auth/platform/ops/people':
+                    assert parse_qs(urlparse(page.url).query).get('tab') == ['people'], path
                 assert urlparse(page.url).path != '/auth/account'
                 await expect(page.get_by_role('heading', name='登入', exact=True)).to_have_count(0)
+                if expected == '/admin/ops' and path == '/auth/platform/ops':
+                    await expect(page.get_by_role('heading', name='請先登入管理員帳號')).to_be_visible()
+                    await page.screenshot(
+                        path=str(OUT / 'ops-unsigned.png'),
+                        full_page=True,
+                        animations='disabled',
+                    )
+                if path == '/auth/platform/ops/people':
+                    await expect(page.get_by_role('heading', name='請先登入管理員帳號')).to_be_visible()
+                if expected == '/admin/school-review':
+                    await expect(page.get_by_role('heading', name='請先登入管理員帳號')).to_be_visible()
+                    await page.screenshot(
+                        path=str(OUT / 'school-review-unsigned.png'),
+                        full_page=True,
+                        animations='disabled',
+                    )
 
             for path in ['/academics', '/staff', '/learning']:
                 response = await page.goto(BASE + path, wait_until='load')
@@ -668,6 +733,49 @@ async def main():
             await no_overflow(signed_page)
             results.append('account return navigation drops auth payloads and nested redirects')
             results.append('signed-in account visits follow allowed return paths')
+
+            async def capture_platform(name, operator):
+                context = await browser.new_context(
+                    viewport={'width': 390, 'height': 844},
+                    color_scheme='light',
+                    reduced_motion='reduce',
+                    service_workers='block',
+                )
+                await context.route('**/*', session_fixtures(True, operator))
+                shot = await context.new_page()
+                shot.set_default_timeout(10000)
+                await shot.goto(BASE + '/auth/platform/class-workspace/join', wait_until='load')
+                await expect(shot.get_by_role('heading', name='加入課班')).to_be_visible()
+                await shot.screenshot(
+                    path=str(OUT / f'class-join-{name}.png'),
+                    full_page=True,
+                    animations='disabled',
+                )
+                await shot.goto(BASE + '/admin/school-review', wait_until='load')
+                if operator:
+                    await expect(shot.get_by_role('heading', name='接入審核')).to_be_visible()
+                else:
+                    await expect(shot.get_by_text('這台帳號不是平台營運人員', exact=False)).to_be_visible()
+                await shot.screenshot(
+                    path=str(OUT / f'school-review-{name}.png'),
+                    full_page=True,
+                    animations='disabled',
+                )
+                await shot.goto(BASE + '/admin/ops', wait_until='load')
+                if operator:
+                    await expect(shot.get_by_role('heading', name='完整管理台')).to_be_visible()
+                else:
+                    await expect(shot.get_by_role('heading', name='沒有管理權限')).to_be_visible()
+                await shot.screenshot(
+                    path=str(OUT / f'ops-{name}.png'),
+                    full_page=True,
+                    animations='disabled',
+                )
+                await context.close()
+
+            await capture_platform('member', False)
+            await capture_platform('operator', True)
+            results.append('platform pages captured for unsigned, member and operator states')
             assert not errors, errors
             await signed.close()
         except Exception:
