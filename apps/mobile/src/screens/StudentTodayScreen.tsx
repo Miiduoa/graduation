@@ -268,7 +268,8 @@ export default function StudentTodayScreen() {
             />
             <QuickCampusEntry
               key={scope}
-              signedIn={Boolean(uid)}
+              uid={uid}
+              schoolId={schoolId}
               onOpen={openQuickAction}
               onAsk={(question) => safeNavigate(navigation, 'AIChat', { prompt: question })}
             />

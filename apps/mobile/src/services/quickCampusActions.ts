@@ -29,8 +29,11 @@ const destinations: Record<CampusQuickDestination, Omit<MobileQuickAction, 'dest
 };
 
 export function getMobileQuickActions(phrase: string): MobileQuickAction[] {
-  return suggestCampusDestinations(phrase).map((destination) => ({
-    destination,
-    ...destinations[destination],
-  }));
+  return getMobileActionsForDestinations(suggestCampusDestinations(phrase));
+}
+
+export function getMobileActionsForDestinations(
+  choices: readonly CampusQuickDestination[],
+): MobileQuickAction[] {
+  return choices.map((destination) => ({ destination, ...destinations[destination] }));
 }
