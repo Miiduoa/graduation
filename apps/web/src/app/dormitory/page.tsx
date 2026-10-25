@@ -102,7 +102,7 @@ function DormitoryWorkspace({ scope, schoolId, schoolName, guest }: {
     try {
       if (localStorage.getItem(scope) !== savedRaw.current) {
         setConflict(true);
-        setSaveError('另一個分頁已修改紀錄。為了避免覆蓋資料，請先重新載入本裝置最新紀錄。');
+        setSaveError('');
         return false;
       }
       const cleaned = normalizeDormWorkspace(next);
