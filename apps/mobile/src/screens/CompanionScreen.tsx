@@ -15,7 +15,8 @@ type Navigation = {
 };
 type CompanionData = { sprite: SpriteState; garden: GardenSummary; unlocks: Unlockable[] };
 type CompanionState =
-  | { scope: string; status: 'loading' | 'error' }
+  | { scope: string; status: 'loading' }
+  | { scope: string; status: 'error' }
   | { scope: string; status: 'ready'; data: CompanionData };
 
 const stageNames: Record<string, string> = {
