@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import type { ReactNode } from 'react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import DormitoryPage from './page';
@@ -116,6 +116,21 @@ it('adds, completes and edits a personal date with storage persistence', () => {
   expect(JSON.parse(localStorage.getItem(key) ?? 'null').milestones[0]).toMatchObject({
     title: '退宿日期', completed: true,
   });
+});
+
+it('saves a room inspection and prefills a repair without notifying the school', () => {
+  render(<DormitoryPage />);
+  fireEvent.click(screen.getByRole('button', { name: '入住與退宿' }));
+  const air = screen.getByRole('group', { name: '冷氣與遙控器狀態' });
+  fireEvent.click(within(air).getByRole('button', { name: '待處理' }));
+  const key = dormStorageKey('guest', 'pu');
+  expect(JSON.parse(localStorage.getItem(key) ?? 'null').inspection).toMatchObject({ air: 'issue' });
+  fireEvent.click(screen.getByRole('button', { name: '記錄問題' }));
+  expect((screen.getByRole('textbox', { name: '問題名稱 *' }) as HTMLInputElement).value).toBe('冷氣或遙控器需要檢查');
+  fireEvent.click(screen.getByRole('button', { name: '儲存紀錄' }));
+  const data = JSON.parse(localStorage.getItem(key) ?? 'null');
+  expect(data.repairs[0]).toMatchObject({ category: 'air', status: 'draft' });
+  expect(data.inspection.air).toBe('issue');
 });
 
 it('records a parcel and allows the resident to update collection status', () => {
