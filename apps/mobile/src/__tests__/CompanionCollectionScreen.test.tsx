@@ -6,7 +6,7 @@ import CompanionCollectionScreen from '../screens/CompanionCollectionScreen';
 import { getLocalState } from '../services/companionLocalStore';
 import { applyTheme } from '../ui/theme';
 
-const auth = {
+const mockAuth = {
   user: null as { uid: string } | null,
   profile: null as { uid: string; schoolId: string } | null,
 };
@@ -14,7 +14,7 @@ const local = jest.mocked(getLocalState);
 const readDoc = jest.mocked(getDoc);
 const buildDoc = jest.mocked(doc);
 
-jest.mock('../state/auth', () => ({ useAuth: () => auth }));
+jest.mock('../state/auth', () => ({ useAuth: () => mockAuth }));
 jest.mock('../services/companionLocalStore', () => ({ getLocalState: jest.fn() }));
 jest.mock('../ui/navigationTheme', () => ({ useTabBarContentBottomPadding: () => 84 }));
 jest.mock('../firebase', () => ({ getFirebaseApp: () => ({}) }));
@@ -32,8 +32,8 @@ function localData() {
 beforeEach(() => {
   jest.clearAllMocks();
   applyTheme('light');
-  auth.user = null;
-  auth.profile = null;
+  mockAuth.user = null;
+  mockAuth.profile = null;
   local.mockResolvedValue(localData());
 });
 afterEach(() => applyTheme('light'));
@@ -65,9 +65,9 @@ it('shows a retry action when device records cannot be read', async () => {
   expect(local).toHaveBeenCalledTimes(2);
 });
 
-it('uses the signed-in uid for optional cloud records rather than app.auth', async () => {
-  auth.user = { uid: 'student-123' };
-  auth.profile = { uid: 'student-123', schoolId: 'pu' };
+it('uses the signed-in uid for optional cloud records rather than app.mockAuth', async () => {
+  mockAuth.user = { uid: 'student-123' };
+  mockAuth.profile = { uid: 'student-123', schoolId: 'pu' };
   readDoc.mockResolvedValue({ data: () => ({}) } as Awaited<ReturnType<typeof getDoc>>);
   const view = render(<CompanionCollectionScreen />);
   await waitFor(() => expect(view.getByTestId('companion-collection')).toBeTruthy());
