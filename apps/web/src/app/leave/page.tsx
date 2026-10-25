@@ -163,6 +163,7 @@ function LeaveWorkspace({ uid, schoolId, schoolName }: {
       record.status !== 'withdrawn' &&
       record.startDate === startDate &&
       record.endDate === endDate &&
+      record.period === period &&
       record.courses.some((course) => selectedIds.includes(course.courseId)),
     );
     if (duplicate) {
