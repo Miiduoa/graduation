@@ -48,6 +48,7 @@ export type PrivateMessage = {
   type: string;
   createdAt: string | null;
   recalled: boolean;
+  reactions: Record<string, string[]>;
 };
 export type ConversationContents = {
   conversation: PrivateConversation;
@@ -126,6 +127,17 @@ export function parseConversation(
     lastReadAt: messageTime(object(row.lastReadBy)[session.uid]),
   };
 }
+function parseReactions(value: unknown): Record<string, string[]> {
+  const raw = object(value);
+  const result: Record<string, string[]> = {};
+  for (const emoji of ['👍', '❤️']) {
+    const members = raw[emoji];
+    if (Array.isArray(members)) {
+      result[emoji] = [...new Set(members.filter((uid): uid is string => typeof uid === 'string' && !!uid))];
+    }
+  }
+  return result;
+}
 function parseMessage(
   id: string,
   row: DocumentData,
@@ -144,6 +156,7 @@ function parseMessage(
     type: text(row.type) || 'text',
     createdAt: messageTime(row.createdAt),
     recalled: !!row.recalledAt,
+    reactions: parseReactions(row.reactions),
   };
 }
 export function watchMessagingSession(
@@ -419,6 +432,43 @@ export async function sendPrivateMessage(
   });
   assertUser(session.uid);
 }
+export async function togglePrivateMessageReaction(
+  session: MessagingSession,
+  conversationId: string,
+  messageId: string,
+  emoji: '👍' | '❤️',
+) {
+  assertUser(session.uid);
+  if (!['👍', '❤️'].includes(emoji)) throw new MessagingError('permission');
+  const conversationRef = doc(getDb(), 'conversations', key(conversationId));
+  const messageRef = doc(collection(conversationRef, 'messages'), key(messageId));
+  await runTransaction(getDb(), async (transaction) => {
+    await transactionSession(transaction, session);
+    const [conversation, message] = await Promise.all([
+      transaction.get(conversationRef),
+      transaction.get(messageRef),
+    ]);
+    if (!conversation.exists() || !message.exists()) throw new MessagingError('permission');
+    const parsed = parseConversation(conversationId, conversation.data(), session);
+    parseMessage(messageId, message.data(), parsed);
+    if (message.data().recalledAt) throw new MessagingError('permission');
+    assertUser(session.uid);
+
+    const reactions = { ...object(message.data().reactions) };
+    const members = parseReactions(reactions)[emoji] ?? [];
+    const next = members.includes(session.uid)
+      ? members.filter((uid) => uid !== session.uid)
+      : [...members, session.uid];
+    if (next.length) reactions[emoji] = next;
+    else delete reactions[emoji];
+    transaction.update(messageRef, {
+      reactions,
+      updatedAt: serverTimestamp(),
+    });
+  });
+  assertUser(session.uid);
+}
+
 export async function markConversationRead(
   session: MessagingSession,
   conversationId: string,
