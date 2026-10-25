@@ -1,0 +1,48 @@
+# Verify model tool-call parameter conversion under both Zod major versions.
+# The v4 install is temporary and does not change package manifests or locks.
+name: Assistant Zod Schema Compatibility
+
+on:
+  pull_request:
+    paths:
+      - 'backend/functions/assistantAgent.js'
+      - 'backend/functions/agent/tools/toolSchema.compat.test.js'
+      - '.github/workflows/zod-tool-compat.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'backend/functions/assistantAgent.js'
+      - 'backend/functions/agent/tools/toolSchema.compat.test.js'
+      - '.github/workflows/zod-tool-compat.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  zod-tool-contracts:
+    name: Run assistant tool contracts under Zod 3 and 4
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install production Functions npm dependency tree
+        run: |
+          npm ci --prefix backend/functions --ignore-scripts
+          npm run build:shared --prefix backend/functions
+      - name: Verify existing Zod 3 runtime
+        working-directory: backend/functions
+        run: |
+          node -p "require('zod/package.json').version"
+          node ./node_modules/jest/bin/jest.js --runInBand agent/tools/toolSchema.compat.test.js agent/tools/campusNavigation.test.js assistantAgent.test.js
+      - name: Install Zod 4 in this disposable runner only
+        run: |
+          npm install --prefix backend/functions --no-save --ignore-scripts --package-lock=false 'zod@4.6.7'
+          npm ls --prefix backend/functions zod --depth=0
+      - name: Verify Zod 4 native OpenAPI conversion
+        working-directory: backend/functions
+        run: |
+          node -p "require('zod/package.json').version"
+          node ./node_modules/jest/bin/jest.js --runInBand agent/tools/toolSchema.compat.test.js agent/tools/campusNavigation.test.js assistantAgent.test.js
