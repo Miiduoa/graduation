@@ -23,3 +23,19 @@
 0049a2f235d5a7086c6efad21ec08fb917e3db60:scripts/verify-nuni-materials-api.mjs:generic-api-key:164
 0049a2f235d5a7086c6efad21ec08fb917e3db60:scripts/verify-nuni-materials-api.mjs:generic-api-key:166
 0049a2f235d5a7086c6efad21ec08fb917e3db60:scripts/verify-nuni-materials-api.mjs:generic-api-key:195
+# mobile streak 本機儲存鍵名（LEGACY_STREAK_KEY 及已刪畫面的同類鍵名）
+f408a270c86c5bd410cd50d9ae6a626566e075e9:apps/mobile/src/features/engagement/repository.ts:generic-api-key:19
+20f7572b4e5da1ed97712dbad9749cb7f74ad8fa:apps/mobile/src/screens/AchievementsScreen.tsx:generic-api-key:76
+20f7572b4e5da1ed97712dbad9749cb7f74ad8fa:apps/mobile/src/screens/ProfileScreen.tsx:generic-api-key:22
+20f7572b4e5da1ed97712dbad9749cb7f74ad8fa:apps/mobile/src/screens/TodayScreen.tsx:generic-api-key:335
+cf32b80b6c3d1547d62fc043b37d76385c1f571c:apps/mobile/src/screens/AchievementsScreen.tsx:generic-api-key:75
+cf32b80b6c3d1547d62fc043b37d76385c1f571c:apps/mobile/src/screens/ProfileScreen.tsx:generic-api-key:21
+cf32b80b6c3d1547d62fc043b37d76385c1f571c:apps/mobile/src/screens/TodayScreen.tsx:generic-api-key:320
+# Podfile.lock 套件 checksum
+e70fa5b8f19a94be2d4e548c887cc6823cf4ef31:apps/mobile/ios/Podfile.lock:generic-api-key:2407
+# docs/API.md 截斷的範例 token
+2962cb398b69b78a639daa99e54981f33dee71fd:docs/API.md:generic-api-key:145
+980eea437bc5ee9ae4cee50c3d27122459ea7cbd:docs/API.md:generic-api-key:115
+# food-api.test.ts 測試假值
+a64aa736debbbbddd00cc6ff5485a432e3ff1806:apps/web/src/lib/nuni/food-api.test.ts:generic-api-key:42
+
