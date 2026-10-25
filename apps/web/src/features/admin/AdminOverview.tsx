@@ -98,6 +98,29 @@ export function AdminOverview({
         </ul>
       </section>
 
+      <section className={styles.panel} aria-labelledby="admin-quick-heading">
+        <div className={styles.stack}>
+          <div className={styles.sectionIntro}>
+            <h2 id="admin-quick-heading">常用營運作業</h2>
+            <p className={styles.muted}>從工作進入管理流程；操作權限仍依登入身分與所屬學校檢查。</p>
+          </div>
+          <div className={styles.taskGrid}>
+            <a className={styles.taskTile} href="/admin/ops?tab=people">
+              <strong>校方成員與授權</strong>
+              <span>先選學校，再新增管理員或職員。已開通學校需啟用限時代操作。</span>
+            </a>
+            <a className={styles.taskTile} href="/admin/ops?tab=merchants">
+              <strong>店家申請審核</strong>
+              <span>分別核對合作意向與店家進件，留下具體理由與確認紀錄。</span>
+            </a>
+            <a className={styles.taskTile} href="/admin/ops?tab=affiliation">
+              <strong>課班掛靠</strong>
+              <span>檢視申請課班、目標學校及理由後，再決定是否掛靠。</span>
+            </a>
+          </div>
+        </div>
+      </section>
+
       <AdminResponsibilities onNavigate={onNavigate} />
     </div>
   );
