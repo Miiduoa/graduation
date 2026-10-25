@@ -1,0 +1,82 @@
+import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import type { ReactNode } from 'react';
+import { afterEach, beforeEach, expect, it, vi } from 'vitest';
+import DormitoryPage from './page';
+import { dormStorageKey } from '@campus/shared/src/dormitory';
+
+const selectedCampus = vi.hoisted(() => ({
+  status: 'ready' as 'ready' | 'unselected',
+  schoolId: 'pu',
+  schoolName: '靜宜大學',
+}));
+
+vi.mock('@/components/SiteShell', () => ({
+  SiteShell: ({ children }: { children: ReactNode }) => <main>{children}</main>,
+}));
+vi.mock('@/components/AuthGuard', () => ({
+  useAuth: () => ({ user: null, loading: false }),
+}));
+vi.mock('@/features/nuni/Session', () => ({
+  useOptionalNuniSession: () => null,
+}));
+vi.mock('@/lib/useCampusBrowseContext', () => ({
+  useCampusBrowseContext: () => selectedCampus,
+}));
+
+beforeEach(() => {
+  localStorage.clear();
+  selectedCampus.status = 'ready';
+  selectedCampus.schoolId = 'pu';
+  selectedCampus.schoolName = '靜宜大學';
+});
+afterEach(() => {
+  cleanup();
+  localStorage.clear();
+});
+
+it('lets a guest save room notes without inventing a school allocation', () => {
+  render(<DormitoryPage />);
+  expect(screen.getByText(/訪客模式/)).toBeTruthy();
+  fireEvent.change(screen.getByRole('textbox', { name: '宿舍或學苑名稱' }), { target: { value: '希嘉學苑' } });
+  fireEvent.change(screen.getByRole('textbox', { name: '寢室' }), { target: { value: '203' } });
+  fireEvent.click(screen.getByRole('button', { name: '儲存住宿備忘' }));
+  const stored = JSON.parse(localStorage.getItem(dormStorageKey('guest', 'pu')) ?? 'null');
+  expect(stored).toMatchObject({ building: '希嘉學苑', room: '203' });
+  expect(screen.getByText('已儲存在這台裝置')).toBeTruthy();
+});
+
+it('offers a working repair editor and records self-reported status only', () => {
+  render(<DormitoryPage />);
+  fireEvent.click(screen.getByRole('button', { name: '設備問題' }));
+  fireEvent.click(screen.getByRole('button', { name: '＋ 記錄問題' }));
+  fireEvent.change(screen.getByRole('textbox', { name: '問題名稱 *' }), { target: { value: '冷氣異音' } });
+  fireEvent.change(screen.getByRole('textbox', { name: '位置' }), { target: { value: '寢室窗邊' } });
+  fireEvent.click(screen.getByRole('button', { name: '儲存紀錄' }));
+  expect(screen.getByRole('heading', { name: '冷氣異音' })).toBeTruthy();
+  fireEvent.click(screen.getByRole('button', { name: '我已自行通報' }));
+  const stored = JSON.parse(localStorage.getItem(dormStorageKey('guest', 'pu')) ?? 'null');
+  expect(stored.repairs).toHaveLength(1);
+  expect(stored.repairs[0]).toMatchObject({ title: '冷氣異音', status: 'reported' });
+  expect(screen.getByText(/已向校方通報的狀態由你自行註記/)).toBeTruthy();
+});
+
+it('keeps separate room notes after switching selected school', () => {
+  const view = render(<DormitoryPage />);
+  fireEvent.change(screen.getByRole('textbox', { name: '宿舍或學苑名稱' }), { target: { value: '思高學苑' } });
+  fireEvent.click(screen.getByRole('button', { name: '儲存住宿備忘' }));
+  selectedCampus.schoolId = 'ncku';
+  selectedCampus.schoolName = '國立成功大學';
+  view.rerender(<DormitoryPage />);
+  expect((screen.getByRole('textbox', { name: '宿舍或學苑名稱' }) as HTMLInputElement).value).toBe('');
+  expect(localStorage.getItem(dormStorageKey('guest', 'pu'))).toContain('思高學苑');
+  expect(localStorage.getItem(dormStorageKey('guest', 'ncku'))).toBeNull();
+});
+
+it('refuses stale writes from another browser tab instead of overwriting changes', () => {
+  render(<DormitoryPage />);
+  fireEvent.change(screen.getByRole('textbox', { name: '宿舍或學苑名稱' }), { target: { value: '本頁草稿' } });
+  localStorage.setItem(dormStorageKey('guest', 'pu'), JSON.stringify({ version: 1, building: '另一頁的內容' }));
+  fireEvent.click(screen.getByRole('button', { name: '儲存住宿備忘' }));
+  expect(screen.getByRole('alert').textContent).toContain('另一個分頁已修改紀錄');
+  expect(localStorage.getItem(dormStorageKey('guest', 'pu'))).toContain('另一頁的內容');
+});
