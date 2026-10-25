@@ -347,7 +347,7 @@ async function executeCampusAssistantCore({
       todaySchedule: prefetched.todaySchedule || null,
       dailyBrief: prefetched.dailyBrief || null,
     });
-    let modelBacked = { modelResult: null, response: null };
+    let modelBacked;
     try {
       modelBacked = await withModelTimeout(buildModelBackedAssistantResponse({
       rawMessages,
@@ -425,7 +425,7 @@ async function executeCampusAssistantCore({
       timeZone,
       prefetched: {},
     };
-    let leaveRows = { items: [], count: 0 };
+    let leaveRows;
     try {
       leaveRows = await runTool('getLeaveRequestStatus', toolCtx, { limit: 10 });
     } catch (e) {
@@ -534,7 +534,7 @@ async function executeCampusAssistantCore({
       }
     }
 
-    let listRows = { items: [], count: 0 };
+    let listRows;
     try {
       const tList = Date.now();
       listRows = await runTool('listMyDormRepairs', toolCtx, { limit: 15 });

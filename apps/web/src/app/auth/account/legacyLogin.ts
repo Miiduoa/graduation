@@ -24,6 +24,7 @@ export const DISCOVER_REASON_COPY: Record<string, string> = {
 const ALLOWED_RETURN_PATHS = new Set([
   '/',
   '/account-deletion',
+  '/account-deletion/status',
   '/admin',
   '/ai-assistant',
   '/announcements',

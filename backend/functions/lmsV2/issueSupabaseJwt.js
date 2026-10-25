@@ -25,8 +25,9 @@
 
 const { onCall, HttpsError } = require('firebase-functions/v2/https');
 const { defineSecret } = require('firebase-functions/params');
+const { getApps, initializeApp } = require('firebase-admin/app');
+const { getAuth } = require('firebase-admin/auth');
 const { readSecretValue } = require('../secretParams');
-const admin = require('firebase-admin');
 const { SignJWT } = require('jose');
 
 const SUPABASE_URL_SECRET = defineSecret('SUPABASE_URL');
@@ -41,7 +42,6 @@ const JWT_TTL_SECONDS = 60 * 60; // 1 hour
  */
 async function ensureSupabaseUser({ supabaseUrl, serviceKey, firebaseUid, email, displayName }) {
   // 使用 supabase-js admin client
-  // eslint-disable-next-line global-require
   const { createClient } = require('@supabase/supabase-js');
   const admin = createClient(supabaseUrl, serviceKey, {
     auth: { persistSession: false, autoRefreshToken: false },
@@ -95,7 +95,6 @@ async function ensureSupabaseUser({ supabaseUrl, serviceKey, firebaseUid, email,
   }, { onConflict: 'user_id' });
   if (upsertErr) {
     // 不致命 — 後續再補
-    // eslint-disable-next-line no-console
     console.warn('[issueSupabaseJwt] profile upsert failed:', upsertErr.message);
   }
   return userId;
@@ -127,8 +126,8 @@ exports.issueSupabaseJwt = onCall(
       );
     }
 
-    if (!admin.apps.length) admin.initializeApp();
-    const fbUser = await admin.auth().getUser(request.auth.uid);
+    if (!getApps().length) initializeApp();
+    const fbUser = await getAuth().getUser(request.auth.uid);
 
     const userId = await ensureSupabaseUser({
       supabaseUrl,

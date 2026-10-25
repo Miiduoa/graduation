@@ -15,7 +15,8 @@
  * - 建立 SSO 設定範本
  */
 
-const admin = require('firebase-admin');
+const { initializeApp, cert } = require('firebase-admin/app');
+const { getFirestore, FieldValue, Timestamp, GeoPoint } = require('firebase-admin/firestore');
 const path = require('path');
 const fs = require('fs');
 
@@ -29,21 +30,19 @@ if (!fs.existsSync(serviceAccountPath)) {
   console.log('使用模擬器模式執行...');
 
   if (process.env.FIRESTORE_EMULATOR_HOST) {
-    admin.initializeApp({ projectId: 'demo-campus' });
+    initializeApp({ projectId: 'demo-campus' });
   } else {
     console.log('請設定 FIRESTORE_EMULATOR_HOST 環境變數，或提供 serviceAccountKey.json');
     process.exit(1);
   }
 } else {
   const serviceAccount = require(serviceAccountPath);
-  admin.initializeApp({
-    credential: admin.credential.cert(serviceAccount),
+  initializeApp({
+    credential: cert(serviceAccount),
   });
 }
 
-const db = admin.firestore();
-const FieldValue = admin.firestore.FieldValue;
-const Timestamp = admin.firestore.Timestamp;
+const db = getFirestore();
 
 const DEMO_SCHOOL_ID = 'ntust';
 const DEMO_SCHOOL_NAME = '台灣科技大學';
@@ -684,7 +683,7 @@ async function seedPOIs() {
   for (const poi of pois) {
     await poisRef.add({
       ...poi,
-      coordinates: new admin.firestore.GeoPoint(poi.latitude, poi.longitude),
+      coordinates: new GeoPoint(poi.latitude, poi.longitude),
       isAccessible: Math.random() > 0.3,
       hasWifi: Math.random() > 0.2,
       rating: (Math.random() * 1 + 4).toFixed(1),
