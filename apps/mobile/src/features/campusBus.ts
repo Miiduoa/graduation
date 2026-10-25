@@ -13,7 +13,7 @@ export type CampusBusRoute = {
 export type BusArrival = { routeName: string; direction: string; label: string };
 export type BusArrivals =
   | { status: 'ready'; arrivals: BusArrival[]; fetchedAt: string }
-  | { status: 'unavailable' | 'error'; arrivals: []; fetchedAt: null };
+  | { status: 'unavailable' | 'error' | 'login-required'; arrivals: []; fetchedAt: null };
 type ObjectData = Record<string, unknown>;
 const object = (value: unknown): ObjectData =>
   value && typeof value === 'object' ? (value as ObjectData) : {};
@@ -131,7 +131,10 @@ export async function loadBusArrivals(input: {
       'getBusArrivals',
     )(input);
     return normalizeBusArrivals(response.data, input.stopId);
-  } catch {
+  } catch (error) {
+    if (object(error).code === 'functions/unauthenticated') {
+      return { status: 'login-required', arrivals: [], fetchedAt: null };
+    }
     return { status: 'error', arrivals: [], fetchedAt: null };
   }
 }

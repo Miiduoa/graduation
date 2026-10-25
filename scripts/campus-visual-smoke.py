@@ -33,7 +33,13 @@ def session_fixtures(authenticated):
         elif url.path in ('/api/nuni/session', '/auth/session'):
             await route.fulfill(json={
                 'authenticated': authenticated,
-                **({'platformAccountId': 'pa_1'} if authenticated else {}),
+                # Match the browser session parser with a synthetic, unprivileged
+                # principal. These values never authenticate a server request.
+                **({
+                    'platformAccountId': 'pa_00000000-0000-4000-8000-000000000001',
+                    'isPlatformOperator': False,
+                    'context': 'a' * 43,
+                } if authenticated else {}),
             })
         elif url.path == '/auth/platform/providers':
             await route.fulfill(json={'kinds': ['google-consumer']})
@@ -86,6 +92,31 @@ async def goto_path(page, path):
     await page.goto(BASE + path, wait_until='load')
 
 
+async def follow_account_return(page, target, expected_target=None):
+    destination = target if expected_target is None else expected_target
+    expected = urlparse(destination)
+    await page.goto(
+        BASE + '/auth/account?' + urlencode({'returnUrl': target}),
+        wait_until='domcontentloaded',
+    )
+    await page.wait_for_url(lambda value: urlparse(value).path == '/login')
+    handoff = urlparse(page.url)
+    assert parse_qs(handoff.query, keep_blank_values=True) == {
+        'returnUrl': [destination],
+    }, page.url
+    assert not handoff.fragment, page.url
+    await no_overflow(page)
+    action = page.get_by_role('link', name='繼續使用', exact=True)
+    await expect(action).to_have_attribute('href', destination)
+    await action.click()
+    await page.wait_for_url(lambda value: urlparse(value).path == expected.path)
+    actual = urlparse(page.url)
+    assert parse_qs(actual.query, keep_blank_values=True) == parse_qs(
+        expected.query, keep_blank_values=True
+    ), page.url
+    assert actual.fragment == expected.fragment, page.url
+
+
 async def check_unsigned_account_entry(page):
     await expect(page.get_by_role('heading', name='登入', exact=True)).to_be_visible()
     await expect(page.get_by_text('請用學校核發的帳號登入。', exact=True)).to_be_visible()
@@ -103,23 +134,30 @@ async def check_unsigned_account_entry(page):
     await expect(footer.get_by_role('link', name='帳號刪除／停用')).to_have_attribute(
         'href', '/account-deletion'
     )
+    assert await footer.evaluate('''nav => {
+        const rgb = value => value.match(/[\\d.]+/g).slice(0, 3).map(Number);
+        const luminance = values => values.map(value => {
+            const component = value / 255;
+            return component <= 0.04045
+                ? component / 12.92
+                : ((component + 0.055) / 1.055) ** 2.4;
+        }).reduce((sum, value, index) => sum + value * [0.2126, 0.7152, 0.0722][index], 0);
+        const background = rgb(getComputedStyle(nav.closest('footer')).backgroundColor);
+        const backgroundLight = luminance(background);
+        return [...nav.querySelectorAll('a')].every(link => {
+            const style = getComputedStyle(link);
+            const opacity = Number(style.opacity);
+            const foreground = rgb(style.color).map(
+                (value, index) => value * opacity + background[index] * (1 - opacity)
+            );
+            const foregroundLight = luminance(foreground);
+            return (Math.max(foregroundLight, backgroundLight) + 0.05)
+                / (Math.min(foregroundLight, backgroundLight) + 0.05) >= 4.5;
+        });
+    }'''), 'Account footer links must remain readable in the current theme'
     for copy in OLD_ACCOUNT_COPY:
         await expect(page.get_by_text(copy, exact=True)).to_have_count(0)
     await expect(page.get_by_role('article')).to_have_count(0)
-
-
-async def check_account_handoff(page, target, expected=None):
-    await page.goto(
-        BASE + '/auth/account?' + urlencode({'returnUrl': target}),
-        wait_until='domcontentloaded',
-    )
-    await page.wait_for_url(lambda value: urlparse(value).path == '/login')
-    actual = urlparse(page.url)
-    assert parse_qs(actual.query, keep_blank_values=True) == {
-        'returnUrl': [target if expected is None else expected],
-    }, page.url
-    assert not actual.fragment, page.url
-    await no_overflow(page)
 
 
 async def check_account_footer_contrast(page):
@@ -604,27 +642,37 @@ async def main():
             await signed_page.goto(BASE + '/auth/account?returnUrl=/life', wait_until='domcontentloaded')
             await signed_page.wait_for_url(re.compile(r'https?://[^/]+/life(?:\?.*)?$'))
             assert urlparse(signed_page.url).path == '/life'
+            return_path = '/life?campus=pu#life-service-results'
+            await follow_account_return(signed_page, return_path)
+            assert parse_qs(urlparse(signed_page.url).query).get('campus') == ['pu']
+            assert urlparse(signed_page.url).fragment == 'life-service-results'
             await signed_page.goto(BASE + '/auth/account?returnUrl=/staff', wait_until='domcontentloaded')
             await signed_page.wait_for_url(re.compile(r'https?://[^/]+/?(\?.*)?$'))
             assert urlparse(signed_page.url).path == '/'
+            results.append('signed-in account visits preserve campus and anchor on allowed return paths')
+
             for target in [
                 '/grades?tab=feedback&schoolId=nthu&campus=nthu',
                 '/settings?section=appearance&campus=nthu#reading',
                 '/school-info?campus=pu',
                 '/events?campus=nthu',
             ]:
-                await check_account_handoff(signed_page, target)
-            await check_account_handoff(
+                await follow_account_return(signed_page, target)
+                await no_overflow(signed_page)
+            results.append('account return navigation preserves campus, tabs and settings position')
+            await follow_account_return(
                 signed_page,
                 '/grades?tab=feedback&campus=nthu&token=discard-me&session=discard-me&next=%2Fstaff#recent',
                 '/grades?tab=feedback&campus=nthu#recent',
             )
-            results.append('account handoff preserves campus, tabs and settings position without auth payloads')
+            await no_overflow(signed_page)
+            results.append('account return navigation drops auth payloads and nested redirects')
             results.append('signed-in account visits follow allowed return paths')
             assert not errors, errors
             await signed.close()
         except Exception:
             diagnostic_page = page if active_page.is_closed() else active_page
+            (OUT / 'failure-url.txt').write_text(diagnostic_page.url, encoding='utf-8')
             await diagnostic_page.screenshot(path=str(OUT / 'failure.png'), full_page=True, animations='disabled')
             (OUT / 'failure-dom.txt').write_text(await diagnostic_page.locator('body').aria_snapshot(), encoding='utf-8')
             raise

@@ -1,4 +1,4 @@
-import { loginHref } from '@/lib/navigation';
+import { collapseInternalPathHash, loginHref, sanitizeInternalPath } from '@/lib/navigation';
 
 export const ACCOUNT_API_ORIGIN = 'https://api.nuni.tw';
 export const PLATFORM_LOGIN_TRANSACTION_KEY = 'campus.platform-login.transaction';
@@ -103,18 +103,6 @@ const BLOCKED_RETURN_PATHS = new Set([
   '/sso/acs',
 ]);
 
-// These simple destinations are also understood by the retained login callbacks.
-const LEGACY_SIMPLE_RETURN_PATHS = new Set([
-  '/',
-  '/account-deletion',
-  '/calendar',
-  '/career',
-  '/food',
-  '/life',
-  '/search',
-  '/social',
-]);
-
 // Only page state travels through login; credentials and nested return URLs do not.
 const RETURN_CONTEXT_KEYS = new Set([
   'school',
@@ -133,6 +121,19 @@ const RETURN_CONTEXT_KEYS = new Set([
   'boardId',
   'poiId',
   'create',
+  'kind',
+]);
+
+// These simple destinations are also understood by the retained login callbacks.
+const LEGACY_SIMPLE_RETURN_PATHS = new Set([
+  '/',
+  '/account-deletion',
+  '/calendar',
+  '/career',
+  '/food',
+  '/life',
+  '/search',
+  '/social',
 ]);
 const MICROSOFT_HOSTS = new Set([
   'login.microsoftonline.com',
@@ -185,18 +186,16 @@ function hasUnsafeReturnCharacters(value: string): boolean {
 function returnFragment(hash: string): string {
   try {
     // A fragment may identify page content, never carry another URL or auth payload.
-    return /^[\p{L}\p{N}_.:-]+$/u.test(decodeURIComponent(hash.slice(1))) ? hash : '';
+    const anchor = collapseInternalPathHash(hash);
+    return /^[\p{L}\p{N}_.:-]+$/u.test(decodeURIComponent(anchor.slice(1))) ? anchor : '';
   } catch {
     return '';
   }
 }
 
 function allowedReturnPath(value: string | null | undefined): string | null {
-  const raw = (value ?? '').trim();
-  if (
-    !raw.startsWith('/') || raw.startsWith('//') ||
-    (value?.length ?? 0) > 1200 || hasUnsafeReturnCharacters(value ?? '')
-  ) return null;
+  const raw = sanitizeInternalPath(value && value.length <= 1200 ? value : null, '');
+  if (!raw) return null;
   let parsed: URL;
   try {
     parsed = new URL(raw, 'https://nuni.invalid');
@@ -231,7 +230,12 @@ function allowedReturnPath(value: string | null | undefined): string | null {
 }
 
 export function sanitizeReturnPath(value: string | null | undefined): string {
-  return allowedReturnPath(value) ?? '/';
+  const destination = allowedReturnPath(value);
+  if (!destination) return '/';
+  const parsed = new URL(destination, 'https://nuni.invalid');
+  // Retained legacy pages keep their existing path-only return policy.
+  if (isLegacyAccountPath(parsed.pathname)) return parsed.hash ? '/' : parsed.pathname;
+  return destination;
 }
 
 type ReturnSearch = string | { get(name: string): string | null };

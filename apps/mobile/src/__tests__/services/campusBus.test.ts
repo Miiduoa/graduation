@@ -112,6 +112,16 @@ it('keeps arrival failures distinct from an empty successful service response', 
   expect(await loadBusArrivals(input)).toMatchObject({ status: 'ready', arrivals: [] });
 });
 
+it('distinguishes an expired login from a network failure', async () => {
+  const call = jest.fn().mockRejectedValue({ code: 'functions/unauthenticated' });
+  jest.mocked(httpsCallable).mockReturnValue(call as never);
+  expect(await loadBusArrivals({ schoolId: 'pu', stopId: 'stop', city: 'Taichung' })).toEqual({
+    status: 'login-required',
+    arrivals: [],
+    fetchedAt: null,
+  });
+});
+
 it('propagates route loading failure instead of substituting example routes', async () => {
   jest.mocked(getDocsFromServer).mockRejectedValueOnce(new Error('offline'));
   await expect(loadBusRoutes('pu')).rejects.toThrow('offline');
