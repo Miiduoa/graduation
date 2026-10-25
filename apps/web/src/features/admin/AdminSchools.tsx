@@ -189,7 +189,7 @@ export function AdminSchools({
                           管理
                         </Button>
                       ) : (
-                        <a className={styles.link} href="/auth/platform/school-review">
+                        <a className={styles.link} href="/admin/school-review">
                           查看申請
                         </a>
                       )}

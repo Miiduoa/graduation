@@ -31,6 +31,8 @@ const ALLOWED_RETURN_PATHS = new Set([
   '/auth/platform/class-workspace/new',
   '/auth/platform/ops',
   '/auth/platform/school-review',
+  '/admin/ops',
+  '/admin/school-review',
   '/bus',
   '/bus/registered',
   '/cafeteria',
@@ -73,6 +75,8 @@ const ALLOWED_RETURN_PATHS = new Set([
 ]);
 
 const ALLOWED_RETURN_PREFIXES = [
+  '/admin/ops',
+  '/admin/school-review',
   '/admin/students',
   '/announcements',
   '/auth/platform/class-workspace',

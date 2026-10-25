@@ -185,11 +185,11 @@ function Workspace({ context, suspended }: { context: string; suspended: boolean
             </nav>
             <div className={styles.sideSecondary}>
               <p className={styles.sideLabel}>延伸作業</p>
-              <a className={styles.link} href="/auth/platform/school-review">
+              <a className={styles.link} href="/admin/school-review">
                 審核學校申請
               </a>
               <p className={styles.muted}>尚未建檔的接入申請在此審核。</p>
-              <a className={styles.link} href="/auth/platform/ops">
+              <a className={styles.link} href="/admin/ops">
                 人員、店家與課班
               </a>
               <p className={styles.muted}>前往既有管理台，處理身分與所屬學校。</p>
@@ -203,10 +203,10 @@ function Workspace({ context, suspended }: { context: string; suspended: boolean
                 <p className={styles.muted}>{meta.purpose}</p>
               </div>
               <div className={styles.mobileSecondary}>
-                <a className={styles.link} href="/auth/platform/school-review">
+                <a className={styles.link} href="/admin/school-review">
                   審核學校申請
                 </a>
-                <a className={styles.link} href="/auth/platform/ops">
+                <a className={styles.link} href="/admin/ops">
                   人員、店家與課班
                 </a>
               </div>
