@@ -14,8 +14,8 @@ vi.mock('@/lib/campusEvents', async () => {
 });
 
 vi.mock('./EventRegistrationPanel', () => ({
-  EventRegistrationPanel: ({ event }: { event: CampusEvent }) => (
-    <div data-testid="registration-panel">{event.source}:{event.id}</div>
+  EventRegistrationPanel: ({ event, returnPath }: { event: CampusEvent; returnPath: string }) => (
+    <div data-testid="registration-panel" data-return-path={returnPath}>{event.source}:{event.id}</div>
   ),
 }));
 
@@ -31,6 +31,33 @@ function event(partial: Partial<CampusEvent> & Pick<CampusEvent, 'id' | 'title' 
 
 beforeEach(() => {
   loadCampusEvent.mockReset();
+});
+
+it('keeps list filters for back and login while sharing only the event identity', async () => {
+  loadCampusEvent.mockResolvedValue(event({ id: 'talk', title: '校園講座', source: 'school-events' }));
+  const writeText = vi.fn().mockResolvedValue(undefined);
+  Object.assign(navigator, { clipboard: { writeText } });
+  render(<EventDetail schoolId="nthu" schoolSearch="?schoolId=nthu&campus=nthu" eventId="talk"
+    sourceParam="school-events" listFilters={{ q: '我的搜尋', view: 'upcoming' }} />);
+  await screen.findByRole('heading', { name: '校園講座' });
+  const back = new URL(screen.getByRole('link', { name: '回到活動列表' }).getAttribute('href')!, 'https://campus.example');
+  expect(Object.fromEntries(back.searchParams)).toEqual({ schoolId: 'nthu', campus: 'nthu', q: '我的搜尋', view: 'upcoming' });
+  expect(screen.getByTestId('registration-panel').getAttribute('data-return-path')).toContain('view=upcoming');
+  fireEvent.click(screen.getByRole('button', { name: '複製連結' }));
+  await waitFor(() => expect(writeText).toHaveBeenCalled());
+  const shared = new URL(writeText.mock.calls[0][0]);
+  expect(shared.searchParams.get('schoolId')).toBe('nthu');
+  expect(shared.searchParams.get('source')).toBe('school-events');
+  expect(shared.searchParams.has('q')).toBe(false);
+  expect(shared.searchParams.has('view')).toBe(false);
+});
+
+it('does not offer a calendar download until a real event time exists', async () => {
+  loadCampusEvent.mockResolvedValue(event({ id: 'tbd', title: '待公告活動', source: 'school-events', startsAt: '' }));
+  render(<EventDetail schoolId="nthu" schoolSearch="?schoolId=nthu" eventId="tbd" sourceParam="school-events" />);
+  await screen.findByRole('heading', { name: '待公告活動' });
+  expect((screen.getByRole('button', { name: '加入行事曆' }) as HTMLButtonElement).disabled).toBe(true);
+  expect(screen.getByText('活動時間待公告，提供開始時間後即可加入行事曆。')).toBeTruthy();
 });
 
 it('rejects invalid source without probing collections by id alone', async () => {

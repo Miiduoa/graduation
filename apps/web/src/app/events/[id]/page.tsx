@@ -5,6 +5,7 @@ import { EventDetail } from '@/components/events/EventDetail';
 import styles from '@/components/events/events.module.css';
 import { SiteShell } from '@/components/SiteShell';
 import { useCampusBrowseContext } from '@/lib/useCampusBrowseContext';
+import { readCampusEventFilters } from '@/components/events/eventPresentation';
 
 export default function CampusEventDetailPage(props: {
   params: Promise<{ id: string }>;
@@ -13,6 +14,9 @@ export default function CampusEventDetailPage(props: {
     schoolId?: string;
     campus?: string;
     source?: string;
+    q?: string;
+    view?: string;
+    page?: string;
   }>;
 }) {
   const { id } = use(props.params);
@@ -44,6 +48,7 @@ export default function CampusEventDetailPage(props: {
           schoolSearch={context.schoolSearch}
           eventId={id}
           sourceParam={source}
+          listFilters={readCampusEventFilters(params)}
         />
       )}
     </SiteShell>

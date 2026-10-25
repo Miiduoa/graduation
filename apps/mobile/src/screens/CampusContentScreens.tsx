@@ -2,16 +2,18 @@ import { EventRegistrationPanel } from '../components/EventRegistrationPanel';
 import { useEventRegistrations } from '../hooks/useEventRegistrations';
 import { eventRegistrationLabel } from '../services/eventRegistration';
 import React, { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react';
-import { Linking, Share, Text, View } from 'react-native';
 import {
-  AIDetailScreen,
-  AICard,
-  AISection,
-  AIRow,
-  AIButton,
-  AIChip,
-  aiTokens,
-} from '../ui/aiFirst';
+  AppState,
+  Keyboard,
+  Linking,
+  Pressable,
+  Share,
+  StyleSheet,
+  Text,
+  TextInput,
+  View,
+} from 'react-native';
+import { AIDetailScreen, AICard, AISection, AIRow, AIButton, aiTokens } from '../ui/aiFirst';
 import { useAuth } from '../state/auth';
 import { getThemeVersion, subscribeToTheme } from '../ui/theme';
 import { useSchool } from '../state/school';
@@ -43,6 +45,12 @@ import { getRawAppEnv } from '../services/release';
 import { safeNavigate } from '../utils/safeNavigate';
 import { exportAndShareICalFile } from '../services/ical';
 import type { AnnouncementCategory } from '../data/types';
+import { matchesCampusContent } from '../utils/campusContentList';
+import {
+  campusEventPhase,
+  campusEventPhaseLabel,
+  compareCampusEventTime,
+} from '@campus/shared/src/campusEventTime';
 
 type Props = {
   navigation?: {
@@ -237,7 +245,178 @@ function ReadState({
   );
 }
 
-export function CampusAnnouncementsScreen({ navigation }: Props) {
+function ContentFilter({
+  label,
+  selected,
+  onPress,
+}: {
+  label: string;
+  selected: boolean;
+  onPress: () => void;
+}) {
+  return (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel={`篩選：${label}`}
+      accessibilityState={{ selected }}
+      onPress={onPress}
+      style={({ pressed }) => ({
+        minHeight: 44,
+        maxWidth: '100%',
+        paddingHorizontal: 14,
+        paddingVertical: 10,
+        borderRadius: aiTokens.radius.pill,
+        borderWidth: 1,
+        borderColor: selected ? aiTokens.ai : aiTokens.border,
+        backgroundColor: selected ? aiTokens.aiSoft : aiTokens.surface,
+        justifyContent: 'center',
+        opacity: pressed ? 0.7 : 1,
+      })}
+    >
+      <Text
+        style={{
+          color: selected ? aiTokens.ai : aiTokens.text,
+          fontSize: 14,
+          fontWeight: selected ? '600' : '400',
+        }}
+      >
+        {label}
+      </Text>
+    </Pressable>
+  );
+}
+
+function ContentSearch({
+  kind,
+  value,
+  onChange,
+}: {
+  kind: '公告' | '活動';
+  value: string;
+  onChange: (value: string) => void;
+}) {
+  return (
+    <View style={{ gap: 8 }}>
+      <Text style={{ color: aiTokens.text, fontSize: 15, fontWeight: '600' }}>搜尋{kind}</Text>
+      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+        <TextInput
+          accessibilityLabel={`搜尋${kind}`}
+          placeholder={kind === '公告' ? '標題、內容或發布單位' : '名稱、介紹、地點或主辦單位'}
+          placeholderTextColor={aiTokens.muted}
+          value={value}
+          onChangeText={onChange}
+          maxLength={160}
+          autoCapitalize="none"
+          autoCorrect={false}
+          returnKeyType="search"
+          onSubmitEditing={Keyboard.dismiss}
+          style={{
+            flex: 1,
+            minWidth: 0,
+            minHeight: 48,
+            padding: 12,
+            color: aiTokens.text,
+            backgroundColor: aiTokens.surface,
+            borderWidth: 1,
+            borderColor: aiTokens.border,
+            borderRadius: aiTokens.radius.sm,
+            fontSize: 16,
+          }}
+        />
+        {value ? (
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={`清除${kind}搜尋`}
+            onPress={() => onChange('')}
+            style={{
+              minHeight: 44,
+              minWidth: 44,
+              padding: 8,
+              alignItems: 'center',
+              justifyContent: 'center',
+            }}
+          >
+            <Text style={{ color: aiTokens.ai, fontSize: 14 }}>清除</Text>
+          </Pressable>
+        ) : null}
+      </View>
+    </View>
+  );
+}
+
+function ContentRow({
+  title,
+  subtitle,
+  preview,
+  labels = [],
+  first,
+  kind,
+  onPress,
+}: {
+  title: string;
+  subtitle: string;
+  preview?: string;
+  labels?: Array<string | undefined>;
+  first: boolean;
+  kind: '公告' | '活動';
+  onPress: () => void;
+}) {
+  const tags = labels.filter((label): label is string => Boolean(label));
+  return (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel={[title, ...tags, subtitle].filter(Boolean).join('，')}
+      accessibilityHint={`開啟${kind}詳情`}
+      onPress={() => {
+        Keyboard.dismiss();
+        onPress();
+      }}
+      style={({ pressed }) => ({
+        gap: 8,
+        minHeight: 64,
+        padding: 16,
+        borderTopWidth: first ? 0 : StyleSheet.hairlineWidth,
+        borderTopColor: aiTokens.border,
+        backgroundColor: pressed ? aiTokens.panel : 'transparent',
+      })}
+    >
+      {tags.length ? (
+        <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6 }}>
+          {tags.map((label) => (
+            <Text
+              key={label}
+              style={{ color: aiTokens.ai, fontSize: 12, lineHeight: 18, fontWeight: '600' }}
+            >
+              {label}
+            </Text>
+          ))}
+        </View>
+      ) : null}
+      <Text style={{ color: aiTokens.text, fontSize: 17, lineHeight: 25, fontWeight: '600' }}>
+        {title}
+      </Text>
+      <Text style={{ color: aiTokens.muted, fontSize: 13, lineHeight: 20 }}>{subtitle}</Text>
+      {preview ? (
+        <Text
+          numberOfLines={2}
+          style={{ color: aiTokens.textSecondary, fontSize: 14, lineHeight: 22 }}
+        >
+          {preview}
+        </Text>
+      ) : null}
+    </Pressable>
+  );
+}
+
+const ANNOUNCEMENTS_PER_PAGE = 30;
+
+export function CampusAnnouncementsScreen(props: Props) {
+  const { school } = useSchool();
+  const { user } = useAuth();
+  return <CampusAnnouncementsContent key={JSON.stringify([user?.uid, school.id])} {...props} />;
+}
+
+function CampusAnnouncementsContent({ navigation }: Props) {
   const { school } = useSchool();
   const schoolVisible = isAnnouncementSchoolVisibleToPublic(
     { schoolId: school.id },
@@ -246,12 +425,40 @@ export function CampusAnnouncementsScreen({ navigation }: Props) {
   const content = useAnnouncementFeed();
   const [category, setCategory] = useState<AnnouncementCategory | 'all'>('all');
   const [listView, setListView] = useState<'student' | 'all'>('student');
+  const [search, setSearch] = useState('');
+  const [displayLimit, setDisplayLimit] = useState(ANNOUNCEMENTS_PER_PAGE);
+  const [linkError, setLinkError] = useState('');
+  const openOfficial = async (url: string) => {
+    if (!content.current()) return;
+    setLinkError('');
+    try {
+      await Linking.openURL(url);
+    } catch {
+      if (content.current()) setLinkError('無法開啟校方公告，請稍後再試。');
+    }
+  };
   const student = content.announcements;
   const official = content.officialAnnouncements;
   const rows = listView === 'all' ? official : student;
   const sources = content.sources;
   const showFeed = official.length > 0 || student.length > 0;
-  const visible = rows.filter((row) => category === 'all' || row.category === category);
+  const visible = rows.filter(
+    (row) =>
+      (category === 'all' || row.category === category) &&
+      matchesCampusContent(search, [row.title, row.summary, row.body, row.source, row.office]),
+  );
+  const shown = visible.slice(0, displayLimit);
+  const resetFilters = () => {
+    setSearch('');
+    setCategory('all');
+    setDisplayLimit(ANNOUNCEMENTS_PER_PAGE);
+  };
+  const changeView = (nextView: 'student' | 'all') => {
+    setListView(nextView);
+    setCategory('all');
+    setDisplayLimit(ANNOUNCEMENTS_PER_PAGE);
+  };
+  const filtered = Boolean(search.trim()) || category !== 'all';
   const down = sources.filter((item) => item.status === 'unavailable');
   const downLinks = down.filter((item) => item.listUrl);
   const officialUrl = verifiedOfficialAnnouncementUrl(school.id);
@@ -278,6 +485,8 @@ export function CampusAnnouncementsScreen({ navigation }: Props) {
       title="公告"
       subtitle="公開處室公告的摘要與原文連結。一般帳號即可查看。"
       onBack={() => navigation?.goBack?.()}
+      keyboardShouldPersistTaps="handled"
+      keyboardDismissMode="on-drag"
     >
       {phase === 'loading' ? (
         <ReadState loading error="" empty="目前沒有公告" reload={content.reload} />
@@ -293,7 +502,7 @@ export function CampusAnnouncementsScreen({ navigation }: Props) {
               <AIButton
                 label={ANNOUNCEMENT_OFFICIAL_SITE_BUTTON}
                 variant="ghost"
-                onPress={() => void Linking.openURL(officialUrl)}
+                onPress={() => void openOfficial(officialUrl)}
               />
             ) : null}
             {(downLinks.length ? downLinks : catalogLinks).map((item) => (
@@ -301,7 +510,7 @@ export function CampusAnnouncementsScreen({ navigation }: Props) {
                 key={item.sourceId}
                 label={item.office}
                 variant="ghost"
-                onPress={() => void Linking.openURL(item.listUrl!)}
+                onPress={() => void openOfficial(item.listUrl!)}
               />
             ))}
           </View>
@@ -317,14 +526,14 @@ export function CampusAnnouncementsScreen({ navigation }: Props) {
             {officialUrl ? (
               <AIButton
                 label={ANNOUNCEMENT_OFFICIAL_SITE_BUTTON}
-                onPress={() => void Linking.openURL(officialUrl)}
+                onPress={() => void openOfficial(officialUrl)}
               />
             ) : null}
             {catalogLinks.map((item) => (
               <AIButton
                 key={item.sourceId}
                 label={item.office}
-                onPress={() => void Linking.openURL(item.listUrl)}
+                onPress={() => void openOfficial(item.listUrl)}
               />
             ))}
             <AIButton label="更新公告" variant="ghost" onPress={() => void content.reload()} />
@@ -342,48 +551,80 @@ export function CampusAnnouncementsScreen({ navigation }: Props) {
               {null}
             </AICard>
           ) : null}
-          <View
-            style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, margin: aiTokens.space.md }}
-          >
-            <AIChip
-              label={ANNOUNCEMENT_STUDENT_WALL_LABEL}
-              active={listView === 'student'}
-              onPress={() => setListView('student')}
+          <View style={{ gap: 16, margin: aiTokens.space.md }}>
+            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
+              <ContentFilter
+                label={ANNOUNCEMENT_STUDENT_WALL_LABEL}
+                selected={listView === 'student'}
+                onPress={() => changeView('student')}
+              />
+              <ContentFilter
+                label={ANNOUNCEMENT_ALL_VIEW_LABEL}
+                selected={listView === 'all'}
+                onPress={() => changeView('all')}
+              />
+            </View>
+            <ContentSearch
+              kind="公告"
+              value={search}
+              onChange={(value) => {
+                setSearch(value);
+                setDisplayLimit(ANNOUNCEMENTS_PER_PAGE);
+              }}
             />
-            <AIChip
-              label={ANNOUNCEMENT_ALL_VIEW_LABEL}
-              active={listView === 'all'}
-              onPress={() => setListView('all')}
-            />
-            <AIChip
-              label={`全部 ${rows.length}`}
-              active={category === 'all'}
-              onPress={() => setCategory('all')}
-            />
-            {(Object.keys(categoryNames) as AnnouncementCategory[])
-              .filter((key) => rows.some((row) => row.category === key))
-              .map((key) => (
-                <AIChip
-                  key={key}
-                  label={categoryNames[key]}
-                  active={category === key}
-                  onPress={() => setCategory(key)}
-                />
-              ))}
+            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
+              <ContentFilter
+                label={`全部 ${rows.length}`}
+                selected={category === 'all'}
+                onPress={() => {
+                  setCategory('all');
+                  setDisplayLimit(ANNOUNCEMENTS_PER_PAGE);
+                }}
+              />
+              {(Object.keys(categoryNames) as AnnouncementCategory[])
+                .filter((key) => rows.some((row) => row.category === key))
+                .map((key) => (
+                  <ContentFilter
+                    key={key}
+                    label={categoryNames[key]}
+                    selected={category === key}
+                    onPress={() => {
+                      setCategory(key);
+                      setDisplayLimit(ANNOUNCEMENTS_PER_PAGE);
+                    }}
+                  />
+                ))}
+            </View>
+            <View style={{ flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: 8 }}>
+              <Text
+                accessibilityLiveRegion="polite"
+                style={{ color: aiTokens.muted, flex: 1, minWidth: 160, lineHeight: 21 }}
+              >
+                {filtered ? `找到 ${visible.length} 則` : `${visible.length} 則公告`}
+                {visible.length > shown.length ? `，顯示前 ${shown.length} 則` : ''}
+                。搜尋與篩選適用已載入的公告。
+              </Text>
+              {filtered ? (
+                <AIButton label="清除公告篩選" variant="ghost" onPress={resetFilters} />
+              ) : null}
+            </View>
           </View>
           <AISection
             title={listView === 'all' ? ANNOUNCEMENT_ALL_VIEW_LABEL : '學校公告'}
             subtitle={listView === 'all' ? '含教師向與資安轉知等正式公告' : '各處室公開公告'}
           >
             {visible.length ? (
-              visible.map((row) => (
-                <AIRow
+              shown.map((row, index) => (
+                <ContentRow
                   key={row.id}
+                  first={index === 0}
+                  kind="公告"
                   title={row.title}
                   subtitle={[row.source || row.office, dateLabel(row.publishedAt)]
                     .filter(Boolean)
                     .join(' · ')}
-                  tag={row.pinned ? '置頂' : undefined}
+                  preview={row.summary || row.body}
+                  labels={[row.pinned ? '置頂' : undefined, categoryNames[row.category]]}
                   onPress={() => {
                     if (content.current()) safeNavigate(navigation, '公告詳情', { id: row.id });
                   }}
@@ -394,9 +635,21 @@ export function CampusAnnouncementsScreen({ navigation }: Props) {
                 <Text>教師向、資安轉知等正式公告可到「{ANNOUNCEMENT_ALL_VIEW_LABEL}」查看。</Text>
               </AICard>
             ) : (
-              <AICard title="這個分類目前沒有公告">{null}</AICard>
+              <AICard title={search.trim() ? '找不到符合的公告' : '這個分類目前沒有公告'}>
+                <Text style={{ color: aiTokens.muted, lineHeight: 22 }}>
+                  試著改用其他關鍵字，或清除篩選查看目前的公告。
+                </Text>
+              </AICard>
             )}
           </AISection>
+          {shown.length < visible.length ? (
+            <AIButton
+              label={`顯示更多公告（還有 ${visible.length - shown.length} 則）`}
+              variant="ghost"
+              style={{ margin: aiTokens.space.md }}
+              onPress={() => setDisplayLimit((value) => value + ANNOUNCEMENTS_PER_PAGE)}
+            />
+          ) : null}
           <AIButton
             label="更新公告"
             variant="ghost"
@@ -405,6 +658,13 @@ export function CampusAnnouncementsScreen({ navigation }: Props) {
           />
         </>
       )}
+      {linkError ? (
+        <AICard>
+          <Text accessibilityRole="alert" style={{ color: aiTokens.danger }}>
+            {linkError}
+          </Text>
+        </AICard>
+      ) : null}
     </AIDetailScreen>
   );
 }
@@ -459,11 +719,12 @@ export function CampusAnnouncementDetailScreen({ navigation, route }: Props) {
           </AICard>
           <AICard title="公告內容">
             <Text selectable style={{ color: aiTokens.text, lineHeight: 25 }}>
-              {announcement.summary || announcement.body || '此公告沒有提供內文。'}
+              {announcement.body?.trim() || announcement.summary?.trim() || '此公告沒有提供內文。'}
             </Text>
-            {announcement.originalUrl || announcement.summary ? (
+            {announcement.originalUrl ||
+            (!announcement.body?.trim() && announcement.summary?.trim()) ? (
               <Text style={{ color: aiTokens.muted, lineHeight: 22, marginTop: 8 }}>
-                {SUMMARY_NOTICE}
+                {announcement.originalUrl ? SUMMARY_NOTICE : '目前僅提供摘要。'}
               </Text>
             ) : null}
           </AICard>
@@ -497,39 +758,60 @@ export function CampusAnnouncementDetailScreen({ navigation, route }: Props) {
   );
 }
 
-export function CampusEventsScreen({ navigation }: Props) {
+export function CampusEventsScreen(props: Props) {
+  const { school } = useSchool();
+  const { user } = useAuth();
+  return <CampusEventsContent key={JSON.stringify([user?.uid, school.id])} {...props} />;
+}
+
+function CampusEventsContent({ navigation }: Props) {
   const content = useCampusEvents();
   const registrations = useEventRegistrations(
     content.items
       .filter((event) => event.source === 'school-club-events' && event.appRegistrationConfigured)
       .map((event) => event.id),
   );
-  const [period, setPeriod] = useState<'all' | 'upcoming' | 'past' | 'undated'>('all');
-  const now = Date.now();
+  const [period, setPeriod] = useState<'all' | 'ongoing' | 'upcoming' | 'past' | 'undated'>('all');
+  const [search, setSearch] = useState('');
+  const [now, setNow] = useState(Date.now);
+  useEffect(() => {
+    const updateTime = () => setNow(Date.now());
+    const interval = setInterval(updateTime, 60_000);
+    const subscription = AppState.addEventListener('change', (state) => {
+      if (state === 'active') updateTime();
+    });
+    return () => {
+      clearInterval(interval);
+      subscription.remove();
+    };
+  }, []);
+  const filtered = period !== 'all' || Boolean(search.trim());
+  const resetFilters = () => {
+    setPeriod('all');
+    setSearch('');
+  };
   const visible = content.items
     .filter((row) => {
+      if (!matchesCampusContent(search, [row.title, row.description, row.location, row.organizer]))
+        return false;
+      const phase = campusEventPhase(row, now);
       if (period === 'all') return true;
-      if (period === 'undated') return !row.startsAt;
-      return (
-        row.startsAt &&
-        (period === 'upcoming'
-          ? new Date(row.startsAt).getTime() >= now
-          : new Date(row.startsAt).getTime() < now)
-      );
+      if (period === 'undated') return phase === 'unscheduled';
+      if (period === 'past') return phase === 'started' || phase === 'ended';
+      return phase === period;
     })
-    .sort((a, b) => {
-      if (!a.startsAt || !b.startsAt)
-        return a.startsAt ? -1 : b.startsAt ? 1 : a.id.localeCompare(b.id);
-      const aTime = new Date(a.startsAt).getTime();
-      const bTime = new Date(b.startsAt).getTime();
-      if (aTime >= now !== bTime >= now) return aTime >= now ? -1 : 1;
-      return (aTime >= now ? aTime - bTime : bTime - aTime) || a.id.localeCompare(b.id);
-    });
+    .sort(
+      (a, b) =>
+        compareCampusEventTime(a, b, now) ||
+        `${a.source}:${a.id}`.localeCompare(`${b.source}:${b.id}`),
+    );
   return (
     <AIDetailScreen
       title="活動"
       subtitle="查看時間、地點與主辦單位資訊。"
       onBack={() => navigation?.goBack?.()}
+      keyboardShouldPersistTaps="handled"
+      keyboardDismissMode="on-drag"
     >
       {!content.loaded && !content.items.length ? (
         <ReadState
@@ -540,41 +822,72 @@ export function CampusEventsScreen({ navigation }: Props) {
         />
       ) : (
         <>
-          <View
-            style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, margin: aiTokens.space.md }}
-          >
-            <AIChip label="全部" active={period === 'all'} onPress={() => setPeriod('all')} />
-            <AIChip
-              label="未來活動"
-              active={period === 'upcoming'}
-              onPress={() => setPeriod('upcoming')}
-            />
-            <AIChip label="過往活動" active={period === 'past'} onPress={() => setPeriod('past')} />
-            <AIChip
-              label="時間待公告"
-              active={period === 'undated'}
-              onPress={() => setPeriod('undated')}
-            />
+          <View style={{ gap: 16, margin: aiTokens.space.md }}>
+            <ContentSearch kind="活動" value={search} onChange={setSearch} />
+            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
+              <ContentFilter
+                label="全部"
+                selected={period === 'all'}
+                onPress={() => setPeriod('all')}
+              />
+              <ContentFilter
+                label="進行中"
+                selected={period === 'ongoing'}
+                onPress={() => setPeriod('ongoing')}
+              />
+              <ContentFilter
+                label="未來活動"
+                selected={period === 'upcoming'}
+                onPress={() => setPeriod('upcoming')}
+              />
+              <ContentFilter
+                label="已開始／過往"
+                selected={period === 'past'}
+                onPress={() => setPeriod('past')}
+              />
+              <ContentFilter
+                label="時間待公告"
+                selected={period === 'undated'}
+                onPress={() => setPeriod('undated')}
+              />
+            </View>
+            <View style={{ flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: 8 }}>
+              <Text
+                accessibilityLiveRegion="polite"
+                style={{ flex: 1, minWidth: 160, color: aiTokens.muted, lineHeight: 21 }}
+              >
+                {filtered ? `找到 ${visible.length} 場` : `${visible.length} 場活動`}
+              </Text>
+              {filtered ? (
+                <AIButton label="清除活動篩選" variant="ghost" onPress={resetFilters} />
+              ) : null}
+            </View>
           </View>
           <AISection
             title="學校活動"
             subtitle={`已載入 ${content.items.length} 場；篩選與日期排序僅適用已載入的活動。`}
           >
             {visible.length ? (
-              visible.map((row) => (
-                <AIRow
+              visible.map((row, index) => (
+                <ContentRow
                   key={`${row.source}:${row.id}`}
-                  tag={
+                  first={index === 0}
+                  kind="活動"
+                  labels={[
+                    campusEventPhaseLabel(campusEventPhase(row, now)),
                     row.source === 'school-club-events' && row.appRegistrationConfigured
                       ? registrations.uid
                         ? eventRegistrationLabel(
                             registrations.states.find((state) => state.eventId === row.id),
                           )
                         : '登入確認報名'
-                      : undefined
-                  }
+                      : undefined,
+                  ]}
                   title={row.title}
-                  subtitle={[dateLabel(row.startsAt), row.location].filter(Boolean).join(' · ')}
+                  subtitle={[dateLabel(row.startsAt), row.location, row.organizer]
+                    .filter(Boolean)
+                    .join(' · ')}
+                  preview={row.description}
                   onPress={() => {
                     if (content.current())
                       safeNavigate(navigation, '活動詳情', { id: row.id, source: row.source });
@@ -585,7 +898,13 @@ export function CampusEventsScreen({ navigation }: Props) {
               <AICard
                 title={content.items.length ? '已載入的活動中沒有符合項目' : '目前沒有活動資訊'}
               >
-                {null}
+                <Text style={{ color: aiTokens.muted, lineHeight: 22 }}>
+                  {content.cursor
+                    ? '可以繼續載入活動，或調整搜尋與篩選。'
+                    : filtered
+                      ? '試著改用其他關鍵字，或清除篩選。'
+                      : '主辦單位發布後會顯示在這裡。'}
+                </Text>
               </AICard>
             )}
           </AISection>
@@ -751,7 +1070,10 @@ export function CampusEventDetailScreen({ navigation, route }: Props) {
                 <AIButton
                   label="匯出行事曆"
                   variant="ghost"
-                  disabled={busyScope === content.scope || !event.startsAt}
+                  disabled={
+                    busyScope === content.scope ||
+                    !Number.isFinite(Date.parse(event.startsAt ?? ''))
+                  }
                   onPress={() => void run('calendar')}
                 />
               </View>

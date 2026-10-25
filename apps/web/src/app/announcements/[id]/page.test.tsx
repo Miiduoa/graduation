@@ -306,7 +306,7 @@ it('reads announcement details from the selected campus, not a stale schoolId', 
     path: 'schools/nthu/announcements/notice-1',
   });
   expect(screen.getByRole('link', { name: '← 返回公告列表' }).getAttribute('href')).toBe(
-    '/announcements?schoolId=nthu',
+    '/announcements?schoolId=nthu&campus=nthu',
   );
 });
 
@@ -328,3 +328,70 @@ it('does not query any announcement when the campus is unselected or invalid', a
   expect(screen.getByText('先選擇一所學校')).toBeTruthy();
   expect(getDocFromServer).not.toHaveBeenCalled();
 });
+
+it('reads the complete announcement body when a separate summary is available', async () => {
+  vi.mocked(getDocFromServer).mockResolvedValue(
+    snapshot({
+      summary: '簡短的活動摘要。',
+      body: '完整公告第一段。\n\n報名時間、地點與需攜帶的文件都在第二段。',
+    }),
+  );
+  await mount();
+  const body = await screen.findByText(/完整公告第一段/);
+  expect(body.textContent).toContain('報名時間、地點與需攜帶的文件都在第二段。');
+  expect(body.textContent).toContain('\n\n');
+});
+
+it('returns to the same campus and list filters without accepting arbitrary return URLs', async () => {
+  await act(async () => {
+    render(
+      <Suspense fallback={null}>
+        <AnnouncementDetailPage
+          params={Promise.resolve({ id: 'notice-1' })}
+          searchParams={Promise.resolve({
+            schoolId: 'pu',
+            campus: 'pu',
+            school: 'PU',
+            q: '選課',
+            category: 'academic',
+            view: 'all',
+            pinned: '1',
+            page: '2',
+            returnUrl: '//unrelated.example/private',
+            token: 'private',
+          })}
+        />
+      </Suspense>,
+    );
+  });
+  await screen.findByText('實際公告詳情');
+  const target = new URL(
+    screen.getByRole('link', { name: '← 返回公告列表' }).getAttribute('href')!,
+    window.location.origin,
+  );
+  expect(target.pathname).toBe('/announcements');
+  expect(Object.fromEntries(target.searchParams)).toEqual({
+    schoolId: 'pu',
+    campus: 'pu',
+    school: 'PU',
+    q: '選課',
+    category: 'academic',
+    view: 'all',
+    pinned: '1',
+    page: '2',
+  });
+});
+
+it.each(['canonical', 'legacy'])(
+  'does not display an explicitly hidden %s announcement through its direct URL',
+  async (source) => {
+    const hidden = snapshot({ title: '已撤下的公告內容', visible: false });
+    vi.mocked(getDocFromServer).mockReset();
+    if (source === 'legacy') vi.mocked(getDocFromServer).mockResolvedValueOnce(snapshot(null));
+    vi.mocked(getDocFromServer).mockResolvedValueOnce(hidden);
+    await mount();
+    expect(await screen.findByRole('heading', { name: '找不到這則公告' })).toBeTruthy();
+    expect(screen.queryByText('已撤下的公告內容')).toBeNull();
+    expect(getDocFromServer).toHaveBeenCalledTimes(source === 'legacy' ? 2 : 1);
+  },
+);

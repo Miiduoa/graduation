@@ -1,0 +1,15 @@
+{
+  "checks": [
+    "production event list reads 25 real emulator records and prioritizes the ongoing event",
+    "time filters distinguish ongoing, ended, unknown end time and unannounced time",
+    "search can find a later page and browser Back restores both the query and loaded depth",
+    "detail return, reload and refresh retain the later-page search result",
+    "empty filters reset without losing loaded events and restore keyboard focus",
+    "a real browser download produces a calendar snapshot with canonical school/source and no implicit registration or alarm",
+    "missing end time is not invented and an unknown start cannot be exported",
+    "event list/detail fit 320/390px light views, including 200% list text and 44px filter targets",
+    "event list/detail fit 320/390px dark views, including 200% list text and 44px filter targets",
+    "campus selection supersedes a stale schoolId for all displayed activities and detail links"
+  ],
+  "pageErrors": []
+}

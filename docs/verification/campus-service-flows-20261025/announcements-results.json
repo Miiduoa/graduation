@@ -1,0 +1,16 @@
+{
+  "checks": [
+    "public announcement list reads emulator documents and limits initial display to 30 rows",
+    "opening an older announcement and returning restores the expanded list",
+    "search includes complete body text and the detail page shows the full announcement instead of its summary",
+    "browser Back, detail return link and page reload keep the search, category, pin and campus filters",
+    "empty search has a working reset that restores results and keyboard focus",
+    "official-only announcements remain reachable and the all-announcements view survives reload",
+    "a hidden announcement stays absent when its detail URL is opened directly",
+    "explicit campus selection reads only the selected school even with a stale schoolId",
+    "announcement list and full reading flow fit 320/390px in light mode, including 200% reading text",
+    "announcement list and full reading flow fit 320/390px in dark mode, including 200% reading text",
+    "guest lost-and-found entry keeps the school-account gate and exposes no item or posting controls"
+  ],
+  "pageErrors": []
+}

@@ -918,14 +918,14 @@ export function asFirebaseCourseGrades(rows: Grade[]): Grade[] {
 export const firebaseSource: DataSource = {
   // ===== 公告 =====
   async listAnnouncements(schoolId, options) {
-    const recent = await fetchCanonicalSchoolCollection<Announcement>({
+    const recent = (await fetchCanonicalSchoolCollection<Announcement>({
       schoolId,
       canonicalCollections: ['announcements'],
       schoolConstraints: [orderBy('publishedAt', 'desc')],
       fallbackCollection: 'announcements',
       fallbackConstraints: [bySchool(schoolId), orderBy('publishedAt', 'desc')],
       options: { ...options, limit: options?.limit ?? ANNOUNCEMENT_RECENT_LIMIT },
-    });
+    })).filter((item) => item.visible !== false);
     if (!schoolId) return recent;
     const present = new Set(
       recent
@@ -948,7 +948,7 @@ export const firebaseSource: DataSource = {
         }),
       ),
     );
-    return mergeAnnouncementsById([recent, ...extras]);
+    return mergeAnnouncementsById([recent, ...extras]).filter((item) => item.visible !== false);
   },
 
   async getAnnouncement(id, schoolId) {
@@ -958,14 +958,16 @@ export const firebaseSource: DataSource = {
         buildSchoolCollectionPath(schoolId, 'announcements', id),
       );
       if (canonical) {
+        if (canonical.visible === false) return null;
         if (canonical.schoolId && canonical.schoolId !== schoolId) return null;
         return { ...canonical, schoolId };
       }
       const legacy = await fetchDocument<Announcement>('announcements', id);
-      if (!legacy || legacy.schoolId !== schoolId) return null;
+      if (!legacy || legacy.visible === false || legacy.schoolId !== schoolId) return null;
       return { ...legacy, schoolId };
     }
-    return fetchDocument<Announcement>('announcements', id);
+    const legacy = await fetchDocument<Announcement>('announcements', id);
+    return legacy?.visible === false ? null : legacy;
   },
 
   // ===== 活動 =====

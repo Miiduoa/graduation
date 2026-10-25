@@ -82,3 +82,5 @@ tmp/
 .test-env/
 artifacts/campus-visual/
 artifacts/timetable-browser/
+artifacts/announcement-browser/
+artifacts/campus-services/

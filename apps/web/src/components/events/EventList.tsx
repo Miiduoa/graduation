@@ -2,6 +2,9 @@
 
 import Link from 'next/link';
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { campusEventPhase, campusEventPhaseLabel, compareCampusEventTime } from '@campus/shared/src/campusEventTime';
+import { replaceServiceListQuery } from '@/lib/serviceListNavigation';
+import { useServiceListQuery } from '@/lib/useServiceListQuery';
 import {
   loadCampusEventPage,
   type CampusEvent,
@@ -12,11 +15,18 @@ import {
   buildCampusEventDetailHref,
   campusEventKey,
   campusEventMatchesSearch,
+  campusEventMatchesView,
+  campusEventFilterQuery,
   campusEventSourceLabel,
+  CAMPUS_EVENT_VIEWS,
+  EVENT_RESTORE_BATCH_SIZE,
   formatCampusEventDateTime,
+  readCampusEventFilters,
   userFacingCampusEventError,
+  type CampusEventFilters,
 } from './eventPresentation';
 import styles from './events.module.css';
+import { useEventClock } from './useEventClock';
 
 type ReadyState = {
   status: 'ready';
@@ -26,6 +36,9 @@ type ReadyState = {
   skipped: CampusEventSkippedRow[];
   moreError: string | null;
   loadingMore: boolean;
+  refreshing: boolean;
+  refreshError: string | null;
+  pagesLoaded: number;
 };
 
 type LoadState =
@@ -49,17 +62,46 @@ function mergePage(existing: CampusEvent[], incoming: CampusEvent[]): CampusEven
   return merged;
 }
 
-export function EventList({ schoolId, schoolSearch }: { schoolId: string; schoolSearch: string }) {
+export function EventList({ schoolId, schoolSearch, initialFilters }: {
+  schoolId: string;
+  schoolSearch: string;
+  initialFilters?: CampusEventFilters;
+}) {
   const [state, setState] = useState<LoadState>({ status: 'loading', schoolId });
-  const [search, setSearch] = useState('');
+  const currentQuery = useServiceListQuery('/events', schoolId,
+    campusEventFilterQuery(initialFilters ?? { q: '', view: 'all' }));
+  const queryKey = `${schoolId}:${currentQuery.toString()}`;
+  const parsedFilters = readCampusEventFilters(currentQuery);
+  const [selection, setSelection] = useState({ queryKey, filters: parsedFilters });
+  const filters = selection.queryKey === queryKey ? selection.filters : parsedFilters;
+  if (selection.queryKey !== queryKey) setSelection({ queryKey, filters });
+  const initialPage = parsedFilters.page ?? 1;
+  const restoreKey = `${schoolId}:${initialPage}`;
+  const [restoreTarget, setRestoreTarget] = useState({
+    key: restoreKey, schoolId, page: Math.min(EVENT_RESTORE_BATCH_SIZE, initialPage), requestedPage: initialPage,
+  });
+  if (restoreTarget.key !== restoreKey) {
+    setRestoreTarget({ key: restoreKey, schoolId, page: Math.min(EVENT_RESTORE_BATCH_SIZE, initialPage), requestedPage: initialPage });
+  }
+  const now = useEventClock();
   const generation = useRef(0);
+  const activeMore = useRef<symbol | null>(null);
   const mounted = useRef(false);
   const searchInput = useRef<HTMLInputElement>(null);
   const view = listForSchool(state, schoolId);
 
+  function updateFilters(next: CampusEventFilters) {
+    const normalized = readCampusEventFilters(campusEventFilterQuery(next));
+    setSelection({ queryKey, filters: normalized });
+    replaceServiceListQuery('/events', schoolId, ['q', 'view'], campusEventFilterQuery(normalized));
+  }
+
   const loadInitial = useCallback(() => {
     const request = ++generation.current;
-    setState({ status: 'loading', schoolId });
+    activeMore.current = null;
+    setState((current) => current.status === 'ready' && current.schoolId === schoolId
+      ? { ...current, refreshing: true, refreshError: null, loadingMore: false }
+      : { status: 'loading', schoolId });
     return loadCampusEventPage(schoolId, null).then(
       (page) => {
         if (!mounted.current || request !== generation.current) return;
@@ -71,15 +113,17 @@ export function EventList({ schoolId, schoolSearch }: { schoolId: string; school
           skipped: page.skipped,
           moreError: null,
           loadingMore: false,
+          refreshing: false,
+          refreshError: null,
+          pagesLoaded: 1,
         });
       },
       (error) => {
         if (!mounted.current || request !== generation.current) return;
-        setState({
-          status: 'failed',
-          schoolId,
-          message: userFacingCampusEventError(error, '暫時無法讀取校園活動，請稍後再試。'),
-        });
+        const message = userFacingCampusEventError(error, '暫時無法讀取校園活動，請稍後再試。');
+        setState((current) => current.status === 'ready' && current.schoolId === schoolId
+          ? { ...current, refreshing: false, refreshError: message }
+          : { status: 'failed', schoolId, message });
       },
     );
   }, [schoolId]);
@@ -90,17 +134,24 @@ export function EventList({ schoolId, schoolSearch }: { schoolId: string; school
     return () => {
       mounted.current = false;
       generation.current += 1;
+      activeMore.current = null;
     };
   }, [loadInitial]);
 
-  async function loadMore() {
-    if (view.status !== 'ready' || !view.nextCursor || view.loadingMore) return;
+  const loadMore = useCallback(async () => {
+    if (view.status !== 'ready' || !view.nextCursor || view.loadingMore || view.refreshing || activeMore.current) return;
+    const token = Symbol('more');
+    activeMore.current = token;
     const request = generation.current;
     const cursor = view.nextCursor;
     setState({ ...view, loadingMore: true, moreError: null });
     try {
       const page = await loadCampusEventPage(schoolId, cursor);
       if (!mounted.current || request !== generation.current) return;
+      const pagesLoaded = view.pagesLoaded + 1;
+      const returnPage = page.nextCursor && restoreTarget.schoolId === schoolId
+        ? Math.max(pagesLoaded, restoreTarget.requestedPage) : pagesLoaded;
+      replaceServiceListQuery('/events', schoolId, ['page'], campusEventFilterQuery({ q: '', view: 'all', page: returnPage }));
       setState((current) => {
         if (current.status !== 'ready' || current.schoolId !== schoolId) return current;
         return {
@@ -110,6 +161,7 @@ export function EventList({ schoolId, schoolSearch }: { schoolId: string; school
           skipped: [...current.skipped, ...page.skipped],
           moreError: null,
           loadingMore: false,
+          pagesLoaded,
         };
       });
     } catch (error) {
@@ -124,7 +176,21 @@ export function EventList({ schoolId, schoolSearch }: { schoolId: string; school
           loadingMore: false,
         };
       });
+    } finally {
+      if (activeMore.current === token) activeMore.current = null;
     }
+  }, [view, schoolId, restoreTarget]);
+
+  useEffect(() => {
+    if (view.status === 'ready' && restoreTarget.schoolId === schoolId &&
+      view.pagesLoaded < restoreTarget.page && !view.moreError && !view.refreshing) {
+      void loadMore();
+    }
+  }, [view, restoreTarget, schoolId, loadMore]);
+
+  function refreshList() {
+    if (view.status === 'ready') setRestoreTarget({ key: restoreKey, schoolId, page: view.pagesLoaded, requestedPage: view.pagesLoaded });
+    void loadInitial();
   }
 
   if (view.status === 'loading') {
@@ -147,12 +213,15 @@ export function EventList({ schoolId, schoolSearch }: { schoolId: string; school
     );
   }
 
-  const filtered = view.items.filter((event) => campusEventMatchesSearch(event, search));
-  const searching = search.trim().length > 0;
+  const filtered = view.items
+    .filter((event) => campusEventMatchesSearch(event, filters.q) && campusEventMatchesView(event, filters.view, now))
+    .sort((a, b) => compareCampusEventTime(a, b, now));
+  const searching = filters.q.trim().length > 0;
+  const filtering = searching || filters.view !== 'all';
 
   return (
     <div className={styles.page}>
-      {view.items.length > 0 ? (
+      <section className={styles.browse} aria-label="尋找校園活動">
         <div className={styles.toolbar}>
           <label className={styles.search}>
             在已載入的活動中搜尋
@@ -160,8 +229,9 @@ export function EventList({ schoolId, schoolSearch }: { schoolId: string; school
               ref={searchInput}
               type="search"
               placeholder="標題、地點、主辦或來源"
-              value={search}
-              onChange={(event) => setSearch(event.target.value)}
+              maxLength={200}
+              value={filters.q}
+              onChange={(event) => updateFilters({ ...filters, q: event.target.value })}
             />
           </label>
           {searching ? (
@@ -169,15 +239,34 @@ export function EventList({ schoolId, schoolSearch }: { schoolId: string; school
               type="button"
               className="btn"
               onClick={() => {
-                setSearch('');
+                updateFilters({ ...filters, q: '' });
                 searchInput.current?.focus();
               }}
             >
               清除搜尋
             </button>
           ) : null}
+          <button type="button" className="btn" disabled={view.refreshing}
+            onClick={refreshList}>
+            {view.refreshing ? '更新中…' : '更新活動'}
+          </button>
         </div>
-      ) : null}
+        <div className={styles.filters} role="group" aria-label="活動時間">
+          {CAMPUS_EVENT_VIEWS.map((option) => (
+            <button key={option.value} type="button" aria-pressed={filters.view === option.value}
+              onClick={() => updateFilters({ ...filters, view: option.value })}>
+              {option.label}
+              <span aria-hidden="true">{view.items.filter((event) => campusEventMatchesView(event, option.value, now)).length}</span>
+            </button>
+          ))}
+        </div>
+        <p className={styles.resultCount} role="status" aria-live="polite">
+          已載入 {view.items.length} 場，顯示 {filtered.length} 場。
+          {view.nextCursor ? '可繼續載入更多活動。' : ''}
+        </p>
+      </section>
+
+      {view.refreshError ? <p className={styles.notice} role="alert">{view.refreshError} 目前列表已保留，可再次更新。</p> : null}
 
       {view.skipped.length > 0 ? (
         <p className={styles.incomplete} role="status">
@@ -189,7 +278,7 @@ export function EventList({ schoolId, schoolSearch }: { schoolId: string; school
         <section className={styles.status}>
           <h2>目前沒有可顯示的校園活動</h2>
           <p>這所學校目前沒有讀到可公開顯示的活動資料。</p>
-          <button type="button" className="btn" onClick={() => void loadInitial()}>
+          <button type="button" className="btn" disabled={view.refreshing} onClick={refreshList}>
             重新讀取
           </button>
         </section>
@@ -201,12 +290,26 @@ export function EventList({ schoolId, schoolSearch }: { schoolId: string; school
               ? '搜尋範圍為已載入的活動，可保留關鍵字，繼續載入更多。'
               : '目前已載入全部活動，請試試其他關鍵字或清除搜尋。'}
           </p>
+          {filtering ? <button type="button" className="btn" onClick={() => {
+            updateFilters({ q: '', view: 'all' });
+            searchInput.current?.focus();
+          }}>清除全部篩選</button> : null}
         </section>
       ) : (
         <div className={styles.list} aria-label="校園活動列表">
           {filtered.map((event) => (
             <article key={campusEventKey(event)} className={styles.item}>
+              <div className={styles.dateTile} aria-hidden="true">
+                {Number.isFinite(Date.parse(event.startsAt)) ? <>
+                  <span>{new Date(event.startsAt).toLocaleDateString('zh-TW', { timeZone: 'Asia/Taipei', month: 'short' })}</span>
+                  <strong>{new Date(event.startsAt).toLocaleDateString('zh-TW', { timeZone: 'Asia/Taipei', day: 'numeric' }).replace('日', '')}</strong>
+                </> : <span>待公告</span>}
+              </div>
+              <div className={styles.itemContent}>
               <div className={styles.meta}>
+                <span className={styles.phase} data-phase={campusEventPhase(event, now)}>
+                  {campusEventPhaseLabel(campusEventPhase(event, now))}
+                </span>
                 <span>{campusEventSourceLabel(event.source)}</span>
                 <time dateTime={event.startsAt || undefined}>
                   {formatCampusEventDateTime(event.startsAt)}
@@ -214,7 +317,7 @@ export function EventList({ schoolId, schoolSearch }: { schoolId: string; school
                 {event.location ? <span>{event.location}</span> : null}
               </div>
               <h2>
-                <Link href={buildCampusEventDetailHref(event.id, event.source, schoolSearch)}>
+                <Link href={buildCampusEventDetailHref(event.id, event.source, schoolSearch, { ...filters, page: view.pagesLoaded })}>
                   {event.title}
                 </Link>
               </h2>
@@ -225,6 +328,7 @@ export function EventList({ schoolId, schoolSearch }: { schoolId: string; school
                     : event.description}
                 </p>
               ) : null}
+              </div>
             </article>
           ))}
         </div>
@@ -232,6 +336,16 @@ export function EventList({ schoolId, schoolSearch }: { schoolId: string; school
 
       {view.nextCursor ? (
         <div className={styles.more}>
+          {restoreTarget.schoolId === schoolId && view.pagesLoaded >= restoreTarget.page &&
+            view.pagesLoaded < restoreTarget.requestedPage ? (
+              <div className={styles.restore}>
+                <p>已還原 {view.pagesLoaded} 頁，先前共展開 {restoreTarget.requestedPage} 頁。</p>
+                <button type="button" className="btn" disabled={view.loadingMore || view.refreshing}
+                  onClick={() => setRestoreTarget({ ...restoreTarget, page: Math.min(restoreTarget.requestedPage, view.pagesLoaded + EVENT_RESTORE_BATCH_SIZE) })}>
+                  繼續還原先前列表
+                </button>
+              </div>
+            ) : null}
           {view.moreError ? (
             <p className={styles.notice} role="alert">
               {view.moreError}
@@ -240,7 +354,7 @@ export function EventList({ schoolId, schoolSearch }: { schoolId: string; school
           <button
             type="button"
             className="btn"
-            disabled={view.loadingMore}
+            disabled={view.loadingMore || view.refreshing}
             onClick={() => void loadMore()}
           >
             {view.loadingMore ? '載入更多中…' : '載入更多'}

@@ -160,7 +160,7 @@ function normalizeAnnouncement(
   return {
     id: document.id,
     title: data.title,
-    body: summary,
+    body: typeof data.body === 'string' && data.body.trim() ? data.body : summary,
     summary,
     originalUrl: originalUrl(data.originalUrl),
     sourceId: typeof data.sourceId === 'string' ? data.sourceId : undefined,
@@ -188,5 +188,6 @@ export async function loadAnnouncement(schoolId: string, id: string): Promise<An
     snapshot = await getDocFromServer(doc(db, 'announcements', id));
     if (!snapshot.exists() || snapshot.data().schoolId !== schoolId) return null;
   }
+  if (snapshot.data().visible === false) return null;
   return normalizeAnnouncement({ id: snapshot.id, data: () => snapshot.data()! }, schoolId);
 }

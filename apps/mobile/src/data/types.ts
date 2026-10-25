@@ -16,6 +16,9 @@ export type Announcement = {
   sourceId?: string;
   origin?: string;
   office?: string;
+  visible?: boolean;
+  studentFeed?: boolean;
+  audience?: string;
 };
 
 export type AnnouncementCategory = 'general' | 'academic' | 'event' | 'emergency' | 'system';

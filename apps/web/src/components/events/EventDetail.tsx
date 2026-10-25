@@ -3,6 +3,9 @@
 import Link from 'next/link';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { loadCampusEvent, type CampusEvent, type CampusEventSource } from '@/lib/campusEvents';
+import { buildCampusEventCalendar, canExportCampusEvent } from '@/lib/campusEventCalendar';
+import { campusEventPhase, campusEventPhaseLabel } from '@campus/shared/src/campusEventTime';
+import { useEventClock } from './useEventClock';
 import { EventRegistrationPanel } from './EventRegistrationPanel';
 import {
   buildCampusEventDetailHref,
@@ -11,6 +14,7 @@ import {
   formatCampusEventDateTime,
   isCampusEventSource,
   userFacingCampusEventError,
+  type CampusEventFilters,
 } from './eventPresentation';
 import styles from './events.module.css';
 
@@ -46,11 +50,13 @@ export function EventDetail({
   schoolSearch,
   eventId,
   sourceParam,
+  listFilters,
 }: {
   schoolId: string;
   schoolSearch: string;
   eventId: string;
   sourceParam: string | undefined;
+  listFilters?: CampusEventFilters;
 }) {
   const source = isCampusEventSource(sourceParam) ? sourceParam : null;
   const [state, setState] = useState<LoadState>(() =>
@@ -58,22 +64,24 @@ export function EventDetail({
       ? { status: 'loading', schoolId, id: eventId, source }
       : { status: 'invalid-source', schoolId, id: eventId },
   );
-  const [notice, setNotice] = useState('');
+  const noticeScope = JSON.stringify([schoolId, eventId, source]);
+  const [noticeState, setNoticeState] = useState({ scope: noticeScope, message: '' });
+  const notice = noticeState.scope === noticeScope ? noticeState.message : '';
+  const setNotice = (message: string) => setNoticeState({ scope: noticeScope, message });
+  const now = useEventClock();
   const generation = useRef(0);
   const mounted = useRef(false);
   const view = detailForRequest(state, schoolId, eventId, source);
-  const listHref = buildCampusEventListHref(schoolSearch);
+  const listHref = buildCampusEventListHref(schoolSearch, listFilters);
   const returnPath = source
-    ? buildCampusEventDetailHref(eventId, source, schoolSearch)
+    ? buildCampusEventDetailHref(eventId, source, schoolSearch, listFilters)
     : listHref;
 
   const load = useCallback(() => {
     if (!source) {
-      setState({ status: 'invalid-source', schoolId, id: eventId });
       return Promise.resolve();
     }
     const request = ++generation.current;
-    setState({ status: 'loading', schoolId, id: eventId, source });
     return loadCampusEvent(schoolId, eventId, source).then(
       (event) => {
         if (!mounted.current || request !== generation.current) return;
@@ -91,6 +99,11 @@ export function EventDetail({
       },
     );
   }, [schoolId, eventId, source]);
+
+  function reload() {
+    if (source) setState({ status: 'loading', schoolId, id: eventId, source });
+    void load();
+  }
 
   useEffect(() => {
     mounted.current = true;
@@ -119,6 +132,33 @@ export function EventDetail({
     }
   }
 
+  function downloadCalendar() {
+    if (view.status !== 'ready' || !view.event || !source) return;
+    setNotice('');
+    let url: string | undefined;
+    const anchor = document.createElement('a');
+    try {
+      const detailUrl = new URL(buildCampusEventDetailHref(eventId, source, schoolSearch), window.location.origin);
+      const calendar = buildCampusEventCalendar(view.event, detailUrl.href);
+      url = URL.createObjectURL(new Blob([calendar.content], { type: 'text/calendar;charset=utf-8' }));
+      anchor.href = url;
+      anchor.download = calendar.filename;
+      anchor.hidden = true;
+      document.body.append(anchor);
+      anchor.click();
+      setNotice(calendar.hasEndTime
+        ? '行事曆檔案已備妥，開啟下載的檔案即可加入；活動報名請另行完成。'
+        : '行事曆檔案已備妥。活動未提供結束時間，加入行事曆後請確認活動長度；報名請另行完成。');
+    } catch {
+      setNotice('暫時無法下載行事曆，請稍後再試。');
+    } finally {
+      anchor.remove();
+      // Give the browser time to start the user-requested download before releasing the blob.
+      const downloadUrl = url;
+      if (downloadUrl) window.setTimeout(() => URL.revokeObjectURL(downloadUrl), 1_000);
+    }
+  }
+
   if (view.status === 'invalid-source') {
     return (
       <section className={styles.status} role="alert">
@@ -144,7 +184,7 @@ export function EventDetail({
       <section className={styles.status} role="alert">
         <h2>無法讀取這場活動</h2>
         <p>{view.message}</p>
-        <button type="button" className="btn" onClick={() => void load()}>
+        <button type="button" className="btn" onClick={reload}>
           重新讀取
         </button>
         <Link className="btn" href={listHref}>
@@ -170,6 +210,9 @@ export function EventDetail({
   return (
     <article className={styles.detail}>
       <div className={styles.meta}>
+        <span className={styles.phase} data-phase={campusEventPhase(event, now)}>
+          {campusEventPhaseLabel(campusEventPhase(event, now))}
+        </span>
         <span>{campusEventSourceLabel(event.source)}</span>
         <time dateTime={event.startsAt || undefined}>
           {formatCampusEventDateTime(event.startsAt)}
@@ -189,10 +232,19 @@ export function EventDetail({
         <button type="button" className="btn" onClick={() => void copyLink()}>
           複製連結
         </button>
-        <button type="button" className="btn" onClick={() => void load()}>
+        <button type="button" className="btn" disabled={!canExportCampusEvent(event)}
+          onClick={downloadCalendar} aria-describedby="event-calendar-note">
+          加入行事曆
+        </button>
+        <button type="button" className="btn" onClick={reload}>
           重新讀取
         </button>
       </div>
+      <p id="event-calendar-note" className={styles.notice}>
+        {canExportCampusEvent(event)
+          ? '下載活動行事曆檔案後，可加入你慣用的行事曆。時間異動請回到此頁確認。'
+          : '活動時間待公告，提供開始時間後即可加入行事曆。'}
+      </p>
       {notice ? (
         <p className={styles.notice} role="status">
           {notice}
