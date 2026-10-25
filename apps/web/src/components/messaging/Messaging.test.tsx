@@ -11,6 +11,7 @@ import {
   sendPrivateMessage,
   newPrivateMessageId,
   markConversationRead,
+  togglePrivateMessageReaction,
   markAccountNotificationRead,
   type PrivateConversation,
   type ConversationContents,
@@ -36,6 +37,7 @@ vi.mock('@/lib/privateMessages', async (original) => {
     sendPrivateMessage: vi.fn(),
     newPrivateMessageId: vi.fn(),
     markConversationRead: vi.fn(),
+    togglePrivateMessageReaction: vi.fn(),
     markAccountNotificationRead: vi.fn(),
   };
 });
@@ -117,6 +119,7 @@ function Chat({ id = 'opaque_conversation_id_with_underscores' }: { id?: string 
   );
 }
 beforeEach(() => {
+  sessionStorage.clear();
   vi.clearAllMocks();
   account.user = { uid: 'alice' };
   account.loading = false;
@@ -139,6 +142,7 @@ beforeEach(() => {
   vi.mocked(newPrivateMessageId).mockReturnValue('request-id');
   vi.mocked(sendPrivateMessage).mockResolvedValue();
   vi.mocked(markConversationRead).mockResolvedValue();
+  vi.mocked(togglePrivateMessageReaction).mockResolvedValue();
   vi.mocked(markAccountNotificationRead).mockResolvedValue();
 });
 
@@ -299,6 +303,43 @@ it('an old pending send cannot clear the new account draft or produce its feedba
   expect((screen.getByLabelText('訊息內容') as HTMLTextAreaElement).value).toBe('新帳號的草稿');
   expect(screen.queryByText('尚未確認送出，內容已保留。請重新連線後再試。')).toBeNull();
 });
+it('never persists a previous account conversation draft under the next account key', async () => {
+  const previousId = 'draft-isolation-previous';
+  const nextId = 'draft-isolation-next';
+  const previousKey = `campus-one:dm-draft:alice:pu:${previousId}`;
+  const nextKey = `campus-one:dm-draft:new-user:pu:${nextId}`;
+  sessionStorage.removeItem(previousKey);
+  sessionStorage.removeItem(nextKey);
+  const view = render(
+    <PrivateConversationView session={{ uid: 'alice', schoolId: 'pu' }} conversationId={previousId} />,
+  );
+  await screen.findByText('伺服器的訊息');
+  fireEvent.change(screen.getByLabelText('訊息內容'), {
+    target: { value: '只有 alice 能看到的草稿' },
+  });
+  await waitFor(() => expect(sessionStorage.getItem(previousKey)).toBe('只有 alice 能看到的草稿'));
+
+  const writes = vi.spyOn(Storage.prototype, 'setItem');
+  try {
+    account.user = { uid: 'new-user' };
+    view.rerender(
+      <PrivateConversationView session={{ uid: 'new-user', schoolId: 'pu' }} conversationId={nextId} />,
+    );
+    await waitFor(() =>
+      expect((screen.getByLabelText('訊息內容') as HTMLTextAreaElement).value).toBe(''),
+    );
+    expect(writes.mock.calls.some(([key, value]) =>
+      key === nextKey && value === '只有 alice 能看到的草稿',
+    )).toBe(false);
+    expect(sessionStorage.getItem(nextKey)).toBeNull();
+    expect(sessionStorage.getItem(previousKey)).toBe('只有 alice 能看到的草稿');
+  } finally {
+    writes.mockRestore();
+    sessionStorage.removeItem(previousKey);
+    sessionStorage.removeItem(nextKey);
+  }
+});
+
 it('read-marker errors remain visible without clearing unread content optimistically', async () => {
   vi.mocked(markConversationRead).mockRejectedValueOnce(new Error('denied'));
   render(<Chat />);
@@ -333,4 +374,92 @@ it('logout removes notifications and old subscription errors cannot restore them
   expect(screen.queryByText('成績已公布')).toBeNull();
   act(() => old(notifications()));
   expect(screen.queryByText('成績已公布')).toBeNull();
+});
+
+it('separates unread and read conversations without treating own messages as unread', async () => {
+  vi.mocked(watchPrivateConversations).mockImplementation((_session, receive) => {
+    receive([
+      conversation({ id: 'unread', peerName: '未讀同學' }),
+      conversation({ id: 'read', peerName: '已讀同學', lastSenderId: 'alice' }),
+    ]);
+    return vi.fn();
+  });
+  render(<DmsListPage />);
+  await screen.findByText('未讀同學');
+  fireEvent.click(screen.getByRole('button', { name: /未讀 1/ }));
+  expect(screen.getByText('未讀同學')).toBeTruthy();
+  expect(screen.queryByText('已讀同學')).toBeNull();
+  fireEvent.click(screen.getByRole('button', { name: /全部 2/ }));
+  expect(screen.getByText('已讀同學')).toBeTruthy();
+});
+
+it('offers a recoverable unread empty state without erasing conversations', async () => {
+  vi.mocked(watchPrivateConversations).mockImplementation((_session, receive) => {
+    receive([conversation({ lastSenderId: 'alice' })]);
+    return vi.fn();
+  });
+  render(<DmsListPage />);
+  await screen.findByText('真實目錄姓名');
+  fireEvent.click(screen.getByRole('button', { name: /未讀 0/ }));
+  expect(screen.getByText('所有對話都已讀')).toBeTruthy();
+  fireEvent.click(screen.getByRole('button', { name: '查看全部對話' }));
+  expect(screen.getByText('真實目錄姓名')).toBeTruthy();
+});
+
+it('filters only the loaded thread messages and can restore them', async () => {
+  render(<Chat />);
+  await screen.findByText('伺服器的訊息');
+  const field = screen.getByRole('searchbox', { name: '搜尋此對話' });
+  fireEvent.change(field, { target: { value: '不在對話內' } });
+  expect(screen.queryByText('伺服器的訊息')).toBeNull();
+  expect(screen.getByText('找不到符合的訊息，試著調整關鍵字。')).toBeTruthy();
+  fireEvent.change(field, { target: { value: '伺服器' } });
+  expect(screen.getByText('伺服器的訊息')).toBeTruthy();
+});
+
+it('recovers an unsent message only for the same browser tab and conversation', async () => {
+  const view = render(<Chat id="draft-restoration" />);
+  await screen.findByText('伺服器的訊息');
+  fireEvent.change(screen.getByLabelText('訊息內容'), { target: { value: '待傳送的訊息' } });
+  await waitFor(() =>
+    expect(sessionStorage.getItem('campus-one:dm-draft:alice:pu:draft-restoration')).toBe('待傳送的訊息'),
+  );
+  view.unmount();
+  render(<Chat id="draft-restoration" />);
+  await screen.findByText('伺服器的訊息');
+  expect((screen.getByLabelText('訊息內容') as HTMLTextAreaElement).value).toBe('待傳送的訊息');
+});
+
+it('supports Cmd+Enter to send while preserving the confirmed-send guard', async () => {
+  render(<Chat />);
+  await screen.findByText('伺服器的訊息');
+  const field = screen.getByLabelText('訊息內容');
+  fireEvent.change(field, { target: { value: '快捷傳送' } });
+  fireEvent.keyDown(field, { key: 'Enter', metaKey: true });
+  await waitFor(() => expect(sendPrivateMessage).toHaveBeenCalledTimes(1));
+  expect(vi.mocked(sendPrivateMessage).mock.calls[0][3]).toBe('快捷傳送');
+});
+
+it('sends reactions to the real conversation with the scoped account and leaves server state authoritative', async () => {
+  render(<Chat />);
+  await screen.findByText('伺服器的訊息');
+  fireEvent.click(screen.getByRole('button', { name: '讚，目前 0 人回應' }));
+  await waitFor(() => expect(togglePrivateMessageReaction).toHaveBeenCalledTimes(1));
+  expect(togglePrivateMessageReaction).toHaveBeenCalledWith(
+    { uid: 'alice', schoolId: 'pu' },
+    'opaque_conversation_id_with_underscores',
+    'm-1',
+    '👍',
+  );
+  // The server listener, not a local toggle, is the single source of truth.
+  expect(screen.getByRole('button', { name: '讚，目前 0 人回應' }).getAttribute('aria-pressed')).toBe('false');
+});
+
+it('a failed reaction reports the error instead of claiming it succeeded', async () => {
+  vi.mocked(togglePrivateMessageReaction).mockRejectedValueOnce(new Error('network'));
+  render(<Chat />);
+  await screen.findByText('伺服器的訊息');
+  fireEvent.click(screen.getByRole('button', { name: '愛心，目前 0 人回應' }));
+  await screen.findByText('無法更新表情回應，請確認網路後重試。');
+  expect(vi.mocked(togglePrivateMessageReaction)).toHaveBeenCalledTimes(1);
 });

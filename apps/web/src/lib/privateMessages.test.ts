@@ -7,6 +7,7 @@ import {
   watchAccountNotifications,
   sendPrivateMessage,
   markConversationRead,
+  togglePrivateMessageReaction,
   markAccountNotificationRead,
   parseNotification,
   notificationDestination,
@@ -431,4 +432,43 @@ it('notification destinations only use supported local tasks and never arbitrary
     href: '/classroom/course/cw_11111111-1111-4111-8111-111111111111#material-cwm_33333333-3333-4333-8333-333333333333',
     label: '開啟這份教材',
   });
+});
+
+it('toggles a permitted message reaction with the authenticated school session', async () => {
+  const original = tx.get.getMockImplementation()!;
+  tx.get.mockImplementation(async (reference: { path: string }) =>
+    reference.path === 'conversations/conversation-1/messages/reaction-1'
+      ? document('reaction-1', message({ reactions: { '👍': ['bob'] } }))
+      : original(reference),
+  );
+  await togglePrivateMessageReaction(session, 'conversation-1', 'reaction-1', '👍');
+  expect(tx.update).toHaveBeenCalledWith(
+    expect.objectContaining({ path: 'conversations/conversation-1/messages/reaction-1' }),
+    {
+      reactions: { '👍': ['bob', 'alice'] },
+      updatedAt: 'SERVER_TIMESTAMP',
+    },
+  );
+});
+
+it('refuses reactions on messages outside the current school and on recalled messages', async () => {
+  const original = tx.get.getMockImplementation()!;
+  tx.get.mockImplementation(async (reference: { path: string }) => {
+    if (reference.path === 'conversations/conversation-1')
+      return document(reference.path, conversation({ schoolId: 'other-school' }));
+    if (reference.path.endsWith('/reaction-1'))
+      return document('reaction-1', message());
+    return original(reference);
+  });
+  await expect(togglePrivateMessageReaction(session, 'conversation-1', 'reaction-1', '❤️'))
+    .rejects.toThrow();
+  expect(tx.update).not.toHaveBeenCalled();
+  tx.get.mockImplementation(async (reference: { path: string }) =>
+    reference.path.endsWith('/reaction-1')
+      ? document('reaction-1', message({ recalledAt: '2026-10-08T01:03:00Z' }))
+      : original(reference),
+  );
+  await expect(togglePrivateMessageReaction(session, 'conversation-1', 'reaction-1', '❤️'))
+    .rejects.toThrow();
+  expect(tx.update).not.toHaveBeenCalled();
 });
