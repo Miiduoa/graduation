@@ -77,6 +77,6 @@ it('refuses stale writes from another browser tab instead of overwriting changes
   fireEvent.change(screen.getByRole('textbox', { name: '宿舍或學苑名稱' }), { target: { value: '本頁草稿' } });
   localStorage.setItem(dormStorageKey('guest', 'pu'), JSON.stringify({ version: 1, building: '另一頁的內容' }));
   fireEvent.click(screen.getByRole('button', { name: '儲存住宿備忘' }));
-  expect(screen.getByRole('alert').textContent).toContain('另一個分頁已修改紀錄');
+  expect(screen.getByRole('alert').textContent).toContain('有另一處修改了這份紀錄');
   expect(localStorage.getItem(dormStorageKey('guest', 'pu'))).toContain('另一頁的內容');
 });
