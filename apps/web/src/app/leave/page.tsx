@@ -78,7 +78,7 @@ export default function LeavePage() {
 function LeaveWorkspace({ uid, schoolId, schoolName }: {
   uid: string; schoolId: string; schoolName: string;
 }) {
-  const today = useMemo(taipeiToday, []);
+  const today = useMemo(() => taipeiToday(), []);
   const [startDate, setStartDate] = useState(today);
   const [endDate, setEndDate] = useState(today);
   const [period, setPeriod] = useState<LeavePeriod>('all');
