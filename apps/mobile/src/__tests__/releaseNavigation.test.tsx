@@ -1094,7 +1094,7 @@ test('Map has a dedicated dormitory workspace route', async () => {
   act(() => navigation.navigate('Dormitory'));
   expect(navigation.getCurrentRoute()?.name).toBe('Dormitory');
   expect(view.queryByText(/宿舍包裹查詢與線上報修尚未開放/)).toBeNull();
-  expect(await view.findByText('住宿工作區')).toBeTruthy();
+  expect(await view.findByText('住得安心，事情好處理')).toBeTruthy();
 });
 
 test('Map school information keeps real official housing and career services after retiring old routes', async () => {

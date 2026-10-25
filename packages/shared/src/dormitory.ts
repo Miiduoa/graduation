@@ -131,7 +131,7 @@ export function emptyDormWorkspace(): DormWorkspace {
 
 /** Reject impossible dates, including 2026-02-30 and month 13. */
 export function isValidDormDate(raw: string): boolean {
-  if (!/^(20\\d{2})-(\\d{2})-(\\d{2})$/.test(raw)) return false;
+  if (!/^(20\d{2})-(\d{2})-(\d{2})$/.test(raw)) return false;
   const [year, month, day] = raw.split('-').map(Number);
   const result = new Date(Date.UTC(year, month - 1, day));
   return result.getUTCFullYear() === year &&
