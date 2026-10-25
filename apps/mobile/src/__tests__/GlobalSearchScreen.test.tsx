@@ -308,3 +308,10 @@ test('search results and selected categories use the OLED theme with readable to
     expect(view.getByLabelText('搜尋分類：公告').props.accessibilityState.selected).toBe(true),
   );
 });
+
+test('spoken-style questions show direct service links even without an exact keyword hit', async () => {
+  const view = render(<GlobalSearchScreen navigation={navigation} />);
+  await search(view, '圖書館怎麼走');
+  fireEvent.press(view.getByLabelText('前往校園地圖'));
+  expect(safeNavigate).toHaveBeenCalledWith(navigation, 'MapV2');
+});

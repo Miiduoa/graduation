@@ -350,3 +350,23 @@ test('the empty-day card follows OLED mode without leaving light text on a cream
   });
   expect(view.getByText(TODAY_COPY.emptyDay)).toHaveStyle({ color: createDarkTheme().colors.text });
 });
+
+test('one-tap homework uses the real current inbox task instead of a guessed target', async () => {
+  const view = render(<StudentTodayScreen />);
+  await view.findAllByText('繳交期末報告');
+  fireEvent.press(view.getByLabelText('直接前往交作業'));
+  expect(mockNavigate).toHaveBeenCalledWith('學習', {
+    screen: 'HomeworkSubmit',
+    params: expect.objectContaining({ courseId: 'course-a', hwId: 'homework-a' }),
+  });
+});
+
+test('a natural-language location query opens the registered campus map without any write', async () => {
+  const view = render(<StudentTodayScreen />);
+  fireEvent.changeText(view.getByLabelText('說出或輸入想做的事'), '圖書館怎麼走');
+  fireEvent.press(view.getByLabelText('前往校園地圖'));
+  expect(mockNavigate).toHaveBeenCalledWith('校園', {
+    screen: 'MapV2',
+    params: undefined,
+  });
+});
