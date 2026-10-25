@@ -120,8 +120,9 @@
 
 .footer {
   padding: 18px 24px calc(18px + env(safe-area-inset-bottom, 0px));
-  background: var(--text);
-  color: #f3f4f0;
+  border-top: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text);
 }
 
 .footer nav {

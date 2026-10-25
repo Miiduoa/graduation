@@ -1,10 +1,10 @@
 # Campus One 體驗整合驗收｜2026-10-25
 
-本次整合既有功能分支，補齊 Web 與 App 的入口、操作流程與跨校資料隔離，並完成本機測試及 production build 的瀏覽器驗收。此紀錄不代表正式站、商店 App 或所有後端功能已發布。
+本次整合既有功能分支，補齊 Web 與 App 的入口、操作流程與跨校資料隔離，並完成本機測試及 production build 的瀏覽器驗收。主要整合 [PR #201](https://github.com/Miiduoa/graduation/pull/201) 已合併至 `main`，提交為 `d78d170d8ab16cf6cbac6bf037931f3b70a8ffd9`；後續登入入口補修的狀態與 CI 亦連於該 PR 驗證區。此紀錄不代表正式站、商店 App 或所有後端功能已發布。
 
 ## 來源與範圍
 
-初始整合基底：`main` 的 `6abe69be1520176e4714fe709b85360ad65e5a0c`。下列四個 PR 以 merge commit 保留原始歷史，再加入本次體驗修正。合併前另納入最新 `main` 的 `8e838cbbdf45a4ae007c6ebf3cff9173cf9d70c9`（#200 舊畫面清理），避免覆蓋同時完成的主分支工作。
+初始整合基底：`main` 的 `6abe69be1520176e4714fe709b85360ad65e5a0c`。下列四個 PR 以 merge commit 保留原始歷史，再加入本次體驗修正；GitHub 已將四個原始 PR 標記為合併。整合另保留主分支的 `8e838cbb`（#200 舊畫面清理）與 `3f5c9987`（#199 新登入入口），沒有覆蓋同時完成的工作。
 
 | PR | 原始 head | 整合內容 |
 | --- | --- | --- |
@@ -21,8 +21,27 @@
 - **課表、活動與提醒**：課表可用拖曳及鍵盤移動，支援取消、儲存、重載與今天空堂操作；未確認節次的學校不借用其他學校時刻。活動搜尋期間仍可載入下一頁；個人行程提醒保留排程、取消及恢復的一致性。
 - **失物、教材與學分**：失物招領補齊草稿與跨端恢復；教材查找涵蓋後續資料頁；學分試算依有效成績及學校規則計算，並呈現資料不足狀態。
 - **管理工作區**：區分平台管理、學校管理與服務人員權責。保留 CSV 公式防護、匯出範圍標記及分頁操作紀錄匯出；帳號、學校或角色改變時，舊匯出操作立即失效，暫存檔會清除。管理員降級後不能沿用舊選單匯出私密紀錄。
+- **新版登入入口**：登入入口與登入 transaction 保留目的頁的校園、分頁、設定分類、活動來源及合法內容定位；篩除巢狀跳轉與憑證參數，維持站內路徑限制。頁尾使用成對主題色，深色模式不再出現近白背景配近白文字。
 
 ## 驗證結果
+
+### 最新整合與登入補修
+
+| 範圍與版本 | 結果 |
+| --- | --- |
+| 主要 PR head `503646f7` 的完整 Web CI | 2,984 項通過、11 項略過；266 個檔案通過、4 個略過 |
+| 同一 head 的完整 App CI | 3,280 項通過、1 項略過；297 suites 通過、1 個略過 |
+| 同一 head 的建置與安全檢查 | Web standalone runtime、App 雙平台 JavaScript bundle、型別、Lint、Functions、安全與權限閘門全部通過；實際 CodeQL check 成功、0 annotations |
+| 同一 App 原始碼的 iOS 模擬器 | 原生建置成功，iPhone 15 模擬器上的首次開啟／登入入口及校園地圖兩條 smoke flows 通過 |
+| 與最新 main 合併後的樹 `407e03b9` | 完整 Web coverage 3,027 項通過、11 項略過；268 個檔案通過、4 個略過；production build 及 32 項瀏覽器檢查通過 |
+| 後續登入補修 | 兩個受影響 suites、88 項回歸測試通過；scoped lint、包含完整 TypeScript 的 production build 通過 |
+| 登入補修後的正式瀏覽器驗證 | 26 項視覺／登入操作與 8 項課表檢查，共 34 項通過；明暗頁尾連結含透明度的有效文字對比皆達 4.5:1 |
+
+主要遠端證據：[CI](https://github.com/Miiduoa/graduation/actions/runs/40160729129)、[瀏覽器](https://github.com/Miiduoa/graduation/actions/runs/40160729092)、[iOS smoke](https://github.com/Miiduoa/graduation/actions/runs/40160729050)、[CodeQL 實際檢查](https://github.com/Miiduoa/graduation/runs/121072189952)。最新主分支與後續登入補修均只改 Web、瀏覽器測試與文件；App／shared／Functions 原始碼及相依版本保持與上述原生驗證一致。
+
+登入回歸驗證涵蓋已登入狀態下的返回操作，以及 Google／學校登入 transaction 寫入契約；未使用真實身分提供者或校務帳號完成正式 OAuth 往返。不同版本、範圍的測試有重疊，不加總成單一測試數。
+
+### 前期整合紀錄
 
 下表是不同範圍、不同輪次的實際結果；部分測試重疊，**不加總成單一測試數**。Web 全量測試完成後另有最後一輪課表調整，已補跑相關 28 項測試、production build、Web typecheck 及完整瀏覽器檢查。
 
@@ -60,7 +79,7 @@ CodeQL 的分析工作成功執行後，另有 7 項安全掃描警示。對應�
 
 ## 畫面與可核對證據
 
-共保留五張 PNG，以及[視覺／操作結果](campus-experience-20261025/results.json)與[課表結果](campus-experience-20261025/timetable-results.json)。以下畫面皆為訪客與本機資料，沒有使用正式學生帳號。
+共保留七張 PNG，以及最新的[視覺／操作結果](campus-experience-20261025/results.json)與[課表結果](campus-experience-20261025/timetable-results.json)。以下畫面皆為訪客與本機資料，沒有使用正式學生帳號。
 
 桌面首頁：今天頁、主要導覽與服務入口。
 
@@ -75,6 +94,11 @@ CodeQL 的分析工作成功執行後，另有 7 項安全掃描警示。對應�
 <img src="campus-experience-20261025/settings-mobile.png" alt="本機訪客手機設定頁" width="280">
 
 其餘畫面：[手機 OLED 首頁](campus-experience-20261025/home-oled-mobile.png)、[手機服務搜尋](campus-experience-20261025/service-search-mobile.png)。
+
+新版登入頁：明暗主題使用一致的介面層級，頁尾資訊保持可讀。
+
+<img src="campus-experience-20261025/auth-account-mobile.png" alt="新版登入頁，淺色手機畫面" width="280">
+<img src="campus-experience-20261025/auth-account-oled-mobile.png" alt="新版登入頁，OLED 手機畫面與清楚的頁尾連結" width="280">
 
 ## 重跑入口與發布界線
 
