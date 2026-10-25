@@ -13,8 +13,8 @@ import { proxy } from '../proxy';
 import { LOGIN_COOKIE, sealCookie } from './nuni/server';
 import {
   ACCOUNT_ENTRY_PATH,
+  DELETION_STATUS_PATH,
   LEGACY_ENDPOINT_PATHS,
-  LEGACY_LIVE_HTML_PATHS,
   LEGACY_LOGIN_CALLBACK_PATHS,
   LEGACY_ORIGIN,
   legacyEnabled,
@@ -74,11 +74,9 @@ function redirectLocation(response: Response): string | null {
   return header ? new URL(header, 'https://nuni.tw').pathname : null;
 }
 
-function shouldForwardLiveHtml(path: string): boolean {
-  return path === '/auth/platform' || path === '/privacy/deletion-status';
-}
-
 function htmlRedirectDestination(path: string): string | null {
+  if (path === '/auth/platform') return ACCOUNT_ENTRY_PATH;
+  if (path === '/privacy/deletion-status') return DELETION_STATUS_PATH;
   if (path === '/auth/platform/ops' || path.startsWith('/auth/platform/ops/')) return '/admin/ops';
   if (
     path === '/auth/platform/school-review' ||
@@ -86,7 +84,7 @@ function htmlRedirectDestination(path: string): string | null {
   ) {
     return '/admin/school-review';
   }
-  if (LEGACY_LOGIN_CALLBACK_PATHS.includes(path) || shouldForwardLiveHtml(path)) return null;
+  if (LEGACY_LOGIN_CALLBACK_PATHS.includes(path)) return null;
   if (
     path === '/auth/find-school' ||
     path === '/auth/product-qa' ||
@@ -221,7 +219,7 @@ describe('pinned legacy HTML screens are not forwarded', () => {
     for (const route of pinnedHtmlPaths()) {
       const path = examplePath(route);
       const response = await responseFor(path);
-      if (LEGACY_LOGIN_CALLBACK_PATHS.includes(route) || shouldForwardLiveHtml(route) || shouldForwardLiveHtml(path)) {
+      if (LEGACY_LOGIN_CALLBACK_PATHS.includes(route)) {
         expectMatchedRewrite(response, path);
         expect(redirectLocation(response)).toBeNull();
         continue;
@@ -248,14 +246,24 @@ describe('pinned legacy HTML screens are not forwarded', () => {
     expect(redirectLocation(response)).toBe(ACCOUNT_ENTRY_PATH);
   });
 
-  it.each(['/auth/platform', '/privacy/deletion-status'])(
-    'keeps live old screen %s on the loopback app',
-    async (path) => {
-      const response = await responseFor(path);
-      expectMatchedRewrite(response, path);
-      expect(redirectLocation(response)).toBeNull();
-    },
-  );
+  it.each([
+    ['/auth/platform', ACCOUNT_ENTRY_PATH],
+    ['/privacy/deletion-status', DELETION_STATUS_PATH],
+  ])('permanently redirects old screen %s to %s', async (path, destination) => {
+    const response = await responseFor(path);
+    expect(getRewrittenUrl(response)).toBeNull();
+    expect(redirectLocation(response)).toBe(destination);
+    expect([301, 308]).toContain(response.status);
+  });
+
+  it('keeps login returnUrl when sending /auth/platform to the account entry', async () => {
+    const response = await responseFor('/auth/platform', '?returnUrl=%2Flife');
+    expect(getRewrittenUrl(response)).toBeNull();
+    const location = new URL(response.headers.get('location')!, 'https://nuni.tw');
+    expect(location.pathname).toBe(ACCOUNT_ENTRY_PATH);
+    expect(location.searchParams.get('returnUrl')).toBe('/life');
+    expect([301, 308]).toContain(response.status);
+  });
 
   it.each([
     ['/auth/platform/ops', '/admin/ops'],
@@ -320,12 +328,13 @@ describe('pinned legacy endpoints stay on the allowlist', () => {
     expect(redirectLocation(html)).toBeNull();
   });
 
-  it('lists live HTML, callbacks and endpoints in the fallback rewrite table', () => {
+  it('lists callbacks and endpoints in the fallback rewrite table', () => {
     const sources = new Set(legacyRewrites(true).fallback.map((rule) => rule.source));
     for (const path of LEGACY_LOGIN_CALLBACK_PATHS) expect(sources.has(path)).toBe(true);
-    for (const path of LEGACY_LIVE_HTML_PATHS) expect(sources.has(path)).toBe(true);
     for (const path of LEGACY_ENDPOINT_PATHS) expect(sources.has(path)).toBe(true);
     expect(sources.has('/auth/account')).toBe(false);
+    expect(sources.has('/auth/platform')).toBe(false);
+    expect(sources.has('/privacy/deletion-status')).toBe(false);
     expect(sources.has('/auth/find-school')).toBe(false);
     expect(sources.has('/privacy/:path*')).toBe(false);
     expect(sources.has('/auth/platform/class-workspace/:path*')).toBe(false);

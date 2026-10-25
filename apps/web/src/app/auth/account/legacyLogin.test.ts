@@ -73,6 +73,7 @@ it.each([
   ['/classroom', '/classroom'],
   ['/merchant', '/merchant'],
   ['/admin', '/admin'],
+  ['/account-deletion/status', '/account-deletion/status'],
   ['/auth/platform/class-workspace/join', '/auth/platform/class-workspace/join'],
   ['/admin/ops', '/admin/ops'],
   ['/admin/ops#people', '/admin/ops#people'],
