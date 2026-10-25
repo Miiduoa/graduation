@@ -133,7 +133,7 @@ it('does not invent completion metrics when unit or activity API reads are missi
       onUnitCreated={vi.fn()}
     />,
   );
-  await screen.findByText(/部分資料尚未取得/);
+  await screen.findByText(/部分內容尚未載入，暫時無法顯示完整進度/);
   expect(screen.queryByText('已繳交或作答')).toBeNull();
   expect(screen.getByRole('link', { name: /關聯式模型練習/ })).toBeTruthy();
   fireEvent.click(screen.getByRole('button', { name: '重試章節清單' }));
@@ -291,7 +291,7 @@ it('restarts path materials after an A→B→A cursor cycle', async () => {
   await screen.findByRole('link', { name: /中間頁課前閱讀/ });
   fireEvent.click(screen.getByRole('button', { name: '繼續載入較早教材' }));
   expect(await screen.findByRole('button', { name: '重新讀取教材' })).toBeTruthy();
-  expect(screen.getByText(/重複游標/)).toBeTruthy();
+  expect(screen.getByText(/教材暫時無法繼續載入/)).toBeTruthy();
   expect(cursors).toEqual([undefined, 'cursor-a', 'cursor-b']);
   fireEvent.click(screen.getByRole('button', { name: '重新讀取教材' }));
   expect(await screen.findByRole('link', { name: /更早的課前閱讀/ })).toBeTruthy();
@@ -354,7 +354,7 @@ it('does not claim quiz completion metrics when quizzes hit the legacy 100 cap',
     />,
   );
   await screen.findByRole('link', { name: /第一週課前閱讀/ });
-  expect(screen.getByText(/測驗已達目前 API 的 100 筆顯示上限/)).toBeTruthy();
+  expect(screen.getByText(/目前已載入 100 份測驗，清單與進度可能不完整/)).toBeTruthy();
   expect(screen.queryByText('已繳交或作答')).toBeNull();
 });
 

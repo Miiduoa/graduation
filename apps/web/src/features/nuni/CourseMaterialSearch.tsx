@@ -19,22 +19,33 @@ import {
 import { useClientNow } from '@/lib/useMaterialClientState';
 import { useClasses } from './CourseUI';
 import { useNuniSession } from './Session';
+import { classroomCourseHref } from './studyNavigation';
 import shared from './NuniApp.module.css';
 import styles from './CourseLearning.module.css';
 
 export function CourseMaterialSearch({
   compact = false,
   seed = null,
+  context = '',
 }: {
   compact?: boolean;
   seed?: MaterialSearchSeed | null;
+  context?: string;
 }) {
   const { session, pendingLogout } = useNuniSession();
   if (!session || pendingLogout) return null;
-  return <Search key={session.context} compact={compact} seed={seed} />;
+  return <Search key={session.context} compact={compact} seed={seed} context={context} />;
 }
 
-function Search({ compact, seed }: { compact: boolean; seed: MaterialSearchSeed | null }) {
+function Search({
+  compact,
+  seed,
+  context,
+}: {
+  compact: boolean;
+  seed: MaterialSearchSeed | null;
+  context: string;
+}) {
   const classes = useClasses();
   const courseApi = useRef(classes);
   const inputId = useId();
@@ -108,8 +119,7 @@ function Search({ compact, seed }: { compact: boolean; seed: MaterialSearchSeed 
     const current = catalog;
     if (!current || reading || continuing || restarting) return;
     const pending = current.courses.some(
-      (course) =>
-        !course.denied && !course.complete && !course.needsRestart && !!course.nextCursor,
+      (course) => !course.denied && !course.complete && !course.needsRestart && !!course.nextCursor,
     );
     if (!pending) return;
     const run = ++continueRequest.current;
@@ -181,17 +191,13 @@ function Search({ compact, seed }: { compact: boolean; seed: MaterialSearchSeed 
   const canContinuePages =
     !!catalog &&
     catalog.courses.some(
-      (course) =>
-        !course.denied && !course.complete && !course.needsRestart && !!course.nextCursor,
+      (course) => !course.denied && !course.complete && !course.needsRestart && !!course.nextCursor,
     );
   const hasMore = !!catalog && (catalog.truncated || !!catalog.partialError);
   const showContinue =
     !!catalog && !reading && !restarting && query.trim().length > 0 && canContinuePages;
   const showRestart =
-    !!query.trim() &&
-    !reading &&
-    !continuing &&
-    (needsRestart || (!!error && !catalog));
+    !!query.trim() && !reading && !continuing && (needsRestart || (!!error && !catalog));
 
   return (
     <section className={compact ? styles.homeSearch : shared.panel} aria-labelledby={inputId}>
@@ -224,18 +230,16 @@ function Search({ compact, seed }: { compact: boolean; seed: MaterialSearchSeed 
         </p>
       )}
       {(catalog?.skipped ?? 0) > 0 && catalog && (
-        <p className={styles.note}>
-          有 {catalog.skipped} 門課目前沒有權限，已略過，沒有拿來搜。
-        </p>
+        <p className={styles.note}>有 {catalog.skipped} 門課目前無法查看，搜尋結果不包含這些課程。</p>
       )}
       {needsRestart && catalog?.partialError && (
         <p role="alert" className={styles.note}>
-          {catalog.partialError} 已確認的教材仍可搜尋；請重新讀取教材，不要沿用失效分頁。
+          {catalog.partialError} 已載入的教材仍可搜尋；請重新讀取教材以更新清單。
         </p>
       )}
       {catalog?.partialError && !needsRestart && (
         <p role="alert" className={styles.note}>
-          {catalog.partialError} 已確認的教材仍可搜尋；請重試載入較早頁面。
+          {catalog.partialError} 已載入的教材仍可搜尋；請重試載入較早的教材。
         </p>
       )}
       {hasMore && catalog && !catalog.partialError && !needsRestart && (
@@ -258,7 +262,14 @@ function Search({ compact, seed }: { compact: boolean; seed: MaterialSearchSeed 
               <li key={`${item.workspaceId}-${item.id}`}>
                 <Link
                   className={styles.searchHit}
-                  href={courseMaterialHref(item.workspaceId, item.id)}
+                  href={
+                    context
+                      ? classroomCourseHref(item.workspaceId, context, {
+                          kind: 'material',
+                          id: item.id,
+                        })
+                      : courseMaterialHref(item.workspaceId, item.id)
+                  }
                 >
                   <strong>{item.title}</strong>
                   <span>

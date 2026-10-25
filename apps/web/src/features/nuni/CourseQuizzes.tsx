@@ -39,6 +39,8 @@ import { useNuniSession } from './Session';
 import { gradeReadOwner, markPublishedGradeReadByLanding } from '@/lib/lmsStudentGrades';
 import styles from './NuniApp.module.css';
 import quizStyles from './CourseQuizzes.module.css';
+import workspaceStyles from './CourseWorkspace.module.css';
+import { matchesQuizSearch, prioritizeCourseQuizzes } from './courseAssignmentDiscovery';
 
 function dateLabel(value: string) {
   return formatTaipeiDateTime(value, { seconds: false });
@@ -60,7 +62,15 @@ function feedbackMatchesSubmitted(
   return (receipt.teacherFeedback ?? '').trim() === submitted.trim();
 }
 
-export function CourseQuizzes({ workspace, units, onChanged }: { workspace: NuniWorkspace; units?: NuniUnit[] | null; onChanged?: () => void }) {
+export function CourseQuizzes({
+  workspace,
+  units,
+  onChanged,
+}: {
+  workspace: NuniWorkspace;
+  units?: NuniUnit[] | null;
+  onChanged?: () => void;
+}) {
   const { session } = useNuniSession();
   if (!session) return <p role="status">請先登入，再查看課程測驗。</p>;
   return (
@@ -74,7 +84,17 @@ export function CourseQuizzes({ workspace, units, onChanged }: { workspace: Nuni
   );
 }
 
-function QuizList({ workspace, accountId, units, onChanged }: { workspace: NuniWorkspace; accountId: string; units?: NuniUnit[] | null; onChanged?: () => void }) {
+function QuizList({
+  workspace,
+  accountId,
+  units,
+  onChanged,
+}: {
+  workspace: NuniWorkspace;
+  accountId: string;
+  units?: NuniUnit[] | null;
+  onChanged?: () => void;
+}) {
   const classes = useClasses();
   const readClasses = useRef(classes);
   const { refresh } = useNuniSession();
@@ -85,6 +105,8 @@ function QuizList({ workspace, accountId, units, onChanged }: { workspace: NuniW
   const [epoch, setEpoch] = useState(0);
   const [now, setNow] = useState(() => Date.now());
   const [filter, setFilter] = useState<QuizFilter>('all');
+  const [query, setQuery] = useState('');
+  const searchRef = useRef<HTMLInputElement>(null);
   const hash = useLocationHash();
   const revealed = useRef('');
   const mounted = useRef(true);
@@ -103,24 +125,36 @@ function QuizList({ workspace, accountId, units, onChanged }: { workspace: NuniW
         ['answered', '已作答'],
         ['feedback', '老師回饋'],
       ];
-  const shown = items?.filter((item) => matchesQuizFilter(item, workspace, filter));
+  const ordered = items ? prioritizeCourseQuizzes(items, workspace) : null;
+  const visible = (item: NuniQuiz) =>
+    matchesQuizFilter(item, workspace, filter) && matchesQuizSearch(item, query);
+  const shown = ordered?.filter(visible);
   useEffect(() => {
     const revealLinkedQuiz = () => {
-      if (window.location.hash.startsWith('#quiz-')) setFilter('all');
+      if (window.location.hash.startsWith('#quiz-')) {
+        setFilter('all');
+        setQuery('');
+      }
     };
     window.addEventListener('hashchange', revealLinkedQuiz);
-    return () => window.removeEventListener('hashchange', revealLinkedQuiz);
+    window.addEventListener('popstate', revealLinkedQuiz);
+    return () => {
+      window.removeEventListener('hashchange', revealLinkedQuiz);
+      window.removeEventListener('popstate', revealLinkedQuiz);
+    };
   }, []);
   const linked = parseCourseWorkHash(hash);
   const missingLinked =
-    items !== null &&
-    linked?.kind === 'quiz' &&
-    !items.some((item) => item.id === linked.id);
+    items !== null && linked?.kind === 'quiz' && !items.some((item) => item.id === linked.id);
   useEffect(() => {
-    if (!linked || linked.kind !== 'quiz') return;
+    if (!linked || linked.kind !== 'quiz') {
+      revealed.current = '';
+      return;
+    }
     const target = courseWorkElementId(linked.kind, linked.id);
     if (
       filter !== 'all' ||
+      query.trim() ||
       revealed.current === target ||
       !items?.some((item) => item.id === linked.id)
     )
@@ -140,7 +174,7 @@ function QuizList({ workspace, accountId, units, onChanged }: { workspace: NuniW
       }
     });
     return () => window.cancelAnimationFrame(frame);
-  }, [accountId, filter, items, linked?.id, linked?.kind, workspace.id]);
+  }, [accountId, filter, query, items, linked?.id, linked?.kind, workspace.id]);
   useEffect(() => {
     mounted.current = true;
     return () => {
@@ -200,7 +234,10 @@ function QuizList({ workspace, accountId, units, onChanged }: { workspace: NuniW
     setReading(false);
     setError('');
     if (!teacher && item.myResponse && filter === 'pending') setFilter('answered');
-    if (teacher && !items?.some((entry) => entry.id === item.id)) setFilter('all');
+    if (teacher && !items?.some((entry) => entry.id === item.id)) {
+      setFilter('all');
+      setQuery('');
+    }
     onChanged?.();
     setItems((previous) =>
       previous?.some((entry) => entry.id === item.id)
@@ -251,6 +288,37 @@ function QuizList({ workspace, accountId, units, onChanged }: { workspace: NuniW
       {reading && <p role="status">正在讀取測驗…</p>}
       {items !== null && items.length > 0 && (
         <div className={styles.taskSummary}>
+          <div className={workspaceStyles.discovery}>
+            <label className={workspaceStyles.search} htmlFor={`${headingId}-search`}>
+              <span>搜尋測驗</span>
+              <input
+                ref={searchRef}
+                id={`${headingId}-search`}
+                type="search"
+                value={query}
+                onChange={(event) => setQuery(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === 'Escape' && query) {
+                    event.preventDefault();
+                    setQuery('');
+                  }
+                }}
+                placeholder="測驗名稱、題目或章節"
+              />
+            </label>
+            {query && (
+              <button
+                type="button"
+                className={`${styles.button} ${styles.secondary}`}
+                onClick={() => {
+                  setQuery('');
+                  searchRef.current?.focus();
+                }}
+              >
+                清除搜尋
+              </button>
+            )}
+          </div>
           <div className={styles.filters} role="group" aria-label="篩選測驗">
             {filters.map(([value, label]) => (
               <button
@@ -263,18 +331,47 @@ function QuizList({ workspace, accountId, units, onChanged }: { workspace: NuniW
               </button>
             ))}
           </div>
+          {query.trim() && (
+            <p className={workspaceStyles.searchCount} aria-live="polite">
+              找到 {shown?.length ?? 0} 份測驗
+            </p>
+          )}
           {shown && shown.length > 0 ? (
-            <nav aria-label="跳到測驗" className={styles.assignmentIndex}>
+            <nav aria-label="跳到測驗" className={workspaceStyles.activityIndex}>
               {shown.map((item) => (
                 <a key={item.id} href={`#quiz-${item.id}`}>
-                  <span>{item.title}</span>
-                  <small>{quizStatus(item, workspace)}</small>
+                  <span className={workspaceStyles.activityTitle}>
+                    <strong>{item.title}</strong>
+                    <small>{item.unitTitle || '未分章節'}</small>
+                  </span>
+                  <span className={workspaceStyles.activityMeta}>
+                    <span
+                      className={workspaceStyles.activityState}
+                      data-pending={!teacher && matchesQuizFilter(item, workspace, 'pending')}
+                    >
+                      {quizStatus(item, workspace)}
+                    </span>
+                    <small>
+                      {item.dueAt ? (
+                        <>
+                          建議 <time dateTime={item.dueAt}>{dateLabel(item.dueAt)}</time>
+                        </>
+                      ) : (
+                        '未設定建議完成時間'
+                      )}
+                    </small>
+                  </span>
+                  <span aria-hidden className={workspaceStyles.activityArrow}>
+                    ↗
+                  </span>
                 </a>
               ))}
             </nav>
           ) : (
             <p role="status" className={styles.note}>
-              這個分類目前沒有測驗。選擇「全部」可查看其他內容。
+              {query.trim()
+                ? '沒有符合的測驗。試試其他關鍵字，或清除搜尋。'
+                : '這個分類目前沒有測驗。選擇「全部」可查看其他內容。'}
             </p>
           )}
         </div>
@@ -286,9 +383,9 @@ function QuizList({ workspace, accountId, units, onChanged }: { workspace: NuniW
           </p>
         </div>
       )}
-      {items?.map((item) => (
+      {ordered?.map((item) => (
         // Keep drafts and uncertain submissions mounted when switching task filters.
-        <div key={item.id} hidden={!matchesQuizFilter(item, workspace, filter)}>
+        <div key={item.id} hidden={!visible(item)}>
           <Quiz item={item} workspace={workspace} acceptQuiz={acceptQuiz} now={now} />
         </div>
       ))}
@@ -489,10 +586,9 @@ function Quiz({
             <>
               <h4>老師回饋</h4>
               <CourseText text={item.myResponse.teacherFeedback} />
-              {item.myResponse.reviewedAt &&
-                needsFeedbackReview(item.myResponse) && (
-                  <p className={styles.note}>這則回饋早於最近一次繳交，請老師確認是否仍適用。</p>
-                )}
+              {item.myResponse.reviewedAt && needsFeedbackReview(item.myResponse) && (
+                <p className={styles.note}>這則回饋早於最近一次繳交，請老師確認是否仍適用。</p>
+              )}
               {item.myResponse.reviewedAt && (
                 <p className={styles.muted}>
                   回饋時間：
@@ -647,9 +743,7 @@ function Quiz({
                     );
                   })}
                 </div>
-                <p className={styles.muted}>
-                  預設先看尚未回饋的作答。儲存後，學生才看得到。
-                </p>
+                <p className={styles.muted}>預設先看尚未回饋的作答。儲存後，學生才看得到。</p>
                 {queueNotice ? (
                   <p role="status" className={styles.receipt}>
                     {queueNotice}
@@ -657,7 +751,8 @@ function Quiz({
                 ) : null}
                 {visibleResponseCount === 0 ? (
                   <p role="status" className={styles.muted}>
-                    「{feedbackQueueLabel(feedbackFilter)}」目前沒有作答。可改選「全部」查看其他狀態。
+                    「{feedbackQueueLabel(feedbackFilter)}
+                    」目前沒有作答。可改選「全部」查看其他狀態。
                   </p>
                 ) : null}
                 <ul className={styles.list}>
@@ -794,11 +889,7 @@ function QuizFeedbackRow({
   hidden: boolean;
   writable: boolean;
   rowRef: (node: HTMLLIElement | null) => void;
-  save: (
-    feedback: string,
-    key: string,
-    intent: MutationFormIntent,
-  ) => Promise<NuniQuizResponse>;
+  save: (feedback: string, key: string, intent: MutationFormIntent) => Promise<NuniQuizResponse>;
 }) {
   const [notice, setNotice] = useState('');
   const [manualOpen, setManualOpen] = useState(false);
@@ -836,8 +927,7 @@ function QuizFeedbackRow({
       </p>
       {position ? (
         <p className={styles.muted}>
-          待回饋第 {position.index}／{position.total} 份
-          {expanded ? ' · 目前批改這一份' : ''}
+          待回饋第 {position.index}／{position.total} 份{expanded ? ' · 目前批改這一份' : ''}
         </p>
       ) : expanded ? (
         <p className={styles.muted}>目前批改這一份</p>

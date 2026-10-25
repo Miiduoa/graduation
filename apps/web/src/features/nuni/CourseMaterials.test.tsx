@@ -451,7 +451,7 @@ it('groups the cabinet by week, shows type and honest size, and opens the file i
   );
   expect(await screen.findByRole('heading', { name: '第 03 週' })).toBeTruthy();
   expect(screen.getByText('PDF')).toBeTruthy();
-  expect(screen.getByText('大小未提供（教材沒有檔案大小欄位）')).toBeTruthy();
+  expect(screen.getByText('大小未提供')).toBeTruthy();
   const open = screen.getByRole('link', { name: '下載' });
   expect(open.getAttribute('href')).toBe('https://example.test/week3.pdf');
   expect(open.getAttribute('download')).toBe('week3.pdf');
