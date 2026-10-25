@@ -32,7 +32,7 @@ const baseData = () => ({
 
 function memoryDb(data = baseData()) {
   const records = { ...data };
-  const document = (path) => ({ path, id: path.split('/').pop() });
+  const document = (path) => ({ path, id: path.split('/').pop(), get: async () => snap(document(path)) });
   const snap = (reference) => ({
     id: reference.id,
     exists: Object.prototype.hasOwnProperty.call(records, reference.path),
@@ -170,7 +170,7 @@ test('teacher can only decide their own offering; course outcomes remain indepen
   expect(records['leaveRequests/' + REQUEST_ID].courses[1].reviewStatus).toBe('pending');
   await expect(review({
     auth: { uid: 't1' },
-    data: { requestId: REQUEST_ID, courseId: 'c1', decision: 'rejected' },
+    data: { requestId: REQUEST_ID, courseId: 'c1', decision: 'rejected', note: '不同意原因' },
   })).rejects.toMatchObject({ code: 'failed-precondition' });
   await review({
     auth: { uid: 'admin' },
