@@ -435,9 +435,6 @@ importers:
       eslint:
         specifier: ^9.39.2
         version: 9.39.2
-      firebase-functions-test:
-        specifier: ^3.5.0
-        version: 3.5.0(firebase-admin@14.5.0(@firebase/app-compat@0.5.7)(@firebase/app@0.14.7))(firebase-functions@7.4.0(firebase-admin@14.5.0(@firebase/app-compat@0.5.7)(@firebase/app@0.14.7)))(jest@29.7.0(@types/node@20.19.30)(ts-node@10.9.2(@types/node@20.19.30)(typescript@5.9.3)))
       globals:
         specifier: ^17.13.0
         version: 17.13.0
@@ -3330,9 +3327,6 @@ packages:
   '@types/leaflet@1.9.21':
     resolution: {integrity: sha512-TbAd9DaPGSnzp6QvtYngntMZgcRk+igFELwR2N99XZn7RXUdKgsXMR+28bUO0rPsWp8MIu/f47luLIQuSLYv/w==}
 
-  '@types/lodash@4.17.24':
-    resolution: {integrity: sha512-gIW7lQLZbue7lRSWEFql49QJJWThrTFFeIMJdp3eH4tKoxm1OvEPg02rm4wCCSHS0cL3/Fizimb35b7k8atwsQ==}
-
   '@types/long@4.0.2':
     resolution: {integrity: sha512-MqTGEo5bj5t157U6fA/BiDynNkn0YknVdh48CMPkTSpFTVmvao5UQmm7uEF6xBEo7qIMAlY/JSleYaE6VOdpaA==}
 
@@ -5363,14 +5357,6 @@ packages:
   firebase-admin@14.5.0:
     resolution: {integrity: sha512-DElmgmaH9aPXu2dWXGQiDoan33UfTnbfAAKaue4fwEZxmpdaNrTk5DmuFn+vVDki2KZ6TiaC0IHRWcEzcDxB3Q==}
     engines: {node: '>=22'}
-
-  firebase-functions-test@3.5.0:
-    resolution: {integrity: sha512-Jg+f9GeWkWpgYRY9s+Oxst/b9kEnOJ6pU/XNFthOFYs2Ax2fU2Zxc7ckfTozYKEH/mzptSDxV5JYiPTvR+RhKA==}
-    engines: {node: '>=14.0.0'}
-    peerDependencies:
-      firebase-admin: ^8.0.0 || ^9.0.0 || ^10.0.0 || ^11.0.0 || ^12.0.0 || ^13.0.0
-      firebase-functions: '>=4.9.0'
-      jest: '>=28.0.0'
 
   firebase-functions@7.4.0:
     resolution: {integrity: sha512-jR+c16q1E07dPVqU/sdbIEVEQJYSxjY6BFI+QR5/AvrnII8C6UkJv6fR8LJ+GKmcGUBe7SjO/MnEWLAeOiHWMw==}
@@ -8458,9 +8444,6 @@ packages:
     engines: {node: '>=18.12'}
     peerDependencies:
       typescript: '>=4.8.4'
-
-  ts-deepmerge@2.0.7:
-    resolution: {integrity: sha512-3phiGcxPSSR47RBubQxPoZ+pqXsEsozLo4G4AlSrsMKTFg9TA3l+3he5BqpUi9wiuDbaHWXH/amlzQ49uEdXtg==}
 
   ts-interface-checker@0.1.13:
     resolution: {integrity: sha512-Y/arvbn+rrz3JCKl9C4kVNfTfSm2/mEp5FSz5EsZSANGPSlQrpRI5M4PKF+mJnE52jOO90PnPSc3Ur3bTQw0gA==}
@@ -12563,8 +12546,6 @@ snapshots:
     dependencies:
       '@types/geojson': 7946.0.16
 
-  '@types/lodash@4.17.24': {}
-
   '@types/long@4.0.2':
     optional: true
 
@@ -15046,15 +15027,6 @@ snapshots:
       - '@firebase/app'
       - '@firebase/app-compat'
       - supports-color
-
-  firebase-functions-test@3.5.0(firebase-admin@14.5.0(@firebase/app-compat@0.5.7)(@firebase/app@0.14.7))(firebase-functions@7.4.0(firebase-admin@14.5.0(@firebase/app-compat@0.5.7)(@firebase/app@0.14.7)))(jest@29.7.0(@types/node@20.19.30)(ts-node@10.9.2(@types/node@20.19.30)(typescript@5.9.3))):
-    dependencies:
-      '@types/lodash': 4.17.24
-      firebase-admin: 14.5.0(@firebase/app-compat@0.5.7)(@firebase/app@0.14.7)
-      firebase-functions: 7.4.0(firebase-admin@14.5.0(@firebase/app-compat@0.5.7)(@firebase/app@0.14.7))
-      jest: 29.7.0(@types/node@20.19.30)(ts-node@10.9.2(@types/node@20.19.30)(typescript@5.9.3))
-      lodash: 4.18.1
-      ts-deepmerge: 2.0.7
 
   firebase-functions@7.4.0(firebase-admin@14.5.0(@firebase/app-compat@0.5.7)(@firebase/app@0.14.7)):
     dependencies:
@@ -18952,8 +18924,6 @@ snapshots:
   ts-api-utils@2.5.0(typescript@5.9.3):
     dependencies:
       typescript: 5.9.3
-
-  ts-deepmerge@2.0.7: {}
 
   ts-interface-checker@0.1.13: {}
 
