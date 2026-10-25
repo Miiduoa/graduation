@@ -15,6 +15,8 @@ import {
 import { isAnnouncementSchoolVisibleToPublic } from '@campus/shared/src/campusAnnouncements';
 import { getAnnouncementVisibilityEnv } from '@/lib/runtime';
 import { useCampusBrowseContext } from '@/lib/useCampusBrowseContext';
+import type { ServiceListSearchParams } from '@/lib/serviceListNavigation';
+import { announcementListHref, readAnnouncementListState } from '../announcementListState';
 import styles from '../announcements.module.css';
 
 type LoadState =
@@ -38,36 +40,45 @@ function detailForRequest(state: LoadState, schoolId: string, id: string): LoadS
 function AnnouncementDetail({ schoolId, id }: { schoolId: string; id: string }) {
   const [state, setState] = useState<LoadState>({ status: 'loading', schoolId, id });
   const [notice, setNotice] = useState('');
+  const [refreshing, setRefreshing] = useState(false);
   const generation = useRef(0);
   const mounted = useRef(false);
+  const refreshLock = useRef(false);
   const view = detailForRequest(state, schoolId, id);
   const load = useCallback(() => {
     const request = ++generation.current;
-    return loadAnnouncement(schoolId, id).then(
-      (announcement) => {
+    return loadAnnouncement(schoolId, id)
+      .then(
+        (announcement) => {
+          if (mounted.current && request === generation.current) {
+            setState({
+              status: 'ready',
+              schoolId,
+              id,
+              announcement,
+              fetchedAt: new Date().toISOString(),
+              stale: false,
+            });
+          }
+        },
+        () => {
+          if (!mounted.current || request !== generation.current) return;
+          setState((current) =>
+            current.schoolId === schoolId &&
+            current.id === id &&
+            current.status === 'ready' &&
+            current.announcement
+              ? { ...current, stale: true }
+              : { status: 'failed', schoolId, id },
+          );
+        },
+      )
+      .finally(() => {
         if (mounted.current && request === generation.current) {
-          setState({
-            status: 'ready',
-            schoolId,
-            id,
-            announcement,
-            fetchedAt: new Date().toISOString(),
-            stale: false,
-          });
+          refreshLock.current = false;
+          setRefreshing(false);
         }
-      },
-      () => {
-        if (!mounted.current || request !== generation.current) return;
-        setState((current) =>
-          current.schoolId === schoolId &&
-          current.id === id &&
-          current.status === 'ready' &&
-          current.announcement
-            ? { ...current, stale: true }
-            : { status: 'failed', schoolId, id },
-        );
-      },
-    );
+      });
   }, [schoolId, id]);
 
   useEffect(() => {
@@ -80,6 +91,9 @@ function AnnouncementDetail({ schoolId, id }: { schoolId: string; id: string }) 
   }, [load]);
 
   function refresh() {
+    if (refreshLock.current) return;
+    refreshLock.current = true;
+    setRefreshing(true);
     setNotice('');
     setState((current) =>
       current.schoolId === schoolId &&
@@ -131,8 +145,9 @@ function AnnouncementDetail({ schoolId, id }: { schoolId: string; id: string }) 
     );
   }
   const announcement = view.announcement;
+  const body = announcement.body?.trim() || announcement.summary?.trim();
   return (
-    <article className={styles.announcement}>
+    <article className={`${styles.announcement} ${styles.detail}`} aria-busy={refreshing}>
       <div className={styles.meta}>
         {announcement.pinned && <span className={styles.pinned}>置頂</span>}
         <span>公開公告</span>
@@ -162,9 +177,7 @@ function AnnouncementDetail({ schoolId, id }: { schoolId: string; id: string }) 
         </p>
       ) : null}
       <h2>{announcement.title}</h2>
-      {(announcement.summary || announcement.body) && (
-        <p className={styles.body}>{announcement.summary || announcement.body}</p>
-      )}
+      {body && <p className={styles.body}>{body}</p>}
       {announcement.originalUrl && (
         <a
           className={styles.share}
@@ -179,8 +192,8 @@ function AnnouncementDetail({ schoolId, id }: { schoolId: string; id: string }) 
         <button className="btn" onClick={() => void copyLink()}>
           複製連結
         </button>
-        <button className="btn" onClick={refresh}>
-          更新公告
+        <button className="btn" onClick={refresh} disabled={refreshing}>
+          {refreshing ? '正在更新…' : '更新公告'}
         </button>
       </div>
       {notice && (
@@ -194,7 +207,7 @@ function AnnouncementDetail({ schoolId, id }: { schoolId: string; id: string }) 
 
 export default function AnnouncementDetailPage(props: {
   params: Promise<{ id: string }>;
-  searchParams?: Promise<{ school?: string; schoolId?: string; campus?: string }>;
+  searchParams?: Promise<ServiceListSearchParams>;
 }) {
   const { id } = use(props.params);
   const params = props.searchParams ? use(props.searchParams) : undefined;
@@ -213,7 +226,7 @@ export default function AnnouncementDetailPage(props: {
           className={styles.back}
           href={
             visible && schoolId
-              ? `/announcements?schoolId=${encodeURIComponent(schoolId)}`
+              ? announcementListHref(schoolId, readAnnouncementListState(params), params)
               : '/announcements'
           }
         >

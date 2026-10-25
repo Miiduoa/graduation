@@ -18,20 +18,25 @@ import {
   type LostFoundItem,
 } from '@/lib/lostFound';
 import {
-  DEFAULT_LOST_FOUND_FILTERS,
   describeLostFoundFilterScope,
   filterLostFoundItems,
   type LostFoundListFilters,
 } from '@/lib/lostFoundFilters';
+import {
+  LOST_FOUND_LIST_QUERY_KEYS,
+  lostFoundListQuery,
+  readLostFoundListState,
+  type LostFoundListState,
+} from '@/lib/lostFoundListNavigation';
+import { replaceServiceListQuery, type ServiceListSearchParams } from '@/lib/serviceListNavigation';
+import { useServiceListQuery } from '@/lib/useServiceListQuery';
 import { isPermissionDeniedError } from '@campus/shared/src/signedInSocialReads';
 import styles from '@/components/lost-found/LostFound.module.css';
 
 /** Bound DOM rows; filters still run over the complete loaded collection. */
 const VISIBLE_PAGE_SIZE = 50;
 
-export default function LostFoundPage(props: {
-  searchParams?: Promise<{ schoolId?: string; school?: string; campus?: string }>;
-}) {
+export default function LostFoundPage(props: { searchParams?: Promise<ServiceListSearchParams> }) {
   const search = props.searchParams ? use(props.searchParams) : undefined;
   const context = useBrowsingSchoolPageContext(search);
   const { user } = useAuth();
@@ -46,27 +51,40 @@ export default function LostFoundPage(props: {
     <LostFoundPageContent
       key={`${user?.uid ?? 'signed-out'}:${context.schoolId}`}
       context={context}
+      initialQuery={search}
     />
   );
 }
 
 function LostFoundPageContent({
   context,
+  initialQuery,
 }: {
   context: ReturnType<typeof useBrowsingSchoolPageContext>;
+  initialQuery?: ServiceListSearchParams;
 }) {
   const { user, loading: authLoading } = useAuth();
   const uid = user?.uid ?? null;
   const signedIn = Boolean(uid);
-  const loginReturnUrl = `/lost-found?schoolId=${encodeURIComponent(context.schoolId)}`;
   const filterId = useId();
   const [items, setItems] = useState<LostFoundItem[] | undefined>(undefined);
   const [error, setError] = useState('');
   const [loginRequired, setLoginRequired] = useState(false);
   const [reloadToken, setReloadToken] = useState(0);
-  const [filters, setFilters] = useState<LostFoundListFilters>(DEFAULT_LOST_FOUND_FILTERS);
-  const [visibleLimit, setVisibleLimit] = useState(VISIBLE_PAGE_SIZE);
+  const currentQuery = useServiceListQuery('/lost-found', context.schoolId, initialQuery);
+  const queryKey = currentQuery.toString();
+  const [selection, setSelection] = useState(() => ({
+    queryKey,
+    filters: readLostFoundListState(currentQuery),
+  }));
+  const filters =
+    selection.queryKey === queryKey ? selection.filters : readLostFoundListState(currentQuery);
+  if (selection.queryKey !== queryKey) setSelection({ queryKey, filters });
+  const visibleLimit = filters.page * VISIBLE_PAGE_SIZE;
   const scopeGeneration = useRef(0);
+  const searchInput = useRef<HTMLInputElement>(null);
+  const listQuery = lostFoundListQuery(context.schoolId, filters, currentQuery);
+  const loginReturnUrl = `/lost-found?${listQuery}`;
 
   useEffect(() => {
     let active = true;
@@ -109,16 +127,24 @@ function LostFoundPageContent({
     };
   }, [authLoading, context.schoolId, reloadToken, signedIn, uid]);
 
-  const filtered =
-    items && signedIn ? filterLostFoundItems(items, filters, uid) : [];
+  const filtered = items && signedIn ? filterLostFoundItems(items, filters, uid) : [];
   const visible = filtered.slice(0, visibleLimit);
   const hasMore = filtered.length > visible.length;
   const scopeText = describeLostFoundFilterScope(filters, context.schoolName);
 
-  function patchFilters(patch: Partial<LostFoundListFilters>) {
-    setFilters((current) => ({ ...current, ...patch }));
-    setVisibleLimit(VISIBLE_PAGE_SIZE);
+  function patchFilters(patch: Partial<LostFoundListState>) {
+    const next = { ...filters, page: 1, ...patch };
+    setSelection({ queryKey, filters: next });
+    replaceServiceListQuery(
+      '/lost-found',
+      context.schoolId,
+      LOST_FOUND_LIST_QUERY_KEYS,
+      lostFoundListQuery(context.schoolId, next),
+    );
   }
+  const hasFilters = Boolean(
+    filters.query.trim() || filters.type !== 'all' || filters.status !== 'all' || filters.mine,
+  );
 
   return (
     <SiteShell
@@ -149,10 +175,7 @@ function LostFoundPageContent({
                   >
                     重新整理
                   </Button>
-                  <Link
-                    className="btn"
-                    href={`/lost-found/post?schoolId=${encodeURIComponent(context.schoolId)}`}
-                  >
+                  <Link className="btn" href={`/lost-found/post?${listQuery}`}>
                     刊登物品
                   </Link>
                 </div>
@@ -161,8 +184,11 @@ function LostFoundPageContent({
               <div className={styles.filters} style={{ marginTop: 16 }}>
                 <div className={styles.filtersWide}>
                   <Input
+                    ref={searchInput}
                     id={`${filterId}-query`}
                     label="搜尋"
+                    type="search"
+                    maxLength={200}
                     value={filters.query}
                     placeholder="標題、說明或地點"
                     onChange={(event) => patchFilters({ query: event.target.value })}
@@ -206,6 +232,20 @@ function LostFoundPageContent({
                   只看我刊登的
                 </label>
               </div>
+              {hasFilters ? (
+                <div className={styles.actions}>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    onClick={() => {
+                      patchFilters(readLostFoundListState());
+                      searchInput.current?.focus();
+                    }}
+                  >
+                    清除篩選
+                  </Button>
+                </div>
+              ) : null}
             </section>
 
             {error ? (
@@ -232,10 +272,7 @@ function LostFoundPageContent({
               <section className={styles.panel}>
                 <p>目前沒有本校刊登資訊</p>
                 <div className={styles.actions}>
-                  <Link
-                    className="btn"
-                    href={`/lost-found/post?schoolId=${encodeURIComponent(context.schoolId)}`}
-                  >
+                  <Link className="btn" href={`/lost-found/post?${listQuery}`}>
                     刊登第一則
                   </Link>
                 </div>
@@ -250,8 +287,7 @@ function LostFoundPageContent({
             ) : (
               <>
                 <p className={styles.scopeNote} role="status">
-                  符合條件 {filtered.length} 則
-                  {hasMore ? `，目前顯示前 ${visible.length} 則` : ''}
+                  符合條件 {filtered.length} 則{hasMore ? `，目前顯示前 ${visible.length} 則` : ''}
                   （自本校完整載入的 {items.length} 則篩選）
                 </p>
                 <ul className={styles.list}>
@@ -261,14 +297,12 @@ function LostFoundPageContent({
                         <span className={styles.badge}>{typeLabel(item.type)}</span>
                         <span className={styles.badge}>{categoryLabel(item.category)}</span>
                         <span className={styles.badge}>{statusLabel(item.status)}</span>
-                        {!item.canonical ? (
-                          <span className={styles.badge}>舊版紀錄</span>
-                        ) : null}
+                        {!item.canonical ? <span className={styles.badge}>舊版紀錄</span> : null}
                       </div>
                       <h2>
                         <Link
                           className={styles.link}
-                          href={`/lost-found/${encodeURIComponent(item.id)}?schoolId=${encodeURIComponent(context.schoolId)}`}
+                          href={`/lost-found/${encodeURIComponent(item.id)}?${listQuery}`}
                         >
                           {item.title}
                         </Link>
@@ -286,9 +320,7 @@ function LostFoundPageContent({
                     <Button
                       type="button"
                       variant="outline"
-                      onClick={() =>
-                        setVisibleLimit((current) => current + VISIBLE_PAGE_SIZE)
-                      }
+                      onClick={() => patchFilters({ page: filters.page + 1 })}
                     >
                       載入更多（尚有 {filtered.length - visible.length} 則）
                     </Button>

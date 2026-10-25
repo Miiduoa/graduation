@@ -1,6 +1,14 @@
 import React from 'react';
 import { act, fireEvent, render } from '@testing-library/react-native';
-import { Linking, Share, StyleSheet } from 'react-native';
+import {
+  AppState,
+  Keyboard,
+  Linking,
+  ScrollView,
+  Share,
+  StyleSheet,
+  type AppStateStatus,
+} from 'react-native';
 import { applyTheme, theme } from '../ui/theme';
 import AnnouncementsScreen from '../screens/AnnouncementsListAiFirstScreen';
 import AnnouncementScreen from '../screens/AnnouncementDetailAiFirstScreen';
@@ -97,7 +105,7 @@ test('announcements use school data with working categories and a registered det
   await view.findByText('校方的新公告');
   expect(loadCampusAnnouncementFeed).toHaveBeenCalledWith('pu');
   expect(view.queryByText(/期末考程序|32 則|AI 從|全部已讀/)).toBeNull();
-  fireEvent.press(view.getByText('教務'));
+  fireEvent.press(view.getByRole('button', { name: '篩選：教務' }));
   expect(view.queryByText('社團活動')).toBeNull();
   fireEvent.press(view.getByText('校方的新公告'));
   expect(safeNavigate).toHaveBeenCalledWith(navigation, '公告詳情', { id: 'a1' });
@@ -500,6 +508,19 @@ test('real announcement attachments open and failures are visible', async () => 
   expect(view.getByText('無法開啟附件，請稍後重試。')).toBeTruthy();
 });
 
+test('announcement detail retains the complete body and paragraph breaks when a separate summary exists', async () => {
+  const body = '第一段完整說明。\n\n第二段：請檢附在學證明與申請文件。';
+  jest.mocked(loadCampusAnnouncement).mockResolvedValueOnce({
+    ...announcement,
+    body,
+    summary: '簡短摘要。',
+  });
+  const view = render(<AnnouncementScreen route={{ params: { id: 'a1' } }} />);
+  expect(await view.findByText(body)).toBeTruthy();
+  expect(view.queryByText('簡短摘要。')).toBeNull();
+  expect(view.queryByText('摘要，全文見原文')).toBeNull();
+});
+
 test('event date filters work and list navigation uses the actual event ID', async () => {
   jest.mocked(loadCampusEventPage).mockResolvedValue({
     items: [
@@ -750,4 +771,283 @@ test('a visitor can read the public announcement list and open its detail', asyn
   fireEvent.press(await view.findByText('校方的新公告'));
   expect(loadCampusAnnouncementFeed).toHaveBeenCalledWith('pu');
   expect(safeNavigate).toHaveBeenCalledWith(navigation, '公告詳情', { id: 'a1' });
+});
+
+test('announcement search matches the loaded content and office with normalized multi-word queries', async () => {
+  jest.mocked(loadCampusAnnouncementFeed).mockResolvedValueOnce({
+    announcements: [
+      { ...announcement, body: 'IELTS 報名開放', office: '語言中心', source: undefined },
+      { ...announcement, id: 'other', title: '社團招生', body: '新生交流', category: 'event' },
+    ],
+    sources: [],
+    allUnavailable: false,
+  });
+  const view = render(<AnnouncementsScreen navigation={navigation} />);
+  await view.findByText('校方的新公告');
+  fireEvent.changeText(view.getByLabelText('搜尋公告'), '  ｉｅｌｔｓ　語言中心 ');
+  expect(view.getByText('校方的新公告')).toBeTruthy();
+  expect(view.queryByText('社團招生')).toBeNull();
+  expect(view.getByText('找到 1 則。搜尋與篩選適用已載入的公告。')).toBeTruthy();
+  fireEvent.changeText(view.getByLabelText('搜尋公告'), '不存在的項目');
+  expect(view.getByText('找不到符合的公告')).toBeTruthy();
+  fireEvent.press(view.getByRole('button', { name: '清除公告篩選' }));
+  expect(view.getByLabelText('搜尋公告').props.value).toBe('');
+  expect(view.getByText('社團招生')).toBeTruthy();
+});
+
+test('switching announcement views clears an unavailable category and preserves the search', async () => {
+  jest.mocked(loadCampusAnnouncementFeed).mockResolvedValueOnce({
+    announcements: [announcement],
+    officialAnnouncements: [
+      announcement,
+      { ...announcement, id: 'security', title: '系統維護公告', category: 'system' },
+    ],
+    sources: [],
+    allUnavailable: false,
+  });
+  const view = render(<AnnouncementsScreen navigation={navigation} />);
+  await view.findByText('校方的新公告');
+  fireEvent.changeText(view.getByLabelText('搜尋公告'), '公告');
+  fireEvent.press(view.getByRole('button', { name: '篩選：全部公告' }));
+  fireEvent.press(view.getByRole('button', { name: '篩選：系統' }));
+  expect(view.queryByText('校方的新公告')).toBeNull();
+  expect(view.getByText('系統維護公告')).toBeTruthy();
+  fireEvent.press(view.getByRole('button', { name: '篩選：學生公告' }));
+  expect(view.getByLabelText('搜尋公告').props.value).toBe('公告');
+  expect(view.getByText('校方的新公告')).toBeTruthy();
+  expect(view.getByRole('button', { name: '篩選：全部 1' }).props.accessibilityState.selected).toBe(
+    true,
+  );
+});
+
+test.each(['school', 'account'] as const)(
+  'announcement filters reset with the %s scope',
+  async (changed) => {
+    const view = render(<AnnouncementsScreen navigation={navigation} />);
+    await view.findByText('校方的新公告');
+    fireEvent.changeText(view.getByLabelText('搜尋公告'), '舊範圍搜尋');
+    fireEvent.press(view.getByRole('button', { name: '篩選：教務' }));
+    const pending = deferred<Awaited<ReturnType<typeof loadCampusAnnouncementFeed>>>();
+    jest.mocked(loadCampusAnnouncementFeed).mockReturnValueOnce(pending.promise);
+    if (changed === 'school') mockSchool = { id: 'ncku' };
+    else mockUid = 'student-b';
+    view.rerender(<AnnouncementsScreen navigation={navigation} />);
+    expect(view.queryByDisplayValue('舊範圍搜尋')).toBeNull();
+    expect(view.getByText('正在讀取')).toBeTruthy();
+    await act(async () =>
+      pending.resolve({
+        announcements: [{ ...announcement, title: '新的校園活動', category: 'event' }],
+        sources: [],
+        allUnavailable: false,
+      }),
+    );
+    expect(view.getByLabelText('搜尋公告').props.value).toBe('');
+    expect(view.getByText('新的校園活動')).toBeTruthy();
+  },
+);
+
+test('announcement search includes records beyond the rendered batch and reset restores the first batch', async () => {
+  const announcements = Array.from({ length: 65 }, (_, index) => ({
+    ...announcement,
+    id: `a${index + 1}`,
+    title: `學校消息 ${index + 1}`,
+  }));
+  jest
+    .mocked(loadCampusAnnouncementFeed)
+    .mockResolvedValueOnce({ announcements, sources: [], allUnavailable: false });
+  const view = render(<AnnouncementsScreen navigation={navigation} />);
+  await view.findByText('學校消息 1');
+  expect(view.queryByText('學校消息 31')).toBeNull();
+  fireEvent.press(view.getByRole('button', { name: '顯示更多公告（還有 35 則）' }));
+  expect(view.getByText('學校消息 31')).toBeTruthy();
+  expect(view.queryByText('學校消息 61')).toBeNull();
+  fireEvent.changeText(view.getByLabelText('搜尋公告'), '消息 65');
+  expect(view.getByText('學校消息 65')).toBeTruthy();
+  expect(view.queryByText(/顯示更多公告/)).toBeNull();
+  fireEvent.press(view.getByRole('button', { name: '清除公告搜尋' }));
+  expect(view.getByText('學校消息 1')).toBeTruthy();
+  expect(view.queryByText('學校消息 31')).toBeNull();
+});
+
+test('failed official announcement links show an actionable error and can be retried', async () => {
+  jest
+    .mocked(loadCampusAnnouncementFeed)
+    .mockResolvedValueOnce({ announcements: [], sources: [], allUnavailable: false });
+  const open = jest
+    .spyOn(Linking, 'openURL')
+    .mockRejectedValueOnce(new Error('cannot open'))
+    .mockResolvedValueOnce(undefined as never);
+  const view = render(<AnnouncementsScreen navigation={navigation} />);
+  await view.findByText('前往學校官方公告');
+  await act(async () => fireEvent.press(view.getByText('前往學校官方公告')));
+  expect(view.getByRole('alert').props.children).toBe('無法開啟校方公告，請稍後再試。');
+  await act(async () => fireEvent.press(view.getByText('前往學校官方公告')));
+  expect(open).toHaveBeenCalledTimes(2);
+  expect(view.queryByRole('alert')).toBeNull();
+});
+
+test('event search preserves its query across failed pagination and finds a matching later page', async () => {
+  jest
+    .mocked(loadCampusEventPage)
+    .mockResolvedValueOnce(eventPage([event], eventCursor))
+    .mockRejectedValueOnce(new Error('offline'))
+    .mockResolvedValueOnce(
+      eventPage([
+        {
+          ...event,
+          id: 'next',
+          title: '交流午餐',
+          description: 'English practice',
+          location: '國際會館',
+        },
+      ]),
+    );
+  const view = render(<EventsScreen navigation={navigation} />);
+  await view.findByText('校方的新活動');
+  fireEvent.changeText(view.getByLabelText('搜尋活動'), 'ＥＮＧＬＩＳＨ 國際');
+  expect(view.getByText('已載入的活動中沒有符合項目')).toBeTruthy();
+  await act(async () => fireEvent.press(view.getByText('載入更多活動')));
+  expect(view.getByText('重試載入')).toBeTruthy();
+  expect(view.getByLabelText('搜尋活動').props.value).toBe('ＥＮＧＬＩＳＨ 國際');
+  await act(async () => fireEvent.press(view.getByText('重試載入')));
+  expect(view.getByText('交流午餐')).toBeTruthy();
+  expect(view.queryByText('校方的新活動')).toBeNull();
+  expect(view.getByText('找到 1 場')).toBeTruthy();
+  fireEvent.press(view.getByRole('button', { name: '清除活動篩選' }));
+  expect(view.getByText('校方的新活動')).toBeTruthy();
+});
+
+test('event time filters keep ongoing events out of the past and identify missing end times without guessing', async () => {
+  jest.spyOn(Date, 'now').mockReturnValue(Date.parse('2026-10-25T04:00:00Z'));
+  jest.mocked(loadCampusEventPage).mockResolvedValueOnce({
+    items: [
+      {
+        ...event,
+        id: 'ongoing',
+        title: '午間講座',
+        startsAt: '2026-10-25T03:00:00Z',
+        endsAt: '2026-10-25T05:00:00Z',
+      },
+      { ...event, id: 'started', title: '未公告結束的展覽', startsAt: '2026-10-25T03:00:00Z' },
+      {
+        ...event,
+        id: 'ended',
+        title: '昨天的工作坊',
+        startsAt: '2026-10-24T03:00:00Z',
+        endsAt: '2026-10-24T05:00:00Z',
+      },
+      {
+        ...event,
+        id: 'invalid',
+        title: '待公布場次',
+        startsAt: 'invalid date',
+        endsAt: '2026-10-25T05:00:00Z',
+      },
+      event,
+    ],
+    source: event.source,
+    nextCursor: null,
+  });
+  const view = render(<EventsScreen navigation={navigation} />);
+  await view.findByText('午間講座');
+  expect(view.getByRole('button', { name: /未公告結束的展覽，已開始/ })).toBeTruthy();
+  fireEvent.press(view.getByRole('button', { name: '篩選：進行中' }));
+  expect(view.getByText('午間講座')).toBeTruthy();
+  expect(view.queryByText('未公告結束的展覽')).toBeNull();
+  expect(view.queryByText('昨天的工作坊')).toBeNull();
+  fireEvent.press(view.getByRole('button', { name: '篩選：已開始／過往' }));
+  expect(view.queryByText('午間講座')).toBeNull();
+  expect(view.getByText('未公告結束的展覽')).toBeTruthy();
+  expect(view.getByText('昨天的工作坊')).toBeTruthy();
+  fireEvent.press(view.getByRole('button', { name: '篩選：時間待公告' }));
+  expect(view.getByText('待公布場次')).toBeTruthy();
+  expect(view.queryByText('校方的新活動')).toBeNull();
+});
+
+test.each(['school', 'account'] as const)(
+  'event search and period reset with the %s scope',
+  async (changed) => {
+    const view = render(<EventsScreen navigation={navigation} />);
+    await view.findByText('校方的新活動');
+    fireEvent.changeText(view.getByLabelText('搜尋活動'), '舊搜尋');
+    fireEvent.press(view.getByRole('button', { name: '篩選：進行中' }));
+    const pending = deferred<ReturnType<typeof eventPage>>();
+    jest.mocked(loadCampusEventPage).mockReturnValueOnce(pending.promise);
+    if (changed === 'school') mockSchool = { id: 'ncku' };
+    else mockUid = 'student-b';
+    view.rerender(<EventsScreen navigation={navigation} />);
+    expect(view.queryByDisplayValue('舊搜尋')).toBeNull();
+    await act(async () => pending.resolve(eventPage([{ ...event, title: '新範圍的活動' }])));
+    expect(view.getByLabelText('搜尋活動').props.value).toBe('');
+    expect(view.getByRole('button', { name: '篩選：全部' }).props.accessibilityState.selected).toBe(
+      true,
+    );
+    expect(view.getByText('新範圍的活動')).toBeTruthy();
+  },
+);
+
+test('returning to the foreground updates event phases and removes its subscription on exit', async () => {
+  let updateAppState: ((state: AppStateStatus) => void) | undefined;
+  const remove = jest.fn();
+  jest.spyOn(AppState, 'addEventListener').mockImplementation((_type, listener) => {
+    updateAppState = listener;
+    return { remove };
+  });
+  const now = jest.spyOn(Date, 'now').mockReturnValue(Date.parse('2026-10-25T02:00:00Z'));
+  jest.mocked(loadCampusEventPage).mockResolvedValueOnce({
+    items: [
+      {
+        ...event,
+        title: '上午活動',
+        startsAt: '2026-10-25T03:00:00Z',
+        endsAt: '2026-10-25T05:00:00Z',
+      },
+    ],
+    source: event.source,
+    nextCursor: null,
+  });
+  const view = render(<EventsScreen navigation={navigation} />);
+  await view.findByText('上午活動');
+  fireEvent.press(view.getByRole('button', { name: '篩選：進行中' }));
+  expect(view.queryByText('上午活動')).toBeNull();
+  now.mockReturnValue(Date.parse('2026-10-25T04:00:00Z'));
+  act(() => updateAppState?.('active'));
+  expect(view.getByText('上午活動')).toBeTruthy();
+  expect(loadCampusEventPage).toHaveBeenCalledTimes(1);
+  view.unmount();
+  expect(remove).toHaveBeenCalledTimes(1);
+});
+
+test.each([
+  [AnnouncementsScreen, '搜尋公告', '教務', '校方的新公告'],
+  [EventsScreen, '搜尋活動', '未來活動', '校方的新活動'],
+] as const)(
+  'content lists expose selected filters and keep result taps available with the keyboard open',
+  async (Screen, searchLabel, filterLabel, title) => {
+    const dismiss = jest.spyOn(Keyboard, 'dismiss');
+    const view = render(<Screen navigation={navigation} />);
+    await view.findByText(title);
+    const filter = view.getByRole('button', { name: `篩選：${filterLabel}` });
+    expect(StyleSheet.flatten(filter.props.style).minHeight).toBe(44);
+    fireEvent.press(filter);
+    expect(
+      view.getByRole('button', { name: `篩選：${filterLabel}` }).props.accessibilityState.selected,
+    ).toBe(true);
+    expect(view.UNSAFE_getByType(ScrollView).props.keyboardShouldPersistTaps).toBe('handled');
+    expect(view.UNSAFE_getByType(ScrollView).props.keyboardDismissMode).toBe('on-drag');
+    fireEvent.changeText(view.getByLabelText(searchLabel), '校方');
+    fireEvent.press(view.getByText(title));
+    expect(dismiss).toHaveBeenCalled();
+    expect(safeNavigate).toHaveBeenCalled();
+  },
+);
+
+test('invalid event dates disable calendar export instead of leaving a silent action', async () => {
+  jest.mocked(loadCampusEvent).mockResolvedValueOnce({ ...event, startsAt: 'invalid' });
+  const view = render(<EventScreen route={{ params: { id: 'e1' } }} />);
+  await view.findByText('校方的新活動');
+  const exportButton = view.getByRole('button', { name: '匯出行事曆' });
+  expect(exportButton.props.accessibilityState.disabled).toBe(true);
+  fireEvent.press(exportButton);
+  expect(exportAndShareICalFile).not.toHaveBeenCalled();
 });

@@ -97,17 +97,16 @@ function announcement(document: SourceDocument, schoolId: string): Announcement 
         ];
       })
     : [];
+  const body = typeof data.body === 'string' ? data.body : '';
   const summary =
     typeof data.summary === 'string' && data.summary.trim()
       ? data.summary
-      : typeof data.body === 'string'
-        ? data.body
-        : '';
+      : body;
   return {
     id: document.id,
     schoolId,
     title: data.title as string,
-    body: summary,
+    body,
     summary,
     originalUrl: isPublicWebUrl(data.originalUrl) ? data.originalUrl : undefined,
     sourceId: typeof data.sourceId === 'string' ? data.sourceId : undefined,
@@ -123,7 +122,7 @@ function announcement(document: SourceDocument, schoolId: string): Announcement 
     studentFeed: data.studentFeed !== false,
     visible: data.visible !== false,
     audience: typeof data.audience === 'string' ? data.audience : undefined,
-  } as Announcement;
+  };
 }
 
 export type AnnouncementSourceHealth = {
@@ -262,8 +261,10 @@ async function loadDetail<T>(
 
 export const loadCampusAnnouncements = async (schoolId: string) =>
   (await loadCampusAnnouncementFeed(schoolId)).announcements;
-export const loadCampusAnnouncement = (schoolId: string, id: string) =>
-  loadDetail(schoolId, id, 'announcements', announcement);
+export const loadCampusAnnouncement = async (schoolId: string, id: string) => {
+  const item = await loadDetail(schoolId, id, 'announcements', announcement);
+  return item?.visible === false ? null : item;
+};
 export type CampusEventSource = 'school-club-events' | 'school-events' | 'legacy-events';
 export type CampusEvent = ClubEvent & { source: CampusEventSource };
 export type CampusEventCursor = {

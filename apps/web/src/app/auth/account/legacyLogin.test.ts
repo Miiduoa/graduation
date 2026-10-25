@@ -24,6 +24,36 @@ beforeEach(() => {
   sessionStorage.clear();
 });
 
+it.each([
+  '/lost-found?schoolId=nthu&q=%E9%9B%A8%E5%82%98&type=found&status=open&mine=1&page=2',
+  '/lost-found/item-1?schoolId=nthu&type=lost&status=resolved&page=3',
+  '/events/event-1?schoolId=nthu&source=school-events&view=upcoming&page=12',
+  '/announcements/notice-1?schoolId=pu&category=academic&pinned=1&page=2',
+])('keeps validated service-list state through login: %s', (path) => {
+  expect(sanitizeReturnPath(path)).toBe(path);
+  const href = campusOneLoginHref(new URLSearchParams({ returnUrl: path }));
+  expect(new URL(href!, 'https://nuni.tw').searchParams.get('returnUrl')).toBe(path);
+});
+
+it('does not let list-only parameters carry auth payloads or affect unrelated routes', () => {
+  expect(sanitizeReturnPath('/lost-found?schoolId=nthu&type=https%3A%2F%2Fevil.test&status=token&mine=true&page=999&returnUrl=%2Fadmin&token=secret'))
+    .toBe('/lost-found?schoolId=nthu');
+  expect(sanitizeReturnPath('/grades?schoolId=nthu&page=2&type=found&status=open&mine=1&pinned=1'))
+    .toBe('/grades?schoolId=nthu');
+  expect(sanitizeReturnPath('/events?page=0&page=2&pinned=1&mine=1'))
+    .toBe('/events?page=2');
+});
+
+it('preserves the allowed 200-character Chinese service query without expanding unrelated destinations', () => {
+  const q = '校園'.repeat(100);
+  const path = `/lost-found?${new URLSearchParams({ schoolId: 'nthu', q, type: 'found', page: '2' })}`;
+  expect(path.length).toBeGreaterThan(1200);
+  expect(sanitizeReturnPath(path)).toBe(path);
+  expect(sanitizeReturnPath('/profile?q=' + 'x'.repeat(1300))).toBe('/');
+  expect(sanitizeReturnPath('/lost-found?q=' + 'x'.repeat(201))).toBe('/lost-found');
+  expect(sanitizeReturnPath('/events?q=' + 'x'.repeat(4097))).toBe('/');
+});
+
 afterEach(() => {
   vi.unstubAllGlobals();
 });

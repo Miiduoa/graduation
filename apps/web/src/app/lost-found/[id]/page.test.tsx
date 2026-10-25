@@ -119,11 +119,7 @@ it('shows owner edit and confirm-resolve, and confirms authoritative resolve rec
   });
   fireEvent.click(screen.getByRole('button', { name: '確認結案' }));
   await waitFor(() =>
-    expect(resolveLostFoundItem).toHaveBeenCalledWith(
-      'item-1',
-      'pu',
-      '2026-10-20T03:00:00.000Z',
-    ),
+    expect(resolveLostFoundItem).toHaveBeenCalledWith('item-1', 'pu', '2026-10-20T03:00:00.000Z'),
   );
   expect(await screen.findByText('已確認結案。')).toBeTruthy();
 });
@@ -303,4 +299,42 @@ it('submits an explicit blank contact as a clear, not an omission', async () => 
       expect.objectContaining({ title: '黑色折疊傘', contactInfo: '' }),
     ),
   );
+});
+
+it('returns to the filtered list using only the current school and supported list fields', async () => {
+  await act(async () => {
+    render(
+      <Suspense fallback={null}>
+        <LostFoundDetailPage
+          params={Promise.resolve({ id: 'item-1' })}
+          searchParams={Promise.resolve({
+            schoolId: 'pu',
+            campus: 'pu',
+            q: '雨傘',
+            type: 'lost',
+            status: 'open',
+            mine: '1',
+            page: '2',
+            returnUrl: 'https://unrelated.example',
+            token: 'secret',
+          })}
+        />
+      </Suspense>,
+    );
+  });
+  await screen.findByText('黑色雨傘');
+  const target = new URL(
+    screen.getByRole('link', { name: '返回列表' }).getAttribute('href')!,
+    window.location.origin,
+  );
+  expect(target.pathname).toBe('/lost-found');
+  expect(Object.fromEntries(target.searchParams)).toEqual({
+    schoolId: 'pu',
+    campus: 'pu',
+    q: '雨傘',
+    type: 'lost',
+    status: 'open',
+    mine: '1',
+    page: '2',
+  });
 });

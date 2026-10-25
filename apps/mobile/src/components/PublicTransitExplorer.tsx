@@ -153,6 +153,7 @@ export function PublicTransitExplorer({
   const [locating, setLocating] = useState(false);
   const request = useRef<AbortController | null>(null);
   const positionRevision = useRef(0);
+  const positionTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const mounted = useRef(true);
 
   useEffect(() => {
@@ -161,13 +162,20 @@ export function PublicTransitExplorer({
       mounted.current = false;
       request.current?.abort();
       positionRevision.current += 1;
+      if (positionTimer.current) clearTimeout(positionTimer.current);
     };
   }, []);
 
+  const cancelPosition = () => {
+    positionRevision.current += 1;
+    if (positionTimer.current) clearTimeout(positionTimer.current);
+    positionTimer.current = null;
+    setLocating(false);
+  };
+
   const reset = () => {
     request.current?.abort();
-    positionRevision.current += 1;
-    setLocating(false);
+    cancelPosition();
     setStops([]);
     setSelected(null);
     setStatus('idle');
@@ -201,6 +209,8 @@ export function PublicTransitExplorer({
   }, []);
 
   const search = () => {
+    cancelPosition();
+    setAccuracyNotice('');
     if (!city) { setMessage('請先選擇要查詢的縣市。'); return; }
     const term = keyword.trim();
     if (term.length < 2) { setMessage('請輸入至少兩個字的站牌名稱。'); return; }
@@ -209,6 +219,7 @@ export function PublicTransitExplorer({
 
   const nearby = async () => {
     if (!city) { setMessage('請先選擇要查詢的縣市。'); return; }
+    reset();
     const run = ++positionRevision.current;
     setLocating(true);
     setMessage('');
@@ -220,10 +231,20 @@ export function PublicTransitExplorer({
         setMessage('尚未授權定位。你仍可輸入站牌名稱查詢。');
         return;
       }
+      positionTimer.current = setTimeout(() => {
+        if (!mounted.current || run !== positionRevision.current) return;
+        positionRevision.current += 1;
+        positionTimer.current = null;
+        setLocating(false);
+        setMessage('定位逾時，請重新定位或輸入站牌名稱查詢。');
+      }, 10_000);
       const location = await Location.getCurrentPositionAsync({
         accuracy: Location.Accuracy.Balanced,
       });
       if (!mounted.current || run !== positionRevision.current) return;
+      if (positionTimer.current) clearTimeout(positionTimer.current);
+      positionTimer.current = null;
+      setLocating(false);
       const lat = location.coords.latitude;
       const lon = location.coords.longitude;
       if (!Number.isFinite(lat) || !Number.isFinite(lon) ||
@@ -238,7 +259,11 @@ export function PublicTransitExplorer({
       if (mounted.current && run === positionRevision.current)
         setMessage('無法取得位置。你仍可輸入站牌名稱查詢。');
     } finally {
-      if (mounted.current && run === positionRevision.current) setLocating(false);
+      if (mounted.current && run === positionRevision.current) {
+        if (positionTimer.current) clearTimeout(positionTimer.current);
+        positionTimer.current = null;
+        setLocating(false);
+      }
     }
   };
 
@@ -319,6 +344,16 @@ export function PublicTransitExplorer({
           disabled={locating || status === 'loading'}
           onPress={() => void nearby()}
         />
+        {locating && (
+          <AIButton
+            label="取消定位"
+            variant="ghost"
+            onPress={() => {
+              cancelPosition();
+              setMessage('已取消定位，仍可搜尋站名。');
+            }}
+          />
+        )}
         {status === 'loading' && <Text accessibilityRole="progressbar" style={body}>正在查詢官方站牌…</Text>}
         {message ? <Text accessibilityRole="alert" style={body}>{message}</Text> : null}
         {accuracyNotice ? <Text style={body}>{accuracyNotice}</Text> : null}

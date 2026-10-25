@@ -1,4 +1,4 @@
-import { doc, getDoc } from 'firebase/firestore';
+import { doc, getDoc, getDocs } from 'firebase/firestore';
 import { firebaseSource } from '../../data/firebaseSource';
 import { createCachedSource } from '../../data/cachedSource';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -48,6 +48,7 @@ function snapshot(path: string, data: Record<string, unknown> | null) {
 beforeEach(async () => {
   await AsyncStorage.clear();
   jest.mocked(getDoc).mockReset();
+  jest.mocked(getDocs).mockReset();
   jest.mocked(doc).mockImplementation((...args: unknown[]) => ({ path: args.slice(1).join('/') }) as never);
 });
 
@@ -80,6 +81,44 @@ test('does not treat a global announcement as another school', async () => {
     title: '未標學校',
     schoolId: 'pu',
   });
+});
+
+test('announcement detail preserves full text and visibility metadata without reopening hidden canonical records', async () => {
+  const visible = {
+    title: '期中成績繳交作業提醒', schoolId: 'pu',
+    body: '完整說明。\n\n請檢附文件。', summary: '摘要。',
+    audience: 'staff', studentFeed: false, visible: true,
+  };
+  jest.mocked(getDoc).mockImplementation(async (ref: { path: string }) => {
+    if (ref.path === 'schools/pu/announcements/visible') return snapshot(ref.path, visible) as never;
+    return snapshot(ref.path, { ...visible, visible: false }) as never;
+  });
+  await expect(firebaseSource.getAnnouncement('visible', 'pu')).resolves.toMatchObject(visible);
+  jest.mocked(getDoc).mockClear();
+  await expect(firebaseSource.getAnnouncement('hidden', 'pu')).resolves.toBeNull();
+  expect(getDoc).toHaveBeenCalledTimes(1);
+  expect((jest.mocked(getDoc).mock.calls[0][0] as { path: string }).path).toBe('schools/pu/announcements/hidden');
+});
+
+test.each(['pu', undefined])('hidden legacy announcements are omitted for school %s', async (schoolId) => {
+  jest.mocked(getDoc).mockImplementation(async (ref: { path: string }) =>
+    snapshot(ref.path, ref.path.startsWith('schools/') ? null : { title: '下架公告', schoolId: 'pu', visible: false }) as never,
+  );
+  await expect(firebaseSource.getAnnouncement('hidden', schoolId)).resolves.toBeNull();
+});
+
+test.each(['pu', undefined])('announcement lists omit hidden rows and preserve public metadata for school %s', async (schoolId) => {
+  const visible = {
+    title: '期中成績繳交作業提醒', schoolId: 'pu', publishedAt: '2026-10-25T00:00:00Z',
+    body: '完整內容。', summary: '摘要。', audience: 'staff', studentFeed: false, visible: true,
+  };
+  jest.mocked(getDocs).mockResolvedValue({ docs: [
+    snapshot('announcements/visible', visible),
+    snapshot('announcements/hidden', { ...visible, title: '下架公告', visible: false }),
+  ] } as never);
+  const rows = await firebaseSource.listAnnouncements(schoolId);
+  expect(rows).toHaveLength(1);
+  expect(rows[0]).toMatchObject({ id: 'visible', ...visible });
 });
 
 test('actual Firebase course reads and cache stay on the explicitly requested school', async () => {
