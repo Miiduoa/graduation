@@ -35,6 +35,15 @@ describe('leave date and course suggestions', () => {
     expect(suggestedLeaveCourses(courses, '2026-10-25', '2026-10-25')).toEqual([]);
     expect(suggestedLeaveCourses(courses, 'invalid', '2026-10-26')).toEqual([]);
   });
+  it('separates morning from afternoon for an identified school schedule', () => {
+    const courses = [
+      { ...course('early', 1), start: 1, end: 2 },
+      { ...course('late', 1), start: 10, end: 11 },
+    ];
+    expect(suggestedLeaveCourses(courses, '2026-10-26', '2026-10-26', 'morning', 'pu').map((c) => c.id)).toEqual(['early']);
+    expect(suggestedLeaveCourses(courses, '2026-10-26', '2026-10-26', 'afternoon', 'pu').map((c) => c.id)).toEqual(['late']);
+    expect(suggestedLeaveCourses(courses, '2026-10-26', '2026-10-26', 'afternoon', 'unknown-school')).toHaveLength(2);
+  });
   it('formats Taiwanese today independently of the caller machine timezone', () => {
     expect(taipeiToday(new Date('2026-10-25T16:30:00Z'))).toBe('2026-10-26');
   });
