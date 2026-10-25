@@ -4,12 +4,14 @@ import { useEffect, useRef, useState } from 'react';
 import { resolveSchoolPublicServices } from '@campus/shared/src/schoolPublicServices';
 import {
   DORM_CHECKLISTS,
+  DORM_INSPECTION_ITEMS,
   DORM_MILESTONE_LIMIT,
   DORM_PARCEL_LIMIT,
   DORM_REPAIR_SHORTCUTS,
   DORM_REPAIR_CATEGORIES,
   DORM_REPAIR_STATUSES,
   dormChecklistProgress,
+  dormInspectionProgress,
   dormStorageKey,
   emptyDormWorkspace,
   formatDormRepairForCopy,
@@ -309,6 +311,7 @@ function DormitoryWorkspace({ scope, schoolId, schoolName, guest }: {
 
   const data = storage.data;
   const progress = dormChecklistProgress(data);
+  const inspectionProgress = dormInspectionProgress(data);
   const openRepairs = data.repairs.filter((item) => item.status !== 'resolved');
   const visibleRepairs = data.repairs.filter((item) => repairFilter === 'all' || item.status === repairFilter);
   const remaining = data.laundryEndAt ? Math.max(0, Math.ceil((data.laundryEndAt - now) / 60000)) : 0;
@@ -628,6 +631,43 @@ function DormitoryWorkspace({ scope, schoolId, schoolName, guest }: {
         {view === 'checklist' && (
           <div className={styles.checklist}>
             <div className={styles.panel}><p className={styles.eyebrow}>PERSONAL CHECKLIST</p><h3>入住與退宿清單</h3><p>勾選只記錄自己的準備進度，不會建立校方申請。總進度：{progress.completed} / {progress.total}</p><progress max={progress.total} value={progress.completed} aria-label="準備事項完成進度" /></div>
+            <section className={styles.panel}>
+              <div className={styles.sectionTitle}>
+                <div><p className={styles.eyebrow}>入住檢查</p><h3>房況與設備點檢</h3></div>
+                <span className={styles.status}>{inspectionProgress.checked}/{inspectionProgress.total} 已確認</span>
+              </div>
+              <p className={styles.muted}>入住時逐項確認房況；這是你的個人記錄，不是校方驗收。發現異常，可直接預填設備問題，再依學校正式方式通報。</p>
+              <p className={styles.source}>{inspectionProgress.issues
+                ? inspectionProgress.issues + ' 項待處理，請盡快確認校方正式通報方式。'
+                : '未發現已標記的設備問題。未檢查項目不代表正常。'}</p>
+              <ul className={styles.inspectionList}>
+                {DORM_INSPECTION_ITEMS.map((item) => {
+                  const status = data.inspection[item.id];
+                  return <li key={item.id}>
+                    <div>
+                      <h4>{item.title}</h4>
+                      <span className={styles.source}>{
+                        status === 'ok' ? '自行檢查：正常'
+                          : status === 'issue' ? '自行檢查：待處理' : '尚未檢查'
+                      }</span>
+                    </div>
+                    <div className={styles.actions} role="group" aria-label={item.title + '狀態'}>
+                      <button type="button" aria-pressed={!status} onClick={() => {
+                        const next = { ...data.inspection };
+                        delete next[item.id];
+                        save({ ...data, inspection: next });
+                      }}>未檢查</button>
+                      <button type="button" aria-pressed={status === 'ok'}
+                        onClick={() => save({ ...data, inspection: { ...data.inspection, [item.id]: 'ok' } })}>正常</button>
+                      <button type="button" aria-pressed={status === 'issue'}
+                        onClick={() => save({ ...data, inspection: { ...data.inspection, [item.id]: 'issue' } })}>待處理</button>
+                      {status === 'issue' && <button type="button"
+                        onClick={() => beginRepair(undefined, { category: item.category, title: item.repairTitle })}>記錄問題</button>}
+                    </div>
+                  </li>;
+                })}
+              </ul>
+            </section>
             {DORM_CHECKLISTS.map((group) => (
               <section className={styles.panel} key={group.stage}>
                 <div className={styles.sectionTitle}><h3>{group.title}</h3><span className={styles.status}>{group.items.filter((item) => data.checkmarks[item.id]).length} / {group.items.length}</span></div>
