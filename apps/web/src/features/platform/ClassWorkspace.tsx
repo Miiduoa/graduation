@@ -33,12 +33,60 @@ import {
   WorkspaceMembers,
 } from './WorkspaceExtras';
 import styles from './Platform.module.css';
+import { CLASSROOM_ACCESS_ERROR, classroomAccessDenied } from './classroomAccess';
+import { useActiveRequest } from './useActiveRequest';
 
 type Tab = 'session' | 'course' | 'members' | 'affiliation';
 
 export function ClassWorkspace({ workspaceId }: { workspaceId: string }) {
   const valid = WORKSPACE_ID_PATTERN.test(workspaceId);
   const auth = useNuniSession();
+  if (!valid) {
+    return (
+      <SiteShell header={<AppHeader />}>
+        <section className={styles.panel}>
+          <h1>找不到課班</h1>
+          <p className={styles.muted}>可能邀請已失效，或你還沒有加入。</p>
+          <Link className={nuni.button} href={JOIN_PATH}>
+            回到加入課班
+          </Link>
+        </section>
+      </SiteShell>
+    );
+  }
+
+  if (auth.loading || auth.pendingLogout) {
+    return (
+      <SiteShell header={<AppHeader />}>
+        <p role="status">正在確認課班帳號…</p>
+      </SiteShell>
+    );
+  }
+
+  if (!auth.session) {
+    return (
+      <SiteShell header={<AppHeader />}>
+        <section className={`${common.stateCard} ${styles.panel}`}>
+          <h1>請先登入</h1>
+          <p>打開課班工作台需要已登入的平台帳號。</p>
+          <Link className={nuni.button} href={accountReturnHref(workspacePath(workspaceId))}>
+            前往登入
+          </Link>
+        </section>
+      </SiteShell>
+    );
+  }
+
+  return (
+    <ClassWorkspaceContent
+      key={`${auth.session.platformAccountId}:${auth.session.context}:${workspaceId}`}
+      workspaceId={workspaceId}
+      context={auth.session.context}
+    />
+  );
+}
+
+function ClassWorkspaceContent({ workspaceId, context }: { workspaceId: string; context: string }) {
   const classes = useClasses(beginCourseRequest);
   const params = useSearchParams();
   const invite = params.get('invite') || '';
@@ -54,43 +102,66 @@ export function ClassWorkspace({ workspaceId }: { workspaceId: string }) {
   const [epoch, setEpoch] = useState(0);
   const [outlineVersion, setOutlineVersion] = useState(0);
   const generation = useRef(0);
+  const captureRequest = useActiveRequest();
+
+  function clearPrivateWorkspace() {
+    setWorkspace(null);
+    setAssignments([]);
+    setUnits(null);
+    setMembers([]);
+    setAffiliation(null);
+    setAffiliationApps([]);
+  }
 
   function beginCourseRequest() {
     const started = generation.current;
+    const isCurrent = captureRequest();
     return () => {
-      if (generation.current !== started) return;
+      if (!isCurrent() || generation.current !== started) return;
       ++generation.current;
-      setWorkspace(null);
-      setError('目前無法存取這門課程，請重新確認課程權限。');
+      clearPrivateWorkspace();
+      setError(CLASSROOM_ACCESS_ERROR);
     };
   }
 
   useEffect(() => {
-    if (!valid || !auth.session) return;
-    const context = auth.session.context;
+    const isCurrent = captureRequest();
     let active = true;
     const run = ++generation.current;
     setError('');
     setMissing(false);
+    const readExtra = async (resource: string, clear: () => void) => {
+      const result = await platformFetch(
+        `class-workspaces/${workspaceId}/${resource}`,
+        'GET',
+        undefined,
+        context,
+      );
+      if (!active || !isCurrent() || generation.current !== run) return result;
+      if (classroomAccessDenied(result)) {
+        // A denied optional read is authoritative even if another parallel read
+        // has not completed. Do not retain its old private projection meanwhile.
+        clear();
+        if (result.status === 401 || result.status === 409) {
+          ++generation.current;
+          clearPrivateWorkspace();
+          setError(CLASSROOM_ACCESS_ERROR);
+          if (result.status === 401)
+            window.location.replace(accountReturnHref(workspacePath(workspaceId)));
+        }
+      }
+      return result;
+    };
     void Promise.all([
       classes.get(workspaceId),
       classes.assignments(workspaceId),
       classes.units(workspaceId).catch(() => [] as NuniUnit[]),
-      platformFetch(`class-workspaces/${workspaceId}/members`, 'GET', undefined, context),
-      platformFetch(`class-workspaces/${workspaceId}/affiliation`, 'GET', undefined, context),
-      platformFetch(
-        `class-workspaces/${workspaceId}/affiliation-applications`,
-        'GET',
-        undefined,
-        context,
-      ),
+      readExtra('members', () => setMembers([])),
+      readExtra('affiliation', () => setAffiliation(null)),
+      readExtra('affiliation-applications', () => setAffiliationApps([])),
     ])
       .then(([item, nextAssignments, nextUnits, memberResult, affiliationResult, appsResult]) => {
-        if (!active || generation.current !== run) return;
-        if (memberResult.status === 401 || affiliationResult.status === 401) {
-          window.location.replace(accountReturnHref(workspacePath(workspaceId)));
-          return;
-        }
+        if (!active || !isCurrent() || generation.current !== run) return;
         setWorkspace(item);
         setAssignments(nextAssignments);
         setUnits(nextUnits);
@@ -103,14 +174,13 @@ export function ClassWorkspace({ workspaceId }: { workspaceId: string }) {
         setAffiliationApps(appsResult.ok ? asRecords(appsResult.body.applications) : []);
       })
       .catch((failure) => {
-        if (!active || generation.current !== run) return;
-        if (failure instanceof NuniError && failure.status === 401) {
-          window.location.replace(accountReturnHref(workspacePath(workspaceId)));
-          return;
-        }
-        if (failure instanceof NuniError && [403, 404].includes(failure.status)) {
-          setMissing(true);
-          setWorkspace(null);
+        if (!active || !isCurrent() || generation.current !== run) return;
+        if (classroomAccessDenied(failure)) {
+          clearPrivateWorkspace();
+          setError(CLASSROOM_ACCESS_ERROR);
+          if (failure instanceof NuniError && [403, 404].includes(failure.status)) setMissing(true);
+          if (failure instanceof NuniError && failure.status === 401)
+            window.location.replace(accountReturnHref(workspacePath(workspaceId)));
           return;
         }
         setError(nuniErrorMessage(failure) || '暫時打不開');
@@ -119,35 +189,7 @@ export function ClassWorkspace({ workspaceId }: { workspaceId: string }) {
       active = false;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [workspaceId, epoch, auth.session?.context, valid]);
-
-  if (!valid) {
-    return (
-      <SiteShell header={<AppHeader />}>
-        <section className={styles.panel}>
-          <h1>找不到課班</h1>
-          <p className={styles.muted}>可能邀請已失效，或你還沒有加入。</p>
-          <Link className={nuni.button} href={JOIN_PATH}>
-            回到加入課班
-          </Link>
-        </section>
-      </SiteShell>
-    );
-  }
-
-  if (!auth.session && !auth.loading) {
-    return (
-      <SiteShell header={<AppHeader />}>
-        <section className={`${common.stateCard} ${styles.panel}`}>
-          <h1>請先登入</h1>
-          <p>打開課班工作台需要已登入的平台帳號。</p>
-          <Link className={nuni.button} href={accountReturnHref(workspacePath(workspaceId))}>
-            前往登入
-          </Link>
-        </section>
-      </SiteShell>
-    );
-  }
+  }, [workspaceId, context, epoch, captureRequest]);
 
   if (missing) {
     return (
@@ -224,8 +266,10 @@ export function ClassWorkspace({ workspaceId }: { workspaceId: string }) {
           <ClassroomSessions
             workspaceId={workspace.id}
             isTeacher={teacher}
+            context={context}
+            beginRequest={beginCourseRequest}
+            refreshVersion={epoch}
             units={(units ?? []).map((unit) => ({ id: unit.id, title: unit.title }))}
-            context={auth.session!.context}
           />
         ) : null}
         {tab === 'course' ? (
@@ -235,7 +279,8 @@ export function ClassWorkspace({ workspaceId }: { workspaceId: string }) {
                 workspaceId={workspace.id}
                 canInvite={workspace.memberRole === 'owner-teacher' && workspace.state === 'active'}
                 initialCode={invite}
-                context={auth.session!.context}
+                context={context}
+                beginRequest={beginCourseRequest}
               />
               <CourseLearningPath
                 workspace={workspace}
@@ -274,16 +319,15 @@ export function ClassWorkspace({ workspaceId }: { workspaceId: string }) {
             </div>
           </CourseAccessBoundary>
         ) : null}
-        {tab === 'members' ? (
-          <WorkspaceMembers members={members} />
-        ) : null}
+        {tab === 'members' ? <WorkspaceMembers members={members} /> : null}
         {tab === 'affiliation' ? (
           <WorkspaceAffiliation
             workspaceId={workspace.id}
-            canApply={workspace.memberRole === 'owner-teacher'}
+            canApply={workspace.memberRole === 'owner-teacher' && workspace.state === 'active'}
             affiliation={affiliation}
             applications={affiliationApps}
-            context={auth.session!.context}
+            context={context}
+            beginRequest={beginCourseRequest}
             onChanged={() => setEpoch((value) => value + 1)}
           />
         ) : null}

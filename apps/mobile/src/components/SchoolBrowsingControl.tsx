@@ -20,7 +20,7 @@ import { fetchSchoolDirectory } from '../services/schoolDirectory';
 import { theme } from '../ui/theme';
 import { useThemeStyleSheet } from '../ui/useThemeStyleSheet';
 
-export function SchoolBrowsingControl() {
+export function SchoolBrowsingControl({ compact = false }: { compact?: boolean }) {
   const s = useThemeStyleSheet(createStyles);
   const { school, setSelection } = useSchool();
   const [open, setOpen] = useState(false);
@@ -64,10 +64,12 @@ export function SchoolBrowsingControl() {
 
   return (
     <>
-      <View style={s.browsing}>
-        <Text accessibilityRole="header" style={s.eyebrow}>
-          瀏覽校園
-        </Text>
+      <View style={compact ? s.compactBrowsing : s.browsing}>
+        {!compact ? (
+          <Text accessibilityRole="header" style={s.eyebrow}>
+            瀏覽校園
+          </Text>
+        ) : null}
         <Pressable
           accessibilityRole="button"
           accessibilityLabel={`目前瀏覽${school.name}，選擇其他學校`}
@@ -78,14 +80,20 @@ export function SchoolBrowsingControl() {
             setSearchFocused(false);
             setOpen(true);
           }}
-          style={({ pressed }) => [s.schoolChoice, pressed && s.pressed]}
+          style={({ pressed }) => [
+            s.schoolChoice,
+            compact && s.compactChoice,
+            pressed && s.pressed,
+          ]}
         >
-          <Text style={s.schoolName}>{school.name}</Text>
-          <Text style={s.changeSchool}>選擇其他學校</Text>
+          <Text style={[s.schoolName, compact && s.compactSchoolName]}>{school.name}</Text>
+          <Text style={s.changeSchool}>{compact ? '切換' : '選擇其他學校'}</Text>
         </Pressable>
-        <Text style={s.browsingNote}>
-          切換後，公開校園資訊會依學校更新。已登入的帳號、課班資格及校務資料權限不會跟著改變。
-        </Text>
+        {!compact ? (
+          <Text style={s.browsingNote}>
+            切換後，公開校園資訊會依學校更新。已登入的帳號、課班資格及校務資料權限不會跟著改變。
+          </Text>
+        ) : null}
       </View>
       <Modal
         visible={open}
@@ -111,6 +119,9 @@ export function SchoolBrowsingControl() {
                 <Text style={s.buttonText}>關閉</Text>
               </Pressable>
             </View>
+            <Text style={s.pickerNote}>
+              切換公開校園資訊，已登入的學校帳號與個人資料權限會維持原設定。
+            </Text>
             <View style={[s.searchBox, searchFocused && s.searchFocused]}>
               <TextInput
                 ref={searchInput}
@@ -253,6 +264,17 @@ const createStyles = () =>
       borderBottomWidth: 1,
       borderColor: theme.colors.border,
     },
+    compactBrowsing: { flex: 1, minWidth: 0 },
+    compactChoice: {
+      minHeight: 44,
+      paddingVertical: 8,
+      paddingHorizontal: 12,
+      borderWidth: 1,
+      borderColor: theme.colors.border,
+      borderRadius: 10,
+      backgroundColor: theme.colors.surface,
+    },
+    compactSchoolName: { fontSize: 14, lineHeight: 22, flex: 1 },
     eyebrow: { color: theme.colors.muted, fontSize: 12, fontWeight: '500' },
     schoolChoice: {
       minHeight: 50,
@@ -289,6 +311,13 @@ const createStyles = () =>
       lineHeight: 30,
       fontWeight: '600',
       flex: 1,
+    },
+    pickerNote: {
+      paddingHorizontal: 20,
+      paddingBottom: 14,
+      color: theme.colors.muted,
+      fontSize: 12,
+      lineHeight: 20,
     },
     button: {
       minHeight: 44,

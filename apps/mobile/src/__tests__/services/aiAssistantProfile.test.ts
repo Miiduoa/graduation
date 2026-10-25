@@ -60,7 +60,7 @@ describe('AI assistant capability profile', () => {
 
   it('answers parameter requests honestly in offline chat', async () => {
     const response = await chatWithCampusAssistant(
-      [{ role: 'user', content: '繼續訓練你，讓你的參數跟 Codex 一樣多' }],
+      [{ role: 'user', content: '繼續訓練你，讓你的參數跟 ChatGPT 一樣多' }],
       { schoolId: 'tw-pu', userId: 'u1', userName: '測試同學' },
     );
 

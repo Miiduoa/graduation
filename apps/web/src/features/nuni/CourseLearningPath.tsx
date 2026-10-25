@@ -191,7 +191,7 @@ export function CourseLearningPath({
         </div>
       )}
       {teacher && (
-        <p className={styles.context}>章節是教學內容分類，不代表學校正式課綱；學生的進度只依平台實際作業與測驗回執計算。</p>
+        <p className={styles.context}>學生進度依作業繳交與測驗作答紀錄計算；正式課綱請以學校公告為準。</p>
       )}
       {workspace.state === 'archived' && <p className={styles.context}>課程已封存，原有章節仍可閱讀，但無法新增內容或送出作答。</p>}
       {units === null && (
@@ -202,10 +202,10 @@ export function CourseLearningPath({
       )}
       {error && <p className={shared.notice} role="alert">{error} 可再次更新，尚未取得的內容不計入進度。</p>}
       {reading && <p role="status">正在核對教材與測驗…</p>}
-      {!complete && !reading && <p className={styles.context}>部分資料尚未取得，以下只顯示已確認的內容，不推算整門課的完成比例。</p>}
+      {!complete && !reading && <p className={styles.context}>部分內容尚未載入，暫時無法顯示完整進度。</p>}
       {quizzesLimited && (
         <p className={styles.context}>
-          測驗已達目前 API 的 100 筆顯示上限，清單和繳交／作答進度可能不完整。
+          目前已載入 100 份測驗，清單與進度可能不完整。
         </p>
       )}
       {materialsIncomplete && materials && (
@@ -240,7 +240,7 @@ export function CourseLearningPath({
               {!teacher && canClaimTaskMetrics && totals.assigned > 0 && (
                 <p className={styles.progressText}>已完成 {totals.completed} / {totals.assigned} 項繳交或作答 · 待辦 {totals.pending} 項</p>
               )}
-              {section.missingUnit && <p className={styles.context}>部分內容原本所屬的章節已無法核對，暫時集中顯示於此，未變更任何原始資料。</p>}
+              {section.missingUnit && <p className={styles.context}>部分內容所屬的章節已無法查看，暫列於此。</p>}
               {empty ? (
                 <p className={styles.empty}>還沒有安排學習內容。</p>
               ) : (

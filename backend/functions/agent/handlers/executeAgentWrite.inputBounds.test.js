@@ -57,19 +57,64 @@ describe('executeAgentWrite input bounds', () => {
     expect(executeSpy).not.toHaveBeenCalled();
   });
 
-  test('still rejects unauthenticated callers before tool execution', async () => {
+  test('rejects oversized input before reading the user profile', async () => {
+    mockStore = transactionStore([]);
+    const readSpy = jest.spyOn(mockStore.db, 'collection');
+    const answers = Array.from({ length: MAX_ARRAY_ITEMS + 1 }, (_, index) => ({
+      questionId: `q${index}`,
+      value: 'x',
+    }));
+
+    await expect(
+      executeAgentWrite({
+        auth: { uid: 'nobody' },
+        data: {
+          toolName: 'submitQuizAttempt',
+          input: { quizId: 'quiz', courseSpaceId: 'course', answers },
+        },
+      }),
+    ).rejects.toMatchObject({ code: 'resource-exhausted' });
+    expect(readSpy).not.toHaveBeenCalled();
+  });
+
+  test('rejects unauthenticated callers before input limits, reads or tool execution', async () => {
     const tool = byName.get('submitQuizAttempt');
     const executeSpy = jest.spyOn(tool, 'execute');
+    const readSpy = jest.spyOn(mockStore.db, 'collection');
 
     await expect(
       executeAgentWrite({
         data: {
           toolName: 'submitQuizAttempt',
-          input: { quizId: 'quiz', courseSpaceId: 'course', answers: [] },
+          input: {
+            quizId: 'quiz',
+            courseSpaceId: 'course',
+            answers: Array(MAX_ARRAY_ITEMS + 1).fill(null),
+          },
         },
       }),
     ).rejects.toMatchObject({ code: 'unauthenticated' });
 
+    expect(readSpy).not.toHaveBeenCalled();
+    expect(executeSpy).not.toHaveBeenCalled();
+  });
+
+  test('valid input cannot bypass the account deletion guard', async () => {
+    mockStore.docs.set('users/alice', { schoolId: 'pu', accountDeletionInProgress: true });
+    const tool = byName.get('submitQuizAttempt');
+    const executeSpy = jest.spyOn(tool, 'execute');
+    await expect(
+      executeAgentWrite({
+        auth: { uid: 'alice' },
+        data: {
+          toolName: 'submitQuizAttempt',
+          input: { quizId: 'quiz', courseSpaceId: 'course', answers: [] },
+        },
+      }),
+    ).rejects.toMatchObject({
+      code: 'failed-precondition',
+      details: { reason: 'account-deletion' },
+    });
     expect(executeSpy).not.toHaveBeenCalled();
   });
 });

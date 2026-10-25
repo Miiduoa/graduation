@@ -52,3 +52,29 @@ test('unavailable account source fails closed', async () => {
   await expect(guarded({}, handler)({ auth: { uid: 'alice' } })).rejects.toThrow('unavailable');
   expect(handler).not.toHaveBeenCalled();
 });
+test('failed preflight prevents account reads and is not forwarded to Firebase', async () => {
+  const { guarded, get, onCall } = setup({});
+  const handler = jest.fn();
+  const preflight = jest.fn(async () => {
+    throw new Error('request rejected');
+  });
+  await expect(
+    guarded({ region: 'asia-east1', preflight }, handler)({ auth: { uid: 'alice' } }),
+  ).rejects.toThrow('request rejected');
+  expect(get).not.toHaveBeenCalled();
+  expect(handler).not.toHaveBeenCalled();
+  expect(onCall).toHaveBeenCalledWith({ region: 'asia-east1' }, expect.any(Function));
+});
+test('successful preflight does not bypass account deletion protection', async () => {
+  const { guarded, get } = setup({ accountDeletionInProgress: true });
+  const preflight = jest.fn(async () => {});
+  const handler = jest.fn();
+  const request = { auth: { uid: 'alice' }, data: {} };
+  await expect(guarded({ preflight }, handler)(request)).rejects.toMatchObject({
+    code: 'failed-precondition',
+    details: { reason: 'account-deletion' },
+  });
+  expect(preflight).toHaveBeenCalledWith(request);
+  expect(get).toHaveBeenCalledTimes(1);
+  expect(handler).not.toHaveBeenCalled();
+});

@@ -55,7 +55,7 @@ const ASSIGNMENT = /^cwa_[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f
 const QUIZ = /^cwq_[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 const UNIT = /^cwu_[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 const ACCOUNT = /^pa_[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
-const CLASSROOM_SESSION = /^[A-Za-z0-9][A-Za-z0-9_-]{0,119}$/;
+const CLASSROOM_SESSION = /^cws_[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 
 function field(input: Record<string, unknown>, name: string, min: number, max: number): string {
   const value = input[name];
@@ -370,7 +370,7 @@ export async function handleNuni(request: NextRequest, segments: string[]): Prom
         segments.length === 5 &&
         segments[2] === 'classroom-sessions' &&
         CLASSROOM_SESSION.test(segments[3] || '') &&
-        (segments[4] === 'roster' || segments[4] === 'makeup-requests')
+        segments[4] === 'roster'
       )
         return jsonResponse(await platformRequest(path, session));
       if (segments.length === 5 && isAssignment && segments[4] === 'submissions') {

@@ -48,10 +48,6 @@ vi.mock('@/components/SiteShell', () => ({
 vi.mock('@/components/NuniSignIn', () => ({
   NuniSignIn: () => <button type="button">使用 Google 帳號繼續</button>,
 }));
-vi.mock('@/components/LoginLink', () => ({
-  LoginLink: ({ children }: { children: ReactNode }) => <a href="/login">{children}</a>,
-}));
-
 vi.mock('next/link', () => ({
   default: ({
     href,
@@ -253,7 +249,9 @@ it('asks an unsigned visitor to sign in instead of showing a fake gradebook', ()
   expect(screen.getByRole('heading', { name: '課業成績與回饋' })).toBeTruthy();
   expect(screen.getByText(GRADE_COPY.unsigned)).toBeTruthy();
   expect(screen.getByRole('button', { name: '使用 Google 帳號繼續' })).toBeTruthy();
-  expect(screen.getByRole('link', { name: '學校帳號登入' })).toBeTruthy();
+  expect(screen.getByRole('link', { name: '學校帳號登入' }).getAttribute('href')).toBe(
+    '/login?reconnect=school&returnUrl=%2Fgrades%3Ftab%3Dfeedback',
+  );
 });
 
 it('says it is loading while the session is still resolving', () => {

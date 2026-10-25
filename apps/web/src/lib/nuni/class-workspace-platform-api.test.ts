@@ -52,13 +52,14 @@ afterEach(() => {
 });
 
 it('rejects classroom-session reads without the Campus One session', async () => {
-  expect((await call(`class-workspaces/${workspaceId}/classroom-sessions`, 'GET', undefined, false)).status).toBe(
-    401,
-  );
+  expect(
+    (await call(`class-workspaces/${workspaceId}/classroom-sessions`, 'GET', undefined, false))
+      .status,
+  ).toBe(401);
   expect(fetcher).not.toHaveBeenCalled();
 });
 
-it('forwards classroom-session list, roster and pending makeup reads to nuni-api', async () => {
+it('forwards classroom-session list and roster reads to nuni-api', async () => {
   respond({ sessions: [{ id: sessionId, title: '本堂課', state: 'open' }] });
   expect((await call(`class-workspaces/${workspaceId}/classroom-sessions`)).status).toBe(200);
   expect(fetcher.mock.calls[0][0]).toBe(
@@ -68,11 +69,6 @@ it('forwards classroom-session list, roster and pending makeup reads to nuni-api
   respond({ present: [], absent: [], late: [] });
   expect(
     (await call(`class-workspaces/${workspaceId}/classroom-sessions/${sessionId}/roster`)).status,
-  ).toBe(200);
-  respond({ requests: [] });
-  expect(
-    (await call(`class-workspaces/${workspaceId}/classroom-sessions/${sessionId}/makeup-requests`))
-      .status,
   ).toBe(200);
 });
 
@@ -173,3 +169,23 @@ it('forwards a makeup decision with platformAccountId', async () => {
     decision: 'accept',
   });
 });
+
+it('rejects the nonexistent GET makeup-requests endpoint without contacting the upstream', async () => {
+  respond({ requests: [] });
+  const result = await call(
+    `class-workspaces/${workspaceId}/classroom-sessions/${sessionId}/makeup-requests`,
+  );
+  expect(result.status).toBe(404);
+  expect(fetcher).not.toHaveBeenCalled();
+});
+
+it.each(['session-1', 'cw_11111111-1111-4111-8111-111111111111'])(
+  'rejects an invalid classroom session identifier %s before forwarding',
+  async (invalid) => {
+    respond({});
+    const root = `class-workspaces/${workspaceId}/classroom-sessions/${invalid}`;
+    expect((await call(`${root}/roster`)).status).toBe(404);
+    expect((await call(`${root}/end`, 'POST', {})).status).toBe(404);
+    expect(fetcher).not.toHaveBeenCalled();
+  },
+);

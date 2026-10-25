@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { SiteShell } from '@/components/SiteShell';
 import { Button } from '@/components/ui/Button';
 import { Input, Select, Textarea } from '@/components/ui/Input';
@@ -10,15 +10,27 @@ import { AdminHeader } from '@/features/admin/AdminHeader';
 import { AdminMerchants } from '@/features/admin/AdminMerchants';
 import { AdminPeople } from '@/features/admin/AdminPeople';
 import { AdminSchools } from '@/features/admin/AdminSchools';
-import { parseSchools } from '@/features/admin/api';
+import { parseProxy, parseSchools } from '@/features/admin/api';
+import {
+  createPeopleParser,
+  parseOversightMerchants,
+  type OversightMerchantApplication,
+  type OversightMerchantInterest,
+} from '@/features/admin/oversightApi';
 import type { SchoolLifecycleFilter } from '@/features/admin/adminNav';
 import { useAdminResource } from '@/features/admin/hooks';
 import { useNuniSession } from '@/features/nuni/Session';
 import common from '@/app/servicePages.module.css';
 import admin from '@/features/admin/Admin.module.css';
-import { accountReturnHref, isOpsTab, OPS_PATH, SCHOOL_REVIEW_PATH, type OpsTab } from './constants';
+import {
+  accountReturnHref,
+  isOpsTab,
+  OPS_PATH,
+  SCHOOL_REVIEW_PATH,
+  type OpsTab,
+} from './constants';
 import { adminFetch, asRecords } from './platformFetch';
-import { parseOversightMerchants } from '@/features/admin/oversightApi';
+import { useActiveRequest } from './useActiveRequest';
 import styles from './Platform.module.css';
 
 const tabs: Array<[OpsTab, string]> = [
@@ -31,8 +43,8 @@ const tabs: Array<[OpsTab, string]> = [
 
 function readTab(): OpsTab {
   if (typeof window === 'undefined') return 'schools';
-  const params = new URLSearchParams(window.location.search);
-  if (isOpsTab(params.get('tab'))) return params.get('tab') as OpsTab;
+  const queryTab = new URLSearchParams(window.location.search).get('tab');
+  if (isOpsTab(queryTab)) return queryTab;
   const hash = window.location.hash.replace(/^#/, '');
   return isOpsTab(hash) ? hash : 'schools';
 }
@@ -40,6 +52,8 @@ function readTab(): OpsTab {
 export function OpsConsole() {
   const auth = useNuniSession();
   const operator = !!auth.session?.isPlatformOperator;
+  const suspended = auth.loading || auth.pendingLogout;
+  const sessionKey = `${auth.session?.platformAccountId}:${auth.session?.context}`;
   const [tab, setTab] = useState<OpsTab>('schools');
   const [schoolId, setSchoolId] = useState<string | null>(null);
   const [schoolQuery, setSchoolQuery] = useState('');
@@ -98,7 +112,7 @@ export function OpsConsole() {
           {tab === 'schools' ? (
             <AdminSchools
               context={auth.session!.context}
-              suspended={auth.loading}
+              suspended={suspended}
               selectedId={schoolId}
               search={schoolQuery}
               lifecycle={schoolLifecycle}
@@ -109,22 +123,32 @@ export function OpsConsole() {
           ) : null}
           {tab === 'people' ? (
             <PeopleTab
+              key={sessionKey}
               context={auth.session!.context}
-              suspended={auth.loading}
+              suspended={suspended}
               selectedSchool={schoolId}
               onSchool={setSchoolId}
+              onManageSchool={() => go('schools')}
             />
           ) : null}
           {tab === 'merchants' ? (
-            <MerchantsTab context={auth.session!.context} suspended={auth.loading} />
+            suspended ? (
+              <p role="status">正在確認管理權限…</p>
+            ) : (
+              <MerchantsTab key={sessionKey} context={auth.session!.context} />
+            )
           ) : null}
           {tab === 'affiliation' ? (
-            <AffiliationTab context={auth.session!.context} />
+            suspended ? (
+              <p role="status">正在確認管理權限…</p>
+            ) : (
+              <AffiliationTab key={sessionKey} context={auth.session!.context} />
+            )
           ) : null}
           {tab === 'audit' ? (
             <AdminAudit
               context={auth.session!.context}
-              suspended={auth.loading}
+              suspended={suspended}
               query={auditQuery}
               onQuery={setAuditQuery}
             />
@@ -161,13 +185,16 @@ function PeopleTab({
   suspended,
   selectedSchool,
   onSchool,
+  onManageSchool,
 }: {
   context: string;
   suspended: boolean;
   selectedSchool: string | null;
   onSchool: (id: string | null) => void;
+  onManageSchool: () => void;
 }) {
   const schools = useAdminResource('schools', context, parseSchools, !suspended);
+  const [peopleRevision, setPeopleRevision] = useState(0);
   const eligible = useMemo(
     () =>
       (schools.value ?? []).filter((school) =>
@@ -182,6 +209,7 @@ function PeopleTab({
   return (
     <div className={styles.stack}>
       <AdminPeople
+        key={peopleRevision}
         context={context}
         suspended={suspended}
         selectedSchool={tenantId}
@@ -192,11 +220,17 @@ function PeopleTab({
         <p className={styles.muted}>
           可以隨時再加一位老師或職員。還沒有管理員時，第一位要先設成學校管理員。已經有管理員後，才可以再加學校職員。不會蓋掉現有的人。核准學校時仍然不會自動把申請人設成管理員。
         </p>
-        {tenantId && selected ? (
+        {suspended ? (
+          <p role="status">正在確認管理權限…</p>
+        ) : tenantId && selected ? (
           <PeopleAddForm
+            key={tenantId}
+            context={context}
             tenantId={tenantId}
             schoolName={selected.displayName}
-            context={context}
+            requiresProxy={selected.lifecycle === 'open'}
+            onManageSchool={onManageSchool}
+            onAdded={() => setPeopleRevision((value) => value + 1)}
           />
         ) : (
           <p className={styles.muted}>先選一所學校，再加人。</p>
@@ -207,63 +241,149 @@ function PeopleTab({
 }
 
 function PeopleAddForm({
+  context,
   tenantId,
   schoolName,
-  context,
+  requiresProxy,
+  onManageSchool,
+  onAdded,
 }: {
+  context: string;
   tenantId: string;
   schoolName: string;
-  context: string;
+  requiresProxy: boolean;
+  onManageSchool: () => void;
+  onAdded: () => void;
 }) {
+  const parsePeople = useMemo(() => createPeopleParser(tenantId), [tenantId]);
+  const people = useAdminResource(
+    `people?tenantId=${encodeURIComponent(tenantId)}`,
+    context,
+    parsePeople,
+  );
+  const parseSession = useCallback((value: unknown) => parseProxy(value, tenantId), [tenantId]);
+  const proxy = useAdminResource(
+    `schools/${encodeURIComponent(tenantId)}/proxy`,
+    context,
+    parseSession,
+    requiresProxy,
+  );
+  const [now, setNow] = useState(() => Date.now());
+  const [boundHasRoleAdmin, setBoundHasRoleAdmin] = useState<boolean | null>(null);
   const [account, setAccount] = useState('');
   const [role, setRole] = useState<'school_admin' | 'school_staff'>('school_admin');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
+  const captureRequest = useActiveRequest();
+  const mutationPending = useRef(false);
+  useEffect(() => {
+    if (!requiresProxy || !proxy.value || proxy.value.ended) return;
+    const timer = window.setInterval(() => setNow(Date.now()), 1000);
+    return () => window.clearInterval(timer);
+  }, [requiresProxy, proxy.value]);
+  const proxyActive =
+    !!proxy.value && !proxy.value.ended && Date.parse(proxy.value.expiresAt) > now;
+  const canBindStaff = boundHasRoleAdmin ?? people.value?.hasRoleAdmin ?? false;
+  const ready =
+    !people.loading &&
+    !people.error &&
+    !!people.value &&
+    tenantId !== 'campus-demo' &&
+    (!requiresProxy || (!proxy.loading && !proxy.error && proxyActive));
   return (
     <form
       className={styles.form}
       onSubmit={(event) => {
         event.preventDefault();
+        const isCurrent = captureRequest();
+        const trimmed = account.trim();
+        if (
+          !isCurrent() ||
+          mutationPending.current ||
+          !ready ||
+          !trimmed ||
+          trimmed.length > 200 ||
+          (requiresProxy &&
+            (!proxy.value || proxy.value.ended || Date.parse(proxy.value.expiresAt) <= Date.now()))
+        )
+          return;
+        mutationPending.current = true;
         setBusy(true);
         setError('');
         setNotice('');
-        const trimmed = account.trim();
         const body: Record<string, unknown> = {
-          role,
+          tenantId,
+          role: canBindStaff ? role : 'school_admin',
           idempotencyKey: `web-people-${crypto.randomUUID()}`,
         };
         if (trimmed.includes('@')) body.email = trimmed;
         else body.personId = trimmed;
-        void adminFetch(`schools/${encodeURIComponent(tenantId)}/people`, 'POST', body, context)
+        void adminFetch('people/bind', 'POST', body, context)
           .then((result) => {
+            if (!isCurrent()) return;
             if (result.status === 401) {
               window.location.replace(accountReturnHref(`${OPS_PATH}?tab=people`));
               return;
             }
             if (!result.ok) throw new Error('加人沒有完成，請稍後再試。');
+            try {
+              const updated = parsePeople(result.body);
+              setBoundHasRoleAdmin(updated.hasRoleAdmin);
+            } catch {
+              throw new Error('加人回應無法確認，請重新讀取授權名單。');
+            }
             setAccount('');
             setNotice(`已為${schoolName}送出加人。`);
+            onAdded();
           })
-          .catch((failure: Error) => setError(failure.message))
-          .finally(() => setBusy(false));
+          .catch((failure: Error) => {
+            if (isCurrent()) setError(failure.message);
+          })
+          .finally(() => {
+            if (isCurrent()) {
+              mutationPending.current = false;
+              setBusy(false);
+            }
+          });
       }}
     >
+      {people.loading || (requiresProxy && proxy.loading) ? (
+        <p role="status">正在確認校方授權…</p>
+      ) : null}
+      {people.error || (requiresProxy && proxy.error) ? (
+        <p role="alert" className={styles.alert}>
+          {people.error || proxy.error}
+        </p>
+      ) : null}
+      {tenantId === 'campus-demo' ? (
+        <p className={styles.notice}>示範學校不開放調整校方授權。</p>
+      ) : null}
+      {requiresProxy && !proxy.loading && !proxy.error && !proxyActive ? (
+        <div className={styles.notice}>
+          <p>已開通學校須先啟用代操作，才能加人。</p>
+          <Button type="button" onClick={onManageSchool}>
+            前往學校分頁啟用代操作
+          </Button>
+        </div>
+      ) : null}
       <Input
         label="Google 登入信箱或人員代號"
         value={account}
         onChange={(event) => setAccount(event.target.value)}
         required
-        disabled={busy}
+        maxLength={200}
+        disabled={busy || !ready}
         hint="填對方的 Google 登入信箱，或這所學校既有的人員代號。"
       />
       <Select
         label="角色"
-        value={role}
+        value={canBindStaff ? role : 'school_admin'}
+        disabled={busy || !ready}
         onChange={(event) => setRole(event.target.value as 'school_admin' | 'school_staff')}
         options={[
           { value: 'school_admin', label: '學校管理員' },
-          { value: 'school_staff', label: '學校職員' },
+          ...(canBindStaff ? [{ value: 'school_staff', label: '學校職員' }] : []),
         ]}
       />
       {error ? (
@@ -276,18 +396,29 @@ function PeopleAddForm({
           {notice}
         </p>
       ) : null}
-      <Button type="submit" disabled={busy || !account.trim()}>
+      <Button type="submit" disabled={busy || !ready || !account.trim()}>
         {busy ? '處理中…' : '加人'}
       </Button>
     </form>
   );
 }
 
-function MerchantsTab({ context, suspended }: { context: string; suspended: boolean }) {
+function MerchantsTab({ context }: { context: string }) {
   const [busyId, setBusyId] = useState<string | null>(null);
+  const [revision, setRevision] = useState(0);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
-  async function decide(path: string, id: string, decision: 'approve' | 'reject') {
+  const captureRequest = useActiveRequest();
+  const mutationPending = useRef(false);
+  async function decide(
+    path: string,
+    id: string,
+    decision: 'approve' | 'reject',
+    expectedVersion?: number,
+  ) {
+    const isCurrent = captureRequest();
+    if (!isCurrent() || mutationPending.current || !id) return;
+    mutationPending.current = true;
     setBusyId(id);
     setError('');
     setNotice('');
@@ -298,20 +429,33 @@ function MerchantsTab({ context, suspended }: { context: string; suspended: bool
         {
           decision,
           reason: decision === 'approve' ? '資料齊全，准予往下。' : '資料不足，請補件。',
-          idempotencyKey: `web-merchant-decide-${crypto.randomUUID()}`,
+          ...(expectedVersion === undefined
+            ? { idempotencyKey: `web-merchant-decide-${crypto.randomUUID()}` }
+            : { expectedVersion }),
         },
         context,
       );
+      if (!isCurrent()) return;
       if (result.status === 401) {
         window.location.replace(accountReturnHref(`${OPS_PATH}?tab=merchants`));
         return;
       }
+      if (result.status === 409) {
+        setRevision((value) => value + 1);
+        throw new Error('這筆申請已更新，請確認最新資料後再審核。');
+      }
       if (!result.ok) throw new Error('店家審核沒有完成，請稍後再試。');
       setNotice(decision === 'approve' ? '已核准這筆店家申請。' : '已拒絕這筆店家申請。');
+      setRevision((value) => value + 1);
     } catch (failure) {
-      setError(failure instanceof Error ? failure.message : '店家審核沒有完成，請稍後再試。');
+      if (isCurrent()) {
+        setError(failure instanceof Error ? failure.message : '店家審核沒有完成，請稍後再試。');
+      }
     } finally {
-      setBusyId(null);
+      if (isCurrent()) {
+        mutationPending.current = false;
+        setBusyId(null);
+      }
     }
   }
   return (
@@ -329,8 +473,13 @@ function MerchantsTab({ context, suspended }: { context: string; suspended: bool
           {notice}
         </p>
       ) : null}
-      <MerchantDecisions context={context} busyId={busyId} onDecide={decide} />
-      <AdminMerchants context={context} suspended={suspended} />
+      <MerchantDecisions
+        key={`decisions-${revision}`}
+        context={context}
+        busyId={busyId}
+        onDecide={decide}
+      />
+      <AdminMerchants key={`overview-${revision}`} context={context} suspended={false} />
     </div>
   );
 }
@@ -342,37 +491,38 @@ function MerchantDecisions({
 }: {
   context: string;
   busyId: string | null;
-  onDecide: (path: string, id: string, decision: 'approve' | 'reject') => Promise<void>;
+  onDecide: (
+    path: string,
+    id: string,
+    decision: 'approve' | 'reject',
+    expectedVersion?: number,
+  ) => Promise<void>;
 }) {
-  const [interest, setInterest] = useState<ReturnType<typeof parseOversightMerchants>['interest']>([]);
-  const [applications, setApplications] = useState<
-    ReturnType<typeof parseOversightMerchants>['applications']
-  >([]);
+  const [interest, setInterest] = useState<OversightMerchantInterest[]>([]);
+  const [applications, setApplications] = useState<OversightMerchantApplication[]>([]);
+  const [error, setError] = useState('');
   useEffect(() => {
     let active = true;
-    void adminFetch('merchants', 'GET', undefined, context).then((result) => {
-      if (!active || result.status === 401) {
-        if (result.status === 401) window.location.replace(accountReturnHref(`${OPS_PATH}?tab=merchants`));
-        return;
-      }
-      if (!result.ok) return;
-      try {
+    void adminFetch('merchants', 'GET', undefined, context)
+      .then((result) => {
+        if (!active) return;
+        if (!result.ok) throw new Error('目前讀不到待審店家。');
         const parsed = parseOversightMerchants(result.body);
         setInterest(parsed.interest.filter((row) => row.state === 'submitted'));
         setApplications(parsed.applications.filter((row) => row.state === 'submitted'));
-      } catch {
-        setInterest([]);
-        setApplications([]);
-      }
-    });
+      })
+      .catch(() => {
+        if (active) setError('目前讀不到待審店家。');
+      });
     return () => {
       active = false;
     };
   }, [context]);
-  if (!interest.length && !applications.length) return null;
+  if (!interest.length && !applications.length && !error) return null;
   return (
     <section className={styles.panel}>
       <h2>待審店家</h2>
+      {error ? <p role="alert">{error}</p> : null}
       {interest.map((row) => {
         const id = String(row.id || '');
         return (
@@ -382,10 +532,10 @@ function MerchantDecisions({
             </strong>
             <div className={styles.actions}>
               <Button
-                disabled={busyId === id}
+                disabled={busyId !== null || !id}
                 onClick={() =>
                   void onDecide(
-                    `merchant-interest/${encodeURIComponent(id)}/decision`,
+                    `merchants/interest/${encodeURIComponent(id)}/decision`,
                     id,
                     'approve',
                   )
@@ -394,10 +544,10 @@ function MerchantDecisions({
                 核准意向
               </Button>
               <Button
-                disabled={busyId === id}
+                disabled={busyId !== null || !id}
                 onClick={() =>
                   void onDecide(
-                    `merchant-interest/${encodeURIComponent(id)}/decision`,
+                    `merchants/interest/${encodeURIComponent(id)}/decision`,
                     id,
                     'reject',
                   )
@@ -414,28 +564,30 @@ function MerchantDecisions({
         return (
           <article key={id} className={styles.item}>
             <strong>
-              {row.brandName || '進件'}／{row.locationName || ''}
+              {String(row.brandName || '進件')}／{String(row.locationName || '')}
             </strong>
             <div className={styles.actions}>
               <Button
-                disabled={busyId === id}
+                disabled={busyId !== null || !id}
                 onClick={() =>
                   void onDecide(
-                    `merchant-applications/${encodeURIComponent(id)}/decision`,
+                    `merchants/applications/${encodeURIComponent(row.tenantId)}/${encodeURIComponent(id)}/decision`,
                     id,
                     'approve',
+                    row.version,
                   )
                 }
               >
                 核准進件
               </Button>
               <Button
-                disabled={busyId === id}
+                disabled={busyId !== null || !id}
                 onClick={() =>
                   void onDecide(
-                    `merchant-applications/${encodeURIComponent(id)}/decision`,
+                    `merchants/applications/${encodeURIComponent(row.tenantId)}/${encodeURIComponent(id)}/decision`,
                     id,
                     'reject',
+                    row.version,
                   )
                 }
               >
@@ -454,29 +606,78 @@ function AffiliationTab({ context }: { context: string }) {
   const [error, setError] = useState('');
   const [busyId, setBusyId] = useState<string | null>(null);
   const [reason, setReason] = useState('資料已核對，准予掛靠。');
-  async function load() {
-    const result = await adminFetch(
-      'class-workspace-affiliation-applications',
-      'GET',
-      undefined,
-      context,
-    );
-    if (result.status === 401) {
-      window.location.replace(accountReturnHref(`${OPS_PATH}?tab=affiliation`));
-      return;
-    }
-    if (result.status === 403) {
-      setError('這台帳號不能處理課班掛靠。');
-      setRows([]);
-      return;
-    }
-    if (!result.ok) throw new Error('目前讀不到掛靠申請。');
-    setRows(asRecords(result.body.applications));
-  }
+  const captureRequest = useActiveRequest();
+  const mutationPending = useRef(false);
+  const load = useCallback(
+    async (isCurrent: () => boolean) => {
+      const result = await adminFetch(
+        'class-workspace-affiliation-applications',
+        'GET',
+        undefined,
+        context,
+      );
+      if (!isCurrent()) return;
+      if (result.status === 401) {
+        window.location.replace(accountReturnHref(`${OPS_PATH}?tab=affiliation`));
+        return;
+      }
+      if (result.status === 403) {
+        setError('這台帳號不能處理課班掛靠。');
+        setRows([]);
+        return;
+      }
+      if (!result.ok) throw new Error('目前讀不到掛靠申請。');
+      setRows(asRecords(result.body.applications ?? result.body.items ?? result.body.affiliations));
+    },
+    [context],
+  );
   useEffect(() => {
-    void load().catch((failure: Error) => setError(failure.message));
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [context]);
+    const isCurrent = captureRequest();
+    void load(isCurrent).catch((failure: Error) => {
+      if (isCurrent()) setError(failure.message);
+    });
+  }, [captureRequest, load]);
+  async function decide(id: string, decision: 'approve' | 'reject') {
+    const isCurrent = captureRequest();
+    if (
+      !isCurrent() ||
+      mutationPending.current ||
+      !id ||
+      (decision === 'approve' && !reason.trim())
+    )
+      return;
+    mutationPending.current = true;
+    setBusyId(id);
+    setError('');
+    try {
+      const result = await adminFetch(
+        `class-workspace-affiliation-applications/${encodeURIComponent(id)}/decision`,
+        'POST',
+        {
+          decision,
+          reason: decision === 'approve' ? reason.trim() : '資料不足，請補件後再申請。',
+          idempotencyKey: `web-affiliate-decide-${crypto.randomUUID()}`,
+        },
+        context,
+      );
+      if (!isCurrent()) return;
+      if (result.status === 401) {
+        window.location.replace(accountReturnHref(`${OPS_PATH}?tab=affiliation`));
+        return;
+      }
+      if (!result.ok) throw new Error('掛靠審核沒有完成，請稍後再試。');
+      await load(isCurrent);
+    } catch (failure) {
+      if (isCurrent()) {
+        setError(failure instanceof Error ? failure.message : '掛靠審核沒有完成，請稍後再試。');
+      }
+    } finally {
+      if (isCurrent()) {
+        mutationPending.current = false;
+        setBusyId(null);
+      }
+    }
+  }
   return (
     <section className={styles.panel}>
       <h2>課班掛靠</h2>
@@ -488,48 +689,24 @@ function AffiliationTab({ context }: { context: string }) {
       ) : null}
       {rows.length === 0 && !error ? <p>目前沒有待處理的掛靠申請。</p> : null}
       {rows.map((row, index) => {
-        const id = typeof row.id === 'string' ? row.id : '';
+        const id = String(row.id || row.applicationId || '');
         return (
-          <article key={id || `affiliation-${index}`} className={styles.item}>
-            <strong>
-              {typeof row.workspaceTitle === 'string'
-                ? row.workspaceTitle
-                : typeof row.workspaceId === 'string'
-                  ? row.workspaceId
-                  : '課班'}
-            </strong>
+          <article
+            key={id || String(row.workspaceId || `affiliation-${index}`)}
+            className={styles.item}
+          >
+            <strong>{String(row.workspaceTitle || row.workspaceId || '課班')}</strong>
             <p className={styles.muted}>
-              {typeof row.tenantName === 'string'
-                ? row.tenantName
-                : typeof row.tenantId === 'string'
-                  ? row.tenantId
-                  : ''}
-              {typeof row.sectionId === 'string' ? ` · ${row.sectionId}` : ''}
-              {typeof row.state === 'string' ? ` · ${row.state}` : ''}
+              {String(row.tenantName || row.tenantId || '')}
+              {row.sectionId ? ` · ${String(row.sectionId)}` : ''}
+              {row.state ? ` · ${String(row.state)}` : ''}
             </p>
-            {typeof row.justification === 'string' ? <p>{row.justification}</p> : null}
+            {row.justification ? <p>{String(row.justification)}</p> : null}
             <form
               className={styles.form}
               onSubmit={(event) => {
                 event.preventDefault();
-                setBusyId(id);
-                setError('');
-                void adminFetch(
-                  `class-workspace-affiliation-applications/${encodeURIComponent(id)}/decision`,
-                  'POST',
-                  {
-                    decision: 'approve',
-                    reason: reason.trim(),
-                    idempotencyKey: `web-affiliate-decide-${crypto.randomUUID()}`,
-                  },
-                  context,
-                )
-                  .then(async (result) => {
-                    if (!result.ok) throw new Error('掛靠審核沒有完成，請稍後再試。');
-                    await load();
-                  })
-                  .catch((failure: Error) => setError(failure.message))
-                  .finally(() => setBusyId(null));
+                void decide(id, 'approve');
               }}
             >
               <Textarea
@@ -537,34 +714,16 @@ function AffiliationTab({ context }: { context: string }) {
                 value={reason}
                 onChange={(event) => setReason(event.target.value)}
                 required
+                disabled={busyId !== null}
               />
               <div className={styles.actions}>
-                <Button type="submit" disabled={busyId === id || !id}>
+                <Button type="submit" disabled={busyId !== null || !id || !reason.trim()}>
                   核准掛靠
                 </Button>
                 <Button
                   type="button"
-                  disabled={busyId === id || !id}
-                  onClick={() => {
-                    setBusyId(id);
-                    setError('');
-                    void adminFetch(
-                      `class-workspace-affiliation-applications/${encodeURIComponent(id)}/decision`,
-                      'POST',
-                      {
-                        decision: 'reject',
-                        reason: '資料不足，請補件後再申請。',
-                        idempotencyKey: `web-affiliate-decide-${crypto.randomUUID()}`,
-                      },
-                      context,
-                    )
-                      .then(async (result) => {
-                        if (!result.ok) throw new Error('掛靠審核沒有完成，請稍後再試。');
-                        await load();
-                      })
-                      .catch((failure: Error) => setError(failure.message))
-                      .finally(() => setBusyId(null));
-                  }}
+                  disabled={busyId !== null || !id}
+                  onClick={() => void decide(id, 'reject')}
                 >
                   拒絕
                 </Button>

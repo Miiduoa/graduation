@@ -15,32 +15,52 @@ import { accountReturnHref, CREATE_PATH, JOIN_PATH, workspacePath } from './cons
 import styles from './Platform.module.css';
 import nuni from '@/features/nuni/NuniApp.module.css';
 import common from '@/app/servicePages.module.css';
+import { useActiveRequest } from './useActiveRequest';
 
 export function ClassCreate() {
+  const auth = useNuniSession();
+  if (auth.loading || auth.pendingLogout)
+    return (
+      <SiteShell header={<AppHeader />} title="開課班">
+        <p role="status">正在確認課班帳號…</p>
+      </SiteShell>
+    );
+  return <ClassCreateContent key={`${auth.session?.platformAccountId}:${auth.session?.context}`} />;
+}
+
+function ClassCreateContent() {
   const auth = useNuniSession();
   const classes = useClasses();
   const router = useRouter();
   const [title, setTitle] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
+  const captureRequest = useActiveRequest();
+  const mutationPending = useRef(false);
   const createKey = useRef(crypto.randomUUID());
   const inviteKey = useRef(crypto.randomUUID());
 
   async function onSubmit(event: FormEvent) {
     event.preventDefault();
-    if (busy) return;
+    const isCurrent = captureRequest();
+    if (!isCurrent() || mutationPending.current) return;
     if (!auth.session) {
       window.location.replace(accountReturnHref(CREATE_PATH));
       return;
     }
+    mutationPending.current = true;
     setBusy(true);
     setError('');
     try {
       const workspace = await classes.create(title.trim(), `web-create-${createKey.current}`);
+      if (!isCurrent()) return;
       const invite = await classes.invite(workspace.id, `web-invite-${inviteKey.current}`, 100);
+      if (!isCurrent()) return;
       const dest = workspacePath(workspace.id);
       router.replace(invite.code ? `${dest}?invite=${encodeURIComponent(invite.code)}` : dest);
     } catch (failure) {
+      if (!isCurrent()) return;
+      mutationPending.current = false;
       if (failure instanceof NuniError && failure.status === 401) {
         window.location.replace(accountReturnHref(CREATE_PATH));
         return;

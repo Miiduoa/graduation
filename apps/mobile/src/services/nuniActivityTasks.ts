@@ -1,7 +1,40 @@
 import type { NuniAssignment, NuniQuiz, NuniWorkspace } from '@campus/shared/src/nuni';
+import { parseTaipeiInstant } from '@campus/shared/src/taipeiTime';
 
 export type CourseActivity = NuniAssignment | NuniQuiz;
 export type ActivityFilter = 'all' | 'pending' | 'submitted';
+export type CourseListFilter = 'all' | 'student' | 'teaching' | 'archived';
+
+function searchWords(value: string): string[] {
+  return value.normalize('NFKC').trim().toLocaleLowerCase('zh-TW').split(/\s+/).filter(Boolean);
+}
+
+export function matchesCourseSearch(course: NuniWorkspace, query: string): boolean {
+  const title = course.title.normalize('NFKC').toLocaleLowerCase('zh-TW');
+  return searchWords(query).every((word) => title.includes(word));
+}
+
+export function matchesCourseListFilter(course: NuniWorkspace, filter: CourseListFilter): boolean {
+  if (filter === 'all') return true;
+  if (filter === 'archived') return course.state === 'archived';
+  return (
+    course.state === 'active' &&
+    (filter === 'student' ? course.memberRole === 'student' : course.memberRole !== 'student')
+  );
+}
+
+export function matchesActivitySearch(item: CourseActivity, query: string): boolean {
+  const text = [
+    item.title,
+    item.unitTitle,
+    'instructions' in item ? item.instructions : item.prompt,
+  ]
+    .filter(Boolean)
+    .join(' ')
+    .normalize('NFKC')
+    .toLocaleLowerCase('zh-TW');
+  return searchWords(query).every((word) => text.includes(word));
+}
 
 export function hasActivityReceipt(item: CourseActivity): boolean {
   return Boolean('instructions' in item ? item.mySubmission : item.myResponse);
@@ -37,8 +70,8 @@ export function prioritizeActivities<T extends CourseActivity>(
     if (pendingLeft !== pendingRight) return pendingLeft ? -1 : 1;
     if (!pendingLeft) return 0;
     return (
-      (left.dueAt ? Date.parse(left.dueAt) : Infinity) -
-        (right.dueAt ? Date.parse(right.dueAt) : Infinity) || 0
+      (left.dueAt ? (parseTaipeiInstant(left.dueAt) ?? Infinity) : Infinity) -
+        (right.dueAt ? (parseTaipeiInstant(right.dueAt) ?? Infinity) : Infinity) || 0
     );
   });
 }

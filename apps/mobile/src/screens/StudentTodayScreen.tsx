@@ -40,7 +40,13 @@ import {
 
 type HomeState =
   | { scope: string; status: 'loading' | 'error' }
-  | { scope: string; status: 'ready'; tasks: InboxTask[] };
+  | {
+      scope: string;
+      status: 'ready';
+      tasks: InboxTask[];
+      updatedAt: Date | null;
+      lmsConnected: boolean | null;
+    };
 
 type TodoRow = TodayTodo & { task?: InboxTask };
 
@@ -74,9 +80,8 @@ export default function StudentTodayScreen() {
   currentScope.current = scope;
   const [state, setState] = useState<HomeState>({ scope, status: 'loading' });
   const [now, setNow] = useState(() => new Date());
-  const [updatedAt, setUpdatedAt] = useState<Date | null>(null);
-  const [timetableRefresh, setTimetableRefresh] = useState(0);
-  const [lmsConnected, setLmsConnected] = useState<boolean | null>(null);
+  const [refreshState, setRefreshState] = useState<{ scope: string; request: number } | null>(null);
+  const refreshGeneration = useRef(0);
   const [leavingIds, setLeavingIds] = useState<string[]>([]);
   const previousTodos = useRef<string[]>([]);
   const scrollY = useRef(0);
@@ -84,11 +89,17 @@ export default function StudentTodayScreen() {
   const generation = useRef(0);
   const current = state.scope === scope ? state : null;
   const data = current?.status === 'ready' ? current : null;
+  const updatedAt = data?.updatedAt ?? null;
+  const lmsConnected = data?.lmsConnected ?? null;
   const loading = !current || current.status === 'loading';
   const error = current?.status === 'error';
   const unsigned = !uid;
-  const { status: timetableStatus, classes, termKey, retry: retryTimetable } =
-    useTodayTimetableData(now, timetableRefresh);
+  const {
+    status: timetableStatus,
+    classes,
+    termKey,
+    retry: retryTimetable,
+  } = useTodayTimetableData(now);
 
   const load = useCallback(
     async (silent = false) => {
@@ -97,7 +108,7 @@ export default function StudentTodayScreen() {
       try {
         if (!uid) {
           if (request === generation.current && currentScope.current === scope)
-            setState({ scope, status: 'ready', tasks: [] });
+            setState({ scope, status: 'ready', tasks: [], updatedAt: null, lmsConnected: null });
           return;
         }
         const [{ tasks }, connected] = await Promise.all([
@@ -105,9 +116,13 @@ export default function StudentTodayScreen() {
           hasTCSession().catch(() => false),
         ]);
         if (request === generation.current && currentScope.current === scope) {
-          setState({ scope, status: 'ready', tasks });
-          setLmsConnected(connected);
-          setUpdatedAt(new Date());
+          setState({
+            scope,
+            status: 'ready',
+            tasks,
+            lmsConnected: connected,
+            updatedAt: new Date(),
+          });
         }
       } catch {
         if (request === generation.current && currentScope.current === scope)
@@ -127,6 +142,7 @@ export default function StudentTodayScreen() {
       return () => {
         cancelAnimationFrame(frame);
         generation.current += 1;
+        refreshGeneration.current += 1;
       };
     }, [load]),
   );
@@ -187,6 +203,14 @@ export default function StudentTodayScreen() {
   const openWeek = () =>
     rootNavigateNested('學習', 'PersonalTimetable', termKey ? { term: termKey } : undefined);
   const openImport = () => rootNavigateNested('學習', 'PersonalImport', { kind: 'timetable' });
+  const refresh = async () => {
+    const request = ++refreshGeneration.current;
+    setRefreshState({ scope, request });
+    await Promise.allSettled([load(true), retryTimetable()]);
+    if (currentScope.current === scope && refreshGeneration.current === request) {
+      setRefreshState(null);
+    }
+  };
 
   return (
     <SafeAreaView style={s.page} edges={['top']}>
@@ -199,11 +223,10 @@ export default function StudentTodayScreen() {
         scrollEventThrottle={16}
         refreshControl={
           <RefreshControl
-            refreshing={loading && !!data}
-            onRefresh={() => {
-              setTimetableRefresh((key) => key + 1);
-              void load(true);
-            }}
+            refreshing={
+              refreshState?.scope === scope && refreshState.request === refreshGeneration.current
+            }
+            onRefresh={() => void refresh()}
             tintColor={theme.colors.accent}
           />
         }
@@ -223,6 +246,7 @@ export default function StudentTodayScreen() {
               action={action}
               unsigned={unsigned}
               todosError={error}
+              timetableReady={timetableStatus === 'ready'}
               now={now}
               styles={s}
               onOpenClass={openCourse}
@@ -273,6 +297,7 @@ function NextActionCard({
   action,
   unsigned,
   todosError,
+  timetableReady,
   now,
   styles: s,
   onOpenClass,
@@ -282,6 +307,7 @@ function NextActionCard({
   action: NextAction;
   unsigned: boolean;
   todosError: boolean;
+  timetableReady: boolean;
   now: Date;
   styles: ReturnType<typeof createStyles>;
   onOpenClass: (courseId?: string) => void;
@@ -332,9 +358,7 @@ function NextActionCard({
     );
   }
   if (action.type === 'empty') {
-    if (todosError) {
-      return <Animated.View style={[s.cardLight, { opacity: fade }]} testID="next-action" />;
-    }
+    if (todosError || !timetableReady) return null;
     return (
       <Animated.View style={[s.cardLight, { opacity: fade }]} testID="next-action">
         <Text style={s.lightHeadline}>{TODAY_COPY.emptyDay}</Text>
@@ -356,7 +380,7 @@ function NextActionCard({
     return (
       <Pressable
         accessibilityRole="button"
-        onPress={() => onOpenClass(todo.courseId)}
+        onPress={() => onOpenTodo(todo)}
         style={({ pressed }) => [s.card, pressed && s.pressed]}
         testID="next-action"
       >
@@ -364,13 +388,9 @@ function NextActionCard({
           <Text style={s.kind}>{TODAY_COPY.allClassesDone}</Text>
           <Text style={s.headline}>{todo.title}</Text>
           <Text style={s.meta}>{formatTodoDueLine(todo, now)}</Text>
-          <Pressable
-            accessibilityRole="button"
-            onPress={() => onOpenTodo(todo)}
-            style={s.cardButton}
-          >
+          <View style={s.cardButton}>
             <Text style={s.cardButtonText}>{TODAY_COPY.goSubmit}</Text>
-          </Pressable>
+          </View>
         </Animated.View>
       </Pressable>
     );
@@ -394,16 +414,21 @@ function NextActionCard({
       </Pressable>
     );
   }
-  if (action.type !== 'assignment' && action.type !== 'overdue' && action.type !== 'upcoming') return null;
+  if (action.type !== 'assignment' && action.type !== 'overdue' && action.type !== 'upcoming')
+    return null;
   const todo = action.todo as TodoRow;
   const overdue = action.type === 'overdue';
-  const kind =
-    overdue ? TODAY_COPY.overdue : action.type === 'upcoming' ? TODAY_COPY.nextAssignment : TODAY_COPY.dueToday;
-  const meta = action.type === 'upcoming' ? formatUpcomingDueLine(todo) : formatTodoDueLine(todo, now);
+  const kind = overdue
+    ? TODAY_COPY.overdue
+    : action.type === 'upcoming'
+      ? TODAY_COPY.nextAssignment
+      : TODAY_COPY.dueToday;
+  const meta =
+    action.type === 'upcoming' ? formatUpcomingDueLine(todo) : formatTodoDueLine(todo, now);
   return (
     <Pressable
       accessibilityRole="button"
-      onPress={() => onOpenClass(todo.courseId)}
+      onPress={() => onOpenTodo(todo)}
       style={({ pressed }) => [s.card, pressed && s.pressed]}
       testID="next-action"
     >
@@ -411,9 +436,9 @@ function NextActionCard({
         <Text style={s.kind}>{kind}</Text>
         <Text style={s.headline}>{todo.title}</Text>
         <Text style={[s.meta, overdue ? s.metaDanger : null]}>{meta}</Text>
-        <Pressable accessibilityRole="button" onPress={() => onOpenTodo(todo)} style={s.cardButton}>
+        <View style={s.cardButton}>
           <Text style={s.cardButtonText}>{TODAY_COPY.goSubmit}</Text>
-        </Pressable>
+        </View>
       </Animated.View>
     </Pressable>
   );
@@ -626,7 +651,7 @@ const createStyles = () =>
       shadowOpacity: 0,
     },
     cardLight: {
-      backgroundColor: CREAM,
+      backgroundColor: theme.mode === 'dark' ? theme.colors.surface2 : CREAM,
       minHeight: 132,
       borderRadius: 16,
       padding: 20,
@@ -676,7 +701,11 @@ const createStyles = () =>
       fontWeight: '600',
       textTransform: 'none',
     },
-    list: { backgroundColor: CREAM, borderRadius: 12, overflow: 'hidden' },
+    list: {
+      backgroundColor: theme.mode === 'dark' ? theme.colors.surface : CREAM,
+      borderRadius: 12,
+      overflow: 'hidden',
+    },
     row: {
       minHeight: 56,
       paddingHorizontal: 16,
@@ -688,8 +717,6 @@ const createStyles = () =>
     rowBorder: {
       borderTopWidth: StyleSheet.hairlineWidth,
       borderTopColor: theme.colors.border,
-      marginLeft: 68,
-      paddingLeft: 0,
     },
     time: {
       width: 52,
@@ -700,10 +727,15 @@ const createStyles = () =>
     },
     rowBody: { flex: 1, minWidth: 0, gap: 2 },
     rowTitle: { color: theme.colors.text, fontSize: 16, lineHeight: 22, fontWeight: '600' },
-    rowMeta: { color: theme.colors.muted, fontSize: 13, lineHeight: 18, fontVariant: ['tabular-nums'] },
+    rowMeta: {
+      color: theme.colors.muted,
+      fontSize: 13,
+      lineHeight: 18,
+      fontVariant: ['tabular-nums'],
+    },
     dueSoon: { color: theme.colors.accent, fontWeight: '700' },
     overdue: { color: theme.colors.danger, fontWeight: '700' },
-    metaDanger: { color: theme.colors.danger, fontWeight: '700' },
+    metaDanger: { color: '#FFD9D0', fontWeight: '700' },
     ended: { opacity: 0.48 },
     leaving: { opacity: 0 },
     more: { minHeight: 44, justifyContent: 'center', paddingHorizontal: 16 },

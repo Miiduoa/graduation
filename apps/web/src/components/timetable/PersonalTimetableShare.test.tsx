@@ -1,6 +1,6 @@
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
-import { cleanCourse, cleanMeta, shareCopiedCopy } from '@campus/shared';
+import { cleanCourse, cleanMeta, shareCopiedCopy, type PersonalImportRecord } from '@campus/shared';
 import { PersonalTimetable } from './PersonalTimetable';
 
 vi.mock('next/navigation', () => ({
@@ -18,6 +18,8 @@ const mocks = vi.hoisted(() => ({
   invite: vi.fn(),
   friend: vi.fn(),
   meetup: vi.fn(),
+  records: [] as PersonalImportRecord[],
+  platformOwner: null as string | null,
 }));
 
 vi.mock('@/components/AuthGuard', () => ({ useAuth: () => mocks.auth }));
@@ -32,7 +34,8 @@ vi.mock('@/components/SelectedSchoolProvider', () => ({
 }));
 vi.mock('@/lib/usePersonalImports', () => ({
   usePersonalImportScope: () => {
-    const owner = mocks.auth.user ? `school:${mocks.auth.user.uid}` : 'guest';
+    const owner =
+      mocks.platformOwner ?? (mocks.auth.user ? `school:${mocks.auth.user.uid}` : 'guest');
     return {
       scope: { owner, schoolId: 'pu' },
       scopeKey: JSON.stringify([owner, 'pu']),
@@ -40,7 +43,7 @@ vi.mock('@/lib/usePersonalImports', () => ({
       schoolName: '靜宜大學',
     };
   },
-  usePersonalImports: () => ({ records: [], error: '', loading: false }),
+  usePersonalImports: () => ({ records: mocks.records, error: '', loading: false }),
 }));
 vi.mock('@/lib/timetable/store', () => ({
   CLOUD_NOT_READY_COPY: '這個功能還沒接通，雲端備份先不用。',
@@ -65,6 +68,8 @@ beforeEach(() => {
   vi.clearAllMocks();
   mocks.auth.user = { uid: 'alice' };
   mocks.auth.loading = false;
+  mocks.records = [];
+  mocks.platformOwner = null;
   mocks.load.mockResolvedValue({
     courses: [cleanCourse({ id: 'a', name: '資料庫', day: 1, start: 1, end: 2 })],
     meta: cleanMeta({ title: '我的課表' }),
@@ -150,6 +155,27 @@ it('does not write the previous account share URL when account changes during cr
   expect(screen.queryByRole('textbox', { name: '分享連結' })).toBeNull();
 });
 
+it('isolates school-account changes even when the platform account stays signed in', async () => {
+  mocks.platformOwner = 'platform:unchanged-account';
+  const pending = deferred<{ path: string; expiresAt: string }>();
+  mocks.share.mockReturnValueOnce(pending.promise);
+  const writeText = vi.fn().mockResolvedValue(undefined);
+  Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText } });
+  const view = await ready();
+  fireEvent.click(screen.getByRole('button', { name: '複製分享連結' }));
+  const newAccount = deferred<ReturnType<typeof cleanMeta>>();
+  mocks.load.mockReturnValueOnce(newAccount.promise);
+  mocks.auth.user = { uid: 'different-school-account' };
+  view.rerender(<PersonalTimetable />);
+  expect(screen.queryByRole('button', { name: '複製分享連結' })).toBeNull();
+  expect(screen.queryByText('資料庫')).toBeNull();
+  await act(async () =>
+    pending.resolve({ path: '/timetable/s/previous-school-account', expiresAt }),
+  );
+  expect(writeText).not.toHaveBeenCalled();
+  expect(screen.queryByRole('textbox', { name: '分享連結' })).toBeNull();
+});
+
 it('refuses an off-site or malformed share path from the backend', async () => {
   mocks.share.mockResolvedValueOnce({ path: 'https://other.invalid/private', expiresAt });
   const writeText = vi.fn().mockResolvedValue(undefined);
@@ -190,4 +216,64 @@ it('sends the on-screen timetable when creating a share link', async () => {
       meta: expect.objectContaining({ title: '我的課表' }),
     }),
   );
+});
+
+function importedCourse(overrides: Partial<PersonalImportRecord> = {}): PersonalImportRecord {
+  return {
+    id: 'current-import',
+    kind: 'timetable',
+    title: '匯入的網路通訊',
+    schoolId: 'pu',
+    academicYear: '115',
+    semester: '1',
+    dayOfWeek: 2,
+    startPeriod: 3,
+    endPeriod: 4,
+    batchId: 'test-import',
+    importedAt: '2026-10-25T00:00:00Z',
+    source: { type: 'paste', line: 1, rawText: '' },
+    ...overrides,
+  };
+}
+
+it('shares an imported-only semester with its own metadata and excludes other semesters', async () => {
+  mocks.records = [
+    importedCourse(),
+    importedCourse({ id: 'previous', title: '上學期課程', academicYear: '114', semester: '2' }),
+    importedCourse({ id: 'unplaced', title: '時間待確認', dayOfWeek: undefined }),
+  ];
+  mocks.load.mockResolvedValueOnce({
+    courses: [],
+    meta: cleanMeta({ title: '舊學期', year: '114', semester: '2' }),
+    shareWithFriends: true,
+    updatedAt: '',
+    schoolId: 'pu',
+  });
+  await ready();
+  const share = screen.getByRole('button', { name: '複製分享連結' });
+  expect((share as HTMLButtonElement).disabled).toBe(false);
+  fireEvent.click(share);
+  await waitFor(() => expect(mocks.share).toHaveBeenCalledOnce());
+  expect(mocks.share).toHaveBeenCalledWith('pu', '115 學年度第 1 學期課表', {
+    courses: [
+      expect.objectContaining({ name: '匯入的網路通訊', day: 2, start: 3, end: 4 }),
+      expect.objectContaining({ name: '時間待確認', day: 0 }),
+    ],
+    meta: expect.objectContaining({ year: '115', semester: '1', school: '靜宜大學' }),
+  });
+});
+
+it('does not copy or present a share link after the displayed semester changes', async () => {
+  mocks.records = [importedCourse()];
+  const pending = deferred<{ path: string; expiresAt: string }>();
+  mocks.share.mockReturnValueOnce(pending.promise);
+  const writeText = vi.fn().mockResolvedValue(undefined);
+  Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText } });
+  await ready();
+  fireEvent.click(screen.getByRole('button', { name: '複製分享連結' }));
+  fireEvent.change(screen.getByLabelText('顯示自行匯入的學期'), { target: { value: 'manual' } });
+  await act(async () => pending.resolve({ path: '/timetable/s/old-semester', expiresAt }));
+  expect(writeText).not.toHaveBeenCalled();
+  expect(screen.queryByRole('textbox', { name: '分享連結' })).toBeNull();
+  expect(screen.queryByText(shareCopiedCopy(expiresAt))).toBeNull();
 });

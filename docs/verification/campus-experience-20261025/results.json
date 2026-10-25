@@ -17,7 +17,15 @@
     "home and life use OLED black with matching browser chrome",
     "explicit dark preference stays black in light system mode, transit and offline pages",
     "course task titles and long deadlines reflow at 200% text size in both themes",
-    "320px large-text preference has no overflow"
+    "320px large-text preference has no overflow",
+    "unsigned account entry keeps existing actions without demo copy",
+    "account footer links remain readable in light and OLED themes",
+    "find-school action stays on the account page",
+    "class-workspace join stays off the new login page",
+    "old find-school URL still lands on the new entry",
+    "live old screens stay reachable; replaced shells 404 or redirect",
+    "account return navigation preserves campus, tabs and settings position",
+    "signed-in account visits follow allowed return paths"
   ],
   "pageErrors": []
 }

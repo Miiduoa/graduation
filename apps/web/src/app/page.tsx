@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { NuniError, nuniErrorMessage } from '@campus/shared/src/nuni';
 import { AppHeader } from '@/components/AppHeader';
@@ -35,23 +35,29 @@ export default function HomePage() {
     context && accountId ? `nuni:${context}:${accountId}` : uid ? `school:${uid}` : null;
   const sessionLoading = !hydrated || authLoading || nuni.loading;
   const blocked = nuni.pendingLogout || (!!nuni.error && !uid);
-  const [result, setResult] = useState<{ owner: string; data: HomeData } | null>(null);
+  const [result, setResult] = useState<{
+    owner: string;
+    data: HomeData;
+    updatedAt: Date;
+  } | null>(null);
   const [loading, setLoading] = useState(false);
-  const [error, setError] = useState('');
+  const [failure, setFailure] = useState<{ owner: string; message: string } | null>(null);
   const [now, setNow] = useState<Date | null>(null);
-  const [updatedAt, setUpdatedAt] = useState<Date | null>(null);
   const [leavingTodoIds, setLeavingTodoIds] = useState<string[]>([]);
   const previousTodos = useRef<string[]>([]);
   const generation = useRef(0);
   const data = !sessionLoading && !blocked && result?.owner === owner ? result?.data : null;
+  const updatedAt = data ? result!.updatedAt : null;
+  const error = failure?.owner === owner ? (failure?.message ?? '') : '';
   const refresh = useCallback(async () => {
     const request = ++generation.current;
-    setResult(null);
-    setError('');
+    setFailure(null);
     if (!owner || sessionLoading || blocked) {
+      setResult(null);
       setLoading(false);
       return;
     }
+    setResult((current) => (current?.owner === owner ? current : null));
     setLoading(true);
     try {
       const next =
@@ -59,12 +65,15 @@ export default function HomePage() {
           ? await loadNuniHomeData((path, input) => browserRequest(path, context, input), accountId)
           : await loadHomeData(uid!);
       if (request === generation.current) {
-        setResult({ owner, data: next });
-        setUpdatedAt(new Date());
+        setResult({ owner, data: next, updatedAt: new Date() });
       }
     } catch (failure) {
       if (request === generation.current) {
-        setError(context ? nuniErrorMessage(failure) : '無法讀取課程資料，請確認連線後重試。');
+        setResult(null);
+        setFailure({
+          owner,
+          message: context ? nuniErrorMessage(failure) : '無法讀取課程資料，請確認連線後重試。',
+        });
         if (
           context &&
           failure instanceof NuniError &&
@@ -103,9 +112,9 @@ export default function HomePage() {
   const teaching = data?.courses.filter((course) => teachingRoles.includes(course.role)) ?? [];
   const studying = data?.courses.filter((course) => !teachingRoles.includes(course.role)) ?? [];
   const signedIn = !!owner && !blocked;
-  const busy = sessionLoading || (!!owner && loading);
+  const busy = sessionLoading || (!!owner && !data && !error);
   const teacherOnly = !!teaching.length && !studying.length;
-  const todos = data ? todayTodosFromHomeTasks(data.tasks) : [];
+  const todos = useMemo(() => (data ? todayTodosFromHomeTasks(data.tasks) : []), [data]);
   useEffect(() => {
     const current = todos.map((item) => item.id);
     const gone = previousTodos.current.filter((id) => !current.includes(id));
@@ -167,6 +176,7 @@ export default function HomePage() {
             signedIn={signedIn}
             unsigned={!signedIn}
             skeleton={busy}
+            refreshing={loading && !!data}
             todos={todos}
             courses={data?.courses ?? []}
             todosError={error}
@@ -176,7 +186,11 @@ export default function HomePage() {
           />
         )}
         {data && teaching.length > 0 ? (
-          <section id="teaching-courses" className={styles.section} aria-labelledby="teaching-title">
+          <section
+            id="teaching-courses"
+            className={styles.section}
+            aria-labelledby="teaching-title"
+          >
             <div className={styles.sectionHeading}>
               <h2 id="teaching-title">
                 授課與協作 <span>{teaching.length}</span>

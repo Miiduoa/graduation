@@ -9,10 +9,10 @@ import { NuniError, nuniErrorMessage } from '@campus/shared/src/nuni';
 export const MATERIAL_NEW_MS = 7 * 24 * 60 * 60 * 1000;
 export const MATERIAL_HOME_WINDOW_MS = 14 * 24 * 60 * 60 * 1000;
 export const MATERIAL_READ_KEY_PREFIX = 'nuni-material-read:';
-export const MATERIAL_SIZE_UNKNOWN = '大小未提供（教材沒有檔案大小欄位）';
+export const MATERIAL_SIZE_UNKNOWN = '大小未提供';
 export const MATERIAL_COURSE_BATCH = 4;
 export const MATERIAL_CURSOR_CYCLE_MESSAGE =
-  '教材分頁出現重複游標，已停止繼續載入，清單可能不完整。請重新讀取教材。';
+  '教材暫時無法繼續載入，清單可能不完整。';
 
 export type MaterialKind =
   | 'pdf'
