@@ -5,6 +5,7 @@ import { resolveSchoolPublicServices } from '@campus/shared/src/schoolPublicServ
 import {
   DORM_CHECKLISTS,
   DORM_MILESTONE_LIMIT,
+  DORM_PARCEL_LIMIT,
   DORM_REPAIR_SHORTCUTS,
   DORM_REPAIR_CATEGORIES,
   DORM_REPAIR_STATUSES,
@@ -16,7 +17,9 @@ import {
   localDormDate,
   normalizeDormWorkspace,
   sortedDormMilestones,
+  sortedDormParcels,
   type DormMilestone,
+  type DormParcel,
   type DormRepair,
   type DormRepairCategory,
   type DormRepairStatus,
@@ -29,7 +32,7 @@ import { useOptionalNuniSession } from '@/features/nuni/Session';
 import { useCampusBrowseContext } from '@/lib/useCampusBrowseContext';
 import styles from './dormitory.module.css';
 
-type View = 'overview' | 'guide' | 'repairs' | 'dates' | 'checklist' | 'laundry';
+type View = 'overview' | 'guide' | 'repairs' | 'parcels' | 'dates' | 'checklist' | 'laundry';
 type StorageState =
   | { status: 'loading' }
   | { status: 'error'; message: string }
@@ -41,11 +44,14 @@ type RepairDraft = {
   description: string;
 };
 
+type ParcelDraft = { title: string; pickupPoint: string; dueDate: string };
 const EMPTY_REPAIR: RepairDraft = { category: 'other', title: '', location: '', description: '' };
+const EMPTY_PARCEL: ParcelDraft = { title: '', pickupPoint: '', dueDate: '' };
 const VIEWS: ReadonlyArray<{ id: View; label: string }> = [
   { id: 'overview', label: '總覽' },
   { id: 'guide', label: '宿舍指南' },
   { id: 'repairs', label: '設備問題' },
+  { id: 'parcels', label: '包裹領取' },
   { id: 'dates', label: '重要日期' },
   { id: 'checklist', label: '入住與退宿' },
   { id: 'laundry', label: '洗衣計時' },
@@ -74,6 +80,12 @@ function DormitoryWorkspace({ scope, schoolId, schoolName, guest }: {
   const [editingMilestoneId, setEditingMilestoneId] = useState<string | null>(null);
   const [pendingMilestoneId, setPendingMilestoneId] = useState<string | null>(null);
   const [deleteMilestoneId, setDeleteMilestoneId] = useState<string | null>(null);
+  const [parcelDraft, setParcelDraft] = useState<ParcelDraft>(EMPTY_PARCEL);
+  const [parcelEditorOpen, setParcelEditorOpen] = useState(false);
+  const [editingParcelId, setEditingParcelId] = useState<string | null>(null);
+  const [pendingParcelId, setPendingParcelId] = useState<string | null>(null);
+  const [deleteParcelId, setDeleteParcelId] = useState<string | null>(null);
+  const [parcelFilter, setParcelFilter] = useState<'all' | 'waiting' | 'collected'>('waiting');
   const [laundryMinutes, setLaundryMinutes] = useState(45);
   const [now, setNow] = useState(() => Date.now());
   const savedRaw = useRef<string | null>(null);
@@ -240,6 +252,50 @@ function DormitoryWorkspace({ scope, schoolId, schoolName, guest }: {
     }
   }
 
+  function beginParcel(entry?: DormParcel, preset = '') {
+    setParcelDraft(entry
+      ? { title: entry.title, pickupPoint: entry.pickupPoint, dueDate: entry.dueDate }
+      : { ...EMPTY_PARCEL, title: preset });
+    setEditingParcelId(entry?.id ?? null);
+    setPendingParcelId(null);
+    setDeleteParcelId(null);
+    setParcelEditorOpen(true);
+    setSaveError('');
+    setNotice('');
+    setView('parcels');
+  }
+
+  function saveParcel(data: DormWorkspace) {
+    const title = parcelDraft.title.trim();
+    const dueDate = parcelDraft.dueDate.trim();
+    if (title.length < 2 || (dueDate && !isValidDormDate(dueDate))) {
+      setSaveError('請填寫至少兩個字的包裹名稱；取件日期若有填寫，必須是有效日期。');
+      return;
+    }
+    if (!editingParcelId && data.parcels.length >= DORM_PARCEL_LIMIT) {
+      setSaveError('包裹清單最多保留 50 筆，請先刪除不需要的舊紀錄。');
+      return;
+    }
+    const previous = data.parcels.find((entry) => entry.id === editingParcelId);
+    const id = editingParcelId ?? pendingParcelId ??
+      ('parcel_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 9));
+    setPendingParcelId(id);
+    const entry: DormParcel = {
+      id, title,
+      pickupPoint: parcelDraft.pickupPoint.trim(),
+      dueDate,
+      collected: previous?.collected ?? false,
+      createdAt: previous?.createdAt ?? Date.now(),
+      collectedAt: previous?.collectedAt ?? null,
+    };
+    if (save({ ...data, parcels: [entry, ...data.parcels.filter((item) => item.id !== id)] })) {
+      setParcelEditorOpen(false);
+      setEditingParcelId(null);
+      setPendingParcelId(null);
+      setParcelDraft(EMPTY_PARCEL);
+    }
+  }
+
   if (storage.status !== 'ready') {
     return (
       <SiteShell title="宿舍" subtitle={schoolName}>
@@ -262,6 +318,11 @@ function DormitoryWorkspace({ scope, schoolId, schoolName, guest }: {
   const overdueCount = milestones.filter((entry) => !entry.completed && entry.dueDate < today).length;
   const nextChecklistItem = DORM_CHECKLISTS.flatMap((group) => group.items)
     .find((item) => !data.checkmarks[item.id]);
+  const parcels = sortedDormParcels(data);
+  const pendingParcels = parcels.filter((item) => !item.collected);
+  const overdueParcels = pendingParcels.filter((item) => item.dueDate && item.dueDate < today);
+  const visibleParcels = parcels.filter((item) =>
+    parcelFilter === 'all' || (parcelFilter === 'waiting' ? !item.collected : item.collected));
 
   return (
     <SiteShell title="宿舍" subtitle="住宿安排與生活紀錄，依目前選擇的學校顯示。" schoolName={schoolName}>
