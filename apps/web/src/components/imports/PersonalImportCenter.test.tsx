@@ -8,6 +8,8 @@ import {
   personalImportUndoneNotice,
 } from '@campus/shared';
 import { readPersonalImportDocumentFile } from '@/lib/personalImportDocuments';
+import { createPersonalImportImagePreview } from '@/lib/personalImportImagePreview';
+import { recognizePersonalImportImage } from '@/lib/personalImportOcr';
 import type { PersonalImportDocument } from '@campus/shared';
 import { PersonalImportCenter } from './PersonalImportCenter';
 import {
@@ -43,10 +45,15 @@ vi.mock('@/features/nuni/Session', () => ({
 }));
 vi.mock('@/lib/personalImportDocuments', () => ({ readPersonalImportDocumentFile: vi.fn() }));
 vi.mock('@/lib/personalImportOcr', () => ({ recognizePersonalImportImage: vi.fn() }));
+vi.mock('@/lib/personalImportImagePreview', () => ({ createPersonalImportImagePreview: vi.fn() }));
 beforeEach(() => {
   vi.restoreAllMocks();
   localStorage.clear();
   vi.mocked(readPersonalImportDocumentFile).mockReset();
+  vi.mocked(recognizePersonalImportImage).mockReset();
+  vi.mocked(createPersonalImportImagePreview).mockReset().mockResolvedValue(new Blob(['safe pixels'], { type: 'image/png' }));
+  URL.createObjectURL = vi.fn(() => 'blob:preview');
+  URL.revokeObjectURL = vi.fn();
   sessionStorage.clear();
   context.owner = 'guest';
   context.session = null;
@@ -260,11 +267,13 @@ it('ignores OCR completion after switching accounts', async () => {
   fireEvent.change(screen.getByLabelText('選擇截圖或檔案'), {
     target: { files: [new File(['test'], 'grades.png', { type: 'image/png' })] },
   });
+  await waitFor(() => expect(recognizePersonalImportImage).toHaveBeenCalledOnce());
   context.owner = 'platform:two';
   view.rerender(<PersonalImportCenter />);
   await act(async () => resolve('課程名稱,學分,成績\n舊帳號秘密,3,90'));
   expect(screen.queryByText(/舊帳號秘密/)).toBeNull();
   expect((screen.getByLabelText('原始文字') as HTMLTextAreaElement).value).toBe('');
+  expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:preview');
 });
 it('keeps a same-account draft hidden while the session revalidates', async () => {
   const view = render(<PersonalImportCenter />);
@@ -403,6 +412,86 @@ it('shows a Chinese notice when the screenshot file cannot be opened', async () 
   });
   await screen.findByText(PERSONAL_IMPORT_IMAGE_UNREADABLE);
   expect(screen.queryByText(/could not be decoded/i)).toBeNull();
+  expect(screen.queryByAltText('你選擇的資料截圖，僅供核對')).toBeNull();
+  expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:preview');
+});
+
+it('previews only the encoded PNG, keeps the original file for OCR, and releases it after saving', async () => {
+  const original = new File(['original JPEG'], 'grades.jpg', { type: 'image/jpeg' });
+  const png = new Blob(['encoded PNG'], { type: 'image/png' });
+  vi.mocked(createPersonalImportImagePreview).mockResolvedValue(png);
+  vi.mocked(recognizePersonalImportImage).mockResolvedValue('課程名稱,學分,成績\n資料庫,3,85');
+  const view = render(<PersonalImportCenter />);
+  fireEvent.change(screen.getByLabelText('這份資料的學年度'), { target: { value: '115' } });
+  fireEvent.change(screen.getByLabelText('學期'), { target: { value: '1' } });
+  fireEvent.change(screen.getByLabelText('選擇截圖或檔案'), { target: { files: [original] } });
+  await screen.findByRole('button', { name: '確認匯入 1 筆' });
+  expect(URL.createObjectURL).toHaveBeenCalledExactlyOnceWith(png);
+  expect(URL.createObjectURL).not.toHaveBeenCalledWith(original);
+  expect(recognizePersonalImportImage).toHaveBeenCalledWith(original, expect.any(AbortSignal), expect.any(Function));
+  expect(screen.getByAltText('你選擇的資料截圖，僅供核對').getAttribute('src')).toBe('blob:preview');
+  fireEvent.click(screen.getByRole('button', { name: '確認匯入 1 筆' }));
+  await screen.findByText(personalImportSavedNotice(1));
+  expect(screen.queryByAltText('你選擇的資料截圖，僅供核對')).toBeNull();
+  expect(URL.revokeObjectURL).toHaveBeenCalledExactlyOnceWith('blob:preview');
+  view.unmount();
+  expect(URL.revokeObjectURL).toHaveBeenCalledTimes(1);
+});
+
+it('rejects a failed image preview without exposing the file or losing existing draft text', async () => {
+  vi.mocked(createPersonalImportImagePreview).mockRejectedValue(new Error('請選 PNG、JPEG 或 WebP 圖片。'));
+  render(<PersonalImportCenter />);
+  fireEvent.change(screen.getByLabelText('原始文字'), { target: { value: '尚未整理的原始文字' } });
+  fireEvent.change(screen.getByLabelText('選擇截圖或檔案'), {
+    target: { files: [new File(['<svg onload="alert(1)"></svg>'], 'unsafe.svg', { type: 'image/svg+xml' })] },
+  });
+  await screen.findByText('請選 PNG、JPEG 或 WebP 圖片。');
+  expect(URL.createObjectURL).not.toHaveBeenCalled();
+  expect(recognizePersonalImportImage).not.toHaveBeenCalled();
+  expect(screen.queryByAltText('你選擇的資料截圖，僅供核對')).toBeNull();
+  expect((screen.getByLabelText('原始文字') as HTMLTextAreaElement).value).toBe('尚未整理的原始文字');
+});
+
+it.each(['cancel', 'account', 'school', 'paused'] as const)('discards a late preview after %s without starting OCR or creating a URL', async (change) => {
+  let finish!: (blob: Blob) => void;
+  vi.mocked(createPersonalImportImagePreview).mockImplementation(() => new Promise((resolve) => { finish = resolve; }));
+  const view = render(<PersonalImportCenter />);
+  fireEvent.change(screen.getByLabelText('選擇截圖或檔案'), {
+    target: { files: [new File(['pixels'], 'grades.png', { type: 'image/png' })] },
+  });
+  expect(createPersonalImportImagePreview).toHaveBeenCalledOnce();
+  if (change === 'cancel') fireEvent.click(screen.getByRole('button', { name: '取消讀取' }));
+  else {
+    if (change === 'account') context.owner = 'platform:two';
+    if (change === 'school') context.schoolId = 'nthu';
+    if (change === 'paused') context.loading = true;
+    view.rerender(<PersonalImportCenter />);
+  }
+  await act(async () => finish(new Blob(['late pixels'], { type: 'image/png' })));
+  expect(URL.createObjectURL).not.toHaveBeenCalled();
+  expect(recognizePersonalImportImage).not.toHaveBeenCalled();
+  expect(screen.queryByAltText('你選擇的資料截圖，僅供核對')).toBeNull();
+});
+
+it.each(['cancel', 'unmount'] as const)('revokes an installed preview on %s and ignores late OCR data', async (change) => {
+  let finish!: (text: string) => void;
+  vi.mocked(recognizePersonalImportImage).mockImplementation(() => new Promise((resolve) => { finish = resolve; }));
+  const view = render(<PersonalImportCenter />);
+  fireEvent.change(screen.getByLabelText('選擇截圖或檔案'), {
+    target: { files: [new File(['pixels'], 'grades.png', { type: 'image/png' })] },
+  });
+  await screen.findByAltText('你選擇的資料截圖，僅供核對');
+  if (change === 'cancel') fireEvent.click(screen.getByRole('button', { name: '取消讀取' }));
+  else view.unmount();
+  expect(URL.revokeObjectURL).toHaveBeenCalledExactlyOnceWith('blob:preview');
+  await act(async () => finish('課程名稱,學分,成績\n舊檔案內容,3,85'));
+  expect(screen.queryByAltText('你選擇的資料截圖，僅供核對')).toBeNull();
+  expect(readPersonalImports(context)).toHaveLength(0);
+  if (change === 'cancel') {
+    expect((screen.getByLabelText('原始文字') as HTMLTextAreaElement).value).toBe('');
+    view.unmount();
+  }
+  expect(URL.revokeObjectURL).toHaveBeenCalledTimes(1);
 });
 
 it('keeps course application and personal-import controls in the same timetable review', async () => {

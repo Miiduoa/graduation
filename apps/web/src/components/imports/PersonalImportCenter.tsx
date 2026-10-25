@@ -54,6 +54,7 @@ import {
   type PersonalImportDraft,
 } from '@/lib/personalImportDrafts';
 import { recognizePersonalImportImage } from '@/lib/personalImportOcr';
+import { createPersonalImportImagePreview } from '@/lib/personalImportImagePreview';
 import styles from './PersonalImport.module.css';
 import { CourseAccessPanel } from './CourseAccessPanel';
 import { DocumentSelection } from './DocumentSelection';
@@ -390,7 +391,7 @@ function ImportWorkspace({
   const [progress, setProgress] = useState('');
   const [reading, setReading] = useState(false);
   const [saving, setSaving] = useState(false);
-  const [preview, setPreview] = useState('');
+  const [preview, setPreviewState] = useState('');
   const [workspaces, setWorkspaces] = useState<NuniWorkspace[]>([]);
   const [linkRefreshVersion, setLinkRefreshVersion] = useState(0);
   const [linkStatus, setLinkStatus] = useState('');
@@ -408,11 +409,18 @@ function ImportWorkspace({
   const job = useRef<AbortController | null>(null);
   const documentFile = useRef<File | null>(null);
   const active = useRef(true);
+  const previewUrl = useRef('');
   const writing = useRef(false);
   const fileInput = useRef<HTMLInputElement>(null);
   const pdfInput = useRef<HTMLInputElement>(null);
   const review = useRef<HTMLElement>(null);
   const undoKeep = useRef<HTMLButtonElement>(null);
+  const setPreview = (url: string) => {
+    if (previewUrl.current === url) return;
+    if (previewUrl.current) URL.revokeObjectURL(previewUrl.current);
+    previewUrl.current = url;
+    if (active.current) setPreviewState(url);
+  };
   useEffect(() => {
     if (undoOpen) undoKeep.current?.focus();
   }, [undoOpen]);
@@ -504,9 +512,10 @@ function ImportWorkspace({
   }, [draftStorageError, text, rows.length, importDocument]);
   useEffect(
     () => () => {
-      if (preview) URL.revokeObjectURL(preview);
+      if (previewUrl.current) URL.revokeObjectURL(previewUrl.current);
+      previewUrl.current = '';
     },
-    [preview],
+    [],
   );
   useEffect(() => {
     let current = true;
@@ -605,6 +614,14 @@ function ImportWorkspace({
       type: image ? ('screenshot' as const) : ('file' as const),
       name: file.name,
     };
+    let pendingPreview = '';
+    const discardPendingPreview = () => {
+      if (pendingPreview && previewUrl.current === pendingPreview) setPreview('');
+      pendingPreview = '';
+    };
+    const currentRead = () =>
+      active.current && !suspended.current && !controller.signal.aborted && job.current === controller;
+    controller.signal.addEventListener('abort', discardPendingPreview, { once: true });
     try {
       if (/\.(pdf|xlsx)$/i.test(file.name)) {
         setProgress(
@@ -650,7 +667,15 @@ function ImportWorkspace({
       }
       let input: string;
       if (image) {
-        setPreview(URL.createObjectURL(file));
+        const png = await createPersonalImportImagePreview(file, controller.signal);
+        if (!currentRead()) return;
+        const url = URL.createObjectURL(png);
+        if (!currentRead()) {
+          URL.revokeObjectURL(url);
+          return;
+        }
+        pendingPreview = url;
+        setPreview(url);
         input = await recognizePersonalImportImage(file, controller.signal, setProgress);
       } else {
         if (!/\.(csv|tsv|txt|ics)$/i.test(file.name))
@@ -660,14 +685,20 @@ function ImportWorkspace({
         if (file.size > 400_000) throw new Error('文字檔超過 400 KB，請分成較小的檔案再匯入。');
         input = await file.text();
       }
-      if (!active.current || controller.signal.aborted) return;
+      if (!currentRead()) {
+        discardPendingPreview();
+        return;
+      }
       setText(input);
       setSource(nextSource);
       parse(input, nextSource);
+      pendingPreview = '';
     } catch (error) {
+      discardPendingPreview();
       if (active.current && !controller.signal.aborted)
         setNotice(errorMessage(error, image ? PERSONAL_IMPORT_IMAGE_UNREADABLE : undefined));
     } finally {
+      controller.signal.removeEventListener('abort', discardPendingPreview);
       if (active.current && job.current === controller) {
         setReading(false);
         setProgress('');

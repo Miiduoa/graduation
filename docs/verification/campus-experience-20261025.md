@@ -93,6 +93,10 @@ CodeQL 的分析工作成功執行後，另有 7 項安全掃描警示。對應�
 
 上述日常流程修改見 [PR #202](https://github.com/Miiduoa/graduation/pull/202)。該分支另納入同時合併至主分支的 #199 新登入入口；保留精簡入口，帶有 Campus One 目的頁的登入則使用既有可保留分頁、校園與頁面位置的登入流程。字級與手機課表的後續本機回歸為 2 suites／33 項及 4 suites／69 項，最新合併結果仍以 PR 最新 SHA 的 CI 與瀏覽器 artifacts 為準。
 
+`232dc31c44707202393d1e1b8f9301f1b5ee0ad2` 的瀏覽器驗證完成 25 項版面／導覽／登入入口及 9 項課表操作，沒有頁面執行錯誤。相同 App 程式內容在 `16007f1b1552ca492d08b7367c71b6e709e64a7e` 完成 iPhone 17 Pro／iOS 26.4 模擬器的原生建置與兩條 Maestro smoke flows；後續更新只涉及 Web、瀏覽器腳本與文件。
+
+CodeQL 複核另發現原始圖片在格式檢查前進入預覽。補修先驗證 PNG／JPEG／WebP、10 MiB／24 MP 限制，再解碼並輸出長邊不超過 2048 px 的 PNG 預覽；OCR 仍讀取原圖。取消、切換範圍、讀取失敗、儲存與卸載會釋放預覽資源。此補修的 helper 與匯入元件 2 suites／55 項通過；沒有停用或忽略規則，最終仍須核對修正後 SHA 的實際 code-scanning check。
+
 ## 重跑入口與發布界線
 
 使用 Node 22、pnpm 10；emulator 另需 Java 21。從 repository 根目錄可重跑核心檢查；完整測試範圍以最終 PR CI 為準。
