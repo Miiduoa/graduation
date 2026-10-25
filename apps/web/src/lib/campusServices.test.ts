@@ -46,3 +46,15 @@ it('lists the local dormitory workspace without implying an official application
   expect(dorm?.access).toBe('device');
   expect(searchCampusServices('報修').some((service) => service.href === '/dormitory')).toBe(true);
 });
+
+
+it('offers school-account leave workflows without presenting them as official leave submission', () => {
+  const student = CAMPUS_SERVICES.find((service) => service.href === '/leave');
+  const teacher = CAMPUS_SERVICES.find((service) => service.href === '/leave/review');
+  expect(student?.access).toBe('school');
+  expect(teacher?.access).toBe('school');
+  expect(student?.text).toContain('站內核閱');
+  expect(searchCampusServices('請假').map((service) => service.href)).toContain('/leave');
+  expect(searchCampusServices('核閱').map((service) => service.href)).toContain('/leave/review');
+  expect(student?.text).not.toContain('正式');
+});
