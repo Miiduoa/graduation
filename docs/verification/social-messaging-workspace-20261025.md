@@ -13,6 +13,8 @@
 | 想接續對話 | App 訊息主頁直接嵌入真正的 DM 清單，不再只是功能選單 | 沿用已登入帳號與 Firestore 的實際對話 |
 | 想先處理重要訊息 | Web／App DM 清單新增未讀／全部篩選、數量和空狀態返回路徑 | 未讀以最後訊息發送者及已讀時間判定；自己發的訊息不算未讀 |
 | 在對話內找內容 | Web 搜尋目前載入的最多 100 則訊息，提供沒有符合結果的明確提示 | 不宣稱是全量歷史搜尋 |
+| 對訊息表達回應 | Web 新增讚／愛心，與 App 使用相同 Firestore 表情回應欄位，寫入前確認目前學校和成員資格 | 撤回訊息不可新增反應；寫入成功後仍以伺服器快照為準 |
+| 分享校園文章 | Web 由原生分享或剪貼簿複製可登入的貼文連結；App 動態牆直接原生分享 | 分享不等於公開授權；校園內容仍須原有閱讀權限 |
 | 切換裝置／意外離開輸入框 | Web 僅於同瀏覽器分頁保留尚未送出的文字，並在成功確認送出後清除 | 草稿依使用者／學校／對話隔離，無雲端同步 |
 | 學校切換／權限不足 | App DM 查詢需有效 schoolId；對收到的文件再核對同校及雙方成員；補上授權錯誤、重新連線 | 不會在缺少 schoolId 時查詢所有學校 |
 | 已讀顯示 | App 在發送時寫入最後發送者欄位，讓未讀判定可以正確排除自己的訊息 | 尚須驗證跨端 Firestore 舊資料相容性 |
@@ -39,7 +41,7 @@
 
 ## 技術驗證與發布前條件
 
-- Web：`pnpm --filter web typecheck`、`pnpm --filter web test -- --run src/components/messaging/Messaging.test.tsx`（或直接使用 Vitest）、`pnpm --filter web lint`、`pnpm --filter web build`。
+- Web：`pnpm --filter web typecheck`、`pnpm --filter web test -- src/components/messaging/Messaging.test.tsx src/lib/privateMessages.test.ts`、`pnpm --filter web lint`、`pnpm --filter web build`。
 - Mobile：`pnpm --filter mobile typecheck`、`pnpm --filter mobile test -- --runTestsByPath src/__tests__/messagingInboxModel.test.ts --watch=false`、`pnpm --filter mobile lint`。
 - 安全：核對 Firebase Firestore rules／index、弱網狀態、舊版文件無 `lastMessageSenderId` 時的行為、舊版已讀欄位、不同學校與帳號同步切換、異步請求完成順序。
 - 手機人工驗收：iOS Safari、Android Chrome、原生 App 內鍵盤、輸入法、輔助使用放大、長訊息排版、語音輸入鍵盤、遠端登出。
