@@ -19,15 +19,11 @@ export const LEGACY_LOGIN_CALLBACK_PATHS = [
   '/auth/platform/callback',
 ];
 
-// Live old HTML that Campus One does not yet replace.
-export const LEGACY_LIVE_HTML_PATHS = [
-  '/auth/platform',
-  '/privacy/deletion-status',
-];
+export const DELETION_STATUS_PATH = '/account-deletion/status';
 
 // Route handlers and hashed assets the current login buttons still call.
 // HTML /page routes from the pinned legacy manifest are intentionally absent
-// except LEGACY_LIVE_HTML_PATHS and login callbacks.
+// except login callbacks. Replaced screens redirect instead of forwarding.
 export const LEGACY_ENDPOINT_PATHS = [
   '/auth/account/token',
   '/auth/find-school/interest',
@@ -93,11 +89,7 @@ export function legacyRewrites(enabled: boolean): {
   return {
     beforeFiles: ASSOCIATION_PATHS.map(loopbackRewrite),
     afterFiles: [],
-    fallback: [
-      ...LEGACY_LOGIN_CALLBACK_PATHS,
-      ...LEGACY_LIVE_HTML_PATHS,
-      ...LEGACY_ENDPOINT_PATHS,
-    ].map(loopbackRewrite),
+    fallback: [...LEGACY_LOGIN_CALLBACK_PATHS, ...LEGACY_ENDPOINT_PATHS].map(loopbackRewrite),
   };
 }
 
@@ -108,6 +100,16 @@ export function legacyHtmlRedirects(): Redirect[] {
       destination: ACCOUNT_ENTRY_PATH,
       permanent: false,
     })),
+    {
+      source: '/auth/platform',
+      destination: ACCOUNT_ENTRY_PATH,
+      permanent: true,
+    },
+    {
+      source: '/privacy/deletion-status',
+      destination: DELETION_STATUS_PATH,
+      permanent: true,
+    },
     ...LEGACY_PLATFORM_PAGE_REDIRECTS.map((rule) => ({
       ...rule,
       permanent: false,

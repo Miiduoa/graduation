@@ -654,12 +654,35 @@ async def main():
             await check_unsigned_account_entry(page)
             results.append('old find-school URL still lands on the new entry')
 
+            response = await page.goto(BASE + '/auth/platform', wait_until='load')
+            body = await page.content()
+            for copy in OLD_ACCOUNT_COPY:
+                assert copy not in body, '/auth/platform still contains old copy'
+            assert urlparse(page.url).path == '/auth/account'
+            await check_unsigned_account_entry(page)
+            results.append('old platform login URL lands on the account entry')
+
+            response = await page.goto(BASE + '/privacy/deletion-status', wait_until='load')
+            body = await page.content()
+            for copy in OLD_ACCOUNT_COPY:
+                assert copy not in body, '/privacy/deletion-status still contains old copy'
+            assert urlparse(page.url).path == '/account-deletion/status'
+            await expect(page.get_by_role('heading', name='刪除進度')).to_be_visible()
+            await expect(page.get_by_label('查詢碼')).to_be_visible()
+            await expect(page.get_by_role('button', name='查詢進度')).to_be_visible()
+            await expect(page.get_by_role('button', name='用這個瀏覽器保存的查詢碼')).to_be_visible()
+            await expect(page.get_by_role('heading', name='登入', exact=True)).to_have_count(0)
+            await page.screenshot(
+                path=str(OUT / 'deletion-status-unsigned.png'),
+                full_page=True,
+                animations='disabled',
+            )
+            results.append('old deletion-status URL lands on the account deletion status page')
+
             for path, expected in [
-                ('/auth/platform', '/auth/platform'),
                 ('/auth/platform/ops', '/admin/ops'),
                 ('/auth/platform/ops/people', '/admin/ops'),
                 ('/auth/platform/school-review', '/admin/school-review'),
-                ('/privacy/deletion-status', '/privacy/deletion-status'),
             ]:
                 response = await page.goto(BASE + path, wait_until='load')
                 body = await page.content()
@@ -695,7 +718,7 @@ async def main():
                 assert '校園都在這' not in await page.title()
                 assert response is not None and response.status == 404, path
                 assert urlparse(page.url).path == path
-            results.append('live old screens stay reachable; replaced shells 404 or redirect')
+            results.append('replaced shells redirect or 404; remaining admin screens stay off login')
 
             signed = await browser.new_context(
                 viewport={'width': 390, 'height': 844},
