@@ -40,3 +40,9 @@ it('does not rewrite non-food services when ordering is off', () => {
     ONLINE_ORDERING_OFF_TEXT,
   );
 });
+
+it('lists the local dormitory workspace without implying an official application', () => {
+  const dorm = CAMPUS_SERVICES.find((service) => service.href === '/dormitory');
+  expect(dorm?.access).toBe('device');
+  expect(searchCampusServices('報修').some((service) => service.href === '/dormitory')).toBe(true);
+});
