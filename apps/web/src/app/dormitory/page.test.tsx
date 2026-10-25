@@ -118,6 +118,42 @@ it('adds, completes and edits a personal date with storage persistence', () => {
   });
 });
 
+it('records a parcel and allows the resident to update collection status', () => {
+  render(<DormitoryPage />);
+  fireEvent.click(screen.getByRole('button', { name: '包裹領取' }));
+  fireEvent.click(screen.getByRole('button', { name: '網購包裹' }));
+  expect((screen.getByRole('textbox', { name: '包裹名稱 *' }) as HTMLInputElement).value).toBe('網購包裹');
+  fireEvent.change(screen.getByRole('textbox', { name: '領取地點' }), { target: { value: '宿舍服務台' } });
+  fireEvent.change(screen.getByLabelText('預計取件日期（選填）'), { target: { value: '2026-11-15' } });
+  fireEvent.click(screen.getByRole('button', { name: '儲存包裹' }));
+  const key = dormStorageKey('guest', 'pu');
+  expect(JSON.parse(localStorage.getItem(key) ?? 'null').parcels).toHaveLength(1);
+  expect(screen.getByRole('heading', { name: '網購包裹' })).toBeTruthy();
+  expect(screen.getByText(/沒有接入學校收發室/)).toBeTruthy();
+  fireEvent.click(screen.getByRole('button', { name: '標記已領取' }));
+  expect(JSON.parse(localStorage.getItem(key) ?? 'null').parcels[0]).toMatchObject({
+    title: '網購包裹', pickupPoint: '宿舍服務台', collected: true,
+  });
+  fireEvent.click(screen.getByRole('button', { name: '已領取' }));
+  expect(screen.getByRole('heading', { name: '網購包裹' })).toBeTruthy();
+  fireEvent.click(screen.getByRole('button', { name: '恢復待領' }));
+  expect(JSON.parse(localStorage.getItem(key) ?? 'null').parcels[0].collected).toBe(false);
+});
+
+it('keeps package notes separate when switching schools', () => {
+  const page = render(<DormitoryPage />);
+  fireEvent.click(screen.getByRole('button', { name: '包裹領取' }));
+  fireEvent.click(screen.getByRole('button', { name: '掛號郵件' }));
+  fireEvent.click(screen.getByRole('button', { name: '儲存包裹' }));
+  selectedCampus.schoolId = 'ncku';
+  selectedCampus.schoolName = '國立成功大學';
+  page.rerender(<DormitoryPage />);
+  fireEvent.click(screen.getByRole('button', { name: '包裹領取' }));
+  expect(screen.queryByRole('heading', { name: '掛號郵件' })).toBeNull();
+  expect(JSON.parse(localStorage.getItem(dormStorageKey('guest', 'pu')) ?? 'null').parcels).toHaveLength(1);
+  expect(localStorage.getItem(dormStorageKey('guest', 'ncku'))).toBeNull();
+});
+
 it('pre-fills a common repair but never submits it to the school automatically', () => {
   render(<DormitoryPage />);
   fireEvent.change(screen.getByRole('textbox', { name: '寢室' }), { target: { value: '305' } });
