@@ -33,6 +33,9 @@ it.each([
   ['/life', '/life'],
   ['/timetable', '/timetable'],
   ['/grades', '/grades'],
+  ['/grades?tab=feedback&campus=pu', '/grades?tab=feedback&campus=pu'],
+  ['/course/cs101?schoolId=pu#assignment-hw-3', '/course/cs101?schoolId=pu#assignment-hw-3'],
+  ['/events/open-day?schoolId=nchu&source=campus', '/events/open-day?schoolId=nchu&source=campus'],
   ['/grades?tab=feedback&campus=nthu#recent', '/grades?tab=feedback&campus=nthu#recent'],
   ['/course/cs101?campus=pu#assignment-hw-1', '/course/cs101?campus=pu#assignment-hw-1'],
   ['/search?q=room%20A&campus=nthu#results', '/search?q=room+A&campus=nthu#results'],
@@ -40,20 +43,26 @@ it.each([
   ['/merchant', '/merchant'],
   ['/admin', '/admin'],
   ['/auth/platform/class-workspace/join', '/auth/platform/class-workspace/join'],
-  ['/auth/platform/ops?tab=review', '/auth/platform/ops?tab=review'],
-  ['/auth/platform/ops#pending', '/auth/platform/ops#pending'],
+  ['/auth/platform/ops?tab=review', '/auth/platform/ops'],
+  ['/auth/platform/ops#pending', '/'],
   ['/me', '/me'],
   ['https://evil.test', '/'],
   ['//evil.test', '/'],
   ['/\\evil.test', '/'],
   ['/login', '/'],
+  ['/login?returnUrl=%2Flife#sign-in', '/'],
+  ['/auth/account?next=%2Flife', '/'],
+  ['/staff', '/'],
+  ['javascript:alert(1)', '/'],
+  ['/life#services', '/life#services'],
+  ['/life?campus=pu\n', '/'],
+  ['/li\nfe?campus=pu', '/'],
+  ['/life?campus=pu\u007f', '/'],
+  ['/course/../login?campus=pu', '/'],
   ['/login?returnUrl=%2Fgrades', '/'],
   ['/auth/account?returnUrl=%2Fgrades', '/'],
   ['/classroom/login#feedback', '/'],
   ['/join?code=course-1', '/'],
-  ['/staff', '/'],
-  ['javascript:alert(1)', '/'],
-  ['/life#services', '/life#services'],
   ['/leave?requestId=abc-1', '/'],
   ['/grades/../auth/account', '/'],
   ['/grades/%2e%2e/auth/account', '/'],
@@ -149,6 +158,7 @@ it.each([
   '/grades?tab=feedback&schoolId=nthu&campus=nthu#feedback',
   '/settings?section=appearance&campus=nthu',
   '/events',
+  '/import?kind=grades&campus=pu',
   '/events/evt-1?school=PU&schoolId=pu&campus=pu&source=school-club-events#registration',
   '/events/evt-2?schoolId=nthu&campus=nthu&source=school-events',
   '/events/evt-3?schoolId=pu&campus=pu&source=legacy-events',
@@ -158,10 +168,6 @@ it.each([
   '/community/post/new?boardId=board-1',
   '/community/story/new?poiId=library',
   '/ai-assistant?courseId=course-1&groupId=group-1',
-  '/auth/platform/class-workspace/join?campus=nthu',
-  '/auth/platform/class-workspace/cw_11111111-1111-4111-8111-111111111111?campus=nthu#materials',
-  '/auth/platform/ops?create=school#form',
-  '/auth/platform/school-review?campus=pu',
 ])('preserves usable page state when returning to %s', (path) => {
   expect(sanitizeReturnPath(path)).toBe(path);
   expect(readReturnPath(new URLSearchParams({ returnUrl: path }))).toBe(path);
@@ -240,6 +246,27 @@ it.each(['#reading', '#registration', '#assignment-hw-3', '#%E9%96%B1%E8%AE%80']
   expect(sanitizeReturnPath(`/grades?campus=pu${hash}`)).toBe(`/grades?campus=pu${hash}`);
 });
 
+it.each([
+  ['/auth/platform/class-workspace/join?campus=nthu', '/auth/platform/class-workspace/join'],
+  ['/auth/platform/class-workspace/cw_11111111-1111-4111-8111-111111111111?campus=nthu#materials', '/'],
+  ['/auth/platform/ops?create=school#form', '/'],
+  ['/auth/platform/school-review?campus=pu', '/auth/platform/school-review'],
+ ])('keeps retained account callbacks on their path-only contract: %s', (path, expected) => {
+  expect(sanitizeReturnPath(path)).toBe(expected);
+  expect(campusOneLoginHref(new URLSearchParams({ returnUrl: path }))).toBeNull();
+});
+
+it('filters return context before handing a task to Campus One login', () => {
+  const input = '/events/open-day?campus=pu&next=%2F%2Fevil.test&token=private#registration';
+  const destination = '/events/open-day?campus=pu#registration';
+  const href = campusOneLoginHref(new URLSearchParams({ returnUrl: input }));
+  expect(new URL(href!, 'https://nuni.tw').searchParams.get('returnUrl')).toBe(destination);
+});
+
+it('keeps the first safe content anchor when a stale document fragment is repeated', () => {
+  expect(sanitizeReturnPath('/grades?campus=pu#feedback#stale')).toBe('/grades?campus=pu#feedback');
+});
+
 it('lists only the consumer Google and Apple kinds from the existing providers endpoint', async () => {
   fetchMock.mockResolvedValueOnce(
     new Response(JSON.stringify({ kinds: ['google-consumer', 'school-issued', 'apple'] }), {
@@ -268,14 +295,15 @@ it('starts Google continue through the existing platform token endpoint and PKCE
       { status: 200, headers: { 'Content-Type': 'application/json' } },
     ),
   );
-  await startGoogleContinue('/grades?tab=feedback&campus=nthu&next=%2F%2Fevil.test#feedback');
+  const returnPath = '/grades?tab=feedback&campus=pu#course-cs101';
+  await startGoogleContinue('/grades?tab=feedback&campus=pu&next=%2F%2Fevil.test#course-cs101');
   expect(fetchMock).toHaveBeenCalledWith('/auth/platform/token', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ grantType: 'start', kind: 'google-consumer' }),
   });
   const stored = JSON.parse(sessionStorage.getItem(PLATFORM_LOGIN_TRANSACTION_KEY)!);
-  expect(stored.returnPath).toBe('/grades?tab=feedback&campus=nthu#feedback');
+  expect(stored.returnPath).toBe(returnPath);
   expect(stored.codeVerifier).toMatch(/^[A-Za-z0-9_-]+$/);
   const destination = new URL(assign.mock.calls[0][0]);
   expect(destination.origin).toBe('https://accounts.google.com');
@@ -345,7 +373,10 @@ it('treats Campus One session as signed in before falling back to /auth/session'
   expect(fetchMock).not.toHaveBeenCalledWith('/auth/session', expect.anything());
 });
 
-it('starts school login through the existing account token endpoint', async () => {
+it.each([
+  '/course/cs101?schoolId=pu#assignment-hw-3',
+  '/events/evt-1?campus=pu&source=school-club-events#registration',
+])('starts school login with return context for %s', async (returnPath) => {
   const assign = vi.fn();
   vi.stubGlobal('location', { assign, origin: 'https://nuni.tw' });
   fetchMock.mockResolvedValueOnce(
@@ -361,14 +392,14 @@ it('starts school login through the existing account token endpoint', async () =
       { status: 200, headers: { 'Content-Type': 'application/json' } },
     ),
   );
-  await startSchoolProvider('tenant-1', 'google-workspace', '/events/evt-1?campus=pu&source=school-club-events#registration');
+  await startSchoolProvider('tenant-1', 'google-workspace', returnPath);
   expect(fetchMock).toHaveBeenCalledWith('/auth/account/token', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ grantType: 'start', tenantId: 'tenant-1', kind: 'google-workspace' }),
   });
   const stored = JSON.parse(sessionStorage.getItem(ACCOUNT_LOGIN_TRANSACTION_KEY)!);
+  expect(stored.returnPath).toBe(returnPath);
   expect(stored.redirectUri).toBe('https://nuni.tw/auth/account/callback');
-  expect(stored.returnPath).toBe('/events/evt-1?campus=pu&source=school-club-events#registration');
   expect(assign).toHaveBeenCalledOnce();
 });

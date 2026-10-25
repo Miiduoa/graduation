@@ -93,6 +93,18 @@ function mapThrownError(error) {
       body: callableErrorBody('not-found', error.message || 'Not found'),
     };
   }
+  if (statusCode === 413 || statusCode === 429) {
+    return {
+      statusCode,
+      body: callableErrorBody('resource-exhausted', error.message || 'Resource exhausted'),
+    };
+  }
+  if (statusCode === 400 || statusCode === 405 || statusCode === 415) {
+    return {
+      statusCode,
+      body: callableErrorBody('invalid-argument', error.message || 'Invalid argument'),
+    };
+  }
   return {
     statusCode: 500,
     body: callableErrorBody('internal', 'INTERNAL'),

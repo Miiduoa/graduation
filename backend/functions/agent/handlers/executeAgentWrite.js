@@ -10,6 +10,7 @@ const { getFirestore, FieldValue } = require('firebase-admin/firestore');
 const { createAuthzHelpers } = require('../../authz');
 const { fetchAssistantUserProfile } = require('../../lib/assistantFetchers');
 const { runTool, byName } = require('../tools/registry');
+const { assertToolInputBounds } = require('../inputLimits');
 const { assertOnlineOrderingEnabled } = require('../../lib/onlineOrdering');
 
 const REGION = 'asia-east1';
@@ -65,12 +66,15 @@ async function appendAgentRunToolStep(uid, agentRunId, toolName, rawInput, outpu
 module.exports = onCall(
   {
     region: REGION,
+    preflight(request) {
+      if (!request.auth?.uid) {
+        throw new HttpsError('unauthenticated', 'Must be logged in');
+      }
+      assertToolInputBounds(request.data?.input);
+    },
   },
   async (request) => {
     const uid = request.auth?.uid;
-    if (!uid) {
-      throw new HttpsError('unauthenticated', 'Must be logged in');
-    }
 
     const toolName = String(request.data?.toolName || '').trim();
     if (!ALLOWED_TOOLS.has(toolName)) {

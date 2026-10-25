@@ -6,6 +6,7 @@ const {
   applyCorsHeaders,
   createRequestListener,
   isAllowedOrigin,
+  mapThrownError,
   resolveAllowedOrigins,
 } = require('./httpAdapter');
 
@@ -198,10 +199,12 @@ describe('httpAdapter CORS allowlist', () => {
     expect(isAllowedOrigin(undefined, ['https://nuni.tw'])).toBe(false);
   });
 
-  test('production defaults exclude localhost', () => {
+  test('production defaults exclude localhost and allow nuni.tw', () => {
     process.env.APP_ENV = 'production';
     delete process.env.ALLOWED_WEB_ORIGINS;
     expect(resolveAllowedOrigins()).toEqual(['https://nuni.tw', 'https://www.nuni.tw']);
+    expect(isAllowedOrigin('https://nuni.tw')).toBe(true);
+    expect(isAllowedOrigin('https://www.nuni.tw')).toBe(true);
     expect(isAllowedOrigin('http://localhost:3000')).toBe(false);
   });
 
@@ -222,3 +225,22 @@ describe('httpAdapter CORS allowlist', () => {
     expect(headers['Access-Control-Allow-Origin']).toBe('https://nuni.tw');
   });
 });
+
+describe('mapThrownError', () => {
+  test('maps 413 and 429 to resource-exhausted instead of 500', () => {
+    const tooLarge = new Error('Request body too large');
+    tooLarge.statusCode = 413;
+    expect(mapThrownError(tooLarge)).toMatchObject({
+      statusCode: 413,
+      body: { error: { status: 'RESOURCE_EXHAUSTED', message: 'Request body too large' } },
+    });
+
+    const limited = new Error('Too many requests');
+    limited.statusCode = 429;
+    expect(mapThrownError(limited)).toMatchObject({
+      statusCode: 429,
+      body: { error: { status: 'RESOURCE_EXHAUSTED', message: 'Too many requests' } },
+    });
+  });
+});
+
