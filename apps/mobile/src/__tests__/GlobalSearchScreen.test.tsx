@@ -4,6 +4,7 @@ import { FlatList, ScrollView, StyleSheet } from 'react-native';
 import { getDocs } from 'firebase/firestore';
 import { GlobalSearchScreen } from '../screens/GlobalSearchScreen';
 import { safeNavigate } from '../utils/safeNavigate';
+import { interpretMobileCampusRequest } from '../services/campusIntentClient';
 import { applyTheme } from '../ui/theme';
 
 let mockSchool = { id: 'pu', name: '靜宜大學' };
@@ -41,6 +42,7 @@ jest.mock('../ui/components', () => ({
 jest.mock('../ui/navigationTheme', () => ({ useTabBarContentBottomPadding: () => 118 }));
 jest.mock('../firebase', () => ({ getDb: () => ({}) }));
 jest.mock('../utils/safeNavigate', () => ({ safeNavigate: jest.fn(() => true) }));
+jest.mock('../services/campusIntentClient', () => ({ interpretMobileCampusRequest: jest.fn() }));
 jest.mock('../services/inboxActions', () => ({ navigateFromInboxTask: jest.fn(() => false) }));
 jest.mock('../utils/campusOs', () => ({ isTeachingRole: (role: string) => role === 'teacher' }));
 jest.mock('@expo/vector-icons', () => ({ Ionicons: () => null }));
@@ -314,4 +316,22 @@ test('spoken-style questions show direct service links even without an exact key
   await search(view, '圖書館怎麼走');
   fireEvent.press(view.getByLabelText('前往校園地圖'));
   expect(safeNavigate).toHaveBeenCalledWith(navigation, 'MapV2');
+});
+
+
+test('AI understands a multi-step campus request without navigating or writing on its own', async () => {
+  jest.mocked(interpretMobileCampusRequest).mockResolvedValue({
+    status: 'understood', source: 'model',
+    summary: '先查空堂，再找讀書和吃飯的地方。',
+    destinations: ['/timetable', '/library', '/cafeteria'], clarifyingQuestion: null,
+  });
+  const view = render(<GlobalSearchScreen navigation={navigation} />);
+  await search(view, '明天沒課想找地方讀書再吃飯');
+  expect(interpretMobileCampusRequest).not.toHaveBeenCalled();
+  await act(async () => fireEvent.press(view.getByLabelText('用 AI 理解校園搜尋')));
+  expect(view.getByText('先查空堂，再找讀書和吃飯的地方。')).toBeTruthy();
+  expect(view.getByText('AI 建議直接開啟')).toBeTruthy();
+  expect(safeNavigate).not.toHaveBeenCalled();
+  fireEvent.press(view.getByLabelText('前往圖書館'));
+  expect(safeNavigate).toHaveBeenCalledWith(navigation, 'Library');
 });

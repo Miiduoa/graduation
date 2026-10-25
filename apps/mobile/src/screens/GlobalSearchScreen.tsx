@@ -12,6 +12,7 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { collection, getDocs, limit, orderBy, query, where } from 'firebase/firestore';
 import { toPublicSchoolId } from '@campus/shared/src/schoolIds';
+import type { CampusSemanticResult } from '@campus/shared/src/campusSemantic';
 import { Screen } from '../ui/components';
 import { useTabBarContentBottomPadding } from '../ui/navigationTheme';
 import { useTheme } from '../state/theme';
@@ -25,7 +26,8 @@ import { safeNavigate } from '../utils/safeNavigate';
 import { navigateFromInboxTask } from '../services/inboxActions';
 import { isTeachingRole } from '../utils/campusOs';
 import { getDb } from '../firebase';
-import { getMobileQuickActions } from '../services/quickCampusActions';
+import { getMobileQuickActions, getMobileActionsForDestinations } from '../services/quickCampusActions';
+import { interpretMobileCampusRequest } from '../services/campusIntentClient';
 import type { InboxTask } from '../data/types';
 
 type Category =
@@ -248,6 +250,13 @@ function SearchWorkspace({
   const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
   const [groupAttempt, setGroupAttempt] = useState(0);
   const [groups, setGroups] = useState<GroupState>(EMPTY_GROUPS);
+  const [understanding, setUnderstanding] = useState<{
+    phrase: string;
+    status: 'loading' | 'ready' | 'error';
+    result?: CampusSemanticResult;
+  } | null>(null);
+  const semanticSequence = useRef(0);
+  useEffect(() => () => { semanticSequence.current += 1; }, []);
   const input = useRef<TextInput>(null);
   const list = useRef<FlatList<SearchResult>>(null);
   const keyword = text.trim().toLocaleLowerCase();
@@ -555,11 +564,39 @@ function SearchWorkspace({
     privateReady && groups.limited && (category === 'all' || category === 'groups');
   const groupLoginNeeded = category === 'groups' && !privateReady;
   const recent = history.recentSearches('all', 8);
+  const activeUnderstanding = understanding?.phrase === text.trim() ? understanding : null;
+  const semantic = activeUnderstanding?.status === 'ready' ? activeUnderstanding.result : undefined;
   const quickActions = searching && category === 'all'
-    ? getMobileQuickActions(text)
+    ? semantic?.status === 'understood'
+      ? getMobileActionsForDestinations(semantic.destinations)
+      : getMobileQuickActions(text)
     : [];
 
+  async function analyze(raw: string) {
+    const utterance = raw.trim().slice(0, 120);
+    if (!uid || !privateReady || !utterance) return;
+    const request = ++semanticSequence.current;
+    setUnderstanding({ phrase: utterance, status: 'loading' });
+    try {
+      const result = await interpretMobileCampusRequest({
+        uid,
+        schoolId: school.id,
+        utterance,
+        isCurrent: () => activeScope.current === scopeKey && semanticSequence.current === request,
+      });
+      if (activeScope.current === scopeKey && semanticSequence.current === request) {
+        setUnderstanding({ phrase: utterance, status: 'ready', result });
+      }
+    } catch {
+      if (activeScope.current === scopeKey && semanticSequence.current === request) {
+        setUnderstanding({ phrase: utterance, status: 'error' });
+      }
+    }
+  }
+
   const changeText = (value: string) => {
+    semanticSequence.current += 1;
+    setUnderstanding(null);
     setText(value);
     setVisibleCount(PAGE_SIZE);
     list.current?.scrollToOffset({ offset: 0, animated: false });
@@ -714,6 +751,7 @@ function SearchWorkspace({
             onSubmitEditing={() => {
               remember();
               Keyboard.dismiss();
+              if (privateReady) void analyze(text);
             }}
             returnKeyType="search"
             maxLength={120}
@@ -747,6 +785,28 @@ function SearchWorkspace({
             <View style={{ width: 12 }} />
           )}
         </View>
+        {searching && privateReady && (
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="用 AI 理解校園搜尋"
+            accessibilityState={{ disabled: activeUnderstanding?.status === 'loading' }}
+            disabled={activeUnderstanding?.status === 'loading'}
+            onPress={() => {
+              Keyboard.dismiss();
+              void analyze(text);
+            }}
+            style={{
+              minHeight: 44, alignSelf: 'flex-start', justifyContent: 'center',
+              borderRadius: 11, backgroundColor: theme.colors.accent,
+              opacity: activeUnderstanding?.status === 'loading' ? 0.6 : 1,
+              paddingHorizontal: 15,
+            }}
+          >
+            <Text style={{ ...theme.typography.bodySmall, fontWeight: '700', color: theme.colors.onAccent }}>
+              {activeUnderstanding?.status === 'loading' ? 'AI 正在理解…' : '用 AI 理解校園需求'}
+            </Text>
+          </Pressable>
+        )}
         <View>
           <ScrollView
             horizontal
@@ -819,6 +879,30 @@ function SearchWorkspace({
                       : `已載入內容中找到 ${results.length} 筆`}
                   </Text>
                 </View>
+                {semantic?.source === 'model' && (
+                  <View style={{
+                    padding: 14, gap: 7,
+                    backgroundColor: theme.colors.surface2,
+                    borderRadius: 12,
+                  }}>
+                    <Text style={{ ...theme.typography.h3, color: theme.colors.text }}>
+                      {semantic.status === 'clarify' ? '需要再確認' : 'AI 理解的需求'}
+                    </Text>
+                    <Text style={{ ...theme.typography.bodySmall, color: theme.colors.text }}>
+                      {semantic.summary}
+                    </Text>
+                    {semantic.clarifyingQuestion && (
+                      <Text style={{ ...theme.typography.bodySmall, color: theme.colors.muted }}>
+                        {semantic.clarifyingQuestion}
+                      </Text>
+                    )}
+                  </View>
+                )}
+                {(activeUnderstanding?.status === 'error' || semantic?.status === 'unavailable') && (
+                  <Text style={{ ...theme.typography.caption, color: theme.colors.muted }}>
+                    AI 暫時無法理解。下方僅顯示基本關鍵字捷徑。
+                  </Text>
+                )}
                 {quickActions.length > 0 ? (
                   <View
                     style={{
@@ -831,7 +915,7 @@ function SearchWorkspace({
                     }}
                   >
                     <Text style={{ ...theme.typography.h3, color: theme.colors.text }}>
-                      直接開啟
+                      {semantic?.status === 'understood' ? 'AI 建議直接開啟' : '直接開啟'}
                     </Text>
                     {quickActions.map((action) => (
                       <Pressable
