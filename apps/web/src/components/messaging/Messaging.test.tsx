@@ -117,6 +117,7 @@ function Chat({ id = 'opaque_conversation_id_with_underscores' }: { id?: string 
   );
 }
 beforeEach(() => {
+  sessionStorage.clear();
   vi.clearAllMocks();
   account.user = { uid: 'alice' };
   account.loading = false;
@@ -370,4 +371,68 @@ it('logout removes notifications and old subscription errors cannot restore them
   expect(screen.queryByText('成績已公布')).toBeNull();
   act(() => old(notifications()));
   expect(screen.queryByText('成績已公布')).toBeNull();
+});
+
+it('separates unread and read conversations without treating own messages as unread', async () => {
+  vi.mocked(watchPrivateConversations).mockImplementation((_session, receive) => {
+    receive([
+      conversation({ id: 'unread', peerName: '未讀同學' }),
+      conversation({ id: 'read', peerName: '已讀同學', lastSenderId: 'alice' }),
+    ]);
+    return vi.fn();
+  });
+  render(<DmsListPage />);
+  await screen.findByText('未讀同學');
+  fireEvent.click(screen.getByRole('button', { name: /未讀 1/ }));
+  expect(screen.getByText('未讀同學')).toBeTruthy();
+  expect(screen.queryByText('已讀同學')).toBeNull();
+  fireEvent.click(screen.getByRole('button', { name: /全部 2/ }));
+  expect(screen.getByText('已讀同學')).toBeTruthy();
+});
+
+it('offers a recoverable unread empty state without erasing conversations', async () => {
+  vi.mocked(watchPrivateConversations).mockImplementation((_session, receive) => {
+    receive([conversation({ lastSenderId: 'alice' })]);
+    return vi.fn();
+  });
+  render(<DmsListPage />);
+  await screen.findByText('真實目錄姓名');
+  fireEvent.click(screen.getByRole('button', { name: /未讀 0/ }));
+  expect(screen.getByText('所有對話都已讀')).toBeTruthy();
+  fireEvent.click(screen.getByRole('button', { name: '查看全部對話' }));
+  expect(screen.getByText('真實目錄姓名')).toBeTruthy();
+});
+
+it('filters only the loaded thread messages and can restore them', async () => {
+  render(<Chat />);
+  await screen.findByText('伺服器的訊息');
+  const field = screen.getByRole('searchbox', { name: '搜尋此對話' });
+  fireEvent.change(field, { target: { value: '不在對話內' } });
+  expect(screen.queryByText('伺服器的訊息')).toBeNull();
+  expect(screen.getByText('找不到符合的訊息，試著調整關鍵字。')).toBeTruthy();
+  fireEvent.change(field, { target: { value: '伺服器' } });
+  expect(screen.getByText('伺服器的訊息')).toBeTruthy();
+});
+
+it('recovers an unsent message only for the same browser tab and conversation', async () => {
+  const view = render(<Chat id="draft-restoration" />);
+  await screen.findByText('伺服器的訊息');
+  fireEvent.change(screen.getByLabelText('訊息內容'), { target: { value: '待傳送的訊息' } });
+  await waitFor(() =>
+    expect(sessionStorage.getItem('campus-one:dm-draft:alice:pu:draft-restoration')).toBe('待傳送的訊息'),
+  );
+  view.unmount();
+  render(<Chat id="draft-restoration" />);
+  await screen.findByText('伺服器的訊息');
+  expect((screen.getByLabelText('訊息內容') as HTMLTextAreaElement).value).toBe('待傳送的訊息');
+});
+
+it('supports Cmd+Enter to send while preserving the confirmed-send guard', async () => {
+  render(<Chat />);
+  await screen.findByText('伺服器的訊息');
+  const field = screen.getByLabelText('訊息內容');
+  fireEvent.change(field, { target: { value: '快捷傳送' } });
+  fireEvent.keyDown(field, { key: 'Enter', metaKey: true });
+  await waitFor(() => expect(sendPrivateMessage).toHaveBeenCalledTimes(1));
+  expect(vi.mocked(sendPrivateMessage).mock.calls[0][3]).toBe('快捷傳送');
 });
