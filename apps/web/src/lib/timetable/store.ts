@@ -466,7 +466,7 @@ export async function listCourseAppeals(schoolId: string, uid: string) {
 }
 
 /** 舊的課表文件沒有索引時，用課表裡實際的課補上（只補，不會多加課）。 */
-async function ensureTimetableIndex(
+export async function ensureTimetableIndex(
   uid: string,
   schoolId: string,
   localCourses?: PersonalCourse[],
