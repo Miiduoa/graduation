@@ -65,6 +65,7 @@ jest.mock('../state/theme', () => ({
 }));
 jest.mock('../state/nuniSession', () => ({
   useNuniSession: () => ({ session: null, loading: false, error: '', pendingLogout: false }),
+  useOptionalNuniSession: () => null,
 }));
 jest.mock('../state/schedule', () => ({
   useSchedule: () => ({
