@@ -802,10 +802,10 @@ it('moves from a selected school to its staff without losing the school context'
   });
   renderSchools();
   fireEvent.click(await screen.findByRole('button', { name: '管理第一學校' }));
-  fireEvent.click(screen.getByRole('button', { name: '查看校方授權' }));
+  fireEvent.click(screen.getAllByRole('button', { name: '查看校方授權' })[0]);
   await waitFor(() => expect(window.location.hash).toBe('#people/school-one'));
   expect((await screen.findByLabelText('選擇學校') as HTMLSelectElement).value).toBe('school-one');
-  fireEvent.click(await screen.findByRole('button', { name: '查看學校設定' }));
+  fireEvent.click((await screen.findAllByRole('button', { name: '查看學校設定' }))[0]);
   await waitFor(() => expect(window.location.hash).toBe('#schools/school-one'));
 });
 
@@ -871,16 +871,16 @@ it('requires a school manager before allowing the school to open from the workbe
 it('preserves the selected school while navigating between settings and authorizations', async () => {
   window.history.replaceState(null, '', '/admin#schools/school-one');
   render(<AdminWorkspace />);
-  await screen.findByRole('button', { name: '收起學校設定' });
+  await screen.findByRole('button', { name: '返回學校列表' });
   expect(screen.getByRole('link', { name: '校方授權作業' }).getAttribute('href')).toBe(
     '/admin/ops?tab=people&school=school-one',
   );
-  fireEvent.click(screen.getByRole('button', { name: '查看校方授權' }));
+  fireEvent.click(screen.getAllByRole('button', { name: '查看校方授權' })[0]);
   await waitFor(() => expect(window.location.hash).toBe('#people/school-one'));
-  expect(screen.getByRole('button', { name: '查看學校設定' })).toBeTruthy();
-  fireEvent.click(screen.getByRole('button', { name: '查看學校設定' }));
+  expect(screen.getAllByRole('button', { name: '查看學校設定' })[0]).toBeTruthy();
+  fireEvent.click(screen.getAllByRole('button', { name: '查看學校設定' })[0]);
   await waitFor(() => expect(window.location.hash).toBe('#schools/school-one'));
-  expect(screen.getByRole('button', { name: '收起學校設定' })).toBeTruthy();
+  expect(screen.getByRole('button', { name: '返回學校列表' })).toBeTruthy();
 });
 
 it('does not read management data while logout confirmation is pending', () => {
