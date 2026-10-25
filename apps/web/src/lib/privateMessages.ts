@@ -48,7 +48,7 @@ export type PrivateMessage = {
   type: string;
   createdAt: string | null;
   recalled: boolean;
-  reactions: Record<string, string[]>;
+  reactions?: Record<string, string[]>;
 };
 export type ConversationContents = {
   conversation: PrivateConversation;
