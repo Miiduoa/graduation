@@ -208,7 +208,7 @@ export default function StudentTodayScreen() {
     rootNavigateNested('學習', 'PersonalTimetable', termKey ? { term: termKey } : undefined);
   const openImport = () => rootNavigateNested('學習', 'PersonalImport', { kind: 'timetable' });
   const openQuickAction = (quick: MobileQuickAction) => {
-    if (quick.destination === '/classroom' && todoRows.length) {
+    if (quick.destination === '/classroom' && todoRows.length === 1) {
       // Use the current user's real assignment or quiz, never fabricate a submit id.
       openTodo(todoRows[0], true);
       return;
