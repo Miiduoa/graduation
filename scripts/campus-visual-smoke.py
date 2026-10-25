@@ -253,25 +253,6 @@ async def main():
                 results.append(f'life directory reflows at {width}px')
             results.append('mobile bottom navigation leaves footer actions reachable')
 
-            await page.set_viewport_size({'width': 1440, 'height': 1000})
-            await goto_path(page, '/auth/account')
-            await check_unsigned_account_entry(page)
-            await no_overflow(page)
-            await page.screenshot(
-                path=str(OUT / 'auth-account-desktop.png'),
-                full_page=True,
-                animations='disabled',
-            )
-            await page.set_viewport_size({'width': 390, 'height': 844})
-            await goto_path(page, '/auth/account')
-            await check_unsigned_account_entry(page)
-            await no_overflow(page)
-            await page.screenshot(
-                path=str(OUT / 'auth-account-mobile.png'),
-                animations='disabled',
-            )
-            results.append('unsigned account entry keeps existing actions without demo copy')
-
             search = page.get_by_role('searchbox', name='快速找服務')
             await search.fill('借書')
             await expect(page.locator('#life-service-results a')).to_have_count(1)
@@ -368,6 +349,27 @@ async def main():
             await no_overflow(page)
             await check_mobile_navigation(page)
             results.append('320px large-text preference has no overflow')
+
+            await page.emulate_media(color_scheme='light')
+            await page.evaluate('''() => localStorage.removeItem('campus-web-preferences')''')
+            await page.set_viewport_size({'width': 1440, 'height': 1000})
+            await goto_path(page, '/auth/account')
+            await check_unsigned_account_entry(page)
+            await no_overflow(page)
+            await page.screenshot(
+                path=str(OUT / 'auth-account-desktop.png'),
+                full_page=True,
+                animations='disabled',
+            )
+            await page.set_viewport_size({'width': 390, 'height': 844})
+            await goto_path(page, '/auth/account')
+            await check_unsigned_account_entry(page)
+            await no_overflow(page)
+            await page.screenshot(
+                path=str(OUT / 'auth-account-mobile.png'),
+                animations='disabled',
+            )
+            results.append('unsigned account entry keeps existing actions without demo copy')
             assert not errors, errors
         except Exception:
             await page.screenshot(path=str(OUT / 'failure.png'), full_page=True, animations='disabled')
