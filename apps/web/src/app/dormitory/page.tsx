@@ -337,12 +337,14 @@ function DormitoryWorkspace({ scope, schoolId, schoolName, guest }: {
             <div className={styles.heroActions}>
               <button type="button" className={styles.heroPrimary} onClick={() => beginRepair()}>記錄設備問題</button>
               <button type="button" className={styles.heroSecondary} onClick={() => setView('guide')}>查看宿舍指南</button>
+               <button type="button" className={styles.heroSecondary} onClick={() => beginParcel()}>記錄待領包裹</button>
             </div>
           </div>
-          <div className={styles.heroStats} aria-label="個人紀錄摘要">
-            <div><strong>{openRepairs.length}</strong><span>待追蹤問題</span></div>
-            <div><strong>{milestones.filter((item) => !item.completed).length}</strong><span>待辦日期</span></div>
-            <div><strong>{progress.completed}/{progress.total}</strong><span>準備進度</span></div>
+          <div className={styles.heroStats} aria-label="個人紀錄快捷入口">
+            <button type="button" onClick={() => setView('parcels')}><strong>{pendingParcels.length}</strong><span>待領包裹</span></button>
+             <button type="button" onClick={() => setView('repairs')}><strong>{openRepairs.length}</strong><span>待追蹤問題</span></button>
+            <button type="button" onClick={() => setView('dates')}><strong>{milestones.filter((item) => !item.completed).length}</strong><span>待辦日期</span></button>
+            <button type="button" onClick={() => setView('checklist')}><strong>{progress.completed}/{progress.total}</strong><span>準備進度</span></button>
           </div>
         </section>
 
@@ -391,9 +393,11 @@ function DormitoryWorkspace({ scope, schoolId, schoolName, guest }: {
                   : nextChecklistItem ? nextChecklistItem.detail : '目前沒有尚未完成的準備事項。'}</p>
                 <button type="button" className={styles.secondary} onClick={() => setView(nextMilestone ? 'dates' : 'checklist')}>查看{nextMilestone ? '重要日期' : '入住退宿清單'}</button>
                 {overdueCount > 0 && <p className={styles.overdueText}>{overdueCount} 項個人日期已過，建議先確認。</p>}
+                 {overdueParcels.length > 0 && <p className={styles.overdueText}>{overdueParcels.length} 件包裹已超過自訂取件日期。</p>}
                 <div className={styles.nextLinks}>
                   <button type="button" onClick={() => beginMilestone()}>＋ 新增重要日期</button>
                   <button type="button" onClick={() => setView('repairs')}>設備問題 {openRepairs.length} 筆</button>
+                   <button type="button" onClick={() => setView('parcels')}>待領包裹 {pendingParcels.length} 件</button>
                 </div>
               </section>
               <section className={styles.panel}>
