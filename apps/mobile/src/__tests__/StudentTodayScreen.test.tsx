@@ -363,7 +363,7 @@ test('one-tap homework uses the real current inbox task instead of a guessed tar
 
 test('a natural-language location query opens the registered campus map without any write', async () => {
   const view = render(<StudentTodayScreen />);
-  fireEvent.changeText(view.getByLabelText('說出或輸入想做的事'), '圖書館怎麼走');
+  fireEvent.changeText(await view.findByLabelText('說出或輸入想做的事'), '圖書館怎麼走');
   fireEvent.press(view.getByLabelText('前往校園地圖'));
   expect(mockNavigate).toHaveBeenCalledWith('校園', {
     screen: 'MapV2',
