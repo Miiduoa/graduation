@@ -28,11 +28,13 @@ import {
   currentPageReturnPath,
   OPS_PATH,
   readOpsTab,
+  readOpsSchool,
   SCHOOL_REVIEW_PATH,
   type OpsTab,
 } from './constants';
 import { adminFetch, asRecords } from './platformFetch';
 import { useActiveRequest } from './useActiveRequest';
+import { ReviewControls, type ReviewDecision } from './ReviewControls';
 import styles from './Platform.module.css';
 
 const tabs: Array<[OpsTab, string]> = [
@@ -48,6 +50,10 @@ function readTab(): OpsTab {
   return readOpsTab(window.location.search, window.location.hash);
 }
 
+function readSchool(): string | null {
+  return typeof window === 'undefined' ? null : readOpsSchool(window.location.search);
+}
+
 export function OpsConsole() {
   const auth = useNuniSession();
   const operator = !!auth.session?.isPlatformOperator;
@@ -60,8 +66,11 @@ export function OpsConsole() {
   const [auditQuery, setAuditQuery] = useState('');
 
   useEffect(() => {
-    setTab(readTab());
-    const sync = () => setTab(readTab());
+    const sync = () => {
+      setTab(readTab());
+      setSchoolId(readSchool());
+    };
+    sync();
     window.addEventListener('hashchange', sync);
     window.addEventListener('popstate', sync);
     return () => {
@@ -71,8 +80,18 @@ export function OpsConsole() {
   }, []);
 
   function go(next: OpsTab) {
+    if (next === tab) return;
     setTab(next);
-    window.history.replaceState(null, '', `${OPS_PATH}?tab=${next}`);
+    const params = new URLSearchParams({ tab: next });
+    if (schoolId) params.set('school', schoolId);
+    window.history.pushState(null, '', OPS_PATH + '?' + params.toString());
+  }
+
+  function selectSchool(next: string | null) {
+    setSchoolId(next);
+    const params = new URLSearchParams({ tab });
+    if (next) params.set('school', next);
+    window.history.replaceState(null, '', OPS_PATH + '?' + params.toString());
   }
 
   return (
@@ -84,30 +103,57 @@ export function OpsConsole() {
               <p className={styles.eyebrow}>平台營運</p>
               <h1>完整管理台</h1>
               <p className={styles.muted}>
-                審核接入、開放或關閉學校、全站店家留資與稽核。已開通學校的日常設定預設只看，需要時再代操作。核准申請還不會讓學生找得到學校。
+                從接入審核、校方授權到店家與課班申請，集中完成營運作業。已開通學校需先取得限時代操作權限，審核通過也不代表正式開放服務。
               </p>
             </div>
             <nav className={styles.links} aria-label="營運作業">
-              <Link href={SCHOOL_REVIEW_PATH}>審核</Link>
-              <Link href={OPS_PATH} aria-current="page">
-                開通
-              </Link>
-              <Link href={`${OPS_PATH}?tab=affiliation`}>掛靠</Link>
+              <Link href="/admin">管理總覽</Link>
+              <Link href={SCHOOL_REVIEW_PATH}>接入審核</Link>
+              <Link href={OPS_PATH} aria-current="page">營運作業</Link>
             </nav>
           </header>
-          <div className={styles.tabs} role="tablist" aria-label="管理項目">
-            {tabs.map(([id, label]) => (
+          <div className={styles.tabs} role="tablist" aria-label="營運管理項目">
+            {tabs.map(([id, label], index) => (
               <button
                 key={id}
+                id={'ops-tab-' + id}
                 type="button"
                 role="tab"
+                tabIndex={tab === id ? 0 : -1}
+                aria-controls="ops-panel"
                 aria-selected={tab === id}
                 onClick={() => go(id)}
+                onKeyDown={(event) => {
+                  let nextIndex = index;
+                  if (event.key === 'ArrowRight' || event.key === 'ArrowDown') {
+                    nextIndex = (index + 1) % tabs.length;
+                  } else if (event.key === 'ArrowLeft' || event.key === 'ArrowUp') {
+                    nextIndex = (index - 1 + tabs.length) % tabs.length;
+                  } else if (event.key === 'Home') {
+                    nextIndex = 0;
+                  } else if (event.key === 'End') {
+                    nextIndex = tabs.length - 1;
+                  } else {
+                    return;
+                  }
+                  event.preventDefault();
+                  const next = tabs[nextIndex]?.[0];
+                  if (!next) return;
+                  go(next);
+                  document.getElementById('ops-tab-' + next)?.focus();
+                }}
               >
                 {label}
               </button>
             ))}
           </div>
+          <div
+            className={styles.tabPanel}
+            id="ops-panel"
+            role="tabpanel"
+            aria-labelledby={'ops-tab-' + tab}
+            tabIndex={0}
+          >
           {tab === 'schools' ? (
             <AdminSchools
               context={auth.session!.context}
@@ -115,7 +161,7 @@ export function OpsConsole() {
               selectedId={schoolId}
               search={schoolQuery}
               lifecycle={schoolLifecycle}
-              onSelect={setSchoolId}
+              onSelect={selectSchool}
               onSearch={setSchoolQuery}
               onLifecycle={setSchoolLifecycle}
             />
@@ -126,7 +172,7 @@ export function OpsConsole() {
               context={auth.session!.context}
               suspended={suspended}
               selectedSchool={schoolId}
-              onSchool={setSchoolId}
+              onSchool={selectSchool}
               onManageSchool={() => go('schools')}
             />
           ) : null}
@@ -152,6 +198,7 @@ export function OpsConsole() {
               onQuery={setAuditQuery}
             />
           ) : null}
+          </div>
         </div>
       ) : auth.loading ? (
         <p role="status" className={common.loading}>
@@ -409,47 +456,55 @@ function MerchantsTab({ context }: { context: string }) {
   const [notice, setNotice] = useState('');
   const captureRequest = useActiveRequest();
   const mutationPending = useRef(false);
+  const retryKeys = useRef(new Map<string, string>());
+
   async function decide(
     path: string,
     id: string,
-    decision: 'approve' | 'reject',
+    decision: ReviewDecision,
+    reason: string,
     expectedVersion?: number,
-  ) {
+  ): Promise<boolean> {
     const isCurrent = captureRequest();
-    if (!isCurrent() || mutationPending.current || !id) return;
+    if (!isCurrent() || mutationPending.current || !id || reason.trim().length < 5 || reason.length > 500)
+      return false;
     mutationPending.current = true;
     setBusyId(id);
     setError('');
     setNotice('');
+    const signature = JSON.stringify([path, decision, reason.trim()]);
+    const key = retryKeys.current.get(signature) ?? 'web-merchant-decide-' + crypto.randomUUID();
+    if (expectedVersion === undefined) retryKeys.current.set(signature, key);
     try {
       const result = await adminFetch(
         path,
         'POST',
         {
           decision,
-          reason: decision === 'approve' ? '資料齊全，准予往下。' : '資料不足，請補件。',
-          ...(expectedVersion === undefined
-            ? { idempotencyKey: `web-merchant-decide-${crypto.randomUUID()}` }
-            : { expectedVersion }),
+          reason: reason.trim(),
+          ...(expectedVersion === undefined ? { idempotencyKey: key } : { expectedVersion }),
         },
         context,
       );
-      if (!isCurrent()) return;
+      if (!isCurrent()) return false;
       if (result.status === 401) {
-        window.location.replace(accountReturnHref(`${OPS_PATH}?tab=merchants`));
-        return;
+        window.location.replace(accountReturnHref(OPS_PATH + '?tab=merchants'));
+        return false;
       }
       if (result.status === 409) {
+        retryKeys.current.delete(signature);
         setRevision((value) => value + 1);
         throw new Error('這筆申請已更新，請確認最新資料後再審核。');
       }
       if (!result.ok) throw new Error('店家審核沒有完成，請稍後再試。');
+      retryKeys.current.delete(signature);
       setNotice(decision === 'approve' ? '已核准這筆店家申請。' : '已拒絕這筆店家申請。');
       setRevision((value) => value + 1);
+      return true;
     } catch (failure) {
-      if (isCurrent()) {
+      if (isCurrent())
         setError(failure instanceof Error ? failure.message : '店家審核沒有完成，請稍後再試。');
-      }
+      return false;
     } finally {
       if (isCurrent()) {
         mutationPending.current = false;
@@ -457,28 +512,23 @@ function MerchantsTab({ context }: { context: string }) {
       }
     }
   }
+
   return (
     <div className={styles.stack}>
       <p className={styles.notice}>
-        意向與進件都要先審過才能往下。點餐能力可以之後再改：可點餐、外連、只顯示資訊。公開與取消公開跟整校關閉無關。
+        先確認申請對象、學校與聯絡資料，再填寫實際審核理由。核准店家意向或進件，
+        不代表已開放線上點餐或公開營業。
       </p>
-      {error ? (
-        <p role="alert" className={styles.alert}>
-          {error}
-        </p>
-      ) : null}
-      {notice ? (
-        <p role="status" className={styles.notice}>
-          {notice}
-        </p>
-      ) : null}
+      {error ? <p role="alert" className={styles.alert}>{error}</p> : null}
+      {notice ? <p role="status" className={styles.notice}>{notice}</p> : null}
       <MerchantDecisions
-        key={`decisions-${revision}`}
+        key={'decisions-' + revision}
         context={context}
         busyId={busyId}
         onDecide={decide}
+        onRetry={() => setRevision((value) => value + 1)}
       />
-      <AdminMerchants key={`overview-${revision}`} context={context} suspended={false} />
+      <AdminMerchants key={'overview-' + revision} context={context} suspended={false} />
     </div>
   );
 }
@@ -487,19 +537,24 @@ function MerchantDecisions({
   context,
   busyId,
   onDecide,
+  onRetry,
 }: {
   context: string;
   busyId: string | null;
   onDecide: (
     path: string,
     id: string,
-    decision: 'approve' | 'reject',
+    decision: ReviewDecision,
+    reason: string,
     expectedVersion?: number,
-  ) => Promise<void>;
+  ) => Promise<boolean>;
+  onRetry: () => void;
 }) {
   const [interest, setInterest] = useState<OversightMerchantInterest[]>([]);
   const [applications, setApplications] = useState<OversightMerchantApplication[]>([]);
+  const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+
   useEffect(() => {
     let active = true;
     void adminFetch('merchants', 'GET', undefined, context)
@@ -512,87 +567,76 @@ function MerchantDecisions({
       })
       .catch(() => {
         if (active) setError('目前讀不到待審店家。');
+      })
+      .finally(() => {
+        if (active) setLoading(false);
       });
-    return () => {
-      active = false;
-    };
+    return () => { active = false; };
   }, [context]);
-  if (!interest.length && !applications.length && !error) return null;
+
   return (
-    <section className={styles.panel}>
-      <h2>待審店家</h2>
-      {error ? <p role="alert">{error}</p> : null}
-      {interest.map((row) => {
+    <section className={styles.panel} aria-labelledby="merchant-review-heading">
+      <div className={styles.reviewHeading}>
+        <div>
+          <h2 id="merchant-review-heading">待審店家</h2>
+          <p className={styles.muted}>僅顯示本次已載入的待審意向與進件。</p>
+        </div>
+        <Button type="button" disabled={loading || busyId !== null} onClick={onRetry}>更新清單</Button>
+      </div>
+      {loading ? <p role="status">正在讀取待審店家…</p> : null}
+      {error ? (
+        <div className={styles.stack}>
+          <p role="alert" className={styles.alert}>{error}</p>
+          <Button type="button" onClick={onRetry}>重試讀取</Button>
+        </div>
+      ) : null}
+      {!loading && !error && !interest.length && !applications.length ? (
+        <p className={styles.emptyState}>目前沒有待審店家申請。</p>
+      ) : null}
+      {!error && interest.map((row) => {
         const id = String(row.id || '');
         return (
-          <article key={id} className={styles.item}>
-            <strong>
-              {String(row.brandName || '意向')} · {String(row.schoolName || '')}
-            </strong>
-            <div className={styles.actions}>
-              <Button
-                disabled={busyId !== null || !id}
-                onClick={() =>
-                  void onDecide(
-                    `merchants/interest/${encodeURIComponent(id)}/decision`,
-                    id,
-                    'approve',
-                  )
-                }
-              >
-                核准意向
-              </Button>
-              <Button
-                disabled={busyId !== null || !id}
-                onClick={() =>
-                  void onDecide(
-                    `merchants/interest/${encodeURIComponent(id)}/decision`,
-                    id,
-                    'reject',
-                  )
-                }
-              >
-                拒絕
-              </Button>
+          <article key={'interest-' + id} className={styles.item}>
+            <div className={styles.reviewIdentity}>
+              <strong>{String(row.brandName || '意向')} · {String(row.schoolName || '')}</strong>
+              <span className={styles.reviewType}>合作意向</span>
             </div>
+            <p className={styles.muted}>聯絡：{row.contactName} · {row.contactEmail}</p>
+            {row.note ? <p className={styles.muted}>補充：{row.note}</p> : null}
+            <ReviewControls
+              subject={row.brandName + '／' + row.schoolName}
+              approveLabel="核准意向"
+              disabled={busyId !== null || !id}
+              busy={busyId === id}
+              onDecide={(decision, reason) =>
+                onDecide('merchants/interest/' + encodeURIComponent(id) + '/decision', id, decision, reason)
+              }
+            />
           </article>
         );
       })}
-      {applications.map((row) => {
+      {!error && applications.map((row) => {
         const id = row.applicationId;
         return (
-          <article key={id} className={styles.item}>
-            <strong>
-              {String(row.brandName || '進件')}／{String(row.locationName || '')}
-            </strong>
-            <div className={styles.actions}>
-              <Button
-                disabled={busyId !== null || !id}
-                onClick={() =>
-                  void onDecide(
-                    `merchants/applications/${encodeURIComponent(row.tenantId)}/${encodeURIComponent(id)}/decision`,
-                    id,
-                    'approve',
-                    row.version,
-                  )
-                }
-              >
-                核准進件
-              </Button>
-              <Button
-                disabled={busyId !== null || !id}
-                onClick={() =>
-                  void onDecide(
-                    `merchants/applications/${encodeURIComponent(row.tenantId)}/${encodeURIComponent(id)}/decision`,
-                    id,
-                    'reject',
-                    row.version,
-                  )
-                }
-              >
-                拒絕
-              </Button>
+          <article key={'application-' + row.tenantId + '-' + id} className={styles.item}>
+            <div className={styles.reviewIdentity}>
+              <strong>{String(row.brandName || '進件')}／{String(row.locationName || '')}</strong>
+              <span className={styles.reviewType}>店家進件</span>
             </div>
+            <p className={styles.muted}>{row.tenantName} · 聯絡：{row.contactName} · {row.contactEmail}</p>
+            <p className={styles.muted}>申請版本：{row.version}</p>
+            <ReviewControls
+              subject={row.brandName + '／' + row.locationName + '（' + row.tenantName + '）'}
+              approveLabel="核准進件"
+              disabled={busyId !== null || !id}
+              busy={busyId === id}
+              onDecide={(decision, reason) =>
+                onDecide(
+                  'merchants/applications/' + encodeURIComponent(row.tenantId) + '/' + encodeURIComponent(id) + '/decision',
+                  id, decision, reason, row.version,
+                )
+              }
+            />
           </article>
         );
       })}
@@ -602,74 +646,82 @@ function MerchantDecisions({
 
 function AffiliationTab({ context }: { context: string }) {
   const [rows, setRows] = useState<Record<string, unknown>[]>([]);
+  const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const [notice, setNotice] = useState('');
   const [busyId, setBusyId] = useState<string | null>(null);
-  const [reason, setReason] = useState('資料已核對，准予掛靠。');
   const captureRequest = useActiveRequest();
   const mutationPending = useRef(false);
+  const retryKeys = useRef(new Map<string, string>());
+
   const load = useCallback(
     async (isCurrent: () => boolean) => {
-      const result = await adminFetch(
-        'class-workspace-affiliation-applications',
-        'GET',
-        undefined,
-        context,
-      );
-      if (!isCurrent()) return;
-      if (result.status === 401) {
-        window.location.replace(accountReturnHref(`${OPS_PATH}?tab=affiliation`));
-        return;
+      setLoading(true);
+      try {
+        const result = await adminFetch('class-workspace-affiliation-applications', 'GET', undefined, context);
+        if (!isCurrent()) return;
+        if (result.status === 401) {
+          window.location.replace(accountReturnHref(OPS_PATH + '?tab=affiliation'));
+          return;
+        }
+        if (result.status === 403) {
+          setError('目前帳號無法處理課班掛靠。');
+          setRows([]);
+          return;
+        }
+        if (!result.ok) throw new Error('目前讀不到掛靠申請。');
+        setRows(asRecords(result.body.applications ?? result.body.items ?? result.body.affiliations));
+        setError('');
+      } finally {
+        if (isCurrent()) setLoading(false);
       }
-      if (result.status === 403) {
-        setError('這台帳號不能處理課班掛靠。');
-        setRows([]);
-        return;
-      }
-      if (!result.ok) throw new Error('目前讀不到掛靠申請。');
-      setRows(asRecords(result.body.applications ?? result.body.items ?? result.body.affiliations));
     },
     [context],
   );
+
   useEffect(() => {
     const isCurrent = captureRequest();
     void load(isCurrent).catch((failure: Error) => {
       if (isCurrent()) setError(failure.message);
     });
   }, [captureRequest, load]);
-  async function decide(id: string, decision: 'approve' | 'reject') {
+
+  async function decide(id: string, decision: ReviewDecision, reason: string): Promise<boolean> {
     const isCurrent = captureRequest();
-    if (
-      !isCurrent() ||
-      mutationPending.current ||
-      !id ||
-      (decision === 'approve' && !reason.trim())
-    )
-      return;
+    if (!isCurrent() || mutationPending.current || !id || reason.trim().length < 5 || reason.length > 500)
+      return false;
     mutationPending.current = true;
     setBusyId(id);
     setError('');
+    setNotice('');
+    const signature = JSON.stringify([id, decision, reason.trim()]);
+    const key = retryKeys.current.get(signature) ?? 'web-affiliate-decide-' + crypto.randomUUID();
+    retryKeys.current.set(signature, key);
     try {
       const result = await adminFetch(
-        `class-workspace-affiliation-applications/${encodeURIComponent(id)}/decision`,
+        'class-workspace-affiliation-applications/' + encodeURIComponent(id) + '/decision',
         'POST',
-        {
-          decision,
-          reason: decision === 'approve' ? reason.trim() : '資料不足，請補件後再申請。',
-          idempotencyKey: `web-affiliate-decide-${crypto.randomUUID()}`,
-        },
+        { decision, reason: reason.trim(), idempotencyKey: key },
         context,
       );
-      if (!isCurrent()) return;
+      if (!isCurrent()) return false;
       if (result.status === 401) {
-        window.location.replace(accountReturnHref(`${OPS_PATH}?tab=affiliation`));
-        return;
+        window.location.replace(accountReturnHref(OPS_PATH + '?tab=affiliation'));
+        return false;
+      }
+      if (result.status === 409) {
+        retryKeys.current.delete(signature);
+        throw new Error('這筆掛靠申請已變更，請重新讀取後再審核。');
       }
       if (!result.ok) throw new Error('掛靠審核沒有完成，請稍後再試。');
+      retryKeys.current.delete(signature);
+      setNotice(decision === 'approve' ? '已核准掛靠申請。' : '已拒絕掛靠申請。');
       await load(isCurrent);
+      return true;
     } catch (failure) {
-      if (isCurrent()) {
+      if (isCurrent())
         setError(failure instanceof Error ? failure.message : '掛靠審核沒有完成，請稍後再試。');
-      }
+      return false;
     } finally {
       if (isCurrent()) {
         mutationPending.current = false;
@@ -677,60 +729,59 @@ function AffiliationTab({ context }: { context: string }) {
       }
     }
   }
+
   return (
-    <section className={styles.panel}>
-      <h2>課班掛靠</h2>
-      <p className={styles.muted}>核准後，課班會掛到指定學校班次。這不會改學生的正式選課。</p>
-      {error ? (
-        <p role="alert" className={styles.alert}>
-          {error}
-        </p>
-      ) : null}
-      {rows.length === 0 && !error ? <p>目前沒有待處理的掛靠申請。</p> : null}
-      {rows.map((row, index) => {
-        const id = String(row.id || row.applicationId || '');
-        return (
-          <article
-            key={id || String(row.workspaceId || `affiliation-${index}`)}
-            className={styles.item}
-          >
-            <strong>{String(row.workspaceTitle || row.workspaceId || '課班')}</strong>
-            <p className={styles.muted}>
-              {String(row.tenantName || row.tenantId || '')}
-              {row.sectionId ? ` · ${String(row.sectionId)}` : ''}
-              {row.state ? ` · ${String(row.state)}` : ''}
-            </p>
-            {row.justification ? <p>{String(row.justification)}</p> : null}
-            <form
-              className={styles.form}
-              onSubmit={(event) => {
-                event.preventDefault();
-                void decide(id, 'approve');
-              }}
-            >
-              <Textarea
-                label="核准原因"
-                value={reason}
-                onChange={(event) => setReason(event.target.value)}
-                required
-                disabled={busyId !== null}
-              />
-              <div className={styles.actions}>
-                <Button type="submit" disabled={busyId !== null || !id || !reason.trim()}>
-                  核准掛靠
-                </Button>
-                <Button
-                  type="button"
-                  disabled={busyId !== null || !id}
-                  onClick={() => void decide(id, 'reject')}
-                >
-                  拒絕
-                </Button>
+    <section className={styles.panel} aria-labelledby="affiliation-review-heading">
+      <div className={styles.stack}>
+        <div className={styles.reviewHeading}>
+          <div>
+            <h2 id="affiliation-review-heading">課班掛靠</h2>
+            <p className={styles.muted}>核准只會建立課班與學校的掛靠關係，不會更改正式選課或學籍。</p>
+          </div>
+          <Button
+            type="button"
+            disabled={loading || busyId !== null}
+            onClick={() => {
+              const isCurrent = captureRequest();
+              void load(isCurrent).catch((failure: Error) => {
+                if (isCurrent()) setError(failure.message);
+              });
+            }}
+          >更新清單</Button>
+        </div>
+        {loading ? <p role="status">正在讀取掛靠申請…</p> : null}
+        {error ? <p role="alert" className={styles.alert}>{error}</p> : null}
+        {notice ? <p role="status" className={styles.notice}>{notice}</p> : null}
+        {!loading && !error && rows.length === 0 ? (
+          <p className={styles.emptyState}>目前沒有待處理的掛靠申請。</p>
+        ) : null}
+        {!error && rows.map((row, index) => {
+          const id = String(row.id || row.applicationId || '');
+          const title = String(row.workspaceTitle || row.workspaceId || '課班');
+          const tenant = String(row.tenantName || row.tenantId || '未指定學校');
+          const status = String(row.state || '待處理');
+          const finalized = ['approved', 'rejected', 'cancelled', 'withdrawn'].includes(status);
+          return (
+            <article key={id || String(row.workspaceId || 'affiliation-' + index)} className={styles.item}>
+              <div className={styles.reviewIdentity}>
+                <strong>{title}</strong>
+                <span className={styles.reviewType}>{status}</span>
               </div>
-            </form>
-          </article>
-        );
-      })}
+              <p className={styles.muted}>
+                {tenant}{row.sectionId ? ' · 班次 ' + String(row.sectionId) : ''}
+              </p>
+              {row.justification ? <p>{String(row.justification)}</p> : null}
+              <ReviewControls
+                subject={title + '／' + tenant}
+                approveLabel="核准掛靠"
+                disabled={busyId !== null || !id || finalized || loading || !!error}
+                busy={busyId === id}
+                onDecide={(decision, reason) => decide(id, decision, reason)}
+              />
+            </article>
+          );
+        })}
+      </div>
     </section>
   );
 }
