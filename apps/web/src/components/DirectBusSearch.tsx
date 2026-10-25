@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   campusEtaView, hasCampusNext, queryTransit,
-  type DirectTripView, type TransitFailure, type TransitResult,
+  type DirectTripView, type TransferTripView, type TransitFailure, type TransitResult,
 } from '@/lib/transit';
 import {
   PROVIDENCE_DIRECT_CHIPS, directWaitLine, isDirectQueryText, suggestDirectDestinations,
@@ -31,6 +31,24 @@ function TripEta({ trip, now }: { trip: DirectTripView; now: number }) {
     );
   }
   return <span className={css.rowEta} data-kind={view.kind}>{view.text}</span>;
+}
+
+function transferNextLabel(view: ReturnType<typeof campusEtaView>): string {
+  if (view.kind === 'live' || view.kind === 'soon') return view.text;
+  if (view.clock) return `表定 ${view.clock}`;
+  return '表定';
+}
+
+function TransferEta({ trip, now }: { trip: TransferTripView; now: number }) {
+  const view = campusEtaView(trip.arrival, now);
+  const live = view.kind === 'live' || view.kind === 'soon';
+  return (
+    <span className={css.rowEta} data-kind={live ? view.kind : 'scheduled'}>
+      <span className={css.etaNumber}>{trip.totalMinutes}</span>
+      <span className={css.etaUnit}>分</span>
+      <small className={css.transferNext}>下一班 {transferNextLabel(view)}</small>
+    </span>
+  );
 }
 
 export function DirectBusSearch({ schoolId }: { schoolId: string }) {
@@ -89,16 +107,17 @@ export function DirectBusSearch({ schoolId }: { schoolId: string }) {
 
   const ready = result?.status === 'ready' && result.kind === 'direct' ? result : null;
   const trips = ready?.trips ?? [];
+  const transfers = ready?.transfers ?? [];
   const mapsUrl = ready?.googleMapsUrl ?? '';
   const destinationLabel = ready?.destination?.label || selected;
-  const noDirect = Boolean(ready && selected && !trips.length);
+  const noDirect = Boolean(ready && selected && !trips.length && !transfers.length);
 
   return (
     <section className={`${css.board} ${css.directSearch}`} aria-labelledby="direct-bus-title" data-testid="direct-bus-search">
       <header className={css.directHead}>
         <p className={css.eyebrow}>靜宜直達公車</p>
         <h2 id="direct-bus-title" className={css.directTitle}>去哪裡</h2>
-        <p className={css.directLead}>輸入或點目的地，先找不用轉乘的公車。第一眼會看到搭幾號、在哪站等、幾分到。</p>
+        <p className={css.directLead}>輸入或點目的地，先找不用轉乘的公車；沒有直達或轉乘明顯較快時會列出轉乘建議。</p>
       </header>
       <form
         className={css.directForm}
@@ -152,9 +171,12 @@ export function DirectBusSearch({ schoolId }: { schoolId: string }) {
       {noDirect ? (
         <div className={css.directEmpty} role="status" data-testid="direct-no-result">
           <p><strong>沒有直達車</strong></p>
-          <p>從靜宜到{destinationLabel}這版找不到不用轉乘的公車，沒有編造班次時間。</p>
+          <p>從靜宜到{destinationLabel}這版找不到不用轉乘的公車，也沒有可用的轉乘建議，沒有編造班次時間。</p>
           {mapsUrl ? <p><a href={mapsUrl} target="_blank" rel="noopener noreferrer">用 Google 地圖看更多路線 ↗</a></p> : null}
         </div>
+      ) : null}
+      {ready && !trips.length && transfers.length ? (
+        <p className={css.directStatus} role="status">沒有直達車，以下是轉乘建議。</p>
       ) : null}
       {trips.length ? (
         <ol className={css.directTrips} data-testid="direct-trip-list">
@@ -192,7 +214,44 @@ export function DirectBusSearch({ schoolId }: { schoolId: string }) {
           })}
         </ol>
       ) : null}
-      {trips.length && mapsUrl ? (
+      {transfers.length ? (
+        <ol className={css.directTrips} data-testid="transfer-trip-list">
+          {transfers.map((trip) => {
+            const key = `transfer:${trip.firstRoute}:${trip.secondRoute}:${trip.boardStopName}:${trip.alightStopName}`;
+            const view = campusEtaView(trip.arrival, clock);
+            const opened = open === key;
+            const live = view.kind === 'live' || view.kind === 'soon';
+            const nextLine = transferNextLabel(view);
+            return (
+              <li key={key}>
+                <button
+                  type="button"
+                  className={`${css.arrivalRow} ${css.transferRow}`}
+                  aria-expanded={opened}
+                  data-testid="transfer-trip"
+                  onClick={() => setOpen(opened ? null : key)}
+                >
+                  <span className={css.routeBadge}>{trip.firstRoute}→{trip.secondRoute}</span>
+                  <span className={css.rowCopy}>
+                    <strong>{directWaitLine(trip.boardStopName)}</strong>
+                    <small>轉乘 {trip.transferStopName.replace(/[（(].*$/, '')}（步行 {trip.transferWalkMinutes} 分）· 下車 {trip.alightStopName.replace(/[（(].*$/, '')}</small>
+                  </span>
+                  <TransferEta trip={trip} now={clock} />
+                </button>
+                {opened ? (
+                  <div className={css.rowPanel}>
+                    <p>上車站 {trip.boardStopName}，先搭 {trip.firstRoute}。</p>
+                    <p>轉乘站 {trip.transferStopName}，步行約 {trip.transferWalkMinutes} 分鐘後搭 {trip.secondRoute}。</p>
+                    <p>下車站 {trip.alightStopName}。全程約 {trip.totalMinutes} 分鐘。</p>
+                    <p>下一班{live ? ` ${nextLine}` : ` ${nextLine}（沒有即時資料）`}。</p>
+                  </div>
+                ) : null}
+              </li>
+            );
+          })}
+        </ol>
+      ) : null}
+      {(trips.length || transfers.length) && mapsUrl ? (
         <p className={css.directMore}>
           <a href={mapsUrl} target="_blank" rel="noopener noreferrer">用 Google 地圖看更多路線 ↗</a>
         </p>

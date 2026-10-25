@@ -139,6 +139,24 @@
   transform-origin: top;
 }
 .directMore { margin: 0 16px 8px; }
+.transferRow {
+  grid-template-columns: minmax(64px, 84px) minmax(0, 1fr) auto;
+}
+.transferRow .rowEta {
+  display: grid;
+  justify-items: end;
+  align-items: start;
+  gap: 0;
+}
+.transferNext {
+  display: block;
+  margin-top: 2px;
+  color: var(--bus-muted, var(--muted));
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 16px;
+  white-space: nowrap;
+}
 @media (max-width: 760px) {
   .directTitle { font-size: 26px; line-height: 32px; }
   .directForm { padding-top: 12px; }
