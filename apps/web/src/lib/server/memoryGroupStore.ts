@@ -10,6 +10,30 @@ function clone(value: unknown): unknown {
   return value;
 }
 
+function incrementAmount(value: unknown): number | null {
+  if (!value || typeof value !== 'object') return null;
+  const record = value as { incrementBy?: unknown; operand?: unknown; isEqual?: unknown };
+  if (typeof record.incrementBy === 'number') return record.incrementBy;
+  if (typeof record.operand === 'number' && typeof record.isEqual === 'function') {
+    return record.operand;
+  }
+  const name = (value as { constructor?: { name?: string } }).constructor?.name;
+  if (name === 'NumericIncrementTransform' && typeof record.operand === 'number') {
+    return record.operand;
+  }
+  return null;
+}
+
+function applyFields(existing: DocData, data: DocData): DocData {
+  const next: DocData = { ...existing };
+  for (const [key, value] of Object.entries(data)) {
+    const amount = incrementAmount(value);
+    next[key] =
+      amount === null ? clone(value) : (typeof next[key] === 'number' ? next[key] : 0) + amount;
+  }
+  return next;
+}
+
 let auto = 0;
 function autoId(): string {
   auto += 1;
@@ -59,8 +83,11 @@ export function createMemoryGroupStore(seed: Array<[string, DocData]> = []) {
     collection: (name: string) => collection(name),
     async runTransaction<T>(callback: (transaction: any) => Promise<T>): Promise<T> {
       const base = new Map(docs);
-      const writes: Array<{ type: 'set' | 'update'; reference: { path: string }; data: DocData }> =
-        [];
+      const writes: Array<{
+        type: 'set' | 'update' | 'create';
+        reference: { path: string };
+        data: DocData;
+      }> = [];
       const tx = {
         getAll: async (...refs: Array<{ path: string; id: string }>) =>
           refs.map((reference) => snap(reference, base)),
@@ -85,6 +112,8 @@ export function createMemoryGroupStore(seed: Array<[string, DocData]> = []) {
         },
         set: (reference: { path: string }, data: DocData) =>
           writes.push({ type: 'set', reference, data: clone(data) as DocData }),
+        create: (reference: { path: string }, data: DocData) =>
+          writes.push({ type: 'create', reference, data: clone(data) as DocData }),
         update: (reference: { path: string }, data: DocData) =>
           writes.push({ type: 'update', reference, data: clone(data) as DocData }),
       };
@@ -95,14 +124,17 @@ export function createMemoryGroupStore(seed: Array<[string, DocData]> = []) {
       }
       const committed = new Map(docs);
       for (const write of writes) {
+        if (write.type === 'create' && committed.has(write.reference.path)) {
+          throw new Error('already exists');
+        }
         if (write.type === 'update' && !committed.has(write.reference.path)) {
           throw new Error('missing document');
         }
         committed.set(
           write.reference.path,
-          write.type === 'update'
-            ? ({ ...committed.get(write.reference.path), ...write.data } as DocData)
-            : write.data,
+          write.type === 'set' || write.type === 'create'
+            ? applyFields({}, write.data)
+            : applyFields(committed.get(write.reference.path) || {}, write.data),
         );
       }
       docs.clear();

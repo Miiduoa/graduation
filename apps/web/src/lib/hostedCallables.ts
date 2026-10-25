@@ -4,6 +4,9 @@ export const HOSTED_WEB_CALLABLES = [
   'leaveGroup',
   'createTimetableShare',
   'revokeTimetableShare',
+  'startLiveSession',
+  'endLiveSession',
+  'joinLiveSession',
 ] as const;
 
 export type HostedWebCallable = (typeof HOSTED_WEB_CALLABLES)[number];

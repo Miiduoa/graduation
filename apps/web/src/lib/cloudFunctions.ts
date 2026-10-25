@@ -42,8 +42,8 @@ export function getCloudFunctionUrl(
   const env = options.env || publicFunctionsEnv();
   const projectId = options.projectId || env.NEXT_PUBLIC_FIREBASE_PROJECT_ID;
   const region = options.region || env.NEXT_PUBLIC_CLOUD_FUNCTION_REGION || 'asia-east1';
-  // Hosted group invite callables live on this Next.js app. Do not send them
-  // to Cloud Functions or a Fly functions host, and do not require
+  // Hosted callables live on this Next.js app. Do not send them to Cloud
+  // Functions or a Fly functions host, and do not require
   // NEXT_PUBLIC_FUNCTIONS_BASE_URL (that switch would also open the assistant).
   if (isHostedWebCallable(functionName)) {
     return hostedWebCallablePath(functionName);
