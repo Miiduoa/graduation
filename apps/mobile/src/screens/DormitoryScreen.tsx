@@ -3,6 +3,7 @@ import {
   Alert,
   Linking,
   Pressable,
+  ScrollView,
   Share,
   Text,
   TextInput,
@@ -14,29 +15,38 @@ import {
 } from '../services/dormitoryStorage';
 import {
   DORM_CHECKLISTS,
+  DORM_MILESTONE_LIMIT,
+  DORM_REPAIR_SHORTCUTS,
   DORM_REPAIR_CATEGORIES,
   DORM_REPAIR_STATUSES,
   dormChecklistProgress,
   dormStorageKey,
   emptyDormWorkspace,
   formatDormRepairForCopy,
+  isValidDormDate,
+  localDormDate,
   normalizeDormWorkspace,
+  sortedDormMilestones,
+  type DormMilestone,
   type DormRepair,
   type DormRepairCategory,
   type DormRepairStatus,
   type DormWorkspace,
 } from '@campus/shared/src/dormitory';
 import { resolveSchoolPublicServices } from '@campus/shared/src/schoolPublicServices';
+import { resolveDormitoryPublicGuide } from '@campus/shared/src/dormitoryGuide';
 import { AIDetailScreen, AICard, AIButton, aiTokens } from '../ui/aiFirst';
 import { getThemeVersion, subscribeToTheme } from '../ui/theme';
 import { useSchool } from '../state/school';
 import { useAuth } from '../state/auth';
 import { useOptionalNuniSession } from '../state/nuniSession';
 
-type ViewName = 'home' | 'repairs' | 'checklist' | 'laundry';
+type ViewName = 'home' | 'guide' | 'repairs' | 'dates' | 'checklist' | 'laundry';
 const NAV: Array<{ id: ViewName; name: string }> = [
   { id: 'home', name: '總覽' },
+  { id: 'guide', name: '宿舍指南' },
   { id: 'repairs', name: '設備問題' },
+  { id: 'dates', name: '重要日期' },
   { id: 'checklist', name: '入住退宿' },
   { id: 'laundry', name: '洗衣計時' },
 ];
@@ -53,7 +63,7 @@ function Body({ children, muted = false }: { children: React.ReactNode; muted?: 
 }
 
 function Field({
-  label, value, onChangeText, placeholder, maxLength, multiline,
+  label, value, onChangeText, placeholder, maxLength, multiline, keyboardType,
 }: {
   label: string;
   value: string;
@@ -61,6 +71,7 @@ function Field({
   placeholder: string;
   maxLength: number;
   multiline?: boolean;
+  keyboardType?: 'default' | 'numbers-and-punctuation';
 }) {
   return (
     <View style={{ gap: 7, marginTop: 14 }}>
@@ -73,6 +84,7 @@ function Field({
         placeholderTextColor={aiTokens.muted}
         maxLength={maxLength}
         multiline={multiline}
+        keyboardType={keyboardType}
         textAlignVertical={multiline ? 'top' : 'center'}
         style={{
           minHeight: multiline ? 100 : 48,
@@ -137,12 +149,17 @@ function DormitoryBody({
   const [pendingId, setPendingId] = useState<string | null>(null);
   const [editor, setEditor] = useState(false);
   const [filter, setFilter] = useState<'all' | DormRepairStatus>('all');
+  const [dateDraft, setDateDraft] = useState({ title: '', dueDate: '' });
+  const [editingDateId, setEditingDateId] = useState<string | null>(null);
+  const [pendingDateId, setPendingDateId] = useState<string | null>(null);
+  const [dateEditorOpen, setDateEditorOpen] = useState(false);
   const [duration, setDuration] = useState(45);
   const [clock, setClock] = useState(() => Date.now());
   const activeRef = useRef(true);
   const rawRef = useRef<string | null>(null);
   const busy = useRef(false);
   const official = resolveSchoolPublicServices(schoolId)?.services.dormitory ?? null;
+  const guide = resolveDormitoryPublicGuide(schoolId);
 
   useEffect(() => {
     activeRef.current = true;
@@ -207,10 +224,15 @@ function DormitoryBody({
     }
   }
 
-  function editRepair(row?: DormRepair) {
+  function editRepair(row?: DormRepair, shortcut?: { title: string; category: DormRepairCategory }) {
     setRepair(row
       ? { title: row.title, category: row.category, description: row.description, location: row.location }
-      : { ...REPAIR_INITIAL });
+      : {
+        ...REPAIR_INITIAL,
+        title: shortcut?.title ?? '',
+        category: shortcut?.category ?? 'other',
+        location: data.room ? '寢室 ' + data.room : '',
+      });
     setEditingId(row?.id ?? null);
     setPendingId(null);
     setEditor(true);
@@ -248,6 +270,45 @@ function DormitoryBody({
     }
   }
 
+  function editDate(entry?: DormMilestone) {
+    setDateDraft({ title: entry?.title ?? '', dueDate: entry?.dueDate ?? '' });
+    setEditingDateId(entry?.id ?? null);
+    setPendingDateId(null);
+    setDateEditorOpen(true);
+    setView('dates');
+    setNotice('');
+  }
+
+  async function saveDate() {
+    const title = dateDraft.title.trim();
+    const dueDate = dateDraft.dueDate.trim();
+    if (title.length < 2 || !isValidDormDate(dueDate)) {
+      setNotice('請輸入至少兩個字的事項名稱及有效日期（YYYY-MM-DD）。');
+      return;
+    }
+    if (!editingDateId && data.milestones.length >= DORM_MILESTONE_LIMIT) {
+      setNotice('最多記錄 30 筆重要日期，請先整理已完成的紀錄。');
+      return;
+    }
+    const original = data.milestones.find((entry) => entry.id === editingDateId);
+    const id = editingDateId ?? pendingDateId ??
+      ('date_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 9));
+    setPendingDateId(id);
+    const entry: DormMilestone = {
+      id,
+      title,
+      dueDate,
+      completed: original?.completed ?? false,
+      createdAt: original?.createdAt ?? Date.now(),
+    };
+    if (await save({ ...data, milestones: [entry, ...data.milestones.filter((item) => item.id !== id)] })) {
+      setDateEditorOpen(false);
+      setEditingDateId(null);
+      setPendingDateId(null);
+      setDateDraft({ title: '', dueDate: '' });
+    }
+  }
+
   async function updateRepairStatus(id: string, status: DormRepairStatus) {
     await save({
       ...data,
@@ -274,6 +335,9 @@ function DormitoryBody({
 
   const progress = dormChecklistProgress(data);
   const remaining = data.laundryEndAt ? Math.max(0, Math.ceil((data.laundryEndAt - clock) / 60000)) : 0;
+  const today = localDormDate(new Date(clock));
+  const milestones = sortedDormMilestones(data);
+  const nextMilestone = milestones.find((entry) => !entry.completed);
   const repairs = data.repairs.filter((r) => filter === 'all' || r.status === filter);
   const flexRow: object = { flexDirection: 'row', flexWrap: 'wrap', gap: 8, alignItems: 'center' };
   const pad: object = { paddingHorizontal: 16, marginTop: 16 };
@@ -282,15 +346,21 @@ function DormitoryBody({
     <AIDetailScreen title="宿舍" subtitle={schoolName} onBack={onBack}
       keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag">
       <View style={{ ...pad, gap: 12 }}>
-        <AICard title={data.building || '住宿工作區'}>
-          <Body>{data.room ? ('寢室 ' + data.room + (data.bed ? ' · ' + data.bed : '')) : '規劃入住、記錄設備問題，避免忘記下一步。'}</Body>
+        <AICard title={data.building || '住得安心，事情好處理'}>
+          <Body>{data.room ? ('寢室 ' + data.room + (data.bed ? ' · ' + data.bed : '')) : '把入住事項、設備問題與重要日期放在一起。'}</Body>
           <View style={{ ...flexRow, marginTop: 13 }}>
-            <Body muted>{data.repairs.filter((r) => r.status !== 'resolved').length} 筆待追蹤</Body>
+            <Body muted>{data.repairs.filter((r) => r.status !== 'resolved').length} 筆問題待追蹤</Body>
+            <Body muted>{milestones.filter((entry) => !entry.completed).length} 個待辦日期</Body>
             <Body muted>準備清單 {progress.completed}/{progress.total}</Body>
+          </View>
+          <View style={{ ...flexRow, marginTop: 16 }}>
+            <AIButton label="記錄設備問題" onPress={() => editRepair()} />
+            <AIButton label="宿舍指南" variant="ghost" onPress={() => setView('guide')} />
           </View>
         </AICard>
 
-        <View accessibilityRole="tablist" style={flexRow}>
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} accessibilityLabel="宿舍功能"
+          contentContainerStyle={{ flexDirection: 'row', gap: 8, paddingVertical: 3, paddingRight: 16 }}>
           {NAV.map((item) => (
             <Pressable key={item.id} accessibilityRole="tab"
               accessibilityState={{ selected: view === item.id }}
@@ -303,7 +373,7 @@ function DormitoryBody({
               <Text style={{ color: aiTokens.text, fontWeight: view === item.id ? '700' : '500', fontSize: 14 }}>{item.name}</Text>
             </Pressable>
           ))}
-        </View>
+        </ScrollView>
         <Body muted>{guest
           ? '訪客紀錄只存在此裝置，不會在登入後自動移到帳號，也不會同步到其他裝置。'
           : '個人紀錄只儲存在此裝置，會依帳號及校園分開。正式住宿申請、報修和繳費不會從這裡送出。'}</Body>
@@ -321,6 +391,16 @@ function DormitoryBody({
               <Field label="床位" value={room.bed} maxLength={40} placeholder="例如：A 床" onChangeText={(value) => setRoom({ ...room, bed: value })} />
               <View style={{ marginTop: 16 }}><AIButton label="儲存備忘" disabled={conflict} onPress={() => void save({ ...data, ...room })} /></View>
             </AICard>
+            <AICard title="接下來可以做">
+              <Body>{nextMilestone
+                ? (nextMilestone.dueDate < today ? '已過期，請確認：' : '下一個日期：') + nextMilestone.title
+                : '目前沒有尚未完成的重要日期。'}</Body>
+              {!!nextMilestone && <Body muted>{nextMilestone.dueDate.replaceAll('-', '/')} · 個人紀錄</Body>}
+              <View style={{ ...flexRow, marginTop: 14 }}>
+                <AIButton label="新增重要日期" variant="ghost" onPress={() => editDate()} />
+                <AIButton label="查看入住清單" variant="ghost" onPress={() => setView('checklist')} />
+              </View>
+            </AICard>
             <AICard title="學校正式入口">
               <Body>床位、抽籤、繳費、退宿和正式報修，請以校方公告或指定平台為準。</Body>
               {official ? (
@@ -333,11 +413,71 @@ function DormitoryBody({
           </>
         )}
 
+
+        {!loading && !failure && view === 'guide' && (
+          <>
+            <AICard title={schoolName + '住宿指南'}>
+              <Body muted>房型、費用與規則是公開參考資訊，不是即時床位、個人住宿申請或繳費紀錄。</Body>
+              {official ? (
+                <View style={{ marginTop: 14 }}>
+                  <AIButton variant="ghost" label={official.label + ' ↗'} onPress={() => void openOfficial()} />
+                </View>
+              ) : <Body muted>這所學校的住宿專屬網站尚未核實，請從學校官網查詢。</Body>}
+            </AICard>
+            {guide ? (
+              <>
+                <AICard title="住宿服務與緊急聯絡">
+                  <Body>住服組 {guide.officePhone} 分機 {guide.officeExtensions}</Body>
+                  <Body muted>{guide.serviceHours}</Body>
+                  <View style={{ ...flexRow, marginTop: 12 }}>
+                    <AIButton variant="ghost" label="撥打住宿服務電話" onPress={() => void Linking.openURL('tel:' + guide.officePhone)} />
+                  </View>
+                  <View style={{ marginTop: 15 }}><Body>24 小時校安專線：{guide.emergencyPhone}</Body></View>
+                  <View style={{ ...flexRow, marginTop: 12 }}>
+                    <AIButton variant="ghost" label="撥打校安專線" onPress={() => void Linking.openURL('tel:' + guide.emergencyPhone)} />
+                  </View>
+                </AICard>
+                {guide.halls.map((hall) => (
+                  <AICard key={hall.id} title={hall.name}>
+                    <Body muted>{hall.summary}</Body>
+                    {hall.roomTypes.map((room) => (
+                      <View key={room.name} style={{ borderBottomWidth: 1, borderBottomColor: aiTokens.border, paddingVertical: 13, gap: 5 }}>
+                        <Text style={{ fontSize: 15, color: aiTokens.text, fontWeight: '600' }}>{room.name}</Text>
+                        <Body>每學期住宿費 NT$ {room.semesterFee.toLocaleString('zh-TW')} · 保證金 NT$ {room.deposit.toLocaleString('zh-TW')}</Body>
+                        {!!room.note && <Body muted>{room.note}</Body>}
+                      </View>
+                    ))}
+                  </AICard>
+                ))}
+                <AICard title="資料來源與使用提醒">
+                  <Body muted>以上費用不含另計冷氣電費；資料核對日 {guide.checkedAt}。床位是否開放及實際金額，請以當學期校方公告為準。</Body>
+                  <View style={{ marginTop: 12 }}><AIButton variant="ghost" label="查看校方房型與收費表 ↗" onPress={() => void Linking.openURL(guide.feeSource)} /></View>
+                </AICard>
+              </>
+            ) : (
+              <AICard title="尚無可核實的房型資訊">
+                <Body>此校的房型和住宿費尚未核實，不會顯示其他學校的資料。個人設備、日期及清單仍可使用。</Body>
+              </AICard>
+            )}
+          </>
+        )}
+
         {!loading && !failure && view === 'repairs' && (
           <>
             <AICard title="設備問題">
               <Body muted>這是個人問題清單，不會傳給校方。「已通報」是自行註記，非校方已受理。</Body>
               <View style={{ marginTop: 14 }}><AIButton label="＋ 記錄問題" onPress={() => editRepair()} /></View>
+              {!editor && <View style={{ marginTop: 16, gap: 10 }}>
+                <Body muted>常見狀況，點一下就能先填好：</Body>
+                <View style={flexRow}>
+                  {DORM_REPAIR_SHORTCUTS.map((shortcut) => (
+                    <Pressable key={shortcut.title} accessibilityRole="button" onPress={() => editRepair(undefined, shortcut)}
+                      style={{ minHeight: 44, paddingVertical: 11, paddingHorizontal: 13, borderRadius: aiTokens.radius.sm, borderWidth: 1, borderColor: aiTokens.border, backgroundColor: aiTokens.surface }}>
+                      <Text style={{ fontSize: 13, color: aiTokens.text }}>{shortcut.title}</Text>
+                    </Pressable>
+                  ))}
+                </View>
+              </View>}
               {editor && (
                 <View style={{ marginTop: 20, borderTopWidth: 1, borderTopColor: aiTokens.border, paddingTop: 12 }}>
                   <Text style={{ fontWeight: '700', color: aiTokens.text, fontSize: 16 }}>{editingId ? '編輯問題' : '新增問題'}</Text>
@@ -392,6 +532,56 @@ function DormitoryBody({
           </>
         )}
 
+
+        {!loading && !failure && view === 'dates' && (
+          <>
+            <AICard title="重要日期">
+              <Body muted>自行記錄入住、繳費、退宿等日期，不代表校方已處理，也不會自動推播提醒。</Body>
+              <View style={{ marginTop: 14 }}><AIButton label="＋ 新增日期" onPress={() => editDate()} /></View>
+              {dateEditorOpen && (
+                <View style={{ marginTop: 18, borderTopWidth: 1, borderTopColor: aiTokens.border, paddingTop: 4 }}>
+                  <Field label="事項名稱" value={dateDraft.title} maxLength={90} placeholder="例如：住宿繳費截止" onChangeText={(text) => setDateDraft({ ...dateDraft, title: text })} />
+                  <Field label="日期（YYYY-MM-DD）" value={dateDraft.dueDate} maxLength={10} keyboardType="numbers-and-punctuation" placeholder="例如：2026-11-15" onChangeText={(text) => setDateDraft({ ...dateDraft, dueDate: text })} />
+                  <View style={{ ...flexRow, marginTop: 12 }}>
+                    {[{ label: '明天', days: 1 }, { label: '一週後', days: 7 }, { label: '一個月後', days: 30 }].map((option) => (
+                      <Pressable accessibilityRole="button" key={option.days} onPress={() => {
+                        const date = new Date(); date.setDate(date.getDate() + option.days);
+                        setDateDraft((old) => ({ ...old, dueDate: localDormDate(date) }));
+                      }} style={{ borderWidth: 1, borderColor: aiTokens.border, borderRadius: 18, paddingVertical: 10, paddingHorizontal: 12, minHeight: 44 }}>
+                        <Text style={{ fontSize: 13, color: aiTokens.text }}>{option.label}</Text>
+                      </Pressable>
+                    ))}
+                  </View>
+                  <View style={{ ...flexRow, marginTop: 18 }}>
+                    <AIButton label="儲存日期" disabled={conflict} onPress={() => void saveDate()} />
+                    <AIButton label="取消" variant="ghost" onPress={() => { setDateEditorOpen(false); setEditingDateId(null); setPendingDateId(null); }} />
+                  </View>
+                </View>
+              )}
+            </AICard>
+            {!milestones.length && <AICard><Body muted>還沒有記下重要日期。確認校方公告後，就能建立自己的待辦清單。</Body></AICard>}
+            {milestones.map((entry) => (
+              <AICard key={entry.id} title={entry.title}
+                badge={entry.completed ? '已完成（自行註記）' : entry.dueDate < today ? '日期已過' : '待確認'}
+                badgeTone={entry.dueDate < today && !entry.completed ? 'danger' : undefined}>
+                <Body muted>{entry.dueDate.replaceAll('-', '/')}</Body>
+                <View style={{ ...flexRow, marginTop: 14 }}>
+                  <AIButton variant="ghost" disabled={conflict} label={entry.completed ? '恢復待辦' : '標記完成'}
+                    onPress={() => void save({ ...data, milestones: data.milestones.map((m) =>
+                      m.id === entry.id ? { ...m, completed: !m.completed } : m) })} />
+                  <AIButton variant="ghost" label="編輯" onPress={() => editDate(entry)} />
+                  <AIButton variant="danger" disabled={conflict} label="刪除" onPress={() => {
+                    Alert.alert('刪除此重要日期？', '這只會刪除本裝置上的個人紀錄。', [
+                      { text: '取消', style: 'cancel' },
+                      { text: '刪除', style: 'destructive', onPress: () => void save({ ...data, milestones: data.milestones.filter((m) => m.id !== entry.id) }) },
+                    ]);
+                  }} />
+                </View>
+              </AICard>
+            ))}
+          </>
+        )}
+
         {!loading && !failure && view === 'checklist' && (
           <>
             <AICard title="入住與退宿清單">
@@ -437,6 +627,7 @@ function DormitoryBody({
             </View>
             <View style={{ ...flexRow, marginTop: 20 }}>
               <AIButton label="開始計時" disabled={conflict} onPress={() => { void save({ ...data, laundryEndAt: Date.now() + duration * 60000 }); setClock(Date.now()); }} />
+              {!!data.laundryEndAt && remaining > 0 && <AIButton variant="ghost" label="延長 10 分鐘" disabled={conflict} onPress={() => void save({ ...data, laundryEndAt: data.laundryEndAt! + 10 * 60000 })} />}
               {!!data.laundryEndAt && <AIButton variant="ghost" label="清除計時" disabled={conflict} onPress={() => void save({ ...data, laundryEndAt: null })} />}
             </View>
           </AICard>
