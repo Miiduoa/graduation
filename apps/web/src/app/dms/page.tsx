@@ -4,7 +4,7 @@ import { MessagingShell, PrivateConversationList } from '@/components/messaging/
 
 export default function DmsListPage() {
   return (
-    <MessagingShell title="私人對話">
+    <MessagingShell title="訊息">
       {(session) => <PrivateConversationList session={session} />}
     </MessagingShell>
   );

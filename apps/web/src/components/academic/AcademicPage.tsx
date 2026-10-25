@@ -24,6 +24,7 @@ type Props<K extends AcademicKind> = {
   title: string;
   subtitle: string;
   closedAlternative: string;
+  lead?: ReactNode;
   children: (snapshot: AcademicSnapshot<K>) => ReactNode;
 };
 
@@ -203,6 +204,7 @@ export function AcademicPage<K extends AcademicKind>(props: Props<K>) {
 
   return (
     <SiteShell title={props.title} subtitle={props.subtitle}>
+      {props.lead}
       <nav className={styles.navigation} aria-label="我的課務">
         {(
           [

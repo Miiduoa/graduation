@@ -31,5 +31,5 @@
     ".next/dev/types/**/*.ts",
     "**/*.mts"
   ],
-  "exclude": ["node_modules", "_lms_v2_staged_admin"]
+  "exclude": ["node_modules"]
 }

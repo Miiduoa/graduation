@@ -18,7 +18,6 @@ import CompanionCollectionScreen from './CompanionCollectionScreen';
 import ConstellationScreen from './ConstellationScreen';
 import DataFlowDebugScreen from './DataFlowDebugScreen';
 import { AdminDashboardScreen } from './AdminDashboardScreen';
-import { UnavailableFeatureScreen } from './UnavailableFeatureScreen';
 import ShopDockScreen from './ShopDockScreen';
 import { AdminCourseVerifyScreen } from './AdminCourseVerifyScreen';
 import { SSOLoginScreen } from './SSOLoginScreen';
@@ -221,21 +220,25 @@ export function MeStack() {
         component={ConstellationScreen}
         options={{ title: '校園星圖' }}
       />
-      <Stack.Screen
-        name="DataFlowDebug"
-        component={DataFlowDebugScreen}
-        options={{ title: '🔍 資料流診斷' }}
-      />
+      {__DEV__ ? (
+        <Stack.Screen
+          name="DataFlowDebug"
+          component={DataFlowDebugScreen}
+          options={{ title: '🔍 資料流診斷' }}
+        />
+      ) : null}
       <Stack.Screen
         name="GlobalSearch"
         component={GlobalSearchScreen}
         options={{ title: '搜尋' }}
       />
-      <Stack.Screen
-        name="WidgetPreview"
-        component={WidgetPreviewScreen}
-        options={{ title: '小工具' }}
-      />
+      {__DEV__ ? (
+        <Stack.Screen
+          name="WidgetPreview"
+          component={WidgetPreviewScreen}
+          options={{ title: '小工具' }}
+        />
+      ) : null}
       <Stack.Screen
         name="CreditAuditStack"
         component={GuardedCreditAuditStack}
@@ -262,22 +265,26 @@ export function MeStack() {
         component={AccessibilitySettingsScreen}
         options={{ title: '無障礙設定', headerShown: false }}
       />
-      <Stack.Screen
-        name="ThemePreview"
-        component={ThemePreviewScreen}
-        options={{ title: '外觀', headerShown: false }}
-      />
+      {__DEV__ ? (
+        <Stack.Screen
+          name="ThemePreview"
+          component={ThemePreviewScreen}
+          options={{ title: '外觀', headerShown: false }}
+        />
+      ) : null}
 
       <Stack.Screen
         name="Help"
         component={HelpScreen}
         options={{ title: '幫助與回饋', headerShown: false }}
       />
-      <Stack.Screen
-        name="PostLoginDebug"
-        component={PostLoginDebugScreen}
-        options={{ title: 'Post-login 除錯' }}
-      />
+      {__DEV__ ? (
+        <Stack.Screen
+          name="PostLoginDebug"
+          component={PostLoginDebugScreen}
+          options={{ title: 'Post-login 除錯' }}
+        />
+      ) : null}
       <Stack.Screen
         name="Feedback"
         component={FeedbackScreen}

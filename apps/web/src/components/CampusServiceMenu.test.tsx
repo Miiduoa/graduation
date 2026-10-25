@@ -37,13 +37,12 @@ const originalServices = [
   ['/community', '校園交流'],
   ['/friends', '找人'],
   ['/messages', '通知'],
-  ['/dms', '私訊'],
+  ['/dms', '訊息'],
   ['/map', '校園地圖'],
   ['/bus', '公車'],
   ['/cafeteria', '餐廳'],
   ['/lost-found', '失物招領'],
   ['/library', '圖書館'],
-  ['/career', '職涯'],
   ['/ai-assistant', '校園助理'],
   ['/support', '支援'],
   ['/account-deletion', '刪除帳號'],
@@ -72,15 +71,16 @@ it('retains all existing services and search while adding a separate classroom e
   expect(screen.getByRole('link', { name: /尋找校園服務/ }).getAttribute('href')).toBe('/search');
   expect(screen.getByRole('link', { name: '課程空間' }).getAttribute('href')).toBe('/classroom');
   expect(screen.getByRole('link', { name: '課業成績與回饋' }).getAttribute('href')).toBe(
-    '/classroom/grades',
+    '/grades?tab=feedback',
   );
-  expect(screen.getByRole('link', { name: '跨校交流' }).getAttribute('href')).toBe('/social');
+  expect(screen.queryByRole('link', { name: '跨校交流' })).toBeNull();
+  expect(screen.queryByRole('link', { name: '職涯' })).toBeNull();
   expect(screen.getByRole('link', { name: '店家合作' }).getAttribute('href')).toBe('/merchant');
   expect(screen.getByRole('link', { name: '點餐與取餐' }).getAttribute('href')).toBe('/food');
   expect(screen.getByRole('link', { name: '學校資訊' }).getAttribute('href')).toBe('/school-info');
   expect(screen.getByText('目前還不能線上點餐')).toBeTruthy();
   expect(screen.queryByText('選餐點、查訂單、出示取餐憑證')).toBeNull();
-  expect(screen.getAllByRole('link')).toHaveLength(35);
+  expect(screen.getAllByRole('link')).toHaveLength(33);
 });
 
 it('preserves school context without copying unrelated session or return parameters', () => {
@@ -90,12 +90,18 @@ it('preserves school context without copying unrelated session or return paramet
   fireEvent.click(screen.getByText('所有服務'));
   for (const link of screen.getAllByRole('link')) {
     const target = new URL(link.getAttribute('href')!, 'https://campus.example');
-    expect([...target.searchParams.entries()]).toEqual([
-      ['school', 'pu'],
-      ['schoolId', 'tw-pu'],
-      ['campus', 'other-campus'],
-    ]);
+    expect(target.searchParams.get('school')).toBe('pu');
+    expect(target.searchParams.get('schoolId')).toBe('tw-pu');
+    expect(target.searchParams.get('campus')).toBe('other-campus');
+    expect(target.searchParams.has('returnUrl')).toBe(false);
+    expect(target.searchParams.has('session')).toBe(false);
   }
+  const feedback = new URL(
+    screen.getByRole('link', { name: '課業成績與回饋' }).getAttribute('href')!,
+    'https://campus.example',
+  );
+  expect(feedback.pathname).toBe('/grades');
+  expect(feedback.searchParams.get('tab')).toBe('feedback');
 });
 
 it('sends a signed-in firebase user to profile from 我', () => {

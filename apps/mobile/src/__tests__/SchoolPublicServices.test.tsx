@@ -80,6 +80,20 @@ test('dormitory and career routes offer school official cards and switch with th
   expect(Linking.openURL).toHaveBeenCalledWith('https://career.ntpu.edu.tw/cht/index.php');
 });
 
+test('public housing opens the PU office and a school without configured services gets no PU fallback', async () => {
+  const view = render(<UnavailableFeatureScreen route={{ name: 'Dormitory' }} />);
+  await act(async () =>
+    fireEvent.press(view.getByRole('button', { name: '前往靜宜住宿服務組官網' })),
+  );
+  expect(Linking.openURL).toHaveBeenCalledWith('https://osadorm.pu.edu.tw/');
+  expect(view.getByRole('button', { name: '查看校方公告' })).toBeTruthy();
+
+  mockSchool = { id: 'nchu' };
+  view.rerender(<UnavailableFeatureScreen route={{ name: 'Dormitory' }} />);
+  expect(view.queryByText('前往靜宜住宿服務組官網')).toBeNull();
+  expect(view.getByRole('button', { name: '查看校方公告' })).toBeTruthy();
+});
+
 test('duplicate taps do not issue a second open while one is pending', async () => {
   let resolve!: (value: unknown) => void;
   jest.mocked(Linking.openURL).mockReturnValueOnce(

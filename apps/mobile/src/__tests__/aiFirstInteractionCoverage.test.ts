@@ -5,13 +5,11 @@ import fs from 'fs';
 import path from 'path';
 
 const DEMO_CRITICAL_SCREENS = [
-  'CampusAiFirstScreen.tsx',
   'CafeteriaAiFirstScreen.tsx',
   'MenuDetailAiFirstScreen.tsx',
   'BusAiFirstScreen.tsx',
   'CourseHubAiFirstScreen.tsx',
   'LearnAiFirstScreen.tsx',
-  'TeacherCockpitAiFirstScreen.tsx',
 ];
 
 const srcRoot = path.resolve(__dirname, '..');

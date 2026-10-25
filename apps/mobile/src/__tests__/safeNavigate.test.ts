@@ -42,7 +42,7 @@ describe('isRouteRegistered', () => {
 describe('resolveTabForRoute', () => {
   test('學習 tab 的 route', () => {
     expect(resolveTabForRoute('CourseModules')).toBe('學習');
-    expect(resolveTabForRoute('GradeWhatIf')).toBe('學習');
+    expect(resolveTabForRoute('CourseScores')).toBe('學習');
     expect(resolveTabForRoute('TodayCockpit')).toBe('學習');
   });
 

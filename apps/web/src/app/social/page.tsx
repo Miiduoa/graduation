@@ -1,5 +1,5 @@
-import { SocialWorkspace } from '@/features/social/SocialWorkspace';
+import { redirect } from 'next/navigation';
 
 export default function SocialPage() {
-  return <SocialWorkspace />;
+  redirect('/community');
 }

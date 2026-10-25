@@ -14,7 +14,7 @@ export function SchoolDataScope({ schoolName }: { schoolName: string }) {
         此頁目前提供{schoolName}的資料，尚未連結你選擇的{school.name}
         。切換瀏覽校園不會更換這裡的校務紀錄。
       </p>
-      <Link href={`/social?campus=${encodeURIComponent(school.id)}`}>
+      <Link href={`/community?campus=${encodeURIComponent(school.id)}`}>
         查看{school.name}的公開交流
       </Link>
     </aside>

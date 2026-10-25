@@ -36,14 +36,6 @@ export const CAMPUS_SERVICES = [
     category: 'study',
   },
   {
-    name: '跨校交流',
-    text: '在公開看板分享近況，認識其他校園的人',
-    href: '/social',
-    access: 'platform',
-    keywords: '社交 跨校 公開 看板 social',
-    category: 'connect',
-  },
-  {
     name: '課表',
     text: '查看、編輯與匯入本學期課表',
     href: '/timetable',
@@ -102,7 +94,7 @@ export const CAMPUS_SERVICES = [
   {
     name: '課業成績與回饋',
     text: '一頁看各門課已評分、等待公布與缺交，點進去看老師評語和自己交的內容',
-    href: '/classroom/grades',
+    href: '/grades?tab=feedback',
     access: 'platform',
     keywords: '成績 回饋 分數 評分 缺交 作業 測驗 評語 grade feedback',
     category: 'study',
@@ -140,11 +132,11 @@ export const CAMPUS_SERVICES = [
     category: 'connect',
   },
   {
-    name: '私訊',
+    name: '訊息',
     text: '接續已建立的對話',
     href: '/dms',
     access: 'school',
-    keywords: '聊天 message',
+    keywords: '聊天 message 私訊',
     category: 'connect',
   },
   {
@@ -224,15 +216,7 @@ export const CAMPUS_SERVICES = [
     text: '查看官方聯絡電話、網站與名錄地址',
     href: '/school-info',
     access: 'public',
-    keywords: '總機 官網 地址 名錄 聯絡 school info contact',
-    category: 'campus',
-  },
-  {
-    name: '職涯',
-    text: '職涯資料還沒接到校方，先看支援說明',
-    href: '/career',
-    access: 'public',
-    keywords: '實習 徵才 履歷 就業 career',
+    keywords: '總機 官網 地址 名錄 聯絡 職涯 實習 徵才 就業 school info contact career',
     category: 'campus',
   },
   {

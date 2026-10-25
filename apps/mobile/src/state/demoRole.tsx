@@ -99,7 +99,7 @@ export const DEMO_ROLES: DemoRoleDefinition[] = [
     tone: '#34C759',
     toneSoft: 'rgba(52,199,89,0.14)',
     description: '管理社團公告、活動發布、成員管理',
-    entryRoute: 'Clubs',
+    entryRoute: 'CampusHome',
   },
   {
     role: 'department_head',

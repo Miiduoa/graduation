@@ -38,5 +38,12 @@ export function useCampusNavigationSearch(params: SearchLike): string {
 }
 
 export function campusServiceHref(path: string, search: string): string {
-  return `${path}${search ? `?${search}` : ''}`;
+  if (!search) return path;
+  const [pathname, existing = ''] = path.split('?');
+  const merged = new URLSearchParams(existing);
+  new URLSearchParams(search).forEach((value, key) => {
+    if (!merged.has(key)) merged.set(key, value);
+  });
+  const query = merged.toString();
+  return query ? `${pathname}?${query}` : pathname;
 }

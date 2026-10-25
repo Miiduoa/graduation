@@ -11,6 +11,7 @@ import {
   getPublicSchoolTelHref,
   getSafePublicSchoolWebsiteUrl,
 } from '@campus/shared/src/publicSchoolInfo';
+import { resolveSchoolPublicServices } from '@campus/shared/src/schoolPublicServices';
 import { AIDetailScreen, AICard, AIButton, aiTokens } from '../ui/aiFirst';
 import { getThemeVersion, subscribeToTheme } from '../ui/theme';
 import { useAuth } from '../state/auth';
@@ -57,6 +58,7 @@ function SchoolInfoContent({
   const [error, setError] = useState('');
   const [copyNotice, setCopyNotice] = useState('');
   const mounted = useRef(true);
+  const opening = useRef(false);
 
   useEffect(() => {
     mounted.current = true;
@@ -68,7 +70,8 @@ function SchoolInfoContent({
   const isCurrent = () => mounted.current && activeScope.current === scope;
 
   const open = async (url: string) => {
-    if (!isCurrent()) return;
+    if (!isCurrent() || opening.current) return;
+    opening.current = true;
     setError('');
     try {
       // Let a school/account switch invalidate this action before leaving the app.
@@ -77,6 +80,8 @@ function SchoolInfoContent({
       await Linking.openURL(url);
     } catch {
       if (isCurrent()) setError('無法開啟連結，請確認裝置設定後重試。');
+    } finally {
+      opening.current = false;
     }
   };
 
@@ -97,11 +102,12 @@ function SchoolInfoContent({
   const websiteUrl = info ? getSafePublicSchoolWebsiteUrl(info.websiteUrl) : null;
   const telHref = info ? getPublicSchoolTelHref(info.telephone) : null;
   const mapsUrl = info ? buildPublicSchoolMapsSearchUrl(info) : null;
+  const publicServices = info ? resolveSchoolPublicServices(schoolId) : null;
 
   return (
     <AIDetailScreen
       title="學校資訊"
-      subtitle="官方總機、網站與名錄地址。"
+      subtitle="官方總機、網站、名錄地址與校方服務。"
       onBack={() => navigation?.goBack?.()}
     >
       {!info ? (
@@ -171,10 +177,49 @@ function SchoolInfoContent({
               ) : null}
             </View>
           </AICard>
+          <AICard title="住宿與職涯資訊">
+            <View style={{ gap: 16 }}>
+              {publicServices ? (
+                <>
+                  <Text style={{ color: aiTokens.muted, lineHeight: 22 }}>
+                    請依校方網站的公告與流程辦理。個人包裹、線上報修與履歷申請紀錄尚未連結。
+                  </Text>
+                  {(['dormitory', 'career'] as const).map((kind) => {
+                    const link = publicServices.services[kind];
+                    return (
+                      <View key={kind} style={{ gap: 8 }}>
+                        {link.entryKind === 'student-portal-fallback' ? (
+                          <Text style={{ color: aiTokens.muted, lineHeight: 22 }}>
+                            {kind === 'dormitory'
+                              ? '請在臺大學生專區查找住宿相關資訊。'
+                              : '請在臺大學生專區查找職涯與實習資訊。'}
+                          </Text>
+                        ) : null}
+                        <AIButton
+                          label={`前往${link.label}`}
+                          variant="ghost"
+                          onPress={() => void open(link.url)}
+                        />
+                        <Text style={{ color: aiTokens.muted, lineHeight: 22 }}>
+                          來源：{link.sourceLabel}
+                        </Text>
+                      </View>
+                    );
+                  })}
+                </>
+              ) : (
+                <Text style={{ color: aiTokens.muted, lineHeight: 22 }}>
+                  目前沒有這所學校的住宿與職涯入口，請從上方官方網站查詢。
+                </Text>
+              )}
+            </View>
+          </AICard>
           <AICard title="資料來源">
             <View style={{ gap: 12 }}>
               <Text style={{ color: aiTokens.muted, lineHeight: 22 }}>
-                教育部統計處大專校院名錄（{info.academicYear} 學年度），快照日期 {PUBLIC_SCHOOL_INFO_SNAPSHOT_DATE}。此頁提供公開聯絡方式；校務服務依學校目前開放項目使用。
+                教育部統計處大專校院名錄（{info.academicYear} 學年度），快照日期{' '}
+                {PUBLIC_SCHOOL_INFO_SNAPSHOT_DATE}
+                。此頁提供公開聯絡方式；校務服務依學校目前開放項目使用。
               </Text>
               <AIButton
                 label="開啟政府資料開放平台名錄"

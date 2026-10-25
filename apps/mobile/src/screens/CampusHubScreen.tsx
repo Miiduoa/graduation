@@ -66,16 +66,9 @@ const sections: Array<{ title: string; items: ServiceItem[] }> = [
       {
         icon: 'ic_school',
         label: '學校資訊',
-        description: '總機與官網',
+        description: '總機、官網與校方服務',
         screen: 'SchoolInfo',
-        keywords: ['總機', '官網', '地址', '名錄', '聯絡'],
-      },
-      {
-        icon: 'ic_dorm',
-        label: '宿舍',
-        description: '住宿服務',
-        screen: 'Dormitory',
-        keywords: ['住宿', '寢室', '報修'],
+        keywords: ['總機', '官網', '地址', '名錄', '聯絡', '宿舍', '住宿', '職涯', '實習'],
       },
       {
         icon: 'ic_bus',
@@ -118,13 +111,6 @@ const sections: Array<{ title: string; items: ServiceItem[] }> = [
         description: '校園健康服務',
         screen: 'Health',
         keywords: ['醫療', '診所', '保健'],
-      },
-      {
-        icon: 'ic_people_community',
-        label: '職涯',
-        description: '還沒接到校方資料',
-        screen: 'Career',
-        keywords: ['職涯', '實習', '徵才', '履歷', '就業'],
       },
       {
         icon: 'ic_lost_found',
@@ -376,10 +362,7 @@ function CampusDirectory({
         </AISection>
       ))}
       {filtered.length === 0 ? (
-        <AIEmptyState
-          title={`找不到「${query.trim()}」相關的服務`}
-          subtitle="試試其他關鍵字。"
-        />
+        <AIEmptyState title={`找不到「${query.trim()}」相關的服務`} subtitle="試試其他關鍵字。" />
       ) : null}
     </AIScreen>
   );

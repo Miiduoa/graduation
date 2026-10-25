@@ -64,7 +64,7 @@ const ITEMS: LifeService[] = [
     action: '看學校資訊',
     icon: 'services',
     group: 'public',
-    keywords: '總機 官網 地址 名錄 聯絡 school info contact',
+    keywords: '總機 官網 地址 名錄 聯絡 職涯 實習 徵才 就業 school info contact career',
   },
   {
     href: '/announcements',
@@ -101,15 +101,6 @@ const ITEMS: LifeService[] = [
     icon: 'orders',
     group: 'personal',
     keywords: '取餐 餐點 進度 點餐 order pickup',
-  },
-  {
-    href: '/social',
-    title: '跨校交流',
-    text: '用 Google 帳號登入，在公開看板閱讀與分享近況。',
-    action: '看公開看板',
-    icon: 'social',
-    group: 'community',
-    keywords: '社群 看板 文章 分享 social board',
   },
   {
     href: '/community',
