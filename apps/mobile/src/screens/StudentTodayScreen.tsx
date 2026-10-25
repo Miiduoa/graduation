@@ -53,8 +53,9 @@ type TodoRow = TodayTodo & { task?: InboxTask };
 function todosFromInbox(tasks: InboxTask[]): TodoRow[] {
   return tasks.flatMap((task) => {
     if (task.kind !== 'assignment' && task.kind !== 'quiz') return [];
-    const due = task.dueAt == null ? null : task.dueAt instanceof Date ? task.dueAt.getTime() : NaN;
-    if (due !== null && !Number.isFinite(due)) return [];
+    // A malformed or missing deadline must not hide the work altogether.
+    const rawDue = task.dueAt instanceof Date ? task.dueAt.getTime() : null;
+    const due = rawDue !== null && Number.isFinite(rawDue) ? rawDue : null;
     return [
       {
         id: task.id,
@@ -83,6 +84,7 @@ export default function StudentTodayScreen() {
   const [refreshState, setRefreshState] = useState<{ scope: string; request: number } | null>(null);
   const refreshGeneration = useRef(0);
   const [leavingIds, setLeavingIds] = useState<string[]>([]);
+  const [expandedTodoScope, setExpandedTodoScope] = useState<string | null>(null);
   const previousTodos = useRef<string[]>([]);
   const scrollY = useRef(0);
   const scrollRef = useRef<ScrollView>(null);
@@ -167,6 +169,7 @@ export default function StudentTodayScreen() {
   const action = pickNextAction(classes, todos, now);
   const classRows = sortTodayClasses(classes, now);
   const todoRows = sortTodayTodos(todos) as TodoRow[];
+  const todosExpanded = expandedTodoScope === scope;
   const firstLoad = unsigned
     ? timetableStatus === 'loading'
     : !updatedAt && (loading || timetableStatus === 'loading');
@@ -182,23 +185,22 @@ export default function StudentTodayScreen() {
     else rootNavigateNested('學習', 'PersonalTimetable', termKey ? { term: termKey } : undefined);
   };
   const openTodo = (row: TodoRow, scrollToSubmit = false) => {
-    if (
-      row.task &&
+    if (row.task) {
+      // The task carries its real assignment / quiz ID and destination.
+      // If opening fails, the navigation helper explains why; never invent a submit ID.
       navigateFromInboxTask(navigation, row.task, {
         role: auth.profile?.role,
         isTeachingRole: false,
         scrollToSubmit,
-      })
-    )
-      return;
-    if (row.courseId)
-      safeNavigate(navigation, 'HomeworkSubmit', {
-        courseId: row.courseId,
-        hwId: row.id,
-        hwTitle: row.title,
-        dueAt: new Date(row.dueAt).toISOString(),
-        ...(scrollToSubmit ? { scrollToSubmit: true } : {}),
       });
+      return;
+    }
+    if (row.courseId) {
+      safeNavigate(navigation, 'CourseHub', {
+        groupId: row.courseId,
+        groupName: row.courseName,
+      });
+    }
   };
   const openWeek = () =>
     rootNavigateNested('學習', 'PersonalTimetable', termKey ? { term: termKey } : undefined);
@@ -265,6 +267,7 @@ export default function StudentTodayScreen() {
             />
             <TodoList
               todos={todoRows}
+              expanded={todosExpanded}
               unsigned={unsigned}
               error={error}
               lmsUnconnected={lmsUnconnected}
@@ -272,7 +275,9 @@ export default function StudentTodayScreen() {
               now={now}
               styles={s}
               onOpen={openTodo}
-              onOpenAll={() => rootNavigateNested('學習', 'LearnHome')}
+              onToggleExpanded={() =>
+                setExpandedTodoScope((previous) => (previous === scope ? null : scope))
+              }
               onRetry={() => void load()}
             />
           </>
@@ -530,6 +535,7 @@ function TodayClassList({
 
 function TodoList({
   todos,
+  expanded,
   unsigned,
   error,
   lmsUnconnected,
@@ -537,10 +543,11 @@ function TodoList({
   now,
   styles: s,
   onOpen,
-  onOpenAll,
+  onToggleExpanded,
   onRetry,
 }: {
   todos: TodoRow[];
+  expanded: boolean;
   unsigned: boolean;
   error: boolean;
   lmsUnconnected: boolean;
@@ -548,11 +555,11 @@ function TodoList({
   now: Date;
   styles: ReturnType<typeof createStyles>;
   onOpen: (todo: TodoRow) => void;
-  onOpenAll: () => void;
+  onToggleExpanded: () => void;
   onRetry: () => void;
 }) {
-  const visible = todos.slice(0, 3);
-  const extra = Math.max(0, todos.length - visible.length);
+  const visible = expanded ? todos : todos.slice(0, 3);
+  const extra = Math.max(0, todos.length - 3);
   const leaving = new Set(leavingIds);
   return (
     <View style={s.section}>
@@ -572,7 +579,9 @@ function TodoList({
         </>
       ) : lmsUnconnected && todos.length === 0 ? (
         <Text style={s.empty}>{TODAY_COPY.lmsUnconnected}</Text>
-      ) : visible.length === 0 ? null : (
+      ) : visible.length === 0 ? (
+        <Text style={s.empty}>已載入的課程目前沒有待處理的作業或測驗。</Text>
+      ) : (
         <View style={s.list}>
           {visible.map((item, index) => {
             const overdue = isTodoOverdue(item, now);
@@ -600,8 +609,15 @@ function TodoList({
             );
           })}
           {extra > 0 ? (
-            <Pressable accessibilityRole="button" onPress={onOpenAll} style={s.more}>
-              <Text style={s.link}>{TODAY_COPY.moreTodos(extra)}</Text>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityState={{ expanded }}
+              onPress={onToggleExpanded}
+              style={s.more}
+            >
+              <Text style={s.link}>
+                {expanded ? '收合待辦' : TODAY_COPY.moreTodos(extra)}
+              </Text>
             </Pressable>
           ) : null}
         </View>
