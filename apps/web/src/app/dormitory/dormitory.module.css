@@ -13,7 +13,40 @@
   padding: clamp(22px, 4vw, 38px);
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
-  background: var(--surface-strong);
+  background: linear-gradient(125deg, var(--surface-strong) 0%, var(--surface) 100%);
+}
+
+.heroIntro {
+  min-width: 0;
+  max-width: 690px;
+  align-self: center;
+}
+
+.heroActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 22px;
+}
+
+.heroActions button {
+  min-height: 44px;
+  padding: 10px 17px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-strong);
+  font: inherit;
+  font-weight: 650;
+  cursor: pointer;
+}
+
+.heroPrimary {
+  background: var(--text);
+  color: var(--bg);
+}
+
+.heroSecondary {
+  background: transparent;
+  color: var(--text);
 }
 
 .hero h2 {
@@ -485,4 +518,205 @@
   .stack * {
     scroll-behavior: auto;
   }
+}
+
+.guideLayout {
+  display: grid;
+  min-width: 0;
+}
+
+.contactGrid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  margin: 22px 0 24px;
+}
+
+.contactGrid > div {
+  display: grid;
+  align-content: start;
+  gap: 8px;
+  padding: 18px;
+  min-width: 0;
+  border: 1px solid var(--border);
+  background: var(--surface-strong);
+  border-radius: var(--radius);
+}
+
+.contactGrid span,
+.contactGrid small {
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.contactGrid strong,
+.contactGrid a {
+  color: var(--text);
+  font-weight: 700;
+  font-size: 16px;
+  overflow-wrap: anywhere;
+}
+
+.hallGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 300px), 1fr));
+  gap: 16px;
+  margin-top: 16px;
+}
+
+.hallCard {
+  min-width: 0;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+}
+
+.hallHeader {
+  padding: 20px 20px 14px;
+}
+
+.hallHeader h4 {
+  color: var(--text);
+  margin: 0 0 6px;
+  font-size: 18px;
+}
+
+.hallHeader p {
+  font-size: 13px;
+  margin: 0;
+}
+
+.feeTable {
+  border-collapse: collapse;
+  width: 100%;
+  color: var(--text);
+  text-align: left;
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+}
+
+.feeTable caption {
+  color: var(--muted);
+  text-align: left;
+  padding: 0 20px 12px;
+  font-size: 12px;
+}
+
+.feeTable th,
+.feeTable td {
+  padding: 12px 10px;
+  border-top: 1px solid var(--border);
+  vertical-align: top;
+}
+
+.feeTable th:first-child { padding-left: 20px; }
+
+.feeTable th { font-weight: 600; }
+
+.feeTable td { text-align: right; white-space: nowrap; }
+
+.feeTable th small {
+  display: block;
+  margin-top: 4px;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.5;
+  font-weight: 400;
+}
+
+.shortcutBar {
+  display: flex;
+  gap: 9px;
+  flex-wrap: wrap;
+  align-items: center;
+  margin: 20px 0;
+}
+
+.shortcutBar span {
+  color: var(--muted);
+  font-size: 13px;
+  margin-right: 4px;
+}
+
+.shortcutBar button,
+.nextLinks button {
+  min-height: 44px;
+  padding: 8px 12px;
+  font: inherit;
+  color: var(--text);
+  background: var(--surface-strong);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+
+.nextLinks {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 9px;
+  margin-top: 16px;
+}
+
+.nextLinks button { font-size: 13px; }
+
+.overdueText {
+  color: var(--danger, #b42318) !important;
+  font-size: 13px;
+  font-weight: 650;
+}
+
+.milestones {
+  list-style: none;
+  margin: 22px 0 0;
+  padding: 0;
+}
+
+.milestones > li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 20px 0;
+  border-top: 1px solid var(--border);
+}
+
+.milestoneInfo {
+  display: grid;
+  gap: 3px;
+}
+
+.milestoneInfo h4 { margin: 0; }
+
+.milestoneDate {
+  font-size: 13px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.milestoneDone h4 {
+  color: var(--muted);
+  text-decoration: line-through;
+}
+
+@media (max-width: 850px) {
+  .contactGrid { grid-template-columns: 1fr; }
+}
+
+@media (max-width: 620px) {
+  .tabs {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    padding-bottom: 13px;
+  }
+  .tabs button { flex: 0 0 auto; white-space: nowrap; }
+  .heroStats { gap: 7px; }
+  .heroStats > div { min-width: 0; padding: 11px; }
+  .heroStats strong { font-size: 22px; }
+  .heroStats span { font-size: 12px; }
+  .hallHeader { padding: 18px 14px 12px; }
+  .feeTable th:first-child { padding-left: 14px; }
 }

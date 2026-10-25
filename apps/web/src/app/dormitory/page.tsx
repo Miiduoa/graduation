@@ -4,25 +4,32 @@ import { useEffect, useRef, useState } from 'react';
 import { resolveSchoolPublicServices } from '@campus/shared/src/schoolPublicServices';
 import {
   DORM_CHECKLISTS,
+  DORM_MILESTONE_LIMIT,
+  DORM_REPAIR_SHORTCUTS,
   DORM_REPAIR_CATEGORIES,
   DORM_REPAIR_STATUSES,
   dormChecklistProgress,
   dormStorageKey,
   emptyDormWorkspace,
   formatDormRepairForCopy,
+  isValidDormDate,
+  localDormDate,
   normalizeDormWorkspace,
+  sortedDormMilestones,
+  type DormMilestone,
   type DormRepair,
   type DormRepairCategory,
   type DormRepairStatus,
   type DormWorkspace,
 } from '@campus/shared/src/dormitory';
+import { resolveDormitoryPublicGuide } from '@campus/shared/src/dormitoryGuide';
 import { useAuth } from '@/components/AuthGuard';
 import { SiteShell } from '@/components/SiteShell';
 import { useOptionalNuniSession } from '@/features/nuni/Session';
 import { useCampusBrowseContext } from '@/lib/useCampusBrowseContext';
 import styles from './dormitory.module.css';
 
-type View = 'overview' | 'repairs' | 'checklist' | 'laundry';
+type View = 'overview' | 'guide' | 'repairs' | 'dates' | 'checklist' | 'laundry';
 type StorageState =
   | { status: 'loading' }
   | { status: 'error'; message: string }
@@ -37,7 +44,9 @@ type RepairDraft = {
 const EMPTY_REPAIR: RepairDraft = { category: 'other', title: '', location: '', description: '' };
 const VIEWS: ReadonlyArray<{ id: View; label: string }> = [
   { id: 'overview', label: '總覽' },
+  { id: 'guide', label: '宿舍指南' },
   { id: 'repairs', label: '設備問題' },
+  { id: 'dates', label: '重要日期' },
   { id: 'checklist', label: '入住與退宿' },
   { id: 'laundry', label: '洗衣計時' },
 ];
@@ -60,10 +69,16 @@ function DormitoryWorkspace({ scope, schoolId, schoolName, guest }: {
   const [pendingId, setPendingId] = useState<string | null>(null);
   const [deleteId, setDeleteId] = useState<string | null>(null);
   const [repairFilter, setRepairFilter] = useState<'all' | DormRepairStatus>('all');
+  const [milestoneDraft, setMilestoneDraft] = useState({ title: '', dueDate: '' });
+  const [milestoneEditorOpen, setMilestoneEditorOpen] = useState(false);
+  const [editingMilestoneId, setEditingMilestoneId] = useState<string | null>(null);
+  const [pendingMilestoneId, setPendingMilestoneId] = useState<string | null>(null);
+  const [deleteMilestoneId, setDeleteMilestoneId] = useState<string | null>(null);
   const [laundryMinutes, setLaundryMinutes] = useState(45);
   const [now, setNow] = useState(() => Date.now());
   const savedRaw = useRef<string | null>(null);
   const official = resolveSchoolPublicServices(schoolId)?.services.dormitory ?? null;
+  const guide = resolveDormitoryPublicGuide(schoolId);
 
   const reload = () => {
     try {
@@ -72,6 +87,12 @@ function DormitoryWorkspace({ scope, schoolId, schoolName, guest }: {
       savedRaw.current = raw;
       setStorage({ status: 'ready', data });
       setInfoDraft({ building: data.building, room: data.room, bed: data.bed });
+      setEditorOpen(false);
+      setEditingId(null);
+      setPendingId(null);
+      setMilestoneEditorOpen(false);
+      setEditingMilestoneId(null);
+      setPendingMilestoneId(null);
       setConflict(false);
       setSaveError('');
       setNotice('');
@@ -119,12 +140,18 @@ function DormitoryWorkspace({ scope, schoolId, schoolName, guest }: {
     }
   }
 
-  function beginRepair(repair?: DormRepair) {
+  function beginRepair(repair?: DormRepair, shortcut?: { category: DormRepairCategory; title: string }) {
     setEditingId(repair?.id ?? null);
     setPendingId(null);
+    const currentRoom = storage.status === 'ready' ? storage.data.room : '';
     setRepairDraft(repair
       ? { title: repair.title, category: repair.category, location: repair.location, description: repair.description }
-      : { ...EMPTY_REPAIR });
+      : {
+        ...EMPTY_REPAIR,
+        category: shortcut?.category ?? 'other',
+        title: shortcut?.title ?? '',
+        location: currentRoom ? '寢室 ' + currentRoom : '',
+      });
     setEditorOpen(true);
     setDeleteId(null);
     setNotice('');
@@ -172,6 +199,47 @@ function DormitoryWorkspace({ scope, schoolId, schoolName, guest }: {
     }
   }
 
+  function beginMilestone(entry?: DormMilestone) {
+    setMilestoneDraft({ title: entry?.title ?? '', dueDate: entry?.dueDate ?? '' });
+    setEditingMilestoneId(entry?.id ?? null);
+    setPendingMilestoneId(null);
+    setDeleteMilestoneId(null);
+    setMilestoneEditorOpen(true);
+    setSaveError('');
+    setNotice('');
+    setView('dates');
+  }
+
+  function saveMilestone(data: DormWorkspace) {
+    const title = milestoneDraft.title.trim();
+    const dueDate = milestoneDraft.dueDate.trim();
+    if (title.length < 2 || !isValidDormDate(dueDate)) {
+      setSaveError('請填寫至少兩個字的事項名稱，並選擇有效日期。');
+      return;
+    }
+    if (!editingMilestoneId && data.milestones.length >= DORM_MILESTONE_LIMIT) {
+      setSaveError('重要日期最多可記錄 30 筆，請先整理已完成的事項。');
+      return;
+    }
+    const previous = data.milestones.find((entry) => entry.id === editingMilestoneId);
+    const id = editingMilestoneId ?? pendingMilestoneId ??
+      ('date_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 9));
+    setPendingMilestoneId(id);
+    const entry: DormMilestone = {
+      id,
+      title,
+      dueDate,
+      completed: previous?.completed ?? false,
+      createdAt: previous?.createdAt ?? Date.now(),
+    };
+    if (save({ ...data, milestones: [entry, ...data.milestones.filter((item) => item.id !== id)] })) {
+      setMilestoneEditorOpen(false);
+      setEditingMilestoneId(null);
+      setPendingMilestoneId(null);
+      setMilestoneDraft({ title: '', dueDate: '' });
+    }
+  }
+
   if (storage.status !== 'ready') {
     return (
       <SiteShell title="宿舍" subtitle={schoolName}>
@@ -188,19 +256,32 @@ function DormitoryWorkspace({ scope, schoolId, schoolName, guest }: {
   const openRepairs = data.repairs.filter((item) => item.status !== 'resolved');
   const visibleRepairs = data.repairs.filter((item) => repairFilter === 'all' || item.status === repairFilter);
   const remaining = data.laundryEndAt ? Math.max(0, Math.ceil((data.laundryEndAt - now) / 60000)) : 0;
+  const today = localDormDate(new Date(now));
+  const milestones = sortedDormMilestones(data);
+  const nextMilestone = milestones.find((entry) => !entry.completed);
+  const overdueCount = milestones.filter((entry) => !entry.completed && entry.dueDate < today).length;
+  const nextChecklistItem = DORM_CHECKLISTS.flatMap((group) => group.items)
+    .find((item) => !data.checkmarks[item.id]);
 
   return (
     <SiteShell title="宿舍" subtitle="住宿安排與生活紀錄，依目前選擇的學校顯示。" schoolName={schoolName}>
       <div className={styles.stack}>
         <section className={styles.hero}>
-          <div>
-            <p className={styles.eyebrow}>{schoolName} · 個人住宿工作區</p>
-            <h2>{data.building ? data.building : '先把住宿大小事安排好'}</h2>
-            <p>{data.room ? '寢室 ' + data.room + (data.bed ? ' · ' + data.bed : '') : '房間資訊可自行記下，校方分配與繳費狀態仍以正式系統為準。'}</p>
+          <div className={styles.heroIntro}>
+            <p className={styles.eyebrow}>{schoolName} / 住宿生活</p>
+            <h2>{data.building || '住得安心，事情好處理'}</h2>
+            <p>{data.room
+              ? '寢室 ' + data.room + (data.bed ? ' · ' + data.bed : '') + '｜你自己的住宿紀錄'
+              : '把要辦的事、需要修的設備和重要日期放在一起。住宿資格仍以校方系統為準。'}</p>
+            <div className={styles.heroActions}>
+              <button type="button" className={styles.heroPrimary} onClick={() => beginRepair()}>記錄設備問題</button>
+              <button type="button" className={styles.heroSecondary} onClick={() => setView('guide')}>查看宿舍指南</button>
+            </div>
           </div>
           <div className={styles.heroStats} aria-label="個人紀錄摘要">
             <div><strong>{openRepairs.length}</strong><span>待追蹤問題</span></div>
-            <div><strong>{progress.completed}/{progress.total}</strong><span>準備事項</span></div>
+            <div><strong>{milestones.filter((item) => !item.completed).length}</strong><span>待辦日期</span></div>
+            <div><strong>{progress.completed}/{progress.total}</strong><span>準備進度</span></div>
           </div>
         </section>
 
@@ -232,7 +313,7 @@ function DormitoryWorkspace({ scope, schoolId, schoolName, guest }: {
         {view === 'overview' && (
           <div className={styles.columns}>
             <section className={styles.panel}>
-              <div className={styles.sectionTitle}><div><p className={styles.eyebrow}>MY ROOM</p><h3>我的住宿資訊</h3></div></div>
+              <div className={styles.sectionTitle}><div><p className={styles.eyebrow}>個人資料</p><h3>我的住宿資訊</h3></div><span className={styles.status}>僅此裝置</span></div>
               <p className={styles.muted}>這是自己保存的備忘，不會變更校方床位或住宿資格。</p>
               <div className={styles.formGrid}>
                 <label>宿舍或學苑名稱<input maxLength={70} value={infoDraft.building} onChange={(e) => setInfoDraft({ ...infoDraft, building: e.target.value })} placeholder="例如：○○學苑" /></label>
@@ -243,11 +324,16 @@ function DormitoryWorkspace({ scope, schoolId, schoolName, guest }: {
             </section>
             <div className={styles.side}>
               <section className={styles.panel}>
-                <div className={styles.sectionTitle}><h3>接下來可以做</h3></div>
-                <p>已勾選 {progress.completed} / {progress.total} 項準備事項。</p>
-                <button type="button" className={styles.secondary} onClick={() => setView('checklist')}>查看入住與退宿清單</button>
-                <p className={styles.muted}>{openRepairs.length ? '還有 ' + openRepairs.length + ' 筆設備問題待追蹤。' : '目前沒有待追蹤的設備問題。'}</p>
-                <button type="button" className={styles.secondary} onClick={() => setView('repairs')}>查看設備問題</button>
+                <div className={styles.sectionTitle}><div><p className={styles.eyebrow}>下一步</p><h3>{nextMilestone?.title || nextChecklistItem?.title || '住宿安排已整理好'}</h3></div></div>
+                <p>{nextMilestone
+                  ? (nextMilestone.dueDate < today ? '這項日期已過，記得確認是否完成。' : '個人設定日期：' + nextMilestone.dueDate.replaceAll('-', '/'))
+                  : nextChecklistItem ? nextChecklistItem.detail : '目前沒有尚未完成的準備事項。'}</p>
+                <button type="button" className={styles.secondary} onClick={() => setView(nextMilestone ? 'dates' : 'checklist')}>查看{nextMilestone ? '重要日期' : '入住退宿清單'}</button>
+                {overdueCount > 0 && <p className={styles.overdueText}>{overdueCount} 項個人日期已過，建議先確認。</p>}
+                <div className={styles.nextLinks}>
+                  <button type="button" onClick={() => beginMilestone()}>＋ 新增重要日期</button>
+                  <button type="button" onClick={() => setView('repairs')}>設備問題 {openRepairs.length} 筆</button>
+                </div>
               </section>
               <section className={styles.panel}>
                 <div className={styles.sectionTitle}><h3>學校正式入口</h3></div>
@@ -263,6 +349,50 @@ function DormitoryWorkspace({ scope, schoolId, schoolName, guest }: {
           </div>
         )}
 
+
+        {view === 'guide' && (
+          <div className={styles.guideLayout}>
+            <section className={styles.panel}>
+              <div className={styles.sectionTitle}>
+                <div><p className={styles.eyebrow}>校方公開資訊</p><h3>{schoolName}住宿指南</h3></div>
+                {official && <a className={styles.external} href={official.url} target="_blank" rel="noopener noreferrer">前往住宿服務單位 ↗</a>}
+              </div>
+              <p className={styles.muted}>房型、規則及收費為公開參考資訊，並非即時床位、個人申請或繳費查詢。請以校方當學期公告及正式系統為準。</p>
+              {guide ? (
+                <>
+                  <div className={styles.contactGrid}>
+                    <div><span>住宿服務電話</span><a href={'tel:' + guide.officePhone}>{guide.officePhone}</a><small>分機 {guide.officeExtensions}</small></div>
+                    <div><span>服務時間</span><strong>{guide.serviceHours}</strong></div>
+                    <div><span>24 小時校安專線</span><a href={'tel:' + guide.emergencyPhone}>{guide.emergencyPhone}</a><small>緊急事件請優先聯繫現場人員或緊急服務</small></div>
+                  </div>
+                  <div className={styles.hallGrid}>
+                    {guide.halls.map((hall) => (
+                      <article className={styles.hallCard} key={hall.id}>
+                        <div className={styles.hallHeader}><h4>{hall.name}</h4><p>{hall.summary}</p></div>
+                        <table className={styles.feeTable}>
+                          <caption>每學期公開參考費用（新臺幣）</caption>
+                          <thead><tr><th scope="col">房型</th><th scope="col">住宿費</th><th scope="col">保證金</th></tr></thead>
+                          <tbody>{hall.roomTypes.map((room) => (
+                            <tr key={room.name}><th scope="row">{room.name}{room.note && <small>{room.note}</small>}</th>
+                              <td>{room.semesterFee.toLocaleString('zh-TW')}</td><td>{room.deposit.toLocaleString('zh-TW')}</td></tr>
+                          ))}</tbody>
+                        </table>
+                      </article>
+                    ))}
+                  </div>
+                  <p className={styles.source}>資料核對：{guide.checkedAt}。以上費用不含另計冷氣電費，亦不代表有空床或可直接申請。<a href={guide.feeSource} target="_blank" rel="noopener noreferrer">校方房型與收費表 ↗</a></p>
+                </>
+              ) : (
+                <div className={styles.empty}>
+                  <h4>這所學校尚無可核實的房型與費用清單</h4>
+                  <p>不會借用其他學校的資訊；你仍可使用設備、重要日期與入住清單等個人工具。</p>
+                  {official && <a className={styles.external} href={official.url} target="_blank" rel="noopener noreferrer">{official.label} ↗</a>}
+                </div>
+              )}
+            </section>
+          </div>
+        )}
+
         {view === 'repairs' && (
           <section className={styles.panel}>
             <div className={styles.sectionTitle}>
@@ -270,6 +400,11 @@ function DormitoryWorkspace({ scope, schoolId, schoolName, guest }: {
               <button type="button" className={styles.primary} onClick={() => beginRepair()}>＋ 記錄問題</button>
             </div>
             <p className={styles.muted}>儲存只是個人備忘，不會送出報修。已向校方通報的狀態由你自行註記，不是校方系統回覆。</p>
+            {!editorOpen && <div className={styles.shortcutBar} aria-label="常見設備問題">
+              <span>快速記錄</span>
+              {DORM_REPAIR_SHORTCUTS.map((shortcut) => <button type="button" key={shortcut.title}
+                onClick={() => beginRepair(undefined, shortcut)}>{shortcut.title}</button>)}
+            </div>}
             {editorOpen && (
               <form className={styles.editor} aria-label="設備問題表單" onSubmit={(e) => { e.preventDefault(); saveRepair(data); }}>
                 <h4>{editingId ? '編輯問題' : '新增問題'}</h4>
@@ -312,6 +447,54 @@ function DormitoryWorkspace({ scope, schoolId, schoolName, guest }: {
           </section>
         )}
 
+
+        {view === 'dates' && (
+          <section className={styles.panel}>
+            <div className={styles.sectionTitle}>
+              <div><p className={styles.eyebrow}>個人行程</p><h3>重要日期</h3></div>
+              <button type="button" className={styles.primary} onClick={() => beginMilestone()}>＋ 新增日期</button>
+            </div>
+            <p className={styles.muted}>自行記下申請、繳費、搬入與退宿日期。這裡不會自動讀取校方期限，也不會送出申請或通知。</p>
+            {milestoneEditorOpen && (
+              <form className={styles.editor} aria-label="重要日期表單" onSubmit={(e) => { e.preventDefault(); saveMilestone(data); }}>
+                <h4>{editingMilestoneId ? '編輯重要日期' : '新增重要日期'}</h4>
+                <div className={styles.formGrid}>
+                  <label>事項名稱 *<input required minLength={2} maxLength={90} value={milestoneDraft.title}
+                    placeholder="例如：住宿繳費截止" onChange={(e) => setMilestoneDraft({ ...milestoneDraft, title: e.target.value })} /></label>
+                  <label>日期 *<input required type="date" value={milestoneDraft.dueDate}
+                    min="2000-01-01" max="2099-12-31" onChange={(e) => setMilestoneDraft({ ...milestoneDraft, dueDate: e.target.value })} /></label>
+                </div>
+                <div className={styles.actions}><button type="submit" className={styles.primary}>儲存日期</button>
+                  <button type="button" className={styles.secondary} onClick={() => { setMilestoneEditorOpen(false); setEditingMilestoneId(null); setPendingMilestoneId(null); }}>取消</button></div>
+              </form>
+            )}
+            {milestones.length ? (
+              <ul className={styles.milestones}>
+                {milestones.map((entry) => {
+                  const overdue = !entry.completed && entry.dueDate < today;
+                  return <li key={entry.id} className={entry.completed ? styles.milestoneDone : ''}>
+                    <div className={styles.milestoneInfo}>
+                      <span className={overdue ? styles.overdueText : styles.milestoneDate}>{entry.dueDate.replaceAll('-', '/')} {overdue ? ' · 日期已過' : ''}</span>
+                      <h4>{entry.title}</h4>
+                      <span className={styles.source}>{entry.completed ? '已完成（自行註記）' : '待確認'}</span>
+                    </div>
+                    <div className={styles.actions}>
+                      <button type="button" onClick={() => save({ ...data, milestones: data.milestones.map((m) =>
+                        m.id === entry.id ? { ...m, completed: !m.completed } : m) })}>{entry.completed ? '恢復待辦' : '標記完成'}</button>
+                      <button type="button" onClick={() => beginMilestone(entry)}>編輯</button>
+                      {deleteMilestoneId === entry.id ? (
+                        <><button className={styles.danger} type="button" onClick={() => {
+                          if (save({ ...data, milestones: data.milestones.filter((m) => m.id !== entry.id) })) setDeleteMilestoneId(null);
+                        }}>確認刪除</button><button type="button" onClick={() => setDeleteMilestoneId(null)}>保留</button></>
+                      ) : <button type="button" onClick={() => setDeleteMilestoneId(entry.id)}>刪除</button>}
+                    </div>
+                  </li>;
+                })}
+              </ul>
+            ) : <div className={styles.empty}><h4>還沒有記下重要日期</h4><p>從校方公告確認期限後，手動加入這份清單。</p></div>}
+          </section>
+        )}
+
         {view === 'checklist' && (
           <div className={styles.checklist}>
             <div className={styles.panel}><p className={styles.eyebrow}>PERSONAL CHECKLIST</p><h3>入住與退宿清單</h3><p>勾選只記錄自己的準備進度，不會建立校方申請。總進度：{progress.completed} / {progress.total}</p><progress max={progress.total} value={progress.completed} aria-label="準備事項完成進度" /></div>
@@ -342,7 +525,7 @@ function DormitoryWorkspace({ scope, schoolId, schoolName, guest }: {
                   {[30, 40, 45, 60, 75, 90].map((m) => <option value={m} key={m}>{m} 分鐘</option>)}
                 </select>
               </label>
-              <div className={styles.actions}><button className={styles.primary} type="button" onClick={() => { if (save({ ...data, laundryEndAt: Date.now() + laundryMinutes * 60000 })) setNow(Date.now()); }}>開始計時</button>{data.laundryEndAt && <button className={styles.secondary} type="button" onClick={() => save({ ...data, laundryEndAt: null })}>清除計時</button>}</div>
+              <div className={styles.actions}><button className={styles.primary} type="button" onClick={() => { if (save({ ...data, laundryEndAt: Date.now() + laundryMinutes * 60000 })) setNow(Date.now()); }}>開始計時</button>{data.laundryEndAt && remaining > 0 && <button className={styles.secondary} type="button" onClick={() => save({ ...data, laundryEndAt: data.laundryEndAt! + 10 * 60000 })}>延長 10 分鐘</button>}{data.laundryEndAt && <button className={styles.secondary} type="button" onClick={() => save({ ...data, laundryEndAt: null })}>清除計時</button>}</div>
             </section>
             <section className={styles.panel}>
               <h3>使用提醒</h3><p>實際機台運作、開放時段、費用與故障處理，以宿舍現場與承包廠商公告為準。</p>
