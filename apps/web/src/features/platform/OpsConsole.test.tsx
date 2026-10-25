@@ -62,6 +62,20 @@ it('asks guests to sign in', () => {
   expect(fetcher).not.toHaveBeenCalled();
 });
 
+it.each([
+  ['/admin/ops?tab=people', '/admin/ops?tab=people'],
+  ['/admin/ops#merchants', '/admin/ops#merchants'],
+  ['/admin/ops', '/admin/ops'],
+])('carries the current ops path %s into admin login', (location, returnUrl) => {
+  window.history.replaceState(null, '', location);
+  render(<OpsConsole />);
+  const login = new URL(
+    (screen.getByRole('link', { name: '前往管理員登入' }) as HTMLAnchorElement).href,
+  );
+  expect(login.pathname).toBe('/admin/login');
+  expect(login.searchParams.get('returnUrl')).toBe(returnUrl);
+});
+
 it('blocks signed-in non-operators without loading ops data', () => {
   mocks.session = {
     platformAccountId: 'pa_1',
@@ -337,6 +351,7 @@ it('uses the existing people bind endpoint and accepts only its matching tenant 
   );
   const posted = fetcher.mock.calls.find(([, options]) => options?.method === 'POST')!;
   expect(posted[0]).toBe('/api/platform-admin/people/bind');
+  expect(posted[1].method).toBe('POST');
   expect(posted[1].headers).toMatchObject({ 'X-Campus-Session': principal.context });
   expect(JSON.parse(posted[1].body)).toMatchObject({
     tenantId: 'school-a',
@@ -356,6 +371,7 @@ it('binds the first school administrator through the existing API before allowin
   await screen.findByText('已為school-a送出加人。');
   const posted = fetcher.mock.calls.find(([, options]) => options?.method === 'POST')!;
   expect(posted[0]).toBe('/api/platform-admin/people/bind');
+  expect(posted[1].method).toBe('POST');
   expect(JSON.parse(posted[1].body)).toMatchObject({
     tenantId: 'school-a',
     email: 'first-admin@example.test',
@@ -590,6 +606,7 @@ it.each(['approve', 'reject'] as const)(
     );
     const posted = fetcher.mock.calls.find(([, options]) => options?.method === 'POST')!;
     expect(posted[0]).toBe(`/api/platform-admin/merchants/interest/${merchantInterestId}/decision`);
+    expect(posted[1].method).toBe('POST');
     expect(JSON.parse(posted[1].body)).toEqual({
       decision,
       reason: decision === 'approve' ? '資料齊全，准予往下。' : '資料不足，請補件。',
@@ -617,6 +634,7 @@ it.each(['approve', 'reject'] as const)(
     expect(posted[0]).toBe(
       `/api/platform-admin/merchants/applications/school-a/${merchantApplicationId}/decision`,
     );
+    expect(posted[1].method).toBe('POST');
     expect(JSON.parse(posted[1].body)).toEqual({
       decision,
       reason: decision === 'approve' ? '資料齊全，准予往下。' : '資料不足，請補件。',

@@ -164,6 +164,10 @@ it('forwards a makeup decision with platformAccountId', async () => {
     { platformAccountId: account, decision: 'accept' },
   );
   expect(result.status).toBe(200);
+  expect(fetcher.mock.calls[0][0]).toBe(
+    `https://api.nuni.tw/v1/auth/platform/class-workspaces/${workspaceId}/classroom-sessions/${sessionId}/makeup`,
+  );
+  expect(fetcher.mock.calls[0][1].method).toBe('POST');
   expect(JSON.parse(fetcher.mock.calls[0][1].body)).toEqual({
     platformAccountId: account,
     decision: 'accept',

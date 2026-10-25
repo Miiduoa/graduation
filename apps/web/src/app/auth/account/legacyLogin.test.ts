@@ -9,6 +9,7 @@ import {
   listPlatformProviderKinds,
   readExistingSession,
   readReturnPath,
+  adminLoginReturnPath,
   sanitizeReturnPath,
   searchSchoolsByName,
   startGoogleContinue,
@@ -113,6 +114,23 @@ it.each([
 ])('keeps only Campus One return paths and rejects %s', (input, expected) => {
   expect(sanitizeReturnPath(input)).toBe(expected);
   expect(readReturnPath(`returnUrl=${encodeURIComponent(input)}`)).toBe(expected);
+});
+
+it.each([
+  [null, '/admin'],
+  ['', '/admin'],
+  ['/admin', '/admin'],
+  ['/admin/ops?tab=people', '/admin/ops?tab=people'],
+  ['/admin/ops#people', '/admin/ops#people'],
+  ['/admin/school-review', '/admin/school-review'],
+  ['/', '/'],
+  ['/admin/ops#secret', '/admin'],
+  ['/admin/ops?tab=evil', '/admin'],
+  ['https://evil.test', '/admin'],
+  ['/login', '/admin'],
+  ['/auth/platform#pending', '/admin'],
+])('sends admin login back through the existing whitelist: %s', (input, expected) => {
+  expect(adminLoginReturnPath(input)).toBe(expected);
 });
 
 it('reads next when returnUrl is absent', () => {
