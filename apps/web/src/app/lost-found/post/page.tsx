@@ -16,6 +16,12 @@ import {
 import styles from '@/components/lost-found/LostFound.module.css';
 import { useBrowsingSchoolPageContext } from '@/lib/useBrowsingSchoolPageContext';
 import {
+  lostFoundListHref,
+  lostFoundListQuery,
+  readLostFoundListState,
+} from '@/lib/lostFoundListNavigation';
+import type { ServiceListSearchParams } from '@/lib/serviceListNavigation';
+import {
   LostFoundConflictError,
   LostFoundError,
   LostFoundWriteUnconfirmedError,
@@ -46,7 +52,7 @@ import {
 } from '@/lib/lostFoundDrafts';
 
 export default function LostFoundPostPage(props: {
-  searchParams?: Promise<{ schoolId?: string; school?: string; campus?: string }>;
+  searchParams?: Promise<ServiceListSearchParams>;
 }) {
   const search = props.searchParams ? use(props.searchParams) : undefined;
   const context = useBrowsingSchoolPageContext(search);
@@ -62,19 +68,23 @@ export default function LostFoundPostPage(props: {
     <LostFoundPostContent
       key={`${user?.uid ?? 'signed-out'}:${context.schoolId}`}
       context={context}
+      listSearch={search}
     />
   );
 }
 
 function LostFoundPostContent({
   context,
+  listSearch,
 }: {
   context: ReturnType<typeof useBrowsingSchoolPageContext>;
+  listSearch?: ServiceListSearchParams;
 }) {
   const router = useRouter();
   const { user, loading: authLoading } = useAuth();
   const uid = user?.uid ?? null;
-  const loginReturnUrl = `/lost-found/post?schoolId=${encodeURIComponent(context.schoolId)}`;
+  const listHref = lostFoundListHref(context.schoolId, listSearch);
+  const loginReturnUrl = `/lost-found/post?${lostFoundListQuery(context.schoolId, readLostFoundListState(listSearch), listSearch)}`;
   const [fields, setFields] = useState<LostFoundWriteFields>(emptyLostFoundFields);
   const [documentId, setDocumentId] = useState<string | null>(null);
   const [errors, setErrors] = useState<LostFoundFormErrors>({});
@@ -270,8 +280,7 @@ function LostFoundPostContent({
       setCorruptBlocked(true);
       setStorageBlocked(true);
       setStorageMessage(
-        session.corruptionMessage ||
-          '本機待確認或草稿資料已損毀，尚未對帳前請勿另開新刊登。',
+        session.corruptionMessage || '本機待確認或草稿資料已損毀，尚未對帳前請勿另開新刊登。',
       );
       setServerReceipt(undefined);
       setConfirmAction(null);
@@ -286,9 +295,7 @@ function LostFoundPostContent({
     setCorruptBlocked(false);
     setErrors({});
     setStatusMessage(
-      session.pending
-        ? '已切換至另一則尚未確認的刊登。'
-        : '已切換至另一則未完成草稿。',
+      session.pending ? '已切換至另一則尚未確認的刊登。' : '已切換至另一則未完成草稿。',
     );
     refreshSiblings(session.documentId);
   }
@@ -344,10 +351,7 @@ function LostFoundPostContent({
       }
       const item = await createLostFoundItem(schoolId, intent.documentId, intent.fields!);
       if (!mounted.current || generation !== scopeGeneration.current) return;
-      if (
-        identityRef.current.uid !== expectedUid ||
-        identityRef.current.schoolId !== schoolId
-      ) {
+      if (identityRef.current.uid !== expectedUid || identityRef.current.schoolId !== schoolId) {
         return;
       }
       try {
@@ -360,14 +364,11 @@ function LostFoundPostContent({
       setPending(null);
       setStatusMessage('刊登成功，正在前往詳情…');
       router.replace(
-        `/lost-found/${encodeURIComponent(item.id)}?schoolId=${encodeURIComponent(schoolId)}`,
+        `/lost-found/${encodeURIComponent(item.id)}?${lostFoundListQuery(schoolId, readLostFoundListState(listSearch), listSearch)}`,
       );
     } catch (reason) {
       if (!mounted.current || generation !== scopeGeneration.current) return;
-      if (
-        identityRef.current.uid !== expectedUid ||
-        identityRef.current.schoolId !== schoolId
-      ) {
+      if (identityRef.current.uid !== expectedUid || identityRef.current.schoolId !== schoolId) {
         return;
       }
       if (reason instanceof LostFoundStorageError) {
@@ -578,9 +579,7 @@ function LostFoundPostContent({
       if (!mounted.current || generation !== scopeGeneration.current) return;
       setStorageBlocked(true);
       setStorageMessage(
-        reason instanceof LostFoundStorageError
-          ? reason.message
-          : '目前仍無法讀取或寫入本機草稿。',
+        reason instanceof LostFoundStorageError ? reason.message : '目前仍無法讀取或寫入本機草稿。',
       );
       setReady(true);
     }
@@ -624,10 +623,7 @@ function LostFoundPostContent({
       }
     } catch (reason) {
       if (!mounted.current || generation !== scopeGeneration.current) return;
-      if (
-        identityRef.current.uid !== expectedUid ||
-        identityRef.current.schoolId !== schoolId
-      ) {
+      if (identityRef.current.uid !== expectedUid || identityRef.current.schoolId !== schoolId) {
         return;
       }
       setServerReceipt(undefined);
@@ -687,10 +683,7 @@ function LostFoundPostContent({
       return;
     }
     if (!mounted.current || generation !== scopeGeneration.current) return;
-    if (
-      identityRef.current.uid !== expectedUid ||
-      identityRef.current.schoolId !== schoolId
-    ) {
+    if (identityRef.current.uid !== expectedUid || identityRef.current.schoolId !== schoolId) {
       return;
     }
     setConfirmAction(null);
@@ -698,7 +691,7 @@ function LostFoundPostContent({
     setStorageBlocked(false);
     setStatusMessage('已改用伺服器紀錄，正在開啟…');
     router.replace(
-      `/lost-found/${encodeURIComponent(id)}?schoolId=${encodeURIComponent(schoolId)}`,
+      `/lost-found/${encodeURIComponent(id)}?${lostFoundListQuery(schoolId, readLostFoundListState(listSearch), listSearch)}`,
     );
   }
 
@@ -767,9 +760,7 @@ function LostFoundPostContent({
             </p>
             {siblings.length > 0 && !corruptBlocked ? (
               <div className={styles.notice} role="status">
-                <p>
-                  另有 {siblings.length} 則尚未完成或未確認的刊登草稿，可切換載入，避免遺失。
-                </p>
+                <p>另有 {siblings.length} 則尚未完成或未確認的刊登草稿，可切換載入，避免遺失。</p>
                 <div className={styles.actions}>
                   {siblings.map((session) => (
                     <Button
@@ -807,7 +798,9 @@ function LostFoundPostContent({
                 {serverReceipt ? (
                   <p className={styles.notice} role="status">
                     伺服器紀錄：{serverReceipt.title}
-                    {serverReceipt.status ? `（${serverReceipt.status === 'open' ? '刊登中' : '已結案'}）` : ''}
+                    {serverReceipt.status
+                      ? `（${serverReceipt.status === 'open' ? '刊登中' : '已結案'}）`
+                      : ''}
                   </p>
                 ) : null}
                 {errors.form ? (
@@ -853,17 +846,32 @@ function LostFoundPostContent({
                       {inspectBusy ? '查詢中…' : '查詢此則刊登狀態'}
                     </Button>
                     {serverReceipt ? (
-                      <Button type="button" variant="outline" disabled={busy} onClick={requestAdoptServer}>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        disabled={busy}
+                        onClick={requestAdoptServer}
+                      >
                         採用伺服器紀錄並清除損毀資料
                       </Button>
                     ) : null}
                     {serverReceipt === null ? (
-                      <Button type="button" variant="outline" disabled={busy} onClick={requestRebuildDraft}>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        disabled={busy}
+                        onClick={requestRebuildDraft}
+                      >
                         在同一編號重建草稿
                       </Button>
                     ) : null}
                     {serverReceipt === undefined ? (
-                      <Button type="button" variant="outline" disabled={busy || inspectBusy} onClick={requestRebuildDraft}>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        disabled={busy || inspectBusy}
+                        onClick={requestRebuildDraft}
+                      >
                         略過查詢，在同一編號重建草稿
                       </Button>
                     ) : null}
@@ -894,9 +902,7 @@ function LostFoundPostContent({
                 statusMessage={statusMessage}
                 onChange={onFieldsChange}
                 onSubmit={() => void onSubmit()}
-                onCancel={() =>
-                  router.push(`/lost-found?schoolId=${encodeURIComponent(context.schoolId)}`)
-                }
+                onCancel={() => router.push(listHref)}
               />
             ) : !corruptBlocked && !storageBlocked ? (
               <p className={styles.error} role="alert">
@@ -904,10 +910,7 @@ function LostFoundPostContent({
               </p>
             ) : null}
             <p className={styles.actions}>
-              <Link
-                className={styles.link}
-                href={`/lost-found?schoolId=${encodeURIComponent(context.schoolId)}`}
-              >
+              <Link className={styles.link} href={listHref}>
                 返回列表
               </Link>
             </p>
@@ -944,8 +947,7 @@ function recoverCreateSession(
         siblings: sessions.slice(1),
         storageBlocked: true,
         storageMessage:
-          primary.corruptionMessage ||
-          '本機待確認資料已損毀，尚未對帳前請勿另開新刊登。',
+          primary.corruptionMessage || '本機待確認資料已損毀，尚未對帳前請勿另開新刊登。',
         corrupt: true,
       };
     }

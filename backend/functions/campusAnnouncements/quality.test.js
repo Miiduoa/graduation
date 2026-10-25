@@ -139,6 +139,8 @@ test('undated and future rows stay out of both lists; staff and security stay in
     input: 5,
     kept: 1,
     duplicate: 0,
+    hidden: 0,
+    excluded: 0,
     no_date: 1,
     future_date: 1,
     stale_source: 0,
@@ -148,4 +150,31 @@ test('undated and future rows stay out of both lists; staff and security stay in
     off_season: 0,
     outside_wall: 0,
   });
+});
+
+test('preserves audience and visibility decisions after source titles are shortened for display', () => {
+  const staff = {
+    id: 'staff',
+    ...announcementQualityFlags({
+      title: '教師研習報名通知(for教師)', publishedAt: '2026-10-08T00:00:00.000Z',
+    }, NOW),
+  };
+  expect(staff.title).toBe('教師研習報名通知');
+  expect(staff).toMatchObject({ audience: 'staff', studentFeed: false, visible: true });
+  const rows = [
+    { id: 'legacy', title: '學生交流活動', publishedAt: '2026-10-08T00:00:00.000Z' },
+    staff,
+    { id: 'excluded', title: '其他公開資訊', publishedAt: '2026-10-08T00:00:00.000Z', studentFeed: false, visible: true },
+    { id: 'hidden', title: '已撤下公告', publishedAt: '2026-10-08T00:00:00.000Z', visible: false, studentFeed: true },
+    { id: 'legacy-staff', title: '課程名冊(for教師)', publishedAt: '2026-10-08T00:00:00.000Z' },
+  ];
+  expect(selectStudentAnnouncements(rows, [], NOW).map((row) => row.id)).toEqual(['legacy']);
+  expect(selectOfficialAnnouncements(rows, [], NOW).map((row) => row.id)).toEqual(['legacy', 'staff', 'excluded', 'legacy-staff']);
+  expect(tallyStudentWallFilter(rows, [], NOW)).toMatchObject({ kept: 1, staff: 2, excluded: 1, hidden: 1 });
+});
+
+test('explicit staff audience wins even when studentFeed was not supplied', () => {
+  const row = { id: 'staff', title: '教職員研習', publishedAt: '2026-10-08T00:00:00.000Z', audience: 'staff' };
+  expect(selectStudentAnnouncements([row], [], NOW)).toEqual([]);
+  expect(selectOfficialAnnouncements([row], [], NOW)).toEqual([row]);
 });

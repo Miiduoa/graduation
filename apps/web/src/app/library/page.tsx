@@ -1,6 +1,6 @@
 'use client';
 
-import { use, useState } from 'react';
+import { use, useState, type ReactNode } from 'react';
 import {
   buildOfficialLibraryCatalogUrl,
   getOfficialLibrary,
@@ -25,6 +25,9 @@ function LibraryContent({ schoolId, schoolName, status }: CampusBrowseContext) {
   const library = getOfficialLibrary(schoolId, schoolName);
   const verifiedSearch = hasVerifiedCatalogSearch(library);
   const queryMaxLength = getOfficialLibraryCatalogQueryMaxLength(library);
+  const catalogSearchUrl = schoolId && verifiedSearch && keyword.trim()
+    ? buildOfficialLibraryCatalogUrl(schoolId, keyword, field, schoolName)
+    : null;
 
   async function copyKeyword() {
     const query = keyword.trim();
@@ -125,11 +128,11 @@ function LibraryContent({ schoolId, schoolName, status }: CampusBrowseContext) {
               </form>
             </>
           ) : (
-            <div className="pageStack">
+            <CatalogSearchPanel enabled={verifiedSearch} searchUrl={catalogSearchUrl}>
               <p style={{ color: 'var(--muted)' }}>
                 {verifiedSearch
-                  ? '輸入關鍵字即可直接前往這所學校的館藏搜尋結果；是否可借與預約成功，請以圖書館系統為準。'
-                  : '已對應這所學校的官方館藏入口。請在校方網站完成搜尋；即時館藏與可借狀態不會以推測資料代替。'}
+                  ? '輸入關鍵字，按 Enter 或搜尋按鈕，在新分頁查看本校館藏；可借與預約狀態以館方系統為準。'
+                  : '請前往校方館藏網站搜尋。可先在這裡輸入並複製關鍵字，開啟後再貼上。'}
               </p>
               {verifiedSearch && library.catalogSearch !== 'primo-ve' ? (
                 <label>
@@ -156,6 +159,7 @@ function LibraryContent({ schoolId, schoolName, status }: CampusBrowseContext) {
                   value={keyword}
                   onChange={(event) => { setKeyword(event.target.value); setCopyMessage(''); }}
                   maxLength={queryMaxLength}
+                  required={verifiedSearch}
                 />
               </label>
               {library.catalogQueryMaxLength ? (
@@ -164,17 +168,18 @@ function LibraryContent({ schoolId, schoolName, status }: CampusBrowseContext) {
                 </p>
               ) : null}
               <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
+                {verifiedSearch && (
+                  <button className="btn primary" type="submit" disabled={!catalogSearchUrl}>
+                    直接搜尋本校館藏 ↗
+                  </button>
+                )}
                 <a
-                  className="btn primary"
-                  href={verifiedSearch && keyword.trim()
-                    ? buildOfficialLibraryCatalogUrl(schoolId, keyword, field, schoolName) ?? library.catalogUrl
-                    : library.catalogUrl}
+                  className={verifiedSearch ? 'btn' : 'btn primary'}
+                  href={library.catalogUrl}
                   target="_blank"
                   rel="noopener noreferrer"
                 >
-                  {verifiedSearch && keyword.trim()
-                    ? '直接搜尋本校館藏 ↗'
-                    : '前往官方館藏入口 ↗'}
+                  前往官方館藏入口 ↗
                 </a>
                 {!verifiedSearch && (
                   <button className="btn" type="button" disabled={!keyword.trim()} onClick={() => void copyKeyword()}>
@@ -183,7 +188,7 @@ function LibraryContent({ schoolId, schoolName, status }: CampusBrowseContext) {
                 )}
               </div>
               {copyMessage && <p role="status">{copyMessage}</p>}
-            </div>
+            </CatalogSearchPanel>
           )}
         </section>
         <section className="card">
@@ -227,5 +232,34 @@ function LibraryContent({ schoolId, schoolName, status }: CampusBrowseContext) {
         </section>
       </div>
     </SiteShell>
+  );
+}
+
+function CatalogSearchPanel({
+  enabled,
+  searchUrl,
+  children,
+}: {
+  enabled: boolean;
+  searchUrl: string | null;
+  children: ReactNode;
+}) {
+  if (!enabled) return <div className="pageStack">{children}</div>;
+  const destination = searchUrl ? new URL(searchUrl) : null;
+  return (
+    <form
+      className="pageStack"
+      aria-label="搜尋本校館藏"
+      action={destination ? `${destination.origin}${destination.pathname}` : undefined}
+      method="get"
+      target="_blank"
+      rel="noopener noreferrer"
+      onSubmit={(event) => { if (!destination) event.preventDefault(); }}
+    >
+      {destination && Array.from(destination.searchParams.entries()).map(([name, value], index) => (
+        <input key={`${name}:${index}`} type="hidden" name={name} value={value} />
+      ))}
+      {children}
+    </form>
   );
 }

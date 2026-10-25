@@ -552,9 +552,7 @@ it('hides stale scrape rows when the school site is down and shows a retryable u
     );
   }) as never);
   render(<AnnouncementsPage />);
-  expect(
-    await screen.findByRole('heading', { name: '暫時讀不到資料，請稍後再試' }),
-  ).toBeTruthy();
+  expect(await screen.findByRole('heading', { name: '暫時讀不到資料，請稍後再試' })).toBeTruthy();
   expectSourceScrapeFailure();
   expect(screen.queryByText('過期稿')).toBeNull();
   expect(screen.queryByText('暫時讀不到新公告')).toBeNull();
@@ -581,9 +579,7 @@ it('keeps official links secondary when the school site is down and there is no 
     return snapshot();
   }) as never);
   render(<AnnouncementsPage />);
-  expect(
-    await screen.findByRole('heading', { name: '暫時讀不到資料，請稍後再試' }),
-  ).toBeTruthy();
+  expect(await screen.findByRole('heading', { name: '暫時讀不到資料，請稍後再試' })).toBeTruthy();
   expectSourceScrapeFailure();
   expect(screen.getByRole('link', { name: '前往學校官方公告' }).getAttribute('href')).toBe(
     'https://dorac.pu.edu.tw/p/403-1059-719-1.php',
@@ -633,9 +629,7 @@ it.each([
         </Suspense>,
       );
     });
-    expect(
-      await screen.findByRole('heading', { name: '暫時讀不到資料，請稍後再試' }),
-    ).toBeTruthy();
+    expect(await screen.findByRole('heading', { name: '暫時讀不到資料，請稍後再試' })).toBeTruthy();
     expectSourceScrapeFailure();
     expect(screen.getByRole('link', { name: office }).getAttribute('href')).toBe(url);
     expect(screen.queryByRole('link', { name: '前往學校官方公告' })).toBeNull();
@@ -660,7 +654,9 @@ it.each([
         </Suspense>,
       );
     });
-    expect(await screen.findByRole('heading', { name: '本站還沒接上這間學校的公告。' })).toBeTruthy();
+    expect(
+      await screen.findByRole('heading', { name: '本站還沒接上這間學校的公告。' }),
+    ).toBeTruthy();
     expect(screen.queryByText('暫時讀不到資料，請稍後再試')).toBeNull();
     expect(screen.queryByRole('button', { name: '再試一次' })).toBeNull();
     expect(screen.getByRole('link', { name: '前往學校官方公告' }).getAttribute('href')).toBe(url);
@@ -684,7 +680,9 @@ it.each([
         </Suspense>,
       );
     });
-    expect(await screen.findByRole('heading', { name: '本站還沒接上這間學校的公告。' })).toBeTruthy();
+    expect(
+      await screen.findByRole('heading', { name: '本站還沒接上這間學校的公告。' }),
+    ).toBeTruthy();
     expect(screen.getByRole('link', { name: office }).getAttribute('href')).toBe(url);
     expect(screen.queryByText('暫時讀不到資料，請稍後再試')).toBeNull();
     expect(screen.queryByRole('button', { name: '再試一次' })).toBeNull();
@@ -710,7 +708,9 @@ it.each(['tmu', 'thu'] as const)(
         </Suspense>,
       );
     });
-    expect(await screen.findByRole('heading', { name: '本站還沒接上這間學校的公告。' })).toBeTruthy();
+    expect(
+      await screen.findByRole('heading', { name: '本站還沒接上這間學校的公告。' }),
+    ).toBeTruthy();
     expect(screen.queryByRole('link', { name: '前往學校官方公告' })).toBeNull();
     expect(screen.queryByRole('button', { name: '再試一次' })).toBeNull();
     expect(screen.queryByText('暫時讀不到資料，請稍後再試')).toBeNull();
@@ -879,4 +879,191 @@ it('keeps undated and future rows out of the student wall and 全部公告, and 
   expect(screen.queryByText('無日期稿')).toBeNull();
   expect(screen.queryByText('未來稿')).toBeNull();
   expect(screen.queryByText('這間學校的公告還沒上架。')).toBeNull();
+});
+
+it('keeps the selected filters in detail links and restores them from the address', async () => {
+  vi.mocked(getDocsFromServer).mockResolvedValue(
+    snapshot(
+      announcementDocument('選課時程', {
+        category: 'academic',
+        pinned: true,
+        body: '本學期選課時間',
+      }),
+      announcementDocument('校園講座', { category: 'event' }),
+    ),
+  );
+  const query = {
+    schoolId: 'pu',
+    campus: 'pu',
+    school: 'PU',
+    q: '選課',
+    category: 'academic',
+    pinned: '1',
+    view: 'all',
+  };
+  window.history.replaceState(
+    { marker: 'preserve' },
+    '',
+    `/announcements?${new URLSearchParams(query)}#reading`,
+  );
+  await act(async () => {
+    render(
+      <Suspense fallback={null}>
+        <AnnouncementsPage searchParams={Promise.resolve(query)} />
+      </Suspense>,
+    );
+  });
+  const detail = await screen.findByRole('link', { name: '選課時程' });
+  const href = new URL(detail.getAttribute('href')!, window.location.origin);
+  expect(href.pathname).toBe(
+    '/announcements/選課時程'
+      .split('/')
+      .map((part) => encodeURIComponent(part))
+      .join('/'),
+  );
+  expect(Object.fromEntries(href.searchParams)).toMatchObject(query);
+  expect(screen.queryByText('校園講座')).toBeNull();
+  expect((screen.getByLabelText('搜尋公告') as HTMLInputElement).value).toBe('選課');
+  fireEvent.click(screen.getByRole('button', { name: '清除篩選' }));
+  expect(screen.getByText('校園講座')).toBeTruthy();
+  expect(document.activeElement).toBe(screen.getByLabelText('搜尋公告'));
+  expect(window.history.state).toEqual({ marker: 'preserve' });
+  expect(window.location.hash).toBe('#reading');
+  expect(new URLSearchParams(window.location.search).get('campus')).toBe('pu');
+  expect(new URLSearchParams(window.location.search).get('school')).toBe('PU');
+  expect(new URLSearchParams(window.location.search).get('q')).toBeNull();
+  expect(new URLSearchParams(window.location.search).get('view')).toBe('all');
+});
+
+it('restores filters on browser history changes without using another campus filter state', async () => {
+  vi.mocked(getDocsFromServer).mockResolvedValue(
+    snapshot(
+      announcementDocument('選課時程', { category: 'academic' }),
+      announcementDocument('校園講座', { category: 'event' }),
+    ),
+  );
+  render(<AnnouncementsPage />);
+  await screen.findByText('選課時程');
+  act(() => {
+    window.history.replaceState({}, '', '/announcements?schoolId=pu&q=講座&category=event');
+    window.dispatchEvent(new PopStateEvent('popstate'));
+  });
+  expect(screen.getByText('校園講座')).toBeTruthy();
+  expect(screen.queryByText('選課時程')).toBeNull();
+  expect((screen.getByLabelText('搜尋公告') as HTMLInputElement).value).toBe('講座');
+  act(() => {
+    window.history.replaceState({}, '', '/announcements?schoolId=nthu&q=另一校');
+    window.dispatchEvent(new PopStateEvent('popstate'));
+  });
+  expect((screen.getByLabelText('搜尋公告') as HTMLInputElement).value).not.toBe('另一校');
+});
+
+it('bounds long lists while searching every loaded announcement and remembers expanded pages', async () => {
+  window.history.replaceState({}, '', '/announcements?schoolId=pu&page=2');
+  vi.mocked(getDocsFromServer).mockResolvedValue(
+    snapshot(...Array.from({ length: 75 }, (_, index) => announcementDocument(`公告${index + 1}`))),
+  );
+  await act(async () => {
+    render(
+      <Suspense fallback={null}>
+        <AnnouncementsPage searchParams={Promise.resolve({ schoolId: 'pu', page: '2' })} />
+      </Suspense>,
+    );
+  });
+  await screen.findByText('公告1');
+  expect(screen.getAllByRole('article')).toHaveLength(60);
+  fireEvent.click(screen.getByRole('button', { name: '顯示更多公告（剩餘 15 則）' }));
+  expect(screen.getAllByRole('article')).toHaveLength(75);
+  expect(new URLSearchParams(window.location.search).get('page')).toBe('3');
+  fireEvent.change(screen.getByLabelText('搜尋公告'), { target: { value: '公告75' } });
+  expect(screen.getAllByRole('article')).toHaveLength(1);
+  expect(screen.getByText('公告75')).toBeTruthy();
+  expect(new URLSearchParams(window.location.search).get('page')).toBeNull();
+});
+
+it('keeps the current feed visible and prevents duplicate refreshes while reading', async () => {
+  render(<AnnouncementsPage />);
+  await screen.findByText('校園公告實際內容');
+  const pending = deferred();
+  vi.mocked(getDocsFromServer).mockReturnValue(pending.promise);
+  const before = vi.mocked(getDocsFromServer).mock.calls.length;
+  fireEvent.click(screen.getByRole('button', { name: '更新公告' }));
+  expect(screen.getByText('校園公告實際內容')).toBeTruthy();
+  const refreshing = screen.getByRole('button', { name: '正在更新…' });
+  expect((refreshing as HTMLButtonElement).disabled).toBe(true);
+  fireEvent.click(refreshing);
+  expect(vi.mocked(getDocsFromServer).mock.calls.length).toBe(before + 1);
+  await act(async () => pending.resolve(snapshot(announcementDocument('更新後公告'))));
+  await screen.findByRole('button', { name: '更新公告' });
+  expect(screen.getByText('更新後公告')).toBeTruthy();
+});
+
+it('keeps official-only announcements visible when a refresh fails', async () => {
+  window.history.replaceState({}, '', '/announcements?schoolId=pu&view=all');
+  vi.mocked(getDocsFromServer).mockResolvedValue(
+    snapshot(
+      announcementDocument('教師研習通知', {
+        audience: 'staff',
+        studentFeed: false,
+        body: '教師研習內容',
+      }),
+    ),
+  );
+  await act(async () => {
+    render(
+      <Suspense fallback={null}>
+        <AnnouncementsPage searchParams={Promise.resolve({ schoolId: 'pu', view: 'all' })} />
+      </Suspense>,
+    );
+  });
+  await screen.findByRole('link', { name: '教師研習通知' });
+  vi.mocked(getDocsFromServer).mockRejectedValueOnce(new Error('offline'));
+  fireEvent.click(screen.getByRole('button', { name: '更新公告' }));
+  await screen.findByRole('button', { name: '更新公告' });
+  expect(screen.getByRole('link', { name: '教師研習通知' })).toBeTruthy();
+  expect(screen.getByText(/暫時讀不到新公告/)).toBeTruthy();
+});
+
+it('uses the current address when Next restores a cached page with older server filter props', async () => {
+  window.history.replaceState(
+    {},
+    '',
+    '/announcements?schoolId=pu&q=選課&category=academic&pinned=1',
+  );
+  vi.mocked(getDocsFromServer).mockResolvedValue(
+    snapshot(
+      announcementDocument('選課時程', { category: 'academic', pinned: true }),
+      announcementDocument('其他活動', { category: 'event' }),
+    ),
+  );
+  await act(async () => {
+    render(
+      <Suspense fallback={null}>
+        <AnnouncementsPage searchParams={Promise.resolve({ schoolId: 'pu', page: '2' })} />
+      </Suspense>,
+    );
+  });
+  await screen.findByRole('link', { name: '選課時程' });
+  expect(screen.getAllByRole('article')).toHaveLength(1);
+  expect((screen.getByLabelText('搜尋公告') as HTMLInputElement).value).toBe('選課');
+  expect((screen.getByLabelText('只看置頂') as HTMLInputElement).checked).toBe(true);
+  expect(screen.queryByText('其他活動')).toBeNull();
+});
+
+it('keeps URL filters while the initial account state is still being resolved', async () => {
+  window.history.replaceState({}, '', '/announcements?schoolId=pu&q=選課');
+  account.user = null;
+  account.loading = true;
+  vi.mocked(getDocsFromServer).mockResolvedValue(snapshot(
+    announcementDocument('選課通知'), announcementDocument('校園活動'),
+  ));
+  const view = render(<AnnouncementsPage />);
+  expect(screen.getByText('正在準備公告…')).toBeTruthy();
+  account.user = { uid: 'alice' };
+  account.loading = false;
+  view.rerender(<AnnouncementsPage />);
+  await screen.findByRole('link', { name: '選課通知' });
+  expect((screen.getByLabelText('搜尋公告') as HTMLInputElement).value).toBe('選課');
+  expect(screen.queryByRole('link', { name: '校園活動' })).toBeNull();
+  expect(new URLSearchParams(window.location.search).get('q')).toBe('選課');
 });

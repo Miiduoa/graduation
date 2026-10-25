@@ -20,6 +20,13 @@ beforeEach(() => {
   context.schoolSearch = '?schoolId=pu&campus=pu';
 });
 afterEach(cleanup);
+function catalogFormUrl() {
+  const form = screen.getByRole('form', { name: '搜尋本校館藏' }) as HTMLFormElement;
+  const url = new URL(form.action);
+  const data = new FormData(form);
+  data.forEach((value, key) => url.searchParams.append(key, String(value)));
+  return url;
+}
 it('searches the official catalog with the chosen field and user input', () => {
   render(<LibraryPage />);
   const input = screen.getByLabelText('關鍵字') as HTMLInputElement;
@@ -86,7 +93,7 @@ it('searches NCUE WebPACX directly with translated fields and no clipboard detou
     target: { value: '資料庫 & SQL' },
   });
   fireEvent.change(screen.getByLabelText('搜尋範圍'), { target: { value: 'Title' } });
-  const url = new URL(screen.getByRole('link', { name: '直接搜尋本校館藏 ↗' }).getAttribute('href')!);
+  const url = catalogFormUrl();
   expect(url.hostname).toBe('webpacx.ncue.edu.tw');
   expect(url.pathname).toBe('/search');
   expect(url.searchParams.get('searchField')).toBe('TI');
@@ -106,6 +113,9 @@ it('keeps clipboard handoff for schools without a verified search format', () =>
     'https://web20.lib.cgu.edu.tw/',
   );
   expect((screen.getByRole('button', { name: '複製關鍵字' }) as HTMLButtonElement).disabled).toBe(false);
+  expect(screen.queryByRole('form', { name: '搜尋本校館藏' })).toBeNull();
+  expect(screen.queryByRole('button', { name: '直接搜尋本校館藏 ↗' })).toBeNull();
+  expect(screen.getByText('請前往校方館藏網站搜尋。可先在這裡輸入並複製關鍵字，開啟後再貼上。')).toBeTruthy();
 });
 
 it('opens Fu Jen Sierra results with the official 75-character limit', () => {
@@ -116,7 +126,7 @@ it('opens Fu Jen Sierra results with the official 75-character limit', () => {
   expect(input.maxLength).toBe(75);
   expect(screen.getByText('此校官方館藏關鍵字上限為 75 字。')).toBeTruthy();
   fireEvent.change(input, { target: { value: '資料庫' } });
-  const url = new URL(screen.getByRole('link', { name: '直接搜尋本校館藏 ↗' }).getAttribute('href')!);
+  const url = catalogFormUrl();
   expect(url.origin).toBe('https://library.lib.fju.edu.tw:444');
   expect(url.pathname).toBe('/search~S0*cht/');
   expect(url.searchParams.get('searchtype')).toBe('Y');
@@ -135,8 +145,7 @@ it('searches the selected university catalog directly without carrying another c
   fireEvent.change(screen.getByLabelText('想找的書或關鍵字'), {
     target: { value: '分散式系統 & AI' },
   });
-  const catalog = screen.getByRole('link', { name: '直接搜尋本校館藏 ↗' });
-  const url = new URL(catalog.getAttribute('href')!);
+  const url = catalogFormUrl();
   expect(url.hostname).toBe('nthu.primo.exlibrisgroup.com');
   expect(url.searchParams.get('vid')).toBe('886UST_NTHU:886UST_NTHU');
   expect(url.searchParams.get('query')).toBe('any,contains,分散式系統 & AI');
@@ -162,11 +171,42 @@ it('uses Soochow Primo with the university view and never opens the previous cam
   fireEvent.change(screen.getByLabelText('想找的書或關鍵字'), {
     target: { value: '現代文學' },
   });
-  const url = new URL(screen.getByRole('link', { name: '直接搜尋本校館藏 ↗' }).getAttribute('href')!);
+  const url = catalogFormUrl();
   expect(url.hostname).toBe('uco-scu.primo.exlibrisgroup.com');
   expect(url.searchParams.get('vid')).toBe('886UCO_SCU:886SCU_INST');
   expect(url.searchParams.get('query')).toBe('any,contains,現代文學');
   expect(screen.queryByText('蓋夏圖書館')).toBeNull();
+});
+
+it('lets verified catalogs submit a real GET form and keeps the university view parameters', () => {
+  context.schoolId = 'ntu';
+  context.schoolName = '國立臺灣大學';
+  render(<LibraryPage />);
+  const input = screen.getByLabelText('想找的書或關鍵字') as HTMLInputElement;
+  const button = screen.getByRole('button', { name: '直接搜尋本校館藏 ↗' }) as HTMLButtonElement;
+  const form = screen.getByRole('form', { name: '搜尋本校館藏' }) as HTMLFormElement;
+  expect(button.disabled).toBe(true);
+  expect(fireEvent.submit(form)).toBe(false);
+  fireEvent.change(input, { target: { value: '  作業系統 & 網路  ' } });
+  expect(button.disabled).toBe(false);
+  expect(button.type).toBe('submit');
+  expect(input.form).toBe(form);
+  expect(button.form).toBe(form);
+  expect(form.method).toBe('get');
+  expect(form.target).toBe('_blank');
+  expect(form.getAttribute('rel')).toBe('noopener noreferrer');
+  expect(fireEvent.submit(form)).toBe(true);
+  const destination = catalogFormUrl();
+  expect(destination.origin).toBe('https://ntu.primo.exlibrisgroup.com');
+  expect(destination.pathname).toBe('/discovery/search');
+  expect(Object.fromEntries(destination.searchParams)).toEqual({
+    tab: 'LibraryCatalog',
+    search_scope: 'MyInstitution',
+    vid: '886NTU_INST:886NTU_INST',
+    lang: 'zh-tw',
+    offset: '0',
+    query: 'any,contains,作業系統 & 網路',
+  });
 });
 
 it('provides Chiayi University official catalog and opening hours as separate links', () => {

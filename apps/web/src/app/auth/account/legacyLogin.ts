@@ -139,6 +139,23 @@ const LEGACY_SIMPLE_RETURN_PATHS = new Set([
   '/search',
   '/social',
 ]);
+
+function isServiceListPath(pathname: string): boolean {
+  return ['announcements', 'events', 'lost-found'].includes(pathname.split('/')[1]);
+}
+
+function isServiceListContext(pathname: string, key: string, value: string): boolean {
+  const service = pathname.split('/')[1];
+  if (!isServiceListPath(pathname)) return false;
+  if (key === 'page') return /^(?:[1-9]\d?|100)$/.test(value);
+  if (service === 'announcements' && key === 'pinned') return value === '1';
+  if (service === 'lost-found') {
+    if (key === 'mine') return value === '1';
+    if (key === 'type') return value === 'lost' || value === 'found';
+    if (key === 'status') return value === 'open' || value === 'resolved';
+  }
+  return false;
+}
 const MICROSOFT_HOSTS = new Set([
   'login.microsoftonline.com',
   'login.microsoftonline.us',
@@ -198,7 +215,7 @@ function returnFragment(hash: string): string {
 }
 
 function allowedReturnPath(value: string | null | undefined): string | null {
-  const raw = sanitizeInternalPath(value && value.length <= 1200 ? value : null, '');
+  const raw = sanitizeInternalPath(value && value.length <= 4096 ? value : null, '');
   if (!raw) return null;
   let parsed: URL;
   try {
@@ -216,6 +233,9 @@ function allowedReturnPath(value: string | null | undefined): string | null {
     return null;
   }
   const normalized = trimPath(parsed.pathname);
+  // Up to 200 Chinese search characters can exceed 1,200 bytes after URL encoding.
+  // Keep the original bound for every other destination.
+  if ((value?.length ?? 0) > 1200 && !isServiceListPath(normalized)) return null;
   if (BLOCKED_RETURN_PATHS.has(normalized)) return null;
   if (normalized === '/admin/ops') {
     const tabs = new Set(['schools', 'people', 'merchants', 'affiliation', 'audit']);
@@ -233,7 +253,9 @@ function allowedReturnPath(value: string | null | undefined): string | null {
   if (!allowed) return null;
   const context = new URLSearchParams();
   for (const [key, value] of parsed.searchParams) {
-    if (RETURN_CONTEXT_KEYS.has(key) && !context.has(key) && !hasUnsafeReturnCharacters(value)) {
+    if (isServiceListPath(normalized) && key === 'q' && value.length > 200) continue;
+    if ((RETURN_CONTEXT_KEYS.has(key) || isServiceListContext(normalized, key, value)) &&
+      !context.has(key) && !hasUnsafeReturnCharacters(value)) {
       context.set(key, value);
     }
   }

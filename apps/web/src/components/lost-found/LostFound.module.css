@@ -10,10 +10,11 @@
   padding: clamp(20px, 3vw, 30px);
   border-radius: var(--radius);
   min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 .panel h2 {
-  font-size: 21px;
+  font-size: 1.3125rem;
   font-weight: 600;
   line-height: 1.4;
   margin: 0 0 12px;
@@ -21,7 +22,7 @@
 
 .muted {
   color: var(--muted);
-  font-size: 14px;
+  font-size: 0.875rem;
   line-height: 1.75;
   margin: 0;
 }
@@ -121,12 +122,12 @@
   border-radius: var(--radius-sm);
   border: 1px solid var(--border);
   background: var(--panel);
-  font-size: 13px;
+  font-size: 0.8125rem;
   color: var(--muted);
 }
 
 .scopeNote {
-  font-size: 14px;
+  font-size: 0.875rem;
   color: var(--muted);
   line-height: 1.7;
   margin: 0;

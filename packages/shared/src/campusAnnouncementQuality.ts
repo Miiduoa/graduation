@@ -223,6 +223,8 @@ export type StudentAnnouncementRow = {
 
 export type StudentWallDropReason =
   | 'duplicate'
+  | 'hidden'
+  | 'excluded'
   | 'no_date'
   | 'future_date'
   | 'stale_source'
@@ -234,6 +236,8 @@ export type StudentWallDropReason =
 
 export const STUDENT_WALL_DROP_REASON_LABELS: Record<StudentWallDropReason, string> = {
   duplicate: '重複',
+  hidden: '已隱藏',
+  excluded: '不列入學生公告',
   no_date: '無日期',
   future_date: '未來日期',
   stale_source: '失效',
@@ -279,6 +283,7 @@ export function studentWallDropReason(
   down: Set<string> = new Set(),
   seen: Set<string> = new Set(),
 ): StudentWallDropReason | null {
+  if (row.visible === false) return 'hidden';
   const flags = rowFlags(row, now);
   const key = duplicateKey(row, flags);
   if (seen.has(key)) return 'duplicate';
@@ -287,7 +292,7 @@ export function studentWallDropReason(
   if (!parsed) return 'no_date';
   if (isFutureAnnouncementDate(parsed, now)) return 'future_date';
   if (row.origin === 'public_scrape' && row.sourceId && down.has(row.sourceId)) return 'stale_source';
-  if (staffAudienceOf(row.title || '')) return 'staff';
+  if (row.audience === 'staff' || staffAudienceOf(row.title || '')) return 'staff';
   if (isComputerCenterSecurityAlert(row.title || '', flags.office)) return 'security';
   if (
     isStaticOrNavAnnouncement(row.title || '') ||
@@ -297,6 +302,7 @@ export function studentWallDropReason(
   }
   if (isOffSeasonControl(row.title || '', now)) return 'off_season';
   if (new Date(parsed).getTime() < studentWallStartUtc(now).getTime()) return 'outside_wall';
+  if (row.studentFeed === false) return 'excluded';
   return null;
 }
 
@@ -311,6 +317,8 @@ export function tallyStudentWallFilter(
     input: (rows || []).length,
     kept: 0,
     duplicate: 0,
+    hidden: 0,
+    excluded: 0,
     no_date: 0,
     future_date: 0,
     stale_source: 0,
@@ -357,6 +365,7 @@ export function selectOfficialAnnouncements<T extends StudentAnnouncementRow>(
   const down = downSourceIds(sources);
   return sortByPublishedAtDesc(
     (rows || []).filter((row) => {
+      if (row.visible === false) return false;
       const flags = rowFlags(row, now);
       if (!flags.publishedAt || isFutureAnnouncementDate(flags.publishedAt, now)) return false;
       if (row.origin === 'public_scrape' && row.sourceId && down.has(row.sourceId)) return false;

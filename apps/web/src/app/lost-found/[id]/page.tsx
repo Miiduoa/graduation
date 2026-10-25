@@ -15,6 +15,12 @@ import {
 import styles from '@/components/lost-found/LostFound.module.css';
 import { useBrowsingSchoolPageContext } from '@/lib/useBrowsingSchoolPageContext';
 import {
+  lostFoundListHref,
+  lostFoundListQuery,
+  readLostFoundListState,
+} from '@/lib/lostFoundListNavigation';
+import type { ServiceListSearchParams } from '@/lib/serviceListNavigation';
+import {
   CONTACT_VISIBILITY_NOTE,
   LostFoundConflictError,
   LostFoundError,
@@ -60,7 +66,7 @@ function toFormFields(item: LostFoundItem): LostFoundWriteFields {
 
 export default function LostFoundDetailPage(props: {
   params: Promise<{ id: string }>;
-  searchParams?: Promise<{ schoolId?: string; school?: string; campus?: string }>;
+  searchParams?: Promise<ServiceListSearchParams>;
 }) {
   const { id } = use(props.params);
   const search = props.searchParams ? use(props.searchParams) : undefined;
@@ -79,6 +85,7 @@ export default function LostFoundDetailPage(props: {
       key={`${user?.uid ?? 'signed-out'}:${context.schoolId}:${id}`}
       id={id}
       context={context}
+      listSearch={search}
     />
   );
 }
@@ -86,14 +93,17 @@ export default function LostFoundDetailPage(props: {
 function LostFoundDetailPageContent({
   context,
   id,
+  listSearch,
 }: {
   context: ReturnType<typeof useBrowsingSchoolPageContext>;
   id: string;
+  listSearch?: ServiceListSearchParams;
 }) {
   const { user, loading: authLoading } = useAuth();
   const uid = user?.uid ?? null;
   const signedIn = Boolean(uid);
-  const loginReturnUrl = `/lost-found/${encodeURIComponent(id)}?schoolId=${encodeURIComponent(context.schoolId)}`;
+  const listHref = lostFoundListHref(context.schoolId, listSearch);
+  const loginReturnUrl = `/lost-found/${encodeURIComponent(id)}?${lostFoundListQuery(context.schoolId, readLostFoundListState(listSearch), listSearch)}`;
   const [item, setItem] = useState<LostFoundItem | null | undefined>(undefined);
   const [error, setError] = useState('');
   const [loginRequired, setLoginRequired] = useState(false);
@@ -354,10 +364,7 @@ function LostFoundDetailPageContent({
         return;
       }
       setFormErrors({
-        form:
-          reason instanceof LostFoundError
-            ? reason.message
-            : '暫時無法完成操作，請稍後再試。',
+        form: reason instanceof LostFoundError ? reason.message : '暫時無法完成操作，請稍後再試。',
       });
     } finally {
       // Only the active generation may clear the lock; remount/reload resets it explicitly.
@@ -418,8 +425,7 @@ function LostFoundDetailPageContent({
   const canManage = item ? canManageLostFoundItem(item, uid) : false;
   const legacyReadOnly = Boolean(item && !item.userId && item.reporterId);
   const revisionStale =
-    Boolean(editing && item && fields) &&
-    (baseUpdatedAt ?? null) !== (item?.updatedAt ?? null);
+    Boolean(editing && item && fields) && (baseUpdatedAt ?? null) !== (item?.updatedAt ?? null);
 
   return (
     <SiteShell title="失物招領" schoolName={context.schoolName}>
@@ -454,10 +460,7 @@ function LostFoundDetailPageContent({
           <section className={styles.panel}>
             <p>找不到物品</p>
             <p className={styles.actions}>
-              <Link
-                className="btn"
-                href={`/lost-found?schoolId=${encodeURIComponent(context.schoolId)}`}
-              >
+              <Link className="btn" href={listHref}>
                 返回列表
               </Link>
             </p>
@@ -484,9 +487,7 @@ function LostFoundDetailPageContent({
             ) : (
               <p className={styles.muted}>未提供聯絡方式</p>
             )}
-            {item.imageUrl ? (
-              <p className={styles.muted}>此則含既有圖片連結。</p>
-            ) : null}
+            {item.imageUrl ? <p className={styles.muted}>此則含既有圖片連結。</p> : null}
 
             {legacyReadOnly ? (
               <p className={styles.notice} role="status">
@@ -558,7 +559,12 @@ function LostFoundDetailPageContent({
                       伺服器上的內容已更新，你目前編輯的是較早版本的草稿。本機內容會保留；若直接儲存而伺服器已不同，會提示衝突。也可放棄草稿、改載入最新內容。
                     </p>
                     <div className={styles.actions}>
-                      <Button type="button" variant="outline" disabled={busy} onClick={adoptServerRevision}>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        disabled={busy}
+                        onClick={adoptServerRevision}
+                      >
                         改用最新內容
                       </Button>
                     </div>
@@ -647,7 +653,8 @@ function LostFoundDetailPageContent({
                 {confirmResolve ? (
                   <div className={styles.notice}>
                     <p>
-                      確認將「{item.title}」標示為已結案？結案後一般使用者仍可查看紀錄，但不可再編輯。
+                      確認將「{item.title}
+                      」標示為已結案？結案後一般使用者仍可查看紀錄，但不可再編輯。
                     </p>
                     <div className={styles.actions}>
                       <Button
@@ -673,10 +680,7 @@ function LostFoundDetailPageContent({
             ) : null}
 
             <p className={styles.actions}>
-              <Link
-                className="btn"
-                href={`/lost-found?schoolId=${encodeURIComponent(context.schoolId)}`}
-              >
+              <Link className="btn" href={listHref}>
                 返回列表
               </Link>
               <Button

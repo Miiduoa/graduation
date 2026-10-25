@@ -750,6 +750,8 @@ export function AIDetailScreen({
   children,
   bottomPadding,
   scrollRef,
+  keyboardShouldPersistTaps,
+  keyboardDismissMode,
 }: {
   title: string;
   subtitle?: string;
@@ -758,6 +760,8 @@ export function AIDetailScreen({
   children: React.ReactNode;
   bottomPadding?: number;
   scrollRef?: React.Ref<ScrollView>;
+  keyboardShouldPersistTaps?: ScrollViewProps['keyboardShouldPersistTaps'];
+  keyboardDismissMode?: ScrollViewProps['keyboardDismissMode'];
 }) {
   useVisualTheme();
   const defaultPadding = useTabBarContentBottomPadding();
@@ -769,6 +773,8 @@ export function AIDetailScreen({
         style={{ flex: 1 }}
         contentContainerStyle={{ paddingBottom: bottomPadding ?? defaultPadding }}
         showsVerticalScrollIndicator={false}
+        keyboardShouldPersistTaps={keyboardShouldPersistTaps}
+        keyboardDismissMode={keyboardDismissMode}
       >
         {children}
       </ScrollView>

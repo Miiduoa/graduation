@@ -1,0 +1,34 @@
+{
+  "checks": [
+    "NTHU Enter submits native GET to its own Primo view with trimmed text and a literal ampersand",
+    "NCUE Enter preserves the translated title field and complete query text",
+    "existing Providence form also submits with production CSP enabled",
+    "CGU offers its official catalog and copy handoff without pretending an unverified keyword search works",
+    "changing the campus through the real header control clears the previous query and search payload",
+    "library search and external-service actions fit 320px and 390px in light mode",
+    "library search and external-service actions fit 320px and 390px in dark mode",
+    "all catalog popups are isolated from their opener and trigger no form-action CSP violations or page errors"
+  ],
+  "pageErrors": [],
+  "cspViolations": [],
+  "interceptedCatalogRequests": [
+    {
+      "url": "https://nthu.primo.exlibrisgroup.com/discovery/search?vid=886UST_NTHU%3A886UST_NTHU&query=any%2Ccontains%2C%E8%B3%87%E6%96%99%E5%BA%AB+%26+SQL",
+      "method": "GET"
+    },
+    {
+      "url": "https://webpacx.ncue.edu.tw/search?searchInput=%E8%B3%87%E6%96%99%E5%BA%AB+%26+SQL&searchField=TI",
+      "method": "GET"
+    },
+    {
+      "url": "https://webpacx.lib.pu.edu.tw/search?searchField=Title&searchInput=%E8%B3%87%E6%96%99%E5%BA%AB+%26+SQL",
+      "method": "GET"
+    },
+    {
+      "url": "https://web20.lib.cgu.edu.tw/",
+      "method": "GET"
+    }
+  ],
+  "blockedExternalRequests": [],
+  "fixtureNote": "Synthetic directory/session and locally fulfilled catalog pages; no external catalog requests were sent."
+}

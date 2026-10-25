@@ -5,9 +5,11 @@ import { EventList } from '@/components/events/EventList';
 import styles from '@/components/events/events.module.css';
 import { SiteShell } from '@/components/SiteShell';
 import { useCampusBrowseContext } from '@/lib/useCampusBrowseContext';
+import { readCampusEventFilters } from '@/components/events/eventPresentation';
+import type { ServiceListSearchParams } from '@/lib/serviceListNavigation';
 
 export default function CampusEventsPage(props: {
-  searchParams?: Promise<{ school?: string; schoolId?: string; campus?: string }>;
+  searchParams?: Promise<ServiceListSearchParams>;
 }) {
   const params = props.searchParams ? use(props.searchParams) : undefined;
   const context = useCampusBrowseContext(params);
@@ -33,7 +35,8 @@ export default function CampusEventsPage(props: {
           ) : null}
         </section>
       ) : (
-        <EventList key={schoolId} schoolId={schoolId} schoolSearch={context.schoolSearch} />
+        <EventList key={schoolId} schoolId={schoolId} schoolSearch={context.schoolSearch}
+          initialFilters={readCampusEventFilters(params)} />
       )}
     </SiteShell>
   );
