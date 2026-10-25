@@ -72,20 +72,29 @@
 }
 
 .heroStats {
-  display: flex;
-  flex-shrink: 0;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  flex: 0 0 270px;
   gap: 10px;
 }
 
-.heroStats > div {
+.heroStats > button {
   display: grid;
   align-content: center;
   gap: 4px;
-  width: 122px;
-  padding: 14px;
+  min-width: 0;
+  padding: 16px;
+  text-align: left;
+  font: inherit;
   border: 1px solid var(--border);
   border-radius: var(--radius);
   background: var(--surface);
+  cursor: pointer;
+}
+
+.heroStats > button:hover {
+  border-color: var(--border-strong);
+  background: var(--surface-strong);
 }
 
 .heroStats strong {
@@ -475,6 +484,15 @@
   outline-offset: 3px;
 }
 
+@media (max-width: 1060px) {
+  .hero { flex-direction: column; }
+  .heroStats {
+    flex: none;
+    width: 100%;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+}
+
 @media (max-width: 860px) {
   .columns {
     grid-template-columns: 1fr;
@@ -489,13 +507,7 @@
     display: grid;
     padding: 22px;
   }
-  .heroStats {
-    width: 100%;
-  }
-  .heroStats > div {
-    flex: 1;
-    width: auto;
-  }
+  .heroStats { width: 100%; grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .formGrid {
     grid-template-columns: 1fr;
   }
@@ -714,7 +726,7 @@
   }
   .tabs button { flex: 0 0 auto; white-space: nowrap; }
   .heroStats { gap: 7px; }
-  .heroStats > div { min-width: 0; padding: 11px; }
+  .heroStats > button { min-width: 0; padding: 13px; }
   .heroStats strong { font-size: 22px; }
   .heroStats span { font-size: 12px; }
   .hallHeader { padding: 18px 14px 12px; }
