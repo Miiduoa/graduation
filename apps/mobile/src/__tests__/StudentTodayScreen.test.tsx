@@ -218,7 +218,33 @@ test('shows the earliest overdue item instead of the empty-day sentence', async 
   expect(view.getAllByText(/已逾期/).length).toBeGreaterThan(0);
 });
 
-test('還有 N 件 opens all todos', async () => {
+test('reveals the remaining work inline and lets the student collapse the list', async () => {
+  const data = result();
+  data.tasks = [0, 1, 2, 3].map((index) => ({
+    ...data.tasks[0],
+    id: `assignment-${index}`,
+    assignmentId: `homework-${index}`,
+    title: `作業 ${index}`,
+  }));
+  jest.mocked(loadStudentHome).mockResolvedValue(data);
+  const view = render(<StudentTodayScreen />);
+  const more = await view.findByText(TODAY_COPY.moreTodos(1));
+  expect(view.queryByLabelText('作業 3，資料結構')).toBeNull();
+  fireEvent.press(more);
+  expect(view.getByLabelText('作業 3，資料結構')).toBeTruthy();
+  expect(view.getByText('收合待辦')).toBeTruthy();
+  expect(rootNavigateNested).not.toHaveBeenCalled();
+  fireEvent.press(view.getByLabelText('作業 3，資料結構'));
+  expect(mockNavigate).toHaveBeenCalledWith('學習', {
+    screen: 'HomeworkSubmit',
+    params: expect.objectContaining({ courseId: 'course-a', hwId: 'homework-3' }),
+  });
+  fireEvent.press(view.getByText('收合待辦'));
+  expect(view.queryByLabelText('作業 3，資料結構')).toBeNull();
+  expect(view.getByText(TODAY_COPY.moreTodos(1))).toBeTruthy();
+});
+
+test('switching schools hides a previously expanded list', async () => {
   const data = result();
   data.tasks = [0, 1, 2, 3].map((index) => ({
     ...data.tasks[0],
@@ -229,7 +255,31 @@ test('還有 N 件 opens all todos', async () => {
   jest.mocked(loadStudentHome).mockResolvedValue(data);
   const view = render(<StudentTodayScreen />);
   fireEvent.press(await view.findByText(TODAY_COPY.moreTodos(1)));
-  expect(rootNavigateNested).toHaveBeenCalledWith('學習', 'LearnHome');
+  expect(view.getByLabelText('作業 3，資料結構')).toBeTruthy();
+  mockAuth = { ...mockAuth, profile: { ...mockAuth.profile!, schoolId: 'school-b' } };
+  view.rerender(<StudentTodayScreen />);
+  await view.findByText(TODAY_COPY.moreTodos(1));
+  expect(view.queryByLabelText('作業 3，資料結構')).toBeNull();
+});
+
+test('a malformed deadline stays visible as undated instead of disappearing', async () => {
+  const data = result();
+  data.tasks[0].dueAt = new Date(Number.NaN);
+  jest.mocked(loadStudentHome).mockResolvedValue(data);
+  const view = render(<StudentTodayScreen />);
+  expect((await view.findAllByText('繳交期末報告')).length).toBeGreaterThan(0);
+  expect(view.getAllByText(/未設截止時間/).length).toBeGreaterThan(0);
+  fireEvent.press(view.getByLabelText('繳交期末報告，資料結構'));
+  expect(mockNavigate).toHaveBeenCalledWith('學習', {
+    screen: 'HomeworkSubmit',
+    params: { courseId: 'course-a', hwId: 'homework-a', hwTitle: '繳交期末報告' },
+  });
+});
+
+test('an empty loaded task list says so instead of leaving a blank section', async () => {
+  jest.mocked(loadStudentHome).mockResolvedValue({ courses: [], tasks: [] });
+  const view = render(<StudentTodayScreen />);
+  expect(await view.findByText('已載入的課程目前沒有待處理的作業或測驗。')).toBeTruthy();
 });
 
 test('keeps an assignment without a deadline visible and actionable', async () => {
