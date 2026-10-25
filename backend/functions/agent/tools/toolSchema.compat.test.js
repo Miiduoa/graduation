@@ -31,6 +31,14 @@ describe('assistant function-calling schema contract', () => {
     );
   });
 
+  test('dorm repair listing still defaults to 20 rows and rejects invalid limits', () => {
+    const { inputSchema } = require('./listMyDormRepairs');
+    expect(inputSchema.parse({})).toEqual({ limit: 20 });
+    expect(inputSchema.safeParse({ limit: 0 }).success).toBe(false);
+    expect(inputSchema.safeParse({ limit: 51 }).success).toBe(false);
+    expect(inputSchema.safeParse({ limit: 10 }).success).toBe(true);
+  });
+
   test('all registered tools keep object-shaped model input parameters', () => {
     const failures = [];
     for (const tool of tools) {
