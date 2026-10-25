@@ -1,8 +1,8 @@
-import { beforeEach, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { getDoc, getDocs } from 'firebase/firestore';
-import { httpsCallable } from 'firebase/functions';
 import {
   attendanceCsv,
+  attendanceError,
   hasOwnActiveAttendance,
   joinCourseAttendance,
   loadCourseAttendance,
@@ -11,9 +11,20 @@ import {
   studentCheckInSession,
   type AttendanceSession,
 } from './courseAttendance';
+import { FunctionsUnconfiguredError } from './functionsUrl';
+
+const auth = vi.hoisted(() => ({
+  currentUser: { uid: 'alice', getIdToken: async () => 'id-token' } as {
+    uid: string;
+    getIdToken: () => Promise<string>;
+  } | null,
+}));
+const fetchMock = vi.hoisted(() => vi.fn());
+
 vi.mock('./firebase', () => ({
   getDb: () => ({}),
-  getFunctionsInstance: () => ({}),
+  getAuth: () => auth,
+  getCloudFunctionUrl: (name: string) => `/api/fn/${name}`,
   isFirebaseConfigured: () => true,
 }));
 vi.mock('firebase/firestore', () => ({
@@ -26,12 +37,17 @@ vi.mock('firebase/firestore', () => ({
   getDoc: vi.fn(),
   getDocs: vi.fn(),
 }));
-vi.mock('firebase/functions', () => ({ httpsCallable: vi.fn() }));
 const document = (data: Record<string, unknown> | null) => ({
   exists: () => !!data,
   data: () => data,
 });
-beforeEach(() => vi.clearAllMocks());
+beforeEach(() => {
+  vi.clearAllMocks();
+  auth.currentUser = { uid: 'alice', getIdToken: async () => 'id-token' };
+  fetchMock.mockReset();
+  vi.stubGlobal('fetch', fetchMock);
+});
+afterEach(() => vi.unstubAllGlobals());
 it('does not read session or class data for a revoked member', async () => {
   vi.mocked(getDoc).mockResolvedValue(document({ status: 'removed', role: 'instructor' }) as never);
   await expect(loadCourseAttendance('class', 'alice')).rejects.toThrow();
@@ -59,18 +75,58 @@ it('uses private per-user receipts and excludes old public session documents', a
   expect(result.sessions[0].ownRecord?.checkedInAt).toBe('2026-10-07T01:00:00.000Z');
 });
 it('sends caller identity for start retries and does not accept false success', async () => {
-  const call = vi.fn().mockResolvedValue({ data: { success: false } });
-  vi.mocked(httpsCallable).mockReturnValue(call as unknown as ReturnType<typeof httpsCallable>);
+  fetchMock.mockResolvedValueOnce({
+    ok: true,
+    status: 200,
+    json: async () => ({ result: { success: false } }),
+  });
   await expect(startCourseAttendance('class', 'same-attempt')).rejects.toThrow();
-  expect(call).toHaveBeenCalledWith({
-    groupId: 'class',
-    requestId: 'same-attempt',
-    qrExpiryMinutes: 10,
+  expect(fetchMock).toHaveBeenCalledWith('/api/fn/startLiveSession', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: 'Bearer id-token' },
+    body: JSON.stringify({
+      data: { groupId: 'class', requestId: 'same-attempt', qrExpiryMinutes: 10 },
+    }),
+    cache: 'no-store',
   });
 });
 it('rejects blank tokens without calling the backend', async () => {
   await expect(joinCourseAttendance('class', 'session', '  ')).rejects.toThrow();
-  expect(httpsCallable).not.toHaveBeenCalled();
+  expect(fetchMock).not.toHaveBeenCalled();
+});
+it('joins through the same-origin /api/fn route and maps expired tokens', async () => {
+  fetchMock.mockResolvedValueOnce({
+    ok: false,
+    status: 504,
+    json: async () => ({ error: { status: 'DEADLINE_EXCEEDED', message: 'QR code has expired' } }),
+  });
+  await expect(joinCourseAttendance('class', 'session', 'teacher-code-long')).rejects.toMatchObject(
+    {
+      code: 'functions/deadline-exceeded',
+    },
+  );
+  expect(fetchMock.mock.calls[0][0]).toBe('/api/fn/joinLiveSession');
+  expect(attendanceError({ code: 'functions/deadline-exceeded' })).toBe(
+    '簽到碼已過期，請聯絡授課教師。',
+  );
+});
+it('surfaces 尚未啟用 when the same-origin attendance route is not configured', async () => {
+  fetchMock.mockResolvedValueOnce({
+    ok: false,
+    status: 503,
+    json: async () => ({ error: { status: 'UNAVAILABLE', message: '尚未啟用' } }),
+  });
+  await expect(startCourseAttendance('class', 'attempt')).rejects.toBeInstanceOf(
+    FunctionsUnconfiguredError,
+  );
+  expect(attendanceError(new FunctionsUnconfiguredError('點名尚未啟用'))).toBe('點名尚未啟用');
+});
+it('does not send a mutation without a Firebase session', async () => {
+  auth.currentUser = null;
+  await expect(startCourseAttendance('class', 'attempt')).rejects.toMatchObject({
+    code: 'functions/unauthenticated',
+  });
+  expect(fetchMock).not.toHaveBeenCalled();
 });
 it('lets a student check into only the latest open session of this course', () => {
   const session = (id: string, active: boolean, startedAt: string | null): AttendanceSession => ({

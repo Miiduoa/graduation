@@ -112,6 +112,10 @@ async function invokeHostedCallable(
     const { createTimetableShareHandlers } = await import('./timetableShareHandlers');
     return createTimetableShareHandlers({ db })[name](request);
   }
+  if (name === 'startLiveSession' || name === 'endLiveSession' || name === 'joinLiveSession') {
+    const { createLiveSessionHandlers } = await import('./attendanceSessionHandlers');
+    return createLiveSessionHandlers({ db })[name](request);
+  }
   throw new HttpsError('not-found', `Unknown function: ${name}`);
 }
 

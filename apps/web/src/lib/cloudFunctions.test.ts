@@ -10,6 +10,9 @@ it('points hosted group invite callables at this Next.js app without a functions
   expect(getCloudFunctionUrl('leaveGroup', { env })).toBe('/api/fn/leaveGroup');
   expect(getCloudFunctionUrl('createTimetableShare', { env })).toBe('/api/fn/createTimetableShare');
   expect(getCloudFunctionUrl('revokeTimetableShare', { env })).toBe('/api/fn/revokeTimetableShare');
+  expect(getCloudFunctionUrl('startLiveSession', { env })).toBe('/api/fn/startLiveSession');
+  expect(getCloudFunctionUrl('endLiveSession', { env })).toBe('/api/fn/endLiveSession');
+  expect(getCloudFunctionUrl('joinLiveSession', { env })).toBe('/api/fn/joinLiveSession');
   expect(getCloudFunctionUrl('createGroup', { env })).toBe(
     'https://asia-east1-campus-one-tw.cloudfunctions.net/createGroup',
   );
@@ -30,7 +33,8 @@ it('uses the Fly base URL when the emulator is off', () => {
     NEXT_PUBLIC_FIREBASE_PROJECT_ID: 'campus-one-tw',
   };
   expect(getFunctionsBaseUrl(env)).toBe(fly);
-  expect(getCloudFunctionUrl('joinLiveSession', { env })).toBe(`${fly}/joinLiveSession`);
+  expect(getCloudFunctionUrl('joinLiveSession', { env })).toBe('/api/fn/joinLiveSession');
+  expect(getCloudFunctionUrl('askCampusAssistant', { env })).toBe(`${fly}/askCampusAssistant`);
 });
 
 it('reports the Fly URL as configured and an empty URL as unconfigured', () => {
