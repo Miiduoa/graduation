@@ -42,7 +42,9 @@ jobs:
       - name: Install Zod 4 in this disposable runner only
         run: |
           npm install --prefix backend/functions --no-save --ignore-scripts --package-lock=false 'zod@4.6.7'
-          npm ls --prefix backend/functions zod --depth=0
+          # This is a deliberate cross-major compatibility probe. The checked-in
+          # manifest still pins Zod 3 until the actual migration PR.
+          node -e "const version = require('./backend/functions/node_modules/zod/package.json').version; if (!version.startsWith('4.6.7')) process.exit(1); console.log(version)"
       - name: Verify Zod 4 native OpenAPI conversion
         working-directory: backend/functions
         run: |
