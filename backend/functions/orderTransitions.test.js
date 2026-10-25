@@ -111,7 +111,7 @@ test('customer retries preserve the original cancellation reason', async () => {
   expect(original.cancelReason).toBe('first');
   expect(push).not.toHaveBeenCalled();
 });
-test('admin/editor override and cafeteria operator access retain their existing scopes', async () => {
+test('only the school admin has an override outside assigned cafeteria scope', async () => {
   await expect(handlers.updateOrderStatus(request('confirmed', 'stranger'))).rejects.toMatchObject({
     code: 'permission-denied',
   });
@@ -120,10 +120,14 @@ test('admin/editor override and cafeteria operator access retain their existing 
     code: 'permission-denied',
   });
   store.docs.set('schools/pu/members/admin', { role: 'editor', status: 'active' });
+  await expect(handlers.updateOrderStatus(request('confirmed', 'admin'))).rejects.toMatchObject({
+    code: 'permission-denied',
+  });
   delete store.docs.get(canonical).cafeteriaId;
   await expect(handlers.updateOrderStatus(request('confirmed'))).rejects.toMatchObject({
     code: 'permission-denied',
   });
+  store.docs.set('schools/pu/members/admin', { role: 'admin', status: 'active' });
   expect(await handlers.updateOrderStatus(request('confirmed', 'admin'))).toMatchObject({
     success: true,
   });

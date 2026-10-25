@@ -16,7 +16,7 @@ export type SemesterPart = 1 | 2 | 3 | 4;
 export type CatalogSemester = {
   /** 完整代碼，例如 '1142' / '1133' */
   code: string;
-  /** 民國學年（98–114） */
+  /** 民國學年（歷年查詢從 98 學年度起） */
   year: number;
   /** 1=上學期 2=下學期 3=暑修-3 4=暑修-4 */
   part: SemesterPart;
@@ -24,34 +24,37 @@ export type CatalogSemester = {
   label: string;
 };
 
-function buildSemesters(): CatalogSemester[] {
+function semesterOption(year: number, part: SemesterPart): CatalogSemester {
+  return { code: `${year}${part}`, year, part, label: `${year}-${part}${part < 3 ? '學期' : '暑修'}` };
+}
+
+/**
+ * 依台北日期取一般學期。查詢條件不代表該學期課程已發布。
+ * 校方行事曆分為 8–1 月與 2–7 月：
+ * https://www.pu.edu.tw/var/file/0/1000/img/331303431.pdf
+ * https://www.pu.edu.tw/var/file/0/1000/img/968245171.pdf
+ */
+export function getCurrentCatalogSemester(reference = new Date()): CatalogSemester {
+  const taipei = new Date(reference.getTime() + 8 * 60 * 60 * 1000);
+  const month = taipei.getUTCMonth() + 1;
+  const year = taipei.getUTCFullYear() - 1911 - (month < 8 ? 1 : 0);
+  return semesterOption(year, month >= 2 && month < 8 ? 2 : 1);
+}
+
+export function buildCatalogSemesters(reference = new Date()): CatalogSemester[] {
+  const current = getCurrentCatalogSemester(reference);
+  // 下學期預選下一學年的課程時，也保留可指定的查詢條件。
+  const latestYear = current.year + (current.part === 2 ? 1 : 0);
   const list: CatalogSemester[] = [];
-  for (let year = 114; year >= 98; year--) {
-    const parts: { part: SemesterPart; suffix: string }[] = [
-      { part: 2, suffix: '學期' },
-      { part: 1, suffix: '學期' },
-      { part: 4, suffix: '暑修' },
-      { part: 3, suffix: '暑修' },
-    ];
-    for (const { part, suffix } of parts) {
-      // 114-2、114-1 已上線；其餘暑修也歷年提供
-      list.push({
-        code: `${year}${part}`,
-        year,
-        part,
-        label: `${year}-${part}${suffix}`,
-      });
+  for (let year = latestYear; year >= 98; year--) {
+    for (const part of [2, 1, 4, 3] as const) {
+      list.push(semesterOption(year, part));
     }
   }
   return list;
 }
 
-export const CATALOG_SEMESTERS: CatalogSemester[] = buildSemesters();
-
-/** 取當前對學生最相關的學期（最新非暑修） */
-export function getCurrentCatalogSemester(): CatalogSemester {
-  return CATALOG_SEMESTERS.find((s) => s.part === 2) ?? CATALOG_SEMESTERS[0];
-}
+export const CATALOG_SEMESTERS: CatalogSemester[] = buildCatalogSemesters();
 
 // ─── 星期（Weekday）──────────────────────────────────────────
 export const CATALOG_WEEKDAYS = [
@@ -526,6 +529,8 @@ export type CatalogFilter = {
   coreCompetency?: string;
 };
 
-export const CATALOG_DEFAULT_FILTER: CatalogFilter = {
-  semester: getCurrentCatalogSemester().code,
-};
+export function getDefaultCatalogFilter(reference = new Date()): CatalogFilter {
+  return { semester: getCurrentCatalogSemester(reference).code };
+}
+
+export const CATALOG_DEFAULT_FILTER: CatalogFilter = getDefaultCatalogFilter();

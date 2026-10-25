@@ -282,11 +282,13 @@ function SignedInWorkspace({
   initialTab,
   initialWorkspaceId,
   initialAssignmentId,
+  initialMaterialId,
 }: {
   onLogout: () => void;
   initialTab?: Tab;
   initialWorkspaceId?: string;
   initialAssignmentId?: string;
+  initialMaterialId?: string;
 }) {
   const s = useThemeStyleSheet(createStyles);
   const [tab, setTab] = useNuniDraftState<Tab>('workspace:tab', 'courses');
@@ -326,6 +328,7 @@ function SignedInWorkspace({
         <NuniCourses
           initialWorkspaceId={initialWorkspaceId}
           initialAssignmentId={initialAssignmentId}
+          initialMaterialId={initialMaterialId}
         />
       </View>
       <View
@@ -348,7 +351,11 @@ function SignedInWorkspace({
 
 export function NuniWorkspaceScreen({
   route,
-}: { route?: { params?: { tab?: Tab; workspaceId?: string; assignmentId?: string } } } = {}) {
+}: {
+  route?: {
+    params?: { tab?: Tab; workspaceId?: string; assignmentId?: string; materialId?: string };
+  };
+} = {}) {
   const auth = useNuniSession();
   const s = useThemeStyleSheet(createStyles);
   const identity = useRef({ key: '', epoch: 0 });
@@ -469,6 +476,7 @@ export function NuniWorkspaceScreen({
           initialTab={route?.params?.tab}
           initialWorkspaceId={route?.params?.workspaceId}
           initialAssignmentId={route?.params?.assignmentId}
+          initialMaterialId={route?.params?.materialId}
         />
       </NuniDraftProvider>
     );

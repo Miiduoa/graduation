@@ -31,7 +31,7 @@ export default function MapPage(props: {
   return (
     <SiteShell
       title="校園地圖"
-      subtitle="搜尋宿舍、廁所、影印，並顯示走路分鐘"
+      subtitle="查看校園地點與校方地圖，確認位置再出發。"
       schoolName={schoolName}
       compactHeading
     >

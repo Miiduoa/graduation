@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { buildPersonalToday } from '@campus/shared';
 import {
@@ -33,6 +33,7 @@ import styles from './StudentToday.module.css';
 export type TimetableStatus = 'loading' | 'ready' | 'error' | 'empty' | 'unsigned-scope';
 
 type Props = {
+  scopeKey?: string;
   now: Date | null;
   updatedAt: Date | null;
   unsigned: boolean;
@@ -73,15 +74,23 @@ export function StudentToday(props: Props) {
   const classes = sortTodayClasses(props.classes, now);
   const todos = sortTodayTodos(props.todos);
   const visibleClasses = classes.slice(0, 4);
-  const visibleTodos = todos.slice(0, 3);
-  const extraTodos = Math.max(0, todos.length - visibleTodos.length);
   const extraClasses = classes.length > 4;
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
-    const stored = sessionStorage.getItem(SCROLL_KEY);
-    if (stored) window.scrollTo(0, Number(stored) || 0);
-    const persist = () => sessionStorage.setItem(SCROLL_KEY, String(window.scrollY));
+    try {
+      const stored = sessionStorage.getItem(SCROLL_KEY);
+      if (stored) window.scrollTo(0, Number(stored) || 0);
+    } catch {
+      // The page remains usable when the browser blocks session storage.
+    }
+    const persist = () => {
+      try {
+        sessionStorage.setItem(SCROLL_KEY, String(window.scrollY));
+      } catch {
+        // Scroll restoration is optional.
+      }
+    };
     window.addEventListener('pagehide', persist);
     return () => {
       persist();
@@ -94,13 +103,16 @@ export function StudentToday(props: Props) {
       <header className={styles.header}>
         <p className={styles.date}>{props.now ? formatTodayHeaderDate(props.now) : ''}</p>
         <h1 className={styles.title}>今天</h1>
-        {props.updatedAt ? <p className={styles.updated}>{formatUpdatedAt(props.updatedAt)}</p> : null}
+        {props.updatedAt ? (
+          <p className={styles.updated}>{formatUpdatedAt(props.updatedAt)}</p>
+        ) : null}
       </header>
       {props.skeleton ? (
         <TodaySkeleton />
       ) : (
         <>
           <NextActionCard
+            key={`action:${props.scopeKey ?? ''}`}
             action={action}
             unsigned={props.unsigned}
             todosError={props.todosError}
@@ -117,8 +129,8 @@ export function StudentToday(props: Props) {
             timetableHref={props.timetableHref}
           />
           <TodoList
-            todos={visibleTodos}
-            extra={extraTodos}
+            key={`todos:${props.scopeKey ?? ''}`}
+            todos={todos}
             unsigned={props.unsigned}
             error={props.todosError}
             lmsUnconnected={props.lmsUnconnected}
@@ -168,10 +180,21 @@ function NextActionCard({
   const [shown, setShown] = useState({ action, unsigned });
   const [visible, setVisible] = useState(true);
   const shownKey = actionKey(shown.action, shown.unsigned);
+  const renderCurrent =
+    incomingKey === shownKey || unsigned !== shown.unsigned || !isContentKey(incomingKey);
+  const displayed = renderCurrent ? { action, unsigned } : shown;
 
   useEffect(() => {
-    if (incomingKey === shownKey) return;
-    const animate = !prefersReducedMotion() && isContentKey(shownKey) && isContentKey(incomingKey);
+    if (incomingKey === shownKey) {
+      if (shown.action !== action || shown.unsigned !== unsigned) setShown({ action, unsigned });
+      setVisible(true);
+      return;
+    }
+    const animate =
+      unsigned === shown.unsigned &&
+      !prefersReducedMotion() &&
+      isContentKey(shownKey) &&
+      isContentKey(incomingKey);
     if (!animate) {
       setShown({ action, unsigned });
       setVisible(true);
@@ -189,16 +212,16 @@ function NextActionCard({
       window.clearTimeout(timer);
       if (frame) window.cancelAnimationFrame(frame);
     };
-  }, [incomingKey, shownKey, action, unsigned]);
+  }, [incomingKey, shownKey, action, unsigned, shown.action, shown.unsigned]);
 
   return (
     <div
-      className={`${cardTone(shown.action, shown.unsigned)} ${styles.fade} ${visible ? '' : styles.fadeOut}`}
+      className={`${cardTone(displayed.action, displayed.unsigned)} ${styles.fade} ${renderCurrent || visible ? '' : styles.fadeOut}`}
       data-testid="next-action"
     >
       <NextActionBody
-        action={shown.action}
-        unsigned={shown.unsigned}
+        action={displayed.action}
+        unsigned={displayed.unsigned}
         todosError={todosError}
         now={now}
         weekHref={weekHref}
@@ -209,7 +232,8 @@ function NextActionCard({
 
 function cardTone(action: NextAction, unsigned: boolean): string {
   if (unsigned && action.type !== 'class') return styles.cardLight;
-  if (action.type === 'empty' || (action.type === 'allDone' && !action.todo)) return styles.cardLight;
+  if (action.type === 'empty' || (action.type === 'allDone' && !action.todo))
+    return styles.cardLight;
   return styles.card;
 }
 
@@ -249,7 +273,7 @@ function NextActionBody({
   if (action.type === 'allDone' && action.todo) {
     return (
       <>
-        <Link href={courseWeekHref(action.todo.courseId)} className={styles.cardMain}>
+        <Link href={assignmentHref(action.todo)} className={styles.cardMain}>
           <p className={styles.kind}>{TODAY_COPY.allClassesDone}</p>
           <p className={styles.headline}>{action.todo.title}</p>
           <p className={styles.meta}>{formatTodoDueLine(action.todo, now)}</p>
@@ -277,11 +301,12 @@ function NextActionBody({
     );
   }
 
-  if (action.type !== 'assignment' && action.type !== 'overdue' && action.type !== 'upcoming') return null;
+  if (action.type !== 'assignment' && action.type !== 'overdue' && action.type !== 'upcoming')
+    return null;
 
   return (
     <>
-      <Link href={courseWeekHref(action.todo.courseId)} className={styles.cardMain}>
+      <Link href={assignmentHref(action.todo)} className={styles.cardMain}>
         <p className={styles.kind}>
           {action.type === 'overdue'
             ? TODAY_COPY.overdue
@@ -291,7 +316,9 @@ function NextActionBody({
         </p>
         <p className={styles.headline}>{action.todo.title}</p>
         <p className={`${styles.meta} ${action.type === 'overdue' ? styles.metaDanger : ''}`}>
-          {action.type === 'upcoming' ? formatUpcomingDueLine(action.todo) : formatTodoDueLine(action.todo, now)}
+          {action.type === 'upcoming'
+            ? formatUpcomingDueLine(action.todo)
+            : formatTodoDueLine(action.todo, now)}
         </p>
       </Link>
       <Link className={styles.action} href={assignmentSubmitHref(action.todo)}>
@@ -402,7 +429,6 @@ function TodayClassList({
 
 function TodoList({
   todos,
-  extra,
   unsigned,
   error,
   lmsUnconnected,
@@ -411,7 +437,6 @@ function TodoList({
   onRetry,
 }: {
   todos: TodayTodo[];
-  extra: number;
   unsigned: boolean;
   error: string;
   lmsUnconnected: boolean;
@@ -420,6 +445,9 @@ function TodoList({
   onRetry: () => void;
 }) {
   const leaving = useMemo(() => new Set(leavingTodoIds ?? []), [leavingTodoIds]);
+  const [expanded, setExpanded] = useState(false);
+  const visible = expanded ? todos : todos.slice(0, 3);
+  const extra = Math.max(0, todos.length - 3);
   return (
     <section className={styles.section} aria-labelledby="today-todo-title" data-testid="today-work">
       <h2 id="today-todo-title" className={styles.sectionTitle}>
@@ -439,8 +467,8 @@ function TodoList({
       ) : lmsUnconnected && todos.length === 0 ? (
         <p className={styles.empty}>{TODAY_COPY.lmsUnconnected}</p>
       ) : todos.length === 0 ? null : (
-        <ul className={styles.list} data-testid="today-work-list">
-          {todos.map((item) => {
+        <ul id="today-work-items" className={styles.list} data-testid="today-work-list">
+          {visible.map((item) => {
             const overdue = isTodoOverdue(item, now);
             const soon = isDueWithinHours(item, now, 6);
             return (
@@ -461,9 +489,15 @@ function TodoList({
           })}
           {extra > 0 ? (
             <li>
-              <Link className={styles.more} href="/classroom">
-                {TODAY_COPY.moreTodos(extra)}
-              </Link>
+              <button
+                type="button"
+                className={styles.more}
+                aria-expanded={expanded}
+                aria-controls="today-work-items"
+                onClick={() => setExpanded((value) => !value)}
+              >
+                {expanded ? '收起待辦' : TODAY_COPY.moreTodos(extra)}
+              </button>
             </li>
           ) : null}
         </ul>
@@ -490,13 +524,14 @@ export function StudentTodayPage(props: BoundProps) {
           : records.imported.records.length === 0 && (records.manual?.length ?? 0) === 0
             ? 'empty'
             : 'ready';
-  const schedule = buildPersonalToday(
-    [...records.imported.records, ...(records.manual ?? [])],
-    { schoolId, now },
-  );
+  const schedule = buildPersonalToday([...records.imported.records, ...(records.manual ?? [])], {
+    schoolId,
+    now,
+  });
   const classes = todayClassesFromSchedule(schedule.today, now, props.courses);
   return (
     <StudentToday
+      scopeKey={records.scopeKey}
       now={props.now}
       updatedAt={props.updatedAt}
       unsigned={props.unsigned}

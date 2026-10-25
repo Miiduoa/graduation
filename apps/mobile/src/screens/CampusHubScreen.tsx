@@ -64,6 +64,13 @@ const sections: Array<{ title: string; items: ServiceItem[] }> = [
         keywords: ['借書', '還書', '自習', '蓋夏'],
       },
       {
+        icon: 'ic_school',
+        label: '學校資訊',
+        description: '總機與官網',
+        screen: 'SchoolInfo',
+        keywords: ['總機', '官網', '地址', '名錄', '聯絡'],
+      },
+      {
         icon: 'ic_dorm',
         label: '宿舍',
         description: '住宿服務',

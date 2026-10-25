@@ -21,20 +21,20 @@ service cloud.firestore {
 
     function hasAnyServiceRole(schoolId, uid) {
       return exists(/databases/$(database)/documents/schools/$(schoolId)/serviceRoles/$(uid))
-        && get(/databases/$(database)/documents/schools/$(schoolId)/serviceRoles/$(uid)).data.status != 'inactive'
+        && get(/databases/$(database)/documents/schools/$(schoolId)/serviceRoles/$(uid)).data.status == 'active'
         && (
-          get(/databases/$(database)/documents/schools/$(schoolId)/serviceRoles/$(uid)).data.orders == true
-          || get(/databases/$(database)/documents/schools/$(schoolId)/serviceRoles/$(uid)).data.repairs == true
-          || get(/databases/$(database)/documents/schools/$(schoolId)/serviceRoles/$(uid)).data.packages == true
-          || get(/databases/$(database)/documents/schools/$(schoolId)/serviceRoles/$(uid)).data.printing == true
-          || get(/databases/$(database)/documents/schools/$(schoolId)/serviceRoles/$(uid)).data.health == true
+          get(/databases/$(database)/documents/schools/$(schoolId)/serviceRoles/$(uid)).data.get('orders', false) == true
+          || get(/databases/$(database)/documents/schools/$(schoolId)/serviceRoles/$(uid)).data.get('repairs', false) == true
+          || get(/databases/$(database)/documents/schools/$(schoolId)/serviceRoles/$(uid)).data.get('packages', false) == true
+          || get(/databases/$(database)/documents/schools/$(schoolId)/serviceRoles/$(uid)).data.get('printing', false) == true
+          || get(/databases/$(database)/documents/schools/$(schoolId)/serviceRoles/$(uid)).data.get('health', false) == true
         );
     }
 
     function hasServiceRoleDomain(schoolId, uid, domain) {
       return exists(/databases/$(database)/documents/schools/$(schoolId)/serviceRoles/$(uid))
-        && get(/databases/$(database)/documents/schools/$(schoolId)/serviceRoles/$(uid)).data.status != 'inactive'
-        && get(/databases/$(database)/documents/schools/$(schoolId)/serviceRoles/$(uid)).data[domain] == true;
+        && get(/databases/$(database)/documents/schools/$(schoolId)/serviceRoles/$(uid)).data.status == 'active'
+        && get(/databases/$(database)/documents/schools/$(schoolId)/serviceRoles/$(uid)).data.get(domain, false) == true;
     }
 
     function isCafeteriaOperator(schoolId, cafeteriaId, uid) {
@@ -53,11 +53,11 @@ service cloud.firestore {
     }
 
     function requesterHasAnyServiceRole(schoolId) {
-      return isSignedIn() && hasAnyServiceRole(schoolId, request.auth.uid);
+      return isSchoolMember(schoolId) && hasAnyServiceRole(schoolId, request.auth.uid);
     }
 
     function requesterHasServiceRoleDomain(schoolId, domain) {
-      return isSignedIn() && hasServiceRoleDomain(schoolId, request.auth.uid, domain);
+      return isSchoolMember(schoolId) && hasServiceRoleDomain(schoolId, request.auth.uid, domain);
     }
 
     function requesterIsCafeteriaOperator(schoolId, cafeteriaId) {
@@ -438,7 +438,7 @@ service cloud.firestore {
       }
 
       match /members/{uid} {
-        allow read: if isSelf(uid) || hasEditorRole(schoolId) || requesterHasAnyServiceRole(schoolId);
+        allow read: if isSelf(uid) || hasRole(schoolId, 'admin') || requesterHasAnyServiceRole(schoolId);
         allow write: if false;
       }
 
@@ -446,7 +446,7 @@ service cloud.firestore {
       match /courseRosters/{rosterId} {
         allow read: if isSchoolMember(schoolId)
           && (
-            hasEditorRole(schoolId)
+            hasRole(schoolId, 'admin')
             || (
               'accessUids' in resource.data
               && request.auth.uid in resource.data.accessUids
@@ -456,17 +456,16 @@ service cloud.firestore {
       }
 
       match /serviceRoles/{uid} {
-        allow read: if isSelf(uid) || hasEditorRole(schoolId);
+        allow read: if isSelf(uid) || hasRole(schoolId, 'admin');
         allow write: if false;
       }
 
       match /cafeterias/{cafeteriaId} {
         allow read: if true;
-        allow create: if hasEditorRole(schoolId) && cafeteriaStorefrontUrlsAllowed();
-        allow delete: if hasEditorRole(schoolId);
-        allow update: if cafeteriaStorefrontUrlsAllowed() && (
-          hasEditorRole(schoolId) || (
-          requesterIsCafeteriaOperator(schoolId, cafeteriaId)
+        // Governance changes use the audited callables; merchants edit only their storefront.
+        allow create, delete: if false;
+        allow update: if cafeteriaStorefrontUrlsAllowed()
+          && requesterIsCafeteriaOperator(schoolId, cafeteriaId)
           && request.resource.data.diff(resource.data).affectedKeys()
             .hasOnly([
               'openingHours', 'updatedAt', 'sourceLabel', 'intro', 'coverUrl',
@@ -482,17 +481,16 @@ service cloud.firestore {
               request.resource.data.merchantMode == 'native_order'
               && resource.data.get('merchantMode', 'native_order') == 'native_order'
             )
-          )
-        ));
+          );
 
         match /operators/{uid} {
-          allow read: if isSelf(uid) || hasEditorRole(schoolId);
-          allow create, update, delete: if hasEditorRole(schoolId);
+          allow read: if isSelf(uid) || hasRole(schoolId, 'admin');
+          allow create, update, delete: if false;
         }
 
         match /posts/{postId} {
           allow read: if true;
-          allow create, update, delete: if hasEditorRole(schoolId)
+          allow create, update, delete: if hasRole(schoolId, 'admin')
             || requesterIsCafeteriaOperator(schoolId, cafeteriaId);
 
           match /likes/{uid} {
@@ -588,18 +586,18 @@ service cloud.firestore {
 
       match /menus/{docId} {
         allow read: if true;
-        allow create: if hasEditorRole(schoolId) || (
+        allow create: if hasRole(schoolId, 'admin') || (
           request.resource.data.schoolId == schoolId
           && request.resource.data.cafeteriaId is string
           && requesterIsCafeteriaOperator(schoolId, request.resource.data.cafeteriaId)
           && request.resource.data.name is string
         );
-        allow update: if hasEditorRole(schoolId) || (
+        allow update: if hasRole(schoolId, 'admin') || (
           resource.data.cafeteriaId is string
           && requesterIsCafeteriaOperator(schoolId, resource.data.cafeteriaId)
           && request.resource.data.cafeteriaId == resource.data.cafeteriaId
         );
-        allow delete: if hasEditorRole(schoolId) || (
+        allow delete: if hasRole(schoolId, 'admin') || (
           resource.data.cafeteriaId is string
           && requesterIsCafeteriaOperator(schoolId, resource.data.cafeteriaId)
         );
@@ -607,25 +605,25 @@ service cloud.firestore {
         match /reviews/{reviewId} {
           allow read: if isSignedIn();
           allow create: if isSignedIn() && request.resource.data.uid == request.auth.uid;
-          allow update, delete: if hasEditorRole(schoolId)
+          allow update, delete: if hasRole(schoolId, 'admin')
             || (isSignedIn() && resource.data.uid == request.auth.uid);
         }
       }
 
       match /cafeteriaMenus/{docId} {
         allow read: if true;
-        allow create: if hasEditorRole(schoolId) || (
+        allow create: if hasRole(schoolId, 'admin') || (
           request.resource.data.schoolId == schoolId
           && request.resource.data.cafeteriaId is string
           && requesterIsCafeteriaOperator(schoolId, request.resource.data.cafeteriaId)
           && request.resource.data.name is string
         );
-        allow update: if hasEditorRole(schoolId) || (
+        allow update: if hasRole(schoolId, 'admin') || (
           resource.data.cafeteriaId is string
           && requesterIsCafeteriaOperator(schoolId, resource.data.cafeteriaId)
           && request.resource.data.cafeteriaId == resource.data.cafeteriaId
         );
-        allow delete: if hasEditorRole(schoolId) || (
+        allow delete: if hasRole(schoolId, 'admin') || (
           resource.data.cafeteriaId is string
           && requesterIsCafeteriaOperator(schoolId, resource.data.cafeteriaId)
         );
@@ -633,7 +631,7 @@ service cloud.firestore {
 
       match /busRoutes/{docId} {
         allow read: if true;
-        allow create, update, delete: if hasEditorRole(schoolId);
+        allow create, update, delete: if hasRole(schoolId, 'admin');
       }
 
       match /busArrivals/{docId} {
@@ -643,21 +641,21 @@ service cloud.firestore {
 
       match /libraryBooks/{docId} {
         allow read: if true;
-        allow create, update, delete: if hasEditorRole(schoolId);
+        allow create, update, delete: if hasRole(schoolId, 'admin');
       }
 
       match /librarySeats/{docId} {
         allow read: if true;
-        allow create, update, delete: if hasEditorRole(schoolId);
+        allow create, update, delete: if hasRole(schoolId, 'admin');
       }
 
       match /libraryLoans/{loanId} {
-        allow read: if hasEditorRole(schoolId) || (isSignedIn() && resource.data.userId == request.auth.uid);
+        allow read: if hasRole(schoolId, 'admin') || (isSignedIn() && resource.data.userId == request.auth.uid);
         allow write: if false;
       }
 
       match /seatReservations/{reservationId} {
-        allow read: if hasEditorRole(schoolId) || (isSignedIn() && resource.data.userId == request.auth.uid);
+        allow read: if hasRole(schoolId, 'admin') || (isSignedIn() && resource.data.userId == request.auth.uid);
         allow write: if false;
       }
 
@@ -668,7 +666,7 @@ service cloud.firestore {
       }
 
       match /orders/{orderId} {
-        allow read: if hasEditorRole(schoolId)
+        allow read: if hasRole(schoolId, 'admin')
           || requesterIsCafeteriaOperator(schoolId, resource.data.cafeteriaId)
           || (isSignedIn() && resource.data.userId == request.auth.uid);
         // Order creation and status changes use authenticated callables so the
@@ -687,52 +685,62 @@ service cloud.firestore {
       }
 
       match /repairRequests/{requestId} {
-        allow read: if hasEditorRole(schoolId) || (isSignedIn() && resource.data.userId == request.auth.uid);
+        allow read: if hasRole(schoolId, 'admin')
+          || requesterHasServiceRoleDomain(schoolId, 'repairs')
+          || (isSignedIn() && resource.data.userId == request.auth.uid);
         allow write: if false;
       }
 
       match /packages/{packageId} {
-        allow read: if hasEditorRole(schoolId) || (isSignedIn() && resource.data.recipientId == request.auth.uid);
+        allow read: if hasRole(schoolId, 'admin')
+          || requesterHasServiceRoleDomain(schoolId, 'packages')
+          || (isSignedIn() && resource.data.recipientId == request.auth.uid);
         allow write: if false;
       }
 
       match /washingMachines/{machineId} {
         allow read: if true;
-        allow create, update, delete: if hasEditorRole(schoolId);
+        allow create, update, delete: if hasRole(schoolId, 'admin');
       }
 
       match /washingReservations/{reservationId} {
-        allow read: if hasEditorRole(schoolId) || (isSignedIn() && resource.data.userId == request.auth.uid);
+        allow read: if hasRole(schoolId, 'admin') || (isSignedIn() && resource.data.userId == request.auth.uid);
         allow write: if false;
       }
 
       match /printers/{printerId} {
         allow read: if true;
-        allow create, update, delete: if hasEditorRole(schoolId);
+        allow create, update, delete: if hasRole(schoolId, 'admin');
       }
 
       match /printJobs/{jobId} {
-        allow read: if hasEditorRole(schoolId) || (isSignedIn() && resource.data.userId == request.auth.uid);
+        allow read: if hasRole(schoolId, 'admin')
+          || requesterHasServiceRoleDomain(schoolId, 'printing')
+          || (isSignedIn() && resource.data.userId == request.auth.uid);
         allow write: if false;
       }
 
       match /healthAppointments/{appointmentId} {
-        allow read: if hasEditorRole(schoolId) || (isSignedIn() && resource.data.userId == request.auth.uid);
+        allow read: if hasRole(schoolId, 'admin')
+          || requesterHasServiceRoleDomain(schoolId, 'health')
+          || (isSignedIn() && resource.data.userId == request.auth.uid);
         allow write: if false;
       }
 
       match /healthRecords/{recordId} {
-        allow read: if hasEditorRole(schoolId) || (isSignedIn() && resource.data.userId == request.auth.uid);
+        allow read: if hasRole(schoolId, 'admin')
+          || requesterHasServiceRoleDomain(schoolId, 'health')
+          || (isSignedIn() && resource.data.userId == request.auth.uid);
         allow write: if false;
       }
 
       match /healthTimeSlots/{slotId} {
         allow read: if true;
-        allow create, update, delete: if hasEditorRole(schoolId);
+        allow create, update, delete: if hasRole(schoolId, 'admin');
       }
 
       match /adminLogs/{docId} {
-        allow read: if hasEditorRole(schoolId);
+        allow read: if hasRole(schoolId, 'admin');
         allow write: if false;
       }
 
@@ -1544,17 +1552,17 @@ service cloud.firestore {
 
     // 哪位老師教哪一門開課（代號＝課名｜老師）：學校管理者設定，老師只看得到自己有教的那幾筆
     match /schools/{schoolId}/courseTeachers/{offeringId} {
-      allow get: if isSignedIn() && (
+      allow get: if isSchoolMember(schoolId) && (
         request.auth.uid in resource.data.get('teacherUids', [])
-        || hasEditorRole(schoolId)
+        || hasRole(schoolId, 'admin')
       );
-      allow list: if hasEditorRole(schoolId) || (isSignedIn() && request.auth.uid in resource.data.teacherUids);
-      allow write: if hasEditorRole(schoolId);
+      allow list: if hasRole(schoolId, 'admin') || (isSchoolMember(schoolId) && request.auth.uid in resource.data.teacherUids);
+      allow write: if hasRole(schoolId, 'admin');
     }
 
     // 申訴的那門課，這位老師有沒有教
     function teachesAppealCourse(appeal) {
-      return hasRole(appeal.schoolId, 'teacher')
+      return isSchoolMember(appeal.schoolId)
         && appeal.get('offeringId', '') is string
         && appeal.get('offeringId', '').size() > 0
         && exists(/databases/$(database)/documents/schools/$(appeal.schoolId)/courseTeachers/$(appeal.offeringId))
@@ -1586,7 +1594,7 @@ service cloud.firestore {
       allow read: if isSignedIn() && (
         resource.data.studentUid == request.auth.uid
         || teachesAppealCourse(resource.data)
-        || hasEditorRole(resource.data.schoolId)
+        || hasRole(resource.data.schoolId, 'admin')
       );
       allow create: if isSignedIn()
         && request.resource.data.studentUid == request.auth.uid
@@ -1612,7 +1620,7 @@ service cloud.firestore {
           && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'updatedAt'])
         )
         || (
-          (teachesAppealCourse(resource.data) || hasEditorRole(resource.data.schoolId))
+          (teachesAppealCourse(resource.data) || hasRole(resource.data.schoolId, 'admin'))
           && request.resource.data.status in ['reviewing', 'approved', 'rejected']
           && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'teacherNote', 'decidedAt', 'decidedBy', 'updatedAt'])
           && request.resource.data.get('teacherNote', '') is string

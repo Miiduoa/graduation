@@ -47,8 +47,8 @@ type TodoRow = TodayTodo & { task?: InboxTask };
 function todosFromInbox(tasks: InboxTask[]): TodoRow[] {
   return tasks.flatMap((task) => {
     if (task.kind !== 'assignment' && task.kind !== 'quiz') return [];
-    const due = task.dueAt instanceof Date ? task.dueAt.getTime() : NaN;
-    if (!Number.isFinite(due)) return [];
+    const due = task.dueAt == null ? null : task.dueAt instanceof Date ? task.dueAt.getTime() : NaN;
+    if (due !== null && !Number.isFinite(due)) return [];
     return [
       {
         id: task.id,

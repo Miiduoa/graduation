@@ -39,6 +39,19 @@ test('uses the verified callable contract and returns only display content and p
     },
   });
 });
+test('forwards selected school name without treating browsing as authorization', async () => {
+  await askCampusAssistant({ ...input(), schoolName: '靜宜大學' });
+  expect(mockCallable).toHaveBeenCalledWith({
+    messages: [{ role: 'user', content: '查公告' }],
+    context: {
+      schoolId: 'pu',
+      schoolName: '靜宜大學',
+      screen: 'campus-assistant',
+      locale: 'zh-TW',
+      timezone: 'Asia/Taipei',
+    },
+  });
+});
 test.each([
   {},
   { content: 'fallback', run: { status: 'failed' } },

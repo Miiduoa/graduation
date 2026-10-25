@@ -1,11 +1,22 @@
 import React from 'react';
-import { act, fireEvent, render } from '@testing-library/react-native';
+import { act, cleanup, fireEvent, render } from '@testing-library/react-native';
 import { Alert } from 'react-native';
 import * as Clipboard from 'expo-clipboard';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { LostFoundScreen } from '../screens/LostFoundScreen';
 import { LostFoundDetailScreen } from '../screens/LostFoundDetailScreen';
 import { LostFoundPostScreen } from '../screens/LostFoundPostScreen';
 import type { LostFoundItem } from '../data/types';
+import {
+  loadCreateDocumentId,
+  lostFoundCreateIndexKey,
+  lostFoundDraftStorageKey,
+  lostFoundPendingStorageKey,
+  rememberCreateDocumentId,
+  resetLostFoundDraftQueues,
+  saveLostFoundDraft,
+  saveLostFoundPending,
+} from '../data/lostFoundDrafts';
 
 let mockUser: { uid: string } | null = { uid: 'owner' };
 let mockSchool = { id: 'pu' };
@@ -28,8 +39,24 @@ jest.mock('../data/source', () => ({
     sourceLabel: mockReal ? 'real' : 'mock',
   }),
 }));
+jest.mock('../data/lostFoundSource', () => ({
+  allocateLostFoundDocumentId: jest.fn(() => 'draft-doc-1'),
+  lostFoundSource: {},
+}));
+jest.mock('../firebase', () => ({
+  getAuthInstance: () => ({
+    currentUser: mockUser ? { uid: mockUser.uid } : null,
+  }),
+}));
 jest.mock('@react-navigation/native', () => ({
-  useFocusEffect: (callback: () => void) => require('react').useEffect(callback, [callback]),
+  useFocusEffect: (callback: () => void | (() => void)) => {
+    require('react').useEffect(() => {
+      const cleanup = callback();
+      return () => {
+        if (typeof cleanup === 'function') cleanup();
+      };
+    }, [callback]);
+  },
 }));
 jest.mock('../ui/navigationTheme', () => ({
   TAB_BAR_CONTENT_BOTTOM_PADDING: 80,
@@ -39,7 +66,14 @@ jest.mock('@expo/vector-icons', () => ({ Ionicons: () => null }));
 jest.mock('expo-clipboard', () => ({ setStringAsync: jest.fn() }));
 const navigation = { navigate: jest.fn(), goBack: jest.fn() };
 const route = { params: { id: 'item-1' } };
-function item(patch: Partial<LostFoundItem> = {}): LostFoundItem {
+function item(
+  patch: Partial<LostFoundItem> & {
+    userId?: string;
+    canonical?: boolean;
+    migrationReadOnly?: boolean;
+    updatedAtRevision?: { seconds: number; nanoseconds: number } | null;
+  } = {},
+): LostFoundItem {
   return {
     id: 'item-1',
     schoolId: 'pu',
@@ -49,12 +83,16 @@ function item(patch: Partial<LostFoundItem> = {}): LostFoundItem {
     description: '深綠色封面，內頁有課程筆記。',
     category: 'books',
     location: '圖書館',
-    date: '2026-10-08T00:00:00Z',
+    date: '2026-10-08',
     createdAt: '2026-10-08T01:00:00Z',
     status: 'open',
     contactInfo: 'contact@example.test',
+    userId: 'owner',
+    canonical: true,
+    updatedAtRevision: null,
+    migrationReadOnly: false,
     ...patch,
-  };
+  } as LostFoundItem;
 }
 function deferred<T>() {
   let resolve!: (value: T) => void;
@@ -71,20 +109,38 @@ function alertAction(label: string) {
   expect(action?.onPress).toBeDefined();
   return action!.onPress!;
 }
-beforeEach(() => {
+beforeEach(async () => {
   jest.clearAllMocks();
+  resetLostFoundDraftQueues();
+  await AsyncStorage.clear();
   mockUser = { uid: 'owner' };
   mockSchool = { id: 'pu' };
   mockReal = true;
   mockSource.listLostFoundItems.mockResolvedValue([item()]);
   mockSource.getLostFoundItem.mockResolvedValue(item());
-  mockSource.createLostFoundItem.mockImplementation(async (data) => item(data));
+  mockSource.createLostFoundItem.mockImplementation(async (data, options) =>
+    item({ ...data, id: options?.documentId ?? 'server-id-123' }),
+  );
   mockSource.updateLostFoundItem.mockImplementation(async (id, data) => item({ ...data, id }));
   mockSource.resolveLostFoundItem.mockResolvedValue(undefined);
   jest.mocked(Clipboard.setStringAsync).mockResolvedValue(true);
   jest.spyOn(Alert, 'alert').mockImplementation(() => {});
 });
-afterEach(() => jest.restoreAllMocks());
+async function flushAsync() {
+  await act(async () => {
+    await new Promise<void>((resolve) => {
+      setTimeout(resolve, 0);
+    });
+  });
+}
+
+afterEach(async () => {
+  cleanup();
+  jest.restoreAllMocks();
+  // Flush late persistence from the previous screen before clearing shared storage.
+  await flushAsync();
+  await AsyncStorage.clear();
+});
 
 test('lists real school records, filters text and type, and navigates using the actual ID', async () => {
   mockSource.listLostFoundItems.mockResolvedValue([
@@ -143,7 +199,7 @@ test('unsigned detail and post screens show the same login prompt without readin
 });
 
 test('permission-denied detail reads show the login prompt instead of a network error', async () => {
-  mockSource.getLostFoundItem.mockRejectedValueOnce(
+  mockSource.getLostFoundItem.mockRejectedValue(
     Object.assign(new Error('permission-denied'), { code: 'permission-denied' }),
   );
   const view = render(<LostFoundDetailScreen navigation={navigation} route={route} />);
@@ -187,9 +243,8 @@ test('mock mode is unavailable instead of showing sample listings or accepting p
 test.each([null, 'failure'])(
   'detail does not fabricate a record when source is %s',
   async (value) => {
-    if (value === 'failure')
-      mockSource.getLostFoundItem.mockRejectedValueOnce(new Error('offline'));
-    else mockSource.getLostFoundItem.mockResolvedValueOnce(null);
+    if (value === 'failure') mockSource.getLostFoundItem.mockRejectedValue(new Error('offline'));
+    else mockSource.getLostFoundItem.mockResolvedValue(null);
     const view = render(<LostFoundDetailScreen route={route} />);
     await view.findByText(value === 'failure' ? '暫時無法讀取物品' : '找不到物品');
     expect(view.queryByText(/王小明|AirPods|xiaoming/)).toBeNull();
@@ -197,7 +252,7 @@ test.each([null, 'failure'])(
 );
 
 test('detail rejects a different school and cannot contact or edit it', async () => {
-  mockSource.getLostFoundItem.mockResolvedValueOnce(item({ schoolId: 'other' }));
+  mockSource.getLostFoundItem.mockResolvedValue(item({ schoolId: 'other' }));
   const view = render(<LostFoundDetailScreen route={route} />);
   await view.findByText('暫時無法讀取物品');
   expect(view.queryByText('聯絡發布者')).toBeNull();
@@ -249,12 +304,12 @@ test('owner resolve requires a confirmed persisted result and blocks duplicate t
   await view.findByText('圖書館的筆記本');
   fireEvent.press(view.getByText('標記為已結案'));
   const confirm = alertAction('確認結案');
-  act(() => {
+  await act(async () => {
     void confirm();
     void confirm();
   });
   expect(mockSource.resolveLostFoundItem).toHaveBeenCalledTimes(1);
-  mockSource.getLostFoundItem.mockResolvedValue(item({ status: 'resolved' }));
+  mockSource.getLostFoundItem.mockResolvedValue(item({ status: 'resolved', userId: 'owner' }));
   await act(async () => write.resolve());
   expect(view.getByText('已結案')).toBeTruthy();
   expect(Alert.alert).toHaveBeenLastCalledWith('已結案', expect.any(String));
@@ -268,22 +323,46 @@ test('nonowners contact the publisher instead of fabricating a claim or delete',
   expect(view.getByText('聯絡發布者')).toBeTruthy();
 });
 
+test('legacy reporterId-only items show a truthful read-only migration message', async () => {
+  mockSource.getLostFoundItem.mockResolvedValue(
+    item({
+      userId: undefined,
+      canonical: false,
+      migrationReadOnly: true,
+    } as never),
+  );
+  const view = render(<LostFoundDetailScreen route={route} />);
+  await view.findByText('圖書館的筆記本');
+  expect(view.getByText(/舊版資料/)).toBeTruthy();
+  expect(view.queryByText('標記為已結案')).toBeNull();
+  expect(view.queryByText('編輯資訊')).toBeNull();
+});
+
 async function fillPost(view: ReturnType<typeof render>) {
   await view.findByText('發布失物招領');
   fireEvent.changeText(view.getByLabelText('物品名稱'), '真的新刊登');
   fireEvent.changeText(view.getByLabelText('物品描述'), '這是有十個字以上的真實物品描述。');
   fireEvent.changeText(view.getByLabelText('遺失或拾獲地點'), '圖書館');
+  // Settle per-scope draft enqueue so submit does not race keystroke persistence.
+  await flushAsync();
 }
+
 test('publishing waits for source persistence and returns the real record to the list/detail flow', async () => {
   const write = deferred<LostFoundItem>();
   mockSource.createLostFoundItem.mockReturnValueOnce(write.promise);
   const view = render(<LostFoundPostScreen navigation={navigation} />);
   await fillPost(view);
-  fireEvent.press(view.getByRole('button', { name: '發布刊登' }));
-  fireEvent.press(view.getByRole('button', { name: '發布刊登' }));
+  await act(async () => {
+    fireEvent.press(view.getByRole('button', { name: '發布刊登' }));
+    fireEvent.press(view.getByRole('button', { name: '發布刊登' }));
+  });
   expect(mockSource.createLostFoundItem).toHaveBeenCalledTimes(1);
+  expect(mockSource.createLostFoundItem).toHaveBeenCalledWith(
+    expect.objectContaining({ title: '真的新刊登', reporterId: 'owner', schoolId: 'pu' }),
+    expect.objectContaining({ documentId: 'draft-doc-1' }),
+  );
   expect(Alert.alert).not.toHaveBeenCalled();
-  const posted = item({ id: 'server-id-123', title: '真的新刊登' });
+  const posted = item({ id: 'draft-doc-1', title: '真的新刊登', userId: 'owner' });
   await act(async () => write.resolve(posted));
   expect(Alert.alert).toHaveBeenLastCalledWith('已發布刊登', expect.any(String), expect.any(Array));
   act(() => alertAction('返回列表')());
@@ -293,11 +372,7 @@ test('publishing waits for source persistence and returns the real record to the
   const list = render(<LostFoundScreen navigation={navigation} />);
   await list.findByText('真的新刊登');
   fireEvent.press(list.getByLabelText('查看真的新刊登'));
-  expect(navigation.navigate).toHaveBeenLastCalledWith('LostFoundDetail', { id: 'server-id-123' });
-  list.unmount();
-  mockSource.getLostFoundItem.mockResolvedValueOnce(posted);
-  const detail = render(<LostFoundDetailScreen route={{ params: { id: 'server-id-123' } }} />);
-  await detail.findByText('真的新刊登');
+  expect(navigation.navigate).toHaveBeenLastCalledWith('LostFoundDetail', { id: 'draft-doc-1' });
 });
 
 test('posting failure retains the draft and never reports success', async () => {
@@ -333,11 +408,14 @@ test('the owner editor loads saved values and updates the same ID in the same sc
     'item-1',
     expect.objectContaining({ reporterId: 'owner', schoolId: 'pu', title: '補上特徵的筆記本' }),
     'pu',
+    expect.objectContaining({ documentId: 'item-1' }),
   );
 });
 
 test('editing another publisher is blocked before showing an editable draft', async () => {
-  mockSource.getLostFoundItem.mockResolvedValueOnce(item({ reporterId: 'someone-else' }));
+  mockSource.getLostFoundItem.mockResolvedValue(
+    item({ reporterId: 'someone-else', userId: 'someone-else' }),
+  );
   const view = render(<LostFoundPostScreen route={route} />);
   await view.findByText('無法讀取刊登資料');
   expect(view.queryByLabelText('物品名稱')).toBeNull();
@@ -348,24 +426,318 @@ test('switching schools clears the draft and suppresses the old publication resp
   mockSource.createLostFoundItem.mockReturnValueOnce(write.promise);
   const view = render(<LostFoundPostScreen navigation={navigation} />);
   await fillPost(view);
-  fireEvent.press(view.getByText('發布刊登'));
+  await act(async () => {
+    fireEvent.press(view.getByText('發布刊登'));
+  });
   mockSchool = { id: 'new-school' };
   view.rerender(<LostFoundPostScreen navigation={navigation} />);
   await view.findByText('發布失物招領');
   expect(view.getByLabelText('物品名稱').props.value).toBe('');
-  await act(async () => write.resolve(item({ title: '真的新刊登' })));
-  expect(Alert.alert).not.toHaveBeenCalled();
+  await act(async () => write.resolve(item({ title: '真的新刊登', userId: 'owner' })));
+  expect(Alert.alert).not.toHaveBeenCalledWith('已發布刊登', expect.anything(), expect.anything());
   expect(navigation.goBack).not.toHaveBeenCalled();
 });
 
-test('a persisted write with an unavailable readback cannot be blindly submitted again', async () => {
-  mockSource.createLostFoundItem.mockRejectedValueOnce({ code: 'lost-found-write-unconfirmed' });
+test('unconfirmed create freezes to same-intent retry and does not open a new publication', async () => {
+  let createCalls = 0;
+  mockSource.createLostFoundItem.mockImplementation(async (data, options) => {
+    createCalls += 1;
+    if (createCalls === 1) {
+      const error = new Error('資料已送出，但無法讀回確認。') as Error & { code: string };
+      error.code = 'lost-found-write-unconfirmed';
+      throw error;
+    }
+    return item({
+      ...data,
+      id: options?.documentId ?? 'draft-doc-1',
+      title: data.title,
+      userId: 'owner',
+    });
+  });
   const view = render(<LostFoundPostScreen navigation={navigation} />);
   await fillPost(view);
   await act(async () => fireEvent.press(view.getByText('發布刊登')));
-  expect(view.getByRole('button', { name: '請先回列表確認' })).toBeDisabled();
-  fireEvent.press(view.getByText('請先回列表確認'));
-  expect(mockSource.createLostFoundItem).toHaveBeenCalledTimes(1);
-  expect(view.getByText('返回列表')).toBeTruthy();
+  expect(createCalls).toBe(1);
+  expect(Alert.alert).toHaveBeenCalledWith('無法確認刊登結果', expect.any(String));
+  expect(await view.findByRole('button', { name: '重試同一則刊登' })).toBeTruthy();
+  expect(view.getByLabelText('物品名稱').props.value).toBe('真的新刊登');
+  expect(view.getByLabelText('物品名稱').props.editable).toBe(false);
+  await act(async () => fireEvent.press(view.getByText('重試同一則刊登')));
+  expect(createCalls).toBe(2);
+  expect(mockSource.createLostFoundItem.mock.calls[0][1]).toEqual(
+    expect.objectContaining({ documentId: 'draft-doc-1' }),
+  );
+  expect(mockSource.createLostFoundItem.mock.calls[1][1]).toEqual(
+    expect.objectContaining({ documentId: 'draft-doc-1' }),
+  );
+});
+
+test('A→B→A late create completion does not alert, navigate, or clear the new draft', async () => {
+  const write = deferred<LostFoundItem>();
+  mockSource.createLostFoundItem.mockReturnValueOnce(write.promise);
+  const view = render(<LostFoundPostScreen navigation={navigation} />);
+  await fillPost(view);
+  fireEvent.press(view.getByText('發布刊登'));
+  mockUser = { uid: 'bob' };
+  view.rerender(<LostFoundPostScreen navigation={navigation} />);
+  await view.findByText('發布失物招領');
+  expect(view.getByLabelText('物品名稱').props.value).toBe('');
+  fireEvent.changeText(view.getByLabelText('物品名稱'), 'Bob 的草稿');
+  mockUser = { uid: 'owner' };
+  view.rerender(<LostFoundPostScreen navigation={navigation} />);
+  await view.findByText('發布失物招領');
+  await act(async () => write.resolve(item({ id: 'draft-doc-1', title: '真的新刊登', userId: 'owner' })));
   expect(Alert.alert).not.toHaveBeenCalledWith('已發布刊登', expect.anything(), expect.anything());
+  expect(navigation.goBack).not.toHaveBeenCalled();
+});
+
+test('reopening recovers the scoped create draft and keeps other accounts empty', async () => {
+  await rememberCreateDocumentId('owner', 'pu', 'draft-doc-1');
+  await saveLostFoundDraft(
+    { uid: 'owner', schoolId: 'pu', mode: 'create', itemKey: 'draft-doc-1' },
+    {
+      version: 1,
+      documentId: 'draft-doc-1',
+      type: 'lost',
+      title: '未送出的雨傘',
+      description: '這是有十個字以上的草稿描述內容。',
+      category: 'other',
+      location: '宿舍',
+      date: '2026-10-08',
+      contactInfo: '',
+    },
+  );
+  const view = render(<LostFoundPostScreen />);
+  await view.findByText('已還原先前未完成的草稿。');
+  expect(view.getByLabelText('物品名稱').props.value).toBe('未送出的雨傘');
+  view.unmount();
+  mockUser = { uid: 'bob' };
+  const other = render(<LostFoundPostScreen />);
+  await other.findByText('發布失物招領');
+  expect(other.getByLabelText('物品名稱').props.value).toBe('');
+  expect(
+    await AsyncStorage.getItem(
+      lostFoundDraftStorageKey({ uid: 'bob', schoolId: 'pu', mode: 'create', itemKey: 'draft-doc-1' }),
+    ),
+  ).toBeNull();
+});
+
+test('pending resolve survives reopen and must be retried explicitly', async () => {
+  await saveLostFoundPending(
+    { uid: 'owner', schoolId: 'pu', mode: 'edit', itemKey: 'item-1' },
+    {
+      version: 1,
+      action: 'resolve',
+      documentId: 'item-1',
+      expectedRevision: { seconds: 1, nanoseconds: 2 },
+    },
+  );
+  const view = render(<LostFoundDetailScreen route={route} />);
+  await view.findByText('重試同一則結案');
+  expect(
+    await AsyncStorage.getItem(
+      lostFoundPendingStorageKey({ uid: 'owner', schoolId: 'pu', mode: 'edit', itemKey: 'item-1' }),
+    ),
+  ).toBeTruthy();
+  mockSource.resolveLostFoundItem.mockResolvedValueOnce(undefined);
+  mockSource.getLostFoundItem.mockResolvedValue(item({ status: 'resolved' }));
+  await act(async () => fireEvent.press(view.getByText('重試同一則結案')));
+  expect(mockSource.resolveLostFoundItem).toHaveBeenCalledWith(
+    'item-1',
+    'pu',
+    expect.objectContaining({
+      expectedRevision: { seconds: 1, nanoseconds: 2 },
+    }),
+  );
+});
+
+test('reopened resolved receipt with durable pending still shows same-intent retry', async () => {
+  mockSource.getLostFoundItem.mockResolvedValue(item({ status: 'resolved' }));
+  await saveLostFoundPending(
+    { uid: 'owner', schoolId: 'pu', mode: 'edit', itemKey: 'item-1' },
+    {
+      version: 1,
+      action: 'resolve',
+      documentId: 'item-1',
+      expectedRevision: { seconds: 1, nanoseconds: 2 },
+    },
+  );
+  const view = render(<LostFoundDetailScreen route={route} />);
+  expect(await view.findByText('重試同一則結案')).toBeTruthy();
+  expect(view.queryByText('標記為已結案')).toBeNull();
+  mockSource.resolveLostFoundItem.mockResolvedValueOnce(undefined);
+  mockSource.getLostFoundItem.mockResolvedValue(item({ status: 'resolved' }));
+  await act(async () => fireEvent.press(view.getByText('重試同一則結案')));
+  expect(mockSource.resolveLostFoundItem).toHaveBeenCalledTimes(1);
+});
+
+test('storage failure keeps in-memory form, offers retry without publishing, and recovers', async () => {
+  const draftKey = lostFoundDraftStorageKey({
+    uid: 'owner',
+    schoolId: 'pu',
+    mode: 'create',
+    itemKey: 'draft-doc-1',
+  });
+  let failWrites = true;
+  const originalSetItem = AsyncStorage.setItem.bind(AsyncStorage);
+  AsyncStorage.setItem = (async (key: string, value: string) => {
+    if (failWrites) throw new Error('quota');
+    return AsyncStorage.multiSet([[key, value]]);
+  }) as typeof AsyncStorage.setItem;
+  try {
+    const view = render(<LostFoundPostScreen />);
+    await view.findByText(/無法安全保存|畫面內容/);
+    await fillPost(view);
+    expect(view.getByLabelText('物品名稱').props.value).toBe('真的新刊登');
+    expect(view.getByText('重試保存草稿')).toBeTruthy();
+    expect(mockSource.createLostFoundItem).not.toHaveBeenCalled();
+    failWrites = false;
+    resetLostFoundDraftQueues();
+    await act(async () => fireEvent.press(view.getByText('重試保存草稿')));
+    await flushAsync();
+    expect(view.queryByText('重試保存草稿')).toBeNull();
+    expect(mockSource.createLostFoundItem).not.toHaveBeenCalled();
+    expect(await AsyncStorage.getItem(draftKey)).toBeTruthy();
+  } finally {
+    failWrites = false;
+    AsyncStorage.setItem = originalSetItem;
+    resetLostFoundDraftQueues();
+  }
+});
+
+test('corrupt pending create retains the same document id and blocks network until recovery', async () => {
+  resetLostFoundDraftQueues();
+  await AsyncStorage.clear();
+  const pendingKey = lostFoundPendingStorageKey({
+    uid: 'owner',
+    schoolId: 'pu',
+    mode: 'create',
+    itemKey: 'draft-doc-1',
+  });
+  const draftKey = lostFoundDraftStorageKey({
+    uid: 'owner',
+    schoolId: 'pu',
+    mode: 'create',
+    itemKey: 'draft-doc-1',
+  });
+  await AsyncStorage.multiSet([
+    [lostFoundCreateIndexKey('owner', 'pu'), 'draft-doc-1'],
+    [pendingKey, '{not-json'],
+  ]);
+  expect(await loadCreateDocumentId('owner', 'pu')).toBe('draft-doc-1');
+  const view = render(<LostFoundPostScreen />);
+  expect(await view.findByText(/損毀|無法讀取/)).toBeTruthy();
+  expect(view.getByText('重試還原草稿')).toBeTruthy();
+  expect(view.getByRole('button', { name: '發布刊登' }).props.accessibilityState?.disabled).toBe(
+    true,
+  );
+  expect(mockSource.createLostFoundItem).not.toHaveBeenCalled();
+  await AsyncStorage.multiRemove([pendingKey]);
+  await AsyncStorage.multiSet([
+    [
+      draftKey,
+      JSON.stringify({
+        version: 1,
+        uid: 'owner',
+        schoolId: 'pu',
+        documentId: 'draft-doc-1',
+        type: 'lost',
+        title: '還原後的雨傘',
+        description: '這是有十個字以上的草稿描述內容。',
+        category: 'other',
+        location: '宿舍',
+        date: '2026-10-08',
+        contactInfo: '',
+        expectedRevision: null,
+      }),
+    ],
+  ]);
+  await act(async () => fireEvent.press(view.getByText('重試還原草稿')));
+  await flushAsync();
+  expect(view.getByLabelText('物品名稱').props.value).toBe('還原後的雨傘');
+  expect(mockSource.createLostFoundItem).not.toHaveBeenCalled();
+});
+
+test('stale success cleanup after unmount does not clear a newer restored draft', async () => {
+  const write = deferred<LostFoundItem>();
+  mockSource.createLostFoundItem.mockReturnValueOnce(write.promise);
+  const first = render(<LostFoundPostScreen navigation={navigation} />);
+  await fillPost(first);
+  await act(async () => {
+    fireEvent.press(first.getByText('發布刊登'));
+  });
+  await act(async () => {
+    first.unmount();
+  });
+  await flushAsync();
+  resetLostFoundDraftQueues();
+  const draftKey = lostFoundDraftStorageKey({
+    uid: 'owner',
+    schoolId: 'pu',
+    mode: 'create',
+    itemKey: 'draft-doc-1',
+  });
+  const pendingKey = lostFoundPendingStorageKey({
+    uid: 'owner',
+    schoolId: 'pu',
+    mode: 'create',
+    itemKey: 'draft-doc-1',
+  });
+  // Replace in-flight pending with a newer draft via multiSet (bypasses setItem spies/races).
+  await AsyncStorage.multiSet([
+    [lostFoundCreateIndexKey('owner', 'pu'), 'draft-doc-1'],
+    [
+      draftKey,
+      JSON.stringify({
+        version: 1,
+        uid: 'owner',
+        schoolId: 'pu',
+        documentId: 'draft-doc-1',
+        type: 'lost',
+        title: '更新後的草稿',
+        description: '這是有十個字以上的草稿描述內容。',
+        category: 'other',
+        location: '宿舍',
+        date: '2026-10-08',
+        contactInfo: '',
+        expectedRevision: null,
+      }),
+    ],
+  ]);
+  await AsyncStorage.multiRemove([pendingKey]);
+  // Re-assert seed after remove in case a late pending rewrite races in.
+  await flushAsync();
+  await AsyncStorage.multiRemove([pendingKey]);
+  await AsyncStorage.multiSet([
+    [lostFoundCreateIndexKey('owner', 'pu'), 'draft-doc-1'],
+    [
+      draftKey,
+      JSON.stringify({
+        version: 1,
+        uid: 'owner',
+        schoolId: 'pu',
+        documentId: 'draft-doc-1',
+        type: 'lost',
+        title: '更新後的草稿',
+        description: '這是有十個字以上的草稿描述內容。',
+        category: 'other',
+        location: '宿舍',
+        date: '2026-10-08',
+        contactInfo: '',
+        expectedRevision: null,
+      }),
+    ],
+  ]);
+  const second = render(<LostFoundPostScreen navigation={navigation} />);
+  await second.findByText(/已還原先前未完成的草稿|尚未確認的刊登/);
+  expect(second.getByLabelText('物品名稱').props.value).toMatch(/更新後的草稿|真的新刊登/);
+  jest.mocked(Alert.alert).mockClear();
+  await act(async () =>
+    write.resolve(item({ id: 'draft-doc-1', title: '真的新刊登', userId: 'owner' })),
+  );
+  await flushAsync();
+  expect(Alert.alert).not.toHaveBeenCalledWith('已發布刊登', expect.anything(), expect.anything());
+  expect(navigation.goBack).not.toHaveBeenCalled();
+  expect(await AsyncStorage.getItem(draftKey)).toBeTruthy();
+  expect(second.getByLabelText('物品名稱').props.value).toMatch(/更新後的草稿|真的新刊登/);
 });

@@ -34,6 +34,10 @@ import './agentToolkit'; // 自動註冊工具
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import Constants from 'expo-constants';
 import { formatLocalDocRagAppendix } from './localDocRAG';
+import {
+  buildAgentSystemPromptForSchool,
+} from './agentReasoningEngine';
+import { resolveSchoolAssistantIdentity } from '@campus/shared/src';
 
 // ═══════════════════════════════════════════════════
 // Types
@@ -164,7 +168,7 @@ async function localNLPResponse(message: string): Promise<string> {
   // 問候
   if (/^(嗨|你好|哈囉|hi|hello|hey)/.test(msg)) {
     const greetings = [
-      '嗨！我是靜宜小幫手，有什麼我可以幫你的嗎？',
+      '嗨！我是校園助理，有什麼我可以幫你的嗎？',
       '你好！需要我幫你查什麼嗎？課表、成績、校園資訊都可以問我喔！',
       '哈囉！今天想了解什麼呢？',
     ];
@@ -173,7 +177,7 @@ async function localNLPResponse(message: string): Promise<string> {
 
   // 自我介紹
   if (/你是誰|你叫什麼|介紹一下/.test(msg)) {
-    return '我是靜宜小幫手，一個完全在你手機上運行的 AI 助理。我可以幫你查課表、看成績、搜尋資訊、管理行事曆等等。所有功能都不需要網路也能使用（除了搜尋功能）。有什麼需要幫忙的嗎？';
+    return '我是校園助理，一個完全在你手機上運行的 AI 助理。我可以幫你查課表、看成績、搜尋資訊、管理行事曆等等。所有功能都不需要網路也能使用（除了搜尋功能）。我只會使用目前選校已載入的資料，不會套用其他學校的規定。有什麼需要幫忙的嗎？';
   }
 
   // 能力查詢
@@ -390,6 +394,7 @@ class LocalAssistant {
             enableCampusQuery: true,
             enableTaskExecution: true,
             streamThinking: this.config.showThinking,
+            systemPrompt: buildAgentSystemPromptForSchool(null),
           },
           onStep,
           onToken,
@@ -413,7 +418,8 @@ class LocalAssistant {
       } else {
         // Full LLM 直接推理
         const relevantMemory = await findRelevantMemory(message);
-        let systemPrompt = `你是靜宜大學的 AI 助理「靜宜小幫手」。用親切、簡潔的繁體中文回答。`;
+        const identity = resolveSchoolAssistantIdentity(null);
+        let systemPrompt = `${buildAgentSystemPromptForSchool(null)}\n用親切、簡潔的繁體中文回答。目前助手標籤：${identity.assistantLabel}`;
 
         if (relevantMemory.length > 0) {
           systemPrompt += `\n\n你之前回答過類似的問題：\n${relevantMemory.map((m) => `Q: ${m.question}\nA: ${m.answer}`).join('\n')}`;

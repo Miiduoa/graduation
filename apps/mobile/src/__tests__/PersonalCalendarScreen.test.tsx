@@ -30,6 +30,7 @@ jest.mock('@react-navigation/native', () => ({
   useFocusEffect: (callback: () => void | (() => void)) =>
     require('react').useEffect(() => callback(), [callback]),
   useNavigation: () => ({ navigate: mockNavigate }),
+  useRoute: () => ({ params: undefined }),
 }));
 jest.mock('../utils/safeNavigate', () => ({
   safeNavigate: (_nav: unknown, route: string, params?: unknown) => mockNavigate(route, params),
@@ -65,12 +66,43 @@ jest.mock('../ui/components', () => {
   };
 });
 
+const mockEnableTimed = jest.fn();
+const mockEnableAllDay = jest.fn();
+const mockDisableReminder = jest.fn();
+const mockRetryReminder = jest.fn();
+const mockListReminders = jest.fn(async () => ({}));
+const mockOpenReminderSettings = jest.fn();
+
+jest.mock('../services/personalEventReminders', () => ({
+  enableTimedPersonalEventReminder: (...args: unknown[]) => mockEnableTimed(...args),
+  enableAllDayPersonalEventReminder: (...args: unknown[]) => mockEnableAllDay(...args),
+  disablePersonalEventReminder: (...args: unknown[]) => mockDisableReminder(...args),
+  retryPersonalEventReminder: (...args: unknown[]) => mockRetryReminder(...args),
+  listPersonalEventReminderEntries: (...args: unknown[]) => mockListReminders(...args),
+  openPersonalReminderSettings: (...args: unknown[]) => mockOpenReminderSettings(...args),
+}));
+
+jest.mock('../services/personalEventReminderJournal', () => {
+  const actual = jest.requireActual('../services/personalEventReminderJournal');
+  return {
+    ...actual,
+    subscribePersonalEventReminderJournal: () => () => undefined,
+  };
+});
+
 beforeEach(async () => {
   mockScope = {
     owner: 'nuni:pa_11111111-1111-4111-8111-111111111111',
     schoolId: 'pu',
   };
   mockNavigate.mockReset();
+  mockEnableTimed.mockReset();
+  mockEnableAllDay.mockReset();
+  mockDisableReminder.mockReset();
+  mockRetryReminder.mockReset();
+  mockListReminders.mockReset();
+  mockListReminders.mockResolvedValue({});
+  mockOpenReminderSettings.mockReset();
   await AsyncStorage.clear();
   jest.spyOn(Alert, 'alert').mockImplementation((_title, _message, buttons) => {
     const confirm = buttons?.find((button) => button.style === 'destructive' || button.text === '刪除');
@@ -249,4 +281,50 @@ it('preserves imported course metadata when only location is edited', async () =
     source: imported.source,
   });
   expect(ledger.records.find((row) => row.id === 'other-keep')?.title).toBe('另一筆');
+});
+
+it('deliberate reminder enable and refusal recovery leave saved events intact', async () => {
+  const view = await fillAndSave('提醒測試');
+  const scope = mockScope!;
+  const ledgerBefore = await loadPersonalImports(scope);
+  const record = ledgerBefore.records[0]!;
+
+  mockEnableTimed.mockResolvedValue({
+    entry: {
+      eventId: record.id,
+      revision: 'rev',
+      preference: { enabled: true, mode: 'timed', leadMinutes: 10 },
+      lookupToken: 'tok',
+      osIdentifier: 'per-evtrem.tok',
+      intentGeneration: 1,
+      status: 'permission_needed',
+      updatedAt: new Date().toISOString(),
+    },
+    permission: { granted: false, canAskAgain: false, unsupported: false, status: 'denied' },
+    eventSavedIndependent: true,
+  });
+  mockListReminders.mockResolvedValue({
+    [record.id]: {
+      eventId: record.id,
+      revision: 'rev',
+      preference: { enabled: true, mode: 'timed', leadMinutes: 10 },
+      lookupToken: 'tok',
+      osIdentifier: 'per-evtrem.tok',
+      intentGeneration: 1,
+      status: 'permission_needed',
+      updatedAt: new Date().toISOString(),
+    },
+  });
+
+  fireEvent.press(view.getByText('提醒測試'));
+  await waitFor(() => expect(view.getByRole('button', { name: '提前 10 分' })).toBeTruthy());
+  fireEvent.press(view.getByRole('button', { name: '提前 10 分' }));
+  await waitFor(() => expect(mockEnableTimed).toHaveBeenCalled());
+  await waitFor(() => expect(Alert.alert).toHaveBeenCalled());
+  expect((await loadPersonalImports(scope)).records).toHaveLength(1);
+
+  mockEnableTimed.mockRejectedValue(new Error('injected reminder failure'));
+  fireEvent.press(view.getByRole('button', { name: '提前 30 分' }));
+  await waitFor(() => expect(view.getByText('injected reminder failure')).toBeTruthy());
+  expect((await loadPersonalImports(scope)).records[0]?.title).toBe('提醒測試');
 });

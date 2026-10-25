@@ -569,6 +569,63 @@ test('Taipei Medical library uses its own WebPAC catalog rather than a Providenc
   expect(view.queryByText('蓋夏圖書館')).toBeNull();
 });
 
+test('NCUE library search opens WebPACX results without clipboard or Providence navigation', async () => {
+  mockSchool = { id: 'ncue' };
+  const navigate = jest.fn();
+  const view = render(<LibraryAiFirstScreen navigation={{ navigate }} />);
+  fireEvent.changeText(view.getByLabelText('館藏關鍵字'), ' 資料庫 & SQL ');
+  await act(async () => fireEvent.press(view.getByText('查詢館藏')));
+  expect(Clipboard.setStringAsync).not.toHaveBeenCalled();
+  expect(navigate).not.toHaveBeenCalledWith('LibraryCatalog', expect.anything());
+  expect(view.queryByText('在圖書館網站搜尋')).toBeNull();
+  const url = new URL(jest.mocked(Linking.openURL).mock.calls.at(-1)![0]);
+  expect(url.hostname).toBe('webpacx.ncue.edu.tw');
+  expect(url.pathname).toBe('/search');
+  expect(url.searchParams.get('searchInput')).toBe('資料庫 & SQL');
+  expect(url.searchParams.get('searchField')).toBe('FullText');
+});
+
+test('NTUB and THU library searches stay on each school WebPACX host', async () => {
+  mockSchool = { id: 'ntub' };
+  let view = render(<LibraryAiFirstScreen />);
+  fireEvent.changeText(view.getByLabelText('館藏關鍵字'), '會計');
+  await act(async () => fireEvent.press(view.getByText('查詢館藏')));
+  expect(new URL(jest.mocked(Linking.openURL).mock.calls.at(-1)![0]).hostname).toBe(
+    'webpacx.ntub.edu.tw',
+  );
+  expect(Clipboard.setStringAsync).not.toHaveBeenCalled();
+
+  mockSchool = { id: 'thu' };
+  view = render(<LibraryAiFirstScreen />);
+  fireEvent.changeText(view.getByLabelText('館藏關鍵字'), '哲學');
+  await act(async () => fireEvent.press(view.getByText('查詢館藏')));
+  const thu = new URL(jest.mocked(Linking.openURL).mock.calls.at(-1)![0]);
+  expect(thu.hostname).toBe('webpac.lib.thu.edu.tw');
+  expect(thu.searchParams.get('searchInput')).toBe('哲學');
+  expect(Clipboard.setStringAsync).not.toHaveBeenCalled();
+});
+
+test('Fu Jen library search opens Sierra results with the 75-character limit', async () => {
+  mockSchool = { id: 'fju' };
+  const navigate = jest.fn();
+  const view = render(<LibraryAiFirstScreen navigation={{ navigate }} />);
+  expect(view.getByLabelText('館藏關鍵字').props.maxLength).toBe(75);
+  expect(view.getByText('此校官方館藏關鍵字上限為 75 字。')).toBeTruthy();
+  fireEvent.changeText(view.getByLabelText('館藏關鍵字'), '資料庫');
+  await act(async () => fireEvent.press(view.getByText('查詢館藏')));
+  expect(Clipboard.setStringAsync).not.toHaveBeenCalled();
+  expect(navigate).not.toHaveBeenCalledWith('LibraryCatalog', expect.anything());
+  const url = new URL(jest.mocked(Linking.openURL).mock.calls.at(-1)![0]);
+  expect(url.hostname).toBe('library.lib.fju.edu.tw');
+  expect(url.port).toBe('444');
+  expect(url.pathname).toBe('/search~S0*cht/');
+  expect(url.searchParams.get('searcharg')).toBe('資料庫');
+  await act(async () => fireEvent.press(view.getByText('開啟我的借閱紀錄')));
+  expect(Linking.openURL).toHaveBeenCalledWith(
+    'https://library.lib.fju.edu.tw:444/patroninfo*cht',
+  );
+});
+
 test('restaurant search matches descriptions without leaving unrelated restaurants visible', async () => {
   jest.mocked(loadDiningCatalog).mockResolvedValueOnce({
     venues: [

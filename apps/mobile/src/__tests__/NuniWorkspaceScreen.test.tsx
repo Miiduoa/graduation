@@ -23,9 +23,11 @@ jest.mock('../screens/nuni/NuniCourses', () => ({
   NuniCourses: ({
     initialWorkspaceId,
     initialAssignmentId,
+    initialMaterialId,
   }: {
     initialWorkspaceId?: string;
     initialAssignmentId?: string;
+    initialMaterialId?: string;
   }) => {
     const { Text, TextInput } = require('react-native');
     const { useNuniDraftState } = jest.requireActual('../state/nuniDrafts');
@@ -34,6 +36,7 @@ jest.mock('../screens/nuni/NuniCourses', () => ({
       <>
         {initialWorkspaceId ? <Text>{`workspace:${initialWorkspaceId}`}</Text> : null}
         {initialAssignmentId ? <Text>{`assignment:${initialAssignmentId}`}</Text> : null}
+        {initialMaterialId ? <Text>{`material:${initialMaterialId}`}</Text> : null}
         <TextInput testID="course-draft" value={draft} onChangeText={setDraft} />
       </>
     );
@@ -491,6 +494,25 @@ test('forwards class-workspace and assignment ids into the courses tab', () => {
   );
   expect(view.getByText('workspace:cw_11111111-1111-4111-8111-111111111111')).toBeTruthy();
   expect(view.getByText('assignment:cwa_22222222-2222-4222-8222-222222222222')).toBeTruthy();
+});
+
+test('forwards materialId into the courses tab without dropping assignment deep links', () => {
+  mockAuth.session = principal;
+  const view = render(
+    <NuniWorkspaceScreen
+      route={{
+        params: {
+          tab: 'courses',
+          workspaceId: 'cw_11111111-1111-4111-8111-111111111111',
+          assignmentId: 'cwa_22222222-2222-4222-8222-222222222222',
+          materialId: 'cwm_66666666-6666-4666-8666-000000000180',
+        },
+      }}
+    />,
+  );
+  expect(view.getByText('workspace:cw_11111111-1111-4111-8111-111111111111')).toBeTruthy();
+  expect(view.getByText('assignment:cwa_22222222-2222-4222-8222-222222222222')).toBeTruthy();
+  expect(view.getByText('material:cwm_66666666-6666-4666-8666-000000000180')).toBeTruthy();
 });
 
 test('restaurant entry selects food and retains its retry intent through temporary validation only', async () => {

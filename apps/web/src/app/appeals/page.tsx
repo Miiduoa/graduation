@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import {
   APPEAL_NEED_COURSE_COPY,
@@ -18,8 +18,10 @@ import {
 } from '@campus/shared';
 import { SiteShell } from '@/components/SiteShell';
 import { SchoolAccountRequired } from '@/components/SchoolAccountRequired';
+import { SchoolScopePlaceholder } from '@/components/SchoolScopePlaceholder';
 import { useAuth } from '@/components/AuthGuard';
 import { useSelectedSchool } from '@/components/SelectedSchoolProvider';
+import { useDemoRole } from '@/lib/demoRole';
 import {
   appealOfferingId,
   createCourseAppeal,
@@ -39,9 +41,45 @@ function newRequestId() {
 }
 
 export default function AppealsPage() {
-  const { user } = useAuth();
+  const { user, loading: authLoading } = useAuth();
   const school = useSelectedSchool();
-  const schoolId = school.selectedSchoolId || 'pu';
+  const [demoRole] = useDemoRole();
+  const schoolId = school.selectedSchoolId;
+
+  if (authLoading) {
+    return (
+      <SiteShell title="課程申訴" subtitle="送出後可以在這裡看老師處理到哪。">
+        <p role="status">正在確認登入狀態…</p>
+      </SiteShell>
+    );
+  }
+
+  if (school.loading || !schoolId) {
+    return (
+      <SiteShell title="課程申訴" subtitle="送出後可以在這裡看老師處理到哪。">
+        <SchoolScopePlaceholder />
+      </SiteShell>
+    );
+  }
+
+  if (!user) {
+    return (
+      <SiteShell title="課程申訴" subtitle="送出後可以在這裡看老師處理到哪。">
+        <SchoolAccountRequired returnUrl="/appeals" alternative="申訴請先向授課老師或系辦反映。" />
+      </SiteShell>
+    );
+  }
+
+  return (
+    <AppealsContent
+      key={`${user.uid}:${schoolId}:${demoRole}`}
+      schoolId={schoolId}
+      uid={user.uid}
+    />
+  );
+}
+
+function AppealsContent({ schoolId, uid }: { schoolId: string; uid: string }) {
   const [items, setItems] = useState<CourseAppeal[]>([]);
   const [courses, setCourses] = useState<PersonalCourse[] | null>(null);
   const [courseId, setCourseId] = useState('');
@@ -51,30 +89,49 @@ export default function AppealsPage() {
   const [notice, setNotice] = useState('');
   const [busy, setBusy] = useState(false);
   const requestId = useRef(newRequestId());
+  const mounted = useRef(false);
+  const generation = useRef(0);
+  const opLock = useRef(false);
 
   const load = useCallback(async () => {
-    if (!user) return;
-    const [rows, timetable] = await Promise.all([
-      listCourseAppeals(schoolId, user.uid),
-      loadPersonalTimetable(user.uid, schoolId),
-    ]);
-    const list = rows as CourseAppeal[];
-    const usable = timetable.courses.filter((course) => course.name.trim());
-    const offeringIds = [
-      ...new Set([
-        ...usable.map((course) => courseOfferingId(course)),
-        ...list.map((item) => item.offeringId || '').filter(Boolean),
-      ]),
-    ];
-    const status = await loadAppealTeacherStatus(schoolId, offeringIds);
-    setItems(list);
-    setCourses(usable);
-    setAssigned(status);
-    return status;
-  }, [user, schoolId]);
+    if (!mounted.current) return null;
+    const run = ++generation.current;
+    try {
+      const [rows, timetable] = await Promise.all([
+        listCourseAppeals(schoolId, uid),
+        loadPersonalTimetable(uid, schoolId),
+      ]);
+      if (!mounted.current || run !== generation.current) return null;
+      const list = rows as CourseAppeal[];
+      const usable = timetable.courses.filter((course) => course.name.trim());
+      const offeringIds = [
+        ...new Set([
+          ...usable.map((course) => courseOfferingId(course)),
+          ...list.map((item) => item.offeringId || '').filter(Boolean),
+        ]),
+      ];
+      const status = await loadAppealTeacherStatus(schoolId, offeringIds);
+      if (!mounted.current || run !== generation.current) return null;
+      setItems(list);
+      setCourses(usable);
+      setAssigned(status);
+      return status;
+    } catch {
+      if (mounted.current && run === generation.current) {
+        setNotice('現在讀不到申訴，請稍後再試。');
+      }
+      return null;
+    }
+  }, [uid, schoolId]);
 
-  useEffect(() => {
-    void load().catch(() => setNotice('現在讀不到申訴，請稍後再試。'));
+  useLayoutEffect(() => {
+    mounted.current = true;
+    void Promise.resolve().then(load);
+    return () => {
+      mounted.current = false;
+      generation.current += 1;
+      opLock.current = false;
+    };
   }, [load]);
 
   const sorted = useMemo(
@@ -86,20 +143,12 @@ export default function AppealsPage() {
     [items],
   );
 
-  if (!user) {
-    return (
-      <SiteShell title="課程申訴" subtitle="送出後可以在這裡看老師處理到哪。">
-        <SchoolAccountRequired returnUrl="/appeals" alternative="申訴請先向授課老師或系辦反映。" />
-      </SiteShell>
-    );
-  }
-
   const top = appealTopCard(items, assigned);
   const noCourses = courses !== null && courses.length === 0;
   const picked = courses?.find((course) => course.id === courseId);
 
   const submit = async () => {
-    if (busy) return;
+    if (opLock.current || !mounted.current) return;
     if (!picked) {
       setNotice(noCourses ? APPEAL_NEED_COURSE_COPY : '請先選要申訴的課。');
       return;
@@ -118,35 +167,61 @@ export default function AppealsPage() {
       setNotice('這門課已經有一樣主旨的申訴還沒處理完。');
       return;
     }
+    opLock.current = true;
     setBusy(true);
+    const offeringId = appealOfferingId(picked);
     try {
       await createCourseAppeal(
         {
           schoolId,
-          studentUid: user.uid,
+          studentUid: uid,
           courseId: picked.id,
           courseName: picked.name,
-          offeringId: appealOfferingId(picked),
+          offeringId,
           title: title.trim(),
           body: body.trim(),
         },
         requestId.current,
         courses || undefined,
       );
+      if (!mounted.current) return;
       requestId.current = newRequestId();
       setTitle('');
       setBody('');
       setCourseId('');
     } catch {
-      setNotice('這次沒有送出，請稍後再試。');
-      setBusy(false);
+      if (mounted.current) {
+        setNotice('這次沒有送出，請稍後再試。');
+        setBusy(false);
+      }
+      opLock.current = false;
       return;
     }
     // 送出成功（包括連按時第一下已經送到）：看這門課有沒有對應老師再決定怎麼說
-    const offeringId = appealOfferingId(picked);
     const latest = await load().catch(() => null);
+    if (!mounted.current) return;
     setNotice(appealSubmittedCopy(offeringId, latest || assigned));
     setBusy(false);
+    opLock.current = false;
+  };
+
+  const withdraw = async (id: string) => {
+    if (opLock.current || !mounted.current) return;
+    opLock.current = true;
+    setBusy(true);
+    try {
+      await withdrawCourseAppeal(id);
+      if (!mounted.current) return;
+      setNotice('已撤回。');
+      await load();
+    } catch {
+      if (mounted.current) setNotice('這次沒有撤回，請稍後再試。');
+    } finally {
+      if (mounted.current) {
+        setBusy(false);
+        opLock.current = false;
+      }
+    }
   };
 
   return (
@@ -219,12 +294,8 @@ export default function AppealsPage() {
                 <button
                   type="button"
                   className="btn"
-                  onClick={() =>
-                    void withdrawCourseAppeal(item.id).then(async () => {
-                      setNotice('已撤回。');
-                      await load();
-                    })
-                  }
+                  disabled={busy}
+                  onClick={() => void withdraw(item.id)}
                 >
                   撤回
                 </button>

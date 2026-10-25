@@ -1,8 +1,39 @@
-import { act, renderHook } from '@testing-library/react';
+import { act, renderHook, waitFor } from '@testing-library/react';
 import { afterEach, expect, it, vi } from 'vitest';
-import { useAdminMutation } from './hooks';
+import { useAdminMutation, useAdminResource } from './hooks';
 
 afterEach(() => vi.unstubAllGlobals());
+
+const keepResponse = (value: unknown) => value;
+
+it.each([401, 403])(
+  'clears retained management records when the server returns %s',
+  async (status) => {
+    const fetcher = vi
+      .fn()
+      .mockResolvedValueOnce(new Response('{"people":["private"]}'))
+      .mockResolvedValueOnce(new Response('{"error":"FORBIDDEN"}', { status }));
+    vi.stubGlobal('fetch', fetcher);
+    const hook = renderHook(() => useAdminResource('people?tenantId=pu', 'account', keepResponse));
+    await waitFor(() => expect(hook.result.current.value).toEqual({ people: ['private'] }));
+    act(() => hook.result.current.reload());
+    await waitFor(() => expect(hook.result.current.error).toBeTruthy());
+    expect(hook.result.current.value).toBeUndefined();
+  },
+);
+
+it('retains recoverable records after a temporary read failure', async () => {
+  const fetcher = vi
+    .fn()
+    .mockResolvedValueOnce(new Response('{"people":["private"]}'))
+    .mockRejectedValueOnce(new TypeError('Network unavailable'));
+  vi.stubGlobal('fetch', fetcher);
+  const hook = renderHook(() => useAdminResource('people?tenantId=pu', 'account', keepResponse));
+  await waitFor(() => expect(hook.result.current.value).toBeTruthy());
+  act(() => hook.result.current.reload());
+  await waitFor(() => expect(hook.result.current.error).toBeTruthy());
+  expect(hook.result.current.value).toEqual({ people: ['private'] });
+});
 
 it('isolates in-flight locks and stale handlers across account contexts', async () => {
   let finishA!: (value: Response) => void;

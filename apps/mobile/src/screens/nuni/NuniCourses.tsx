@@ -11,6 +11,16 @@ import React, {
 } from 'react';
 import { Image, Linking, Pressable, ScrollView, Text, TextInput, View } from 'react-native';
 import { revealAssignmentSubmitArea } from './scrollAssignment';
+import {
+  MATERIAL_CURSOR_CYCLE_MESSAGE,
+  MATERIAL_TARGET_AUTO_PAGE_BUDGET,
+  appendMaterialPage,
+  emptyMaterialPageProgress,
+  filterLoadedMaterials,
+  materialSearchStatusCopy,
+  visibleLoadedMaterials,
+  type MaterialPageProgress,
+} from './materialDiscovery';
 import { randomUUID } from 'expo-crypto';
 import {
   createNuniClasses,
@@ -552,9 +562,11 @@ function useLoad<T>(load: () => Promise<T>, automatic = true, clearOnDenied = fa
 export function NuniCourses({
   initialWorkspaceId,
   initialAssignmentId,
+  initialMaterialId,
 }: {
   initialWorkspaceId?: string;
   initialAssignmentId?: string;
+  initialMaterialId?: string;
 } = {}) {
   const auth = useNuniSession();
   if (!auth.session || auth.loading || auth.pendingLogout) return null;
@@ -567,6 +579,7 @@ export function NuniCourses({
       bffRequest={auth.bffRequest}
       initialWorkspaceId={initialWorkspaceId}
       initialAssignmentId={initialAssignmentId}
+      initialMaterialId={initialMaterialId}
     />
   );
 }
@@ -577,6 +590,7 @@ function CourseScope({
   bffRequest,
   initialWorkspaceId,
   initialAssignmentId,
+  initialMaterialId,
 }: {
   session: NativeNuniSession;
   request: ReturnType<typeof useNuniSession>['request'];
@@ -584,6 +598,7 @@ function CourseScope({
   bffRequest?: ReturnType<typeof useNuniSession>['bffRequest'];
   initialWorkspaceId?: string;
   initialAssignmentId?: string;
+  initialMaterialId?: string;
 }) {
   const theme = useTheme();
   const classes = useMemo(
@@ -614,15 +629,20 @@ function CourseScope({
     initialWorkspaceId ?? null,
   );
   const [focusActivityId, setFocusActivityId] = useState<string | undefined>(initialAssignmentId);
+  const [focusMaterialId, setFocusMaterialId] = useState<string | undefined>(initialMaterialId);
   useEffect(() => {
     if (initialWorkspaceId) setSelected(initialWorkspaceId);
   }, [initialWorkspaceId, setSelected]);
   useEffect(() => {
     if (initialAssignmentId) setFocusActivityId(initialAssignmentId);
   }, [initialAssignmentId]);
+  useEffect(() => {
+    if (initialMaterialId) setFocusMaterialId(initialMaterialId);
+  }, [initialMaterialId]);
   const openCourse = useCallback(
     (id: string, activityId?: string) => {
       setFocusActivityId(activityId);
+      setFocusMaterialId(undefined);
       setSelected(id);
     },
     [setSelected],
@@ -646,9 +666,11 @@ function CourseScope({
           classes={classes}
           onBack={() => {
             setFocusActivityId(undefined);
+            setFocusMaterialId(undefined);
             setSelected(null);
           }}
           initialAssignmentId={focusActivityId}
+          initialMaterialId={focusMaterialId}
           scrollRef={scrollRef}
           contentOffsetYRef={contentOffsetYRef}
         />
@@ -778,6 +800,7 @@ function CourseDetail({
   classes,
   onBack,
   initialAssignmentId,
+  initialMaterialId,
   scrollRef,
   contentOffsetYRef,
 }: {
@@ -785,18 +808,44 @@ function CourseDetail({
   classes: Classes;
   onBack(): void;
   initialAssignmentId?: string;
+  initialMaterialId?: string;
   scrollRef: RefObject<ScrollView | null>;
   contentOffsetYRef: MutableRefObject<number>;
 }) {
+  const theme = useTheme();
   const pageGeneration = useRef(0);
   const pagePending = useRef(false);
+  const pageFlight = useRef(0);
+  const lookupGeneration = useRef(0);
+  const pageProgress = useRef<MaterialPageProgress<NuniMaterial>>(emptyMaterialPageProgress());
   const [loadingMore, setLoadingMore] = useState(false);
   const [materialsError, setMaterialsError] = useState('');
   const [materialsDenied, setMaterialsDenied] = useState(false);
   const [cursorInvalid, setCursorInvalid] = useState(false);
+  const [cursorCycled, setCursorCycled] = useState(false);
+  const [materialQuery, setMaterialQuery] = useState('');
+  const [targetSeekBudget, setTargetSeekBudget] = useState(0);
+  const [targetSeekCancelled, setTargetSeekCancelled] = useState(false);
+  const [targetSeekActive, setTargetSeekActive] = useState(false);
+  const invalidateMaterialLookup = useCallback(() => {
+    lookupGeneration.current += 1;
+    pageFlight.current += 1;
+    pagePending.current = false;
+    setLoadingMore(false);
+  }, []);
+  const resetMaterialPaging = useCallback(() => {
+    invalidateMaterialLookup();
+    pageProgress.current = emptyMaterialPageProgress();
+    setMaterialsError('');
+    setMaterialsDenied(false);
+    setCursorInvalid(false);
+    setCursorCycled(false);
+  }, [invalidateMaterialLookup]);
   useEffect(
     () => () => {
       pageGeneration.current += 1;
+      lookupGeneration.current += 1;
+      pageFlight.current += 1;
     },
     [classes, id],
   );
@@ -804,25 +853,38 @@ function CourseDetail({
     // Reloads and confirmed publication restart at the newest page. An older
     // pending page must never append into this new authority snapshot.
     pageGeneration.current += 1;
-    pagePending.current = false;
-    setLoadingMore(false);
-    setMaterialsError('');
-    setMaterialsDenied(false);
-    setCursorInvalid(false);
+    const run = pageGeneration.current;
+    resetMaterialPaging();
+    if (initialMaterialId) {
+      setTargetSeekCancelled(false);
+      setTargetSeekBudget(MATERIAL_TARGET_AUTO_PAGE_BUDGET);
+      setTargetSeekActive(true);
+    } else {
+      setTargetSeekActive(false);
+      setTargetSeekBudget(0);
+      setTargetSeekCancelled(false);
+    }
     const course = await classes.get(id);
     const [page, assignments, quizzes] = await Promise.all([
       classes.materialsPage(id),
       classes.assignments(id),
       classes.quizzes(id),
     ]);
+    const snapshot = appendMaterialPage<NuniMaterial>(
+      emptyMaterialPageProgress<NuniMaterial>(),
+      page,
+      undefined,
+    );
+    // useLoad drops stale state, but must not let an older first page rewrite the shared pager ref.
+    if (run === pageGeneration.current) pageProgress.current = snapshot;
     return {
       course,
-      materials: page.materials,
-      materialsCursor: page.nextCursor,
+      materials: snapshot.items,
+      materialsCursor: snapshot.nextCursor,
       assignments,
       quizzes,
     };
-  }, [classes, id]);
+  }, [classes, id, initialMaterialId, resetMaterialPaging]);
   const result = useLoad(load, true, true);
   const [tab, setTab] = useNuniDraftState<'assignments' | 'materials' | 'quizzes'>(
     `course:${id}:tab`,
@@ -838,66 +900,165 @@ function CourseDetail({
   const linkedQuiz =
     !!initialAssignmentId && !!data?.quizzes.some((item) => item.id === initialAssignmentId);
   const missingLinkedWork =
-    !!initialAssignmentId && !!data && !linkedAssignment && !linkedQuiz;
+    !!initialAssignmentId &&
+    !initialMaterialId &&
+    !!data &&
+    !linkedAssignment &&
+    !linkedQuiz;
   const linkedQuizTab =
     !!initialAssignmentId &&
     (linkedQuiz || (!linkedAssignment && /^cwq_/i.test(initialAssignmentId)));
+  const linkedMaterial =
+    !!initialMaterialId && !!data?.materials.some((item) => item.id === initialMaterialId);
+  const missingLinkedMaterial =
+    !!initialMaterialId &&
+    !!data &&
+    !result.loading &&
+    !loadingMore &&
+    !materialsDenied &&
+    !cursorInvalid &&
+    !cursorCycled &&
+    !materialsError &&
+    !data.materialsCursor &&
+    !linkedMaterial &&
+    !targetSeekActive;
   useEffect(() => {
-    if (!initialAssignmentId) return;
+    if (initialMaterialId) {
+      invalidateMaterialLookup();
+      setTab('materials');
+      setMaterialQuery('');
+      setTargetSeekCancelled(false);
+      setTargetSeekBudget(MATERIAL_TARGET_AUTO_PAGE_BUDGET);
+      setTargetSeekActive(true);
+      return;
+    }
+    invalidateMaterialLookup();
+    setTargetSeekActive(false);
+    setTargetSeekBudget(0);
+    setTargetSeekCancelled(false);
+  }, [initialMaterialId, id, invalidateMaterialLookup, setTab]);
+  useEffect(() => {
+    if (initialMaterialId || !initialAssignmentId) return;
     setTab(linkedQuizTab ? 'quizzes' : 'assignments');
     setActivityFilter('all');
-  }, [initialAssignmentId, linkedQuizTab, setActivityFilter, setTab]);
+  }, [initialAssignmentId, initialMaterialId, linkedQuizTab, setActivityFilter, setTab]);
+  const cancelMaterialLookup = () => {
+    invalidateMaterialLookup();
+    setTargetSeekCancelled(true);
+    setTargetSeekActive(false);
+    setTargetSeekBudget(0);
+  };
+  const resumeMaterialLookup = () => {
+    invalidateMaterialLookup();
+    setTargetSeekCancelled(false);
+    setTargetSeekActive(true);
+    setTargetSeekBudget(MATERIAL_TARGET_AUTO_PAGE_BUDGET);
+  };
   const loadOlderMaterials = async () => {
     if (
       !data?.materialsCursor ||
       result.loading ||
       result.error ||
       cursorInvalid ||
+      cursorCycled ||
       materialsDenied ||
       pagePending.current
     )
       return;
     const run = pageGeneration.current;
+    const lookupRun = lookupGeneration.current;
+    const flight = ++pageFlight.current;
+    const requestedCursor = data.materialsCursor;
     pagePending.current = true;
     setLoadingMore(true);
     setMaterialsError('');
     try {
-      const page = await classes.materialsPage(id, data.materialsCursor);
+      const page = await classes.materialsPage(id, requestedCursor);
       if (run !== pageGeneration.current) return;
+      if (lookupRun !== lookupGeneration.current) return;
+      const merged = appendMaterialPage(pageProgress.current, page, requestedCursor);
+      pageProgress.current = merged;
+      if (merged.cycleDetected) {
+        setCursorCycled(true);
+        setMaterialsError(MATERIAL_CURSOR_CYCLE_MESSAGE);
+        setTargetSeekActive(false);
+        setTargetSeekBudget(0);
+      }
       result.commit((current) => {
         if (!current || run !== pageGeneration.current) return current;
-        const loaded = new Set(current.materials.map((item) => item.id));
+        if (lookupRun !== lookupGeneration.current) return current;
         return {
           ...current,
-          materials: [
-            ...current.materials,
-            ...page.materials.filter((item) => !loaded.has(item.id)),
-          ],
-          materialsCursor: page.nextCursor,
+          materials: merged.items,
+          materialsCursor: merged.nextCursor,
         };
       }, result.version);
+      if (
+        lookupRun === lookupGeneration.current &&
+        targetSeekActive &&
+        !merged.cycleDetected
+      ) {
+        setTargetSeekBudget((remaining) => Math.max(0, remaining - 1));
+      }
     } catch (failure) {
       if (run !== pageGeneration.current) return;
+      if (lookupRun !== lookupGeneration.current) return;
       setMaterialsError(nuniErrorMessage(failure));
       if (failure instanceof NuniError && (failure.status === 403 || failure.status === 404)) {
         pageGeneration.current += 1;
-        pagePending.current = false;
-        setLoadingMore(false);
+        invalidateMaterialLookup();
         setMaterialsDenied(true);
+        setTargetSeekActive(false);
+        setTargetSeekBudget(0);
+        pageProgress.current = emptyMaterialPageProgress();
         result.commit(() => null, result.version);
       } else if (
         failure instanceof NuniError &&
         failure.code === 'CLASS_WORKSPACE_MATERIAL_CURSOR_INVALID'
       ) {
         setCursorInvalid(true);
+        setTargetSeekActive(false);
+        setTargetSeekBudget(0);
       }
     } finally {
-      if (run === pageGeneration.current) {
+      if (flight === pageFlight.current && run === pageGeneration.current) {
         pagePending.current = false;
         setLoadingMore(false);
       }
     }
   };
+  useEffect(() => {
+    if (!initialMaterialId || !targetSeekActive || targetSeekCancelled) return;
+    if (!data || result.loading || result.error || materialsDenied) return;
+    if (cursorInvalid || cursorCycled || materialsError) return;
+    if (linkedMaterial) {
+      setTargetSeekActive(false);
+      return;
+    }
+    if (!data.materialsCursor) {
+      setTargetSeekActive(false);
+      setTargetSeekBudget(0);
+      return;
+    }
+    if (targetSeekBudget <= 0 || loadingMore || pagePending.current) return;
+    void loadOlderMaterials();
+    // loadOlderMaterials closes over the current cursor; re-run after each committed page.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    cursorCycled,
+    cursorInvalid,
+    data,
+    initialMaterialId,
+    linkedMaterial,
+    loadingMore,
+    materialsDenied,
+    materialsError,
+    result.error,
+    result.loading,
+    targetSeekActive,
+    targetSeekBudget,
+    targetSeekCancelled,
+  ]);
   const saveActivity = (item: Activity) => {
     result.commit(
       (current) =>
@@ -946,6 +1107,11 @@ function CourseDetail({
                 : '找不到這份作業。可能已被老師刪除，或你沒有查看權限。請從作業列表選擇其他作業。'}
             </Copy>
           ) : null}
+          {missingLinkedMaterial ? (
+            <Copy alert>
+              找不到這份教材。可能已被老師刪除，或你沒有查看權限。請從教材列表選擇其他教材。
+            </Copy>
+          ) : null}
           <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
             <Button
               label={`作業 ${data.assignments.length}`}
@@ -953,7 +1119,7 @@ function CourseDetail({
               selected={tab === 'assignments'}
             />
             <Button
-              label={`教材 ${data.materials.length}${data.materialsCursor ? '+' : ''}`}
+              label={`教材 ${data.materials.length}${data.materialsCursor || cursorCycled ? '+' : ''}`}
               onPress={() => setTab('materials')}
               selected={tab === 'materials'}
             />
@@ -1017,25 +1183,99 @@ function CourseDetail({
           </View>
           <View style={{ display: tab === 'materials' ? 'flex' : 'none', gap: 16 }}>
             {data.materials.length > 0 ? (
-              <Copy>
-                {data.materialsCursor
-                  ? `已載入 ${data.materials.length} 筆教材，還有較早內容。`
-                  : `共 ${data.materials.length} 筆教材。`}
-              </Copy>
+              <>
+                <TextInput
+                  accessibilityLabel="在這門課找已載入教材"
+                  value={materialQuery}
+                  onChangeText={setMaterialQuery}
+                  placeholder="標題、單元或內容關鍵字"
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                  style={{
+                    borderWidth: 1,
+                    borderColor: theme.colors.border,
+                    borderRadius: 10,
+                    paddingHorizontal: 14,
+                    paddingVertical: 12,
+                    fontSize: 15,
+                    color: theme.colors.text,
+                    backgroundColor: theme.colors.surface,
+                  }}
+                />
+                {materialQuery.trim() ? (
+                  <Button label="清除搜尋" onPress={() => setMaterialQuery('')} />
+                ) : null}
+              </>
             ) : null}
-            {data.materials.length === 0 ? (
-              <Copy>老師尚未發布教材。</Copy>
-            ) : (
-              data.materials.map((material) => (
-                <Section key={material.id}>
-                  <Copy title>{material.title}</Copy>
-                  {material.unitTitle ? <Copy>{material.unitTitle}</Copy> : null}
-                  <Copy>{material.body}</Copy>
-                </Section>
-              ))
-            )}
+            {(() => {
+              const matched = filterLoadedMaterials(data.materials, materialQuery);
+              const visible = visibleLoadedMaterials(
+                data.materials,
+                materialQuery,
+                initialMaterialId,
+              );
+              const status = materialSearchStatusCopy({
+                query: materialQuery,
+                loadedCount: data.materials.length,
+                matchCount: matched.length,
+                hasOlder: !!data.materialsCursor,
+                interrupted: cursorCycled,
+              });
+              const seekingTarget =
+                !!initialMaterialId &&
+                targetSeekActive &&
+                !targetSeekCancelled &&
+                !linkedMaterial &&
+                targetSeekBudget > 0;
+              const targetLookupPaused =
+                !!initialMaterialId &&
+                !linkedMaterial &&
+                !missingLinkedMaterial &&
+                !!data.materialsCursor &&
+                !cursorInvalid &&
+                !cursorCycled &&
+                !seekingTarget &&
+                (targetSeekCancelled || targetSeekBudget <= 0);
+              return (
+                <>
+                  {status ? <Copy>{status}</Copy> : null}
+                  {seekingTarget ? (
+                    <>
+                      <Copy>正在載入較早教材以尋找目標…</Copy>
+                      <Button label="取消尋找" onPress={cancelMaterialLookup} />
+                    </>
+                  ) : null}
+                  {targetLookupPaused ? (
+                    <>
+                      <Copy>
+                        {targetSeekCancelled
+                          ? '已取消尋找目標教材。已載入內容仍保留，可繼續尋找。'
+                          : '尚未找到這份教材，已暫停自動載入。可繼續尋找或載入較早教材。'}
+                      </Copy>
+                      <Button label="繼續尋找" onPress={resumeMaterialLookup} />
+                    </>
+                  ) : null}
+                  {data.materials.length === 0 ? (
+                    <Copy>老師尚未發布教材。</Copy>
+                  ) : visible.length === 0 ? null : (
+                    visible.map((material) => (
+                      <MaterialCard
+                        key={material.id}
+                        material={material}
+                        focused={
+                          material.id === initialMaterialId && !targetSeekCancelled
+                        }
+                        lookupGeneration={lookupGeneration}
+                        scrollRef={scrollRef}
+                        contentOffsetYRef={contentOffsetYRef}
+                      />
+                    ))
+                  )}
+                </>
+              );
+            })()}
             {materialsError ? <Copy alert>{materialsError}</Copy> : null}
-            {cursorInvalid ? (
+            {cursorInvalid || cursorCycled ? (
               <Button label="更新教材" onPress={() => void result.refresh()} />
             ) : data.materialsCursor ? (
               <Button
@@ -1134,6 +1374,58 @@ function CourseDetail({
         </View>
       ) : null}
     </>
+  );
+}
+
+function MaterialCard({
+  material,
+  focused = false,
+  lookupGeneration,
+  scrollRef,
+  contentOffsetYRef,
+}: {
+  material: NuniMaterial;
+  focused?: boolean;
+  lookupGeneration?: MutableRefObject<number>;
+  scrollRef?: RefObject<ScrollView | null>;
+  contentOffsetYRef?: MutableRefObject<number>;
+}) {
+  const cardRef = useRef<View>(null);
+  const revealed = useRef(false);
+  const revealIntent = useRef(lookupGeneration?.current ?? 0);
+  if (focused) revealIntent.current = lookupGeneration?.current ?? revealIntent.current;
+  const revealTarget = () => {
+    if (!focused || revealed.current) return;
+    const scroll = scrollRef?.current;
+    const target = cardRef.current;
+    if (!scroll || !target) return;
+    const intent = revealIntent.current;
+    revealed.current = true;
+    revealAssignmentSubmitArea(scroll, target, {
+      contentOffsetY: contentOffsetYRef?.current ?? 0,
+      isActive: () =>
+        focused &&
+        scrollRef?.current === scroll &&
+        cardRef.current === target &&
+        (lookupGeneration?.current ?? intent) === intent,
+    });
+  };
+  return (
+    <Section>
+      <View
+        ref={cardRef}
+        testID={`material-${material.id}`}
+        onLayout={revealTarget}
+        style={{ gap: 12 }}
+      >
+        {focused ? (
+          <Text accessibilityLabel={`目標教材：${material.title}`}>目標教材</Text>
+        ) : null}
+        <Copy title>{material.title}</Copy>
+        {material.unitTitle ? <Copy>{material.unitTitle}</Copy> : null}
+        <Copy>{material.body}</Copy>
+      </View>
+    </Section>
   );
 }
 

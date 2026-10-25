@@ -12,6 +12,7 @@ import { useAdminMutation } from './hooks';
 import { adminError } from './api';
 import common from '@/app/servicePages.module.css';
 import styles from './Admin.module.css';
+import { AdminHeader } from './AdminHeader';
 
 export function AdminLogin() {
   const auth = useNuniSession();
@@ -30,13 +31,18 @@ export function AdminLogin() {
     if (mounted.current) router.replace('/admin');
   }
   return (
-    <SiteShell title="管理員登入" subtitle="使用具有平台管理權限的帳號管理學校與服務。">
+    <SiteShell
+      header={<AdminHeader />}
+      title="管理員登入"
+      subtitle="使用具有平台管理權限的帳號管理學校與服務。"
+    >
       {completing || auth.loading ? (
         <p role="status" className={common.loading}>
           正在確認登入狀態…
         </p>
       ) : auth.session?.isPlatformOperator ? (
-        <section className={common.stateCard}>
+        <section className={`${common.stateCard} ${styles.gateCard}`}>
+          <p className={styles.eyebrow}>平台管理員</p>
           <h2>管理員已登入</h2>
           <p>目前帳號已具有平台管理權限，可以直接進入管理台。</p>
           <Link className={styles.link} href="/admin">
@@ -44,10 +50,15 @@ export function AdminLogin() {
           </Link>
         </section>
       ) : auth.session || auth.pendingLogout ? (
-        <section className={common.stateCard}>
+        <section className={`${common.stateCard} ${styles.gateCard}`}>
+          <p className={styles.eyebrow}>平台管理員</p>
           <h2>{auth.pendingLogout ? '完成登出後再登入' : '目前帳號沒有管理權限'}</h2>
-          <p>請先登出目前帳號，再使用管理員帳號登入。</p>
-          {auth.error && <p role="alert">{auth.error}</p>}
+          <p>請先登出目前帳號，再使用管理員帳號登入。學校管理員身分不能進入此管理台。</p>
+          {auth.error && (
+            <p role="alert" className={styles.error}>
+              {auth.error}
+            </p>
+          )}
           <div className={common.actions}>
             <Button onClick={() => void auth.logout()}>
               {auth.pendingLogout ? '重試登出' : '登出目前帳號'}
@@ -55,9 +66,12 @@ export function AdminLogin() {
           </div>
         </section>
       ) : auth.error ? (
-        <section className={common.stateCard}>
+        <section className={`${common.stateCard} ${styles.gateCard}`}>
+          <p className={styles.eyebrow}>平台管理員</p>
           <h2>無法確認帳號</h2>
-          <p role="alert">{auth.error}</p>
+          <p role="alert" className={styles.error}>
+            {auth.error}
+          </p>
           <div className={common.actions}>
             <Button onClick={() => void auth.refresh()}>重新確認</Button>
           </div>
@@ -106,8 +120,11 @@ function LoginForm({ onAuthenticated }: { onAuthenticated: () => Promise<void> }
     await onAuthenticated();
   }
   return (
-    <div className={common.loginLayout}>
-      <form className={common.loginForm} onSubmit={submit}>
+    <div className={styles.loginLayout}>
+      <form className={styles.loginForm} onSubmit={submit}>
+        <p className={styles.eyebrow}>平台管理員</p>
+        <h2 className={styles.loginHeading}>管理員帳號登入</h2>
+        <p className={styles.muted}>僅限平台營運帳號。一般登入或校方身分不會取得此權限。</p>
         <Input
           label="電子郵件"
           type="email"
@@ -128,7 +145,7 @@ function LoginForm({ onAuthenticated }: { onAuthenticated: () => Promise<void> }
           onChange={(event) => setPassword(event.target.value)}
         />
         {(mutation.error || responseError) && (
-          <p role="alert" className={common.errorNotice}>
+          <p role="alert" className={styles.error}>
             {mutation.error || responseError}
           </p>
         )}
@@ -136,13 +153,13 @@ function LoginForm({ onAuthenticated }: { onAuthenticated: () => Promise<void> }
           登入管理台
         </Button>
       </form>
-      <aside className={common.loginHelp}>
+      <aside className={styles.loginHelp}>
         <h2>已有 Google 管理員帳號</h2>
         <p>使用 Google 帳號登入，登入後會確認平台管理權限並返回管理台。</p>
         <Link className={styles.link} href="/classroom/login?returnUrl=%2Fadmin">
           使用 Google 登入
         </Link>
-        <p>一般帳號登入不會取得管理權限。</p>
+        <p className={styles.muted}>一般帳號登入不會取得管理權限。</p>
       </aside>
     </div>
   );

@@ -116,6 +116,14 @@ export const CAMPUS_SERVICES = [
     category: 'connect',
   },
   {
+    name: '校園活動',
+    text: '瀏覽校園公開活動與講座資訊',
+    href: '/events',
+    access: 'public',
+    keywords: '活動 報名 講座 event',
+    category: 'campus',
+  },
+  {
     name: '社團活動',
     text: '查看已加入的社團',
     href: '/clubs',
@@ -183,7 +191,7 @@ export const CAMPUS_SERVICES = [
     name: '失物招領',
     text: '查看本校遺失與拾獲刊登',
     href: '/lost-found',
-    access: 'platform',
+    access: 'school',
     keywords: '失物 招領 遺失 拾獲 lost found',
     category: 'campus',
   },
@@ -209,6 +217,14 @@ export const CAMPUS_SERVICES = [
     href: '/library',
     access: 'public',
     keywords: '書籍 借書 續借 library',
+    category: 'campus',
+  },
+  {
+    name: '學校資訊',
+    text: '查看官方聯絡電話、網站與名錄地址',
+    href: '/school-info',
+    access: 'public',
+    keywords: '總機 官網 地址 名錄 聯絡 school info contact',
     category: 'campus',
   },
   {

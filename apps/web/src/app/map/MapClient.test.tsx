@@ -477,7 +477,7 @@ it('puts search then the map on the first screen, with source collapsed below', 
   expect(screen.getByText(/OpenStreetMap 貢獻者資料/)).toBeTruthy();
 });
 
-it('finds verified dorm, restroom and print places without guessed pins', async () => {
+it('finds verified dorm and print places without claiming public toilets', async () => {
   vi.mocked(loadMapLocations).mockResolvedValue([]);
   render(<MapClient school="pu" />);
   const input = await screen.findByRole('searchbox', { name: '搜尋地點' });
@@ -486,8 +486,10 @@ it('finds verified dorm, restroom and print places without guessed pins', async 
   expect(screen.getByRole('button', { name: '查看思高學苑' })).toBeTruthy();
   expect(screen.queryByText('善牧學苑')).toBeNull();
   fireEvent.change(input, { target: { value: '廁所' } });
-  expect(screen.getByRole('button', { name: '查看希嘉學苑' })).toBeTruthy();
-  expect(screen.getByRole('button', { name: '查看思高學苑' })).toBeTruthy();
+  expect(screen.queryByRole('button', { name: '查看希嘉學苑' })).toBeNull();
+  expect(screen.queryByRole('button', { name: '查看思高學苑' })).toBeNull();
+  expect(screen.getByText('沒有符合條件的地點。')).toBeTruthy();
+  expect(screen.getByRole('link', { name: '校方校區平面圖' })).toBeTruthy();
   fireEvent.change(input, { target: { value: '影印' } });
   expect(screen.getByRole('button', { name: '查看蓋夏圖書館' })).toBeTruthy();
   expect(screen.getByRole('button', { name: '查看至善樓' })).toBeTruthy();

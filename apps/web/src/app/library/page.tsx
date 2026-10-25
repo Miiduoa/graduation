@@ -1,7 +1,12 @@
 'use client';
 
 import { use, useState } from 'react';
-import { buildOfficialLibraryCatalogUrl, getOfficialLibrary } from '@campus/shared/src/officialLibraries';
+import {
+  buildOfficialLibraryCatalogUrl,
+  getOfficialLibrary,
+  getOfficialLibraryCatalogQueryMaxLength,
+  hasVerifiedCatalogSearch,
+} from '@campus/shared/src/officialLibraries';
 import { SiteShell } from '@/components/SiteShell';
 import { useCampusBrowseContext, type CampusBrowseContext } from '@/lib/useCampusBrowseContext';
 
@@ -18,6 +23,8 @@ function LibraryContent({ schoolId, schoolName, status }: CampusBrowseContext) {
   const [field, setField] = useState('FullText');
   const [copyMessage, setCopyMessage] = useState('');
   const library = getOfficialLibrary(schoolId, schoolName);
+  const verifiedSearch = hasVerifiedCatalogSearch(library);
+  const queryMaxLength = getOfficialLibraryCatalogQueryMaxLength(library);
 
   async function copyKeyword() {
     const query = keyword.trim();
@@ -120,10 +127,26 @@ function LibraryContent({ schoolId, schoolName, status }: CampusBrowseContext) {
           ) : (
             <div className="pageStack">
               <p style={{ color: 'var(--muted)' }}>
-                {library.catalogSearch === 'primo-ve'
+                {verifiedSearch
                   ? '輸入關鍵字即可直接前往這所學校的館藏搜尋結果；是否可借與預約成功，請以圖書館系統為準。'
                   : '已對應這所學校的官方館藏入口。請在校方網站完成搜尋；即時館藏與可借狀態不會以推測資料代替。'}
               </p>
+              {verifiedSearch && library.catalogSearch !== 'primo-ve' ? (
+                <label>
+                  搜尋範圍
+                  <select
+                    className="input"
+                    value={field}
+                    onChange={(event) => setField(event.target.value)}
+                  >
+                    <option value="FullText">全部欄位</option>
+                    <option value="Title">書名</option>
+                    <option value="Author">作者</option>
+                    <option value="ISBN">ISBN</option>
+                    <option value="Subject">主題</option>
+                  </select>
+                </label>
+              ) : null}
               <label>
                 想找的書或關鍵字
                 <input
@@ -132,23 +155,28 @@ function LibraryContent({ schoolId, schoolName, status }: CampusBrowseContext) {
                   placeholder="書名、作者或 ISBN"
                   value={keyword}
                   onChange={(event) => { setKeyword(event.target.value); setCopyMessage(''); }}
-                  maxLength={200}
+                  maxLength={queryMaxLength}
                 />
               </label>
+              {library.catalogQueryMaxLength ? (
+                <p style={{ color: 'var(--muted)', margin: 0 }}>
+                  此校官方館藏關鍵字上限為 {library.catalogQueryMaxLength} 字。
+                </p>
+              ) : null}
               <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
                 <a
                   className="btn primary"
-                  href={library.catalogSearch === 'primo-ve' && keyword.trim()
-                    ? buildOfficialLibraryCatalogUrl(schoolId, keyword, 'FullText', schoolName) ?? library.catalogUrl
+                  href={verifiedSearch && keyword.trim()
+                    ? buildOfficialLibraryCatalogUrl(schoolId, keyword, field, schoolName) ?? library.catalogUrl
                     : library.catalogUrl}
                   target="_blank"
                   rel="noopener noreferrer"
                 >
-                  {library.catalogSearch === 'primo-ve' && keyword.trim()
+                  {verifiedSearch && keyword.trim()
                     ? '直接搜尋本校館藏 ↗'
                     : '前往官方館藏入口 ↗'}
                 </a>
-                {library.catalogSearch !== 'primo-ve' && (
+                {!verifiedSearch && (
                   <button className="btn" type="button" disabled={!keyword.trim()} onClick={() => void copyKeyword()}>
                     複製關鍵字
                   </button>

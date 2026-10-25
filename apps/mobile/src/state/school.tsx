@@ -82,7 +82,15 @@ export function schoolFromSelection(selection: Partial<SchoolSelection>): School
 }
 
 function normalizeSelection(selection: Partial<SchoolSelection>): SchoolSelection {
-  return toSelection(schoolFromSelection(selection));
+  const normalized = toSelection(schoolFromSelection(selection));
+  const requestedId = selection.schoolId?.trim();
+  const hasSchoolIdentity = requestedId
+    ? /^[A-Za-z0-9][A-Za-z0-9_-]{0,119}$/.test(requestedId)
+    : findSchoolsByCode(selection.code).length === 1;
+  // A public browsing fallback does not establish a school management scope.
+  return hasSchoolIdentity
+    ? normalized
+    : { ...normalized, code: normalizeSchoolCode(selection.code), schoolId: null };
 }
 
 export function SchoolProvider(props: {
@@ -223,7 +231,11 @@ export function SchoolProvider(props: {
 }
 
 export function useSchool() {
-  const ctx = useContext(SchoolContext);
+  const ctx = useOptionalSchool();
   if (!ctx) throw new Error('useSchool must be used within SchoolProvider');
   return ctx;
+}
+
+export function useOptionalSchool() {
+  return useContext(SchoolContext);
 }

@@ -25,6 +25,13 @@ import type { AssistantActionProposal, AssistantChoiceMenu } from '../data';
 import { TAB_BAR_CONTENT_BOTTOM_PADDING } from '../ui/navigationTheme';
 import { theme } from '../ui/theme';
 import { useSchool } from '../state/school';
+import {
+  buildCheckBusOfflineMessage,
+  buildSchoolScopedEmergencyFallback,
+  buildSchoolScopedTransportDirections,
+  buildSchoolScopedTransportQuickReply,
+  buildSchoolScopedWeatherQuickReply,
+} from '../features/aiSchoolScopedFallback';
 import { useAuth } from '../state/auth';
 import { useDataSource } from '../hooks/useDataSource';
 import { useAsyncList } from '../hooks/useAsyncList';
@@ -3224,102 +3231,8 @@ export function AIChatScreen(props: any) {
 
   function buildTransportDirections(
     msg: string,
-  ): { content: string; suggestions: string[] } | null {
-    const q = msg.toLowerCase();
-    const asksDirections =
-      /怎麼去|怎樣去|如何去|怎麼到|到.*怎麼走|搭什麼|搭哪|幾號公車|路線|交通/.test(q);
-    const mentionsStation = /台中車站|臺中車站|台中火車站|臺中火車站|車站|火車站/.test(q);
-    const mentionsHsr = /高鐵|烏日/.test(q);
-    const mentionsShalu = /沙鹿.*(車站|火車站)|沙鹿火車站/.test(q);
-    const mentionsMitsui = /三井|outlet|港井/.test(q);
-    const mentionsGaomei = /高美/.test(q);
-
-    if (!asksDirections && !mentionsStation && !mentionsHsr && !mentionsMitsui && !mentionsGaomei) {
-      return null;
-    }
-
-    if (mentionsShalu) {
-      return {
-        content: [
-          '從靜宜大學到沙鹿火車站：',
-          '',
-          '1. 最快：計程車或共乘，約 10 分鐘。',
-          '2. 省錢：到校門口周邊搭往沙鹿市區方向的公車，或用 YouBike 轉乘，實際班次請看台中公車 App。',
-          '3. 如果你要再去台中車站，可從沙鹿火車站搭台鐵區間車到台中車站，約 20-30 分鐘。',
-          '',
-          '離線模式沒有即時班次，出發前請查台鐵或台中公車即時資訊。',
-        ].join('\n'),
-        suggestions: ['怎麼去台中車站', '怎麼去高鐵', '校門口公車'],
-      };
-    }
-
-    if (mentionsHsr) {
-      return {
-        content: [
-          '從靜宜大學到高鐵台中站：',
-          '',
-          '1. 推薦：在校門口一帶搭往高鐵台中站方向的客運或 35 路公車，約 30-40 分鐘。',
-          '2. 趕時間：計程車或共乘約 20-30 分鐘，費用會比公車高很多。',
-          '3. 到站後依指標進入高鐵站大廳；若要轉台鐵，旁邊是新烏日車站。',
-          '',
-          '離線模式不能查即時到站，請用台中公車 App 確認下一班車。',
-        ].join('\n'),
-        suggestions: ['怎麼去台中車站', '查公車站位置', '去沙鹿火車站'],
-      };
-    }
-
-    if (mentionsMitsui) {
-      return {
-        content: [
-          '從靜宜大學到三井 Outlet 台中港：',
-          '',
-          '1. 公車：從校門口周邊搭往梧棲/台中港方向的路線，再依台中公車 App 顯示轉乘或下車。',
-          '2. 計程車或共乘：約 15-25 分鐘，適合多人分攤。',
-          '3. 若時間不趕，先查即時公車會比較穩，因為班距可能不固定。',
-        ].join('\n'),
-        suggestions: ['怎麼去台中車站', '怎麼去高美濕地', '校門口公車'],
-      };
-    }
-
-    if (mentionsGaomei) {
-      return {
-        content: [
-          '從靜宜大學到高美濕地：',
-          '',
-          '1. 公車：通常要往清水/高美方向轉乘，建議直接用台中公車 App 查當下最佳路線。',
-          '2. 計程車或共乘：約 25-35 分鐘，傍晚回程較難叫車，建議先規劃。',
-          '3. 看夕陽要注意潮汐、風大和回程時間。',
-        ].join('\n'),
-        suggestions: ['怎麼去台中車站', '怎麼去三井', '查公車'],
-      };
-    }
-
-    if (mentionsStation || /台中/.test(q)) {
-      return {
-        content: [
-          '從靜宜大學到台中車站，離線版建議兩種走法：',
-          '',
-          '1. 直達公車：到校門口台灣大道上的公車站，搭 300、307 或 308 往台中車站方向，約 40-50 分鐘。尖峰時間可能更久。',
-          '2. 台鐵轉乘：先到沙鹿火車站，再搭台鐵區間車到台中車站。這個方式要多一次轉乘，但有時比較穩。',
-          '',
-          '下車提醒：目的地可設「台中車站」或「臺中車站」。離線模式不能看即時班次，出門前請用台中公車 App 或台鐵 App 確認下一班。',
-        ].join('\n'),
-        suggestions: ['校門口公車在哪', '怎麼去高鐵', '去沙鹿火車站'],
-      };
-    }
-
-    return {
-      content: [
-        '靜宜大學常用交通：',
-        '',
-        '1. 台中車站：校門口搭 300、307、308，約 40-50 分鐘。',
-        '2. 高鐵台中站：搭往高鐵方向的客運或 35 路，約 30-40 分鐘。',
-        '3. 沙鹿火車站：計程車約 10 分鐘，也可查台中公車轉乘。',
-        '',
-        '離線模式沒有即時到站，請用台中公車 App 確認班次。',
-      ].join('\n'),
-      suggestions: ['怎麼去台中車站', '怎麼去高鐵', '去沙鹿火車站'],
-    };
+  ): { content: string; suggestions: string[]; actions?: any[] } | null {
+    return buildSchoolScopedTransportDirections(school.id, msg, school.name);
   }
 
   const COURSE_DAY_NAMES = ['週日', '週一', '週二', '週三', '週四', '週五', '週六'];
@@ -3955,36 +3868,29 @@ export function AIChatScreen(props: any) {
       // ── 天氣 ──
       if (domain === 'weather') {
         if (aiStatus.webSearchEnabled) return null;
-        const month = new Date().getMonth() + 1;
-        const seasonInfo =
-          month >= 6 && month <= 9
-            ? '夏季氣候偏熱，午後容易有雷陣雨，建議攜帶雨具'
-            : month >= 10 && month <= 12
-              ? '秋冬季節早晚溫差較大，建議帶件外套'
-              : month >= 3 && month <= 5
-                ? '春季天氣多變，建議留意氣象預報'
-                : '冬季偏涼，請注意保暖';
+        const weather = buildSchoolScopedWeatherQuickReply(school.id, school.name);
         return {
           id: uid(),
           role: 'assistant',
-          content: `靜宜大學位於台中沙鹿，${seasonInfo}。\n\n⚠️ 即時天氣資訊請查看氣象 APP 或中央氣象署網站以獲得最準確的預報。`,
+          content: weather.content,
           timestamp: new Date(),
           agentType: 'text',
-          suggestions: ['查公車', '推薦午餐'],
+          actions: weather.actions,
+          suggestions: weather.suggestions,
         };
       }
 
       // ── 交通 / 公車 ──
       if (domain === 'transport') {
+        const transport = buildSchoolScopedTransportQuickReply(school.id, school.name);
         return {
           id: uid(),
           role: 'assistant',
-          content:
-            '靜宜大學主要公車路線：\n\n• 300/307/308：往台中車站方向\n• 304：往清水方向\n• 統聯：往高鐵台中站\n\n⚠️ 即時到站資訊請查看「台中公車」APP 以獲得最準確的時間。\n\n要開啟校園地圖查看公車站位置嗎？',
+          content: transport.content,
           timestamp: new Date(),
           agentType: 'text',
-          actions: [{ label: '查看公車站位置', action: 'navigate', params: { screen: '校園' } }],
-          suggestions: ['校門在哪', '怎麼去台中車站'],
+          actions: transport.actions,
+          suggestions: transport.suggestions,
         };
       }
 
@@ -4868,7 +4774,7 @@ export function AIChatScreen(props: any) {
         return `你有 ${_pa.length} 份待處理作業：\n\n${list}\n\n需要我設定提醒嗎？`;
       }
       case 'check_bus':
-        return '靜宜大學主要公車路線：\n\n• 300/307/308：往台中車站方向\n• 304：往清水方向\n• 統聯：往高鐵台中站\n\n⚠️ 即時到站時間請查看「台中公車」APP。';
+        return buildCheckBusOfflineMessage(school.id, school.name);
       case 'set_reminder':
         return `已設定提醒！\n\n內容：${params.title || '提醒'}\n時間：${params.datetime || '稍後'}\n\n到時間會推播通知你 🔔`;
       case 'check_print_balance':
@@ -5572,10 +5478,25 @@ export function AIChatScreen(props: any) {
 
   // ── Main Send Handler ──
   const abortRef = useRef<AbortController | null>(null);
+  const replyScopeRef = useRef({ schoolId: school.id, userId: effectiveUserId ?? null, generation: 0 });
+  useEffect(() => {
+    replyScopeRef.current = {
+      schoolId: school.id,
+      userId: effectiveUserId ?? null,
+      generation: replyScopeRef.current.generation + 1,
+    };
+    abortRef.current?.abort();
+  }, [school.id, effectiveUserId]);
+  const isReplyScopeCurrent = (token: { schoolId: string; userId: string | null; generation: number }) =>
+    mountedRef.current &&
+    token.generation === replyScopeRef.current.generation &&
+    token.schoolId === school.id &&
+    token.userId === (effectiveUserId ?? null);
 
   const handleSend = async (overrideText?: string) => {
     const messageText = (typeof overrideText === 'string' ? overrideText : input).trim();
     if (!messageText) return;
+    const replyScopeToken = { ...replyScopeRef.current };
     earnXP('use_ai_chat').catch(() => {});
 
     // If in a chain (executing or waiting for confirmation)
@@ -6853,6 +6774,7 @@ export function AIChatScreen(props: any) {
 
       try {
         const aiResponse = await chatWithLocalLLMStreaming(aiMessages, aiContext, onToken, signal);
+        if (!isReplyScopeCurrent(replyScopeToken)) return;
         const finalContent = aiResponse.error
           ? `抱歉，發生錯誤：${aiResponse.error}`
           : aiResponse.content;
@@ -7005,6 +6927,7 @@ export function AIChatScreen(props: any) {
             });
           } else {
             const fallback = await chatWithCampusAssistant(aiMessages, aiContext);
+        if (!isReplyScopeCurrent(replyScopeToken)) return;
             if (fallback.campusAssistantSessionId) {
               setCampusAssistantSessionId(fallback.campusAssistantSessionId);
             }
@@ -7043,115 +6966,48 @@ export function AIChatScreen(props: any) {
         fatalError?.stack,
       );
 
-      // ★★ 緊急知識庫回退：即使主流程崩潰，仍嘗試用本地知識回答 ★★
+      // ★★ 緊急知識庫回退：即使主流程崩潰，仍嘗試用本地、選校範圍內知識回答 ★★
       let emergencyContent: string | null = null;
       let emergencySuggestions: string[] = ['再問一次', '換個方式問'];
       const _userText = (userMsg?.content ?? '').toLowerCase();
 
       try {
-        // 1) 交通方向 — buildTransportDirections 已有完整答案
-        const transport = buildTransportDirections(_userText);
-        if (transport) {
-          emergencyContent = transport.content;
-          emergencySuggestions = transport.suggestions;
-        }
-
-        // 2) 校園常見問題 — 靜態知識庫
-        if (!emergencyContent) {
-          const campusKB: { pattern: RegExp; answer: string; suggestions: string[] }[] = [
-            {
-              pattern: /圖書館|蓋夏|借書|還書|自習|看書|討論室/,
-              answer:
-                '靜宜大學蓋夏圖書館資訊：\n\n📍 位置：校園中心區域，蓋夏圖書館\n⏰ 開放時間：週一至週五 08:00-21:30，週六 09:00-17:00，週日及國定假日休館（學期間）\n\n主要服務：借還書、館際互借、自習室、團體討論室預約、電子資源查詢、列印影印\n\n💡 借書上限通常為 30 冊，借期 14-28 天，可線上續借。\n如需預約討論室，請至圖書館網站或親洽服務台。',
-              suggestions: ['怎麼去圖書館', '借書規則', '預約討論室'],
-            },
-            {
-              pattern: /宿舍|住宿|寢室|報修|漏水|洗衣/,
-              answer:
-                '靜宜大學宿舍相關資訊：\n\n🏠 宿舍包含男生宿舍與女生宿舍，住宿申請通常於每學期初開放。\n\n常見服務：\n- 報修：可至宿舍管理室填報修單或透過學校系統線上報修\n- 洗衣機/烘衣機：各樓層設有投幣式洗衣設備\n- 包裹：宿舍管理室代收，請攜帶學生證領取\n- 門禁時間：通常為 23:00，請留意各宿舍公告\n\n有其他宿舍問題可以繼續問我！',
-              suggestions: ['宿舍報修', '洗衣機位置', '門禁時間'],
-            },
-            {
-              pattern: /餐廳|吃什麼|午餐|晚餐|食堂|美食街|便當|飯/,
-              answer:
-                '靜宜大學校園餐飲：\n\n🍽️ 可確認的校內餐飲點：\n- 靜園餐廳：早餐、咖哩、滷味、自助餐、飲料與點心等櫃位\n- 宜園餐廳：早餐、自助餐、茶飲、炸物、咖哩與鍋貼類櫃位\n- 至善美食廣場：快餐、早餐、飯捲、拉麵、水果與便利商店鮮食\n- 小木屋鬆餅、OK 便利商店\n\n⏰ 營業時間依校方公告與現場公告為準。\n\n想知道今天有哪些可推薦餐點，我會用已載入的官方菜單資料回答，不會亂編價格。',
-              suggestions: ['附近有什麼好吃的', '便利商店在哪', '餐廳營業時間'],
-            },
-            {
-              pattern: /選課|加退選|課程|修課|學分|必修|選修|通識/,
-              answer:
-                '靜宜大學選課相關：\n\n📚 選課時程：\n- 初選：通常於開學前 2-3 週\n- 加退選：開學第一至二週\n- 停修：期中考後約一週內\n\n💡 注意事項：\n- 每學期修課上限通常為 25 學分\n- 必修衝堂請洽系辦協調\n- 通識課程需注意領域分配\n- 選課系統：校務行政資訊系統\n\n建議開學前先規劃好課表，熱門課程初選就要搶！',
-              suggestions: ['怎麼選課', '學分上限', '通識規定'],
-            },
-            {
-              pattern: /請假|缺課|曠課|出席|病假|事假/,
-              answer:
-                '靜宜大學請假規定：\n\n📋 請假類型：病假、事假、公假、喪假、產假等\n\n請假流程：\n1. 登入校務系統 → 學生請假系統\n2. 填寫假別、日期、事由\n3. 附上證明文件（病假需醫療證明）\n4. 送出後等待導師/任課老師核准\n\n⚠️ 注意：\n- 曠課達該科總時數 1/3 將被扣考\n- 病假需於銷假後 3 天內補辦\n- 事假應事先請假\n\n有請假問題建議直接洽詢導師或學務處。',
-              suggestions: ['怎麼請病假', '缺課上限', '補假流程'],
-            },
-            {
-              pattern: /成績|分數|GPA|學期成績|期中考|期末考/,
-              answer:
-                '靜宜大學成績相關：\n\n📊 成績查詢：登入校務行政資訊系統 → 成績查詢\n\n成績計算：\n- 通常包含：平時成績（30-40%）、期中考（20-30%）、期末考（30-40%）\n- 各科比例由任課老師決定，請參考課程大綱\n- 及格分數：學士班 60 分\n\n💡 提醒：\n- 期中預警成績會由系統通知\n- 對成績有疑義可在公告期間申請複查\n- 學期平均未達標準可能影響預警或退學',
-              suggestions: ['怎麼查成績', 'GPA 怎麼算', '成績複查'],
-            },
-            {
-              pattern: /停車|機車|汽車|腳踏車|車位|停車場/,
-              answer:
-                '靜宜大學停車資訊：\n\n🅿️ 停車場位置：\n- 機車停車場：校門口附近及各棟周邊\n- 汽車停車場：校園外圍停車區\n- YouBike 站點：校門口附近\n\n注意事項：\n- 機車需辦理停車證\n- 上課尖峰時段車位較緊張，建議提早\n- 違規停車會被拖吊或開單',
-              suggestions: ['機車停車證怎麼辦', 'YouBike 在哪', '停車場位置'],
-            },
-            {
-              pattern: /校園|學校|靜宜|在哪|怎麼走|地圖|位置/,
-              answer:
-                '靜宜大學校園資訊：\n\n📍 地址：台中市沙鹿區台灣大道七段 200 號\n📞 總機：(04) 2632-8001\n\n校園主要建築：\n- 主顧樓、任垣樓、伯鐸樓 — 教學大樓\n- 蓋夏圖書館 — 圖書與自習\n- 至善樓 — 行政中心\n- 體育館、田徑場 — 運動設施\n- 靜園餐廳、宜園餐廳、至善美食廣場 — 校內餐飲點\n\n想知道特定地點怎麼走，可以告訴我你要去哪裡！',
-              suggestions: ['圖書館在哪', '怎麼去台中車站', '餐廳在哪'],
-            },
-          ];
-
-          for (const kb of campusKB) {
-            if (kb.pattern.test(_userText)) {
-              emergencyContent = kb.answer;
-              emergencySuggestions = kb.suggestions;
-              break;
-            }
-          }
-        }
-
-        // 3) 打招呼 / 基礎對話
-        if (!emergencyContent) {
-          if (/你好|嗨|哈囉|hello|hi|hey|早安|午安|晚安/.test(_userText)) {
-            emergencyContent =
-              '你好！我是校園助理\n\n可以問我交通資訊、校園設施、課程問題等，我會盡力幫你解答！';
-            emergencySuggestions = ['怎麼去台中車站', '圖書館開放時間', '今天有什麼課'];
-          } else if (/謝謝|感謝|thx|thanks/.test(_userText)) {
-            emergencyContent = '不客氣！有其他問題隨時問我 😊';
-            emergencySuggestions = ['還有其他問題', '查課表', '查交通'];
-          } else if (/你是誰|你叫什麼|自我介紹/.test(_userText)) {
-            emergencyContent =
-              '我是靜宜大學校園助理！\n\n我可以幫你：\n- 🚌 查交通路線（怎麼去台中車站、高鐵等）\n- 📚 查課程和作業資訊\n- 🏫 校園設施位置與開放時間\n- 🍽️ 餐廳和用餐資訊\n- 📋 請假、選課等學務問題\n\n有什麼想問的，儘管說！';
-            emergencySuggestions = ['怎麼去台中車站', '圖書館在哪', '今天吃什麼'];
-          }
+        const loadedPublicSnippets = [
+          ...(announcements ?? []).slice(0, 3).map((a: any) => a?.title).filter(Boolean),
+          ...(pois ?? []).slice(0, 3).map((p: any) => p?.name).filter(Boolean),
+          ...(diningCafeterias ?? []).slice(0, 3).map((c: any) => c?.name ?? c?.cafeteria).filter(Boolean),
+        ];
+        const emergency = buildSchoolScopedEmergencyFallback({
+          schoolId: school.id,
+          schoolName: school.name,
+          userText: _userText,
+          loadedPublicSnippets,
+        });
+        if (emergency) {
+          emergencyContent = emergency.content;
+          emergencySuggestions = emergency.suggestions;
         }
       } catch (_emergencyError) {
         // 緊急回退本身也出錯，放棄
         console.error('[AIChat] Emergency fallback also failed:', _emergencyError);
       }
 
+
       const errorMsg: Message = {
         id: genMsgId(),
         role: 'assistant',
         content:
           emergencyContent ??
-          '抱歉，處理你的訊息時發生了意外錯誤。請再試一次，或換個方式問問看！\n\n你可以試試這些問題：\n- 怎麼去台中車站\n- 圖書館開放時間\n- 校園餐廳在哪\n- 怎麼請假',
+          '抱歉，處理你的訊息時發生了意外錯誤。請再試一次，或換個方式問問看！\n\n你可以試試：開啟校園地圖、查看公告，或詢問已載入的課表／餐廳資料。',
         timestamp: new Date(),
         agentType: 'text',
         suggestions: emergencySuggestions,
       };
+      if (!isReplyScopeCurrent(replyScopeToken)) return;
       setMessages((prev) => [...prev, errorMsg]);
     } finally {
-      // ★ 無論任何路徑，一定重置 isTyping
-      setIsTyping(false);
+      // ★ 僅重置當前選校／帳號世代的 typing，避免 A→B 切換時舊請求清掉新對話狀態
+      if (isReplyScopeCurrent(replyScopeToken)) setIsTyping(false);
     }
   };
 

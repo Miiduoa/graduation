@@ -168,6 +168,14 @@ async def main():
             await expect(page.get_by_role('status').filter(has_text='確認儲存後才會移動')).to_have_count(0)
             await page.screenshot(path=str(OUT / 'mobile.png'), full_page=True, animations='disabled')
             results.append('390px layout, reachable editor actions and non-dragging movement')
+            friend_availability = page.get_by_role('region', name='共同空堂', exact=True)
+            await expect(friend_availability.get_by_text('這個功能還沒接通', exact=True)).to_have_count(0)
+            await friend_availability.get_by_role('button', name='查看自己的空堂', exact=True).click()
+            await expect(page.get_by_role('region', name='幫我安排', exact=True)).to_be_focused()
+            await expect(page.get_by_role('region', name='幫我安排', exact=True).get_by_role(
+                'heading', name='今天空堂', exact=True
+            )).to_be_visible()
+            results.append('guest friend-availability notice leads to usable local free-time results')
             await page.evaluate('''() => {
                 // Saving creates the campus-scoped copy, which must take precedence over legacy.
                 const key = 'campus-one-personal-timetable:local:pu';
@@ -179,6 +187,9 @@ async def main():
             await page.reload(wait_until='networkidle')
             await expect(page.get_by_role('button', name='今天空堂', exact=True)).to_be_disabled()
             await expect(page.get_by_role('button', name='排讀書時間', exact=True)).to_be_disabled()
+            await expect(friend_availability.get_by_role('link', name='匯入自己的課表', exact=True)).to_have_attribute(
+                'href', '/import?kind=timetable&campus=pu'
+            )
             results.append('incomplete schedules do not produce planning suggestions')
             assert not errors, errors
         except Exception:
