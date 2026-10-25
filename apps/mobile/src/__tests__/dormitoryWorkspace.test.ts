@@ -1,7 +1,9 @@
 import {
   DORM_MILESTONE_LIMIT,
+  DORM_INSPECTION_ITEMS,
   DORM_PARCEL_LIMIT,
   emptyDormWorkspace,
+  dormInspectionProgress,
   isValidDormDate,
   normalizeDormWorkspace,
   sortedDormMilestones,
@@ -49,4 +51,15 @@ test('normalizes parcel notes from older records and excludes malformed IDs', ()
       id: 'parcel_' + n, title: '包裹 ' + n,
     })),
   }).parcels).toHaveLength(DORM_PARCEL_LIMIT);
+});
+
+test('resident room inspection is scoped to known items and never represents school sign-off', () => {
+  const next = normalizeDormWorkspace({
+    inspection: { air: 'issue', doors: 'ok', other: 'approved', network: 'school-accepted' },
+  });
+  expect(next.inspection).toEqual({ air: 'issue', doors: 'ok' });
+  expect(dormInspectionProgress(next)).toEqual({
+    checked: 2, issues: 1, total: DORM_INSPECTION_ITEMS.length,
+  });
+  expect(normalizeDormWorkspace({ version: 1, room: '203' }).inspection).toEqual({});
 });
