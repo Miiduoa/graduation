@@ -13,7 +13,8 @@ export const OPS_TABS = ['schools', 'people', 'merchants', 'affiliation', 'audit
 export type OpsTab = (typeof OPS_TABS)[number];
 
 export function readOpsSchool(search: string | null | undefined): string | null {
-  const candidate = new URLSearchParams((search || '').replace(/^\?/, '')).get('school');
+  const params = new URLSearchParams((search || '').replace(/^\?/, ''));
+  const candidate = params.get('school') ?? params.get('tenantId');
   return candidate && /^[a-z0-9](?:[a-z0-9-]{0,98}[a-z0-9])$/.test(candidate)
     ? candidate
     : null;
@@ -33,6 +34,22 @@ export function readOpsTab(
   const withHash = !raw || raw.startsWith('#') ? raw : `#${raw}`;
   const fragment = collapseInternalPathHash(withHash).replace(/^#/, '');
   return isOpsTab(fragment) ? fragment : 'schools';
+}
+
+// The selected school is navigation context, never an authorization grant.
+export function readOpsSchoolId(search: string | null | undefined): string | null {
+  const tenantId = new URLSearchParams((search || '').replace(/^\?/, '')).get('tenantId');
+  if (!tenantId || tenantId.length > 80 || !/^[a-z0-9][a-z0-9-]*[a-z0-9]$/.test(tenantId))
+    return null;
+  return tenantId;
+}
+
+export function opsTabHref(tab: OpsTab, schoolId: string | null): string {
+  const params = new URLSearchParams({ tab });
+  if ((tab === 'schools' || tab === 'people') && schoolId && readOpsSchoolId(`?tenantId=${encodeURIComponent(schoolId)}`)) {
+    params.set('tenantId', schoolId);
+  }
+  return `${OPS_PATH}?${params.toString()}`;
 }
 
 export const APPROVE_SCHOOL_REASON = '資料齊全，先建檔未開放註冊。';

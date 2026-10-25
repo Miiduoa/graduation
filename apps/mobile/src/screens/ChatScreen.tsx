@@ -72,6 +72,7 @@ type Msg = {
 type ConvoMeta = {
   id: string;
   type: 'dm' | 'group_chat';
+  schoolId?: string;
   memberIds: string[];
   lastMessageText?: string;
   lastMessageAt?: any;
@@ -174,8 +175,15 @@ export function ChatScreen(props: any) {
         }
         const data = snap.data() as ConvoMeta;
         const mids = Array.isArray(data.memberIds) ? data.memberIds : [];
-        if (!mids.includes(myUid)) {
-          setAccessError('你不是此對話的成員，無法檢視訊息。');
+        if (
+          data.schoolId !== school.id ||
+          data.type !== 'dm' ||
+          mids.length !== 2 ||
+          new Set(mids).size !== 2 ||
+          !mids.includes(myUid)
+        ) {
+          setAccessError('這不是目前帳號可存取的本校私訊。');
+          setMessages([]);
           return;
         }
         const other = mids.find((m) => m !== myUid);
@@ -190,7 +198,7 @@ export function ChatScreen(props: any) {
     return () => {
       cancelled = true;
     };
-  }, [conversationIdParam, peerParam, myUid, db]);
+  }, [conversationIdParam, peerParam, myUid, db, school.id]);
 
   // ── 取得對方名稱（切人時先清空，避免顯示上一個對象的名稱） ──
   useEffect(() => {
@@ -388,9 +396,18 @@ export function ChatScreen(props: any) {
       (snap) => {
         if (!snap.exists()) return;
         const data = snap.data() as ConvoMeta;
-        // 防呆：必須是當前生效的對話，且使用者是成員
-        if (myUid && Array.isArray(data.memberIds) && !data.memberIds.includes(myUid)) {
-          setAccessError('你不是此對話的成員，無法檢視訊息。');
+        if (
+          !myUid ||
+          !school.id ||
+          data.schoolId !== school.id ||
+          data.type !== 'dm' ||
+          !Array.isArray(data.memberIds) ||
+          data.memberIds.length !== 2 ||
+          new Set(data.memberIds).size !== 2 ||
+          !data.memberIds.includes(myUid)
+        ) {
+          setMessages([]);
+          setAccessError('這不是目前帳號可存取的本校私訊。');
           return;
         }
         // 打字狀態
@@ -415,7 +432,7 @@ export function ChatScreen(props: any) {
       },
     );
     return () => unsub();
-  }, [db, convoKey, peerId, myUid]);
+  }, [db, convoKey, peerId, myUid, school.id]);
 
   // ── 更新我的在線狀態 + 進入即更新 lastReadBy（讓對話列表的未讀立刻歸零） ──
   useEffect(() => {
@@ -490,6 +507,8 @@ export function ChatScreen(props: any) {
       await updateDoc(convoRef, {
         lastMessageText: draftText.slice(0, 50),
         lastMessageAt: serverTimestamp(),
+        lastMessageSenderId: myUid,
+        updatedAt: serverTimestamp(),
         [`typingUsers.${myUid}`]: null,
       }).catch(() => {});
       try {

@@ -114,3 +114,22 @@ test.each(['chat', 'quick', 'insights'])(
     expect(mockClose).toHaveBeenCalledTimes(1);
   },
 );
+
+test('suggested questions fill an editable draft without calling the backend until submitted', async () => {
+  const view = render(<CampusAssistantScreen />);
+  fireEvent.press(view.getByText('今天有哪些作業要處理？'));
+  expect(view.getByLabelText('詢問校園助理').props.value).toBe('今天有哪些作業要處理？');
+  expect(request).not.toHaveBeenCalled();
+});
+
+test('assistant offers the existing service directly instead of inventing a transaction', async () => {
+  const navigate = jest.fn();
+  const view = render(<CampusAssistantScreen navigation={{ navigate }} />);
+  fireEvent.changeText(view.getByLabelText('詢問校園助理'), '圖書館怎麼走');
+  fireEvent.press(view.getByText('前往校園地圖'));
+  expect(navigate).toHaveBeenCalledWith('校園', {
+    screen: 'MapV2',
+    params: undefined,
+  });
+  expect(request).not.toHaveBeenCalled();
+});

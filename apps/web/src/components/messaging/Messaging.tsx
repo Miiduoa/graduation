@@ -14,6 +14,7 @@ import {
   sendPrivateMessage,
   newPrivateMessageId,
   markConversationRead,
+  togglePrivateMessageReaction,
   markAccountNotificationRead,
   notificationDestination,
   type MessagingSession,
@@ -193,49 +194,94 @@ export function PrivateConversationList({ session }: { session: MessagingSession
   );
   const { state, retry } = useFeed(`${session.uid}:${session.schoolId}`, subscribe);
   const [search, setSearch] = useState('');
-  const rows = (state.data ?? []).filter((row) =>
-    `${row.peerName ?? ''} ${row.preview}`.toLowerCase().includes(search.trim().toLowerCase()),
+  const [onlyUnread, setOnlyUnread] = useState(false);
+  const conversations = state.status === 'ready' ? (state.data ?? []) : [];
+  const isUnread = (row: (typeof conversations)[number]) =>
+    isConversationUnread({
+      uid: session.uid,
+      lastMessageAt: row.lastMessageAt,
+      lastReadAt: row.lastReadAt,
+      lastMessageSenderId: row.lastSenderId,
+    });
+  const unreadCount = conversations.filter(isUnread).length;
+  const query = search.trim().toLocaleLowerCase();
+  const rows = conversations.filter(
+    (row) =>
+      (!onlyUnread || isUnread(row)) &&
+      (!query || `${row.peerName ?? ''} ${row.preview}`.toLocaleLowerCase().includes(query)),
   );
+
   return (
     <div className={styles.stack}>
-      <div className={styles.toolbar}>
+      <div className={styles.inboxHeading}>
+        <div>
+          <p className={styles.overline}>校內私訊</p>
+          <h2>我的對話</h2>
+          <p className={styles.muted}>只有目前帳號所屬學校、且你是成員的對話會出現在這裡。</p>
+        </div>
+        <div className={styles.inboxActions}>
+          <Link className={styles.button} href="/friends">
+            尋找同學
+          </Link>
+          <Link className={styles.button} href="/groups">
+            我的群組
+          </Link>
+        </div>
+      </div>
+      <div className={styles.inboxToolbar}>
         <label className={styles.field}>
           搜尋對話
           <input
             type="search"
             value={search}
             onChange={(event) => setSearch(event.target.value)}
-            placeholder="搜尋姓名或最近訊息"
+            placeholder="姓名、最近訊息"
           />
         </label>
+        <div className={styles.filterRow} role="group" aria-label="對話篩選">
+          <button
+            type="button"
+            className={styles.filterButton}
+            aria-pressed={!onlyUnread}
+            onClick={() => setOnlyUnread(false)}
+          >
+            全部 <span>{conversations.length}</span>
+          </button>
+          <button
+            type="button"
+            className={styles.filterButton}
+            aria-pressed={onlyUnread}
+            onClick={() => setOnlyUnread(true)}
+          >
+            未讀 <span>{unreadCount}</span>
+          </button>
+        </div>
         <button className={styles.button} type="button" onClick={retry}>
           更新對話
         </button>
       </div>
-      <p className={styles.muted}>最近更新的 100 個校內對話會顯示在這裡。</p>
       <StateNotice status={state.status} retry={retry} />
       {state.status === 'ready' &&
         (rows.length ? (
-          <div className={styles.list}>
+          <div className={styles.list} aria-label="對話列表">
+            <p className={styles.resultCount} role="status">
+              {onlyUnread ? `尚未讀取的 ${rows.length} 個對話` : `顯示 ${rows.length} 個對話`}
+            </p>
             {rows.map((row) => {
-              const unread = isConversationUnread({
-                uid: session.uid,
-                lastMessageAt: row.lastMessageAt,
-                lastReadAt: row.lastReadAt,
-                lastMessageSenderId: row.lastSenderId,
-              });
+              const unread = isUnread(row);
               return (
                 <Link
                   className={styles.conversation}
+                  data-unread={unread}
                   key={row.id}
                   href={`/dms/${encodeURIComponent(row.id)}`}
                 >
                   <div className={styles.avatar} aria-hidden="true">
-                    {row.peerName?.slice(0, 1) || '對'}
+                    {row.peerName?.slice(0, 1) || '訊'}
                   </div>
                   <div className={styles.conversationBody}>
                     <div className={styles.row}>
-                      <strong>{row.peerName || '訊息'}</strong>
+                      <strong>{row.peerName || '對話'}</strong>
                       {unread && <span className={styles.badge}>未讀</span>}
                     </div>
                     <p>{row.preview || '尚無訊息內容'}</p>
@@ -249,13 +295,37 @@ export function PrivateConversationList({ session }: { session: MessagingSession
           </div>
         ) : (
           <section className={styles.notice}>
-            <h2>{search.trim() ? '沒有符合的對話' : '目前沒有訊息'}</h2>
-            <p>{search.trim() ? '試著調整搜尋文字。' : '已有的本校訊息會顯示在這裡。'}</p>
-            {search.trim() && (
-              <button className={styles.button} type="button" onClick={() => setSearch('')}>
-                清除搜尋
-              </button>
-            )}
+            <h2>
+              {search.trim()
+                ? '沒有符合的對話'
+                : onlyUnread
+                  ? '所有對話都已讀'
+                  : '目前沒有訊息'}
+            </h2>
+            <p>
+              {search.trim()
+                ? '可以試著改用對方姓名，或清除搜尋重新查看。'
+                : onlyUnread
+                  ? '有新訊息時會出現在這個分類。'
+                  : '你可以從同校好友或已加入的群組開始交流。'}
+            </p>
+            <div className={styles.actions}>
+              {search.trim() && (
+                <button className={styles.button} type="button" onClick={() => setSearch('')}>
+                  清除搜尋
+                </button>
+              )}
+              {onlyUnread && (
+                <button className={styles.button} type="button" onClick={() => setOnlyUnread(false)}>
+                  查看全部對話
+                </button>
+              )}
+              {!search.trim() && !onlyUnread && (
+                <Link className={styles.primary} href="/friends">
+                  尋找同學
+                </Link>
+              )}
+            </div>
           </section>
         ))}
     </div>
@@ -280,18 +350,44 @@ export function PrivateConversationView({
     subscribe,
   );
   const isCurrent = useCurrent(session);
-  const [draft, setDraft] = useState('');
+  const [draftState, setDraftState] = useState<{ scope: string; text: string }>({ scope: '', text: '' });
+  const [messageSearch, setMessageSearch] = useState('');
   const [sending, setSending] = useState(false);
   const [feedback, setFeedback] = useState('');
   const [reading, setReading] = useState(false);
+  const [reacting, setReacting] = useState<string | null>(null);
   const sendLock = useRef(false);
   const readLock = useRef(false);
+  const reactionLock = useRef(false);
   const attempt = useRef<{ id: string; body: string } | null>(null);
   const currentConversation = useRef(conversationId);
   useLayoutEffect(() => {
     currentConversation.current = conversationId;
   }, [conversationId]);
   const active = () => isCurrent() && currentConversation.current === conversationId;
+  const draftKey = `campus-one:dm-draft:${session.uid}:${session.schoolId}:${conversationId}`;
+  // Keep draft state bound to its conversation: effects for a newly selected
+  // conversation must never persist text from the previous account or thread.
+  const draft = draftState.scope === draftKey ? draftState.text : '';
+  const setDraft = (value: string) => setDraftState({ scope: draftKey, text: value });
+  useEffect(() => {
+    let saved = '';
+    try {
+      saved = sessionStorage.getItem(draftKey)?.slice(0, 4000) ?? '';
+    } catch {
+      // Session storage is unavailable in some private browsing contexts.
+    }
+    setDraftState({ scope: draftKey, text: saved });
+  }, [draftKey]);
+  useEffect(() => {
+    if (draftState.scope !== draftKey) return;
+    try {
+      if (draftState.text) sessionStorage.setItem(draftKey, draftState.text);
+      else sessionStorage.removeItem(draftKey);
+    } catch {
+      // Private browsing can block storage; the live draft remains editable.
+    }
+  }, [draftKey, draftState.scope, draftState.text]);
   const send = async () => {
     const body = draft.trim();
     if (!body || body.length > 4000 || sendLock.current || state.status !== 'ready' || !active())
@@ -331,6 +427,26 @@ export function PrivateConversationView({
       if (active()) setReading(false);
     }
   };
+  const react = async (messageId: string, emoji: '👍' | '❤️') => {
+    if (reactionLock.current || state.status !== 'ready' || !active()) return;
+    reactionLock.current = true;
+    setReacting(`${messageId}:${emoji}`);
+    setFeedback('');
+    try {
+      await togglePrivateMessageReaction(session, conversationId, messageId, emoji);
+    } catch {
+      if (active()) setFeedback('無法更新表情回應，請確認網路後重試。');
+    } finally {
+      reactionLock.current = false;
+      if (active()) setReacting(null);
+    }
+  };
+  const visibleMessages = (state.data?.messages ?? []).filter(
+    (row) =>
+      !messageSearch.trim() ||
+      (!row.recalled &&
+        row.content.toLocaleLowerCase().includes(messageSearch.trim().toLocaleLowerCase())),
+  );
   return (
     <div className={styles.stack}>
       <div className={styles.toolbar}>
@@ -342,16 +458,37 @@ export function PrivateConversationView({
       <StateNotice status={state.status} retry={retry} />
       {state.status === 'ready' && state.data && (
         <>
-          <div className={styles.row}>
-            <h2>{state.data.conversation.peerName || '訊息'}</h2>
-            <button className={styles.button} type="button" onClick={read} disabled={reading}>
-              {reading ? '更新中…' : '標記已讀'}
-            </button>
+          <div className={styles.chatHeader}>
+            <div>
+              <p className={styles.overline}>對話內容</p>
+              <h2>{state.data.conversation.peerName || '訊息'}</h2>
+              <p className={styles.muted}>顯示最近 100 則訊息；搜尋僅查詢目前載入的內容。</p>
+            </div>
+            {isConversationUnread({
+              uid: session.uid,
+              lastMessageAt: state.data.conversation.lastMessageAt,
+              lastReadAt: state.data.conversation.lastReadAt,
+              lastMessageSenderId: state.data.conversation.lastSenderId,
+            }) ? (
+              <button className={styles.button} type="button" onClick={read} disabled={reading}>
+                {reading ? '更新中…' : '標記已讀'}
+              </button>
+            ) : (
+              <span className={styles.readIndicator}>對話已讀</span>
+            )}
           </div>
-          <p className={styles.muted}>顯示最近 100 則訊息。</p>
+          <label className={styles.field}>
+            搜尋此對話
+            <input
+              type="search"
+              value={messageSearch}
+              onChange={(event) => setMessageSearch(event.target.value)}
+              placeholder="搜尋最近 100 則訊息"
+            />
+          </label>
           <ol className={styles.messages} aria-label="對話內容">
-            {state.data.messages.length ? (
-              state.data.messages.map((row) => (
+            {visibleMessages.length ? (
+              visibleMessages.map((row) => (
                 <li
                   key={row.id}
                   className={row.senderId === session.uid ? styles.mine : styles.theirs}
@@ -364,10 +501,33 @@ export function PrivateConversationView({
                         : '此類型訊息請在 App 中查看。'}
                   </p>
                   <time dateTime={row.createdAt ?? undefined}>{time(row.createdAt)}</time>
+                  {!row.recalled && (row.type === 'text' || row.type === 'reply') && (
+                    <div className={styles.messageReactions} aria-label="訊息表情回應">
+                      {(['👍', '❤️'] as const).map((emoji) => {
+                        const members = row.reactions?.[emoji] ?? [];
+                        const mine = members.includes(session.uid);
+                        return (
+                          <button
+                            key={emoji}
+                            type="button"
+                            aria-label={`${emoji === '👍' ? '讚' : '愛心'}，目前 ${members.length} 人回應`}
+                            aria-pressed={mine}
+                            className={styles.reactionButton}
+                            disabled={reacting !== null}
+                            onClick={() => void react(row.id, emoji)}
+                          >
+                            {emoji}{members.length ? ` ${members.length}` : ''}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  )}
                 </li>
               ))
             ) : (
-              <li className={styles.empty}>目前還沒有訊息。</li>
+              <li className={styles.empty}>
+                {messageSearch.trim() ? '找不到符合的訊息，試著調整關鍵字。' : '目前還沒有訊息。'}
+              </li>
             )}
           </ol>
         </>
@@ -392,11 +552,19 @@ export function PrivateConversationView({
             rows={3}
             disabled={sending || state.status !== 'ready'}
             onChange={(event) => setDraft(event.target.value)}
-            placeholder="輸入訊息"
+            onKeyDown={(event) => {
+              if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') {
+                event.preventDefault();
+                void send();
+              }
+            }}
+            placeholder="輸入訊息，按 Cmd / Ctrl + Enter 傳送"
           />
         </label>
         <div className={styles.row}>
-          <small className={styles.muted}>{draft.length} / 4000</small>
+          <small className={styles.muted}>
+            {draft.length} / 4000 · 草稿保留在目前瀏覽器分頁
+          </small>
           <button
             className={styles.primary}
             type="submit"

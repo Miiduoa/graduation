@@ -67,14 +67,25 @@ export function CommunityScreen(props: Record<string, unknown>) {
             <Text style={styles.heading}>校園社群</Text>
             <Text style={styles.headingSub}>動態 · 看板 · 即時 · 學伴</Text>
           </View>
-          <Pressable
-            onPress={() => stackNav?.navigate?.('CampusGame')}
-            accessibilityRole="button"
-            accessibilityLabel="校園漫步"
-            style={({ pressed }) => [styles.iconShortcut, pressed && { opacity: 0.85 }]}
-          >
-            <Ionicons name="game-controller-outline" size={20} color={theme.colors.accent} />
-          </Pressable>
+          <View style={styles.topActions}>
+            <Pressable
+              onPress={() => stackNav?.navigate?.('PostCompose')}
+              accessibilityRole="button"
+              accessibilityLabel="發表新貼文"
+              style={({ pressed }) => [styles.composeButton, pressed && { opacity: 0.85 }]}
+            >
+              <Ionicons name="add" size={18} color={theme.colors.onAccent} />
+              <Text style={styles.composeText}>發文</Text>
+            </Pressable>
+            <Pressable
+              onPress={() => stackNav?.navigate?.('CampusGame')}
+              accessibilityRole="button"
+              accessibilityLabel="校園漫步"
+              style={({ pressed }) => [styles.iconShortcut, pressed && { opacity: 0.85 }]}
+            >
+              <Ionicons name="game-controller-outline" size={20} color={theme.colors.accent} />
+            </Pressable>
+          </View>
         </View>
 
         {/* ─── Tab pills ─── */}
@@ -85,6 +96,9 @@ export function CommunityScreen(props: Record<string, unknown>) {
               <Pressable
                 key={tab.key}
                 onPress={() => setActiveTab(tab.key)}
+                accessibilityRole="tab"
+                accessibilityLabel={tab.label}
+                accessibilityState={{ selected: active }}
                 style={[styles.tab, active && styles.tabActive]}
               >
                 <Ionicons
@@ -114,6 +128,17 @@ export function CommunityScreen(props: Record<string, unknown>) {
 
 const createStyles = () => StyleSheet.create({
   topBar: { flexDirection: 'row', alignItems: 'center', marginBottom: theme.space.md },
+  topActions: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  composeButton: {
+    minHeight: 40,
+    paddingHorizontal: 14,
+    borderRadius: 999,
+    backgroundColor: theme.colors.accent,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+  },
+  composeText: { color: theme.colors.onAccent, fontSize: 13, fontWeight: '700' },
   heading: { fontSize: 22, fontWeight: '700', color: theme.colors.text },
   headingSub: { fontSize: 11, color: theme.colors.textSecondary, marginTop: 2, letterSpacing: 0.4 },
   iconShortcut: {

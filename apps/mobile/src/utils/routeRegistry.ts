@@ -43,6 +43,7 @@ export const ROUTE_TO_TAB: Record<string, TabName> = {
   // 把它導向學習 tab，safeNavigate 會自動 fallback 到 LearnHome / CoursesHome 而不噴 alert。
   AcademicStack: '學習',
   CourseHub: '學習',
+  CourseAppeals: '學習',
   CourseModules: '學習',
   CourseCatalog: '學習',
   CourseSchedule: '學習',

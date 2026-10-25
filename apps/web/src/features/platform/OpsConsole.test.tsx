@@ -1,7 +1,7 @@
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { OpsConsole } from './OpsConsole';
-import { adminLoginHref, readOpsSchool, readOpsTab } from './constants';
+import { adminLoginHref, opsTabHref, readOpsSchool, readOpsSchoolId, readOpsTab } from './constants';
 
 const mocks = vi.hoisted(() => ({
   session: null as null | {
@@ -836,4 +836,41 @@ it('keeps different affiliation review reasons isolated', async () => {
   fireEvent.click(within(second).getByRole('button', { name: '拒絕' }));
   expect(within(second).getByRole('textbox', { name: '審核理由' })).toHaveProperty('value', '');
   expect(within(first).getByRole('textbox', { name: '審核理由' })).toHaveProperty('value', REVIEW_REASON);
+});
+
+it('keeps a school selected in a deep link while moving between school settings and people', async () => {
+  mocks.session = principal;
+  window.history.replaceState(null, '', '/admin/ops?tab=people&tenantId=school-a');
+  fetcher.mockImplementation(async (url: string) => {
+    if (url.includes('/people?tenantId=')) return ok(peopleStatus('school-a'));
+    return ok({
+      schools: [{
+        kind: 'tenant',
+        applicationId: null,
+        tenantId: 'school-a',
+        displayName: '學校 A',
+        emailDomain: 'a.edu.tw',
+        lifecycle: 'provisioned',
+        description: '',
+        modules: { leave: true, identity: true, food: false },
+        peopleCount: 1,
+        merchantCount: 0,
+      }],
+    });
+  });
+  render(<OpsConsole />);
+  expect((await screen.findByLabelText('選擇學校') as HTMLSelectElement).value).toBe('school-a');
+  expect(await screen.findByRole('heading', { name: '加人' })).toBeTruthy();
+  fireEvent.click(screen.getByRole('tab', { name: '學校' }));
+  expect(window.location.search).toBe('?tab=schools&school=school-a');
+  fireEvent.click(screen.getByRole('tab', { name: '人員' }));
+  expect(window.location.search).toBe('?tab=people&school=school-a');
+});
+
+it('rejects malformed school selection in operations links', () => {
+  expect(readOpsSchoolId('?tab=people&tenantId=school-one')).toBe('school-one');
+  expect(readOpsSchoolId('?tab=people&tenantId=../../private')).toBeNull();
+  expect(readOpsSchoolId('?tab=people&tenantId=')).toBeNull();
+  expect(opsTabHref('people', 'school-one')).toBe('/admin/ops?tab=people&tenantId=school-one');
+  expect(opsTabHref('merchants', 'school-one')).toBe('/admin/ops?tab=merchants');
 });

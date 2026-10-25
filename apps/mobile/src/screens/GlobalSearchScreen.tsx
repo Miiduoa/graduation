@@ -12,6 +12,7 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { collection, getDocs, limit, orderBy, query, where } from 'firebase/firestore';
 import { toPublicSchoolId } from '@campus/shared/src/schoolIds';
+import type { CampusSemanticResult } from '@campus/shared/src/campusSemantic';
 import { Screen } from '../ui/components';
 import { useTabBarContentBottomPadding } from '../ui/navigationTheme';
 import { useTheme } from '../state/theme';
@@ -25,6 +26,8 @@ import { safeNavigate } from '../utils/safeNavigate';
 import { navigateFromInboxTask } from '../services/inboxActions';
 import { isTeachingRole } from '../utils/campusOs';
 import { getDb } from '../firebase';
+import { getMobileQuickActions, getMobileActionsForDestinations } from '../services/quickCampusActions';
+import { interpretMobileCampusRequest } from '../services/campusIntentClient';
 import type { InboxTask } from '../data/types';
 
 type Category =
@@ -247,6 +250,13 @@ function SearchWorkspace({
   const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
   const [groupAttempt, setGroupAttempt] = useState(0);
   const [groups, setGroups] = useState<GroupState>(EMPTY_GROUPS);
+  const [understanding, setUnderstanding] = useState<{
+    phrase: string;
+    status: 'loading' | 'ready' | 'error';
+    result?: CampusSemanticResult;
+  } | null>(null);
+  const semanticSequence = useRef(0);
+  useEffect(() => () => { semanticSequence.current += 1; }, []);
   const input = useRef<TextInput>(null);
   const list = useRef<FlatList<SearchResult>>(null);
   const keyword = text.trim().toLocaleLowerCase();
@@ -554,8 +564,39 @@ function SearchWorkspace({
     privateReady && groups.limited && (category === 'all' || category === 'groups');
   const groupLoginNeeded = category === 'groups' && !privateReady;
   const recent = history.recentSearches('all', 8);
+  const activeUnderstanding = understanding?.phrase === text.trim() ? understanding : null;
+  const semantic = activeUnderstanding?.status === 'ready' ? activeUnderstanding.result : undefined;
+  const quickActions = searching && category === 'all'
+    ? semantic?.status === 'understood'
+      ? getMobileActionsForDestinations(semantic.destinations)
+      : getMobileQuickActions(text)
+    : [];
+
+  async function analyze(raw: string) {
+    const utterance = raw.trim().slice(0, 120);
+    if (!uid || !privateReady || !utterance) return;
+    const request = ++semanticSequence.current;
+    setUnderstanding({ phrase: utterance, status: 'loading' });
+    try {
+      const result = await interpretMobileCampusRequest({
+        uid,
+        schoolId: school.id,
+        utterance,
+        isCurrent: () => activeScope.current === scopeKey && semanticSequence.current === request,
+      });
+      if (activeScope.current === scopeKey && semanticSequence.current === request) {
+        setUnderstanding({ phrase: utterance, status: 'ready', result });
+      }
+    } catch {
+      if (activeScope.current === scopeKey && semanticSequence.current === request) {
+        setUnderstanding({ phrase: utterance, status: 'error' });
+      }
+    }
+  }
 
   const changeText = (value: string) => {
+    semanticSequence.current += 1;
+    setUnderstanding(null);
     setText(value);
     setVisibleCount(PAGE_SIZE);
     list.current?.scrollToOffset({ offset: 0, animated: false });
@@ -703,13 +744,14 @@ function SearchWorkspace({
             accessibilityLabel="搜尋校園內容"
             value={text}
             onChangeText={changeText}
-            placeholder="課表、公告、活動或餐廳"
+            placeholder="例如：我想交作業，或搜尋課號"
             placeholderTextColor={theme.colors.muted}
             onFocus={() => setFocused(true)}
             onBlur={() => setFocused(false)}
             onSubmitEditing={() => {
               remember();
               Keyboard.dismiss();
+              if (privateReady) void analyze(text);
             }}
             returnKeyType="search"
             maxLength={120}
@@ -743,6 +785,28 @@ function SearchWorkspace({
             <View style={{ width: 12 }} />
           )}
         </View>
+        {searching && privateReady && (
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="用 AI 理解校園搜尋"
+            accessibilityState={{ disabled: activeUnderstanding?.status === 'loading' }}
+            disabled={activeUnderstanding?.status === 'loading'}
+            onPress={() => {
+              Keyboard.dismiss();
+              void analyze(text);
+            }}
+            style={{
+              minHeight: 44, alignSelf: 'flex-start', justifyContent: 'center',
+              borderRadius: 11, backgroundColor: theme.colors.accent,
+              opacity: activeUnderstanding?.status === 'loading' ? 0.6 : 1,
+              paddingHorizontal: 15,
+            }}
+          >
+            <Text style={{ ...theme.typography.bodySmall, fontWeight: '700', color: theme.colors.onAccent }}>
+              {activeUnderstanding?.status === 'loading' ? 'AI 正在理解…' : '用 AI 理解校園需求'}
+            </Text>
+          </Pressable>
+        )}
         <View>
           <ScrollView
             horizontal
@@ -815,6 +879,96 @@ function SearchWorkspace({
                       : `已載入內容中找到 ${results.length} 筆`}
                   </Text>
                 </View>
+                {semantic?.source === 'model' && (
+                  <View style={{
+                    padding: 14, gap: 7,
+                    backgroundColor: theme.colors.surface2,
+                    borderRadius: 12,
+                  }}>
+                    <Text style={{ ...theme.typography.h3, color: theme.colors.text }}>
+                      {semantic.status === 'clarify' ? '需要再確認' : 'AI 理解的需求'}
+                    </Text>
+                    <Text style={{ ...theme.typography.bodySmall, color: theme.colors.text }}>
+                      {semantic.summary}
+                    </Text>
+                    {semantic.clarifyingQuestion && (
+                      <Text style={{ ...theme.typography.bodySmall, color: theme.colors.muted }}>
+                        {semantic.clarifyingQuestion}
+                      </Text>
+                    )}
+                  </View>
+                )}
+                {(activeUnderstanding?.status === 'error' || semantic?.status === 'unavailable') && (
+                  <Text style={{ ...theme.typography.caption, color: theme.colors.muted }}>
+                    AI 暫時無法理解。下方僅顯示基本關鍵字捷徑。
+                  </Text>
+                )}
+                {quickActions.length > 0 ? (
+                  <View
+                    style={{
+                      gap: 9,
+                      padding: 14,
+                      backgroundColor: theme.colors.surface,
+                      borderRadius: 12,
+                      borderWidth: 1,
+                      borderColor: theme.colors.border,
+                    }}
+                  >
+                    <Text style={{ ...theme.typography.h3, color: theme.colors.text }}>
+                      {semantic?.status === 'understood' ? 'AI 建議直接開啟' : '直接開啟'}
+                    </Text>
+                    {quickActions.map((action) => (
+                      <Pressable
+                        key={action.destination}
+                        accessibilityRole="button"
+                        accessibilityLabel={'前往' + action.label}
+                        onPress={() => {
+                          if (activeScope.current !== scopeKey) return;
+                          remember();
+                          Keyboard.dismiss();
+                          safeNavigate(navigation, action.route);
+                        }}
+                        style={({ pressed }) => ({
+                          minHeight: 52,
+                          flexDirection: 'row',
+                          alignItems: 'center',
+                          paddingHorizontal: 12,
+                          gap: 10,
+                          borderRadius: 10,
+                          backgroundColor: pressed ? theme.colors.surface3 : theme.colors.surface2,
+                        })}
+                      >
+                        <View style={{ flex: 1, gap: 2 }}>
+                          <Text style={{ ...theme.typography.body, fontWeight: '600', color: theme.colors.text }}>
+                            {action.label}
+                          </Text>
+                          <Text style={{ ...theme.typography.caption, color: theme.colors.muted }}>
+                            {action.description}
+                          </Text>
+                          {semantic?.previews?.filter((preview) => preview.destination === action.destination).map((preview) => (
+                            <View key={preview.destination} style={{
+                              marginTop: 7, paddingTop: 8,
+                              borderTopWidth: 1, borderTopColor: theme.colors.border, gap: 3,
+                            }}>
+                              <Text style={{ ...theme.typography.caption, color: theme.colors.muted }}>
+                                {preview.source === 'campus-platform' ? 'Campus One 資料' : '接通狀態'}：{preview.message}
+                              </Text>
+                              {preview.items.map((item, index) => (
+                                <Text key={index} style={{ ...theme.typography.caption, color: theme.colors.text }}>
+                                  {item.title}{item.detail ? ' · ' + item.detail : ''}
+                                </Text>
+                              ))}
+                            </View>
+                          ))}
+                        </View>
+                        <Ionicons name="arrow-forward" size={18} color={theme.colors.accent} />
+                      </Pressable>
+                    ))}
+                    <Text style={{ ...theme.typography.caption, color: theme.colors.muted }}>
+                      只會開啟服務，正式操作仍需自行確認。
+                    </Text>
+                  </View>
+                ) : null}
                 {failed.length ? (
                   <View
                     accessibilityRole="alert"
@@ -878,7 +1032,9 @@ function SearchWorkspace({
                       ? '正在尋找符合的內容'
                       : failed.length
                         ? '部分內容尚未載入'
-                        : '沒有符合的結果'}
+                        : quickActions.length
+                          ? '可使用上方推薦的服務'
+                          : '沒有符合的結果'}
                 </Text>
                 <Text style={{ ...theme.typography.bodySmall, color: theme.colors.muted }}>
                   {groupLoginNeeded
@@ -887,13 +1043,21 @@ function SearchWorkspace({
                       ? '讀取完成後，結果會直接顯示在這裡。'
                       : failed.length
                         ? '保留這次搜尋，稍後可重試讀取。'
-                        : `試試較短的關鍵字${category === 'all' ? '，或改用課號、教師姓名。' : '，或查看全部分類。'}`}
+                        : quickActions.length
+                          ? '依需求選擇上方入口，或改用較短的關鍵字搜尋校園內容。'
+                          : `試試較短的關鍵字${category === 'all' ? '，或改用課號、教師姓名。' : '，或查看全部分類。'}`}
                 </Text>
                 {groupLoginNeeded
                   ? pill('前往登入', () => safeNavigate(navigation, 'SSOLogin'))
                   : null}
                 {!pending && category !== 'all'
                   ? pill('查看全部分類', () => chooseCategory('all'))
+                  : null}
+                {privateReady && category === 'all' && !pending
+                  ? pill('改問校園助理', () => {
+                      Keyboard.dismiss();
+                      safeNavigate(navigation, 'AIChat', { prompt: text.trim() });
+                    })
                   : null}
               </View>
             }

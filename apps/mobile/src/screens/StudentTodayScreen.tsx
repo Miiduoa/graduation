@@ -9,6 +9,8 @@ import {
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { QuickCampusEntry } from '../components/QuickCampusEntry';
+import type { MobileQuickAction } from '../services/quickCampusActions';
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import { useAuth } from '../state/auth';
 import { loadStudentHome } from '../data/studentHome';
@@ -205,6 +207,14 @@ export default function StudentTodayScreen() {
   const openWeek = () =>
     rootNavigateNested('學習', 'PersonalTimetable', termKey ? { term: termKey } : undefined);
   const openImport = () => rootNavigateNested('學習', 'PersonalImport', { kind: 'timetable' });
+  const openQuickAction = (quick: MobileQuickAction) => {
+    if (quick.destination === '/classroom' && todoRows.length === 1) {
+      // Use the current user's real assignment or quiz, never fabricate a submit id.
+      openTodo(todoRows[0], true);
+      return;
+    }
+    safeNavigate(navigation, quick.route);
+  };
   const refresh = async () => {
     const request = ++refreshGeneration.current;
     setRefreshState({ scope, request });
@@ -218,6 +228,7 @@ export default function StudentTodayScreen() {
     <SafeAreaView style={s.page} edges={['top']}>
       <ScrollView
         ref={scrollRef}
+        keyboardShouldPersistTaps="handled"
         contentContainerStyle={[s.content, { paddingBottom: bottom + 24 }]}
         onScroll={(event) => {
           scrollY.current = event.nativeEvent.contentOffset.y;
@@ -254,6 +265,13 @@ export default function StudentTodayScreen() {
               onOpenClass={openCourse}
               onOpenTodo={(todo) => openTodo(todo, true)}
               onOpenWeek={openWeek}
+            />
+            <QuickCampusEntry
+              key={scope}
+              uid={uid}
+              schoolId={schoolId}
+              onOpen={openQuickAction}
+              onAsk={(question) => safeNavigate(navigation, 'AIChat', { prompt: question })}
             />
             <TodayClassList
               classes={classRows}

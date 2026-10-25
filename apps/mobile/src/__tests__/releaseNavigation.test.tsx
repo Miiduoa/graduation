@@ -1094,7 +1094,7 @@ test('Map has a dedicated dormitory workspace route', async () => {
   act(() => navigation.navigate('Dormitory'));
   expect(navigation.getCurrentRoute()?.name).toBe('Dormitory');
   expect(view.queryByText(/宿舍包裹查詢與線上報修尚未開放/)).toBeNull();
-  expect(await view.findByText('住宿工作區')).toBeTruthy();
+  expect(await view.findByText('住得安心，事情好處理')).toBeTruthy();
 });
 
 test('Map school information keeps real official housing and career services after retiring old routes', async () => {
@@ -1122,13 +1122,13 @@ test('Notifications mounts the live inbox instead of hardcoded samples', async (
 });
 test('message landing reaches live private conversations and its old alias has no synthetic people', async () => {
   const { view, navigation } = await mount(MessagesStack);
-  expect(view.getByText('開啟私訊')).toBeTruthy();
-  fireEvent.press(view.getByText('開啟私訊'));
-  await waitFor(() => expect(view.getByText('DmsScreen')).toBeTruthy());
+  // The live conversation list is embedded on the landing page, not behind the old button.
+  expect(view.getByText('DmsScreen')).toBeTruthy();
+  expect(view.getByText('我的群組')).toBeTruthy();
   act(() => navigation.navigate('MessagesHome'));
-  expect(view.getByText('開啟群組')).toBeTruthy();
+  await waitFor(() => expect(view.getAllByText('DmsScreen').length).toBeGreaterThan(0));
   expect(view.queryByText('林助教')).toBeNull();
-  fireEvent.press(view.getByText('開啟群組'));
+  fireEvent.press(view.getAllByText('我的群組').at(-1)!);
   await waitFor(() => expect(view.getByText('GroupsScreen')).toBeTruthy());
 });
 test('HomeworkSubmit mounts the live text submission page', async () => {

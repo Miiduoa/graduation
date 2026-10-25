@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import type { ReactNode } from 'react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import DormitoryPage from './page';
@@ -79,4 +79,107 @@ it('refuses stale writes from another browser tab instead of overwriting changes
   fireEvent.click(screen.getByRole('button', { name: '儲存住宿備忘' }));
   expect(screen.getByRole('alert').textContent).toContain('有另一處修改了這份紀錄');
   expect(localStorage.getItem(dormStorageKey('guest', 'pu'))).toContain('另一頁的內容');
+});
+
+
+it('shows verified PU housing reference only for the selected school', () => {
+  const page = render(<DormitoryPage />);
+  fireEvent.click(screen.getByRole('button', { name: '宿舍指南' }));
+  expect(screen.getByRole('heading', { name: '思高學苑' })).toBeTruthy();
+  expect(screen.getByText(/24 小時校安專線/)).toBeTruthy();
+  expect(screen.getByText(/不代表有空床或可直接申請/)).toBeTruthy();
+  selectedCampus.schoolId = 'ncku';
+  selectedCampus.schoolName = '國立成功大學';
+  page.rerender(<DormitoryPage />);
+  fireEvent.click(screen.getByRole('button', { name: '宿舍指南' }));
+  expect(screen.queryByRole('heading', { name: '思高學苑' })).toBeNull();
+  expect(screen.getByText(/尚無可核實的房型與費用清單/)).toBeTruthy();
+});
+
+it('adds, completes and edits a personal date with storage persistence', () => {
+  render(<DormitoryPage />);
+  fireEvent.click(screen.getByRole('button', { name: '重要日期' }));
+  fireEvent.click(screen.getByRole('button', { name: '＋ 新增日期' }));
+  fireEvent.change(screen.getByRole('textbox', { name: '事項名稱 *' }), { target: { value: '住宿繳費截止' } });
+  fireEvent.change(screen.getByLabelText('日期 *'), { target: { value: '2026-11-15' } });
+  fireEvent.click(screen.getByRole('button', { name: '儲存日期' }));
+  expect(screen.getByRole('heading', { name: '住宿繳費截止' })).toBeTruthy();
+  fireEvent.click(screen.getByRole('button', { name: '標記完成' }));
+  const key = dormStorageKey('guest', 'pu');
+  expect(JSON.parse(localStorage.getItem(key) ?? 'null').milestones[0]).toMatchObject({
+    title: '住宿繳費截止', dueDate: '2026-11-15', completed: true,
+  });
+  fireEvent.click(screen.getByRole('button', { name: '編輯' }));
+  fireEvent.change(screen.getByRole('textbox', { name: '事項名稱 *' }), { target: { value: '退宿日期' } });
+  fireEvent.click(screen.getByRole('button', { name: '儲存日期' }));
+  expect(JSON.parse(localStorage.getItem(key) ?? 'null').milestones).toHaveLength(1);
+  expect(JSON.parse(localStorage.getItem(key) ?? 'null').milestones[0]).toMatchObject({
+    title: '退宿日期', completed: true,
+  });
+});
+
+it('saves a room inspection and prefills a repair without notifying the school', () => {
+  render(<DormitoryPage />);
+  fireEvent.click(screen.getByRole('button', { name: '入住與退宿' }));
+  const air = screen.getByRole('group', { name: '冷氣與遙控器狀態' });
+  fireEvent.click(within(air).getByRole('button', { name: '待處理' }));
+  const key = dormStorageKey('guest', 'pu');
+  expect(JSON.parse(localStorage.getItem(key) ?? 'null').inspection).toMatchObject({ air: 'issue' });
+  fireEvent.click(screen.getByRole('button', { name: '記錄問題' }));
+  expect((screen.getByRole('textbox', { name: '問題名稱 *' }) as HTMLInputElement).value).toBe('冷氣或遙控器需要檢查');
+  fireEvent.click(screen.getByRole('button', { name: '儲存紀錄' }));
+  const data = JSON.parse(localStorage.getItem(key) ?? 'null');
+  expect(data.repairs[0]).toMatchObject({ category: 'air', status: 'draft' });
+  expect(data.inspection.air).toBe('issue');
+});
+
+it('records a parcel and allows the resident to update collection status', () => {
+  render(<DormitoryPage />);
+  fireEvent.click(screen.getByRole('button', { name: '包裹領取' }));
+  fireEvent.click(screen.getByRole('button', { name: '網購包裹' }));
+  expect((screen.getByRole('textbox', { name: '包裹名稱 *' }) as HTMLInputElement).value).toBe('網購包裹');
+  fireEvent.change(screen.getByRole('textbox', { name: '領取地點' }), { target: { value: '宿舍服務台' } });
+  fireEvent.change(screen.getByLabelText('預計取件日期（選填）'), { target: { value: '2026-11-15' } });
+  fireEvent.click(screen.getByRole('button', { name: '儲存包裹' }));
+  const key = dormStorageKey('guest', 'pu');
+  expect(JSON.parse(localStorage.getItem(key) ?? 'null').parcels).toHaveLength(1);
+  expect(screen.getByRole('heading', { name: '網購包裹' })).toBeTruthy();
+  expect(screen.getByText(/沒有接入學校收發室/)).toBeTruthy();
+  fireEvent.click(screen.getByRole('button', { name: '標記已領取' }));
+  expect(JSON.parse(localStorage.getItem(key) ?? 'null').parcels[0]).toMatchObject({
+    title: '網購包裹', pickupPoint: '宿舍服務台', collected: true,
+  });
+  fireEvent.click(screen.getByRole('button', { name: '已領取' }));
+  expect(screen.getByRole('heading', { name: '網購包裹' })).toBeTruthy();
+  fireEvent.click(screen.getByRole('button', { name: '恢復待領' }));
+  expect(JSON.parse(localStorage.getItem(key) ?? 'null').parcels[0].collected).toBe(false);
+});
+
+it('keeps package notes separate when switching schools', () => {
+  const page = render(<DormitoryPage />);
+  fireEvent.click(screen.getByRole('button', { name: '包裹領取' }));
+  fireEvent.click(screen.getByRole('button', { name: '掛號郵件' }));
+  fireEvent.click(screen.getByRole('button', { name: '儲存包裹' }));
+  selectedCampus.schoolId = 'ncku';
+  selectedCampus.schoolName = '國立成功大學';
+  page.rerender(<DormitoryPage />);
+  fireEvent.click(screen.getByRole('button', { name: '包裹領取' }));
+  expect(screen.queryByRole('heading', { name: '掛號郵件' })).toBeNull();
+  expect(JSON.parse(localStorage.getItem(dormStorageKey('guest', 'pu')) ?? 'null').parcels).toHaveLength(1);
+  expect(localStorage.getItem(dormStorageKey('guest', 'ncku'))).toBeNull();
+});
+
+it('pre-fills a common repair but never submits it to the school automatically', () => {
+  render(<DormitoryPage />);
+  fireEvent.change(screen.getByRole('textbox', { name: '寢室' }), { target: { value: '305' } });
+  fireEvent.click(screen.getByRole('button', { name: '儲存住宿備忘' }));
+  fireEvent.click(screen.getByRole('button', { name: '設備問題' }));
+  fireEvent.click(screen.getByRole('button', { name: '冷氣無法正常運作' }));
+  expect((screen.getByRole('textbox', { name: '問題名稱 *' }) as HTMLInputElement).value).toBe('冷氣無法正常運作');
+  expect((screen.getByRole('textbox', { name: '位置' }) as HTMLInputElement).value).toBe('寢室 305');
+  expect(localStorage.getItem(dormStorageKey('guest', 'pu'))).not.toContain('冷氣無法正常運作');
+  fireEvent.click(screen.getByRole('button', { name: '儲存紀錄' }));
+  expect(JSON.parse(localStorage.getItem(dormStorageKey('guest', 'pu')) ?? 'null').repairs[0]).toMatchObject({
+    title: '冷氣無法正常運作', status: 'draft',
+  });
 });

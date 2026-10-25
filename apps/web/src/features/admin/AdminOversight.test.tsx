@@ -172,7 +172,7 @@ it('does not fetch school people until an eligible school is explicitly selected
     fetcher.mock.calls.some(([url]) => String(url).includes('/people?tenantId=school-one')),
   ).toBe(true);
   expect(screen.getByText(/查看各校管理員、職員與已核發授權/)).toBeTruthy();
-  expect(screen.getByRole('link', { name: '調整校方授權' })).toHaveProperty(
+  expect(screen.getByRole('link', { name: '新增或調整校方人員' })).toHaveProperty(
     'href',
     expect.stringContaining('/admin/ops'),
   );
