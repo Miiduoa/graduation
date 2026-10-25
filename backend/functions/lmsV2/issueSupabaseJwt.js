@@ -25,8 +25,9 @@
 
 const { onCall, HttpsError } = require('firebase-functions/v2/https');
 const { defineSecret } = require('firebase-functions/params');
+const { getApps, initializeApp } = require('firebase-admin/app');
+const { getAuth } = require('firebase-admin/auth');
 const { readSecretValue } = require('../secretParams');
-const admin = require('firebase-admin');
 const { SignJWT } = require('jose');
 
 const SUPABASE_URL_SECRET = defineSecret('SUPABASE_URL');
@@ -125,8 +126,8 @@ exports.issueSupabaseJwt = onCall(
       );
     }
 
-    if (!admin.apps.length) admin.initializeApp();
-    const fbUser = await admin.auth().getUser(request.auth.uid);
+    if (!getApps().length) initializeApp();
+    const fbUser = await getAuth().getUser(request.auth.uid);
 
     const userId = await ensureSupabaseUser({
       supabaseUrl,
