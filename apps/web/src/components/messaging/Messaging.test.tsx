@@ -11,6 +11,7 @@ import {
   sendPrivateMessage,
   newPrivateMessageId,
   markConversationRead,
+  togglePrivateMessageReaction,
   markAccountNotificationRead,
   type PrivateConversation,
   type ConversationContents,
@@ -36,6 +37,7 @@ vi.mock('@/lib/privateMessages', async (original) => {
     sendPrivateMessage: vi.fn(),
     newPrivateMessageId: vi.fn(),
     markConversationRead: vi.fn(),
+    togglePrivateMessageReaction: vi.fn(),
     markAccountNotificationRead: vi.fn(),
   };
 });
@@ -140,6 +142,7 @@ beforeEach(() => {
   vi.mocked(newPrivateMessageId).mockReturnValue('request-id');
   vi.mocked(sendPrivateMessage).mockResolvedValue();
   vi.mocked(markConversationRead).mockResolvedValue();
+  vi.mocked(togglePrivateMessageReaction).mockResolvedValue();
   vi.mocked(markAccountNotificationRead).mockResolvedValue();
 });
 
@@ -435,4 +438,28 @@ it('supports Cmd+Enter to send while preserving the confirmed-send guard', async
   fireEvent.keyDown(field, { key: 'Enter', metaKey: true });
   await waitFor(() => expect(sendPrivateMessage).toHaveBeenCalledTimes(1));
   expect(vi.mocked(sendPrivateMessage).mock.calls[0][3]).toBe('快捷傳送');
+});
+
+it('sends reactions to the real conversation with the scoped account and leaves server state authoritative', async () => {
+  render(<Chat />);
+  await screen.findByText('伺服器的訊息');
+  fireEvent.click(screen.getByRole('button', { name: '讚，目前 0 人回應' }));
+  await waitFor(() => expect(togglePrivateMessageReaction).toHaveBeenCalledTimes(1));
+  expect(togglePrivateMessageReaction).toHaveBeenCalledWith(
+    { uid: 'alice', schoolId: 'pu' },
+    'opaque_conversation_id_with_underscores',
+    'm-1',
+    '👍',
+  );
+  // The server listener, not a local toggle, is the single source of truth.
+  expect(screen.getByRole('button', { name: '讚，目前 0 人回應' }).getAttribute('aria-pressed')).toBe('false');
+});
+
+it('a failed reaction reports the error instead of claiming it succeeded', async () => {
+  vi.mocked(togglePrivateMessageReaction).mockRejectedValueOnce(new Error('network'));
+  render(<Chat />);
+  await screen.findByText('伺服器的訊息');
+  fireEvent.click(screen.getByRole('button', { name: '愛心，目前 0 人回應' }));
+  await screen.findByText('無法更新表情回應，請確認網路後重試。');
+  expect(vi.mocked(togglePrivateMessageReaction)).toHaveBeenCalledTimes(1);
 });
