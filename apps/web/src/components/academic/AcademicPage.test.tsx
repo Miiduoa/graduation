@@ -31,6 +31,7 @@ vi.mock('@/features/nuni/Session', () => ({
 vi.mock('next/navigation', () => ({
   usePathname: () => '/grades',
   useRouter: () => ({ push: vi.fn() }),
+  useSearchParams: () => new URLSearchParams(),
 }));
 vi.mock('@/components/SiteShell', () => ({
   SiteShell: ({
@@ -107,6 +108,16 @@ beforeEach(() => {
   timetableApi.loadPersonalTimetable.mockResolvedValue(emptyTimetable());
   timetableApi.savePersonalTimetable.mockResolvedValue({ stored: 'local' });
 });
+it('shows semester and classroom-feedback tabs on the merged grades page', async () => {
+  render(<GradesPage />);
+  expect(screen.getByRole('navigation', { name: '成績分段' })).toBeTruthy();
+  expect(screen.getByRole('link', { name: '學期成績' }).getAttribute('href')).toBe('/grades');
+  expect(screen.getByRole('link', { name: '課堂回饋' }).getAttribute('href')).toBe(
+    '/grades?tab=feedback',
+  );
+  expect(screen.getByRole('link', { name: '學期成績' }).getAttribute('aria-current')).toBe('page');
+});
+
 it('uses the function name in the header instead of a school name before the school account is connected', async () => {
   account.studentId = false;
   vi.mocked(loadAcademicRecords).mockRejectedValue(new AcademicConnectionError('reconnect'));

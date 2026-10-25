@@ -131,7 +131,7 @@ export function MessagingShell({
       <div className={styles.stack}>
         <nav className={styles.tabs} aria-label="訊息導覽">
           <Link href="/dms" aria-current={section === 'conversations' ? 'page' : undefined}>
-            私人對話
+            訊息
           </Link>
           <Link href="/messages" aria-current={section === 'notifications' ? 'page' : undefined}>
             通知
@@ -235,7 +235,7 @@ export function PrivateConversationList({ session }: { session: MessagingSession
                   </div>
                   <div className={styles.conversationBody}>
                     <div className={styles.row}>
-                      <strong>{row.peerName || '私人對話'}</strong>
+                      <strong>{row.peerName || '訊息'}</strong>
                       {unread && <span className={styles.badge}>未讀</span>}
                     </div>
                     <p>{row.preview || '尚無訊息內容'}</p>
@@ -249,8 +249,8 @@ export function PrivateConversationList({ session }: { session: MessagingSession
           </div>
         ) : (
           <section className={styles.notice}>
-            <h2>{search.trim() ? '沒有符合的對話' : '目前沒有私人對話'}</h2>
-            <p>{search.trim() ? '試著調整搜尋文字。' : '已有的本校私人對話會顯示在這裡。'}</p>
+            <h2>{search.trim() ? '沒有符合的對話' : '目前沒有訊息'}</h2>
+            <p>{search.trim() ? '試著調整搜尋文字。' : '已有的本校訊息會顯示在這裡。'}</p>
             {search.trim() && (
               <button className={styles.button} type="button" onClick={() => setSearch('')}>
                 清除搜尋
@@ -343,7 +343,7 @@ export function PrivateConversationView({
       {state.status === 'ready' && state.data && (
         <>
           <div className={styles.row}>
-            <h2>{state.data.conversation.peerName || '私人對話'}</h2>
+            <h2>{state.data.conversation.peerName || '訊息'}</h2>
             <button className={styles.button} type="button" onClick={read} disabled={reading}>
               {reading ? '更新中…' : '標記已讀'}
             </button>

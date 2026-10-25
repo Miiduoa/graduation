@@ -151,7 +151,7 @@ self.addEventListener('notificationclick', (event) => {
       break;
     case 'grade':
     case 'feedback':
-      path = work || '/classroom/grades';
+      path = work || '/grades?tab=feedback';
       break;
     case 'message':
       path = `/groups?messageId=${encodeURIComponent(data.id)}`;

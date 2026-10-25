@@ -20,14 +20,14 @@ import {
 type Chip = { key: string; label: string; emoji: string; route: string };
 
 const CHIPS: Chip[] = [
-  { key: 'materials', label: '教材', emoji: '📚', route: 'CourseMaterialsV2' },
-  { key: 'assignments', label: '作業', emoji: '📝', route: 'CourseAssignmentsV2' },
-  { key: 'quizzes', label: '測驗', emoji: '❓', route: 'CourseQuizzesV2' },
-  { key: 'forum', label: '討論', emoji: '💬', route: 'CourseForumV2' },
-  { key: 'announcements', label: '公告', emoji: '📢', route: 'CourseAnnouncementsV2' },
-  { key: 'grades', label: '成績', emoji: '💯', route: 'CourseGradesV2' },
-  { key: 'ai', label: '課程助理', emoji: '💬', route: 'CourseAIAssistantV2' },
-  { key: 'live', label: '直播', emoji: '🎥', route: 'CourseLiveV2' },
+  { key: 'materials', label: '教材', emoji: '📚', route: 'CourseMaterialViewer' },
+  { key: 'assignments', label: '作業', emoji: '📝', route: 'HomeworkSubmit' },
+  { key: 'quizzes', label: '測驗', emoji: '❓', route: 'QuizCenter' },
+  { key: 'forum', label: '討論', emoji: '💬', route: 'CourseDiscussion' },
+  { key: 'announcements', label: '公告', emoji: '📢', route: '公告總覽' },
+  { key: 'grades', label: '成績', emoji: '💯', route: 'CourseScores' },
+  { key: 'ai', label: '課程助理', emoji: '💬', route: 'AIAgentConsole' },
+  { key: 'live', label: '直播', emoji: '🎥', route: 'Attendance' },
 ];
 
 export default function CourseHubV2Screen() {

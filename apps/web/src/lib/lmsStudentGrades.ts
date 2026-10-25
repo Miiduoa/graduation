@@ -3,7 +3,7 @@ import { NuniError, nuniErrorMessage, type NuniAssignment, type NuniQuiz } from 
 import { isNetworkLayerError, isDeviceOffline, loadFailureCopy } from '@campus/shared/src/loadFailureCopy';
 import { feedbackPredatesSubmission, isPublishedHomeGrade } from './homeOverview';
 
-export const LMS_GRADES_HREF = '/classroom/grades';
+export const LMS_GRADES_HREF = '/grades?tab=feedback';
 export const LMS_GRADES_TITLE = '課業成績與回饋';
 const READ_STORAGE_PREFIX = 'nuni-grade-read:';
 const READ_EVENT = 'nuni-grade-read-change';

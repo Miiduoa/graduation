@@ -3,7 +3,7 @@
  * HomeStack — Today Tab (精簡版)
  *
  * 只保留核心路由：
- * - TodayHome: SmartDashboard（統一儀表板）
+ * - TodayHome: RoleAwareTodayScreen（今天）
  * - 公告/活動詳情
  * - 校園社群（唯一的社交入口）
  * - CampusGame：校園漫步原型（`campus://home/campus-game`）
@@ -22,7 +22,6 @@
  */
 import React from 'react';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
-import { SmartDashboardScreen } from './SmartDashboardScreen';
 import StudentTodayScreen from './StudentTodayScreen';
 import RoleAwareTodayScreen from './RoleAwareTodayScreen';
 // 公告與活動入口；舊 AnnouncementsScreen / AnnouncementDetailScreen /
@@ -83,11 +82,6 @@ export function HomeStack() {
         name="StudentToday"
         component={StudentTodayScreen}
         options={{ title: '今日課程', headerShown: false }}
-      />
-      <Stack.Screen
-        name="SmartDashboard"
-        component={SmartDashboardScreen}
-        options={{ title: '學習總覽', headerShown: false }}
       />
       <Stack.Screen
         name="公告總覽"

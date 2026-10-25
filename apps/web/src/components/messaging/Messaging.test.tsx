@@ -105,7 +105,7 @@ function deferred<T>() {
 }
 function Chat({ id = 'opaque_conversation_id_with_underscores' }: { id?: string }) {
   return (
-    <MessagingShell title="私人對話">
+    <MessagingShell title="訊息">
       {(session) => (
         <PrivateConversationView
           key={`${session.uid}:${session.schoolId}:${id}`}
@@ -164,7 +164,7 @@ it('logged-out visitors do not subscribe to private data', async () => {
   expect(watchMessagingSession).not.toHaveBeenCalled();
   expect(watchAccountNotifications).not.toHaveBeenCalled();
   expect(screen.getByRole('link', { name: '通知' }).getAttribute('aria-current')).toBe('page');
-  expect(screen.getByRole('link', { name: '私人對話' }).getAttribute('aria-current')).toBeNull();
+  expect(screen.getByRole('link', { name: '訊息' }).getAttribute('aria-current')).toBeNull();
   expect(screen.getByRole('link', { name: '前往登入' }).getAttribute('href')).toBe(
     '/login?returnUrl=%2Fmessages',
   );
@@ -173,7 +173,7 @@ it('logged-out visitors do not subscribe to private data', async () => {
 it('keeps the current section clear and allows recovery from an empty conversation search', async () => {
   render(<DmsListPage />);
   await screen.findByText('真實目錄姓名');
-  expect(screen.getByRole('link', { name: '私人對話' }).getAttribute('aria-current')).toBe('page');
+  expect(screen.getByRole('link', { name: '訊息' }).getAttribute('aria-current')).toBe('page');
   fireEvent.change(screen.getByRole('searchbox', { name: '搜尋對話' }), {
     target: { value: '不存在的對話' },
   });
@@ -204,7 +204,7 @@ it('successful empty conversations stay empty and an error remains distinct', as
     return vi.fn();
   });
   const view = render(<DmsListPage />);
-  await screen.findByText('目前沒有私人對話');
+  await screen.findByText('目前沒有訊息');
   view.unmount();
   vi.mocked(watchPrivateConversations).mockImplementationOnce((_session, _receive, fail) => {
     fail('unavailable');
@@ -212,7 +212,7 @@ it('successful empty conversations stay empty and an error remains distinct', as
   });
   render(<DmsListPage />);
   await screen.findByText('暫時無法連線');
-  expect(screen.queryByText('目前沒有私人對話')).toBeNull();
+  expect(screen.queryByText('目前沒有訊息')).toBeNull();
   fireEvent.click(screen.getByRole('button', { name: '重新連線' }));
   await screen.findByText('真實目錄姓名');
 });
@@ -238,7 +238,7 @@ it('changing accounts clears names immediately and ignores old callback deliveri
   expect(screen.queryByText('真實目錄姓名')).toBeNull();
   act(() => old([conversation({ peerName: '不該出現的舊姓名' })]));
   expect(screen.queryByText('不該出現的舊姓名')).toBeNull();
-  await screen.findByText('目前沒有私人對話');
+  await screen.findByText('目前沒有訊息');
 });
 it('a server school switch remounts the conversation reader without retaining the old school content', async () => {
   render(<DmsListPage />);
@@ -250,7 +250,7 @@ it('a server school switch remounts the conversation reader without retaining th
   });
   act(() => session({ uid: 'alice', schoolId: 'another-school' }));
   expect(screen.queryByText('真實目錄姓名')).toBeNull();
-  await screen.findByText('目前沒有私人對話');
+  await screen.findByText('目前沒有訊息');
 });
 it('sending waits for the confirmed write and a double click cannot duplicate it', async () => {
   const sent = deferred<void>();
@@ -311,7 +311,7 @@ it('notifications contain real task links and no local approval, purchase or rep
   render(<MessagesPage />);
   await screen.findByText('成績已公布');
   expect(screen.getByRole('link', { name: '查看課業成績與回饋' }).getAttribute('href')).toBe(
-    '/classroom/grades',
+    '/grades?tab=feedback',
   );
   expect(screen.getByText('部分通知尚未標示學校，未列入本頁。')).toBeTruthy();
   expect(screen.queryByRole('button', { name: /核准|退回|訂單|回覆|加好友/ })).toBeNull();

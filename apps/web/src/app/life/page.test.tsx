@@ -70,13 +70,13 @@ it('空結果可以恢復完整目錄，Escape 也可清除輸入', () => {
   expect(screen.queryAllByRole('link')).toHaveLength(0);
   expect(screen.getByRole('status').textContent).toBe('找到 0 項服務');
   fireEvent.click(screen.getByRole('button', { name: '顯示全部服務' }));
-  expect(screen.getAllByRole('link')).toHaveLength(10);
+  expect(screen.getAllByRole('link')).toHaveLength(9);
   expect(document.activeElement).toBe(search);
   fireEvent.change(search, { target: { value: '教室' } });
   fireEvent.keyDown(search, { key: 'Escape', isComposing: true });
   expect(screen.getAllByRole('link')).toHaveLength(1);
   fireEvent.keyDown(search, { key: 'Escape' });
-  expect(screen.getAllByRole('link')).toHaveLength(10);
+  expect(screen.getAllByRole('link')).toHaveLength(9);
 });
 
 it('搜尋不會繞過訂單開關，也不會將報修顯示為可使用服務', () => {

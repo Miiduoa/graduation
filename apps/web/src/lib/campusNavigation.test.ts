@@ -19,6 +19,17 @@ it('replaces stale campus parameters and does not carry credentials or old schoo
   expect(href.searchParams.has('token')).toBe(false);
 });
 
+it('keeps an existing tab query when attaching campus context', () => {
+  const href = new URL(
+    campusServiceHref('/grades?tab=feedback', 'schoolId=nthu&campus=nthu'),
+    'https://campus.example',
+  );
+  expect(href.pathname).toBe('/grades');
+  expect(href.searchParams.get('tab')).toBe('feedback');
+  expect(href.searchParams.get('schoolId')).toBe('nthu');
+  expect(href.searchParams.get('campus')).toBe('nthu');
+});
+
 it('does not turn the all-campuses selection into the previous campus', () => {
   const previous = new URLSearchParams('school=PU&schoolId=pu');
   expect(buildCampusNavigationSearch(previous, null, true)).toBe('campus=all');

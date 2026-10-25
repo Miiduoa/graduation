@@ -4,6 +4,7 @@ import { useNavigation } from '@react-navigation/native';
 import { httpsCallable } from 'firebase/functions';
 import { getFunctionsInstance } from '../firebase';
 import { safeNavigate } from '../utils/safeNavigate';
+import { resolveDeprecatedRouteRedirect } from '../app/deprecatedRouteRedirect';
 import { describePickupNumber, formatShortOrderCode } from '@campus/shared/src/ordering/pickupNumber';
 import {
   ORDER_NOT_SENT_TEXT,
@@ -375,7 +376,14 @@ function NavigateCard({ payload }: { payload: any }) {
   return (
     <TouchableOpacity
       style={styles.navigateCard}
-      onPress={() => nav.navigate(payload.screen, payload.params || {})}
+      onPress={() => {
+        const redirect = resolveDeprecatedRouteRedirect(payload.screen);
+        if (redirect) {
+          safeNavigate(nav, redirect.screen, payload.params || {});
+          return;
+        }
+        nav.navigate(payload.screen, payload.params || {});
+      }}
       activeOpacity={0.7}
     >
       <Text style={styles.navigateIcon}>📍</Text>
@@ -529,7 +537,7 @@ function RepairSubmittedCard({ payload }: { payload: any }) {
       <InfoRow label="地點" value={payload.location || payload.dormitory || '—'} />
       <InfoRow label="類別" value={payload.category || '—'} />
       <InfoRow label="編號" value={payload.repairId || payload.requestId || '—'} />
-      <TouchableOpacity style={styles.actionButton} onPress={() => nav.navigate('DormitoryScreen')}>
+      <TouchableOpacity style={styles.actionButton} onPress={() => safeNavigate(nav, 'TodayHome')}>
         <Text style={styles.actionButtonText}>查看報修紀錄</Text>
       </TouchableOpacity>
     </View>
