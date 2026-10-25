@@ -54,7 +54,10 @@ export function VoiceDictationButton({
   const [interim, setInterim] = useState('');
   const recognitionRef = useRef<SpeechRecognizer | null>(null);
   const callback = useRef(onTranscript);
-  callback.current = onTranscript;
+
+  useEffect(() => {
+    callback.current = onTranscript;
+  }, [onTranscript]);
 
   useEffect(() => {
     setSupported(!!browserSpeech());
