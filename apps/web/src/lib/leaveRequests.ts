@@ -2,7 +2,10 @@
 
 import { collection, getDocs, limit, orderBy, query, where } from 'firebase/firestore';
 import { httpsCallable } from 'firebase/functions';
-import { courseOfferingId, type PersonalCourse } from '@campus/shared';
+import {
+  courseOfferingId, periodEnd, periodProfileForSchool, periodStart,
+  type PersonalCourse,
+} from '@campus/shared';
 import { getAuth, getDb, getFunctionsInstance, isFirebaseConfigured } from '@/lib/firebase';
 import { areFunctionsConfigured, FunctionsUnconfiguredError } from '@/lib/functionsUrl';
 
@@ -112,13 +115,24 @@ export function suggestedLeaveCourses(
   courses: PersonalCourse[],
   startDate: string,
   endDate: string,
+  period: LeavePeriod = 'all',
+  schoolId?: string,
 ): PersonalCourse[] {
   if (!validLeaveDates(startDate, endDate)) return [];
   const days = new Set<number>();
   for (let date = startDate; date <= endDate; date = shiftLeaveDay(date, 1)) {
     days.add(new Date(date + 'T00:00:00Z').getUTCDay());
   }
-  return courses.filter((course) => course.day !== 0 && days.has(course.day));
+  const profile = periodProfileForSchool(schoolId);
+  return courses.filter((course) => {
+    if (!course.day || !days.has(course.day)) return false;
+    // Schools without a verified period profile should not silently lose courses.
+    if (period === 'all' || !profile) return true;
+    const start = periodStart(course.start, profile);
+    const end = periodEnd(course.end, profile);
+    if (!start || !end) return true;
+    return period === 'morning' ? start < '12:00' : end > '12:00';
+  });
 }
 
 export function countLeaveReviews(courses: LeaveCourse[]) {
