@@ -99,7 +99,7 @@ describe('verified campus data read-through', () => {
 });
 
 
-test('reads only the student's own school-scoped orders, not other-school orders', async () => {
+test('reads only authenticated school-scoped orders and excludes other schools', async () => {
   const results = await connectCampusServiceData({
     uid: 'alice', schoolId: 'pu', utterance: '我的取餐訂單',
     destinations: ['/food'],
