@@ -3,6 +3,27 @@ export type DormRepairStatus = 'draft' | 'reported' | 'resolved';
 export type DormRepairCategory = 'water' | 'electric' | 'air' | 'furniture' | 'network' | 'other';
 export type DormStage = 'prepare' | 'checkin' | 'checkout';
 
+export type DormMilestone = {
+  id: string;
+  title: string;
+  dueDate: string; // YYYY-MM-DD in the student's local calendar
+  completed: boolean;
+  createdAt: number;
+};
+
+export const DORM_MILESTONE_LIMIT = 30;
+
+export const DORM_REPAIR_SHORTCUTS: ReadonlyArray<{
+  category: DormRepairCategory;
+  title: string;
+}> = [
+  { category: 'air', title: '冷氣無法正常運作' },
+  { category: 'water', title: '浴室或水管漏水' },
+  { category: 'electric', title: '插座或照明故障' },
+  { category: 'network', title: '宿舍網路無法連線' },
+  { category: 'furniture', title: '門窗或家具損壞' },
+];
+
 export type DormRepair = {
   id: string;
   category: DormRepairCategory;
@@ -21,6 +42,7 @@ export type DormWorkspace = {
   bed: string;
   checkmarks: Record<string, boolean>;
   repairs: DormRepair[];
+  milestones: DormMilestone[];
   laundryEndAt: number | null;
 };
 
@@ -102,8 +124,33 @@ export function emptyDormWorkspace(): DormWorkspace {
     bed: '',
     checkmarks: {},
     repairs: [],
+    milestones: [],
     laundryEndAt: null,
   };
+}
+
+/** Reject impossible dates, including 2026-02-30 and month 13. */
+export function isValidDormDate(raw: string): boolean {
+  if (!/^(20\\d{2})-(\\d{2})-(\\d{2})$/.test(raw)) return false;
+  const [year, month, day] = raw.split('-').map(Number);
+  const result = new Date(Date.UTC(year, month - 1, day));
+  return result.getUTCFullYear() === year &&
+    result.getUTCMonth() === month - 1 &&
+    result.getUTCDate() === day;
+}
+
+export function localDormDate(date = new Date()): string {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
+export function sortedDormMilestones(value: DormWorkspace): DormMilestone[] {
+  return [...value.milestones].sort((a, b) =>
+    Number(a.completed) - Number(b.completed) ||
+    a.dueDate.localeCompare(b.dueDate) ||
+    a.createdAt - b.createdAt);
 }
 
 export function normalizeDormWorkspace(raw: unknown): DormWorkspace {
@@ -137,6 +184,26 @@ export function normalizeDormWorkspace(raw: unknown): DormWorkspace {
       });
     }
   }
+  const milestones: DormMilestone[] = [];
+  const milestoneIds = new Set<string>();
+  if (Array.isArray(value.milestones)) {
+    for (const item of value.milestones.slice(0, DORM_MILESTONE_LIMIT)) {
+      const row = asObject(item);
+      const id = boundedText(row.id, 90);
+      const title = boundedText(row.title, 90);
+      const dueDate = boundedText(row.dueDate, 10);
+      if (!id || !/^[a-zA-Z0-9_-]+$/.test(id) ||
+          milestoneIds.has(id) || !title || !isValidDormDate(dueDate)) continue;
+      milestoneIds.add(id);
+      milestones.push({
+        id,
+        title,
+        dueDate,
+        completed: row.completed === true,
+        createdAt: integer(row.createdAt),
+      });
+    }
+  }
   const laundryEndAt = integer(value.laundryEndAt);
   return {
     ...blank,
@@ -145,6 +212,7 @@ export function normalizeDormWorkspace(raw: unknown): DormWorkspace {
     bed: boundedText(value.bed, 40),
     checkmarks,
     repairs,
+    milestones,
     laundryEndAt: laundryEndAt || null,
   };
 }
