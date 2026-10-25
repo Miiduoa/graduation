@@ -17,7 +17,25 @@ export const CAMPUS_QUICK_DESTINATIONS = [
   "/announcements",
   "/messages",
   "/lost-found",
-  "/friends"
+  "/friends",
+  "/import",
+  "/appeals",
+  "/teacher",
+  "/groups",
+  "/grades?tab=feedback",
+  "/clubs",
+  "/dms",
+  "/community",
+  "/food",
+  "/merchant",
+  "/school-info",
+  "/ai-assistant",
+  "/support",
+  "/account-deletion",
+  "/profile",
+  "/settings",
+  "/classroom/account",
+  "/admin"
 ] as const;
 
 export type CampusQuickDestination = (typeof CAMPUS_QUICK_DESTINATIONS)[number];
@@ -49,6 +67,24 @@ export function suggestCampusDestinations(input: string): CampusQuickDestination
   match(/通知|未讀訊息|私訊/, '/messages');
   match(/失物|遺失|拾獲|找不到.*東西/, '/lost-found');
   match(/加好友|找朋友|好友課表/, '/friends');
+  match(/匯入|掃描課表|上傳課表|上傳成績|讀取截圖|ocr/, '/import');
+  match(/課程申訴|缺席申訴|出席異議|成績申訴|申訴單/, '/appeals');
+  match(/老師工作台|授課管理|教師工作台|批改作業/, '/teacher');
+  match(/群組|課程群組|加入課程/, '/groups');
+  match(/評語|老師回饋|作業回饋|成績回饋/, '/grades?tab=feedback');
+  match(/社團|社團清單|入社/, '/clubs');
+  match(/私訊|聊天|傳訊息|對話紀錄/, '/dms');
+  match(/校園社群|校園交流|貼文|討論區|看板|發文/, '/community');
+  match(/點餐|訂餐|取餐|訂單狀態|餐點訂單/, '/food');
+  match(/店家合作|商家進駐|門市管理|商家後台|店家後台/, '/merchant');
+  match(/學校資訊|校方電話|總機|學校官網|學校地址/, '/school-info');
+  match(/詢問校園助理|問助理|問ai|人工智慧助理/, '/ai-assistant');
+  match(/客服|問題回報|聯絡支援|幫助中心/, '/support');
+  match(/刪除帳號|註銷帳號|刪掉帳戶/, '/account-deletion');
+  match(/我的個人資料|編輯個人資料|姓名|學號|個人資料/, '/profile');
+  match(/設定|暗色模式|深色模式|外觀主題|通知設定/, '/settings');
+  match(/學校資格|學籍驗證|身分驗證|多校資格/, '/classroom/account');
+  match(/管理員後台|平台管理員|系統後台/, '/admin');
 
   return result.slice(0, 3);
 }
