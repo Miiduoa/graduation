@@ -6,6 +6,8 @@ import Link from 'next/link';
 import { SiteShell } from '@/components/SiteShell';
 import { campusServiceHref, useCampusNavigationSearch } from '@/lib/campusNavigation';
 import { useSignInOptions } from '@/lib/signInOptions';
+import { VoiceDictationButton } from '@/components/VoiceDictationButton';
+import { getQuickCampusActions } from '@/lib/quickCampusActions';
 import styles from './search.module.css';
 import {
   serviceAccessLabel,
@@ -40,6 +42,9 @@ function ServiceDirectory() {
   }, [queryString]);
   const term = query.trim();
   const matches = searchCampusServices(query, category);
+  const suggested = getQuickCampusActions(query).filter(
+    (action) => !matches.some((match) => match.href === action.href),
+  );
   function updateFilters(next: { query: string; category: ServiceCategory | 'all' }) {
     setFilters(next);
     const url = new URL(window.location.href);
@@ -67,24 +72,30 @@ function ServiceDirectory() {
           onSubmit={(event) => event.preventDefault()}
         >
           <label htmlFor="service-search">想找什麼？</label>
-          <input
-            ref={searchInput}
-            id="service-search"
-            className={styles.searchInput}
-            type="search"
-            value={query}
-            maxLength={100}
-            autoComplete="off"
-            enterKeyHint="search"
-            placeholder="課表、借書、公車…"
-            onChange={(event) => updateFilters({ query: event.target.value, category })}
-            onKeyDown={(event) => {
-              if (event.key === 'Escape' && !event.nativeEvent.isComposing && query) {
-                event.preventDefault();
-                updateFilters({ query: '', category });
-              }
-            }}
-          />
+          <div className={styles.queryRow}>
+            <input
+              ref={searchInput}
+              id="service-search"
+              className={styles.searchInput}
+              type="search"
+              value={query}
+              maxLength={100}
+              autoComplete="off"
+              enterKeyHint="search"
+              placeholder="說出需求，例如：圖書館怎麼走？"
+              onChange={(event) => updateFilters({ query: event.target.value, category })}
+              onKeyDown={(event) => {
+                if (event.key === 'Escape' && !event.nativeEvent.isComposing && query) {
+                  event.preventDefault();
+                  updateFilters({ query: '', category });
+                }
+              }}
+            />
+            <VoiceDictationButton
+              onTranscript={(text) => updateFilters({ query: text.slice(0, 100), category: 'all' })}
+            />
+          </div>
+          <p className={styles.voiceHelp}>用說的也可以。辨識內容會先顯示在搜尋欄，只有點選結果才會開啟服務。</p>
           <div className={styles.filters} role="group" aria-label="服務分類">
             {[{ id: 'all', label: '全部' }, ...SERVICE_CATEGORIES].map((item) => (
               <button
@@ -100,6 +111,25 @@ function ServiceDirectory() {
             ))}
           </div>
         </form>
+        {term && suggested.length > 0 && (
+          <section className={styles.smartResults} aria-label="根據需求推薦的服務">
+            <h2>你可能想做</h2>
+            <div className={styles.smartGrid}>
+              {suggested.map((action) => (
+                <Link
+                  key={action.href}
+                  href={campusServiceHref(action.href, schoolSearch)}
+                  className={styles.smartAction}
+                >
+                  <strong>{action.name}</strong>
+                  <small>{action.text}</small>
+                  <span aria-hidden="true">→</span>
+                </Link>
+              ))}
+            </div>
+            <p>這些連結只會開啟對應功能，不會自動提交資料。</p>
+          </section>
+        )}
         {options.error && (
           <div role="alert">
             <p>暫時無法確認學校登入方式，公開資訊仍可瀏覽。</p>
@@ -155,8 +185,10 @@ function ServiceDirectory() {
           })
         ) : (
           <section className={styles.empty}>
-            <h2>沒有符合的服務</h2>
-            <p>試試「課表」或「公車」等關鍵字，也可以清除篩選，查看所有服務。</p>
+            <h2>{suggested.length ? '沒有完全相符的服務' : '沒有符合的服務'}</h2>
+            <p>{suggested.length
+              ? '你可以先使用上方推薦的入口，或調整關鍵字繼續找。'
+              : '試試「課表」或「公車」等關鍵字，也可以清除篩選，查看所有服務。'}</p>
             <button type="button" className="btn primary" onClick={resetFilters}>
               查看所有服務
             </button>

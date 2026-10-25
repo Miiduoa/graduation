@@ -46,6 +46,15 @@ function Header() {
           ) : null}
         </div>
         <div className={headerStyles.account}>
+          <Link
+            href={href('/search')}
+            className={headerStyles.quickSearch}
+            aria-label="搜尋服務與語音輸入"
+            title="搜尋服務與語音輸入"
+          >
+            <CampusIcon name="search" size={17} />
+            <span>搜尋</span>
+          </Link>
           {!checking && nuni.session?.isPlatformOperator && (
             <Link className={headerStyles.operatorLink} href="/admin">
               平台管理

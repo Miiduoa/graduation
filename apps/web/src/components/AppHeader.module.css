@@ -151,6 +151,14 @@
     border-color 160ms ease;
 }
 
+.account > .quickSearch {
+  gap: 7px;
+  background: var(--panel);
+  border-color: var(--border);
+  border-radius: 11px;
+  font-weight: 600;
+}
+
 .account > .login {
   border-color: var(--brand);
   background: var(--brand);
@@ -331,6 +339,14 @@
   .account > a,
   .account > button {
     padding-inline: 10px;
+  }
+
+  .account > .quickSearch {
+    min-width: 44px;
+    padding-inline: 10px;
+  }
+  .quickSearch span {
+    display: none;
   }
 
   .account > [role='status'] {

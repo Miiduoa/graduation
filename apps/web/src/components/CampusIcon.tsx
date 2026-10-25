@@ -12,6 +12,7 @@ export type CampusIconName =
   | 'import'
   | 'people'
   | 'search'
+  | 'microphone'
   | 'lost-found'
   | 'orders'
   | 'social'
@@ -84,6 +85,12 @@ const paths: Record<CampusIconName, React.ReactNode> = {
     <>
       <circle cx="10.5" cy="10.5" r="6.5" />
       <path d="m16 16 5 5" />
+    </>
+  ),
+  microphone: (
+    <>
+      <rect x="9" y="2.5" width="6" height="12" rx="3" />
+      <path d="M6 10v1a6 6 0 0 0 12 0v-1M12 17v4M8 21h8" />
     </>
   ),
   'lost-found': (

@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { NuniError, nuniErrorMessage } from '@campus/shared/src/nuni';
 import { AppHeader } from '@/components/AppHeader';
+import { QuickCampusEntry } from '@/components/QuickCampusEntry';
 import { SiteFooter } from '@/components/SiteFooter';
 import { useAuth } from '@/components/AuthGuard';
 import { AccountIdentity } from '@/components/AccountIdentity';
@@ -133,6 +134,7 @@ export default function HomePage() {
       </a>
       <AppHeader />
       <main id="today-content" className={styles.main} tabIndex={-1}>
+        <QuickCampusEntry />
         {isTeacherRole(role) && (
           <p className={styles.notice}>
             <Link href="/teacher">老師工作台 →</Link> 看學生送來的課程申訴。

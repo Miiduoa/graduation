@@ -41,6 +41,31 @@
   display: inline-flex;
   margin-top: 12px;
 }
+.exampleQuestions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 18px;
+}
+.exampleQuestions button {
+  min-height: 40px;
+  padding: 8px 12px;
+  font: inherit;
+  font-size: 13px;
+  border-radius: 999px;
+  border: 1px solid var(--border-strong);
+  color: var(--text);
+  background: var(--panel);
+  cursor: pointer;
+}
+.voiceRow {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px 14px;
+  margin-top: 10px;
+}
+
 .serviceLinks,
 .suggestions {
   display: flex;
