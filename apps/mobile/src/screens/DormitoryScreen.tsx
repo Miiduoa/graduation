@@ -333,6 +333,16 @@ function DormitoryBody({
     }
   }
 
+  async function openPublicLink(url: string) {
+    try {
+      await Linking.openURL(url);
+    } catch {
+      Alert.alert('無法開啟', url.startsWith('tel:')
+        ? '此裝置無法直接撥號，請使用可通話的電話撥打畫面上的號碼。'
+        : '請檢查網路連線，或從校方住宿服務網站查詢。');
+    }
+  }
+
   const progress = dormChecklistProgress(data);
   const remaining = data.laundryEndAt ? Math.max(0, Math.ceil((data.laundryEndAt - clock) / 60000)) : 0;
   const today = localDormDate(new Date(clock));
@@ -430,11 +440,11 @@ function DormitoryBody({
                   <Body>住服組 {guide.officePhone} 分機 {guide.officeExtensions}</Body>
                   <Body muted>{guide.serviceHours}</Body>
                   <View style={{ ...flexRow, marginTop: 12 }}>
-                    <AIButton variant="ghost" label="撥打住宿服務電話" onPress={() => void Linking.openURL('tel:' + guide.officePhone)} />
+                    <AIButton variant="ghost" label="撥打住宿服務電話" onPress={() => void openPublicLink('tel:' + guide.officePhone)} />
                   </View>
                   <View style={{ marginTop: 15 }}><Body>24 小時校安專線：{guide.emergencyPhone}</Body></View>
                   <View style={{ ...flexRow, marginTop: 12 }}>
-                    <AIButton variant="ghost" label="撥打校安專線" onPress={() => void Linking.openURL('tel:' + guide.emergencyPhone)} />
+                    <AIButton variant="ghost" label="撥打校安專線" onPress={() => void openPublicLink('tel:' + guide.emergencyPhone)} />
                   </View>
                 </AICard>
                 {guide.halls.map((hall) => (
@@ -451,7 +461,7 @@ function DormitoryBody({
                 ))}
                 <AICard title="資料來源與使用提醒">
                   <Body muted>以上費用不含另計冷氣電費；資料核對日 {guide.checkedAt}。床位是否開放及實際金額，請以當學期校方公告為準。</Body>
-                  <View style={{ marginTop: 12 }}><AIButton variant="ghost" label="查看校方房型與收費表 ↗" onPress={() => void Linking.openURL(guide.feeSource)} /></View>
+                  <View style={{ marginTop: 12 }}><AIButton variant="ghost" label="查看校方房型與收費表 ↗" onPress={() => void openPublicLink(guide.feeSource)} /></View>
                 </AICard>
               </>
             ) : (
@@ -563,7 +573,7 @@ function DormitoryBody({
             {milestones.map((entry) => (
               <AICard key={entry.id} title={entry.title}
                 badge={entry.completed ? '已完成（自行註記）' : entry.dueDate < today ? '日期已過' : '待確認'}
-                badgeTone={entry.dueDate < today && !entry.completed ? 'danger' : undefined}>
+                badgeTone={entry.completed ? 'success' : entry.dueDate < today ? 'danger' : 'muted'}>
                 <Body muted>{entry.dueDate.replaceAll('-', '/')}</Body>
                 <View style={{ ...flexRow, marginTop: 14 }}>
                   <AIButton variant="ghost" disabled={conflict} label={entry.completed ? '恢復待辦' : '標記完成'}
