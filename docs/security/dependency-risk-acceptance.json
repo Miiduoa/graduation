@@ -47,11 +47,11 @@
       "package": "zod",
       "ghsa": "GHSA-mrhx-c7xc-m3w5",
       "scope": "workspace-all",
-      "reason": "保留 Zod 3 契約，已在共用工具入口解析前施加陣列、鍵數、深度、節點與 UTF-8 上限；模型參數與成功及錯誤串流均有界限。此為受測緩解，套件告警仍存在。",
+      "reason": "Functions 執行期已升到 Zod 4.6.7（advisory 修復版 >=4.6.6）。殘餘 3.25.76 僅來自 ESLint 外掛傳遞依賴，不在正式 Functions／Web 執行路徑。套件告警仍保留可見。",
       "expiry": "2026-10-31",
-      "evidence": "backend/functions/agent/inputLimits.js 與 registry.inputBounds.test.js、executeAgentWrite.inputBounds.test.js；assistantAgent.test.js 真實串流回歸；50 項專項測試及獨立兩輪覆核通過。",
+      "evidence": "pnpm audit 路徑 .>eslint-plugin-react-hooks>zod；Functions 鎖檔為 4.6.7；backend/functions/agent/inputLimits.js 與 registry.inputBounds.test.js、executeAgentWrite.inputBounds.test.js。",
       "paths": [
-        "backend__functions>zod"
+        ".>eslint-plugin-react-hooks>zod"
       ],
       "versions": [
         "3.25.76"
@@ -97,34 +97,6 @@
       ],
       "versions": [
         "1.4.0"
-      ]
-    },
-    {
-      "package": "zod",
-      "ghsa": "GHSA-mrhx-c7xc-m3w5",
-      "scope": "workspace-prod",
-      "reason": "保留 Zod 3 契約，已在共用工具入口解析前施加陣列、鍵數、深度、節點與 UTF-8 上限；模型參數與成功及錯誤串流均有界限。此為受測緩解，套件告警仍存在。",
-      "expiry": "2026-10-31",
-      "evidence": "backend/functions/agent/inputLimits.js 與 registry.inputBounds.test.js、executeAgentWrite.inputBounds.test.js；assistantAgent.test.js 真實串流回歸；50 項專項測試及獨立兩輪覆核通過。",
-      "paths": [
-        "backend__functions>zod"
-      ],
-      "versions": [
-        "3.25.76"
-      ]
-    },
-    {
-      "package": "zod",
-      "ghsa": "GHSA-mrhx-c7xc-m3w5",
-      "scope": "functions-prod",
-      "reason": "保留 Zod 3 契約，已在共用工具入口解析前施加陣列、鍵數、深度、節點與 UTF-8 上限；模型參數與成功及錯誤串流均有界限。此為受測緩解，套件告警仍存在。",
-      "expiry": "2026-10-31",
-      "evidence": "backend/functions/agent/inputLimits.js 與 registry.inputBounds.test.js、executeAgentWrite.inputBounds.test.js；assistantAgent.test.js 真實串流回歸；50 項專項測試及獨立兩輪覆核通過。",
-      "nodes": [
-        "node_modules/zod"
-      ],
-      "ranges": [
-        "<4.6.6"
       ]
     }
   ]
