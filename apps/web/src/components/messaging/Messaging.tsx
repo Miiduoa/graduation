@@ -14,6 +14,7 @@ import {
   sendPrivateMessage,
   newPrivateMessageId,
   markConversationRead,
+  togglePrivateMessageReaction,
   markAccountNotificationRead,
   notificationDestination,
   type MessagingSession,
@@ -354,8 +355,10 @@ export function PrivateConversationView({
   const [sending, setSending] = useState(false);
   const [feedback, setFeedback] = useState('');
   const [reading, setReading] = useState(false);
+  const [reacting, setReacting] = useState<string | null>(null);
   const sendLock = useRef(false);
   const readLock = useRef(false);
+  const reactionLock = useRef(false);
   const attempt = useRef<{ id: string; body: string } | null>(null);
   const currentConversation = useRef(conversationId);
   useLayoutEffect(() => {
@@ -424,6 +427,26 @@ export function PrivateConversationView({
       if (active()) setReading(false);
     }
   };
+  const react = async (messageId: string, emoji: '👍' | '❤️') => {
+    if (reactionLock.current || state.status !== 'ready' || !active()) return;
+    reactionLock.current = true;
+    setReacting(`${messageId}:${emoji}`);
+    setFeedback('');
+    try {
+      await togglePrivateMessageReaction(session, conversationId, messageId, emoji);
+    } catch {
+      if (active()) setFeedback('無法更新表情回應，請確認網路後重試。');
+    } finally {
+      reactionLock.current = false;
+      if (active()) setReacting(null);
+    }
+  };
+  const visibleMessages = (state.data?.messages ?? []).filter(
+    (row) =>
+      !messageSearch.trim() ||
+      (!row.recalled &&
+        row.content.toLocaleLowerCase().includes(messageSearch.trim().toLocaleLowerCase())),
+  );
   return (
     <div className={styles.stack}>
       <div className={styles.toolbar}>
@@ -464,16 +487,8 @@ export function PrivateConversationView({
             />
           </label>
           <ol className={styles.messages} aria-label="對話內容">
-            {state.data.messages.filter((row) =>
-              !messageSearch.trim() || (!row.recalled &&
-                row.content.toLocaleLowerCase().includes(messageSearch.trim().toLocaleLowerCase())),
-            ).length ? (
-              state.data.messages
-                .filter((row) =>
-                  !messageSearch.trim() || (!row.recalled &&
-                    row.content.toLocaleLowerCase().includes(messageSearch.trim().toLocaleLowerCase())),
-                )
-                .map((row) => (
+            {visibleMessages.length ? (
+              visibleMessages.map((row) => (
                 <li
                   key={row.id}
                   className={row.senderId === session.uid ? styles.mine : styles.theirs}
@@ -486,6 +501,27 @@ export function PrivateConversationView({
                         : '此類型訊息請在 App 中查看。'}
                   </p>
                   <time dateTime={row.createdAt ?? undefined}>{time(row.createdAt)}</time>
+                  {!row.recalled && (row.type === 'text' || row.type === 'reply') && (
+                    <div className={styles.messageReactions} aria-label="訊息表情回應">
+                      {(['👍', '❤️'] as const).map((emoji) => {
+                        const members = row.reactions?.[emoji] ?? [];
+                        const mine = members.includes(session.uid);
+                        return (
+                          <button
+                            key={emoji}
+                            type="button"
+                            aria-label={`${emoji === '👍' ? '讚' : '愛心'}，目前 ${members.length} 人回應`}
+                            aria-pressed={mine}
+                            className={styles.reactionButton}
+                            disabled={reacting !== null}
+                            onClick={() => void react(row.id, emoji)}
+                          >
+                            {emoji}{members.length ? ` ${members.length}` : ''}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  )}
                 </li>
               ))
             ) : (
