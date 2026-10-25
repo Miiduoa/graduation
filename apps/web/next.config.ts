@@ -1,6 +1,6 @@
 import path from 'node:path';
 import type { NextConfig } from 'next';
-import { legacyEnabled, legacyRewrites } from './src/lib/legacy-routing';
+import { legacyEnabled, legacyHtmlRedirects, legacyRewrites } from './src/lib/legacy-routing';
 
 const firebaseAdminBrowserStub = path.join(__dirname, 'src/lib/nodeNativeStub.ts');
 
@@ -23,7 +23,8 @@ const contentSecurityPolicy = [
   "style-src 'self' 'unsafe-inline' https:",
   "script-src 'self' 'unsafe-inline' 'unsafe-eval' 'wasm-unsafe-eval'",
   "worker-src 'self' blob:",
-  "connect-src 'self' https://*.googleapis.com https://*.firebaseio.com https://*.cloudfunctions.net https://*.fly.dev https://*.web.app https://*.firebaseapp.com https://huggingface.co https://*.huggingface.co https://*.hf.co wss:" +
+  // api.nuni.tw is the existing school-discovery host used by /auth/account.
+  "connect-src 'self' https://api.nuni.tw https://*.googleapis.com https://*.firebaseio.com https://*.cloudfunctions.net https://*.fly.dev https://*.web.app https://*.firebaseapp.com https://huggingface.co https://*.huggingface.co https://*.hf.co wss:" +
     emulatorConnectSrc,
 ].join('; ');
 
@@ -73,6 +74,9 @@ const nextConfig: NextConfig = {
       };
     }
     return config;
+  },
+  async redirects() {
+    return legacyHtmlRedirects();
   },
   async rewrites() {
     return legacyRewrites(legacyEnabled());
