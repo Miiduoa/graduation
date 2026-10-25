@@ -17,6 +17,7 @@ import BusAiFirstScreen from './BusAiFirstScreen';
 import MenuDetailAiFirstScreen from './MenuDetailAiFirstScreen';
 import LibraryAiFirstScreen from './LibraryAiFirstScreen';
 import SchoolInfoScreen from './SchoolInfoScreen';
+import { DormitoryScreen } from './DormitoryScreen';
 import { OrderingScreen } from './OrderingScreen';
 import { MenuSubscriptionScreen } from './MenuSubscriptionScreen';
 import { LibraryCatalogScreen } from './LibraryCatalogScreen';
@@ -149,6 +150,7 @@ export function MapStack() {
         component={LibraryAiFirstScreen}
         options={{ title: '圖書館', headerShown: false }}
       />
+      <Stack.Screen name="Dormitory" component={DormitoryScreen} options={{ title: '宿舍', headerShown: false }} />
       <Stack.Screen
         name="SchoolInfo"
         component={SchoolInfoScreen}

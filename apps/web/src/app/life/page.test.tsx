@@ -86,26 +86,25 @@ it('空結果可以恢復完整目錄，Escape 也可清除輸入', () => {
   expect(screen.queryAllByRole('link')).toHaveLength(0);
   expect(screen.getByRole('status').textContent).toBe('找到 0 項服務');
   fireEvent.click(screen.getByRole('button', { name: '顯示全部服務' }));
-  expect(screen.getAllByRole('link')).toHaveLength(11);
+  expect(screen.getAllByRole('link')).toHaveLength(12);
   expect(document.activeElement).toBe(search);
   fireEvent.change(search, { target: { value: '教室' } });
   fireEvent.keyDown(search, { key: 'Escape', isComposing: true });
   expect(screen.getAllByRole('link')).toHaveLength(1);
   fireEvent.keyDown(search, { key: 'Escape' });
-  expect(screen.getAllByRole('link')).toHaveLength(11);
+  expect(screen.getAllByRole('link')).toHaveLength(12);
 });
 
-it('搜尋不會繞過訂單開關，也不會將報修顯示為可使用服務', () => {
+it('搜尋不會繞過訂單開關，並可直達個人宿舍工作區', () => {
   render(<LifePage />);
   const search = screen.getByRole('searchbox', { name: '快速找服務' });
   fireEvent.change(search, { target: { value: '取餐' } });
   expect(screen.queryAllByRole('link')).toHaveLength(0);
   expect(screen.queryByText('我的訂單')).toBeNull();
   fireEvent.change(search, { target: { value: '維修' } });
-  expect(screen.queryAllByRole('link')).toHaveLength(0);
-  expect(screen.getByRole('complementary', { name: '報修 尚未開放' })).toBeTruthy();
-  expect(screen.getByText('報修還沒開，有問題先找系辦或總務處。')).toBeTruthy();
-  expect(screen.getByRole('status').textContent).toBe('找到 0 項服務，報修尚未開放');
+  expect(screen.getAllByRole('link')).toHaveLength(1);
+  expect(screen.getByRole('link', { name: /宿舍/ }).getAttribute('href')).toBe('/dormitory');
+  expect(screen.getByRole('status').textContent).toBe('找到 1 項服務');
 });
 
 it('搜尋結果維持已選校園的連結參數與原有帳號需求', () => {
@@ -286,7 +285,7 @@ it('URL 校園參數不影響生活頁搜尋與分類狀態', () => {
   const search = screen.getByRole('searchbox', { name: '快速找服務' }) as HTMLInputElement;
   expect(search.value).toBe('');
   expect(screen.getByRole('button', { name: '全部' }).getAttribute('aria-pressed')).toBe('true');
-  expect(screen.getByRole('status').textContent).toBe('共 11 項服務');
+  expect(screen.getByRole('status').textContent).toBe('共 12 項服務');
   fireEvent.change(search, { target: { value: '公車' } });
   expect(screen.getAllByRole('link')).toHaveLength(1);
   expect(screen.getByRole('link', { name: /公車/ }).getAttribute('href')).toContain('campus=nthu');

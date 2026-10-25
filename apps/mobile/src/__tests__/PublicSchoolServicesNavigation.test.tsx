@@ -65,6 +65,7 @@ jest.mock('../state/theme', () => ({
 }));
 jest.mock('../state/nuniSession', () => ({
   useNuniSession: () => ({ session: null, loading: false, error: '', pendingLogout: false }),
+  useOptionalNuniSession: () => null,
 }));
 jest.mock('../state/schedule', () => ({
   useSchedule: () => ({
@@ -243,9 +244,9 @@ test.each([
   },
   {
     route: 'Dormitory',
-    openLabel: '前往成大住宿服務組',
+    openLabel: '成大住宿服務組 ↗',
     url: 'https://housing-osa.ncku.edu.tw/',
-    marker: /宿舍包裹查詢與線上報修尚未開放/,
+    marker: /床位、抽籤、繳費、退宿和正式報修/,
   },
   {
     route: 'Career',
@@ -285,15 +286,17 @@ test('non-PU CourseCatalog does not query PU catalog and opens selected-school o
   expect(onUnhandledAction).not.toHaveBeenCalled();
 });
 
-test('Dormitory wrapper 公告總覽 action navigates to the registered public screen', async () => {
+test('guest Dormitory provides an editable personal workspace without claiming school access', async () => {
   const { view, navigation, onUnhandledAction } = renderPublicStack();
   fireEvent.press(await view.findByTestId('public-Dormitory'));
   await waitFor(() => expect(navigation.getCurrentRoute()?.name).toBe('Dormitory'));
-  expect(view.queryByText('查看校園活動')).toBeNull();
-  expect(view.queryByText('查看我的課程')).toBeNull();
-  fireEvent.press(view.getByText('查看校方公告'));
-  await view.findByTestId('public-announcements-screen');
-  expect(navigation.getCurrentRoute()?.name).toBe('公告總覽');
+  expect(await view.findByText('住宿工作區')).toBeTruthy();
+  expect(view.getByText(/訪客紀錄只存在此裝置/)).toBeTruthy();
+  fireEvent.press(view.getByText('設備問題'));
+  expect(view.getByText('＋ 記錄問題')).toBeTruthy();
+  fireEvent.press(view.getByText('＋ 記錄問題'));
+  expect(view.getByText('新增問題')).toBeTruthy();
+  expect(view.queryByTestId('school-login-form')).toBeNull();
   expect(onUnhandledAction).not.toHaveBeenCalled();
 });
 
@@ -329,7 +332,7 @@ test('a school without configured sources shows honest unsupported states withou
   fireEvent.press(await view.findByTestId('public-Dormitory'));
   await waitFor(() => expect(navigation.getCurrentRoute()?.name).toBe('Dormitory'));
   expect(view.queryByText(/前往.*住宿/)).toBeNull();
-  expect(view.getByText('查看校方公告')).toBeTruthy();
+  expect(await view.findByText(/這所學校目前沒有已核實的住宿專屬網站/)).toBeTruthy();
   expect(onUnhandledAction).not.toHaveBeenCalled();
 });
 
