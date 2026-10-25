@@ -226,9 +226,13 @@ function TimetableWorkspace({ schoolId }: { schoolId: string }) {
       ? ''
       : new URLSearchParams(window.location.search).get('term') || '',
   );
-  const terms = personalTimetableTerms(imported.records, schoolId).map((term) => term.key);
+  const terms = personalTimetableTerms(imported.records, schoolId);
   const activeTerm =
-    importTerm === 'manual' ? 'manual' : terms.includes(importTerm) ? importTerm : terms[0] || '';
+    importTerm === 'manual'
+      ? 'manual'
+      : terms.some((term) => term.key === importTerm)
+        ? importTerm
+        : terms[0]?.key || '';
   const importedCourses: PersonalCourse[] = imported.records
     .filter(
       (row) =>
@@ -455,8 +459,8 @@ function TimetableWorkspace({ schoolId }: { schoolId: string }) {
             <select value={activeTerm} onChange={(event) => setImportTerm(event.target.value)}>
               <option value="manual">原本的手動課表</option>
               {terms.map((term) => (
-                <option key={term} value={term}>
-                  {term.replace('|', ' 學年度 ')} 學期
+                <option key={term.key} value={term.key}>
+                  {term.academicYear} 學年度 {term.semester} 學期
                 </option>
               ))}
             </select>
@@ -812,8 +816,8 @@ function TimetableWorkspace({ schoolId }: { schoolId: string }) {
             <select value={activeTerm} onChange={(event) => setImportTerm(event.target.value)}>
               <option value="manual">原本的手動課表</option>
               {terms.map((term) => (
-                <option key={term} value={term}>
-                  {term.replace('|', ' 學年度 ')} 學期
+                <option key={term.key} value={term.key}>
+                  {term.academicYear} 學年度 {term.semester} 學期
                 </option>
               ))}
             </select>

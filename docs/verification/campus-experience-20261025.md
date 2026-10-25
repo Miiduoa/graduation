@@ -31,6 +31,7 @@
 | Web 全量 | 264 個檔案通過、4 個略過；2,973 項通過、11 項略過；exit 0 |
 | 最後一輪課表相關測試 | 28 項通過 |
 | 教材分頁補修 | 兩個受影響 suites 開啟 coverage，23 項通過；Web typecheck 與 scoped lint 通過 |
+| CodeQL 警示對應修正 | Web 44 項、Functions 81 項通過；型別與 scoped lint 通過；獨立 Functions production package 成功載入 121 exports |
 | Web production build | 完成，建置檢查通過 |
 | App 整合測試 | 36 suites／542 項通過 |
 | App 最終導覽相關測試 | 7 suites／148 項通過；與整合測試重疊 |
@@ -44,6 +45,8 @@
 瀏覽器使用本機 production build、訪客狀態及明確的測試資料；檢查 1440、768、390、320 px 版面、200% 文字縮放、OLED 外觀、選單鍵盤操作、設定連結及課表學校隔離。這些結果不包含原生實機、真實學校帳號或正式環境部署驗收。
 
 PR 第一輪全量 Web CI 在「繼續載入較早教材」案例出現一次下一頁未顯示的失敗。學習路徑與教材搜尋的按鈕原先以 state 渲染，卻從稍後由 effect 同步的 ref 讀取分頁資料；補修改為直接讀取渲染按鈕的 state，並增加下一頁 cursor 的立即請求斷言。帳號／請求範圍與取消機制維持原有防護，沒有放寬測試 timeout。這筆補修在上述本機全量 Web 測試之後；最終整合結果以 PR 最新 commit 的完整 CI 為準。
+
+CodeQL 的分析工作成功執行後，另有 7 項安全掃描警示。對應修正使用明確的 Firebase provider ID 等值比較、直接呈現學期欄位，以及 parse5 的單次 HTML 解析與迭代文字節點走訪；測試 mock 亦改為精確 hostname 比較。parse5 7.3.0 已加入 Functions 正式依賴與兩份鎖檔，並通過獨立 production 安裝／載入檢查。沒有停用規則或關閉警示；最終結果須同時檢查 CodeQL 分析工作與 code-scanning check。
 
 ## 畫面與可核對證據
 

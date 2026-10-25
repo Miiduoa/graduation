@@ -191,7 +191,7 @@ describe('assistant agent policy', () => {
     process.env.GEMINI_API_KEY = 'gemini-key';
     process.env.GEMINI_MODEL = 'gemini-2.0-flash';
     const fetchImpl = jest.fn(async (url) => {
-      if (String(url).includes('groq.com')) {
+      if (new URL(String(url)).hostname === 'api.groq.com') {
         return mockResponse({ ok: false, status: 400, text: 'bad request' });
       }
       return mockResponse({
@@ -263,7 +263,7 @@ describe('assistant agent policy', () => {
     process.env.GROQ_API_KEY = 'groq-key';
     process.env.GEMINI_API_KEY = 'gemini-key';
     const fetchImpl = jest.fn(async (url) => {
-      if (String(url).includes('groq.com')) {
+      if (new URL(String(url)).hostname === 'api.groq.com') {
         return mockResponse({ ok: false, status: 400, text: 'bad request' });
       }
       return mockResponse({
@@ -290,6 +290,58 @@ describe('assistant agent policy', () => {
     const result = await answerWithServerWebSearch('從靜宜大學怎麼去台中車站？');
     expect(result.content).toContain('Google Maps');
     expect(result.sources.some((source) => source.source.includes('公車'))).toBe(true);
+  });
+
+  test.each([
+    [
+      'nested elements and quoted angle brackets',
+      '<p title="a > b">公開 <span>校務 <b>公告</b></span></p>',
+      '公開 校務 公告',
+    ],
+    [
+      'non-content elements and comments',
+      '公開<script>script-secret</script><style>style-secret</style>' +
+        '<template><b>template-secret</b></template><noscript>noscript-secret</noscript>' +
+        '<!-- comment-secret --> <span>可見</span>',
+      '公開 可見',
+    ],
+    [
+      'malformed nested script opening',
+      '公開 <<script>script-secret</script> <span>可見</span>',
+      '公開 < 可見',
+    ],
+    [
+      'unclosed script content',
+      '公開<script src=x />script-secret<p>still-script-content</p>',
+      '公開',
+    ],
+    [
+      'exactly-once named and numeric entity decoding',
+      'A &amp;lt;b&amp;gt; &#38;lt;i&#38;gt; &amp;amp; &quot;B&quot; &#039; ' +
+        '&lt;u&gt;字&lt;/u&gt; &#x4e2d; &nbsp; 文',
+      'a &lt;b&gt; &lt;i&gt; &amp; "b" \' <u>字</u> 中 文',
+    ],
+    [
+      'deeply nested source HTML',
+      '<div>'.repeat(12000) + '公開內容' + '</div>'.repeat(12000),
+      '公開內容',
+    ],
+  ])('extracts source text safely from %s', async (_name, snippet, expected) => {
+    const fetchImpl = jest.fn(async (url) => mockResponse({
+      json: new URL(String(url)).hostname === 'zh.wikipedia.org'
+        ? { query: { search: [{ title: '校務資訊', snippet }] } }
+        : {},
+    }));
+
+    const result = await answerWithServerWebSearch('搜尋公開校園資訊', {
+      schoolId: 'nthu',
+      fetchImpl,
+    });
+
+    expect(result.sources).toHaveLength(1);
+    expect(result.sources[0].snippet).toBe(expected);
+    expect(result.content).toContain(expected);
+    expect(result.content).not.toContain('secret');
   });
 
   test('rejects oversized provider responses before JSON.parse', async () => {
