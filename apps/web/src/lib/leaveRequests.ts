@@ -167,11 +167,14 @@ export async function listMyLeaveRequests(uid: string, schoolId: string): Promis
     collection(getDb(), 'leaveRequests'),
     where('uid', '==', uid),
     where('schoolId', '==', schoolId),
+    where('source', '==', 'campus-one'),
     orderBy('createdAt', 'desc'),
     limit(100),
   ));
   assertCloudUser(uid);
-  return result.docs.map((doc) => ({ ...doc.data(), id: doc.id } as LeaveRequest))
+  return result.docs
+    .filter((doc) => doc.data().source === 'campus-one' && Array.isArray(doc.data().courses))
+    .map((doc) => ({ ...doc.data(), id: doc.id } as LeaveRequest))
     .sort((a, b) => timestampOf(b.createdAt) - timestampOf(a.createdAt));
 }
 
