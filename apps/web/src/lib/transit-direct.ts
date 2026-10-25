@@ -7,8 +7,29 @@ import {
   findCatalogStopsByName, normalizeCatalogName, searchTaichungCatalog, type TaichungCatalogStop,
 } from './transit-catalog';
 
-/** 校門口閘門（與校園地圖步行起點同一點），沒有定位時當作出發點。 */
-export const PROVIDENCE_DIRECT_ORIGIN: Position = { lat: 24.225714, lon: 120.577096 };
+/**
+ * 靜宜校門（沒有定位時的出發點，也是 TDX 旅運規劃起點）。
+ *
+ * OSM 閘門 node 4692506551 為 24.225714, 120.577096，落在臺灣大道西側，
+ * 實測會讓旅運規劃把首段走到校外。改用 OSM 公車站
+ * 「Providence University(Main Gate)」node 9612420907
+ * https://www.openstreetmap.org/node/9612420907
+ * （2026-10-25 查詢：24.2253877, 120.5775610）。
+ * 交叉核對：臺中站牌快照「靜宜大學（校門）」24.2253, 120.577797；
+ * 校方「如何到靜宜」GPS 24.2257, 120.5772
+ * https://www.pu.edu.tw/p/406-1000-2733,r192.php?Lang=zh-tw
+ */
+export const PROVIDENCE_DIRECT_ORIGIN: Position = { lat: 24.225388, lon: 120.577561 };
+/**
+ * 主顧樓建築中心（校內目的地與 TDX 迄點）。
+ *
+ * OSM way 255784268「主顧樓」範圍中心 24.226939, 120.583587
+ * https://www.openstreetmap.org/way/255784268 （校園地圖 2026-10-19 核對）。
+ * 公車站「靜宜大學主顧樓」在 24.226601, 120.583099，偏西約 50 公尺，
+ * 不當作出發／迄點以免旅運規劃把人放到樓西側。
+ * Google 地圖地點 24.227105, 120.583577 相距約 18 公尺、同一棟。
+ */
+export const PROVIDENCE_ZHUGU_HALL: Position = { lat: 24.226939, lon: 120.583587 };
 export const DIRECT_WALKING_METERS_PER_MINUTE = 80;
 export const DIRECT_TRIP_LIMIT = 6;
 export type DirectDestinationKind = 'landmark' | 'campus-place' | 'stop';
@@ -55,7 +76,7 @@ const LANDMARKS: ReadonlyArray<{ label: string; aliases: readonly string[] }> = 
 ];
 
 const CAMPUS_PLACES: ReadonlyArray<{ label: string; aliases: readonly string[]; lat: number; lon: number }> = [
-  { label: '主顧樓', aliases: ['主顧樓', 'ph'], lat: 24.226939, lon: 120.583587 },
+  { label: '主顧樓', aliases: ['主顧樓', 'ph'], lat: PROVIDENCE_ZHUGU_HALL.lat, lon: PROVIDENCE_ZHUGU_HALL.lon },
   { label: '任垣樓', aliases: ['任垣樓', 'ak'], lat: 24.226415, lon: 120.580067 },
   { label: '伯鐸樓', aliases: ['伯鐸樓', 'sp'], lat: 24.22606, lon: 120.580649 },
   { label: '文興樓', aliases: ['文興樓'], lat: 24.226953, lon: 120.581189 },

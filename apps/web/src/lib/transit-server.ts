@@ -5,6 +5,11 @@ import {
 } from './transit';
 import { catalogProvidenceLaneDestination, searchTaichungCatalog } from './transit-catalog';
 import { buildDirectPlan, isDirectQueryText } from './transit-direct';
+import {
+  MAAS_CACHE_SLOT_MS, MAAS_RATE_LIMIT_PER_MINUTE, MAAS_TIMEOUT_MS,
+  buildMaasPlannerUrl, maasCacheKey, parseMaasTransferPlans, shouldRequestMaas,
+  transferPlannerQuery, withTransferArrivals, mergeDirectAndTransfers,
+} from './transit-transfer';
 
 const BASE = 'https://tdx.transportdata.tw';
 const text = (value: unknown) => typeof value === 'string' ? value.trim().slice(0, 120) : '';
@@ -254,10 +259,12 @@ export function createTransitService(options: {
   now?: () => number;
   wait?: (milliseconds: number) => Promise<void>;
   preloadRoutes?: { city: TransitCity; routeUids: readonly string[] };
+  maasTimeoutMs?: number;
 }) {
   const fetcher = options.fetcher ?? fetch;
   const now = options.now ?? Date.now;
   const wait = options.wait ?? ((milliseconds: number) => new Promise<void>((resolve) => setTimeout(resolve, milliseconds)));
+  const maasTimeoutMs = options.maasTimeoutMs ?? MAAS_TIMEOUT_MS;
   let token: { value: string; expires: number } | null = null;
   let tokenPending: Promise<string> | null = null;
   let blockedUntil = 0;
@@ -269,6 +276,9 @@ export function createTransitService(options: {
   const lastGood = new Map<string, { fetchedAt: number; retainUntil: number; value: unknown[] }>();
   let preloadStarted = false;
   const pending = new Map<string, Promise<QueryResult>>();
+  const maasCache = new Map<string, { expires: number; value: unknown }>();
+  const maasPending = new Map<string, Promise<unknown>>();
+  let maasBudget = { window: 0, count: 0 };
 
   // 用量保護不放寬：最多 MAX_RUNNING 個同時請求、每分鐘 60 次、遇 429 依 Retry-After 暫停。
   // 只是在名額滿時最多排隊 SLOT_WAIT_MS，排不到才回忙碌。
@@ -291,14 +301,14 @@ export function createTransitService(options: {
     else running -= 1;
   }
 
-  async function request(url: string, init: RequestInit): Promise<unknown> {
+  async function request(url: string, init: RequestInit, timeoutMs = 8000): Promise<unknown> {
     if (now() < blockedUntil) throw new TransitError('rate-limited');
     await acquireSlot();
     try {
       if (now() < blockedUntil) throw new TransitError('rate-limited');
       if (now() - budget.window >= 60_000) budget = { window: now(), count: 0 };
       if (++budget.count > 60) throw new TransitError('rate-limited');
-      const response = await fetcher(url, { ...init, redirect: 'error', cache: 'no-store', signal: AbortSignal.timeout(8000) });
+      const response = await fetcher(url, { ...init, redirect: 'error', cache: 'no-store', signal: AbortSignal.timeout(timeoutMs) });
       if (response.status === 429) {
         const seconds = Number(response.headers.get('retry-after'));
         blockedUntil = now() + (Number.isFinite(seconds) && seconds > 0 ? Math.min(seconds, 300) : 60) * 1000;
@@ -410,6 +420,57 @@ export function createTransitService(options: {
     })();
   }
 
+  function claimMaasBudget(): void {
+    if (now() < blockedUntil) throw new TransitError('rate-limited');
+    if (now() - maasBudget.window >= 60_000) maasBudget = { window: now(), count: 0 };
+    if (maasBudget.count >= MAAS_RATE_LIMIT_PER_MINUTE) throw new TransitError('rate-limited');
+    maasBudget.count += 1;
+  }
+
+  async function loadMaasPayload(query: Parameters<typeof buildMaasPlannerUrl>[0]): Promise<unknown> {
+    const key = maasCacheKey(query);
+    const hit = maasCache.get(key);
+    if (hit && hit.expires > now()) return hit.value;
+    const inflight = maasPending.get(key);
+    if (inflight) return inflight;
+    let resolveWork!: (value: unknown) => void;
+    let rejectWork!: (error: unknown) => void;
+    let settled = false;
+    const work = new Promise<unknown>((resolve, reject) => {
+      resolveWork = resolve;
+      rejectWork = reject;
+    });
+    maasPending.set(key, work);
+    const settle = (error: unknown, value?: unknown) => {
+      if (settled) return;
+      settled = true;
+      if (maasPending.get(key) === work) maasPending.delete(key);
+      if (error) rejectWork(error);
+      else resolveWork(value);
+    };
+    try {
+      claimMaasBudget();
+    } catch (error) {
+      settle(error);
+      return work;
+    }
+    void (async () => {
+      try {
+        const bearer = await accessToken();
+        const payload = await request(buildMaasPlannerUrl(query), {
+          headers: { Authorization: `Bearer ${bearer}`, Accept: 'application/json' },
+        }, maasTimeoutMs);
+        const slotEnd = (Math.floor(now() / MAAS_CACHE_SLOT_MS) + 1) * MAAS_CACHE_SLOT_MS;
+        if (maasCache.size >= 64) maasCache.delete(maasCache.keys().next().value!);
+        maasCache.set(key, { expires: Math.max(now() + 1_000, slotEnd), value: payload });
+        settle(null, payload);
+      } catch (error) {
+        settle(error);
+      }
+    })();
+    return work;
+  }
+
   async function loadCampusLive(spec: (typeof CAMPUS_NEXT)[keyof typeof CAMPUS_NEXT]) {
     const [path, params] = campusNextArrivalQuery(spec);
     const eta = await query(path, params, 15_000);
@@ -434,16 +495,24 @@ export function createTransitService(options: {
       if (input.action === 'direct') {
         const credentials = options.credentials();
         const origin = input.lat !== undefined && input.lon !== undefined ? { lat: input.lat, lon: input.lon } : null;
+        const hasKeys = Boolean(credentials.clientId?.trim() && credentials.clientSecret?.trim());
         let arrivals: TransitArrival[] = [];
         let sequences: RouteStopSequence[] = [];
         let fetchedAt = now();
         let stale = false;
-        if (credentials.clientId !== undefined || credentials.clientSecret !== undefined) {
-          const live = await loadCampusLive(CAMPUS_NEXT.pu);
-          arrivals = live.arrivals;
-          sequences = live.sequences;
-          fetchedAt = live.fetchedAt;
-          stale = live.stale;
+        if (hasKeys) {
+          try {
+            const live = await loadCampusLive(CAMPUS_NEXT.pu);
+            arrivals = live.arrivals;
+            sequences = live.sequences;
+            fetchedAt = live.fetchedAt;
+            stale = live.stale;
+          } catch {
+            arrivals = [];
+            sequences = [];
+            fetchedAt = now();
+            stale = false;
+          }
         }
         const plan = buildDirectPlan({
           query: input.destination,
@@ -452,6 +521,29 @@ export function createTransitService(options: {
           arrivals,
           now: fetchedAt,
         });
+        const planner = transferPlannerQuery(plan.origin, plan.destination, fetchedAt);
+        let transferRows = [] as ReturnType<typeof parseMaasTransferPlans>;
+        let transferFallback = !hasKeys || !planner;
+        if (hasKeys && planner && shouldRequestMaas(plan.trips, fetchedAt)) {
+          try {
+            const payload = await loadMaasPayload(planner);
+            transferRows = withTransferArrivals(parseMaasTransferPlans(payload), arrivals, fetchedAt);
+            transferFallback = false;
+          } catch {
+            transferFallback = true;
+          }
+        }
+        const merged = transferRows.length
+          ? mergeDirectAndTransfers({
+            directs: plan.trips,
+            transfers: transferRows,
+            origin: plan.origin,
+            destination: plan.destination && plan.destination.lat !== null && plan.destination.lon !== null
+              ? { lat: plan.destination.lat, lon: plan.destination.lon }
+              : plan.origin,
+            now: fetchedAt,
+          })
+          : { trips: plan.trips, transfers: [] };
         return {
           status: 'ready',
           kind: 'direct',
@@ -463,7 +555,7 @@ export function createTransitService(options: {
             lon: plan.destination.lon,
           },
           origin: plan.origin,
-          trips: plan.trips.map((trip) => ({
+          trips: merged.trips.map((trip) => ({
             route: trip.route,
             boardStopName: trip.boardStopName,
             alightStopName: trip.alightStopName,
@@ -471,9 +563,20 @@ export function createTransitService(options: {
             walkMinutes: trip.walkMinutes,
             arrival: trip.arrival,
           })),
+          transfers: merged.transfers.map((trip) => ({
+            boardStopName: trip.boardStopName,
+            firstRoute: trip.firstRoute,
+            transferStopName: trip.transferStopName,
+            transferWalkMinutes: trip.transferWalkMinutes,
+            secondRoute: trip.secondRoute,
+            alightStopName: trip.alightStopName,
+            totalMinutes: trip.totalMinutes,
+            arrival: trip.arrival,
+          })),
           googleMapsUrl: plan.googleMapsUrl,
           fetchedAt: new Date(fetchedAt).toISOString(),
           ...(stale ? { stale: true as const } : {}),
+          ...(transferFallback ? { transferFallback: true as const } : {}),
         };
       }
       const campus = input.action === 'campus' ? CAMPUS_TRANSIT[input.schoolId] : null;

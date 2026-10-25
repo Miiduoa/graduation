@@ -134,6 +134,8 @@ describe('直達目的地演算法', () => {
   it('校內大樓可對到主顧樓站牌', () => {
     const destination = resolveDirectDestination('主顧樓', findCatalogStopsByName('主顧樓'));
     expect(destination?.kind).toBe('campus-place');
+    expect(destination?.lon).toBe(120.583587);
+    expect(destination?.lat).toBe(24.226939);
     expect(stop('靜宜大學主顧樓')?.name).toBe('靜宜大學主顧樓');
     const trips = planDirectTrips({
       origin: PROVIDENCE_DIRECT_ORIGIN,
@@ -155,7 +157,7 @@ describe('直達目的地演算法', () => {
     expect(walkingMinutesFromMeters(0)).toBe(1);
     expect(walkingMinutesFromMeters(-3)).toBeNull();
     const url = googleTransitUrl(PROVIDENCE_DIRECT_ORIGIN, '高鐵臺中站');
-    expect(url).toContain('origin=24.225714');
+    expect(url).toContain('origin=24.225388');
     expect(url).toContain('destination=%E9%AB%98%E9%90%B5');
   });
 });
