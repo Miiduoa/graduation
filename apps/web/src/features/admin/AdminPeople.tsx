@@ -20,11 +20,13 @@ export function AdminPeople({
   suspended,
   selectedSchool,
   onSchool,
+  onManageSchool,
 }: {
   context: string;
   suspended: boolean;
   selectedSchool: string | null;
   onSchool: (id: string | null) => void;
+  onManageSchool?: (id: string) => void;
 }) {
   const schools = useAdminResource('schools', context, parseSchools, !suspended);
   const eligible = useMemo(
@@ -115,14 +117,22 @@ export function AdminPeople({
             </div>
           )}
 
-          {tenantId && people.value && !people.error && <PeopleDetail data={people.value} />}
+          {tenantId && people.value && !people.error && (
+            <PeopleDetail data={people.value} onManageSchool={onManageSchool} />
+          )}
         </div>
       </section>
     </div>
   );
 }
 
-function PeopleDetail({ data }: { data: OversightPeople }) {
+function PeopleDetail({
+  data,
+  onManageSchool,
+}: {
+  data: OversightPeople;
+  onManageSchool?: (tenantId: string) => void;
+}) {
   return (
     <div className={styles.stack}>
       <div className={styles.toolbar}>
@@ -134,9 +144,17 @@ function PeopleDetail({ data }: { data: OversightPeople }) {
             已核發 {data.people.length} 位校方管理／職員授權。
           </p>
         </div>
-        <a className={styles.link} href="/admin/ops">
-          調整校方授權
-        </a>
+        <div className={styles.actions}>
+          {onManageSchool && (
+            <Button onClick={() => onManageSchool(data.tenantId)}>查看學校設定</Button>
+          )}
+          <a
+            className={styles.link}
+            href={`/admin/ops?tab=people&tenantId=${encodeURIComponent(data.tenantId)}`}
+          >
+            新增或調整校方人員
+          </a>
+        </div>
       </div>
 
       {data.hasRoleAdmin ? (
