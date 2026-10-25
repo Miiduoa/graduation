@@ -10,7 +10,7 @@ export type DormRepairDictation = {
 // Keep everything the person said in the editable description. Only the
 // category and explicitly mentioned location are inferred; nothing is saved.
 export function parseDormRepairDictation(speech: string): DormRepairDictation | null {
-  const original = speech.normalize('NFKC').replace(/\s+/g, ' ').trim().slice(0, 1200);
+  const original = speech.replace(/\s+/g, ' ').trim().slice(0, 1200);
   if (original.length < 2) return null;
 
   const title = original
