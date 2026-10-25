@@ -60,6 +60,9 @@ async def main():
             await expect(nthu_timetable.get_by_role('status')).to_contain_text('尚未取得這所學校的節次時間')
             await expect(nthu_timetable.get_by_text('星期三 · 第 2–3 節（時間未確認） · 測試教室', exact=True)).to_be_visible()
             assert await nthu_timetable.get_by_role('table').count() == 0, 'NTHU borrowed another school\'s period grid'
+            await expect(nthu_timetable.get_by_role('link', name='整理個人紀錄')).to_have_attribute(
+                'href', '/import?kind=timetable&campus=nthu'
+            )
             assert await page.get_by_text('08:10').count() == 0, 'Unsupported school must not reuse the PU clock'
             assert await page.get_by_role('button', name='格子', exact=True).count() == 0
             assert await page.get_by_role('button', name='移動課程', exact=True).count() == 0, 'Unverified NTHU periods allowed course movement'
@@ -153,7 +156,23 @@ async def main():
             results.append('real drag with continuation offset, save and reload')
             await page.screenshot(path=str(OUT / 'desktop.png'), full_page=True, animations='disabled')
             await page.set_viewport_size({'width': 390, 'height': 844})
+            await page.reload(wait_until='networkidle')
             assert await page.evaluate('document.documentElement.scrollWidth <= innerWidth'), 'mobile page overflows horizontally'
+            await expect(page.get_by_role('button', name='一週', exact=True)).to_have_attribute('aria-pressed', 'true')
+            weekly = page.get_by_role('region', name='一週課程', exact=True)
+            await expect(weekly.get_by_role('button', name=re.compile('資料庫管理'))).to_be_visible()
+            assert await weekly.evaluate('el => getComputedStyle(el).gridTemplateColumns.split(" ").length') == 1, 'Mobile weekly courses are not a single readable column'
+            await expect(page.get_by_role('region', name='課表捲動區')).to_have_count(0)
+            await expect(page.get_by_role('combobox', name='上課日', exact=True)).to_have_count(0)
+            await expect(page.get_by_role('link', name='匯入截圖或檔案', exact=True)).to_have_attribute(
+                'href', '/import?kind=timetable&campus=pu'
+            )
+            await page.screenshot(path=str(OUT / 'mobile-week.png'), full_page=True, animations='disabled')
+            results.append('fresh mobile timetable starts with readable weekly courses and campus-scoped import')
+            await page.get_by_role('button', name='格子', exact=True).click()
+            for width in [768, 390]:
+                await page.set_viewport_size({'width': width, 'height': 844})
+                await expect(page.get_by_role('button', name='格子', exact=True)).to_have_attribute('aria-pressed', 'true')
             await choose()
             await page.get_by_role('button', name='移到星期三第 2 節', exact=True).click()
             await expect(dialog.get_by_role('combobox', name='開始節次', exact=True)).to_have_value('2')

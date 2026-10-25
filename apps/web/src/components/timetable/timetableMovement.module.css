@@ -28,6 +28,12 @@
 .workspace .week { grid-template-columns: repeat(5, minmax(0, 1fr)); }
 .workspace .courseCard { display: block; width: 100%; min-height: 44px; text-align: left; cursor: pointer; }
 .workspace .courseCard:disabled { cursor: not-allowed; opacity: 0.6; }
+.workspace .courseCard h4 { font-size: var(--font-body-size); line-height: 1.5; }
+.workspace .courseCard p, .workspace .courseCard time { font-size: var(--font-body-sm-size); line-height: 1.6; }
+.workspace .courseCard:hover:not(:disabled) { border-color: var(--brand); }
+.workspace .courseCard:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 3px; }
+.workspace .week > section { padding: 16px; }
+.workspace .week > section > h3 { font-size: var(--font-body-size); }
 .workspace input:not([type='checkbox']), .workspace select, .workspace textarea { max-width: 100%; min-width: 0; font-size: 16px; box-sizing: border-box; }
 @media (max-width: 980px) { .workspace .week { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 @media (max-width: 560px) { .workspace .week { grid-template-columns: minmax(0, 1fr); } .workspace .week > section { border-right: 0; } }

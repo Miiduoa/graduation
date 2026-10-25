@@ -1,10 +1,84 @@
-import type { Rewrite } from 'next/dist/lib/load-custom-routes';
+import type { Redirect, Rewrite } from 'next/dist/lib/load-custom-routes';
 
 export const LEGACY_ORIGIN = 'http://127.0.0.1:3001';
 export const PLATFORM_CALLBACK_PATH = '/auth/platform/callback';
+export const ACCOUNT_ENTRY_PATH = '/auth/account';
+
+// Association files are not HTML screens. Keep them in beforeFiles so the
+// published app-site links still resolve when Campus One has no copy.
+const ASSOCIATION_PATHS = [
+  '/.well-known/:path*',
+  '/apple-app-site-association',
+];
+
+// Login-completion HTML that IdP redirects still hit. These are not browsable
+// entry screens; dropping them would break school/Google return after consent.
+export const LEGACY_LOGIN_CALLBACK_PATHS = [
+  '/auth/account/callback',
+  '/auth/callback',
+  '/auth/platform/callback',
+];
+
+// Live old HTML that Campus One does not yet replace. Users still enter these
+// from /admin and the class-workspace join button.
+export const LEGACY_LIVE_HTML_PATHS = [
+  '/auth/platform',
+  '/auth/platform/class-workspace/:path*',
+  '/auth/platform/ops/:path*',
+  '/auth/platform/school-review/:path*',
+  '/privacy/deletion-status',
+];
+
+// Route handlers and hashed assets the current login buttons still call.
+// HTML /page routes from the pinned legacy manifest are intentionally absent
+// except LEGACY_LIVE_HTML_PATHS and login callbacks.
+export const LEGACY_ENDPOINT_PATHS = [
+  '/auth/account/token',
+  '/auth/find-school/interest',
+  '/auth/find-school/search',
+  '/auth/logout',
+  '/auth/oidc/token',
+  '/auth/school',
+  '/auth/session',
+  '/auth/shell-role',
+  '/auth/product-qa/availability',
+  '/auth/product-qa/enter',
+  '/auth/platform/callback/apple',
+  '/auth/platform/merchant-applications',
+  '/auth/platform/realms',
+  '/auth/platform/realms/:tenantId/:service/:path*',
+  '/auth/platform/school-issued-session',
+  '/auth/platform/session',
+  '/auth/platform/token',
+  '/auth/platform/providers',
+  '/auth/platform/class-workspace-affiliations/:path*',
+  '/auth/platform/merchant-workspaces/:path*',
+  '/auth/platform/ops-api/:path*',
+  '/auth/platform/class-workspaces/:path*',
+  '/auth/platform/school-applications/:path*',
+  '/api/campus/:path*',
+  '/privacy/deletion-status-access',
+  '/support/merchant/interest',
+  '/_next/static/:path*',
+];
+
+// Old shells that already have a Campus One replacement. /auth/find-school
+// stays here so bookmarked URLs land on the in-page lookup, not the old page.
+const LEGACY_HTML_REDIRECT_SOURCES = [
+  '/auth/find-school',
+  '/auth/platform/account',
+  '/auth/platform/class-workspace-affiliation-review',
+  '/auth/platform/membership',
+  '/auth/platform/school-apply',
+  '/auth/product-qa',
+];
 
 export function legacyEnabled(env: Record<string, string | undefined> = process.env): boolean {
   return env.CAMPUS_LEGACY_ENABLED === 'true';
+}
+
+function loopbackRewrite(source: string): Rewrite {
+  return { source, destination: `${LEGACY_ORIGIN}${source}` };
 }
 
 export function legacyRewrites(enabled: boolean): {
@@ -13,24 +87,23 @@ export function legacyRewrites(enabled: boolean): {
   fallback: Rewrite[];
 } {
   if (!enabled) return { beforeFiles: [], afterFiles: [], fallback: [] };
-  const publishedPaths = [
-    '/support/:path*',
-    '/account-deletion/:path*',
-    '/privacy/:path*',
-    '/terms/:path*',
-    '/.well-known/:path*',
-    '/apple-app-site-association',
-  ];
   return {
-    beforeFiles: publishedPaths.map((source) => ({
-      source,
-      destination: `${LEGACY_ORIGIN}${source}`,
-    })),
+    beforeFiles: ASSOCIATION_PATHS.map(loopbackRewrite),
     afterFiles: [],
-    // Existing Campus One routes and assets are resolved first. This retains the
-    // old account endpoints, bookmarked pages and hashed assets in the same origin.
-    fallback: [{ source: '/:path*', destination: `${LEGACY_ORIGIN}/:path*` }],
+    fallback: [
+      ...LEGACY_LOGIN_CALLBACK_PATHS,
+      ...LEGACY_LIVE_HTML_PATHS,
+      ...LEGACY_ENDPOINT_PATHS,
+    ].map(loopbackRewrite),
   };
+}
+
+export function legacyHtmlRedirects(): Redirect[] {
+  return LEGACY_HTML_REDIRECT_SOURCES.map((source) => ({
+    source,
+    destination: ACCOUNT_ENTRY_PATH,
+    permanent: false,
+  }));
 }
 
 export function isCampusOneCallback(

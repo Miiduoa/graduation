@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { usePersonalImportScope, usePersonalImports } from '@/lib/usePersonalImports';
@@ -64,14 +64,32 @@ export const SHARE_NEEDS_SCHOOL_LOGIN_COPY =
 export const SHARE_SCHOOL_LOGIN_UNAVAILABLE_COPY =
   '分享課表要用學校帳號登入，網站的學校帳號登入還沒開放；課表先存在這台瀏覽器。';
 
-function ShareNeedsSchoolAccountNotice() {
+type TimetableView = 'grid' | 'week' | 'day';
+const compactTimetableQuery = '(max-width: 600px)';
+
+function subscribeToCompactLayout(onChange: () => void) {
+  const query = window.matchMedia?.(compactTimetableQuery);
+  query?.addEventListener?.('change', onChange);
+  return () => query?.removeEventListener?.('change', onChange);
+}
+
+function compactLayout() {
+  return window.matchMedia?.(compactTimetableQuery).matches ?? false;
+}
+
+const serverLayout = () => false;
+
+function ShareNeedsSchoolAccountNotice({ schoolId }: { schoolId: string }) {
   const options = useSignInOptions();
   if (options.loading || options.error || !options.studentId) {
     return <p className={styles.notice}>{SHARE_SCHOOL_LOGIN_UNAVAILABLE_COPY}</p>;
   }
   return (
     <p className={styles.notice}>
-      {SHARE_NEEDS_SCHOOL_LOGIN_COPY} <Link href={loginHref('/timetable')}>登入學校帳號</Link>
+      {SHARE_NEEDS_SCHOOL_LOGIN_COPY}{' '}
+      <Link href={loginHref(`/timetable?campus=${encodeURIComponent(schoolId)}`)}>
+        登入學校帳號
+      </Link>
     </p>
   );
 }
@@ -100,7 +118,7 @@ function FriendTimetableAccessNotice({
               ? '登入學校帳號，並與好友互相開放課表後，就能比較共同空堂。'
               : '目前尚未開放學校帳號登入，暫時無法讀取好友課表。'}
       </p>
-      <div className={styles.toolbar}>
+      <div className={`${styles.toolbar} ${movement.toolbar}`}>
         {options.error ? (
           <button type="button" className="btn" onClick={options.retry}>
             重新確認
@@ -189,7 +207,10 @@ function TimetableWorkspace({ schoolId }: { schoolId: string }) {
   const periodTotal = periodProfile ? periodCount(periodProfile) : 0;
   const { user } = useAuth();
   const [timetable, setTimetable] = useState<StoredTimetable | null>(null);
-  const [view, setView] = useState<'grid' | 'week' | 'day'>('grid');
+  const compact = useSyncExternalStore(subscribeToCompactLayout, compactLayout, serverLayout);
+  const [selectedView, setView] = useState<TimetableView | null>(null);
+  const view = selectedView ?? (compact ? 'week' : 'grid');
+  const importHref = `/import?kind=timetable&campus=${encodeURIComponent(schoolId)}`;
   const [day, setDay] = useState(() => {
     const today = new Date().getDay();
     return today >= 1 && today <= 5 ? today : 1;
@@ -322,7 +343,7 @@ function TimetableWorkspace({ schoolId }: { schoolId: string }) {
   const planning = planningReadiness(planningCourses, periodTotal, WEEKDAY_LABELS.length);
   const openCourse = (course: PersonalCourse) => {
     if (busy || savingRef.current) return;
-    if (course.id.startsWith('import:')) router.push('/import?kind=timetable');
+    if (course.id.startsWith('import:')) router.push(importHref);
     else {
       setNotice('');
       setEditing({ ...course });
@@ -555,7 +576,7 @@ function TimetableWorkspace({ schoolId }: { schoolId: string }) {
         {!visibleCourses.length && !missingImportTimes.length && (
           <p>這所學校還沒有個人課程紀錄。</p>
         )}
-        <Link className="btn" href="/import?kind=timetable">
+        <Link className="btn" href={importHref}>
           整理個人紀錄
         </Link>
       </section>
@@ -757,7 +778,7 @@ function TimetableWorkspace({ schoolId }: { schoolId: string }) {
                   {friends.find((friend) => friend.id === item.creatorUid)?.name || '同學'} 約你：
                   {meetupLabel(item)}
                 </p>
-                <div className={styles.toolbar}>
+                <div className={`${styles.toolbar} ${movement.toolbar}`}>
                   <button
                     type="button"
                     className="btn primary"
@@ -806,8 +827,8 @@ function TimetableWorkspace({ schoolId }: { schoolId: string }) {
           有 {conflicts.length} 組課程時間重疊，仍可先留著，約人時會避開這些時段。
         </section>
       )}
-      <div className={styles.toolbar}>
-        <div className={styles.segment} aria-label="課表顯示方式">
+      <div className={`${styles.toolbar} ${movement.toolbar}`}>
+        <div className={styles.segment} role="group" aria-label="課表顯示方式">
           <button type="button" aria-pressed={view === 'grid'} onClick={() => setView('grid')}>
             格子
           </button>
@@ -818,16 +839,18 @@ function TimetableWorkspace({ schoolId }: { schoolId: string }) {
             單日
           </button>
         </div>
-        <label className={styles.field}>
-          上課日
-          <select value={day} onChange={(event) => setDay(Number(event.target.value))}>
-            {WEEKDAY_LABELS.map((label, index) => (
-              <option value={index + 1} key={label}>
-                {label}
-              </option>
-            ))}
-          </select>
-        </label>
+        {view === 'day' && (
+          <label className={styles.field}>
+            上課日
+            <select value={day} onChange={(event) => setDay(Number(event.target.value))}>
+              {WEEKDAY_LABELS.map((label, index) => (
+                <option value={index + 1} key={label}>
+                  {label}
+                </option>
+              ))}
+            </select>
+          </label>
+        )}
         <button
           type="button"
           className="btn"
@@ -850,7 +873,6 @@ function TimetableWorkspace({ schoolId }: { schoolId: string }) {
           </button>
         ) : null}
       </div>
-      {!uid && <ShareNeedsSchoolAccountNotice />}
       {shareUrl && (
         <label className={styles.field}>
           分享連結
@@ -870,7 +892,7 @@ function TimetableWorkspace({ schoolId }: { schoolId: string }) {
         </p>
       )}
       {terms.length > 0 && (
-        <div className={styles.toolbar}>
+        <div className={`${styles.toolbar} ${movement.toolbar}`}>
           <label className={styles.field}>
             顯示自行匯入的學期
             <select value={activeTerm} onChange={(event) => setImportTerm(event.target.value)}>
@@ -885,7 +907,7 @@ function TimetableWorkspace({ schoolId }: { schoolId: string }) {
           <p className={styles.notice}>
             自行匯入 {importedCourses.length}{' '}
             筆。原有手動課表只有在學期相符時一起顯示，也可切換查看。點選可回到匯入頁修改；其他學校與週末課程請查看
-            <Link href="/import?kind=timetable">個人紀錄</Link>。
+            <Link href={importHref}>個人紀錄</Link>。
             {savesToManual ? ' 新增課程會儲存至手動課表，儲存後會自動切換。' : ''}
           </p>
         </div>
@@ -898,7 +920,7 @@ function TimetableWorkspace({ schoolId }: { schoolId: string }) {
           periodProfile={periodProfile}
         />
       ) : view === 'week' ? (
-        <div className={styles.week}>
+        <div className={`${styles.week} ${movement.week}`} role="region" aria-label="一週課程">
           {WEEKDAY_LABELS.map((label, index) => {
             const entries = visibleCourses
               .filter((course) => course.day === index + 1)
@@ -910,7 +932,7 @@ function TimetableWorkspace({ schoolId }: { schoolId: string }) {
                   entries.map((course) => (
                     <button
                       type="button"
-                      className={styles.course}
+                      className={`${styles.course} ${movement.courseCard}`}
                       key={course.id}
                       onClick={() => openCourse(course)}
                     >
@@ -920,7 +942,7 @@ function TimetableWorkspace({ schoolId }: { schoolId: string }) {
                     </button>
                   ))
                 ) : (
-                  <p className={styles.empty}>無課</p>
+                  <p className={styles.empty}>尚無已排課程</p>
                 )}
               </section>
             );
@@ -938,7 +960,11 @@ function TimetableWorkspace({ schoolId }: { schoolId: string }) {
             .sort((a, b) => a.start - b.start)
             .map((course) => (
               <li key={course.id}>
-                <button type="button" className={styles.course} onClick={() => openCourse(course)}>
+                <button
+                  type="button"
+                  className={`${styles.course} ${movement.courseCard}`}
+                  onClick={() => openCourse(course)}
+                >
                   <time>{periodRangeLabel(course.start, course.end, periodProfile)}</time>
                   <h4>{course.name}</h4>
                   <p>
@@ -956,6 +982,7 @@ function TimetableWorkspace({ schoolId }: { schoolId: string }) {
         onEdit={openCourse}
         periodProfile={periodProfile}
       />
+      {!uid && <ShareNeedsSchoolAccountNotice schoolId={schoolId} />}
       {editing && (
         <EditableCourseDialog
           key={editing.id}
@@ -977,8 +1004,8 @@ function TimetableWorkspace({ schoolId }: { schoolId: string }) {
       <section className={styles.panel} aria-label="匯入課表">
         <h2>匯入課表</h2>
         <p className={styles.notice}>截圖、文字與檔案都可以先整理成草稿，再逐筆確認。</p>
-        <div className={styles.toolbar}>
-          <Link className="btn primary" href="/import?kind=timetable">
+        <div className={`${styles.toolbar} ${movement.toolbar}`}>
+          <Link className="btn primary" href={importHref}>
             匯入截圖或檔案
           </Link>
           {uid && (
@@ -1030,7 +1057,7 @@ function TimetableWorkspace({ schoolId }: { schoolId: string }) {
             ? '依目前選取學期的課表計算；尚未匯入的課程仍需自行核對。'
             : planning.message}
         </p>
-        <div className={styles.toolbar}>
+        <div className={`${styles.toolbar} ${movement.toolbar}`}>
           <button
             type="button"
             className="btn"
@@ -1048,7 +1075,7 @@ function TimetableWorkspace({ schoolId }: { schoolId: string }) {
             今天空堂
           </button>
         </div>
-        <div className={styles.toolbar}>
+        <div className={`${styles.toolbar} ${movement.toolbar}`}>
           <label className={styles.field}>
             星期
             <select value={studyDay} onChange={(event) => setStudyDay(Number(event.target.value))}>
@@ -1181,7 +1208,7 @@ function MeetupWindowRow({
   const options = meetupStartOptions(window);
   const [start, setStart] = useState(options[0] ?? window.start);
   return (
-    <div className={styles.toolbar}>
+    <div className={`${styles.toolbar} ${movement.toolbar}`}>
       <span>{meetupWindowLabel(window)}</span>
       <label className={styles.field}>
         開始
