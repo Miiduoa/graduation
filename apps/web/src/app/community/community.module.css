@@ -251,3 +251,27 @@
 @media (prefers-reduced-motion: reduce) {
   .primaryLink, .secondaryLink, .quickLinks a { transition: none; }
 }
+
+.postShare {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  margin-left: auto;
+  min-height: 36px;
+  padding: 6px 11px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: var(--muted);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+}
+.postShare:hover { background: var(--bg-soft); color: var(--text); }
+.shareFeedback {
+  color: var(--muted);
+  font-size: 12px;
+  margin: 8px 0 0;
+  line-height: 1.5;
+}
