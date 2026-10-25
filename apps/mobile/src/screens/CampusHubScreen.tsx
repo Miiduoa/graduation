@@ -64,13 +64,6 @@ const sections: Array<{ title: string; items: ServiceItem[] }> = [
         keywords: ['借書', '還書', '自習', '蓋夏'],
       },
       {
-        icon: 'ic_dorm',
-        label: '宿舍',
-        description: '住宿服務',
-        screen: 'Dormitory',
-        keywords: ['住宿', '寢室', '報修'],
-      },
-      {
         icon: 'ic_bus',
         label: '校園公車',
         description: '路線與站牌',
@@ -111,13 +104,6 @@ const sections: Array<{ title: string; items: ServiceItem[] }> = [
         description: '校園健康服務',
         screen: 'Health',
         keywords: ['醫療', '診所', '保健'],
-      },
-      {
-        icon: 'ic_people_community',
-        label: '職涯',
-        description: '還沒接到校方資料',
-        screen: 'Career',
-        keywords: ['職涯', '實習', '徵才', '履歷', '就業'],
       },
       {
         icon: 'ic_lost_found',

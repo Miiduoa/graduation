@@ -574,7 +574,7 @@ export function notificationDestination(
     if (work) return { href: work, label: courseWorkOpenLabel(work) };
     const course = courseHrefFromData(notification.data);
     if (course) return { href: course, label: courseWorkOpenLabel(course) };
-    return { href: '/classroom/grades', label: '查看課業成績與回饋' };
+    return { href: '/grades?tab=feedback', label: '查看課業成績與回饋' };
   }
   if (
     notification.type === 'message' &&

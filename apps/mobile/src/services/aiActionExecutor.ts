@@ -351,7 +351,7 @@ function defaultActionsForTool(tool: AgentTool): AssistantActionProposal[] {
     case 'search_book':
       return [navAction('開啟圖書館功能', { screen: '校園', nested: 'Library' })];
     case 'report_repair':
-      return [navAction('開啟宿舍服務', { screen: '校園', nested: 'Dormitory' }, 'medium')];
+      return [navAction('回到今天', { screen: 'Today', nested: 'TodayHome' }, 'medium')];
     case 'post_lost':
       return [navAction('開啟失物招領', { screen: '校園', nested: 'LostFound' }, 'medium')];
     case 'print_file':

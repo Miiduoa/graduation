@@ -1,11 +1,8 @@
 import React, { useSyncExternalStore } from 'react';
-import { Alert, Text, View } from 'react-native';
+import { Text, View } from 'react-native';
 import { AIDetailScreen, AICard, AIButton, aiTokens } from '../ui/aiFirst';
 import { getThemeVersion, subscribeToTheme } from '../ui/theme';
 import { safeNavigate } from '../utils/safeNavigate';
-import { useSchool } from '../state/school';
-import { DORM_OFFICE_INFO } from '../data/puDormData';
-import { linkingOpenWithPuTronClassGate } from '../services/tronClassWebUiGate';
 
 export type ServiceScreenProps = {
   navigation?: Parameters<typeof safeNavigate>[0] & { goBack?: () => void };
@@ -21,15 +18,6 @@ const courseActions: Action[] = [
   { label: '查詢課程', route: 'AICourseAdvisor' },
 ];
 const features: Record<string, { title: string; description: string; actions?: Action[] }> = {
-  Clubs: {
-    title: '社團服務',
-    description: '社團申請與名單管理尚未開放。你可以先查看校方發布的社團活動。',
-    actions: [{ label: '查看校園活動', route: '活動總覽' }],
-  },
-  Dormitory: {
-    title: '宿舍服務',
-    description: '宿舍包裹查詢與線上報修尚未開放。請透過住宿服務組現有管道辦理。',
-  },
   AssignmentDetail: {
     title: '作業',
     description: '此作業入口尚未提供線上繳交。請從課程確認教師公告的繳交方式。',
@@ -108,12 +96,6 @@ const features: Record<string, { title: string; description: string; actions?: A
     title: '請假與報修',
     description: '線上申請尚未開放。請透過校方現有管道辦理；這裡不會代送申請。',
   },
-  Career: {
-    title: '職涯',
-    description:
-      '職涯資料還沒接到校方職涯發展處。這裡不會列出假職缺，也不會用預覽學生履歷充當你的資料。',
-    actions: publicActions,
-  },
   StaffHub: { title: '校務服務', description: '校務服務工作台尚未開放。' },
   DepartmentHub: { title: '系所工作台', description: '系所工作台尚未開放。' },
   AdminDashboard: { title: '管理工作台', description: '管理工作台尚未開放。' },
@@ -127,7 +109,6 @@ export function UnavailableFeatureScreen({
   actions,
 }: ServiceScreenProps & { title?: string; description?: string; actions?: Action[] }) {
   useSyncExternalStore(subscribeToTheme, getThemeVersion, getThemeVersion);
-  const { school } = useSchool();
   const feature = features[route?.name ?? ''] ?? {
     title: '校園服務',
     description: '此功能尚未開放。你可以先使用下方的校園服務。',
@@ -139,21 +120,6 @@ export function UnavailableFeatureScreen({
           {description ?? feature.description}
         </Text>
       </AICard>
-      {route?.name === 'Dormitory' && school?.id === 'pu' && (
-        <AICard title="住宿服務組">
-          <Text style={{ color: aiTokens.text, lineHeight: 24 }}>
-            抽籤、入住與換房請依校方公告辦理；洗衣設備狀態與電費請至現場確認。
-          </Text>
-          <AIButton
-            label="前往靜宜住宿服務組官網"
-            variant="ghost"
-            onPress={async () => {
-              const opened = await linkingOpenWithPuTronClassGate(DORM_OFFICE_INFO.website);
-              if (!opened) Alert.alert('無法開啟官網', DORM_OFFICE_INFO.website);
-            }}
-          />
-        </AICard>
-      )}
       <AICard title="目前可以使用">
         <View style={{ gap: 12 }}>
           {(actions ?? feature.actions ?? publicActions).map((action) => (

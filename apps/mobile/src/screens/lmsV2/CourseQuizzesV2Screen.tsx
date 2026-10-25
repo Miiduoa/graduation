@@ -40,7 +40,7 @@ export default function CourseQuizzesV2Screen() {
             title={q.title}
             subtitle={`${q.time_limit_seconds ? `${Math.round(q.time_limit_seconds / 60)} 分鐘` : '無時限'} · ${q.max_attempts ?? 1} 次機會`}
             onPress={() =>
-              nav.navigate('CourseQuizTakingV2', { courseId, courseName, quizId: q.id })
+              nav.navigate('QuizTaking', { courseId, courseName, quizId: q.id })
             }
           />
         )}

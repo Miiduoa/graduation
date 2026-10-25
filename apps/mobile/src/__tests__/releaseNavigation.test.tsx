@@ -719,14 +719,6 @@ jest.mock('../screens/SettingsAiFirstScreen', () => {
     default: () => React.createElement(Text, null, 'SettingsAiFirstScreen'),
   };
 });
-jest.mock('../screens/SmartDashboardScreen', () => {
-  const React = require('react');
-  const { Text } = require('react-native');
-  return {
-    __esModule: true,
-    SmartDashboardScreen: () => React.createElement(Text, null, 'SmartDashboardScreen'),
-  };
-});
 jest.mock('../screens/StudentTodayScreen', () => {
   const React = require('react');
   const { Text } = require('react-native');
@@ -976,23 +968,26 @@ test('「我的訂單」開的是真的訂單列表，不是尚未開放', async
 });
 
 test.each([
-  ['GradeWhatIf', '成績試算尚未開放'],
-  ['MonthlySummary', '每月學習回顧尚未開放'],
-  ['VendorRevenueReport', '營運報表尚未開放'],
-  ['VendorLoyaltyPush', '顧客通知尚未開放'],
-  ['VendorMenuManage', '菜單管理尚未開放'],
-  ['StudentRisk', '學習關懷分析尚未開放'],
-  ['TeachingEvaluation', '教學評量分析尚未開放'],
-  ['AIStudyBuddy', '學習夥伴配對尚未開放'],
-  ['LifeRequests', '線上申請尚未開放'],
-  ['MistakeRepertoire', '錯題整理尚未開放'],
-  ['StudentInbox', '待辦彙整尚未開放'],
-  ['AITrustCard', '使用紀錄彙整尚未開放'],
-])('release route %s cannot mount the old simulated workflow', async (route, explanation) => {
+  'GradeWhatIf',
+  'MonthlySummary',
+  'VendorRevenueReport',
+  'VendorLoyaltyPush',
+  'VendorMenuManage',
+  'StudentRisk',
+  'TeachingEvaluation',
+  'AIStudyBuddy',
+  'LifeRequests',
+  'MistakeRepertoire',
+  'StudentInbox',
+  'AITrustCard',
+  'StaffHub',
+  'DepartmentHub',
+  'DemoStory',
+])('release route %s is no longer registered', async (route) => {
   const { view, navigation } = await mount(LearnStack);
   act(() => navigation.navigate(route, { courseId: 'demo_c001' }));
-  expect(view.getByText(new RegExp(explanation))).toBeTruthy();
-  expect(view.getByText('目前可以使用')).toBeTruthy();
+  expect(view.getByText('LearnAiFirstScreen')).toBeTruthy();
+  expect(view.queryByText(/尚未開放/)).toBeNull();
   expect(view.queryByText(`${route}Screen`)).toBeNull();
 });
 test.each([
@@ -1009,14 +1004,19 @@ test.each([
   'CourseAIAssistantV2',
   'CourseQuestionBankV2',
   'CourseLiveV2',
-])('a direct %s deep link does not bypass the release LMS gate', async (route) => {
+])('a direct %s deep link is not registered', async (route) => {
   const { view, navigation } = await mount(LearnStack);
   act(() => navigation.navigate(route, { courseId: 'demo-course' }));
-  expect(view.getByText(/這項課程功能尚未開放/)).toBeTruthy();
-  fireEvent.press(view.getByText('查看我的課程'));
-  await waitFor(() => expect(view.getByText('LearnAiFirstScreen')).toBeTruthy());
+  expect(view.getByText('LearnAiFirstScreen')).toBeTruthy();
+  expect(view.queryByText(/這項課程功能尚未開放/)).toBeNull();
   expect(ensureLmsV2DemoSignIn).not.toHaveBeenCalled();
 });
+test('SmartDashboard is no longer registered on Home', async () => {
+  const { view, navigation } = await mount(HomeStack);
+  act(() => navigation.navigate('SmartDashboard'));
+  expect(view.getByText('StudentTodayScreen')).toBeTruthy();
+});
+
 test('legacy TodayCockpit selects the authenticated live dashboard instead of a synthetic story', async () => {
   const { view, navigation } = await mount(LearnStack);
   act(() => navigation.navigate('TodayCockpit'));
@@ -1078,14 +1078,16 @@ test.each(['AIAgentConsole', 'AIAgentObservatory'])(
     expect(view.queryByText('AIAgentConsoleScreen')).toBeNull();
   },
 );
-test.each([
-  ['Clubs', '社團申請與名單管理尚未開放'],
-  ['Dormitory', '宿舍包裹查詢與線上報修尚未開放'],
-])('Map %s cannot submit demo actions', async (route, explanation) => {
-  const { view, navigation } = await mount(MapStack);
-  act(() => navigation.navigate(route));
-  expect(view.getByText(new RegExp(explanation))).toBeTruthy();
-});
+test.each(['Clubs', 'Dormitory', 'DormitoryScreen', 'Career'])(
+  'Map %s is no longer registered; old dorm links go to today instead of an unavailable page',
+  async (route) => {
+    const { view, navigation } = await mount(MapStack);
+    act(() => navigation.navigate(route));
+    expect(view.queryByText(/尚未開放/)).toBeNull();
+    expect(view.queryByText('前往靜宜住宿服務組官網')).toBeNull();
+    expect(view.queryByText(`${route}Screen`)).toBeNull();
+  },
+);
 test.each([
   ['MerchantHub', '這間店還沒接到訂單系統'],
 ])('Me %s no longer shows fictitious account data', async (route, explanation) => {

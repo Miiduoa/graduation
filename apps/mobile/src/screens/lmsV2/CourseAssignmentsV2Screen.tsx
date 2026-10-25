@@ -52,7 +52,7 @@ export default function CourseAssignmentsV2Screen() {
             subtitle={`${formatDue(a.due_at)} · 滿分 ${a.max_points ?? 100}`}
             badge={a.is_group_submission ? '小組' : undefined}
             onPress={() =>
-              nav.navigate('CourseAssignmentDetailV2', {
+              nav.navigate('HomeworkSubmit', {
                 courseId,
                 courseName,
                 assignmentId: a.id,

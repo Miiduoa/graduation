@@ -90,7 +90,7 @@ export function AccessibilitySettingsScreen({ navigation }: Props) {
         <AIRow
           title="外觀"
           subtitle="選擇淺色或深色模式"
-          onPress={() => navigation?.navigate?.('ThemePreview')}
+          onPress={() => navigation?.navigate?.('Settings')}
         />
         <AIRow
           title="回報閱讀或操作問題"

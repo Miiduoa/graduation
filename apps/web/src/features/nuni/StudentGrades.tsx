@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { formatTaipeiDateTime } from '@campus/shared/src/taipeiTime';
 import { NuniError } from '@campus/shared/src/nuni';
+import { GradesTabs } from '@/components/academic/GradesTabs';
 import { SiteShell } from '@/components/SiteShell';
 import { NuniSignIn } from '@/components/NuniSignIn';
 import { LoginLink } from '@/components/LoginLink';
@@ -400,6 +401,7 @@ export function StudentGradesPage() {
   return (
     <SiteShell>
       <div className={styles.page}>
+        <GradesTabs active="feedback" />
         <div className={styles.heading}>
           <div>
             <p className={styles.eyebrow}>課程空間</p>
