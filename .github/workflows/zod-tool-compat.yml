@@ -45,8 +45,10 @@ jobs:
           # This is a deliberate cross-major compatibility probe. The checked-in
           # manifest still pins Zod 3 until the actual migration PR.
           node -e "const version = require('./backend/functions/node_modules/zod/package.json').version; if (!version.startsWith('4.6.7')) process.exit(1); console.log(version)"
-      - name: Verify Zod 4 native OpenAPI conversion
+      - name: Verify full Functions suite under Zod 4
         working-directory: backend/functions
+        env:
+          ONLINE_ORDERING_ENABLED: 'true'
         run: |
           node -p "require('zod/package.json').version"
-          pnpm exec jest --runInBand agent/tools/toolSchema.compat.test.js agent/tools/campusNavigation.test.js assistantAgent.test.js
+          pnpm exec jest --runInBand
