@@ -6,7 +6,13 @@ vi.mock('next/navigation', () => ({
   usePathname: () => '/timetable',
 }));
 
-import { cleanCourse, cleanMeta, shareCopiedCopy, WEEKDAY_LABELS } from '@campus/shared';
+import {
+  cleanCourse,
+  cleanMeta,
+  shareCopiedCopy,
+  WEEKDAY_LABELS,
+  type PersonalImportRecord,
+} from '@campus/shared';
 import { PersonalTimetable } from './PersonalTimetable';
 
 const mocks = vi.hoisted(() => ({
@@ -19,6 +25,7 @@ const mocks = vi.hoisted(() => ({
   invites: vi.fn(),
   friendTimetable: vi.fn(),
   meetup: vi.fn(),
+  records: [] as PersonalImportRecord[],
 }));
 vi.mock('@/components/AuthGuard', () => ({ useAuth: () => mocks.auth }));
 vi.mock('@/components/SelectedSchoolProvider', () => ({
@@ -42,7 +49,7 @@ vi.mock('@/lib/usePersonalImports', () => ({
       schoolName: '靜宜大學',
     };
   },
-  usePersonalImports: () => ({ records: [], error: '', loading: false }),
+  usePersonalImports: () => ({ records: mocks.records, error: '', loading: false }),
 }));
 vi.mock('@/lib/timetable/store', () => ({
   CLOUD_NOT_READY_COPY: '這個功能還沒接通，雲端備份先不用。',
@@ -108,6 +115,7 @@ beforeEach(() => {
   mocks.auth.loading = false;
   mocks.school.selectedSchoolId = 'pu';
   mocks.school.loading = false;
+  mocks.records = [];
   mocks.load.mockReset().mockResolvedValue(timetable());
   mocks.save.mockReset().mockResolvedValue({ stored: 'cloud' });
   mocks.share
@@ -157,6 +165,35 @@ function existingCourseButton() {
 }
 
 describe('personal timetable data retention', () => {
+  it('keeps a newly saved manual course visible when adding it from an imported semester', async () => {
+    mocks.records = [
+      {
+        id: 'imported',
+        kind: 'timetable',
+        title: '匯入課程',
+        schoolId: 'pu',
+        academicYear: '115',
+        semester: '1',
+        dayOfWeek: 2,
+        startPeriod: 3,
+        endPeriod: 4,
+        batchId: 'test',
+        importedAt: '2026-10-25T00:00:00Z',
+        source: { type: 'paste', line: 1, rawText: '' },
+      },
+    ];
+    await ready();
+    expect((screen.getByLabelText('顯示自行匯入的學期') as HTMLSelectElement).value).toBe('115|1');
+    const editor = addCourse('剛新增的統計學');
+    fireEvent.click(editor.getByRole('button', { name: '儲存' }));
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+    expect((screen.getByLabelText('顯示自行匯入的學期') as HTMLSelectElement).value).toBe('manual');
+    expect(screen.getAllByRole('button', { name: /編輯 剛新增的統計學/ }).length).toBeGreaterThan(
+      0,
+    );
+    expect(screen.getByRole('status').textContent).toContain('已切換至手動課表');
+  });
+
   it('keeps an unsuccessful edit, freezes its fields while saving, and allows retry', async () => {
     const pending = deferred<{ stored: 'cloud' }>();
     mocks.save.mockReturnValueOnce(pending.promise);

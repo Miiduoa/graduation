@@ -12,7 +12,11 @@ import {
 } from '@/lib/campusServices';
 import { isWebOnlineOrderingEnabled, ONLINE_ORDERING_OFF_TEXT } from '@/lib/onlineOrdering';
 import styles from './CampusServiceMenu.module.css';
-import { campusServiceHref, useCampusNavigationSearch } from '@/lib/campusNavigation';
+import {
+  campusServiceHref,
+  campusServiceMatches,
+  useCampusNavigationSearch,
+} from '@/lib/campusNavigation';
 import { primaryNavigationSection } from '@/lib/primaryNavigation';
 
 const categoryLabels: Record<ServiceCategory, string> = {
@@ -24,10 +28,10 @@ const categoryLabels: Record<ServiceCategory, string> = {
 
 export function CampusServiceMenu() {
   const pathname = usePathname();
-  const currentService = CAMPUS_SERVICES.filter(
-    (service) => pathname === service.href || pathname?.startsWith(`${service.href}/`),
-  ).sort((first, second) => second.href.length - first.href.length)[0]?.href;
   const params = useSearchParams();
+  const currentService = CAMPUS_SERVICES.filter((service) =>
+    campusServiceMatches(service.href, pathname, params),
+  ).sort((first, second) => second.href.length - first.href.length)[0]?.href;
   const menu = useRef<HTMLDetailsElement>(null);
   const search = useRef<HTMLInputElement>(null);
   const results = useRef<HTMLDivElement>(null);

@@ -380,7 +380,8 @@ function ImportWorkspace({
   const [backup, setBackup] = useState<Omit<PersonalImportBackupPreview, 'rows'> | null>(null);
   const [importDocument, setDocument] = useState<PersonalImportDocument | null>(null);
   const [hasDocumentFile, setHasDocumentFile] = useState(false);
-  const [documentSelection, setDocumentSelection] = useState<PersonalImportDraft['documentSelection']>(null);
+  const [documentSelection, setDocumentSelection] =
+    useState<PersonalImportDraft['documentSelection']>(null);
   const [documentVersion, setDocumentVersion] = useState(0);
   const [reviewPage, setReviewPage] = useState(0);
   const [excluded, setExcluded] = useState<string[]>([]);
@@ -436,7 +437,9 @@ function ImportWorkspace({
           '已找回這個分頁尚未匯入的草稿，請繼續核對。' +
             (draft.document
               ? '文件文字與選取內容已保留；重新辨識時請再選擇原始檔案。'
-              : draft.source.type === 'screenshot' ? '原始圖片未暫存，需開啟原圖對照。' : ''),
+              : draft.source.type === 'screenshot'
+                ? '原始圖片未暫存，需開啟原圖對照。'
+                : ''),
         );
       }
     } catch (error) {
@@ -721,6 +724,15 @@ function ImportWorkspace({
         { restoreBackup: !!backup },
       );
       if (!active.current) return;
+      // Finish the draft before announcing success; the next effect may not run
+      // if the user leaves immediately. A damaged, unreadable draft stays protected.
+      if (!draftReadFailed) {
+        try {
+          clearPersonalImportDraft(scope);
+        } catch (error) {
+          setDraftStorageError(errorMessage(error));
+        }
+      }
       setNotice(
         personalImportSavedNotice(result.added, readPersonalImportSyncState(scope).enabled),
       );
@@ -1046,9 +1058,11 @@ function ImportWorkspace({
               <button
                 type="button"
                 className="btn"
-                onClick={() => documentFile.current
-                  ? void readFile(documentFile.current, 'ocr')
-                  : pdfInput.current?.click()}
+                onClick={() =>
+                  documentFile.current
+                    ? void readFile(documentFile.current, 'ocr')
+                    : pdfInput.current?.click()
+                }
               >
                 重新辨識 PDF 整頁
               </button>

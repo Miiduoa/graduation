@@ -15,7 +15,7 @@ type Snapshot = {
   records: PersonalImportRecord[];
 };
 
-export function useTodayTimetableData(now: Date, refreshKey = 0) {
+export function useTodayTimetableData(now: Date) {
   const scope = usePersonalImportScope();
   const scopeKey = scope ? JSON.stringify(scope) : '';
   const currentScope = useRef(scopeKey);
@@ -26,7 +26,11 @@ export function useTodayTimetableData(now: Date, refreshKey = 0) {
   const load = useCallback(async () => {
     const run = ++generation.current;
     if (!scopeKey) return;
-    setSnapshot({ scope: scopeKey, status: 'loading', records: [] });
+    setSnapshot((previous) =>
+      previous?.scope === scopeKey && previous.status === 'ready'
+        ? previous
+        : { scope: scopeKey, status: 'loading', records: [] },
+    );
     try {
       const current = JSON.parse(scopeKey) as { owner: string; schoolId: string };
       const [ledger, timetable] = await Promise.all([
@@ -58,7 +62,7 @@ export function useTodayTimetableData(now: Date, refreshKey = 0) {
         generation.current += 1;
         subscription.remove();
       };
-    }, [load, refreshKey]),
+    }, [load]),
   );
   const plan = useMemo(
     () =>

@@ -1,6 +1,6 @@
 // @vitest-environment node
 import { expect, it } from 'vitest';
-import { MAX_PERIOD_SLOTS } from '@campus/shared';
+import { MAX_PERIOD_SLOTS, cleanCourses } from '@campus/shared';
 import { cleanCourse, createTimetableShareHandlers } from './timetableShareHandlers';
 import { createMemoryGroupStore } from './memoryGroupStore';
 
@@ -81,6 +81,34 @@ it('creating a share copies the saved timetable without owner uid or teacher', a
       `timetableShares/${created.token}`,
     ]),
   );
+});
+
+it('retains unplaced courses through public share storage and client normalization', async () => {
+  const { store, handlers: api } = handlers();
+  const created = await api.createTimetableShare({
+    auth: { uid: 'alice' },
+    data: {
+      schoolId: 'pu',
+      courses: [
+        puCourse,
+        { ...puCourse, id: 'import:unplaced', name: '自主學習', day: 0, start: 0, end: 0 },
+      ],
+      meta: { school: '靜宜大學', year: '115', semester: '1', title: '115 學年度第 1 學期課表' },
+    },
+  });
+  const saved = store.docs.get(`timetableShares/${created.token}`);
+  expect(saved?.meta).toEqual({
+    school: '靜宜大學', year: '115', semester: '1', title: '115 學年度第 1 學期課表',
+  });
+  // loadSharedTimetable uses this same normalization after reading the public document.
+  expect(cleanCourses(saved?.courses)).toEqual([
+    expect.objectContaining({ name: '資料庫', day: 1, start: 3, end: 4, teacher: '' }),
+    expect.objectContaining({
+      id: 'import:unplaced', name: '自主學習', day: 0, start: 0, end: 0, teacher: '',
+    }),
+  ]);
+  expect(saved?.ownerUid).toBeUndefined();
+  expect(store.docs.get(`timetableShareOwners/${created.token}`)?.ownerUid).toBe('alice');
 });
 
 it('same user shares PU and NTU school-scoped courses and meta separately', async () => {

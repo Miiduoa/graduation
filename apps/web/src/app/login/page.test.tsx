@@ -116,6 +116,28 @@ it('lets a school-only user choose the platform account for a social or classroo
   expect(replace).not.toHaveBeenCalled();
   expect(screen.getByText('課程與跨校交流')).toBeTruthy();
 });
+it('offers Google for course feedback while retaining the requested campus and tab', () => {
+  state.user = null;
+  const destination = '/grades?schoolId=tw-pu&tab=feedback';
+  state.params = new URLSearchParams({ returnUrl: destination });
+  render(<LoginPage />);
+  expect(screen.getByRole('heading', { level: 1 }).textContent).toBe('登入');
+  expect(screen.getByTestId('platform-sign-in').getAttribute('data-return-url')).toBe(destination);
+  expect(screen.queryByText('這個頁面要用學校帳號，Google 帳號無法代替。')).toBeNull();
+  expect(replace).not.toHaveBeenCalled();
+});
+it('honors an explicit school sign-in for course feedback without offering Google instead', async () => {
+  state.user = null;
+  state.studentId = true;
+  const destination = '/grades?tab=feedback';
+  state.params = new URLSearchParams({ returnUrl: destination, reconnect: 'school' });
+  render(<LoginPage />);
+  expect(screen.queryByTestId('platform-sign-in')).toBeNull();
+  expect(screen.getByRole('heading', { level: 1 }).textContent).toBe('連線學校帳號');
+  fillSchoolLogin();
+  fireEvent.submit(screen.getByLabelText('學號').closest('form')!);
+  await waitFor(() => expect(replace).toHaveBeenCalledWith(destination));
+});
 it('retains the reconnection form after a rejected school login', async () => {
   state.studentId = true;
   state.params.set('reconnect', 'school');

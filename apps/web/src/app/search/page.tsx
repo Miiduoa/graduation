@@ -1,12 +1,10 @@
 'use client';
 
-import { Suspense, useEffect, useState } from 'react';
+import { Suspense, useEffect, useRef, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { SiteShell } from '@/components/SiteShell';
-import { useOptionalSelectedSchool } from '@/components/SelectedSchoolProvider';
-import { browsingSchoolSearch } from '@/lib/navigation';
-import { campusServiceHref } from '@/lib/campusNavigation';
+import { campusServiceHref, useCampusNavigationSearch } from '@/lib/campusNavigation';
 import { useSignInOptions } from '@/lib/signInOptions';
 import styles from './search.module.css';
 import {
@@ -28,7 +26,8 @@ function readFilters(params: URLSearchParams) {
 
 function ServiceDirectory() {
   const params = useSearchParams();
-  const school = useOptionalSelectedSchool();
+  const searchInput = useRef<HTMLInputElement>(null);
+  const schoolSearch = useCampusNavigationSearch(params);
   const options = useSignInOptions();
   const queryString = params.toString();
   const [{ query, category }, setFilters] = useState(() =>
@@ -41,7 +40,6 @@ function ServiceDirectory() {
   }, [queryString]);
   const term = query.trim();
   const matches = searchCampusServices(query, category);
-  const schoolSearch = browsingSchoolSearch(params, school?.selectedSchoolId ?? null);
   function updateFilters(next: { query: string; category: ServiceCategory | 'all' }) {
     setFilters(next);
     const url = new URL(window.location.href);
@@ -50,28 +48,42 @@ function ServiceDirectory() {
     if (next.category !== 'all') url.searchParams.set('category', next.category);
     else url.searchParams.delete('category');
     // Next.js observes native history changes without a server request per keystroke.
-    window.history.replaceState(
-      null,
-      '',
-      `${url.pathname}${url.search}${url.hash}`,
-    );
+    window.history.replaceState(null, '', `${url.pathname}${url.search}${url.hash}`);
   }
   function resetFilters() {
     updateFilters({ query: '', category: 'all' });
+    searchInput.current?.focus();
   }
   return (
-    <SiteShell title="所有服務" subtitle="搜尋要做的事，或依分類查找。學校帳號與 Google 帳號可使用的服務不同。">
+    <SiteShell
+      title="所有服務"
+      subtitle="搜尋要做的事，或依分類查找。學校帳號與 Google 帳號可使用的服務不同。"
+    >
       <div className={styles.directory}>
-        <section className={styles.searchPanel} aria-label="尋找服務">
+        <form
+          className={styles.searchPanel}
+          role="search"
+          aria-label="尋找服務"
+          onSubmit={(event) => event.preventDefault()}
+        >
           <label htmlFor="service-search">想找什麼？</label>
           <input
+            ref={searchInput}
             id="service-search"
             className={styles.searchInput}
             type="search"
             value={query}
             maxLength={100}
+            autoComplete="off"
+            enterKeyHint="search"
             placeholder="課表、借書、公車…"
             onChange={(event) => updateFilters({ query: event.target.value, category })}
+            onKeyDown={(event) => {
+              if (event.key === 'Escape' && !event.nativeEvent.isComposing && query) {
+                event.preventDefault();
+                updateFilters({ query: '', category });
+              }
+            }}
           />
           <div className={styles.filters} role="group" aria-label="服務分類">
             {[{ id: 'all', label: '全部' }, ...SERVICE_CATEGORIES].map((item) => (
@@ -87,15 +99,17 @@ function ServiceDirectory() {
               </button>
             ))}
           </div>
-        </section>
+        </form>
         {options.error && (
           <div role="alert">
             <p>暫時無法確認學校登入方式，公開資訊仍可瀏覽。</p>
-            <button type="button" className="btn" onClick={options.retry}>重新確認登入方式</button>
+            <button type="button" className="btn" onClick={options.retry}>
+              重新確認登入方式
+            </button>
           </div>
         )}
         <div className={styles.resultSummary}>
-          <p role="status" aria-live="polite">
+          <p role="status" aria-live="polite" aria-atomic="true">
             找到 {matches.length} 項服務
           </p>
           {(term || category !== 'all') && (
@@ -128,7 +142,9 @@ function ServiceDirectory() {
                       <div>
                         <h3>{service.name}</h3>
                         <p>{service.text}</p>
-                        <small className={styles.access}>{serviceAccessLabel(service.access, options)}</small>
+                        <small className={styles.access}>
+                          {serviceAccessLabel(service.access, options)}
+                        </small>
                       </div>
                       <span aria-hidden="true">→</span>
                     </Link>

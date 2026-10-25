@@ -36,6 +36,23 @@ it('recognizes an authenticated account and avoids school-login redirect loops',
   expect(screen.getByRole('link', { name: '繼續使用' }).getAttribute('href')).toBe('/classroom');
   expect(mocks.request).not.toHaveBeenCalled();
 });
+it('returns a new Google session to course feedback with its campus and section intact', async () => {
+  const destination = '/grades?schoolId=tw-pu&tab=feedback#recent';
+  render(<NuniSignIn returnUrl={destination} />);
+  expect(screen.getByText('登入後查看各門課目前的成績、等待公布與老師回饋。')).toBeTruthy();
+  const button = await screen.findByRole('button', { name: '使用 Google 帳號繼續' });
+  const action = new URL(button.closest('form')!.action);
+  expect(action.pathname).toBe('/auth/platform/start');
+  expect(action.searchParams.get('returnUrl')).toBe(destination);
+});
+it('lets an existing Google session continue directly to course feedback', () => {
+  mocks.session = { platformAccountId: 'a' };
+  render(<NuniSignIn returnUrl="/grades?tab=feedback" />);
+  expect(screen.getByRole('link', { name: '繼續使用' }).getAttribute('href')).toBe(
+    '/grades?tab=feedback',
+  );
+  expect(mocks.request).not.toHaveBeenCalled();
+});
 it('blocks a new login until pending logout is completed', () => {
   mocks.pendingLogout = true;
   render(<NuniSignIn />);

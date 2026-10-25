@@ -135,6 +135,35 @@ it('warns when draft storage fails and preserves edits for a later successful re
   expect(screen.queryByText(/草稿暫存沒有成功/)).toBeNull();
   expect(sessionStorage.getItem(personalImportDraftKey(context))).toContain('88');
 });
+
+it('keeps the reviewed draft when saving the actual records fails', async () => {
+  render(<PersonalImportCenter />);
+  await prepare();
+  const draftKey = personalImportDraftKey(context);
+  const originalDraft = sessionStorage.getItem(draftKey);
+  const setItem = Storage.prototype.setItem;
+  vi.spyOn(Storage.prototype, 'setItem').mockImplementation(function (this: Storage, key, value) {
+    if (this === localStorage && key === personalImportsStorageKey(context))
+      throw new DOMException('Full', 'QuotaExceededError');
+    setItem.call(this, key, value);
+  });
+  fireEvent.click(screen.getByRole('button', { name: '確認匯入 1 筆' }));
+  await screen.findByText(/這次沒有存成/);
+  expect(readPersonalImports(context)).toHaveLength(0);
+  expect(sessionStorage.getItem(draftKey)).toBe(originalDraft);
+  expect((screen.getByLabelText('成績') as HTMLInputElement).value).toBe('85');
+});
+
+it('does not discard an unreadable previous draft after saving newly entered records', async () => {
+  const draftKey = personalImportDraftKey(context);
+  sessionStorage.setItem(draftKey, '{damaged');
+  render(<PersonalImportCenter />);
+  await prepare();
+  fireEvent.click(screen.getByRole('button', { name: '確認匯入 1 筆' }));
+  await screen.findByText(personalImportSavedNotice(1));
+  expect(readPersonalImports(context)).toHaveLength(1);
+  expect(sessionStorage.getItem(draftKey)).toBe('{damaged');
+});
 async function prepare(text = '課程名稱,學分,成績\n資料庫,3,85') {
   fireEvent.change(screen.getByLabelText('這份資料的學年度'), { target: { value: '115' } });
   fireEvent.change(screen.getByLabelText('學期'), { target: { value: '1' } });
@@ -599,18 +628,48 @@ it('restores document text, selected sheets and header rows without saving recor
   fireEvent.click(screen.getByRole('checkbox', { name: '成績 · 3 列' }));
   fireEvent.change(screen.getByLabelText('「成績」的標題列'), { target: { value: '2' } });
   view.unmount();
-  render(<PersonalImportCenter />);
-  expect((screen.getByRole('checkbox', { name: '說明 · 2 列' }) as HTMLInputElement).checked).toBe(false);
-  expect((screen.getByRole('checkbox', { name: '成績 · 3 列' }) as HTMLInputElement).checked).toBe(true);
+  const restoredView = render(<PersonalImportCenter />);
+  expect((screen.getByRole('checkbox', { name: '說明 · 2 列' }) as HTMLInputElement).checked).toBe(
+    false,
+  );
+  expect((screen.getByRole('checkbox', { name: '成績 · 3 列' }) as HTMLInputElement).checked).toBe(
+    true,
+  );
   expect((screen.getByLabelText('「成績」的標題列') as HTMLSelectElement).value).toBe('2');
   expect(readPersonalImports(context)).toHaveLength(0);
-  expect(sessionStorage.getItem(personalImportDraftKey(context))).not.toContain('private-source-bytes');
+  expect(sessionStorage.getItem(personalImportDraftKey(context))).not.toContain(
+    'private-source-bytes',
+  );
   expect(readPersonalImportDocumentFile).toHaveBeenCalledTimes(1);
   fireEvent.click(screen.getByRole('button', { name: '整理選取內容' }));
+  const clearedDraft = vi.fn();
+  const removeItem = Storage.prototype.removeItem;
+  vi.spyOn(Storage.prototype, 'removeItem').mockImplementation(function (
+    this: Storage,
+    key: string,
+  ) {
+    if (
+      this === sessionStorage &&
+      key === personalImportDraftKey(context) &&
+      this.getItem(key) !== null
+    ) {
+      clearedDraft(
+        readPersonalImports(context).length,
+        !!screen.queryByText(personalImportSavedNotice(1)),
+      );
+    }
+    removeItem.call(this, key);
+  });
   fireEvent.click(screen.getByRole('button', { name: '確認匯入 1 筆' }));
   await screen.findByText(personalImportSavedNotice(1));
   expect(readPersonalImports(context)[0]).toMatchObject({ title: '英文', grade: '90' });
+  expect(clearedDraft).toHaveBeenCalledWith(1, false);
   expect(sessionStorage.getItem(personalImportDraftKey(context))).toBeNull();
+  restoredView.unmount();
+  render(<PersonalImportCenter />);
+  expect(screen.queryByRole('button', { name: '確認匯入 1 筆' })).toBeNull();
+  expect(screen.queryByText(/已找回這個分頁尚未匯入的草稿/)).toBeNull();
+  expect(readPersonalImports(context)).toHaveLength(1);
 });
 
 it('restores PDF preview and requests the original file only when re-running OCR', async () => {
@@ -625,9 +684,11 @@ it('restores PDF preview and requests the original file only when re-running OCR
   expect(screen.getByText('資料庫')).toBeTruthy();
   const file = new File(['pdf'], 'grades.pdf', { type: 'application/pdf' });
   fireEvent.change(screen.getByLabelText('重新選擇原始 PDF'), { target: { files: [file] } });
-  await waitFor(() => expect(readPersonalImportDocumentFile).toHaveBeenLastCalledWith(
-    file, expect.any(AbortSignal), { pdfMode: 'ocr' },
-  ));
+  await waitFor(() =>
+    expect(readPersonalImportDocumentFile).toHaveBeenLastCalledWith(file, expect.any(AbortSignal), {
+      pdfMode: 'ocr',
+    }),
+  );
   expect(readPersonalImports(context)).toHaveLength(0);
   fireEvent.click(screen.getByRole('button', { name: '清除暫存草稿' }));
   fireEvent.click(screen.getByRole('button', { name: '確認清除草稿' }));
