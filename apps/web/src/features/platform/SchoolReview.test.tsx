@@ -84,6 +84,17 @@ beforeEach(() => {
         schools: [schoolRow('ready-school', '待開放學校')],
       });
     }
+    if (String(url).includes('/api/platform-admin/people?tenantId=')) {
+      return ok({
+        tenantId: 'ready-school',
+        displayName: '待開放學校',
+        tenantState: 'provisioned',
+        hasRoleAdmin: true,
+        roleAdmins: [{ personId: 'admin-1', displayName: '校方管理員' }],
+        people: [],
+        honesty: '依校方授權名單核對',
+      });
+    }
     return ok({});
   });
   vi.stubGlobal('fetch', fetcher);
@@ -240,19 +251,21 @@ it.each(['loading', 'pendingLogout'] as const)(
     view.rerender(<SchoolReview />);
     expect(screen.getByText('正在確認管理權限…')).toBeTruthy();
     expect(screen.queryByRole('button', { name: '核准申請' })).toBeNull();
-    expect(screen.queryByRole('button', { name: '一鍵開通' })).toBeNull();
+    expect(screen.queryByRole('button', { name: '檢查開通條件' })).toBeNull();
     expect(screen.queryByText('待審學校')).toBeNull();
     expect(fetcher.mock.calls.some(([, options]) => options?.method === 'POST')).toBe(false);
   },
 );
 
-it.each(['核准申請', '一鍵開通'])(
+it.each(['核准申請', '檢查開通條件'])(
   'ignores a previous account %s completion instead of reloading with new credentials',
   async (button) => {
     const mutation = deferredResponse();
     const original = fetcher.getMockImplementation()!;
     fetcher.mockImplementation((url: string, options?: RequestInit) =>
-      options?.method === 'POST' ? mutation.promise : original(url, options),
+      options?.method === 'POST' || String(url).includes('/people?tenantId=')
+        ? mutation.promise
+        : original(url, options),
     );
     const view = render(<SchoolReview />);
     await screen.findByText('待開放學校');
@@ -289,9 +302,12 @@ it('ignores reads from an effect replay even when the account context stays the 
   ).toHaveLength(1);
 });
 
-it('opens a provisioned school through the existing schools open path', async () => {
+it('opens a provisioned school only after administrator verification and confirmation', async () => {
   render(<SchoolReview />);
-  fireEvent.click(await screen.findByRole('button', { name: '一鍵開通' }));
+  fireEvent.click(await screen.findByRole('button', { name: '檢查開通條件' }));
+  const confirm = await screen.findByRole('button', { name: '確認開通 待開放學校' });
+  expect(fetcher.mock.calls.some(([url]) => String(url).endsWith('/open'))).toBe(false);
+  fireEvent.click(confirm);
   await waitFor(() =>
     expect(
       fetcher.mock.calls.some(
@@ -326,5 +342,50 @@ it('clears pending applications when the later school lookup rejects operator au
   await screen.findByText(/這台帳號不是平台營運人員/);
   expect(screen.queryByText('待審學校')).toBeNull();
   expect(screen.queryByRole('button', { name: '核准申請' })).toBeNull();
-  expect(screen.queryByRole('button', { name: '一鍵開通' })).toBeNull();
+  expect(screen.queryByRole('button', { name: '檢查開通條件' })).toBeNull();
+});
+
+it('blocks opening a school with no active school administrator', async () => {
+  const original = fetcher.getMockImplementation()!;
+  fetcher.mockImplementation((url: string, options?: RequestInit) =>
+    String(url).includes('/people?tenantId=')
+      ? Promise.resolve(ok({
+          tenantId: 'ready-school',
+          displayName: '待開放學校',
+          tenantState: 'provisioned',
+          hasRoleAdmin: false,
+          roleAdmins: [],
+          people: [],
+          honesty: '依校方授權名單核對',
+        }))
+      : original(url, options),
+  );
+  render(<SchoolReview />);
+  fireEvent.click(await screen.findByRole('button', { name: '檢查開通條件' }));
+  expect(await screen.findByText(/尚未指定有效的校方管理員/)).toBeTruthy();
+  expect(screen.queryByRole('button', { name: '確認開通 待開放學校' })).toBeNull();
+  expect(fetcher.mock.calls.some(([url]) => String(url).endsWith('/open'))).toBe(false);
+});
+
+it('rechecks school admin role at confirmation and rejects a revoked role', async () => {
+  let reads = 0;
+  const original = fetcher.getMockImplementation()!;
+  fetcher.mockImplementation((url: string, options?: RequestInit) => {
+    if (String(url).includes('/people?tenantId=') && ++reads === 2)
+      return Promise.resolve(ok({
+        tenantId: 'ready-school',
+        displayName: '待開放學校',
+        tenantState: 'provisioned',
+        hasRoleAdmin: false,
+        roleAdmins: [],
+        people: [],
+        honesty: '最新校方授權',
+      }));
+    return original(url, options);
+  });
+  render(<SchoolReview />);
+  fireEvent.click(await screen.findByRole('button', { name: '檢查開通條件' }));
+  fireEvent.click(await screen.findByRole('button', { name: '確認開通 待開放學校' }));
+  expect(await screen.findByText(/目前沒有有效的校方管理員/)).toBeTruthy();
+  expect(fetcher.mock.calls.filter(([url]) => String(url).endsWith('/open'))).toHaveLength(0);
 });
