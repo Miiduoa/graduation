@@ -42,7 +42,6 @@ const JWT_TTL_SECONDS = 60 * 60; // 1 hour
  */
 async function ensureSupabaseUser({ supabaseUrl, serviceKey, firebaseUid, email, displayName }) {
   // 使用 supabase-js admin client
-  // eslint-disable-next-line global-require
   const { createClient } = require('@supabase/supabase-js');
   const admin = createClient(supabaseUrl, serviceKey, {
     auth: { persistSession: false, autoRefreshToken: false },
@@ -96,7 +95,6 @@ async function ensureSupabaseUser({ supabaseUrl, serviceKey, firebaseUid, email,
   }, { onConflict: 'user_id' });
   if (upsertErr) {
     // 不致命 — 後續再補
-    // eslint-disable-next-line no-console
     console.warn('[issueSupabaseJwt] profile upsert failed:', upsertErr.message);
   }
   return userId;

@@ -39,7 +39,7 @@ function request(port, { method, path, body, headers = {} }) {
         res.on('data', (chunk) => chunks.push(chunk));
         res.on('end', () => {
           const text = Buffer.concat(chunks).toString('utf8');
-          let json = null;
+          let json;
           try {
             json = text ? JSON.parse(text) : null;
           } catch {
