@@ -64,7 +64,7 @@ export function AdminOverview({
             </div>
             {!schools.loading && !schools.error && (
               <div className={styles.actions}>
-                <a className={styles.link} href="/auth/platform/school-review">
+                <a className={styles.link} href="/admin/school-review">
                   前往審核申請
                 </a>
                 <Button onClick={() => onNavigate('schools')}>檢查學校開通狀態</Button>
