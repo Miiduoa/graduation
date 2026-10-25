@@ -31,6 +31,7 @@ import { AIDetailScreen, AICard, AIButton, aiTokens } from '../ui/aiFirst';
 import { getThemeVersion, subscribeToTheme } from '../ui/theme';
 import { useSchool } from '../state/school';
 import { useAuth } from '../state/auth';
+import { useOptionalNuniSession } from '../state/nuniSession';
 
 type ViewName = 'home' | 'repairs' | 'checklist' | 'laundry';
 const NAV: Array<{ id: ViewName; name: string }> = [
@@ -92,10 +93,15 @@ function Field({
 export function DormitoryScreen({ navigation }: { navigation?: { goBack?: () => void } }) {
   const { school } = useSchool();
   const { user, loading } = useAuth();
-  if (loading) {
+  const nuni = useOptionalNuniSession();
+  if (loading || nuni?.loading || nuni?.pendingLogout) {
     return <AIDetailScreen title="宿舍" onBack={() => navigation?.goBack?.()}><AICard><Body>正在確認使用者…</Body></AICard></AIDetailScreen>;
   }
-  const owner = user?.uid ? 'firebase:' + user.uid : 'guest';
+  const owner = user?.uid
+    ? 'firebase:' + user.uid
+    : nuni?.session
+      ? 'platform:' + nuni.session.platformAccountId
+      : 'guest';
   const key = dormStorageKey(owner, school.id);
   return (
     <DormitoryBody
@@ -103,7 +109,7 @@ export function DormitoryScreen({ navigation }: { navigation?: { goBack?: () => 
       storageKey={key}
       schoolId={school.id}
       schoolName={school.name}
-      guest={!user}
+      guest={owner === 'guest'}
       onBack={() => navigation?.goBack?.()}
     />
   );
