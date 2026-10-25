@@ -18,7 +18,8 @@
  */
 'use strict';
 
-const admin = require('firebase-admin');
+const { getApps, initializeApp } = require('firebase-admin/app');
+const { getFirestore, FieldValue } = require('firebase-admin/firestore');
 
 const DEFAULT_TEST_PROJECT = 'campus-demo-3a869';
 const PRODUCTION_PROJECTS = new Set(['campus-one-tw']);
@@ -312,12 +313,12 @@ function cafeteriasForSchool(schoolId) {
 const PROJECT_ID = resolveSeedProjectId();
 
 function init() {
-  if (admin.apps.length > 0) return;
+  if (getApps().length > 0) return;
   if (process.env.FIRESTORE_EMULATOR_HOST) {
-    admin.initializeApp({ projectId: PROJECT_ID });
+    initializeApp({ projectId: PROJECT_ID });
     console.log(`[seed] Using Firestore emulator at ${process.env.FIRESTORE_EMULATOR_HOST}`);
   } else if (process.env.GOOGLE_APPLICATION_CREDENTIALS) {
-    admin.initializeApp({ projectId: PROJECT_ID });
+    initializeApp({ projectId: PROJECT_ID });
     console.log(`[seed] Using service account from GOOGLE_APPLICATION_CREDENTIALS for project ${PROJECT_ID}`);
   } else {
     console.error(
@@ -423,7 +424,7 @@ async function seedOne(db, cafeteria) {
   const cafRef = db.collection('schools').doc(SCHOOL_ID).collection('cafeterias').doc(cafeteria.id);
   const cafPayload = {
     ...cafeteria,
-    updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+    updatedAt: FieldValue.serverTimestamp(),
   };
   await cafRef.set(cafPayload, { merge: true });
   console.log(`[seed] ✔ cafeteria ${cafeteria.id} (${cafeteria.name})`);
@@ -435,7 +436,7 @@ async function seedOne(db, cafeteria) {
       {
         ...item,
         cafeteriaId: cafeteria.id,
-        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        updatedAt: FieldValue.serverTimestamp(),
       },
       { merge: true },
     );
@@ -447,7 +448,7 @@ async function seedOne(db, cafeteria) {
 async function main() {
   assertSafeCafeteriaSeedTarget(process.env);
   init();
-  const db = admin.firestore();
+  const db = getFirestore();
   console.log(`[seed] schoolId=${SCHOOL_ID} project=${PROJECT_ID}`);
   const rows = cafeteriasForSchool(SCHOOL_ID);
   if (!rows.length) {
