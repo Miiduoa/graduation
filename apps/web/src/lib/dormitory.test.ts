@@ -1,9 +1,11 @@
 import { expect, it } from 'vitest';
 import {
   DORM_CHECKLISTS,
+  DORM_INSPECTION_ITEMS,
   DORM_MILESTONE_LIMIT,
   DORM_PARCEL_LIMIT,
   dormChecklistProgress,
+  dormInspectionProgress,
   dormStorageKey,
   emptyDormWorkspace,
   formatDormRepairForCopy,
@@ -81,6 +83,22 @@ it('safely normalizes locally entered dates without inventing official deadlines
   expect(sortedDormMilestones(value).map((m) => m.id)).toEqual(['today', 'fee', 'move']);
   expect(value.milestones[0].completed).toBe(false);
   expect(emptyDormWorkspace().milestones).toEqual([]);
+});
+
+it('normalizes a resident inspection without treating unknown or malformed statuses as official', () => {
+  const empty = emptyDormWorkspace();
+  expect(empty.inspection).toEqual({});
+  expect(dormInspectionProgress(empty)).toEqual({
+    checked: 0, issues: 0, total: DORM_INSPECTION_ITEMS.length,
+  });
+  const next = normalizeDormWorkspace({
+    inspection: { air: 'issue', lighting: 'ok', bathroom: 'reported', unknown: 'issue' },
+  });
+  expect(next.inspection).toEqual({ air: 'issue', lighting: 'ok' });
+  expect(dormInspectionProgress(next)).toEqual({
+    checked: 2, issues: 1, total: DORM_INSPECTION_ITEMS.length,
+  });
+  expect(normalizeDormWorkspace({ version: 1, building: '思高學苑' }).inspection).toEqual({});
 });
 
 it('keeps older data readable and validates resident-entered parcel pickups', () => {
