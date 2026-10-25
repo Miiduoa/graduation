@@ -11,11 +11,13 @@ if (!process.env.FIRESTORE_EMULATOR_HOST || !process.env.FIREBASE_AUTH_EMULATOR_
   process.exit(1);
 }
 
-const admin = require('firebase-admin');
+const { initializeApp } = require('firebase-admin/app');
+const { getFirestore } = require('firebase-admin/firestore');
+const { getAuth } = require('firebase-admin/auth');
 
-admin.initializeApp({ projectId });
-const db = admin.firestore();
-const auth = admin.auth();
+initializeApp({ projectId });
+const db = getFirestore();
+const auth = getAuth();
 
 const PASSWORD = 'campus-test-1234'; // gitleaks:allow 只在本機模擬器用的公開測試密碼
 const SCHOOL_ID = 'pu';

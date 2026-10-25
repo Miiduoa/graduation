@@ -11,16 +11,17 @@
  * - Or run in a Firebase-authenticated environment
  */
 
-import * as admin from 'firebase-admin';
+import { getApps, initializeApp } from 'firebase-admin/app';
+import { getFirestore } from 'firebase-admin/firestore';
 import * as path from 'path';
 import * as fs from 'fs';
 
 // Initialize Firebase Admin SDK
-if (!admin.apps.length) {
-  admin.initializeApp();
+if (!getApps().length) {
+  initializeApp();
 }
 
-const db = admin.firestore();
+const db = getFirestore();
 const DEMO_SCHOOLS = ['tw-nchu', 'tw-demo-uni'];
 const DEFAULT_USER_ID = 'demo-user-1';
 const BATCH_SIZE = 500; // Firestore batch limit
