@@ -121,6 +121,15 @@ const ITEMS: LifeService[] = [
     keywords: '同學 好友 朋友 代號 friends people',
   },
   {
+    href: '/dormitory',
+    title: '宿舍',
+    text: '管理個人住宿備忘、設備問題與入住退宿清單；正式申請請至校方辦理。',
+    action: '管理住宿',
+    icon: 'repair',
+    group: 'personal',
+    keywords: '宿舍 住宿 寢室 房間 報修 維修 洗衣 入住 退宿 床位 dorm housing laundry repair',
+  },
+  {
     href: '/timetable',
     title: '共同空堂',
     text: '好友開放課表分享後，找兩個人都有空的時段。需要學校帳號。',
@@ -142,20 +151,6 @@ type ServiceCategory = (typeof CATEGORIES)[number]['value'];
 
 function normalizeSearch(value: string) {
   return value.normalize('NFKC').toLowerCase().trim();
-}
-
-function RepairNotice() {
-  return (
-    <aside className={styles.repair} aria-labelledby="repair-title">
-      <CampusIcon name="repair" size={22} />
-      <div>
-        <h3 id="repair-title">
-          報修 <span>尚未開放</span>
-        </h3>
-        <p>報修還沒開，有問題先找系辦或總務處。</p>
-      </div>
-    </aside>
-  );
 }
 
 function ServiceLink({ item, href }: { item: LifeService; href: string }) {
@@ -197,9 +192,6 @@ function LifeDirectory() {
     );
     return terms.every((term) => content.includes(term));
   });
-  const showRepair =
-    (category === 'all' || category === 'personal') &&
-    terms.every((term) => normalizeSearch('報修 維修 設備 壞了 系辦 總務處 repair').includes(term));
   const resetFilters = () => {
     setQuery('');
     setCategory('all');
@@ -268,7 +260,6 @@ function LifeDirectory() {
           </div>
           <p className={styles.resultCount} role="status" aria-live="polite" aria-atomic="true">
             {filtered ? '找到' : '共'} {matches.length} 項服務
-            {filtered && showRepair ? '，報修尚未開放' : ''}
           </p>
         </div>
       </div>
@@ -293,14 +284,13 @@ function LifeDirectory() {
                   </li>
                 ))}
               </ul>
-            ) : !showRepair ? (
+            ) : (
               <div className={styles.emptyResults}>
                 <CampusIcon name="search" size={26} />
                 <h3>沒有找到符合的服務</h3>
                 <p>試試「借書」「搭車」，或切換上方分類。</p>
               </div>
-            ) : null}
-            {showRepair && <RepairNotice />}
+            )}
           </section>
         ) : (
           <div className={styles.directory}>
@@ -350,7 +340,6 @@ function LifeDirectory() {
                       </li>
                     ))}
                 </ul>
-                <RepairNotice />
               </section>
             </div>
           </div>
