@@ -25,6 +25,7 @@ import { safeNavigate } from '../utils/safeNavigate';
 import { navigateFromInboxTask } from '../services/inboxActions';
 import { isTeachingRole } from '../utils/campusOs';
 import { getDb } from '../firebase';
+import { getMobileQuickActions } from '../services/quickCampusActions';
 import type { InboxTask } from '../data/types';
 
 type Category =
@@ -554,6 +555,9 @@ function SearchWorkspace({
     privateReady && groups.limited && (category === 'all' || category === 'groups');
   const groupLoginNeeded = category === 'groups' && !privateReady;
   const recent = history.recentSearches('all', 8);
+  const quickActions = searching && category === 'all'
+    ? getMobileQuickActions(text)
+    : [];
 
   const changeText = (value: string) => {
     setText(value);
@@ -703,7 +707,7 @@ function SearchWorkspace({
             accessibilityLabel="搜尋校園內容"
             value={text}
             onChangeText={changeText}
-            placeholder="課表、公告、活動或餐廳"
+            placeholder="例如：我想交作業，或搜尋課號"
             placeholderTextColor={theme.colors.muted}
             onFocus={() => setFocused(true)}
             onBlur={() => setFocused(false)}
@@ -815,6 +819,57 @@ function SearchWorkspace({
                       : `已載入內容中找到 ${results.length} 筆`}
                   </Text>
                 </View>
+                {quickActions.length > 0 ? (
+                  <View
+                    style={{
+                      gap: 9,
+                      padding: 14,
+                      backgroundColor: theme.colors.surface,
+                      borderRadius: 12,
+                      borderWidth: 1,
+                      borderColor: theme.colors.border,
+                    }}
+                  >
+                    <Text style={{ ...theme.typography.h3, color: theme.colors.text }}>
+                      直接開啟
+                    </Text>
+                    {quickActions.map((action) => (
+                      <Pressable
+                        key={action.destination}
+                        accessibilityRole="button"
+                        accessibilityLabel={'前往' + action.label}
+                        onPress={() => {
+                          if (activeScope.current !== scopeKey) return;
+                          remember();
+                          Keyboard.dismiss();
+                          safeNavigate(navigation, action.route);
+                        }}
+                        style={({ pressed }) => ({
+                          minHeight: 52,
+                          flexDirection: 'row',
+                          alignItems: 'center',
+                          paddingHorizontal: 12,
+                          gap: 10,
+                          borderRadius: 10,
+                          backgroundColor: pressed ? theme.colors.surface3 : theme.colors.surface2,
+                        })}
+                      >
+                        <View style={{ flex: 1, gap: 2 }}>
+                          <Text style={{ ...theme.typography.body, fontWeight: '600', color: theme.colors.text }}>
+                            {action.label}
+                          </Text>
+                          <Text style={{ ...theme.typography.caption, color: theme.colors.muted }}>
+                            {action.description}
+                          </Text>
+                        </View>
+                        <Ionicons name="arrow-forward" size={18} color={theme.colors.accent} />
+                      </Pressable>
+                    ))}
+                    <Text style={{ ...theme.typography.caption, color: theme.colors.muted }}>
+                      只會開啟服務，正式操作仍需自行確認。
+                    </Text>
+                  </View>
+                ) : null}
                 {failed.length ? (
                   <View
                     accessibilityRole="alert"
@@ -878,7 +933,9 @@ function SearchWorkspace({
                       ? '正在尋找符合的內容'
                       : failed.length
                         ? '部分內容尚未載入'
-                        : '沒有符合的結果'}
+                        : quickActions.length
+                          ? '可使用上方推薦的服務'
+                          : '沒有符合的結果'}
                 </Text>
                 <Text style={{ ...theme.typography.bodySmall, color: theme.colors.muted }}>
                   {groupLoginNeeded
@@ -887,13 +944,21 @@ function SearchWorkspace({
                       ? '讀取完成後，結果會直接顯示在這裡。'
                       : failed.length
                         ? '保留這次搜尋，稍後可重試讀取。'
-                        : `試試較短的關鍵字${category === 'all' ? '，或改用課號、教師姓名。' : '，或查看全部分類。'}`}
+                        : quickActions.length
+                          ? '依需求選擇上方入口，或改用較短的關鍵字搜尋校園內容。'
+                          : `試試較短的關鍵字${category === 'all' ? '，或改用課號、教師姓名。' : '，或查看全部分類。'}`}
                 </Text>
                 {groupLoginNeeded
                   ? pill('前往登入', () => safeNavigate(navigation, 'SSOLogin'))
                   : null}
                 {!pending && category !== 'all'
                   ? pill('查看全部分類', () => chooseCategory('all'))
+                  : null}
+                {privateReady && category === 'all' && !pending
+                  ? pill('改問校園助理', () => {
+                      Keyboard.dismiss();
+                      safeNavigate(navigation, 'AIChat', { prompt: text.trim() });
+                    })
                   : null}
               </View>
             }
