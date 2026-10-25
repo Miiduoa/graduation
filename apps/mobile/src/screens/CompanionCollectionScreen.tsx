@@ -116,7 +116,7 @@ export default function CompanionCollectionScreen() {
     .slice(0, 3);
 
   return (
-    <View style={{ flex: 1, backgroundColor: theme.colors.bg }}>
+    <View testID="companion-collection-screen" style={{ flex: 1, backgroundColor: theme.colors.bg }}>
       <View style={{ paddingHorizontal: theme.layout.screenPadding, paddingVertical: 20, gap: 5 }}>
         <Text accessibilityRole="header" style={{ fontSize: 24, fontWeight: '700', color: theme.colors.text }}>
           我的收藏
