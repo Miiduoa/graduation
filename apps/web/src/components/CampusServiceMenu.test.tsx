@@ -144,6 +144,23 @@ it('marks classroom children as part of the added service without selecting exis
   expect(screen.getByRole('link', { name: '課程與群組' }).getAttribute('aria-current')).toBeNull();
 });
 
+it('marks the feedback tab instead of the general grade service and keeps campus context', () => {
+  navigation.pathname = '/grades';
+  navigation.search = 'tab=feedback&campus=nthu';
+  const view = render(<CampusServiceMenu />);
+  screen.getByText('所有服務').closest('details')!.open = true;
+  const feedback = screen.getByRole('link', { name: '課業成績與回饋' });
+  expect(feedback.getAttribute('aria-current')).toBe('page');
+  expect(screen.getByRole('link', { name: /^成績$/ }).getAttribute('aria-current')).toBeNull();
+  const destination = new URL(feedback.getAttribute('href')!, 'https://campus.example');
+  expect(destination.searchParams.get('tab')).toBe('feedback');
+  expect(destination.searchParams.get('campus')).toBe('nthu');
+  navigation.search = 'campus=nthu';
+  view.rerender(<CampusServiceMenu />);
+  expect(screen.getByRole('link', { name: /^成績$/ }).getAttribute('aria-current')).toBe('page');
+  expect(feedback.getAttribute('aria-current')).toBeNull();
+});
+
 it('keeps the Campus One header and original school login around the complete shared menu', () => {
   navigation.search = 'schoolId=tw-pu';
   render(<AppHeader />);
@@ -351,6 +368,8 @@ it.each([
   ['/classroom/grades', '課務'],
   ['/settings', '我'],
   ['/classroom/account', '我'],
+  ['/orders/order-1', '生活'],
+  ['/school-info', '生活'],
 ])('shows the parent section for %s', (pathname, label) => {
   navigation.pathname = pathname;
   render(<AppHeader />);

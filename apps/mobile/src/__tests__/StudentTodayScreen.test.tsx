@@ -4,10 +4,15 @@ import { RefreshControl } from 'react-native';
 import StudentTodayScreen from '../screens/StudentTodayScreen';
 import { loadStudentHome } from '../data/studentHome';
 import type { CourseSpace, InboxTask } from '../data/types';
-import { formatUpcomingDueLine, TODAY_COPY, type TodayClass } from '@campus/shared/src/pickNextAction';
+import {
+  formatUpcomingDueLine,
+  TODAY_COPY,
+  type TodayClass,
+} from '@campus/shared/src/pickNextAction';
 import { rootNavigateNested } from '../app/rootNavigation';
 import { hasTCSession } from '../services/tronClassClient';
 import { SENSE_EMPTY_TEXT, SENSE_SECTION_TITLE } from '@campus/shared/src/todaySense';
+import { applyTheme, clearSchoolTheme, createDarkTheme } from '../ui/theme';
 
 let mockAuth = {
   user: { uid: 'student-a' } as { uid: string } | null,
@@ -78,8 +83,15 @@ beforeEach(() => {
   mockTimetable.status = 'ready';
   mockTimetable.classes = [];
   mockTimetable.termKey = '115-1';
+  mockTimetable.retry.mockReset().mockResolvedValue(undefined);
+  clearSchoolTheme();
+  applyTheme('light');
   jest.mocked(loadStudentHome).mockResolvedValue(result());
   jest.mocked(hasTCSession).mockResolvedValue(true);
+});
+
+afterEach(() => {
+  act(() => applyTheme('light'));
 });
 
 test('opens timetable import from the empty timetable state', async () => {
@@ -135,6 +147,7 @@ test.each(['account', 'school'])(
         : { ...mockAuth, profile: { ...mockAuth.profile!, schoolId: 'school-b' } };
     view.rerender(<StudentTodayScreen />);
     expect(view.queryByText('繳交期末報告')).toBeNull();
+    expect(view.getByTestId('today-skeleton')).toBeTruthy();
     await act(async () => old.resolve(result('過期課程')));
     expect(view.queryByText('過期課程')).toBeNull();
     await act(async () => next.resolve({ ...result('新課程'), tasks: [] }));
@@ -181,7 +194,14 @@ test('shows upcoming work due after 24 hours as the next assignment, not due tod
   const view = render(<StudentTodayScreen />);
   expect(await view.findByText(TODAY_COPY.nextAssignment)).toBeTruthy();
   expect(
-    view.getByText(formatUpcomingDueLine({ id: data.tasks[0].id, title: data.tasks[0].title, courseName: data.tasks[0].groupName, dueAt: dueAt.getTime() })),
+    view.getByText(
+      formatUpcomingDueLine({
+        id: data.tasks[0].id,
+        title: data.tasks[0].title,
+        courseName: data.tasks[0].groupName,
+        dueAt: dueAt.getTime(),
+      }),
+    ),
   ).toBeTruthy();
   expect(view.queryByText(TODAY_COPY.dueToday)).toBeNull();
   expect(view.getByText(TODAY_COPY.goSubmit)).toBeTruthy();
@@ -220,4 +240,63 @@ test('keeps an assignment without a deadline visible and actionable', async () =
   expect((await view.findAllByText('繳交期末報告')).length).toBeGreaterThan(0);
   expect(view.getAllByText(/未設截止時間/).length).toBeGreaterThan(0);
   expect(view.queryByText(TODAY_COPY.emptyDay)).toBeNull();
+});
+
+test('pull-to-refresh keeps current records visible and stays active until both sources finish', async () => {
+  const view = render(<StudentTodayScreen />);
+  await view.findAllByText('繳交期末報告');
+  const home = deferred<ReturnType<typeof result>>();
+  const timetable = deferred<void>();
+  jest.mocked(loadStudentHome).mockReturnValueOnce(home.promise);
+  mockTimetable.retry.mockReturnValueOnce(timetable.promise);
+
+  fireEvent(view.UNSAFE_getByType(RefreshControl), 'refresh');
+  expect(view.UNSAFE_getByType(RefreshControl).props.refreshing).toBe(true);
+  expect(view.getAllByText('繳交期末報告').length).toBeGreaterThan(0);
+  await act(async () => home.resolve(result()));
+  expect(view.UNSAFE_getByType(RefreshControl).props.refreshing).toBe(true);
+  await act(async () => timetable.resolve());
+  expect(view.UNSAFE_getByType(RefreshControl).props.refreshing).toBe(false);
+});
+
+test('the entire next-assignment card opens that assignment directly', async () => {
+  const data = result();
+  jest.mocked(loadStudentHome).mockResolvedValue(data);
+  const view = render(<StudentTodayScreen />);
+  await view.findByText(TODAY_COPY.nextAssignment);
+  fireEvent.press(view.getByTestId('next-action'));
+  expect(mockNavigate).toHaveBeenCalledWith('學習', {
+    screen: 'HomeworkSubmit',
+    params: {
+      courseId: 'course-a',
+      hwId: 'homework-a',
+      hwTitle: '繳交期末報告',
+      dueAt: data.tasks[0].dueAt?.toISOString(),
+      scrollToSubmit: true,
+    },
+  });
+});
+
+test.each(['error', 'empty'] as const)(
+  'an %s timetable never tells the student the day is free',
+  async (status) => {
+    mockTimetable.status = status;
+    jest.mocked(loadStudentHome).mockResolvedValue({ courses: [], tasks: [] });
+    const view = render(<StudentTodayScreen />);
+    await view.findByText(
+      status === 'error' ? TODAY_COPY.timetableUnavailable : TODAY_COPY.noTimetable,
+    );
+    expect(view.queryByText(TODAY_COPY.emptyDay)).toBeNull();
+  },
+);
+
+test('the empty-day card follows OLED mode without leaving light text on a cream surface', async () => {
+  jest.mocked(loadStudentHome).mockResolvedValue({ courses: [], tasks: [] });
+  const view = render(<StudentTodayScreen />);
+  await view.findByText(TODAY_COPY.emptyDay);
+  act(() => applyTheme('dark'));
+  expect(view.getByTestId('next-action')).toHaveStyle({
+    backgroundColor: createDarkTheme().colors.surface2,
+  });
+  expect(view.getByText(TODAY_COPY.emptyDay)).toHaveStyle({ color: createDarkTheme().colors.text });
 });

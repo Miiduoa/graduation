@@ -29,21 +29,35 @@ export function buildCampusNavigationSearch(
 
 export function useCampusNavigationSearch(params: SearchLike): string {
   const selection = useOptionalSelectedSchool();
-  const ready =
-    selection !== null &&
-    !selection.loading &&
-    selection.catalogStatus === 'ready';
+  const ready = selection !== null && !selection.loading && selection.catalogStatus === 'ready';
 
   return buildCampusNavigationSearch(params, selection?.selectedSchool, ready);
 }
 
 export function campusServiceHref(path: string, search: string): string {
   if (!search) return path;
-  const [pathname, existing = ''] = path.split('?');
+  const hashIndex = path.indexOf('#');
+  const fragment = hashIndex < 0 ? '' : path.slice(hashIndex);
+  const destination = hashIndex < 0 ? path : path.slice(0, hashIndex);
+  const queryIndex = destination.indexOf('?');
+  const pathname = queryIndex < 0 ? destination : destination.slice(0, queryIndex);
+  const existing = queryIndex < 0 ? '' : destination.slice(queryIndex + 1);
   const merged = new URLSearchParams(existing);
   new URLSearchParams(search).forEach((value, key) => {
     if (!merged.has(key)) merged.set(key, value);
   });
   const query = merged.toString();
-  return query ? `${pathname}?${query}` : pathname;
+  return `${pathname}${query ? `?${query}` : ''}${fragment}`;
+}
+
+export function campusServiceMatches(
+  href: string,
+  pathname: string | null | undefined,
+  params: SearchLike,
+): boolean {
+  if (!pathname) return false;
+  const destination = new URL(href, 'https://campus.local');
+  if (pathname !== destination.pathname && !pathname.startsWith(`${destination.pathname}/`))
+    return false;
+  return [...destination.searchParams].every(([key, value]) => params?.get(key) === value);
 }

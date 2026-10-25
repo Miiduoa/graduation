@@ -7,7 +7,7 @@ import { NuniError } from '@campus/shared/src/nuni';
 import { GradesTabs } from '@/components/academic/GradesTabs';
 import { SiteShell } from '@/components/SiteShell';
 import { NuniSignIn } from '@/components/NuniSignIn';
-import { LoginLink } from '@/components/LoginLink';
+import { schoolLoginHref } from '@/lib/navigation';
 import { useAuth } from '@/components/AuthGuard';
 import { useClientHydrated } from '@/lib/useClientHydrated';
 import { browserRequest, useNuniSession } from './Session';
@@ -443,9 +443,9 @@ export function StudentGradesPage() {
             <p className={styles.muted}>{GRADE_COPY.unsigned}</p>
             <NuniSignIn returnUrl={LMS_GRADES_HREF} />
             <p className={styles.muted}>若這門課走學校帳號，請改用學校登入。</p>
-            <LoginLink className={styles.button} returnPath={LMS_GRADES_HREF}>
+            <Link className={styles.button} href={schoolLoginHref(LMS_GRADES_HREF)}>
               學校帳號登入
-            </LoginLink>
+            </Link>
           </section>
         ) : busy && !nuniBook && !schoolBook ? (
           <div aria-busy="true">

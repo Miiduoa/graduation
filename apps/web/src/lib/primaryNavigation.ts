@@ -13,14 +13,15 @@ export function primaryNavigationSection(
 ): PrimaryNavigationSection | null {
   if (!pathname) return null;
   if (pathname === '/' || pathname === '/today') return 'today';
-  if (pathname === '/life' || pathname === '/hub') return 'life';
+  if (pathname === '/life' || pathname === '/hub' || includesRoute(pathname, '/orders'))
+    return 'life';
   if (pathname === '/me') return 'me';
   if (pathname === '/search') return 'more';
   if (includesRoute(pathname, '/course')) return 'study';
 
-  const service = CAMPUS_SERVICES.filter((item) => includesRoute(pathname, item.href)).sort(
-    (first, second) => second.href.length - first.href.length,
-  )[0];
+  const service = CAMPUS_SERVICES.filter((item) =>
+    includesRoute(pathname, item.href.split(/[?#]/, 1)[0]),
+  ).sort((first, second) => second.href.length - first.href.length)[0];
   if (!service) return null;
   if (standaloneServices.has(service.href)) return 'more';
   if (service.category === 'study') return 'study';

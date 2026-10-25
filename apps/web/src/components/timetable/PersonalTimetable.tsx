@@ -16,6 +16,7 @@ import {
   analyzeImportDrafts,
   applyImport,
   cleanCourse,
+  cleanMeta,
   meetupLabel,
   meetupStartOptions,
   meetupWindowLabel,
@@ -171,10 +172,16 @@ function actualClockLabel(
 
 export function PersonalTimetable() {
   const context = usePersonalImportScope();
+  const { user } = useAuth();
   if (context.loading) return <p role="status">正在確認課表…</p>;
   if (context.scope.schoolId === 'personal')
     return <p role="status">請先選擇一所學校，再查看或編輯這所學校的課表。</p>;
-  return <TimetableWorkspace key={context.scopeKey} schoolId={context.scope.schoolId} />;
+  return (
+    <TimetableWorkspace
+      key={JSON.stringify([context.scopeKey, user?.uid ?? null])}
+      schoolId={context.scope.schoolId}
+    />
+  );
 }
 
 function TimetableWorkspace({ schoolId }: { schoolId: string }) {
@@ -214,7 +221,7 @@ function TimetableWorkspace({ schoolId }: { schoolId: string }) {
   const [friends, setFriends] = useState<Array<PlannerFriend & { username?: string }>>([]);
   const [selectedFriend, setSelectedFriend] = useState<string | null>(null);
   const [meetupBusy, setMeetupBusy] = useState(false);
-  const [shareUrl, setShareUrl] = useState('');
+  const [shareResult, setShareResult] = useState<{ key: string; url: string } | null>(null);
   const schoolRecords = useAcademicRecords('courses', schoolId === 'pu');
 
   const uid = user?.uid || null;
@@ -276,6 +283,35 @@ function TimetableWorkspace({ schoolId }: { schoolId: string }) {
       `${row.academicYear}|${row.semester}` === activeTerm &&
       !importedCourses.some((course) => course.id === `import:${row.id}`),
   );
+  const selectedTerm = terms.find((term) => term.key === activeTerm);
+  const shareMeta = selectedTerm
+    ? cleanMeta({
+        ...(legacyTerm === activeTerm ? timetable?.meta : {}),
+        school: importScope.schoolName,
+        year: selectedTerm.academicYear,
+        semester: selectedTerm.semester,
+        title: `${selectedTerm.academicYear} 學年度第 ${selectedTerm.semester} 學期課表`,
+      })
+    : (timetable?.meta ?? cleanMeta());
+  const shareCourses = [
+    ...visibleCourses,
+    ...missingImportTimes.map((row) =>
+      cleanCourse({
+        id: `import:${row.id}`,
+        name: row.title,
+        day: 0,
+        teacher: row.teacher,
+        room: row.location,
+      }),
+    ),
+  ];
+  const shareViewKey = JSON.stringify([activeTerm, shareCourses, shareMeta]);
+  const shareViewRef = useRef(shareViewKey);
+  useEffect(() => {
+    shareViewRef.current = shareViewKey;
+  }, [shareViewKey]);
+  const shareUrl = shareResult?.key === shareViewKey ? shareResult.url : '';
+  const savesToManual = terms.length > 0 && activeTerm !== 'manual' && legacyTerm !== activeTerm;
   // Unscheduled imported rows cannot be treated as free time.
   const planningCourses = [
     ...visibleCourses,
@@ -394,7 +430,7 @@ function TimetableWorkspace({ schoolId }: { schoolId: string }) {
       if (!activeRef.current) return false;
       setTimetable({ ...next, schoolId });
       setPlanResult(null);
-      setShareUrl('');
+      setShareResult(null);
       setNotice(
         options?.deviceOnly
           ? TIMETABLE_DEVICE_ONLY_STORED_COPY
@@ -409,7 +445,7 @@ function TimetableWorkspace({ schoolId }: { schoolId: string }) {
       if (activeRef.current && error instanceof TimetableCloudSaveError) {
         setTimetable({ ...next, schoolId });
         setPlanResult(null);
-        setShareUrl('');
+        setShareResult(null);
         setNotice('已儲存於這台裝置，但雲端同步沒有成功；好友目前看到的仍是原先版本。');
         return true;
       }
@@ -581,7 +617,13 @@ function TimetableWorkspace({ schoolId }: { schoolId: string }) {
     const next = timetable.courses.some((item) => item.id === cleaned.id)
       ? timetable.courses.map((item) => (item.id === cleaned.id ? cleaned : item))
       : [...timetable.courses, cleaned];
-    if (await persist({ ...timetable, courses: next }, '課程已更新。')) setEditing(null);
+    if (await persist({ ...timetable, courses: next }, '課程已更新。')) {
+      setEditing(null);
+      if (savesToManual) {
+        setImportTerm('manual');
+        setNotice((message) => `${message} 已切換至手動課表。`);
+      }
+    }
   };
 
   const removeCourse = async (id: string) => {
@@ -602,21 +644,37 @@ function TimetableWorkspace({ schoolId }: { schoolId: string }) {
       await persist({ ...timetable, courses: next }, TIMETABLE_DEVICE_ONLY_STORED_COPY, {
         deviceOnly: true,
       })
-    )
+    ) {
       setDrafts([]);
+      if (savesToManual) {
+        setImportTerm('manual');
+        setNotice((message) => `${message} 已切換至手動課表。`);
+      }
+    }
   };
 
   const copyShare = async () => {
-    if (!uid || busy || sharingRef.current || !activeRef.current) return;
+    if (
+      !uid ||
+      busy ||
+      sharingRef.current ||
+      !activeRef.current ||
+      imported.loading ||
+      imported.error ||
+      !shareCourses.length
+    )
+      return;
+    const requestedView = shareViewKey;
+    const isCurrentShare = () => activeRef.current && shareViewRef.current === requestedView;
     sharingRef.current = true;
     setShareBusy(true);
-    setShareUrl('');
+    setShareResult(null);
     try {
-      const server = await createServerShare(schoolId, timetable.meta.title || '我的課表', {
-        courses: timetable.courses,
-        meta: timetable.meta,
+      const server = await createServerShare(schoolId, shareMeta.title || '我的課表', {
+        courses: shareCourses,
+        meta: shareMeta,
       });
-      if (!activeRef.current) return;
+      if (!isCurrentShare()) return;
       const parsed = new URL(server.path, window.location.origin);
       if (
         parsed.origin !== window.location.origin ||
@@ -625,20 +683,20 @@ function TimetableWorkspace({ schoolId }: { schoolId: string }) {
         throw new Error('invalid-timetable-share-path');
       }
       const url = parsed.toString();
-      setShareUrl(url);
+      setShareResult({ key: requestedView, url });
       if (!navigator.clipboard?.writeText) {
         setNotice('瀏覽器無法自動複製。請手動複製下方連結。');
         return;
       }
       try {
         await navigator.clipboard.writeText(url);
-        if (activeRef.current) setNotice(shareCopiedCopy(server.expiresAt));
+        if (isCurrentShare()) setNotice(shareCopiedCopy(server.expiresAt));
       } catch {
-        if (activeRef.current) setNotice('瀏覽器未完成複製，請手動複製下方連結。');
+        if (isCurrentShare()) setNotice('瀏覽器未完成複製，請手動複製下方連結。');
       }
     } catch (error) {
-      if (activeRef.current) {
-        setShareUrl('');
+      if (isCurrentShare()) {
+        setShareResult(null);
         setNotice(shareFailureCopy(error));
       }
     } finally {
@@ -783,7 +841,9 @@ function TimetableWorkspace({ schoolId }: { schoolId: string }) {
             type="button"
             className="btn"
             onClick={() => void copyShare()}
-            disabled={busy || shareBusy || !timetable.courses.length}
+            disabled={
+              busy || shareBusy || imported.loading || !!imported.error || !shareCourses.length
+            }
             aria-busy={shareBusy}
           >
             {shareBusy ? '正在產生連結…' : '複製分享連結'}
@@ -826,6 +886,7 @@ function TimetableWorkspace({ schoolId }: { schoolId: string }) {
             自行匯入 {importedCourses.length}{' '}
             筆。原有手動課表只有在學期相符時一起顯示，也可切換查看。點選可回到匯入頁修改；其他學校與週末課程請查看
             <Link href="/import?kind=timetable">個人紀錄</Link>。
+            {savesToManual ? ' 新增課程會儲存至手動課表，儲存後會自動切換。' : ''}
           </p>
         </div>
       )}

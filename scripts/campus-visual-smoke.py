@@ -74,7 +74,18 @@ async def check_unsigned_today(page):
     await expect(today.get_by_test_id('today-skeleton')).to_have_count(0)
     await expect(today.get_by_role('heading', name='今天', exact=True)).to_be_visible()
     await expect(today.locator('header p').first).to_have_text(TODAY_DATE)
-    await expect(page.get_by_text(UNSIGNED_TODAY, exact=True)).to_have_count(2)
+    await expect(page.get_by_text(UNSIGNED_TODAY, exact=True)).to_have_count(1)
+    await expect(today.get_by_role('heading', name='先把課表放進來。', exact=True)).to_be_visible()
+    await expect(today.get_by_role('link', name='匯入我的課表', exact=True)).to_have_attribute(
+        'href', '/import?kind=timetable&campus=pu'
+    )
+    await expect(today.get_by_role('link', name='手動建立課表')).to_have_attribute(
+        'href', '/timetable?campus=pu'
+    )
+    quick_services = today.get_by_role('navigation', name='常用校園服務')
+    await expect(quick_services.get_by_role('link')).to_have_count(4)
+    for link in await quick_services.get_by_role('link').all():
+        assert parse_qs(urlparse(await link.get_attribute('href')).query).get('campus') == ['pu']
     await expect(page.get_by_role('link', name='登入', exact=True)).to_be_visible()
     await expect(today.get_by_role('heading', name='今天課表', exact=True)).to_be_visible()
     await expect(today.get_by_text('還沒有課表。', exact=True)).to_be_visible()
