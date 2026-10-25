@@ -1,0 +1,48 @@
+name: Functions Jest 30 Compatibility
+
+on:
+  pull_request:
+    paths:
+      - 'backend/functions/**'
+      - 'pnpm-lock.yaml'
+      - '.github/workflows/jest30-functions-compat.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'backend/functions/**'
+      - 'pnpm-lock.yaml'
+      - '.github/workflows/jest30-functions-compat.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  isolated-jest30:
+    name: Functions Jest 30 with npm production graph
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+      - name: Reconcile workspace lock only in this runner
+        run: |
+          pnpm install --lockfile-only --ignore-scripts
+          pnpm install --frozen-lockfile
+          pnpm --filter functions run build:shared
+      - name: Install Functions own Jest 30 lock
+        run: |
+          npm ci --prefix backend/functions --ignore-scripts
+          npm ls --prefix backend/functions jest --depth=0
+      - name: Execute full Functions tests with Jest 30
+        working-directory: backend/functions
+        env:
+          ONLINE_ORDERING_ENABLED: 'true'
+        run: node ./node_modules/jest/bin/jest.js --runInBand
+      - name: Verify lockfile and package manifests match
+        working-directory: backend/functions
+        run: |
+          npm ci --ignore-scripts
+          npm ls jest --depth=0
