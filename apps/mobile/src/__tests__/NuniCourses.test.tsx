@@ -1660,3 +1660,284 @@ it('drops a pending receipt reveal when the course session context changes', asy
   expect(view.queryByText(/已移到 陳同學/)).toBeNull();
   expect(mockScrollAssignment.reveal).not.toHaveBeenCalled();
 });
+
+function materialPageFixture(total = 220, pageSize = 50) {
+  const all = Array.from({ length: total }, (_, index) =>
+    material(index + 1, index === 179 ? '遠端目標教材 180' : index === 219 ? '頁尾目標 220' : undefined),
+  );
+  const pages: { materials: NuniMaterial[]; nextCursor: string | null }[] = [];
+  for (let start = 0; start < total; start += pageSize) {
+    const slice = all.slice(start, start + pageSize);
+    const pageIndex = start / pageSize;
+    pages.push({
+      materials: slice,
+      nextCursor: start + pageSize < total ? `page_${pageIndex + 1}` : null,
+    });
+  }
+  return { all, pages };
+}
+
+it('searches only loaded material pages and keeps honest older-content empty copy', async () => {
+  const { pages } = materialPageFixture(220, 50);
+  mockRequest.mockImplementation((path, context, input, _method, query) => {
+    if (!path.endsWith('/materials/page')) return response(path, context, input);
+    if (!query) return Promise.resolve(pages[0]);
+    if (query.cursor === 'page_1') return Promise.resolve(pages[1]);
+    throw new Error(`unexpected cursor ${JSON.stringify(query)}`);
+  });
+  const view = await openCourse();
+  fireEvent.press(view.getByRole('button', { name: '教材 50+' }));
+  expect(view.getByText('已載入 50 筆教材，還有較早內容。')).toBeTruthy();
+  fireEvent.changeText(view.getByLabelText('在這門課找已載入教材'), '遠端目標教材');
+  expect(view.getByText('已載入教材中沒有相符結果，還有較早內容')).toBeTruthy();
+  expect(view.queryByText('遠端目標教材 180')).toBeNull();
+  expect(view.getByRole('button', { name: '載入較早教材' })).toBeTruthy();
+  fireEvent.press(view.getByRole('button', { name: '載入較早教材' }));
+  await view.findByText('已載入教材中沒有相符結果，還有較早內容');
+  expect(view.getByRole('button', { name: '教材 100+' })).toBeTruthy();
+  fireEvent.changeText(view.getByLabelText('在這門課找已載入教材'), '第 2 份');
+  expect(view.getByText('已載入 100 筆，符合 1 筆，還有較早內容。')).toBeTruthy();
+  expect(view.getByText('第 2 份教材')).toBeTruthy();
+  expect(
+    mockRequest.mock.calls.filter(([path]) => path.endsWith('/materials')).length,
+  ).toBe(0);
+});
+
+it('finds materialId targets beyond page 100 through legal materialsPage cursors', async () => {
+  const { pages, all } = materialPageFixture(220, 50);
+  const target = all[179]!;
+  mockRequest.mockImplementation((path, context, input, _method, query) => {
+    if (!path.endsWith('/materials/page')) return response(path, context, input);
+    if (!query) return Promise.resolve(pages[0]);
+    const index = Number(String(query.cursor).replace('page_', ''));
+    return Promise.resolve(pages[index]!);
+  });
+  const view = render(
+    <NuniCourses initialWorkspaceId={courseId} initialMaterialId={target.id} />,
+  );
+  await view.findByText('目標教材', {}, { timeout: 5000 });
+  expect(view.getByText('遠端目標教材 180')).toBeTruthy();
+  expect(view.getByLabelText('目標教材：遠端目標教材 180')).toBeTruthy();
+  expect(view.getByTestId(`material-${target.id}`)).toBeTruthy();
+  const pageCalls = mockRequest.mock.calls.filter(([path]) => path.endsWith('/materials/page'));
+  expect(pageCalls.map((call) => call[4]?.cursor ?? null)).toEqual([
+    null,
+    'page_1',
+    'page_2',
+    'page_3',
+  ]);
+  fireEvent(view.getByTestId(`material-${target.id}`), 'layout');
+  expect(mockScrollAssignment.reveal).toHaveBeenCalled();
+});
+
+it('clears a hiding search when opening a material target and keeps the target visible', async () => {
+  mockRequest.mockImplementation((path, context, input) => {
+    if (!path.endsWith('/materials/page')) return response(path, context, input);
+    return Promise.resolve({
+      materials: [material(1, '服務設計導讀'), material(2, '關聯與主鍵')],
+      nextCursor: null,
+    });
+  });
+  const cache = new Map<string, unknown>([[`course:${courseId}:tab`, 'assignments']]);
+  const view = render(
+    <NuniDraftProvider cache={cache}>
+      <NuniCourses
+        initialWorkspaceId={courseId}
+        initialMaterialId={material(2, '關聯與主鍵').id}
+      />
+    </NuniDraftProvider>,
+  );
+  await view.findByText('目標教材');
+  expect(view.getByText('關聯與主鍵')).toBeTruthy();
+  fireEvent.changeText(view.getByLabelText('在這門課找已載入教材'), '服務設計');
+  expect(view.getByText('服務設計導讀')).toBeTruthy();
+  expect(view.getByText('關聯與主鍵')).toBeTruthy();
+  expect(view.getByLabelText('目標教材：關聯與主鍵')).toBeTruthy();
+});
+
+it('pauses target seeking at the auto page budget without claiming the material is missing', async () => {
+  const cursors = ['c1', 'c2', 'c3', 'c4', 'c5', 'c6'];
+  mockRequest.mockImplementation((path, context, input, _method, query) => {
+    if (!path.endsWith('/materials/page')) return response(path, context, input);
+    if (!query) return Promise.resolve({ materials: [material(1)], nextCursor: cursors[0] });
+    const at = cursors.indexOf(String(query.cursor));
+    return Promise.resolve({
+      materials: [material(at + 2)],
+      nextCursor: cursors[at + 1] ?? null,
+    });
+  });
+  const missingId = material(99).id;
+  const view = render(
+    <NuniCourses initialWorkspaceId={courseId} initialMaterialId={missingId} />,
+  );
+  await view.findByText('尚未找到這份教材，已暫停自動載入。可繼續尋找或載入較早教材。');
+  expect(view.queryByText(/找不到這份教材/)).toBeNull();
+  expect(view.getByRole('button', { name: '繼續尋找' })).toBeTruthy();
+  expect(view.getByText('第 1 份教材')).toBeTruthy();
+  const olderCalls = mockRequest.mock.calls.filter(
+    ([path, , , , query]) => path.endsWith('/materials/page') && query,
+  );
+  expect(olderCalls).toHaveLength(4);
+});
+
+it('stops an A→B→A materials cursor cycle and keeps loaded rows', async () => {
+  mockRequest.mockImplementation((path, context, input, _method, query) => {
+    if (!path.endsWith('/materials/page')) return response(path, context, input);
+    if (!query) return Promise.resolve({ materials: [material(1)], nextCursor: 'cursor-a' });
+    if (query.cursor === 'cursor-a')
+      return Promise.resolve({ materials: [material(2)], nextCursor: 'cursor-b' });
+    if (query.cursor === 'cursor-b')
+      return Promise.resolve({ materials: [material(3)], nextCursor: 'cursor-a' });
+    throw new Error(`unexpected ${JSON.stringify(query)}`);
+  });
+  const view = await openCourse();
+  fireEvent.press(view.getByRole('button', { name: '教材 1+' }));
+  fireEvent.press(view.getByRole('button', { name: '載入較早教材' }));
+  await view.findByText('第 2 份教材');
+  fireEvent.press(view.getByRole('button', { name: '載入較早教材' }));
+  await view.findByText(/較早教材未能繼續載入/);
+  expect(view.getByText('第 3 份教材')).toBeTruthy();
+  expect(view.queryByText('共 3 筆教材。')).toBeNull();
+  expect(view.getByRole('button', { name: '更新教材' })).toBeTruthy();
+  expect(view.queryByRole('button', { name: '載入較早教材' })).toBeNull();
+  const olderCalls = mockRequest.mock.calls.filter(
+    ([path, , , , query]) => path.endsWith('/materials/page') && query,
+  );
+  expect(olderCalls).toHaveLength(2);
+});
+
+it('keeps search query and loaded materials after a mid-page 503, then retries the same cursor', async () => {
+  let olderAttempts = 0;
+  mockRequest.mockImplementation((path, context, input, _method, query) => {
+    if (!path.endsWith('/materials/page')) return response(path, context, input);
+    if (!query) return Promise.resolve({ materials: [material(1, '可搜尋教材')], nextCursor: 'next' });
+    if (++olderAttempts === 1) return Promise.reject(new NuniError(503, 'UNAVAILABLE'));
+    return Promise.resolve({ materials: [material(2, '可搜尋的較早教材')], nextCursor: null });
+  });
+  const view = await openCourse();
+  fireEvent.press(view.getByRole('button', { name: '教材 1+' }));
+  fireEvent.changeText(view.getByLabelText('在這門課找已載入教材'), '可搜尋');
+  expect(view.getByText('已載入 1 筆，符合 1 筆，還有較早內容。')).toBeTruthy();
+  fireEvent.press(view.getByRole('button', { name: '載入較早教材' }));
+  await view.findByRole('button', { name: '重試載入較早教材' });
+  expect(view.getByText('可搜尋教材')).toBeTruthy();
+  expect(view.getByLabelText('在這門課找已載入教材').props.value).toBe('可搜尋');
+  fireEvent.press(view.getByRole('button', { name: '重試載入較早教材' }));
+  await view.findByText('可搜尋的較早教材');
+  expect(view.getByText('已載入 2 筆，符合 2 筆。')).toBeTruthy();
+  expect(
+    mockRequest.mock.calls
+      .filter(([path, , , , query]) => path.endsWith('/materials/page') && query)
+      .map((call) => call[4]),
+  ).toEqual([{ cursor: 'next' }, { cursor: 'next' }]);
+});
+
+it('ignores a late material target page after session A→B→A replacement', async () => {
+  const older = deferred<unknown>();
+  mockRequest.mockImplementation((path, context, input, _method, query) => {
+    if (!path.endsWith('/materials/page')) return response(path, context, input);
+    if (!query) return Promise.resolve({ materials: [material(1)], nextCursor: 'older_page' });
+    return older.promise;
+  });
+  const targetId = material(2).id;
+  const view = render(
+    <NuniCourses initialWorkspaceId={courseId} initialMaterialId={targetId} />,
+  );
+  await view.findByRole('button', { name: '取消尋找' });
+  fireEvent.changeText(view.getByLabelText('在這門課找已載入教材'), '舊身份搜尋');
+  mockSession = {
+    ...mockSession,
+    context: 'context-second',
+    platformAccountId: 'pa_55555555-5555-4555-8555-555555555555',
+  };
+  mockRequest.mockImplementation((path, context, input) => {
+    if (path === 'class-workspaces') return { workspaces: [] };
+    return response(path, context, input);
+  });
+  view.rerender(<NuniCourses />);
+  await view.findByText('尚未加入修習課程。請向老師取得邀請碼。');
+  mockSession = { ...mockSession, context: 'context-first', platformAccountId: accountId };
+  mockRequest.mockImplementation((path, context, input) =>
+    path.endsWith('/materials/page')
+      ? { materials: [material(3, '重新登入後的教材')], nextCursor: null }
+      : response(path, context, input),
+  );
+  view.rerender(<NuniCourses initialWorkspaceId={courseId} />);
+  await view.findByText('校園訪談');
+  fireEvent.press(view.getByRole('button', { name: '教材 1' }));
+  expect(view.getByText('重新登入後的教材')).toBeTruthy();
+  expect(view.getByLabelText('在這門課找已載入教材').props.value).toBe('');
+  await act(async () => older.resolve({ materials: [material(2)], nextCursor: null }));
+  expect(view.queryByText('第 2 份教材')).toBeNull();
+  expect(view.queryByText('目標教材')).toBeNull();
+});
+
+it('explains a missing linked material only after the page chain is exhausted', async () => {
+  mockRequest.mockImplementation((path, context, input) => {
+    if (!path.endsWith('/materials/page')) return response(path, context, input);
+    return Promise.resolve({ materials: [material(1)], nextCursor: null });
+  });
+  const view = render(
+    <NuniCourses
+      initialWorkspaceId={courseId}
+      initialMaterialId="cwm_66666666-6666-4666-8666-000000009999"
+    />,
+  );
+  expect(
+    await view.findByText(
+      '找不到這份教材。可能已被老師刪除，或你沒有查看權限。請從教材列表選擇其他教材。',
+    ),
+  ).toBeTruthy();
+  expect(view.getByText('第 1 份教材')).toBeTruthy();
+});
+
+it('cancels a material lookup before its pending page can append or reveal the target', async () => {
+  const older = deferred<unknown>();
+  mockRequest.mockImplementation((path, context, input, _method, query) => {
+    if (!path.endsWith('/materials/page')) return response(path, context, input);
+    if (!query) return { materials: [material(1)], nextCursor: 'pending_target' };
+    return older.promise;
+  });
+  const view = render(
+    <NuniCourses initialWorkspaceId={courseId} initialMaterialId={material(2).id} />,
+  );
+  await waitFor(() =>
+    expect(mockRequest.mock.calls.some((call) => call[4]?.cursor === 'pending_target')).toBe(true),
+  );
+  fireEvent.press(view.getByRole('button', { name: '取消尋找' }));
+  await act(async () => older.resolve({ materials: [material(2)], nextCursor: null }));
+  expect(view.queryByText('第 2 份教材')).toBeNull();
+  expect(view.queryByText('目標教材')).toBeNull();
+  expect(view.getByText('第 1 份教材')).toBeTruthy();
+  expect(view.getByRole('button', { name: '繼續尋找' })).toBeTruthy();
+});
+
+it('keeps pager progress on the newest first-page snapshot after overlapping refreshes', async () => {
+  const olderFirstPage = deferred<unknown>();
+  let firstPageReads = 0;
+  mockRequest.mockImplementation((path, context, input, _method, query) => {
+    if (!path.endsWith('/materials/page')) return response(path, context, input);
+    if (query) return { materials: [material(4, '新快照較早教材')], nextCursor: null };
+    firstPageReads += 1;
+    if (firstPageReads === 1) return { materials: [material(1)], nextCursor: 'initial' };
+    if (firstPageReads === 2) return olderFirstPage.promise;
+    return { materials: [material(3, '最新第一頁')], nextCursor: 'latest' };
+  });
+  const view = await openCourse();
+  fireEvent.press(view.getByRole('button', { name: '教材 1+' }));
+  const refresh = view.getByRole('button', { name: '更新內容' });
+  act(() => {
+    fireEvent.press(refresh);
+    fireEvent.press(refresh);
+  });
+  await view.findByText('最新第一頁');
+  await act(async () =>
+    olderFirstPage.resolve({ materials: [material(2, '過期第一頁')], nextCursor: 'obsolete' }),
+  );
+  expect(view.queryByText('過期第一頁')).toBeNull();
+  fireEvent.press(view.getByRole('button', { name: '載入較早教材' }));
+  await view.findByText('新快照較早教材');
+  expect(view.getByText('最新第一頁')).toBeTruthy();
+  expect(view.queryByText('過期第一頁')).toBeNull();
+  expect(mockRequest.mock.calls.at(-1)?.[4]).toEqual({ cursor: 'latest' });
+});

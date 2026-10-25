@@ -267,9 +267,14 @@ it('does not read comments, likes or follows before login and shows a login prom
   expect(await screen.findByText('紙感小店')).toBeTruthy();
   expect(screen.getByRole('heading', { name: '蔬菜吐司' })).toBeTruthy();
   expect(screen.getByText(commentsPrompt)).toBeTruthy();
+  expect(screen.queryByText('查看失物招領需要學校帳號。')).toBeNull();
   expect(screen.queryByText('登入後才能看失物招領和評論')).toBeNull();
-  const login = screen.getByRole('link', { name: '登入' });
-  expect(login.getAttribute('href')).toBe('/login?returnUrl=%2Fcafeteria%2Fstall%3FschoolId%3Dpu');
+  const login = screen.getByRole('link', { name: '連線學校帳號' });
+  expect(login.getAttribute('href')).toBe(
+    '/login?reconnect=school&returnUrl=%2Fcafeteria%2Fstall%3FschoolId%3Dpu',
+  );
+  expect(login.getAttribute('href')).not.toMatch(/google/i);
+  expect(screen.queryByRole('link', { name: '登入' })).toBeNull();
   expect(loadStorefrontPosts).toHaveBeenCalledWith('pu', 'stall', undefined);
   expect(loadStorefrontComments).not.toHaveBeenCalled();
   expect(isFollowingStorefront).not.toHaveBeenCalled();

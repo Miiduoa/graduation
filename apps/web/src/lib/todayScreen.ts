@@ -39,9 +39,8 @@ export function todayClassesFromSchedule(
 
 export function todayTodosFromHomeTasks(tasks: readonly HomeTask[]): TodayTodo[] {
   return tasks.flatMap((task) => {
-    if (!task.dueAt) return [];
-    const dueAt = parseTaipeiInstant(task.dueAt);
-    if (dueAt === null) return [];
+    const dueAt = task.dueAt ? parseTaipeiInstant(task.dueAt) : null;
+    if (task.dueAt && dueAt === null) return [];
     return [
       {
         id: `${task.courseId}:${task.id}`,
@@ -76,6 +75,9 @@ export function assignmentSubmitHref(todo: TodayTodo): string {
   const href = assignmentHref(todo);
   try {
     const url = new URL(href, 'https://campus.local');
+    // Platform course cards are addressed by their original assignment/quiz ID.
+    // Only the school course view has a separate submission-form anchor.
+    if (url.pathname.startsWith('/classroom/course/')) return href;
     if (url.hash) return `${url.pathname}${url.search}${url.hash}-submit`;
     return `${href}#submit`;
   } catch {

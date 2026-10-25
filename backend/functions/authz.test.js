@@ -14,9 +14,17 @@ function createDocSnapshot(data) {
   };
 }
 
-function createFakeDb({ members = {}, serviceRoles = {}, cafeteriaOperators = {} } = {}) {
+function createFakeDb({
+  members = {},
+  serviceRoles = {},
+  cafeteriaOperators = {},
+  accounts = {},
+} = {}) {
   return {
     collection(collectionName) {
+      if (collectionName === 'users') {
+        return { doc: (uid) => ({ get: async () => createDocSnapshot(accounts[uid] ?? null) }) };
+      }
       if (collectionName !== 'schools') {
         throw new Error(`Unsupported collection: ${collectionName}`);
       }
@@ -172,6 +180,69 @@ describe('authz helpers', () => {
       code: 'permission-denied',
     });
   });
+
+  test('only a school admin can provision permissions, with account lifecycle checks', async () => {
+    const { assertSchoolAdmin } = createAuthzHelpers(
+      createFakeDb({
+        members: {
+          'school-1/admin': { role: 'admin', status: 'active' },
+          'school-1/editor': { role: 'editor', status: 'active' },
+          'school-1/legacy': { role: 'admin' },
+          'school-1/closing': { role: 'admin', status: 'active' },
+        },
+        accounts: { closing: { accountDeletionInProgress: true } },
+      }),
+    );
+    await expect(assertSchoolAdmin('school-1', 'admin')).resolves.toMatchObject({ role: 'admin' });
+    await expect(assertSchoolAdmin('school-1', 'legacy')).resolves.toMatchObject({ role: 'admin' });
+    await expect(assertSchoolAdmin('school-1', 'editor')).rejects.toMatchObject({
+      code: 'permission-denied',
+    });
+    await expect(assertSchoolAdmin('school-2', 'admin')).rejects.toMatchObject({
+      code: 'permission-denied',
+    });
+    await expect(assertSchoolAdmin('school-1', 'closing')).rejects.toMatchObject({
+      code: 'failed-precondition',
+    });
+  });
+
+  test('an editor has no operational override but can hold an explicit scoped assignment', async () => {
+    const members = { 'school-1/editor': { role: 'editor', status: 'active' } };
+    const unassigned = createAuthzHelpers(createFakeDb({ members }));
+    await expect(
+      unassigned.assertServiceRole('school-1', 'editor', 'repairs'),
+    ).rejects.toMatchObject({ code: 'permission-denied' });
+    const assigned = createAuthzHelpers(
+      createFakeDb({
+        members,
+        serviceRoles: { 'school-1/editor': { status: 'active', repairs: true } },
+      }),
+    );
+    await expect(
+      assigned.assertServiceRole('school-1', 'editor', 'repairs'),
+    ).resolves.toMatchObject({ override: false });
+    await expect(assigned.assertServiceRole('school-1', 'editor', 'health')).rejects.toMatchObject({
+      code: 'permission-denied',
+    });
+    await expect(assigned.assertServiceRole('school-2', 'editor', 'repairs')).rejects.toMatchObject(
+      { code: 'permission-denied' },
+    );
+  });
+
+  test.each(['inactive', undefined])(
+    'service assignments require explicit active status: %s',
+    async (status) => {
+      const { assertServiceRole } = createAuthzHelpers(
+        createFakeDb({
+          members: { 'school-1/staff': { role: 'member', status: 'active' } },
+          serviceRoles: { 'school-1/staff': { status, repairs: true } },
+        }),
+      );
+      await expect(assertServiceRole('school-1', 'staff', 'repairs')).rejects.toMatchObject({
+        code: 'permission-denied',
+      });
+    },
+  );
 
   test('assertCafeteriaOperator only allows active operators on the same cafeteria', async () => {
     const db = createFakeDb({

@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState, useSyncExternalStore } from 'react';
-import { Text, TextInput, View } from 'react-native';
+import { Linking, Text, TextInput, View } from 'react-native';
+import { resolveSchoolPublicServices } from '@campus/shared/src/schoolPublicServices';
 import { AIDetailScreen, AICard, AIButton, aiTokens } from '../ui/aiFirst';
 import { getThemeVersion, subscribeToTheme } from '../ui/theme';
 import { useAuth } from '../state/auth';
@@ -21,6 +22,7 @@ export function CampusAssistantScreen({ navigation, route }: ServiceScreenProps)
       key={scope}
       uid={user?.uid ?? ''}
       schoolId={school.id}
+      schoolName={school.name}
       initialPrompt={initialScope.current === scope ? prompt : ''}
       isScopeCurrent={() => active.current === scope}
       navigation={navigation}
@@ -30,12 +32,14 @@ export function CampusAssistantScreen({ navigation, route }: ServiceScreenProps)
 function AssistantConversation({
   uid,
   schoolId,
+  schoolName,
   initialPrompt,
   isScopeCurrent,
   navigation,
 }: {
   uid: string;
   schoolId: string;
+  schoolName: string;
   initialPrompt: string;
   isScopeCurrent: () => boolean;
   navigation: ServiceScreenProps['navigation'];
@@ -46,8 +50,10 @@ function AssistantConversation({
   const [draft, setDraft] = useState(initialPrompt.slice(0, 1600));
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
+  const [linkError, setLinkError] = useState('');
   const mounted = useRef(true);
   const lock = useRef(false);
+  const publicServices = resolveSchoolPublicServices(schoolId);
   useEffect(() => {
     mounted.current = true;
     return () => {
@@ -65,6 +71,7 @@ function AssistantConversation({
     try {
       const reply = await askCampusAssistant({
         scope: { uid, schoolId },
+        schoolName,
         messages: next,
         isCurrent: current,
       });
@@ -87,9 +94,27 @@ function AssistantConversation({
       <AICard>
         <Text style={{ color: aiTokens.muted, lineHeight: 24 }}>
           {uid
-            ? '可以詢問課程、公告與校園資訊。需要提交申請或付款時，請前往對應服務確認辦理。'
-            : '請先登入，再詢問目前學校的課程、公告與校園資訊。'}
+            ? `目前選校：${schoolName}。可以詢問該校課程、公告與校園資訊；回覆不會套用其他學校資料。需要提交申請或付款時，請前往對應服務確認辦理。`
+            : `目前選校：${schoolName}。請先登入，再詢問這所學校的課程、公告與校園資訊。`}
         </Text>
+        {publicServices?.services.courses ? (
+          <View style={{ marginTop: 12, gap: 8 }}>
+            <AIButton
+              label={`開啟${publicServices.services.courses.label}`}
+              variant="ghost"
+              onPress={() => {
+                void Linking.openURL(publicServices.services.courses.url).catch(() => {
+                  if (current()) setLinkError('無法開啟校方課程查詢頁，請稍後再試。');
+                });
+              }}
+            />
+            {linkError ? (
+              <Text accessibilityRole="alert" style={{ color: aiTokens.danger }}>
+                {linkError}
+              </Text>
+            ) : null}
+          </View>
+        ) : null}
       </AICard>
       {messages.map((message, index) => (
         <AICard key={index} title={message.role === 'user' ? '你的問題' : '校園助理'}>

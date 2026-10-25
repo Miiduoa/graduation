@@ -64,6 +64,13 @@ const sections: Array<{ title: string; items: ServiceItem[] }> = [
         keywords: ['借書', '還書', '自習', '蓋夏'],
       },
       {
+        icon: 'ic_school',
+        label: '學校資訊',
+        description: '總機、官網與校方服務',
+        screen: 'SchoolInfo',
+        keywords: ['總機', '官網', '地址', '名錄', '聯絡', '宿舍', '住宿', '職涯', '實習'],
+      },
+      {
         icon: 'ic_bus',
         label: '校園公車',
         description: '路線與站牌',
@@ -355,10 +362,7 @@ function CampusDirectory({
         </AISection>
       ))}
       {filtered.length === 0 ? (
-        <AIEmptyState
-          title={`找不到「${query.trim()}」相關的服務`}
-          subtitle="試試其他關鍵字。"
-        />
+        <AIEmptyState title={`找不到「${query.trim()}」相關的服務`} subtitle="試試其他關鍵字。" />
       ) : null}
     </AIScreen>
   );

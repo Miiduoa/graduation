@@ -62,8 +62,10 @@ import type {
   WashingMachine,
   WashingReservation,
 } from './types';
+import type { LostFoundWriteOptions } from './lostFoundMeta';
 
 export type { QueryOptions } from './types';
+export type { LostFoundWriteOptions } from './lostFoundMeta';
 
 export type CreateOrderInput = Omit<Order, 'id' | 'createdAt' | 'status' | 'paymentStatus'> & {
   /** Required at runtime. Persist the same key until the server confirms the outcome. */
@@ -345,13 +347,19 @@ export type DataSource = {
   getLostFoundItem: (id: string, schoolId?: string) => Promise<LostFoundItem | null>;
   createLostFoundItem: (
     data: Omit<LostFoundItem, 'id' | 'createdAt' | 'status'>,
+    options?: LostFoundWriteOptions,
   ) => Promise<LostFoundItem>;
   updateLostFoundItem: (
     id: string,
     data: Partial<LostFoundItem>,
     schoolId?: string,
+    options?: LostFoundWriteOptions,
   ) => Promise<LostFoundItem>;
-  resolveLostFoundItem: (id: string, schoolId?: string) => Promise<void>;
+  resolveLostFoundItem: (
+    id: string,
+    schoolId?: string,
+    options?: LostFoundWriteOptions,
+  ) => Promise<void>;
 
   // 圖書館
   searchBooks: (query: string, schoolId?: string, options?: QueryOptions) => Promise<LibraryBook[]>;

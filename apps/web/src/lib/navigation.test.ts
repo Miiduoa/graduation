@@ -11,6 +11,7 @@ import {
   navigateAfterLogin,
   readLoginReturnParam,
   sanitizeInternalPath,
+  schoolLoginHref,
 } from './navigation';
 
 const SCHOOL_CONTEXT = {
@@ -76,6 +77,22 @@ it('preserves a course destination and its query and fragment', () => {
 it('builds a login href that returns to the original storefront', () => {
   expect(loginHref('/cafeteria/stall?schoolId=pu')).toBe(
     '/login?returnUrl=%2Fcafeteria%2Fstall%3FschoolId%3Dpu',
+  );
+});
+
+it('builds a school login href with reconnect before returnUrl and preserves schoolId', () => {
+  expect(schoolLoginHref('/lost-found?schoolId=pu')).toBe(
+    '/login?reconnect=school&returnUrl=%2Flost-found%3FschoolId%3Dpu',
+  );
+  expect(loginHref('/lost-found?schoolId=pu', { reconnect: 'school' })).toBe(
+    '/login?reconnect=school&returnUrl=%2Flost-found%3FschoolId%3Dpu',
+  );
+  expect(loginHref('/grades')).toBe('/login?returnUrl=%2Fgrades');
+});
+
+it('collapses stacked fragments on school login href and ends with #', () => {
+  expect(schoolLoginHref('/course/cs101#assignment-hw-3#assignment-hw-3')).toBe(
+    '/login?reconnect=school&returnUrl=%2Fcourse%2Fcs101%23assignment-hw-3#',
   );
 });
 

@@ -4,7 +4,11 @@
  */
 import React, { useState } from 'react';
 import { Linking, Platform, Pressable, Text, View } from 'react-native';
-import { buildOfficialLibraryCatalogUrl, getOfficialLibrary } from '@campus/shared/src/officialLibraries';
+import {
+  buildOfficialLibraryCatalogUrl,
+  getOfficialLibrary,
+  hasVerifiedCatalogSearch,
+} from '@campus/shared/src/officialLibraries';
 import { Screen } from '../ui/components';
 import { TAB_BAR_CONTENT_BOTTOM_PADDING } from '../ui/navigationTheme';
 import { analytics } from '../services/analytics';
@@ -18,6 +22,7 @@ export function LibraryCatalogScreen(props: { navigation?: any; route?: any }) {
   const { school } = useSchool();
   const [failedSchoolId, setFailedSchoolId] = useState<string | null>(null);
   const library = getOfficialLibrary(school.id, school.name);
+  const verifiedSearch = hasVerifiedCatalogSearch(library);
 
   React.useEffect(() => {
     analytics.logScreenView('LibraryCatalog');
@@ -54,7 +59,7 @@ export function LibraryCatalogScreen(props: { navigation?: any; route?: any }) {
               }}
             >
               <Text style={{ color: theme.colors.onAccent, fontWeight: '700' }}>
-                {library.catalogSearch === 'primo-ve' && initialQ.trim()
+                {verifiedSearch && initialQ.trim()
                   ? '搜尋本校館藏'
                   : '開啟學校官方館藏'}
               </Text>

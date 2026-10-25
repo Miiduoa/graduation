@@ -16,6 +16,17 @@ const account = vi.hoisted(() => ({
   error: null,
   studentId: true,
 }));
+const browse = vi.hoisted(() => ({
+  schoolId: 'pu' as string | null,
+  schoolName: '靜宜大學',
+  catalogStatus: 'ready' as 'loading' | 'ready' | 'error',
+  loading: false,
+}));
+const navigation = vi.hoisted(() => ({
+  path: '/grades',
+  search: 'schoolId=pu&campus=pu',
+}));
+
 vi.mock('@/components/AuthGuard', () => ({ useAuth: () => account }));
 vi.mock('@/lib/signInOptions', () => ({
   useSignInOptions: () => ({
@@ -29,9 +40,9 @@ vi.mock('@/features/nuni/Session', () => ({
   useOptionalNuniSession: () => null,
 }));
 vi.mock('next/navigation', () => ({
-  usePathname: () => '/grades',
-  useRouter: () => ({ push: vi.fn() }),
-  useSearchParams: () => new URLSearchParams(),
+  usePathname: () => navigation.path,
+  useRouter: () => ({ push: vi.fn(), replace: vi.fn() }),
+  useSearchParams: () => new URLSearchParams(navigation.search),
 }));
 vi.mock('@/components/SiteShell', () => ({
   SiteShell: ({
@@ -54,6 +65,11 @@ vi.mock('@/lib/academicClient', async (original) => ({
   ...(await original<typeof import('@/lib/academicClient')>()),
   loadAcademicRecords: vi.fn(),
 }));
+vi.mock('@/components/imports/PersonalImportSummary', () => ({
+  PersonalImportSummary: () => (
+    <section aria-label="自行匯入的資料">個人匯入入口</section>
+  ),
+}));
 const timetableApi = vi.hoisted(() => ({
   loadPersonalTimetable: vi.fn(),
   savePersonalTimetable: vi.fn(),
@@ -70,10 +86,53 @@ vi.mock('@/lib/timetable/store', async (original) => ({
 vi.mock('@/lib/timetable/friends', () => ({
   listAcceptedFriends: vi.fn(async () => []),
 }));
-vi.mock('@/components/SelectedSchoolProvider', () => ({
-  useSelectedSchool: () => ({ selectedSchoolId: 'pu' }),
-  useOptionalSelectedSchool: () => ({ selectedSchoolId: 'pu' }),
+vi.mock('@/lib/usePersonalImports', () => ({
+  usePersonalImportScope: () => ({
+    scope: { owner: account.user ? `school:${account.user.uid}` : 'guest', schoolId: browse.schoolId || 'personal' },
+    scopeKey: 'scope',
+    loading: false,
+    schoolName: browse.schoolName || '未指定校園',
+  }),
+  usePersonalImports: () => ({ records: [], error: '', loading: false }),
 }));
+vi.mock('@/components/SelectedSchoolProvider', () => ({
+  useSelectedSchool: () => selectedSchool(),
+  useOptionalSelectedSchool: () => selectedSchool(),
+}));
+
+function selectedSchool() {
+  if (browse.loading || browse.catalogStatus === 'loading') {
+    return {
+      selectedSchoolId: null,
+      selectedSchool: null,
+      loading: true,
+      catalogStatus: 'loading' as const,
+    };
+  }
+  if (browse.catalogStatus === 'error') {
+    return {
+      selectedSchoolId: null,
+      selectedSchool: null,
+      loading: false,
+      catalogStatus: 'error' as const,
+    };
+  }
+  if (!browse.schoolId) {
+    return {
+      selectedSchoolId: null,
+      selectedSchool: null,
+      loading: false,
+      catalogStatus: 'ready' as const,
+    };
+  }
+  return {
+    selectedSchoolId: browse.schoolId,
+    selectedSchool: { id: browse.schoolId, name: browse.schoolName },
+    loading: false,
+    catalogStatus: 'ready' as const,
+  };
+}
+
 function emptyTimetable() {
   return {
     courses: [],
@@ -99,22 +158,49 @@ function grades(uid = 'one', name = '真實來源科目'): AcademicSnapshot<'gra
     }),
   };
 }
+
+function setBrowse(
+  schoolId: string | null,
+  extras?: Partial<typeof browse> & { search?: string },
+) {
+  browse.schoolId = schoolId;
+  browse.schoolName =
+    extras?.schoolName ??
+    (schoolId === 'nthu' ? '國立清華大學' : schoolId === 'pu' ? '靜宜大學' : '');
+  browse.catalogStatus = extras?.catalogStatus ?? 'ready';
+  browse.loading = extras?.loading ?? false;
+  if (extras?.search !== undefined) {
+    navigation.search = extras.search;
+  } else if (!schoolId) {
+    navigation.search = 'campus=all';
+  } else {
+    navigation.search = `schoolId=${schoolId}&campus=${schoolId}`;
+  }
+}
+
 beforeEach(() => {
   vi.clearAllMocks();
   account.user = { uid: 'one' };
   account.loading = false;
   account.studentId = true;
+  navigation.path = '/grades';
+  setBrowse('pu');
   vi.mocked(loadAcademicRecords).mockResolvedValue(grades());
   timetableApi.loadPersonalTimetable.mockResolvedValue(emptyTimetable());
   timetableApi.savePersonalTimetable.mockResolvedValue({ stored: 'local' });
 });
-it('shows semester and classroom-feedback tabs on the merged grades page', async () => {
+it('keeps the selected campus in both semester and classroom-feedback tabs', () => {
+  setBrowse('nthu');
   render(<GradesPage />);
   expect(screen.getByRole('navigation', { name: '成績分段' })).toBeTruthy();
-  expect(screen.getByRole('link', { name: '學期成績' }).getAttribute('href')).toBe('/grades');
-  expect(screen.getByRole('link', { name: '課堂回饋' }).getAttribute('href')).toBe(
-    '/grades?tab=feedback',
-  );
+  for (const [name, tab] of [['學期成績', null], ['課堂回饋', 'feedback']] as const) {
+    const href = new URL(screen.getByRole('link', { name }).getAttribute('href')!, 'https://campus.example');
+    expect(href.pathname).toBe('/grades');
+    expect(href.searchParams.get('tab')).toBe(tab);
+    expect(href.searchParams.get('campus')).toBe('nthu');
+    expect(href.searchParams.get('schoolId')).toBe('nthu');
+    expect(href.searchParams.get('school')).toBe('NTHU');
+  }
   expect(screen.getByRole('link', { name: '學期成績' }).getAttribute('aria-current')).toBe('page');
 });
 
@@ -134,6 +220,10 @@ it('preserves unknown grades and a real zero without manufacturing GPA or rank',
   fireEvent.change(screen.getByLabelText('學期'), { target: { value: '1151' } });
   expect(screen.queryByText('前期科目')).toBeNull();
   expect(screen.getByText('—')).toBeTruthy();
+  expect(screen.getByText(/來源：靜宜大學 e 校園/)).toBeTruthy();
+  await waitFor(() =>
+    expect(loadAcademicRecords).toHaveBeenCalledWith('grades', 'one', 'pu'),
+  );
 });
 it('shows failure and retries without falling back to demo or previously loaded grades', async () => {
   render(<GradesPage />);
@@ -201,13 +291,16 @@ it('removes the previous account transcript before loading the next account', as
   account.user = { uid: 'two' };
   view.rerender(<GradesPage />);
   expect(screen.queryByText('真實來源科目')).toBeNull();
-  await waitFor(() => expect(loadAcademicRecords).toHaveBeenLastCalledWith('grades', 'two'));
+  await waitFor(() =>
+    expect(loadAcademicRecords).toHaveBeenLastCalledWith('grades', 'two', 'pu'),
+  );
 });
 it('offers reconnection without pretending an expired session has an empty transcript', async () => {
   vi.mocked(loadAcademicRecords).mockRejectedValue(new AcademicConnectionError('reconnect'));
   render(<GradesPage />);
   const link = await screen.findByRole('link', { name: '連線學校帳號' });
   expect(link.getAttribute('href')).toContain('reconnect=school');
+  expect(link.getAttribute('href')).toContain(encodeURIComponent('/grades?schoolId=pu&campus=pu'));
   expect(screen.queryByText('課程紀錄')).toBeNull();
 });
 it('does not open a school login form when student ID is unavailable', async () => {
@@ -219,6 +312,7 @@ it('does not open a school login form when student ID is unavailable', async () 
   expect(screen.queryByRole('link', { name: /學校帳號/ })).toBeNull();
 });
 it('keeps weekend and unrecognized school courses as drafts until confirm', async () => {
+  navigation.path = '/timetable';
   const course = {
     code: 'A',
     name: '週末課',
@@ -255,7 +349,7 @@ it('keeps weekend and unrecognized school courses as drafts until confirm', asyn
   });
   render(<TimetablePage />);
   expect(await screen.findByRole('heading', { name: '匯入課表' })).toBeTruthy();
-  await waitFor(() => expect(loadAcademicRecords).toHaveBeenCalledWith('courses', 'one'));
+  await waitFor(() => expect(loadAcademicRecords).toHaveBeenCalledWith('courses', 'one', 'pu'));
   fireEvent.click(screen.getByRole('button', { name: '從學校課表帶入' }));
   expect(screen.getByText('課表尚未被修改，按確認匯入後才會套用')).toBeTruthy();
   expect(screen.getByText('週末課')).toBeTruthy();
@@ -272,6 +366,7 @@ it('keeps weekend and unrecognized school courses as drafts until confirm', asyn
   expect(screen.queryByText(/已儲存|已同步/)).toBeNull();
 });
 it('requires personal input for credit planning and clears it when the account changes', async () => {
+  navigation.path = '/credit-planner';
   const view = render(<CreditPlannerPage />);
   const approved = await screen.findByLabelText('已確認可採計學分（自行填寫）');
   expect((approved as HTMLInputElement).value).toBe('');
@@ -285,4 +380,149 @@ it('requires personal input for credit planning and clears it when the account c
   expect(
     ((await screen.findByLabelText('已確認可採計學分（自行填寫）')) as HTMLInputElement).value,
   ).toBe('');
+});
+
+it('hides a Providence transcript immediately when switching to NTHU and does not query again', async () => {
+  const view = render(<GradesPage />);
+  await screen.findByText('真實來源科目');
+  const callsBefore = vi.mocked(loadAcademicRecords).mock.calls.length;
+  setBrowse('nthu');
+  view.rerender(<GradesPage />);
+  expect(screen.queryByText('真實來源科目')).toBeNull();
+  expect(screen.getByRole('heading', { name: '這所學校尚未提供官方成績來源' })).toBeTruthy();
+  expect(screen.getByText(/國立清華大學/)).toBeTruthy();
+  expect(screen.queryByRole('link', { name: /e 校園/ })).toBeNull();
+  expect(screen.queryByRole('link', { name: /連線學校帳號/ })).toBeNull();
+  expect(screen.getByRole('region', { name: '自行匯入的資料' })).toBeTruthy();
+  expect(vi.mocked(loadAcademicRecords).mock.calls.length).toBe(callsBefore);
+});
+
+it('does not query official records on an NTHU first visit and keeps personal import', async () => {
+  setBrowse('nthu');
+  render(<GradesPage />);
+  expect(await screen.findByRole('heading', { name: '這所學校尚未提供官方成績來源' })).toBeTruthy();
+  expect(screen.getByRole('region', { name: '自行匯入的資料' })).toBeTruthy();
+  expect(screen.queryByText('真實來源科目')).toBeNull();
+  expect(loadAcademicRecords).not.toHaveBeenCalled();
+});
+
+it.each([
+  {
+    name: 'all campuses',
+    apply: () => setBrowse(null, { search: 'campus=all' }),
+    heading: '請先選擇一所學校',
+  },
+  {
+    name: 'catalog loading',
+    apply: () => setBrowse(null, { catalogStatus: 'loading', loading: true, search: '' }),
+    heading: '正在確認所選校園…',
+  },
+  {
+    name: 'catalog error',
+    apply: () => setBrowse(null, { catalogStatus: 'error', search: 'campus=unknown' }),
+    heading: '暫時無法確認所選校園',
+  },
+])('does not query Providence or promise school login for guest $name', async ({ apply, heading }) => {
+  account.user = null;
+  account.studentId = true;
+  apply();
+  render(<GradesPage />);
+  expect(await screen.findByRole('heading', { name: heading })).toBeTruthy();
+  expect(screen.queryByText('真實來源科目')).toBeNull();
+  expect(screen.queryByRole('link', { name: /學校帳號/ })).toBeNull();
+  expect(screen.queryByText('成績請先到學校的 e 校園查看。')).toBeNull();
+  expect(screen.queryByRole('link', { name: /e 校園/ })).toBeNull();
+  expect(loadAcademicRecords).not.toHaveBeenCalled();
+});
+
+it('does not query Providence for signed-in unresolved browse scopes', async () => {
+  setBrowse(null, { search: 'campus=all' });
+  render(<GradesPage />);
+  expect(await screen.findByRole('heading', { name: '請先選擇一所學校' })).toBeTruthy();
+  expect(loadAcademicRecords).not.toHaveBeenCalled();
+});
+
+it('ignores an in-flight Providence response after leaving and returning to PU', async () => {
+  let finish!: (value: AcademicSnapshot<'grades'>) => void;
+  vi.mocked(loadAcademicRecords).mockImplementationOnce(
+    () =>
+      new Promise((resolve) => {
+        finish = resolve;
+      }),
+  );
+  const view = render(<GradesPage />);
+  expect(await screen.findByText('正在向學校讀取資料…')).toBeTruthy();
+  setBrowse('nthu');
+  view.rerender(<GradesPage />);
+  expect(screen.queryByText('真實來源科目')).toBeNull();
+  vi.mocked(loadAcademicRecords).mockResolvedValue(grades('one', '返回後的新資料'));
+  setBrowse('pu');
+  view.rerender(<GradesPage />);
+  expect(await screen.findByText('返回後的新資料')).toBeTruthy();
+  await act(async () => finish(grades('one', '切校前的舊回應')));
+  expect(screen.queryByText('切校前的舊回應')).toBeNull();
+  expect(screen.getByText('返回後的新資料')).toBeTruthy();
+});
+
+it('keeps school context on academic navigation for NTHU', async () => {
+  setBrowse('nthu');
+  render(<GradesPage />);
+  await screen.findByRole('heading', { name: '這所學校尚未提供官方成績來源' });
+  expect(screen.getByRole('link', { name: '我的課表' }).getAttribute('href')).toBe(
+    '/timetable?schoolId=nthu&campus=nthu',
+  );
+  expect(screen.getByRole('link', { name: '學分規劃' }).getAttribute('href')).toBe(
+    '/credit-planner?schoolId=nthu&campus=nthu',
+  );
+});
+
+it('guest NTHU shows school unavailable without school login or official query', async () => {
+  account.user = null;
+  account.studentId = true;
+  setBrowse('nthu');
+  render(<GradesPage />);
+  expect(await screen.findByRole('heading', { name: '這所學校尚未提供官方成績來源' })).toBeTruthy();
+  expect(screen.getByText(/國立清華大學/)).toBeTruthy();
+  expect(screen.getByRole('region', { name: '自行匯入的資料' })).toBeTruthy();
+  expect(screen.queryByRole('link', { name: /學校帳號/ })).toBeNull();
+  expect(screen.queryByText('成績請先到學校的 e 校園查看。')).toBeNull();
+  expect(screen.queryByRole('link', { name: /e 校園/ })).toBeNull();
+  expect(screen.queryByRole('link', { name: /alcat/i })).toBeNull();
+  expect(loadAcademicRecords).not.toHaveBeenCalled();
+});
+
+it('uses PU-scoped login returnUrl only for supported Providence guests', async () => {
+  account.user = null;
+  account.studentId = true;
+  setBrowse('pu');
+  render(<GradesPage />);
+  const login = await screen.findByRole('link', { name: /學校帳號登入/ });
+  expect(login.getAttribute('href')).toContain(
+    encodeURIComponent('/grades?schoolId=pu&campus=pu'),
+  );
+  expect(loadAcademicRecords).not.toHaveBeenCalled();
+});
+
+it('never falls back to Providence for a valid unknown school id', async () => {
+  account.user = null;
+  account.studentId = true;
+  setBrowse('new-campus', { schoolName: '新接入校園' });
+  render(<GradesPage />);
+  expect(await screen.findByRole('heading', { name: '這所學校尚未提供官方成績來源' })).toBeTruthy();
+  expect(screen.getByText(/新接入校園/)).toBeTruthy();
+  expect(screen.queryByRole('link', { name: /學校帳號/ })).toBeNull();
+  expect(screen.queryByText('成績請先到學校的 e 校園查看。')).toBeNull();
+  expect(loadAcademicRecords).not.toHaveBeenCalled();
+});
+
+it('never falls back to Providence for an invalid school id', async () => {
+  account.user = null;
+  account.studentId = true;
+  // Catalog rejects unknown ids → selectedSchool null → unselected (never PU).
+  setBrowse(null, { search: 'schoolId=not-a-real-school&campus=not-a-real-school' });
+  render(<GradesPage />);
+  expect(await screen.findByRole('heading', { name: '請先選擇一所學校' })).toBeTruthy();
+  expect(screen.queryByRole('link', { name: /學校帳號/ })).toBeNull();
+  expect(screen.queryByText('成績請先到學校的 e 校園查看。')).toBeNull();
+  expect(loadAcademicRecords).not.toHaveBeenCalled();
 });

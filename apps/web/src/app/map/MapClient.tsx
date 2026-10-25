@@ -360,7 +360,7 @@ function MapContent({
               className="input"
               type="search"
               aria-label="搜尋地點"
-              placeholder="宿舍、廁所、影印或公車"
+              placeholder="宿舍、影印或公車"
               value={search}
               onChange={(event) => setSearch(event.target.value)}
             />
@@ -390,7 +390,7 @@ function MapContent({
       />
       {placeState.source === 'error' && (
         <div className={styles.notice} role="alert">
-          <p>校方地點資料暫時讀不到，先顯示已核對過的靜宜建築與公車站牌，收藏與部分地點可能缺少。</p>
+          <p>校方地點資料暫時讀不到，先顯示目前可用的靜宜地點，收藏與部分地點可能缺少。</p>
           <button className="btn" onClick={retry}>
             重新讀取地點資料
           </button>
@@ -398,7 +398,7 @@ function MapContent({
       )}
       {sourcePending && bundled && (
         <p className={styles.note} role="status">
-          正在同步校方地點資料，已先顯示核對過的靜宜地點。
+          正在同步校方地點資料，已先顯示靜宜的預載地點。
         </p>
       )}
       {!sourcePending && route && !deepLinkRoute && routeDraft === null && (
@@ -416,7 +416,7 @@ function MapContent({
           <details>
             <summary>靜宜地圖資料來源與步行分鐘算法</summary>
             <p>
-              建築與設施位置取自{' '}
+              預載目錄中的建築與設施位置取自{' '}
               <a href={PROVIDENCE_CAMPUS_SOURCE.mapDataUrl} target="_blank" rel="noopener noreferrer">
                 OpenStreetMap 貢獻者資料
               </a>
@@ -424,8 +424,8 @@ function MapContent({
               <a href={PROVIDENCE_CAMPUS_SOURCE.officialCampusTourUrl} target="_blank" rel="noopener noreferrer">
                 校方校園地圖實境導覽
               </a>
-              交叉核對名稱；底圖上也保留 OpenStreetMap 署名。宿舍、廁所、影印只掛在已核對建築，沒有獨立、對不上的座標就不放。
-              公車站牌取自{' '}
+              交叉核對名稱；底圖上也保留 OpenStreetMap 署名。宿舍與影印只掛在已核對建築；宿舍衛浴／盥洗僅供住宿生、訪客可否使用尚未核實，未另放已核對的公共廁所座標。
+              預載公車站牌取自{' '}
               <a href={PROVIDENCE_CAMPUS_SOURCE.transitDatasetUrl} target="_blank" rel="noopener noreferrer">
                 臺中市公車站牌資料
               </a>
@@ -503,7 +503,7 @@ function MapContent({
                 {walkingEstimateLabel(distanceMeters(walkFrom, selected))}
               </p>
             )}
-            {isProvidencePendingVerification(selected) && (
+            {isProvidencePendingVerification(school, selected) && (
               <p role="status">這個地點目前只有單一資料來源，位置待再次確認，先不要把它當成已核對的導航點。</p>
             )}
             <div className={styles.actions}>
@@ -520,10 +520,10 @@ function MapContent({
                   查看即時到站
                 </Link>
               )}
-              {providencePlaceSourceUrl(selected) && (
+              {providencePlaceSourceUrl(school, selected) && (
                 <a
                   className="btn"
-                  href={providencePlaceSourceUrl(selected)!}
+                  href={providencePlaceSourceUrl(school, selected)!}
                   target="_blank"
                   rel="noopener noreferrer"
                 >
@@ -637,7 +637,7 @@ function MapContent({
                 >
                   <span className={styles.locationName}>
                     {location.name}
-                    {isProvidencePendingVerification(location) && (
+                    {isProvidencePendingVerification(school, location) && (
                       <span className={styles.pending}>待確認</span>
                     )}
                   </span>

@@ -52,6 +52,7 @@ import type { UserRole as DataUserRole } from '../data/types';
 import type { MerchantAssignment } from '../data/types';
 import { DEMO_EXAM_BENTO_MERCHANT_ID } from '../data/demoMerchants';
 import { getRoleGroup, type RoleGroup } from '../services/permissions';
+import { useOptionalSchool } from './school';
 
 export type UserRole = DataUserRole;
 
@@ -64,6 +65,7 @@ export type UserProfile = {
   /** 登入後多身分（Firestore users.postLoginRoles，與 custom claims.roles 對齊） */
   postLoginRoles?: string[] | null;
   schoolMembershipRole?: string | null;
+  schoolMembershipSchoolId?: string | null;
   displayName?: string | null;
   department?: string | null;
   studentId?: string | null;
@@ -225,6 +227,7 @@ async function loadProfile(u: User | null): Promise<UserProfile | null> {
       resolveSchoolByEmail(u.email)?.id ??
       null;
     let schoolMembershipRole: string | null = null;
+    let schoolMembershipSchoolId: string | null = null;
     let serviceRoles: string[] = [];
 
     if (schoolId) {
@@ -234,17 +237,30 @@ async function loadProfile(u: User | null): Promise<UserProfile | null> {
       const membershipData = membershipSnap?.exists()
         ? (membershipSnap.data() as Record<string, unknown>)
         : null;
-      schoolMembershipRole = typeof membershipData?.role === 'string' ? membershipData.role : null;
+      const hasActiveMembership =
+        membershipData?.status === 'active' &&
+        (membershipData.schoolId == null || membershipData.schoolId === schoolId);
+      schoolMembershipRole =
+        hasActiveMembership && typeof membershipData?.role === 'string'
+          ? membershipData.role
+          : null;
+      schoolMembershipSchoolId = hasActiveMembership ? schoolId : null;
 
       // Try to load service roles
       try {
         const serviceRolesSnap = await getDoc(
           doc(db, 'schools', schoolId, 'serviceRoles', u.uid),
         ).catch(() => null);
-        if (serviceRolesSnap?.exists()) {
+        if (hasActiveMembership && serviceRolesSnap?.exists()) {
           const serviceRoleData = serviceRolesSnap.data() as Record<string, unknown>;
-          const roles = serviceRoleData.roles as unknown;
-          serviceRoles = Array.isArray(roles) ? (roles as string[]) : [];
+          if (
+            serviceRoleData.status === 'active' &&
+            (serviceRoleData.schoolId == null || serviceRoleData.schoolId === schoolId)
+          ) {
+            serviceRoles = ['orders', 'repairs', 'packages', 'printing', 'health'].filter(
+              (domain) => serviceRoleData[domain] === true,
+            );
+          }
         }
       } catch {
         // Service roles optional - ignore errors
@@ -267,6 +283,7 @@ async function loadProfile(u: User | null): Promise<UserProfile | null> {
       role: userRole,
       postLoginRoles: postLoginRoles?.length ? postLoginRoles : null,
       schoolMembershipRole,
+      schoolMembershipSchoolId,
       displayName:
         (typeof data.displayName === 'string' && data.displayName.trim()
           ? data.displayName
@@ -387,7 +404,8 @@ function toMockUserProfile(session: {
     primarySchoolId: session.schoolId,
     role: session.role,
     postLoginRoles: null,
-    schoolMembershipRole: null,
+    schoolMembershipRole: session.role === 'admin' ? 'admin' : null,
+    schoolMembershipSchoolId: session.role === 'admin' ? session.schoolId : null,
     displayName: session.displayName,
     department: session.department ?? null,
     studentId: session.studentId ?? null,
@@ -490,6 +508,8 @@ function mapCachesForBuildPostLoginContext(params: {
 }
 
 export function AuthProvider(props: { children: React.ReactNode }) {
+  const schoolContext = useOptionalSchool();
+  const selectedSchoolId = schoolContext?.selection.schoolId ?? null;
   const [user, setUser] = useState<User | null>(null);
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [loading, setLoading] = useState(true);
@@ -505,24 +525,42 @@ export function AuthProvider(props: { children: React.ReactNode }) {
   currentUserRef.current = user;
 
   const isAdmin = useMemo(() => {
-    const role = profile?.role;
-    const schoolMembershipRole = profile?.schoolMembershipRole;
-    return role === 'admin' || schoolMembershipRole === 'admin';
-  }, [profile?.role, profile?.schoolMembershipRole]);
+    return (
+      !profileLoading &&
+      Boolean(user?.uid) &&
+      profile?.uid === user?.uid &&
+      Boolean(selectedSchoolId) &&
+      profile?.schoolMembershipSchoolId === selectedSchoolId &&
+      profile?.schoolMembershipRole === 'admin'
+    );
+  }, [
+    profileLoading,
+    user?.uid,
+    profile?.uid,
+    profile?.schoolMembershipRole,
+    profile?.schoolMembershipSchoolId,
+    selectedSchoolId,
+  ]);
 
   const isEditor = useMemo(() => {
-    const role = profile?.role;
-    const schoolMembershipRole = profile?.schoolMembershipRole;
     return (
       isAdmin ||
-      schoolMembershipRole === 'admin' ||
-      schoolMembershipRole === 'editor' ||
-      role === 'admin' ||
-      role === 'teacher' ||
-      role === 'professor' ||
-      role === 'principal'
+      (!profileLoading &&
+        Boolean(user?.uid) &&
+        profile?.uid === user?.uid &&
+        Boolean(selectedSchoolId) &&
+        profile?.schoolMembershipSchoolId === selectedSchoolId &&
+        profile?.schoolMembershipRole === 'editor')
     );
-  }, [isAdmin, profile?.role, profile?.schoolMembershipRole]);
+  }, [
+    isAdmin,
+    profileLoading,
+    user?.uid,
+    profile?.uid,
+    profile?.schoolMembershipRole,
+    profile?.schoolMembershipSchoolId,
+    selectedSchoolId,
+  ]);
 
   const runPostLoginContext = useCallback(async (nextProfile: UserProfile | null) => {
     try {
@@ -622,6 +660,16 @@ export function AuthProvider(props: { children: React.ReactNode }) {
       if (requestIdRef.current === currentRequestId) {
         console.error('[auth] refreshProfile failed:', e);
         setError(loadFailureCopy(e));
+        setProfile((current) =>
+          current?.uid === currentUser.uid
+            ? {
+                ...current,
+                schoolMembershipRole: null,
+                schoolMembershipSchoolId: null,
+                serviceRoles: [],
+              }
+            : null,
+        );
       }
     } finally {
       if (requestIdRef.current === currentRequestId) {

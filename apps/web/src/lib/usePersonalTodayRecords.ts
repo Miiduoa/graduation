@@ -28,14 +28,19 @@ function manualRecords(timetable: StoredTimetable): PersonalImportRecord[] {
 export function usePersonalTodayRecords() {
   const context = usePersonalImportScope();
   const { user } = useAuth();
-  const imported = usePersonalImports(context.scope);
-  const [manual, setManual] = useState<PersonalImportRecord[] | null>(null);
-  const [loadError, setLoadError] = useState('');
+  const imported = usePersonalImports(context.scope, !context.loading);
+  const [manualState, setManualState] = useState<{
+    key: string;
+    records: PersonalImportRecord[] | null;
+    error: string;
+  } | null>(null);
   const [attempt, setAttempt] = useState(0);
   const { owner, schoolId } = context.scope;
   const uid = user?.uid ?? null;
+  const scopeKey = JSON.stringify([owner, schoolId, uid]);
   const retry = useCallback(() => setAttempt((value) => value + 1), []);
   useEffect(() => {
+    if (context.loading) return;
     let active = true;
     let generation = 0;
     const refresh = async () => {
@@ -43,13 +48,15 @@ export function usePersonalTodayRecords() {
       try {
         const data = await loadPersonalTimetable(uid, schoolId, owner);
         if (active && request === generation) {
-          setManual(manualRecords(data));
-          setLoadError('');
+          setManualState({ key: scopeKey, records: manualRecords(data), error: '' });
         }
       } catch {
         if (active && request === generation) {
-          setManual(null);
-          setLoadError('手動課表暫時讀不到，請保留瀏覽器資料後重試。');
+          setManualState({
+            key: scopeKey,
+            records: null,
+            error: '手動課表暫時讀不到，請保留瀏覽器資料後重試。',
+          });
         }
       }
     };
@@ -66,8 +73,10 @@ export function usePersonalTodayRecords() {
       window.removeEventListener('storage', visible);
       document.removeEventListener('visibilitychange', visible);
     };
-  }, [uid, owner, schoolId, attempt]);
-  const loaded = !imported.loading && (manual !== null || !!loadError);
-  const error = imported.error || loadError;
-  return { context, imported, manual, retry, loaded, error, schoolId };
+  }, [uid, owner, schoolId, scopeKey, context.loading, attempt]);
+  const visible = !context.loading && manualState?.key === scopeKey ? manualState : null;
+  const manual = visible?.records ?? null;
+  const loaded = !imported.loading && visible !== null;
+  const error = imported.error || visible?.error || '';
+  return { context, imported, manual, retry, loaded, error, schoolId, scopeKey };
 }

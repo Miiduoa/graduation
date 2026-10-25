@@ -6,6 +6,8 @@
 }
 
 .sidebar {
+  position: sticky;
+  top: 24px;
   min-width: 0;
 }
 
@@ -34,6 +36,11 @@
 .navigation button[aria-current='page'] {
   background: var(--accent-soft);
   border-color: var(--border-strong);
+}
+
+.navigation button:focus-visible {
+  outline: 3px solid var(--focus-ring);
+  outline-offset: 2px;
 }
 
 .navigation strong {
@@ -69,6 +76,7 @@
   min-width: 0;
   max-width: 800px;
   overflow-wrap: anywhere;
+  scroll-margin-top: 92px;
 }
 
 .stack {
@@ -488,16 +496,30 @@
     max-width: none;
   }
 
+  .sidebar {
+    top: 0;
+    z-index: 10;
+    padding-block: 8px;
+    border-bottom: 1px solid var(--border);
+    background: var(--bg);
+  }
+
   .navigation {
     display: flex;
-    flex-wrap: wrap;
+    flex-wrap: nowrap;
     gap: 6px;
+    overflow-x: auto;
+    padding: 4px;
+    scroll-padding-inline: 4px;
+    scrollbar-width: thin;
   }
 
   .navigation button {
+    flex: 1 0 auto;
     width: auto;
     min-height: 44px;
     padding: 10px 16px;
+    white-space: nowrap;
   }
 
   .navigation button > span,

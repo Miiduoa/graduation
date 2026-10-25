@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { cleanMeta } from '@campus/shared';
 import {
@@ -65,9 +65,6 @@ vi.mock('@/lib/useAcademicRecords', () => ({
     context.academic(kind, enabled);
     return { state: null, refresh: vi.fn() };
   },
-}));
-vi.mock('@/components/SchoolAccountRequired', () => ({
-  SchoolAccountRequired: () => null,
 }));
 vi.mock('@/lib/signInOptions', () => ({
   useSignInOptions: () => context.signIn,
@@ -179,13 +176,25 @@ it('resets the timetable and importer when the browsing school changes', async (
 
 it('does not offer a school login link for sharing when student ID sign-in is closed', async () => {
   context.schoolId = 'pu';
-  render(<PersonalTimetable />);
+  const view = render(<PersonalTimetable />);
   await screen.findByRole('button', { name: '新增課程' });
   expect(screen.getByText(SHARE_SCHOOL_LOGIN_UNAVAILABLE_COPY)).toBeTruthy();
   expect(screen.queryByText(SHARE_NEEDS_SCHOOL_LOGIN_COPY)).toBeNull();
   expect(screen.queryByText(/這個功能還沒接通/)).toBeNull();
   expect(screen.queryByRole('link', { name: '登入學校帳號' })).toBeNull();
   expect(screen.queryByRole('button', { name: '複製分享連結' })).toBeNull();
+  const common = within(screen.getByRole('region', { name: '共同空堂' }));
+  expect(common.getByText('目前尚未開放學校帳號登入，暫時無法讀取好友課表。')).toBeTruthy();
+  expect(common.queryByRole('link', { name: '登入查看好友' })).toBeNull();
+  expect(common.getByRole('link', { name: '匯入自己的課表' }).getAttribute('href')).toBe(
+    '/import?kind=timetable&campus=pu',
+  );
+  context.records = [record('pu', 'mine', '自己的課程')];
+  view.rerender(<PersonalTimetable />);
+  fireEvent.click(common.getByRole('button', { name: '查看自己的空堂' }));
+  const planning = screen.getByRole('region', { name: '幫我安排' });
+  expect(within(planning).getByRole('heading', { name: '今天空堂' })).toBeTruthy();
+  expect(document.activeElement).toBe(planning);
 });
 
 it('offers school login for sharing only when student ID sign-in is open', async () => {
@@ -197,6 +206,9 @@ it('offers school login for sharing only when student ID sign-in is open', async
   expect(screen.queryByText(SHARE_SCHOOL_LOGIN_UNAVAILABLE_COPY)).toBeNull();
   expect(screen.getByRole('link', { name: '登入學校帳號' }).getAttribute('href')).toBe(
     '/login?returnUrl=%2Ftimetable',
+  );
+  expect(screen.getByRole('link', { name: '登入查看好友' }).getAttribute('href')).toBe(
+    '/login?returnUrl=%2Ftimetable%3Fcampus%3Dpu',
   );
   expect(screen.queryByRole('button', { name: '複製分享連結' })).toBeNull();
 });
@@ -216,6 +228,16 @@ it.each([
     expect(screen.getByText(SHARE_SCHOOL_LOGIN_UNAVAILABLE_COPY)).toBeTruthy();
     expect(screen.queryByText(SHARE_NEEDS_SCHOOL_LOGIN_COPY)).toBeNull();
     expect(screen.queryByRole('link', { name: '登入學校帳號' })).toBeNull();
+    const common = within(screen.getByRole('region', { name: '共同空堂' }));
+    expect(common.queryByRole('link', { name: '登入查看好友' })).toBeNull();
+    expect(common.queryByText('目前尚未開放學校帳號登入，暫時無法讀取好友課表。')).toBeNull();
+    if (error) {
+      expect(common.getByRole('alert').textContent).toContain('暫時無法確認');
+      fireEvent.click(common.getByRole('button', { name: '重新確認' }));
+      expect(context.signIn.retry).toHaveBeenCalledOnce();
+    } else {
+      expect(common.getByRole('status').textContent).toContain('正在確認');
+    }
   },
 );
 
@@ -226,19 +248,33 @@ it('does not silently load Providence data when no campus is selected', () => {
   expect(context.load).not.toHaveBeenCalled();
 });
 
-it('shows the newest academic term even when an older term was imported later', async () => {
-  context.records = [
-    record('nthu', 'new', '本學期課程'),
-    {
-      ...record('nthu', 'old', '舊學期課程'),
-      academicYear: '114',
-      semester: '2',
-    },
-  ];
-  render(<PersonalTimetable />);
-  expect((await screen.findAllByText('本學期課程')).length).toBeGreaterThan(0);
-  expect(screen.queryByText('舊學期課程')).toBeNull();
-});
+it.each(['nthu', 'pu'])(
+  'labels and switches academic terms in the %s timetable',
+  async (schoolId) => {
+    context.schoolId = schoolId;
+    context.records = [
+      record(schoolId, 'new', '本學期課程'),
+      {
+        ...record(schoolId, 'old', '舊學期課程'),
+        academicYear: '114',
+        semester: '2',
+      },
+    ];
+    render(<PersonalTimetable />);
+    expect((await screen.findAllByText('本學期課程')).length).toBeGreaterThan(0);
+    expect(screen.queryByText('舊學期課程')).toBeNull();
+    const terms = screen.getByRole('combobox', { name: '顯示自行匯入的學期' });
+    expect(
+      within(terms).getByRole('option', { name: '115 學年度 1 學期' }).getAttribute('value'),
+    ).toBe('115|1');
+    expect(
+      within(terms).getByRole('option', { name: '114 學年度 2 學期' }).getAttribute('value'),
+    ).toBe('114|2');
+    fireEvent.change(terms, { target: { value: '114|2' } });
+    expect(screen.getAllByText('舊學期課程').length).toBeGreaterThan(0);
+    expect(screen.queryByText('本學期課程')).toBeNull();
+  },
+);
 
 it('keeps the academic term selected on Today when opening the full timetable', async () => {
   window.history.replaceState({}, '', '/timetable?term=114%7C2');

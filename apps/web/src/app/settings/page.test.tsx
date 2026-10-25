@@ -83,6 +83,7 @@ vi.mock('firebase/firestore', () => ({
 }));
 beforeEach(() => {
   vi.clearAllMocks();
+  window.history.replaceState({}, '', '/settings');
   localStorage.clear();
   agentRuntime.deleteTodaySenseModelCache.mockResolvedValue({
     released: true,
@@ -126,6 +127,66 @@ async function openProfile() {
     expect((screen.getByLabelText('姓名') as HTMLInputElement).disabled).toBe(false),
   );
 }
+it('opens an addressable settings section and preserves its campus and hash while switching', async () => {
+  window.history.replaceState(
+    {},
+    '',
+    '/settings?schoolId=nthu&campus=nthu&section=appearance#reading',
+  );
+  render(<SettingsPage />);
+  expect(screen.getByRole('heading', { name: '外觀設定' })).toBeTruthy();
+  expect(screen.getByRole('button', { name: '外觀' }).getAttribute('aria-current')).toBe('page');
+  fireEvent.click(screen.getByRole('button', { name: '通知' }));
+  const location = new URL(window.location.href);
+  expect(location.searchParams.get('section')).toBe('notifications');
+  expect(location.searchParams.get('schoolId')).toBe('nthu');
+  expect(location.searchParams.get('campus')).toBe('nthu');
+  expect(location.hash).toBe('#reading');
+  const entries = window.history.length;
+  fireEvent.click(screen.getByRole('button', { name: '通知' }));
+  expect(window.history.length).toBe(entries);
+  await waitFor(() => expect(state.read).toHaveBeenCalled());
+});
+
+it('restores the previous category on browser history without losing an unsaved profile draft', async () => {
+  render(<SettingsPage />);
+  await openProfile();
+  fireEvent.change(screen.getByLabelText('姓名'), { target: { value: '還在編輯的姓名' } });
+  fireEvent.click(screen.getByRole('button', { name: '外觀' }));
+  expect(screen.queryByLabelText('姓名')).toBeNull();
+  act(() => window.history.back());
+  await waitFor(() => expect(screen.getByLabelText('姓名')).toBeTruthy());
+  expect((screen.getByLabelText('姓名') as HTMLInputElement).value).toBe('還在編輯的姓名');
+  act(() => window.history.forward());
+  await waitFor(() => expect(screen.getByRole('heading', { name: '外觀設定' })).toBeTruthy());
+  expect(state.saveProfile).not.toHaveBeenCalled();
+});
+
+it('moves through settings categories by keyboard and focuses content reached from an inline action', async () => {
+  render(<SettingsPage />);
+  const general = screen.getByRole('button', { name: '一般' });
+  general.focus();
+  fireEvent.keyDown(general, { key: 'ArrowRight' });
+  const account = screen.getByRole('button', { name: '帳號' });
+  expect(document.activeElement).toBe(account);
+  expect(account.getAttribute('aria-current')).toBe('page');
+  fireEvent.keyDown(account, { key: 'Home' });
+  expect(document.activeElement).toBe(general);
+  fireEvent.click(screen.getByRole('button', { name: '調整外觀' }));
+  expect(document.activeElement).toBe(screen.getByRole('region', { name: '外觀' }));
+  expect(new URLSearchParams(window.location.search).get('section')).toBe('appearance');
+  await waitFor(() => expect(state.read).toHaveBeenCalled());
+});
+
+it('uses the general category for an unknown section without interpreting arbitrary identifiers', async () => {
+  window.history.replaceState({}, '', '/settings?section=__proto__&schoolId=nthu');
+  render(<SettingsPage />);
+  expect(screen.getByRole('heading', { name: '一般設定' })).toBeTruthy();
+  fireEvent.click(screen.getByRole('button', { name: '一般' }));
+  expect(window.location.search).toBe('?schoolId=nthu');
+  await waitFor(() => expect(state.read).toHaveBeenCalled());
+});
+
 it('removes demo seeding and broad storage deletion from the user settings', async () => {
   render(<SettingsPage />);
   await waitFor(() => expect(state.read).toHaveBeenCalled());
@@ -240,7 +301,9 @@ it('shows delete-model in privacy after download and returns to the rule list', 
   expect(await screen.findByRole('button', { name: AGENT_DELETE_MODEL_ACTION })).toBeTruthy();
   expect(screen.queryByRole('switch')).toBeNull();
   fireEvent.click(screen.getByRole('button', { name: AGENT_DELETE_MODEL_ACTION }));
-  await waitFor(() => expect(screen.queryByRole('button', { name: AGENT_DELETE_MODEL_ACTION })).toBeNull());
+  await waitFor(() =>
+    expect(screen.queryByRole('button', { name: AGENT_DELETE_MODEL_ACTION })).toBeNull(),
+  );
   expect(agentRuntime.deleteTodaySenseModelCache).toHaveBeenCalled();
   expect(parseAgentConsent(localStorage.getItem(agentConsentStorageKey('school:a')))).toBe('unset');
   expect(screen.getByText(AGENT_MODEL_DELETED_TEXT)).toBeTruthy();
@@ -279,6 +342,20 @@ it('shows the authenticated provider instead of implying a school login is conne
   expect(screen.queryByText('PU 學號登入')).toBeNull();
   expect(screen.queryByText('學校登入')).toBeNull();
 });
+
+it.each(['notgoogle.com', 'google.com.evil.test', 'sso.google.com', 'https://google.com'])(
+  'does not label a different Firebase provider ID as Google: %s',
+  async (providerId) => {
+    state.user = {
+      ...state.user!,
+      providerData: [{ providerId }, { providerId: 'password' }],
+    };
+    render(<SettingsPage />);
+    await openProfile();
+    expect(screen.getByText('電子郵件與密碼')).toBeTruthy();
+    expect(screen.queryByText('Google 帳號')).toBeNull();
+  },
+);
 
 it('provides an accessible sign-out button and prevents duplicate requests while pending', async () => {
   let finish!: () => void;

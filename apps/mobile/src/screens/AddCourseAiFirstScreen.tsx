@@ -2,15 +2,16 @@ import React, { useState, useSyncExternalStore } from 'react';
 import { Linking, Text, View } from 'react-native';
 import { AIDetailScreen, AICard, AIButton, aiTokens } from '../ui/aiFirst';
 import { getThemeVersion, subscribeToTheme } from '../ui/theme';
+import { isProvidenceSchoolId, resolveOfficialCourseQueryLink } from '@campus/shared/src';
 import { useSchool } from '../state/school';
 import { safeNavigate } from '../utils/safeNavigate';
-import { OFFICIAL_CATALOG_URL } from '../features/courseAdvisor';
 import type { ServiceScreenProps } from './UnavailableFeatureScreen';
 
 export default function AddCourseAiFirstScreen({ navigation }: ServiceScreenProps) {
   useSyncExternalStore(subscribeToTheme, getThemeVersion, getThemeVersion);
   const { school } = useSchool();
   const [error, setError] = useState('');
+  const officialCatalog = resolveOfficialCourseQueryLink(school.id);
   const openWebsite = async (url: string) => {
     try {
       await Linking.openURL(url);
@@ -36,11 +37,11 @@ export default function AddCourseAiFirstScreen({ navigation }: ServiceScreenProp
             variant="ghost"
             onPress={() => safeNavigate(navigation, 'CourseSchedule')}
           />
-          {school.id === 'pu' ? (
+          {officialCatalog ? (
             <AIButton
-              label="開啟校方課程查詢"
+              label={`開啟${officialCatalog.label}`}
               variant="ghost"
-              onPress={() => void openWebsite(OFFICIAL_CATALOG_URL)}
+              onPress={() => void openWebsite(officialCatalog.url)}
             />
           ) : (
             <Text style={{ color: aiTokens.muted }}>
@@ -60,7 +61,7 @@ export default function AddCourseAiFirstScreen({ navigation }: ServiceScreenProp
             請登入校方入口網站，再進入「教務」的選課系統。Campus One
             目前不會代送加退選申請，也不會把課表上的個人安排當成選課完成。
           </Text>
-          {school.id === 'pu' ? (
+          {isProvidenceSchoolId(school.id) ? (
             <AIButton
               label="開啟校方登入"
               variant="ghost"

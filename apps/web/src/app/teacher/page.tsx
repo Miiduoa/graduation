@@ -1,11 +1,13 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useLayoutEffect, useRef, useState } from 'react';
 import { APPEAL_STATUS_COPY, type AppealStatus } from '@campus/shared';
 import { SiteShell } from '@/components/SiteShell';
 import { SchoolAccountRequired } from '@/components/SchoolAccountRequired';
+import { SchoolScopePlaceholder } from '@/components/SchoolScopePlaceholder';
 import { useAuth } from '@/components/AuthGuard';
 import { useSelectedSchool } from '@/components/SelectedSchoolProvider';
+import { useDemoRole } from '@/lib/demoRole';
 import {
   decideCourseAppeal,
   listTeacherAppeals,
@@ -38,41 +40,26 @@ function submittedAt(item: TeacherAppealRow) {
 }
 
 export default function TeacherDeskPage() {
-  const { user } = useAuth();
+  const { user, loading: authLoading } = useAuth();
   const school = useSelectedSchool();
-  const schoolId = school.selectedSchoolId || 'pu';
-  const [items, setItems] = useState<TeacherAppealRow[] | null>(null);
-  const [courses, setCourses] = useState<string[] | null>(null);
-  const [denied, setDenied] = useState(false);
-  const [loadError, setLoadError] = useState(false);
-  const [notes, setNotes] = useState<Record<string, string>>({});
-  const [busyId, setBusyId] = useState('');
-  const [notice, setNotice] = useState('');
+  const [demoRole] = useDemoRole();
+  const schoolId = school.selectedSchoolId;
 
-  const load = useCallback(async () => {
-    if (!user) return;
-    try {
-      const result = await listTeacherAppeals(schoolId);
-      const rows = [...result.rows];
-      setCourses(result.courses);
-      rows.sort(
-        (a, b) =>
-          Date.parse(b.updatedAt || b.createdAt || '') -
-          Date.parse(a.updatedAt || a.createdAt || ''),
-      );
-      setItems(rows);
-      setDenied(false);
-      setLoadError(false);
-    } catch (error) {
-      const code = (error as { code?: string })?.code || '';
-      if (code.includes('permission-denied')) setDenied(true);
-      else setLoadError(true);
-    }
-  }, [user, schoolId]);
+  if (authLoading) {
+    return (
+      <SiteShell title="老師工作台" subtitle="看學生的課程申訴，核准或不核准。">
+        <p role="status">正在確認登入狀態…</p>
+      </SiteShell>
+    );
+  }
 
-  useEffect(() => {
-    void load();
-  }, [load]);
+  if (school.loading || !schoolId) {
+    return (
+      <SiteShell title="老師工作台" subtitle="看學生的課程申訴，核准或不核准。">
+        <SchoolScopePlaceholder />
+      </SiteShell>
+    );
+  }
 
   if (!user) {
     return (
@@ -85,6 +72,79 @@ export default function TeacherDeskPage() {
     );
   }
 
+  return (
+    <TeacherDeskContent key={`${user.uid}:${schoolId}:${demoRole}`} schoolId={schoolId} />
+  );
+}
+
+function TeacherDeskContent({ schoolId }: { schoolId: string }) {
+  const [items, setItems] = useState<TeacherAppealRow[] | null>(null);
+  const [courses, setCourses] = useState<string[] | null>(null);
+  const [denied, setDenied] = useState(false);
+  const [loadError, setLoadError] = useState(false);
+  const [notes, setNotes] = useState<Record<string, string>>({});
+  const [busyId, setBusyId] = useState('');
+  const [notice, setNotice] = useState('');
+  const mounted = useRef(false);
+  const generation = useRef(0);
+  const opLock = useRef(false);
+
+  const load = useCallback(async () => {
+    if (!mounted.current) return;
+    const run = ++generation.current;
+    try {
+      const result = await listTeacherAppeals(schoolId);
+      if (!mounted.current || run !== generation.current) return;
+      const rows = [...result.rows];
+      rows.sort(
+        (a, b) =>
+          Date.parse(b.updatedAt || b.createdAt || '') -
+          Date.parse(a.updatedAt || a.createdAt || ''),
+      );
+      setCourses(result.courses);
+      setItems(rows);
+      setDenied(false);
+      setLoadError(false);
+    } catch (error) {
+      if (!mounted.current || run !== generation.current) return;
+      const code = (error as { code?: string })?.code || '';
+      if (code.includes('permission-denied')) setDenied(true);
+      else setLoadError(true);
+    }
+  }, [schoolId]);
+
+  useLayoutEffect(() => {
+    mounted.current = true;
+    void Promise.resolve().then(load);
+    return () => {
+      mounted.current = false;
+      generation.current += 1;
+      opLock.current = false;
+    };
+  }, [load]);
+
+  const decide = async (id: string, status: 'approved' | 'rejected') => {
+    if (opLock.current || !mounted.current) return;
+    opLock.current = true;
+    setBusyId(id);
+    try {
+      // Server rules authorize via resource.data.schoolId; only id/status/note are written.
+      await decideCourseAppeal(id, status, notes[id] || '');
+      if (!mounted.current) return;
+      setNotice(
+        status === 'approved' ? '已核准，學生那邊會看到「老師已核准。」' : '已標成不核准。',
+      );
+      await load();
+    } catch {
+      if (mounted.current) setNotice('這次沒有存成，請稍後再試。');
+    } finally {
+      if (mounted.current) {
+        setBusyId('');
+        opLock.current = false;
+      }
+    }
+  };
+
   if (denied) {
     return (
       <SiteShell title="老師工作台" subtitle="看學生的課程申訴，核准或不核准。">
@@ -92,22 +152,6 @@ export default function TeacherDeskPage() {
       </SiteShell>
     );
   }
-
-  const decide = async (id: string, status: 'approved' | 'rejected') => {
-    if (busyId) return;
-    setBusyId(id);
-    try {
-      await decideCourseAppeal(id, status, notes[id] || '');
-      setNotice(
-        status === 'approved' ? '已核准，學生那邊會看到「老師已核准。」' : '已標成不核准。',
-      );
-      await load();
-    } catch {
-      setNotice('這次沒有存成，請稍後再試。');
-    } finally {
-      setBusyId('');
-    }
-  };
 
   const open = (items || []).filter(
     (item) => item.status === 'pending' || item.status === 'reviewing',
@@ -136,8 +180,6 @@ export default function TeacherDeskPage() {
           <p className={styles.notice}>
             你還沒有對應到任何一門課，所以看不到申訴。請學校管理者把你加到你教的課。
           </p>
-        ) : items === null ? (
-          <p className={styles.notice}>讀取中…</p>
         ) : open.length === 0 ? (
           <p className={styles.notice}>現在沒有待處理的申訴。</p>
         ) : (
@@ -164,7 +206,7 @@ export default function TeacherDeskPage() {
                   <button
                     type="button"
                     className="btn primary"
-                    disabled={busyId === item.id}
+                    disabled={Boolean(busyId)}
                     onClick={() => void decide(item.id, 'approved')}
                   >
                     核准
@@ -172,7 +214,7 @@ export default function TeacherDeskPage() {
                   <button
                     type="button"
                     className="btn"
-                    disabled={busyId === item.id}
+                    disabled={Boolean(busyId)}
                     onClick={() => void decide(item.id, 'rejected')}
                   >
                     不核准

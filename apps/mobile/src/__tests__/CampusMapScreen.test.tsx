@@ -50,10 +50,12 @@ const place: CampusMapPlace = {
 };
 function deferred<T>() {
   let resolve!: (value: T) => void;
-  const promise = new Promise<T>((done) => {
+  let reject!: (error: unknown) => void;
+  const promise = new Promise<T>((done, fail) => {
     resolve = done;
+    reject = fail;
   });
-  return { resolve, promise };
+  return { resolve, reject, promise };
 }
 beforeEach(() => {
   jest.clearAllMocks();
@@ -354,23 +356,124 @@ test('shows the verified campus plan alongside public map POIs without automatic
   expect(Linking.openURL).toHaveBeenCalledWith('https://gnl.pu.edu.tw/p/426-1007-8.php?Lang=zh-tw');
 });
 
-test('offers the university plan when its POI source is unavailable, and reports browser handoff failures', async () => {
+test('keeps bundled Providence places with a sync warning when the published source fails', async () => {
   mockSchool = { id: 'pu', name: '靜宜大學' };
   jest.mocked(loadCampusMapPlaces).mockRejectedValueOnce(new Error('offline'));
   const view = render(<GoogleMapsLikeScreen />);
-  await view.findByText('目前無法讀取校園地點');
+  await view.findByText(/校方地點資料暫時讀不到/);
+  expect(view.getByText('主顧樓')).toBeTruthy();
+  expect(view.queryByText('目前無法讀取校園地點')).toBeNull();
+  expect(view.getByText('查看校方校區平面圖')).toBeTruthy();
   jest.mocked(Linking.openURL).mockRejectedValueOnce(new Error('not available'));
   await act(async () => fireEvent.press(view.getByText('查看校方校區平面圖')));
   expect(view.getByText(/無法開啟校方校區平面圖/)).toBeTruthy();
 });
 
-test('links to the university plan for a confirmed empty Providence collection', async () => {
+test('shows bundled Providence places for a confirmed empty source and keeps the official plan', async () => {
   mockSchool = { id: 'pu', name: '靜宜大學' };
   jest.mocked(loadCampusMapPlaces).mockResolvedValueOnce([]);
   const view = render(<GoogleMapsLikeScreen />);
-  await view.findByText('尚未提供校園地點');
+  await view.findByText('主顧樓');
+  expect(view.queryByText('尚未提供校園地點')).toBeNull();
+  expect(view.getAllByText(/OpenStreetMap|靜宜地圖資料來源/).length).toBeGreaterThan(0);
   await act(async () => fireEvent.press(view.getByText('查看校方校區平面圖')));
   expect(Linking.openURL).toHaveBeenCalledWith('https://gnl.pu.edu.tw/p/426-1007-8.php?Lang=zh-tw');
+});
+
+test('shows bundled Providence places immediately while the published source is still pending', async () => {
+  mockSchool = { id: 'pu', name: '靜宜大學' };
+  const pending = deferred<CampusMapPlace[]>();
+  jest.mocked(loadCampusMapPlaces).mockReturnValueOnce(pending.promise);
+  const view = render(<GoogleMapsLikeScreen />);
+  expect(view.getByText(/正在同步校方地點資料/)).toBeTruthy();
+  expect(view.getByText('文興樓')).toBeTruthy();
+  expect(view.getByText('查看校方校區平面圖')).toBeTruthy();
+  expect(view.queryByText('目前無法讀取校園地點')).toBeNull();
+  await act(async () => pending.resolve([]));
+  expect(view.queryByText(/正在同步校方地點資料/)).toBeNull();
+});
+
+test('retry after timeout keeps retained Providence places and remounts the sync request', async () => {
+  mockSchool = { id: 'pu', name: '靜宜大學' };
+  jest.mocked(loadCampusMapPlaces).mockRejectedValueOnce(new Error('Map source timed out'));
+  const view = render(<GoogleMapsLikeScreen />);
+  await view.findByText(/校方地點資料暫時讀不到/);
+  expect(view.getByText('文興樓')).toBeTruthy();
+  jest.mocked(loadCampusMapPlaces).mockResolvedValueOnce([]);
+  fireEvent.press(view.getByText('重新讀取地點資料'));
+  await act(async () => {});
+  expect(view.queryByText(/校方地點資料暫時讀不到/)).toBeNull();
+  expect(view.getByText('文興樓')).toBeTruthy();
+  expect(loadCampusMapPlaces).toHaveBeenCalledTimes(2);
+});
+
+test('switching away from Providence while a request is pending drops PU places', async () => {
+  mockSchool = { id: 'pu', name: '靜宜大學' };
+  const pending = deferred<CampusMapPlace[]>();
+  jest.mocked(loadCampusMapPlaces).mockReturnValueOnce(pending.promise);
+  const view = render(<GoogleMapsLikeScreen />);
+  expect(view.getByText('主顧樓')).toBeTruthy();
+  jest.mocked(loadCampusMapPlaces).mockResolvedValueOnce([]);
+  mockSchool = { id: 'nthu', name: '國立清華大學' };
+  view.rerender(<GoogleMapsLikeScreen />);
+  await view.findByText('尚未提供校園地點');
+  expect(view.queryByText('主顧樓')).toBeNull();
+  await act(async () => pending.resolve([{ ...place, name: '晚到的靜宜地點' }]));
+  expect(view.queryByText('晚到的靜宜地點')).toBeNull();
+  expect(view.queryByText('主顧樓')).toBeNull();
+});
+
+test('deep-links to the bundled Providence library before the published source answers', async () => {
+  mockSchool = { id: 'pu', name: '靜宜大學' };
+  mockParams = { poiId: 'pu-library' };
+  const pending = deferred<CampusMapPlace[]>();
+  jest.mocked(loadCampusMapPlaces).mockReturnValueOnce(pending.promise);
+  const view = render(<GoogleMapsLikeScreen />);
+  expect(view.getAllByText('蓋夏圖書館').length).toBeGreaterThan(0);
+  expect(view.getByText('查看校方樓層導覽')).toBeTruthy();
+  expect(view.getByText('查看地點來源')).toBeTruthy();
+  await act(async () => fireEvent.press(view.getByText('查看地點來源')));
+  expect(Linking.openURL).toHaveBeenCalledWith('https://www.openstreetmap.org/way/255784049');
+  await act(async () => pending.resolve([]));
+});
+
+test('finds verified print facilities from the bundled Providence catalog', async () => {
+  mockSchool = { id: 'pu', name: '靜宜大學' };
+  jest.mocked(loadCampusMapPlaces).mockResolvedValueOnce([]);
+  const view = render(<GoogleMapsLikeScreen />);
+  await view.findByText('蓋夏圖書館');
+  fireEvent.changeText(view.getByLabelText('搜尋校園地點'), '影印');
+  expect(view.getByText('蓋夏圖書館')).toBeTruthy();
+  expect(view.getByText('至善樓')).toBeTruthy();
+  expect(view.queryByText('主顧樓')).toBeNull();
+});
+
+test('does not route toilet search to resident-only dorm bathrooms', async () => {
+  mockSchool = { id: 'pu', name: '靜宜大學' };
+  jest.mocked(loadCampusMapPlaces).mockResolvedValueOnce([]);
+  const view = render(<GoogleMapsLikeScreen />);
+  await view.findByText('蓋夏圖書館');
+  fireEvent.changeText(view.getByLabelText('搜尋校園地點'), '廁所');
+  expect(view.queryByText('希嘉學苑')).toBeNull();
+  expect(view.queryByText('思高學苑')).toBeNull();
+  expect(view.getByText('找不到符合的地點')).toBeTruthy();
+  expect(view.getByText('查看校方校區平面圖')).toBeTruthy();
+});
+
+test('ignores a late source-link rejection after the selected place changes', async () => {
+  mockSchool = { id: 'pu', name: '靜宜大學' };
+  mockParams = { poiId: 'pu-library' };
+  jest.mocked(loadCampusMapPlaces).mockResolvedValueOnce([]);
+  const pending = deferred<unknown>();
+  jest.mocked(Linking.openURL).mockReturnValueOnce(pending.promise);
+  const view = render(<GoogleMapsLikeScreen />);
+  await view.findByText('查看地點來源');
+  await act(async () => fireEvent.press(view.getByText('查看地點來源')));
+  fireEvent.press(view.getByText('主顧樓'));
+  expect(view.queryByText(/無法開啟地點來源/)).toBeNull();
+  await act(async () => pending.reject(new Error('offline')));
+  expect(view.queryByText(/無法開啟地點來源/)).toBeNull();
+  expect(view.getAllByText('主顧樓').length).toBeGreaterThan(0);
 });
 
 test('never substitutes Providence official campus maps for an unverified university id', async () => {
@@ -464,6 +567,24 @@ test('accepts a new explicit destination for the current campus after a school c
   expect(Linking.openURL).toHaveBeenCalledWith(expect.stringContaining('destination=24.1%2C121.1'));
 });
 
+
+test('clears a source-opening error when a new deep link selects another place', async () => {
+  mockSchool = { id: 'pu', name: '靜宜大學' };
+  mockParams = { toPoiId: 'pu-library' };
+  jest.mocked(loadCampusMapPlaces).mockResolvedValueOnce([]);
+  const view = await openMap();
+  jest.mocked(Linking.openURL).mockRejectedValueOnce(new Error('offline'));
+  await act(async () => fireEvent.press(view.getByText('查看地點來源')));
+  expect(view.getByText(/無法開啟地點來源/)).toBeTruthy();
+
+  mockParams = { toPoiId: 'pu-zhugu' };
+  view.rerender(<GoogleMapsLikeScreen />);
+  expect(view.queryByText(/無法開啟地點來源/)).toBeNull();
+  await act(async () => fireEvent.press(view.getByText('查看步行路線')));
+  expect(Linking.openURL).toHaveBeenLastCalledWith(
+    expect.stringContaining('destination=24.226939%2C120.583587'),
+  );
+});
 
 test('does not replace the WebView document when only the map search changes', async () => {
   const view = await openMap();

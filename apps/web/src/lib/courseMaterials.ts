@@ -1,10 +1,18 @@
-import type { NuniMaterial, NuniUnit, NuniWorkspace } from '@campus/shared/src/nuni';
-import { NuniError } from '@campus/shared/src/nuni';
+import type {
+  NuniMaterial,
+  NuniMaterialPage,
+  NuniUnit,
+  NuniWorkspace,
+} from '@campus/shared/src/nuni';
+import { NuniError, nuniErrorMessage } from '@campus/shared/src/nuni';
 
 export const MATERIAL_NEW_MS = 7 * 24 * 60 * 60 * 1000;
 export const MATERIAL_HOME_WINDOW_MS = 14 * 24 * 60 * 60 * 1000;
 export const MATERIAL_READ_KEY_PREFIX = 'nuni-material-read:';
 export const MATERIAL_SIZE_UNKNOWN = '大小未提供（教材沒有檔案大小欄位）';
+export const MATERIAL_COURSE_BATCH = 4;
+export const MATERIAL_CURSOR_CYCLE_MESSAGE =
+  '教材分頁出現重複游標，已停止繼續載入，清單可能不完整。請重新讀取教材。';
 
 export type MaterialKind =
   | 'pdf'
@@ -36,8 +44,38 @@ export type SearchableMaterial = {
 
 export type MaterialSearchSeed = {
   items: SearchableMaterial[];
+  /** Only courses whose seed catalogue is demonstrably complete. */
   courseIds: string[];
   truncated: boolean;
+};
+
+export type MaterialDiscoveryFence = {
+  cancelled: () => boolean;
+};
+
+export type CourseMaterialPageProgress<T extends { id: string }> = {
+  items: T[];
+  nextCursor: string | null;
+  complete: boolean;
+  denied: boolean;
+  seenCursors: string[];
+  error: string | null;
+  /** Continuation is impossible; caller must restart from the first page. */
+  needsRestart: boolean;
+};
+
+export type CourseMaterialCatalogEntry = CourseMaterialPageProgress<SearchableMaterial> & {
+  courseId: string;
+  courseTitle: string;
+};
+
+export type SearchableMaterialsCatalog = {
+  items: SearchableMaterial[];
+  courses: CourseMaterialCatalogEntry[];
+  skipped: number;
+  /** True when at least one course still has more pages or a stalled incomplete read. */
+  truncated: boolean;
+  partialError: string | null;
 };
 
 export function toSearchableMaterial(
@@ -52,6 +90,113 @@ export function toSearchableMaterial(
     body: item.body,
     unitTitle: item.unitTitle,
     createdAt: item.createdAt,
+  };
+}
+
+export function emptyCourseMaterialPageProgress<T extends { id: string }>(): CourseMaterialPageProgress<T> {
+  return {
+    items: [],
+    nextCursor: null,
+    complete: false,
+    denied: false,
+    seenCursors: [],
+    error: null,
+    needsRestart: false,
+  };
+}
+
+function dedupeById<T extends { id: string }>(existing: T[], incoming: T[]): T[] {
+  if (!incoming.length) return existing;
+  const seen = new Set(existing.map((item) => item.id));
+  const added = incoming.filter((item) => {
+    if (seen.has(item.id)) return false;
+    seen.add(item.id);
+    return true;
+  });
+  return added.length ? [...existing, ...added] : existing;
+}
+
+/**
+ * Merge one materialsPage result into local progress. Detects repeated/cyclic
+ * cursors and never marks those courses complete.
+ */
+export function mergeMaterialPageProgress<T extends { id: string }>(
+  previous: CourseMaterialPageProgress<T>,
+  page: { materials: T[]; nextCursor: string | null },
+  requestedCursor: string | undefined,
+): CourseMaterialPageProgress<T> {
+  const requestKey = requestedCursor ?? '';
+  const seenCursors = previous.seenCursors.includes(requestKey)
+    ? previous.seenCursors
+    : [...previous.seenCursors, requestKey];
+  const items = dedupeById(previous.items, page.materials);
+  const nextCursor = page.nextCursor;
+  if (nextCursor === null) {
+    return {
+      items,
+      nextCursor: null,
+      complete: true,
+      denied: false,
+      seenCursors,
+      error: null,
+      needsRestart: false,
+    };
+  }
+  if (nextCursor === requestedCursor || seenCursors.includes(nextCursor)) {
+    return {
+      items,
+      nextCursor: null,
+      complete: false,
+      denied: false,
+      seenCursors,
+      error: MATERIAL_CURSOR_CYCLE_MESSAGE,
+      needsRestart: true,
+    };
+  }
+  return {
+    items,
+    nextCursor,
+    complete: false,
+    denied: false,
+    seenCursors,
+    error: null,
+    needsRestart: false,
+  };
+}
+
+export function flattenSearchableCatalog(
+  courses: CourseMaterialCatalogEntry[],
+): SearchableMaterial[] {
+  const catalog: SearchableMaterial[] = [];
+  const seen = new Set<string>();
+  for (const course of courses) {
+    if (course.denied) continue;
+    for (const item of course.items) {
+      const key = `${item.workspaceId}:${item.id}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      catalog.push(item);
+    }
+  }
+  return catalog;
+}
+
+function summarizeCatalog(
+  courses: CourseMaterialCatalogEntry[],
+  skipped: number,
+): SearchableMaterialsCatalog {
+  const active = courses.filter((course) => !course.denied);
+  const partialError =
+    active.map((course) => course.error).find((message) => message && message.length > 0) ?? null;
+  return {
+    items: flattenSearchableCatalog(courses),
+    courses,
+    skipped,
+    truncated: active.some(
+      (course) =>
+        !course.complete || !!course.error || !!course.nextCursor || course.needsRestart,
+    ),
+    partialError,
   };
 }
 
@@ -402,42 +547,366 @@ export function searchCourseMaterials(
     .map((entry) => entry.item);
 }
 
-type MaterialClient = {
-  materials(id: string): Promise<NuniMaterial[]>;
+type MaterialPageClient = {
+  materialsPage(id: string, cursor?: string): Promise<NuniMaterialPage>;
 };
 
+function isAccessDenied(error: unknown): boolean {
+  return error instanceof NuniError && [403, 404].includes(error.status);
+}
+
+function isInvalidMaterialCursor(error: unknown): boolean {
+  return error instanceof NuniError && error.code === 'CLASS_WORKSPACE_MATERIAL_CURSOR_INVALID';
+}
+
+function stalledCursorProgress<T extends { id: string }>(
+  previous: CourseMaterialPageProgress<T>,
+  error: unknown,
+): CourseMaterialPageProgress<T> {
+  return {
+    ...previous,
+    nextCursor: null,
+    complete: false,
+    denied: false,
+    error: nuniErrorMessage(error),
+    needsRestart: true,
+  };
+}
+
+function fenceCancelled(fence?: MaterialDiscoveryFence | null): boolean {
+  return fence?.cancelled() === true;
+}
+
+async function readMaterialPage(
+  classes: MaterialPageClient,
+  courseId: string,
+  cursor: string | undefined,
+  fence?: MaterialDiscoveryFence | null,
+): Promise<NuniMaterialPage | 'cancelled'> {
+  if (fenceCancelled(fence)) return 'cancelled';
+  const page = await classes.materialsPage(courseId, cursor);
+  if (fenceCancelled(fence)) return 'cancelled';
+  return page;
+}
+
+function seededCompleteEntry(
+  course: NuniWorkspace,
+  seed: MaterialSearchSeed,
+): CourseMaterialCatalogEntry {
+  return {
+    courseId: course.id,
+    courseTitle: course.title,
+    items: seed.items.filter((item) => item.workspaceId === course.id),
+    nextCursor: null,
+    complete: true,
+    denied: false,
+    seenCursors: [''],
+    error: null,
+    needsRestart: false,
+  };
+}
+
+async function loadCourseFirstSearchPage(
+  classes: MaterialPageClient,
+  course: NuniWorkspace,
+  fence?: MaterialDiscoveryFence | null,
+): Promise<CourseMaterialCatalogEntry | 'cancelled'> {
+  try {
+    const page = await readMaterialPage(classes, course.id, undefined, fence);
+    if (page === 'cancelled') return 'cancelled';
+    const progress = mergeMaterialPageProgress<SearchableMaterial>(
+      emptyCourseMaterialPageProgress(),
+      {
+        materials: page.materials.map((item) =>
+          toSearchableMaterial({ id: course.id, title: course.title }, item),
+        ),
+        nextCursor: page.nextCursor,
+      },
+      undefined,
+    );
+    return { courseId: course.id, courseTitle: course.title, ...progress };
+  } catch (error) {
+    if (fenceCancelled(fence)) return 'cancelled';
+    if (isAccessDenied(error)) {
+      return {
+        courseId: course.id,
+        courseTitle: course.title,
+        items: [],
+        nextCursor: null,
+        complete: false,
+        denied: true,
+        seenCursors: [],
+        error: null,
+        needsRestart: false,
+      };
+    }
+    throw error;
+  }
+}
+
 export async function loadSearchableMaterials(
-  classes: MaterialClient,
+  classes: MaterialPageClient,
   workspaces: NuniWorkspace[],
   seed?: MaterialSearchSeed | null,
-): Promise<{ items: SearchableMaterial[]; skipped: number; truncated: boolean }> {
-  const catalog: SearchableMaterial[] = [];
-  let skipped = 0;
-  let truncated = seed?.truncated === true;
+  fence?: MaterialDiscoveryFence | null,
+): Promise<SearchableMaterialsCatalog> {
   const seeded = new Set(seed?.courseIds ?? []);
-  const seededItems = seed?.items ?? [];
   const active = workspaces.filter((course) => course.state === 'active');
-  const batchSize = 4;
-  for (let start = 0; start < active.length; start += batchSize) {
+  const courses: CourseMaterialCatalogEntry[] = [];
+  let skipped = 0;
+  for (let start = 0; start < active.length; start += MATERIAL_COURSE_BATCH) {
+    if (fenceCancelled(fence)) {
+      return summarizeCatalog(courses, skipped);
+    }
+    const slice = active.slice(start, start + MATERIAL_COURSE_BATCH);
     const batch = await Promise.all(
-      active.slice(start, start + batchSize).map(async (course) => {
-        if (seeded.has(course.id)) {
-          return seededItems.filter((item) => item.workspaceId === course.id);
+      slice.map(async (course) => {
+        if (seeded.has(course.id) && seed) {
+          return seededCompleteEntry(course, seed);
+        }
+        return loadCourseFirstSearchPage(classes, course, fence);
+      }),
+    );
+    for (const entry of batch) {
+      if (entry === 'cancelled') return summarizeCatalog(courses, skipped);
+      if (entry.denied) skipped += 1;
+      courses.push(entry);
+    }
+  }
+  if (fenceCancelled(fence)) return summarizeCatalog(courses, skipped);
+  return summarizeCatalog(courses, skipped);
+}
+
+export async function continueSearchableMaterials(
+  classes: MaterialPageClient,
+  catalog: SearchableMaterialsCatalog,
+  fence?: MaterialDiscoveryFence | null,
+): Promise<SearchableMaterialsCatalog> {
+  const pending = catalog.courses.filter(
+    (course) =>
+      !course.denied && !course.complete && !course.needsRestart && !!course.nextCursor,
+  );
+  if (!pending.length) return catalog;
+  const courses = catalog.courses.map((course) => ({ ...course, items: [...course.items] }));
+  let skipped = catalog.skipped;
+  for (let start = 0; start < pending.length; start += MATERIAL_COURSE_BATCH) {
+    if (fenceCancelled(fence)) return summarizeCatalog(courses, skipped);
+    const slice = pending.slice(start, start + MATERIAL_COURSE_BATCH);
+    await Promise.all(
+      slice.map(async (target) => {
+        const index = courses.findIndex((course) => course.courseId === target.courseId);
+        if (index < 0) return;
+        const current = courses[index];
+        const cursor = current.nextCursor;
+        if (!cursor || current.seenCursors.includes(cursor)) {
+          courses[index] = {
+            ...current,
+            nextCursor: null,
+            complete: false,
+            error: MATERIAL_CURSOR_CYCLE_MESSAGE,
+            needsRestart: true,
+          };
+          return;
         }
         try {
-          const materials = await classes.materials(course.id);
-          if (materials.length >= 100) truncated = true;
-          return materials.map((item) => toSearchableMaterial({ id: course.id, title: course.title }, item));
+          const page = await readMaterialPage(classes, current.courseId, cursor, fence);
+          if (page === 'cancelled') return;
+          const progress = mergeMaterialPageProgress<SearchableMaterial>(
+            current,
+            {
+              materials: page.materials.map((item) =>
+                toSearchableMaterial(
+                  { id: current.courseId, title: current.courseTitle },
+                  item,
+                ),
+              ),
+              nextCursor: page.nextCursor,
+            },
+            cursor,
+          );
+          courses[index] = { ...current, ...progress };
         } catch (error) {
-          if (error instanceof NuniError && [403, 404].includes(error.status)) {
+          if (fenceCancelled(fence)) return;
+          if (isAccessDenied(error)) {
+            courses[index] = {
+              ...current,
+              items: [],
+              nextCursor: null,
+              complete: false,
+              denied: true,
+              seenCursors: [],
+              error: null,
+              needsRestart: false,
+            };
             skipped += 1;
-            return [];
+            return;
           }
-          throw error;
+          if (isInvalidMaterialCursor(error)) {
+            courses[index] = {
+              courseId: current.courseId,
+              courseTitle: current.courseTitle,
+              ...stalledCursorProgress(current, error),
+            };
+            return;
+          }
+          courses[index] = {
+            ...current,
+            error: nuniErrorMessage(error),
+            needsRestart: false,
+          };
         }
       }),
     );
-    catalog.push(...batch.flat());
   }
-  return { items: catalog, skipped, truncated };
+  if (fenceCancelled(fence)) return summarizeCatalog(courses, skipped);
+  return summarizeCatalog(courses, skipped);
+}
+
+/**
+ * Replace stalled courses with a fresh first-page read. Confirmed rows stay
+ * visible until the replacement page succeeds; 403/404 still evict.
+ */
+export async function restartSearchableMaterials(
+  classes: MaterialPageClient,
+  catalog: SearchableMaterialsCatalog,
+  fence?: MaterialDiscoveryFence | null,
+): Promise<SearchableMaterialsCatalog> {
+  const stalled = catalog.courses.filter((course) => !course.denied && course.needsRestart);
+  if (!stalled.length) return catalog;
+  const courses = catalog.courses.map((course) => ({ ...course, items: [...course.items] }));
+  let skipped = catalog.skipped;
+  for (let start = 0; start < stalled.length; start += MATERIAL_COURSE_BATCH) {
+    if (fenceCancelled(fence)) return summarizeCatalog(courses, skipped);
+    const slice = stalled.slice(start, start + MATERIAL_COURSE_BATCH);
+    await Promise.all(
+      slice.map(async (target) => {
+        const index = courses.findIndex((course) => course.courseId === target.courseId);
+        if (index < 0) return;
+        const current = courses[index];
+        try {
+          const page = await readMaterialPage(classes, current.courseId, undefined, fence);
+          if (page === 'cancelled') return;
+          const progress = mergeMaterialPageProgress<SearchableMaterial>(
+            emptyCourseMaterialPageProgress(),
+            {
+              materials: page.materials.map((item) =>
+                toSearchableMaterial(
+                  { id: current.courseId, title: current.courseTitle },
+                  item,
+                ),
+              ),
+              nextCursor: page.nextCursor,
+            },
+            undefined,
+          );
+          courses[index] = {
+            courseId: current.courseId,
+            courseTitle: current.courseTitle,
+            ...progress,
+          };
+        } catch (error) {
+          if (fenceCancelled(fence)) return;
+          if (isAccessDenied(error)) {
+            courses[index] = {
+              ...current,
+              items: [],
+              nextCursor: null,
+              complete: false,
+              denied: true,
+              seenCursors: [],
+              error: null,
+              needsRestart: false,
+            };
+            skipped += 1;
+            return;
+          }
+          courses[index] = {
+            courseId: current.courseId,
+            courseTitle: current.courseTitle,
+            ...stalledCursorProgress(current, error),
+          };
+        }
+      }),
+    );
+  }
+  if (fenceCancelled(fence)) return summarizeCatalog(courses, skipped);
+  return summarizeCatalog(courses, skipped);
+}
+
+export async function loadCourseMaterialsPage(
+  classes: MaterialPageClient,
+  courseId: string,
+  previous: CourseMaterialPageProgress<NuniMaterial> | null,
+  fence?: MaterialDiscoveryFence | null,
+): Promise<CourseMaterialPageProgress<NuniMaterial> | 'cancelled'> {
+  const base = previous ?? emptyCourseMaterialPageProgress<NuniMaterial>();
+  const cursor = previous?.nextCursor ?? undefined;
+  if (previous && (!cursor || previous.needsRestart)) return base;
+  if (cursor && base.seenCursors.includes(cursor)) {
+    return {
+      ...base,
+      nextCursor: null,
+      complete: false,
+      error: MATERIAL_CURSOR_CYCLE_MESSAGE,
+      needsRestart: true,
+    };
+  }
+  try {
+    const page = await readMaterialPage(classes, courseId, cursor, fence);
+    if (page === 'cancelled') return 'cancelled';
+    return mergeMaterialPageProgress(base, page, cursor);
+  } catch (error) {
+    if (fenceCancelled(fence)) return 'cancelled';
+    if (isAccessDenied(error)) {
+      return {
+        items: [],
+        nextCursor: null,
+        complete: false,
+        denied: true,
+        seenCursors: [],
+        error: null,
+        needsRestart: false,
+      };
+    }
+    if (!previous) throw error;
+    if (isInvalidMaterialCursor(error)) {
+      return stalledCursorProgress(base, error);
+    }
+    return {
+      ...base,
+      error: nuniErrorMessage(error),
+      needsRestart: false,
+    };
+  }
+}
+
+/**
+ * Fresh first-page read for a stalled course. Keeps previous rows until the
+ * replacement page confirms access; denial still evicts.
+ */
+export async function restartCourseMaterialsPage(
+  classes: MaterialPageClient,
+  courseId: string,
+  previous: CourseMaterialPageProgress<NuniMaterial>,
+  fence?: MaterialDiscoveryFence | null,
+): Promise<CourseMaterialPageProgress<NuniMaterial> | 'cancelled'> {
+  try {
+    const page = await readMaterialPage(classes, courseId, undefined, fence);
+    if (page === 'cancelled') return 'cancelled';
+    return mergeMaterialPageProgress(emptyCourseMaterialPageProgress<NuniMaterial>(), page, undefined);
+  } catch (error) {
+    if (fenceCancelled(fence)) return 'cancelled';
+    if (isAccessDenied(error)) {
+      return {
+        items: [],
+        nextCursor: null,
+        complete: false,
+        denied: true,
+        seenCursors: [],
+        error: null,
+        needsRestart: false,
+      };
+    }
+    return stalledCursorProgress(previous, error);
+  }
 }

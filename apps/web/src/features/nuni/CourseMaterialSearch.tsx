@@ -5,13 +5,16 @@ import Link from 'next/link';
 import { nuniErrorMessage } from '@campus/shared/src/nuni';
 import { formatTaipeiDateTime } from '@campus/shared/src/taipeiTime';
 import {
+  continueSearchableMaterials,
   courseMaterialHref,
   describeMaterial,
   isMaterialNew,
   loadSearchableMaterials,
+  restartSearchableMaterials,
   searchCourseMaterials,
   type MaterialSearchSeed,
   type SearchableMaterial,
+  type SearchableMaterialsCatalog,
 } from '@/lib/courseMaterials';
 import { useClientNow } from '@/lib/useMaterialClientState';
 import { useClasses } from './CourseUI';
@@ -36,14 +39,17 @@ function Search({ compact, seed }: { compact: boolean; seed: MaterialSearchSeed 
   const courseApi = useRef(classes);
   const inputId = useId();
   const [query, setQuery] = useState('');
-  const [catalog, setCatalog] = useState<SearchableMaterial[] | null>(null);
-  const [skipped, setSkipped] = useState(0);
-  const [truncated, setTruncated] = useState(false);
+  const [catalog, setCatalog] = useState<SearchableMaterialsCatalog | null>(null);
   const [reading, setReading] = useState(false);
+  const [continuing, setContinuing] = useState(false);
+  const [restarting, setRestarting] = useState(false);
   const [error, setError] = useState('');
+  const [loadEpoch, setLoadEpoch] = useState(0);
   const now = useClientNow();
   const request = useRef(0);
   const loadStarted = useRef(false);
+  const continueRequest = useRef(0);
+  const restartRequest = useRef(0);
   const mounted = useRef(true);
 
   useEffect(() => {
@@ -61,7 +67,13 @@ function Search({ compact, seed }: { compact: boolean; seed: MaterialSearchSeed 
     const trimmed = query.trim();
     if (!trimmed) {
       request.current += 1;
+      continueRequest.current += 1;
+      restartRequest.current += 1;
+      // Clearing the query cancels in-flight catalogue work without keeping stale hits.
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setReading(false);
+      setContinuing(false);
+      setRestarting(false);
       if (!catalog) loadStarted.current = false;
       return;
     }
@@ -71,26 +83,115 @@ function Search({ compact, seed }: { compact: boolean; seed: MaterialSearchSeed 
     setReading(true);
     setError('');
     const api = courseApi.current;
+    const fence = { cancelled: () => !mounted.current || run !== request.current };
     void api
       .list()
-      .then((workspaces) => loadSearchableMaterials(api, workspaces, seed))
+      .then((workspaces) => {
+        if (fence.cancelled()) return null;
+        return loadSearchableMaterials(api, workspaces, seed, fence);
+      })
       .then((result) => {
-        if (!mounted.current || run !== request.current) return;
-        setCatalog(result.items);
-        setSkipped(result.skipped);
-        setTruncated(result.truncated);
+        if (!result || fence.cancelled()) return;
+        setCatalog(result);
       })
       .catch((failure) => {
-        if (!mounted.current || run !== request.current) return;
+        if (fence.cancelled()) return;
         loadStarted.current = false;
         setError(nuniErrorMessage(failure));
       })
       .finally(() => {
         if (mounted.current && run === request.current) setReading(false);
       });
-  }, [catalog, query, seed]);
+  }, [catalog, loadEpoch, query, seed]);
 
-  const hits = catalog && query.trim() ? searchCourseMaterials(query, catalog) : [];
+  async function loadMore() {
+    const current = catalog;
+    if (!current || reading || continuing || restarting) return;
+    const pending = current.courses.some(
+      (course) =>
+        !course.denied && !course.complete && !course.needsRestart && !!course.nextCursor,
+    );
+    if (!pending) return;
+    const run = ++continueRequest.current;
+    const loadRun = request.current;
+    setContinuing(true);
+    const api = courseApi.current;
+    const fence = {
+      cancelled: () =>
+        !mounted.current || run !== continueRequest.current || loadRun !== request.current,
+    };
+    try {
+      const next = await continueSearchableMaterials(api, current, fence);
+      if (fence.cancelled()) return;
+      setCatalog(next);
+    } catch (failure) {
+      if (fence.cancelled()) return;
+      setCatalog({
+        ...current,
+        partialError: nuniErrorMessage(failure),
+      });
+    } finally {
+      if (mounted.current && run === continueRequest.current) setContinuing(false);
+    }
+  }
+
+  async function restartCatalog() {
+    const current = catalog;
+    if (reading || continuing || restarting) return;
+    if (current) {
+      const stalled = current.courses.some((course) => !course.denied && course.needsRestart);
+      if (!stalled) return;
+      const run = ++restartRequest.current;
+      const loadRun = request.current;
+      setRestarting(true);
+      const api = courseApi.current;
+      const fence = {
+        cancelled: () =>
+          !mounted.current || run !== restartRequest.current || loadRun !== request.current,
+      };
+      try {
+        const next = await restartSearchableMaterials(api, current, fence);
+        if (fence.cancelled()) return;
+        setCatalog(next);
+      } catch (failure) {
+        if (fence.cancelled()) return;
+        setCatalog({
+          ...current,
+          partialError: nuniErrorMessage(failure),
+        });
+      } finally {
+        if (mounted.current && run === restartRequest.current) setRestarting(false);
+      }
+      return;
+    }
+    // First-page catalogue failure: explicit retry without editing the query.
+    loadStarted.current = false;
+    setError('');
+    request.current += 1;
+    continueRequest.current += 1;
+    restartRequest.current += 1;
+    setCatalog(null);
+    setLoadEpoch((value) => value + 1);
+  }
+
+  const items: SearchableMaterial[] = catalog?.items ?? [];
+  const hits = catalog && query.trim() ? searchCourseMaterials(query, items) : [];
+  const needsRestart =
+    !!catalog && catalog.courses.some((course) => !course.denied && course.needsRestart);
+  const canContinuePages =
+    !!catalog &&
+    catalog.courses.some(
+      (course) =>
+        !course.denied && !course.complete && !course.needsRestart && !!course.nextCursor,
+    );
+  const hasMore = !!catalog && (catalog.truncated || !!catalog.partialError);
+  const showContinue =
+    !!catalog && !reading && !restarting && query.trim().length > 0 && canContinuePages;
+  const showRestart =
+    !!query.trim() &&
+    !reading &&
+    !continuing &&
+    (needsRestart || (!!error && !catalog));
 
   return (
     <section className={compact ? styles.homeSearch : shared.panel} aria-labelledby={inputId}>
@@ -115,20 +216,38 @@ function Search({ compact, seed }: { compact: boolean; seed: MaterialSearchSeed 
         />
       </label>
       {reading && <p role="status">正在讀取你各門課的教材…</p>}
+      {continuing && <p role="status">正在載入較早的教材頁面…</p>}
+      {restarting && <p role="status">正在重新讀取教材…</p>}
       {error && (
         <p role="alert" className={shared.notice}>
           {error} 還沒搜到任何課的教材，請確認連線後再試。
         </p>
       )}
-      {skipped > 0 && catalog && (
-        <p className={styles.note}>有 {skipped} 門課目前沒有權限，已略過，沒有拿來搜。</p>
+      {(catalog?.skipped ?? 0) > 0 && catalog && (
+        <p className={styles.note}>
+          有 {catalog.skipped} 門課目前沒有權限，已略過，沒有拿來搜。
+        </p>
       )}
-      {truncated && catalog && (
-        <p className={styles.note}>每門課目前最多搜到 100 則教材。更早的請進入該課教材櫃再載入較早頁面。</p>
+      {needsRestart && catalog?.partialError && (
+        <p role="alert" className={styles.note}>
+          {catalog.partialError} 已確認的教材仍可搜尋；請重新讀取教材，不要沿用失效分頁。
+        </p>
+      )}
+      {catalog?.partialError && !needsRestart && (
+        <p role="alert" className={styles.note}>
+          {catalog.partialError} 已確認的教材仍可搜尋；請重試載入較早頁面。
+        </p>
+      )}
+      {hasMore && catalog && !catalog.partialError && !needsRestart && (
+        <p className={styles.note}>
+          部分課程還有較早的教材頁面未載入。若找不到需要的內容，請繼續載入後再搜。
+        </p>
       )}
       {query.trim() && catalog && !reading && !hits.length && (
         <p className={shared.muted}>
-          找不到符合「{query.trim()}」的教材。可改打課名、週次或檔名關鍵字。
+          {hasMore
+            ? `目前已載入的教材中找不到「${query.trim()}」。可繼續載入較早頁面，或改打課名、週次、檔名關鍵字。`
+            : `找不到符合「${query.trim()}」的教材。可改打課名、週次或檔名關鍵字。`}
         </p>
       )}
       {hits.length > 0 && (
@@ -156,6 +275,30 @@ function Search({ compact, seed }: { compact: boolean; seed: MaterialSearchSeed 
             );
           })}
         </ul>
+      )}
+      {showContinue && (
+        <button
+          type="button"
+          className={`${shared.button} ${shared.secondary}`}
+          disabled={continuing}
+          onClick={() => void loadMore()}
+        >
+          {continuing
+            ? '載入較早教材中…'
+            : catalog?.partialError
+              ? '重試載入較早教材'
+              : '繼續載入較早教材'}
+        </button>
+      )}
+      {showRestart && (
+        <button
+          type="button"
+          className={`${shared.button} ${shared.secondary}`}
+          disabled={restarting}
+          onClick={() => void restartCatalog()}
+        >
+          {restarting ? '重新讀取教材中…' : '重新讀取教材'}
+        </button>
       )}
     </section>
   );
