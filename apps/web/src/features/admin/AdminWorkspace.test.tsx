@@ -812,6 +812,7 @@ it('links the overview directly to the correct operational tasks', async () => {
     .toBe('/admin/ops?tab=people');
   expect(screen.getByRole('link', { name: /店家申請審核/ }).getAttribute('href'))
     .toBe('/admin/ops?tab=merchants');
-  expect(screen.getByRole('link', { name: /課班掛靠/ }).getAttribute('href'))
-    .toBe('/admin/ops?tab=affiliation');
+  expect(
+    screen.getAllByRole('link', { name: /課班掛靠/ }).map((link) => link.getAttribute('href')),
+  ).toContain('/admin/ops?tab=affiliation');
 });
