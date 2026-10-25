@@ -301,14 +301,14 @@ export function createTransitService(options: {
     else running -= 1;
   }
 
-  async function request(url: string, init: RequestInit): Promise<unknown> {
+  async function request(url: string, init: RequestInit, timeoutMs = 8000): Promise<unknown> {
     if (now() < blockedUntil) throw new TransitError('rate-limited');
     await acquireSlot();
     try {
       if (now() < blockedUntil) throw new TransitError('rate-limited');
       if (now() - budget.window >= 60_000) budget = { window: now(), count: 0 };
       if (++budget.count > 60) throw new TransitError('rate-limited');
-      const response = await fetcher(url, { ...init, redirect: 'error', cache: 'no-store', signal: AbortSignal.timeout(8000) });
+      const response = await fetcher(url, { ...init, redirect: 'error', cache: 'no-store', signal: AbortSignal.timeout(timeoutMs) });
       if (response.status === 429) {
         const seconds = Number(response.headers.get('retry-after'));
         blockedUntil = now() + (Number.isFinite(seconds) && seconds > 0 ? Math.min(seconds, 300) : 60) * 1000;
@@ -420,34 +420,55 @@ export function createTransitService(options: {
     })();
   }
 
+  function claimMaasBudget(): void {
+    if (now() < blockedUntil) throw new TransitError('rate-limited');
+    if (now() - maasBudget.window >= 60_000) maasBudget = { window: now(), count: 0 };
+    if (maasBudget.count >= MAAS_RATE_LIMIT_PER_MINUTE) throw new TransitError('rate-limited');
+    maasBudget.count += 1;
+  }
+
   async function loadMaasPayload(query: Parameters<typeof buildMaasPlannerUrl>[0]): Promise<unknown> {
     const key = maasCacheKey(query);
     const hit = maasCache.get(key);
     if (hit && hit.expires > now()) return hit.value;
     const inflight = maasPending.get(key);
     if (inflight) return inflight;
-    const work = (async () => {
-      if (now() - maasBudget.window >= 60_000) maasBudget = { window: now(), count: 0 };
-      if (maasBudget.count >= MAAS_RATE_LIMIT_PER_MINUTE) throw new TransitError('rate-limited');
-      const bearer = await accessToken();
-      maasBudget.count += 1;
-      const response = await fetcher(buildMaasPlannerUrl(query), {
-        redirect: 'error',
-        cache: 'no-store',
-        headers: { Authorization: `Bearer ${bearer}`, Accept: 'application/json' },
-        signal: AbortSignal.timeout(maasTimeoutMs),
-      });
-      if (response.status === 429) throw new TransitError('rate-limited');
-      if (response.status === 401) { token = null; throw new TransitError('upstream'); }
-      if (!response.ok) throw new TransitError('upstream');
-      const payload: unknown = await response.json();
-      const slotEnd = (Math.floor(now() / MAAS_CACHE_SLOT_MS) + 1) * MAAS_CACHE_SLOT_MS;
-      if (maasCache.size >= 64) maasCache.delete(maasCache.keys().next().value!);
-      maasCache.set(key, { expires: Math.max(now() + 1_000, slotEnd), value: payload });
-      return payload;
-    })();
+    let resolveWork!: (value: unknown) => void;
+    let rejectWork!: (error: unknown) => void;
+    let settled = false;
+    const work = new Promise<unknown>((resolve, reject) => {
+      resolveWork = resolve;
+      rejectWork = reject;
+    });
     maasPending.set(key, work);
-    try { return await work; } finally { maasPending.delete(key); }
+    const settle = (error: unknown, value?: unknown) => {
+      if (settled) return;
+      settled = true;
+      if (maasPending.get(key) === work) maasPending.delete(key);
+      if (error) rejectWork(error);
+      else resolveWork(value);
+    };
+    try {
+      claimMaasBudget();
+    } catch (error) {
+      settle(error);
+      return work;
+    }
+    void (async () => {
+      try {
+        const bearer = await accessToken();
+        const payload = await request(buildMaasPlannerUrl(query), {
+          headers: { Authorization: `Bearer ${bearer}`, Accept: 'application/json' },
+        }, maasTimeoutMs);
+        const slotEnd = (Math.floor(now() / MAAS_CACHE_SLOT_MS) + 1) * MAAS_CACHE_SLOT_MS;
+        if (maasCache.size >= 64) maasCache.delete(maasCache.keys().next().value!);
+        maasCache.set(key, { expires: Math.max(now() + 1_000, slotEnd), value: payload });
+        settle(null, payload);
+      } catch (error) {
+        settle(error);
+      }
+    })();
+    return work;
   }
 
   async function loadCampusLive(spec: (typeof CAMPUS_NEXT)[keyof typeof CAMPUS_NEXT]) {

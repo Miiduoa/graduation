@@ -12,6 +12,17 @@ export const MAAS_PLANNER_PATH = '/api/maas/Routing/Planner';
 export const MAAS_RATE_LIMIT_PER_MINUTE = 5;
 export const MAAS_CACHE_SLOT_MS = 5 * 60_000;
 export const MAAS_TIMEOUT_MS = 8_000;
+/** 快取鍵粗化到約 111 公尺，避免微移 lat/lon 刷出大量 miss。 */
+export const MAAS_CACHE_COORD_DECIMALS = 3;
+/** 出發點須在校門 2.5 公里內，否則改用校門常數，不用呼叫端任意座標。 */
+export const MAAS_ORIGIN_MAX_METERS = 2_500;
+/** 迄點限臺中市區常見範圍（校門、沙鹿、臺中車站、高鐵、逢甲）。 */
+export const MAAS_DESTINATION_BOUNDS = {
+  minLat: 24.08,
+  maxLat: 24.32,
+  minLon: 120.50,
+  maxLon: 120.80,
+} as const;
 export const TRANSFER_PLAN_LIMIT = 3;
 /** 轉乘總時間至少少這幾分鐘，才算「明顯更快」。 */
 export const TRANSFER_FASTER_BY_MINUTES = 10;
@@ -66,7 +77,22 @@ export function maasCacheSlot(ms: number): number {
 }
 
 export function roundCoord(value: number): string {
-  return value.toFixed(4);
+  return value.toFixed(MAAS_CACHE_COORD_DECIMALS);
+}
+
+export function isNearCampusOrigin(origin: Position): boolean {
+  return isPosition(origin) && distanceMetres(origin, PROVIDENCE_DIRECT_ORIGIN) <= MAAS_ORIGIN_MAX_METERS;
+}
+
+export function clampMaasOrigin(origin: Position): Position {
+  return isNearCampusOrigin(origin) ? origin : PROVIDENCE_DIRECT_ORIGIN;
+}
+
+export function isAllowedMaasDestination(destination: Position): boolean {
+  if (!isPosition(destination)) return false;
+  const { minLat, maxLat, minLon, maxLon } = MAAS_DESTINATION_BOUNDS;
+  return destination.lat >= minLat && destination.lat <= maxLat
+    && destination.lon >= minLon && destination.lon <= maxLon;
 }
 
 export function maasCacheKey(query: MaasPlannerQuery): string {
@@ -417,8 +443,8 @@ export function transferPlannerQuery(
 ): MaasPlannerQuery | null {
   if (!destination || destination.lat === null || destination.lon === null) return null;
   const dest = { lat: destination.lat, lon: destination.lon };
-  if (!isPosition(origin) || !isPosition(dest)) return null;
-  return { origin, destination: dest, departureAt: now };
+  if (!isPosition(origin) || !isPosition(dest) || !isAllowedMaasDestination(dest)) return null;
+  return { origin: clampMaasOrigin(origin), destination: dest, departureAt: now };
 }
 
 export function defaultTransferOrigin(origin?: Position | null): Position {

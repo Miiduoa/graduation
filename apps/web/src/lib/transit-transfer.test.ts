@@ -1,8 +1,9 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createTransitService } from './transit-server';
 import {
-  MAAS_RATE_LIMIT_PER_MINUTE,
-  buildMaasPlannerUrl, maasCacheKey, maasUrlHasArrivalParam, mergeDirectAndTransfers,
+  MAAS_CACHE_COORD_DECIMALS, MAAS_RATE_LIMIT_PER_MINUTE,
+  buildMaasPlannerUrl, clampMaasOrigin, isAllowedMaasDestination, isNearCampusOrigin,
+  maasCacheKey, maasUrlHasArrivalParam, mergeDirectAndTransfers,
   parseMaasTransferPlans, shouldRequestMaas, transferPlannerQuery,
 } from './transit-transfer';
 import { PROVIDENCE_DIRECT_ORIGIN, PROVIDENCE_ZHUGU_HALL, buildDirectPlan, resolveDirectDestination } from './transit-direct';
@@ -154,6 +155,32 @@ describe('TDX 轉乘方案', () => {
     expect(maasInit).toContain('Bearer test-token');
   });
 
+  it('快取鍵粗化到小數 3 位，校門外定位不另開 MaaS 鍵', () => {
+    expect(MAAS_CACHE_COORD_DECIMALS).toBe(3);
+    expect(maasCacheKey({
+      origin: { lat: 24.225388, lon: 120.577561 },
+      destination: { lat: 24.11111, lon: 120.61612 },
+      departureAt: NOW,
+    })).toBe(maasCacheKey({
+      origin: { lat: 24.225300, lon: 120.577500 },
+      destination: { lat: 24.11144, lon: 120.61644 },
+      departureAt: NOW,
+    }));
+    expect(isNearCampusOrigin(PROVIDENCE_DIRECT_ORIGIN)).toBe(true);
+    expect(clampMaasOrigin({ lat: 25.033, lon: 121.565 })).toEqual(PROVIDENCE_DIRECT_ORIGIN);
+    expect(isAllowedMaasDestination({ lat: 24.112, lon: 120.616 })).toBe(true);
+    expect(isAllowedMaasDestination({ lat: 25.0, lon: 121.5 })).toBe(false);
+    const far = transferPlannerQuery({ lat: 25.033, lon: 121.565 }, {
+      query: '高鐵臺中站', label: '高鐵臺中站', kind: 'landmark',
+      lat: 24.112, lon: 120.616, matchNames: ['高鐵臺中站'],
+    }, NOW);
+    expect(far?.origin).toEqual(PROVIDENCE_DIRECT_ORIGIN);
+    expect(transferPlannerQuery(PROVIDENCE_DIRECT_ORIGIN, {
+      query: '遠方', label: '遠方', kind: 'landmark',
+      lat: 25.0, lon: 121.5, matchNames: ['遠方'],
+    }, NOW)).toBeNull();
+  });
+
   it('同起訖、同 5 分鐘時段共用快取，不重複打 MaaS', async () => {
     const mock = service(busThenMaas(walkOnlyPayload()));
     await mock.execute({ action: 'direct', schoolId: 'pu', destination: '高鐵臺中站' });
@@ -242,6 +269,68 @@ describe('TDX 轉乘方案', () => {
     expect(result.transferFallback).toBe(true);
     expect(result.googleMapsUrl).toContain('travelmode=transit');
     expect(buildDirectPlan({ query: '高鐵臺中站' }).googleMapsUrl).toContain('https://www.google.com/maps/dir/?');
+  });
+
+  it('同鍵並行只打一次上游；不同 origin 大量同時請求每分鐘最多 5 次', async () => {
+    const same = service(async (url) => {
+      if (url.includes('/api/maas/')) {
+        await new Promise((resolve) => setTimeout(resolve, 40));
+        return Response.json(walkOnlyPayload());
+      }
+      if (url.includes('/StopOfRoute/')) return Response.json([]);
+      return Response.json([]);
+    });
+    const sameResults = await Promise.all(Array.from({ length: 8 }, () =>
+      same.execute({ action: 'direct', schoolId: 'pu', destination: '高鐵臺中站' })));
+    expect(sameResults.every((result) => result.status === 'ready')).toBe(true);
+    expect(same.calls.filter((call) => call.url.includes('/api/maas/Routing/Planner'))).toHaveLength(1);
+
+    const burst = service(async (url) => {
+      if (url.includes('/api/maas/')) {
+        await new Promise((resolve) => setTimeout(resolve, 40));
+        return Response.json(walkOnlyPayload());
+      }
+      if (url.includes('/StopOfRoute/')) return Response.json([]);
+      return Response.json([]);
+    });
+    const burstResults = await Promise.all(Array.from({ length: 12 }, (_, index) => burst.execute({
+      action: 'direct', schoolId: 'pu', destination: '高鐵臺中站',
+      lat: 24.221 + index * 0.001, lon: 120.577561,
+    })));
+    expect(burstResults.every((result) => result.status === 'ready')).toBe(true);
+    expect(burst.calls.filter((call) => call.url.includes('/api/maas/Routing/Planner'))).toHaveLength(5);
+    expect(burstResults.filter((result) => result.status === 'ready' && result.kind === 'direct' && result.transferFallback).length).toBeGreaterThan(0);
+  });
+
+  it('MaaS 429 後納入全域暫停，不再打上游', async () => {
+    const mock = service((url) => {
+      if (url.includes('/api/maas/')) {
+        return new Response('{}', { status: 429, headers: { 'retry-after': '60' } });
+      }
+      if (url.includes('/StopOfRoute/')) return Response.json([]);
+      return Response.json([]);
+    });
+    const first = await mock.execute({
+      action: 'direct', schoolId: 'pu', destination: '高鐵臺中站',
+      lat: 24.225388, lon: 120.577561,
+    });
+    expect(first.status).toBe('ready');
+    if (first.status !== 'ready' || first.kind !== 'direct') throw new Error('expected direct');
+    expect(first.transferFallback).toBe(true);
+    mock.tick(16_000);
+    const etaAfterFirst = mock.calls.filter((call) => call.url.includes('/EstimatedTimeOfArrival/')).length;
+    const second = await mock.execute({
+      action: 'direct', schoolId: 'pu', destination: '高鐵臺中站',
+      lat: 24.226388, lon: 120.577561,
+    });
+    expect(second.status).toBe('ready');
+    if (second.status !== 'ready' || second.kind !== 'direct') throw new Error('expected direct');
+    expect(second.transferFallback).toBe(true);
+    expect(mock.calls.filter((call) => call.url.includes('/api/maas/Routing/Planner'))).toHaveLength(1);
+    expect(mock.calls.filter((call) => call.url.includes('/EstimatedTimeOfArrival/')).length).toBe(etaAfterFirst);
+    const campus = await mock.execute({ action: 'campus-next', schoolId: 'pu' });
+    expect(campus.status === 'ready' || campus.status === 'unavailable').toBe(true);
+    expect(mock.calls.filter((call) => call.url.includes('/EstimatedTimeOfArrival/')).length).toBe(etaAfterFirst);
   });
 
   it('有即將到站的直達時不打 MaaS', async () => {

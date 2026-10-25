@@ -974,6 +974,58 @@ test('transfer search rate-limit and timeout fall back to direct plus Google Map
   assert.equal(fallback.transferFallback, true);
   assert.match(fallback.googleMapsUrl, /^https:\/\/www\.google\.com\/maps\/dir\/\?/);
 });
+test('transfer search coalesces the same key and caps concurrent origins at 5 MaaS calls', async () => {
+  const same = service(async (url) => {
+    if (url.includes('/api/maas/')) {
+      await new Promise((resolve) => setTimeout(resolve, 40));
+      return Response.json(maasFixture);
+    }
+    return Response.json([]);
+  });
+  const sameResults = await Promise.all(Array.from({ length: 8 }, () =>
+    same.execute({ action: 'direct', schoolId: 'pu', destination: '高鐵臺中站' })));
+  assert.equal(sameResults.every((result) => result.status === 'ready'), true);
+  assert.equal(same.calls.filter((call) => call.url.includes('/api/maas/Routing/Planner')).length, 1);
+
+  const burst = service(async (url) => {
+    if (url.includes('/api/maas/')) {
+      await new Promise((resolve) => setTimeout(resolve, 40));
+      return Response.json(maasFixture);
+    }
+    return Response.json([]);
+  });
+  const burstResults = await Promise.all(Array.from({ length: 12 }, (_, index) => burst.execute({
+    action: 'direct', schoolId: 'pu', destination: '高鐵臺中站',
+    lat: 24.221 + index * 0.001, lon: 120.577561,
+  })));
+  assert.equal(burstResults.every((result) => result.status === 'ready'), true);
+  assert.equal(burst.calls.filter((call) => call.url.includes('/api/maas/Routing/Planner')).length, 5);
+  assert.equal(burstResults.some((result) => result.transferFallback === true), true);
+});
+test('transfer search 429 pauses later MaaS and campus-next upstream calls', async () => {
+  const mock = service((url) => {
+    if (url.includes('/api/maas/')) {
+      return new Response('{}', { status: 429, headers: { 'retry-after': '60' } });
+    }
+    return Response.json([]);
+  });
+  const first = await mock.execute({
+    action: 'direct', schoolId: 'pu', destination: '高鐵臺中站',
+    lat: 24.225388, lon: 120.577561,
+  });
+  assert.equal(first.status, 'ready');
+  assert.equal(first.transferFallback, true);
+  mock.tick(16_000);
+  const etaAfterFirst = mock.calls.filter((call) => call.url.includes('/EstimatedTimeOfArrival/')).length;
+  const second = await mock.execute({
+    action: 'direct', schoolId: 'pu', destination: '高鐵臺中站',
+    lat: 24.226388, lon: 120.577561,
+  });
+  assert.equal(second.status, 'ready');
+  assert.equal(second.transferFallback, true);
+  assert.equal(mock.calls.filter((call) => call.url.includes('/api/maas/Routing/Planner')).length, 1);
+  assert.equal(mock.calls.filter((call) => call.url.includes('/EstimatedTimeOfArrival/')).length, etaAfterFirst);
+});
 test('transfer search without keys never calls MaaS and keeps the Google Maps link', async () => {
   const mock = service([], { credentials: () => ({}) });
   const result = await mock.execute({ action: 'direct', schoolId: 'pu', destination: '高鐵臺中站' });
