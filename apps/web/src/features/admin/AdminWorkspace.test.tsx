@@ -783,3 +783,36 @@ it('synchronizes the audit search field when history changes the applied query',
     expect((screen.getByLabelText('在已載入紀錄中搜尋') as HTMLInputElement).value).toBe('第二'),
   );
 });
+
+it('preserves the selected school while navigating between settings and authorizations', async () => {
+  window.history.replaceState(null, '', '/admin#schools/school-one');
+  render(<AdminWorkspace />);
+  await screen.findByRole('button', { name: '收起學校設定' });
+  expect(screen.getByRole('link', { name: '校方授權作業' }).getAttribute('href')).toBe(
+    '/admin/ops?tab=people&school=school-one',
+  );
+  fireEvent.click(screen.getByRole('button', { name: '查看校方授權' }));
+  await waitFor(() => expect(window.location.hash).toBe('#people/school-one'));
+  expect(screen.getByRole('button', { name: '查看學校設定' })).toBeTruthy();
+  fireEvent.click(screen.getByRole('button', { name: '查看學校設定' }));
+  await waitFor(() => expect(window.location.hash).toBe('#schools/school-one'));
+  expect(screen.getByRole('button', { name: '收起學校設定' })).toBeTruthy();
+});
+
+it('does not read management data while logout confirmation is pending', () => {
+  mocks.auth.pendingLogout = true;
+  render(<AdminWorkspace />);
+  expect(screen.getByText('正在重新確認管理權限…')).toBeTruthy();
+  expect(fetcher).not.toHaveBeenCalled();
+});
+
+it('links the overview directly to the correct operational tasks', async () => {
+  render(<AdminWorkspace />);
+  expect((await screen.findByRole('link', { name: /校方成員與授權/ })).getAttribute('href'))
+    .toBe('/admin/ops?tab=people');
+  expect(screen.getByRole('link', { name: /店家申請審核/ }).getAttribute('href'))
+    .toBe('/admin/ops?tab=merchants');
+  expect(
+    screen.getAllByRole('link', { name: /課班掛靠/ }).map((link) => link.getAttribute('href')),
+  ).toContain('/admin/ops?tab=affiliation');
+});

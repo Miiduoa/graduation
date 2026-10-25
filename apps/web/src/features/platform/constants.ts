@@ -12,6 +12,13 @@ export const SCHOOL_APPLY_PATH = '/auth/platform/school-apply';
 export const OPS_TABS = ['schools', 'people', 'merchants', 'affiliation', 'audit'] as const;
 export type OpsTab = (typeof OPS_TABS)[number];
 
+export function readOpsSchool(search: string | null | undefined): string | null {
+  const candidate = new URLSearchParams((search || '').replace(/^\?/, '')).get('school');
+  return candidate && /^[a-z0-9](?:[a-z0-9-]{0,98}[a-z0-9])$/.test(candidate)
+    ? candidate
+    : null;
+}
+
 export function isOpsTab(value: string | null | undefined): value is OpsTab {
   return !!value && (OPS_TABS as readonly string[]).includes(value);
 }

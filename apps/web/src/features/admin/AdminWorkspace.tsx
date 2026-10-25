@@ -26,14 +26,11 @@ import { AdminMerchants } from './AdminMerchants';
 import common from '@/app/servicePages.module.css';
 import styles from './Admin.module.css';
 
-const navOrder: AdminSection[] = [
-  'overview',
-  'schools',
-  'people',
-  'merchants',
-  'boards',
-  'reports',
-  'audit',
+const navGroups: Array<{ label: string; sections: AdminSection[] }> = [
+  { label: '工作概況', sections: ['overview'] },
+  { label: '校園與授權', sections: ['schools', 'people', 'merchants'] },
+  { label: '社群與安全', sections: ['boards', 'reports'] },
+  { label: '紀錄', sections: ['audit'] },
 ];
 
 export function AdminWorkspace() {
@@ -58,7 +55,7 @@ export function AdminWorkspace() {
           <Workspace
             key={`${auth.session.platformAccountId}:${auth.session.context}`}
             context={auth.session.context}
-            suspended={auth.loading}
+            suspended={auth.loading || auth.pendingLogout}
           />
         ) : auth.loading ? (
           <p role="status" className={common.loading}>
@@ -162,37 +159,41 @@ function Workspace({ context, suspended }: { context: string; suspended: boolean
               <p className={styles.eyebrow}>管理範圍 · 全部學校</p>
               <p className={styles.muted}>已使用平台管理員帳號登入</p>
             </div>
-            <nav className={styles.sideNav} aria-label="管理項目">
-              {navOrder.map((section) => (
-                <button
-                  type="button"
-                  className={styles.navItem}
-                  key={section}
-                  aria-pressed={location.section === section}
-                  aria-current={location.section === section ? 'page' : undefined}
-                  onClick={() =>
-                    go({
-                      section,
-                      schoolId: null,
-                      reportId: null,
-                      boardsCreate: false,
-                    })
-                  }
-                >
-                  {sectionMeta[section].label}
-                </button>
+            <nav className={styles.sideNav} aria-label="平台管理項目">
+              {navGroups.map((group) => (
+                <div className={styles.navGroup} key={group.label}>
+                  <p className={styles.navGroupLabel}>{group.label}</p>
+                  {group.sections.map((section) => (
+                    <button
+                      type="button"
+                      className={styles.navItem}
+                      key={section}
+                      aria-pressed={location.section === section}
+                      aria-current={location.section === section ? 'page' : undefined}
+                      onClick={() => {
+                        const keepSchool =
+                          (section === 'schools' || section === 'people') &&
+                          (location.section === 'schools' || location.section === 'people');
+                        go({
+                          section,
+                          schoolId: keepSchool ? location.schoolId : null,
+                          reportId: null,
+                          boardsCreate: false,
+                        });
+                      }}
+                    >
+                      {sectionMeta[section].label}
+                    </button>
+                  ))}
+                </div>
               ))}
             </nav>
             <div className={styles.sideSecondary}>
               <p className={styles.sideLabel}>延伸作業</p>
-              <a className={styles.link} href="/admin/school-review">
-                審核學校申請
-              </a>
-              <p className={styles.muted}>尚未建檔的接入申請在此審核。</p>
-              <a className={styles.link} href="/admin/ops">
-                人員、店家與課班
-              </a>
-              <p className={styles.muted}>前往既有管理台，處理身分與所屬學校。</p>
+              <a className={styles.link} href="/admin/school-review">接入申請審核</a>
+              <a className={styles.link} href="/admin/ops?tab=people">校方成員作業</a>
+              <a className={styles.link} href="/admin/ops?tab=merchants">店家審核作業</a>
+              <a className={styles.link} href="/admin/ops?tab=affiliation">課班掛靠審核</a>
             </div>
           </aside>
 
@@ -203,13 +204,37 @@ function Workspace({ context, suspended }: { context: string; suspended: boolean
                 <p className={styles.muted}>{meta.purpose}</p>
               </div>
               <div className={styles.mobileSecondary}>
-                <a className={styles.link} href="/admin/school-review">
-                  審核學校申請
-                </a>
-                <a className={styles.link} href="/admin/ops">
-                  人員、店家與課班
-                </a>
+                <a className={styles.link} href="/admin/school-review">接入審核</a>
+                <a className={styles.link} href="/admin/ops?tab=people">校方成員</a>
+                <a className={styles.link} href="/admin/ops?tab=merchants">店家審核</a>
+                <a className={styles.link} href="/admin/ops?tab=affiliation">課班掛靠</a>
               </div>
+              {(location.section === 'schools' || location.section === 'people') &&
+              location.schoolId ? (
+                <div className={styles.scopeStrip}>
+                  <span>目前學校代號：<strong>{location.schoolId}</strong></span>
+                  <div className={styles.scopeActions}>
+                    <button
+                      type="button"
+                      className={styles.linkButton}
+                      onClick={() =>
+                        go({
+                          section: location.section === 'schools' ? 'people' : 'schools',
+                          schoolId: location.schoolId,
+                        })
+                      }
+                    >
+                      {location.section === 'schools' ? '查看校方授權' : '查看學校設定'}
+                    </button>
+                    <Link
+                      className={styles.link}
+                      href={'/admin/ops?tab=people&school=' + encodeURIComponent(location.schoolId)}
+                    >
+                      校方授權作業
+                    </Link>
+                  </div>
+                </div>
+              ) : null}
             </header>
 
             {location.section === 'overview' ? (
