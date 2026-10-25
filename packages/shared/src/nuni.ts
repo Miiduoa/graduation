@@ -433,9 +433,11 @@ export function createNuniClasses(
     async join(code: string, idempotencyKey: string) {
       return parseNuniWorkspace(await transport('class-workspaces/join', { code, idempotencyKey }));
     },
-    async invite(id: string, idempotencyKey: string) {
+    async invite(id: string, idempotencyKey: string, maxUses = 30) {
+      if (!Number.isInteger(maxUses) || maxUses < 1 || maxUses > 100)
+        throw new NuniError(422, 'INVALID_INPUT');
       const value = nuniRecord(
-        await transport(`${path(id)}/invites`, { idempotencyKey, maxUses: 30 }),
+        await transport(`${path(id)}/invites`, { idempotencyKey, maxUses }),
       );
       const code = string(value.code, 24);
       if (!/^[A-Z0-9]{6,12}$/.test(code)) throw new NuniError(502, 'INVALID_RESPONSE');

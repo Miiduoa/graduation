@@ -5,6 +5,7 @@ import { useEffect, useState } from 'react';
 import { SiteShell } from '@/components/SiteShell';
 import { Button } from '@/components/ui/Button';
 import { AdminHeader } from '@/features/admin/AdminHeader';
+import { parseSchools } from '@/features/admin/api';
 import { useNuniSession } from '@/features/nuni/Session';
 import common from '@/app/servicePages.module.css';
 import admin from '@/features/admin/Admin.module.css';
@@ -17,7 +18,7 @@ import {
   SCHOOL_APPLY_PATH,
   SCHOOL_REVIEW_PATH,
 } from './constants';
-import { asRecords, platformFetch } from './platformFetch';
+import { adminFetch, asRecords } from './platformFetch';
 import styles from './Platform.module.css';
 
 type Application = {
@@ -50,55 +51,45 @@ function parseApplications(value: unknown): Application[] {
     .filter((row) => row.id);
 }
 
-function parseProvisioned(value: unknown): ProvisionedSchool[] {
-  return asRecords(value)
-    .filter((row) => row.lifecycle === 'provisioned' && typeof row.tenantId === 'string' && row.tenantId)
-    .map((row) => ({
-      tenantId: String(row.tenantId),
-      displayName: String(row.displayName || row.tenantId),
-    }));
-}
-
 export function SchoolReview() {
   const auth = useNuniSession();
+  const operator = !!auth.session?.isPlatformOperator;
   const [applications, setApplications] = useState<Application[]>([]);
   const [schools, setSchools] = useState<ProvisionedSchool[]>([]);
-  const [forbidden, setForbidden] = useState(false);
   const [error, setError] = useState('');
   const [busyId, setBusyId] = useState<string | null>(null);
   const [loaded, setLoaded] = useState(false);
 
-  async function load() {
-    const pending = await platformFetch('/auth/platform/school-applications?scope=pending');
+  async function load(context: string) {
+    const pending = await adminFetch('school-applications?scope=pending', 'GET', undefined, context);
     if (pending.status === 401) {
       window.location.replace(accountReturnHref(SCHOOL_REVIEW_PATH));
       return;
     }
-    if (pending.status === 403) {
-      setForbidden(true);
-      setApplications([]);
-      setLoaded(true);
+    if (!pending.ok) throw new Error('目前讀不到待審申請。');
+    setApplications(parseApplications(pending.body.applications));
+    const ops = await adminFetch('schools', 'GET', undefined, context);
+    if (ops.status === 401) {
+      window.location.replace(accountReturnHref(SCHOOL_REVIEW_PATH));
       return;
     }
-    if (!pending.ok) throw new Error('目前讀不到待審申請。');
-    setForbidden(false);
-    setApplications(parseApplications(pending.body.applications));
-    const ops = await platformFetch('/auth/platform/ops-api/schools');
-    if (ops.status === 401 || ops.status === 403) {
-      setSchools([]);
-    } else if (!ops.ok) {
-      throw new Error('目前讀不到待開放學校。');
-    } else {
-      setSchools(parseProvisioned(ops.body.schools));
-    }
+    if (!ops.ok) throw new Error('目前讀不到待開放學校。');
+    setSchools(
+      parseSchools(ops.body)
+        .filter((row) => row.lifecycle === 'provisioned' && row.tenantId)
+        .map((row) => ({
+          tenantId: row.tenantId as string,
+          displayName: row.displayName,
+        })),
+    );
     setLoaded(true);
   }
 
   useEffect(() => {
-    if (!auth.session || auth.loading) return;
+    if (!operator || !auth.session || auth.loading) return;
     let active = true;
     setError('');
-    void load().catch((failure: Error) => {
+    void load(auth.session.context).catch((failure: Error) => {
       if (active) {
         setError(failure.message || '目前讀不到待審申請。');
         setLoaded(true);
@@ -108,26 +99,29 @@ export function SchoolReview() {
       active = false;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [auth.session?.context, auth.loading]);
+  }, [auth.session?.context, auth.loading, operator]);
 
   async function decide(id: string, decision: 'approve' | 'reject') {
+    if (!auth.session) return;
     setBusyId(id);
     setError('');
     try {
-      const result = await platformFetch(
-        `/auth/platform/school-applications/${encodeURIComponent(id)}/decision`,
+      const result = await adminFetch(
+        `school-applications/${encodeURIComponent(id)}/decision`,
+        'POST',
         {
           decision,
           reason: decision === 'approve' ? APPROVE_SCHOOL_REASON : REJECT_SCHOOL_REASON,
           idempotencyKey: `web-school-decide-${crypto.randomUUID()}`,
         },
+        auth.session.context,
       );
       if (result.status === 401) {
         window.location.replace(accountReturnHref(SCHOOL_REVIEW_PATH));
         return;
       }
       if (!result.ok) throw new Error('審核沒有完成，請稍後再試。');
-      await load();
+      await load(auth.session.context);
     } catch (failure) {
       setError(failure instanceof Error ? failure.message : '審核沒有完成，請稍後再試。');
     } finally {
@@ -136,23 +130,34 @@ export function SchoolReview() {
   }
 
   async function openSchool(tenantId: string) {
+    if (!auth.session) return;
     setBusyId(tenantId);
     setError('');
     try {
-      const result = await platformFetch(
-        `/auth/platform/ops-api/schools/${encodeURIComponent(tenantId)}/open`,
+      const result = await adminFetch(
+        `schools/${encodeURIComponent(tenantId)}/open`,
+        'POST',
         {
           reason: OPEN_SCHOOL_REASON,
           idempotencyKey: `web-school-open-${crypto.randomUUID()}`,
         },
+        auth.session.context,
       );
       if (result.status === 401) {
         window.location.replace(accountReturnHref(SCHOOL_REVIEW_PATH));
         return;
       }
       if (!result.ok) throw new Error('開放沒有完成，請稍後再試。');
-      const ops = await platformFetch('/auth/platform/ops-api/schools');
-      if (ops.ok) setSchools(parseProvisioned(ops.body.schools));
+      const ops = await adminFetch('schools', 'GET', undefined, auth.session.context);
+      if (ops.ok)
+        setSchools(
+          parseSchools(ops.body)
+            .filter((row) => row.lifecycle === 'provisioned' && row.tenantId)
+            .map((row) => ({
+              tenantId: row.tenantId as string,
+              displayName: row.displayName,
+            })),
+        );
     } catch (failure) {
       setError(failure instanceof Error ? failure.message : '開放沒有完成，請稍後再試。');
     } finally {
@@ -161,23 +166,8 @@ export function SchoolReview() {
   }
 
   return (
-    <SiteShell header={<AdminHeader />} title={auth.session?.isPlatformOperator ? undefined : '接入審核'}>
-      {!auth.session && !auth.loading ? (
-        <section className={`${common.stateCard} ${admin.gateCard}`}>
-          <p className={admin.eyebrow}>平台營運</p>
-          <h2>請先登入管理員帳號</h2>
-          <p>登入後會確認你的平台管理權限，才能審核學校接入。</p>
-          <div className={common.actions}>
-            <Link className={admin.link} href="/admin/login">
-              前往管理員登入
-            </Link>
-          </div>
-        </section>
-      ) : auth.loading && !auth.session ? (
-        <p role="status" className={common.loading}>
-          正在確認管理權限…
-        </p>
-      ) : (
+    <SiteShell header={<AdminHeader />} title={operator ? undefined : '接入審核'}>
+      {operator ? (
         <div className={styles.page}>
           <header className={styles.heading}>
             <div>
@@ -192,7 +182,7 @@ export function SchoolReview() {
                 審核
               </Link>
               <Link href={OPS_PATH}>開通</Link>
-              <Link href={`${OPS_PATH}#affiliation`}>掛靠</Link>
+              <Link href={`${OPS_PATH}?tab=affiliation`}>掛靠</Link>
             </nav>
           </header>
           {error ? (
@@ -202,14 +192,8 @@ export function SchoolReview() {
           ) : null}
           <section className={styles.panel}>
             <h2>待審申請</h2>
-            {forbidden ? (
-              <p className={styles.notice}>
-                這台帳號不是平台營運人員，不能審核學校接入。若你是校方代表人，請改走{' '}
-                <Link href={SCHOOL_APPLY_PATH}>學校接入</Link>。
-              </p>
-            ) : null}
-            {!loaded && auth.session ? <p role="status">正在讀取待審申請…</p> : null}
-            {loaded && !forbidden && applications.length === 0 ? <p>目前沒有待審申請。</p> : null}
+            {!loaded ? <p role="status">正在讀取待審申請…</p> : null}
+            {loaded && applications.length === 0 ? <p>目前沒有待審申請。</p> : null}
             {applications.map((item) => (
               <article key={item.id} className={styles.item}>
                 <div>
@@ -232,31 +216,56 @@ export function SchoolReview() {
               </article>
             ))}
           </section>
-          {!forbidden ? (
-            <section className={styles.panel}>
-              <h2>待開放</h2>
-              <p className={styles.notice}>建檔未開放，找校尚不可見——一鍵開通後學生才看得到已開通</p>
-              {schools.length === 0 ? <p>目前沒有已建檔、尚未開放的學校。</p> : null}
-              {schools.map((school) => (
-                <article key={school.tenantId} className={styles.item}>
-                  <div>
-                    <strong>{school.displayName}</strong>
-                    <p className={styles.muted}>{school.tenantId}</p>
-                  </div>
-                  <div className={styles.actions}>
-                    <Button
-                      disabled={busyId === school.tenantId}
-                      onClick={() => void openSchool(school.tenantId)}
-                    >
-                      一鍵開通
-                    </Button>
-                    <Link href={OPS_PATH}>去平台管理綁老師</Link>
-                  </div>
-                </article>
-              ))}
-            </section>
-          ) : null}
+          <section className={styles.panel}>
+            <h2>待開放</h2>
+            <p className={styles.notice}>建檔未開放，找校尚不可見——一鍵開通後學生才看得到已開通</p>
+            {schools.length === 0 ? <p>目前沒有已建檔、尚未開放的學校。</p> : null}
+            {schools.map((school) => (
+              <article key={school.tenantId} className={styles.item}>
+                <div>
+                  <strong>{school.displayName}</strong>
+                  <p className={styles.muted}>{school.tenantId}</p>
+                </div>
+                <div className={styles.actions}>
+                  <Button
+                    disabled={busyId === school.tenantId}
+                    onClick={() => void openSchool(school.tenantId)}
+                  >
+                    一鍵開通
+                  </Button>
+                  <Link href={OPS_PATH}>去平台管理綁老師</Link>
+                </div>
+              </article>
+            ))}
+          </section>
         </div>
+      ) : auth.loading ? (
+        <p role="status" className={common.loading}>
+          正在確認管理權限…
+        </p>
+      ) : (
+        <section className={`${common.stateCard} ${admin.gateCard}`}>
+          <p className={admin.eyebrow}>平台營運</p>
+          <h2>{auth.session ? '沒有管理權限' : '請先登入管理員帳號'}</h2>
+          <p>
+            {auth.error ||
+              (auth.session
+                ? '這台帳號不是平台營運人員，不能審核學校接入。若你是校方代表人，請改走學校接入。'
+                : '登入後會確認你的平台管理權限，才能審核學校接入。')}
+          </p>
+          <div className={common.actions}>
+            {auth.session ? (
+              <Link className={admin.link} href={SCHOOL_APPLY_PATH}>
+                學校接入
+              </Link>
+            ) : (
+              <Link className={admin.link} href="/admin/login">
+                前往管理員登入
+              </Link>
+            )}
+            {auth.error ? <Button onClick={() => void auth.refresh()}>重新確認</Button> : null}
+          </div>
+        </section>
       )}
     </SiteShell>
   );

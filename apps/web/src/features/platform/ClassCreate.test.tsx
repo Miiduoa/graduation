@@ -1,11 +1,17 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
+import { NuniError } from '@campus/shared/src/nuni';
 import { ClassCreate } from './ClassCreate';
 
 const mocks = vi.hoisted(() => ({
   create: vi.fn(),
+  invite: vi.fn(),
   replace: vi.fn(),
-  session: null as null | { platformAccountId: string; context: string; isPlatformOperator: boolean },
+  session: null as null | {
+    platformAccountId: string;
+    context: string;
+    isPlatformOperator: boolean;
+  },
 }));
 
 vi.mock('next/navigation', () => ({
@@ -26,26 +32,18 @@ vi.mock('@/features/nuni/Session', () => ({
   }),
 }));
 vi.mock('@/features/nuni/CourseUI', () => ({
-  useClasses: () => ({ create: mocks.create, join: vi.fn() }),
+  useClasses: () => ({ create: mocks.create, invite: mocks.invite, join: vi.fn() }),
 }));
-
-const fetcher = vi.fn();
 
 beforeEach(() => {
   mocks.create.mockReset();
+  mocks.invite.mockReset();
   mocks.replace.mockReset();
   mocks.session = {
     platformAccountId: 'pa_1',
     context: 'a'.repeat(43),
     isPlatformOperator: false,
   };
-  fetcher.mockReset().mockResolvedValue(
-    new Response(JSON.stringify({ code: 'INVITE1' }), {
-      status: 200,
-      headers: { 'content-type': 'application/json' },
-    }),
-  );
-  vi.stubGlobal('fetch', fetcher);
   sessionStorage.clear();
 });
 
@@ -53,8 +51,9 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-it('creates a workspace then asks the existing invite endpoint for 100 uses', async () => {
+it('creates a workspace then asks the nuni invite API for 100 uses', async () => {
   mocks.create.mockResolvedValue({ id: 'cw_11111111-1111-4111-8111-111111111111' });
+  mocks.invite.mockResolvedValue({ code: 'INVITE1' });
   render(<ClassCreate />);
   fireEvent.change(screen.getByLabelText('課班名稱'), { target: { value: '設計專題' } });
   fireEvent.submit(screen.getByLabelText('課班名稱').closest('form')!);
@@ -64,8 +63,35 @@ it('creates a workspace then asks the existing invite endpoint for 100 uses', as
     ),
   );
   expect(mocks.create).toHaveBeenCalledWith('設計專題', expect.stringMatching(/^web-create-/));
-  expect(fetcher.mock.calls[0][0]).toContain(
-    '/auth/platform/class-workspaces/cw_11111111-1111-4111-8111-111111111111/invites',
+  expect(mocks.invite).toHaveBeenCalledWith(
+    'cw_11111111-1111-4111-8111-111111111111',
+    expect.stringMatching(/^web-invite-/),
+    100,
   );
-  expect(JSON.parse(fetcher.mock.calls[0][1].body)).toMatchObject({ maxUses: 100 });
+});
+
+it('stays on the create page when invite fails with a non-401 error', async () => {
+  mocks.create.mockResolvedValue({ id: 'cw_11111111-1111-4111-8111-111111111111' });
+  mocks.invite.mockRejectedValue(new NuniError(422, 'INVALID_INPUT'));
+  render(<ClassCreate />);
+  fireEvent.change(screen.getByLabelText('課班名稱'), { target: { value: '設計專題' } });
+  fireEvent.submit(screen.getByLabelText('課班名稱').closest('form')!);
+  expect(await screen.findByRole('alert')).toBeTruthy();
+  expect(mocks.replace).not.toHaveBeenCalled();
+  expect(screen.getByRole('heading', { name: '開課班' })).toBeTruthy();
+});
+
+it('sends an expired session back to account login', async () => {
+  const replace = vi.fn();
+  vi.stubGlobal('location', { ...window.location, replace });
+  mocks.create.mockRejectedValue(new NuniError(401, 'SIGN_IN_REQUIRED'));
+  render(<ClassCreate />);
+  fireEvent.change(screen.getByLabelText('課班名稱'), { target: { value: '設計專題' } });
+  fireEvent.submit(screen.getByLabelText('課班名稱').closest('form')!);
+  await waitFor(() =>
+    expect(replace).toHaveBeenCalledWith(
+      `/auth/account?returnUrl=${encodeURIComponent('/auth/platform/class-workspace/new')}`,
+    ),
+  );
+  expect(mocks.replace).not.toHaveBeenCalled();
 });

@@ -268,6 +268,14 @@ describe('pinned legacy HTML screens are not forwarded', () => {
     expect(redirectLocation(response)).toBe(destination);
   });
 
+  it('keeps the matching ops subpage as a tab query', async () => {
+    const response = await responseFor('/auth/platform/ops/people');
+    expect(getRewrittenUrl(response)).toBeNull();
+    const location = new URL(response.headers.get('location')!, 'https://nuni.tw');
+    expect(location.pathname).toBe('/admin/ops');
+    expect(location.search).toBe('?tab=people');
+  });
+
   it.each([
     '/auth/platform/class-workspace/join',
     '/auth/platform/class-workspace/new',

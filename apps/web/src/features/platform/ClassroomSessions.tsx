@@ -21,6 +21,11 @@ type RosterPerson = {
   punctuality?: string;
 };
 
+type MakeupRequest = {
+  platformAccountId: string;
+  displayName: string;
+};
+
 const rosterLabels: Record<string, string> = {
   present: '出席',
   absent: '缺席',
@@ -43,26 +48,28 @@ export function ClassroomSessions({
   workspaceId,
   isTeacher,
   units,
+  context,
 }: {
   workspaceId: string;
   isTeacher: boolean;
   units: Array<{ id: string; title: string }>;
+  context: string;
 }) {
   const [title, setTitle] = useState('本堂課');
   const [unitId, setUnitId] = useState('');
   const [code, setCode] = useState('');
   const [sessions, setSessions] = useState<SessionRow[]>([]);
   const [roster, setRoster] = useState<Record<string, RosterPerson[]> | null>(null);
+  const [pendingMakeup, setPendingMakeup] = useState<MakeupRequest[]>([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
 
-  const live = sessions.find((row) => row.state === 'open' || row.state === 'live') ?? null;
+  const live = sessions.find((row) => row.state === 'open') ?? null;
+  const root = `class-workspaces/${workspaceId}/classroom-sessions`;
 
   async function reload() {
-    const result = await platformFetch(
-      `/auth/platform/class-workspaces/${encodeURIComponent(workspaceId)}/classroom-sessions`,
-    );
+    const result = await platformFetch(root, 'GET', undefined, context);
     if (result.status === 401) {
       window.location.replace(accountReturnHref(workspacePath(workspaceId)));
       return;
@@ -73,44 +80,63 @@ export function ClassroomSessions({
 
   useEffect(() => {
     let active = true;
-    void reload()
-      .catch((failure: Error) => {
-        if (active) setError(failure.message);
-      });
+    void reload().catch((failure: Error) => {
+      if (active) setError(failure.message);
+    });
     return () => {
       active = false;
     };
     // workspaceId is the loaded course; extras re-fetch when it changes.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [workspaceId]);
+  }, [workspaceId, context]);
 
   useEffect(() => {
     if (!live || !isTeacher) {
       setRoster(null);
+      setPendingMakeup([]);
       return;
     }
     let active = true;
-    void platformFetch(
-      `/auth/platform/class-workspaces/${encodeURIComponent(workspaceId)}/classroom-sessions/${encodeURIComponent(live.id)}/roster`,
-    ).then((result) => {
-      if (!active || result.status === 403 || !result.ok) {
-        if (active && result.status !== 403 && !result.ok) setRoster(null);
+    const sessionRoot = `${root}/${live.id}`;
+    void Promise.all([
+      platformFetch(`${sessionRoot}/roster`, 'GET', undefined, context),
+      platformFetch(`${sessionRoot}/makeup-requests`, 'GET', undefined, context),
+    ]).then(([rosterResult, makeupResult]) => {
+      if (!active) return;
+      if (rosterResult.status === 401 || makeupResult.status === 401) {
+        window.location.replace(accountReturnHref(workspacePath(workspaceId)));
         return;
       }
-      const groups: Record<string, RosterPerson[]> = { present: [], absent: [], late: [] };
-      for (const key of Object.keys(groups)) {
-        groups[key] = asRecords(result.body[key]).map((row) => ({
-          platformAccountId: String(row.platformAccountId || ''),
-          displayName: String(row.displayName || '同學'),
-          punctuality: typeof row.punctuality === 'string' ? row.punctuality : undefined,
-        }));
+      if (rosterResult.status === 403 || !rosterResult.ok) {
+        setRoster(null);
+      } else {
+        const groups: Record<string, RosterPerson[]> = { present: [], absent: [], late: [] };
+        for (const key of Object.keys(groups)) {
+          groups[key] = asRecords(rosterResult.body[key]).map((row) => ({
+            platformAccountId: String(row.platformAccountId || ''),
+            displayName: String(row.displayName || '同學'),
+            punctuality: typeof row.punctuality === 'string' ? row.punctuality : undefined,
+          }));
+        }
+        setRoster(groups);
       }
-      setRoster(groups);
+      if (!makeupResult.ok) {
+        setPendingMakeup([]);
+        return;
+      }
+      setPendingMakeup(
+        asRecords(makeupResult.body.requests)
+          .map((row) => ({
+            platformAccountId: String(row.platformAccountId || ''),
+            displayName: String(row.displayName || '同學'),
+          }))
+          .filter((row) => row.platformAccountId),
+      );
     });
     return () => {
       active = false;
     };
-  }, [live?.id, isTeacher, workspaceId]);
+  }, [live?.id, isTeacher, workspaceId, context, root]);
 
   async function run(action: () => Promise<void>, fallback: string) {
     setBusy(true);
@@ -146,12 +172,14 @@ export function ClassroomSessions({
             event.preventDefault();
             void run(async () => {
               const result = await platformFetch(
-                `/auth/platform/class-workspaces/${encodeURIComponent(workspaceId)}/classroom-sessions`,
+                root,
+                'POST',
                 {
                   title: title.trim(),
                   idempotencyKey: `web-classroom-${crypto.randomUUID()}`,
                   ...(unitId ? { unitId } : {}),
                 },
+                context,
               );
               if (result.status === 401) {
                 window.location.replace(accountReturnHref(workspacePath(workspaceId)));
@@ -198,9 +226,10 @@ export function ClassroomSessions({
                 event.preventDefault();
                 void run(async () => {
                   const result = await platformFetch(
-                    `/auth/platform/class-workspaces/${encodeURIComponent(workspaceId)}/classroom-sessions/${encodeURIComponent(live.id)}/check-in`,
-                    code.trim() ? { code: code.trim() } : undefined,
+                    `${root}/${live.id}/check-in`,
                     'POST',
+                    code.trim() ? { code: code.trim() } : {},
+                    context,
                   );
                   if (result.status === 401) {
                     window.location.replace(accountReturnHref(workspacePath(workspaceId)));
@@ -229,10 +258,15 @@ export function ClassroomSessions({
                   onClick={() =>
                     void run(async () => {
                       const result = await platformFetch(
-                        `/auth/platform/class-workspaces/${encodeURIComponent(workspaceId)}/classroom-sessions/${encodeURIComponent(live.id)}/makeup-requests`,
-                        undefined,
+                        `${root}/${live.id}/makeup-requests`,
                         'POST',
+                        {},
+                        context,
                       );
+                      if (result.status === 401) {
+                        window.location.replace(accountReturnHref(workspacePath(workspaceId)));
+                        return;
+                      }
                       if (!result.ok) throw new Error('補簽沒有送出，請稍後再試。');
                       setNotice('已請老師補簽，還在等處理。');
                       await reload();
@@ -249,13 +283,14 @@ export function ClassroomSessions({
               disabled={busy}
               onClick={() =>
                 void run(async () => {
-                  const result = await platformFetch(
-                    `/auth/platform/class-workspaces/${encodeURIComponent(workspaceId)}/classroom-sessions/${encodeURIComponent(live.id)}/end`,
-                    undefined,
-                    'POST',
-                  );
+                  const result = await platformFetch(`${root}/${live.id}/end`, 'POST', {}, context);
+                  if (result.status === 401) {
+                    window.location.replace(accountReturnHref(workspacePath(workspaceId)));
+                    return;
+                  }
                   if (!result.ok) throw new Error('課堂沒有結束成功，請稍後再試。');
                   setRoster(null);
+                  setPendingMakeup([]);
                   await reload();
                 }, '課堂沒有結束成功，請稍後再試。')
               }
@@ -267,6 +302,65 @@ export function ClassroomSessions({
       ) : (
         <p className={styles.muted}>目前沒有進行中的課堂。</p>
       )}
+      {isTeacher && pendingMakeup.length ? (
+        <div className={styles.roster} aria-label="待補簽">
+          <h3>待補簽 {pendingMakeup.length}</h3>
+          <ul className={styles.stack}>
+            {pendingMakeup.map((person) => (
+              <li key={person.platformAccountId}>
+                <span>{person.displayName}</span>
+                {live ? (
+                  <div className={styles.actions}>
+                    <Button
+                      size="sm"
+                      disabled={busy}
+                      onClick={() =>
+                        void run(async () => {
+                          const result = await platformFetch(
+                            `${root}/${live.id}/makeup`,
+                            'POST',
+                            {
+                              platformAccountId: person.platformAccountId,
+                              decision: 'accept',
+                            },
+                            context,
+                          );
+                          if (!result.ok) throw new Error('補簽沒有完成，請稍後再試。');
+                          await reload();
+                        }, '補簽沒有完成，請稍後再試。')
+                      }
+                    >
+                      接受補簽
+                    </Button>
+                    <Button
+                      size="sm"
+                      disabled={busy}
+                      onClick={() =>
+                        void run(async () => {
+                          const result = await platformFetch(
+                            `${root}/${live.id}/makeup`,
+                            'POST',
+                            {
+                              platformAccountId: person.platformAccountId,
+                              decision: 'reject',
+                            },
+                            context,
+                          );
+                          if (!result.ok) throw new Error('補簽沒有完成，請稍後再試。');
+                          setNotice('這次沒有補簽。');
+                          await reload();
+                        }, '補簽沒有完成，請稍後再試。')
+                      }
+                    >
+                      拒絕補簽
+                    </Button>
+                  </div>
+                ) : null}
+              </li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
       {isTeacher && roster ? (
         <div className={styles.roster} aria-label="課堂名冊">
           {(['present', 'absent', 'late'] as const).map((group) => (
@@ -284,49 +378,6 @@ export function ClassroomSessions({
                         {person.displayName}
                         {person.punctuality === 'makeup' ? ' · 補簽' : ''}
                       </span>
-                      {group === 'absent' && live ? (
-                        <div className={styles.actions}>
-                          <Button
-                            size="sm"
-                            disabled={busy}
-                            onClick={() =>
-                              void run(async () => {
-                                const result = await platformFetch(
-                                  `/auth/platform/class-workspaces/${encodeURIComponent(workspaceId)}/classroom-sessions/${encodeURIComponent(live.id)}/makeup`,
-                                  {
-                                    platformAccountId: person.platformAccountId,
-                                    decision: 'accept',
-                                  },
-                                );
-                                if (!result.ok) throw new Error('補簽沒有完成，請稍後再試。');
-                                await reload();
-                              }, '補簽沒有完成，請稍後再試。')
-                            }
-                          >
-                            接受補簽
-                          </Button>
-                          <Button
-                            size="sm"
-                            disabled={busy}
-                            onClick={() =>
-                              void run(async () => {
-                                const result = await platformFetch(
-                                  `/auth/platform/class-workspaces/${encodeURIComponent(workspaceId)}/classroom-sessions/${encodeURIComponent(live.id)}/makeup`,
-                                  {
-                                    platformAccountId: person.platformAccountId,
-                                    decision: 'reject',
-                                  },
-                                );
-                                if (!result.ok) throw new Error('補簽沒有完成，請稍後再試。');
-                                setNotice('這次沒有補簽。');
-                                await reload();
-                              }, '補簽沒有完成，請稍後再試。')
-                            }
-                          >
-                            拒絕補簽
-                          </Button>
-                        </div>
-                      ) : null}
                     </li>
                   ))
                 )}

@@ -12,7 +12,6 @@ import { useClasses } from '@/features/nuni/CourseUI';
 import { useNuniSession } from '@/features/nuni/Session';
 import { ClassHonestyBanner } from './ClassHonestyBanner';
 import { accountReturnHref, CREATE_PATH, JOIN_PATH, workspacePath } from './constants';
-import { platformFetch } from './platformFetch';
 import styles from './Platform.module.css';
 import nuni from '@/features/nuni/NuniApp.module.css';
 import common from '@/app/servicePages.module.css';
@@ -38,17 +37,9 @@ export function ClassCreate() {
     setError('');
     try {
       const workspace = await classes.create(title.trim(), `web-create-${createKey.current}`);
-      const invite = await platformFetch(`/auth/platform/class-workspaces/${encodeURIComponent(workspace.id)}/invites`, {
-        maxUses: 100,
-        idempotencyKey: `web-invite-${inviteKey.current}`,
-      });
-      if (invite.status === 401) {
-        window.location.replace(accountReturnHref(CREATE_PATH));
-        return;
-      }
-      const code = typeof invite.body.code === 'string' ? invite.body.code : '';
+      const invite = await classes.invite(workspace.id, `web-invite-${inviteKey.current}`, 100);
       const dest = workspacePath(workspace.id);
-      router.replace(code ? `${dest}?invite=${encodeURIComponent(code)}` : dest);
+      router.replace(invite.code ? `${dest}?invite=${encodeURIComponent(invite.code)}` : dest);
     } catch (failure) {
       if (failure instanceof NuniError && failure.status === 401) {
         window.location.replace(accountReturnHref(CREATE_PATH));

@@ -71,7 +71,7 @@ const LEGACY_HTML_REDIRECT_SOURCES = [
 
 const LEGACY_PLATFORM_PAGE_REDIRECTS: Array<{ source: string; destination: string }> = [
   { source: '/auth/platform/ops', destination: '/admin/ops' },
-  { source: '/auth/platform/ops/:path*', destination: '/admin/ops' },
+  { source: '/auth/platform/ops/:tab', destination: '/admin/ops?tab=:tab' },
   { source: '/auth/platform/school-review', destination: '/admin/school-review' },
   { source: '/auth/platform/school-review/:path*', destination: '/admin/school-review' },
 ];

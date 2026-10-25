@@ -67,6 +67,7 @@ export function ClassWorkspace({ workspaceId }: { workspaceId: string }) {
 
   useEffect(() => {
     if (!valid || !auth.session) return;
+    const context = auth.session.context;
     let active = true;
     const run = ++generation.current;
     setError('');
@@ -75,10 +76,13 @@ export function ClassWorkspace({ workspaceId }: { workspaceId: string }) {
       classes.get(workspaceId),
       classes.assignments(workspaceId),
       classes.units(workspaceId).catch(() => [] as NuniUnit[]),
-      platformFetch(`/auth/platform/class-workspaces/${encodeURIComponent(workspaceId)}/members`),
-      platformFetch(`/auth/platform/class-workspaces/${encodeURIComponent(workspaceId)}/affiliation`),
+      platformFetch(`class-workspaces/${workspaceId}/members`, 'GET', undefined, context),
+      platformFetch(`class-workspaces/${workspaceId}/affiliation`, 'GET', undefined, context),
       platformFetch(
-        `/auth/platform/class-workspaces/${encodeURIComponent(workspaceId)}/affiliation-applications`,
+        `class-workspaces/${workspaceId}/affiliation-applications`,
+        'GET',
+        undefined,
+        context,
       ),
     ])
       .then(([item, nextAssignments, nextUnits, memberResult, affiliationResult, appsResult]) => {
@@ -221,6 +225,7 @@ export function ClassWorkspace({ workspaceId }: { workspaceId: string }) {
             workspaceId={workspace.id}
             isTeacher={teacher}
             units={(units ?? []).map((unit) => ({ id: unit.id, title: unit.title }))}
+            context={auth.session!.context}
           />
         ) : null}
         {tab === 'course' ? (
@@ -230,6 +235,7 @@ export function ClassWorkspace({ workspaceId }: { workspaceId: string }) {
                 workspaceId={workspace.id}
                 canInvite={workspace.memberRole === 'owner-teacher' && workspace.state === 'active'}
                 initialCode={invite}
+                context={auth.session!.context}
               />
               <CourseLearningPath
                 workspace={workspace}
@@ -277,6 +283,7 @@ export function ClassWorkspace({ workspaceId }: { workspaceId: string }) {
             canApply={workspace.memberRole === 'owner-teacher'}
             affiliation={affiliation}
             applications={affiliationApps}
+            context={auth.session!.context}
             onChanged={() => setEpoch((value) => value + 1)}
           />
         ) : null}

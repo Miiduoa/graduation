@@ -48,6 +48,10 @@ it.each([
   ['javascript:alert(1)', '/'],
   ['/life#secret', '/'],
   ['/leave?requestId=abc-1', '/'],
+  ['/admin/ops#people', '/admin/ops#people'],
+  ['/admin/ops?tab=people', '/admin/ops?tab=people'],
+  ['/admin/ops#secret', '/'],
+  ['/admin/ops?tab=evil', '/'],
 ])('keeps only Campus One return paths and rejects %s', (input, expected) => {
   expect(sanitizeReturnPath(input)).toBe(expected);
   expect(readReturnPath(`returnUrl=${encodeURIComponent(input)}`)).toBe(expected);
