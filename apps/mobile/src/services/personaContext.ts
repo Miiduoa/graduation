@@ -443,17 +443,17 @@ export function getTodayTimeline(
   // 統一 timeline 連結策略：
   //   - 每個 link.screen 必須對應到實際註冊在 Navigator 的路由名（HomeStack/LearnStack/MapStack/CafeteriaStack/MessagesStack）。
   //   - 若沒有合適的 target，就不要設 link（點下去不會跳，但也不會出錯）。
-  //   - 課程相關用 CourseHubV2（已驗證註冊在 LearnStack），courseId 用實際 DEMO_COURSES 的 id。
+  //   - 課程相關用 CourseModules（已驗證註冊在 LearnStack），courseId 用實際 DEMO_COURSES 的 id。
   //   - 「我的訂單」用 'Ordering' route (CafeteriaStack 內)。
   if (story.role === 'student') {
     items.push(
       { id: 'wake', hhmm: '07:00', category: 'wake', icon: 'sunny-outline', title: '起床', detail: `${story.dorm?.building ?? '宜真樓'} ${story.dorm?.room ?? 'A215'}` },
       { id: 'breakfast', hhmm: '07:45', category: 'food', icon: 'cafe-outline', title: '早餐：靜園餐廳', detail: '預訂的鮪魚三明治 + 大冰拿', link: { screen: 'Ordering' } },
       { id: 'busA', hhmm: '08:40', category: 'bus', icon: 'bus-outline', title: '搭校園 A 線', detail: '宿舍 → 任垣樓 · 約 5 分鐘', link: { screen: 'BusV2' } },
-      { id: 'class1', hhmm: '09:10', category: 'class', icon: 'school-outline', title: '機器學習', detail: '任垣樓 R301 · 張怡君老師', link: { screen: 'CourseHubV2', params: { courseId: 71378 } } },
+      { id: 'class1', hhmm: '09:10', category: 'class', icon: 'school-outline', title: '機器學習', detail: '任垣樓 R301 · 張怡君老師', link: { screen: 'CourseModules', params: { courseId: 71378 } } },
       { id: 'lunch', hhmm: '12:10', category: 'food', icon: 'restaurant-outline', title: '午餐 ready', detail: '靜宜中餐部 · 日式炸雞便當', link: { screen: 'Ordering' } },
       { id: 'lib', hhmm: '13:00', category: 'study', icon: 'library-outline', title: '圖書館自習', detail: '蓋夏圖書館 4F · 24 小時自習室 · 借的「統計學概論」2 天後到期', link: { screen: 'IndoorFloorMap', params: { buildingId: 'lib' } } },
-      { id: 'class2', hhmm: '13:10', category: 'class', icon: 'school-outline', title: '計算機概論(二)', detail: '主顧樓 PH-101 · 王孝熙老師', link: { screen: 'CourseHubV2', params: { courseId: 71282 } } },
+      { id: 'class2', hhmm: '13:10', category: 'class', icon: 'school-outline', title: '計算機概論(二)', detail: '主顧樓 PH-101 · 王孝熙老師', link: { screen: 'CourseModules', params: { courseId: 71282 } } },
       { id: 'gym', hhmm: '17:00', category: 'health', icon: 'fitness-outline', title: '羽球場練球', detail: '羽球場 #2 · 與資管學會社員', link: { screen: 'Health' } },
       { id: 'dinner', hhmm: '18:30', category: 'food', icon: 'restaurant-outline', title: '晚餐：至善廣場', detail: '韓式拌飯', link: { screen: 'Cafeteria' } },
       { id: 'home', hhmm: '21:30', category: 'home', icon: 'home-outline', title: '回宿舍', detail: '宜真樓 A215 · 室友夜聊' },
@@ -462,7 +462,7 @@ export function getTodayTimeline(
     items.push(
       { id: 'drive', hhmm: '08:30', category: 'bus', icon: 'car-outline', title: '開車到校', detail: `主顧樓教職員停車場 · ${story.office?.vehicle?.plate ?? ''}` },
       { id: 'office', hhmm: '08:50', category: 'office', icon: 'briefcase-outline', title: '辦公室準備', detail: `${story.office?.building ?? '主顧樓'} ${story.office?.room ?? 'P-308'} · 課前準備`, link: { screen: 'TeacherCockpit' } },
-      { id: 'class1', hhmm: '09:10', category: 'class', icon: 'school-outline', title: '機器學習 (上課)', detail: '任垣樓 R301 · 32 位學生簽到完成', link: { screen: 'CourseHubV2', params: { courseId: 71378 } } },
+      { id: 'class1', hhmm: '09:10', category: 'class', icon: 'school-outline', title: '機器學習 (上課)', detail: '任垣樓 R301 · 32 位學生簽到完成', link: { screen: 'CourseModules', params: { courseId: 71378 } } },
       { id: 'grade', hhmm: '12:30', category: 'work', icon: 'create-outline', title: '批改 HW3', detail: '6 份新繳交 · AI 已起草評語', link: { screen: 'TeacherGrading' } },
       { id: 'office2', hhmm: '14:00', category: 'office', icon: 'people-outline', title: 'Office Hours', detail: `${story.office?.officeHours?.[0]?.day ?? '週四'} ${story.office?.officeHours?.[0]?.from ?? '14:00'} 已有 2 位學生預約`, link: { screen: 'TeacherCockpit' } },
       { id: 'admin', hhmm: '15:30', category: 'work', icon: 'document-text-outline', title: '系務會議', detail: '行政大樓 A301 · 黃主任' },
@@ -494,15 +494,15 @@ export function getTodayTimeline(
     );
   } else if (story.role === 'club_officer') {
     items.push(
-      { id: 'class', hhmm: '13:10', category: 'class', icon: 'school-outline', title: '機器學習', detail: '任垣樓 R305', link: { screen: 'CourseHubV2', params: { courseId: 71378 } } },
+      { id: 'class', hhmm: '13:10', category: 'class', icon: 'school-outline', title: '機器學習', detail: '任垣樓 R305', link: { screen: 'CourseModules', params: { courseId: 71378 } } },
       { id: 'club-prep', hhmm: '17:30', category: 'work', icon: 'megaphone-outline', title: '社課準備', detail: '黑客松報名審核 32 件', link: { screen: 'Groups' } },
       { id: 'club-event', hhmm: '19:00', category: 'social', icon: 'people-outline', title: '社課：Web3 入門', detail: '社團辦 C-12 · 42 位報名', link: { screen: 'Groups' } },
       { id: 'home', hhmm: '21:30', category: 'home', icon: 'home-outline', title: '回宿舍', detail: '宜真樓 B302' },
     );
   } else if (story.role === 'department_head') {
     items.push(
-      { id: 'arrive', hhmm: '08:00', category: 'office', icon: 'briefcase-outline', title: '到系辦', detail: '主顧樓 RB-401', link: { screen: 'DepartmentHub' } },
-      { id: 'review', hhmm: '09:00', category: 'work', icon: 'analytics-outline', title: '檢視系所儀表板', detail: '3 位學生 risk 標記為紅', link: { screen: 'DepartmentHub' } },
+      { id: 'arrive', hhmm: '08:00', category: 'office', icon: 'briefcase-outline', title: '到系辦', detail: '主顧樓 RB-401', link: { screen: 'LearnHome' } },
+      { id: 'review', hhmm: '09:00', category: 'work', icon: 'analytics-outline', title: '檢視系所儀表板', detail: '3 位學生 risk 標記為紅', link: { screen: 'LearnHome' } },
       { id: 'meeting', hhmm: '10:00', category: 'work', icon: 'people-circle-outline', title: '系務會議', detail: '行政大樓 A301' },
       { id: 'lunch', hhmm: '12:00', category: 'food', icon: 'restaurant-outline', title: '午餐：教職員餐廳', detail: '至善廣場 1F', link: { screen: 'Cafeteria' } },
       { id: 'student-talk', hhmm: '14:00', category: 'work', icon: 'chatbubbles-outline', title: 'risk 學生輔導', detail: '與 1 位學生面談', link: { screen: 'Dms' } },

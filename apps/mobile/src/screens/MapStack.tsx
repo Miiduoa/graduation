@@ -1,4 +1,3 @@
-import { UnavailableFeatureScreen } from './UnavailableFeatureScreen';
 /* eslint-disable */
 import React from 'react';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
@@ -150,26 +149,11 @@ export function MapStack() {
         options={{ title: '圖書館', headerShown: false }}
       />
       <Stack.Screen
-        name="Clubs"
-        component={UnavailableFeatureScreen}
-        options={{ title: '社團', headerShown: false }}
-      />
-      <Stack.Screen
         name="LibraryCatalog"
         component={LibraryCatalogScreen}
         options={{ title: '館藏查詢', headerShown: false }}
       />
       <Stack.Screen name="Health" component={HealthScreen} options={{ title: '校園健康', headerShown: false }} />
-      <Stack.Screen
-        name="Career"
-        component={UnavailableFeatureScreen}
-        options={{ title: '職涯', headerShown: false }}
-      />
-      <Stack.Screen
-        name="Dormitory"
-        component={UnavailableFeatureScreen}
-        options={{ title: '宿舍服務', headerShown: false }}
-      />
       <Stack.Screen
         name="PrintService"
         component={PrintServiceScreen}

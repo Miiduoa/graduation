@@ -11,7 +11,7 @@ it('names the actual source instead of relabeling another campus data', () => {
   expect(screen.getByLabelText('目前校園資料範圍').textContent).toContain(
     '此頁目前提供靜宜大學的資料',
   );
-  expect(screen.getByRole('link').getAttribute('href')).toBe('/social?campus=other-school');
+  expect(screen.getByRole('link').getAttribute('href')).toBe('/community?campus=other-school');
 });
 it('does not show a mismatch for the source campus or no browsing preference', () => {
   state.school = { id: 'pu', name: '靜宜大學' };

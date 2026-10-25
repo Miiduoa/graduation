@@ -96,7 +96,7 @@ it('offers the all-course gradebook from the classroom list', async () => {
   });
   render(<NuniApp />);
   expect((await screen.findByRole('link', { name: '課業成績與回饋' })).getAttribute('href')).toBe(
-    '/classroom/grades',
+    '/grades?tab=feedback',
   );
 });
 

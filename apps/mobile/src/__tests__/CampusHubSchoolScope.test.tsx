@@ -26,6 +26,13 @@ test('Taichung-specific transport entry is only available in its original PU con
   expect(view.getByText('圖書館')).toBeTruthy();
 });
 
+test('closed campus modules do not show dormitory or career entries', () => {
+  const view = render(<CampusHubScreen />);
+  expect(view.queryByText('宿舍')).toBeNull();
+  expect(view.queryByText('職涯')).toBeNull();
+  expect(view.queryByText('社團')).toBeNull();
+});
+
 test('another school does not expose Providence-specific library search keywords', () => {
   mockSchool = { id: 'nthu', name: '國立清華大學' };
   const view = render(<CampusHubScreen />);

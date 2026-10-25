@@ -41,7 +41,7 @@ export default function CourseForumV2Screen() {
             subtitle={t.created_at ? new Date(t.created_at).toLocaleDateString() : '剛建立'}
             badge={t.locked_at ? '已鎖' : undefined}
             onPress={() =>
-              nav.navigate('CourseForumTopicV2', { courseId, courseName, topicId: t.id })
+              nav.navigate('DiscussionThreadDetail', { courseId, courseName, topicId: t.id })
             }
           />
         )}
