@@ -11,6 +11,7 @@ import {
   ActivityIndicator,
   StyleSheet,
   Alert,
+  Share,
   ScrollView,
   Dimensions,
 } from 'react-native';
@@ -421,6 +422,21 @@ function HomeFeedContent() {
                     <Text style={styles.statLabel}>{repliesDisplay(item)}</Text>
                   </View>
                   <View style={{ flex: 1 }} />
+                  <Pressable
+                    accessibilityRole="button"
+                    accessibilityLabel={`分享貼文：${item.title}`}
+                    style={styles.statHit}
+                    hitSlop={8}
+                    onPress={(event) => {
+                      event.stopPropagation?.();
+                      const url = `campus://post/${item.id}`;
+                      void Share.share({ title: item.title, message: `${item.title}\n${url}`, url })
+                        .catch(() => Alert.alert('暫時無法分享', '請稍後再試或從貼文詳情分享。'));
+                    }}
+                  >
+                    <Ionicons name="share-outline" size={18} color={theme.colors.textSecondary} />
+                    <Text style={styles.statLabel}>分享</Text>
+                  </Pressable>
                   <Ionicons name="chevron-forward" size={16} color={theme.colors.border} />
                 </View>
               </Pressable>
