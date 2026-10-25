@@ -50,7 +50,7 @@ function CommunityPageInner({ schoolId, schoolSearch }: { schoolId: string; scho
   const activeTab = activeTabFor(searchParams?.get('tab'));
   const selected = TABS.find((tab) => tab.key === activeTab)!;
   const newPostHref = `/community/post/new?schoolId=${encodeURIComponent(schoolId)}`;
-  const boardsParams = new URLSearchParams(schoolSearch.replace(/^\\?/, ''));
+  const boardsParams = new URLSearchParams(schoolSearch.startsWith('?') ? schoolSearch.slice(1) : schoolSearch);
   boardsParams.set('tab', 'boards');
   const boardsHref = `/community?${boardsParams.toString()}`;
 
