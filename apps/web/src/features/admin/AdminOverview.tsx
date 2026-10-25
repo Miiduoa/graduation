@@ -3,7 +3,7 @@
 import { Button } from '@/components/ui/Button';
 import { parseReports, parseSchools } from './api';
 import { useAdminResource } from './hooks';
-import type { AdminSection } from './adminNav';
+import type { AdminLocation, AdminSection } from './adminNav';
 import { AdminResponsibilities } from './AdminResponsibilities';
 import styles from './Admin.module.css';
 
@@ -14,14 +14,53 @@ export function AdminOverview({
 }: {
   context: string;
   suspended: boolean;
-  onNavigate: (section: AdminSection) => void;
+  onNavigate: (section: AdminSection, patch?: Partial<AdminLocation>) => void;
 }) {
   const schools = useAdminResource('schools', context, parseSchools, !suspended);
   const reports = useAdminResource('reports?state=open', context, parseReports, !suspended);
   const pending = schools.value?.filter((school) => school.lifecycle === 'pending');
   const provisioned = schools.value?.filter((school) => school.lifecycle === 'provisioned');
+  const activeSchools = schools.value?.filter((school) => school.lifecycle === 'open');
+  const schoolsReady = !schools.loading && !schools.error && !!schools.value;
+  const reportsReady = !reports.loading && !reports.error && !!reports.value;
   return (
     <div className={styles.stack}>
+      <section className={styles.overviewHero} aria-labelledby="admin-summary-heading">
+        <div className={styles.sectionIntro}>
+          <p className={styles.eyebrow}>跨校營運 / 今日工作</p>
+          <h2 id="admin-summary-heading">先處理需要決策的事情</h2>
+          <p className={styles.muted}>
+            把學校接入、服務開通與公開社群檢舉放在同一個工作台。
+            各校的學籍、課程和個人資料仍依原有校方授權管理。
+          </p>
+        </div>
+        <div className={styles.heroActions}>
+          <a className={styles.link} href="/admin/school-review">審核學校申請</a>
+          <Button onClick={() => onNavigate('people')}>查看管理授權</Button>
+        </div>
+      </section>
+      <div className={styles.metricsGrid} aria-label="本次載入的營運摘要">
+        <div className={styles.metricCard}>
+          <span className={styles.metricLabel}>學校申請待審核</span>
+          <strong className={styles.metricValue}>{schoolsReady ? pending!.length : '—'}</strong>
+          <span className={styles.metricHint}>依本次已讀取的學校資料</span>
+        </div>
+        <div className={styles.metricCard}>
+          <span className={styles.metricLabel}>已建檔待開通</span>
+          <strong className={styles.metricValue}>{schoolsReady ? provisioned!.length : '—'}</strong>
+          <span className={styles.metricHint}>尚未開放校方服務</span>
+        </div>
+        <div className={styles.metricCard}>
+          <span className={styles.metricLabel}>公開社群待處理檢舉</span>
+          <strong className={styles.metricValue}>{reportsReady ? reports.value!.length : '—'}</strong>
+          <span className={styles.metricHint}>本次最多載入最近 50 件</span>
+        </div>
+        <div className={styles.metricCard}>
+          <span className={styles.metricLabel}>已開通學校</span>
+          <strong className={styles.metricValue}>{schoolsReady ? activeSchools!.length : '—'}</strong>
+          <span className={styles.metricHint}>僅計入本次成功讀取的資料</span>
+        </div>
+      </div>
       <section className={styles.panel} aria-labelledby="admin-work-heading">
         <div className={styles.toolbar}>
           <div className={styles.sectionIntro}>
@@ -67,7 +106,9 @@ export function AdminOverview({
                 <a className={styles.link} href="/admin/school-review">
                   前往審核申請
                 </a>
-                <Button onClick={() => onNavigate('schools')}>檢查學校開通狀態</Button>
+                <Button onClick={() => onNavigate('schools', { schoolLifecycle: 'provisioned' })}>
+                  檢查學校開通狀態
+                </Button>
               </div>
             )}
           </li>

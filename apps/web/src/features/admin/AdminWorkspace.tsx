@@ -26,14 +26,9 @@ import { AdminMerchants } from './AdminMerchants';
 import common from '@/app/servicePages.module.css';
 import styles from './Admin.module.css';
 
-const navOrder: AdminSection[] = [
-  'overview',
-  'schools',
-  'people',
-  'merchants',
-  'boards',
-  'reports',
-  'audit',
+const navGroups: { label: string; sections: AdminSection[] }[] = [
+  { label: '日常營運', sections: ['overview', 'schools', 'people', 'merchants'] },
+  { label: '社群與治理', sections: ['boards', 'reports', 'audit'] },
 ];
 
 export function AdminWorkspace() {
@@ -58,7 +53,7 @@ export function AdminWorkspace() {
           <Workspace
             key={`${auth.session.platformAccountId}:${auth.session.context}`}
             context={auth.session.context}
-            suspended={auth.loading}
+            suspended={auth.loading || auth.pendingLogout}
           />
         ) : auth.loading ? (
           <p role="status" className={common.loading}>
@@ -122,10 +117,10 @@ function Workspace({ context, suspended }: { context: string; suspended: boolean
         ...previous,
         ...patch,
         schoolId:
-          patch.section && patch.section !== 'schools' && patch.section !== 'people'
-            ? null
-            : patch.schoolId !== undefined
-              ? patch.schoolId
+          patch.schoolId !== undefined
+            ? patch.schoolId
+            : patch.section && patch.section !== 'schools' && patch.section !== 'people'
+              ? null
               : previous.schoolId,
         reportId:
           patch.section && patch.section !== 'reports'
@@ -163,24 +158,21 @@ function Workspace({ context, suspended }: { context: string; suspended: boolean
               <p className={styles.muted}>已使用平台管理員帳號登入</p>
             </div>
             <nav className={styles.sideNav} aria-label="管理項目">
-              {navOrder.map((section) => (
-                <button
-                  type="button"
-                  className={styles.navItem}
-                  key={section}
-                  aria-pressed={location.section === section}
-                  aria-current={location.section === section ? 'page' : undefined}
-                  onClick={() =>
-                    go({
-                      section,
-                      schoolId: null,
-                      reportId: null,
-                      boardsCreate: false,
-                    })
-                  }
-                >
-                  {sectionMeta[section].label}
-                </button>
+              {navGroups.map((group) => (
+                <div className={styles.navGroup} key={group.label}>
+                  <p className={styles.sideLabel}>{group.label}</p>
+                  {group.sections.map((section) => (
+                    <button
+                      type="button"
+                      className={styles.navItem}
+                      key={section}
+                      aria-current={location.section === section ? 'page' : undefined}
+                      onClick={() => go({ section, reportId: null, boardsCreate: false })}
+                    >
+                      {sectionMeta[section].label}
+                    </button>
+                  ))}
+                </div>
               ))}
             </nav>
             <div className={styles.sideSecondary}>
@@ -199,6 +191,7 @@ function Workspace({ context, suspended }: { context: string; suspended: boolean
           <div className={styles.workspace}>
             <header className={styles.workspaceHeader}>
               <div className={styles.sectionIntro}>
+                <p className={styles.eyebrow}>平台工作台 / {meta.label}</p>
                 <h1 className={styles.workspaceTitle}>{meta.heading}</h1>
                 <p className={styles.muted}>{meta.purpose}</p>
               </div>
@@ -216,7 +209,7 @@ function Workspace({ context, suspended }: { context: string; suspended: boolean
               <AdminOverview
                 context={context}
                 suspended={suspended}
-                onNavigate={(section) => go({ section })}
+                onNavigate={(section, patch) => go({ section, ...patch })}
               />
             ) : location.section === 'schools' ? (
               <AdminSchools
@@ -226,6 +219,7 @@ function Workspace({ context, suspended }: { context: string; suspended: boolean
                 search={location.schoolQuery}
                 lifecycle={location.schoolLifecycle}
                 onSelect={(schoolId) => go({ section: 'schools', schoolId })}
+                onPeople={(schoolId) => go({ section: 'people', schoolId })}
                 onSearch={(schoolQuery) =>
                   go({ section: 'schools', schoolQuery, schoolId: null }, 'replace')
                 }
@@ -239,6 +233,9 @@ function Workspace({ context, suspended }: { context: string; suspended: boolean
                 suspended={suspended}
                 selectedSchool={location.schoolId}
                 onSchool={(schoolId) => go({ section: 'people', schoolId })}
+                onManageSchool={(schoolId) =>
+                  go({ section: 'schools', schoolId, schoolQuery: '', schoolLifecycle: 'all' })
+                }
               />
             ) : location.section === 'merchants' ? (
               <AdminMerchants context={context} suspended={suspended} />

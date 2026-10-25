@@ -40,6 +40,7 @@ export function AdminSchools({
   search,
   lifecycle,
   onSelect,
+  onPeople,
   onSearch,
   onLifecycle,
 }: {
@@ -49,6 +50,7 @@ export function AdminSchools({
   search: string;
   lifecycle: SchoolLifecycleFilter;
   onSelect: (tenantId: string | null) => void;
+  onPeople?: (tenantId: string) => void;
   onSearch: (query: string) => void;
   onLifecycle: (value: SchoolLifecycleFilter) => void;
 }) {
@@ -90,6 +92,7 @@ export function AdminSchools({
             suspended={suspended || resource.loading || !!resource.error}
             onChanged={resource.reload}
             onClose={() => onSelect(null)}
+            onPeople={onPeople}
           />
         </>
       ) : (
@@ -211,12 +214,14 @@ function SchoolDetail({
   suspended,
   onChanged,
   onClose,
+  onPeople,
 }: {
   school: AdminSchool;
   context: string;
   suspended: boolean;
   onChanged: () => void;
   onClose: () => void;
+  onPeople?: (tenantId: string) => void;
 }) {
   const tenantId = school.tenantId!;
   const base = `schools/${encodeURIComponent(tenantId)}`;
@@ -315,9 +320,16 @@ function SchoolDetail({
                   : ''}
               </p>
             </div>
-            <Button onClick={onClose} disabled={mutation.busy}>
-              收起學校設定
-            </Button>
+            <div className={styles.actions}>
+              {onPeople && (
+                <Button disabled={mutation.busy} onClick={() => onPeople(tenantId)}>
+                  查看校方授權
+                </Button>
+              )}
+              <Button onClick={onClose} disabled={mutation.busy}>
+                收起學校設定
+              </Button>
+            </div>
           </div>
           {mutation.error || responseError ? (
             <p role="alert" className={styles.error}>
