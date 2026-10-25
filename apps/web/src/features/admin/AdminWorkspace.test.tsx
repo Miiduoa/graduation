@@ -838,3 +838,32 @@ it('masks an operator workbench while a logout is pending', () => {
   expect(screen.queryByRole('button', { name: '學校管理' })).toBeNull();
   expect(fetcher).not.toHaveBeenCalled();
 });
+
+it('requires a school manager before allowing the school to open from the workbench', async () => {
+  fetcher.mockImplementation(async (url: string, options: RequestInit) => {
+    if (url.endsWith('/proxy')) return ok(inactiveProxy);
+    if (url.includes('/people?tenantId=')) {
+      return ok({
+        tenantId: tenant.tenantId,
+        displayName: tenant.displayName,
+        tenantState: 'provisioned',
+        hasRoleAdmin: false,
+        roleAdmins: [],
+        people: [],
+        honesty: '校方授權查核',
+      });
+    }
+    if (options?.method === 'POST') throw new Error('Must not open without admin');
+    return ok({ schools: [{ ...tenant, lifecycle: 'provisioned' }] });
+  });
+  renderSchools();
+  fireEvent.click(await screen.findByRole('button', { name: '管理第一學校' }));
+  fireEvent.click(screen.getByRole('button', { name: '開通學校' }));
+  expect(await screen.findByText(/尚未指定有效的校方管理員/)).toBeTruthy();
+  fireEvent.change(screen.getByLabelText('操作原因'), {
+    target: { value: '已完成學校啟用檢查' },
+  });
+  expect(screen.getByRole('button', { name: '確定開通學校' })).toHaveProperty('disabled', true);
+  fireEvent.submit(screen.getByLabelText('操作原因').closest('form')!);
+  expect(fetcher.mock.calls.filter(([, options]) => options.method === 'POST')).toHaveLength(0);
+});

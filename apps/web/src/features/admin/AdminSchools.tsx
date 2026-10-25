@@ -1,10 +1,11 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Button } from '@/components/ui/Button';
 import { Input, Select, Textarea } from '@/components/ui/Input';
 import {
   adminError,
+  adminRequest,
   parseProxy,
   parseSchool,
   parseSchools,
@@ -12,6 +13,7 @@ import {
   type SchoolModules,
 } from './api';
 import { useAdminMutation, useAdminResource } from './hooks';
+import { createPeopleParser } from './oversightApi';
 import type { SchoolLifecycleFilter } from './adminNav';
 import styles from './Admin.module.css';
 
@@ -251,6 +253,15 @@ function SchoolDetail({
     return () => onDraftChange?.(tenantId, false);
   }, [tenantId, hasUnsavedChanges, onDraftChange]);
   const [action, setAction] = useState<'open' | 'suspend' | null>(null);
+  const parsePeople = useMemo(() => createPeopleParser(tenantId), [tenantId]);
+  const adminReadiness = useAdminResource(
+    `people?tenantId=${encodeURIComponent(tenantId)}`,
+    context,
+    parsePeople,
+    !suspended && action === 'open',
+  );
+  const [checkingOpen, setCheckingOpen] = useState(false);
+  const checkingOpenRef = useRef(false);
   const [reason, setReason] = useState('');
   const [notice, setNotice] = useState('');
   const [responseError, setResponseError] = useState('');
@@ -311,9 +322,30 @@ function SchoolDetail({
     }
   }
   async function changeLifecycle() {
-    if (!action || reason.trim().length < 5) return;
+    if (!action || reason.trim().length < 5 || checkingOpenRef.current || mutation.busy) return;
     setNotice('');
     setResponseError('');
+    if (action === 'open') {
+      if (adminReadiness.loading || adminReadiness.error || !adminReadiness.value?.hasRoleAdmin)
+        return;
+      checkingOpenRef.current = true;
+      setCheckingOpen(true);
+      try {
+        const latest = await adminRequest(`people?tenantId=${encodeURIComponent(tenantId)}`, context);
+        const confirmed = parsePeople(latest);
+        if (!confirmed.hasRoleAdmin) {
+          setResponseError('這所學校目前沒有有效的校方管理員。請完成指派再開通。');
+          adminReadiness.reload();
+          return;
+        }
+      } catch (failure) {
+        setResponseError(adminError(failure));
+        return;
+      } finally {
+        checkingOpenRef.current = false;
+        setCheckingOpen(false);
+      }
+    }
     const result = await mutation.run(`${base}/${action}`, { reason: reason.trim() });
     if (result === undefined) return;
     if (
@@ -496,6 +528,36 @@ function SchoolDetail({
                   ? '關閉後，學生將無法在選校目錄找到這所學校，請假、證件與點餐也會一併停止。'
                   : '開通後，具校方身分的使用者即可使用已啟用的校務服務。請先確認學校資料與服務設定。'}
               </p>
+              {action === 'open' && (
+                <div className={styles.stack}>
+                  {adminReadiness.loading ? (
+                    <p role="status">正在查核校方管理員…</p>
+                  ) : adminReadiness.error ? (
+                    <div className={styles.stack}>
+                      <p role="alert" className={styles.error}>{adminReadiness.error}</p>
+                      <Button type="button" onClick={adminReadiness.reload}>重新查核校方授權</Button>
+                    </div>
+                  ) : adminReadiness.value?.hasRoleAdmin ? (
+                    <p className={styles.notice}>
+                      已確認校方管理員：
+                      {adminReadiness.value.roleAdmins.map((person) => person.displayName).join('、')}。
+                      請再核對學校資料與已啟用的服務。
+                    </p>
+                  ) : (
+                    <div className={styles.stack}>
+                      <p role="alert" className={styles.error}>
+                        這所學校尚未指定有效的校方管理員。請先完成校方授權，再重新查核。
+                      </p>
+                      <a
+                        className={styles.link}
+                        href={`/admin/ops?tab=people&tenantId=${encodeURIComponent(tenantId)}`}
+                      >
+                        前往新增校方管理員
+                      </a>
+                    </div>
+                  )}
+                </div>
+              )}
               <Textarea
                 label="操作原因"
                 required
@@ -510,7 +572,15 @@ function SchoolDetail({
                 <Button
                   variant={action === 'suspend' ? 'danger' : 'primary'}
                   type="submit"
-                  disabled={mutation.busy || reason.trim().length < 5}
+                  disabled={
+                    mutation.busy ||
+                    checkingOpen ||
+                    reason.trim().length < 5 ||
+                    (action === 'open' &&
+                      (!adminReadiness.value?.hasRoleAdmin ||
+                        adminReadiness.loading ||
+                        !!adminReadiness.error))
+                  }
                 >
                   {action === 'suspend' ? '確定關閉學校' : '確定開通學校'}
                 </Button>
