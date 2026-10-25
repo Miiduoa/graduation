@@ -27,6 +27,8 @@ import {
   adminLoginHref,
   currentPageReturnPath,
   OPS_PATH,
+  opsTabHref,
+  readOpsSchoolId,
   readOpsTab,
   SCHOOL_REVIEW_PATH,
   type OpsTab,
@@ -60,8 +62,11 @@ export function OpsConsole() {
   const [auditQuery, setAuditQuery] = useState('');
 
   useEffect(() => {
-    setTab(readTab());
-    const sync = () => setTab(readTab());
+    const sync = () => {
+      setTab(readTab());
+      setSchoolId(readOpsSchoolId(window.location.search));
+    };
+    sync();
     window.addEventListener('hashchange', sync);
     window.addEventListener('popstate', sync);
     return () => {
@@ -72,7 +77,12 @@ export function OpsConsole() {
 
   function go(next: OpsTab) {
     setTab(next);
-    window.history.replaceState(null, '', `${OPS_PATH}?tab=${next}`);
+    window.history.replaceState(null, '', opsTabHref(next, schoolId));
+  }
+
+  function selectSchool(id: string | null) {
+    setSchoolId(id);
+    window.history.replaceState(null, '', opsTabHref(tab, id));
   }
 
   return (
@@ -115,7 +125,7 @@ export function OpsConsole() {
               selectedId={schoolId}
               search={schoolQuery}
               lifecycle={schoolLifecycle}
-              onSelect={setSchoolId}
+              onSelect={selectSchool}
               onSearch={setSchoolQuery}
               onLifecycle={setSchoolLifecycle}
             />
@@ -126,7 +136,7 @@ export function OpsConsole() {
               context={auth.session!.context}
               suspended={suspended}
               selectedSchool={schoolId}
-              onSchool={setSchoolId}
+              onSchool={selectSchool}
               onManageSchool={() => go('schools')}
             />
           ) : null}

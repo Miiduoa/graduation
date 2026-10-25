@@ -28,6 +28,22 @@ export function readOpsTab(
   return isOpsTab(fragment) ? fragment : 'schools';
 }
 
+// The selected school is navigation context, never an authorization grant.
+export function readOpsSchoolId(search: string | null | undefined): string | null {
+  const tenantId = new URLSearchParams((search || '').replace(/^\?/, '')).get('tenantId');
+  if (!tenantId || tenantId.length > 80 || !/^[a-z0-9][a-z0-9-]*[a-z0-9]$/.test(tenantId))
+    return null;
+  return tenantId;
+}
+
+export function opsTabHref(tab: OpsTab, schoolId: string | null): string {
+  const params = new URLSearchParams({ tab });
+  if ((tab === 'schools' || tab === 'people') && schoolId && readOpsSchoolId(`?tenantId=${encodeURIComponent(schoolId)}`)) {
+    params.set('tenantId', schoolId);
+  }
+  return `${OPS_PATH}?${params.toString()}`;
+}
+
 export const APPROVE_SCHOOL_REASON = '資料齊全，先建檔未開放註冊。';
 export const REJECT_SCHOOL_REASON = '資料不足，請補件後再申請。';
 export const OPEN_SCHOOL_REASON = '資料已核對，開放給學生找校。';
