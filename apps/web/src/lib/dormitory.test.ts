@@ -1,10 +1,13 @@
 import { expect, it } from 'vitest';
 import {
   DORM_CHECKLISTS,
+  DORM_MILESTONE_LIMIT,
   dormChecklistProgress,
   dormStorageKey,
   emptyDormWorkspace,
   formatDormRepairForCopy,
+  isValidDormDate,
+  sortedDormMilestones,
   normalizeDormWorkspace,
 } from '@campus/shared/src/dormitory';
 
@@ -56,4 +59,39 @@ it('copy template explicitly says that the app did not submit a school report', 
   expect(text).toContain('冷氣不冷');
   expect(text).toContain('風扇在轉但無冷風');
   expect(text).not.toContain('校方已受理');
+});
+
+
+it('safely normalizes locally entered dates without inventing official deadlines', () => {
+  const value = normalizeDormWorkspace({
+    milestones: [
+      { id: 'fee', title: '  繳費截止  ', dueDate: '2026-11-15', completed: false, createdAt: 4 },
+      { id: 'fee', title: '重複', dueDate: '2026-11-16' },
+      { id: 'bad', title: '錯誤日', dueDate: '2026-02-30' },
+      { id: '../malformed', title: '錯誤識別碼', dueDate: '2026-11-20' },
+      { id: 'move', title: '搬入', dueDate: '2026-11-01', completed: true, createdAt: 1 },
+      { id: 'today', title: '查房', dueDate: '2026-11-08', completed: false, createdAt: 2 },
+    ],
+  });
+  expect(value.milestones).toHaveLength(3);
+  expect(value.milestones[0].title).toBe('繳費截止');
+  expect(value.milestones.map((m) => m.id)).toEqual(['fee', 'move', 'today']);
+  expect(sortedDormMilestones(value).map((m) => m.id)).toEqual(['today', 'fee', 'move']);
+  expect(value.milestones[0].completed).toBe(false);
+  expect(emptyDormWorkspace().milestones).toEqual([]);
+});
+
+it('validates leap days and caps the personal date list', () => {
+  expect(isValidDormDate('2028-02-29')).toBe(true);
+  expect(isValidDormDate('2026-02-29')).toBe(false);
+  expect(isValidDormDate('2026-13-01')).toBe(false);
+  expect(isValidDormDate('2026-11-31')).toBe(false);
+  expect(isValidDormDate('2026-11-30')).toBe(true);
+  expect(isValidDormDate('')).toBe(false);
+  const value = normalizeDormWorkspace({
+    milestones: Array.from({ length: 100 }, (_, n) => ({
+      id: 'date_' + n, title: '提醒 ' + n, dueDate: '2026-12-15', completed: false,
+    })),
+  });
+  expect(value.milestones).toHaveLength(DORM_MILESTONE_LIMIT);
 });

@@ -80,3 +80,55 @@ it('refuses stale writes from another browser tab instead of overwriting changes
   expect(screen.getByRole('alert').textContent).toContain('有另一處修改了這份紀錄');
   expect(localStorage.getItem(dormStorageKey('guest', 'pu'))).toContain('另一頁的內容');
 });
+
+
+it('shows verified PU housing reference only for the selected school', () => {
+  const page = render(<DormitoryPage />);
+  fireEvent.click(screen.getByRole('button', { name: '宿舍指南' }));
+  expect(screen.getByRole('heading', { name: '思高學苑' })).toBeTruthy();
+  expect(screen.getByText(/24 小時校安專線/)).toBeTruthy();
+  expect(screen.getByText(/不代表有空床或可直接申請/)).toBeTruthy();
+  selectedCampus.schoolId = 'ncku';
+  selectedCampus.schoolName = '國立成功大學';
+  page.rerender(<DormitoryPage />);
+  fireEvent.click(screen.getByRole('button', { name: '宿舍指南' }));
+  expect(screen.queryByRole('heading', { name: '思高學苑' })).toBeNull();
+  expect(screen.getByText(/尚無可核實的房型與費用清單/)).toBeTruthy();
+});
+
+it('adds, completes and edits a personal date with storage persistence', () => {
+  render(<DormitoryPage />);
+  fireEvent.click(screen.getByRole('button', { name: '重要日期' }));
+  fireEvent.click(screen.getByRole('button', { name: '＋ 新增日期' }));
+  fireEvent.change(screen.getByRole('textbox', { name: '事項名稱 *' }), { target: { value: '住宿繳費截止' } });
+  fireEvent.change(screen.getByLabelText('日期 *'), { target: { value: '2026-11-15' } });
+  fireEvent.click(screen.getByRole('button', { name: '儲存日期' }));
+  expect(screen.getByRole('heading', { name: '住宿繳費截止' })).toBeTruthy();
+  fireEvent.click(screen.getByRole('button', { name: '標記完成' }));
+  const key = dormStorageKey('guest', 'pu');
+  expect(JSON.parse(localStorage.getItem(key) ?? 'null').milestones[0]).toMatchObject({
+    title: '住宿繳費截止', dueDate: '2026-11-15', completed: true,
+  });
+  fireEvent.click(screen.getByRole('button', { name: '編輯' }));
+  fireEvent.change(screen.getByRole('textbox', { name: '事項名稱 *' }), { target: { value: '退宿日期' } });
+  fireEvent.click(screen.getByRole('button', { name: '儲存日期' }));
+  expect(JSON.parse(localStorage.getItem(key) ?? 'null').milestones).toHaveLength(1);
+  expect(JSON.parse(localStorage.getItem(key) ?? 'null').milestones[0]).toMatchObject({
+    title: '退宿日期', completed: true,
+  });
+});
+
+it('pre-fills a common repair but never submits it to the school automatically', () => {
+  render(<DormitoryPage />);
+  fireEvent.change(screen.getByRole('textbox', { name: '寢室' }), { target: { value: '305' } });
+  fireEvent.click(screen.getByRole('button', { name: '儲存住宿備忘' }));
+  fireEvent.click(screen.getByRole('button', { name: '設備問題' }));
+  fireEvent.click(screen.getByRole('button', { name: '冷氣無法正常運作' }));
+  expect((screen.getByRole('textbox', { name: '問題名稱 *' }) as HTMLInputElement).value).toBe('冷氣無法正常運作');
+  expect((screen.getByRole('textbox', { name: '位置' }) as HTMLInputElement).value).toBe('寢室 305');
+  expect(localStorage.getItem(dormStorageKey('guest', 'pu'))).not.toContain('冷氣無法正常運作');
+  fireEvent.click(screen.getByRole('button', { name: '儲存紀錄' }));
+  expect(JSON.parse(localStorage.getItem(dormStorageKey('guest', 'pu')) ?? 'null').repairs[0]).toMatchObject({
+    title: '冷氣無法正常運作', status: 'draft',
+  });
+});
