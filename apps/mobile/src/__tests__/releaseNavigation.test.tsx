@@ -1078,8 +1078,8 @@ test.each(['AIAgentConsole', 'AIAgentObservatory'])(
     expect(view.queryByText('AIAgentConsoleScreen')).toBeNull();
   },
 );
-test.each(['Clubs', 'Dormitory', 'DormitoryScreen', 'Career'])(
-  'Map %s is no longer registered; old dorm links go to today instead of an unavailable page',
+test.each(['Clubs', 'DormitoryScreen', 'Career'])(
+  'Map %s is not registered; old placeholder routes do not open unavailable dorm pages',
   async (route) => {
     const { view, navigation } = await mount(MapStack);
     act(() => navigation.navigate(route));
@@ -1088,6 +1088,14 @@ test.each(['Clubs', 'Dormitory', 'DormitoryScreen', 'Career'])(
     expect(view.queryByText(`${route}Screen`)).toBeNull();
   },
 );
+
+test('Map has a dedicated dormitory workspace route', async () => {
+  const { view, navigation } = await mount(MapStack);
+  act(() => navigation.navigate('Dormitory'));
+  expect(navigation.getCurrentRoute()?.name).toBe('Dormitory');
+  expect(view.queryByText(/宿舍包裹查詢與線上報修尚未開放/)).toBeNull();
+  expect(await view.findByText('住宿工作區')).toBeTruthy();
+});
 
 test('Map school information keeps real official housing and career services after retiring old routes', async () => {
   const { view, navigation } = await mount(MapStack);
