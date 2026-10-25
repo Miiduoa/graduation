@@ -4,6 +4,7 @@ import { beforeEach, expect, it, vi } from 'vitest';
 import { NuniError, type NuniAssignment, type NuniWorkspace } from '@campus/shared/src/nuni';
 import { COURSE_WORK_LANDING_ATTR, COURSE_WORK_MISSING_ASSIGNMENT } from '@/lib/courseWorkLanding';
 import { CourseAssignments } from './CourseAssignments';
+import { matchesAssignmentSearch, prioritizeCourseAssignments } from './courseAssignmentDiscovery';
 
 const request = vi.hoisted(() => vi.fn());
 vi.mock('./Session', () => ({
@@ -286,4 +287,85 @@ it('shows a confirmed submission even when the student submitted from the pendin
   expect(screen.getByRole('button', { name: '已繳交 1' }).getAttribute('aria-pressed')).toBe(
     'true',
   );
+});
+
+it('searches titles, descriptions and chapters while retaining drafts and restoring a linked task', async () => {
+  const chapterTask = { ...task, unitTitle: '第 03 週：設計方法' };
+  render(
+    <CourseAssignments
+      assignments={[chapterTask, submitted]}
+      workspace={workspace}
+      reload={vi.fn()}
+      onConfirmed={vi.fn()}
+    />,
+  );
+  const draft = within(screen.getByRole('article', { name: task.title })).getByLabelText(
+    '作業內容',
+  ) as HTMLTextAreaElement;
+  fireEvent.change(draft, { target: { value: '搜尋時仍保留的內容' } });
+  fireEvent.change(screen.getByRole('searchbox', { name: '搜尋作業' }), {
+    target: { value: '文獻' },
+  });
+  expect(screen.queryByRole('article', { name: task.title })).toBeNull();
+  expect(screen.getByRole('article', { name: submitted.title })).toBeTruthy();
+  act(() => {
+    window.history.replaceState({}, '', `#assignment-${task.id}`);
+    window.dispatchEvent(new HashChangeEvent('hashchange'));
+  });
+  expect((screen.getByRole('searchbox', { name: '搜尋作業' }) as HTMLInputElement).value).toBe('');
+  expect(screen.getByRole('article', { name: task.title })).toBeTruthy();
+  expect(draft.value).toBe('搜尋時仍保留的內容');
+  fireEvent.change(screen.getByRole('searchbox', { name: '搜尋作業' }), {
+    target: { value: '０３ 研究' },
+  });
+  expect(screen.getByRole('article', { name: task.title })).toBeTruthy();
+  expect(screen.queryByRole('article', { name: submitted.title })).toBeNull();
+  fireEvent.keyDown(screen.getByRole('searchbox', { name: '搜尋作業' }), { key: 'Escape' });
+  expect(screen.getByRole('article', { name: submitted.title })).toBeTruthy();
+});
+
+it('keeps submitted work behind actionable work and sorts Taipei deadlines without mutating the input', () => {
+  const later = { ...task, id: 'later', dueAt: '2026-10-25T10:00:00+08:00' };
+  const earlier = { ...task, id: 'earlier', dueAt: '2026-10-25T09:00:00' };
+  const unspecified = { ...task, id: 'no-date', dueAt: null };
+  const invalid = { ...task, id: 'invalid', dueAt: 'not-a-date' };
+  const input = [submitted, unspecified, later, invalid, earlier];
+  const sorted = prioritizeCourseAssignments(input, workspace);
+  expect(sorted.map((item) => item.id)).toEqual([
+    'earlier',
+    'later',
+    'no-date',
+    'invalid',
+    submitted.id,
+  ]);
+  expect(input.map((item) => item.id)).toEqual([
+    submitted.id,
+    'no-date',
+    'later',
+    'invalid',
+    'earlier',
+  ]);
+  expect(prioritizeCourseAssignments(input, { ...workspace, memberRole: 'co-teacher' })).toBe(
+    input,
+  );
+  expect(prioritizeCourseAssignments(input, { ...workspace, state: 'archived' })).toBe(input);
+  expect(matchesAssignmentSearch({ ...task, title: 'API 設計' }, 'ＡＰＩ 研究')).toBe(true);
+});
+
+it('explains an empty search and clears it without losing a student answer', () => {
+  render(
+    <CourseAssignments
+      assignments={[task]}
+      workspace={workspace}
+      reload={vi.fn()}
+      onConfirmed={vi.fn()}
+    />,
+  );
+  fireEvent.change(screen.getByLabelText('作業內容'), { target: { value: '草稿不要消失' } });
+  const search = screen.getByRole('searchbox', { name: '搜尋作業' });
+  fireEvent.change(search, { target: { value: '不存在的內容' } });
+  expect(screen.getByText('沒有符合的作業。試試其他關鍵字，或清除搜尋。')).toBeTruthy();
+  fireEvent.click(screen.getByRole('button', { name: '清除搜尋' }));
+  expect((screen.getByLabelText('作業內容') as HTMLTextAreaElement).value).toBe('草稿不要消失');
+  expect(document.activeElement).toBe(search);
 });

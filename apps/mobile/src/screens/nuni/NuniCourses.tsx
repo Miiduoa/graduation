@@ -38,7 +38,8 @@ import {
   assignmentReceiptStatusLabel,
   assignmentSubmissionLate,
 } from '@campus/shared/src/assignmentFiles';
-import { formatTaipeiDateTime } from '@campus/shared/src/taipeiTime';
+import { formatTaipeiDateTime, parseTaipeiInstant } from '@campus/shared/src/taipeiTime';
+import { loadNuniStudyAgenda } from '@campus/shared/src/nuniStudyAgenda';
 import {
   assignmentFileDownloadUrl,
   assignmentFileSubmitEnabledNative,
@@ -56,6 +57,7 @@ import {
 import { courseRoleLabels } from '@campus/shared/src/nuniCourseTasks';
 import {
   awaitingFeedbackPosition,
+  feedbackPredatesSubmission,
   feedbackQueueLabel,
   matchesFeedbackQueueFilter,
   needsFeedbackReview,
@@ -67,16 +69,21 @@ import { useNuniSession } from '../../state/nuniSession';
 import { useNuniDraftState } from '../../state/nuniDrafts';
 import { useTheme } from '../../state/theme';
 import type { NativeNuniSession } from '../../services/nuniSessionController';
-import {
-  loadNuniRecentTeacherFeedback,
-  type NuniRecentTeacherFeedback,
+import type {
+  NuniRecentTeacherFeedback,
+  NuniRecentTeacherFeedbackResult,
 } from '../../services/nuniRecentFeedback';
 import {
   isPendingActivity,
   matchesActivityFilter,
+  matchesActivitySearch,
+  matchesCourseListFilter,
+  matchesCourseSearch,
   prioritizeActivities,
   type ActivityFilter,
+  type CourseListFilter,
 } from '../../services/nuniActivityTasks';
+import { StudyAgenda } from './StudyAgenda';
 
 type Classes = ReturnType<typeof createNuniClasses>;
 type Field = {
@@ -93,9 +100,7 @@ type Receipt = NuniSubmission | NuniQuizResponse;
 const QUIZ_ANSWER_LIMIT = 2000;
 const time = (value: string) => formatTaipeiDateTime(value);
 const receiptFeedbackIsStale = (receipt: Receipt) =>
-  !!receipt.teacherFeedback &&
-  !!receipt.reviewedAt &&
-  needsFeedbackReview(receipt);
+  !!receipt.teacherFeedback && !!receipt.reviewedAt && needsFeedbackReview(receipt);
 
 function Copy({
   children,
@@ -126,18 +131,24 @@ function Button({
   onPress,
   disabled = false,
   selected,
+  expanded,
 }: {
   label: string;
   onPress(): void;
   disabled?: boolean;
   selected?: boolean;
+  expanded?: boolean;
 }) {
   const theme = useTheme();
   return (
     <Pressable
       accessibilityRole="button"
       accessibilityLabel={label}
-      accessibilityState={{ disabled, ...(selected === undefined ? {} : { selected }) }}
+      accessibilityState={{
+        disabled,
+        ...(selected === undefined ? {} : { selected }),
+        ...(expanded === undefined ? {} : { expanded }),
+      }}
       disabled={disabled}
       onPress={onPress}
       style={({ pressed }) => ({
@@ -181,12 +192,14 @@ function RecentTeacherFeedbackPanel({
   loading,
   error,
   data,
+  limited = false,
   onRetry,
   open,
 }: {
   loading: boolean;
   error: string;
-  data: Awaited<ReturnType<typeof loadNuniRecentTeacherFeedback>> | null;
+  data: NuniRecentTeacherFeedbackResult | null;
+  limited?: boolean;
   onRetry(): void;
   open(courseId: string, activityId?: string): void;
 }) {
@@ -217,14 +230,23 @@ function RecentTeacherFeedbackPanel({
       ) : null}
       {!loading && !error && data && items.length === 0 && failed === 0 ? (
         <Copy>
-          {studied === 0
-            ? '加入修習課程後，老師留下的回饋會顯示在這裡。'
-            : '目前還沒有跨課程的老師回饋。'}
+          {limited
+            ? '已載入內容中尚無回饋，較早紀錄可能未包含。'
+            : studied === 0
+              ? '加入修習課程後，老師留下的回饋會顯示在這裡。'
+              : '目前還沒有跨課程的老師回饋。'}
         </Copy>
+      ) : null}
+      {!loading && !error && limited && items.length > 0 ? (
+        <Copy>這裡只顯示已載入的回饋，較早紀錄可能未包含。</Copy>
       ) : null}
       {!loading && !error
         ? items.map((item) => (
-            <RecentTeacherFeedbackRow key={`${item.courseId}-${item.kind}-${item.id}`} item={item} open={open} />
+            <RecentTeacherFeedbackRow
+              key={`${item.courseId}-${item.kind}-${item.id}`}
+              item={item}
+              open={open}
+            />
           ))
         : null}
     </Section>
@@ -248,9 +270,7 @@ function RecentTeacherFeedbackRow({
         {item.stale ? ' · 早於最近繳交' : ''}
       </Copy>
       <Copy>{truncateFeedback(item.feedback)}</Copy>
-      {item.stale ? (
-        <Copy>這則回饋早於你最近一次繳交，請到作業頁確認是否仍適用。</Copy>
-      ) : null}
+      {item.stale ? <Copy>這則回饋早於你最近一次繳交，請到作業頁確認是否仍適用。</Copy> : null}
       {item.reviewedAt ? <Copy>{time(item.reviewedAt)}</Copy> : null}
       <Button label={label} onPress={() => open(item.courseId, item.id)} />
     </View>
@@ -480,7 +500,11 @@ function MutationForm({
   );
 }
 
-function useLoad<T>(load: () => Promise<T>, automatic = true, clearOnDenied = false) {
+function useLoad<T>(
+  load: (fence: { cancelled(): boolean }) => Promise<T>,
+  automatic = true,
+  clearOnDenied = false,
+) {
   const [data, setData] = useState<T | null>(null);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(automatic);
@@ -495,7 +519,9 @@ function useLoad<T>(load: () => Promise<T>, automatic = true, clearOnDenied = fa
       setLoading(true);
       setError('');
       try {
-        const value = await load();
+        const value = await load({
+          cancelled: () => !mounted.current || run !== generation.current,
+        });
         if (mounted.current && run === generation.current) setData(value);
       } catch (failure) {
         if (mounted.current && run === generation.current) {
@@ -503,7 +529,7 @@ function useLoad<T>(load: () => Promise<T>, automatic = true, clearOnDenied = fa
           if (
             clearOnDenied &&
             failure instanceof NuniError &&
-            (failure.status === 403 || failure.status === 404)
+            ([401, 403, 404].includes(failure.status) || failure.code === 'SESSION_CHANGED')
           )
             setData(null);
         }
@@ -631,7 +657,11 @@ function CourseScope({
   const [focusActivityId, setFocusActivityId] = useState<string | undefined>(initialAssignmentId);
   const [focusMaterialId, setFocusMaterialId] = useState<string | undefined>(initialMaterialId);
   useEffect(() => {
-    if (initialWorkspaceId) setSelected(initialWorkspaceId);
+    if (initialWorkspaceId) {
+      scrollRef.current?.scrollTo({ y: 0, animated: false });
+      contentOffsetYRef.current = 0;
+      setSelected(initialWorkspaceId);
+    }
   }, [initialWorkspaceId, setSelected]);
   useEffect(() => {
     if (initialAssignmentId) setFocusActivityId(initialAssignmentId);
@@ -641,6 +671,8 @@ function CourseScope({
   }, [initialMaterialId]);
   const openCourse = useCallback(
     (id: string, activityId?: string) => {
+      scrollRef.current?.scrollTo({ y: 0, animated: false });
+      contentOffsetYRef.current = 0;
       setFocusActivityId(activityId);
       setFocusMaterialId(undefined);
       setSelected(id);
@@ -665,6 +697,8 @@ function CourseScope({
           id={selected}
           classes={classes}
           onBack={() => {
+            scrollRef.current?.scrollTo({ y: 0, animated: false });
+            contentOffsetYRef.current = 0;
             setFocusActivityId(undefined);
             setFocusMaterialId(undefined);
             setSelected(null);
@@ -688,35 +722,97 @@ function CourseList({
   classes: Classes;
   open(id: string, activityId?: string): void;
 }) {
+  const theme = useTheme();
   const load = useCallback(() => classes.list(), [classes]);
-  const result = useLoad(load);
-  const loadFeedback = useCallback(() => loadNuniRecentTeacherFeedback(classes), [classes]);
-  const feedback = useLoad(loadFeedback);
+  const result = useLoad(load, true, true);
+  const loadAgenda = useCallback(
+    (fence: { cancelled(): boolean }) => loadNuniStudyAgenda(classes, result.data ?? [], fence),
+    [classes, result.data],
+  );
+  const agenda = useLoad(loadAgenda, result.data !== null, true);
+  const agendaData = useMemo(() => {
+    if (!agenda.data || agenda.data === 'cancelled') return null;
+    const allowed = new Set(
+      (result.data ?? [])
+        .filter((course) => course.state === 'active' && course.memberRole === 'student')
+        .map((course) => course.id),
+    );
+    return {
+      ...agenda.data,
+      tasks: agenda.data.tasks.filter((task) => allowed.has(task.courseId)),
+      failedCourseIds: agenda.data.failedCourseIds.filter((id) => allowed.has(id)),
+      limitedCourseIds: agenda.data.limitedCourseIds.filter((id) => allowed.has(id)),
+      studiedCourseCount: allowed.size,
+    };
+  }, [agenda.data, result.data]);
+  const feedback = useMemo<NuniRecentTeacherFeedbackResult | null>(() => {
+    if (!agendaData) return null;
+    return {
+      studiedCourseCount: agendaData.studiedCourseCount,
+      failedCourseIds: agendaData.failedCourseIds,
+      items: agendaData.tasks
+        .filter((task) => !!task.feedback && !!task.submittedAt)
+        .map((task) => ({
+          kind: task.kind,
+          id: task.id,
+          courseId: task.courseId,
+          courseName: task.courseTitle,
+          title: task.title,
+          feedback: task.feedback!,
+          reviewedAt: task.reviewedAt,
+          submittedAt: task.submittedAt,
+          stale: feedbackPredatesSubmission(task.reviewedAt, task.submittedAt),
+        }))
+        .sort(
+          (left, right) =>
+            (right.reviewedAt ? (parseTaipeiInstant(right.reviewedAt) ?? 0) : 0) -
+            (left.reviewedAt ? (parseTaipeiInstant(left.reviewedAt) ?? 0) : 0),
+        )
+        .slice(0, 8),
+    };
+  }, [agendaData]);
   const [action, setAction] = useNuniDraftState<'join' | 'create' | null>('courses:entry', null);
-  const refreshAll = () => {
-    void result.refresh();
-    void feedback.refresh();
-  };
+  const [query, setQuery] = useNuniDraftState('courses:search', '');
+  const [filter, setFilter] = useNuniDraftState<CourseListFilter>('courses:filter', 'all');
+  const courses = result.data ?? [];
+  const matched = courses.filter(
+    (course) => matchesCourseListFilter(course, filter) && matchesCourseSearch(course, query),
+  );
+  const filters: [CourseListFilter, string][] = [
+    ['all', '全部課程'],
+    ['student', '修習'],
+    ['teaching', '授課'],
+    ['archived', '已封存'],
+  ];
   return (
     <>
-      <Copy title>我的課程</Copy>
-      <Copy>選擇課程，查看教材、作業與測驗。</Copy>
+      <View style={{ gap: 6 }}>
+        <Text style={{ color: theme.colors.muted, fontSize: 13, lineHeight: 20 }}>學習空間</Text>
+        <Text
+          accessibilityRole="header"
+          style={{ color: theme.colors.text, fontSize: 30, fontWeight: '600', lineHeight: 39 }}
+        >
+          我的課程
+        </Text>
+        <Copy>先掌握待辦，再回到課程繼續學習。</Copy>
+      </View>
       <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
-        <Button label="加入課程" onPress={() => setAction('join')} />
-        <Button label="建立課程" onPress={() => setAction('create')} />
+        <Button
+          label="加入課程"
+          selected={action === 'join'}
+          onPress={() => setAction(action === 'join' ? null : 'join')}
+        />
+        <Button
+          label="建立課程"
+          selected={action === 'create'}
+          onPress={() => setAction(action === 'create' ? null : 'create')}
+        />
         <Button
           label="更新課程"
-          onPress={refreshAll}
-          disabled={result.loading || feedback.loading}
+          onPress={() => void result.refresh()}
+          disabled={result.loading || agenda.loading}
         />
       </View>
-      <RecentTeacherFeedbackPanel
-        loading={feedback.loading}
-        error={feedback.error}
-        data={feedback.data}
-        onRetry={() => void feedback.refresh()}
-        open={open}
-      />
       <View style={{ display: action === 'join' ? 'flex' : 'none' }}>
         <MutationForm
           draftKey="courses:join"
@@ -742,46 +838,133 @@ function CourseList({
       </View>
       {result.loading ? <Copy>正在讀取課程…</Copy> : null}
       {result.error ? <Copy alert>{result.error}</Copy> : null}
-      {!result.loading && !result.error && result.data ? (
+      {result.data && !result.error ? (
         <>
-          {(['student', 'teaching', 'archived'] as const).map((group) => {
-            const rows = result.data!.filter((course) =>
-              group === 'archived'
-                ? course.state === 'archived'
-                : course.state === 'active' &&
-                  (group === 'student'
-                    ? course.memberRole === 'student'
-                    : course.memberRole !== 'student'),
-            );
-            return (
-              <Section key={group}>
-                <Copy title>
-                  {group === 'student'
-                    ? '修習課程'
-                    : group === 'teaching'
-                      ? '授課與協作'
-                      : '封存課程'}{' '}
-                  · {rows.length}
-                </Copy>
-                {rows.length === 0 ? (
-                  <Copy>
-                    {group === 'student'
-                      ? '尚未加入修習課程。請向老師取得邀請碼。'
-                      : group === 'teaching'
-                        ? '目前沒有負責或共同授課的課程。'
-                        : '目前沒有封存課程。'}
-                  </Copy>
-                ) : (
-                  rows.map((course) => (
-                    <View key={course.id} style={{ gap: 4 }}>
-                      <Button label={course.title} onPress={() => open(course.id)} />
-                      <Copy>{courseRoleLabels[course.memberRole]}</Copy>
-                    </View>
-                  ))
-                )}
-              </Section>
-            );
-          })}
+          <StudyAgenda
+            data={agendaData}
+            loading={agenda.loading}
+            error={agenda.error}
+            retry={() => void agenda.refresh()}
+            open={open}
+          />
+          <Section>
+            <Copy title>課程目錄</Copy>
+            <TextInput
+              accessibilityLabel="搜尋我的課程"
+              placeholder="輸入課程名稱"
+              placeholderTextColor={theme.colors.muted}
+              value={query}
+              onChangeText={setQuery}
+              autoCapitalize="none"
+              autoCorrect={false}
+              returnKeyType="search"
+              style={{
+                borderWidth: 1,
+                borderColor: theme.colors.border,
+                borderRadius: 10,
+                paddingHorizontal: 14,
+                paddingVertical: 12,
+                color: theme.colors.text,
+                backgroundColor: theme.colors.surface,
+                fontSize: 16,
+                minHeight: 48,
+              }}
+            />
+            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
+              {filters.map(([value, label]) => (
+                <Button
+                  key={value}
+                  label={`${label} ${courses.filter((course) => matchesCourseListFilter(course, value)).length}`}
+                  selected={filter === value}
+                  onPress={() => setFilter(value)}
+                />
+              ))}
+            </View>
+            {query.trim() || filter !== 'all' ? (
+              <View style={{ gap: 8 }}>
+                <Copy>找到 {matched.length} 門課程</Copy>
+                <Button
+                  label="顯示所有課程"
+                  onPress={() => {
+                    setQuery('');
+                    setFilter('all');
+                  }}
+                />
+              </View>
+            ) : null}
+            {courses.length === 0 ? (
+              <Copy>尚未加入修習課程。請向老師取得邀請碼。</Copy>
+            ) : matched.length === 0 ? (
+              <Copy>沒有符合的課程。試試其他名稱，或顯示所有課程。</Copy>
+            ) : (
+              (['student', 'teaching', 'archived'] as const).map((group) => {
+                const rows = matched.filter((course) => matchesCourseListFilter(course, group));
+                if (!rows.length) return null;
+                return (
+                  <View key={group} style={{ gap: 8, marginTop: 10 }}>
+                    <Copy title>
+                      {group === 'student'
+                        ? '修習課程'
+                        : group === 'teaching'
+                          ? '授課與協作'
+                          : '封存課程'}{' '}
+                      · {rows.length}
+                    </Copy>
+                    {rows.map((course) => (
+                      <Pressable
+                        key={course.id}
+                        accessibilityRole="button"
+                        accessibilityLabel={course.title}
+                        accessibilityHint={`開啟課程。${courseRoleLabels[course.memberRole]}${course.state === 'archived' ? '，已封存' : ''}`}
+                        onPress={() => open(course.id)}
+                        style={({ pressed }) => ({
+                          borderBottomWidth: 1,
+                          borderColor: theme.colors.border,
+                          paddingVertical: 17,
+                          paddingHorizontal: 2,
+                          flexDirection: 'row',
+                          alignItems: 'center',
+                          gap: 12,
+                          opacity: pressed ? 0.65 : 1,
+                        })}
+                      >
+                        <View style={{ flex: 1, minWidth: 0, gap: 5 }}>
+                          <Text
+                            style={{
+                              color: theme.colors.text,
+                              fontSize: 17,
+                              fontWeight: '600',
+                              lineHeight: 26,
+                            }}
+                          >
+                            {course.title}
+                          </Text>
+                          <Text style={{ color: theme.colors.muted, fontSize: 13, lineHeight: 20 }}>
+                            {courseRoleLabels[course.memberRole]}
+                            {course.state === 'archived' ? ' · 已封存' : ''}
+                          </Text>
+                        </View>
+                        <Text
+                          importantForAccessibility="no"
+                          style={{ color: theme.colors.muted, fontSize: 22 }}
+                        >
+                          ›
+                        </Text>
+                      </Pressable>
+                    ))}
+                  </View>
+                );
+              })
+            )}
+          </Section>
+          <RecentTeacherFeedbackPanel
+            loading={agenda.loading}
+            error={agenda.error}
+            data={feedback}
+            limited={!!agendaData?.limitedCourseIds.length}
+            onRetry={() => void agenda.refresh()}
+            open={open}
+          />
         </>
       ) : null}
     </>
@@ -894,17 +1077,20 @@ function CourseDetail({
     `course:${id}:activity-filter`,
     'all',
   );
+  const [assignmentQuery, setAssignmentQuery] = useNuniDraftState(
+    `course:${id}:assignment-search`,
+    '',
+  );
+  const [quizQuery, setQuizQuery] = useNuniDraftState(`course:${id}:quiz-search`, '');
+  const activityQuery = tab === 'quizzes' ? quizQuery : assignmentQuery;
+  const setActivityQuery = tab === 'quizzes' ? setQuizQuery : setAssignmentQuery;
   const data = result.data;
   const linkedAssignment =
     !!initialAssignmentId && !!data?.assignments.some((item) => item.id === initialAssignmentId);
   const linkedQuiz =
     !!initialAssignmentId && !!data?.quizzes.some((item) => item.id === initialAssignmentId);
   const missingLinkedWork =
-    !!initialAssignmentId &&
-    !initialMaterialId &&
-    !!data &&
-    !linkedAssignment &&
-    !linkedQuiz;
+    !!initialAssignmentId && !initialMaterialId && !!data && !linkedAssignment && !linkedQuiz;
   const linkedQuizTab =
     !!initialAssignmentId &&
     (linkedQuiz || (!linkedAssignment && /^cwq_/i.test(initialAssignmentId)));
@@ -941,7 +1127,17 @@ function CourseDetail({
     if (initialMaterialId || !initialAssignmentId) return;
     setTab(linkedQuizTab ? 'quizzes' : 'assignments');
     setActivityFilter('all');
-  }, [initialAssignmentId, initialMaterialId, linkedQuizTab, setActivityFilter, setTab]);
+    if (linkedQuizTab) setQuizQuery('');
+    else setAssignmentQuery('');
+  }, [
+    initialAssignmentId,
+    initialMaterialId,
+    linkedQuizTab,
+    setActivityFilter,
+    setAssignmentQuery,
+    setQuizQuery,
+    setTab,
+  ]);
   const cancelMaterialLookup = () => {
     invalidateMaterialLookup();
     setTargetSeekCancelled(true);
@@ -993,11 +1189,7 @@ function CourseDetail({
           materialsCursor: merged.nextCursor,
         };
       }, result.version);
-      if (
-        lookupRun === lookupGeneration.current &&
-        targetSeekActive &&
-        !merged.cycleDetected
-      ) {
+      if (lookupRun === lookupGeneration.current && targetSeekActive && !merged.cycleDetected) {
         setTargetSeekBudget((remaining) => Math.max(0, remaining - 1));
       }
     } catch (failure) {
@@ -1081,13 +1273,25 @@ function CourseDetail({
     setActivityFilter((filter) => (filter === 'pending' ? 'submitted' : filter));
   };
   const teacher = data && data.course.memberRole !== 'student';
+  const currentActivities = data ? (tab === 'quizzes' ? data.quizzes : data.assignments) : [];
+  const matchingActivities = data
+    ? currentActivities.filter(
+        (item) =>
+          (teacher || matchesActivityFilter(item, data.course, activityFilter)) &&
+          matchesActivitySearch(item, activityQuery),
+      )
+    : [];
   return (
     <>
-      <Button label="返回我的課程" onPress={onBack} />
+      <View
+        style={{ flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between', gap: 8 }}
+      >
+        <Button label="返回我的課程" onPress={onBack} />
+        <Button label="更新內容" onPress={() => void result.refresh()} disabled={result.loading} />
+      </View>
       {result.loading ? <Copy>正在讀取課程內容…</Copy> : null}
       {result.error ? <Copy alert>{result.error}</Copy> : null}
       {materialsDenied ? <Copy alert>{materialsError}</Copy> : null}
-      <Button label="更新內容" onPress={() => void result.refresh()} disabled={result.loading} />
       {data ? (
         <View style={{ gap: 16, display: result.loading || result.error ? 'none' : 'flex' }}>
           <Copy title>{data.course.title}</Copy>
@@ -1095,6 +1299,11 @@ function CourseDetail({
             {courseRoleLabels[data.course.memberRole]}
             {data.course.state === 'archived' ? ' · 課程已封存' : ''}
           </Copy>
+          {data.assignments.length >= 100 || data.quizzes.length >= 100 ? (
+            <Copy>
+              作業或測驗已達本次載入上限，較早內容可能尚未完整顯示；數量只計算目前已載入的項目。
+            </Copy>
+          ) : null}
           <Copy>
             {teacher
               ? '教學操作僅限這門課；不代表校方教職員身分。'
@@ -1129,6 +1338,34 @@ function CourseDetail({
               selected={tab === 'quizzes'}
             />
           </View>
+          {tab !== 'materials' ? (
+            <View style={{ gap: 8 }}>
+              <TextInput
+                accessibilityLabel={tab === 'assignments' ? '搜尋這門課的作業' : '搜尋這門課的測驗'}
+                placeholder="搜尋標題、單元或說明"
+                placeholderTextColor={theme.colors.muted}
+                value={activityQuery}
+                onChangeText={setActivityQuery}
+                autoCapitalize="none"
+                autoCorrect={false}
+                returnKeyType="search"
+                style={{
+                  borderWidth: 1,
+                  borderColor: theme.colors.border,
+                  borderRadius: 10,
+                  paddingHorizontal: 14,
+                  paddingVertical: 12,
+                  color: theme.colors.text,
+                  backgroundColor: theme.colors.surface,
+                  fontSize: 16,
+                  minHeight: 48,
+                }}
+              />
+              {activityQuery.trim() ? (
+                <Button label="清除作業與測驗搜尋" onPress={() => setActivityQuery('')} />
+              ) : null}
+            </View>
+          ) : null}
           {!teacher && tab !== 'materials' ? (
             <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
               {(['all', 'pending', 'submitted'] as const).map((filter) => {
@@ -1147,11 +1384,19 @@ function CourseDetail({
               })}
             </View>
           ) : null}
+          {tab !== 'materials' && activityQuery.trim() ? (
+            <Copy>
+              {matchingActivities.length
+                ? `搜尋符合 ${matchingActivities.length} 項。`
+                : '沒有符合的作業或測驗。請更換關鍵字，或清除搜尋。'}
+              {initialAssignmentId ? ' 從連結開啟的項目仍保留在下方。' : ''}
+            </Copy>
+          ) : null}
           <View style={{ display: tab === 'assignments' ? 'flex' : 'none', gap: 16 }}>
             {data.assignments.length === 0 ? (
               <Copy>老師尚未發布作業。</Copy>
             ) : (
-              prioritizeActivities(data.assignments, data.course).map((item) => (
+              prioritizeActivities(data.assignments, data.course).map((item, index) => (
                 <ActivityCard
                   key={`${data.course.memberRole}:${data.course.state}:${item.id}`}
                   item={item}
@@ -1159,10 +1404,11 @@ function CourseDetail({
                   classes={classes}
                   saved={saveActivity}
                   hidden={
-                    !teacher &&
-                    !matchesActivityFilter(item, data.course, activityFilter) &&
+                    ((!teacher && !matchesActivityFilter(item, data.course, activityFilter)) ||
+                      !matchesActivitySearch(item, assignmentQuery)) &&
                     item.id !== initialAssignmentId
                   }
+                  compact={data.assignments.length > 8 && index > 0}
                   focused={item.id === initialAssignmentId}
                   scrollRef={scrollRef}
                   contentOffsetYRef={contentOffsetYRef}
@@ -1262,9 +1508,7 @@ function CourseDetail({
                       <MaterialCard
                         key={material.id}
                         material={material}
-                        focused={
-                          material.id === initialMaterialId && !targetSeekCancelled
-                        }
+                        focused={material.id === initialMaterialId && !targetSeekCancelled}
                         lookupGeneration={lookupGeneration}
                         scrollRef={scrollRef}
                         contentOffsetYRef={contentOffsetYRef}
@@ -1295,7 +1539,7 @@ function CourseDetail({
             {data.quizzes.length === 0 ? (
               <Copy>老師尚未發布測驗。</Copy>
             ) : (
-              prioritizeActivities(data.quizzes, data.course).map((item) => (
+              prioritizeActivities(data.quizzes, data.course).map((item, index) => (
                 <ActivityCard
                   key={`${data.course.memberRole}:${data.course.state}:${item.id}`}
                   item={item}
@@ -1303,10 +1547,11 @@ function CourseDetail({
                   classes={classes}
                   saved={saveActivity}
                   hidden={
-                    !teacher &&
-                    !matchesActivityFilter(item, data.course, activityFilter) &&
+                    ((!teacher && !matchesActivityFilter(item, data.course, activityFilter)) ||
+                      !matchesActivitySearch(item, quizQuery)) &&
                     item.id !== initialAssignmentId
                   }
+                  compact={data.quizzes.length > 8 && index > 0}
                   focused={item.id === initialAssignmentId}
                   scrollRef={scrollRef}
                   contentOffsetYRef={contentOffsetYRef}
@@ -1436,6 +1681,7 @@ function ActivityCard({
   saved,
   hidden = false,
   focused = false,
+  compact = false,
   scrollRef,
   contentOffsetYRef,
 }: {
@@ -1445,9 +1691,15 @@ function ActivityCard({
   saved(item: Activity): void;
   hidden?: boolean;
   focused?: boolean;
+  compact?: boolean;
   scrollRef?: RefObject<ScrollView | null>;
   contentOffsetYRef?: MutableRefObject<number>;
 }) {
+  const theme = useTheme();
+  const [expanded, setExpanded] = useState(() => !compact || focused);
+  useEffect(() => {
+    if (focused) setExpanded(true);
+  }, [focused]);
   const assignment = 'instructions' in item;
   const receipt = assignment ? item.mySubmission : item.myResponse;
   const prompt = assignment ? item.instructions : item.prompt;
@@ -1472,29 +1724,34 @@ function ActivityCard({
     revealed.current = true;
     revealAssignmentSubmitArea(scroll, target, {
       contentOffsetY: contentOffsetYRef?.current ?? 0,
-      isActive: () =>
-        focused &&
-        scrollRef?.current === scroll &&
-        submitRef.current === target,
+      isActive: () => focused && scrollRef?.current === scroll && submitRef.current === target,
     });
   };
   const landKind = assignment ? 'assignment' : 'quiz';
   const landLabel = assignment ? '作業繳交區' : '測驗作答區';
   const submitArea = (
     <>
-      {focused ? (
-        <Text accessibilityLabel={`${landLabel}：${item.title}`}>{landLabel}</Text>
-      ) : null}
+      {focused ? <Text accessibilityLabel={`${landLabel}：${item.title}`}>{landLabel}</Text> : null}
       {canSubmit && fileSubmit ? (
         <View style={{ gap: 8 }}>
-          <Button label="拍照" onPress={() => void pickAssignmentCamera(localFiles).then(setLocalFiles)} />
-          <Button label="相簿" onPress={() => void pickAssignmentAlbum(localFiles).then(setLocalFiles)} />
+          <Button
+            label="拍照"
+            onPress={() => void pickAssignmentCamera(localFiles).then(setLocalFiles)}
+          />
+          <Button
+            label="相簿"
+            onPress={() => void pickAssignmentAlbum(localFiles).then(setLocalFiles)}
+          />
           <Button
             label="檔案"
             onPress={() => void pickAssignmentDocuments(localFiles).then(setLocalFiles)}
           />
           <Copy>網路不穩時再送一次，不會重複交。選好的照片可以刪除或調整順序後再送出。</Copy>
-          {progress ? <Copy>上傳中 {progress.completed}/{progress.total}，請保持網路連線。</Copy> : null}
+          {progress ? (
+            <Copy>
+              上傳中 {progress.completed}/{progress.total}，請保持網路連線。
+            </Copy>
+          ) : null}
           {localFiles.map((file, index) => (
             <View
               key={file.key}
@@ -1612,83 +1869,126 @@ function ActivityCard({
       importantForAccessibility={hidden ? 'no-hide-descendants' : 'auto'}
     >
       <Section>
-        <Copy title>{item.title}</Copy>
-        <Copy>{prompt}</Copy>
+        <View style={{ gap: 8 }}>
+          {item.unitTitle ? (
+            <Text style={{ color: theme.colors.muted, fontSize: 13, lineHeight: 20 }}>
+              {item.unitTitle}
+            </Text>
+          ) : null}
+          <Copy title>{item.title}</Copy>
+          <Text
+            style={{
+              color: receipt ? theme.colors.success : theme.colors.muted,
+              fontSize: 14,
+              lineHeight: 22,
+            }}
+          >
+            {receipt
+              ? receiptFeedbackIsStale(receipt)
+                ? '已繳交 · 有較早版本的回饋'
+                : receipt.teacherFeedback
+                  ? '已繳交 · 老師已回饋'
+                  : assignment
+                    ? '已繳交 · 等待回饋'
+                    : '已作答 · 等待回饋'
+              : !student
+                ? `${assignment ? item.submissionCount : item.responseCount} 份繳交`
+                : !active
+                  ? '課程已封存'
+                  : item.state === 'closed'
+                    ? '未繳交 · 已停止收件'
+                    : assignment
+                      ? '待繳交'
+                      : '待作答'}
+          </Text>
+        </View>
         <Copy>
           {item.dueAt ? `參考期限：${time(item.dueAt)}` : '未設定參考期限'} ·{' '}
           {item.state === 'open' ? '開放繳交' : '已停止收件'}
         </Copy>
-        {item.dueAt && item.state === 'open' && active ? (
-          <Copy>目前仍開放繳交，收件狀態以老師是否停止收件為準。</Copy>
-        ) : null}
-        {fileSubmit && lateOpen ? <Copy alert>{lateOpen}</Copy> : null}
-        {receipt ? (
-          <View style={{ gap: 8 }}>
-            <Copy title>
-              {assignment
-                ? assignmentReceiptStatusLabel(
-                    'late' in receipt
-                      ? receipt.late === true ||
-                        assignmentSubmissionLate(item.dueAt, receipt.submittedAt)
-                      : false,
-                  )
-                : '已作答'}
-            </Copy>
-            <Copy>{time(receipt.submittedAt)}</Copy>
-            {assignment && 'files' in receipt && receipt.files?.length
-              ? receipt.files.map((file) => (
-                  <View
-                    key={file.id}
-                    style={{ flexDirection: 'row', gap: 10, alignItems: 'center', minWidth: 0 }}
-                  >
-                    {file.kind === 'image' ? (
-                      <Image
-                        source={{ uri: assignmentFileDownloadUrl(file) }}
-                        accessibilityLabel={file.originalName}
-                        style={{ width: 56, height: 56, borderRadius: 8 }}
-                      />
-                    ) : null}
-                    <Copy>
-                      {file.originalName} · {file.kind === 'image' ? '照片' : '檔案'}
-                    </Copy>
-                  </View>
-                ))
-              : null}
-            <Copy>{'body' in receipt ? receipt.body : receipt.answer}</Copy>
-            <Copy>
-              {receipt.teacherFeedback
-                ? `老師回饋：${receipt.teacherFeedback}`
-                : '老師尚未留下回饋。'}
-            </Copy>
-            {receipt.reviewedAt ? <Copy>回饋時間：{time(receipt.reviewedAt)}</Copy> : null}
-            {receiptFeedbackIsStale(receipt) ? (
-              <Copy>這則回饋早於最近一次繳交，可請老師確認是否仍適用。</Copy>
-            ) : null}
-          </View>
-        ) : null}
-        {focused ? (
-          <View
-            ref={submitRef}
-            testID={`${landKind}-submit-${item.id}`}
-            nativeID={`${landKind}-submit-${item.id}`}
-            onLayout={revealSubmit}
-          >
-            {submitArea}
-          </View>
-        ) : (
-          submitArea
-        )}
-        {!active ? <Copy>這門課已封存，現在只能查看保留的紀錄。</Copy> : null}
-        {!student ? (
-          <TeacherReceipts
-            key={`${item.id}:${course.memberRole}:${course.state}`}
-            classes={classes}
-            course={course}
-            item={item}
-            scrollRef={scrollRef}
-            contentOffsetYRef={contentOffsetYRef}
-          />
-        ) : null}
+        <Button
+          label={`${expanded ? '收合' : '展開'}${kind}：${item.title}`}
+          expanded={expanded}
+          onPress={() => setExpanded((value) => !value)}
+        />
+        <View
+          style={{ display: expanded ? 'flex' : 'none', gap: 12 }}
+          accessibilityElementsHidden={!expanded}
+          importantForAccessibility={expanded ? 'auto' : 'no-hide-descendants'}
+        >
+          <Copy>{prompt}</Copy>
+          {item.dueAt && item.state === 'open' && active ? (
+            <Copy>目前仍開放繳交，收件狀態以老師是否停止收件為準。</Copy>
+          ) : null}
+          {fileSubmit && lateOpen ? <Copy alert>{lateOpen}</Copy> : null}
+          {receipt ? (
+            <View style={{ gap: 8 }}>
+              <Copy title>
+                {assignment
+                  ? assignmentReceiptStatusLabel(
+                      'late' in receipt
+                        ? receipt.late === true ||
+                            assignmentSubmissionLate(item.dueAt, receipt.submittedAt)
+                        : false,
+                    )
+                  : '已作答'}
+              </Copy>
+              <Copy>{time(receipt.submittedAt)}</Copy>
+              {assignment && 'files' in receipt && receipt.files?.length
+                ? receipt.files.map((file) => (
+                    <View
+                      key={file.id}
+                      style={{ flexDirection: 'row', gap: 10, alignItems: 'center', minWidth: 0 }}
+                    >
+                      {file.kind === 'image' ? (
+                        <Image
+                          source={{ uri: assignmentFileDownloadUrl(file) }}
+                          accessibilityLabel={file.originalName}
+                          style={{ width: 56, height: 56, borderRadius: 8 }}
+                        />
+                      ) : null}
+                      <Copy>
+                        {file.originalName} · {file.kind === 'image' ? '照片' : '檔案'}
+                      </Copy>
+                    </View>
+                  ))
+                : null}
+              <Copy>{'body' in receipt ? receipt.body : receipt.answer}</Copy>
+              <Copy>
+                {receipt.teacherFeedback
+                  ? `老師回饋：${receipt.teacherFeedback}`
+                  : '老師尚未留下回饋。'}
+              </Copy>
+              {receipt.reviewedAt ? <Copy>回饋時間：{time(receipt.reviewedAt)}</Copy> : null}
+              {receiptFeedbackIsStale(receipt) ? (
+                <Copy>這則回饋早於最近一次繳交，可請老師確認是否仍適用。</Copy>
+              ) : null}
+            </View>
+          ) : null}
+          {focused ? (
+            <View
+              ref={submitRef}
+              testID={`${landKind}-submit-${item.id}`}
+              nativeID={`${landKind}-submit-${item.id}`}
+              onLayout={revealSubmit}
+            >
+              {submitArea}
+            </View>
+          ) : (
+            submitArea
+          )}
+          {!active ? <Copy>這門課已封存，現在只能查看保留的紀錄。</Copy> : null}
+          {!student ? (
+            <TeacherReceipts
+              key={`${item.id}:${course.memberRole}:${course.state}`}
+              classes={classes}
+              course={course}
+              item={item}
+              scrollRef={scrollRef}
+              contentOffsetYRef={contentOffsetYRef}
+            />
+          ) : null}
+        </View>
       </Section>
     </View>
   );
