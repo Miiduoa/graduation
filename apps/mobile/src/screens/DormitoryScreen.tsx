@@ -32,6 +32,7 @@ import { getThemeVersion, subscribeToTheme } from '../ui/theme';
 import { useSchool } from '../state/school';
 import { useAuth } from '../state/auth';
 import { useOptionalNuniSession } from '../state/nuniSession';
+import { parseDormRepairDictation } from '@campus/shared/src/dormRepairDictation';
 
 type ViewName = 'home' | 'repairs' | 'checklist' | 'laundry';
 const NAV: Array<{ id: ViewName; name: string }> = [
@@ -133,6 +134,7 @@ function DormitoryBody({
   const [view, setView] = useState<ViewName>('home');
   const [room, setRoom] = useState({ building: '', room: '', bed: '' });
   const [repair, setRepair] = useState({ ...REPAIR_INITIAL });
+  const [issueNarration, setIssueNarration] = useState('');
   const [editingId, setEditingId] = useState<string | null>(null);
   const [pendingId, setPendingId] = useState<string | null>(null);
   const [editor, setEditor] = useState(false);
@@ -208,6 +210,7 @@ function DormitoryBody({
   }
 
   function editRepair(row?: DormRepair) {
+    setIssueNarration('');
     setRepair(row
       ? { title: row.title, category: row.category, description: row.description, location: row.location }
       : { ...REPAIR_INITIAL });
@@ -341,6 +344,56 @@ function DormitoryBody({
               {editor && (
                 <View style={{ marginTop: 20, borderTopWidth: 1, borderTopColor: aiTokens.border, paddingTop: 12 }}>
                   <Text style={{ fontWeight: '700', color: aiTokens.text, fontSize: 16 }}>{editingId ? '編輯問題' : '新增問題'}</Text>
+                  <View style={{
+                    padding: 14,
+                    borderRadius: 12,
+                    backgroundColor: aiTokens.panel,
+                    gap: 9,
+                    marginTop: 12,
+                    borderWidth: 1,
+                    borderColor: aiTokens.border,
+                  }}>
+                    <Text style={{ fontWeight: '700', color: aiTokens.text }}>一句話描述問題</Text>
+                    <Body muted>可以使用手機鍵盤的麥克風說話；先整理成表單草稿，再核對資料並自行儲存。</Body>
+                    <TextInput
+                      accessibilityLabel="一句話描述設備問題"
+                      multiline
+                      textAlignVertical="top"
+                      maxLength={1200}
+                      value={issueNarration}
+                      onChangeText={setIssueNarration}
+                      placeholder="例如：浴室水龍頭一直漏水，位置在四樓 405 寢室"
+                      placeholderTextColor={aiTokens.muted}
+                      style={{
+                        minHeight: 94,
+                        color: aiTokens.text,
+                        fontSize: 15,
+                        lineHeight: 22,
+                        padding: 12,
+                        backgroundColor: aiTokens.surface,
+                        borderWidth: 1,
+                        borderColor: aiTokens.border,
+                        borderRadius: 10,
+                      }}
+                    />
+                    <AIButton
+                      label="整理成可修改的草稿"
+                      variant="ghost"
+                      disabled={!issueNarration.trim() || conflict}
+                      onPress={() => {
+                        const suggestion = parseDormRepairDictation(issueNarration);
+                        if (!suggestion) return;
+                        setRepair((previous) => ({
+                          ...previous,
+                          title: suggestion.title,
+                          category: suggestion.category,
+                          description: suggestion.description,
+                          location: suggestion.location || previous.location,
+                        }));
+                        setNotice('已整理成草稿。請核對問題名稱、類別、位置和詳細狀況後再儲存；尚未通報校方。');
+                      }}
+                    />
+                  </View>
                   <Field label="問題名稱" value={repair.title} maxLength={90} placeholder="例如：冷氣無法啟動" onChangeText={(text) => setRepair({ ...repair, title: text })} />
                   <Text style={{ color: aiTokens.text, marginTop: 14, fontWeight: '600' }}>類別</Text>
                   <View style={{ ...flexRow, marginTop: 8 }}>
