@@ -27,3 +27,12 @@ export function workspacePath(id: string): string {
 export function accountReturnHref(path: string): string {
   return `/auth/account?returnUrl=${encodeURIComponent(path)}`;
 }
+
+export function adminLoginHref(path: string): string {
+  return `/admin/login?returnUrl=${encodeURIComponent(path)}`;
+}
+
+export function currentPageReturnPath(fallback: string): string {
+  if (typeof window === 'undefined') return fallback;
+  return `${window.location.pathname}${window.location.search}${window.location.hash}` || fallback;
+}

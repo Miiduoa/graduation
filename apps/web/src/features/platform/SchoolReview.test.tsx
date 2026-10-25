@@ -95,8 +95,14 @@ afterEach(() => {
 
 it('asks guests to sign in and does not load applications', () => {
   mocks.session = null;
+  window.history.replaceState(null, '', '/admin/school-review');
   render(<SchoolReview />);
   expect(screen.getByRole('heading', { name: '請先登入管理員帳號' })).toBeTruthy();
+  const login = new URL(
+    (screen.getByRole('link', { name: '前往管理員登入' }) as HTMLAnchorElement).href,
+  );
+  expect(login.pathname).toBe('/admin/login');
+  expect(login.searchParams.get('returnUrl')).toBe('/admin/school-review');
   expect(fetcher).not.toHaveBeenCalled();
 });
 

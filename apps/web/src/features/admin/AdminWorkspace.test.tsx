@@ -29,7 +29,10 @@ vi.mock('@/components/SiteShell', () => ({
     </>
   ),
 }));
-vi.mock('next/navigation', () => ({ useRouter: () => ({ replace: mocks.replace }) }));
+vi.mock('next/navigation', () => ({
+  useRouter: () => ({ replace: mocks.replace }),
+  useSearchParams: () => new URLSearchParams(window.location.search),
+}));
 const tenant = {
   kind: 'tenant',
   applicationId: null,
@@ -313,6 +316,57 @@ it('routes administrator Google sign-in through the shared flow and preserves th
   expect(login.pathname).toBe('/classroom/login');
   expect(login.searchParams.get('returnUrl')).toBe('/admin');
   expect(fetcher).not.toHaveBeenCalled();
+});
+
+async function submitOperatorLogin() {
+  fireEvent.change(screen.getByLabelText('電子郵件'), {
+    target: { value: 'operator@example.test' },
+  });
+  fireEvent.change(screen.getByLabelText('密碼'), { target: { value: 'test-only-password' } });
+  fireEvent.submit(screen.getByLabelText('密碼').closest('form')!);
+  await waitFor(() => expect(mocks.auth.refresh).toHaveBeenCalled());
+}
+
+it('returns to a sanitized admin task after login', async () => {
+  mocks.auth.session = null;
+  fetcher.mockResolvedValue(ok({ authenticated: true, ...principal }));
+  window.history.replaceState(
+    null,
+    '',
+    `/admin/login?returnUrl=${encodeURIComponent('/admin/ops?tab=people')}`,
+  );
+  render(<AdminLogin />);
+  const google = new URL(
+    (screen.getByRole('link', { name: '使用 Google 登入' }) as HTMLAnchorElement).href,
+  );
+  expect(google.searchParams.get('returnUrl')).toBe('/admin/ops?tab=people');
+  await submitOperatorLogin();
+  expect(mocks.replace).toHaveBeenCalledWith('/admin/ops?tab=people');
+});
+
+it('falls back to /admin when returnUrl is off-site', async () => {
+  mocks.auth.session = null;
+  fetcher.mockResolvedValue(ok({ authenticated: true, ...principal }));
+  window.history.replaceState(
+    null,
+    '',
+    `/admin/login?returnUrl=${encodeURIComponent('https://evil.test')}`,
+  );
+  render(<AdminLogin />);
+  await submitOperatorLogin();
+  expect(mocks.replace).toHaveBeenCalledWith('/admin');
+});
+
+it('keeps a legal ops hash on the already-signed-in operator shortcut', () => {
+  window.history.replaceState(
+    null,
+    '',
+    `/admin/login?returnUrl=${encodeURIComponent('/admin/ops#people')}`,
+  );
+  render(<AdminLogin />);
+  expect(
+    (screen.getByRole('link', { name: '進入管理台' }) as HTMLAnchorElement).getAttribute('href'),
+  ).toBe('/admin/ops#people');
 });
 
 it('submits blank-default login once and refreshes before navigating', async () => {
