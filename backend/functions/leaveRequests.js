@@ -107,7 +107,7 @@ function matchingCourses(timetable, schoolId, courseIds) {
     return {
       courseId: id,
       courseName: text(row.name, 100),
-      offeringId: offeringIdOf(row).slice(0, 210),
+      offeringId: offeringIdOf(row),
       reviewStatus: 'pending',
       reviewerNote: '',
       reviewedBy: '',
@@ -191,6 +191,9 @@ function createWithdrawLeaveHandler({ db, clock = () => new Date() }) {
         tx.get(db.doc('users/' + uid)),
       ]);
       activeMember(member, account);
+      if (data.source !== 'campus-one') {
+        fail('failed-precondition', '此紀錄屬於其他請假系統，不能在 Campus One 撤回。');
+      }
       if (data.status === 'withdrawn') return { id, status: 'withdrawn' };
       if (data.status !== 'pending') {
         fail('failed-precondition', '已有老師核閱，請聯絡處理人員修正。');
@@ -220,6 +223,9 @@ function createReviewLeaveHandler({ db, clock = () => new Date() }) {
       const snap = await tx.get(ref);
       if (!snap.exists) fail('not-found', '找不到這筆申請。');
       const data = snap.data();
+      if (data.source !== 'campus-one' || !Array.isArray(data.courses)) {
+        fail('failed-precondition', '此紀錄不屬於 Campus One 站內請假流程。');
+      }
       if (data.status === 'withdrawn') fail('failed-precondition', '這筆請假已撤回。');
       const course = data.courses?.find((item) => item.courseId === courseId);
       if (!course) fail('not-found', '這筆申請沒有該課程。');
@@ -281,26 +287,29 @@ function createListReviewLeavesHandler({ db }) {
     const schoolId = schoolIdOf(request.data?.schoolId);
     const access = await reviewerAccess(db, schoolId, uid);
     const snap = await db.collection('leaveRequests')
-      .where('schoolId', '==', schoolId).orderBy('createdAt', 'desc').limit(150).get();
+      .where('schoolId', '==', schoolId).where('source', '==', 'campus-one')
+      .orderBy('createdAt', 'desc').limit(150).get();
     const permitted = snap.docs.map((row) => {
       const data = row.data();
-      const courses = (data.courses || []).filter(
+      if (data.source !== 'campus-one' || !Array.isArray(data.courses)) return null;
+      const courses = data.courses.filter(
         (course) => access.admin || access.offerings.has(course.offeringId),
       );
       if (!courses.length) return null;
       return { id: row.id, ...data, courses };
     }).filter(Boolean);
-    // Re-check authorisation after reading private request data.
-    const current = await reviewerAccess(db, schoolId, uid);
-    if ((access.admin && !current.admin) ||
-      (!current.admin && [...access.offerings].some((id) => !current.offerings.has(id)))) {
-      fail('permission-denied', '審核權限已變更，請重新整理。');
-    }
     const students = new Map();
     await Promise.all([...new Set(permitted.map((row) => row.uid))].map(async (studentUid) => {
       const profile = await db.doc('users/' + studentUid).get();
       students.set(studentUid, profile.exists ? text(profile.data().displayName, 60) : '');
     }));
+    // Re-check after profile reads as permissions may change during network I/O.
+
+    const current = await reviewerAccess(db, schoolId, uid);
+    if ((access.admin && !current.admin) ||
+      (!current.admin && [...access.offerings].some((id) => !current.offerings.has(id)))) {
+      fail('permission-denied', '審核權限已變更，請重新整理。');
+    }
     return {
       rows: permitted.map((row) => ({
         id: row.id,
