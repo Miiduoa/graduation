@@ -25,3 +25,28 @@ describe('cross-platform semantic navigation contract', () => {
     })).toBeNull();
   });
 });
+
+
+it('only shows authenticated-source previews for the exact selected destination', () => {
+  expect(normalizeCampusSemanticResult({
+    status: 'understood', source: 'model', summary: '查看待辦',
+    destinations: ['/classroom'], clarifyingQuestion: null,
+    previews: [{ destination: '/classroom', status: 'available', source: 'campus-platform',
+      message: '已讀取平台待辦', items: [{ title: '期末報告', detail: '專題' }] }],
+  })?.previews?.[0]).toMatchObject({ destination: '/classroom', items: [{ title: '期末報告' }] });
+  expect(normalizeCampusSemanticResult({
+    status: 'understood', source: 'model', summary: '查看待辦',
+    destinations: ['/classroom'], clarifyingQuestion: null,
+    previews: [{ destination: '/grades', status: 'available', source: 'campus-platform',
+      message: '不可讀', items: [{ title: '私密成績', detail: '' }] }],
+  })).toBeNull();
+});
+
+it('rejects fake official data or unbounded previews', () => {
+  expect(normalizeCampusSemanticResult({
+    status: 'understood', source: 'model', summary: '查課表',
+    destinations: ['/timetable'], clarifyingQuestion: null,
+    previews: [{ destination: '/timetable', status: 'available', source: 'untrusted-official',
+      message: '有課', items: [] }],
+  })).toBeNull();
+});
