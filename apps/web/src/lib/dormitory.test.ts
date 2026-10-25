@@ -2,12 +2,14 @@ import { expect, it } from 'vitest';
 import {
   DORM_CHECKLISTS,
   DORM_MILESTONE_LIMIT,
+  DORM_PARCEL_LIMIT,
   dormChecklistProgress,
   dormStorageKey,
   emptyDormWorkspace,
   formatDormRepairForCopy,
   isValidDormDate,
   sortedDormMilestones,
+  sortedDormParcels,
   normalizeDormWorkspace,
 } from '@campus/shared/src/dormitory';
 
@@ -79,6 +81,31 @@ it('safely normalizes locally entered dates without inventing official deadlines
   expect(sortedDormMilestones(value).map((m) => m.id)).toEqual(['today', 'fee', 'move']);
   expect(value.milestones[0].completed).toBe(false);
   expect(emptyDormWorkspace().milestones).toEqual([]);
+});
+
+it('keeps older data readable and validates resident-entered parcel pickups', () => {
+  const previous = normalizeDormWorkspace({ version: 1, building: '思高學苑' });
+  expect(previous.parcels).toEqual([]);
+  const next = normalizeDormWorkspace({
+    parcels: [
+      { id: 'p1', title: '  包裹一  ', pickupPoint: ' 服務台 ', dueDate: '2026-12-02', createdAt: 1 },
+      { id: 'p1', title: '重複資料', dueDate: '2026-11-01' },
+      { id: 'p2', title: '掛號', dueDate: '2026-11-01', collected: false, createdAt: 2 },
+      { id: '../no', title: '識別碼不合法' },
+      { id: 'p3', title: '已領', collected: true, createdAt: 3, collectedAt: 5 },
+      { id: 'p4', title: '其他', dueDate: '2026-02-30', createdAt: 4 },
+    ],
+  });
+  expect(next.parcels).toHaveLength(4);
+  expect(next.parcels[0]).toMatchObject({ title: '包裹一', pickupPoint: '服務台' });
+  expect(next.parcels[3].dueDate).toBe('');
+  expect(sortedDormParcels(next).map((p) => p.id)).toEqual(['p2', 'p1', 'p4', 'p3']);
+  expect(sortedDormParcels(next)[3].collectedAt).toBe(5);
+  expect(normalizeDormWorkspace({
+    parcels: Array.from({ length: DORM_PARCEL_LIMIT + 5 }, (_, index) => ({
+      id: 'p_' + index, title: '包裹 ' + index,
+    })),
+  }).parcels).toHaveLength(DORM_PARCEL_LIMIT);
 });
 
 it('validates leap days and caps the personal date list', () => {
