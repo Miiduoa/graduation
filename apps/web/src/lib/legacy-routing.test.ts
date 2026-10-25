@@ -50,7 +50,8 @@ describe('legacy route configuration', () => {
   });
 
   it.each([
-    '/auth/account',
+    '/auth/account/token',
+    '/auth/account/callback',
     '/auth/platform/token',
     '/_next/static/chunks/old-hash.js',
     '/old-page',
