@@ -1,12 +1,12 @@
 'use strict';
 
-const getUser = jest.fn().mockResolvedValue({ exists: false, data: () => ({}) });
+const mockGetUser = jest.fn().mockResolvedValue({ exists: false, data: () => ({}) });
 jest.mock('firebase-functions/v2/https', () => ({
   ...jest.requireActual('firebase-functions/v2/https'),
   onCall: (_, handler) => handler,
 }));
 jest.mock('firebase-admin/firestore', () => ({
-  getFirestore: () => ({ collection: () => ({ doc: () => ({ get: getUser }) }) }),
+  getFirestore: () => ({ collection: () => ({ doc: () => ({ get: mockGetUser }) }) }),
 }));
 jest.mock('../semanticCampusIntent', () => ({
   understandCampusUtterance: jest.fn(async () => ({
@@ -18,8 +18,8 @@ const handler = require('./understandCampusRequest');
 const { understandCampusUtterance } = require('../semanticCampusIntent');
 
 beforeEach(() => {
-  getUser.mockResolvedValue({ exists: false, data: () => ({}) });
-  getUser.mockClear();
+  mockGetUser.mockResolvedValue({ exists: false, data: () => ({}) });
+  mockGetUser.mockClear();
   understandCampusUtterance.mockClear();
 });
 
@@ -36,7 +36,7 @@ test('rejects large inputs before model calls', async () => {
 });
 
 test('rejects requests from closing accounts', async () => {
-  getUser.mockResolvedValueOnce({ exists: true, data: () => ({ accountDeletionInProgress: true }) });
+  mockGetUser.mockResolvedValueOnce({ exists: true, data: () => ({ accountDeletionInProgress: true }) });
   await expect(handler({ auth: { uid: 'student-closing' }, data: { utterance: '今天有課嗎' } }))
     .rejects.toMatchObject({ code: 'failed-precondition' });
   expect(understandCampusUtterance).not.toHaveBeenCalled();
