@@ -165,6 +165,11 @@ it('continues materials pages so path links reach older items and marks counts i
   expect(screen.getByText(/教材尚有較早頁面未載入/)).toBeTruthy();
   expect(screen.getByText(/1 教材（尚未載完）/)).toBeTruthy();
   fireEvent.click(screen.getByRole('button', { name: '繼續載入較早教材' }));
+  expect(
+    state.request.mock.calls
+      .filter(([path]) => path === `class-workspaces/${workspaceId}/materials/page`)
+      .map(([, , , , query]) => query?.cursor),
+  ).toEqual([undefined, 'older-page']);
   const older = await screen.findByRole('link', { name: /更早的課前閱讀/ });
   expect(older.getAttribute('href')).toBe(`#material-${olderMaterial.id}`);
   fireEvent.click(older);
