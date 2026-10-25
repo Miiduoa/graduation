@@ -620,6 +620,100 @@ function DormitoryBody({
         )}
 
 
+        {!loading && !failure && view === 'parcels' && (
+          <>
+            <AICard title="包裹與郵件">
+              <Body muted>自行記錄待領包裹與掛號郵件。這裡沒有連接宿舍收發室、物流狀態或自動通知；請勿儲存取件驗證碼。</Body>
+              <View style={{ marginTop: 15 }}><AIButton label="＋ 記錄包裹" onPress={() => editParcel()} /></View>
+              {!parcelEditorOpen && (
+                <View style={{ ...flexRow, marginTop: 14 }}>
+                  {['網購包裹', '掛號郵件', '其他物品'].map((title) => (
+                    <Pressable key={title} accessibilityRole="button" onPress={() => editParcel(undefined, title)}
+                      style={{ minHeight: 44, justifyContent: 'center', paddingHorizontal: 14,
+                        borderWidth: 1, borderColor: aiTokens.border, borderRadius: aiTokens.radius.sm }}>
+                      <Text style={{ color: aiTokens.text, fontSize: 14 }}>{title}</Text>
+                    </Pressable>
+                  ))}
+                </View>
+              )}
+              {parcelEditorOpen && (
+                <View style={{ marginTop: 18, borderTopWidth: 1, borderTopColor: aiTokens.border, paddingTop: 4 }}>
+                  <Field label="包裹名稱" value={parcelDraft.title} maxLength={90}
+                    placeholder="例如：網購包裹" onChangeText={(title) => setParcelDraft({ ...parcelDraft, title })} />
+                  <Field label="領取地點（選填）" value={parcelDraft.pickupPoint} maxLength={100}
+                    placeholder="例如：宿舍服務台" onChangeText={(pickupPoint) => setParcelDraft({ ...parcelDraft, pickupPoint })} />
+                  <Field label="取件日期（選填，YYYY-MM-DD）" value={parcelDraft.dueDate} maxLength={10}
+                    keyboardType="numbers-and-punctuation" placeholder="例如：2026-11-15"
+                    onChangeText={(dueDate) => setParcelDraft({ ...parcelDraft, dueDate })} />
+                  <View style={{ ...flexRow, marginTop: 12 }}>
+                    {[{ label: '明天', days: 1 }, { label: '三天後', days: 3 }, { label: '一週後', days: 7 }].map((option) => (
+                      <Pressable key={option.days} accessibilityRole="button"
+                        onPress={() => {
+                          const next = new Date();
+                          next.setDate(next.getDate() + option.days);
+                          setParcelDraft((old) => ({ ...old, dueDate: localDormDate(next) }));
+                        }}
+                        style={{ minHeight: 44, justifyContent: 'center', paddingHorizontal: 14,
+                          borderWidth: 1, borderColor: aiTokens.border, borderRadius: 20 }}>
+                        <Text style={{ color: aiTokens.text, fontSize: 13 }}>{option.label}</Text>
+                      </Pressable>
+                    ))}
+                  </View>
+                  <View style={{ ...flexRow, marginTop: 16 }}>
+                    <AIButton label="儲存包裹" disabled={conflict} onPress={() => void saveParcel()} />
+                    <AIButton label="取消" variant="ghost" onPress={() => {
+                      setParcelEditorOpen(false);
+                      setEditingParcelId(null);
+                      setPendingParcelId(null);
+                    }} />
+                  </View>
+                </View>
+              )}
+            </AICard>
+            <View style={flexRow}>
+              {([{ id: 'waiting', label: '待領取' }, { id: 'collected', label: '已領取' }, { id: 'all', label: '全部' }] as const).map((item) => (
+                <Pressable key={item.id} accessibilityRole="button"
+                  accessibilityState={{ selected: parcelFilter === item.id }}
+                  onPress={() => setParcelFilter(item.id)}
+                  style={{ minHeight: 44, paddingVertical: 11, paddingHorizontal: 14, borderRadius: 22,
+                    borderWidth: 1, borderColor: parcelFilter === item.id ? aiTokens.text : aiTokens.border,
+                    backgroundColor: parcelFilter === item.id ? aiTokens.panel : aiTokens.surface }}>
+                  <Text style={{ color: aiTokens.text, fontSize: 14 }}>{item.label}</Text>
+                </Pressable>
+              ))}
+            </View>
+            {!visibleParcels.length && <AICard title="目前沒有相符的包裹紀錄">
+              <Body muted>收到領件通知後，只要記下物品和領取地點即可。</Body>
+            </AICard>}
+            {visibleParcels.map((entry) => {
+              const overdue = !entry.collected && !!entry.dueDate && entry.dueDate < today;
+              return <AICard key={entry.id} title={entry.title}
+                badge={entry.collected ? '已自行標記領取' : overdue ? '自訂日期已過' : '待領取'}
+                badgeTone={overdue ? 'danger' : 'muted'}>
+                {!!entry.pickupPoint && <Body>領取地點：{entry.pickupPoint}</Body>}
+                {!!entry.dueDate && <Body muted>自訂取件日期：{entry.dueDate.replaceAll('-', '/')}</Body>}
+                <View style={{ ...flexRow, marginTop: 14 }}>
+                  <AIButton variant="ghost" disabled={conflict}
+                    label={entry.collected ? '恢復待領' : '標記已領取'}
+                    onPress={() => void save({ ...data, parcels: data.parcels.map((p) =>
+                      p.id === entry.id ? {
+                        ...p, collected: !p.collected,
+                        collectedAt: p.collected ? null : Date.now(),
+                      } : p) })} />
+                  <AIButton variant="ghost" label="編輯" onPress={() => editParcel(entry)} />
+                  <AIButton variant="danger" label="刪除" disabled={conflict} onPress={() => {
+                    Alert.alert('刪除這筆包裹紀錄？', '只會刪除此裝置的備忘，不會影響學校收發室。', [
+                      { text: '取消', style: 'cancel' },
+                      { text: '刪除', style: 'destructive',
+                        onPress: () => void save({ ...data, parcels: data.parcels.filter((p) => p.id !== entry.id) }) },
+                    ]);
+                  }} />
+                </View>
+              </AICard>;
+            })}
+          </>
+        )}
+
         {!loading && !failure && view === 'dates' && (
           <>
             <AICard title="重要日期">
