@@ -5,6 +5,7 @@ const { createAccountGuardedOnCall } = require('../../accountLifecycle');
 const { assertToolInputBounds } = require('../inputLimits');
 const { enforceRateLimit } = require('../../securityUtils');
 const { understandCampusUtterance } = require('../semanticCampusIntent');
+const { connectCampusServiceData } = require('../semanticCampusData');
 
 const onCall = createAccountGuardedOnCall({
   onCall: firebaseOnCall,
@@ -40,9 +41,18 @@ module.exports = onCall(
     } catch {
       throw new HttpsError('resource-exhausted', 'Too many AI requests');
     }
-    return understandCampusUtterance({
-      utterance: request.data.utterance,
-      schoolId: request.data.schoolId || '',
+    const utterance = request.data.utterance;
+    const schoolId = request.data.schoolId || '';
+    const semantic = await understandCampusUtterance({ utterance, schoolId });
+    if (semantic.status !== 'understood' || !Array.isArray(semantic.destinations)) {
+      return { ...semantic, previews: [] };
+    }
+    const previews = await connectCampusServiceData({
+      uid: request.auth.uid,
+      schoolId,
+      utterance,
+      destinations: semantic.destinations,
     });
+    return { ...semantic, previews };
   },
 );
