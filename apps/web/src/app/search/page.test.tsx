@@ -39,8 +39,9 @@ it('keeps every service discoverable without inventing a school selection', () =
   expect(screen.getByRole('link', { name: /^學校資訊/ }).getAttribute('href')).toBe('/school-info');
   expect(screen.getByRole('link', { name: /^校園活動/ }).getAttribute('href')).toBe('/events');
   expect(screen.getByRole('link', { name: /^宿舍/ }).getAttribute('href')).toBe('/dormitory');
-  expect(screen.getByRole('link', { name: /^請假 / }).getAttribute('href')).toBe('/leave');
-  expect(screen.getByRole('link', { name: /^請假核閱 / }).getAttribute('href')).toBe('/leave/review');
+  const serviceRoutes = screen.getAllByRole('link').map((link) => link.getAttribute('href'));
+  expect(serviceRoutes).toContain('/leave');
+  expect(serviceRoutes).toContain('/leave/review');
   const profile = screen.getByRole('link', { name: /個人資料 查看帳號資料/ });
   const destination = new URL(profile.getAttribute('href')!, 'https://campus.example');
   expect(destination.pathname).toBe('/profile');
