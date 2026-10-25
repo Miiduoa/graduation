@@ -148,7 +148,7 @@ it('opens the school-email form from 登入校園帳號 and looks up the school 
 });
 
 it('opens an in-page school lookup from 尋找學校 and searches by school name', async () => {
-  fetchMock.mockImplementation(async (input) => {
+  fetchMock.mockImplementation(async (input, init) => {
     const url = String(input);
     if (url === '/api/nuni/session' || url === '/auth/session') {
       return new Response(JSON.stringify({ authenticated: false }), {
@@ -162,10 +162,16 @@ it('opens an in-page school lookup from 尋找學校 and searches by school name
         headers: { 'Content-Type': 'application/json' },
       });
     }
-    if (url === '/auth/find-school/search') {
+    if (url.startsWith('/auth/find-school/search?')) {
+      const parsed = new URL(url, 'https://nuni.invalid');
+      expect(parsed.pathname).toBe('/auth/find-school/search');
+      expect(parsed.searchParams.get('q')).toBe('靜宜大學');
+      if (init?.method === 'POST') {
+        return new Response('', { status: 405, statusText: 'Method Not Allowed' });
+      }
       return new Response(
         JSON.stringify({
-          schools: [{ available: true, tenantId: 'tenant-1', displayName: '靜宜大學', providerKinds: ['google-workspace'] }],
+          schools: [{ tenantId: 'pu', displayName: '靜宜大學', status: 'open' }],
         }),
         { status: 200, headers: { 'Content-Type': 'application/json' } },
       );
@@ -177,9 +183,13 @@ it('opens an in-page school lookup from 尋找學校 and searches by school name
   fireEvent.change(screen.getByLabelText('學校配發的信箱或校名'), { target: { value: '靜宜大學' } });
   fireEvent.click(screen.getByRole('button', { name: '找到我的學校' }));
   expect(await screen.findByRole('heading', { name: '靜宜大學' })).toBeTruthy();
-  expect(fetchMock.mock.calls.some(([url, init]) => url === '/auth/find-school/search' && init?.method === 'POST')).toBe(
-    true,
-  );
+  expect(
+    fetchMock.mock.calls.some(
+      ([url, init]) =>
+        url === '/auth/find-school/search?q=' + encodeURIComponent('靜宜大學') && init?.method !== 'POST',
+    ),
+  ).toBe(true);
+  expect(fetchMock.mock.calls.some(([, init]) => init?.method === 'POST')).toBe(false);
 });
 
 it('sends a signed-in visitor to the allowed return path without showing the form', async () => {

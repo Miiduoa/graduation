@@ -320,10 +320,7 @@ function asSchool(value: unknown): DiscoveredSchool | null {
 export async function searchSchoolsByName(query: string): Promise<DiscoveredSchool[]> {
   let response: Response;
   try {
-    response = await fetch('/auth/find-school/search', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ query }),
+    response = await fetch('/auth/find-school/search?q=' + encodeURIComponent(query), {
       cache: 'no-store',
     });
   } catch {
@@ -337,13 +334,9 @@ export async function searchSchoolsByName(query: string): Promise<DiscoveredScho
       'SCHOOL_SEARCH_FAILED',
     );
   }
-  const rows = Array.isArray(body.schools)
-    ? body.schools
-    : Array.isArray(body.results)
-      ? body.results
-      : Array.isArray(body.items)
-        ? body.items
-        : [body];
+  // Old route handler GET /auth/find-school/search?q= returns
+  // { schools: [{ tenantId, displayName, status }] }; POST is 405.
+  const rows = Array.isArray(body.schools) ? body.schools : [];
   return rows.map(asSchool).filter((school): school is DiscoveredSchool => school !== null);
 }
 

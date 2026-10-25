@@ -123,23 +123,24 @@ it('looks up a school through the existing registration-start API', async () => 
 });
 
 it('searches schools by name through the existing find-school search endpoint', async () => {
-  fetchMock.mockResolvedValueOnce(
-    new Response(
+  fetchMock.mockImplementation(async (input, init) => {
+    if (init?.method === 'POST') {
+      return new Response('', { status: 405, statusText: 'Method Not Allowed' });
+    }
+    return new Response(
       JSON.stringify({
-        schools: [{ available: true, tenantId: 'tenant-1', displayName: '靜宜大學', providerKinds: ['google-workspace'] }],
+        schools: [{ tenantId: 'pu', displayName: '靜宜大學', status: 'open' }],
       }),
       { status: 200, headers: { 'Content-Type': 'application/json' } },
-    ),
-  );
+    );
+  });
   await expect(searchSchoolsByName('靜宜大學')).resolves.toEqual([
-    { available: true, tenantId: 'tenant-1', displayName: '靜宜大學', providerKinds: ['google-workspace'] },
+    { available: true, tenantId: 'pu', displayName: '靜宜大學' },
   ]);
-  expect(fetchMock).toHaveBeenCalledWith('/auth/find-school/search', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ query: '靜宜大學' }),
+  expect(fetchMock).toHaveBeenCalledWith('/auth/find-school/search?q=' + encodeURIComponent('靜宜大學'), {
     cache: 'no-store',
   });
+  expect(fetchMock.mock.calls.some(([, init]) => init?.method === 'POST')).toBe(false);
 });
 
 it('treats Campus One session as signed in before falling back to /auth/session', async () => {
