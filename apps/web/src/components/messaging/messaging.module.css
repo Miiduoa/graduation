@@ -383,3 +383,31 @@
 @media (prefers-reduced-motion: reduce) {
   .stack .messages { scroll-behavior: auto; }
 }
+
+.messageReactions {
+  display: flex;
+  gap: 5px;
+  flex-wrap: wrap;
+  margin-top: 8px;
+}
+.reactionButton {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 36px;
+  min-height: 28px;
+  padding: 3px 9px;
+  font: inherit;
+  font-size: 12px;
+  background: var(--surface);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-pill);
+  cursor: pointer;
+}
+.reactionButton[aria-pressed='true'] {
+  background: var(--accent-soft);
+  border-color: var(--brand);
+}
+.reactionButton:disabled { cursor: not-allowed; opacity: 0.6; }
+.reactionButton:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
