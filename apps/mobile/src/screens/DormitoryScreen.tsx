@@ -8,7 +8,10 @@ import {
   TextInput,
   View,
 } from 'react-native';
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import {
+  readDormitoryWorkspaceStorage,
+  writeDormitoryWorkspaceStorage,
+} from '../services/dormitoryStorage';
 import {
   DORM_CHECKLISTS,
   DORM_REPAIR_CATEGORIES,
@@ -138,7 +141,7 @@ function DormitoryBody({
   useEffect(() => {
     activeRef.current = true;
     let active = true;
-    AsyncStorage.getItem(storageKey)
+    readDormitoryWorkspaceStorage(storageKey)
       .then((raw) => {
         if (!active) return;
         let next: DormWorkspace;
@@ -175,7 +178,7 @@ function DormitoryBody({
     if (busy.current || !activeRef.current || loading || failure) return false;
     busy.current = true;
     try {
-      const currentRaw = await AsyncStorage.getItem(storageKey);
+      const currentRaw = await readDormitoryWorkspaceStorage(storageKey);
       if (!activeRef.current) return false;
       if (currentRaw !== rawRef.current) {
         setConflict(true);
@@ -183,7 +186,7 @@ function DormitoryBody({
         return false;
       }
       const raw = JSON.stringify(normalizeDormWorkspace(next));
-      await AsyncStorage.setItem(storageKey, raw);
+      await writeDormitoryWorkspaceStorage(storageKey, raw);
       if (!activeRef.current) return false;
       rawRef.current = raw;
       setData(normalizeDormWorkspace(next));
