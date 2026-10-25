@@ -280,7 +280,11 @@ it('shows live, scheduled, empty and ended rows together on one direction', asyn
 });
 
 it('keeps scheduled times when this direction has no live bus without saying live data is down', async () => {
-  const now = new Date().toISOString();
+  // Use an afternoon clock so two upcoming runs remain on the same service day.
+  // Near midnight, the next-day departure is correctly rendered as a night bus instead.
+  const afternoon = Date.parse('2026-10-19T06:41:00.000Z');
+  vi.spyOn(Date, 'now').mockReturnValue(afternoon);
+  const now = new Date(afternoon).toISOString();
   vi.mocked(queryTransit).mockImplementation(async (query) => query.action === 'campus-next' ? {
     status: 'ready', kind: 'arrivals', fetchedAt: now,
     arrivals: [
