@@ -164,6 +164,16 @@ export function QuickCampusEntry() {
                     <span>
                       <strong>{action.name}</strong>
                       <small>{action.text}</small>
+                      {aiResult?.previews?.filter((preview) => preview.destination === action.href).map((preview) => (
+                        <span key={preview.destination} className={styles.serviceSnapshot}>
+                          <span>{preview.source === 'campus-platform' ? 'Campus One 資料' : '接通狀態'}：{preview.message}</span>
+                          {preview.items.map((item, index) => (
+                            <span key={index} className={styles.snapshotItem}>
+                              {item.title}{item.detail ? ' · ' + item.detail : ''}
+                            </span>
+                          ))}
+                        </span>
+                      ))}
                     </span>
                     <CampusIcon name="arrow" size={18} />
                   </Link>

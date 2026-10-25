@@ -232,3 +232,19 @@
   outline: 3px solid var(--focus-ring);
   outline-offset: 3px;
 }
+
+.preview {
+  position: static !important;
+  display: grid;
+  gap: 5px;
+  padding-top: 9px;
+  border-top: 1px solid var(--border);
+  color: var(--muted) !important;
+  font-size: 12px;
+  line-height: 1.5;
+}
+.previewItem {
+  position: static !important;
+  display: block;
+  color: var(--text) !important;
+}

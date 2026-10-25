@@ -255,6 +255,21 @@ export function QuickCampusEntry({
                     <Text style={{ ...typography.caption, color: colors.muted }}>
                       {action.description}
                     </Text>
+                    {semantic?.previews?.filter((preview) => preview.destination === action.destination).map((preview) => (
+                      <View key={preview.destination} style={{
+                        marginTop: 7, paddingTop: 8,
+                        borderTopColor: colors.border, borderTopWidth: 1, gap: 3,
+                      }}>
+                        <Text style={{ ...typography.caption, color: colors.muted }}>
+                          {preview.source === 'campus-platform' ? 'Campus One 資料' : '接通狀態'}：{preview.message}
+                        </Text>
+                        {preview.items.map((item, index) => (
+                          <Text key={index} style={{ ...typography.caption, color: colors.text }}>
+                            {item.title}{item.detail ? ' · ' + item.detail : ''}
+                          </Text>
+                        ))}
+                      </View>
+                    ))}
                   </View>
                   <Ionicons name="arrow-forward" color={colors.accent} size={18} />
                 </Pressable>

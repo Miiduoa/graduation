@@ -196,6 +196,16 @@ function ServiceDirectory() {
                 >
                   <strong>{action.name}</strong>
                   <small>{action.text}</small>
+                  {semantic?.previews?.filter((preview) => preview.destination === action.href).map((preview) => (
+                    <span className={styles.preview} key={preview.destination}>
+                      <span>{preview.source === 'campus-platform' ? 'Campus One 資料' : '接通狀態'}：{preview.message}</span>
+                      {preview.items.map((item, index) => (
+                        <span key={index} className={styles.previewItem}>
+                          {item.title}{item.detail ? ' · ' + item.detail : ''}
+                        </span>
+                      ))}
+                    </span>
+                  ))}
                   <span aria-hidden="true">→</span>
                 </Link>
               ))}

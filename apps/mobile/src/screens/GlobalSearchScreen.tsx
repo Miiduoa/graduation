@@ -945,6 +945,21 @@ function SearchWorkspace({
                           <Text style={{ ...theme.typography.caption, color: theme.colors.muted }}>
                             {action.description}
                           </Text>
+                          {semantic?.previews?.filter((preview) => preview.destination === action.destination).map((preview) => (
+                            <View key={preview.destination} style={{
+                              marginTop: 7, paddingTop: 8,
+                              borderTopWidth: 1, borderTopColor: theme.colors.border, gap: 3,
+                            }}>
+                              <Text style={{ ...theme.typography.caption, color: theme.colors.muted }}>
+                                {preview.source === 'campus-platform' ? 'Campus One 資料' : '接通狀態'}：{preview.message}
+                              </Text>
+                              {preview.items.map((item, index) => (
+                                <Text key={index} style={{ ...theme.typography.caption, color: theme.colors.text }}>
+                                  {item.title}{item.detail ? ' · ' + item.detail : ''}
+                                </Text>
+                              ))}
+                            </View>
+                          ))}
                         </View>
                         <Ionicons name="arrow-forward" size={18} color={theme.colors.accent} />
                       </Pressable>

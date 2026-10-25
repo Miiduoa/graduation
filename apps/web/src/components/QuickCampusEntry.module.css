@@ -185,3 +185,21 @@
 }
 .understanding strong { font-size: 14px; color: var(--text); }
 .understanding p { margin: 7px 0 0; color: var(--text); font-size: 14px; line-height: 1.65; }
+
+.serviceSnapshot {
+  display: grid;
+  gap: 5px;
+  margin-top: 10px;
+  border-top: 1px solid var(--border);
+  padding-top: 9px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--muted);
+  font-weight: 400;
+}
+.snapshotItem {
+  display: block;
+  color: var(--text);
+  font-size: 12px;
+  line-height: 1.5;
+}
