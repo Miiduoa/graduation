@@ -338,7 +338,7 @@ it.each(['global', 'user'] as const)(
 );
 it('notification destinations only use supported local tasks and never arbitrary URL or approval actions', () => {
   expect(notificationDestination({ ...notice, data: { url: 'javascript:alert(1)' } })).toEqual({
-    href: '/classroom/grades',
+    href: '/grades?tab=feedback',
     label: '查看課業成績與回饋',
   });
   expect(

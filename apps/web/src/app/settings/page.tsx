@@ -575,7 +575,7 @@ function SettingsContent({ user, schoolSearch }: { user: User | null; schoolSear
       { key: 'groups', title: '群組', subtitle: '課程與社群互動' },
       { key: 'assignments', title: '作業', subtitle: '截止提醒與繳交更新' },
       { key: 'grades', title: '成績', subtitle: '分數公布與成績異動' },
-      { key: 'messages', title: '訊息', subtitle: '私訊與服務通知' },
+      { key: 'messages', title: '訊息', subtitle: '訊息與服務通知' },
     ];
     return (
       <div className={styles.stack}>

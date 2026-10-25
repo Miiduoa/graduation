@@ -307,5 +307,5 @@ it('opens the gradebook when a feedback push has no assignment id', async () => 
     waitUntil,
   });
   await waitUntil.mock.calls[0][0];
-  expect(openWindow).toHaveBeenCalledWith('https://campus.test/classroom/grades');
+  expect(openWindow).toHaveBeenCalledWith('https://campus.test/grades?tab=feedback');
 });

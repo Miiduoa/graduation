@@ -393,11 +393,13 @@ export function HeaderDrawerHost() {
                   setTimeout(() => rootNavigateNested('訊息', 'FriendSearch'), 220);
                 }}
               />
-              <DrawerRow
-                icon="ic_grid_widgets"
-                label="小工具預覽"
-                onPress={() => go('WidgetPreview')}
-              />
+              {__DEV__ ? (
+                <DrawerRow
+                  icon="ic_grid_widgets"
+                  label="小工具預覽"
+                  onPress={() => go('WidgetPreview')}
+                />
+              ) : null}
             </DrawerSection>
 
             {/* ─── 角色專屬：管理工具 ─── */}

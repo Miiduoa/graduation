@@ -8,7 +8,6 @@ const allowedScreenDirectFirebaseImports = [
   'apps/mobile/src/screens/BugReportScreen.tsx',
   'apps/mobile/src/screens/ChatScreen.tsx',
   'apps/mobile/src/screens/ClassroomScreen.tsx',
-  'apps/mobile/src/screens/DepartmentHubScreen.tsx',
   'apps/mobile/src/screens/DmsScreen.tsx',
   'apps/mobile/src/screens/FollowingListsScreen.tsx',
   'apps/mobile/src/screens/FriendSearchScreen.tsx',
