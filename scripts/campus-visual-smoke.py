@@ -370,6 +370,28 @@ async def main():
                 animations='disabled',
             )
             results.append('unsigned account entry keeps existing actions without demo copy')
+
+            await page.set_viewport_size({'width': 390, 'height': 844})
+            for path, expect_account in [
+                ('/auth/find-school', True),
+                ('/auth/platform/class-workspace/join', True),
+                ('/auth/platform', True),
+                ('/academics', False),
+                ('/staff', False),
+                ('/learning', False),
+            ]:
+                response = await page.goto(BASE + path, wait_until='load')
+                body = await page.content()
+                for copy in OLD_ACCOUNT_COPY:
+                    assert copy not in body, f'{path} still contains old copy'
+                assert '校園都在這' not in await page.title()
+                if expect_account:
+                    assert urlparse(page.url).path == '/auth/account', path
+                    await check_unsigned_account_entry(page)
+                else:
+                    assert response is not None and response.status == 404, path
+                    assert urlparse(page.url).path == path
+            results.append('old HTML screens redirect to the new entry or 404 without demo copy')
             assert not errors, errors
         except Exception:
             await page.screenshot(path=str(OUT / 'failure.png'), full_page=True, animations='disabled')

@@ -1,6 +1,6 @@
 import path from 'node:path';
 import type { NextConfig } from 'next';
-import { legacyEnabled, legacyRewrites } from './src/lib/legacy-routing';
+import { legacyEnabled, legacyHtmlRedirects, legacyRewrites } from './src/lib/legacy-routing';
 
 const firebaseAdminBrowserStub = path.join(__dirname, 'src/lib/nodeNativeStub.ts');
 
@@ -74,6 +74,9 @@ const nextConfig: NextConfig = {
       };
     }
     return config;
+  },
+  async redirects() {
+    return legacyHtmlRedirects();
   },
   async rewrites() {
     return legacyRewrites(legacyEnabled());
