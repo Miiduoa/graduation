@@ -50,6 +50,9 @@ function CommunityPageInner({ schoolId, schoolSearch }: { schoolId: string; scho
   const activeTab = activeTabFor(searchParams?.get('tab'));
   const selected = TABS.find((tab) => tab.key === activeTab)!;
   const newPostHref = `/community/post/new?schoolId=${encodeURIComponent(schoolId)}`;
+  const boardsParams = new URLSearchParams(schoolSearch.replace(/^\\?/, ''));
+  boardsParams.set('tab', 'boards');
+  const boardsHref = `/community?${boardsParams.toString()}`;
 
   function switchTab(tab: TabKey) {
     const next = new URLSearchParams(searchParams?.toString() ?? '');
@@ -61,7 +64,7 @@ function CommunityPageInner({ schoolId, schoolSearch }: { schoolId: string; scho
     <div className={styles.content}>
       <section className={styles.intro} aria-labelledby="community-intro-title">
         <div className={styles.introCopy}>
-          <p className={styles.eyebrow}>CAMPUS / CONNECT</p>
+          <p className={styles.eyebrow}>校園交流</p>
           <h2 id="community-intro-title">從一個問題，找到同路人。</h2>
           <p>分享課堂與生活的大小事，或看看同學們正在討論什麼。</p>
         </div>
@@ -69,7 +72,7 @@ function CommunityPageInner({ schoolId, schoolSearch }: { schoolId: string; scho
           <Link href={newPostHref} className={styles.primaryLink}>
             發表貼文
           </Link>
-          <Link href="/community?tab=boards" className={styles.secondaryLink}>
+          <Link href={boardsHref} className={styles.secondaryLink}>
             逛逛看板
           </Link>
         </div>
@@ -97,7 +100,7 @@ function CommunityPageInner({ schoolId, schoolSearch }: { schoolId: string; scho
       <section className={styles.communitySection} aria-label="校內社群內容">
         <div className={styles.sectionHeading}>
           <div>
-            <p className={styles.eyebrow}>DISCOVER</p>
+            <p className={styles.eyebrow}>探索內容</p>
             <h2>{selected.label}</h2>
             <p>{selected.desc}</p>
           </div>
