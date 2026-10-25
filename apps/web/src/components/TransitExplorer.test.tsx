@@ -78,7 +78,10 @@ it('starts with school stops without requesting the user location', async () => 
 });
 
 it('shows Providence gate routes from campus-next without querying a default stop', async () => {
-  const now = new Date().toISOString();
+  // Fixed local afternoon avoids service-day changes when CI runs near midnight.
+  const afternoon = Date.parse('2026-10-19T06:41:00.000Z');
+  vi.spyOn(Date, 'now').mockReturnValue(afternoon);
+  const now = new Date(afternoon).toISOString();
   vi.mocked(queryTransit).mockImplementation(async (query) => {
     if (query.action === 'campus-next') {
       return {
@@ -118,7 +121,10 @@ it('shows Providence gate routes from campus-next without querying a default sto
 });
 
 it('draws the next live bus on a stop line and does not invent a bus for timetable-only rows', async () => {
-  const now = new Date().toISOString();
+  // Fixed local afternoon avoids service-day changes when CI runs near midnight.
+  const afternoon = Date.parse('2026-10-19T06:41:00.000Z');
+  vi.spyOn(Date, 'now').mockReturnValue(afternoon);
+  const now = new Date(afternoon).toISOString();
   vi.mocked(queryTransit).mockImplementation(async (query) => query.action === 'campus-next' ? {
     status: 'ready', kind: 'arrivals', fetchedAt: now,
     arrivals: [
@@ -258,7 +264,10 @@ it('shows night-first scheduled copy instead of 今天收班 during the day', as
 });
 
 it('shows live, scheduled, empty and ended rows together on one direction', async () => {
-  const now = new Date().toISOString();
+  // Fixed local afternoon avoids service-day changes when CI runs near midnight.
+  const afternoon = Date.parse('2026-10-19T06:41:00.000Z');
+  vi.spyOn(Date, 'now').mockReturnValue(afternoon);
+  const now = new Date(afternoon).toISOString();
   vi.mocked(queryTransit).mockImplementation(async (query) => query.action === 'campus-next' ? {
     status: 'ready', kind: 'arrivals', fetchedAt: now,
     arrivals: [
@@ -280,7 +289,10 @@ it('shows live, scheduled, empty and ended rows together on one direction', asyn
 });
 
 it('keeps scheduled times when this direction has no live bus without saying live data is down', async () => {
-  const now = new Date().toISOString();
+  // Fixed local afternoon avoids service-day changes when CI runs near midnight.
+  const afternoon = Date.parse('2026-10-19T06:41:00.000Z');
+  vi.spyOn(Date, 'now').mockReturnValue(afternoon);
+  const now = new Date(afternoon).toISOString();
   vi.mocked(queryTransit).mockImplementation(async (query) => query.action === 'campus-next' ? {
     status: 'ready', kind: 'arrivals', fetchedAt: now,
     arrivals: [
