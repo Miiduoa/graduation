@@ -137,7 +137,8 @@ export function OpsConsole() {
                     return;
                   }
                   event.preventDefault();
-                  const next = tabs[nextIndex][0];
+                  const next = tabs[nextIndex]?.[0];
+                  if (!next) return;
                   go(next);
                   document.getElementById('ops-tab-' + next)?.focus();
                 }}
@@ -751,7 +752,7 @@ function AffiliationTab({ context }: { context: string }) {
         {!loading && !error && rows.length === 0 ? (
           <p className={styles.emptyState}>目前沒有待處理的掛靠申請。</p>
         ) : null}
-        {rows.map((row, index) => {
+        {!error && rows.map((row, index) => {
           const id = String(row.id || row.applicationId || '');
           const title = String(row.workspaceTitle || row.workspaceId || '課班');
           const tenant = String(row.tenantName || row.tenantId || '未指定學校');
@@ -770,7 +771,7 @@ function AffiliationTab({ context }: { context: string }) {
               <ReviewControls
                 subject={title + '／' + tenant}
                 approveLabel="核准掛靠"
-                disabled={busyId !== null || !id || finalized || loading}
+                disabled={busyId !== null || !id || finalized || loading || !!error}
                 busy={busyId === id}
                 onDecide={(decision, reason) => decide(id, decision, reason)}
               />
