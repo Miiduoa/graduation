@@ -274,3 +274,26 @@ it('cancels obsolete membership reads and never lets their late responses replac
   view.unmount();
   await waitFor(() => expect(currentFence.cancelled()).toBe(true));
 });
+
+
+it('does not attribute another course loading failure to the selected healthy course', async () => {
+  const workspaces: NuniWorkspace[] = [
+    ...memberships,
+    { ...memberships[0], id: 'cw_22222222-2222-4222-8222-222222222222', title: '網路通訊' },
+  ];
+  state.load.mockResolvedValue(
+    agenda(
+      [task(21, { courseId: workspaces[1].id, courseTitle: workspaces[1].title })],
+      { workspaces, studiedCourseCount: 2, failedCourseIds: [workspaces[0].id] },
+    ),
+  );
+  render(<Harness workspaces={workspaces} />);
+  await screen.findByText(/有 1 門課未能完整讀取/);
+  fireEvent.change(screen.getByRole('combobox', { name: '待辦課程' }), {
+    target: { value: workspaces[1].id },
+  });
+  expect(screen.queryByText(/有 1 門課未能完整讀取/)).toBeNull();
+  const summary = within(screen.getByRole('group', { name: '待辦快速篩選' }));
+  expect(summary.getByRole('button', { name: /待完成/ }).textContent).toContain('1');
+  expect(summary.getByRole('button', { name: /待完成/ }).textContent).not.toContain('+');
+});

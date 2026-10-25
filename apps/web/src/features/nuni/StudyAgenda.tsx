@@ -202,7 +202,11 @@ export function StudyAgenda({
     scopedTasks.filter((task) => matches(task, filter, now)),
     now,
   );
-  const partial = !!data && (data.failedCourseIds.length > 0 || data.limitedCourseIds.length > 0);
+  const failedCourseIds =
+    data?.failedCourseIds.filter((id) => selectedCourse === 'all' || id === selectedCourse) ?? [];
+  const limitedCourseIds =
+    data?.limitedCourseIds.filter((id) => selectedCourse === 'all' || id === selectedCourse) ?? [];
+  const partial = failedCourseIds.length > 0 || limitedCourseIds.length > 0;
   const chooseFilter = (next: StudyAgendaFilter) => {
     setVisibleLimit(6);
     onFilter(next);
@@ -305,9 +309,9 @@ export function StudyAgenda({
           </button>
         </div>
       )}
-      {data && data.failedCourseIds.length > 0 && (
+      {data && failedCourseIds.length > 0 && (
         <div className={styles.partialNotice} role="status">
-          有 {data.failedCourseIds.length} 門課未能完整讀取，以下只顯示已確認的項目。
+          有 {failedCourseIds.length} 門課未能完整讀取，以下只顯示已確認的項目。
           <button
             type="button"
             className={styles.textButton}
@@ -318,9 +322,9 @@ export function StudyAgenda({
           </button>
         </div>
       )}
-      {data && data.limitedCourseIds.length > 0 && (
+      {data && limitedCourseIds.length > 0 && (
         <p className={styles.partialNotice}>
-          有 {data.limitedCourseIds.length}{' '}
+          有 {limitedCourseIds.length}{' '}
           門課達到目前的顯示上限；數量只計入已載入項目，較早的紀錄可能未列出。
         </p>
       )}
