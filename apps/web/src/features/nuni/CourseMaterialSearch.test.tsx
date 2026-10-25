@@ -176,6 +176,11 @@ it('continues later pages so older materials become searchable and link to the c
   expect(await screen.findByRole('link', { name: /關聯與主鍵/ })).toBeTruthy();
   expect(screen.queryByRole('link', { name: /較早的主鍵講義/ })).toBeNull();
   fireEvent.click(screen.getByRole('button', { name: '繼續載入較早教材' }));
+  expect(
+    state.request.mock.calls
+      .filter(([path]) => path === `class-workspaces/${workspaceId}/materials/page`)
+      .map(([, , , , query]) => query?.cursor),
+  ).toEqual([undefined, 'older-page']);
   const older = await screen.findByRole('link', { name: /較早的主鍵講義/ });
   expect(older.getAttribute('href')).toBe(
     `/classroom/course/${workspaceId}#material-${olderMaterial.id}`,

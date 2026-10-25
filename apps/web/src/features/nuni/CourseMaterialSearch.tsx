@@ -51,7 +51,6 @@ function Search({ compact, seed }: { compact: boolean; seed: MaterialSearchSeed 
   const continueRequest = useRef(0);
   const restartRequest = useRef(0);
   const mounted = useRef(true);
-  const catalogRef = useRef<SearchableMaterialsCatalog | null>(null);
 
   useEffect(() => {
     courseApi.current = classes;
@@ -63,10 +62,6 @@ function Search({ compact, seed }: { compact: boolean; seed: MaterialSearchSeed 
       mounted.current = false;
     };
   }, []);
-
-  useEffect(() => {
-    catalogRef.current = catalog;
-  }, [catalog]);
 
   useEffect(() => {
     const trimmed = query.trim();
@@ -110,7 +105,7 @@ function Search({ compact, seed }: { compact: boolean; seed: MaterialSearchSeed 
   }, [catalog, loadEpoch, query, seed]);
 
   async function loadMore() {
-    const current = catalogRef.current;
+    const current = catalog;
     if (!current || reading || continuing || restarting) return;
     const pending = current.courses.some(
       (course) =>
@@ -141,7 +136,7 @@ function Search({ compact, seed }: { compact: boolean; seed: MaterialSearchSeed 
   }
 
   async function restartCatalog() {
-    const current = catalogRef.current;
+    const current = catalog;
     if (reading || continuing || restarting) return;
     if (current) {
       const stalled = current.courses.some((course) => !course.denied && course.needsRestart);

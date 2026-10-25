@@ -53,7 +53,6 @@ export function CourseLearningPath({
   const [now, setNow] = useState(() => Date.now());
   const request = useRef(0);
   const moreRequest = useRef(0);
-  const materialsProgressRef = useRef<CourseMaterialPageProgress<NuniMaterial> | null>(null);
   const teacher = workspace.memberRole !== 'student';
   const materialsComplete = materialsProgress?.complete === true;
   const materialsDenied = materialsProgress?.denied === true;
@@ -71,10 +70,6 @@ export function CourseLearningPath({
   useEffect(() => {
     courseApi.current = classes;
   });
-
-  useEffect(() => {
-    materialsProgressRef.current = materialsProgress;
-  }, [materialsProgress]);
 
   useEffect(() => {
     const tick = setInterval(() => setNow(Date.now()), 60000);
@@ -126,7 +121,7 @@ export function CourseLearningPath({
   }, [workspace.id, epoch, refreshVersion]);
 
   async function loadMoreMaterials() {
-    const current = materialsProgressRef.current;
+    const current = materialsProgress;
     if (!current || reading || loadingMoreMaterials || current.denied || current.needsRestart) return;
     if (!current.nextCursor) return;
     const sequence = request.current;
@@ -151,7 +146,7 @@ export function CourseLearningPath({
   }
 
   async function restartMaterials() {
-    const current = materialsProgressRef.current;
+    const current = materialsProgress;
     if (!current || reading || loadingMoreMaterials || current.denied || !current.needsRestart) {
       return;
     }
