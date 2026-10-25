@@ -120,7 +120,7 @@ export function OpsConsole() {
                 type="button"
                 role="tab"
                 tabIndex={tab === id ? 0 : -1}
-                aria-controls={'ops-panel-' + id}
+                aria-controls="ops-panel"
                 aria-selected={tab === id}
                 onClick={() => go(id)}
                 onKeyDown={(event) => {
@@ -149,7 +149,7 @@ export function OpsConsole() {
           </div>
           <div
             className={styles.tabPanel}
-            id={'ops-panel-' + tab}
+            id="ops-panel"
             role="tabpanel"
             aria-labelledby={'ops-tab-' + tab}
             tabIndex={0}
@@ -709,7 +709,10 @@ function AffiliationTab({ context }: { context: string }) {
         window.location.replace(accountReturnHref(OPS_PATH + '?tab=affiliation'));
         return false;
       }
-      if (result.status === 409) throw new Error('這筆掛靠申請已變更，請重新讀取後再審核。');
+      if (result.status === 409) {
+        retryKeys.current.delete(signature);
+        throw new Error('這筆掛靠申請已變更，請重新讀取後再審核。');
+      }
       if (!result.ok) throw new Error('掛靠審核沒有完成，請稍後再試。');
       retryKeys.current.delete(signature);
       setNotice(decision === 'approve' ? '已核准掛靠申請。' : '已拒絕掛靠申請。');
