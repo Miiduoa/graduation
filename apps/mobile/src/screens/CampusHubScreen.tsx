@@ -111,6 +111,13 @@ const sections: Array<{ title: string; items: ServiceItem[] }> = [
         ],
       },
       {
+        icon: 'ic_dorm',
+        label: '宿舍',
+        description: '入住安排、設備問題與洗衣計時',
+        screen: 'Dormitory',
+        keywords: ['住宿', '寢室', '床位', '入住', '退宿', '報修', '維修', '洗衣'],
+      },
+      {
         icon: 'ic_health_heart',
         label: '健康',
         description: '校園健康與諮商服務',

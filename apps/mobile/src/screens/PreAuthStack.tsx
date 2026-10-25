@@ -15,6 +15,7 @@ import PersonalTimetableScreen from './PersonalTimetableScreen';
 import PersonalCalendarScreen from './PersonalCalendarScreen';
 import { CourseCatalogScreen } from './CourseCatalogScreen';
 import { HealthScreen } from './HealthScreen';
+import { DormitoryScreen } from './DormitoryScreen';
 import { UnavailableFeatureScreen, type ServiceScreenProps } from './UnavailableFeatureScreen';
 import type { PreAuthStackParamList } from './preAuthTypes';
 import { createStackScreenOptions } from '../ui/navigationTheme';
@@ -24,20 +25,6 @@ const Stack = createNativeStackNavigator<PreAuthStackParamList, undefined>();
 
 /** Public guest stack may only deep-link into registered PreAuth routes. */
 const PUBLIC_UNAVAILABLE_ACTIONS = [{ label: '查看校方公告', route: '公告總覽' }];
-
-/**
- * Preserve route.name for schoolPublicServices resolvers; override default
- * UnavailableFeatureScreen actions that point at unregistered private / activity routes.
- */
-function PublicDormitoryScreen(props: ServiceScreenProps) {
-  return (
-    <UnavailableFeatureScreen
-      {...props}
-      route={{ ...props.route, name: 'Dormitory' }}
-      actions={PUBLIC_UNAVAILABLE_ACTIONS}
-    />
-  );
-}
 
 function PublicCareerScreen(props: ServiceScreenProps) {
   return (
@@ -97,7 +84,7 @@ export function PreAuthStack() {
       />
       <Stack.Screen
         name="Dormitory"
-        component={PublicDormitoryScreen}
+        component={DormitoryScreen}
         options={{ headerShown: false, title: '宿舍服務' }}
       />
       <Stack.Screen

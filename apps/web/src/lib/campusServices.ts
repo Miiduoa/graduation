@@ -180,6 +180,14 @@ export const CAMPUS_SERVICES = [
     category: 'campus',
   },
   {
+    name: '宿舍',
+    text: '自主管理宿舍備忘、報修紀錄、入住退宿清單與洗衣計時',
+    href: '/dormitory',
+    access: 'device',
+    keywords: '宿舍 住宿 寢室 房間 床位 報修 維修 入住 退宿 洗衣 dormitory laundry',
+    category: 'campus',
+  },
+  {
     name: '失物招領',
     text: '查看本校遺失與拾獲刊登',
     href: '/lost-found',

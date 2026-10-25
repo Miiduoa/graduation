@@ -83,3 +83,8 @@ export function useNuniSession(): Auth {
   if (!value) throw new Error('NuniSessionProvider is required');
   return value;
 }
+
+/** A guest-compatible reader for screens also mounted outside the Nuni account flow. */
+export function useOptionalNuniSession(): Auth | null {
+  return useContext(Context);
+}
