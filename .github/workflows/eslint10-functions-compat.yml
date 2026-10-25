@@ -1,0 +1,45 @@
+name: Functions ESLint 10 Compatibility
+
+on:
+  pull_request:
+    paths:
+      - 'backend/functions/**'
+      - 'pnpm-lock.yaml'
+      - '.github/workflows/eslint10-functions-compat.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'backend/functions/**'
+      - 'pnpm-lock.yaml'
+      - '.github/workflows/eslint10-functions-compat.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  eslint10:
+    name: Functions ESLint 10 + @eslint/js 10 integration
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+      - name: Install reconciled pnpm workspace in disposable CI
+        run: |
+          pnpm install --lockfile-only --ignore-scripts
+          pnpm install --frozen-lockfile
+      - name: Install paired ESLint 10 runtime in Functions only
+        run: |
+          npm install --prefix backend/functions --no-save --ignore-scripts --package-lock=false \
+            'eslint@10.13.0' '@eslint/js@10.0.1'
+          node -e "for(const name of ['eslint', '@eslint/js']) console.log(name, require('./backend/functions/node_modules/'+name+'/package.json').version)"
+      - name: Run complete Functions lint under new rules
+        run: npm run lint --prefix backend/functions
+      - name: Verify workspace lint scopes remain active
+        run: |
+          pnpm --filter @campus/shared lint
+          pnpm --filter web lint
+          pnpm --filter mobile lint
