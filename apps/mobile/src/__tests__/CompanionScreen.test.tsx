@@ -4,14 +4,14 @@ import CompanionScreen from '../screens/CompanionScreen';
 import { applyTheme, getCurrentTheme } from '../ui/theme';
 import { computeLocalCompanion } from '../services/companionLocalStore';
 
-const auth = {
+const mockAuth = {
   user: null as { uid: string } | null,
   profile: null as { uid: string; schoolId: string } | null,
 };
 const navigation = { navigate: jest.fn(), getState: () => ({ routeNames: ['Companion', 'CompanionCollection', 'Constellation'] }) };
 const local = jest.mocked(computeLocalCompanion);
 
-jest.mock('../state/auth', () => ({ useAuth: () => auth }));
+jest.mock('../state/auth', () => ({ useAuth: () => mockAuth }));
 jest.mock('../services/companionLocalStore', () => ({ computeLocalCompanion: jest.fn() }));
 jest.mock('../ui/navigationTheme', () => ({ useTabBarContentBottomPadding: () => 84 }));
 jest.mock('../firebase', () => ({ getFirebaseApp: () => ({}), getCloudFunctionRegion: () => 'asia-east1' }));
@@ -49,8 +49,8 @@ function deferred<T>() {
 beforeEach(() => {
   jest.clearAllMocks();
   applyTheme('light');
-  auth.user = null;
-  auth.profile = null;
+  mockAuth.user = null;
+  mockAuth.profile = null;
   local.mockResolvedValue(example());
 });
 afterEach(() => applyTheme('light'));
@@ -89,12 +89,12 @@ it('offers retry instead of spinning forever when local records fail', async () 
 
 it('does not show the previous account response after switching users', async () => {
   const first = deferred<Awaited<ReturnType<typeof computeLocalCompanion>>>();
-  auth.user = { uid: 'user-a' };
-  auth.profile = { uid: 'user-a', schoolId: 'pu' };
+  mockAuth.user = { uid: 'user-a' };
+  mockAuth.profile = { uid: 'user-a', schoolId: 'pu' };
   local.mockReturnValueOnce(first.promise).mockResolvedValueOnce(example('目前帳號的新資料'));
   const view = render(<CompanionScreen navigation={navigation} />);
-  auth.user = { uid: 'user-b' };
-  auth.profile = { uid: 'user-b', schoolId: 'ncku' };
+  mockAuth.user = { uid: 'user-b' };
+  mockAuth.profile = { uid: 'user-b', schoolId: 'ncku' };
   view.rerender(<CompanionScreen navigation={navigation} />);
   await waitFor(() => expect(view.getByText('目前帳號的新資料')).toBeTruthy());
   await act(async () => first.resolve(example('上一個帳號的舊資料')));
