@@ -18,7 +18,10 @@ function fail(code, message) {
 
 function text(value, max) {
   return typeof value === 'string'
-    ? value.replace(/[\u0000-\u001f\u007f]/g, ' ').trim().slice(0, max)
+    ? [...value].filter((char) => {
+      const code = char.charCodeAt(0);
+      return code >= 32 && code !== 127;
+    }).join('').trim().slice(0, max)
     : '';
 }
 
