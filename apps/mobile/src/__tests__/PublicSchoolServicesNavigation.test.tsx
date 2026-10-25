@@ -290,7 +290,7 @@ test('guest Dormitory provides an editable personal workspace without claiming s
   const { view, navigation, onUnhandledAction } = renderPublicStack();
   fireEvent.press(await view.findByTestId('public-Dormitory'));
   await waitFor(() => expect(navigation.getCurrentRoute()?.name).toBe('Dormitory'));
-  expect(await view.findByText('住宿工作區')).toBeTruthy();
+  expect(await view.findByText('住得安心，事情好處理')).toBeTruthy();
   expect(view.getByText(/訪客紀錄只存在此裝置/)).toBeTruthy();
   fireEvent.press(view.getByText('設備問題'));
   expect(view.getByText('＋ 記錄問題')).toBeTruthy();
@@ -298,6 +298,27 @@ test('guest Dormitory provides an editable personal workspace without claiming s
   expect(view.getByText('新增問題')).toBeTruthy();
   expect(view.queryByTestId('school-login-form')).toBeNull();
   expect(onUnhandledAction).not.toHaveBeenCalled();
+});
+
+test('PU guest Dormitory guide displays verified reference details without claiming live bed availability', async () => {
+  setBrowsingSchoolId('pu');
+  const { view, navigation, onUnhandledAction } = renderPublicStack();
+  fireEvent.press(await view.findByTestId('public-Dormitory'));
+  await waitFor(() => expect(navigation.getCurrentRoute()?.name).toBe('Dormitory'));
+  fireEvent.press(view.getAllByText('宿舍指南')[0]);
+  expect(await view.findByText('希嘉學苑')).toBeTruthy();
+  expect(view.getByText(/24 小時校安專線/)).toBeTruthy();
+  expect(view.getByText(/床位是否開放及實際金額/)).toBeTruthy();
+  expect(onUnhandledAction).not.toHaveBeenCalled();
+});
+
+test('other campuses never show PU fees in the Dormitory guide', async () => {
+  setBrowsingSchoolId('ncku');
+  const { view } = renderPublicStack();
+  fireEvent.press(await view.findByTestId('public-Dormitory'));
+  fireEvent.press(view.getAllByText('宿舍指南')[0]);
+  expect(await view.findByText('尚無可核實的房型資訊')).toBeTruthy();
+  expect(view.queryByText('思高學苑')).toBeNull();
 });
 
 test('Career wrapper keeps route.name for resolver and only offers registered public actions', async () => {
