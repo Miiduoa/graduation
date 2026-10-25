@@ -2,22 +2,25 @@
  * Natural-language shortcuts shared by the Web and native app.
  * A match identifies an existing read/navigation screen, never an executable command.
  */
-export type CampusQuickDestination =
-  | '/map'
-  | '/bus'
-  | '/classroom'
-  | '/timetable'
-  | '/library'
-  | '/grades'
-  | '/credit-planner'
-  | '/cafeteria'
-  | '/dormitory'
-  | '/calendar'
-  | '/events'
-  | '/announcements'
-  | '/messages'
-  | '/lost-found'
-  | '/friends';
+export const CAMPUS_QUICK_DESTINATIONS = [
+  "/map",
+  "/bus",
+  "/classroom",
+  "/timetable",
+  "/library",
+  "/grades",
+  "/credit-planner",
+  "/cafeteria",
+  "/dormitory",
+  "/calendar",
+  "/events",
+  "/announcements",
+  "/messages",
+  "/lost-found",
+  "/friends"
+] as const;
+
+export type CampusQuickDestination = (typeof CAMPUS_QUICK_DESTINATIONS)[number];
 
 export function suggestCampusDestinations(input: string): CampusQuickDestination[] {
   const phrase = input.slice(0, 160).normalize('NFKC').toLocaleLowerCase('zh-TW').replace(/\s+/g, '');
