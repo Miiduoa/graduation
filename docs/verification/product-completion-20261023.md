@@ -2,7 +2,7 @@
 
 ## Scope and identity
 
-Repository: `Miiduoa/graduation`. Work was implemented by Cursor in separate owned worktrees and reviewed independently. No other chat's dirty checkout was modified. Candidate source `e5a47b15cac43ee796998415ea5677d5e0042e0d` includes notifications/discussion, admin pagination/export and personal calendar, plus main snapshot `6a1f52c6`. This is a local candidate, not deployment or all-domain completion.
+Repository: `Miiduoa/graduation`. Work was implemented in separate owned worktrees and reviewed independently. No other chat's dirty checkout was modified. Candidate source `e5a47b15cac43ee796998415ea5677d5e0042e0d` includes notifications/discussion, admin pagination/export and personal calendar, plus main snapshot `6a1f52c6`. This is a local candidate, not deployment or all-domain completion.
 
 Node 22.23.3, pnpm 10.28.2, unchanged lockfile. Platform Google sessions and Firebase school sessions remain distinct. Public personal calendar works on the existing personal-import ledger; school notifications/discussion/admin require their own school authorization.
 
@@ -36,7 +36,7 @@ No deployed SHA, actual school-account user journey, real background push, Googl
 ## Final source validation (integration candidate)
 
 **Source SHA (implementation + ownership + pinned main + test:rules wiring + emulator lint fix):** `8d28ec088f3f609db5ae265ce4aa7f45cf3c0206`  
-Branch: `cursor/product-completion-20261023`. Working tree clean at validation time.  
+Branch: `product-completion-20261023`. Working tree clean at validation time.  
 Pinned main merged: `27f7206880954b6a89d22e5fac2d638c9c0670da`. Ownership cherry-pick from `0e9b4dc823382cd85fdffbfe30a549ab1f30e9d9` completed (discussion links + ownership transfer both retained).  
 Tooling: Node `22.23.4` (`/opt/homebrew/opt/node@22/bin`), pnpm `10.28.2`. Local workspace logs: `work/validation-8d28ec0/` (outside the repository). A compact tracked result is in [validation summary](./product-completion-20261023-summary.json). Do not conflate with older `validation-e5a47b1` / `validation-40247a2`.
 

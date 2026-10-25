@@ -8,6 +8,7 @@ import {
 } from '@campus/shared/src/nuni';
 import { COURSE_WORK_LANDING_ATTR, COURSE_WORK_MISSING_QUIZ } from '@/lib/courseWorkLanding';
 import { CourseQuizzes, quizReceiptDomId } from './CourseQuizzes';
+import { prioritizeCourseQuizzes } from './courseAssignmentDiscovery';
 
 const mocks = vi.hoisted(() => ({
   request: vi.fn(),
@@ -94,6 +95,47 @@ function openPublish() {
     target: { value: '請提出一個研究問題。' },
   });
 }
+
+it('searches quiz content and keeps an answer draft when a direct link clears the search', async () => {
+  replyList([quiz(), quiz({ id: quizId2, title: '第二份測驗', prompt: '請比較兩種模型。' })]);
+  render(<CourseQuizzes workspace={workspace()} />);
+  const card = await screen.findByRole('article', { name: '測驗：說明研究方法' });
+  const editor = within(card).getByLabelText('你的回答') as HTMLTextAreaElement;
+  fireEvent.change(editor, { target: { value: '保留我的研究回答' } });
+  const search = screen.getByRole('searchbox', { name: '搜尋測驗' });
+  fireEvent.change(search, { target: { value: '兩種 模型' } });
+  expect(screen.queryByRole('article', { name: '測驗：說明研究方法' })).toBeNull();
+  expect(screen.getByRole('article', { name: '測驗：第二份測驗' })).toBeTruthy();
+  act(() => {
+    window.history.replaceState({}, '', `#quiz-${quizId}`);
+    window.dispatchEvent(new HashChangeEvent('hashchange'));
+  });
+  expect((search as HTMLInputElement).value).toBe('');
+  expect(screen.getByRole('article', { name: '測驗：說明研究方法' })).toBeTruthy();
+  expect(editor.value).toBe('保留我的研究回答');
+  fireEvent.change(search, { target: { value: '找不到' } });
+  expect(screen.getByText('沒有符合的測驗。試試其他關鍵字，或清除搜尋。')).toBeTruthy();
+  fireEvent.click(screen.getByRole('button', { name: '清除搜尋' }));
+  expect(editor.value).toBe('保留我的研究回答');
+  expect(document.activeElement).toBe(search);
+});
+
+it('puts unsubmitted open quizzes first without treating a suggested date as a closure', () => {
+  const received = quiz({ myResponse: answer() });
+  const future = quiz({ id: quizId2, dueAt: '2026-11-01T08:00:00+08:00' });
+  const passed = quiz({ id: 'passed', dueAt: '2026-01-01T08:00:00', state: 'open' });
+  const closed = quiz({ id: 'closed', state: 'closed', closedAt: timestamp });
+  const source = [received, future, closed, passed];
+  expect(prioritizeCourseQuizzes(source, workspace()).map((item) => item.id)).toEqual([
+    'passed',
+    quizId2,
+    quizId,
+    'closed',
+  ]);
+  expect(prioritizeCourseQuizzes(source, workspace('co-teacher'))).toBe(source);
+  expect(prioritizeCourseQuizzes(source, workspace('student', 'archived'))).toBe(source);
+});
+
 beforeEach(() => {
   mocks.request.mockReset();
   mocks.refresh.mockReset();
@@ -311,7 +353,11 @@ it('treats a quiz dueAt without offset as Taipei time', async () => {
   replyList([quiz({ dueAt: '2026-10-07T16:00:00' })]);
   render(<CourseQuizzes workspace={workspace()} />);
   await screen.findByText('已過建議完成時間，老師尚未結束測驗，目前仍可送出作答。');
-  expect(screen.getByText('2026/10/7 下午4:00')).toBeTruthy();
+  expect(
+    within(screen.getByRole('article', { name: '測驗：說明研究方法' })).getByText(
+      '2026/10/7 下午4:00',
+    ),
+  ).toBeTruthy();
 });
 
 it('closed quizzes show the absence of an answer and cannot be submitted', async () => {
@@ -912,10 +958,7 @@ it('scopes quiz save-and-next reveal to the activity that submitted feedback', a
     }
     if (path.endsWith(`/quizzes/${quizId2}/responses`) && !input) {
       return {
-        responses: [
-          answer({ quizId: quizId2 }),
-          { ...peer, quizId: quizId2 },
-        ],
+        responses: [answer({ quizId: quizId2 }), { ...peer, quizId: quizId2 }],
       };
     }
     if (path.endsWith('/feedback') && String(path).includes(quizId2)) {
@@ -931,23 +974,15 @@ it('scopes quiz save-and-next reveal to the activity that submitted feedback', a
   const openButtons = await screen.findAllByRole('button', { name: '查看作答' });
   for (const button of openButtons) fireEvent.click(button);
   await waitFor(() =>
-    expect(
-      document.getElementById(quizReceiptDomId(workspaceId, quizId2, studentId)),
-    ).toBeTruthy(),
+    expect(document.getElementById(quizReceiptDomId(workspaceId, quizId2, studentId))).toBeTruthy(),
   );
-  const firstPeer = document.getElementById(
-    quizReceiptDomId(workspaceId, quizId, otherId),
-  )!;
-  const secondPeer = document.getElementById(
-    quizReceiptDomId(workspaceId, quizId2, otherId),
-  )!;
+  const firstPeer = document.getElementById(quizReceiptDomId(workspaceId, quizId, otherId))!;
+  const secondPeer = document.getElementById(quizReceiptDomId(workspaceId, quizId2, otherId))!;
   const firstScroll = vi.fn();
   const secondScroll = vi.fn();
   firstPeer.scrollIntoView = firstScroll;
   secondPeer.scrollIntoView = secondScroll;
-  const secondLin = document.getElementById(
-    quizReceiptDomId(workspaceId, quizId2, studentId),
-  )!;
+  const secondLin = document.getElementById(quizReceiptDomId(workspaceId, quizId2, studentId))!;
   const editor = within(secondLin).getByLabelText('給 林同學 的回饋');
   fireEvent.click(within(secondLin).getByText('填寫回饋'));
   fireEvent.change(editor, { target: { value: '給林同學的回饋' } });

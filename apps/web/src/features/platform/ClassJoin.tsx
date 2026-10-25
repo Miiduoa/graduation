@@ -15,32 +15,54 @@ import { accountReturnHref, CREATE_PATH, JOIN_PATH, workspacePath } from './cons
 import styles from './Platform.module.css';
 import nuni from '@/features/nuni/NuniApp.module.css';
 import common from '@/app/servicePages.module.css';
+import { useActiveRequest } from './useActiveRequest';
 
 export function ClassJoin() {
+  const auth = useNuniSession();
+  if (auth.loading || auth.pendingLogout)
+    return (
+      <SiteShell header={<AppHeader />} title="加入課班">
+        <p role="status">正在確認課班帳號…</p>
+      </SiteShell>
+    );
+  return <ClassJoinContent key={`${auth.session?.platformAccountId}:${auth.session?.context}`} />;
+}
+
+function ClassJoinContent() {
   const auth = useNuniSession();
   const classes = useClasses();
   const router = useRouter();
   const [code, setCode] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
+  const captureRequest = useActiveRequest();
+  const mutationPending = useRef(false);
   const key = useRef(crypto.randomUUID());
 
   async function onSubmit(event: FormEvent) {
     event.preventDefault();
-    if (busy) return;
+    const isCurrent = captureRequest();
+    if (!isCurrent() || mutationPending.current) return;
     if (!auth.session) {
       window.location.replace(accountReturnHref(JOIN_PATH));
       return;
     }
+    mutationPending.current = true;
     setBusy(true);
     setError('');
     try {
       const workspace = await classes.join(
-        code.trim().toUpperCase().replace(/[\s-]+/g, ''),
+        code
+          .trim()
+          .toUpperCase()
+          .replace(/[\s-]+/g, ''),
         `web-join-${key.current}`,
       );
+      if (!isCurrent()) return;
       router.replace(workspacePath(workspace.id));
     } catch (failure) {
+      if (!isCurrent()) return;
+      mutationPending.current = false;
       if (failure instanceof NuniError && failure.status === 401) {
         window.location.replace(accountReturnHref(JOIN_PATH));
         return;
@@ -63,7 +85,9 @@ export function ClassJoin() {
           <div>
             <p className={styles.eyebrow}>課班工作區</p>
             <h1>加入課班</h1>
-            <p className={styles.muted}>輸入老師提供的邀請碼。加入後只取得這一門課的學生身分，不是學校學籍。</p>
+            <p className={styles.muted}>
+              輸入老師提供的邀請碼。加入後只取得這一門課的學生身分，不是學校學籍。
+            </p>
           </div>
           <div className={styles.links}>
             <Link href="/auth/account">回登入進門</Link>

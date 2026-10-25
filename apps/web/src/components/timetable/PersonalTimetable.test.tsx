@@ -1,12 +1,18 @@
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 vi.mock('next/navigation', () => ({
-  useRouter: () => ({ push: vi.fn(), replace: vi.fn() }),
+  useRouter: () => ({ push: mocks.push, replace: vi.fn() }),
   useSearchParams: () => new URLSearchParams(),
   usePathname: () => '/timetable',
 }));
 
-import { cleanCourse, cleanMeta, shareCopiedCopy, WEEKDAY_LABELS } from '@campus/shared';
+import {
+  cleanCourse,
+  cleanMeta,
+  shareCopiedCopy,
+  WEEKDAY_LABELS,
+  type PersonalImportRecord,
+} from '@campus/shared';
 import { PersonalTimetable } from './PersonalTimetable';
 
 const mocks = vi.hoisted(() => ({
@@ -19,6 +25,8 @@ const mocks = vi.hoisted(() => ({
   invites: vi.fn(),
   friendTimetable: vi.fn(),
   meetup: vi.fn(),
+  push: vi.fn(),
+  records: [] as PersonalImportRecord[],
 }));
 vi.mock('@/components/AuthGuard', () => ({ useAuth: () => mocks.auth }));
 vi.mock('@/components/SelectedSchoolProvider', () => ({
@@ -42,7 +50,7 @@ vi.mock('@/lib/usePersonalImports', () => ({
       schoolName: '靜宜大學',
     };
   },
-  usePersonalImports: () => ({ records: [], error: '', loading: false }),
+  usePersonalImports: () => ({ records: mocks.records, error: '', loading: false }),
 }));
 vi.mock('@/lib/timetable/store', () => ({
   CLOUD_NOT_READY_COPY: '這個功能還沒接通，雲端備份先不用。',
@@ -108,6 +116,7 @@ beforeEach(() => {
   mocks.auth.loading = false;
   mocks.school.selectedSchoolId = 'pu';
   mocks.school.loading = false;
+  mocks.records = [];
   mocks.load.mockReset().mockResolvedValue(timetable());
   mocks.save.mockReset().mockResolvedValue({ stored: 'cloud' });
   mocks.share
@@ -140,6 +149,7 @@ afterEach(() => {
     else Reflect.deleteProperty(HTMLDialogElement.prototype, name);
   }
   vi.restoreAllMocks();
+  vi.unstubAllGlobals();
 });
 async function ready() {
   const view = render(<PersonalTimetable />);
@@ -157,6 +167,95 @@ function existingCourseButton() {
 }
 
 describe('personal timetable data retention', () => {
+  it('opens an imported course in the currently viewed campus', async () => {
+    mocks.records = [
+      {
+        id: 'imported',
+        kind: 'timetable',
+        title: '匯入課程',
+        schoolId: 'pu',
+        academicYear: '115',
+        semester: '1',
+        dayOfWeek: 2,
+        startPeriod: 3,
+        endPeriod: 4,
+        batchId: 'test',
+        importedAt: '2026-10-25T00:00:00Z',
+        source: { type: 'paste', line: 1, rawText: '' },
+      },
+    ];
+    await ready();
+    fireEvent.click(screen.getAllByRole('button', { name: /檢視匯入紀錄 匯入課程/ })[0]);
+    expect(mocks.push).toHaveBeenCalledWith('/import?kind=timetable&campus=pu');
+  });
+
+  it('starts with readable weekly courses on mobile and keeps an explicitly selected view', async () => {
+    let compact = true;
+    const listeners = new Set<() => void>();
+    vi.stubGlobal(
+      'matchMedia',
+      vi.fn(() => ({
+        get matches() {
+          return compact;
+        },
+        addEventListener: (_event: string, listener: () => void) => listeners.add(listener),
+        removeEventListener: (_event: string, listener: () => void) => listeners.delete(listener),
+      })),
+    );
+    await ready();
+    expect(
+      screen.getByRole('button', { name: '一週' }).getAttribute('aria-pressed'),
+    ).toBe('true');
+    expect(
+      within(screen.getByRole('region', { name: '一週課程' })).getAllByText('原本課程'),
+    ).toHaveLength(1);
+    expect(screen.queryByRole('region', { name: '課表捲動區' })).toBeNull();
+    expect(screen.queryByRole('combobox', { name: '上課日' })).toBeNull();
+
+    fireEvent.click(screen.getByRole('button', { name: '格子' }));
+    expect(screen.getByRole('region', { name: '課表捲動區' })).toBeTruthy();
+    for (const width of [false, true]) {
+      await act(async () => {
+        compact = width;
+        for (const listener of listeners) listener();
+      });
+      expect(
+        screen.getByRole('button', { name: '格子' }).getAttribute('aria-pressed'),
+      ).toBe('true');
+    }
+    fireEvent.click(screen.getByRole('button', { name: '單日' }));
+    expect(screen.getByRole('combobox', { name: '上課日' })).toBeTruthy();
+  });
+
+  it('keeps a newly saved manual course visible when adding it from an imported semester', async () => {
+    mocks.records = [
+      {
+        id: 'imported',
+        kind: 'timetable',
+        title: '匯入課程',
+        schoolId: 'pu',
+        academicYear: '115',
+        semester: '1',
+        dayOfWeek: 2,
+        startPeriod: 3,
+        endPeriod: 4,
+        batchId: 'test',
+        importedAt: '2026-10-25T00:00:00Z',
+        source: { type: 'paste', line: 1, rawText: '' },
+      },
+    ];
+    await ready();
+    expect((screen.getByLabelText('顯示自行匯入的學期') as HTMLSelectElement).value).toBe('115|1');
+    const editor = addCourse('剛新增的統計學');
+    fireEvent.click(editor.getByRole('button', { name: '儲存' }));
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+    expect((screen.getByLabelText('顯示自行匯入的學期') as HTMLSelectElement).value).toBe('manual');
+    expect(screen.getAllByRole('button', { name: /編輯 剛新增的統計學/ }).length).toBeGreaterThan(
+      0,
+    );
+    expect(screen.getByRole('status').textContent).toContain('已切換至手動課表');
+  });
+
   it('keeps an unsuccessful edit, freezes its fields while saving, and allows retry', async () => {
     const pending = deferred<{ stored: 'cloud' }>();
     mocks.save.mockReturnValueOnce(pending.promise);
@@ -203,7 +302,7 @@ describe('personal timetable data retention', () => {
     await ready();
     const section = within(screen.getByRole('region', { name: '匯入課表' }));
     expect(section.getByRole('link', { name: '匯入截圖或檔案' }).getAttribute('href')).toBe(
-      '/import?kind=timetable',
+      '/import?kind=timetable&campus=pu',
     );
     fireEvent.click(section.getByRole('button', { name: '從學校課表帶入' }));
     expect(section.getByText('匯入資料庫')).toBeTruthy();

@@ -3108,7 +3108,7 @@ async function mockAIResponse(
       const hasCourses = (context.courses?.length ?? 0) > 0;
       const hasAssignments = (context.pendingAssignments?.length ?? 0) > 0;
       const isIdentityQuestion =
-        /你是誰|你是什麼|什麼模型|模型|離線|本地|chatgpt|gpt|codex|智商|多聰明|參數|parameter|權重|訓練|跟.*一樣/.test(
+        /你是誰|你是什麼|什麼模型|模型|離線|本地|chatgpt|gpt|智商|多聰明|參數|parameter|權重|訓練|跟.*一樣/.test(
           lowerMsg,
         );
       const isComplaint = /笨|很爛|不好用|答錯|錯了|不聰明|沒用|廢|亂回|答非所問/.test(lowerMsg);

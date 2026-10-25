@@ -170,14 +170,16 @@ it('目錄尚未就緒時立即沿用 URL 校園範圍，不沿用過期選定�
   for (const pathname of publicAndPrivate) {
     const link = screen.getByRole('link', {
       name: new RegExp(
-        ({
-          '/map': '校園地圖',
-          '/library': '圖書館',
-          '/school-info': '學校資訊',
-          '/lost-found': '失物招領',
-          '/friends': '找人',
-          '/timetable': '共同空堂',
-        } as Record<string, string>)[pathname],
+        (
+          {
+            '/map': '校園地圖',
+            '/library': '圖書館',
+            '/school-info': '學校資訊',
+            '/lost-found': '失物招領',
+            '/friends': '找人',
+            '/timetable': '共同空堂',
+          } as Record<string, string>
+        )[pathname],
       ),
     });
     const href = new URL(link.getAttribute('href')!, 'https://campus.example');
@@ -221,8 +223,10 @@ it('未就緒時保留 campus=all 與未知校園查詢，不改寫成既有選�
   });
   render(<LifePage />);
   expect(
-    new URL(screen.getByRole('link', { name: /校園地圖/ }).getAttribute('href')!, 'https://campus.example')
-      .searchParams.get('campus'),
+    new URL(
+      screen.getByRole('link', { name: /校園地圖/ }).getAttribute('href')!,
+      'https://campus.example',
+    ).searchParams.get('campus'),
   ).toBe('all');
   cleanup();
 

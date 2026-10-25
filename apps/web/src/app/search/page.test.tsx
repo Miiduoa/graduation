@@ -2,6 +2,17 @@ import { fireEvent, render, screen, within } from '@testing-library/react';
 import { beforeEach, expect, it, vi } from 'vitest';
 import SearchPage from './page';
 
+const selection = vi.hoisted(() => ({
+  current: null as null | {
+    selectedSchool: { id: string; code?: string };
+    loading: boolean;
+    catalogStatus: string;
+  },
+}));
+vi.mock('@/components/SelectedSchoolProvider', () => ({
+  useOptionalSelectedSchool: () => selection.current,
+}));
+
 const options = { studentId: false, loading: false, error: false, retry: vi.fn() };
 vi.mock('@/lib/signInOptions', () => ({ useSignInOptions: () => options }));
 
@@ -10,6 +21,7 @@ vi.mock('next/navigation', () => ({
 }));
 beforeEach(() => {
   window.history.replaceState({}, '', '/search');
+  selection.current = null;
   options.studentId = false;
   options.loading = false;
   options.error = false;
@@ -80,7 +92,9 @@ it('keeps the existing course directory alongside the added Nuni classroom', () 
 
 it('shows ordering-off copy for /food while keeping bus and announcements', () => {
   render(<SearchPage />);
-  expect(screen.getByRole('link', { name: /點餐與取餐/ }).textContent).toContain('目前還不能線上點餐');
+  expect(screen.getByRole('link', { name: /點餐與取餐/ }).textContent).toContain(
+    '目前還不能線上點餐',
+  );
   expect(screen.queryByText('選餐點、查訂單、出示取餐憑證')).toBeNull();
   expect(screen.getByRole('link', { name: /^公車/ })).toBeTruthy();
   expect(screen.getByRole('link', { name: /^公告/ }).getAttribute('href')).toBe('/announcements');
@@ -108,8 +122,44 @@ it('restores a shareable search and preserves only browsing context in service l
   expect(new URL(window.location.href).searchParams.has('q')).toBe(false);
 });
 
-it('keeps the feedback tab and campus together in the grades destination', () => {
-  window.history.replaceState({}, '', '/search?campus=nthu&session=private');
+it('opens the feedback tab with the selected campus and without copying the search query', () => {
+  window.history.replaceState({}, '', '/search?q=回饋&campus=nthu&token=private');
+  render(<SearchPage />);
+  const destination = new URL(
+    screen.getByRole('link', { name: /^課業成績與回饋/ }).getAttribute('href')!,
+    'https://campus.example',
+  );
+  expect(destination.pathname).toBe('/grades');
+  expect(destination.searchParams.get('tab')).toBe('feedback');
+  expect(destination.searchParams.get('campus')).toBe('nthu');
+  expect(destination.searchParams.has('q')).toBe(false);
+  expect(destination.searchParams.has('token')).toBe(false);
+});
+
+it('restores focus when clearing filters and leaves a composing search untouched', () => {
+  render(<SearchPage />);
+  const search = screen.getByRole('searchbox', { name: '想找什麼？' });
+  fireEvent.click(screen.getByRole('button', { name: '校園生活' }));
+  fireEvent.change(search, { target: { value: '借書' } });
+  fireEvent.keyDown(search, { key: 'Escape', isComposing: true });
+  expect((search as HTMLInputElement).value).toBe('借書');
+  fireEvent.keyDown(search, { key: 'Escape' });
+  expect((search as HTMLInputElement).value).toBe('');
+  expect(screen.getByRole('button', { name: '校園生活' }).getAttribute('aria-pressed')).toBe(
+    'true',
+  );
+  fireEvent.click(screen.getByRole('button', { name: '清除篩選' }));
+  expect(document.activeElement).toBe(search);
+  expect(screen.getByRole('button', { name: '全部' }).getAttribute('aria-pressed')).toBe('true');
+});
+
+it('uses the current school for feedback when the address still has an earlier campus', () => {
+  selection.current = {
+    selectedSchool: { id: 'nthu' },
+    loading: false,
+    catalogStatus: 'ready',
+  };
+  window.history.replaceState({}, '', '/search?campus=pu&schoolId=pu&school=PU&session=private');
   render(<SearchPage />);
   const target = new URL(
     screen.getByRole('link', { name: /^課業成績與回饋/ }).getAttribute('href')!,
@@ -122,6 +172,22 @@ it('keeps the feedback tab and campus together in the grades destination', () =>
   expect(target.searchParams.get('school')).toBe('NTHU');
   expect(target.searchParams.has('session')).toBe(false);
 });
+
+it.each(['職涯', '實習'])(
+  'finds the official school information destination when searching for %s',
+  (query) => {
+    window.history.replaceState({}, '', `/search?campus=nthu&q=${encodeURIComponent(query)}`);
+    render(<SearchPage />);
+    const target = new URL(
+      screen.getByRole('link', { name: /^學校資訊/ }).getAttribute('href')!,
+      'https://campus.example',
+    );
+    expect(target.pathname).toBe('/school-info');
+    expect(target.searchParams.get('campus')).toBe('nthu');
+    expect(target.searchParams.has('q')).toBe(false);
+    expect(screen.getAllByRole('link')).toHaveLength(1);
+  },
+);
 
 it('finds tasks using separated words and full-width Latin characters', () => {
   render(<SearchPage />);

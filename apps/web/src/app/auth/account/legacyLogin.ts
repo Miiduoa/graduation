@@ -1,3 +1,5 @@
+import { collapseInternalPathHash, loginHref, sanitizeInternalPath } from '@/lib/navigation';
+
 export const ACCOUNT_API_ORIGIN = 'https://api.nuni.tw';
 export const PLATFORM_LOGIN_TRANSACTION_KEY = 'campus.platform-login.transaction';
 export const ACCOUNT_LOGIN_TRANSACTION_KEY = 'campus.account-login.transaction';
@@ -45,12 +47,12 @@ const ALLOWED_RETURN_PATHS = new Set([
   '/community',
   '/credit-planner',
   '/dms',
+  '/events',
   '/food',
   '/friends',
   '/grades',
   '/groups',
   '/import',
-  '/join',
   '/library',
   '/life',
   '/lms-admin',
@@ -64,6 +66,7 @@ const ALLOWED_RETURN_PATHS = new Set([
   '/privacy/deletion-status',
   '/profile',
   '/search',
+  '/school-info',
   '/settings',
   '/shops',
   '/social',
@@ -94,9 +97,9 @@ const ALLOWED_RETURN_PREFIXES = [
   '/timetable/s',
 ];
 
-const OPS_RETURN_TABS = new Set(['schools', 'people', 'merchants', 'affiliation', 'audit']);
 const BLOCKED_RETURN_PATHS = new Set([
   '/login',
+  '/join',
   '/admin/login',
   '/classroom/login',
   '/auth/account',
@@ -104,7 +107,38 @@ const BLOCKED_RETURN_PATHS = new Set([
   '/sso/acs',
 ]);
 
-const CLASS_WORKSPACE_PATH = /^\/auth\/platform\/class-workspace\/cw_[0-9a-fA-F-]{36}$/u;
+// Only page state travels through login; credentials and nested return URLs do not.
+const RETURN_CONTEXT_KEYS = new Set([
+  'school',
+  'schoolId',
+  'campus',
+  'tab',
+  'section',
+  'source',
+  'q',
+  'category',
+  'week',
+  'view',
+  'semester',
+  'courseId',
+  'groupId',
+  'boardId',
+  'poiId',
+  'create',
+  'kind',
+]);
+
+// These simple destinations are also understood by the retained login callbacks.
+const LEGACY_SIMPLE_RETURN_PATHS = new Set([
+  '/',
+  '/account-deletion',
+  '/calendar',
+  '/career',
+  '/food',
+  '/life',
+  '/search',
+  '/social',
+]);
 const MICROSOFT_HOSTS = new Set([
   'login.microsoftonline.com',
   'login.microsoftonline.us',
@@ -145,54 +179,110 @@ function trimPath(path: string): string {
   return trimmed === '' ? '/' : trimmed;
 }
 
-function opsReturnSuffix(pathname: string, searchParams: URLSearchParams, hash: string): string | null {
-  const opsPath = pathname === '/admin/ops' || pathname === '/auth/platform/ops';
-  if (!opsPath) return searchParams.size || hash ? null : '';
-  const names = [...searchParams.keys()];
-  if (names.some((name) => name !== 'tab')) return null;
-  const queryTab = searchParams.get('tab');
-  const hashTab = hash.startsWith('#') ? hash.slice(1) : hash;
-  if (queryTab !== null && !OPS_RETURN_TABS.has(queryTab)) return null;
-  if (hash && !OPS_RETURN_TABS.has(hashTab)) return null;
-  if (queryTab && hash && queryTab !== hashTab) return null;
-  if (queryTab) return `?tab=${queryTab}`;
-  if (hashTab) return `#${hashTab}`;
-  return '';
+function hasUnsafeReturnCharacters(value: string): boolean {
+  for (let index = 0; index < value.length; index += 1) {
+    const code = value.charCodeAt(index);
+    if (code <= 31 || code === 92 || code === 127) return true;
+  }
+  return false;
 }
 
-export function sanitizeReturnPath(value: string | null | undefined): string {
-  const raw = (value ?? '').trim();
-  if (!raw.startsWith('/') || raw.startsWith('//') || raw.includes('\\')) return '/';
+function returnFragment(hash: string): string {
+  try {
+    // A fragment may identify page content, never carry another URL or auth payload.
+    const anchor = collapseInternalPathHash(hash);
+    return /^[\p{L}\p{N}_.:-]+$/u.test(decodeURIComponent(anchor.slice(1))) ? anchor : '';
+  } catch {
+    return '';
+  }
+}
+
+function allowedReturnPath(value: string | null | undefined): string | null {
+  const raw = sanitizeInternalPath(value && value.length <= 1200 ? value : null, '');
+  if (!raw) return null;
   let parsed: URL;
   try {
     parsed = new URL(raw, 'https://nuni.invalid');
   } catch {
-    return '/';
+    return null;
   }
-  if (parsed.origin !== 'https://nuni.invalid' || parsed.username || parsed.password) {
-    return '/';
+  if (
+    parsed.origin !== 'https://nuni.invalid' ||
+    parsed.username ||
+    parsed.password ||
+    `${parsed.pathname}${parsed.search}${parsed.hash}` !== raw ||
+    /%(?:2f|5c|0[0-9a-f]|1[0-9a-f]|7f)/i.test(parsed.pathname)
+  ) {
+    return null;
   }
-  if (`${parsed.pathname}${parsed.search}${parsed.hash}` !== raw) return '/';
   const normalized = trimPath(parsed.pathname);
-  if (BLOCKED_RETURN_PATHS.has(normalized)) return '/';
-  if (CLASS_WORKSPACE_PATH.test(normalized) && parsed.search === '' && parsed.hash === '')
-    return normalized;
+  if (BLOCKED_RETURN_PATHS.has(normalized)) return null;
+  if (normalized === '/admin/ops') {
+    const tabs = new Set(['schools', 'people', 'merchants', 'affiliation', 'audit']);
+    const queryTabs = parsed.searchParams.getAll('tab');
+    const hashTab = parsed.hash.slice(1);
+    if (queryTabs.length > 1 || queryTabs.some((tab) => !tabs.has(tab)) ||
+      (parsed.hash && !tabs.has(hashTab)) ||
+      (queryTabs[0] && hashTab && queryTabs[0] !== hashTab)) return null;
+  }
   const allowed =
     normalized === '/' ||
     ALLOWED_RETURN_PATHS.has(normalized) ||
+    /^\/events\/[^/]+$/u.test(normalized) ||
     ALLOWED_RETURN_PREFIXES.some((prefix) => normalized === prefix || normalized.startsWith(`${prefix}/`));
-  if (!allowed) return '/';
-  const suffix = opsReturnSuffix(normalized, parsed.searchParams, parsed.hash);
-  if (suffix === null) return parsed.search || parsed.hash ? '/' : normalized;
-  return `${normalized}${suffix}`;
+  if (!allowed) return null;
+  const context = new URLSearchParams();
+  for (const [key, value] of parsed.searchParams) {
+    if (RETURN_CONTEXT_KEYS.has(key) && !context.has(key) && !hasUnsafeReturnCharacters(value)) {
+      context.set(key, value);
+    }
+  }
+  const query = context.toString();
+  return `${normalized}${query ? `?${query}` : ''}${returnFragment(parsed.hash)}`;
 }
 
-export function readReturnPath(search: string | { get(name: string): string | null }): string {
-  const params =
-    typeof search === 'string'
-      ? new URLSearchParams(search.startsWith('?') ? search.slice(1) : search)
-      : search;
+export function sanitizeReturnPath(value: string | null | undefined): string {
+  const destination = allowedReturnPath(value);
+  if (!destination) return '/';
+  const parsed = new URL(destination, 'https://nuni.invalid');
+  // Retained legacy pages keep their existing path-only return policy.
+  if (isLegacyAccountPath(parsed.pathname)) return parsed.hash ? '/' : parsed.pathname;
+  return destination;
+}
+
+type ReturnSearch = string | { get(name: string): string | null };
+
+function returnSearchParams(search: ReturnSearch): { get(name: string): string | null } {
+  return typeof search === 'string'
+    ? new URLSearchParams(search.startsWith('?') ? search.slice(1) : search)
+    : search;
+}
+
+export function readReturnPath(search: ReturnSearch): string {
+  const params = returnSearchParams(search);
   return sanitizeReturnPath(params.get('returnUrl') ?? params.get('next'));
+}
+
+function isLegacyAccountPath(pathname: string): boolean {
+  return pathname === '/auth/platform' ||
+    pathname.startsWith('/auth/platform/') ||
+    pathname === '/privacy/deletion-status';
+}
+
+/** Keep Campus One task context out of legacy callbacks that discard it. */
+export function campusOneLoginHref(search: ReturnSearch): string | null {
+  const params = returnSearchParams(search);
+  const destination = allowedReturnPath(params.get('returnUrl') ?? params.get('next'));
+  if (!destination) return null;
+  const parsed = new URL(destination, 'https://nuni.invalid');
+  if (
+    isLegacyAccountPath(parsed.pathname) ||
+    (!parsed.search && !parsed.hash && LEGACY_SIMPLE_RETURN_PATHS.has(parsed.pathname))
+  ) return null;
+  return loginHref(
+    destination,
+    params.get('reconnect') === 'school' ? { reconnect: 'school' } : undefined,
+  );
 }
 
 function bytesToBase64Url(bytes: Uint8Array): string {

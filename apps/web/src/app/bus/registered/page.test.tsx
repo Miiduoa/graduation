@@ -51,9 +51,46 @@ it('shows that realtime arrivals are not enabled instead of a retryable failure'
   render(<BusPage />);
   expect(await screen.findByText(/即時到站查詢尚未啟用/)).toBeTruthy();
   expect(screen.queryByText(/請重新查詢/)).toBeNull();
-  expect(
-    (screen.getByRole('button', { name: '更新到站資訊' }) as HTMLButtonElement).disabled,
-  ).toBe(true);
+  expect((screen.getByRole('button', { name: '更新到站資訊' }) as HTMLButtonElement).disabled).toBe(
+    true,
+  );
+});
+
+it('offers login and public arrivals while pausing unauthorized polling', async () => {
+  vi.useFakeTimers();
+  vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('visible');
+  vi.mocked(loadBusArrivals).mockResolvedValue({
+    status: 'login-required',
+    arrivals: [],
+    fetchedAt: null,
+  });
+  await act(async () => {
+    render(<BusPage />);
+  });
+  expect(screen.getByText(/此站點的到站查詢需要登入/)).toBeTruthy();
+  expect(screen.queryByText(/無法連線/)).toBeNull();
+  expect(screen.getByRole('link', { name: '登入後查詢' }).getAttribute('href')).toBe(
+    '/login?returnUrl=%2Fbus%2Fregistered%3FschoolId%3Dpu',
+  );
+  expect(screen.getByRole('link', { name: '查看公開站牌' }).getAttribute('href')).toBe(
+    '/bus?campus=pu',
+  );
+  const calls = vi.mocked(loadBusArrivals).mock.calls.length;
+  await act(async () => {
+    vi.advanceTimersByTime(60_000);
+    document.dispatchEvent(new Event('visibilitychange'));
+  });
+  expect(loadBusArrivals).toHaveBeenCalledTimes(calls);
+  vi.mocked(loadBusArrivals).mockResolvedValue({
+    status: 'unavailable',
+    arrivals: [],
+    fetchedAt: null,
+  });
+  await act(async () => {
+    fireEvent.click(screen.getByRole('button', { name: '更新到站資訊' }));
+  });
+  expect(screen.queryByText(/此站點的到站查詢需要登入/)).toBeNull();
+  expect(loadBusArrivals).toHaveBeenCalledTimes(calls + 1);
 });
 
 it('offers the official service without inventing an arrival when realtime data is unavailable', async () => {

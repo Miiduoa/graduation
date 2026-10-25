@@ -9,7 +9,7 @@ import json
 import os
 import re
 from pathlib import Path
-from urllib.parse import parse_qs, urlparse
+from urllib.parse import parse_qs, urlencode, urlparse
 
 from playwright.async_api import async_playwright, expect
 
@@ -31,14 +31,16 @@ def session_fixtures(authenticated, operator=False):
                 {'id': 'nthu', 'name': '國立清華大學', 'status': 'not-open'},
             ]})
         elif url.path in ('/api/nuni/session', '/auth/session'):
-            payload = {'authenticated': authenticated}
-            if authenticated:
-                payload.update({
-                    'platformAccountId': 'pa_11111111-1111-4111-8111-111111111111',
-                    'context': 'a' * 43,
+            await route.fulfill(json={
+                'authenticated': authenticated,
+                # Match the browser session parser with a synthetic principal,
+                # unprivileged by default. These fixtures never authenticate a server request.
+                **({
+                    'platformAccountId': 'pa_00000000-0000-4000-8000-000000000001',
                     'isPlatformOperator': operator,
-                })
-            await route.fulfill(json=payload)
+                    'context': 'a' * 43,
+                } if authenticated else {}),
+            })
         elif url.path == '/auth/platform/providers':
             await route.fulfill(json={'kinds': ['google-consumer']})
         elif url.path.startswith('/api/transit'):
@@ -130,6 +132,31 @@ async def goto_path(page, path):
     await page.goto(BASE + path, wait_until='load')
 
 
+async def follow_account_return(page, target, expected_target=None):
+    destination = target if expected_target is None else expected_target
+    expected = urlparse(destination)
+    await page.goto(
+        BASE + '/auth/account?' + urlencode({'returnUrl': target}),
+        wait_until='domcontentloaded',
+    )
+    await page.wait_for_url(lambda value: urlparse(value).path == '/login')
+    handoff = urlparse(page.url)
+    assert parse_qs(handoff.query, keep_blank_values=True) == {
+        'returnUrl': [destination],
+    }, page.url
+    assert not handoff.fragment, page.url
+    await no_overflow(page)
+    action = page.get_by_role('link', name='繼續使用', exact=True)
+    await expect(action).to_have_attribute('href', destination)
+    await action.click()
+    await page.wait_for_url(lambda value: urlparse(value).path == expected.path)
+    actual = urlparse(page.url)
+    assert parse_qs(actual.query, keep_blank_values=True) == parse_qs(
+        expected.query, keep_blank_values=True
+    ), page.url
+    assert actual.fragment == expected.fragment, page.url
+
+
 async def check_unsigned_account_entry(page):
     await expect(page.get_by_role('heading', name='登入', exact=True)).to_be_visible()
     await expect(page.get_by_text('請用學校核發的帳號登入。', exact=True)).to_be_visible()
@@ -147,9 +174,52 @@ async def check_unsigned_account_entry(page):
     await expect(footer.get_by_role('link', name='帳號刪除／停用')).to_have_attribute(
         'href', '/account-deletion'
     )
+    assert await footer.evaluate('''nav => {
+        const rgb = value => value.match(/[\\d.]+/g).slice(0, 3).map(Number);
+        const luminance = values => values.map(value => {
+            const component = value / 255;
+            return component <= 0.04045
+                ? component / 12.92
+                : ((component + 0.055) / 1.055) ** 2.4;
+        }).reduce((sum, value, index) => sum + value * [0.2126, 0.7152, 0.0722][index], 0);
+        const background = rgb(getComputedStyle(nav.closest('footer')).backgroundColor);
+        const backgroundLight = luminance(background);
+        return [...nav.querySelectorAll('a')].every(link => {
+            const style = getComputedStyle(link);
+            const opacity = Number(style.opacity);
+            const foreground = rgb(style.color).map(
+                (value, index) => value * opacity + background[index] * (1 - opacity)
+            );
+            const foregroundLight = luminance(foreground);
+            return (Math.max(foregroundLight, backgroundLight) + 0.05)
+                / (Math.min(foregroundLight, backgroundLight) + 0.05) >= 4.5;
+        });
+    }'''), 'Account footer links must remain readable in the current theme'
     for copy in OLD_ACCOUNT_COPY:
         await expect(page.get_by_text(copy, exact=True)).to_have_count(0)
     await expect(page.get_by_role('article')).to_have_count(0)
+
+
+async def check_account_footer_contrast(page):
+    footer = page.get_by_role('navigation', name='公開資訊')
+    for link in await footer.get_by_role('link').all():
+        await expect(link).to_be_visible()
+        contrast = await link.evaluate('''link => {
+            const channels = color => color.match(/[\\d.]+/g).map(Number);
+            const background = channels(getComputedStyle(link.closest('footer')).backgroundColor);
+            const style = getComputedStyle(link);
+            const foreground = channels(style.color);
+            const alpha = (foreground[3] ?? 1) * Number(style.opacity);
+            const rendered = foreground.slice(0, 3).map((value, index) =>
+                value * alpha + background[index] * (1 - alpha));
+            const luminance = color => color.slice(0, 3).map(value => {
+                const channel = value / 255;
+                return channel <= 0.04045 ? channel / 12.92 : ((channel + 0.055) / 1.055) ** 2.4;
+            }).reduce((total, value, index) => total + value * [0.2126, 0.7152, 0.0722][index], 0);
+            const a = luminance(rendered), b = luminance(background);
+            return (Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05);
+        }''')
+        assert contrast >= 4.5, f'Account footer link contrast is only {contrast:.2f}:1'
 
 
 async def check_unsigned_today(page):
@@ -158,7 +228,18 @@ async def check_unsigned_today(page):
     await expect(today.get_by_test_id('today-skeleton')).to_have_count(0)
     await expect(today.get_by_role('heading', name='今天', exact=True)).to_be_visible()
     await expect(today.locator('header p').first).to_have_text(TODAY_DATE)
-    await expect(page.get_by_text(UNSIGNED_TODAY, exact=True)).to_have_count(2)
+    await expect(page.get_by_text(UNSIGNED_TODAY, exact=True)).to_have_count(1)
+    await expect(today.get_by_role('heading', name='先把課表放進來。', exact=True)).to_be_visible()
+    await expect(today.get_by_role('link', name='匯入我的課表', exact=True)).to_have_attribute(
+        'href', '/import?kind=timetable&campus=pu'
+    )
+    await expect(today.get_by_role('link', name='手動建立課表')).to_have_attribute(
+        'href', '/timetable?campus=pu'
+    )
+    quick_services = today.get_by_role('navigation', name='常用校園服務')
+    await expect(quick_services.get_by_role('link')).to_have_count(4)
+    for link in await quick_services.get_by_role('link').all():
+        assert parse_qs(urlparse(await link.get_attribute('href')).query).get('campus') == ['pu']
     await expect(page.get_by_role('link', name='登入', exact=True)).to_be_visible()
     await expect(today.get_by_role('heading', name='今天課表', exact=True)).to_be_visible()
     await expect(today.get_by_text('還沒有課表。', exact=True)).to_be_visible()
@@ -177,6 +258,54 @@ async def check_oled(page):
     assert await page.locator('meta[name="theme-color"]').evaluate_all(
         'metas => metas.length > 0 && metas.every(meta => meta.content === "#000000")'
     ), 'Browser chrome does not match the OLED theme'
+
+
+async def check_home_font_preference(page):
+    """Measure rendered content after changing text size through settings."""
+    viewport = page.viewport_size
+    sizes = {}
+    try:
+        for preference, label in [('medium', '中'), ('large', '大')]:
+            await goto_path(page, '/settings?campus=pu&section=appearance')
+            option = page.get_by_role('group', name='字級', exact=True).get_by_role(
+                'button', name=label, exact=True
+            )
+            await option.click()
+            await expect(option).to_have_attribute('aria-pressed', 'true')
+            await page.wait_for_function('''preference => {
+                const stored = JSON.parse(localStorage.getItem('campus-web-preferences') || '{}');
+                return stored.appearance?.fontSize === preference;
+            }''', arg=preference)
+            await goto_path(page, '/?campus=pu')
+            await check_unsigned_today(page)
+            today = page.get_by_test_id('student-today')
+            welcome = page.get_by_role('region', name='先把課表放進來。', exact=True)
+            elements = {
+                'welcome title': welcome.get_by_role('heading', name='先把課表放進來。', exact=True),
+                'welcome body': welcome.locator('p').first,
+                'welcome action': welcome.get_by_role('link', name='匯入我的課表', exact=True),
+                'page title': today.get_by_role('heading', name='今天', exact=True),
+                'section title': today.get_by_role('heading', name='今天課表', exact=True),
+                'empty state': today.get_by_text('還沒有課表。', exact=True),
+            }
+            sizes[preference] = {}
+            for width in [320, 768, 1440]:
+                await page.set_viewport_size({'width': width, 'height': 844 if width <= 768 else 1000})
+                await no_overflow(page)
+                sizes[preference][width] = {
+                    name: await element.evaluate('el => parseFloat(getComputedStyle(el).fontSize)')
+                    for name, element in elements.items()
+                }
+        for width, normal_sizes in sizes['medium'].items():
+            for name, normal_size in normal_sizes.items():
+                large_size = sizes['large'][width][name]
+                assert large_size > normal_size, (
+                    f'{name} ignores the large-text preference at {width}px: '
+                    f'{normal_size}px -> {large_size}px'
+                )
+    finally:
+        await page.set_viewport_size(viewport)
+    return sizes
 
 
 async def check_task_text_scaling(page):
@@ -279,6 +408,7 @@ async def main():
         )
         await context.route('**/*', fixtures)
         page = await context.new_page()
+        active_page = page
         page.set_default_timeout(10000)
         page.on('pageerror', lambda error: errors.append(str(error)))
         try:
@@ -440,10 +570,12 @@ async def main():
 
             await page.emulate_media(color_scheme='dark')
             await page.evaluate('''() => localStorage.setItem('campus-web-preferences', JSON.stringify({
-                appearance: {theme: 'light', fontSize: 'large', animations: false}
+                appearance: {theme: 'light', fontSize: 'medium', animations: false}
             }))''')
             await page.set_viewport_size({'width': 320, 'height': 844})
             await goto_path(page, '/?campus=pu')
+            await check_home_font_preference(page)
+            results.append('home titles, copy and actions grow with the large-text preference at 320/768/1440px')
             await expect(page.locator('html')).to_have_attribute('data-reduced-motion', 'true')
             assert await page.locator('body').evaluate(
                 'el => getComputedStyle(el).backgroundColor === "rgb(248, 247, 243)"'
@@ -478,6 +610,22 @@ async def main():
                 animations='disabled',
             )
             results.append('unsigned account entry keeps existing actions without demo copy')
+
+            await check_account_footer_contrast(page)
+            await page.emulate_media(color_scheme='dark')
+            await goto_path(page, '/auth/account')
+            await check_unsigned_account_entry(page)
+            await check_oled(page)
+            await check_account_footer_contrast(page)
+            await no_overflow(page)
+            await page.screenshot(
+                path=str(OUT / 'auth-account-oled-mobile.png'),
+                animations='disabled',
+            )
+            await page.emulate_media(color_scheme='light')
+            await goto_path(page, '/auth/account')
+            await check_unsigned_account_entry(page)
+            results.append('account footer links remain readable in light and OLED themes')
 
             await page.set_viewport_size({'width': 390, 'height': 844})
             await page.get_by_role('button', name='尋找學校').click()
@@ -553,14 +701,37 @@ async def main():
             )
             await signed.route('**/*', session_fixtures(True))
             signed_page = await signed.new_page()
+            active_page = signed_page
             signed_page.set_default_timeout(10000)
+            signed_page.on('pageerror', lambda error: errors.append(str(error)))
             await signed_page.goto(BASE + '/auth/account?returnUrl=/life', wait_until='domcontentloaded')
             await signed_page.wait_for_url(re.compile(r'https?://[^/]+/life(?:\?.*)?$'))
             assert urlparse(signed_page.url).path == '/life'
+            return_path = '/life?campus=pu#life-service-results'
+            await follow_account_return(signed_page, return_path)
+            assert parse_qs(urlparse(signed_page.url).query).get('campus') == ['pu']
+            assert urlparse(signed_page.url).fragment == 'life-service-results'
             await signed_page.goto(BASE + '/auth/account?returnUrl=/staff', wait_until='domcontentloaded')
             await signed_page.wait_for_url(re.compile(r'https?://[^/]+/?(\?.*)?$'))
             assert urlparse(signed_page.url).path == '/'
-            await signed.close()
+            results.append('signed-in account visits preserve campus and anchor on allowed return paths')
+
+            for target in [
+                '/grades?tab=feedback&schoolId=nthu&campus=nthu',
+                '/settings?section=appearance&campus=nthu#reading',
+                '/school-info?campus=pu',
+                '/events?campus=nthu',
+            ]:
+                await follow_account_return(signed_page, target)
+                await no_overflow(signed_page)
+            results.append('account return navigation preserves campus, tabs and settings position')
+            await follow_account_return(
+                signed_page,
+                '/grades?tab=feedback&campus=nthu&token=discard-me&session=discard-me&next=%2Fstaff#recent',
+                '/grades?tab=feedback&campus=nthu#recent',
+            )
+            await no_overflow(signed_page)
+            results.append('account return navigation drops auth payloads and nested redirects')
             results.append('signed-in account visits follow allowed return paths')
 
             async def capture_platform(name, operator):
@@ -606,9 +777,12 @@ async def main():
             await capture_platform('operator', True)
             results.append('platform pages captured for unsigned, member and operator states')
             assert not errors, errors
+            await signed.close()
         except Exception:
-            await page.screenshot(path=str(OUT / 'failure.png'), full_page=True, animations='disabled')
-            (OUT / 'failure-dom.txt').write_text(await page.locator('body').aria_snapshot(), encoding='utf-8')
+            diagnostic_page = page if active_page.is_closed() else active_page
+            (OUT / 'failure-url.txt').write_text(diagnostic_page.url, encoding='utf-8')
+            await diagnostic_page.screenshot(path=str(OUT / 'failure.png'), full_page=True, animations='disabled')
+            (OUT / 'failure-dom.txt').write_text(await diagnostic_page.locator('body').aria_snapshot(), encoding='utf-8')
             raise
         finally:
             (OUT / 'results.json').write_text(json.dumps({

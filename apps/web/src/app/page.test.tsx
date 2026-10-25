@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, render, screen, waitFor } from '@testing-library/react';
 import { renderToString } from 'react-dom/server';
 import { hydrateRoot, type Root } from 'react-dom/client';
 import { beforeEach, expect, it, vi } from 'vitest';
@@ -196,9 +196,11 @@ it('uses the Nuni account for home and links directly to pending work', async ()
   render(<HomePage />);
   expect(await screen.findByRole('heading', { name: '我的身分' })).toBeTruthy();
   const taskLinks = await screen.findAllByRole('link', { name: /週五提案/ });
-  expect(taskLinks.some((link) => link.getAttribute('href') === '/classroom/course/design#assignment-draft')).toBe(
-    true,
-  );
+  expect(
+    taskLinks.some(
+      (link) => link.getAttribute('href') === '/classroom/course/design#assignment-draft',
+    ),
+  ).toBe(true);
   expect(loadHomeData).not.toHaveBeenCalled();
   expect(screen.getAllByText(/已逾期 \d+ 天/).length).toBeGreaterThan(0);
 });
@@ -296,6 +298,29 @@ it('removes a loaded overview when refreshing discovers revoked access', async (
   expect(screen.queryByText(TODAY_COPY.emptyDay)).toBeNull();
 });
 
+it('keeps confirmed work visible while the same account refreshes in the background', async () => {
+  let finishRefresh!: (value: HomeData) => void;
+  vi.mocked(loadHomeData)
+    .mockResolvedValueOnce(data('資料結構'))
+    .mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          finishRefresh = resolve;
+        }),
+    );
+  render(<HomePage />);
+  expect((await screen.findAllByText('資料結構 作業')).length).toBeGreaterThan(0);
+  await act(async () => window.dispatchEvent(new Event('pageshow')));
+  expect(loadHomeData).toHaveBeenCalledTimes(2);
+  expect(screen.getAllByText('資料結構 作業').length).toBeGreaterThan(0);
+  expect(screen.queryByTestId('today-skeleton')).toBeNull();
+  expect(screen.getByRole('status').textContent).toBe('正在更新課程待辦…');
+  await act(async () => finishRefresh(data('新作業')));
+  expect(screen.getAllByText('新作業 作業').length).toBeGreaterThan(0);
+  await waitFor(() => expect(screen.queryByText('資料結構 作業')).toBeNull());
+  expect(screen.queryByText('正在更新課程待辦…')).toBeNull();
+});
+
 it('keeps the session error visible when the course session is unavailable', () => {
   state.uid = null;
   state.sessionError = '無法確認登入狀態';
@@ -313,6 +338,54 @@ it('lets a guest browse before signing in and never loads personal courses', () 
   expect(screen.queryByText(SENSE_EMPTY_TEXT)).toBeNull();
   expect(screen.queryByRole('heading', { name: SENSE_SECTION_TITLE })).toBeNull();
 });
+
+it('keeps all-campuses navigation out of the private personal-storage namespace', () => {
+  state.uid = null;
+  state.selectedSchoolId = null;
+  state.timetable.schoolId = 'personal';
+  state.importScope = {
+    loading: false,
+    scope: { owner: 'guest', schoolId: 'personal' },
+    scopeKey: 'guest:personal',
+  };
+  render(<HomePage />);
+  const destinations = screen
+    .getAllByRole('link')
+    .map((link) => new URL(link.getAttribute('href')!, 'https://campus.example'));
+  for (const destination of destinations) {
+    expect(destination.searchParams.get('campus')).not.toBe('personal');
+  }
+  const map = destinations.find((destination) => destination.pathname === '/map');
+  expect(map?.searchParams.get('campus')).toBe('all');
+  const timetable = destinations.find((destination) => destination.pathname === '/timetable');
+  expect(timetable?.searchParams.get('campus')).toBe('all');
+  expect(screen.queryByText(TODAY_COPY.emptyDay)).toBeNull();
+});
+
+it.each([
+  ['grades', 'pu'],
+  ['events', 'pu'],
+  ['timetable', 'nthu'],
+])(
+  'does not treat imported %s records from %s as the current campus timetable',
+  (kind, schoolId) => {
+    state.uid = null;
+    state.timetable.imported.records = [
+      {
+        id: 'record-1',
+        kind,
+        schoolId,
+        title: '另一份資料',
+        academicYear: '115',
+        semester: '1',
+      },
+    ];
+    render(<HomePage />);
+    expect(screen.getByRole('heading', { name: '先把課表放進來。' })).toBeTruthy();
+    expect(screen.queryByRole('heading', { name: '課表準備好了。' })).toBeNull();
+    expect(screen.getByText(TODAY_COPY.noTimetable)).toBeTruthy();
+  },
+);
 
 it('revalidates an expired course session before retrying with the new account context', async () => {
   state.uid = null;
@@ -333,12 +406,16 @@ it('looks up the school role from the selected school instead of always using pu
   state.schoolRole = 'teacher';
   vi.mocked(loadHomeData).mockResolvedValue(data('資料結構', { tasks: [] }));
   const view = render(<HomePage />);
-  expect(state.schoolRoleCalls.some((call) => call[0] === 'alice' && call[1] === 'nthu')).toBe(true);
+  expect(state.schoolRoleCalls.some((call) => call[0] === 'alice' && call[1] === 'nthu')).toBe(
+    true,
+  );
   expect(await screen.findByRole('link', { name: /老師工作台/ })).toBeTruthy();
   state.selectedSchoolId = 'ncku';
   state.schoolRole = null;
   view.rerender(<HomePage />);
-  expect(state.schoolRoleCalls.some((call) => call[0] === 'alice' && call[1] === 'ncku')).toBe(true);
+  expect(state.schoolRoleCalls.some((call) => call[0] === 'alice' && call[1] === 'ncku')).toBe(
+    true,
+  );
   expect(screen.queryByRole('link', { name: /老師工作台/ })).toBeNull();
   state.selectedSchoolId = null;
   view.rerender(<HomePage />);

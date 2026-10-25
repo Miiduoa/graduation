@@ -2,8 +2,10 @@
 
 import { Suspense, useCallback, useEffect, useRef, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
+import Link from 'next/link';
 import { SiteShell } from '@/components/SiteShell';
 import { useCampusBrowseContext } from '@/lib/useCampusBrowseContext';
+import { loginHref } from '@/lib/navigation';
 import {
   BUS_FRESHNESS_MS,
   TAICHUNG_BUS_URL,
@@ -28,6 +30,7 @@ function Arrivals({
   const [data, setData] = useState<BusArrivals | null>(null);
   const [loading, setLoading] = useState(true);
   const generation = useRef(0);
+  const pollingBlocked = useRef(false);
   const cancelRequests = useCallback(() => {
     generation.current += 1;
   }, []);
@@ -35,6 +38,7 @@ function Arrivals({
     const current = ++generation.current;
     const next = await loadBusArrivals({ schoolId, stopId, city });
     if (current !== generation.current) return;
+    pollingBlocked.current = next.status === 'login-required' || next.status === 'unconfigured';
     setData(next);
     setLoading(false);
   }, [schoolId, stopId, city]);
@@ -42,10 +46,10 @@ function Arrivals({
   useEffect(() => {
     void refresh();
     const timer = setInterval(() => {
-      if (document.visibilityState === 'visible') void refresh();
+      if (!pollingBlocked.current && document.visibilityState === 'visible') void refresh();
     }, 30_000);
     const visible = () => {
-      if (document.visibilityState === 'visible') void refresh();
+      if (!pollingBlocked.current && document.visibilityState === 'visible') void refresh();
     };
     document.addEventListener('visibilitychange', visible);
     return () => {
@@ -88,6 +92,22 @@ function Arrivals({
         <p role="status" className={styles.empty}>
           即時到站查詢尚未啟用，請使用官方公車網站。
         </p>
+      )}
+      {data?.status === 'login-required' && (
+        <div role="status" className={styles.empty}>
+          <p>此站點的到站查詢需要登入。你也可以直接使用公開站牌查詢。</p>
+          <div className={styles.focusActions}>
+            <Link
+              className={styles.primary}
+              href={loginHref(`/bus/registered?schoolId=${encodeURIComponent(schoolId)}`)}
+            >
+              登入後查詢
+            </Link>
+            <Link className={styles.secondary} href={`/bus?campus=${encodeURIComponent(schoolId)}`}>
+              查看公開站牌
+            </Link>
+          </div>
+        </div>
       )}
       {data?.status === 'error' && (
         <p role="alert" className={styles.notice}>

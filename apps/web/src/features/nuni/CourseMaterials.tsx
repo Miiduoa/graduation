@@ -275,7 +275,7 @@ function Materials({
         </button>
       </div>
       <p className={shared.muted}>
-        依週次或單元分組。類型從連結副檔名判斷；大小未寫在教材資料裡時會明說，不會假裝有檔案容量。
+        依週次或單元整理教材，可搜尋名稱與內容。
       </p>
       {workspace.state === 'archived' && (
         <p className={styles.note}>課程已封存，教材保留供成員閱讀。</p>

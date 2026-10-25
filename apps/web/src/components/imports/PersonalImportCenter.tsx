@@ -54,6 +54,7 @@ import {
   type PersonalImportDraft,
 } from '@/lib/personalImportDrafts';
 import { recognizePersonalImportImage } from '@/lib/personalImportOcr';
+import { createPersonalImportImagePreview } from '@/lib/personalImportImagePreview';
 import styles from './PersonalImport.module.css';
 import { CourseAccessPanel } from './CourseAccessPanel';
 import { DocumentSelection } from './DocumentSelection';
@@ -380,7 +381,8 @@ function ImportWorkspace({
   const [backup, setBackup] = useState<Omit<PersonalImportBackupPreview, 'rows'> | null>(null);
   const [importDocument, setDocument] = useState<PersonalImportDocument | null>(null);
   const [hasDocumentFile, setHasDocumentFile] = useState(false);
-  const [documentSelection, setDocumentSelection] = useState<PersonalImportDraft['documentSelection']>(null);
+  const [documentSelection, setDocumentSelection] =
+    useState<PersonalImportDraft['documentSelection']>(null);
   const [documentVersion, setDocumentVersion] = useState(0);
   const [reviewPage, setReviewPage] = useState(0);
   const [excluded, setExcluded] = useState<string[]>([]);
@@ -389,7 +391,7 @@ function ImportWorkspace({
   const [progress, setProgress] = useState('');
   const [reading, setReading] = useState(false);
   const [saving, setSaving] = useState(false);
-  const [preview, setPreview] = useState('');
+  const [preview, setPreviewState] = useState('');
   const [workspaces, setWorkspaces] = useState<NuniWorkspace[]>([]);
   const [linkRefreshVersion, setLinkRefreshVersion] = useState(0);
   const [linkStatus, setLinkStatus] = useState('');
@@ -407,11 +409,18 @@ function ImportWorkspace({
   const job = useRef<AbortController | null>(null);
   const documentFile = useRef<File | null>(null);
   const active = useRef(true);
+  const previewUrl = useRef('');
   const writing = useRef(false);
   const fileInput = useRef<HTMLInputElement>(null);
   const pdfInput = useRef<HTMLInputElement>(null);
   const review = useRef<HTMLElement>(null);
   const undoKeep = useRef<HTMLButtonElement>(null);
+  const setPreview = (url: string) => {
+    if (previewUrl.current === url) return;
+    if (previewUrl.current) URL.revokeObjectURL(previewUrl.current);
+    previewUrl.current = url;
+    if (active.current) setPreviewState(url);
+  };
   useEffect(() => {
     if (undoOpen) undoKeep.current?.focus();
   }, [undoOpen]);
@@ -436,7 +445,9 @@ function ImportWorkspace({
           '已找回這個分頁尚未匯入的草稿，請繼續核對。' +
             (draft.document
               ? '文件文字與選取內容已保留；重新辨識時請再選擇原始檔案。'
-              : draft.source.type === 'screenshot' ? '原始圖片未暫存，需開啟原圖對照。' : ''),
+              : draft.source.type === 'screenshot'
+                ? '原始圖片未暫存，需開啟原圖對照。'
+                : ''),
         );
       }
     } catch (error) {
@@ -501,9 +512,10 @@ function ImportWorkspace({
   }, [draftStorageError, text, rows.length, importDocument]);
   useEffect(
     () => () => {
-      if (preview) URL.revokeObjectURL(preview);
+      if (previewUrl.current) URL.revokeObjectURL(previewUrl.current);
+      previewUrl.current = '';
     },
-    [preview],
+    [],
   );
   useEffect(() => {
     let current = true;
@@ -602,6 +614,14 @@ function ImportWorkspace({
       type: image ? ('screenshot' as const) : ('file' as const),
       name: file.name,
     };
+    let pendingPreview = '';
+    const discardPendingPreview = () => {
+      if (pendingPreview && previewUrl.current === pendingPreview) setPreview('');
+      pendingPreview = '';
+    };
+    const currentRead = () =>
+      active.current && !suspended.current && !controller.signal.aborted && job.current === controller;
+    controller.signal.addEventListener('abort', discardPendingPreview, { once: true });
     try {
       if (/\.(pdf|xlsx)$/i.test(file.name)) {
         setProgress(
@@ -647,7 +667,15 @@ function ImportWorkspace({
       }
       let input: string;
       if (image) {
-        setPreview(URL.createObjectURL(file));
+        const png = await createPersonalImportImagePreview(file, controller.signal);
+        if (!currentRead()) return;
+        const url = URL.createObjectURL(png);
+        if (!currentRead()) {
+          URL.revokeObjectURL(url);
+          return;
+        }
+        pendingPreview = url;
+        setPreview(url);
         input = await recognizePersonalImportImage(file, controller.signal, setProgress);
       } else {
         if (!/\.(csv|tsv|txt|ics)$/i.test(file.name))
@@ -657,14 +685,20 @@ function ImportWorkspace({
         if (file.size > 400_000) throw new Error('文字檔超過 400 KB，請分成較小的檔案再匯入。');
         input = await file.text();
       }
-      if (!active.current || controller.signal.aborted) return;
+      if (!currentRead()) {
+        discardPendingPreview();
+        return;
+      }
       setText(input);
       setSource(nextSource);
       parse(input, nextSource);
+      pendingPreview = '';
     } catch (error) {
+      discardPendingPreview();
       if (active.current && !controller.signal.aborted)
         setNotice(errorMessage(error, image ? PERSONAL_IMPORT_IMAGE_UNREADABLE : undefined));
     } finally {
+      controller.signal.removeEventListener('abort', discardPendingPreview);
       if (active.current && job.current === controller) {
         setReading(false);
         setProgress('');
@@ -721,6 +755,15 @@ function ImportWorkspace({
         { restoreBackup: !!backup },
       );
       if (!active.current) return;
+      // Finish the draft before announcing success; the next effect may not run
+      // if the user leaves immediately. A damaged, unreadable draft stays protected.
+      if (!draftReadFailed) {
+        try {
+          clearPersonalImportDraft(scope);
+        } catch (error) {
+          setDraftStorageError(errorMessage(error));
+        }
+      }
       setNotice(
         personalImportSavedNotice(result.added, readPersonalImportSyncState(scope).enabled),
       );
@@ -1046,9 +1089,11 @@ function ImportWorkspace({
               <button
                 type="button"
                 className="btn"
-                onClick={() => documentFile.current
-                  ? void readFile(documentFile.current, 'ocr')
-                  : pdfInput.current?.click()}
+                onClick={() =>
+                  documentFile.current
+                    ? void readFile(documentFile.current, 'ocr')
+                    : pdfInput.current?.click()
+                }
               >
                 重新辨識 PDF 整頁
               </button>

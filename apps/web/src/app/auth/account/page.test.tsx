@@ -1,9 +1,24 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
+import { NuniSignIn } from '@/components/NuniSignIn';
 import AccountPage from './page';
 
 const fetchMock = vi.fn<typeof fetch>();
 const search = { current: new URLSearchParams() };
+const platform = vi.hoisted(() => ({
+  session: null as null | { platformAccountId: string },
+  loading: false,
+  pendingLogout: false,
+  error: '',
+  refresh: vi.fn(),
+  logout: vi.fn(),
+  request: vi.fn(),
+}));
+
+vi.mock('@/features/nuni/Session', () => ({
+  useNuniSession: () => platform,
+  browserRequest: platform.request,
+}));
 
 vi.mock('next/navigation', () => ({
   useSearchParams: () => search.current,
@@ -17,6 +32,8 @@ beforeEach(() => {
   vi.stubGlobal('fetch', fetchMock);
   fetchMock.mockReset();
   search.current = new URLSearchParams();
+  platform.session = null;
+  platform.request.mockReset().mockResolvedValue({ google: true });
   sessionStorage.clear();
   fetchMock.mockImplementation(async (input) => {
     const url = String(input);
@@ -192,10 +209,21 @@ it('opens an in-page school lookup from 尋找學校 and searches by school name
   expect(fetchMock.mock.calls.some(([, init]) => init?.method === 'POST')).toBe(false);
 });
 
-it('sends a signed-in visitor to the allowed return path without showing the form', async () => {
+it.each([
+  '/life',
+  '/grades?tab=feedback&campus=pu',
+  '/course/cs101?schoolId=pu#assignment-hw-3',
+  '/events/open-day?schoolId=nchu&source=campus',
+  '/grades?tab=feedback&schoolId=nthu&campus=nthu#feedback',
+  '/settings?section=appearance&campus=nthu',
+  '/events/evt-1?schoolId=pu&campus=pu&source=school-club-events#registration',
+  '/school-info?campus=ncku#contact',
+  '/admin/ops#people',
+  '/admin/school-review#pending',
+])('sends a signed-in visitor back to %s without losing task context', async (returnPath) => {
   const replace = vi.fn();
   vi.stubGlobal('location', { ...window.location, replace, origin: 'https://nuni.tw' });
-  search.current = new URLSearchParams('returnUrl=/life');
+  search.current = new URLSearchParams({ returnUrl: returnPath });
   fetchMock.mockImplementation(async (input) => {
     const url = String(input);
     if (url === '/api/nuni/session') {
@@ -209,9 +237,81 @@ it('sends a signed-in visitor to the allowed return path without showing the for
       headers: { 'Content-Type': 'application/json' },
     });
   });
-  render(<AccountPage />);
-  await waitFor(() => expect(replace).toHaveBeenCalledWith('/life'));
+  const entry = render(<AccountPage />);
+  await waitFor(() => expect(replace).toHaveBeenCalledOnce());
   expect(screen.queryByRole('button', { name: '登入校園帳號' })).toBeNull();
+  if (returnPath === '/life') {
+    expect(replace).toHaveBeenCalledWith(returnPath);
+  } else {
+    const handoff = new URL(replace.mock.calls[0][0], 'https://nuni.tw');
+    expect(handoff.pathname).toBe('/login');
+    expect(handoff.searchParams.get('returnUrl')).toBe(returnPath);
+    entry.unmount();
+    platform.session = { platformAccountId: 'pa_1' };
+    render(<NuniSignIn returnUrl={handoff.searchParams.get('returnUrl')!} />);
+    expect(screen.getByRole('link', { name: '繼續使用' }).getAttribute('href')).toBe(
+      returnPath.startsWith('/course/') ? '/classroom' : returnPath,
+    );
+  }
+});
+
+it.each([
+  [false, false],
+  [true, false],
+  [false, true],
+  [true, true],
+])('preserves feedback context through the Campus One login handoff (signed in: %s, auth payload: %s)', async (signedIn, withAuthPayload) => {
+  const destination = '/grades?tab=feedback&campus=nthu&q=a%26b%3Dc#recent';
+  const replace = vi.fn();
+  vi.stubGlobal('location', { ...window.location, replace, origin: 'https://nuni.tw' });
+  search.current = new URLSearchParams({
+    returnUrl: withAuthPayload
+      ? destination.replace('#recent', '&token=private&returnUrl=%2Flogin#recent')
+      : destination,
+    next: '/timetable',
+  });
+  platform.session = signedIn ? { platformAccountId: 'pa_1' } : null;
+  fetchMock.mockResolvedValue(new Response(JSON.stringify({
+    authenticated: signedIn,
+    platformAccountId: signedIn ? 'pa_1' : undefined,
+  }), { status: 200, headers: { 'Content-Type': 'application/json' } }));
+
+  const entry = render(<AccountPage />);
+  await waitFor(() => expect(replace).toHaveBeenCalledOnce());
+  const handoff = new URL(replace.mock.calls[0][0], 'https://nuni.tw');
+  expect(handoff.pathname).toBe('/login');
+  expect(handoff.searchParams.get('returnUrl')).toBe(destination);
+  expect(screen.queryByRole('button', { name: '登入校園帳號' })).toBeNull();
+  expect(fetchMock).not.toHaveBeenCalled();
+  entry.unmount();
+
+  render(<NuniSignIn returnUrl={handoff.searchParams.get('returnUrl')!} />);
+  if (signedIn) {
+    expect(screen.getByRole('link', { name: '繼續使用' }).getAttribute('href')).toBe(destination);
+    expect(platform.request).not.toHaveBeenCalled();
+  } else {
+    const button = await screen.findByRole('button', { name: '使用 Google 帳號繼續' });
+    const action = new URL(button.closest('form')!.action);
+    expect(action.pathname).toBe('/auth/platform/start');
+    expect(action.searchParams.get('returnUrl')).toBe(destination);
+    expect(sessionStorage.getItem('campus.platform-login.transaction')).toBeNull();
+  }
+});
+
+it.each([
+  ['/auth/platform/ops?tab=review', '/auth/platform/ops'],
+  ['/auth/platform/ops?create=school#form', '/'],
+])('keeps the legacy operator destination on its existing session flow: %s', async (destination, expected) => {
+  const replace = vi.fn();
+  vi.stubGlobal('location', { ...window.location, replace, origin: 'https://nuni.tw' });
+  search.current = new URLSearchParams({ returnUrl: destination });
+  fetchMock.mockResolvedValue(new Response(JSON.stringify({ authenticated: true }), {
+    status: 200,
+    headers: { 'Content-Type': 'application/json' },
+  }));
+  render(<AccountPage />);
+  await waitFor(() => expect(replace).toHaveBeenCalledWith(expected));
+  expect(fetchMock).toHaveBeenCalledWith('/api/nuni/session', expect.anything());
 });
 
 it('drops a missing old return path when taking a signed-in visitor home', async () => {

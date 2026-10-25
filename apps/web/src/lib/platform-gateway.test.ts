@@ -295,17 +295,37 @@ it('forwards school, people, merchant and affiliation writes to the matching nun
     [
       ['school-applications', 'app-1', 'decision'],
       'https://api.nuni.tw/v1/auth/platform/school-applications/app-1/decision',
-      { decision: 'approve', reason: '資料齊全，先建檔未開放註冊。', idempotencyKey: 'school-decide-1' },
+      {
+        decision: 'approve',
+        reason: '資料齊全，先建檔未開放註冊。',
+        idempotencyKey: 'school-decide-1',
+      },
     ],
     [
-      ['schools', 'school-one', 'people'],
-      'https://api.nuni.tw/v1/auth/platform/ops/schools/school-one/people',
-      { role: 'school_admin', email: 'teacher@one.edu.tw', idempotencyKey: 'people-add-123' },
+      ['people', 'bind'],
+      'https://api.nuni.tw/v1/auth/platform/ops/people/bind',
+      {
+        tenantId: 'school-one',
+        role: 'school_admin',
+        email: 'teacher@one.edu.tw',
+        idempotencyKey: 'people-add-123',
+      },
     ],
     [
-      ['merchant-interest', 'interest-1', 'decision'],
-      'https://api.nuni.tw/v1/auth/platform/ops/merchant-interest/interest-1/decision',
+      ['merchants', 'interest', 'interest-1', 'decision'],
+      'https://api.nuni.tw/v1/auth/platform/ops/merchants/interest/interest-1/decision',
       { decision: 'approve', reason: '資料齊全，准予往下。', idempotencyKey: 'merchant-dec-1' },
+    ],
+    [
+      [
+        'merchants',
+        'applications',
+        'school-one',
+        'fma_22222222-2222-4222-8222-222222222222',
+        'decision',
+      ],
+      'https://api.nuni.tw/v1/auth/platform/ops/merchants/applications/school-one/fma_22222222-2222-4222-8222-222222222222/decision',
+      { decision: 'approve', reason: '資料齊全，准予往下。', expectedVersion: 7 },
     ],
     [
       ['class-workspace-affiliation-applications', 'aff-1', 'decision'],
@@ -327,6 +347,132 @@ it('forwards school, people, merchant and affiliation writes to the matching nun
       headers: expect.objectContaining({ 'Content-Type': 'application/json' }),
     });
   }
+});
+
+const guardedOperationPaths = [
+  'people/bind',
+  'merchants/interest/mpi_11111111-1111-4111-8111-111111111111/decision',
+  'merchants/applications/school-one/fma_22222222-2222-4222-8222-222222222222/decision',
+  'school-applications/soa_33333333-3333-4333-8333-333333333333/decision',
+  'class-workspace-affiliation-applications/cwa_44444444-4444-4444-8444-444444444444/decision',
+];
+
+it.each(guardedOperationPaths)(
+  'retains session, context, origin and live operator checks for %s',
+  async (path) => {
+    const segments = path.split('/');
+    for (const [options, status] of [
+      [{ body: {} }, 401],
+      [{ auth: true, body: {}, context: 'b'.repeat(43) }, 409],
+      [{ auth: true, body: {}, origin: 'https://evil.test' }, 403],
+    ] as const) {
+      const response = await handlePlatformAdmin(req(`platform-admin/${path}`, options), segments);
+      expect(response.status).toBe(status);
+      expect(fetcher).not.toHaveBeenCalled();
+    }
+    fetcher.mockResolvedValue(
+      json({ authenticated: true, platformAccountId: account, isPlatformOperator: false }),
+    );
+    const denied = await handlePlatformAdmin(
+      req(`platform-admin/${path}`, { auth: true, body: {} }),
+      segments,
+    );
+    expect(denied.status).toBe(403);
+    expect(fetcher).toHaveBeenCalledTimes(1);
+    expect(fetcher.mock.calls[0][0]).toMatch(/sessions\/current$/);
+  },
+);
+
+it.each([
+  'schools/school-one/people',
+  'merchant-interest/interest-1/decision',
+  'merchant-applications/application-1/decision',
+  'merchants/applications/application-1/decision',
+  'people/delete',
+])('rejects unsupported or incomplete admin aliases: %s', async (path) => {
+  operatorThen({});
+  const response = await handlePlatformAdmin(
+    req(`platform-admin/${path}`, { auth: true, body: {} }),
+    path.split('/'),
+  );
+  expect(response.status).toBe(404);
+  expect(fetcher).toHaveBeenCalledTimes(1);
+});
+
+it.each([undefined, null, 0, -1, 1.5, '7', Number.MAX_SAFE_INTEGER + 1])(
+  'requires a reviewed merchant application version before forwarding (%s)',
+  async (expectedVersion) => {
+    operatorThen({});
+    const path =
+      'merchants/applications/school-one/fma_22222222-2222-4222-8222-222222222222/decision';
+    const response = await handlePlatformAdmin(
+      req(`platform-admin/${path}`, {
+        auth: true,
+        body: { decision: 'approve', reason: '人工確認', expectedVersion },
+      }),
+      path.split('/'),
+    );
+    expect(response.status).toBe(400);
+    expect(fetcher).toHaveBeenCalledTimes(1);
+  },
+);
+
+it.each([
+  {
+    tenantId: '../other',
+    role: 'school_admin',
+    email: 'teacher@example.test',
+    idempotencyKey: 'valid-key-123',
+  },
+  {
+    tenantId: 'school-one',
+    role: 'platform_operator',
+    email: 'teacher@example.test',
+    idempotencyKey: 'valid-key-123',
+  },
+  { tenantId: 'school-one', role: 'school_admin', idempotencyKey: 'valid-key-123' },
+  {
+    tenantId: 'school-one',
+    role: 'school_admin',
+    email: 'teacher@example.test',
+    idempotencyKey: 'short',
+  },
+  {
+    tenantId: 'school-one',
+    role: 'school_admin',
+    email: 'teacher@example.test',
+    idempotencyKey: 'valid-key-123',
+    actorId: account,
+  },
+])('rejects an invalid or caller-forged people binding before upstream writes', async (input) => {
+  operatorThen({});
+  const response = await handlePlatformAdmin(
+    req('platform-admin/people/bind', { auth: true, body: input }),
+    ['people', 'bind'],
+  );
+  expect(response.status).toBe(400);
+  expect(fetcher).toHaveBeenCalledTimes(1);
+});
+
+it('does not accept a body tenant override or idempotency key for a versioned merchant application decision', async () => {
+  operatorThen({});
+  const path =
+    'merchants/applications/school-one/fma_22222222-2222-4222-8222-222222222222/decision';
+  const response = await handlePlatformAdmin(
+    req(`platform-admin/${path}`, {
+      auth: true,
+      body: {
+        decision: 'approve',
+        reason: '人工確認',
+        expectedVersion: 7,
+        tenantId: 'school-two',
+        idempotencyKey: 'wrong-contract-123',
+      },
+    }),
+    path.split('/'),
+  );
+  expect(response.status).toBe(400);
+  expect(fetcher).toHaveBeenCalledTimes(1);
 });
 
 it('does not forward operator writes when the Campus One session is missing', async () => {

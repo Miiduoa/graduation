@@ -139,7 +139,12 @@ export async function handlePlatformAdmin(request: NextRequest, segments: string
         ].includes(path) || new RegExp(`^schools/${tenant}/proxy$`).test(path);
       if (!valid) throw new NuniError(404, 'NOT_FOUND');
       return jsonResponse(
-        await platformRequest(adminUpstream(path, 'GET'), session, undefined, query(request, fields)),
+        await platformRequest(
+          adminUpstream(path, 'GET'),
+          session,
+          undefined,
+          query(request, fields),
+        ),
       );
     }
     query(request, {});
@@ -157,16 +162,44 @@ export async function handlePlatformAdmin(request: NextRequest, segments: string
       keys = ['decision', 'reason', 'expectedVersion', 'idempotencyKey'];
     else if (new RegExp(`^school-applications/${identifier}/decision$`).test(path))
       keys = ['decision', 'reason', 'idempotencyKey'];
-    else if (new RegExp(`^schools/${tenant}/people$`).test(path))
-      keys = ['role', 'email', 'personId', 'idempotencyKey'];
-    else if (new RegExp(`^merchant-interest/${identifier}/decision$`).test(path))
+    else if (path === 'people/bind')
+      keys = ['tenantId', 'role', 'email', 'personId', 'idempotencyKey'];
+    else if (new RegExp(`^merchants/interest/${identifier}/decision$`).test(path))
       keys = ['decision', 'reason', 'idempotencyKey'];
-    else if (new RegExp(`^merchant-applications/${identifier}/decision$`).test(path))
-      keys = ['decision', 'reason', 'idempotencyKey'];
-    else if (new RegExp(`^class-workspace-affiliation-applications/${identifier}/decision$`).test(path))
+    else if (new RegExp(`^merchants/applications/${tenant}/${identifier}/decision$`).test(path))
+      keys = ['decision', 'reason', 'expectedVersion'];
+    else if (
+      new RegExp(`^class-workspace-affiliation-applications/${identifier}/decision$`).test(path)
+    )
       keys = ['decision', 'reason', 'idempotencyKey'];
     else throw new NuniError(404, 'NOT_FOUND');
     onlyKeys(input, keys);
+    if (path === 'people/bind') {
+      const hasIdentity = ['email', 'personId'].some(
+        (key) =>
+          typeof input[key] === 'string' &&
+          input[key].trim().length > 0 &&
+          input[key].length <= 200,
+      );
+      if (
+        typeof input.tenantId !== 'string' ||
+        !new RegExp(`^${tenant}$`).test(input.tenantId) ||
+        (input.role !== 'school_admin' && input.role !== 'school_staff') ||
+        !hasIdentity ||
+        typeof input.idempotencyKey !== 'string' ||
+        input.idempotencyKey.length < 8 ||
+        input.idempotencyKey.length > 100
+      )
+        throw new NuniError(400, 'INVALID_INPUT');
+    }
+    if (
+      path.startsWith('merchants/applications/') &&
+      (typeof input.expectedVersion !== 'number' ||
+        !Number.isSafeInteger(input.expectedVersion) ||
+        input.expectedVersion < 1)
+    ) {
+      throw new NuniError(400, 'INVALID_INPUT');
+    }
     return jsonResponse(await platformRequest(adminUpstream(path, 'POST'), session, input));
   } catch (error) {
     return errorResponse(error);
