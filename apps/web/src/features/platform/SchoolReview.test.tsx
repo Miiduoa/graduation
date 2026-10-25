@@ -2,7 +2,6 @@ import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { StrictMode } from 'react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { SchoolReview } from './SchoolReview';
-import { APPROVE_SCHOOL_REASON, REJECT_SCHOOL_REASON } from './constants';
 
 const mocks = vi.hoisted(() => ({
   session: null as null | {
@@ -134,6 +133,11 @@ it('approves a pending application through the existing decision endpoint', asyn
   render(<SchoolReview />);
   expect(await screen.findByText('待審學校')).toBeTruthy();
   fireEvent.click(screen.getByRole('button', { name: '核准申請' }));
+  expect(fetcher.mock.calls.some(([, opts]) => opts?.method === 'POST')).toBe(false);
+  fireEvent.change(screen.getByLabelText('審核理由'), {
+    target: { value: '已核對申請人及校方資料，核准建檔' },
+  });
+  fireEvent.click(screen.getByRole('button', { name: '確定核准申請' }));
   await waitFor(() =>
     expect(
       fetcher.mock.calls.some(
@@ -148,21 +152,25 @@ it('approves a pending application through the existing decision endpoint', asyn
   expect(posted[1].headers).toMatchObject({ 'X-Campus-Session': principal.context });
   expect(JSON.parse(posted[1].body)).toMatchObject({
     decision: 'approve',
-    reason: APPROVE_SCHOOL_REASON,
+    reason: '已核對申請人及校方資料，核准建檔',
   });
 });
 
-it('rejects with the original insufficient-data reason', async () => {
+it('rejects only after the reviewer explains the reason and confirms', async () => {
   render(<SchoolReview />);
   await screen.findByText('待審學校');
   fireEvent.click(screen.getByRole('button', { name: '拒絕' }));
+  fireEvent.change(screen.getByLabelText('審核理由'), {
+    target: { value: '缺少正式校方授權與聯絡窗口證明' },
+  });
+  fireEvent.click(screen.getByRole('button', { name: '確定拒絕申請' }));
   await waitFor(() =>
     expect(fetcher.mock.calls.some(([, options]) => options?.method === 'POST')).toBe(true),
   );
   const posted = fetcher.mock.calls.find(([, options]) => options?.method === 'POST')!;
   expect(JSON.parse(posted[1].body)).toMatchObject({
     decision: 'reject',
-    reason: REJECT_SCHOOL_REASON,
+    reason: '缺少正式校方授權與聯絡窗口證明',
   });
 });
 
@@ -270,6 +278,12 @@ it.each(['核准申請', '檢查開通條件'])(
     const view = render(<SchoolReview />);
     await screen.findByText('待開放學校');
     fireEvent.click(screen.getByRole('button', { name: button }));
+    if (button === '核准申請') {
+      fireEvent.change(screen.getByLabelText('審核理由'), {
+        target: { value: '核准申請的必要審核資料已查核' },
+      });
+      fireEvent.click(screen.getByRole('button', { name: '確定核准申請' }));
+    }
     mocks.session = { ...principal, context: 'b'.repeat(43) };
     view.rerender(<SchoolReview />);
     await screen.findByText('待開放學校');
@@ -388,4 +402,31 @@ it('rechecks school admin role at confirmation and rejects a revoked role', asyn
   fireEvent.click(await screen.findByRole('button', { name: '確認開通 待開放學校' }));
   expect(await screen.findByText(/目前沒有有效的校方管理員/)).toBeTruthy();
   expect(fetcher.mock.calls.filter(([url]) => String(url).endsWith('/open'))).toHaveLength(0);
+});
+
+it('does not submit a school review with a short reason or after cancellation', async () => {
+  render(<SchoolReview />);
+  fireEvent.click(await screen.findByRole('button', { name: '核准申請' }));
+  expect(screen.getByRole('button', { name: '確定核准申請' })).toHaveProperty('disabled', true);
+  fireEvent.change(screen.getByLabelText('審核理由'), { target: { value: '太短' } });
+  fireEvent.submit(screen.getByLabelText('審核理由').closest('form')!);
+  expect(fetcher.mock.calls.filter(([, opts]) => opts?.method === 'POST')).toHaveLength(0);
+  fireEvent.click(screen.getByRole('button', { name: '取消' }));
+  expect(screen.queryByLabelText('審核理由')).toBeNull();
+  expect(fetcher.mock.calls.filter(([, opts]) => opts?.method === 'POST')).toHaveLength(0);
+});
+
+it('keeps the entered review reason when a decision request fails', async () => {
+  const original = fetcher.getMockImplementation()!;
+  fetcher.mockImplementation((url: string, options?: RequestInit) =>
+    options?.method === 'POST' ? Promise.resolve(ok({}, 503)) : original(url, options),
+  );
+  render(<SchoolReview />);
+  fireEvent.click(await screen.findByRole('button', { name: '拒絕' }));
+  fireEvent.change(screen.getByLabelText('審核理由'), {
+    target: { value: '申請人無法提供有效的學校代表授權' },
+  });
+  fireEvent.click(screen.getByRole('button', { name: '確定拒絕申請' }));
+  expect(await screen.findByRole('alert')).toBeTruthy();
+  expect((screen.getByLabelText('審核理由') as HTMLTextAreaElement).value).toBe('申請人無法提供有效的學校代表授權');
 });

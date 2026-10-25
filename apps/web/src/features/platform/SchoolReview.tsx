@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { SiteShell } from '@/components/SiteShell';
 import { Button } from '@/components/ui/Button';
+import { Textarea } from '@/components/ui/Input';
 import { AdminHeader } from '@/features/admin/AdminHeader';
 import { parseSchools } from '@/features/admin/api';
 import { parseOversightPeople } from '@/features/admin/oversightApi';
@@ -13,11 +14,9 @@ import admin from '@/features/admin/Admin.module.css';
 import {
   accountReturnHref,
   adminLoginHref,
-  APPROVE_SCHOOL_REASON,
   currentPageReturnPath,
   OPEN_SCHOOL_REASON,
   OPS_PATH,
-  REJECT_SCHOOL_REASON,
   SCHOOL_APPLY_PATH,
   SCHOOL_REVIEW_PATH,
 } from './constants';
@@ -120,6 +119,12 @@ function SchoolReviewContent({ context }: { context: string }) {
   const [forbidden, setForbidden] = useState(false);
   const [error, setError] = useState('');
   const [busyId, setBusyId] = useState<string | null>(null);
+  const [decisionDraft, setDecisionDraft] = useState<{
+    id: string;
+    decision: 'approve' | 'reject';
+    reason: string;
+    key: string;
+  } | null>(null);
   const [openCheck, setOpenCheck] = useState<{
     tenantId: string;
     hasRoleAdmin: boolean;
@@ -184,6 +189,10 @@ function SchoolReviewContent({ context }: { context: string }) {
   }, [captureRequest, load]);
 
   async function decide(id: string, decision: 'approve' | 'reject') {
+    const reason = decisionDraft?.id === id && decisionDraft.decision === decision
+      ? decisionDraft.reason.trim()
+      : '';
+    if (reason.length < 5 || reason.length > 1000) return;
     const isCurrent = captureRequest();
     if (!isCurrent() || mutationPending.current) return;
     mutationPending.current = true;
@@ -195,8 +204,8 @@ function SchoolReviewContent({ context }: { context: string }) {
         'POST',
         {
           decision,
-          reason: decision === 'approve' ? APPROVE_SCHOOL_REASON : REJECT_SCHOOL_REASON,
-          idempotencyKey: `web-school-decide-${crypto.randomUUID()}`,
+          reason,
+          idempotencyKey: decisionDraft!.key,
         },
         context,
       );
@@ -206,6 +215,7 @@ function SchoolReviewContent({ context }: { context: string }) {
         return;
       }
       if (!result.ok) throw new Error('審核沒有完成，請稍後再試。');
+      setDecisionDraft(null);
       await load(isCurrent);
     } catch (failure) {
       if (isCurrent()) {
@@ -362,13 +372,73 @@ function SchoolReviewContent({ context }: { context: string }) {
             </p>
             {item.justification ? <p>{item.justification}</p> : null}
             <div className={styles.actions}>
-              <Button disabled={busyId !== null} onClick={() => void decide(item.id, 'approve')}>
+              <Button
+                disabled={busyId !== null}
+                onClick={() => setDecisionDraft({
+                  id: item.id,
+                  decision: 'approve',
+                  reason: '',
+                  key: crypto.randomUUID(),
+                })}
+              >
                 核准申請
               </Button>
-              <Button disabled={busyId !== null} onClick={() => void decide(item.id, 'reject')}>
+              <Button
+                disabled={busyId !== null}
+                onClick={() => setDecisionDraft({
+                  id: item.id,
+                  decision: 'reject',
+                  reason: '',
+                  key: crypto.randomUUID(),
+                })}
+              >
                 拒絕
               </Button>
             </div>
+            {decisionDraft?.id === item.id && (
+              <form
+                className={styles.form}
+                onSubmit={(event) => {
+                  event.preventDefault();
+                  void decide(item.id, decisionDraft.decision);
+                }}
+              >
+                <h3>{decisionDraft.decision === 'approve' ? '確認核准申請' : '確認拒絕申請'}</h3>
+                <p className={styles.notice}>
+                  {decisionDraft.decision === 'approve'
+                    ? '核准只代表建立學校資料，不會立即開通或授予校方人員權限。'
+                    : '拒絕前請說明需要補齊的資料或不符條件的具體原因。'}
+                </p>
+                <Textarea
+                  label="審核理由"
+                  required
+                  minLength={5}
+                  maxLength={1000}
+                  hint="至少 5 字，請依實際審核結果說明。"
+                  value={decisionDraft.reason}
+                  disabled={busyId !== null}
+                  onChange={(event) =>
+                    setDecisionDraft((current) =>
+                      current?.id === item.id
+                        ? { ...current, reason: event.target.value, key: crypto.randomUUID() }
+                        : current,
+                    )
+                  }
+                />
+                <div className={styles.actions}>
+                  <Button
+                    type="submit"
+                    variant={decisionDraft.decision === 'reject' ? 'danger' : 'primary'}
+                    disabled={busyId !== null || decisionDraft.reason.trim().length < 5}
+                  >
+                    {decisionDraft.decision === 'approve' ? '確定核准申請' : '確定拒絕申請'}
+                  </Button>
+                  <Button type="button" disabled={busyId !== null} onClick={() => setDecisionDraft(null)}>
+                    取消
+                  </Button>
+                </div>
+              </form>
+            )}
           </article>
         ))}
       </section>
