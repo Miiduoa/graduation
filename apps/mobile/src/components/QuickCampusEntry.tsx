@@ -1,7 +1,8 @@
 import React, { useState } from 'react';
 import { Keyboard, Pressable, Text, TextInput, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { useTheme } from '../state/theme';
+import { theme } from '../ui/theme';
+import { useThemeVersion } from '../ui/useThemeStyleSheet';
 import { getMobileQuickActions, type MobileQuickAction } from '../services/quickCampusActions';
 
 const favoriteActions = [
@@ -20,8 +21,8 @@ export function QuickCampusEntry({
   onOpen: (action: MobileQuickAction) => void;
   onAsk: (question: string) => void;
 }) {
-  const design = useTheme();
-  const { colors, radius, typography } = design;
+  useThemeVersion();
+  const { colors, radius, typography } = theme;
   const [query, setQuery] = useState('');
   const phrase = query.trim();
   const suggestions = getMobileQuickActions(phrase);
