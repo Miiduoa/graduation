@@ -32,13 +32,18 @@ describe('assistant function-calling schema contract', () => {
   });
 
   test('all registered tools keep object-shaped model input parameters', () => {
-    const definitions = buildToolDefinitions(tools);
-    expect(definitions).toHaveLength(tools.length);
-    for (const definition of definitions) {
-      const parameters = definition.function.parameters;
-      expect(parameters.type).toBe('object');
-      expect(parameters.properties).toEqual(expect.any(Object));
-      expect(Array.isArray(parameters.properties)).toBe(false);
+    const failures = [];
+    for (const tool of tools) {
+      try {
+        const [definition] = buildToolDefinitions([tool]);
+        const parameters = definition.function.parameters;
+        if (parameters.type !== 'object' || !parameters.properties || Array.isArray(parameters.properties)) {
+          failures.push(tool.name + ': missing object parameters');
+        }
+      } catch (error) {
+        failures.push(tool.name + ': ' + String(error.message));
+      }
     }
+    expect(failures).toEqual([]);
   });
 });
