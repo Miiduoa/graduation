@@ -2,6 +2,19 @@
 export type DormRepairStatus = 'draft' | 'reported' | 'resolved';
 export type DormRepairCategory = 'water' | 'electric' | 'air' | 'furniture' | 'network' | 'other';
 export type DormStage = 'prepare' | 'checkin' | 'checkout';
+export type DormInspectionStatus = 'ok' | 'issue';
+
+/** Resident-entered room condition, not the school's formal inspection record. */
+export const DORM_INSPECTION_ITEMS: ReadonlyArray<{
+  id: string; title: string; category: DormRepairCategory; repairTitle: string;
+}> = [
+  { id: 'air', title: '冷氣與遙控器', category: 'air', repairTitle: '冷氣或遙控器需要檢查' },
+  { id: 'lighting', title: '燈具與插座', category: 'electric', repairTitle: '燈具或插座異常' },
+  { id: 'bathroom', title: '衛浴與排水', category: 'water', repairTitle: '衛浴或排水設備異常' },
+  { id: 'doors', title: '門鎖與門窗', category: 'furniture', repairTitle: '門鎖或門窗異常' },
+  { id: 'furniture', title: '床架、桌椅與櫃體', category: 'furniture', repairTitle: '床架、桌椅或櫃體損壞' },
+  { id: 'network', title: '網路與網路孔', category: 'network', repairTitle: '宿舍網路無法正常使用' },
+];
 
 export type DormMilestone = {
   id: string;
@@ -53,6 +66,7 @@ export type DormWorkspace = {
   room: string;
   bed: string;
   checkmarks: Record<string, boolean>;
+  inspection: Record<string, DormInspectionStatus>;
   repairs: DormRepair[];
   milestones: DormMilestone[];
   parcels: DormParcel[];
@@ -136,6 +150,7 @@ export function emptyDormWorkspace(): DormWorkspace {
     room: '',
     bed: '',
     checkmarks: {},
+    inspection: {},
     repairs: [],
     milestones: [],
     parcels: [],
@@ -178,12 +193,27 @@ export function sortedDormParcels(value: DormWorkspace): DormParcel[] {
     a.id.localeCompare(b.id));
 }
 
+export function dormInspectionProgress(value: DormWorkspace): { checked: number; total: number; issues: number } {
+  const statuses = DORM_INSPECTION_ITEMS.map((item) => value.inspection[item.id]);
+  return {
+    checked: statuses.filter((status) => status === 'ok' || status === 'issue').length,
+    total: DORM_INSPECTION_ITEMS.length,
+    issues: statuses.filter((status) => status === 'issue').length,
+  };
+}
+
 export function normalizeDormWorkspace(raw: unknown): DormWorkspace {
   const value = asObject(raw);
   const blank = emptyDormWorkspace();
   const checkmarks: Record<string, boolean> = {};
   const checks = asObject(value.checkmarks);
   for (const id of taskIds) if (checks[id] === true) checkmarks[id] = true;
+  const inspection: Record<string, DormInspectionStatus> = {};
+  const previousInspection = asObject(value.inspection);
+  for (const item of DORM_INSPECTION_ITEMS) {
+    const status = previousInspection[item.id];
+    if (status === 'ok' || status === 'issue') inspection[item.id] = status;
+  }
   const used = new Set<string>();
   const repairs: DormRepair[] = [];
   if (Array.isArray(value.repairs)) {
@@ -258,6 +288,7 @@ export function normalizeDormWorkspace(raw: unknown): DormWorkspace {
     room: boundedText(value.room, 50),
     bed: boundedText(value.bed, 40),
     checkmarks,
+    inspection,
     repairs,
     milestones,
     parcels,
