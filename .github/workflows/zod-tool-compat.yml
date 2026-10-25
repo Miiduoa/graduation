@@ -1,24 +1,23 @@
-# Verify model tool-call parameter conversion under both Zod major versions.
-# The locked runtime is Zod 4; Zod 3 is installed only in this disposable runner.
+# Validate the pinned Zod 4 runtime and keep legacy Zod 3 tool contracts explicit.
 name: Assistant Zod Schema Compatibility
 
 on:
   pull_request:
     paths:
-      - 'backend/functions/assistantAgent.js'
-      - 'backend/functions/agent/tools/toolSchema.compat.test.js'
       - 'backend/functions/package.json'
       - 'backend/functions/package-lock.json'
       - 'pnpm-lock.yaml'
+      - 'backend/functions/assistantAgent.js'
+      - 'backend/functions/agent/tools/toolSchema.compat.test.js'
       - '.github/workflows/zod-tool-compat.yml'
   push:
     branches: [main]
     paths:
-      - 'backend/functions/assistantAgent.js'
-      - 'backend/functions/agent/tools/toolSchema.compat.test.js'
       - 'backend/functions/package.json'
       - 'backend/functions/package-lock.json'
       - 'pnpm-lock.yaml'
+      - 'backend/functions/assistantAgent.js'
+      - 'backend/functions/agent/tools/toolSchema.compat.test.js'
       - '.github/workflows/zod-tool-compat.yml'
 
 permissions:
@@ -26,33 +25,31 @@ permissions:
 
 jobs:
   zod-tool-contracts:
-    name: Run assistant tool contracts under Zod 3 and 4
+    name: Zod 4 full Functions and Zod 3 fallback contracts
     runs-on: ubuntu-24.04
     timeout-minutes: 25
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v7
         with:
-          node-version: '22'
+          node-version: '22.23.4'
           cache: 'pnpm'
-      - name: Install full workspace and compile Functions shared types
+      - name: Install pinned workspace and compile Functions shared types
         run: |
           pnpm install --frozen-lockfile
           pnpm --filter functions run build:shared
-      - name: Verify locked Zod 4 runtime
-        working-directory: backend/functions
-        run: |
-          node -e "const version = require('zod/package.json').version; if (!version.startsWith('4.6.7')) process.exit(1); console.log(version)"
-          pnpm exec jest --runInBand agent/tools/toolSchema.compat.test.js agent/tools/campusNavigation.test.js assistantAgent.test.js
-      - name: Install Zod 3 in this disposable runner only
-        run: |
-          npm install --prefix backend/functions --no-save --ignore-scripts --package-lock=false 'zod@3.25.76'
-          node -e "const version = require('./backend/functions/node_modules/zod/package.json').version; if (!version.startsWith('3.25.76')) process.exit(1); console.log(version)"
-      - name: Verify full Functions suite under Zod 3
+      - name: Verify Zod 4.6.7 and complete Functions test suite
         working-directory: backend/functions
         env:
           ONLINE_ORDERING_ENABLED: 'true'
         run: |
-          node -p "require('zod/package.json').version"
+          node -e "const v=require('zod/package.json').version; if(v!=='4.6.7') process.exit(1); console.log('Zod',v)"
           pnpm exec jest --runInBand
+      - name: Temporarily install Zod 3 for legacy tool-contract regression
+        run: |
+          npm install --prefix backend/functions --no-save --ignore-scripts --package-lock=false 'zod@3.25.76'
+          node -e "const v=require('./backend/functions/node_modules/zod/package.json').version; if(v!=='3.25.76') process.exit(1); console.log('Zod',v)"
+      - name: Verify legacy Zod 3 function-call contracts
+        working-directory: backend/functions
+        run: pnpm exec jest --runInBand agent/tools/toolSchema.compat.test.js agent/tools/campusNavigation.test.js assistantAgent.test.js
