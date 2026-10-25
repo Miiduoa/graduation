@@ -210,3 +210,25 @@
   outline: 3px solid var(--focus-ring);
   outline-offset: 3px;
 }
+
+.aiButton {
+  justify-self: start;
+  min-height: 44px;
+  padding: 10px 16px;
+  border: 1px solid var(--brand);
+  border-radius: 11px;
+  background: var(--brand);
+  color: var(--on-brand);
+  font: inherit;
+  font-size: 14px;
+  font-weight: 650;
+  cursor: pointer;
+}
+.aiButton:disabled {
+  cursor: progress;
+  opacity: .55;
+}
+.aiButton:focus-visible {
+  outline: 3px solid var(--focus-ring);
+  outline-offset: 3px;
+}

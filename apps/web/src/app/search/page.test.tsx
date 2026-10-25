@@ -1,4 +1,5 @@
 import { fireEvent, render, screen, within } from '@testing-library/react';
+import { interpretCampusRequest } from '@/lib/campusIntentClient';
 import { beforeEach, expect, it, vi } from 'vitest';
 import SearchPage from './page';
 
@@ -13,6 +14,11 @@ vi.mock('@/components/SelectedSchoolProvider', () => ({
   useOptionalSelectedSchool: () => selection.current,
 }));
 
+const userState = vi.hoisted(() => ({ uid: null as string | null }));
+vi.mock('@/components/AuthGuard', () => ({
+  useAuth: () => ({ user: userState.uid ? { uid: userState.uid } : null }),
+}));
+vi.mock('@/lib/campusIntentClient', () => ({ interpretCampusRequest: vi.fn() }));
 const options = { studentId: false, loading: false, error: false, retry: vi.fn() };
 vi.mock('@/lib/signInOptions', () => ({ useSignInOptions: () => options }));
 
@@ -22,6 +28,8 @@ vi.mock('next/navigation', () => ({
 beforeEach(() => {
   window.history.replaceState({}, '', '/search');
   selection.current = null;
+  userState.uid = null;
+  vi.mocked(interpretCampusRequest).mockReset();
   options.studentId = false;
   options.loading = false;
   options.error = false;
@@ -235,4 +243,22 @@ it('retains a search and public destinations when login availability fails, and 
   fireEvent.click(screen.getByRole('button', { name: '重新確認登入方式' }));
   expect(options.retry).toHaveBeenCalledOnce();
   expect((screen.getByRole('searchbox') as HTMLInputElement).value).toBe('公車');
+});
+
+
+it('recognizes a complex signed-in campus request using AI instead of only keyword results', async () => {
+  userState.uid = 'alice';
+  vi.mocked(interpretCampusRequest).mockResolvedValue({
+    status: 'understood', source: 'model', summary: '想先確認課表，再找讀書和吃飯的地點。',
+    destinations: ['/timetable', '/library', '/cafeteria'], clarifyingQuestion: null,
+  });
+  render(<SearchPage />);
+  fireEvent.change(screen.getByRole('searchbox'), {
+    target: { value: '明天沒有課的話我想去讀書再吃個飯' },
+  });
+  expect(interpretCampusRequest).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole('button', { name: '用 AI 理解需求' }));
+  expect(await screen.findByText('想先確認課表，再找讀書和吃飯的地點。')).toBeTruthy();
+  expect(screen.getByText('AI 建議先開啟')).toBeTruthy();
+  expect(interpretCampusRequest).toHaveBeenCalledTimes(1);
 });
