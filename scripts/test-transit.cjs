@@ -16,6 +16,7 @@ for (const [source, name] of [
   ['apps/web/src/lib/transit.ts', 'transit'],
   ['apps/web/src/lib/transit-catalog.ts', 'transit-catalog'],
   ['apps/web/src/lib/transit-direct.ts', 'transit-direct'],
+  ['apps/web/src/lib/transit-transfer.ts', 'transit-transfer'],
   ['apps/web/src/lib/transit-server.ts', 'transit-server'],
   ['apps/web/src/lib/transit-replay.ts', 'transit-replay'],
   ['apps/web/src/app/api/transit/route.ts', 'route'],
@@ -31,8 +32,10 @@ for (const [source, name] of [
 const client = require(path.join(output, 'transit.js'));
 const server = require(path.join(output, 'transit-server.js'));
 const direct = require(path.join(output, 'transit-direct.js'));
+const transfer = require(path.join(output, 'transit-transfer.js'));
 const route = require(path.join(output, 'route.js'));
 const studentReport = require(path.join(root, 'apps/web/src/lib/fixtures/tdx-providence-student-report.json'));
+const maasFixture = require(path.join(root, 'apps/web/src/lib/fixtures/tdx-maas-walk-and-taxi.json'));
 const NOW = Date.parse('2026-10-12T08:00:00Z');
 const at = (offset = 0) => new Date(NOW + offset).toISOString();
 const point = { lat: 24.22, lon: 120.58 };
@@ -912,4 +915,123 @@ test('direct search without TDX still uses the catalog and does not invent arriv
   assert.equal(result.trips.some((trip) => trip.route === '300'), true);
   assert.equal(result.trips.every((trip) => trip.arrival === null), true);
   assert.equal(direct.buildDirectPlan({ query: '高鐵臺中站' }).trips.length, 0);
+  assert.deepEqual(result.transfers, []);
+  assert.equal(result.transferFallback, true);
+});
+test('maas walk-only filter drops YOXI taxi and bike first/last miles', () => {
+  const trips = transfer.parseMaasTransferPlans(maasFixture);
+  assert.equal(trips.length, 1);
+  assert.equal(trips[0].firstRoute, '300');
+  assert.equal(trips[0].secondRoute, '151');
+  assert.equal(JSON.stringify(trips).includes('YOXI'), false);
+  const url = transfer.buildMaasPlannerUrl({
+    origin: direct.PROVIDENCE_DIRECT_ORIGIN,
+    destination: { lat: 24.112, lon: 120.616 },
+    departureAt: NOW,
+  });
+  assert.match(url, /firstLastMileType=Walk/);
+  assert.equal(transfer.maasUrlHasArrivalParam(url), false);
+  assert.equal(url.includes('120.577561'), true);
+});
+test('transfer search caches the same origin, destination and 5-minute slot', async () => {
+  const mock = service((url) => Response.json(url.includes('/api/maas/') ? maasFixture : []));
+  const first = await mock.execute({ action: 'direct', schoolId: 'pu', destination: '高鐵臺中站' });
+  mock.tick(60_000);
+  const second = await mock.execute({ action: 'direct', schoolId: 'pu', destination: '高鐵臺中站' });
+  assert.equal(first.status, 'ready');
+  assert.equal(second.status, 'ready');
+  assert.equal(mock.calls.filter((call) => call.url.includes('/api/maas/Routing/Planner')).length, 1);
+  assert.equal(first.transfers[0].firstRoute, '300');
+});
+test('transfer search rate-limit and timeout fall back to direct plus Google Maps', async () => {
+  const mock = service((url) => Response.json(url.includes('/api/maas/') ? maasFixture : []));
+  for (let index = 0; index < 5; index += 1) {
+    const result = await mock.execute({
+      action: 'direct', schoolId: 'pu', destination: '高鐵臺中站',
+      lat: 24.225 + index * 0.002, lon: 120.577561,
+    });
+    assert.equal(result.status, 'ready');
+  }
+  const overflow = await mock.execute({
+    action: 'direct', schoolId: 'pu', destination: '高鐵臺中站',
+    lat: 24.240, lon: 120.577561,
+  });
+  assert.equal(overflow.status, 'ready');
+  assert.deepEqual(overflow.transfers, []);
+  assert.equal(overflow.transferFallback, true);
+  assert.match(overflow.googleMapsUrl, /travelmode=transit/);
+  const timed = service((url) => {
+    if (url.includes('/api/maas/')) {
+      const error = new Error('timeout');
+      error.name = 'TimeoutError';
+      return Promise.reject(error);
+    }
+    return Response.json([]);
+  }, { maasTimeoutMs: 20 });
+  const fallback = await timed.execute({ action: 'direct', schoolId: 'pu', destination: '高鐵臺中站' });
+  assert.equal(fallback.status, 'ready');
+  assert.deepEqual(fallback.transfers, []);
+  assert.equal(fallback.transferFallback, true);
+  assert.match(fallback.googleMapsUrl, /^https:\/\/www\.google\.com\/maps\/dir\/\?/);
+});
+test('transfer search coalesces the same key and caps concurrent origins at 5 MaaS calls', async () => {
+  const same = service(async (url) => {
+    if (url.includes('/api/maas/')) {
+      await new Promise((resolve) => setTimeout(resolve, 40));
+      return Response.json(maasFixture);
+    }
+    return Response.json([]);
+  });
+  const sameResults = await Promise.all(Array.from({ length: 8 }, () =>
+    same.execute({ action: 'direct', schoolId: 'pu', destination: '高鐵臺中站' })));
+  assert.equal(sameResults.every((result) => result.status === 'ready'), true);
+  assert.equal(same.calls.filter((call) => call.url.includes('/api/maas/Routing/Planner')).length, 1);
+
+  const burst = service(async (url) => {
+    if (url.includes('/api/maas/')) {
+      await new Promise((resolve) => setTimeout(resolve, 40));
+      return Response.json(maasFixture);
+    }
+    return Response.json([]);
+  });
+  const burstResults = await Promise.all(Array.from({ length: 12 }, (_, index) => burst.execute({
+    action: 'direct', schoolId: 'pu', destination: '高鐵臺中站',
+    lat: 24.221 + index * 0.001, lon: 120.577561,
+  })));
+  assert.equal(burstResults.every((result) => result.status === 'ready'), true);
+  assert.equal(burst.calls.filter((call) => call.url.includes('/api/maas/Routing/Planner')).length, 5);
+  assert.equal(burstResults.some((result) => result.transferFallback === true), true);
+});
+test('transfer search 429 pauses later MaaS and campus-next upstream calls', async () => {
+  const mock = service((url) => {
+    if (url.includes('/api/maas/')) {
+      return new Response('{}', { status: 429, headers: { 'retry-after': '60' } });
+    }
+    return Response.json([]);
+  });
+  const first = await mock.execute({
+    action: 'direct', schoolId: 'pu', destination: '高鐵臺中站',
+    lat: 24.225388, lon: 120.577561,
+  });
+  assert.equal(first.status, 'ready');
+  assert.equal(first.transferFallback, true);
+  mock.tick(16_000);
+  const etaAfterFirst = mock.calls.filter((call) => call.url.includes('/EstimatedTimeOfArrival/')).length;
+  const second = await mock.execute({
+    action: 'direct', schoolId: 'pu', destination: '高鐵臺中站',
+    lat: 24.226388, lon: 120.577561,
+  });
+  assert.equal(second.status, 'ready');
+  assert.equal(second.transferFallback, true);
+  assert.equal(mock.calls.filter((call) => call.url.includes('/api/maas/Routing/Planner')).length, 1);
+  assert.equal(mock.calls.filter((call) => call.url.includes('/EstimatedTimeOfArrival/')).length, etaAfterFirst);
+});
+test('transfer search without keys never calls MaaS and keeps the Google Maps link', async () => {
+  const mock = service([], { credentials: () => ({}) });
+  const result = await mock.execute({ action: 'direct', schoolId: 'pu', destination: '高鐵臺中站' });
+  assert.equal(result.status, 'ready');
+  assert.equal(mock.calls.length, 0);
+  assert.deepEqual(result.transfers, []);
+  assert.equal(result.transferFallback, true);
+  assert.match(result.googleMapsUrl, /travelmode=transit/);
 });
