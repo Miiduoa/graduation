@@ -289,7 +289,7 @@ it('keeps scheduled times when this direction has no live bus without saying liv
     ],
   } : emptyArrivals());
   renderExplorer();
-  expect(await screen.findAllByText(/表定 \d{1,2}:\d{2}/)).toHaveLength(2);
+  await waitFor(() => expect(screen.getAllByText(/表定 \d{1,2}:\d{2}/)).toHaveLength(2));
   expect(screen.queryByText('讀不到即時資料，先顯示表定時間')).toBeNull();
   expect(screen.getByText(/\d{1,2}:\d{2} 更新/)).toBeTruthy();
   expect(screen.getAllByText(/表定 \d{1,2}:\d{2}/).length).toBeGreaterThan(1);
