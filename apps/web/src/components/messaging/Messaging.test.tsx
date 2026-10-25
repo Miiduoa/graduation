@@ -299,6 +299,43 @@ it('an old pending send cannot clear the new account draft or produce its feedba
   expect((screen.getByLabelText('訊息內容') as HTMLTextAreaElement).value).toBe('新帳號的草稿');
   expect(screen.queryByText('尚未確認送出，內容已保留。請重新連線後再試。')).toBeNull();
 });
+it('never persists a previous account conversation draft under the next account key', async () => {
+  const previousId = 'draft-isolation-previous';
+  const nextId = 'draft-isolation-next';
+  const previousKey = `campus-one:dm-draft:alice:pu:${previousId}`;
+  const nextKey = `campus-one:dm-draft:new-user:pu:${nextId}`;
+  sessionStorage.removeItem(previousKey);
+  sessionStorage.removeItem(nextKey);
+  const view = render(
+    <PrivateConversationView session={{ uid: 'alice', schoolId: 'pu' }} conversationId={previousId} />,
+  );
+  await screen.findByText('伺服器的訊息');
+  fireEvent.change(screen.getByLabelText('訊息內容'), {
+    target: { value: '只有 alice 能看到的草稿' },
+  });
+  await waitFor(() => expect(sessionStorage.getItem(previousKey)).toBe('只有 alice 能看到的草稿'));
+
+  const writes = vi.spyOn(Storage.prototype, 'setItem');
+  try {
+    account.user = { uid: 'new-user' };
+    view.rerender(
+      <PrivateConversationView session={{ uid: 'new-user', schoolId: 'pu' }} conversationId={nextId} />,
+    );
+    await waitFor(() =>
+      expect((screen.getByLabelText('訊息內容') as HTMLTextAreaElement).value).toBe(''),
+    );
+    expect(writes.mock.calls.some(([key, value]) =>
+      key === nextKey && value === '只有 alice 能看到的草稿',
+    )).toBe(false);
+    expect(sessionStorage.getItem(nextKey)).toBeNull();
+    expect(sessionStorage.getItem(previousKey)).toBe('只有 alice 能看到的草稿');
+  } finally {
+    writes.mockRestore();
+    sessionStorage.removeItem(previousKey);
+    sessionStorage.removeItem(nextKey);
+  }
+});
+
 it('read-marker errors remain visible without clearing unread content optimistically', async () => {
   vi.mocked(markConversationRead).mockRejectedValueOnce(new Error('denied'));
   render(<Chat />);
