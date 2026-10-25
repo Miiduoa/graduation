@@ -214,7 +214,7 @@ export function PrivateConversationList({ session }: { session: MessagingSession
     <div className={styles.stack}>
       <div className={styles.inboxHeading}>
         <div>
-          <p className={styles.overline}>PRIVATE CONVERSATIONS</p>
+          <p className={styles.overline}>校內私訊</p>
           <h2>我的對話</h2>
           <p className={styles.muted}>只有目前帳號所屬學校、且你是成員的對話會出現在這裡。</p>
         </div>
@@ -437,7 +437,7 @@ export function PrivateConversationView({
         <>
           <div className={styles.chatHeader}>
             <div>
-              <p className={styles.overline}>DIRECT MESSAGE</p>
+              <p className={styles.overline}>對話內容</p>
               <h2>{state.data.conversation.peerName || '訊息'}</h2>
               <p className={styles.muted}>顯示最近 100 則訊息；搜尋僅查詢目前載入的內容。</p>
             </div>
