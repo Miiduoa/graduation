@@ -48,6 +48,7 @@ export const ROUTE_TO_TAB: Record<string, TabName> = {
   CourseCatalog: '學習',
   CourseSchedule: '學習',
   PersonalImport: '學習',
+  PersonalTimetable: '學習',
   PersonalCalendar: '學習',
   CourseMaterialViewer: '學習',
   CourseDiscussion: '學習',
@@ -109,6 +110,7 @@ export const ROUTE_TO_TAB: Record<string, TabName> = {
   MapV2: '校園',
   Library: '校園',
   LibraryCatalog: '校園',
+  SchoolInfo: '校園',
   Dormitory: '校園',
   Career: '校園',
   Health: '校園',
@@ -183,43 +185,29 @@ export function resolveTabForRoute(route: string): TabName | null {
 }
 
 /**
- * 給定一個 navigation 物件（可能在任何 stack 內），判斷 route 是否就在當前 navigator。
- *
- * 用 collectRouteNames 收集所有 nested route 名稱，比對 route 是否其中之一。
+ * 判斷目前 navigator 或可向上傳遞導航的祖先是否註冊此路由。
+ * 兄弟分頁已掛載的子路由仍須帶上分頁名稱，不能直接 navigate 到該子路由。
  */
 export function isRouteRegistered(
   navigation: { getState?: () => unknown; getParent?: () => unknown } | null | undefined,
   route: string,
 ): boolean {
-  if (!navigation || typeof navigation.getState !== 'function') return false;
   try {
-    const names = new Set<string>();
-    let cursor: any = navigation;
-    let topMost: any = navigation;
-    let safety = 0;
-    while (cursor && typeof cursor.getParent === 'function' && safety < 10) {
-      const parent = cursor.getParent();
-      if (!parent) break;
-      topMost = parent;
-      cursor = parent;
-      safety++;
+    let cursor: unknown = navigation;
+    const visited = new Set<unknown>();
+    for (let depth = 0; depth < 10 && cursor && typeof cursor === 'object'; depth++) {
+      if (visited.has(cursor)) break;
+      visited.add(cursor);
+      const navigator = cursor as { getState?: () => unknown; getParent?: () => unknown };
+      const state = navigator.getState?.();
+      if (state && typeof state === 'object') {
+        const names = (state as { routeNames?: unknown }).routeNames;
+        if (Array.isArray(names) && names.includes(route)) return true;
+      }
+      cursor = navigator.getParent?.();
     }
-    collectRouteNames(topMost?.getState?.() ?? navigation.getState!(), names);
-    return names.has(route);
+    return false;
   } catch {
     return false;
-  }
-}
-
-function collectRouteNames(state: unknown, out: Set<string>): void {
-  if (!state || typeof state !== 'object') return;
-  const s = state as { routeNames?: string[]; routes?: Array<{ state?: unknown }> };
-  if (Array.isArray(s.routeNames)) {
-    for (const r of s.routeNames) out.add(r);
-  }
-  if (Array.isArray(s.routes)) {
-    for (const r of s.routes) {
-      if (r?.state) collectRouteNames(r.state, out);
-    }
   }
 }

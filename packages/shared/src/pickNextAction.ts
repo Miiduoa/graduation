@@ -39,7 +39,7 @@ export type TodayTodo = {
   title: string;
   courseName: string;
   courseId?: string;
-  dueAt: number;
+  dueAt: number | null;
   href?: string;
 };
 
@@ -111,37 +111,40 @@ function classStartingSoon(classes: readonly TodayClass[], nowMs: number): Today
   );
 }
 
+function hasDeadline(todo: TodayTodo): todo is TodayTodo & { dueAt: number } {
+  return todo.dueAt !== null && Number.isFinite(todo.dueAt);
+}
+
 function dueWithin24h(todos: readonly TodayTodo[], nowMs: number): TodayTodo | null {
   const upcoming = todos
-    .filter((item) => Number.isFinite(item.dueAt) && item.dueAt >= nowMs && item.dueAt - nowMs <= DAY_MS)
+    .filter(hasDeadline)
+    .filter((item) => item.dueAt >= nowMs && item.dueAt - nowMs <= DAY_MS)
     .sort((a, b) => a.dueAt - b.dueAt || a.id.localeCompare(b.id));
   return upcoming[0] ?? null;
 }
 
 function nearestTodo(todos: readonly TodayTodo[], nowMs: number): TodayTodo | null {
   const ranked = [...todos]
-    .filter((item) => Number.isFinite(item.dueAt))
+    .filter(hasDeadline)
     .sort(
       (a, b) =>
         Math.abs(a.dueAt - nowMs) - Math.abs(b.dueAt - nowMs) ||
         a.dueAt - b.dueAt ||
         a.id.localeCompare(b.id),
     );
-  return ranked[0] ?? null;
+  return ranked[0] ?? todos.find((item) => item.dueAt === null) ?? null;
 }
 
 function earliestOverdue(todos: readonly TodayTodo[], nowMs: number): TodayTodo | null {
   const overdue = todos
-    .filter((item) => Number.isFinite(item.dueAt) && item.dueAt < nowMs)
+    .filter(hasDeadline)
+    .filter((item) => item.dueAt < nowMs)
     .sort((a, b) => a.dueAt - b.dueAt || a.id.localeCompare(b.id));
   return overdue[0] ?? null;
 }
 
 function earliestOpenTodo(todos: readonly TodayTodo[]): TodayTodo | null {
-  const open = todos
-    .filter((item) => Number.isFinite(item.dueAt))
-    .sort((a, b) => a.dueAt - b.dueAt || a.id.localeCompare(b.id));
-  return open[0] ?? null;
+  return sortTodayTodos(todos)[0] ?? null;
 }
 
 export function pickNextAction(
@@ -189,8 +192,12 @@ export function sortTodayClasses(classes: readonly TodayClass[], now: Date): Tod
 
 export function sortTodayTodos(todos: readonly TodayTodo[]): TodayTodo[] {
   return [...todos]
-    .filter((item) => Number.isFinite(item.dueAt))
-    .sort((a, b) => a.dueAt - b.dueAt || a.id.localeCompare(b.id));
+    .filter((item) => item.dueAt === null || hasDeadline(item))
+    .sort((a, b) => {
+      if (a.dueAt === null && b.dueAt !== null) return 1;
+      if (b.dueAt === null && a.dueAt !== null) return -1;
+      return (a.dueAt ?? 0) - (b.dueAt ?? 0) || a.id.localeCompare(b.id);
+    });
 }
 
 export function formatTodayHeaderDate(now: Date): string {
@@ -227,7 +234,8 @@ function remainingHoursText(dueAt: number, nowMs: number): string {
 
 export function formatTodoDueLine(todo: TodayTodo, now: Date): string {
   const nowMs = now.getTime();
-  if (!Number.isFinite(todo.dueAt)) return '';
+  if (todo.dueAt === null) return '未設截止時間';
+  if (!hasDeadline(todo)) return '';
   if (todo.dueAt < nowMs) {
     const days = taipeiCalendarDayDiff(todo.dueAt, nowMs);
     if (days === null) return TODAY_COPY.overdue;
@@ -237,6 +245,8 @@ export function formatTodoDueLine(todo: TodayTodo, now: Date): string {
 }
 
 export function formatUpcomingDueLine(todo: TodayTodo): string {
+  if (todo.dueAt === null) return '未設截止時間';
+  if (!hasDeadline(todo)) return '';
   const parts = taipeiParts(todo.dueAt);
   const weekday = taipeiWeekdayIndex(new Date(todo.dueAt));
   if (!parts || weekday === null || !Number.isFinite(todo.dueAt)) return '';
@@ -245,11 +255,11 @@ export function formatUpcomingDueLine(todo: TodayTodo): string {
 
 export function isDueWithinHours(todo: TodayTodo, now: Date, hours: number): boolean {
   const nowMs = now.getTime();
-  return Number.isFinite(todo.dueAt) && todo.dueAt >= nowMs && todo.dueAt - nowMs <= hours * 60 * 60 * 1000;
+  return hasDeadline(todo) && todo.dueAt >= nowMs && todo.dueAt - nowMs <= hours * 60 * 60 * 1000;
 }
 
 export function isTodoOverdue(todo: TodayTodo, now: Date): boolean {
-  return Number.isFinite(todo.dueAt) && todo.dueAt < now.getTime();
+  return hasDeadline(todo) && todo.dueAt < now.getTime();
 }
 
 export { TAIPEI_TIME_ZONE };

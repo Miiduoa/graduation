@@ -1,28 +1,15 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { ScrollView, Text, View, Pressable, TextInput, Alert, Modal } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { isAvailableAsync, shareAsync } from 'expo-sharing';
-import { Paths, File } from 'expo-file-system';
-import {
-  collection,
-  documentId,
-  getDocs,
-  query,
-  orderBy,
-  limit,
-  type QueryDocumentSnapshot,
-} from 'firebase/firestore';
+import { collection, getDocs, query, orderBy, limit } from 'firebase/firestore';
 
 import {
   Screen,
-  Card,
   Button,
   Pill,
   LoadingState,
   SectionTitle,
-  AnimatedCard,
-  StatCard,
   SegmentedControl,
 } from '../ui/components';
 import { TAB_BAR_CONTENT_BOTTOM_PADDING } from '../ui/navigationTheme';
@@ -31,15 +18,10 @@ import { useSchool } from '../state/school';
 import { useAuth } from '../state/auth';
 import { getDb } from '../firebase';
 import { useAdminEvents } from '../hooks/useAdminEvents';
-import { useAdminCollectionPage } from '../hooks/useAdminCollectionPage';
 import { useAsyncList } from '../hooks/useAsyncList';
-import { useAmbientCues } from '../features/engagement';
-import { AmbientCueCard } from '../ui/campusOs';
-import { HeaderAvatarButton } from '../components/HeaderAvatarButton';
 import {
   bulkDeleteSchoolEvents,
   bulkUpdateSchoolAnnouncements,
-  clearSchoolAdminTestData as clearSchoolAdminTestDataCall,
   deleteSchoolAnnouncement,
   deleteSchoolEvent,
   upsertCafeteriaOperatorAssignment,
@@ -77,11 +59,26 @@ import {
   registrationPolicyDraft,
   registrationPolicyInput,
 } from '../components/EventRegistrationPolicyFields';
-import { AIMissionControl } from '../components/AIMissionControl';
+import { AdminWorkbenchHeader } from './admin/AdminWorkbenchHeader';
+import { ADMIN_TABS, AdminTabBar, type AdminTabKey } from './admin/AdminTabBar';
+import { AdminDataStatusRow, AdminListFeedback, AdminSurface } from './admin/AdminSurface';
+import {
+  ADMIN_PAGE_SIZES,
+  adminWorkbenchStyles as adminStyles,
+  formatDataStatus,
+  memberRoleLabel,
+  type MemberRole,
+} from './admin/adminWorkbenchStyles';
+import { useAdminCollectionPage } from './admin/useAdminCollectionPage';
+import { cleanupAdminExportFile, type AdminExportScopeToken } from './admin/adminScopedExport';
+import { isAvailableAsync, shareAsync } from 'expo-sharing';
+import { Paths, File } from 'expo-file-system';
 
-type AdminTab = 'overview' | 'announcements' | 'events' | 'members' | 'settings';
+type AdminTab = AdminTabKey;
 type SortMode = 'latest' | 'oldest' | 'pinned';
 type LogFilterMode = 'all' | 'write' | 'delete' | 'batch' | 'export';
+type WorkbenchScope = AdminExportScopeToken & { schoolId: string };
+type AdminForm = 'announcement' | 'event' | 'cafeteria' | 'operator';
 
 type Announcement = {
   id: string;
@@ -199,40 +196,6 @@ function loadedScopeHint(loaded: number, hasMore: boolean, noun: string): string
   return `已載入全部可讀取的 ${loaded} ${noun}；搜尋與匯出範圍即為此批資料。`;
 }
 
-function TabButton(props: { icon: string; label: string; active: boolean; onPress: () => void }) {
-  return (
-    <Pressable
-      onPress={props.onPress}
-      style={{
-        flex: 1,
-        paddingVertical: 10,
-        paddingHorizontal: 8,
-        borderRadius: theme.radius.md,
-        borderWidth: 1,
-        borderColor: props.active ? theme.colors.accent : theme.colors.border,
-        backgroundColor: props.active ? theme.colors.accentSoft : theme.colors.surface2,
-        alignItems: 'center',
-        gap: 4,
-      }}
-    >
-      <Ionicons
-        name={props.icon as any}
-        size={18}
-        color={props.active ? theme.colors.accent : theme.colors.muted}
-      />
-      <Text
-        style={{
-          color: props.active ? theme.colors.accent : theme.colors.muted,
-          fontWeight: '700',
-          fontSize: 11,
-        }}
-      >
-        {props.label}
-      </Text>
-    </Pressable>
-  );
-}
-
 function FormInput(props: {
   label: string;
   value: string;
@@ -241,27 +204,21 @@ function FormInput(props: {
   multiline?: boolean;
 }) {
   return (
-    <View style={{ marginBottom: 12 }}>
-      <Text style={{ color: theme.colors.muted, marginBottom: 6, fontWeight: '600' }}>
-        {props.label}
-      </Text>
+    <View style={adminStyles.formField}>
+      <Text style={adminStyles.formLabel}>{props.label}</Text>
       <TextInput
         value={props.value}
         onChangeText={props.onChangeText}
         placeholder={props.placeholder}
         placeholderTextColor={theme.colors.muted}
         multiline={props.multiline}
-        style={{
-          paddingVertical: 12,
-          paddingHorizontal: 14,
-          borderRadius: theme.radius.md,
-          borderWidth: 1,
-          borderColor: theme.colors.border,
-          backgroundColor: theme.colors.surface2,
-          color: theme.colors.text,
-          minHeight: props.multiline ? 100 : undefined,
-          textAlignVertical: props.multiline ? 'top' : 'center',
-        }}
+        style={[
+          adminStyles.formInput,
+          {
+            minHeight: props.multiline ? 100 : undefined,
+            textAlignVertical: props.multiline ? 'top' : 'center',
+          },
+        ]}
       />
     </View>
   );
@@ -278,25 +235,52 @@ export function AdminDashboardScreen(props: any) {
   const eventFormGeneration = useRef(0);
   const eventSaving = useRef(false);
   const eventMounted = useRef(true);
+  const workbenchMountedRef = useRef(true);
+  const workbenchIdentityKey = JSON.stringify([
+    auth.user?.uid ?? '',
+    school.id,
+    Boolean(auth.isAdmin),
+    Boolean(auth.isEditor),
+  ]);
+  const workbenchIdentityRef = useRef(workbenchIdentityKey);
+  const workbenchGenerationRef = useRef(0);
+  if (workbenchIdentityRef.current !== workbenchIdentityKey) {
+    workbenchIdentityRef.current = workbenchIdentityKey;
+    workbenchGenerationRef.current += 1;
+  }
+  const workbenchGeneration = workbenchGenerationRef.current;
+  const workbenchContextRef = useRef({
+    identityKey: workbenchIdentityKey,
+    generation: workbenchGeneration,
+  });
+  workbenchContextRef.current = {
+    identityKey: workbenchIdentityKey,
+    generation: workbenchGeneration,
+  };
+  const roleConfirmLockRef = useRef(false);
+  const formContextsRef = useRef<Partial<Record<AdminForm, WorkbenchScope>>>({});
+  const formSavingRef = useRef<Partial<Record<AdminForm, WorkbenchScope>>>({});
   useEffect(() => {
     eventMounted.current = true;
+    workbenchMountedRef.current = true;
     return () => {
       eventMounted.current = false;
+      workbenchMountedRef.current = false;
     };
   }, []);
-  const {
-    cue: ambientCue,
-    dismissCue: dismissAmbientCue,
-    openCue: openAmbientCue,
-  } = useAmbientCues({
-    schoolId: school.id,
-    uid: auth.user?.uid ?? null,
-    role: 'admin',
-    surface: 'admin',
-    limit: 1,
-  });
+
+  const isCurrentWorkbenchContext = (token: AdminExportScopeToken) =>
+    workbenchMountedRef.current &&
+    workbenchContextRef.current.generation === token.generation &&
+    workbenchContextRef.current.identityKey === token.identityKey;
+  const actionScope: WorkbenchScope = { ...workbenchContextRef.current, schoolId: school.id };
+  const isCurrentForm = (kind: AdminForm, context: WorkbenchScope | undefined) =>
+    Boolean(
+      context && formContextsRef.current[kind] === context && isCurrentWorkbenchContext(context),
+    );
 
   const [tab, setTab] = useState<AdminTab>('overview');
+  const activeTab = !auth.isAdmin && (tab === 'members' || tab === 'settings') ? 'overview' : tab;
   const [showAnnouncementModal, setShowAnnouncementModal] = useState(false);
   const [showEventModal, setShowEventModal] = useState(false);
   const [eventFormScope, setEventFormScope] = useState(eventScope);
@@ -310,7 +294,17 @@ export function AdminDashboardScreen(props: any) {
   const [saving, setSaving] = useState(false);
   const [savingCafeteria, setSavingCafeteria] = useState(false);
   const [savingOperator, setSavingOperator] = useState(false);
-  const [cleaningData, setCleaningData] = useState(false);
+  const [roleOpGeneration, setRoleOpGeneration] = useState(workbenchGeneration);
+  const [pendingRoleUpdateId, setPendingRoleUpdateId] = useState<string | null>(null);
+  const [roleUpdateError, setRoleUpdateError] = useState<string | null>(null);
+  // Drop stale pending/error as soon as account/school/role scope changes (incl. A→B→A).
+  if (roleOpGeneration !== workbenchGeneration) {
+    setRoleOpGeneration(workbenchGeneration);
+    setPendingRoleUpdateId(null);
+    setRoleUpdateError(null);
+    roleConfirmLockRef.current = false;
+  }
+  const [reloadingAll, setReloadingAll] = useState(false);
   const [memberKeyword, setMemberKeyword] = useState('');
   const [announcementKeyword, setAnnouncementKeyword] = useState('');
   const [eventKeyword, setEventKeyword] = useState('');
@@ -338,13 +332,19 @@ export function AdminDashboardScreen(props: any) {
       allowed: canExportAdminData,
     }),
   );
-  useEffect(() => {
+  const exportRoleRef = useRef(workbenchIdentityKey);
+  useLayoutEffect(() => {
+    const roleChanged = exportRoleRef.current !== workbenchIdentityKey;
+    exportRoleRef.current = workbenchIdentityKey;
     const changed = exportSessionRef.current.setIdentity({
       uid: auth.user?.uid ?? '',
       schoolId: school.id,
-      allowed: Boolean((auth.isAdmin || auth.isEditor) && !auth.loading && !auth.profileLoading && auth.user?.uid),
+      allowed: Boolean(
+        (auth.isAdmin || auth.isEditor) && !auth.loading && !auth.profileLoading && auth.user?.uid,
+      ),
     });
-    if (changed) {
+    if (roleChanged && !changed) exportSessionRef.current.invalidate();
+    if (changed || roleChanged) {
       setExportingAnnouncements(false);
       setExportingEvents(false);
       setExportingLogs(false);
@@ -357,6 +357,7 @@ export function AdminDashboardScreen(props: any) {
     auth.loading,
     auth.profileLoading,
     school.id,
+    workbenchIdentityKey,
   ]);
   useEffect(() => {
     const session = exportSessionRef.current;
@@ -364,6 +365,32 @@ export function AdminDashboardScreen(props: any) {
       session.unmount();
     };
   }, []);
+
+  const [mutationGeneration, setMutationGeneration] = useState(workbenchGeneration);
+  if (mutationGeneration !== workbenchGeneration) {
+    setMutationGeneration(workbenchGeneration);
+    formContextsRef.current = {};
+    formSavingRef.current = {};
+    eventFormGeneration.current += 1;
+    eventSaving.current = false;
+    setShowAnnouncementModal(false);
+    setShowEventModal(false);
+    setShowCafeteriaModal(false);
+    setShowOperatorModal(false);
+    setSelectedOperatorCafeteria(null);
+    setSaving(false);
+    setSavingCafeteria(false);
+    setSavingOperator(false);
+    setBatchDeletingAnnouncements(false);
+    setBatchDeletingEvents(false);
+    setBatchPinningAnnouncements(false);
+    setBatchUnpinningAnnouncements(false);
+    setReloadingAll(false);
+  }
+  const announcementFormContext = formContextsRef.current.announcement;
+  const eventFormContext = formContextsRef.current.event;
+  const cafeteriaFormContext = formContextsRef.current.cafeteria;
+  const operatorFormContext = formContextsRef.current.operator;
 
   const [annTitle, setAnnTitle] = useState('');
   const [annBody, setAnnBody] = useState('');
@@ -395,25 +422,32 @@ export function AdminDashboardScreen(props: any) {
 
   const demoMode = isDevelopmentDemoSession(auth.user?.uid);
 
+  const sessionUid = auth.user?.uid ?? '';
+  const canAccessAdminCollections = Boolean(auth.isAdmin || auth.isEditor);
+  const adminAccessFence = auth.isAdmin ? 'admin' : auth.isEditor ? 'editor' : 'none';
+
   const {
     items: announcements,
     loading: annLoading,
     busy: annBusy,
-    error: annError,
+    error: annFailed,
+    errorMessage: annErrorMessage,
     hasMore: moreAnnouncements,
-    complete: announcementsComplete,
-    permissionDenied: annPermissionDenied,
     loadMore: loadMoreAnnouncements,
     reload: reloadAnn,
   } = useAdminCollectionPage<Announcement>({
     schoolId: school.id,
-    uid: auth.user?.uid ?? '',
+    uid: sessionUid,
+    canAccess: canAccessAdminCollections,
+    fenceKey: `${adminAccessFence}:${demoMode ? 'demo' : 'live'}`,
     demoItems: demoMode ? (DEMO_ADMIN_ANNOUNCEMENTS as Announcement[]) : undefined,
+    pageSize: ADMIN_PAGE_SIZES.announcements,
     getCollection: () => collection(db, 'schools', school.id, 'announcements'),
-    buildConstraints: () => [orderBy('publishedAt', 'desc'), orderBy(documentId(), 'desc')],
-    mapDocs: (docs: QueryDocumentSnapshot[]) =>
-      docs.map((d) => ({ id: d.id, ...(d.data() as any) })),
+    buildConstraints: () => [orderBy('publishedAt', 'desc')],
+    mapDocs: (docs) => docs.map((d) => ({ id: d.id, ...(d.data() as any) })),
   });
+  const annError = annFailed ? annErrorMessage : null;
+  const annRefreshing = annBusy && announcements.length > 0;
 
   const {
     items: events,
@@ -425,7 +459,7 @@ export function AdminDashboardScreen(props: any) {
     reload: reloadEvt,
   } = useAdminEvents<ClubEvent>(
     school.id,
-    auth.user?.uid ?? '',
+    canAccessAdminCollections ? sessionUid : '',
     demoMode ? (DEMO_ADMIN_EVENTS as ClubEvent[]) : undefined,
   );
 
@@ -433,19 +467,22 @@ export function AdminDashboardScreen(props: any) {
     items: members,
     loading: memLoading,
     busy: memBusy,
-    error: memError,
+    error: memFailed,
+    errorMessage: memErrorMessage,
     hasMore: moreMembers,
-    complete: membersComplete,
-    permissionDenied: memPermissionDenied,
     loadMore: loadMoreMembers,
     reload: reloadMem,
   } = useAdminCollectionPage<SchoolMember>({
     schoolId: school.id,
-    uid: auth.user?.uid ?? '',
+    uid: sessionUid,
+    canAccess: Boolean(auth.isAdmin),
+    fenceKey: `${adminAccessFence}:${demoMode ? 'demo' : 'live'}`,
     demoItems: demoMode ? (DEMO_ADMIN_MEMBERS as SchoolMember[]) : undefined,
+    pageSize: ADMIN_PAGE_SIZES.members,
     getCollection: () => collection(db, 'schools', school.id, 'members'),
-    buildConstraints: () => [orderBy(documentId())],
-    mapDocs: async (docs: QueryDocumentSnapshot[]) => {
+    // Default document-ID order — no explicit orderBy / composite index.
+    buildConstraints: () => [],
+    mapDocs: async (docs) => {
       const directoryProfiles = await fetchSchoolDirectoryProfiles(
         school.id,
         docs.map((docSnap) => docSnap.id),
@@ -468,37 +505,47 @@ export function AdminDashboardScreen(props: any) {
       });
     },
   });
+  const memError = memFailed ? memErrorMessage : null;
+  const memRefreshing = memBusy && members.length > 0;
 
   const {
     items: adminLogs,
     loading: logsLoading,
     busy: logsBusy,
-    error: logsError,
+    error: logsFailed,
+    errorMessage: logsErrorMessage,
     hasMore: moreLogs,
-    complete: logsComplete,
-    permissionDenied: logsPermissionDenied,
     loadMore: loadMoreLogs,
     reload: reloadLogs,
   } = useAdminCollectionPage<AdminLog>({
     schoolId: school.id,
-    uid: auth.user?.uid ?? '',
+    uid: sessionUid,
+    canAccess: Boolean(auth.isAdmin),
+    fenceKey: `${adminAccessFence}:${demoMode ? 'demo' : 'live'}`,
     demoItems: demoMode ? (DEMO_ADMIN_LOGS as AdminLog[]) : undefined,
+    pageSize: ADMIN_PAGE_SIZES.logs,
     getCollection: () => collection(db, 'schools', school.id, 'adminLogs'),
-    buildConstraints: () => [orderBy('createdAt', 'desc'), orderBy(documentId(), 'desc')],
-    mapDocs: (docs: QueryDocumentSnapshot[]) =>
-      docs.map((d) => ({ id: d.id, ...(d.data() as any) }) as AdminLog),
+    buildConstraints: () => [orderBy('createdAt', 'desc')],
+    mapDocs: (docs) => docs.map((d) => ({ id: d.id, ...(d.data() as any) })),
   });
+  const logsError = logsFailed ? logsErrorMessage : null;
+  const logsRefreshing = logsBusy && adminLogs.length > 0;
 
   const {
     items: cafeterias,
     loading: cafeteriaLoading,
+    refreshing: cafeteriaRefreshing,
+    error: cafeteriaError,
+    lastRefreshError: cafeteriaLastRefreshError,
     reload: reloadCafeterias,
+    refresh: refreshCafeterias,
   } = useAsyncList<SchoolCafeteria>(async () => {
+    if (!auth.isAdmin || !sessionUid) return [];
     if (demoMode) return DEMO_ADMIN_CAFETERIAS as SchoolCafeteria[];
     const qy = query(
       collection(db, 'schools', school.id, 'cafeterias'),
       orderBy('name', 'asc'),
-      limit(100),
+      limit(ADMIN_PAGE_SIZES.cafeterias),
     );
     const snap = await getDocs(qy);
     return snap.docs.map((docSnap) => {
@@ -520,14 +567,17 @@ export function AdminDashboardScreen(props: any) {
         updatedAt: data.updatedAt,
       } satisfies SchoolCafeteria;
     });
-  }, [db, school.id, demoMode]);
+  }, [db, school.id, demoMode, sessionUid, auth.isAdmin]);
+  const cafeteriaDisplayError = cafeteriaError ?? cafeteriaLastRefreshError;
 
   const {
     items: cafeteriaOperators,
     loading: operatorsLoading,
+    error: operatorsError,
+    lastRefreshError: operatorsLastRefreshError,
     reload: reloadOperators,
   } = useAsyncList<CafeteriaOperator>(async () => {
-    if (!selectedOperatorCafeteria) {
+    if (!auth.isAdmin || !sessionUid || !selectedOperatorCafeteria) {
       return [];
     }
 
@@ -558,14 +608,16 @@ export function AdminDashboardScreen(props: any) {
         } satisfies CafeteriaOperator;
       })
       .sort((a, b) => a.id.localeCompare(b.id, 'zh-TW'));
-  }, [db, school.id, selectedOperatorCafeteria?.id]);
+  }, [db, school.id, selectedOperatorCafeteria?.id, sessionUid, auth.isAdmin]);
 
-  const stats = useMemo(() => {
+  const loadedCounts = useMemo(() => {
     return {
       announcements: announcements.length,
       events: events.length,
       members: members.length,
       admins: members.filter((m) => m.role === 'admin').length,
+      editors: members.filter((m) => m.role === 'editor').length,
+      regular: members.filter((m) => m.role === 'member').length,
     };
   }, [announcements, events, members]);
 
@@ -641,6 +693,10 @@ export function AdminDashboardScreen(props: any) {
   }, [adminLogs, logFilter, logKeyword]);
 
   const openAnnouncementModal = (ann?: Announcement) => {
+    if (!isCurrentWorkbenchContext(actionScope) || (!auth.isAdmin && !auth.isEditor)) return;
+    formContextsRef.current.announcement = { ...actionScope };
+    formSavingRef.current.announcement = undefined;
+    setSaving(false);
     if (ann) {
       setEditingAnnouncement(ann);
       setAnnTitle(ann.title);
@@ -657,48 +713,67 @@ export function AdminDashboardScreen(props: any) {
     setShowAnnouncementModal(true);
   };
 
+  const closeAnnouncementModal = () => {
+    formContextsRef.current.announcement = undefined;
+    formSavingRef.current.announcement = undefined;
+    setShowAnnouncementModal(false);
+    setSaving(false);
+  };
+
   const saveAnnouncement = async () => {
+    const context = announcementFormContext;
+    const current = () => isCurrentForm('announcement', context);
+    if (!context || !current() || formSavingRef.current.announcement === context) return;
     if (!annTitle.trim()) {
       Alert.alert('錯誤', '請輸入標題');
       return;
     }
+    formSavingRef.current.announcement = context;
     setSaving(true);
     try {
       await upsertSchoolAnnouncement({
-        schoolId: school.id,
+        schoolId: context.schoolId,
         announcementId: editingAnnouncement?.id ?? null,
         title: annTitle.trim(),
         body: annBody.trim(),
         source: annSource.trim() || school.name,
         pinned: annPinned,
       });
-      setShowAnnouncementModal(false);
+      if (!current()) return;
       reloadAnn();
       reloadLogs();
       Alert.alert('成功', editingAnnouncement ? '公告已更新' : '公告已發布');
+      closeAnnouncementModal();
     } catch (e: any) {
-      Alert.alert('錯誤', e?.message ?? '儲存失敗');
+      if (current()) Alert.alert('錯誤', e?.message ?? '儲存失敗');
     } finally {
-      setSaving(false);
+      if (current()) {
+        formSavingRef.current.announcement = undefined;
+        setSaving(false);
+      }
     }
   };
 
   const deleteAnnouncement = async (ann: Announcement) => {
+    const scope = actionScope;
+    if (!isCurrentWorkbenchContext(scope)) return;
     Alert.alert('確認刪除', `確定要刪除「${ann.title}」？`, [
       { text: '取消', style: 'cancel' },
       {
         text: '刪除',
         style: 'destructive',
         onPress: async () => {
+          if (!isCurrentWorkbenchContext(scope)) return;
           try {
             await deleteSchoolAnnouncement({
-              schoolId: school.id,
+              schoolId: scope.schoolId,
               announcementId: ann.id,
             });
+            if (!isCurrentWorkbenchContext(scope)) return;
             reloadAnn();
             reloadLogs();
           } catch (e: any) {
-            Alert.alert('錯誤', e?.message ?? '刪除失敗');
+            if (isCurrentWorkbenchContext(scope)) Alert.alert('錯誤', e?.message ?? '刪除失敗');
           }
         },
       },
@@ -706,12 +781,15 @@ export function AdminDashboardScreen(props: any) {
   };
 
   const closeEventModal = () => {
+    formContextsRef.current.event = undefined;
     eventSaving.current = false;
     eventFormGeneration.current += 1;
     setShowEventModal(false);
     setSaving(false);
   };
   const openEventModal = (evt?: ClubEvent) => {
+    if (!isCurrentWorkbenchContext(actionScope) || (!auth.isAdmin && !auth.isEditor)) return;
+    formContextsRef.current.event = { ...actionScope };
     eventSaving.current = false;
     eventFormGeneration.current += 1;
     setEventFormScope(eventScope);
@@ -738,6 +816,10 @@ export function AdminDashboardScreen(props: any) {
   };
 
   const openCafeteriaModal = (cafeteria?: SchoolCafeteria) => {
+    if (!auth.isAdmin || !isCurrentWorkbenchContext(actionScope)) return;
+    formContextsRef.current.cafeteria = { ...actionScope };
+    formSavingRef.current.cafeteria = undefined;
+    setSavingCafeteria(false);
     if (cafeteria) {
       setEditingCafeteria(cafeteria);
       setCafeteriaName(cafeteria.name);
@@ -758,6 +840,13 @@ export function AdminDashboardScreen(props: any) {
     setShowCafeteriaModal(true);
   };
 
+  const closeCafeteriaModal = () => {
+    formContextsRef.current.cafeteria = undefined;
+    formSavingRef.current.cafeteria = undefined;
+    setShowCafeteriaModal(false);
+    setSavingCafeteria(false);
+  };
+
   const buildCafeteriaId = (name: string) => {
     const normalized = name
       .trim()
@@ -768,15 +857,20 @@ export function AdminDashboardScreen(props: any) {
   };
 
   const saveCafeteria = async () => {
+    const context = cafeteriaFormContext;
+    const current = () => isCurrentForm('cafeteria', context);
+    if (!context || !auth.isAdmin || !current() || formSavingRef.current.cafeteria === context)
+      return;
     if (!cafeteriaName.trim()) {
       Alert.alert('錯誤', '請輸入餐廳名稱');
       return;
     }
 
+    formSavingRef.current.cafeteria = context;
     setSavingCafeteria(true);
     try {
       await upsertSchoolCafeteriaConfig({
-        schoolId: school.id,
+        schoolId: context.schoolId,
         cafeteriaId: editingCafeteria?.id ?? buildCafeteriaId(cafeteriaName),
         name: cafeteriaName.trim(),
         location: cafeteriaLocation.trim() || null,
@@ -785,18 +879,26 @@ export function AdminDashboardScreen(props: any) {
         pilotStatus: cafeteriaPilotStatus,
         orderingEnabled: cafeteriaOrderingEnabled,
       });
-      setShowCafeteriaModal(false);
+      if (!current()) return;
       reloadCafeterias();
       reloadLogs();
       Alert.alert('成功', editingCafeteria ? '餐廳設定已更新' : '餐廳已建立');
+      closeCafeteriaModal();
     } catch (e: any) {
-      Alert.alert('錯誤', e?.message ?? '儲存餐廳設定失敗');
+      if (current()) Alert.alert('錯誤', e?.message ?? '儲存餐廳設定失敗');
     } finally {
-      setSavingCafeteria(false);
+      if (current()) {
+        formSavingRef.current.cafeteria = undefined;
+        setSavingCafeteria(false);
+      }
     }
   };
 
   const openOperatorModal = (cafeteria: SchoolCafeteria, operator?: CafeteriaOperator) => {
+    if (!auth.isAdmin || !isCurrentWorkbenchContext(actionScope)) return;
+    formContextsRef.current.operator = { ...actionScope };
+    formSavingRef.current.operator = undefined;
+    setSavingOperator(false);
     setSelectedOperatorCafeteria(cafeteria);
     setOperatorUid(operator?.id ?? '');
     setOperatorDisplayName(operator?.displayName ?? '');
@@ -806,7 +908,18 @@ export function AdminDashboardScreen(props: any) {
     setShowOperatorModal(true);
   };
 
+  const closeOperatorModal = () => {
+    formContextsRef.current.operator = undefined;
+    formSavingRef.current.operator = undefined;
+    setShowOperatorModal(false);
+    setSavingOperator(false);
+  };
+
   const saveOperatorAssignment = async () => {
+    const context = operatorFormContext;
+    const current = () => isCurrentForm('operator', context);
+    if (!context || !auth.isAdmin || !current() || formSavingRef.current.operator === context)
+      return;
     if (!selectedOperatorCafeteria) {
       Alert.alert('錯誤', '請先選擇餐廳');
       return;
@@ -816,10 +929,11 @@ export function AdminDashboardScreen(props: any) {
       return;
     }
 
+    formSavingRef.current.operator = context;
     setSavingOperator(true);
     try {
       await upsertCafeteriaOperatorAssignment({
-        schoolId: school.id,
+        schoolId: context.schoolId,
         cafeteriaId: selectedOperatorCafeteria.id,
         targetUid: operatorUid.trim(),
         displayName: operatorDisplayName.trim() || null,
@@ -827,14 +941,18 @@ export function AdminDashboardScreen(props: any) {
         role: operatorRole,
         status: operatorStatus,
       });
+      if (!current()) return;
       reloadOperators();
       reloadCafeterias();
       reloadLogs();
       Alert.alert('成功', '店員指派已更新');
     } catch (e: any) {
-      Alert.alert('錯誤', e?.message ?? '店員指派失敗');
+      if (current()) Alert.alert('錯誤', e?.message ?? '店員指派失敗');
     } finally {
-      setSavingOperator(false);
+      if (current()) {
+        formSavingRef.current.operator = undefined;
+        setSavingOperator(false);
+      }
     }
   };
 
@@ -842,9 +960,10 @@ export function AdminDashboardScreen(props: any) {
     const generation = eventFormGeneration.current;
     const current = () =>
       eventMounted.current &&
+      isCurrentForm('event', eventFormContext) &&
       currentEventScope.current === eventScope &&
       eventFormGeneration.current === generation;
-    if (!current() || eventSaving.current) return;
+    if (!eventFormContext || !current() || eventSaving.current) return;
     if (!evtTitle.trim()) {
       Alert.alert('錯誤', '請輸入活動名稱');
       return;
@@ -876,7 +995,7 @@ export function AdminDashboardScreen(props: any) {
     setSaving(true);
     try {
       await upsertSchoolEvent({
-        schoolId: school.id,
+        schoolId: eventFormContext.schoolId,
         eventId: editingEvent?.id ?? null,
         registrationPolicy: registrationPolicyInput(evtRegistrationPolicy),
         title: evtTitle.trim(),
@@ -902,61 +1021,124 @@ export function AdminDashboardScreen(props: any) {
   };
 
   const deleteEvent = async (evt: ClubEvent) => {
+    const scope = actionScope;
+    if (!isCurrentWorkbenchContext(scope)) return;
     Alert.alert('確認刪除', `確定要刪除「${evt.title}」？`, [
       { text: '取消', style: 'cancel' },
       {
         text: '刪除',
         style: 'destructive',
         onPress: async () => {
+          if (!isCurrentWorkbenchContext(scope)) return;
           try {
             await deleteSchoolEvent({
-              schoolId: school.id,
+              schoolId: scope.schoolId,
               eventId: evt.id,
             });
+            if (!isCurrentWorkbenchContext(scope)) return;
             reloadEvt();
             reloadLogs();
           } catch (e: any) {
-            Alert.alert('錯誤', e?.message ?? '刪除失敗');
+            if (isCurrentWorkbenchContext(scope)) Alert.alert('錯誤', e?.message ?? '刪除失敗');
           }
         },
       },
     ]);
   };
 
-  const updateMemberRole = async (member: SchoolMember, newRole: 'admin' | 'editor' | 'member') => {
+  const applyMemberRoleChange = async (captured: {
+    generation: number;
+    identityKey: string;
+    schoolId: string;
+    targetUid: string;
+    oldRole: MemberRole;
+    newRole: MemberRole;
+    displayName: string;
+  }) => {
+    roleConfirmLockRef.current = false;
+    if (!isCurrentWorkbenchContext(captured)) return;
+    if (!auth.isAdmin) return;
+    setRoleUpdateError(null);
+    setPendingRoleUpdateId(captured.targetUid);
     try {
       await updateSchoolMemberRoleCall({
-        schoolId: school.id,
-        targetUid: member.id,
-        role: newRole,
+        schoolId: captured.schoolId,
+        targetUid: captured.targetUid,
+        role: captured.newRole,
       });
+      if (!isCurrentWorkbenchContext(captured)) return;
       reloadMem();
       reloadLogs();
       Alert.alert('成功', '權限已更新');
     } catch (e: any) {
-      Alert.alert('錯誤', e?.message ?? '更新失敗');
+      if (!isCurrentWorkbenchContext(captured)) return;
+      const message = e?.message ?? '更新失敗';
+      setRoleUpdateError(message);
+      Alert.alert('錯誤', message);
+    } finally {
+      // Never clear a newer operation from an old completion.
+      if (isCurrentWorkbenchContext(captured)) {
+        setPendingRoleUpdateId(null);
+      }
     }
   };
 
-  const clearTestingData = async () => {
-    setCleaningData(true);
+  const requestMemberRoleChange = (member: SchoolMember, newRole: MemberRole) => {
+    if (!auth.isAdmin || !workbenchMountedRef.current) return;
+    if (member.role === newRole) return;
+    if (pendingRoleUpdateId || roleConfirmLockRef.current) return;
+
+    const captured = {
+      generation: workbenchGeneration,
+      identityKey: workbenchIdentityKey,
+      schoolId: school.id,
+      targetUid: member.id,
+      oldRole: member.role,
+      newRole,
+      displayName: member.displayName?.trim() || member.id,
+    };
+    roleConfirmLockRef.current = true;
+    Alert.alert(
+      '確認變更權限',
+      `確定將「${captured.displayName}」的角色由「${memberRoleLabel(captured.oldRole)}」改為「${memberRoleLabel(captured.newRole)}」？`,
+      [
+        {
+          text: '取消',
+          style: 'cancel',
+          onPress: () => {
+            roleConfirmLockRef.current = false;
+          },
+        },
+        {
+          text: '確認變更',
+          onPress: () => {
+            void applyMemberRoleChange(captured);
+          },
+        },
+      ],
+    );
+  };
+
+  const reloadAllWorkbenchData = async () => {
+    const scope = actionScope;
+    if (!isCurrentWorkbenchContext(scope)) return;
+    setReloadingAll(true);
     try {
-      const result = await clearSchoolAdminTestDataCall({ schoolId: school.id });
-      reloadAnn();
-      reloadEvt();
-      reloadLogs();
-      Alert.alert(
-        '成功',
-        `已清空測試資料（公告 ${result.deleted.announcements} 筆、活動 ${result.deleted.events} 筆）`,
-      );
-    } catch (e: any) {
-      Alert.alert('錯誤', e?.message ?? '清空資料失敗');
+      await Promise.all([
+        Promise.resolve(reloadAnn()),
+        Promise.resolve(reloadMem()),
+        Promise.resolve(reloadLogs()),
+        refreshCafeterias(),
+        Promise.resolve(reloadEvt()),
+      ]);
     } finally {
-      setCleaningData(false);
+      if (isCurrentWorkbenchContext(scope)) setReloadingAll(false);
     }
   };
 
   const batchDeleteFilteredAnnouncements = async () => {
+    const scope = actionScope;
+    if (!isCurrentWorkbenchContext(scope)) return;
     if (sortedAnnouncements.length === 0) {
       Alert.alert('提示', '目前沒有可刪除的公告。');
       return;
@@ -964,21 +1146,24 @@ export function AdminDashboardScreen(props: any) {
     setBatchDeletingAnnouncements(true);
     try {
       await bulkUpdateSchoolAnnouncements({
-        schoolId: school.id,
+        schoolId: scope.schoolId,
         announcementIds: sortedAnnouncements.map((ann) => ann.id),
         action: 'delete',
       });
+      if (!isCurrentWorkbenchContext(scope)) return;
       reloadAnn();
       reloadLogs();
       Alert.alert('成功', `已刪除 ${sortedAnnouncements.length} 則公告`);
     } catch (e: any) {
-      Alert.alert('錯誤', e?.message ?? '批次刪除公告失敗');
+      if (isCurrentWorkbenchContext(scope)) Alert.alert('錯誤', e?.message ?? '批次刪除公告失敗');
     } finally {
-      setBatchDeletingAnnouncements(false);
+      if (isCurrentWorkbenchContext(scope)) setBatchDeletingAnnouncements(false);
     }
   };
 
   const batchDeleteFilteredEvents = async () => {
+    const scope = actionScope;
+    if (!isCurrentWorkbenchContext(scope)) return;
     if (sortedEvents.length === 0) {
       Alert.alert('提示', '目前沒有可刪除的活動。');
       return;
@@ -986,20 +1171,23 @@ export function AdminDashboardScreen(props: any) {
     setBatchDeletingEvents(true);
     try {
       await bulkDeleteSchoolEvents({
-        schoolId: school.id,
+        schoolId: scope.schoolId,
         eventIds: sortedEvents.map((evt) => evt.id),
       });
+      if (!isCurrentWorkbenchContext(scope)) return;
       reloadEvt();
       reloadLogs();
       Alert.alert('成功', `已刪除 ${sortedEvents.length} 個活動`);
     } catch (e: any) {
-      Alert.alert('錯誤', e?.message ?? '批次刪除活動失敗');
+      if (isCurrentWorkbenchContext(scope)) Alert.alert('錯誤', e?.message ?? '批次刪除活動失敗');
     } finally {
-      setBatchDeletingEvents(false);
+      if (isCurrentWorkbenchContext(scope)) setBatchDeletingEvents(false);
     }
   };
 
   const batchSetPinForFilteredAnnouncements = async (pinned: boolean) => {
+    const scope = actionScope;
+    if (!isCurrentWorkbenchContext(scope)) return;
     if (sortedAnnouncements.length === 0) {
       Alert.alert('提示', '目前沒有可更新的公告。');
       return;
@@ -1011,10 +1199,11 @@ export function AdminDashboardScreen(props: any) {
     }
     try {
       await bulkUpdateSchoolAnnouncements({
-        schoolId: school.id,
+        schoolId: scope.schoolId,
         announcementIds: sortedAnnouncements.map((ann) => ann.id),
         action: pinned ? 'pin' : 'unpin',
       });
+      if (!isCurrentWorkbenchContext(scope)) return;
       reloadAnn();
       reloadLogs();
       Alert.alert(
@@ -1022,10 +1211,12 @@ export function AdminDashboardScreen(props: any) {
         `已將 ${sortedAnnouncements.length} 則公告設為${pinned ? '置頂' : '非置頂'}`,
       );
     } catch (e: any) {
-      Alert.alert('錯誤', e?.message ?? '批次更新公告失敗');
+      if (isCurrentWorkbenchContext(scope)) Alert.alert('錯誤', e?.message ?? '批次更新公告失敗');
     } finally {
-      setBatchPinningAnnouncements(false);
-      setBatchUnpinningAnnouncements(false);
+      if (isCurrentWorkbenchContext(scope)) {
+        setBatchPinningAnnouncements(false);
+        setBatchUnpinningAnnouncements(false);
+      }
     }
   };
 
@@ -1038,22 +1229,26 @@ export function AdminDashboardScreen(props: any) {
     const session = exportSessionRef.current;
     assertExportStillCurrent(session, token);
     const file = new File(Paths.cache, filename);
-    file.write(csv);
-    assertExportStillCurrent(session, token);
-    const canShare = await isAvailableAsync();
-    assertExportStillCurrent(session, token);
-    if (!canShare) {
-      if (options?.allowCacheOnlyAlert !== false) {
-        Alert.alert('提示', '此裝置不支援分享功能，檔案已產生於快取目錄。');
+    try {
+      file.write(csv);
+      assertExportStillCurrent(session, token);
+      const canShare = await isAvailableAsync();
+      assertExportStillCurrent(session, token);
+      if (!canShare) {
+        if (options?.allowCacheOnlyAlert !== false) {
+          Alert.alert('提示', '此裝置目前無法分享檔案。');
+        }
+        return false;
       }
-      return false;
+      await shareAsync(file.uri, {
+        mimeType: 'text/csv',
+        UTI: 'public.comma-separated-values-text',
+      });
+      assertExportStillCurrent(session, token);
+      return true;
+    } finally {
+      cleanupAdminExportFile(file);
     }
-    await shareAsync(file.uri, {
-      mimeType: 'text/csv',
-      UTI: 'public.comma-separated-values-text',
-    });
-    assertExportStillCurrent(session, token);
-    return true;
   };
 
   const writeAdminLogsCsv = async (
@@ -1072,11 +1267,7 @@ export function AdminDashboardScreen(props: any) {
         scopeNote,
       ]),
     );
-    await shareCsvFile(
-      `admin-logs-${token.captured.schoolCode}-${Date.now()}.csv`,
-      csv,
-      token,
-    );
+    return shareCsvFile(`admin-logs-${token.captured.schoolCode}-${Date.now()}.csv`, csv, token);
   };
 
   type LoadedLogsExportTicket = {
@@ -1091,9 +1282,7 @@ export function AdminDashboardScreen(props: any) {
     partial: boolean;
   };
 
-  const exportAnnouncementsCsv = async (
-    ticket?: SnapshotExportTicket<Announcement>,
-  ) => {
+  const exportAnnouncementsCsv = async (ticket?: SnapshotExportTicket<Announcement>) => {
     const session = exportSessionRef.current;
     const origin = ticket?.origin ?? session.captureOrigin(school.code);
     const rows = ticket?.rows ?? [...sortedAnnouncements];
@@ -1126,11 +1315,14 @@ export function AdminDashboardScreen(props: any) {
           partial ? 'loaded_filtered_partial' : 'loaded_filtered_complete',
         ]),
       );
-      await shareCsvFile(
-        `announcements-${token.captured.schoolCode}-${Date.now()}.csv`,
-        csv,
-        token,
-      );
+      if (
+        !(await shareCsvFile(
+          `announcements-${token.captured.schoolCode}-${Date.now()}.csv`,
+          csv,
+          token,
+        ))
+      )
+        return;
       assertExportStillCurrent(session, token);
       logAdminAction(
         'export_announcements_csv',
@@ -1188,7 +1380,10 @@ export function AdminDashboardScreen(props: any) {
           partial ? 'loaded_filtered_partial' : 'loaded_filtered_complete',
         ]),
       );
-      await shareCsvFile(`events-${token.captured.schoolCode}-${Date.now()}.csv`, csv, token);
+      if (
+        !(await shareCsvFile(`events-${token.captured.schoolCode}-${Date.now()}.csv`, csv, token))
+      )
+        return;
       assertExportStillCurrent(session, token);
       logAdminAction(
         'export_events_csv',
@@ -1222,7 +1417,7 @@ export function AdminDashboardScreen(props: any) {
         count: ticket.rows.length,
       };
       const scopeNote = describeAdminLogExportScope(scope);
-      await writeAdminLogsCsv(ticket.rows, scopeNote, token);
+      if (!(await writeAdminLogsCsv(ticket.rows, scopeNote, token))) return;
       assertExportStillCurrent(session, token);
       logAdminAction(
         'export_admin_logs_csv',
@@ -1246,10 +1441,7 @@ export function AdminDashboardScreen(props: any) {
 
   const exportAllAdminLogsCsv = async (origin: AdminExportOrigin) => {
     if (demoMode) {
-      Alert.alert(
-        '提示',
-        '示範模式僅能匯出畫面上已載入的操作紀錄，不會向伺服器分頁擷取完整歷史。',
-      );
+      Alert.alert('提示', '示範模式僅能匯出畫面上已載入的操作紀錄，不會向伺服器分頁擷取完整歷史。');
       return;
     }
     const session = exportSessionRef.current;
@@ -1279,7 +1471,7 @@ export function AdminDashboardScreen(props: any) {
         capped: result.capped,
       };
       const scopeNote = describeAdminLogExportScope(scope);
-      await writeAdminLogsCsv(result.rows, scopeNote, token);
+      if (!(await writeAdminLogsCsv(result.rows, scopeNote, token))) return;
       assertExportStillCurrent(session, token);
       logAdminAction(
         'export_admin_logs_csv',
@@ -1287,7 +1479,11 @@ export function AdminDashboardScreen(props: any) {
       );
       Alert.alert('匯出完成', scopeNote);
     } catch (e: any) {
-      if (e?.name === 'AbortError' || token.controller.signal.aborted || !session.isCurrent(token)) {
+      if (
+        e?.name === 'AbortError' ||
+        token.controller.signal.aborted ||
+        !session.isCurrent(token)
+      ) {
         // Lifecycle invalidate/cancel: no stale success alert or share.
         return;
       }
@@ -1345,6 +1541,7 @@ export function AdminDashboardScreen(props: any) {
   };
 
   const promptAdminLogsExport = () => {
+    if (!auth.isAdmin || authSettling) return;
     const origin = exportSessionRef.current.captureOrigin(school.code);
     if (!origin) {
       Alert.alert('權限不足', '目前帳號沒有匯出操作紀錄的權限，或身分仍在確認中。');
@@ -1383,229 +1580,224 @@ export function AdminDashboardScreen(props: any) {
           style={{ flex: 1 }}
           contentContainerStyle={{ gap: 12, paddingBottom: TAB_BAR_CONTENT_BOTTOM_PADDING }}
         >
-          <Card title="管理員控制台" subtitle="此功能僅限管理員或編輯者使用。">
+          <AdminSurface title="管理後台" description="此功能僅限管理員或編輯者使用。">
             <Pill text="權限不足" />
-            <Text style={{ color: theme.colors.muted, marginTop: 10, lineHeight: 20 }}>
-              若你是管理員，請用具有管理員權限的帳號登入。
-            </Text>
-          </Card>
+            <Text style={adminStyles.mutedNote}>若你是管理員，請用具有管理員權限的帳號登入。</Text>
+          </AdminSurface>
         </ScrollView>
       </Screen>
     );
   }
 
+  const roleLabel = auth.isAdmin ? '學校管理員' : '校園內容編輯';
+  const listsRefreshing =
+    reloadingAll || annBusy || memBusy || logsBusy || cafeteriaRefreshing || evtBusy;
+
   return (
     <Screen>
       <ScrollView
         style={{ flex: 1 }}
-        contentContainerStyle={{ gap: 12, paddingBottom: TAB_BAR_CONTENT_BOTTOM_PADDING }}
+        contentContainerStyle={{ gap: 14, paddingBottom: TAB_BAR_CONTENT_BOTTOM_PADDING }}
       >
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 8 }}>
-          <HeaderAvatarButton />
-          <View style={{ flex: 1 }}>
-            <Text
-              style={{
-                color: theme.colors.muted,
-                fontSize: 11,
-                fontWeight: '700',
-                letterSpacing: 1.5,
-                textTransform: 'uppercase',
-              }}
-            >
-              學習 · 管理員模式
-            </Text>
-            <Text style={{ color: theme.colors.text, fontSize: 22, fontWeight: '700' }}>
-              管理後台
-            </Text>
-          </View>
-        </View>
-        <View style={{ flexDirection: 'row', gap: 8 }}>
-          <TabButton
-            icon="grid"
-            label="總覽"
-            active={tab === 'overview'}
-            onPress={() => setTab('overview')}
-          />
-          <TabButton
-            icon="newspaper"
-            label="公告"
-            active={tab === 'announcements'}
-            onPress={() => setTab('announcements')}
-          />
-          <TabButton
-            icon="calendar"
-            label="活動"
-            active={tab === 'events'}
-            onPress={() => setTab('events')}
-          />
-          <TabButton
-            icon="people"
-            label="成員"
-            active={tab === 'members'}
-            onPress={() => setTab('members')}
-          />
-          <TabButton
-            icon="settings"
-            label="設定"
-            active={tab === 'settings'}
-            onPress={() => setTab('settings')}
-          />
-        </View>
+        <AdminWorkbenchHeader
+          schoolName={school.name}
+          schoolCode={school.code}
+          roleLabel={roleLabel}
+          accountText={auth.user?.email ?? auth.user?.uid ?? null}
+        />
+        <AdminTabBar
+          active={activeTab}
+          onChange={setTab}
+          items={
+            auth.isAdmin
+              ? ADMIN_TABS
+              : ADMIN_TABS.filter((item) => item.key !== 'members' && item.key !== 'settings')
+          }
+        />
 
-        {tab === 'overview' && (
+        {activeTab === 'overview' && (
           <>
-            {demoMode && (
-              <AIMissionControl uid={auth.user?.uid ?? ''} maxVisible={3} hideWhenEmpty />
-            )}
-
-            <AnimatedCard title="管理員總覽" subtitle={`${school.name}（${school.code}）`}>
-              <View
-                style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 12 }}
-              >
-                <Pill text={auth.isAdmin ? '管理員' : '編輯者'} kind="accent" />
-                <Text style={{ color: theme.colors.muted, fontSize: 12 }}>{auth.user?.email}</Text>
-              </View>
-            </AnimatedCard>
-
-            {ambientCue ? (
-              <AmbientCueCard
-                signalType={ambientCue.signalType}
-                headline={ambientCue.headline}
-                body={ambientCue.body}
-                metric={ambientCue.metric}
-                actionLabel={ambientCue.ctaLabel}
-                onPress={() => openAmbientCue(ambientCue, nav)}
-                onDismiss={() => {
-                  void dismissAmbientCue(ambientCue);
-                }}
-              />
-            ) : null}
-
-            <View style={{ flexDirection: 'row', gap: 12 }}>
-              <View style={{ flex: 1 }}>
-                <StatCard
-                  icon="newspaper-outline"
-                  label={moreAnnouncements ? '已載入公告' : '公告'}
-                  value={stats.announcements}
-                  color={theme.colors.accent}
-                  onPress={() => setTab('announcements')}
-                />
-              </View>
-              <View style={{ flex: 1 }}>
-                <StatCard
-                  icon="calendar-outline"
-                  label={moreEvents ? '已載入活動' : '活動'}
-                  value={stats.events}
-                  color={theme.colors.success}
-                  onPress={() => setTab('events')}
-                />
-              </View>
-              <View style={{ flex: 1 }}>
-                <StatCard
-                  icon="people-outline"
-                  label={moreMembers ? '已載入成員' : '成員'}
-                  value={stats.members}
-                  color="#FF9500"
-                  onPress={() => setTab('members')}
-                />
-              </View>
-            </View>
-
-            <Card title="快速操作">
-              <View style={{ gap: 10 }}>
-                <Button text="發布新公告" kind="primary" onPress={() => openAnnouncementModal()} />
+            <AdminSurface title="今日工作" description="發布校內消息、安排活動，並追蹤最近更新。">
+              <View style={adminStyles.actionStack}>
+                <Button text="發布公告" kind="primary" onPress={() => openAnnouncementModal()} />
                 <Button text="建立新活動" onPress={() => openEventModal()} />
-                <Button text="課程認證" onPress={() => nav?.navigate?.('AdminCourseVerify')} />
               </View>
-            </Card>
+              {auth.isAdmin ? (
+                <View style={adminStyles.secondaryActions}>
+                  <Button text="前往成員" kind="outline" onPress={() => setTab('members')} />
+                  <Button text="前往設定" kind="outline" onPress={() => setTab('settings')} />
+                  <Button
+                    text="課程認證"
+                    kind="outline"
+                    onPress={() => nav?.navigate?.('AdminCourseVerify')}
+                  />
+                </View>
+              ) : null}
+            </AdminSurface>
 
-            <Card title="最新公告" subtitle={`最近 ${Math.min(3, announcements.length)} 則`}>
-              {annLoading ? (
-                <Text style={{ color: theme.colors.muted }}>載入中...</Text>
-              ) : announcements.length === 0 ? (
-                <Text style={{ color: theme.colors.muted }}>尚無公告</Text>
-              ) : (
+            <AdminSurface
+              title="資料狀態"
+              description="資料分批載入；搜尋與匯出以已載入的內容為準。"
+            >
+              <AdminDataStatusRow
+                label="公告"
+                value={formatDataStatus({
+                  loading: annLoading,
+                  refreshing: annRefreshing || reloadingAll,
+                  error: annError,
+                  count: loadedCounts.announcements,
+                  hasMore: moreAnnouncements,
+                })}
+                isError={Boolean(annError)}
+                onRetry={() => void reloadAnn()}
+              />
+              <AdminDataStatusRow
+                label="活動"
+                value={
+                  evtLoading && events.length === 0
+                    ? '載入中…'
+                    : evtBusy
+                      ? `更新中…（目前已載入 ${loadedCounts.events}）`
+                      : evtError
+                        ? events.length > 0
+                          ? '載入失敗（已載入內容仍保留）'
+                          : '活動載入失敗，請重試'
+                        : moreEvents
+                          ? `目前已載入 ${loadedCounts.events}（尚可載入更多）`
+                          : `目前已載入 ${loadedCounts.events}`
+                }
+                isError={Boolean(evtError)}
+                onRetry={() => void reloadEvt()}
+                isLast={!auth.isAdmin}
+              />
+              {auth.isAdmin ? (
+                <AdminDataStatusRow
+                  label="成員"
+                  value={formatDataStatus({
+                    loading: memLoading,
+                    refreshing: memRefreshing || reloadingAll,
+                    error: memError,
+                    count: loadedCounts.members,
+                    hasMore: moreMembers,
+                  })}
+                  isError={Boolean(memError)}
+                  onRetry={() => void reloadMem()}
+                  isLast
+                />
+              ) : null}
+            </AdminSurface>
+
+            <AdminSurface
+              title="最近公告"
+              description={
+                annError
+                  ? '公告清單載入失敗'
+                  : annLoading
+                    ? '載入中…'
+                    : `顯示最近 ${Math.min(3, announcements.length)} 則（已載入範圍內）`
+              }
+            >
+              <AdminListFeedback
+                loading={annLoading}
+                error={annError}
+                empty={announcements.length === 0}
+                emptyText="尚無公告"
+                onRetry={reloadAnn}
+              >
                 <View style={{ gap: 8 }}>
                   {announcements.slice(0, 3).map((ann) => (
                     <Pressable
                       key={ann.id}
                       onPress={() => openAnnouncementModal(ann)}
-                      style={{
-                        padding: 10,
-                        borderRadius: theme.radius.md,
-                        backgroundColor: theme.colors.surface2,
-                        borderWidth: 1,
-                        borderColor: theme.colors.border,
-                      }}
+                      style={adminStyles.listItem}
                     >
-                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-                        {ann.pinned && (
+                      <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 8 }}>
+                        {ann.pinned ? (
                           <Ionicons name="pin" size={14} color={theme.colors.accent} />
-                        )}
-                        <Text
-                          style={{ color: theme.colors.text, fontWeight: '700', flex: 1 }}
-                          numberOfLines={1}
-                        >
-                          {ann.title}
-                        </Text>
+                        ) : null}
+                        <Text style={[adminStyles.listItemTitle, { flex: 1 }]}>{ann.title}</Text>
                       </View>
-                      <Text style={{ color: theme.colors.muted, fontSize: 11, marginTop: 4 }}>
+                      <Text style={adminStyles.listItemMeta}>
                         {formatDateTime(ann.publishedAt)}
                       </Text>
                     </Pressable>
                   ))}
                 </View>
-              )}
-            </Card>
+              </AdminListFeedback>
+            </AdminSurface>
+
+            <AdminSurface
+              title="最近活動"
+              description={
+                evtError
+                  ? events.length > 0
+                    ? '活動清單載入失敗；已載入內容仍保留'
+                    : '活動清單載入失敗，請重新讀取'
+                  : evtLoading && events.length === 0
+                    ? '載入中…'
+                    : `顯示最近 ${Math.min(3, events.length)} 個（已載入範圍內）`
+              }
+            >
+              <AdminListFeedback
+                loading={evtLoading && events.length === 0}
+                error={evtError ? '無法更新活動列表' : null}
+                empty={events.length === 0}
+                emptyText="尚無活動"
+                onRetry={() => void reloadEvt()}
+              >
+                <View style={{ gap: 8 }}>
+                  {events.slice(0, 3).map((evt) => (
+                    <Pressable
+                      key={evt.id}
+                      onPress={() => openEventModal(evt)}
+                      style={adminStyles.listItem}
+                    >
+                      <Text style={adminStyles.listItemTitle}>{evt.title}</Text>
+                      <Text style={adminStyles.listItemMeta}>
+                        {formatDateTime(evt.startsAt) || '時間尚未公布'}
+                        {evt.location ? ` · ${evt.location}` : ''}
+                      </Text>
+                    </Pressable>
+                  ))}
+                </View>
+              </AdminListFeedback>
+            </AdminSurface>
           </>
         )}
 
-        {tab === 'announcements' && (
-          <Card
+        {activeTab === 'announcements' && (
+          <AdminSurface
             title="公告管理"
-            subtitle={loadedScopeHint(announcements.length, moreAnnouncements, '則公告')}
+            description={`${formatDataStatus({
+              loading: annLoading,
+              refreshing: annRefreshing,
+              error: annError,
+              count: announcements.length,
+              hasMore: moreAnnouncements,
+            })}。搜尋與匯出目前已載入的資料。`}
           >
-            <View style={{ marginBottom: 12 }}>
-              <TextInput
-                value={announcementKeyword}
-                onChangeText={setAnnouncementKeyword}
-                placeholder="搜尋已載入公告的標題、內容、來源"
-                placeholderTextColor={theme.colors.muted}
-                style={{
-                  paddingVertical: 10,
-                  paddingHorizontal: 12,
-                  borderRadius: theme.radius.md,
-                  borderWidth: 1,
-                  borderColor: theme.colors.border,
-                  backgroundColor: theme.colors.surface2,
-                  color: theme.colors.text,
-                }}
-              />
-              {moreAnnouncements ? (
-                <Text style={{ color: theme.colors.muted, fontSize: 12, marginTop: 6 }}>
-                  搜尋只比對已載入列。若要找更早的公告，請先載入更多。
-                </Text>
-              ) : announcementsComplete ? (
-                <Text style={{ color: theme.colors.muted, fontSize: 12, marginTop: 6 }}>
-                  已載入全部可讀取公告；目前搜尋範圍即為全部。
-                </Text>
-              ) : null}
+            <TextInput
+              value={announcementKeyword}
+              onChangeText={setAnnouncementKeyword}
+              placeholder="搜尋目前已載入的標題、內容、來源"
+              placeholderTextColor={theme.colors.muted}
+              style={adminStyles.searchField}
+            />
+            <SegmentedControl
+              options={[
+                { key: 'latest', label: '最新' },
+                { key: 'oldest', label: '最舊' },
+                { key: 'pinned', label: '置頂優先' },
+              ]}
+              selected={announcementSort}
+              onChange={setAnnouncementSort}
+            />
+            <View style={adminStyles.actionStack}>
+              <Button text="發布公告" kind="primary" onPress={() => openAnnouncementModal()} />
             </View>
-            <View style={{ marginBottom: 12 }}>
-              <SegmentedControl
-                options={[
-                  { key: 'latest', label: '最新' },
-                  { key: 'oldest', label: '最舊' },
-                  { key: 'pinned', label: '置頂優先' },
-                ]}
-                selected={announcementSort}
-                onChange={setAnnouncementSort}
-              />
-            </View>
-            <View style={{ marginBottom: 12, gap: 8 }}>
-              <Button text="發布新公告" kind="primary" onPress={() => openAnnouncementModal()} />
+            <View style={adminStyles.secondaryActions}>
               <Button
-                text={batchPinningAnnouncements ? '套用中...' : '目前篩選結果：批次置頂'}
+                text={batchPinningAnnouncements ? '套用中...' : '批次置頂（目前篩選）'}
                 disabled={
                   batchPinningAnnouncements ||
                   batchUnpinningAnnouncements ||
@@ -1614,7 +1806,7 @@ export function AdminDashboardScreen(props: any) {
                 onPress={() =>
                   Alert.alert(
                     '確認批次置頂',
-                    `將 ${sortedAnnouncements.length} 則目前篩選出的公告設為置頂，確定繼續？`,
+                    `將目前已載入且篩選出的 ${sortedAnnouncements.length} 則公告設為置頂，確定繼續？`,
                     [
                       { text: '取消', style: 'cancel' },
                       { text: '確認', onPress: () => batchSetPinForFilteredAnnouncements(true) },
@@ -1623,7 +1815,7 @@ export function AdminDashboardScreen(props: any) {
                 }
               />
               <Button
-                text={batchUnpinningAnnouncements ? '套用中...' : '目前篩選結果：批次取消置頂'}
+                text={batchUnpinningAnnouncements ? '套用中...' : '批次取消置頂（目前篩選）'}
                 disabled={
                   batchPinningAnnouncements ||
                   batchUnpinningAnnouncements ||
@@ -1632,7 +1824,7 @@ export function AdminDashboardScreen(props: any) {
                 onPress={() =>
                   Alert.alert(
                     '確認批次取消置頂',
-                    `將 ${sortedAnnouncements.length} 則目前篩選出的公告改為非置頂，確定繼續？`,
+                    `將目前已載入且篩選出的 ${sortedAnnouncements.length} 則公告改為非置頂，確定繼續？`,
                     [
                       { text: '取消', style: 'cancel' },
                       { text: '確認', onPress: () => batchSetPinForFilteredAnnouncements(false) },
@@ -1647,7 +1839,7 @@ export function AdminDashboardScreen(props: any) {
                 onPress={() =>
                   Alert.alert(
                     '確認批次刪除',
-                    `將刪除 ${sortedAnnouncements.length} 則目前篩選出的公告，確定繼續？`,
+                    `將刪除目前已載入且篩選出的 ${sortedAnnouncements.length} 則公告，確定繼續？`,
                     [
                       { text: '取消', style: 'cancel' },
                       {
@@ -1678,117 +1870,78 @@ export function AdminDashboardScreen(props: any) {
             </View>
             {annLoading ? (
               <LoadingState title="公告" subtitle="載入中..." rows={3} />
+            ) : annError && announcements.length === 0 ? (
+              <AdminListFeedback
+                loading={false}
+                error={annError}
+                empty={false}
+                emptyText=""
+                onRetry={() => void reloadAnn()}
+              />
             ) : (
               <View style={{ gap: 10 }}>
+                {annError ? (
+                  <Text style={adminStyles.inlineError}>
+                    載入失敗，請重試。已載入的內容仍會保留。
+                  </Text>
+                ) : null}
                 {sortedAnnouncements.map((ann) => (
-                  <View
-                    key={ann.id}
-                    style={{
-                      padding: 12,
-                      borderRadius: theme.radius.md,
-                      backgroundColor: theme.colors.surface2,
-                      borderWidth: 1,
-                      borderColor: theme.colors.border,
-                    }}
-                  >
-                    <View
-                      style={{
-                        flexDirection: 'row',
-                        alignItems: 'center',
-                        gap: 8,
-                        marginBottom: 6,
-                      }}
-                    >
-                      {ann.pinned && <Pill text="置頂" kind="accent" />}
-                      {ann.source && <Pill text={ann.source} />}
+                  <View key={ann.id} style={adminStyles.listItem}>
+                    <View style={adminStyles.chipWrap}>
+                      {ann.pinned ? <Pill text="置頂" kind="accent" /> : null}
+                      {ann.source ? <Pill text={ann.source} /> : null}
                     </View>
-                    <Text style={{ color: theme.colors.text, fontWeight: '700' }}>{ann.title}</Text>
-                    <Text
-                      style={{ color: theme.colors.muted, marginTop: 4, fontSize: 12 }}
-                      numberOfLines={2}
-                    >
-                      {ann.body}
-                    </Text>
-                    <Text style={{ color: theme.colors.muted, fontSize: 11, marginTop: 6 }}>
-                      {formatDateTime(ann.publishedAt)}
-                    </Text>
-                    <View style={{ flexDirection: 'row', gap: 8, marginTop: 10 }}>
+                    <Text style={adminStyles.listItemTitle}>{ann.title}</Text>
+                    {ann.body ? <Text style={adminStyles.listItemMeta}>{ann.body}</Text> : null}
+                    <Text style={adminStyles.listItemMeta}>{formatDateTime(ann.publishedAt)}</Text>
+                    <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 4 }}>
                       <Button text="編輯" onPress={() => openAnnouncementModal(ann)} />
                       <Button text="刪除" onPress={() => deleteAnnouncement(ann)} />
                     </View>
                   </View>
                 ))}
-                {announcements.length === 0 && (
-                  <Text style={{ color: theme.colors.muted }}>尚無公告</Text>
-                )}
-                {announcements.length > 0 && filteredAnnouncements.length === 0 && (
-                  <Text style={{ color: theme.colors.muted }}>
-                    在已載入的公告中找不到符合搜尋條件的項目
-                  </Text>
-                )}
+                {announcements.length === 0 ? (
+                  <Text style={adminStyles.mutedNote}>尚無公告</Text>
+                ) : null}
+                {announcements.length > 0 && filteredAnnouncements.length === 0 ? (
+                  <Text style={adminStyles.mutedNote}>找不到符合搜尋條件的公告</Text>
+                ) : null}
+                {moreAnnouncements ? (
+                  <Button
+                    text={annBusy ? '載入中...' : annError ? '重試載入更多公告' : '載入更多公告'}
+                    disabled={annBusy}
+                    onPress={() => void loadMoreAnnouncements()}
+                  />
+                ) : null}
               </View>
             )}
-            {annError && (
-              <Text style={{ color: theme.colors.danger }}>
-                {annPermissionDenied
-                  ? '讀取公告的權限已失效或被撤銷；已載入內容仍保留。'
-                  : '無法更新公告列表，已載入的內容仍保留。'}
-              </Text>
-            )}
-            {moreAnnouncements && (
-              <Button
-                text={annBusy ? '載入中...' : '載入更多公告'}
-                disabled={annBusy}
-                onPress={() => void loadMoreAnnouncements()}
-              />
-            )}
-            <Button
-              text={annBusy ? '更新中...' : '重新載入公告列表'}
-              disabled={annBusy}
-              onPress={() => void reloadAnn()}
-            />
-          </Card>
+          </AdminSurface>
         )}
 
-        {tab === 'events' && (
-          <Card
+        {activeTab === 'events' && (
+          <AdminSurface
             title="活動管理"
-            subtitle={loadedScopeHint(events.length, moreEvents, '個活動')}
+            description={`已載入 ${events.length} 個活動；搜尋、排序與匯出僅涵蓋已載入項目。`}
           >
-            <View style={{ marginBottom: 12 }}>
-              <TextInput
-                value={eventKeyword}
-                onChangeText={setEventKeyword}
-                placeholder="搜尋已載入活動的名稱、描述、地點"
-                placeholderTextColor={theme.colors.muted}
-                style={{
-                  paddingVertical: 10,
-                  paddingHorizontal: 12,
-                  borderRadius: theme.radius.md,
-                  borderWidth: 1,
-                  borderColor: theme.colors.border,
-                  backgroundColor: theme.colors.surface2,
-                  color: theme.colors.text,
-                }}
-              />
-              {moreEvents ? (
-                <Text style={{ color: theme.colors.muted, fontSize: 12, marginTop: 6 }}>
-                  搜尋只比對已載入列。若要找其他活動，請先載入更多。
-                </Text>
-              ) : null}
-            </View>
-            <View style={{ marginBottom: 12 }}>
-              <SegmentedControl
-                options={[
-                  { key: 'latest', label: '最新' },
-                  { key: 'oldest', label: '最舊' },
-                ]}
-                selected={eventSort}
-                onChange={setEventSort}
-              />
-            </View>
-            <View style={{ marginBottom: 12, gap: 8 }}>
+            <TextInput
+              value={eventKeyword}
+              onChangeText={setEventKeyword}
+              placeholder="搜尋已載入的活動名稱、描述、地點"
+              placeholderTextColor={theme.colors.muted}
+              style={adminStyles.searchField}
+            />
+            <SegmentedControl
+              options={[
+                { key: 'latest', label: '最新' },
+                { key: 'oldest', label: '最舊' },
+              ]}
+              selected={eventSort}
+              onChange={setEventSort}
+            />
+            <View style={adminStyles.actionStack}>
               <Button text="建立新活動" kind="primary" onPress={() => openEventModal()} />
+            </View>
+            <View style={adminStyles.secondaryActions}>
               <Button
                 text={batchDeletingEvents ? '刪除中...' : '刪除目前篩選結果'}
                 kind="danger"
@@ -1796,7 +1949,7 @@ export function AdminDashboardScreen(props: any) {
                 onPress={() =>
                   Alert.alert(
                     '確認批次刪除',
-                    `將刪除 ${sortedEvents.length} 個目前篩選出的活動，確定繼續？`,
+                    `將刪除目前已載入且篩選出的 ${sortedEvents.length} 個活動，確定繼續？`,
                     [
                       { text: '取消', style: 'cancel' },
                       { text: '刪除', style: 'destructive', onPress: batchDeleteFilteredEvents },
@@ -1813,7 +1966,10 @@ export function AdminDashboardScreen(props: any) {
                       : '匯出已載入且符合篩選的 CSV'
                 }
                 disabled={
-                  authSettling || exportingEvents || sortedEvents.length === 0 || !canExportAdminData
+                  authSettling ||
+                  exportingEvents ||
+                  sortedEvents.length === 0 ||
+                  !canExportAdminData
                 }
                 onPress={promptEventExport}
               />
@@ -1823,210 +1979,191 @@ export function AdminDashboardScreen(props: any) {
             ) : (
               <View style={{ gap: 10 }}>
                 {sortedEvents.map((evt) => (
-                  <View
-                    key={evt.id}
-                    style={{
-                      padding: 12,
-                      borderRadius: theme.radius.md,
-                      backgroundColor: theme.colors.surface2,
-                      borderWidth: 1,
-                      borderColor: theme.colors.border,
-                    }}
-                  >
-                    <Text style={{ color: theme.colors.text, fontWeight: '700' }}>{evt.title}</Text>
-                    {evt.location && (
-                      <Text style={{ color: theme.colors.muted, fontSize: 12, marginTop: 4 }}>
-                        📍 {evt.location}
-                      </Text>
-                    )}
-                    <Text style={{ color: theme.colors.muted, fontSize: 12, marginTop: 4 }}>
-                      🗓️ {formatDateTime(evt.startsAt) || '時間尚未公布'}
+                  <View key={evt.id} style={adminStyles.listItem}>
+                    <Text style={adminStyles.listItemTitle}>{evt.title}</Text>
+                    {evt.location ? (
+                      <Text style={adminStyles.listItemMeta}>{evt.location}</Text>
+                    ) : null}
+                    <Text style={adminStyles.listItemMeta}>
+                      {formatDateTime(evt.startsAt) || '時間尚未公布'}
                     </Text>
-                    {evt.capacity && (
-                      <Text style={{ color: theme.colors.muted, fontSize: 12, marginTop: 2 }}>
+                    {evt.capacity ? (
+                      <Text style={adminStyles.listItemMeta}>
                         👥 {eventRegistrationCount(evt) ?? '待確認'} / {evt.capacity} 人
                       </Text>
-                    )}
-                    <View style={{ flexDirection: 'row', gap: 8, marginTop: 10 }}>
+                    ) : null}
+                    <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 4 }}>
                       <Button text="編輯" onPress={() => openEventModal(evt)} />
                       <Button text="刪除" onPress={() => deleteEvent(evt)} />
                     </View>
                   </View>
                 ))}
-                {events.length === 0 && <Text style={{ color: theme.colors.muted }}>尚無活動</Text>}
-                {events.length > 0 && filteredEvents.length === 0 && (
-                  <Text style={{ color: theme.colors.muted }}>找不到符合搜尋條件的活動</Text>
-                )}
+                {events.length === 0 ? <Text style={adminStyles.mutedNote}>尚無活動</Text> : null}
+                {events.length > 0 && filteredEvents.length === 0 ? (
+                  <Text style={adminStyles.mutedNote}>找不到符合搜尋條件的活動</Text>
+                ) : null}
               </View>
             )}
-            {evtError && (
-              <Text style={{ color: theme.colors.danger }}>無法更新活動，已載入的內容仍保留。</Text>
-            )}
-            {moreEvents && (
+            {evtError ? (
+              <Text style={adminStyles.inlineError}>無法更新活動，已載入的內容仍保留。</Text>
+            ) : null}
+            {moreEvents ? (
               <Button
                 text={evtBusy ? '載入中...' : '載入更多活動'}
                 disabled={evtBusy}
                 onPress={() => void loadMoreEvents()}
               />
-            )}
+            ) : null}
             <Button
               text={evtBusy ? '更新中...' : '更新活動列表'}
               disabled={evtBusy}
               onPress={() => void reloadEvt()}
             />
-          </Card>
+          </AdminSurface>
         )}
 
-        {tab === 'members' && (
-          <Card
+        {activeTab === 'members' && auth.isAdmin && (
+          <AdminSurface
             title="成員管理"
-            subtitle={loadedScopeHint(members.length, moreMembers, '位成員')}
+            description={`${formatDataStatus({
+              loading: memLoading,
+              refreshing: memRefreshing,
+              error: memError,
+              count: members.length,
+              hasMore: moreMembers,
+            })}。搜尋目前已載入的成員；變更角色僅管理員可執行。`}
           >
-            <View style={{ marginBottom: 12 }}>
-              <TextInput
-                value={memberKeyword}
-                onChangeText={setMemberKeyword}
-                placeholder="搜尋已載入成員的姓名、系所、UID 或角色"
-                placeholderTextColor={theme.colors.muted}
-                style={{
-                  paddingVertical: 10,
-                  paddingHorizontal: 12,
-                  borderRadius: theme.radius.md,
-                  borderWidth: 1,
-                  borderColor: theme.colors.border,
-                  backgroundColor: theme.colors.surface2,
-                  color: theme.colors.text,
-                }}
-              />
-              {moreMembers ? (
-                <Text style={{ color: theme.colors.muted, fontSize: 12, marginTop: 6 }}>
-                  沒有全校伺服器搜尋；目前只比對已載入列。請用「載入更多成員」擴大範圍。
-                </Text>
-              ) : membersComplete ? (
-                <Text style={{ color: theme.colors.muted, fontSize: 12, marginTop: 6 }}>
-                  已載入全部可讀取成員；目前搜尋範圍即為全部。
-                </Text>
-              ) : null}
-            </View>
-            <View style={{ marginBottom: 12, flexDirection: 'row', gap: 8 }}>
-              <Pill text={`已載入管理員 ${stats.admins}`} kind="accent" />
-              <Pill text={`已載入編輯者 ${members.filter((m) => m.role === 'editor').length}`} />
-              <Pill text={`已載入一般 ${members.filter((m) => m.role === 'member').length}`} />
-            </View>
+            <TextInput
+              value={memberKeyword}
+              onChangeText={setMemberKeyword}
+              placeholder="搜尋目前已載入的姓名、系所、UID 或角色"
+              placeholderTextColor={theme.colors.muted}
+              style={adminStyles.searchField}
+            />
+            {!memLoading && !(memError && members.length === 0) ? (
+              <View style={adminStyles.chipWrap}>
+                <Pill text={`管理員 ${loadedCounts.admins}`} kind="accent" />
+                <Pill text={`編輯者 ${loadedCounts.editors}`} />
+                <Pill text={`一般 ${loadedCounts.regular}`} />
+              </View>
+            ) : null}
+            {roleUpdateError ? (
+              <View style={{ gap: 8 }}>
+                <Text style={adminStyles.inlineError}>角色更新失敗：{roleUpdateError}</Text>
+                <Button
+                  text="清除錯誤提示"
+                  kind="outline"
+                  onPress={() => setRoleUpdateError(null)}
+                />
+              </View>
+            ) : null}
             {memLoading ? (
               <LoadingState title="成員" subtitle="載入中..." rows={3} />
+            ) : memError && members.length === 0 ? (
+              <AdminListFeedback
+                loading={false}
+                error={memError}
+                empty={false}
+                emptyText=""
+                onRetry={() => void reloadMem()}
+              />
             ) : (
               <View style={{ gap: 10 }}>
-                {filteredMembers.map((member) => (
-                  <View
-                    key={member.id}
-                    style={{
-                      padding: 12,
-                      borderRadius: theme.radius.md,
-                      backgroundColor: theme.colors.surface2,
-                      borderWidth: 1,
-                      borderColor: theme.colors.border,
-                    }}
-                  >
-                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-                      <View
-                        style={{
-                          width: 36,
-                          height: 36,
-                          borderRadius: 18,
-                          backgroundColor: theme.colors.accentSoft,
-                          alignItems: 'center',
-                          justifyContent: 'center',
-                        }}
-                      >
-                        <Text style={{ color: theme.colors.accent, fontWeight: '700' }}>
-                          {(member.displayName?.[0] || member.id?.[0] || '?').toUpperCase()}
-                        </Text>
-                      </View>
-                      <View style={{ flex: 1 }}>
-                        <Text style={{ color: theme.colors.text, fontWeight: '700' }}>
-                          {member.displayName || '(未設定名稱)'}
-                        </Text>
-                        <Text style={{ color: theme.colors.muted, fontSize: 12 }}>
-                          {member.department || member.id.slice(0, 8) + '...'}
-                        </Text>
-                      </View>
-                      <Pill
-                        text={
-                          member.role === 'admin'
-                            ? '管理員'
-                            : member.role === 'editor'
-                              ? '編輯者'
-                              : '一般'
-                        }
-                        kind={member.role === 'admin' ? 'accent' : 'default'}
-                      />
-                    </View>
-                    {auth.isAdmin && member.id !== auth.user?.uid && (
-                      <View style={{ flexDirection: 'row', gap: 8, marginTop: 10 }}>
-                        {member.role !== 'admin' && (
-                          <Button
-                            text="設為管理員"
-                            onPress={() => updateMemberRole(member, 'admin')}
-                          />
-                        )}
-                        {member.role !== 'editor' && (
-                          <Button
-                            text="設為編輯者"
-                            onPress={() => updateMemberRole(member, 'editor')}
-                          />
-                        )}
-                        {member.role !== 'member' && (
-                          <Button
-                            text="設為一般"
-                            onPress={() => updateMemberRole(member, 'member')}
-                          />
-                        )}
-                      </View>
-                    )}
-                  </View>
-                ))}
-                {members.length === 0 && (
-                  <Text style={{ color: theme.colors.muted }}>尚無成員</Text>
-                )}
-                {members.length > 0 && filteredMembers.length === 0 && (
-                  <Text style={{ color: theme.colors.muted }}>
-                    在已載入的成員中找不到符合搜尋條件的項目
+                {memError ? (
+                  <Text style={adminStyles.inlineError}>
+                    載入失敗，請重試。已載入的內容仍會保留。
                   </Text>
-                )}
+                ) : null}
+                {filteredMembers.map((member) => {
+                  const updating = pendingRoleUpdateId === member.id;
+                  return (
+                    <View key={member.id} style={adminStyles.listItem}>
+                      <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 8 }}>
+                        <View
+                          style={{
+                            width: 36,
+                            height: 36,
+                            borderRadius: 18,
+                            backgroundColor: theme.colors.accentSoft,
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                          }}
+                        >
+                          <Text style={{ color: theme.colors.accent, fontWeight: '700' }}>
+                            {(member.displayName?.[0] || member.id?.[0] || '?').toUpperCase()}
+                          </Text>
+                        </View>
+                        <View style={{ flex: 1, minWidth: 0 }}>
+                          <Text style={adminStyles.listItemTitle}>
+                            {member.displayName || '(未設定名稱)'}
+                          </Text>
+                          <Text style={adminStyles.listItemMeta}>
+                            {member.department || `${member.id.slice(0, 8)}...`}
+                          </Text>
+                        </View>
+                        <Pill
+                          text={memberRoleLabel(member.role)}
+                          kind={member.role === 'admin' ? 'accent' : 'default'}
+                        />
+                      </View>
+                      {updating ? <Text style={adminStyles.mutedNote}>角色更新中…</Text> : null}
+                      {auth.isAdmin && member.id !== auth.user?.uid ? (
+                        <View
+                          style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 4 }}
+                        >
+                          {member.role !== 'admin' ? (
+                            <Button
+                              text="設為管理員"
+                              disabled={Boolean(pendingRoleUpdateId)}
+                              onPress={() => requestMemberRoleChange(member, 'admin')}
+                            />
+                          ) : null}
+                          {member.role !== 'editor' ? (
+                            <Button
+                              text="設為編輯者"
+                              disabled={Boolean(pendingRoleUpdateId)}
+                              onPress={() => requestMemberRoleChange(member, 'editor')}
+                            />
+                          ) : null}
+                          {member.role !== 'member' ? (
+                            <Button
+                              text="設為一般成員"
+                              disabled={Boolean(pendingRoleUpdateId)}
+                              onPress={() => requestMemberRoleChange(member, 'member')}
+                            />
+                          ) : null}
+                        </View>
+                      ) : null}
+                    </View>
+                  );
+                })}
+                {!auth.isAdmin ? (
+                  <Text style={adminStyles.mutedNote}>編輯者僅可檢視成員，無法變更角色。</Text>
+                ) : null}
+                {members.length === 0 ? <Text style={adminStyles.mutedNote}>尚無成員</Text> : null}
+                {members.length > 0 && filteredMembers.length === 0 ? (
+                  <Text style={adminStyles.mutedNote}>找不到符合搜尋條件的成員</Text>
+                ) : null}
+                {moreMembers ? (
+                  <Button
+                    text={memBusy ? '載入中...' : memError ? '重試載入更多成員' : '載入更多成員'}
+                    disabled={memBusy}
+                    onPress={() => void loadMoreMembers()}
+                  />
+                ) : null}
               </View>
             )}
-            {memError && (
-              <Text style={{ color: theme.colors.danger }}>
-                {memPermissionDenied
-                  ? '讀取成員的權限已失效或被撤銷；已載入內容仍保留。'
-                  : '無法更新成員列表，已載入的內容仍保留。'}
-              </Text>
-            )}
-            {moreMembers && (
-              <Button
-                text={memBusy ? '載入中...' : '載入更多成員'}
-                disabled={memBusy}
-                onPress={() => void loadMoreMembers()}
-              />
-            )}
-            <Button
-              text={memBusy ? '更新中...' : '重新載入成員列表'}
-              disabled={memBusy}
-              onPress={() => void reloadMem()}
-            />
-          </Card>
+          </AdminSurface>
         )}
 
-        {tab === 'settings' && (
-          <Card title="學校設定" subtitle={`${school.name}（${school.code}）`}>
+        {activeTab === 'settings' && auth.isAdmin && (
+          <AdminSurface title="學校設定" description={`${school.name}（${school.code}）`}>
             <View style={{ gap: 12 }}>
               <View>
                 <SectionTitle text="基本資訊" />
-                <Text style={{ color: theme.colors.muted, marginTop: 6 }}>
-                  學校 ID：{school.id}
-                </Text>
-                <Text style={{ color: theme.colors.muted, marginTop: 2 }}>代碼：{school.code}</Text>
+                <Text style={[adminStyles.mutedNote, { marginTop: 6 }]}>學校 ID：{school.id}</Text>
+                <Text style={adminStyles.mutedNote}>代碼：{school.code}</Text>
+                <Text style={adminStyles.mutedNote}>目前角色範圍：{roleLabel}</Text>
               </View>
 
               <View
@@ -2034,21 +2171,26 @@ export function AdminDashboardScreen(props: any) {
               >
                 <SectionTitle text="管理操作" />
                 <View style={{ marginTop: 10, gap: 10 }}>
+                  {auth.isAdmin ? (
+                    <Button
+                      text="課程認證管理"
+                      onPress={() => nav?.navigate?.('AdminCourseVerify')}
+                    />
+                  ) : (
+                    <Text style={adminStyles.mutedNote}>課程認證僅管理員可開啟。</Text>
+                  )}
                   <Button
-                    text="課程認證管理"
-                    onPress={() => nav?.navigate?.('AdminCourseVerify')}
-                  />
-                  <Button
-                    text="重新載入所有資料"
+                    text={listsRefreshing || reloadingAll ? '更新中…' : '重新載入所有資料'}
+                    disabled={listsRefreshing || reloadingAll}
                     onPress={() => {
-                      reloadAnn();
-                      reloadEvt();
-                      reloadMem();
-                      reloadCafeterias();
-                      reloadLogs();
-                      Alert.alert('成功', '資料已重新載入');
+                      void reloadAllWorkbenchData();
                     }}
                   />
+                  {(listsRefreshing || reloadingAll) && (
+                    <Text style={adminStyles.mutedNote}>
+                      正在更新各列表；成功或失敗會顯示在對應區段，不會預先宣告完成。
+                    </Text>
+                  )}
                 </View>
               </View>
 
@@ -2065,79 +2207,103 @@ export function AdminDashboardScreen(props: any) {
                   <SectionTitle text="餐廳接單開通" />
                   <Button text="新增餐廳" size="small" onPress={() => openCafeteriaModal()} />
                 </View>
+                <Text style={[adminStyles.mutedNote, { marginTop: 6 }]}>
+                  {formatDataStatus({
+                    loading: cafeteriaLoading,
+                    refreshing: cafeteriaRefreshing,
+                    error: cafeteriaDisplayError,
+                    count: cafeterias.length,
+                  })}
+                </Text>
                 <View style={{ marginTop: 10, gap: 10 }}>
                   {cafeteriaLoading ? (
-                    <Text style={{ color: theme.colors.muted }}>載入餐廳設定中...</Text>
-                  ) : cafeterias.length === 0 ? (
-                    <Text style={{ color: theme.colors.muted }}>尚無餐廳資料</Text>
+                    <Text style={adminStyles.mutedNote}>載入餐廳設定中…</Text>
                   ) : (
-                    cafeterias.map((cafeteria) => (
-                      <View
-                        key={cafeteria.id}
-                        style={{
-                          borderRadius: theme.radius.md,
-                          borderWidth: 1,
-                          borderColor: theme.colors.border,
-                          backgroundColor: theme.colors.surface2,
-                          padding: 12,
-                          gap: 10,
-                        }}
-                      >
-                        <View
-                          style={{ flexDirection: 'row', justifyContent: 'space-between', gap: 12 }}
-                        >
-                          <View style={{ flex: 1 }}>
-                            <Text style={{ color: theme.colors.text, fontWeight: '700' }}>
-                              {cafeteria.name}
-                            </Text>
-                            <Text style={{ color: theme.colors.muted, fontSize: 12, marginTop: 2 }}>
-                              {cafeteria.location || '未設定位置'} · {cafeteria.id}
-                            </Text>
-                          </View>
-                          <View style={{ alignItems: 'flex-end', gap: 6 }}>
-                            <Pill
-                              text={
-                                cafeteria.pilotStatus === 'live'
-                                  ? '正式開通'
-                                  : cafeteria.pilotStatus === 'pilot'
-                                    ? '試營運'
-                                    : '未開通'
-                              }
-                              kind={
-                                cafeteria.pilotStatus === 'live'
-                                  ? 'success'
-                                  : cafeteria.pilotStatus === 'pilot'
-                                    ? 'warning'
-                                    : 'default'
-                              }
-                            />
-                            <Pill
-                              text={cafeteria.orderingEnabled ? '可接單' : '已關閉接單'}
-                              kind={cafeteria.orderingEnabled ? 'accent' : 'default'}
-                            />
-                          </View>
-                        </View>
-                        <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
-                          <Pill text={`operator ${cafeteria.activeOperatorCount}`} kind="muted" />
-                          {cafeteria.brandKey ? (
-                            <Pill text={`品牌 ${cafeteria.brandKey}`} kind="muted" />
-                          ) : null}
-                        </View>
-                        <View style={{ flexDirection: 'row', gap: 8 }}>
+                    <>
+                      {cafeteriaDisplayError && cafeterias.length === 0 ? (
+                        <AdminListFeedback
+                          loading={false}
+                          error={cafeteriaDisplayError}
+                          empty={false}
+                          emptyText=""
+                          onRetry={reloadCafeterias}
+                        />
+                      ) : null}
+                      {cafeteriaDisplayError && cafeterias.length > 0 ? (
+                        <View style={{ gap: 8 }}>
+                          <Text style={adminStyles.inlineError}>
+                            載入失敗，請重試。已載入的內容仍會保留。
+                          </Text>
                           <Button
-                            text="編輯設定"
-                            size="small"
-                            onPress={() => openCafeteriaModal(cafeteria)}
-                          />
-                          <Button
-                            text="管理店員"
-                            size="small"
+                            text="重試"
                             kind="outline"
-                            onPress={() => openOperatorModal(cafeteria)}
+                            onPress={() => void refreshCafeterias()}
                           />
                         </View>
-                      </View>
-                    ))
+                      ) : null}
+                      {!cafeteriaDisplayError && cafeterias.length === 0 ? (
+                        <Text style={adminStyles.mutedNote}>尚無餐廳資料</Text>
+                      ) : null}
+                      {cafeterias.map((cafeteria) => (
+                        <View key={cafeteria.id} style={adminStyles.listItem}>
+                          <View
+                            style={{
+                              flexDirection: 'row',
+                              justifyContent: 'space-between',
+                              gap: 12,
+                            }}
+                          >
+                            <View style={{ flex: 1, minWidth: 0 }}>
+                              <Text style={adminStyles.listItemTitle}>{cafeteria.name}</Text>
+                              <Text style={adminStyles.listItemMeta}>
+                                {cafeteria.location || '未設定位置'} · {cafeteria.id}
+                              </Text>
+                            </View>
+                            <View style={{ alignItems: 'flex-end', gap: 6 }}>
+                              <Pill
+                                text={
+                                  cafeteria.pilotStatus === 'live'
+                                    ? '正式開通'
+                                    : cafeteria.pilotStatus === 'pilot'
+                                      ? '試營運'
+                                      : '未開通'
+                                }
+                                kind={
+                                  cafeteria.pilotStatus === 'live'
+                                    ? 'success'
+                                    : cafeteria.pilotStatus === 'pilot'
+                                      ? 'warning'
+                                      : 'default'
+                                }
+                              />
+                              <Pill
+                                text={cafeteria.orderingEnabled ? '可接單' : '已關閉接單'}
+                                kind={cafeteria.orderingEnabled ? 'accent' : 'default'}
+                              />
+                            </View>
+                          </View>
+                          <View style={adminStyles.chipWrap}>
+                            <Pill text={`店員 ${cafeteria.activeOperatorCount}`} kind="muted" />
+                            {cafeteria.brandKey ? (
+                              <Pill text={`品牌 ${cafeteria.brandKey}`} kind="muted" />
+                            ) : null}
+                          </View>
+                          <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
+                            <Button
+                              text="編輯設定"
+                              size="small"
+                              onPress={() => openCafeteriaModal(cafeteria)}
+                            />
+                            <Button
+                              text="管理店員"
+                              size="small"
+                              kind="outline"
+                              onPress={() => openOperatorModal(cafeteria)}
+                            />
+                          </View>
+                        </View>
+                      ))}
+                    </>
                   )}
                 </View>
               </View>
@@ -2145,35 +2311,25 @@ export function AdminDashboardScreen(props: any) {
               <View
                 style={{ borderTopWidth: 1, borderTopColor: theme.colors.border, paddingTop: 12 }}
               >
-                <SectionTitle text="管理操作紀錄" />
-                <Text style={{ color: theme.colors.muted, fontSize: 12, marginTop: 6 }}>
-                  {loadedScopeHint(adminLogs.length, moreLogs, '筆操作紀錄')}
+                <SectionTitle text="最近管理操作" />
+                <Text style={[adminStyles.mutedNote, { marginTop: 6 }]}>
+                  {formatDataStatus({
+                    loading: logsLoading,
+                    refreshing: logsRefreshing,
+                    error: logsError,
+                    count: adminLogs.length,
+                    hasMore: moreLogs,
+                  })}
+                  。搜尋與匯出目前已載入的資料。
                 </Text>
                 <View style={{ marginTop: 10, gap: 8 }}>
                   <TextInput
                     value={logKeyword}
                     onChangeText={setLogKeyword}
-                    placeholder="搜尋已載入紀錄的操作、細節、操作者"
+                    placeholder="搜尋目前已載入的操作、細節、操作者"
                     placeholderTextColor={theme.colors.muted}
-                    style={{
-                      paddingVertical: 10,
-                      paddingHorizontal: 12,
-                      borderRadius: theme.radius.md,
-                      borderWidth: 1,
-                      borderColor: theme.colors.border,
-                      backgroundColor: theme.colors.surface2,
-                      color: theme.colors.text,
-                    }}
+                    style={adminStyles.searchField}
                   />
-                  {moreLogs ? (
-                    <Text style={{ color: theme.colors.muted, fontSize: 12 }}>
-                      畫面上的篩選只比對已載入列。完整歷史請用下方「分頁匯出」或先載入更多。
-                    </Text>
-                  ) : logsComplete ? (
-                    <Text style={{ color: theme.colors.muted, fontSize: 12 }}>
-                      已載入全部可讀取的操作紀錄；目前篩選範圍即為全部。
-                    </Text>
-                  ) : null}
                   <SegmentedControl
                     options={[
                       { key: 'all', label: '全部' },
@@ -2193,116 +2349,79 @@ export function AdminDashboardScreen(props: any) {
                     }
                     disabled={
                       authSettling ||
-                      !canExportAdminData ||
+                      !auth.isAdmin ||
                       exportingLogs ||
                       exportingAllLogs ||
                       (filteredAdminLogs.length === 0 && adminLogs.length === 0 && !moreLogs)
                     }
                     onPress={promptAdminLogsExport}
                   />
-                  {exportingAllLogs ? (
+                  {exportingAllLogs && (
                     <Button text="取消完整匯出" kind="danger" onPress={cancelAdminLogsFullExport} />
-                  ) : null}
+                  )}
                 </View>
                 {logsLoading ? (
-                  <Text style={{ color: theme.colors.muted, marginTop: 8 }}>載入中...</Text>
+                  <Text style={[adminStyles.mutedNote, { marginTop: 8 }]}>載入中…</Text>
+                ) : logsError && adminLogs.length === 0 ? (
+                  <View style={{ marginTop: 8 }}>
+                    <AdminListFeedback
+                      loading={false}
+                      error={logsError}
+                      empty={false}
+                      emptyText=""
+                      onRetry={() => void reloadLogs()}
+                    />
+                  </View>
                 ) : adminLogs.length === 0 ? (
-                  <Text style={{ color: theme.colors.muted, marginTop: 8 }}>尚無操作紀錄</Text>
+                  <Text style={[adminStyles.mutedNote, { marginTop: 8 }]}>尚無操作紀錄</Text>
                 ) : (
                   <View style={{ gap: 8, marginTop: 10 }}>
+                    {logsError ? (
+                      <Text style={adminStyles.inlineError}>
+                        載入失敗，請重試。已載入的內容仍會保留。
+                      </Text>
+                    ) : null}
                     {filteredAdminLogs.map((log) => (
-                      <View
-                        key={log.id}
-                        style={{
-                          borderWidth: 1,
-                          borderColor: theme.colors.border,
-                          borderRadius: theme.radius.md,
-                          backgroundColor: theme.colors.surface2,
-                          padding: 10,
-                        }}
-                      >
-                        <Text style={{ color: theme.colors.text, fontWeight: '700' }}>
-                          {log.action}
-                        </Text>
+                      <View key={log.id} style={adminStyles.listItem}>
+                        <Text style={adminStyles.listItemTitle}>{log.action}</Text>
                         {log.details ? (
-                          <Text style={{ color: theme.colors.muted, fontSize: 12, marginTop: 2 }}>
-                            {log.details}
-                          </Text>
+                          <Text style={adminStyles.listItemMeta}>{log.details}</Text>
                         ) : null}
-                        <Text style={{ color: theme.colors.muted, fontSize: 11, marginTop: 4 }}>
+                        <Text style={adminStyles.listItemMeta}>
                           {log.actorEmail || log.actorUid || '未知操作者'} ·{' '}
                           {formatDateTime(log.createdAt)}
                         </Text>
                       </View>
                     ))}
-                    {adminLogs.length > 0 && filteredAdminLogs.length === 0 && (
-                      <Text style={{ color: theme.colors.muted }}>
-                        在已載入的操作紀錄中找不到符合篩選條件的項目
-                      </Text>
-                    )}
+                    {adminLogs.length > 0 && filteredAdminLogs.length === 0 ? (
+                      <Text style={adminStyles.mutedNote}>找不到符合篩選條件的操作紀錄</Text>
+                    ) : null}
+                    {moreLogs ? (
+                      <Button
+                        text={
+                          logsBusy
+                            ? '載入中...'
+                            : logsError
+                              ? '重試載入更多紀錄'
+                              : '載入更多操作紀錄'
+                        }
+                        disabled={logsBusy}
+                        onPress={() => void loadMoreLogs()}
+                      />
+                    ) : null}
                   </View>
                 )}
-                {logsError && (
-                  <Text style={{ color: theme.colors.danger, marginTop: 8 }}>
-                    {logsPermissionDenied
-                      ? '讀取操作紀錄的權限已失效或被撤銷；已載入內容仍保留。'
-                      : '無法更新操作紀錄，已載入的內容仍保留。'}
-                  </Text>
-                )}
-                {moreLogs && (
-                  <Button
-                    text={logsBusy ? '載入中...' : '載入更多操作紀錄'}
-                    disabled={logsBusy}
-                    onPress={() => void loadMoreLogs()}
-                  />
-                )}
-                <Button
-                  text={logsBusy ? '更新中...' : '重新載入操作紀錄'}
-                  disabled={logsBusy}
-                  onPress={() => void reloadLogs()}
-                />
-              </View>
-
-              <View
-                style={{ borderTopWidth: 1, borderTopColor: theme.colors.border, paddingTop: 12 }}
-              >
-                <SectionTitle text="危險區域" />
-                <Text
-                  style={{
-                    color: theme.colors.muted,
-                    fontSize: 12,
-                    marginTop: 6,
-                    marginBottom: 10,
-                  }}
-                >
-                  以下操作無法復原，請謹慎使用。
-                </Text>
-                <Button
-                  text={cleaningData ? '清空中...' : '清空所有測試資料'}
-                  kind="danger"
-                  disabled={cleaningData}
-                  onPress={() => {
-                    Alert.alert('確認', '此操作將清空所有測試資料，無法復原。確定要繼續嗎？', [
-                      { text: '取消', style: 'cancel' },
-                      {
-                        text: '確定清空',
-                        style: 'destructive',
-                        onPress: clearTestingData,
-                      },
-                    ]);
-                  }}
-                />
               </View>
             </View>
-          </Card>
+          </AdminSurface>
         )}
       </ScrollView>
 
       <Modal
-        visible={showAnnouncementModal}
+        visible={showAnnouncementModal && isCurrentForm('announcement', announcementFormContext)}
         animationType="slide"
         presentationStyle="pageSheet"
-        onRequestClose={() => setShowAnnouncementModal(false)}
+        onRequestClose={closeAnnouncementModal}
       >
         <View style={{ flex: 1, backgroundColor: theme.colors.bg }}>
           <View
@@ -2315,7 +2434,7 @@ export function AdminDashboardScreen(props: any) {
               borderBottomColor: theme.colors.border,
             }}
           >
-            <Pressable onPress={() => setShowAnnouncementModal(false)}>
+            <Pressable onPress={closeAnnouncementModal}>
               <Text style={{ color: theme.colors.accent, fontWeight: '600' }}>取消</Text>
             </Pressable>
             <Text style={{ color: theme.colors.text, fontWeight: '700', fontSize: 16 }}>
@@ -2385,7 +2504,11 @@ export function AdminDashboardScreen(props: any) {
       </Modal>
 
       <Modal
-        visible={showEventModal && eventFormScope === eventScope}
+        visible={
+          showEventModal &&
+          eventFormScope === eventScope &&
+          isCurrentForm('event', eventFormContext)
+        }
         animationType="slide"
         presentationStyle="pageSheet"
         onRequestClose={closeEventModal}
@@ -2472,10 +2595,12 @@ export function AdminDashboardScreen(props: any) {
       </Modal>
 
       <Modal
-        visible={showCafeteriaModal}
+        visible={
+          showCafeteriaModal && auth.isAdmin && isCurrentForm('cafeteria', cafeteriaFormContext)
+        }
         animationType="slide"
         presentationStyle="pageSheet"
-        onRequestClose={() => setShowCafeteriaModal(false)}
+        onRequestClose={closeCafeteriaModal}
       >
         <View style={{ flex: 1, backgroundColor: theme.colors.bg }}>
           <View
@@ -2488,7 +2613,7 @@ export function AdminDashboardScreen(props: any) {
               borderBottomColor: theme.colors.border,
             }}
           >
-            <Pressable onPress={() => setShowCafeteriaModal(false)}>
+            <Pressable onPress={closeCafeteriaModal}>
               <Text style={{ color: theme.colors.accent, fontWeight: '600' }}>取消</Text>
             </Pressable>
             <Text style={{ color: theme.colors.text, fontWeight: '700', fontSize: 16 }}>
@@ -2584,10 +2709,12 @@ export function AdminDashboardScreen(props: any) {
       </Modal>
 
       <Modal
-        visible={showOperatorModal}
+        visible={
+          showOperatorModal && auth.isAdmin && isCurrentForm('operator', operatorFormContext)
+        }
         animationType="slide"
         presentationStyle="pageSheet"
-        onRequestClose={() => setShowOperatorModal(false)}
+        onRequestClose={closeOperatorModal}
       >
         <View style={{ flex: 1, backgroundColor: theme.colors.bg }}>
           <View
@@ -2600,7 +2727,7 @@ export function AdminDashboardScreen(props: any) {
               borderBottomColor: theme.colors.border,
             }}
           >
-            <Pressable onPress={() => setShowOperatorModal(false)}>
+            <Pressable onPress={closeOperatorModal}>
               <Text style={{ color: theme.colors.accent, fontWeight: '600' }}>取消</Text>
             </Pressable>
             <Text style={{ color: theme.colors.text, fontWeight: '700', fontSize: 16 }}>
@@ -2679,9 +2806,13 @@ export function AdminDashboardScreen(props: any) {
               }}
             >
               <SectionTitle text="目前店員" />
+              {operatorsError || operatorsLastRefreshError ? (
+                <Text style={adminStyles.inlineError}>載入失敗，請重試。</Text>
+              ) : null}
               {operatorsLoading ? (
                 <Text style={{ color: theme.colors.muted }}>載入店員中...</Text>
-              ) : cafeteriaOperators.length === 0 ? (
+              ) : cafeteriaOperators.length === 0 &&
+                !(operatorsError || operatorsLastRefreshError) ? (
                 <Text style={{ color: theme.colors.muted }}>此餐廳尚未指派店員</Text>
               ) : (
                 cafeteriaOperators.map((operator) => (

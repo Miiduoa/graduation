@@ -1,21 +1,23 @@
 'use client';
 
 import Link from 'next/link';
-import { usePathname } from 'next/navigation';
+import { usePathname, useSearchParams } from 'next/navigation';
 import type { ReactNode } from 'react';
 import { useAuth } from '@/components/AuthGuard';
 import { SchoolAccountRequired } from '@/components/SchoolAccountRequired';
-import { useOptionalSelectedSchool } from '@/components/SelectedSchoolProvider';
 import { SiteShell } from '@/components/SiteShell';
 import { useAcademicRecords } from '@/lib/useAcademicRecords';
+import { useCampusBrowseContext } from '@/lib/useCampusBrowseContext';
 import { useSignInOptions } from '@/lib/signInOptions';
 import type { AcademicKind, AcademicSnapshot } from '@/lib/academicClient';
+import {
+  isOfficialAcademicSchool,
+  OFFICIAL_ACADEMIC_PORTAL_URL,
+  OFFICIAL_ACADEMIC_SOURCE_LABEL,
+} from '@/lib/academicOfficialSchool';
 import { loadFailureCopy } from '@campus/shared/src/loadFailureCopy';
-import { findSchoolById } from '@campus/shared/src/schools';
 import styles from './academic.module.css';
 import { PersonalImportSummary } from '@/components/imports/PersonalImportSummary';
-
-const PROVIDENCE_E_CAMPUS = 'https://alcat.pu.edu.tw/';
 
 type Props<K extends AcademicKind> = {
   kind: K;
@@ -28,16 +30,18 @@ type Props<K extends AcademicKind> = {
 function Records<K extends AcademicKind>({
   kind,
   closedAlternative,
+  returnUrl,
+  schoolName,
   children,
-}: Pick<Props<K>, 'kind' | 'closedAlternative' | 'children'>) {
-  const { state, refresh } = useAcademicRecords(kind);
-  const path = usePathname();
+}: {
+  kind: K;
+  closedAlternative: string;
+  returnUrl: string;
+  schoolName: string;
+  children: (snapshot: AcademicSnapshot<K>) => ReactNode;
+}) {
+  const { state, refresh } = useAcademicRecords(kind, true, 'pu');
   const options = useSignInOptions();
-  const browsing = useOptionalSelectedSchool();
-  const browsingId = browsing?.selectedSchoolId;
-  // Official e-campus deep link is only for the connected Providence adapter.
-  const showProvidenceCampus =
-    !browsing || browsingId === 'pu' || browsingId === 'tw-pu';
   if (!state || state.status === 'loading') {
     return (
       <div className={styles.status} role="status">
@@ -58,7 +62,7 @@ function Records<K extends AcademicKind>({
         );
       }
       if (!options.studentId) {
-        return <SchoolAccountRequired returnUrl={path} alternative={closedAlternative} />;
+        return <SchoolAccountRequired returnUrl={returnUrl} alternative={closedAlternative} />;
       }
     }
     return (
@@ -86,7 +90,7 @@ function Records<K extends AcademicKind>({
           {reconnect || permission ? (
             <Link
               className="btn primary"
-              href={`/login?reconnect=school&returnUrl=${encodeURIComponent(path)}`}
+              href={`/login?reconnect=school&returnUrl=${encodeURIComponent(returnUrl)}`}
             >
               連線學校帳號
             </Link>
@@ -98,39 +102,30 @@ function Records<K extends AcademicKind>({
           {!reconnect && !permission && !unconfigured && options.studentId && (
             <Link
               className="btn"
-              href={`/login?reconnect=school&returnUrl=${encodeURIComponent(path)}`}
+              href={`/login?reconnect=school&returnUrl=${encodeURIComponent(returnUrl)}`}
             >
               重新連線學校帳號
             </Link>
           )}
-          {showProvidenceCampus ? (
-            <a
-              className="btn"
-              href={PROVIDENCE_E_CAMPUS}
-              target="_blank"
-              rel="noopener noreferrer"
-            >
-              前往 e 校園 ↗
-            </a>
-          ) : (
-            <p className={styles.notice}>
-              目前瀏覽的是
-              {browsing?.selectedSchool?.name || '其他校園'}
-              ；這項校務讀取尚未接到該校官方系統，請改到學校教務單位查詢。
-            </p>
-          )}
+          <a
+            className="btn"
+            href={OFFICIAL_ACADEMIC_PORTAL_URL}
+            target="_blank"
+            rel="noopener noreferrer"
+          >
+            前往 e 校園 ↗
+          </a>
         </div>
       </section>
     );
   }
-  const sourceSchool =
-    findSchoolById(state.snapshot.schoolId)?.name ||
-    (state.snapshot.schoolId === 'pu' ? '靜宜大學' : '學校');
+  const sourceLabel =
+    state.snapshot.schoolId === 'pu' ? OFFICIAL_ACADEMIC_SOURCE_LABEL : schoolName;
   return (
     <>
       <div className={styles.source}>
         <span>
-          來源：{sourceSchool} e 校園 ·{' '}
+          來源：{sourceLabel} ·{' '}
           {new Date(state.snapshot.fetchedAt).toLocaleString('zh-TW', {
             timeZone: 'Asia/Taipei',
             month: 'numeric',
@@ -149,9 +144,63 @@ function Records<K extends AcademicKind>({
   );
 }
 
+function BrowseUnavailable({
+  status,
+  schoolName,
+}: {
+  status: 'loading' | 'error' | 'unselected' | 'unsupported';
+  schoolName: string;
+}) {
+  if (status === 'loading') {
+    return (
+      <div className={styles.status} role="status">
+        <h2>正在確認所選校園…</h2>
+        <p>確認校園後再讀取正式成績，不會先顯示其他學校的資料。</p>
+      </div>
+    );
+  }
+  if (status === 'error') {
+    return (
+      <section className={styles.status} role="alert">
+        <h2>暫時無法確認所選校園</h2>
+        <p>校園目錄讀取失敗，目前不會顯示正式成績資料。</p>
+      </section>
+    );
+  }
+  if (status === 'unselected') {
+    return (
+      <section className={styles.status} role="status">
+        <h2>請先選擇一所學校</h2>
+        <p>從頁首選擇校園後，才會讀取該校可提供的正式課業資料。</p>
+      </section>
+    );
+  }
+  return (
+    <section className={styles.status} role="status">
+      <h2>這所學校尚未提供官方成績來源</h2>
+      <p>
+        目前無法讀取「{schoolName}」的正式成績或學分資料，也不會顯示其他學校的正式紀錄。你仍可使用上方自行匯入的個人資料。
+      </p>
+    </section>
+  );
+}
+
 export function AcademicPage<K extends AcademicKind>(props: Props<K>) {
   const { user, loading, error } = useAuth();
   const path = usePathname();
+  const searchParams = useSearchParams();
+  const browse = useCampusBrowseContext({
+    school: searchParams.get('school') ?? undefined,
+    schoolId: searchParams.get('schoolId') ?? undefined,
+    campus: searchParams.get('campus') ?? undefined,
+  });
+  const schoolSearch = browse.schoolSearch;
+  const returnUrl = `${path}${schoolSearch}`;
+  const readyOfficial =
+    browse.status === 'ready' && isOfficialAcademicSchool(browse.schoolId);
+  const schoolKey =
+    browse.status === 'ready' && browse.schoolId ? browse.schoolId : `:${browse.status}`;
+
   return (
     <SiteShell title={props.title} subtitle={props.subtitle}>
       <nav className={styles.navigation} aria-label="我的課務">
@@ -162,13 +211,25 @@ export function AcademicPage<K extends AcademicKind>(props: Props<K>) {
             ['/credit-planner', '學分規劃'],
           ] as const
         ).map(([href, name]) => (
-          <Link key={href} href={href} aria-current={path === href ? 'page' : undefined}>
+          <Link
+            key={href}
+            href={`${href}${schoolSearch}`}
+            aria-current={path === href ? 'page' : undefined}
+          >
             {name}
           </Link>
         ))}
       </nav>
       <PersonalImportSummary kind="grades" />
-      {loading ? (
+      {browse.status === 'loading' ? (
+        <BrowseUnavailable status="loading" schoolName="" />
+      ) : browse.status === 'error' ? (
+        <BrowseUnavailable status="error" schoolName="" />
+      ) : browse.status === 'unselected' || !browse.schoolId ? (
+        <BrowseUnavailable status="unselected" schoolName="" />
+      ) : !readyOfficial ? (
+        <BrowseUnavailable status="unsupported" schoolName={browse.schoolName} />
+      ) : loading ? (
         <div className={styles.status} role="status">
           正在確認帳號…
         </div>
@@ -179,10 +240,16 @@ export function AcademicPage<K extends AcademicKind>(props: Props<K>) {
             <p>{loadFailureCopy(error, { online: navigator.onLine })}。</p>
           </section>
         ) : (
-          <SchoolAccountRequired returnUrl={path} alternative={props.closedAlternative} />
+          <SchoolAccountRequired returnUrl={returnUrl} alternative={props.closedAlternative} />
         )
       ) : (
-        <Records key={user.uid} kind={props.kind} closedAlternative={props.closedAlternative}>
+        <Records
+          key={`${user.uid}:${schoolKey}`}
+          kind={props.kind}
+          closedAlternative={props.closedAlternative}
+          returnUrl={returnUrl}
+          schoolName={browse.schoolName}
+        >
           {props.children}
         </Records>
       )}

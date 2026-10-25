@@ -14,6 +14,7 @@ import headerStyles from './AppHeader.module.css';
 import { campusServiceHref, useCampusNavigationSearch } from '@/lib/campusNavigation';
 import { LoginLink } from './LoginLink';
 import { currentReturnPath } from '@/lib/navigation';
+import { primaryNavigationSection } from '@/lib/primaryNavigation';
 
 function Header() {
   const pathname = usePathname();
@@ -25,12 +26,9 @@ function Header() {
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
   const context = useCampusNavigationSearch(params);
+  const activeSection = primaryNavigationSection(pathname);
   const href = (path: string) => campusServiceHref(path, context);
-  const currentPage = currentReturnPath(
-    pathname || '/',
-    params?.size ? `?${params}` : '',
-    hash,
-  );
+  const currentPage = currentReturnPath(pathname || '/', params?.size ? `?${params}` : '', hash);
   const loginPage = ['/login', '/classroom/login', '/admin/login'].includes(pathname || '');
   const checking = !hydrated || loading || nuni.loading;
   return (
@@ -99,43 +97,24 @@ function Header() {
           ) : null}
         </div>
         <nav aria-label="主要導覽" className={headerStyles.nav}>
-          <Link href={href('/')} aria-current={pathname === '/' ? 'page' : undefined}>
+          <Link href={href('/')} aria-current={activeSection === 'today' ? 'page' : undefined}>
             <CampusIcon name="calendar" size={17} />
             今天
           </Link>
           <Link
             href={href('/timetable')}
-            aria-current={
-              pathname === '/timetable' ||
-              pathname === '/classroom' ||
-              pathname?.startsWith('/classroom/course/') ||
-              pathname?.startsWith('/course/') ||
-              pathname?.startsWith('/teacher/course/')
-                ? 'page'
-                : undefined
-            }
+            aria-current={activeSection === 'study' ? 'page' : undefined}
           >
             <CampusIcon name="library" size={17} />
             課務
           </Link>
-          <Link
-            href={href('/life')}
-            aria-current={
-              pathname === '/life' ||
-              pathname?.startsWith('/lost-found') ||
-              ['/map', '/bus', '/cafeteria', '/food', '/community', '/friends'].includes(
-                pathname || '',
-              )
-                ? 'page'
-                : undefined
-            }
-          >
+          <Link href={href('/life')} aria-current={activeSection === 'life' ? 'page' : undefined}>
             <CampusIcon name="map" size={17} />
             生活
           </Link>
           <Link
             href={user || nuni.session ? '/profile' : '/login?returnUrl=%2Fprofile'}
-            aria-current={pathname === '/profile' || pathname === '/me' ? 'page' : undefined}
+            aria-current={activeSection === 'me' ? 'page' : undefined}
           >
             <CampusIcon name="profile" size={17} />我
           </Link>

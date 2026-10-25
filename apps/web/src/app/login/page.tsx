@@ -67,7 +67,10 @@ function LoginForm({
   const schoolTask = reconnect || platformDestination(destination) !== destination;
   const schoolAvailable = options.studentId;
   const schoolRequired = schoolTask && schoolAvailable;
-  const hideGoogle = schoolRequired || (schoolTask && (options.loading || options.error));
+  const schoolUnavailable =
+    schoolTask && !options.loading && !options.error && !schoolAvailable;
+  // School destinations stay school-only; Google must not appear to fulfill them.
+  const hideGoogle = schoolTask;
   const publicDestination = isPublicCampusPath(
     new URL(destination, 'https://campus.local').pathname,
   );
@@ -136,14 +139,16 @@ function LoginForm({
       title={
         reconnect && user && schoolAvailable
           ? '重新連線學校帳號'
-          : schoolRequired
+          : schoolTask
             ? '連線學校帳號'
             : '登入'
       }
       subtitle={
         schoolRequired
           ? '驗證學校帳號後，返回你原本的頁面。'
-          : '不登入也能看校園資訊。需要課程、交流或店家服務時，用 Google 帳號登入。'
+          : schoolTask
+            ? '這個頁面要用學校帳號，Google 帳號無法代替。'
+            : '不登入也能看校園資訊。需要課程、交流或店家服務時，用 Google 帳號登入。'
       }
     >
       <section className={styles.guestAccess} aria-labelledby="guest-access-title">
@@ -239,6 +244,10 @@ function LoginForm({
               </form>
               <p>請輸入你登入 e 校園時使用的資料。若忘記密碼，請透過學校的帳號服務處理。</p>
             </>
+          ) : schoolUnavailable ? (
+            <p role="status">
+              學校帳號登入目前未開放，暫時無法連線這項服務。你原本要開啟的頁面已保留。
+            </p>
           ) : (
             <p role="status">{STUDENT_ID_PREPARING_COPY}</p>
           )}
@@ -250,9 +259,9 @@ function LoginForm({
               閱讀使用條款 <span aria-hidden="true">↗</span>
             </Link>
           </div>
-          {schoolRequired && (
+          {schoolTask && (
             <Link href="/login" className={styles.backLink}>
-              改用 Google 帳號登入
+              改用一般登入
             </Link>
           )}
           <Link href="/" className={styles.backLink}>

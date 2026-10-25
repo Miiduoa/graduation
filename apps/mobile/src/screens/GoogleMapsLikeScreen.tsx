@@ -24,13 +24,31 @@ import {
   hasOfficialProvidenceLibraryGuide,
 } from '@campus/shared/src/campusMapLookup';
 import {
+  hasBundledCampusPlaces,
+  isProvidencePendingVerification,
+  locationMatchesSearch,
+  PROVIDENCE_CAMPUS_SOURCE,
+  providencePlaceSourceUrl,
+  walkingEstimateLabel,
+  withProvidenceCampusPlaces,
+} from '@campus/shared/src/providenceCampus';
+import {
   buildCampusMapHtml,
   buildWalkingDirectionsUrl,
   mapPlacesPayload,
   loadCampusMapPlaces,
+  mergeCampusMapPlaces,
+  toCampusMapPlaces,
   type CampusMapPlace,
   type MapCoordinate,
 } from '../features/campusMap';
+
+type PlaceSource = 'loading' | 'error' | 'ready';
+type PlaceState = {
+  status: 'loading' | 'error' | 'ready';
+  source: PlaceSource;
+  locations: CampusMapPlace[];
+};
 
 type MapNavigation = {
   goBack?: () => void;
@@ -85,18 +103,26 @@ function CampusMapContent({
   const theme = useTheme();
   const mapSearchUrl = buildCampusMapSearchUrl(schoolName);
   const officialMapUrl = getOfficialCampusMapUrl(schoolId);
+  const bundled = hasBundledCampusPlaces(schoolId);
   const webRef = useRef<WebView>(null);
   const scrollRef = useRef<ScrollView>(null);
   const mounted = useRef(true);
   const locationLock = useRef(false);
+  const schoolIdRef = useRef(schoolId);
+  schoolIdRef.current = schoolId;
   const [query, setQuery] = useState('');
-  const [catalog, setCatalog] = useState<CampusMapPlace[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [loadError, setLoadError] = useState(false);
+  const [placeState, setPlaceState] = useState<PlaceState>(() => ({
+    status: bundled ? 'ready' : 'loading',
+    source: 'loading',
+    locations: bundled ? toCampusMapPlaces(withProvidenceCampusPlaces(schoolId, [])) : [],
+  }));
+  const [placeAttempt, setPlaceAttempt] = useState(0);
   const generation = useRef(0);
   const [category, setCategory] = useState<string>('all');
   const [nearbyOnly, setNearbyOnly] = useState(false);
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const selectedIdRef = useRef(selectedId);
+  selectedIdRef.current = selectedId;
   const [originId, setOriginId] = useState<string | null | undefined>(undefined);
   const [ready, setReady] = useState(false);
   const [mapFailed, setMapFailed] = useState(false);
@@ -106,34 +132,63 @@ function CampusMapContent({
   const [locationError, setLocationError] = useState('');
   const [directionsError, setDirectionsError] = useState('');
   const [officialMapError, setOfficialMapError] = useState('');
+  const [sourceLinkError, setSourceLinkError] = useState('');
 
   useEffect(() => {
     mounted.current = true;
     return () => {
       mounted.current = false;
+      generation.current += 1;
     };
   }, []);
 
-  const load = useCallback(async () => {
-    const request = ++generation.current;
-    setLoading(true);
-    setLoadError(false);
-    setCatalog([]);
-    try {
-      const next = await loadCampusMapPlaces(schoolId);
-      if (mounted.current && request === generation.current) setCatalog(next);
-    } catch {
-      if (mounted.current && request === generation.current) setLoadError(true);
-    } finally {
-      if (mounted.current && request === generation.current) setLoading(false);
-    }
-  }, [schoolId]);
+  const retryPlaces = useCallback(() => {
+    setPlaceState((previous) =>
+      previous.status === 'ready'
+        ? { ...previous, source: 'loading' }
+        : { status: 'loading', source: 'loading', locations: [] },
+    );
+    setPlaceAttempt((value) => value + 1);
+  }, []);
+
   useEffect(() => {
-    void load();
-  }, [load]);
+    const request = ++generation.current;
+    void loadCampusMapPlaces(schoolId).then(
+      (loaded) => {
+        if (!mounted.current || request !== generation.current) return;
+        setPlaceState({
+          status: 'ready',
+          source: 'ready',
+          locations: mergeCampusMapPlaces(schoolId, loaded),
+        });
+      },
+      () => {
+        if (!mounted.current || request !== generation.current) return;
+        setPlaceState((previous) =>
+          bundled
+            ? {
+                status: 'ready',
+                source: 'error',
+                locations: previous.locations.length
+                  ? previous.locations
+                  : toCampusMapPlaces(withProvidenceCampusPlaces(schoolId, [])),
+              }
+            : { status: 'error', source: 'error', locations: [] },
+        );
+      },
+    );
+  }, [schoolId, placeAttempt, bundled]);
+
+  const catalog = placeState.locations;
+  const loading = placeState.status === 'loading';
+  const loadError = placeState.status === 'error';
+  const sourcePending = placeState.source === 'loading';
+  const sourceFailed = placeState.source === 'error';
   const selected = catalog.find((place) => place.id === selectedId);
+  const selectedSourceUrl = selected ? providencePlaceSourceUrl(schoolId, selected) : null;
   const origin = catalog.find((place) => place.id === (originId === undefined ? params.fromPoiId : originId));
   const missingDeepLink =
+    !sourcePending &&
     selectedId !== null &&
     selectedId === (params.focusPoiId ?? params.toPoiId ?? params.poiId) &&
     !selected;
@@ -142,13 +197,10 @@ function CampusMapContent({
     [catalog],
   );
   const places = useMemo(() => {
-    const keyword = query.trim().toLowerCase();
     const matches = catalog.filter(
       (place) =>
         (category === 'all' || place.category === category) &&
-        [place.name, place.category, place.description, place.building, place.floor, ...place.facilities].some(
-          (value) => value?.toLowerCase().includes(keyword),
-        ) &&
+        locationMatchesSearch(place, query) &&
         (!nearbyOnly || !location || distanceMeters(location, place) <= 1000),
     );
     if (location) matches.sort((a, b) => distanceMeters(location, a) - distanceMeters(location, b));
@@ -190,6 +242,7 @@ function CampusMapContent({
     const targetId = params.focusPoiId ?? params.toPoiId ?? params.poiId;
     setSelectedId(typeof targetId === 'string' ? targetId : null);
     setDirectionsError('');
+    setSourceLinkError('');
   }, [params.focusPoiId, params.toPoiId, params.poiId]);
 
   useEffect(() => {
@@ -262,11 +315,35 @@ function CampusMapContent({
 
   const openOfficialMap = async () => {
     if (!officialMapUrl) return;
+    const actionSchoolId = schoolId;
+    const actionUrl = officialMapUrl;
     setOfficialMapError('');
     try {
-      await Linking.openURL(officialMapUrl);
+      await Linking.openURL(actionUrl);
     } catch {
-      if (mounted.current) setOfficialMapError('無法開啟校方校區平面圖，請確認網路連線後重試。');
+      if (!mounted.current || schoolIdRef.current !== actionSchoolId) return;
+      setOfficialMapError('無法開啟校方校區平面圖，請確認網路連線後重試。');
+    }
+  };
+
+  const openSelectedSource = async () => {
+    if (!selectedSourceUrl || !selected) return;
+    const actionSchoolId = schoolId;
+    const actionPlaceId = selected.id;
+    const actionUrl = selectedSourceUrl;
+    if (!mounted.current || selectedIdRef.current !== actionPlaceId) return;
+    setSourceLinkError('');
+    try {
+      await Linking.openURL(actionUrl);
+    } catch {
+      if (
+        !mounted.current ||
+        schoolIdRef.current !== actionSchoolId ||
+        selectedIdRef.current !== actionPlaceId
+      ) {
+        return;
+      }
+      setSourceLinkError('無法開啟地點來源，請確認網路連線後重試。');
     }
   };
 
@@ -297,13 +374,14 @@ function CampusMapContent({
       {loading ? (
         <AICard>
           <ActivityIndicator accessibilityLabel="讀取校園地點" color={theme.colors.accent} />
+          {officialPlanAction}
         </AICard>
       ) : loadError ? (
         <AICard title="目前無法讀取校園地點">
           <Text accessibilityRole="alert" style={textStyle}>
             請確認登入狀態與網路連線後重試。
           </Text>
-          <AIButton label="重新讀取地點" onPress={() => void load()} />
+          <AIButton label="重新讀取地點" onPress={retryPlaces} />
           {officialPlanAction}
         </AICard>
       ) : catalog.length === 0 ? (
@@ -332,10 +410,27 @@ function CampusMapContent({
               {directionsError}
             </Text>
           ) : null}
-          <AIButton label="重新讀取地點" variant="ghost" onPress={() => void load()} />
+          <AIButton label="重新讀取地點" variant="ghost" onPress={retryPlaces} />
         </AICard>
       ) : (
         <>
+          {sourceFailed && bundled ? (
+            <AICard title="校方地點資料暫時讀不到">
+              <Text accessibilityRole="alert" style={textStyle}>
+                先顯示目前可用的靜宜地點，收藏與部分地點可能缺少。
+              </Text>
+              <AIButton label="重新讀取地點資料" onPress={retryPlaces} />
+              {officialPlanAction}
+            </AICard>
+          ) : null}
+          {sourcePending && bundled ? (
+            <AICard>
+              <Text style={textStyle}>
+                正在同步校方地點資料，已先顯示靜宜的預載地點。
+              </Text>
+              {officialPlanAction}
+            </AICard>
+          ) : null}
           {missingDeepLink ? (
             <AICard title="找不到連結指定的地點">
               <Text style={textStyle}>這個地點不在目前學校的資料中，請從下方清單重新選擇。</Text>
@@ -422,6 +517,7 @@ function CampusMapContent({
                       ) {
                         setSelectedId(message.id);
                         setDirectionsError('');
+                        setSourceLinkError('');
                       }
                     } catch {
                       /* Ignore unrelated WebView messages. */
@@ -483,9 +579,29 @@ function CampusMapContent({
               <Text style={textStyle}>
                 依目前校園地點資料顯示。開放時間與出入口請以現場公告為準。
               </Text>
-              {officialPlanAction}
+              {!sourcePending && !sourceFailed ? officialPlanAction : null}
             </View>
           </AICard>
+          {schoolId === 'pu' ? (
+            <AICard title="靜宜地圖資料來源與步行分鐘算法">
+              <Text style={textStyle}>
+                預載目錄中的建築與設施位置取自 OpenStreetMap 貢獻者資料（查詢日期{' '}
+                {PROVIDENCE_CAMPUS_SOURCE.retrievedAt}），並與校方校園地圖實境導覽交叉核對名稱。預載公車站牌取自臺中市公車站牌資料（快照{' '}
+                {PROVIDENCE_CAMPUS_SOURCE.transitCatalogDate}）。步行分鐘是直線公尺 ÷ 每分鐘 80 公尺後四捨五入，不是導航路線時間。
+              </Text>
+              <AIButton
+                label="OpenStreetMap 著作權與授權"
+                variant="ghost"
+                onPress={() => {
+                  const actionSchoolId = schoolId;
+                  void Linking.openURL(PROVIDENCE_CAMPUS_SOURCE.mapDataUrl).catch(() => {
+                    if (!mounted.current || schoolIdRef.current !== actionSchoolId) return;
+                    setDirectionsError('無法開啟地圖服務，請確認網路連線後重試。');
+                  });
+                }}
+              />
+            </AICard>
+          ) : null}
           {selected ? (
             <View
               onLayout={(event) =>
@@ -514,17 +630,31 @@ function CampusMapContent({
                   {location ? (
                     <Text style={textStyle}>
                       與目前位置直線相距約 {formatDistance(distanceMeters(location, selected))}。
+                      {walkingEstimateLabel(distanceMeters(location, selected))}
                     </Text>
                   ) : null}
                   {origin && origin.id !== selected.id ? (
                     <Text style={textStyle}>
                       從{origin.name}出發；兩地直線距離約 {formatDistance(distanceMeters(origin, selected))}（地圖虛線僅為位置示意）。
+                      {walkingEstimateLabel(distanceMeters(origin, selected))}
+                    </Text>
+                  ) : null}
+                  {isProvidencePendingVerification(schoolId, selected) ? (
+                    <Text style={textStyle}>
+                      這個地點目前只有單一資料來源，位置待再次確認，先不要把它當成已核對的導航點。
                     </Text>
                   ) : null}
                   <Text style={textStyle}>
                     將開啟 Google 地圖確認實際步行路線與所需時間。
                   </Text>
                   <AIButton label="查看步行路線" onPress={() => void openDirections()} />
+                  {selectedSourceUrl ? (
+                    <AIButton
+                      label="查看地點來源"
+                      variant="ghost"
+                      onPress={() => void openSelectedSource()}
+                    />
+                  ) : null}
                   {hasOfficialProvidenceLibraryGuide(schoolId, selected) ? (
                     <AIButton
                       label="查看校方樓層導覽"
@@ -555,12 +685,21 @@ function CampusMapContent({
                       {directionsError}
                     </Text>
                   ) : null}
+                  {sourceLinkError ? (
+                    <Text
+                      accessibilityRole="alert"
+                      style={{ ...textStyle, color: theme.colors.danger }}
+                    >
+                      {sourceLinkError}
+                    </Text>
+                  ) : null}
                   <AIButton
                     label="關閉地點資訊"
                     variant="ghost"
                     onPress={() => {
                       setSelectedId(null);
                       setDirectionsError('');
+                      setSourceLinkError('');
                     }}
                   />
                 </View>
@@ -578,11 +717,13 @@ function CampusMapContent({
                 subtitle={[
                   place.category,
                   place.building,
+                  isProvidencePendingVerification(schoolId, place) ? '待確認' : null,
                   location ? `直線距離 ${formatDistance(distanceMeters(location, place))}` : null,
                 ].filter(Boolean).join(' · ')}
                 onPress={() => {
                   setSelectedId(place.id);
                   setDirectionsError('');
+                  setSourceLinkError('');
                 }}
               />
             ))}

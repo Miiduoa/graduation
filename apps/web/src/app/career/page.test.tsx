@@ -11,9 +11,17 @@ vi.mock('@/components/SiteShell', () => ({
   ),
 }));
 
-it('職涯還沒接通時用通用說法，不寫特定學校名稱', () => {
+vi.mock('@/components/SchoolPublicServiceLinks', () => ({
+  SchoolPublicServiceLinks: ({ service }: { service: string }) => (
+    <section aria-label="所選學校公開服務入口" data-service={service} />
+  ),
+}));
+
+it('說明個人服務狀態並提供所選學校的職涯入口，頁面本身不預設學校', () => {
   render(<CareerPage />);
   expect(screen.getByRole('heading', { name: '職涯' })).toBeTruthy();
-  expect(screen.getByText(/學校職涯或校友服務單位/)).toBeTruthy();
+  expect(screen.getByRole('heading', { name: '個人職涯服務尚未開放' })).toBeTruthy();
+  expect(screen.getByText('履歷與個人申請紀錄尚未連結。')).toBeTruthy();
+  expect(screen.getByRole('region', { name: '所選學校公開服務入口' }).getAttribute('data-service')).toBe('career');
   expect(screen.queryByText(/靜宜/)).toBeNull();
 });

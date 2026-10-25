@@ -91,12 +91,11 @@ function resetIdentity() {
   schoolState.school = { id: 'school-old', name: '舊校', code: 'OLD' };
 }
 
-async function openSettingsAndCaptureLoadedExport(
-  view: RenderAPI,
-): Promise<() => void> {
+async function openSettingsAndCaptureLoadedExport(view: RenderAPI): Promise<() => void> {
   fireEvent.press(view.getByText('設定'));
   await waitFor(() => expect(view.getByText('匯出操作紀錄 CSV（可選範圍）')).toBeTruthy());
 
+  await view.findByText('prior-school-secret');
   const alertSpy = jest.spyOn(Alert, 'alert');
   fireEvent.press(view.getByText('匯出操作紀錄 CSV（可選範圍）'));
   await waitFor(() => expect(alertSpy).toHaveBeenCalled());
@@ -256,7 +255,9 @@ test('full-export cancel then retry under same scope remains usable', async () =
       1,
     ),
   );
-  const retryChooser = [...alertSpy.mock.calls].reverse().find((call) => call[0] === '匯出操作紀錄')!;
+  const retryChooser = [...alertSpy.mock.calls]
+    .reverse()
+    .find((call) => call[0] === '匯出操作紀錄')!;
   const retryButtons = retryChooser[2] as Array<{ text?: string; onPress?: () => void }>;
   const retryLoaded = retryButtons.find((button) => button.text?.includes('已載入且符合篩選'))!;
 
@@ -275,4 +276,18 @@ test('full-export cancel then retry under same scope remains usable', async () =
   });
 
   alertSpy.mockRestore();
+});
+
+test('demotion to editor invalidates an already-open private audit export chooser', async () => {
+  const view = render(<AdminDashboardScreen />);
+  const runLoadedExport = await openSettingsAndCaptureLoadedExport(view);
+  authState.isAdmin = false;
+  authState.isEditor = true;
+  view.rerender(<AdminDashboardScreen />);
+  await act(async () => {
+    runLoadedExport();
+    await Promise.resolve();
+  });
+  expect(mockFileWrite).not.toHaveBeenCalled();
+  expect(shareAsync).not.toHaveBeenCalled();
 });

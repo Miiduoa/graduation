@@ -1,6 +1,12 @@
 const nodeCrypto = require('crypto');
 const { zodToJsonSchema } = require('zod-to-json-schema');
 const { MAX_TOTAL_UTF8_BYTES, utf8ByteLength } = require('./agent/inputLimits');
+const {
+  resolveRouteOrigin,
+  isProvidenceOriginLabel,
+  buildGroundedWebQuery,
+  resolveWeatherLocation,
+} = require('./lib/assistantPublicSchoolContext');
 
 const DEFAULT_PROVIDER_ORDER = ['groq', 'gemini'];
 const OLLAMA_BASE_URL_DEFAULT = 'http://localhost:11434/v1';
@@ -376,14 +382,22 @@ function buildMapDirectionsUrl(origin, destination) {
   return `https://www.google.com/maps/dir/?${params.toString()}`;
 }
 
-function routeAnswer(query) {
+function buildDestinationSearchUrl(destination) {
+  const params = new URLSearchParams({
+    api: '1',
+    query: destination,
+  });
+  return `https://www.google.com/maps/search/?${params.toString()}`;
+}
+
+function routeAnswer(query, options = {}) {
   if (!/(怎麼去|如何到|怎麼到|路線|搭.*公車|導航|交通)/.test(query)) return null;
   const cleaned = query
     .replace(/^(請問|幫我|搜尋|查詢)/, '')
     .replace(/[？?。！!]/g, '')
     .trim();
   const explicit = cleaned.match(/(?:從|自)([^到去，。？！?]{2,24})(?:到|去)([^，。？！?]{2,30})/);
-  const origin = explicit?.[1]?.replace(/(怎麼|如何|要|想)$/g, '').trim() || '靜宜大學';
+  const explicitOrigin = explicit?.[1]?.replace(/(怎麼|如何|要|想)$/g, '').trim() || '';
   const destination =
     explicit?.[2]?.trim() ||
     cleaned
@@ -392,6 +406,39 @@ function routeAnswer(query) {
       .trim();
 
   if (!destination || destination.length < 2) return null;
+
+  const originResolution = resolveRouteOrigin({
+    explicitOrigin,
+    schoolId: options.schoolId,
+  });
+
+  if (originResolution.needsOrigin) {
+    const searchUrl = buildDestinationSearchUrl(destination);
+    return {
+      content: [
+        '目前無法判斷出發地，不會預設任何校園座標。',
+        `請告訴我你從哪裡出發，例如「從○○大學怎麼去${destination}」。`,
+        '',
+        `你要去的目的地可先用地圖搜尋：${destination}`,
+        searchUrl,
+        '',
+        `查詢時間：${new Date().toLocaleString('zh-TW', { timeZone: 'Asia/Taipei' })}`,
+        '資料來源：Google Maps',
+      ].join('\n'),
+      sources: [
+        {
+          title: `Google Maps 搜尋：${destination}`,
+          url: searchUrl,
+          source: 'Google Maps',
+          snippet: `目的地「${destination}」的地圖搜尋；出發地尚未確認。`,
+        },
+      ],
+      confidence: 'low',
+      suggestions: ['補上出發地', '改目的地', '查公車到站'],
+    };
+  }
+
+  const origin = originResolution.origin;
   const url = buildMapDirectionsUrl(origin, destination);
   const sources = [
     {
@@ -403,7 +450,7 @@ function routeAnswer(query) {
   ];
 
   if (
-    /靜宜|静宜|providence/i.test(origin) &&
+    isProvidenceOriginLabel(origin) &&
     /台中車站|臺中車站|台中火車站|臺中火車站/.test(destination)
   ) {
     sources.unshift({
@@ -433,16 +480,6 @@ function routeAnswer(query) {
   };
 }
 
-function normalizeWeatherLocation(query) {
-  if (/靜宜|静宜|沙鹿/.test(query)) {
-    return { name: '台中市沙鹿區靜宜大學', latitude: 24.226, longitude: 120.563 };
-  }
-  if (/台中|臺中/.test(query)) {
-    return { name: '台中市', latitude: 24.1477, longitude: 120.6736 };
-  }
-  return { name: '台中市沙鹿區靜宜大學', latitude: 24.226, longitude: 120.563 };
-}
-
 function describeWeather(code) {
   if (code == null) return '天氣狀態未提供';
   if (code === 0) return '晴朗';
@@ -457,7 +494,24 @@ function describeWeather(code) {
 
 async function weatherAnswer(query, options = {}) {
   if (!/(天氣|氣溫|下雨|帶傘|雨具|天候)/.test(query)) return null;
-  const location = normalizeWeatherLocation(query);
+  const resolved = resolveWeatherLocation({ query, schoolId: options.schoolId });
+  if (resolved.unavailable || !resolved.location) {
+    return {
+      content: [
+        resolved.message ||
+          '目前無法查這個地點的即時天氣。請告訴我要查哪裡，或直接查看中央氣象署／氣象 APP。',
+        '',
+        `查詢時間：${new Date().toLocaleString('zh-TW', { timeZone: 'Asia/Taipei' })}`,
+      ].join('\n'),
+      sources: [],
+      confidence: 'low',
+      suggestions: ['告訴我地點', '改問別的', '查看中央氣象署'],
+      weatherUnavailable: true,
+      weatherReason: resolved.reason || 'missing_location',
+    };
+  }
+
+  const location = resolved.location;
   const params = new URLSearchParams({
     latitude: String(location.latitude),
     longitude: String(location.longitude),
@@ -578,15 +632,19 @@ function buildGroundedWebSummary(query, sources) {
 }
 
 async function answerWithServerWebSearch(query, options = {}) {
-  const route = routeAnswer(query);
+  const schoolId = options.schoolId != null ? String(options.schoolId).trim() || null : null;
+  const searchOptions = { ...options, schoolId };
+
+  const route = routeAnswer(query, searchOptions);
   if (route) return route;
 
-  const weather = await weatherAnswer(query, options);
+  const weather = await weatherAnswer(query, searchOptions);
   if (weather) return weather;
 
+  const groundedQuery = buildGroundedWebQuery(query, schoolId);
   const [wiki, ddg] = await Promise.all([
-    wikipediaSources(query, options),
-    duckDuckGoSources(query, options),
+    wikipediaSources(groundedQuery, searchOptions),
+    duckDuckGoSources(groundedQuery, searchOptions),
   ]);
   return buildGroundedWebSummary(query, [...wiki, ...ddg]);
 }

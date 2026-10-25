@@ -4,6 +4,8 @@ import * as Clipboard from 'expo-clipboard';
 import {
   buildOfficialLibraryCatalogUrl,
   getOfficialLibrary,
+  getOfficialLibraryCatalogQueryMaxLength,
+  hasVerifiedCatalogSearch,
 } from '@campus/shared/src/officialLibraries';
 import { AIDetailScreen, AICard, AIButton, aiTokens } from '../ui/aiFirst';
 import { getThemeVersion, subscribeToTheme } from '../ui/theme';
@@ -48,6 +50,8 @@ function LibraryContent({
   navigation?: Navigation;
 }) {
   const library = getOfficialLibrary(schoolId, schoolName);
+  const verifiedSearch = hasVerifiedCatalogSearch(library);
+  const queryMaxLength = getOfficialLibraryCatalogQueryMaxLength(library);
   const [keyword, setKeyword] = useState('');
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
@@ -83,7 +87,7 @@ function LibraryContent({
       }
       return;
     }
-    if (library.catalogSearch === 'primo-ve') {
+    if (verifiedSearch) {
       const url = buildOfficialLibraryCatalogUrl(schoolId, keyword, 'FullText', schoolName);
       if (url) await open(url);
       return;
@@ -116,14 +120,16 @@ function LibraryContent({
               <Text style={{ color: aiTokens.muted, lineHeight: 22 }}>
                 {library.catalogSearch === 'pu-webpac'
                   ? '依書名、作者或 ISBN 查詢學校館藏。'
-                  : '已連結這所學校的官方圖書館。不同學校有各自的館藏系統，請在官網確認館藏及可借狀態。'}
+                  : verifiedSearch
+                    ? '輸入關鍵字即可直接開啟這所學校的官方館藏結果；是否可借請以館方系統為準。'
+                    : '已連結這所學校的官方圖書館。不同學校有各自的館藏系統，請在官網確認館藏及可借狀態。'}
               </Text>
               <TextInput
                 accessibilityLabel="館藏關鍵字"
                 placeholder="書名、作者或 ISBN"
                 placeholderTextColor={aiTokens.muted}
                 value={keyword}
-                maxLength={200}
+                maxLength={queryMaxLength}
                 onChangeText={(value) => { setKeyword(value); setNotice(''); }}
                 style={{
                   color: aiTokens.text,
@@ -134,13 +140,18 @@ function LibraryContent({
                   minHeight: 48,
                 }}
               />
+              {library.catalogQueryMaxLength ? (
+                <Text style={{ color: aiTokens.muted, lineHeight: 20 }}>
+                  此校官方館藏關鍵字上限為 {library.catalogQueryMaxLength} 字。
+                </Text>
+              ) : null}
               <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
                 <AIButton
                   label="查詢館藏"
                   disabled={!keyword.trim()}
                   onPress={() => void searchOfficialCatalog()}
                 />
-                {library.catalogSearch !== 'primo-ve' ? (
+                {library.catalogSearch === 'pu-webpac' || !verifiedSearch ? (
                   <AIButton
                     label="在圖書館網站搜尋"
                     variant="ghost"

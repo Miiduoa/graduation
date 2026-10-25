@@ -1,6 +1,6 @@
 import {
-  addDoc,
   collection,
+  deleteField,
   doc,
   getDocFromServer,
   getDocsFromServer,
@@ -14,85 +14,106 @@ import { permissionDeniedError } from '@campus/shared/src/signedInSocialReads';
 import { getAuthInstance, getDb } from '../firebase';
 import type { DataSource } from './source';
 import type { LostFoundItem } from './types';
-
-class LostFoundWriteUnconfirmedError extends Error {
-  readonly code = 'lost-found-write-unconfirmed';
-  constructor() {
-    super('資料已送出，但無法讀回確認。請先返回列表重新整理，避免重複刊登。');
-  }
-}
+import { normalizeLostFoundDateInput } from './lostFoundDates';
+import {
+  LostFoundConflictError,
+  LostFoundError,
+  LostFoundScopeChangedError,
+  LostFoundWriteUnconfirmedError,
+  readRevision,
+  revisionsEqual,
+  type LostFoundViewItem,
+  type LostFoundWriteFields,
+  type LostFoundWriteOptions,
+} from './lostFoundMeta';
 
 function segment(value: string | undefined): string {
-  if (!value?.trim() || value.includes('/')) throw new Error('失物招領資料範圍不正確。');
-  return value;
+  if (!value?.trim() || value.includes('/')) throw new LostFoundError('失物招領資料範圍不正確。');
+  return value.trim();
 }
+
 function currentUid(): string {
   const uid = getAuthInstance().currentUser?.uid;
-  if (!uid) throw new Error('請先登入後再操作。');
+  if (!uid) throw new LostFoundError('請先登入後再操作。');
   return uid;
 }
+
 function requireSignedIn() {
   if (!getAuthInstance().currentUser) throw permissionDeniedError();
 }
+
 function sameUser(uid: string) {
-  if (currentUid() !== uid) throw new Error('帳號已切換，請重新操作。');
-}
-function dateValue(value: unknown): string {
-  const date =
-    typeof value === 'string' ? new Date(value) : (value as { toDate?: () => Date })?.toDate?.();
-  if (!(date instanceof Date) || !Number.isFinite(date.getTime()))
-    throw new Error('物品日期資料不完整。');
-  return date.toISOString();
-}
-function readItem(
-  snapshot: DocumentSnapshot,
-  schoolId: string,
-  canonical: boolean,
-): LostFoundItem | null {
-  if (!snapshot.exists()) return null;
-  const row = snapshot.data();
-  if ((!canonical && row.schoolId !== schoolId) || (row.schoolId && row.schoolId !== schoolId))
-    return null;
-  const owner = row.userId ?? row.reporterId;
-  if (
-    typeof owner !== 'string' ||
-    !owner ||
-    (row.userId && row.reporterId && row.userId !== row.reporterId)
-  ) {
-    throw new Error('物品發布者資料不完整。');
+  if (getAuthInstance().currentUser?.uid !== uid) {
+    throw new LostFoundScopeChangedError('帳號已切換，請重新操作。');
   }
-  if (
-    !['lost', 'found'].includes(row.type) ||
-    !['open', 'active', 'claimed', 'resolved', 'returned', 'expired'].includes(row.status) ||
-    ['title', 'description', 'category', 'location'].some(
-      (field) => typeof row[field] !== 'string' || !row[field].trim(),
-    )
-  ) {
-    throw new Error('物品資料不完整，請稍後再試。');
+}
+
+async function assertScope(options: LostFoundWriteOptions | undefined, uid: string) {
+  sameUser(uid);
+  if (!options?.assertCurrentScope) return;
+  const ok = await options.assertCurrentScope();
+  if (!ok) throw new LostFoundScopeChangedError();
+  sameUser(uid);
+}
+
+function optionalDateValue(value: unknown): string | undefined {
+  if (value == null || value === '') return undefined;
+  return instantValue(value);
+}
+
+function instantValue(value: unknown): string {
+  if (typeof value === 'string') {
+    const date = new Date(value);
+    if (!Number.isFinite(date.getTime())) throw new LostFoundError('物品日期資料不完整。');
+    return date.toISOString();
   }
-  return {
-    ...row,
-    id: snapshot.id,
-    reporterId: owner,
-    schoolId,
-    contactInfo: typeof row.contactInfo === 'string' ? row.contactInfo : undefined,
-    reporter: typeof row.reporter?.displayName === 'string' ? row.reporter : undefined,
-    imageUrl: typeof row.imageUrl === 'string' ? row.imageUrl : undefined,
-    imageUrls: Array.isArray(row.imageUrls)
-      ? row.imageUrls.filter((url: unknown) => typeof url === 'string')
-      : undefined,
-    date: dateValue(row.date),
-    createdAt: dateValue(row.createdAt),
-  } as LostFoundItem;
+  if (value && typeof value === 'object') {
+    const row = value as {
+      toDate?: () => Date;
+      seconds?: number;
+      nanoseconds?: number;
+      _seconds?: number;
+      _nanoseconds?: number;
+    };
+    if (typeof row.toDate === 'function') {
+      const date = row.toDate();
+      if (date instanceof Date && Number.isFinite(date.getTime())) return date.toISOString();
+    }
+    const seconds = row.seconds ?? row._seconds;
+    const nanoseconds = row.nanoseconds ?? row._nanoseconds ?? 0;
+    if (typeof seconds === 'number' && Number.isFinite(seconds)) {
+      return new Date(seconds * 1000 + Math.floor(Number(nanoseconds) / 1e6)).toISOString();
+    }
+  }
+  throw new LostFoundError('物品日期資料不完整。');
 }
-async function locate(id: string, schoolId: string) {
-  const db = getDb();
-  const canonical = await getDocFromServer(doc(db, 'schools', schoolId, 'lostFound', segment(id)));
-  if (canonical.exists()) return { snapshot: canonical, canonical: true };
-  return { snapshot: await getDocFromServer(doc(db, 'lostFoundItems', id)), canonical: false };
+
+function dateFieldValue(value: unknown): string {
+  if (typeof value === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(value.trim())) {
+    return normalizeLostFoundDateInput(value);
+  }
+  return instantValue(value);
 }
-function editable(data: Partial<LostFoundItem>): Record<string, unknown> {
-  const result: Record<string, unknown> = {};
+
+function normalizeContact(value: unknown): string | undefined {
+  if (value == null) return undefined;
+  if (typeof value !== 'string') throw new LostFoundError('請確認聯絡方式格式。');
+  const trimmed = value.trim();
+  return trimmed || undefined;
+}
+
+function contactMatches(actual: string | undefined, expected: string | undefined) {
+  return (actual ?? '') === (expected ?? '');
+}
+
+type NormalizedWrite = {
+  patch: Record<string, unknown>;
+  match: Record<string, string | undefined>;
+};
+
+function normalizeWritable(data: Partial<LostFoundWriteFields>): NormalizedWrite {
+  const patch: Record<string, unknown> = {};
+  const match: Record<string, string | undefined> = {};
   for (const key of [
     'type',
     'title',
@@ -102,23 +123,153 @@ function editable(data: Partial<LostFoundItem>): Record<string, unknown> {
     'date',
     'contactInfo',
   ] as const) {
-    if (data[key] !== undefined) {
-      if (typeof data[key] !== 'string') throw new Error('請確認物品資料格式。');
-      result[key] = data[key].trim();
+    if (data[key] === undefined) continue;
+    if (typeof data[key] !== 'string') throw new LostFoundError('請確認物品資料格式。');
+    const trimmed = data[key].trim();
+    if (key === 'contactInfo') {
+      match.contactInfo = trimmed || undefined;
+      // Empty contact intentionally clears the stored field.
+      patch.contactInfo = trimmed ? trimmed : deleteField();
+      continue;
     }
+    if (!trimmed && ['title', 'description', 'category', 'location'].includes(key)) {
+      throw new LostFoundError('請填寫物品的必填資訊。');
+    }
+    match[key] = trimmed;
+    patch[key] = key === 'date' ? normalizeLostFoundDateInput(trimmed) : trimmed;
   }
-  for (const key of ['title', 'description', 'category', 'location'] as const) {
-    if (key in result && !result[key]) throw new Error('請填寫物品的必填資訊。');
+  if ('type' in match && !['lost', 'found'].includes(String(match.type))) {
+    throw new LostFoundError('請選擇遺失或拾獲。');
   }
-  if ('type' in result && !['lost', 'found'].includes(String(result.type)))
-    throw new Error('請選擇遺失或拾獲。');
-  if ('date' in result) result.date = dateValue(result.date);
-  if ('status' in data) {
-    if (data.status !== 'resolved') throw new Error('不支援這個物品狀態變更。');
-    result.status = 'resolved';
-    result.resolvedAt = serverTimestamp();
+  if ('date' in match && match.date) match.date = normalizeLostFoundDateInput(match.date);
+  return { patch, match };
+}
+
+function requireCreateFields(match: Record<string, string | undefined>) {
+  for (const key of ['type', 'title', 'description', 'category', 'location', 'date'] as const) {
+    if (!match[key]) throw new LostFoundError('請填寫物品的必填資訊。');
   }
-  return result;
+}
+
+function matchesCreateIntent(
+  item: LostFoundViewItem,
+  match: Record<string, string | undefined>,
+  uid: string,
+  schoolId: string,
+) {
+  return (
+    item.canonical &&
+    item.userId === uid &&
+    item.reporterId === uid &&
+    item.schoolId === schoolId &&
+    item.status === 'open' &&
+    item.type === match.type &&
+    item.title === match.title &&
+    item.description === match.description &&
+    item.category === match.category &&
+    item.location === match.location &&
+    item.date === match.date &&
+    contactMatches(item.contactInfo, match.contactInfo)
+  );
+}
+
+function matchesEditIntent(item: LostFoundViewItem, match: Record<string, string | undefined>) {
+  for (const key of Object.keys(match) as (keyof LostFoundWriteFields)[]) {
+    if (key === 'contactInfo') {
+      if (!contactMatches(item.contactInfo, match.contactInfo)) return false;
+      continue;
+    }
+    if ((item as Record<string, unknown>)[key] !== match[key]) return false;
+  }
+  return true;
+}
+
+function readItem(
+  snapshot: DocumentSnapshot,
+  schoolId: string,
+  canonical: boolean,
+): LostFoundViewItem | null {
+  if (!snapshot.exists()) return null;
+  const row = snapshot.data();
+  if ((!canonical && row.schoolId !== schoolId) || (row.schoolId && row.schoolId !== schoolId)) {
+    return null;
+  }
+  const userId = typeof row.userId === 'string' && row.userId ? row.userId : undefined;
+  const reporterId = typeof row.reporterId === 'string' && row.reporterId ? row.reporterId : undefined;
+  // Canonical docs must not carry conflicting owner metadata.
+  if (canonical && userId && reporterId && userId !== reporterId) {
+    throw new LostFoundError('物品發布者資料不完整。');
+  }
+  if (canonical && !userId) {
+    throw new LostFoundError('物品發布者資料不完整。');
+  }
+  if (!canonical && userId && reporterId && userId !== reporterId) {
+    throw new LostFoundError('物品發布者資料不完整。');
+  }
+  const owner = userId ?? reporterId;
+  if (typeof owner !== 'string' || !owner) {
+    throw new LostFoundError('物品發布者資料不完整。');
+  }
+  if (
+    !['lost', 'found'].includes(row.type) ||
+    !['open', 'active', 'claimed', 'resolved', 'returned', 'expired'].includes(row.status) ||
+    ['title', 'description', 'category', 'location'].some(
+      (field) => typeof row[field] !== 'string' || !row[field].trim(),
+    )
+  ) {
+    throw new LostFoundError('物品資料不完整，請稍後再試。');
+  }
+  const migrationReadOnly = !userId;
+  return {
+    id: snapshot.id,
+    type: row.type,
+    title: row.title,
+    description: row.description,
+    category: row.category,
+    location: row.location,
+    date: dateFieldValue(row.date),
+    status: row.status,
+    reporterId: owner,
+    userId,
+    createdAt: instantValue(row.createdAt),
+    resolvedAt: optionalDateValue(row.resolvedAt),
+    schoolId,
+    contactInfo: normalizeContact(row.contactInfo),
+    reporter: typeof row.reporter?.displayName === 'string' ? row.reporter : undefined,
+    imageUrl: typeof row.imageUrl === 'string' ? row.imageUrl : undefined,
+    imageUrls: Array.isArray(row.imageUrls)
+      ? row.imageUrls.filter((url: unknown) => typeof url === 'string')
+      : undefined,
+    canonical,
+    updatedAtRevision: readRevision(row.updatedAt),
+    migrationReadOnly,
+  };
+}
+
+async function locate(id: string, schoolId: string) {
+  const db = getDb();
+  const itemId = segment(id);
+  const scoped = segment(schoolId);
+  const canonical = await getDocFromServer(doc(db, 'schools', scoped, 'lostFound', itemId));
+  if (canonical.exists()) return { snapshot: canonical, canonical: true as const };
+  return {
+    snapshot: await getDocFromServer(doc(db, 'lostFoundItems', itemId)),
+    canonical: false as const,
+  };
+}
+
+function isClosedStatus(status: string | undefined) {
+  return status === 'resolved' || status === 'returned' || status === 'expired';
+}
+
+function isResolvedStatus(status: string | undefined) {
+  return status === 'resolved' || status === 'returned';
+}
+
+/** Stable per-draft document id for create retries (never use addDoc). */
+export function allocateLostFoundDocumentId(schoolId: string): string {
+  const scoped = segment(schoolId);
+  return doc(collection(getDb(), 'schools', scoped, 'lostFound')).id;
 }
 
 export const lostFoundSource: Pick<
@@ -152,64 +303,196 @@ export const lostFoundSource: Pick<
     );
     return options?.limit ? sorted.slice(0, options.limit) : sorted;
   },
+
   async getLostFoundItem(id, school) {
     requireSignedIn();
     const schoolId = segment(school);
     const record = await locate(id, schoolId);
     return readItem(record.snapshot, schoolId, record.canonical);
   },
-  async createLostFoundItem(data) {
+
+  async createLostFoundItem(data, options) {
     const uid = currentUid();
+    await assertScope(options, uid);
     const schoolId = segment(data.schoolId);
-    if (data.reporterId !== uid) throw new Error('無法代其他帳號發布。');
-    const fields = editable(data);
-    for (const key of ['type', 'title', 'description', 'category', 'location', 'date']) {
-      if (!fields[key]) throw new Error('請填寫物品的必填資訊。');
-    }
-    const reference = await addDoc(collection(getDb(), 'schools', schoolId, 'lostFound'), {
-      ...fields,
-      userId: uid,
-      reporterId: uid,
-      schoolId,
-      status: 'open',
-      createdAt: serverTimestamp(),
+    if (data.reporterId !== uid) throw new LostFoundError('無法代其他帳號發布。');
+    const documentId = segment(options?.documentId ?? allocateLostFoundDocumentId(schoolId));
+    const { match } = normalizeWritable({
+      type: data.type,
+      title: data.title,
+      description: data.description,
+      category: data.category,
+      location: data.location,
+      date: data.date,
+      contactInfo: data.contactInfo,
     });
-    sameUser(uid);
+    requireCreateFields(match);
+    const ref = doc(getDb(), 'schools', schoolId, 'lostFound', documentId);
+
+    let writeError: unknown;
     try {
-      const item = readItem(await getDocFromServer(reference), schoolId, true);
-      sameUser(uid);
-      if (!item) throw new LostFoundWriteUnconfirmedError();
-      return item;
+      await runTransaction(getDb(), async (transaction) => {
+        await assertScope(options, uid);
+        const snapshot = await transaction.get(ref);
+        await assertScope(options, uid);
+        if (snapshot.exists()) {
+          const existing = readItem(snapshot, schoolId, true);
+          if (existing && matchesCreateIntent(existing, match, uid, schoolId)) return;
+          throw new LostFoundConflictError(
+            '這則刊登編號已有不同內容。請重新整理確認後，再決定是否另開一則。',
+          );
+        }
+        const payload: Record<string, unknown> = {
+          type: match.type,
+          title: match.title,
+          description: match.description,
+          category: match.category,
+          location: match.location,
+          date: match.date,
+          userId: uid,
+          reporterId: uid,
+          schoolId,
+          status: 'open',
+          createdAt: serverTimestamp(),
+        };
+        if (match.contactInfo) payload.contactInfo = match.contactInfo;
+        transaction.set(ref, payload);
+      });
+    } catch (error) {
+      writeError = error;
+      if (
+        error instanceof LostFoundConflictError ||
+        error instanceof LostFoundScopeChangedError ||
+        error instanceof LostFoundError
+      ) {
+        // Deterministic client/validation failures are not ambiguous receipts.
+        if (!(error instanceof LostFoundWriteUnconfirmedError)) throw error;
+      }
+    }
+
+    await assertScope(options, uid);
+    let receipt: LostFoundViewItem | null;
+    try {
+      receipt = readItem(await getDocFromServer(ref), schoolId, true);
     } catch {
       throw new LostFoundWriteUnconfirmedError();
     }
+    await assertScope(options, uid);
+    if (receipt && matchesCreateIntent(receipt, match, uid, schoolId)) return receipt;
+    if (writeError) throw new LostFoundWriteUnconfirmedError();
+    throw new LostFoundWriteUnconfirmedError();
   },
-  async updateLostFoundItem(id, data, school) {
+
+  async updateLostFoundItem(id, data, school, options) {
     const uid = currentUid();
+    await assertScope(options, uid);
     const schoolId = segment(school);
-    const located = await locate(id, schoolId);
-    const fields = editable(data);
-    sameUser(uid);
-    await runTransaction(getDb(), async (transaction) => {
-      sameUser(uid);
-      const snapshot = await transaction.get(located.snapshot.ref);
-      const existing = readItem(snapshot, schoolId, located.canonical);
-      // Existing rules authorize userId; legacy records without it need migration, not an ownership guess.
-      if (!existing || snapshot.data()?.userId !== uid || existing.reporterId !== uid)
-        throw new Error('只有發布者可以更新這則資訊。');
-      transaction.update(snapshot.ref, { ...fields, updatedAt: serverTimestamp() });
+    const expectedRevision =
+      options?.expectedRevision === undefined ? undefined : options.expectedRevision;
+    const { patch, match } = normalizeWritable({
+      type: data.type,
+      title: data.title,
+      description: data.description,
+      category: data.category,
+      location: data.location,
+      date: data.date,
+      contactInfo: data.contactInfo,
     });
-    sameUser(uid);
-    const updated = readItem(
-      await getDocFromServer(located.snapshot.ref),
-      schoolId,
-      located.canonical,
-    );
-    sameUser(uid);
-    if (!updated) throw new Error('無法確認更新結果，請重新整理。');
-    return updated;
+    if (!Object.keys(match).length && data.status !== 'resolved') {
+      throw new LostFoundError('沒有需要更新的內容。');
+    }
+    if (data.status != null && data.status !== 'resolved') {
+      throw new LostFoundError('不支援這個物品狀態變更。');
+    }
+    const located = await locate(id, schoolId);
+    await assertScope(options, uid);
+
+    let writeError: unknown;
+    try {
+      await runTransaction(getDb(), async (transaction) => {
+        await assertScope(options, uid);
+        const snapshot = await transaction.get(located.snapshot.ref);
+        await assertScope(options, uid);
+        const existing = readItem(snapshot, schoolId, located.canonical);
+        // Rules authorize userId; never infer ownership from reporterId-only legacy docs.
+        if (!existing || snapshot.data()?.userId !== uid || existing.userId !== uid) {
+          throw new LostFoundError('只有發布者可以更新這則資訊。', 'lost-found-forbidden');
+        }
+        if (data.status === 'resolved') {
+          // Owner-authorized already-resolved/returned (e.g. Web resolve) is desired state.
+          if (isResolvedStatus(existing.status)) return;
+          if (
+            expectedRevision !== undefined &&
+            !revisionsEqual(existing.updatedAtRevision, expectedRevision)
+          ) {
+            // Stale resolve while row is still open but genuinely newer → conflict.
+            throw new LostFoundConflictError('物品已由其他操作更新，請重新讀取後再結案。');
+          }
+          if (isClosedStatus(existing.status)) {
+            throw new LostFoundError('這則刊登目前無法結案。');
+          }
+          transaction.update(snapshot.ref, {
+            status: 'resolved',
+            resolvedAt: serverTimestamp(),
+            updatedAt: serverTimestamp(),
+          });
+          return;
+        }
+        // Closed statuses must not masquerade as editable same-state success.
+        if (isClosedStatus(existing.status)) {
+          throw new LostFoundError('已結案的物品無法再編輯。');
+        }
+        // Same-intent reconciliation after a lost commit receipt (content already matches).
+        if (matchesEditIntent(existing, match)) {
+          return;
+        }
+        if (
+          expectedRevision !== undefined &&
+          !revisionsEqual(existing.updatedAtRevision, expectedRevision)
+        ) {
+          throw new LostFoundConflictError('物品已由其他操作更新，請重新讀取後再編輯。');
+        }
+        transaction.update(snapshot.ref, { ...patch, updatedAt: serverTimestamp() });
+      });
+    } catch (error) {
+      writeError = error;
+      if (
+        error instanceof LostFoundConflictError ||
+        error instanceof LostFoundScopeChangedError ||
+        (error instanceof LostFoundError && !(error instanceof LostFoundWriteUnconfirmedError))
+      ) {
+        throw error;
+      }
+      // Non-deterministic rejection after a possible commit: fall through to receipt read.
+    }
+
+    await assertScope(options, uid);
+    let live: DocumentSnapshot;
+    try {
+      live = await getDocFromServer(located.snapshot.ref);
+    } catch {
+      throw new LostFoundWriteUnconfirmedError('資料可能已更新，但無法讀回確認。請重新整理。');
+    }
+    await assertScope(options, uid);
+    const updated = readItem(live, schoolId, located.canonical);
+    if (!updated || updated.userId !== uid) {
+      throw new LostFoundWriteUnconfirmedError('資料可能已更新，但無法讀回確認。請重新整理。');
+    }
+    if (data.status === 'resolved') {
+      if (isResolvedStatus(updated.status)) return updated;
+      if (writeError) {
+        throw new LostFoundWriteUnconfirmedError('結案可能已送出，但無法讀回確認。請重新整理。');
+      }
+      throw new LostFoundWriteUnconfirmedError('結案可能已送出，但無法讀回確認。請重新整理。');
+    }
+    if (isClosedStatus(updated.status)) {
+      throw new LostFoundError('已結案的物品無法再編輯。');
+    }
+    if (matchesEditIntent(updated, match)) return updated;
+    throw new LostFoundWriteUnconfirmedError('資料可能已更新，但無法讀回確認。請重新整理。');
   },
-  async resolveLostFoundItem(id, schoolId) {
-    await lostFoundSource.updateLostFoundItem(id, { status: 'resolved' }, schoolId);
+
+  async resolveLostFoundItem(id, schoolId, options) {
+    await lostFoundSource.updateLostFoundItem(id, { status: 'resolved' }, schoolId, options);
   },
 };

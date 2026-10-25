@@ -81,3 +81,4 @@ outputs/
 tmp/
 .test-env/
 artifacts/campus-visual/
+artifacts/timetable-browser/

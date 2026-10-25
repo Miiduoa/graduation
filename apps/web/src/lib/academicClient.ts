@@ -7,6 +7,7 @@ import {
   type AcademicCourseResponse,
   type AcademicGradeResponse,
 } from './academicRecords';
+import { isOfficialAcademicSchool } from './academicOfficialSchool';
 
 export type AcademicKind = 'courses' | 'grades';
 export type AcademicData = { courses: AcademicCourseResponse; grades: AcademicGradeResponse };
@@ -26,10 +27,19 @@ export class AcademicConnectionError extends Error {
   }
 }
 
+/**
+ * Loads official academic records for the signed-in account.
+ * `expectedSchool` is a client gate only — the callable still receives `{ dataType }`.
+ * Ownership remains server-authoritative (auth token / membership / provenance).
+ */
 export async function loadAcademicRecords<K extends AcademicKind>(
   kind: K,
   uid: string,
+  expectedSchool: string = 'pu',
 ): Promise<AcademicSnapshot<K>> {
+  if (!isOfficialAcademicSchool(expectedSchool)) {
+    throw new AcademicConnectionError('unavailable');
+  }
   if (!uid || !isFirebaseConfigured() || getAuth()?.currentUser?.uid !== uid) {
     throw new AcademicConnectionError('unavailable');
   }
@@ -48,7 +58,7 @@ export async function loadAcademicRecords<K extends AcademicKind>(
       row.success !== true ||
       row.ownerUid !== uid ||
       getAuth()?.currentUser?.uid !== uid ||
-      row.schoolId !== 'pu' ||
+      row.schoolId !== expectedSchool ||
       row.source !== 'pu-campus' ||
       row.dataType !== kind ||
       typeof row.fetchedAt !== 'string' ||
@@ -60,7 +70,7 @@ export async function loadAcademicRecords<K extends AcademicKind>(
       kind === 'courses' ? normalizeCourseRecords(row.result) : normalizeGradeRecords(row.result);
     return {
       ownerUid: uid,
-      schoolId: 'pu',
+      schoolId: expectedSchool,
       fetchedAt: row.fetchedAt,
       records,
     } as AcademicSnapshot<K>;

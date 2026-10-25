@@ -3,11 +3,24 @@
 import Link from 'next/link';
 import { CampusIcon } from './CampusIcon';
 import { usePathname, useSearchParams } from 'next/navigation';
-import { useEffect, useId, useRef } from 'react';
-import { CAMPUS_SERVICES, SERVICE_CATEGORIES } from '@/lib/campusServices';
+import { useEffect, useId, useRef, useState } from 'react';
+import {
+  CAMPUS_SERVICES,
+  SERVICE_CATEGORIES,
+  searchCampusServices,
+  type ServiceCategory,
+} from '@/lib/campusServices';
 import { isWebOnlineOrderingEnabled, ONLINE_ORDERING_OFF_TEXT } from '@/lib/onlineOrdering';
 import styles from './CampusServiceMenu.module.css';
 import { campusServiceHref, useCampusNavigationSearch } from '@/lib/campusNavigation';
+import { primaryNavigationSection } from '@/lib/primaryNavigation';
+
+const categoryLabels: Record<ServiceCategory, string> = {
+  study: '課務',
+  campus: '生活',
+  connect: '交流',
+  account: '帳號',
+};
 
 export function CampusServiceMenu() {
   const pathname = usePathname();
@@ -16,6 +29,10 @@ export function CampusServiceMenu() {
   ).sort((first, second) => second.href.length - first.href.length)[0]?.href;
   const params = useSearchParams();
   const menu = useRef<HTMLDetailsElement>(null);
+  const search = useRef<HTMLInputElement>(null);
+  const results = useRef<HTMLDivElement>(null);
+  const [query, setQuery] = useState('');
+  const [category, setCategory] = useState<ServiceCategory | 'all'>('all');
   const id = useId();
   useEffect(() => {
     function dismiss(event: PointerEvent) {
@@ -24,15 +41,47 @@ export function CampusServiceMenu() {
         element.open = false;
       }
     }
+    function openSearch(event: KeyboardEvent) {
+      if (
+        event.defaultPrevented ||
+        event.isComposing ||
+        event.altKey ||
+        !(event.metaKey || event.ctrlKey) ||
+        event.key.toLowerCase() !== 'k' ||
+        (event.target instanceof Element &&
+          event.target.closest(
+            'input, textarea, select, [contenteditable]:not([contenteditable="false"])',
+          )) ||
+        document.querySelector('dialog[open]')
+      )
+        return;
+      if (!menu.current || !search.current) return;
+      event.preventDefault();
+      menu.current.open = true;
+      search.current.focus();
+    }
     document.addEventListener('pointerdown', dismiss);
-    return () => document.removeEventListener('pointerdown', dismiss);
+    document.addEventListener('keydown', openSearch);
+    return () => {
+      document.removeEventListener('pointerdown', dismiss);
+      document.removeEventListener('keydown', openSearch);
+    };
   }, []);
+  const matches = searchCampusServices(query, category);
+  const filtering = !!query.trim() || category !== 'all';
   const context = useCampusNavigationSearch(params);
   const href = (path: string) => campusServiceHref(path, context);
   function closeMenu() {
     if (!menu.current?.open) return;
     menu.current.open = false;
+    setQuery('');
+    setCategory('all');
     menu.current.querySelector('summary')?.focus({ preventScroll: true });
+  }
+  function resetSearch() {
+    setQuery('');
+    setCategory('all');
+    search.current?.focus({ preventScroll: true });
   }
   return (
     <details
@@ -40,6 +89,12 @@ export function CampusServiceMenu() {
       name="campus-navigation-popover"
       className={styles.menu}
       key={pathname}
+      onToggle={(event) => {
+        if (!event.currentTarget.open) {
+          setQuery('');
+          setCategory('all');
+        }
+      }}
       onKeyDown={(event) => {
         if (event.key === 'Escape' && !event.nativeEvent.isComposing && event.currentTarget.open) {
           event.preventDefault();
@@ -56,7 +111,12 @@ export function CampusServiceMenu() {
         }
       }}
     >
-      <summary aria-label="所有服務" aria-controls={`${id}-services`}>
+      <summary
+        aria-label="所有服務"
+        aria-controls={`${id}-services`}
+        aria-keyshortcuts="Control+k Meta+k"
+        aria-current={primaryNavigationSection(pathname) === 'more' ? 'page' : undefined}
+      >
         <CampusIcon name="services" size={17} />
         <span className={styles.desktopLabel} aria-hidden="true">
           所有服務
@@ -89,7 +149,84 @@ export function CampusServiceMenu() {
             </svg>
           </button>
         </div>
-        <div className={styles.menuContents}>
+        <div className={styles.menuControls}>
+          <label htmlFor={`${id}-query`} className={styles.searchLabel}>
+            搜尋服務
+          </label>
+          <div className={styles.searchField}>
+            <CampusIcon name="search" size={19} />
+            <input
+              ref={search}
+              id={`${id}-query`}
+              type="search"
+              autoComplete="off"
+              maxLength={100}
+              value={query}
+              placeholder="課表、借書、公車…"
+              aria-controls={`${id}-results`}
+              onChange={(event) => setQuery(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === 'ArrowDown' && !event.nativeEvent.isComposing) {
+                  const first =
+                    results.current?.querySelector<HTMLAnchorElement>('[data-service-link]');
+                  if (first) {
+                    event.preventDefault();
+                    first.focus();
+                  }
+                }
+              }}
+            />
+            {query ? (
+              <button
+                type="button"
+                className={styles.clearSearch}
+                onClick={() => {
+                  setQuery('');
+                  search.current?.focus({ preventScroll: true });
+                }}
+              >
+                清除
+              </button>
+            ) : (
+              <kbd className={styles.shortcut}>⌘ / Ctrl K</kbd>
+            )}
+          </div>
+          <div className={styles.filters} role="group" aria-label="快速篩選服務">
+            <button
+              type="button"
+              aria-pressed={category === 'all'}
+              onClick={() => setCategory('all')}
+            >
+              全部
+            </button>
+            {SERVICE_CATEGORIES.map((item) => (
+              <button
+                key={item.id}
+                type="button"
+                aria-label={`篩選${item.label}`}
+                aria-pressed={category === item.id}
+                onClick={() => setCategory(item.id)}
+              >
+                {categoryLabels[item.id]}
+              </button>
+            ))}
+          </div>
+          {filtering && (
+            <div className={styles.resultSummary}>
+              <p role="status" aria-live="polite">
+                找到 {matches.length} 項服務
+              </p>
+              <button type="button" onClick={resetSearch}>
+                清除篩選
+              </button>
+            </div>
+          )}
+        </div>
+        <div
+          ref={results}
+          className={`${styles.menuContents}${filtering ? ` ${styles.filteredContents}` : ''}`}
+          id={`${id}-results`}
+        >
           <Link
             href={href('/search')}
             className={styles.menuOverview}
@@ -98,12 +235,15 @@ export function CampusServiceMenu() {
           >
             尋找校園服務 <span aria-hidden="true">→</span>
           </Link>
-          {SERVICE_CATEGORIES.map((category) => (
-            <section key={category.id} className={styles.menuGroup} aria-label={category.label}>
-              <h2>{category.label}</h2>
-              {CAMPUS_SERVICES.filter((service) => service.category === category.id).map(
-                (service) => (
+          {SERVICE_CATEGORIES.map((group) => {
+            const services = matches.filter((service) => service.category === group.id);
+            if (!services.length) return null;
+            return (
+              <section key={group.id} className={styles.menuGroup} aria-label={group.label}>
+                <h2>{group.label}</h2>
+                {services.map((service) => (
                   <Link
+                    data-service-link
                     href={href(service.href)}
                     key={service.href}
                     aria-label={service.name}
@@ -119,14 +259,25 @@ export function CampusServiceMenu() {
                       {service.name}
                       {service.href === '/food' && !isWebOnlineOrderingEnabled() ? (
                         <small id={`${id}-food-status`}>{ONLINE_ORDERING_OFF_TEXT}</small>
+                      ) : filtering ? (
+                        <small>{service.text}</small>
                       ) : null}
                     </span>
                     <span aria-hidden="true">→</span>
                   </Link>
-                ),
-              )}
+                ))}
+              </section>
+            );
+          })}
+          {!matches.length && (
+            <section className={styles.noResults}>
+              <h3>沒有符合的服務</h3>
+              <p>試試「課表」或「公車」，也可以切回全部服務。</p>
+              <button type="button" className="btn" onClick={resetSearch}>
+                查看全部服務
+              </button>
             </section>
-          ))}
+          )}
         </div>
       </div>
     </details>

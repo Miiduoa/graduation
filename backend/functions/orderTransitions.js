@@ -183,7 +183,7 @@ function createOrderStatusHandlers({ db, sendPushToUser, logger = console }) {
           throw new HttpsError('permission-denied', 'This is not your active school order');
         if (!['pending', 'confirmed', 'cancelled'].includes(order.status))
           throw new HttpsError('failed-precondition', 'Cannot cancel order in this status');
-      } else if (!['admin', 'editor'].includes(membership?.role)) {
+      } else if (membership?.role !== 'admin') {
         let cafeteriaId;
         try {
           cafeteriaId = identifier(order.cafeteriaId, 'cafeteriaId');

@@ -1,14 +1,18 @@
 import { mockSchools } from './schools';
 
+export type OfficialLibraryCatalogSearch = 'pu-webpac' | 'primo-ve' | 'webpac-x' | 'sierra';
+
 export type OfficialLibraryService = {
   name: string;
   websiteUrl: string;
   catalogUrl: string;
-  catalogSearch?: 'pu-webpac' | 'primo-ve';
+  catalogSearch?: OfficialLibraryCatalogSearch;
   accountUrl?: string;
   hoursUrl?: string;
   spacesUrl?: string;
   electronicResourcesUrl?: string;
+  /** Official searcharg / keyword character limit when shorter than the shared default. */
+  catalogQueryMaxLength?: number;
 };
 
 /**
@@ -110,7 +114,9 @@ export const officialLibraryDirectory: Readonly<Record<string, OfficialLibrarySe
   ncue: {
     name: '國立彰化師範大學圖書與資訊處',
     websiteUrl: 'https://olis.ncue.edu.tw/',
+    // Verified 2026-10-24: WebPACX search?searchInput=&searchField=
     catalogUrl: 'https://webpacx.ncue.edu.tw/',
+    catalogSearch: 'webpac-x',
   },
   ntpu: {
     name: '國立臺北大學圖書館',
@@ -133,12 +139,18 @@ export const officialLibraryDirectory: Readonly<Record<string, OfficialLibrarySe
   fju: {
     name: '輔仁大學圖書館',
     websiteUrl: 'https://home.lib.fju.edu.tw/',
-    catalogUrl: 'https://home.lib.fju.edu.tw/TC/webpac',
+    // https://home.lib.fju.edu.tw/TC/webpac submits a GET search to this Sierra scope.
+    catalogUrl: 'https://library.lib.fju.edu.tw:444/search~S0*cht/',
+    catalogSearch: 'sierra',
+    accountUrl: 'https://library.lib.fju.edu.tw:444/patroninfo*cht',
+    catalogQueryMaxLength: 75,
   },
   thu: {
     name: '東海大學圖書暨資訊處',
     websiteUrl: 'https://lis.thu.edu.tw/',
+    // Verified 2026-10-24: WebPACX search?searchInput=&searchField=
     catalogUrl: 'https://webpac.lib.thu.edu.tw/',
+    catalogSearch: 'webpac-x',
   },
   cgu: {
     name: '長庚大學圖書館',
@@ -165,7 +177,9 @@ export const officialLibraryDirectory: Readonly<Record<string, OfficialLibrarySe
   ntub: {
     name: '國立臺北商業大學圖書館',
     websiteUrl: 'https://library.ntub.edu.tw/wSite/mp?mp=1',
+    // Verified 2026-10-24: WebPACX search?searchInput=&searchField=
     catalogUrl: 'https://webpacx.ntub.edu.tw/',
+    catalogSearch: 'webpac-x',
   },
   'tw-nchu': {
     name: '國立中興大學圖書館',
@@ -175,6 +189,65 @@ export const officialLibraryDirectory: Readonly<Record<string, OfficialLibrarySe
     hoursUrl: 'https://www.lib.nchu.edu.tw/service.php?cID=35',
   },
 };
+
+const DEFAULT_CATALOG_QUERY_MAX_LENGTH = 200;
+
+/** True when keyword handoff builds a verified deep-link search URL. */
+export function hasVerifiedCatalogSearch(
+  library: OfficialLibraryService | null | undefined,
+): library is OfficialLibraryService & { catalogSearch: OfficialLibraryCatalogSearch } {
+  return (
+    library?.catalogSearch === 'primo-ve' ||
+    library?.catalogSearch === 'webpac-x' ||
+    library?.catalogSearch === 'sierra'
+  );
+}
+
+export function getOfficialLibraryCatalogQueryMaxLength(
+  library: OfficialLibraryService | null | undefined,
+): number {
+  return library?.catalogQueryMaxLength ?? DEFAULT_CATALOG_QUERY_MAX_LENGTH;
+}
+
+function normalizeCatalogQuery(keyword: string, maxLength: number): string {
+  return keyword.trim().replace(/[\r\n\t]+/g, ' ').slice(0, maxLength);
+}
+
+/** Map shared UI field names to WebPACX searchField values (ncue / ntub / thu). */
+function mapWebpacXSearchField(field: string): string {
+  switch (field) {
+    case 'Title':
+      return 'TI';
+    case 'Author':
+      return 'PN';
+    case 'Subject':
+      return 'SU';
+    case 'ISBN':
+      return 'ISBN';
+    case 'FullText':
+      return 'FullText';
+    default:
+      return 'FullText';
+  }
+}
+
+/** Map shared UI field names to Fu Jen Sierra searchtype values. */
+function mapSierraSearchType(field: string): string {
+  switch (field) {
+    case 'Title':
+      return 't';
+    case 'Author':
+      return 'a';
+    case 'Subject':
+      return 'd';
+    case 'ISBN':
+      return 'i';
+    case 'FullText':
+      return 'Y';
+    default:
+      return 'Y';
+  }
+}
 
 export function getOfficialLibrary(
   schoolId?: string | null,
@@ -219,12 +292,27 @@ export function buildOfficialLibraryCatalogUrl(
 ): string | null {
   const library = getOfficialLibrary(schoolId, schoolName);
   if (!library) return null;
-  const query = keyword.trim().replace(/[\r\n\t]+/g, ' ').slice(0, 200);
+  const maxLength = getOfficialLibraryCatalogQueryMaxLength(library);
+  const query = normalizeCatalogQuery(keyword, maxLength);
   if (!query) return library.catalogUrl;
   if (library.catalogSearch === 'pu-webpac') {
     const search = new URL('search', library.catalogUrl);
     search.searchParams.set('searchField', field);
     search.searchParams.set('searchInput', query);
+    return search.toString();
+  }
+  if (library.catalogSearch === 'webpac-x') {
+    const search = new URL('search', library.catalogUrl);
+    search.searchParams.set('searchInput', query);
+    search.searchParams.set('searchField', mapWebpacXSearchField(field));
+    return search.toString();
+  }
+  if (library.catalogSearch === 'sierra') {
+    const search = new URL(library.catalogUrl);
+    search.searchParams.set('searchtype', mapSierraSearchType(field));
+    search.searchParams.set('searcharg', query);
+    search.searchParams.set('SORT', 'D');
+    search.searchParams.set('extended', '0');
     return search.toString();
   }
   if (library.catalogSearch === 'primo-ve') {

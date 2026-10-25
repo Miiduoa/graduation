@@ -274,7 +274,7 @@ async function executeCampusAssistantCore({
 
   if (shouldUseServerWebSearch(lastUserMessage, intent)) {
     const t0 = Date.now();
-    const webAnswer = await answerWithServerWebSearch(lastUserMessage);
+    const webAnswer = await answerWithServerWebSearch(lastUserMessage, { schoolId });
     await recordStep('answerWithServerWebSearch', { intent }, { ok: Boolean(webAnswer) }, Date.now() - t0);
     if (webAnswer) {
       response.content = webAnswer.content;
