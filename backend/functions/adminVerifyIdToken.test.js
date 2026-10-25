@@ -1,12 +1,12 @@
 'use strict';
 
-const crypto = require('node:crypto');
+const { generateKeyPairSync, sign } = require('node:crypto');
 const { initializeApp, cert, deleteApp } = require('firebase-admin/app');
 const { getAuth } = require('firebase-admin/auth');
 const { verifyRequestFirebaseUser } = require('./sessionSecurity');
 
 function generateServiceAccount() {
-  const { privateKey } = crypto.generateKeyPairSync('rsa', {
+  const { privateKey } = generateKeyPairSync('rsa', {
     modulusLength: 2048,
     privateKeyEncoding: { type: 'pkcs8', format: 'pem' },
     publicKeyEncoding: { type: 'spki', format: 'pem' },
@@ -52,7 +52,7 @@ function forgeSignedIdToken(privateKeyPem, projectId) {
     firebase: { identities: {}, sign_in_provider: 'custom' },
   };
   const unsigned = `${encodeJwtPart(header)}.${encodeJwtPart(payload)}`;
-  const signature = crypto.sign('sha256', Buffer.from(unsigned), privateKeyPem);
+  const signature = sign('sha256', Buffer.from(unsigned), privateKeyPem);
   return `${unsigned}.${signature.toString('base64url')}`;
 }
 
