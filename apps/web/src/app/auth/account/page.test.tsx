@@ -192,10 +192,16 @@ it('opens an in-page school lookup from 尋找學校 and searches by school name
   expect(fetchMock.mock.calls.some(([, init]) => init?.method === 'POST')).toBe(false);
 });
 
-it('sends a signed-in visitor to the allowed return path without showing the form', async () => {
+it.each([
+  '/life',
+  '/grades?tab=feedback&schoolId=nthu&campus=nthu#feedback',
+  '/settings?section=appearance&campus=nthu',
+  '/events/evt-1?schoolId=pu&campus=pu&source=school-club-events#registration',
+  '/school-info?campus=ncku#contact',
+])('sends a signed-in visitor back to %s without losing page state', async (returnPath) => {
   const replace = vi.fn();
   vi.stubGlobal('location', { ...window.location, replace, origin: 'https://nuni.tw' });
-  search.current = new URLSearchParams('returnUrl=/life');
+  search.current = new URLSearchParams({ returnUrl: returnPath });
   fetchMock.mockImplementation(async (input) => {
     const url = String(input);
     if (url === '/api/nuni/session') {
@@ -210,7 +216,7 @@ it('sends a signed-in visitor to the allowed return path without showing the for
     });
   });
   render(<AccountPage />);
-  await waitFor(() => expect(replace).toHaveBeenCalledWith('/life'));
+  await waitFor(() => expect(replace).toHaveBeenCalledWith(returnPath));
   expect(screen.queryByRole('button', { name: '登入校園帳號' })).toBeNull();
 });
 

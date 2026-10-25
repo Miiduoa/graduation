@@ -43,12 +43,12 @@ const ALLOWED_RETURN_PATHS = new Set([
   '/community',
   '/credit-planner',
   '/dms',
+  '/events',
   '/food',
   '/friends',
   '/grades',
   '/groups',
   '/import',
-  '/join',
   '/library',
   '/life',
   '/lms-admin',
@@ -62,6 +62,7 @@ const ALLOWED_RETURN_PATHS = new Set([
   '/privacy/deletion-status',
   '/profile',
   '/search',
+  '/school-info',
   '/settings',
   '/shops',
   '/social',
@@ -94,12 +95,31 @@ const BLOCKED_RETURN_PATHS = new Set([
   '/login',
   '/admin/login',
   '/classroom/login',
+  '/join',
   '/auth/account',
   '/sso-callback',
   '/sso/acs',
 ]);
 
-const CLASS_WORKSPACE_PATH = /^\/auth\/platform\/class-workspace\/cw_[0-9a-fA-F-]{36}$/u;
+// Only page state travels through login; credentials and nested return URLs do not.
+const RETURN_CONTEXT_KEYS = new Set([
+  'school',
+  'schoolId',
+  'campus',
+  'tab',
+  'section',
+  'source',
+  'q',
+  'category',
+  'week',
+  'view',
+  'semester',
+  'courseId',
+  'groupId',
+  'boardId',
+  'poiId',
+  'create',
+]);
 const MICROSOFT_HOSTS = new Set([
   'login.microsoftonline.com',
   'login.microsoftonline.us',
@@ -140,9 +160,26 @@ function trimPath(path: string): string {
   return trimmed === '' ? '/' : trimmed;
 }
 
+function hasUnsafeReturnCharacters(value: string): boolean {
+  for (let index = 0; index < value.length; index += 1) {
+    const code = value.charCodeAt(index);
+    if (code <= 31 || code === 92 || code === 127) return true;
+  }
+  return false;
+}
+
+function returnFragment(hash: string): string {
+  try {
+    // A fragment may identify page content, never carry another URL or auth payload.
+    return /^[\p{L}\p{N}_.:-]+$/u.test(decodeURIComponent(hash.slice(1))) ? hash : '';
+  } catch {
+    return '';
+  }
+}
+
 export function sanitizeReturnPath(value: string | null | undefined): string {
   const raw = (value ?? '').trim();
-  if (!raw.startsWith('/') || raw.startsWith('//') || raw.includes('\\')) return '/';
+  if (!raw.startsWith('/') || raw.startsWith('//') || hasUnsafeReturnCharacters(value ?? '')) return '/';
   let parsed: URL;
   try {
     parsed = new URL(raw, 'https://nuni.invalid');
@@ -153,20 +190,27 @@ export function sanitizeReturnPath(value: string | null | undefined): string {
     parsed.origin !== 'https://nuni.invalid' ||
     parsed.username ||
     parsed.password ||
-    parsed.hash ||
-    `${parsed.pathname}${parsed.search}` !== raw
+    `${parsed.pathname}${parsed.search}${parsed.hash}` !== raw ||
+    /%(?:2f|5c|0[0-9a-f]|1[0-9a-f]|7f)/i.test(parsed.pathname)
   ) {
     return '/';
   }
   const normalized = trimPath(parsed.pathname);
   if (BLOCKED_RETURN_PATHS.has(normalized)) return '/';
-  if (CLASS_WORKSPACE_PATH.test(normalized) && parsed.search === '') return normalized;
   const allowed =
     normalized === '/' ||
     ALLOWED_RETURN_PATHS.has(normalized) ||
+    /^\/events\/[^/]+$/u.test(normalized) ||
     ALLOWED_RETURN_PREFIXES.some((prefix) => normalized === prefix || normalized.startsWith(`${prefix}/`));
   if (!allowed) return '/';
-  return normalized;
+  const context = new URLSearchParams();
+  for (const [key, value] of parsed.searchParams) {
+    if (RETURN_CONTEXT_KEYS.has(key) && !context.has(key) && !hasUnsafeReturnCharacters(value)) {
+      context.set(key, value);
+    }
+  }
+  const query = context.toString();
+  return `${normalized}${query ? `?${query}` : ''}${returnFragment(parsed.hash)}`;
 }
 
 export function readReturnPath(search: string | { get(name: string): string | null }): string {
