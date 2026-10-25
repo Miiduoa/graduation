@@ -25,8 +25,7 @@ jest.mock('firebase/firestore', () => ({
 }));
 
 function localData() {
-  return { events: [], courses: [], lifetime: {}, unlocks: [] }
-    as Awaited<ReturnType<typeof getLocalState>>;
+  return { events: [], courses: [], lifetime: {}, unlocks: [] } as Awaited<ReturnType<typeof getLocalState>>;
 }
 
 beforeEach(() => {
