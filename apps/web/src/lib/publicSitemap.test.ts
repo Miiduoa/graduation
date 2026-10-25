@@ -6,6 +6,7 @@ import { SITEMAP_URL } from './publicSitemap';
 it('把 nuni.tw 首頁列進 sitemap', () => {
   const urls = sitemap().map((entry) => entry.url);
   expect(urls).toContain('https://nuni.tw/');
+  expect(urls).toContain('https://nuni.tw/account-deletion/status');
 });
 
 it('robots 指向 sitemap', () => {

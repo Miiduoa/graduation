@@ -8,6 +8,7 @@ export const PUBLIC_SITEMAP_PATHS = [
   '/terms',
   '/support',
   '/account-deletion',
+  '/account-deletion/status',
 ] as const;
 
 export function publicSitemapUrls(origin: string = SITE_ORIGIN): string[] {
@@ -28,6 +29,7 @@ export function publicRobotsConfig() {
         '/terms',
         '/support',
         '/account-deletion',
+        '/account-deletion/status',
         '/robots.txt',
         '/sitemap.xml',
       ],

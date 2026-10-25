@@ -20,6 +20,13 @@ export default function AccountDeletionPage() {
           </p>
         </section>
         <section>
+          <h2>查刪除進度</h2>
+          <p>
+            若你已經送出刪除請求並拿到查詢碼，可到 <Link href="/account-deletion/status">刪除進度</Link>
+            查詢，不需要登入。這一頁不會顯示你是誰，也不會列出資料內容。
+          </p>
+        </section>
+        <section>
           <h2>用信件提出</h2>
           <p>
             若無法登入，請來信 <a href="mailto:demohan513@gmail.com">demohan513@gmail.com</a>{' '}
