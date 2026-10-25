@@ -55,7 +55,7 @@ test('Taichung-specific transport entry is only available in its original PU con
 
 test('closed modules stay out of the directory while official information has clear entries', () => {
   const view = render(<CampusHubScreen />);
-  expect(view.queryByText('宿舍')).toBeNull();
+  expect(view.getByText('宿舍')).toBeTruthy();
   expect(view.queryByText('職涯')).toBeNull();
   expect(view.queryByText('社團')).toBeNull();
   expect(view.queryByText('校園錢包')).toBeNull();
@@ -122,4 +122,15 @@ test('another school does not expose Providence-specific library search keywords
   expect(view.queryByText('圖書館')).toBeNull();
   fireEvent.changeText(view.getByPlaceholderText('搜尋地點或服務'), '圖書館');
   expect(view.getByText('圖書館')).toBeTruthy();
+});
+
+test('dormitory opens its own workspace and repair search finds it directly', () => {
+  const navigation = { navigate: jest.fn() };
+  const view = render(<CampusHubScreen navigation={navigation} />);
+  fireEvent.changeText(view.getByPlaceholderText('搜尋地點或服務'), '報修');
+  expect(view.getByText('宿舍')).toBeTruthy();
+  fireEvent.press(view.getByText('宿舍'));
+  expect(safeNavigate).toHaveBeenCalledWith(navigation, 'Dormitory', undefined, {
+    fallbackMessage: '「宿舍」目前無法開啟。',
+  });
 });
