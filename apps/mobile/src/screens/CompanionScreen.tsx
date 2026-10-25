@@ -1,432 +1,343 @@
-/**
- * Campus Companion 主畫面
- *
- * 顯示：
- *  - 精靈當前狀態（外型 / 季節 / 氣象 / vitality）
- *  - 4 個需求進度條（學/動/食/友）
- *  - careHint 卡片（精靈用關心語氣說話）
- *  - 學習花園預覽（橫向 carousel）
- *  - 最近解鎖的 3 個成就
- *  - 風險雷達警示（若有 critical）
- *
- * 資料來源：後端 callable `computeCompanionState` + 本機 cache。
- */
-import React, { useCallback, useEffect, useState } from 'react';
-import { theme } from '../ui/theme';
-import { ScrollView, Text, View, RefreshControl, Pressable, ActivityIndicator } from 'react-native';
-import type {
-  SpriteState,
-  GardenSummary,
-  Plant,
-  Unlockable,
-} from '@campus/shared';
-
+import React, { useCallback, useEffect, useRef, useState } from 'react';
+import { ActivityIndicator, Pressable, RefreshControl, ScrollView, Text, View } from 'react-native';
+import type { GardenSummary, Plant, SpriteState, Unlockable } from '@campus/shared';
+import { useAuth } from '../state/auth';
 import { computeLocalCompanion } from '../services/companionLocalStore';
+import { theme } from '../ui/theme';
+import { useThemeVersion } from '../ui/useThemeStyleSheet';
+import { useTabBarContentBottomPadding } from '../ui/navigationTheme';
+import { safeNavigate } from '../utils/safeNavigate';
 
-type CompanionPayload = {
-  sprite: SpriteState;
-  garden: GardenSummary;
+type Navigation = {
+  navigate?: (...args: any[]) => void;
+  getState?: () => unknown;
+  getParent?: () => unknown;
+};
+type CompanionData = { sprite: SpriteState; garden: GardenSummary; unlocks: Unlockable[] };
+type CompanionState =
+  | { scope: string; status: 'loading' }
+  | { scope: string; status: 'error' }
+  | { scope: string; status: 'ready'; data: CompanionData };
+
+const stageNames: Record<string, string> = {
+  egg: '剛開始',
+  sprout: '萌芽中',
+  fledgling: '成長中',
+  companion: '校園夥伴',
+};
+const weatherIcons: Record<string, string> = {
+  sunny: '☀️',
+  cloudy: '☁️',
+  rainy: '🌧️',
+  snowy: '❄️',
 };
 
-export default function CompanionScreen({ navigation }: { navigation?: { navigate: (s: string, p?: unknown) => void } }) {
-  const [loading, setLoading] = useState(true);
+function percent(value: number): number {
+  return Number.isFinite(value) ? Math.max(0, Math.min(100, Math.round(value))) : 0;
+}
+
+function careRoute(target: string | undefined): string | null {
+  switch (target) {
+    case 'cafeteria': return 'Cafeteria';
+    case 'map': return 'Map';
+    case 'groups': return 'Groups';
+    case 'office_hours': return 'LearnHome';
+    case 'counseling': return 'Health';
+    default: return null;
+  }
+}
+
+export default function CompanionScreen({ navigation }: { navigation?: Navigation }) {
+  useThemeVersion();
+  const bottom = useTabBarContentBottomPadding();
+  const auth = useAuth();
+  const uid = auth.user?.uid ?? null;
+  const schoolId = auth.profile?.uid === uid ? auth.profile?.schoolId ?? null : null;
+  const scope = JSON.stringify([uid, schoolId]);
+  const activeScope = useRef(scope);
+  activeScope.current = scope;
+  const generation = useRef(0);
+  const [state, setState] = useState<CompanionState>({ scope, status: 'loading' });
   const [refreshing, setRefreshing] = useState(false);
-  const [data, setData] = useState<CompanionPayload | null>(null);
-  const [recentUnlocks, setRecentUnlocks] = useState<Unlockable[]>([]);
 
-  const fetch = useCallback(async () => {
+  const load = useCallback(async (pull = false) => {
+    const request = ++generation.current;
+    const isCurrent = () => generation.current === request && activeScope.current === scope;
+    if (pull) setRefreshing(true);
+    else setState({ scope, status: 'loading' });
+
     try {
-      // ── 本地優先：用 spriteEngine + gardenEngine 純函式直接算 ──
-      // 任何時候打開都會有畫面，不依賴後端
-      const local = await computeLocalCompanion();
-      setData({ sprite: local.sprite, garden: local.garden });
-      setRecentUnlocks(local.unlocks.slice(-3).reverse());
+      const local = await computeLocalCompanion({ schoolId: schoolId ?? undefined });
+      if (!isCurrent()) return;
+      setState({ scope, status: 'ready', data: local });
 
-      // ── 後端可用時，背景補上更精準的雲端狀態（不阻塞 UI）──
-      void (async () => {
-        try {
-          const { httpsCallable, getFunctions } = await import('firebase/functions');
-          const { getFirebaseApp, getCloudFunctionRegion } = await import('../firebase');
-          const app = getFirebaseApp();
-          const functions = getFunctions(app, getCloudFunctionRegion());
-          const callable = httpsCallable<{ days?: number }, CompanionPayload & { success: boolean }>(
-            functions,
-            'computeCompanionState',
-          );
-          const res = await callable({ days: 7 });
-          if ((res.data as { success?: boolean })?.success) {
-            setData({ sprite: res.data.sprite, garden: res.data.garden });
+      // Local content is usable without school SSO. A cloud failure never blocks it.
+      if (uid) {
+        void (async () => {
+          try {
+            const { getFunctions, httpsCallable } = await import('firebase/functions');
+            const { getFirebaseApp, getCloudFunctionRegion } = await import('../firebase');
+            if (!isCurrent()) return;
+            const callable = httpsCallable<{ days?: number }, {
+              success: boolean;
+              sprite: SpriteState;
+              garden: GardenSummary;
+            }>(getFunctions(getFirebaseApp(), getCloudFunctionRegion()), 'computeCompanionState');
+            const result = await callable({ days: 7 });
+            if (!isCurrent() || !result.data.success || !result.data.sprite || !result.data.garden) return;
+            setState((previous) => (
+              previous.scope === scope && previous.status === 'ready'
+                ? { ...previous, data: { ...previous.data, sprite: result.data.sprite, garden: result.data.garden } }
+                : previous
+            ));
+          } catch {
+            // School cloud data is optional; the local view remains available.
           }
-        } catch {
-          // 雲端拿不到也沒關係，本地畫面已經顯示
-        }
-      })();
+        })();
+      }
+    } catch {
+      if (isCurrent()) setState({ scope, status: 'error' });
     } finally {
-      setLoading(false);
-      setRefreshing(false);
+      if (isCurrent()) setRefreshing(false);
     }
-  }, []);
+  }, [uid, schoolId, scope]);
 
   useEffect(() => {
-    fetch();
-  }, [fetch]);
+    void load();
+    return () => { generation.current += 1; };
+  }, [load]);
 
-  if (loading || !data) {
+  const current = state.scope === scope ? state : null;
+  const open = (route: string, params?: Record<string, unknown>) =>
+    safeNavigate(navigation, route, params);
+  const page = { flex: 1, backgroundColor: theme.colors.bg };
+  const card = {
+    borderRadius: theme.radius.xl,
+    backgroundColor: theme.colors.surface,
+    borderColor: theme.colors.border,
+    borderWidth: 1,
+    padding: theme.space.md,
+    gap: 12,
+  } as const;
+
+  if (!current || current.status === 'loading') {
     return (
-      <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
-        <ActivityIndicator />
-        <Text style={{ marginTop: 12, color: '#8E8E93' }}>正在喚醒你的校園精靈⋯⋯</Text>
+      <View style={[page, { alignItems: 'center', justifyContent: 'center', gap: 12 }]}>
+        <ActivityIndicator color={theme.colors.accent} accessibilityLabel="讀取校園精靈" />
+        <Text style={{ color: theme.colors.muted }}>正在整理這台裝置的校園紀錄…</Text>
       </View>
     );
   }
 
-  const sprite = data.sprite;
+  if (current.status === 'error') {
+    return (
+      <View style={[page, { alignItems: 'center', justifyContent: 'center', padding: 24, gap: 14 }]}>
+        <Text accessibilityRole="alert" style={{ color: theme.colors.text, fontSize: 18, fontWeight: '600' }}>
+          暫時無法讀取校園精靈
+        </Text>
+        <Text style={{ color: theme.colors.muted, lineHeight: 22, textAlign: 'center' }}>
+          裝置紀錄載入失敗，資料不會因此被清除。
+        </Text>
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="重試讀取校園精靈"
+          onPress={() => void load()}
+          style={{ backgroundColor: theme.colors.accent, borderRadius: 10, paddingVertical: 13, paddingHorizontal: 24 }}
+        >
+          <Text style={{ color: theme.colors.onAccent, fontWeight: '600' }}>重新讀取</Text>
+        </Pressable>
+      </View>
+    );
+  }
+
+  const { sprite, garden, unlocks } = current.data;
+  const destination = careRoute(sprite.careHint.ctaTarget);
+  const needRows = [
+    { key: 'study', label: '學習', value: sprite.needs.study, color: theme.colors.accent },
+    { key: 'move', label: '活動', value: sprite.needs.move, color: theme.colors.info },
+    { key: 'nourish', label: '飲食', value: sprite.needs.nourish, color: theme.colors.gold },
+    { key: 'social', label: '社交', value: sprite.needs.social, color: theme.colors.social },
+  ];
 
   return (
     <ScrollView
-      style={{ flex: 1, backgroundColor: '#F2F2F7' }}
-      contentContainerStyle={{ padding: 16, paddingBottom: 64 }}
-      refreshControl={
-        <RefreshControl
-          refreshing={refreshing}
-          onRefresh={() => {
-            setRefreshing(true);
-            fetch();
-          }}
-        />
-      }
+      testID="companion-screen"
+      style={page}
+      contentContainerStyle={{ paddingHorizontal: theme.layout.screenPadding, paddingTop: 16, paddingBottom: bottom + 24, gap: 20 }}
+      refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => void load(true)} tintColor={theme.colors.accent} />}
     >
-      {/* ── 精靈頭像區 ── */}
-      <SpriteHeader sprite={sprite} />
+      <View style={{ gap: 5 }}>
+        <Text accessibilityRole="header" style={{ fontSize: 25, fontWeight: '700', color: theme.colors.text }}>
+          校園精靈
+        </Text>
+        <Text style={{ color: theme.colors.muted, lineHeight: 20 }}>
+          從每天的校園活動慢慢累積，不需要特別打卡。
+        </Text>
+      </View>
 
-      {/* ── careHint ── */}
-      {sprite.careHint.kind !== 'none' && (
-        <CareHintCard
-          hint={sprite.careHint}
-          onPress={() => {
-            if (sprite.careHint.ctaTarget && navigation) {
-              navigation.navigate(deepLinkForCareHint(sprite.careHint.ctaTarget));
-            }
-          }}
-        />
-      )}
-
-      {/* ── 4 需求 ── */}
-      <Section title="今日精靈四象">
-        <NeedBar label="學" value={sprite.needs.study} color={theme.colors.accent} />
-        <NeedBar label="動" value={sprite.needs.move} color="#34C759" />
-        <NeedBar label="食" value={sprite.needs.nourish} color="#FF9500" />
-        <NeedBar label="友" value={sprite.needs.social} color="#FF3B30" />
-      </Section>
-
-      {/* ── 花園預覽 ── */}
-      <Section title={`學習花園・${data.garden.plants.length} 株植物`}>
-        <ScrollView horizontal showsHorizontalScrollIndicator={false}>
-          {data.garden.plants.map((p) => (
-            <PlantCard
-              key={p.courseId}
-              plant={p}
-              onPress={() =>
-                navigation?.navigate('CourseHub', { courseSpaceId: p.courseId })
-              }
-            />
-          ))}
-          {data.garden.plants.length === 0 && (
-            <Text style={{ color: '#8E8E93', padding: 12 }}>
-              還沒有植物，先選一門課讓花園開始長出來。
+      <View style={[card, { backgroundColor: theme.colors.accentSoft, borderColor: theme.colors.accentSoft }]}>
+        <View style={{ flexDirection: 'row', gap: 16, alignItems: 'center' }}>
+          <Text accessible accessibilityLabel="校園精靈" style={{ fontSize: 57 }}>
+            {sprite.evolutionStage === 'egg' ? '🥚' : sprite.evolutionStage === 'sprout' ? '🌱' : sprite.evolutionStage === 'fledgling' ? '🐣' : sprite.evolutionStage === 'companion' ? '🦝' : '🦊'}
+          </Text>
+          <View style={{ flex: 1, gap: 6 }}>
+            <Text style={{ color: theme.colors.text, fontWeight: '700', fontSize: 19 }}>
+              {stageNames[sprite.evolutionStage] ?? '持續成長中'}
             </Text>
-          )}
-        </ScrollView>
-      </Section>
+            <Text style={{ color: theme.colors.textSecondary, fontSize: 13 }}>
+              {(weatherIcons[sprite.appearance.weatherMood] ?? '✨') + ' ' + sprite.appearance.season}
+            </Text>
+            <Text style={{ color: theme.colors.textSecondary, fontSize: 13 }}>
+              活力 {percent(sprite.vitality)} / 100
+            </Text>
+          </View>
+        </View>
+        <Progress value={sprite.vitality} color={theme.colors.accent} />
+        {sprite.message ? (
+          <Text style={{ color: theme.colors.textSecondary, lineHeight: 22 }}>{sprite.message}</Text>
+        ) : null}
+      </View>
 
-      {/* ── 最近解鎖 ── */}
-      <Section title="最近解鎖">
-        {recentUnlocks.length === 0 ? (
-          <Text style={{ color: '#8E8E93' }}>還沒有新解鎖，繼續使用 APP 就會出現 ✨</Text>
-        ) : (
-          <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
-            {recentUnlocks.map((u) => (
-              <UnlockChip key={u.id} unlock={u} />
+      {sprite.careHint.kind !== 'none' ? (
+        <View style={[card, { backgroundColor: theme.colors.surfaceMuted }]}>
+          <Text style={{ fontWeight: '700', color: theme.colors.text }}>給你的建議</Text>
+          <Text style={{ color: theme.colors.textSecondary, lineHeight: 22 }}>{sprite.careHint.text}</Text>
+          {destination ? (
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="依建議前往相關服務"
+              onPress={() => open(destination)}
+              style={{ alignSelf: 'flex-start', paddingVertical: 10, paddingHorizontal: 14, backgroundColor: theme.colors.accentSoft, borderRadius: 8 }}
+            >
+              <Text style={{ color: theme.colors.accent, fontWeight: '600' }}>前往相關服務 ›</Text>
+            </Pressable>
+          ) : null}
+        </View>
+      ) : null}
+
+      <View style={card}>
+        <Text accessibilityRole="header" style={{ color: theme.colors.text, fontSize: 17, fontWeight: '700' }}>
+          生活節奏
+        </Text>
+        {needRows.map((item) => (
+          <View key={item.key} style={{ gap: 7 }}>
+            <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
+              <Text style={{ color: theme.colors.textSecondary }}>{item.label}</Text>
+              <Text style={{ color: theme.colors.text, fontWeight: '600' }}>{percent(item.value)}</Text>
+            </View>
+            <Progress value={item.value} color={item.color} />
+          </View>
+        ))}
+      </View>
+
+      <View style={card}>
+        <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+          <Text accessibilityRole="header" style={{ color: theme.colors.text, fontSize: 17, fontWeight: '700' }}>
+            學習花園
+          </Text>
+          <Text style={{ color: theme.colors.muted }}>{garden.plants.length} 株</Text>
+        </View>
+        {garden.plants.length ? (
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 10 }}>
+            {garden.plants.map((plant) => (
+              <PlantTile
+                key={plant.courseId}
+                plant={plant}
+                onPress={() => open('CourseHub', { courseSpaceId: plant.courseId, groupId: plant.courseId, section: 'week' })}
+              />
             ))}
+          </ScrollView>
+        ) : (
+          <View style={{ gap: 12 }}>
+            <Text style={{ color: theme.colors.muted, lineHeight: 22 }}>目前還沒有課程紀錄，可以先從課程頁開始。</Text>
+            <ActionButton label="查看我的課程" onPress={() => open('LearnHome')} />
           </View>
         )}
-      </Section>
-
-      {/* ── 入口列 ── */}
-      <View style={{ flexDirection: 'row', gap: 8, marginTop: 12 }}>
-        <NavButton label="🌌 星圖" onPress={() => navigation?.navigate('Constellation')} />
-        <NavButton label="🧺 收藏" onPress={() => navigation?.navigate('CompanionCollection')} />
-        <NavButton label="📊 風險雷達" onPress={() => navigation?.navigate('LearningAnalytics')} />
       </View>
+
+      <View style={card}>
+        <Text accessibilityRole="header" style={{ color: theme.colors.text, fontSize: 17, fontWeight: '700' }}>
+          最近解鎖
+        </Text>
+        {unlocks.length ? (
+          <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
+            {unlocks.slice(-3).reverse().map((unlock) => (
+              <View key={unlock.id} style={{ backgroundColor: theme.colors.goldSoft, padding: 10, borderRadius: 10 }}>
+                <Text style={{ color: theme.colors.text }}>{unlock.emoji + ' ' + unlock.label}</Text>
+              </View>
+            ))}
+          </View>
+        ) : (
+          <Text style={{ color: theme.colors.muted }}>尚未解鎖成就，活動紀錄增加後會出現在這裡。</Text>
+        )}
+      </View>
+
+      <View style={{ gap: 10 }}>
+        <ActionButton label="我的收藏" onPress={() => open('CompanionCollection')} />
+        <ActionButton label="校園星圖" onPress={() => open('Constellation')} />
+        <ActionButton label="學習狀態" onPress={() => open('LearningAnalytics')} />
+      </View>
+
+      <Text style={{ color: theme.colors.muted, fontSize: 12, textAlign: 'center' }}>
+        先顯示這台裝置的活動紀錄，雲端資料依登入與服務可用狀態更新。
+      </Text>
     </ScrollView>
   );
 }
 
-function deepLinkForCareHint(target: string): string {
-  switch (target) {
-    case 'cafeteria':
-      return 'Cafeteria';
-    case 'map':
-      return 'Map';
-    case 'groups':
-      return 'Groups';
-    case 'office_hours':
-      return 'CourseHub';
-    case 'counseling':
-      return 'Health';
-    default:
-      return 'CompanionScreen';
-  }
-}
-
-// ──────────────────────────────────────────────
-// Sub components
-// ──────────────────────────────────────────────
-
-function SpriteHeader({ sprite }: { sprite: SpriteState }) {
-  const stageEmoji =
-    sprite.evolutionStage === 'egg'
-      ? '🥚'
-      : sprite.evolutionStage === 'sprout'
-      ? '🌱'
-      : sprite.evolutionStage === 'fledgling'
-      ? '🐣'
-      : sprite.evolutionStage === 'companion'
-      ? '🦝'
-      : '🦊';
-  const weatherEmoji =
-    sprite.appearance.weatherMood === 'sunny'
-      ? '☀️'
-      : sprite.appearance.weatherMood === 'cloudy'
-      ? '☁️'
-      : sprite.appearance.weatherMood === 'rainy'
-      ? '🌧️'
-      : sprite.appearance.weatherMood === 'snowy'
-      ? '❄️'
-      : '✨';
-
+function Progress({ value, color }: { value: number; color: string }) {
+  const ratio = percent(value) / 100;
   return (
     <View
-      style={{
-        backgroundColor: '#003F8A',
-        borderRadius: 16,
-        padding: 20,
-        marginBottom: 16,
-      }}
+      accessibilityRole="progressbar"
+      accessibilityValue={{ min: 0, max: 100, now: percent(value) }}
+      style={{ height: 7, backgroundColor: theme.colors.border, borderRadius: 10, overflow: 'hidden', flexDirection: 'row' }}
     >
-      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 16 }}>
-        <Text style={{ fontSize: 72 }}>{stageEmoji}</Text>
-        <View style={{ flex: 1 }}>
-          <Text style={{ color: '#fff', fontSize: 20, fontWeight: '700' }}>
-            {sprite.evolutionStage} ・ {weatherEmoji} {sprite.appearance.season}
-          </Text>
-          <Text style={{ color: '#E5F2FF', fontSize: 14, marginTop: 4 }}>
-            裝飾：{sprite.appearance.seasonalAccessory}
-          </Text>
-          <View
-            style={{
-              marginTop: 12,
-              backgroundColor: '#1e3a5f',
-              borderRadius: 8,
-              padding: 8,
-            }}
-          >
-            <Text style={{ color: '#fff', fontSize: 13 }}>vitality {sprite.vitality} / 100</Text>
-            <View
-              style={{
-                height: 6,
-                backgroundColor: '#3b5b87',
-                marginTop: 4,
-                borderRadius: 3,
-              }}
-            >
-              <View
-                style={{
-                  height: 6,
-                  width: `${sprite.vitality}%`,
-                  backgroundColor: '#fbbf24',
-                  borderRadius: 3,
-                }}
-              />
-            </View>
-          </View>
-        </View>
-      </View>
-      {sprite.message && (
-        <Text style={{ color: '#fef3c7', fontSize: 13, marginTop: 12, fontStyle: 'italic' }}>
-          {sprite.message}
-        </Text>
-      )}
+      <View style={{ flex: ratio, backgroundColor: color }} />
+      <View style={{ flex: 1 - ratio }} />
     </View>
   );
 }
 
-function CareHintCard({
-  hint,
-  onPress,
-}: {
-  hint: SpriteState['careHint'];
-  onPress: () => void;
-}) {
-  const bg =
-    hint.kind === 'rest'
-      ? '#FEF3C7'
-      : hint.kind === 'meal'
-      ? '#FED7AA'
-      : hint.kind === 'social'
-      ? '#FECACA'
-      : '#D1FAE5';
-  const icon =
-    hint.kind === 'rest'
-      ? '🌙'
-      : hint.kind === 'meal'
-      ? '🍱'
-      : hint.kind === 'social'
-      ? '👯'
-      : '🎉';
+function PlantTile({ plant, onPress }: { plant: Plant; onPress: () => void }) {
   return (
     <Pressable
+      accessibilityRole="button"
+      accessibilityLabel={'開啟課程 ' + plant.courseName}
       onPress={onPress}
-      style={{
-        backgroundColor: bg,
-        borderRadius: 12,
-        padding: 16,
-        marginBottom: 16,
-        flexDirection: 'row',
-        gap: 12,
-      }}
+      style={{ width: 145, minHeight: 142, backgroundColor: theme.colors.surfaceMuted, borderRadius: 12, padding: 14, gap: 8, alignItems: 'center' }}
     >
-      <Text style={{ fontSize: 32 }}>{icon}</Text>
-      <View style={{ flex: 1 }}>
-        <Text style={{ fontSize: 14, color: '#1C1C1E' }}>{hint.text}</Text>
-        {hint.ctaTarget && (
-          <Text style={{ fontSize: 12, color: '#003F8A', marginTop: 6, fontWeight: '600' }}>
-            ▶ 點此前往
-          </Text>
-        )}
-      </View>
-    </Pressable>
-  );
-}
-
-function Section({ title, children }: { title: string; children: React.ReactNode }) {
-  return (
-    <View style={{ marginBottom: 20 }}>
-      <Text style={{ fontSize: 16, fontWeight: '700', marginBottom: 8, color: '#1C1C1E' }}>
-        {title}
-      </Text>
-      {children}
-    </View>
-  );
-}
-
-function NeedBar({ label, value, color }: { label: string; value: number; color: string }) {
-  return (
-    <View style={{ marginBottom: 8 }}>
-      <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
-        <Text style={{ fontSize: 13, color: '#3C3C43' }}>{label}</Text>
-        <Text style={{ fontSize: 13, color: '#8E8E93' }}>{value}</Text>
-      </View>
-      <View
-        style={{
-          height: 8,
-          backgroundColor: '#E5E5EA',
-          borderRadius: 4,
-          marginTop: 4,
-          overflow: 'hidden',
-        }}
-      >
-        <View
-          style={{
-            height: 8,
-            width: `${value}%`,
-            backgroundColor: color,
-          }}
-        />
-      </View>
-    </View>
-  );
-}
-
-function PlantCard({ plant, onPress }: { plant: Plant; onPress: () => void }) {
-  return (
-    <Pressable
-      onPress={onPress}
-      style={{
-        width: 120,
-        marginRight: 12,
-        backgroundColor: '#fff',
-        borderRadius: 12,
-        padding: 12,
-        alignItems: 'center',
-      }}
-    >
-      <Text style={{ fontSize: 48 }}>{plant.emoji}</Text>
-      <Text style={{ fontSize: 13, fontWeight: '600', marginTop: 4 }} numberOfLines={1}>
+      <Text style={{ fontSize: 37 }}>{plant.emoji}</Text>
+      <Text style={{ color: theme.colors.text, fontSize: 13, fontWeight: '600', textAlign: 'center' }} numberOfLines={2}>
         {plant.courseName}
       </Text>
-      <Text style={{ fontSize: 11, color: '#8E8E93', marginTop: 2 }}>{plant.stage}</Text>
-      <View
-        style={{
-          height: 4,
-          backgroundColor: '#E5E5EA',
-          borderRadius: 2,
-          width: '100%',
-          marginTop: 6,
-        }}
-      >
-        <View
-          style={{
-            height: 4,
-            width: `${plant.growth}%`,
-            backgroundColor: plant.health < 50 ? '#D70015' : '#34C759',
-            borderRadius: 2,
-          }}
-        />
+      <Text style={{ color: theme.colors.muted, fontSize: 12 }}>{plant.stage}</Text>
+      <View style={{ alignSelf: 'stretch' }}>
+        <Progress value={plant.growth} color={plant.health < 50 ? theme.colors.warning : theme.colors.success} />
       </View>
-      {plant.harvestable && (
-        <Text style={{ fontSize: 10, color: '#34C759', marginTop: 4 }}>🧺 可採收</Text>
-      )}
     </Pressable>
   );
 }
 
-function UnlockChip({ unlock }: { unlock: Unlockable }) {
-  return (
-    <View
-      style={{
-        backgroundColor: '#fff',
-        paddingHorizontal: 12,
-        paddingVertical: 8,
-        borderRadius: 999,
-        flexDirection: 'row',
-        alignItems: 'center',
-        gap: 6,
-        borderWidth: 1,
-        borderColor: '#E5E5EA',
-      }}
-    >
-      <Text style={{ fontSize: 16 }}>{unlock.emoji}</Text>
-      <Text style={{ fontSize: 12, color: '#1C1C1E' }}>{unlock.label}</Text>
-    </View>
-  );
-}
-
-function NavButton({ label, onPress }: { label: string; onPress?: () => void }) {
+function ActionButton({ label, onPress }: { label: string; onPress: () => void }) {
   return (
     <Pressable
+      accessibilityRole="button"
+      accessibilityLabel={label}
       onPress={onPress}
-      style={{
-        flex: 1,
-        padding: 12,
-        backgroundColor: '#fff',
-        borderRadius: 12,
-        alignItems: 'center',
+      style={({ pressed }) => ({
+        minHeight: 46,
+        paddingHorizontal: 18,
+        borderRadius: 10,
         borderWidth: 1,
-        borderColor: '#E5E5EA',
-      }}
+        borderColor: theme.colors.border,
+        backgroundColor: theme.colors.surface,
+        alignItems: 'center',
+        justifyContent: 'center',
+        opacity: pressed ? 0.7 : 1,
+      })}
     >
-      <Text style={{ fontSize: 13, color: '#1C1C1E', fontWeight: '600' }}>{label}</Text>
+      <Text style={{ color: theme.colors.text, fontWeight: '600' }}>{label}</Text>
     </Pressable>
   );
 }

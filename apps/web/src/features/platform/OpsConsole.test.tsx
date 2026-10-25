@@ -1,6 +1,7 @@
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { OpsConsole } from './OpsConsole';
+import { adminLoginHref, readOpsTab } from './constants';
 
 const mocks = vi.hoisted(() => ({
   session: null as null | {
@@ -63,17 +64,42 @@ it('asks guests to sign in', () => {
 });
 
 it.each([
-  ['/admin/ops?tab=people', '/admin/ops?tab=people'],
-  ['/admin/ops#merchants', '/admin/ops#merchants'],
-  ['/admin/ops', '/admin/ops'],
-])('carries the current ops path %s into admin login', (location, returnUrl) => {
+  ['/admin/ops?tab=people', '/admin/login?returnUrl=%2Fadmin%2Fops%3Ftab%3Dpeople'],
+  ['/admin/ops#affiliation', '/admin/login?returnUrl=%2Fadmin%2Fops%23affiliation#'],
+  ['/admin/ops#affiliation#affiliation', '/admin/login?returnUrl=%2Fadmin%2Fops%23affiliation#'],
+  ['/admin/ops', '/admin/login?returnUrl=%2Fadmin%2Fops'],
+])('carries the current ops path %s into admin login without leaving the page hash', (location, href) => {
   window.history.replaceState(null, '', location);
   render(<OpsConsole />);
-  const login = new URL(
-    (screen.getByRole('link', { name: '前往管理員登入' }) as HTMLAnchorElement).href,
+  expect(screen.getByRole('link', { name: '前往管理員登入' }).getAttribute('href')).toBe(href);
+});
+
+it('clears the current ops hash when building the admin login href', () => {
+  expect(adminLoginHref('/admin/ops#affiliation')).toBe(
+    '/admin/login?returnUrl=%2Fadmin%2Fops%23affiliation#',
   );
-  expect(login.pathname).toBe('/admin/login');
-  expect(login.searchParams.get('returnUrl')).toBe(returnUrl);
+  expect(adminLoginHref('/admin/ops#affiliation#affiliation')).toBe(
+    '/admin/login?returnUrl=%2Fadmin%2Fops%23affiliation#',
+  );
+});
+
+it('reads an ops tab from a stacked leftover hash', () => {
+  expect(readOpsTab('', '#affiliation#affiliation')).toBe('affiliation');
+  expect(readOpsTab('tab=people', '#affiliation#affiliation')).toBe('people');
+  expect(readOpsTab('', 'affiliation#affiliation')).toBe('affiliation');
+});
+
+it('selects affiliation when a leftover login hash is stacked on the ops fragment', async () => {
+  mocks.session = {
+    platformAccountId: 'pa_1',
+    context: 'a'.repeat(43),
+    isPlatformOperator: true,
+  };
+  window.history.replaceState(null, '', '/admin/ops#affiliation#affiliation');
+  render(<OpsConsole />);
+  expect((await screen.findByRole('tab', { name: '課班掛靠' })).getAttribute('aria-selected')).toBe(
+    'true',
+  );
 });
 
 it('blocks signed-in non-operators without loading ops data', () => {
