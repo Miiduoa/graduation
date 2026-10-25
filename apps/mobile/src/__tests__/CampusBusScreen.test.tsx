@@ -140,3 +140,15 @@ test('a visitor can query the public bus source without a school identity', asyn
     city: 'Taichung',
   });
 });
+
+test('explains a login requirement without calling it a connection failure', async () => {
+  mockUser = null;
+  jest
+    .mocked(loadBusArrivals)
+    .mockResolvedValue({ status: 'login-required', arrivals: [], fetchedAt: null });
+  const view = render(<BusScreen />);
+  fireEvent.press(await view.findByText('校門 · 查到站'));
+  expect(await view.findByText(/此站點的到站查詢需要登入/)).toBeTruthy();
+  expect(view.queryByText(/無法連線取得到站資訊/)).toBeNull();
+  expect(view.getByText('開啟官方公車查詢')).toBeTruthy();
+});

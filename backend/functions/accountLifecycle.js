@@ -15,8 +15,10 @@ async function assertAccountAvailable(db, uid) {
 // to read the account marker inside their transaction to serialize with deletion.
 function createAccountGuardedOnCall({ onCall, getDb }) {
   return (options, handler) => {
-    const { allowClosingAccount = false, ...firebaseOptions } = options;
+    const { allowClosingAccount = false, preflight, ...firebaseOptions } = options;
     return onCall(firebaseOptions, async (request, ...args) => {
+      // Authentication and input limits can reject a request without reading the account.
+      if (preflight) await preflight(request, ...args);
       if (!allowClosingAccount) await assertAccountAvailable(getDb(), request.auth?.uid);
       return handler(request, ...args);
     });

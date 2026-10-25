@@ -23,6 +23,7 @@ export function CampusBusArrivals({
   const [loading, setLoading] = useState(true);
   const generation = useRef(0);
   const inFlight = useRef(false);
+  const pollingBlocked = useRef(false);
   const refresh = useCallback(async () => {
     if (inFlight.current) return;
     inFlight.current = true;
@@ -32,16 +33,17 @@ export function CampusBusArrivals({
     const result = await loadBusArrivals({ schoolId, stopId: stop.id, city: route.city });
     if (generation.current !== request) return;
     inFlight.current = false;
+    pollingBlocked.current = result.status === 'login-required';
     setData(result);
     setLoading(false);
   }, [schoolId, stop.id, route.city]);
   useEffect(() => {
     void refresh();
     const timer = setInterval(() => {
-      if (AppState.currentState === 'active') void refresh();
+      if (!pollingBlocked.current && AppState.currentState === 'active') void refresh();
     }, 30_000);
     const subscription = AppState.addEventListener('change', (state) => {
-      if (state === 'active') void refresh();
+      if (!pollingBlocked.current && state === 'active') void refresh();
     });
     return () => {
       generation.current += 1;
@@ -70,6 +72,11 @@ export function CampusBusArrivals({
         {data?.status === 'error' ? (
           <Text accessibilityRole="alert" style={body}>
             無法連線取得到站資訊，請重新查詢或使用官方公車網站。
+          </Text>
+        ) : null}
+        {data?.status === 'login-required' ? (
+          <Text style={body}>
+            此站點的到站查詢需要登入，或請使用公開站牌與官方公車網站確認班次。
           </Text>
         ) : null}
         {data?.status === 'unavailable' ? (
