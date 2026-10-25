@@ -28,11 +28,13 @@ import {
   currentPageReturnPath,
   OPS_PATH,
   readOpsTab,
+  readOpsSchool,
   SCHOOL_REVIEW_PATH,
   type OpsTab,
 } from './constants';
 import { adminFetch, asRecords } from './platformFetch';
 import { useActiveRequest } from './useActiveRequest';
+import { ReviewControls, type ReviewDecision } from './ReviewControls';
 import styles from './Platform.module.css';
 
 const tabs: Array<[OpsTab, string]> = [
@@ -48,6 +50,10 @@ function readTab(): OpsTab {
   return readOpsTab(window.location.search, window.location.hash);
 }
 
+function readSchool(): string | null {
+  return typeof window === 'undefined' ? null : readOpsSchool(window.location.search);
+}
+
 export function OpsConsole() {
   const auth = useNuniSession();
   const operator = !!auth.session?.isPlatformOperator;
@@ -60,8 +66,11 @@ export function OpsConsole() {
   const [auditQuery, setAuditQuery] = useState('');
 
   useEffect(() => {
-    setTab(readTab());
-    const sync = () => setTab(readTab());
+    const sync = () => {
+      setTab(readTab());
+      setSchoolId(readSchool());
+    };
+    sync();
     window.addEventListener('hashchange', sync);
     window.addEventListener('popstate', sync);
     return () => {
@@ -71,8 +80,18 @@ export function OpsConsole() {
   }, []);
 
   function go(next: OpsTab) {
+    if (next === tab) return;
     setTab(next);
-    window.history.replaceState(null, '', `${OPS_PATH}?tab=${next}`);
+    const params = new URLSearchParams({ tab: next });
+    if (schoolId) params.set('school', schoolId);
+    window.history.pushState(null, '', OPS_PATH + '?' + params.toString());
+  }
+
+  function selectSchool(next: string | null) {
+    setSchoolId(next);
+    const params = new URLSearchParams({ tab });
+    if (next) params.set('school', next);
+    window.history.replaceState(null, '', OPS_PATH + '?' + params.toString());
   }
 
   return (
@@ -84,30 +103,56 @@ export function OpsConsole() {
               <p className={styles.eyebrow}>平台營運</p>
               <h1>完整管理台</h1>
               <p className={styles.muted}>
-                審核接入、開放或關閉學校、全站店家留資與稽核。已開通學校的日常設定預設只看，需要時再代操作。核准申請還不會讓學生找得到學校。
+                從接入審核、校方授權到店家與課班申請，集中完成營運作業。已開通學校需先取得限時代操作權限，審核通過也不代表正式開放服務。
               </p>
             </div>
             <nav className={styles.links} aria-label="營運作業">
-              <Link href={SCHOOL_REVIEW_PATH}>審核</Link>
-              <Link href={OPS_PATH} aria-current="page">
-                開通
-              </Link>
-              <Link href={`${OPS_PATH}?tab=affiliation`}>掛靠</Link>
+              <Link href="/admin">管理總覽</Link>
+              <Link href={SCHOOL_REVIEW_PATH}>接入審核</Link>
+              <Link href={OPS_PATH} aria-current="page">營運作業</Link>
             </nav>
           </header>
-          <div className={styles.tabs} role="tablist" aria-label="管理項目">
-            {tabs.map(([id, label]) => (
+          <div className={styles.tabs} role="tablist" aria-label="營運管理項目">
+            {tabs.map(([id, label], index) => (
               <button
                 key={id}
+                id={'ops-tab-' + id}
                 type="button"
                 role="tab"
+                tabIndex={tab === id ? 0 : -1}
+                aria-controls={'ops-panel-' + id}
                 aria-selected={tab === id}
                 onClick={() => go(id)}
+                onKeyDown={(event) => {
+                  let nextIndex = index;
+                  if (event.key === 'ArrowRight' || event.key === 'ArrowDown') {
+                    nextIndex = (index + 1) % tabs.length;
+                  } else if (event.key === 'ArrowLeft' || event.key === 'ArrowUp') {
+                    nextIndex = (index - 1 + tabs.length) % tabs.length;
+                  } else if (event.key === 'Home') {
+                    nextIndex = 0;
+                  } else if (event.key === 'End') {
+                    nextIndex = tabs.length - 1;
+                  } else {
+                    return;
+                  }
+                  event.preventDefault();
+                  const next = tabs[nextIndex][0];
+                  go(next);
+                  document.getElementById('ops-tab-' + next)?.focus();
+                }}
               >
                 {label}
               </button>
             ))}
           </div>
+          <div
+            className={styles.tabPanel}
+            id={'ops-panel-' + tab}
+            role="tabpanel"
+            aria-labelledby={'ops-tab-' + tab}
+            tabIndex={0}
+          >
           {tab === 'schools' ? (
             <AdminSchools
               context={auth.session!.context}
@@ -115,7 +160,7 @@ export function OpsConsole() {
               selectedId={schoolId}
               search={schoolQuery}
               lifecycle={schoolLifecycle}
-              onSelect={setSchoolId}
+              onSelect={selectSchool}
               onSearch={setSchoolQuery}
               onLifecycle={setSchoolLifecycle}
             />
@@ -126,7 +171,7 @@ export function OpsConsole() {
               context={auth.session!.context}
               suspended={suspended}
               selectedSchool={schoolId}
-              onSchool={setSchoolId}
+              onSchool={selectSchool}
               onManageSchool={() => go('schools')}
             />
           ) : null}
@@ -152,6 +197,7 @@ export function OpsConsole() {
               onQuery={setAuditQuery}
             />
           ) : null}
+          </div>
         </div>
       ) : auth.loading ? (
         <p role="status" className={common.loading}>
