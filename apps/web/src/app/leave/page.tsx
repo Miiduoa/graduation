@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { courseOfferingId, type PersonalCourse } from '@campus/shared';
+import { type PersonalCourse } from '@campus/shared';
 import { SiteShell } from '@/components/SiteShell';
 import { SchoolAccountRequired } from '@/components/SchoolAccountRequired';
 import { SchoolScopePlaceholder } from '@/components/SchoolScopePlaceholder';
@@ -122,10 +122,13 @@ function LeaveWorkspace({ uid, schoolId, schoolName }: {
   [timetable, startDate, endDate]);
   const selectedIds = selection ?? suggested.map((item) => item.id);
   const suggestedSet = new Set(suggested.map((item) => item.id));
-  const available = useMemo(() => [...(timetable || [])].sort((a, b) =>
-    Number(suggestedSet.has(b.id)) - Number(suggestedSet.has(a.id)) ||
-    a.day - b.day || a.start - b.start || a.name.localeCompare(b.name, 'zh-TW'),
-  ), [timetable, suggested]); // date changes update the suggested grouping
+  const available = useMemo(() => {
+    const matching = new Set(suggested.map((course) => course.id));
+    return [...(timetable || [])].sort((a, b) =>
+      Number(matching.has(b.id)) - Number(matching.has(a.id)) ||
+      a.day - b.day || a.start - b.start || a.name.localeCompare(b.name, 'zh-TW'),
+    );
+  }, [timetable, suggested]);
   const datesOk = validLeaveDates(startDate, endDate);
   const openCount = (records || []).filter((item) => item.status === 'pending' || item.status === 'partial').length;
   const completedCount = (records || []).filter((item) => item.status === 'completed').length;
