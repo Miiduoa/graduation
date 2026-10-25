@@ -29,15 +29,12 @@ import AcademicOverviewAiFirstScreen from './AcademicOverviewAiFirstScreen';
 import QuizCenterAiFirstScreen from './QuizCenterAiFirstScreen';
 import AddCourseAiFirstScreen from './AddCourseAiFirstScreen';
 import TeacherTodayScreen from './TeacherTodayScreen';
-import { AddCourseScreen } from './AddCourseScreen';
 import { AcademicScreen } from './AcademicScreen';
 import { CreditAuditStack } from './CreditAuditStack';
 import { AICourseAdvisorScreen } from './AICourseAdvisorScreen';
-import { CourseHubScreen } from './CourseHubScreen';
 import { CourseGradebookScreen } from './CourseGradebookScreen';
 import { CourseCatalogScreen } from './CourseCatalogScreen';
 import { CourseModulesScreen } from './CourseModulesScreen';
-import { QuizCenterScreen } from './QuizCenterScreen';
 import { AttendanceScreen } from './AttendanceScreen';
 import { ClassroomScreen } from './ClassroomScreen';
 import { QuizTakingScreen } from './QuizTakingScreen';
@@ -109,15 +106,6 @@ const AcademicGradesRoute = withAcademicInitialTab('grades');
 const AcademicInsightsRoute = withAcademicInitialTab('insights');
 const AcademicGradebookRoute = withAcademicInitialTab('gradebook');
 const AcademicAnalyticsRoute = withAcademicInitialTab('analytics');
-
-// 包裝需要「開課/管理」權限的畫面
-function GuardedAddCourse(props: any) {
-  return (
-    <RouteGuard requires="courses.create">
-      <AddCourseScreen {...props} />
-    </RouteGuard>
-  );
-}
 
 function GuardedAttendance(props: any) {
   return (

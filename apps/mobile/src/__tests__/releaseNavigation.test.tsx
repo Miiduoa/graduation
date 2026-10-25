@@ -118,14 +118,6 @@ jest.mock('../screens/AchievementsAiFirstScreen', () => {
     default: () => React.createElement(Text, null, 'AchievementsAiFirstScreen'),
   };
 });
-jest.mock('../screens/AddCourseScreen', () => {
-  const React = require('react');
-  const { Text } = require('react-native');
-  return {
-    __esModule: true,
-    AddCourseScreen: () => React.createElement(Text, null, 'AddCourseScreen'),
-  };
-});
 jest.mock('../screens/AdminCourseVerifyScreen', () => {
   const React = require('react');
   const { Text } = require('react-native');
@@ -307,14 +299,6 @@ jest.mock('../screens/CourseHubAiFirstScreen', () => {
   return {
     __esModule: true,
     default: () => React.createElement(Text, null, 'CourseHubAiFirstScreen'),
-  };
-});
-jest.mock('../screens/CourseHubScreen', () => {
-  const React = require('react');
-  const { Text } = require('react-native');
-  return {
-    __esModule: true,
-    CourseHubScreen: () => React.createElement(Text, null, 'CourseHubScreen'),
   };
 });
 jest.mock('../screens/CourseMaterialViewerScreen', () => {
@@ -709,14 +693,6 @@ jest.mock('../screens/QuizCenterAiFirstScreen', () => {
   return {
     __esModule: true,
     default: () => React.createElement(Text, null, 'QuizCenterAiFirstScreen'),
-  };
-});
-jest.mock('../screens/QuizCenterScreen', () => {
-  const React = require('react');
-  const { Text } = require('react-native');
-  return {
-    __esModule: true,
-    QuizCenterScreen: () => React.createElement(Text, null, 'QuizCenterScreen'),
   };
 });
 jest.mock('../screens/QuizTakingScreen', () => {
