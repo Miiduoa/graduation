@@ -95,6 +95,61 @@ test('canonical and legacy details reject other-school data and preserve documen
   expect(doc).toHaveBeenLastCalledWith('db', 'schools', 'pu', 'announcements', 'a1');
 });
 
+test('preserves the complete announcement body and the producer audience metadata', async () => {
+  const data = {
+    ...row,
+    title: '期中成績繳交作業提醒',
+    body: '完整說明第一段。\n\n第二段：請檢附必要文件。',
+    summary: '繳交作業摘要。',
+    audience: 'staff',
+    studentFeed: false,
+    visible: true,
+  };
+  jest.mocked(getDocFromServer).mockResolvedValue(document(data) as never);
+  await expect(loadCampusAnnouncement('pu', 'a1')).resolves.toMatchObject({
+    body: data.body,
+    summary: data.summary,
+    audience: 'staff',
+    studentFeed: false,
+    visible: true,
+  });
+});
+
+test('a hidden canonical announcement cannot be reopened through its direct link or legacy fallback', async () => {
+  jest.mocked(getDocFromServer).mockResolvedValue(document({ ...row, visible: false } as never) as never);
+  await expect(loadCampusAnnouncement('pu', 'a1')).resolves.toBeNull();
+  expect(getDocFromServer).toHaveBeenCalledTimes(1);
+  expect(doc).toHaveBeenLastCalledWith('db', 'schools', 'pu', 'announcements', 'a1');
+});
+
+test('a hidden legacy announcement remains hidden when its school matches', async () => {
+  jest.mocked(getDocFromServer)
+    .mockResolvedValueOnce({ exists: () => false } as never)
+    .mockResolvedValueOnce(document({ ...row, schoolId: 'pu', visible: false } as never) as never);
+  await expect(loadCampusAnnouncement('pu', 'a1')).resolves.toBeNull();
+  expect(getDocFromServer).toHaveBeenCalledTimes(2);
+});
+
+test('producer flags survive normalization so cleaned staff titles stay out of the student feed', async () => {
+  const publishedAt = new Date(Date.now() - 60_000).toISOString();
+  const record = (id: string, fields: Record<string, unknown>) => ({
+    id,
+    data: () => ({ ...row, publishedAt, ...fields }),
+  });
+  const docs = [
+    record('student', { title: '學生選課提醒', body: '完整選課辦法。', summary: '選課摘要。' }),
+    record('staff', { title: '期中成績繳交作業提醒', audience: 'staff', studentFeed: false }),
+    record('excluded', { title: '校友交流邀請', studentFeed: false }),
+    record('hidden', { title: '下架公告內容', visible: false }),
+  ];
+  jest.mocked(getDocsFromServer).mockImplementation(async (input) => docsForPath(input, docs) as never);
+  const feed = await loadCampusAnnouncementFeed('pu');
+  expect(feed.announcements.map((item) => item.id)).toEqual(['student']);
+  expect(feed.officialAnnouncements?.map((item) => item.id).sort()).toEqual(['excluded', 'staff', 'student']);
+  expect(feed.announcements[0]).toMatchObject({ body: '完整選課辦法。', summary: '選課摘要。' });
+  expect(feed.officialAnnouncements?.find((item) => item.id === 'staff')).toMatchObject({ audience: 'staff', studentFeed: false });
+});
+
 test('missing IDs never fall back to sample content and invalid runtime never reads Firestore', async () => {
   await expect(loadCampusAnnouncement('pu', '')).resolves.toBeNull();
   await expect(loadCampusEvent('pu', '../other')).resolves.toBeNull();

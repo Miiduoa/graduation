@@ -25,10 +25,18 @@ import {
 import { isAnnouncementSchoolVisibleToPublic } from '@campus/shared/src/campusAnnouncements';
 import { getAnnouncementVisibilityEnv } from '@/lib/runtime';
 import { useCampusBrowseContext } from '@/lib/useCampusBrowseContext';
+import { replaceServiceListQuery, type ServiceListSearchParams } from '@/lib/serviceListNavigation';
+import { useServiceListQuery } from '@/lib/useServiceListQuery';
+import {
+  ANNOUNCEMENT_LIST_QUERY_KEYS,
+  ANNOUNCEMENT_PAGE_SIZE,
+  announcementListQuery,
+  readAnnouncementListState,
+  type AnnouncementListState,
+} from './announcementListState';
 import styles from './announcements.module.css';
 
 type Category = 'all' | 'academic' | 'event' | 'general';
-type ListView = 'student' | 'all';
 type ReadyState = {
   status: 'ready';
   schoolId: string;
@@ -110,53 +118,78 @@ function VerifiedCatalogLinks({ schoolId }: { schoolId: string }) {
   return <OfficeSourceLinks links={listAnnouncementCatalogLinks(schoolId)} />;
 }
 
-function AnnouncementReader({ schoolId }: { schoolId: string }) {
+function AnnouncementReader({
+  schoolId,
+  initialQuery,
+}: {
+  schoolId: string;
+  initialQuery?: ServiceListSearchParams;
+}) {
   const [state, setState] = useState<LoadState>({ status: 'loading', schoolId });
-  const [search, setSearch] = useState('');
-  const [category, setCategory] = useState<Category>('all');
-  const [listView, setListView] = useState<ListView>('student');
-  const [pinnedOnly, setPinnedOnly] = useState(false);
+  const currentQuery = useServiceListQuery('/announcements', schoolId, initialQuery);
+  const queryKey = currentQuery.toString();
+  const [selection, setSelection] = useState(() => ({
+    queryKey,
+    filters: readAnnouncementListState(currentQuery),
+  }));
+  const filters =
+    selection.queryKey === queryKey ? selection.filters : readAnnouncementListState(currentQuery);
+  if (selection.queryKey !== queryKey) setSelection({ queryKey, filters });
+  const { search, category, view: listView, pinned: pinnedOnly } = filters;
   const [notice, setNotice] = useState('');
+  const [refreshing, setRefreshing] = useState(false);
   const generation = useRef(0);
   const mounted = useRef(false);
+  const refreshLock = useRef(false);
+  const searchInput = useRef<HTMLInputElement>(null);
   const view = feedForSchool(state, schoolId);
 
   const load = useCallback(() => {
     const request = ++generation.current;
-    return loadAnnouncementFeed(schoolId).then(
-      (feed) => {
+    return loadAnnouncementFeed(schoolId)
+      .then(
+        (feed) => {
+          if (mounted.current && request === generation.current) {
+            setState({
+              status: 'ready',
+              schoolId,
+              announcements: feed.announcements,
+              officialAnnouncements: feed.officialAnnouncements,
+              sources: feed.sources,
+              allUnavailable: feed.allUnavailable,
+              fetchedAt: new Date().toISOString(),
+              stale: false,
+            });
+          }
+        },
+        () => {
+          if (!mounted.current || request !== generation.current) return;
+          setState((current) =>
+            current.schoolId === schoolId &&
+            current.status === 'ready' &&
+            (current.announcements.length > 0 || current.officialAnnouncements.length > 0)
+              ? { ...current, stale: true }
+              : { status: 'failed', schoolId },
+          );
+        },
+      )
+      .finally(() => {
         if (mounted.current && request === generation.current) {
-          setState({
-            status: 'ready',
-            schoolId,
-            announcements: feed.announcements,
-            officialAnnouncements: feed.officialAnnouncements,
-            sources: feed.sources,
-            allUnavailable: feed.allUnavailable,
-            fetchedAt: new Date().toISOString(),
-            stale: false,
-          });
+          refreshLock.current = false;
+          setRefreshing(false);
         }
-      },
-      () => {
-        if (!mounted.current || request !== generation.current) return;
-        setState((current) =>
-          current.schoolId === schoolId &&
-          current.status === 'ready' &&
-          current.announcements.length > 0
-            ? { ...current, stale: true }
-            : { status: 'failed', schoolId },
-        );
-      },
-    );
+      });
   }, [schoolId]);
 
   function refresh() {
+    if (refreshLock.current) return;
+    refreshLock.current = true;
+    setRefreshing(true);
     setNotice('');
     setState((current) =>
       current.schoolId === schoolId &&
       current.status === 'ready' &&
-      current.announcements.length > 0
+      (current.announcements.length > 0 || current.officialAnnouncements.length > 0)
         ? current
         : { status: 'loading', schoolId },
     );
@@ -171,6 +204,22 @@ function AnnouncementReader({ schoolId }: { schoolId: string }) {
       generation.current += 1;
     };
   }, [load]);
+
+  function updateFilters(patch: Partial<AnnouncementListState>) {
+    const next = { ...filters, page: 1, ...patch };
+    setSelection({ queryKey, filters: next });
+    replaceServiceListQuery(
+      '/announcements',
+      schoolId,
+      ANNOUNCEMENT_LIST_QUERY_KEYS,
+      announcementListQuery(schoolId, next),
+    );
+  }
+
+  function clearFilters() {
+    updateFilters({ search: '', category: 'all', pinned: false });
+    searchInput.current?.focus();
+  }
 
   async function share(announcement: Announcement) {
     const request = generation.current;
@@ -228,6 +277,8 @@ function AnnouncementReader({ schoolId }: { schoolId: string }) {
       (!pinnedOnly || announcement.pinned)
     );
   });
+  const visibleAnnouncements = filtered.slice(0, filters.page * ANNOUNCEMENT_PAGE_SIZE);
+  const hasFilters = Boolean(search.trim() || category !== 'all' || pinnedOnly);
   const downLinks = view.sources.filter((item) => item.status === 'unavailable' && item.listUrl);
   const showStaleNotice =
     listed.length > 0 && (view.stale || view.sources.some((item) => item.status === 'unavailable'));
@@ -250,8 +301,8 @@ function AnnouncementReader({ schoolId }: { schoolId: string }) {
             讀取
           </span>
         </p>
-        <button className="btn" onClick={() => void refresh()}>
-          更新公告
+        <button className="btn" disabled={refreshing} onClick={() => void refresh()}>
+          {refreshing ? '正在更新…' : '更新公告'}
         </button>
       </div>
       {showFeed ? (
@@ -259,21 +310,27 @@ function AnnouncementReader({ schoolId }: { schoolId: string }) {
           <label className={styles.search}>
             搜尋公告
             <input
+              ref={searchInput}
               type="search"
+              maxLength={200}
               placeholder="標題、內容或發布單位"
               value={search}
-              onChange={(event) => setSearch(event.target.value)}
+              onChange={(event) => updateFilters({ search: event.target.value })}
             />
           </label>
           <div className={styles.filters} aria-label="公告檢視">
             <button
               type="button"
               aria-pressed={listView === 'student'}
-              onClick={() => setListView('student')}
+              onClick={() => updateFilters({ view: 'student' })}
             >
               {ANNOUNCEMENT_STUDENT_WALL_LABEL}
             </button>
-            <button type="button" aria-pressed={listView === 'all'} onClick={() => setListView('all')}>
+            <button
+              type="button"
+              aria-pressed={listView === 'all'}
+              onClick={() => updateFilters({ view: 'all' })}
+            >
               {ANNOUNCEMENT_ALL_VIEW_LABEL}
             </button>
           </div>
@@ -283,7 +340,7 @@ function AnnouncementReader({ schoolId }: { schoolId: string }) {
                 key={item.id}
                 type="button"
                 aria-pressed={category === item.id}
-                onClick={() => setCategory(item.id)}
+                onClick={() => updateFilters({ category: item.id })}
               >
                 {item.label}
               </button>
@@ -293,10 +350,25 @@ function AnnouncementReader({ schoolId }: { schoolId: string }) {
             <input
               type="checkbox"
               checked={pinnedOnly}
-              onChange={(event) => setPinnedOnly(event.target.checked)}
+              onChange={(event) => updateFilters({ pinned: event.target.checked })}
             />
             只看置頂
           </label>
+        </div>
+      ) : null}
+      {showFeed ? (
+        <div className={styles.resultBar}>
+          <p role="status" aria-live="polite">
+            {hasFilters ? `找到 ${filtered.length} 則公告` : `共 ${filtered.length} 則公告`}
+            {filtered.length > visibleAnnouncements.length
+              ? `，目前顯示 ${visibleAnnouncements.length} 則`
+              : ''}
+          </p>
+          {hasFilters ? (
+            <button type="button" onClick={clearFilters}>
+              清除篩選
+            </button>
+          ) : null}
         </div>
       ) : null}
       {notice && (
@@ -347,6 +419,9 @@ function AnnouncementReader({ schoolId }: { schoolId: string }) {
             <>
               <h2>{ANNOUNCEMENT_EMPTY_CONNECTED_TEXT}</h2>
               <p>教師向、資安轉知等正式公告可到「{ANNOUNCEMENT_ALL_VIEW_LABEL}」查看。</p>
+              <button type="button" className="btn" onClick={() => updateFilters({ view: 'all' })}>
+                查看{ANNOUNCEMENT_ALL_VIEW_LABEL}
+              </button>
             </>
           ) : (
             <>
@@ -357,7 +432,7 @@ function AnnouncementReader({ schoolId }: { schoolId: string }) {
         </section>
       ) : (
         <div className={styles.list} aria-label="公告列表">
-          {filtered.map((announcement) => (
+          {visibleAnnouncements.map((announcement) => (
             <article
               key={announcement.id}
               id={`announcement-${encodeURIComponent(announcement.id)}`}
@@ -386,13 +461,13 @@ function AnnouncementReader({ schoolId }: { schoolId: string }) {
               </div>
               <h2>
                 <Link
-                  href={`/announcements/${encodeURIComponent(announcement.id)}?schoolId=${encodeURIComponent(schoolId)}`}
+                  href={`/announcements/${encodeURIComponent(announcement.id)}?${announcementListQuery(schoolId, filters, currentQuery)}`}
                 >
                   {announcement.title}
                 </Link>
               </h2>
               {(announcement.summary || announcement.body) && (
-                <p className={styles.body}>{announcement.summary || announcement.body}</p>
+                <p className={styles.preview}>{announcement.summary || announcement.body}</p>
               )}
               {announcement.originalUrl ? (
                 <a
@@ -416,12 +491,23 @@ function AnnouncementReader({ schoolId }: { schoolId: string }) {
           ))}
         </div>
       )}
+      {filtered.length > visibleAnnouncements.length ? (
+        <div className={styles.more}>
+          <button
+            type="button"
+            className="btn"
+            onClick={() => updateFilters({ page: filters.page + 1 })}
+          >
+            顯示更多公告（剩餘 {filtered.length - visibleAnnouncements.length} 則）
+          </button>
+        </div>
+      ) : null}
     </div>
   );
 }
 
 export default function AnnouncementsPage(props: {
-  searchParams?: Promise<{ school?: string; schoolId?: string; campus?: string }>;
+  searchParams?: Promise<ServiceListSearchParams>;
 }) {
   const params = props.searchParams ? use(props.searchParams) : undefined;
   const context = useCampusBrowseContext(params);
@@ -432,6 +518,20 @@ export default function AnnouncementsPage(props: {
     isAnnouncementSchoolVisibleToPublic({ schoolId }, getAnnouncementVisibilityEnv()),
   );
   const { user, loading } = useAuth();
+  const previousAccount = useRef({ uid: user?.uid ?? null, settled: !loading });
+  useEffect(() => {
+    if (loading) return;
+    const nextAccount = user?.uid ?? null;
+    if (previousAccount.current.settled && previousAccount.current.uid !== nextAccount && schoolId) {
+      replaceServiceListQuery(
+        '/announcements',
+        schoolId,
+        ANNOUNCEMENT_LIST_QUERY_KEYS,
+        new URLSearchParams(),
+      );
+    }
+    previousAccount.current = { uid: nextAccount, settled: true };
+  }, [loading, schoolId, user?.uid]);
   return (
     <SiteShell
       schoolName={visible ? context.schoolName : undefined}
@@ -458,6 +558,7 @@ export default function AnnouncementsPage(props: {
         <AnnouncementReader
           key={JSON.stringify([schoolId, user?.uid ?? null])}
           schoolId={schoolId!}
+          initialQuery={params}
         />
       )}
     </SiteShell>

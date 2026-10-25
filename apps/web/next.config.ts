@@ -1,6 +1,7 @@
 import path from 'node:path';
 import type { NextConfig } from 'next';
 import { legacyEnabled, legacyHtmlRedirects, legacyRewrites } from './src/lib/legacy-routing';
+import { hasVerifiedCatalogSearch, officialLibraryDirectory } from '../../packages/shared/src/officialLibraries';
 
 const firebaseAdminBrowserStub = path.join(__dirname, 'src/lib/nodeNativeStub.ts');
 
@@ -11,13 +12,18 @@ const emulatorTestEnv =
 const emulatorConnectSrc = emulatorTestEnv
   ? ' http://127.0.0.1:* http://localhost:* ws://127.0.0.1:* ws://localhost:*'
   : '';
+const libraryFormOrigins = [...new Set(Object.values(officialLibraryDirectory)
+  .filter((library) => library.catalogSearch === 'pu-webpac' || hasVerifiedCatalogSearch(library))
+  .map((library) => new URL(library.catalogUrl))
+  .filter((url) => url.protocol === 'https:' && !url.username && !url.password)
+  .map((url) => url.origin))];
 
 const contentSecurityPolicy = [
   "default-src 'self'",
   "base-uri 'self'",
   "frame-ancestors 'none'",
   "object-src 'none'",
-  "form-action 'self' https://accounts.google.com",
+  "form-action 'self' https://accounts.google.com " + libraryFormOrigins.join(' '),
   "img-src 'self' data: blob: https:",
   "font-src 'self' data: https:",
   "style-src 'self' 'unsafe-inline' https:",

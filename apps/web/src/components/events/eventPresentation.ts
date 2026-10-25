@@ -1,6 +1,47 @@
 import type { CampusEvent, CampusEventSource } from '@/lib/campusEvents';
 import { eventRegistrationLabel, type EventRegistrationState } from '@/lib/campusEventRegistration';
 import { schoolLoginHref } from '@/lib/navigation';
+import { listPageNumber, listQueryValue, listSearchText, type ServiceListQuery } from '@/lib/serviceListNavigation';
+import { campusEventPhase, type CampusEventTime } from '@campus/shared/src/campusEventTime';
+
+export type CampusEventView = 'all' | 'upcoming' | 'ongoing' | 'past' | 'unscheduled';
+export type CampusEventFilters = { q: string; view: CampusEventView; page?: number };
+export const EVENT_RESTORE_BATCH_SIZE = 10;
+
+export const CAMPUS_EVENT_VIEWS: ReadonlyArray<{ value: CampusEventView; label: string }> = [
+  { value: 'all', label: '全部活動' },
+  { value: 'ongoing', label: '進行中' },
+  { value: 'upcoming', label: '即將開始' },
+  { value: 'past', label: '已開始／過往' },
+  { value: 'unscheduled', label: '時間待公告' },
+];
+
+export function readCampusEventFilters(query?: ServiceListQuery): CampusEventFilters {
+  const view = listQueryValue(query, 'view');
+  const page = listPageNumber(listQueryValue(query, 'page'));
+  return {
+    q: listSearchText(listQueryValue(query, 'q')),
+    view: CAMPUS_EVENT_VIEWS.some((item) => item.value === view) ? view as CampusEventView : 'all',
+    ...(page > 1 ? { page } : {}),
+  };
+}
+
+export function campusEventFilterQuery(filters: CampusEventFilters): URLSearchParams {
+  const params = new URLSearchParams();
+  const q = listSearchText(filters.q);
+  if (q) params.set('q', q);
+  if (filters.view !== 'all' && CAMPUS_EVENT_VIEWS.some((item) => item.value === filters.view)) {
+    params.set('view', filters.view);
+  }
+  if (filters.page && filters.page > 1) params.set('page', String(Math.min(100, filters.page)));
+  return params;
+}
+
+export function campusEventMatchesView(event: CampusEventTime, view: CampusEventView, now: number): boolean {
+  if (view === 'all') return true;
+  const phase = campusEventPhase(event, now);
+  return view === 'past' ? phase === 'ended' || phase === 'started' : phase === view;
+}
 
 const EVENT_SOURCES: CampusEventSource[] = [
   'school-club-events',
@@ -70,8 +111,17 @@ export function campusEventMatchesSearch(event: CampusEvent, query: string): boo
   return terms.every((term) => content.includes(term));
 }
 
-export function buildCampusEventListHref(schoolSearch: string): string {
+function eventNavigationQuery(schoolSearch: string, filters?: CampusEventFilters): URLSearchParams {
   const params = new URLSearchParams(schoolSearch.startsWith('?') ? schoolSearch.slice(1) : schoolSearch);
+  for (const key of [...params.keys()]) {
+    if (!['school', 'schoolId', 'campus'].includes(key)) params.delete(key);
+  }
+  if (filters) campusEventFilterQuery(filters).forEach((value, key) => params.set(key, value));
+  return params;
+}
+
+export function buildCampusEventListHref(schoolSearch: string, filters?: CampusEventFilters): string {
+  const params = eventNavigationQuery(schoolSearch, filters);
   const query = params.toString();
   return query ? `/events?${query}` : '/events';
 }
@@ -80,8 +130,9 @@ export function buildCampusEventDetailHref(
   eventId: string,
   source: CampusEventSource,
   schoolSearch: string,
+  filters?: CampusEventFilters,
 ): string {
-  const params = new URLSearchParams(schoolSearch.startsWith('?') ? schoolSearch.slice(1) : schoolSearch);
+  const params = eventNavigationQuery(schoolSearch, filters);
   params.set('source', source);
   return `/events/${encodeURIComponent(eventId)}?${params.toString()}`;
 }

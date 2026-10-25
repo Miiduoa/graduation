@@ -1,5 +1,6 @@
 import { validatePersonalImportRow } from './validation';
 import type { PersonalImportRecord } from './types';
+import { escapeIcsText, foldIcsLine, utcIcsStamp } from './icalendarSerialization';
 
 const TAIPEI = 'Asia/Taipei';
 
@@ -8,54 +9,6 @@ export type PersonalEventsCalendarExport = {
   eventCount: number;
   skipped: number;
 };
-
-function utf8Bytes(value: string): number {
-  // Avoid depending on TextEncoder so React Native Jest can import this module.
-  let bytes = 0;
-  for (let index = 0; index < value.length; index += 1) {
-    const code = value.charCodeAt(index);
-    if (code <= 0x7f) bytes += 1;
-    else if (code <= 0x7ff) bytes += 2;
-    else if (code >= 0xd800 && code <= 0xdbff) {
-      bytes += 4;
-      index += 1;
-    } else bytes += 3;
-  }
-  return bytes;
-}
-
-function escapeIcsText(value: string): string {
-  return value
-    // eslint-disable-next-line no-control-regex -- ICS text must omit non-text control bytes.
-    .replace(/[\u0000-\u0009\u000b-\u000c\u000e-\u001f\u007f]/g, '')
-    .replace(/\\/g, '\\\\')
-    .replace(/\r\n|\r|\n/g, '\\n')
-    .replace(/;/g, '\\;')
-    .replace(/,/g, '\\,');
-}
-
-function foldLine(value: string): string {
-  const lines: string[] = [];
-  let current = '';
-  let bytes = 0;
-  for (const character of value) {
-    const size = utf8Bytes(character);
-    if (bytes + size > 75) {
-      lines.push(current);
-      current = ' ' + character;
-      bytes = 1 + size;
-    } else {
-      current += character;
-      bytes += size;
-    }
-  }
-  lines.push(current);
-  return lines.join('\r\n');
-}
-
-function utcStamp(date: Date): string {
-  return date.toISOString().replace(/[-:]/g, '').replace(/\.\d{3}Z$/, 'Z');
-}
 
 function compactDate(value: string): string {
   return value.replace(/-/g, '');
@@ -86,7 +39,7 @@ export function buildPersonalEventsCalendar(
 ): PersonalEventsCalendarExport {
   const now = options.now ?? new Date();
   if (!Number.isFinite(now.getTime())) throw new Error('無法判定目前時間');
-  const generatedAt = utcStamp(now);
+  const generatedAt = utcIcsStamp(now);
   const lines = [
     'BEGIN:VCALENDAR',
     'VERSION:2.0',
@@ -146,7 +99,7 @@ export function buildPersonalEventsCalendar(
 
   lines.push('END:VCALENDAR');
   return {
-    content: lines.map(foldLine).join('\r\n') + '\r\n',
+    content: lines.map(foldIcsLine).join('\r\n') + '\r\n',
     eventCount,
     skipped,
   };

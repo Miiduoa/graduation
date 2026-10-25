@@ -34,6 +34,15 @@ const fetchedAt = () => new Date().toISOString();
 const result = (): PublicTransitResult => ({
   status: 'ready', kind: 'stops', stops: [stop], limited: false, fetchedAt: fetchedAt(),
 });
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  let reject!: (reason: unknown) => void;
+  const promise = new Promise<T>((complete, fail) => {
+    resolve = complete;
+    reject = fail;
+  });
+  return { promise, resolve, reject };
+}
 beforeEach(() => {
   jest.clearAllMocks();
   jest.mocked(queryPublicTransit).mockResolvedValue(result());
@@ -93,6 +102,100 @@ test('denied location never guesses a school coordinate and still permits statio
   expect(view.getByText(/尚未授權定位/)).toBeTruthy();
   expect(Location.getCurrentPositionAsync).not.toHaveBeenCalled();
   expect(queryPublicTransit).not.toHaveBeenCalled();
+});
+
+test('station search cancels a pending permission request before GPS is started', async () => {
+  const permission = deferred<Location.LocationPermissionResponse>();
+  jest.mocked(Location.requestForegroundPermissionsAsync).mockReturnValueOnce(permission.promise);
+  const view = render(<PublicTransitExplorer schoolId="nthu" />);
+  await act(async () => fireEvent.press(view.getByText('用我的位置找附近站牌')));
+  expect(view.getByText('正在確認位置…')).toBeTruthy();
+
+  fireEvent.changeText(view.getByLabelText('搜尋公車站名'), '清華大學');
+  await act(async () => fireEvent.press(view.getByText('搜尋官方站牌')));
+  expect(view.queryByText('正在確認位置…')).toBeNull();
+  await act(async () => permission.resolve({ status: 'granted' } as Location.LocationPermissionResponse));
+
+  expect(Location.getCurrentPositionAsync).not.toHaveBeenCalled();
+  expect(queryPublicTransit).toHaveBeenCalledTimes(1);
+  expect(view.getByText('清華大學（HSZ001）')).toBeTruthy();
+});
+
+test.each(['resolved', 'rejected'] as const)('late %s GPS cannot replace a newer station search', async (outcome) => {
+  const position = deferred<Location.LocationObject>();
+  jest.mocked(Location.getCurrentPositionAsync).mockReturnValueOnce(position.promise);
+  const view = render(<PublicTransitExplorer schoolId="nthu" />);
+  await act(async () => fireEvent.press(view.getByText('用我的位置找附近站牌')));
+  expect(Location.getCurrentPositionAsync).toHaveBeenCalledTimes(1);
+
+  fireEvent.changeText(view.getByLabelText('搜尋公車站名'), '清華大學');
+  await act(async () => fireEvent.press(view.getByText('搜尋官方站牌')));
+  await act(async () => {
+    if (outcome === 'resolved') {
+      position.resolve({ coords: { latitude: 24.8, longitude: 120.99, accuracy: 900 } } as Location.LocationObject);
+    } else {
+      position.reject(new Error('GPS unavailable'));
+    }
+  });
+
+  expect(queryPublicTransit).toHaveBeenCalledTimes(1);
+  expect(view.getByText('清華大學（HSZ001）')).toBeTruthy();
+  expect(view.queryByText('正在確認位置…')).toBeNull();
+  expect(view.queryByText(/無法取得位置/)).toBeNull();
+  expect(view.queryByText(/定位誤差偏大/)).toBeNull();
+});
+
+test('cancel location stops the busy state and ignores the later coordinates', async () => {
+  const position = deferred<Location.LocationObject>();
+  jest.mocked(Location.getCurrentPositionAsync).mockReturnValueOnce(position.promise);
+  const view = render(<PublicTransitExplorer schoolId="nthu" />);
+  await act(async () => fireEvent.press(view.getByText('用我的位置找附近站牌')));
+  fireEvent.press(view.getByText('取消定位'));
+  expect(view.queryByText('正在確認位置…')).toBeNull();
+  expect(view.getByText('已取消定位，仍可搜尋站名。')).toBeTruthy();
+  await act(async () => position.resolve({
+    coords: { latitude: 24.8, longitude: 120.99, accuracy: 20 },
+  } as Location.LocationObject));
+  expect(queryPublicTransit).not.toHaveBeenCalled();
+});
+
+test('a stalled GPS attempt times out and a new attempt can complete without old results', async () => {
+  jest.useFakeTimers();
+  const position = deferred<Location.LocationObject>();
+  jest.mocked(Location.getCurrentPositionAsync).mockReturnValueOnce(position.promise);
+  const view = render(<PublicTransitExplorer schoolId="nthu" />);
+  try {
+    await act(async () => fireEvent.press(view.getByText('用我的位置找附近站牌')));
+    await act(async () => jest.advanceTimersByTime(10_000));
+    expect(view.getByText('定位逾時，請重新定位或輸入站牌名稱查詢。')).toBeTruthy();
+    expect(view.queryByText('正在確認位置…')).toBeNull();
+    await act(async () => fireEvent.press(view.getByText('用我的位置找附近站牌')));
+    expect(queryPublicTransit).toHaveBeenCalledTimes(1);
+    expect(view.getByText('清華大學（HSZ001）')).toBeTruthy();
+    await act(async () => position.resolve({
+      coords: { latitude: 22.6, longitude: 120.3, accuracy: 20 },
+    } as Location.LocationObject));
+    expect(queryPublicTransit).toHaveBeenCalledTimes(1);
+    expect(view.queryByText(/定位逾時/)).toBeNull();
+  } finally {
+    view.unmount();
+    jest.useRealTimers();
+  }
+});
+
+test('submitting a new station search from the keyboard discards an earlier response', async () => {
+  const first = deferred<PublicTransitResult>();
+  jest.mocked(queryPublicTransit).mockReturnValueOnce(first.promise);
+  const view = render(<PublicTransitExplorer schoolId="nthu" />);
+  fireEvent.changeText(view.getByLabelText('搜尋公車站名'), '舊站牌');
+  fireEvent.press(view.getByText('搜尋官方站牌'));
+  const oldSignal = jest.mocked(queryPublicTransit).mock.calls[0][1]!;
+  fireEvent.changeText(view.getByLabelText('搜尋公車站名'), '清華大學');
+  await act(async () => fireEvent(view.getByLabelText('搜尋公車站名'), 'submitEditing'));
+  expect(oldSignal.aborted).toBe(true);
+  await act(async () => first.resolve({ ...result(), stops: [{ ...stop, id: 'HSZ_OLD', name: '舊站牌' }] }));
+  expect(view.getByText('清華大學（HSZ001）')).toBeTruthy();
+  expect(view.queryByText('舊站牌（HSZ_OLD）')).toBeNull();
 });
 
 test('only a selected verified stop requests live TDX arrivals', async () => {

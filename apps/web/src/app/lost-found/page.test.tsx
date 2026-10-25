@@ -31,6 +31,7 @@ vi.mock('@/lib/lostFound', async () => {
 });
 
 beforeEach(() => {
+  window.history.replaceState({}, '', '/lost-found');
   state.user = { uid: 'alice' };
   vi.mocked(listLostFoundItems).mockReset().mockResolvedValue([]);
 });
@@ -189,4 +190,120 @@ it('discovers an owned item beyond the former silent top-100 window', async () =
   expect(await screen.findByRole('link', { name: '我的第101則舊刊登' })).toBeTruthy();
   fireEvent.change(screen.getByLabelText('搜尋'), { target: { value: '第101則' } });
   expect(screen.getByRole('link', { name: '我的第101則舊刊登' })).toBeTruthy();
+});
+
+it('preserves list filters across item, posting and browser history navigation', async () => {
+  vi.mocked(listLostFoundItems).mockResolvedValue([
+    {
+      id: 'umbrella',
+      type: 'lost',
+      title: '黑色雨傘',
+      description: '圖書館門口',
+      category: 'other',
+      location: '圖書館',
+      date: '2026-10-20',
+      status: 'open',
+      reporterId: 'alice',
+      userId: 'alice',
+      createdAt: '2026-10-20T00:00:00.000Z',
+      schoolId: 'pu',
+      canonical: true,
+    },
+    {
+      id: 'card',
+      type: 'found',
+      title: '拾獲學生證',
+      description: '教室',
+      category: 'other',
+      location: '教室',
+      date: '2026-10-20',
+      status: 'open',
+      reporterId: 'bob',
+      userId: 'bob',
+      createdAt: '2026-10-20T00:00:00.000Z',
+      schoolId: 'pu',
+      canonical: true,
+    },
+  ]);
+  window.history.replaceState(
+    { marker: 1 },
+    '',
+    '/lost-found?schoolId=pu&campus=pu&q=%E9%9B%A8%E5%82%98&type=lost&status=open&mine=1#list',
+  );
+  await act(async () => {
+    render(
+      <Suspense fallback={null}>
+        <LostFoundPage
+          searchParams={Promise.resolve({
+            schoolId: 'pu',
+            campus: 'pu',
+            q: '雨傘',
+            type: 'lost',
+            status: 'open',
+            mine: '1',
+          })}
+        />
+      </Suspense>,
+    );
+  });
+  const umbrella = await screen.findByRole('link', { name: '黑色雨傘' });
+  expect(screen.queryByRole('link', { name: '拾獲學生證' })).toBeNull();
+  for (const link of [umbrella, screen.getByRole('link', { name: '刊登物品' })]) {
+    const query = new URL(link.getAttribute('href')!, window.location.origin).searchParams;
+    expect(Object.fromEntries(query)).toEqual({
+      schoolId: 'pu',
+      campus: 'pu',
+      q: '雨傘',
+      type: 'lost',
+      status: 'open',
+      mine: '1',
+    });
+  }
+  fireEvent.click(screen.getByRole('button', { name: '清除篩選' }));
+  expect(screen.getByRole('link', { name: '拾獲學生證' })).toBeTruthy();
+  expect(document.activeElement).toBe(screen.getByLabelText('搜尋'));
+  expect(window.history.state).toEqual({ marker: 1 });
+  expect(window.location.hash).toBe('#list');
+  expect(new URLSearchParams(window.location.search).get('campus')).toBe('pu');
+  act(() => {
+    window.history.replaceState({}, '', '/lost-found?schoolId=pu&type=found');
+    window.dispatchEvent(new PopStateEvent('popstate'));
+  });
+  expect(screen.queryByRole('link', { name: '黑色雨傘' })).toBeNull();
+  expect(screen.getByRole('link', { name: '拾獲學生證' })).toBeTruthy();
+  expect((screen.getByLabelText('類型') as HTMLSelectElement).value).toBe('found');
+});
+
+it('restores an expanded list after opening an item without losing the older records', async () => {
+  window.history.replaceState({}, '', '/lost-found?schoolId=pu&page=2');
+  vi.mocked(listLostFoundItems).mockResolvedValue(
+    Array.from({ length: 80 }, (_, index) => ({
+      id: `item-${index}`,
+      type: 'lost',
+      title: `物品 ${index}`,
+      description: '說明',
+      category: 'other',
+      location: '圖書館',
+      date: '2026-10-20',
+      status: 'open',
+      reporterId: 'alice',
+      userId: 'alice',
+      createdAt: '2026-10-20T00:00:00.000Z',
+      schoolId: 'pu',
+      canonical: true,
+    })),
+  );
+  await act(async () => {
+    render(
+      <Suspense fallback={null}>
+        <LostFoundPage searchParams={Promise.resolve({ schoolId: 'pu', page: '2' })} />
+      </Suspense>,
+    );
+  });
+  await screen.findByRole('link', { name: '物品 79' });
+  expect(screen.getAllByRole('listitem')).toHaveLength(80);
+  expect(screen.getByRole('link', { name: '物品 79' }).getAttribute('href')).toContain('page=2');
+  fireEvent.change(screen.getByLabelText('搜尋'), { target: { value: '物品 79' } });
+  expect(screen.getAllByRole('listitem')).toHaveLength(1);
+  expect(new URLSearchParams(window.location.search).get('page')).toBeNull();
 });

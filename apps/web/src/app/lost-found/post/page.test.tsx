@@ -375,9 +375,7 @@ it('recovery: inspect adopt-server clears damaged metadata only after confirmati
       ),
     ).toBeNull(),
   );
-  expect(state.replace).toHaveBeenCalledWith(
-    '/lost-found/unknown-outcome-id?schoolId=pu',
-  );
+  expect(state.replace).toHaveBeenCalledWith('/lost-found/unknown-outcome-id?schoolId=pu');
 });
 
 it('recovery: storage retry persists current in-memory fields, not older draft bytes', async () => {
@@ -408,4 +406,48 @@ it('recovery: storage retry persists current in-memory fields, not older draft b
       itemKey: 'stable-draft',
     })?.title,
   ).toBe('更新後記憶體標題');
+});
+
+it('preserves the filtered list when cancelling and after a confirmed publication', async () => {
+  await act(async () => {
+    render(
+      <Suspense fallback={null}>
+        <LostFoundPostPage
+          searchParams={Promise.resolve({
+            schoolId: 'pu',
+            campus: 'pu',
+            q: '雨傘',
+            type: 'lost',
+            mine: '1',
+            page: '2',
+          })}
+        />
+      </Suspense>,
+    );
+  });
+  await screen.findByLabelText('標題');
+  const expectedQuery = {
+    schoolId: 'pu',
+    campus: 'pu',
+    q: '雨傘',
+    type: 'lost',
+    mine: '1',
+    page: '2',
+  };
+  const back = new URL(
+    screen.getByRole('link', { name: '返回列表' }).getAttribute('href')!,
+    window.location.origin,
+  );
+  expect(Object.fromEntries(back.searchParams)).toEqual(expectedQuery);
+  fireEvent.click(screen.getByRole('button', { name: '取消' }));
+  expect(state.push).toHaveBeenCalledWith(`${back.pathname}${back.search}`);
+  fireEvent.change(screen.getByLabelText('標題'), { target: { value: '黑色雨傘' } });
+  fireEvent.change(screen.getByLabelText('說明'), { target: { value: '圖書館門口' } });
+  fireEvent.change(screen.getByLabelText('地點'), { target: { value: '圖書館' } });
+  fireEvent.change(screen.getByLabelText('日期'), { target: { value: '2026-10-20' } });
+  fireEvent.click(screen.getByRole('button', { name: '送出刊登' }));
+  await waitFor(() => expect(state.replace).toHaveBeenCalled());
+  const destination = new URL(state.replace.mock.calls[0][0], window.location.origin);
+  expect(destination.pathname).toBe('/lost-found/stable-draft');
+  expect(Object.fromEntries(destination.searchParams)).toEqual(expectedQuery);
 });

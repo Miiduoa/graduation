@@ -283,3 +283,43 @@ it('only exposes verified official announcement URLs and keeps categorized posts
     staff: 1,
   });
 });
+
+it('honors stored audience, student feed and visibility after titles lose audience suffixes', () => {
+  const now = new Date('2026-10-18T00:00:00.000Z');
+  const rows = [
+    { id: 'legacy', title: '學生交流活動', publishedAt: '2026-10-08T00:00:00.000Z' },
+    {
+      id: 'staff',
+      title: '教師研習報名通知',
+      publishedAt: '2026-10-08T00:00:00.000Z',
+      audience: 'staff',
+    },
+    {
+      id: 'excluded',
+      title: '其他公開資訊',
+      publishedAt: '2026-10-08T00:00:00.000Z',
+      studentFeed: false,
+    },
+    {
+      id: 'hidden',
+      title: '已撤下公告',
+      publishedAt: '2026-10-08T00:00:00.000Z',
+      visible: false,
+      studentFeed: true,
+    },
+    { id: 'legacy-staff', title: '課程名冊(for教師)', publishedAt: '2026-10-08T00:00:00.000Z' },
+  ];
+  expect(selectStudentAnnouncements(rows, [], now).map((row) => row.id)).toEqual(['legacy']);
+  expect(selectOfficialAnnouncements(rows, [], now).map((row) => row.id)).toEqual([
+    'legacy',
+    'staff',
+    'excluded',
+    'legacy-staff',
+  ]);
+  expect(tallyStudentWallFilter(rows, [], now)).toMatchObject({
+    kept: 1,
+    staff: 2,
+    excluded: 1,
+    hidden: 1,
+  });
+});
