@@ -151,3 +151,37 @@
   .inputRow { gap: 8px; padding-left: 10px; }
   .inputRow > svg { display: none; }
 }
+
+.aiRow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+}
+.analyzeButton {
+  min-height: 44px;
+  border: 1px solid var(--brand);
+  border-radius: 11px;
+  background: var(--brand);
+  color: var(--on-brand);
+  padding: 9px 14px;
+  font: inherit;
+  font-size: 14px;
+  font-weight: 650;
+  cursor: pointer;
+}
+.analyzeButton:disabled { opacity: .55; cursor: progress; }
+.hint {
+  margin: 0;
+  font-size: 12px;
+  color: var(--muted);
+  line-height: 1.65;
+}
+.understanding {
+  padding: 15px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--panel);
+}
+.understanding strong { font-size: 14px; color: var(--text); }
+.understanding p { margin: 7px 0 0; color: var(--text); font-size: 14px; line-height: 1.65; }

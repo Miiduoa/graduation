@@ -1,6 +1,6 @@
 import {
   normalizeCampusSemanticResult,
-} from './campusSemantic';
+} from '@campus/shared/src/campusSemantic';
 
 describe('cross-platform semantic navigation contract', () => {
   it('accepts multiple safe route suggestions', () => {
