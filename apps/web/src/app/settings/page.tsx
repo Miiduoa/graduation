@@ -986,7 +986,7 @@ function SettingsContent({
         </div>
       );
     const providerIds = user?.providerData?.map((provider) => provider.providerId) ?? [];
-    const loginMethod = providerIds.includes('google.com')
+    const loginMethod = providerIds.some((providerId) => providerId === 'google.com')
       ? 'Google 帳號'
       : providerIds.includes('password')
         ? '電子郵件與密碼'

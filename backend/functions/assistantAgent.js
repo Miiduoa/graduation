@@ -1,4 +1,5 @@
 const nodeCrypto = require('crypto');
+const { parseFragment } = require('parse5');
 const { zodToJsonSchema } = require('zod-to-json-schema');
 const { MAX_TOTAL_UTF8_BYTES, utf8ByteLength } = require('./agent/inputLimits');
 const {
@@ -22,6 +23,7 @@ const MAX_PROVIDER_RESPONSE_BYTES = 2 * 1024 * 1024;
 const MAX_PROVIDER_ERROR_PREFIX_BYTES = 2 * 1024;
 /** Cap tool_calls scheduled per model round before Promise.all. */
 const MAX_TOOL_CALLS_PER_ROUND = 8;
+const NON_CONTENT_HTML_ELEMENTS = new Set(['script', 'style', 'template', 'noscript']);
 
 const PERSONAL_INTENTS = new Set([
   'assignment_status',
@@ -85,14 +87,22 @@ function hashUserId(uid, schoolId = '') {
 }
 
 function normalizeText(value) {
-  return String(value ?? '')
+  // Parse entities once and extract text; decoded text is never reparsed as HTML.
+  const pending = [parseFragment(String(value ?? ''))];
+  const parts = [];
+  while (pending.length > 0) {
+    const node = pending.pop();
+    if (node.nodeName === '#text') {
+      parts.push(node.value);
+      continue;
+    }
+    if (NON_CONTENT_HTML_ELEMENTS.has(node.nodeName)) continue;
+    for (let index = (node.childNodes?.length ?? 0) - 1; index >= 0; index -= 1) {
+      pending.push(node.childNodes[index]);
+    }
+  }
+  return parts.join('')
     .toLowerCase()
-    .replace(/<[^>]+>/g, '')
-    .replace(/&quot;/g, '"')
-    .replace(/&#039;|&apos;/g, "'")
-    .replace(/&amp;/g, '&')
-    .replace(/&lt;/g, '<')
-    .replace(/&gt;/g, '>')
     .replace(/\s+/g, ' ')
     .trim();
 }

@@ -248,19 +248,33 @@ it('does not silently load Providence data when no campus is selected', () => {
   expect(context.load).not.toHaveBeenCalled();
 });
 
-it('shows the newest academic term even when an older term was imported later', async () => {
-  context.records = [
-    record('nthu', 'new', '本學期課程'),
-    {
-      ...record('nthu', 'old', '舊學期課程'),
-      academicYear: '114',
-      semester: '2',
-    },
-  ];
-  render(<PersonalTimetable />);
-  expect((await screen.findAllByText('本學期課程')).length).toBeGreaterThan(0);
-  expect(screen.queryByText('舊學期課程')).toBeNull();
-});
+it.each(['nthu', 'pu'])(
+  'labels and switches academic terms in the %s timetable',
+  async (schoolId) => {
+    context.schoolId = schoolId;
+    context.records = [
+      record(schoolId, 'new', '本學期課程'),
+      {
+        ...record(schoolId, 'old', '舊學期課程'),
+        academicYear: '114',
+        semester: '2',
+      },
+    ];
+    render(<PersonalTimetable />);
+    expect((await screen.findAllByText('本學期課程')).length).toBeGreaterThan(0);
+    expect(screen.queryByText('舊學期課程')).toBeNull();
+    const terms = screen.getByRole('combobox', { name: '顯示自行匯入的學期' });
+    expect(
+      within(terms).getByRole('option', { name: '115 學年度 1 學期' }).getAttribute('value'),
+    ).toBe('115|1');
+    expect(
+      within(terms).getByRole('option', { name: '114 學年度 2 學期' }).getAttribute('value'),
+    ).toBe('114|2');
+    fireEvent.change(terms, { target: { value: '114|2' } });
+    expect(screen.getAllByText('舊學期課程').length).toBeGreaterThan(0);
+    expect(screen.queryByText('本學期課程')).toBeNull();
+  },
+);
 
 it('keeps the academic term selected on Today when opening the full timetable', async () => {
   window.history.replaceState({}, '', '/timetable?term=114%7C2');

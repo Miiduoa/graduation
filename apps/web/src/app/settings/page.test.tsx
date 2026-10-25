@@ -343,6 +343,20 @@ it('shows the authenticated provider instead of implying a school login is conne
   expect(screen.queryByText('學校登入')).toBeNull();
 });
 
+it.each(['notgoogle.com', 'google.com.evil.test', 'sso.google.com', 'https://google.com'])(
+  'does not label a different Firebase provider ID as Google: %s',
+  async (providerId) => {
+    state.user = {
+      ...state.user!,
+      providerData: [{ providerId }, { providerId: 'password' }],
+    };
+    render(<SettingsPage />);
+    await openProfile();
+    expect(screen.getByText('電子郵件與密碼')).toBeTruthy();
+    expect(screen.queryByText('Google 帳號')).toBeNull();
+  },
+);
+
 it('provides an accessible sign-out button and prevents duplicate requests while pending', async () => {
   let finish!: () => void;
   state.signOut.mockImplementation(

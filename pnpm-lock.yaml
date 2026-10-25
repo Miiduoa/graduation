@@ -411,6 +411,9 @@ importers:
       node-fetch:
         specifier: ^3.3.2
         version: 3.3.2
+      parse5:
+        specifier: 7.3.0
+        version: 7.3.0
       saml2-js:
         specifier: ^4.0.2
         version: 4.0.4
