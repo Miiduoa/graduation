@@ -1,9 +1,11 @@
 import {
   DORM_MILESTONE_LIMIT,
+  DORM_PARCEL_LIMIT,
   emptyDormWorkspace,
   isValidDormDate,
   normalizeDormWorkspace,
   sortedDormMilestones,
+  sortedDormParcels,
 } from '@campus/shared/src/dormitory';
 import { resolveDormitoryPublicGuide } from '@campus/shared/src/dormitoryGuide';
 
@@ -25,4 +27,26 @@ test('legacy device records stay readable and dates are not fabricated', () => {
   const normalized = normalizeDormWorkspace({ milestones });
   expect(normalized.milestones).toHaveLength(DORM_MILESTONE_LIMIT);
   expect(sortedDormMilestones(normalized).at(-1)?.completed).toBe(true);
+});
+
+test('normalizes parcel notes from older records and excludes malformed IDs', () => {
+  const old = normalizeDormWorkspace({ version: 1, building: '思高學苑' });
+  expect(old.parcels).toEqual([]);
+  const next = normalizeDormWorkspace({
+    parcels: [
+      { id: 'a', title: '新包裹', dueDate: '2026-11-20', createdAt: 3 },
+      { id: 'duplicate', title: '郵件', dueDate: '2026-11-01', collected: true, collectedAt: 10 },
+      { id: 'duplicate', title: '重複', dueDate: '2026-11-05' },
+      { id: 'bad/id', title: '不合法' },
+      { id: 'other', title: '第二件', dueDate: '2026-02-30' },
+    ],
+  });
+  expect(next.parcels).toHaveLength(3);
+  expect(next.parcels[2].dueDate).toBe('');
+  expect(sortedDormParcels(next).map((item) => item.id)).toEqual(['a', 'other', 'duplicate']);
+  expect(normalizeDormWorkspace({
+    parcels: Array.from({ length: DORM_PARCEL_LIMIT + 4 }, (_, n) => ({
+      id: 'parcel_' + n, title: '包裹 ' + n,
+    })),
+  }).parcels).toHaveLength(DORM_PARCEL_LIMIT);
 });
