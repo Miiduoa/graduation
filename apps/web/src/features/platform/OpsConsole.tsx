@@ -26,8 +26,8 @@ import {
   accountReturnHref,
   adminLoginHref,
   currentPageReturnPath,
-  isOpsTab,
   OPS_PATH,
+  readOpsTab,
   SCHOOL_REVIEW_PATH,
   type OpsTab,
 } from './constants';
@@ -45,10 +45,7 @@ const tabs: Array<[OpsTab, string]> = [
 
 function readTab(): OpsTab {
   if (typeof window === 'undefined') return 'schools';
-  const queryTab = new URLSearchParams(window.location.search).get('tab');
-  if (isOpsTab(queryTab)) return queryTab;
-  const hash = window.location.hash.replace(/^#/, '');
-  return isOpsTab(hash) ? hash : 'schools';
+  return readOpsTab(window.location.search, window.location.hash);
 }
 
 export function OpsConsole() {

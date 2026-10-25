@@ -1,3 +1,5 @@
+import { collapseInternalPathHash, currentReturnPath } from '@/lib/navigation';
+
 export const CLASS_HONESTY_STORAGE_KEY = 'nuni-class-honesty-banner';
 export const CLASS_HONESTY_TEXT =
   '這是課班空間：可開班、邀請、課堂簽到與作業。不是學校正式學籍，也不是正式請假、校發證件或校內點餐。';
@@ -12,6 +14,18 @@ export type OpsTab = (typeof OPS_TABS)[number];
 
 export function isOpsTab(value: string | null | undefined): value is OpsTab {
   return !!value && (OPS_TABS as readonly string[]).includes(value);
+}
+
+export function readOpsTab(
+  search: string | null | undefined,
+  hash: string | null | undefined,
+): OpsTab {
+  const queryTab = new URLSearchParams((search || '').replace(/^\?/, '')).get('tab');
+  if (isOpsTab(queryTab)) return queryTab;
+  const raw = hash || '';
+  const withHash = !raw || raw.startsWith('#') ? raw : `#${raw}`;
+  const fragment = collapseInternalPathHash(withHash).replace(/^#/, '');
+  return isOpsTab(fragment) ? fragment : 'schools';
 }
 
 export const APPROVE_SCHOOL_REASON = '資料齊全，先建檔未開放註冊。';
@@ -29,10 +43,17 @@ export function accountReturnHref(path: string): string {
 }
 
 export function adminLoginHref(path: string): string {
-  return `/admin/login?returnUrl=${encodeURIComponent(path)}`;
+  const destination = collapseInternalPathHash(path);
+  const href = `/admin/login?returnUrl=${encodeURIComponent(destination)}`;
+  // Next.js <Link> keeps the current document fragment when the target has none.
+  // Encoded %23 in returnUrl is not a fragment, so end with # to replace it.
+  return destination.includes('#') ? `${href}#` : href;
 }
 
 export function currentPageReturnPath(fallback: string): string {
   if (typeof window === 'undefined') return fallback;
-  return `${window.location.pathname}${window.location.search}${window.location.hash}` || fallback;
+  return (
+    currentReturnPath(window.location.pathname, window.location.search, window.location.hash) ||
+    fallback
+  );
 }

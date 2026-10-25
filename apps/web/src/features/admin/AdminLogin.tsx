@@ -9,6 +9,7 @@ import { Input } from '@/components/ui/Input';
 import { Button } from '@/components/ui/Button';
 import { useNuniSession } from '@/features/nuni/Session';
 import { adminLoginReturnPath } from '@/app/auth/account/legacyLogin';
+import { navigateAfterLogin } from '@/lib/navigation';
 import { useAdminMutation } from './hooks';
 import { adminError } from './api';
 import common from '@/app/servicePages.module.css';
@@ -31,7 +32,7 @@ export function AdminLogin() {
   async function authenticated() {
     setCompleting(true);
     await auth.refresh();
-    if (mounted.current) router.replace(destination);
+    if (mounted.current) navigateAfterLogin((href) => router.replace(href), destination);
   }
   return (
     <SiteShell
@@ -167,7 +168,11 @@ function LoginForm({
         <p>使用 Google 帳號登入，登入後會確認平台管理權限並返回管理台。</p>
         <Link
           className={styles.link}
-          href={`/classroom/login?returnUrl=${encodeURIComponent(destination)}`}
+          href={
+            destination.includes('#')
+              ? `/classroom/login?returnUrl=${encodeURIComponent(destination)}#`
+              : `/classroom/login?returnUrl=${encodeURIComponent(destination)}`
+          }
         >
           使用 Google 登入
         </Link>
