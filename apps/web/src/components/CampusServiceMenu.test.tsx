@@ -409,3 +409,14 @@ it('clears a completed search immediately before a route change can remove the d
   expect((screen.getByRole('searchbox', { name: '搜尋服務' }) as HTMLInputElement).value).toBe('');
   expect(screen.getByRole('link', { name: '課表' })).toBeTruthy();
 });
+
+
+it('opens a keyboard-dismissible voice AI entry without leaving the current service', () => {
+  const view = render(<AppHeader />);
+  fireEvent.click(view.getByRole('button', { name: '開啟校園語音 AI' }));
+  const dialog = view.getByRole('dialog', { name: '校園語音與 AI 快速操作' });
+  expect(dialog).toBeTruthy();
+  expect(view.getByRole('heading', { name: '說出想做的事，直接找到入口。' })).toBeTruthy();
+  fireEvent.keyDown(dialog, { key: 'Escape' });
+  expect(view.queryByRole('dialog')).toBeNull();
+});

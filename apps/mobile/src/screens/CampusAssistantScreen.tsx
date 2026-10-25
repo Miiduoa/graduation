@@ -7,6 +7,8 @@ import { useAuth } from '../state/auth';
 import { useSchool } from '../state/school';
 import { askCampusAssistant, type CampusAssistantMessage } from '../features/campusAssistant';
 import type { ServiceScreenProps } from './UnavailableFeatureScreen';
+import { safeNavigate } from '../utils/safeNavigate';
+import { getMobileQuickActions } from '../services/quickCampusActions';
 
 export function CampusAssistantScreen({ navigation, route }: ServiceScreenProps) {
   useSyncExternalStore(subscribeToTheme, getThemeVersion, getThemeVersion);
@@ -54,6 +56,7 @@ function AssistantConversation({
   const mounted = useRef(true);
   const lock = useRef(false);
   const publicServices = resolveSchoolPublicServices(schoolId);
+  const quickActions = getMobileQuickActions(draft);
   useEffect(() => {
     mounted.current = true;
     return () => {
@@ -116,6 +119,27 @@ function AssistantConversation({
           </View>
         ) : null}
       </AICard>
+      {uid && messages.length === 0 && !draft.trim() ? (
+        <AICard title="一點就能開始">
+          <View style={{ gap: 10 }}>
+            <Text style={{ color: aiTokens.muted, lineHeight: 22 }}>
+              不需要想完整的提問。點一個問題，確認文字後再送出。
+            </Text>
+            {[
+              '今天有哪些作業要處理？',
+              '圖書館怎麼走？',
+              '這週有什麼校園活動？',
+            ].map((question) => (
+              <AIButton
+                key={question}
+                label={question}
+                variant="ghost"
+                onPress={() => setDraft(question)}
+              />
+            ))}
+          </View>
+        </AICard>
+      ) : null}
       {messages.map((message, index) => (
         <AICard key={index} title={message.role === 'user' ? '你的問題' : '校園助理'}>
           <Text selectable style={{ color: aiTokens.text, lineHeight: 25 }}>
@@ -131,6 +155,9 @@ function AssistantConversation({
       {uid ? (
         <AICard title="想查詢什麼？">
           <View style={{ gap: 12 }}>
+            <Text style={{ color: aiTokens.muted, lineHeight: 21, fontSize: 13 }}>
+              可以使用手機鍵盤的麥克風口述；語音辨識結果會先成為可編輯的文字，不會自動詢問或提交。
+            </Text>
             <TextInput
               accessibilityLabel="詢問校園助理"
               value={draft}
@@ -155,6 +182,28 @@ function AssistantConversation({
                 textAlignVertical: 'top',
               }}
             />
+            {quickActions.length > 0 && typeof navigation?.navigate === 'function' ? (
+              <View style={{ gap: 10, padding: 12, borderRadius: 12, backgroundColor: aiTokens.panel }}>
+                <Text style={{ color: aiTokens.text, fontWeight: '700' }}>
+                  也可以直接使用對應服務
+                </Text>
+                {quickActions.map((action) => (
+                  <AIButton
+                    key={action.destination}
+                    label={'前往' + action.label}
+                    variant="ghost"
+                    disabled={busy}
+                    onPress={() => {
+                      if (!current()) return;
+                      safeNavigate(navigation, action.route);
+                    }}
+                  />
+                ))}
+                <Text style={{ color: aiTokens.muted, fontSize: 12 }}>
+                  只是開啟頁面，提交或付款仍要自行確認。
+                </Text>
+              </View>
+            ) : null}
             {error ? (
               <Text accessibilityRole="alert" style={{ color: aiTokens.danger }}>
                 {error}

@@ -151,6 +151,14 @@
     border-color 160ms ease;
 }
 
+.account > .quickSearch {
+  gap: 7px;
+  background: var(--panel);
+  border-color: var(--border);
+  border-radius: 11px;
+  font-weight: 600;
+}
+
 .account > .login {
   border-color: var(--brand);
   background: var(--brand);
@@ -333,6 +341,14 @@
     padding-inline: 10px;
   }
 
+  .account > .quickSearch {
+    min-width: 44px;
+    padding-inline: 10px;
+  }
+  .quickSearch span {
+    display: none;
+  }
+
   .account > [role='status'] {
     max-width: 65px;
     font-size: 11px;
@@ -366,4 +382,62 @@
     animation: none !important;
     transition: none !important;
   }
+}
+
+.voiceTrigger {
+  gap: 7px;
+  border-color: var(--brand) !important;
+  background: var(--accent-soft) !important;
+  color: var(--brand) !important;
+  font-weight: 650 !important;
+  border-radius: 11px !important;
+}
+.voicePanel {
+  position: fixed;
+  z-index: 90;
+  width: min(440px, calc(100vw - 28px));
+  max-height: min(660px, calc(100dvh - 115px));
+  overflow-y: auto;
+  top: 78px;
+  right: max(14px, env(safe-area-inset-right, 0px));
+  border: 1px solid var(--border);
+  border-radius: 18px;
+  padding: 12px;
+  background: var(--bg);
+  box-shadow: 0 24px 70px color-mix(in srgb, var(--text) 17%, transparent);
+}
+.voicePanelHeading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 4px 4px 12px;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text);
+}
+.voicePanelHeading button {
+  min-height: 40px;
+  padding: 7px 12px;
+  border: 1px solid var(--border);
+  background: var(--panel);
+  color: var(--text);
+  border-radius: 10px;
+  font: inherit;
+  cursor: pointer;
+}
+.voicePanel:focus { outline: none; }
+@media (max-width: 760px) {
+  .voiceTrigger span { display: none; }
+  .voicePanel {
+    top: auto;
+    bottom: calc(var(--mobile-nav-offset, 72px) + 10px);
+    right: 12px;
+    left: 12px;
+    width: auto;
+    max-height: calc(100dvh - var(--mobile-nav-offset, 72px) - 85px);
+  }
+}
+@media (max-width: 360px) {
+  .account > .voiceTrigger { min-width: 40px; padding-inline: 7px; }
 }

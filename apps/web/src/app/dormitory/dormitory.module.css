@@ -758,3 +758,25 @@
   .hallHeader { padding: 18px 14px 12px; }
   .feeTable th:first-child { padding-left: 14px; }
 }
+
+/* Voice-assisted maintenance note: a local, editable draft, not an official report. */
+.voiceRepair {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px 20px;
+  padding: 16px;
+  margin: 10px 0 18px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--panel);
+}
+.voiceRepair > div:first-child { flex: 1 1 250px; }
+.voiceRepair strong { font-size: 14px; }
+.voiceRepair p {
+  margin: 6px 0 0;
+  color: var(--muted);
+  line-height: 1.6;
+  font-size: 13px;
+}

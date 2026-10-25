@@ -134,3 +134,20 @@ test('dormitory opens its own workspace and repair search finds it directly', ()
     fallbackMessage: '「宿舍」目前無法開啟。',
   });
 });
+
+test('natural-language directions offer the actual map rather than a dead-end empty search', () => {
+  const navigation = { navigate: jest.fn() };
+  const view = render(<CampusHubScreen navigation={navigation} />);
+  fireEvent.changeText(view.getByPlaceholderText('搜尋地點或服務'), '圖書館怎麼走');
+  fireEvent.press(view.getByLabelText('依需求前往校園地圖'));
+  expect(safeNavigate).toHaveBeenCalledWith(navigation, 'MapV2', undefined, {
+    fallbackMessage: '目前無法開啟對應服務，請稍後重試。',
+  });
+});
+
+test('when the ordinary service list matches, it does not duplicate the same destination', () => {
+  const view = render(<CampusHubScreen />);
+  fireEvent.changeText(view.getByPlaceholderText('搜尋地點或服務'), '宿舍');
+  expect(view.getAllByText('宿舍')).toHaveLength(1);
+  expect(view.queryByLabelText('依需求前往宿舍')).toBeNull();
+});

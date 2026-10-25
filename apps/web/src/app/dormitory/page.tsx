@@ -30,6 +30,8 @@ import {
 import { resolveDormitoryPublicGuide } from '@campus/shared/src/dormitoryGuide';
 import { useAuth } from '@/components/AuthGuard';
 import { SiteShell } from '@/components/SiteShell';
+import { VoiceDictationButton } from '@/components/VoiceDictationButton';
+import { parseDormRepairDictation } from '@/lib/dormRepairDictation';
 import { useOptionalNuniSession } from '@/features/nuni/Session';
 import { useCampusBrowseContext } from '@/lib/useCampusBrowseContext';
 import styles from './dormitory.module.css';
@@ -476,6 +478,27 @@ function DormitoryWorkspace({ scope, schoolId, schoolName, guest }: {
             {editorOpen && (
               <form className={styles.editor} aria-label="設備問題表單" onSubmit={(e) => { e.preventDefault(); saveRepair(data); }}>
                 <h4>{editingId ? '編輯問題' : '新增問題'}</h4>
+                <div className={styles.voiceRepair}>
+                  <div>
+                    <strong>不想逐欄輸入？</strong>
+                    <p>直接說明故障狀況，先產生可以修改的草稿。確認後才儲存個人紀錄，不會自動向校方通報。</p>
+                  </div>
+                  <VoiceDictationButton
+                    onTranscript={(speech) => {
+                      const suggestion = parseDormRepairDictation(speech);
+                      if (!suggestion) return;
+                      setRepairDraft((previous) => ({
+                        ...previous,
+                        title: suggestion.title,
+                        description: suggestion.description,
+                        location: suggestion.location || previous.location,
+                        category: suggestion.category,
+                      }));
+                      setSaveError('');
+                      setNotice('已填入語音草稿，請核對名稱、類別、位置與狀況後再儲存。');
+                    }}
+                  />
+                </div>
                 <div className={styles.formGrid}>
                   <label>問題名稱 *<input required minLength={2} maxLength={90} value={repairDraft.title} onChange={(e) => setRepairDraft({ ...repairDraft, title: e.target.value })} placeholder="例如：浴室水龍頭持續滴水" /></label>
                   <label>類別<select value={repairDraft.category} onChange={(e) => setRepairDraft({ ...repairDraft, category: e.target.value as DormRepairCategory })}>{Object.entries(DORM_REPAIR_CATEGORIES).map(([key, label]) => <option value={key} key={key}>{label}</option>)}</select></label>
