@@ -118,8 +118,8 @@ function LeaveWorkspace({ uid, schoolId, schoolName }: {
   }, [load]);
 
   const suggested = useMemo(() =>
-    suggestedLeaveCourses(timetable || [], startDate, endDate),
-  [timetable, startDate, endDate]);
+    suggestedLeaveCourses(timetable || [], startDate, endDate, period, schoolId),
+  [timetable, startDate, endDate, period, schoolId]);
   const selectedIds = selection ?? suggested.map((item) => item.id);
   const suggestedSet = new Set(suggested.map((item) => item.id));
   const available = useMemo(() => {
@@ -277,7 +277,7 @@ function LeaveWorkspace({ uid, schoolId, schoolName }: {
                 {!datesOk && <p role="alert" className={styles.invalid}>結束日不可早於開始日，一次最多 31 天。</p>}
                 <div className={styles.periods} role="group" aria-label="請假時段">
                   {LEAVE_PERIODS.map((item) => (
-                    <button key={item.id} type="button" aria-pressed={period === item.id} onClick={() => setPeriod(item.id)}>{item.label}</button>
+                    <button key={item.id} type="button" aria-pressed={period === item.id} onClick={() => { setPeriod(item.id); setSelection(null); }}>{item.label}</button>
                   ))}
                 </div>
               </fieldset>
