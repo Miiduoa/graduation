@@ -85,6 +85,10 @@ export function AdminWorkspace() {
 function Workspace({ context, suspended }: { context: string; suspended: boolean }) {
   const [location, setLocation] = useState<AdminLocation>(readAdminLocation);
   const locationRef = useRef(location);
+  const draftRef = useRef<{ tenantId: string | null; dirty: boolean }>({
+    tenantId: null,
+    dirty: false,
+  });
   useLayoutEffect(() => {
     locationRef.current = location;
   }, [location]);
@@ -97,6 +101,17 @@ function Workspace({ context, suspended }: { context: string; suspended: boolean
     const sync = () => {
       const parsed = tryParseAdminHash(window.location.hash);
       if (parsed) {
+        if (
+          draftRef.current.dirty &&
+          locationRef.current.section === 'schools' &&
+          (parsed.section !== 'schools' || parsed.schoolId !== locationRef.current.schoolId)
+        ) {
+          if (!window.confirm('這所學校有尚未儲存的資料。確定要離開並捨棄變更嗎？')) {
+            writeAdminLocation(locationRef.current, 'replace');
+            return;
+          }
+          draftRef.current = { tenantId: null, dirty: false };
+        }
         setLocation(parsed);
         return;
       }
@@ -111,7 +126,28 @@ function Workspace({ context, suspended }: { context: string; suspended: boolean
     };
   }, []);
 
+  useEffect(() => {
+    const preventAccidentalExit = (event: BeforeUnloadEvent) => {
+      if (!draftRef.current.dirty) return;
+      event.preventDefault();
+      event.returnValue = '';
+    };
+    window.addEventListener('beforeunload', preventAccidentalExit);
+    return () => window.removeEventListener('beforeunload', preventAccidentalExit);
+  }, []);
+
   const go = useCallback((patch: Partial<AdminLocation>, mode: 'push' | 'replace' = 'push') => {
+    const previousLocation = locationRef.current;
+    if (
+      draftRef.current.dirty &&
+      previousLocation.section === 'schools' &&
+      ((patch.section !== undefined && patch.section !== 'schools') ||
+        (patch.schoolId !== undefined && patch.schoolId !== previousLocation.schoolId))
+    ) {
+      if (!window.confirm('這所學校有尚未儲存的資料。確定要離開並捨棄變更嗎？'))
+        return;
+      draftRef.current = { tenantId: null, dirty: false };
+    }
     setLocation((previous) => {
       const next: AdminLocation = {
         ...previous,
@@ -220,6 +256,9 @@ function Workspace({ context, suspended }: { context: string; suspended: boolean
                 lifecycle={location.schoolLifecycle}
                 onSelect={(schoolId) => go({ section: 'schools', schoolId })}
                 onPeople={(schoolId) => go({ section: 'people', schoolId })}
+                onDraftChange={(tenantId, dirty) => {
+                  draftRef.current = { tenantId, dirty };
+                }}
                 onSearch={(schoolQuery) =>
                   go({ section: 'schools', schoolQuery, schoolId: null }, 'replace')
                 }

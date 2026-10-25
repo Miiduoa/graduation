@@ -41,6 +41,7 @@ export function AdminSchools({
   lifecycle,
   onSelect,
   onPeople,
+  onDraftChange,
   onSearch,
   onLifecycle,
 }: {
@@ -51,6 +52,7 @@ export function AdminSchools({
   lifecycle: SchoolLifecycleFilter;
   onSelect: (tenantId: string | null) => void;
   onPeople?: (tenantId: string) => void;
+  onDraftChange?: (tenantId: string, dirty: boolean) => void;
   onSearch: (query: string) => void;
   onLifecycle: (value: SchoolLifecycleFilter) => void;
 }) {
@@ -93,6 +95,7 @@ export function AdminSchools({
             onChanged={resource.reload}
             onClose={() => onSelect(null)}
             onPeople={onPeople}
+            onDraftChange={onDraftChange}
           />
         </>
       ) : (
@@ -215,6 +218,7 @@ function SchoolDetail({
   onChanged,
   onClose,
   onPeople,
+  onDraftChange,
 }: {
   school: AdminSchool;
   context: string;
@@ -222,6 +226,7 @@ function SchoolDetail({
   onChanged: () => void;
   onClose: () => void;
   onPeople?: (tenantId: string) => void;
+  onDraftChange?: (tenantId: string, dirty: boolean) => void;
 }) {
   const tenantId = school.tenantId!;
   const base = `schools/${encodeURIComponent(tenantId)}`;
@@ -232,6 +237,19 @@ function SchoolDetail({
   const [displayName, setDisplayName] = useState(school.displayName);
   const [description, setDescription] = useState(school.description);
   const [modules, setModules] = useState(school.modules);
+  const [savedProfile, setSavedProfile] = useState({
+    displayName: school.displayName,
+    description: school.description,
+  });
+  const [savedModules, setSavedModules] = useState(school.modules);
+  const profileDirty =
+    displayName !== savedProfile.displayName || description !== savedProfile.description;
+  const modulesDirty = moduleIds.some((id) => modules[id] !== savedModules[id]);
+  const hasUnsavedChanges = profileDirty || modulesDirty;
+  useEffect(() => {
+    onDraftChange?.(tenantId, hasUnsavedChanges);
+    return () => onDraftChange?.(tenantId, false);
+  }, [tenantId, hasUnsavedChanges, onDraftChange]);
   const [action, setAction] = useState<'open' | 'suspend' | null>(null);
   const [reason, setReason] = useState('');
   const [notice, setNotice] = useState('');
@@ -264,7 +282,8 @@ function SchoolDetail({
     }
   }
   async function save(kind: 'profile' | 'modules') {
-    if (!stillCanEdit()) return;
+    if (!stillCanEdit() || mutation.busy || (kind === 'profile' ? !profileDirty : !modulesDirty))
+      return;
     setNotice('');
     setResponseError('');
     const result = await mutation.run(
@@ -277,6 +296,14 @@ function SchoolDetail({
     try {
       const updated = parseSchool(result);
       if (updated.tenantId !== tenantId) throw new Error('Unexpected school response');
+      if (kind === 'profile') {
+        setSavedProfile({ displayName: updated.displayName, description: updated.description });
+        setDisplayName(updated.displayName);
+        setDescription(updated.description);
+      } else {
+        setSavedModules(updated.modules);
+        setModules(updated.modules);
+      }
       setNotice(kind === 'profile' ? '學校資料已儲存。' : '學校服務設定已儲存。');
       onChanged();
     } catch (error) {
@@ -327,7 +354,7 @@ function SchoolDetail({
                 </Button>
               )}
               <Button onClick={onClose} disabled={mutation.busy}>
-                收起學校設定
+                返回學校列表
               </Button>
             </div>
           </div>
@@ -339,6 +366,11 @@ function SchoolDetail({
           {notice && (
             <p role="status" className={styles.success}>
               {notice}
+            </p>
+          )}
+          {hasUnsavedChanges && (
+            <p role="status" className={styles.notice}>
+              有尚未儲存的變更。離開此校設定前，請先儲存或捨棄草稿。
             </p>
           )}
           {school.lifecycle === 'open' && (
@@ -401,9 +433,23 @@ function SchoolDetail({
                   value={description}
                   onChange={(event) => setDescription(event.target.value)}
                 />
-                <Button type="submit" disabled={!displayName.trim()}>
-                  儲存學校資料
-                </Button>
+                <div className={styles.actions}>
+                  <Button type="submit" disabled={!displayName.trim() || !profileDirty}>
+                    儲存學校資料
+                  </Button>
+                  {profileDirty && (
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      onClick={() => {
+                        setDisplayName(savedProfile.displayName);
+                        setDescription(savedProfile.description);
+                      }}
+                    >
+                      捨棄學校資料變更
+                    </Button>
+                  )}
+                </div>
               </fieldset>
             </form>
             <form
@@ -425,7 +471,14 @@ function SchoolDetail({
                     {moduleLabels[id]}
                   </label>
                 ))}
-                <Button type="submit">儲存服務設定</Button>
+                <div className={styles.actions}>
+                  <Button type="submit" disabled={!modulesDirty}>儲存服務設定</Button>
+                  {modulesDirty && (
+                    <Button type="button" variant="ghost" onClick={() => setModules(savedModules)}>
+                      捨棄服務變更
+                    </Button>
+                  )}
+                </div>
               </fieldset>
             </form>
           </div>
