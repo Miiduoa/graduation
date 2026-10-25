@@ -29,11 +29,22 @@ describe('natural-language campus shortcuts', () => {
   });
 });
 
-it('matches the complete Web service catalog without inventing destinations', () => {
-  expect(CAMPUS_SERVICES).toHaveLength(33);
-  expect(new Set(CAMPUS_SERVICES.map(row => row.href))).toEqual(
-    new Set(CAMPUS_QUICK_DESTINATIONS),
-  );
+it('keeps 33 navigable voice shortcuts inside the expanded service catalog', () => {
+  const serviceRoutes = CAMPUS_SERVICES.map(row => row.href);
+  const serviceSet = new Set(serviceRoutes);
+  const shortcutSet = new Set(CAMPUS_QUICK_DESTINATIONS);
+
+  expect(serviceRoutes.length).toBe(serviceSet.size);
+  expect(shortcutSet.size).toBe(CAMPUS_QUICK_DESTINATIONS.length);
+  expect([...shortcutSet].every(href => serviceSet.has(href))).toBe(true);
+
+  // The leave workflow added these two routes to main after the original voice
+  // feature was developed. They are not part of the voice allowlist until the
+  // related authenticated interaction and review permissions are integrated.
+  expect(serviceRoutes.filter(href => !shortcutSet.has(href as (typeof CAMPUS_QUICK_DESTINATIONS)[number]))).toEqual([
+    '/leave',
+    '/leave/review',
+  ]);
 });
 
 it.each([
