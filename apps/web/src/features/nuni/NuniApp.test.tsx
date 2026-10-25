@@ -286,3 +286,82 @@ it('hydrates a logged-in course hash against the server loading markup', async (
     container.remove();
   }
 });
+
+it('restores a named panel from the address and retains the course-list search when returning', async () => {
+  window.history.replaceState(
+    {},
+    '',
+    `${mocks.pathname}?campus=tw-pu&q=design&courses=studying&task=pending&view=materials`,
+  );
+  render(<NuniApp />);
+  await screen.findByRole('heading', { name: '設計專題' });
+  expect(screen.getByRole('tab', { name: '教材' }).getAttribute('aria-selected')).toBe('true');
+  const returnUrl = new URL(
+    screen.getByRole('link', { name: '我的課程' }).getAttribute('href')!,
+    'https://campus.local',
+  );
+  expect(returnUrl.pathname).toBe('/classroom');
+  expect(Object.fromEntries(returnUrl.searchParams)).toEqual({
+    q: 'design',
+    courses: 'studying',
+    task: 'pending',
+    campus: 'tw-pu',
+  });
+  fireEvent.click(screen.getByRole('tab', { name: '作業' }));
+  expect(new URLSearchParams(window.location.search).get('view')).toBe('assignments');
+  expect(new URLSearchParams(window.location.search).get('q')).toBe('design');
+  expect(new URLSearchParams(window.location.search).get('campus')).toBe('tw-pu');
+});
+
+it('allows an explicit panel change after a task link and restores panels through browser history', async () => {
+  const linked = `${mocks.pathname}?campus=tw-pu&view=materials#assignment-cwa_11111111-1111-4111-8111-111111111111`;
+  window.history.replaceState({}, '', linked);
+  render(<NuniApp />);
+  await screen.findByRole('heading', { name: '設計專題' });
+  expect(screen.getByRole('tab', { name: '作業' }).getAttribute('aria-selected')).toBe('true');
+  fireEvent.click(screen.getByRole('tab', { name: '教材' }));
+  expect(screen.getByRole('tab', { name: '教材' }).getAttribute('aria-selected')).toBe('true');
+  expect(window.location.hash).toBe('');
+  fireEvent.change(screen.getByLabelText('教材草稿'), { target: { value: '還在閱讀與整理' } });
+  act(() => {
+    window.history.replaceState({}, '', linked);
+    window.dispatchEvent(new PopStateEvent('popstate'));
+  });
+  expect(screen.getByRole('tab', { name: '作業' }).getAttribute('aria-selected')).toBe('true');
+  act(() => {
+    window.history.replaceState({}, '', `${mocks.pathname}?campus=tw-pu&view=materials`);
+    window.dispatchEvent(new PopStateEvent('popstate'));
+  });
+  expect(screen.getByRole('tab', { name: '教材' }).getAttribute('aria-selected')).toBe('true');
+  expect((screen.getByLabelText('教材草稿') as HTMLInputElement).value).toBe('還在閱讀與整理');
+});
+
+it('preserves an unrelated fragment while changing a panel and ignores invalid panel values', async () => {
+  window.history.replaceState({}, '', `${mocks.pathname}?campus=tw-pu&view=invalid#week`);
+  render(<NuniApp />);
+  await screen.findByRole('heading', { name: '設計專題' });
+  expect(screen.getByRole('tab', { name: '學習路徑' }).getAttribute('aria-selected')).toBe('true');
+  fireEvent.click(screen.getByRole('tab', { name: '教材' }));
+  expect(window.location.hash).toBe('#week');
+  expect(new URLSearchParams(window.location.search).get('view')).toBe('materials');
+});
+
+it('retains the selected agenda course when returning from an assignment link', async () => {
+  window.history.replaceState(
+    {},
+    '',
+    `${mocks.pathname}?campus=tw-pu&task=pending&taskCourse=${workspaceId}&view=assignments#assignment-cwa_11111111-1111-4111-8111-111111111111`,
+  );
+  render(<NuniApp />);
+  await screen.findByRole('heading', { name: '設計專題' });
+  const href = screen.getByRole('link', { name: '我的課程' }).getAttribute('href')!;
+  const back = new URL(href, 'https://campus.local');
+  expect(back.pathname).toBe('/classroom');
+  expect(back.searchParams.get('taskCourse')).toBe(workspaceId);
+  expect(back.searchParams.get('task')).toBe('pending');
+  expect(back.searchParams.get('campus')).toBe('tw-pu');
+  expect(back.searchParams.has('view')).toBe(false);
+  expect(back.hash).toBe('');
+  fireEvent.click(screen.getByRole('tab', { name: '教材' }));
+  expect(new URLSearchParams(window.location.search).get('taskCourse')).toBe(workspaceId);
+});

@@ -128,7 +128,7 @@ it('skips a course without permission and still searches the rest', async () => 
   render(<CourseMaterialSearch />);
   fireEvent.change(screen.getByLabelText('搜尋教材'), { target: { value: '主鍵' } });
   await screen.findByRole('link', { name: /關聯與主鍵/ });
-  expect(screen.getByText(/有 1 門課目前沒有權限/)).toBeTruthy();
+  expect(screen.getByText(/有 1 門課目前無法查看，搜尋結果不包含這些課程/)).toBeTruthy();
 });
 
 it('reuses today-page materials and does not fetch those courses again', async () => {
@@ -292,7 +292,7 @@ it('restarts search after an A→B→A cursor cycle without faking a complete ca
   fireEvent.click(screen.getByRole('button', { name: '繼續載入較早教材' }));
   await screen.findByRole('link', { name: /中間頁主鍵/ });
   fireEvent.click(screen.getByRole('button', { name: '繼續載入較早教材' }));
-  expect((await screen.findByRole('alert')).textContent).toMatch(/重複游標/);
+  expect((await screen.findByRole('alert')).textContent).toMatch(/教材暫時無法繼續載入/);
   expect(screen.queryByRole('button', { name: '繼續載入較早教材' })).toBeNull();
   expect(calls).toEqual([undefined, 'cursor-a', 'cursor-b']);
   fireEvent.click(screen.getByRole('button', { name: '重新讀取教材' }));

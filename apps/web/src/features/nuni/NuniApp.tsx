@@ -10,7 +10,12 @@ import {
   type NuniUnit,
   type NuniWorkspace,
 } from '@campus/shared/src/nuni';
-import { parseTaipeiInstant, taipeiParts, taipeiWallTimeToIso } from '@campus/shared/src/taipeiTime';
+import {
+  formatTaipeiDateTime,
+  parseTaipeiInstant,
+  taipeiParts,
+  taipeiWallTimeToIso,
+} from '@campus/shared/src/taipeiTime';
 import { landOnCourseWork } from '@/lib/courseWorkLanding';
 import { AppHeader } from '@/components/AppHeader';
 import { NuniSignIn } from '@/components/NuniSignIn';
@@ -28,6 +33,9 @@ import { CourseLearningPath } from './CourseLearningPath';
 import { CourseUnitSelect } from './CourseUnitSelect';
 import { selectCourseUnit } from './courseOutline';
 import styles from './NuniApp.module.css';
+import workspaceStyles from './CourseWorkspace.module.css';
+import { useCoursePanel } from './useCoursePanel';
+import { prioritizeCourseAssignments } from './courseAssignmentDiscovery';
 
 export function NuniHeader() {
   return <AppHeader />;
@@ -51,7 +59,10 @@ function weekAssignments(assignments: NuniAssignment[], now = new Date()): NuniA
     if (due === null) return false;
     const dueDay = taipeiParts(due);
     if (!dueDay) return false;
-    return Date.UTC(dueDay.year, dueDay.month - 1, dueDay.day) >= start && Date.UTC(dueDay.year, dueDay.month - 1, dueDay.day) < end;
+    return (
+      Date.UTC(dueDay.year, dueDay.month - 1, dueDay.day) >= start &&
+      Date.UTC(dueDay.year, dueDay.month - 1, dueDay.day) < end
+    );
   });
 }
 
@@ -77,19 +88,13 @@ function Workspace({ id }: { id: string }) {
   const [error, setError] = useState('');
   const [epoch, setEpoch] = useState(0);
   const [code, setCode] = useState('');
-  const [tab, setTab] = useState<'outline' | 'materials' | 'assignments' | 'quizzes'>('outline');
+  const { panel: tab, navigate: setTab, courseListHref } = useCoursePanel();
   const [units, setUnits] = useState<NuniUnit[] | null>(null);
   const [unitsError, setUnitsError] = useState('');
   const [unitsEpoch, setUnitsEpoch] = useState(0);
   const [outlineVersion, setOutlineVersion] = useState(0);
   const refreshOutline = () => setOutlineVersion((value) => value + 1);
   const weekHash = hash.replace(/^#/, '').split('#')[0] === 'week';
-  useEffect(() => {
-    // A task link must open its panel, including browser back/forward in the same course.
-    if (hash.startsWith('#quiz-')) setTab('quizzes');
-    else if (hash.startsWith('#assignment-')) setTab('assignments');
-    else if (hash.startsWith('#material-')) setTab('materials');
-  }, [hash]);
   useEffect(() => {
     if (!weekHash || !data) return;
     const frame = window.requestAnimationFrame(() => {
@@ -171,7 +176,9 @@ function Workspace({ id }: { id: string }) {
   const acceptUnit = (unit: NuniUnit) => {
     if (unit.workspaceId !== id) return;
     ++unitGeneration.current;
-    setUnits((current) => current ? [...current.filter((entry) => entry.id !== unit.id), unit] : current);
+    setUnits((current) =>
+      current ? [...current.filter((entry) => entry.id !== unit.id), unit] : current,
+    );
   };
   if (error && !data)
     return (
@@ -184,6 +191,13 @@ function Workspace({ id }: { id: string }) {
     );
   if (!data) return <p role="status">正在讀取課程內容…</p>;
   const teacher = data.workspace.memberRole !== 'student';
+  const pending =
+    data.workspace.state === 'active'
+      ? data.assignments.filter((item) => item.state === 'open' && !item.mySubmission)
+      : [];
+  const nextAssignment = prioritizeCourseAssignments(pending, data.workspace)[0];
+  const submitted = data.assignments.filter((item) => !!item.mySubmission).length;
+  const weekCount = weekAssignments(data.assignments).length;
   const acceptAssignment = (assignment: NuniAssignment) => {
     refreshOutline();
     setData((current) =>
@@ -199,19 +213,26 @@ function Workspace({ id }: { id: string }) {
   };
   return (
     <>
-      <Link href="/classroom" className={styles.muted}>
-        ← 我的課程
+      <Link href={courseListHref} className={workspaceStyles.backLink}>
+        <span aria-hidden>←</span> 我的課程
       </Link>
-      <div className={styles.heading}>
+      <div className={`${styles.heading} ${workspaceStyles.courseHeading}`}>
         <div>
-          <p className={styles.eyebrow}>{courseRoleLabels[data.workspace.memberRole]}</p>
+          <div className={workspaceStyles.context}>
+            <span className={workspaceStyles.role}>
+              {courseRoleLabels[data.workspace.memberRole]}
+            </span>
+            {data.workspace.state === 'archived' && (
+              <span className={workspaceStyles.archived}>已封存</span>
+            )}
+          </div>
           <h1>{data.workspace.title}</h1>
           <p className={styles.muted}>
             {data.workspace.memberRole === 'owner-teacher'
               ? '你負責這門課，可以邀請學生、發布內容與回覆繳交。'
               : data.workspace.memberRole === 'co-teacher'
                 ? '你可以發布內容與回覆繳交；邀請學生由課程負責老師處理。'
-                : '查看老師發布的內容、繳交作業，並確認每一次繳交紀錄。'}
+                : '教材、作業和測驗，都在這門課。'}
           </p>
         </div>
         <button
@@ -227,27 +248,74 @@ function Workspace({ id }: { id: string }) {
           {error} 已保留目前內容，可再次更新。
         </p>
       )}
+      {data.assignments.length >= 100 && (
+        <p className={styles.note}>
+          目前已載入 {data.assignments.length} 份作業，較早的內容可能未包含在清單與筆數中。
+        </p>
+      )}
       <section
-        className={styles.panel}
+        className={workspaceStyles.overview}
         id="week"
         tabIndex={-1}
         aria-labelledby="nuni-week-title"
       >
-        <h2 id="nuni-week-title">本週</h2>
-        <p className={styles.muted}>這門課本週到期的作業與評量。</p>
-        {weekAssignments(data.assignments).length ? (
-          <ul>
-            {weekAssignments(data.assignments).map((item) => (
-              <li key={item.id}>
-                <a href={`#assignment-${encodeURIComponent(item.id)}`}>{item.title}</a>
-              </li>
-            ))}
-          </ul>
-        ) : (
-          <p>本週沒有到期的作業。</p>
-        )}
+        <div className={workspaceStyles.overviewTop}>
+          <h2 id="nuni-week-title">作業概況</h2>
+          <button
+            type="button"
+            className={workspaceStyles.textButton}
+            onClick={() => setTab('assignments')}
+          >
+            查看全部作業 <span aria-hidden>↗</span>
+          </button>
+        </div>
+        <dl className={workspaceStyles.metrics}>
+          <div>
+            <dt>{teacher ? '已發布作業' : '待繳作業'}</dt>
+            <dd>{teacher ? data.assignments.length : pending.length}</dd>
+          </div>
+          <div>
+            <dt>{teacher ? '已收到繳交' : '已繳作業'}</dt>
+            <dd>
+              {teacher
+                ? data.assignments.reduce((total, item) => total + item.submissionCount, 0)
+                : submitted}
+            </dd>
+          </div>
+          <div>
+            <dt>本週參考期限</dt>
+            <dd>{weekCount}</dd>
+          </div>
+        </dl>
+        {data.workspace.state === 'archived' ? (
+          <p className={workspaceStyles.overviewNote}>課程已封存，內容與紀錄仍可查看。</p>
+        ) : !teacher && nextAssignment ? (
+          <a
+            className={workspaceStyles.nextTask}
+            href={`#assignment-${encodeURIComponent(nextAssignment.id)}`}
+          >
+            <span className={workspaceStyles.nextLabel}>接著處理</span>
+            <strong>{nextAssignment.title}</strong>
+            <span className={workspaceStyles.nextTime}>
+              {nextAssignment.dueAt
+                ? `參考 ${formatTaipeiDateTime(nextAssignment.dueAt, { seconds: false })}`
+                : '未設定參考期限'}
+            </span>
+            <span className={workspaceStyles.nextArrow} aria-hidden>
+              →
+            </span>
+          </a>
+        ) : !teacher ? (
+          <p className={workspaceStyles.overviewNote}>
+            目前沒有可繳交的待辦作業。測驗進度請到「測驗」查看。
+          </p>
+        ) : null}
       </section>
-      <div className={styles.courseTabs} role="tablist" aria-label="課程內容">
+      <div
+        className={`${styles.courseTabs} ${workspaceStyles.tabs}`}
+        role="tablist"
+        aria-label="課程內容"
+      >
         {(
           [
             ['outline', '學習路徑'],
@@ -304,7 +372,6 @@ function Workspace({ id }: { id: string }) {
             refreshVersion={outlineVersion}
             reloadUnits={reloadUnits}
             onUnitCreated={acceptUnit}
-            onNavigate={setTab}
           />
         </section>
         <section
@@ -329,7 +396,7 @@ function Workspace({ id }: { id: string }) {
           aria-labelledby="tab-assignments"
           hidden={tab !== 'assignments'}
         >
-          <div className={styles.grid}>
+          <div className={teacher ? styles.grid : workspaceStyles.studentWork}>
             <CourseAssignments
               key={`${data.workspace.memberRole}:${data.workspace.state}`}
               assignments={data.assignments}
@@ -337,7 +404,7 @@ function Workspace({ id }: { id: string }) {
               reload={reload}
               onConfirmed={acceptAssignment}
             />
-            <aside>
+            <aside className={!teacher ? workspaceStyles.studentAside : undefined}>
               {teacher && data.workspace.state === 'active' && (
                 <>
                   <details className={`${styles.panel} ${styles.compose}`}>
@@ -428,17 +495,7 @@ function NuniContent() {
         </Link>
       </section>
     );
-  else if (pathname === '/classroom')
-    content = (
-      <>
-        <p>
-          <Link href="/grades?tab=feedback" className={styles.button}>
-            課業成績與回饋
-          </Link>
-        </p>
-        <WorkspaceList key={session.context} />
-      </>
-    );
+  else if (pathname === '/classroom') content = <WorkspaceList key={session.context} />;
   else if (/^\/classroom\/course\/cw_[0-9a-f-]{36}$/.test(pathname))
     content = <Workspace key={`${session.context}:${pathname}`} id={pathname.split('/')[3]} />;
   else
