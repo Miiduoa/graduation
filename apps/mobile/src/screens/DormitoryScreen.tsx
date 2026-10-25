@@ -16,6 +16,7 @@ import {
 import {
   DORM_CHECKLISTS,
   DORM_MILESTONE_LIMIT,
+  DORM_PARCEL_LIMIT,
   DORM_REPAIR_SHORTCUTS,
   DORM_REPAIR_CATEGORIES,
   DORM_REPAIR_STATUSES,
@@ -27,7 +28,9 @@ import {
   localDormDate,
   normalizeDormWorkspace,
   sortedDormMilestones,
+  sortedDormParcels,
   type DormMilestone,
+  type DormParcel,
   type DormRepair,
   type DormRepairCategory,
   type DormRepairStatus,
@@ -41,11 +44,12 @@ import { useSchool } from '../state/school';
 import { useAuth } from '../state/auth';
 import { useOptionalNuniSession } from '../state/nuniSession';
 
-type ViewName = 'home' | 'guide' | 'repairs' | 'dates' | 'checklist' | 'laundry';
+type ViewName = 'home' | 'guide' | 'repairs' | 'parcels' | 'dates' | 'checklist' | 'laundry';
 const NAV: Array<{ id: ViewName; name: string }> = [
   { id: 'home', name: '總覽' },
   { id: 'guide', name: '宿舍指南' },
   { id: 'repairs', name: '設備問題' },
+  { id: 'parcels', name: '包裹領取' },
   { id: 'dates', name: '重要日期' },
   { id: 'checklist', name: '入住退宿' },
   { id: 'laundry', name: '洗衣計時' },
@@ -153,6 +157,11 @@ function DormitoryBody({
   const [editingDateId, setEditingDateId] = useState<string | null>(null);
   const [pendingDateId, setPendingDateId] = useState<string | null>(null);
   const [dateEditorOpen, setDateEditorOpen] = useState(false);
+  const [parcelDraft, setParcelDraft] = useState({ title: '', pickupPoint: '', dueDate: '' });
+  const [parcelEditorOpen, setParcelEditorOpen] = useState(false);
+  const [editingParcelId, setEditingParcelId] = useState<string | null>(null);
+  const [pendingParcelId, setPendingParcelId] = useState<string | null>(null);
+  const [parcelFilter, setParcelFilter] = useState<'all' | 'waiting' | 'collected'>('waiting');
   const [duration, setDuration] = useState(45);
   const [clock, setClock] = useState(() => Date.now());
   const activeRef = useRef(true);
@@ -309,6 +318,48 @@ function DormitoryBody({
     }
   }
 
+  function editParcel(entry?: DormParcel, preset = '') {
+    setParcelDraft(entry
+      ? { title: entry.title, pickupPoint: entry.pickupPoint, dueDate: entry.dueDate }
+      : { title: preset, pickupPoint: '', dueDate: '' });
+    setEditingParcelId(entry?.id ?? null);
+    setPendingParcelId(null);
+    setParcelEditorOpen(true);
+    setView('parcels');
+    setNotice('');
+  }
+
+  async function saveParcel() {
+    const title = parcelDraft.title.trim();
+    const dueDate = parcelDraft.dueDate.trim();
+    if (title.length < 2 || (dueDate && !isValidDormDate(dueDate))) {
+      setNotice('請填寫至少兩個字的包裹名稱；日期若有填寫，格式為 YYYY-MM-DD。');
+      return;
+    }
+    if (!editingParcelId && data.parcels.length >= DORM_PARCEL_LIMIT) {
+      setNotice('包裹清單最多保留 50 筆，請先整理舊紀錄。');
+      return;
+    }
+    const previous = data.parcels.find((item) => item.id === editingParcelId);
+    const id = editingParcelId ?? pendingParcelId ??
+      ('parcel_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 9));
+    setPendingParcelId(id);
+    const entry: DormParcel = {
+      id, title,
+      pickupPoint: parcelDraft.pickupPoint.trim(),
+      dueDate,
+      collected: previous?.collected ?? false,
+      createdAt: previous?.createdAt ?? Date.now(),
+      collectedAt: previous?.collectedAt ?? null,
+    };
+    if (await save({ ...data, parcels: [entry, ...data.parcels.filter((item) => item.id !== id)] })) {
+      setParcelDraft({ title: '', pickupPoint: '', dueDate: '' });
+      setParcelEditorOpen(false);
+      setEditingParcelId(null);
+      setPendingParcelId(null);
+    }
+  }
+
   async function updateRepairStatus(id: string, status: DormRepairStatus) {
     await save({
       ...data,
@@ -348,6 +399,11 @@ function DormitoryBody({
   const today = localDormDate(new Date(clock));
   const milestones = sortedDormMilestones(data);
   const nextMilestone = milestones.find((entry) => !entry.completed);
+  const parcels = sortedDormParcels(data);
+  const pendingParcels = parcels.filter((entry) => !entry.collected);
+  const overdueParcels = pendingParcels.filter((entry) => entry.dueDate && entry.dueDate < today);
+  const visibleParcels = parcels.filter((entry) =>
+    parcelFilter === 'all' || (parcelFilter === 'waiting' ? !entry.collected : entry.collected));
   const repairs = data.repairs.filter((r) => filter === 'all' || r.status === filter);
   const flexRow: object = { flexDirection: 'row', flexWrap: 'wrap', gap: 8, alignItems: 'center' };
   const pad: object = { paddingHorizontal: 16, marginTop: 16 };
