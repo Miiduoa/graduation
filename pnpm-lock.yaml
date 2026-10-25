@@ -7,6 +7,7 @@ settings:
 overrides:
   '@next/eslint-plugin-next': 16.4.2
   eslint-config-next: 16.4.2
+  'eslint-plugin-react-hooks>zod': 4.6.7
   fast-xml-parser: 5.7.0
   js-yaml: 4.3.2
   next: 16.4.2
