@@ -1,0 +1,30 @@
+{
+  "Plans": [
+    {
+      "TravelTime": 2700,
+      "TransferCount": 1,
+      "Sections": [
+        { "Type": "Walk", "StartName": "靜宜大學(校門)", "EndName": "靜宜大學(專用道)", "Duration": 180, "Distance": 220 },
+        { "Type": "Bus", "RouteName": "300", "StartName": "靜宜大學(專用道)", "EndName": "臺中車站", "Duration": 1500, "StartTime": "2026-10-25T16:10:00+08:00" },
+        { "Type": "Walk", "StartName": "臺中車站", "EndName": "臺中車站轉運中心", "Duration": 180, "Distance": 200 },
+        { "Type": "Bus", "RouteName": "151", "StartName": "臺中車站", "EndName": "高鐵臺中站", "Duration": 720, "StartTime": "2026-10-25T16:40:00+08:00" },
+        { "Type": "Walk", "StartName": "高鐵臺中站", "EndName": "高鐵出口", "Duration": 120, "Distance": 150 }
+      ]
+    },
+    {
+      "TravelTime": 960,
+      "TransferCount": 0,
+      "Sections": [
+        { "Type": "Taxi", "RouteName": "YOXI", "StartName": "靜宜大學(校門)", "EndName": "高鐵臺中站", "Duration": 960 }
+      ]
+    },
+    {
+      "TravelTime": 1080,
+      "TransferCount": 0,
+      "Sections": [
+        { "Type": "Walk", "StartName": "靜宜大學(校門)", "EndName": "YouBike 沙鹿站", "Duration": 180 },
+        { "Type": "Bike", "RouteName": "YouBike", "StartName": "YouBike 沙鹿站", "EndName": "高鐵臺中站", "Duration": 900 }
+      ]
+    }
+  ]
+}

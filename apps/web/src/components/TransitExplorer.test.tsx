@@ -25,6 +25,11 @@ const groupButton = (label: string) => screen.getByRole('button', { name: groupN
 const findGroupButton = (label: string) => screen.findByRole('button', { name: groupName(label) });
 const compactName = (expected: string) => (name: string) =>
   name.replace(/\s/g, '') === expected.replace(/\s/g, '');
+const TAIPEI_AFTERNOON = Date.parse('2026-10-25T06:40:00.000Z');
+function freezeNow(ms = TAIPEI_AFTERNOON) {
+  vi.spyOn(Date, 'now').mockReturnValue(ms);
+  return { nowMs: ms, now: new Date(ms).toISOString() };
+}
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -78,14 +83,14 @@ it('starts with school stops without requesting the user location', async () => 
 });
 
 it('shows Providence gate routes from campus-next without querying a default stop', async () => {
-  const now = new Date().toISOString();
+  const { nowMs, now } = freezeNow();
   vi.mocked(queryTransit).mockImplementation(async (query) => {
     if (query.action === 'campus-next') {
       return {
         status: 'ready', kind: 'arrivals', fetchedAt: now,
         arrivals: [
           { id: '162', route: '162', direction: 1, destination: '沙鹿火車站', status: 0, seconds: 180, updatedAt: now, stopName: '靜宜大學(英才路)' },
-          { id: '301', route: '301', direction: 1, destination: '台中車站', status: 0, seconds: null, updatedAt: now, stopName: '靜宜大學(校門)', scheduledAt: new Date(Date.now() + 12 * 60_000).toISOString() },
+          { id: '301', route: '301', direction: 1, destination: '台中車站', status: 0, seconds: null, updatedAt: now, stopName: '靜宜大學(校門)', scheduledAt: new Date(nowMs + 12 * 60_000).toISOString() },
           { id: '326', route: '326', direction: 1, destination: '新民高中', status: 3, seconds: null, updatedAt: now, stopName: '靜宜大學' },
           { id: '368', route: '368', direction: 0, destination: '主顧聖母堂', status: 0, seconds: 600, updatedAt: now, stopName: '靜宜大學(校門)' },
         ],
@@ -118,13 +123,13 @@ it('shows Providence gate routes from campus-next without querying a default sto
 });
 
 it('draws the next live bus on a stop line and does not invent a bus for timetable-only rows', async () => {
-  const now = new Date().toISOString();
+  const { nowMs, now } = freezeNow();
   vi.mocked(queryTransit).mockImplementation(async (query) => query.action === 'campus-next' ? {
     status: 'ready', kind: 'arrivals', fetchedAt: now,
     arrivals: [
       { id: '162', route: '162', direction: 1, destination: '沙鹿火車站', status: 0, seconds: 180, updatedAt: now, stopName: '靜宜大學(英才路)' },
       { id: '301', route: '301', direction: 1, destination: '嘉陽高中', status: 0, seconds: 720, updatedAt: now, stopName: '靜宜大學(英才路)' },
-      { id: '326', route: '326', direction: 1, destination: '巨業沙鹿站', status: 0, seconds: null, updatedAt: now, stopName: '靜宜大學(英才路)', scheduledAt: new Date(Date.now() + 12 * 60_000).toISOString() },
+      { id: '326', route: '326', direction: 1, destination: '巨業沙鹿站', status: 0, seconds: null, updatedAt: now, stopName: '靜宜大學(英才路)', scheduledAt: new Date(nowMs + 12 * 60_000).toISOString() },
     ],
     routeStops: [{
       routeUid: 'TXG162', subRouteUid: 'TXG162', routeName: '162', direction: 1,
@@ -258,12 +263,12 @@ it('shows night-first scheduled copy instead of 今天收班 during the day', as
 });
 
 it('shows live, scheduled, empty and ended rows together on one direction', async () => {
-  const now = new Date().toISOString();
+  const { nowMs, now } = freezeNow();
   vi.mocked(queryTransit).mockImplementation(async (query) => query.action === 'campus-next' ? {
     status: 'ready', kind: 'arrivals', fetchedAt: now,
     arrivals: [
       { id: '162', route: '162', direction: 1, destination: '沙鹿火車站', status: 0, seconds: 180, updatedAt: now, stopName: '靜宜大學(英才路)' },
-      { id: '301', route: '301', direction: 1, destination: '嘉陽高中', status: 0, seconds: null, updatedAt: now, stopName: '靜宜大學(英才路)', scheduledAt: new Date(Date.now() + 12 * 60_000).toISOString() },
+      { id: '301', route: '301', direction: 1, destination: '嘉陽高中', status: 0, seconds: null, updatedAt: now, stopName: '靜宜大學(英才路)', scheduledAt: new Date(nowMs + 12 * 60_000).toISOString() },
       { id: '326', route: '326', direction: 1, destination: '巨業沙鹿站', status: 0, seconds: null, updatedAt: now, stopName: '靜宜大學(英才路)' },
       { id: '368', route: '368', direction: 1, destination: '沙鹿火車站', status: 3, seconds: null, updatedAt: now, stopName: '靜宜大學(英才路)' },
     ],
@@ -280,12 +285,12 @@ it('shows live, scheduled, empty and ended rows together on one direction', asyn
 });
 
 it('keeps scheduled times when this direction has no live bus without saying live data is down', async () => {
-  const now = new Date().toISOString();
+  const { nowMs, now } = freezeNow();
   vi.mocked(queryTransit).mockImplementation(async (query) => query.action === 'campus-next' ? {
     status: 'ready', kind: 'arrivals', fetchedAt: now,
     arrivals: [
-      { id: '162', route: '162', direction: 1, destination: '沙鹿火車站', status: 0, seconds: null, updatedAt: now, stopName: '靜宜大學(英才路)', scheduledAt: new Date(Date.now() + 8 * 60_000).toISOString() },
-      { id: '301', route: '301', direction: 1, destination: '嘉陽高中', status: 0, seconds: null, updatedAt: now, stopName: '靜宜大學(英才路)', scheduledAt: new Date(Date.now() + 18 * 60_000).toISOString() },
+      { id: '162', route: '162', direction: 1, destination: '沙鹿火車站', status: 0, seconds: null, updatedAt: now, stopName: '靜宜大學(英才路)', scheduledAt: new Date(nowMs + 8 * 60_000).toISOString() },
+      { id: '301', route: '301', direction: 1, destination: '嘉陽高中', status: 0, seconds: null, updatedAt: now, stopName: '靜宜大學(英才路)', scheduledAt: new Date(nowMs + 18 * 60_000).toISOString() },
     ],
   } : emptyArrivals());
   renderExplorer();
@@ -297,11 +302,11 @@ it('keeps scheduled times when this direction has no live bus without saying liv
 });
 
 it('says live data is down only when the campus-next payload is stale', async () => {
-  const now = new Date().toISOString();
+  const { nowMs, now } = freezeNow();
   vi.mocked(queryTransit).mockImplementation(async (query) => query.action === 'campus-next' ? {
     status: 'ready', kind: 'arrivals', fetchedAt: now, stale: true,
     arrivals: [
-      { id: '162', route: '162', direction: 1, destination: '主顧聖母堂', status: 0, seconds: null, updatedAt: now, stopName: '靜宜大學(校門)', scheduledAt: new Date(Date.now() + 8 * 60_000).toISOString() },
+      { id: '162', route: '162', direction: 1, destination: '主顧聖母堂', status: 0, seconds: null, updatedAt: now, stopName: '靜宜大學(校門)', scheduledAt: new Date(nowMs + 8 * 60_000).toISOString() },
     ],
   } : emptyArrivals());
   renderExplorer();
@@ -753,22 +758,24 @@ it('lets a Providence student type or tap a destination and see the next direct 
       return {
         status: 'ready', kind: 'direct', fetchedAt: now,
         destination: { query: '沙鹿車站', label: '沙鹿車站', kind: 'landmark', lat: 24.236, lon: 120.559 },
-        origin: { lat: 24.225714, lon: 120.577096 },
-        googleMapsUrl: 'https://www.google.com/maps/dir/?api=1&origin=24.225714,120.577096&destination=24.236,120.559&travelmode=transit',
+        origin: { lat: 24.225388, lon: 120.577561 },
+        googleMapsUrl: 'https://www.google.com/maps/dir/?api=1&origin=24.225388,120.577561&destination=24.236,120.559&travelmode=transit',
         trips: [{
           route: '162', boardStopName: '靜宜大學(英才路)', alightStopName: '沙鹿車站',
           walkMeters: 240, walkMinutes: 3,
           arrival: { id: '162', route: '162', direction: 0, destination: '沙鹿車站', status: 0, seconds: 180, updatedAt: now, stopName: '靜宜大學(英才路)' },
         }],
+        transfers: [],
       };
     }
     if (query.action === 'direct') {
       return {
         status: 'ready', kind: 'direct', fetchedAt: now,
         destination: { query: query.destination, label: '高鐵臺中站', kind: 'landmark', lat: 24.111, lon: 120.616 },
-        origin: { lat: 24.225714, lon: 120.577096 },
-        googleMapsUrl: 'https://www.google.com/maps/dir/?api=1&origin=24.225714,120.577096&destination=%E9%AB%98%E9%90%B5%E8%87%BA%E4%B8%AD%E7%AB%99&travelmode=transit',
+        origin: { lat: 24.225388, lon: 120.577561 },
+        googleMapsUrl: 'https://www.google.com/maps/dir/?api=1&origin=24.225388,120.577561&destination=%E9%AB%98%E9%90%B5%E8%87%BA%E4%B8%AD%E7%AB%99&travelmode=transit',
         trips: [],
+        transfers: [],
       };
     }
     return emptyArrivals();
@@ -793,6 +800,41 @@ it('lets a Providence student type or tap a destination and see the next direct 
   const maps = screen.getByRole('link', { name: '用 Google 地圖看更多路線 ↗' });
   expect(maps.getAttribute('href')).toContain('https://www.google.com/maps/dir/?');
   expect(maps.getAttribute('href')).toContain('travelmode=transit');
+});
+
+it('shows a walking transfer when there is no one-seat ride', async () => {
+  const { nowMs, now } = freezeNow();
+  vi.mocked(queryTransit).mockImplementation(async (query) => {
+    if (query.action === 'campus-next') {
+      return { status: 'ready', kind: 'arrivals', arrivals: [], fetchedAt: now };
+    }
+    if (query.action === 'direct' && query.destination === '高鐵臺中站') {
+      return {
+        status: 'ready', kind: 'direct', fetchedAt: now,
+        destination: { query: '高鐵臺中站', label: '高鐵臺中站', kind: 'landmark', lat: 24.111, lon: 120.616 },
+        origin: { lat: 24.225388, lon: 120.577561 },
+        googleMapsUrl: 'https://www.google.com/maps/dir/?api=1&origin=24.225388,120.577561&destination=24.111,120.616&travelmode=transit',
+        trips: [],
+        transfers: [{
+          boardStopName: '靜宜大學(專用道)', firstRoute: '300', transferStopName: '臺中車站',
+          transferWalkMinutes: 3, secondRoute: '151', alightStopName: '高鐵臺中站',
+          totalMinutes: 45,
+          arrival: { id: '300', route: '300', direction: 0, destination: '台中車站', status: 0, seconds: null, updatedAt: now, stopName: '靜宜大學(專用道)', scheduledAt: new Date(nowMs + 12 * 60_000).toISOString() },
+        }],
+      };
+    }
+    return emptyArrivals();
+  });
+  renderExplorer();
+  fireEvent.click(await screen.findByRole('button', { name: '高鐵臺中站' }));
+  expect(await screen.findByTestId('transfer-trip-list')).toBeTruthy();
+  expect(screen.getByText('沒有直達車，以下是轉乘建議。')).toBeTruthy();
+  expect(screen.getByText('300→151')).toBeTruthy();
+  expect(screen.getByText('在專用道等')).toBeTruthy();
+  expect(screen.getByText(/轉乘 臺中車站（步行 3 分）/)).toBeTruthy();
+  expect(screen.getByText('45')).toBeTruthy();
+  expect(screen.getByText(/下一班 表定 /)).toBeTruthy();
+  expect(screen.queryByText('YOXI')).toBeNull();
 });
 
 it('does not offer Providence destination search on another campus', async () => {

@@ -38,12 +38,18 @@ export type DirectTripView = {
   route: string; boardStopName: string; alightStopName: string;
   walkMeters: number; walkMinutes: number; arrival: TransitArrival | null;
 };
+export type TransferTripView = {
+  boardStopName: string; firstRoute: string; transferStopName: string;
+  transferWalkMinutes: number; secondRoute: string; alightStopName: string;
+  totalMinutes: number; arrival: TransitArrival | null;
+};
 export type TransitResult =
   | { status: 'ready'; kind: 'stops'; stops: TransitStop[]; limited: boolean; fetchedAt: string; stale?: true }
   | { status: 'ready'; kind: 'arrivals'; arrivals: TransitArrival[]; fetchedAt: string; stale?: true; routeStops?: RouteStopSequence[] }
   | {
     status: 'ready'; kind: 'direct'; destination: DirectDestinationView | null;
-    origin: Position; trips: DirectTripView[]; googleMapsUrl: string; fetchedAt: string; stale?: true;
+    origin: Position; trips: DirectTripView[]; transfers: TransferTripView[];
+    googleMapsUrl: string; fetchedAt: string; stale?: true; transferFallback?: true;
   }
   | { status: 'unavailable'; reason: TransitFailure };
 export const TRANSIT_FRESHNESS_MS = 90_000;
@@ -1030,10 +1036,18 @@ export async function queryTransit(query: TransitQuery, signal: AbortSignal): Pr
       return trip ? [trip] : [];
     });
     if (trips.length !== result.trips.length) throw new Error('invalid-response');
+    const transferRows = Array.isArray(result.transfers) ? result.transfers : [];
+    if (transferRows.length > 3) throw new Error('invalid-response');
+    const transfers = transferRows.flatMap((row) => {
+      const trip = readTransferTrip(row);
+      return trip ? [trip] : [];
+    });
+    if (transfers.length !== transferRows.length) throw new Error('invalid-response');
     return {
       status: 'ready', kind: 'direct', destination, origin: { lat: result.origin.lat, lon: result.origin.lon },
-      trips, googleMapsUrl: result.googleMapsUrl, fetchedAt: result.fetchedAt,
+      trips, transfers, googleMapsUrl: result.googleMapsUrl, fetchedAt: result.fetchedAt,
       ...(result.stale === true ? { stale: true as const } : {}),
+      ...(result.transferFallback === true ? { transferFallback: true as const } : {}),
     };
   }
   throw new Error('invalid-response');
@@ -1075,6 +1089,30 @@ function readDirectTrip(value: unknown): DirectTripView | null {
     alightStopName: value.alightStopName.trim(),
     walkMeters: Math.round(value.walkMeters),
     walkMinutes: value.walkMinutes,
+    arrival: value.arrival,
+  };
+}
+
+function readTransferTrip(value: unknown): TransferTripView | null {
+  if (!isRecord(value) ||
+    typeof value.boardStopName !== 'string' || !value.boardStopName.trim() || value.boardStopName.length > 80 ||
+    typeof value.firstRoute !== 'string' || !value.firstRoute.trim() || value.firstRoute.length > 40 ||
+    typeof value.transferStopName !== 'string' || !value.transferStopName.trim() || value.transferStopName.length > 80 ||
+    typeof value.secondRoute !== 'string' || !value.secondRoute.trim() || value.secondRoute.length > 40 ||
+    typeof value.alightStopName !== 'string' || !value.alightStopName.trim() || value.alightStopName.length > 80 ||
+    typeof value.transferWalkMinutes !== 'number' || !Number.isInteger(value.transferWalkMinutes) || value.transferWalkMinutes < 1 ||
+    typeof value.totalMinutes !== 'number' || !Number.isInteger(value.totalMinutes) || value.totalMinutes < 1) {
+    return null;
+  }
+  if (value.arrival !== null && !isArrivalRow(value.arrival)) return null;
+  return {
+    boardStopName: value.boardStopName.trim(),
+    firstRoute: value.firstRoute.trim(),
+    transferStopName: value.transferStopName.trim(),
+    transferWalkMinutes: value.transferWalkMinutes,
+    secondRoute: value.secondRoute.trim(),
+    alightStopName: value.alightStopName.trim(),
+    totalMinutes: value.totalMinutes,
     arrival: value.arrival,
   };
 }
