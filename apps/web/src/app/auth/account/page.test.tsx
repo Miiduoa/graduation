@@ -211,11 +211,14 @@ it('opens an in-page school lookup from 尋找學校 and searches by school name
 
 it.each([
   '/life',
+  '/grades?tab=feedback&campus=pu',
+  '/course/cs101?schoolId=pu#assignment-hw-3',
+  '/events/open-day?schoolId=nchu&source=campus',
   '/grades?tab=feedback&schoolId=nthu&campus=nthu#feedback',
   '/settings?section=appearance&campus=nthu',
   '/events/evt-1?schoolId=pu&campus=pu&source=school-club-events#registration',
   '/school-info?campus=ncku#contact',
-])('sends a signed-in visitor back to %s without losing page state', async (returnPath) => {
+])('sends a signed-in visitor back to %s without losing task context', async (returnPath) => {
   const replace = vi.fn();
   vi.stubGlobal('location', { ...window.location, replace, origin: 'https://nuni.tw' });
   search.current = new URLSearchParams({ returnUrl: returnPath });
@@ -244,16 +247,25 @@ it.each([
     entry.unmount();
     platform.session = { platformAccountId: 'pa_1' };
     render(<NuniSignIn returnUrl={handoff.searchParams.get('returnUrl')!} />);
-    expect(screen.getByRole('link', { name: '繼續使用' }).getAttribute('href')).toBe(returnPath);
+    expect(screen.getByRole('link', { name: '繼續使用' }).getAttribute('href')).toBe(
+      returnPath.startsWith('/course/') ? '/classroom' : returnPath,
+    );
   }
 });
 
-it.each([false, true])('preserves feedback context through the Campus One login handoff (signed in: %s)', async (signedIn) => {
+it.each([
+  [false, false],
+  [true, false],
+  [false, true],
+  [true, true],
+])('preserves feedback context through the Campus One login handoff (signed in: %s, auth payload: %s)', async (signedIn, withAuthPayload) => {
   const destination = '/grades?tab=feedback&campus=nthu&q=a%26b%3Dc#recent';
   const replace = vi.fn();
   vi.stubGlobal('location', { ...window.location, replace, origin: 'https://nuni.tw' });
   search.current = new URLSearchParams({
-    returnUrl: destination.replace('#recent', '&token=private&returnUrl=%2Flogin#recent'),
+    returnUrl: withAuthPayload
+      ? destination.replace('#recent', '&token=private&returnUrl=%2Flogin#recent')
+      : destination,
     next: '/timetable',
   });
   platform.session = signedIn ? { platformAccountId: 'pa_1' } : null;
@@ -284,8 +296,10 @@ it.each([false, true])('preserves feedback context through the Campus One login 
   }
 });
 
-it('keeps the legacy operator destination on its existing session flow', async () => {
-  const destination = '/auth/platform/ops?create=school#form';
+it.each([
+  ['/auth/platform/ops?tab=review', '/auth/platform/ops'],
+  ['/auth/platform/ops?create=school#form', '/'],
+])('keeps the legacy operator destination on its existing session flow: %s', async (destination, expected) => {
   const replace = vi.fn();
   vi.stubGlobal('location', { ...window.location, replace, origin: 'https://nuni.tw' });
   search.current = new URLSearchParams({ returnUrl: destination });
@@ -294,7 +308,7 @@ it('keeps the legacy operator destination on its existing session flow', async (
     headers: { 'Content-Type': 'application/json' },
   }));
   render(<AccountPage />);
-  await waitFor(() => expect(replace).toHaveBeenCalledWith(destination));
+  await waitFor(() => expect(replace).toHaveBeenCalledWith(expected));
   expect(fetchMock).toHaveBeenCalledWith('/api/nuni/session', expect.anything());
 });
 

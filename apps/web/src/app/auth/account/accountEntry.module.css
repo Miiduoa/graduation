@@ -121,7 +121,7 @@
 .footer {
   padding: 18px 24px calc(18px + env(safe-area-inset-bottom, 0px));
   border-top: 1px solid var(--border);
-  background: var(--surface);
+  background: var(--bg);
   color: var(--text);
 }
 
@@ -137,5 +137,4 @@
   align-items: center;
   min-height: 44px;
   color: inherit;
-  opacity: 0.82;
 }
