@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { getQuickCampusActions } from './quickCampusActions';
+import { CAMPUS_SERVICES } from './campusServices';
+import { CAMPUS_QUICK_DESTINATIONS } from '@campus/shared/src/campusIntent';
 
 describe('natural-language campus shortcuts', () => {
   it.each([
@@ -25,4 +27,25 @@ describe('natural-language campus shortcuts', () => {
     expect(getQuickCampusActions('我最近好煩')).toEqual([]);
     expect(getQuickCampusActions('   ')).toEqual([]);
   });
+});
+
+it('matches the complete Web service catalog without inventing destinations', () => {
+  expect(CAMPUS_SERVICES).toHaveLength(33);
+  expect(new Set(CAMPUS_SERVICES.map(row => row.href))).toEqual(
+    new Set(CAMPUS_QUICK_DESTINATIONS),
+  );
+});
+
+it.each([
+  ['匯入課表', '/import'],
+  ['課程申訴單', '/appeals'],
+  ['老師工作台', '/teacher'],
+  ['我的課程群組', '/groups'],
+  ['我的取餐訂單', '/food'],
+  ['校園社群', '/community'],
+  ['查看私訊', '/dms'],
+  ['學校資格驗證', '/classroom/account'],
+  ['刪除帳號', '/account-deletion'],
+])('matches the existing service directory for %s', (utterance, expected) => {
+  expect(getQuickCampusActions(utterance).map(row => row.href)).toContain(expected);
 });

@@ -1,5 +1,5 @@
-import { getMobileQuickActions } from '../services/quickCampusActions';
-import { suggestCampusDestinations } from '@campus/shared/src/campusIntent';
+import { getMobileQuickActions, getMobileActionsForDestinations } from '../services/quickCampusActions';
+import { CAMPUS_QUICK_DESTINATIONS, suggestCampusDestinations } from '@campus/shared/src/campusIntent';
 import { ROUTE_TO_TAB } from '../utils/routeRegistry';
 
 test.each([
@@ -20,4 +20,13 @@ test('does not invent a write action for ambiguous or high-risk requests', () =>
     expect.objectContaining({ destination: '/classroom', route: 'CoursesHome' }),
   ]);
   expect(suggestCampusDestinations('')).toEqual([]);
+});
+
+test('every allowed voice route lands on a registered native screen', () => {
+  const actions = getMobileActionsForDestinations(CAMPUS_QUICK_DESTINATIONS);
+  expect(actions).toHaveLength(33);
+  for (const action of actions) {
+    expect(ROUTE_TO_TAB[action.route]).toBeTruthy();
+    expect(action.description.length).toBeGreaterThan(0);
+  }
 });
