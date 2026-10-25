@@ -218,6 +218,9 @@ function createReviewLeaveHandler({ db, clock = () => new Date() }) {
     if (!courseId || !REVIEW_STATUSES.has(decision)) {
       fail('invalid-argument', '請選擇課程和審核結果。');
     }
+    if (decision === 'rejected' && note.length < 2) {
+      fail('invalid-argument', '不同意時，請提供至少兩個字的原因。');
+    }
     const ref = db.doc('leaveRequests/' + id);
     return db.runTransaction(async (tx) => {
       const snap = await tx.get(ref);
