@@ -73,6 +73,7 @@ export function FeedTab(props: { schoolId: string; schoolSearch: string }) {
   const [nameByUid, setNameByUid] = useState<Record<string, string>>({});
   const [avatarByUid, setAvatarByUid] = useState<Record<string, string>>({});
   const [refreshing, setRefreshing] = useState(false);
+  const [shareFeedback, setShareFeedback] = useState<{ postId: string; text: string } | null>(null);
   const likeFlightRef = useRef(false);
 
   const load = useCallback(async () => {
@@ -173,6 +174,26 @@ export function FeedTab(props: { schoolId: string; schoolSearch: string }) {
     setRefreshing(true);
     await refresh();
     setRefreshing(false);
+  };
+
+  const sharePost = async (post: CampusPostDoc) => {
+    const href = `/community/post/${encodeURIComponent(post.id)}?schoolId=${encodeURIComponent(schoolId)}`;
+    const url = new URL(href, window.location.origin).toString();
+    setShareFeedback(null);
+    try {
+      if (navigator.share) {
+        await navigator.share({ title: post.title, url });
+        return;
+      }
+      if (!navigator.clipboard?.writeText) {
+        throw new Error('Clipboard API unavailable');
+      }
+      await navigator.clipboard.writeText(url);
+      setShareFeedback({ postId: post.id, text: '連結已複製；對方仍需具備校園閱讀權限。' });
+    } catch (error) {
+      if (error instanceof DOMException && error.name === 'AbortError') return;
+      setShareFeedback({ postId: post.id, text: '無法自動分享，請開啟貼文後複製網址。' });
+    }
   };
 
   const authorLine = (p: CampusPostDoc) => {
@@ -535,7 +556,18 @@ export function FeedTab(props: { schoolId: string; schoolSearch: string }) {
                   >
                     💬 {typeof item.commentCount === 'number' ? item.commentCount : 0}
                   </Link>
+                  <button
+                    type="button"
+                    aria-label={`分享貼文：${item.title}`}
+                    onClick={() => void sharePost(item)}
+                    className={styles.postShare}
+                  >
+                    分享
+                  </button>
                 </div>
+                {shareFeedback?.postId === item.id && (
+                  <p role="status" className={styles.shareFeedback}>{shareFeedback.text}</p>
+                )}
               </article>
             );
           })}

@@ -25,7 +25,8 @@ const groupButton = (label: string) => screen.getByRole('button', { name: groupN
 const findGroupButton = (label: string) => screen.findByRole('button', { name: groupName(label) });
 const compactName = (expected: string) => (name: string) =>
   name.replace(/\s/g, '') === expected.replace(/\s/g, '');
-const TAIPEI_AFTERNOON = Date.parse('2026-10-25T06:40:00.000Z');
+// Fixed local afternoon avoids service-day changes when CI runs near midnight.
+const TAIPEI_AFTERNOON = Date.parse('2026-10-19T06:41:00.000Z');
 function freezeNow(ms = TAIPEI_AFTERNOON) {
   vi.spyOn(Date, 'now').mockReturnValue(ms);
   return { nowMs: ms, now: new Date(ms).toISOString() };
@@ -285,6 +286,8 @@ it('shows live, scheduled, empty and ended rows together on one direction', asyn
 });
 
 it('keeps scheduled times when this direction has no live bus without saying live data is down', async () => {
+  // Use an afternoon clock so two upcoming runs remain on the same service day.
+  // Near midnight, the next-day departure is correctly rendered as a night bus instead.
   const { nowMs, now } = freezeNow();
   vi.mocked(queryTransit).mockImplementation(async (query) => query.action === 'campus-next' ? {
     status: 'ready', kind: 'arrivals', fetchedAt: now,
@@ -294,7 +297,7 @@ it('keeps scheduled times when this direction has no live bus without saying liv
     ],
   } : emptyArrivals());
   renderExplorer();
-  expect(await screen.findAllByText(/表定 \d{1,2}:\d{2}/)).toHaveLength(2);
+  await waitFor(() => expect(screen.getAllByText(/表定 \d{1,2}:\d{2}/)).toHaveLength(2));
   expect(screen.queryByText('讀不到即時資料，先顯示表定時間')).toBeNull();
   expect(screen.getByText(/\d{1,2}:\d{2} 更新/)).toBeTruthy();
   expect(screen.getAllByText(/表定 \d{1,2}:\d{2}/).length).toBeGreaterThan(1);

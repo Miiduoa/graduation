@@ -20,25 +20,22 @@ import {
   Screen,
   Button,
   LoadingState,
-  ErrorState,
-  AnimatedCard,
 } from '../ui/components';
 import { TAB_BAR_CONTENT_BOTTOM_PADDING } from '../ui/navigationTheme';
 import { theme } from '../ui/theme';
 import { useThemeStyleSheet } from '../ui/useThemeStyleSheet';
 import { useAuth } from '../state/auth';
-import { shouldBlockForNoLogin, isDemoUid } from '../services/demoSession';
+import { shouldBlockForNoLogin } from '../services/demoSession';
 import { useSchool } from '../state/school';
 import { getDb, isFirebaseMockMode } from '../firebase';
 import {
   collection,
-  getDocs,
   onSnapshot,
   query,
   where,
-  orderBy,
 } from 'firebase/firestore';
 import { fetchSchoolDirectoryProfiles } from '../services/memberDirectory';
+import { filterInbox, schoolConversations, unreadConversation } from './messagingInboxModel';
 import {
   getPersonaConversationSummaries,
   isDemoPersonaUid,
@@ -50,9 +47,13 @@ import {
 type Conversation = {
   id: string;
   type: 'dm' | 'group_chat';
+  schoolId?: string;
   memberIds: string[];
   lastMessageText?: string;
   lastMessageAt?: any;
+  lastMessageSenderId?: string;
+  lastMessage?: { senderId?: string; content?: string };
+  lastReadBy?: Record<string, any>;
   onlineUsers?: Record<string, any>;
   typingUsers?: Record<string, any>;
   unreadCount?: number;
@@ -70,6 +71,7 @@ type ConvoRow = Conversation & {
 function formatLastTime(ts: any): string {
   if (!ts) return '';
   const d = ts?.toDate ? ts.toDate() : new Date(ts.seconds ? ts.seconds * 1000 : ts);
+  if (!Number.isFinite(d.getTime())) return '';
   const now = new Date();
   const diff = now.getTime() - d.getTime();
   if (diff < 60000) return '剛剛';
@@ -97,8 +99,16 @@ export function DmsScreen(props: any) {
   const [refreshing, setRefreshing] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [peerNames, setPeerNames] = useState<Record<string, string>>({});
+  const [onlyUnread, setOnlyUnread] = useState(false);
+  const [refreshKey, setRefreshKey] = useState(0);
+  const [loadError, setLoadError] = useState('');
+  const [loadedScope, setLoadedScope] = useState('');
 
   const myUid = auth.user?.uid;
+  const scope = `${myUid ?? ''}:${school.id ?? ''}`;
+  const demo = isFirebaseMockMode() || isDemoPersonaUid(myUid);
+  const isUnread = (row: Conversation) =>
+    demo ? (row.unreadCount ?? 0) > 0 : unreadConversation(row, myUid);
 
   // ── Demo persona 模式：嚴格按身分隔離載入對話 ──
   useEffect(() => {
@@ -107,6 +117,7 @@ export function DmsScreen(props: any) {
     const rows: Conversation[] = summaries.map((s) => ({
       id: s.id,
       type: 'dm',
+      schoolId: school.id,
       memberIds: [myUid, s.peerUid],
       lastMessageText: s.lastMessage,
       lastMessageAt: { seconds: Math.floor(new Date(s.lastMessageAt).getTime() / 1000) },
@@ -119,82 +130,97 @@ export function DmsScreen(props: any) {
       if (p) names[s.peerUid] = `${p.fullName}（${p.shortLabel}）`;
     });
     setPeerNames(names);
+    setLoadedScope(scope);
+    setLoadError('');
     setLoading(false);
     setRefreshing(false);
-  }, [myUid]);
+  }, [myUid, school.id, scope]);
 
-  // ── 即時監聽對話列表 ──
+  // Restrict a live inbox to the signed-in user's current school.
   useEffect(() => {
-    if (!myUid || isFirebaseMockMode() || isDemoPersonaUid(myUid)) {
-      setLoading(false);
+    if (!myUid || demo) {
+      if (!demo) {
+        setConversations([]);
+        setLoadedScope(scope);
+        setLoading(false);
+      }
       return;
     }
+    if (!school.id) {
+      setConversations([]);
+      setLoadedScope(scope);
+      setLoadError('尚未確認所屬學校，無法載入私人對話。');
+      setLoading(false);
+      setRefreshing(false);
+      return;
+    }
+    let active = true;
+    setConversations([]);
+    setPeerNames({});
+    setLoadedScope('');
+    setLoadError('');
     setLoading(true);
-    const ref = collection(db, 'conversations');
-    // 鎖到目前學校 + 我是成員，避免跨校或跨帳號的對話誤入清單。
-    const qy = school.id
-      ? query(
-          ref,
-          where('type', '==', 'dm'),
-          where('memberIds', 'array-contains', myUid),
-          where('schoolId', '==', school.id),
-        )
-      : query(
-          ref,
-          where('type', '==', 'dm'),
-          where('memberIds', 'array-contains', myUid),
-        );
-
+    const qy = query(
+      collection(db, 'conversations'),
+      where('type', '==', 'dm'),
+      where('memberIds', 'array-contains', myUid),
+      where('schoolId', '==', school.id),
+    );
     const unsub = onSnapshot(
       qy,
       (snapshot) => {
-        const rows = (
-          snapshot.docs.map((d) => ({
-            id: d.id,
-            ...(d.data() as any),
-          })) as Conversation[]
-        ).filter(
-          // 雙保險：即使 Firestore 出現異常資料，前端也要再次驗證我是 memberIds 之一
-          (c) => Array.isArray(c.memberIds) && c.memberIds.includes(myUid),
-        );
-        setConversations(rows);
+        if (!active) return;
+        const entries = snapshot.docs.map((doc) => ({
+          id: doc.id,
+          ...(doc.data() as Omit<Conversation, 'id'>),
+        }));
+        const scoped = schoolConversations(entries, myUid, school.id);
+        setConversations(scoped);
+        setLoadedScope(scope);
+        setLoadError('');
         setLoading(false);
         setRefreshing(false);
 
-        // 批量取得 peer 名稱
         const peerIds = [
-          ...new Set(
-            rows.flatMap((c) => c.memberIds.filter((id) => id !== myUid)),
-          ),
+          ...new Set(scoped.flatMap((row) => row.memberIds.filter((id) => id !== myUid))),
         ];
-        const newPeers = peerIds.filter((id) => !peerNames[id]);
-        if (newPeers.length > 0 && school.id) {
-          fetchSchoolDirectoryProfiles(school.id, newPeers, db)
+        if (peerIds.length) {
+          fetchSchoolDirectoryProfiles(school.id, peerIds, db)
             .then((profiles) => {
-              const map: Record<string, string> = {};
-              profiles.forEach((p) => {
-                if (p?.uid) map[p.uid] = p.displayName ?? p.uid.slice(0, 8);
+              if (!active) return;
+              const names: Record<string, string> = {};
+              profiles.forEach((profile) => {
+                if (profile?.uid) names[profile.uid] = profile.displayName ?? profile.uid.slice(0, 8);
               });
-              setPeerNames((prev) => ({ ...prev, ...map }));
+              setPeerNames(names);
             })
-            .catch(() => {});
+            .catch(() => {
+              // Directory access is optional; an inaccessible name never blocks messages.
+            });
         }
       },
-      (err) => {
-        if (err?.code !== 'permission-denied') {
-          console.error('[DmsScreen] Subscription error:', err);
-        }
+      (error) => {
+        if (!active) return;
+        setConversations([]);
+        setLoadedScope(scope);
+        setLoadError(
+          error?.code === 'permission-denied'
+            ? '目前帳號沒有讀取本校對話的權限，請重新確認登入狀態。'
+            : '無法取得最新對話，請檢查網路後重試。',
+        );
         setLoading(false);
         setRefreshing(false);
       },
     );
-
-    return () => unsub();
-  }, [db, myUid, school.id]);
+    return () => {
+      active = false;
+      unsub();
+    };
+  }, [db, myUid, school.id, scope, refreshKey, demo]);
 
   // ── 建構列表行 ──
   const rows: ConvoRow[] = useMemo(() => {
-    return conversations
+    return (loadedScope === scope ? conversations : [])
       .map((c) => {
         const peerId = c.memberIds.find((id) => id !== myUid) ?? '';
         const name = peerNames[peerId] ?? peerId.slice(0, 8);
@@ -203,16 +229,16 @@ export function DmsScreen(props: any) {
         let online = false;
         if (c.onlineUsers && peerId && c.onlineUsers[peerId]) {
           const ts = c.onlineUsers[peerId];
-          const tsMs = ts?.seconds ? ts.seconds * 1000 : Date.now();
-          online = Date.now() - tsMs < 60000;
+          const tsMs = ts?.toMillis?.() ?? (typeof ts?.seconds === 'number' ? ts.seconds * 1000 : 0);
+          online = tsMs > 0 && Date.now() - tsMs < 60000;
         }
 
         // 打字狀態
         let typing = false;
         if (c.typingUsers && peerId && c.typingUsers[peerId]) {
           const ts = c.typingUsers[peerId];
-          const tsMs = ts?.seconds ? ts.seconds * 1000 : Date.now();
-          typing = Date.now() - tsMs < 5000;
+          const tsMs = ts?.toMillis?.() ?? (typeof ts?.seconds === 'number' ? ts.seconds * 1000 : 0);
+          typing = tsMs > 0 && Date.now() - tsMs < 5000;
         }
 
         return {
@@ -228,18 +254,13 @@ export function DmsScreen(props: any) {
         const atB = (b.lastMessageAt?.seconds ?? 0) as number;
         return atB - atA;
       });
-  }, [conversations, peerNames, myUid]);
+  }, [conversations, peerNames, myUid, loadedScope, scope]);
 
-  // ── 搜尋過濾 ──
-  const filteredRows = useMemo(() => {
-    if (!searchQuery.trim()) return rows;
-    const q = searchQuery.toLowerCase();
-    return rows.filter(
-      (r) =>
-        r.peerName.toLowerCase().includes(q) ||
-        (r.lastMessageText ?? '').toLowerCase().includes(q),
-    );
-  }, [rows, searchQuery]);
+  const unreadCount = rows.filter(isUnread).length;
+  const filteredRows = useMemo(
+    () => filterInbox(rows, myUid, searchQuery, onlyUnread, demo ? (row) => (row.unreadCount ?? 0) > 0 : undefined),
+    [rows, myUid, searchQuery, onlyUnread, demo],
+  );
 
   // ── 未登入 ──
   if (shouldBlockForNoLogin({ uid: auth.user?.uid ?? null, hasUser: !!auth.user })) {
@@ -261,11 +282,14 @@ export function DmsScreen(props: any) {
   const renderItem = ({ item }: { item: ConvoRow }) => {
     const peerId = item.memberIds.find((id) => id !== myUid) ?? '';
     const initials = item.peerName.slice(0, 1).toUpperCase();
+    const unread = isUnread(item);
 
     return (
       <Pressable
+        accessibilityRole="button"
+        accessibilityLabel={`${item.peerName}${unread ? '，未讀訊息' : ''}，${item.lastMessageText ?? '尚無訊息'}`}
         onPress={() => nav?.navigate?.('Chat', { peerId, conversationId: item.id })}
-        style={({ pressed }) => [s.row, pressed && { opacity: 0.7 }]}
+        style={({ pressed }) => [s.row, unread && s.unreadRow, pressed && { opacity: 0.7 }]}
       >
         {/* 頭像 */}
         <View style={s.avatarBox}>
@@ -278,9 +302,10 @@ export function DmsScreen(props: any) {
         {/* 內容 */}
         <View style={s.rowContent}>
           <View style={s.rowTop}>
-            <Text style={s.rowName} numberOfLines={1}>
+            <Text style={[s.rowName, unread && s.unreadName]} numberOfLines={1}>
               {item.peerName}
             </Text>
+            {unread && <View style={s.unreadDot} accessibilityLabel="未讀" />}
             <Text style={s.rowTime}>{item.timeLabel}</Text>
           </View>
           <Text style={s.rowPreview} numberOfLines={1}>
@@ -351,8 +376,37 @@ export function DmsScreen(props: any) {
           </Pressable>
         </View>
 
-        {loading ? (
-          <LoadingState title="對話" subtitle="載入中..." rows={4} />
+        <View style={s.filterRow}>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityState={{ selected: !onlyUnread }}
+            onPress={() => setOnlyUnread(false)}
+            style={[s.filterChip, !onlyUnread && s.filterChipActive]}
+          >
+            <Text style={[s.filterText, !onlyUnread && s.filterTextActive]}>
+              全部 {rows.length}
+            </Text>
+          </Pressable>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityState={{ selected: onlyUnread }}
+            onPress={() => setOnlyUnread(true)}
+            style={[s.filterChip, onlyUnread && s.filterChipActive]}
+          >
+            <Text style={[s.filterText, onlyUnread && s.filterTextActive]}>
+              未讀 {unreadCount}
+            </Text>
+          </Pressable>
+        </View>
+        {loadError && loadedScope === scope ? (
+          <View style={s.emptyContainer}>
+            <Ionicons name="cloud-offline-outline" size={36} color={theme.colors.muted} />
+            <Text style={s.emptyTitle}>無法載入對話</Text>
+            <Text style={s.emptySubtitle}>{loadError}</Text>
+            <Button text="重新連線" kind="primary" onPress={() => setRefreshKey((value) => value + 1)} />
+          </View>
+        ) : loading || loadedScope !== scope ? (
+          <LoadingState title="對話" subtitle="正在同步本校訊息…" rows={4} />
         ) : (
           <FlatList
             data={filteredRows}
@@ -364,7 +418,10 @@ export function DmsScreen(props: any) {
             refreshControl={
               <RefreshControl
                 refreshing={refreshing}
-                onRefresh={() => setRefreshing(true)}
+                onRefresh={() => {
+                  setRefreshing(true);
+                  setRefreshKey((value) => value + 1);
+                }}
                 tintColor={theme.colors.accent}
               />
             }
@@ -374,10 +431,28 @@ export function DmsScreen(props: any) {
             ListEmptyComponent={
               <View style={s.emptyContainer}>
                 <Ionicons name="chatbubble-ellipses-outline" size={48} color={theme.colors.border} />
-                <Text style={s.emptyTitle}>沒有對話</Text>
-                <Text style={s.emptySubtitle}>
-                  {searchQuery ? '找不到符合的對話' : '用右上角加好友搜尋同校聯絡人，或到群組開始私訊'}
+                <Text style={s.emptyTitle}>
+                  {searchQuery ? '找不到符合的對話' : onlyUnread ? '目前沒有未讀訊息' : '尚未開始對話'}
                 </Text>
+                <Text style={s.emptySubtitle}>
+                  {searchQuery
+                    ? '試著調整搜尋內容。'
+                    : onlyUnread
+                      ? '新訊息會自動出現在這裡。'
+                      : '搜尋同校同學，或從群組成員開始私訊。'}
+                </Text>
+                {(searchQuery || onlyUnread) && (
+                  <Pressable
+                    accessibilityRole="button"
+                    onPress={() => {
+                      setSearchQuery('');
+                      setOnlyUnread(false);
+                    }}
+                    style={s.resetButton}
+                  >
+                    <Text style={s.resetText}>查看全部對話</Text>
+                  </Pressable>
+                )}
               </View>
             }
           />
@@ -410,6 +485,30 @@ const createStyles = () => StyleSheet.create({
     fontSize: 14,
     paddingVertical: 0,
   },
+  filterRow: {
+    flexDirection: 'row',
+    gap: 8,
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderColor: theme.colors.border,
+  },
+  filterChip: {
+    borderWidth: 1,
+    borderColor: theme.colors.border,
+    borderRadius: 999,
+    paddingHorizontal: 16,
+    paddingVertical: 9,
+    backgroundColor: theme.colors.surface,
+  },
+  filterChipActive: { backgroundColor: theme.colors.accentSoft, borderColor: theme.colors.accent },
+  filterText: { color: theme.colors.textSecondary, fontWeight: '600', fontSize: 13 },
+  filterTextActive: { color: theme.colors.text, fontWeight: '700' },
+  unreadRow: { backgroundColor: theme.colors.accentSoft },
+  unreadName: { fontWeight: '800' },
+  unreadDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: theme.colors.accent, marginLeft: 6 },
+  resetButton: { backgroundColor: theme.colors.accentSoft, borderRadius: 10, paddingVertical: 10, paddingHorizontal: 18, marginTop: 8 },
+  resetText: { color: theme.colors.accent, fontWeight: '700' },
   row: {
     flexDirection: 'row',
     alignItems: 'center',

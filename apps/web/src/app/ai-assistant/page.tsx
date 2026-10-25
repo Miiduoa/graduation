@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
 import { Suspense, useEffect, useRef, useState, type FormEvent } from 'react';
 import { SiteShell } from '@/components/SiteShell';
+import { VoiceDictationButton } from '@/components/VoiceDictationButton';
 import { SchoolAccountRequired } from '@/components/SchoolAccountRequired';
 import { useAuth } from '@/components/AuthGuard';
 import { useCampusBrowseContext } from '@/lib/useCampusBrowseContext';
@@ -166,6 +167,22 @@ function AssistantConversation({
               ? '寫下問題，可以補充課程名稱、日期或地點。若要排課、找空堂，請用課表裡的「幫我安排」。'
               : '正式站尚未接上雲端函式服務，因此無法詢問助理。設定完成前請改用課表、地圖、公車與公開公告。'}
           </p>
+          {functionsReady && (
+            <div className={styles.exampleQuestions} aria-label="常用問題">
+              {['這週有哪些作業要交？', '如何前往圖書館？', '校園裡有哪些餐廳？'].map((question) => (
+                <button
+                  key={question}
+                  type="button"
+                  onClick={() => {
+                    setDraft(question);
+                    composer.current?.focus();
+                  }}
+                >
+                  {question}
+                </button>
+              ))}
+            </div>
+          )}
           <nav aria-label="直接開啟服務" className={styles.serviceLinks}>
             <Link href="/timetable">我的課表</Link>
             <Link href="/#courses">課程</Link>
@@ -265,6 +282,17 @@ function AssistantConversation({
           }}
           aria-describedby={error ? 'assistant-error' : 'assistant-note'}
         />
+        <div className={styles.voiceRow}>
+          <VoiceDictationButton
+            disabled={pending || !functionsReady}
+            onTranscript={(text) => {
+              setDraft(text.slice(0, 4000));
+              setError('');
+              composer.current?.focus();
+            }}
+          />
+          <span className={styles.note}>辨識後可修改文字，按「送出」才會詢問助理。</span>
+        </div>
         {error && (
           <p id="assistant-error" role="alert" className={styles.error}>
             {error}

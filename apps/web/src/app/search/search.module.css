@@ -18,6 +18,47 @@
   font-weight: 600;
 }
 
+.queryRow {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+.queryRow .searchInput { flex: 1; }
+.voiceHelp {
+  margin: -6px 0 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.6;
+}
+.smartResults {
+  display: grid;
+  gap: 12px;
+  padding: 20px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+}
+.smartResults h2 { margin: 0; font-size: 17px; }
+.smartResults > p { margin: 0; color: var(--muted); font-size: 12px; }
+.smartGrid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+.smartAction {
+  position: relative;
+  display: grid;
+  min-width: 0;
+  gap: 5px;
+  padding: 15px 38px 15px 15px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text);
+  text-decoration: none;
+}
+.smartAction strong { font-size: 14px; }
+.smartAction small { color: var(--muted); font-size: 12px; line-height: 1.5; }
+.smartAction span { position: absolute; right: 14px; top: 16px; color: var(--brand); }
+.smartAction:focus-visible { outline: 3px solid var(--focus-ring); outline-offset: 3px; }
+
 .searchInput {
   width: 100%;
   min-width: 0;
@@ -154,13 +195,9 @@
 }
 
 @media (max-width: 560px) {
-  .searchPanel {
-    padding: 18px;
-  }
-
-  .services {
-    grid-template-columns: 1fr;
-  }
+  .searchPanel { padding: 18px; }
+  .services, .smartGrid { grid-template-columns: 1fr; }
+  .queryRow { gap: 8px; }
 }
 
 .access {
@@ -172,4 +209,42 @@
 .service:focus-visible {
   outline: 3px solid var(--focus-ring);
   outline-offset: 3px;
+}
+
+.aiButton {
+  justify-self: start;
+  min-height: 44px;
+  padding: 10px 16px;
+  border: 1px solid var(--brand);
+  border-radius: 11px;
+  background: var(--brand);
+  color: var(--on-brand);
+  font: inherit;
+  font-size: 14px;
+  font-weight: 650;
+  cursor: pointer;
+}
+.aiButton:disabled {
+  cursor: progress;
+  opacity: .55;
+}
+.aiButton:focus-visible {
+  outline: 3px solid var(--focus-ring);
+  outline-offset: 3px;
+}
+
+.preview {
+  position: static !important;
+  display: grid;
+  gap: 5px;
+  padding-top: 9px;
+  border-top: 1px solid var(--border);
+  color: var(--muted) !important;
+  font-size: 12px;
+  line-height: 1.5;
+}
+.previewItem {
+  position: static !important;
+  display: block;
+  color: var(--text) !important;
 }
