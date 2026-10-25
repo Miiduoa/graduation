@@ -44,6 +44,22 @@ export const CAMPUS_SERVICES = [
     category: 'study',
   },
   {
+    name: '請假',
+    text: '從課表選課、填寫假單、追蹤每門課的站內核閱結果',
+    href: '/leave',
+    access: 'school',
+    keywords: '請假 假單 病假 事假 心理假 生理假 核假 缺課 absence leave',
+    category: 'study',
+  },
+  {
+    name: '請假核閱',
+    text: '授課教師依指派課程核閱請假，查看待辦與已處理紀錄',
+    href: '/leave/review',
+    access: 'school',
+    keywords: '老師 教師 請假 核閱 審核 管理 approve',
+    category: 'study',
+  },
+  {
     name: '課程申訴',
     text: '送出課程申訴，看老師處理到哪',
     href: '/appeals',
