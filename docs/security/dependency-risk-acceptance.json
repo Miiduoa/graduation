@@ -44,20 +44,6 @@
       ]
     },
     {
-      "package": "zod",
-      "ghsa": "GHSA-mrhx-c7xc-m3w5",
-      "scope": "workspace-all",
-      "reason": "Functions 執行期已升到 Zod 4.6.7（advisory 修復版 >=4.6.6）。殘餘 3.25.76 僅來自 ESLint 外掛傳遞依賴，不在正式 Functions／Web 執行路徑。套件告警仍保留可見。",
-      "expiry": "2026-10-31",
-      "evidence": "pnpm audit 路徑 .>eslint-plugin-react-hooks>zod；Functions 鎖檔為 4.6.7；backend/functions/agent/inputLimits.js 與 registry.inputBounds.test.js、executeAgentWrite.inputBounds.test.js。",
-      "paths": [
-        ".>eslint-plugin-react-hooks>zod"
-      ],
-      "versions": [
-        "3.25.76"
-      ]
-    },
-    {
       "package": "image-size",
       "ghsa": "GHSA-5p2g-fcmc-qvqq",
       "scope": "workspace-prod",
