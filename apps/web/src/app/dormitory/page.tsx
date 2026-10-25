@@ -513,6 +513,71 @@ function DormitoryWorkspace({ scope, schoolId, schoolName, guest }: {
         )}
 
 
+        {view === 'parcels' && (
+          <section className={styles.panel}>
+            <div className={styles.sectionTitle}>
+              <div><p className={styles.eyebrow}>取件備忘</p><h3>包裹與郵件</h3></div>
+              <button type="button" className={styles.primary} onClick={() => beginParcel()}>＋ 記錄包裹</button>
+            </div>
+            <p className={styles.muted}>自行記下要領的包裹或掛號郵件。此處沒有接入學校收發室、物流追蹤或自動取件通知；請勿儲存取件驗證碼。</p>
+            {!parcelEditorOpen && <div className={styles.shortcutBar} aria-label="快速記錄包裹">
+              <span>快速開始</span>
+              {['網購包裹', '掛號郵件', '其他物品'].map((title) =>
+                <button key={title} type="button" onClick={() => beginParcel(undefined, title)}>{title}</button>)}
+            </div>}
+            {parcelEditorOpen && (
+              <form className={styles.editor} aria-label="包裹紀錄表單" onSubmit={(e) => { e.preventDefault(); saveParcel(data); }}>
+                <h4>{editingParcelId ? '編輯包裹' : '新增待領包裹'}</h4>
+                <div className={styles.formGrid}>
+                  <label>包裹名稱 *<input required minLength={2} maxLength={90} value={parcelDraft.title}
+                    placeholder="例如：網購包裹、掛號郵件" onChange={(e) => setParcelDraft({ ...parcelDraft, title: e.target.value })} /></label>
+                  <label>領取地點<input maxLength={100} value={parcelDraft.pickupPoint}
+                    placeholder="例如：宿舍服務台" onChange={(e) => setParcelDraft({ ...parcelDraft, pickupPoint: e.target.value })} /></label>
+                  <label>預計取件日期（選填）<input type="date" min="2000-01-01" max="2099-12-31"
+                    value={parcelDraft.dueDate} onChange={(e) => setParcelDraft({ ...parcelDraft, dueDate: e.target.value })} /></label>
+                </div>
+                <div className={styles.actions}><button type="submit" className={styles.primary}>儲存包裹</button>
+                  <button type="button" className={styles.secondary} onClick={() => { setParcelEditorOpen(false); setEditingParcelId(null); setPendingParcelId(null); }}>取消</button></div>
+              </form>
+            )}
+            <div className={styles.filters} role="group" aria-label="包裹狀態篩選">
+              {([{ id: 'waiting', label: '待領取' }, { id: 'collected', label: '已領取' }, { id: 'all', label: '全部' }] as const).map((item) =>
+                <button type="button" key={item.id} aria-pressed={parcelFilter === item.id}
+                  onClick={() => setParcelFilter(item.id)}>{item.label}</button>)}
+            </div>
+            {visibleParcels.length ? (
+              <ul className={styles.milestones}>
+                {visibleParcels.map((entry) => {
+                  const overdue = !entry.collected && !!entry.dueDate && entry.dueDate < today;
+                  return <li key={entry.id} className={entry.collected ? styles.milestoneDone : ''}>
+                    <div className={styles.milestoneInfo}>
+                      <span className={overdue ? styles.overdueText : styles.milestoneDate}>
+                        {entry.collected ? '已自行標記領取' : overdue ? '自訂日期已過' : '待領取'}
+                        {entry.dueDate ? ' · ' + entry.dueDate.replaceAll('-', '/') : ''}
+                      </span>
+                      <h4>{entry.title}</h4>
+                      {entry.pickupPoint && <span className={styles.source}>地點：{entry.pickupPoint}</span>}
+                    </div>
+                    <div className={styles.actions}>
+                      <button type="button" onClick={() => save({ ...data, parcels: data.parcels.map((p) =>
+                        p.id === entry.id ? { ...p, collected: !p.collected, collectedAt: p.collected ? null : Date.now() } : p) })}>
+                        {entry.collected ? '恢復待領' : '標記已領取'}
+                      </button>
+                      <button type="button" onClick={() => beginParcel(entry)}>編輯</button>
+                      {deleteParcelId === entry.id ? (
+                        <><button className={styles.danger} type="button" onClick={() => {
+                          if (save({ ...data, parcels: data.parcels.filter((p) => p.id !== entry.id) })) setDeleteParcelId(null);
+                        }}>確認刪除</button><button type="button" onClick={() => setDeleteParcelId(null)}>保留</button></>
+                      ) : <button type="button" onClick={() => setDeleteParcelId(entry.id)}>刪除</button>}
+                    </div>
+                  </li>;
+                })}
+              </ul>
+            ) : <div className={styles.empty}><h4>目前沒有{parcelFilter === 'collected' ? '已領取' : parcelFilter === 'all' ? '' : '待領取'}的紀錄</h4>
+              <p>收到領件通知後，簡單記下物品與領取地點即可。</p></div>}
+          </section>
+        )}
+
         {view === 'dates' && (
           <section className={styles.panel}>
             <div className={styles.sectionTitle}>
