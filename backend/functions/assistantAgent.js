@@ -1,6 +1,7 @@
 const nodeCrypto = require('crypto');
 const { parseFragment } = require('parse5');
 const { zodToJsonSchema } = require('zod-to-json-schema');
+const { z } = require('zod');
 const { MAX_TOTAL_UTF8_BYTES, utf8ByteLength } = require('./agent/inputLimits');
 const {
   resolveRouteOrigin,
@@ -663,13 +664,27 @@ function zodSchemaToOpenAiParameters(schema) {
   if (!schema || typeof schema !== 'object') {
     return { type: 'object', properties: {} };
   }
-  try {
-    const json = zodToJsonSchema(schema, { target: 'openApi3', $refStrategy: 'none' });
-    delete json.$schema;
-    return json;
-  } catch {
-    return { type: 'object', properties: {} };
+
+  // The v3 converter cannot read v4 schemas. Use Zod's native converter when
+  // the actual schema is v4, retaining the v3 path for existing installations.
+  const json =
+    typeof z.toJSONSchema === 'function' && schema._zod
+      ? z.toJSONSchema(schema, { target: 'openapi-3.0', io: 'input', cycles: 'throw' })
+      : zodToJsonSchema(schema, { target: 'openApi3', $refStrategy: 'none' });
+
+  // Never send a silently degraded {} schema to an external model: required
+  // fields and size limits must survive conversion before a tool is exposed.
+  if (
+    !json ||
+    json.type !== 'object' ||
+    !json.properties ||
+    typeof json.properties !== 'object' ||
+    Array.isArray(json.properties)
+  ) {
+    throw new Error('Assistant tool input schema must convert to an OpenAPI object');
   }
+  delete json.$schema;
+  return json;
 }
 
 /**

@@ -3,12 +3,12 @@
 const { z } = require('zod');
 const { getFirestore } = require('firebase-admin/firestore');
 
-const inputSchema = z
-  .object({
-    limit: z.number().int().min(1).max(50).optional().default(20),
-  })
-  .optional()
-  .default({});
+// A model function's root parameters must be an object. The executor already
+// treats omitted input as {}, so wrapping the entire schema in optional/default
+// is unnecessary and breaks JSON Schema conversion.
+const inputSchema = z.object({
+  limit: z.number().int().min(1).max(50).optional().default(20),
+});
 
 function toIso(v) {
   if (!v) return null;
