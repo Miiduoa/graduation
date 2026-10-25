@@ -220,3 +220,16 @@ it('preserves the selected agenda filter when navigating away and returning', ()
   expect(second.getByText('作業 reviewed')).toBeTruthy();
   expect(second.queryByText('作業 pending')).toBeNull();
 });
+
+it('does not call an overdue but still open quiz a submission', () => {
+  const view = render(
+    <StudyAgenda
+      data={agenda([task('late-quiz', { kind: 'quiz', dueAt: '2020-01-01T00:00:00Z' })])}
+      loading={false}
+      error=""
+      retry={jest.fn()}
+      open={jest.fn()}
+    />,
+  );
+  expect(view.getByText('參考期限已過 · 仍可作答')).toBeTruthy();
+});
