@@ -20,6 +20,19 @@ import {
 
 const tenant = '[a-z0-9][a-z0-9-]{0,78}[a-z0-9]';
 const identifier = '[A-Za-z0-9_-]{1,120}';
+function adminUpstream(path: string, method: 'GET' | 'POST'): string {
+  if (path === 'reports') return 'ops/social/reports';
+  if (path === 'boards') return method === 'GET' ? 'social/boards' : 'ops/social/boards';
+  if (path.startsWith('reports/')) return `ops/social/${path}`;
+  if (
+    path === 'school-applications' ||
+    path.startsWith('school-applications/') ||
+    path === 'class-workspace-affiliation-applications' ||
+    path.startsWith('class-workspace-affiliation-applications/')
+  )
+    return path;
+  return `ops/${path}`;
+}
 function query(request: NextRequest, fields: Record<string, number>) {
   const result: Record<string, string> = {};
   for (const [name, value] of request.nextUrl.searchParams) {
@@ -110,18 +123,24 @@ export async function handlePlatformAdmin(request: NextRequest, segments: string
             ? { tenantId: 80 }
             : path === 'reports'
               ? { state: 20, limit: 3 }
-              : {};
+              : path === 'school-applications'
+                ? { scope: 20 }
+                : {};
       const valid =
-        ['schools', 'audit', 'people', 'merchants', 'reports', 'boards'].includes(path) ||
-        new RegExp(`^schools/${tenant}/proxy$`).test(path);
+        [
+          'schools',
+          'audit',
+          'people',
+          'merchants',
+          'reports',
+          'boards',
+          'school-applications',
+          'class-workspace-affiliation-applications',
+        ].includes(path) || new RegExp(`^schools/${tenant}/proxy$`).test(path);
       if (!valid) throw new NuniError(404, 'NOT_FOUND');
       return jsonResponse(
         await platformRequest(
-          path === 'reports'
-            ? 'ops/social/reports'
-            : path === 'boards'
-              ? 'social/boards'
-              : `ops/${path}`,
+          adminUpstream(path, 'GET'),
           session,
           undefined,
           query(request, fields),
@@ -141,15 +160,47 @@ export async function handlePlatformAdmin(request: NextRequest, segments: string
     else if (new RegExp(`^schools/${tenant}/proxy/(?:start|extend|end)$`).test(path)) keys = [];
     else if (new RegExp(`^reports/${identifier}/decision$`).test(path))
       keys = ['decision', 'reason', 'expectedVersion', 'idempotencyKey'];
+    else if (new RegExp(`^school-applications/${identifier}/decision$`).test(path))
+      keys = ['decision', 'reason', 'idempotencyKey'];
+    else if (path === 'people/bind')
+      keys = ['tenantId', 'role', 'email', 'personId', 'idempotencyKey'];
+    else if (new RegExp(`^merchants/interest/${identifier}/decision$`).test(path))
+      keys = ['decision', 'reason', 'idempotencyKey'];
+    else if (new RegExp(`^merchants/applications/${tenant}/${identifier}/decision$`).test(path))
+      keys = ['decision', 'reason', 'expectedVersion'];
+    else if (
+      new RegExp(`^class-workspace-affiliation-applications/${identifier}/decision$`).test(path)
+    )
+      keys = ['decision', 'reason', 'idempotencyKey'];
     else throw new NuniError(404, 'NOT_FOUND');
     onlyKeys(input, keys);
-    return jsonResponse(
-      await platformRequest(
-        path.startsWith('reports/') || path === 'boards' ? `ops/social/${path}` : `ops/${path}`,
-        session,
-        input,
-      ),
-    );
+    if (path === 'people/bind') {
+      const hasIdentity = ['email', 'personId'].some(
+        (key) =>
+          typeof input[key] === 'string' &&
+          input[key].trim().length > 0 &&
+          input[key].length <= 200,
+      );
+      if (
+        typeof input.tenantId !== 'string' ||
+        !new RegExp(`^${tenant}$`).test(input.tenantId) ||
+        (input.role !== 'school_admin' && input.role !== 'school_staff') ||
+        !hasIdentity ||
+        typeof input.idempotencyKey !== 'string' ||
+        input.idempotencyKey.length < 8 ||
+        input.idempotencyKey.length > 100
+      )
+        throw new NuniError(400, 'INVALID_INPUT');
+    }
+    if (
+      path.startsWith('merchants/applications/') &&
+      (typeof input.expectedVersion !== 'number' ||
+        !Number.isSafeInteger(input.expectedVersion) ||
+        input.expectedVersion < 1)
+    ) {
+      throw new NuniError(400, 'INVALID_INPUT');
+    }
+    return jsonResponse(await platformRequest(adminUpstream(path, 'POST'), session, input));
   } catch (error) {
     return errorResponse(error);
   }

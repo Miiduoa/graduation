@@ -33,6 +33,8 @@ const ALLOWED_RETURN_PATHS = new Set([
   '/auth/platform/class-workspace/new',
   '/auth/platform/ops',
   '/auth/platform/school-review',
+  '/admin/ops',
+  '/admin/school-review',
   '/bus',
   '/bus/registered',
   '/cafeteria',
@@ -76,6 +78,8 @@ const ALLOWED_RETURN_PATHS = new Set([
 ]);
 
 const ALLOWED_RETURN_PREFIXES = [
+  '/admin/ops',
+  '/admin/school-review',
   '/admin/students',
   '/announcements',
   '/auth/platform/class-workspace',
@@ -213,6 +217,14 @@ function allowedReturnPath(value: string | null | undefined): string | null {
   }
   const normalized = trimPath(parsed.pathname);
   if (BLOCKED_RETURN_PATHS.has(normalized)) return null;
+  if (normalized === '/admin/ops') {
+    const tabs = new Set(['schools', 'people', 'merchants', 'affiliation', 'audit']);
+    const queryTabs = parsed.searchParams.getAll('tab');
+    const hashTab = parsed.hash.slice(1);
+    if (queryTabs.length > 1 || queryTabs.some((tab) => !tabs.has(tab)) ||
+      (parsed.hash && !tabs.has(hashTab)) ||
+      (queryTabs[0] && hashTab && queryTabs[0] !== hashTab)) return null;
+  }
   const allowed =
     normalized === '/' ||
     ALLOWED_RETURN_PATHS.has(normalized) ||

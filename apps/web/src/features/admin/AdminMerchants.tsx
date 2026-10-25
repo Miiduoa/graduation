@@ -91,7 +91,7 @@ export function AdminMerchants({ context, suspended }: { context: string; suspen
               <Button disabled={resource.loading} onClick={resource.reload}>
                 重新讀取店家
               </Button>
-              <a className={styles.link} href="/auth/platform/ops">
+              <a className={styles.link} href="/admin/ops">
                 前往完整管理台審核
               </a>
             </div>

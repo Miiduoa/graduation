@@ -126,6 +126,34 @@ it('offers Google for course feedback while retaining the requested campus and t
   expect(screen.queryByText('這個頁面要用學校帳號，Google 帳號無法代替。')).toBeNull();
   expect(replace).not.toHaveBeenCalled();
 });
+
+it.each([
+  '/admin/ops',
+  '/admin/ops?tab=people&campus=pu#people',
+  '/admin/school-review',
+  '/admin/school-review?campus=pu#pending',
+])('offers platform sign-in for the administrator return destination %s', (destination) => {
+  state.user = null;
+  state.params = new URLSearchParams({ returnUrl: destination });
+  render(<LoginPage />);
+  expect(screen.getByTestId('platform-sign-in').getAttribute('data-return-url')).toBe(destination);
+  expect(screen.getByRole('button', { name: '使用 Google 帳號繼續' })).toBeTruthy();
+  expect(screen.queryByText('這個頁面要用學校帳號，Google 帳號無法代替。')).toBeNull();
+  expect(replace).not.toHaveBeenCalled();
+});
+
+it.each([
+  '/admin/ops/private',
+  '/admin/school-review/private',
+  '/admin/ops-extra',
+  '/admin/school-review-extra',
+])('does not expand platform login eligibility to the unlisted administrator path %s', (destination) => {
+  state.user = null;
+  state.params = new URLSearchParams({ returnUrl: destination });
+  render(<LoginPage />);
+  expect(screen.queryByTestId('platform-sign-in')).toBeNull();
+  expect(replace).not.toHaveBeenCalled();
+});
 it('honors an explicit school sign-in for course feedback without offering Google instead', async () => {
   state.user = null;
   state.studentId = true;
@@ -322,7 +350,13 @@ it('returns to the same storefront after a platform login', () => {
   );
 });
 
-it.each(['https://evil.test', '//evil.test', '/\\evil.test'])(
+it.each([
+  'https://evil.test',
+  '//evil.test',
+  '/\\evil.test',
+  'https://evil.test/admin/ops',
+  '//evil.test/admin/school-review',
+])(
   'does not honor an off-site returnUrl %s',
   (target) => {
     state.user = null;
