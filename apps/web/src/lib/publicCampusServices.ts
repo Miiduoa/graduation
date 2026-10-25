@@ -11,6 +11,8 @@ export const publicCampusServices = [
 /** Browsing a school does not establish school identity or grant academic access. */
 export function isPublicCampusPath(path: string): boolean {
   return (
+    path === '/life' ||
+    path === '/search' ||
     publicCampusServices.some((service) => service.href === path) ||
     /^\/announcements\/[^/]+$/.test(path) ||
     /^\/events\/[^/]+$/.test(path) ||

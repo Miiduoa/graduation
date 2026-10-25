@@ -1,3 +1,5 @@
+import { loginHref } from '@/lib/navigation';
+
 export const ACCOUNT_API_ORIGIN = 'https://api.nuni.tw';
 export const PLATFORM_LOGIN_TRANSACTION_KEY = 'campus.platform-login.transaction';
 export const ACCOUNT_LOGIN_TRANSACTION_KEY = 'campus.account-login.transaction';
@@ -93,12 +95,24 @@ const ALLOWED_RETURN_PREFIXES = [
 
 const BLOCKED_RETURN_PATHS = new Set([
   '/login',
+  '/join',
   '/admin/login',
   '/classroom/login',
-  '/join',
   '/auth/account',
   '/sso-callback',
   '/sso/acs',
+]);
+
+// These simple destinations are also understood by the retained login callbacks.
+const LEGACY_SIMPLE_RETURN_PATHS = new Set([
+  '/',
+  '/account-deletion',
+  '/calendar',
+  '/career',
+  '/food',
+  '/life',
+  '/search',
+  '/social',
 ]);
 
 // Only page state travels through login; credentials and nested return URLs do not.
@@ -177,14 +191,17 @@ function returnFragment(hash: string): string {
   }
 }
 
-export function sanitizeReturnPath(value: string | null | undefined): string {
+function allowedReturnPath(value: string | null | undefined): string | null {
   const raw = (value ?? '').trim();
-  if (!raw.startsWith('/') || raw.startsWith('//') || hasUnsafeReturnCharacters(value ?? '')) return '/';
+  if (
+    !raw.startsWith('/') || raw.startsWith('//') ||
+    (value?.length ?? 0) > 1200 || hasUnsafeReturnCharacters(value ?? '')
+  ) return null;
   let parsed: URL;
   try {
     parsed = new URL(raw, 'https://nuni.invalid');
   } catch {
-    return '/';
+    return null;
   }
   if (
     parsed.origin !== 'https://nuni.invalid' ||
@@ -193,16 +210,16 @@ export function sanitizeReturnPath(value: string | null | undefined): string {
     `${parsed.pathname}${parsed.search}${parsed.hash}` !== raw ||
     /%(?:2f|5c|0[0-9a-f]|1[0-9a-f]|7f)/i.test(parsed.pathname)
   ) {
-    return '/';
+    return null;
   }
   const normalized = trimPath(parsed.pathname);
-  if (BLOCKED_RETURN_PATHS.has(normalized)) return '/';
+  if (BLOCKED_RETURN_PATHS.has(normalized)) return null;
   const allowed =
     normalized === '/' ||
     ALLOWED_RETURN_PATHS.has(normalized) ||
     /^\/events\/[^/]+$/u.test(normalized) ||
     ALLOWED_RETURN_PREFIXES.some((prefix) => normalized === prefix || normalized.startsWith(`${prefix}/`));
-  if (!allowed) return '/';
+  if (!allowed) return null;
   const context = new URLSearchParams();
   for (const [key, value] of parsed.searchParams) {
     if (RETURN_CONTEXT_KEYS.has(key) && !context.has(key) && !hasUnsafeReturnCharacters(value)) {
@@ -213,12 +230,43 @@ export function sanitizeReturnPath(value: string | null | undefined): string {
   return `${normalized}${query ? `?${query}` : ''}${returnFragment(parsed.hash)}`;
 }
 
-export function readReturnPath(search: string | { get(name: string): string | null }): string {
-  const params =
-    typeof search === 'string'
-      ? new URLSearchParams(search.startsWith('?') ? search.slice(1) : search)
-      : search;
+export function sanitizeReturnPath(value: string | null | undefined): string {
+  return allowedReturnPath(value) ?? '/';
+}
+
+type ReturnSearch = string | { get(name: string): string | null };
+
+function returnSearchParams(search: ReturnSearch): { get(name: string): string | null } {
+  return typeof search === 'string'
+    ? new URLSearchParams(search.startsWith('?') ? search.slice(1) : search)
+    : search;
+}
+
+export function readReturnPath(search: ReturnSearch): string {
+  const params = returnSearchParams(search);
   return sanitizeReturnPath(params.get('returnUrl') ?? params.get('next'));
+}
+
+function isLegacyAccountPath(pathname: string): boolean {
+  return pathname === '/auth/platform' ||
+    pathname.startsWith('/auth/platform/') ||
+    pathname === '/privacy/deletion-status';
+}
+
+/** Keep Campus One task context out of legacy callbacks that discard it. */
+export function campusOneLoginHref(search: ReturnSearch): string | null {
+  const params = returnSearchParams(search);
+  const destination = allowedReturnPath(params.get('returnUrl') ?? params.get('next'));
+  if (!destination) return null;
+  const parsed = new URL(destination, 'https://nuni.invalid');
+  if (
+    isLegacyAccountPath(parsed.pathname) ||
+    (!parsed.search && !parsed.hash && LEGACY_SIMPLE_RETURN_PATHS.has(parsed.pathname))
+  ) return null;
+  return loginHref(
+    destination,
+    params.get('reconnect') === 'school' ? { reconnect: 'school' } : undefined,
+  );
 }
 
 function bytesToBase64Url(bytes: Uint8Array): string {

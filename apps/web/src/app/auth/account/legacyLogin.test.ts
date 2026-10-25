@@ -1,8 +1,10 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
+import { platformDestination } from '@/lib/accountDestination';
 import {
   ACCOUNT_API_ORIGIN,
   ACCOUNT_LOGIN_TRANSACTION_KEY,
   PLATFORM_LOGIN_TRANSACTION_KEY,
+  campusOneLoginHref,
   discoverSchool,
   listPlatformProviderKinds,
   readExistingSession,
@@ -31,19 +33,34 @@ it.each([
   ['/life', '/life'],
   ['/timetable', '/timetable'],
   ['/grades', '/grades'],
+  ['/grades?tab=feedback&campus=nthu#recent', '/grades?tab=feedback&campus=nthu#recent'],
+  ['/course/cs101?campus=pu#assignment-hw-1', '/course/cs101?campus=pu#assignment-hw-1'],
+  ['/search?q=room%20A&campus=nthu#results', '/search?q=room+A&campus=nthu#results'],
   ['/classroom', '/classroom'],
   ['/merchant', '/merchant'],
   ['/admin', '/admin'],
   ['/auth/platform/class-workspace/join', '/auth/platform/class-workspace/join'],
+  ['/auth/platform/ops?tab=review', '/auth/platform/ops?tab=review'],
+  ['/auth/platform/ops#pending', '/auth/platform/ops#pending'],
   ['/me', '/me'],
   ['https://evil.test', '/'],
   ['//evil.test', '/'],
   ['/\\evil.test', '/'],
   ['/login', '/'],
+  ['/login?returnUrl=%2Fgrades', '/'],
+  ['/auth/account?returnUrl=%2Fgrades', '/'],
+  ['/classroom/login#feedback', '/'],
+  ['/join?code=course-1', '/'],
   ['/staff', '/'],
   ['javascript:alert(1)', '/'],
   ['/life#services', '/life#services'],
   ['/leave?requestId=abc-1', '/'],
+  ['/grades/../auth/account', '/'],
+  ['/grades/%2e%2e/auth/account', '/'],
+  ['/grades\n?tab=feedback', '/'],
+  ['/grades?tab=feedback\t', '/'],
+  ['/grades' + String.fromCharCode(127), '/'],
+  ['/profile?' + 'a'.repeat(1300), '/'],
 ])('keeps only Campus One return paths and rejects %s', (input, expected) => {
   expect(sanitizeReturnPath(input)).toBe(expected);
   expect(readReturnPath(`returnUrl=${encodeURIComponent(input)}`)).toBe(expected);
@@ -51,6 +68,81 @@ it.each([
 
 it('reads next when returnUrl is absent', () => {
   expect(readReturnPath('next=%2Flife')).toBe('/life');
+});
+
+it('keeps returnUrl precedence without decoding the destination twice', () => {
+  const destination = '/grades?tab=feedback&campus=nthu&q=a%26b%3Dc#recent';
+  const params = new URLSearchParams({ returnUrl: destination, next: '/timetable' });
+  expect(readReturnPath(params)).toBe(destination);
+  expect(new URL(campusOneLoginHref(params)!, 'https://nuni.tw').searchParams.get('returnUrl')).toBe(destination);
+  params.set('returnUrl', '');
+  expect(readReturnPath(params)).toBe('/');
+  expect(campusOneLoginHref(params)).toBeNull();
+  params.set('returnUrl', 'https://evil.test');
+  expect(campusOneLoginHref(params)).toBeNull();
+});
+
+it.each([
+  '/grades?tab=feedback&campus=nthu#recent',
+  '/grades?tab=semester&campus=pu',
+  '/classroom/grades?schoolId=tw-pu#recent',
+  '/course/cs101?campus=pu#assignment-hw-1',
+  '/timetable?campus=nthu',
+  '/life?campus=nthu#services',
+  '/search?q=library+hours&campus=nthu#results',
+  '/events/evt-1?schoolId=pu&source=school-club-events#registration',
+  '/school-info?campus=ncku#contact',
+  '/admin',
+])('hands the Campus One destination %s to its own login route', (destination) => {
+  const href = campusOneLoginHref(new URLSearchParams({ next: destination }));
+  expect(href).toBeTruthy();
+  const login = new URL(href!, 'https://nuni.tw');
+  expect(login.origin).toBe('https://nuni.tw');
+  expect(login.pathname).toBe('/login');
+  expect(login.searchParams.get('returnUrl')).toBe(destination);
+});
+
+it('keeps an explicit school reconnect when handing off an academic task', () => {
+  const destination = '/grades?tab=semester&campus=pu';
+  const href = campusOneLoginHref(new URLSearchParams({ returnUrl: destination, reconnect: 'school' }));
+  const login = new URL(href!, 'https://nuni.tw');
+  expect(login.searchParams.get('reconnect')).toBe('school');
+  expect(login.searchParams.get('returnUrl')).toBe(destination);
+});
+
+it.each([
+  ['/grades?tab=semester&tab=feedback&campus=pu', '/grades?tab=semester&campus=pu'],
+  ['/timetable?campus=nthu#personal-timetable', '/timetable?campus=nthu#personal-timetable'],
+  ['/course/cs101?campus=pu#assignment-hw-1', '/course/cs101?campus=pu#assignment-hw-1'],
+])('keeps %s in the school account flow after filtering page state', (requested, destination) => {
+  const href = campusOneLoginHref(new URLSearchParams({ returnUrl: requested }));
+  const login = new URL(href!, 'https://nuni.tw');
+  expect(login.pathname).toBe('/login');
+  expect(login.searchParams.get('returnUrl')).toBe(destination);
+  expect(platformDestination(login.searchParams.get('returnUrl'))).toBe('/classroom');
+});
+
+it.each([
+  null,
+  '',
+  '/',
+  '/life',
+  '/search',
+  '/auth/platform',
+  '/auth/platform/class-workspace/join',
+  '/auth/platform/ops?tab=review#pending',
+  '/auth/platform/school-review/tenant-1',
+  '/privacy/deletion-status',
+  '/login?returnUrl=%2Fgrades',
+  '/auth/account?next=%2Fgrades',
+  '//evil.test/grades',
+  '/\\evil.test',
+  'https://evil.test',
+  '%2F%2Fevil.test',
+])('keeps the existing entry or rejects unsafe handoff input: %s', (destination) => {
+  const params = new URLSearchParams();
+  if (destination !== null) params.set('returnUrl', destination);
+  expect(campusOneLoginHref(params)).toBeNull();
 });
 
 it.each([
@@ -100,6 +192,7 @@ it.each([
   '/gra\ndes',
 ])('rejects login loops, retired pages and ambiguous return path %s', (path) => {
   expect(sanitizeReturnPath(path)).toBe('/');
+  expect(campusOneLoginHref(new URLSearchParams({ returnUrl: path }))).toBeNull();
 });
 
 it('drops nested redirect and credential parameters, including encoded parameter names', () => {
@@ -107,6 +200,8 @@ it('drops nested redirect and credential parameters, including encoded parameter
     '&returnTo=%2Fadmin&redirect=https%3A%2F%2Fevil.test&continue=%2Flogin&callback=%2Fauth%2Fcallback' +
     '&token=private&access_token=private&code=private&state=private&session=private&%6Eext=%2Fadmin#feedback';
   expect(sanitizeReturnPath(path)).toBe('/grades?tab=feedback&campus=nthu#feedback');
+  const handoff = new URL(campusOneLoginHref(new URLSearchParams({ returnUrl: path }))!, 'https://nuni.tw');
+  expect(handoff.searchParams.get('returnUrl')).toBe('/grades?tab=feedback&campus=nthu#feedback');
 });
 
 it('keeps the first page-state value without letting duplicate or encoded keys change its meaning', () => {

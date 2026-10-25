@@ -4,9 +4,11 @@ import { isPublicCampusPath } from './publicCampusServices';
 /** Platform login cannot establish a separate school identity. */
 export function platformDestination(value?: string | null): string {
   const safe = sanitizeInternalPath(value && value.length <= 1200 ? value : null, '/classroom');
-  const path = new URL(safe, 'https://campus.local').pathname;
+  const destination = new URL(safe, 'https://campus.local');
+  const path = destination.pathname;
   if (
     isPublicCampusPath(path) ||
+    (path === '/grades' && destination.searchParams.get('tab') === 'feedback') ||
     [
       '/',
       '/profile',
@@ -14,6 +16,7 @@ export function platformDestination(value?: string | null): string {
       '/social',
       '/classroom',
       '/classroom/account',
+      '/classroom/grades',
       '/admin',
       '/merchant',
       '/merchant/apply',

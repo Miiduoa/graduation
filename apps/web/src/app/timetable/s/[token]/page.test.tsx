@@ -1,5 +1,5 @@
 import { Suspense, type ReactNode } from 'react';
-import { act, render, screen, waitFor } from '@testing-library/react';
+import { act, render, screen, waitFor, within } from '@testing-library/react';
 import { beforeEach, expect, it, vi } from 'vitest';
 import { cleanCourse, cleanMeta } from '@campus/shared';
 import SharedTimetablePage from './page';
@@ -80,6 +80,50 @@ it('renders NCKU period 15 as 21:05–21:55 from the snapshot school profile', a
   );
   await mount();
   expect(await screen.findByText('21:05–21:55')).toBeTruthy();
+});
+
+it('shows an imported-only share with unplaced classes and its own semester metadata', async () => {
+  vi.mocked(loadSharedTimetable).mockResolvedValue(
+    share({
+      schoolId: 'pu',
+      name: '115 學年度第 1 學期課表',
+      meta: cleanMeta({
+        title: '115 學年度第 1 學期課表', school: '靜宜大學', year: '115', semester: '1',
+      }),
+      courses: [
+        cleanCourse({ id: 'import:unplaced', name: '自主學習', day: 0, room: '主顧 301' }),
+        cleanCourse({ id: 'import:weekend', name: '週末專題', day: 0 }),
+      ],
+    }),
+  );
+  await mount();
+  expect(await screen.findByRole('heading', { name: '115 學年度第 1 學期課表' })).toBeTruthy();
+  expect(screen.getByText('靜宜大學 · 115 學年度第 1 學期')).toBeTruthy();
+  const unplaced = screen.getByRole('region', { name: '尚未排入課表' });
+  expect(within(unplaced).getByText('自主學習')).toBeTruthy();
+  expect(within(unplaced).getByText('週末專題')).toBeTruthy();
+  expect(within(unplaced).getByText('上課時間待確認 · 主顧 301')).toBeTruthy();
+  expect(screen.getByText(/有 2 門課的上課時間尚未確認/)).toBeTruthy();
+  expect(screen.queryByText('無課')).toBeNull();
+  expect(screen.getAllByText('尚無已排課程')).toHaveLength(5);
+});
+
+it('keeps confirmed class times alongside unplaced classes without implying free time', async () => {
+  vi.mocked(loadSharedTimetable).mockResolvedValue(
+    share({
+      schoolId: 'ncku',
+      courses: [
+        cleanCourse({ id: 'scheduled', name: '夜間課', day: 1, start: 15, end: 15 }),
+        cleanCourse({ id: 'pending', name: '待安排專題', day: 0 }),
+      ],
+    }),
+  );
+  await mount();
+  expect(await screen.findByText('21:05–21:55')).toBeTruthy();
+  expect(screen.getByText('待安排專題')).toBeTruthy();
+  expect(screen.getByText(/課表中的空白時段不代表確定空堂/)).toBeTruthy();
+  expect(screen.getAllByText('尚無已排課程')).toHaveLength(4);
+  expect(screen.queryByText('無課')).toBeNull();
 });
 
 it('does not invent PU 08:10 when the snapshot school profile is missing or unknown', async () => {

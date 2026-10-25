@@ -29,6 +29,7 @@ import {
   todayClassesFromSchedule,
 } from '@/lib/todayScreen';
 import styles from './StudentToday.module.css';
+import { TodayWelcome } from './TodayWelcome';
 
 export type TimetableStatus = 'loading' | 'ready' | 'error' | 'empty' | 'unsigned-scope';
 
@@ -38,6 +39,7 @@ type Props = {
   updatedAt: Date | null;
   unsigned: boolean;
   skeleton: boolean;
+  refreshing?: boolean;
   classes: TodayClass[];
   todos: TodayTodo[];
   timetableStatus: TimetableStatus;
@@ -57,6 +59,7 @@ type BoundProps = {
   signedIn: boolean;
   unsigned: boolean;
   skeleton: boolean;
+  refreshing?: boolean;
   todos: TodayTodo[];
   courses: readonly HomeCourse[];
   todosError: string;
@@ -103,41 +106,59 @@ export function StudentToday(props: Props) {
       <header className={styles.header}>
         <p className={styles.date}>{props.now ? formatTodayHeaderDate(props.now) : ''}</p>
         <h1 className={styles.title}>今天</h1>
-        {props.updatedAt ? (
-          <p className={styles.updated}>{formatUpdatedAt(props.updatedAt)}</p>
+        {props.updatedAt || props.refreshing ? (
+          <p
+            className={styles.updated}
+            role={props.refreshing ? 'status' : undefined}
+            aria-live="polite"
+          >
+            {props.refreshing ? '正在更新課程待辦…' : formatUpdatedAt(props.updatedAt!)}
+          </p>
         ) : null}
       </header>
       {props.skeleton ? (
         <TodaySkeleton />
       ) : (
         <>
-          <NextActionCard
-            key={`action:${props.scopeKey ?? ''}`}
-            action={action}
-            unsigned={props.unsigned}
-            todosError={props.todosError}
-            now={now}
-            weekHref={props.weekHref}
-          />
-          <TodayClassList
-            classes={visibleClasses}
-            extra={extraClasses}
-            status={props.timetableStatus}
-            now={now}
-            onRetry={props.onRetryTimetable}
-            importHref={props.importHref}
-            timetableHref={props.timetableHref}
-          />
-          <TodoList
-            key={`todos:${props.scopeKey ?? ''}`}
-            todos={todos}
-            unsigned={props.unsigned}
-            error={props.todosError}
-            lmsUnconnected={props.lmsUnconnected}
-            leavingTodoIds={props.leavingTodoIds}
-            now={now}
-            onRetry={props.onRetryTodos}
-          />
+          {props.unsigned && action.type !== 'class' ? (
+            <TodayWelcome
+              importHref={props.importHref}
+              timetableHref={props.timetableHref}
+              hasTimetable={props.timetableStatus === 'ready'}
+            />
+          ) : (
+            <NextActionCard
+              key={`action:${props.scopeKey ?? ''}`}
+              action={action}
+              unsigned={props.unsigned}
+              todosError={props.todosError}
+              timetableStatus={props.timetableStatus}
+              lmsUnconnected={props.lmsUnconnected}
+              now={now}
+              weekHref={props.weekHref}
+            />
+          )}
+          <div className={styles.columns}>
+            <TodayClassList
+              classes={visibleClasses}
+              extra={extraClasses}
+              status={props.timetableStatus}
+              now={now}
+              onRetry={props.onRetryTimetable}
+              importHref={props.importHref}
+              timetableHref={props.timetableHref}
+            />
+            <TodoList
+              key={`todos:${props.scopeKey ?? ''}`}
+              todos={todos}
+              unsigned={props.unsigned}
+              error={props.todosError}
+              lmsUnconnected={props.lmsUnconnected}
+              leavingTodoIds={props.leavingTodoIds}
+              now={now}
+              onRetry={props.onRetryTodos}
+            />
+          </div>
         </>
       )}
     </div>
@@ -167,12 +188,16 @@ function NextActionCard({
   action,
   unsigned,
   todosError,
+  timetableStatus,
+  lmsUnconnected,
   now,
   weekHref,
 }: {
   action: NextAction;
   unsigned: boolean;
   todosError: string;
+  timetableStatus: TimetableStatus;
+  lmsUnconnected: boolean;
   now: Date;
   weekHref: string;
 }) {
@@ -223,6 +248,8 @@ function NextActionCard({
         action={displayed.action}
         unsigned={displayed.unsigned}
         todosError={todosError}
+        timetableStatus={timetableStatus}
+        lmsUnconnected={lmsUnconnected}
         now={now}
         weekHref={weekHref}
       />
@@ -241,12 +268,16 @@ function NextActionBody({
   action,
   unsigned,
   todosError,
+  timetableStatus,
+  lmsUnconnected,
   now,
   weekHref,
 }: {
   action: NextAction;
   unsigned: boolean;
   todosError: string;
+  timetableStatus: TimetableStatus;
+  lmsUnconnected: boolean;
   now: Date;
   weekHref: string;
 }) {
@@ -255,7 +286,48 @@ function NextActionBody({
   }
 
   if (action.type === 'empty') {
-    if (todosError) return null;
+    if (todosError || timetableStatus === 'error') {
+      return (
+        <>
+          <p className={styles.headline}>今天的安排還沒確認完整</p>
+          <p className={styles.meta}>請重新讀取下方未完成的資料，再確認課程與待辦。</p>
+        </>
+      );
+    }
+    if (timetableStatus === 'loading') {
+      return (
+        <p className={styles.headline} role="status">
+          正在確認今天的課表…
+        </p>
+      );
+    }
+    if (timetableStatus === 'unsigned-scope') {
+      return (
+        <>
+          <p className={styles.headline}>先選擇要安排的校園</p>
+          <p className={styles.meta}>課表會依校園分開保存，切換後就能查看對應的安排。</p>
+        </>
+      );
+    }
+    if (timetableStatus === 'empty') {
+      return (
+        <>
+          <p className={styles.headline}>先加入你的課表</p>
+          <p className={styles.meta}>匯入課表後，就能在這裡確認今天的上課安排。</p>
+        </>
+      );
+    }
+    if (lmsUnconnected) {
+      return (
+        <>
+          <p className={styles.headline}>課程待辦還沒連上</p>
+          <p className={styles.meta}>先確認已加入的課程，再查看作業與測驗。</p>
+          <Link className={styles.action} href="/groups">
+            查看我的課程
+          </Link>
+        </>
+      );
+    }
     return (
       <>
         <p className={styles.headline}>{TODAY_COPY.emptyDay}</p>
@@ -384,6 +456,13 @@ function TodayClassList({
             {TODAY_COPY.retry}
           </button>
         </>
+      ) : status === 'unsigned-scope' ? (
+        <>
+          <p className={styles.empty}>先選擇校園，就能查看或建立這所學校的課表。</p>
+          <Link className={styles.import} href={timetableHref}>
+            選校園、整理課表
+          </Link>
+        </>
       ) : status === 'empty' ? (
         <>
           <p className={styles.empty}>{TODAY_COPY.noTimetable}</p>
@@ -510,21 +589,25 @@ export function StudentTodayPage(props: BoundProps) {
   const scope = usePersonalImportScope();
   const records = usePersonalTodayRecords();
   const now = props.now ?? new Date();
-  const schoolId = records.schoolId || 'pu';
-  const importHref = `/import?kind=timetable&campus=${encodeURIComponent(schoolId)}`;
-  const timetableHref = `/timetable?campus=${encodeURIComponent(schoolId)}`;
+  const schoolId = records.schoolId || scope.scope.schoolId || 'personal';
+  const campusId = schoolId === 'personal' ? 'all' : schoolId;
+  const importHref = `/import?kind=timetable&campus=${encodeURIComponent(campusId)}`;
+  const timetableHref = `/timetable?campus=${encodeURIComponent(campusId)}`;
+  const timetableRecords = [...records.imported.records, ...(records.manual ?? [])].filter(
+    (row) => row.kind === 'timetable' && row.schoolId === schoolId,
+  );
   const timetableStatus: TimetableStatus = scope.loading
     ? 'loading'
     : scope.scope.schoolId === 'personal'
-      ? 'empty'
+      ? 'unsigned-scope'
       : !records.loaded
         ? 'loading'
         : records.error
           ? 'error'
-          : records.imported.records.length === 0 && (records.manual?.length ?? 0) === 0
+          : timetableRecords.length === 0
             ? 'empty'
             : 'ready';
-  const schedule = buildPersonalToday([...records.imported.records, ...(records.manual ?? [])], {
+  const schedule = buildPersonalToday(timetableRecords, {
     schoolId,
     now,
   });
@@ -536,6 +619,7 @@ export function StudentTodayPage(props: BoundProps) {
       updatedAt={props.updatedAt}
       unsigned={props.unsigned}
       skeleton={props.skeleton}
+      refreshing={props.refreshing}
       classes={classes}
       todos={props.todos}
       timetableStatus={timetableStatus}

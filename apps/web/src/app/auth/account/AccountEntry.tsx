@@ -7,6 +7,7 @@ import {
   DISCOVER_REASON_COPY,
   PasskeyCeremonyCancelled,
   SCHOOL_PROVIDER_LABELS,
+  campusOneLoginHref,
   discoverSchool,
   listPlatformProviderKinds,
   loginErrorMessage,
@@ -58,6 +59,7 @@ function GoogleMark() {
 export function AccountEntry() {
   const search = useSearchParams();
   const returnPath = readReturnPath(search);
+  const campusLogin = campusOneLoginHref(search);
   const [gate, setGate] = useState<'checking' | 'unsigned'>('checking');
   const [query, setQuery] = useState('');
   const [school, setSchool] = useState<DiscoveredSchool | null>(null);
@@ -79,6 +81,10 @@ export function AccountEntry() {
   );
 
   useEffect(() => {
+    if (campusLogin) {
+      window.location.replace(campusLogin);
+      return;
+    }
     const ignore = new AbortController();
     void readExistingSession().then((signedIn) => {
       if (ignore.signal.aborted) return;
@@ -89,13 +95,15 @@ export function AccountEntry() {
       setGate('unsigned');
     });
     return () => ignore.abort();
-  }, [returnPath]);
+  }, [campusLogin, returnPath]);
 
   useEffect(() => {
+    if (campusLogin) return;
     setPasskeys(passkeyAvailable());
-  }, []);
+  }, [campusLogin]);
 
   useEffect(() => {
+    if (campusLogin) return;
     const ignore = new AbortController();
     void listPlatformProviderKinds()
       .then((kinds) => {
@@ -105,7 +113,7 @@ export function AccountEntry() {
         if (!ignore.signal.aborted) setGoogleReady(false);
       });
     return () => ignore.abort();
-  }, []);
+  }, [campusLogin]);
 
   useEffect(() => {
     if (asking) queryField.current?.focus();
@@ -191,7 +199,7 @@ export function AccountEntry() {
     }
   }
 
-  if (gate === 'checking') {
+  if (campusLogin || gate === 'checking') {
     return (
       <div className={styles.page}>
         <main className={styles.main}>
