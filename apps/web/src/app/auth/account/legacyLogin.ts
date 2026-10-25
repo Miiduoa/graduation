@@ -1,4 +1,4 @@
-import { collapseInternalPathHash, loginHref, sanitizeInternalPath } from '@/lib/navigation';
+import { loginHref } from '@/lib/navigation';
 
 export const ACCOUNT_API_ORIGIN = 'https://api.nuni.tw';
 export const PLATFORM_LOGIN_TRANSACTION_KEY = 'campus.platform-login.transaction';
@@ -45,12 +45,12 @@ const ALLOWED_RETURN_PATHS = new Set([
   '/community',
   '/credit-planner',
   '/dms',
+  '/events',
   '/food',
   '/friends',
   '/grades',
   '/groups',
   '/import',
-  '/join',
   '/library',
   '/life',
   '/lms-admin',
@@ -64,6 +64,7 @@ const ALLOWED_RETURN_PATHS = new Set([
   '/privacy/deletion-status',
   '/profile',
   '/search',
+  '/school-info',
   '/settings',
   '/shops',
   '/social',
@@ -113,6 +114,26 @@ const LEGACY_SIMPLE_RETURN_PATHS = new Set([
   '/search',
   '/social',
 ]);
+
+// Only page state travels through login; credentials and nested return URLs do not.
+const RETURN_CONTEXT_KEYS = new Set([
+  'school',
+  'schoolId',
+  'campus',
+  'tab',
+  'section',
+  'source',
+  'q',
+  'category',
+  'week',
+  'view',
+  'semester',
+  'courseId',
+  'groupId',
+  'boardId',
+  'poiId',
+  'create',
+]);
 const MICROSOFT_HOSTS = new Set([
   'login.microsoftonline.com',
   'login.microsoftonline.us',
@@ -153,9 +174,29 @@ function trimPath(path: string): string {
   return trimmed === '' ? '/' : trimmed;
 }
 
+function hasUnsafeReturnCharacters(value: string): boolean {
+  for (let index = 0; index < value.length; index += 1) {
+    const code = value.charCodeAt(index);
+    if (code <= 31 || code === 92 || code === 127) return true;
+  }
+  return false;
+}
+
+function returnFragment(hash: string): string {
+  try {
+    // A fragment may identify page content, never carry another URL or auth payload.
+    return /^[\p{L}\p{N}_.:-]+$/u.test(decodeURIComponent(hash.slice(1))) ? hash : '';
+  } catch {
+    return '';
+  }
+}
+
 function allowedReturnPath(value: string | null | undefined): string | null {
-  const raw = sanitizeInternalPath(value && value.length <= 1200 ? value : null, '');
-  if (!raw) return null;
+  const raw = (value ?? '').trim();
+  if (
+    !raw.startsWith('/') || raw.startsWith('//') ||
+    (value?.length ?? 0) > 1200 || hasUnsafeReturnCharacters(value ?? '')
+  ) return null;
   let parsed: URL;
   try {
     parsed = new URL(raw, 'https://nuni.invalid');
@@ -166,7 +207,8 @@ function allowedReturnPath(value: string | null | undefined): string | null {
     parsed.origin !== 'https://nuni.invalid' ||
     parsed.username ||
     parsed.password ||
-    `${parsed.pathname}${parsed.search}${parsed.hash}` !== raw
+    `${parsed.pathname}${parsed.search}${parsed.hash}` !== raw ||
+    /%(?:2f|5c|0[0-9a-f]|1[0-9a-f]|7f)/i.test(parsed.pathname)
   ) {
     return null;
   }
@@ -175,18 +217,21 @@ function allowedReturnPath(value: string | null | undefined): string | null {
   const allowed =
     normalized === '/' ||
     ALLOWED_RETURN_PATHS.has(normalized) ||
+    /^\/events\/[^/]+$/u.test(normalized) ||
     ALLOWED_RETURN_PREFIXES.some((prefix) => normalized === prefix || normalized.startsWith(`${prefix}/`));
   if (!allowed) return null;
-  return collapseInternalPathHash(`${normalized}${parsed.search}${parsed.hash}`);
+  const context = new URLSearchParams();
+  for (const [key, value] of parsed.searchParams) {
+    if (RETURN_CONTEXT_KEYS.has(key) && !context.has(key) && !hasUnsafeReturnCharacters(value)) {
+      context.set(key, value);
+    }
+  }
+  const query = context.toString();
+  return `${normalized}${query ? `?${query}` : ''}${returnFragment(parsed.hash)}`;
 }
 
 export function sanitizeReturnPath(value: string | null | undefined): string {
-  const destination = allowedReturnPath(value);
-  if (!destination) return '/';
-  const parsed = new URL(destination, 'https://nuni.invalid');
-  // Retained legacy pages keep their existing path-only return policy.
-  if (isLegacyAccountPath(parsed.pathname)) return parsed.hash ? '/' : parsed.pathname;
-  return destination;
+  return allowedReturnPath(value) ?? '/';
 }
 
 type ReturnSearch = string | { get(name: string): string | null };

@@ -209,10 +209,16 @@ it('opens an in-page school lookup from 尋找學校 and searches by school name
   expect(fetchMock.mock.calls.some(([, init]) => init?.method === 'POST')).toBe(false);
 });
 
-it('sends a signed-in visitor to the allowed return path without showing the form', async () => {
+it.each([
+  '/life',
+  '/grades?tab=feedback&schoolId=nthu&campus=nthu#feedback',
+  '/settings?section=appearance&campus=nthu',
+  '/events/evt-1?schoolId=pu&campus=pu&source=school-club-events#registration',
+  '/school-info?campus=ncku#contact',
+])('sends a signed-in visitor back to %s without losing page state', async (returnPath) => {
   const replace = vi.fn();
   vi.stubGlobal('location', { ...window.location, replace, origin: 'https://nuni.tw' });
-  search.current = new URLSearchParams('returnUrl=/life');
+  search.current = new URLSearchParams({ returnUrl: returnPath });
   fetchMock.mockImplementation(async (input) => {
     const url = String(input);
     if (url === '/api/nuni/session') {
@@ -226,16 +232,30 @@ it('sends a signed-in visitor to the allowed return path without showing the for
       headers: { 'Content-Type': 'application/json' },
     });
   });
-  render(<AccountPage />);
-  await waitFor(() => expect(replace).toHaveBeenCalledWith('/life'));
+  const entry = render(<AccountPage />);
+  await waitFor(() => expect(replace).toHaveBeenCalledOnce());
   expect(screen.queryByRole('button', { name: '登入校園帳號' })).toBeNull();
+  if (returnPath === '/life') {
+    expect(replace).toHaveBeenCalledWith(returnPath);
+  } else {
+    const handoff = new URL(replace.mock.calls[0][0], 'https://nuni.tw');
+    expect(handoff.pathname).toBe('/login');
+    expect(handoff.searchParams.get('returnUrl')).toBe(returnPath);
+    entry.unmount();
+    platform.session = { platformAccountId: 'pa_1' };
+    render(<NuniSignIn returnUrl={handoff.searchParams.get('returnUrl')!} />);
+    expect(screen.getByRole('link', { name: '繼續使用' }).getAttribute('href')).toBe(returnPath);
+  }
 });
 
 it.each([false, true])('preserves feedback context through the Campus One login handoff (signed in: %s)', async (signedIn) => {
-  const destination = '/grades?tab=feedback&campus=nthu&label=a%26b%3Dc#recent';
+  const destination = '/grades?tab=feedback&campus=nthu&q=a%26b%3Dc#recent';
   const replace = vi.fn();
   vi.stubGlobal('location', { ...window.location, replace, origin: 'https://nuni.tw' });
-  search.current = new URLSearchParams({ returnUrl: destination, next: '/timetable' });
+  search.current = new URLSearchParams({
+    returnUrl: destination.replace('#recent', '&token=private&returnUrl=%2Flogin#recent'),
+    next: '/timetable',
+  });
   platform.session = signedIn ? { platformAccountId: 'pa_1' } : null;
   fetchMock.mockResolvedValue(new Response(JSON.stringify({
     authenticated: signedIn,
@@ -265,7 +285,7 @@ it.each([false, true])('preserves feedback context through the Campus One login 
 });
 
 it('keeps the legacy operator destination on its existing session flow', async () => {
-  const destination = '/auth/platform/ops?tab=review';
+  const destination = '/auth/platform/ops?create=school#form';
   const replace = vi.fn();
   vi.stubGlobal('location', { ...window.location, replace, origin: 'https://nuni.tw' });
   search.current = new URLSearchParams({ returnUrl: destination });
@@ -274,7 +294,7 @@ it('keeps the legacy operator destination on its existing session flow', async (
     headers: { 'Content-Type': 'application/json' },
   }));
   render(<AccountPage />);
-  await waitFor(() => expect(replace).toHaveBeenCalledWith('/auth/platform/ops'));
+  await waitFor(() => expect(replace).toHaveBeenCalledWith(destination));
   expect(fetchMock).toHaveBeenCalledWith('/api/nuni/session', expect.anything());
 });
 

@@ -9,7 +9,7 @@ import json
 import os
 import re
 from pathlib import Path
-from urllib.parse import parse_qs, urlparse
+from urllib.parse import parse_qs, urlencode, urlparse
 
 from playwright.async_api import async_playwright, expect
 
@@ -106,6 +106,42 @@ async def check_unsigned_account_entry(page):
     for copy in OLD_ACCOUNT_COPY:
         await expect(page.get_by_text(copy, exact=True)).to_have_count(0)
     await expect(page.get_by_role('article')).to_have_count(0)
+
+
+async def check_account_handoff(page, target, expected=None):
+    await page.goto(
+        BASE + '/auth/account?' + urlencode({'returnUrl': target}),
+        wait_until='domcontentloaded',
+    )
+    await page.wait_for_url(lambda value: urlparse(value).path == '/login')
+    actual = urlparse(page.url)
+    assert parse_qs(actual.query, keep_blank_values=True) == {
+        'returnUrl': [target if expected is None else expected],
+    }, page.url
+    assert not actual.fragment, page.url
+    await no_overflow(page)
+
+
+async def check_account_footer_contrast(page):
+    footer = page.get_by_role('navigation', name='公開資訊')
+    for link in await footer.get_by_role('link').all():
+        await expect(link).to_be_visible()
+        contrast = await link.evaluate('''link => {
+            const channels = color => color.match(/[\\d.]+/g).map(Number);
+            const background = channels(getComputedStyle(link.closest('footer')).backgroundColor);
+            const style = getComputedStyle(link);
+            const foreground = channels(style.color);
+            const alpha = (foreground[3] ?? 1) * Number(style.opacity);
+            const rendered = foreground.slice(0, 3).map((value, index) =>
+                value * alpha + background[index] * (1 - alpha));
+            const luminance = color => color.slice(0, 3).map(value => {
+                const channel = value / 255;
+                return channel <= 0.04045 ? channel / 12.92 : ((channel + 0.055) / 1.055) ** 2.4;
+            }).reduce((total, value, index) => total + value * [0.2126, 0.7152, 0.0722][index], 0);
+            const a = luminance(rendered), b = luminance(background);
+            return (Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05);
+        }''')
+        assert contrast >= 4.5, f'Account footer link contrast is only {contrast:.2f}:1'
 
 
 async def check_unsigned_today(page):
@@ -497,6 +533,22 @@ async def main():
             )
             results.append('unsigned account entry keeps existing actions without demo copy')
 
+            await check_account_footer_contrast(page)
+            await page.emulate_media(color_scheme='dark')
+            await goto_path(page, '/auth/account')
+            await check_unsigned_account_entry(page)
+            await check_oled(page)
+            await check_account_footer_contrast(page)
+            await no_overflow(page)
+            await page.screenshot(
+                path=str(OUT / 'auth-account-oled-mobile.png'),
+                animations='disabled',
+            )
+            await page.emulate_media(color_scheme='light')
+            await goto_path(page, '/auth/account')
+            await check_unsigned_account_entry(page)
+            results.append('account footer links remain readable in light and OLED themes')
+
             await page.set_viewport_size({'width': 390, 'height': 844})
             await page.get_by_role('button', name='尋找學校').click()
             await expect(page.get_by_label('學校配發的信箱或校名')).to_be_visible()
@@ -555,6 +607,19 @@ async def main():
             await signed_page.goto(BASE + '/auth/account?returnUrl=/staff', wait_until='domcontentloaded')
             await signed_page.wait_for_url(re.compile(r'https?://[^/]+/?(\?.*)?$'))
             assert urlparse(signed_page.url).path == '/'
+            for target in [
+                '/grades?tab=feedback&schoolId=nthu&campus=nthu',
+                '/settings?section=appearance&campus=nthu#reading',
+                '/school-info?campus=pu',
+                '/events?campus=nthu',
+            ]:
+                await check_account_handoff(signed_page, target)
+            await check_account_handoff(
+                signed_page,
+                '/grades?tab=feedback&campus=nthu&token=discard-me&session=discard-me&next=%2Fstaff#recent',
+                '/grades?tab=feedback&campus=nthu#recent',
+            )
+            results.append('account handoff preserves campus, tabs and settings position without auth payloads')
             results.append('signed-in account visits follow allowed return paths')
             assert not errors, errors
             await signed.close()
