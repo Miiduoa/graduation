@@ -429,10 +429,10 @@ async def main():
             signed_page = await signed.new_page()
             signed_page.set_default_timeout(10000)
             await signed_page.goto(BASE + '/auth/account?returnUrl=/life', wait_until='domcontentloaded')
-            await signed_page.wait_for_url(re.compile(r'/life(?:\?.*)?$'))
+            await signed_page.wait_for_url(re.compile(r'https?://[^/]+/life(?:\?.*)?$'))
             assert urlparse(signed_page.url).path == '/life'
             await signed_page.goto(BASE + '/auth/account?returnUrl=/staff', wait_until='domcontentloaded')
-            await signed_page.wait_for_url(re.compile(r'https?://[^/]+/?$'))
+            await signed_page.wait_for_url(re.compile(r'https?://[^/]+/?(\?.*)?$'))
             assert urlparse(signed_page.url).path == '/'
             await signed.close()
             results.append('signed-in account visits follow allowed return paths')
