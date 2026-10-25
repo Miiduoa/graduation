@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Pressable, Text, View } from 'react-native';
+import { Pressable, ScrollView, Text, View } from 'react-native';
 import {
   sortStudyTasks,
   studyTaskStatus,
@@ -9,19 +9,31 @@ import {
 } from '@campus/shared/src/nuniStudyAgenda';
 import { formatTaipeiDateTime } from '@campus/shared/src/taipeiTime';
 import { feedbackPredatesSubmission } from '@campus/shared/src/lmsReviewQueue';
+import { useNuniDraftState } from '../../state/nuniDrafts';
 import { useTheme } from '../../state/theme';
 
-type Filter = 'pending' | 'closed' | 'submitted';
+type Filter = 'pending' | 'soon' | 'overdue' | 'feedback' | 'submitted' | 'closed' | 'all';
 const FILTERS: [Filter, string][] = [
   ['pending', '待完成'],
-  ['closed', '已停止收件'],
+  ['soon', '未來七天'],
+  ['overdue', '已過建議時間'],
+  ['feedback', '老師回饋'],
   ['submitted', '已有繳交紀錄'],
+  ['closed', '已停止收件'],
+  ['all', '全部'],
 ];
-const belongs = (task: NuniStudyTask, filter: Filter) => {
+const belongs = (task: NuniStudyTask, filter: Filter, now: number) => {
+  if (filter === 'all') return true;
   const status = studyTaskStatus(task);
-  return filter === 'submitted'
-    ? status === 'submitted' || status === 'feedback'
-    : status === filter;
+  if (filter === 'submitted') return status === 'submitted' || status === 'feedback';
+  if (filter === 'soon' || filter === 'overdue') {
+    if (status !== 'pending') return false;
+    const timing = studyTaskTiming(task, now);
+    return filter === 'soon'
+      ? timing === 'today' || timing === 'week'
+      : timing === 'overdue';
+  }
+  return status === filter;
 };
 
 export function StudyAgenda({
@@ -38,7 +50,8 @@ export function StudyAgenda({
   open(courseId: string, activityId?: string): void;
 }) {
   const theme = useTheme();
-  const [filter, setFilter] = useState<Filter>('pending');
+  const [filter, setFilter] = useNuniDraftState<Filter>('courses:agenda-filter', 'pending');
+  const [courseFilter, setCourseFilter] = useNuniDraftState<string>('courses:agenda-course', 'all');
   const [limit, setLimit] = useState(8);
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
@@ -46,8 +59,21 @@ export function StudyAgenda({
     return () => clearInterval(timer);
   }, []);
   const tasks = sortStudyTasks(data?.tasks ?? [], now);
-  const visible = tasks.filter((task) => belongs(task, filter));
-  const partial = !!data && (data.failedCourseIds.length > 0 || data.limitedCourseIds.length > 0);
+  const studentCourses = (data?.workspaces ?? []).filter(
+    (course) => course.state === 'active' && course.memberRole === 'student',
+  );
+  const selectedCourse =
+    courseFilter === 'all' || studentCourses.some((course) => course.id === courseFilter)
+      ? courseFilter
+      : 'all';
+  const scopedTasks =
+    selectedCourse === 'all' ? tasks : tasks.filter((task) => task.courseId === selectedCourse);
+  const visible = scopedTasks.filter((task) => belongs(task, filter, now));
+  const failedCourseIds =
+    data?.failedCourseIds.filter((id) => selectedCourse === 'all' || id === selectedCourse) ?? [];
+  const limitedCourseIds =
+    data?.limitedCourseIds.filter((id) => selectedCourse === 'all' || id === selectedCourse) ?? [];
+  const partial = failedCourseIds.length > 0 || limitedCourseIds.length > 0;
   const copy = { color: theme.colors.text, fontSize: 15, lineHeight: 23 };
   if (!loading && !data && !error) return null;
   return (
@@ -82,17 +108,17 @@ export function StudyAgenda({
           {error}
         </Text>
       ) : null}
-      {data?.failedCourseIds.length ? (
+      {failedCourseIds.length ? (
         <Text accessibilityRole="alert" style={{ ...copy, color: theme.colors.danger }}>
-          有 {data.failedCourseIds.length} 門課程尚未完整載入，以下保留已確認的項目。
+          有 {failedCourseIds.length} 門課程尚未完整載入，以下保留已確認的項目。
         </Text>
       ) : null}
-      {data?.limitedCourseIds.length ? (
+      {limitedCourseIds.length ? (
         <Text style={{ ...copy, color: theme.colors.muted }}>
           部分課程還可能有較早內容；這裡的數量只計算已載入項目。
         </Text>
       ) : null}
-      {error || data?.failedCourseIds.length ? (
+      {error || failedCourseIds.length ? (
         <Pressable
           accessibilityRole="button"
           accessibilityState={{ disabled: loading }}
@@ -107,36 +133,89 @@ export function StudyAgenda({
       ) : null}
       {data ? (
         <>
-          <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
-            {FILTERS.map(([value, label]) => (
-              <Pressable
-                key={value}
-                accessibilityRole="button"
-                accessibilityState={{ selected: filter === value }}
-                onPress={() => {
-                  setFilter(value);
-                  setLimit(8);
-                }}
-                style={{
-                  borderRadius: 8,
-                  paddingHorizontal: 12,
-                  paddingVertical: 11,
-                  borderWidth: 1,
-                  borderColor: filter === value ? theme.colors.accent : theme.colors.border,
-                  backgroundColor: filter === value ? theme.colors.accentSoft : theme.colors.bg,
-                }}
+          {studentCourses.length > 1 ? (
+            <View style={{ gap: 7 }}>
+              <Text style={{ ...copy, color: theme.colors.muted, fontSize: 13 }}>
+                依課程查看
+              </Text>
+              <ScrollView
+                horizontal
+                showsHorizontalScrollIndicator={false}
+                keyboardShouldPersistTaps="handled"
+                contentContainerStyle={{ gap: 8, paddingRight: 8 }}
               >
-                <Text
+                {[{ id: 'all', title: '所有課程' }, ...studentCourses].map((course) => (
+                  <Pressable
+                    key={course.id}
+                    accessibilityRole="button"
+                    accessibilityLabel={'篩選課程：' + course.title}
+                    accessibilityState={{ selected: selectedCourse === course.id }}
+                    onPress={() => {
+                      setCourseFilter(course.id);
+                      setLimit(8);
+                    }}
+                    style={{
+                      borderRadius: 9,
+                      borderWidth: 1,
+                      paddingVertical: 10,
+                      paddingHorizontal: 12,
+                      borderColor:
+                        selectedCourse === course.id ? theme.colors.accent : theme.colors.border,
+                      backgroundColor:
+                        selectedCourse === course.id ? theme.colors.accentSoft : theme.colors.bg,
+                    }}
+                  >
+                    <Text style={{
+                      ...copy,
+                      fontSize: 14,
+                      color: selectedCourse === course.id ? theme.colors.accent : theme.colors.muted,
+                    }}>
+                      {course.title}
+                    </Text>
+                  </Pressable>
+                ))}
+              </ScrollView>
+            </View>
+          ) : null}
+          <View style={{ gap: 7 }}>
+            <Text style={{ ...copy, color: theme.colors.muted, fontSize: 13 }}>
+              依進度篩選
+            </Text>
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              keyboardShouldPersistTaps="handled"
+              contentContainerStyle={{ gap: 8, paddingRight: 8 }}
+            >
+              {FILTERS.map(([value, label]) => (
+                <Pressable
+                  key={value}
+                  accessibilityRole="button"
+                  accessibilityState={{ selected: filter === value }}
+                  onPress={() => {
+                    setFilter(value);
+                    setLimit(8);
+                  }}
                   style={{
+                    borderRadius: 9,
+                    paddingHorizontal: 12,
+                    paddingVertical: 11,
+                    borderWidth: 1,
+                    borderColor: filter === value ? theme.colors.accent : theme.colors.border,
+                    backgroundColor: filter === value ? theme.colors.accentSoft : theme.colors.bg,
+                  }}
+                >
+                  <Text style={{
                     ...copy,
                     fontSize: 14,
                     color: filter === value ? theme.colors.accent : theme.colors.muted,
-                  }}
-                >
-                  {label} {tasks.filter((task) => belongs(task, value)).length}
-                </Text>
-              </Pressable>
-            ))}
+                  }}>
+                    {label} {scopedTasks.filter((task) => belongs(task, value, now)).length}
+                    {partial ? '+' : ''}
+                  </Text>
+                </Pressable>
+              ))}
+            </ScrollView>
           </View>
           {visible.length ? (
             visible.slice(0, limit).map((task) => {
@@ -155,9 +234,13 @@ export function StudyAgenda({
                         ? '已作答'
                         : '已繳交'
                       : status === 'closed'
-                        ? '已停止收件 · 未繳交'
+                        ? task.kind === 'quiz'
+                          ? '已結束 · 未作答'
+                          : '已停止收件 · 未繳交'
                         : timing === 'overdue'
-                          ? '參考期限已過 · 仍可繳交'
+                          ? task.kind === 'quiz'
+                            ? '參考期限已過 · 仍可作答'
+                            : '參考期限已過 · 仍可繳交'
                           : timing === 'today'
                             ? '建議今天完成'
                             : timing === 'week'
@@ -212,9 +295,17 @@ export function StudyAgenda({
                 ? '已載入的內容中沒有這類項目，其他課程仍待確認。'
                 : filter === 'pending'
                   ? '目前沒有待完成項目。可以從下方課程繼續閱讀教材。'
-                  : filter === 'closed'
-                    ? '目前沒有已停止收件且尚未繳交的項目。'
-                    : '目前還沒有繳交紀錄。'}
+                  : filter === 'soon'
+                    ? '未來七天內沒有待完成的項目。'
+                    : filter === 'overdue'
+                    ? '目前沒有已過建議時間且尚未完成的項目。'
+                    : filter === 'feedback'
+                      ? '目前沒有新的老師回饋。'
+                      : filter === 'closed'
+                        ? '目前沒有已停止收件且尚未繳交的項目。'
+                        : filter === 'submitted'
+                          ? '目前還沒有繳交紀錄。'
+                          : '目前沒有課業活動。'}
             </Text>
           )}
           {visible.length > limit ? (
