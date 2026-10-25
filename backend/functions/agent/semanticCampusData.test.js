@@ -1,7 +1,7 @@
 'use strict';
 
 const { connectCampusServiceData } = require('./semanticCampusData');
-const fake = ({ verify = jest.fn(), tool = jest.fn(), events = jest.fn() } = {}) => ({ verify, tool, events });
+const fake = ({ verify = jest.fn(), tool = jest.fn(), events = jest.fn(), records = jest.fn() } = {}) => ({ verify, tool, events, records });
 
 describe('verified campus data read-through', () => {
   test('reads only authorized current-school assignments and announcement records', async () => {
@@ -96,4 +96,50 @@ describe('verified campus data read-through', () => {
     }, fake({ events }));
     expect(output[0].items).toEqual([{ title: '正式活動', detail: '' }]);
   });
+});
+
+
+test('reads only the student's own school-scoped orders, not other-school orders', async () => {
+  const results = await connectCampusServiceData({
+    uid: 'alice', schoolId: 'pu', utterance: '我的取餐訂單',
+    destinations: ['/food'],
+  }, fake({ records: jest.fn(async () => [
+    { schoolId: 'nthu', cafeteria: '不同學校餐廳', status: 'pending', queueNumber: 9 },
+    { schoolId: 'pu', cafeteria: '校內餐廳', status: 'preparing', queueNumber: 21 },
+  ]) }));
+  expect(results[0]).toMatchObject({
+    status: 'available', items: [{ title: '校內餐廳', detail: 'preparing · 取餐號 21' }],
+  });
+  expect(JSON.stringify(results[0])).not.toContain('不同學校餐廳');
+});
+
+test('filters private notifications by the requested school', async () => {
+  const result = await connectCampusServiceData({
+    uid: 'alice', schoolId: 'pu', utterance: '查通知',
+    destinations: ['/messages'],
+  }, fake({ records: jest.fn(async () => [
+    { schoolId: 'nthu', title: '不同學校私人提醒', body: '秘密' },
+    { schoolId: 'pu', userId: 'alice', title: '可讀通知', body: '今天有公告' },
+  ]) }));
+  expect(result[0].items).toEqual([{ title: '可讀通知', detail: '今天有公告' }]);
+});
+
+test('does not reveal lost-found contact details or unlisted posts', async () => {
+  const result = await connectCampusServiceData({
+    uid: 'alice', schoolId: 'pu', destinations: ['/lost-found'],
+  }, fake({ records: jest.fn(async () => [
+    { schoolId: 'pu', title: '耳機', type: 'found', status: 'open', location: '體育館', contactInfo: 'private@example.com' },
+    { schoolId: 'pu', title: '已關閉案件', type: 'lost', status: 'resolved' },
+  ]) }));
+  expect(result[0].items).toEqual([{ title: '拾獲：耳機', detail: '體育館' }]);
+  expect(JSON.stringify(result[0])).not.toContain('private@example.com');
+});
+
+test('hides a read result when membership is revoked while the read is in progress', async () => {
+  const verify = jest.fn().mockResolvedValueOnce(undefined).mockRejectedValueOnce(new Error('revoked'));
+  const results = await connectCampusServiceData({
+    uid: 'alice', schoolId: 'pu', destinations: ['/classroom'],
+  }, fake({ verify, tool: jest.fn(async () => [{ title: '私密作業' }]) }));
+  expect(results[0].status).toBe('connection-required');
+  expect(JSON.stringify(results)).not.toContain('私密作業');
 });

@@ -7,7 +7,7 @@
  */
 const SAFE_DATA_ROUTES = new Set([
   '/timetable', '/classroom', '/announcements', '/events', '/map',
-  '/cafeteria', '/library', '/dormitory',
+  '/cafeteria', '/library', '/dormitory', '/food', '/messages', '/dms', '/lost-found', '/groups',
 ]);
 const CONNECTABLE_LABELS = Object.freeze({
   '/timetable': '個人課表',
@@ -18,6 +18,11 @@ const CONNECTABLE_LABELS = Object.freeze({
   '/cafeteria': '餐廳',
   '/library': '平台借閱紀錄',
   '/dormitory': '平台報修紀錄',
+  '/food': '平台訂單',
+  '/messages': '帳號通知',
+  '/dms': '私人對話',
+  '/lost-found': '失物招領',
+  '/groups': '已加入群組',
 });
 const ROUTE_HINTS = Object.freeze({
   '/bus': '公車到站需要先選路線與站牌，請到公車頁查詢實際到站資訊。',
@@ -73,6 +78,28 @@ function createReaders() {
     verify: (uid, schoolId) => createAuthzHelpers(getFirestore()).assertActiveSchoolMember(schoolId, uid),
     tool: runTool,
     events: fetchAssistantEvents,
+    records: async (kind, ctx) => {
+      const db = getFirestore();
+      const school = db.collection('schools').doc(ctx.schoolId);
+      const user = db.collection('users').doc(ctx.uid);
+      let ref;
+      if (kind === 'orders') {
+        ref = user.collection('schools').doc(ctx.schoolId).collection('orders')
+          .orderBy('createdAt', 'desc').limit(15);
+      } else if (kind === 'notifications') {
+        ref = user.collection('notifications').orderBy('createdAt', 'desc').limit(20);
+      } else if (kind === 'conversations') {
+        ref = db.collection('conversations').where('memberIds', 'array-contains', ctx.uid).limit(30);
+      } else if (kind === 'lostFound') {
+        ref = school.collection('lostFound').limit(25);
+      } else if (kind === 'groups') {
+        ref = user.collection('groups').where('schoolId', '==', ctx.schoolId).limit(25);
+      } else {
+        throw new Error('Unsupported read-only service');
+      }
+      const snapshot = await ref.get();
+      return snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+    },
   };
 }
 
@@ -184,6 +211,77 @@ async function connectOne(destination, input, readers) {
           : '平台尚未讀到報修紀錄，不代表校方不存在紀錄。',
         rows);
     }
+    case '/food': {
+      if (!/訂單|取餐|取餐號|排隊|等候|出餐|取消訂單/.test(spoken)) {
+        return openOnly(destination,
+          '查看菜單請先開啟餐廳；實際點餐要在店家服務頁確認，不能從語音直接付款或下單。');
+      }
+      const all = await readers.records('orders', ctx);
+      if (!Array.isArray(all)) return summary(destination, 'unavailable', '目前無法查詢帳號的訂單副本。');
+      const rows = all.filter(x => !x.schoolId || x.schoolId === input.schoolId).slice(0, MAX_ITEMS)
+        .map(x => item(x.cafeteria || x.merchantName || '校園餐廳',
+          [x.status, Number.isSafeInteger(x.queueNumber) && x.queueNumber > 0 ? '取餐號 ' + x.queueNumber : '']
+            .filter(Boolean).join(' · ')));
+      return summary(destination, rows.some(Boolean) ? 'available' : 'empty',
+        rows.length ? '已讀取本人 Campus One 訂單副本，實際取餐與取消仍以商家最新狀態為準。'
+          : '平台尚未讀到本人的訂單，不能推定其他店家網站沒有訂單。',
+        rows);
+    }
+    case '/messages': {
+      const data = await readers.records('notifications', ctx);
+      if (!Array.isArray(data)) return summary(destination, 'unavailable', '目前無法讀取帳號通知。');
+      const eligible = data.filter(x => {
+        const rowSchool = x.schoolId || (x.data && x.data.schoolId);
+        return x.userId === undefined || x.userId === input.uid
+          ? rowSchool === input.schoolId
+          : false;
+      });
+      const rows = eligible.slice(0, MAX_ITEMS).map(x => item(x.title, x.body || ''));
+      return summary(destination, rows.some(Boolean) ? 'available' : 'empty',
+        rows.length ? '已讀取目前學校的本人通知，不包括其他學校或未同步平台。'
+          : '此校尚未讀到本人通知，不代表校方各系統沒有新訊息。',
+        rows);
+    }
+    case '/dms': {
+      const data = await readers.records('conversations', ctx);
+      if (!Array.isArray(data)) return summary(destination, 'unavailable', '目前無法讀取本人對話。');
+      const eligible = data.filter(x =>
+        x.schoolId === input.schoolId && x.type === 'dm' && Array.isArray(x.memberIds) &&
+        x.memberIds.length === 2 && x.memberIds.includes(input.uid));
+      const rows = eligible.slice(0, MAX_ITEMS).map((x, i) =>
+        item('私人對話 ' + (i + 1), x.lastMessageText || '請開啟訊息頁查看對話'));
+      return summary(destination, rows.some(Boolean) ? 'available' : 'empty',
+        rows.length ? '已讀取本人參與的校內對話摘要，未顯示其他人的帳號識別。'
+          : '此校沒有讀到本人參與的私人對話。',
+        rows);
+    }
+    case '/lost-found': {
+      const data = await readers.records('lostFound', ctx);
+      if (!Array.isArray(data)) return summary(destination, 'unavailable', '失物招領目前無法讀取。');
+      const active = data.filter(x =>
+        (!x.schoolId || x.schoolId === input.schoolId) &&
+        ['open', 'active'].includes(String(x.status || '')) &&
+        ['lost', 'found'].includes(String(x.type || '')));
+      const rows = active.slice(0, MAX_ITEMS).map(x =>
+        item((x.type === 'found' ? '拾獲：' : '遺失：') + text(x.title, 100), x.location || ''));
+      return summary(destination, rows.some(Boolean) ? 'available' : 'empty',
+        rows.length ? '已從目前學校的公開刊登取得項目，聯絡方式不會由語音助理顯示。'
+          : '平台沒有讀到目前公開的刊登，可能仍有學校官方獨立失物資料。',
+        rows);
+    }
+    case '/groups': {
+      const data = await readers.records('groups', ctx);
+      if (!Array.isArray(data)) return summary(destination, 'unavailable', '無法核對目前加入的課程與群組。');
+      const members = data.filter(x =>
+        x.schoolId === input.schoolId && x.status === 'active' &&
+        (!x.groupId || x.groupId === x.id));
+      const rows = members.length ? [item('已連結 ' + members.length + ' 筆有效群組',
+        '詳細課程權限與最新內容請進入群組確認')] : [];
+      return summary(destination, rows.length ? 'available' : 'empty',
+        rows.length ? '已核對目前帳號的群組連結數量；不代表所有校方 LMS 課程都已匯入。'
+          : '未讀到本人有效群組，請確認學校或課程連線狀態。',
+        rows);
+    }
     default:
       return openOnly(destination);
   }
@@ -211,7 +309,7 @@ async function connectCampusServiceData(input, deps = createReaders()) {
       '帳號尚未驗證為目前學校的有效成員；請先完成學校身分連線。'));
   }
   const ctx = { ...input, uid, schoolId };
-  return Promise.all(destinations.map(async (d) => {
+  const results = await Promise.all(destinations.map(async (d) => {
     if (!SAFE_DATA_ROUTES.has(d)) return openOnly(d);
     try {
       // Tool failures must not be portrayed as a genuinely empty data set.
@@ -220,6 +318,14 @@ async function connectCampusServiceData(input, deps = createReaders()) {
       return summary(d, 'unavailable', '這項服務目前無法取得已驗證資料，請前往原服務頁確認。');
     }
   }));
+  // A school membership may be revoked while individual read operations run.
+  try {
+    await deps.verify(uid, schoolId);
+  } catch {
+    return destinations.map(d => summary(d, 'connection-required',
+      '查詢期間校園身分已失效，不能顯示較早讀到的私人資料。'));
+  }
+  return results;
 }
 
 module.exports = {
