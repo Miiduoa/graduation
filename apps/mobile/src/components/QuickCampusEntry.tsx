@@ -2,7 +2,8 @@ import React, { useEffect, useRef, useState } from 'react';
 import { Keyboard, Pressable, Text, TextInput, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import type { CampusSemanticResult } from '@campus/shared/src/campusSemantic';
-import { useTheme } from '../state/theme';
+import { theme } from '../ui/theme';
+import { useThemeVersion } from '../ui/useThemeStyleSheet';
 import {
   getMobileActionsForDestinations,
   getMobileQuickActions,
@@ -34,8 +35,8 @@ export function QuickCampusEntry({
   onOpen: (action: MobileQuickAction) => void;
   onAsk: (question: string) => void;
 }) {
-  const design = useTheme();
-  const { colors, radius, typography } = design;
+  useThemeVersion();
+  const { colors, radius, typography } = theme;
   const [query, setQuery] = useState('');
   const [analysis, setAnalysis] = useState<Analysis | null>(null);
   const sequence = useRef(0);
