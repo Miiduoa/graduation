@@ -2,10 +2,11 @@
 
 import Link from 'next/link';
 import { usePathname, useSearchParams } from 'next/navigation';
-import { Suspense, useState } from 'react';
+import { Suspense, useEffect, useRef, useState } from 'react';
 import { useAuth } from './AuthGuard';
 import { CampusServiceMenu } from './CampusServiceMenu';
 import { CampusIcon } from './CampusIcon';
+import { QuickCampusEntry } from './QuickCampusEntry';
 import { SchoolSelector } from './SchoolSelector';
 import { useNuniSession } from '@/features/nuni/Session';
 import { useClientHydrated } from '@/lib/useClientHydrated';
@@ -25,6 +26,16 @@ function Header() {
   const hydrated = useClientHydrated();
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
+  const [quickOpen, setQuickOpen] = useState(false);
+  const quickTrigger = useRef<HTMLButtonElement>(null);
+  const quickPanel = useRef<HTMLElement>(null);
+  useEffect(() => {
+    if (quickOpen) quickPanel.current?.focus();
+  }, [quickOpen]);
+  const closeQuick = () => {
+    setQuickOpen(false);
+    quickTrigger.current?.focus();
+  };
   const context = useCampusNavigationSearch(params);
   const activeSection = primaryNavigationSection(pathname);
   const href = (path: string) => campusServiceHref(path, context);
@@ -46,6 +57,18 @@ function Header() {
           ) : null}
         </div>
         <div className={headerStyles.account}>
+          <button
+            ref={quickTrigger}
+            type="button"
+            className={headerStyles.voiceTrigger}
+            aria-label="開啟校園語音 AI"
+            aria-controls="campus-voice-quick-panel"
+            aria-expanded={quickOpen}
+            onClick={() => setQuickOpen((opened) => !opened)}
+          >
+            <CampusIcon name="microphone" size={18} />
+            <span>語音 AI</span>
+          </button>
           <Link
             href={href('/search')}
             className={headerStyles.quickSearch}
@@ -130,6 +153,33 @@ function Header() {
           <CampusServiceMenu />
         </nav>
       </header>
+      {quickOpen && (
+        <section
+          id="campus-voice-quick-panel"
+          ref={quickPanel}
+          role="dialog"
+          aria-label="校園語音與 AI 快速操作"
+          tabIndex={-1}
+          className={headerStyles.voicePanel}
+          onKeyDown={(event) => {
+            if (event.key === 'Escape') {
+              event.stopPropagation();
+              closeQuick();
+            }
+          }}
+          onClick={(event) => {
+            if (event.target instanceof Element && event.target.closest('a')) {
+              setQuickOpen(false);
+            }
+          }}
+        >
+          <div className={headerStyles.voicePanelHeading}>
+            <span>校園快速操作</span>
+            <button type="button" onClick={closeQuick} aria-label="關閉校園語音 AI">關閉</button>
+          </div>
+          <QuickCampusEntry />
+        </section>
+      )}
       {error && (
         <p role="alert" className={headerStyles.error}>
           {error}
