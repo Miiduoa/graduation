@@ -405,7 +405,7 @@ function CourseContent({ courseId, uid }: { courseId: string; uid: string }) {
           <section className={styles.section} aria-labelledby="course-materials-title">
             <h2 id="course-materials-title">教材櫃</h2>
             <p className={styles.sectionNote}>
-              依單元或週次排列。類型從連結判斷；學校課沒有檔案大小欄位時會明說。
+              依單元或週次整理教材，開啟項目即可閱讀。
             </p>
             {linked?.kind === 'material' && !course.modules.some((item) => item.id === linked.id) ? (
               <p role="status" className={styles.notice}>
