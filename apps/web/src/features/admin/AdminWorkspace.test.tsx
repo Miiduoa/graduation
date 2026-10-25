@@ -805,7 +805,7 @@ it('moves from a selected school to its staff without losing the school context'
   fireEvent.click(screen.getByRole('button', { name: '查看校方授權' }));
   await waitFor(() => expect(window.location.hash).toBe('#people/school-one'));
   expect((await screen.findByLabelText('選擇學校') as HTMLSelectElement).value).toBe('school-one');
-  fireEvent.click(screen.getByRole('button', { name: '查看學校設定' }));
+  fireEvent.click(await screen.findByRole('button', { name: '查看學校設定' }));
   await waitFor(() => expect(window.location.hash).toBe('#schools/school-one'));
 });
 
