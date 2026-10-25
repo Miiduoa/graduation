@@ -200,7 +200,12 @@ function OfficialPublicServiceCard({
   return (
     <AICard title={title}>
       <Text style={{ color: aiTokens.text, lineHeight: 24 }}>{serviceBody(serviceKind, link)}</Text>
-      <AIButton label={buttonLabel} variant="ghost" disabled={opening} onPress={() => void open()} />
+      <AIButton
+        label={buttonLabel}
+        variant="ghost"
+        disabled={opening}
+        onPress={() => void open()}
+      />
       <Text style={{ color: aiTokens.muted, lineHeight: 22, marginTop: 8 }}>
         來源：{link.sourceLabel}
       </Text>

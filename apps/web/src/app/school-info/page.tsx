@@ -1,6 +1,7 @@
 'use client';
 
 import { use, useState } from 'react';
+import { resolveSchoolPublicServices } from '@campus/shared/src/schoolPublicServices';
 import {
   PUBLIC_SCHOOL_INFO_CATALOG_URL,
   PUBLIC_SCHOOL_INFO_SNAPSHOT_DATE,
@@ -66,6 +67,7 @@ function SchoolInfoContent({ schoolId, schoolName, status }: CampusBrowseContext
   const mapsUrl = buildPublicSchoolMapsSearchUrl(info);
   const city = formatPublicSchoolCity(info);
   const address = formatPublicSchoolAddress(info);
+  const career = resolveSchoolPublicServices(schoolId)?.services.career;
 
   async function copyTelephone() {
     setCopyMessage('');
@@ -135,6 +137,21 @@ function SchoolInfoContent({ schoolId, schoolName, status }: CampusBrowseContext
             </p>
           ) : null}
         </section>
+
+        {career ? (
+          <section className="card">
+            <h2>校方職涯資訊</h2>
+            <p>
+              {career.entryKind === 'student-portal-fallback'
+                ? '請在臺大學生專區查找職涯與實習資訊。'
+                : '職缺、實習與諮詢資訊請到所選學校官方網站查看。'}
+            </p>
+            <a className="btn" href={career.url} target="_blank" rel="noopener noreferrer">
+              {career.label} ↗
+            </a>
+            <p style={{ color: 'var(--muted)', fontSize: 14 }}>來源：{career.sourceLabel}</p>
+          </section>
+        ) : null}
 
         <section className="card">
           <h2>資料來源</h2>

@@ -432,7 +432,7 @@ function NuniContent() {
     content = (
       <>
         <p>
-          <Link href="/classroom/grades" className={styles.button}>
+          <Link href="/grades?tab=feedback" className={styles.button}>
             課業成績與回饋
           </Link>
         </p>

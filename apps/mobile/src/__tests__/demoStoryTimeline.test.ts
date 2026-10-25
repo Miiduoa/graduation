@@ -14,7 +14,6 @@ import { getDemoStory, getTodayTimeline } from '../services/personaContext';
 const KNOWN_ROUTES = new Set<string>([
   // HomeStack (Today tab)
   'TodayHome',
-  'SmartDashboard',
   'AIChat',
   'CampusSocialScreen',
   'CampusGame',
@@ -25,21 +24,16 @@ const KNOWN_ROUTES = new Set<string>([
   // LearnStack (學習 tab)
   'LearnHome',
   'CoursesHome',
-  'CourseHubV2',
+  'CourseModules',
   'CourseHub',
-  'CourseAssignmentsV2',
-  'CourseAssignmentDetailV2',
-  'CourseGradesV2',
-  'CourseQuizzesV2',
-  'CourseMaterialsV2',
-  'CourseForumV2',
-  'CourseAnnouncementsV2',
-  'CourseAIAssistantV2',
+  'HomeworkSubmit',
+  'CourseScores',
+  'QuizCenter',
+  'CourseMaterialViewer',
+  'CourseDiscussion',
   'TeacherCockpit',
   'TeacherGrading',
   'TeachingHub',
-  'StaffHub',
-  'DepartmentHub',
   'AdminDashboard',
   'MerchantHub',
   'AcademicInsights',
@@ -52,7 +46,6 @@ const KNOWN_ROUTES = new Set<string>([
   'Ordering',
   'MenuSubscription',
   'Health',
-  'Dormitory',
   'IndoorFloorMap',
   // MessagesStack (訊息 tab)
   'Dms',
@@ -119,14 +112,13 @@ describe('demo timeline 每個事件至少有 title + detail', () => {
 });
 
 describe('學生 timeline 的課程 link 用實際 DEMO_COURSES id', () => {
-  test('學生課程事件對應 CourseHubV2 + 真實 courseId', () => {
+  test('學生課程事件對應 CourseModules + 真實 courseId', () => {
     const story = getDemoStory('demo_student_kuchih');
     const timeline = getTodayTimeline(story, new Date('2026-05-20T12:00:00'));
     const classes = timeline.filter((e) => e.category === 'class');
     expect(classes.length).toBeGreaterThanOrEqual(2);
     for (const c of classes) {
-      // 應該都指向 CourseHubV2
-      expect(c.link?.screen).toBe('CourseHubV2');
+      expect(c.link?.screen).toBe('CourseModules');
       // courseId 應該是實際 DEMO_COURSES 的 id (5 位數字)
       const cid = c.link?.params?.courseId as number;
       expect(typeof cid).toBe('number');

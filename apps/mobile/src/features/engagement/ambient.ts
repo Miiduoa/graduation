@@ -449,7 +449,7 @@ async function buildDepartmentCue(schoolId: string): Promise<AmbientCue[]> {
           : '目前待審核量偏低',
       body: '同類角色通常會先把堆積中的審核清掉，再回頭看統計與長期報表，避免節奏被未決事項拖住。',
       ctaLabel: '查看審核',
-      target: { tab: '學習', screen: 'DepartmentHub' },
+      target: { tab: 'Today', screen: 'TodayHome' },
       metric: pendingCount > 0 ? `${pendingCount} 件待審核` : undefined,
       distinctUserCount: Math.max(pendingCount, 1),
       updatedAt: new Date(),

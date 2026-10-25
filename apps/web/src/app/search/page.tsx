@@ -6,6 +6,7 @@ import Link from 'next/link';
 import { SiteShell } from '@/components/SiteShell';
 import { useOptionalSelectedSchool } from '@/components/SelectedSchoolProvider';
 import { browsingSchoolSearch } from '@/lib/navigation';
+import { campusServiceHref } from '@/lib/campusNavigation';
 import { useSignInOptions } from '@/lib/signInOptions';
 import styles from './search.module.css';
 import {
@@ -122,7 +123,7 @@ function ServiceDirectory() {
                     <Link
                       key={service.href}
                       className={styles.service}
-                      href={`${service.href}${schoolSearch}`}
+                      href={campusServiceHref(service.href, schoolSearch)}
                     >
                       <div>
                         <h3>{service.name}</h3>

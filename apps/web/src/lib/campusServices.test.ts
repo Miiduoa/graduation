@@ -20,9 +20,10 @@ it('lists lost-found as a school-account service, not a platform Google task', (
   expect(lostFound?.access).not.toBe('platform');
 });
 
-it('finds school info through contact keywords', () => {
-  const services = searchCampusServices('總機');
+it.each(['總機', '職涯', '實習'])('finds school info through %s without a retired career entry', (query) => {
+  const services = searchCampusServices(query);
   expect(services.some((service) => service.href === '/school-info')).toBe(true);
+  expect(services.some((service) => service.href === '/career')).toBe(false);
 });
 
 it('exposes a separate public campus-events entry beside clubs', () => {

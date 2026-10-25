@@ -76,16 +76,55 @@ test('offers copy instead of dial for range and extension switchboards', async (
   expect(view.getByText('已複製學校總機號碼。')).toBeTruthy();
 });
 
+test('current school information retains official housing and career links with retry', async () => {
+  mockSchool = { id: 'ncku', name: '國立成功大學' };
+  const view = render(<SchoolInfoScreen />);
+  expect(view.getByText(/來源：國立成功大學住宿服務組公開網站/)).toBeTruthy();
+  await act(async () => fireEvent.press(view.getByText('前往成大住宿服務組')));
+  expect(Linking.openURL).toHaveBeenLastCalledWith('https://housing-osa.ncku.edu.tw/');
+
+  jest.mocked(Linking.openURL).mockRejectedValueOnce(new Error('offline'));
+  await act(async () => fireEvent.press(view.getByText('前往成大生涯發展與就業輔導組')));
+  expect(view.getByRole('alert')).toBeTruthy();
+  await act(async () => fireEvent.press(view.getByText('前往成大生涯發展與就業輔導組')));
+  expect(Linking.openURL).toHaveBeenLastCalledWith('https://grad-osa.ncku.edu.tw/');
+  expect(view.queryByRole('alert')).toBeNull();
+});
+
+test('schools without verified service links keep their own website and no foreign fallback', () => {
+  mockSchool = { id: 'nthu', name: '國立清華大學' };
+  const view = render(<SchoolInfoScreen />);
+  expect(view.getByText('目前沒有這所學校的住宿與職涯入口，請從上方官方網站查詢。')).toBeTruthy();
+  expect(view.getByText('開啟官方網站')).toBeTruthy();
+  expect(view.queryByText(/前往.*住宿/)).toBeNull();
+  expect(view.queryByText(/前往.*職涯/)).toBeNull();
+});
+
+test('official service callbacks are invalidated when the selected school changes', async () => {
+  const view = render(<SchoolInfoScreen />);
+  const retained = retainPress(view, '前往靜宜住宿服務組');
+  mockSchool = { id: 'ntu', name: '國立臺灣大學' };
+  view.rerender(<SchoolInfoScreen />);
+  expect(view.getByText('請在臺大學生專區查找住宿相關資訊。')).toBeTruthy();
+  expect(view.queryByText('前往靜宜住宿服務組')).toBeNull();
+  await act(async () => retained());
+  expect(Linking.openURL).not.toHaveBeenCalled();
+  await act(async () => fireEvent.press(view.getByText('前往臺大學生專區（住宿資訊入口）')));
+  expect(Linking.openURL).toHaveBeenCalledWith('https://www.ntu.edu.tw/student.html');
+});
+
 test('keeps unknown and conflicting schools unavailable without a foreign fallback', () => {
   mockSchool = { id: 'unknown-campus', name: '未知學校' };
   const view = render(<SchoolInfoScreen />);
   expect(view.getByText(/目前沒有這所學校的公開聯絡資料/)).toBeTruthy();
   expect(view.queryByText('撥打學校總機')).toBeNull();
+  expect(view.queryByText('住宿與職涯資訊')).toBeNull();
 
   mockSchool = { id: 'pu', name: '國立清華大學' };
   view.rerender(<SchoolInfoScreen />);
   expect(view.getByText(/目前沒有這所學校的公開聯絡資料/)).toBeTruthy();
   expect(view.queryByText('靜宜大學')).toBeNull();
+  expect(view.queryByText('前往靜宜住宿服務組')).toBeNull();
 });
 
 test('switching schools replaces content and preserves a non-PU selection', async () => {

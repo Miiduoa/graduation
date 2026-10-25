@@ -189,6 +189,20 @@ beforeEach(() => {
   timetableApi.loadPersonalTimetable.mockResolvedValue(emptyTimetable());
   timetableApi.savePersonalTimetable.mockResolvedValue({ stored: 'local' });
 });
+it('keeps the selected campus in both semester and classroom-feedback tabs', () => {
+  setBrowse('nthu');
+  render(<GradesPage />);
+  expect(screen.getByRole('navigation', { name: '成績分段' })).toBeTruthy();
+  for (const [name, tab] of [['學期成績', null], ['課堂回饋', 'feedback']] as const) {
+    const href = new URL(screen.getByRole('link', { name }).getAttribute('href')!, 'https://campus.example');
+    expect(href.pathname).toBe('/grades');
+    expect(href.searchParams.get('tab')).toBe(tab);
+    expect(href.searchParams.get('campus')).toBe('nthu');
+    expect(href.searchParams.get('schoolId')).toBe('nthu');
+    expect(href.searchParams.get('school')).toBe('NTHU');
+  }
+  expect(screen.getByRole('link', { name: '學期成績' }).getAttribute('aria-current')).toBe('page');
+});
 
 it('uses the function name in the header instead of a school name before the school account is connected', async () => {
   account.studentId = false;

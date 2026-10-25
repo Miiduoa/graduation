@@ -1,7 +1,10 @@
 'use client';
 
 import { useMemo, useState } from 'react';
+import { useSearchParams } from 'next/navigation';
 import { AcademicPage } from '@/components/academic/AcademicPage';
+import { GradesTabs, isGradesFeedbackTab } from '@/components/academic/GradesTabs';
+import { StudentGradesPage } from '@/features/nuni/StudentGrades';
 import {
   calculateGradeSummary,
   formatSemester,
@@ -128,13 +131,19 @@ function Grades({ records }: { records: AcademicGradeResponse }) {
     </>
   );
 }
+
 export default function GradesPage() {
+  const tab = useSearchParams()?.get('tab');
+  if (isGradesFeedbackTab(tab)) {
+    return <StudentGradesPage />;
+  }
   return (
     <AcademicPage
       kind="grades"
       title="成績"
       subtitle="查看各學期結果，保留學校提供的原始成績。"
       closedAlternative="成績請先到學校的 e 校園查看。"
+      lead={<GradesTabs active="semester" />}
     >
       {({ records }) => <Grades records={records} />}
     </AcademicPage>

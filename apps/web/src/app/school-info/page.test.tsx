@@ -65,6 +65,26 @@ it('shows official contact fields for the selected school', () => {
     'noopener noreferrer',
   );
   expect(screen.getByRole('link', { name: '官方網站 ↗' }).getAttribute('target')).toBe('_blank');
+  expect(screen.getByRole('link', { name: '靜宜職涯發展暨產業促進處 ↗' }).getAttribute('href')).toBe(
+    'https://cdif.pu.edu.tw/',
+  );
+});
+
+it.each([
+  ['ncku', '國立成功大學', '成大生涯發展與就業輔導組 ↗', 'https://grad-osa.ncku.edu.tw/'],
+  ['ntpu', '國立臺北大學', '北大職涯發展中心 ↗', 'https://career.ntpu.edu.tw/cht/index.php'],
+  ['ntu', '國立臺灣大學', '臺大學生專區（職涯資訊入口） ↗', 'https://www.ntu.edu.tw/student.html'],
+])('keeps the existing official career destination for %s', (schoolId, schoolName, label, url) => {
+  context.schoolId = schoolId;
+  context.schoolName = schoolName;
+  render(<SchoolInfoPage />);
+  const link = screen.getByRole('link', { name: label });
+  expect(link.getAttribute('href')).toBe(url);
+  expect(link.getAttribute('rel')).toBe('noopener noreferrer');
+  expect(screen.queryByRole('link', { name: /靜宜職涯/ })).toBeNull();
+  if (schoolId === 'ntu') {
+    expect(screen.getByText('請在臺大學生專區查找職涯與實習資訊。')).toBeTruthy();
+  }
 });
 
 it('offers copy instead of dial for ambiguous range telephone rows', async () => {
@@ -99,6 +119,7 @@ it('shows loading, error, and unselected states without foreign school content',
   rerender(<SchoolInfoPage />);
   expect(screen.getByText('先選擇一所學校')).toBeTruthy();
   expect(screen.queryByRole('link', { name: '官方網站 ↗' })).toBeNull();
+  expect(screen.queryByRole('heading', { name: '校方職涯資訊' })).toBeNull();
 });
 
 it('keeps unknown or conflicting identities unavailable', () => {
@@ -125,6 +146,7 @@ it('keeps unknown or conflicting identities unavailable', () => {
 it('clears previous school content when the selection switches', () => {
   const { rerender } = render(<SchoolInfoPage />);
   expect(screen.getByRole('heading', { name: '靜宜大學' })).toBeTruthy();
+  expect(screen.getByRole('link', { name: /靜宜職涯/ })).toBeTruthy();
 
   context.schoolId = 'nthu';
   context.schoolName = '國立清華大學';
@@ -135,6 +157,8 @@ it('clears previous school content when the selection switches', () => {
   expect(screen.getByRole('link', { name: '官方網站 ↗' }).getAttribute('href')).toBe(
     'http://www.nthu.edu.tw',
   );
+  expect(screen.queryByRole('heading', { name: '校方職涯資訊' })).toBeNull();
+  expect(screen.queryByRole('link', { name: /靜宜職涯/ })).toBeNull();
 });
 
 it('registers school-info as a public campus entry that preserves selection', () => {

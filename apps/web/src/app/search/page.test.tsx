@@ -22,7 +22,7 @@ vi.mock('@/components/SiteShell', () => ({
 
 it('keeps every service discoverable without inventing a school selection', () => {
   render(<SearchPage />);
-  expect(screen.getAllByRole('link')).toHaveLength(34);
+  expect(screen.getAllByRole('link')).toHaveLength(32);
   expect(screen.getByRole('link', { name: /^學校資訊/ }).getAttribute('href')).toBe('/school-info');
   expect(screen.getByRole('link', { name: /^校園活動/ }).getAttribute('href')).toBe('/events');
   const profile = screen.getByRole('link', { name: /個人資料 查看帳號資料/ });
@@ -36,7 +36,7 @@ it('combines category filters with keyword search and restores all services afte
   render(<SearchPage />);
   fireEvent.click(screen.getByRole('button', { name: '校園生活' }));
   expect(screen.queryByRole('link', { name: /^課表/ })).toBeNull();
-  expect(screen.getAllByRole('link')).toHaveLength(10);
+  expect(screen.getAllByRole('link')).toHaveLength(9);
   fireEvent.change(screen.getByRole('searchbox', { name: '想找什麼？' }), {
     target: { value: '借書' },
   });
@@ -44,7 +44,7 @@ it('combines category filters with keyword search and restores all services afte
   expect(screen.getByRole('link', { name: /^圖書館/ })).toBeTruthy();
   expect(screen.getByRole('status').textContent).toBe('找到 1 項服務');
   fireEvent.click(screen.getByRole('button', { name: '清除篩選' }));
-  expect(screen.getAllByRole('link')).toHaveLength(34);
+  expect(screen.getAllByRole('link')).toHaveLength(32);
   expect((screen.getByRole('searchbox') as HTMLInputElement).value).toBe('');
 });
 
@@ -54,7 +54,7 @@ it('offers a recovery action when a query has no matching service', () => {
   expect(screen.queryAllByRole('link')).toHaveLength(0);
   expect(screen.getByRole('heading', { name: '沒有符合的服務' })).toBeTruthy();
   fireEvent.click(screen.getByRole('button', { name: '查看所有服務' }));
-  expect(screen.getAllByRole('link')).toHaveLength(34);
+  expect(screen.getAllByRole('link')).toHaveLength(32);
 });
 
 it('matches search aliases without case or surrounding-space sensitivity', () => {
@@ -71,7 +71,7 @@ it('keeps the existing course directory alongside the added Nuni classroom', () 
   expect(paths).toContain('/cafeteria');
   expect(paths).toContain('/food');
   expect(paths).toContain('/classroom');
-  expect(paths).toContain('/classroom/grades');
+  expect(paths).toContain('/grades');
   expect(paths).toContain('/timetable');
   expect(paths).toContain('/grades');
   expect(paths).toContain('/import');
@@ -107,6 +107,22 @@ it('restores a shareable search and preserves only browsing context in service l
   expect(new URL(window.location.href).searchParams.get('campus')).toBe('school-b');
   expect(new URL(window.location.href).searchParams.has('q')).toBe(false);
 });
+
+it('keeps the feedback tab and campus together in the grades destination', () => {
+  window.history.replaceState({}, '', '/search?campus=nthu&session=private');
+  render(<SearchPage />);
+  const target = new URL(
+    screen.getByRole('link', { name: /^課業成績與回饋/ }).getAttribute('href')!,
+    'https://campus.example',
+  );
+  expect(target.pathname).toBe('/grades');
+  expect(target.searchParams.get('tab')).toBe('feedback');
+  expect(target.searchParams.get('campus')).toBe('nthu');
+  expect(target.searchParams.get('schoolId')).toBe('nthu');
+  expect(target.searchParams.get('school')).toBe('NTHU');
+  expect(target.searchParams.has('session')).toBe(false);
+});
+
 it('finds tasks using separated words and full-width Latin characters', () => {
   render(<SearchPage />);
   fireEvent.change(screen.getByRole('searchbox'), { target: { value: '繳交 作業' } });

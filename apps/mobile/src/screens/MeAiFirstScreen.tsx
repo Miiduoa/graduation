@@ -117,7 +117,7 @@ export default function MeAiFirstScreen() {
       </AISection>
       <AISection title="使用設定">
         <AIRow title="語言" onPress={go('LanguageSettings')} />
-        <AIRow title="外觀" subtitle="調整淺色與深色模式" onPress={go('ThemePreview')} />
+        <AIRow title="外觀" subtitle="調整淺色與深色模式" onPress={go('Settings')} />
         <AIRow title="無障礙設定" onPress={go('AccessibilitySettings')} />
         <AIRow title="幫助與回饋" onPress={go('Help')} />
         <AIRow

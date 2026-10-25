@@ -104,6 +104,7 @@ import { navigateToCourseScreen } from './src/utils/courseNavigation';
 import { initCrossModuleConnections } from './src/services/crossModuleConnector';
 import { registerCompanionCampusBusBridge } from './src/services/companionBusBridge';
 import { rewriteLegacyShopsPath } from './src/app/legacyShopsPath';
+import { resolveDeprecatedRouteRedirect } from './src/app/deprecatedRouteRedirect';
 
 /**
  * 學生四個入口：今天｜課務｜生活｜我
@@ -156,8 +157,6 @@ const linkingBase: LinkingOptions<RootTabParamList> = {
           LearnHome: 'learn',
           CoursesHome: 'courses',
           TeachingHub: 'teaching',
-          StaffHub: 'staff',
-          DepartmentHub: 'department',
           AdminDashboard: 'admin',
           CourseSchedule: 'schedule',
           AddCourse: 'course/new',
@@ -198,7 +197,6 @@ const linkingBase: LinkingOptions<RootTabParamList> = {
           Library: 'library',
           SchoolInfo: 'school-info',
           Health: 'health',
-          Dormitory: 'dormitory',
           PrintService: 'print',
           LostFound: 'lost-found',
           LostFoundDetail: 'lost-found/:id',
@@ -949,14 +947,7 @@ function SchoolNavigation() {
 
           // 已被改名 / 整合的 deprecated route：silent 自動 redirect，不再彈 alert
           // （例如 AcademicStack 在 4+1 改版已整合進 LearnStack）
-          const DEPRECATED_REDIRECT: Record<string, { tab: string; screen: string }> = {
-            AcademicStack: { tab: '學習', screen: 'CoursesHome' },
-            TeachingStack: { tab: '學習', screen: 'TeachingHub' },
-            StaffStack: { tab: '學習', screen: 'StaffHub' },
-            DepartmentStack: { tab: '學習', screen: 'DepartmentHub' },
-            AdminStack: { tab: '學習', screen: 'AdminDashboard' },
-          };
-          const redirect = DEPRECATED_REDIRECT[targetName];
+          const redirect = resolveDeprecatedRouteRedirect(targetName);
           if (redirect) {
             try {
               rootNavigateNested(redirect.tab as any, redirect.screen);

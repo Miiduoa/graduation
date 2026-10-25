@@ -4,7 +4,7 @@
 
 ## 來源與範圍
 
-整合基底：`main` 的 `6abe69be1520176e4714fe709b85360ad65e5a0c`。下列四個 PR 以 merge commit 保留原始歷史，再加入本次體驗修正。
+初始整合基底：`main` 的 `6abe69be1520176e4714fe709b85360ad65e5a0c`。下列四個 PR 以 merge commit 保留原始歷史，再加入本次體驗修正。合併前另納入最新 `main` 的 `8e838cbbdf45a4ae007c6ebf3cff9173cf9d70c9`（#200 舊畫面清理），避免覆蓋同時完成的主分支工作。
 
 | PR | 原始 head | 整合內容 |
 | --- | --- | --- |
@@ -47,6 +47,16 @@
 PR 第一輪全量 Web CI 在「繼續載入較早教材」案例出現一次下一頁未顯示的失敗。學習路徑與教材搜尋的按鈕原先以 state 渲染，卻從稍後由 effect 同步的 ref 讀取分頁資料；補修改為直接讀取渲染按鈕的 state，並增加下一頁 cursor 的立即請求斷言。帳號／請求範圍與取消機制維持原有防護，沒有放寬測試 timeout。這筆補修在上述本機全量 Web 測試之後；最終整合結果以 PR 最新 commit 的完整 CI 為準。
 
 CodeQL 的分析工作成功執行後，另有 7 項安全掃描警示。對應修正使用明確的 Firebase provider ID 等值比較、直接呈現學期欄位，以及 parse5 的單次 HTML 解析與迭代文字節點走訪；測試 mock 亦改為精確 hostname 比較。parse5 7.3.0 已加入 Functions 正式依賴與兩份鎖檔，並通過獨立 production 安裝／載入檢查。沒有停用規則或關閉警示；最終結果須同時檢查 CodeQL 分析工作與 code-scanning check。
+
+### 遠端整合檢查與主分支更新
+
+修正後的 `83edbdc895cd2ed84a0b31418bb302891ea97b50` 已完成 [GitHub CI](https://github.com/Miiduoa/graduation/actions/runs/40158601724)：Web 2,978 項通過、11 項略過；App 3,276 項通過、1 項略過；建置、型別、Functions、權限與安全閘門皆通過。[CodeQL 的實際 code-scanning check](https://github.com/Miiduoa/graduation/runs/121065969143) 成功，這次 PR 的變更沒有新增警示。
+
+[iOS Maestro](https://github.com/Miiduoa/graduation/actions/runs/40158601730) 亦完成原生 App 建置，在 iPhone 15 模擬器上通過首次開啟／登入入口與校園地圖兩條 smoke flows；這不等同所有 Maestro flows 或原生實機驗收。
+
+最後核對時，主分支新增 #200，故再整合其舊頁面刪除、轉址、成績分頁及通知／訊息標題。已完成的官方住宿／職涯服務集中至可達的學校資訊頁，搜尋與成績分頁同時保留目的頁參數及目前學校；無入口舊實作維持刪除。上述測試數屬於整合這筆主分支更新之前的確切版本；最新合併版本的完整結果與驗證範圍記錄於 [PR #201](https://github.com/Miiduoa/graduation/pull/201)。
+
+納入 #200 後，本機重驗 Web 19 suites／233 項及 App 18 suites／266 項全數通過，兩端完整型別檢查與編輯檔案 lint 無錯誤。Web 重新完成 production build，視覺／操作 18 項與課表 8 項再次通過；下方五張畫面已用這次建置重新產生並核對。
 
 ## 畫面與可核對證據
 
