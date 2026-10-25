@@ -349,7 +349,7 @@ export function PrivateConversationView({
     subscribe,
   );
   const isCurrent = useCurrent(session);
-  const [draft, setDraft] = useState('');
+  const [draftState, setDraftState] = useState<{ scope: string; text: string }>({ scope: '', text: '' });
   const [messageSearch, setMessageSearch] = useState('');
   const [sending, setSending] = useState(false);
   const [feedback, setFeedback] = useState('');
@@ -363,25 +363,28 @@ export function PrivateConversationView({
   }, [conversationId]);
   const active = () => isCurrent() && currentConversation.current === conversationId;
   const draftKey = `campus-one:dm-draft:${session.uid}:${session.schoolId}:${conversationId}`;
-  const draftReady = useRef(false);
+  // Keep draft state bound to its conversation: effects for a newly selected
+  // conversation must never persist text from the previous account or thread.
+  const draft = draftState.scope === draftKey ? draftState.text : '';
+  const setDraft = (value: string) => setDraftState({ scope: draftKey, text: value });
   useEffect(() => {
-    draftReady.current = false;
+    let saved = '';
     try {
-      setDraft(sessionStorage.getItem(draftKey)?.slice(0, 4000) ?? '');
+      saved = sessionStorage.getItem(draftKey)?.slice(0, 4000) ?? '';
     } catch {
-      setDraft('');
+      // Session storage is unavailable in some private browsing contexts.
     }
-    draftReady.current = true;
+    setDraftState({ scope: draftKey, text: saved });
   }, [draftKey]);
   useEffect(() => {
-    if (!draftReady.current) return;
+    if (draftState.scope !== draftKey) return;
     try {
-      if (draft) sessionStorage.setItem(draftKey, draft);
+      if (draftState.text) sessionStorage.setItem(draftKey, draftState.text);
       else sessionStorage.removeItem(draftKey);
     } catch {
       // Private browsing can block storage; the live draft remains editable.
     }
-  }, [draftKey, draft]);
+  }, [draftKey, draftState.scope, draftState.text]);
   const send = async () => {
     const body = draft.trim();
     if (!body || body.length > 4000 || sendLock.current || state.status !== 'ready' || !active())
