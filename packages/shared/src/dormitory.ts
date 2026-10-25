@@ -139,7 +139,7 @@ export function emptyDormWorkspace(): DormWorkspace {
     repairs: [],
     milestones: [],
     parcels: [],
-    laundryEndAt: null;
+    laundryEndAt: null,
   };
 }
 
