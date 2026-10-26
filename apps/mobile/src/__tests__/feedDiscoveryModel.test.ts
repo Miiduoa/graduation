@@ -15,10 +15,11 @@ const posts: CampusPostDoc[] = [
     createdAt: { toMillis: () => Date.parse('2026-10-25T00:00:00Z') },
   },
 ];
-function pick(patch: Partial<{ filter: 'all' | 'subscribed' | 'media'; order: 'recommended' | 'latest'; search: string }> = {}) {
+function pick(patch: Partial<{ filter: 'all' | 'following' | 'subscribed' | 'media'; order: 'recommended' | 'latest'; search: string }> = {}) {
   return selectMobileFeedPosts(posts, {
     filter: 'all', order: 'recommended', search: '',
     subscribedIds: new Set(['courses']),
+    followingIds: new Set(['alice', 'hidden-uid']),
     boards: { courses: '課程討論', photos: '攝影看板' },
     authors: { alice: '小明', 'hidden-uid': '真實姓名' },
     ...patch,
@@ -33,6 +34,7 @@ describe('mobile school-scoped feed discovery', () => {
   });
   it('applies subscription and media filters to the existing results', () => {
     expect(pick({ filter: 'subscribed' })).toEqual(['one']);
+    expect(pick({ filter: 'following' })).toEqual(['one']);
     expect(pick({ filter: 'media' })).toEqual(['two']);
   });
   it('can discover by title, body, tag, board and visible author', () => {
