@@ -1,5 +1,6 @@
-import { isHostedWebCallable } from '@/lib/hostedCallables';
+import { isHostedWebCallable, isLeaveWebCallable } from '@/lib/hostedCallables';
 import { callableErrorBody, HttpsError } from './httpsError';
+import { isLeaveWebApiServerEnabled } from './leaveWebApiEnabled';
 import type { CallableRequest } from './groupInviteHandlers';
 import {
   assertJoinCodeAttemptsAllowed,
@@ -21,7 +22,10 @@ const MAX_BODY_BYTES = 64 * 1024;
 
 export type FnRuntime = {
   db: import('./groupInviteHandlers').GroupFirestore;
-  verifyIdToken: (token: string) => Promise<{ uid: string } & Record<string, unknown>>;
+  verifyIdToken: (
+    token: string,
+    checkRevoked?: boolean,
+  ) => Promise<{ uid: string } & Record<string, unknown>>;
 };
 
 function jsonResponse(status: number, body: unknown, extra?: HeadersInit): Response {
@@ -55,6 +59,7 @@ function parseAuthorization(headerValue: string | null): {
 async function verifyCallableAuth(
   authorizationHeader: string | null,
   verifyIdToken: FnRuntime['verifyIdToken'],
+  checkRevoked = false,
 ): Promise<{ uid: string; token: Record<string, unknown> } | null> {
   const parsed = parseAuthorization(authorizationHeader);
   if (parsed.kind === 'missing') return null;
@@ -62,7 +67,9 @@ async function verifyCallableAuth(
     throw new HttpsError('unauthenticated', 'Invalid Firebase ID token');
   }
   try {
-    const decoded = await verifyIdToken(parsed.token);
+    const decoded = checkRevoked
+      ? await verifyIdToken(parsed.token, true)
+      : await verifyIdToken(parsed.token);
     if (!decoded?.uid) {
       throw new HttpsError('unauthenticated', 'Invalid Firebase ID token');
     }
@@ -116,6 +123,15 @@ async function invokeHostedCallable(
     const { createLiveSessionHandlers } = await import('./attendanceSessionHandlers');
     return createLiveSessionHandlers({ db })[name](request);
   }
+  if (
+    name === 'submitLeaveRequest' ||
+    name === 'withdrawLeaveRequest' ||
+    name === 'reviewLeaveRequest' ||
+    name === 'listLeaveReviewQueue'
+  ) {
+    const { createLeaveRequestHandlers } = await import('./leaveRequestHandlers');
+    return createLeaveRequestHandlers({ db: db as never })[name](request);
+  }
   throw new HttpsError('not-found', `Unknown function: ${name}`);
 }
 
@@ -151,6 +167,10 @@ export async function dispatchFnRequest(
     );
   }
 
+  if (isLeaveWebCallable(name) && !isLeaveWebApiServerEnabled()) {
+    return callableResponse(new HttpsError('unavailable', '尚未啟用'), request);
+  }
+
   let resolved = runtime;
   if (resolved === undefined) {
     try {
@@ -177,6 +197,7 @@ export async function dispatchFnRequest(
     const auth = await verifyCallableAuth(
       request.headers.get('authorization'),
       resolved.verifyIdToken,
+      isLeaveWebCallable(name),
     );
     uid = auth?.uid;
     if (uid) {
