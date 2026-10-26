@@ -191,9 +191,11 @@ function HomeFeedContent() {
     const uid = auth.user?.uid;
     const schoolId = school?.id;
     if (!uid || !schoolId || isFirebaseMockMode()) {
-      setBookmarkScope('');
+      setBookmarkScope(uid && schoolId ? `${uid}:${schoolId}` : '');
       setBookmarkedIds(new Set());
       setBookmarkedPosts([]);
+      setBookmarksLoading(false);
+      setBookmarksError(isFirebaseMockMode() && savedView ? '示範模式不會讀取或寫入真實收藏。' : '');
       return;
     }
     let live = true;
@@ -353,7 +355,7 @@ function HomeFeedContent() {
 
   const visiblePosts = useMemo(
     () => selectMobileFeedPosts(savedView ? savedPosts : posts, {
-      filter: savedView ? 'all' : filter,
+      filter: filter === 'saved' ? 'all' : filter,
       order,
       search,
       subscribedIds: subscribedBoardIds,
