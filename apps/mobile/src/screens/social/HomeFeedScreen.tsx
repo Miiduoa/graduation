@@ -267,7 +267,7 @@ function HomeFeedContent() {
         if (live) setFollowingLoading(false);
       });
     return () => { live = false; };
-  }, [auth.user?.uid, school?.id, followingRevision, followingView]);
+  }, [auth.user?.uid, school?.id, followingRevision]);
 
   const onToggleFollow = useCallback(async (targetUid: string) => {
     const uid = auth.user?.uid;
