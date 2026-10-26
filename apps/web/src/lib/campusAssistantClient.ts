@@ -49,6 +49,33 @@ export interface CallCampusAssistantInput {
   screen?: string;
 }
 
+export interface CampusAssistantSnapshot {
+  schoolId: string;
+  checkedAt: string;
+  schedule: { status: 'available' | 'unavailable'; count: number | null };
+  assignments: {
+    status: 'available' | 'unavailable';
+    count: number | null;
+    items: Array<{ title: string; groupName: string; dueAt: string | null }>;
+  };
+  announcements: {
+    status: 'available' | 'unavailable';
+    items: Array<{ title: string; publishedAt: string | null }>;
+  };
+}
+
+export interface AgentWriteResult {
+  success: boolean;
+  toolName?: string;
+  errorCode?: string;
+  errorMessage?: string;
+  requestId?: string;
+  repairId?: string;
+  reservationId?: string;
+  orderId?: string;
+  status?: string;
+}
+
 export class CampusAssistantError extends Error {
   constructor(
     public readonly code: 'unavailable' | 'unconfigured' | 'session-changed' | 'invalid-response',
@@ -107,6 +134,85 @@ export async function callCampusAssistant(
   } catch (e) {
     assertCurrentSession();
     throw e;
+  }
+}
+
+/** All personal data is read from the signed-in account and the server-authorized school. */
+export async function getCampusAssistantSnapshot(
+  userId: string,
+  schoolId: string,
+  signal?: AbortSignal,
+): Promise<CampusAssistantSnapshot> {
+  if (!isFirebaseConfigured()) throw new CampusAssistantError('unavailable');
+  if (!areFunctionsConfigured()) throw new CampusAssistantError('unconfigured');
+  const checkSession = () => {
+    if (signal?.aborted) throw new DOMException('Request aborted', 'AbortError');
+    if (!userId || getAuth()?.currentUser?.uid !== userId) {
+      throw new CampusAssistantError('session-changed');
+    }
+  };
+  checkSession();
+  const callable = httpsCallable<{ schoolId: string }, CampusAssistantSnapshot>(
+    getFunctionsInstance(),
+    'getCampusAssistantSnapshot',
+  );
+  try {
+    const { data } = await callable({ schoolId });
+    checkSession();
+    if (!data || data.schoolId !== schoolId || !data.assignments || !data.announcements || !data.schedule) {
+      throw new CampusAssistantError('invalid-response');
+    }
+    return data;
+  } catch (error) {
+    checkSession();
+    throw error;
+  }
+}
+
+/** Submitting an agent proposal is a separate, explicit user action. */
+export async function executeCampusAgentWrite(
+  input: {
+    userId: string;
+    schoolId: string;
+    toolName: string;
+    payload: Record<string, unknown>;
+    agentRunId: string;
+    groupId?: string;
+  },
+  signal?: AbortSignal,
+): Promise<AgentWriteResult> {
+  if (!isFirebaseConfigured()) throw new CampusAssistantError('unavailable');
+  if (!areFunctionsConfigured()) throw new CampusAssistantError('unconfigured');
+  const checkSession = () => {
+    if (signal?.aborted) throw new DOMException('Request aborted', 'AbortError');
+    if (!input.userId || getAuth()?.currentUser?.uid !== input.userId) {
+      throw new CampusAssistantError('session-changed');
+    }
+  };
+  checkSession();
+  const callable = httpsCallable<
+    { toolName: string; input: Record<string, unknown>; agentRunId: string; context: Record<string, string> },
+    AgentWriteResult
+  >(getFunctionsInstance(), 'executeAgentWrite');
+  try {
+    const { data } = await callable({
+      toolName: input.toolName,
+      input: input.payload,
+      agentRunId: input.agentRunId,
+      context: {
+        schoolId: input.schoolId,
+        timezone: 'Asia/Taipei',
+        ...(input.groupId ? { groupId: input.groupId } : {}),
+      },
+    });
+    checkSession();
+    if (!data || typeof data.success !== 'boolean' || data.toolName !== input.toolName) {
+      throw new CampusAssistantError('invalid-response');
+    }
+    return data;
+  } catch (error) {
+    checkSession();
+    throw error;
   }
 }
 
