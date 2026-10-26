@@ -684,18 +684,12 @@ function MediaGrid({ uris }: { uris: string[] }) {
 // ─── 開啟 Story group → 全螢幕 viewer ─────────────────────
 
 function openStoryGroup(grp: StoryAuthorGroup, nav: any) {
-  // 直接傳 stories 給 StoryCompose 重用？不行 — 改用 navigate to a dedicated viewer modal.
-  // 為了避免新增更多 route，先 fallback：show first story's text via Alert; user 可從 RealtimeSocialScreen 看完整 viewer。
-  const first = grp.stories[0];
-  if (!first) return;
-  const summary = first.text ?? '(媒體 Story)';
-  Alert.alert(`${grp.isMine ? '我的' : ''}Story · ${grp.stories.length} 則`, summary, [
-    {
-      text: '到「即時」分頁看詳情',
-      onPress: () => nav?.navigate?.('CampusSocialScreen' as never, { initialTab: 'realtime' }),
-    },
-    { text: '關閉', style: 'cancel' },
-  ]);
+  if (!grp.stories.length) return;
+  // Open the existing full-screen story viewer within the same school context.
+  nav?.navigate?.('CampusSocialScreen' as never, {
+    initialTab: 'realtime',
+    storyAuthorUid: grp.authorUid,
+  });
 }
 
 const createStyles = () => StyleSheet.create({
