@@ -3,6 +3,7 @@ import { theme } from '../../ui/theme';
 import { useThemeMode } from '../../state/theme';
 import { View } from 'react-native';
 import { getSupabaseClient } from '../../services/supabaseClient';
+import { COURSE_V2_ROUTES } from './courseV2Routes';
 import {
   CourseV2Header,
   CourseV2List,
@@ -52,7 +53,7 @@ export default function CourseAssignmentsV2Screen() {
             subtitle={`${formatDue(a.due_at)} · 滿分 ${a.max_points ?? 100}`}
             badge={a.is_group_submission ? '小組' : undefined}
             onPress={() =>
-              nav.navigate('HomeworkSubmit', {
+              nav.navigate(COURSE_V2_ROUTES.assignmentDetail, {
                 courseId,
                 courseName,
                 assignmentId: a.id,
