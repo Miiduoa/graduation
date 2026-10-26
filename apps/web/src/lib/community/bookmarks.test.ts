@@ -81,12 +81,12 @@ describe('school-scoped bookmarked campus posts', () => {
   it('writes only the scoped ID and its server timestamp', async () => {
     await saveCampusPostBookmark('alice', 'pu', 'post');
     expect(setDoc).toHaveBeenCalledWith(
-      { path: 'users/alice/schools/pu/campusPostBookmarks/post' },
+      { path: 'users/alice/campusPostBookmarks/pu/posts/post' },
       { schoolId: 'pu', postId: 'post', createdAt: 'SERVER_TIME' },
     );
     await removeCampusPostBookmark('alice', 'pu', 'post');
     expect(deleteDoc).toHaveBeenCalledWith({
-      path: 'users/alice/schools/pu/campusPostBookmarks/post',
+      path: 'users/alice/campusPostBookmarks/pu/posts/post',
     });
   });
 
