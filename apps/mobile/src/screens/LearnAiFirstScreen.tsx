@@ -93,7 +93,7 @@ export default function LearnAiFirstScreen() {
           {[
             { value: workspace.courses.length, label: '我的課程' },
             { value: workspace.upcomingCount, label: '7 天內到期' },
-            { value: workspace.overdueCount, label: '已逾期' },
+            { value: workspace.overdueCount, label: '逾期可補交' },
           ].map((metric) => (
             <View
               key={metric.label}
@@ -111,7 +111,7 @@ export default function LearnAiFirstScreen() {
                 style={{
                   fontSize: 24,
                   fontWeight: '700',
-                  color: metric.label === '已逾期' && metric.value > 0 ? aiTokens.danger : aiTokens.text,
+                  color: metric.label === '逾期可補交' && metric.value > 0 ? aiTokens.danger : aiTokens.text,
                   fontVariant: ['tabular-nums'],
                 }}
               >
