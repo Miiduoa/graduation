@@ -1,5 +1,6 @@
 import {
   canListAsPendingWork,
+  canSubmitCourseWork,
   courseSubmissionState,
   submissionStatusText,
   summarizeCourseReceipts,
@@ -94,4 +95,23 @@ test('course receipt counts never turn unverified or instructor records into sub
     unsubmitted: 2,
     needsVerification: 3,
   });
+});
+
+test('a passed due date cannot be described as actionable unless the instructor permits late work', () => {
+  const now = new Date('2026-10-26T12:00:00Z');
+  const pending = {
+    closed: false,
+    dueAt: '2026-10-26T11:00:00Z',
+    submission: { kind: 'not_submitted' as const },
+  };
+  expect(canSubmitCourseWork(pending, now)).toBe(false);
+  expect(canSubmitCourseWork({ ...pending, allowLateSubmission: true }, now)).toBe(true);
+  expect(canSubmitCourseWork({ ...pending, closed: true, allowLateSubmission: true }, now)).toBe(false);
+  expect(canSubmitCourseWork({
+    ...pending,
+    submission: { kind: 'submitted', submittedAt: '2026-10-26T10:00:00Z', grade: null },
+    allowLateSubmission: true,
+  }, now)).toBe(false);
+  expect(canSubmitCourseWork({ ...pending, dueAt: 'invalid', allowLateSubmission: true }, now)).toBe(false);
+  expect(canSubmitCourseWork({ ...pending, dueAt: null }, now)).toBe(true);
 });
