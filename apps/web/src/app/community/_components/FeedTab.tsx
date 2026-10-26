@@ -246,29 +246,30 @@ export function FeedTab(props: { schoolId: string; schoolSearch: string }) {
       likeFlightsRef.current.add(row.id);
       setPendingLikes((prev) => new Set([...prev, row.id]));
       setLikeFeedback(null);
-      setPosts((prev) =>
-        prev.map((p) => {
+      const optimistic = (items: CampusPostDoc[]) =>
+        items.map((p) => {
           if (p.id !== row.id) return p;
           const likedBy = Array.isArray(p.likedBy) ? [...p.likedBy] : [];
           const index = likedBy.indexOf(user.uid);
           if (index >= 0) likedBy.splice(index, 1);
           else likedBy.push(user.uid);
           return {
-            ...p,
-            likedBy,
+            ...p, likedBy,
             likes: typeof p.likes === 'number' ? Math.max(0, p.likes + (index >= 0 ? -1 : 1)) : likedBy.length,
           };
-        }),
-      );
+        });
+      setPosts(optimistic);
+      setBookmarkedPosts(optimistic);
       try {
         await toggleCampusPostLike(schoolId, row.id, user.uid);
       } catch {
         // A failed write must not leave an unconfirmed reaction on screen.
-        setPosts((prev) =>
-          prev.map((post) =>
+        const rollback = (items: CampusPostDoc[]) =>
+          items.map((post) =>
             post.id === row.id ? { ...post, likedBy: row.likedBy, likes: row.likes } : post,
-          ),
-        );
+          );
+        setPosts(rollback);
+        setBookmarkedPosts(rollback);
         setLikeFeedback({ postId: row.id, text: '讚沒有成功更新，請確認網路後再試。' });
       } finally {
         likeFlightsRef.current.delete(row.id);
