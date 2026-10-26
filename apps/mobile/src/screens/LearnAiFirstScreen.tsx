@@ -38,7 +38,7 @@ export default function LearnAiFirstScreen() {
     setState({ scope, data: null, loading: true, error: null });
     try {
       if (!uid || !schoolId) throw new Error('missing-session');
-      const data = await loadStudentHome(uid, schoolId);
+      const data = await loadStudentHome(uid, schoolId, 'learning');
       const courseIds = new Set(data.courses.map((course) => course.groupId));
       const tasks = data.tasks.filter(
         (task) => task.kind !== 'assistant_queue' && courseIds.has(task.groupId),
