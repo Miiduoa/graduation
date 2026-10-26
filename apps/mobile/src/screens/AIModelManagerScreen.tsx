@@ -52,9 +52,22 @@ interface ModelInfo {
 const MODEL_INFO: ModelInfo[] = [
   // ── 輕量級 ──
   {
+    id: 'qwen3-0.6b',
+    name: 'Qwen3 隨身 AI',
+    description: '輕量中文模型，適合日常問答、文字整理。下載後可完全離線運算；複雜推理建議改用進階模型。',
+    sizeLabel: '約 397 MB',
+    sizeBytes: MODEL_REGISTRY['qwen3-0.6b'].modelSize,
+    quality: '輕量',
+    qualityStars: 2,
+    speedStars: 5,
+    recommended: true,
+    features: ['免付費 API', '離線問答', '中文對話', '手機本地處理'],
+    badge: '首次安裝推薦',
+  },
+  {
     id: 'smollm2-1.7b',
     name: 'SmolLM2 輕量版',
-    description: '速度最快，適合基本問答和簡單對話',
+    description: '舊版輕量模型，適合英文簡單對話；中文建議優先選 Qwen3',
     sizeLabel: '1.1 GB',
     sizeBytes: 1_100_000_000,
     quality: '輕量',
@@ -99,9 +112,9 @@ const MODEL_INFO: ModelInfo[] = [
     quality: '完整',
     qualityStars: 5,
     speedStars: 2,
-    recommended: true,
-    features: ['頂級中文', '深度推理', 'Agent 代理', '長文理解', '工具使用'],
-    badge: '推薦升級',
+    recommended: false,
+    features: ['中文推理', '進階對話', '長文整理', '工具理解'],
+    badge: '高記憶體裝置',
   },
   {
     id: 'mistral-7b-v0.3',
