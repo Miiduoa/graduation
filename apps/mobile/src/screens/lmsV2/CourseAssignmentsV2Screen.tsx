@@ -14,13 +14,14 @@ import {
 } from './_courseV2Shell';
 
 function formatDue(due: string | null | undefined): string {
-  if (!due) return '無截止';
+  if (!due) return '未設定參考時間';
   const d = new Date(due);
-  if (Number.isNaN(d.getTime())) return '無截止';
-  const days = Math.round((d.getTime() - Date.now()) / 86_400_000);
-  if (days < 0) return '已過期';
-  if (days === 0) return '今日截止';
-  if (days <= 7) return `${days} 天後截止`;
+  if (Number.isNaN(d.getTime())) return '未設定參考時間';
+  const remainingMs = d.getTime() - Date.now();
+  if (remainingMs < 0) return '已過參考時間';
+  const days = Math.ceil(remainingMs / 86_400_000);
+  if (days <= 1) return '參考時間在 24 小時內';
+  if (days <= 7) return `約 ${days} 天後`;
   return d.toLocaleDateString();
 }
 
@@ -30,7 +31,7 @@ export default function CourseAssignmentsV2Screen() {
   const nav = useCourseV2Nav();
   const loadable = useLoadable(async () => {
     const sb = getSupabaseClient();
-    if (!sb) return [];
+    if (!sb) throw new Error('LMS 服務尚未連線，請確認設定後重試。');
     const { data, error } = await sb
       .from('assignments')
       .select('id, title, description, due_at, max_points, is_group_submission')
