@@ -270,30 +270,30 @@ function HomeFeedContent() {
       setPendingLikes((prev) => new Set([...prev, row.id]));
 
       // The server remains authoritative after optimistic feedback.
-      setPosts((prev) =>
-        prev.map((p) => {
+      const optimistic = (items: CampusPostDoc[]) =>
+        items.map((p) => {
           if (p.id !== row.id) return p;
           const arr = Array.isArray(p.likedBy) ? [...p.likedBy] : [];
           const idx = arr.indexOf(uid);
           if (idx >= 0) arr.splice(idx, 1);
           else arr.push(uid);
           return {
-            ...p,
-            likedBy: arr,
-            likes:
-              typeof p.likes === 'number' ? p.likes + (idx >= 0 ? -1 : 1) : arr.length,
+            ...p, likedBy: arr,
+            likes: typeof p.likes === 'number' ? Math.max(0, p.likes + (idx >= 0 ? -1 : 1)) : arr.length,
           };
-        }),
-      );
+        });
+      setPosts(optimistic);
+      setBookmarkedPosts(optimistic);
 
       try {
         await toggleCampusPostLike(sid, row.id, uid);
       } catch (e: any) {
-        setPosts((prev) =>
-          prev.map((post) =>
+        const rollback = (items: CampusPostDoc[]) =>
+          items.map((post) =>
             post.id === row.id ? { ...post, likedBy: row.likedBy, likes: row.likes } : post,
-          ),
-        );
+          );
+        setPosts(rollback);
+        setBookmarkedPosts(rollback);
         Alert.alert('按讚失敗', '目前無法更新貼文，請確認連線後再試。');
       } finally {
         likeFlightsRef.current.delete(row.id);
