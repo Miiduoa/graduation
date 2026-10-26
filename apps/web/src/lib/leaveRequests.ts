@@ -6,8 +6,9 @@ import {
   courseOfferingId, periodEnd, periodProfileForSchool, periodStart,
   type PersonalCourse,
 } from '@campus/shared';
-import { getAuth, getDb, getFunctionsInstance, isFirebaseConfigured } from '@/lib/firebase';
+import { getAuth, getCloudFunctionUrl, getDb, getFunctionsInstance, isFirebaseConfigured } from '@/lib/firebase';
 import { areFunctionsConfigured, FunctionsUnconfiguredError } from '@/lib/functionsUrl';
+import { isLeaveWebApiEnabled } from '@/lib/leaveWebApi';
 import {
   leaveFailureCopy,
   leavePageFailureFromError,
@@ -176,9 +177,59 @@ function assertCloudUser(uid: string) {
   }
 }
 
-function callable<Input, Output>(name: string) {
+function callableCode(status: string): string {
+  return status.toLowerCase().replaceAll('_', '-');
+}
+
+function withCallableCode(message: string, status: string): Error {
+  const error = new Error(message);
+  (error as Error & { code: string }).code = `functions/${callableCode(status)}`;
+  return error;
+}
+
+type LeaveCallableName =
+  | 'submitLeaveRequest'
+  | 'withdrawLeaveRequest'
+  | 'reviewLeaveRequest'
+  | 'listLeaveReviewQueue';
+
+async function callLeaveFn<Input extends Record<string, unknown>, Output>(
+  name: LeaveCallableName,
+  data: Input,
+): Promise<Output> {
+  if (isLeaveWebApiEnabled()) {
+    const user = getAuth()?.currentUser;
+    if (!user) throw withCallableCode('請先登入學校帳號。', 'UNAUTHENTICATED');
+    const idToken = await user.getIdToken();
+    const response = await fetch(getCloudFunctionUrl(name), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${idToken}` },
+      body: JSON.stringify({ data }),
+      cache: 'no-store',
+    });
+    const payload = (await response.json()) as {
+      error?: { status?: unknown; message?: unknown };
+      result?: unknown;
+      data?: unknown;
+    };
+    const errorMessage =
+      payload?.error && typeof payload.error === 'object' ? String(payload.error.message || '') : '';
+    if (response.status === 503 || /尚未啟用/.test(errorMessage)) {
+      throw new FunctionsUnconfiguredError('請假服務尚未接通');
+    }
+    if (!response.ok || payload.error) {
+      const status =
+        payload?.error && typeof payload.error === 'object' ? String(payload.error.status || '') : '';
+      throw withCallableCode(
+        errorMessage || '目前無法確認操作是否完成，請先重新整理紀錄，再決定是否重試。',
+        status || 'UNKNOWN',
+      );
+    }
+    return (payload.result ?? payload.data) as Output;
+  }
   if (!areFunctionsConfigured()) throw new FunctionsUnconfiguredError('請假服務尚未接通');
-  return httpsCallable<Input, Output>(getFunctionsInstance(), name);
+  const result = await httpsCallable<Input, Output>(getFunctionsInstance(), name)(data);
+  return result.data;
 }
 
 export async function listMyLeaveRequests(uid: string, schoolId: string): Promise<LeaveRequest[]> {
@@ -209,28 +260,30 @@ export async function submitLeaveRequest(
   if (!validLeaveDates(data.startDate, data.endDate)) {
     throw new Error('請假日期不正確，一次最多 31 天。');
   }
-  const result = await callable<typeof data, { id: string; alreadySubmitted: boolean }>(
+  const result = await callLeaveFn<typeof data, { id: string; alreadySubmitted: boolean }>(
     'submitLeaveRequest',
-  )(data);
+    data,
+  );
   assertCloudUser(uid);
-  return result.data;
+  return result;
 }
 
 export async function withdrawLeaveRequest(uid: string, requestId: string) {
   assertCloudUser(uid);
-  await callable<{ requestId: string }, { status: string }>('withdrawLeaveRequest')({ requestId });
+  await callLeaveFn<{ requestId: string }, { status: string }>('withdrawLeaveRequest', { requestId });
   assertCloudUser(uid);
 }
 
 export async function listLeaveReviewQueue(uid: string, schoolId: string) {
   assertCloudUser(uid);
   const result = await withLeaveLoadTimeout(
-    callable<{ schoolId: string }, { rows: LeaveReviewRow[] }>(
+    callLeaveFn<{ schoolId: string }, { rows: LeaveReviewRow[] }>(
       'listLeaveReviewQueue',
-    )({ schoolId }),
+      { schoolId },
+    ),
   );
   assertCloudUser(uid);
-  return result.data.rows;
+  return result.rows;
 }
 
 export async function reviewLeaveRequest(
@@ -238,9 +291,9 @@ export async function reviewLeaveRequest(
   decision: 'approved' | 'rejected', note: string,
 ) {
   assertCloudUser(uid);
-  await callable<{
+  await callLeaveFn<{
     requestId: string; courseId: string; decision: 'approved' | 'rejected'; note: string;
-  }, { id: string; status: LeaveStatus }>('reviewLeaveRequest')({
+  }, { id: string; status: LeaveStatus }>('reviewLeaveRequest', {
     requestId, courseId, decision, note,
   });
   assertCloudUser(uid);

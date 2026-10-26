@@ -1,4 +1,5 @@
-import { isHostedWebCallable } from '@/lib/hostedCallables';
+import { isHostedWebCallable, isLeaveWebCallable } from '@/lib/hostedCallables';
+import { isLeaveWebApiEnabled } from '@/lib/leaveWebApi';
 import { callableErrorBody, HttpsError } from './httpsError';
 import type { CallableRequest } from './groupInviteHandlers';
 import {
@@ -116,6 +117,15 @@ async function invokeHostedCallable(
     const { createLiveSessionHandlers } = await import('./attendanceSessionHandlers');
     return createLiveSessionHandlers({ db })[name](request);
   }
+  if (
+    name === 'submitLeaveRequest' ||
+    name === 'withdrawLeaveRequest' ||
+    name === 'reviewLeaveRequest' ||
+    name === 'listLeaveReviewQueue'
+  ) {
+    const { createLeaveRequestHandlers } = await import('./leaveRequestHandlers');
+    return createLeaveRequestHandlers({ db: db as never })[name](request);
+  }
   throw new HttpsError('not-found', `Unknown function: ${name}`);
 }
 
@@ -149,6 +159,10 @@ export async function dispatchFnRequest(
       new HttpsError('invalid-argument', 'Request has invalid method.'),
       request,
     );
+  }
+
+  if (isLeaveWebCallable(name) && !isLeaveWebApiEnabled()) {
+    return callableResponse(new HttpsError('unavailable', '尚未啟用'), request);
   }
 
   let resolved = runtime;

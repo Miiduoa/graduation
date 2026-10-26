@@ -1,5 +1,5 @@
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { beforeEach, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { LEAVE_COPY, LEAVE_LOAD_TIMEOUT_MS } from '@/lib/leavePageState';
 import { listLeaveReviewQueue } from '@/lib/leaveRequests';
 import LeaveReviewPage from './page';
@@ -72,6 +72,10 @@ function expectOnly(visible: string) {
   expect(screen.queryByText(/請確認連線/)).toBeNull();
 }
 
+afterEach(() => {
+  vi.unstubAllEnvs();
+});
+
 beforeEach(() => {
   vi.clearAllMocks();
   runtime.functionsConfigured = false;
@@ -85,6 +89,14 @@ it('shows only that review is not open when Functions are not configured', async
   expectOnly(LEAVE_COPY.unavailableReview);
   expect(listLeaveReviewQueue).not.toHaveBeenCalled();
   expect(screen.queryByRole('button', { name: LEAVE_COPY.retry })).toBeNull();
+});
+
+it('loads the review queue through the web API when the flag is on without Functions', async () => {
+  vi.stubEnv('NEXT_PUBLIC_LEAVE_WEB_API', 'true');
+  render(<LeaveReviewPage />);
+  expect(await screen.findByText(LEAVE_COPY.emptyReview)).toBeTruthy();
+  expect(listLeaveReviewQueue).toHaveBeenCalled();
+  expect(screen.queryByText(LEAVE_COPY.unavailableReview)).toBeNull();
 });
 
 it('shows only the loading copy while the review queue is in flight', () => {

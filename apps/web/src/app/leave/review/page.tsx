@@ -8,7 +8,7 @@ import { SchoolScopePlaceholder } from '@/components/SchoolScopePlaceholder';
 import { useAuth } from '@/components/AuthGuard';
 import { useSelectedSchool } from '@/components/SelectedSchoolProvider';
 import { useDemoRole } from '@/lib/demoRole';
-import { areFunctionsConfigured } from '@/lib/functionsUrl';
+import { isLeaveBackendAvailable } from '@/lib/leaveWebApi';
 import {
   LEAVE_COPY,
   initialLeavePageView,
@@ -61,7 +61,7 @@ function ReviewWorkspace({ uid, schoolId, schoolName }: {
   uid: string; schoolId: string; schoolName: string;
 }) {
   const [view, setView] = useState<LeavePageView<LeaveReviewRow[]>>(() =>
-    initialLeavePageView(areFunctionsConfigured()),
+    initialLeavePageView(isLeaveBackendAvailable()),
   );
   const [notice, setNotice] = useState('');
   const [filter, setFilter] = useState<ReviewFilter>('pending');
@@ -71,7 +71,7 @@ function ReviewWorkspace({ uid, schoolId, schoolName }: {
   const lockedRef = useRef(false);
 
   const load = useCallback(async () => {
-    if (!areFunctionsConfigured()) {
+    if (!isLeaveBackendAvailable()) {
       setView({ status: 'unavailable' });
       return;
     }
@@ -89,7 +89,7 @@ function ReviewWorkspace({ uid, schoolId, schoolName }: {
 
   useEffect(() => {
     currentRef.current = true;
-    if (areFunctionsConfigured()) void Promise.resolve().then(load);
+    if (isLeaveBackendAvailable()) void Promise.resolve().then(load);
     return () => { currentRef.current = false; };
   }, [load]);
 
