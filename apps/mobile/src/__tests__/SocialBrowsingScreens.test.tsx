@@ -255,7 +255,7 @@ test('the saved filter loads older bookmarked posts outside the latest feed', as
   const view = render(<HomeFeedScreen />);
   expect(await view.findByText(post.title)).toBeTruthy();
   await act(async () => {
-    fireEvent.press(view.getByText('收藏'));
+    fireEvent.press(view.getByLabelText('收藏分類'));
   });
   expect(await view.findByText('上學期筆記')).toBeTruthy();
   expect(view.queryByText(post.title)).toBeNull();
