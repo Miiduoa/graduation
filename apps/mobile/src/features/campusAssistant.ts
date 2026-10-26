@@ -105,16 +105,12 @@ export async function askCampusAssistant(input: {
       role: message.role,
       content: message.content.slice(0, 550),
     }));
-    if (readiness.modelId === 'qwen3-0.6b') {
-      const last = compactHistory[compactHistory.length - 1];
-      last.content += '\n/no_think';
-    }
-    const completion = await localLLM.generate({
+        const completion = await localLLM.generate({
       messages: [
         { role: 'system', content: formatOnDeviceSchoolPrompt(snapshot) },
         ...compactHistory,
       ],
-      maxTokens: readiness.modelId === 'qwen3-0.6b' ? 512 : 700,
+      maxTokens: readiness.modelId === 'qwen2.5-0.5b' ? 512 : 700,
       temperature: 0.45,
     });
     scopeCheck(input, false);
