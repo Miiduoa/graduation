@@ -270,7 +270,10 @@ function AssistantConversation({
                 label={'開啟' + VERIFIED_SERVICE_ROUTES[message.route].label}
                 variant="ghost"
                 disabled={busy}
-                onPress={() => safeNavigate(navigation, VERIFIED_SERVICE_ROUTES[message.route!].route)}
+                onPress={() => {
+                  const destination = message.route && VERIFIED_SERVICE_ROUTES[message.route];
+                  if (destination) safeNavigate(navigation, destination.route);
+                }}
               />
             </View>
           ) : message.role === 'assistant' && index > 0 ? (
