@@ -1,5 +1,5 @@
 import type { Metadata } from 'next';
-import { DeletionStatus } from './DeletionStatus';
+import { DeletionStatus } from './DeletionStatusView';
 import { PUBLIC_PAGE_INTRO } from './deletionStatus';
 
 export const metadata: Metadata = {
