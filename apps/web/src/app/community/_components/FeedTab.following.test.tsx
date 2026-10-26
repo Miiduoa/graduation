@@ -100,8 +100,8 @@ it('shows a retryable error rather than pretending a denied following query is e
   mocks.listFollowing.mockRejectedValueOnce(new Error('permission-denied'));
   render(<FeedTab schoolId="pu" schoolSearch="?schoolId=pu" />);
   await screen.findByText('小明的貼文');
-  await screen.findByText('無法讀取追蹤清單，請確認網路及校籍後重試。');
   fireEvent.click(screen.getByRole('button', { name: '追蹤' }));
+  await screen.findByText('無法讀取追蹤清單，請確認網路及校籍後重試。');
   expect(screen.queryByText('追蹤的作者尚無新貼文')).toBeNull();
   fireEvent.click(screen.getByRole('button', { name: '重新讀取追蹤' }));
   await waitFor(() => expect(mocks.listFollowing).toHaveBeenCalledTimes(2));
