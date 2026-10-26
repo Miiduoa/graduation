@@ -14,6 +14,7 @@ import Link from 'next/link';
 import styles from '../community.module.css';
 import { CommunityLoadError, useCommunityLoad } from './useCommunityLoad';
 import { selectCampusFeedPosts, type FeedFilter, type FeedOrder } from './feedView';
+import { listFollowingIds, followUser, unfollowUser } from '@/lib/community/follows';
 import Image from 'next/image';
 import { useAuth } from '@/components/AuthGuard';
 import {
@@ -38,9 +39,11 @@ import {
 
 type FilterKey = FeedFilter | 'saved';
 const EMPTY_SAVED_POSTS: CampusPostDoc[] = [];
+const EMPTY_FOLLOWING_IDS: ReadonlySet<string> = new Set();
 
 const FILTERS: { key: FilterKey; label: string; icon: string }[] = [
   { key: 'all', label: '全部', icon: '✨' },
+  { key: 'following', label: '追蹤', icon: '👥' },
   { key: 'subscribed', label: '我訂閱', icon: '🔔' },
   { key: 'media', label: '圖文', icon: '🖼' },
   { key: 'saved', label: '收藏', icon: '🔖' },
@@ -102,6 +105,20 @@ export function FeedTab(props: { schoolId: string; schoolSearch: string }) {
   const savedIds = validBookmarks ? bookmarkedIds : new Set<string>();
   const savedPosts = validBookmarks ? bookmarkedPosts : EMPTY_SAVED_POSTS;
   const savedView = filter === 'saved';
+  const followingView = filter === 'following';
+  const [followingScope, setFollowingScope] = useState('');
+  const [followingIds, setFollowingIds] = useState<ReadonlySet<string>>(new Set());
+  const [followingLoading, setFollowingLoading] = useState(false);
+  const [followingError, setFollowingError] = useState('');
+  const [followingFeedback, setFollowingFeedback] = useState('');
+  const [followingRevision, setFollowingRevision] = useState(0);
+  const followingFlights = useRef<Set<string>>(new Set());
+  const [followingPending, setFollowingPending] = useState<ReadonlySet<string>>(new Set());
+  const currentFollowingScope = `${user?.uid ?? ''}:${schoolId}`;
+  const followingScopeRef = useRef(currentFollowingScope);
+  followingScopeRef.current = currentFollowingScope;
+  const validFollowing = followingScope === currentFollowingScope;
+  const followedIds = validFollowing ? followingIds : EMPTY_FOLLOWING_IDS;
 
   const load = useCallback(async () => {
     if (!schoolId || !user) {
@@ -168,10 +185,11 @@ export function FeedTab(props: { schoolId: string; schoolSearch: string }) {
         order,
         search,
         subscribedIds,
+        followingIds: followedIds,
         boardNames: boardNameById,
         authorNames: nameByUid,
       }),
-    [posts, savedPosts, savedView, filter, order, search, subscribedIds, boardNameById, nameByUid],
+    [posts, savedPosts, savedView, filter, order, search, subscribedIds, followedIds, boardNameById, nameByUid],
   );
 
   useEffect(() => {
@@ -209,6 +227,69 @@ export function FeedTab(props: { schoolId: string; schoolSearch: string }) {
       live = false;
     };
   }, [user?.uid, schoolId, savedView, bookmarkRevision]);
+
+  useEffect(() => {
+    const uid = user?.uid;
+    if (!uid || !schoolId) {
+      setFollowingScope('');
+      setFollowingIds(new Set());
+      setFollowingLoading(false);
+      return;
+    }
+    const scope = `${uid}:${schoolId}`;
+    let live = true;
+    setFollowingLoading(true);
+    setFollowingError('');
+    void listFollowingIds(schoolId, uid)
+      .then((ids) => {
+        if (!live) return;
+        setFollowingIds(new Set(ids));
+        setFollowingScope(scope);
+      })
+      .catch(() => {
+        if (live) setFollowingError('無法讀取追蹤清單，請確認網路及校籍後重試。');
+      })
+      .finally(() => {
+        if (live) setFollowingLoading(false);
+      });
+    return () => { live = false; };
+  }, [user?.uid, schoolId, followingRevision]);
+
+  const toggleFollow = async (targetUid: string) => {
+    if (
+      !user?.uid || !schoolId || targetUid === user.uid ||
+      !validFollowing || followingError || followingFlights.current.has(targetUid)
+    ) return;
+    const scope = currentFollowingScope;
+    const removing = followedIds.has(targetUid);
+    followingFlights.current.add(targetUid);
+    setFollowingPending((prev) => new Set([...prev, targetUid]));
+    setFollowingFeedback('');
+    try {
+      if (removing) await unfollowUser(schoolId, user.uid, targetUid);
+      else await followUser(schoolId, user.uid, targetUid);
+      if (followingScopeRef.current !== scope) return;
+      setFollowingIds((prev) => {
+        const next = new Set(prev);
+        if (removing) next.delete(targetUid);
+        else next.add(targetUid);
+        return next;
+      });
+      setFollowingRevision((prev) => prev + 1);
+    } catch {
+      if (followingScopeRef.current === scope)
+        setFollowingFeedback('追蹤狀態未更新，請確認網路和對方校籍後重試。');
+    } finally {
+      followingFlights.current.delete(targetUid);
+      if (followingScopeRef.current === scope) {
+        setFollowingPending((prev) => {
+          const next = new Set(prev);
+          next.delete(targetUid);
+          return next;
+        });
+      }
+    }
+  };
 
   const toggleBookmark = async (item: CampusPostDoc) => {
     if (!user?.uid || !schoolId || bookmarkFlights.current.has(item.id)) return;
