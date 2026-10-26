@@ -15,11 +15,11 @@ const openTimetable = jest.fn();
 const openImport = jest.fn();
 const retry = jest.fn();
 const now = Date.parse('2026-10-26T00:00:00.000Z');
-const upcoming = (id: string, offsetMinutes: number, location = ''): TodayClass => ({
+const upcoming = (id: string, offsetMinutes: number, location = '', anchor = Date.now()): TodayClass => ({
   id,
   title: '課程 ' + id,
-  startAt: now + offsetMinutes * 60000,
-  endAt: now + (offsetMinutes + 50) * 60000,
+  startAt: anchor + offsetMinutes * 60000,
+  endAt: anchor + (offsetMinutes + 50) * 60000,
   location,
 });
 
@@ -41,10 +41,10 @@ beforeEach(() => {
 
 test('the next class helper skips ended and malformed classes before sorting by start time', () => {
   const classes = [
-    upcoming('late', 120),
-    upcoming('invalid', 15),
-    upcoming('ended', -150),
-    upcoming('early', 35),
+    upcoming('late', 120, '', now),
+    upcoming('invalid', 15, '', now),
+    upcoming('ended', -150, '', now),
+    upcoming('early', 35, '', now),
   ];
   classes[1].endAt = Number.NaN;
   expect(nextLearningClass(classes, new Date(now))?.id).toBe('early');
