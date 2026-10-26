@@ -148,3 +148,38 @@ test('assistant offers the existing service directly instead of inventing a tran
   });
   expect(request).not.toHaveBeenCalled();
 });
+
+test('a verified offline timetable result opens only its allowlisted local service', async () => {
+  const navigate = jest.fn();
+  request.mockResolvedValueOnce({
+    content: '星期一有 2 堂已保存的課程',
+    source: 'device',
+    tool: 'saved-timetable',
+    route: '/timetable',
+    hasActions: false,
+  });
+  const view = render(<CampusAssistantScreen navigation={{ navigate }} />);
+  fireEvent.changeText(view.getByLabelText('詢問校園助理'), '今天課表');
+  await act(async () => fireEvent.press(view.getByText('送出問題')));
+  expect(view.getByText('手機離線工具')).toBeTruthy();
+  expect(view.getByText(/本機規則／已保存資料/)).toBeTruthy();
+  fireEvent.press(view.getByText('開啟我的課表'));
+  expect(navigate).toHaveBeenCalledWith('學習', {
+    screen: 'PersonalTimetable',
+    params: undefined,
+  });
+});
+
+test('a service route outside the local allowlist is never turned into a direct navigation', async () => {
+  request.mockResolvedValueOnce({
+    content: '請核對內容',
+    source: 'device',
+    tool: 'open-service',
+    route: 'https://untrusted.invalid',
+    hasActions: false,
+  });
+  const view = render(<CampusAssistantScreen />);
+  fireEvent.changeText(view.getByLabelText('詢問校園助理'), '幫我寫報告');
+  await act(async () => fireEvent.press(view.getByText('送出問題')));
+  expect(view.queryByText(/開啟https/)).toBeNull();
+});
