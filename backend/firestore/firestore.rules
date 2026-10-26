@@ -1651,10 +1651,20 @@ service cloud.firestore {
         && (resource.data.followerUid == request.auth.uid || resource.data.targetUid == request.auth.uid)
         && isSchoolMember(resource.data.schoolId);
       allow create: if isSignedIn()
+        && request.resource.data.keys().hasAll(['schoolId', 'followerUid', 'targetUid', 'createdAt'])
+        && request.resource.data.keys().hasOnly(['schoolId', 'followerUid', 'targetUid', 'createdAt'])
+        && request.resource.data.schoolId is string
         && request.resource.data.followerUid == request.auth.uid
+        && request.resource.data.targetUid is string
+        && request.resource.data.targetUid.size() > 0
+        && request.resource.data.targetUid.size() <= 128
         && request.resource.data.followerUid != request.resource.data.targetUid
-        && request.resource.data.schoolId != null
-        && isSchoolMember(request.resource.data.schoolId);
+        && followId == 'fol_' + request.resource.data.schoolId + '_' + request.auth.uid + '_' + request.resource.data.targetUid
+        && request.resource.data.createdAt == request.time
+        && isSchoolMember(request.resource.data.schoolId)
+        && exists(/databases/$(database)/documents/schools/$(request.resource.data.schoolId)/members/$(request.resource.data.targetUid))
+        && get(/databases/$(database)/documents/schools/$(request.resource.data.schoolId)/members/$(request.resource.data.targetUid)).data.status == 'active';
+      // Allow owners to remove their own follow even after membership is revoked.
       allow delete: if isSignedIn() && resource.data.followerUid == request.auth.uid;
       allow update: if false;
     }
