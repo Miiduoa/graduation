@@ -52,11 +52,11 @@ interface ModelInfo {
 const MODEL_INFO: ModelInfo[] = [
   // ── 輕量級 ──
   {
-    id: 'qwen3-0.6b',
-    name: 'Qwen3 隨身 AI',
+    id: 'qwen2.5-0.5b',
+    name: 'Qwen2.5 隨身 AI',
     description: '輕量中文模型，適合日常問答、文字整理。下載後可完全離線運算；複雜推理建議改用進階模型。',
-    sizeLabel: '約 397 MB',
-    sizeBytes: MODEL_REGISTRY['qwen3-0.6b'].modelSize,
+    sizeLabel: '約 398 MB',
+    sizeBytes: MODEL_REGISTRY['qwen2.5-0.5b'].modelSize,
     quality: '輕量',
     qualityStars: 2,
     speedStars: 5,
@@ -67,7 +67,7 @@ const MODEL_INFO: ModelInfo[] = [
   {
     id: 'smollm2-1.7b',
     name: 'SmolLM2 輕量版',
-    description: '舊版輕量模型，適合英文簡單對話；中文建議優先選 Qwen3',
+    description: '舊版輕量模型，適合英文簡單對話；中文建議優先選 Qwen2.5',
     sizeLabel: '1.1 GB',
     sizeBytes: 1_100_000_000,
     quality: '輕量',
