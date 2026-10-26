@@ -56,6 +56,11 @@ import {
 import { getOrCreateBoardAlias } from '../../services/aliasService';
 import { fetchSchoolDirectoryProfiles } from '../../services/memberDirectory';
 import { submitCampusReport } from '../../services/reportSystem';
+import {
+  isCampusPostBookmarked,
+  saveCampusPostBookmark,
+  removeCampusPostBookmark,
+} from '../../services/campusPostBookmarks';
 import { flattenCampusRepliesThread } from '../../utils/campusReplyThread';
 
 export function PostDetailScreen(props: any) {
@@ -76,6 +81,47 @@ export function PostDetailScreen(props: any) {
   const [replyParentId, setReplyParentId] = useState<string | null>(null);
   const [likeBusy, setLikeBusy] = useState(false);
   const [showEdit, setShowEdit] = useState(false);
+  const [bookmarkState, setBookmarkState] = useState<{ scope: string; saved: boolean } | null>(null);
+  const [bookmarkBusy, setBookmarkBusy] = useState(false);
+  const [bookmarkError, setBookmarkError] = useState('');
+  const [bookmarkRevision, setBookmarkRevision] = useState(0);
+  const bookmarkScope = `${auth.user?.uid ?? ''}:${school?.id ?? ''}:${postId ?? ''}`;
+  const bookmarkReady = bookmarkState?.scope === bookmarkScope;
+  const isSaved = bookmarkReady ? bookmarkState.saved : false;
+
+  React.useEffect(() => {
+    const uid = auth.user?.uid;
+    const sid = school?.id;
+    if (!uid || !sid || !postId || isFirebaseMockMode()) return;
+    let live = true;
+    void isCampusPostBookmarked(uid, sid, postId)
+      .then((saved) => {
+        if (!live) return;
+        setBookmarkState({ scope: `${uid}:${sid}:${postId}`, saved });
+        setBookmarkError('');
+      })
+      .catch(() => {
+        if (live) setBookmarkError('無法讀取收藏狀態，請確認校籍與連線。');
+      });
+    return () => { live = false; };
+  }, [auth.user?.uid, school?.id, postId, bookmarkRevision]);
+
+  const toggleBookmark = async () => {
+    const uid = auth.user?.uid;
+    const sid = school?.id;
+    if (!uid || !sid || !postId || bookmarkBusy || !bookmarkReady || isFirebaseMockMode()) return;
+    setBookmarkBusy(true);
+    setBookmarkError('');
+    try {
+      if (isSaved) await removeCampusPostBookmark(uid, sid, postId);
+      else await saveCampusPostBookmark(uid, sid, postId);
+      setBookmarkState({ scope: `${uid}:${sid}:${postId}`, saved: !isSaved });
+    } catch {
+      setBookmarkError('這次收藏沒有成功更新，請重新連線後再試。');
+    } finally {
+      setBookmarkBusy(false);
+    }
+  };
 
   const loadPost = useCallback(async () => {
     if (!postId || !school?.id || !auth.user?.uid || isFirebaseMockMode()) {
@@ -245,7 +291,7 @@ export function PostDetailScreen(props: any) {
         text: '分享',
         onPress: async () => {
           try {
-            const url = `campus://post/${postId}`;
+            const url = `https://nuni.tw/community/post/${encodeURIComponent(postId)}?schoolId=${encodeURIComponent(school?.id ?? '')}`;
             await Share.share({ message: `${post.title}\n${url}`, url });
           } catch {
             /* ignore */
@@ -431,10 +477,25 @@ export function PostDetailScreen(props: any) {
               </View>
               <View style={{ flex: 1 }} />
               <Pressable
+                accessibilityRole="button"
+                accessibilityLabel={isSaved ? '取消收藏貼文' : '收藏貼文'}
+                accessibilityState={{ selected: isSaved, disabled: !bookmarkReady || bookmarkBusy }}
+                disabled={!bookmarkReady || bookmarkBusy}
+                style={styles.statChip}
+                hitSlop={8}
+                onPress={() => void toggleBookmark()}
+              >
+                <Ionicons
+                  name={isSaved ? 'bookmark' : 'bookmark-outline'}
+                  size={18}
+                  color={isSaved ? theme.colors.accent : theme.colors.textSecondary}
+                />
+              </Pressable>
+              <Pressable
                 style={styles.statChip}
                 hitSlop={6}
                 onPress={async () => {
-                  const url = `campus://post/${postId}`;
+                  const url = `https://nuni.tw/community/post/${encodeURIComponent(postId)}?schoolId=${encodeURIComponent(school?.id ?? '')}`;
                   try {
                     await Share.share({ message: `${post.title}\n${url}`, url });
                   } catch {
@@ -446,6 +507,14 @@ export function PostDetailScreen(props: any) {
                 <Ionicons name="share-outline" size={17} color={theme.colors.textSecondary} />
               </Pressable>
             </View>
+            {!!bookmarkError && (
+              <View style={{ marginHorizontal: 14, marginTop: 8, gap: 6 }}>
+                <Text accessibilityRole="alert" style={{ color: theme.colors.danger }}>{bookmarkError}</Text>
+                <Pressable accessibilityRole="button" onPress={() => setBookmarkRevision((prev) => prev + 1)}>
+                  <Text style={{ color: theme.colors.accent }}>重試收藏狀態</Text>
+                </Pressable>
+              </View>
+            )}
 
             <Text style={styles.commentHeader}>討論串 · {threadedReplies.length}</Text>
             {threadedReplies.length === 0 ? (

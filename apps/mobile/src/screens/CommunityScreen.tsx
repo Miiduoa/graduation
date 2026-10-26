@@ -7,7 +7,7 @@
  *  - 分頁 icon 與舊版一致，但採用 pill underline 視覺，contained badge 顯示活躍計數（之後可接事件匯流）
  *  - 仍支援 route.params.initialTab（含 social/pulse 別名）
  */
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { View, Text, Pressable, StyleSheet } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -42,6 +42,11 @@ export function CommunityScreen(props: Record<string, unknown>) {
 
   const route = (props as any)?.route;
   const rawInitial = route?.params?.initialTab as string | undefined;
+  const storyAuthorUid = route?.params?.storyAuthorUid as string | undefined;
+  const storySchoolId = route?.params?.storySchoolId as string | undefined;
+  const clearStoryRequest = useCallback(() => {
+    stackNav?.setParams?.({ storyAuthorUid: undefined, storySchoolId: undefined });
+  }, [stackNav]);
   const initialTab: TabKey | undefined = rawInitial
     ? (LEGACY_TAB[rawInitial] ?? (rawInitial as TabKey))
     : undefined;
@@ -118,7 +123,13 @@ export function CommunityScreen(props: Record<string, unknown>) {
         <View style={{ flex: 1 }}>
           {activeTab === 'feed' && <HomeFeedScreen />}
           {activeTab === 'boards' && <BoardsScreen />}
-          {activeTab === 'realtime' && <RealtimeSocialScreen />}
+          {activeTab === 'realtime' && (
+            <RealtimeSocialScreen
+              requestedAuthorUid={storyAuthorUid}
+              requestedSchoolId={storySchoolId}
+              onRequestConsumed={clearStoryRequest}
+            />
+          )}
           {activeTab === 'buddy' && <StudyBuddyPanel />}
         </View>
       </CampusSocialNavProvider>
