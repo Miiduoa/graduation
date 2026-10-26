@@ -14,6 +14,7 @@
  */
 
 import { getSupabaseClient } from './supabaseClient';
+import { saveAssignmentDeviceDraft, deliverAssignmentFinal } from './lmsV2AssignmentDelivery';
 import { isLmsV2Enabled } from './lmsV2FeatureFlag';
 
 // ─── 共用型別 ───
@@ -178,47 +179,15 @@ function rls(err: any): LmsWriteErr {
 // STUDENT actions
 // ──────────────────────────────────────────────────────────────
 
+export { readOwnAssignmentDraft } from './lmsV2AssignmentDelivery';
+
 export async function submitAssignmentDraft(opts: {
   courseId: string | number;
   assignmentId: string | number;
   contentText?: string;
   attachmentUrls?: string[];
 }): Promise<LmsWriteResult> {
-  const env = await getClientOrErr();
-  if (env.ok === false) return env.err;
-  const { sb, userId } = env;
-
-  // RLS 自動限制 own + before due_at
-  try {
-    const { data, error } = await sb
-      .from('submissions')
-      .upsert(
-        {
-          course_id: opts.courseId,
-          assignment_id: opts.assignmentId,
-          user_id: userId,
-          content_text: opts.contentText ?? null,
-          attachment_urls: opts.attachmentUrls ?? null,
-          status: 'draft',
-          updated_at: new Date().toISOString(),
-        },
-        { onConflict: 'assignment_id,user_id' },
-      )
-      .select('id')
-      .single();
-    if (error) return rls(error);
-    const auditId = await writeAudit(sb, userId, opts.courseId, 'submit_draft', `assignments/${opts.assignmentId}`, opts);
-    return {
-      success: true,
-      summary: '草稿已存',
-      data: { submissionId: data?.id },
-      is_draft: true,
-      audit_id: auditId,
-      affects: ['self'],
-    };
-  } catch (err) {
-    return rls(err);
-  }
+  return saveAssignmentDeviceDraft(opts);
 }
 
 export async function submitAssignmentFinal(opts: {
@@ -227,40 +196,7 @@ export async function submitAssignmentFinal(opts: {
   contentText?: string;
   attachmentUrls?: string[];
 }): Promise<LmsWriteResult> {
-  const env = await getClientOrErr();
-  if (env.ok === false) return env.err;
-  const { sb, userId } = env;
-
-  try {
-    const { data, error } = await sb
-      .from('submissions')
-      .upsert(
-        {
-          course_id: opts.courseId,
-          assignment_id: opts.assignmentId,
-          user_id: userId,
-          content_text: opts.contentText ?? null,
-          attachment_urls: opts.attachmentUrls ?? null,
-          status: 'submitted',
-          submitted_at: new Date().toISOString(),
-          updated_at: new Date().toISOString(),
-        },
-        { onConflict: 'assignment_id,user_id' },
-      )
-      .select('id')
-      .single();
-    if (error) return rls(error);
-    const auditId = await writeAudit(sb, userId, opts.courseId, 'submit_final', `assignments/${opts.assignmentId}`, opts);
-    return {
-      success: true,
-      summary: '已送出作業,教師將收到批改通知',
-      data: { submissionId: data?.id },
-      audit_id: auditId,
-      affects: ['teacher', 'ta'],
-    };
-  } catch (err) {
-    return rls(err);
-  }
+  return deliverAssignmentFinal(opts);
 }
 
 export async function startQuizAttempt(opts: {
