@@ -14,7 +14,7 @@ export interface OnDeviceAssistantReadiness {
 
 export class OnDeviceAssistantError extends Error {
   constructor(public readonly code: 'native-unavailable' | 'model-required' | 'model-failed' | 'session-changed') {
-    super(code);
+    super(code === 'session-changed' ? 'Assistant session changed' : code);
     this.name = 'OnDeviceAssistantError';
   }
 }
@@ -62,7 +62,13 @@ export async function askCampusAssistant(input: {
   schoolName?: string | null;
   /** Offline by default. Campus mode is explicit and requires an authenticated backend. */
   mode?: CampusAssistantMode;
-}): Promise<{ content: string; hasActions: boolean; source: CampusAssistantMode }> {
+}): Promise<{
+  content: string;
+  hasActions: boolean;
+  source: CampusAssistantMode;
+  tool?: 'saved-timetable' | 'online-required' | 'open-service';
+  route?: string;
+}> {
   const mode = input.mode ?? 'device';
   scopeCheck(input, mode === 'campus');
   const messages = input.messages
@@ -77,6 +83,32 @@ export async function askCampusAssistant(input: {
   }
 
   if (mode === 'device') {
+    const { collectOnDeviceSchoolContext, formatOnDeviceSchoolPrompt } =
+      require('../services/onDeviceSchoolContext') as typeof import('../services/onDeviceSchoolContext');
+    const { runOfflineCampusTool } =
+      require('../services/offlineCampusTools') as typeof import('../services/offlineCampusTools');
+
+    const uid = input.scope.uid && !isFirebaseMockMode() ? input.scope.uid : '';
+    const snapshot = await collectOnDeviceSchoolContext({
+      uid,
+      schoolId: input.scope.schoolId,
+      schoolName: input.schoolName,
+    });
+    scopeCheck(input, false);
+
+    // Safe read-only tools run even without a GGUF download or a native runtime.
+    // They do not query a backend, perform mutations, or invent missing school data.
+    const localAnswer = runOfflineCampusTool(messages[messages.length - 1].content, snapshot);
+    if (localAnswer) {
+      return {
+        content: localAnswer.content,
+        hasActions: false,
+        source: 'device',
+        tool: localAnswer.tool,
+        route: localAnswer.route,
+      };
+    }
+
     const { localLLM } = engine();
     const readiness = await getOnDeviceAssistantReadiness();
     scopeCheck(input, false);
@@ -88,16 +120,6 @@ export async function askCampusAssistant(input: {
       scopeCheck(input, false);
       if (!loaded) throw new OnDeviceAssistantError('model-failed');
     }
-
-    const { collectOnDeviceSchoolContext, formatOnDeviceSchoolPrompt } =
-      require('../services/onDeviceSchoolContext') as typeof import('../services/onDeviceSchoolContext');
-    const uid = input.scope.uid && !isFirebaseMockMode() ? input.scope.uid : '';
-    const snapshot = await collectOnDeviceSchoolContext({
-      uid,
-      schoolId: input.scope.schoolId,
-      schoolName: input.schoolName,
-    });
-    scopeCheck(input, false);
 
     // Each request gets explicitly scoped history; never reuse a global chat history
     // that could contain data from a previous account or campus.
