@@ -598,7 +598,8 @@ class LocalLLMEngine {
         model: modelPath,
         n_ctx: cfg.contextLength,
         n_threads: cfg.threads,
-        n_gpu_layers: cfg.gpuLayers,
+        // 此版本在 Android 使用 CPU 路徑，避免把 iOS Metal 設定套到不支援的手機。
+        n_gpu_layers: Platform.OS === 'ios' ? cfg.gpuLayers : 0,
         use_mlock: true,
         use_mmap: true,
       });
