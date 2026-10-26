@@ -13,6 +13,8 @@ const { replace, signIn, state } = vi.hoisted(() => ({
     optionsLoading: false,
     optionsError: false,
     retryOptions: vi.fn(),
+    selectedSchoolId: null as string | null,
+    schoolDirectoryLoading: false,
   },
 }));
 vi.mock('next/navigation', () => ({
@@ -46,12 +48,19 @@ vi.mock('@/features/auth/client', () => ({
   isFirebaseConfigured: () => true,
   signInWithPuStudentId: signIn,
 }));
+vi.mock('@/components/SelectedSchoolProvider', () => ({
+  useOptionalSelectedSchool: () => ({
+    selectedSchoolId: state.selectedSchoolId,
+    selectedSchool: state.selectedSchoolId ? { id: state.selectedSchoolId, name: '校園' } : null,
+    loading: state.schoolDirectoryLoading,
+  }),
+}));
 vi.mock('@/lib/signInOptions', async (original) => ({
   ...(await original<typeof import('@/lib/signInOptions')>()),
-  useSignInOptions: () => ({
+  useSignInOptions: (schoolId?: string | null, ready = true) => ({
     google: true,
-    studentId: state.studentId,
-    loading: state.optionsLoading,
+    studentId: ready && state.studentId && schoolId !== 'ntu',
+    loading: state.optionsLoading || !ready,
     error: state.optionsError,
     retry: state.retryOptions,
   }),
@@ -64,6 +73,8 @@ beforeEach(() => {
   state.loading = false;
   state.optionsLoading = false;
   state.optionsError = false;
+  state.selectedSchoolId = null;
+  state.schoolDirectoryLoading = false;
   signIn.mockResolvedValue({ uid: 'one' });
 });
 it('keeps a school return destination during an availability failure instead of offering the wrong account', () => {
@@ -81,6 +92,15 @@ it('returns an already signed-in school user to the requested page only when stu
   state.studentId = true;
   render(<LoginPage />);
   await waitFor(() => expect(replace).toHaveBeenCalledWith('/grades'));
+});
+it('does not show the student-id form when the selected school is ntu', () => {
+  state.user = null;
+  state.studentId = true;
+  state.selectedSchoolId = 'ntu';
+  render(<LoginPage />);
+  expect(screen.queryByLabelText('學號')).toBeNull();
+  expect(screen.queryByRole('button', { name: '連線學校帳號' })).toBeNull();
+  expect(replace).not.toHaveBeenCalled();
 });
 it('does not send a Google-only session into a school form that cannot sign in', () => {
   render(<LoginPage />);

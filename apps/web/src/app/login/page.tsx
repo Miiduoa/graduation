@@ -18,6 +18,7 @@ import styles from '../servicePages.module.css';
 import { NuniSignIn } from '@/components/NuniSignIn';
 import { platformDestination } from '@/lib/accountDestination';
 import { isPublicCampusPath, publicCampusServices } from '@/lib/publicCampusServices';
+import { useOptionalSelectedSchool } from '@/components/SelectedSchoolProvider';
 import { STUDENT_ID_PREPARING_COPY, useSignInOptions } from '@/lib/signInOptions';
 
 function loginDestination(value: string | null): string {
@@ -55,7 +56,10 @@ function LoginForm({
 }) {
   const router = useRouter();
   const { user, loading: schoolLoading } = useAuth();
-  const options = useSignInOptions();
+  const selection = useOptionalSelectedSchool();
+  const selectedSchoolId = selection?.selectedSchoolId ?? null;
+  const schoolDirectoryReady = !selection || !selection.loading;
+  const options = useSignInOptions(selectedSchoolId, schoolDirectoryReady);
   const [studentId, setStudentId] = useState('');
   const [password, setPassword] = useState('');
   const busyRef = useRef<'school' | 'platform' | null>(null);
@@ -114,11 +118,14 @@ function LoginForm({
     request.current = controller;
     setBusy(true);
     try {
-      const authenticated = await signInWithPuStudentId(
-        studentId.trim().toUpperCase(),
-        password,
-        controller.signal,
-      );
+      const authenticated = selectedSchoolId
+        ? await signInWithPuStudentId(
+            studentId.trim().toUpperCase(),
+            password,
+            controller.signal,
+            selectedSchoolId,
+          )
+        : await signInWithPuStudentId(studentId.trim().toUpperCase(), password, controller.signal);
       if (controller.signal.aborted) return;
       if (!authenticated) throw new Error('登入服務尚未連線。');
       setPassword('');
