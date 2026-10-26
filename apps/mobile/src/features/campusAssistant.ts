@@ -1,41 +1,135 @@
 import { httpsCallable } from 'firebase/functions';
 import { getAuthInstance, getFunctionsInstance, isFirebaseMockMode } from '../firebase';
+
 export type CampusAssistantMessage = { role: 'user' | 'assistant'; content: string };
 export type CampusAssistantScope = { uid: string; schoolId: string };
+export type CampusAssistantMode = 'device' | 'campus';
+
+export interface OnDeviceAssistantReadiness {
+  available: boolean;
+  modelId: string;
+  ready: boolean;
+  reason: string | null;
+}
+
+export class OnDeviceAssistantError extends Error {
+  constructor(public readonly code: 'native-unavailable' | 'model-required' | 'model-failed' | 'session-changed') {
+    super(code);
+    this.name = 'OnDeviceAssistantError';
+  }
+}
+
+function engine() {
+  // Lazy import avoids loading a native inference module on the cloud-only path.
+  return require('../services/localLLMInference') as typeof import('../services/localLLMInference');
+}
+
+function scopeCheck(input: { scope: CampusAssistantScope; isCurrent: () => boolean }, requiresAuth: boolean) {
+  if (!input.isCurrent()) throw new OnDeviceAssistantError('session-changed');
+  if (requiresAuth && (isFirebaseMockMode() || !input.scope.uid || !input.scope.schoolId ||
+      getAuthInstance().currentUser?.uid !== input.scope.uid)) {
+    throw new OnDeviceAssistantError('session-changed');
+  }
+  if (!requiresAuth && input.scope.uid && !isFirebaseMockMode() &&
+      getAuthInstance().currentUser?.uid !== input.scope.uid) {
+    throw new OnDeviceAssistantError('session-changed');
+  }
+}
+
+/** Never downloads or calls a paid provider while checking status. */
+export async function getOnDeviceAssistantReadiness(): Promise<OnDeviceAssistantReadiness> {
+  const { localLLM, getDefaultLocalLlmModelId } = engine();
+  const runtime = localLLM.getRuntimeAvailability();
+  const saved = await localLLM.getSavedModelId();
+  const modelId = saved || getDefaultLocalLlmModelId();
+  if (!runtime.available) {
+    return { available: false, modelId, ready: false, reason: runtime.reason || '手機 AI 引擎尚未載入' };
+  }
+  if (await localLLM.isModelDownloaded(modelId)) {
+    return { available: true, modelId, ready: true, reason: null };
+  }
+  const alternatives = await localLLM.getDownloadedModels();
+  if (alternatives.length) {
+    return { available: true, modelId: alternatives[0], ready: true, reason: null };
+  }
+  return { available: true, modelId, ready: false, reason: '請先下載免費模型；下載後可在沒有網路時使用。' };
+}
 
 export async function askCampusAssistant(input: {
   scope: CampusAssistantScope;
   messages: CampusAssistantMessage[];
   isCurrent: () => boolean;
-  /** Display name for selected school — never infer authorization from browsing alone. */
   schoolName?: string | null;
-}): Promise<{ content: string; hasActions: boolean }> {
-  const check = () => {
-    if (
-      !input.isCurrent() ||
-      isFirebaseMockMode() ||
-      !input.scope.uid ||
-      !input.scope.schoolId ||
-      getAuthInstance().currentUser?.uid !== input.scope.uid
-    )
-      throw new Error('Assistant session changed');
-  };
-  check();
+  /** Offline by default. Campus mode is explicit and requires an authenticated backend. */
+  mode?: CampusAssistantMode;
+}): Promise<{ content: string; hasActions: boolean; source: CampusAssistantMode }> {
+  const mode = input.mode ?? 'device';
+  scopeCheck(input, mode === 'campus');
   const messages = input.messages
     .slice(-20)
-    .map((message) => ({ role: message.role, content: message.content.trim().slice(0, 1600) }));
-  if (
-    !messages.length ||
-    messages[messages.length - 1].role !== 'user' ||
-    !messages[messages.length - 1].content
-  )
+    .map((message) => ({
+      role: message.role,
+      content: message.content.trim().slice(0, 1600),
+    }));
+  if (!messages.length || messages[messages.length - 1].role !== 'user' ||
+      !messages[messages.length - 1].content) {
     throw new Error('Missing question');
+  }
+
+  if (mode === 'device') {
+    const { localLLM } = engine();
+    const readiness = await getOnDeviceAssistantReadiness();
+    scopeCheck(input, false);
+    if (!readiness.available) throw new OnDeviceAssistantError('native-unavailable');
+    if (!readiness.ready) throw new OnDeviceAssistantError('model-required');
+    const state = localLLM.getState();
+    if (state.status !== 'ready' || state.modelId !== readiness.modelId) {
+      const loaded = await localLLM.loadModel(readiness.modelId);
+      scopeCheck(input, false);
+      if (!loaded) throw new OnDeviceAssistantError('model-failed');
+    }
+
+    const { collectOnDeviceSchoolContext, formatOnDeviceSchoolPrompt } =
+      require('../services/onDeviceSchoolContext') as typeof import('../services/onDeviceSchoolContext');
+    const uid = input.scope.uid && !isFirebaseMockMode() ? input.scope.uid : '';
+    const snapshot = await collectOnDeviceSchoolContext({
+      uid,
+      schoolId: input.scope.schoolId,
+      schoolName: input.schoolName,
+    });
+    scopeCheck(input, false);
+
+    // Each request gets explicitly scoped history; never reuse a global chat history
+    // that could contain data from a previous account or campus.
+    const compactHistory = messages.slice(-8).map((message) => ({
+      role: message.role,
+      content: message.content.slice(0, 550),
+    }));
+    if (readiness.modelId === 'qwen3-0.6b') {
+      const last = compactHistory[compactHistory.length - 1];
+      last.content += '\n/no_think';
+    }
+    const completion = await localLLM.generate({
+      messages: [
+        { role: 'system', content: formatOnDeviceSchoolPrompt(snapshot) },
+        ...compactHistory,
+      ],
+      maxTokens: readiness.modelId === 'qwen3-0.6b' ? 512 : 700,
+      temperature: 0.45,
+    });
+    scopeCheck(input, false);
+    const answer = completion.content.replace(/<think>[\s\S]*?<\/think>/g, '').trim();
+    if (!answer || answer.includes('<think>')) throw new OnDeviceAssistantError('model-failed');
+    return { content: answer, hasActions: false, source: 'device' };
+  }
+
   const callable = httpsCallable<
     unknown,
     { content?: string; error?: unknown; actions?: unknown[]; run?: { status?: string } }
   >(getFunctionsInstance(), 'askCampusAssistant');
-  const schoolName =
-    typeof input.schoolName === 'string' ? input.schoolName.trim().slice(0, 160) : '';
+  const schoolName = typeof input.schoolName === 'string'
+    ? input.schoolName.trim().slice(0, 160)
+    : '';
   const result = await callable({
     messages,
     context: {
@@ -46,16 +140,15 @@ export async function askCampusAssistant(input: {
       timezone: 'Asia/Taipei',
     },
   });
-  check();
-  if (
-    result.data.error ||
-    !['completed', 'blocked'].includes(result.data.run?.status ?? '') ||
-    typeof result.data.content !== 'string' ||
-    !result.data.content.trim()
-  )
+  scopeCheck(input, true);
+  if (result.data.error ||
+      !['completed', 'blocked'].includes(result.data.run?.status ?? '') ||
+      typeof result.data.content !== 'string' || !result.data.content.trim()) {
     throw new Error('Assistant reply not confirmed');
+  }
   return {
     content: result.data.content.trim(),
     hasActions: Array.isArray(result.data.actions) && result.data.actions.length > 0,
+    source: 'campus',
   };
 }
