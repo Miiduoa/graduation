@@ -264,11 +264,36 @@
   .primaryLink, .secondaryLink, .quickLinks a { transition: none; }
 }
 
+.postActions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 10px;
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border);
+  min-width: 0;
+}
+.postActionsEnd {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px 10px;
+  margin-left: auto;
+  flex: 1 1 168px;
+  min-width: 0;
+}
+.postAction,
 .postShare {
   display: inline-flex;
+  flex-direction: row;
+  flex-wrap: nowrap;
   align-items: center;
   justify-content: center;
-  margin-left: auto;
+  flex: 0 0 auto;
+  gap: 5px;
+  margin-left: 0;
   min-height: 36px;
   padding: 6px 11px;
   border: 1px solid var(--border);
@@ -278,16 +303,32 @@
   font: inherit;
   font-size: 13px;
   font-weight: 700;
+  line-height: 1.2;
+  white-space: nowrap;
+  writing-mode: horizontal-tb;
+  word-break: keep-all;
+  overflow-wrap: normal;
   cursor: pointer;
 }
+.postAction:hover,
 .postShare:hover { background: var(--bg-soft); color: var(--text); }
-.postBookmark { margin-left: 0; }
 .postBookmark[aria-pressed='true'] {
   border-color: var(--brand);
   color: var(--brand);
   background: var(--accent-soft);
 }
 .postBookmark:disabled { opacity: 0.6; cursor: wait; }
+.postActionFull { display: inline; white-space: nowrap; }
+.postActionShort { display: none; white-space: nowrap; }
+@media (max-width: 390px) {
+  .postActionsEnd {
+    flex-basis: 100%;
+    margin-left: 0;
+    justify-content: flex-start;
+  }
+  .postActionFull { display: none; }
+  .postActionShort { display: inline; }
+}
 .shareFeedback {
   color: var(--muted);
   font-size: 12px;

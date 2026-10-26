@@ -18,11 +18,13 @@ import { SiteShell } from '@/components/SiteShell';
 import { SchoolScopePlaceholder } from '@/components/SchoolScopePlaceholder';
 import { useAuth } from '@/components/AuthGuard';
 import { useBrowsingSchoolPageContext } from '@/lib/useBrowsingSchoolPageContext';
+import { PostActionsRow, PostBookmarkShareActions } from '../../_components/PostActionBar';
 import {
   isCampusPostBookmarked,
   saveCampusPostBookmark,
   removeCampusPostBookmark,
 } from '@/lib/community/bookmarks';
+import { isPermissionDeniedError } from '@campus/shared/src/signedInSocialReads';
 import {
   addCampusReply,
   deleteCampusPost,
@@ -90,8 +92,14 @@ function PostDetailInner({ schoolId }: { schoolId: string }) {
         setBookmarkState({ scope: `${uid}:${schoolId}:${postId}`, saved: value });
         setBookmarkError('');
       })
-      .catch(() => {
-        if (live) setBookmarkError('無法讀取收藏狀態，請確認校籍與連線。');
+      .catch((error) => {
+        if (!live) return;
+        if (isPermissionDeniedError(error)) {
+          setBookmarkState({ scope: `${uid}:${schoolId}:${postId}`, saved: false });
+          setBookmarkError('');
+          return;
+        }
+        setBookmarkError('無法讀取收藏狀態，請確認校籍與連線。');
       });
     return () => { live = false; };
   }, [user?.uid, schoolId, postId, bookmarkRevision]);
@@ -458,16 +466,7 @@ function PostDetailInner({ schoolId }: { schoolId: string }) {
           </div>
         )}
 
-        <div
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: 14,
-            marginTop: 16,
-            paddingTop: 12,
-            borderTop: '1px solid var(--border)',
-          }}
-        >
+        <PostActionsRow>
           <button type="button" onClick={onToggleLike} disabled={likeBusy} style={statChip}>
             <span style={{ color: liked ? 'var(--danger, var(--danger))' : 'var(--muted)' }}>
               {liked ? '❤️' : '🤍'}
@@ -485,25 +484,14 @@ function PostDetailInner({ schoolId }: { schoolId: string }) {
             <span>💬</span>
             <span style={{ fontWeight: 700, color: 'var(--muted)' }}>{cc}</span>
           </div>
-          <div style={{ flex: 1 }} />
-          <button
-            type="button"
-            onClick={() => void onToggleBookmark()}
-            disabled={!bookmarkReady || bookmarkBusy}
-            aria-pressed={saved}
-            aria-label={saved ? '取消收藏貼文' : '收藏貼文'}
-            style={statChip}
-          >
-            <span>{saved ? '🔖' : '▤'}</span>
-            <span style={{ fontWeight: 700, color: saved ? 'var(--brand)' : 'var(--muted)' }}>
-              {saved ? '已收藏' : '收藏'}
-            </span>
-          </button>
-          <button type="button" onClick={onShare} style={statChip}>
-            <span>🔗</span>
-            <span style={{ fontWeight: 700, color: 'var(--muted)' }}>分享</span>
-          </button>
-        </div>
+          <PostBookmarkShareActions
+            saved={saved}
+            bookmarkDisabled={!bookmarkReady || bookmarkBusy}
+            onBookmark={() => void onToggleBookmark()}
+            onShare={() => void onShare()}
+            shareAriaLabel="分享"
+          />
+        </PostActionsRow>
         {bookmarkError && (
           <p role="alert" style={{ margin: '8px 0 0', color: 'var(--danger)', fontSize: 13 }}>
             {bookmarkError}{' '}
@@ -811,8 +799,11 @@ const btnGhost: React.CSSProperties = {
 };
 
 const statChip: React.CSSProperties = {
-  display: 'flex',
+  display: 'inline-flex',
+  flexDirection: 'row',
+  flexWrap: 'nowrap',
   alignItems: 'center',
+  flexShrink: 0,
   gap: 6,
   background: 'var(--surface)',
   padding: '6px 12px',
@@ -820,4 +811,5 @@ const statChip: React.CSSProperties = {
   border: '1px solid var(--border)',
   cursor: 'pointer',
   fontSize: 13,
+  whiteSpace: 'nowrap',
 };

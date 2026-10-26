@@ -17,12 +17,14 @@ import { selectCampusFeedPosts, type FeedFilter, type FeedOrder } from './feedVi
 import { listFollowingIds, followUser, unfollowUser } from '@/lib/community/follows';
 import Image from 'next/image';
 import { useAuth } from '@/components/AuthGuard';
+import { PostActionsRow, PostBookmarkShareActions } from './PostActionBar';
 import {
   listCampusPostBookmarkIds,
   loadCampusPostBookmarks,
   saveCampusPostBookmark,
   removeCampusPostBookmark,
 } from '@/lib/community/bookmarks';
+import { isPermissionDeniedError } from '@campus/shared/src/signedInSocialReads';
 import {
   fetchRecentCampusPosts,
   rankFeedPosts,
@@ -118,6 +120,7 @@ function ScopedFeedTab(props: FeedTabProps & { user: { uid: string } }) {
   const [bookmarkedPosts, setBookmarkedPosts] = useState<CampusPostDoc[]>([]);
   const [bookmarksLoading, setBookmarksLoading] = useState(false);
   const [bookmarksError, setBookmarksError] = useState('');
+  const [bookmarksSilent, setBookmarksSilent] = useState(false);
   const [bookmarkRevision, setBookmarkRevision] = useState(0);
   const bookmarkFlights = useRef<Set<string>>(new Set());
   const [bookmarksPending, setBookmarksPending] = useState<ReadonlySet<string>>(new Set());
@@ -222,6 +225,7 @@ function ScopedFeedTab(props: FeedTabProps & { user: { uid: string } }) {
       setBookmarkScope('');
       setBookmarkedIds(new Set());
       setBookmarkedPosts([]);
+      setBookmarksSilent(false);
       return;
     }
     const scope = `${uid}:${schoolId}`;
@@ -239,10 +243,21 @@ function ScopedFeedTab(props: FeedTabProps & { user: { uid: string } }) {
         if (!live) return;
         setBookmarkedIds(new Set(ids));
       }
+      setBookmarksSilent(false);
       setBookmarkScope(scope);
     })()
-      .catch(() => {
-        if (live) setBookmarksError('暫時無法讀取收藏，請確認連線與校籍後重試。');
+      .catch((error) => {
+        if (!live) return;
+        if (isPermissionDeniedError(error)) {
+          setBookmarkedIds(new Set());
+          setBookmarkedPosts([]);
+          setBookmarkScope(scope);
+          setBookmarksError('');
+          setBookmarksSilent(true);
+          return;
+        }
+        setBookmarksSilent(false);
+        setBookmarksError('暫時無法讀取收藏，請確認連線與校籍後重試。');
       })
       .finally(() => {
         if (live) setBookmarksLoading(false);
@@ -631,7 +646,7 @@ function ScopedFeedTab(props: FeedTabProps & { user: { uid: string } }) {
           </button>
         </div>
       </div>
-      {!selectedFeedLoading && !selectedFeedError && (
+      {!selectedFeedLoading && !selectedFeedError && !bookmarksSilent && (
         <p className={styles.feedScope} role="status">
           {savedView
             ? `顯示 ${visible.length} 則 · 本校最近最多 40 筆私人收藏，跨裝置同步`
@@ -826,16 +841,7 @@ function ScopedFeedTab(props: FeedTabProps & { user: { uid: string } }) {
                   </div>
                 )}
 
-                <div
-                  style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: 18,
-                    marginTop: 12,
-                    paddingTop: 10,
-                    borderTop: '1px solid var(--border)',
-                  }}
-                >
+                <PostActionsRow>
                   <button
                     type="button"
                     aria-label={liked ? '取消按讚' : '按讚'}
@@ -850,12 +856,15 @@ function ScopedFeedTab(props: FeedTabProps & { user: { uid: string } }) {
                       background: 'transparent',
                       border: 'none',
                       cursor: 'pointer',
-                      display: 'flex',
+                      display: 'inline-flex',
+                      flexWrap: 'nowrap',
                       alignItems: 'center',
+                      flexShrink: 0,
                       gap: 5,
                       fontSize: 13,
                       fontWeight: 700,
                       color: liked ? 'var(--danger, var(--danger))' : 'var(--muted)',
+                      whiteSpace: 'nowrap',
                     }}
                   >
                     {liked ? '❤️' : '🤍'} {likesOf(item)}
@@ -863,36 +872,28 @@ function ScopedFeedTab(props: FeedTabProps & { user: { uid: string } }) {
                   <Link
                     href={`/community/post/${item.id}?schoolId=${encodeURIComponent(schoolId)}`}
                     style={{
-                      display: 'flex',
+                      display: 'inline-flex',
+                      flexWrap: 'nowrap',
                       alignItems: 'center',
+                      flexShrink: 0,
                       gap: 5,
                       fontSize: 13,
                       fontWeight: 700,
                       color: 'var(--muted)',
                       textDecoration: 'none',
+                      whiteSpace: 'nowrap',
                     }}
                   >
                     💬 {typeof item.commentCount === 'number' ? item.commentCount : 0}
                   </Link>
-                  <button
-                    type="button"
-                    aria-label={savedIds.has(item.id) ? '取消收藏貼文' : '收藏貼文'}
-                    aria-pressed={savedIds.has(item.id)}
-                    disabled={bookmarksPending.has(item.id)}
-                    className={`${styles.postShare} ${styles.postBookmark}`}
-                    onClick={() => void toggleBookmark(item)}
-                  >
-                    {savedIds.has(item.id) ? '已收藏' : '收藏'}
-                  </button>
-                  <button
-                    type="button"
-                    aria-label={`分享貼文：${item.title}`}
-                    onClick={() => void sharePost(item)}
-                    className={styles.postShare}
-                  >
-                    分享
-                  </button>
-                </div>
+                  <PostBookmarkShareActions
+                    saved={savedIds.has(item.id)}
+                    bookmarkDisabled={bookmarksPending.has(item.id)}
+                    onBookmark={() => void toggleBookmark(item)}
+                    onShare={() => void sharePost(item)}
+                    shareAriaLabel={`分享貼文：${item.title}`}
+                  />
+                </PostActionsRow>
                 {bookmarkFeedback?.postId === item.id && (
                   <p role="alert" className={styles.feedError}>{bookmarkFeedback.text}</p>
                 )}
