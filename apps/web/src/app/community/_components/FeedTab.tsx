@@ -614,7 +614,7 @@ export function FeedTab(props: { schoolId: string; schoolSearch: string }) {
               : `顯示 ${visible.length} 則 · 目前載入 ${posts.length} 則本校動態，搜尋與排序僅適用於這些貼文`}
         </p>
       )}
-      {followingError && (
+      {followingView && followingError && (
         <div className={styles.feedError} role="alert">
           {followingError}{' '}
           <button type="button" onClick={() => setFollowingRevision((prev) => prev + 1)}>
@@ -741,6 +741,7 @@ export function FeedTab(props: { schoolId: string; schoolSearch: string }) {
                     </Link>
                   </div>
                   {!item.anonymous &&
+                    !followingError &&
                     item.authorUid &&
                     user &&
                     item.authorUid !== user.uid &&
