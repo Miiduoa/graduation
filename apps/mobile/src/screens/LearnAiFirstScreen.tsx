@@ -94,10 +94,13 @@ export default function LearnAiFirstScreen() {
   );
 
   const openTask = (task: InboxTask) => {
+    const courseRole = workspace?.courses.find((course) => course.groupId === task.groupId)?.role;
+    const isTeachingRole =
+      courseRole === 'owner' || courseRole === 'instructor' || courseRole === 'moderator';
     if (
       navigateFromInboxTask(navigation, task, {
         role: auth.profile?.role,
-        isTeachingRole: false,
+        isTeachingRole,
       })
     ) {
       return;
