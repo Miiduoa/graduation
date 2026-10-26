@@ -9,4 +9,3 @@ const fragment = parseFragment('<p>臺灣 &amp; 安全</p><script>discard()</scr
 assert.equal(fragment.childNodes?.[0]?.nodeName, 'p');
 assert.equal(fragment.childNodes?.[0]?.childNodes?.[0]?.value, '臺灣 & 安全');
 assert.equal(fragment.childNodes?.[1]?.nodeName, 'script');
-console.log(`Native Node ${process.version} parse5 v8 smoke passed`);
