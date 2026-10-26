@@ -1,17 +1,16 @@
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { beforeEach, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { LEAVE_COPY, LEAVE_LOAD_TIMEOUT_MS } from '@/lib/leavePageState';
 import { listLeaveReviewQueue } from '@/lib/leaveRequests';
-import LeaveReviewPage from './page';
+import LeaveReviewPage, { dynamic, revalidate } from './page';
 
 const runtime = vi.hoisted(() => ({
-  functionsConfigured: false,
+  leaveApiEnabled: false,
   user: { uid: 'teacher' } as { uid: string } | null,
   authLoading: false,
 }));
-vi.mock('@/lib/functionsUrl', async (original) => ({
-  ...(await original<typeof import('@/lib/functionsUrl')>()),
-  areFunctionsConfigured: () => runtime.functionsConfigured,
+vi.mock('@/lib/server/leaveWebApiEnabled', () => ({
+  isLeaveWebApiServerEnabled: () => runtime.leaveApiEnabled,
 }));
 vi.mock('@/components/AuthGuard', () => ({
   useAuth: () => ({ user: runtime.user, loading: runtime.authLoading }),
@@ -72,37 +71,54 @@ function expectOnly(visible: string) {
   expect(screen.queryByText(/請確認連線/)).toBeNull();
 }
 
+afterEach(() => {
+  vi.unstubAllEnvs();
+});
+
 beforeEach(() => {
   vi.clearAllMocks();
-  runtime.functionsConfigured = false;
+  runtime.leaveApiEnabled = false;
   runtime.user = { uid: 'teacher' };
   runtime.authLoading = false;
   vi.mocked(listLeaveReviewQueue).mockResolvedValue([]);
 });
 
-it('shows only that review is not open when Functions are not configured', async () => {
+it('is rendered at request time so the runtime switch is not baked at build', () => {
+  expect(dynamic).toBe('force-dynamic');
+  expect(revalidate).toBe(0);
+});
+
+it('shows only that review is not open when the leave API is off', async () => {
   render(<LeaveReviewPage />);
   expectOnly(LEAVE_COPY.unavailableReview);
   expect(listLeaveReviewQueue).not.toHaveBeenCalled();
   expect(screen.queryByRole('button', { name: LEAVE_COPY.retry })).toBeNull();
 });
 
+it('loads the review queue when the runtime switch is on', async () => {
+  runtime.leaveApiEnabled = true;
+  render(<LeaveReviewPage />);
+  expect(await screen.findByText(LEAVE_COPY.emptyReview)).toBeTruthy();
+  expect(listLeaveReviewQueue).toHaveBeenCalled();
+  expect(screen.queryByText(LEAVE_COPY.unavailableReview)).toBeNull();
+});
+
 it('shows only the loading copy while the review queue is in flight', () => {
-  runtime.functionsConfigured = true;
+  runtime.leaveApiEnabled = true;
   vi.mocked(listLeaveReviewQueue).mockReturnValue(new Promise(() => {}));
   render(<LeaveReviewPage />);
   expectOnly(LEAVE_COPY.loadingReview);
 });
 
 it('shows only the empty copy when the queue is configured and has no rows', async () => {
-  runtime.functionsConfigured = true;
+  runtime.leaveApiEnabled = true;
   render(<LeaveReviewPage />);
   expect(await screen.findByText(LEAVE_COPY.emptyReview)).toBeTruthy();
   expectOnly(LEAVE_COPY.emptyReview);
 });
 
 it('shows queue rows instead of loading, error, empty or unavailable', async () => {
-  runtime.functionsConfigured = true;
+  runtime.leaveApiEnabled = true;
   vi.mocked(listLeaveReviewQueue).mockResolvedValue([row]);
   render(<LeaveReviewPage />);
   expect(await screen.findByText(/王小明/)).toBeTruthy();
@@ -110,7 +126,7 @@ it('shows queue rows instead of loading, error, empty or unavailable', async () 
 });
 
 it('shows a network error with retry and does not keep loading beside it', async () => {
-  runtime.functionsConfigured = true;
+  runtime.leaveApiEnabled = true;
   vi.mocked(listLeaveReviewQueue).mockRejectedValue(new TypeError('Failed to fetch'));
   render(<LeaveReviewPage />);
   expect(await screen.findByText(LEAVE_COPY.network)).toBeTruthy();
@@ -119,7 +135,7 @@ it('shows a network error with retry and does not keep loading beside it', async
 });
 
 it('sends 401 to login and 403 to a permission state', async () => {
-  runtime.functionsConfigured = true;
+  runtime.leaveApiEnabled = true;
   vi.mocked(listLeaveReviewQueue).mockRejectedValueOnce(
     Object.assign(new Error('signed out'), { status: 401 }),
   );
@@ -141,7 +157,7 @@ it('sends 401 to login and 403 to a permission state', async () => {
 });
 
 it('stops a stuck review read after the timeout', async () => {
-  runtime.functionsConfigured = true;
+  runtime.leaveApiEnabled = true;
   vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
   try {
     vi.mocked(listLeaveReviewQueue).mockReturnValue(new Promise(() => {}));
@@ -159,7 +175,7 @@ it('stops a stuck review read after the timeout', async () => {
 });
 
 it('retry after a network error can reach the empty queue', async () => {
-  runtime.functionsConfigured = true;
+  runtime.leaveApiEnabled = true;
   vi.mocked(listLeaveReviewQueue)
     .mockRejectedValueOnce(new TypeError('Failed to fetch'))
     .mockResolvedValueOnce([]);
