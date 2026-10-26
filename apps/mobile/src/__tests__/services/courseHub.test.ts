@@ -270,15 +270,17 @@ test('nested module files replace the unit link and drop unsafe or unpublished f
 });
 
 test('student receipts reflect server-acknowledged submissions without leaking unpublished grades', async () => {
-  jest.mocked(getDocsFromServer)
-    .mockResolvedValueOnce(collectionResult([{
-      title: '閱讀心得',
-      type: 'assignment',
-      published: true,
-      status: 'published',
-      dueAt: '2026-10-28T15:59:00Z',
-    }]))
-    .mockResolvedValueOnce(collectionResult([]));
+  jest.mocked(getDocsFromServer).mockImplementation(async (ref) => (
+    String(ref).endsWith('/assignments')
+      ? collectionResult([{
+          title: '閱讀心得',
+          type: 'assignment',
+          published: true,
+          status: 'published',
+          dueAt: '2026-10-28T15:59:00Z',
+        }])
+      : collectionResult([])
+  ));
   records['groups/course-a/assignments/0/submissions/alice'] = {
     status: 'submitted',
     submittedAt: '2026-10-26T08:10:00Z',
@@ -307,15 +309,17 @@ test('student receipts reflect server-acknowledged submissions without leaking u
 });
 
 test('receipt failures remain explicit and an enrollment revocation blocks the entire response', async () => {
-  jest.mocked(getDocsFromServer)
-    .mockResolvedValueOnce(collectionResult([{
-      title: '期末作業',
-      type: 'assignment',
-      published: true,
-      status: 'published',
-      dueAt: '2026-10-28T16:00:00Z',
-    }]))
-    .mockResolvedValueOnce(collectionResult([]));
+  jest.mocked(getDocsFromServer).mockImplementation(async (ref) => (
+    String(ref).endsWith('/assignments')
+      ? collectionResult([{
+          title: '期末作業',
+          type: 'assignment',
+          published: true,
+          status: 'published',
+          dueAt: '2026-10-28T16:00:00Z',
+        }])
+      : collectionResult([])
+  ));
   jest.mocked(getDocFromServer).mockImplementation(async (ref) => {
     if (String(ref).endsWith('/submissions/alice')) throw new Error('permission-denied');
     return document(records[String(ref)]);
