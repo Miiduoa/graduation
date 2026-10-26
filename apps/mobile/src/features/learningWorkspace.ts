@@ -28,7 +28,7 @@ export function describeLearningTask(task: InboxTask, now = new Date()): Learnin
     if (task.kind === 'assignment') return { label: '作業', tone: 'muted' };
     return { label: '課程動態', tone: 'muted' };
   }
-  if (due < now.getTime()) return { label: '已逾期', tone: 'danger' };
+  if (due < now.getTime()) return { label: task.lateSubmissionAllowed ? '逾期可補交' : '已逾期', tone: 'danger' };
 
   const today = taipeiDay(now.getTime());
   const target = taipeiDay(due);
@@ -80,7 +80,7 @@ export function buildLearningWorkspace(courses: CourseSpace[], tasks: InboxTask[
     taskCount: ordered.length,
     overdueCount: ordered.filter((task) => {
       const due = dueTime(task);
-      return due !== null && due < current;
+      return task.lateSubmissionAllowed === true && due !== null && due < current;
     }).length,
     upcomingCount: ordered.filter((task) => {
       const due = dueTime(task);
@@ -93,14 +93,22 @@ export function filterLearningTasks(
   tasks: InboxTask[],
   filter: LearningTaskFilter,
   now = new Date(),
+  options: { query?: string; groupId?: string } = {},
 ): InboxTask[] {
-  if (filter === 'all') return tasks;
+  const query = options.query?.trim().normalize('NFKC').toLocaleLowerCase('zh-TW') ?? '';
+  const scoped = tasks.filter((task) => {
+    if (options.groupId && task.groupId !== options.groupId) return false;
+    if (!query) return true;
+    return [task.title, task.groupName, task.subtitle]
+      .some((value) => value.normalize('NFKC').toLocaleLowerCase('zh-TW').includes(query));
+  });
+  if (filter === 'all') return scoped;
   if (filter === 'assignment' || filter === 'quiz' || filter === 'live') {
-    return tasks.filter((task) => task.kind === filter);
+    return scoped.filter((task) => task.kind === filter);
   }
   const current = now.getTime();
   const weekEnd = current + 7 * 86400000;
-  return tasks.filter((task) => {
+  return scoped.filter((task) => {
     const due = dueTime(task);
     return due !== null && due >= current && due <= weekEnd;
   });
