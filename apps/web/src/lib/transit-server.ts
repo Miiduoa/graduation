@@ -8,7 +8,7 @@ import { buildDirectPlan, isDirectQueryText } from './transit-direct';
 import {
   MAAS_CACHE_SLOT_MS, MAAS_RATE_LIMIT_PER_MINUTE, MAAS_TIMEOUT_MS,
   buildMaasPlannerUrl, maasCacheKey, parseMaasTransferPlans, shouldRequestMaas,
-  transferPlannerQuery, withTransferArrivals, mergeDirectAndTransfers,
+  filterDetourTransfers, transferPlannerQuery, withTransferArrivals, mergeDirectAndTransfers,
 } from './transit-transfer';
 
 const BASE = 'https://tdx.transportdata.tw';
@@ -530,7 +530,11 @@ export function createTransitService(options: {
         if (hasKeys && planner && shouldRequestMaas(plan.trips, fetchedAt)) {
           try {
             const payload = await loadMaasPayload(planner);
-            transferRows = withTransferArrivals(parseMaasTransferPlans(payload), arrivals, fetchedAt);
+            transferRows = withTransferArrivals(
+              filterDetourTransfers(parseMaasTransferPlans(payload)),
+              arrivals,
+              fetchedAt,
+            );
             transferFallback = false;
           } catch (error) {
             const status = error instanceof TransitError && typeof error.statusCode === 'number'

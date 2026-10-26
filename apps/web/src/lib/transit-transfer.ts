@@ -26,6 +26,22 @@ export const MAAS_DESTINATION_BOUNDS = {
 export const TRANSFER_PLAN_LIMIT = 3;
 /** 轉乘總時間至少少這幾分鐘，才算「明顯更快」。 */
 export const TRANSFER_FASTER_BY_MINUTES = 10;
+/**
+ * 繞路過濾：比最快方案多這幾分鐘就丢掉。
+ * 15 分大約是多等一班市區公車，短於這個差距的平行線（305／308副／300）應保留。
+ */
+export const TRANSFER_DETOUR_EXTRA_MINUTES = 15;
+/**
+ * 繞路過濾：總車程超過最快方案這個倍率就丢掉。
+ * 短程 20 分若只靠 15 分門檻會放走 28 分的外圍繞行，1.35 倍可補上。
+ */
+export const TRANSFER_DETOUR_TIME_RATIO = 1.35;
+/**
+ * 繞路過濾：站點折線距離超過最短方案這個倍率就丢掉。
+ * TDX 公車段 length 常為 0，所以用站牌座標。台灣大道專用道平行線通常差不到 20%；
+ * 經臺中國際機場再折返約 1.4 倍以上，取 1.35 可丢掉折返、不誤殺同走廊方案。
+ */
+export const TRANSFER_DETOUR_DISTANCE_RATIO = 1.35;
 const TAXI_RE = /yoxi|taxi|uber|cab|rideshare|計程車|小黃/;
 const BIKE_RE = /bike|cycling|ubike|youbike|t-bike|bicycle|單車|自行車|腳踏/;
 const WALK_RE = /walk|foot|pedestrian|步行/;
@@ -42,6 +58,12 @@ export type TransferTrip = {
   secondRoute: string;
   alightStopName: string;
   totalMinutes: number;
+  /** 路線規劃的車程（travel_time），不含從現在等到上車。 */
+  travelMinutes?: number;
+  /** 站點折線公尺數；TDX 公車 length 常為 0 時由座標加總。 */
+  pathMeters?: number;
+  /** 路線規劃的抵達時刻（end_time）。 */
+  endAt?: string | null;
   firstDepartureAt: string | null;
   arrival: TransitArrival | null;
 };
@@ -185,6 +207,8 @@ type ParsedLeg = {
   minutes: number;
   startAt: string | null;
   rawMinutes: number | null;
+  lengthMeters: number | null;
+  points: Position[];
 };
 
 function classifyMode(raw: string): LegKind {
@@ -213,6 +237,55 @@ function recordOf(value: unknown): Record<string, unknown> | null {
 function summaryDuration(value: unknown): number | null {
   const summary = recordOf(value);
   return summary ? rawDuration(summary.duration) : null;
+}
+
+function summaryLength(value: unknown): number | null {
+  const summary = recordOf(value);
+  return summary ? rawDuration(summary.length) : null;
+}
+
+function positionOf(value: unknown): Position | null {
+  const rec = recordOf(value);
+  if (!rec) return null;
+  const loc = recordOf(rec.location) ?? rec;
+  const lat = loc.lat;
+  const lon = loc.lng ?? loc.lon;
+  if (typeof lat !== 'number' || typeof lon !== 'number') return null;
+  const point = { lat, lon };
+  return isPosition(point) ? point : null;
+}
+
+function collectLegPoints(leg: Record<string, unknown>, departure: Record<string, unknown> | null, arrival: Record<string, unknown> | null): Position[] {
+  const points: Position[] = [];
+  const push = (point: Position | null) => {
+    const last = points[points.length - 1];
+    if (!point) return;
+    if (last && last.lat === point.lat && last.lon === point.lon) return;
+    points.push(point);
+  };
+  push(positionOf(departure?.place) || positionOf(departure));
+  for (const stop of asList(leg.intermediateStops ?? leg.IntermediateStops)) {
+    const rec = recordOf(stop);
+    const stopDeparture = rec ? recordOf(rec.departure) : null;
+    push(positionOf(stopDeparture?.place) || positionOf(rec) || positionOf(stop));
+  }
+  push(positionOf(arrival?.place) || positionOf(arrival));
+  return points;
+}
+
+function polylineMetres(points: readonly Position[]): number {
+  let total = 0;
+  for (let index = 1; index < points.length; index += 1) {
+    total += distanceMetres(points[index - 1]!, points[index]!);
+  }
+  return total;
+}
+
+function planPathMetres(legs: readonly ParsedLeg[]): number {
+  return legs.reduce((total, leg) => {
+    if (leg.lengthMeters != null && leg.lengthMeters >= 1) return total + Math.round(leg.lengthMeters);
+    return total + polylineMetres(leg.points);
+  }, 0);
 }
 
 function legKind(leg: Record<string, unknown>, transport: Record<string, unknown> | null): LegKind {
@@ -245,6 +318,8 @@ function parseLeg(value: unknown): ParsedLeg | null {
   return {
     kind, route: route.slice(0, 40), fromName: fromName.slice(0, 80), toName: toName.slice(0, 80),
     minutes: duration ?? 1, startAt, rawMinutes: duration,
+    lengthMeters: summaryLength(value.travelSummary),
+    points: collectLegPoints(value, departure, arrival),
   };
 }
 
@@ -300,7 +375,11 @@ function transferWalkMinutes(legs: readonly ParsedLeg[], firstIndex: number, sec
   return Math.max(1, sum || 1);
 }
 
-export function transferFromWalkOnlyLegs(legs: readonly ParsedLeg[], totalMinutes: number): TransferTrip | null {
+export function transferFromWalkOnlyLegs(
+  legs: readonly ParsedLeg[],
+  totalMinutes: number,
+  extra: { endAt?: string | null; pathMeters?: number } = {},
+): TransferTrip | null {
   if (!isWalkOnlyAccess(legs)) return null;
   const transit = legs
     .map((leg, index) => ({ leg, index }))
@@ -314,6 +393,7 @@ export function transferFromWalkOnlyLegs(legs: readonly ParsedLeg[], totalMinute
   if (!boardStopName || !alightStopName || !transferStopName) return null;
   if (!first.leg.route || !second.leg.route) return null;
   if (first.leg.route === second.leg.route && first.leg.fromName === second.leg.fromName) return null;
+  const travelMinutes = Math.max(1, totalMinutes);
   return {
     boardStopName,
     firstRoute: first.leg.route,
@@ -321,7 +401,10 @@ export function transferFromWalkOnlyLegs(legs: readonly ParsedLeg[], totalMinute
     transferWalkMinutes: transferWalkMinutes(legs, first.index, second.index),
     secondRoute: second.leg.route,
     alightStopName,
-    totalMinutes: Math.max(1, totalMinutes),
+    totalMinutes: travelMinutes,
+    travelMinutes,
+    pathMeters: extra.pathMeters ?? 0,
+    endAt: extra.endAt ?? null,
     firstDepartureAt: first.leg.startAt,
     arrival: null,
   };
@@ -334,7 +417,10 @@ export function parseMaasTransferPlans(payload: unknown): TransferTrip[] {
   for (const plan of plans) {
     if (!isRecord(plan)) continue;
     const legs = scaledLegs(collectLegs(plan));
-    const trip = transferFromWalkOnlyLegs(legs, planTotalMinutes(plan, legs));
+    const trip = transferFromWalkOnlyLegs(legs, planTotalMinutes(plan, legs), {
+      endAt: taipeiLocalTimeToIso(textOf(plan.end_time) || textOf(plan.endTime)),
+      pathMeters: planPathMetres(legs),
+    });
     if (!trip) continue;
     const key = `${trip.firstRoute}:${trip.secondRoute}:${trip.boardStopName}:${trip.transferStopName}:${trip.alightStopName}`;
     if (seen.has(key)) continue;
@@ -342,6 +428,57 @@ export function parseMaasTransferPlans(payload: unknown): TransferTrip[] {
     trips.push(trip);
   }
   return trips;
+}
+
+function tripTravelMinutes(trip: TransferTrip): number {
+  return Math.max(1, trip.travelMinutes ?? trip.totalMinutes);
+}
+
+function tripPathMeters(trip: TransferTrip): number {
+  return trip.pathMeters ?? 0;
+}
+
+/**
+ * 丢掉明顯繞路的轉乘：比最快慢太多，或折線距離明顯比較長。
+ * 用規劃車程與路徑，不用等車時間，避免只是晚一班就被當成繞路。
+ */
+export function filterDetourTransfers(trips: readonly TransferTrip[]): TransferTrip[] {
+  if (trips.length <= 1) return [...trips];
+  const fastest = Math.min(...trips.map(tripTravelMinutes));
+  const measured = trips.map(tripPathMeters).filter((meters) => meters > 0);
+  const shortest = measured.length ? Math.min(...measured) : 0;
+  return trips.filter((trip) => {
+    const travel = tripTravelMinutes(trip);
+    if (travel > fastest + TRANSFER_DETOUR_EXTRA_MINUTES) return false;
+    if (travel > fastest * TRANSFER_DETOUR_TIME_RATIO) return false;
+    const path = tripPathMeters(trip);
+    if (shortest > 0 && path > 0 && path > shortest * TRANSFER_DETOUR_DISTANCE_RATIO) return false;
+    return true;
+  });
+}
+
+/**
+ * 從現在到下車的分鐘數。
+ * 有即時到站：即時等車 + 規劃車程（travel_time）。
+ * 沒有即時：用規劃 end_time 減現在；沒有 end_time 就用出發時刻加車程。
+ */
+export function transferDoorToDoorMinutes(trip: TransferTrip, now: number): number {
+  const travel = tripTravelMinutes(trip);
+  const view = campusEtaView(trip.arrival, now);
+  if (view.kind === 'soon') return Math.max(1, 1 + travel);
+  if (view.kind === 'live' && view.minutes != null) return Math.max(1, view.minutes + travel);
+  if (trip.endAt) {
+    const end = Date.parse(trip.endAt);
+    if (Number.isFinite(end) && end > now) return Math.max(1, Math.round((end - now) / 60_000));
+  }
+  if (trip.firstDepartureAt) {
+    const depart = Date.parse(trip.firstDepartureAt);
+    if (Number.isFinite(depart)) {
+      const wait = Math.max(0, Math.round((depart - now) / 60_000));
+      return Math.max(1, wait + travel);
+    }
+  }
+  return travel;
 }
 
 export function estimateDirectMinutes(trip: DirectTrip, origin: Position, destination: Position, now: number): number {
@@ -421,26 +558,21 @@ export function pickTransferArrival(
   now: number,
 ): TransitArrival | null {
   const boardPlace = campusPlaceLabel(trip.boardStopName);
-  const candidates = arrivals.filter((arrival) => {
+  const live = arrivals.filter((arrival) => {
     if (arrival.route !== trip.firstRoute) return false;
-    if (arrival.stopName === trip.boardStopName) return true;
-    const arrivalPlace = campusPlaceLabel(arrival.stopName ?? '');
-    return Boolean(boardPlace) && boardPlace === arrivalPlace;
-  });
-  if (candidates.length) {
-    const rank = (arrival: TransitArrival): [number, number] => {
-      const view = campusEtaView(arrival, now);
-      if (view.kind === 'soon' || view.kind === 'live') return [0, view.minutes ?? 0];
-      if ((view.kind === 'scheduled' || view.kind === 'night') && arrival.scheduledAt) return [1, Date.parse(arrival.scheduledAt)];
-      return [2, 0];
-    };
-    const live = [...candidates].sort((a, b) => {
-      const left = rank(a);
-      const right = rank(b);
-      return left[0] - right[0] || left[1] - right[1];
-    })[0];
-    if (live) return live;
-  }
+    const sameStop = arrival.stopName === trip.boardStopName
+      || (Boolean(boardPlace) && campusPlaceLabel(arrival.stopName ?? '') === boardPlace);
+    if (!sameStop) return false;
+    const view = campusEtaView(arrival, now);
+    return view.kind === 'soon' || view.kind === 'live';
+  }).sort((left, right) => {
+    const a = campusEtaView(left, now);
+    const b = campusEtaView(right, now);
+    if (a.kind === 'soon' && b.kind !== 'soon') return -1;
+    if (b.kind === 'soon' && a.kind !== 'soon') return 1;
+    return (a.minutes ?? 0) - (b.minutes ?? 0);
+  })[0];
+  if (live) return live;
   return scheduledTransferArrival(trip, now);
 }
 
@@ -449,10 +581,13 @@ export function withTransferArrivals(
   arrivals: readonly TransitArrival[],
   now: number,
 ): TransferTrip[] {
-  return trips.map((trip) => ({
-    ...trip,
-    arrival: pickTransferArrival(arrivals, trip, now) ?? scheduledTransferArrival(trip, now),
-  }));
+  return trips.map((trip) => {
+    const next = {
+      ...trip,
+      arrival: pickTransferArrival(arrivals, trip, now) ?? scheduledTransferArrival(trip, now),
+    };
+    return { ...next, totalMinutes: transferDoorToDoorMinutes(next, now) };
+  });
 }
 
 export function transferPlannerQuery(
