@@ -92,6 +92,11 @@ function realtimeOnly(question: string): OfflineCampusToolResult | null {
 }
 
 function userWriteRequest(question: string): OfflineCampusToolResult | null {
+  // A request to check a status is a read, not permission to create another request.
+  if (/(?:查詢|幫我查|查一下|進度|狀態|紀錄|編號)/.test(question) &&
+      !/(?:送出|提交|建立|幫我預約|幫我下單|幫我訂餐)/.test(question)) {
+    return null;
+  }
   if (!/(?:幫我|替我|我要|我想|請幫|幫忙|請直接|送出|幫我處理).{0,22}(?:請假|報修|預約|借書|續借|還書|下單|訂餐|付款|傳訊息|發訊息)/.test(question)) {
     return null;
   }
