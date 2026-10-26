@@ -123,11 +123,13 @@ export async function askCampusAssistant(input: {
 
     // Each request gets explicitly scoped history; never reuse a global chat history
     // that could contain data from a previous account or campus.
-    // Keep input inside the 0.5B model's 2K context, reserving room for the answer.
+    // Reserve enough context for the instruction, trusted data and generated answer.
+    // Models above 0.5B currently use a 4K window; unbounded 8x550 Chinese
+    // characters can exceed that limit before generation starts.
     const compact = readiness.modelId === 'qwen2.5-0.5b';
-    const compactHistory = messages.slice(compact ? -3 : -8).map((message) => ({
+    const compactHistory = messages.slice(compact ? -3 : -6).map((message) => ({
       role: message.role,
-      content: message.content.slice(0, compact ? 160 : 550),
+      content: message.content.slice(0, compact ? 160 : 220),
     }));
     const completion = await localLLM.generate({
       messages: [
