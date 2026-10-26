@@ -1076,6 +1076,7 @@ function generateGroupJoinCode(length = 8) {
 // =====================================================
 
 exports.askCampusAssistant = require('./agent/handlers/askCampusAssistant');
+exports.getCampusAssistantSnapshot = require('./agent/handlers/getCampusAssistantSnapshot');
 exports.understandCampusRequest = require('./agent/handlers/understandCampusRequest');
 exports.executeAgentWrite = require('./agent/handlers/executeAgentWrite');
 exports.aiOrderFood = require('./aiOrderFood');
