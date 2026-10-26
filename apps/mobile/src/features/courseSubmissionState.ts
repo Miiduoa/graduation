@@ -53,3 +53,27 @@ export function submissionStatusText(state: CourseSubmissionState | undefined): 
 export function canListAsPendingWork(state: CourseSubmissionState | undefined): boolean {
   return state?.kind === 'not_submitted' || state?.kind === 'draft';
 }
+
+export type CourseReceiptSummary = {
+  submitted: number;
+  graded: number;
+  unsubmitted: number;
+  needsVerification: number;
+};
+
+export function summarizeCourseReceipts(
+  items: readonly { submission?: CourseSubmissionState }[],
+): CourseReceiptSummary {
+  return items.reduce<CourseReceiptSummary>((summary, item) => {
+    const state = item.submission;
+    if (state?.kind === 'submitted') {
+      summary.submitted += 1;
+      if (state.grade) summary.graded += 1;
+    } else if (canListAsPendingWork(state)) {
+      summary.unsubmitted += 1;
+    } else if (!state || state.kind === 'unconfirmed' || state.kind === 'unavailable') {
+      summary.needsVerification += 1;
+    }
+    return summary;
+  }, { submitted: 0, graded: 0, unsubmitted: 0, needsVerification: 0 });
+}
