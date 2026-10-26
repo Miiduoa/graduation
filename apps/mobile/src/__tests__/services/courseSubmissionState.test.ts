@@ -12,6 +12,12 @@ test('only a server timestamp confirms that coursework was submitted', () => {
     .toEqual({ kind: 'unconfirmed' });
   expect(courseSubmissionState({ status: 'submitted', submittedAt: null }))
     .toEqual({ kind: 'unconfirmed' });
+  expect(courseSubmissionState({ status: 'submitted', submittedAt: { unexpected: 'object' } }))
+    .toEqual({ kind: 'unconfirmed' });
+  expect(courseSubmissionState({
+    status: 'submitted',
+    submittedAt: { toDate: () => { throw new Error('invalid timestamp'); } },
+  })).toEqual({ kind: 'unconfirmed' });
   expect(submissionStatusText({ kind: 'unconfirmed' })).toContain('尚未確認');
 });
 
