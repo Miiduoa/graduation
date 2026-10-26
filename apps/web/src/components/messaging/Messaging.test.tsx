@@ -266,7 +266,7 @@ it('sending waits for the confirmed write and a double click cannot duplicate it
   fireEvent.click(screen.getByRole('button', { name: '傳送中…' }));
   expect(sendPrivateMessage).toHaveBeenCalledTimes(1);
   expect((screen.getByLabelText('訊息內容') as HTMLTextAreaElement).value).toBe('我的新訊息');
-  expect(screen.getByRole('list', { name: '對話內容' }).textContent).not.toContain('我的新訊息');
+  expect(screen.getByRole('log', { name: '對話內容' }).textContent).not.toContain('我的新訊息');
   await act(async () => sent.resolve());
   expect((screen.getByLabelText('訊息內容') as HTMLTextAreaElement).value).toBe('');
 });
