@@ -519,7 +519,7 @@ function HomeFeedContent() {
                     hitSlop={8}
                     onPress={(event) => {
                       event.stopPropagation?.();
-                      const url = `campus://post/${item.id}`;
+                      const url = `https://nuni.tw/community/post/${encodeURIComponent(item.id)}?schoolId=${encodeURIComponent(school?.id ?? '')}`;
                       void Share.share({ title: item.title, message: `${item.title}\n${url}`, url })
                         .catch(() => Alert.alert('暫時無法分享', '請稍後再試或從貼文詳情分享。'));
                     }}
