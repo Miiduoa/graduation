@@ -86,6 +86,25 @@ function realtimeOnly(question: string): OfflineCampusToolResult | null {
     : null;
 }
 
+function userWriteRequest(question: string): OfflineCampusToolResult | null {
+  if (!/(?:幫我|替我|我要|我想|請幫|幫忙|請直接|送出|幫我處理).{0,22}(?:請假|報修|預約|借書|續借|還書|下單|訂餐|付款|傳訊息|發訊息)/.test(question)) {
+    return null;
+  }
+  const targets: Array<{ pattern: RegExp; route: string; label: string }> = [
+    { pattern: /請假/, route: '/classroom', label: '請假申請' },
+    { pattern: /報修|洗衣|洗衣機/, route: '/dormitory', label: '宿舍服務' },
+    { pattern: /借書|續借|還書|預約.{0,5}座位/, route: '/library', label: '圖書館服務' },
+    { pattern: /訂餐|下單|點餐|付款/, route: '/cafeteria', label: '餐廳服務' },
+    { pattern: /傳訊息|發訊息/, route: '/dms', label: '訊息服務' },
+  ];
+  const task = targets.find((item) => item.pattern.test(question));
+  return {
+    tool: 'open-service',
+    route: task?.route || '/classroom',
+    content: `可以先開啟${task?.label || '對應校園服務'}檢查可用功能，但離線 AI 無法代替你送出或確認這項操作。請點下方服務入口，在登入及檢查內容後自行確認；我沒有建立任何申請或付款。`,
+  };
+}
+
 /**
  * Deterministic, read-only local tool execution. No LLM, cloud call or mutation.
  * Only course slots actually stored on this device are eligible for an answer.
@@ -96,6 +115,8 @@ export function runOfflineCampusTool(
 ): OfflineCampusToolResult | null {
   const text = question.trim().slice(0, 1600);
   if (!text) return null;
+  const requestedWrite = userWriteRequest(text);
+  if (requestedWrite) return requestedWrite;
   const wantsTimetable = /課表|有課|沒課|上課|哪幾堂|哪些課|幾堂課|空堂|空檔|課程時間/.test(text);
   if (!wantsTimetable) return realtimeOnly(text);
 
