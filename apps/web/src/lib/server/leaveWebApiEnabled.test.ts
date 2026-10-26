@@ -4,7 +4,7 @@ import { fileURLToPath } from 'node:url';
 import { afterEach, expect, it, vi } from 'vitest';
 import { isLeaveWebApiServerEnabled } from './leaveWebApiEnabled';
 
-const webRoot = join(dirname(fileURLToPath(import.meta.url)), '../..');
+const webRoot = join(dirname(fileURLToPath(import.meta.url)), '../../..');
 
 afterEach(() => {
   vi.unstubAllEnvs();
