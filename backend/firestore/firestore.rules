@@ -1201,6 +1201,21 @@ service cloud.firestore {
         allow read: if isSelf(uid);
         allow write: if false;
 
+        // Saved campus posts stay private to the owner and scoped to active school membership.
+        match /campusPostBookmarks/{postId} {
+          allow read: if isSelf(uid) && isSchoolMember(schoolId);
+          allow create: if isSelf(uid)
+            && isSchoolMember(schoolId)
+            && request.resource.data.keys().hasOnly(['schoolId', 'postId', 'createdAt'])
+            && request.resource.data.keys().hasAll(['schoolId', 'postId', 'createdAt'])
+            && request.resource.data.schoolId == schoolId
+            && request.resource.data.postId == postId
+            && request.resource.data.createdAt == request.time
+            && exists(/databases/$(database)/documents/schools/$(schoolId)/campusPosts/$(postId));
+          allow delete: if isSelf(uid) && isSchoolMember(schoolId);
+          allow update: if false;
+        }
+
         match /favorites/{favoriteId} {
           allow read, create, delete: if isSelf(uid);
           allow update: if false;
