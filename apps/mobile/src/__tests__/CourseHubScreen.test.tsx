@@ -146,3 +146,48 @@ test.each(['account', 'school', 'course'])(
     expect(view.queryByText('前一個身分的課程')).toBeNull();
   },
 );
+
+test('a published assignment opens its real submission detail with the scoped course and due date', async () => {
+  const navigation = { navigate: jest.fn() };
+  jest.mocked(loadCourseHub).mockResolvedValue({
+    ...data,
+    assignments: {
+      status: 'ready',
+      items: [{
+        id: 'work-23',
+        title: '閱讀回應',
+        description: '完成心得',
+        dueAt: '2026-10-29T23:59:00+08:00',
+        closed: false,
+      }],
+    },
+  });
+
+  const view = render(<CourseHub route={route} navigation={navigation} />);
+  fireEvent.press(await view.findByText('查看作業：閱讀回應'));
+  expect(safeNavigate).toHaveBeenCalledWith(navigation, 'HomeworkSubmit', {
+    courseId: 'course-a',
+    hwId: 'work-23',
+    hwTitle: '閱讀回應',
+    dueAt: '2026-10-29T23:59:00+08:00',
+  });
+});
+
+test('closed assignments remain viewable but never appear among actionable weekly deadlines', async () => {
+  jest.mocked(loadCourseHub).mockResolvedValue({
+    ...data,
+    assignments: {
+      status: 'ready',
+      items: [{
+        id: 'closed-1',
+        title: '已結束測驗回顧',
+        description: '',
+        dueAt: '2026-10-29T23:59:00+08:00',
+        closed: true,
+      }],
+    },
+  });
+  const view = render(<CourseHub route={route} />);
+  expect(await view.findByText('查看已關閉作業：已結束測驗回顧')).toBeTruthy();
+  expect(view.queryByText('查看本週作業：已結束測驗回顧')).toBeNull();
+});
