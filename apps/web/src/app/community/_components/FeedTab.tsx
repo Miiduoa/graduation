@@ -164,7 +164,7 @@ export function FeedTab(props: { schoolId: string; schoolSearch: string }) {
   const visible = useMemo(
     () =>
       selectCampusFeedPosts(savedView ? savedPosts : posts, {
-        filter: savedView ? 'all' : filter,
+        filter: filter === 'saved' ? 'all' : filter,
         order,
         search,
         subscribedIds,
