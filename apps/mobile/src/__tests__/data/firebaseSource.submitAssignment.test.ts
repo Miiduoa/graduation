@@ -1,4 +1,4 @@
-import { getDoc, runTransaction } from 'firebase/firestore';
+import { getDoc, getDocFromServer, getDocs, runTransaction } from 'firebase/firestore';
 import { getAuthInstance } from '../../firebase';
 import { firebaseSource } from '../../data/firebaseSource';
 
@@ -15,6 +15,7 @@ jest.mock('firebase/functions', () => ({ httpsCallable: jest.fn() }));
 jest.mock('firebase/firestore', () => ({
   doc: jest.fn((...args: unknown[]) => ({ path: args.slice(1).join('/') })),
   getDoc: jest.fn(),
+  getDocFromServer: jest.fn(),
   getDocs: jest.fn(),
   collection: jest.fn(),
   query: jest.fn(),
@@ -47,7 +48,7 @@ beforeEach(() => {
   jest.mocked(getAuthInstance).mockReturnValue({ currentUser: { uid: 'alice' } } as never);
   jest.mocked(runTransaction).mockImplementation(async (_db, body) => body(transaction as never));
   transaction.get.mockResolvedValueOnce(document({ title: 'Work' })).mockResolvedValueOnce(document(null));
-  jest.mocked(getDoc).mockResolvedValue({
+  jest.mocked(getDocFromServer).mockResolvedValue({
     exists: () => true,
     id: 'alice',
     data: () => ({
@@ -56,6 +57,7 @@ beforeEach(() => {
       assignmentId: 'work',
       content: 'Answer',
       status: 'submitted',
+      submittedAt: '2026-10-26T09:00:00Z',
     }),
   } as never);
 });
@@ -92,6 +94,9 @@ test.each([
   { status: 'draft' },
   { type: 'quiz' },
   { dueAt: '2000-01-01T00:00:00Z' },
+  { dueAt: 'invalid', allowLateSubmission: true },
+  { dueAt: '' },
+  { dueAt: {} },
 ])('rejects unavailable work %j without writing', async (assignment) => {
   transaction.get.mockReset().mockResolvedValue(document(assignment));
   await expect(
@@ -150,7 +155,7 @@ test('accepts an overdue submission only when the teacher allowed late work', as
     assignmentId: 'work',
     userId: 'alice',
     groupId: 'course',
-    content: 'Late answer',
+    content: 'Answer',
   });
   expect(transaction.set).toHaveBeenCalled();
 });
@@ -166,4 +171,59 @@ test('refuses to submit for a different signed-in account', async () => {
     }),
   ).rejects.toThrow('登入身分已變更');
   expect(runTransaction).not.toHaveBeenCalled();
+});
+
+
+test('only returns a verified server receipt and never relies on the offline document cache', async () => {
+  const receipt = await firebaseSource.submitAssignment({
+    assignmentId: 'work', userId: 'alice', groupId: 'course', content: 'Answer',
+  });
+  expect(receipt.submittedAt).toBe('2026-10-26T09:00:00Z');
+  expect(getDocFromServer).toHaveBeenCalledWith({ path: 'groups/course/assignments/work/submissions/alice' });
+  expect(getDoc).not.toHaveBeenCalled();
+});
+
+test.each([
+  null,
+  { submittedAt: 'invalid' },
+  { groupId: 'other-course' },
+  { assignmentId: 'other-work' },
+  { userId: 'bob' },
+  { content: 'different answer' },
+])('rejects a missing or inconsistent post-write receipt %j', async (patch) => {
+  jest.mocked(getDocFromServer).mockResolvedValue({
+    ...document(patch === null ? null : {
+      userId: 'alice', groupId: 'course', assignmentId: 'work', content: 'Answer',
+      status: 'submitted', submittedAt: '2026-10-26T09:00:00Z', ...patch,
+    }), id: 'alice',
+  } as never);
+  await expect(firebaseSource.submitAssignment({
+    assignmentId: 'work', userId: 'alice', groupId: 'course', content: 'Answer',
+  })).rejects.toThrow('尚未確認');
+  expect(transaction.set).toHaveBeenCalledTimes(1);
+});
+
+test('canonical missing records never fall back to unrelated legacy collections', async () => {
+  jest.mocked(getDocFromServer).mockResolvedValue(document(null) as never);
+  expect(await firebaseSource.getSubmission('work', 'alice', 'course')).toBeNull();
+  expect(await firebaseSource.getAssignment('work', 'course')).toBeNull();
+  expect(getDocs).not.toHaveBeenCalled();
+  expect(getDoc).not.toHaveBeenCalled();
+});
+
+test('read failure is not treated as a missing canonical submission', async () => {
+  jest.mocked(getDocFromServer).mockRejectedValue(new Error('unavailable'));
+  await expect(firebaseSource.getSubmission('work', 'alice', 'course')).rejects.toThrow('unavailable');
+  expect(getDocs).not.toHaveBeenCalled();
+});
+
+test('a switched account cannot receive the previous post-write receipt', async () => {
+  jest.mocked(getDocFromServer).mockImplementation(async () => {
+    jest.mocked(getAuthInstance).mockReturnValue({ currentUser: { uid: 'bob' } } as never);
+    return { ...document({ userId: 'alice', groupId: 'course', assignmentId: 'work',
+      content: 'Answer', status: 'submitted', submittedAt: '2026-10-26T09:00:00Z' }), id: 'alice' } as never;
+  });
+  await expect(firebaseSource.submitAssignment({
+    assignmentId: 'work', userId: 'alice', groupId: 'course', content: 'Answer',
+  })).rejects.toThrow('登入身分已變更');
 });
