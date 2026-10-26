@@ -83,7 +83,7 @@ export function CampusAgentActionReview({
       gap: 10,
     }}>
       <Text style={{ color: aiTokens.muted, fontSize: 12, fontWeight: '700' }}>
-        需要本人確認 · 尚未執行
+        {success ? '伺服器已確認完成' : attempted ? '已送出確認，請核對結果' : '需要本人確認 · 尚未執行'}
       </Text>
       <Text style={{ color: aiTokens.text, fontSize: 16, fontWeight: '700' }}>
         {proposal.label}
