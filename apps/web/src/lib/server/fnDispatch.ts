@@ -1,6 +1,6 @@
 import { isHostedWebCallable, isLeaveWebCallable } from '@/lib/hostedCallables';
-import { isLeaveWebApiEnabled } from '@/lib/leaveWebApi';
 import { callableErrorBody, HttpsError } from './httpsError';
+import { isLeaveWebApiServerEnabled } from './leaveWebApiEnabled';
 import type { CallableRequest } from './groupInviteHandlers';
 import {
   assertJoinCodeAttemptsAllowed,
@@ -22,7 +22,10 @@ const MAX_BODY_BYTES = 64 * 1024;
 
 export type FnRuntime = {
   db: import('./groupInviteHandlers').GroupFirestore;
-  verifyIdToken: (token: string) => Promise<{ uid: string } & Record<string, unknown>>;
+  verifyIdToken: (
+    token: string,
+    checkRevoked?: boolean,
+  ) => Promise<{ uid: string } & Record<string, unknown>>;
 };
 
 function jsonResponse(status: number, body: unknown, extra?: HeadersInit): Response {
@@ -56,6 +59,7 @@ function parseAuthorization(headerValue: string | null): {
 async function verifyCallableAuth(
   authorizationHeader: string | null,
   verifyIdToken: FnRuntime['verifyIdToken'],
+  checkRevoked = false,
 ): Promise<{ uid: string; token: Record<string, unknown> } | null> {
   const parsed = parseAuthorization(authorizationHeader);
   if (parsed.kind === 'missing') return null;
@@ -63,7 +67,9 @@ async function verifyCallableAuth(
     throw new HttpsError('unauthenticated', 'Invalid Firebase ID token');
   }
   try {
-    const decoded = await verifyIdToken(parsed.token);
+    const decoded = checkRevoked
+      ? await verifyIdToken(parsed.token, true)
+      : await verifyIdToken(parsed.token);
     if (!decoded?.uid) {
       throw new HttpsError('unauthenticated', 'Invalid Firebase ID token');
     }
@@ -161,7 +167,7 @@ export async function dispatchFnRequest(
     );
   }
 
-  if (isLeaveWebCallable(name) && !isLeaveWebApiEnabled()) {
+  if (isLeaveWebCallable(name) && !isLeaveWebApiServerEnabled()) {
     return callableResponse(new HttpsError('unavailable', '尚未啟用'), request);
   }
 
@@ -191,6 +197,7 @@ export async function dispatchFnRequest(
     const auth = await verifyCallableAuth(
       request.headers.get('authorization'),
       resolved.verifyIdToken,
+      isLeaveWebCallable(name),
     );
     uid = auth?.uid;
     if (uid) {

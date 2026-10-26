@@ -31,3 +31,12 @@ it('只開請假網頁 API 時，不必設定 Functions 網址也視為可用', 
   vi.stubEnv('NEXT_PUBLIC_USE_FIREBASE_EMULATOR', '');
   expect(isLeaveBackendAvailable()).toBe(true);
 });
+
+it('客戶端開關不看伺服器端 LEAVE_WEB_API_ENABLED', () => {
+  vi.stubEnv('LEAVE_WEB_API_ENABLED', 'true');
+  vi.stubEnv('NEXT_PUBLIC_LEAVE_WEB_API', '');
+  vi.stubEnv('NEXT_PUBLIC_FUNCTIONS_BASE_URL', '');
+  vi.stubEnv('NEXT_PUBLIC_USE_FIREBASE_EMULATOR', '');
+  expect(isLeaveWebApiEnabled()).toBe(false);
+  expect(isLeaveBackendAvailable()).toBe(false);
+});
