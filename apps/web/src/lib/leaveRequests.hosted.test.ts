@@ -8,32 +8,18 @@ const auth = vi.hoisted(() => ({
   } | null,
 }));
 const fetchMock = vi.hoisted(() => vi.fn());
-const leaveFlag = vi.hoisted(() => ({ enabled: true }));
 
 vi.mock('./firebase', () => ({
   getDb: () => ({}),
   getAuth: () => auth,
   getCloudFunctionUrl: (name: string) => `/api/fn/${name}`,
-  getFunctionsInstance: () => ({}),
   isFirebaseConfigured: () => true,
-}));
-vi.mock('./functionsUrl', async (original) => ({
-  ...(await original<typeof import('./functionsUrl')>()),
-  areFunctionsConfigured: () => false,
-}));
-vi.mock('./leaveWebApi', () => ({
-  isLeaveWebApiEnabled: () => leaveFlag.enabled,
-  isLeaveBackendAvailable: () => leaveFlag.enabled,
-}));
-vi.mock('firebase/functions', () => ({
-  httpsCallable: vi.fn(),
 }));
 
 import { reviewLeaveRequest, submitLeaveRequest, withdrawLeaveRequest } from './leaveRequests';
 
 beforeEach(() => {
   vi.clearAllMocks();
-  leaveFlag.enabled = true;
   auth.currentUser = { uid: 'stu', getIdToken: async () => 'id-token' };
   fetchMock.mockReset();
   vi.stubGlobal('fetch', fetchMock);
@@ -41,7 +27,7 @@ beforeEach(() => {
 
 afterEach(() => vi.unstubAllGlobals());
 
-it('sends submit, withdraw and review through same-origin /api/fn when the web API is on', async () => {
+it('sends submit, withdraw and review through same-origin /api/fn', async () => {
   fetchMock.mockResolvedValue({
     ok: true,
     status: 200,
@@ -110,21 +96,4 @@ it('maps 尚未啟用 to the existing unconfigured error instead of a network fa
       courseIds: ['c1'],
     }),
   ).rejects.toBeInstanceOf(FunctionsUnconfiguredError);
-});
-
-it('does not call /api/fn when the leave web API flag is off and Functions are unconfigured', async () => {
-  leaveFlag.enabled = false;
-  await expect(
-    submitLeaveRequest('stu', {
-      schoolId: 'pu',
-      requestId: 'leave-2026-good-id',
-      startDate: '2026-10-26',
-      endDate: '2026-10-26',
-      kind: 'sick',
-      period: 'all',
-      detail: '',
-      courseIds: ['c1'],
-    }),
-  ).rejects.toBeInstanceOf(FunctionsUnconfiguredError);
-  expect(fetchMock).not.toHaveBeenCalled();
 });

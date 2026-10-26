@@ -92,7 +92,7 @@ afterEach(() => {
   vi.unstubAllEnvs();
 });
 
-it('returns 503 尚未啟用 for leave routes when the server write flag is off', async () => {
+it('returns 503 尚未啟用 for leave routes when the runtime switch is off', async () => {
   vi.stubEnv('LEAVE_WEB_API_ENABLED', 'false');
   vi.stubEnv('NEXT_PUBLIC_LEAVE_WEB_API', 'true');
   const { runtime: deps, store } = runtime();
@@ -111,7 +111,7 @@ it('returns 503 尚未啟用 for leave routes when the server write flag is off'
   expect(store.docs.has('leaveRequests/' + REQUEST_ID)).toBe(false);
 });
 
-it('does not use NEXT_PUBLIC_LEAVE_WEB_API to gate leave writes', async () => {
+it('does not treat leftover NEXT_PUBLIC_LEAVE_WEB_API as the write switch', async () => {
   vi.stubEnv('LEAVE_WEB_API_ENABLED', 'true');
   vi.stubEnv('NEXT_PUBLIC_LEAVE_WEB_API', 'false');
   const { runtime: deps, store } = runtime();

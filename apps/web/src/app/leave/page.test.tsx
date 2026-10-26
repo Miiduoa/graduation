@@ -3,16 +3,15 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { LEAVE_COPY, LEAVE_LOAD_TIMEOUT_MS } from '@/lib/leavePageState';
 import { listMyLeaveRequests } from '@/lib/leaveRequests';
 import { loadPersonalTimetable } from '@/lib/timetable/store';
-import LeavePage from './page';
+import LeavePage, { dynamic, revalidate } from './page';
 
 const runtime = vi.hoisted(() => ({
-  functionsConfigured: false,
+  leaveApiEnabled: false,
   user: { uid: 'stu' } as { uid: string } | null,
   authLoading: false,
 }));
-vi.mock('@/lib/functionsUrl', async (original) => ({
-  ...(await original<typeof import('@/lib/functionsUrl')>()),
-  areFunctionsConfigured: () => runtime.functionsConfigured,
+vi.mock('@/lib/server/leaveWebApiEnabled', () => ({
+  isLeaveWebApiServerEnabled: () => runtime.leaveApiEnabled,
 }));
 vi.mock('@/components/AuthGuard', () => ({
   useAuth: () => ({ user: runtime.user, loading: runtime.authLoading }),
@@ -84,7 +83,7 @@ afterEach(() => {
 
 beforeEach(() => {
   vi.clearAllMocks();
-  runtime.functionsConfigured = false;
+  runtime.leaveApiEnabled = false;
   runtime.user = { uid: 'stu' };
   runtime.authLoading = false;
   vi.mocked(loadPersonalTimetable).mockResolvedValue({
@@ -97,7 +96,12 @@ beforeEach(() => {
   vi.mocked(listMyLeaveRequests).mockResolvedValue([]);
 });
 
-it('shows only the unavailable copy when Functions are not configured', async () => {
+it('is rendered at request time so the runtime switch is not baked at build', () => {
+  expect(dynamic).toBe('force-dynamic');
+  expect(revalidate).toBe(0);
+});
+
+it('shows only the unavailable copy when the leave API is off', async () => {
   render(<LeavePage />);
   expectOnly(LEAVE_COPY.unavailableSubmit);
   expect(listMyLeaveRequests).not.toHaveBeenCalled();
@@ -105,8 +109,8 @@ it('shows only the unavailable copy when Functions are not configured', async ()
   expect(screen.queryByRole('button', { name: LEAVE_COPY.retry })).toBeNull();
 });
 
-it('loads leave records through the web API when the flag is on without Functions', async () => {
-  vi.stubEnv('NEXT_PUBLIC_LEAVE_WEB_API', 'true');
+it('loads leave records when the runtime switch is on', async () => {
+  runtime.leaveApiEnabled = true;
   render(<LeavePage />);
   expect(await screen.findByText(LEAVE_COPY.emptySubmit)).toBeTruthy();
   expect(listMyLeaveRequests).toHaveBeenCalled();
@@ -115,14 +119,14 @@ it('loads leave records through the web API when the flag is on without Function
 });
 
 it('shows only the loading copy while the source is in flight', () => {
-  runtime.functionsConfigured = true;
+  runtime.leaveApiEnabled = true;
   vi.mocked(listMyLeaveRequests).mockReturnValue(new Promise(() => {}));
   render(<LeavePage />);
   expectOnly(LEAVE_COPY.loadingSubmit);
 });
 
 it('shows only the empty copy after a successful read with no records', async () => {
-  runtime.functionsConfigured = true;
+  runtime.leaveApiEnabled = true;
   render(<LeavePage />);
   expect(await screen.findByText(LEAVE_COPY.emptySubmit)).toBeTruthy();
   expectOnly(LEAVE_COPY.emptySubmit);
@@ -130,7 +134,7 @@ it('shows only the empty copy after a successful read with no records', async ()
 });
 
 it('shows records instead of empty, loading, error or unavailable', async () => {
-  runtime.functionsConfigured = true;
+  runtime.leaveApiEnabled = true;
   vi.mocked(listMyLeaveRequests).mockResolvedValue([record]);
   render(<LeavePage />);
   expect(await screen.findByText('等待站內核閱')).toBeTruthy();
@@ -138,7 +142,7 @@ it('shows records instead of empty, loading, error or unavailable', async () => 
 });
 
 it('shows a network error with retry and never keeps loading beside it', async () => {
-  runtime.functionsConfigured = true;
+  runtime.leaveApiEnabled = true;
   vi.mocked(listMyLeaveRequests).mockRejectedValue(new TypeError('Failed to fetch'));
   render(<LeavePage />);
   expect(await screen.findByText(LEAVE_COPY.network)).toBeTruthy();
@@ -147,7 +151,7 @@ it('shows a network error with retry and never keeps loading beside it', async (
 });
 
 it('sends unauthenticated reads to login instead of calling it a network error', async () => {
-  runtime.functionsConfigured = true;
+  runtime.leaveApiEnabled = true;
   vi.mocked(listMyLeaveRequests).mockRejectedValue(
     Object.assign(new Error('signed out'), { code: 'functions/unauthenticated' }),
   );
@@ -161,7 +165,7 @@ it('sends unauthenticated reads to login instead of calling it a network error',
 });
 
 it('shows missing permission without blaming the network', async () => {
-  runtime.functionsConfigured = true;
+  runtime.leaveApiEnabled = true;
   vi.mocked(listMyLeaveRequests).mockRejectedValue(
     Object.assign(new Error('denied'), { code: 'permission-denied' }),
   );
@@ -172,7 +176,7 @@ it('shows missing permission without blaming the network', async () => {
 });
 
 it('stops loading after the timeout and lets the user retry', async () => {
-  runtime.functionsConfigured = true;
+  runtime.leaveApiEnabled = true;
   vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
   try {
     vi.mocked(listMyLeaveRequests).mockReturnValue(new Promise(() => {}));
@@ -190,7 +194,7 @@ it('stops loading after the timeout and lets the user retry', async () => {
 });
 
 it('retry after a network error can reach the empty state', async () => {
-  runtime.functionsConfigured = true;
+  runtime.leaveApiEnabled = true;
   vi.mocked(listMyLeaveRequests)
     .mockRejectedValueOnce(new TypeError('Failed to fetch'))
     .mockResolvedValueOnce([]);

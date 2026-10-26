@@ -1,14 +1,12 @@
 'use client';
 
 import { collection, getDocs, limit, orderBy, query, where } from 'firebase/firestore';
-import { httpsCallable } from 'firebase/functions';
 import {
   courseOfferingId, periodEnd, periodProfileForSchool, periodStart,
   type PersonalCourse,
 } from '@campus/shared';
-import { getAuth, getCloudFunctionUrl, getDb, getFunctionsInstance, isFirebaseConfigured } from '@/lib/firebase';
-import { areFunctionsConfigured, FunctionsUnconfiguredError } from '@/lib/functionsUrl';
-import { isLeaveWebApiEnabled } from '@/lib/leaveWebApi';
+import { getAuth, getCloudFunctionUrl, getDb, isFirebaseConfigured } from '@/lib/firebase';
+import { FunctionsUnconfiguredError } from '@/lib/functionsUrl';
 import {
   leaveFailureCopy,
   leavePageFailureFromError,
@@ -197,39 +195,34 @@ async function callLeaveFn<Input extends Record<string, unknown>, Output>(
   name: LeaveCallableName,
   data: Input,
 ): Promise<Output> {
-  if (isLeaveWebApiEnabled()) {
-    const user = getAuth()?.currentUser;
-    if (!user) throw withCallableCode('請先登入學校帳號。', 'UNAUTHENTICATED');
-    const idToken = await user.getIdToken();
-    const response = await fetch(getCloudFunctionUrl(name), {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${idToken}` },
-      body: JSON.stringify({ data }),
-      cache: 'no-store',
-    });
-    const payload = (await response.json()) as {
-      error?: { status?: unknown; message?: unknown };
-      result?: unknown;
-      data?: unknown;
-    };
-    const errorMessage =
-      payload?.error && typeof payload.error === 'object' ? String(payload.error.message || '') : '';
-    if (response.status === 503 || /尚未啟用/.test(errorMessage)) {
-      throw new FunctionsUnconfiguredError('請假服務尚未接通');
-    }
-    if (!response.ok || payload.error) {
-      const status =
-        payload?.error && typeof payload.error === 'object' ? String(payload.error.status || '') : '';
-      throw withCallableCode(
-        errorMessage || '目前無法確認操作是否完成，請先重新整理紀錄，再決定是否重試。',
-        status || 'UNKNOWN',
-      );
-    }
-    return (payload.result ?? payload.data) as Output;
+  const user = getAuth()?.currentUser;
+  if (!user) throw withCallableCode('請先登入學校帳號。', 'UNAUTHENTICATED');
+  const idToken = await user.getIdToken();
+  const response = await fetch(getCloudFunctionUrl(name), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${idToken}` },
+    body: JSON.stringify({ data }),
+    cache: 'no-store',
+  });
+  const payload = (await response.json()) as {
+    error?: { status?: unknown; message?: unknown };
+    result?: unknown;
+    data?: unknown;
+  };
+  const errorMessage =
+    payload?.error && typeof payload.error === 'object' ? String(payload.error.message || '') : '';
+  if (response.status === 503 || /尚未啟用/.test(errorMessage)) {
+    throw new FunctionsUnconfiguredError('請假服務尚未接通');
   }
-  if (!areFunctionsConfigured()) throw new FunctionsUnconfiguredError('請假服務尚未接通');
-  const result = await httpsCallable<Input, Output>(getFunctionsInstance(), name)(data);
-  return result.data;
+  if (!response.ok || payload.error) {
+    const status =
+      payload?.error && typeof payload.error === 'object' ? String(payload.error.status || '') : '';
+    throw withCallableCode(
+      errorMessage || '目前無法確認操作是否完成，請先重新整理紀錄，再決定是否重試。',
+      status || 'UNKNOWN',
+    );
+  }
+  return (payload.result ?? payload.data) as Output;
 }
 
 export async function listMyLeaveRequests(uid: string, schoolId: string): Promise<LeaveRequest[]> {

@@ -1,6 +1,6 @@
 /**
- * 請假四支 /api/fn 是否真正寫入。只在伺服器端讀 process.env，預設關閉。
- * 畫面路徑由 NEXT_PUBLIC_LEAVE_WEB_API 決定；兩個開關都開了才會真的寫入。
+ * 請假站內送出／撤回／核閱是否改走 nuni-web `/api/fn`。
+ * 只在伺服器 runtime 讀 process.env，預設關閉。同一個開關同時控制畫面與寫入。
  */
 export const LEAVE_WEB_API_SERVER_FLAG = 'LEAVE_WEB_API_ENABLED';
 
