@@ -216,7 +216,8 @@ test('a server proposal requires review and a second explicit tap before writing
   jest.mocked(confirmCampusAgentWrite).mockResolvedValue({
     success: true, toolName: 'createDormRepairRequest', repairId: 'repair-123',
   });
-  const view = render(<CampusAssistantScreen />);
+  const navigate = jest.fn();
+  const view = render(<CampusAssistantScreen navigation={{ navigate }} />);
   selectCampusMode(view);
   fireEvent.changeText(view.getByLabelText('詢問校園助理'), 'A棟301冷氣不冷');
   await act(async () => fireEvent.press(view.getByText('送出問題')));
@@ -239,6 +240,11 @@ test('a server proposal requires review and a second explicit tap before writing
   expect(view.getByText('伺服器已確認執行成功')).toBeTruthy();
   expect(view.getByText('紀錄編號：repair-123')).toBeTruthy();
   expect(view.queryByText('確認並執行')).toBeNull();
+  fireEvent.press(view.getByText('開啟服務頁核對紀錄'));
+  expect(navigate).toHaveBeenCalledWith('校園', {
+    screen: 'Dormitory',
+    params: undefined,
+  });
 });
 
 test('a lost write receipt is never displayed as success or offered for automatic retry', async () => {
