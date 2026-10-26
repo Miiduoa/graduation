@@ -38,11 +38,13 @@ export function CampusAgentActionReview({
   userId,
   schoolId,
   isCurrent,
+  onOpenService,
 }: {
   proposal: CampusAgentWriteProposal;
   userId: string;
   schoolId: string;
   isCurrent: () => boolean;
+  onOpenService?: () => void;
 }) {
   const [expanded, setExpanded] = useState(false);
   const [attempted, setAttempted] = useState(false);
@@ -129,6 +131,9 @@ export function CampusAgentActionReview({
                 為避免重複送出，請先到對應服務頁面查核。這份草稿不會再次自動執行。
               </Text>
             </View>
+          )}
+          {attempted && onOpenService && (
+            <AIButton label="開啟服務頁核對紀錄" variant="ghost" onPress={onOpenService} />
           )}
         </View>
       )}
