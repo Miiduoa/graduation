@@ -114,7 +114,8 @@ function HomeFeedContent() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [loadError, setLoadError] = useState('');
-  const likeFlightRef = useRef(false);
+  const likeFlightsRef = useRef<Set<string>>(new Set());
+  const [pendingLikes, setPendingLikes] = useState<ReadonlySet<string>>(new Set());
   const loadVersion = useRef(0);
 
   const load = useCallback(async () => {
@@ -172,10 +173,11 @@ function HomeFeedContent() {
         if (!uid) Alert.alert('請登入', '登入後即可按讚貼文');
         return;
       }
-      if (likeFlightRef.current) return;
-      likeFlightRef.current = true;
+      if (likeFlightsRef.current.has(row.id)) return;
+      likeFlightsRef.current.add(row.id);
+      setPendingLikes((prev) => new Set([...prev, row.id]));
 
-      // 樂觀更新
+      // The server remains authoritative after optimistic feedback.
       setPosts((prev) =>
         prev.map((p) => {
           if (p.id !== row.id) return p;
@@ -195,13 +197,22 @@ function HomeFeedContent() {
       try {
         await toggleCampusPostLike(sid, row.id, uid);
       } catch (e: any) {
-        Alert.alert('按讚失敗', e?.message ?? String(e));
-        await load();
+        setPosts((prev) =>
+          prev.map((post) =>
+            post.id === row.id ? { ...post, likedBy: row.likedBy, likes: row.likes } : post,
+          ),
+        );
+        Alert.alert('按讚失敗', '目前無法更新貼文，請確認連線後再試。');
       } finally {
-        likeFlightRef.current = false;
+        likeFlightsRef.current.delete(row.id);
+        setPendingLikes((prev) => {
+          const next = new Set(prev);
+          next.delete(row.id);
+          return next;
+        });
       }
     },
-    [auth.user?.uid, school?.id, load],
+    [auth.user?.uid, school?.id],
   );
 
   React.useEffect(() => {
@@ -477,6 +488,10 @@ function HomeFeedContent() {
                 <View style={styles.cardFooter}>
                   <Pressable
                     style={styles.statHit}
+                    accessibilityRole="button"
+                    accessibilityLabel={liked ? '取消按讚' : '按讚'}
+                    accessibilityState={{ selected: liked, disabled: pendingLikes.has(item.id) }}
+                    disabled={pendingLikes.has(item.id)}
                     hitSlop={{ top: 8, bottom: 8, left: 6, right: 6 }}
                     onPress={(e) => {
                       e.stopPropagation?.();
