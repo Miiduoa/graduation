@@ -14,12 +14,19 @@ export function courseSubmissionState(
 ): CourseSubmissionState {
   if (!record) return { kind: 'not_submitted' };
 
-  const timestamp = record.submittedAt as string | number | Date | { toDate?: () => Date } | undefined;
-  const parsed = timestamp && typeof timestamp === 'object' && 'toDate' in timestamp
-    ? timestamp.toDate?.() : timestamp;
-
-  const submittedAt = parsed === undefined || parsed === null
-    ? null : parseTaipeiInstant(parsed as string | number | Date);
+  let submittedAt: number | null = null;
+  try {
+    let source: unknown = record.submittedAt;
+    if (source && typeof source === 'object' && 'toDate' in source) {
+      const toDate = (source as { toDate?: unknown }).toDate;
+      source = typeof toDate === 'function' ? toDate.call(source) : null;
+    }
+    if (typeof source === 'string' || typeof source === 'number' || source instanceof Date) {
+      submittedAt = parseTaipeiInstant(source);
+    }
+  } catch {
+    submittedAt = null;
+  }
   if (submittedAt !== null) {
     return {
       kind: 'submitted',
