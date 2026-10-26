@@ -18,7 +18,8 @@ export default function CourseQuizzesV2Screen() {
   const nav = useCourseV2Nav();
   const loadable = useLoadable(async () => {
     const sb = getSupabaseClient();
-    if (!sb) return [];
+    if (!sb) throw new Error('LMS 服務尚未連線，請確認設定後重試。');
+    if (!courseId) throw new Error('缺少課程識別資料，請返回重新選擇。');
     const { data, error } = await sb
       .from('quizzes')
       .select('id, title, description, time_limit_seconds, max_attempts, pool_pick_count, created_at')
