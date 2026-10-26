@@ -1,5 +1,5 @@
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { beforeEach, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { LEAVE_COPY, LEAVE_LOAD_TIMEOUT_MS } from '@/lib/leavePageState';
 import { listMyLeaveRequests } from '@/lib/leaveRequests';
 import { loadPersonalTimetable } from '@/lib/timetable/store';
@@ -78,6 +78,10 @@ function expectOnly(visible: string) {
   expect(screen.queryByText(/請確認連線/)).toBeNull();
 }
 
+afterEach(() => {
+  vi.unstubAllEnvs();
+});
+
 beforeEach(() => {
   vi.clearAllMocks();
   runtime.functionsConfigured = false;
@@ -99,6 +103,15 @@ it('shows only the unavailable copy when Functions are not configured', async ()
   expect(listMyLeaveRequests).not.toHaveBeenCalled();
   expect(loadPersonalTimetable).not.toHaveBeenCalled();
   expect(screen.queryByRole('button', { name: LEAVE_COPY.retry })).toBeNull();
+});
+
+it('loads leave records through the web API when the flag is on without Functions', async () => {
+  vi.stubEnv('NEXT_PUBLIC_LEAVE_WEB_API', 'true');
+  render(<LeavePage />);
+  expect(await screen.findByText(LEAVE_COPY.emptySubmit)).toBeTruthy();
+  expect(listMyLeaveRequests).toHaveBeenCalled();
+  expect(loadPersonalTimetable).toHaveBeenCalled();
+  expect(screen.queryByText(LEAVE_COPY.unavailableSubmit)).toBeNull();
 });
 
 it('shows only the loading copy while the source is in flight', () => {

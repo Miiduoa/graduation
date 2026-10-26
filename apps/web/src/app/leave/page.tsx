@@ -10,7 +10,7 @@ import { useAuth } from '@/components/AuthGuard';
 import { useSelectedSchool } from '@/components/SelectedSchoolProvider';
 import { useDemoRole } from '@/lib/demoRole';
 import { ensureTimetableIndex, loadPersonalTimetable } from '@/lib/timetable/store';
-import { areFunctionsConfigured } from '@/lib/functionsUrl';
+import { isLeaveBackendAvailable } from '@/lib/leaveWebApi';
 import {
   LEAVE_COPY,
   initialLeavePageView,
@@ -99,7 +99,7 @@ function LeaveWorkspace({ uid, schoolId, schoolName }: {
   const [filter, setFilter] = useState<Filter>('all');
   const [expanded, setExpanded] = useState<string | null>(null);
   const [view, setView] = useState<LeavePageView<LeaveData>>(() =>
-    initialLeavePageView(areFunctionsConfigured()),
+    initialLeavePageView(isLeaveBackendAvailable()),
   );
   const [notice, setNotice] = useState('');
   const [busy, setBusy] = useState(false);
@@ -108,7 +108,7 @@ function LeaveWorkspace({ uid, schoolId, schoolName }: {
   const activeRef = useRef(true);
 
   const load = useCallback(async () => {
-    if (!areFunctionsConfigured()) {
+    if (!isLeaveBackendAvailable()) {
       setView({ status: 'unavailable' });
       return;
     }
@@ -132,7 +132,7 @@ function LeaveWorkspace({ uid, schoolId, schoolName }: {
 
   useEffect(() => {
     activeRef.current = true;
-    if (areFunctionsConfigured()) void Promise.resolve().then(() => load());
+    if (isLeaveBackendAvailable()) void Promise.resolve().then(() => load());
     return () => { activeRef.current = false; };
   }, [load]);
 
