@@ -948,6 +948,8 @@ export type InboxTask = {
   assignmentId?: string;
   priority: number;
   dueAt?: Date | null;
+  /** Only true when the course source explicitly permits submissions after its deadline. */
+  lateSubmissionAllowed?: boolean;
   unreadCount?: number;
   preferredIntent?: InboxIntent;
   actionLabel?: string;
