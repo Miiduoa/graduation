@@ -104,6 +104,38 @@ it('ignores maintenance wording inside comments or scripts when the login form i
   expect(campusPageHasLoginForm(html)).toBe(true);
 });
 
+it('ignores maintenance wording inside script and style tags with messy closing tags', () => {
+  const html = `
+    <script>document.write('系統維護中，尚未開放')</script >
+    <script type="text/javascript">alert('暫停服務')</script
+ foo>
+    <SCRIPT>尚未開放</SCRIPT>
+    <style type="text/css">.x{content:'暫時關閉'}</style >
+    <form action="index_check.php" method="POST">
+      <input name="uid"><input name="upassword">
+    </form>
+  `;
+  expect(campusPageLooksClosed(html)).toBe(false);
+  expect(campusPageHasLoginForm(html)).toBe(true);
+});
+
+it('still treats a visible maintenance page as closed when leftover script closers are messy', () => {
+  const html = `
+    <script>console.log('ok')</script >
+    <p>系統維護中，尚未開放</p>
+  `;
+  expect(campusPageHasLoginForm(html)).toBe(false);
+  expect(campusPageLooksClosed(html)).toBe(true);
+});
+
+it('does not filter script or style tags with a regular expression', () => {
+  const source = readFileSync(fileURLToPath(import.meta.url).replace(/\.test\.ts$/, '.ts'), 'utf8');
+  expect(source).toContain('parseFragment');
+  expect(source).not.toContain('<script\\b');
+  expect(source.toLowerCase()).not.toContain('</script>');
+  expect(source.toLowerCase()).not.toContain('</style>');
+});
+
 it('does not classify a bounced login page as maintenance after submit', async () => {
   const fetchMock = vi.fn(async (url: string) => {
     const href = String(url);
