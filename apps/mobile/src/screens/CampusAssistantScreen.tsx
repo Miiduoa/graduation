@@ -20,6 +20,7 @@ import { getMobileQuickActions } from '../services/quickCampusActions';
 const VERIFIED_SERVICE_ROUTES: Record<string, { route: string; label: string }> = {
   '/timetable': { route: 'PersonalTimetable', label: '我的課表' },
   '/announcements': { route: '公告總覽', label: '校園公告' },
+  '/events': { route: '活動總覽', label: '校園活動' },
   '/classroom': { route: 'CoursesHome', label: '課程與作業' },
   '/grades': { route: 'Grades', label: '成績' },
   '/bus': { route: 'BusV2', label: '公車' },
