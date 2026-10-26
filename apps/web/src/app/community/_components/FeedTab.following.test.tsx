@@ -13,6 +13,7 @@ const mocks = vi.hoisted(() => ({
   follow: vi.fn(),
   unfollow: vi.fn(),
   listBookmarks: vi.fn(),
+  loadBookmarks: vi.fn(),
   saveBookmark: vi.fn(),
   toggleLike: vi.fn(),
 }));
@@ -34,7 +35,7 @@ vi.mock('@/lib/community/firestore', () => ({
 }));
 vi.mock('@/lib/community/bookmarks', () => ({
   listCampusPostBookmarkIds: mocks.listBookmarks,
-  loadCampusPostBookmarks: vi.fn(),
+  loadCampusPostBookmarks: mocks.loadBookmarks,
   saveCampusPostBookmark: mocks.saveBookmark,
   removeCampusPostBookmark: vi.fn(),
 }));
@@ -74,6 +75,7 @@ beforeEach(() => {
   mocks.follow.mockResolvedValue(undefined);
   mocks.unfollow.mockResolvedValue(undefined);
   mocks.listBookmarks.mockResolvedValue([]);
+  mocks.loadBookmarks.mockResolvedValue({ ids: [], posts: [] });
   mocks.saveBookmark.mockResolvedValue(undefined);
   mocks.toggleLike.mockResolvedValue(undefined);
 });
@@ -150,6 +152,46 @@ it('refreshes following relations changed on another device before showing the u
   await screen.findByText('小華的貼文');
   expect(screen.queryByText('小明的貼文')).toBeNull();
   expect(mocks.listFollowing).toHaveBeenCalledTimes(2);
+});
+
+it('does not claim a saved-post count while a loaded collection is refreshing or denied', async () => {
+  const initial = deferred<{ ids: string[]; posts: typeof bob[] }>();
+  const reload = deferred<{ ids: string[]; posts: typeof bob[] }>();
+  mocks.loadBookmarks
+    .mockReturnValueOnce(initial.promise)
+    .mockReturnValueOnce(reload.promise);
+  render(<FeedTab schoolId="pu" schoolSearch="?schoolId=pu" />);
+  await screen.findByText('小明的貼文');
+  fireEvent.click(screen.getByRole('button', { name: '收藏' }));
+  expect(screen.getByText('正在讀取收藏…')).toBeTruthy();
+  expect(screen.queryByText(/^顯示 .*私人收藏/)).toBeNull();
+  await act(async () => initial.resolve({ ids: [bob.id], posts: [bob] }));
+  await screen.findByText('顯示 1 則 · 本校最近最多 40 筆私人收藏，跨裝置同步');
+  fireEvent.click(screen.getByRole('button', { name: '重新整理' }));
+  await screen.findByText('正在讀取收藏…');
+  expect(screen.queryByText(/^顯示 .*私人收藏/)).toBeNull();
+  await act(async () => reload.reject(Object.assign(new Error('revoked'), { code: 'permission-denied' })));
+  await screen.findByText('暫時無法讀取收藏，請確認連線與校籍後重試。');
+  expect(screen.queryByText(/^顯示 .*私人收藏/)).toBeNull();
+  expect(screen.queryByText('小明的貼文')).toBeNull();
+  expect(screen.queryByText('還沒有收藏貼文')).toBeNull();
+});
+
+it('does not claim a followed-post count while previously loaded relations are refreshing or denied', async () => {
+  const reload = deferred<string[]>();
+  mocks.listFollowing.mockResolvedValueOnce(['bob']).mockReturnValueOnce(reload.promise);
+  render(<FeedTab schoolId="pu" schoolSearch="?schoolId=pu" />);
+  await screen.findByText('小明的貼文');
+  fireEvent.click(screen.getByRole('button', { name: '追蹤' }));
+  await screen.findByText('顯示 1 則 · 目前載入 3 則貼文中追蹤的作者');
+  fireEvent.click(screen.getByRole('button', { name: '重新整理' }));
+  await screen.findByText('正在讀取追蹤動態…');
+  expect(screen.queryByText(/^顯示 .*追蹤的作者/)).toBeNull();
+  await act(async () => reload.reject(Object.assign(new Error('revoked'), { code: 'permission-denied' })));
+  await screen.findByText('無法讀取追蹤清單，請確認網路及校籍後重試。');
+  expect(screen.queryByText(/^顯示 .*追蹤的作者/)).toBeNull();
+  expect(screen.queryByText('小明的貼文')).toBeNull();
+  expect(screen.queryByText('追蹤的作者尚無新貼文')).toBeNull();
 });
 
 it('does not replace the new account feed with an earlier account read', async () => {

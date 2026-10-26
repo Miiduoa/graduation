@@ -391,8 +391,8 @@ function ScopedFeedTab(props: FeedTabProps & { user: { uid: string } }) {
   const onRefresh = async () => {
     setRefreshing(true);
     setFollowingRevision((prev) => prev + 1);
-    await refresh();
     setBookmarkRevision((prev) => prev + 1);
+    await refresh();
     setRefreshing(false);
   };
 
@@ -423,6 +423,11 @@ function ScopedFeedTab(props: FeedTabProps & { user: { uid: string } }) {
   };
 
   if (error) return <CommunityLoadError message={error} retry={refresh} />;
+
+  const selectedFeedLoading = loading ||
+    (savedView && (bookmarksLoading || (!validBookmarks && !bookmarksError))) ||
+    (followingView && (followingLoading || (!validFollowing && !followingError)));
+  const selectedFeedError = (savedView && bookmarksError) || (followingView && followingError);
 
   return (
     <div className={styles.feedColumn}>
@@ -550,7 +555,10 @@ function ScopedFeedTab(props: FeedTabProps & { user: { uid: string } }) {
               key={f.key}
               type="button"
               aria-pressed={active}
-              onClick={() => setFilter(f.key)}
+              onClick={() => {
+                if (f.key === 'saved' && filter !== 'saved') setBookmarksLoading(true);
+                setFilter(f.key);
+              }}
               style={{
                 display: 'flex',
                 alignItems: 'center',
@@ -623,7 +631,7 @@ function ScopedFeedTab(props: FeedTabProps & { user: { uid: string } }) {
           </button>
         </div>
       </div>
-      {!loading && (
+      {!selectedFeedLoading && !selectedFeedError && (
         <p className={styles.feedScope} role="status">
           {savedView
             ? `顯示 ${visible.length} 則 · 本校最近最多 40 筆私人收藏，跨裝置同步`
@@ -653,13 +661,11 @@ function ScopedFeedTab(props: FeedTabProps & { user: { uid: string } }) {
       )}
 
       {/* ── Posts ── */}
-      {loading ||
-        (savedView && (bookmarksLoading || (!validBookmarks && !bookmarksError))) ||
-        (followingView && (followingLoading || (!validFollowing && !followingError))) ? (
+      {selectedFeedLoading ? (
         <div className="card" style={{ padding: 24, textAlign: 'center', color: 'var(--muted)' }} role="status">
           {savedView ? '正在讀取收藏…' : followingView ? '正在讀取追蹤動態…' : '載入中…'}
         </div>
-      ) : (savedView && bookmarksError) || (followingView && followingError) ? null : visible.length === 0 ? (
+      ) : selectedFeedError ? null : visible.length === 0 ? (
         <div className="card" style={{ padding: 32, textAlign: 'center', color: 'var(--muted)' }}>
           {search.trim()
             ? '找不到符合的貼文'
