@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -13,7 +13,7 @@ import {
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
 
 import { useAuth } from '../state/auth';
-import { useTheme } from '../state/theme';
+import { getThemeVersion, subscribeToTheme, theme } from '../ui/theme';
 import { useDataSource } from '../hooks/useDataSource';
 import type { Assignment, Submission } from '../data/types';
 import {
@@ -54,7 +54,7 @@ function asText(value: unknown, fallback = ''): string {
 
 export default function HomeworkSubmitScreen(props: RouteProps) {
   const navigation = useNavigation<any>();
-  const theme = useTheme();
+  useSyncExternalStore(subscribeToTheme, getThemeVersion, getThemeVersion);
   const auth = useAuth();
   const ds = useDataSource();
   const params = props.route?.params ?? {};
