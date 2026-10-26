@@ -43,7 +43,7 @@ test('only reads the selected account and campus copy, never a demo schedule', a
   const prompt = formatOnDeviceSchoolPrompt(result);
   expect(prompt).toContain('資料庫概論');
   expect(prompt).toContain('不能冒充鐘點或官方');
-  expect(prompt).toContain('無法');
+  expect(prompt).toContain('不能宣稱已查到');
 });
 
 test('missing or invalid cached data does not become a fabricated timetable', async () => {
