@@ -13,6 +13,7 @@ export type HubAssignment = {
   description: string;
   dueAt: string | null;
   closed: boolean;
+  allowLateSubmission?: boolean;
   submission?: CourseSubmissionState;
 };
 export type HubMaterial = {
@@ -240,6 +241,7 @@ export async function loadCourseHub(
         description: text(row.description),
         dueAt: dateText(row.dueAt),
         closed: row.status === 'closed',
+        allowLateSubmission: row.allowLateSubmission === true,
         submission,
       });
     }
