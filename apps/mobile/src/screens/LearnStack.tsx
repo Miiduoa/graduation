@@ -58,6 +58,12 @@ import CourseScoresScreen from './CourseScoresScreen';
 import PomodoroSessionScreen from './PomodoroSessionScreen';
 // LMS v2 — 新版課程子頁 (取代舊 Course*Screen 系列)
 import CourseHubV2Screen from './lmsV2/CourseHubV2Screen';
+import CourseMaterialsV2Screen from './lmsV2/CourseMaterialsV2Screen';
+import CourseAssignmentsV2Screen from './lmsV2/CourseAssignmentsV2Screen';
+import CourseAssignmentDetailV2Screen from './lmsV2/CourseAssignmentDetailV2Screen';
+import CourseQuizzesV2Screen from './lmsV2/CourseQuizzesV2Screen';
+import CourseAnnouncementsV2Screen from './lmsV2/CourseAnnouncementsV2Screen';
+import { COURSE_V2_ROUTES } from './lmsV2/courseV2Routes';
 import CourseQuizTakingV2Screen from './lmsV2/CourseQuizTakingV2Screen';
 import CourseForumV2Screen from './lmsV2/CourseForumV2Screen';
 import CourseForumTopicV2Screen from './lmsV2/CourseForumTopicV2Screen';
@@ -390,6 +396,41 @@ export function LearnStack() {
         component={lmsV2Enabled ? CourseHubV2Screen : guardCourseView(CourseModulesScreen)}
         options={{ title: '課程', headerShown: false }}
       />
+      {lmsV2Enabled && (
+        <Stack.Screen
+          name={COURSE_V2_ROUTES.materials}
+          component={CourseMaterialsV2Screen}
+          options={{ title: '教材', headerShown: false }}
+        />
+      )}
+      {lmsV2Enabled && (
+        <Stack.Screen
+          name={COURSE_V2_ROUTES.assignments}
+          component={CourseAssignmentsV2Screen}
+          options={{ title: '作業', headerShown: false }}
+        />
+      )}
+      {lmsV2Enabled && (
+        <Stack.Screen
+          name={COURSE_V2_ROUTES.assignmentDetail}
+          component={CourseAssignmentDetailV2Screen}
+          options={{ title: '繳交作業', headerShown: false }}
+        />
+      )}
+      {lmsV2Enabled && (
+        <Stack.Screen
+          name={COURSE_V2_ROUTES.quizzes}
+          component={CourseQuizzesV2Screen}
+          options={{ title: '測驗', headerShown: false }}
+        />
+      )}
+      {lmsV2Enabled && (
+        <Stack.Screen
+          name={COURSE_V2_ROUTES.announcements}
+          component={CourseAnnouncementsV2Screen}
+          options={{ title: '公告', headerShown: false }}
+        />
+      )}
       <Stack.Screen
         name="CourseCatalog"
         component={CourseCatalogScreen}

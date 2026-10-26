@@ -8,11 +8,21 @@ import { SchoolScopePlaceholder } from '@/components/SchoolScopePlaceholder';
 import { useAuth } from '@/components/AuthGuard';
 import { useSelectedSchool } from '@/components/SelectedSchoolProvider';
 import { useDemoRole } from '@/lib/demoRole';
+import { areFunctionsConfigured } from '@/lib/functionsUrl';
+import {
+  LEAVE_COPY,
+  initialLeavePageView,
+  leavePageFailureFromError,
+  leavePageSuccess,
+  withLeaveLoadTimeout,
+  type LeavePageView,
+} from '@/lib/leavePageState';
 import {
   LEAVE_PERIODS, LEAVE_REVIEWS, LEAVE_STATUSES, countLeaveReviews,
   formatLeaveRange, leaveKindLabel, leaveRequestError,
   listLeaveReviewQueue, reviewLeaveRequest, type LeaveReviewRow,
 } from '@/lib/leaveRequests';
+import { LeaveStatusPanel } from '../LeaveStatusPanel';
 import styles from '../leave.module.css';
 
 type ReviewFilter = 'pending' | 'all' | 'reviewed';
@@ -50,9 +60,9 @@ export default function LeaveReviewPage() {
 function ReviewWorkspace({ uid, schoolId, schoolName }: {
   uid: string; schoolId: string; schoolName: string;
 }) {
-  const [rows, setRows] = useState<LeaveReviewRow[] | null>(null);
-  const [denied, setDenied] = useState(false);
-  const [error, setError] = useState('');
+  const [view, setView] = useState<LeavePageView<LeaveReviewRow[]>>(() =>
+    initialLeavePageView(areFunctionsConfigured()),
+  );
   const [notice, setNotice] = useState('');
   const [filter, setFilter] = useState<ReviewFilter>('pending');
   const [notes, setNotes] = useState<Record<string, string>>({});
@@ -61,37 +71,39 @@ function ReviewWorkspace({ uid, schoolId, schoolName }: {
   const lockedRef = useRef(false);
 
   const load = useCallback(async () => {
+    if (!areFunctionsConfigured()) {
+      setView({ status: 'unavailable' });
+      return;
+    }
+    setView((current) =>
+      current.status === 'empty' || current.status === 'ready' ? current : { status: 'loading' },
+    );
     try {
-      const result = await listLeaveReviewQueue(uid, schoolId);
+      const result = await withLeaveLoadTimeout(listLeaveReviewQueue(uid, schoolId));
       if (!currentRef.current) return;
-      setRows(result);
-      setDenied(false);
-      setError('');
+      setView(leavePageSuccess(result, result.length === 0));
     } catch (cause) {
-      if (!currentRef.current) return;
-      if (String((cause as { code?: string })?.code || '').includes('permission-denied')) {
-        setDenied(true);
-      } else {
-        setError('讀取核閱清單時發生問題，請確認連線後重試。');
-      }
+      if (currentRef.current) setView(leavePageFailureFromError(cause));
     }
   }, [uid, schoolId]);
 
   useEffect(() => {
     currentRef.current = true;
-    void Promise.resolve().then(load);
+    if (areFunctionsConfigured()) void Promise.resolve().then(load);
     return () => { currentRef.current = false; };
   }, [load]);
 
-  const pending = (rows || []).reduce(
+  const rows = view.status === 'empty' || view.status === 'ready' ? view.data : [];
+  const showQueue = view.status === 'empty' || view.status === 'ready';
+  const pending = rows.reduce(
     (total, row) => total + row.courses.filter((course) => course.reviewStatus === 'pending').length,
     0,
   );
-  const reviewed = (rows || []).reduce(
+  const reviewed = rows.reduce(
     (total, row) => total + countLeaveReviews(row.courses).approved + countLeaveReviews(row.courses).rejected,
     0,
   );
-  const filtered = (rows || []).filter((row) => {
+  const filtered = rows.filter((row) => {
     if (filter === 'pending') return row.status !== 'withdrawn' &&
       row.courses.some((course) => course.reviewStatus === 'pending');
     if (filter === 'reviewed') return row.courses.some((course) => course.reviewStatus !== 'pending');
@@ -143,20 +155,21 @@ function ReviewWorkspace({ uid, schoolId, schoolName }: {
           </div>
         </section>
 
-        {denied ? (
-          <section className={styles.alert} role="alert">
-            <strong>目前沒有核閱權限</strong>
-            <p>只有目前校園已指派授課的教師，或擁有該校管理員身分的帳號，才能使用這個工作台。</p>
-          </section>
-        ) : (
+        <LeaveStatusPanel
+          kind="review"
+          view={view}
+          loginHref={'/login?returnUrl=' + encodeURIComponent('/leave/review')}
+          onRetry={() => void load()}
+        />
+
+        {showQueue && (
           <>
             <div className={styles.stats} aria-label="請假核閱概況">
-              <div><span>待核閱課程</span><strong>{rows ? pending : '—'}</strong></div>
-              <div><span>已核閱課程</span><strong>{rows ? reviewed : '—'}</strong></div>
-              <div><span>可見假單</span><strong>{rows ? rows.length : '—'}</strong></div>
+              <div><span>待核閱課程</span><strong>{pending}</strong></div>
+              <div><span>已核閱課程</span><strong>{reviewed}</strong></div>
+              <div><span>可見假單</span><strong>{rows.length}</strong></div>
             </div>
             {notice && <p className={styles.notice} role="status" aria-live="polite">{notice}</p>}
-            {error && <section className={styles.alert} role="alert"><p>{error}</p><button type="button" onClick={() => void load()}>重新讀取</button></section>}
             <section className={styles.reviewPanel} aria-labelledby="review-queue-title">
               <div className={styles.sectionHead}>
                 <div>
@@ -170,10 +183,11 @@ function ReviewWorkspace({ uid, schoolId, schoolName }: {
                   <button key={id} type="button" aria-pressed={filter === id} onClick={() => setFilter(id)}>{label}</button>
                 ))}
               </div>
-              {rows === null ? (
-                <div className={styles.empty} role="status">正在讀取你有權限查看的請假紀錄…</div>
-              ) : filtered.length === 0 ? (
-                <div className={styles.empty}><strong>這裡暫時沒有待處理的申請</strong><p>學生建立請假紀錄，且課程已指派給你後，才會顯示在此處。</p></div>
+              {filtered.length === 0 ? (
+                <div className={styles.empty}>
+                  <strong>{view.status === 'empty' || filter === 'pending' ? LEAVE_COPY.emptyReview : '這個狀態沒有紀錄'}</strong>
+                  <p>{LEAVE_COPY.emptyReviewHint}</p>
+                </div>
               ) : (
                 <div className={styles.reviewGrid}>
                   {filtered.map((request) => (
