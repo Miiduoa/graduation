@@ -75,3 +75,23 @@ test('never treats an unscheduled course as a class on Sunday', () => {
   expect(result?.content).toContain('副本沒有排定這一天');
   expect(result?.content).not.toContain('待安排選修');
 });
+
+test('routes each live personal status to its own service instead of the generic classroom', () => {
+  expect(runOfflineCampusTool('我有幾份作業還沒交', snapshot))
+    .toMatchObject({ tool: 'online-required', route: '/classroom' });
+  expect(runOfflineCampusTool('幫我查宿舍報修進度', snapshot))
+    .toMatchObject({ tool: 'online-required', route: '/dormitory' });
+  expect(runOfflineCampusTool('我的訂單狀態', snapshot))
+    .toMatchObject({ tool: 'online-required', route: '/cafeteria' });
+  expect(runOfflineCampusTool('我的圖書借閱紀錄', snapshot))
+    .toMatchObject({ tool: 'online-required', route: '/library' });
+  expect(runOfflineCampusTool('這週有什麼校園活動', snapshot))
+    .toMatchObject({ tool: 'online-required', route: '/events' });
+});
+
+test('does not invent current weather when offline', () => {
+  const result = runOfflineCampusTool('今天的天氣如何？', snapshot);
+  expect(result).toMatchObject({ tool: 'online-required' });
+  expect(result?.content).toContain('需要正式資料來源');
+  expect(result?.route).toBeUndefined();
+});
