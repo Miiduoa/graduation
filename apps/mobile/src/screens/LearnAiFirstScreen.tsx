@@ -8,6 +8,7 @@ import type { InboxTask } from '../data/types';
 import { safeNavigate } from '../utils/safeNavigate';
 import { navigateFromInboxTask } from '../services/inboxActions';
 import { theme } from '../ui/theme';
+import { LearningNextClassCard } from '../components/LearningNextClassCard';
 import { buildLearningWorkspace, describeLearningTask, filterLearningTasks, type LearningTaskFilter } from '../features/learningWorkspace';
 
 type LearningData = Awaited<ReturnType<typeof loadStudentHome>>;
@@ -122,29 +123,11 @@ export default function LearnAiFirstScreen() {
           ))}
         </View>
       ) : null}
-      <AISection title="常用工具">
-        <AIRow title="匯入我的資料" subtitle="截圖、文字、檔案；課表、成績與行事曆" onPress={() => safeNavigate(navigation, 'PersonalImport')} />
-        <AIRow
-          title="我的課表"
-          subtitle="一週、單日、匯入與空堂"
-          onPress={() => safeNavigate(navigation, 'PersonalTimetable')}
-        />
-        <AIRow
-          title="行事曆"
-          subtitle="學校行事曆與自己的安排"
-          onPress={() => safeNavigate(navigation, 'Calendar')}
-        />
-        <AIRow
-          title="課程申訴"
-          subtitle="看申訴處理到哪"
-          onPress={() => safeNavigate(navigation, 'CourseAppeals')}
-        />
-        <AIRow
-          title="課綱查詢"
-          subtitle="搜尋課程內容與授課資訊"
-          onPress={() => safeNavigate(navigation, 'CourseCatalog')}
-        />
-      </AISection>
+      <LearningNextClassCard
+        onOpenTimetable={() => safeNavigate(navigation, 'PersonalTimetable')}
+        onImportTimetable={() => safeNavigate(navigation, 'PersonalImport', { kind: 'timetable' })}
+      />
+
       {!visible || visible.loading ? (
         <ActivityIndicator accessibilityLabel="讀取課程" color={aiTokens.ai} />
       ) : visible.error ? (
@@ -253,6 +236,29 @@ export default function LearnAiFirstScreen() {
           </AISection>
         </>
       ) : null}
+      <AISection title="常用工具">
+        <AIRow title="匯入我的資料" subtitle="截圖、文字、檔案；課表、成績與行事曆" onPress={() => safeNavigate(navigation, 'PersonalImport')} />
+        <AIRow
+          title="我的課表"
+          subtitle="一週、單日、匯入與空堂"
+          onPress={() => safeNavigate(navigation, 'PersonalTimetable')}
+        />
+        <AIRow
+          title="行事曆"
+          subtitle="學校行事曆與自己的安排"
+          onPress={() => safeNavigate(navigation, 'Calendar')}
+        />
+        <AIRow
+          title="課程申訴"
+          subtitle="看申訴處理到哪"
+          onPress={() => safeNavigate(navigation, 'CourseAppeals')}
+        />
+        <AIRow
+          title="課綱查詢"
+          subtitle="搜尋課程內容與授課資訊"
+          onPress={() => safeNavigate(navigation, 'CourseCatalog')}
+        />
+      </AISection>
     </AIScreen>
   );
 }
