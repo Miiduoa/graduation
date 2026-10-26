@@ -7,10 +7,17 @@
 ### 校園動態（Web、App）
 - 只對已讀取的**目前學校貼文**提供標題、內容、標籤、看板與可見作者搜尋。
 - 在既有推薦動態的次序與「最新」排序之間切換；最新排序使用貼文的真實建立時間。
-- 保留「全部、訂閱、圖文」過濾，搜尋結果可一鍵清除，畫面標示載入數與搜尋範圍。
+- 保留「全部、訂閱、圖文」過濾，新增「收藏」分類；搜尋結果可一鍵清除，畫面標示載入數與搜尋範圍。
 - 匿名貼文僅能搜尋其公開暱稱，不能透過作者 UID 或真實姓名被找出。
 - 按讚以每篇貼文為單位鎖定送出，失敗會還原樂觀更新，不將未確認寫入視為成功。
 - Web 採用閱讀寬度與響應式工具列；App 保留原導覽、可用區域與 40–44pt 的搜尋／排序操作。
+
+### 跨裝置校園貼文收藏（Web、App）
+- Web 與 App 使用同一個 `users/{uid}/schools/{schoolId}/campusPostBookmarks/{postId}` 路徑，保存文章參照，不複製他人的內文到個人紀錄。
+- 支援首頁快速收藏、取消收藏、貼文詳情狀態確認，以及收藏分類獨立讀取最近 40 筆記錄，能找回不在首頁近期動態內的貼文。
+- 收藏的讀寫必須同時符合**本人**及**目前學校有效成員**，寫入的文章必須真實存在，資料結構及伺服器時間戳受 Firestore 規則驗證。
+- 刪除、無法開啟或已失去校籍權限的文章不得以歷史快取繞過校方讀取規則；取消收藏與寫入失敗都有明確結果。
+- 收藏列表目前限制 40 筆，尚未實作全部收藏分頁；不把此能力誇大為全站全文搜尋。
 
 ### 私訊（Web）
 - 開啟對話定位到最新一則訊息。
@@ -28,18 +35,21 @@
 
 新增或擴充：
 - Web Vitest：貼文排序／查找／匿名保護、私訊停留舊訊息與返回最新、複製結果。
-- Mobile Jest：貼文篩選／搜尋／匿名保護、已載入貼文的最新排序與搜尋操作。
+- Mobile Jest：貼文篩選／搜尋／匿名保護、已載入貼文的最新排序與搜尋操作、收藏／取消收藏／失敗還原與較舊貼文讀回。
+- Web Vitest：收藏資料解析、跨校資料過濾、重複寫入保護及已刪除貼文的安全處理。
+- Firestore Emulator：只有原帳號且仍是該校有效成員才可讀取／建立／刪除收藏；其他人、其他學校、額外欄位、無效文章與更新操作均拒絕。
 
 合併正式 main 前必須通過下列指令與既有 PR 閘門（本文件不代表結果已通過）：
 
 ```bash
 pnpm --filter web typecheck
 pnpm --filter web lint
-pnpm --filter web exec vitest run src/app/community/_components/feedView.test.ts src/components/messaging/Messaging.test.tsx
+pnpm --filter web exec vitest run src/app/community/_components/feedView.test.ts src/lib/community/bookmarks.test.ts src/components/messaging/Messaging.test.tsx
 pnpm --filter web build
 pnpm --filter mobile typecheck
 pnpm --filter mobile lint
 pnpm --filter mobile exec jest src/__tests__/feedDiscoveryModel.test.ts src/__tests__/SocialBrowsingScreens.test.tsx --runInBand
+pnpm test:rules
 ```
 
 還要在 iOS / Android 驗證：中文輸入法、低速網路與斷線重試、同帳號切校／跨帳號切換、觸控滑動與鍵盤導覽、深色主題與文字縮放、Story 到期與刪除後的入口處理。依既有 CI、CodeQL、Firestore Rules、Maestro 與 Web Build 結果決定是否合併。
@@ -48,7 +58,7 @@ pnpm --filter mobile exec jest src/__tests__/feedDiscoveryModel.test.ts src/__te
 
 這次**不宣稱**做到 Threads、Instagram、X 的完整社交平台能力：
 
-1. **內容關係**：追蹤作者、引用／轉發、收藏同步、多層留言與搜尋全歷史仍需資料模型、索引、速率限制與濫用防護。
+1. **內容關係**：作者追蹤主動態整合、引用／轉發、收藏全部歷史分頁與搜尋全歷史仍需資料模型、索引、速率限制與濫用防護。
 2. **媒體體驗**：多圖裁切、影片處理與播放、上傳進度／失敗續傳、限時貼文互動，需獨立實測儲存與內容審核。
 3. **即時通訊**：訊息附件與跨端相容、已送達狀態、訊息回覆／編輯／撤回的跨端一致性、推播、分頁歷史與語音／視訊須逐項驗證安全規則。
 4. **平台品質**：大量貼文游標分頁、伺服器端搜尋、跨校公開社群權限邊界、完整無障礙與實機壓力測試需另外實作。
