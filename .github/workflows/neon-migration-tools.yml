@@ -23,7 +23,7 @@ jobs:
     container: postgres:18
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Install Python for local validation
         run: |
           apt-get update -qq
