@@ -17,6 +17,18 @@ import type { ServiceScreenProps } from './UnavailableFeatureScreen';
 import { safeNavigate } from '../utils/safeNavigate';
 import { getMobileQuickActions } from '../services/quickCampusActions';
 
+const VERIFIED_SERVICE_ROUTES: Record<string, { route: string; label: string }> = {
+  '/timetable': { route: 'PersonalTimetable', label: '我的課表' },
+  '/announcements': { route: '公告總覽', label: '校園公告' },
+  '/classroom': { route: 'CoursesHome', label: '課程與作業' },
+  '/grades': { route: 'Grades', label: '成績' },
+  '/bus': { route: 'BusV2', label: '公車' },
+  '/cafeteria': { route: '餐廳總覽', label: '校園餐廳' },
+  '/dormitory': { route: 'Dormitory', label: '宿舍服務' },
+  '/library': { route: 'Library', label: '圖書館' },
+  '/dms': { route: 'Dms', label: '私訊' },
+};
+
 export function CampusAssistantScreen({ navigation, route }: ServiceScreenProps) {
   useSyncExternalStore(subscribeToTheme, getThemeVersion, getThemeVersion);
   const { user } = useAuth();
@@ -54,7 +66,12 @@ function AssistantConversation({
   navigation: ServiceScreenProps['navigation'];
 }) {
   const [messages, setMessages] = useState<
-    Array<CampusAssistantMessage & { requiresService?: boolean; source?: CampusAssistantMode }>
+    Array<CampusAssistantMessage & {
+      requiresService?: boolean;
+      source?: CampusAssistantMode;
+      tool?: 'saved-timetable' | 'online-required' | 'open-service';
+      route?: string;
+    }>
   >([]);
   const [draft, setDraft] = useState(initialPrompt.slice(0, 1600));
   const [mode, setMode] = useState<CampusAssistantMode>('device');
@@ -107,7 +124,14 @@ function AssistantConversation({
       if (current()) {
         setMessages([
           ...next,
-          { role: 'assistant', content: reply.content, requiresService: reply.hasActions, source: reply.source },
+          {
+            role: 'assistant',
+            content: reply.content,
+            requiresService: reply.hasActions,
+            source: reply.source,
+            tool: reply.tool,
+            route: reply.route,
+          },
         ]);
         setDraft('');
       }
@@ -158,7 +182,7 @@ function AssistantConversation({
                   : deviceStatus?.reason || '正在檢查本機模型…'}
               </Text>
               <Text style={{ color: aiTokens.muted, lineHeight: 21, fontSize: 12 }}>
-                首次安裝需要下載 GGUF 模型；之後可離線問答。本機課表只引用本人已保存的副本，不包含校方即時狀態。
+                本機課表查詢與服務導覽不需下載模型；自由問答才需要免費 GGUF 模型。本機課表只引用已保存副本，不包含校方即時狀態。
               </Text>
               <AIButton
                 label={deviceStatus?.ready ? '管理手機 AI 模型' : '下載／管理免費 AI 模型'}
@@ -229,16 +253,27 @@ function AssistantConversation({
         </AICard>
       ) : null}
       {messages.map((message, index) => (
-        <AICard key={index} title={message.role === 'user' ? '你的問題' : message.source === 'device' ? '手機本地 AI' : '校園即時助理'}>
+        <AICard key={index} title={message.role === 'user' ? '你的問題' : message.tool ? '手機離線工具' : message.source === 'device' ? '手機本地 AI' : '校園即時助理'}>
           <Text selectable style={{ color: aiTokens.text, lineHeight: 25 }}>
             {message.content}
           </Text>
           {message.role === 'assistant' && message.source === 'device' && (
             <Text style={{ color: aiTokens.muted, fontSize: 12, marginTop: 10 }}>
-              本機生成 · 未進行校園網路查詢，重要資訊請到正式服務確認
+              {message.tool
+                ? '本機規則／已保存資料 · 未進行雲端推論或即時校園查詢'
+                : '手機模型生成 · 未進行校園網路查詢，重要資訊請到正式服務確認'}
             </Text>
           )}
-          {message.role === 'assistant' && index > 0 && (
+          {message.role === 'assistant' && message.route && VERIFIED_SERVICE_ROUTES[message.route] ? (
+            <View style={{ marginTop: 12 }}>
+              <AIButton
+                label={'開啟' + VERIFIED_SERVICE_ROUTES[message.route].label}
+                variant="ghost"
+                disabled={busy}
+                onPress={() => safeNavigate(navigation, VERIFIED_SERVICE_ROUTES[message.route!].route)}
+              />
+            </View>
+          ) : message.role === 'assistant' && index > 0 ? (
             <View style={{ marginTop: 12, gap: 8 }}>
               {getMobileQuickActions(messages[index - 1]?.role === 'user' ? messages[index - 1].content : '')
                 .slice(0, 3)
@@ -252,7 +287,7 @@ function AssistantConversation({
                   />
                 ))}
             </View>
-          )}
+          ) : null}
           {message.requiresService ? (
             <Text style={{ color: aiTokens.muted, lineHeight: 24, marginTop: 12 }}>
               尚未送出任何申請或交易。請到對應服務確認辦理。
