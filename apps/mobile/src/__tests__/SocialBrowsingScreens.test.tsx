@@ -6,6 +6,12 @@ import { BoardsScreen } from '../screens/social/BoardsScreen';
 import { fetchRecentCampusPosts } from '../services/feed';
 import { listBoards, listSubscribedBoardIds } from '../services/boards';
 import { listActiveStoriesForSchool } from '../services/stories';
+import {
+  listCampusPostBookmarkIds,
+  loadCampusPostBookmarks,
+  saveCampusPostBookmark,
+  removeCampusPostBookmark,
+} from '../services/campusPostBookmarks';
 
 let mockUser = { uid: 'alice' };
 let mockSchoolId = 'pu';
@@ -37,6 +43,12 @@ jest.mock('../services/boards', () => ({
 jest.mock('../services/stories', () => ({
   listActiveStoriesForSchool: jest.fn(async () => []),
   groupStoriesByAuthor: () => [],
+}));
+jest.mock('../services/campusPostBookmarks', () => ({
+  listCampusPostBookmarkIds: jest.fn(async () => []),
+  loadCampusPostBookmarks: jest.fn(async () => ({ ids: [], posts: [] })),
+  saveCampusPostBookmark: jest.fn(async () => undefined),
+  removeCampusPostBookmark: jest.fn(async () => undefined),
 }));
 jest.mock('../services/memberDirectory', () => ({
   fetchSchoolDirectoryProfiles: jest.fn(async () => []),
@@ -84,6 +96,10 @@ beforeEach(() => {
   jest.mocked(listBoards).mockResolvedValue([]);
   jest.mocked(listSubscribedBoardIds).mockResolvedValue([]);
   jest.mocked(listActiveStoriesForSchool).mockResolvedValue([]);
+  jest.mocked(listCampusPostBookmarkIds).mockResolvedValue([]);
+  jest.mocked(loadCampusPostBookmarks).mockResolvedValue({ ids: [], posts: [] });
+  jest.mocked(saveCampusPostBookmark).mockResolvedValue(undefined);
+  jest.mocked(removeCampusPostBookmark).mockResolvedValue(undefined);
 });
 
 test.each(screens)(
@@ -230,4 +246,46 @@ test('the mobile feed switches to latest and searches only loaded school posts',
   expect(view.queryByText('期中考討論')).toBeNull();
   fireEvent.press(view.getByLabelText('清除搜尋'));
   expect(view.getByText('期中考討論')).toBeTruthy();
+});
+
+test('the saved filter loads older bookmarked posts outside the latest feed', async () => {
+  const savedPost = { ...post, id: 'saved-old', title: '上學期筆記' };
+  jest.mocked(fetchRecentCampusPosts).mockResolvedValueOnce([post]);
+  jest.mocked(loadCampusPostBookmarks).mockResolvedValue({ ids: ['saved-old'], posts: [savedPost] });
+  const view = render(<HomeFeedScreen />);
+  expect(await view.findByText(post.title)).toBeTruthy();
+  await act(async () => {
+    fireEvent.press(view.getByText('收藏'));
+  });
+  expect(await view.findByText('上學期筆記')).toBeTruthy();
+  expect(view.queryByText(post.title)).toBeNull();
+  expect(loadCampusPostBookmarks).toHaveBeenCalledWith('alice', 'pu');
+});
+
+test('saves a post only after a confirmed write and allows undo', async () => {
+  jest.mocked(fetchRecentCampusPosts).mockResolvedValueOnce([post]);
+  const view = render(<HomeFeedScreen />);
+  expect(await view.findByText(post.title)).toBeTruthy();
+  await act(async () => {
+    fireEvent.press(view.getByLabelText('收藏貼文'));
+  });
+  expect(saveCampusPostBookmark).toHaveBeenCalledWith('alice', 'pu', 'post');
+  expect(view.getByLabelText('取消收藏貼文')).toBeTruthy();
+  await act(async () => {
+    fireEvent.press(view.getByLabelText('取消收藏貼文'));
+  });
+  expect(removeCampusPostBookmark).toHaveBeenCalledWith('alice', 'pu', 'post');
+  expect(view.getByLabelText('收藏貼文')).toBeTruthy();
+});
+
+test('a failed save does not falsely mark the post as bookmarked', async () => {
+  jest.mocked(fetchRecentCampusPosts).mockResolvedValueOnce([post]);
+  jest.mocked(saveCampusPostBookmark).mockRejectedValueOnce(new Error('offline'));
+  const view = render(<HomeFeedScreen />);
+  expect(await view.findByText(post.title)).toBeTruthy();
+  await act(async () => {
+    fireEvent.press(view.getByLabelText('收藏貼文'));
+  });
+  expect(view.getByLabelText('收藏貼文')).toBeTruthy();
+  expect(view.queryByLabelText('取消收藏貼文')).toBeNull();
 });
