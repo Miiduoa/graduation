@@ -281,6 +281,13 @@
   cursor: pointer;
 }
 .postShare:hover { background: var(--bg-soft); color: var(--text); }
+.postBookmark { margin-left: 0; }
+.postBookmark[aria-pressed='true'] {
+  border-color: var(--brand);
+  color: var(--brand);
+  background: var(--accent-soft);
+}
+.postBookmark:disabled { opacity: 0.6; cursor: wait; }
 .shareFeedback {
   color: var(--muted);
   font-size: 12px;
