@@ -139,6 +139,25 @@ function withLocalFallback(schoolId: string, fallback: StoredTimetable): StoredT
   };
 }
 
+/**
+ * Read only an already saved timetable for this exact user + campus. No Firestore read,
+ * shared-device legacy key, or demo-data fallback is allowed in offline AI context.
+ */
+export async function loadOfflinePersonalTimetable(
+  uid: string,
+  schoolId: string,
+): Promise<StoredTimetable | null> {
+  if (!uid?.trim() || !schoolId?.trim()) return null;
+  let hasScopedCopy = false;
+  for (const suffix of localSchoolKeySuffixes(schoolId)) {
+    if ((await AsyncStorage.getItem(`${KEY}:${uid}:${suffix}`)) !== null) {
+      hasScopedCopy = true;
+      break;
+    }
+  }
+  return hasScopedCopy ? readLocalTimetable(uid, schoolId, false) : null;
+}
+
 export async function loadPersonalTimetable(
   uid: string | null,
   schoolId: string,
