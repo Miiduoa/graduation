@@ -4,6 +4,7 @@ import React, { useCallback, useMemo, useRef, useState } from 'react';
 import {
   View,
   Text,
+  TextInput,
   FlatList,
   Image,
   Pressable,
@@ -42,6 +43,7 @@ import {
 import { fetchSchoolDirectoryProfiles } from '../../services/memberDirectory';
 import { toDate } from '../../utils/format';
 import { useCampusSocialStackNav } from './CampusSocialNavContext';
+import { selectMobileFeedPosts, type MobileFeedOrder } from './feedDiscoveryModel';
 
 type FilterKey = 'all' | 'subscribed' | 'media';
 
@@ -107,6 +109,8 @@ function HomeFeedContent() {
   const [nameByUid, setNameByUid] = useState<Record<string, string>>({});
   const [avatarByUid, setAvatarByUid] = useState<Record<string, string>>({});
   const [filter, setFilter] = useState<FilterKey>('all');
+  const [order, setOrder] = useState<MobileFeedOrder>('recommended');
+  const [search, setSearch] = useState('');
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [loadError, setLoadError] = useState('');
@@ -246,15 +250,17 @@ function HomeFeedContent() {
     return m;
   }, [boards]);
 
-  const visiblePosts = useMemo(() => {
-    if (filter === 'subscribed') {
-      return posts.filter((p) => subscribedBoardIds.has(p.boardId));
-    }
-    if (filter === 'media') {
-      return posts.filter((p) => mediaUrlsOf(p).length > 0);
-    }
-    return posts;
-  }, [posts, filter, subscribedBoardIds]);
+  const visiblePosts = useMemo(
+    () => selectMobileFeedPosts(posts, {
+      filter,
+      order,
+      search,
+      subscribedIds: subscribedBoardIds,
+      boards: boardNameById,
+      authors: nameByUid,
+    }),
+    [posts, filter, order, search, subscribedBoardIds, boardNameById, nameByUid],
+  );
 
   const authorLine = (p: CampusPostDoc) => {
     if (p.anonymous) return p.aliasSnapshot ?? '匿名貼文';
@@ -310,7 +316,9 @@ function HomeFeedContent() {
           maxToRenderPerBatch={8}
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
           keyboardShouldPersistTaps="handled"
+          keyboardDismissMode="on-drag"
           ListHeaderComponent={
+            <>
             <FeedHeader
               stories={stories}
               avatarByUid={avatarByUid}
@@ -322,16 +330,83 @@ function HomeFeedContent() {
               onComposeStory={goStoryCompose}
               onComposePost={goCompose}
             />
+            <View style={{ paddingHorizontal: 14, paddingTop: 8, gap: 9 }}>
+              <View style={{
+                flexDirection: 'row', alignItems: 'center', minHeight: 44, gap: 9,
+                paddingHorizontal: 12, borderWidth: StyleSheet.hairlineWidth,
+                borderColor: theme.colors.border, borderRadius: theme.radius.md,
+                backgroundColor: theme.colors.surface,
+              }}>
+                <Ionicons name="search" size={18} color={theme.colors.textSecondary} />
+                <TextInput
+                  style={{ flex: 1, minWidth: 0, color: theme.colors.text, paddingVertical: 10 }}
+                  accessibilityLabel="搜尋本校貼文"
+                  value={search}
+                  onChangeText={setSearch}
+                  placeholder="搜尋貼文、看板、標籤或作者"
+                  placeholderTextColor={theme.colors.textSecondary}
+                  returnKeyType="search"
+                  autoCorrect={false}
+                />
+                {!!search && (
+                  <Pressable
+                    accessibilityRole="button"
+                    accessibilityLabel="清除搜尋"
+                    hitSlop={10}
+                    onPress={() => setSearch('')}
+                  >
+                    <Ionicons name="close-circle" size={20} color={theme.colors.textSecondary} />
+                  </Pressable>
+                )}
+              </View>
+              <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+                <Text style={{ color: theme.colors.textSecondary, fontSize: 12 }}>
+                  已載入 {posts.length} 則 · 顯示 {visiblePosts.length} 則
+                </Text>
+                <View style={{ flexDirection: 'row', gap: 6 }}>
+                  {([
+                    { key: 'recommended', label: '推薦' },
+                    { key: 'latest', label: '最新' },
+                  ] as const).map((item) => (
+                    <Pressable
+                      key={item.key}
+                      accessibilityRole="button"
+                      accessibilityLabel={item.label}
+                      accessibilityState={{ selected: order === item.key }}
+                      onPress={() => setOrder(item.key)}
+                      style={{
+                        minHeight: 40, minWidth: 56, paddingHorizontal: 12,
+                        alignItems: 'center', justifyContent: 'center',
+                        borderRadius: theme.radius.md,
+                        backgroundColor: order === item.key ? theme.colors.accent : theme.colors.surface,
+                        borderWidth: StyleSheet.hairlineWidth, borderColor: theme.colors.border,
+                      }}
+                    >
+                      <Text style={{
+                        color: order === item.key ? theme.colors.onAccent : theme.colors.textSecondary,
+                        fontSize: 12, fontWeight: '700',
+                      }}>{item.label}</Text>
+                    </Pressable>
+                  ))}
+                </View>
+              </View>
+              <Text style={{ color: theme.colors.textSecondary, fontSize: 11, lineHeight: 16 }}>
+                搜尋與排序僅適用於本次載入的本校貼文
+              </Text>
+            </View>
+            </>
           }
           ListEmptyComponent={
             loadError ? null : (
               <EmptyState
                 showCalmHero
-                title={filter === 'subscribed' ? '尚無已訂閱看板的新貼文' : '尚無校園貼文'}
+                title={search.trim() ? '找不到符合的貼文' : filter === 'subscribed' ? '尚無已訂閱看板的新貼文' : '尚無校園貼文'}
                 subtitle={
-                  filter === 'subscribed'
-                    ? '到「看板」訂閱你想追的版面，或點右下角發第一篇。'
-                    : '點右下角的鉛筆，發出你的第一篇貼文。'
+                  search.trim()
+                    ? '請縮短關鍵字或清除搜尋，目前僅搜尋已載入的貼文。'
+                    : filter === 'subscribed'
+                      ? '到「看板」訂閱你想追的版面，或點右下角發第一篇。'
+                      : '點右下角的鉛筆，發出你的第一篇貼文。'
                 }
               />
             )
