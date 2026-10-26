@@ -13,6 +13,7 @@ import {
   removeCampusPostBookmark,
 } from '../services/campusPostBookmarks';
 
+let savedBookmarks = new Set<string>();
 let mockUser = { uid: 'alice' };
 let mockSchoolId = 'pu';
 let mockAuthLoading = false;
@@ -96,10 +97,15 @@ beforeEach(() => {
   jest.mocked(listBoards).mockResolvedValue([]);
   jest.mocked(listSubscribedBoardIds).mockResolvedValue([]);
   jest.mocked(listActiveStoriesForSchool).mockResolvedValue([]);
-  jest.mocked(listCampusPostBookmarkIds).mockResolvedValue([]);
+  savedBookmarks = new Set();
+  jest.mocked(listCampusPostBookmarkIds).mockImplementation(async () => [...savedBookmarks]);
   jest.mocked(loadCampusPostBookmarks).mockResolvedValue({ ids: [], posts: [] });
-  jest.mocked(saveCampusPostBookmark).mockResolvedValue(undefined);
-  jest.mocked(removeCampusPostBookmark).mockResolvedValue(undefined);
+  jest.mocked(saveCampusPostBookmark).mockImplementation(async (_uid, _schoolId, postId) => {
+    savedBookmarks.add(postId);
+  });
+  jest.mocked(removeCampusPostBookmark).mockImplementation(async (_uid, _schoolId, postId) => {
+    savedBookmarks.delete(postId);
+  });
 });
 
 test.each(screens)(
