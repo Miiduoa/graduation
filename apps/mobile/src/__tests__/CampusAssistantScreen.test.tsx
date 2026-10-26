@@ -3,6 +3,7 @@ import { act, fireEvent, render } from '@testing-library/react-native';
 import { AIOverlayHost } from '../components/AIOverlayHost';
 import { CampusAssistantScreen } from '../screens/CampusAssistantScreen';
 import { askCampusAssistant } from '../features/campusAssistant';
+import { confirmCampusAgentWrite } from '../features/campusAssistantActions';
 const mockClose = jest.fn();
 let mockOverlay = { visible: true, mode: 'chat', initialPrompt: '查校方公告' };
 jest.mock('../app/useAIOverlay', () => ({
@@ -36,6 +37,9 @@ jest.mock('../features/campusAssistant', () => ({
     reason: '尚未下載免費模型',
   })),
 }));
+jest.mock('../features/campusAssistantActions', () => ({
+  confirmCampusAgentWrite: jest.fn(),
+}));
 jest.mock('@expo/vector-icons', () => ({ Ionicons: () => null }));
 const request = askCampusAssistant as jest.Mock;
 function selectCampusMode(view: ReturnType<typeof render>) {
@@ -55,6 +59,7 @@ beforeEach(() => {
   // clearAllMocks does not clear queued mockResolvedValueOnce implementations.
   // Prevent a pending result from one navigation test reaching another account.
   request.mockReset();
+  jest.mocked(confirmCampusAgentWrite).mockReset();
   mockUid = 'A';
   mockSchool = 'pu';
   mockOverlay = { visible: true, mode: 'chat', initialPrompt: '查校方公告' };
@@ -193,4 +198,68 @@ test('a service route outside the local allowlist is never turned into a direct 
   fireEvent.changeText(view.getByLabelText('詢問校園助理'), '幫我寫報告');
   await act(async () => fireEvent.press(view.getByText('送出問題')));
   expect(view.queryByText(/開啟https/)).toBeNull();
+});
+
+test('a server proposal requires review and a second explicit tap before writing', async () => {
+  const runId = '01234567-89ab-4cde-8012-3456789abcde';
+  request.mockResolvedValueOnce({
+    content: '已準備好報修草稿，確認前不會送出。',
+    source: 'campus',
+    hasActions: true,
+    proposals: [{
+      label: '確認送出報修',
+      toolName: 'createDormRepairRequest',
+      input: { dormitory: 'A棟', room: '301', category: '冷氣', description: '不冷' },
+      agentRunId: runId,
+    }],
+  });
+  jest.mocked(confirmCampusAgentWrite).mockResolvedValue({
+    success: true, toolName: 'createDormRepairRequest', repairId: 'repair-123',
+  });
+  const view = render(<CampusAssistantScreen />);
+  selectCampusMode(view);
+  fireEvent.changeText(view.getByLabelText('詢問校園助理'), 'A棟301冷氣不冷');
+  await act(async () => fireEvent.press(view.getByText('送出問題')));
+
+  expect(view.getByText('確認送出報修')).toBeTruthy();
+  expect(view.getByText('需要本人確認 · 尚未執行')).toBeTruthy();
+  expect(confirmCampusAgentWrite).not.toHaveBeenCalled();
+  fireEvent.press(view.getByText('檢視任務草稿'));
+  expect(view.getByText('301')).toBeTruthy();
+  expect(confirmCampusAgentWrite).not.toHaveBeenCalled();
+
+  await act(async () => {
+    fireEvent.press(view.getByText('確認並執行'));
+  });
+  expect(confirmCampusAgentWrite).toHaveBeenCalledTimes(1);
+  expect(jest.mocked(confirmCampusAgentWrite).mock.calls[0][0]).toMatchObject({
+    userId: 'A', schoolId: 'pu',
+    proposal: { agentRunId: runId, toolName: 'createDormRepairRequest' },
+  });
+  expect(view.getByText('伺服器已確認執行成功')).toBeTruthy();
+  expect(view.getByText('紀錄編號：repair-123')).toBeTruthy();
+  expect(view.queryByText('確認並執行')).toBeNull();
+});
+
+test('a lost write receipt is never displayed as success or offered for automatic retry', async () => {
+  request.mockResolvedValueOnce({
+    content: '請確認',
+    source: 'campus', hasActions: true,
+    proposals: [{
+      label: '送出請假', toolName: 'submitLeaveRequest',
+      input: { courseId: 'course-1', date: '2026-10-29', type: '事假' },
+      agentRunId: '01234567-89ab-4cde-8012-3456789abcde',
+    }],
+  });
+  jest.mocked(confirmCampusAgentWrite).mockRejectedValueOnce(new Error('timeout'));
+  const view = render(<CampusAssistantScreen />);
+  selectCampusMode(view);
+  fireEvent.changeText(view.getByLabelText('詢問校園助理'), '明天請假');
+  await act(async () => fireEvent.press(view.getByText('送出問題')));
+  fireEvent.press(view.getByText('檢視任務草稿'));
+  await act(async () => fireEvent.press(view.getByText('確認並執行')));
+  expect(view.getByText('執行狀態尚未確認')).toBeTruthy();
+  expect(view.queryByText('伺服器已確認執行成功')).toBeNull();
+  expect(view.queryByText('確認並執行')).toBeNull();
+  expect(confirmCampusAgentWrite).toHaveBeenCalledTimes(1);
 });
