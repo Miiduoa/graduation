@@ -24,6 +24,7 @@ function select(patch: Partial<{
   return selectCampusFeedPosts(posts, {
     filter: 'all', order: 'recommended', search: '',
     subscribedIds: new Set(['study']),
+    followingIds: new Set(['alice', 'secret-real-uid']),
     boardNames: { study: '課業討論', photo: '攝影社' },
     authorNames: { alice: '小明', 'secret-real-uid': '不可公開的真名' },
     ...patch,
@@ -38,6 +39,7 @@ describe('school-scoped feed discovery', () => {
   });
   it('filters subscriptions and media without introducing another data source', () => {
     expect(select({ filter: 'subscribed' })).toEqual(['older']);
+    expect(select({ filter: 'following' })).toEqual(['older']);
     expect(select({ filter: 'media' })).toEqual(['newer']);
   });
   it('searches loaded titles, text, tags, board names and visible authors', () => {
