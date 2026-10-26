@@ -67,3 +67,11 @@ export async function loadCampusPostBookmarks(
   }
   return { ids, posts };
 }
+
+/** Read one specific bookmark so detail pages do not depend on the list window. */
+export async function isCampusPostBookmarked(uid: string, schoolId: string, postId: string) {
+  const snapshot = await getDoc(bookmarkDoc(uid, schoolId, postId));
+  return snapshot.exists() &&
+    snapshot.data()?.schoolId === schoolId &&
+    snapshot.data()?.postId === postId;
+}
