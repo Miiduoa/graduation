@@ -48,3 +48,23 @@ function prioritize<T extends { dueAt: string | null }>(
     return leftDue - rightDue || 0;
   });
 }
+
+// The reference deadline helps students prioritize work; it never closes submissions.
+export type AssignmentReferenceTiming = 'none' | 'overdue' | 'soon' | 'later';
+
+export function assignmentReferenceTiming(
+  item: NuniAssignment,
+  workspace: NuniWorkspace,
+  now: number | null,
+): AssignmentReferenceTiming {
+  if (
+    now === null ||
+    !Number.isFinite(now) ||
+    !matchesAssignmentFilter(item, workspace, 'pending')
+  )
+    return 'none';
+  const due = item.dueAt ? parseTaipeiInstant(item.dueAt) : null;
+  if (due === null) return 'none';
+  if (due < now) return 'overdue';
+  return due <= now + 7 * 24 * 60 * 60 * 1000 ? 'soon' : 'later';
+}

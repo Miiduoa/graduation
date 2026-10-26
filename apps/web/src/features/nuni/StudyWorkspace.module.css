@@ -604,3 +604,12 @@
     transition: none;
   }
 }
+
+
+.taskRow[data-urgency='overdue'] {
+  box-shadow: inset 3px 0 var(--warning);
+}
+
+.taskRow[data-urgency='overdue'] .taskTitle {
+  font-weight: 650;
+}

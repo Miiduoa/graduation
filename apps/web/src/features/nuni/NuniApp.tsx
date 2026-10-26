@@ -21,6 +21,7 @@ import { AppHeader } from '@/components/AppHeader';
 import { NuniSignIn } from '@/components/NuniSignIn';
 import { SiteShell } from '@/components/SiteShell';
 import { useClientHydrated } from '@/lib/useClientHydrated';
+import { useClientNow } from '@/lib/useMaterialClientState';
 import { useLocationHash } from '@/lib/useLocationHash';
 import { useNuniSession } from './Session';
 import { CourseAccessBoundary, MutationForm, useClasses } from './CourseUI';
@@ -35,7 +36,7 @@ import { selectCourseUnit } from './courseOutline';
 import styles from './NuniApp.module.css';
 import workspaceStyles from './CourseWorkspace.module.css';
 import { useCoursePanel } from './useCoursePanel';
-import { prioritizeCourseAssignments } from './courseAssignmentDiscovery';
+import { assignmentReferenceTiming, prioritizeCourseAssignments } from './courseAssignmentDiscovery';
 
 export function NuniHeader() {
   return <AppHeader />;
@@ -89,6 +90,7 @@ function Workspace({ id }: { id: string }) {
   const [epoch, setEpoch] = useState(0);
   const [code, setCode] = useState('');
   const { panel: tab, navigate: setTab, courseListHref } = useCoursePanel();
+  const now = useClientNow();
   const [units, setUnits] = useState<NuniUnit[] | null>(null);
   const [unitsError, setUnitsError] = useState('');
   const [unitsEpoch, setUnitsEpoch] = useState(0);
@@ -198,6 +200,13 @@ function Workspace({ id }: { id: string }) {
   const nextAssignment = prioritizeCourseAssignments(pending, data.workspace)[0];
   const submitted = data.assignments.filter((item) => !!item.mySubmission).length;
   const weekCount = weekAssignments(data.assignments).length;
+  const weekPendingCount = weekAssignments(pending).length;
+  const overdueCount = pending.filter(
+    (item) => assignmentReferenceTiming(item, data.workspace, now) === 'overdue',
+  ).length;
+  const nextAssignmentTiming = nextAssignment
+    ? assignmentReferenceTiming(nextAssignment, data.workspace, now)
+    : 'none';
   const acceptAssignment = (assignment: NuniAssignment) => {
     refreshOutline();
     setData((current) =>
@@ -269,7 +278,7 @@ function Workspace({ id }: { id: string }) {
             查看全部作業 <span aria-hidden>↗</span>
           </button>
         </div>
-        <dl className={workspaceStyles.metrics}>
+        <dl className={workspaceStyles.metrics} data-role={teacher ? 'teacher' : 'student'}>
           <div>
             <dt>{teacher ? '已發布作業' : '待繳作業'}</dt>
             <dd>{teacher ? data.assignments.length : pending.length}</dd>
@@ -282,9 +291,15 @@ function Workspace({ id }: { id: string }) {
                 : submitted}
             </dd>
           </div>
+          {!teacher && (
+            <div data-urgent={overdueCount > 0}>
+              <dt>已過參考時間</dt>
+              <dd>{overdueCount}</dd>
+            </div>
+          )}
           <div>
-            <dt>本週參考期限</dt>
-            <dd>{weekCount}</dd>
+            <dt>{teacher ? '本週參考期限' : '本週待繳'}</dt>
+            <dd>{teacher ? weekCount : weekPendingCount}</dd>
           </div>
         </dl>
         {data.workspace.state === 'archived' ? (
@@ -292,13 +307,17 @@ function Workspace({ id }: { id: string }) {
         ) : !teacher && nextAssignment ? (
           <a
             className={workspaceStyles.nextTask}
+            data-urgency={nextAssignmentTiming}
             href={`#assignment-${encodeURIComponent(nextAssignment.id)}`}
+            onClick={() => setTab('assignments')}
           >
-            <span className={workspaceStyles.nextLabel}>接著處理</span>
+            <span className={workspaceStyles.nextLabel}>
+              {nextAssignmentTiming === 'overdue' ? '參考時間已過 · 優先補交' : '接著處理'}
+            </span>
             <strong>{nextAssignment.title}</strong>
             <span className={workspaceStyles.nextTime}>
               {nextAssignment.dueAt
-                ? `參考 ${formatTaipeiDateTime(nextAssignment.dueAt, { seconds: false })}`
+                ? `${nextAssignmentTiming === 'overdue' ? '仍在收件 · 原參考時間' : '參考時間'} ${formatTaipeiDateTime(nextAssignment.dueAt, { seconds: false })}`
                 : '未設定參考期限'}
             </span>
             <span className={workspaceStyles.nextArrow} aria-hidden>
