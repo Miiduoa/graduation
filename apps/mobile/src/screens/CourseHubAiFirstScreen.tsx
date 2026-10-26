@@ -10,9 +10,13 @@ import { loadCourseHub, type CourseHubData, type CourseHubScope, type HubAssignm
 import { webBrowserOpenWithPuTronClassGate } from '../services/tronClassWebUiGate';
 import { formatTaipeiDateTime, parseTaipeiInstant, taipeiParts } from '@campus/shared/src/taipeiTime';
 import { revealAssignmentSubmitArea } from './nuni/scrollAssignment';
+import { canListAsPendingWork, canSubmitCourseWork, submissionStatusText, summarizeCourseReceipts } from '../features/courseSubmissionState';
 
 type Props = {
-  navigation?: Parameters<typeof safeNavigate>[0] & { goBack?: () => void };
+  navigation?: Parameters<typeof safeNavigate>[0] & {
+    goBack?: () => void;
+    addListener?: (event: 'focus', callback: () => void) => () => void;
+  };
   route?: { params?: Record<string, unknown> };
 };
 
@@ -24,7 +28,7 @@ function weekAssignments(items: HubAssignment[], now = new Date()): HubAssignmen
   const start = Date.UTC(parts.year, parts.month - 1, parts.day) - (weekday - 1) * 86400000;
   const end = start + 7 * 86400000;
   return items.filter((item) => {
-    if (!item.dueAt || item.closed) return false;
+    if (!item.dueAt || !canSubmitCourseWork(item, now)) return false;
     const due = parseTaipeiInstant(item.dueAt);
     if (due === null) return false;
     const dueParts = taipeiParts(due);
@@ -82,6 +86,7 @@ function CourseContent({
   const [error, setError] = useState('');
   const [linkError, setLinkError] = useState('');
   const [opening, setOpening] = useState(false);
+  const [workFilter, setWorkFilter] = useState<'all' | 'unsubmitted' | 'submitted'>('all');
   const isCurrent = useCallback(
     () => mounted.current && activeScope.current === scopeKey,
     [activeScope, scopeKey],
@@ -111,11 +116,13 @@ function CourseContent({
   useEffect(() => {
     mounted.current = true;
     void load();
+    const unsubscribe = navigation?.addListener?.('focus', () => { void load(); });
     return () => {
+      unsubscribe?.();
       mounted.current = false;
       generation.current += 1;
     };
-  }, [load]);
+  }, [load, navigation]);
   useEffect(() => {
     if (section !== 'week' || loading || !data) return;
     const timer = setTimeout(() => {
@@ -161,6 +168,14 @@ function CourseContent({
     if (isCurrent() && data && target?.source === 'group')
       safeNavigate(navigation, screen, { groupId: target.groupId, groupName: data.name });
   };
+  const assignments = data?.assignments.status === 'ready' ? data.assignments.items : [];
+  const receiptSummary = summarizeCourseReceipts(assignments);
+  const showStudentFilters = assignments.some((item) => item.submission?.kind !== 'instructor');
+  const visibleAssignments = workFilter === 'all'
+    ? assignments
+    : assignments.filter((item) => workFilter === 'submitted'
+      ? item.submission?.kind === 'submitted'
+      : canListAsPendingWork(item.submission));
   const body = { ...theme.typography.body, color: theme.colors.muted };
   const gap = { gap: theme.space.md };
   return (
@@ -217,8 +232,12 @@ function CourseContent({
                     </View>
                   ),
                 )
+              ) : data.assignments.status === 'error' ? (
+                <Text accessibilityRole="alert" style={body}>無法讀取這門課的作業，請更新課程後再試。</Text>
+              ) : data.assignments.items.some((item) => item.submission?.kind === 'unavailable') ? (
+                <Text accessibilityRole="alert" style={body}>部分繳交狀態暫時無法確認，請重新整理或開啟作業核對。</Text>
               ) : (
-                <Text style={body}>本週沒有到期的作業。</Text>
+                <Text style={body}>本週沒有待繳交的作業。</Text>
               )}
             </View>
           </AICard>
@@ -305,7 +324,7 @@ function CourseContent({
                   )}
                 </View>
               </AICard>
-              <AICard title="作業公告">
+              <AICard title="作業與繳交">
                 <View style={gap}>
                   {data.assignments.status === 'error' ? (
                     <Text accessibilityRole="alert" style={body}>
@@ -316,7 +335,33 @@ function CourseContent({
                   ) : (
                     <>
                       <Text style={body}>可開啟作業詳情；可否繳交與提交狀態以課程設定及實際紀錄為準。</Text>
-                      {data.assignments.items.map((item) => (
+                      {showStudentFilters ? (
+                        <>
+                          <Text style={{ ...theme.typography.bodySmall, color: theme.colors.text }}>
+                            已繳交 {receiptSummary.submitted} · 已發布評分 {receiptSummary.graded} · 未繳交 {receiptSummary.unsubmitted}
+                            {receiptSummary.needsVerification > 0
+                              ? ` · 待確認 ${receiptSummary.needsVerification}` : ''}
+                          </Text>
+                          <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
+                            {([
+                              ['all', '全部'],
+                              ['unsubmitted', '未繳交'],
+                              ['submitted', '已繳交'],
+                            ] as const).map(([key, label]) => (
+                              <AIButton
+                                key={key}
+                                label={label}
+                                variant={workFilter === key ? undefined : 'ghost'}
+                                onPress={() => setWorkFilter(key)}
+                              />
+                            ))}
+                          </View>
+                        </>
+                      ) : null}
+                      {!visibleAssignments.length ? (
+                        <Text style={body}>這個分類目前沒有作業。</Text>
+                      ) : null}
+                      {visibleAssignments.map((item) => (
                         <View key={item.id} style={gap}>
                           <Text
                             style={{
@@ -335,8 +380,24 @@ function CourseContent({
                                 ? `截止：${formatTaipeiDateTime(item.dueAt, { seconds: false })}`
                                 : '未提供截止時間'}
                           </Text>
+                          <Text style={{ ...theme.typography.bodySmall, color: theme.colors.textSecondary }}>
+                            {submissionStatusText(item.submission)}
+                          </Text>
+                          {item.submission?.kind !== 'submitted' &&
+                          item.dueAt && (parseTaipeiInstant(item.dueAt) ?? Infinity) < Date.now() ? (
+                            <Text style={{ ...theme.typography.bodySmall, color: theme.colors.warning }}>
+                              {item.allowLateSubmission ? '已過截止時間 · 教師允許補交' : '已過截止時間 · 請洽授課教師'}
+                            </Text>
+                          ) : null}
+                          {item.submission?.kind === 'submitted' && item.submission.grade?.feedback ? (
+                            <Text style={body}>教師回饋：{item.submission.grade.feedback}</Text>
+                          ) : null}
                           <AIButton
-                            label={(item.closed ? '查看已關閉作業：' : '查看作業：') + item.title}
+                            label={
+                              (item.submission?.kind === 'submitted'
+                                ? '查看繳交紀錄：'
+                                : item.closed ? '查看已關閉作業：' : '查看作業：') + item.title
+                            }
                             variant="ghost"
                             onPress={() => openAssignment(item)}
                           />
