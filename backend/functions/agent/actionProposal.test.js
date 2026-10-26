@@ -32,3 +32,10 @@ test('does not accept pending, empty or unrecorded runs', () => {
   expect(matchAgentProposal({ ...run, actionProposals: [] }, input)).toBe(-1);
   expect(matchAgentProposal(null, input)).toBe(-1);
 });
+
+test('matches the same proposal when Firestore returns object keys in a different order', () => {
+  expect(matchAgentProposal(run, {
+    ...input,
+    input: { type: '事假', courseId: 'class-1', date: '2026-10-27' },
+  })).toBe(0);
+});
