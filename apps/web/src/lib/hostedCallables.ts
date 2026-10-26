@@ -11,6 +11,7 @@ export const HOSTED_WEB_CALLABLES = [
   'withdrawLeaveRequest',
   'reviewLeaveRequest',
   'listLeaveReviewQueue',
+  'signInPuStudentId',
 ] as const;
 
 export const LEAVE_WEB_CALLABLES = [
@@ -19,6 +20,8 @@ export const LEAVE_WEB_CALLABLES = [
   'reviewLeaveRequest',
   'listLeaveReviewQueue',
 ] as const;
+
+export const SCHOOL_LOGIN_WEB_CALLABLES = ['signInPuStudentId'] as const;
 
 export type HostedWebCallable = (typeof HOSTED_WEB_CALLABLES)[number];
 
@@ -30,6 +33,12 @@ export type LeaveWebCallable = (typeof LEAVE_WEB_CALLABLES)[number];
 
 export function isLeaveWebCallable(name: string): name is LeaveWebCallable {
   return (LEAVE_WEB_CALLABLES as readonly string[]).includes(name);
+}
+
+export type SchoolLoginWebCallable = (typeof SCHOOL_LOGIN_WEB_CALLABLES)[number];
+
+export function isSchoolLoginWebCallable(name: string): name is SchoolLoginWebCallable {
+  return (SCHOOL_LOGIN_WEB_CALLABLES as readonly string[]).includes(name);
 }
 
 export function hostedWebCallablePath(name: string): string {

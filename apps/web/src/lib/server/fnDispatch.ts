@@ -1,6 +1,7 @@
-import { isHostedWebCallable, isLeaveWebCallable } from '@/lib/hostedCallables';
+import { isHostedWebCallable, isLeaveWebCallable, isSchoolLoginWebCallable } from '@/lib/hostedCallables';
 import { callableErrorBody, HttpsError } from './httpsError';
 import { isLeaveWebApiServerEnabled } from './leaveWebApiEnabled';
+import { isSchoolStudentIdLoginEnabled } from './schoolStudentIdLoginEnabled';
 import type { CallableRequest } from './groupInviteHandlers';
 import {
   assertJoinCodeAttemptsAllowed,
@@ -9,6 +10,11 @@ import {
   recordInvalidJoinCode,
   recordTimetableShareCreate,
 } from './uidRateLimit';
+import type { PuCampusGateway } from './puCampusClient';
+import type { SchoolLoginFirestore } from './schoolLoginProfile';
+import type { ServiceAccountSigner } from './firebaseCustomToken';
+import { LoginRateLimitError, LoginRateStoreError, type LoginRateGate } from './loginRateLimit';
+import { clientIpFromRequest, PuLoginHttpError } from './signInPuStudentId';
 
 const JSON_HEADERS = {
   'Content-Type': 'application/json; charset=utf-8',
@@ -26,6 +32,11 @@ export type FnRuntime = {
     token: string,
     checkRevoked?: boolean,
   ) => Promise<{ uid: string } & Record<string, unknown>>;
+  createCustomToken?: (uid: string, claims: Record<string, string>) => Promise<string>;
+  puCampus?: PuCampusGateway;
+  serviceAccount?: ServiceAccountSigner | null;
+  rateLimitGate?: LoginRateGate;
+  rateLimitSalt?: string;
 };
 
 function jsonResponse(status: number, body: unknown, extra?: HeadersInit): Response {
@@ -171,6 +182,10 @@ export async function dispatchFnRequest(
     return callableResponse(new HttpsError('unavailable', '尚未啟用'), request);
   }
 
+  if (isSchoolLoginWebCallable(name) && !isSchoolStudentIdLoginEnabled()) {
+    return jsonResponse(503, { error: '尚未啟用' }, cors);
+  }
+
   let resolved = runtime;
   if (resolved === undefined) {
     try {
@@ -185,7 +200,14 @@ export async function dispatchFnRequest(
   }
 
   if (!resolved) {
+    if (isSchoolLoginWebCallable(name)) {
+      return jsonResponse(503, { error: '尚未啟用' }, cors);
+    }
     return callableResponse(new HttpsError('unavailable', '尚未啟用'), request);
+  }
+
+  if (isSchoolLoginWebCallable(name)) {
+    return dispatchSchoolLogin(request, resolved, cors);
   }
 
   let uid: string | undefined;
@@ -222,5 +244,40 @@ export async function dispatchFnRequest(
       recordInvalidJoinCode(uid);
     }
     return callableResponse(mapped, request);
+  }
+}
+
+async function dispatchSchoolLogin(
+  request: Request,
+  runtime: FnRuntime,
+  cors: HeadersInit,
+): Promise<Response> {
+  try {
+    const body = await readJsonBody(request);
+    const { handleSignInPuStudentId } = await import('./signInPuStudentId');
+    const { readServiceAccountSigner } = await import('./firebaseAdmin');
+    const result = await handleSignInPuStudentId(body, clientIpFromRequest(request), {
+      db: runtime.db as unknown as SchoolLoginFirestore,
+      campus: runtime.puCampus,
+      signCustomToken: runtime.createCustomToken,
+      serviceAccount: runtime.serviceAccount ?? readServiceAccountSigner(),
+      rateLimitGate: runtime.rateLimitGate,
+      rateLimitSalt: runtime.rateLimitSalt,
+    });
+    return jsonResponse(200, result, cors);
+  } catch (error) {
+    if (error instanceof LoginRateLimitError) {
+      return jsonResponse(429, { error: error.message }, cors);
+    }
+    if (error instanceof LoginRateStoreError) {
+      return jsonResponse(503, { error: error.message }, cors);
+    }
+    if (error instanceof PuLoginHttpError) {
+      return jsonResponse(error.status, { error: error.message }, cors);
+    }
+    if (error instanceof HttpsError) {
+      return jsonResponse(error.httpErrorCode.status, { error: error.message }, cors);
+    }
+    return jsonResponse(500, { error: 'PU student login failed' }, cors);
   }
 }
