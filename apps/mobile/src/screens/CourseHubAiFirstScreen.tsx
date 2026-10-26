@@ -8,7 +8,7 @@ import { safeNavigate } from '../utils/safeNavigate';
 import { resolveCourseHubTarget, type CourseHubTarget } from '../utils/courseHubRoute';
 import { loadCourseHub, type CourseHubData, type CourseHubScope, type HubAssignment } from '../features/courseHub';
 import { webBrowserOpenWithPuTronClassGate } from '../services/tronClassWebUiGate';
-import { parseTaipeiInstant, taipeiParts } from '@campus/shared/src/taipeiTime';
+import { formatTaipeiDateTime, parseTaipeiInstant, taipeiParts } from '@campus/shared/src/taipeiTime';
 import { revealAssignmentSubmitArea } from './nuni/scrollAssignment';
 
 type Props = {
@@ -24,14 +24,14 @@ function weekAssignments(items: HubAssignment[], now = new Date()): HubAssignmen
   const start = Date.UTC(parts.year, parts.month - 1, parts.day) - (weekday - 1) * 86400000;
   const end = start + 7 * 86400000;
   return items.filter((item) => {
-    if (!item.dueAt) return false;
+    if (!item.dueAt || item.closed) return false;
     const due = parseTaipeiInstant(item.dueAt);
     if (due === null) return false;
     const dueParts = taipeiParts(due);
     if (!dueParts) return false;
     const dueUtc = Date.UTC(dueParts.year, dueParts.month - 1, dueParts.day);
     return dueUtc >= start && dueUtc < end;
-  });
+  }).sort((a, b) => (parseTaipeiInstant(a.dueAt!) ?? 0) - (parseTaipeiInstant(b.dueAt!) ?? 0));
 }
 export default function CourseHubAiFirstScreen({ navigation, route }: Props) {
   const { user } = useAuth();
@@ -148,6 +148,15 @@ function CourseContent({
       courseName: data.name,
     });
   };
+  const openAssignment = (item: HubAssignment) => {
+    if (!isCurrent() || !data || target?.source !== 'group') return;
+    safeNavigate(navigation, 'HomeworkSubmit', {
+      courseId: target.groupId,
+      hwId: item.id,
+      hwTitle: item.title,
+      ...(item.dueAt ? { dueAt: item.dueAt } : {}),
+    });
+  };
   const go = (screen: string) => {
     if (isCurrent() && data && target?.source === 'group')
       safeNavigate(navigation, screen, { groupId: target.groupId, groupName: data.name });
@@ -193,12 +202,19 @@ function CourseContent({
               {weekAssignments(data.assignments.status === 'ready' ? data.assignments.items : []).length ? (
                 weekAssignments(data.assignments.status === 'ready' ? data.assignments.items : []).map(
                   (item) => (
-                    <Text
-                      key={item.id}
-                      style={{ ...theme.typography.body, color: theme.colors.text, fontWeight: '700' }}
-                    >
-                      {item.title}
-                    </Text>
+                    <View key={item.id} style={{ gap: 4 }}>
+                      <Text style={{ ...theme.typography.body, color: theme.colors.text, fontWeight: '700' }}>
+                        {item.title}
+                      </Text>
+                      <Text style={body}>
+                        {'截止：' + formatTaipeiDateTime(item.dueAt!, { seconds: false })}
+                      </Text>
+                      <AIButton
+                        label={'查看本週作業：' + item.title}
+                        variant="ghost"
+                        onPress={() => openAssignment(item)}
+                      />
+                    </View>
                   ),
                 )
               ) : (
@@ -299,7 +315,7 @@ function CourseContent({
                     <Text style={body}>尚未發布作業。</Text>
                   ) : (
                     <>
-                      <Text style={body}>此處提供作業說明；繳交方式請依老師公告辦理。</Text>
+                      <Text style={body}>可開啟作業詳情；可否繳交與提交狀態以課程設定及實際紀錄為準。</Text>
                       {data.assignments.items.map((item) => (
                         <View key={item.id} style={gap}>
                           <Text
@@ -316,9 +332,14 @@ function CourseContent({
                             {item.closed
                               ? '已關閉'
                               : item.dueAt
-                                ? `截止：${new Date(item.dueAt).toLocaleString('zh-TW')}`
+                                ? `截止：${formatTaipeiDateTime(item.dueAt, { seconds: false })}`
                                 : '未提供截止時間'}
                           </Text>
+                          <AIButton
+                            label={(item.closed ? '查看已關閉作業：' : '查看與繳交：') + item.title}
+                            variant="ghost"
+                            onPress={() => openAssignment(item)}
+                          />
                         </View>
                       ))}
                     </>
