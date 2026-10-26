@@ -109,6 +109,52 @@ it('rejects non-pu schools, invalid student ids, and missing fields', async () =
   ).rejects.toMatchObject({ status: 400, message: 'Missing required fields: studentId, password' });
 });
 
+it('logs expected campus failures without account, password, or IP', async () => {
+  const lines: string[] = [];
+  vi.spyOn(console, 'info').mockImplementation((...args) => {
+    lines.push(args.map((item) => String(item)).join(' '));
+  });
+  const { runtime: closed } = deps({
+    campus: campus({
+      loginStudent: async () => {
+        throw new PuCampusError('closed', '尚未開放');
+      },
+    }),
+  });
+  await expect(
+    handleSignInPuStudentId({ studentId: STUDENT, password: SECRET }, '2.2.2.2', closed),
+  ).rejects.toMatchObject({ status: 503, message: '尚未開放' });
+  const closedLog = JSON.parse(lines.at(-1) || '{}') as Record<string, unknown>;
+  expect(closedLog).toMatchObject({
+    msg: 'pu_campus_login_expected_failure',
+    reason: 'campus_closed',
+    school: 'pu',
+  });
+  expect(typeof closedLog.elapsedMs).toBe('number');
+  expect(JSON.stringify(closedLog)).not.toContain(STUDENT);
+  expect(JSON.stringify(closedLog)).not.toContain(SECRET);
+  expect(JSON.stringify(closedLog)).not.toContain('2.2.2.2');
+
+  const { runtime: timeout } = deps({
+    campus: campus({
+      loginStudent: async () => {
+        throw new PuCampusError('timeout', '學校系統無回應');
+      },
+    }),
+  });
+  await expect(
+    handleSignInPuStudentId({ studentId: STUDENT, password: SECRET }, '3.3.3.3', timeout),
+  ).rejects.toMatchObject({ status: 503, message: '學校系統暫時無法連線' });
+  const timeoutLog = JSON.parse(lines.at(-1) || '{}') as Record<string, unknown>;
+  expect(timeoutLog).toMatchObject({
+    msg: 'pu_campus_login_expected_failure',
+    reason: 'campus_unreachable',
+    school: 'pu',
+  });
+  expect(JSON.stringify(timeoutLog)).not.toContain(SECRET);
+  expect(JSON.stringify(timeoutLog)).not.toContain('3.3.3.3');
+});
+
 it('maps campus credential, timeout and closed errors', async () => {
   const { runtime: creds } = deps({
     campus: campus({
@@ -150,6 +196,9 @@ it('never puts the password into logs, thrown errors, or the JSON result', async
     errors.push(args);
   });
   vi.spyOn(console, 'warn').mockImplementation((...args) => {
+    errors.push(args);
+  });
+  vi.spyOn(console, 'info').mockImplementation((...args) => {
     errors.push(args);
   });
   const { runtime } = deps({

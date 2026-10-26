@@ -54,6 +54,34 @@ export const SCHOOL_UNAVAILABLE = '學校系統暫時無法連線';
 export const TEACHER_SCHOOL_UNAVAILABLE = SCHOOL_UNAVAILABLE;
 export const TEACHER_IDENTITY_UNVERIFIED = '暫時無法驗證老師身分';
 
+type ExpectedCampusFailureReason = 'campus_closed' | 'campus_unreachable';
+
+function expectedCampusFailureReason(error: unknown): ExpectedCampusFailureReason | null {
+  if (error instanceof PuCampusError) {
+    if (error.kind === 'closed') return 'campus_closed';
+    if (error.kind === 'timeout' || error.kind === 'unavailable') return 'campus_unreachable';
+    return null;
+  }
+  if (error instanceof PuLoginHttpError) {
+    if (error.message === '尚未開放') return 'campus_closed';
+    if (error.message === SCHOOL_UNAVAILABLE) return 'campus_unreachable';
+  }
+  return null;
+}
+
+function logExpectedCampusFailure(error: unknown, startedAt: number): void {
+  const reason = expectedCampusFailureReason(error);
+  if (!reason) return;
+  console.info(
+    JSON.stringify({
+      msg: 'pu_campus_login_expected_failure',
+      reason,
+      school: PROVIDENCE_SCHOOL_ID,
+      elapsedMs: Math.max(0, Date.now() - startedAt),
+    }),
+  );
+}
+
 function asRecord(value: unknown): Record<string, unknown> {
   return value && typeof value === 'object' && !Array.isArray(value)
     ? (value as Record<string, unknown>)
@@ -183,11 +211,13 @@ export async function handleSignInPuStudentId(
     await consumeLoginAccountLimit(accountKey, rateCtx);
 
     const campus = deps.campus ?? createPuCampusGateway();
+    const campusStartedAt = Date.now();
     try {
       return isStudent
         ? await signInStudent(studentId, password, campus, deps)
         : await signInTeacher(teacherAccount, password, campus, deps);
     } catch (error) {
+      logExpectedCampusFailure(error, campusStartedAt);
       if (isSchoolSideFailure(error)) {
         await refundLoginAccountLimit(accountKey, rateCtx);
       }

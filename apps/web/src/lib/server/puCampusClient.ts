@@ -78,29 +78,54 @@ function mergeCookies(jar: CookieJar, headers: Headers): CookieJar {
   return next;
 }
 
-function looksLikeLoginPage(html: string): boolean {
-  const normalized = html.toLowerCase();
+const CLOSED_PAGE_TEXT = /尚未開放|系統維護|暫停服務|暫時關閉/;
+
+function stripIgnoredHtml(html: string): string {
+  return html
+    .replace(/<!--[\s\S]*?-->/g, ' ')
+    .replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, ' ')
+    .replace(/<style\b[^>]*>[\s\S]*?<\/style>/gi, ' ');
+}
+
+function visibleCampusText(html: string): string {
+  return stripIgnoredHtml(html)
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/&nbsp;/gi, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+export function campusPageHasLoginForm(html: string): boolean {
+  const markup = stripIgnoredHtml(html).toLowerCase();
   return (
-    normalized.includes('action="index_check.php"') ||
-    normalized.includes("action='index_check.php'") ||
-    (normalized.includes('name="uid"') && normalized.includes('name="upassword"'))
+    markup.includes('action="index_check.php"') ||
+    markup.includes("action='index_check.php'") ||
+    (markup.includes('name="uid"') && markup.includes('name="upassword"'))
   );
 }
 
 function hasStudentContext(html: string): boolean {
+  const markup = stripIgnoredHtml(html);
   return (
-    html.includes('學號(Student No.)') ||
-    html.includes('姓名(Student Name)') ||
-    html.includes('query_course')
+    markup.includes('學號(Student No.)') ||
+    markup.includes('姓名(Student Name)') ||
+    markup.includes('query_course')
   );
 }
 
+export function campusPageLooksClosed(html: string): boolean {
+  if (campusPageHasLoginForm(html)) return false;
+  return CLOSED_PAGE_TEXT.test(visibleCampusText(html));
+}
+
 function isClosedPage(html: string): boolean {
-  return /尚未開放|系統維護|暫停服務|暫時關閉/.test(html);
+  return campusPageLooksClosed(html);
 }
 
 function isCredentialPage(html: string): boolean {
-  return /帳號或密碼錯誤|login_fail|Login Failed|密碼錯誤|_INVALID_PASSWORD_/.test(html);
+  return /帳號或密碼錯誤|login_fail|Login Failed|密碼錯誤|_INVALID_PASSWORD_/.test(
+    stripIgnoredHtml(html),
+  );
 }
 
 function asRecord(value: unknown): Record<string, unknown> {
@@ -282,11 +307,7 @@ export function createPuCampusGateway(
         if (isClosedPage(verify.html)) {
           throw new PuCampusError('closed', '尚未開放');
         }
-        if (
-          verify.status !== 200 ||
-          looksLikeLoginPage(verify.html) ||
-          !hasStudentContext(verify.html)
-        ) {
+        if (verify.status !== 200 || !hasStudentContext(verify.html)) {
           throw new PuCampusError('credentials', '學號或密碼錯誤');
         }
         const nameMatch =
@@ -307,7 +328,7 @@ export function createPuCampusGateway(
         if (isClosedPage(page.html)) {
           throw new PuCampusError('closed', '尚未開放');
         }
-        if (looksLikeLoginPage(page.html) || !hasStudentContext(page.html)) {
+        if (!hasStudentContext(page.html)) {
           return {};
         }
         return {
