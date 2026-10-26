@@ -16,7 +16,10 @@ const text = (value: unknown) => typeof value === 'string' ? value.trim().slice(
 const localName = (value: unknown) => isRecord(value) ? text(value.Zh_tw) || text(value.En) : '';
 const literal = (value: string) => `'${value.replaceAll("'", "''")}'`;
 class TransitError extends Error {
-  constructor(readonly reason: TransitFailure) { super(reason); }
+  constructor(readonly reason: TransitFailure, readonly statusCode?: number) {
+    super(reason);
+    this.name = 'TransitError';
+  }
 }
 
 export function validateTransitQuery(value: unknown): TransitQuery {
@@ -312,10 +315,10 @@ export function createTransitService(options: {
       if (response.status === 429) {
         const seconds = Number(response.headers.get('retry-after'));
         blockedUntil = now() + (Number.isFinite(seconds) && seconds > 0 ? Math.min(seconds, 300) : 60) * 1000;
-        throw new TransitError('rate-limited');
+        throw new TransitError('rate-limited', response.status);
       }
-      if (response.status === 401) { token = null; throw new TransitError('upstream'); }
-      if (!response.ok) throw new TransitError('upstream');
+      if (response.status === 401) { token = null; throw new TransitError('upstream', response.status); }
+      if (!response.ok) throw new TransitError('upstream', response.status);
       return await response.json();
     } finally { releaseSlot(); }
   }
@@ -529,7 +532,14 @@ export function createTransitService(options: {
             const payload = await loadMaasPayload(planner);
             transferRows = withTransferArrivals(parseMaasTransferPlans(payload), arrivals, fetchedAt);
             transferFallback = false;
-          } catch {
+          } catch (error) {
+            const status = error instanceof TransitError && typeof error.statusCode === 'number'
+              ? error.statusCode
+              : null;
+            const type = error instanceof TransitError
+              ? error.reason
+              : error instanceof Error ? error.name : 'unknown';
+            console.warn('TDX MaaS routing failed', { status, type });
             transferFallback = true;
           }
         }

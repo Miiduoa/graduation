@@ -920,16 +920,25 @@ test('direct search without TDX still uses the catalog and does not invent arriv
 });
 test('maas walk-only filter drops YOXI taxi and bike first/last miles', () => {
   const trips = transfer.parseMaasTransferPlans(maasFixture);
-  assert.equal(trips.length, 1);
-  assert.equal(trips[0].firstRoute, '300');
+  assert.equal(trips.length, 5);
+  assert.equal(trips[0].firstRoute, '305');
   assert.equal(trips[0].secondRoute, '151');
+  assert.match(trips[0].alightStopName, /高鐵臺中站/);
+  assert.equal(trips[0].firstDepartureAt, '2026-10-26T03:03:00.000Z');
   assert.equal(JSON.stringify(trips).includes('YOXI'), false);
   const url = transfer.buildMaasPlannerUrl({
     origin: direct.PROVIDENCE_DIRECT_ORIGIN,
     destination: { lat: 24.112, lon: 120.616 },
     departureAt: NOW,
   });
-  assert.match(url, /firstLastMileType=Walk/);
+  const parsed = new URL(url);
+  assert.equal(parsed.pathname, '/api/maas/routing');
+  assert.equal(parsed.searchParams.get('first_mile_mode'), '0');
+  assert.equal(parsed.searchParams.get('last_mile_mode'), '0');
+  assert.equal(parsed.searchParams.get('transit'), '3,4,5,6,7');
+  assert.equal(parsed.searchParams.get('gc'), '1');
+  assert.equal(parsed.searchParams.get('transfer_time'), null);
+  assert.equal(parsed.searchParams.get('depart'), '2026-10-12T16:05:00');
   assert.equal(transfer.maasUrlHasArrivalParam(url), false);
   assert.equal(url.includes('120.577561'), true);
 });
@@ -940,8 +949,8 @@ test('transfer search caches the same origin, destination and 5-minute slot', as
   const second = await mock.execute({ action: 'direct', schoolId: 'pu', destination: '高鐵臺中站' });
   assert.equal(first.status, 'ready');
   assert.equal(second.status, 'ready');
-  assert.equal(mock.calls.filter((call) => call.url.includes('/api/maas/Routing/Planner')).length, 1);
-  assert.equal(first.transfers[0].firstRoute, '300');
+  assert.equal(mock.calls.filter((call) => call.url.includes('/api/maas/routing')).length, 1);
+  assert.equal(first.transfers.some((trip) => trip.firstRoute === '305' && trip.secondRoute === '151'), true);
 });
 test('transfer search rate-limit and timeout fall back to direct plus Google Maps', async () => {
   const mock = service((url) => Response.json(url.includes('/api/maas/') ? maasFixture : []));
@@ -985,7 +994,7 @@ test('transfer search coalesces the same key and caps concurrent origins at 5 Ma
   const sameResults = await Promise.all(Array.from({ length: 8 }, () =>
     same.execute({ action: 'direct', schoolId: 'pu', destination: '高鐵臺中站' })));
   assert.equal(sameResults.every((result) => result.status === 'ready'), true);
-  assert.equal(same.calls.filter((call) => call.url.includes('/api/maas/Routing/Planner')).length, 1);
+  assert.equal(same.calls.filter((call) => call.url.includes('/api/maas/routing')).length, 1);
 
   const burst = service(async (url) => {
     if (url.includes('/api/maas/')) {
@@ -999,7 +1008,7 @@ test('transfer search coalesces the same key and caps concurrent origins at 5 Ma
     lat: 24.221 + index * 0.001, lon: 120.577561,
   })));
   assert.equal(burstResults.every((result) => result.status === 'ready'), true);
-  assert.equal(burst.calls.filter((call) => call.url.includes('/api/maas/Routing/Planner')).length, 5);
+  assert.equal(burst.calls.filter((call) => call.url.includes('/api/maas/routing')).length, 5);
   assert.equal(burstResults.some((result) => result.transferFallback === true), true);
 });
 test('transfer search 429 pauses later MaaS and campus-next upstream calls', async () => {
@@ -1023,8 +1032,24 @@ test('transfer search 429 pauses later MaaS and campus-next upstream calls', asy
   });
   assert.equal(second.status, 'ready');
   assert.equal(second.transferFallback, true);
-  assert.equal(mock.calls.filter((call) => call.url.includes('/api/maas/Routing/Planner')).length, 1);
+  assert.equal(mock.calls.filter((call) => call.url.includes('/api/maas/routing')).length, 1);
   assert.equal(mock.calls.filter((call) => call.url.includes('/EstimatedTimeOfArrival/')).length, etaAfterFirst);
+});
+test('transfer search 400 past depart falls back to direct plus Google Maps', async () => {
+  const mock = service((url) => {
+    if (url.includes('/api/maas/')) {
+      return Response.json(
+        { result: 'fail', error: { code: 20001, msg: 'The depart time before now!' } },
+        { status: 400 },
+      );
+    }
+    return Response.json([]);
+  });
+  const result = await mock.execute({ action: 'direct', schoolId: 'pu', destination: '高鐵臺中站' });
+  assert.equal(result.status, 'ready');
+  assert.deepEqual(result.transfers, []);
+  assert.equal(result.transferFallback, true);
+  assert.match(result.googleMapsUrl, /travelmode=transit/);
 });
 test('transfer search without keys never calls MaaS and keeps the Google Maps link', async () => {
   const mock = service([], { credentials: () => ({}) });
