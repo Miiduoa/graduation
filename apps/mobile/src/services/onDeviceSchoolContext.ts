@@ -7,7 +7,7 @@ export type OnDeviceSchoolContext = {
   timetable: {
     source: 'saved-device-copy' | 'not-available';
     updatedAt: string | null;
-    courses: Array<{ name: string; day: number; start: number; end: number }>;
+    courses: Array<{ name: string; day: number; start: number; end: number; room?: string }>;
   };
 };
 
@@ -39,6 +39,7 @@ export async function collectOnDeviceSchoolContext(
           day: course.day,
           start: course.start,
           end: course.end,
+          room: typeof course.room === 'string' ? course.room.slice(0, 40) : '',
         })),
       },
     };
