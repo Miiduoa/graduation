@@ -10,7 +10,7 @@ import { loadCourseHub, type CourseHubData, type CourseHubScope, type HubAssignm
 import { webBrowserOpenWithPuTronClassGate } from '../services/tronClassWebUiGate';
 import { formatTaipeiDateTime, parseTaipeiInstant, taipeiParts } from '@campus/shared/src/taipeiTime';
 import { revealAssignmentSubmitArea } from './nuni/scrollAssignment';
-import { canListAsPendingWork, submissionStatusText, summarizeCourseReceipts } from '../features/courseSubmissionState';
+import { canListAsPendingWork, canSubmitCourseWork, submissionStatusText, summarizeCourseReceipts } from '../features/courseSubmissionState';
 
 type Props = {
   navigation?: Parameters<typeof safeNavigate>[0] & {
@@ -28,7 +28,7 @@ function weekAssignments(items: HubAssignment[], now = new Date()): HubAssignmen
   const start = Date.UTC(parts.year, parts.month - 1, parts.day) - (weekday - 1) * 86400000;
   const end = start + 7 * 86400000;
   return items.filter((item) => {
-    if (!item.dueAt || item.closed || !canListAsPendingWork(item.submission)) return false;
+    if (!item.dueAt || !canSubmitCourseWork(item, now)) return false;
     const due = parseTaipeiInstant(item.dueAt);
     if (due === null) return false;
     const dueParts = taipeiParts(due);
@@ -383,6 +383,12 @@ function CourseContent({
                           <Text style={{ ...theme.typography.bodySmall, color: theme.colors.textSecondary }}>
                             {submissionStatusText(item.submission)}
                           </Text>
+                          {item.submission?.kind !== 'submitted' &&
+                          item.dueAt && (parseTaipeiInstant(item.dueAt) ?? Infinity) < Date.now() ? (
+                            <Text style={{ ...theme.typography.bodySmall, color: theme.colors.warning }}>
+                              {item.allowLateSubmission ? '已過截止時間 · 教師允許補交' : '已過截止時間 · 請洽授課教師'}
+                            </Text>
+                          ) : null}
                           {item.submission?.kind === 'submitted' && item.submission.grade?.feedback ? (
                             <Text style={body}>教師回饋：{item.submission.grade.feedback}</Text>
                           ) : null}
