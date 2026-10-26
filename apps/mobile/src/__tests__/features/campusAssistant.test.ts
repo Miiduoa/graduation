@@ -1,5 +1,9 @@
 import { httpsCallable } from 'firebase/functions';
-import { askCampusAssistant } from '../../features/campusAssistant';
+import {
+  askCampusAssistant,
+  getOnDeviceAssistantReadiness,
+  OnDeviceAssistantError,
+} from '../../features/campusAssistant';
 let mockUid: string | null = 'A';
 let mockFake = false;
 const mockCallable = jest.fn();
@@ -9,15 +13,45 @@ jest.mock('../../firebase', () => ({
   getFunctionsInstance: () => ({}),
   isFirebaseMockMode: () => mockFake,
 }));
+jest.mock('../../services/localLLMInference', () => ({
+  localLLM: {
+    getRuntimeAvailability: jest.fn(() => ({ available: true })),
+    getSavedModelId: jest.fn(async () => null),
+    isModelDownloaded: jest.fn(async () => true),
+    getDownloadedModels: jest.fn(async () => ['qwen3-0.6b']),
+    getState: jest.fn(() => ({ status: 'ready', modelId: 'qwen3-0.6b' })),
+    loadModel: jest.fn(async () => true),
+    generate: jest.fn(async () => ({ content: ' 已依照本機資訊整理建議 ', tokensGenerated: 15 })),
+  },
+  getDefaultLocalLlmModelId: () => 'qwen3-0.6b',
+}));
+jest.mock('../../services/onDeviceSchoolContext', () => ({
+  collectOnDeviceSchoolContext: jest.fn(async ({ schoolId }: { schoolId: string }) => ({
+    checkedAt: '2026-10-26T12:00:00Z',
+    schoolId, schoolName: '靜宜大學',
+    timetable: { source: 'not-available', updatedAt: null, courses: [] },
+  })),
+  formatOnDeviceSchoolPrompt: jest.fn(() => '裝置端有限制的系統上下文'),
+}));
+const { localLLM } = require('../../services/localLLMInference');
+
 const input = () => ({
   scope: { uid: 'A', schoolId: 'pu' },
   messages: [{ role: 'user' as const, content: ' 查公告 ' }],
   isCurrent: () => true,
+  mode: 'campus' as const,
 });
 beforeEach(() => {
   jest.clearAllMocks();
   mockUid = 'A';
   mockFake = false;
+  jest.mocked(localLLM.getRuntimeAvailability).mockReturnValue({ available: true });
+  jest.mocked(localLLM.getState).mockReturnValue({ status: 'ready', modelId: 'qwen3-0.6b' });
+  jest.mocked(localLLM.getSavedModelId).mockResolvedValue(null);
+  jest.mocked(localLLM.isModelDownloaded).mockResolvedValue(true);
+  jest.mocked(localLLM.getDownloadedModels).mockResolvedValue(['qwen3-0.6b']);
+  jest.mocked(localLLM.loadModel).mockResolvedValue(true);
+  jest.mocked(localLLM.generate).mockResolvedValue({ content: '已依照本機資訊整理建議', tokensGenerated: 15 });
   mockCallable.mockResolvedValue({
     data: { content: ' 有新公告 ', run: { status: 'completed' }, actions: [] },
   });
@@ -26,7 +60,7 @@ test('uses the verified callable contract and returns only display content and p
   mockCallable.mockResolvedValue({
     data: { content: ' 草稿 ', run: { status: 'blocked' }, actions: [{ tool: 'write' }] },
   });
-  await expect(askCampusAssistant(input())).resolves.toEqual({ content: '草稿', hasActions: true });
+  await expect(askCampusAssistant(input())).resolves.toEqual({ content: '草稿', hasActions: true, source: 'campus' });
   expect(httpsCallable).toHaveBeenCalledTimes(1);
   expect(httpsCallable).toHaveBeenCalledWith({}, 'askCampusAssistant');
   expect(mockCallable).toHaveBeenCalledWith({
@@ -83,4 +117,63 @@ test.each(['uid', 'scope'])('rejects a completed result after %s changes', async
   else current = false;
   resolve({ data: { content: 'A私訊', run: { status: 'completed' } } });
   await expect(pending).rejects.toThrow('session changed');
+});
+
+test('uses local GGUF by default without calling Firebase Functions or downloading anything', async () => {
+  const result = await askCampusAssistant({ ...input(), mode: undefined, schoolName: '靜宜大學' });
+  expect(result).toEqual({
+    content: '已依照本機資訊整理建議', hasActions: false, source: 'device',
+  });
+  expect(localLLM.generate).toHaveBeenCalledWith(expect.objectContaining({
+    messages: [
+      { role: 'system', content: '裝置端有限制的系統上下文' },
+      { role: 'user', content: '查公告\\n/no_think' },
+    ],
+  }));
+  expect(localLLM.loadModel).not.toHaveBeenCalled();
+  expect(mockCallable).not.toHaveBeenCalled();
+  expect(httpsCallable).not.toHaveBeenCalled();
+});
+
+test('explicitly requires a downloaded model instead of silently falling back to cloud', async () => {
+  jest.mocked(localLLM.isModelDownloaded).mockResolvedValue(false);
+  jest.mocked(localLLM.getDownloadedModels).mockResolvedValue([]);
+  await expect(askCampusAssistant({ ...input(), mode: 'device' })).rejects.toMatchObject({
+    code: 'model-required',
+  });
+  expect(localLLM.generate).not.toHaveBeenCalled();
+  expect(mockCallable).not.toHaveBeenCalled();
+});
+
+test('does not claim local AI availability when its native module is missing', async () => {
+  jest.mocked(localLLM.getRuntimeAvailability).mockReturnValue({
+    available: false, reason: '原生模組尚未安裝',
+  });
+  await expect(getOnDeviceAssistantReadiness()).resolves.toMatchObject({
+    ready: false, available: false, reason: '原生模組尚未安裝',
+  });
+  await expect(askCampusAssistant({ ...input(), mode: 'device' })).rejects.toMatchObject({
+    code: 'native-unavailable',
+  });
+  expect(mockCallable).not.toHaveBeenCalled();
+});
+
+test('rejects late on-device generation when user switches account', async () => {
+  let resolve!: (value: unknown) => void;
+  jest.mocked(localLLM.generate).mockReturnValue(new Promise((yes) => { resolve = yes; }));
+  const pending = askCampusAssistant({ ...input(), mode: 'device' });
+  // Allow readiness and context reads to settle before local inference is pending.
+  await new Promise((done) => setImmediate(done));
+  mockUid = 'B';
+  resolve({ content: '前一帳號的課表', tokensGenerated: 15 });
+  await expect(pending).rejects.toMatchObject({ code: 'session-changed' });
+  expect(mockCallable).not.toHaveBeenCalled();
+});
+
+test('does not expose an unverified local cache when the app uses mock authentication', async () => {
+  const { collectOnDeviceSchoolContext } = require('../../services/onDeviceSchoolContext');
+  mockFake = true;
+  await askCampusAssistant({ ...input(), mode: 'device' });
+  expect(collectOnDeviceSchoolContext).toHaveBeenCalledWith(expect.objectContaining({ uid: '' }));
+  expect(mockCallable).not.toHaveBeenCalled();
 });
