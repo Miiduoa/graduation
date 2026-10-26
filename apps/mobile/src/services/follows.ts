@@ -30,11 +30,13 @@ export async function followUser(schoolId: string, followerUid: string, targetUi
   if (!schoolId || !followerUid || !targetUid || followerUid === targetUid)
     throw new Error('INVALID_FOLLOW_TARGET');
   const ref = doc(db, 'follows', followId(schoolId, followerUid, targetUid));
-  const matches = (snapshot: Awaited<ReturnType<typeof getDoc>>) =>
-    snapshot.exists() &&
-    snapshot.data()?.schoolId === schoolId &&
-    snapshot.data()?.followerUid === followerUid &&
-    snapshot.data()?.targetUid === targetUid;
+  const matches = (snapshot: Awaited<ReturnType<typeof getDoc>>) => {
+    if (!snapshot.exists()) return false;
+    const saved = snapshot.data() as FollowDoc | undefined;
+    return saved?.schoolId === schoolId &&
+      saved?.followerUid === followerUid &&
+      saved?.targetUid === targetUid;
+  };
   if (matches(await getDoc(ref))) return;
   try {
     await setDoc(ref, {
