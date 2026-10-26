@@ -13,6 +13,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import styles from '../community.module.css';
 import { CommunityLoadError, useCommunityLoad } from './useCommunityLoad';
+import { selectCampusFeedPosts, type FeedFilter, type FeedOrder } from './feedView';
 import Image from 'next/image';
 import { useAuth } from '@/components/AuthGuard';
 import {
@@ -29,7 +30,7 @@ import {
   type StoryAuthorGroup,
 } from '@/lib/community/firestore';
 
-type FilterKey = 'all' | 'subscribed' | 'media';
+type FilterKey = FeedFilter;
 
 const FILTERS: { key: FilterKey; label: string; icon: string }[] = [
   { key: 'all', label: '全部', icon: '✨' },
@@ -70,11 +71,15 @@ export function FeedTab(props: { schoolId: string; schoolSearch: string }) {
   const [stories, setStories] = useState<StoryAuthorGroup[]>([]);
   const [subscribedIds, setSubscribedIds] = useState<Set<string>>(new Set());
   const [filter, setFilter] = useState<FilterKey>('all');
+  const [order, setOrder] = useState<FeedOrder>('recommended');
+  const [search, setSearch] = useState('');
   const [nameByUid, setNameByUid] = useState<Record<string, string>>({});
   const [avatarByUid, setAvatarByUid] = useState<Record<string, string>>({});
   const [refreshing, setRefreshing] = useState(false);
   const [shareFeedback, setShareFeedback] = useState<{ postId: string; text: string } | null>(null);
-  const likeFlightRef = useRef(false);
+  const likeFlightsRef = useRef<Set<string>>(new Set());
+  const [pendingLikes, setPendingLikes] = useState<ReadonlySet<string>>(new Set());
+  const [likeFeedback, setLikeFeedback] = useState<{ postId: string; text: string } | null>(null);
 
   const load = useCallback(async () => {
     if (!schoolId || !user) {
@@ -134,40 +139,59 @@ export function FeedTab(props: { schoolId: string; schoolSearch: string }) {
     return m;
   }, [boards]);
 
-  const visible = useMemo(() => {
-    if (filter === 'subscribed') return posts.filter((p) => subscribedIds.has(p.boardId));
-    if (filter === 'media') return posts.filter((p) => mediaOf(p).length > 0);
-    return posts;
-  }, [posts, filter, subscribedIds]);
+  const visible = useMemo(
+    () =>
+      selectCampusFeedPosts(posts, {
+        filter,
+        order,
+        search,
+        subscribedIds,
+        boardNames: boardNameById,
+        authorNames: nameByUid,
+      }),
+    [posts, filter, order, search, subscribedIds, boardNameById, nameByUid],
+  );
 
   const onToggleLike = useCallback(
     async (row: CampusPostDoc) => {
-      if (!user || !schoolId || likeFlightRef.current) return;
-      likeFlightRef.current = true;
+      if (!user || !schoolId || likeFlightsRef.current.has(row.id)) return;
+      likeFlightsRef.current.add(row.id);
+      setPendingLikes((prev) => new Set([...prev, row.id]));
+      setLikeFeedback(null);
       setPosts((prev) =>
         prev.map((p) => {
           if (p.id !== row.id) return p;
-          const arr = Array.isArray(p.likedBy) ? [...p.likedBy] : [];
-          const idx = arr.indexOf(user.uid);
-          if (idx >= 0) arr.splice(idx, 1);
-          else arr.push(user.uid);
+          const likedBy = Array.isArray(p.likedBy) ? [...p.likedBy] : [];
+          const index = likedBy.indexOf(user.uid);
+          if (index >= 0) likedBy.splice(index, 1);
+          else likedBy.push(user.uid);
           return {
             ...p,
-            likedBy: arr,
-            likes: typeof p.likes === 'number' ? p.likes + (idx >= 0 ? -1 : 1) : arr.length,
+            likedBy,
+            likes: typeof p.likes === 'number' ? Math.max(0, p.likes + (index >= 0 ? -1 : 1)) : likedBy.length,
           };
         }),
       );
       try {
         await toggleCampusPostLike(schoolId, row.id, user.uid);
-      } catch (e) {
-        console.warn(e);
-        await refresh();
+      } catch {
+        // A failed write must not leave an unconfirmed reaction on screen.
+        setPosts((prev) =>
+          prev.map((post) =>
+            post.id === row.id ? { ...post, likedBy: row.likedBy, likes: row.likes } : post,
+          ),
+        );
+        setLikeFeedback({ postId: row.id, text: '讚沒有成功更新，請確認網路後再試。' });
       } finally {
-        likeFlightRef.current = false;
+        likeFlightsRef.current.delete(row.id);
+        setPendingLikes((prev) => {
+          const next = new Set(prev);
+          next.delete(row.id);
+          return next;
+        });
       }
     },
-    [user, schoolId, refresh],
+    [user, schoolId],
   );
 
   const onRefresh = async () => {
@@ -213,7 +237,7 @@ export function FeedTab(props: { schoolId: string; schoolSearch: string }) {
   if (error) return <CommunityLoadError message={error} retry={refresh} />;
 
   return (
-    <div>
+    <div className={styles.feedColumn}>
       {/* ── Story strip ── */}
       <div
         style={{
@@ -382,6 +406,40 @@ export function FeedTab(props: { schoolId: string; schoolSearch: string }) {
         </Link>
       </div>
 
+      <div className={styles.feedDiscovery}>
+        <label className={styles.feedSearch}>
+          搜尋此校動態
+          <input
+            type="search"
+            value={search}
+            onChange={(event) => setSearch(event.target.value)}
+            placeholder="貼文、標籤、看板或作者"
+            autoComplete="off"
+          />
+        </label>
+        <div className={styles.feedOrder} role="group" aria-label="動態排序">
+          <button
+            type="button"
+            aria-pressed={order === 'recommended'}
+            onClick={() => setOrder('recommended')}
+          >
+            推薦
+          </button>
+          <button
+            type="button"
+            aria-pressed={order === 'latest'}
+            onClick={() => setOrder('latest')}
+          >
+            最新
+          </button>
+        </div>
+      </div>
+      {!loading && (
+        <p className={styles.feedScope} role="status">
+          顯示 {visible.length} 則 · 目前載入 {posts.length} 則本校動態，搜尋與排序僅適用於這些貼文
+        </p>
+      )}
+
       {/* ── Posts ── */}
       {loading ? (
         <div className="card" style={{ padding: 24, textAlign: 'center', color: 'var(--muted)' }}>
@@ -389,15 +447,27 @@ export function FeedTab(props: { schoolId: string; schoolSearch: string }) {
         </div>
       ) : visible.length === 0 ? (
         <div className="card" style={{ padding: 32, textAlign: 'center', color: 'var(--muted)' }}>
-          {filter === 'subscribed' ? '尚無已訂閱看板的新貼文' : '尚無校園貼文'}
-          <div style={{ marginTop: 10 }}>
-            <Link href={`/community/post/new?schoolId=${encodeURIComponent(schoolId)}`} className="btn primary">
-              發第一篇貼文 →
-            </Link>
+          {search.trim()
+            ? '找不到符合的貼文'
+            : filter === 'subscribed'
+              ? '尚無已訂閱看板的新貼文'
+              : filter === 'media'
+                ? '目前沒有圖文貼文'
+                : '尚無校園貼文'}
+          <div className={styles.feedEmptyActions}>
+            {search.trim() ? (
+              <button type="button" className="btn" onClick={() => setSearch('')}>
+                清除搜尋
+              </button>
+            ) : (
+              <Link href={`/community/post/new?schoolId=${encodeURIComponent(schoolId)}`} className="btn primary">
+                發第一篇貼文
+              </Link>
+            )}
           </div>
         </div>
       ) : (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+        <div className={styles.feedCards}>
           {visible.map((item) => {
             const liked = !!(
               user &&
@@ -408,7 +478,7 @@ export function FeedTab(props: { schoolId: string; schoolSearch: string }) {
             const board = boardNameById[item.boardId] ?? item.boardId;
             const av = !item.anonymous && item.authorUid ? avatarByUid[item.authorUid] : undefined;
             return (
-              <article key={item.id} className="card" style={{ padding: 16, cursor: 'pointer' }}>
+              <article key={item.id} className={`card ${styles.feedCard}`} style={{ padding: 16 }}>
                 <div
                   style={{
                     display: 'flex',
@@ -523,6 +593,9 @@ export function FeedTab(props: { schoolId: string; schoolSearch: string }) {
                 >
                   <button
                     type="button"
+                    aria-label={liked ? '取消按讚' : '按讚'}
+                    aria-pressed={liked}
+                    disabled={pendingLikes.has(item.id)}
                     onClick={(e) => {
                       e.preventDefault();
                       e.stopPropagation();
@@ -565,6 +638,9 @@ export function FeedTab(props: { schoolId: string; schoolSearch: string }) {
                     分享
                   </button>
                 </div>
+                {likeFeedback?.postId === item.id && (
+                  <p role="alert" className={styles.feedError}>{likeFeedback.text}</p>
+                )}
                 {shareFeedback?.postId === item.id && (
                   <p role="status" className={styles.shareFeedback}>{shareFeedback.text}</p>
                 )}
