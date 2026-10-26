@@ -22,9 +22,18 @@ jest.mock('../state/school', () => ({
     },
   }),
 }));
-jest.mock('../features/campusAssistant', () => ({ askCampusAssistant: jest.fn() }));
+jest.mock('../features/campusAssistant', () => ({
+  askCampusAssistant: jest.fn(),
+  getOnDeviceAssistantReadiness: jest.fn(async () => ({
+    available: true, ready: false, modelId: 'qwen2.5-0.5b',
+    reason: '尚未下載免費模型',
+  })),
+}));
 jest.mock('@expo/vector-icons', () => ({ Ionicons: () => null }));
 const request = askCampusAssistant as jest.Mock;
+function selectCampusMode(view: ReturnType<typeof render>) {
+  fireEvent.press(view.getByText('校園即時 · 需網路'));
+}
 function deferred<T>() {
   let resolve!: (v: T) => void;
   let reject!: (e: Error) => void;
@@ -44,6 +53,7 @@ test('failed questions remain editable and retry does not add duplicated history
     .mockRejectedValueOnce(new Error('unavailable'))
     .mockResolvedValueOnce({ content: '已找到公告', hasActions: false });
   const view = render(<CampusAssistantScreen />);
+  selectCampusMode(view);
   fireEvent.changeText(view.getByLabelText('詢問校園助理'), '查公告');
   await act(async () => fireEvent.press(view.getByText('送出問題')));
   expect(view.getByLabelText('詢問校園助理').props.value).toBe('查公告');
@@ -59,6 +69,7 @@ test.each(['account', 'school', 'account-back'])(
     const old = deferred<{ content: string; hasActions: boolean }>();
     request.mockReturnValueOnce(old.promise);
     const view = render(<CampusAssistantScreen route={{ params: { prompt: 'A 的問題' } }} />);
+    selectCampusMode(view);
     fireEvent.press(view.getByText('送出問題'));
     const oldCurrent = request.mock.calls[0][0].isCurrent;
     if (change === 'school') mockSchool = 'other';
@@ -79,6 +90,7 @@ test('a proposal is clearly unsent and double press cannot execute or duplicate 
   const pending = deferred<{ content: string; hasActions: boolean }>();
   request.mockReturnValue(pending.promise);
   const view = render(<CampusAssistantScreen />);
+  selectCampusMode(view);
   fireEvent.changeText(view.getByLabelText('詢問校園助理'), '幫我送出申請');
   const button = view.getByText('送出問題');
   act(() => {
@@ -90,10 +102,12 @@ test('a proposal is clearly unsent and double press cannot execute or duplicate 
   expect(view.getByText('尚未送出任何申請或交易。請到對應服務確認辦理。')).toBeTruthy();
   expect(view.queryByText('確認執行')).toBeNull();
 });
-test('guests cannot submit and returning uses the shared page header', () => {
+test('guests can draft offline, but cannot submit authenticated campus queries', () => {
   mockUid = null;
   const goBack = jest.fn();
   const view = render(<CampusAssistantScreen navigation={{ goBack }} />);
+  expect(view.getByLabelText('詢問校園助理')).toBeTruthy();
+  selectCampusMode(view);
   expect(view.queryByLabelText('詢問校園助理')).toBeNull();
   fireEvent.press(view.getByLabelText('返回'));
   expect(goBack).toHaveBeenCalledTimes(1);
@@ -106,6 +120,7 @@ test.each(['chat', 'quick', 'insights'])(
     mockOverlay = { visible: true, mode, initialPrompt: '查校方公告' };
     request.mockResolvedValueOnce({ content: '伺服器公告', hasActions: false });
     const view = render(<AIOverlayHost />);
+    selectCampusMode(view);
     expect(view.getByLabelText('詢問校園助理').props.value).toBe('查校方公告');
     expect(request).not.toHaveBeenCalled();
     await act(async () => fireEvent.press(view.getByText('送出問題')));
@@ -117,8 +132,8 @@ test.each(['chat', 'quick', 'insights'])(
 
 test('suggested questions fill an editable draft without calling the backend until submitted', async () => {
   const view = render(<CampusAssistantScreen />);
-  fireEvent.press(view.getByText('今天有哪些作業要處理？'));
-  expect(view.getByLabelText('詢問校園助理').props.value).toBe('今天有哪些作業要處理？');
+  fireEvent.press(view.getByText('幫我把期末報告拆成可以完成的步驟'));
+  expect(view.getByLabelText('詢問校園助理').props.value).toBe('幫我把期末報告拆成可以完成的步驟');
   expect(request).not.toHaveBeenCalled();
 });
 
