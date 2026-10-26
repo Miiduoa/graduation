@@ -16,7 +16,7 @@
     "sync:announcements:probe": "node campusAnnouncements/probe.js",
     "backfill:canonical": "node backfillCanonicalData.js",
     "build:shared": "node ../../scripts/build-functions-shared.cjs",
-    "test": "pnpm run build:shared && ONLINE_ORDERING_ENABLED=true jest"
+    "test": "pnpm run build:shared && node parse5-runtime-smoke.cjs && ONLINE_ORDERING_ENABLED=true jest"
   },
   "dependencies": {
     "firebase-admin": "14.5.0",
