@@ -35,7 +35,7 @@ export function selectCampusFeedPosts(
   const query = options.search.trim().toLocaleLowerCase();
   const filtered = posts.filter((post) => {
     if (options.filter === 'subscribed' && !options.subscribedIds.has(post.boardId)) return false;
-    if (options.filter === 'media' && !(post.mediaUrls ?? []).some((url) => typeof url === 'string' && url.length > 0))
+    if (options.filter === 'media' && !((Array.isArray(post.mediaUrls) ? post.mediaUrls : [])).some((url) => typeof url === 'string' && url.length > 0))
       return false;
     if (!query) return true;
 
@@ -45,7 +45,7 @@ export function selectCampusFeedPosts(
     const searchable = [
       post.title,
       post.content,
-      ...(post.tags ?? []),
+      ...(Array.isArray(post.tags) ? post.tags : []),
       options.boardNames[post.boardId] ?? '',
       author,
     ].join(' ').toLocaleLowerCase();
