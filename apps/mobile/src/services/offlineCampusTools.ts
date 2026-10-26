@@ -96,7 +96,7 @@ export function runOfflineCampusTool(
 ): OfflineCampusToolResult | null {
   const text = question.trim().slice(0, 1600);
   if (!text) return null;
-  const wantsTimetable = /課表|有課|上課|哪幾堂|哪些課|幾堂課|空堂|課程時間/.test(text);
+  const wantsTimetable = /課表|有課|沒課|上課|哪幾堂|哪些課|幾堂課|空堂|空檔|課程時間/.test(text);
   if (!wantsTimetable) return realtimeOnly(text);
 
   const saved = context.timetable;
