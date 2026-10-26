@@ -25,8 +25,9 @@ import { useLocationHash } from '@/lib/useLocationHash';
 import { gradeReadOwner, markPublishedGradeReadByLanding } from '@/lib/lmsStudentGrades';
 import { useClientHydrated } from '@/lib/useClientHydrated';
 import { materialBrowserStorage, useMaterialReadIds } from '@/lib/useMaterialClientState';
-import { parseTaipeiInstant, taipeiParts } from '@campus/shared/src/taipeiTime';
+import { formatTaipeiDateTime, parseTaipeiInstant, taipeiParts } from '@campus/shared/src/taipeiTime';
 import styles from '../../home.module.css';
+import courseStyles from './courseWorkspace.module.css';
 
 function workKind(assignment: CourseAssignment) {
   return ['quiz', 'exam'].includes(assignment.type) ? 'quiz' : 'assignment';
@@ -380,6 +381,25 @@ function CourseContent({ courseId, uid }: { courseId: string; uid: string }) {
               重新整理
             </button>
           </div>
+          <div className={courseStyles.overview} aria-label="課程摘要">
+            <div className={courseStyles.stat}>
+              <strong>{weekAssignments(course.assignments).length}</strong>
+              <span>本週到期</span>
+            </div>
+            <div className={courseStyles.stat}>
+              <strong>{course.modules.length}</strong>
+              <span>課程教材</span>
+            </div>
+            <div className={courseStyles.stat}>
+              <strong>{course.assignments.length}</strong>
+              <span>作業與評量</span>
+            </div>
+          </div>
+          <nav className={courseStyles.jumpNavigation} aria-label="課程內容捷徑">
+            <a href="#week">本週待辦</a>
+            <a href="#course-materials-title">教材櫃</a>
+            <a href="#assignments">作業與評量</a>
+          </nav>
           <section
             className={`${styles.section} ${styles.courseWorkTarget}`}
             id="week"
@@ -394,6 +414,11 @@ function CourseContent({ courseId, uid }: { courseId: string; uid: string }) {
                   <li key={item.id}>
                     <a href={`#assignment-${encodeURIComponent(item.id)}`} className={styles.task}>
                       <strong>{item.title}</strong>
+                      {item.dueAt ? (
+                        <span className={courseStyles.dueDate}>
+                          {formatTaipeiDateTime(item.dueAt, { seconds: false })}
+                        </span>
+                      ) : null}
                     </a>
                   </li>
                 ))}
