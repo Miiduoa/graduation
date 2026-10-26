@@ -290,3 +290,43 @@ test('returning to the course refreshes receipts instead of keeping a stale pend
   expect(view.queryByText('查看本週作業：期中作業')).toBeNull();
   expect(loadCourseHub).toHaveBeenCalledTimes(2);
 });
+
+test('student filters distinguish confirmed submissions, unfinished work and unknown states', async () => {
+  jest.mocked(loadCourseHub).mockResolvedValue({
+    ...data,
+    assignments: { status: 'ready', items: [{
+      id: 'done',
+      title: '已送出的報告',
+      description: '',
+      dueAt: '2026-10-29T15:59:00Z',
+      closed: false,
+      submission: { kind: 'submitted', submittedAt: '2026-10-26T10:00:00Z', grade: null },
+    }, {
+      id: 'pending',
+      title: '待繳作業',
+      description: '',
+      dueAt: '2026-10-29T15:59:00Z',
+      closed: false,
+      submission: { kind: 'not_submitted' },
+    }, {
+      id: 'unverified',
+      title: '未確認的作業',
+      description: '',
+      dueAt: '2026-10-29T15:59:00Z',
+      closed: false,
+      submission: { kind: 'unavailable' },
+    }] },
+  });
+
+  const view = render(<CourseHub route={route} />);
+  expect(await view.findByText(/已繳交 1 · 已發布評分 0 · 未繳交 1 · 待確認 1/)).toBeTruthy();
+  fireEvent.press(view.getByText('已繳交'));
+  expect(view.getByText('查看繳交紀錄：已送出的報告')).toBeTruthy();
+  expect(view.queryByText('查看作業：待繳作業')).toBeNull();
+  fireEvent.press(view.getByText('未繳交'));
+  expect(view.getByText('查看作業：待繳作業')).toBeTruthy();
+  expect(view.queryByText('查看繳交紀錄：已送出的報告')).toBeNull();
+  expect(view.queryByText('查看作業：未確認的作業')).toBeNull();
+  fireEvent.press(view.getByText('全部'));
+  expect(view.getByText('查看作業：未確認的作業')).toBeTruthy();
+});
