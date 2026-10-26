@@ -2,7 +2,7 @@ import {
   collection,
   deleteDoc,
   doc,
-  getDoc,
+  getDocFromServer,
   getDocs,
   limit,
   query,
@@ -51,7 +51,7 @@ export async function followUser(schoolId: string, followerUid: string, targetUi
   if (!schoolId || !followerUid || !targetUid || followerUid === targetUid)
     throw new Error('INVALID_FOLLOW_TARGET');
   const ref = followRef(schoolId, followerUid, targetUid);
-  const isCurrent = (snapshot: Awaited<ReturnType<typeof getDoc>>) => {
+  const isCurrent = (snapshot: Awaited<ReturnType<typeof getDocFromServer>>) => {
     if (!snapshot.exists()) return false;
     const data = snapshot.data() as Record<string, unknown> | undefined;
     return data?.schoolId === schoolId &&
@@ -59,7 +59,8 @@ export async function followUser(schoolId: string, followerUid: string, targetUi
       data?.targetUid === targetUid;
   };
 
-  if (isCurrent(await getDoc(ref))) return;
+  // A missing relation cannot be read under the participant-only rules.
+  // Create first; the rules keep existing relations immutable.
   try {
     await setDoc(ref, {
       schoolId,
@@ -69,7 +70,7 @@ export async function followUser(schoolId: string, followerUid: string, targetUi
     });
   } catch (error) {
     // Another device may have created this exact relation in the meantime.
-    const current = await getDoc(ref).catch(() => null);
+    const current = await getDocFromServer(ref).catch(() => null);
     if (current && isCurrent(current)) return;
     throw error;
   }

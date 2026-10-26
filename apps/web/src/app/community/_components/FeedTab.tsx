@@ -74,9 +74,31 @@ function mediaOf(p: CampusPostDoc): string[] {
     : [];
 }
 
-export function FeedTab(props: { schoolId: string; schoolSearch: string }) {
-  const { schoolId } = props;
+type FeedTabProps = { schoolId: string; schoolSearch: string };
+
+export function FeedTab(props: FeedTabProps) {
   const { user, loading: authLoading } = useAuth();
+  if (authLoading) {
+    return (
+      <div className="card" style={{ padding: 24, textAlign: 'center', color: 'var(--muted)' }} role="status">
+        正在確認登入狀態…
+      </div>
+    );
+  }
+  if (!user) {
+    return (
+      <div className="card" style={{ padding: 32, textAlign: 'center', color: 'var(--muted)' }}>
+        請先登入以瀏覽校園動態
+      </div>
+    );
+  }
+  // Reads, pending writes and search text belong to one account and school.
+  // Replacing the scope also detaches late completions from the next account's state.
+  return <ScopedFeedTab key={JSON.stringify([user.uid, props.schoolId])} {...props} user={user} />;
+}
+
+function ScopedFeedTab(props: FeedTabProps & { user: { uid: string } }) {
+  const { schoolId, user } = props;
   const [posts, setPosts] = useState<CampusPostDoc[]>([]);
   const [boards, setBoards] = useState<CampusBoard[]>([]);
   const [stories, setStories] = useState<StoryAuthorGroup[]>([]);
@@ -368,6 +390,7 @@ export function FeedTab(props: { schoolId: string; schoolSearch: string }) {
 
   const onRefresh = async () => {
     setRefreshing(true);
+    setFollowingRevision((prev) => prev + 1);
     await refresh();
     setBookmarkRevision((prev) => prev + 1);
     setRefreshing(false);
@@ -398,14 +421,6 @@ export function FeedTab(props: { schoolId: string; schoolSearch: string }) {
     if (!p.authorUid) return '成員';
     return nameByUid[p.authorUid] ?? '載入中…';
   };
-
-  if (!user && !authLoading) {
-    return (
-      <div className="card" style={{ padding: 32, textAlign: 'center', color: 'var(--muted)' }}>
-        請先登入以瀏覽校園動態
-      </div>
-    );
-  }
 
   if (error) return <CommunityLoadError message={error} retry={refresh} />;
 
@@ -534,6 +549,7 @@ export function FeedTab(props: { schoolId: string; schoolSearch: string }) {
             <button
               key={f.key}
               type="button"
+              aria-pressed={active}
               onClick={() => setFilter(f.key)}
               style={{
                 display: 'flex',
@@ -616,7 +632,7 @@ export function FeedTab(props: { schoolId: string; schoolSearch: string }) {
               : `顯示 ${visible.length} 則 · 目前載入 ${posts.length} 則本校動態，搜尋與排序僅適用於這些貼文`}
         </p>
       )}
-      {followingView && followingError && (
+      {followingError && (
         <div className={styles.feedError} role="alert">
           {followingError}{' '}
           <button type="button" onClick={() => setFollowingRevision((prev) => prev + 1)}>
