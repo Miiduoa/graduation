@@ -395,7 +395,7 @@ it('opens the correct course panel when following an activity from the chapter o
     throw new Error(`Unexpected request: ${path}`);
   });
   render(<NuniApp />);
-  const outlineLink = await screen.findByRole('link', { name: /介面設計練習/ });
+  const outlineLink = await within(screen.getByRole('region', { name: '學習路徑' })).findByRole('link', { name: /介面設計練習/ });
   expect(screen.getByRole('tab', { name: '學習路徑' }).getAttribute('aria-selected')).toBe('true');
   fireEvent.click(outlineLink);
   expect(screen.getByRole('tab', { name: '作業' }).getAttribute('aria-selected')).toBe('true');

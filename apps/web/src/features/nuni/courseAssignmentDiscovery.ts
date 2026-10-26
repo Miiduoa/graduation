@@ -60,6 +60,7 @@ export function assignmentReferenceTiming(
   if (
     now === null ||
     !Number.isFinite(now) ||
+    workspace.memberRole !== 'student' ||
     !matchesAssignmentFilter(item, workspace, 'pending')
   )
     return 'none';
