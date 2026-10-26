@@ -4,15 +4,15 @@ import {
   confirmCampusAgentWrite,
 } from '../../features/campusAssistantActions';
 
-let currentUid: string | null = 'alice';
-let fakeMode = false;
-const callable = jest.fn();
+let mockCurrentUid: string | null = 'alice';
+let mockFakeMode = false;
+const mockCallable = jest.fn();
 
-jest.mock('firebase/functions', () => ({ httpsCallable: jest.fn(() => callable) }));
+jest.mock('firebase/functions', () => ({ httpsCallable: jest.fn(() => mockCallable) }));
 jest.mock('../../firebase', () => ({
-  getAuthInstance: () => ({ currentUser: currentUid ? { uid: currentUid } : null }),
+  getAuthInstance: () => ({ currentUser: mockCurrentUid ? { uid: mockCurrentUid } : null }),
   getFunctionsInstance: () => ({}),
-  isFirebaseMockMode: () => fakeMode,
+  isFirebaseMockMode: () => mockFakeMode,
 }));
 
 const runId = '01234567-89ab-4cde-8012-3456789abcde';
@@ -34,10 +34,10 @@ function envelope(overrides: Record<string, unknown> = {}) {
 
 beforeEach(() => {
   jest.clearAllMocks();
-  callable.mockReset();
-  currentUid = 'alice';
-  fakeMode = false;
-  callable.mockResolvedValue({ data: { success: true, toolName: 'createDormRepairRequest', repairId: 'repair-1' } });
+  mockCallable.mockReset();
+  mockCurrentUid = 'alice';
+  mockFakeMode = false;
+  mockCallable.mockResolvedValue({ data: { success: true, toolName: 'createDormRepairRequest', repairId: 'repair-1' } });
 });
 
 test('only trusted completed run actions become executable proposals', () => {
@@ -80,7 +80,7 @@ test('explicitly confirmed action calls the existing authenticated function and 
   });
   expect(result).toMatchObject({ success: true, repairId: 'repair-1' });
   expect(httpsCallable).toHaveBeenCalledWith({}, 'executeAgentWrite');
-  expect(callable).toHaveBeenCalledWith({
+  expect(mockCallable).toHaveBeenCalledWith({
     toolName: 'createDormRepairRequest',
     input,
     agentRunId: runId,
@@ -90,25 +90,25 @@ test('explicitly confirmed action calls the existing authenticated function and 
 
 test('rechecks account and school scope before writing or admitting a late receipt', async () => {
   const proposal = campusAgentWriteProposals(envelope())[0];
-  currentUid = 'bob';
+  mockCurrentUid = 'bob';
   await expect(confirmCampusAgentWrite({
     userId: 'alice', schoolId: 'pu', isCurrent: () => true, proposal,
   })).rejects.toThrow('session-changed');
-  expect(callable).not.toHaveBeenCalled();
+  expect(mockCallable).not.toHaveBeenCalled();
 
-  currentUid = 'alice';
+  mockCurrentUid = 'alice';
   let settle!: (data: unknown) => void;
-  callable.mockImplementationOnce(() => new Promise(resolve => { settle = resolve; }));
+  mockCallable.mockImplementationOnce(() => new Promise(resolve => { settle = resolve; }));
   const pending = confirmCampusAgentWrite({
     userId: 'alice', schoolId: 'pu', isCurrent: () => true, proposal,
   });
-  currentUid = 'bob';
+  mockCurrentUid = 'bob';
   settle({ data: { success: true, toolName: 'createDormRepairRequest', repairId: 'old-user' } });
   await expect(pending).rejects.toThrow('session-changed');
 });
 
 test('a model-looking success without a typed server receipt is rejected', async () => {
-  callable.mockResolvedValueOnce({ data: { success: 'yes', toolName: 'createDormRepairRequest' } });
+  mockCallable.mockResolvedValueOnce({ data: { success: 'yes', toolName: 'createDormRepairRequest' } });
   await expect(confirmCampusAgentWrite({
     userId: 'alice', schoolId: 'pu', isCurrent: () => true,
     proposal: campusAgentWriteProposals(envelope())[0],
