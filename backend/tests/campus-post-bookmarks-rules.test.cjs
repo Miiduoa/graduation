@@ -10,7 +10,7 @@ const path = require('node:path');
 
 let environment;
 const bookmark = (db, uid = 'alice', schoolId = 'pu', postId = 'one') =>
-  db.doc(`users/${uid}/schools/${schoolId}/campusPostBookmarks/${postId}`);
+  db.doc(`users/${uid}/campusPostBookmarks/${schoolId}/posts/${postId}`);
 const data = (overrides = {}) => ({
   schoolId: 'pu',
   postId: 'one',
@@ -51,7 +51,7 @@ test('the active student can create, list and remove own bookmarked campus posts
   const ref = bookmark(alice);
   await assertSucceeds(ref.set(data()));
   await assertSucceeds(ref.get());
-  const list = await assertSucceeds(alice.collection('users/alice/schools/pu/campusPostBookmarks').get());
+  const list = await assertSucceeds(alice.collection('users/alice/campusPostBookmarks/pu/posts').get());
   if (list.size !== 1 || list.docs[0].id !== 'one') throw Error('Saved post missing');
   await assertFails(ref.update({ schoolId: 'other' }));
   await assertSucceeds(ref.delete());
@@ -86,6 +86,6 @@ test('revoking school membership also revokes access to saved school posts', asy
   // Default Firestore reads may reuse the document just written by this client.
   // Require a server read to exercise the current authorization policy.
   await assertFails(bookmark(alice).get({ source: 'server' }));
-  await assertFails(alice.collection('users/alice/schools/pu/campusPostBookmarks').get({ source: 'server' }));
+  await assertFails(alice.collection('users/alice/campusPostBookmarks/pu/posts').get({ source: 'server' }));
   await assertFails(bookmark(alice).delete());
 });
