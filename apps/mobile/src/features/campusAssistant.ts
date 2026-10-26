@@ -1,5 +1,6 @@
 import { httpsCallable } from 'firebase/functions';
 import { getAuthInstance, getFunctionsInstance, isFirebaseMockMode } from '../firebase';
+import { campusAgentWriteProposals, type CampusAgentWriteProposal } from './campusAssistantActions';
 
 export type CampusAssistantMessage = { role: 'user' | 'assistant'; content: string };
 export type CampusAssistantScope = { uid: string; schoolId: string };
@@ -68,6 +69,7 @@ export async function askCampusAssistant(input: {
   source: CampusAssistantMode;
   tool?: 'saved-timetable' | 'online-required' | 'open-service';
   route?: string;
+  proposals?: CampusAgentWriteProposal[];
 }> {
   const mode = input.mode ?? 'device';
   scopeCheck(input, mode === 'campus');
@@ -147,7 +149,7 @@ export async function askCampusAssistant(input: {
 
   const callable = httpsCallable<
     unknown,
-    { content?: string; error?: unknown; actions?: unknown[]; run?: { status?: string } }
+    { content?: string; error?: unknown; actions?: unknown[]; run?: { status?: string; runId?: string } }
   >(getFunctionsInstance(), 'askCampusAssistant');
   const schoolName = typeof input.schoolName === 'string'
     ? input.schoolName.trim().slice(0, 160)
@@ -168,9 +170,14 @@ export async function askCampusAssistant(input: {
       typeof result.data.content !== 'string' || !result.data.content.trim()) {
     throw new Error('Assistant reply not confirmed');
   }
+  const proposals = campusAgentWriteProposals({
+    run: result.data.run,
+    actions: result.data.actions,
+  });
   return {
     content: result.data.content.trim(),
     hasActions: Array.isArray(result.data.actions) && result.data.actions.length > 0,
     source: 'campus',
+    ...(proposals.length ? { proposals } : {}),
   };
 }
