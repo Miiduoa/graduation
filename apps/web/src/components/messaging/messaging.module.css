@@ -411,3 +411,57 @@
 }
 .reactionButton:disabled { cursor: not-allowed; opacity: 0.6; }
 .reactionButton:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
+
+
+/* Conversation actions remain available without forcing a reader away from older messages. */
+.jumpRow {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: -12px;
+}
+.jumpButton {
+  min-height: 40px;
+  padding: 8px 16px;
+  border-radius: var(--radius-pill);
+  border: 1px solid var(--border-strong);
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+}
+.jumpButton:hover { background: var(--accent-soft); }
+.jumpButton:focus-visible,
+.copyMessage:focus-visible {
+  outline: 3px solid var(--focus-ring);
+  outline-offset: 3px;
+}
+.messageMeta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 6px 14px;
+  margin-top: 3px;
+}
+.copyMessage {
+  min-height: 32px;
+  padding: 3px 9px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 650;
+  cursor: pointer;
+}
+.copyMessage:hover {
+  border-color: var(--border);
+  color: var(--text);
+}
+@media (max-width: 560px) {
+  .jumpRow { margin-bottom: -8px; }
+  .stack .messages { max-height: min(62dvh, 550px); }
+}
