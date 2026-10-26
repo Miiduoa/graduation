@@ -252,7 +252,7 @@ function weekAssignments(assignments: CourseAssignment[], now = new Date()): Cou
   if (start === null) return [];
   const end = start + 7 * 24 * 60 * 60 * 1000;
   return assignments.filter((item) => {
-    if (!item.dueAt) return false;
+    if (!item.dueAt || item.closed || item.submittedAt) return false;
     const due = parseTaipeiInstant(item.dueAt);
     if (due === null) return false;
     const dueDay = taipeiParts(due);
