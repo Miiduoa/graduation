@@ -84,3 +84,19 @@ export function summarizeCourseReceipts(
     return summary;
   }, { submitted: 0, graded: 0, unsubmitted: 0, needsVerification: 0 });
 }
+
+export function canSubmitCourseWork(
+  item: {
+    closed: boolean;
+    dueAt: string | null;
+    allowLateSubmission?: boolean;
+    submission?: CourseSubmissionState;
+  },
+  now = new Date(),
+): boolean {
+  if (item.closed || !canListAsPendingWork(item.submission)) return false;
+  if (!item.dueAt) return true;
+  const due = parseTaipeiInstant(item.dueAt);
+  if (due === null) return false;
+  return due >= now.getTime() || item.allowLateSubmission === true;
+}
