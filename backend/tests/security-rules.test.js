@@ -1064,6 +1064,10 @@ describe('firestore security rules', () => {
         name: 'Secure Systems',
       });
       for (const uid of ['alice', 'bob', 'charlie']) {
+        await db.collection('schools').doc('tw-demo-uni').collection('members').doc(uid).set({
+          role: 'student',
+          status: 'active',
+        });
         await db.collection('groups').doc('group-1').collection('members').doc(uid).set({
           role: 'member',
           status: 'active',
