@@ -489,6 +489,18 @@ function HomeFeedContent() {
           </Pressable>
         </View>
       )}
+      {!!followingError && (
+        <View style={{ paddingHorizontal: 16, paddingVertical: 9, gap: 6 }}>
+          <Text accessibilityRole="alert" style={{ color: theme.colors.danger }}>{followingError}</Text>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="重新載入追蹤"
+            onPress={() => setFollowingRevision((prev) => prev + 1)}
+          >
+            <Text style={{ color: theme.colors.accent, fontWeight: '700' }}>重新載入追蹤</Text>
+          </Pressable>
+        </View>
+      )}
       {savedView && !!bookmarksError && (
         <View style={{ paddingHorizontal: 16, paddingVertical: 9, gap: 8 }}>
           <Text accessibilityRole="alert" style={{ color: theme.colors.danger }}>{bookmarksError}</Text>
@@ -508,7 +520,7 @@ function HomeFeedContent() {
       ) : (
         <FlatList
           style={{ flex: 1 }}
-          data={visiblePosts}
+          data={followingView && (followingLoading || (!validFollowing && !followingError)) ? [] : visiblePosts}
           keyExtractor={(p) => p.id}
           removeClippedSubviews
           windowSize={7}
@@ -563,7 +575,9 @@ function HomeFeedContent() {
                 <Text style={{ color: theme.colors.textSecondary, fontSize: 12 }}>
                   {savedView
                     ? `顯示 ${visiblePosts.length} 則收藏`
-                    : `已載入 ${posts.length} 則 · 顯示 ${visiblePosts.length} 則`}
+                    : followingView
+                      ? `追蹤作者的貼文 ${visiblePosts.length} 則`
+                      : `已載入 ${posts.length} 則 · 顯示 ${visiblePosts.length} 則`}
                 </Text>
                 <View style={{ flexDirection: 'row', gap: 6 }}>
                   {([
@@ -595,30 +609,38 @@ function HomeFeedContent() {
               <Text style={{ color: theme.colors.textSecondary, fontSize: 11, lineHeight: 16 }}>
                 {savedView
                   ? '顯示本校最近最多 40 筆私人收藏，可跨裝置同步'
-                  : '搜尋與排序僅適用於本次載入的本校貼文'}
+                  : followingView
+                    ? '只顯示目前載入的本校貼文中追蹤的作者'
+                    : '搜尋與排序僅適用於本次載入的本校貼文'}
               </Text>
             </View>
             </>
           }
           ListEmptyComponent={
-            loadError || (savedView && !!bookmarksError) ? null : (
-              bookmarksLoading || (savedView && !validBookmarks) ? (
+            loadError || (savedView && !!bookmarksError) || (followingView && !!followingError) ? null : (
+              bookmarksLoading || (savedView && !validBookmarks) ||
+                (followingView && (followingLoading || !validFollowing)) ? (
                 <View style={{ alignItems: 'center', paddingVertical: 28, gap: 10 }}>
                   <ActivityIndicator color={theme.colors.accent} />
-                  <Text style={{ color: theme.colors.textSecondary }}>正在讀取收藏…</Text>
+                  <Text style={{ color: theme.colors.textSecondary }}>
+                    {followingView ? '正在讀取追蹤動態…' : '正在讀取收藏…'}
+                  </Text>
                 </View>
               ) : <EmptyState
                 showCalmHero
                 title={search.trim()
                   ? '找不到符合的貼文'
-                  : filter === 'saved' ? '還沒有收藏貼文'
+                  : filter === 'following' ? '追蹤的作者尚未發文'
+                    : filter === 'saved' ? '還沒有收藏貼文'
                     : filter === 'subscribed' ? '尚無已訂閱看板的新貼文'
                     : '尚無校園貼文'}
                 subtitle={
                   search.trim()
                     ? '請縮短關鍵字或清除搜尋，目前僅搜尋已載入的貼文。'
-                    : filter === 'saved'
-                      ? '到校園動態收藏有用的內容，之後可跨裝置找回。'
+                    : filter === 'following'
+                      ? '先到「全部」動態追蹤感興趣的作者；目前只篩選已載入貼文。'
+                      : filter === 'saved'
+                        ? '到校園動態收藏有用的內容，之後可跨裝置找回。'
                     : filter === 'subscribed'
                       ? '到「看板」訂閱你想追的版面，或點右下角發第一篇。'
                       : '點右下角的鉛筆，發出你的第一篇貼文。'
@@ -668,6 +690,35 @@ function HomeFeedContent() {
                       <Text style={styles.boardChip}>＃{board}</Text>
                     </Pressable>
                   </View>
+                  {!item.anonymous &&
+                    item.authorUid &&
+                    item.authorUid !== uid &&
+                    validFollowing && (
+                      <Pressable
+                        accessibilityRole="button"
+                        accessibilityLabel={followedIds.has(item.authorUid)
+                          ? `取消追蹤 ${authorLine(item)}`
+                          : `追蹤 ${authorLine(item)}`}
+                        accessibilityState={{
+                          selected: followedIds.has(item.authorUid),
+                          disabled: followingLoading || !!followingError || followingPending.has(item.authorUid),
+                        }}
+                        disabled={followingLoading || !!followingError || followingPending.has(item.authorUid)}
+                        hitSlop={8}
+                        onPress={(event) => {
+                          event.stopPropagation?.();
+                          void onToggleFollow(item.authorUid!);
+                        }}
+                        style={[styles.authorFollow, followedIds.has(item.authorUid) && styles.authorFollowActive]}
+                      >
+                        <Text style={[
+                          styles.authorFollowText,
+                          followedIds.has(item.authorUid) && styles.authorFollowTextActive,
+                        ]}>
+                          {followedIds.has(item.authorUid) ? '追蹤中' : '追蹤'}
+                        </Text>
+                      </Pressable>
+                    )}
                 </View>
 
                 <Text numberOfLines={2} style={styles.cardTitle}>
@@ -886,7 +937,7 @@ function FeedHeader(props: {
       </View>
 
       {/* Filter chips */}
-      <View style={styles.filterRow}>
+      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.filterRow}>
         {FILTERS.map((f) => {
           const active = filter === f.key;
           return (
@@ -907,7 +958,7 @@ function FeedHeader(props: {
             </Pressable>
           );
         })}
-      </View>
+      </ScrollView>
     </View>
   );
 }
@@ -1051,6 +1102,22 @@ const createStyles = () => StyleSheet.create({
       fontSize: 12,
     },
 
+  authorFollow: {
+    minHeight: 36,
+    paddingHorizontal: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: 18,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: theme.colors.border,
+    backgroundColor: theme.colors.surface,
+  },
+  authorFollowActive: {
+    borderColor: theme.colors.accent,
+    backgroundColor: theme.colors.accentSoft,
+  },
+  authorFollowText: { fontSize: 12, fontWeight: '700', color: theme.colors.text },
+  authorFollowTextActive: { color: theme.colors.accent },
   cardTitle: { fontSize: 16, fontWeight: '700', color: theme.colors.text, marginBottom: 4 },
   preview: { fontSize: 14, color: theme.colors.textSecondary, lineHeight: 20 },
 
