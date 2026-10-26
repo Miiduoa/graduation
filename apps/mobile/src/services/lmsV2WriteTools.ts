@@ -14,6 +14,7 @@
  */
 
 import { getSupabaseClient } from './supabaseClient';
+import { beginLmsQuizAttempt, storeLmsQuizAnswer, finishLmsQuizAttempt } from './lmsV2QuizDelivery';
 import { saveAssignmentDeviceDraft, deliverAssignmentFinal } from './lmsV2AssignmentDelivery';
 import { isLmsV2Enabled } from './lmsV2FeatureFlag';
 
@@ -203,33 +204,7 @@ export async function startQuizAttempt(opts: {
   courseId: string | number;
   quizId: string | number;
 }): Promise<LmsWriteResult> {
-  const env = await getClientOrErr();
-  if (env.ok === false) return env.err;
-  const { sb, userId } = env;
-  try {
-    const { data, error } = await sb
-      .from('quiz_attempts')
-      .insert({
-        course_id: opts.courseId,
-        quiz_id: opts.quizId,
-        user_id: userId,
-        started_at: new Date().toISOString(),
-        status: 'in_progress',
-      })
-      .select('id')
-      .single();
-    if (error) return rls(error);
-    const auditId = await writeAudit(sb, userId, opts.courseId, 'start_quiz', `quizzes/${opts.quizId}`);
-    return {
-      success: true,
-      summary: '測驗開始',
-      data: { attemptId: data?.id },
-      audit_id: auditId,
-      affects: ['self'],
-    };
-  } catch (err) {
-    return rls(err);
-  }
+  return beginLmsQuizAttempt(opts);
 }
 
 export async function answerQuizQuestion(opts: {
@@ -237,53 +212,13 @@ export async function answerQuizQuestion(opts: {
   questionId: string | number;
   answer: any;
 }): Promise<LmsWriteResult> {
-  const env = await getClientOrErr();
-  if (env.ok === false) return env.err;
-  const { sb, userId } = env;
-  try {
-    const { error } = await sb.from('quiz_answers').upsert(
-      {
-        attempt_id: opts.attemptId,
-        question_id: opts.questionId,
-        user_id: userId,
-        answer: opts.answer,
-        updated_at: new Date().toISOString(),
-      },
-      { onConflict: 'attempt_id,question_id' },
-    );
-    if (error) return rls(error);
-    return { success: true, summary: '答案已存', affects: ['self'] };
-  } catch (err) {
-    return rls(err);
-  }
+  return storeLmsQuizAnswer(opts);
 }
 
 export async function submitQuizAttempt(opts: {
   attemptId: string | number;
 }): Promise<LmsWriteResult> {
-  const env = await getClientOrErr();
-  if (env.ok === false) return env.err;
-  const { sb, userId } = env;
-  try {
-    const { error } = await sb
-      .from('quiz_attempts')
-      .update({
-        status: 'submitted',
-        submitted_at: new Date().toISOString(),
-      })
-      .eq('id', opts.attemptId)
-      .eq('user_id', userId);
-    if (error) return rls(error);
-    const auditId = await writeAudit(sb, userId, null, 'submit_quiz', `quiz_attempts/${opts.attemptId}`);
-    return {
-      success: true,
-      summary: '測驗已交卷',
-      audit_id: auditId,
-      affects: ['teacher'],
-    };
-  } catch (err) {
-    return rls(err);
-  }
+  return finishLmsQuizAttempt(opts);
 }
 
 export async function postForumReply(opts: {
