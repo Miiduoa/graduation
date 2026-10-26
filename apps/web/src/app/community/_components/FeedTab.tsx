@@ -17,6 +17,12 @@ import { selectCampusFeedPosts, type FeedFilter, type FeedOrder } from './feedVi
 import Image from 'next/image';
 import { useAuth } from '@/components/AuthGuard';
 import {
+  listCampusPostBookmarkIds,
+  loadCampusPostBookmarks,
+  saveCampusPostBookmark,
+  removeCampusPostBookmark,
+} from '@/lib/community/bookmarks';
+import {
   fetchRecentCampusPosts,
   rankFeedPosts,
   toggleCampusPostLike,
@@ -30,12 +36,13 @@ import {
   type StoryAuthorGroup,
 } from '@/lib/community/firestore';
 
-type FilterKey = FeedFilter;
+type FilterKey = FeedFilter | 'saved';
 
 const FILTERS: { key: FilterKey; label: string; icon: string }[] = [
   { key: 'all', label: '全部', icon: '✨' },
   { key: 'subscribed', label: '我訂閱', icon: '🔔' },
   { key: 'media', label: '圖文', icon: '🖼' },
+  { key: 'saved', label: '收藏', icon: '🔖' },
 ];
 
 function formatTs(t: unknown): string {
@@ -80,6 +87,20 @@ export function FeedTab(props: { schoolId: string; schoolSearch: string }) {
   const likeFlightsRef = useRef<Set<string>>(new Set());
   const [pendingLikes, setPendingLikes] = useState<ReadonlySet<string>>(new Set());
   const [likeFeedback, setLikeFeedback] = useState<{ postId: string; text: string } | null>(null);
+  const [bookmarkScope, setBookmarkScope] = useState('');
+  const [bookmarkedIds, setBookmarkedIds] = useState<ReadonlySet<string>>(new Set());
+  const [bookmarkedPosts, setBookmarkedPosts] = useState<CampusPostDoc[]>([]);
+  const [bookmarksLoading, setBookmarksLoading] = useState(false);
+  const [bookmarksError, setBookmarksError] = useState('');
+  const [bookmarkRevision, setBookmarkRevision] = useState(0);
+  const bookmarkFlights = useRef<Set<string>>(new Set());
+  const [bookmarksPending, setBookmarksPending] = useState<ReadonlySet<string>>(new Set());
+  const [bookmarkFeedback, setBookmarkFeedback] = useState<{ postId: string; text: string } | null>(null);
+  const currentBookmarkScope = `${user?.uid ?? ''}:${schoolId}`;
+  const validBookmarks = bookmarkScope === currentBookmarkScope;
+  const savedIds = validBookmarks ? bookmarkedIds : new Set<string>();
+  const savedPosts = validBookmarks ? bookmarkedPosts : [];
+  const savedView = filter === 'saved';
 
   const load = useCallback(async () => {
     if (!schoolId || !user) {
@@ -110,7 +131,7 @@ export function FeedTab(props: { schoolId: string; schoolSearch: string }) {
   useEffect(() => {
     (async () => {
       const uids = new Set<string>();
-      posts.forEach((p) => {
+      [...posts, ...savedPosts].forEach((p) => {
         if (!p.anonymous && p.authorUid) uids.add(p.authorUid);
       });
       stories.forEach((g) => uids.add(g.authorUid));
@@ -129,7 +150,7 @@ export function FeedTab(props: { schoolId: string; schoolSearch: string }) {
       setNameByUid(n);
       setAvatarByUid(a);
     })().catch(() => {});
-  }, [posts, stories, schoolId]);
+  }, [posts, savedPosts, stories, schoolId]);
 
   const boardNameById = useMemo(() => {
     const m: Record<string, string> = {};
@@ -141,16 +162,82 @@ export function FeedTab(props: { schoolId: string; schoolSearch: string }) {
 
   const visible = useMemo(
     () =>
-      selectCampusFeedPosts(posts, {
-        filter,
-        order,
+      selectCampusFeedPosts(savedView ? savedPosts : posts, {
+        filter: savedView ? 'all' : filter,
+        order: savedView ? 'latest' : order,
         search,
         subscribedIds,
         boardNames: boardNameById,
         authorNames: nameByUid,
       }),
-    [posts, filter, order, search, subscribedIds, boardNameById, nameByUid],
+    [posts, savedPosts, savedView, filter, order, search, subscribedIds, boardNameById, nameByUid],
   );
+
+  useEffect(() => {
+    const uid = user?.uid;
+    if (!uid || !schoolId) {
+      setBookmarkScope('');
+      setBookmarkedIds(new Set());
+      setBookmarkedPosts([]);
+      return;
+    }
+    const scope = `${uid}:${schoolId}`;
+    let live = true;
+    setBookmarksError('');
+    if (savedView) setBookmarksLoading(true);
+    void (async () => {
+      if (savedView) {
+        const result = await loadCampusPostBookmarks(uid, schoolId);
+        if (!live) return;
+        setBookmarkedIds(new Set(result.ids));
+        setBookmarkedPosts(result.posts);
+      } else {
+        const ids = await listCampusPostBookmarkIds(uid, schoolId);
+        if (!live) return;
+        setBookmarkedIds(new Set(ids));
+      }
+      setBookmarkScope(scope);
+    })()
+      .catch(() => {
+        if (live) setBookmarksError('暫時無法讀取收藏，請確認連線與校籍後重試。');
+      })
+      .finally(() => {
+        if (live) setBookmarksLoading(false);
+      });
+    return () => {
+      live = false;
+    };
+  }, [user?.uid, schoolId, savedView, bookmarkRevision]);
+
+  const toggleBookmark = async (item: CampusPostDoc) => {
+    if (!user?.uid || !schoolId || bookmarkFlights.current.has(item.id)) return;
+    const removing = savedIds.has(item.id);
+    bookmarkFlights.current.add(item.id);
+    setBookmarksPending((prev) => new Set([...prev, item.id]));
+    setBookmarkFeedback(null);
+    try {
+      if (removing) await removeCampusPostBookmark(user.uid, schoolId, item.id);
+      else await saveCampusPostBookmark(user.uid, schoolId, item.id);
+      setBookmarkedIds((prev) => {
+        const next = new Set(prev);
+        if (removing) next.delete(item.id);
+        else next.add(item.id);
+        return next;
+      });
+      if (removing) setBookmarkedPosts((prev) => prev.filter((post) => post.id !== item.id));
+      setBookmarkScope(currentBookmarkScope);
+      setBookmarkRevision((prev) => prev + 1);
+    } catch {
+      setBookmarkFeedback({ postId: item.id, text: '收藏未更新，請確認連線及校籍後重試。' });
+    } finally {
+      bookmarkFlights.current.delete(item.id);
+      setBookmarksPending((prev) => {
+        const next = new Set(prev);
+        next.delete(item.id);
+        return next;
+      });
+    }
+  };
 
   const onToggleLike = useCallback(
     async (row: CampusPostDoc) => {
@@ -197,6 +284,7 @@ export function FeedTab(props: { schoolId: string; schoolSearch: string }) {
   const onRefresh = async () => {
     setRefreshing(true);
     await refresh();
+    setBookmarkRevision((prev) => prev + 1);
     setRefreshing(false);
   };
 
@@ -436,16 +524,26 @@ export function FeedTab(props: { schoolId: string; schoolSearch: string }) {
       </div>
       {!loading && (
         <p className={styles.feedScope} role="status">
-          顯示 {visible.length} 則 · 目前載入 {posts.length} 則本校動態，搜尋與排序僅適用於這些貼文
+          {savedView
+            ? `顯示 ${visible.length} 則 · 本校最近最多 40 筆私人收藏，跨裝置同步`
+            : `顯示 ${visible.length} 則 · 目前載入 ${posts.length} 則本校動態，搜尋與排序僅適用於這些貼文`}
         </p>
+      )}
+      {savedView && bookmarksError && (
+        <div className={styles.feedError} role="alert">
+          {bookmarksError}{' '}
+          <button type="button" onClick={() => setBookmarkRevision((prev) => prev + 1)}>
+            重新載入
+          </button>
+        </div>
       )}
 
       {/* ── Posts ── */}
-      {loading ? (
-        <div className="card" style={{ padding: 24, textAlign: 'center', color: 'var(--muted)' }}>
-          載入中…
+      {loading || (savedView && (bookmarksLoading || !validBookmarks)) ? (
+        <div className="card" style={{ padding: 24, textAlign: 'center', color: 'var(--muted)' }} role="status">
+          {savedView ? '正在讀取收藏…' : '載入中…'}
         </div>
-      ) : visible.length === 0 ? (
+      ) : savedView && bookmarksError ? null : visible.length === 0 ? (
         <div className="card" style={{ padding: 32, textAlign: 'center', color: 'var(--muted)' }}>
           {search.trim()
             ? '找不到符合的貼文'
@@ -453,11 +551,17 @@ export function FeedTab(props: { schoolId: string; schoolSearch: string }) {
               ? '尚無已訂閱看板的新貼文'
               : filter === 'media'
                 ? '目前沒有圖文貼文'
-                : '尚無校園貼文'}
+                : filter === 'saved'
+                  ? '還沒有收藏貼文'
+                  : '尚無校園貼文'}
           <div className={styles.feedEmptyActions}>
             {search.trim() ? (
               <button type="button" className="btn" onClick={() => setSearch('')}>
                 清除搜尋
+              </button>
+            ) : filter === 'saved' ? (
+              <button type="button" className="btn primary" onClick={() => setFilter('all')}>
+                探索校園動態
               </button>
             ) : (
               <Link href={`/community/post/new?schoolId=${encodeURIComponent(schoolId)}`} className="btn primary">
@@ -631,6 +735,16 @@ export function FeedTab(props: { schoolId: string; schoolSearch: string }) {
                   </Link>
                   <button
                     type="button"
+                    aria-label={savedIds.has(item.id) ? '取消收藏貼文' : '收藏貼文'}
+                    aria-pressed={savedIds.has(item.id)}
+                    disabled={bookmarksPending.has(item.id)}
+                    className={styles.postShare}
+                    onClick={() => void toggleBookmark(item)}
+                  >
+                    {savedIds.has(item.id) ? '已收藏' : '收藏'}
+                  </button>
+                  <button
+                    type="button"
                     aria-label={`分享貼文：${item.title}`}
                     onClick={() => void sharePost(item)}
                     className={styles.postShare}
@@ -638,6 +752,9 @@ export function FeedTab(props: { schoolId: string; schoolSearch: string }) {
                     分享
                   </button>
                 </div>
+                {bookmarkFeedback?.postId === item.id && (
+                  <p role="alert" className={styles.feedError}>{bookmarkFeedback.text}</p>
+                )}
                 {likeFeedback?.postId === item.id && (
                   <p role="alert" className={styles.feedError}>{likeFeedback.text}</p>
                 )}
