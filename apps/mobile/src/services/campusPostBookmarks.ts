@@ -11,6 +11,7 @@ import {
   setDoc,
 } from 'firebase/firestore';
 import { getDb } from '../firebase';
+import { getCampusPostById, type CampusPostDoc } from './feed';
 
 function bookmarkCollection(uid: string, schoolId: string) {
   return collection(getDb(), 'users', uid, 'schools', schoolId, 'campusPostBookmarks');
@@ -44,4 +45,25 @@ export async function saveCampusPostBookmark(uid: string, schoolId: string, post
 
 export async function removeCampusPostBookmark(uid: string, schoolId: string, postId: string) {
   await deleteDoc(bookmarkDoc(uid, schoolId, postId));
+}
+
+/** Resolve saved posts outside the recent feed window. Missing or deleted posts are omitted. */
+export async function loadCampusPostBookmarks(
+  uid: string,
+  schoolId: string,
+  maximum = 40,
+): Promise<{ ids: string[]; posts: CampusPostDoc[] }> {
+  const ids = await listCampusPostBookmarkIds(uid, schoolId, maximum);
+  const settled = await Promise.allSettled(ids.map((id) => getCampusPostById(schoolId, id)));
+  const posts: CampusPostDoc[] = [];
+  for (const result of settled) {
+    if (
+      result.status === 'fulfilled' &&
+      result.value &&
+      result.value.schoolId === schoolId
+    ) {
+      posts.push(result.value);
+    }
+  }
+  return { ids, posts };
 }
