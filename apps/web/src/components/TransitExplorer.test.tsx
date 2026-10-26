@@ -747,6 +747,12 @@ it('keeps long route badges on one line and fits the stop-mode bar on a 350px bo
   expect(css).toMatch(/\.arrivals \{[^}]*scroll-margin-top: 24px;/);
   expect(css).toMatch(/\.arrivals \{[^}]*overflow-anchor: none;/);
   expect(css).toMatch(/\.arrivalBlock \{[^}]*scroll-margin-top: 24px;/);
+  const transferBadge = css.match(/\.transferRow \.routeBadge \{[^}]*\}/)?.[0] ?? '';
+  expect(transferBadge).toMatch(/white-space: normal;/);
+  expect(transferBadge).toMatch(/overflow: visible;/);
+  expect(transferBadge).toMatch(/flex-direction: column;/);
+  expect(transferBadge).not.toMatch(/text-overflow: ellipsis;/);
+  expect(css).toMatch(/@media \(max-width: 390px\) \{[\s\S]*?\.transferRow \.routeBadge \{[\s\S]*?font-size: 11px;/);
   expect(css).toMatch(/\.approach \{[^}]*position: sticky;/);
   expect(css).toMatch(/\.approach \{[^}]*top: 44px;/);
 });
@@ -832,12 +838,47 @@ it('shows a walking transfer when there is no one-seat ride', async () => {
   fireEvent.click(await screen.findByRole('button', { name: '高鐵臺中站' }));
   expect(await screen.findByTestId('transfer-trip-list')).toBeTruthy();
   expect(screen.getByText('沒有直達車，以下是轉乘建議。')).toBeTruthy();
-  expect(screen.getByText('300→151')).toBeTruthy();
+  expect(screen.getByTestId('transfer-trip').textContent?.replace(/\s+/g, '')).toContain('300→151');
+  expect(screen.getByLabelText('300轉151')).toBeTruthy();
   expect(screen.getByText('在專用道等')).toBeTruthy();
   expect(screen.getByText(/轉乘 臺中車站（步行 3 分）/)).toBeTruthy();
   expect(screen.getByText('45')).toBeTruthy();
-  expect(screen.getByText(/下一班 表定 /)).toBeTruthy();
+  expect(screen.getByText('分抵達')).toBeTruthy();
+  expect(screen.getByText('規劃 14:53 上車')).toBeTruthy();
+  expect(screen.queryByText(/下一班 表定 /)).toBeNull();
   expect(screen.queryByText('YOXI')).toBeNull();
+});
+
+it('keeps transfer route labels intact on a 360px board, including 308副→151', async () => {
+  const { nowMs, now } = freezeNow();
+  vi.mocked(queryTransit).mockImplementation(async (query) => {
+    if (query.action === 'campus-next') {
+      return { status: 'ready', kind: 'arrivals', arrivals: [], fetchedAt: now };
+    }
+    if (query.action === 'direct' && query.destination === '高鐵臺中站') {
+      return {
+        status: 'ready', kind: 'direct', fetchedAt: now,
+        destination: { query: '高鐵臺中站', label: '高鐵臺中站', kind: 'landmark', lat: 24.111, lon: 120.616 },
+        origin: { lat: 24.225388, lon: 120.577561 },
+        googleMapsUrl: 'https://www.google.com/maps/dir/?api=1&origin=24.225388,120.577561&destination=24.111,120.616&travelmode=transit',
+        trips: [],
+        transfers: [{
+          boardStopName: '靜宜大學(專用道)', firstRoute: '308副', transferStopName: '朝馬2',
+          transferWalkMinutes: 6, secondRoute: '151', alightStopName: '高鐵臺中站',
+          totalMinutes: 51,
+          arrival: { id: '308', route: '308副', direction: 0, destination: '台中車站', status: 0, seconds: null, updatedAt: now, stopName: '靜宜大學(專用道)', scheduledAt: new Date(nowMs + 12 * 60_000).toISOString() },
+        }],
+      };
+    }
+    return emptyArrivals();
+  });
+  renderExplorer();
+  fireEvent.click(await screen.findByRole('button', { name: '高鐵臺中站' }));
+  const row = await screen.findByTestId('transfer-trip');
+  expect(row.textContent?.replace(/\s+/g, '')).toContain('308副→151');
+  expect(screen.getByLabelText('308副轉151')).toBeTruthy();
+  expect(screen.getByText('分抵達')).toBeTruthy();
+  expect(screen.getByText('規劃 14:53 上車')).toBeTruthy();
 });
 
 it('does not offer Providence destination search on another campus', async () => {

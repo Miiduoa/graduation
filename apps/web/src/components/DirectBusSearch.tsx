@@ -34,9 +34,10 @@ function TripEta({ trip, now }: { trip: DirectTripView; now: number }) {
 }
 
 function transferNextLabel(view: ReturnType<typeof campusEtaView>): string {
-  if (view.kind === 'live' || view.kind === 'soon') return view.text;
-  if (view.clock) return `表定 ${view.clock}`;
-  return '表定';
+  if (view.kind === 'soon') return '即將進站，先上車';
+  if (view.kind === 'live' && view.minutes != null) return `即時 ${view.minutes} 分後上車`;
+  if (view.clock) return `規劃 ${view.clock} 上車`;
+  return '發車時間未提供';
 }
 
 function TransferEta({ trip, now }: { trip: TransferTripView; now: number }) {
@@ -45,8 +46,8 @@ function TransferEta({ trip, now }: { trip: TransferTripView; now: number }) {
   return (
     <span className={css.rowEta} data-kind={live ? view.kind : 'scheduled'}>
       <span className={css.etaNumber}>{trip.totalMinutes}</span>
-      <span className={css.etaUnit}>分</span>
-      <small className={css.transferNext}>下一班 {transferNextLabel(view)}</small>
+      <span className={css.etaUnit}>分抵達</span>
+      <small className={css.transferNext}>{transferNextLabel(view)}</small>
     </span>
   );
 }
@@ -231,7 +232,10 @@ export function DirectBusSearch({ schoolId }: { schoolId: string }) {
                   data-testid="transfer-trip"
                   onClick={() => setOpen(opened ? null : key)}
                 >
-                  <span className={css.routeBadge}>{trip.firstRoute}→{trip.secondRoute}</span>
+                  <span className={css.routeBadge} aria-label={`${trip.firstRoute}轉${trip.secondRoute}`}>
+                    <span>{trip.firstRoute}</span>
+                    <span>→{trip.secondRoute}</span>
+                  </span>
                   <span className={css.rowCopy}>
                     <strong>{directWaitLine(trip.boardStopName)}</strong>
                     <small>轉乘 {trip.transferStopName.replace(/[（(].*$/, '')}（步行 {trip.transferWalkMinutes} 分）· 下車 {trip.alightStopName.replace(/[（(].*$/, '')}</small>
@@ -242,8 +246,8 @@ export function DirectBusSearch({ schoolId }: { schoolId: string }) {
                   <div className={css.rowPanel}>
                     <p>上車站 {trip.boardStopName}，先搭 {trip.firstRoute}。</p>
                     <p>轉乘站 {trip.transferStopName}，步行約 {trip.transferWalkMinutes} 分鐘後搭 {trip.secondRoute}。</p>
-                    <p>下車站 {trip.alightStopName}。全程約 {trip.totalMinutes} 分鐘。</p>
-                    <p>下一班{live ? ` ${nextLine}` : ` ${nextLine}（沒有即時資料）`}。</p>
+                    <p>下車站 {trip.alightStopName}。從現在到下車約 {trip.totalMinutes} 分鐘。</p>
+                    <p>{live ? nextLine : `${nextLine}（沒有即時到站，跟路線規劃同一班）`}。</p>
                   </div>
                 ) : null}
               </li>
