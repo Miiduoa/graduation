@@ -171,10 +171,27 @@ it('does not claim a saved-post count while a loaded collection is refreshing or
   await screen.findByText('正在讀取收藏…');
   expect(screen.queryByText(/^顯示 .*私人收藏/)).toBeNull();
   await act(async () => reload.reject(Object.assign(new Error('revoked'), { code: 'permission-denied' })));
-  await screen.findByText('暫時無法讀取收藏，請確認連線與校籍後重試。');
+  expect(screen.queryByText('暫時無法讀取收藏，請確認連線與校籍後重試。')).toBeNull();
   expect(screen.queryByText(/^顯示 .*私人收藏/)).toBeNull();
   expect(screen.queryByText('小明的貼文')).toBeNull();
-  expect(screen.queryByText('還沒有收藏貼文')).toBeNull();
+  await screen.findByText('還沒有收藏貼文');
+});
+
+it('treats a permission-denied bookmark read as unsaved and only warns after a failed save', async () => {
+  mocks.listBookmarks.mockRejectedValueOnce(
+    Object.assign(new Error('denied'), { code: 'permission-denied' }),
+  );
+  mocks.saveBookmark.mockRejectedValueOnce(
+    Object.assign(new Error('denied'), { code: 'permission-denied' }),
+  );
+  render(<FeedTab schoolId="pu" schoolSearch="?schoolId=pu" />);
+  await screen.findByText('小明的貼文');
+  expect(screen.queryByText('暫時無法讀取收藏，請確認連線與校籍後重試。')).toBeNull();
+  const bookmark = postCard('小明的貼文').getByRole('button', { name: '收藏貼文' });
+  expect(bookmark.getAttribute('aria-pressed')).toBe('false');
+  fireEvent.click(bookmark);
+  await screen.findByText('收藏未更新，請確認連線及校籍後重試。');
+  expect(mocks.saveBookmark).toHaveBeenCalledWith('alice', 'pu', 'p-bob');
 });
 
 it('does not claim a followed-post count while previously loaded relations are refreshing or denied', async () => {
