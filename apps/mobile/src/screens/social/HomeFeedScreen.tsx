@@ -808,6 +808,9 @@ function FeedHeader(props: {
             <Pressable
               key={f.key}
               onPress={() => onSelectFilter(f.key)}
+              accessibilityRole="tab"
+              accessibilityLabel={`${f.label}分類`}
+              accessibilityState={{ selected: active }}
               style={[styles.filterChip, active && styles.filterChipActive]}
             >
               <Ionicons
