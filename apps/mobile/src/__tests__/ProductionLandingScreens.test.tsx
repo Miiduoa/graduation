@@ -33,6 +33,7 @@ let mockAuth: {
 jest.mock('../state/auth', () => ({ useAuth: () => mockAuth }));
 jest.mock('../hooks/usePermissions', () => ({ usePermissions: () => ({ isStudent: true }) }));
 jest.mock('../data/studentHome', () => ({ loadStudentHome: jest.fn() }));
+jest.mock('../components/LearningNextClassCard', () => ({ LearningNextClassCard: () => null }));
 jest.mock('../data/firebaseSource', () => ({ firebaseSource: { listBusRoutes: jest.fn() } }));
 jest.mock('../firebase', () => ({ isFirebaseMockMode: jest.fn(() => false) }));
 jest.mock('../utils/safeNavigate', () => ({ safeNavigate: jest.fn() }));
