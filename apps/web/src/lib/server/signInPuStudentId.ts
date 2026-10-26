@@ -2,7 +2,11 @@ import { randomBytes } from 'node:crypto';
 import { FieldValue } from 'firebase-admin/firestore';
 import { courseOfferingId } from '@campus/shared/src/timetable/course';
 import { signFirebaseCustomToken, type ServiceAccountSigner } from './firebaseCustomToken';
-import { enforceLoginRateLimit, LoginRateLimitError } from './loginRateLimit';
+import {
+  enforceLoginRateLimit,
+  LoginRateLimitError,
+  LoginRateStoreError,
+} from './loginRateLimit';
 import { createPuCampusGateway, PuCampusError, type PuCampusGateway } from './puCampusClient';
 import {
   assertOnlyProvidence,
@@ -95,19 +99,25 @@ async function writeSession(
   return sessionId;
 }
 
-function safeOfferingIds(teacherName: string, courses: Array<{ name: string; role: string; teachers: Array<{ name?: string }> }>): string[] {
+function safeOfferingIds(
+  teacherName: string,
+  courses: Array<{ name: string; role: string; teachers: Array<{ name?: string }> }>,
+): string[] {
   const names = new Set<string>();
   const display = teacherName.trim();
+  if (!display) return [];
   for (const course of courses) {
     if (!TEACHER_ROLES.has(course.role) || !course.name.trim()) continue;
     names.add(courseOfferingId({ name: course.name, teacher: display }));
-    for (const person of course.teachers) {
-      if (person.name?.trim()) {
-        names.add(courseOfferingId({ name: course.name, teacher: person.name }));
-      }
-    }
   }
   return [...names].filter((id) => id.length > 0 && id.length <= 200);
+}
+
+function hasTronClassSessionCookie(cookies: Record<string, string> | undefined): boolean {
+  if (!cookies) return false;
+  return Object.entries(cookies).some(
+    ([key, value]) => key.toLowerCase() === 'session' && String(value || '').trim().length > 0,
+  );
 }
 
 export async function handleSignInPuStudentId(
@@ -137,7 +147,12 @@ export async function handleSignInPuStudentId(
       throw new PuLoginHttpError(400, '學號格式不正確');
     }
 
-    enforceLoginRateLimit(ip, isStudent ? studentId : teacherAccount.toLowerCase());
+    await enforceLoginRateLimit(
+      deps.db,
+      ip,
+      isStudent ? studentId : teacherAccount.toLowerCase(),
+      deps.now?.() ?? Date.now(),
+    );
 
     const campus = deps.campus ?? createPuCampusGateway();
     if (isStudent) {
@@ -145,7 +160,11 @@ export async function handleSignInPuStudentId(
     }
     return await signInTeacher(teacherAccount, password, campus, deps);
   } catch (error) {
-    if (error instanceof PuLoginHttpError || error instanceof LoginRateLimitError) {
+    if (
+      error instanceof PuLoginHttpError ||
+      error instanceof LoginRateLimitError ||
+      error instanceof LoginRateStoreError
+    ) {
       throw error;
     }
     if (error instanceof PuCampusError) {
@@ -278,10 +297,15 @@ async function signInTeacher(
     session = await campus.loginTronClass(account, password);
   } catch (error) {
     if (error instanceof PuCampusError) {
-      const mapped = clientMessage(error);
-      throw new PuLoginHttpError(mapped.status, mapped.message);
+      if (error.kind === 'closed') {
+        throw new PuLoginHttpError(503, '尚未開放');
+      }
+      throw new PuLoginHttpError(401, '學號或密碼錯誤');
     }
     throw error;
+  }
+  if (!hasTronClassSessionCookie(session.cookies) || (!session.userId && !session.userName.trim())) {
+    throw new PuLoginHttpError(401, '學號或密碼錯誤');
   }
 
   let courses: Awaited<ReturnType<PuCampusGateway['fetchTronClassCourses']>> = [];
@@ -363,10 +387,16 @@ async function signInTeacher(
 }
 
 export function clientIpFromRequest(request: Request): string {
+  const fly = request.headers.get('fly-client-ip')?.trim();
+  if (fly) return fly;
   const forwarded = request.headers.get('x-forwarded-for');
   if (forwarded) {
-    const first = forwarded.split(',')[0]?.trim();
-    if (first) return first;
+    const hops = forwarded
+      .split(',')
+      .map((part) => part.trim())
+      .filter(Boolean);
+    const last = hops[hops.length - 1];
+    if (last) return last;
   }
   return request.headers.get('x-real-ip')?.trim() || 'unknown';
 }

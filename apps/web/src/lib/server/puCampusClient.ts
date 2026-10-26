@@ -103,6 +103,94 @@ function isCredentialPage(html: string): boolean {
   return /帳號或密碼錯誤|login_fail|Login Failed|密碼錯誤|_INVALID_PASSWORD_/.test(html);
 }
 
+function asRecord(value: unknown): Record<string, unknown> {
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : {};
+}
+
+function readTrimmed(value: unknown): string {
+  return typeof value === 'string' ? value.trim() : '';
+}
+
+function positiveId(value: unknown): number | null {
+  const parsed = typeof value === 'number' ? value : Number(value);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+}
+
+function sessionCookieValue(jar: CookieJar): string {
+  for (const [key, value] of Object.entries(jar)) {
+    if (key.toLowerCase() === 'session' && String(value || '').trim()) {
+      return String(value);
+    }
+  }
+  return '';
+}
+
+function looksLikeHtml(body: string): boolean {
+  return body.trimStart().startsWith('<');
+}
+
+function userIdFrom(data: Record<string, unknown>): number | null {
+  const nested = asRecord(data.user);
+  return positiveId(data.user_id ?? data.id ?? data.userId ?? nested.id ?? nested.user_id);
+}
+
+function displayNameFrom(data: Record<string, unknown>, fallback: string): string {
+  const nested = asRecord(data.user);
+  return (
+    readTrimmed(data.name) ||
+    readTrimmed(data.display_name) ||
+    readTrimmed(nested.name) ||
+    readTrimmed(nested.display_name) ||
+    fallback
+  );
+}
+
+function roleFrom(data: Record<string, unknown>): string {
+  const nested = asRecord(data.user);
+  return readTrimmed(data.role ?? nested.role).toLowerCase();
+}
+
+function accountIdentifiers(data: Record<string, unknown>): string[] {
+  const nested = asRecord(data.user);
+  const email = readTrimmed(data.email || nested.email).toLowerCase();
+  const local = email.includes('@') ? email.slice(0, email.indexOf('@')) : email;
+  return [
+    data.login_name,
+    data.user_no,
+    data.user_name,
+    data.userName,
+    nested.login_name,
+    nested.user_no,
+    nested.user_name,
+    nested.userName,
+    local,
+  ]
+    .map((value) => readTrimmed(value).toLowerCase())
+    .filter(Boolean);
+}
+
+function identityBelongsToAccount(
+  account: string,
+  data: Record<string, unknown>,
+  loginUserId: number | null,
+): boolean {
+  const wanted = account.trim().toLowerCase();
+  if (!wanted) return false;
+  if (accountIdentifiers(data).includes(wanted)) return true;
+  const profileId = userIdFrom(data);
+  return Boolean(profileId && loginUserId && profileId === loginUserId);
+}
+
+function authenticatedJson(page: SentPage): Record<string, unknown> | null {
+  if (page.status === 401 || page.status === 403 || page.status === 302) return null;
+  if (page.status !== 200 || looksLikeHtml(page.html) || !page.json || typeof page.json !== 'object') {
+    return null;
+  }
+  return asRecord(page.json);
+}
+
 export function classifyCampusFailure(error: unknown): PuCampusError {
   if (error instanceof PuCampusError) return error;
   const name = error instanceof Error ? error.name : '';
@@ -252,23 +340,52 @@ export function createPuCampusGateway(
         if (posted.status !== 200) {
           throw new PuCampusError('unavailable', '學校系統無回應');
         }
-        const data =
-          posted.json && typeof posted.json === 'object'
-            ? (posted.json as Record<string, unknown>)
-            : {};
-        const nested =
-          data.user && typeof data.user === 'object' ? (data.user as Record<string, unknown>) : {};
-        const userIdRaw = data.user_id ?? data.id ?? data.userId ?? nested.id ?? nested.user_id;
-        const userName = String(
-          data.name ?? data.user_name ?? data.display_name ?? nested.name ?? account,
-        ).trim();
-        const role = String(data.role ?? nested.role ?? '').toLowerCase();
-        return {
+        // HTTP 200 不夠：原生 API 可能回 200 JSON 卻沒有 session cookie。
+        if (!sessionCookieValue(posted.cookies)) {
+          throw new PuCampusError('credentials', '學號或密碼錯誤');
+        }
+        const loginData = asRecord(posted.json);
+        const loginUserId = userIdFrom(loginData);
+        const loginName = displayNameFrom(loginData, account);
+
+        const profilePage = await send(`${TRONCLASS_ORIGIN}/api/profile`, {
           cookies: posted.cookies,
-          userId: typeof userIdRaw === 'number' ? userIdRaw : Number(userIdRaw) || null,
-          userName,
-          role,
-        };
+          headers: { Accept: 'application/json' },
+        });
+        const profileData = authenticatedJson(profilePage);
+        if (profileData && identityBelongsToAccount(account, profileData, loginUserId)) {
+          return {
+            cookies: posted.cookies,
+            userId: userIdFrom(profileData) ?? loginUserId,
+            userName: displayNameFrom(profileData, loginName),
+            role: roleFrom(profileData) || roleFrom(loginData),
+          };
+        }
+        if (profilePage.status === 401 || profilePage.status === 403 || profilePage.status === 302) {
+          throw new PuCampusError('credentials', '學號或密碼錯誤');
+        }
+        if (profileData || looksLikeHtml(profilePage.html)) {
+          throw new PuCampusError('credentials', '學號或密碼錯誤');
+        }
+
+        const coursesPage = await send(`${TRONCLASS_ORIGIN}/api/my-courses`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+          body: JSON.stringify({ conditions: { status: ['ongoing'] }, page: 1, page_size: 50 }),
+          cookies: posted.cookies,
+        });
+        const coursesData = authenticatedJson(coursesPage);
+        const loginIdentifiesAccount =
+          identityBelongsToAccount(account, loginData, loginUserId) || Boolean(loginUserId);
+        if (coursesData && Array.isArray(coursesData.courses) && loginIdentifiesAccount) {
+          return {
+            cookies: posted.cookies,
+            userId: loginUserId,
+            userName: loginName,
+            role: roleFrom(loginData),
+          };
+        }
+        throw new PuCampusError('credentials', '學號或密碼錯誤');
       } catch (error) {
         throw classifyCampusFailure(error);
       }

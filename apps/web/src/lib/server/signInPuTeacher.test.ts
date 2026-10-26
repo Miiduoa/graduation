@@ -1,6 +1,5 @@
 // @vitest-environment node
-import { afterEach, beforeEach, expect, it } from 'vitest';
-import { resetLoginRateLimitForTests } from './loginRateLimit';
+import { expect, it } from 'vitest';
 import { createMemoryGroupStore } from './memoryGroupStore';
 import type { PuCampusGateway } from './puCampusClient';
 import { handleSignInPuStudentId } from './signInPuStudentId';
@@ -40,14 +39,6 @@ function deps(options?: {
     },
   };
 }
-
-beforeEach(() => {
-  resetLoginRateLimitForTests();
-});
-
-afterEach(() => {
-  resetLoginRateLimitForTests();
-});
 
 it('lets a TronClass teacher in and unions teacherUids without wiping others', async () => {
   const store = createMemoryGroupStore([
@@ -103,4 +94,62 @@ it('does not let a TronClass student claim to be a teacher', async () => {
   expect([...store.docs.keys()].some((path) => path.startsWith('schools/pu/courseTeachers/'))).toBe(
     false,
   );
+});
+
+it('rejects a TronClass 200 that did not actually create a session', async () => {
+  const { runtime, store } = deps({
+    campus: campus({
+      loginTronClass: async () => ({
+        cookies: {},
+        userId: 44,
+        userName: '王老師',
+        role: 'teacher',
+      }),
+    }),
+  });
+  await expect(
+    handleSignInPuStudentId({ studentId: TEACHER, password: SECRET }, '8.8.8.9', runtime),
+  ).rejects.toMatchObject({ status: 401, message: '學號或密碼錯誤' });
+  expect(store.docs.get('schools/pu/courseTeachers/資料庫｜王老師')).toBeUndefined();
+});
+
+it('only adds the signed-in teacher to 課名｜自己的名字 on a co-taught course', async () => {
+  const store = createMemoryGroupStore([
+    ['schools/pu/courseTeachers/資料庫｜李老師', { teacherUids: ['pu-t-lee'], note: 'keep' }],
+  ]);
+  const { runtime } = deps({
+    store,
+    campus: campus({
+      loginTronClass: async () => ({
+        cookies: { session: 'tc' },
+        userId: 44,
+        userName: '王老師',
+        role: 'teacher',
+      }),
+      fetchTronClassCourses: async () => [
+        {
+          name: '資料庫',
+          role: 'teacher',
+          teachers: [{ name: '王老師' }, { name: '李老師' }],
+        },
+      ],
+    }),
+  });
+  const result = await handleSignInPuStudentId(
+    { studentId: TEACHER, password: SECRET },
+    '7.7.7.8',
+    runtime,
+  );
+  expect(result).toMatchObject({
+    uid: 'pu-t-changyi',
+    displayName: '王老師',
+    offerings: ['資料庫｜王老師'],
+  });
+  expect(store.docs.get('schools/pu/courseTeachers/資料庫｜王老師')).toMatchObject({
+    teacherUids: ['pu-t-changyi'],
+  });
+  expect(store.docs.get('schools/pu/courseTeachers/資料庫｜李老師')).toMatchObject({
+    teacherUids: ['pu-t-lee'],
+    note: 'keep',
+  });
 });

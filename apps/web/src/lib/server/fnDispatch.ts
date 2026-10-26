@@ -13,7 +13,7 @@ import {
 import type { PuCampusGateway } from './puCampusClient';
 import type { SchoolLoginFirestore } from './schoolLoginProfile';
 import type { ServiceAccountSigner } from './firebaseCustomToken';
-import { LoginRateLimitError } from './loginRateLimit';
+import { LoginRateLimitError, LoginRateStoreError } from './loginRateLimit';
 import { clientIpFromRequest, PuLoginHttpError } from './signInPuStudentId';
 
 const JSON_HEADERS = {
@@ -264,6 +264,9 @@ async function dispatchSchoolLogin(
   } catch (error) {
     if (error instanceof LoginRateLimitError) {
       return jsonResponse(429, { error: error.message }, cors);
+    }
+    if (error instanceof LoginRateStoreError) {
+      return jsonResponse(503, { error: error.message }, cors);
     }
     if (error instanceof PuLoginHttpError) {
       return jsonResponse(error.status, { error: error.message }, cors);

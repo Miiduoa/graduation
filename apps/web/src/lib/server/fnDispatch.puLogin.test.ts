@@ -2,7 +2,7 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { dispatchFnRequest, type FnRuntime } from './fnDispatch';
 import { resetFirebaseAdminForTests } from './firebaseAdmin';
-import { resetLoginRateLimitForTests } from './loginRateLimit';
+import { LOGIN_RATE_LIMIT } from './loginRateLimit';
 import { createMemoryGroupStore } from './memoryGroupStore';
 import { PuCampusError, type PuCampusGateway } from './puCampusClient';
 import { resetUidRateLimitForTests } from './uidRateLimit';
@@ -49,7 +49,6 @@ function runtime(): { runtime: FnRuntime; store: ReturnType<typeof createMemoryG
 beforeEach(() => {
   resetFirebaseAdminForTests();
   resetUidRateLimitForTests();
-  resetLoginRateLimitForTests();
   delete process.env.FIREBASE_SERVICE_ACCOUNT_JSON;
   vi.stubEnv('SCHOOL_STUDENT_ID_LOGIN_ENABLED', 'true');
 });
@@ -57,7 +56,6 @@ beforeEach(() => {
 afterEach(() => {
   resetFirebaseAdminForTests();
   resetUidRateLimitForTests();
-  resetLoginRateLimitForTests();
   delete process.env.FIREBASE_SERVICE_ACCOUNT_JSON;
   vi.unstubAllEnvs();
 });
@@ -130,4 +128,59 @@ it('returns 401 for bad campus credentials without the password', async () => {
   const text = await res.text();
   expect(text).toBe(JSON.stringify({ error: '學號或密碼錯誤' }));
   expect(text).not.toContain(SECRET);
+});
+
+it('does not let a spoofed X-Forwarded-For hop bypass the IP limit', async () => {
+  const { runtime: deps } = runtime();
+  deps.puCampus = campus({
+    loginStudent: async () => {
+      throw new PuCampusError('credentials', '學號或密碼錯誤');
+    },
+  });
+  for (let i = 0; i < LOGIN_RATE_LIMIT.ip.limit; i += 1) {
+    const res = await dispatchFnRequest(
+      'signInPuStudentId',
+      request(
+        { studentId: String(1110700300 + i), password: SECRET },
+        { 'fly-client-ip': '203.0.113.10', 'x-forwarded-for': `${i}.1.1.1, 203.0.113.10` },
+      ),
+      deps,
+    );
+    expect(res.status).toBe(401);
+  }
+  const spoofed = await dispatchFnRequest(
+    'signInPuStudentId',
+    request(
+      { studentId: '1110700400', password: SECRET },
+      { 'fly-client-ip': '203.0.113.10', 'x-forwarded-for': '198.51.100.1' },
+    ),
+    deps,
+  );
+  expect(spoofed.status).toBe(429);
+  const otherFlyIp = await dispatchFnRequest(
+    'signInPuStudentId',
+    request(
+      { studentId: '1110700401', password: SECRET },
+      { 'fly-client-ip': '203.0.113.11', 'x-forwarded-for': '198.51.100.1' },
+    ),
+    deps,
+  );
+  expect(otherFlyIp.status).toBe(401);
+});
+
+it('returns 503 when shared rate-limit storage cannot be written', async () => {
+  const { runtime: deps, store } = runtime();
+  const loginStudent = vi.fn(async () => {
+    throw new PuCampusError('credentials', '學號或密碼錯誤');
+  });
+  deps.puCampus = campus({ loginStudent });
+  store.failNextCommit();
+  const res = await dispatchFnRequest(
+    'signInPuStudentId',
+    request({ studentId: STUDENT, password: SECRET }, { 'fly-client-ip': '203.0.113.12' }),
+    deps,
+  );
+  expect(res.status).toBe(503);
+  expect(await res.json()).toEqual({ error: '服務暫時無法使用' });
+  expect(loginStudent).not.toHaveBeenCalled();
 });

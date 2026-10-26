@@ -1,14 +1,33 @@
 /**
- * 學號登入頻率限制。計數存在單一 Node 行程的記憶體，多台機器之間不共用。
- * 正式站若水平擴充，每台各自計算；這是刻意取捨，避免為了登入去寫共用儲存。
+ * 學號登入頻率限制。計數寫在 Firestore `_rateLimits/{key}`，多台機器共用。
+ * 這個 collection 沒有 client rules，只有 Admin SDK 能讀寫。
+ * 計數失敗時 fail closed，不改走記憶體。
  */
 export const LOGIN_RATE_LIMIT = {
   ip: { limit: 20, windowMs: 10 * 60 * 1000 },
   account: { limit: 5, windowMs: 15 * 60 * 1000 },
-  maxKeys: 4096,
 } as const;
 
-type Bucket = { count: number; resetAt: number };
+export const RATE_LIMITS_COLLECTION = '_rateLimits';
+
+type RateLimitSnapshot = {
+  exists: boolean;
+  data: () => Record<string, unknown>;
+};
+
+type RateLimitDocRef = {
+  path?: string;
+};
+
+type RateLimitTransaction = {
+  get: (ref: RateLimitDocRef) => Promise<RateLimitSnapshot>;
+  set: (ref: RateLimitDocRef, data: Record<string, unknown>, options?: { merge?: boolean }) => void;
+};
+
+export type RateLimitFirestore = {
+  doc: (path: string) => RateLimitDocRef;
+  runTransaction: <T>(fn: (transaction: RateLimitTransaction) => Promise<T>) => Promise<T>;
+};
 
 export class LoginRateLimitError extends Error {
   readonly status = 429;
@@ -19,75 +38,100 @@ export class LoginRateLimitError extends Error {
   }
 }
 
-export type LoginRateLimiter = {
-  consume: (scope: string, key: string, limit: number, windowMs: number) => void;
-  reset: () => void;
-  size: () => number;
-};
+export class LoginRateStoreError extends Error {
+  readonly status = 503;
 
-export function createLoginRateLimiter(
-  options: { maxKeys?: number; now?: () => number } = {},
-): LoginRateLimiter {
-  const maxKeys = options.maxKeys ?? LOGIN_RATE_LIMIT.maxKeys;
-  const nowFn = options.now ?? (() => Date.now());
-  const store = new Map<string, Bucket>();
-
-  function evict(now: number): void {
-    for (const [id, bucket] of store) {
-      if (bucket.resetAt <= now) store.delete(id);
-    }
-    while (store.size >= maxKeys) {
-      const oldest = store.keys().next().value;
-      if (oldest === undefined) break;
-      store.delete(oldest);
-    }
+  constructor() {
+    super('服務暫時無法使用');
+    this.name = 'LoginRateStoreError';
   }
-
-  return {
-    consume(scope, key, limit, windowMs) {
-      const now = nowFn();
-      evict(now);
-      const id = `${scope}:${key}`;
-      const current = store.get(id);
-      if (!current || current.resetAt <= now) {
-        store.delete(id);
-        store.set(id, { count: 1, resetAt: now + windowMs });
-        return;
-      }
-      if (current.count >= limit) {
-        throw new LoginRateLimitError();
-      }
-      current.count += 1;
-      store.delete(id);
-      store.set(id, current);
-    },
-    reset() {
-      store.clear();
-    },
-    size() {
-      return store.size;
-    },
-  };
 }
 
-const singleton = createLoginRateLimiter();
-let active = singleton;
+function rateLimitDocId(scope: string, key: string): string {
+  return `${scope}:${key}`.replace(/\//g, '_').slice(0, 700);
+}
 
-export function enforceLoginRateLimit(ip: string, account: string): void {
-  active.consume('pu-student-login-ip', ip || 'unknown', LOGIN_RATE_LIMIT.ip.limit, LOGIN_RATE_LIMIT.ip.windowMs);
-  active.consume(
+function expiryMillis(value: unknown): number {
+  if (!value) return 0;
+  if (value instanceof Date) return value.getTime();
+  if (typeof value === 'number' && Number.isFinite(value)) return value;
+  if (typeof value === 'object') {
+    const record = value as { toMillis?: unknown; seconds?: unknown };
+    if (typeof record.toMillis === 'function') return record.toMillis();
+    if (typeof record.seconds === 'number') return record.seconds * 1000;
+  }
+  return 0;
+}
+
+export async function consumeLoginRateLimit(
+  db: RateLimitFirestore,
+  scope: string,
+  key: string,
+  limit: number,
+  windowMs: number,
+  now = Date.now(),
+): Promise<void> {
+  if (!db || typeof db.runTransaction !== 'function' || typeof db.doc !== 'function') {
+    throw new LoginRateStoreError();
+  }
+  const ref = db.doc(`${RATE_LIMITS_COLLECTION}/${rateLimitDocId(scope, key)}`);
+  try {
+    const outcome = await db.runTransaction(async (tx) => {
+      const snap = await tx.get(ref);
+      const data = snap.exists ? snap.data() : {};
+      const resetAt = expiryMillis(data.ttl ?? data.expiresAt);
+      if (!snap.exists || resetAt <= now) {
+        const ttl = new Date(now + windowMs);
+        tx.set(ref, { count: 1, ttl, scope, key });
+        return 'ok' as const;
+      }
+      const count = typeof data.count === 'number' ? data.count : 0;
+      if (count >= limit) {
+        return 'limited' as const;
+      }
+      tx.set(
+        ref,
+        {
+          count: count + 1,
+          ttl: data.ttl ?? data.expiresAt ?? new Date(resetAt),
+          scope,
+          key,
+        },
+        { merge: true },
+      );
+      return 'ok' as const;
+    });
+    if (outcome === 'limited') {
+      throw new LoginRateLimitError();
+    }
+  } catch (error) {
+    if (error instanceof LoginRateLimitError || error instanceof LoginRateStoreError) {
+      throw error;
+    }
+    throw new LoginRateStoreError();
+  }
+}
+
+export async function enforceLoginRateLimit(
+  db: RateLimitFirestore,
+  ip: string,
+  account: string,
+  now = Date.now(),
+): Promise<void> {
+  await consumeLoginRateLimit(
+    db,
+    'pu-student-login-ip',
+    ip || 'unknown',
+    LOGIN_RATE_LIMIT.ip.limit,
+    LOGIN_RATE_LIMIT.ip.windowMs,
+    now,
+  );
+  await consumeLoginRateLimit(
+    db,
     'pu-student-login-account',
     account,
     LOGIN_RATE_LIMIT.account.limit,
     LOGIN_RATE_LIMIT.account.windowMs,
+    now,
   );
-}
-
-export function setLoginRateLimiterForTests(limiter: LoginRateLimiter | null): void {
-  active = limiter ?? singleton;
-}
-
-export function resetLoginRateLimitForTests(): void {
-  active = singleton;
-  singleton.reset();
 }
