@@ -108,3 +108,44 @@ test('includes recently overdue work only when the teacher explicitly permits la
   expect(tasks.map((task) => task.title)).toEqual(['Late submission still available']);
   expect(tasks[0]?.subtitle).toContain('教師允許補交');
 });
+
+test('learning mode shows all enrolled published work while compact Today keeps its 14-item limit', async () => {
+  const day = 86400000;
+  const near = Array.from({ length: 18 }, (_, index) =>
+    row('near-' + index, {
+      title: 'Homework ' + index,
+      type: 'assignment',
+      dueAt: new Date(Date.now() + 2 * day).toISOString(),
+    }),
+  );
+  jest.mocked(getDocs).mockImplementation(async (path) => ({
+    empty: true,
+    docs: String(path).endsWith('/assignments')
+      ? [
+          ...near,
+          row('future', { title: 'Final presentation', dueAt: new Date(Date.now() + 45 * day).toISOString() }),
+          row('undated', { title: 'Reading journal' }),
+          row('invalid', { title: 'Invalid date', dueAt: 'invalid' }),
+          row('late-allowed', {
+            title: 'Late after seven days',
+            dueAt: new Date(Date.now() - 10 * day).toISOString(),
+            allowLateSubmission: true,
+          }),
+          row('closed', { title: 'Closed assessment', dueAt: new Date(Date.now() + day).toISOString(), status: 'closed' }),
+        ]
+      : [],
+  }) as never);
+  jest.mocked(getDoc).mockResolvedValue({ exists: () => false, data: () => ({}) } as never);
+
+  const compact = await listInboxTasks('alice');
+  const complete = await listInboxTasks('alice', undefined, 'learning');
+
+  expect(compact).toHaveLength(14);
+  expect(complete).toHaveLength(22);
+  expect(complete.some((item) => item.title === 'Final presentation')).toBe(true);
+  expect(complete.find((item) => item.title === 'Reading journal')?.dueAt).toBeNull();
+  expect(complete.find((item) => item.title === 'Invalid date')?.dueAt).toBeNull();
+  expect(complete.find((item) => item.title === 'Late after seven days')?.lateSubmissionAllowed).toBe(true);
+  expect(complete.some((item) => item.title === 'Closed assessment')).toBe(false);
+  expect(complete.every((item) => item.kind !== 'assistant_queue')).toBe(true);
+});
