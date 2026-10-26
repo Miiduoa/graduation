@@ -60,6 +60,7 @@ it.each([
   [401, '學號或密碼錯誤', '學號或密碼錯誤'],
   [503, '尚未開放', '這間學校尚未開放學號登入'],
   [503, '學校系統暫時無法連線', '學校系統暫時連不上，請稍後再試'],
+  [503, '老師登入暫未開放；學生請輸入純數字學號', '老師登入暫未開放；學生請輸入純數字學號'],
   [429, 'Too many requests', '嘗試太多次，請稍後再試'],
   [503, '暫時無法驗證老師身分', '登入失敗。請確認學號與密碼，或稍後再試。'],
   [500, '<script>evil</script>', '登入失敗。請確認學號與密碼，或稍後再試。'],
@@ -80,6 +81,17 @@ it.each([
     expect(state.signIn).not.toHaveBeenCalled();
   },
 );
+
+it('maps teacher LMS unavailability by error code without printing the server body', async () => {
+  state.fetch.mockImplementation(async () =>
+    Response.json({ error: '<script>evil</script>', code: 'teacher_lms_unreachable' }, { status: 503 }),
+  );
+  await expect(signInWithPuStudentId('changyi', 'test-password')).rejects.toMatchObject({
+    name: 'SchoolLoginHttpError',
+    status: 503,
+    message: '老師登入暫未開放；學生請輸入純數字學號',
+  });
+});
 
 it('establishes a school session for a still-active login task and disposes temporary Auth', async () => {
   state.fetch.mockResolvedValueOnce(Response.json({ customToken: 'test-credential' }));

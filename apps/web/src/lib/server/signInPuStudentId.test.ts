@@ -11,7 +11,14 @@ import {
 } from './loginRateLimit';
 import { createMemoryGroupStore } from './memoryGroupStore';
 import { PuCampusError, type PuCampusGateway } from './puCampusClient';
-import { clientIpFromRequest, handleSignInPuStudentId, PuLoginHttpError } from './signInPuStudentId';
+import {
+  clientIpFromRequest,
+  handleSignInPuStudentId,
+  PuLoginHttpError,
+  STUDENT_LMS_SOFT_TIMEOUT_MS,
+  TEACHER_LMS_UNAVAILABLE,
+  TEACHER_LMS_UNAVAILABLE_CODE,
+} from './signInPuStudentId';
 
 const STUDENT = '1110700321';
 const SECRET = 'never-log-this-password';
@@ -127,6 +134,50 @@ it('rejects invalid student ids and missing fields', async () => {
   ).rejects.toMatchObject({ status: 400, message: 'Missing required fields: studentId, password' });
 });
 
+it.each(['s1110700321', 'S1110700321', '1110700321@pu.edu.tw', 's1110700321@pu.edu.tw'])(
+  'sends %s through the student alcat route as digits',
+  async (input) => {
+    const loginStudent = vi.fn(async (studentId: string) => {
+      expect(studentId).toBe(STUDENT);
+      return { cookies: { PHPSESSID: 'stu-cookie' }, studentName: '陳同學' };
+    });
+    const loginTronClass = vi.fn(async () => {
+      throw new PuCampusError('timeout', '學校系統無回應', { route: 'student', stage: 'submit', code: 'ETIMEDOUT' });
+    });
+    const { runtime } = deps({ campus: campus({ loginStudent, loginTronClass }) });
+    const result = await handleSignInPuStudentId({ studentId: input, password: SECRET }, '1.1.1.1', runtime);
+    expect(result).toMatchObject({ uid: 'pu-1110700321', studentId: STUDENT, success: true });
+    expect(loginStudent).toHaveBeenCalledOnce();
+    expect(loginTronClass).toHaveBeenCalledWith(STUDENT, SECRET, {
+      timeoutMs: STUDENT_LMS_SOFT_TIMEOUT_MS,
+      route: 'student',
+    });
+  },
+);
+
+it('keeps romanized faculty accounts on the teacher route', async () => {
+  const loginStudent = vi.fn(async () => ({ cookies: { PHPSESSID: 'stu' } }));
+  const loginTronClass = vi.fn(async () => ({
+    cookies: { session: 'tc' },
+    userId: 44,
+    userName: '王老師',
+    role: 'teacher',
+  }));
+  const { runtime } = deps({
+    campus: campus({
+      loginStudent,
+      loginTronClass,
+      fetchTronClassCourses: async () => [
+        { name: '資料庫', role: 'teacher', teachers: [{ name: '王老師' }] },
+      ],
+    }),
+  });
+  const result = await handleSignInPuStudentId({ studentId: 'changyi', password: SECRET }, '1.1.1.1', runtime);
+  expect(result).toMatchObject({ uid: 'pu-t-changyi', role: 'teacher' });
+  expect(loginStudent).not.toHaveBeenCalled();
+  expect(loginTronClass).toHaveBeenCalled();
+});
+
 it('logs expected campus failures without account, password, or IP', async () => {
   const lines: string[] = [];
   vi.spyOn(console, 'info').mockImplementation((...args) => {
@@ -147,16 +198,23 @@ it('logs expected campus failures without account, password, or IP', async () =>
     msg: 'pu_campus_login_expected_failure',
     reason: 'campus_closed',
     school: 'pu',
+    route: 'student',
   });
   expect(typeof closedLog.elapsedMs).toBe('number');
   expect(JSON.stringify(closedLog)).not.toContain(STUDENT);
   expect(JSON.stringify(closedLog)).not.toContain(SECRET);
   expect(JSON.stringify(closedLog)).not.toContain('2.2.2.2');
+  expect(JSON.stringify(closedLog)).not.toContain('PHPSESSID');
+  expect(JSON.stringify(closedLog)).not.toContain('token');
 
   const { runtime: timeout } = deps({
     campus: campus({
       loginStudent: async () => {
-        throw new PuCampusError('timeout', '學校系統無回應');
+        throw new PuCampusError('timeout', '學校系統無回應', {
+          route: 'student',
+          stage: 'submit',
+          code: 'ETIMEDOUT',
+        });
       },
     }),
   });
@@ -168,9 +226,49 @@ it('logs expected campus failures without account, password, or IP', async () =>
     msg: 'pu_campus_login_expected_failure',
     reason: 'campus_unreachable',
     school: 'pu',
+    route: 'student',
+    stage: 'submit',
+    code: 'ETIMEDOUT',
   });
   expect(JSON.stringify(timeoutLog)).not.toContain(SECRET);
   expect(JSON.stringify(timeoutLog)).not.toContain('3.3.3.3');
+});
+
+it('tells students to use a numeric id when the teacher LMS cannot be reached', async () => {
+  const lines: string[] = [];
+  vi.spyOn(console, 'info').mockImplementation((...args) => {
+    lines.push(args.map((item) => String(item)).join(' '));
+  });
+  const { runtime } = deps({
+    campus: campus({
+      loginStudent: async () => {
+        throw new Error('should not run');
+      },
+      loginTronClass: async () => {
+        throw new PuCampusError('timeout', '學校系統無回應', {
+          route: 'teacher',
+          stage: 'submit',
+          code: 'ETIMEDOUT',
+        });
+      },
+    }),
+  });
+  await expect(
+    handleSignInPuStudentId({ studentId: 'changyi', password: SECRET }, '8.8.8.8', runtime),
+  ).rejects.toMatchObject({
+    status: 503,
+    message: TEACHER_LMS_UNAVAILABLE,
+    code: TEACHER_LMS_UNAVAILABLE_CODE,
+  });
+  const timeoutLog = JSON.parse(lines.at(-1) || '{}') as Record<string, unknown>;
+  expect(timeoutLog).toMatchObject({
+    msg: 'pu_campus_login_expected_failure',
+    route: 'teacher',
+    stage: 'submit',
+    code: 'ETIMEDOUT',
+  });
+  expect(JSON.stringify(timeoutLog)).not.toContain('changyi');
+  expect(JSON.stringify(timeoutLog)).not.toContain(SECRET);
 });
 
 it('maps campus credential, timeout and closed errors', async () => {
