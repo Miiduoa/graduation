@@ -297,3 +297,33 @@ it('does not attribute another course loading failure to the selected healthy co
   expect(summary.getByRole('button', { name: /待完成/ }).textContent).toContain('1');
   expect(summary.getByRole('button', { name: /待完成/ }).textContent).not.toContain('+');
 });
+ 
+
+it('shows an explainable cross-course focus queue with direct task actions', async () => {
+  const overdue = task(31, { title: '仍可處理的逾時作業', dueAt: '2026-10-20T10:00:00+08:00' });
+  const quiz = task(32, {
+    kind: 'quiz',
+    title: '今天的小考',
+    id: 'cwq_00000000-0000-4000-8000-000000000032',
+    dueAt: '2026-10-25T20:00:00+08:00',
+  });
+  const completed = task(33, { title: '已經繳交過的作業', submittedAt: '2026-10-24T12:00:00+08:00' });
+  state.load.mockResolvedValue(agenda([quiz, completed, overdue]));
+  render(<Harness context="campus=tw-pu" />);
+  const focus = await screen.findByRole('region', { name: '今日優先課業' });
+  const links = within(focus).getAllByRole('link');
+  expect(links).toHaveLength(2);
+  expect(links[0].getAttribute('aria-label')).toContain(overdue.title);
+  expect(links[1].getAttribute('aria-label')).toContain(quiz.title);
+  expect(links[0].getAttribute('href')).toContain(`#assignment-${overdue.id}`);
+  expect(links[1].getAttribute('href')).toContain(`#quiz-${quiz.id}`);
+  expect(focus.textContent).toContain('已過參考時間 · 仍可開啟');
+  expect(focus.textContent).not.toContain(completed.title);
+});
+
+it('marks a partially loaded recommendation as incomplete rather than a full student plan', async () => {
+  state.load.mockResolvedValue(agenda([task(90)], { failedCourseIds: [memberships[0].id] }));
+  render(<Harness />);
+  const focus = await screen.findByRole('region', { name: '今日優先課業' });
+  expect(focus.textContent).toContain('部分課程資料尚未完整');
+});
