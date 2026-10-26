@@ -56,6 +56,7 @@ import {
   deleteDoc,
   doc,
   getDoc,
+  getDocFromServer,
   getDocs,
   limit as firestoreLimit,
   orderBy,
@@ -121,6 +122,7 @@ import {
   isProvidenceDiningSchoolId,
 } from './puDiningCatalog';
 import { publicDiningCafeterias } from '@campus/shared/src/publicDiningCatalog';
+import { parseTaipeiInstant } from '@campus/shared/src/taipeiTime';
 
 const DEFAULT_PAGE_SIZE = 20;
 
@@ -452,6 +454,7 @@ async function fetchCollectionAtPath<T extends { id: string }>(
 
 async function fetchDocumentAtPath<T extends { id: string }>(
   pathSegments: string[],
+  fromServer = false,
 ): Promise<T | null> {
   // 路徑中若帶有 demo_ uid（'users/demo_student_kuchih' 等），直接 miss。
   if (pathSegments.some((seg) => typeof seg === 'string' && seg.startsWith('demo_'))) {
@@ -459,7 +462,8 @@ async function fetchDocumentAtPath<T extends { id: string }>(
   }
   try {
     const db = getDb();
-    const docSnap = await getDoc(docFromSegments(db, pathSegments));
+    const ref = docFromSegments(db, pathSegments);
+    const docSnap = await (fromServer ? getDocFromServer(ref) : getDoc(ref));
 
     if (!docSnap.exists()) {
       return null;
@@ -1938,10 +1942,15 @@ export const firebaseSource: DataSource = {
     if (groupId) {
       const canonicalAssignment = await fetchDocumentAtPath<Assignment>(
         buildGroupCollectionPath(groupId, 'assignments', id),
+        true,
       );
       if (canonicalAssignment) {
+        if (canonicalAssignment.groupId && canonicalAssignment.groupId !== groupId) {
+          throw new Error('作業所屬課程不符，請重新開啟課程。');
+        }
         return { ...canonicalAssignment, groupId: canonicalAssignment.groupId ?? groupId };
       }
+      return null;
     }
     return fetchDocument<Assignment>('assignments', id);
   },
@@ -2001,15 +2010,28 @@ export const firebaseSource: DataSource = {
 
   async getSubmission(assignmentId, userId, groupId = undefined) {
     if (groupId) {
+      const readerUid = getAuthInstance().currentUser?.uid;
+      if (!readerUid) throw new Error('請先登入。');
       const canonicalSubmission = await fetchDocumentAtPath<Submission>(
         buildGroupCollectionPath(groupId, 'assignments', assignmentId, 'submissions', userId),
+        true,
       );
+      if (getAuthInstance().currentUser?.uid !== readerUid) {
+        throw new Error('登入身分已變更，請重新開啟課程。');
+      }
       if (canonicalSubmission) {
+        if ((canonicalSubmission.groupId && canonicalSubmission.groupId !== groupId)
+          || (canonicalSubmission.assignmentId && canonicalSubmission.assignmentId !== assignmentId)
+          || canonicalSubmission.userId !== userId) {
+          throw new Error('繳交紀錄與這份作業不符，請重新讀取。');
+        }
         return {
           ...canonicalSubmission,
           assignmentId: canonicalSubmission.assignmentId ?? assignmentId,
+          groupId: canonicalSubmission.groupId ?? groupId,
         };
       }
+      return null;
     }
 
     const submissions = await fetchCollection<Submission>('submissions', [
@@ -2053,8 +2075,19 @@ export const firebaseSource: DataSource = {
       if (['quiz', 'exam'].includes(String(assignment.type ?? ''))) {
         throw new Error('請透過評量頁面作答。');
       }
-      const due = isoTimestamp(assignment.dueAt);
-      if (due && Date.parse(due) < Date.now() && assignment.allowLateSubmission !== true) {
+      const rawDue = assignment.dueAt;
+      let due: number | null = null;
+      try {
+        due = rawDue instanceof Timestamp
+          ? parseTaipeiInstant(rawDue.toDate())
+          : typeof rawDue === 'string' ? parseTaipeiInstant(rawDue) : null;
+      } catch {
+        due = null;
+      }
+      if (rawDue != null && due === null) {
+        throw new Error('截止時間無法確認，請聯絡授課教師。');
+      }
+      if (due !== null && due < Date.now() && assignment.allowLateSubmission !== true) {
         throw new Error('作業已截止，請聯絡授課教師。');
       }
       const ref = docFromSegments(db, submissionPath);
@@ -2080,7 +2113,17 @@ export const firebaseSource: DataSource = {
       );
     });
 
-    return (await fetchDocumentAtPath<Submission>(submissionPath)) as Submission;
+    const receipt = await fetchDocumentAtPath<Submission>(submissionPath, true);
+    if (getAuthInstance().currentUser?.uid !== userId) {
+      throw new Error('登入身分已變更，請重新開啟課程。');
+    }
+    if (!receipt || receipt.userId !== userId || receipt.groupId !== groupId
+      || receipt.assignmentId !== assignmentId || receipt.content !== content
+      || receipt.status !== 'submitted' || !receipt.submittedAt
+      || parseTaipeiInstant(receipt.submittedAt) === null) {
+      throw new Error('繳交結果尚未確認，請重新讀取紀錄，內容仍會保留。');
+    }
+    return receipt;
   },
 
   async gradeSubmission(
