@@ -21,6 +21,9 @@ function taipeiDay(time: number): number | null {
 }
 
 export function describeLearningTask(task: InboxTask, now = new Date()): LearningTaskLabel {
+  if (task.preferredIntent === 'review') {
+    return { label: task.actionLabel || '待批改', tone: 'ai' };
+  }
   if (task.kind === 'live') return { label: '進行中', tone: 'warning' };
   const due = dueTime(task);
   if (due === null) {
