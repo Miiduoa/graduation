@@ -39,7 +39,7 @@ test('puts active attendance and overdue work before future deadlines', () => {
   const summary = buildLearningWorkspace(courses, [
     task('later', 'assignment', '2026-11-10T06:00:00Z'),
     task('soon', 'quiz', '2026-10-27T07:00:00Z'),
-    task('late', 'assignment', '2026-10-24T16:00:00Z'),
+    { ...task('late', 'assignment', '2026-10-24T16:00:00Z'), lateSubmissionAllowed: true },
     task('attendance', 'live'),
   ], now);
   expect(summary.tasks.map((row) => row.id)).toEqual(['attendance', 'late', 'soon', 'later']);
@@ -66,4 +66,33 @@ test('seven-day filter excludes overdue and undated items without inventing dead
   expect(filterLearningTasks(tasks, 'week', now).map((row) => row.id)).toEqual(['week']);
   expect(filterLearningTasks(tasks, 'assignment', now).map((row) => row.id))
     .toEqual(['expired', 'undated', 'later']);
+});
+
+test('overdue count only includes assignments with a verified permission to submit late', () => {
+  const unverified = task('locked', 'assignment', '2026-10-24T16:00:00Z');
+  const allowed = { ...task('allowed', 'assignment', '2026-10-24T16:00:00Z'), lateSubmissionAllowed: true };
+  const summary = buildLearningWorkspace(courses, [unverified, allowed], now);
+  expect(summary.overdueCount).toBe(1);
+  expect(describeLearningTask(allowed, now)).toEqual({ label: '逾期可補交', tone: 'danger' });
+  expect(describeLearningTask(unverified, now)).toEqual({ label: '已逾期', tone: 'danger' });
+});
+
+test('task search is case-insensitive, unicode-normalized and limited to the selected course', () => {
+  const first = {
+    ...task('find', 'assignment', '2026-10-30T09:00:00Z'),
+    title: 'DB Homework',
+    groupName: '資料結構',
+    subtitle: '第三週練習',
+  };
+  const other = {
+    ...task('other', 'assignment', '2026-10-30T09:00:00Z', 'course-2'),
+    title: 'DB Project',
+    groupName: '資料庫',
+  };
+  expect(filterLearningTasks([first, other], 'all', now, { query: 'ｄｂ' }).map((row) => row.id))
+    .toEqual(['find', 'other']);
+  expect(filterLearningTasks([first, other], 'all', now, { query: 'HOME', groupId: 'course-1' }).map((row) => row.id))
+    .toEqual(['find']);
+  expect(filterLearningTasks([first, other], 'all', now, { query: '資料庫', groupId: 'course-1' }))
+    .toEqual([]);
 });
