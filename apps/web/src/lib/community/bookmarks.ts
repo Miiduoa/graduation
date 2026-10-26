@@ -41,7 +41,16 @@ export async function saveCampusPostBookmark(uid: string, schoolId: string, post
   const ref = bookmarkDoc(uid, schoolId, postId);
   // A second device may already have saved the post; writes are create-only.
   if ((await getDoc(ref)).exists()) return;
-  await setDoc(ref, { schoolId, postId, createdAt: serverTimestamp() });
+  try {
+    await setDoc(ref, { schoolId, postId, createdAt: serverTimestamp() });
+  } catch (error) {
+    // Two devices can both read an empty bookmark before one of them creates it.
+    // Our rules reject updates, so verify whether the other write already won.
+    const current = await getDoc(ref).catch(() => null);
+    if (current?.exists() && current.data()?.schoolId === schoolId && current.data()?.postId === postId)
+      return;
+    throw error;
+  }
 }
 
 export async function removeCampusPostBookmark(uid: string, schoolId: string, postId: string) {
