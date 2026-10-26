@@ -96,3 +96,11 @@ test('task search is case-insensitive, unicode-normalized and limited to the sel
   expect(filterLearningTasks([first, other], 'all', now, { query: '資料庫', groupId: 'course-1' }))
     .toEqual([]);
 });
+
+test('instructor review work is labeled by its actual action instead of an expired due date', () => {
+  expect(describeLearningTask({
+    ...task('review', 'quiz', '2026-10-20T00:00:00Z'),
+    preferredIntent: 'review',
+    actionLabel: '前往批改',
+  }, now)).toEqual({ label: '前往批改', tone: 'ai' });
+});
