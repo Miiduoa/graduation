@@ -14,7 +14,7 @@ import { getDb } from '../firebase';
 import { getCampusPostById, type CampusPostDoc } from './feed';
 
 function bookmarkCollection(uid: string, schoolId: string) {
-  return collection(getDb(), 'users', uid, 'schools', schoolId, 'campusPostBookmarks');
+  return collection(getDb(), 'users', uid, 'campusPostBookmarks', schoolId, 'posts');
 }
 
 function bookmarkDoc(uid: string, schoolId: string, postId: string) {
