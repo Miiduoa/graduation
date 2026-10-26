@@ -639,7 +639,7 @@ function HomeFeedContent() {
                     style={styles.statHit}
                     hitSlop={8}
                     onPress={(event) => {
-                      event.stopPropagation?.();
+                      event?.stopPropagation?.();
                       void onToggleBookmark(item);
                     }}
                   >
