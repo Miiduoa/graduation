@@ -12,6 +12,7 @@ const mockNavigate = jest.fn();
 const mockNavigation = { navigate: mockNavigate };
 jest.mock('../state/auth', () => ({ useAuth: () => mockAuth }));
 jest.mock('../data/studentHome', () => ({ loadStudentHome: jest.fn() }));
+jest.mock('../components/LearningNextClassCard', () => ({ LearningNextClassCard: () => null }));
 jest.mock('@react-navigation/native', () => ({
   useNavigation: () => mockNavigation,
   useFocusEffect: (callback: () => void) => require('react').useEffect(callback, [callback]),
