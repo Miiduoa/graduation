@@ -8,6 +8,7 @@ import { theme } from '../../ui/theme';
 import { useThemeStyleSheet } from '../../ui/useThemeStyleSheet';
 import { View, Text, ScrollView, Pressable, StyleSheet } from 'react-native';
 import { getSupabaseClient } from '../../services/supabaseClient';
+import { COURSE_V2_SHORTCUT_GROUPS } from './courseV2Routes';
 import {
   CourseV2Header,
   useCourseV2Nav,
@@ -17,32 +18,22 @@ import {
   CourseV2Error,
 } from './_courseV2Shell';
 
-type Chip = { key: string; label: string; emoji: string; route: string };
-
-const CHIPS: Chip[] = [
-  { key: 'materials', label: '教材', emoji: '📚', route: 'CourseMaterialViewer' },
-  { key: 'assignments', label: '作業', emoji: '📝', route: 'HomeworkSubmit' },
-  { key: 'quizzes', label: '測驗', emoji: '❓', route: 'QuizCenter' },
-  { key: 'forum', label: '討論', emoji: '💬', route: 'CourseDiscussion' },
-  { key: 'announcements', label: '公告', emoji: '📢', route: '公告總覽' },
-  { key: 'grades', label: '成績', emoji: '💯', route: 'CourseScores' },
-  { key: 'ai', label: '課程助理', emoji: '💬', route: 'AIAgentConsole' },
-  { key: 'live', label: '直播', emoji: '🎥', route: 'Attendance' },
-];
-
 export default function CourseHubV2Screen() {
   const styles = useThemeStyleSheet(createStyles);
   const { courseId, courseName } = useCourseV2Params();
   const nav = useCourseV2Nav();
   const loadable = useLoadable(async () => {
     const sb = getSupabaseClient();
-    if (!sb) return { title: courseName ?? '(無連線)', catalog_summary: '' };
-    const { data } = await sb
+    if (!courseId) throw new Error('找不到課程代碼，請返回課程列表重新選擇。');
+    if (!sb) throw new Error('課程服務尚未連線，請確認 LMS 設定後重試。');
+    const { data, error } = await sb
       .from('courses')
       .select('id, title, description, catalog_summary, credit_hours, term_id')
       .eq('id', courseId)
       .maybeSingle();
-    return data ?? { title: courseName ?? '(無資料)', catalog_summary: '' };
+    if (error) throw error;
+    if (!data) throw new Error('找不到這門課，或目前沒有存取權限。');
+    return data;
   });
 
   if (loadable.loading) return <CourseV2Loading />;
@@ -53,18 +44,35 @@ export default function CourseHubV2Screen() {
     <View style={{ flex: 1, backgroundColor: theme.colors.bg }}>
       <CourseV2Header
         title={course.title}
-        subtitle={course.catalog_summary || (course.credit_hours ? `${course.credit_hours} 學分` : String(courseId))}
+        subtitle={course.catalog_summary || (course.credit_hours ? `${course.credit_hours} 學分` : courseName)}
       />
-      <ScrollView contentContainerStyle={styles.grid}>
-        {CHIPS.map(chip => (
-          <Pressable
-            key={chip.key}
-            style={styles.chip}
-            onPress={() => nav.navigate(chip.route, { courseId, courseName: course.title })}
-          >
-            <Text style={styles.chipEmoji}>{chip.emoji}</Text>
-            <Text style={styles.chipLabel}>{chip.label}</Text>
-          </Pressable>
+      <ScrollView contentContainerStyle={styles.page}>
+        {COURSE_V2_SHORTCUT_GROUPS.map((group) => (
+          <View key={group.title} style={styles.section}>
+            <View style={styles.sectionHeading}>
+              <Text style={styles.sectionTitle}>{group.title}</Text>
+              <Text style={styles.sectionDescription}>{group.description}</Text>
+            </View>
+            <View style={styles.grid}>
+              {group.shortcuts.map((shortcut) => (
+                <Pressable
+                  key={shortcut.key}
+                  style={({ pressed }) => [styles.shortcut, pressed && styles.shortcutPressed]}
+                  accessibilityRole="button"
+                  accessibilityLabel={`開啟${shortcut.label}`}
+                  onPress={() =>
+                    nav.navigate(shortcut.route, { courseId, courseName: course.title })
+                  }
+                >
+                  <Text style={styles.shortcutTitle}>{shortcut.label}</Text>
+                  <Text style={styles.shortcutDetail}>{shortcut.detail}</Text>
+                  <Text style={styles.shortcutArrow} accessibilityElementsHidden>
+                    →
+                  </Text>
+                </Pressable>
+              ))}
+            </View>
+          </View>
         ))}
       </ScrollView>
     </View>
@@ -72,18 +80,32 @@ export default function CourseHubV2Screen() {
 }
 
 const createStyles = () => StyleSheet.create({
-  grid: { flexDirection: 'row', flexWrap: 'wrap', padding: 12, gap: 12 },
-  chip: {
+  page: {
+    paddingHorizontal: theme.layout.screenPadding,
+    paddingTop: 24,
+    paddingBottom: 48,
+    gap: 28,
+  },
+  section: { gap: 14 },
+  sectionHeading: { gap: 4 },
+  sectionTitle: { color: theme.colors.text, fontSize: 18, fontWeight: '700' },
+  sectionDescription: { color: theme.colors.muted, fontSize: 13, lineHeight: 20 },
+  grid: { flexDirection: 'row', flexWrap: 'wrap', gap: 12 },
+  shortcut: {
+    flexGrow: 1,
     width: '46%',
-    aspectRatio: 1.4,
+    minHeight: 118,
+    paddingHorizontal: 16,
+    paddingVertical: 15,
     backgroundColor: theme.colors.surface,
-    borderRadius: 14,
+    borderRadius: theme.radius.lg,
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: theme.colors.border,
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 8,
+    alignItems: 'flex-start',
+    justifyContent: 'space-between',
   },
-  chipEmoji: { fontSize: 36 },
-  chipLabel: { color: theme.colors.text, fontSize: 14, fontWeight: '600' },
+  shortcutPressed: { opacity: 0.72 },
+  shortcutTitle: { color: theme.colors.text, fontSize: 16, fontWeight: '700' },
+  shortcutDetail: { color: theme.colors.muted, fontSize: 12, lineHeight: 18 },
+  shortcutArrow: { alignSelf: 'flex-end', color: theme.colors.muted, fontSize: 17 },
 });

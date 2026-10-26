@@ -367,3 +367,39 @@
     white-space: nowrap;
   }
 }
+
+
+/* Keep overdue work visible without implying that submissions have closed. */
+.activityState[data-overdue='true'] {
+  color: var(--warning);
+  font-weight: 650;
+}
+
+.metrics[data-role='student'] {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.metrics [data-urgent='true'] dd {
+  color: var(--warning);
+}
+
+.nextTask[data-urgency='overdue'] {
+  box-shadow: inset 3px 0 var(--warning);
+}
+
+.nextTask[data-urgency='overdue'] .nextLabel {
+  color: var(--warning);
+  font-weight: 650;
+}
+
+@media (max-width: 640px) {
+  .metrics[data-role='student'] {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 14px 0;
+  }
+
+  .metrics[data-role='student'] > div:nth-child(3) {
+    border-left: 0;
+    padding-left: 0;
+  }
+}
