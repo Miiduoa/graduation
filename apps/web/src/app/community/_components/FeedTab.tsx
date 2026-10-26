@@ -9,7 +9,7 @@
  *  - 貼文卡片：作者頭像、看板 chip、圖片 grid、點讚、留言、跳 /community/post/[id]
  */
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import styles from '../community.module.css';
 import { CommunityLoadError, useCommunityLoad } from './useCommunityLoad';
@@ -116,7 +116,9 @@ export function FeedTab(props: { schoolId: string; schoolSearch: string }) {
   const [followingPending, setFollowingPending] = useState<ReadonlySet<string>>(new Set());
   const currentFollowingScope = `${user?.uid ?? ''}:${schoolId}`;
   const followingScopeRef = useRef(currentFollowingScope);
-  followingScopeRef.current = currentFollowingScope;
+  useLayoutEffect(() => {
+    followingScopeRef.current = currentFollowingScope;
+  }, [currentFollowingScope]);
   const validFollowing = followingScope === currentFollowingScope;
   const followedIds = validFollowing ? followingIds : EMPTY_FOLLOWING_IDS;
 
