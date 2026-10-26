@@ -369,3 +369,29 @@ it('explains an empty search and clears it without losing a student answer', () 
   expect((screen.getByLabelText('作業內容') as HTMLTextAreaElement).value).toBe('草稿不要消失');
   expect(document.activeElement).toBe(search);
 });
+
+
+it('separates overdue reference dates from still-open future work without blocking submissions', async () => {
+  const overdue = { ...task, dueAt: '2020-01-01T12:00:00+08:00' };
+  const later = {
+    ...task,
+    id: 'cwa_55555555-5555-4555-8555-555555555555',
+    title: '下學期作業',
+    dueAt: '2099-01-01T12:00:00+08:00',
+  };
+  render(
+    <CourseAssignments
+      assignments={[overdue, later, submitted]}
+      workspace={workspace}
+      reload={vi.fn()}
+      onConfirmed={vi.fn()}
+    />,
+  );
+  await waitFor(() => expect(screen.getByRole('button', { name: '已過參考時間 1' })).toBeTruthy());
+  fireEvent.click(screen.getByRole('button', { name: '已過參考時間 1' }));
+  expect(screen.getByRole('article', { name: overdue.title })).toBeTruthy();
+  expect(screen.getByText('已過參考時間 · 仍可補交')).toBeTruthy();
+  expect(screen.getByRole('button', { name: '繳交作業' })).toBeTruthy();
+  expect(screen.queryByRole('article', { name: later.title })).toBeNull();
+  expect(screen.queryByRole('article', { name: submitted.title })).toBeNull();
+});
