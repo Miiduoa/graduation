@@ -105,7 +105,7 @@ export async function askCampusAssistant(input: {
       role: message.role,
       content: message.content.slice(0, 550),
     }));
-        const completion = await localLLM.generate({
+    const completion = await localLLM.generate({
       messages: [
         { role: 'system', content: formatOnDeviceSchoolPrompt(snapshot) },
         ...compactHistory,
