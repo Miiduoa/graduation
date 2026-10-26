@@ -1,5 +1,5 @@
 import { expect, it } from 'vitest';
-import { assistantSources, readOnlyAssistantCards } from './assistantPresentation';
+import { assistantSources, assistantWriteProposals, readOnlyAssistantCards } from './assistantPresentation';
 
 it('keeps useful read cards and excludes write proposals or unverified receipts', () => {
   const cards = readOnlyAssistantCards([
@@ -40,4 +40,21 @@ it.each([
   { schoolId: 'nthu', cafeterias: [{ id: 'one', name: '餐廳', schoolId: 'nthu' }] },
 ])('rejects cafeterias with missing or mismatched school metadata', payload => {
   expect(readOnlyAssistantCards([{ kind: 'cafeteria_list_card', payload }], 'pu')).toEqual([]);
+});
+
+it('allows only a pending write proposal bound to the server run', () => {
+  const runId = '01234567-89ab-4cde-8012-3456789abcde';
+  const input = { date: '2026-10-28', type: '事假', courseId: 'c1' };
+  expect(assistantWriteProposals({
+    content: '草稿',
+    run: { runId },
+    actions: [
+      { action: 'queue_action', label: '確認請假', requiresConfirmation: true,
+        params: { agentRunId: runId, toolName: 'submitLeaveRequest', input } },
+      { action: 'queue_action', label: '未知工具', requiresConfirmation: true,
+        params: { agentRunId: runId, toolName: 'deleteUser', input } },
+      { action: 'queue_action', label: '錯誤執行紀錄', requiresConfirmation: true,
+        params: { agentRunId: 'other-run', toolName: 'submitLeaveRequest', input } },
+    ],
+  })).toEqual([{ label: '確認請假', agentRunId: runId, toolName: 'submitLeaveRequest', input }]);
 });
