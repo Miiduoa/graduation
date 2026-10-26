@@ -275,3 +275,103 @@
   margin: 8px 0 0;
   line-height: 1.5;
 }
+
+
+/* Feed discovery: keep attention on content rather than filling wide displays. */
+.feedColumn {
+  width: 100%;
+  max-width: 800px;
+  margin-inline: auto;
+  min-width: 0;
+}
+.feedDiscovery {
+  display: flex;
+  align-items: end;
+  gap: 12px;
+  margin: 12px 0 8px;
+}
+.feedSearch {
+  flex: 1 1 260px;
+  display: grid;
+  gap: 7px;
+  min-width: 0;
+  font-size: 13px;
+  font-weight: 650;
+  color: var(--text);
+}
+.feedSearch input {
+  width: 100%;
+  min-height: 44px;
+  padding: 11px 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+}
+.feedSearch input::placeholder { color: var(--muted); }
+.feedOrder {
+  display: flex;
+  flex: 0 0 auto;
+  gap: 4px;
+  padding: 4px;
+  border: 1px solid var(--border);
+  background: var(--bg-soft);
+  border-radius: var(--radius);
+}
+.feedOrder button {
+  min-height: 36px;
+  padding: 6px 16px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 650;
+  cursor: pointer;
+}
+.feedOrder button[aria-pressed='true'] {
+  background: var(--surface);
+  border-color: var(--border-strong);
+  color: var(--text);
+}
+.feedScope {
+  margin: 0 0 16px;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.6;
+}
+.feedCards {
+  display: grid;
+  gap: 12px;
+}
+.feedCard {
+  min-width: 0;
+  border-radius: var(--radius-lg);
+  transition: border-color var(--motion-fast) ease;
+}
+.feedCard:hover,
+.feedCard:focus-within { border-color: var(--border-strong); }
+.feedCard :is(button, a):focus-visible,
+.feedDiscovery :is(input, button):focus-visible {
+  outline: 3px solid var(--focus-ring);
+  outline-offset: 3px;
+}
+.feedCard button:disabled { cursor: wait; opacity: 0.55; }
+.feedEmptyActions { margin-top: 14px; }
+.feedError {
+  margin: 9px 0 0;
+  font-size: 13px;
+  line-height: 1.55;
+  color: var(--danger);
+}
+@media (max-width: 540px) {
+  .feedDiscovery { align-items: stretch; flex-wrap: wrap; gap: 9px; }
+  .feedSearch { flex-basis: 100%; }
+  .feedOrder { flex: 1 1 auto; }
+  .feedOrder button { flex: 1 1 50%; min-height: 42px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .feedCard { transition: none; }
+}
