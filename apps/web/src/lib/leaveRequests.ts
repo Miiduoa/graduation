@@ -8,6 +8,11 @@ import {
 } from '@campus/shared';
 import { getAuth, getDb, getFunctionsInstance, isFirebaseConfigured } from '@/lib/firebase';
 import { areFunctionsConfigured, FunctionsUnconfiguredError } from '@/lib/functionsUrl';
+import {
+  leaveFailureCopy,
+  leavePageFailureFromError,
+  withLeaveLoadTimeout,
+} from '@/lib/leavePageState';
 
 export type LeaveKind =
   | 'sick' | 'personal' | 'family' | 'official'
@@ -155,12 +160,13 @@ export function formatLeaveRange(start: string, end: string): string {
 
 export function leaveRequestError(error: unknown): string {
   const code = String((error as { code?: string })?.code || '');
-  if (code.includes('unauthenticated')) return '學校帳號已登出，請重新登入。';
-  if (code.includes('permission-denied')) return '目前沒有這所學校或這門課的操作權限。';
   if (code.includes('failed-precondition')) return '課表或狀態已變更，請重新整理後再試。';
   if (code.includes('already-exists')) return '申請已存在，請重新整理確認。';
-  if (code.includes('unavailable') || error instanceof FunctionsUnconfiguredError)
-    return '請假服務目前無法連線，尚未送出。';
+  const failure = leavePageFailureFromError(error);
+  if (failure.status === 'forbidden') return '目前沒有這所學校或這門課的操作權限。';
+  if (failure.status !== 'error' || failure.reason === 'network' || failure.reason === 'timeout') {
+    return leaveFailureCopy('submit', failure);
+  }
   return '目前無法確認操作是否完成，請先重新整理紀錄，再決定是否重試。';
 }
 
@@ -177,14 +183,14 @@ function callable<Input, Output>(name: string) {
 
 export async function listMyLeaveRequests(uid: string, schoolId: string): Promise<LeaveRequest[]> {
   assertCloudUser(uid);
-  const result = await getDocs(query(
+  const result = await withLeaveLoadTimeout(getDocs(query(
     collection(getDb(), 'leaveRequests'),
     where('uid', '==', uid),
     where('schoolId', '==', schoolId),
     where('source', '==', 'campus-one'),
     orderBy('createdAt', 'desc'),
     limit(100),
-  ));
+  )));
   assertCloudUser(uid);
   return result.docs
     .filter((doc) => doc.data().source === 'campus-one' && Array.isArray(doc.data().courses))
@@ -218,9 +224,11 @@ export async function withdrawLeaveRequest(uid: string, requestId: string) {
 
 export async function listLeaveReviewQueue(uid: string, schoolId: string) {
   assertCloudUser(uid);
-  const result = await callable<{ schoolId: string }, { rows: LeaveReviewRow[] }>(
-    'listLeaveReviewQueue',
-  )({ schoolId });
+  const result = await withLeaveLoadTimeout(
+    callable<{ schoolId: string }, { rows: LeaveReviewRow[] }>(
+      'listLeaveReviewQueue',
+    )({ schoolId }),
+  );
   assertCloudUser(uid);
   return result.data.rows;
 }
