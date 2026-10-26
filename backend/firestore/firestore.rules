@@ -1031,8 +1031,9 @@ service cloud.firestore {
           && resource.data.get('type', '') != 'assignment';
 
         match /submissions/{submissionId} {
-          allow read: if (isActiveGroupMember(groupId) && submissionId == request.auth.uid)
-            || canReadSubmissionDoc(groupId, assignmentId, submissionId, resource.data);
+          allow read: if isActiveGroupMember(groupId)
+            && (submissionId == request.auth.uid
+              || canReadSubmissionDoc(groupId, assignmentId, submissionId, resource.data));
           allow create: if validStudentSubmission(groupId, assignmentId, submissionId)
             && request.resource.data.keys().hasOnly([
               'userId', 'groupId', 'assignmentId', 'content', 'attachments', 'answers', 'status', 'submittedAt', 'updatedAt'
