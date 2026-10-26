@@ -44,13 +44,21 @@ import { fetchSchoolDirectoryProfiles } from '../../services/memberDirectory';
 import { toDate } from '../../utils/format';
 import { useCampusSocialStackNav } from './CampusSocialNavContext';
 import { selectMobileFeedPosts, type MobileFeedOrder } from './feedDiscoveryModel';
+import {
+  listCampusPostBookmarkIds,
+  loadCampusPostBookmarks,
+  saveCampusPostBookmark,
+  removeCampusPostBookmark,
+} from '../../services/campusPostBookmarks';
 
-type FilterKey = 'all' | 'subscribed' | 'media';
+type FilterKey = 'all' | 'subscribed' | 'media' | 'saved';
+const EMPTY_SAVED_POSTS: CampusPostDoc[] = [];
 
 const FILTERS: { key: FilterKey; label: string; icon: keyof typeof Ionicons.glyphMap }[] = [
   { key: 'all', label: '全部', icon: 'sparkles-outline' },
   { key: 'subscribed', label: '我訂閱', icon: 'notifications-outline' },
   { key: 'media', label: '圖文', icon: 'image-outline' },
+  { key: 'saved', label: '收藏', icon: 'bookmark-outline' },
 ];
 
 function formatTs(t: unknown): string {
@@ -116,6 +124,19 @@ function HomeFeedContent() {
   const [loadError, setLoadError] = useState('');
   const likeFlightsRef = useRef<Set<string>>(new Set());
   const [pendingLikes, setPendingLikes] = useState<ReadonlySet<string>>(new Set());
+  const [bookmarkScope, setBookmarkScope] = useState('');
+  const [bookmarkedIds, setBookmarkedIds] = useState<ReadonlySet<string>>(new Set());
+  const [bookmarkedPosts, setBookmarkedPosts] = useState<CampusPostDoc[]>([]);
+  const [bookmarksLoading, setBookmarksLoading] = useState(false);
+  const [bookmarksError, setBookmarksError] = useState('');
+  const [bookmarkRevision, setBookmarkRevision] = useState(0);
+  const bookmarkFlights = useRef<Set<string>>(new Set());
+  const [bookmarksPending, setBookmarksPending] = useState<ReadonlySet<string>>(new Set());
+  const savedView = filter === 'saved';
+  const currentBookmarkScope = `${auth.user?.uid ?? ''}:${school?.id ?? ''}`;
+  const validBookmarks = bookmarkScope === currentBookmarkScope;
+  const savedIds = validBookmarks ? bookmarkedIds : new Set<string>();
+  const savedPosts = validBookmarks ? bookmarkedPosts : EMPTY_SAVED_POSTS;
   const loadVersion = useRef(0);
 
   const load = useCallback(async () => {
@@ -162,8 +183,77 @@ function HomeFeedContent() {
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
+    setBookmarkRevision((prev) => prev + 1);
     await load();
   }, [load]);
+
+  React.useEffect(() => {
+    const uid = auth.user?.uid;
+    const schoolId = school?.id;
+    if (!uid || !schoolId || isFirebaseMockMode()) {
+      setBookmarkScope('');
+      setBookmarkedIds(new Set());
+      setBookmarkedPosts([]);
+      return;
+    }
+    let live = true;
+    setBookmarksError('');
+    if (savedView) setBookmarksLoading(true);
+    void (async () => {
+      if (savedView) {
+        const saved = await loadCampusPostBookmarks(uid, schoolId);
+        if (!live) return;
+        setBookmarkedIds(new Set(saved.ids));
+        setBookmarkedPosts(saved.posts);
+      } else {
+        const ids = await listCampusPostBookmarkIds(uid, schoolId);
+        if (!live) return;
+        setBookmarkedIds(new Set(ids));
+      }
+      setBookmarkScope(`${uid}:${schoolId}`);
+    })()
+      .catch(() => {
+        if (live) setBookmarksError('收藏無法讀取，請檢查連線與校籍後重試。');
+      })
+      .finally(() => {
+        if (live) setBookmarksLoading(false);
+      });
+    return () => { live = false; };
+  }, [auth.user?.uid, school?.id, savedView, bookmarkRevision]);
+
+  const onToggleBookmark = useCallback(async (post: CampusPostDoc) => {
+    const uid = auth.user?.uid;
+    const schoolId = school?.id;
+    if (!uid || !schoolId || isFirebaseMockMode() || bookmarkFlights.current.has(post.id)) {
+      if (isFirebaseMockMode()) Alert.alert('尚未連線', '示範模式不會寫入真實收藏。');
+      return;
+    }
+    const removing = savedIds.has(post.id);
+    bookmarkFlights.current.add(post.id);
+    setBookmarksPending((prev) => new Set([...prev, post.id]));
+    try {
+      if (removing) await removeCampusPostBookmark(uid, schoolId, post.id);
+      else await saveCampusPostBookmark(uid, schoolId, post.id);
+      setBookmarkedIds((prev) => {
+        const next = new Set(prev);
+        if (removing) next.delete(post.id);
+        else next.add(post.id);
+        return next;
+      });
+      if (removing) setBookmarkedPosts((prev) => prev.filter((p) => p.id !== post.id));
+      setBookmarkScope(`${uid}:${schoolId}`);
+      setBookmarkRevision((prev) => prev + 1);
+    } catch {
+      Alert.alert('收藏未更新', '請確認網路與校籍後重試。');
+    } finally {
+      bookmarkFlights.current.delete(post.id);
+      setBookmarksPending((prev) => {
+        const next = new Set(prev);
+        next.delete(post.id);
+        return next;
+      });
+    }
+  }, [auth.user?.uid, school?.id, savedIds]);
 
   const onToggleLike = useCallback(
     async (row: CampusPostDoc) => {
@@ -228,7 +318,7 @@ function HomeFeedContent() {
     (async () => {
       // 把貼文作者 + Story 作者一起 hydrate（少一次 batch）
       const uids = new Set<string>();
-      posts.forEach((p) => {
+      [...posts, ...savedPosts].forEach((p) => {
         if (!p.anonymous && p.authorUid) uids.add(p.authorUid);
       });
       stories.forEach((g) => uids.add(g.authorUid));
@@ -251,7 +341,7 @@ function HomeFeedContent() {
     return () => {
       cancelled = true;
     };
-  }, [posts, stories, school?.id]);
+  }, [posts, savedPosts, stories, school?.id]);
 
   const boardNameById = useMemo(() => {
     const m: Record<string, string> = {};
@@ -262,15 +352,15 @@ function HomeFeedContent() {
   }, [boards]);
 
   const visiblePosts = useMemo(
-    () => selectMobileFeedPosts(posts, {
-      filter,
+    () => selectMobileFeedPosts(savedView ? savedPosts : posts, {
+      filter: savedView ? 'all' : filter,
       order,
       search,
       subscribedIds: subscribedBoardIds,
       boards: boardNameById,
       authors: nameByUid,
     }),
-    [posts, filter, order, search, subscribedBoardIds, boardNameById, nameByUid],
+    [posts, savedPosts, savedView, filter, order, search, subscribedBoardIds, boardNameById, nameByUid],
   );
 
   const authorLine = (p: CampusPostDoc) => {
@@ -309,6 +399,18 @@ function HomeFeedContent() {
             style={{ paddingVertical: 10 }}
           >
             <Text style={{ color: theme.colors.accent, fontWeight: '600' }}>重新讀取動態</Text>
+          </Pressable>
+        </View>
+      )}
+      {savedView && !!bookmarksError && (
+        <View style={{ paddingHorizontal: 16, paddingVertical: 9, gap: 8 }}>
+          <Text accessibilityRole="alert" style={{ color: theme.colors.danger }}>{bookmarksError}</Text>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="重新載入收藏"
+            onPress={() => setBookmarkRevision((prev) => prev + 1)}
+          >
+            <Text style={{ color: theme.colors.accent, fontWeight: '700' }}>重新載入收藏</Text>
           </Pressable>
         </View>
       )}
@@ -372,12 +474,14 @@ function HomeFeedContent() {
               </View>
               <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
                 <Text style={{ color: theme.colors.textSecondary, fontSize: 12 }}>
-                  已載入 {posts.length} 則 · 顯示 {visiblePosts.length} 則
+                  {savedView
+                    ? `顯示 ${visiblePosts.length} 則收藏`
+                    : `已載入 ${posts.length} 則 · 顯示 ${visiblePosts.length} 則`}
                 </Text>
                 <View style={{ flexDirection: 'row', gap: 6 }}>
                   {([
-                    { key: 'recommended', label: '推薦' },
-                    { key: 'latest', label: '最新' },
+                    { key: 'recommended', label: savedView ? '收藏順序' : '推薦' },
+                    { key: 'latest', label: savedView ? '貼文最新' : '最新' },
                   ] as const).map((item) => (
                     <Pressable
                       key={item.key}
@@ -402,19 +506,32 @@ function HomeFeedContent() {
                 </View>
               </View>
               <Text style={{ color: theme.colors.textSecondary, fontSize: 11, lineHeight: 16 }}>
-                搜尋與排序僅適用於本次載入的本校貼文
+                {savedView
+                  ? '顯示本校最近最多 40 筆私人收藏，可跨裝置同步'
+                  : '搜尋與排序僅適用於本次載入的本校貼文'}
               </Text>
             </View>
             </>
           }
           ListEmptyComponent={
-            loadError ? null : (
-              <EmptyState
+            loadError || (savedView && !!bookmarksError) ? null : (
+              bookmarksLoading || (savedView && !validBookmarks) ? (
+                <View style={{ alignItems: 'center', paddingVertical: 28, gap: 10 }}>
+                  <ActivityIndicator color={theme.colors.accent} />
+                  <Text style={{ color: theme.colors.textSecondary }}>正在讀取收藏…</Text>
+                </View>
+              ) : <EmptyState
                 showCalmHero
-                title={search.trim() ? '找不到符合的貼文' : filter === 'subscribed' ? '尚無已訂閱看板的新貼文' : '尚無校園貼文'}
+                title={search.trim()
+                  ? '找不到符合的貼文'
+                  : filter === 'saved' ? '還沒有收藏貼文'
+                    : filter === 'subscribed' ? '尚無已訂閱看板的新貼文'
+                    : '尚無校園貼文'}
                 subtitle={
                   search.trim()
                     ? '請縮短關鍵字或清除搜尋，目前僅搜尋已載入的貼文。'
+                    : filter === 'saved'
+                      ? '到校園動態收藏有用的內容，之後可跨裝置找回。'
                     : filter === 'subscribed'
                       ? '到「看板」訂閱你想追的版面，或點右下角發第一篇。'
                       : '點右下角的鉛筆，發出你的第一篇貼文。'
@@ -512,6 +629,27 @@ function HomeFeedContent() {
                     <Text style={styles.statLabel}>{repliesDisplay(item)}</Text>
                   </View>
                   <View style={{ flex: 1 }} />
+                  <Pressable
+                    accessibilityRole="button"
+                    accessibilityLabel={savedIds.has(item.id) ? '取消收藏貼文' : '收藏貼文'}
+                    accessibilityState={{ selected: savedIds.has(item.id), disabled: bookmarksPending.has(item.id) }}
+                    disabled={bookmarksPending.has(item.id)}
+                    style={styles.statHit}
+                    hitSlop={8}
+                    onPress={(event) => {
+                      event.stopPropagation?.();
+                      void onToggleBookmark(item);
+                    }}
+                  >
+                    <Ionicons
+                      name={savedIds.has(item.id) ? 'bookmark' : 'bookmark-outline'}
+                      size={18}
+                      color={savedIds.has(item.id) ? theme.colors.accent : theme.colors.textSecondary}
+                    />
+                    <Text style={[styles.statLabel, savedIds.has(item.id) && { color: theme.colors.accent }]}>
+                      {savedIds.has(item.id) ? '已收藏' : '收藏'}
+                    </Text>
+                  </Pressable>
                   <Pressable
                     accessibilityRole="button"
                     accessibilityLabel={`分享貼文：${item.title}`}
