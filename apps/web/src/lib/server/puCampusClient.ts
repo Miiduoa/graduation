@@ -1,3 +1,5 @@
+import { parseFragment, serialize, type DefaultTreeAdapterMap } from 'parse5';
+
 const ALCAT_ORIGIN = 'https://alcat.pu.edu.tw';
 const TRONCLASS_ORIGIN = 'https://tronclass.pu.edu.tw';
 const DEFAULT_TIMEOUT_MS = 10_000;
@@ -79,20 +81,47 @@ function mergeCookies(jar: CookieJar, headers: Headers): CookieJar {
 }
 
 const CLOSED_PAGE_TEXT = /尚未開放|系統維護|暫停服務|暫時關閉/;
+const IGNORED_HTML_NODES = new Set(['#comment', 'script', 'style']);
+
+type HtmlNode = DefaultTreeAdapterMap['node'];
+type HtmlParent = DefaultTreeAdapterMap['parentNode'];
+
+function isHtmlParent(node: HtmlNode): node is HtmlParent {
+  return 'childNodes' in node && Array.isArray(node.childNodes);
+}
+
+function pruneIgnoredHtml(node: HtmlNode): void {
+  if (!isHtmlParent(node)) return;
+  node.childNodes = node.childNodes.filter((child) => {
+    if (IGNORED_HTML_NODES.has(child.nodeName.toLowerCase())) return false;
+    pruneIgnoredHtml(child);
+    return true;
+  });
+}
+
+function collectHtmlText(node: HtmlNode): string {
+  if (node.nodeName === '#text' && 'value' in node) {
+    return String(node.value || '');
+  }
+  if (!isHtmlParent(node)) return '';
+  return node.childNodes.map(collectHtmlText).join(' ');
+}
+
+function inspectCampusHtml(html: string): { markup: string; text: string } {
+  const fragment = parseFragment(String(html || ''));
+  pruneIgnoredHtml(fragment);
+  return {
+    markup: serialize(fragment),
+    text: collectHtmlText(fragment).replace(/\u00a0/g, ' ').replace(/\s+/g, ' ').trim(),
+  };
+}
 
 function stripIgnoredHtml(html: string): string {
-  return html
-    .replace(/<!--[\s\S]*?-->/g, ' ')
-    .replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, ' ')
-    .replace(/<style\b[^>]*>[\s\S]*?<\/style>/gi, ' ');
+  return inspectCampusHtml(html).markup;
 }
 
 function visibleCampusText(html: string): string {
-  return stripIgnoredHtml(html)
-    .replace(/<[^>]+>/g, ' ')
-    .replace(/&nbsp;/gi, ' ')
-    .replace(/\s+/g, ' ')
-    .trim();
+  return inspectCampusHtml(html).text;
 }
 
 export function campusPageHasLoginForm(html: string): boolean {
