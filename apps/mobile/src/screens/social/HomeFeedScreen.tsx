@@ -247,7 +247,7 @@ function HomeFeedContent() {
       setFollowingIds(new Set());
       setFollowingScope(uid && schoolId ? `${uid}:${schoolId}` : '');
       setFollowingLoading(false);
-      setFollowingError(isFirebaseMockMode() && followingView ? '示範模式不會讀取真實追蹤清單。' : '');
+      setFollowingError(isFirebaseMockMode() ? '示範模式不會讀取真實追蹤清單。' : '');
       return;
     }
     const scope = `${uid}:${schoolId}`;
@@ -489,7 +489,7 @@ function HomeFeedContent() {
           </Pressable>
         </View>
       )}
-      {!!followingError && (
+      {followingView && !!followingError && (
         <View style={{ paddingHorizontal: 16, paddingVertical: 9, gap: 6 }}>
           <Text accessibilityRole="alert" style={{ color: theme.colors.danger }}>{followingError}</Text>
           <Pressable
@@ -690,7 +690,8 @@ function HomeFeedContent() {
                       <Text style={styles.boardChip}>＃{board}</Text>
                     </Pressable>
                   </View>
-                  {!item.anonymous &&
+                  {!isFirebaseMockMode() &&
+                    !item.anonymous &&
                     item.authorUid &&
                     item.authorUid !== uid &&
                     validFollowing && (
