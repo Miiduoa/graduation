@@ -87,3 +87,47 @@ export function assistantSuggestions(envelope: CampusAssistantEnvelope): string[
 export function hasOrderProposal(envelope: CampusAssistantEnvelope): boolean {
   return Array.isArray(envelope.cards) && envelope.cards.some(card => ['order_draft_card', 'order_submitted'].includes(fields(card).kind as string));
 }
+
+const WRITE_TOOLS = new Set([
+  'submitLeaveRequest',
+  'reserveSeat',
+  'borrowBook',
+  'renewBook',
+  'returnBook',
+  'createDormRepairRequest',
+  'reserveWashingMachine',
+  'createOrder',
+]);
+
+export interface AssistantWriteProposal {
+  label: string;
+  toolName: string;
+  input: Record<string, unknown>;
+  agentRunId: string;
+}
+
+/** Only expose explicit server proposals tied to this run; never execute free-form model text. */
+export function assistantWriteProposals(envelope: CampusAssistantEnvelope): AssistantWriteProposal[] {
+  const runId = envelope.run?.runId;
+  if (typeof runId !== 'string' || !/^[a-f0-9-]{32,36}$/i.test(runId)) return [];
+  if (!Array.isArray(envelope.actions)) return [];
+  return envelope.actions.slice(0, 12).flatMap((raw): AssistantWriteProposal[] => {
+    const action = fields(raw);
+    const params = fields(action.params);
+    const input = fields(params.input);
+    if (action.action !== 'queue_action' || action.requiresConfirmation !== true ||
+        !WRITE_TOOLS.has(text(params.toolName)) || params.agentRunId !== runId ||
+        !params.input || Array.isArray(params.input) || !Object.keys(input).length) return [];
+    try {
+      if (JSON.stringify(input).length > 4000) return [];
+    } catch {
+      return [];
+    }
+    return [{
+      label: text(action.label).slice(0, 70) || '確認執行',
+      toolName: text(params.toolName),
+      input,
+      agentRunId: runId,
+    }];
+  }).slice(0, 3);
+}
