@@ -51,11 +51,13 @@ export async function followUser(schoolId: string, followerUid: string, targetUi
   if (!schoolId || !followerUid || !targetUid || followerUid === targetUid)
     throw new Error('INVALID_FOLLOW_TARGET');
   const ref = followRef(schoolId, followerUid, targetUid);
-  const isCurrent = (snapshot: Awaited<ReturnType<typeof getDoc>>) =>
-    snapshot.exists() &&
-    snapshot.data()?.schoolId === schoolId &&
-    snapshot.data()?.followerUid === followerUid &&
-    snapshot.data()?.targetUid === targetUid;
+  const isCurrent = (snapshot: Awaited<ReturnType<typeof getDoc>>) => {
+    if (!snapshot.exists()) return false;
+    const data = snapshot.data() as Record<string, unknown> | undefined;
+    return data?.schoolId === schoolId &&
+      data?.followerUid === followerUid &&
+      data?.targetUid === targetUid;
+  };
 
   if (isCurrent(await getDoc(ref))) return;
   try {
