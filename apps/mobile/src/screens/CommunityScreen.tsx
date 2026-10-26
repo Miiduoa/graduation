@@ -43,8 +43,9 @@ export function CommunityScreen(props: Record<string, unknown>) {
   const route = (props as any)?.route;
   const rawInitial = route?.params?.initialTab as string | undefined;
   const storyAuthorUid = route?.params?.storyAuthorUid as string | undefined;
+  const storySchoolId = route?.params?.storySchoolId as string | undefined;
   const clearStoryRequest = useCallback(() => {
-    stackNav?.setParams?.({ storyAuthorUid: undefined });
+    stackNav?.setParams?.({ storyAuthorUid: undefined, storySchoolId: undefined });
   }, [stackNav]);
   const initialTab: TabKey | undefined = rawInitial
     ? (LEGACY_TAB[rawInitial] ?? (rawInitial as TabKey))
@@ -125,6 +126,7 @@ export function CommunityScreen(props: Record<string, unknown>) {
           {activeTab === 'realtime' && (
             <RealtimeSocialScreen
               requestedAuthorUid={storyAuthorUid}
+              requestedSchoolId={storySchoolId}
               onRequestConsumed={clearStoryRequest}
             />
           )}
