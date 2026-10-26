@@ -1,5 +1,5 @@
-import React, { useCallback, useMemo, useRef, useState } from 'react';
-import { ActivityIndicator, Pressable, Text, View } from 'react-native';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { ActivityIndicator, Pressable, ScrollView, Text, TextInput, View } from 'react-native';
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import { AIScreen, AIHero, AISection, AICard, AIRow, AIButton, aiTokens } from '../ui/aiFirst';
 import { useAuth } from '../state/auth';
@@ -23,6 +23,19 @@ export default function LearnAiFirstScreen() {
   currentScope.current = scope;
   const generation = useRef(0);
   const [filter, setFilter] = useState<LearningTaskFilter>('all');
+  const [query, setQuery] = useState('');
+  const [selectedCourse, setSelectedCourse] = useState('');
+  const [visibleCount, setVisibleCount] = useState(20);
+  const [clock, setClock] = useState(() => new Date());
+  useEffect(() => {
+    setFilter('all');
+    setQuery('');
+    setSelectedCourse('');
+    setVisibleCount(20);
+  }, [scope]);
+  useEffect(() => {
+    setVisibleCount(20);
+  }, [filter, query, selectedCourse]);
   const [state, setState] = useState<{
     scope: string;
     data: LearningData | null;
@@ -30,8 +43,18 @@ export default function LearnAiFirstScreen() {
     error: string | null;
   } | null>(null);
   const visible = state?.scope === scope ? state : null;
-  const workspace = useMemo(() => visible?.data ? buildLearningWorkspace(visible.data.courses, visible.data.tasks) : null, [visible?.data]);
-  const filteredTasks = useMemo(() => workspace ? filterLearningTasks(workspace.tasks, filter) : [], [workspace, filter]);
+  const workspace = useMemo(
+    () => visible?.data ? buildLearningWorkspace(visible.data.courses, visible.data.tasks, clock) : null,
+    [visible?.data, clock],
+  );
+  const selectedGroupId = workspace?.courses.some((course) => course.groupId === selectedCourse)
+    ? selectedCourse : '';
+  const filteredTasks = useMemo(
+    () => workspace
+      ? filterLearningTasks(workspace.tasks, filter, clock, { query, groupId: selectedGroupId })
+      : [],
+    [workspace, filter, clock, query, selectedGroupId],
+  );
 
   const load = useCallback(async () => {
     const request = ++generation.current;
@@ -61,8 +84,11 @@ export default function LearnAiFirstScreen() {
   useFocusEffect(
     useCallback(() => {
       void load();
+      setClock(new Date());
+      const ticker = setInterval(() => setClock(new Date()), 60_000);
       return () => {
         generation.current += 1;
+        clearInterval(ticker);
       };
     }, [load]),
   );
@@ -139,7 +165,69 @@ export default function LearnAiFirstScreen() {
         </AISection>
       ) : visible.data && workspace ? (
         <>
-          <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, paddingHorizontal: 16, paddingTop: 16 }} accessibilityLabel="篩選近期課務">
+          <View style={{ paddingHorizontal: 16, paddingTop: 16 }}>
+            <TextInput
+              accessibilityLabel="搜尋課務"
+              placeholder="搜尋作業、測驗或課程"
+              placeholderTextColor={theme.colors.muted}
+              value={query}
+              onChangeText={setQuery}
+              returnKeyType="search"
+              autoCorrect={false}
+              style={{
+                backgroundColor: theme.colors.surface,
+                borderRadius: 12,
+                borderColor: theme.colors.border,
+                borderWidth: 1,
+                paddingHorizontal: 16,
+                minHeight: 48,
+                color: theme.colors.text,
+                fontSize: 15,
+              }}
+            />
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              style={{ marginTop: 12 }}
+              contentContainerStyle={{ gap: 8, paddingBottom: 4 }}
+              accessibilityLabel="依課程篩選"
+            >
+              {[
+                { id: '', name: '所有課程' },
+                ...workspace.courses.map((course) => ({
+                  id: course.groupId, name: '只看：' + course.name,
+                })),
+              ].map((course) => {
+                const selected = selectedGroupId === course.id;
+                return (
+                  <Pressable
+                    key={course.id || 'all-courses'}
+                    accessibilityRole="button"
+                    accessibilityState={{ selected }}
+                    onPress={() => setSelectedCourse(course.id)}
+                    style={{
+                      minHeight: 40,
+                      paddingHorizontal: 14,
+                      justifyContent: 'center',
+                      borderWidth: 1,
+                      borderColor: selected ? theme.colors.accent : theme.colors.border,
+                      backgroundColor: selected ? theme.colors.accentSoft : theme.colors.surface,
+                      borderRadius: 20,
+                    }}
+                  >
+                    <Text style={{
+                      color: selected ? theme.colors.accent : theme.colors.textSecondary,
+                      fontSize: 13,
+                      fontWeight: selected ? '700' : '500',
+                    }}>
+                      {course.name}
+                    </Text>
+                  </Pressable>
+                );
+              })}
+            </ScrollView>
+          </View>
+          <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, paddingHorizontal: 16, paddingTop: 12 }} accessibilityLabel="篩選近期課務">
             {([
               ['all', '全部'],
               ['week', '7 天內'],
@@ -168,21 +256,38 @@ export default function LearnAiFirstScreen() {
               </Pressable>
             ))}
           </View>
-          <AISection title="近期課務" subtitle="依截止時間排列，只顯示目前修習的課程">
+          <AISection
+            title="近期課務"
+            subtitle={'目前符合條件：' + filteredTasks.length + ' 項 · 依優先處理順序排列'}
+          >
             {filteredTasks.length ? (
-              filteredTasks.map((task) => (
-                <AIRow
-                  key={task.id}
-                  title={task.title}
-                  subtitle={task.groupName}
-                  tag={describeLearningTask(task).label}
-                  tagTone={describeLearningTask(task).tone}
-                  onPress={() => openTask(task)}
-                />
-              ))
+              <>
+                {filteredTasks.slice(0, visibleCount).map((task) => {
+                  const status = describeLearningTask(task, clock);
+                  return (
+                    <AIRow
+                      key={task.id + ':' + task.groupId}
+                      title={task.title}
+                      subtitle={task.groupName + (task.subtitle ? ' · ' + task.subtitle : '')}
+                      tag={status.label}
+                      tagTone={status.tone}
+                      onPress={() => openTask(task)}
+                    />
+                  );
+                })}
+                {visibleCount < filteredTasks.length ? (
+                  <View style={{ padding: 12 }}>
+                    <AIButton
+                      label={'顯示更多（尚有 ' + (filteredTasks.length - visibleCount) + ' 項）'}
+                      variant="ghost"
+                      onPress={() => setVisibleCount((count) => count + 20)}
+                    />
+                  </View>
+                ) : null}
+              </>
             ) : (
               <Text style={{ color: aiTokens.muted, padding: 16 }}>
-                {filter === 'all' ? '目前沒有可列出的近期課務，仍可從課程查看最新內容。' : '此分類目前沒有待處理的事項。'}
+                {filter === 'all' && !query && !selectedGroupId ? '已載入的課程目前沒有待處理的事項。' : '目前沒有符合條件的課務，請調整搜尋或篩選。'}
               </Text>
             )}
           </AISection>
