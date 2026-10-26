@@ -60,6 +60,24 @@ describe('school-scoped bookmarked campus posts', () => {
     expect(setDoc).not.toHaveBeenCalled();
   });
 
+  it('treats a concurrent save from a second device as successful when the record now exists', async () => {
+    vi.mocked(getDoc)
+      .mockResolvedValueOnce({ exists: () => false } as never)
+      .mockResolvedValueOnce({
+        exists: () => true,
+        data: () => ({ schoolId: 'pu', postId: 'post' }),
+      } as never);
+    vi.mocked(setDoc).mockRejectedValueOnce(new Error('create race'));
+    await expect(saveCampusPostBookmark('alice', 'pu', 'post')).resolves.toBeUndefined();
+    expect(getDoc).toHaveBeenCalledTimes(2);
+  });
+
+  it('does not hide a genuine denied bookmark write after rechecking', async () => {
+    vi.mocked(getDoc).mockResolvedValue({ exists: () => false } as never);
+    vi.mocked(setDoc).mockRejectedValueOnce(new Error('permission-denied'));
+    await expect(saveCampusPostBookmark('alice', 'pu', 'post')).rejects.toThrow('permission-denied');
+  });
+
   it('writes only the scoped ID and its server timestamp', async () => {
     await saveCampusPostBookmark('alice', 'pu', 'post');
     expect(setDoc).toHaveBeenCalledWith(
