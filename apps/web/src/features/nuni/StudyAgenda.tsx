@@ -23,7 +23,7 @@ import styles from './StudyWorkspace.module.css';
 
 const filterLabels: [StudyAgendaFilter, string][] = [
   ['pending', '待完成'],
-  ['overdue', '已過建議時間'],
+  ['overdue', '已過參考時間'],
   ['submitted', '已繳交／作答'],
   ['closed', '已停止收件'],
   ['all', '全部'],
@@ -73,7 +73,7 @@ function TaskRow({ task, now, context }: { task: NuniStudyTask; now: number; con
       ? formatTaipeiDateTime(task.dueAt, { seconds: false })
       : null;
   return (
-    <li className={styles.taskRow}>
+    <li className={styles.taskRow} data-urgency={pending ? timing : 'none'}>
       <span className={styles.taskIcon} aria-hidden="true">
         <CampusIcon name={task.kind === 'assignment' ? 'orders' : 'calendar'} size={19} />
       </span>
@@ -98,7 +98,7 @@ function TaskRow({ task, now, context }: { task: NuniStudyTask; now: number; con
         </div>
         {task.submittedAt && (
           <p className={styles.receiptTime}>
-            繳交紀錄：{formatTaipeiDateTime(task.submittedAt, { seconds: false })}
+            {task.kind === 'quiz' ? '作答紀錄' : '繳交紀錄'}：{formatTaipeiDateTime(task.submittedAt, { seconds: false })}
           </p>
         )}
         {status === 'feedback' && task.feedback && (
@@ -108,9 +108,15 @@ function TaskRow({ task, now, context }: { task: NuniStudyTask; now: number; con
       <Link
         className={styles.taskAction}
         href={classroomCourseHref(task.courseId, context, task)}
-        aria-label={`${status === 'feedback' ? '查看回饋' : pending ? '開啟' : '查看紀錄'}：${task.title}`}
+        aria-label={`${status === 'feedback' ? '查看回饋' : pending ? (task.kind === 'assignment' ? '前往繳交' : '前往作答') : '查看紀錄'}：${task.title}`}
       >
-        <span>{status === 'feedback' ? '看回饋' : pending ? '開啟' : '看紀錄'}</span>
+        <span>
+          {status === 'feedback'
+            ? '看回饋'
+            : pending
+              ? task.kind === 'assignment' ? '去繳交' : '去作答'
+              : '看紀錄'}
+        </span>
         <CampusIcon name="arrow" size={16} />
       </Link>
     </li>
@@ -236,6 +242,7 @@ export function StudyAgenda({
         {(
           [
             ['pending', '待完成'],
+            ['overdue', '已過參考時間'],
             ['soon', '未來七天'],
             ['feedback', '老師回饋'],
           ] as const
@@ -280,9 +287,14 @@ export function StudyAgenda({
           </label>
         )}
       </div>
-      {filter === 'soon' || filter === 'feedback' ? (
+      {filter === 'soon' || filter === 'feedback' || filter === 'overdue' ? (
         <p className={styles.filterContext}>
-          目前顯示：{filter === 'soon' ? '今天起未來七天內建議完成的項目' : '老師已留下回饋的項目'}
+          目前顯示：
+          {filter === 'soon'
+            ? '今天起未來七天內建議完成的項目'
+            : filter === 'overdue'
+              ? '已過參考時間、但仍可開啟處理的項目；是否接受補交由課程老師決定'
+              : '老師已留下回饋的項目'}
           <button
             type="button"
             className={styles.textButton}

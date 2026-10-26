@@ -118,7 +118,7 @@ it('starts with pending work and separates latest feedback, submitted receipts a
   await screen.findByRole('link', { name: '仍可補交' });
   expect(screen.queryByRole('link', { name: '已停止的任務' })).toBeNull();
   expect(screen.queryByRole('link', { name: '已有本次回饋' })).toBeNull();
-  expect(screen.getByRole('link', { name: '開啟：仍可補交' })).toBeTruthy();
+  expect(screen.getByRole('link', { name: '前往繳交：仍可補交' })).toBeTruthy();
   const metrics = within(screen.getByRole('group', { name: '待辦快速篩選' }));
   fireEvent.click(metrics.getByRole('button', { name: /老師回饋/ }));
   expect(screen.getByRole('link', { name: '已有本次回饋' })).toBeTruthy();
