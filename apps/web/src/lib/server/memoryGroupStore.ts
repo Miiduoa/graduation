@@ -45,7 +45,8 @@ type QueryOrder = { field: string; direction: string };
 
 function fieldMatches(data: DocData, filter: QueryFilter): boolean {
   if (filter.op === 'array-contains') {
-    return Array.isArray(data[filter.field]) && data[filter.field].includes(filter.value);
+    const current = data[filter.field];
+    return Array.isArray(current) && current.includes(filter.value);
   }
   return data[filter.field] === filter.value;
 }
