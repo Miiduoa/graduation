@@ -106,12 +106,12 @@ export interface LLMRuntimeAvailability {
 
 export const MODEL_REGISTRY: Record<string, LLMConfig> = {
   // 低門檻、可在一般手機上試用的免費 GGUF（下載後只在裝置端推論）
-  'qwen3-0.6b': {
-    modelId: 'qwen3-0.6b',
+  'qwen2.5-0.5b': {
+    modelId: 'qwen2.5-0.5b',
     modelUrl:
-      'https://huggingface.co/unsloth/Qwen3-0.6B-GGUF/resolve/main/Qwen3-0.6B-Q4_K_M.gguf',
-    modelFileName: 'Qwen3-0.6B-Q4_K_M.gguf',
-    modelSize: 397_000_000,
+      'https://huggingface.co/bartowski/Qwen2.5-0.5B-Instruct-GGUF/resolve/main/Qwen2.5-0.5B-Instruct-Q4_K_M.gguf',
+    modelFileName: 'Qwen2.5-0.5B-Instruct-Q4_K_M.gguf',
+    modelSize: 398_000_000,
     contextLength: 2048,
     maxTokens: 512,
     temperature: 0.45,
@@ -214,7 +214,7 @@ export function getDefaultLocalLlmModelId(): string {
   if (fromExtra && MODEL_REGISTRY[fromExtra]) return fromExtra;
   const fromEnv = String(process.env.EXPO_PUBLIC_LOCAL_LLM_MODEL ?? '').trim();
   if (fromEnv && MODEL_REGISTRY[fromEnv]) return fromEnv;
-  return 'qwen3-0.6b';
+  return 'qwen2.5-0.5b';
 }
 
 // Storage keys
@@ -364,7 +364,7 @@ class LocalLLMEngine {
   // 輕量 GGUF 需要較嚴格的檔案長度驗證，避免下載錯誤頁或截斷檔被標成完成。
   private isCompleteModelFile(config: LLMConfig, size: unknown): boolean {
     if (typeof size !== 'number' || !Number.isFinite(size)) return false;
-    const tolerance = config.modelId === 'qwen3-0.6b' ? 0.97 : 0.9;
+    const tolerance = config.modelId === 'qwen2.5-0.5b' ? 0.97 : 0.9;
     return size >= config.modelSize * tolerance;
   }
 
