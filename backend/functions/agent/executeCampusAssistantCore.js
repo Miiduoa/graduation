@@ -165,7 +165,8 @@ async function executeCampusAssistantCore({
       : detectCampusAssistantIntent(lastUserMessage);
 
   const userProfile = uid ? await fetchAssistantUserProfile(uid) : null;
-  const schoolId = userProfile?.schoolId ?? context.schoolId ?? null;
+  const selectedSchoolId = typeof context.schoolId === 'string' ? context.schoolId.trim() : '';
+  const schoolId = selectedSchoolId || userProfile?.schoolId || null;
   const displayName = userProfile?.displayName ?? request.auth?.token?.name ?? null;
   const actorRole = resolveAssistantActorRole(userProfile?.role ?? request.auth?.token?.role);
   const permissionScope = resolvePermissionScope(intent, Boolean(uid));
