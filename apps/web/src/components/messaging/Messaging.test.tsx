@@ -463,3 +463,59 @@ it('a failed reaction reports the error instead of claiming it succeeded', async
   await screen.findByText('無法更新表情回應，請確認網路後重試。');
   expect(vi.mocked(togglePrivateMessageReaction)).toHaveBeenCalledTimes(1);
 });
+
+it('keeps a reader\'s scroll position when new messages arrive and offers a jump to latest', async () => {
+  render(<Chat />);
+  await screen.findByText('伺服器的訊息');
+  const log = screen.getByRole('log', { name: '對話內容' }) as HTMLOListElement;
+  Object.defineProperties(log, {
+    scrollHeight: { configurable: true, value: 800 },
+    clientHeight: { configurable: true, value: 160 },
+  });
+  act(() => {
+    log.scrollTop = 100;
+    fireEvent.scroll(log);
+  });
+  expect(screen.getByRole('button', { name: '跳到最新訊息' })).toBeTruthy();
+  const receive = vi.mocked(watchConversationContents).mock.calls.at(-1)![2];
+  act(() => {
+    receive({
+      conversation: conversation(),
+      messages: [
+        ...contents().messages,
+        {
+          id: 'm-2',
+          senderId: 'bob',
+          content: '最新訊息',
+          type: 'text',
+          createdAt: '2026-10-08T01:01:00Z',
+          recalled: false,
+        },
+      ],
+    });
+  });
+  expect(log.scrollTop).toBe(100);
+  fireEvent.click(screen.getByRole('button', { name: '跳到最新訊息' }));
+  expect(log.scrollTop).toBe(800);
+  expect(screen.queryByRole('button', { name: '跳到最新訊息' })).toBeNull();
+});
+
+it('copies message text only after clipboard confirmation', async () => {
+  const writeText = vi.fn().mockResolvedValue(undefined);
+  Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText } });
+  render(<Chat />);
+  await screen.findByText('伺服器的訊息');
+  fireEvent.click(screen.getByRole('button', { name: '複製' }));
+  await waitFor(() => expect(writeText).toHaveBeenCalledWith('伺服器的訊息'));
+  expect(screen.getByRole('button', { name: '已複製' })).toBeTruthy();
+});
+
+it('does not claim a failed message copy was successful', async () => {
+  const writeText = vi.fn().mockRejectedValue(new Error('denied'));
+  Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText } });
+  render(<Chat />);
+  await screen.findByText('伺服器的訊息');
+  fireEvent.click(screen.getByRole('button', { name: '複製' }));
+  await screen.findByText('無法自動複製訊息，請選取文字後手動複製。');
+  expect(screen.queryByRole('button', { name: '已複製' })).toBeNull();
+});
