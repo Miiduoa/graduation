@@ -118,7 +118,7 @@ afterEach(() => {
 test('learning lists real memberships and navigates using their group IDs, never a sample course', async () => {
   const view = render(<LearnAiFirstScreen />);
   await view.findByText('實際課程');
-  expect(loadStudentHome).toHaveBeenCalledWith('student-a', 'school-a');
+  expect(loadStudentHome).toHaveBeenCalledWith('student-a', 'school-a', 'learning');
   expect(view.queryByText(/今天 3 堂課|Lab 3|即時運算|週一 · 共 3 堂/)).toBeNull();
   fireEvent.press(view.getByText('課程成績'));
   expect(safeNavigate).toHaveBeenLastCalledWith(mockNavigation, 'CourseGradebook', {
