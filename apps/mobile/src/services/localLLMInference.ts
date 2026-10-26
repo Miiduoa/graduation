@@ -105,6 +105,22 @@ export interface LLMRuntimeAvailability {
 // ═══════════════════════════════════════════════════
 
 export const MODEL_REGISTRY: Record<string, LLMConfig> = {
+  // 低門檻、可在一般手機上試用的免費 GGUF（下載後只在裝置端推論）
+  'qwen3-0.6b': {
+    modelId: 'qwen3-0.6b',
+    modelUrl:
+      'https://huggingface.co/unsloth/Qwen3-0.6B-GGUF/resolve/main/Qwen3-0.6B-Q4_K_M.gguf',
+    modelFileName: 'Qwen3-0.6B-Q4_K_M.gguf',
+    modelSize: 397_000_000,
+    contextLength: 2048,
+    maxTokens: 512,
+    temperature: 0.45,
+    topP: 0.9,
+    topK: 30,
+    repeatPenalty: 1.12,
+    threads: 4,
+    gpuLayers: 99,
+  },
   // ── 進階模型 (~4-5GB) — 7B 參數級 ──
   'qwen2.5-7b': {
     modelId: 'qwen2.5-7b',
@@ -191,14 +207,14 @@ function readExpoExtra(): Record<string, unknown> {
   return ex ?? {};
 }
 
-/** 預設本機 GGUF（對齊「最強離線」建議：Qwen2.5-7B Q4）；可用 EXPO_PUBLIC_LOCAL_LLM_MODEL覆寫。 */
+/** 預設輕量免費模型；進階裝置可在模型管理頁選擇大模型。 */
 export function getDefaultLocalLlmModelId(): string {
   const extra = readExpoExtra();
   const fromExtra = String(extra.localLlmDefaultModelId ?? '').trim();
   if (fromExtra && MODEL_REGISTRY[fromExtra]) return fromExtra;
   const fromEnv = String(process.env.EXPO_PUBLIC_LOCAL_LLM_MODEL ?? '').trim();
   if (fromEnv && MODEL_REGISTRY[fromEnv]) return fromEnv;
-  return 'qwen2.5-7b';
+  return 'qwen3-0.6b';
 }
 
 // Storage keys
@@ -345,6 +361,13 @@ class LocalLLMEngine {
     });
   }
 
+  // 輕量 GGUF 需要較嚴格的檔案長度驗證，避免下載錯誤頁或截斷檔被標成完成。
+  private isCompleteModelFile(config: LLMConfig, size: unknown): boolean {
+    if (typeof size !== 'number' || !Number.isFinite(size)) return false;
+    const tolerance = config.modelId === 'qwen3-0.6b' ? 0.97 : 0.9;
+    return size >= config.modelSize * tolerance;
+  }
+
   // ── Model Management ──
 
   /**
@@ -400,7 +423,7 @@ class LocalLLMEngine {
     const path = this.getModelPath(cfg);
     try {
       const info = await FileSystem.getInfoAsync(path);
-      return info.exists && (info as any).size > cfg.modelSize * 0.9;
+      return info.exists && this.isCompleteModelFile(cfg, (info as { size?: number }).size);
     } catch {
       return false;
     }
@@ -442,7 +465,7 @@ class LocalLLMEngine {
     try {
       const existingInfo = await FileSystem.getInfoAsync(modelPath);
       if (existingInfo.exists) {
-        if ((existingInfo as any).size > cfg.modelSize * 0.9) {
+        if (this.isCompleteModelFile(cfg, (existingInfo as { size?: number }).size)) {
           await AsyncStorage.setItem(
             STORAGE_KEYS.modelReady,
             JSON.stringify({ modelId: cfg.modelId, downloadedAt: Date.now() }),
@@ -489,6 +512,16 @@ class LocalLLMEngine {
       }
 
       console.log(`[LocalLLM] Download complete: status=${result.status}, uri=${result.uri}`);
+      if (result.status < 200 || result.status >= 300) {
+        await FileSystem.deleteAsync(modelPath, { idempotent: true });
+        throw new Error(`下載伺服器回應 HTTP ${result.status}`);
+      }
+      const downloaded = await FileSystem.getInfoAsync(modelPath);
+      if (!downloaded.exists || !this.isCompleteModelFile(cfg, (downloaded as { size?: number }).size)) {
+        await FileSystem.deleteAsync(modelPath, { idempotent: true });
+        throw new Error('下載檔案不完整或大小異常，未安裝模型');
+      }
+
 
       await AsyncStorage.setItem(
         STORAGE_KEYS.modelReady,
@@ -531,7 +564,7 @@ class LocalLLMEngine {
       });
       return false;
     }
-    if ((fileInfo as any).size && (fileInfo as any).size < cfg.modelSize * 0.9) {
+    if (!this.isCompleteModelFile(cfg, (fileInfo as { size?: number }).size)) {
       this.setState({
         status: 'error',
         modelId: cfg.modelId,
