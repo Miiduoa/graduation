@@ -15,6 +15,7 @@ it('does not import the Functions index, trigger runners, or custom-claims helpe
     'src/lib/server/timetableShareHandlers.ts',
     'src/lib/server/attendanceSessionHandlers.ts',
     'src/lib/server/leaveRequestHandlers.ts',
+    'src/lib/server/leaveWebApiEnabled.ts',
   ];
   const joined = files.map((file) => readFileSync(join(root, file), 'utf8')).join('\n');
   expect(joined).not.toMatch(/backend\/functions\/index/);

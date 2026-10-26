@@ -43,13 +43,23 @@ function runtime(options?: {
   uid?: string;
   token?: string;
   store?: ReturnType<typeof seedStore>;
+  revoked?: boolean;
+  disabled?: boolean;
+  verifyCalls?: Array<{ token: string; checkRevoked?: boolean }>;
 }): { runtime: FnRuntime; store: ReturnType<typeof seedStore> } {
   const store = options?.store ?? seedStore();
   return {
     store,
     runtime: {
       db: store.db as FnRuntime['db'],
-      verifyIdToken: async (token: string) => {
+      verifyIdToken: async (token: string, checkRevoked?: boolean) => {
+        options?.verifyCalls?.push({ token, checkRevoked });
+        if (checkRevoked && options?.revoked) {
+          throw Object.assign(new Error('auth/id-token-revoked'), { code: 'auth/id-token-revoked' });
+        }
+        if (checkRevoked && options?.disabled) {
+          throw Object.assign(new Error('auth/user-disabled'), { code: 'auth/user-disabled' });
+        }
         if (token !== (options?.token ?? 'valid-token')) throw new Error('bad token');
         return { uid: options?.uid ?? 's1' };
       },
@@ -72,7 +82,7 @@ beforeEach(() => {
   resetFirebaseAdminForTests();
   resetUidRateLimitForTests();
   delete process.env.FIREBASE_SERVICE_ACCOUNT_JSON;
-  vi.stubEnv('NEXT_PUBLIC_LEAVE_WEB_API', 'true');
+  vi.stubEnv('LEAVE_WEB_API_ENABLED', 'true');
 });
 
 afterEach(() => {
@@ -82,8 +92,9 @@ afterEach(() => {
   vi.unstubAllEnvs();
 });
 
-it('returns 503 尚未啟用 for leave routes when the web API flag is off', async () => {
-  vi.stubEnv('NEXT_PUBLIC_LEAVE_WEB_API', 'false');
+it('returns 503 尚未啟用 for leave routes when the server write flag is off', async () => {
+  vi.stubEnv('LEAVE_WEB_API_ENABLED', 'false');
+  vi.stubEnv('NEXT_PUBLIC_LEAVE_WEB_API', 'true');
   const { runtime: deps, store } = runtime();
   const res = await dispatchFnRequest(
     'submitLeaveRequest',
@@ -98,6 +109,22 @@ it('returns 503 尚未啟用 for leave routes when the web API flag is off', asy
     error: { status: 'UNAVAILABLE', message: '尚未啟用' },
   });
   expect(store.docs.has('leaveRequests/' + REQUEST_ID)).toBe(false);
+});
+
+it('does not use NEXT_PUBLIC_LEAVE_WEB_API to gate leave writes', async () => {
+  vi.stubEnv('LEAVE_WEB_API_ENABLED', 'true');
+  vi.stubEnv('NEXT_PUBLIC_LEAVE_WEB_API', 'false');
+  const { runtime: deps, store } = runtime();
+  const res = await dispatchFnRequest(
+    'submitLeaveRequest',
+    request('submitLeaveRequest', {
+      body: { data: submitBody },
+      headers: { Authorization: 'Bearer valid-token' },
+    }),
+    deps,
+  );
+  expect(res.status).toBe(200);
+  expect(store.docs.has('leaveRequests/' + REQUEST_ID)).toBe(true);
 });
 
 it('blocks unauthenticated leave submit before writing', async () => {
@@ -189,4 +216,56 @@ it('does not let another student withdraw someone else\'s leave request', async 
   expect(withdrawn.status).toBe(404);
   expect((await withdrawn.json()).error.status).toBe('NOT_FOUND');
   expect(owner.store.docs.get('leaveRequests/' + REQUEST_ID)?.status).toBe('pending');
+});
+
+it('checks revoked tokens only for the four leave routes', async () => {
+  const leaveCalls: Array<{ token: string; checkRevoked?: boolean }> = [];
+  const otherCalls: Array<{ token: string; checkRevoked?: boolean }> = [];
+  const leave = runtime({ verifyCalls: leaveCalls });
+  const leaveRes = await dispatchFnRequest(
+    'submitLeaveRequest',
+    request('submitLeaveRequest', {
+      body: { data: submitBody },
+      headers: { Authorization: 'Bearer valid-token' },
+    }),
+    leave.runtime,
+  );
+  expect(leaveRes.status).toBe(200);
+  expect(leaveCalls[0]?.checkRevoked).toBe(true);
+
+  const other = runtime({ uid: 'alice', verifyCalls: otherCalls });
+  await dispatchFnRequest(
+    'leaveGroup',
+    request('leaveGroup', {
+      body: { data: { groupId: 'class-1' } },
+      headers: { Authorization: 'Bearer valid-token' },
+    }),
+    other.runtime,
+  );
+  expect(otherCalls[0]?.checkRevoked).not.toBe(true);
+});
+
+it('blocks revoked or disabled accounts on leave routes before writing', async () => {
+  const leaveNames = [
+    ['submitLeaveRequest', submitBody],
+    ['withdrawLeaveRequest', { requestId: REQUEST_ID }],
+    ['reviewLeaveRequest', { requestId: REQUEST_ID, courseId: 'c1', decision: 'approved' }],
+    ['listLeaveReviewQueue', { schoolId: 'pu' }],
+  ] as const;
+  for (const kind of ['revoked', 'disabled'] as const) {
+    for (const [name, data] of leaveNames) {
+      const { runtime: deps, store } = runtime({ [kind]: true });
+      const res = await dispatchFnRequest(
+        name,
+        request(name, {
+          body: { data },
+          headers: { Authorization: 'Bearer valid-token' },
+        }),
+        deps,
+      );
+      expect(res.status).toBe(401);
+      expect((await res.json()).error.status).toBe('UNAUTHENTICATED');
+      expect(store.docs.has('leaveRequests/' + REQUEST_ID)).toBe(false);
+    }
+  }
 });

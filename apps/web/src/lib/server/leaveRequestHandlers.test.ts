@@ -165,6 +165,38 @@ it('teacher can only decide their own offering; course outcomes remain independe
     .toBe('completed');
 });
 
+it('keeps extra course fields when writing a review', async () => {
+  const store = seed();
+  const api = handlers(store);
+  await api.submitLeaveRequest(request());
+  const saved = store.docs.get('leaveRequests/' + REQUEST_ID)!;
+  const courses = saved.courses as Array<Record<string, unknown>>;
+  store.docs.set('leaveRequests/' + REQUEST_ID, {
+    ...saved,
+    courses: [
+      { ...courses[0], extraFlag: 'keep-me', section: 'A' },
+      { ...courses[1], extraFlag: 'other' },
+    ],
+  });
+  await api.reviewLeaveRequest({
+    auth: { uid: 't1' },
+    data: { requestId: REQUEST_ID, courseId: 'c1', decision: 'approved', note: '同意' },
+  });
+  const next = store.docs.get('leaveRequests/' + REQUEST_ID)?.courses as Array<Record<string, unknown>>;
+  expect(next[0]).toMatchObject({
+    courseId: 'c1',
+    extraFlag: 'keep-me',
+    section: 'A',
+    reviewStatus: 'approved',
+    reviewedBy: 't1',
+  });
+  expect(next[1]).toMatchObject({
+    courseId: 'c2',
+    extraFlag: 'other',
+    reviewStatus: 'pending',
+  });
+});
+
 it('only request owner can withdraw and only while no course was reviewed', async () => {
   const store = seed();
   const api = handlers(store);

@@ -323,13 +323,13 @@ function createReviewLeaveHandler({ db, clock }: { db: LeaveFirestore; clock: ()
       const snap = await tx.get(ref);
       if (!snap.exists) fail('not-found', '找不到這筆申請。');
       const data = snap.data();
-      const courses = courseRows(data.courses);
       if (data.source !== 'campus-one' || !Array.isArray(data.courses)) {
         fail('failed-precondition', '此紀錄不屬於 Campus One 站內請假流程。');
       }
       if (data.status === 'withdrawn') fail('failed-precondition', '這筆請假已撤回。');
-      const course = courses.find((item) => item.courseId === courseId);
+      const course = data.courses.find((item) => asRecord(item).courseId === courseId);
       if (!course) fail('not-found', '這筆申請沒有該課程。');
+      const courseRecord = asRecord(course);
       const [member, account] = await Promise.all([
         tx.get(db.doc('schools/' + String(data.schoolId) + '/members/' + uid)),
         tx.get(db.doc('users/' + uid)),
@@ -337,7 +337,7 @@ function createReviewLeaveHandler({ db, clock }: { db: LeaveFirestore; clock: ()
       const schoolMember = activeMember(member, account);
       if (schoolMember.role !== 'admin') {
         const assignment = await tx.get(db.doc(
-          'schools/' + String(data.schoolId) + '/courseTeachers/' + course.offeringId,
+          'schools/' + String(data.schoolId) + '/courseTeachers/' + String(courseRecord.offeringId),
         ));
         const assigned = assignment.exists ? assignment.data() : {};
         if (
@@ -348,20 +348,23 @@ function createReviewLeaveHandler({ db, clock }: { db: LeaveFirestore; clock: ()
           fail('permission-denied', '目前沒有這門課的審核權限。');
         }
       }
-      if (course.reviewStatus !== 'pending') {
+      if (courseRecord.reviewStatus !== 'pending') {
         fail('failed-precondition', '這門課已處理，請更新列表。');
       }
       const time = clock();
-      const nextCourses = courses.map((item) => item.courseId === courseId
-        ? { ...item, reviewStatus: decision, reviewerNote: note, reviewedBy: uid, reviewedAt: time }
-        : item);
+      const nextCourses = data.courses.map((item) => {
+        const row = asRecord(item);
+        return row.courseId === courseId
+          ? { ...row, reviewStatus: decision, reviewerNote: note, reviewedBy: uid, reviewedAt: time }
+          : item;
+      });
       tx.update(ref, {
         courses: nextCourses,
-        status: summarize(nextCourses),
+        status: summarize(nextCourses.map((item) => asRecord(item))),
         events: [...(Array.isArray(data.events) ? data.events : []), event(decision, uid, time, courseId)].slice(-60),
         updatedAt: FieldValue.serverTimestamp(),
       });
-      return { id, status: summarize(nextCourses) };
+      return { id, status: summarize(nextCourses.map((item) => asRecord(item))) };
     });
   };
 }
