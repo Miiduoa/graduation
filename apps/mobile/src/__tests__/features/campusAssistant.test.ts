@@ -176,3 +176,17 @@ test('does not expose an unverified local cache when the app uses mock authentic
   expect(collectOnDeviceSchoolContext).toHaveBeenCalledWith(expect.objectContaining({ uid: '' }));
   expect(mockCallable).not.toHaveBeenCalled();
 });
+
+test('bounds context sent to the 0.5B on-device model without touching cloud services', async () => {
+  const longMessages = Array.from({ length: 9 }, (_, index) => ({
+    role: (index % 2 === 0 ? 'user' : 'assistant') as 'user' | 'assistant',
+    content: '期末報告'.repeat(700),
+  }));
+  await askCampusAssistant({
+    ...input(), mode: 'device', messages: longMessages,
+  });
+  const options = jest.mocked(localLLM.generate).mock.calls[0][0];
+  expect(options.messages).toHaveLength(4);
+  expect(options.messages.slice(1).every((message: { content: string }) => message.content.length <= 160)).toBe(true);
+  expect(mockCallable).not.toHaveBeenCalled();
+});
