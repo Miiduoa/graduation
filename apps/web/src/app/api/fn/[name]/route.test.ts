@@ -73,6 +73,16 @@ it('returns 503 尚未啟用 when no service account is configured', async () =>
   expect(await leave.json()).toEqual({
     error: { status: 'UNAVAILABLE', message: '尚未啟用' },
   });
+  const schoolLogin = await POST(
+    new Request('https://nuni.tw/api/fn/signInPuStudentId', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ studentId: '1110700321', password: 'nope' }),
+    }),
+    { params: Promise.resolve({ name: 'signInPuStudentId' }) },
+  );
+  expect(schoolLogin.status).toBe(503);
+  expect(await schoolLogin.json()).toEqual({ error: '尚未啟用' });
 });
 
 it('returns 404 for createGroup even though the handler still exists', async () => {
