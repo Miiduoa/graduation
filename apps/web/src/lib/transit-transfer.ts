@@ -7,8 +7,8 @@ import {
   type DirectDestination, type DirectTrip,
 } from './transit-direct';
 
-/** TDX 公共運輸旅運規劃（MaaS）免費方案路徑，不含付費加值。 */
-export const MAAS_PLANNER_PATH = '/api/maas/Routing/Planner';
+/** TDX 公共運輸旅運規劃（MaaS）路徑，不含付費加值。 */
+export const MAAS_PLANNER_PATH = '/api/maas/routing';
 export const MAAS_RATE_LIMIT_PER_MINUTE = 5;
 export const MAAS_CACHE_SLOT_MS = 5 * 60_000;
 export const MAAS_TIMEOUT_MS = 8_000;
@@ -26,10 +26,13 @@ export const MAAS_DESTINATION_BOUNDS = {
 export const TRANSFER_PLAN_LIMIT = 3;
 /** 轉乘總時間至少少這幾分鐘，才算「明顯更快」。 */
 export const TRANSFER_FASTER_BY_MINUTES = 10;
-const TAXI_RE = /yoxi|taxi|uber|cab|計程車|小黃/;
+const TAXI_RE = /yoxi|taxi|uber|cab|rideshare|計程車|小黃/;
 const BIKE_RE = /bike|cycling|ubike|youbike|t-bike|bicycle|單車|自行車|腳踏/;
 const WALK_RE = /walk|foot|pedestrian|步行/;
-const TRANSIT_RE = /bus|rail|train|thsr|hsr|mrt|metro|tram|lrt|ferry|gondola|cable|公車|客運|火車|臺鐵|台鐵|高鐵|捷運|輕軌|渡輪/;
+const WAIT_RE = /\bwait(ing)?\b|等車|候車/;
+const TRANSIT_RE = /transit|bus|rail|train|thsr|hsr|mrt|metro|tram|lrt|subway|ferry|gondola|cable|公車|客運|火車|臺鐵|台鐵|高鐵|捷運|輕軌|渡輪/;
+/** 送當下時間會被 TDX 以 400／20001 拒絕，出發時刻往後推這段再往上取整到分鐘。 */
+export const MAAS_DEPART_LEAD_MS = 5 * 60_000;
 
 export type TransferTrip = {
   boardStopName: string;
@@ -72,6 +75,23 @@ export function taipeiPlannerTime(ms: number): string | null {
   return `${year}-${month}-${day}T${hour}:${minute}:00`;
 }
 
+export function maasDepartTimestamp(ms: number): number {
+  if (!Number.isFinite(ms)) return ms;
+  return Math.ceil((ms + MAAS_DEPART_LEAD_MS) / 60_000) * 60_000;
+}
+
+export function taipeiMaasDepartTime(ms: number): string | null {
+  return taipeiPlannerTime(maasDepartTimestamp(ms));
+}
+
+export function taipeiLocalTimeToIso(value: string): string | null {
+  const raw = value.trim();
+  if (!raw) return null;
+  const stamped = /[zZ]|[+-]\d{2}:?\d{2}$/.test(raw) ? raw : `${raw}+08:00`;
+  const parsed = Date.parse(stamped);
+  return Number.isFinite(parsed) ? new Date(parsed).toISOString() : null;
+}
+
 export function maasCacheSlot(ms: number): number {
   return Math.floor(ms / MAAS_CACHE_SLOT_MS);
 }
@@ -107,20 +127,25 @@ export function maasCacheKey(query: MaasPlannerQuery): string {
 
 /**
  * 組 TDX MaaS 旅運規劃查詢。
- * 實測：arrival 參數不被遵守，所以只送出發時間（gc=0 + time）。
- * 預設首末段會出計程車（YOXI）與單車，故 firstLastMileType 固定 Walk。
+ * 端點：GET /api/maas/routing。origin／destination 為 WGS84 緯度,經度。
+ * gc 是票價與時間的權重，實測 gc=1 可用，不是座標系統。
+ * 不送 transfer_time（送 0 會 404／40001）。
+ * depart 為台北時間、現在加 5 分鐘再往上取整到分鐘；送當下時間會 400／20001。
+ * transit=3,4,5,6,7 為公共運具；first_mile_mode／last_mile_mode=0 為步行。
+ * 不送 arrival。
  */
 export function buildMaasPlannerUrl(query: MaasPlannerQuery): string {
-  const time = taipeiPlannerTime(query.departureAt);
+  const depart = taipeiMaasDepartTime(query.departureAt);
   const params = new URLSearchParams({
     origin: `${query.origin.lat.toFixed(6)},${query.origin.lon.toFixed(6)}`,
     destination: `${query.destination.lat.toFixed(6)},${query.destination.lon.toFixed(6)}`,
-    gc: '0',
+    gc: '1',
     top: '5',
-    transitType: 'Bus,Rail,MRT',
-    firstLastMileType: 'Walk',
+    transit: '3,4,5,6,7',
+    first_mile_mode: '0',
+    last_mile_mode: '0',
   });
-  if (time) params.set('time', time);
+  if (depart) params.set('depart', depart);
   return `https://tdx.transportdata.tw${MAAS_PLANNER_PATH}?${params.toString()}`;
 }
 
@@ -150,7 +175,7 @@ function toMinutes(value: number, unit: 'seconds' | 'minutes'): number {
   return Math.max(1, Math.round(unit === 'seconds' ? value / 60 : value));
 }
 
-type LegKind = 'walk' | 'transit' | 'taxi' | 'bike' | 'other';
+type LegKind = 'walk' | 'wait' | 'transit' | 'taxi' | 'bike' | 'other';
 
 type ParsedLeg = {
   kind: LegKind;
@@ -165,6 +190,7 @@ type ParsedLeg = {
 function classifyMode(raw: string): LegKind {
   const value = raw.normalize('NFKC').trim().toLowerCase();
   if (!value) return 'other';
+  if (WAIT_RE.test(value)) return 'wait';
   if (TAXI_RE.test(value)) return 'taxi';
   if (BIKE_RE.test(value)) return 'bike';
   if (WALK_RE.test(value)) return 'walk';
@@ -172,97 +198,90 @@ function classifyMode(raw: string): LegKind {
   return 'other';
 }
 
-function legKind(leg: Record<string, unknown>): LegKind {
+function asList(value: unknown): unknown[] {
+  if (Array.isArray(value)) return value;
+  if (!isRecord(value)) return [];
+  if (Array.isArray(value.section)) return value.section;
+  if (isRecord(value.section)) return [value.section];
+  return [value];
+}
+
+function recordOf(value: unknown): Record<string, unknown> | null {
+  return isRecord(value) ? value : null;
+}
+
+function summaryDuration(value: unknown): number | null {
+  const summary = recordOf(value);
+  return summary ? rawDuration(summary.duration) : null;
+}
+
+function legKind(leg: Record<string, unknown>, transport: Record<string, unknown> | null): LegKind {
   const mode = [
-    textOf(leg.Type), textOf(leg.type), textOf(leg.Mode), textOf(leg.mode),
-    textOf(leg.TravelMode), textOf(leg.agencyName), textOf(leg.AgencyName),
-    textOf(leg.RouteName), textOf(leg.route), textOf(leg.routeShortName),
+    textOf(leg.type), textOf(transport?.mode), textOf(transport?.name), textOf(transport?.shortName),
   ].filter(Boolean).join(' ');
   const classified = classifyMode(mode);
   if (classified !== 'other') return classified;
-  if (textOf(leg.RouteName) || textOf(leg.route) || textOf(leg.routeShortName) || textOf(leg.RouteNo)) return 'transit';
+  if (textOf(transport?.shortName) || textOf(transport?.name)) return 'transit';
   return 'other';
 }
 
-function placeName(value: unknown, fallbackKeys: string[] = []): string {
+function placeName(value: unknown): string {
   if (typeof value === 'string') return value.trim();
   if (!isRecord(value)) return '';
-  const named = textOf(value.Name) || textOf(value.name) || textOf(value.StopName) || textOf(value.stopName);
-  if (named) return named;
-  for (const key of fallbackKeys) {
-    const hit = textOf(value[key]);
-    if (hit) return hit;
-  }
-  return '';
+  return textOf(value.name) || textOf(value.Name) || textOf(value.StopName) || textOf(value.stopName);
 }
 
 function parseLeg(value: unknown): ParsedLeg | null {
   if (!isRecord(value)) return null;
-  const kind = legKind(value);
-  const route = textOf(value.RouteName) || textOf(value.route) || textOf(value.routeShortName)
-    || textOf(value.RouteNo) || textOf(value.headsign) || textOf(value.Headsign);
-  const fromName = placeName(value.from, ['StartName', 'startName', 'OriginName', 'originName'])
-    || textOf(value.StartName) || textOf(value.startName) || textOf(value.OriginStopName);
-  const toName = placeName(value.to, ['EndName', 'endName', 'DestinationName', 'destinationName'])
-    || textOf(value.EndName) || textOf(value.endName) || textOf(value.DestinationStopName);
-  const duration = rawDuration(value.Duration) ?? rawDuration(value.duration)
-    ?? rawDuration(value.TravelTime) ?? rawDuration(value.travelTime);
-  const startRaw = textOf(value.StartTime) || textOf(value.startTime) || textOf(value.departure)
-    || textOf(isRecord(value.from) ? value.from.departure : '') || textOf(isRecord(value.from) ? value.from.startTime : '');
-  const startAt = startRaw && Number.isFinite(Date.parse(startRaw)) ? new Date(Date.parse(startRaw)).toISOString() : null;
+  const transport = recordOf(value.transport);
+  const departure = recordOf(value.departure);
+  const arrival = recordOf(value.arrival);
+  const kind = legKind(value, transport);
+  const route = textOf(transport?.shortName) || textOf(transport?.name);
+  const fromName = placeName(departure?.place) || placeName(departure);
+  const toName = placeName(arrival?.place) || placeName(arrival);
+  const duration = summaryDuration(value.travelSummary);
+  const startAt = taipeiLocalTimeToIso(textOf(departure?.time));
   return {
     kind, route: route.slice(0, 40), fromName: fromName.slice(0, 80), toName: toName.slice(0, 80),
     minutes: duration ?? 1, startAt, rawMinutes: duration,
   };
 }
 
-function collectPlans(value: unknown, depth = 0): unknown[] {
-  if (depth > 4) return [];
-  if (Array.isArray(value)) return value;
-  if (!isRecord(value)) return [];
-  for (const key of ['Plans', 'plans', 'itineraries', 'Itineraries', 'routes', 'Routes', 'data', 'Data', 'result', 'Result', 'plan', 'Plan']) {
-    const nested = value[key];
-    if (Array.isArray(nested)) return nested;
-    if (isRecord(nested)) {
-      const found = collectPlans(nested, depth + 1);
-      if (found.length) return found;
-    }
-  }
-  return [];
+function collectRoutes(payload: unknown): unknown[] {
+  if (!isRecord(payload)) return [];
+  const data = recordOf(payload.data) ?? payload;
+  const routes = data.routes ?? data.Routes;
+  if (routes == null) return [];
+  return asList(routes);
 }
 
 function collectLegs(plan: Record<string, unknown>): ParsedLeg[] {
-  for (const key of ['Sections', 'sections', 'legs', 'Legs', 'segments', 'Segments', 'Trips', 'trips']) {
-    const rows = plan[key];
-    if (!Array.isArray(rows)) continue;
-    return rows.flatMap((row) => {
-      const leg = parseLeg(row);
-      return leg ? [leg] : [];
-    });
-  }
-  return [];
+  const sections = plan.sections ?? plan.Sections;
+  if (sections == null) return [];
+  return asList(sections).flatMap((row) => {
+    const leg = parseLeg(row);
+    return leg ? [leg] : [];
+  });
 }
 
-function durationUnit(plan: Record<string, unknown>, legs: ParsedLeg[]): 'seconds' | 'minutes' {
-  const listed = rawDuration(plan.TravelTime) ?? rawDuration(plan.travelTime)
-    ?? rawDuration(plan.duration) ?? rawDuration(plan.Duration);
-  const samples = [...legs.map((leg) => leg.rawMinutes ?? 0), listed ?? 0];
-  return Math.max(0, ...samples) > 240 ? 'seconds' : 'minutes';
+function listedDuration(plan: Record<string, unknown>): number | null {
+  return rawDuration(plan.travel_time)
+    ?? summaryDuration(plan.travelSummary)
+    ?? rawDuration(plan.duration)
+    ?? rawDuration(plan.Duration);
 }
 
-function scaledLegs(plan: Record<string, unknown>, legs: ParsedLeg[]): ParsedLeg[] {
-  const unit = durationUnit(plan, legs);
+function scaledLegs(legs: ParsedLeg[]): ParsedLeg[] {
   return legs.map((leg) => ({
     ...leg,
-    minutes: leg.rawMinutes == null ? leg.minutes : toMinutes(leg.rawMinutes, unit),
+    minutes: leg.rawMinutes == null ? leg.minutes : toMinutes(leg.rawMinutes, 'seconds'),
   }));
 }
 
 function planTotalMinutes(plan: Record<string, unknown>, legs: ParsedLeg[]): number {
-  const unit = durationUnit(plan, legs);
-  const listed = rawDuration(plan.TravelTime) ?? rawDuration(plan.travelTime)
-    ?? rawDuration(plan.duration) ?? rawDuration(plan.Duration);
-  if (listed != null) return toMinutes(listed, unit);
+  const listed = listedDuration(plan);
+  if (listed != null) return toMinutes(listed, 'seconds');
   const sum = legs.reduce((total, leg) => total + leg.minutes, 0);
   return Math.max(1, sum);
 }
@@ -270,7 +289,7 @@ function planTotalMinutes(plan: Record<string, unknown>, legs: ParsedLeg[]): num
 export function isWalkOnlyAccess(legs: readonly ParsedLeg[]): boolean {
   if (!legs.length) return false;
   if (legs.some((leg) => leg.kind === 'taxi' || leg.kind === 'bike')) return false;
-  const trimmed = legs.filter((leg) => leg.kind !== 'walk');
+  const trimmed = legs.filter((leg) => leg.kind !== 'walk' && leg.kind !== 'wait');
   if (!trimmed.length) return false;
   return trimmed.every((leg) => leg.kind === 'transit');
 }
@@ -309,12 +328,12 @@ export function transferFromWalkOnlyLegs(legs: readonly ParsedLeg[], totalMinute
 }
 
 export function parseMaasTransferPlans(payload: unknown): TransferTrip[] {
-  const plans = collectPlans(payload);
+  const plans = collectRoutes(payload);
   const trips: TransferTrip[] = [];
   const seen = new Set<string>();
   for (const plan of plans) {
     if (!isRecord(plan)) continue;
-    const legs = scaledLegs(plan, collectLegs(plan));
+    const legs = scaledLegs(collectLegs(plan));
     const trip = transferFromWalkOnlyLegs(legs, planTotalMinutes(plan, legs));
     if (!trip) continue;
     const key = `${trip.firstRoute}:${trip.secondRoute}:${trip.boardStopName}:${trip.transferStopName}:${trip.alightStopName}`;
