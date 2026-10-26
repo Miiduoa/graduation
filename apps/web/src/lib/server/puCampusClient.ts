@@ -154,33 +154,26 @@ function roleFrom(data: Record<string, unknown>): string {
 
 function accountIdentifiers(data: Record<string, unknown>): string[] {
   const nested = asRecord(data.user);
-  const email = readTrimmed(data.email || nested.email).toLowerCase();
-  const local = email.includes('@') ? email.slice(0, email.indexOf('@')) : email;
+  const emails = [data.email, nested.email].map((value) => readTrimmed(value).toLowerCase());
+  const locals = emails.map((email) => (email.includes('@') ? email.slice(0, email.indexOf('@')) : email));
   return [
     data.login_name,
-    data.user_no,
     data.user_name,
     data.userName,
     nested.login_name,
-    nested.user_no,
     nested.user_name,
     nested.userName,
-    local,
+    ...emails,
+    ...locals,
   ]
     .map((value) => readTrimmed(value).toLowerCase())
     .filter(Boolean);
 }
 
-function identityBelongsToAccount(
-  account: string,
-  data: Record<string, unknown>,
-  loginUserId: number | null,
-): boolean {
+function identityBelongsToAccount(account: string, data: Record<string, unknown>): boolean {
   const wanted = account.trim().toLowerCase();
   if (!wanted) return false;
-  if (accountIdentifiers(data).includes(wanted)) return true;
-  const profileId = userIdFrom(data);
-  return Boolean(profileId && loginUserId && profileId === loginUserId);
+  return accountIdentifiers(data).includes(wanted);
 }
 
 function authenticatedJson(page: SentPage): Record<string, unknown> | null {
@@ -353,7 +346,7 @@ export function createPuCampusGateway(
           headers: { Accept: 'application/json' },
         });
         const profileData = authenticatedJson(profilePage);
-        if (profileData && identityBelongsToAccount(account, profileData, loginUserId)) {
+        if (profileData && identityBelongsToAccount(account, profileData)) {
           return {
             cookies: posted.cookies,
             userId: userIdFrom(profileData) ?? loginUserId,
@@ -375,9 +368,10 @@ export function createPuCampusGateway(
           cookies: posted.cookies,
         });
         const coursesData = authenticatedJson(coursesPage);
-        const loginIdentifiesAccount =
-          identityBelongsToAccount(account, loginData, loginUserId) || Boolean(loginUserId);
-        if (coursesData && Array.isArray(coursesData.courses) && loginIdentifiesAccount) {
+        const accountMatched =
+          identityBelongsToAccount(account, loginData) ||
+          (coursesData ? identityBelongsToAccount(account, coursesData) : false);
+        if (coursesData && Array.isArray(coursesData.courses) && accountMatched) {
           return {
             cookies: posted.cookies,
             userId: loginUserId,

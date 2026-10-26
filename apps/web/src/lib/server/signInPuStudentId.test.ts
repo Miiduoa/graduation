@@ -1,6 +1,7 @@
 // @vitest-environment node
 import { afterEach, expect, it, vi } from 'vitest';
 import { decodeFirebaseCustomTokenPayload } from './firebaseCustomToken';
+import { createLoginRateGate } from './loginRateLimit';
 import { createMemoryGroupStore } from './memoryGroupStore';
 import { PuCampusError, type PuCampusGateway } from './puCampusClient';
 import { clientIpFromRequest, handleSignInPuStudentId, PuLoginHttpError } from './signInPuStudentId';
@@ -43,6 +44,8 @@ function deps(options?: {
       campus: options?.campus ?? campus(),
       signCustomToken: async (uid: string, claims: Record<string, string>) =>
         options?.token ?? `token:${uid}:${claims.role}:${claims.schoolId}`,
+      rateLimitGate: createLoginRateGate(),
+      rateLimitSalt: 'test-rate-limit-salt',
     },
   };
 }
@@ -203,7 +206,7 @@ it('rate-limits repeated student attempts before calling the campus', async () =
   const loginStudent = vi.fn(async () => {
     throw new PuCampusError('credentials', '學號或密碼錯誤');
   });
-  const { runtime } = deps({ campus: campus({ loginStudent }) });
+  const { runtime, store } = deps({ campus: campus({ loginStudent }) });
   for (let i = 0; i < 5; i += 1) {
     await expect(
       handleSignInPuStudentId({ studentId: STUDENT, password: SECRET }, '9.9.9.9', runtime),
@@ -213,6 +216,8 @@ it('rate-limits repeated student attempts before calling the campus', async () =
     handleSignInPuStudentId({ studentId: STUDENT, password: SECRET }, '9.9.9.9', runtime),
   ).rejects.toMatchObject({ status: 429, message: 'Too many requests' });
   expect(loginStudent).toHaveBeenCalledTimes(5);
+  const rateLimitPaths = [...store.docs.keys()].filter((path) => path.startsWith('_rateLimits/'));
+  expect(rateLimitPaths.join('\n')).not.toContain(STUDENT);
 });
 
 it('returns 503 and does not call the campus when rate-limit storage fails', async () => {
@@ -226,13 +231,27 @@ it('returns 503 and does not call the campus when rate-limit storage fails', asy
   expect(loginStudent).not.toHaveBeenCalled();
 });
 
-it('prefers Fly-Client-IP and the last X-Forwarded-For hop over a spoofed first hop', () => {
+it('returns 503 without Firestore or campus when the daily write budget is spent', async () => {
+  const loginStudent = vi.fn(async () => ({ cookies: { PHPSESSID: 'stu-cookie' } }));
+  const store = createMemoryGroupStore();
+  const runTransaction = vi.spyOn(store.db, 'runTransaction');
+  const { runtime } = deps({ store, campus: campus({ loginStudent }) });
+  runtime.rateLimitGate = createLoginRateGate({ dailyWriteLimit: 0 });
+  await expect(
+    handleSignInPuStudentId({ studentId: STUDENT, password: SECRET }, '9.9.9.7', runtime),
+  ).rejects.toMatchObject({ status: 503, message: '服務暫時無法使用' });
+  expect(loginStudent).not.toHaveBeenCalled();
+  expect(runTransaction).not.toHaveBeenCalled();
+});
+
+it('uses only Fly-Client-IP and otherwise a shared unknown bucket', () => {
   expect(
     clientIpFromRequest(
       new Request('https://nuni.tw/api/fn/signInPuStudentId', {
         headers: {
           'fly-client-ip': '203.0.113.10',
           'x-forwarded-for': '198.51.100.1, 203.0.113.10',
+          'x-real-ip': '192.0.2.1',
         },
       }),
     ),
@@ -240,8 +259,8 @@ it('prefers Fly-Client-IP and the last X-Forwarded-For hop over a spoofed first 
   expect(
     clientIpFromRequest(
       new Request('https://nuni.tw/api/fn/signInPuStudentId', {
-        headers: { 'x-forwarded-for': '198.51.100.1, 203.0.113.9' },
+        headers: { 'x-forwarded-for': '198.51.100.1, 203.0.113.9', 'x-real-ip': '192.0.2.1' },
       }),
     ),
-  ).toBe('203.0.113.9');
+  ).toBe('unknown');
 });

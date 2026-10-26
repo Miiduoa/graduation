@@ -13,7 +13,7 @@ import {
 import type { PuCampusGateway } from './puCampusClient';
 import type { SchoolLoginFirestore } from './schoolLoginProfile';
 import type { ServiceAccountSigner } from './firebaseCustomToken';
-import { LoginRateLimitError, LoginRateStoreError } from './loginRateLimit';
+import { LoginRateLimitError, LoginRateStoreError, type LoginRateGate } from './loginRateLimit';
 import { clientIpFromRequest, PuLoginHttpError } from './signInPuStudentId';
 
 const JSON_HEADERS = {
@@ -35,6 +35,8 @@ export type FnRuntime = {
   createCustomToken?: (uid: string, claims: Record<string, string>) => Promise<string>;
   puCampus?: PuCampusGateway;
   serviceAccount?: ServiceAccountSigner | null;
+  rateLimitGate?: LoginRateGate;
+  rateLimitSalt?: string;
 };
 
 function jsonResponse(status: number, body: unknown, extra?: HeadersInit): Response {
@@ -259,6 +261,8 @@ async function dispatchSchoolLogin(
       campus: runtime.puCampus,
       signCustomToken: runtime.createCustomToken,
       serviceAccount: runtime.serviceAccount ?? readServiceAccountSigner(),
+      rateLimitGate: runtime.rateLimitGate,
+      rateLimitSalt: runtime.rateLimitSalt,
     });
     return jsonResponse(200, result, cors);
   } catch (error) {

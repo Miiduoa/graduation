@@ -2,7 +2,7 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { dispatchFnRequest, type FnRuntime } from './fnDispatch';
 import { resetFirebaseAdminForTests } from './firebaseAdmin';
-import { LOGIN_RATE_LIMIT } from './loginRateLimit';
+import { createLoginRateGate, LOGIN_RATE_LIMIT } from './loginRateLimit';
 import { createMemoryGroupStore } from './memoryGroupStore';
 import { PuCampusError, type PuCampusGateway } from './puCampusClient';
 import { resetUidRateLimitForTests } from './uidRateLimit';
@@ -42,6 +42,8 @@ function runtime(): { runtime: FnRuntime; store: ReturnType<typeof createMemoryG
       verifyIdToken: async () => ({ uid: 'unused' }),
       createCustomToken: async (uid, claims) => `token:${uid}:${claims.role}`,
       puCampus: campus(),
+      rateLimitGate: createLoginRateGate(),
+      rateLimitSalt: 'test-rate-limit-salt',
     },
   };
 }
@@ -166,6 +168,25 @@ it('does not let a spoofed X-Forwarded-For hop bypass the IP limit', async () =>
     deps,
   );
   expect(otherFlyIp.status).toBe(401);
+});
+
+it('returns 503 without Firestore or campus when the daily write budget is spent', async () => {
+  const { runtime: deps, store } = runtime();
+  const loginStudent = vi.fn(async () => {
+    throw new PuCampusError('credentials', '學號或密碼錯誤');
+  });
+  deps.puCampus = campus({ loginStudent });
+  deps.rateLimitGate = createLoginRateGate({ dailyWriteLimit: 0 });
+  const runTransaction = vi.spyOn(store.db, 'runTransaction');
+  const res = await dispatchFnRequest(
+    'signInPuStudentId',
+    request({ studentId: STUDENT, password: SECRET }, { 'fly-client-ip': '203.0.113.13' }),
+    deps,
+  );
+  expect(res.status).toBe(503);
+  expect(await res.json()).toEqual({ error: '服務暫時無法使用' });
+  expect(loginStudent).not.toHaveBeenCalled();
+  expect(runTransaction).not.toHaveBeenCalled();
 });
 
 it('returns 503 when shared rate-limit storage cannot be written', async () => {

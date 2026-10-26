@@ -92,6 +92,25 @@ it('rejects TronClass HTTP 200 when the session cannot call an authenticated API
   });
 });
 
+it('rejects HTTP 200 with a numeric id, no account fields, empty my-courses, and no profile', async () => {
+  const fetchMock = vi.fn(async (url: string) => {
+    if (String(url).endsWith('/api/login')) {
+      return jsonResponse(200, { id: 44, name: '王老師', role: 'teacher' }, { 'set-cookie': 'session=tc; Path=/' });
+    }
+    if (String(url).endsWith('/api/profile')) {
+      return jsonResponse(404, { message: 'not found' });
+    }
+    if (String(url).endsWith('/api/my-courses')) {
+      return jsonResponse(200, { courses: [] });
+    }
+    throw new Error(`unexpected ${url}`);
+  });
+  const gateway = createPuCampusGateway({ fetch: fetchMock });
+  await expect(gateway.loginTronClass('changyi', SECRET)).rejects.toMatchObject({
+    kind: 'credentials',
+  });
+});
+
 it('falls back to my-courses when profile is missing but the session belongs to this account', async () => {
   const fetchMock = vi.fn(async (url: string) => {
     if (String(url).endsWith('/api/login')) {

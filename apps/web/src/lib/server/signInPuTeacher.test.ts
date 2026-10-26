@@ -1,7 +1,8 @@
 // @vitest-environment node
 import { expect, it } from 'vitest';
+import { createLoginRateGate, LOGIN_RATE_LIMIT } from './loginRateLimit';
 import { createMemoryGroupStore } from './memoryGroupStore';
-import type { PuCampusGateway } from './puCampusClient';
+import { PuCampusError, type PuCampusGateway } from './puCampusClient';
 import { handleSignInPuStudentId } from './signInPuStudentId';
 
 const SECRET = 'never-log-this-password';
@@ -36,6 +37,8 @@ function deps(options?: {
       campus: options?.campus ?? campus(),
       signCustomToken: async (uid: string, claims: Record<string, string>) =>
         `token:${uid}:${claims.role}:${claims.schoolId}`,
+      rateLimitGate: createLoginRateGate(),
+      rateLimitSalt: 'test-rate-limit-salt',
     },
   };
 }
@@ -152,4 +155,16 @@ it('only adds the signed-in teacher to 課名｜自己的名字 on a co-taught c
     teacherUids: ['pu-t-lee'],
     note: 'keep',
   });
+});
+
+it('returns 503 when TronClass is down and does not spend the account quota', async () => {
+  const loginTronClass = async () => {
+    throw new PuCampusError('timeout', '學校系統無回應');
+  };
+  const { runtime } = deps({ campus: campus({ loginTronClass }) });
+  for (let i = 0; i < LOGIN_RATE_LIMIT.account.limit + 1; i += 1) {
+    await expect(
+      handleSignInPuStudentId({ studentId: TEACHER, password: SECRET }, `10.0.0.${i + 1}`, runtime),
+    ).rejects.toMatchObject({ status: 503, message: '學校系統暫時無法連線' });
+  }
 });

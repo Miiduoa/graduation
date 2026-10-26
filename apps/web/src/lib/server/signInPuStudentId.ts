@@ -3,9 +3,14 @@ import { FieldValue } from 'firebase-admin/firestore';
 import { courseOfferingId } from '@campus/shared/src/timetable/course';
 import { signFirebaseCustomToken, type ServiceAccountSigner } from './firebaseCustomToken';
 import {
-  enforceLoginRateLimit,
+  assertLoginAccountAllowed,
+  consumeLoginAccountLimit,
+  consumeLoginIpLimit,
+  deriveRateLimitSalt,
+  getLoginRateGate,
   LoginRateLimitError,
   LoginRateStoreError,
+  type LoginRateGate,
 } from './loginRateLimit';
 import { createPuCampusGateway, PuCampusError, type PuCampusGateway } from './puCampusClient';
 import {
@@ -41,7 +46,11 @@ export type SignInPuDeps = {
   signCustomToken?: (uid: string, claims: Record<string, string>) => Promise<string>;
   serviceAccount?: ServiceAccountSigner | null;
   now?: () => number;
+  rateLimitSalt?: string;
+  rateLimitGate?: LoginRateGate;
 };
+
+export const TEACHER_SCHOOL_UNAVAILABLE = '學校系統暫時無法連線';
 
 function asRecord(value: unknown): Record<string, unknown> {
   return value && typeof value === 'object' && !Array.isArray(value)
@@ -120,6 +129,19 @@ function hasTronClassSessionCookie(cookies: Record<string, string> | undefined):
   );
 }
 
+function isSchoolSideFailure(error: unknown): boolean {
+  if (error instanceof PuCampusError) {
+    return error.kind === 'timeout' || error.kind === 'unavailable' || error.kind === 'closed';
+  }
+  if (error instanceof PuLoginHttpError) {
+    return (
+      error.status === 503 &&
+      (error.message === TEACHER_SCHOOL_UNAVAILABLE || error.message === '尚未開放')
+    );
+  }
+  return false;
+}
+
 export async function handleSignInPuStudentId(
   body: unknown,
   ip: string,
@@ -147,18 +169,37 @@ export async function handleSignInPuStudentId(
       throw new PuLoginHttpError(400, '學號格式不正確');
     }
 
-    await enforceLoginRateLimit(
-      deps.db,
-      ip,
-      isStudent ? studentId : teacherAccount.toLowerCase(),
-      deps.now?.() ?? Date.now(),
-    );
+    const accountKey = isStudent ? studentId : teacherAccount.toLowerCase();
+    const rateCtx = {
+      db: deps.db,
+      now: deps.now?.() ?? Date.now(),
+      salt: deps.rateLimitSalt ?? deriveRateLimitSalt(),
+      gate: deps.rateLimitGate ?? getLoginRateGate(),
+    };
+    assertLoginAccountAllowed(accountKey, rateCtx);
+    await consumeLoginIpLimit(ip, rateCtx);
 
     const campus = deps.campus ?? createPuCampusGateway();
-    if (isStudent) {
-      return await signInStudent(studentId, password, campus, deps);
+    try {
+      const result = isStudent
+        ? await signInStudent(studentId, password, campus, deps)
+        : await signInTeacher(teacherAccount, password, campus, deps);
+      await consumeLoginAccountLimit(accountKey, rateCtx);
+      return result;
+    } catch (error) {
+      if (
+        !isSchoolSideFailure(error) &&
+        !(error instanceof LoginRateLimitError) &&
+        !(error instanceof LoginRateStoreError)
+      ) {
+        try {
+          await consumeLoginAccountLimit(accountKey, rateCtx);
+        } catch {
+          // 這次請求已有校園結果；帳號次數仍要記，但錯誤以校園為準。
+        }
+      }
+      throw error;
     }
-    return await signInTeacher(teacherAccount, password, campus, deps);
   } catch (error) {
     if (
       error instanceof PuLoginHttpError ||
@@ -300,6 +341,9 @@ async function signInTeacher(
       if (error.kind === 'closed') {
         throw new PuLoginHttpError(503, '尚未開放');
       }
+      if (error.kind === 'timeout' || error.kind === 'unavailable') {
+        throw new PuLoginHttpError(503, TEACHER_SCHOOL_UNAVAILABLE);
+      }
       throw new PuLoginHttpError(401, '學號或密碼錯誤');
     }
     throw error;
@@ -313,6 +357,9 @@ async function signInTeacher(
     courses = await campus.fetchTronClassCourses(session);
   } catch (error) {
     if (error instanceof PuCampusError && error.kind !== 'credentials') {
+      if (error.kind === 'timeout' || error.kind === 'unavailable') {
+        throw new PuLoginHttpError(503, TEACHER_SCHOOL_UNAVAILABLE);
+      }
       const mapped = clientMessage(error);
       throw new PuLoginHttpError(mapped.status, mapped.message);
     }
@@ -387,16 +434,5 @@ async function signInTeacher(
 }
 
 export function clientIpFromRequest(request: Request): string {
-  const fly = request.headers.get('fly-client-ip')?.trim();
-  if (fly) return fly;
-  const forwarded = request.headers.get('x-forwarded-for');
-  if (forwarded) {
-    const hops = forwarded
-      .split(',')
-      .map((part) => part.trim())
-      .filter(Boolean);
-    const last = hops[hops.length - 1];
-    if (last) return last;
-  }
-  return request.headers.get('x-real-ip')?.trim() || 'unknown';
+  return request.headers.get('fly-client-ip')?.trim() || 'unknown';
 }
