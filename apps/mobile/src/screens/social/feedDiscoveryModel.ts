@@ -1,6 +1,6 @@
 import type { CampusPostDoc } from '../../services/feed';
 
-export type MobileFeedFilter = 'all' | 'subscribed' | 'media';
+export type MobileFeedFilter = 'all' | 'following' | 'subscribed' | 'media';
 export type MobileFeedOrder = 'recommended' | 'latest';
 
 type Options = {
@@ -8,6 +8,7 @@ type Options = {
   order: MobileFeedOrder;
   search: string;
   subscribedIds: ReadonlySet<string>;
+  followingIds: ReadonlySet<string>;
   boards: Record<string, string>;
   authors: Record<string, string>;
 };
@@ -29,6 +30,10 @@ export function selectMobileFeedPosts(posts: CampusPostDoc[], options: Options):
   const matched = posts.filter((post) => {
     if (options.filter === 'subscribed' && !options.subscribedIds.has(post.boardId))
       return false;
+    if (
+      options.filter === 'following' &&
+      (post.anonymous || !post.authorUid || !options.followingIds.has(post.authorUid))
+    ) return false;
     if (
       options.filter === 'media' &&
       !((Array.isArray(post.mediaUrls) ? post.mediaUrls : [])).some((url) => typeof url === 'string' && url.length > 0)
