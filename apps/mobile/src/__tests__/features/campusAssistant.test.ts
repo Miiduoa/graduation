@@ -2,7 +2,6 @@ import { httpsCallable } from 'firebase/functions';
 import {
   askCampusAssistant,
   getOnDeviceAssistantReadiness,
-  OnDeviceAssistantError,
 } from '../../features/campusAssistant';
 let mockUid: string | null = 'A';
 let mockFake = false;
