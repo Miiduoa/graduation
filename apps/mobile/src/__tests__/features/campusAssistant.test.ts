@@ -195,3 +195,40 @@ test('bounds context sent to the 0.5B on-device model without touching cloud ser
   expect(options.messages.slice(1).every((message: { content: string }) => message.content.length <= 160)).toBe(true);
   expect(mockCallable).not.toHaveBeenCalled();
 });
+
+test('an offline campus data question resolves without an LLM or Firebase callable', async () => {
+  const answer = await askCampusAssistant({
+    ...input(),
+    mode: 'device',
+    messages: [{ role: 'user', content: '查最新校園公告' }],
+  });
+  expect(answer).toMatchObject({
+    source: 'device', tool: 'online-required', route: '/announcements',
+    hasActions: false,
+  });
+  expect(answer.content).toContain('需要正式資料來源');
+  expect(localLLM.generate).not.toHaveBeenCalled();
+  expect(localLLM.loadModel).not.toHaveBeenCalled();
+  expect(httpsCallable).not.toHaveBeenCalled();
+});
+
+test('offline timetable read works without downloading a GGUF and never invokes a cloud model', async () => {
+  const { collectOnDeviceSchoolContext } = require('../../services/onDeviceSchoolContext');
+  jest.mocked(collectOnDeviceSchoolContext).mockResolvedValueOnce({
+    checkedAt: '2026-10-26T01:00:00Z',
+    schoolId: 'pu',
+    schoolName: '靜宜大學',
+    timetable: { source: 'saved-device-copy', updatedAt: '2026-10-25T10:00:00Z',
+      courses: [{ name: '資料庫', day: 1, start: 2, end: 3 }] },
+  });
+  jest.mocked(localLLM.isModelDownloaded).mockResolvedValue(false);
+  jest.mocked(localLLM.getDownloadedModels).mockResolvedValue([]);
+  const result = await askCampusAssistant({
+    ...input(), mode: 'device',
+    messages: [{ role: 'user', content: '今天有哪些課' }],
+  });
+  expect(result).toMatchObject({ source: 'device', tool: 'saved-timetable', route: '/timetable' });
+  expect(result.content).toContain('資料庫');
+  expect(localLLM.generate).not.toHaveBeenCalled();
+  expect(httpsCallable).not.toHaveBeenCalled();
+});
