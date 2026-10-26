@@ -38,7 +38,13 @@ jest.mock('../services/lmsV2DemoSignIn', () => ({
 jest.mock('../features/courseAdvisor', () => ({
   OFFICIAL_CATALOG_URL: 'https://mypu.pu.edu.tw/Framework/Academic/CourseCatalogSys/',
 }));
-jest.mock('../features/campusAssistant', () => ({ askCampusAssistant: jest.fn() }));
+jest.mock('../features/campusAssistant', () => ({
+  askCampusAssistant: jest.fn(),
+  getOnDeviceAssistantReadiness: jest.fn(async () => ({
+    available: true, ready: false, modelId: 'qwen2.5-0.5b',
+    reason: '尚未下載免費模型',
+  })),
+}));
 jest.mock('@expo/vector-icons', () => ({ Ionicons: () => null }));
 jest.mock('../screens/AdminDashboardScreen', () => {
   const React = require('react');
@@ -1063,6 +1069,7 @@ test.each(['AIChat', 'AIAgentConsole'])(
   async (route) => {
     const { view, navigation } = await mount(HomeStack);
     act(() => navigation.navigate(route));
+    fireEvent.press(view.getByText('校園即時 · 需網路'));
     fireEvent.changeText(view.getByLabelText('詢問校園助理'), '本週有哪些活動？');
     await act(async () => fireEvent.press(view.getByText('送出問題')));
     expect(askCampusAssistant).toHaveBeenCalledTimes(1);
