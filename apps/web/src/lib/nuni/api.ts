@@ -49,6 +49,7 @@ import {
   isAssignmentFileQuery,
 } from './assignmentFileRoutes';
 import { assignmentFileSubmitEnabled } from './assignmentFileService';
+import { isSchoolStudentIdLoginEnabled } from '@/lib/server/schoolStudentIdLoginEnabled';
 
 const WORKSPACE = /^cw_[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 const ASSIGNMENT = /^cwa_[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
@@ -162,7 +163,7 @@ export async function handleNuni(request: NextRequest, segments: string[]): Prom
         throw new NuniError(502, 'INVALID_RESPONSE');
       return jsonResponse({
         google: googleReady && result.kinds.includes('google-consumer'),
-        studentId: result.kinds.includes('school-issued') || result.kinds.includes('student-id'),
+        studentId: isSchoolStudentIdLoginEnabled(),
       });
     }
     if (method === 'GET' && path === 'session') {

@@ -72,6 +72,10 @@ export function createMemoryGroupStore(seed: Array<[string, DocData]> = []) {
       id,
       collection: (name: string) => collection(`${path}/${name}`),
       get: async () => snap({ path, id }),
+      set: async (data: DocData, options?: { merge?: boolean }) => {
+        const existing = options?.merge ? docs.get(path) || {} : {};
+        docs.set(path, applyFields(existing, data));
+      },
     };
   }
 
@@ -143,6 +147,7 @@ export function createMemoryGroupStore(seed: Array<[string, DocData]> = []) {
         type: 'set' | 'update' | 'create';
         reference: { path: string };
         data: DocData;
+        merge?: boolean;
       }> = [];
       const tx = {
         getAll: async (...refs: Array<{ path: string; id: string }>) =>
@@ -165,8 +170,13 @@ export function createMemoryGroupStore(seed: Array<[string, DocData]> = []) {
           );
           return { docs: result, size: result.length, empty: result.length === 0 };
         },
-        set: (reference: { path: string }, data: DocData) =>
-          writes.push({ type: 'set', reference, data: clone(data) as DocData }),
+        set: (reference: { path: string }, data: DocData, options?: { merge?: boolean }) =>
+          writes.push({
+            type: 'set',
+            reference,
+            data: clone(data) as DocData,
+            merge: options?.merge === true,
+          }),
         create: (reference: { path: string }, data: DocData) =>
           writes.push({ type: 'create', reference, data: clone(data) as DocData }),
         update: (reference: { path: string }, data: DocData) =>
@@ -185,12 +195,13 @@ export function createMemoryGroupStore(seed: Array<[string, DocData]> = []) {
         if (write.type === 'update' && !committed.has(write.reference.path)) {
           throw new Error('missing document');
         }
-        committed.set(
-          write.reference.path,
-          write.type === 'set' || write.type === 'create'
-            ? applyFields({}, write.data)
-            : applyFields(committed.get(write.reference.path) || {}, write.data),
-        );
+        const mergeBase =
+          write.type === 'set' && write.merge
+            ? committed.get(write.reference.path) || {}
+            : write.type === 'set' || write.type === 'create'
+              ? {}
+              : committed.get(write.reference.path) || {};
+        committed.set(write.reference.path, applyFields(mergeBase, write.data));
       }
       docs.clear();
       for (const [path, data] of committed) docs.set(path, data);
