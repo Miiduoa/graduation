@@ -68,7 +68,13 @@ const POI_CAT_ICON: Record<SocialPoiCategory, keyof typeof Ionicons.glyphMap> = 
   transit: 'bus-outline',
 };
 
-export function RealtimeSocialScreen() {
+export function RealtimeSocialScreen({
+  requestedAuthorUid,
+  onRequestConsumed,
+}: {
+  requestedAuthorUid?: string;
+  onRequestConsumed?: () => void;
+} = {}) {
   const styles = useThemeStyleSheet(createStyles);
   const injected = useCampusSocialStackNav();
   const fb = useNavigation<any>();
@@ -86,6 +92,7 @@ export function RealtimeSocialScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [heartbeatSession, setHeartbeatSession] = useState<string | null>(null);
   const [viewerState, setViewerState] = useState<{ group: StoryAuthorGroup; index: number } | null>(null);
+  const [storyNotice, setStoryNotice] = useState('');
   const [nameByUid, setNameByUid] = useState<Record<string, string>>({});
   const [avatarByUid, setAvatarByUid] = useState<Record<string, string>>({});
 
@@ -200,6 +207,22 @@ export function RealtimeSocialScreen() {
     if (story && uid && !isFirebaseMockMode()) void markStoryViewed(story.id, uid).catch(() => {});
   };
 
+  useEffect(() => {
+    if (!requestedAuthorUid || storiesLoading) return;
+    const group = storyGroups.find((entry) => entry.authorUid === requestedAuthorUid);
+    if (group?.stories.length) {
+      setViewerState({ group, index: 0 });
+      const story = group.stories[0];
+      if (uid && !isFirebaseMockMode()) {
+        void markStoryViewed(story.id, uid).catch(() => {});
+      }
+      setStoryNotice('');
+    } else {
+      setStoryNotice('這則限時動態可能已到期或移除。');
+    }
+    onRequestConsumed?.();
+  }, [requestedAuthorUid, storiesLoading, storyGroups, uid, onRequestConsumed]);
+
   const advanceStory = (delta: number) => {
     setViewerState((prev) => {
       if (!prev) return prev;
@@ -304,6 +327,11 @@ export function RealtimeSocialScreen() {
         </View>
 
         {/* ─── Stories ─── */}
+        {!!storyNotice && (
+          <Text accessibilityRole="alert" style={[styles.softMuted, { paddingHorizontal: 14 }]}>
+            {storyNotice}
+          </Text>
+        )}
         <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: theme.space.lg, paddingHorizontal: 14 }}>
           <Text style={[styles.section, { flex: 1, paddingHorizontal: 0 }]}>校園 Story</Text>
           <Pressable onPress={openCompose} style={styles.storyComposeBtn} accessibilityRole="button">
