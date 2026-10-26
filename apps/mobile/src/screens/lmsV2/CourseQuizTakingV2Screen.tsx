@@ -5,7 +5,7 @@ import { useThemeStyleSheet } from '../../ui/useThemeStyleSheet';
 import {
   loadLmsQuizWorkspace, beginLmsQuizAttempt, storeLmsQuizAnswer, finishLmsQuizAttempt,
 } from '../../services/lmsV2QuizDelivery';
-import { quizAnswerPayload, type QuizAnswerInput } from '../../services/lmsV2QuizModels';
+import { quizOptions, type QuizAnswerInput } from '../../services/lmsV2QuizModels';
 import { QuizQuestionEditor } from './QuizQuestionEditor';
 import {
   CourseV2Header, useCourseV2Params, useLoadable, CourseV2Loading, CourseV2Error,
@@ -48,11 +48,10 @@ export default function CourseQuizTakingV2Screen() {
   const changed = session?.questions.filter((question) =>
     JSON.stringify(valueOf(question.id)) !== JSON.stringify(saved[question.id] ?? null)) ?? [];
   const active = !!attempt && !attempt.submitted_at;
-  const unsupported = session?.questions.some((q) => {
-    try { quizAnswerPayload(q.question_type, null, q.choices); }
-    catch { return true; }
-    return false;
-  }) ?? false;
+  const unsupported = session?.questions.some((q) =>
+    !['single', 'multiple', 'boolean', 'short', 'essay'].includes(q.question_type) ||
+    (['single', 'multiple'].includes(q.question_type) && quizOptions(q.choices).length === 0)
+  ) ?? false;
   const totalAllowed = session?.quiz.max_attempts ?? 1;
 
   const begin = async () => {
