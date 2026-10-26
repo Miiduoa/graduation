@@ -232,7 +232,7 @@ export async function loadCourseHub(
       const submission: CourseSubmissionState = canTeach
         ? { kind: 'instructor' }
         : receipt?.status === 'fulfilled'
-          ? courseSubmissionState(receipt.value.exists() ? receipt.value.data() : null)
+          ? courseSubmissionState(receipt.value.exists() ? (receipt.value.data() ?? null) : null)
           : { kind: 'unavailable' };
       assignmentItems.push({
         id: entry.id,
