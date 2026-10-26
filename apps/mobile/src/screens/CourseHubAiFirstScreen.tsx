@@ -336,7 +336,7 @@ function CourseContent({
                                 : '未提供截止時間'}
                           </Text>
                           <AIButton
-                            label={(item.closed ? '查看已關閉作業：' : '查看與繳交：') + item.title}
+                            label={(item.closed ? '查看已關閉作業：' : '查看作業：') + item.title}
                             variant="ghost"
                             onPress={() => openAssignment(item)}
                           />
