@@ -70,9 +70,11 @@ const POI_CAT_ICON: Record<SocialPoiCategory, keyof typeof Ionicons.glyphMap> = 
 
 export function RealtimeSocialScreen({
   requestedAuthorUid,
+  requestedSchoolId,
   onRequestConsumed,
 }: {
   requestedAuthorUid?: string;
+  requestedSchoolId?: string;
   onRequestConsumed?: () => void;
 } = {}) {
   const styles = useThemeStyleSheet(createStyles);
@@ -93,6 +95,10 @@ export function RealtimeSocialScreen({
   const [heartbeatSession, setHeartbeatSession] = useState<string | null>(null);
   const [viewerState, setViewerState] = useState<{ group: StoryAuthorGroup; index: number } | null>(null);
   const [storyNotice, setStoryNotice] = useState('');
+  useEffect(() => {
+    setViewerState(null);
+    setStoryNotice('');
+  }, [school?.id, uid]);
   const [nameByUid, setNameByUid] = useState<Record<string, string>>({});
   const [avatarByUid, setAvatarByUid] = useState<Record<string, string>>({});
 
@@ -209,7 +215,15 @@ export function RealtimeSocialScreen({
 
   useEffect(() => {
     if (!requestedAuthorUid || storiesLoading) return;
-    const group = storyGroups.find((entry) => entry.authorUid === requestedAuthorUid);
+    const group =
+      requestedSchoolId === school?.id
+        ? storyGroups.find(
+            (entry) =>
+              entry.authorUid === requestedAuthorUid &&
+              entry.stories.length > 0 &&
+              entry.stories.every((story) => story.schoolId === school?.id),
+          )
+        : undefined;
     if (group?.stories.length) {
       setViewerState({ group, index: 0 });
       const story = group.stories[0];
@@ -221,7 +235,7 @@ export function RealtimeSocialScreen({
       setStoryNotice('這則限時動態可能已到期或移除。');
     }
     onRequestConsumed?.();
-  }, [requestedAuthorUid, storiesLoading, storyGroups, uid, onRequestConsumed]);
+  }, [requestedAuthorUid, requestedSchoolId, school?.id, storiesLoading, storyGroups, uid, onRequestConsumed]);
 
   const advanceStory = (delta: number) => {
     setViewerState((prev) => {
