@@ -1,5 +1,6 @@
 import { FieldValue } from 'firebase-admin/firestore';
 import { PROVIDENCE_SCHOOL_ID } from './puIdentity';
+import { getSchoolLoginConfig } from './schoolLoginConfig';
 
 const DISPLAY_ROLES = new Set([
   'student',
@@ -66,20 +67,24 @@ export async function writeSchoolLoginProfile({
   profile,
   membershipFields = {},
   courseOfferingIds = [],
+  schoolId,
 }: {
   db: SchoolLoginFirestore;
   uid: string;
   profile: SchoolLoginProfileInput;
   membershipFields?: Record<string, unknown>;
   courseOfferingIds?: string[];
+  schoolId?: string;
 }): Promise<{ role: string; memberRole: string; isNewUser: boolean }> {
+  const membershipSchoolId =
+    getSchoolLoginConfig(schoolId)?.membershipSchoolId || PROVIDENCE_SCHOOL_ID;
   const userRef = db.doc('users/' + uid);
-  const memberRef = db.doc('schools/' + PROVIDENCE_SCHOOL_ID + '/members/' + uid);
+  const memberRef = db.doc('schools/' + membershipSchoolId + '/members/' + uid);
   const offeringRefs = courseOfferingIds
     .filter((id) => id && !id.includes('/'))
     .map((id) => ({
       id,
-      ref: db.doc('schools/' + PROVIDENCE_SCHOOL_ID + '/courseTeachers/' + id),
+      ref: db.doc('schools/' + membershipSchoolId + '/courseTeachers/' + id),
     }));
 
   return db.runTransaction(async (tx) => {
@@ -110,8 +115,8 @@ export async function writeSchoolLoginProfile({
         department: profile.department || '',
         role: resolved.role,
         primaryRole: resolved.role,
-        schoolId: PROVIDENCE_SCHOOL_ID,
-        primarySchoolId: PROVIDENCE_SCHOOL_ID,
+        schoolId: membershipSchoolId,
+        primarySchoolId: membershipSchoolId,
         lastLoginAt: FieldValue.serverTimestamp(),
         ...(userDoc.exists ? {} : { createdAt: FieldValue.serverTimestamp() }),
       },

@@ -13,16 +13,20 @@ export function parseSignInOptions(value: unknown): SignInOptions {
   return { google: row.google === true, studentId: row.studentId === true };
 }
 
-export function useSignInOptions() {
+export function useSignInOptions(schoolId?: string | null, ready = true) {
+  const requestedSchoolId = schoolId ?? null;
   const [result, setResult] = useState<{
     attempt: number;
+    schoolId: string | null;
     options: SignInOptions | null;
     error: boolean;
-  }>({ attempt: 0, options: null, error: false });
+  }>({ attempt: 0, schoolId: null, options: null, error: false });
   const [attempt, setAttempt] = useState(0);
   useEffect(() => {
+    if (!ready) return;
     let active = true;
-    void browserRequest('sign-in-options')
+    const query = requestedSchoolId ? { schoolId: requestedSchoolId } : undefined;
+    void browserRequest('sign-in-options', undefined, undefined, undefined, query)
       .then((value) => {
         // A missing or malformed response cannot establish which services are closed.
         if (!value || typeof value !== 'object' || Array.isArray(value)) {
@@ -32,16 +36,23 @@ export function useSignInOptions() {
         if (typeof row.google !== 'boolean' || typeof row.studentId !== 'boolean') {
           throw new Error('invalid-sign-in-options');
         }
-        if (active) setResult({ attempt, options: parseSignInOptions(value), error: false });
+        if (active) {
+          setResult({
+            attempt,
+            schoolId: requestedSchoolId,
+            options: parseSignInOptions(value),
+            error: false,
+          });
+        }
       })
       .catch(() => {
-        if (active) setResult({ attempt, options: null, error: true });
+        if (active) setResult({ attempt, schoolId: requestedSchoolId, options: null, error: true });
       });
     return () => {
       active = false;
     };
-  }, [attempt]);
-  const current = result.attempt === attempt;
+  }, [attempt, ready, requestedSchoolId]);
+  const current = ready && result.attempt === attempt && result.schoolId === requestedSchoolId;
   const options = current ? result.options : null;
   const error = current && result.error;
   return {
