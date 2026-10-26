@@ -5,7 +5,14 @@ import { AIDetailScreen, AICard, AIButton, aiTokens } from '../ui/aiFirst';
 import { getThemeVersion, subscribeToTheme } from '../ui/theme';
 import { useAuth } from '../state/auth';
 import { useSchool } from '../state/school';
-import { askCampusAssistant, type CampusAssistantMessage } from '../features/campusAssistant';
+import {
+  askCampusAssistant,
+  getOnDeviceAssistantReadiness,
+  OnDeviceAssistantError,
+  type CampusAssistantMessage,
+  type CampusAssistantMode,
+  type OnDeviceAssistantReadiness,
+} from '../features/campusAssistant';
 import type { ServiceScreenProps } from './UnavailableFeatureScreen';
 import { safeNavigate } from '../utils/safeNavigate';
 import { getMobileQuickActions } from '../services/quickCampusActions';
@@ -47,9 +54,12 @@ function AssistantConversation({
   navigation: ServiceScreenProps['navigation'];
 }) {
   const [messages, setMessages] = useState<
-    Array<CampusAssistantMessage & { requiresService?: boolean }>
+    Array<CampusAssistantMessage & { requiresService?: boolean; source?: CampusAssistantMode }>
   >([]);
   const [draft, setDraft] = useState(initialPrompt.slice(0, 1600));
+  const [mode, setMode] = useState<CampusAssistantMode>('device');
+  const [deviceStatus, setDeviceStatus] = useState<OnDeviceAssistantReadiness | null>(null);
+  const [deviceCheck, setDeviceCheck] = useState(0);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
   const [linkError, setLinkError] = useState('');
@@ -64,9 +74,24 @@ function AssistantConversation({
     };
   }, []);
   const current = () => mounted.current && isScopeCurrent();
+  useEffect(() => {
+    let active = true;
+    void getOnDeviceAssistantReadiness().then((state) => {
+      if (active && current()) setDeviceStatus(state);
+    }).catch(() => {
+      if (active && current()) setDeviceStatus(null);
+    });
+    return () => { active = false; };
+  }, [deviceCheck]);
+  const changeMode = (next: CampusAssistantMode) => {
+    if (lock.current || next === mode) return;
+    setMode(next);
+    setMessages([]);
+    setError('');
+  };
   const send = async () => {
     const question = draft.trim();
-    if (!uid || !question || lock.current || !current()) return;
+    if ((!uid && mode === 'campus') || !question || lock.current || !current()) return;
     lock.current = true;
     setBusy(true);
     setError('');
@@ -77,16 +102,33 @@ function AssistantConversation({
         schoolName,
         messages: next,
         isCurrent: current,
+        mode,
       });
       if (current()) {
         setMessages([
           ...next,
-          { role: 'assistant', content: reply.content, requiresService: reply.hasActions },
+          { role: 'assistant', content: reply.content, requiresService: reply.hasActions, source: reply.source },
         ]);
         setDraft('');
       }
-    } catch {
-      if (current()) setError('目前無法取得回覆，問題已保留。請確認登入狀態與網路後重試。');
+    } catch (failure) {
+      if (current()) {
+        if (failure instanceof OnDeviceAssistantError) {
+          if (failure.code === 'model-required') {
+            setError('手機尚未下載 AI 模型，請先安裝免費模型。訊息已保留，不會自動改用雲端。');
+          } else if (failure.code === 'native-unavailable') {
+            setError('目前 App 沒有本地推論引擎。請使用包含 llama.rn 的 iOS／Android 原生版本，Expo Go 不支援。');
+          } else if (failure.code === 'session-changed') {
+            setError('帳號或學校已變更，這次回覆已捨棄。');
+          } else {
+            setError('手機模型無法產生回答，請到模型管理頁確認模型是否已啟用。');
+          }
+        } else {
+          setError(mode === 'device'
+            ? '手機 AI 暫時無法回覆。請檢查本地模型，內容沒有傳送到雲端。'
+            : '校園即時查詢失敗，問題已保留。請確認登入與網路狀態。');
+        }
+      }
     } finally {
       lock.current = false;
       if (current()) setBusy(false);
@@ -94,11 +136,57 @@ function AssistantConversation({
   };
   return (
     <AIDetailScreen title="校園助理" onBack={() => navigation?.goBack?.()}>
+      <AICard title="選擇 AI 模式">
+        <View style={{ gap: 9 }}>
+          <AIButton
+            label={mode === 'device' ? '✓ 手機本地 AI · 免費推論' : '手機本地 AI · 免費推論'}
+            variant="ghost"
+            disabled={busy}
+            onPress={() => changeMode('device')}
+          />
+          <AIButton
+            label={mode === 'campus' ? '✓ 校園即時 · 需網路' : '校園即時 · 需網路'}
+            variant="ghost"
+            disabled={busy}
+            onPress={() => changeMode('campus')}
+          />
+          {mode === 'device' ? (
+            <>
+              <Text style={{ color: aiTokens.muted, lineHeight: 22, fontSize: 13 }}>
+                {deviceStatus?.ready
+                  ? `模型已下載：${deviceStatus.modelId}。問答會在手機內處理，不會自動傳送到付費 AI API。`
+                  : deviceStatus?.reason || '正在檢查本機模型…'}
+              </Text>
+              <Text style={{ color: aiTokens.muted, lineHeight: 21, fontSize: 12 }}>
+                首次安裝需要下載 GGUF 模型；之後可離線問答。本機課表只引用本人已保存的副本，不包含校方即時狀態。
+              </Text>
+              <AIButton
+                label={deviceStatus?.ready ? '管理手機 AI 模型' : '下載／管理免費 AI 模型'}
+                variant="ghost"
+                disabled={busy}
+                onPress={() => safeNavigate(navigation, 'AIModelManager')}
+              />
+              <AIButton
+                label="重新檢查模型狀態"
+                variant="ghost"
+                disabled={busy}
+                onPress={() => setDeviceCheck((value) => value + 1)}
+              />
+            </>
+          ) : (
+            <Text style={{ color: aiTokens.muted, lineHeight: 21, fontSize: 13 }}>
+              查詢官方校園資料需要網路及帳號權限，可能使用雲端 AI 資源。此模式不是純手機免費推論，也不會自動提交任何交易。
+            </Text>
+          )}
+        </View>
+      </AICard>
       <AICard>
         <Text style={{ color: aiTokens.muted, lineHeight: 24 }}>
-          {uid
-            ? `目前選校：${schoolName}。可以詢問該校課程、公告與校園資訊；回覆不會套用其他學校資料。需要提交申請或付款時，請前往對應服務確認辦理。`
-            : `目前選校：${schoolName}。請先登入，再詢問這所學校的課程、公告與校園資訊。`}
+          {mode === 'device'
+            ? `目前瀏覽：${schoolName}。手機 AI 能協助整理文字、規劃任務和建議服務入口；沒有連線時，不能取得即時學校資料或代替你完成申請。`
+            : uid
+              ? `目前選校：${schoolName}。雲端資料會驗證校籍權限，重要資訊以學校原始資料為準；不會自動送出申請或付款。`
+              : `目前瀏覽：${schoolName}。校園即時查詢需先登入。也可以切換成手機本地 AI。`}
         </Text>
         {publicServices?.services.courses ? (
           <View style={{ marginTop: 12, gap: 8 }}>
@@ -119,16 +207,16 @@ function AssistantConversation({
           </View>
         ) : null}
       </AICard>
-      {uid && messages.length === 0 && !draft.trim() ? (
+      {(uid || mode === 'device') && messages.length === 0 && !draft.trim() ? (
         <AICard title="一點就能開始">
           <View style={{ gap: 10 }}>
             <Text style={{ color: aiTokens.muted, lineHeight: 22 }}>
               不需要想完整的提問。點一個問題，確認文字後再送出。
             </Text>
             {[
-              '今天有哪些作業要處理？',
-              '圖書館怎麼走？',
-              '這週有什麼校園活動？',
+              '幫我把期末報告拆成可以完成的步驟',
+              '請依手機儲存的課表整理學習安排',
+              '我要找校園圖書館，應該開啟哪個功能？',
             ].map((question) => (
               <AIButton
                 key={question}
@@ -141,10 +229,30 @@ function AssistantConversation({
         </AICard>
       ) : null}
       {messages.map((message, index) => (
-        <AICard key={index} title={message.role === 'user' ? '你的問題' : '校園助理'}>
+        <AICard key={index} title={message.role === 'user' ? '你的問題' : message.source === 'device' ? '手機本地 AI' : '校園即時助理'}>
           <Text selectable style={{ color: aiTokens.text, lineHeight: 25 }}>
             {message.content}
           </Text>
+          {message.role === 'assistant' && message.source === 'device' && (
+            <Text style={{ color: aiTokens.muted, fontSize: 12, marginTop: 10 }}>
+              本機生成 · 未進行校園網路查詢，重要資訊請到正式服務確認
+            </Text>
+          )}
+          {message.role === 'assistant' && index > 0 && (
+            <View style={{ marginTop: 12, gap: 8 }}>
+              {getMobileQuickActions(messages[index - 1]?.role === 'user' ? messages[index - 1].content : '')
+                .slice(0, 3)
+                .map((action) => (
+                  <AIButton
+                    key={action.destination}
+                    label={'查看' + action.label}
+                    variant="ghost"
+                    disabled={busy}
+                    onPress={() => safeNavigate(navigation, action.route)}
+                  />
+                ))}
+            </View>
+          )}
           {message.requiresService ? (
             <Text style={{ color: aiTokens.muted, lineHeight: 24, marginTop: 12 }}>
               尚未送出任何申請或交易。請到對應服務確認辦理。
@@ -152,11 +260,11 @@ function AssistantConversation({
           ) : null}
         </AICard>
       ))}
-      {uid ? (
-        <AICard title="想查詢什麼？">
+      {(uid || mode === 'device') ? (
+        <AICard title={mode === 'device' ? '問手機 AI' : '查詢校園即時資料'}>
           <View style={{ gap: 12 }}>
             <Text style={{ color: aiTokens.muted, lineHeight: 21, fontSize: 13 }}>
-              可以使用手機鍵盤的麥克風口述；語音辨識結果會先成為可編輯的文字，不會自動詢問或提交。
+              可以用手機鍵盤麥克風口述；辨識結果可先修改。手機 AI 只在本機運算，提交校園服務仍需自己確認。
             </Text>
             <TextInput
               accessibilityLabel="詢問校園助理"
@@ -170,7 +278,7 @@ function AssistantConversation({
                   setError('');
                 }
               }}
-              placeholder="例如：這週有哪些校園活動？"
+              placeholder={mode === 'device' ? '例如：幫我安排三天的報告進度' : '例如：這週有哪些校園活動？'}
               placeholderTextColor={aiTokens.muted}
               style={{
                 color: aiTokens.text,
