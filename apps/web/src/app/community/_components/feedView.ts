@@ -1,6 +1,6 @@
 import type { CampusPostDoc } from '@/lib/community/firestore';
 
-export type FeedFilter = 'all' | 'subscribed' | 'media';
+export type FeedFilter = 'all' | 'following' | 'subscribed' | 'media';
 export type FeedOrder = 'recommended' | 'latest';
 
 type FeedViewOptions = {
@@ -8,6 +8,7 @@ type FeedViewOptions = {
   order: FeedOrder;
   search: string;
   subscribedIds: ReadonlySet<string>;
+  followingIds: ReadonlySet<string>;
   boardNames: Record<string, string>;
   authorNames: Record<string, string>;
 };
@@ -35,6 +36,10 @@ export function selectCampusFeedPosts(
   const query = options.search.trim().toLocaleLowerCase();
   const filtered = posts.filter((post) => {
     if (options.filter === 'subscribed' && !options.subscribedIds.has(post.boardId)) return false;
+    if (
+      options.filter === 'following' &&
+      (post.anonymous || !post.authorUid || !options.followingIds.has(post.authorUid))
+    ) return false;
     if (options.filter === 'media' && !((Array.isArray(post.mediaUrls) ? post.mediaUrls : [])).some((url) => typeof url === 'string' && url.length > 0))
       return false;
     if (!query) return true;
