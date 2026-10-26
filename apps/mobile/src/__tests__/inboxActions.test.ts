@@ -265,3 +265,29 @@ describe('navigateFromInboxTask', () => {
     );
   });
 });
+
+test('instructor quiz submissions with review intent open grading, not another quiz attempt', () => {
+  const task = baseTask({
+    kind: 'quiz',
+    assignmentId: 'q-17',
+    groupId: 'course-taught',
+    preferredIntent: 'review',
+    actionLabel: '前往批改',
+  });
+  expect(resolveInboxAction(task, { isTeachingRole: true })).toMatchObject({
+    label: '前往批改',
+    target: 'grade_assignment',
+    params: { assignmentId: 'q-17', courseSpaceId: 'course-taught' },
+  });
+  jest.mocked(navigateToCourseScreen).mockClear();
+  expect(navigateFromInboxTask({}, task, {
+    role: 'student',
+    isTeachingRole: true,
+  })).toBe(true);
+  expect(navigateToCourseScreen).toHaveBeenCalledWith(
+    {},
+    'student',
+    'TeacherGrading',
+    expect.objectContaining({ courseId: 'course-taught', assignmentId: 'q-17' }),
+  );
+});

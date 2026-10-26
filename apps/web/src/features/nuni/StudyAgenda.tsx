@@ -7,6 +7,7 @@ import { NuniError, nuniErrorMessage, type NuniWorkspace } from '@campus/shared/
 import {
   loadNuniStudyAgenda,
   sortStudyTasks,
+  recommendStudyFocus,
   studyTaskStatus,
   studyTaskTiming,
   type NuniStudyAgenda,
@@ -23,7 +24,7 @@ import styles from './StudyWorkspace.module.css';
 
 const filterLabels: [StudyAgendaFilter, string][] = [
   ['pending', '待完成'],
-  ['overdue', '已過建議時間'],
+  ['overdue', '已過參考時間'],
   ['submitted', '已繳交／作答'],
   ['closed', '已停止收件'],
   ['all', '全部'],
@@ -73,7 +74,7 @@ function TaskRow({ task, now, context }: { task: NuniStudyTask; now: number; con
       ? formatTaipeiDateTime(task.dueAt, { seconds: false })
       : null;
   return (
-    <li className={styles.taskRow}>
+    <li className={styles.taskRow} data-urgency={pending ? timing : 'none'}>
       <span className={styles.taskIcon} aria-hidden="true">
         <CampusIcon name={task.kind === 'assignment' ? 'orders' : 'calendar'} size={19} />
       </span>
@@ -98,7 +99,7 @@ function TaskRow({ task, now, context }: { task: NuniStudyTask; now: number; con
         </div>
         {task.submittedAt && (
           <p className={styles.receiptTime}>
-            繳交紀錄：{formatTaipeiDateTime(task.submittedAt, { seconds: false })}
+            {task.kind === 'quiz' ? '作答紀錄' : '繳交紀錄'}：{formatTaipeiDateTime(task.submittedAt, { seconds: false })}
           </p>
         )}
         {status === 'feedback' && task.feedback && (
@@ -108,9 +109,15 @@ function TaskRow({ task, now, context }: { task: NuniStudyTask; now: number; con
       <Link
         className={styles.taskAction}
         href={classroomCourseHref(task.courseId, context, task)}
-        aria-label={`${status === 'feedback' ? '查看回饋' : pending ? '開啟' : '查看紀錄'}：${task.title}`}
+        aria-label={`${status === 'feedback' ? '查看回饋' : pending ? (task.kind === 'assignment' ? '前往繳交' : '前往作答') : '查看紀錄'}：${task.title}`}
       >
-        <span>{status === 'feedback' ? '看回饋' : pending ? '開啟' : '看紀錄'}</span>
+        <span>
+          {status === 'feedback'
+            ? '看回饋'
+            : pending
+              ? task.kind === 'assignment' ? '去繳交' : '去作答'
+              : '看紀錄'}
+        </span>
         <CampusIcon name="arrow" size={16} />
       </Link>
     </li>
@@ -207,6 +214,7 @@ export function StudyAgenda({
   const limitedCourseIds =
     data?.limitedCourseIds.filter((id) => selectedCourse === 'all' || id === selectedCourse) ?? [];
   const partial = failedCourseIds.length > 0 || limitedCourseIds.length > 0;
+  const focus = data && now > 0 ? recommendStudyFocus(scopedTasks, now) : [];
   const chooseFilter = (next: StudyAgendaFilter) => {
     setVisibleLimit(6);
     onFilter(next);
@@ -236,6 +244,7 @@ export function StudyAgenda({
         {(
           [
             ['pending', '待完成'],
+            ['overdue', '已過參考時間'],
             ['soon', '未來七天'],
             ['feedback', '老師回饋'],
           ] as const
@@ -253,6 +262,55 @@ export function StudyAgenda({
           </button>
         ))}
       </div>
+      {focus.length > 0 && (
+        <section className={styles.focusPanel} aria-label="今日優先課業">
+          <div className={styles.focusHeading}>
+            <div>
+              <p className={styles.kicker}>下一步</p>
+              <h3>建議先處理這 {focus.length} 件</h3>
+            </div>
+            <p>
+              依已載入的待辦、參考時間與跨課程分布排列。
+              {partial ? '部分課程資料尚未完整，這不是所有課程的最終排序。' : ''}
+            </p>
+          </div>
+          <div className={styles.focusGrid}>
+            {focus.map(({ task, timing }, index) => (
+              <Link
+                key={`${task.courseId}:${task.kind}:${task.id}`}
+                className={styles.focusItem}
+                data-urgency={timing}
+                href={classroomCourseHref(task.courseId, taskContext.toString(), task)}
+                aria-label={`優先處理第 ${index + 1} 件：${task.title}`}
+              >
+                <div className={styles.focusItemTop}>
+                  <span className={styles.focusPosition}>{String(index + 1).padStart(2, '0')}</span>
+                  <span className={styles.focusReason}>
+                    {timing === 'overdue'
+                      ? '已過參考時間 · 仍可開啟'
+                      : timing === 'today'
+                        ? '建議今天完成'
+                        : timing === 'week'
+                          ? '未來七天內'
+                          : timing === 'later'
+                            ? '較晚到期'
+                            : '未設定參考時間'}
+                  </span>
+                </div>
+                <strong>{task.title}</strong>
+                <span className={styles.focusCourse}>{task.courseTitle} · {task.kind === 'assignment' ? '作業' : '測驗'}</span>
+                <span className={styles.focusAction}>
+                  {task.kind === 'assignment' ? '前往繳交' : '前往作答'}
+                  <CampusIcon name="arrow" size={16} />
+                </span>
+              </Link>
+            ))}
+          </div>
+          <p className={styles.focusDisclaimer}>
+            只安排已確認仍開放的課業，參考時間不等於停止收件；實際作答與繳交結果以伺服器回執為準。
+          </p>
+        </section>
+      )}
       <div className={styles.agendaToolbar}>
         <div className={styles.segmented} role="group" aria-label="篩選課業待辦">
           {filterLabels.map(([value, label]) => (
@@ -280,9 +338,14 @@ export function StudyAgenda({
           </label>
         )}
       </div>
-      {filter === 'soon' || filter === 'feedback' ? (
+      {filter === 'soon' || filter === 'feedback' || filter === 'overdue' ? (
         <p className={styles.filterContext}>
-          目前顯示：{filter === 'soon' ? '今天起未來七天內建議完成的項目' : '老師已留下回饋的項目'}
+          目前顯示：
+          {filter === 'soon'
+            ? '今天起未來七天內建議完成的項目'
+            : filter === 'overdue'
+              ? '已過參考時間、但仍可開啟處理的項目；是否接受補交由課程老師決定'
+              : '老師已留下回饋的項目'}
           <button
             type="button"
             className={styles.textButton}

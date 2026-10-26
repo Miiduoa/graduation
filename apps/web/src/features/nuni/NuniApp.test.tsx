@@ -365,3 +365,38 @@ it('retains the selected agenda course when returning from an assignment link', 
   fireEvent.click(screen.getByRole('tab', { name: '教材' }));
   expect(new URLSearchParams(window.location.search).get('taskCourse')).toBe(workspaceId);
 });
+
+it('opens the correct course panel when following an activity from the chapter outline', async () => {
+  const taskId = 'cwa_55555555-5555-4555-8555-555555555555';
+  mocks.request.mockImplementation(async (path: string) => {
+    if (path === `class-workspaces/${workspaceId}`)
+      return { id: workspaceId, title: '設計專題', state: 'active', memberRole: 'student' };
+    if (path.endsWith('/assignments'))
+      return {
+        assignments: [{
+          id: taskId,
+          workspaceId,
+          title: '介面設計練習',
+          instructions: '完成畫面練習',
+          state: 'open',
+          createdAt: '2026-10-20T00:00:00Z',
+          dueAt: '2026-10-30T12:00:00+08:00',
+          closedAt: null,
+          unitId: null,
+          unitTitle: null,
+          submissionCount: 0,
+          mySubmission: null,
+        }],
+      };
+    if (path.endsWith('/units')) return { units: [] };
+    if (path.endsWith('/materials/page')) return { materials: [], nextCursor: null };
+    if (path.endsWith('/quizzes')) return { quizzes: [] };
+    if (path.endsWith('/materials')) return { materials: [] };
+    throw new Error(`Unexpected request: ${path}`);
+  });
+  render(<NuniApp />);
+  const outlineLink = await within(await screen.findByRole('tabpanel', { name: '學習路徑' })).findByRole('link', { name: /介面設計練習/ });
+  expect(screen.getByRole('tab', { name: '學習路徑' }).getAttribute('aria-selected')).toBe('true');
+  fireEvent.click(outlineLink);
+  expect(screen.getByRole('tab', { name: '作業' }).getAttribute('aria-selected')).toBe('true');
+});
