@@ -37,6 +37,7 @@ import {
 } from '@/lib/community/firestore';
 
 type FilterKey = FeedFilter | 'saved';
+const EMPTY_SAVED_POSTS: CampusPostDoc[] = [];
 
 const FILTERS: { key: FilterKey; label: string; icon: string }[] = [
   { key: 'all', label: '全部', icon: '✨' },
@@ -99,7 +100,7 @@ export function FeedTab(props: { schoolId: string; schoolSearch: string }) {
   const currentBookmarkScope = `${user?.uid ?? ''}:${schoolId}`;
   const validBookmarks = bookmarkScope === currentBookmarkScope;
   const savedIds = validBookmarks ? bookmarkedIds : new Set<string>();
-  const savedPosts = validBookmarks ? bookmarkedPosts : [];
+  const savedPosts = validBookmarks ? bookmarkedPosts : EMPTY_SAVED_POSTS;
   const savedView = filter === 'saved';
 
   const load = useCallback(async () => {
@@ -164,7 +165,7 @@ export function FeedTab(props: { schoolId: string; schoolSearch: string }) {
     () =>
       selectCampusFeedPosts(savedView ? savedPosts : posts, {
         filter: savedView ? 'all' : filter,
-        order: savedView ? 'latest' : order,
+        order,
         search,
         subscribedIds,
         boardNames: boardNameById,
@@ -511,14 +512,14 @@ export function FeedTab(props: { schoolId: string; schoolSearch: string }) {
             aria-pressed={order === 'recommended'}
             onClick={() => setOrder('recommended')}
           >
-            推薦
+            {savedView ? '收藏順序' : '推薦'}
           </button>
           <button
             type="button"
             aria-pressed={order === 'latest'}
             onClick={() => setOrder('latest')}
           >
-            最新
+            {savedView ? '貼文最新' : '最新'}
           </button>
         </div>
       </div>
@@ -539,7 +540,7 @@ export function FeedTab(props: { schoolId: string; schoolSearch: string }) {
       )}
 
       {/* ── Posts ── */}
-      {loading || (savedView && (bookmarksLoading || !validBookmarks)) ? (
+      {loading || (savedView && (bookmarksLoading || (!validBookmarks && !bookmarksError))) ? (
         <div className="card" style={{ padding: 24, textAlign: 'center', color: 'var(--muted)' }} role="status">
           {savedView ? '正在讀取收藏…' : '載入中…'}
         </div>
@@ -738,7 +739,7 @@ export function FeedTab(props: { schoolId: string; schoolSearch: string }) {
                     aria-label={savedIds.has(item.id) ? '取消收藏貼文' : '收藏貼文'}
                     aria-pressed={savedIds.has(item.id)}
                     disabled={bookmarksPending.has(item.id)}
-                    className={styles.postShare}
+                    className={`${styles.postShare} ${styles.postBookmark}`}
                     onClick={() => void toggleBookmark(item)}
                   >
                     {savedIds.has(item.id) ? '已收藏' : '收藏'}
