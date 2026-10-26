@@ -29,7 +29,10 @@ export const TRANSFER_FASTER_BY_MINUTES = 10;
 const TAXI_RE = /yoxi|taxi|uber|cab|rideshare|計程車|小黃/;
 const BIKE_RE = /bike|cycling|ubike|youbike|t-bike|bicycle|單車|自行車|腳踏/;
 const WALK_RE = /walk|foot|pedestrian|步行/;
+const WAIT_RE = /\bwait(ing)?\b|等車|候車/;
 const TRANSIT_RE = /transit|bus|rail|train|thsr|hsr|mrt|metro|tram|lrt|subway|ferry|gondola|cable|公車|客運|火車|臺鐵|台鐵|高鐵|捷運|輕軌|渡輪/;
+/** 送當下時間會被 TDX 以 400／20001 拒絕，出發時刻往後推這段再往上取整到分鐘。 */
+export const MAAS_DEPART_LEAD_MS = 5 * 60_000;
 
 export type TransferTrip = {
   boardStopName: string;
@@ -72,6 +75,23 @@ export function taipeiPlannerTime(ms: number): string | null {
   return `${year}-${month}-${day}T${hour}:${minute}:00`;
 }
 
+export function maasDepartTimestamp(ms: number): number {
+  if (!Number.isFinite(ms)) return ms;
+  return Math.ceil((ms + MAAS_DEPART_LEAD_MS) / 60_000) * 60_000;
+}
+
+export function taipeiMaasDepartTime(ms: number): string | null {
+  return taipeiPlannerTime(maasDepartTimestamp(ms));
+}
+
+export function taipeiLocalTimeToIso(value: string): string | null {
+  const raw = value.trim();
+  if (!raw) return null;
+  const stamped = /[zZ]|[+-]\d{2}:?\d{2}$/.test(raw) ? raw : `${raw}+08:00`;
+  const parsed = Date.parse(stamped);
+  return Number.isFinite(parsed) ? new Date(parsed).toISOString() : null;
+}
+
 export function maasCacheSlot(ms: number): number {
   return Math.floor(ms / MAAS_CACHE_SLOT_MS);
 }
@@ -107,23 +127,23 @@ export function maasCacheKey(query: MaasPlannerQuery): string {
 
 /**
  * 組 TDX MaaS 旅運規劃查詢。
- * 端點與參數依 TDX 公共運輸旅運規劃模組（OAS 服務根路徑 /api/maas）
- * 及公開實作：GET /api/maas/routing，origin／destination 為 WGS84 緯度,經度，
- * gc=0 表示該座標系統。transit=3,4,5,6,7 為公共運具；
- * first_mile_mode／last_mile_mode=0 為步行，避免計程車與單車。
- * 只送出發時間 depart（台北時間），不送 arrival。
+ * 端點：GET /api/maas/routing。origin／destination 為 WGS84 緯度,經度。
+ * gc 是票價與時間的權重，實測 gc=1 可用，不是座標系統。
+ * 不送 transfer_time（送 0 會 404／40001）。
+ * depart 為台北時間、現在加 5 分鐘再往上取整到分鐘；送當下時間會 400／20001。
+ * transit=3,4,5,6,7 為公共運具；first_mile_mode／last_mile_mode=0 為步行。
+ * 不送 arrival。
  */
 export function buildMaasPlannerUrl(query: MaasPlannerQuery): string {
-  const depart = taipeiPlannerTime(query.departureAt);
+  const depart = taipeiMaasDepartTime(query.departureAt);
   const params = new URLSearchParams({
     origin: `${query.origin.lat.toFixed(6)},${query.origin.lon.toFixed(6)}`,
     destination: `${query.destination.lat.toFixed(6)},${query.destination.lon.toFixed(6)}`,
-    gc: '0',
+    gc: '1',
     top: '5',
     transit: '3,4,5,6,7',
     first_mile_mode: '0',
     last_mile_mode: '0',
-    transfer_time: '0',
   });
   if (depart) params.set('depart', depart);
   return `https://tdx.transportdata.tw${MAAS_PLANNER_PATH}?${params.toString()}`;
@@ -155,7 +175,7 @@ function toMinutes(value: number, unit: 'seconds' | 'minutes'): number {
   return Math.max(1, Math.round(unit === 'seconds' ? value / 60 : value));
 }
 
-type LegKind = 'walk' | 'transit' | 'taxi' | 'bike' | 'other';
+type LegKind = 'walk' | 'wait' | 'transit' | 'taxi' | 'bike' | 'other';
 
 type ParsedLeg = {
   kind: LegKind;
@@ -170,6 +190,7 @@ type ParsedLeg = {
 function classifyMode(raw: string): LegKind {
   const value = raw.normalize('NFKC').trim().toLowerCase();
   if (!value) return 'other';
+  if (WAIT_RE.test(value)) return 'wait';
   if (TAXI_RE.test(value)) return 'taxi';
   if (BIKE_RE.test(value)) return 'bike';
   if (WALK_RE.test(value)) return 'walk';
@@ -220,8 +241,7 @@ function parseLeg(value: unknown): ParsedLeg | null {
   const fromName = placeName(departure?.place) || placeName(departure);
   const toName = placeName(arrival?.place) || placeName(arrival);
   const duration = summaryDuration(value.travelSummary);
-  const startRaw = textOf(departure?.time);
-  const startAt = startRaw && Number.isFinite(Date.parse(startRaw)) ? new Date(Date.parse(startRaw)).toISOString() : null;
+  const startAt = taipeiLocalTimeToIso(textOf(departure?.time));
   return {
     kind, route: route.slice(0, 40), fromName: fromName.slice(0, 80), toName: toName.slice(0, 80),
     minutes: duration ?? 1, startAt, rawMinutes: duration,
@@ -246,29 +266,22 @@ function collectLegs(plan: Record<string, unknown>): ParsedLeg[] {
 }
 
 function listedDuration(plan: Record<string, unknown>): number | null {
-  return summaryDuration(plan.travelSummary)
+  return rawDuration(plan.travel_time)
+    ?? summaryDuration(plan.travelSummary)
     ?? rawDuration(plan.duration)
     ?? rawDuration(plan.Duration);
 }
 
-function durationUnit(plan: Record<string, unknown>, legs: ParsedLeg[]): 'seconds' | 'minutes' {
-  const listed = listedDuration(plan);
-  const samples = [...legs.map((leg) => leg.rawMinutes ?? 0), listed ?? 0];
-  return Math.max(0, ...samples) > 240 ? 'seconds' : 'minutes';
-}
-
-function scaledLegs(plan: Record<string, unknown>, legs: ParsedLeg[]): ParsedLeg[] {
-  const unit = durationUnit(plan, legs);
+function scaledLegs(legs: ParsedLeg[]): ParsedLeg[] {
   return legs.map((leg) => ({
     ...leg,
-    minutes: leg.rawMinutes == null ? leg.minutes : toMinutes(leg.rawMinutes, unit),
+    minutes: leg.rawMinutes == null ? leg.minutes : toMinutes(leg.rawMinutes, 'seconds'),
   }));
 }
 
 function planTotalMinutes(plan: Record<string, unknown>, legs: ParsedLeg[]): number {
-  const unit = durationUnit(plan, legs);
   const listed = listedDuration(plan);
-  if (listed != null) return toMinutes(listed, unit);
+  if (listed != null) return toMinutes(listed, 'seconds');
   const sum = legs.reduce((total, leg) => total + leg.minutes, 0);
   return Math.max(1, sum);
 }
@@ -276,7 +289,7 @@ function planTotalMinutes(plan: Record<string, unknown>, legs: ParsedLeg[]): num
 export function isWalkOnlyAccess(legs: readonly ParsedLeg[]): boolean {
   if (!legs.length) return false;
   if (legs.some((leg) => leg.kind === 'taxi' || leg.kind === 'bike')) return false;
-  const trimmed = legs.filter((leg) => leg.kind !== 'walk');
+  const trimmed = legs.filter((leg) => leg.kind !== 'walk' && leg.kind !== 'wait');
   if (!trimmed.length) return false;
   return trimmed.every((leg) => leg.kind === 'transit');
 }
@@ -320,7 +333,7 @@ export function parseMaasTransferPlans(payload: unknown): TransferTrip[] {
   const seen = new Set<string>();
   for (const plan of plans) {
     if (!isRecord(plan)) continue;
-    const legs = scaledLegs(plan, collectLegs(plan));
+    const legs = scaledLegs(collectLegs(plan));
     const trip = transferFromWalkOnlyLegs(legs, planTotalMinutes(plan, legs));
     if (!trip) continue;
     const key = `${trip.firstRoute}:${trip.secondRoute}:${trip.boardStopName}:${trip.transferStopName}:${trip.alightStopName}`;

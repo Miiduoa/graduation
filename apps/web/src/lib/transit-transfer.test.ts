@@ -74,17 +74,35 @@ describe('TDX 轉乘方案', () => {
     expect(hall?.lon).toBe(PROVIDENCE_ZHUGU_HALL.lon);
   });
 
-  it('只走路的過濾會丟掉 YOXI 計程車與單車首末段', () => {
+  it('真實 MaaS 回應解出 5 筆走路轉乘，waiting 不當成轉乘', () => {
     const trips = parseMaasTransferPlans(walkOnlyPayload());
-    expect(trips).toHaveLength(1);
-    expect(trips[0]?.firstRoute).toBe('300');
+    expect(trips).toHaveLength(5);
+    expect(trips[0]?.firstRoute).toBe('305');
     expect(trips[0]?.secondRoute).toBe('151');
     expect(trips[0]?.boardStopName).toBe('靜宜大學(專用道)');
-    expect(trips[0]?.transferStopName).toBe('臺中車站');
-    expect(trips[0]?.transferWalkMinutes).toBe(3);
-    expect(trips[0]?.alightStopName).toBe('高鐵臺中站');
-    expect(trips[0]?.totalMinutes).toBe(45);
+    expect(trips[0]?.alightStopName).toContain('高鐵臺中站');
+    expect(trips[0]?.totalMinutes).toBe(52);
+    expect(trips[0]?.firstDepartureAt).toBe('2026-10-26T03:03:00.000Z');
     expect(JSON.stringify(trips)).not.toMatch(/YOXI|YouBike|Taxi|Bike/i);
+  });
+
+  it('計程車或單車首末段不會當成走路轉乘', () => {
+    const trips = parseMaasTransferPlans({
+      result: 'success',
+      data: {
+        routes: [{
+          travel_time: 960,
+          sections: [{
+            type: 'taxi',
+            travelSummary: { duration: 960 },
+            departure: { time: '2026-10-26T11:00:00', place: { name: '靜宜大學(校門)', location: { lat: 24.225388, lng: 120.577561 } } },
+            arrival: { time: '2026-10-26T11:16:00', place: { name: '高鐵臺中站', location: { lat: 24.11117, lng: 120.61590 } } },
+            transport: { mode: 'taxi', name: 'YOXI', shortName: 'YOXI' },
+          }],
+        }],
+      },
+    });
+    expect(trips).toEqual([]);
   });
 
   it('sections 或 routes 是物件時仍能解析走路轉乘', () => {
@@ -95,12 +113,12 @@ describe('TDX 轉乘方案', () => {
     const first = wrapped.data.routes[0];
     if (!first || !Array.isArray(first.sections)) throw new Error('expected sections array');
     first.sections = { section: first.sections };
-    expect(parseMaasTransferPlans(wrapped)).toHaveLength(1);
+    expect(parseMaasTransferPlans(wrapped)).toHaveLength(5);
 
     const single = walkOnlyPayload() as { data: { routes: unknown } };
     const walkRoute = (single.data.routes as unknown[])[0];
     single.data.routes = walkRoute;
-    expect(parseMaasTransferPlans(single)[0]?.firstRoute).toBe('300');
+    expect(parseMaasTransferPlans(single)[0]?.firstRoute).toBe('305');
   });
 
   it('組出來的 MaaS 網址只走路、只用出發時間、不含 arrival', () => {
@@ -112,20 +130,24 @@ describe('TDX 轉乘方案', () => {
       `${PROVIDENCE_DIRECT_ORIGIN.lat.toFixed(6)},${PROVIDENCE_DIRECT_ORIGIN.lon.toFixed(6)}`,
     );
     expect(parsed.searchParams.get('destination')).toBe('24.112000,120.616000');
-    expect(parsed.searchParams.get('gc')).toBe('0');
+    expect(parsed.searchParams.get('gc')).toBe('1');
     expect(parsed.searchParams.get('top')).toBe('5');
     expect(parsed.searchParams.get('transit')).toBe('3,4,5,6,7');
-    expect(parsed.searchParams.get('depart')).toBe('2026-10-25T16:00:00');
+    expect(parsed.searchParams.get('depart')).toBe('2026-10-25T16:05:00');
     expect(parsed.searchParams.get('first_mile_mode')).toBe('0');
     expect(parsed.searchParams.get('last_mile_mode')).toBe('0');
-    expect(parsed.searchParams.get('transfer_time')).toBe('0');
+    expect(parsed.searchParams.get('transfer_time')).toBeNull();
     expect(parsed.searchParams.get('firstLastMileType')).toBeNull();
     expect(parsed.searchParams.get('transitType')).toBeNull();
     expect(parsed.searchParams.get('time')).toBeNull();
     expect(parsed.searchParams.get('arrival')).toBeNull();
     expect(maasUrlHasArrivalParam(url)).toBe(false);
-    expect(url).not.toContain('gc=1');
+    expect(url).not.toContain('gc=0');
     expect(url).not.toMatch(/YOXI|Bike|Taxi/i);
+    const ceilUrl = buildMaasPlannerUrl({
+      origin: PROVIDENCE_DIRECT_ORIGIN, destination: dest, departureAt: NOW + 1,
+    });
+    expect(new URL(ceilUrl).searchParams.get('depart')).toBe('2026-10-25T16:06:00');
   });
 
   it('主顧樓迄點用校正後的建築座標，不用偏西的站牌', () => {
@@ -175,11 +197,13 @@ describe('TDX 轉乘方案', () => {
     expect(params.get('first_mile_mode')).toBe('0');
     expect(params.get('last_mile_mode')).toBe('0');
     expect(params.get('transit')).toBe('3,4,5,6,7');
-    expect(params.get('depart')).toBeTruthy();
+    expect(params.get('depart')).toBe('2026-10-25T16:05:00');
+    expect(params.get('gc')).toBe('1');
+    expect(params.get('transfer_time')).toBeNull();
     expect(params.get('arrival')).toBeNull();
-    expect(result.transfers).toHaveLength(1);
-    expect(result.transfers[0]?.firstRoute).toBe('300');
-    expect(result.transfers[0]?.secondRoute).toBe('151');
+    expect(result.transfers).toHaveLength(3);
+    expect(result.transfers.some((trip) => trip.firstRoute === '305' && trip.secondRoute === '151')).toBe(true);
+    expect(result.transfers[0]?.alightStopName).toContain('高鐵臺中站');
     expect(result.googleMapsUrl).toContain('https://www.google.com/maps/dir/?');
     expect(JSON.stringify(result.transfers)).not.toMatch(/YOXI|YouBike/);
     const maasInit = JSON.stringify(maas[0]?.init ?? {});
@@ -274,7 +298,9 @@ describe('TDX 轉乘方案', () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     try {
       const mock = service((url) => {
-        if (url.includes('/api/maas/')) return new Response('{}', { status: 404 });
+        if (url.includes('/api/maas/')) {
+          return Response.json({ result: 'fail', error: { code: 40001, msg: 'API spec params is wrong.' } }, { status: 404 });
+        }
         if (url.includes('/StopOfRoute/')) return Response.json([]);
         return Response.json([]);
       });
@@ -295,6 +321,31 @@ describe('TDX 轉乘方案', () => {
     }
   });
 
+  it('depart 在過去會回 400，畫面退回直達與地圖', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      const mock = service((url) => {
+        if (url.includes('/api/maas/')) {
+          return Response.json(
+            { result: 'fail', error: { code: 20001, msg: 'The depart time before now!' } },
+            { status: 400 },
+          );
+        }
+        if (url.includes('/StopOfRoute/')) return Response.json([]);
+        return Response.json([]);
+      });
+      const result = await mock.execute({ action: 'direct', schoolId: 'pu', destination: '高鐵臺中站' });
+      expect(result.status).toBe('ready');
+      if (result.status !== 'ready' || result.kind !== 'direct') throw new Error('expected direct');
+      expect(result.transfers).toEqual([]);
+      expect(result.transferFallback).toBe(true);
+      expect(result.googleMapsUrl).toContain('travelmode=transit');
+      expect(warn).toHaveBeenCalledWith('TDX MaaS routing failed', { status: 400, type: 'upstream' });
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
   it('即時到站失敗時仍回直達與 Google 地圖，不讓頁面壞掉', async () => {
     const mock = service((url) => {
       if (url.includes('/EstimatedTimeOfArrival/')) throw new Error('upstream');
@@ -305,7 +356,7 @@ describe('TDX 轉乘方案', () => {
     expect(result.status).toBe('ready');
     if (result.status !== 'ready' || result.kind !== 'direct') throw new Error('expected direct');
     expect(result.googleMapsUrl).toContain('travelmode=transit');
-    expect(result.transfers[0]?.firstRoute).toBe('300');
+    expect(result.transfers.some((trip) => trip.firstRoute === '305' && trip.secondRoute === '151')).toBe(true);
   });
 
   it('沒有金鑰時不呼叫 MaaS，退回直達結果加 Google 地圖', async () => {

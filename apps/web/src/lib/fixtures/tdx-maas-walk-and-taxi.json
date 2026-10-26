@@ -1,208 +1,1014 @@
 {
-  "result": "Success",
+  "result": "success",
   "data": {
     "routes": [
       {
-        "id": "R1",
-        "travelSummary": { "duration": 2700, "length": 22000 },
+        "travel_time": 3120,
+        "start_time": "2026-10-26T11:01:00",
+        "end_time": "2026-10-26T11:53:00",
+        "transfers": 1,
         "sections": [
           {
-            "id": "R1-S1",
             "type": "pedestrian",
+            "travelSummary": {
+              "duration": 120,
+              "length": 167.623123
+            },
             "departure": {
-              "time": "2026-10-25T16:07:00+08:00",
+              "time": "2026-10-26T11:01:00",
               "place": {
                 "type": "place",
-                "name": "靜宜大學(校門)",
-                "location": { "lat": 24.225388, "lng": 120.577561 }
+                "location": {
+                  "lat": 24.225388,
+                  "lng": 120.57756
+                }
               }
             },
             "arrival": {
-              "time": "2026-10-25T16:10:00+08:00",
+              "time": "2026-10-26T11:03:00",
               "place": {
-                "type": "station",
                 "name": "靜宜大學(專用道)",
-                "location": { "lat": 24.2266, "lng": 120.5748 }
-              }
-            },
-            "transport": { "mode": "pedestrian" },
-            "travelSummary": { "duration": 180, "length": 220 }
-          },
-          {
-            "id": "R1-S2",
-            "type": "transit",
-            "departure": {
-              "time": "2026-10-25T16:10:00+08:00",
-              "place": {
                 "type": "station",
-                "name": "靜宜大學(專用道)",
-                "location": { "lat": 24.2266, "lng": 120.5748 }
-              }
-            },
-            "arrival": {
-              "time": "2026-10-25T16:35:00+08:00",
-              "place": {
-                "type": "station",
-                "name": "臺中車站",
-                "location": { "lat": 24.1369, "lng": 120.6850 }
+                "location": {
+                  "lat": 24.225899,
+                  "lng": 120.576538
+                }
               }
             },
             "transport": {
-              "mode": "bus",
-              "name": "300",
-              "shortName": "300",
-              "headsign": "臺中車站"
-            },
-            "travelSummary": { "duration": 1500, "length": 18000 }
+              "mode": "pedestrian"
+            }
           },
           {
-            "id": "R1-S3",
+            "type": "transit",
+            "travelSummary": {
+              "duration": 1440,
+              "length": 0
+            },
+            "departure": {
+              "time": "2026-10-26T11:03:00",
+              "place": {
+                "name": "靜宜大學(專用道)",
+                "type": "station",
+                "location": {
+                  "lat": 24.225899,
+                  "lng": 120.576538
+                }
+              }
+            },
+            "arrival": {
+              "time": "2026-10-26T11:27:00",
+              "place": {
+                "name": "秋紅谷(專用道)",
+                "type": "station",
+                "location": {
+                  "lat": 24.169165,
+                  "lng": 120.638878
+                }
+              }
+            },
+            "transport": {
+              "mode": "Bus",
+              "name": "305",
+              "shortName": "305"
+            }
+          },
+          {
             "type": "pedestrian",
+            "travelSummary": {
+              "duration": 360,
+              "length": 385
+            },
             "departure": {
-              "time": "2026-10-25T16:35:00+08:00",
+              "time": "2026-10-26T11:27:00",
               "place": {
+                "name": "秋紅谷(專用道)",
                 "type": "station",
-                "name": "臺中車站",
-                "location": { "lat": 24.1369, "lng": 120.6850 }
+                "location": {
+                  "lat": 24.169165,
+                  "lng": 120.638878
+                }
               }
             },
             "arrival": {
-              "time": "2026-10-25T16:38:00+08:00",
+              "time": "2026-10-26T11:33:00",
               "place": {
+                "name": "朝馬2(臺灣大道)",
                 "type": "station",
-                "name": "臺中車站轉運中心",
-                "location": { "lat": 24.1374, "lng": 120.6862 }
-              }
-            },
-            "transport": { "mode": "pedestrian" },
-            "travelSummary": { "duration": 180, "length": 200 }
-          },
-          {
-            "id": "R1-S4",
-            "type": "transit",
-            "departure": {
-              "time": "2026-10-25T16:40:00+08:00",
-              "place": {
-                "type": "station",
-                "name": "臺中車站",
-                "location": { "lat": 24.1369, "lng": 120.6850 }
-              }
-            },
-            "arrival": {
-              "time": "2026-10-25T16:52:00+08:00",
-              "place": {
-                "type": "station",
-                "name": "高鐵臺中站",
-                "location": { "lat": 24.11117, "lng": 120.61590 }
+                "location": {
+                  "lat": 24.171602,
+                  "lng": 120.636177
+                }
               }
             },
             "transport": {
-              "mode": "bus",
+              "mode": "pedestrian"
+            }
+          },
+          {
+            "type": "waiting",
+            "travelSummary": {
+              "duration": 600,
+              "length": 0
+            },
+            "departure": {
+              "time": "2026-10-26T11:33:00",
+              "place": {
+                "name": "朝馬2(臺灣大道)",
+                "type": "station",
+                "location": {
+                  "lat": 24.171602,
+                  "lng": 120.636177
+                }
+              }
+            },
+            "arrival": {
+              "time": "2026-10-26T11:43:00",
+              "place": {
+                "name": "朝馬2(臺灣大道)",
+                "type": "station",
+                "location": {
+                  "lat": 24.171602,
+                  "lng": 120.636177
+                }
+              }
+            },
+            "transport": {
+              "mode": "waiting"
+            }
+          },
+          {
+            "type": "transit",
+            "travelSummary": {
+              "duration": 600,
+              "length": 0
+            },
+            "departure": {
+              "time": "2026-10-26T11:43:00",
+              "place": {
+                "name": "朝馬2(臺灣大道)",
+                "type": "station",
+                "location": {
+                  "lat": 24.171602,
+                  "lng": 120.636177
+                }
+              }
+            },
+            "arrival": {
+              "time": "2026-10-26T11:53:00",
+              "place": {
+                "name": "高鐵臺中站(第14月台)",
+                "type": "station",
+                "location": {
+                  "lat": 24.11117,
+                  "lng": 120.615898
+                }
+              }
+            },
+            "transport": {
+              "mode": "Bus",
               "name": "151",
-              "shortName": "151",
-              "headsign": "高鐵臺中站"
-            },
-            "travelSummary": { "duration": 720, "length": 9000 }
+              "shortName": "151"
+            }
           },
           {
-            "id": "R1-S5",
             "type": "pedestrian",
+            "travelSummary": {
+              "duration": 0,
+              "length": 0.405649
+            },
             "departure": {
-              "time": "2026-10-25T16:52:00+08:00",
+              "time": "2026-10-26T11:53:00",
               "place": {
+                "name": "高鐵臺中站(第14月台)",
                 "type": "station",
-                "name": "高鐵臺中站",
-                "location": { "lat": 24.11117, "lng": 120.61590 }
+                "location": {
+                  "lat": 24.11117,
+                  "lng": 120.615898
+                }
               }
             },
             "arrival": {
-              "time": "2026-10-25T16:54:00+08:00",
+              "time": "2026-10-26T11:53:00",
               "place": {
                 "type": "place",
-                "name": "高鐵出口",
-                "location": { "lat": 24.11140, "lng": 120.61620 }
+                "location": {
+                  "lat": 24.11117,
+                  "lng": 120.615898
+                }
               }
             },
-            "transport": { "mode": "pedestrian" },
-            "travelSummary": { "duration": 120, "length": 150 }
+            "transport": {
+              "mode": "pedestrian"
+            }
           }
         ]
       },
       {
-        "id": "R2",
-        "travelSummary": { "duration": 960, "length": 21000 },
+        "travel_time": 3060,
+        "start_time": "2026-10-26T11:02:00",
+        "end_time": "2026-10-26T11:53:00",
+        "transfers": 1,
         "sections": [
           {
-            "id": "R2-S1",
-            "type": "taxi",
-            "departure": {
-              "time": "2026-10-25T16:00:00+08:00",
-              "place": {
-                "type": "place",
-                "name": "靜宜大學(校門)",
-                "location": { "lat": 24.225388, "lng": 120.577561 }
-              }
-            },
-            "arrival": {
-              "time": "2026-10-25T16:16:00+08:00",
-              "place": {
-                "type": "place",
-                "name": "高鐵臺中站",
-                "location": { "lat": 24.11117, "lng": 120.61590 }
-              }
-            },
-            "transport": { "mode": "taxi", "name": "YOXI", "shortName": "YOXI" },
-            "travelSummary": { "duration": 960, "length": 21000 }
-          }
-        ]
-      },
-      {
-        "id": "R3",
-        "travelSummary": { "duration": 1080, "length": 19000 },
-        "sections": [
-          {
-            "id": "R3-S1",
             "type": "pedestrian",
+            "travelSummary": {
+              "duration": 120,
+              "length": 167.623123
+            },
             "departure": {
-              "time": "2026-10-25T16:00:00+08:00",
+              "time": "2026-10-26T11:02:00",
               "place": {
                 "type": "place",
-                "name": "靜宜大學(校門)",
-                "location": { "lat": 24.225388, "lng": 120.577561 }
+                "location": {
+                  "lat": 24.225388,
+                  "lng": 120.57756
+                }
               }
             },
             "arrival": {
-              "time": "2026-10-25T16:03:00+08:00",
+              "time": "2026-10-26T11:04:00",
               "place": {
-                "type": "place",
-                "name": "YouBike 沙鹿站",
-                "location": { "lat": 24.2260, "lng": 120.5780 }
+                "name": "靜宜大學(專用道)",
+                "type": "station",
+                "location": {
+                  "lat": 24.225899,
+                  "lng": 120.576538
+                }
               }
             },
-            "transport": { "mode": "pedestrian" },
-            "travelSummary": { "duration": 180, "length": 250 }
+            "transport": {
+              "mode": "pedestrian"
+            }
           },
           {
-            "id": "R3-S2",
-            "type": "bicycle",
+            "type": "transit",
+            "travelSummary": {
+              "duration": 1440,
+              "length": 0
+            },
             "departure": {
-              "time": "2026-10-25T16:03:00+08:00",
+              "time": "2026-10-26T11:04:00",
               "place": {
-                "type": "place",
-                "name": "YouBike 沙鹿站",
-                "location": { "lat": 24.2260, "lng": 120.5780 }
+                "name": "靜宜大學(專用道)",
+                "type": "station",
+                "location": {
+                  "lat": 24.225899,
+                  "lng": 120.576538
+                }
               }
             },
             "arrival": {
-              "time": "2026-10-25T16:18:00+08:00",
+              "time": "2026-10-26T11:28:00",
               "place": {
-                "type": "place",
-                "name": "高鐵臺中站",
-                "location": { "lat": 24.11117, "lng": 120.61590 }
+                "name": "秋紅谷(專用道)",
+                "type": "station",
+                "location": {
+                  "lat": 24.169165,
+                  "lng": 120.638878
+                }
               }
             },
-            "transport": { "mode": "bicycle", "name": "YouBike", "shortName": "YouBike" },
-            "travelSummary": { "duration": 900, "length": 18750 }
+            "transport": {
+              "mode": "Bus",
+              "name": "308副",
+              "shortName": "308副"
+            }
+          },
+          {
+            "type": "pedestrian",
+            "travelSummary": {
+              "duration": 360,
+              "length": 385
+            },
+            "departure": {
+              "time": "2026-10-26T11:28:00",
+              "place": {
+                "name": "秋紅谷(專用道)",
+                "type": "station",
+                "location": {
+                  "lat": 24.169165,
+                  "lng": 120.638878
+                }
+              }
+            },
+            "arrival": {
+              "time": "2026-10-26T11:34:00",
+              "place": {
+                "name": "朝馬2(臺灣大道)",
+                "type": "station",
+                "location": {
+                  "lat": 24.171602,
+                  "lng": 120.636177
+                }
+              }
+            },
+            "transport": {
+              "mode": "pedestrian"
+            }
+          },
+          {
+            "type": "waiting",
+            "travelSummary": {
+              "duration": 540,
+              "length": 0
+            },
+            "departure": {
+              "time": "2026-10-26T11:34:00",
+              "place": {
+                "name": "朝馬2(臺灣大道)",
+                "type": "station",
+                "location": {
+                  "lat": 24.171602,
+                  "lng": 120.636177
+                }
+              }
+            },
+            "arrival": {
+              "time": "2026-10-26T11:43:00",
+              "place": {
+                "name": "朝馬2(臺灣大道)",
+                "type": "station",
+                "location": {
+                  "lat": 24.171602,
+                  "lng": 120.636177
+                }
+              }
+            },
+            "transport": {
+              "mode": "waiting"
+            }
+          },
+          {
+            "type": "transit",
+            "travelSummary": {
+              "duration": 600,
+              "length": 0
+            },
+            "departure": {
+              "time": "2026-10-26T11:43:00",
+              "place": {
+                "name": "朝馬2(臺灣大道)",
+                "type": "station",
+                "location": {
+                  "lat": 24.171602,
+                  "lng": 120.636177
+                }
+              }
+            },
+            "arrival": {
+              "time": "2026-10-26T11:53:00",
+              "place": {
+                "name": "高鐵臺中站(第14月台)",
+                "type": "station",
+                "location": {
+                  "lat": 24.11117,
+                  "lng": 120.615898
+                }
+              }
+            },
+            "transport": {
+              "mode": "Bus",
+              "name": "151",
+              "shortName": "151"
+            }
+          },
+          {
+            "type": "pedestrian",
+            "travelSummary": {
+              "duration": 0,
+              "length": 0.405649
+            },
+            "departure": {
+              "time": "2026-10-26T11:53:00",
+              "place": {
+                "name": "高鐵臺中站(第14月台)",
+                "type": "station",
+                "location": {
+                  "lat": 24.11117,
+                  "lng": 120.615898
+                }
+              }
+            },
+            "arrival": {
+              "time": "2026-10-26T11:53:00",
+              "place": {
+                "type": "place",
+                "location": {
+                  "lat": 24.11117,
+                  "lng": 120.615898
+                }
+              }
+            },
+            "transport": {
+              "mode": "pedestrian"
+            }
+          }
+        ]
+      },
+      {
+        "travel_time": 3180,
+        "start_time": "2026-10-26T11:00:00",
+        "end_time": "2026-10-26T11:53:00",
+        "transfers": 1,
+        "sections": [
+          {
+            "type": "pedestrian",
+            "travelSummary": {
+              "duration": 120,
+              "length": 167.623123
+            },
+            "departure": {
+              "time": "2026-10-26T11:00:00",
+              "place": {
+                "type": "place",
+                "location": {
+                  "lat": 24.225388,
+                  "lng": 120.57756
+                }
+              }
+            },
+            "arrival": {
+              "time": "2026-10-26T11:02:00",
+              "place": {
+                "name": "靜宜大學(專用道)",
+                "type": "station",
+                "location": {
+                  "lat": 24.225899,
+                  "lng": 120.576538
+                }
+              }
+            },
+            "transport": {
+              "mode": "pedestrian"
+            }
+          },
+          {
+            "type": "transit",
+            "travelSummary": {
+              "duration": 1500,
+              "length": 0
+            },
+            "departure": {
+              "time": "2026-10-26T11:02:00",
+              "place": {
+                "name": "靜宜大學(專用道)",
+                "type": "station",
+                "location": {
+                  "lat": 24.225899,
+                  "lng": 120.576538
+                }
+              }
+            },
+            "arrival": {
+              "time": "2026-10-26T11:27:00",
+              "place": {
+                "name": "秋紅谷(專用道)",
+                "type": "station",
+                "location": {
+                  "lat": 24.169165,
+                  "lng": 120.638878
+                }
+              }
+            },
+            "transport": {
+              "mode": "Bus",
+              "name": "302",
+              "shortName": "302"
+            }
+          },
+          {
+            "type": "pedestrian",
+            "travelSummary": {
+              "duration": 360,
+              "length": 385
+            },
+            "departure": {
+              "time": "2026-10-26T11:27:00",
+              "place": {
+                "name": "秋紅谷(專用道)",
+                "type": "station",
+                "location": {
+                  "lat": 24.169165,
+                  "lng": 120.638878
+                }
+              }
+            },
+            "arrival": {
+              "time": "2026-10-26T11:33:00",
+              "place": {
+                "name": "朝馬2(臺灣大道)",
+                "type": "station",
+                "location": {
+                  "lat": 24.171602,
+                  "lng": 120.636177
+                }
+              }
+            },
+            "transport": {
+              "mode": "pedestrian"
+            }
+          },
+          {
+            "type": "waiting",
+            "travelSummary": {
+              "duration": 600,
+              "length": 0
+            },
+            "departure": {
+              "time": "2026-10-26T11:33:00",
+              "place": {
+                "name": "朝馬2(臺灣大道)",
+                "type": "station",
+                "location": {
+                  "lat": 24.171602,
+                  "lng": 120.636177
+                }
+              }
+            },
+            "arrival": {
+              "time": "2026-10-26T11:43:00",
+              "place": {
+                "name": "朝馬2(臺灣大道)",
+                "type": "station",
+                "location": {
+                  "lat": 24.171602,
+                  "lng": 120.636177
+                }
+              }
+            },
+            "transport": {
+              "mode": "waiting"
+            }
+          },
+          {
+            "type": "transit",
+            "travelSummary": {
+              "duration": 600,
+              "length": 0
+            },
+            "departure": {
+              "time": "2026-10-26T11:43:00",
+              "place": {
+                "name": "朝馬2(臺灣大道)",
+                "type": "station",
+                "location": {
+                  "lat": 24.171602,
+                  "lng": 120.636177
+                }
+              }
+            },
+            "arrival": {
+              "time": "2026-10-26T11:53:00",
+              "place": {
+                "name": "高鐵臺中站(第14月台)",
+                "type": "station",
+                "location": {
+                  "lat": 24.11117,
+                  "lng": 120.615898
+                }
+              }
+            },
+            "transport": {
+              "mode": "Bus",
+              "name": "151",
+              "shortName": "151"
+            }
+          },
+          {
+            "type": "pedestrian",
+            "travelSummary": {
+              "duration": 0,
+              "length": 0.405649
+            },
+            "departure": {
+              "time": "2026-10-26T11:53:00",
+              "place": {
+                "name": "高鐵臺中站(第14月台)",
+                "type": "station",
+                "location": {
+                  "lat": 24.11117,
+                  "lng": 120.615898
+                }
+              }
+            },
+            "arrival": {
+              "time": "2026-10-26T11:53:00",
+              "place": {
+                "type": "place",
+                "location": {
+                  "lat": 24.11117,
+                  "lng": 120.615898
+                }
+              }
+            },
+            "transport": {
+              "mode": "pedestrian"
+            }
+          }
+        ]
+      },
+      {
+        "travel_time": 2940,
+        "start_time": "2026-10-26T11:04:00",
+        "end_time": "2026-10-26T11:53:00",
+        "transfers": 1,
+        "sections": [
+          {
+            "type": "pedestrian",
+            "travelSummary": {
+              "duration": 120,
+              "length": 167.623123
+            },
+            "departure": {
+              "time": "2026-10-26T11:04:00",
+              "place": {
+                "type": "place",
+                "location": {
+                  "lat": 24.225388,
+                  "lng": 120.57756
+                }
+              }
+            },
+            "arrival": {
+              "time": "2026-10-26T11:06:00",
+              "place": {
+                "name": "靜宜大學(專用道)",
+                "type": "station",
+                "location": {
+                  "lat": 24.225899,
+                  "lng": 120.576538
+                }
+              }
+            },
+            "transport": {
+              "mode": "pedestrian"
+            }
+          },
+          {
+            "type": "transit",
+            "travelSummary": {
+              "duration": 1440,
+              "length": 0
+            },
+            "departure": {
+              "time": "2026-10-26T11:06:00",
+              "place": {
+                "name": "靜宜大學(專用道)",
+                "type": "station",
+                "location": {
+                  "lat": 24.225899,
+                  "lng": 120.576538
+                }
+              }
+            },
+            "arrival": {
+              "time": "2026-10-26T11:30:00",
+              "place": {
+                "name": "秋紅谷(專用道)",
+                "type": "station",
+                "location": {
+                  "lat": 24.169165,
+                  "lng": 120.638878
+                }
+              }
+            },
+            "transport": {
+              "mode": "Bus",
+              "name": "300",
+              "shortName": "300"
+            }
+          },
+          {
+            "type": "pedestrian",
+            "travelSummary": {
+              "duration": 60,
+              "length": 70
+            },
+            "departure": {
+              "time": "2026-10-26T11:30:00",
+              "place": {
+                "name": "秋紅谷(專用道)",
+                "type": "station",
+                "location": {
+                  "lat": 24.169165,
+                  "lng": 120.638878
+                }
+              }
+            },
+            "arrival": {
+              "time": "2026-10-26T11:31:00",
+              "place": {
+                "name": "秋紅谷(專用道)",
+                "type": "station",
+                "location": {
+                  "lat": 24.168974,
+                  "lng": 120.639542
+                }
+              }
+            },
+            "transport": {
+              "mode": "pedestrian"
+            }
+          },
+          {
+            "type": "waiting",
+            "travelSummary": {
+              "duration": 600,
+              "length": 0
+            },
+            "departure": {
+              "time": "2026-10-26T11:31:00",
+              "place": {
+                "name": "秋紅谷(專用道)",
+                "type": "station",
+                "location": {
+                  "lat": 24.168974,
+                  "lng": 120.639542
+                }
+              }
+            },
+            "arrival": {
+              "time": "2026-10-26T11:41:00",
+              "place": {
+                "name": "秋紅谷(專用道)",
+                "type": "station",
+                "location": {
+                  "lat": 24.168974,
+                  "lng": 120.639542
+                }
+              }
+            },
+            "transport": {
+              "mode": "waiting"
+            }
+          },
+          {
+            "type": "transit",
+            "travelSummary": {
+              "duration": 720,
+              "length": 0
+            },
+            "departure": {
+              "time": "2026-10-26T11:41:00",
+              "place": {
+                "name": "秋紅谷(專用道)",
+                "type": "station",
+                "location": {
+                  "lat": 24.168974,
+                  "lng": 120.639542
+                }
+              }
+            },
+            "arrival": {
+              "time": "2026-10-26T11:53:00",
+              "place": {
+                "name": "高鐵臺中站(第14月台)",
+                "type": "station",
+                "location": {
+                  "lat": 24.11117,
+                  "lng": 120.615898
+                }
+              }
+            },
+            "transport": {
+              "mode": "Bus",
+              "name": "151",
+              "shortName": "151"
+            }
+          },
+          {
+            "type": "pedestrian",
+            "travelSummary": {
+              "duration": 0,
+              "length": 0.405649
+            },
+            "departure": {
+              "time": "2026-10-26T11:53:00",
+              "place": {
+                "name": "高鐵臺中站(第14月台)",
+                "type": "station",
+                "location": {
+                  "lat": 24.11117,
+                  "lng": 120.615898
+                }
+              }
+            },
+            "arrival": {
+              "time": "2026-10-26T11:53:00",
+              "place": {
+                "type": "place",
+                "location": {
+                  "lat": 24.11117,
+                  "lng": 120.615898
+                }
+              }
+            },
+            "transport": {
+              "mode": "pedestrian"
+            }
+          }
+        ]
+      },
+      {
+        "travel_time": 3180,
+        "start_time": "2026-10-26T11:04:00",
+        "end_time": "2026-10-26T11:57:00",
+        "transfers": 1,
+        "sections": [
+          {
+            "type": "pedestrian",
+            "travelSummary": {
+              "duration": 120,
+              "length": 167.623123
+            },
+            "departure": {
+              "time": "2026-10-26T11:04:00",
+              "place": {
+                "type": "place",
+                "location": {
+                  "lat": 24.225388,
+                  "lng": 120.57756
+                }
+              }
+            },
+            "arrival": {
+              "time": "2026-10-26T11:06:00",
+              "place": {
+                "name": "靜宜大學(專用道)",
+                "type": "station",
+                "location": {
+                  "lat": 24.225899,
+                  "lng": 120.576538
+                }
+              }
+            },
+            "transport": {
+              "mode": "pedestrian"
+            }
+          },
+          {
+            "type": "transit",
+            "travelSummary": {
+              "duration": 1560,
+              "length": 0
+            },
+            "departure": {
+              "time": "2026-10-26T11:06:00",
+              "place": {
+                "name": "靜宜大學(專用道)",
+                "type": "station",
+                "location": {
+                  "lat": 24.225899,
+                  "lng": 120.576538
+                }
+              }
+            },
+            "arrival": {
+              "time": "2026-10-26T11:32:00",
+              "place": {
+                "name": "新光/遠百(專用道)",
+                "type": "station",
+                "location": {
+                  "lat": 24.165998,
+                  "lng": 120.643234
+                }
+              }
+            },
+            "transport": {
+              "mode": "Bus",
+              "name": "300",
+              "shortName": "300"
+            }
+          },
+          {
+            "type": "pedestrian",
+            "travelSummary": {
+              "duration": 180,
+              "length": 217
+            },
+            "departure": {
+              "time": "2026-10-26T11:32:00",
+              "place": {
+                "name": "新光/遠百(專用道)",
+                "type": "station",
+                "location": {
+                  "lat": 24.165998,
+                  "lng": 120.643234
+                }
+              }
+            },
+            "arrival": {
+              "time": "2026-10-26T11:35:00",
+              "place": {
+                "name": "新光/大遠百",
+                "type": "station",
+                "location": {
+                  "lat": 24.164301,
+                  "lng": 120.642159
+                }
+              }
+            },
+            "transport": {
+              "mode": "pedestrian"
+            }
+          },
+          {
+            "type": "waiting",
+            "travelSummary": {
+              "duration": 360,
+              "length": 0
+            },
+            "departure": {
+              "time": "2026-10-26T11:35:00",
+              "place": {
+                "name": "新光/大遠百",
+                "type": "station",
+                "location": {
+                  "lat": 24.164301,
+                  "lng": 120.642159
+                }
+              }
+            },
+            "arrival": {
+              "time": "2026-10-26T11:41:00",
+              "place": {
+                "name": "新光/大遠百",
+                "type": "station",
+                "location": {
+                  "lat": 24.164301,
+                  "lng": 120.642159
+                }
+              }
+            },
+            "transport": {
+              "mode": "waiting"
+            }
+          },
+          {
+            "type": "transit",
+            "travelSummary": {
+              "duration": 960,
+              "length": 0
+            },
+            "departure": {
+              "time": "2026-10-26T11:41:00",
+              "place": {
+                "name": "新光/大遠百",
+                "type": "station",
+                "location": {
+                  "lat": 24.164301,
+                  "lng": 120.642159
+                }
+              }
+            },
+            "arrival": {
+              "time": "2026-10-26T11:57:00",
+              "place": {
+                "name": "高鐵臺中站(第21月台)",
+                "type": "station",
+                "location": {
+                  "lat": 24.11117,
+                  "lng": 120.615898
+                }
+              }
+            },
+            "transport": {
+              "mode": "Bus",
+              "name": "155",
+              "shortName": "155"
+            }
+          },
+          {
+            "type": "pedestrian",
+            "travelSummary": {
+              "duration": 0,
+              "length": 0.405649
+            },
+            "departure": {
+              "time": "2026-10-26T11:57:00",
+              "place": {
+                "name": "高鐵臺中站(第21月台)",
+                "type": "station",
+                "location": {
+                  "lat": 24.11117,
+                  "lng": 120.615898
+                }
+              }
+            },
+            "arrival": {
+              "time": "2026-10-26T11:57:00",
+              "place": {
+                "type": "place",
+                "location": {
+                  "lat": 24.11117,
+                  "lng": 120.615898
+                }
+              }
+            },
+            "transport": {
+              "mode": "pedestrian"
+            }
           }
         ]
       }
