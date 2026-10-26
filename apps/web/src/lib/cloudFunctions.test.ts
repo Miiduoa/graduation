@@ -13,6 +13,10 @@ it('points hosted group invite callables at this Next.js app without a functions
   expect(getCloudFunctionUrl('startLiveSession', { env })).toBe('/api/fn/startLiveSession');
   expect(getCloudFunctionUrl('endLiveSession', { env })).toBe('/api/fn/endLiveSession');
   expect(getCloudFunctionUrl('joinLiveSession', { env })).toBe('/api/fn/joinLiveSession');
+  expect(getCloudFunctionUrl('submitLeaveRequest', { env })).toBe('/api/fn/submitLeaveRequest');
+  expect(getCloudFunctionUrl('withdrawLeaveRequest', { env })).toBe('/api/fn/withdrawLeaveRequest');
+  expect(getCloudFunctionUrl('reviewLeaveRequest', { env })).toBe('/api/fn/reviewLeaveRequest');
+  expect(getCloudFunctionUrl('listLeaveReviewQueue', { env })).toBe('/api/fn/listLeaveReviewQueue');
   expect(getCloudFunctionUrl('createGroup', { env })).toBe(
     'https://asia-east1-campus-one-tw.cloudfunctions.net/createGroup',
   );

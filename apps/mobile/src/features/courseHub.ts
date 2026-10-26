@@ -3,6 +3,7 @@ import { getAuthInstance, getDb, isFirebaseMockMode } from '../firebase';
 import { tcFetchCourseDetail } from '../services/tronClassClient';
 import { isTronClassDataFetchEnabled } from '../services/tronClassDataEnabled';
 import type { CourseHubTarget } from '../utils/courseHubRoute';
+import { courseSubmissionState, type CourseSubmissionState } from './courseSubmissionState';
 
 export type CourseHubScope = { uid: string; schoolId: string; target: CourseHubTarget };
 type Section<T> = { status: 'ready'; items: T[] } | { status: 'error'; items: [] };
@@ -12,6 +13,8 @@ export type HubAssignment = {
   description: string;
   dueAt: string | null;
   closed: boolean;
+  allowLateSubmission?: boolean;
+  submission?: CourseSubmissionState;
 };
 export type HubMaterial = {
   id: string;
@@ -87,14 +90,17 @@ async function authorize(scope: CourseHubScope, current: () => boolean) {
     member.data().status !== 'active'
   )
     throw new Error('目前無法存取這門課，請回到課程列表重新選擇。');
-  return group.data();
+  return {
+    group: group.data(),
+    role: String(member.data().role ?? ''),
+  };
 }
 
 export async function loadCourseHub(
   scope: CourseHubScope,
   current: () => boolean = () => true,
 ): Promise<CourseHubData> {
-  const group = await authorize(scope, current);
+  const courseAccess = await authorize(scope, current);
   if (scope.target.source === 'tronclass') {
     if (scope.schoolId !== 'pu' || !isTronClassDataFetchEnabled())
       throw new Error('目前無法連線到這門校方課程。');
@@ -123,6 +129,8 @@ export async function loadCourseHub(
     };
   }
   const { groupId } = scope.target;
+  const group = courseAccess?.group;
+  const canTeach = ['owner', 'instructor', 'moderator'].includes(courseAccess?.role ?? '');
   const db = getDb();
   const [assignments, materials] = await Promise.allSettled([
     getDocsFromServer(collection(db, 'groups', groupId, 'assignments')),
@@ -197,33 +205,56 @@ export async function loadCourseHub(
     if (cabinet.length) return cabinet;
     return [module];
   });
+  const published = assignments.status === 'fulfilled'
+    ? assignments.value.docs.filter(
+        (entry) =>
+          visible(entry.id, entry.data()) &&
+          entry.data().type === 'assignment' &&
+          ['published', 'closed'].includes(entry.data().status),
+      )
+    : [];
+  const assignmentItems: HubAssignment[] = [];
+  const batchSize = 8;
+
+  for (let offset = 0; offset < published.length; offset += batchSize) {
+    const batch = published.slice(offset, offset + batchSize);
+    const receipts = canTeach
+      ? []
+      : await Promise.allSettled(
+          batch.map((entry) =>
+            getDocFromServer(doc(db, 'groups', groupId, 'assignments', entry.id, 'submissions', scope.uid)),
+          ),
+        );
+    assertCurrent(scope, current);
+
+    for (const [index, entry] of batch.entries()) {
+      const row = entry.data();
+      const receipt = receipts[index];
+      const submission: CourseSubmissionState = canTeach
+        ? { kind: 'instructor' }
+        : receipt?.status === 'fulfilled'
+          ? courseSubmissionState(receipt.value.exists() ? (receipt.value.data() ?? null) : null)
+          : { kind: 'unavailable' };
+      assignmentItems.push({
+        id: entry.id,
+        title: text(row.title) || '未命名作業',
+        description: text(row.description),
+        dueAt: dateText(row.dueAt),
+        closed: row.status === 'closed',
+        allowLateSubmission: row.allowLateSubmission === true,
+        submission,
+      });
+    }
+  }
+  if (published.length) await authorize(scope, current);
+
   return {
     name: text(group?.name) || '未命名課程',
     description: text(group?.description),
     details: [],
-    assignments:
-      assignments.status === 'rejected'
-        ? { status: 'error', items: [] }
-        : {
-            status: 'ready',
-            items: assignments.value.docs
-              .filter(
-                (entry) =>
-                  visible(entry.id, entry.data()) &&
-                  entry.data().type === 'assignment' &&
-                  ['published', 'closed'].includes(entry.data().status),
-              )
-              .map((entry) => {
-                const row = entry.data();
-                return {
-                  id: entry.id,
-                  title: text(row.title) || '未命名作業',
-                  description: text(row.description),
-                  dueAt: dateText(row.dueAt),
-                  closed: row.status === 'closed',
-                };
-              }),
-          },
+    assignments: assignments.status === 'rejected'
+      ? { status: 'error', items: [] }
+      : { status: 'ready', items: assignmentItems },
     materials:
       materials.status === 'rejected'
         ? { status: 'error', items: [] }

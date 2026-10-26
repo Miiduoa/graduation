@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
+import { FunctionsUnconfiguredError } from '@/lib/functionsUrl';
+import { LEAVE_COPY } from './leavePageState';
 import {
-  countLeaveReviews, formatLeaveRange, leaveKindLabel,
+  countLeaveReviews, formatLeaveRange, leaveKindLabel, leaveRequestError,
   shiftLeaveDay, suggestedLeaveCourses, taipeiToday, validLeaveDates,
   type LeaveCourse,
 } from './leaveRequests';
@@ -62,5 +64,28 @@ describe('leave status summaries', () => {
     expect(formatLeaveRange('2026-10-26', '2026-10-26')).toBe('10/26');
     expect(formatLeaveRange('2026-10-26', '2026-10-27')).toBe('10/26－10/27');
     expect(leaveKindLabel('sick')).toBe('病假');
+  });
+});
+
+describe('leave mutation errors', () => {
+  it('does not describe an unconfigured backend as a network failure', () => {
+    expect(leaveRequestError(new FunctionsUnconfiguredError('請假服務尚未接通'))).toBe(
+      LEAVE_COPY.unavailableSubmit,
+    );
+    expect(leaveRequestError({ code: 'functions/not-found' })).toBe(LEAVE_COPY.unavailableSubmit);
+    expect(leaveRequestError(new FunctionsUnconfiguredError('請假服務尚未接通'))).not.toContain(
+      '連線',
+    );
+  });
+
+  it('asks the user to log in or reports missing permission instead of blaming the network', () => {
+    expect(leaveRequestError({ code: 'functions/unauthenticated' })).toBe(LEAVE_COPY.unauthorized);
+    expect(leaveRequestError({ code: 'functions/permission-denied' })).toBe(
+      '目前沒有這所學校或這門課的操作權限。',
+    );
+  });
+
+  it('mentions the network only for network-layer failures', () => {
+    expect(leaveRequestError(new TypeError('Failed to fetch'))).toBe(LEAVE_COPY.network);
   });
 });

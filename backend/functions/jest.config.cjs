@@ -1,10 +1,10 @@
 'use strict';
 
-/** firebase-admin 14 → jwks-rsa 4 會載入 ESM-only 的 jose，需轉成 CJS 才能在 Node 22 的 Jest 執行。 */
+/** Jest 以 CommonJS 載入程式；將 ESM-only 的 jose、parse5 與 entities 一起轉譯供測試使用。 */
 module.exports = {
   testEnvironment: 'node',
   transform: {
     '^.+\\.m?js$': 'babel-jest',
   },
-  transformIgnorePatterns: ['/node_modules/(?!(jose|jwks-rsa|lru-cache)/)'],
+  transformIgnorePatterns: ['/node_modules/(?!(jose|jwks-rsa|lru-cache|parse5|entities)/)'],
 };

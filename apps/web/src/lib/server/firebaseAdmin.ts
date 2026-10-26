@@ -1,7 +1,10 @@
 const REQUIRED_PROJECT_ID = 'campus-one-tw';
 
 type FirebaseAdmin = {
-  verifyIdToken: (token: string) => Promise<{ uid: string } & Record<string, unknown>>;
+  verifyIdToken: (
+    token: string,
+    checkRevoked?: boolean,
+  ) => Promise<{ uid: string } & Record<string, unknown>>;
   db: import('firebase-admin/firestore').Firestore;
 };
 
@@ -85,8 +88,8 @@ async function initializeFirebaseAdmin(env: NodeJS.ProcessEnv): Promise<Firebase
     const auth = getAuth(app);
     cached = {
       db: getFirestore(app),
-      verifyIdToken: async (token: string) => {
-        const decoded = await auth.verifyIdToken(token);
+      verifyIdToken: async (token: string, checkRevoked?: boolean) => {
+        const decoded = await auth.verifyIdToken(token, checkRevoked === true);
         return decoded as { uid: string } & Record<string, unknown>;
       },
     };

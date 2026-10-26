@@ -420,3 +420,16 @@ it('lands on the week section from the today page', async () => {
   const week = await screen.findByRole('region', { name: '本週' });
   await waitFor(() => expect(week.getAttribute(COURSE_WORK_LANDING_ATTR)).toBe('true'));
 });
+
+it('offers scoped course counts and accessible shortcuts without inventing a workload', async () => {
+  await mount();
+  const summary = document.querySelector('[aria-label="課程摘要"]');
+  expect(summary).not.toBeNull();
+  expect(summary?.textContent).toContain('0本週到期');
+  expect(summary?.textContent).toContain('1課程教材');
+  expect(summary?.textContent).toContain('2作業與評量');
+  const navigation = screen.getByRole('navigation', { name: '課程內容捷徑' });
+  expect(within(navigation).getByRole('link', { name: '本週待辦' }).getAttribute('href')).toBe('#week');
+  expect(within(navigation).getByRole('link', { name: '教材櫃' }).getAttribute('href')).toBe('#course-materials-title');
+  expect(within(navigation).getByRole('link', { name: '作業與評量' }).getAttribute('href')).toBe('#assignments');
+});

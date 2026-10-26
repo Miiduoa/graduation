@@ -10,13 +10,20 @@ import {
   parseCourseWorkHash,
 } from '@/lib/courseWorkLanding';
 import { useLocationHash } from '@/lib/useLocationHash';
+import { useClientNow } from '@/lib/useMaterialClientState';
 import { AssignmentCard } from './AssignmentCard';
 import { assignmentStatus, matchesAssignmentFilter, type AssignmentFilter } from './courseTasks';
 import { gradeReadOwner, markPublishedGradeReadByLanding } from '@/lib/lmsStudentGrades';
 import { useNuniSession } from './Session';
 import styles from './NuniApp.module.css';
 import workspaceStyles from './CourseWorkspace.module.css';
-import { matchesAssignmentSearch, prioritizeCourseAssignments } from './courseAssignmentDiscovery';
+import {
+  assignmentReferenceTiming,
+  matchesAssignmentSearch,
+  prioritizeCourseAssignments,
+} from './courseAssignmentDiscovery';
+
+type CourseAssignmentFilter = AssignmentFilter | 'overdue' | 'soon';
 
 type Props = {
   assignments: NuniAssignment[];
@@ -26,17 +33,20 @@ type Props = {
 };
 
 export function CourseAssignments({ assignments, workspace, reload, onConfirmed }: Props) {
-  const [filter, setFilter] = useState<AssignmentFilter>('all');
+  const [filter, setFilter] = useState<CourseAssignmentFilter>('all');
   const [query, setQuery] = useState('');
   const searchRef = useRef<HTMLInputElement>(null);
   const hash = useLocationHash();
+  const now = useClientNow();
   const revealed = useRef('');
   const { session } = useNuniSession();
   const student = workspace.memberRole === 'student';
-  const filters: [AssignmentFilter, string][] = student
+  const filters: [CourseAssignmentFilter, string][] = student
     ? [
         ['all', '全部'],
         ['pending', '待繳交'],
+        ['overdue', '已過參考時間'],
+        ['soon', '七天內待繳'],
         ['submitted', '已繳交'],
         ['feedback', '老師回饋'],
       ]
@@ -47,8 +57,12 @@ export function CourseAssignments({ assignments, workspace, reload, onConfirmed 
       ];
   const pending = assignments.filter((item) => matchesAssignmentFilter(item, workspace, 'pending'));
   const ordered = prioritizeCourseAssignments(assignments, workspace);
+  const matchesFilter = (item: NuniAssignment, value: CourseAssignmentFilter) =>
+    value === 'overdue' || value === 'soon'
+      ? assignmentReferenceTiming(item, workspace, now) === value
+      : matchesAssignmentFilter(item, workspace, value);
   const visible = (item: NuniAssignment) =>
-    matchesAssignmentFilter(item, workspace, filter) && matchesAssignmentSearch(item, query);
+    matchesFilter(item, filter) && matchesAssignmentSearch(item, query);
   const shown = ordered.filter(visible);
 
   useEffect(() => {
@@ -157,7 +171,7 @@ export function CourseAssignments({ assignments, workspace, reload, onConfirmed 
               onClick={() => setFilter(value)}
             >
               {label}{' '}
-              {assignments.filter((item) => matchesAssignmentFilter(item, workspace, value)).length}
+              {assignments.filter((item) => matchesFilter(item, value)).length}
             </button>
           ))}
         </div>
@@ -178,8 +192,11 @@ export function CourseAssignments({ assignments, workspace, reload, onConfirmed 
                   <span
                     className={workspaceStyles.activityState}
                     data-pending={student && matchesAssignmentFilter(item, workspace, 'pending')}
+                    data-overdue={assignmentReferenceTiming(item, workspace, now) === 'overdue'}
                   >
-                    {assignmentStatus(item, workspace)}
+                    {assignmentReferenceTiming(item, workspace, now) === 'overdue'
+                      ? '已過參考時間 · 仍可補交'
+                      : assignmentStatus(item, workspace)}
                   </span>
                   <small>
                     {item.dueAt ? (
@@ -214,7 +231,9 @@ export function CourseAssignments({ assignments, workspace, reload, onConfirmed 
                 : '尚未發布作業。從「發布作業」開始，填寫學生需要完成的內容。'
               : query.trim()
                 ? '沒有符合的作業。試試其他關鍵字，或清除搜尋。'
-                : '這個分類目前沒有作業。選擇「全部」可查看其他內容。'}
+                : filter === 'overdue' || filter === 'soon'
+                  ? '這段時間沒有需要繳交的作業。可切換「待繳交」查看其他任務。'
+                  : '這個分類目前沒有作業。選擇「全部」可查看其他內容。'}
           </p>
         )}
       </div>
@@ -226,7 +245,7 @@ export function CourseAssignments({ assignments, workspace, reload, onConfirmed 
             workspace={workspace}
             reload={reload}
             onConfirmed={(assignment) => {
-              if (student && assignment.mySubmission && filter === 'pending')
+              if (student && assignment.mySubmission && (filter === 'pending' || filter === 'overdue' || filter === 'soon'))
                 setFilter('submitted');
               onConfirmed(assignment);
             }}

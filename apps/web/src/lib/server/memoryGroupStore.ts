@@ -40,6 +40,27 @@ function autoId(): string {
   return `auto-${auto}`;
 }
 
+type QueryFilter = { field: string; op: string; value: unknown };
+type QueryOrder = { field: string; direction: string };
+
+function fieldMatches(data: DocData, filter: QueryFilter): boolean {
+  if (filter.op === 'array-contains') {
+    const current = data[filter.field];
+    return Array.isArray(current) && current.includes(filter.value);
+  }
+  return data[filter.field] === filter.value;
+}
+
+function sortValue(value: unknown): number {
+  if (typeof value === 'number') return value;
+  if (value instanceof Date) return value.getTime();
+  if (value && typeof value === 'object' && typeof (value as { toMillis?: unknown }).toMillis === 'function') {
+    return (value as { toMillis: () => number }).toMillis();
+  }
+  if (typeof value === 'string') return Date.parse(value) || 0;
+  return 0;
+}
+
 export function createMemoryGroupStore(seed: Array<[string, DocData]> = []) {
   const docs = new Map<string, DocData>(seed.map(([path, data]) => [path, clone(data) as DocData]));
   let failCommit = false;
@@ -50,22 +71,56 @@ export function createMemoryGroupStore(seed: Array<[string, DocData]> = []) {
       path,
       id,
       collection: (name: string) => collection(`${path}/${name}`),
+      get: async () => snap({ path, id }),
     };
+  }
+
+  function queryDocs(
+    path: string,
+    filters: QueryFilter[],
+    maximum: number,
+    order: QueryOrder | null,
+    values: Map<string, DocData>,
+  ) {
+    const rows = [...values]
+      .filter(
+        ([docPath, data]) =>
+          docPath.startsWith(`${path}/`) &&
+          docPath.slice(path.length + 1).indexOf('/') === -1 &&
+          filters.every((filter) => fieldMatches(data, filter)),
+      )
+      .map(([docPath]) => snap(ref(docPath), values));
+    if (order) {
+      const direction = order.direction === 'desc' ? -1 : 1;
+      rows.sort(
+        (left, right) =>
+          direction * (sortValue(left.data()[order.field]) - sortValue(right.data()[order.field])),
+      );
+    }
+    return rows.slice(0, maximum);
   }
 
   function collection(
     path: string,
-    filters: Array<{ field: string; value: unknown }> = [],
+    filters: QueryFilter[] = [],
     maximum = Infinity,
+    order: QueryOrder | null = null,
   ) {
     return {
       path,
       filters,
       maximum,
+      order,
       doc: (id?: string) => ref(`${path}/${id || autoId()}`),
-      where: (field: string, _op: string, value: unknown) =>
-        collection(path, [...filters, { field, value }], maximum),
-      limit: (count: number) => collection(path, filters, count),
+      where: (field: string, op: string, value: unknown) =>
+        collection(path, [...filters, { field, op, value }], maximum, order),
+      orderBy: (field: string, direction = 'asc') =>
+        collection(path, filters, maximum, { field, direction }),
+      limit: (count: number) => collection(path, filters, count, order),
+      async get() {
+        const result = queryDocs(path, filters, maximum, order, docs);
+        return { docs: result, size: result.length, empty: result.length === 0 };
+      },
     };
   }
 
@@ -80,6 +135,7 @@ export function createMemoryGroupStore(seed: Array<[string, DocData]> = []) {
   }
 
   const db = {
+    doc: (path: string) => ref(path),
     collection: (name: string) => collection(name),
     async runTransaction<T>(callback: (transaction: any) => Promise<T>): Promise<T> {
       const base = new Map(docs);
@@ -94,20 +150,19 @@ export function createMemoryGroupStore(seed: Array<[string, DocData]> = []) {
         get: async (query: {
           path: string;
           id?: string;
-          filters?: Array<{ field: string; value: unknown }>;
+          filters?: QueryFilter[];
           maximum?: number;
+          order?: QueryOrder | null;
         }) => {
           if (!Array.isArray(query.filters))
             return snap(query as { path: string; id: string }, base);
-          const result = [...base]
-            .filter(
-              ([path, data]) =>
-                path.startsWith(`${query.path}/`) &&
-                path.slice(query.path.length + 1).indexOf('/') === -1 &&
-                query.filters!.every(({ field, value }) => data[field] === value),
-            )
-            .slice(0, query.maximum ?? Infinity)
-            .map(([path]) => snap(ref(path), base));
+          const result = queryDocs(
+            query.path,
+            query.filters,
+            query.maximum ?? Infinity,
+            query.order ?? null,
+            base,
+          );
           return { docs: result, size: result.length, empty: result.length === 0 };
         },
         set: (reference: { path: string }, data: DocData) =>

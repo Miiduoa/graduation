@@ -521,12 +521,36 @@ async function listActionQueueInboxTasks(userId: string): Promise<InboxTask[]> {
   return out;
 }
 
-export async function listInboxTasks(userId: string, schoolId?: string): Promise<InboxTask[]> {
+type StudentTaskWindow = { dueAt: Date | null; lateSubmissionOpen: boolean };
+
+function studentTaskWindow(
+  assignment: Record<string, unknown>,
+  mode: 'inbox' | 'learning',
+  now: number,
+): StudentTaskWindow | null {
+  if (assignment.published === false || assignment.status === 'draft' || assignment.status === 'closed') {
+    return null;
+  }
+  const parsed = toDate(assignment.dueAt);
+  const dueAt = parsed && Number.isFinite(parsed.getTime()) ? parsed : null;
+  const diff = dueAt ? dueAt.getTime() - now : null;
+  const week = 7 * 24 * 60 * 60 * 1000;
+  const lateSubmissionOpen = diff !== null && diff < 0 && assignment.allowLateSubmission === true;
+  if (diff !== null && diff < 0 && !lateSubmissionOpen) return null;
+  if (mode === 'inbox' && (diff === null || diff < -week || diff > week)) return null;
+  return { dueAt, lateSubmissionOpen };
+}
+
+export async function listInboxTasks(
+  userId: string,
+  schoolId?: string,
+  mode: 'inbox' | 'learning' = 'inbox',
+): Promise<InboxTask[]> {
   if (isFirebaseMockMode()) return [];
   const db = getDb();
   const memberships = await listCourseMemberships(db, userId, schoolId);
   if (memberships.length === 0) {
-    return (await listActionQueueInboxTasks(userId)).slice(0, 14);
+    return mode === 'learning' ? [] : (await listActionQueueInboxTasks(userId)).slice(0, 14);
   }
 
   const now = Date.now();
@@ -613,9 +637,41 @@ export async function listInboxTasks(userId: string, schoolId?: string): Promise
           ...(docSnap.data() as Record<string, unknown>),
         })) ?? [];
 
+      // A full semester can contain hundreds of assignments. Read only
+      // actionable rows, in small parallel batches, while preserving every
+      // authorization error instead of turning failures into empty results.
+      const studentWindows = new Map<string, StudentTaskWindow>();
+      const submitted = new Set<string>();
+      if (!teachingMembership) {
+        const eligible = assignments.filter((assignment) => {
+          const window = studentTaskWindow(assignment, mode, now);
+          if (!window) return false;
+          studentWindows.set(assignment.id, window);
+          return true;
+        });
+        const batchSize = 8;
+        for (let start = 0; start < eligible.length; start += batchSize) {
+          const batch = eligible.slice(start, start + batchSize);
+          const results = await Promise.all(
+            batch.map((assignment) =>
+              getDoc(
+                doc(db, 'groups', membership.groupId, 'assignments', assignment.id, 'submissions', userId),
+              ),
+            ),
+          );
+          for (const [index, snapshot] of results.entries()) {
+            const assignment = batch[index];
+            if (assignment && snapshot.exists() && snapshot.data()?.submittedAt) {
+              submitted.add(assignment.id);
+            }
+          }
+        }
+      }
+
       for (const assignment of assignments) {
         if (assignment.published === false || assignment.status === 'draft') continue;
-        const dueAt = toDate(assignment.dueAt);
+        const rawDue = toDate(assignment.dueAt);
+        const dueAt = rawDue && Number.isFinite(rawDue.getTime()) ? rawDue : null;
         const kind: InboxTask['kind'] =
           assignment.type === 'quiz' || assignment.type === 'exam' ? 'quiz' : 'assignment';
         const label = kind === 'quiz' ? '評量' : '作業';
@@ -685,21 +741,9 @@ export async function listInboxTasks(userId: string, schoolId?: string): Promise
           continue;
         }
 
-        const ownSubmission = await getDoc(
-          doc(
-            db,
-            'groups',
-            membership.groupId,
-            'assignments',
-            assignment.id,
-            'submissions',
-            userId,
-          ),
-        );
-        if (ownSubmission.exists() && ownSubmission.data().submittedAt) continue;
-        if (!dueAt) continue;
-        const diff = dueAt.getTime() - now;
-        if (diff < 0 || diff > 7 * 24 * 60 * 60 * 1000) continue;
+        const studentWindow = studentWindows.get(assignment.id);
+        if (!studentWindow || submitted.has(assignment.id)) continue;
+        const lateSubmissionOpen = studentWindow.lateSubmissionOpen;
 
         groupTasks.push({
           id: `${kind}-${membership.groupId}-${assignment.id}`,
@@ -707,15 +751,21 @@ export async function listInboxTasks(userId: string, schoolId?: string): Promise
           groupId: membership.groupId,
           groupName: membership.name,
           title: String(assignment.title ?? '未命名任務'),
-          subtitle: `${label}將於 ${dueAt.toLocaleString('zh-TW', {
-            month: 'numeric',
-            day: 'numeric',
-            hour: '2-digit',
-            minute: '2-digit',
-          })} 截止`,
+          subtitle: lateSubmissionOpen
+            ? '已過截止時間 · 教師允許補交'
+            : dueAt
+              ? `${label}將於 ${dueAt.toLocaleString('zh-TW', {
+                  timeZone: 'Asia/Taipei',
+                  month: 'numeric',
+                  day: 'numeric',
+                  hour: '2-digit',
+                  minute: '2-digit',
+                })} 截止`
+              : '尚未設定截止時間 · 請查看作業說明',
           assignmentId: assignment.id,
-          priority: kind === 'quiz' ? 2 : 1,
+          priority: lateSubmissionOpen ? 0 : dueAt === null ? 3 : kind === 'quiz' ? 2 : 1,
           dueAt,
+          ...(lateSubmissionOpen ? { lateSubmissionAllowed: true } : {}),
         });
       }
 
@@ -724,16 +774,18 @@ export async function listInboxTasks(userId: string, schoolId?: string): Promise
   );
 
   const fromGroups = tasks.flat();
-  const fromAssistantQueue = await listActionQueueInboxTasks(userId);
+  const fromAssistantQueue =
+    mode === 'learning' ? [] : await listActionQueueInboxTasks(userId);
 
-  return [...fromAssistantQueue, ...fromGroups]
-    .sort((left, right) => {
-      if (left.priority !== right.priority) return left.priority - right.priority;
-      const timeA = left.dueAt?.getTime() ?? Number.MAX_SAFE_INTEGER;
-      const timeB = right.dueAt?.getTime() ?? Number.MAX_SAFE_INTEGER;
-      return timeA - timeB;
-    })
-    .slice(0, 14);
+  const sorted = [...fromAssistantQueue, ...fromGroups].sort((left, right) => {
+    if (left.priority !== right.priority) return left.priority - right.priority;
+    const timeA = left.dueAt?.getTime() ?? Number.MAX_SAFE_INTEGER;
+    const timeB = right.dueAt?.getTime() ?? Number.MAX_SAFE_INTEGER;
+    return timeA - timeB;
+  });
+  // The compact Today inbox remains bounded. The learning workspace needs the
+  // complete enrolled-course task list for accurate filters and summary counts.
+  return mode === 'learning' ? sorted : sorted.slice(0, 14);
 }
 
 export async function getCourseGradebook(

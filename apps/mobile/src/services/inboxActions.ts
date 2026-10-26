@@ -95,6 +95,21 @@ export function resolveInboxAction(
         },
       };
     case 'quiz':
+      if (teaching && task.preferredIntent === 'review') {
+        return {
+          label: task.actionLabel || '去批改',
+          target: 'grade_assignment',
+          params: {
+            assignmentId: task.assignmentId,
+            courseSpaceId: task.groupId,
+          },
+          emphasis: 'primary',
+          recordEventOnComplete: {
+            kind: 'inbox_action_taken',
+            payload: { source: 'inbox_quiz_review' },
+          },
+        };
+      }
       return {
         label: teaching ? '檢視測驗' : '去作答',
         target: 'start_quiz',
