@@ -34,8 +34,8 @@ export async function collectOnDeviceSchoolContext(
       timetable: {
         source: 'saved-device-copy',
         updatedAt: typeof timetable.updatedAt === 'string' ? timetable.updatedAt : null,
-        courses: timetable.courses.slice(0, 16).map((course) => ({
-          name: String(course.name).slice(0, 90),
+        courses: timetable.courses.slice(0, 8).map((course) => ({
+          name: String(course.name).slice(0, 48),
           day: course.day,
           start: course.start,
           end: course.end,
