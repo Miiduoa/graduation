@@ -263,9 +263,8 @@ export default function LearnAiFirstScreen() {
             title="近期課務"
             subtitle={'目前符合條件：' + filteredTasks.length + ' 項 · 依優先處理順序排列'}
           >
-            {filteredTasks.length ? (
-              <>
-                {filteredTasks.slice(0, visibleCount).map((task) => {
+            {filteredTasks.length
+              ? filteredTasks.slice(0, visibleCount).map((task) => {
                   const status = describeLearningTask(task, clock);
                   return (
                     <AIRow
@@ -277,22 +276,23 @@ export default function LearnAiFirstScreen() {
                       onPress={() => openTask(task)}
                     />
                   );
-                })}
-                {visibleCount < filteredTasks.length ? (
-                  <View style={{ padding: 12 }}>
-                    <AIButton
-                      label={'顯示更多（尚有 ' + (filteredTasks.length - visibleCount) + ' 項）'}
-                      variant="ghost"
-                      onPress={() => setVisibleCount((count) => count + 20)}
-                    />
-                  </View>
-                ) : null}
-              </>
-            ) : (
-              <Text style={{ color: aiTokens.muted, padding: 16 }}>
-                {filter === 'all' && !query && !selectedGroupId ? '已載入的課程目前沒有待處理的事項。' : '目前沒有符合條件的課務，請調整搜尋或篩選。'}
-              </Text>
-            )}
+                })
+              : (
+                <Text style={{ color: aiTokens.muted, padding: 16 }}>
+                  {filter === 'all' && !query && !selectedGroupId
+                    ? '已載入的課程目前沒有待處理的事項。'
+                    : '目前沒有符合條件的課務，請調整搜尋或篩選。'}
+                </Text>
+              )}
+            {visibleCount < filteredTasks.length ? (
+              <View style={{ padding: 12 }}>
+                <AIButton
+                  label={'顯示更多（尚有 ' + (filteredTasks.length - visibleCount) + ' 項）'}
+                  variant="ghost"
+                  onPress={() => setVisibleCount((count) => count + 20)}
+                />
+              </View>
+            ) : null}
           </AISection>
           <AISection title="我的課程">
             {visible.data.courses.length ? (
