@@ -83,7 +83,9 @@ test('revoking school membership also revokes access to saved school posts', asy
   await environment.withSecurityRulesDisabled(async (context) => {
     await context.firestore().doc('schools/pu/members/alice').update({ status: 'inactive' });
   });
-  await assertFails(bookmark(alice).get());
-  await assertFails(alice.collection('users/alice/schools/pu/campusPostBookmarks').get());
+  // Default Firestore reads may reuse the document just written by this client.
+  // Require a server read to exercise the current authorization policy.
+  await assertFails(bookmark(alice).get({ source: 'server' }));
+  await assertFails(alice.collection('users/alice/schools/pu/campusPostBookmarks').get({ source: 'server' }));
   await assertFails(bookmark(alice).delete());
 });
