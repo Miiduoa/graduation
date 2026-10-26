@@ -391,6 +391,7 @@ function Workspace({ id }: { id: string }) {
             refreshVersion={outlineVersion}
             reloadUnits={reloadUnits}
             onUnitCreated={acceptUnit}
+            onNavigate={setTab}
           />
         </section>
         <section
