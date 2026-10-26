@@ -164,7 +164,7 @@ test('a published assignment opens its real submission detail with the scoped co
   });
 
   const view = render(<CourseHub route={route} navigation={navigation} />);
-  fireEvent.press(await view.findByText('查看與繳交：閱讀回應'));
+  fireEvent.press(await view.findByText('查看作業：閱讀回應'));
   expect(safeNavigate).toHaveBeenCalledWith(navigation, 'HomeworkSubmit', {
     courseId: 'course-a',
     hwId: 'work-23',
