@@ -6,6 +6,7 @@ import { BoardsScreen } from '../screens/social/BoardsScreen';
 import { fetchRecentCampusPosts } from '../services/feed';
 import { listBoards, listSubscribedBoardIds } from '../services/boards';
 import { listActiveStoriesForSchool } from '../services/stories';
+import { listFollowingIds, followUser } from '../services/follows';
 import {
   listCampusPostBookmarkIds,
   loadCampusPostBookmarks,
@@ -54,6 +55,11 @@ jest.mock('../services/campusPostBookmarks', () => ({
 jest.mock('../services/memberDirectory', () => ({
   fetchSchoolDirectoryProfiles: jest.fn(async () => []),
 }));
+jest.mock('../services/follows', () => ({
+  listFollowingIds: jest.fn(async () => []),
+  followUser: jest.fn(async () => undefined),
+  unfollowUser: jest.fn(async () => undefined),
+}));
 
 const post = {
   id: 'post',
@@ -97,6 +103,8 @@ beforeEach(() => {
   jest.mocked(listBoards).mockResolvedValue([]);
   jest.mocked(listSubscribedBoardIds).mockResolvedValue([]);
   jest.mocked(listActiveStoriesForSchool).mockResolvedValue([]);
+  jest.mocked(listFollowingIds).mockResolvedValue([]);
+  jest.mocked(followUser).mockResolvedValue(undefined);
   savedBookmarks = new Set();
   jest.mocked(listCampusPostBookmarkIds).mockImplementation(async () => [...savedBookmarks]);
   jest.mocked(loadCampusPostBookmarks).mockResolvedValue({ ids: [], posts: [] });
@@ -294,4 +302,31 @@ test('a failed save does not falsely mark the post as bookmarked', async () => {
   });
   expect(view.getByLabelText('收藏貼文')).toBeTruthy();
   expect(view.queryByLabelText('取消收藏貼文')).toBeNull();
+});
+
+test('following feed shows only public authors explicitly followed within this school', async () => {
+  jest.mocked(fetchRecentCampusPosts).mockResolvedValueOnce([
+    { ...post, id: 'bob-post', anonymous: false, authorUid: 'bob', title: '小明的讀書會' },
+    { ...post, id: 'carol-post', anonymous: false, authorUid: 'carol', title: '小華的活動' },
+    { ...post, id: 'anonymous-post', anonymous: true, authorUid: 'bob', title: '匿名提問' },
+  ]);
+  jest.mocked(listFollowingIds).mockResolvedValue(['bob']);
+  const view = render(<HomeFeedScreen />);
+  expect(await view.findByText('小明的讀書會')).toBeTruthy();
+  await act(async () => {});
+  fireEvent.press(view.getByLabelText('追蹤分類'));
+  expect(view.getByText('小明的讀書會')).toBeTruthy();
+  expect(view.queryByText('小華的活動')).toBeNull();
+  expect(view.queryByText('匿名提問')).toBeNull();
+  expect(listFollowingIds).toHaveBeenCalledWith('pu', 'alice', 200, { throwOnError: true });
+});
+
+test('following read failures stay distinguishable from an empty feed', async () => {
+  jest.mocked(fetchRecentCampusPosts).mockResolvedValueOnce([post]);
+  jest.mocked(listFollowingIds).mockRejectedValueOnce(new Error('offline'));
+  const view = render(<HomeFeedScreen />);
+  expect(await view.findByText(post.title)).toBeTruthy();
+  fireEvent.press(view.getByLabelText('追蹤分類'));
+  expect(await view.findByText('追蹤清單暫時無法讀取，請確認連線及校籍後重試。')).toBeTruthy();
+  expect(view.queryByText('追蹤的作者尚未發文')).toBeNull();
 });
