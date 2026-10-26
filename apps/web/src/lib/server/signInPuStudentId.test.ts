@@ -289,13 +289,20 @@ it('refunds the account debit after a campus timeout', async () => {
 it('returns 503 without campus when the service-account secret is empty', async () => {
   const loginStudent = vi.fn(async () => ({ cookies: { PHPSESSID: 'stu-cookie' } }));
   const { runtime } = deps({ campus: campus({ loginStudent }) });
-  const withoutSalt = { ...runtime };
-  delete withoutSalt.rateLimitSalt;
   const previous = process.env.FIREBASE_SERVICE_ACCOUNT_JSON;
   delete process.env.FIREBASE_SERVICE_ACCOUNT_JSON;
   try {
     await expect(
-      handleSignInPuStudentId({ studentId: STUDENT, password: SECRET }, '9.9.9.6', withoutSalt),
+      handleSignInPuStudentId(
+        { studentId: STUDENT, password: SECRET },
+        '9.9.9.6',
+        {
+          db: runtime.db,
+          campus: runtime.campus,
+          signCustomToken: runtime.signCustomToken,
+          rateLimitGate: runtime.rateLimitGate,
+        },
+      ),
     ).rejects.toMatchObject({ status: 503, message: '服務暫時無法使用' });
     expect(loginStudent).not.toHaveBeenCalled();
   } finally {
