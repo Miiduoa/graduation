@@ -68,19 +68,24 @@ function gaps(courses: OnDeviceSchoolContext['timetable']['courses'], day: numbe
 }
 
 function realtimeOnly(question: string): OfflineCampusToolResult | null {
-  const source: Array<{ pattern: RegExp; route: string; label: string }> = [
-    { pattern: /(?:最新|即時|今天|本週|這週|近期|有哪些|查詢|查).{0,8}(?:公告|活動)|(?:公告|活動).{0,8}(?:最新|即時|本週|這週|近期|有哪些)/, route: '/announcements', label: '公告或活動' },
-    { pattern: /(?:我的|尚未|待繳|待交|還沒交|截止|幾份|查).{0,10}(?:作業|測驗|考試)|(?:作業|測驗|考試).{0,10}(?:截止|繳交|有哪些)/, route: '/classroom', label: '作業／測驗' },
-    { pattern: /(?:成績|GPA|學分).{0,9}(?:最新|查|多少|幾分|這學期|我的)|(?:我的|查).{0,9}(?:成績|GPA|學分)/i, route: '/grades', label: '成績' },
+  const source: Array<{ pattern: RegExp; route?: string; label: string }> = [
+    { pattern: /(?:最新|即時|今天|本週|這週|近期|有哪些|查詢|查).{0,8}公告|公告.{0,8}(?:最新|即時|本週|這週|近期|有哪些)/, route: '/announcements', label: '校園公告' },
+    { pattern: /(?:最新|即時|今天|本週|這週|近期|有哪些|查詢|查).{0,8}活動|活動.{0,8}(?:最新|即時|本週|這週|近期|有哪些)/, route: '/events', label: '校園活動' },
+    { pattern: /(?:我|我的|今天|明天|本週|這週|下週|有哪些|截止|待交|待繳|未交|還沒交|查詢|查).{0,12}(?:作業|測驗|考試|待辦)|(?:作業|測驗|考試).{0,12}(?:截止|繳交|有哪些|幾份|還有|交完)/, route: '/classroom', label: '個人作業／測驗' },
+    { pattern: /(?:我的|我這|這學期|本學期|查).{0,10}(?:成績|GPA|學分)|(?:成績|GPA|學分).{0,10}(?:最新|查|多少|幾分|這學期|我的|已修)/i, route: '/grades', label: '個人成績／學分' },
     { pattern: /(?:公車|校車).{0,9}(?:到站|還要|幾分鐘|即時|哪班)|(?:到站|幾分鐘).{0,9}(?:公車|校車)/, route: '/bus', label: '即時公車' },
     { pattern: /(?:菜單|餐點|餐廳).{0,8}(?:今天|多少錢|有哪些|最新|營業)/, route: '/cafeteria', label: '即時餐廳資料' },
-    { pattern: /(?:我的|查|追蹤).{0,8}(?:請假|報修|訂單|借閱).{0,8}(?:狀態|進度|紀錄|編號)|(?:請假|報修|訂單|借閱).{0,8}(?:狀態|進度)/, route: '/classroom', label: '申請或訂單狀態' },
+    { pattern: /(?:請假).{0,8}(?:狀態|進度|紀錄|編號)|(?:我的|查|追蹤).{0,8}請假/, route: '/classroom', label: '請假申請' },
+    { pattern: /(?:報修).{0,8}(?:狀態|進度|紀錄|編號)|(?:我的|查|追蹤).{0,8}報修/, route: '/dormitory', label: '宿舍報修' },
+    { pattern: /(?:訂單).{0,8}(?:狀態|進度|紀錄|編號)|(?:我的|查|追蹤).{0,8}訂單/, route: '/cafeteria', label: '餐廳訂單' },
+    { pattern: /(?:借閱|借書).{0,8}(?:狀態|進度|紀錄|編號)|(?:我的|查|追蹤).{0,8}借閱/, route: '/library', label: '圖書借閱' },
+    { pattern: /(?:今天|明天|目前|現在|即時).{0,12}(?:天氣|氣溫|降雨|空氣品質|下雨)|(?:天氣|氣溫|降雨|空氣品質).{0,12}(?:今天|明天|目前|現在|即時)/, label: '即時天氣' },
   ];
   const item = source.find((entry) => entry.pattern.test(question));
   return item
     ? {
         tool: 'online-required',
-        route: item.route,
+        ...(item.route ? { route: item.route } : {}),
         content: `「${item.label}」需要正式資料來源才能核實。手機離線模式沒有讀取即時資料，也不會猜測結果。請切換「校園即時」模式，或使用下方校園服務入口查證。`,
       }
     : null;
