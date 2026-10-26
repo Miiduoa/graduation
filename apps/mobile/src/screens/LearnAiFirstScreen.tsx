@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ActivityIndicator, Pressable, ScrollView, Text, TextInput, View } from 'react-native';
+import { ActivityIndicator, Pressable, RefreshControl, ScrollView, Text, TextInput, View } from 'react-native';
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import { AIScreen, AIHero, AISection, AICard, AIRow, AIButton, aiTokens } from '../ui/aiFirst';
 import { useAuth } from '../state/auth';
@@ -112,7 +112,7 @@ export default function LearnAiFirstScreen() {
   };
 
   return (
-    <AIScreen>
+    <AIScreen refreshControl={<RefreshControl refreshing={visible?.loading ?? false} onRefresh={() => void load()} tintColor={theme.colors.accent} />}>
       <AIHero
         eyebrow="CAMPUS ONE"
         title="課務"
