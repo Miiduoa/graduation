@@ -16,6 +16,8 @@ import {
 import type { ServiceScreenProps } from './UnavailableFeatureScreen';
 import { safeNavigate } from '../utils/safeNavigate';
 import { getMobileQuickActions } from '../services/quickCampusActions';
+import type { CampusAgentWriteProposal } from '../features/campusAssistantActions';
+import { CampusAgentActionReview } from './CampusAgentActionReview';
 
 const VERIFIED_SERVICE_ROUTES: Record<string, { route: string; label: string }> = {
   '/timetable': { route: 'PersonalTimetable', label: '我的課表' },
@@ -72,6 +74,7 @@ function AssistantConversation({
       source?: CampusAssistantMode;
       tool?: 'saved-timetable' | 'online-required' | 'open-service';
       route?: string;
+      proposals?: CampusAgentWriteProposal[];
     }>
   >([]);
   const [draft, setDraft] = useState(initialPrompt.slice(0, 1600));
@@ -132,6 +135,7 @@ function AssistantConversation({
             source: reply.source,
             tool: reply.tool,
             route: reply.route,
+            proposals: reply.proposals,
           },
         ]);
         setDraft('');
@@ -258,6 +262,16 @@ function AssistantConversation({
           <Text selectable style={{ color: aiTokens.text, lineHeight: 25 }}>
             {message.content}
           </Text>
+          {message.role === 'assistant' && message.source === 'campus' &&
+            index === messages.length - 1 && message.proposals?.map((proposal, proposalIndex) => (
+              <CampusAgentActionReview
+                key={proposal.agentRunId + ':' + proposal.toolName + ':' + proposalIndex}
+                proposal={proposal}
+                userId={uid}
+                schoolId={schoolId}
+                isCurrent={current}
+              />
+            ))}
           {message.role === 'assistant' && message.source === 'device' && (
             <Text style={{ color: aiTokens.muted, fontSize: 12, marginTop: 10 }}>
               {message.tool
@@ -292,9 +306,13 @@ function AssistantConversation({
                 ))}
             </View>
           ) : null}
-          {message.requiresService ? (
+          {message.requiresService && !message.proposals?.length ? (
             <Text style={{ color: aiTokens.muted, lineHeight: 24, marginTop: 12 }}>
               尚未送出任何申請或交易。請到對應服務確認辦理。
+            </Text>
+          ) : message.proposals?.length && index < messages.length - 1 ? (
+            <Text style={{ color: aiTokens.muted, lineHeight: 22, marginTop: 12 }}>
+              這是先前的任務建議。若要確認執行狀態，請到對應服務頁面核對。
             </Text>
           ) : null}
         </AICard>
