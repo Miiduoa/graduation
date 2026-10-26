@@ -609,8 +609,21 @@ export function FeedTab(props: { schoolId: string; schoolSearch: string }) {
         <p className={styles.feedScope} role="status">
           {savedView
             ? `顯示 ${visible.length} 則 · 本校最近最多 40 筆私人收藏，跨裝置同步`
-            : `顯示 ${visible.length} 則 · 目前載入 ${posts.length} 則本校動態，搜尋與排序僅適用於這些貼文`}
+            : followingView
+              ? `顯示 ${visible.length} 則 · 目前載入 ${posts.length} 則貼文中追蹤的作者`
+              : `顯示 ${visible.length} 則 · 目前載入 ${posts.length} 則本校動態，搜尋與排序僅適用於這些貼文`}
         </p>
+      )}
+      {followingError && (
+        <div className={styles.feedError} role="alert">
+          {followingError}{' '}
+          <button type="button" onClick={() => setFollowingRevision((prev) => prev + 1)}>
+            重新讀取追蹤
+          </button>
+        </div>
+      )}
+      {followingFeedback && (
+        <p className={styles.feedError} role="alert">{followingFeedback}</p>
       )}
       {savedView && bookmarksError && (
         <div className={styles.feedError} role="alert">
@@ -622,16 +635,20 @@ export function FeedTab(props: { schoolId: string; schoolSearch: string }) {
       )}
 
       {/* ── Posts ── */}
-      {loading || (savedView && (bookmarksLoading || (!validBookmarks && !bookmarksError))) ? (
+      {loading ||
+        (savedView && (bookmarksLoading || (!validBookmarks && !bookmarksError))) ||
+        (followingView && (followingLoading || (!validFollowing && !followingError))) ? (
         <div className="card" style={{ padding: 24, textAlign: 'center', color: 'var(--muted)' }} role="status">
-          {savedView ? '正在讀取收藏…' : '載入中…'}
+          {savedView ? '正在讀取收藏…' : followingView ? '正在讀取追蹤動態…' : '載入中…'}
         </div>
-      ) : savedView && bookmarksError ? null : visible.length === 0 ? (
+      ) : (savedView && bookmarksError) || (followingView && followingError) ? null : visible.length === 0 ? (
         <div className="card" style={{ padding: 32, textAlign: 'center', color: 'var(--muted)' }}>
           {search.trim()
             ? '找不到符合的貼文'
-            : filter === 'subscribed'
-              ? '尚無已訂閱看板的新貼文'
+            : filter === 'following'
+              ? '追蹤的作者尚無新貼文'
+              : filter === 'subscribed'
+                ? '尚無已訂閱看板的新貼文'
               : filter === 'media'
                 ? '目前沒有圖文貼文'
                 : filter === 'saved'
@@ -642,9 +659,9 @@ export function FeedTab(props: { schoolId: string; schoolSearch: string }) {
               <button type="button" className="btn" onClick={() => setSearch('')}>
                 清除搜尋
               </button>
-            ) : filter === 'saved' ? (
+            ) : filter === 'saved' || filter === 'following' ? (
               <button type="button" className="btn primary" onClick={() => setFilter('all')}>
-                探索校園動態
+                {filter === 'following' ? '探索其他作者' : '探索校園動態'}
               </button>
             ) : (
               <Link href={`/community/post/new?schoolId=${encodeURIComponent(schoolId)}`} className="btn primary">
@@ -723,6 +740,22 @@ export function FeedTab(props: { schoolId: string; schoolSearch: string }) {
                       ＃{board}
                     </Link>
                   </div>
+                  {!item.anonymous &&
+                    item.authorUid &&
+                    user &&
+                    item.authorUid !== user.uid &&
+                    validFollowing && (
+                      <button
+                        type="button"
+                        className={styles.authorFollow}
+                        aria-label={followedIds.has(item.authorUid) ? `取消追蹤 ${authorLine(item)}` : `追蹤 ${authorLine(item)}`}
+                        aria-pressed={followedIds.has(item.authorUid)}
+                        disabled={followingLoading || !!followingError || followingPending.has(item.authorUid)}
+                        onClick={() => void toggleFollow(item.authorUid!)}
+                      >
+                        {followedIds.has(item.authorUid) ? '追蹤中' : '追蹤'}
+                      </button>
+                    )}
                 </div>
 
                 <Link
