@@ -1,5 +1,5 @@
 import React from 'react';
-import { ActivityIndicator, RefreshControl } from 'react-native';
+import { ActivityIndicator, FlatList, RefreshControl } from 'react-native';
 import { act, fireEvent, render } from '@testing-library/react-native';
 import { HomeFeedScreen } from '../screens/social/HomeFeedScreen';
 import { BoardsScreen } from '../screens/social/BoardsScreen';
@@ -199,4 +199,35 @@ test.each(screens)('$name hides private content while the same account is revali
   view.rerender(<Component />);
   await act(async () => {});
   expect(view.queryByText(title)).toBeNull();
+});
+
+test('the mobile feed switches to latest and searches only loaded school posts', async () => {
+  const older = {
+    ...post,
+    id: 'older',
+    title: '期中考討論',
+    content: '一起讀書',
+    createdAt: new Date('2026-10-20T00:00:00Z'),
+  };
+  const newer = {
+    ...post,
+    id: 'newer',
+    title: '系上活動',
+    content: '攝影分享',
+    createdAt: new Date('2026-10-25T00:00:00Z'),
+  };
+  jest.mocked(fetchRecentCampusPosts).mockResolvedValueOnce([older, newer]);
+  const view = render(<HomeFeedScreen />);
+  expect(await view.findByText('期中考討論')).toBeTruthy();
+  expect(view.getByText('系上活動')).toBeTruthy();
+
+  fireEvent.press(view.getByText('最新'));
+  const list = view.UNSAFE_getByType(FlatList);
+  expect(list.props.data.map((item: typeof post) => item.id)).toEqual(['newer', 'older']);
+
+  fireEvent.changeText(view.getByLabelText('搜尋本校貼文'), '攝影分享');
+  expect(view.getByText('系上活動')).toBeTruthy();
+  expect(view.queryByText('期中考討論')).toBeNull();
+  fireEvent.press(view.getByLabelText('清除搜尋'));
+  expect(view.getByText('期中考討論')).toBeTruthy();
 });
