@@ -233,3 +233,44 @@ export function sortStudyTasks(tasks: readonly NuniStudyTask[], now: Instant): N
     );
   });
 }
+
+// A small, explainable queue: urgent work comes first, with course variety among
+// equally urgent items. Only server-confirmed, still-open tasks can be suggested.
+export type NuniFocusTiming = 'overdue' | 'today' | 'week' | 'later' | 'undated';
+export type NuniFocusItem = { task: NuniStudyTask; timing: NuniFocusTiming };
+
+export function recommendStudyFocus(
+  tasks: readonly NuniStudyTask[],
+  now: Instant,
+  requestedLimit = 3,
+): NuniFocusItem[] {
+  const instant = parseTaipeiInstant(now);
+  if (instant === null || !Number.isFinite(requestedLimit) || requestedLimit <= 0) return [];
+  const limit = Math.min(6, Math.floor(requestedLimit));
+  if (!limit) return [];
+
+  const pending = sortStudyTasks(
+    tasks.filter((task) => studyTaskStatus(task) === 'pending'),
+    instant,
+  ).map((task) => ({ task, timing: studyTaskTiming(task, instant) }));
+  const result: NuniFocusItem[] = [];
+
+  for (const timing of ['overdue', 'today', 'week', 'later', 'undated'] as const) {
+    const bucket = pending.filter((item) => item.timing === timing);
+    const seenCourses = new Set<string>();
+    const firstPass: NuniFocusItem[] = [];
+    const remaining: NuniFocusItem[] = [];
+    for (const item of bucket) {
+      if (seenCourses.has(item.task.courseId)) remaining.push(item);
+      else {
+        seenCourses.add(item.task.courseId);
+        firstPass.push(item);
+      }
+    }
+    for (const item of [...firstPass, ...remaining]) {
+      if (result.length === limit) return result;
+      result.push(item);
+    }
+  }
+  return result;
+}
