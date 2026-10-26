@@ -604,3 +604,118 @@
     transition: none;
   }
 }
+
+
+.taskRow[data-urgency='overdue'] {
+  box-shadow: inset 3px 0 var(--warning);
+}
+
+.taskRow[data-urgency='overdue'] .taskTitle {
+  font-weight: 650;
+}
+
+
+/* A task-first, explainable focus queue; it shares the existing campus palette. */
+.focusPanel {
+  margin: 0 1.5rem 1.25rem;
+  padding: 1rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--bg-soft);
+}
+
+.focusHeading {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.5rem 1rem;
+  flex-wrap: wrap;
+  margin-bottom: 0.9rem;
+}
+.focusHeading h3 {
+  margin: 0.2rem 0 0;
+  font-size: 1.0625rem;
+  font-weight: 650;
+  color: var(--text);
+}
+.focusHeading > p {
+  margin: 0;
+  max-width: 36rem;
+  color: var(--muted);
+  font-size: 0.75rem;
+  line-height: 1.7;
+}
+.focusGrid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.65rem;
+}
+.focusItem {
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+  min-width: 0;
+  padding: 0.85rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: var(--text);
+  text-decoration: none;
+  transition: border-color var(--motion-fast) var(--ease-out);
+}
+.focusItem:hover {
+  border-color: var(--brand);
+}
+.focusItem[data-urgency='overdue'] {
+  border-inline-start: 3px solid var(--warning);
+}
+.focusItemTop,
+.focusAction {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.4rem;
+}
+.focusPosition {
+  font-size: 0.6875rem;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+.focusReason {
+  font-size: 0.6875rem;
+  color: var(--brand);
+  line-height: 1.6;
+}
+.focusItem[data-urgency='overdue'] .focusReason {
+  color: var(--warning);
+}
+.focusItem strong {
+  font-size: 0.875rem;
+  font-weight: 650;
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+}
+.focusCourse,
+.focusDisclaimer {
+  font-size: 0.75rem;
+  line-height: 1.6;
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+.focusAction {
+  margin-top: auto;
+  padding-top: 0.45rem;
+  justify-content: flex-end;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--brand);
+}
+.focusDisclaimer {
+  margin: 0.7rem 0 0;
+}
+@media (max-width: 980px) {
+  .focusGrid { grid-template-columns: 1fr; }
+}
+@media (max-width: 640px) {
+  .focusPanel { margin-inline: 1rem; }
+}
