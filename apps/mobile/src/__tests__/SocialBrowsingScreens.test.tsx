@@ -368,6 +368,25 @@ test('revoking access removes previously loaded saved posts when the refresh is 
   expect(view.queryByText('還沒有收藏貼文')).toBeNull();
 });
 
+test('a denied feed refresh hides saved content even if a concurrent bookmark read succeeds', async () => {
+  const savedPost = { ...post, id: 'private-saved', title: '以前收藏的校內筆記' };
+  jest.mocked(fetchRecentCampusPosts).mockResolvedValue([post]);
+  jest.mocked(loadCampusPostBookmarks).mockResolvedValue({ ids: [savedPost.id], posts: [savedPost] });
+  const view = render(<HomeFeedScreen />);
+  await view.findByText(post.title);
+  await act(async () => fireEvent.press(view.getByLabelText('收藏分類')));
+  await view.findByText(savedPost.title);
+  jest.mocked(fetchRecentCampusPosts).mockRejectedValueOnce(
+    Object.assign(new Error('revoked'), { code: 'permission-denied' }),
+  );
+  await act(async () => view.UNSAFE_getByType(RefreshControl).props.onRefresh());
+  expect(view.getByText(screens[0].error)).toBeTruthy();
+  expect(view.queryByText(savedPost.title)).toBeNull();
+  expect(view.queryByText(/顯示 \d+ 則收藏/)).toBeNull();
+  await act(async () => fireEvent.press(view.getByText('重新讀取動態')));
+  expect(await view.findByText(savedPost.title)).toBeTruthy();
+});
+
 test('a denied following refresh removes the previously accepted relations', async () => {
   const publicPost = { ...post, anonymous: false, authorUid: 'bob' };
   jest.mocked(fetchRecentCampusPosts).mockResolvedValue([publicPost]);
@@ -404,4 +423,40 @@ test.each([
   await act(async () => reject(new Error('old request failed')));
   expect(alertSpy).not.toHaveBeenCalled();
   expect(view.getByLabelText(label)).toBeTruthy();
+});
+
+test.each([
+  {
+    name: 'saved', filter: '收藏分類', load: loadCampusPostBookmarks,
+    ready: { ids: ['post'], posts: [{ ...post, anonymous: false, authorUid: 'bob' }] },
+    count: '顯示 1 則收藏', scope: '顯示本校最近最多 40 筆私人收藏，可跨裝置同步',
+    retry: '重新載入收藏', error: '收藏無法讀取，請檢查連線與校籍後重試。',
+  },
+  {
+    name: 'following', filter: '追蹤分類', load: listFollowingIds, ready: ['bob'],
+    count: '追蹤作者的貼文 1 則', scope: '只顯示目前載入的本校貼文中追蹤的作者',
+    retry: '重新載入追蹤', error: '追蹤清單暫時無法讀取，請確認連線及校籍後重試。',
+  },
+])('$name shows confirmed counts only after loading succeeds and hides denied content', async ({ filter, load, ready, count, scope, retry, error }) => {
+  jest.mocked(fetchRecentCampusPosts).mockResolvedValue([{ ...post, anonymous: false, authorUid: 'bob' }]);
+  (load as jest.Mock).mockResolvedValue(ready);
+  const view = render(<HomeFeedScreen />);
+  await view.findByText(post.title);
+  await act(async () => fireEvent.press(view.getByLabelText(filter)));
+  expect(await view.findByText(count)).toBeTruthy();
+  expect(view.getByText(scope)).toBeTruthy();
+  let reject!: (cause: Error) => void;
+  (load as jest.Mock).mockReturnValueOnce(new Promise((_resolve, fail) => { reject = fail; }));
+  await act(async () => view.UNSAFE_getByType(RefreshControl).props.onRefresh());
+  expect(view.queryByText(count)).toBeNull();
+  expect(view.queryByText(scope)).toBeNull();
+  expect(view.queryByText(post.title)).toBeNull();
+  await act(async () => reject(Object.assign(new Error('revoked'), { code: 'permission-denied' })));
+  expect(view.getByText(error)).toBeTruthy();
+  expect(view.queryByText(post.title)).toBeNull();
+  expect(view.queryByText(scope)).toBeNull();
+  expect(view.queryByText(/顯示 \d+ 則收藏|追蹤作者的貼文 \d+ 則/)).toBeNull();
+  await act(async () => fireEvent.press(view.getByLabelText(retry)));
+  expect(await view.findByText(count)).toBeTruthy();
+  expect(view.getByText(post.title)).toBeTruthy();
 });

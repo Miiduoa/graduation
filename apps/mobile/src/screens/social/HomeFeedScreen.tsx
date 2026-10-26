@@ -137,6 +137,7 @@ function HomeFeedContent() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [loadError, setLoadError] = useState('');
+  const [accessDenied, setAccessDenied] = useState(false);
   const likeFlightsRef = useRef<Set<string>>(new Set());
   const [pendingLikes, setPendingLikes] = useState<ReadonlySet<string>>(new Set());
   const [bookmarkScope, setBookmarkScope] = useState('');
@@ -185,6 +186,7 @@ function HomeFeedContent() {
         listActiveStoriesForSchool(school.id, 80, { throwOnError: true }),
       ]);
       if (loadVersion.current !== version) return;
+      setAccessDenied(false);
       setPosts(rankFeedPosts(rows, 80));
       setBoards(boardList);
       setSubscribedBoardIds(new Set(subs));
@@ -192,6 +194,7 @@ function HomeFeedContent() {
     } catch (cause) {
       if (loadVersion.current !== version) return;
       if (isAccessDenied(cause)) {
+        setAccessDenied(true);
         setPosts([]);
         setBoards([]);
         setSubscribedBoardIds(new Set());
@@ -477,6 +480,14 @@ function HomeFeedContent() {
     }),
     [posts, savedPosts, savedView, filter, order, search, subscribedBoardIds, followedIds, boardNameById, nameByUid],
   );
+  const savedUnavailable = savedView && (bookmarksLoading || !validBookmarks || !!bookmarksError);
+  const followingUnavailable = followingView && (followingLoading || !validFollowing || !!followingError);
+  const discoveryUnavailable = accessDenied || savedUnavailable || followingUnavailable;
+
+  const selectFilter = (next: FilterKey) => {
+    if (next === 'saved' && !savedView) setBookmarksLoading(true);
+    setFilter(next);
+  };
 
   const authorLine = (p: CampusPostDoc) => {
     if (p.anonymous) return p.aliasSnapshot ?? '匿名貼文';
@@ -548,7 +559,7 @@ function HomeFeedContent() {
       ) : (
         <FlatList
           style={{ flex: 1 }}
-          data={followingView && (followingLoading || (!validFollowing && !followingError)) ? [] : visiblePosts}
+          data={discoveryUnavailable ? [] : visiblePosts}
           keyExtractor={(p) => p.id}
           removeClippedSubviews
           windowSize={7}
@@ -565,7 +576,7 @@ function HomeFeedContent() {
               nameByUid={nameByUid}
               myUid={auth.user.uid}
               filter={filter}
-              onSelectFilter={setFilter}
+              onSelectFilter={selectFilter}
               onOpenStoryGroup={(grp) => openStoryGroup(grp, nav, school?.id)}
               onComposeStory={goStoryCompose}
               onComposePost={goCompose}
@@ -600,13 +611,13 @@ function HomeFeedContent() {
                 )}
               </View>
               <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
-                <Text style={{ color: theme.colors.textSecondary, fontSize: 12 }}>
+                {!discoveryUnavailable && <Text style={{ color: theme.colors.textSecondary, fontSize: 12 }}>
                   {savedView
                     ? `顯示 ${visiblePosts.length} 則收藏`
                     : followingView
                       ? `追蹤作者的貼文 ${visiblePosts.length} 則`
                       : `已載入 ${posts.length} 則 · 顯示 ${visiblePosts.length} 則`}
-                </Text>
+                </Text>}
                 <View style={{ flexDirection: 'row', gap: 6 }}>
                   {([
                     { key: 'recommended', label: savedView ? '收藏順序' : '推薦' },
@@ -634,19 +645,19 @@ function HomeFeedContent() {
                   ))}
                 </View>
               </View>
-              <Text style={{ color: theme.colors.textSecondary, fontSize: 11, lineHeight: 16 }}>
+              {!discoveryUnavailable && <Text style={{ color: theme.colors.textSecondary, fontSize: 11, lineHeight: 16 }}>
                 {savedView
                   ? '顯示本校最近最多 40 筆私人收藏，可跨裝置同步'
                   : followingView
                     ? '只顯示目前載入的本校貼文中追蹤的作者'
                     : '搜尋與排序僅適用於本次載入的本校貼文'}
-              </Text>
+              </Text>}
             </View>
             </>
           }
           ListEmptyComponent={
             loadError || (savedView && !!bookmarksError) || (followingView && !!followingError) ? null : (
-              bookmarksLoading || (savedView && !validBookmarks) ||
+              (savedView && (bookmarksLoading || !validBookmarks)) ||
                 (followingView && (followingLoading || !validFollowing)) ? (
                 <View style={{ alignItems: 'center', paddingVertical: 28, gap: 10 }}>
                   <ActivityIndicator color={theme.colors.accent} />
