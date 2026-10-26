@@ -119,14 +119,17 @@ test.each(['uid', 'scope'])('rejects a completed result after %s changes', async
 });
 
 test('uses local GGUF by default without calling Firebase Functions or downloading anything', async () => {
-  const result = await askCampusAssistant({ ...input(), mode: undefined, schoolName: '靜宜大學' });
+  const result = await askCampusAssistant({
+    ...input(), mode: undefined, schoolName: '靜宜大學',
+    messages: [{ role: 'user', content: '幫我整理我的閱讀計畫' }],
+  });
   expect(result).toEqual({
     content: '已依照本機資訊整理建議', hasActions: false, source: 'device',
   });
   expect(localLLM.generate).toHaveBeenCalledWith(expect.objectContaining({
     messages: [
       { role: 'system', content: '裝置端有限制的系統上下文' },
-      { role: 'user', content: '查公告' },
+      { role: 'user', content: '幫我整理我的閱讀計畫' },
     ],
   }));
   expect(localLLM.loadModel).not.toHaveBeenCalled();
@@ -137,7 +140,7 @@ test('uses local GGUF by default without calling Firebase Functions or downloadi
 test('explicitly requires a downloaded model instead of silently falling back to cloud', async () => {
   jest.mocked(localLLM.isModelDownloaded).mockResolvedValue(false);
   jest.mocked(localLLM.getDownloadedModels).mockResolvedValue([]);
-  await expect(askCampusAssistant({ ...input(), mode: 'device' })).rejects.toMatchObject({
+  await expect(askCampusAssistant({ ...input(), mode: 'device', messages: [{ role: 'user', content: '幫我規劃閱讀進度' }] })).rejects.toMatchObject({
     code: 'model-required',
   });
   expect(localLLM.generate).not.toHaveBeenCalled();
@@ -151,7 +154,7 @@ test('does not claim local AI availability when its native module is missing', a
   await expect(getOnDeviceAssistantReadiness()).resolves.toMatchObject({
     ready: false, available: false, reason: '原生模組尚未安裝',
   });
-  await expect(askCampusAssistant({ ...input(), mode: 'device' })).rejects.toMatchObject({
+  await expect(askCampusAssistant({ ...input(), mode: 'device', messages: [{ role: 'user', content: '幫我規劃閱讀進度' }] })).rejects.toMatchObject({
     code: 'native-unavailable',
   });
   expect(mockCallable).not.toHaveBeenCalled();
@@ -160,9 +163,11 @@ test('does not claim local AI availability when its native module is missing', a
 test('rejects late on-device generation when user switches account', async () => {
   let resolve!: (value: unknown) => void;
   jest.mocked(localLLM.generate).mockReturnValue(new Promise((yes) => { resolve = yes; }));
-  const pending = askCampusAssistant({ ...input(), mode: 'device' });
-  // Allow readiness and context reads to settle before local inference is pending.
-  await new Promise((done) => setImmediate(done));
+  const pending = askCampusAssistant({ ...input(), mode: 'device', messages: [{ role: 'user', content: '幫我規劃閱讀進度' }] });
+  for (let attempt = 0; attempt < 12 && jest.mocked(localLLM.generate).mock.calls.length === 0; attempt += 1) {
+    await Promise.resolve();
+  }
+  expect(localLLM.generate).toHaveBeenCalledTimes(1);
   mockUid = 'B';
   resolve({ content: '前一帳號的課表', tokensGenerated: 15 });
   await expect(pending).rejects.toMatchObject({ code: 'session-changed' });
@@ -172,7 +177,7 @@ test('rejects late on-device generation when user switches account', async () =>
 test('does not expose an unverified local cache when the app uses mock authentication', async () => {
   const { collectOnDeviceSchoolContext } = require('../../services/onDeviceSchoolContext');
   mockFake = true;
-  await askCampusAssistant({ ...input(), mode: 'device' });
+  await askCampusAssistant({ ...input(), mode: 'device', messages: [{ role: 'user', content: '幫我規劃閱讀進度' }] });
   expect(collectOnDeviceSchoolContext).toHaveBeenCalledWith(expect.objectContaining({ uid: '' }));
   expect(mockCallable).not.toHaveBeenCalled();
 });
