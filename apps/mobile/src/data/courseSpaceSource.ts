@@ -699,7 +699,10 @@ export async function listInboxTasks(userId: string, schoolId?: string): Promise
         if (ownSubmission.exists() && ownSubmission.data().submittedAt) continue;
         if (!dueAt) continue;
         const diff = dueAt.getTime() - now;
-        if (diff < 0 || diff > 7 * 24 * 60 * 60 * 1000) continue;
+        const week = 7 * 24 * 60 * 60 * 1000;
+        const lateSubmissionOpen =
+          diff < 0 && assignment.allowLateSubmission === true && assignment.status !== 'closed';
+        if (diff < -week || diff > week || (diff < 0 && !lateSubmissionOpen)) continue;
 
         groupTasks.push({
           id: `${kind}-${membership.groupId}-${assignment.id}`,
@@ -707,14 +710,17 @@ export async function listInboxTasks(userId: string, schoolId?: string): Promise
           groupId: membership.groupId,
           groupName: membership.name,
           title: String(assignment.title ?? '未命名任務'),
-          subtitle: `${label}將於 ${dueAt.toLocaleString('zh-TW', {
-            month: 'numeric',
-            day: 'numeric',
-            hour: '2-digit',
-            minute: '2-digit',
-          })} 截止`,
+          subtitle: lateSubmissionOpen
+            ? '已過截止時間 · 教師允許補交'
+            : `${label}將於 ${dueAt.toLocaleString('zh-TW', {
+                timeZone: 'Asia/Taipei',
+                month: 'numeric',
+                day: 'numeric',
+                hour: '2-digit',
+                minute: '2-digit',
+              })} 截止`,
           assignmentId: assignment.id,
-          priority: kind === 'quiz' ? 2 : 1,
+          priority: lateSubmissionOpen ? 0 : kind === 'quiz' ? 2 : 1,
           dueAt,
         });
       }
