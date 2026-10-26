@@ -16,8 +16,18 @@ import {
 import type { ServiceScreenProps } from './UnavailableFeatureScreen';
 import { safeNavigate } from '../utils/safeNavigate';
 import { getMobileQuickActions } from '../services/quickCampusActions';
-import type { CampusAgentWriteProposal } from '../features/campusAssistantActions';
+import type { CampusAgentWriteProposal, CampusAgentWriteTool } from '../features/campusAssistantActions';
 import { CampusAgentActionReview } from './CampusAgentActionReview';
+
+const SERVICE_AFTER_WRITE: Record<CampusAgentWriteTool, string> = {
+  submitLeaveRequest: 'CoursesHome',
+  createDormRepairRequest: 'Dormitory',
+  reserveSeat: 'Library',
+  borrowBook: 'Library',
+  renewBook: 'Library',
+  returnBook: 'Library',
+  reserveWashingMachine: 'Dormitory',
+};
 
 const VERIFIED_SERVICE_ROUTES: Record<string, { route: string; label: string }> = {
   '/timetable': { route: 'PersonalTimetable', label: '我的課表' },
@@ -270,6 +280,9 @@ function AssistantConversation({
                 userId={uid}
                 schoolId={schoolId}
                 isCurrent={current}
+                onOpenService={typeof navigation?.navigate === 'function'
+                  ? () => safeNavigate(navigation, SERVICE_AFTER_WRITE[proposal.toolName])
+                  : undefined}
               />
             ))}
           {message.role === 'assistant' && message.source === 'device' && (
