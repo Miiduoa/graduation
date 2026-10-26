@@ -521,6 +521,26 @@ async function listActionQueueInboxTasks(userId: string): Promise<InboxTask[]> {
   return out;
 }
 
+type StudentTaskWindow = { dueAt: Date | null; lateSubmissionOpen: boolean };
+
+function studentTaskWindow(
+  assignment: Record<string, unknown>,
+  mode: 'inbox' | 'learning',
+  now: number,
+): StudentTaskWindow | null {
+  if (assignment.published === false || assignment.status === 'draft' || assignment.status === 'closed') {
+    return null;
+  }
+  const parsed = toDate(assignment.dueAt);
+  const dueAt = parsed && Number.isFinite(parsed.getTime()) ? parsed : null;
+  const diff = dueAt ? dueAt.getTime() - now : null;
+  const week = 7 * 24 * 60 * 60 * 1000;
+  const lateSubmissionOpen = diff !== null && diff < 0 && assignment.allowLateSubmission === true;
+  if (diff !== null && diff < 0 && !lateSubmissionOpen) return null;
+  if (mode === 'inbox' && (diff === null || diff < -week || diff > week)) return null;
+  return { dueAt, lateSubmissionOpen };
+}
+
 export async function listInboxTasks(
   userId: string,
   schoolId?: string,
@@ -617,6 +637,36 @@ export async function listInboxTasks(
           ...(docSnap.data() as Record<string, unknown>),
         })) ?? [];
 
+      // A full semester can contain hundreds of assignments. Read only
+      // actionable rows, in small parallel batches, while preserving every
+      // authorization error instead of turning failures into empty results.
+      const studentWindows = new Map<string, StudentTaskWindow>();
+      const submitted = new Set<string>();
+      if (!teachingMembership) {
+        const eligible = assignments.filter((assignment) => {
+          const window = studentTaskWindow(assignment, mode, now);
+          if (!window) return false;
+          studentWindows.set(assignment.id, window);
+          return true;
+        });
+        const batchSize = 8;
+        for (let start = 0; start < eligible.length; start += batchSize) {
+          const batch = eligible.slice(start, start + batchSize);
+          const results = await Promise.all(
+            batch.map((assignment) =>
+              getDoc(
+                doc(db, 'groups', membership.groupId, 'assignments', assignment.id, 'submissions', userId),
+              ),
+            ),
+          );
+          for (let index = 0; index < batch.length; index++) {
+            if (results[index].exists() && results[index].data().submittedAt) {
+              submitted.add(batch[index].id);
+            }
+          }
+        }
+      }
+
       for (const assignment of assignments) {
         if (assignment.published === false || assignment.status === 'draft') continue;
         const rawDue = toDate(assignment.dueAt);
@@ -690,24 +740,9 @@ export async function listInboxTasks(
           continue;
         }
 
-        const ownSubmission = await getDoc(
-          doc(
-            db,
-            'groups',
-            membership.groupId,
-            'assignments',
-            assignment.id,
-            'submissions',
-            userId,
-          ),
-        );
-        if (ownSubmission.exists() && ownSubmission.data().submittedAt) continue;
-        if (assignment.status === 'closed') continue;
-        const diff = dueAt ? dueAt.getTime() - now : null;
-        const week = 7 * 24 * 60 * 60 * 1000;
-        const lateSubmissionOpen = diff !== null && diff < 0 && assignment.allowLateSubmission === true;
-        if (diff !== null && diff < 0 && !lateSubmissionOpen) continue;
-        if (mode === 'inbox' && (diff === null || diff < -week || diff > week)) continue;
+        const studentWindow = studentWindows.get(assignment.id);
+        if (!studentWindow || submitted.has(assignment.id)) continue;
+        const lateSubmissionOpen = studentWindow.lateSubmissionOpen;
 
         groupTasks.push({
           id: `${kind}-${membership.groupId}-${assignment.id}`,
