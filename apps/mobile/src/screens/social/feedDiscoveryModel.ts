@@ -31,7 +31,7 @@ export function selectMobileFeedPosts(posts: CampusPostDoc[], options: Options):
       return false;
     if (
       options.filter === 'media' &&
-      !(post.mediaUrls ?? []).some((url) => typeof url === 'string' && url.length > 0)
+      !((Array.isArray(post.mediaUrls) ? post.mediaUrls : [])).some((url) => typeof url === 'string' && url.length > 0)
     ) return false;
     if (!query) return true;
     const author = post.anonymous
@@ -40,7 +40,7 @@ export function selectMobileFeedPosts(posts: CampusPostDoc[], options: Options):
     return [
       post.title,
       post.content,
-      ...(post.tags ?? []),
+      ...(Array.isArray(post.tags) ? post.tags : []),
       options.boards[post.boardId] ?? '',
       author,
     ].join(' ').toLocaleLowerCase().includes(query);
