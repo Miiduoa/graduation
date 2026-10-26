@@ -4,7 +4,7 @@ const DEFAULT_TIMEOUT_MS = 10_000;
 const USER_AGENT =
   'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36';
 
-export type CampusErrorKind = 'credentials' | 'timeout' | 'closed' | 'unavailable';
+export type CampusErrorKind = 'credentials' | 'timeout' | 'closed' | 'unavailable' | 'unverified';
 
 export class PuCampusError extends Error {
   readonly kind: CampusErrorKind;
@@ -338,48 +338,26 @@ export function createPuCampusGateway(
           throw new PuCampusError('credentials', '學號或密碼錯誤');
         }
         const loginData = asRecord(posted.json);
-        const loginUserId = userIdFrom(loginData);
-        const loginName = displayNameFrom(loginData, account);
-
         const profilePage = await send(`${TRONCLASS_ORIGIN}/api/profile`, {
           cookies: posted.cookies,
           headers: { Accept: 'application/json' },
         });
+        if (profilePage.status === 401 || profilePage.status === 403 || profilePage.status === 302) {
+          throw new PuCampusError('credentials', '學號或密碼錯誤');
+        }
         const profileData = authenticatedJson(profilePage);
         if (profileData && identityBelongsToAccount(account, profileData)) {
           return {
             cookies: posted.cookies,
-            userId: userIdFrom(profileData) ?? loginUserId,
-            userName: displayNameFrom(profileData, loginName),
-            role: roleFrom(profileData) || roleFrom(loginData),
+            userId: userIdFrom(profileData) ?? userIdFrom(loginData),
+            userName: displayNameFrom(profileData, account),
+            role: roleFrom(profileData),
           };
         }
-        if (profilePage.status === 401 || profilePage.status === 403 || profilePage.status === 302) {
+        if (profileData) {
           throw new PuCampusError('credentials', '學號或密碼錯誤');
         }
-        if (profileData || looksLikeHtml(profilePage.html)) {
-          throw new PuCampusError('credentials', '學號或密碼錯誤');
-        }
-
-        const coursesPage = await send(`${TRONCLASS_ORIGIN}/api/my-courses`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-          body: JSON.stringify({ conditions: { status: ['ongoing'] }, page: 1, page_size: 50 }),
-          cookies: posted.cookies,
-        });
-        const coursesData = authenticatedJson(coursesPage);
-        const accountMatched =
-          identityBelongsToAccount(account, loginData) ||
-          (coursesData ? identityBelongsToAccount(account, coursesData) : false);
-        if (coursesData && Array.isArray(coursesData.courses) && accountMatched) {
-          return {
-            cookies: posted.cookies,
-            userId: loginUserId,
-            userName: loginName,
-            role: roleFrom(loginData),
-          };
-        }
-        throw new PuCampusError('credentials', '學號或密碼錯誤');
+        throw new PuCampusError('unverified', '暫時無法驗證老師身分');
       } catch (error) {
         throw classifyCampusFailure(error);
       }

@@ -92,26 +92,7 @@ it('rejects TronClass HTTP 200 when the session cannot call an authenticated API
   });
 });
 
-it('rejects HTTP 200 with a numeric id, no account fields, empty my-courses, and no profile', async () => {
-  const fetchMock = vi.fn(async (url: string) => {
-    if (String(url).endsWith('/api/login')) {
-      return jsonResponse(200, { id: 44, name: '王老師', role: 'teacher' }, { 'set-cookie': 'session=tc; Path=/' });
-    }
-    if (String(url).endsWith('/api/profile')) {
-      return jsonResponse(404, { message: 'not found' });
-    }
-    if (String(url).endsWith('/api/my-courses')) {
-      return jsonResponse(200, { courses: [] });
-    }
-    throw new Error(`unexpected ${url}`);
-  });
-  const gateway = createPuCampusGateway({ fetch: fetchMock });
-  await expect(gateway.loginTronClass('changyi', SECRET)).rejects.toMatchObject({
-    kind: 'credentials',
-  });
-});
-
-it('falls back to my-courses when profile is missing but the session belongs to this account', async () => {
+it('does not treat login JSON echoing the requested user_name as identity when profile is missing', async () => {
   const fetchMock = vi.fn(async (url: string) => {
     if (String(url).endsWith('/api/login')) {
       return jsonResponse(
@@ -129,10 +110,28 @@ it('falls back to my-courses when profile is missing but the session belongs to 
     throw new Error(`unexpected ${url}`);
   });
   const gateway = createPuCampusGateway({ fetch: fetchMock });
-  await expect(gateway.loginTronClass('changyi', SECRET)).resolves.toMatchObject({
-    userId: 44,
-    userName: '王老師',
-    cookies: { session: 'tc-cookie' },
+  await expect(gateway.loginTronClass('changyi', SECRET)).rejects.toMatchObject({
+    kind: 'unverified',
+    message: '暫時無法驗證老師身分',
+  });
+  expect(fetchMock.mock.calls.some(([url]) => String(url).endsWith('/api/my-courses'))).toBe(false);
+});
+
+it('returns unverified when profile exists but is not JSON', async () => {
+  const fetchMock = vi.fn(async (url: string) => {
+    if (String(url).endsWith('/api/login')) {
+      return jsonResponse(
+        200,
+        { id: 44, name: '王老師', role: 'teacher', user_name: 'changyi' },
+        { 'set-cookie': 'session=tc-cookie; Path=/' },
+      );
+    }
+    return htmlResponse(200, '<html>profile</html>');
+  });
+  const gateway = createPuCampusGateway({ fetch: fetchMock });
+  await expect(gateway.loginTronClass('changyi', SECRET)).rejects.toMatchObject({
+    kind: 'unverified',
+    message: '暫時無法驗證老師身分',
   });
 });
 

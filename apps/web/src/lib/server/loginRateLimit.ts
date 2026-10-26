@@ -1,9 +1,9 @@
 /**
  * 學號登入頻率限制分兩層：
- * 1. 本機記憶體先擋同一 IP／帳號，並有每日 Firestore 寫入預算。
+ * 1. 本機記憶體先同步預扣同一 IP／帳號，並同步預佔每日 Firestore 寫入預算。
  * 2. 通過第一層的嘗試才進 Firestore `_rateLimits/{hmac}`，多台機器共用。
- * 文件 key 是加鹽 HMAC，鹽從 FIREBASE_SERVICE_ACCOUNT_JSON 衍生。
- * 過期計數在交易裡覆寫，不另開排程。Firestore 失敗或預算用完 fail closed。
+ * 文件 key 是加鹽 HMAC，鹽從 FIREBASE_SERVICE_ACCOUNT_JSON 衍生；密鑰為空則 fail closed。
+ * 過期計數在交易裡覆寫。校園逾時可退還帳號次數，退還也算寫入預算。
  */
 import { createHmac } from 'node:crypto';
 
@@ -15,6 +15,8 @@ export const LOGIN_RATE_LIMIT = {
 } as const;
 
 export const RATE_LIMITS_COLLECTION = '_rateLimits';
+export const ACCOUNT_SCOPE = 'pu-student-login-account';
+export const IP_SCOPE = 'pu-student-login-ip';
 
 type RateLimitSnapshot = {
   exists: boolean;
@@ -56,10 +58,10 @@ export class LoginRateStoreError extends Error {
 }
 
 export type LoginRateGate = {
-  peek: (scope: string, key: string, limit: number, windowMs: number) => void;
   increment: (scope: string, key: string, limit: number, windowMs: number) => void;
-  assertWriteBudget: (writes?: number) => void;
-  recordWrites: (writes?: number) => void;
+  decrement: (scope: string, key: string) => void;
+  reserveWrites: (writes?: number) => void;
+  releaseWrites: (writes?: number) => void;
   reset: () => void;
   writesUsed: () => number;
 };
@@ -78,7 +80,17 @@ function utcDay(now: number): string {
 export function deriveRateLimitSalt(
   secret: string | undefined = process.env.FIREBASE_SERVICE_ACCOUNT_JSON,
 ): string {
-  return createHmac('sha256', String(secret || '').trim()).update('nuni-web/_rateLimits').digest('hex');
+  const material = String(secret || '').trim();
+  if (!material) {
+    throw new LoginRateStoreError();
+  }
+  return createHmac('sha256', material).update('nuni-web/_rateLimits').digest('hex');
+}
+
+export function requireRateLimitSalt(salt?: string): string {
+  const explicit = String(salt || '').trim();
+  if (explicit) return explicit;
+  return deriveRateLimitSalt();
 }
 
 export function hashRateLimitDocId(scope: string, value: string, salt: string): string {
@@ -106,20 +118,6 @@ export function createLoginRateGate(
     }
   }
 
-  function bucket(scope: string, key: string, windowMs: number, now: number, create: boolean): Bucket | undefined {
-    evict(now);
-    const id = `${scope}:${key}`;
-    const current = store.get(id);
-    if (!current || current.resetAt <= now) {
-      store.delete(id);
-      if (!create) return undefined;
-      const next = { count: 0, resetAt: now + windowMs };
-      store.set(id, next);
-      return next;
-    }
-    return current;
-  }
-
   function rollDay(now: number): void {
     const today = utcDay(now);
     if (today !== day) {
@@ -129,31 +127,36 @@ export function createLoginRateGate(
   }
 
   return {
-    peek(scope, key, limit, windowMs) {
-      const now = nowFn();
-      const current = bucket(scope, key, windowMs, now, false);
-      if (current && current.count >= limit) {
-        throw new LoginRateLimitError();
-      }
-    },
     increment(scope, key, limit, windowMs) {
       const now = nowFn();
-      const current = bucket(scope, key, windowMs, now, true);
-      if (!current) return;
+      evict(now);
+      const id = `${scope}:${key}`;
+      let current = store.get(id);
+      if (!current || current.resetAt <= now) {
+        store.delete(id);
+        current = { count: 0, resetAt: now + windowMs };
+        store.set(id, current);
+      }
       if (current.count >= limit) {
         throw new LoginRateLimitError();
       }
       current.count += 1;
     },
-    assertWriteBudget(amount = 1) {
+    decrement(scope, key) {
+      const id = `${scope}:${key}`;
+      const current = store.get(id);
+      if (current && current.count > 0) current.count -= 1;
+    },
+    reserveWrites(amount = 1) {
       rollDay(nowFn());
       if (writes + amount > dailyWriteLimit) {
         throw new LoginRateStoreError();
       }
-    },
-    recordWrites(amount = 1) {
-      rollDay(nowFn());
       writes += amount;
+    },
+    releaseWrites(amount = 1) {
+      rollDay(nowFn());
+      writes = Math.max(0, writes - amount);
     },
     reset() {
       store.clear();
@@ -206,12 +209,13 @@ export async function consumeLoginRateLimit(
   limit: number,
   windowMs: number,
   now = Date.now(),
-  salt = deriveRateLimitSalt(),
+  salt?: string,
 ): Promise<void> {
   if (!db || typeof db.runTransaction !== 'function' || typeof db.doc !== 'function') {
     throw new LoginRateStoreError();
   }
-  const ref = db.doc(`${RATE_LIMITS_COLLECTION}/${hashRateLimitDocId(scope, key, salt)}`);
+  const resolvedSalt = requireRateLimitSalt(salt);
+  const ref = db.doc(`${RATE_LIMITS_COLLECTION}/${hashRateLimitDocId(scope, key, resolvedSalt)}`);
   try {
     const outcome = await db.runTransaction(async (tx) => {
       const snap = await tx.get(ref);
@@ -248,6 +252,39 @@ export async function consumeLoginRateLimit(
   }
 }
 
+async function refundLoginRateLimit(
+  db: RateLimitFirestore,
+  scope: string,
+  key: string,
+  now: number,
+  salt: string,
+): Promise<boolean> {
+  if (!db || typeof db.runTransaction !== 'function' || typeof db.doc !== 'function') {
+    throw new LoginRateStoreError();
+  }
+  const ref = db.doc(`${RATE_LIMITS_COLLECTION}/${hashRateLimitDocId(scope, key, salt)}`);
+  const outcome = await db.runTransaction(async (tx) => {
+    const snap = await tx.get(ref);
+    if (!snap.exists) return 'skip' as const;
+    const data = snap.data();
+    const resetAt = expiryMillis(data.ttl ?? data.expiresAt);
+    if (resetAt <= now) return 'skip' as const;
+    const count = typeof data.count === 'number' ? data.count : 0;
+    if (count <= 0) return 'skip' as const;
+    tx.set(
+      ref,
+      {
+        count: count - 1,
+        ttl: data.ttl ?? data.expiresAt ?? new Date(resetAt),
+        scope,
+      },
+      { merge: true },
+    );
+    return 'ok' as const;
+  });
+  return outcome === 'ok';
+}
+
 async function writeSharedLimit(
   db: RateLimitFirestore,
   gate: LoginRateGate,
@@ -258,60 +295,79 @@ async function writeSharedLimit(
   now: number,
   salt: string,
 ): Promise<void> {
-  gate.assertWriteBudget(1);
-  await consumeLoginRateLimit(db, scope, key, limit, windowMs, now, salt);
-  gate.recordWrites(1);
-}
-
-export function assertLoginAccountAllowed(
-  account: string,
-  ctx: Pick<LoginRateContext, 'gate' | 'now'> = {},
-): void {
-  resolveGate(ctx).peek(
-    'pu-student-login-account',
-    account,
-    LOGIN_RATE_LIMIT.account.limit,
-    LOGIN_RATE_LIMIT.account.windowMs,
-  );
+  gate.reserveWrites(1);
+  try {
+    await consumeLoginRateLimit(db, scope, key, limit, windowMs, now, salt);
+  } catch (error) {
+    gate.releaseWrites(1);
+    throw error;
+  }
 }
 
 export async function consumeLoginIpLimit(ip: string, ctx: LoginRateContext): Promise<void> {
   const gate = resolveGate(ctx);
   const now = ctx.now ?? Date.now();
-  const salt = ctx.salt ?? deriveRateLimitSalt();
-  gate.increment('pu-student-login-ip', ip || 'unknown', LOGIN_RATE_LIMIT.ip.limit, LOGIN_RATE_LIMIT.ip.windowMs);
-  await writeSharedLimit(
-    ctx.db,
-    gate,
-    'pu-student-login-ip',
-    ip || 'unknown',
-    LOGIN_RATE_LIMIT.ip.limit,
-    LOGIN_RATE_LIMIT.ip.windowMs,
-    now,
-    salt,
-  );
+  const salt = requireRateLimitSalt(ctx.salt);
+  const key = ip || 'unknown';
+  gate.increment(IP_SCOPE, key, LOGIN_RATE_LIMIT.ip.limit, LOGIN_RATE_LIMIT.ip.windowMs);
+  try {
+    await writeSharedLimit(
+      ctx.db,
+      gate,
+      IP_SCOPE,
+      key,
+      LOGIN_RATE_LIMIT.ip.limit,
+      LOGIN_RATE_LIMIT.ip.windowMs,
+      now,
+      salt,
+    );
+  } catch (error) {
+    gate.decrement(IP_SCOPE, key);
+    throw error;
+  }
 }
 
 export async function consumeLoginAccountLimit(account: string, ctx: LoginRateContext): Promise<void> {
   const gate = resolveGate(ctx);
   const now = ctx.now ?? Date.now();
-  const salt = ctx.salt ?? deriveRateLimitSalt();
-  gate.increment(
-    'pu-student-login-account',
-    account,
-    LOGIN_RATE_LIMIT.account.limit,
-    LOGIN_RATE_LIMIT.account.windowMs,
-  );
-  await writeSharedLimit(
-    ctx.db,
-    gate,
-    'pu-student-login-account',
-    account,
-    LOGIN_RATE_LIMIT.account.limit,
-    LOGIN_RATE_LIMIT.account.windowMs,
-    now,
-    salt,
-  );
+  const salt = requireRateLimitSalt(ctx.salt);
+  gate.increment(ACCOUNT_SCOPE, account, LOGIN_RATE_LIMIT.account.limit, LOGIN_RATE_LIMIT.account.windowMs);
+  try {
+    await writeSharedLimit(
+      ctx.db,
+      gate,
+      ACCOUNT_SCOPE,
+      account,
+      LOGIN_RATE_LIMIT.account.limit,
+      LOGIN_RATE_LIMIT.account.windowMs,
+      now,
+      salt,
+    );
+  } catch (error) {
+    gate.decrement(ACCOUNT_SCOPE, account);
+    throw error;
+  }
+}
+
+export async function refundLoginAccountLimit(account: string, ctx: LoginRateContext): Promise<void> {
+  const gate = resolveGate(ctx);
+  const now = ctx.now ?? Date.now();
+  const salt = requireRateLimitSalt(ctx.salt);
+  try {
+    gate.reserveWrites(1);
+  } catch {
+    return;
+  }
+  try {
+    const wrote = await refundLoginRateLimit(ctx.db, ACCOUNT_SCOPE, account, now, salt);
+    if (!wrote) {
+      gate.releaseWrites(1);
+      return;
+    }
+    gate.decrement(ACCOUNT_SCOPE, account);
+  } catch {
+    gate.releaseWrites(1);
+  }
 }
 
 export async function enforceLoginRateLimit(
@@ -322,7 +378,6 @@ export async function enforceLoginRateLimit(
   options: { salt?: string; gate?: LoginRateGate } = {},
 ): Promise<void> {
   const ctx = { db, now, salt: options.salt, gate: options.gate };
-  assertLoginAccountAllowed(account, ctx);
   await consumeLoginIpLimit(ip, ctx);
   await consumeLoginAccountLimit(account, ctx);
 }

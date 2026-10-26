@@ -189,6 +189,24 @@ it('returns 503 without Firestore or campus when the daily write budget is spent
   expect(runTransaction).not.toHaveBeenCalled();
 });
 
+it('returns 503 without campus when FIREBASE_SERVICE_ACCOUNT_JSON is empty', async () => {
+  const { runtime: deps } = runtime();
+  const loginStudent = vi.fn(async () => {
+    throw new PuCampusError('credentials', '學號或密碼錯誤');
+  });
+  deps.puCampus = campus({ loginStudent });
+  delete deps.rateLimitSalt;
+  delete process.env.FIREBASE_SERVICE_ACCOUNT_JSON;
+  const res = await dispatchFnRequest(
+    'signInPuStudentId',
+    request({ studentId: STUDENT, password: SECRET }, { 'fly-client-ip': '203.0.113.14' }),
+    deps,
+  );
+  expect(res.status).toBe(503);
+  expect(await res.json()).toEqual({ error: '服務暫時無法使用' });
+  expect(loginStudent).not.toHaveBeenCalled();
+});
+
 it('returns 503 when shared rate-limit storage cannot be written', async () => {
   const { runtime: deps, store } = runtime();
   const loginStudent = vi.fn(async () => {

@@ -1,8 +1,8 @@
 // @vitest-environment node
-import { expect, it } from 'vitest';
+import { expect, it, vi } from 'vitest';
 import { createLoginRateGate, LOGIN_RATE_LIMIT } from './loginRateLimit';
 import { createMemoryGroupStore } from './memoryGroupStore';
-import { PuCampusError, type PuCampusGateway } from './puCampusClient';
+import { createPuCampusGateway, PuCampusError, type PuCampusGateway } from './puCampusClient';
 import { handleSignInPuStudentId } from './signInPuStudentId';
 
 const SECRET = 'never-log-this-password';
@@ -157,7 +157,7 @@ it('only adds the signed-in teacher to 課名｜自己的名字 on a co-taught c
   });
 });
 
-it('returns 503 when TronClass is down and does not spend the account quota', async () => {
+it('returns 503 when TronClass is down and refunds the account debit', async () => {
   const loginTronClass = async () => {
     throw new PuCampusError('timeout', '學校系統無回應');
   };
@@ -167,4 +167,36 @@ it('returns 503 when TronClass is down and does not spend the account quota', as
       handleSignInPuStudentId({ studentId: TEACHER, password: SECRET }, `10.0.0.${i + 1}`, runtime),
     ).rejects.toMatchObject({ status: 503, message: '學校系統暫時無法連線' });
   }
+});
+
+it('does not mint a token when login echoes user_name but profile cannot verify the account', async () => {
+  const mint = vi.fn(async () => 'should-not-mint');
+  const gateway = createPuCampusGateway({
+    fetch: async (url: string) => {
+      if (String(url).endsWith('/api/login')) {
+        return new Response(JSON.stringify({ id: 44, name: '王老師', role: 'teacher', user_name: TEACHER }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json', 'set-cookie': 'session=tc-cookie; Path=/' },
+        });
+      }
+      if (String(url).endsWith('/api/profile')) {
+        return new Response(JSON.stringify({ message: 'not found' }), {
+          status: 404,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
+      return new Response(JSON.stringify({ courses: [] }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    },
+  });
+  const { runtime } = deps({ campus: gateway });
+  await expect(
+    handleSignInPuStudentId({ studentId: TEACHER, password: SECRET }, '8.8.8.7', {
+      ...runtime,
+      signCustomToken: mint,
+    }),
+  ).rejects.toMatchObject({ status: 503, message: '暫時無法驗證老師身分' });
+  expect(mint).not.toHaveBeenCalled();
 });

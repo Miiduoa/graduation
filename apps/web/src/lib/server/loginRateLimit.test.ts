@@ -3,6 +3,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { expect, it, vi } from 'vitest';
 import {
+  ACCOUNT_SCOPE,
   consumeLoginAccountLimit,
   consumeLoginIpLimit,
   consumeLoginRateLimit,
@@ -14,6 +15,8 @@ import {
   LoginRateLimitError,
   LoginRateStoreError,
   RATE_LIMITS_COLLECTION,
+  refundLoginAccountLimit,
+  requireRateLimitSalt,
 } from './loginRateLimit';
 import { createMemoryGroupStore } from './memoryGroupStore';
 
@@ -96,11 +99,57 @@ it('returns 503 without touching Firestore when the daily write budget is spent'
   expect(gate.writesUsed()).toBe(0);
 });
 
-it('derives the salt from the existing service-account secret', () => {
+it('reserves write budget synchronously so concurrent callers cannot overshoot', () => {
+  const gate = createLoginRateGate({ dailyWriteLimit: 2 });
+  gate.reserveWrites(1);
+  gate.reserveWrites(1);
+  expect(() => gate.reserveWrites(1)).toThrow(LoginRateStoreError);
+  expect(gate.writesUsed()).toBe(2);
+});
+
+it('refunds a pre-debited account count', async () => {
+  const { db, docs } = store();
+  const gate = createLoginRateGate();
+  const account = '1110700321';
+  await consumeLoginAccountLimit(account, { db, salt: SALT, gate });
+  await refundLoginAccountLimit(account, { db, salt: SALT, gate });
+  const hashed = `${RATE_LIMITS_COLLECTION}/${hashRateLimitDocId(ACCOUNT_SCOPE, account, SALT)}`;
+  expect(docs.get(hashed)).toMatchObject({ count: 0 });
+  expect(gate.writesUsed()).toBe(2);
+  await expect(consumeLoginAccountLimit(account, { db, salt: SALT, gate })).resolves.toBeUndefined();
+});
+
+it('skips the refund write when the daily budget is already spent', async () => {
+  const { db, docs } = store();
+  const gate = createLoginRateGate({ dailyWriteLimit: 1 });
+  const account = '1110700321';
+  await consumeLoginAccountLimit(account, { db, salt: SALT, gate });
+  await refundLoginAccountLimit(account, { db, salt: SALT, gate });
+  const hashed = `${RATE_LIMITS_COLLECTION}/${hashRateLimitDocId(ACCOUNT_SCOPE, account, SALT)}`;
+  expect(docs.get(hashed)).toMatchObject({ count: 1 });
+  expect(gate.writesUsed()).toBe(1);
+});
+
+it('derives the salt from the existing service-account secret and fails closed when empty', async () => {
   const first = deriveRateLimitSalt('{"private_key":"x"}');
   const second = deriveRateLimitSalt('{"private_key":"y"}');
   expect(first).not.toBe(second);
   expect(first).toMatch(/^[0-9a-f]{64}$/);
+  expect(() => deriveRateLimitSalt('')).toThrow(LoginRateStoreError);
+  expect(() => requireRateLimitSalt('')).toThrow(LoginRateStoreError);
+  const previous = process.env.FIREBASE_SERVICE_ACCOUNT_JSON;
+  delete process.env.FIREBASE_SERVICE_ACCOUNT_JSON;
+  const { db } = store();
+  const gate = createLoginRateGate();
+  try {
+    await expect(consumeLoginAccountLimit('1110700321', { db, gate })).rejects.toBeInstanceOf(
+      LoginRateStoreError,
+    );
+    expect(gate.writesUsed()).toBe(0);
+  } finally {
+    if (previous === undefined) delete process.env.FIREBASE_SERVICE_ACCOUNT_JSON;
+    else process.env.FIREBASE_SERVICE_ACCOUNT_JSON = previous;
+  }
 });
 
 it('does not grant clients a Firestore rule on _rateLimits', () => {

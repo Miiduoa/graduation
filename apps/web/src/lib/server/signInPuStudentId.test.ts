@@ -1,7 +1,14 @@
 // @vitest-environment node
 import { afterEach, expect, it, vi } from 'vitest';
 import { decodeFirebaseCustomTokenPayload } from './firebaseCustomToken';
-import { createLoginRateGate } from './loginRateLimit';
+import {
+  ACCOUNT_SCOPE,
+  createLoginRateGate,
+  hashRateLimitDocId,
+  LOGIN_RATE_LIMIT,
+  LoginRateLimitError,
+  RATE_LIMITS_COLLECTION,
+} from './loginRateLimit';
 import { createMemoryGroupStore } from './memoryGroupStore';
 import { PuCampusError, type PuCampusGateway } from './puCampusClient';
 import { clientIpFromRequest, handleSignInPuStudentId, PuLoginHttpError } from './signInPuStudentId';
@@ -123,7 +130,7 @@ it('maps campus credential, timeout and closed errors', async () => {
   });
   await expect(
     handleSignInPuStudentId({ studentId: STUDENT, password: SECRET }, '3.3.3.3', timeout),
-  ).rejects.toMatchObject({ status: 504, message: '學校系統無回應' });
+  ).rejects.toMatchObject({ status: 503, message: '學校系統暫時無法連線' });
 
   const { runtime: closed } = deps({
     campus: campus({
@@ -218,6 +225,83 @@ it('rate-limits repeated student attempts before calling the campus', async () =
   expect(loginStudent).toHaveBeenCalledTimes(5);
   const rateLimitPaths = [...store.docs.keys()].filter((path) => path.startsWith('_rateLimits/'));
   expect(rateLimitPaths.join('\n')).not.toContain(STUDENT);
+});
+
+it('lets at most 5 concurrent attempts for the same account reach campus', async () => {
+  const loginStudent = vi.fn(async () => {
+    throw new PuCampusError('credentials', '學號或密碼錯誤');
+  });
+  const { runtime } = deps({ campus: campus({ loginStudent }) });
+  const results = await Promise.all(
+    Array.from({ length: 20 }, (_, index) =>
+      handleSignInPuStudentId(
+        { studentId: STUDENT, password: SECRET },
+        `10.1.0.${index + 1}`,
+        runtime,
+      ).catch((error: unknown) => error),
+    ),
+  );
+  expect(loginStudent.mock.calls.length).toBeLessThanOrEqual(LOGIN_RATE_LIMIT.account.limit);
+  expect(
+    results.filter((item) => item instanceof LoginRateLimitError || (item instanceof PuLoginHttpError && item.status === 429))
+      .length,
+  ).toBeGreaterThan(0);
+});
+
+it('rejects from shared Firestore even when this process memory is empty', async () => {
+  const loginStudent = vi.fn(async () => {
+    throw new PuCampusError('credentials', '學號或密碼錯誤');
+  });
+  const salt = 'test-rate-limit-salt';
+  const hashed = hashRateLimitDocId(ACCOUNT_SCOPE, STUDENT, salt);
+  const store = createMemoryGroupStore([
+    [
+      `${RATE_LIMITS_COLLECTION}/${hashed}`,
+      { count: LOGIN_RATE_LIMIT.account.limit, ttl: new Date(Date.now() + 15 * 60 * 1000), scope: ACCOUNT_SCOPE },
+    ],
+  ]);
+  const { runtime } = deps({ store, campus: campus({ loginStudent }) });
+  await expect(
+    handleSignInPuStudentId({ studentId: STUDENT, password: SECRET }, '9.9.8.8', runtime),
+  ).rejects.toMatchObject({ status: 429, message: 'Too many requests' });
+  expect(loginStudent).not.toHaveBeenCalled();
+});
+
+it('refunds the account debit after a campus timeout', async () => {
+  let mode: 'timeout' | 'credentials' = 'timeout';
+  const loginStudent = vi.fn(async () => {
+    if (mode === 'timeout') throw new PuCampusError('timeout', '學校系統無回應');
+    throw new PuCampusError('credentials', '學號或密碼錯誤');
+  });
+  const { runtime } = deps({ campus: campus({ loginStudent }) });
+  for (let i = 0; i < LOGIN_RATE_LIMIT.account.limit; i += 1) {
+    await expect(
+      handleSignInPuStudentId({ studentId: STUDENT, password: SECRET }, `11.0.0.${i + 1}`, runtime),
+    ).rejects.toMatchObject({ status: 503, message: '學校系統暫時無法連線' });
+  }
+  mode = 'credentials';
+  await expect(
+    handleSignInPuStudentId({ studentId: STUDENT, password: SECRET }, '11.0.0.9', runtime),
+  ).rejects.toMatchObject({ status: 401, message: '學號或密碼錯誤' });
+  expect(loginStudent).toHaveBeenCalledTimes(LOGIN_RATE_LIMIT.account.limit + 1);
+});
+
+it('returns 503 without campus when the service-account secret is empty', async () => {
+  const loginStudent = vi.fn(async () => ({ cookies: { PHPSESSID: 'stu-cookie' } }));
+  const { runtime } = deps({ campus: campus({ loginStudent }) });
+  const withoutSalt = { ...runtime };
+  delete withoutSalt.rateLimitSalt;
+  const previous = process.env.FIREBASE_SERVICE_ACCOUNT_JSON;
+  delete process.env.FIREBASE_SERVICE_ACCOUNT_JSON;
+  try {
+    await expect(
+      handleSignInPuStudentId({ studentId: STUDENT, password: SECRET }, '9.9.9.6', withoutSalt),
+    ).rejects.toMatchObject({ status: 503, message: '服務暫時無法使用' });
+    expect(loginStudent).not.toHaveBeenCalled();
+  } finally {
+    if (previous === undefined) delete process.env.FIREBASE_SERVICE_ACCOUNT_JSON;
+    else process.env.FIREBASE_SERVICE_ACCOUNT_JSON = previous;
+  }
 });
 
 it('returns 503 and does not call the campus when rate-limit storage fails', async () => {

@@ -3,13 +3,13 @@ import { FieldValue } from 'firebase-admin/firestore';
 import { courseOfferingId } from '@campus/shared/src/timetable/course';
 import { signFirebaseCustomToken, type ServiceAccountSigner } from './firebaseCustomToken';
 import {
-  assertLoginAccountAllowed,
   consumeLoginAccountLimit,
   consumeLoginIpLimit,
-  deriveRateLimitSalt,
   getLoginRateGate,
   LoginRateLimitError,
   LoginRateStoreError,
+  refundLoginAccountLimit,
+  requireRateLimitSalt,
   type LoginRateGate,
 } from './loginRateLimit';
 import { createPuCampusGateway, PuCampusError, type PuCampusGateway } from './puCampusClient';
@@ -50,7 +50,9 @@ export type SignInPuDeps = {
   rateLimitGate?: LoginRateGate;
 };
 
-export const TEACHER_SCHOOL_UNAVAILABLE = '學校系統暫時無法連線';
+export const SCHOOL_UNAVAILABLE = '學校系統暫時無法連線';
+export const TEACHER_SCHOOL_UNAVAILABLE = SCHOOL_UNAVAILABLE;
+export const TEACHER_IDENTITY_UNVERIFIED = '暫時無法驗證老師身分';
 
 function asRecord(value: unknown): Record<string, unknown> {
   return value && typeof value === 'object' && !Array.isArray(value)
@@ -61,7 +63,8 @@ function asRecord(value: unknown): Record<string, unknown> {
 function clientMessage(error: PuCampusError): { status: number; message: string } {
   if (error.kind === 'credentials') return { status: 401, message: '學號或密碼錯誤' };
   if (error.kind === 'closed') return { status: 503, message: '尚未開放' };
-  return { status: 504, message: '學校系統無回應' };
+  if (error.kind === 'unverified') return { status: 503, message: TEACHER_IDENTITY_UNVERIFIED };
+  return { status: 503, message: SCHOOL_UNAVAILABLE };
 }
 
 function redact(value: unknown, secret: string): string {
@@ -136,7 +139,7 @@ function isSchoolSideFailure(error: unknown): boolean {
   if (error instanceof PuLoginHttpError) {
     return (
       error.status === 503 &&
-      (error.message === TEACHER_SCHOOL_UNAVAILABLE || error.message === '尚未開放')
+      (error.message === SCHOOL_UNAVAILABLE || error.message === '尚未開放')
     );
   }
   return false;
@@ -173,30 +176,20 @@ export async function handleSignInPuStudentId(
     const rateCtx = {
       db: deps.db,
       now: deps.now?.() ?? Date.now(),
-      salt: deps.rateLimitSalt ?? deriveRateLimitSalt(),
+      salt: requireRateLimitSalt(deps.rateLimitSalt),
       gate: deps.rateLimitGate ?? getLoginRateGate(),
     };
-    assertLoginAccountAllowed(accountKey, rateCtx);
     await consumeLoginIpLimit(ip, rateCtx);
+    await consumeLoginAccountLimit(accountKey, rateCtx);
 
     const campus = deps.campus ?? createPuCampusGateway();
     try {
-      const result = isStudent
+      return isStudent
         ? await signInStudent(studentId, password, campus, deps)
         : await signInTeacher(teacherAccount, password, campus, deps);
-      await consumeLoginAccountLimit(accountKey, rateCtx);
-      return result;
     } catch (error) {
-      if (
-        !isSchoolSideFailure(error) &&
-        !(error instanceof LoginRateLimitError) &&
-        !(error instanceof LoginRateStoreError)
-      ) {
-        try {
-          await consumeLoginAccountLimit(accountKey, rateCtx);
-        } catch {
-          // 這次請求已有校園結果；帳號次數仍要記，但錯誤以校園為準。
-        }
+      if (isSchoolSideFailure(error)) {
+        await refundLoginAccountLimit(accountKey, rateCtx);
       }
       throw error;
     }
@@ -341,8 +334,11 @@ async function signInTeacher(
       if (error.kind === 'closed') {
         throw new PuLoginHttpError(503, '尚未開放');
       }
+      if (error.kind === 'unverified') {
+        throw new PuLoginHttpError(503, TEACHER_IDENTITY_UNVERIFIED);
+      }
       if (error.kind === 'timeout' || error.kind === 'unavailable') {
-        throw new PuLoginHttpError(503, TEACHER_SCHOOL_UNAVAILABLE);
+        throw new PuLoginHttpError(503, SCHOOL_UNAVAILABLE);
       }
       throw new PuLoginHttpError(401, '學號或密碼錯誤');
     }
@@ -358,7 +354,7 @@ async function signInTeacher(
   } catch (error) {
     if (error instanceof PuCampusError && error.kind !== 'credentials') {
       if (error.kind === 'timeout' || error.kind === 'unavailable') {
-        throw new PuLoginHttpError(503, TEACHER_SCHOOL_UNAVAILABLE);
+        throw new PuLoginHttpError(503, SCHOOL_UNAVAILABLE);
       }
       const mapped = clientMessage(error);
       throw new PuLoginHttpError(mapped.status, mapped.message);
