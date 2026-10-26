@@ -7,6 +7,7 @@ import { loadStudentHome } from '../data/studentHome';
 import type { InboxTask } from '../data/types';
 import { safeNavigate } from '../utils/safeNavigate';
 import { navigateFromInboxTask } from '../services/inboxActions';
+import { theme } from '../ui/theme';
 import { buildLearningWorkspace, describeLearningTask, filterLearningTasks, type LearningTaskFilter } from '../features/learningWorkspace';
 
 type LearningData = Awaited<ReturnType<typeof loadStudentHome>>;
@@ -178,7 +179,7 @@ export default function LearnAiFirstScreen() {
                   justifyContent: 'center',
                 }}
               >
-                <Text style={{ color: filter === key ? aiTokens.aiStrong : aiTokens.text, fontSize: 13, fontWeight: '600' }}>
+                <Text style={{ color: filter === key ? theme.colors.onAccent : aiTokens.text, fontSize: 13, fontWeight: '600' }}>
                   {label}
                 </Text>
               </Pressable>
