@@ -2,6 +2,7 @@ import {
   canListAsPendingWork,
   courseSubmissionState,
   submissionStatusText,
+  summarizeCourseReceipts,
 } from '../../features/courseSubmissionState';
 
 test('only a server timestamp confirms that coursework was submitted', () => {
@@ -60,4 +61,31 @@ test('published and valid instructor grades are displayed, but missing grade con
     gradePublished: true,
     gradeScore: '87',
   })).toMatchObject({ kind: 'submitted', grade: null });
+});
+
+test('course receipt counts never turn unverified or instructor records into submitted totals', () => {
+  const summary = summarizeCourseReceipts([
+    { submission: { kind: 'not_submitted' } },
+    { submission: { kind: 'draft' } },
+    { submission: { kind: 'unconfirmed' } },
+    { submission: { kind: 'unavailable' } },
+    { submission: { kind: 'instructor' } },
+    { submission: courseSubmissionState({
+      submittedAt: '2026-10-26T16:00:00Z',
+      gradePublished: true,
+      gradeScore: 91,
+    }) },
+    { submission: courseSubmissionState({
+      submittedAt: '2026-10-26T16:00:00Z',
+      gradePublished: false,
+      gradeScore: 100,
+    }) },
+    {},
+  ]);
+  expect(summary).toEqual({
+    submitted: 2,
+    graded: 1,
+    unsubmitted: 2,
+    needsVerification: 3,
+  });
 });
