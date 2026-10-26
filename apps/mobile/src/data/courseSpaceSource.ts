@@ -659,9 +659,10 @@ export async function listInboxTasks(
               ),
             ),
           );
-          for (let index = 0; index < batch.length; index++) {
-            if (results[index].exists() && results[index].data().submittedAt) {
-              submitted.add(batch[index].id);
+          for (const [index, snapshot] of results.entries()) {
+            const assignment = batch[index];
+            if (assignment && snapshot.exists() && snapshot.data()?.submittedAt) {
+              submitted.add(assignment.id);
             }
           }
         }
