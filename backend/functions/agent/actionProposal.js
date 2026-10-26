@@ -8,6 +8,15 @@ function timestampMs(value) {
   return NaN;
 }
 
+function canonicalJson(value) {
+  if (Array.isArray(value)) return '[' + value.map(canonicalJson).join(',') + ']';
+  if (value && typeof value === 'object') {
+    const fields = Object.keys(value).filter((key) => value[key] !== undefined).sort();
+    return '{' + fields.map((key) => JSON.stringify(key) + ':' + canonicalJson(value[key])).join(',') + '}';
+  }
+  return JSON.stringify(value);
+}
+
 /**
  * A write may only use a proposal saved with this user's completed run.
  * Returns its index for the single-use claim, or -1 if it cannot be authorized.
@@ -21,9 +30,9 @@ function matchAgentProposal(run, { uid, schoolId, toolName, input, now = Date.no
     return -1;
   }
   if (!Array.isArray(run.actionProposals)) return -1;
-  const expected = JSON.stringify(input);
+  const expected = canonicalJson(input);
   return run.actionProposals.findIndex((item) =>
-    item && item.toolName === toolName && JSON.stringify(item.input) === expected);
+    item && item.toolName === toolName && canonicalJson(item.input) === expected);
 }
 
 module.exports = { matchAgentProposal };
