@@ -16,14 +16,14 @@
     "sync:announcements:probe": "node campusAnnouncements/probe.js",
     "backfill:canonical": "node backfillCanonicalData.js",
     "build:shared": "node ../../scripts/build-functions-shared.cjs",
-    "test": "pnpm run build:shared && ONLINE_ORDERING_ENABLED=true jest"
+    "test": "pnpm run build:shared && node parse5-runtime-smoke.cjs && ONLINE_ORDERING_ENABLED=true jest"
   },
   "dependencies": {
     "firebase-admin": "14.5.0",
     "firebase-functions": "^7.4.0",
     "jose": "^6.2.13",
     "node-fetch": "^3.3.2",
-    "parse5": "7.3.0",
+    "parse5": "8.0.1",
     "saml2-js": "^4.0.2",
     "xml2js": "^0.6.2",
     "zod": "^4.6.7",
