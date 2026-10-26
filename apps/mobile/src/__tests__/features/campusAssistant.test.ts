@@ -18,12 +18,12 @@ jest.mock('../../services/localLLMInference', () => ({
     getRuntimeAvailability: jest.fn(() => ({ available: true })),
     getSavedModelId: jest.fn(async () => null),
     isModelDownloaded: jest.fn(async () => true),
-    getDownloadedModels: jest.fn(async () => ['qwen3-0.6b']),
-    getState: jest.fn(() => ({ status: 'ready', modelId: 'qwen3-0.6b' })),
+    getDownloadedModels: jest.fn(async () => ['qwen2.5-0.5b']),
+    getState: jest.fn(() => ({ status: 'ready', modelId: 'qwen2.5-0.5b' })),
     loadModel: jest.fn(async () => true),
     generate: jest.fn(async () => ({ content: ' 已依照本機資訊整理建議 ', tokensGenerated: 15 })),
   },
-  getDefaultLocalLlmModelId: () => 'qwen3-0.6b',
+  getDefaultLocalLlmModelId: () => 'qwen2.5-0.5b',
 }));
 jest.mock('../../services/onDeviceSchoolContext', () => ({
   collectOnDeviceSchoolContext: jest.fn(async ({ schoolId }: { schoolId: string }) => ({
@@ -46,10 +46,10 @@ beforeEach(() => {
   mockUid = 'A';
   mockFake = false;
   jest.mocked(localLLM.getRuntimeAvailability).mockReturnValue({ available: true });
-  jest.mocked(localLLM.getState).mockReturnValue({ status: 'ready', modelId: 'qwen3-0.6b' });
+  jest.mocked(localLLM.getState).mockReturnValue({ status: 'ready', modelId: 'qwen2.5-0.5b' });
   jest.mocked(localLLM.getSavedModelId).mockResolvedValue(null);
   jest.mocked(localLLM.isModelDownloaded).mockResolvedValue(true);
-  jest.mocked(localLLM.getDownloadedModels).mockResolvedValue(['qwen3-0.6b']);
+  jest.mocked(localLLM.getDownloadedModels).mockResolvedValue(['qwen2.5-0.5b']);
   jest.mocked(localLLM.loadModel).mockResolvedValue(true);
   jest.mocked(localLLM.generate).mockResolvedValue({ content: '已依照本機資訊整理建議', tokensGenerated: 15 });
   mockCallable.mockResolvedValue({
@@ -127,7 +127,7 @@ test('uses local GGUF by default without calling Firebase Functions or downloadi
   expect(localLLM.generate).toHaveBeenCalledWith(expect.objectContaining({
     messages: [
       { role: 'system', content: '裝置端有限制的系統上下文' },
-      { role: 'user', content: '查公告\\n/no_think' },
+      { role: 'user', content: '查公告' },
     ],
   }));
   expect(localLLM.loadModel).not.toHaveBeenCalled();
