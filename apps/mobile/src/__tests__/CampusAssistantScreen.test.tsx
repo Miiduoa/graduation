@@ -24,6 +24,13 @@ jest.mock('../state/school', () => ({
 }));
 jest.mock('../features/campusAssistant', () => ({
   askCampusAssistant: jest.fn(),
+  OnDeviceAssistantError: class OnDeviceAssistantError extends Error {
+    code: string;
+    constructor(code: string) {
+      super(code);
+      this.code = code;
+    }
+  },
   getOnDeviceAssistantReadiness: jest.fn(async () => ({
     available: true, ready: false, modelId: 'qwen2.5-0.5b',
     reason: '尚未下載免費模型',
@@ -45,8 +52,12 @@ function deferred<T>() {
 }
 beforeEach(() => {
   jest.clearAllMocks();
+  // clearAllMocks does not clear queued mockResolvedValueOnce implementations.
+  // Prevent a pending result from one navigation test reaching another account.
+  request.mockReset();
   mockUid = 'A';
   mockSchool = 'pu';
+  mockOverlay = { visible: true, mode: 'chat', initialPrompt: '查校方公告' };
 });
 test('failed questions remain editable and retry does not add duplicated history', async () => {
   request
