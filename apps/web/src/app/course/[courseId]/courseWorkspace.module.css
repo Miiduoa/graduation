@@ -52,7 +52,7 @@
 }
 
 .jumpNavigation a:hover {
-  background: var(--surface2);
+  background: color-mix(in srgb, var(--surface) 85%, var(--text) 15%);
   border-color: var(--border-strong);
 }
 
