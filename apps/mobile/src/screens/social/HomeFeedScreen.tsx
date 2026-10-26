@@ -337,7 +337,7 @@ function HomeFeedContent() {
               myUid={auth.user.uid}
               filter={filter}
               onSelectFilter={setFilter}
-              onOpenStoryGroup={(grp) => openStoryGroup(grp, nav)}
+              onOpenStoryGroup={(grp) => openStoryGroup(grp, nav, school?.id)}
               onComposeStory={goStoryCompose}
               onComposePost={goCompose}
             />
@@ -709,12 +709,13 @@ function MediaGrid({ uris }: { uris: string[] }) {
 
 // ─── 開啟 Story group → 全螢幕 viewer ─────────────────────
 
-function openStoryGroup(grp: StoryAuthorGroup, nav: any) {
-  if (!grp.stories.length) return;
+function openStoryGroup(grp: StoryAuthorGroup, nav: any, schoolId?: string) {
+  if (!grp.stories.length || !schoolId || !grp.stories.every((story) => story.schoolId === schoolId)) return;
   // Open the existing full-screen story viewer within the same school context.
   nav?.navigate?.('CampusSocialScreen' as never, {
     initialTab: 'realtime',
     storyAuthorUid: grp.authorUid,
+    storySchoolId: schoolId,
   });
 }
 
