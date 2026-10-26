@@ -64,3 +64,47 @@ test('a permission failure is surfaced instead of reporting no pending work', as
   jest.mocked(getDocs).mockRejectedValue(new Error('permission-denied'));
   await expect(listInboxTasks('alice')).rejects.toThrow('permission-denied');
 });
+
+test('includes recently overdue work only when the teacher explicitly permits late submission', async () => {
+  const hour = 60 * 60 * 1000;
+  jest.mocked(getDocs).mockImplementation(
+    async (path) => ({
+      empty: true,
+      docs: String(path).endsWith('/assignments')
+        ? [
+            row('late-open', {
+              title: 'Late submission still available',
+              dueAt: new Date(Date.now() - hour).toISOString(),
+              allowLateSubmission: true,
+              status: 'published',
+            }),
+            row('late-locked', {
+              title: 'Locked after deadline',
+              dueAt: new Date(Date.now() - hour).toISOString(),
+              allowLateSubmission: false,
+              status: 'published',
+            }),
+            row('late-closed', {
+              title: 'Closed by instructor',
+              dueAt: new Date(Date.now() - hour).toISOString(),
+              allowLateSubmission: true,
+              status: 'closed',
+            }),
+            row('too-old', {
+              title: 'Old overdue',
+              dueAt: new Date(Date.now() - 9 * 24 * hour).toISOString(),
+              allowLateSubmission: true,
+              status: 'published',
+            }),
+          ]
+        : [],
+    }) as never,
+  );
+  jest.mocked(getDoc).mockResolvedValue({
+    exists: () => false,
+    data: () => ({}),
+  } as never);
+  const tasks = await listInboxTasks('alice');
+  expect(tasks.map((task) => task.title)).toEqual(['Late submission still available']);
+  expect(tasks[0]?.subtitle).toContain('教師允許補交');
+});
