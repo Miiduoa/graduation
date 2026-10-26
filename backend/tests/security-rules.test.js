@@ -1520,6 +1520,32 @@ describe('course assignment submissions', () => {
       await db.doc('groups/course-1/assignments/work-1').set({ title: 'Work', published: true, ...overrides });
     });
   }
+  test('revoked enrollment and unassigned peer review cannot read private submissions', async () => {
+    await seedAssignment({
+      type: 'assignment', createdBy: 'teacher', status: 'published',
+      description: 'Private work', points: 100,
+      dueAt: new Date(Date.now() + 3600000).toISOString(), allowLateSubmission: false,
+    });
+    const alice = testEnv.authenticatedContext('alice').firestore();
+    const bob = testEnv.authenticatedContext('bob').firestore();
+    await assertSucceeds(pathTo(alice).set(answer()));
+    await assertSucceeds(pathTo(alice).get({ source: 'server' }));
+
+    // A stale peer-review assignment is not authorization without current course membership.
+    await seedFirestore((db) => db.doc('groups/course-1/assignments/work-1/peerReviews/bob').set({
+      reviewerId: 'bob', submissionOwnerId: 'alice',
+    }));
+    await assertFails(pathTo(bob).get({ source: 'server' }));
+
+    await seedFirestore((db) => db.doc('groups/course-1/members/alice').update({ status: 'removed' }));
+    await assertFails(pathTo(alice).get({ source: 'server' }));
+    await seedFirestore(async (db) => {
+      await db.doc('groups/course-1/members/alice').update({ status: 'active' });
+      await db.doc('schools/school-1/members/alice').update({ status: 'removed' });
+    });
+    await assertFails(pathTo(alice).get({ source: 'server' }));
+  });
+
   test('author can edit descriptive fields but not points, identity or published status', async () => {
     await seedAssignment({
       type: 'assignment', createdBy: 'teacher', status: 'published',
