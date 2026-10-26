@@ -521,12 +521,16 @@ async function listActionQueueInboxTasks(userId: string): Promise<InboxTask[]> {
   return out;
 }
 
-export async function listInboxTasks(userId: string, schoolId?: string): Promise<InboxTask[]> {
+export async function listInboxTasks(
+  userId: string,
+  schoolId?: string,
+  mode: 'inbox' | 'learning' = 'inbox',
+): Promise<InboxTask[]> {
   if (isFirebaseMockMode()) return [];
   const db = getDb();
   const memberships = await listCourseMemberships(db, userId, schoolId);
   if (memberships.length === 0) {
-    return (await listActionQueueInboxTasks(userId)).slice(0, 14);
+    return mode === 'learning' ? [] : (await listActionQueueInboxTasks(userId)).slice(0, 14);
   }
 
   const now = Date.now();
@@ -615,7 +619,8 @@ export async function listInboxTasks(userId: string, schoolId?: string): Promise
 
       for (const assignment of assignments) {
         if (assignment.published === false || assignment.status === 'draft') continue;
-        const dueAt = toDate(assignment.dueAt);
+        const rawDue = toDate(assignment.dueAt);
+        const dueAt = rawDue && Number.isFinite(rawDue.getTime()) ? rawDue : null;
         const kind: InboxTask['kind'] =
           assignment.type === 'quiz' || assignment.type === 'exam' ? 'quiz' : 'assignment';
         const label = kind === 'quiz' ? '評量' : '作業';
@@ -697,12 +702,12 @@ export async function listInboxTasks(userId: string, schoolId?: string): Promise
           ),
         );
         if (ownSubmission.exists() && ownSubmission.data().submittedAt) continue;
-        if (!dueAt) continue;
-        const diff = dueAt.getTime() - now;
+        if (assignment.status === 'closed') continue;
+        const diff = dueAt ? dueAt.getTime() - now : null;
         const week = 7 * 24 * 60 * 60 * 1000;
-        const lateSubmissionOpen =
-          diff < 0 && assignment.allowLateSubmission === true && assignment.status !== 'closed';
-        if (diff < -week || diff > week || (diff < 0 && !lateSubmissionOpen)) continue;
+        const lateSubmissionOpen = diff !== null && diff < 0 && assignment.allowLateSubmission === true;
+        if (diff !== null && diff < 0 && !lateSubmissionOpen) continue;
+        if (mode === 'inbox' && (diff === null || diff < -week || diff > week)) continue;
 
         groupTasks.push({
           id: `${kind}-${membership.groupId}-${assignment.id}`,
@@ -712,16 +717,19 @@ export async function listInboxTasks(userId: string, schoolId?: string): Promise
           title: String(assignment.title ?? '未命名任務'),
           subtitle: lateSubmissionOpen
             ? '已過截止時間 · 教師允許補交'
-            : `${label}將於 ${dueAt.toLocaleString('zh-TW', {
-                timeZone: 'Asia/Taipei',
-                month: 'numeric',
-                day: 'numeric',
-                hour: '2-digit',
-                minute: '2-digit',
-              })} 截止`,
+            : dueAt
+              ? `${label}將於 ${dueAt.toLocaleString('zh-TW', {
+                  timeZone: 'Asia/Taipei',
+                  month: 'numeric',
+                  day: 'numeric',
+                  hour: '2-digit',
+                  minute: '2-digit',
+                })} 截止`
+              : '尚未設定截止時間 · 請查看作業說明',
           assignmentId: assignment.id,
-          priority: lateSubmissionOpen ? 0 : kind === 'quiz' ? 2 : 1,
+          priority: lateSubmissionOpen ? 0 : dueAt === null ? 3 : kind === 'quiz' ? 2 : 1,
           dueAt,
+          ...(lateSubmissionOpen ? { lateSubmissionAllowed: true } : {}),
         });
       }
 
@@ -730,16 +738,18 @@ export async function listInboxTasks(userId: string, schoolId?: string): Promise
   );
 
   const fromGroups = tasks.flat();
-  const fromAssistantQueue = await listActionQueueInboxTasks(userId);
+  const fromAssistantQueue =
+    mode === 'learning' ? [] : await listActionQueueInboxTasks(userId);
 
-  return [...fromAssistantQueue, ...fromGroups]
-    .sort((left, right) => {
-      if (left.priority !== right.priority) return left.priority - right.priority;
-      const timeA = left.dueAt?.getTime() ?? Number.MAX_SAFE_INTEGER;
-      const timeB = right.dueAt?.getTime() ?? Number.MAX_SAFE_INTEGER;
-      return timeA - timeB;
-    })
-    .slice(0, 14);
+  const sorted = [...fromAssistantQueue, ...fromGroups].sort((left, right) => {
+    if (left.priority !== right.priority) return left.priority - right.priority;
+    const timeA = left.dueAt?.getTime() ?? Number.MAX_SAFE_INTEGER;
+    const timeB = right.dueAt?.getTime() ?? Number.MAX_SAFE_INTEGER;
+    return timeA - timeB;
+  });
+  // The compact Today inbox remains bounded. The learning workspace needs the
+  // complete enrolled-course task list for accurate filters and summary counts.
+  return mode === 'learning' ? sorted : sorted.slice(0, 14);
 }
 
 export async function getCourseGradebook(
