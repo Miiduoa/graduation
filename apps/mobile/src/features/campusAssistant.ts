@@ -101,9 +101,11 @@ export async function askCampusAssistant(input: {
 
     // Each request gets explicitly scoped history; never reuse a global chat history
     // that could contain data from a previous account or campus.
-    const compactHistory = messages.slice(-8).map((message) => ({
+    // Keep input inside the 0.5B model's 2K context, reserving room for the answer.
+    const compact = readiness.modelId === 'qwen2.5-0.5b';
+    const compactHistory = messages.slice(compact ? -3 : -8).map((message) => ({
       role: message.role,
-      content: message.content.slice(0, 550),
+      content: message.content.slice(0, compact ? 160 : 550),
     }));
     const completion = await localLLM.generate({
       messages: [
