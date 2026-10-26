@@ -30,7 +30,6 @@ function seedStore() {
     ['schools/pu/members/s1', { status: 'active', role: 'student' }],
     ['schools/pu/members/t1', { status: 'active', role: 'instructor' }],
     ['schools/pu/members/other', { status: 'active', role: 'student' }],
-    ['schools/ntpu/members/s1', { status: 'active', role: 'student' }],
     ['schools/pu/courseTeachers/資料庫｜王老師', { teacherUids: ['t1'] }],
     ['users/s1', { displayName: '陳同學' }],
     [
