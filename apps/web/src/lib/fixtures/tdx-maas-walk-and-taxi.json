@@ -1,30 +1,211 @@
 {
-  "Plans": [
-    {
-      "TravelTime": 2700,
-      "TransferCount": 1,
-      "Sections": [
-        { "Type": "Walk", "StartName": "靜宜大學(校門)", "EndName": "靜宜大學(專用道)", "Duration": 180, "Distance": 220 },
-        { "Type": "Bus", "RouteName": "300", "StartName": "靜宜大學(專用道)", "EndName": "臺中車站", "Duration": 1500, "StartTime": "2026-10-25T16:10:00+08:00" },
-        { "Type": "Walk", "StartName": "臺中車站", "EndName": "臺中車站轉運中心", "Duration": 180, "Distance": 200 },
-        { "Type": "Bus", "RouteName": "151", "StartName": "臺中車站", "EndName": "高鐵臺中站", "Duration": 720, "StartTime": "2026-10-25T16:40:00+08:00" },
-        { "Type": "Walk", "StartName": "高鐵臺中站", "EndName": "高鐵出口", "Duration": 120, "Distance": 150 }
-      ]
-    },
-    {
-      "TravelTime": 960,
-      "TransferCount": 0,
-      "Sections": [
-        { "Type": "Taxi", "RouteName": "YOXI", "StartName": "靜宜大學(校門)", "EndName": "高鐵臺中站", "Duration": 960 }
-      ]
-    },
-    {
-      "TravelTime": 1080,
-      "TransferCount": 0,
-      "Sections": [
-        { "Type": "Walk", "StartName": "靜宜大學(校門)", "EndName": "YouBike 沙鹿站", "Duration": 180 },
-        { "Type": "Bike", "RouteName": "YouBike", "StartName": "YouBike 沙鹿站", "EndName": "高鐵臺中站", "Duration": 900 }
-      ]
-    }
-  ]
+  "result": "Success",
+  "data": {
+    "routes": [
+      {
+        "id": "R1",
+        "travelSummary": { "duration": 2700, "length": 22000 },
+        "sections": [
+          {
+            "id": "R1-S1",
+            "type": "pedestrian",
+            "departure": {
+              "time": "2026-10-25T16:07:00+08:00",
+              "place": {
+                "type": "place",
+                "name": "靜宜大學(校門)",
+                "location": { "lat": 24.225388, "lng": 120.577561 }
+              }
+            },
+            "arrival": {
+              "time": "2026-10-25T16:10:00+08:00",
+              "place": {
+                "type": "station",
+                "name": "靜宜大學(專用道)",
+                "location": { "lat": 24.2266, "lng": 120.5748 }
+              }
+            },
+            "transport": { "mode": "pedestrian" },
+            "travelSummary": { "duration": 180, "length": 220 }
+          },
+          {
+            "id": "R1-S2",
+            "type": "transit",
+            "departure": {
+              "time": "2026-10-25T16:10:00+08:00",
+              "place": {
+                "type": "station",
+                "name": "靜宜大學(專用道)",
+                "location": { "lat": 24.2266, "lng": 120.5748 }
+              }
+            },
+            "arrival": {
+              "time": "2026-10-25T16:35:00+08:00",
+              "place": {
+                "type": "station",
+                "name": "臺中車站",
+                "location": { "lat": 24.1369, "lng": 120.6850 }
+              }
+            },
+            "transport": {
+              "mode": "bus",
+              "name": "300",
+              "shortName": "300",
+              "headsign": "臺中車站"
+            },
+            "travelSummary": { "duration": 1500, "length": 18000 }
+          },
+          {
+            "id": "R1-S3",
+            "type": "pedestrian",
+            "departure": {
+              "time": "2026-10-25T16:35:00+08:00",
+              "place": {
+                "type": "station",
+                "name": "臺中車站",
+                "location": { "lat": 24.1369, "lng": 120.6850 }
+              }
+            },
+            "arrival": {
+              "time": "2026-10-25T16:38:00+08:00",
+              "place": {
+                "type": "station",
+                "name": "臺中車站轉運中心",
+                "location": { "lat": 24.1374, "lng": 120.6862 }
+              }
+            },
+            "transport": { "mode": "pedestrian" },
+            "travelSummary": { "duration": 180, "length": 200 }
+          },
+          {
+            "id": "R1-S4",
+            "type": "transit",
+            "departure": {
+              "time": "2026-10-25T16:40:00+08:00",
+              "place": {
+                "type": "station",
+                "name": "臺中車站",
+                "location": { "lat": 24.1369, "lng": 120.6850 }
+              }
+            },
+            "arrival": {
+              "time": "2026-10-25T16:52:00+08:00",
+              "place": {
+                "type": "station",
+                "name": "高鐵臺中站",
+                "location": { "lat": 24.11117, "lng": 120.61590 }
+              }
+            },
+            "transport": {
+              "mode": "bus",
+              "name": "151",
+              "shortName": "151",
+              "headsign": "高鐵臺中站"
+            },
+            "travelSummary": { "duration": 720, "length": 9000 }
+          },
+          {
+            "id": "R1-S5",
+            "type": "pedestrian",
+            "departure": {
+              "time": "2026-10-25T16:52:00+08:00",
+              "place": {
+                "type": "station",
+                "name": "高鐵臺中站",
+                "location": { "lat": 24.11117, "lng": 120.61590 }
+              }
+            },
+            "arrival": {
+              "time": "2026-10-25T16:54:00+08:00",
+              "place": {
+                "type": "place",
+                "name": "高鐵出口",
+                "location": { "lat": 24.11140, "lng": 120.61620 }
+              }
+            },
+            "transport": { "mode": "pedestrian" },
+            "travelSummary": { "duration": 120, "length": 150 }
+          }
+        ]
+      },
+      {
+        "id": "R2",
+        "travelSummary": { "duration": 960, "length": 21000 },
+        "sections": [
+          {
+            "id": "R2-S1",
+            "type": "taxi",
+            "departure": {
+              "time": "2026-10-25T16:00:00+08:00",
+              "place": {
+                "type": "place",
+                "name": "靜宜大學(校門)",
+                "location": { "lat": 24.225388, "lng": 120.577561 }
+              }
+            },
+            "arrival": {
+              "time": "2026-10-25T16:16:00+08:00",
+              "place": {
+                "type": "place",
+                "name": "高鐵臺中站",
+                "location": { "lat": 24.11117, "lng": 120.61590 }
+              }
+            },
+            "transport": { "mode": "taxi", "name": "YOXI", "shortName": "YOXI" },
+            "travelSummary": { "duration": 960, "length": 21000 }
+          }
+        ]
+      },
+      {
+        "id": "R3",
+        "travelSummary": { "duration": 1080, "length": 19000 },
+        "sections": [
+          {
+            "id": "R3-S1",
+            "type": "pedestrian",
+            "departure": {
+              "time": "2026-10-25T16:00:00+08:00",
+              "place": {
+                "type": "place",
+                "name": "靜宜大學(校門)",
+                "location": { "lat": 24.225388, "lng": 120.577561 }
+              }
+            },
+            "arrival": {
+              "time": "2026-10-25T16:03:00+08:00",
+              "place": {
+                "type": "place",
+                "name": "YouBike 沙鹿站",
+                "location": { "lat": 24.2260, "lng": 120.5780 }
+              }
+            },
+            "transport": { "mode": "pedestrian" },
+            "travelSummary": { "duration": 180, "length": 250 }
+          },
+          {
+            "id": "R3-S2",
+            "type": "bicycle",
+            "departure": {
+              "time": "2026-10-25T16:03:00+08:00",
+              "place": {
+                "type": "place",
+                "name": "YouBike 沙鹿站",
+                "location": { "lat": 24.2260, "lng": 120.5780 }
+              }
+            },
+            "arrival": {
+              "time": "2026-10-25T16:18:00+08:00",
+              "place": {
+                "type": "place",
+                "name": "高鐵臺中站",
+                "location": { "lat": 24.11117, "lng": 120.61590 }
+              }
+            },
+            "transport": { "mode": "bicycle", "name": "YouBike", "shortName": "YouBike" },
+            "travelSummary": { "duration": 900, "length": 18750 }
+          }
+        ]
+      }
+    ]
+  }
 }
