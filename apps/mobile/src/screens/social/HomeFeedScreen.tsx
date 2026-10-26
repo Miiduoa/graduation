@@ -90,6 +90,11 @@ function mediaUrlsOf(p: CampusPostDoc): string[] {
   return Array.isArray(p.mediaUrls) ? p.mediaUrls.filter((u) => typeof u === 'string' && u.length > 0) : [];
 }
 
+function isAccessDenied(cause: unknown): boolean {
+  const code = (cause as { code?: string })?.code ?? '';
+  return code.endsWith('permission-denied') || code.endsWith('unauthenticated');
+}
+
 export function HomeFeedScreen() {
   const { user, loading } = useAuth();
   const { school } = useSchool();
@@ -112,6 +117,13 @@ function HomeFeedContent() {
   const auth = useAuth();
   const { school } = useSchool();
   const insets = useSafeAreaInsets();
+  // The parent remounts this content for every account/school change.
+  // Native alerts also need fencing: they outlive the unmounted React tree.
+  const active = useRef(true);
+  React.useLayoutEffect(() => {
+    active.current = true;
+    return () => { active.current = false; };
+  }, []);
 
   const [posts, setPosts] = useState<CampusPostDoc[]>([]);
   const [boards, setBoards] = useState<CampusBoard[]>([]);
@@ -179,8 +191,7 @@ function HomeFeedContent() {
       setStories(groupStoriesByAuthor(storyRows, auth.user.uid));
     } catch (cause) {
       if (loadVersion.current !== version) return;
-      const code = (cause as { code?: string })?.code ?? '';
-      if (code.endsWith('permission-denied') || code.endsWith('unauthenticated')) {
+      if (isAccessDenied(cause)) {
         setPosts([]);
         setBoards([]);
         setSubscribedBoardIds(new Set());
@@ -231,8 +242,14 @@ function HomeFeedContent() {
       }
       setBookmarkScope(`${uid}:${schoolId}`);
     })()
-      .catch(() => {
-        if (live) setBookmarksError('收藏無法讀取，請檢查連線與校籍後重試。');
+      .catch((cause) => {
+        if (!live) return;
+        if (isAccessDenied(cause)) {
+          setBookmarkScope('');
+          setBookmarkedIds(new Set());
+          setBookmarkedPosts([]);
+        }
+        setBookmarksError('收藏無法讀取，請檢查連線與校籍後重試。');
       })
       .finally(() => {
         if (live) setBookmarksLoading(false);
@@ -260,8 +277,13 @@ function HomeFeedContent() {
         setFollowingIds(new Set(ids));
         setFollowingScope(scope);
       })
-      .catch(() => {
-        if (live) setFollowingError('追蹤清單暫時無法讀取，請確認連線及校籍後重試。');
+      .catch((cause) => {
+        if (!live) return;
+        if (isAccessDenied(cause)) {
+          setFollowingScope('');
+          setFollowingIds(new Set());
+        }
+        setFollowingError('追蹤清單暫時無法讀取，請確認連線及校籍後重試。');
       })
       .finally(() => {
         if (live) setFollowingLoading(false);
@@ -274,7 +296,7 @@ function HomeFeedContent() {
     const schoolId = school?.id;
     if (
       !uid || !schoolId || !targetUid || targetUid === uid ||
-      !validFollowing || !!followingError || isFirebaseMockMode() ||
+      !validFollowing || followingLoading || !!followingError || isFirebaseMockMode() ||
       followFlights.current.has(targetUid)
     ) return;
     const scope = currentFollowingScope;
@@ -284,7 +306,7 @@ function HomeFeedContent() {
     try {
       if (removing) await unfollowUser(schoolId, uid, targetUid);
       else await followUser(schoolId, uid, targetUid);
-      if (followingScopeRef.current !== scope) return;
+      if (!active.current || followingScopeRef.current !== scope) return;
       setFollowingIds((prev) => {
         const next = new Set(prev);
         if (removing) next.delete(targetUid);
@@ -293,11 +315,11 @@ function HomeFeedContent() {
       });
       setFollowingRevision((prev) => prev + 1);
     } catch {
-      if (followingScopeRef.current === scope)
+      if (active.current && followingScopeRef.current === scope)
         Alert.alert('追蹤未更新', '請確認網路與對方校籍後重試。');
     } finally {
       followFlights.current.delete(targetUid);
-      if (followingScopeRef.current === scope) {
+      if (active.current && followingScopeRef.current === scope) {
         setFollowingPending((prev) => {
           const next = new Set(prev);
           next.delete(targetUid);
@@ -305,7 +327,7 @@ function HomeFeedContent() {
         });
       }
     }
-  }, [auth.user?.uid, school?.id, validFollowing, followingError, followedIds, currentFollowingScope]);
+  }, [auth.user?.uid, school?.id, validFollowing, followingLoading, followingError, followedIds, currentFollowingScope]);
 
   const onToggleBookmark = useCallback(async (post: CampusPostDoc) => {
     const uid = auth.user?.uid;
@@ -320,6 +342,7 @@ function HomeFeedContent() {
     try {
       if (removing) await removeCampusPostBookmark(uid, schoolId, post.id);
       else await saveCampusPostBookmark(uid, schoolId, post.id);
+      if (!active.current) return;
       setBookmarkedIds((prev) => {
         const next = new Set(prev);
         if (removing) next.delete(post.id);
@@ -330,14 +353,16 @@ function HomeFeedContent() {
       setBookmarkScope(`${uid}:${schoolId}`);
       setBookmarkRevision((prev) => prev + 1);
     } catch {
-      Alert.alert('收藏未更新', '請確認網路與校籍後重試。');
+      if (active.current) Alert.alert('收藏未更新', '請確認網路與校籍後重試。');
     } finally {
       bookmarkFlights.current.delete(post.id);
-      setBookmarksPending((prev) => {
-        const next = new Set(prev);
-        next.delete(post.id);
-        return next;
-      });
+      if (active.current) {
+        setBookmarksPending((prev) => {
+          const next = new Set(prev);
+          next.delete(post.id);
+          return next;
+        });
+      }
     }
   }, [auth.user?.uid, school?.id, savedIds]);
 
@@ -372,6 +397,7 @@ function HomeFeedContent() {
       try {
         await toggleCampusPostLike(sid, row.id, uid);
       } catch (e: any) {
+        if (!active.current) return;
         const rollback = (items: CampusPostDoc[]) =>
           items.map((post) =>
             post.id === row.id ? { ...post, likedBy: row.likedBy, likes: row.likes } : post,
@@ -381,11 +407,13 @@ function HomeFeedContent() {
         Alert.alert('按讚失敗', '目前無法更新貼文，請確認連線後再試。');
       } finally {
         likeFlightsRef.current.delete(row.id);
-        setPendingLikes((prev) => {
-          const next = new Set(prev);
-          next.delete(row.id);
-          return next;
-        });
+        if (active.current) {
+          setPendingLikes((prev) => {
+            const next = new Set(prev);
+            next.delete(row.id);
+            return next;
+          });
+        }
       }
     },
     [auth.user?.uid, school?.id],
@@ -489,7 +517,7 @@ function HomeFeedContent() {
           </Pressable>
         </View>
       )}
-      {followingView && !!followingError && (
+      {!!followingError && (
         <View style={{ paddingHorizontal: 16, paddingVertical: 9, gap: 6 }}>
           <Text accessibilityRole="alert" style={{ color: theme.colors.danger }}>{followingError}</Text>
           <Pressable

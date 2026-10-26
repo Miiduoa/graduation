@@ -415,6 +415,9 @@ it('filters only the loaded thread messages and can restore them', async () => {
   expect(screen.getByText('找不到符合的訊息，試著調整關鍵字。')).toBeTruthy();
   fireEvent.change(field, { target: { value: '伺服器' } });
   expect(screen.getByText('伺服器的訊息')).toBeTruthy();
+  fireEvent.click(screen.getByRole('button', { name: '清除搜尋' }));
+  expect((field as HTMLInputElement).value).toBe('');
+  expect(screen.queryByRole('button', { name: '清除搜尋' })).toBeNull();
 });
 
 it('recovers an unsent message only for the same browser tab and conversation', async () => {
@@ -518,4 +521,60 @@ it('does not claim a failed message copy was successful', async () => {
   fireEvent.click(screen.getByRole('button', { name: '複製' }));
   await screen.findByText('無法自動複製訊息，請選取文字後手動複製。');
   expect(screen.queryByRole('button', { name: '已複製' })).toBeNull();
+});
+
+it('can send in a new conversation while the previous send is still pending', async () => {
+  const oldSend = deferred<void>();
+  const nextSend = deferred<void>();
+  vi.mocked(sendPrivateMessage)
+    .mockReturnValueOnce(oldSend.promise)
+    .mockReturnValueOnce(nextSend.promise);
+  vi.mocked(newPrivateMessageId).mockImplementation((id) => `request-${id}`);
+  const view = render(<Chat id="previous" />);
+  await screen.findByText('伺服器的訊息');
+  fireEvent.change(screen.getByLabelText('訊息內容'), { target: { value: '舊對話訊息' } });
+  fireEvent.click(screen.getByRole('button', { name: '傳送訊息' }));
+
+  view.rerender(<Chat id="next" />);
+  await screen.findByText('伺服器的訊息');
+  expect((screen.getByLabelText('訊息內容') as HTMLTextAreaElement).disabled).toBe(false);
+  fireEvent.change(screen.getByLabelText('訊息內容'), { target: { value: '新對話訊息' } });
+  fireEvent.click(screen.getByRole('button', { name: '傳送訊息' }));
+  expect(sendPrivateMessage).toHaveBeenNthCalledWith(
+    2, { uid: 'alice', schoolId: 'pu' }, 'next', 'request-next', '新對話訊息',
+  );
+  await act(async () => oldSend.reject(new Error('old failure')));
+  expect(screen.queryByText('尚未確認送出，內容已保留。請重新連線後再試。')).toBeNull();
+  expect((screen.getByLabelText('訊息內容') as HTMLTextAreaElement).value).toBe('新對話訊息');
+  expect(screen.getByRole('button', { name: '傳送中…' })).toBeTruthy();
+  await act(async () => nextSend.resolve());
+  expect((screen.getByLabelText('訊息內容') as HTMLTextAreaElement).value).toBe('');
+  expect(sessionStorage.getItem('campus-one:dm-draft:alice:pu:previous')).toBe('舊對話訊息');
+});
+
+it('resets search and copy feedback when switching conversation', async () => {
+  Object.defineProperty(navigator, 'clipboard', {
+    configurable: true, value: { writeText: vi.fn().mockResolvedValue(undefined) },
+  });
+  const view = render(<Chat id="previous" />);
+  await screen.findByText('伺服器的訊息');
+  fireEvent.click(screen.getByRole('button', { name: '複製' }));
+  await screen.findByRole('button', { name: '已複製' });
+  fireEvent.change(screen.getByRole('searchbox', { name: '搜尋此對話' }), {
+    target: { value: '舊對話關鍵字' },
+  });
+  view.rerender(<Chat id="next" />);
+  await screen.findByText('伺服器的訊息');
+  expect((screen.getByRole('searchbox', { name: '搜尋此對話' }) as HTMLInputElement).value).toBe('');
+  expect(screen.queryByRole('button', { name: '已複製' })).toBeNull();
+});
+
+it('does not send Cmd+Enter while an IME composition is active', async () => {
+  render(<Chat />);
+  await screen.findByText('伺服器的訊息');
+  const field = screen.getByLabelText('訊息內容');
+  fireEvent.change(field, { target: { value: '中文組字中' } });
+  fireEvent.keyDown(field, { key: 'Enter', metaKey: true, isComposing: true });
+  expect(sendPrivateMessage).not.toHaveBeenCalled();
+  expect((field as HTMLTextAreaElement).value).toBe('中文組字中');
 });

@@ -1,9 +1,10 @@
 import React from 'react';
-import { ActivityIndicator, FlatList, RefreshControl } from 'react-native';
+import { ActivityIndicator, Alert, FlatList, RefreshControl } from 'react-native';
 import { act, fireEvent, render } from '@testing-library/react-native';
 import { HomeFeedScreen } from '../screens/social/HomeFeedScreen';
 import { BoardsScreen } from '../screens/social/BoardsScreen';
-import { fetchRecentCampusPosts } from '../services/feed';
+import { fetchRecentCampusPosts, toggleCampusPostLike } from '../services/feed';
+import { fetchSchoolDirectoryProfiles } from '../services/memberDirectory';
 import { listBoards, listSubscribedBoardIds } from '../services/boards';
 import { listActiveStoriesForSchool } from '../services/stories';
 import { listFollowingIds, followUser } from '../services/follows';
@@ -18,6 +19,7 @@ let savedBookmarks = new Set<string>();
 let mockUser = { uid: 'alice' };
 let mockSchoolId = 'pu';
 let mockAuthLoading = false;
+const alertSpy = jest.spyOn(Alert, 'alert').mockImplementation(() => {});
 jest.mock('../state/auth', () => ({ useAuth: () => ({ user: mockUser, loading: mockAuthLoading }) }));
 jest.mock('../state/school', () => ({ useSchool: () => ({ school: { id: mockSchoolId } }) }));
 jest.mock('../firebase', () => ({ isFirebaseMockMode: () => false, getDb: () => ({}) }));
@@ -105,6 +107,8 @@ beforeEach(() => {
   jest.mocked(listActiveStoriesForSchool).mockResolvedValue([]);
   jest.mocked(listFollowingIds).mockResolvedValue([]);
   jest.mocked(followUser).mockResolvedValue(undefined);
+  jest.mocked(toggleCampusPostLike).mockResolvedValue(undefined);
+  jest.mocked(fetchSchoolDirectoryProfiles).mockResolvedValue([]);
   savedBookmarks = new Set();
   jest.mocked(listCampusPostBookmarkIds).mockImplementation(async () => [...savedBookmarks]);
   jest.mocked(loadCampusPostBookmarks).mockResolvedValue({ ids: [], posts: [] });
@@ -329,4 +333,75 @@ test('following read failures stay distinguishable from an empty feed', async ()
   fireEvent.press(view.getByLabelText('追蹤分類'));
   expect(await view.findByText('追蹤清單暫時無法讀取，請確認連線及校籍後重試。')).toBeTruthy();
   expect(view.queryByText('追蹤的作者尚未發文')).toBeNull();
+});
+
+test('following failures offer recovery beside the current feed without requiring a filter change', async () => {
+  const publicPost = { ...post, anonymous: false, authorUid: 'bob' };
+  jest.mocked(fetchRecentCampusPosts).mockResolvedValue([publicPost]);
+  jest.mocked(fetchSchoolDirectoryProfiles).mockResolvedValue([{ uid: 'bob', displayName: '小明' }]);
+  jest.mocked(listFollowingIds).mockRejectedValueOnce(new Error('offline'));
+  const view = render(<HomeFeedScreen />);
+  expect(await view.findByText(post.title)).toBeTruthy();
+  expect(view.getByText('追蹤清單暫時無法讀取，請確認連線及校籍後重試。')).toBeTruthy();
+  expect(view.queryByLabelText('追蹤 小明')).toBeNull();
+  await act(async () => {
+    fireEvent.press(view.getByLabelText('重新載入追蹤'));
+  });
+  expect(await view.findByLabelText('追蹤 小明')).toBeTruthy();
+  expect(view.queryByText('追蹤清單暫時無法讀取，請確認連線及校籍後重試。')).toBeNull();
+});
+
+test('revoking access removes previously loaded saved posts when the refresh is denied', async () => {
+  const savedPost = { ...post, id: 'private-saved', title: '以前收藏的校內筆記' };
+  jest.mocked(fetchRecentCampusPosts).mockResolvedValue([post]);
+  jest.mocked(loadCampusPostBookmarks).mockResolvedValue({ ids: [savedPost.id], posts: [savedPost] });
+  const view = render(<HomeFeedScreen />);
+  await view.findByText(post.title);
+  await act(async () => fireEvent.press(view.getByLabelText('收藏分類')));
+  expect(await view.findByText(savedPost.title)).toBeTruthy();
+  jest.mocked(loadCampusPostBookmarks).mockRejectedValueOnce(
+    Object.assign(new Error('revoked'), { code: 'firestore/permission-denied' }),
+  );
+  await act(async () => view.UNSAFE_getByType(RefreshControl).props.onRefresh());
+  expect(view.queryByText(savedPost.title)).toBeNull();
+  expect(view.getByText('收藏無法讀取，請檢查連線與校籍後重試。')).toBeTruthy();
+  expect(view.queryByText('還沒有收藏貼文')).toBeNull();
+});
+
+test('a denied following refresh removes the previously accepted relations', async () => {
+  const publicPost = { ...post, anonymous: false, authorUid: 'bob' };
+  jest.mocked(fetchRecentCampusPosts).mockResolvedValue([publicPost]);
+  jest.mocked(listFollowingIds).mockResolvedValue(['bob']);
+  const view = render(<HomeFeedScreen />);
+  await view.findByText(post.title);
+  fireEvent.press(view.getByLabelText('追蹤分類'));
+  expect(view.getByText(post.title)).toBeTruthy();
+  jest.mocked(listFollowingIds).mockRejectedValueOnce(
+    Object.assign(new Error('revoked'), { code: 'permission-denied' }),
+  );
+  await act(async () => view.UNSAFE_getByType(RefreshControl).props.onRefresh());
+  expect(view.queryByText(post.title)).toBeNull();
+  expect(view.getByText('追蹤清單暫時無法讀取，請確認連線及校籍後重試。')).toBeTruthy();
+  expect(view.queryByText('追蹤的作者尚未發文')).toBeNull();
+});
+
+test.each([
+  { name: 'follow', action: followUser, label: '追蹤 小明' },
+  { name: 'bookmark', action: saveCampusPostBookmark, label: '收藏貼文' },
+  { name: 'like', action: toggleCampusPostLike, label: '按讚' },
+])('an old $name failure cannot interrupt the next account', async ({ action, label }) => {
+  let reject!: (error: Error) => void;
+  (action as jest.Mock).mockReturnValueOnce(new Promise((_resolve, fail) => { reject = fail; }));
+  jest.mocked(fetchRecentCampusPosts).mockResolvedValue([{ ...post, anonymous: false, authorUid: 'bob' }]);
+  jest.mocked(fetchSchoolDirectoryProfiles).mockResolvedValue([{ uid: 'bob', displayName: '小明' }]);
+  const view = render(<HomeFeedScreen />);
+  const button = await view.findByLabelText(label);
+  fireEvent.press(button, { stopPropagation: jest.fn() });
+  expect(action).toHaveBeenCalledTimes(1);
+  mockUser = { uid: 'diana' };
+  view.rerender(<HomeFeedScreen />);
+  await view.findByText(post.title);
+  await act(async () => reject(new Error('old request failed')));
+  expect(alertSpy).not.toHaveBeenCalled();
+  expect(view.getByLabelText(label)).toBeTruthy();
 });

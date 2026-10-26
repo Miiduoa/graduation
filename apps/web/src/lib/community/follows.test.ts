@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { deleteDoc, getDoc, getDocs, setDoc } from 'firebase/firestore';
+import { deleteDoc, getDocFromServer, getDocs, setDoc } from 'firebase/firestore';
 import { followId, followUser, listFollowingIds, unfollowUser } from './follows';
 
 vi.mock('@/lib/firebase', () => ({ getDb: () => ({}) }));
@@ -9,7 +9,7 @@ vi.mock('firebase/firestore', () => ({
   where: vi.fn((field: string, op: string, value: string) => ({ field, op, value })),
   limit: vi.fn((value: number) => value),
   query: vi.fn((collection: unknown, ...args: unknown[]) => ({ collection, args })),
-  getDoc: vi.fn(),
+  getDocFromServer: vi.fn(),
   getDocs: vi.fn(),
   setDoc: vi.fn(),
   deleteDoc: vi.fn(),
@@ -17,8 +17,8 @@ vi.mock('firebase/firestore', () => ({
 }));
 
 beforeEach(() => {
-  vi.clearAllMocks();
-  vi.mocked(getDoc).mockResolvedValue({ exists: () => false } as never);
+  vi.resetAllMocks();
+  vi.mocked(getDocFromServer).mockResolvedValue({ exists: () => false } as never);
   vi.mocked(getDocs).mockResolvedValue({ docs: [] } as never);
   vi.mocked(setDoc).mockResolvedValue(undefined);
   vi.mocked(deleteDoc).mockResolvedValue(undefined);
@@ -37,15 +37,16 @@ describe('school-scoped following relationships', () => {
     expect(await listFollowingIds('pu', 'alice')).toEqual(['bob']);
   });
   it('does not create duplicates on an already followed author', async () => {
-    vi.mocked(getDoc).mockResolvedValue({
+    vi.mocked(setDoc).mockRejectedValueOnce(new Error('update denied'));
+    vi.mocked(getDocFromServer).mockResolvedValue({
       exists: () => true, data: () => ({ schoolId: 'pu', followerUid: 'alice', targetUid: 'bob' }),
     } as never);
     await expect(followUser('pu', 'alice', 'bob')).resolves.toBeUndefined();
-    expect(setDoc).not.toHaveBeenCalled();
+    expect(setDoc).toHaveBeenCalledTimes(1);
+    expect(getDocFromServer).toHaveBeenCalledTimes(1);
   });
   it('confirms a concurrent follow instead of reporting failure', async () => {
-    vi.mocked(getDoc)
-      .mockResolvedValueOnce({ exists: () => false } as never)
+    vi.mocked(getDocFromServer)
       .mockResolvedValueOnce({
         exists: () => true, data: () => ({ schoolId: 'pu', followerUid: 'alice', targetUid: 'bob' }),
       } as never);
@@ -54,6 +55,17 @@ describe('school-scoped following relationships', () => {
   });
   it('does not treat a rejected follow as successful', async () => {
     vi.mocked(setDoc).mockRejectedValue(new Error('permission-denied'));
+    await expect(followUser('pu', 'alice', 'bob')).rejects.toThrow('permission-denied');
+  });
+  it('creates a first follow without trying to read a protected missing relation', async () => {
+    vi.mocked(getDocFromServer).mockRejectedValue(new Error('permission-denied'));
+    await expect(followUser('pu', 'alice', 'bob')).resolves.toBeUndefined();
+    expect(setDoc).toHaveBeenCalledTimes(1);
+    expect(getDocFromServer).not.toHaveBeenCalled();
+  });
+  it('does not acknowledge a follow when the server cannot confirm it', async () => {
+    vi.mocked(setDoc).mockRejectedValue(new Error('permission-denied'));
+    vi.mocked(getDocFromServer).mockRejectedValue(new Error('unavailable'));
     await expect(followUser('pu', 'alice', 'bob')).rejects.toThrow('permission-denied');
   });
   it('sends only required keys and supports unfollowing', async () => {

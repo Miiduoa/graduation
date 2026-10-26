@@ -529,15 +529,22 @@ export function PrivateConversationView({
               <span className={styles.readIndicator}>對話已讀</span>
             )}
           </div>
-          <label className={styles.field}>
-            搜尋此對話
-            <input
-              type="search"
-              value={messageSearch}
-              onChange={(event) => setMessageSearch(event.target.value)}
-              placeholder="搜尋最近 100 則訊息"
-            />
-          </label>
+          <div className={styles.toolbar}>
+            <label className={styles.field}>
+              搜尋此對話
+              <input
+                type="search"
+                value={messageSearch}
+                onChange={(event) => setMessageSearch(event.target.value)}
+                placeholder="搜尋最近 100 則訊息"
+              />
+            </label>
+            {messageSearch && (
+              <button className={styles.button} type="button" onClick={() => setMessageSearch('')}>
+                清除搜尋
+              </button>
+            )}
+          </div>
           {showJumpToLatest && !messageSearch.trim() && (
             <div className={styles.jumpRow}>
               <button className={styles.jumpButton} type="button" onClick={jumpToLatest}>

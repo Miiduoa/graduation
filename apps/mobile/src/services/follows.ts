@@ -4,6 +4,7 @@ import {
   deleteDoc,
   doc,
   getDoc,
+  getDocFromServer,
   getDocs,
   limit,
   query,
@@ -30,15 +31,16 @@ export async function followUser(schoolId: string, followerUid: string, targetUi
   if (!schoolId || !followerUid || !targetUid || followerUid === targetUid)
     throw new Error('INVALID_FOLLOW_TARGET');
   const ref = doc(db, 'follows', followId(schoolId, followerUid, targetUid));
-  const matches = (snapshot: Awaited<ReturnType<typeof getDoc>>) => {
+  const matches = (snapshot: Awaited<ReturnType<typeof getDocFromServer>>) => {
     if (!snapshot.exists()) return false;
     const saved = snapshot.data() as FollowDoc | undefined;
     return saved?.schoolId === schoolId &&
       saved?.followerUid === followerUid &&
       saved?.targetUid === targetUid;
   };
-  if (matches(await getDoc(ref))) return;
   try {
+    // Missing follows are not readable under the owner/school rules. Create
+    // first; the rules reject updates and preserve the existing timestamp.
     await setDoc(ref, {
       schoolId,
       followerUid,
@@ -46,7 +48,7 @@ export async function followUser(schoolId: string, followerUid: string, targetUi
       createdAt: serverTimestamp(),
     } satisfies FollowDoc);
   } catch (error) {
-    const current = await getDoc(ref).catch(() => null);
+    const current = await getDocFromServer(ref).catch(() => null);
     if (current && matches(current)) return;
     throw error;
   }
