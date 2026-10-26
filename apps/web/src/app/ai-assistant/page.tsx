@@ -229,9 +229,9 @@ function AssistantConversation({
             </p>
             {message.role === 'assistant' && (
               <>
-                {assistantWriteProposals(message.response).map((proposal) => (
+                {index === messages.length - 1 && assistantWriteProposals(message.response).map((proposal, proposalIndex) => (
                   <AgentWritePanel
-                    key={proposal.agentRunId + ':' + proposal.toolName}
+                    key={proposal.agentRunId + ':' + proposal.toolName + ':' + proposalIndex}
                     proposal={proposal}
                     userId={userId}
                     schoolId={schoolId}
