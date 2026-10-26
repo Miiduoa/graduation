@@ -2,9 +2,11 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createTransitService } from './transit-server';
 import {
   MAAS_CACHE_COORD_DECIMALS, MAAS_RATE_LIMIT_PER_MINUTE,
-  buildMaasPlannerUrl, clampMaasOrigin, isAllowedMaasDestination, isNearCampusOrigin,
-  maasCacheKey, maasUrlHasArrivalParam, mergeDirectAndTransfers,
-  parseMaasTransferPlans, shouldRequestMaas, transferPlannerQuery,
+  TRANSFER_DETOUR_DISTANCE_RATIO, TRANSFER_DETOUR_EXTRA_MINUTES, TRANSFER_DETOUR_TIME_RATIO,
+  buildMaasPlannerUrl, clampMaasOrigin, filterDetourTransfers, isAllowedMaasDestination, isNearCampusOrigin,
+  maasCacheKey, maasUrlHasArrivalParam, mergeDirectAndTransfers, parseMaasTransferPlans,
+  pickTransferArrival, shouldRequestMaas, transferDoorToDoorMinutes, transferPlannerQuery,
+  withTransferArrivals, type TransferTrip,
 } from './transit-transfer';
 import { PROVIDENCE_DIRECT_ORIGIN, PROVIDENCE_ZHUGU_HALL, buildDirectPlan, resolveDirectDestination } from './transit-direct';
 import fixture from './fixtures/tdx-maas-walk-and-taxi.json';
@@ -12,6 +14,7 @@ import type { DirectTrip } from './transit-direct';
 import type { TransitArrival } from './transit';
 
 const NOW = Date.parse('2026-10-25T08:00:00.000Z');
+const PLANNER_NOW = Date.parse('2026-10-26T03:00:00.000Z');
 const HSR_START = '2026-10-25T16:10:00+08:00';
 
 function walkOnlyPayload() {
@@ -52,6 +55,16 @@ function service(data: (url: string) => Response | Promise<Response>, override: 
   return { execute, calls, tick: (ms: number) => { time += ms; } };
 }
 
+function transfer(overrides: Partial<TransferTrip> = {}): TransferTrip {
+  return {
+    boardStopName: '靜宜大學(專用道)', firstRoute: '300', transferStopName: '秋紅谷(專用道)',
+    transferWalkMinutes: 2, secondRoute: '151', alightStopName: '高鐵臺中站',
+    totalMinutes: 49, travelMinutes: 49, pathMeters: 12_000,
+    endAt: '2026-10-26T03:53:00.000Z', firstDepartureAt: '2026-10-26T03:03:00.000Z', arrival: null,
+    ...overrides,
+  };
+}
+
 function busThenMaas(maas: unknown) {
   return (url: string) => {
     if (url.includes('/api/maas/')) return Response.json(maas);
@@ -82,8 +95,131 @@ describe('TDX 轉乘方案', () => {
     expect(trips[0]?.boardStopName).toBe('靜宜大學(專用道)');
     expect(trips[0]?.alightStopName).toContain('高鐵臺中站');
     expect(trips[0]?.totalMinutes).toBe(52);
+    expect(trips[0]?.travelMinutes).toBe(52);
+    expect(trips[0]?.endAt).toBe('2026-10-26T03:53:00.000Z');
     expect(trips[0]?.firstDepartureAt).toBe('2026-10-26T03:03:00.000Z');
+    expect((trips[0]?.pathMeters ?? 0) > 1000).toBe(true);
     expect(JSON.stringify(trips)).not.toMatch(/YOXI|YouBike|Taxi|Bike/i);
+  });
+
+  it('沒有即時到站時用規劃出發與抵達，不用站牌表定下一班', () => {
+    const trip = parseMaasTransferPlans(walkOnlyPayload()).find((row) => row.firstRoute === '302');
+    expect(trip?.firstDepartureAt).toBe('2026-10-26T03:02:00.000Z');
+    const scheduledCampus = arrival({
+      route: '302', stopName: '靜宜大學(專用道)', destination: '新光里',
+      seconds: null, status: 1, scheduledAt: '2026-10-26T04:57:00.000Z',
+    });
+    const picked = pickTransferArrival([scheduledCampus], trip!, PLANNER_NOW);
+    expect(picked?.scheduledAt).toBe('2026-10-26T03:02:00.000Z');
+    expect(picked?.scheduledAt).not.toBe(scheduledCampus.scheduledAt);
+    const withEta = withTransferArrivals([trip!], [scheduledCampus], PLANNER_NOW)[0];
+    expect(withEta?.totalMinutes).toBe(53);
+    expect(transferDoorToDoorMinutes({ ...trip!, arrival: picked }, PLANNER_NOW)).toBe(53);
+  });
+
+  it('有即時到站時用倒數，全程為等車加規劃車程', () => {
+    const trip = parseMaasTransferPlans(walkOnlyPayload()).find((row) => row.firstRoute === '305')!;
+    const live = arrival({
+      route: '305', stopName: '靜宜大學(專用道)', destination: '台中車站',
+      seconds: 480, status: 0, scheduledAt: '2026-10-26T04:57:00.000Z',
+      updatedAt: new Date(PLANNER_NOW).toISOString(),
+    });
+    const withEta = withTransferArrivals([trip], [live], PLANNER_NOW)[0];
+    expect(withEta?.arrival?.seconds).toBe(480);
+    expect(withEta?.arrival?.scheduledAt).toBe(live.scheduledAt);
+    expect(withEta?.totalMinutes).toBe(8 + 52);
+  });
+
+  it('比最快慢太多或路徑明顯繞遠的轉乘會丢掉，專用道平行線會留', () => {
+    expect(TRANSFER_DETOUR_EXTRA_MINUTES).toBe(15);
+    expect(TRANSFER_DETOUR_TIME_RATIO).toBe(1.35);
+    expect(TRANSFER_DETOUR_DISTANCE_RATIO).toBe(1.35);
+    const real = parseMaasTransferPlans(walkOnlyPayload());
+    expect(real.map((row) => `${row.firstRoute}→${row.secondRoute}`)).toEqual([
+      '305→151', '308副→151', '302→151', '300→151', '300→155',
+    ]);
+    expect(filterDetourTransfers(real)).toHaveLength(5);
+
+    const slowAirport = filterDetourTransfers([
+      transfer({ firstRoute: '300', travelMinutes: 49, totalMinutes: 49, pathMeters: 12_000 }),
+      transfer({ firstRoute: '305', travelMinutes: 52, totalMinutes: 52, pathMeters: 12_500 }),
+      transfer({
+        firstRoute: '302', secondRoute: '156', transferStopName: '臺中國際機場',
+        travelMinutes: 90, totalMinutes: 90, pathMeters: 28_000,
+      }),
+    ]);
+    expect(slowAirport.map((row) => `${row.firstRoute}→${row.secondRoute}`)).toEqual(['300→151', '305→151']);
+
+    const sameTimeAirport = filterDetourTransfers([
+      transfer({ firstRoute: '300', travelMinutes: 49, totalMinutes: 49, pathMeters: 12_000 }),
+      transfer({
+        firstRoute: '302', secondRoute: '156', transferStopName: '臺中國際機場',
+        travelMinutes: 53, totalMinutes: 53, pathMeters: 23_000,
+      }),
+    ]);
+    expect(sameTimeAirport.map((row) => `${row.firstRoute}→${row.secondRoute}`)).toEqual(['300→151']);
+  });
+
+  it('真實規劃裡經機場折返的方案會因路徑被丢掉', () => {
+    const payload = walkOnlyPayload() as {
+      data: { routes: Array<Record<string, unknown>> };
+    };
+    payload.data.routes.push({
+      travel_time: 3180,
+      start_time: '2026-10-26T11:00:00',
+      end_time: '2026-10-26T11:53:00',
+      transfers: 1,
+      sections: [
+        {
+          type: 'pedestrian',
+          travelSummary: { duration: 120, length: 168 },
+          departure: { time: '2026-10-26T11:00:00', place: { location: { lat: 24.225388, lng: 120.57756 } } },
+          arrival: { time: '2026-10-26T11:02:00', place: { name: '靜宜大學(專用道)', location: { lat: 24.225899, lng: 120.576538 } } },
+          transport: { mode: 'pedestrian' },
+        },
+        {
+          type: 'transit',
+          travelSummary: { duration: 1500, length: 0 },
+          departure: {
+            time: '2026-10-26T11:02:00',
+            place: { name: '靜宜大學(專用道)', location: { lat: 24.225899, lng: 120.576538 } },
+          },
+          arrival: {
+            time: '2026-10-26T11:27:00',
+            place: { name: '臺中國際機場', location: { lat: 24.2649, lng: 120.6206 } },
+          },
+          transport: { mode: 'Bus', name: '302', shortName: '302' },
+          intermediateStops: [{
+            departure: { place: { name: '臺中國際機場', location: { lat: 24.2649, lng: 120.6206 } } },
+          }],
+        },
+        {
+          type: 'pedestrian',
+          travelSummary: { duration: 180, length: 80 },
+          departure: { time: '2026-10-26T11:27:00', place: { name: '臺中國際機場', location: { lat: 24.2649, lng: 120.6206 } } },
+          arrival: { time: '2026-10-26T11:30:00', place: { name: '臺中國際機場', location: { lat: 24.2649, lng: 120.6206 } } },
+          transport: { mode: 'pedestrian' },
+        },
+        {
+          type: 'transit',
+          travelSummary: { duration: 1380, length: 0 },
+          departure: {
+            time: '2026-10-26T11:30:00',
+            place: { name: '臺中國際機場', location: { lat: 24.2649, lng: 120.6206 } },
+          },
+          arrival: {
+            time: '2026-10-26T11:53:00',
+            place: { name: '高鐵臺中站', location: { lat: 24.11117, lng: 120.615898 } },
+          },
+          transport: { mode: 'Bus', name: '156', shortName: '156' },
+        },
+      ],
+    });
+    const parsed = parseMaasTransferPlans(payload);
+    expect(parsed.some((row) => row.firstRoute === '302' && row.secondRoute === '156')).toBe(true);
+    const kept = filterDetourTransfers(parsed);
+    expect(kept.some((row) => row.secondRoute === '156')).toBe(false);
+    expect(kept.some((row) => row.firstRoute === '305' && row.secondRoute === '151')).toBe(true);
   });
 
   it('計程車或單車首末段不會當成走路轉乘', () => {
@@ -204,12 +340,39 @@ describe('TDX 轉乘方案', () => {
     expect(result.transfers).toHaveLength(3);
     expect(result.transfers.some((trip) => trip.firstRoute === '305' && trip.secondRoute === '151')).toBe(true);
     expect(result.transfers[0]?.alightStopName).toContain('高鐵臺中站');
+    expect(result.transfers.every((trip) => trip.secondRoute !== '156')).toBe(true);
     expect(result.googleMapsUrl).toContain('https://www.google.com/maps/dir/?');
     expect(JSON.stringify(result.transfers)).not.toMatch(/YOXI|YouBike/);
     const maasInit = JSON.stringify(maas[0]?.init ?? {});
     expect(maas[0]?.url.includes('test-only-secret')).toBe(false);
     expect(maasInit.includes('test-only-secret')).toBe(false);
     expect(maasInit).toContain('Bearer test-token');
+  });
+
+  it('站牌只有表定下一班時，轉乘仍用規劃出發並把等車算進抵達時間', async () => {
+    const mock = service((url) => {
+      if (url.includes('/api/maas/')) return Response.json(walkOnlyPayload());
+      if (url.includes('/StopOfRoute/')) return Response.json([]);
+      if (url.includes('/EstimatedTimeOfArrival/')) {
+        return Response.json([{
+          StopUID: 'TXG-BRT', RouteUID: 'TXG302', SubRouteUID: 'TXG302', RouteName: { Zh_tw: '302' },
+          Direction: 0, StopStatus: 1, EstimateTime: null,
+          NextBusTime: '2026-10-26T12:57:00+08:00',
+          SrcUpdateTime: new Date(PLANNER_NOW).toISOString(),
+          StopName: { Zh_tw: '靜宜大學(專用道)' }, DestinationStopNameZh: '新光里',
+        }]);
+      }
+      return Response.json([]);
+    }, { now: () => PLANNER_NOW });
+    const result = await mock.execute({ action: 'direct', schoolId: 'pu', destination: '高鐵臺中站' });
+    expect(result.status).toBe('ready');
+    if (result.status !== 'ready' || result.kind !== 'direct') throw new Error('expected direct');
+    const threeOhTwo = result.transfers.find((trip) => trip.firstRoute === '302' && trip.secondRoute === '151');
+    expect(threeOhTwo).toBeTruthy();
+    expect(threeOhTwo?.arrival?.scheduledAt).toBe('2026-10-26T03:02:00.000Z');
+    expect(threeOhTwo?.arrival?.scheduledAt).not.toBe('2026-10-26T04:57:00.000Z');
+    expect(threeOhTwo?.totalMinutes).toBe(53);
+    expect(result.transfers.every((trip) => trip.totalMinutes >= 52)).toBe(true);
   });
 
   it('快取鍵粗化到小數 3 位，校門外定位不另開 MaaS 鍵', () => {

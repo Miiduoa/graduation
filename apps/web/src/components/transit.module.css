@@ -140,7 +140,26 @@
 }
 .directMore { margin: 0 16px 8px; }
 .transferRow {
-  grid-template-columns: minmax(64px, 84px) minmax(0, 1fr) auto;
+  grid-template-columns: 4.5rem minmax(0, 1fr) auto;
+}
+.transferRow .routeBadge {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: auto;
+  min-height: 28px;
+  padding: 4px 3px;
+  font-size: 12px;
+  line-height: 1.15;
+  white-space: normal;
+  overflow: visible;
+  gap: 1px;
+}
+.transferRow .routeBadge > span {
+  max-width: 100%;
+  overflow: visible;
+  white-space: nowrap;
 }
 .transferRow .rowEta {
   display: grid;
@@ -148,14 +167,28 @@
   align-items: start;
   gap: 0;
 }
+.transferRow .etaUnit {
+  white-space: nowrap;
+}
 .transferNext {
   display: block;
   margin-top: 2px;
+  max-width: 7.5em;
   color: var(--bus-muted, var(--muted));
   font-size: 12px;
   font-weight: 600;
   line-height: 16px;
-  white-space: nowrap;
+  white-space: normal;
+  text-align: right;
+  overflow: visible;
+}
+@media (max-width: 390px) {
+  .transferRow {
+    grid-template-columns: 4.25rem minmax(0, 1fr) auto;
+  }
+  .transferRow .routeBadge {
+    font-size: 11px;
+  }
 }
 @media (max-width: 760px) {
   .directTitle { font-size: 26px; line-height: 32px; }
