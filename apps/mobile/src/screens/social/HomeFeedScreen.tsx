@@ -590,7 +590,12 @@ function FeedHeader(props: {
           showsHorizontalScrollIndicator={false}
           contentContainerStyle={{ paddingHorizontal: 14, gap: 14 }}
         >
-          <Pressable style={styles.storyItem} onPress={onComposeStory} accessibilityLabel="發布 Story">
+          <Pressable
+            style={styles.storyItem}
+            onPress={() => myGroup ? onOpenStoryGroup(myGroup) : onComposeStory()}
+            accessibilityRole="button"
+            accessibilityLabel={myGroup ? '查看我的 Story' : '發布 Story'}
+          >
             <View style={[styles.storyRing, styles.storyAddRing]}>
               {myGroup ? (
                 avatarByUid[myUid] ? (
@@ -610,10 +615,31 @@ function FeedHeader(props: {
               {myGroup ? '我的 Story' : '新增'}
             </Text>
           </Pressable>
+          {!!myGroup && (
+            <Pressable
+              style={styles.storyItem}
+              onPress={onComposeStory}
+              accessibilityRole="button"
+              accessibilityLabel="新增 Story"
+            >
+              <View style={[styles.storyRing, styles.storyAddRing]}>
+                <View style={[styles.storyImg, styles.storyAddInner]}>
+                  <Ionicons name="add" size={26} color={theme.colors.accent} />
+                </View>
+              </View>
+              <Text style={styles.storyName}>新增</Text>
+            </Pressable>
+          )}
           {others.map((g) => {
             const av = avatarByUid[g.authorUid];
             return (
-              <Pressable key={g.authorUid} style={styles.storyItem} onPress={() => onOpenStoryGroup(g)}>
+              <Pressable
+                key={g.authorUid}
+                style={styles.storyItem}
+                onPress={() => onOpenStoryGroup(g)}
+                accessibilityRole="button"
+                accessibilityLabel={`查看 ${nameByUid[g.authorUid] ?? '同學'} 的 Story`}
+              >
                 <View style={styles.storyRing}>
                   {av ? (
                     <Image source={{ uri: av }} style={styles.storyImg} />
