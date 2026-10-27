@@ -1,5 +1,5 @@
 // @vitest-environment node
-import { afterEach, beforeEach, expect, it } from 'vitest';
+import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { dispatchFnRequest, type FnRuntime } from './fnDispatch';
 import { createMemoryGroupStore } from './memoryGroupStore';
 import { resetFirebaseAdminForTests } from './firebaseAdmin';
@@ -31,7 +31,9 @@ function runtime(options?: {
   const store =
     options?.store ??
     createMemoryGroupStore([
-      ['groups/class-1', { name: '程式設計' }],
+      ['groups/class-1', { name: '程式設計', type: 'course', schoolId: 'school-1' }],
+      ['schools/school-1/members/teacher', { status: 'active' }],
+      ['schools/school-1/members/student', { status: 'active' }],
       ['groups/class-1/members/teacher', { role: 'instructor', status: 'active' }],
       [
         'groups/class-1/members/student',
@@ -340,4 +342,46 @@ it('does not accidentally expose unrelated privileged functions when corrections
   );
   expect(blocked.status).toBe(404);
   expect((await blocked.json()).error.status).toBe('NOT_FOUND');
+});
+
+it('checks token revocation for teacher corrections before any mutation', async () => {
+  const { runtime: deps, store } = runtime();
+  const verify = vi.fn(async (_token: string, checkRevoked?: boolean) => {
+    if (checkRevoked) throw new Error('auth/id-token-revoked');
+    return { uid: 'teacher' };
+  });
+  deps.verifyIdToken = verify;
+  const before = new Map(store.docs);
+  const denied = await dispatchFnRequest('correctAttendanceRecord', request('correctAttendanceRecord', {
+    body: { data: {
+      groupId: 'class-1', sessionId: 'session-1', studentUid: 'student',
+      status: 'present', reason: '授課教師現場核實學生出席', requestId: 'attempt-revoked',
+    } },
+    headers: { Authorization: 'Bearer valid-token' },
+  }), deps);
+  expect(verify).toHaveBeenCalledWith('valid-token', true);
+  expect(denied.status).toBe(401);
+  expect(store.docs).toEqual(before);
+});
+
+it('does not let an active course instructor correct records after school access is revoked', async () => {
+  const teacher = runtime();
+  const started = await dispatchFnRequest('startLiveSession', request('startLiveSession', {
+    body: { data: { groupId: 'class-1', requestId: 'school-scope-test' } },
+    headers: { Authorization: 'Bearer valid-token' },
+  }), teacher.runtime);
+  expect(started.status).toBe(200);
+  const session = (await started.json()).result as { sessionId: string };
+  teacher.store.docs.set('schools/school-1/members/teacher', { status: 'inactive' });
+  const before = new Map(teacher.store.docs);
+  const denied = await dispatchFnRequest('correctAttendanceRecord', request('correctAttendanceRecord', {
+    body: { data: {
+      groupId: 'class-1', sessionId: session.sessionId, studentUid: 'student',
+      status: 'present', reason: '授課教師現場核實學生出席', requestId: 'school-revoked',
+    } },
+    headers: { Authorization: 'Bearer valid-token' },
+  }), teacher.runtime);
+  expect(denied.status).toBe(403);
+  expect((await denied.json()).error.status).toBe('PERMISSION_DENIED');
+  expect(teacher.store.docs).toEqual(before);
 });
