@@ -104,7 +104,10 @@ export function schoolPortalCaptureScript(request: PortalCaptureRequest): string
       return ' ' + name + '="' + Number(value) + '"';
     }
     function collect(doc) {
-      var headings = doc.querySelectorAll('h1,h2,h3,caption');
+      var headings = [];
+      ['h1', 'h2', 'h3', 'caption'].forEach(function (tag) {
+        Array.prototype.push.apply(headings, doc.getElementsByTagName(tag));
+      });
       if (headings.length > 100) throw new Error('too-large');
       Array.prototype.forEach.call(headings, function (heading) {
         if (visible(heading)) {
@@ -113,11 +116,14 @@ export function schoolPortalCaptureScript(request: PortalCaptureRequest): string
           if (title) add('<h2>' + escapeText(title) + '</h2>');
         }
       });
-      var tables = doc.querySelectorAll('table');
+      var tables = doc.getElementsByTagName('table');
       if (tables.length > 60) throw new Error('too-large');
       Array.prototype.forEach.call(tables, function (table) {
-        if (!visible(table) || table.querySelector('table')) return;
-        if (table.querySelector('input[type="password"]')) return;
+        if (!visible(table) || table.getElementsByTagName('table').length) return;
+        var hasPassword = Array.prototype.some.call(table.getElementsByTagName('input'), function (input) {
+          return String(input.getAttribute('type') || '').toLowerCase() === 'password';
+        });
+        if (hasPassword) return;
         tableCount += 1;
         if (tableCount > 30) throw new Error('too-large');
         add('<table>');
@@ -144,7 +150,9 @@ export function schoolPortalCaptureScript(request: PortalCaptureRequest): string
         if (seen.indexOf(doc) >= 0) continue;
         seen.push(doc);
         collect(doc);
-        Array.prototype.forEach.call(doc.querySelectorAll('iframe,frame'), function (frame) {
+        var childFrames = Array.prototype.slice.call(doc.getElementsByTagName('iframe'))
+          .concat(Array.prototype.slice.call(doc.getElementsByTagName('frame')));
+        childFrames.forEach(function (frame) {
           frames += 1;
           if (frames > 50) throw new Error('too-large');
           if (!visible(frame)) return;
