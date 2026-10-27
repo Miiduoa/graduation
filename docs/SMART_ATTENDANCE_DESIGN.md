@@ -1,4 +1,9 @@
-# 智慧點名設計：TronClass parity + 4 點超越
+# 智慧點名設計草案（非已上線能力清單）
+
+> 注意：本頁是探索性設計，表格、方法與部分測試只代表純函式原型／規劃，不代表已在正式系統串接或部署。
+> **截至 2026-10-27，僅由伺服器簽發的課堂 QR token 與 `joinLiveSession` 交易收據能確認正式簽到。**
+> 數字密碼、GPS、自拍、動態 QR 每 3 秒輪換與教務資料回寫尚不可供正式簽到使用；勿在正式 UI 宣稱已支援。
+> 正式能力範圍與驗證邊界請參閱 [ATTENDANCE_VERIFICATION.md](./ATTENDANCE_VERIFICATION.md)。
 
 > 對應引擎：`packages/shared/src/lms/attendanceEngine.ts`
 > 對應測試：17 條全綠
