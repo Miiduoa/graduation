@@ -72,6 +72,19 @@ test('student can set goals and add a hypothetical future course without alterin
   });
 });
 
+test('mobile displays honest average load and does not allocate unscheduled credits to a term', async () => {
+  const plan = {
+    ...emptyCreditPlan(), recognized: '60', target: '128', extra: '20',
+  };
+  jest.mocked(readMobileCreditPlan).mockResolvedValue(plan);
+  const view = render(<CreditPlanningScreen />);
+  await view.findByText('學期負擔與下一步');
+  expect(view.getByText('平均每學期還需')).toBeTruthy();
+  expect(view.getByText('尚未排入學期')).toBeTruthy();
+  expect(view.getByText(/學期推演不會把/)).toBeTruthy();
+  expect(view.getByText('累積 60')).toBeTruthy();
+});
+
 test('changing school/account reloads a fresh isolated plan without saving prior state into the new scope', async () => {
   const view = render(<CreditPlanningScreen />);
   await view.findByText('把未來的學分，排成可執行的計畫。');
