@@ -120,3 +120,33 @@ it('does not treat script contents as reliable academic term evidence', () => {
     '<tr><td>統計</td><td>3</td><td>90</td></tr></table>';
   expect(extractSchoolPageTables(html, 'grades')[0].suggestedTerm).toBeUndefined();
 });
+
+it('treats hostile script markup and escaped tags only as data, not a course table', () => {
+  const markup = '<script>const leaked = "<table><tr><th>課程名稱</th><th>學分</th><th>成績</th></tr>" + ' +
+    '"<tr><td>偽造課程</td><td>20</td><td>99</td></tr></table>";</script  data-x="1">' +
+    '<!-- <table><tr><th>課程名稱</th><th>學分</th><th>成績</th></tr>' +
+    '<tr><td>註解課程</td><td>1</td><td>90</td></tr></table> -->' +
+    '<table><tr><th>課程名稱</th><th>學分</th><th>成績</th></tr>' +
+    '<tr><td>真實課程 &lt;script&gt;</td><td>3</td><td>88</td></tr></table>';
+  const found = extractSchoolPageTables(markup, 'grades');
+  expect(found).toHaveLength(1);
+  expect(found[0].rowCount).toBe(1);
+  expect(found[0].text).not.toContain('偽造課程');
+  expect(found[0].text).not.toContain('註解課程');
+  expect(found[0].text).not.toContain('<script');
+  const parsed = parsePersonalImport(found[0].text, { ...opts, kind: 'grades' });
+  expect(parsed.rows).toHaveLength(1);
+  expect(parsed.rows[0]).toMatchObject({ credits: 3, grade: '88' });
+});
+
+it('does not trust fake tables buried inside attributes or hidden elements', () => {
+  const markup = '<div data-value="><table><tr><th>課程名稱</th><th>學分</th><th>成績</th></tr>">' +
+    '<table><tr><th>課程名稱</th><th>學分</th><th>成績</th></tr>' +
+    '<tr hidden><td>隱藏課程</td><td>4</td><td>99</td></tr>' +
+    '<tr><td>真實課程</td><td>2</td><td>90</td></tr></table></div>';
+  const found = extractSchoolPageTables(markup, 'grades');
+  expect(found).toHaveLength(1);
+  expect(found[0].rowCount).toBe(1);
+  expect(found[0].text).not.toContain('隱藏課程');
+  expect(found[0].text).toContain('真實課程');
+});
