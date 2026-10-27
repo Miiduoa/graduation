@@ -505,6 +505,10 @@ export function createLiveSessionHandlers({
         };
       }
 
+      // Do not finalize an absence or excused status while students can still sign in.
+      if (liveSnap.data().active === true && ['absent', 'excused'].includes(status)) {
+        throw new HttpsError('failed-precondition', 'Finish the attendance session before finalizing absence or leave');
+      }
       const previous = recordSnap.exists ? recordSnap.data() : null;
       if (
         previous &&
