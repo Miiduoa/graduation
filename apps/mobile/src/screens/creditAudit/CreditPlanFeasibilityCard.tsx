@@ -5,6 +5,7 @@ import {
 } from '@campus/shared/src/creditPlanInsights';
 import { formatCredits, type CreditPlan } from '@campus/shared/src/creditPlanner';
 import { theme } from '../../ui/theme';
+import { CreditPlanScenarioCard } from './CreditPlanScenarioCard';
 
 function numberOrDash(number: number | null) {
   return number === null ? '—' : formatCredits(number);
@@ -103,6 +104,7 @@ export function CreditPlanFeasibilityCard({ plan }: { plan: CreditPlan }) {
           是否符合系所必修、抵免及畢業規定，仍須依入學年度與學校正式審查。
         </Text>
       </View>
+      <CreditPlanScenarioCard plan={plan} />
     </View>
   );
 }
