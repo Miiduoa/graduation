@@ -370,8 +370,7 @@ export function calculateDetailedCredits(input: {
     label: requirement.label,
     satisfied: nonCreditSatisfied[requirement.key] === true,
   }));
-  // This result is a *reference-rule calculation*. Actual graduation also
-  // depends on mandatory course identity, retake exemptions and school review.
+  // 這份結果是「對照規則試算」。實際能否畢業還要看必修課對應、重修免修與校方審查。
   const satisfied =
     totalEarned >= totalRequired &&
     byCategory.every((category) => category.earned >= category.required) &&
