@@ -30,7 +30,8 @@ import {
 import { Screen, Spinner } from '../ui/components';
 import { useAuth } from '../state/auth';
 import { useSchool } from '../state/school';
-import { theme } from '../ui/theme';
+import { theme, type ThemeColors } from '../ui/theme';
+import { useThemeMode } from '../state/theme';
 import { TAB_BAR_CONTENT_BOTTOM_PADDING } from '../ui/navigationTheme';
 import {
   CREDIT_PLAN_BACKUP_MAX_BYTES,
@@ -41,7 +42,9 @@ import {
   writeMobileCreditPlan,
 } from '../features/academics/creditPlanRepository';
 
-const t = theme.colors;
+const t = new Proxy({} as ThemeColors, {
+  get(_target, key: keyof ThemeColors) { return theme.colors[key]; },
+});
 const space = 16;
 const categories = PLANNER_CATEGORIES;
 
@@ -155,7 +158,7 @@ function Action({
       }}
     >
       <Text style={{
-        color: primary ? t.onAccent ?? '#111' : t.text,
+        color: primary ? t.onAccent : t.text,
         fontSize: 14,
         fontWeight: '700',
       }}>{title}</Text>
@@ -194,6 +197,7 @@ function Chip({
 }
 
 export default function CreditPlanningScreen() {
+  useThemeMode();
   const { user } = useAuth();
   const { school } = useSchool();
   const schoolId = school.id;
