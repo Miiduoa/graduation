@@ -71,6 +71,11 @@ const normalizeHeader = (value: string) =>
     .replace(/[\s_()（）:：]/g, '');
 const fieldFor = (value: string) => headerMap.get(normalizeHeader(value));
 
+/** Shared header recognition for locally imported school portal tables. */
+export function personalImportHeaderField(value: string): string | undefined {
+  return fieldFor(value);
+}
+
 function weekday(value: string): number | undefined {
   const clean = normalizePersonalImportText(value);
   const match = /^(?:(?:星期|週|周|禮拜)\s*)?([一二三四五六日天1-7])$/.exec(clean);
