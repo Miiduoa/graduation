@@ -36,3 +36,5 @@
 - `apps/web/src/lib/schoolPageTables.test.ts`：含導覽表的 HTML、週課表跨列、成績、登入欄位排除、多表選取、大小與格式限制。
 - `apps/mobile/src/__tests__/SchoolPageTables.test.ts`：驗證不依賴 DOM 的 native 解析。
 - Web 與 App 的個人資料匯入畫面測試：從本人存檔或複製校務表格後，資料只進入核對流程，不會直接儲存。
+
+- HTML 文件會在找到**唯一且明確**的學年度／學期標示時，建議補上尚未填寫的欄位；如果來源含不同學期則不自動推定。這只是參考，使用者仍需逐筆核對及按確認匯入。

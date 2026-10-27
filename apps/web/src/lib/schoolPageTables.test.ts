@@ -96,3 +96,27 @@ it('finds a grade table nested inside a school portal layout without duplicating
   expect(parsePersonalImport(found[0].text, { ...opts, kind: 'grades' }).rows[0])
     .toMatchObject({ title: '演算法', grade: '93', credits: 3 });
 });
+
+it('suggests an unambiguous academic term without overwriting the imported row', () => {
+  const html = '<h2>115 學年度 第 1 學期 課表</h2>' +
+    '<table><tr><th>課程名稱</th><th>星期</th><th>開始節次</th></tr>' +
+    '<tr><td>資料庫</td><td>一</td><td>3</td></tr></table>';
+  const found = extractSchoolPageTables(html, 'timetable', 'pu');
+  expect(found[0].suggestedTerm).toEqual({ academicYear: '115', semester: '1' });
+  const parsed = parsePersonalImport(found[0].text, opts);
+  expect(parsed.rows[0]).toMatchObject({ academicYear: '115', semester: '1', dayOfWeek: 1 });
+});
+
+it('declines to guess the academic term when several distinct semesters appear', () => {
+  const html = '<h1>114 學年度 第 2 學期</h1><h2>115 學年度 第 1 學期</h2>' +
+    '<table><tr><th>課程名稱</th><th>學分</th><th>成績</th></tr>' +
+    '<tr><td>統計</td><td>3</td><td>95</td></tr></table>';
+  expect(extractSchoolPageTables(html, 'grades')[0].suggestedTerm).toBeUndefined();
+});
+
+it('does not treat script contents as reliable academic term evidence', () => {
+  const html = '<script>var term="115 學年度第 1 學期";</script>' +
+    '<table><tr><th>課程名稱</th><th>學分</th><th>成績</th></tr>' +
+    '<tr><td>統計</td><td>3</td><td>90</td></tr></table>';
+  expect(extractSchoolPageTables(html, 'grades')[0].suggestedTerm).toBeUndefined();
+});

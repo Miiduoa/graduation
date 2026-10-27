@@ -1236,10 +1236,14 @@ function ImportWorkspace({
                   {schoolPage.tables.map((table) => (
                     <Button
                       key={table.id}
-                      text={table.label}
+                      text={table.label + (table.suggestedTerm ? ' · ' + table.suggestedTerm.academicYear + ' 學年度第 ' + table.suggestedTerm.semester + ' 學期' : '')}
                       disabled={busy || saving}
                       onPress={() => {
                         setText(table.text);
+                        if (table.suggestedTerm) {
+                          if (!academicYear.trim()) setYear(table.suggestedTerm.academicYear);
+                          if (!semester.trim()) setSemester(table.suggestedTerm.semester);
+                        }
                         setSource({ type: 'file', name: schoolPage.name });
                         setRows([]);
                         setIssues([]);

@@ -12,6 +12,7 @@ export type SchoolPageTable = {
   rowCount: number;
   text: string;
   layout: 'list' | 'weekly';
+  suggestedTerm?: { academicYear: string; semester: string };
 };
 
 export class SchoolPageImportError extends Error {
@@ -133,6 +134,28 @@ function period(value: string, profile?: PeriodProfileId): number | null {
   if (profile) return slotIndexForLabel(match[1], profile) ?? null;
   const number = Number(match[1]);
   return Number.isInteger(number) && number >= 1 && number <= 24 ? number : null;
+}
+
+
+/** A suggestion only: ambiguous years/semesters must never silently choose one. */
+export function suggestSchoolPageTerm(markup: string): { academicYear: string; semester: string } | null {
+  const visible = decodeEntities(
+    markup
+      .replace(/<(script|style|noscript|template|svg|iframe)\b[^>]*>[\s\S]*?<\/\1\s*>/gi, '')
+      .replace(/<[^>]+>/g, ' ')
+  ).normalize('NFKC').replace(/\s+/g, ' ').slice(0, 100_000);
+  const choices = new Set<string>();
+  const pattern = /(?:民國\s*)?(1\d{2}|20\d{2})\s*學年度\s*(?:第?\s*([12一二])\s*學期|([上下])\s*學期|暑(?:期|修))/g;
+  for (const found of visible.matchAll(pattern)) {
+    const semester = found[2]
+      ? (found[2] === '1' || found[2] === '一' ? '1' : '2')
+      : found[3] ? (found[3] === '上' ? '1' : '2') : '暑期';
+    choices.add(found[1] + ':' + semester);
+    if (choices.size > 1) return null;
+  }
+  if (choices.size !== 1) return null;
+  const [academicYear, semester] = [...choices][0].split(':');
+  return { academicYear, semester };
 }
 
 function toCsv(rows: string[][]): string {
@@ -258,15 +281,16 @@ export function extractSchoolPageTables(
         throw new SchoolPageImportError('這個頁面包含太多表格，請只複製要匯入的表格。');
     }
   }
+  const term = suggestSchoolPageTerm(cleaned);
   const found: SchoolPageTable[] = [];
   all.forEach((table, index) => {
     const rows = tableRows(table);
     if (rows.length < 2) return;
     const candidate = listCandidate(rows, index, kind);
-    if (candidate) found.push(candidate);
+    if (candidate) found.push({ ...candidate, ...(term ? { suggestedTerm: term } : {}) });
     if (kind === 'timetable') {
       const grid = weeklyCandidate(rows, index, profile);
-      if (grid) found.push(grid);
+      if (grid) found.push({ ...grid, ...(term ? { suggestedTerm: term } : {}) });
     }
   });
   if (!found.length)

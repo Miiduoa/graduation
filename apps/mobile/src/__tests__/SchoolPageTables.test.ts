@@ -17,3 +17,10 @@ test('native import reads a user-saved school grade table without a network requ
     title: '資訊管理', credits: 3, grade: '91', schoolId: 'nthu',
   });
 });
+
+test('school portal term is suggested only when explicitly visible and unambiguous', () => {
+  const source = '<p>115 學年度上學期成績</p><table><tr><th>科目名稱</th><th>學分</th><th>成績</th></tr>' +
+    '<tr><td>系統分析</td><td>3</td><td>88</td></tr></table>';
+  expect(extractSchoolPageTables(source, 'grades')[0].suggestedTerm)
+    .toEqual({ academicYear: '115', semester: '1' });
+});

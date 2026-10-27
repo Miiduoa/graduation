@@ -1076,12 +1076,17 @@ function ImportWorkspace({
                   onClick={() => {
                     const selectedSource = { type: 'file' as const, name: schoolPage.name };
                     setSource(selectedSource);
+                    if (table.suggestedTerm) {
+                      if (!year.trim()) setYear(table.suggestedTerm.academicYear);
+                      if (!semester.trim()) setSemester(table.suggestedTerm.semester);
+                    }
                     setText(table.text);
                     parse(table.text, selectedSource);
                   }}
                 >
                   <strong>{table.label}</strong>
                   <span>{table.layout === 'weekly' ? '週課表轉換' : '校務資料列'} · {table.rowCount} 筆 · 點擊後進入核對</span>
+                  {table.suggestedTerm && <span>網頁標示：{table.suggestedTerm.academicYear} 學年度第 {table.suggestedTerm.semester} 學期（只補空欄，匯入前請確認）</span>}
                 </button>
               ))}
             </div>
