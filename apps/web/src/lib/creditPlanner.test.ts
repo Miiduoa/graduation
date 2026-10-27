@@ -81,6 +81,51 @@ describe('credit planning boundaries', () => {
     ] }))).toBeNull();
   });
 
+  it('evaluates manual category thresholds separately and keeps conditions self-declared', () => {
+    const input = plan({
+      recognized: '60',
+      target: '128',
+      categoryGoals: {
+        ...emptyCreditPlan().categoryGoals,
+        required: { recognized: '20', target: '30' },
+        general: { recognized: '24', target: '24' },
+      },
+      milestones: [
+        { id: 'eng', label: '英文能力', done: false },
+        { id: 'service', label: '服務學習', done: true },
+      ],
+      courses: [
+        { id: 'r1', name: '資料庫', credits: 3, category: 'required', term: 1, status: 'considering' },
+      ],
+    });
+    const summary = creditPlanSummary(input);
+    expect(summary.remaining).toBe(65);
+    expect(summary.categoryGaps.find((item) => item.key === 'required')?.remaining).toBe(7);
+    expect(summary.categoryGaps.find((item) => item.key === 'general')?.remaining).toBe(0);
+    expect(summary.milestonesComplete).toBe(1);
+    expect(summary.categoryOvercount).toBe(false);
+    expect(restoreCreditPlan(JSON.stringify(input))).toEqual(input);
+    expect(exportCreditPlanCsv(input)).toContain('"英文能力"');
+    expect(exportCreditPlanCsv(input)).toContain('"必修目標"');
+  });
+
+  it('rejects corrupt category thresholds and forged milestone states', () => {
+    const valid = plan();
+    expect(restoreCreditPlan(JSON.stringify({
+      ...valid, categoryGoals: { ...valid.categoryGoals, general: { recognized: '3', target: '-6' } },
+    }))).toBeNull();
+    expect(restoreCreditPlan(JSON.stringify({
+      ...valid, milestones: [{ id: 'x', label: '語言能力', done: 'yes' }],
+    }))).toBeNull();
+    expect(restoreCreditPlan(JSON.stringify({
+      ...valid, milestones: [{ id: 'x', label: '語言能力', done: true }, { id: 'x', label: '服務', done: false }],
+    }))).toBeNull();
+    expect(creditPlanSummary(plan({
+      recognized: '10',
+      categoryGoals: { ...valid.categoryGoals, required: { recognized: '20', target: '30' } },
+    })).categoryOvercount).toBe(true);
+  });
+
   it('exports CSV without mistaking course names for spreadsheet formulas', () => {
     const csv = exportCreditPlanCsv(plan({
       recognized: '60',
