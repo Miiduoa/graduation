@@ -3,12 +3,12 @@ import { Text, View } from 'react-native';
 import { AIButton, aiTokens } from '../ui/aiFirst';
 import type { CampusEvidencePlan, CampusPlanPriority, CampusPlanRoute } from '../services/offlineCampusPlanner';
 
-const PRIORITY: Record<CampusPlanPriority, { label: string; color: string }> = {
-  overdue: { label: '期限已過', color: aiTokens.danger },
-  urgent: { label: '24 小時內', color: aiTokens.danger },
-  soon: { label: '三天內', color: aiTokens.warning },
-  normal: { label: '待安排', color: aiTokens.textSecondary },
-  verify: { label: '需核對', color: aiTokens.muted },
+const PRIORITY: Record<CampusPlanPriority, string> = {
+  overdue: '期限已過',
+  urgent: '24 小時內',
+  soon: '三天內',
+  normal: '待安排',
+  verify: '需核對',
 };
 
 const ROUTE_LABEL: Record<CampusPlanRoute, string> = {
@@ -44,7 +44,8 @@ export function CampusEvidencePlanCard({
         </Text>
       </View>
       {plan.steps.map((step, index) => {
-        const priority = PRIORITY[step.priority];
+        const priorityColor = step.priority === 'overdue' || step.priority === 'urgent'
+          ? aiTokens.danger : step.priority === 'soon' ? aiTokens.warning : aiTokens.muted;
         return (
           <View key={step.id} style={{
             backgroundColor: aiTokens.panel,
@@ -66,8 +67,8 @@ export function CampusEvidencePlanCard({
                 <Text style={{ color: aiTokens.text, fontSize: 15, fontWeight: '700' }}>
                   {step.title}
                 </Text>
-                <Text style={{ color: priority.color, fontSize: 12, fontWeight: '600' }}>
-                  {priority.label}
+                <Text style={{ color: priorityColor, fontSize: 12, fontWeight: '600' }}>
+                  {PRIORITY[step.priority]}
                 </Text>
               </View>
             </View>
