@@ -85,6 +85,9 @@ module.exports = onCall(
       })),
     }), { status: 'unavailable', items: [] });
 
+    // Membership may change while independent readers are running.
+    // Do not deliver a personal snapshot after the selected school's grant is revoked.
+    await createAuthzHelpers(getFirestore()).assertActiveSchoolMember(schoolId, uid);
     return {
       schoolId,
       checkedAt: new Date().toISOString(),
