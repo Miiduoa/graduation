@@ -119,13 +119,19 @@ function syncedCampusAnswer(
         const upcoming = [...assignments.items].sort((left, right) =>
           (left.dueAt ? Date.parse(left.dueAt) : Infinity) -
           (right.dueAt ? Date.parse(right.dueAt) : Infinity));
-        for (const item of upcoming.slice(0, askingPriority ? 3 : 8)) {
+        const previewSize = askingPriority ? 3 : 8;
+        for (const item of upcoming.slice(0, previewSize)) {
           const due = item.dueAt ? '｜截止 ' + syncedTime(item.dueAt) : '｜截止時間未提供';
           lines.push('• ' + item.title + (item.groupName ? '（' + item.groupName + '）' : '') + due);
         }
-        if (assignments.count !== null && assignments.count > assignments.items.length) {
-          lines.push('其餘待交內容請開啟課程頁核對。');
+        if (upcoming.length > previewSize) {
+          lines.push('此回覆先列出 ' + previewSize + ' 筆；另有 ' + (upcoming.length - previewSize) +
+            ' 筆已同步但未在此預覽展開，可從「未來七天」的逐日安排與其他作業區查看。');
         }
+      }
+      if (assignments.count !== null && assignments.count > assignments.items.length) {
+        lines.push('另有 ' + (assignments.count - assignments.items.length) +
+          ' 筆尚未同步，未納入本機規劃；其餘待交內容請開啟課程頁核對。');
       }
     } else {
       lines.push('待交作業來源目前無法取得，不能判定是否已繳交。');
