@@ -192,6 +192,7 @@ export async function scheduleCampusAssignmentReminder(
           version: 1, identifier: key.identifier, triggerAt: new Date(source.triggerAt).toISOString(),
         } satisfies ReminderRecord)).catch(() => { throw new CampusReminderError('native-failed'); });
       }
+      checkAccount(input.scope, input.isCurrent, epoch);
       return { outcome: 'already-scheduled', triggerAt: new Date(source.triggerAt).toISOString() };
     }
     if (inventory.length >= CAMPUS_AGENT_REMINDER_BUDGET) {
@@ -297,6 +298,7 @@ export function beginCampusAssignmentReminderSignOutCleanup(): Promise<number> {
   reminderTeardownActive = true;
   reminderEpoch += 1;
   return (async () => {
+    if (!supportsLocalNotification()) return 0;
     const initial = await scheduledInventory();
     const ours = initial.filter((item) =>
       item.identifier.startsWith(CAMPUS_AGENT_REMINDER_PREFIX));
