@@ -61,4 +61,5 @@ jobs:
             src/__tests__/services/offlineCampusTools.test.ts \
             src/__tests__/features/campusAssistant.test.ts \
             src/__tests__/CampusAssistantScreen.test.tsx \
+            src/__tests__/AuthSignOut.test.tsx \
             --runInBand --ci
