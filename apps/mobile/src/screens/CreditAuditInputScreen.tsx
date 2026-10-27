@@ -278,8 +278,10 @@ export function CreditAuditInputScreen(props: any) {
       };
 
       const updatedCourses = [...savedCourses, newCourse];
-      setSavedCourses(updatedCourses);
+      const savingScope = storageKey;
       await saveCourses(updatedCourses);
+      if (activeScope.current !== savingScope) return;
+      setSavedCourses(updatedCourses);
 
       analytics.logEvent('credit_course_added', {
         category,
@@ -307,15 +309,20 @@ export function CreditAuditInputScreen(props: any) {
   };
 
   const handleDeleteCourse = (courseId: string) => {
-    Alert.alert('確認刪除', '確定要刪除這門課程嗎？', [
+    Alert.alert('確認刪除', '確定刪除這門本機課程？已同步的雲端紀錄不會跟著刪除。', [
       { text: '取消', style: 'cancel' },
       {
         text: '刪除',
         style: 'destructive',
         onPress: async () => {
           const updatedCourses = savedCourses.filter((c) => c.id !== courseId);
-          setSavedCourses(updatedCourses);
-          await saveCourses(updatedCourses);
+          const savingScope = storageKey;
+          try {
+            await saveCourses(updatedCourses);
+            if (activeScope.current === savingScope) setSavedCourses(updatedCourses);
+          } catch {
+            Alert.alert('刪除失敗', '這次未能更新本機紀錄，請重試。');
+          }
         },
       },
     ]);
@@ -342,8 +349,10 @@ export function CreditAuditInputScreen(props: any) {
           ? { ...course, syncedToCloud: true }
           : course,
       );
-      setSavedCourses(updatedCourses);
+      const savingScope = storageKey;
       await saveCourses(updatedCourses);
+      if (activeScope.current !== savingScope) return;
+      setSavedCourses(updatedCourses);
 
       analytics.logEvent('credit_courses_synced', {
         count: unsyncedCourses.length,
@@ -351,7 +360,7 @@ export function CreditAuditInputScreen(props: any) {
 
       Alert.alert('同步成功', `已同步 ${unsyncedCourses.length} 門課程到雲端`);
     } catch (error) {
-      Alert.alert('同步失敗', error instanceof Error ? error.message : '請稍後再試');
+      Alert.alert('同步狀態未確認', '可能已寫入雲端，但本機同步狀態尚未保存。請先核對，避免重複操作。');
     } finally {
       setSyncing(false);
     }
@@ -391,98 +400,58 @@ export function CreditAuditInputScreen(props: any) {
   }, [savedCourses]);
 
   const handleImportCSV = async () => {
+    const selectedScope = storageKey;
     try {
       const result = await DocumentPicker.getDocumentAsync({
         type: ['text/csv', 'text/comma-separated-values', 'application/csv'],
         copyToCacheDirectory: true,
       });
-
-      if (result.canceled || !result.assets?.[0]) {
-        return;
-      }
-
-      setImporting(true);
+      if (result.canceled || !result.assets?.[0] || activeScope.current !== selectedScope) return;
       const file = result.assets[0];
-
-      const pickedFile = new File(file.uri);
-      const content = await pickedFile.text();
-
-      const lines = content.split('\n').filter((line) => line.trim());
-      if (lines.length < 2) {
-        Alert.alert('格式錯誤', 'CSV 檔案必須包含標題行和至少一筆資料');
+      if (file.size != null && file.size > 600_000) {
+        Alert.alert('檔案過大', '每次最多匯入約 600 KB，請先分批整理。');
         return;
       }
-
-      const headers = lines[0].split(',').map((h) => h.trim().toLowerCase());
-      const nameIdx = headers.findIndex(
-        (h) => h.includes('name') || h.includes('課程') || h.includes('名稱'),
-      );
-      const creditsIdx = headers.findIndex((h) => h.includes('credit') || h.includes('學分'));
-      const categoryIdx = headers.findIndex(
-        (h) => h.includes('category') || h.includes('分類') || h.includes('類別'),
-      );
-      const gradeIdx = headers.findIndex((h) => h.includes('grade') || h.includes('成績'));
-      const semesterIdx = headers.findIndex((h) => h.includes('semester') || h.includes('學期'));
-
-      if (nameIdx === -1 || creditsIdx === -1) {
-        Alert.alert('格式錯誤', 'CSV 必須包含課程名稱和學分欄位');
-        return;
-      }
-
-      const importedCourses: SavedCourse[] = [];
-
-      for (let i = 1; i < lines.length; i++) {
-        const values = lines[i].split(',').map((v) => v.trim());
-        if (values.length < 2) continue;
-
-        const courseName = values[nameIdx];
-        const courseCredits = parseInt(values[creditsIdx]) || 0;
-
-        if (!courseName) continue;
-
-        let courseCategory: CreditCategory = 'elective';
-        if (categoryIdx !== -1) {
-          const cat = values[categoryIdx]?.toLowerCase();
-          if (cat?.includes('必修') || cat?.includes('required')) courseCategory = 'required';
-          else if (cat?.includes('通識') || cat?.includes('general')) courseCategory = 'general';
-          else if (cat?.includes('英文') || cat?.includes('english')) courseCategory = 'english';
-          else if (cat?.includes('其他') || cat?.includes('other')) courseCategory = 'other';
-        }
-
-        const courseGrade = gradeIdx !== -1 ? values[gradeIdx] : 'A';
-        const courseSemester = semesterIdx !== -1 ? values[semesterIdx] : semester;
-        const coursePassed = !courseGrade || !['F', 'E'].includes(courseGrade.toUpperCase());
-
-        importedCourses.push({
-          id: `import-${Date.now()}-${i}-${Math.random().toString(36).substr(2, 5)}`,
-          name: courseName,
-          credits: courseCredits,
-          category: courseCategory,
-          passed: coursePassed,
-          grade: coursePassed ? courseGrade : undefined,
-          semester: courseSemester,
-          createdAt: new Date().toISOString(),
-          syncedToCloud: false,
-        });
-      }
-
-      if (importedCourses.length === 0) {
-        Alert.alert('匯入失敗', '未能從 CSV 中解析出有效的課程資料');
-        return;
-      }
-
-      const updatedCourses = [...savedCourses, ...importedCourses];
-      setSavedCourses(updatedCourses);
-      await saveCourses(updatedCourses);
-
-      analytics.logEvent('credit_courses_imported', {
-        count: importedCourses.length,
-      });
-
-      Alert.alert('匯入成功', `已匯入 ${importedCourses.length} 門課程`);
+      setImporting(true);
+      const content = await new File(file.uri).text();
+      const parsed = parseManualCreditCsv(content);
+      if (activeScope.current !== selectedScope) return;
+      const note = [
+        `辨識到 ${parsed.courses.length} 門課程。`,
+        parsed.skipped ? `已略過 ${parsed.skipped} 筆非課程或無效資料。` : '',
+        parsed.missingPassEvidence
+          ? `其中 ${parsed.missingPassEvidence} 門沒有明確「通過」標記，將暫不計入自行標示通過的學分。`
+          : '',
+        '匯入只是個人紀錄，不代表學校正式採計。',
+      ].filter(Boolean).join('\\n');
+      Alert.alert('確認匯入課程', note, [
+        { text: '取消', style: 'cancel' },
+        {
+          text: `匯入 ${parsed.courses.length} 門`,
+          onPress: async () => {
+            if (activeScope.current !== selectedScope) return;
+            const now = new Date().toISOString();
+            const importedCourses: SavedCourse[] = parsed.courses.map((course, index) => ({
+              ...course,
+              id: `import-${Date.now()}-${index}-${Math.random().toString(36).slice(2, 7)}`,
+              createdAt: now,
+              syncedToCloud: false,
+            }));
+            const next = [...savedCourses, ...importedCourses];
+            try {
+              await saveCourses(next);
+              if (activeScope.current !== selectedScope) return;
+              setSavedCourses(next);
+              analytics.logEvent('credit_courses_imported', { count: importedCourses.length });
+              Alert.alert('匯入完成', `已儲存 ${importedCourses.length} 門本機課程，尚未同步雲端。`);
+            } catch {
+              Alert.alert('匯入失敗', '本機儲存未完成，現有課程仍保留。');
+            }
+          },
+        },
+      ]);
     } catch (error) {
-      console.error('CSV import error:', error);
-      Alert.alert('匯入失敗', '讀取檔案時發生錯誤');
+      Alert.alert('匯入失敗', error instanceof Error ? error.message : '無法解析這份 CSV');
     } finally {
       setImporting(false);
     }
@@ -496,16 +465,22 @@ export function CreditAuditInputScreen(props: any) {
 
     Alert.alert(
       '清除所有資料',
-      `確定要刪除全部 ${savedCourses.length} 門課程嗎？此操作無法復原。`,
+      `確定清除本機的 ${savedCourses.length} 門課程？這不會刪除之前同步到雲端的紀錄。`,
       [
         { text: '取消', style: 'cancel' },
         {
           text: '清除',
           style: 'destructive',
           onPress: async () => {
-            setSavedCourses([]);
-            await saveCourses([]);
-            Alert.alert('已清除', '所有課程資料已刪除');
+            const savingScope = storageKey;
+            try {
+              await saveCourses([]);
+              if (activeScope.current !== savingScope) return;
+              setSavedCourses([]);
+              Alert.alert('已清除本機資料', '本機課程已清除；先前同步到雲端的資料不會跟著刪除。');
+            } catch {
+              Alert.alert('清除失敗', '無法更新本機紀錄，請重新操作。');
+            }
           },
         },
       ],
