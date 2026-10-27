@@ -8,6 +8,8 @@ import {
   serializePersonalImportsCsv,
   parsePersonalImport,
   personalImportErrorMessage,
+  extractSchoolPageTables,
+  type SchoolPageTable,
   personalImportPreviewNotice,
   personalImportSavedNotice,
   personalImportUndoBody,
@@ -381,6 +383,7 @@ function ImportWorkspace({
   const [backup, setBackup] = useState<Omit<PersonalImportBackupPreview, 'rows'> | null>(null);
   const [importDocument, setDocument] = useState<PersonalImportDocument | null>(null);
   const [hasDocumentFile, setHasDocumentFile] = useState(false);
+  const [schoolPage, setSchoolPage] = useState<{ name: string; tables: SchoolPageTable[] } | null>(null);
   const [documentSelection, setDocumentSelection] =
     useState<PersonalImportDraft['documentSelection']>(null);
   const [documentVersion, setDocumentVersion] = useState(0);
@@ -557,8 +560,13 @@ function ImportWorkspace({
     source,
     periodProfile,
   };
-  const parse = (input: string, inputSource = source) => {
-    const parsed = parsePersonalImport(input, { ...options, source: inputSource });
+  const parse = (
+    input: string,
+    inputSource = source,
+    term?: { academicYear: string; semester: string },
+  ) => {
+    setSchoolPage(null);
+    const parsed = parsePersonalImport(input, { ...options, source: inputSource, ...(term ?? {}) });
     setRows(parsed.rows);
     setBackup(null);
     setReviewPage(0);
@@ -609,6 +617,7 @@ function ImportWorkspace({
     job.current = controller;
     setReading(true);
     setNotice('');
+    setSchoolPage(null);
     const image = file.type.startsWith('image/');
     const nextSource = {
       type: image ? ('screenshot' as const) : ('file' as const),
@@ -623,6 +632,14 @@ function ImportWorkspace({
       active.current && !suspended.current && !controller.signal.aborted && job.current === controller;
     controller.signal.addEventListener('abort', discardPendingPreview, { once: true });
     try {
+      if (/\.html?$/i.test(file.name)) {
+        if (file.size > 512_000) throw new Error('學校網頁存檔超過 500 KB，請只複製課表或成績表格。');
+        const tables = extractSchoolPageTables(await file.text(), kind, periodProfile);
+        if (!currentRead()) return;
+        setSchoolPage({ name: file.name, tables });
+        setNotice('已辨識 ' + tables.length + ' 張符合目前資料類型的表格。請選擇要讀取的資料，不會直接儲存。');
+        return;
+      }
       if (/\.(pdf|xlsx)$/i.test(file.name)) {
         setProgress(
           pdfMode === 'ocr'
@@ -680,7 +697,7 @@ function ImportWorkspace({
       } else {
         if (!/\.(csv|tsv|txt|ics)$/i.test(file.name))
           throw new Error(
-            '可讀圖片、PDF、XLSX、CSV、TSV、TXT、ICS 與 Campus One JSON 備份。舊版 XLS 請先另存為 XLSX。',
+            '可讀圖片、PDF、XLSX、HTML、CSV、TSV、TXT、ICS 與 Campus One JSON 備份。舊版 XLS 請先另存為 XLSX。',
           );
         if (file.size > 400_000) throw new Error('文字檔超過 400 KB，請分成較小的檔案再匯入。');
         input = await file.text();
@@ -871,6 +888,7 @@ function ImportWorkspace({
               setNotice('');
               setPreview('');
               setSource({ type: 'paste' });
+              setSchoolPage(null);
             }}
           >
             <strong>{item.title}</strong>
@@ -984,7 +1002,7 @@ function ImportWorkspace({
             <input
               ref={fileInput}
               type="file"
-              accept="image/png,image/jpeg,image/webp,.pdf,.xlsx,.csv,.tsv,.txt,.ics,.json,application/json"
+              accept="image/png,image/jpeg,image/webp,.pdf,.xlsx,.html,.htm,text/html,.csv,.tsv,.txt,.ics,.json,application/json"
               className={styles.file}
               aria-label="選擇截圖或檔案"
               onChange={(event) => {
@@ -1001,20 +1019,33 @@ function ImportWorkspace({
             </button>
             <span>也可以拖曳到這裡</span>
             <small>
-              PNG／JPEG／WebP，單張 10 MB 內；PDF／XLSX，8 MiB 內；CSV／TSV／TXT／ICS，400 KB 內
+              PNG／JPEG／WebP，單張 10 MB 內；PDF／XLSX，8 MiB 內；HTML 校務網頁 500 KB 內；CSV／TSV／TXT／ICS，400 KB 內
             </small>
             <small>
               換裝置：也可選擇 Campus One 完整備份（JSON，8 MB 內），一次帶回三類資料與所有學期。
             </small>
           </div>
           <details className={styles.paste} open={!!text}>
-            <summary>或貼上文字</summary>
+            <summary>或貼上從學校網頁複製的表格／文字</summary>
             <label className={styles.field}>
               原始文字
               <textarea
                 rows={7}
                 value={text}
+                onPaste={(event) => {
+                  const html = event.clipboardData?.getData('text/html');
+                  if (!html || !/<table\b/i.test(html)) return;
+                  try {
+                    const tables = extractSchoolPageTables(html, kind, periodProfile);
+                    event.preventDefault();
+                    setSchoolPage({ name: '校務網頁複製內容', tables });
+                    setNotice('已辨識複製的校務表格。請先選擇要匯入的表格，再核對每筆資料。');
+                  } catch {
+                    // Unsupported markup falls through to normal plain-text paste.
+                  }
+                }}
                 onChange={(event) => {
+                  setSchoolPage(null);
                   setText(event.target.value);
                   // Keep screenshot provenance so corrected OCR table spacing is still parsed.
                   if (!event.target.value || source.type !== 'screenshot')
@@ -1034,6 +1065,44 @@ function ImportWorkspace({
             </button>
           </details>
         </fieldset>
+        {schoolPage && !importDocument && !rows.length && (
+          <section className={styles.schoolPageChooser} aria-label="選擇校務網頁表格">
+            <div>
+              <h3>從校務網頁取出資料</h3>
+              <p>來源：{schoolPage.name}。以下只保留表格文字，不執行原網頁程式，也不連線到學校。請選擇正確表格並核對欄位。</p>
+            </div>
+            <div className={styles.schoolPageCandidates}>
+              {schoolPage.tables.map((table) => (
+                <button
+                  type="button"
+                  key={table.id}
+                  disabled={reading || saving}
+                  onClick={() => {
+                    const selectedSource = { type: 'file' as const, name: schoolPage.name };
+                    setSource(selectedSource);
+                    const term = {
+                      academicYear: year.trim() || table.suggestedTerm?.academicYear || '',
+                      semester: semester.trim() || table.suggestedTerm?.semester || '',
+                    };
+                    if (table.suggestedTerm) {
+                      if (!year.trim()) setYear(term.academicYear);
+                      if (!semester.trim()) setSemester(term.semester);
+                    }
+                    setText(table.text);
+                    // React state updates are deferred; parsing must use the same
+                    // values that will appear in the academic-term fields.
+                    parse(table.text, selectedSource, term);
+                  }}
+                >
+                  <strong>{table.label}</strong>
+                  <span>{table.layout === 'weekly' ? '週課表轉換' : '校務資料列'} · {table.rowCount} 筆 · 點擊後進入核對</span>
+                  {table.suggestedTerm && <span>網頁標示：{table.suggestedTerm.academicYear} 學年度第 {table.suggestedTerm.semester} 學期（只補空欄，匯入前請確認）</span>}
+                </button>
+              ))}
+            </div>
+            <button type="button" className="btn" onClick={() => setSchoolPage(null)}>取消選擇表格</button>
+          </section>
+        )}
         {reading && (
           <div className={styles.actions}>
             <p role="status">{progress || '正在讀取檔案…'}</p>

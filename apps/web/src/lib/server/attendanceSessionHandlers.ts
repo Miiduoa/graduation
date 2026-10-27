@@ -438,5 +438,176 @@ export function createLiveSessionHandlers({
     });
   }
 
-  return { startLiveSession, endLiveSession, joinLiveSession };
+  async function correctAttendanceRecord(request: CallableRequest) {
+    const teacherUid = actor(request);
+    const data = asRecord(request.data);
+    const groupId = documentId(data.groupId, 'groupId');
+    const sessionId = documentId(data.sessionId, 'sessionId');
+    const studentUid = documentId(data.studentUid, 'studentUid');
+    const requestId =
+      data.requestId === undefined ? randomUUID() : documentId(data.requestId, 'requestId');
+    if (teacherUid === studentUid)
+      throw new HttpsError('permission-denied', 'Cannot correct your own record');
+    const status = data.status;
+    if (typeof status !== 'string' || !['present', 'late', 'absent', 'excused'].includes(status))
+      throw new HttpsError('invalid-argument', 'A supported attendance status is required');
+    const reason = typeof data.reason === 'string' ? data.reason.trim() : '';
+    if (reason.length < 6 || reason.length > 300)
+      throw new HttpsError('invalid-argument', 'A reason between 6 and 300 characters is required');
+
+    const group = db.collection('groups').doc(groupId);
+    const attendance = group.collection('attendanceSessions').doc(sessionId);
+    const record = attendance.collection('attendanceRecords').doc(studentUid);
+    const correctionId = `correction_${createHash('sha256')
+      .update(JSON.stringify([groupId, sessionId, teacherUid, requestId]))
+      .digest('hex')}`;
+    const correction = attendance.collection('attendanceCorrections').doc(correctionId);
+    const requestHash = createHash('sha256')
+      .update(JSON.stringify([studentUid, status, reason]))
+      .digest('hex');
+
+    return db.runTransaction(async (transaction: SessionTransaction) => {
+      const [teacher, student, liveSnap, attendanceSnap, recordSnap, auditSnap, course, teacherAccount, studentAccount] =
+        await transaction.getAll(
+          group.collection('members').doc(teacherUid),
+          group.collection('members').doc(studentUid),
+          group.collection('liveSessions').doc(sessionId),
+          attendance,
+          record,
+          correction,
+          group,
+          db.collection('users').doc(teacherUid),
+          db.collection('users').doc(studentUid),
+        );
+      requireMember(teacher, true);
+      const membership = requireMember(student);
+      if (!['member', 'student'].includes(String(membership.role)))
+        throw new HttpsError('permission-denied', 'Target must be an active student member');
+      const schoolId = course.exists ? course.data().schoolId : null;
+      if (
+        !course.exists || course.data().type !== 'course' ||
+        typeof schoolId !== 'string' || !/^[A-Za-z0-9_-]{1,128}$/.test(schoolId)
+      ) {
+        throw new HttpsError('failed-precondition', 'A school-scoped course is required');
+      }
+      for (const account of [teacherAccount, studentAccount]) {
+        if (account.exists && (
+          account.data().accountDeletionInProgress === true ||
+          account.data().status === 'deleted'
+        )) {
+          throw new HttpsError('permission-denied', 'Account is no longer available');
+        }
+      }
+      // Admin SDK bypasses Rules; school revocation must participate in this
+      // transaction before a new write or an idempotent receipt is returned.
+      const schoolMembers = db.collection('schools').doc(schoolId).collection('members');
+      const [teacherSchool, studentSchool] = await transaction.getAll(
+        schoolMembers.doc(teacherUid), schoolMembers.doc(studentUid),
+      );
+      requireMember(teacherSchool);
+      requireMember(studentSchool);
+      if (
+        !liveSnap.exists ||
+        !attendanceSnap.exists ||
+        liveSnap.data().schemaVersion !== SCHEMA_VERSION ||
+        attendanceSnap.data().schemaVersion !== SCHEMA_VERSION ||
+        liveSnap.data().groupId !== groupId ||
+        attendanceSnap.data().groupId !== groupId ||
+        liveSnap.data().sessionId !== sessionId ||
+        attendanceSnap.data().sessionId !== sessionId ||
+        typeof liveSnap.data().active !== 'boolean' ||
+        liveSnap.data().active !== attendanceSnap.data().active
+      ) {
+        throw new HttpsError('failed-precondition', 'An active course record is required');
+      }
+
+      if (auditSnap.exists) {
+        if (auditSnap.data().requestHash !== requestHash)
+          throw new HttpsError('already-exists', 'Request ID already used for another correction');
+        return {
+          success: true,
+          reused: true,
+          status: auditSnap.data().nextStatus,
+        };
+      }
+
+      // Do not finalize an absence or excused status while students can still sign in.
+      if (liveSnap.data().active === true && ['absent', 'excused'].includes(status)) {
+        throw new HttpsError('failed-precondition', 'Finish the attendance session before finalizing absence or leave');
+      }
+      const previous = recordSnap.exists ? recordSnap.data() : null;
+      if (
+        previous &&
+        (previous.uid !== studentUid ||
+          previous.groupId !== groupId ||
+          previous.sessionId !== sessionId ||
+          !['present', 'late', 'absent', 'excused'].includes(String(previous.status)))
+      ) {
+        throw new HttpsError(
+          'failed-precondition',
+          'Attendance record requires administrator repair',
+        );
+      }
+      const previousStatus = previous ? String(previous.status) : null;
+      const wasPresent = previousStatus === 'present' || previousStatus === 'late';
+      const isPresent = status === 'present' || status === 'late';
+      const delta = Number(isPresent) - Number(wasPresent);
+      const liveCount = liveSnap.data().attendeeCount;
+      const attendanceCount = attendanceSnap.data().attendeeCount;
+      if (
+        typeof liveCount !== 'number' || typeof attendanceCount !== 'number' ||
+        !Number.isSafeInteger(liveCount) ||
+        !Number.isSafeInteger(attendanceCount) ||
+        liveCount !== attendanceCount ||
+        liveCount < 0 ||
+        (delta < 0 && liveCount < 1)
+      ) {
+        throw new HttpsError('failed-precondition', 'Attendance counts require administrator repair');
+      }
+      const correctedAt = Timestamp.fromMillis(now());
+      const oldMillis = timestampMillis(previous?.checkedInAt);
+      const checkedInAt = isPresent
+        ? Timestamp.fromMillis(wasPresent && oldMillis !== null ? oldMillis : correctedAt.toMillis())
+        : null;
+      const updatedRecord = {
+        uid: studentUid,
+        groupId,
+        sessionId,
+        status,
+        source: 'manual',
+        checkedInAt,
+        correctedBy: teacherUid,
+        correctedAt,
+        ...profileFields(membership),
+      };
+      if (recordSnap.exists) transaction.update(record, updatedRecord);
+      else transaction.create(record, updatedRecord);
+      if (delta !== 0) {
+        transaction.update(attendance, { attendeeCount: FieldValue.increment(delta) });
+        transaction.update(group.collection('liveSessions').doc(sessionId), {
+          attendeeCount: FieldValue.increment(delta),
+        });
+      }
+      transaction.create(correction, {
+        requestHash,
+        requestId,
+        groupId,
+        sessionId,
+        studentUid,
+        teacherUid,
+        previousStatus,
+        nextStatus: status,
+        reason,
+        correctedAt,
+      });
+      return {
+        success: true,
+        reused: false,
+        status,
+        checkedInAt: checkedInAt ? checkedInAt.toDate().toISOString() : null,
+      };
+    });
+  }
+
+  return { startLiveSession, endLiveSession, joinLiveSession, correctAttendanceRecord };
 }

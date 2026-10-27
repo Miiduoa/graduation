@@ -13,6 +13,8 @@ import {
 import { getDb } from '@/lib/firebase';
 import { getCampusPostById, type CampusPostDoc } from './firestore';
 
+export const BOOKMARK_UNAVAILABLE_COPY = '收藏功能暫時無法使用';
+
 function bookmarkCollection(uid: string, schoolId: string) {
   return collection(getDb(), 'users', uid, 'campusPostBookmarks', schoolId, 'posts');
 }

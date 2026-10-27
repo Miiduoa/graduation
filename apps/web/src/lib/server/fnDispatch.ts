@@ -130,7 +130,7 @@ async function invokeHostedCallable(
     const { createTimetableShareHandlers } = await import('./timetableShareHandlers');
     return createTimetableShareHandlers({ db })[name](request);
   }
-  if (name === 'startLiveSession' || name === 'endLiveSession' || name === 'joinLiveSession') {
+  if (name === 'startLiveSession' || name === 'endLiveSession' || name === 'joinLiveSession' || name === 'correctAttendanceRecord') {
     const { createLiveSessionHandlers } = await import('./attendanceSessionHandlers');
     return createLiveSessionHandlers({ db })[name](request);
   }
@@ -219,7 +219,7 @@ export async function dispatchFnRequest(
     const auth = await verifyCallableAuth(
       request.headers.get('authorization'),
       resolved.verifyIdToken,
-      isLeaveWebCallable(name),
+      isLeaveWebCallable(name) || name === 'correctAttendanceRecord',
     );
     uid = auth?.uid;
     if (uid) {
@@ -273,7 +273,11 @@ async function dispatchSchoolLogin(
       return jsonResponse(503, { error: error.message }, cors);
     }
     if (error instanceof PuLoginHttpError) {
-      return jsonResponse(error.status, { error: error.message }, cors);
+      return jsonResponse(
+        error.status,
+        error.code ? { error: error.message, code: error.code } : { error: error.message },
+        cors,
+      );
     }
     if (error instanceof HttpsError) {
       return jsonResponse(error.httpErrorCode.status, { error: error.message }, cors);
