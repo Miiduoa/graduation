@@ -200,6 +200,21 @@ describe('Nuni browser session boundary', () => {
       await (await handleNuni(request('api/nuni/sign-in-options'), ['sign-in-options'])).json(),
     ).toEqual({ google: false, studentId: false });
   });
+  it('advertises student ID only for an open school login config', async () => {
+    vi.stubEnv('SCHOOL_STUDENT_ID_LOGIN_ENABLED', 'true');
+    fetcher.mockResolvedValueOnce(response({ kinds: ['google-consumer'] }));
+    expect(
+      await (
+        await handleNuni(request('api/nuni/sign-in-options?schoolId=pu'), ['sign-in-options'])
+      ).json(),
+    ).toEqual({ google: true, studentId: true });
+    fetcher.mockResolvedValueOnce(response({ kinds: ['google-consumer'] }));
+    expect(
+      await (
+        await handleNuni(request('api/nuni/sign-in-options?schoolId=ntu'), ['sign-in-options'])
+      ).json(),
+    ).toEqual({ google: true, studentId: false });
+  });
   it('does not treat an unrelated successful JSON response as acknowledged logout', async () => {
     const value = session();
     fetcher.mockResolvedValue(response({ ok: true }));

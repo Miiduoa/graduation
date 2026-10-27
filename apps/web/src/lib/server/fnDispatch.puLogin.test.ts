@@ -223,3 +223,28 @@ it('returns 503 when shared rate-limit storage cannot be written', async () => {
   expect(await res.json()).toEqual({ error: '服務暫時無法使用' });
   expect(loginStudent).not.toHaveBeenCalled();
 });
+
+it('returns the teacher LMS unavailability code without echoing the password', async () => {
+  const { runtime: deps } = runtime();
+  deps.puCampus = campus({
+    loginTronClass: async () => {
+      throw new PuCampusError('timeout', '學校系統無回應', {
+        route: 'teacher',
+        stage: 'submit',
+        code: 'ETIMEDOUT',
+      });
+    },
+  });
+  const res = await dispatchFnRequest(
+    'signInPuStudentId',
+    request({ studentId: 'changyi', password: SECRET }, { 'fly-client-ip': '203.0.113.20' }),
+    deps,
+  );
+  expect(res.status).toBe(503);
+  const body = await res.json();
+  expect(body).toEqual({
+    error: '老師登入暫未開放；學生請輸入純數字學號',
+    code: 'teacher_lms_unreachable',
+  });
+  expect(JSON.stringify(body)).not.toContain(SECRET);
+});

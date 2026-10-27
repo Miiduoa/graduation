@@ -50,6 +50,26 @@ import {
 } from './assignmentFileRoutes';
 import { assignmentFileSubmitEnabled } from './assignmentFileService';
 import { isSchoolStudentIdLoginEnabled } from '@/lib/server/schoolStudentIdLoginEnabled';
+import { isSchoolLoginOffered } from '@/lib/server/schoolLoginConfig';
+
+const SIGN_IN_OPTIONS_SCHOOL_ID = /^[a-z0-9](?:[a-z0-9-]{0,78}[a-z0-9])?$/;
+
+function signInOptionsSchoolId(request: NextRequest): string | null {
+  const keys = Array.from(request.nextUrl.searchParams.keys());
+  if (keys.some((key) => key !== 'schoolId') || request.nextUrl.searchParams.getAll('schoolId').length > 1) {
+    throw new NuniError(400, 'INVALID_INPUT');
+  }
+  const schoolId = request.nextUrl.searchParams.get('schoolId');
+  if (schoolId === null) return null;
+  if (!SIGN_IN_OPTIONS_SCHOOL_ID.test(schoolId)) throw new NuniError(400, 'INVALID_INPUT');
+  return schoolId;
+}
+
+function studentIdSignInOption(request: NextRequest): boolean {
+  if (!isSchoolStudentIdLoginEnabled()) return false;
+  const schoolId = signInOptionsSchoolId(request);
+  return isSchoolLoginOffered(schoolId ?? 'pu');
+}
 
 const WORKSPACE = /^cw_[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 const ASSIGNMENT = /^cwa_[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
@@ -112,8 +132,8 @@ export async function handleNuni(request: NextRequest, segments: string[]): Prom
     const path = segments.join('/');
     if (!nuniEnabled() && path !== 'session' && path !== 'logout') {
       // Existing sessions still need verification and revocation when courses are disabled.
-      if (request.method === 'GET' && !request.nextUrl.search) {
-        if (path === 'sign-in-options') return jsonResponse({ google: false, studentId: false });
+      if (request.method === 'GET' && path === 'sign-in-options') {
+        return jsonResponse({ google: false, studentId: studentIdSignInOption(request) });
       }
       throw new NuniError(404, 'NOT_FOUND');
     }
@@ -143,7 +163,13 @@ export async function handleNuni(request: NextRequest, segments: string[]): Prom
       (Array.from(request.nextUrl.searchParams.keys()).some((key) => key !== 'cursor') ||
         request.nextUrl.searchParams.getAll('cursor').length > 1))
       throw new NuniError(400, 'INVALID_INPUT');
-    if (request.nextUrl.search && !isFoodResource(segments) && !isMaterialsPage && !(method === 'GET' && fileContent))
+    if (
+      request.nextUrl.search &&
+      !isFoodResource(segments) &&
+      !isMaterialsPage &&
+      !(method === 'GET' && fileContent) &&
+      !(method === 'GET' && path === 'sign-in-options')
+    )
       throw new NuniError(400, 'INVALID_INPUT');
     if (method !== 'GET' && !(fileMutation && readPlatformAuthorization(request)))
       requireSameOrigin(request);
@@ -163,7 +189,7 @@ export async function handleNuni(request: NextRequest, segments: string[]): Prom
         throw new NuniError(502, 'INVALID_RESPONSE');
       return jsonResponse({
         google: googleReady && result.kinds.includes('google-consumer'),
-        studentId: isSchoolStudentIdLoginEnabled(),
+        studentId: studentIdSignInOption(request),
       });
     }
     if (method === 'GET' && path === 'session') {

@@ -25,12 +25,42 @@ tags:
 - assertVisible: 'Google 帳號'
 - tapOn:
     id: login-start
-# The navigation target is valid even when the remote session check fails.
-# The offline/error state must not pretend that a Google login succeeded.
+# Assert the visible terminal state rather than a non-interactive page container.
+# The iOS failure artifact contains nuni-workspace in its hierarchy while its
+# visible heading and recovery controls are rendered as separate native nodes.
+# A remote session failure is not a successful login; recovery must remain usable.
 - extendedWaitUntil:
     visible:
-      id: nuni-workspace
+      text: '登入或建立帳號|目前無法確認登入狀態|登出尚未完成'
     timeout: 20000
+- assertNotVisible:
+    id: login-landing
+- assertNotVisible: '登出 Google 帳號'
+- runFlow:
+    when:
+      visible: '目前無法確認登入狀態'
+    commands:
+      - assertVisible:
+          text: '重新確認登入狀態'
+          enabled: true
+      - assertVisible:
+          text: '開啟網頁版登入'
+          enabled: true
+      - assertNotVisible: '申請學校資格'
+- runFlow:
+    when:
+      visible: '登出尚未完成'
+    commands:
+      - assertVisible:
+          text: '重試登出'
+          enabled: true
+- runFlow:
+    when:
+      visible: '登入或建立帳號'
+    commands:
+      - assertVisible:
+          text: '使用 Google 繼續|開啟網頁版登入'
+          enabled: true
 - takeScreenshot: platform_account_state
 
 # On iOS the navigation header owns the back action; a device-level back gesture
@@ -41,11 +71,13 @@ tags:
     visible:
       id: login-landing
     timeout: 20000
+# The campus import entry is always available, even when student-ID login is not.
 - scrollUntilVisible:
     element:
-      text: '只有讀取學校提供的個人課表與成績，才需要連線學校帳號。|目前只能用 Google 帳號登入，登入後再綁定你的學校。'
-    direction: DOWN
-- assertVisible: '連線學校帳號'
+      id: school-import-start
+    direction: UP
+- assertVisible:
+    id: school-import-start
 # School-issued sign-in is hidden unless a verified provider is available.
 # Both states must show a truthful explanation; never assume school login works.
 - runFlow:

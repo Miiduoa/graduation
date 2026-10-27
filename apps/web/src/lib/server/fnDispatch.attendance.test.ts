@@ -1,5 +1,5 @@
 // @vitest-environment node
-import { afterEach, beforeEach, expect, it } from 'vitest';
+import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { dispatchFnRequest, type FnRuntime } from './fnDispatch';
 import { createMemoryGroupStore } from './memoryGroupStore';
 import { resetFirebaseAdminForTests } from './firebaseAdmin';
@@ -31,7 +31,9 @@ function runtime(options?: {
   const store =
     options?.store ??
     createMemoryGroupStore([
-      ['groups/class-1', { name: '程式設計' }],
+      ['groups/class-1', { name: '程式設計', type: 'course', schoolId: 'school-1' }],
+      ['schools/school-1/members/teacher', { status: 'active' }],
+      ['schools/school-1/members/student', { status: 'active' }],
       ['groups/class-1/members/teacher', { role: 'instructor', status: 'active' }],
       [
         'groups/class-1/members/student',
@@ -257,4 +259,129 @@ it('returns 400 for an oversized joinLiveSession body', async () => {
   );
   expect(res.status).toBe(400);
   expect((await res.json()).error.status).toBe('INVALID_ARGUMENT');
+});
+
+it('HTTP correction requires a real teacher identity and writes a counted, audited receipt', async () => {
+  const teacher = runtime({ uid: 'teacher' });
+  const started = await dispatchFnRequest(
+    'startLiveSession',
+    request('startLiveSession', {
+      body: { data: { groupId: 'class-1', requestId: 'manual-session' } },
+      headers: { Authorization: 'Bearer valid-token' },
+    }),
+    teacher.runtime,
+  );
+  expect(started.status).toBe(200);
+  const session = (await started.json()) as { result: { sessionId: string } };
+  const data = {
+    groupId: 'class-1',
+    sessionId: session.result.sessionId,
+    studentUid: 'student',
+    status: 'late',
+    reason: '授課教師依現場紀錄確認遲到',
+    requestId: 'teacher-confirm-1',
+  };
+  const student = runtime({ uid: 'student', store: teacher.store });
+  const denied = await dispatchFnRequest(
+    'correctAttendanceRecord',
+    request('correctAttendanceRecord', {
+      body: { data },
+      headers: { Authorization: 'Bearer valid-token' },
+    }),
+    student.runtime,
+  );
+  expect(denied.status).toBe(403);
+  expect((await denied.json()).error.status).toBe('PERMISSION_DENIED');
+  const approved = await dispatchFnRequest(
+    'correctAttendanceRecord',
+    request('correctAttendanceRecord', {
+      body: { data },
+      headers: { Authorization: 'Bearer valid-token' },
+    }),
+    teacher.runtime,
+  );
+  expect(approved.status).toBe(200);
+  expect((await approved.json()).result).toMatchObject({ success: true, status: 'late' });
+  const attendance = teacher.store.docs.get(
+    `groups/class-1/attendanceSessions/${session.result.sessionId}`,
+  );
+  expect(attendance?.attendeeCount).toBe(1);
+  expect([...teacher.store.docs.keys()].filter((key) => key.includes('/attendanceCorrections/')))
+    .toHaveLength(1);
+});
+
+it('exposes manual corrections on the explicit hosted allowlist but requires a bearer token', async () => {
+  const { runtime: deps, store } = runtime({ uid: 'teacher' });
+  const denied = await dispatchFnRequest(
+    'correctAttendanceRecord',
+    request('correctAttendanceRecord', {
+      body: { data: {
+        groupId: 'class-1',
+        sessionId: 'session-existing',
+        studentUid: 'student',
+        status: 'present',
+        reason: '授課教師現場確認學生出席',
+        requestId: 'manual-correction-id',
+      } },
+    }),
+    deps,
+  );
+  expect(denied.status).toBe(401);
+  expect((await denied.json()).error.status).toBe('UNAUTHENTICATED');
+  expect([...store.docs.keys()].some((key) => key.includes('attendanceCorrections'))).toBe(false);
+});
+it('does not accidentally expose unrelated privileged functions when corrections are enabled', async () => {
+  const { runtime: deps } = runtime({ uid: 'teacher' });
+  const blocked = await dispatchFnRequest(
+    'verifyAttendanceClaim',
+    request('verifyAttendanceClaim', {
+      body: { data: { groupId: 'class-1' } },
+      headers: { Authorization: 'Bearer valid-token' },
+    }),
+    deps,
+  );
+  expect(blocked.status).toBe(404);
+  expect((await blocked.json()).error.status).toBe('NOT_FOUND');
+});
+
+it('checks token revocation for teacher corrections before any mutation', async () => {
+  const { runtime: deps, store } = runtime();
+  const verify = vi.fn(async (_token: string, checkRevoked?: boolean) => {
+    if (checkRevoked) throw new Error('auth/id-token-revoked');
+    return { uid: 'teacher' };
+  });
+  deps.verifyIdToken = verify;
+  const before = new Map(store.docs);
+  const denied = await dispatchFnRequest('correctAttendanceRecord', request('correctAttendanceRecord', {
+    body: { data: {
+      groupId: 'class-1', sessionId: 'session-1', studentUid: 'student',
+      status: 'present', reason: '授課教師現場核實學生出席', requestId: 'attempt-revoked',
+    } },
+    headers: { Authorization: 'Bearer valid-token' },
+  }), deps);
+  expect(verify).toHaveBeenCalledWith('valid-token', true);
+  expect(denied.status).toBe(401);
+  expect(store.docs).toEqual(before);
+});
+
+it('does not let an active course instructor correct records after school access is revoked', async () => {
+  const teacher = runtime();
+  const started = await dispatchFnRequest('startLiveSession', request('startLiveSession', {
+    body: { data: { groupId: 'class-1', requestId: 'school-scope-test' } },
+    headers: { Authorization: 'Bearer valid-token' },
+  }), teacher.runtime);
+  expect(started.status).toBe(200);
+  const session = (await started.json()).result as { sessionId: string };
+  teacher.store.docs.set('schools/school-1/members/teacher', { status: 'inactive' });
+  const before = new Map(teacher.store.docs);
+  const denied = await dispatchFnRequest('correctAttendanceRecord', request('correctAttendanceRecord', {
+    body: { data: {
+      groupId: 'class-1', sessionId: session.sessionId, studentUid: 'student',
+      status: 'present', reason: '授課教師現場核實學生出席', requestId: 'school-revoked',
+    } },
+    headers: { Authorization: 'Bearer valid-token' },
+  }), teacher.runtime);
+  expect(denied.status).toBe(403);
+  expect((await denied.json()).error.status).toBe('PERMISSION_DENIED');
+  expect(teacher.store.docs).toEqual(before);
 });

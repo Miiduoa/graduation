@@ -18,6 +18,8 @@ import styles from '../servicePages.module.css';
 import { NuniSignIn } from '@/components/NuniSignIn';
 import { platformDestination } from '@/lib/accountDestination';
 import { isPublicCampusPath, publicCampusServices } from '@/lib/publicCampusServices';
+import { useOptionalSelectedSchool } from '@/components/SelectedSchoolProvider';
+import { SchoolLoginHttpError, schoolLoginFailureCopy } from '@/lib/schoolLoginErrorCopy';
 import { STUDENT_ID_PREPARING_COPY, useSignInOptions } from '@/lib/signInOptions';
 
 function loginDestination(value: string | null): string {
@@ -55,7 +57,13 @@ function LoginForm({
 }) {
   const router = useRouter();
   const { user, loading: schoolLoading } = useAuth();
-  const options = useSignInOptions();
+  const selection = useOptionalSelectedSchool();
+  const selectedSchoolId = selection?.selectedSchoolId ?? null;
+  const schoolDirectoryReady = !selection || !selection.loading;
+  const importHref = selectedSchoolId && selection?.selectedSchool
+    ? `/import?schoolId=${encodeURIComponent(selectedSchoolId)}`
+    : '/import';
+  const options = useSignInOptions(selectedSchoolId, schoolDirectoryReady);
   const [studentId, setStudentId] = useState('');
   const [password, setPassword] = useState('');
   const busyRef = useRef<'school' | 'platform' | null>(null);
@@ -64,9 +72,13 @@ function LoginForm({
   const [busy, setBusy] = useState(false);
   const [platformBusy, setPlatformBusy] = useState(false);
   const [error, setError] = useState('');
+  const previousSchoolId = useRef(selectedSchoolId);
   const schoolTask = reconnect || platformDestination(destination) !== destination;
   const schoolAvailable = options.studentId;
   const schoolRequired = schoolTask && schoolAvailable;
+  const hasSchoolIdentity = Boolean(
+    user?.uid.startsWith('pu-') && (!selectedSchoolId || selectedSchoolId === 'pu'),
+  );
   const schoolUnavailable =
     schoolTask && !options.loading && !options.error && !schoolAvailable;
   // School destinations stay school-only; Google must not appear to fulfill them.
@@ -89,18 +101,31 @@ function LoginForm({
     };
   }, []);
   useEffect(() => {
+    if (previousSchoolId.current === selectedSchoolId) return;
+    previousSchoolId.current = selectedSchoolId;
+    request.current?.abort();
+    request.current = null;
+    if (busyRef.current === 'school') {
+      busyRef.current = null;
+      setBusy(false);
+    }
+    setStudentId('');
+    setPassword('');
+    setError('');
+  }, [selectedSchoolId]);
+  useEffect(() => {
     if (
       !schoolLoading &&
       !busyRef.current &&
       !returning.current &&
-      user &&
+      hasSchoolIdentity &&
       schoolRequired &&
       !reconnect
     ) {
       returning.current = true;
       goAfterLogin(router, destination);
     }
-  }, [user, schoolLoading, router, destination, reconnect, schoolRequired]);
+  }, [hasSchoolIdentity, schoolLoading, router, destination, reconnect, schoolRequired]);
   async function login(event: FormEvent) {
     event.preventDefault();
     if (busyRef.current || returning.current || schoolLoading || !schoolAvailable) return;
@@ -114,19 +139,23 @@ function LoginForm({
     request.current = controller;
     setBusy(true);
     try {
-      const authenticated = await signInWithPuStudentId(
-        studentId.trim().toUpperCase(),
-        password,
-        controller.signal,
-      );
+      const authenticated = selectedSchoolId
+        ? await signInWithPuStudentId(
+            studentId.trim().toUpperCase(),
+            password,
+            controller.signal,
+            selectedSchoolId,
+          )
+        : await signInWithPuStudentId(studentId.trim().toUpperCase(), password, controller.signal);
       if (controller.signal.aborted) return;
       if (!authenticated) throw new Error('登入服務尚未連線。');
       setPassword('');
       returning.current = true;
       goAfterLogin(router, destination);
-    } catch {
+    } catch (error) {
       if (controller.signal.aborted) return;
-      setError('登入失敗。請確認學號與密碼，或稍後再試。');
+      if (error instanceof SchoolLoginHttpError && error.status === 401) setPassword('');
+      setError(schoolLoginFailureCopy(error));
     } finally {
       if (!controller.signal.aborted) {
         busyRef.current = null;
@@ -151,38 +180,45 @@ function LoginForm({
             : '不登入也能看校園資訊。需要課程、交流或店家服務時，用 Google 帳號登入。'
       }
     >
-      <section className={styles.guestAccess} aria-labelledby="guest-access-title">
+      <section className={styles.connectionIntro} aria-label="校務連線方式">
         <div>
-          <h2 id="guest-access-title">先瀏覽校園資訊</h2>
-          <p>地圖、公車、公開公告、餐廳與圖書館入口不需登入。資料是否提供，依各校來源為準。</p>
+          <p className={styles.connectionKicker}>校園資料，一次整理</p>
+          <h2>用熟悉的學校帳號，接上自己的課表</h2>
+          <p>靜宜大學目前提供學號直接連線；其他學校可以從學校下載或截取資料後自行匯入。兩種方法分開顯示，避免把「可瀏覽校園」誤認為「已取得校務權限」。</p>
         </div>
-        <Link href={guestDestination} className="btn">
-          不登入，繼續瀏覽
-        </Link>
-        <nav aria-label="不需登入的校園服務">
-          {publicCampusServices.map((service) => (
-            <Link key={service.href} href={service.href}>
-              {service.title}
-            </Link>
-          ))}
-        </nav>
+        <div className={styles.connectionFacts}>
+          <span>直接連線：靜宜大學</span>
+          <span>檔案匯入：跨校適用</span>
+        </div>
       </section>
       <div className={styles.loginLayout}>
-        {!hideGoogle && (
-          <NuniSignIn
-            returnUrl={destination}
-            issue={issue}
-            disabled={busy}
-            onStart={() => {
-              if (busyRef.current) return false;
-              busyRef.current = 'platform';
-              setPlatformBusy(true);
-              return true;
-            }}
-          />
-        )}
         <section className={styles.loginHelp} aria-label="學校帳號登入">
-          <h2>學校帳號</h2>
+          <div className={styles.methodHeading}>
+            <div>
+              <span className={styles.methodEyebrow}>學校帳號 · 本人授權</span>
+              <h2>學校帳號</h2>
+            </div>
+            <span className={styles.methodStatus}>{schoolAvailable ? '可連線' : '依校園提供'}</span>
+          </div>
+          {(selection?.schools?.length ?? 0) > 0 && (
+            <label className={styles.schoolPicker} htmlFor="login-school">
+              <span>選擇學校</span>
+              <select
+                id="login-school"
+                value={selectedSchoolId ?? ''}
+                onChange={(event) => selection?.selectSchool(event.target.value || null)}
+                disabled={busy || platformBusy || schoolLoading || !schoolDirectoryReady}
+              >
+                <option value="">全部校園／未指定</option>
+                {selection?.schools.map((school) => (
+                  <option key={school.id} value={school.id}>{school.name}</option>
+                ))}
+              </select>
+            </label>
+          )}
+          {selection?.selectedSchool && (
+            <p className={styles.selectedCampus}>目前選擇：{selection.selectedSchool.name}</p>
+          )}
           {options.loading ? (
             <p role="status">正在確認登入方式…</p>
           ) : options.error ? (
@@ -193,8 +229,7 @@ function LoginForm({
           ) : schoolAvailable ? (
             <>
               <p>
-                讀取個人課表、成績、校務紀錄與既有地圖收藏時使用。目前支援靜宜大學；學生用 e
-                校園學號，老師用教職員帳號與密碼登入。
+                目前支援靜宜大學 e 校園學號登入，用於讀取本人的課表、成績與校務紀錄。學校帳號驗證不會自動取得教師、課班或平台管理權限。
               </p>
               {schoolRequired && (
                 <p>
@@ -204,12 +239,17 @@ function LoginForm({
                 </p>
               )}
               <form className={styles.loginForm} onSubmit={login} aria-busy={busy}>
+                <p className={styles.formIntro}>使用學校的既有帳號連線，不需要另外申請 Campus One 學號。</p>
                 <Input
                   id="student-id"
                   name="studentId"
                   label="學號"
                   value={studentId}
-                  onChange={(e) => setStudentId(e.target.value)}
+                  onChange={(e) => {
+                    setStudentId(e.target.value);
+                    setError('');
+                  }}
+                  maxLength={64}
                   required
                   autoComplete="username"
                   autoCapitalize="characters"
@@ -222,11 +262,17 @@ function LoginForm({
                   label="密碼"
                   type="password"
                   value={password}
-                  onChange={(e) => setPassword(e.target.value)}
+                  onChange={(e) => {
+                    setPassword(e.target.value);
+                    setError('');
+                  }}
                   required
                   autoComplete="current-password"
                   disabled={busy || platformBusy || schoolLoading}
                 />
+                {busy && (
+                  <p role="status" className={styles.loginProgress}>正在驗證帳號與建立校務資料連線…</p>
+                )}
                 {error && (
                   <p role="alert" className={styles.errorNotice}>
                     {error}
@@ -242,7 +288,11 @@ function LoginForm({
                   {schoolLoading ? '正在確認學校帳號…' : busy ? '連線中…' : '連線學校帳號'}
                 </Button>
               </form>
-              <p>請輸入你登入 e 校園時使用的資料。若忘記密碼，請透過學校的帳號服務處理。</p>
+              <details className={styles.connectionDetails}>
+                <summary>連線後能看到哪些資料？</summary>
+                <p>靜宜大學目前可使用校務系統連線取得個人課表與成績，其他資料依學校系統當次回應為準。學校帳號驗證不等於取得平台的教師或管理權限。</p>
+                <p>密碼會透過加密連線送至驗證服務使用；不會存成個人匯入草稿。忘記密碼請前往學校原本的帳號服務處理。</p>
+              </details>
             </>
           ) : schoolUnavailable ? (
             <p role="status">
@@ -251,6 +301,12 @@ function LoginForm({
           ) : (
             <p role="status">{STUDENT_ID_PREPARING_COPY}</p>
           )}
+          <div className={styles.importRoute}>
+            <span className={styles.methodEyebrow}>另一種方式 · 各校適用</span>
+            <h3>不使用學號，也能匯入課表</h3>
+            <p>在校務系統開啟課表或成績列表後，直接複製網頁表格貼上，或匯入從學校下載的 HTML、PDF、CSV 與截圖。先核對預覽再儲存，不必提供學校密碼。</p>
+            <Link href={importHref} className="btn">前往資料匯入 <span aria-hidden="true">↗</span></Link>
+          </div>
           <div className={styles.helpLinks}>
             <Link href="/privacy">
               了解資料使用方式 <span aria-hidden="true">↗</span>
@@ -268,7 +324,36 @@ function LoginForm({
             ← 返回首頁
           </Link>
         </section>
+        {!hideGoogle && (
+          <NuniSignIn
+            returnUrl={destination}
+            issue={issue}
+            disabled={busy}
+            onStart={() => {
+              if (busyRef.current) return false;
+              busyRef.current = 'platform';
+              setPlatformBusy(true);
+              return true;
+            }}
+          />
+        )}
       </div>
+      <section className={styles.guestAccess} aria-labelledby="guest-access-title">
+        <div>
+          <h2 id="guest-access-title">先瀏覽校園資訊</h2>
+          <p>地圖、公車、公開公告、餐廳與圖書館入口不需登入。資料是否提供，依各校來源為準。</p>
+        </div>
+        <Link href={guestDestination} className="btn">
+          不登入，繼續瀏覽
+        </Link>
+        <nav aria-label="不需登入的校園服務">
+          {publicCampusServices.map((service) => (
+            <Link key={service.href} href={service.href}>
+              {service.title}
+            </Link>
+          ))}
+        </nav>
+      </section>
     </SiteShell>
   );
 }

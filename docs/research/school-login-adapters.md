@@ -76,7 +76,7 @@ nuni-api（Fly，唯一驗學校帳密的地方）
 靜宜會有**多個策略、同一個 adapter 套件**，不是「一個 PHP 登入頁＝整間學校」：
 
 1. `identity.pu.edu.tw` Keycloak（CAS，必要時再申請 OIDC client）
-2. 學校信箱／Google Workspace（若 `@pu.edu.tw` 確是校發）
+2. 學校信箱／Microsoft 365（靜宜學生雲端主力是 M365 `@o365st.pu.edu.tw`，111 學年起不配發 Google）
 3. `alcat.pu.edu.tw` 表單模擬（最後手段，且要有版本化解析，見第 4、5 節）
 
 TronClass、成績頁、選課頁是**資料連線**，不是登入是否成功的唯一依據。登入成功只需要「校方身分系統承認這組學號密碼」；課表稍後抓不到，應標資料降級，不把人踢出去。
@@ -112,7 +112,7 @@ TronClass、成績頁、選課頁是**資料連線**，不是登入是否成功�
 
 | 學校 | 較可能的官方路 | 還能不能免爬 |
 | --- | --- | --- |
-| 靜宜 `pu` | Keycloak CAS（`identity.pu.edu.tw`）；信箱網域 `pu.edu.tw` | 若校發 Google／信箱 OTP 可用，日常登入可完全不碰 e 校園網頁 |
+| 靜宜 `pu` | Keycloak CAS（`identity.pu.edu.tw`）；學生雲端主力 M365 `@o365st.pu.edu.tw`（111 學年起不配發 Google）；信箱網域 `pu.edu.tw` | 若校發 M365／信箱 OTP 可用，日常登入可完全不碰 e 校園網頁 |
 | 台科大 | 入口 OAuth（公開路徑曾見 `portal.ntust.edu.tw/oauth`） | 有 client 就可免爬 |
 | 台大、清大、成大、陽交大、中央、師大、政大等 | 多為校務入口＋Google 或 CAS | 優先談 SSO／學校 Google，不要先寫爬蟲 |
 | 輔大、東海、長庚、中原、東吳、北醫等 | 入口／Google／微軟混用 | 一校一查；沒 SSO 才考慮表單 |
@@ -334,8 +334,8 @@ adapter **程式**跟映像走；adapter **設定**（URL、欄位、指紋、�
 ## 9. 靜宜第一間：建議接法（摘要）
 
 1. 使用者送學號密碼 → 只進 nuni-api。
-2. 依序試：Keycloak CAS →（若有）學校 Google／校方 API → alcat 表單新版 → 表單舊版。
-3. 成功：密碼丟棄；發我們的 session；強迫綁信箱 OTP／學校 Google／passkey。
+2. 依序試：Keycloak CAS →（若有）學校 M365／校方 API → alcat 表單新版 → 表單舊版。
+3. 成功：密碼丟棄；發我們的 session；強迫綁信箱 OTP／學校 M365／passkey。靜宜不要把「學校 Google」當預設第二因素：學生雲端主力是 M365 `@o365st.pu.edu.tw`，111 學年起不配發 Google。
 4. 之後登入：已綁定方式，不打學校。
 5. 學校改版：已綁定者無感；新生走信箱 OTP；健康檢查標靜宜 `degraded`，自動試新解析並開修正提交。
 6. 畫面：帳密錯就說帳密錯；其他情況不說帳密錯，並把已綁定入口放最上面。
