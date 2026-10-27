@@ -5,6 +5,7 @@ import { CreditAuditScreen } from './CreditAuditScreen';
 import { CreditAuditInputScreen } from './CreditAuditInputScreen';
 import CreditSummaryScreen from './CreditSummaryScreen';
 import CreditPlanningScreen from './CreditPlanningScreen';
+import CreditTranscriptReviewScreen from './CreditTranscriptReviewScreen';
 import { theme } from '../ui/theme';
 import { useThemeMode } from '../state/theme';
 
@@ -42,6 +43,11 @@ export function CreditAuditStack() {
         name="CreditPlanning"
         component={CreditPlanningScreen}
         options={{ title: '未來學分規劃', headerShown: false }}
+      />
+      <Stack.Screen
+        name="CreditTranscriptReview"
+        component={CreditTranscriptReviewScreen}
+        options={{ title: '已修學分核對', headerShown: false }}
       />
     </Stack.Navigator>
   );

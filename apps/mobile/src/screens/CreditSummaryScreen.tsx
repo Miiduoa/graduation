@@ -256,6 +256,23 @@ export default function CreditSummaryScreen(props: Props) {
 
       <Pressable
         accessibilityRole="button"
+        accessibilityLabel="從成績核對並帶入學分規劃"
+        accessibilityState={{ disabled: !uid || auth.loading }}
+        disabled={!uid || auth.loading}
+        onPress={() => navigation?.navigate?.('CreditTranscriptReview')}
+        style={{ marginHorizontal: aiTokens.space.md, marginTop: aiTokens.space.md,
+          padding: aiTokens.space.lg, minHeight: 64, borderRadius: aiTokens.radius.lg,
+          backgroundColor: aiTokens.surface, borderWidth: 1, borderColor: aiTokens.border,
+          opacity: !uid || auth.loading ? 0.5 : 1 }}
+      >
+        <Text style={{ color: aiTokens.text, fontSize: 16, fontWeight: '700' }}>從成績核對已修學分 →</Text>
+        <Text style={{ color: aiTokens.muted, fontSize: 12, marginTop: 6, lineHeight: 19 }}>
+          逐筆核對重修與分類，預覽後帶入規劃，不必重新加總或手填。
+        </Text>
+      </Pressable>
+
+      <Pressable
+        accessibilityRole="button"
         accessibilityLabel="規劃未來每學期課程"
         onPress={() => navigation?.navigate?.('CreditPlanning')}
         style={{
