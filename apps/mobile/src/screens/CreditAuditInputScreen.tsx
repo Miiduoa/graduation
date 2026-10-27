@@ -7,6 +7,9 @@ import { File, Paths } from 'expo-file-system';
 import { isAvailableAsync, shareAsync } from 'expo-sharing';
 import {
   getCreditAuditStorageKey,
+  getCreditChecklistStorageKey,
+  loadCreditChecklistStatus,
+  saveCreditChecklistStatus,
   loadCreditAuditSavedCourses,
   saveCreditAuditSavedCourses,
   syncCreditAuditCoursesToCloud,
@@ -115,7 +118,7 @@ export function CreditAuditInputScreen(props: any) {
     [detailedTemplate],
   );
 
-  // Non-credit requirement satisfaction (persisted per user later)
+  // Reference checklist status is scoped to the account, campus and template.
   const [nonCreditSatisfied, setNonCreditSatisfied] = useState<Record<string, boolean>>({});
 
   const [savedCourses, setSavedCourses] = useState<SavedCourse[]>([]);
@@ -129,6 +132,10 @@ export function CreditAuditInputScreen(props: any) {
     () => getCreditAuditStorageKey(auth.user?.uid ?? null, school.id),
     [auth.user?.uid, school.id],
   );
+  const checklistKey = useMemo(
+    () => getCreditChecklistStorageKey(auth.user?.uid ?? null, school.id, detailedTemplate.id),
+    [auth.user?.uid, school.id, detailedTemplate.id],
+  );
 
   const activeScope = useRef(storageKey);
   activeScope.current = storageKey;
@@ -141,10 +148,14 @@ export function CreditAuditInputScreen(props: any) {
     setSavedCourses([]);
     setLoadError(null);
     try {
-      const rows = await loadCreditAuditSavedCourses(storageKey);
+      const [rows, checklist] = await Promise.all([
+        loadCreditAuditSavedCourses(storageKey),
+        loadCreditChecklistStatus(checklistKey),
+      ]);
       if (request !== requestIdRef.current) return;
       if (!Array.isArray(rows)) throw new Error('儲存格式錯誤');
       setSavedCourses(rows);
+      setNonCreditSatisfied(checklist);
     } catch {
       if (request !== requestIdRef.current) return;
       setLoadError('本機課程資料無法讀取，這次不會以空資料覆寫原紀錄。');
@@ -154,7 +165,7 @@ export function CreditAuditInputScreen(props: any) {
         setLoading(false);
       }
     }
-  }, [storageKey]);
+  }, [storageKey, checklistKey]);
 
   useEffect(() => {
     analytics.logScreenView('CreditAuditInput');
@@ -1205,10 +1216,13 @@ export function CreditAuditInputScreen(props: any) {
                     <Pressable
                       key={req.key}
                       onPress={() => {
-                        setNonCreditSatisfied((prev) => ({
-                          ...prev,
-                          [req.key]: !prev[req.key],
-                        }));
+                        const previousScope = storageKey;
+                        const next = { ...nonCreditSatisfied, [req.key]: !nonCreditSatisfied[req.key] };
+                        void saveCreditChecklistStatus(checklistKey, next)
+                          .then(() => {
+                            if (activeScope.current === previousScope) setNonCreditSatisfied(next);
+                          })
+                          .catch(() => Alert.alert('尚未儲存', '這次勾選無法保存，請稍後重試。'));
                       }}
                       style={{
                         flexDirection: 'row',
@@ -1257,7 +1271,7 @@ export function CreditAuditInputScreen(props: any) {
                   );
                 })}
                 <Text style={{ color: theme.colors.muted, fontSize: 11, textAlign: 'center' }}>
-                  點擊可切換完成狀態
+                  個人勾選結果只保存在此裝置，不代表校方認證完成
                 </Text>
               </View>
             </AnimatedCard>
