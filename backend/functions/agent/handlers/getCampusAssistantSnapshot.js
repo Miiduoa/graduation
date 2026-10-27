@@ -12,6 +12,7 @@ const {
   fetchAssistantAnnouncements,
 } = require('../../lib/assistantFetchers');
 const { toJsDate } = require('../../lib/assistantFormat');
+const { summarizeAssignmentRows } = require('../assignmentSummary');
 
 const onCall = createAccountGuardedOnCall({
   onCall: firebaseOnCall,
@@ -67,15 +68,8 @@ module.exports = onCall(
       return { status: 'available', count: value.slots.length };
     }, { status: 'unavailable', count: null });
 
-    const assignments = summarizeSettled(assignmentsResult, (items) => ({
-      status: 'available',
-      count: Array.isArray(items) ? items.length : 0,
-      items: (Array.isArray(items) ? items : []).slice(0, 8).map((item) => ({
-        title: String(item.title || '').slice(0, 140),
-        groupName: String(item.groupName || '').slice(0, 100),
-        dueAt: toIso(item.dueAt),
-      })),
-    }), { status: 'unavailable', count: null, items: [] });
+    const assignments = summarizeSettled(assignmentsResult, summarizeAssignmentRows,
+      { status: 'unavailable', count: null, items: [] });
 
     const announcements = summarizeSettled(announcementsResult, (items) => ({
       status: 'available',
