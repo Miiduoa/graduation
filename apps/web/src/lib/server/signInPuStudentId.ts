@@ -23,6 +23,7 @@ import {
   canonicalizePuStudentId,
   normalizePuAccount,
   normalizePuStudentId,
+  providenceAlcatUidCandidates,
   PROVIDENCE_SCHOOL_ID,
 } from './puIdentity';
 import {
@@ -333,7 +334,16 @@ export async function handleSignInPuStudentId(
     const campusStartedAt = Date.now();
     try {
       return kind === 'student'
-        ? await signInStudent(studentId, password, campus, deps, config)
+        ? await signInStudent(
+            studentId,
+            config.schoolId === PROVIDENCE_SCHOOL_ID
+              ? providenceAlcatUidCandidates(rawAccount)
+              : [studentId],
+            password,
+            campus,
+            deps,
+            config,
+          )
         : await signInTeacher(teacherAccount, password, campus, deps, config);
     } catch (error) {
       logExpectedCampusFailure(error, campusStartedAt, config.schoolId, kind);
@@ -364,8 +374,36 @@ export async function handleSignInPuStudentId(
   }
 }
 
+async function loginStudentWithAlternateUid(
+  campus: PuCampusGateway,
+  portalUids: readonly string[],
+  password: string,
+): Promise<{ login: Awaited<ReturnType<PuCampusGateway['loginStudent']>>; portalUid: string }> {
+  const uids = portalUids.filter((uid) => uid.length > 0).slice(0, 2);
+  const first = uids[0];
+  if (!first) {
+    throw new PuLoginHttpError(400, '學號格式不正確');
+  }
+  try {
+    return { login: await campus.loginStudent(first, password), portalUid: first };
+  } catch (error) {
+    const alternate = uids[1];
+    if (!alternate || !(error instanceof PuCampusError) || error.kind !== 'credentials') {
+      if (error instanceof PuCampusError) throwMappedCampusError(error, 'student');
+      throw error;
+    }
+    try {
+      return { login: await campus.loginStudent(alternate, password), portalUid: alternate };
+    } catch (second) {
+      if (second instanceof PuCampusError) throwMappedCampusError(second, 'student');
+      throw second;
+    }
+  }
+}
+
 async function signInStudent(
-  rawStudentId: string,
+  canonicalStudentId: string,
+  portalUids: readonly string[],
   password: string,
   campus: PuCampusGateway,
   deps: SignInPuDeps,
@@ -374,15 +412,7 @@ async function signInStudent(
   if (config.studentAdapter !== 'form-password') {
     closedWithoutCampus();
   }
-  let login;
-  try {
-    login = await campus.loginStudent(rawStudentId, password);
-  } catch (error) {
-    if (error instanceof PuCampusError) {
-      throwMappedCampusError(error, 'student');
-    }
-    throw error;
-  }
+  const { login, portalUid } = await loginStudentWithAlternateUid(campus, portalUids, password);
   if (!login.cookies || Object.keys(login.cookies).length === 0) {
     throw new PuLoginHttpError(401, '學號或密碼錯誤');
   }
@@ -390,7 +420,7 @@ async function signInStudent(
   let tronClass: Awaited<ReturnType<PuCampusGateway['loginTronClass']>> | null = null;
   const softStartedAt = Date.now();
   try {
-    tronClass = await campus.loginTronClass(rawStudentId, password, {
+    tronClass = await campus.loginTronClass(portalUid, password, {
       timeoutMs: STUDENT_LMS_SOFT_TIMEOUT_MS,
       route: 'student',
     });
@@ -418,7 +448,7 @@ async function signInStudent(
     }
   }
 
-  const studentId = normalizePuStudentId(profile.studentId || rawStudentId);
+  const studentId = canonicalStudentId;
   const displayName = String(profile.name || login.studentName || `${studentId} 同學`).trim();
   const department = String(profile.class || '').trim();
   const email = schoolEmail(config, studentId);
