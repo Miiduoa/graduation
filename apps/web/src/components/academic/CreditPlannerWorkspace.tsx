@@ -18,6 +18,7 @@ import {
 } from '@/lib/creditPlanner';
 import styles from './CreditPlannerWorkspace.module.css';
 import { CreditPlannerRequirements } from './CreditPlannerRequirements';
+import { CreditPlanFeasibility } from './CreditPlanFeasibility';
 
 type CourseDraft = {
   name: string;
@@ -379,6 +380,8 @@ export function CreditPlannerWorkspace({
           </div>
         )}
       </div>
+
+      <CreditPlanFeasibility plan={plan} />
 
       <div className={styles.sectionHeading}>
         <div>

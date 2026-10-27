@@ -846,3 +846,54 @@ it('preserves the existing PDF preview on re-read failure, then cancels and igno
   expect(screen.queryByText('grades.pdf')).toBeNull();
   expect(readPersonalImports(context)).toHaveLength(0);
 });
+
+it('selects a course-grade table saved from a school website before any record is written', async () => {
+  render(<PersonalImportCenter />);
+  fireEvent.change(screen.getByLabelText('這份資料的學年度'), { target: { value: '115' } });
+  fireEvent.change(screen.getByLabelText('學期'), { target: { value: '1' } });
+  const html = '<table><tr><th>課程名稱</th><th>學分</th><th>成績</th></tr>' +
+    '<tr><td>統計學</td><td>3</td><td>89</td></tr></table>';
+  const file = { name: 'academic.html', size: html.length, type: 'text/html', text: async () => html };
+  fireEvent.change(screen.getByLabelText('選擇截圖或檔案'), { target: { files: [file] } });
+  await screen.findByText('從校務網頁取出資料');
+  expect(readPersonalImports(context)).toHaveLength(0);
+  fireEvent.click(screen.getByRole('button', { name: /表格 1 · 1 筆/ }));
+  await waitFor(() => expect((screen.getAllByLabelText('成績')[0] as HTMLInputElement).value).toBe('89'));
+  expect(readPersonalImports(context)).toHaveLength(0);
+  expect((screen.getByLabelText('原始文字') as HTMLTextAreaElement).value).toContain('統計學');
+  expect(screen.getByRole('button', { name: '確認匯入 1 筆' })).toBeTruthy();
+});
+
+it('accepts rich HTML tables copied from a school site without running its scripts', async () => {
+  render(<PersonalImportCenter />);
+  const html = '<table><tr><th>課程名稱</th><th>學分</th><th>成績</th></tr>' +
+    '<tr><td>英文</td><td>2</td><td>90</td></tr></table><script>alert(1)</script>';
+  fireEvent.paste(screen.getByLabelText('原始文字'), {
+    clipboardData: {
+      getData: (format: string) => format === 'text/html' ? html : 'HTML not text',
+    },
+  });
+  await screen.findByText('從校務網頁取出資料');
+  fireEvent.click(screen.getByRole('button', { name: /表格 1 · 1 筆/ }));
+  expect((screen.getByLabelText('原始文字') as HTMLTextAreaElement).value).not.toContain('<script');
+  expect((screen.getByLabelText('原始文字') as HTMLTextAreaElement).value).toContain('英文');
+  expect(readPersonalImports(context)).toHaveLength(0);
+});
+
+it('applies the school HTML term to preview rows in the same click, not just to form inputs', async () => {
+  window.history.replaceState(null, '', '/import?kind=grades');
+  render(<PersonalImportCenter />);
+  const html = '<h2>115 學年度 第 1 學期成績</h2>' +
+    '<table><tr><th>課程名稱</th><th>學分</th><th>成績</th></tr>' +
+    '<tr><td>統計學</td><td>3</td><td>89</td></tr></table>';
+  const file = { name: 'grades.html', size: html.length, type: 'text/html', text: async () => html };
+  fireEvent.change(screen.getByLabelText('選擇截圖或檔案'), { target: { files: [file] } });
+  await screen.findByText('從校務網頁取出資料');
+  fireEvent.click(screen.getByRole('button', { name: /表格 1 · 1 筆/ }));
+  expect((screen.getByLabelText('這份資料的學年度') as HTMLInputElement).value).toBe('115');
+  expect(screen.getAllByLabelText('學期').every((field) => (field as HTMLInputElement).value === '1')).toBe(true);
+  await waitFor(() => expect(
+    JSON.parse(sessionStorage.getItem(personalImportDraftKey(context)) || '{}').draft?.rows?.[0],
+  ).toMatchObject({ title: '統計學', academicYear: '115', semester: '1' }));
+  expect(readPersonalImports(context)).toHaveLength(0);
+});

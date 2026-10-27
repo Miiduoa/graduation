@@ -15,7 +15,7 @@ beforeEach(() => {
 
 it('hides school login unless a usable school-issued provider is listed', () => {
   expect(STUDENT_ID_PREPARING_COPY).toBe(
-    '目前只能用 Google 帳號登入，登入後再綁定你的學校。',
+    '此校園尚未開放學號直接登入。你仍可匯入自己取得的課表、成績與活動；Google 帳號用於平台交流與課班服務。',
   );
   expect(hasUsableSchoolLoginProvider(['google-consumer'])).toBe(false);
   expect(hasUsableSchoolLoginProvider([])).toBe(false);

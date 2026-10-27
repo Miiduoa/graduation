@@ -12,6 +12,66 @@ An attendance record requires server confirmation. Opening a screen, validating 
 - The compatibility screen does not collect six-digit tokens, location or selfies, invoke `verifyAttendanceClaim`, publish a successful check-in event or claim that it recorded attendance. `verifyAttendanceClaim` is still not exported by `backend/functions/index.js`; no backend entry point was enabled by this change.
 - Numeric-code, location and selfie-liveness methods remain unavailable. There is no queued retry or automatic sync for an unconfirmed claim.
 
+## Verified attendance history and teaching workbench (2026-10-27)
+
+- The native `MyAttendanceHistoryScreen` no longer fabricates attendance by treating missing TronClass statuses as `present`, and never substitutes mock courses when official records are unavailable.
+- The student history reads the signed-in user's own `groups/{groupId}/attendanceSessions/{sessionId}/attendanceRecords/{uid}` documents for schema-v2 sessions from Firestore's server, scoped to active course memberships and the selected school. Verified `present` and `late` count as attended; only an explicit validated `absent` record means absent. A missing receipt is **unconfirmed**, and a failed server read is **unavailable**.
+- History cards show actual confirmed check-ins and course-scoped session details. They intentionally avoid calculating an official attendance percentage from the limited receipt window; truncated history and classes without official session data cannot support it.
+- The teaching web workbench adds saved-session overview, active/ended filters, searchable attendance rosters, and CSV export of visible confirmed rows. No absent students are inferred from the roster, which only contains confirmed entries.
+- The teacher web QR is now obtained from the server rather than the local Firestore cache. The page refuses to reveal the code after expiry and hides an already revealed code on page backgrounding or expiry. Server-side `joinLiveSession` remains authoritative.
+- The native attendance landing shortcut now navigates to an authenticated attendance history or teaching workbench instead of constructing demo session IDs or advertising five operational check-in methods.
+- These changes are only UI, history and safety improvements. They **do not activate** number-code, geofence, selfie, offline signing or institutional LMS write-back.
+
+### Verification checklist
+
+Run the targeted tests before merging:
+
+```sh
+pnpm --filter web exec vitest run src/components/CourseAttendance.test.tsx src/lib/courseAttendance.test.ts
+pnpm --filter mobile exec jest src/__tests__/MyAttendanceHistoryScreen.test.tsx src/__tests__/services/verifiedAttendanceHistory.test.ts --runInBand
+pnpm --filter web typecheck
+pnpm --filter mobile typecheck
+```
+
+Verify an active instructor and student account against the Firebase emulator or staging backend. Confirm a successful check-in only after server acknowledgment, QR expiry, permission revocation, switching account/school, and that absent/nonexistent records never appear as verified presence.
+
+
+## Instructor correction workflow (development branch, 2026-10-27)
+
+The `correctAttendanceRecord` callable introduces explicit, instructor-verified
+attendance corrections. The operation is not automatic attendance inference:
+
+- Only an authenticated, active `owner` or `instructor` in the course can correct
+  an active enrolled student's record.
+- The request carries course ID, session ID, student UID, explicit status
+  (`present`, `late`, `absent`, `excused`), a 6–300 character reason and a
+  client-stable retry request ID. Server-owned membership and schema-v2 session
+  snapshots are validated within a Firestore transaction.
+- A correction creates or updates the student's receipt and appends an immutable
+  `attendanceCorrections` document in the same transaction. The document stores
+  previous and new statuses, instructor identity, reason, request identity and
+  timestamp. Students cannot read teacher audit history and no client can write it.
+- Attendee counters change only when transitioning into or out of `present/late`,
+  and synchronize between the canonical attendance session and live session.
+  Repeated requests with the same ID are idempotent; mismatched replays are rejected.
+- An attendance session must be closed before absent/excused can be finalized. While QR sign-in is active, instructors may only confirm attendance or lateness.
+- The teacher web dashboard allows instructors to select a verified member,
+  record a reason, inspect the recent audit trail and immediately refresh the
+  saved roster. Students see corrected `absent` and `excused` as explicit
+  school-workspace statuses, not as fabricated missing check-ins.
+
+This does **not** synchronize corrections back to TronClass or a school's
+official transcript. The audit log is authoritative **only within Campus One**.
+
+Verification before deployment:
+
+```sh
+pnpm --filter functions exec jest attendanceSessions.test.js --runInBand
+pnpm --filter web exec vitest run src/lib/server/attendanceSessionHandlers.test.ts src/lib/server/fnDispatch.attendance.test.ts src/components/AttendanceCorrectionPanel.test.tsx src/lib/courseAttendance.test.ts
+pnpm --filter web typecheck
+pnpm test:rules
+```
+
 ## Contract required before enabling additional methods
 
 Any future attendance callable must:

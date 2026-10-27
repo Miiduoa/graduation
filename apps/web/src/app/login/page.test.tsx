@@ -21,6 +21,7 @@ const { replace, signIn, state } = vi.hoisted(() => ({
     retryOptions: vi.fn(),
     selectedSchoolId: null as string | null,
     schoolDirectoryLoading: false,
+    selectSchool: vi.fn(),
   },
 }));
 vi.mock('next/navigation', () => ({
@@ -59,6 +60,8 @@ vi.mock('@/components/SelectedSchoolProvider', () => ({
     selectedSchoolId: state.selectedSchoolId,
     selectedSchool: state.selectedSchoolId ? { id: state.selectedSchoolId, name: '校園' } : null,
     loading: state.schoolDirectoryLoading,
+    selectSchool: state.selectSchool,
+    schools: [{ id: 'pu', name: '靜宜大學' }, { id: 'ntu', name: '國立臺灣大學' }],
   }),
 }));
 vi.mock('@/lib/signInOptions', async (original) => ({
@@ -95,6 +98,7 @@ it('keeps a school return destination during an availability failure instead of 
   expect(state.retryOptions).toHaveBeenCalledOnce();
 });
 it('returns an already signed-in school user to the requested page only when student ID is available', async () => {
+  state.user = { uid: 'pu-one' };
   state.studentId = true;
   render(<LoginPage />);
   await waitFor(() => expect(replace).toHaveBeenCalledWith('/grades'));
@@ -485,6 +489,7 @@ function fillSchoolLogin() {
   fireEvent.change(screen.getByLabelText('密碼'), { target: { value: 'test-only-password' } });
 }
 it('waits for restored school identity before redirecting or accepting credentials', () => {
+  state.user = { uid: 'pu-one' };
   state.studentId = true;
   state.loading = true;
   const view = render(<LoginPage />);
@@ -582,4 +587,43 @@ it('blocks school submission during Google navigation and unlocks on browser ret
   fireEvent(window, new Event('pageshow'));
   fireEvent.submit(screen.getByLabelText('學號').closest('form')!);
   expect(signIn).toHaveBeenCalledOnce();
+});
+
+it('can change the campus from the school sign-in form', () => {
+  state.studentId = true;
+  state.user = null;
+  state.selectedSchoolId = 'pu';
+  render(<LoginPage />);
+  fireEvent.change(screen.getByLabelText('選擇學校'), { target: { value: 'ntu' } });
+  expect(state.selectSchool).toHaveBeenCalledWith('ntu');
+});
+
+it('offers an import path for a campus without student ID sign-in', () => {
+  state.studentId = true;
+  state.user = null;
+  state.selectedSchoolId = 'ntu';
+  render(<LoginPage />);
+  expect(screen.queryByLabelText('學號')).toBeNull();
+  expect(screen.getByRole('link', { name: /前往資料匯入/ }).getAttribute('href')).toBe('/import?schoolId=ntu');
+  expect(screen.getByText(/直接複製網頁表格貼上，或匯入從學校下載的 HTML、PDF、CSV 與截圖/)).toBeTruthy();
+});
+
+it('clears the rejected school password while preserving the student ID', async () => {
+  state.user = null;
+  state.studentId = true;
+  signIn.mockRejectedValueOnce(new SchoolLoginHttpError(401, '學號或密碼錯誤'));
+  render(<LoginPage />);
+  fillSchoolLogin();
+  fireEvent.submit(screen.getByLabelText('學號').closest('form')!);
+  await screen.findByText('學號或密碼錯誤');
+  expect((screen.getByLabelText('密碼') as HTMLInputElement).value).toBe('');
+  expect((screen.getByLabelText('學號') as HTMLInputElement).value).toBe('a1234567');
+});
+
+it('does not treat another Firebase user as a verified school session', () => {
+  state.user = { uid: 'external-google-account' };
+  state.studentId = true;
+  render(<LoginPage />);
+  expect(screen.getByLabelText('學號')).toBeTruthy();
+  expect(replace).not.toHaveBeenCalled();
 });

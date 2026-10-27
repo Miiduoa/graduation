@@ -39,6 +39,26 @@ describe('personal credit workspace', () => {
     });
   });
 
+  it('shows honest workload projections, not official graduation approval', async () => {
+    renderWorkspace();
+    const recognized = await screen.findByLabelText('已確認可採計學分（自行填寫）');
+    fireEvent.change(recognized, { target: { value: '60' } });
+    fireEvent.change(screen.getByLabelText('希望累計的學分'), { target: { value: '128' } });
+    fireEvent.change(screen.getByLabelText('預計再修學分'), { target: { value: '20' } });
+    const panel = screen.getByRole('region', { name: '距離你的修課目標，還需要什麼？' });
+    expect(panel.textContent).toContain('每學期平均還需17');
+    expect(panel.textContent).toContain('尚未分配學期68');
+    expect(panel.textContent).toContain('全部規劃通過仍缺48');
+    expect(panel.textContent).toContain('不會私自把其他預計學分塞進某個學期');
+    expect(panel.textContent).toContain('累積 60');
+
+    fireEvent.change(screen.getByLabelText('課程名稱'), { target: { value: '程式設計' } });
+    fireEvent.click(screen.getByRole('button', { name: '加入規劃' }));
+    expect(panel.textContent).toContain('尚未分配學期65');
+    expect(panel.textContent).toContain('累積 63');
+    expect(panel.textContent).toContain('個人總學分目標');
+  });
+
   it('supports edit, remove and undo in a single page', async () => {
     renderWorkspace();
     await screen.findByLabelText('課程名稱');

@@ -2,11 +2,11 @@
 
 import Link from 'next/link';
 import { usePathname, useSearchParams } from 'next/navigation';
-import type { ReactNode } from 'react';
+import { useState, type ReactNode } from 'react';
 import { useAuth } from '@/components/AuthGuard';
 import { SchoolAccountRequired } from '@/components/SchoolAccountRequired';
 import { SiteShell } from '@/components/SiteShell';
-import { useAcademicRecords } from '@/lib/useAcademicRecords';
+import { useAcademicRecords, type AcademicRecordState } from '@/lib/useAcademicRecords';
 import { useCampusBrowseContext } from '@/lib/useCampusBrowseContext';
 import { useSignInOptions } from '@/lib/signInOptions';
 import type { AcademicKind, AcademicSnapshot } from '@/lib/academicClient';
@@ -18,6 +18,8 @@ import {
 import { loadFailureCopy } from '@campus/shared/src/loadFailureCopy';
 import styles from './academic.module.css';
 import { PersonalImportSummary } from '@/components/imports/PersonalImportSummary';
+import { AcademicRefreshControls } from './AcademicRefreshControls';
+import { AcademicChangeSummary } from './AcademicChangeSummary';
 
 type Props<K extends AcademicKind> = {
   kind: K;
@@ -29,20 +31,41 @@ type Props<K extends AcademicKind> = {
   children: (snapshot: AcademicSnapshot<K>) => ReactNode;
 };
 
-function Records<K extends AcademicKind>({
-  kind,
-  closedAlternative,
-  returnUrl,
-  schoolName,
-  children,
-}: {
+type RecordsProps<K extends AcademicKind> = {
   kind: K;
   closedAlternative: string;
   returnUrl: string;
   schoolName: string;
   children: (snapshot: AcademicSnapshot<K>) => ReactNode;
+};
+
+function Records<K extends AcademicKind>(props: RecordsProps<K>) {
+  const [automatic, setAutomatic] = useState(false);
+  const { state, refresh, automaticStatus } = useAcademicRecords(props.kind, true, 'pu', automatic);
+  return (
+    <>
+      <AcademicRefreshControls
+        enabled={automatic}
+        status={automaticStatus}
+        onChange={setAutomatic}
+      />
+      <AcademicChangeSummary kind={props.kind} state={state} />
+      <RecordContent {...props} state={state} refresh={refresh} />
+    </>
+  );
+}
+
+function RecordContent<K extends AcademicKind>({
+  state,
+  refresh,
+  closedAlternative,
+  returnUrl,
+  schoolName,
+  children,
+}: RecordsProps<K> & {
+  state: AcademicRecordState<K> | null;
+  refresh: () => Promise<void>;
 }) {
-  const { state, refresh } = useAcademicRecords(kind, true, 'pu');
   const options = useSignInOptions();
   if (!state || state.status === 'loading') {
     return (
@@ -125,7 +148,7 @@ function Records<K extends AcademicKind>({
     state.snapshot.schoolId === 'pu' ? OFFICIAL_ACADEMIC_SOURCE_LABEL : schoolName;
   return (
     <>
-      <div className={styles.source}>
+      <div className={styles.source} aria-busy={state.refreshing || undefined}>
         <span>
           來源：{sourceLabel} ·{' '}
           {new Date(state.snapshot.fetchedAt).toLocaleString('zh-TW', {
@@ -135,10 +158,10 @@ function Records<K extends AcademicKind>({
             hour: '2-digit',
             minute: '2-digit',
           })}{' '}
-          讀取
+          讀取{state.refreshing ? '（正在更新）' : ''}
         </span>
-        <button className="btn" onClick={() => void refresh()}>
-          更新資料
+        <button className="btn" disabled={state.refreshing} onClick={() => void refresh()}>
+          {state.refreshing ? '更新中…' : '更新資料'}
         </button>
       </div>
       {children(state.snapshot)}
@@ -254,7 +277,7 @@ export function AcademicPage<K extends AcademicKind>(props: Props<K>) {
         )
       ) : (
         <Records
-          key={`${user.uid}:${schoolKey}`}
+          key={`${user.uid}:${schoolKey}:${props.kind}`}
           kind={props.kind}
           closedAlternative={props.closedAlternative}
           returnUrl={returnUrl}
