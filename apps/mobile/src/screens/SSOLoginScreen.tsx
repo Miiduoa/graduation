@@ -334,7 +334,7 @@ function SchoolLoginContent(
           subtitle="讀取你自己下載的校務資料"
         >
           <Text style={styles.note}>
-            課表截圖、PDF、CSV 可先預覽核對再儲存；不需要學校與 Campus One 合作。
+            可匯入學校網頁 HTML 存檔、課表截圖、PDF、CSV；先選表格核對再儲存，不必提供校務密碼。
           </Text>
           <Button
             text="匯入課表、成績或活動"

@@ -304,7 +304,7 @@ function LoginForm({
           <div className={styles.importRoute}>
             <span className={styles.methodEyebrow}>另一種方式 · 各校適用</span>
             <h3>不使用學號，也能匯入課表</h3>
-            <p>將你從校務系統取得的課表截圖、PDF 或 CSV 帶進來，核對預覽後再儲存。這項匯入不需要學校與平台合作，也不要求提供學校密碼。</p>
+            <p>在校務系統開啟課表或成績列表後，直接複製網頁表格貼上，或匯入從學校下載的 HTML、PDF、CSV 與截圖。先核對預覽再儲存，不必提供學校密碼。</p>
             <Link href={importHref} className="btn">前往資料匯入 <span aria-hidden="true">↗</span></Link>
           </div>
           <div className={styles.helpLinks}>

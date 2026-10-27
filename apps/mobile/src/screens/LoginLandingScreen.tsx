@@ -91,7 +91,7 @@ export default function LoginLandingScreen() {
           >
             <Text style={s.importButtonText}>匯入課表、成績或活動 →</Text>
           </Pressable>
-          <Text style={s.importHelp}>支援截圖、PDF、CSV 等格式，匯入前可以核對內容。不需要提供學校帳號密碼。</Text>
+          <Text style={s.importHelp}>支援學校網頁 HTML 存檔、截圖、PDF、CSV；先選表格並核對內容，不需要提供校務密碼。</Text>
         </View>
         <View style={s.publicPanel}>
           <View style={s.sectionHeading}>
