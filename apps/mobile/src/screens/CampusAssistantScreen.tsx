@@ -188,6 +188,10 @@ function AssistantConversation({
         isCurrent: current,
         signal: controller.signal,
       });
+      if (controller.signal.aborted && current()) {
+        setError('已停止這次本地整理，沒有將取消後的回答加入對話。');
+        return;
+      }
       if (current()) {
         setMessages([
           ...next,
@@ -240,6 +244,10 @@ function AssistantConversation({
         mode,
         ...(mode === 'device' ? { signal: controller.signal } : {}),
       });
+      if (controller.signal.aborted && current()) {
+        setError('已停止本機回答，問題仍保留在輸入欄，可修改後重試。');
+        return;
+      }
       if (current()) {
         setMessages([
           ...next,
