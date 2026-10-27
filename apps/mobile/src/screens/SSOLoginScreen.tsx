@@ -21,6 +21,7 @@ import { useAuth } from '../state/auth';
 import { useSchool } from '../state/school';
 import { finishLoginReturn } from '../utils/loginReturn';
 import { signInWithStudentId, type LoginProgress } from '../services/studentIdAuth';
+import type { SchoolSyncSummary } from '../services/schoolSyncSummary';
 import {
   SCHOOL_LOGIN_BIND_HINT,
   isSchoolLoginEntryAvailable,
@@ -76,6 +77,7 @@ function SchoolLoginContent(
   const [stageDetail, setStageDetail] = useState('確認學校帳號');
   const [error, setError] = useState<string | null>(null);
   const [isRetryable, setIsRetryable] = useState(false);
+  const [syncSummary, setSyncSummary] = useState<SchoolSyncSummary | null>(null);
   const [leavingForPlatform, setLeavingForPlatform] = useState(false);
   const mounted = useRef(true);
   const activeAttempt = useRef<LoginAttempt | null>(null);
@@ -154,18 +156,25 @@ function SchoolLoginContent(
       school.id !== PROVIDENCE_UNIVERSITY_SCHOOL_ID ||
       !studentIdInput.trim() ||
       !studentPwInput.trim()
-    ) return;
+    )
+      return;
     const attempt = beginAttempt('school');
     if (!attempt) return;
     setError(null);
+    setSyncSummary(null);
     setIsRetryable(false);
     setStep('authenticating');
     setStageDetail('確認學校帳號');
 
-    const onProgress = (progressStep: LoginProgress) => {
+    const onProgress = (progressStep: LoginProgress, detail?: string) => {
       if (!isCurrent(attempt)) return;
       setStep(progressStep);
-      setStageDetail(stepLabels[progressStep]);
+      const detailCopy: Record<string, string> = {
+        'TronClass 暫時無法連線': '玩課雲暫時無法連線',
+        '已略過 LMS（TronClass）連線': '此版本尚未開啟課程平台連線',
+        'E校園暫時無法連線，使用 TronClass 資料': 'E 校園尚未連線，課程平台仍可使用',
+      };
+      setStageDetail((detail && detailCopy[detail]) || stepLabels[progressStep]);
     };
 
     try {
@@ -183,15 +192,23 @@ function SchoolLoginContent(
       await auth.refreshProfile();
       if (!isCurrent(attempt)) return;
       setStep('success');
+      setSyncSummary(result.syncSummary ?? null);
       setStudentPwInput('');
 
       const deptLabel = result.department ? `（${result.department}）` : '';
-      showSuccess(attempt, `歡迎，${result.displayName}${deptLabel}`, () => {
-        void import('../services/companionEngine')
-          .then((m) => m.recordCompanionFeatureSignal('sso_login'))
-          .catch(() => undefined);
-        finishLoginReturn(nav, props.route?.params?.returnTo);
-      });
+      const summaryCopy = result.syncSummary?.items
+        .map((item) => `${item.title}：${item.detail}`)
+        .join('\n');
+      showSuccess(
+        attempt,
+        `歡迎，${result.displayName}${deptLabel}${summaryCopy ? `\n\n${summaryCopy}` : ''}`,
+        () => {
+          void import('../services/companionEngine')
+            .then((m) => m.recordCompanionFeatureSignal('sso_login'))
+            .catch(() => undefined);
+          finishLoginReturn(nav, props.route?.params?.returnTo);
+        },
+      );
     } catch (loginError) {
       if (!isCurrent(attempt)) return;
       activeAttempt.current = null;
@@ -296,7 +313,11 @@ function SchoolLoginContent(
                 onPress={handleStudentIdLogin}
                 disabled={formLocked || !studentIdInput.trim() || !studentPwInput.trim()}
               />
-              <Text style={styles.note}>可同步的課程與成績依學校提供內容而定。</Text>
+              <View style={styles.sourceGuide}>
+                <Text style={styles.sourceTitle}>一次連線，分別讀取你的資料</Text>
+                <Text style={styles.note}>E 校園：課表、歷年成績與學分紀錄</Text>
+                <Text style={styles.note}>玩課雲：課程、教材與作業；使用相同帳密</Text>
+              </View>
             </View>
           </AnimatedCard>
         ) : (
@@ -332,16 +353,47 @@ function SchoolLoginContent(
         ) : null}
 
         {step === 'success' ? (
-          <View style={styles.status} accessibilityLiveRegion="polite">
-            <Ionicons name="checkmark-circle" size={24} color={theme.colors.success} />
-            <Text style={[styles.statusTitle, styles.statusContent]}>登入完成</Text>
+          <View style={styles.resultPanel} accessibilityLiveRegion="polite">
+            <View style={styles.resultHeading}>
+              <Ionicons name="checkmark-circle" size={24} color={theme.colors.success} />
+              <View style={styles.statusContent}>
+                <Text style={styles.statusTitle}>登入完成</Text>
+                {syncSummary ? (
+                  <Text style={styles.note}>
+                    {syncSummary.incomplete
+                      ? '部分資料尚未取得，可先查看已完成的項目。'
+                      : '本次資料讀取結果'}
+                  </Text>
+                ) : null}
+              </View>
+            </View>
+            {syncSummary?.items.map((item) => (
+              <View key={item.key} style={styles.resultRow}>
+                <Ionicons
+                  name={
+                    item.state === 'received' || item.state === 'empty'
+                      ? 'checkmark-circle-outline'
+                      : 'time-outline'
+                  }
+                  size={20}
+                  color={
+                    item.state === 'received' || item.state === 'empty'
+                      ? theme.colors.success
+                      : theme.colors.muted
+                  }
+                />
+                <View style={styles.statusContent}>
+                  <Text style={styles.label}>
+                    {item.title} · {item.source}
+                  </Text>
+                  <Text style={styles.note}>{item.detail}</Text>
+                </View>
+              </View>
+            ))}
           </View>
         ) : null}
 
-        <AnimatedCard
-          title="不用學校帳號，也能匯入"
-          subtitle="讀取你自己下載的校務資料"
-        >
+        <AnimatedCard title="不用學校帳號，也能匯入" subtitle="讀取你自己下載的校務資料">
           <Text style={styles.note}>
             可匯入學校網頁 HTML 存檔、課表截圖、PDF、CSV；先選表格核對再儲存，不必提供校務密碼。
           </Text>
@@ -386,6 +438,24 @@ const createStyles = () =>
     heading: { ...theme.typography.h1, color: theme.colors.text },
     body: { ...theme.typography.body, color: theme.colors.textSecondary },
     fields: { gap: theme.space.md },
+    sourceGuide: { gap: theme.space.xs, paddingTop: theme.space.xs },
+    sourceTitle: { ...theme.typography.labelSmall, color: theme.colors.textSecondary },
+    resultPanel: {
+      gap: theme.space.md,
+      padding: theme.space.md,
+      borderWidth: 1,
+      borderColor: theme.colors.border,
+      borderRadius: theme.radius.md,
+    },
+    resultHeading: { flexDirection: 'row', alignItems: 'center', gap: theme.space.sm },
+    resultRow: {
+      flexDirection: 'row',
+      alignItems: 'flex-start',
+      gap: theme.space.sm,
+      paddingTop: theme.space.sm,
+      borderTopWidth: StyleSheet.hairlineWidth,
+      borderTopColor: theme.colors.border,
+    },
     field: { gap: theme.space.xs },
     label: { ...theme.typography.label, color: theme.colors.text },
     input: {

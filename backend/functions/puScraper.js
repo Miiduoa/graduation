@@ -31,6 +31,9 @@ const MYPU_HOST = 'mypu.pu.edu.tw';
 const LOGIN_PATH = '/index_check.php';
 const COURSE_RESULT_PATH = '/stu_query/query_course.html';
 const GRADE_PATH = '/score_query/score_all.php';
+const REQUEST_TIMEOUT_MS = 10_000;
+const MAX_RESPONSE_BYTES = 4 * 1024 * 1024;
+const CAMPUS_HOSTS = new Set([ALCAT_HOST, MYPU_HOST]);
 // ---------------------------------------------------------------------------
 // HTTP helpers
 // ---------------------------------------------------------------------------
@@ -55,6 +58,10 @@ function cookieString(jar) {
 
 function httpsRequest(hostname, path, method, cookies, body) {
   return new Promise((resolve, reject) => {
+    if (!CAMPUS_HOSTS.has(hostname) || !path.startsWith('/') || path.startsWith('//')) {
+      reject(new Error('Untrusted campus URL'));
+      return;
+    }
     const bodyBuf = body ? Buffer.from(body, 'utf8') : null;
     const headers = {
       'User-Agent':
@@ -70,14 +77,41 @@ function httpsRequest(hostname, path, method, cookies, body) {
       headers.Cookie = cookieString(cookies);
     }
 
-    const req = https.request({ hostname, path, method, headers }, (res) => {
+    let req;
+    let settled = false;
+    const finish = (error, result) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      if (error) reject(error);
+      else resolve(result);
+    };
+    const timer = setTimeout(() => {
+      const error = new Error('Campus request timed out');
+      error.code = 'ETIMEDOUT';
+      finish(error);
+      req?.destroy?.();
+    }, REQUEST_TIMEOUT_MS);
+    timer.unref?.();
+    req = https.request({ hostname, path, method, headers, family: 4 }, (res) => {
       const chunks = [];
+      let bytes = 0;
       const jar = { ...cookies };
       parseCookies(res.headers['set-cookie'], jar);
 
-      res.on('data', (c) => chunks.push(c));
+      res.on('error', error => finish(error));
+      res.on('aborted', () => finish(new Error('Campus response interrupted')));
+      res.on('data', (c) => {
+        bytes += c.length;
+        if (bytes > MAX_RESPONSE_BYTES) {
+          finish(new Error('Campus response is too large'));
+          req?.destroy?.();
+          return;
+        }
+        if (!settled) chunks.push(c);
+      });
       res.on('end', () => {
-        resolve({
+        finish(null, {
           status: res.statusCode,
           headers: res.headers,
           data: Buffer.concat(chunks).toString('utf8'),
@@ -85,7 +119,7 @@ function httpsRequest(hostname, path, method, cookies, body) {
         });
       });
     });
-    req.on('error', reject);
+    req.on('error', error => finish(error));
     if (bodyBuf) req.write(bodyBuf);
     req.end();
   });
@@ -99,20 +133,24 @@ function post(hostname, path, cookies, body) {
   return httpsRequest(hostname, path, 'POST', cookies || {}, body);
 }
 
-// Follow 302 redirects (some PU pages redirect)
+// 僅在既有校務主機間跟隨轉址，不把登入 Cookie 送到其他網站。
 async function getFollowRedirect(hostname, path, cookies, maxRedirects = 3) {
-  let res = await get(hostname, path, cookies);
+  let current = new URL(path, `https://${hostname}/`);
+  const assertCampusUrl = (url) => {
+    if (!CAMPUS_HOSTS.has(url.hostname) || !['https:', 'http:'].includes(url.protocol) ||
+      url.username || url.password || (url.port && url.port !== '443')) {
+      throw new Error('Untrusted campus redirect');
+    }
+    url.protocol = 'https:';
+  };
+  assertCampusUrl(current);
+  let res = await get(current.hostname, current.pathname + current.search, cookies);
   let redirects = 0;
-  while (
-    (res.status === 301 || res.status === 302) &&
-    res.headers.location &&
-    redirects < maxRedirects
-  ) {
-    const loc = res.headers.location;
-    const url = new URL(loc, `https://${hostname}`);
-    hostname = url.hostname;
-    path = url.pathname + url.search;
-    res = await get(hostname, path, res.cookies);
+  while ([301, 302, 303, 307, 308].includes(res.status) && res.headers.location) {
+    if (redirects >= maxRedirects) throw new Error('Too many campus redirects');
+    current = new URL(res.headers.location, current);
+    assertCampusUrl(current);
+    res = await get(current.hostname, current.pathname + current.search, res.cookies);
     redirects++;
   }
   return res;
@@ -331,7 +369,7 @@ async function puLogin(uid, upassword) {
 
     return {
       success: true,
-      cookies,
+      cookies: verify.cookies,
       studentName: nameMatch ? nameMatch[1] : undefined,
     };
   } catch (err) {
@@ -369,7 +407,7 @@ async function puFetchCourses(cookies, semester) {
     const idMatch = html.match(/學號\(Student No\.\)[：:]\s*(\d+)/);
     const nameMatch = html.match(/姓名\(Student Name\)[：:]\s*([^\s<]+)/);
     const semMatch = html.match(/(\d+)學年度\s*第(\d)學期/);
-    const creditsMatch = html.match(/學期總學分[：:]\s*(\d+)/);
+    const creditsMatch = html.match(/學期總學分[：:]\s*(\d+(?:\.\d+)?)/);
 
     const studentInfo = {
       class: classMatch ? classMatch[1] : null,
@@ -378,7 +416,7 @@ async function puFetchCourses(cookies, semester) {
     };
 
     const detectedSemester = semMatch ? `${semMatch[1]}${semMatch[2]}` : semester || null;
-    const totalCredits = creditsMatch ? parseInt(creditsMatch[1], 10) : 0;
+    const totalCredits = creditsMatch ? Number(creditsMatch[1]) : 0;
 
     // ---- Parse course table ----
     const rows = parseTable(html, 'course code');
@@ -393,7 +431,8 @@ async function puFetchCourses(cookies, semester) {
       const classOffered = cells[1];
       const titleRaw = cells[2];
       const courseType = cells[3];
-      const credits = parseInt(cells[4], 10) || 0;
+      const credits = /^\d+(?:\.\d+)?$/.test(cells[4]) ? Number(cells[4]) : null;
+      if (!code || !titleRaw || credits === null) continue;
       const timePlaceRaw = cells[5];
       const teacherEmail = cells[6];
 
@@ -440,23 +479,9 @@ async function puFetchGrades(cookies, semester) {
   try {
     if (!cookies || !Object.keys(cookies).length) throw new Error('No session cookies');
 
-    // Try the PU SSO bridge first, then the mypu grade page.
-    // Do not fail the entire fetch on a redundant preflight request.
-    // ── Step 1: Establish mypu session (fallback) ──
-    // alcat and mypu are on different subdomains of pu.edu.tw.
-    // We try multiple approaches to establish a valid mypu session:
-    //   A) Direct: send alcat cookies to mypu root (may share parent domain cookies)
-    //   B) SSO bridge: visit alcat's link to mypu (follows SSO redirect chain)
+    // 先走既有校務入口，避免 mypu 首頁建立訪客 Cookie 後蓋掉有效登入。
+    let portalCookies = { ...cookies };
     let mypuCookies = { ...cookies };
-
-    // Approach A: warm up mypu directly
-    try {
-      const warmup = await get(MYPU_HOST, '/', cookies);
-      mypuCookies = { ...cookies, ...warmup.cookies };
-      console.log('[puFetchGrades] mypu warmup status:', warmup.status, 'cookies:', Object.keys(mypuCookies).length);
-    } catch (e) {
-      console.warn('[puFetchGrades] mypu warmup failed (non-fatal):', e.message);
-    }
 
     // Approach B: Try SSO bridge URLs from alcat → mypu
     const bridgePaths = [
@@ -466,11 +491,10 @@ async function puFetchGrades(cookies, semester) {
     let usableBridge = null;
     for (const bp of bridgePaths) {
       try {
-        const bridgeRes = await getFollowRedirect(ALCAT_HOST, bp, cookies);
-        if (bridgeRes.cookies && Object.keys(bridgeRes.cookies).length > Object.keys(mypuCookies).length) {
-          mypuCookies = { ...mypuCookies, ...bridgeRes.cookies };
-          console.log(`[puFetchGrades] Bridge ${bp} added cookies:`, Object.keys(bridgeRes.cookies).length);
-        }
+        const bridgeRes = await getFollowRedirect(ALCAT_HOST, bp, portalCookies);
+        // 同名 Cookie 的輪替也是更新；不能用 Cookie 數量判斷是否有新 session。
+        portalCookies = { ...portalCookies, ...bridgeRes.cookies };
+        mypuCookies = { ...mypuCookies, ...bridgeRes.cookies };
         // If alcat's score page actually returns grade data directly, use it
         if (bp.includes('score') && bridgeRes.status === 200) {
           const bridgeParsed = parsePuGradeDocument(bridgeRes.data, semester);

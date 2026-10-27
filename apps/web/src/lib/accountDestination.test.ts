@@ -45,6 +45,8 @@ it.each([
   '/admin/ops/%2e%2e/login',
   '/timetable',
   '/timetable?campus=nthu',
+  '/school-courses',
+  '/school-courses?school=pu&schoolId=pu&campus=pu',
   '/life/private',
   '/search/private',
   '/course/cs101#assignment-hw-1',

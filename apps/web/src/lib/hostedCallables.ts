@@ -13,6 +13,8 @@ export const HOSTED_WEB_CALLABLES = [
   'reviewLeaveRequest',
   'listLeaveReviewQueue',
   'signInPuStudentId',
+  'getMyAcademicRecords',
+  'getMyTronClassCourses',
 ] as const;
 
 export const LEAVE_WEB_CALLABLES = [

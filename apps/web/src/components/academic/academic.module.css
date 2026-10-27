@@ -46,8 +46,140 @@
   justify-content: space-between;
   gap: 16px;
   margin: 14px 0 24px;
+  padding: 22px 0;
+  border-bottom: 1px solid var(--border);
   color: var(--muted);
   font-size: 12px;
+}
+.sourceDetail {
+  min-width: 0;
+}
+.sourceDetail p {
+  margin: 6px 0 0;
+  line-height: 1.7;
+  overflow-wrap: anywhere;
+}
+.sourceDetail a {
+  color: var(--brand);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.sourceTitle {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+.sourceTitle h2 {
+  color: var(--text);
+  font-size: 18px;
+  font-weight: 600;
+  margin: 0;
+}
+.sourceBadge {
+  color: var(--text);
+  padding: 3px 9px;
+  border: 1px solid var(--border);
+  border-radius: 99px;
+  font-size: 11px;
+  white-space: nowrap;
+}
+.source button {
+  flex-shrink: 0;
+  min-height: 44px;
+}
+.schoolSummary {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 20px;
+  margin: 24px 0;
+  background: var(--surface);
+}
+.schoolSummary h2 {
+  font-size: 16px;
+  font-weight: 600;
+  margin: 0;
+}
+.schoolSummary header p {
+  margin: 8px 0 20px;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.7;
+}
+.schoolSummaryRow + .schoolSummaryRow {
+  border-top: 1px solid var(--border);
+  padding-top: 16px;
+  margin-top: 16px;
+}
+.schoolSummaryRow h3 {
+  font-size: 13px;
+  font-weight: 500;
+  margin: 0 0 14px;
+}
+.schoolSummaryRow dl {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 16px;
+  margin: 0;
+}
+.schoolSummaryRow dt {
+  color: var(--muted);
+  font-size: 12px;
+}
+.schoolSummaryRow dd {
+  font-size: 18px;
+  font-variant-numeric: tabular-nums;
+  margin: 6px 0 0;
+  overflow-wrap: anywhere;
+}
+.resultCount {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  color: var(--muted);
+  font-size: 13px;
+  margin: 8px 0;
+}
+.resultCount button {
+  min-height: 44px;
+  padding: 8px;
+  border: 0;
+  background: transparent;
+  color: var(--brand);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  cursor: pointer;
+}
+.creditReadout {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 24px;
+  margin: 24px 0;
+  padding-bottom: 24px;
+  border-bottom: 1px solid var(--border);
+}
+.creditReadout p {
+  color: var(--muted);
+  font-size: 13px;
+  margin: 0 0 10px;
+}
+.creditReadout strong {
+  display: block;
+  font-size: 34px;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+  margin-bottom: 8px;
+}
+.creditReadout .creditUnknown {
+  font-size: 22px;
+  line-height: 1.9;
+}
+.creditReadout small {
+  display: block;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.7;
 }
 .overview {
   display: grid;
@@ -155,7 +287,8 @@
   color: var(--muted);
   border-radius: var(--radius-sm);
 }
-.segment button[aria-pressed='true'] {
+.segment button[aria-pressed='true'],
+.segment button[aria-selected='true'] {
   background: var(--brand);
   color: var(--on-brand);
 }
@@ -348,6 +481,17 @@
   }
   .source {
     align-items: start;
+    flex-wrap: wrap;
+  }
+  .sourceTitle h2 {
+    font-size: 16px;
+  }
+  .schoolSummaryRow dl {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .creditReadout {
+    grid-template-columns: 1fr;
+    gap: 20px;
   }
   .overview {
     grid-template-columns: 1fr;

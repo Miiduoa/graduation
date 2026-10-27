@@ -10,6 +10,7 @@ import { useAcademicRecords, type AcademicRecordState } from '@/lib/useAcademicR
 import { useCampusBrowseContext } from '@/lib/useCampusBrowseContext';
 import { useSignInOptions } from '@/lib/signInOptions';
 import type { AcademicKind, AcademicSnapshot } from '@/lib/academicClient';
+import { formatSemester, type AcademicCourseResponse, type AcademicGradeResponse } from '@/lib/academicRecords';
 import {
   isOfficialAcademicSchool,
   OFFICIAL_ACADEMIC_PORTAL_URL,
@@ -20,6 +21,7 @@ import styles from './academic.module.css';
 import { PersonalImportSummary } from '@/components/imports/PersonalImportSummary';
 import { AcademicRefreshControls } from './AcademicRefreshControls';
 import { AcademicChangeSummary } from './AcademicChangeSummary';
+import { AcademicNavigation } from './AcademicNavigation';
 
 type Props<K extends AcademicKind> = {
   kind: K;
@@ -44,13 +46,13 @@ function Records<K extends AcademicKind>(props: RecordsProps<K>) {
   const { state, refresh, automaticStatus } = useAcademicRecords(props.kind, true, 'pu', automatic);
   return (
     <>
+      <RecordContent {...props} state={state} refresh={refresh} />
       <AcademicRefreshControls
         enabled={automatic}
         status={automaticStatus}
         onChange={setAutomatic}
       />
       <AcademicChangeSummary kind={props.kind} state={state} />
-      <RecordContent {...props} state={state} refresh={refresh} />
     </>
   );
 }
@@ -99,7 +101,7 @@ function RecordContent<K extends AcademicKind>({
             : permission
               ? '目前帳號無法讀取這份資料'
               : unconfigured
-                ? '學校資料雲端讀取尚未啟用'
+                ? '學校資料讀取尚未啟用'
                 : '暫時無法讀取學校資料'}
         </h2>
         <p>
@@ -108,7 +110,7 @@ function RecordContent<K extends AcademicKind>({
             : permission
               ? '請確認目前使用的是你的學校帳號。'
               : unconfigured
-                ? '目前尚未接上雲端函式服務，無法從學校系統讀取這份資料。請改到學校官方系統查詢。'
+                ? '目前無法從學校取得這份資料。你可以先到 e 校園查詢，或匯入自己的成績檔案。'
                 : `${loadFailureCopy(state.error, { online: navigator.onLine })}。這次未取得資料，不會以舊紀錄代替。`}
         </p>
         <div className={styles.actions}>
@@ -146,10 +148,23 @@ function RecordContent<K extends AcademicKind>({
   }
   const sourceLabel =
     state.snapshot.schoolId === 'pu' ? OFFICIAL_ACADEMIC_SOURCE_LABEL : schoolName;
+  const records = state.snapshot.records as AcademicCourseResponse | AcademicGradeResponse;
+  const gradeRecords = 'grades' in records ? records : null;
+  const count = 'grades' in records ? records.grades.length : records.courses.length;
+  const range = 'grades' in records
+    ? `${new Set(records.grades.map((grade) => grade.semester)).size} 個學期 · ${count} 筆成績`
+    : `${formatSemester(records.semester)} · ${count} 筆課程`;
   return (
     <>
-      <div className={styles.source} aria-busy={state.refreshing || undefined}>
-        <span>
+      <section className={styles.source} aria-label="學校資料讀取結果" aria-busy={state.refreshing || undefined}>
+        <div className={styles.sourceDetail}>
+          <div className={styles.sourceTitle}>
+            <h2>{count ? range : gradeRecords ? '這次未取得成績明細' : '這次未取得課程明細'}</h2>
+            <span className={styles.sourceBadge}>
+              {state.refreshing ? '更新中' : gradeRecords?.coverage?.status === 'partial' ? '部分讀取' : count ? '已讀取' : '待確認'}
+            </span>
+          </div>
+          <p>
           來源：{sourceLabel} ·{' '}
           {new Date(state.snapshot.fetchedAt).toLocaleString('zh-TW', {
             timeZone: 'Asia/Taipei',
@@ -159,11 +174,19 @@ function RecordContent<K extends AcademicKind>({
             minute: '2-digit',
           })}{' '}
           讀取{state.refreshing ? '（正在更新）' : ''}
-        </span>
+          </p>
+          {gradeRecords && <p>顯示本次取得的成績範圍；課堂作業與教材請至 <a href="https://tronclass.pu.edu.tw/" target="_blank" rel="noopener noreferrer">WOW Class ↗</a>。</p>}
+        </div>
         <button className="btn" disabled={state.refreshing} onClick={() => void refresh()}>
           {state.refreshing ? '更新中…' : '更新資料'}
         </button>
-      </div>
+      </section>
+      {gradeRecords?.coverage?.status === 'partial' && <p className={styles.warning} role="status">
+        有 {gradeRecords.coverage.skippedRows} 筆來源資料的學期或學分尚無法確認，未納入下方明細與合計。已辨識的成績仍可查看，請至 e 校園核對缺漏。
+      </p>}
+      {gradeRecords?.creditSummaryUnavailable && <p className={styles.warning} role="status">
+        學分摘要未能確認，已保留本次取得的成績明細。請更新資料或至 e 校園查看學分試算表。
+      </p>}
       {children(state.snapshot)}
     </>
   );
@@ -229,30 +252,7 @@ export function AcademicPage<K extends AcademicKind>(props: Props<K>) {
   return (
     <SiteShell title={props.title} subtitle={props.subtitle}>
       {props.lead}
-      <nav className={styles.navigation} aria-label="我的課務">
-        {(
-          [
-            ['/timetable', '我的課表'],
-            ['/grades', '成績紀錄'],
-            ['/credit-planner', '學分規劃'],
-          ] as const
-        ).map(([href, name]) => (
-          <Link
-            key={href}
-            href={`${href}${schoolSearch}`}
-            aria-current={path === href ? 'page' : undefined}
-          >
-            {name}
-          </Link>
-        ))}
-      </nav>
-      {props.workspace && browse.status === 'ready' && browse.schoolId && !loading && !error
-        ? props.workspace({
-            userId: user?.uid ?? null,
-            schoolId: browse.schoolId,
-            schoolName: browse.schoolName,
-          })
-        : null}
+      <AcademicNavigation path={path} schoolSearch={schoolSearch} />
       <PersonalImportSummary kind="grades" />
       {browse.status === 'loading' ? (
         <BrowseUnavailable status="loading" schoolName="" />
@@ -286,6 +286,13 @@ export function AcademicPage<K extends AcademicKind>(props: Props<K>) {
           {props.children}
         </Records>
       )}
+      {props.workspace && browse.status === 'ready' && browse.schoolId && !loading && !error
+        ? props.workspace({
+            userId: user?.uid ?? null,
+            schoolId: browse.schoolId,
+            schoolName: browse.schoolName,
+          })
+        : null}
     </SiteShell>
   );
 }

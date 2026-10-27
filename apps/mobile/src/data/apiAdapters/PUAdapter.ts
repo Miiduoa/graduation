@@ -1,6 +1,4 @@
-// @ts-nocheck — main 上既有的型別破洞（seedCachedCreditAudit / AnnouncementResponse /
-// CourseResponse / PuCreditAuditPayload / puFetchCreditAudit 都未匯出），等 owner 修。
-import { PROVIDENCE_UNIVERSITY_SCHOOL_ID } from '@campus/shared/src';
+import { PROVIDENCE_UNIVERSITY_SCHOOL_ID, type PuCreditAuditPayload } from '@campus/shared/src';
 import { BaseApiAdapter } from './BaseAdapter';
 import type { AdapterCapabilities, AuthCredentials } from './types';
 import type {
@@ -19,21 +17,19 @@ import type {
   AttendanceSummary,
 } from '../types';
 import { CAMPUS_POIS, getCampusPoi, type CampusPoi, type CampusPoiCategory } from '../puCampusData';
-import { puLogin, type PUSession } from '../../services/puDirectScraper';
+import { puLogin, type PUSession, type PUCourseResult } from '../../services/puDirectScraper';
 import {
   getCachedCourses,
   getCachedGrades,
   getCachedAnnouncements,
-  getCachedCreditAudit,
   getAnyCachedCourses,
   getAnyCachedGrades,
   getAnyCachedAnnouncements,
-  getAnyCachedCreditAudit,
   refreshCourses,
+  refreshCreditAudit,
   refreshAnnouncements,
   seedCachedCourses,
   seedCachedAnnouncements,
-  seedCachedCreditAudit,
   getCachedTCCourses,
   getCachedTCActivities,
   getCachedTCModules,
@@ -53,12 +49,30 @@ import {
 import type { TCCourse, TCActivity, TCModule, TCAttendance } from '../../services/tronClassClient';
 import { getCloudFunctionUrl, getFirebaseAuthHeaders } from '../../services/cloudFunctions';
 import { getAuthInstance } from '../../firebase';
+import { loadOwnedSchoolGrades } from '../../services/ownedSchoolAcademicRecords';
 import {
   PU_GRADE_POINT_POLICY,
   convertPuPercentScoreToGradePoint,
 } from './puGradePointPolicy';
 
 export { PU_GRADE_POINT_POLICY, convertPuPercentScoreToGradePoint };
+
+type AnnouncementResponse = {
+  success: boolean;
+  announcements: Array<{ title: string; url: string; date: string }>;
+};
+
+type CourseResponse = Omit<PUCourseResult, 'studentInfo'> & {
+  success: boolean;
+  studentInfo: {
+    class: string | null;
+    studentId: string | null;
+    name: string | null;
+    department?: string | null;
+    grade?: string | null;
+    enrollmentStatus?: string | null;
+  };
+};
 
 function toValidDate(value: string | null | undefined): Date | null {
   if (!value) return null;
@@ -468,10 +482,6 @@ export class PUAdapter extends BaseApiAdapter {
         const fresh = await refreshAnnouncements(this.directSession);
         if (fresh && fresh.length > 0) return this.mapAnnouncements(fresh);
       } else if (!this.useDirectMode) {
-        type AnnouncementResponse = {
-          success: boolean;
-          announcements: Array<{ title: string; url: string; date: string }>;
-        };
         const data = await this.fetchData<AnnouncementResponse>("announcements");
         if (data?.success && data.announcements?.length > 0) {
           const items = data.announcements.map((a) => ({ title: a.title, url: a.url, date: a.date }));
@@ -563,32 +573,6 @@ export class PUAdapter extends BaseApiAdapter {
         const fresh = await refreshCourses(this.directSession);
         if (fresh && fresh.courses.length > 0) return this.mapCourses(fresh, semester);
       } else if (!this.useDirectMode) {
-        type CourseResponse = {
-          success: boolean;
-          courses: Array<{
-            code: string;
-            classOffered: string;
-            name: string;
-            nameEn: string;
-            courseType: string;
-            credits: number;
-            dayOfWeek: number | null;
-            periods: number[];
-            startTime: string | null;
-            endTime: string | null;
-            location: string;
-            timePlaceRaw: string;
-            teacherEmail: string;
-          }>;
-          studentInfo: {
-            class: string | null;
-            studentId: string | null;
-            name: string | null;
-          };
-          semester: string | null;
-          totalCredits: number;
-        };
-
         const data = await this.fetchData<CourseResponse>("courses", { semester });
         if (data?.success && data.courses?.length > 0) {
           if (data.studentInfo?.studentId) this.studentId = data.studentInfo.studentId;
@@ -616,6 +600,9 @@ export class PUAdapter extends BaseApiAdapter {
               name: data.studentInfo?.name ?? this.studentName,
               className: data.studentInfo?.class ?? null,
               currentSemester: data.semester ?? null,
+              department: data.studentInfo?.department ?? null,
+              grade: data.studentInfo?.grade ?? null,
+              enrollmentStatus: data.studentInfo?.enrollmentStatus ?? null,
             },
             semester: data.semester ?? null,
             totalCredits: data.totalCredits ?? 0,
@@ -711,8 +698,18 @@ export class PUAdapter extends BaseApiAdapter {
     // 原生 cookie jar 和舊快取都沒有帳號歸屬證明。成績只走伺服器驗證 owner 的 session。
     const requester = getAuthInstance().currentUser;
     const sessionId = this.sessionId;
-    if (!requester || requester.uid !== studentId || !sessionId) {
+    if (!requester || requester.uid !== studentId || (!sessionId && this.directSession)) {
       throw new Error('請重新連線學校帳號後再讀取成績。');
+    }
+    if (!sessionId) {
+      const result = await loadOwnedSchoolGrades(requester.uid);
+      if (getAuthInstance().currentUser !== requester || this.sessionId !== sessionId) {
+        throw new Error('帳號已變更，請重新讀取成績。');
+      }
+      return mapPuOfficialGrades(result.grades, {
+        studentId: requester.uid, schoolId: this.schoolId,
+        gradeSource: 'school-official', semester,
+      });
     }
     const isCurrent = () =>
       getAuthInstance().currentUser === requester && this.sessionId === sessionId;
@@ -782,50 +779,12 @@ export class PUAdapter extends BaseApiAdapter {
   }
 
   async getCreditAudit(): Promise<PuCreditAuditPayload | null> {
-    // Only accept v2 format data — reject any old format
-    const isV2 = (d: PuCreditAuditPayload | null): d is PuCreditAuditPayload =>
-      d != null && (d as any).version === 2;
-
-    const cached = await getCachedCreditAudit();
-    if (isV2(cached)) {
-      console.log("[PUAdapter] getCreditAudit: returning v2 cached data, subtotal:", (cached as any).creditTotals?.subtotal);
-      return cached;
-    }
-
-    try {
-      if (this.useDirectMode && this.directSession) {
-        console.log("[PUAdapter] getCreditAudit: fetching fresh via direct scraping");
-        const fresh = await puFetchCreditAudit(this.directSession);
-        if (fresh.success && fresh.data && isV2(fresh.data)) {
-          await seedCachedCreditAudit(fresh.data).catch(() => undefined);
-          return fresh.data;
-        }
-        console.warn("[PUAdapter] getCreditAudit: direct fetch result:", fresh.success, "isV2:", isV2(fresh.data));
-      } else if (!this.useDirectMode) {
-        type CreditAuditResponse = {
-          success?: boolean;
-          creditAudit?: PuCreditAuditPayload | null;
-        };
-
-        const data = await this.fetchData<CreditAuditResponse>("creditAudit");
-        if (data?.success && data.creditAudit && isV2(data.creditAudit)) {
-          await seedCachedCreditAudit(data.creditAudit).catch(() => undefined);
-          return data.creditAudit;
-        }
-        console.warn("[PUAdapter] getCreditAudit: backend fetch returned no v2 data");
-      }
-    } catch (err) {
-      console.warn("[PUAdapter] getCreditAudit remote fetch failed:", err);
-    }
-
-    // 遠端失敗 → 讀任何快取（離線模式）
-    const stale = await getAnyCachedCreditAudit();
-    if (isV2(stale)) {
-      console.log("[PUAdapter] getCreditAudit: returning stale v2 cached data");
-      return stale;
-    }
-
-    return null;
+    // 歷年成績和完整學分試算表是不同契約。後端的成績摘要不能冒充校方畢業審核。
+    if (!this.directSession || this.sessionId) return null;
+    const session = this.directSession;
+    const result = await refreshCreditAudit(session);
+    if (this.directSession !== session) return null;
+    return result;
   }
 
   // ---------------------------------------------------------------------------

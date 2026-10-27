@@ -1,4 +1,3 @@
-// @ts-nocheck — pre-existing type breakage from main; mobile demoStore PR 範圍外
 /**
  * Providence University (靜宜大學) Direct Scraper
  *
@@ -246,9 +245,22 @@ function parseTable(html: string, headerHint: string): string[][] {
   return allRows;
 }
 
+function parseAllTables(html: string): string[][][] {
+  return (html.match(/<table\b[^>]*>[\s\S]*?<\/table>/gi) ?? []).map((table) => parseTable(table, ''));
+}
+
+function normalizeScoreValue(raw: string): number | string {
+  const value = raw.trim();
+  if (/^(?:通過(?:\s*\(Pass\))?|Pass)$/i.test(value)) return 'Pass';
+  if (/^[+-]?\d+(?:\.\d+)?$/.test(value)) return Number(value);
+  return value;
+}
+
 function looksLikePuLoginPage(html: string): boolean {
   const normalized = html.toLowerCase();
   return (
+    /<input\b[^>]*type\s*=\s*["']?password\b/i.test(html) ||
+    /尚未登入|請重新登入|Not yet logged in/i.test(html) ||
     normalized.includes('action="index_check.php"') ||
     normalized.includes("action='index_check.php'") ||
     (normalized.includes('name="uid"') && normalized.includes('name="upassword"')) ||
@@ -461,14 +473,12 @@ export async function puLogin(
     });
     console.log('[puLogin] POST status:', loginResult.status);
     console.log('[puLogin] POST html length:', loginResult.html.length);
-    console.log('[puLogin] POST html snippet:', loginResult.html.slice(0, 500));
 
     // ── Step 2: 不靠 POST 回傳頁的文字判斷，直接試抓受保護的課表頁 ──
     console.log('[puLogin] Step 2: verifying session via course page…');
     const verifyResult = await nativeFetch(`${ALCAT_BASE}${COURSE_PATH}`);
     console.log('[puLogin] verify status:', verifyResult.status);
     console.log('[puLogin] verify html length:', verifyResult.html.length);
-    console.log('[puLogin] verify html snippet:', verifyResult.html.slice(0, 500));
 
     const vHtml = verifyResult.html;
 
@@ -502,7 +512,6 @@ export async function puLogin(
       loginResult.html.match(/([^\s<]+)同學您好/);
     const studentName = nameMatch?.[1] ?? null;
 
-    console.log('[puLogin] success! studentName =', studentName);
     return {
       success: true,
       session: { loggedIn: true, studentName },
@@ -537,7 +546,7 @@ export async function puFetchCourses(
     const idMatch = html.match(/學號\(Student No\.\)[：:]\s*(\d+)/);
     const nameMatch = html.match(/姓名\(Student Name\)[：:]\s*([^\s<]+)/);
     const semMatch = html.match(/(\d+)學年度\s*第(\d)學期/);
-    const creditsMatch = html.match(/學期總學分[：:]\s*(\d+)/);
+    const creditsMatch = html.match(/學期總學分[：:]\s*(\d+(?:\.\d+)?)/);
     const className = classMatch?.[1] ?? null;
     const { department, grade } = className
       ? parseClassName(className)
@@ -554,7 +563,7 @@ export async function puFetchCourses(
       enrollmentStatus: enrollStatusMatch?.[1] ?? enrollStatusMatch?.[2] ?? null,
     };
 
-    const totalCredits = creditsMatch ? parseInt(creditsMatch[1], 10) : 0;
+    const totalCredits = creditsMatch ? parseFloat(creditsMatch[1]) : 0;
     const detectedSemester = semMatch ? `${semMatch[1]}${semMatch[2]}` : null;
 
     // 解析課表
@@ -574,7 +583,7 @@ export async function puFetchCourses(
         name: zhName,
         nameEn: enName,
         courseType: cells[3],
-        credits: parseInt(cells[4], 10) || 0,
+        credits: parseFloat(cells[4]) || 0,
         dayOfWeek: tp?.dayOfWeek ?? null,
         periods: tp?.periods ?? [],
         startTime: tp?.startTime ?? null,
@@ -598,99 +607,6 @@ export async function puFetchCourses(
       error: err instanceof Error ? err.message : '抓取課表失敗',
     };
   }
-}
-
-/**
- * 從 HTML 解析成績行。
- */
-/**
- * 解析「歷年修課明細」格式 — 學期標題 + 每學期一個 table
- * 格式: 學期別(Semester)：114 [ 1 ] → 下方 table 有 Course, Class, CourseType, Credits, Score
- * 學期結束有: 學期平均成績, 操行成績, 班排名, 系排名
- */
-function parsePerSemesterGrades(html: string): { grades: PUGrade[]; summaryRows: { semester: string; label: string; value: string }[] } {
-  const grades: PUGrade[] = [];
-  const summaryRows: { semester: string; label: string; value: string }[] = [];
-
-  // 用 學期別(Semester)：XXX [ Y ] 來拆分 HTML
-  const semesterSections = html.split(/學期別\(Semester\)/);
-  if (semesterSections.length <= 1) return { grades: [], summaryRows: [] };
-
-  for (let i = 1; i < semesterSections.length; i++) {
-    const section = semesterSections[i];
-    // 解析學期代碼: ：114 [ 1 ] → "1141"
-    const semMatch = section.match(/[：:]\s*(\d{2,3})\s*\[\s*(\d+)\s*\]/);
-    if (!semMatch) continue;
-    const semester = `${semMatch[1]}${semMatch[2]}`;
-
-    // 解析此學期的 table
-    const tables = parseAllTables(section);
-    for (const rows of tables) {
-      for (const cells of rows) {
-        if (cells.length < 5) continue;
-
-        const courseName = (cells[0] ?? "").trim();
-        if (!courseName) continue;
-        if (courseName.includes("科目名稱") || courseName.includes("Course")) continue;
-
-        // 學期平均、排名等 summary rows
-        if (
-          courseName.includes("平均") || courseName.includes("average") ||
-          courseName.includes("操行") || courseName.includes("Behavior") ||
-          courseName.includes("排名") || courseName.includes("ranking")
-        ) {
-          const value = cells[cells.length - 1] ?? "";
-          if (value) summaryRows.push({ semester, label: courseName, value: value.trim() });
-          continue;
-        }
-
-        // 正常成績 row: [Course, Class, CourseType, Credits, Score]
-        const scoreIdx = cells.length >= 5 ? cells.length - 1 : 4;
-        const creditsIdx = cells.length >= 5 ? cells.length - 2 : 3;
-        const courseTypeIdx = cells.length >= 5 ? cells.length - 3 : 2;
-        const classIdx = cells.length >= 5 ? cells.length - 4 : 1;
-
-        const score = (cells[scoreIdx] ?? "").trim();
-        if (!score) continue;
-
-        const { zhName, enName } = parseCourseTitle(courseName);
-        grades.push({
-          semester,
-          courseName: zhName,
-          courseNameEn: enName,
-          className: (cells[classIdx] ?? "").trim(),
-          courseType: (cells[courseTypeIdx] ?? "").trim(),
-          credits: parseInt(cells[creditsIdx] ?? "0", 10) || 0,
-          score: normalizeScoreValue(score),
-        });
-      }
-    }
-  }
-
-  return { grades: dedupeGradeRows(grades), summaryRows: dedupeSummaryRows(summaryRows) };
-}
-
-function parseGradeRows(html: string): { grades: PUGrade[]; summaryRows: { semester: string; label: string; value: string }[] } {
-  // 優先嘗試「歷年修課明細」格式（學期標題 + per-table）
-  const perSemResult = parsePerSemesterGrades(html);
-  if (perSemResult.grades.length > 0) {
-    console.log(`[parseGradeRows] Per-semester format: ${perSemResult.grades.length} grades`);
-    return perSemResult;
-  }
-
-  // Fallback: 原始格式（單一大 table，column 0 = semester）
-  const parsedTables = parseAllTables(html)
-    .map((rows) => parseGradeRowsFromTableRows(rows))
-    .filter((candidate) => candidate.grades.length > 0 || candidate.summaryRows.length > 0);
-
-  if (parsedTables.length === 0) {
-    return { grades: [], summaryRows: [] };
-  }
-
-  return {
-    grades: dedupeGradeRows(parsedTables.flatMap((candidate) => candidate.grades)),
-    summaryRows: dedupeSummaryRows(parsedTables.flatMap((candidate) => candidate.summaryRows)),
-  };
 }
 
 /**
@@ -756,7 +672,7 @@ export async function puFetchGrades(
       return { success: false, data: null, error: 'E校園 session 已失效，請重新登入' };
     }
 
-    // ── 成績頁結構（2026-04 實測確認）：
+    // ── 支援的成績頁結構：
     //   每個學期是一個 <p>學期別(Semester)：YYY [ T ]</p> 後接一個 5 欄 <table>
     //   欄位: 科目名稱(Course) | 修課班級(Class) | 修別(Course type) | 學分數(Credits) | 成績(Score)
     //   表尾有: 學期平均成績, 操行成績, 班排名, 系排名
@@ -784,6 +700,12 @@ export async function puFetchGrades(
       ) {
         gradeTables.push(table);
       }
+    }
+
+    const explicitEmpty = hasPuStudentContext(html) &&
+      /查無成績|尚無成績|無成績資料|沒有成績|無修課紀錄|尚無修課紀錄|No\s+(?:grade|course)\s+records/i.test(stripTags(html));
+    if (gradeTables.length === 0 && !explicitEmpty) {
+      return { success: false, data: null, error: '未能辨識校方成績頁面，請稍後再試' };
     }
 
     // 3. 逐個表格配對學期並解析
@@ -830,8 +752,8 @@ export async function puFetchGrades(
           courseNameEn: enName,
           className: cells[1],
           courseType: cells[2],
-          credits: parseInt(cells[3], 10) || 0,
-          score: score === '通過(Pass)' ? 'Pass' : parseFloat(score) || score,
+          credits: parseFloat(cells[3]) || 0,
+          score: normalizeScoreValue(score),
         });
       }
     }
@@ -865,22 +787,20 @@ export async function puFetchGrades(
  */
 function parseCreditTotals(html: string): PuCreditTotals {
   const text = stripTags(html).replace(/\s+/g, " ");
-  console.log("[parseCreditTotals] Stripped text sample (last 600 chars):", text.slice(-600));
 
   const extract = (label: string): number | null => {
     // Allow whitespace between 】 and ：, and between ： and the number
     // Also handle optional "學分" suffix and variations like "： 51學分"
     const patterns = [
-      new RegExp(`【${label}】\\s*[：:]\\s*(\\d+)`, "i"),
-      new RegExp(`【${label}[^】]*】\\s*[：:]\\s*(\\d+)`, "i"),
+      new RegExp(`【${label}】\\s*[：:]\\s*(\\d+(?:\\.\\d+)?)`, "i"),
+      new RegExp(`【${label}[^】]*】\\s*[：:]\\s*(\\d+(?:\\.\\d+)?)`, "i"),
       // Fallback: label followed by number anywhere nearby (within 20 chars)
-      new RegExp(`${label}[】\\s：:]*?(\\d+)\\s*學分`, "i"),
+      new RegExp(`${label}[】\\s：:]*?(\\d+(?:\\.\\d+)?)\\s*學分`, "i"),
     ];
     for (const re of patterns) {
       const m = text.match(re);
       if (m) {
-        console.log(`[parseCreditTotals] Matched "${label}" = ${m[1]} via ${re.source}`);
-        return parseInt(m[1], 10);
+        return parseFloat(m[1]);
       }
     }
     return null;
@@ -888,16 +808,15 @@ function parseCreditTotals(html: string): PuCreditTotals {
 
   // 小計 has special format: 【小計(...)】：88 or 【小計(不含輔雙)】 ： 88
   const subtotalPatterns = [
-    /【小計[^】]*】\s*[：:]\s*(\d+)/,
-    /小計[^）)]*[）)】]?\s*[：:]\s*(\d+)/,
-    /小計\s*[（(][^）)]*[）)]\s*[】]?\s*[：:]\s*(\d+)/,
+    /【小計[^】]*】\s*[：:]\s*(\d+(?:\.\d+)?)/,
+    /小計[^）)]*[）)】]?\s*[：:]\s*(\d+(?:\.\d+)?)/,
+    /小計\s*[（(][^）)]*[）)]\s*[】]?\s*[：:]\s*(\d+(?:\.\d+)?)/,
   ];
   let subtotal: number | null = null;
   for (const re of subtotalPatterns) {
     const m = text.match(re);
     if (m) {
-      subtotal = parseInt(m[1], 10);
-      console.log(`[parseCreditTotals] Matched subtotal = ${subtotal} via ${re.source}`);
+      subtotal = parseFloat(m[1]);
       break;
     }
   }
@@ -994,8 +913,8 @@ function parseGeneralEdDimensions(html: string): PuGeneralEdDimension[] {
 
       dimensions.push({
         dimension,
-        requiredCredits: parseInt(cells[1], 10) || 0,
-        earnedCredits: parseInt(cells[2], 10) || 0,
+        requiredCredits: parseFloat(cells[1]) || 0,
+        earnedCredits: parseFloat(cells[2]) || 0,
         note: cells[3]?.trim() || undefined,
       });
     }
@@ -1027,7 +946,7 @@ function parseRequiredGeneralCourses(html: string): PuRequiredGeneralCourse[] {
 
       courses.push({
         dimension,
-        credits: parseInt(cells[1], 10) || 0,
+        credits: parseFloat(cells[1]) || 0,
         courseName: cells[2]?.trim() ?? "",
       });
     }
@@ -1062,7 +981,7 @@ function parseInProgressGeneralCourses(html: string): PuInProgressGeneralCourse[
         courseName,
         grade: cells[2]?.trim() ?? "",
         semester: cells[3]?.trim() ?? "",
-        credits: parseInt(cells[4] ?? "0", 10) || 0,
+        credits: parseFloat(cells[4] ?? "0") || 0,
         rules: cells[5]?.trim() || undefined,
       });
     }
@@ -1095,13 +1014,16 @@ function parseProfessionalElectiveOptions(html: string): PuProfessionalElectiveO
       const courseName = cells[1]?.trim();
       if (!courseName) continue;
 
+      const credits = cells[4]?.trim() ? Number(cells[4]) : Number.NaN;
+      const earnedCredits = cells[5]?.trim() ? Number(cells[5]) : Number.NaN;
+
       options.push({
         courseGroup: cells[0]?.trim() ?? "",
         courseName,
         className: cells[2]?.trim() || undefined,
         semester: cells[3]?.trim() || undefined,
-        credits: parseInt(cells[4] ?? "0", 10) || undefined,
-        earnedCredits: parseInt(cells[5] ?? "0", 10) || undefined,
+        credits: Number.isFinite(credits) ? credits : undefined,
+        earnedCredits: Number.isFinite(earnedCredits) ? earnedCredits : undefined,
         rules: cells[6]?.trim() || undefined,
       });
     }
@@ -1215,7 +1137,7 @@ function parseScoreAllPage(html: string): {
     });
   }
 
-  // Per-semester grades (reuse existing parsePerSemesterGrades + enhance)
+  // Per-semester grades
   const semesterSections = html.split(/學期別\(Semester\)/);
   for (let i = 1; i < semesterSections.length; i++) {
     const section = semesterSections[i];
@@ -1273,7 +1195,7 @@ function parseScoreAllPage(html: string): {
           courseNameEn: enName,
           className: (cells[classIdx] ?? "").trim(),
           courseType: (cells[courseTypeIdx] ?? "").trim(),
-          credits: parseInt(cells[creditsIdx] ?? "0", 10) || 0,
+          credits: parseFloat(cells[creditsIdx] ?? "0") || 0,
           score: normalizeScoreValue(score),
         });
       }
@@ -1356,7 +1278,7 @@ export async function puFetchCreditAudit(
       if (res.value.status !== 200) return "";
       const html = res.value.html;
       // Detect session-expired / login redirect pages
-      if (html.includes("尚未登入") || html.includes("Not yet logged in") || html.includes("請重新登入")) {
+      if (looksLikePuLoginPage(html) || html.includes("尚未登入") || html.includes("Not yet logged in") || html.includes("請重新登入")) {
         console.warn("[puFetchCreditAudit v2] Session expired detected in response");
         return "";
       }
@@ -1376,8 +1298,7 @@ export async function puFetchCreditAudit(
     }
 
     // ── Parse tab_1.php sections ──
-    // Use 'let' because we may fill in fallback values from scoreAll data
-    let creditTotals = parseCreditTotals(tab1Html);
+    const creditTotals = parseCreditTotals(tab1Html);
     const missingRequiredCourses = parseMissingRequiredCourses(tab1Html);
     const completedGeneralCourses = parseCompletedGeneralCourses(tab1Html);
     const requiredGeneralCourses = parseRequiredGeneralCourses(tab1Html);
@@ -1412,28 +1333,12 @@ export async function puFetchCreditAudit(
 
     // ── Parse score_all.php ──
     const scoreData = parseScoreAllPage(scoreAllHtml);
-    console.log(`[puFetchCreditAudit v2] scoreAll: ${scoreData.semesterGrades.length} semesters, student=${scoreData.studentId}`);
+    console.log(`[puFetchCreditAudit v2] scoreAll: ${scoreData.semesterGrades.length} semesters`);
 
-    // ── Fallback: if creditTotals are all null, compute from scoreAll grades ──
-    if (creditTotals.subtotal == null && creditTotals.required == null && creditTotals.elective == null) {
-      console.warn("[puFetchCreditAudit v2] creditTotals all null — computing fallback from semesterGrades");
-      let totalPassedCredits = 0;
-      for (const sem of scoreData.semesterGrades) {
-        for (const course of sem.courses) {
-          const scoreStr = String(course.score).toLowerCase();
-          const score = typeof course.score === "number" ? course.score : parseFloat(scoreStr);
-          const passed = !isNaN(score) && score >= 60;
-          // Also count "Pass", "通過", "通過(Pass)" for P/F courses
-          const isPassText = scoreStr.includes("通過") || scoreStr === "pass";
-          if (passed || isPassText) {
-            totalPassedCredits += course.credits;
-          }
-        }
-      }
-      if (totalPassedCredits > 0) {
-        creditTotals.subtotal = totalPassedCredits;
-        console.log(`[puFetchCreditAudit v2] Fallback subtotal from grades: ${totalPassedCredits}`);
-      }
+    // 沒有讀到學分試算表時，不把自行加總的成績冒充校方核定學分。
+    // 成績頁的學分試算另由共用的重修、文字成績規則處理。
+    if (!/學分|必修|選修|通識/.test(tab1Html) && scoreData.semesterGrades.length === 0) {
+      return { success: false, data: null, error: '學校未回傳可辨識的學分或歷年成績資料' };
     }
 
     // ── Build legacy compat ──
