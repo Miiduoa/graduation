@@ -65,6 +65,35 @@ export async function loadCreditAuditSavedCourses(storageKey: string): Promise<S
   return parsed as SavedCourse[];
 }
 
+export function getCreditChecklistStorageKey(
+  uid: string | null,
+  schoolId: string,
+  templateId: string,
+): string {
+  return getScopedStorageKey(`credit-audit-checklist:${templateId}`, { uid, schoolId });
+}
+
+export async function loadCreditChecklistStatus(storageKey: string): Promise<Record<string, boolean>> {
+  const raw = await AsyncStorage.getItem(storageKey);
+  if (raw === null) return {};
+  const value: unknown = JSON.parse(raw);
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new Error('檢核清單格式錯誤');
+  }
+  const rows = Object.entries(value);
+  if (rows.length > 50 || rows.some(([key, done]) => !/^[\\w-]{1,80}$/.test(key) || typeof done !== 'boolean')) {
+    throw new Error('檢核清單內容無法驗證');
+  }
+  return value as Record<string, boolean>;
+}
+
+export async function saveCreditChecklistStatus(
+  storageKey: string,
+  status: Record<string, boolean>,
+): Promise<void> {
+  await AsyncStorage.setItem(storageKey, JSON.stringify(status));
+}
+
 export async function saveCreditAuditSavedCourses(
   storageKey: string,
   courses: SavedCourse[],
