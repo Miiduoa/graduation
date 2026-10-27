@@ -47,19 +47,122 @@ function decodeEntities(value: string): string {
     });
 }
 
-function plainText(markup: string): string {
-  return decodeEntities(
-    markup
-      .replace(/<(?:script|style|noscript|template|svg|iframe)\b[^>]*>[\s\S]*?<\/(?:script|style|noscript|template|svg|iframe)\s*>/gi, '')
-      .replace(/<(?:br|\/p|\/div|\/li|\/h[1-6])\b[^>]*>/gi, '\n')
-      .replace(/<[^>]+>/g, ' ')
-  )
+/**
+ * Conservatively turns a user-provided HTML file into inert text and table
+ * structure. Only table/row/cell/br tags are emitted; no attributes except
+ * numeric cell spans and the visibility marker survive. We never execute,
+ * mount, or fetch anything from the source document.
+ *
+ * Regex-only script stripping is deliberately avoided: valid closing tags
+ * can have whitespace and browsers do not require a literal </script>.
+ */
+const SUPPRESSED_HTML_ELEMENTS = new Set([
+  'script', 'style', 'noscript', 'template', 'svg', 'iframe',
+  'object', 'embed', 'form', 'textarea', 'select',
+]);
+const TABLE_HTML_ELEMENTS = new Set(['table', 'tr', 'td', 'th']);
+const LINE_BREAK_ELEMENTS = new Set(['br', 'p', 'div', 'li', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6']);
+
+function tagEnd(markup: string, afterOpeningBracket: number): number {
+  let quote: '"' | "'" | null = null;
+  for (let i = afterOpeningBracket; i < markup.length; i++) {
+    const char = markup[i];
+    if (quote) {
+      if (char === quote) quote = null;
+    } else if (char === '"' || char === "'") {
+      quote = char;
+    } else if (char === '>') {
+      return i;
+    }
+  }
+  return -1;
+}
+
+function inertSchoolMarkup(markup: string): string {
+  const output: string[] = [];
+  const suppressed: string[] = [];
+  let at = 0;
+  while (at < markup.length) {
+    const open = markup.indexOf('<', at);
+    if (open < 0) {
+      if (!suppressed.length) output.push(markup.slice(at).replace(/</g, '&lt;').replace(/>/g, '&gt;'));
+      break;
+    }
+    if (!suppressed.length && open > at) {
+      output.push(markup.slice(at, open).replace(/</g, '&lt;').replace(/>/g, '&gt;'));
+    }
+    if (markup.startsWith('<!--', open)) {
+      const closingComment = markup.indexOf('-->', open + 4);
+      if (closingComment < 0) break;
+      at = closingComment + 3;
+      continue;
+    }
+    const close = tagEnd(markup, open + 1);
+    if (close < 0) break;
+    const inside = markup.slice(open + 1, close);
+    at = close + 1;
+    const match = /^\s*(\/?)\s*([a-z][a-z0-9:-]*)/i.exec(inside);
+    if (!match) continue;
+    const closing = match[1] === '/';
+    const name = match[2].toLowerCase();
+    if (SUPPRESSED_HTML_ELEMENTS.has(name)) {
+      if (closing) {
+        const index = suppressed.lastIndexOf(name);
+        if (index >= 0) suppressed.splice(index);
+      } else if (!/\/\s*$/.test(inside)) {
+        suppressed.push(name);
+      }
+      continue;
+    }
+    if (suppressed.length) continue;
+    if (TABLE_HTML_ELEMENTS.has(name)) {
+      if (closing) {
+        output.push('</' + name + '>');
+      } else {
+        const attributes = inside.slice(match[0].length);
+        const spans = name === 'td' || name === 'th'
+          ? ' rowspan="' + span(attributes, 'rowspan') + '" colspan="' + span(attributes, 'colspan') + '"'
+          : '';
+        output.push('<' + name + spans + (isHidden(attributes) ? ' hidden' : '') + '>');
+      }
+    } else if (LINE_BREAK_ELEMENTS.has(name)) {
+      output.push('<br>');
+    } else {
+      output.push(' ');
+    }
+  }
+  return output.join('');
+}
+
+/** Only receives inertSchoolMarkup output, never an arbitrary HTML string. */
+function schoolMarkupText(markup: string): string {
+  const chunks: string[] = [];
+  let at = 0;
+  while (at < markup.length) {
+    const open = markup.indexOf('<', at);
+    if (open < 0) {
+      chunks.push(markup.slice(at));
+      break;
+    }
+    chunks.push(markup.slice(at, open));
+    const close = markup.indexOf('>', open + 1);
+    if (close < 0) break;
+    const tag = markup.slice(open + 1, close).trim().toLowerCase();
+    chunks.push(tag === 'br' ? '\n' : ' ');
+    at = close + 1;
+  }
+  return chunks.join('');
+}
+
+function plainText(markup: string, limit = 500): string {
+  return decodeEntities(schoolMarkupText(markup))
+    .replace(/[<>]/g, '')
     .replace(/\u00a0/g, ' ')
     .split('\n')
     .map((line) => line.replace(/[\t\r\f\v ]+/g, ' ').trim())
     .filter(Boolean)
     .join(' / ')
-    .slice(0, 500);
+    .slice(0, limit);
 }
 
 function span(attribute: string, name: 'rowspan' | 'colspan'): number {
@@ -139,11 +242,7 @@ function period(value: string, profile?: PeriodProfileId): number | null {
 
 /** A suggestion only: ambiguous years/semesters must never silently choose one. */
 export function suggestSchoolPageTerm(markup: string): { academicYear: string; semester: string } | null {
-  const visible = decodeEntities(
-    markup
-      .replace(/<(script|style|noscript|template|svg|iframe)\b[^>]*>[\s\S]*?<\/\1\s*>/gi, '')
-      .replace(/<[^>]+>/g, ' ')
-  ).normalize('NFKC').replace(/\s+/g, ' ').slice(0, 100_000);
+  const visible = plainText(inertSchoolMarkup(markup), 100_000).normalize('NFKC').replace(/\s+/g, ' ');
   const choices = new Set<string>();
   const pattern = /(?:民國\s*)?(1\d{2}|20\d{2})\s*學年度\s*(?:第?\s*([12一二])\s*學期|([上下])\s*學期|暑(?:期|修))/g;
   for (const found of visible.matchAll(pattern)) {
@@ -263,8 +362,7 @@ export function extractSchoolPageTables(
     throw new SchoolPageImportError('學校網頁存檔超過 500 KB，請只複製課表或成績表格。');
   if (!/<table\b/i.test(markup))
     throw new SchoolPageImportError('沒有找到網頁表格。請在校務網站開啟課表或成績列表，再儲存頁面。');
-  const cleaned = markup.replace(/<!--[\s\S]*?-->/g, '')
-    .replace(/<(script|style|noscript|template|svg|iframe)\b[^>]*>[\s\S]*?<\/\1\s*>/gi, '');
+  const cleaned = inertSchoolMarkup(markup);
   // Nested layout tables are common in school portals: keep every complete
   // innermost table instead of pairing an outer <table> with the first </table>.
   const all: string[] = [];
