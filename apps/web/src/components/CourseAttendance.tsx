@@ -276,6 +276,7 @@ function Session({
         <AttendanceCorrectionPanel
           courseId={courseId}
           sessionId={session.id}
+          active={session.active}
           onUpdated={async () => {
             await reload();
             const latest = await loadAttendanceRecords(courseId, session.id);
