@@ -63,7 +63,7 @@ describe('manual academic credits', () => {
     const rows = parseCreditCsvRows(csv);
     expect(rows[1][0]).toBe(original[0].name);
     expect(rows[1][1]).toBe('2.5');
-    // Spreadsheet safety prefix is not stripped by import: it remains plain text.
+    // 匯入時不會拿掉試算表安全前綴，會原樣當成純文字。
     expect(rows[2][0]).toBe("'=HYPERLINK(\"bad\")");
     const imported = parseManualCreditCsv(csv);
     expect(imported.courses[0].passed).toBe(true);

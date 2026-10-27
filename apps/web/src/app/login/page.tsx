@@ -5,7 +5,7 @@ import Link from 'next/link';
 import { SiteShell } from '@/components/SiteShell';
 import { Input } from '@/components/ui/Input';
 import { Button } from '@/components/ui/Button';
-import { useRouter, useSearchParams } from 'next/navigation';
+import { useSearchParams } from 'next/navigation';
 import { useAuth } from '@/components/AuthGuard';
 import { isFirebaseConfigured, signInWithPuStudentId } from '@/features/auth/client';
 import {
@@ -42,8 +42,10 @@ function loginDestination(value: string | null): string {
   }
 }
 
-function goAfterLogin(router: { replace: (href: string) => void }, destination: string) {
-  navigateAfterLogin((href) => router.replace(href), destination);
+function goAfterLogin(destination: string) {
+  // App Router 的 router.replace 在登入後帳號／校園狀態更新時可能被取消，
+  // 回到「/」時可見 /?_rsc 中斷、畫面停在 /login。改以整頁導向離開登入頁。
+  navigateAfterLogin((href) => window.location.replace(href), destination);
 }
 
 function LoginForm({
@@ -55,7 +57,6 @@ function LoginForm({
   reconnect: boolean;
   issue: boolean;
 }) {
-  const router = useRouter();
   const { user, loading: schoolLoading } = useAuth();
   const selection = useOptionalSelectedSchool();
   const selectedSchoolId = selection?.selectedSchoolId ?? null;
@@ -101,8 +102,12 @@ function LoginForm({
     };
   }, []);
   useEffect(() => {
+    // 登入成功後帳號作用域會重讀校園偏好，目錄會短暫未就緒並清空 selectedSchoolId。
+    // 那不是使用者改選校園，不能中斷正在進行的學號登入或登入後導頁。
+    if (!schoolDirectoryReady) return;
     if (previousSchoolId.current === selectedSchoolId) return;
     previousSchoolId.current = selectedSchoolId;
+    if (returning.current) return;
     request.current?.abort();
     request.current = null;
     if (busyRef.current === 'school') {
@@ -112,7 +117,7 @@ function LoginForm({
     setStudentId('');
     setPassword('');
     setError('');
-  }, [selectedSchoolId]);
+  }, [selectedSchoolId, schoolDirectoryReady]);
   useEffect(() => {
     if (
       !schoolLoading &&
@@ -123,9 +128,9 @@ function LoginForm({
       !reconnect
     ) {
       returning.current = true;
-      goAfterLogin(router, destination);
+      goAfterLogin(destination);
     }
-  }, [hasSchoolIdentity, schoolLoading, router, destination, reconnect, schoolRequired]);
+  }, [hasSchoolIdentity, schoolLoading, destination, reconnect, schoolRequired]);
   async function login(event: FormEvent) {
     event.preventDefault();
     if (busyRef.current || returning.current || schoolLoading || !schoolAvailable) return;
@@ -151,13 +156,13 @@ function LoginForm({
       if (!authenticated) throw new Error('登入服務尚未連線。');
       setPassword('');
       returning.current = true;
-      goAfterLogin(router, destination);
+      goAfterLogin(destination);
     } catch (error) {
       if (controller.signal.aborted) return;
       if (error instanceof SchoolLoginHttpError && error.status === 401) setPassword('');
       setError(schoolLoginFailureCopy(error));
     } finally {
-      if (!controller.signal.aborted) {
+      if (!controller.signal.aborted && !returning.current) {
         busyRef.current = null;
         setBusy(false);
       }

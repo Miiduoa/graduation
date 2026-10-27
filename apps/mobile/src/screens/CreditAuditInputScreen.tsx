@@ -55,7 +55,7 @@ const legacyCategories: Array<{ key: CreditCategory; label: string; color: strin
   { key: 'other', label: '其他', color: '#FF9500' },
 ];
 
-/** Historical terms remain accessible, while the current year is always near the front. */
+/** 歷年學期仍可選，目前學年會排在前面。 */
 function localAcademicTerm(now = new Date()): { year: number; semester: 1 | 2 } {
   const parts = new Intl.DateTimeFormat('en-US', {
     timeZone: 'Asia/Taipei',
@@ -107,8 +107,7 @@ export function CreditAuditInputScreen(props: any) {
   const [grade, setGrade] = useState('');
   const [semester, setSemester] = useState(`${currentTerm.year}-${currentTerm.semester}`);
 
-  // The only bundled sample is PU CSIE 115. Never silently apply it to another
-  // department, year, account or campus as a graduation audit.
+  // 內建範本只有靜宜資工 115。不可默默套到別系、別屆、別的帳號或校區當畢業審核。
   const [referenceEnabled, setReferenceEnabled] = useState(false);
   const canUseReference = mayOfferPuCsie115Reference(school.id, auth.profile?.department);
   const referenceActive = canUseReference && referenceEnabled;
@@ -118,7 +117,7 @@ export function CreditAuditInputScreen(props: any) {
     [detailedTemplate],
   );
 
-  // Reference checklist status is scoped to the account, campus and template.
+  // 對照清單的勾選狀態只屬於這個帳號、校區與範本。
   const [nonCreditSatisfied, setNonCreditSatisfied] = useState<Record<string, boolean>>({});
 
   const [savedCourses, setSavedCourses] = useState<SavedCourse[]>([]);
