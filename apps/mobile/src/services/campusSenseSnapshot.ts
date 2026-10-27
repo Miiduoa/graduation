@@ -50,7 +50,10 @@ function dateString(value: unknown): string | null {
 
 function requiredText(value: unknown, max: number): string {
   if (typeof value !== 'string' || !value.trim()) throw new Error('invalid-sense-response');
-  return value.trim().slice(0, max).replace(/[\u0000-\u001f\u007f]/g, ' ');
+  return Array.from(value.trim().slice(0, max), (character) => {
+    const code = character.charCodeAt(0);
+    return code < 32 || code === 127 ? ' ' : character;
+  }).join('');
 }
 
 function parseSnapshot(payload: unknown, userId: string, schoolId: string): CampusSenseSnapshot {
