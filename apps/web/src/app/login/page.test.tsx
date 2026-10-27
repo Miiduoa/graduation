@@ -25,6 +25,7 @@ const { replace, signIn, state } = vi.hoisted(() => ({
   },
 }));
 vi.mock('next/navigation', () => ({
+  usePathname: () => '/login',
   useRouter: () => ({ replace }),
   useSearchParams: () => state.params,
 }));
@@ -90,6 +91,7 @@ it('keeps a school return destination during an availability failure instead of 
   state.user = null;
   state.optionsError = true;
   render(<LoginPage />);
+  expect(screen.queryByRole('navigation', { name: '課務導覽' })).toBeNull();
   expect(screen.queryByTestId('platform-sign-in')).toBeNull();
   expect(screen.queryByText(STUDENT_ID_PREPARING_COPY)).toBeNull();
   expect(screen.queryByLabelText('學號')).toBeNull();
