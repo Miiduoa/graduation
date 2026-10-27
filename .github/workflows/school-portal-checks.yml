@@ -5,6 +5,7 @@ on:
       - 'packages/shared/src/imports/**'
       - 'apps/mobile/src/components/SchoolPortalImport.tsx'
       - 'apps/mobile/src/__tests__/SchoolPortalImport.test.tsx'
+      - 'apps/mobile/src/__tests__/SchoolPortalSession.test.tsx'
       - 'apps/mobile/src/screens/LoginLandingScreen.tsx'
       - 'apps/mobile/src/screens/SSOLoginScreen.tsx'
       - 'apps/web/src/lib/portalCapture*.test.ts'
@@ -31,7 +32,7 @@ jobs:
         run: pnpm --filter web exec vitest run src/lib/portalCapture.test.ts src/lib/portalCapture.dom.test.ts src/lib/portalCapture.privacy.test.ts --coverage --reporter=json --outputFile=portal-vitest-results.json
       - name: Test native review and original login screens
         if: ${{ !cancelled() }}
-        run: pnpm --filter mobile test src/__tests__/SchoolPortalImport.test.tsx src/__tests__/GuestLoginScreens.test.tsx --ci --json --outputFile=portal-jest-results.json
+        run: pnpm --filter mobile test src/__tests__/SchoolPortalImport.test.tsx src/__tests__/SchoolPortalSession.test.tsx src/__tests__/GuestLoginScreens.test.tsx --ci --json --outputFile=portal-jest-results.json
       - name: Preserve machine-readable results
         if: ${{ !cancelled() }}
         uses: actions/upload-artifact@v4
