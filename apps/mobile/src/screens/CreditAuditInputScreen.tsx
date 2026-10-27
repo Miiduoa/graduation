@@ -574,7 +574,7 @@ export function CreditAuditInputScreen(props: any) {
                   <TextInput
                     value={credits}
                     onChangeText={setCredits}
-                    keyboardType="number-pad"
+                    keyboardType="decimal-pad"
                     style={{
                       marginTop: 4,
                       paddingVertical: 12,
