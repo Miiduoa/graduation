@@ -4,6 +4,7 @@ import { useMemo, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { AcademicPage } from '@/components/academic/AcademicPage';
 import { GradesTabs, isGradesFeedbackTab } from '@/components/academic/GradesTabs';
+import { SchoolSemesterSummary } from '@/components/academic/SchoolSemesterSummary';
 import { StudentGradesPage } from '@/features/nuni/StudentGrades';
 import {
   calculateGradeSummary,
@@ -50,7 +51,7 @@ function Grades({ records }: { records: AcademicGradeResponse }) {
           學期
           <select value={semester} onChange={(event) => setSemester(event.target.value)}>
             <option value="">全部學期</option>
-            {records.semesters.map((code) => (
+            {[...records.semesters].sort((a, b) => b.localeCompare(a, undefined, { numeric: true })).map((code) => (
               <option key={code} value={code}>
                 {formatSemester(code)}
               </option>
@@ -66,7 +67,7 @@ function Grades({ records }: { records: AcademicGradeResponse }) {
         </div>
         <div className={styles.metric}>
           <p>紀錄中的修課學分</p>
-          <strong>{summary.totalCredits}</strong>
+          <strong>{summary.courseCount ? summary.totalCredits : '—'}</strong>
           <small>含未通過與重修紀錄，不是畢業採計學分</small>
         </div>
         <div className={styles.metric}>
@@ -77,6 +78,7 @@ function Grades({ records }: { records: AcademicGradeResponse }) {
           <small>僅計 {summary.numericCredits} 學分的數字成績</small>
         </div>
       </div>
+      <SchoolSemesterSummary records={records} semester={semester} />
       <div className={styles.toolbar}>
         <label className={styles.field}>
           搜尋科目
@@ -96,6 +98,10 @@ function Grades({ records }: { records: AcademicGradeResponse }) {
           </select>
         </label>
       </div>
+      {(search.trim() || semester) && <p className={styles.resultCount} role="status">
+        目前顯示 {rows.length} 筆成績
+        <button type="button" onClick={() => { setSearch(''); setSemester(''); }}>清除篩選</button>
+      </p>}
       {rows.length ? (
         <ul className={styles.list}>
           {rows.map((grade) => (

@@ -44,6 +44,7 @@ _tmp_*
 # Next
 apps/web/.next/
 apps/web/out/
+apps/web/public/ai/onnxruntime/
 next-env.d.ts
 
 # Expo

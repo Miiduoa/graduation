@@ -165,7 +165,8 @@ async function executeCampusAssistantCore({
       : detectCampusAssistantIntent(lastUserMessage);
 
   const userProfile = uid ? await fetchAssistantUserProfile(uid) : null;
-  const schoolId = userProfile?.schoolId ?? context.schoolId ?? null;
+  const selectedSchoolId = typeof context.schoolId === 'string' ? context.schoolId.trim() : '';
+  const schoolId = selectedSchoolId || userProfile?.schoolId || null;
   const displayName = userProfile?.displayName ?? request.auth?.token?.name ?? null;
   const actorRole = resolveAssistantActorRole(userProfile?.role ?? request.auth?.token?.role);
   const permissionScope = resolvePermissionScope(intent, Boolean(uid));
@@ -447,6 +448,9 @@ async function executeCampusAssistantCore({
       if (x === 'pending') return '待審核';
       if (x === 'approved' || x === 'accepted') return '已核准';
       if (x === 'rejected' || x === 'denied') return '已駁回';
+      if (x === 'partial') return '部分課程已核閱';
+      if (x === 'completed') return '各課程已完成核閱，請到請假頁查看結果';
+      if (x === 'withdrawn') return '已撤回';
       return s || '未知';
     };
 

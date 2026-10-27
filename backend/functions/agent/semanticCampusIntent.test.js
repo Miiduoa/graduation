@@ -39,6 +39,20 @@ describe('read-only AI semantic intent', () => {
     expect(value.destinations.every(x => SAFE_DESTINATIONS.includes(x))).toBe(true);
   });
 
+  test('accepts the named school platform as a navigation destination', async () => {
+    const model = jest.fn(async () => ({
+      provider: 'gemini', content: JSON.stringify({
+        summary: '開啟 WOW Class 課程頁。',
+        destinations: ['/school-courses'],
+        clarifyingQuestion: null,
+      }),
+    }));
+    const result = await understandCampusUtterance({ utterance: '我要開玩課雲', schoolId: 'pu' }, model);
+    expect(result).toMatchObject({ status: 'understood', destinations: ['/school-courses'] });
+    expect(model.mock.calls[0][0].messages[0].content).toContain('WOW Class、TronClass 或玩課雲');
+    expect(model.mock.calls[0][0]).not.toHaveProperty('toolDefs');
+  });
+
   test('clarifies an unclear request instead of inventing an action', () => {
     expect(parseModelCampusIntent('{"summary":"還需要資訊","destinations":[],"clarifyingQuestion":"你要查詢哪項服務？"}'))
       .toMatchObject({ status: 'clarify', destinations: [], clarifyingQuestion: '你要查詢哪項服務？' });

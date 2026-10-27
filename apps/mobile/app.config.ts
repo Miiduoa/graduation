@@ -361,8 +361,8 @@ export default ({ config }: any) => {
       /** Cloudflare Worker OPAC proxy base URL (no trailing slash); empty → device direct fetch only */
       libraryOpacProxyUrl: process.env.EXPO_PUBLIC_LIBRARY_OPAC_PROXY_URL ?? '',
       geminiApiKey: isReleaseLike ? '' : (process.env.EXPO_PUBLIC_GEMINI_API_KEY ?? ''),
-      /** 預設 GGUF：`qwen2.5-7b`（與 MLX 微調基底對齊）；可改 `qwen2.5-3b` 等 `MODEL_REGISTRY` 鍵 */
-      localLlmDefaultModelId: process.env.EXPO_PUBLIC_LOCAL_LLM_MODEL ?? 'qwen2.5-7b',
+      /** 裝置 AI 的輕量預設；進階使用者可在模型管理頁下載其他 GGUF。 */
+      localLlmDefaultModelId: process.env.EXPO_PUBLIC_LOCAL_LLM_MODEL ?? 'qwen2.5-0.5b',
       /** true：預設關閉網搜／預抓學習（完全離線優先）；仍可用對應 EXPO_PUBLIC_AI_* =true 強制開啟 */
       aiOfflineFirst: aiOfflineFirstBuild,
       aiWebSearchEnabled: aiOfflineFirstBuild

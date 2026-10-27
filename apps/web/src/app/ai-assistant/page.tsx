@@ -17,10 +17,13 @@ import { areFunctionsConfigured } from '@/lib/functionsUrl';
 import {
   assistantSources,
   assistantSuggestions,
+  assistantWriteProposals,
   hasOrderProposal,
   readOnlyAssistantCards,
 } from '@/lib/assistantPresentation';
 import { AgentCardList } from './AgentCards';
+import { AgentWritePanel } from './AgentWritePanel';
+import { CampusSensePanel } from './CampusSensePanel';
 import {
   isWebOnlineOrderingEnabled,
   isWebOrderStatusQuestion,
@@ -62,6 +65,7 @@ function AssistantConversation({
   const [draft, setDraft] = useState(initialDraft);
   const [pending, setPending] = useState(false);
   const [error, setError] = useState('');
+  const [senseRevision, setSenseRevision] = useState(0);
   const sessionId = useRef<string | null>(null);
   const request = useRef<AbortController | null>(null);
   const composer = useRef<HTMLTextAreaElement>(null);
@@ -145,6 +149,18 @@ function AssistantConversation({
 
   return (
     <section className={styles.conversation} aria-label="校園助理對話">
+      {functionsReady && (
+        <CampusSensePanel
+          userId={userId}
+          schoolId={schoolId}
+          revision={senseRevision}
+          onAsk={(question) => {
+            setDraft(question);
+            setError('');
+            composer.current?.focus();
+          }}
+        />
+      )}
       <div className={styles.toolbar}>
         <p className={home.intro}>
           {!functionsReady
@@ -213,6 +229,16 @@ function AssistantConversation({
             </p>
             {message.role === 'assistant' && (
               <>
+                {index === messages.length - 1 && assistantWriteProposals(message.response).map((proposal, proposalIndex) => (
+                  <AgentWritePanel
+                    key={proposal.agentRunId + ':' + proposal.toolName + ':' + proposalIndex}
+                    proposal={proposal}
+                    userId={userId}
+                    schoolId={schoolId}
+                    groupId={groupId || undefined}
+                    onCompleted={() => setSenseRevision((value) => value + 1)}
+                  />
+                ))}
                 <div className={styles.cards}>
                   <AgentCardList
                     cards={readOnlyAssistantCards(message.response.cards, schoolId)}
@@ -280,18 +306,24 @@ function AssistantConversation({
             setDraft(event.target.value);
             setError('');
           }}
+          onKeyDown={(event) => {
+            if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) {
+              event.preventDefault();
+              event.currentTarget.form?.requestSubmit();
+            }
+          }}
           aria-describedby={error ? 'assistant-error' : 'assistant-note'}
         />
         <div className={styles.voiceRow}>
           <VoiceDictationButton
             disabled={pending || !functionsReady}
             onTranscript={(text) => {
-              setDraft(text.slice(0, 4000));
+              setDraft((previous) => [previous.trim(), text.trim()].filter(Boolean).join(' ').slice(0, 4000));
               setError('');
               composer.current?.focus();
             }}
           />
-          <span className={styles.note}>辨識後可修改文字，按「送出」才會詢問助理。</span>
+          <span className={styles.note}>說完可修改文字，再送出。Enter 送出、Shift + Enter 換行。</span>
         </div>
         {error && (
           <p id="assistant-error" role="alert" className={styles.error}>

@@ -19,6 +19,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import NetInfo from '@react-native-community/netinfo';
+import * as Device from 'expo-device';
 import * as FileSystem from 'expo-file-system/legacy';
 import {
   localLLM,
@@ -49,12 +50,32 @@ interface ModelInfo {
   badge?: string;
 }
 
+const recommendedOnDeviceModelId =
+  Platform.OS === 'ios' &&
+  typeof Device.totalMemory === 'number' &&
+  Device.totalMemory >= 6 * 1024 * 1024 * 1024
+    ? 'qwen2.5-3b'
+    : 'qwen2.5-0.5b';
+
 const MODEL_INFO: ModelInfo[] = [
   // ── 輕量級 ──
   {
+    id: 'qwen2.5-0.5b',
+    name: 'Qwen2.5 隨身 AI',
+    description: '輕量中文模型，適合日常問答、文字整理。下載後可完全離線運算；複雜推理建議改用進階模型。',
+    sizeLabel: '約 398 MB',
+    sizeBytes: MODEL_REGISTRY['qwen2.5-0.5b'].modelSize,
+    quality: '輕量',
+    qualityStars: 2,
+    speedStars: 5,
+    recommended: true,
+    features: ['免付費 API', '離線問答', '中文對話', '手機本地處理'],
+    badge: '首次安裝推薦',
+  },
+  {
     id: 'smollm2-1.7b',
     name: 'SmolLM2 輕量版',
-    description: '速度最快，適合基本問答和簡單對話',
+    description: '舊版輕量模型，適合英文簡單對話；中文建議優先選 Qwen2.5',
     sizeLabel: '1.1 GB',
     sizeBytes: 1_100_000_000,
     quality: '輕量',
@@ -99,9 +120,9 @@ const MODEL_INFO: ModelInfo[] = [
     quality: '完整',
     qualityStars: 5,
     speedStars: 2,
-    recommended: true,
-    features: ['頂級中文', '深度推理', 'Agent 代理', '長文理解', '工具使用'],
-    badge: '推薦升級',
+    recommended: false,
+    features: ['中文推理', '進階對話', '長文整理', '工具理解'],
+    badge: '高記憶體裝置',
   },
   {
     id: 'mistral-7b-v0.3',
@@ -164,10 +185,8 @@ export default function AIModelManagerScreen({ navigation }: any) {
       setDownloadedModels(downloaded);
 
       const status = await localAssistant.getStatus();
-      // 只有在模型真正 ready 時才標記為使用中
-      if (status.llmState.modelId && status.llmState.status === 'ready') {
-        setActiveModel(status.llmState.modelId);
-      }
+      // A preference alone is not proof that the native context loaded.
+      setActiveModel(status.llmState.status === 'ready' ? status.llmState.modelId ?? null : null);
     } catch (e) {
       console.warn('[AIModelManager] loadState error:', e);
     }
@@ -194,6 +213,10 @@ export default function AIModelManagerScreen({ navigation }: any) {
     async (modelId: string) => {
       const info = MODEL_INFO.find((m) => m.id === modelId);
       if (!info) return;
+      if (['generating', 'loading', 'downloading'].includes(localLLM.getState().status)) {
+        Alert.alert('AI 正在使用中', '目前還有模型下載或推論工作，請先完成或取消後再操作。');
+        return;
+      }
 
       const runtime = localLLM.getRuntimeAvailability();
       setRuntimeAvailability(runtime);
@@ -253,11 +276,10 @@ export default function AIModelManagerScreen({ navigation }: any) {
         return false;
       }
 
-      await localLLM.setActiveModel(modelId);
-      await localAssistant.setConfig({ modelId });
-
+      // Only persist a new preference after the native context is ready.
       const ok = await localLLM.loadModel(modelId);
       if (ok) {
+        await localAssistant.setConfig({ modelId }).catch(() => {});
         setActiveModel(modelId);
         Alert.alert(messages.successTitle, messages.successBody);
         return true;
@@ -294,8 +316,10 @@ export default function AIModelManagerScreen({ navigation }: any) {
           failureFallback: '模型已下載，但載入到本機 AI 推理引擎時失敗。請稍後重試啟用。',
         });
       } else {
-        const errMsg = localLLM.getState().error ?? '下載失敗，請檢查網路連線後重試。';
-        Alert.alert('下載失敗', errMsg);
+        const state = localLLM.getState();
+        if (state.status !== 'uninitialized' || state.error) {
+          Alert.alert('下載未完成', state.error ?? '下載未完成。請確認是否有其他模型操作正在進行。');
+        }
         setDownloadProgress((prev) => {
           const next = { ...prev };
           delete next[modelId];
@@ -338,10 +362,14 @@ export default function AIModelManagerScreen({ navigation }: any) {
             text: '刪除',
             style: 'destructive',
             onPress: async () => {
-              await localLLM.deleteModel(modelId);
-              setDownloadedModels((prev) => prev.filter((id) => id !== modelId));
-              if (activeModel === modelId) setActiveModel(null);
-              checkDiskSpace();
+              try {
+                await localLLM.deleteModel(modelId);
+                setDownloadedModels((prev) => prev.filter((id) => id !== modelId));
+                if (activeModel === modelId) setActiveModel(null);
+                void checkDiskSpace();
+              } catch (error: any) {
+                Alert.alert('無法刪除模型', error?.message || '模型正在使用中，請稍後再試。');
+              }
             },
           },
         ],
@@ -411,14 +439,16 @@ export default function AIModelManagerScreen({ navigation }: any) {
 
         {/* Model Cards */}
         {MODEL_INFO.map((model) => {
+          const recommended = model.id === recommendedOnDeviceModelId;
           const isDownloaded = downloadedModels.includes(model.id);
           const isActive = activeModel === model.id;
           const progress = downloadProgress[model.id];
           const isDownloading =
             (llmState.status === 'downloading' && llmState.modelId === model.id) ||
             !!downloadProgress[model.id];
-          const canActivate = runtimeAvailability.available;
-          const canDownload = runtimeAvailability.available;
+          const engineBusy = ['downloading', 'loading', 'generating'].includes(llmState.status);
+          const canActivate = runtimeAvailability.available && !engineBusy;
+          const canDownload = runtimeAvailability.available && !engineBusy;
 
           return (
             <Animated.View
@@ -426,18 +456,18 @@ export default function AIModelManagerScreen({ navigation }: any) {
               style={[
                 styles.modelCard,
                 isActive && styles.modelCardActive,
-                model.recommended && { transform: [{ scale: pulseAnim }] },
+                recommended && { transform: [{ scale: pulseAnim }] },
               ]}
             >
               {/* Badge */}
-              {model.badge && (
+              {(recommended || model.badge) && (
                 <View
                   style={[
                     styles.badge,
-                    model.recommended ? styles.badgeRecommended : styles.badgeNormal,
+                    recommended ? styles.badgeRecommended : styles.badgeNormal,
                   ]}
                 >
-                  <Text style={[styles.badgeText, !model.recommended && { color: theme.colors.textSecondary }]}>{model.badge}</Text>
+                  <Text style={[styles.badgeText, !recommended && { color: theme.colors.textSecondary }]}>{recommended ? '此裝置建議' : model.badge}</Text>
                 </View>
               )}
 
@@ -554,7 +584,7 @@ export default function AIModelManagerScreen({ navigation }: any) {
                     <Text
                       style={[styles.actionBtnText, !canDownload && styles.actionBtnTextDisabled]}
                     >
-                      {canDownload ? '下載模型' : '需開發版 App'}
+                      {canDownload ? '下載模型' : engineBusy ? '請稍後再試' : '需開發版 App'}
                     </Text>
                   </TouchableOpacity>
                 )}
@@ -578,12 +608,13 @@ export default function AIModelManagerScreen({ navigation }: any) {
                       <Text
                         style={[styles.actionBtnText, !canActivate && styles.actionBtnTextDisabled]}
                       >
-                        {canActivate ? '啟用' : '需重建 App'}
+                        {canActivate ? '啟用' : engineBusy ? '請稍後再試' : '需重建 App'}
                       </Text>
                     </TouchableOpacity>
                     <TouchableOpacity
-                      style={[styles.actionBtn, styles.deleteBtn]}
+                      style={[styles.actionBtn, styles.deleteBtn, engineBusy && styles.actionBtnDisabled]}
                       onPress={() => handleDelete(model.id)}
+                      disabled={engineBusy}
                     >
                       <Ionicons name="trash-outline" size={18} color={theme.colors.danger} />
                     </TouchableOpacity>
@@ -600,7 +631,7 @@ export default function AIModelManagerScreen({ navigation }: any) {
                 {isDownloading && (
                   <TouchableOpacity
                     style={[styles.actionBtn, styles.cancelBtn]}
-                    onPress={() => localLLM.abort()}
+                    onPress={() => { void localLLM.cancelDownload(model.id); }}
                   >
                     <Ionicons name="close-circle-outline" size={18} color={theme.colors.danger} />
                     <Text style={[styles.actionBtnText, { color: theme.colors.danger }]}>取消</Text>

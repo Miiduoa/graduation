@@ -130,7 +130,7 @@ describe('personal credit workspace', () => {
     expect(emptyCreditPlan().recognized).toBe('');
   });
   it('restores valid backup only with confirmation and keeps the active campus scope', async () => {
-    renderWorkspace();
+    const workspace = renderWorkspace();
     await screen.findByLabelText('課程名稱');
     fireEvent.change(screen.getByLabelText('已確認可採計學分（自行填寫）'), { target: { value: '20' } });
     const restored = {
@@ -147,8 +147,17 @@ describe('personal credit workspace', () => {
     fireEvent.change(screen.getByLabelText('匯入 JSON 備份'), { target: { files: [file] } });
     await waitFor(() => expect((screen.getByLabelText('已確認可採計學分（自行填寫）') as HTMLInputElement).value).toBe('64'));
     expect(screen.getByText('資訊倫理')).toBeTruthy();
-    expect(window.localStorage.getItem(creditPlanStorageKey('u1', 'pu'))).toContain('資訊倫理');
+    // 備份解析先更新畫面，持久化由後續 effect 完成，必須等到真正寫入才驗證。
+    await waitFor(() => {
+      const raw = window.localStorage.getItem(creditPlanStorageKey('u1', 'pu'));
+      expect(raw).not.toBeNull();
+      expect(JSON.parse(raw!)).toEqual(restored);
+    });
     expect(window.localStorage.getItem(creditPlanStorageKey('u2', 'pu'))).toBeNull();
+    workspace.unmount();
+    renderWorkspace();
+    expect((await screen.findByLabelText('已確認可採計學分（自行填寫）') as HTMLInputElement).value).toBe('64');
+    expect(screen.getByText('資訊倫理')).toBeTruthy();
   });
 
   it('rejects malformed JSON without changing the working plan', async () => {

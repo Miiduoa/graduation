@@ -804,12 +804,16 @@ export function SearchBar(props: {
   onChange?: (t: string) => void;
   onChangeText?: (t: string) => void;
   placeholder?: string;
+  accessibilityLabel?: string;
+  disabled?: boolean;
   onFocus?: () => void;
   onSubmit?: () => void;
 }) {
   useVisualTheme();
   const [isFocused, setIsFocused] = useState(false);
-  const handleChange = props.onChangeText ?? props.onChange ?? (() => {});
+  const handleChange = (value: string) => {
+    if (!props.disabled) (props.onChangeText ?? props.onChange)?.(value);
+  };
 
   return (
     <View
@@ -817,44 +821,55 @@ export function SearchBar(props: {
         borderRadius: theme.radius.xl,
         backgroundColor: theme.colors.surface2,
         paddingHorizontal: theme.space.md,
-        paddingVertical: 12,
+        paddingVertical: 2,
+        minHeight: 48,
         flexDirection: 'row',
         alignItems: 'center',
         gap: theme.space.sm,
         borderWidth: 1.5,
-        borderColor: isFocused ? theme.colors.accent : 'transparent',
+        borderColor: isFocused && !props.disabled ? theme.colors.accent : 'transparent',
       }}
     >
       <Ionicons
         name="search"
+        accessible={false}
         size={18}
-        color={isFocused ? theme.colors.accent : theme.colors.muted}
+        color={isFocused && !props.disabled ? theme.colors.accent : theme.colors.muted}
       />
       <TextInput
         value={props.value}
         onChangeText={handleChange}
+        editable={!props.disabled}
+        accessibilityRole="search"
+        accessibilityLabel={props.accessibilityLabel ?? props.placeholder ?? '搜尋'}
+        accessibilityState={{ disabled: !!props.disabled }}
         placeholder={props.placeholder ?? '搜尋'}
         placeholderTextColor={theme.colors.muted}
         onFocus={() => {
+          if (props.disabled) return;
           setIsFocused(true);
           props.onFocus?.();
         }}
         onBlur={() => setIsFocused(false)}
-        onSubmitEditing={props.onSubmit}
+        onSubmitEditing={() => {
+          if (!props.disabled) props.onSubmit?.();
+        }}
         returnKeyType="search"
         style={{
           flex: 1,
           color: theme.colors.text,
           fontSize: 15,
           padding: 0,
+          minHeight: 44,
         }}
       />
       {props.value.length > 0 ? (
         <Pressable
           onPress={() => handleChange('')}
+          disabled={props.disabled}
           style={{
-            width: 24,
-            height: 24,
+            width: 44,
+            height: 44,
             borderRadius: 12,
             backgroundColor: theme.colors.surface2,
             alignItems: 'center',
@@ -862,8 +877,9 @@ export function SearchBar(props: {
           }}
           accessibilityRole="button"
           accessibilityLabel="清除搜尋"
+          accessibilityState={{ disabled: !!props.disabled }}
         >
-          <Ionicons name="close" size={14} color={theme.colors.muted} />
+          <Ionicons name="close" accessible={false} size={14} color={theme.colors.muted} />
         </Pressable>
       ) : null}
     </View>
@@ -1433,12 +1449,13 @@ export function FilterChip(props: { label: string; selected?: boolean; onPress?:
 export function SegmentedControl(props: {
   options: any[];
   selected?: any;
+  disabled?: boolean;
   onSelect?: (id: any) => void;
   onChange?: (id: any) => void;
 }) {
   useVisualTheme();
-  const getOptionId = (opt: any) => (typeof opt === 'object' ? (opt.id ?? opt.key) : opt);
-  const getOptionLabel = (opt: any) => (typeof opt === 'object' ? opt.label : opt);
+  const getOptionId = (opt: any) => (opt && typeof opt === 'object' ? (opt.id ?? opt.key) : opt);
+  const getOptionLabel = (opt: any) => (opt && typeof opt === 'object' ? opt.label : opt);
   const selected = props.selected ?? getOptionId(props.options[0]);
   const handleChange = props.onSelect || props.onChange || (() => {});
 
@@ -1456,17 +1473,29 @@ export function SegmentedControl(props: {
         const optionId = getOptionId(option);
         const optionLabel = getOptionLabel(option);
         const isSelected = optionId === selected;
+        const isDisabled = Boolean(
+          props.disabled || (option && typeof option === 'object' && option.disabled),
+        );
         return (
           <Pressable
             key={optionId}
-            onPress={() => handleChange(optionId)}
+            onPress={() => {
+              if (!isDisabled) handleChange(optionId);
+            }}
+            disabled={isDisabled}
+            accessibilityRole="tab"
+            accessibilityLabel={String(optionLabel)}
+            accessibilityState={{ selected: isSelected, disabled: isDisabled }}
             style={{
               flex: 1,
+              minHeight: 44,
               paddingVertical: theme.space.sm,
               paddingHorizontal: theme.space.md,
               borderRadius: theme.radius.lg,
               backgroundColor: isSelected ? theme.colors.surface : 'transparent',
               alignItems: 'center',
+              justifyContent: 'center',
+              opacity: isDisabled ? 0.5 : 1,
               ...(isSelected ? softShadowStyle(theme.shadows.inset) : {}),
             }}
           >

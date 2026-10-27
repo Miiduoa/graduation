@@ -172,6 +172,65 @@ test('school success keeps both flows locked and clears the pending dialog after
   }
 });
 
+test('school success reports the actual source counts and an unavailable course platform', async () => {
+  jest.useFakeTimers();
+  try {
+    jest.mocked(signInWithStudentId).mockResolvedValueOnce({
+      ...schoolResult,
+      syncSummary: {
+        incomplete: true,
+        items: [
+          {
+            key: 'timetable',
+            title: '課表',
+            source: 'E 校園',
+            state: 'received',
+            detail: '已讀取 6 筆上課紀錄',
+          },
+          {
+            key: 'grades',
+            title: '歷年成績',
+            source: 'E 校園',
+            state: 'received',
+            detail: '已讀取 28 筆成績',
+          },
+          {
+            key: 'credits',
+            title: '學分',
+            source: '歷年修課紀錄',
+            state: 'received',
+            detail: '可依修課紀錄試算，尚未取得校方完整畢業審核',
+          },
+          {
+            key: 'learning',
+            title: '課程平台',
+            source: '玩課雲',
+            state: 'unavailable',
+            detail: '尚未取得，請重新連線後再試',
+          },
+        ],
+      },
+    });
+    const view = render(<SSOLoginScreen />);
+    enterSchoolCredentials(view);
+    await act(async () => fireEvent.press(view.getByText('使用學號登入')));
+    expect(view.getByText('已讀取 6 筆上課紀錄')).toBeTruthy();
+    expect(view.getByText('已讀取 28 筆成績')).toBeTruthy();
+    expect(view.getByText('尚未取得，請重新連線後再試')).toBeTruthy();
+    expect(view.getByText('部分資料尚未取得，可先查看已完成的項目。')).toBeTruthy();
+    expect(view.getByText(/尚未取得校方完整畢業審核/)).toBeTruthy();
+    act(() => jest.advanceTimersByTime(250));
+    expect(Alert.alert).toHaveBeenCalledWith(
+      '登入成功',
+      expect.stringContaining('課程平台：尚未取得，請重新連線後再試'),
+      expect.any(Array),
+    );
+    view.unmount();
+  } finally {
+    jest.useRealTimers();
+  }
+});
+
 test('guest landing exposes stable native smoke targets and follows shared light/dark colors', () => {
   const view = render(<LoginLandingScreen />);
   expect(view.getByTestId('login-landing')).toHaveStyle({
@@ -356,7 +415,9 @@ test('pending logout explains the next step without presenting a restored accoun
 test('hides the school login button when no usable school provider is listed', () => {
   setSchoolLoginProviderKinds([]);
   const landing = render(<LoginLandingScreen />);
-  expect(landing.getByText('這間學校尚未開放學號直接連線；你仍可匯入自己從校務系統取得的資料。')).toBeTruthy();
+  expect(
+    landing.getByText('這間學校尚未開放學號直接連線；你仍可匯入自己從校務系統取得的資料。'),
+  ).toBeTruthy();
   expect(landing.queryByTestId('school-login-start')).toBeNull();
   expect(landing.queryByText('前往學校登入')).toBeNull();
   landing.unmount();
@@ -378,7 +439,9 @@ test('a release without school SSO keeps public and platform entries, but does n
   });
   setSchoolLoginProviderKinds([]);
   const landing = render(<LoginLandingScreen />);
-  expect(landing.getByText('這間學校尚未開放學號直接連線；你仍可匯入自己從校務系統取得的資料。')).toBeTruthy();
+  expect(
+    landing.getByText('這間學校尚未開放學號直接連線；你仍可匯入自己從校務系統取得的資料。'),
+  ).toBeTruthy();
   expect(landing.queryByTestId('school-login-start')).toBeNull();
   fireEvent.press(landing.getByTestId('public-Map'));
   expect(safeNavigate).toHaveBeenCalledWith(mockNavigation, 'Map');
@@ -394,14 +457,15 @@ test('a release without school SSO keeps public and platform entries, but does n
   expect(signInWithStudentId).not.toHaveBeenCalled();
 });
 
-
 test('the guest school-login entry always follows the selected university', () => {
   const view = render(<LoginLandingScreen />);
   expect(view.getByTestId('school-login-start')).toBeTruthy();
   mockSchool = { id: 'nthu', name: '國立清華大學', shortName: '清大' };
   view.rerender(<LoginLandingScreen />);
   expect(view.queryByTestId('school-login-start')).toBeNull();
-  expect(view.getByText('這間學校尚未開放學號直接連線；你仍可匯入自己從校務系統取得的資料。')).toBeTruthy();
+  expect(
+    view.getByText('這間學校尚未開放學號直接連線；你仍可匯入自己從校務系統取得的資料。'),
+  ).toBeTruthy();
   expect(view.getByTestId('login-start')).toBeTruthy();
   mockSchool = { id: 'pu', name: '靜宜大學', shortName: '靜宜' };
   view.rerender(<LoginLandingScreen />);
@@ -422,23 +486,25 @@ test('a direct school login route cannot show Providence credentials while brows
 test('changing university cancels the old credential form and drops its late response', async () => {
   let resolveSchoolLogin!: (value: typeof schoolResult) => void;
   jest.mocked(signInWithStudentId).mockImplementation(
-    () => new Promise((resolve) => { resolveSchoolLogin = resolve; }),
+    () =>
+      new Promise((resolve) => {
+        resolveSchoolLogin = resolve;
+      }),
   );
   const view = render(<SSOLoginScreen />);
   enterSchoolCredentials(view);
   fireEvent.press(view.getByText('使用學號登入'));
-  expect(signInWithStudentId).toHaveBeenCalledWith(
-    expect.objectContaining({ schoolId: 'pu' }),
-  );
+  expect(signInWithStudentId).toHaveBeenCalledWith(expect.objectContaining({ schoolId: 'pu' }));
   mockSchool = { id: 'nthu', name: '國立清華大學', shortName: '清大' };
   view.rerender(<SSOLoginScreen />);
   expect(view.queryByTestId('student-password-input')).toBeNull();
   expect(view.getByRole('button', { name: '用 Google 帳號登入' })).not.toBeDisabled();
-  await act(async () => { resolveSchoolLogin(schoolResult); });
+  await act(async () => {
+    resolveSchoolLogin(schoolResult);
+  });
   expect(mockRefreshProfile).not.toHaveBeenCalled();
   expect(Alert.alert).not.toHaveBeenCalled();
 });
-
 
 test('public landing shows the current browsing campus and opens its library without school login', () => {
   const view = render(<LoginLandingScreen />);
@@ -471,9 +537,13 @@ test('guest campus connection surfaces the self-import path before the public di
   mockSchool = { id: 'ntu', name: '國立臺灣大學', shortName: '臺大' };
   const view = render(<LoginLandingScreen />);
   expect(view.queryByTestId('school-login-start')).toBeNull();
-  expect(view.getByText('這間學校尚未開放學號直接連線；你仍可匯入自己從校務系統取得的資料。')).toBeTruthy();
+  expect(
+    view.getByText('這間學校尚未開放學號直接連線；你仍可匯入自己從校務系統取得的資料。'),
+  ).toBeTruthy();
   fireEvent.press(view.getByTestId('school-import-start'));
-  expect(safeNavigate).toHaveBeenCalledWith(mockNavigation, 'PersonalImport', { kind: 'timetable' });
+  expect(safeNavigate).toHaveBeenCalledWith(mockNavigation, 'PersonalImport', {
+    kind: 'timetable',
+  });
   expect(view.queryByTestId('school-login-start')).toBeNull();
 });
 

@@ -52,12 +52,23 @@ export interface AcademicSemesterSummary {
   departmentRanking?: number | string;
 }
 
+export interface AcademicDerivedCreditSummary {
+  source: 'derived-from-grade-rows';
+  officialAudit: false;
+  totalRequired: null;
+  totalEarned: number;
+  totalCourses: number;
+}
+
 export interface AcademicGradeResponse {
   grades: AcademicGrade[];
   semesters: string[];
   allSemesters: string[];
   /** Values reported by the school, separate from the locally calculated average. */
   summary: Record<string, AcademicSemesterSummary>;
+  coverage?: { status: 'partial' | 'unknown'; skippedRows: number };
+  creditSummary?: AcademicDerivedCreditSummary;
+  creditSummaryUnavailable?: boolean;
 }
 
 export interface GradeSummary {
@@ -114,9 +125,9 @@ function credits(value: unknown): number {
   return value;
 }
 
-function gradeValue(value: unknown): number | string {
+function gradeValue(value: unknown, allowBlank = false): number | string {
   if (typeof value === 'number' && Number.isFinite(value)) return value;
-  if (typeof value === 'string' && value.trim()) return value.trim();
+  if (typeof value === 'string' && (value.trim() || allowBlank)) return value.trim();
   throw new AcademicRecordError('成績格式不正確，請重新讀取。');
 }
 
@@ -216,7 +227,7 @@ export function normalizeGradeRecords(input: unknown): AcademicGradeResponse {
       class: text(row.class, '班級'),
       courseType: text(row.courseType, '課程類別'),
       credits: credits(row.credits),
-      score: gradeValue(row.score),
+      score: gradeValue(row.score, true),
     };
     if (!semesters.includes(grade.semester)) semesters.push(grade.semester);
     const key = JSON.stringify(grade);
@@ -244,7 +255,34 @@ export function normalizeGradeRecords(input: unknown): AcademicGradeResponse {
       writable: true,
     });
   }
-  return { grades, semesters, allSemesters: [...semesters], summary };
+  const result: AcademicGradeResponse = { grades, semesters, allSemesters: [...semesters], summary };
+  if (response.coverage && typeof response.coverage === 'object') {
+    const coverage = response.coverage as Record<string, unknown>;
+    if (Number.isSafeInteger(coverage.skippedRows) && (coverage.skippedRows as number) >= 0) {
+      const skippedRows = coverage.skippedRows as number;
+      // 零筆略過只表示這份回應可讀，不代表歷年資料都已取得。
+      result.coverage = { status: skippedRows > 0 ? 'partial' : 'unknown', skippedRows };
+    }
+  }
+  if (response.creditSummary !== undefined) {
+    const value = response.creditSummary;
+    const derived = value && typeof value === 'object' && !Array.isArray(value)
+      ? value as Record<string, unknown> : null;
+    const listedCredits = grades.reduce((sum, grade) => sum + grade.credits, 0);
+    if (derived?.source === 'derived-from-grade-rows' && derived.officialAudit === false &&
+      derived.totalRequired === null && typeof derived.totalEarned === 'number' &&
+      Number.isFinite(derived.totalEarned) && derived.totalEarned >= 0 &&
+      derived.totalEarned <= listedCredits + 0.000001 && derived.totalCourses === grades.length) {
+      result.creditSummary = {
+        source: 'derived-from-grade-rows', officialAudit: false, totalRequired: null,
+        totalEarned: derived.totalEarned, totalCourses: grades.length,
+      };
+    } else {
+      // 摘要有問題時仍保留可核對的成績明細，不將它們一起清空。
+      result.creditSummaryUnavailable = true;
+    }
+  }
+  return result;
 }
 
 export const normalizeCourseResponse = normalizeCourseRecords;
@@ -257,7 +295,7 @@ export function calculateGradeSummary(grades: readonly AcademicGrade[]): GradeSu
   let weightedTotal = 0;
   for (const grade of grades) {
     const weight = credits(grade.credits);
-    const score = gradeValue(grade.score);
+    const score = gradeValue(grade.score, true);
     totalCredits += weight;
     if (typeof score !== 'number') continue;
     numericGradeCount += 1;

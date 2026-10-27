@@ -29,13 +29,14 @@ describe('natural-language campus shortcuts', () => {
   });
 });
 
-it('keeps 33 navigable voice shortcuts inside the expanded service catalog', () => {
+it('keeps 34 navigable voice shortcuts inside the expanded service catalog', () => {
   const serviceRoutes = CAMPUS_SERVICES.map(row => row.href);
   const serviceSet = new Set(serviceRoutes);
   const shortcutSet = new Set(CAMPUS_QUICK_DESTINATIONS);
 
   expect(serviceRoutes.length).toBe(serviceSet.size);
   expect(shortcutSet.size).toBe(CAMPUS_QUICK_DESTINATIONS.length);
+  expect(CAMPUS_QUICK_DESTINATIONS).toHaveLength(34);
   expect([...shortcutSet].every(href => serviceSet.has(href))).toBe(true);
 
   // The leave workflow added these two routes to main after the original voice
@@ -45,6 +46,31 @@ it('keeps 33 navigable voice shortcuts inside the expanded service catalog', () 
     '/leave',
     '/leave/review',
   ]);
+});
+
+it.each([
+  '打開 WOW Class',
+  '查看 TronClass',
+  '我要看玩課雲',
+  'ＷＯＷ Ｃｌａｓｓ 的課程',
+  'open wowclass',
+  '進入 Tron Class',
+])('opens the school course service for an explicit platform name: %s', (utterance) => {
+  expect(getQuickCampusActions(utterance)).toEqual([
+    expect.objectContaining({ href: '/school-courses', name: 'WOW Class 課程', access: 'school' }),
+  ]);
+});
+
+it('prioritizes a named school platform while preserving generic course suggestions', () => {
+  expect(getQuickCampusActions('TronClass 上的作業').map((action) => action.href)).toEqual([
+    '/school-courses', '/classroom',
+  ]);
+  expect(getQuickCampusActions('今天要上什麼課？').map((action) => action.href)).toEqual(['/timetable']);
+  expect(getQuickCampusActions('我要看課堂教材').map((action) => action.href)).toEqual(['/classroom']);
+});
+
+it.each(['我的課堂', '課程', 'classroom', 'wow classical music', 'tronclassroom'])('does not infer WOW Class from a generic or partial name: %s', (utterance) => {
+  expect(getQuickCampusActions(utterance).map((action) => action.href)).not.toContain('/school-courses');
 });
 
 it.each([

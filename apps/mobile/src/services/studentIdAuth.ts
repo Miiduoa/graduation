@@ -1,20 +1,8 @@
 /**
- * 學號密碼登入 — 統一登入靜宜大學 E校園 + TronClass。
- *
- * 核心設計：
- *   優先使用後端 signInPuStudentId 雲端函數，一次呼叫同時完成：
- *     1. E校園 (alcat.pu.edu.tw) 登入
- *     2. TronClass (tronclass.pu.edu.tw) 登入（透過 Node.js IPv4 pin 繞過 IPv6 問題）
- *     3. 取得學生資料、課表、成績、公告
- *   回傳 puSessionId + tronClassSessionId，後續 API 呼叫走後端代理。
- *
- *   若後端不可用（例如 Firebase 未設定），降級為手機直連 E校園 + 後端代理 TronClass。
- *
- * 為什麼 TronClass 不從手機直接登入：
- *   identity.pu.edu.tw / tronclass.pu.edu.tw 有 IPv6 AAAA 記錄，
- *   iOS/Android 的 fetch 優先走 IPv6 但連不上，
- *   加上 CAS redirect 跨域 cookie 在 React Native 中不可靠，
- *   所以 TronClass 登入必須走後端 Node.js（可以 pin IPv4）。
+ * 學號登入先由伺服器驗證校務帳密，再交換真正的 Firebase token。
+ * 舊端點未部署時，僅在相容的正式設定下改走網站登入服務；
+ * 課表、成績與課程清單另由已登入者的本人資料端點讀取。
+ * 明確的伺服器拒絕不轉原生登入；沒有回應時保留既有的原生直連路徑。
  */
 
 import Constants from 'expo-constants';
@@ -23,9 +11,9 @@ import {
   isTeacherLmsUnavailableNotice,
 } from '@campus/shared/src/schoolLogin';
 import { isStudentIdLoginAvailable } from './schoolLoginAvailability';
-import { signInWithCustomToken } from 'firebase/auth';
+import { signInWithCustomToken, signOut, type User } from 'firebase/auth';
 
-import { saveMockAuthSession, type MockAuthSession } from './mockAuth';
+import { clearMockAuthSession, saveMockAuthSession, type MockAuthSession } from './mockAuth';
 import {
   puLogin,
   puFetchStudentInfo,
@@ -44,6 +32,8 @@ import {
 import { isTronClassDataFetchEnabled } from './tronClassDataEnabled';
 import {
   syncAllData,
+  clearPUCache,
+  type SyncAllResult,
   refreshCourses,
   refreshGrades,
   refreshStudentInfo,
@@ -55,9 +45,10 @@ import {
 } from './puDataCache';
 import { getAdapter } from '../data/apiAdapters';
 import { PUAdapter } from '../data/apiAdapters/PUAdapter';
-import { getCloudFunctionUrl } from './cloudFunctions';
+import { canUseHostedSchoolFallback, getCloudFunctionUrl } from './cloudFunctions';
 import { getAuthInstance, hasUsableFirebaseConfig } from '../firebase';
 import type { UserRole } from '../state/auth';
+import { buildSchoolSyncSummary, type SchoolSyncSummary } from './schoolSyncSummary';
 
 // ─── Progress Callback ──────────────────────────────────
 
@@ -68,12 +59,14 @@ export type OnLoginProgress = (step: LoginProgress, detail?: string) => void;
 // ─── 全域 PU Session 存取 ────────────────────────────────
 // 登入成功後存在這裡，PUAdapter 可以透過 getPUSession() 取得。
 let _currentPUSession: PUSession | null = null;
+let schoolLoginGeneration = 0;
 
 export function getPUSession(): PUSession | null {
   return _currentPUSession;
 }
 
 export function clearPUSession(): void {
+  schoolLoginGeneration += 1;
   _currentPUSession = null;
   clearTCSavedCredentials().catch(() => {});
   clearTCSession().catch(() => {});
@@ -90,6 +83,7 @@ export type StudentIdLoginResult = {
   role: UserRole;
   schoolId: string;
   session: PUSession;
+  syncSummary?: SchoolSyncSummary;
 };
 
 export { isStudentIdLoginAvailable } from './schoolLoginAvailability';
@@ -113,6 +107,7 @@ function isLocalMockAuthAllowed(): boolean {
 async function tryBackendUnifiedLogin(
   studentId: string,
   password: string,
+  schoolId: string,
 ): Promise<{
   success: boolean;
   data?: {
@@ -121,42 +116,62 @@ async function tryBackendUnifiedLogin(
     studentId: string;
     displayName: string;
     department: string;
-    puSessionId: string;
+    puSessionId: string | null;
     tronClassSessionId: string | null;
     tronClassUserId: number | null;
     studentInfo: PUStudentInfo | null;
     courses: PUCourseResult | null;
     grades: PUGradeResult | null;
     announcements: PUAnnouncement[] | null;
+    source: 'cloud' | 'hosted';
+    localMock: boolean;
   };
   error?: string;
   code?: string;
+  allowNativeFallback?: boolean;
 }> {
+  const url = getCloudFunctionUrl('signInPuStudentId');
+  const hostedUrl = 'https://nuni.tw/api/fn/signInPuStudentId';
+  const useLocalMockAuth = !hasUsableFirebaseConfig() && isLocalMockAuthAllowed();
+  let receivedResponse = false;
+  let usingHosted = url === hostedUrl;
+  const controller = new AbortController();
+  let timeout: ReturnType<typeof setTimeout>;
+  const expired = new Promise<never>((_, reject) => {
+    timeout = setTimeout(() => {
+      controller.abort();
+      reject(new Error('學校登入逾時，請稍後再試。'));
+    }, 45_000);
+  });
   try {
-    const url = getCloudFunctionUrl('signInPuStudentId');
-    const useLocalMockAuth = !hasUsableFirebaseConfig() && isLocalMockAuthAllowed();
     console.log('[studentIdAuth] Trying backend unified login…');
-
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 20000);
-
-    let response: Response;
-    try {
-      response = await fetch(url, {
+    const request = async () => {
+      if (usingHosted && !canUseHostedSchoolFallback(url)) {
+        throw new Error('此版本尚未設定可用的學校登入服務。');
+      }
+      const options: RequestInit = {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         signal: controller.signal,
         body: JSON.stringify({
           studentId,
           password,
+          schoolId,
           ...(useLocalMockAuth ? { skipFirebase: true } : {}),
         }),
-      });
-    } finally {
-      clearTimeout(timeout);
-    }
-
-    const text = await response.text();
+      };
+      let response = await fetch(url, options);
+      receivedResponse = true;
+      if (response.status === 404 && url !== hostedUrl && !useLocalMockAuth && canUseHostedSchoolFallback(url)) {
+        if (controller.signal.aborted) throw new Error('學校登入逾時，請稍後再試。');
+        usingHosted = true;
+        response = await fetch(hostedUrl, options);
+      }
+      const text = await response.text();
+      if (controller.signal.aborted) throw new Error('學校登入逾時，請稍後再試。');
+      return { response, text };
+    };
+    const { response, text } = await Promise.race([request(), expired]);
     let data: Record<string, unknown> | null = null;
     try {
       data = JSON.parse(text);
@@ -164,15 +179,16 @@ async function tryBackendUnifiedLogin(
       data = null;
     }
 
-    if (!response.ok || !data?.success) {
+    if (!response.ok || data?.success !== true) {
       const errorMsg = (data?.error as string) || `HTTP ${response.status}`;
       const code = typeof data?.code === 'string' ? data.code : undefined;
       console.warn('[studentIdAuth] Backend unified login failed:', errorMsg);
-      return { success: false, error: errorMsg, code };
+      return { success: false, error: errorMsg, code, allowNativeFallback: false };
     }
 
-    if (!useLocalMockAuth && typeof data.customToken !== 'string') {
-      return { success: false, error: '登入端點未回傳 Firebase token' };
+    if (!useLocalMockAuth && (typeof data.customToken !== 'string' || !data.customToken.trim() ||
+        typeof data.uid !== 'string' || !data.uid.trim())) {
+      return { success: false, error: '登入服務未完成身分驗證，請稍後再試。', allowNativeFallback: false };
     }
 
     console.log('[studentIdAuth] Backend unified login succeeded!');
@@ -184,13 +200,15 @@ async function tryBackendUnifiedLogin(
         studentId: (data.studentId as string) || studentId,
         displayName: (data.displayName as string) || `${studentId} 同學`,
         department: (data.department as string) || '',
-        puSessionId: data.puSessionId as string,
+        puSessionId: typeof data.puSessionId === 'string' && data.puSessionId.trim() ? data.puSessionId : null,
         tronClassSessionId: (data.tronClassSessionId as string) || null,
         tronClassUserId: (data.tronClassUserId as number) ?? null,
         studentInfo: data.studentInfo as PUStudentInfo | null,
         courses: data.courses as PUCourseResult | null,
         grades: data.grades as PUGradeResult | null,
         announcements: data.announcements as PUAnnouncement[] | null,
+        source: usingHosted ? 'hosted' : 'cloud',
+        localMock: useLocalMockAuth,
       },
     };
   } catch (err) {
@@ -198,7 +216,10 @@ async function tryBackendUnifiedLogin(
     return {
       success: false,
       error: err instanceof Error ? err.message : '後端連線失敗',
+      allowNativeFallback: !receivedResponse && !usingHosted && !useLocalMockAuth && canUseHostedSchoolFallback(url),
     };
+  } finally {
+    clearTimeout(timeout!);
   }
 }
 
@@ -431,6 +452,20 @@ export async function signInWithStudentId(params: {
   if (!params.password.trim()) {
     throw new Error('請輸入密碼');
   }
+  const generation = ++schoolLoginGeneration;
+  const previousSession = _currentPUSession;
+  const firebaseConfigured = hasUsableFirebaseConfig();
+  const previousUser = firebaseConfigured ? getAuthInstance().currentUser : null;
+  const assertAttempt = () => {
+    if (generation !== schoolLoginGeneration) throw new Error('登入已取消，請重新登入。');
+  };
+  const assertBeforeExchange = () => {
+    assertAttempt();
+    if (_currentPUSession !== previousSession ||
+        (firebaseConfigured && getAuthInstance().currentUser !== previousUser)) {
+      throw new Error('帳號已變更，請重新登入。');
+    }
+  };
 
   // ── 策略 0: 測試帳號快速登入 ──
   const testResult = await tryTestAccountLogin(
@@ -442,25 +477,26 @@ export async function signInWithStudentId(params: {
   if (testResult) {
     return testResult;
   }
-
-  if (isTronClassDataFetchEnabled()) {
-    await setTCSavedCredentials(studentId, params.password);
-  } else {
-    await clearTCSavedCredentials().catch(() => undefined);
-    await clearTCSession().catch(() => undefined);
-  }
+  assertBeforeExchange();
 
   progress('authenticating', '驗證靜宜帳密');
 
   // ── 策略 A: 嘗試後端統一登入 ──
-  const backendResult = await tryBackendUnifiedLogin(studentId, params.password);
+  const backendResult = await tryBackendUnifiedLogin(studentId, params.password, params.schoolId);
+  assertBeforeExchange();
 
   if (backendResult.success && backendResult.data) {
-    return await handleBackendLoginSuccess(backendResult.data, params, progress);
+    return await handleBackendLoginSuccess(backendResult.data, params, progress, assertBeforeExchange, assertAttempt);
   }
 
-  // ── 策略 B: 後端失敗 → 降級為手機直連 E校園 + TronClass ──
-  // 無論後端為何失敗（404、timeout、網路錯誤），都自動降級
+  if (!backendResult.allowNativeFallback) {
+    if (isTeacherLmsUnavailableNotice(backendResult.code) || isTeacherLmsUnavailableNotice(backendResult.error)) {
+      throw new Error(TEACHER_LMS_UNAVAILABLE_COPY);
+    }
+    throw new Error(backendResult.error || '學校登入未完成，請稍後再試。');
+  }
+
+  // ── 策略 B: 後端未回應時保留原生直連；明確拒絕不改走另一個登入管道。 ──
   console.log('[studentIdAuth] Backend unavailable, falling back to hybrid login…');
   try {
     return await handleHybridLogin(studentId, params, progress);
@@ -482,9 +518,53 @@ async function handleBackendLoginSuccess(
   data: NonNullable<Awaited<ReturnType<typeof tryBackendUnifiedLogin>>['data']>,
   params: { studentId: string; password: string; schoolId: string; schoolName?: string },
   progress: OnLoginProgress,
+  assertBeforeExchange: () => void,
+  assertAttempt: () => void,
 ): Promise<StudentIdLoginResult> {
   const { studentId, displayName, department, puSessionId, tronClassSessionId, tronClassUserId } =
     data;
+  let requester: User | null = null;
+  let loginSession: PUSession | null = null;
+  const assertCurrent = () => {
+    assertAttempt();
+    if ((requester && getAuthInstance().currentUser !== requester) ||
+        (loginSession && _currentPUSession !== loginSession)) {
+      throw new Error('帳號已變更，請重新登入。');
+    }
+  };
+
+  progress('linking', '連上學校帳號');
+  let uid = data.uid;
+  const email = `${studentId.toLowerCase()}@pu.edu.tw`;
+  if (data.customToken) {
+    assertBeforeExchange();
+    const auth = getAuthInstance();
+    const credential = await signInWithCustomToken(auth, data.customToken);
+    if (!credential.user || credential.user.uid !== data.uid) {
+      if (credential.user && auth.currentUser === credential.user) await signOut(auth);
+      throw new Error('學校登入身分不一致，請重新登入。');
+    }
+    try {
+      assertAttempt();
+    } catch (error) {
+      if (auth.currentUser === credential.user) await signOut(auth);
+      throw error;
+    }
+    if (auth.currentUser !== credential.user) throw new Error('帳號已變更，請重新登入。');
+    requester = credential.user;
+    uid = credential.user.uid;
+    await clearMockAuthSession();
+    assertCurrent();
+  } else if (data.localMock && isLocalMockAuthAllowed()) {
+    uid = uid || `pu-${studentId.toLowerCase()}`;
+    await saveMockAuthSession({
+      uid, email, schoolId: params.schoolId, displayName, role: 'student',
+      department: department || null, studentId, loginAccount: params.studentId,
+    });
+  } else {
+    throw new Error('登入服務未完成身分驗證，請稍後再試。');
+  }
+  assertCurrent();
 
   progress('syncingCampus', '同步 E 校園資料');
 
@@ -493,19 +573,26 @@ async function handleBackendLoginSuccess(
     loggedIn: true,
     studentName: displayName,
     backendSessionId: puSessionId,
+    backendOwnerUid: data.localMock ? undefined : uid,
   };
+  loginSession = session;
   _currentPUSession = session;
 
   // 注入 PUAdapter
+  let adapter: Awaited<ReturnType<typeof getAdapter>>;
   try {
-    const adapter = await getAdapter('tw-pu');
-    if (adapter && adapter instanceof PUAdapter) {
-      adapter.setBackendSession(puSessionId, studentId, displayName);
-    }
+    adapter = await getAdapter('tw-pu');
   } catch {
     /* Adapter 尚未註冊 */
   }
+  assertCurrent();
+  if (adapter && adapter instanceof PUAdapter) {
+    adapter.setBackendSession(puSessionId, studentId, displayName, data.localMock ? undefined : uid);
+  }
 
+  // 新連線不沿用前一個帳號的校務快取。
+  await clearPUCache();
+  assertCurrent();
   // 快取後端回傳的資料（如果有的話）
   let seededCount = 0;
   if (data.courses) {
@@ -515,6 +602,7 @@ async function handleBackendLoginSuccess(
     } catch (e) {
       console.warn('[studentIdAuth] seed courses error:', e);
     }
+    assertCurrent();
   }
   if (data.grades) {
     try {
@@ -523,6 +611,7 @@ async function handleBackendLoginSuccess(
     } catch (e) {
       console.warn('[studentIdAuth] seed grades error:', e);
     }
+    assertCurrent();
   }
   if (data.studentInfo) {
     try {
@@ -531,6 +620,7 @@ async function handleBackendLoginSuccess(
     } catch (e) {
       console.warn('[studentIdAuth] seed studentInfo error:', e);
     }
+    assertCurrent();
   }
   if (data.announcements) {
     try {
@@ -539,32 +629,9 @@ async function handleBackendLoginSuccess(
     } catch (e) {
       console.warn('[studentIdAuth] seed announcements error:', e);
     }
+    assertCurrent();
   }
   console.log(`[studentIdAuth] Seeded ${seededCount}/4 data types from backend`);
-
-  // ── 建立帳號（先存 auth session，讓使用者立刻看到登入成功）──
-  progress('linking', '連上學校帳號');
-
-  const email = `${studentId.toLowerCase()}@pu.edu.tw`;
-  const uid = `pu-${studentId.toLowerCase()}`;
-
-  const mockSession: MockAuthSession = {
-    uid,
-    email,
-    schoolId: params.schoolId,
-    displayName,
-    role: 'student',
-    department: department || null,
-    studentId,
-    loginAccount: params.studentId,
-  };
-  if (data.customToken) {
-    await signInWithCustomToken(getAuthInstance(), data.customToken);
-  } else {
-    // 後端未回傳 customToken → 用 mock auth（開發模式常見：Cloud Functions 未完全部署）
-    console.log('[studentIdAuth] No customToken from backend, using mock auth session');
-    await saveMockAuthSession(mockSession);
-  }
 
   const result: StudentIdLoginResult = {
     uid,
@@ -582,35 +649,57 @@ async function handleBackendLoginSuccess(
   // ── TronClass 登入 + 資料同步（建置開關可跳過）──
   const userAccount = params.studentId;
   if (!tcAllowed) {
+    await clearTCSavedCredentials().catch(() => undefined);
+    assertCurrent();
+    await clearTCSession().catch(() => undefined);
+    assertCurrent();
     progress('syncingTronClass', '已略過 LMS（TronClass）連線');
   } else {
+    await setTCSavedCredentials(params.studentId, params.password);
+    assertCurrent();
     progress('syncingTronClass', '登入 TronClass');
 
     try {
       if (tronClassSessionId) {
         await setTCBackendSession(tronClassSessionId, tronClassUserId);
+        assertCurrent();
         console.log('[studentIdAuth] TronClass session stored, userId:', tronClassUserId);
       }
 
-      if (!tronClassSessionId) {
+      if (!tronClassSessionId && data.source !== 'hosted') {
         console.log('[studentIdAuth] TronClass session missing, retrying…');
         const { tcLogin } = await import('./tronClassClient');
+        assertCurrent();
         const tcRetry = await tcLogin(userAccount, params.password);
+        assertCurrent();
         console.log('[studentIdAuth] TronClass retry', tcRetry.success ? 'OK' : 'FAILED');
+      }
+      if (!tronClassSessionId && data.source === 'hosted') {
+        await clearTCSession();
+        assertCurrent();
       }
     } catch (err) {
       console.warn('[studentIdAuth] TronClass login error (continuing):', err);
     }
+    assertCurrent();
 
     progress('syncingTronClass', '同步 TronClass 課程資料');
   }
 
+  let synchronized: SyncAllResult | null = null;
   try {
-    await syncAllData(session, { includeEssential: true });
+    synchronized = await syncAllData(session, {
+      includeEssential: true,
+      fetchTronClass: !(data.source === 'hosted' && !tronClassSessionId),
+      includeExtended: data.source !== 'hosted',
+    });
     console.log('[studentIdAuth] syncAllData completed');
   } catch (err) {
     console.warn('[studentIdAuth] syncAllData failed (continuing):', err);
   }
+  assertCurrent();
+
+  result.syncSummary = buildSchoolSyncSummary(synchronized, tcAllowed);
 
   // ── 登入後資料路由：推斷角色 + 建立師生關聯 ──
   try {
@@ -624,6 +713,7 @@ async function handleBackendLoginSuccess(
   } catch (err) {
     console.warn('[studentIdAuth] postLoginDataRouter failed (continuing):', err);
   }
+  assertCurrent();
 
   await runPostLoginContextPipeline({
     uid: result.uid,
@@ -631,6 +721,7 @@ async function handleBackendLoginSuccess(
     role: result.role,
     email: result.email,
   });
+  assertCurrent();
 
   return result;
 }
@@ -706,12 +797,8 @@ async function handleHybridLogin(
     }
   })();
 
-  // 等待兩者完成（最多等 15 秒，避免 IPv6 DNS 問題卡太久）
-  const loginTimeout = new Promise<void>((resolve) => setTimeout(resolve, 15000));
-  await Promise.race([
-    Promise.allSettled(tcAllowed ? [tcLoginPromise, puLoginPromise] : [puLoginPromise]),
-    loginTimeout,
-  ]);
+  // 各請求本身已有逾時；等到登入完成再決定結果，避免舊請求在下一次登入時晚到。
+  await Promise.allSettled(tcAllowed ? [tcLoginPromise, puLoginPromise] : [puLoginPromise]);
 
   // ── 判斷登入結果 ──
   if (!puLoginOk && !tcLoginOk) {
@@ -739,6 +826,8 @@ async function handleHybridLogin(
     session = { loggedIn: true, studentName: tcSession?.userName ?? null };
     _currentPUSession = session;
   }
+
+  await clearPUCache();
 
   // ── Step 2: 嘗試同步 E校園 資料（如果 E校園 有連上） ──
   let displayName = session!.studentName ?? tcSession?.userName ?? `${userAccount} 同學`;
@@ -824,11 +913,13 @@ async function handleHybridLogin(
     session: session!,
   };
 
+  let synchronized: SyncAllResult | null = null;
+
   // ── Step 4: TronClass 資料同步（建置關閉或登入失敗時僅同步 E 校園可及資料）──
   if (tcLoginOk) {
     progress('syncingTronClass', '同步 TronClass 課程資料');
     try {
-      await syncAllData(session!, { includeEssential: true });
+      synchronized = await syncAllData(session!, { includeEssential: true });
       console.log('[studentIdAuth] Hybrid: syncAllData completed');
     } catch (err) {
       console.warn('[studentIdAuth] Hybrid: syncAllData failed (continuing):', err);
@@ -842,12 +933,14 @@ async function handleHybridLogin(
     }
 
     try {
-      await syncAllData(session!, { includeEssential: true });
+      synchronized = await syncAllData(session!, { includeEssential: true });
       console.log('[studentIdAuth] Hybrid: syncAllData completed (E-campus / 無 TronClass)');
     } catch (err) {
       console.warn('[studentIdAuth] Hybrid: syncAllData failed (continuing):', err);
     }
   }
+
+  result.syncSummary = buildSchoolSyncSummary(synchronized, tcAllowed);
 
   // ── 登入後資料路由：推斷角色 + 建立師生關聯 ──
   try {

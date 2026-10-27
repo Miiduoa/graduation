@@ -10,6 +10,11 @@ import {
 import { readPersonalImportDocumentFile } from '@/lib/personalImportDocuments';
 import { createPersonalImportImagePreview } from '@/lib/personalImportImagePreview';
 import { recognizePersonalImportImage } from '@/lib/personalImportOcr';
+import {
+  deletePersonalImportAiModelCache,
+  getPersonalImportAiAvailability,
+  runPersonalImportAi,
+} from '@/lib/personalImportAi';
 import type { PersonalImportDocument } from '@campus/shared';
 import { PersonalImportCenter } from './PersonalImportCenter';
 import {
@@ -45,13 +50,26 @@ vi.mock('@/features/nuni/Session', () => ({
 }));
 vi.mock('@/lib/personalImportDocuments', () => ({ readPersonalImportDocumentFile: vi.fn() }));
 vi.mock('@/lib/personalImportOcr', () => ({ recognizePersonalImportImage: vi.fn() }));
+vi.mock('@/lib/personalImportAi', () => ({
+  getPersonalImportAiAvailability: vi.fn(),
+  runPersonalImportAi: vi.fn(),
+  deletePersonalImportAiModelCache: vi.fn(),
+}));
 vi.mock('@/lib/personalImportImagePreview', () => ({ createPersonalImportImagePreview: vi.fn() }));
 beforeEach(() => {
   vi.restoreAllMocks();
   localStorage.clear();
   vi.mocked(readPersonalImportDocumentFile).mockReset();
   vi.mocked(recognizePersonalImportImage).mockReset();
-  vi.mocked(createPersonalImportImagePreview).mockReset().mockResolvedValue(new Blob(['safe pixels'], { type: 'image/png' }));
+  vi.mocked(getPersonalImportAiAvailability).mockReset().mockReturnValue({
+    available: true,
+    downloadLabel: '約 1.9 GB',
+  });
+  vi.mocked(runPersonalImportAi).mockReset();
+  vi.mocked(deletePersonalImportAiModelCache).mockReset().mockResolvedValue(undefined);
+  vi.mocked(createPersonalImportImagePreview)
+    .mockReset()
+    .mockResolvedValue(new Blob(['safe pixels'], { type: 'image/png' }));
   URL.createObjectURL = vi.fn(() => 'blob:preview');
   URL.revokeObjectURL = vi.fn();
   sessionStorage.clear();
@@ -428,8 +446,14 @@ it('previews only the encoded PNG, keeps the original file for OCR, and releases
   await screen.findByRole('button', { name: '確認匯入 1 筆' });
   expect(URL.createObjectURL).toHaveBeenCalledExactlyOnceWith(png);
   expect(URL.createObjectURL).not.toHaveBeenCalledWith(original);
-  expect(recognizePersonalImportImage).toHaveBeenCalledWith(original, expect.any(AbortSignal), expect.any(Function));
-  expect(screen.getByAltText('你選擇的資料截圖，僅供核對').getAttribute('src')).toBe('blob:preview');
+  expect(recognizePersonalImportImage).toHaveBeenCalledWith(
+    original,
+    expect.any(AbortSignal),
+    expect.any(Function),
+  );
+  expect(screen.getByAltText('你選擇的資料截圖，僅供核對').getAttribute('src')).toBe(
+    'blob:preview',
+  );
   fireEvent.click(screen.getByRole('button', { name: '確認匯入 1 筆' }));
   await screen.findByText(personalImportSavedNotice(1));
   expect(screen.queryByAltText('你選擇的資料截圖，僅供核對')).toBeNull();
@@ -439,60 +463,82 @@ it('previews only the encoded PNG, keeps the original file for OCR, and releases
 });
 
 it('rejects a failed image preview without exposing the file or losing existing draft text', async () => {
-  vi.mocked(createPersonalImportImagePreview).mockRejectedValue(new Error('請選 PNG、JPEG 或 WebP 圖片。'));
+  vi.mocked(createPersonalImportImagePreview).mockRejectedValue(
+    new Error('請選 PNG、JPEG 或 WebP 圖片。'),
+  );
   render(<PersonalImportCenter />);
   fireEvent.change(screen.getByLabelText('原始文字'), { target: { value: '尚未整理的原始文字' } });
   fireEvent.change(screen.getByLabelText('選擇截圖或檔案'), {
-    target: { files: [new File(['<svg onload="alert(1)"></svg>'], 'unsafe.svg', { type: 'image/svg+xml' })] },
+    target: {
+      files: [new File(['<svg onload="alert(1)"></svg>'], 'unsafe.svg', { type: 'image/svg+xml' })],
+    },
   });
   await screen.findByText('請選 PNG、JPEG 或 WebP 圖片。');
   expect(URL.createObjectURL).not.toHaveBeenCalled();
   expect(recognizePersonalImportImage).not.toHaveBeenCalled();
   expect(screen.queryByAltText('你選擇的資料截圖，僅供核對')).toBeNull();
-  expect((screen.getByLabelText('原始文字') as HTMLTextAreaElement).value).toBe('尚未整理的原始文字');
+  expect((screen.getByLabelText('原始文字') as HTMLTextAreaElement).value).toBe(
+    '尚未整理的原始文字',
+  );
 });
 
-it.each(['cancel', 'account', 'school', 'paused'] as const)('discards a late preview after %s without starting OCR or creating a URL', async (change) => {
-  let finish!: (blob: Blob) => void;
-  vi.mocked(createPersonalImportImagePreview).mockImplementation(() => new Promise((resolve) => { finish = resolve; }));
-  const view = render(<PersonalImportCenter />);
-  fireEvent.change(screen.getByLabelText('選擇截圖或檔案'), {
-    target: { files: [new File(['pixels'], 'grades.png', { type: 'image/png' })] },
-  });
-  expect(createPersonalImportImagePreview).toHaveBeenCalledOnce();
-  if (change === 'cancel') fireEvent.click(screen.getByRole('button', { name: '取消讀取' }));
-  else {
-    if (change === 'account') context.owner = 'platform:two';
-    if (change === 'school') context.schoolId = 'nthu';
-    if (change === 'paused') context.loading = true;
-    view.rerender(<PersonalImportCenter />);
-  }
-  await act(async () => finish(new Blob(['late pixels'], { type: 'image/png' })));
-  expect(URL.createObjectURL).not.toHaveBeenCalled();
-  expect(recognizePersonalImportImage).not.toHaveBeenCalled();
-  expect(screen.queryByAltText('你選擇的資料截圖，僅供核對')).toBeNull();
-});
+it.each(['cancel', 'account', 'school', 'paused'] as const)(
+  'discards a late preview after %s without starting OCR or creating a URL',
+  async (change) => {
+    let finish!: (blob: Blob) => void;
+    vi.mocked(createPersonalImportImagePreview).mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          finish = resolve;
+        }),
+    );
+    const view = render(<PersonalImportCenter />);
+    fireEvent.change(screen.getByLabelText('選擇截圖或檔案'), {
+      target: { files: [new File(['pixels'], 'grades.png', { type: 'image/png' })] },
+    });
+    expect(createPersonalImportImagePreview).toHaveBeenCalledOnce();
+    if (change === 'cancel') fireEvent.click(screen.getByRole('button', { name: '取消讀取' }));
+    else {
+      if (change === 'account') context.owner = 'platform:two';
+      if (change === 'school') context.schoolId = 'nthu';
+      if (change === 'paused') context.loading = true;
+      view.rerender(<PersonalImportCenter />);
+    }
+    await act(async () => finish(new Blob(['late pixels'], { type: 'image/png' })));
+    expect(URL.createObjectURL).not.toHaveBeenCalled();
+    expect(recognizePersonalImportImage).not.toHaveBeenCalled();
+    expect(screen.queryByAltText('你選擇的資料截圖，僅供核對')).toBeNull();
+  },
+);
 
-it.each(['cancel', 'unmount'] as const)('revokes an installed preview on %s and ignores late OCR data', async (change) => {
-  let finish!: (text: string) => void;
-  vi.mocked(recognizePersonalImportImage).mockImplementation(() => new Promise((resolve) => { finish = resolve; }));
-  const view = render(<PersonalImportCenter />);
-  fireEvent.change(screen.getByLabelText('選擇截圖或檔案'), {
-    target: { files: [new File(['pixels'], 'grades.png', { type: 'image/png' })] },
-  });
-  await screen.findByAltText('你選擇的資料截圖，僅供核對');
-  if (change === 'cancel') fireEvent.click(screen.getByRole('button', { name: '取消讀取' }));
-  else view.unmount();
-  expect(URL.revokeObjectURL).toHaveBeenCalledExactlyOnceWith('blob:preview');
-  await act(async () => finish('課程名稱,學分,成績\n舊檔案內容,3,85'));
-  expect(screen.queryByAltText('你選擇的資料截圖，僅供核對')).toBeNull();
-  expect(readPersonalImports(context)).toHaveLength(0);
-  if (change === 'cancel') {
-    expect((screen.getByLabelText('原始文字') as HTMLTextAreaElement).value).toBe('');
-    view.unmount();
-  }
-  expect(URL.revokeObjectURL).toHaveBeenCalledTimes(1);
-});
+it.each(['cancel', 'unmount'] as const)(
+  'revokes an installed preview on %s and ignores late OCR data',
+  async (change) => {
+    let finish!: (text: string) => void;
+    vi.mocked(recognizePersonalImportImage).mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          finish = resolve;
+        }),
+    );
+    const view = render(<PersonalImportCenter />);
+    fireEvent.change(screen.getByLabelText('選擇截圖或檔案'), {
+      target: { files: [new File(['pixels'], 'grades.png', { type: 'image/png' })] },
+    });
+    await screen.findByAltText('你選擇的資料截圖，僅供核對');
+    if (change === 'cancel') fireEvent.click(screen.getByRole('button', { name: '取消讀取' }));
+    else view.unmount();
+    expect(URL.revokeObjectURL).toHaveBeenCalledExactlyOnceWith('blob:preview');
+    await act(async () => finish('課程名稱,學分,成績\n舊檔案內容,3,85'));
+    expect(screen.queryByAltText('你選擇的資料截圖，僅供核對')).toBeNull();
+    expect(readPersonalImports(context)).toHaveLength(0);
+    if (change === 'cancel') {
+      expect((screen.getByLabelText('原始文字') as HTMLTextAreaElement).value).toBe('');
+      view.unmount();
+    }
+    expect(URL.revokeObjectURL).toHaveBeenCalledTimes(1);
+  },
+);
 
 it('keeps course application and personal-import controls in the same timetable review', async () => {
   window.history.replaceState(null, '', '/import?kind=timetable');
@@ -851,14 +897,22 @@ it('selects a course-grade table saved from a school website before any record i
   render(<PersonalImportCenter />);
   fireEvent.change(screen.getByLabelText('這份資料的學年度'), { target: { value: '115' } });
   fireEvent.change(screen.getByLabelText('學期'), { target: { value: '1' } });
-  const html = '<table><tr><th>課程名稱</th><th>學分</th><th>成績</th></tr>' +
+  const html =
+    '<table><tr><th>課程名稱</th><th>學分</th><th>成績</th></tr>' +
     '<tr><td>統計學</td><td>3</td><td>89</td></tr></table>';
-  const file = { name: 'academic.html', size: html.length, type: 'text/html', text: async () => html };
+  const file = {
+    name: 'academic.html',
+    size: html.length,
+    type: 'text/html',
+    text: async () => html,
+  };
   fireEvent.change(screen.getByLabelText('選擇截圖或檔案'), { target: { files: [file] } });
   await screen.findByText('從校務網頁取出資料');
   expect(readPersonalImports(context)).toHaveLength(0);
   fireEvent.click(screen.getByRole('button', { name: /表格 1 · 1 筆/ }));
-  await waitFor(() => expect((screen.getAllByLabelText('成績')[0] as HTMLInputElement).value).toBe('89'));
+  await waitFor(() =>
+    expect((screen.getAllByLabelText('成績')[0] as HTMLInputElement).value).toBe('89'),
+  );
   expect(readPersonalImports(context)).toHaveLength(0);
   expect((screen.getByLabelText('原始文字') as HTMLTextAreaElement).value).toContain('統計學');
   expect(screen.getByRole('button', { name: '確認匯入 1 筆' })).toBeTruthy();
@@ -866,11 +920,12 @@ it('selects a course-grade table saved from a school website before any record i
 
 it('accepts rich HTML tables copied from a school site without running its scripts', async () => {
   render(<PersonalImportCenter />);
-  const html = '<table><tr><th>課程名稱</th><th>學分</th><th>成績</th></tr>' +
+  const html =
+    '<table><tr><th>課程名稱</th><th>學分</th><th>成績</th></tr>' +
     '<tr><td>英文</td><td>2</td><td>90</td></tr></table><script>alert(1)</script>';
   fireEvent.paste(screen.getByLabelText('原始文字'), {
     clipboardData: {
-      getData: (format: string) => format === 'text/html' ? html : 'HTML not text',
+      getData: (format: string) => (format === 'text/html' ? html : 'HTML not text'),
     },
   });
   await screen.findByText('從校務網頁取出資料');
@@ -883,17 +938,502 @@ it('accepts rich HTML tables copied from a school site without running its scrip
 it('applies the school HTML term to preview rows in the same click, not just to form inputs', async () => {
   window.history.replaceState(null, '', '/import?kind=grades');
   render(<PersonalImportCenter />);
-  const html = '<h2>115 學年度 第 1 學期成績</h2>' +
+  const html =
+    '<h2>115 學年度 第 1 學期成績</h2>' +
     '<table><tr><th>課程名稱</th><th>學分</th><th>成績</th></tr>' +
     '<tr><td>統計學</td><td>3</td><td>89</td></tr></table>';
-  const file = { name: 'grades.html', size: html.length, type: 'text/html', text: async () => html };
+  const file = {
+    name: 'grades.html',
+    size: html.length,
+    type: 'text/html',
+    text: async () => html,
+  };
   fireEvent.change(screen.getByLabelText('選擇截圖或檔案'), { target: { files: [file] } });
   await screen.findByText('從校務網頁取出資料');
   fireEvent.click(screen.getByRole('button', { name: /表格 1 · 1 筆/ }));
   expect((screen.getByLabelText('這份資料的學年度') as HTMLInputElement).value).toBe('115');
-  expect(screen.getAllByLabelText('學期').every((field) => (field as HTMLInputElement).value === '1')).toBe(true);
-  await waitFor(() => expect(
-    JSON.parse(sessionStorage.getItem(personalImportDraftKey(context)) || '{}').draft?.rows?.[0],
-  ).toMatchObject({ title: '統計學', academicYear: '115', semester: '1' }));
+  expect(
+    screen.getAllByLabelText('學期').every((field) => (field as HTMLInputElement).value === '1'),
+  ).toBe(true);
+  await waitFor(() =>
+    expect(
+      JSON.parse(sessionStorage.getItem(personalImportDraftKey(context)) || '{}').draft?.rows?.[0],
+    ).toMatchObject({ title: '統計學', academicYear: '115', semester: '1' }),
+  );
   expect(readPersonalImports(context)).toHaveLength(0);
+});
+
+function aiGradePreview(title = '資料庫') {
+  return {
+    rows: [
+      {
+        id: 'ai-grade-1',
+        kind: 'grades' as const,
+        title,
+        schoolId: 'pu',
+        academicYear: '115',
+        semester: '1',
+        credits: 3,
+        grade: '85',
+        source: {
+          type: 'screenshot' as const,
+          name: 'grades.png',
+          line: 1,
+          rawText: `${title} 3 85`,
+        },
+      },
+    ],
+    issues: [
+      {
+        code: 'ai-review-required',
+        severity: 'warning' as const,
+        rowId: 'ai-grade-1',
+        message: '請與原始資料逐筆核對。',
+      },
+    ],
+  };
+}
+function chooseAiScreenshot() {
+  const file = new File(['image'], 'grades.png', { type: 'image/png' });
+  fireEvent.change(screen.getByLabelText('這份資料的學年度'), { target: { value: '115' } });
+  fireEvent.change(screen.getByLabelText('學期'), { target: { value: '1' } });
+  fireEvent.change(screen.getByLabelText('選擇交給 AI 辨識的截圖'), { target: { files: [file] } });
+  return file;
+}
+
+const unstructuredDocument: PersonalImportDocument = {
+  name: 'semester.xlsx',
+  format: 'xlsx',
+  warnings: [],
+  sections: [
+    {
+      id: 'instructions',
+      label: '說明',
+      needsOcr: false,
+      warnings: [],
+      rows: [{ line: 1, cells: ['未選取的其他資料'] }],
+    },
+    {
+      id: 'results',
+      label: '成績',
+      needsOcr: false,
+      warnings: [],
+      rows: [
+        { line: 1, cells: ['略過的頁首'] },
+        { line: 2, cells: ['應修項目', '採計單位', '評定'] },
+        { line: 3, cells: ['資料庫', '3', '85'] },
+      ],
+    },
+  ],
+};
+
+async function chooseDocumentRanges(document = unstructuredDocument) {
+  vi.mocked(readPersonalImportDocumentFile).mockResolvedValue(document);
+  fireEvent.change(screen.getByLabelText('這份資料的學年度'), { target: { value: '115' } });
+  fireEvent.change(screen.getByLabelText('學期'), { target: { value: '1' } });
+  const file = new File(['private-document-bytes'], document.name);
+  fireEvent.change(screen.getByLabelText('選擇截圖或檔案'), { target: { files: [file] } });
+  await screen.findByRole('region', { name: '選擇文件內容' });
+  fireEvent.click(screen.getByRole('checkbox', { name: '說明 · 1 列' }));
+  fireEvent.click(screen.getByRole('checkbox', { name: '成績 · 3 列' }));
+  fireEvent.change(screen.getByLabelText('「成績」的標題列'), { target: { value: '2' } });
+  return file;
+}
+
+function documentAiPreview(document = unstructuredDocument) {
+  const preview = aiGradePreview();
+  return {
+    ...preview,
+    rows: [
+      {
+        ...preview.rows[0],
+        source: {
+          type: 'file' as const,
+          name: `${document.name} · 成績`,
+          line: 3,
+          rawText: '資料庫\t3\t85',
+        },
+      },
+    ],
+  };
+}
+
+it.each(['pdf', 'xlsx'] as const)(
+  'organizes selected %s text with AI despite unknown headers and requires review before saving',
+  async (format) => {
+    const document = { ...unstructuredDocument, name: `semester.${format}`, format };
+    vi.mocked(runPersonalImportAi).mockResolvedValue(documentAiPreview(document));
+    render(<PersonalImportCenter />);
+    await chooseDocumentRanges(document);
+    expect(runPersonalImportAi).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: '整理選取內容' }));
+    expect(screen.getByRole('alert')).toBeTruthy();
+    expect(screen.queryByRole('button', { name: '確認匯入 1 筆' })).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: '用 AI 整理選取內容' }));
+    const save = await screen.findByRole('button', { name: '確認匯入 1 筆' });
+    expect(runPersonalImportAi).toHaveBeenCalledWith(
+      expect.objectContaining({
+        input: { text: '【成績】\n應修項目\t採計單位\t評定\n資料庫\t3\t85' },
+        options: expect.objectContaining({
+          kind: 'grades',
+          schoolId: 'pu',
+          academicYear: '115',
+          semester: '1',
+          source: { type: 'file', name: `semester.${format} · 成績` },
+        }),
+      }),
+    );
+    expect(screen.queryByRole('region', { name: '選擇文件內容' })).toBeNull();
+    expect((screen.getByLabelText('原始文字') as HTMLTextAreaElement).value).toBe(
+      '【成績】\n應修項目\t採計單位\t評定\n資料庫\t3\t85',
+    );
+    expect(screen.queryByRole('img')).toBeNull();
+    expect(readPersonalImports(context)).toHaveLength(0);
+    expect(save.hasAttribute('disabled')).toBe(true);
+    fireEvent.click(
+      screen.getByRole('checkbox', { name: '我已對照來源，逐筆核對這次 AI 整理的內容' }),
+    );
+    fireEvent.click(save);
+    await waitFor(() => expect(readPersonalImports(context)).toHaveLength(1));
+    expect(readPersonalImports(context)[0].source.name).toBe(`semester.${format} · 成績`);
+  },
+);
+
+it.each(['failure', 'cancel'] as const)(
+  'preserves the document and selected ranges after AI %s',
+  async (outcome) => {
+    let finish!: (value: ReturnType<typeof documentAiPreview>) => void;
+    if (outcome === 'failure')
+      vi.mocked(runPersonalImportAi).mockRejectedValue(new Error('模型目前無法載入。'));
+    else
+      vi.mocked(runPersonalImportAi).mockImplementation(
+        () =>
+          new Promise((resolve) => {
+            finish = resolve;
+          }),
+      );
+    const view = render(<PersonalImportCenter />);
+    await chooseDocumentRanges();
+    fireEvent.click(screen.getByRole('button', { name: '用 AI 整理選取內容' }));
+    await waitFor(() => expect(runPersonalImportAi).toHaveBeenCalledOnce());
+    if (outcome === 'failure') await screen.findByText('模型目前無法載入。');
+    else {
+      expect(
+        screen.getByRole('button', { name: '用 AI 整理選取內容' }).hasAttribute('disabled'),
+      ).toBe(true);
+      expect(screen.getByRole('checkbox', { name: '成績 · 3 列' }).matches(':disabled')).toBe(true);
+      fireEvent.click(screen.getByRole('button', { name: '取消讀取' }));
+      expect(vi.mocked(runPersonalImportAi).mock.calls[0][0].signal.aborted).toBe(true);
+      await act(async () => finish(documentAiPreview()));
+    }
+    expect(screen.getByRole('region', { name: '選擇文件內容' })).toBeTruthy();
+    expect(
+      (screen.getByRole('checkbox', { name: '說明 · 1 列' }) as HTMLInputElement).checked,
+    ).toBe(false);
+    expect(
+      (screen.getByRole('checkbox', { name: '成績 · 3 列' }) as HTMLInputElement).checked,
+    ).toBe(true);
+    expect((screen.getByLabelText('「成績」的標題列') as HTMLSelectElement).value).toBe('2');
+    expect(
+      screen.getByRole('button', { name: '用 AI 整理選取內容' }).hasAttribute('disabled'),
+    ).toBe(false);
+    expect(screen.queryByRole('button', { name: '確認匯入 1 筆' })).toBeNull();
+    expect(readPersonalImports(context)).toHaveLength(0);
+    view.unmount();
+    render(<PersonalImportCenter />);
+    expect((screen.getByLabelText('「成績」的標題列') as HTMLSelectElement).value).toBe('2');
+    expect(
+      (screen.getByRole('checkbox', { name: '說明 · 1 列' }) as HTMLInputElement).checked,
+    ).toBe(false);
+  },
+);
+
+it('rejects oversized document AI input before downloading and allows a smaller selected range', async () => {
+  const document: PersonalImportDocument = {
+    ...unstructuredDocument,
+    sections: [
+      unstructuredDocument.sections[0],
+      {
+        ...unstructuredDocument.sections[1],
+        rows: [
+          unstructuredDocument.sections[1].rows[0],
+          { line: 2, cells: ['長'.repeat(8_001)] },
+          unstructuredDocument.sections[1].rows[2],
+        ],
+      },
+    ],
+  };
+  vi.mocked(runPersonalImportAi).mockResolvedValue(documentAiPreview(document));
+  render(<PersonalImportCenter />);
+  await chooseDocumentRanges(document);
+  fireEvent.click(screen.getByRole('button', { name: '用 AI 整理選取內容' }));
+  expect(screen.getByText(/選取內容超過 8,000 字元/)).toBeTruthy();
+  expect(runPersonalImportAi).not.toHaveBeenCalled();
+  expect(screen.getByRole('region', { name: '選擇文件內容' })).toBeTruthy();
+  expect((screen.getByLabelText('「成績」的標題列') as HTMLSelectElement).value).toBe('2');
+  fireEvent.change(screen.getByLabelText('「成績」的標題列'), { target: { value: '3' } });
+  fireEvent.click(screen.getByRole('button', { name: '用 AI 整理選取內容' }));
+  await screen.findByRole('button', { name: '確認匯入 1 筆' });
+  expect(runPersonalImportAi).toHaveBeenCalledOnce();
+  expect(vi.mocked(runPersonalImportAi).mock.calls[0][0].input).toEqual({
+    text: '【成績】\n資料庫\t3\t85',
+  });
+  expect(readPersonalImports(context)).toHaveLength(0);
+});
+
+it('shows clear source choices and never starts a model download without choosing AI', async () => {
+  render(<PersonalImportCenter />);
+  expect(screen.getByRole('group', { name: '選擇匯入方式' })).toBeTruthy();
+  expect(screen.getByText(/首次下載約 1.9 GB/)).toBeTruthy();
+  expect(runPersonalImportAi).not.toHaveBeenCalled();
+  await prepare();
+  expect(runPersonalImportAi).not.toHaveBeenCalled();
+  expect(screen.getByRole('button', { name: '確認匯入 1 筆' }).hasAttribute('disabled')).toBe(
+    false,
+  );
+});
+
+it('explains unsupported AI while preserving ordinary import paths', async () => {
+  vi.mocked(getPersonalImportAiAvailability).mockReturnValue({
+    available: false,
+    downloadLabel: '約 1.9 GB',
+    reason: '這個瀏覽器不支援 WebGPU。請使用一般檔案讀取。',
+  });
+  render(<PersonalImportCenter />);
+  expect(screen.getByRole('button', { name: /AI 讀取截圖/ }).hasAttribute('disabled')).toBe(true);
+  expect(screen.getByText(/這個瀏覽器不支援 WebGPU/)).toBeTruthy();
+  await prepare();
+  fireEvent.click(screen.getByRole('button', { name: '確認匯入 1 筆' }));
+  await waitFor(() => expect(readPersonalImports(context)).toHaveLength(1));
+  expect(runPersonalImportAi).not.toHaveBeenCalled();
+});
+
+it('runs actual AI image integration only on request and requires source review before saving', async () => {
+  vi.mocked(runPersonalImportAi).mockResolvedValue(aiGradePreview());
+  render(<PersonalImportCenter />);
+  const file = chooseAiScreenshot();
+  const save = await screen.findByRole('button', { name: '確認匯入 1 筆' });
+  expect(recognizePersonalImportImage).not.toHaveBeenCalled();
+  expect(runPersonalImportAi).toHaveBeenCalledWith(
+    expect.objectContaining({
+      input: { image: file },
+      options: expect.objectContaining({
+        kind: 'grades',
+        schoolId: 'pu',
+        academicYear: '115',
+        semester: '1',
+      }),
+      signal: expect.any(AbortSignal),
+    }),
+  );
+  expect(screen.getByText('AI 辨讀的來源片段（請與原檔核對）')).toBeTruthy();
+  expect(screen.getByRole('complementary', { name: '匯入來源對照' })).toBeTruthy();
+  expect(readPersonalImports(context)).toHaveLength(0);
+  expect(save.hasAttribute('disabled')).toBe(true);
+  const reviewed = screen.getByRole('checkbox', {
+    name: '我已對照來源，逐筆核對這次 AI 整理的內容',
+  });
+  fireEvent.click(reviewed);
+  expect(save.hasAttribute('disabled')).toBe(false);
+  fireEvent.change(screen.getByLabelText('成績'), { target: { value: '88' } });
+  expect((reviewed as HTMLInputElement).checked).toBe(false);
+  expect(save.hasAttribute('disabled')).toBe(true);
+  fireEvent.click(reviewed);
+  fireEvent.click(save);
+  await waitFor(() => expect(readPersonalImports(context)[0]?.grade).toBe('88'));
+});
+
+it('restores AI warnings but requires a fresh acknowledgement after returning to the draft', async () => {
+  vi.mocked(runPersonalImportAi).mockResolvedValue(aiGradePreview());
+  const view = render(<PersonalImportCenter />);
+  chooseAiScreenshot();
+  await screen.findByRole('button', { name: '確認匯入 1 筆' });
+  fireEvent.click(
+    screen.getByRole('checkbox', { name: '我已對照來源，逐筆核對這次 AI 整理的內容' }),
+  );
+  view.unmount();
+  render(<PersonalImportCenter />);
+  expect(screen.getByRole('button', { name: '確認匯入 1 筆' }).hasAttribute('disabled')).toBe(true);
+  expect(
+    (
+      screen.getByRole('checkbox', {
+        name: '我已對照來源，逐筆核對這次 AI 整理的內容',
+      }) as HTMLInputElement
+    ).checked,
+  ).toBe(false);
+  expect(screen.queryByRole('img')).toBeNull();
+});
+
+it('requires replacement confirmation and preserves existing edits when AI fails', async () => {
+  vi.mocked(runPersonalImportAi).mockRejectedValue(new Error('模型目前無法載入。'));
+  render(<PersonalImportCenter />);
+  await prepare();
+  fireEvent.change(screen.getByLabelText('成績'), { target: { value: '88' } });
+  fireEvent.click(screen.getByRole('button', { name: 'AI 整理這段文字' }));
+  expect(runPersonalImportAi).not.toHaveBeenCalled();
+  expect(screen.getByRole('alertdialog', { name: '重新整理這份草稿？' })).toBeTruthy();
+  fireEvent.click(screen.getByRole('button', { name: '保留目前草稿' }));
+  expect(runPersonalImportAi).not.toHaveBeenCalled();
+  expect((screen.getByLabelText('成績') as HTMLInputElement).value).toBe('88');
+  fireEvent.click(screen.getByRole('button', { name: 'AI 整理這段文字' }));
+  fireEvent.click(screen.getByRole('button', { name: '確認以 AI 重新整理' }));
+  await waitFor(() => expect(runPersonalImportAi).toHaveBeenCalledOnce());
+  await waitFor(() => expect(screen.queryByRole('button', { name: '取消讀取' })).toBeNull());
+  expect((screen.getByLabelText('成績') as HTMLInputElement).value).toBe('88');
+  expect(readPersonalImports(context)).toHaveLength(0);
+});
+
+it.each(['cancel', 'account', 'school'] as const)(
+  'ignores a late AI response after %s',
+  async (change) => {
+    let finish!: (value: ReturnType<typeof aiGradePreview>) => void;
+    vi.mocked(runPersonalImportAi).mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          finish = resolve;
+        }),
+    );
+    const view = render(<PersonalImportCenter />);
+    chooseAiScreenshot();
+    await waitFor(() => expect(runPersonalImportAi).toHaveBeenCalledOnce());
+    const signal = vi.mocked(runPersonalImportAi).mock.calls[0][0].signal;
+    if (change === 'cancel') fireEvent.click(screen.getByRole('button', { name: '取消讀取' }));
+    else {
+      if (change === 'account') context.owner = 'platform:another';
+      else context.schoolId = 'nthu';
+      view.rerender(<PersonalImportCenter />);
+    }
+    expect(signal.aborted).toBe(true);
+    await act(async () => finish(aiGradePreview('舊來源的私人課程')));
+    expect(screen.queryByDisplayValue('舊來源的私人課程')).toBeNull();
+    expect(screen.queryByRole('button', { name: '確認匯入 1 筆' })).toBeNull();
+    expect(readPersonalImports(context)).toHaveLength(0);
+    expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:preview');
+  },
+);
+
+it('keeps the previous draft editable after cancelling a pending AI replacement', async () => {
+  let finish!: (value: ReturnType<typeof aiGradePreview>) => void;
+  vi.mocked(runPersonalImportAi).mockImplementation(
+    () =>
+      new Promise((resolve) => {
+        finish = resolve;
+      }),
+  );
+  render(<PersonalImportCenter />);
+  await prepare();
+  fireEvent.change(screen.getByLabelText('成績'), { target: { value: '88' } });
+  fireEvent.click(screen.getByRole('button', { name: 'AI 整理這段文字' }));
+  fireEvent.click(screen.getByRole('button', { name: '確認以 AI 重新整理' }));
+  await waitFor(() => expect(runPersonalImportAi).toHaveBeenCalledOnce());
+  expect(screen.getByRole('button', { name: '確認匯入 1 筆' }).hasAttribute('disabled')).toBe(true);
+  fireEvent.click(screen.getByRole('button', { name: '取消讀取' }));
+  await act(async () => finish(aiGradePreview('不應取代')));
+  expect((screen.getByLabelText('名稱') as HTMLInputElement).value).toBe('資料庫');
+  expect((screen.getByLabelText('成績') as HTMLInputElement).value).toBe('88');
+  expect(screen.getByRole('button', { name: '確認匯入 1 筆' }).hasAttribute('disabled')).toBe(
+    false,
+  );
+});
+
+it('filters and focuses incorrect rows without removing a field while it is being corrected', async () => {
+  render(<PersonalImportCenter />);
+  await prepare('課程名稱,學分,成績\n資料庫,3,85\n英文,2,');
+  expect(screen.getByRole('button', { name: '待修正 1 筆' })).toBeTruthy();
+  fireEvent.click(screen.getByRole('button', { name: '前往第一筆待修正' }));
+  expect(screen.queryByRole('checkbox', { name: /第 1 筆/ })).toBeNull();
+  const grade = screen.getByLabelText('成績');
+  await waitFor(() => expect(document.activeElement).toBe(grade));
+  expect(grade.getAttribute('aria-invalid')).toBe('true');
+  fireEvent.change(grade, { target: { value: '90' } });
+  expect(screen.getByLabelText('成績')).toBe(grade);
+  expect(screen.getByRole('button', { name: '待修正 0 筆' })).toBeTruthy();
+  fireEvent.click(screen.getByRole('button', { name: '全部 2 筆' }));
+  expect(screen.getAllByLabelText('成績')).toHaveLength(2);
+  expect(screen.getByRole('button', { name: '確認匯入 2 筆' }).hasAttribute('disabled')).toBe(
+    false,
+  );
+});
+
+it('only clears the recognition model cache after an explicit request and preserves the import draft', async () => {
+  render(<PersonalImportCenter />);
+  await prepare();
+  expect(deletePersonalImportAiModelCache).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole('button', { name: '移除下載模型' }));
+  await screen.findByText('已移除本瀏覽器的辨識模型快取，下次使用會重新下載。');
+  expect(deletePersonalImportAiModelCache).toHaveBeenCalledOnce();
+  expect((screen.getByLabelText('成績') as HTMLInputElement).value).toBe('85');
+  expect(readPersonalImports(context)).toHaveLength(0);
+});
+
+it('does not report model deletion success when browser cache removal fails', async () => {
+  vi.mocked(deletePersonalImportAiModelCache).mockRejectedValue(
+    new Error('辨識模型快取尚未移除，請稍後再試。'),
+  );
+  render(<PersonalImportCenter />);
+  fireEvent.click(screen.getByRole('button', { name: '移除下載模型' }));
+  await screen.findByText('辨識模型快取尚未移除，請稍後再試。');
+  expect(screen.queryByText('已移除本瀏覽器的辨識模型快取，下次使用會重新下載。')).toBeNull();
+});
+
+it('releases the previous screenshot when switching to a saved school table', async () => {
+  vi.mocked(runPersonalImportAi).mockResolvedValue(aiGradePreview());
+  render(<PersonalImportCenter />);
+  chooseAiScreenshot();
+  await screen.findByRole('button', { name: '確認匯入 1 筆' });
+  expect(screen.getByRole('button', { name: 'AI 重新讀取圖片' })).toBeTruthy();
+  fireEvent.click(screen.getByRole('button', { name: '取消這份草稿' }));
+  const html =
+    '<table><tr><th>課程名稱</th><th>學分</th><th>成績</th></tr><tr><td>新來源英文</td><td>2</td><td>90</td></tr></table>';
+  const file = new File([html], 'new-grades.html', { type: 'text/html' });
+  Object.defineProperty(file, 'text', { value: async () => html });
+  fireEvent.change(screen.getByLabelText('選擇截圖或檔案'), { target: { files: [file] } });
+  await screen.findByRole('region', { name: '選擇校務網頁表格' });
+  expect(screen.queryByRole('button', { name: 'AI 重新讀取圖片' })).toBeNull();
+  expect(screen.queryByRole('img')).toBeNull();
+  expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:preview');
+});
+
+it('clears a stale screenshot when a new plain text file is read', async () => {
+  vi.mocked(runPersonalImportAi).mockResolvedValue(aiGradePreview());
+  render(<PersonalImportCenter />);
+  chooseAiScreenshot();
+  await screen.findByRole('button', { name: '確認匯入 1 筆' });
+  fireEvent.click(screen.getByRole('button', { name: '取消這份草稿' }));
+  const contents = `課程名稱,學分,成績
+英文,2,90`;
+  const file = new File([contents], 'new-grades.csv', { type: 'text/csv' });
+  Object.defineProperty(file, 'text', { value: async () => contents });
+  fireEvent.change(screen.getByLabelText('選擇截圖或檔案'), { target: { files: [file] } });
+  await screen.findByRole('button', { name: '確認匯入 1 筆' });
+  expect(screen.queryByRole('button', { name: 'AI 重新讀取圖片' })).toBeNull();
+  expect(screen.queryByRole('img')).toBeNull();
+  expect((screen.getByLabelText('名稱') as HTMLInputElement).value).toBe('英文');
+});
+
+it('copies the school capture bookmark only after the user requests it', async () => {
+  const writeText = vi.fn().mockResolvedValue(undefined);
+  Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText } });
+  render(<PersonalImportCenter />);
+  expect(writeText).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByText('從已登入的學校網頁擷取'));
+  expect(screen.getByText(/單次擷取，不會自動同步/)).toBeTruthy();
+  fireEvent.click(screen.getByRole('button', { name: '複製擷取工具' }));
+  await screen.findByText('工具網址已複製。請新增一個書籤，將網址替換成剛剛複製的內容。');
+  expect(writeText).toHaveBeenCalledOnce();
+  expect(writeText.mock.calls[0][0]).toMatch(/^javascript:/);
+  expect(document.getElementById('campus-one-school-table-capture')).toBeNull();
+  expect(readPersonalImports(context)).toHaveLength(0);
+});
+
+it('provides a selectable bookmark URL when automatic clipboard access is unavailable', async () => {
+  Object.defineProperty(navigator, 'clipboard', { configurable: true, value: undefined });
+  render(<PersonalImportCenter />);
+  fireEvent.click(screen.getByText('從已登入的學校網頁擷取'));
+  fireEvent.click(screen.getByRole('button', { name: '複製擷取工具' }));
+  await screen.findByText(/瀏覽器未能自動複製/);
+  const field = screen.getByLabelText('校務擷取書籤網址') as HTMLTextAreaElement;
+  expect(field.readOnly).toBe(true);
+  expect(field.value).toMatch(/^javascript:/);
+  expect(field.closest('details')?.open).toBe(true);
 });

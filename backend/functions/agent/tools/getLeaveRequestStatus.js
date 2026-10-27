@@ -34,12 +34,16 @@ async function execute(ctx, rawInput) {
 
   const items = snap.docs.map((doc) => {
     const d = doc.data() || {};
+    const kindLabels = { sick: '病假', personal: '事假', family: '家庭照顧假', official: '公假',
+      menstrual: '生理假', mental: '心理健康假', bereavement: '喪假', other: '其他' };
+    const date = d.startDate && d.endDate && d.startDate !== d.endDate
+      ? `${d.startDate} 至 ${d.endDate}` : d.startDate || d.date;
     const row = {
       requestId: doc.id,
-      date: d.date != null ? String(d.date) : '',
-      type: d.type != null ? String(d.type) : '',
+      date: date != null ? String(date) : '',
+      type: kindLabels[d.kind] || (d.type != null ? String(d.type) : ''),
       status: d.status != null ? String(d.status) : '',
-      courseId: d.courseId != null ? String(d.courseId) : '',
+      courseId: d.courseId != null ? String(d.courseId) : String(d.courses?.[0]?.courseId || ''),
       createdAt: serializeCreatedAt(d.createdAt),
     };
     if (d.groupId != null && String(d.groupId).trim()) {
