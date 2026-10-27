@@ -3,8 +3,11 @@ import { Text, View } from 'react-native';
 import { AIButton, aiTokens } from '../ui/aiFirst';
 import type { CampusEvidencePlan, CampusPlanPriority, CampusPlanRoute } from '../services/offlineCampusPlanner';
 import type { CampusSenseSnapshot } from '../services/campusSenseSnapshot';
+import type { CampusAssignmentIdentity } from '../services/campusAssignmentTarget';
+import type { safeNavigate } from '../utils/safeNavigate';
 import { CampusAssignmentReminderAction } from './CampusAssignmentReminderAction';
 import { CampusStudyAgendaCard } from './CampusStudyAgendaCard';
+import { CampusAssignmentOpenButton } from './CampusAssignmentOpenButton';
 
 const PRIORITY: Record<CampusPlanPriority, string> = {
   overdue: '期限已過',
@@ -32,10 +35,12 @@ export function CampusEvidencePlanCard({
   disabled,
   onOpenRoute,
   reminderContext,
+  navigation,
 }: {
   plan: CampusEvidencePlan;
   disabled: boolean;
   onOpenRoute?: (route: CampusPlanRoute) => void;
+  navigation?: Parameters<typeof safeNavigate>[0];
   reminderContext?: {
     userId: string;
     schoolId: string;
@@ -43,6 +48,14 @@ export function CampusEvidencePlanCard({
     isCurrent: () => boolean;
   };
 }) {
+  const assignmentAction = (assignment: CampusAssignmentIdentity) => reminderContext && navigation ? (
+    <CampusAssignmentOpenButton
+      assignment={assignment}
+      context={reminderContext}
+      navigation={navigation}
+      disabled={disabled}
+    />
+  ) : null;
   return (
     <View style={{ gap: 12, marginTop: 14 }}>
       <View style={{ gap: 4 }}>
@@ -88,6 +101,7 @@ export function CampusEvidencePlanCard({
             <Text style={{ color: aiTokens.muted, fontSize: 12 }}>
               依據：{EVIDENCE_LABEL[step.evidence]}
             </Text>
+            {step.evidence === 'authorized-assignments' ? assignmentAction(step) : null}
             {onOpenRoute ? (
               <AIButton
                 label={'開啟' + ROUTE_LABEL[step.route] + '核對'}
@@ -117,6 +131,7 @@ export function CampusEvidencePlanCard({
           agenda={plan.agenda}
           disabled={disabled}
           onOpenRoute={onOpenRoute}
+          renderAssignmentAction={assignmentAction}
         />
       ) : null}
       {plan.limitations.length ? (

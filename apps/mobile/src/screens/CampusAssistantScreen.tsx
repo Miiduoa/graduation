@@ -480,6 +480,7 @@ function AssistantConversation({
             <CampusEvidencePlanCard
               plan={message.plan}
               disabled={busy}
+              navigation={navigation}
               reminderContext={{
                 userId: uid,
                 schoolId,
@@ -487,6 +488,7 @@ function AssistantConversation({
                 isCurrent: current,
               }}
               onOpenRoute={(route: CampusPlanRoute) => {
+                if (!current()) return;
                 const destination = VERIFIED_SERVICE_ROUTES[route];
                 if (destination) safeNavigate(navigation, destination.route);
               }}
@@ -515,7 +517,7 @@ function AssistantConversation({
                 ? '手機規則計算 · 先前主動同步的授權摘要（非即時結果）'
                 : message.tool
                   ? '本機規則／已保存資料 · 未進行雲端推論或即時校園查詢'
-                : '手機模型生成 · 未進行校園網路查詢，重要資訊請到正式服務確認'}
+                  : '手機模型生成 · 未進行校園網路查詢，重要資訊請到正式服務確認'}
             </Text>
           )}
           {message.role === 'assistant' && !message.plan && !message.localReads?.length && message.route && VERIFIED_SERVICE_ROUTES[message.route] ? (

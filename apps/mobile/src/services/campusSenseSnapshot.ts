@@ -1,5 +1,6 @@
 import { httpsCallable } from 'firebase/functions';
 import { getAuthInstance, getFunctionsInstance, isFirebaseMockMode } from '../firebase';
+import { parseCampusAssignmentSource, type CampusAssignmentSource } from './campusAssignmentSource';
 
 export type SenseSourceStatus = 'available' | 'unavailable';
 
@@ -11,7 +12,7 @@ export interface CampusSenseSnapshot {
   assignments: {
     status: SenseSourceStatus;
     count: number | null;
-    items: Array<{ title: string; groupName: string; dueAt: string | null }>;
+    items: Array<{ title: string; groupName: string; dueAt: string | null; source?: CampusAssignmentSource }>;
   };
   announcements: {
     status: SenseSourceStatus;
@@ -82,10 +83,13 @@ function parseSnapshot(payload: unknown, userId: string, schoolId: string): Camp
         ? assignments.items.slice(0, 12).map((item: unknown) => {
             const row = record(item);
             if (!row) throw new Error('invalid-sense-response');
+            const source = row.source === undefined ? null : parseCampusAssignmentSource(row.source);
+            if (row.source !== undefined && !source) throw new Error('invalid-sense-response');
             return {
               title: requiredText(row.title, 140),
               groupName: typeof row.groupName === 'string' ? row.groupName.trim().slice(0, 100) : '',
               dueAt: dateString(row.dueAt),
+              ...(source ? { source } : {}),
             };
           })
         : [],
