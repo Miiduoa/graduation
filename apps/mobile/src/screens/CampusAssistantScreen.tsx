@@ -19,6 +19,8 @@ import { getMobileQuickActions } from '../services/quickCampusActions';
 import type { CampusAgentWriteProposal, CampusAgentWriteTool } from '../features/campusAssistantActions';
 import { CampusAgentActionReview } from './CampusAgentActionReview';
 import { CampusSenseDashboard } from './CampusSenseDashboard';
+import { CampusEvidencePlanCard } from './CampusEvidencePlanCard';
+import type { CampusEvidencePlan, CampusPlanRoute } from '../services/offlineCampusPlanner';
 import {
   refreshCampusSenseSnapshot,
   validCampusSenseSnapshot,
@@ -89,7 +91,8 @@ function AssistantConversation({
     Array<CampusAssistantMessage & {
       requiresService?: boolean;
       source?: CampusAssistantMode;
-      tool?: 'saved-timetable' | 'campus-snapshot' | 'online-required' | 'open-service';
+      tool?: 'saved-timetable' | 'campus-snapshot' | 'campus-plan' | 'online-required' | 'open-service';
+      plan?: CampusEvidencePlan;
       route?: string;
       proposals?: CampusAgentWriteProposal[];
     }>
@@ -156,7 +159,7 @@ function AssistantConversation({
       if (current()) setSyncBusy(false);
     }
   };
-  const briefToday = async () => {
+  const briefPlan = async (question: string) => {
     if (!uid || lock.current || syncLock.current || !current()) return;
     lock.current = true;
     syncLock.current = true;
@@ -174,7 +177,6 @@ function AssistantConversation({
       if (!current() || controller.signal.aborted) return;
       setSense(snapshot);
       setSyncBusy(false);
-      const question = '今天要先處理什麼？';
       const next: CampusAssistantMessage[] = [
         ...messages, { role: 'user', content: question },
       ];
@@ -202,6 +204,7 @@ function AssistantConversation({
             source: reply.source,
             tool: reply.tool,
             route: reply.route,
+            plan: reply.plan,
           },
         ]);
         setDraft('');
@@ -258,6 +261,7 @@ function AssistantConversation({
             source: reply.source,
             tool: reply.tool,
             route: reply.route,
+            plan: reply.plan,
             proposals: reply.proposals,
           },
         ]);
@@ -359,7 +363,8 @@ function AssistantConversation({
           syncBusy={syncBusy}
           error={senseError}
           onSync={() => void syncCampus()}
-          onBrief={() => void briefToday()}
+          onBrief={() => void briefPlan('今天要先處理什麼？')}
+          onWeekBrief={() => void briefPlan('依手機課表與授權作業安排接下來七天的學習計畫')}
           onClear={() => { setSense(null); setSenseError(''); }}
         />
       ) : null}
@@ -413,10 +418,20 @@ function AssistantConversation({
         </AICard>
       ) : null}
       {messages.map((message, index) => (
-        <AICard key={index} title={message.role === 'user' ? '你的問題' : message.tool ? '手機離線工具' : message.source === 'device' ? '手機本地 AI' : '校園即時助理'}>
+        <AICard key={index} title={message.role === 'user' ? '你的問題' : message.plan ? '校園行動計畫' : message.tool ? '手機離線工具' : message.source === 'device' ? '手機本地 AI' : '校園即時助理'}>
           <Text selectable style={{ color: aiTokens.text, lineHeight: 25 }}>
-            {message.content}
+            {message.plan ? message.plan.overview : message.content}
           </Text>
+          {message.role === 'assistant' && message.plan ? (
+            <CampusEvidencePlanCard
+              plan={message.plan}
+              disabled={busy}
+              onOpenRoute={(route: CampusPlanRoute) => {
+                const destination = VERIFIED_SERVICE_ROUTES[route];
+                if (destination) safeNavigate(navigation, destination.route);
+              }}
+            />
+          ) : null}
           {message.role === 'assistant' && message.source === 'campus' &&
             index === messages.length - 1 && message.proposals?.map((proposal, proposalIndex) => (
               <CampusAgentActionReview
@@ -432,14 +447,16 @@ function AssistantConversation({
             ))}
           {message.role === 'assistant' && message.source === 'device' && (
             <Text style={{ color: aiTokens.muted, fontSize: 12, marginTop: 10 }}>
-              {message.tool === 'campus-snapshot'
+              {message.tool === 'campus-plan'
+                ? '手機端多步驟規劃 · 資料來源與期限已標示 · 未執行任何寫入'
+                : message.tool === 'campus-snapshot'
                 ? '手機規則計算 · 先前主動同步的授權摘要（非即時結果）'
                 : message.tool
                   ? '本機規則／已保存資料 · 未進行雲端推論或即時校園查詢'
                 : '手機模型生成 · 未進行校園網路查詢，重要資訊請到正式服務確認'}
             </Text>
           )}
-          {message.role === 'assistant' && message.route && VERIFIED_SERVICE_ROUTES[message.route] ? (
+          {message.role === 'assistant' && !message.plan && message.route && VERIFIED_SERVICE_ROUTES[message.route] ? (
             <View style={{ marginTop: 12 }}>
               <AIButton
                 label={'開啟' + VERIFIED_SERVICE_ROUTES[message.route].label}
@@ -451,7 +468,7 @@ function AssistantConversation({
                 }}
               />
             </View>
-          ) : message.role === 'assistant' && index > 0 ? (
+          ) : message.role === 'assistant' && !message.plan && index > 0 ? (
             <View style={{ marginTop: 12, gap: 8 }}>
               {getMobileQuickActions(messages[index - 1]?.role === 'user' ? messages[index - 1].content : '')
                 .slice(0, 3)
