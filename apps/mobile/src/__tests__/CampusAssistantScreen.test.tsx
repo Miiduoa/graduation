@@ -1,5 +1,5 @@
 import React from 'react';
-import { act, fireEvent, render } from '@testing-library/react-native';
+import { act, fireEvent, render, waitFor } from '@testing-library/react-native';
 import { AIOverlayHost } from '../components/AIOverlayHost';
 import { CampusAssistantScreen } from '../screens/CampusAssistantScreen';
 import { askCampusAssistant } from '../features/campusAssistant';
@@ -618,7 +618,7 @@ test('source-verified assignment requires review and confirmation before a local
   fireEvent.press(view.getByText('1 天前'));
   await act(async () => fireEvent.press(view.getByText('確認設定本機提醒')));
 
-  expect(scheduleCampusAssignmentReminder).toHaveBeenCalledTimes(1);
+  await waitFor(() => expect(scheduleCampusAssignmentReminder).toHaveBeenCalledTimes(1));
   expect(jest.mocked(scheduleCampusAssignmentReminder).mock.calls[0][0]).toMatchObject({
     scope: { uid: 'A', schoolId: 'pu' },
     snapshot: sense,
