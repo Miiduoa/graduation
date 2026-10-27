@@ -59,6 +59,7 @@ it('retries an ambiguous correction with the same idempotency key', async () => 
   render(<AttendanceCorrectionPanel courseId="class-a" sessionId="session-a" onUpdated={vi.fn().mockResolvedValue(undefined)} />);
   fireEvent.click(screen.getByRole('button', { name: '管理出席更正' }));
   await screen.findByLabelText('更正原因');
+  fireEvent.change(screen.getByLabelText('選擇學生'), { target: { value: 'student-one' } });
   fireEvent.change(screen.getByLabelText('更正原因'), { target: { value: '授課老師已確認沒有出席' } });
   fireEvent.click(screen.getByRole('button', { name: '確認並保存更正' }));
   await screen.findByRole('alert');
