@@ -160,3 +160,31 @@ test('changing the saved model preference cannot impersonate an already loaded c
   expect(engine.getState()).toMatchObject({ status: 'ready', modelId: 'qwen2.5-0.5b' });
   expect(mockInitLlama).toHaveBeenCalledTimes(1);
 });
+
+test('generates with the token format of the actually loaded GGUF model', async () => {
+  mockGetInfo.mockResolvedValue({ exists: true, size: 5_000_000_000 });
+  const messages = [
+    { role: 'system' as const, content: 'Answer in Chinese' },
+    { role: 'user' as const, content: 'Plan today's tasks' },
+  ];
+
+  await expect(engine.loadModel('mistral-7b-v0.3')).resolves.toBe(true);
+  await engine.generate({ messages });
+  const mistralParams = mockCompletion.mock.calls.at(-1)?.[0];
+  expect(mistralParams.prompt).toContain('[INST]Answer in Chinese');
+  expect(mistralParams.prompt).toContain("Plan today's tasks[/INST]");
+  expect(mistralParams.stop).toEqual(['</s>', '[INST]']);
+
+  await expect(engine.loadModel('phi-3.5-mini')).resolves.toBe(true);
+  await engine.generate({ messages });
+  const phiParams = mockCompletion.mock.calls.at(-1)?.[0];
+  expect(phiParams.prompt).toContain('<|system|>\nAnswer in Chinese<|end|>');
+  expect(phiParams.prompt).toContain('<|user|>\nPlan today');
+  expect(phiParams.stop).toContain('<|end|>');
+
+  await expect(engine.loadModel('qwen2.5-0.5b')).resolves.toBe(true);
+  await engine.generate({ messages });
+  const qwenParams = mockCompletion.mock.calls.at(-1)?.[0];
+  expect(qwenParams.prompt).toContain('<|im_start|>user\nPlan today');
+  expect(qwenParams.stop).toEqual(['<|im_end|>', '<|im_start|>']);
+});
