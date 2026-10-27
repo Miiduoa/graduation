@@ -94,7 +94,7 @@ function syncedCampusAnswer(
 
   const askingAssignments = /作業|待交|待繳|截止|繳交期限/.test(question);
   const askingAnnouncements = /公告|通知/.test(question);
-  const askingPriority = /今日重點|今天要做|今天先做|先處理什麼|待辦摘要|校園摘要/.test(question);
+  const askingPriority = /今日重點|今天要做|今天要先|今天先做|今天該做|先處理|待辦摘要|校園摘要|先完成哪|有什麼重要的/.test(question);
   // Writing a submission is never a read-only snapshot action.
   if (/幫我.{0,12}(?:交作業|繳作業|提交|刪除|修改)|(?:代交|自動繳交)/.test(question)) {
     return null;
@@ -114,7 +114,10 @@ function syncedCampusAnswer(
       if (!assignments.items.length) {
         lines.push('這次同步沒有列出作業，不代表其他校務系統已全部繳交。');
       } else {
-        for (const item of assignments.items.slice(0, askingPriority ? 3 : 8)) {
+        const upcoming = [...assignments.items].sort((left, right) =>
+          (left.dueAt ? Date.parse(left.dueAt) : Infinity) -
+          (right.dueAt ? Date.parse(right.dueAt) : Infinity));
+        for (const item of upcoming.slice(0, askingPriority ? 3 : 8)) {
           const due = item.dueAt ? '｜截止 ' + syncedTime(item.dueAt) : '｜截止時間未提供';
           lines.push('• ' + item.title + (item.groupName ? '（' + item.groupName + '）' : '') + due);
         }
@@ -141,6 +144,30 @@ function syncedCampusAnswer(
     }
   }
   if (!matched) return null;
+  if (askingPriority) {
+    if (context.timetable.source === 'saved-device-copy') {
+      const day = taiwanWeekday(new Date(context.checkedAt));
+      const today = courseLines(context.timetable.courses, day);
+      lines.push(today.length
+        ? '今日手機課表副本：\n' + today.slice(0, 6).join('\n') +
+          (today.length > 6 ? '\n其餘課程請開啟課表核對。' : '')
+        : '今日手機課表副本未排課，不能據此判定學校正式停課。');
+    } else {
+      lines.push('手機沒有已保存的個人課表副本。');
+    }
+    const tasks = snapshot.assignments.status === 'available'
+      ? [...snapshot.assignments.items]
+        .filter((item) => item.dueAt && Number.isFinite(Date.parse(item.dueAt)))
+        .sort((a, b) => Date.parse(a.dueAt!) - Date.parse(b.dueAt!))
+      : [];
+    if (tasks.length) {
+      const first = tasks[0];
+      lines.push('建議下一步：先核對「' + first.title +
+        '」的繳交要求及截止時間，再依剩餘時間安排工作；是否已繳交仍以課程頁為準。');
+    } else {
+      lines.push('建議下一步：先開啟課程與公告服務核對來源，再安排今天的工作。');
+    }
+  }
   return {
     tool: 'campus-snapshot',
     route: askingAssignments || askingPriority ? '/classroom' : '/announcements',
