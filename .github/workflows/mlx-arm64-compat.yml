@@ -1,0 +1,57 @@
+# Target the local MLX path on a real macOS arm64 GitHub-hosted runner.
+# No pretrained weights or tokens are downloaded; user checkpoints are not touched.
+name: Local MLX Apple Silicon Compatibility
+
+on:
+  pull_request:
+    paths:
+      - 'backend/ai-server/requirements.txt'
+      - 'backend/ai-server/run.sh'
+      - 'backend/ai-server/training/**'
+      - 'backend/ai-server/tests/test_local_bootstrap.py'
+      - 'backend/ai-server/tests/mlx_lora_compat_smoke.py'
+      - 'backend/ai-server/tests/mlx_tiny_training_smoke.py'
+      - '.github/workflows/mlx-arm64-compat.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'backend/ai-server/requirements.txt'
+      - 'backend/ai-server/run.sh'
+      - 'backend/ai-server/training/**'
+      - 'backend/ai-server/tests/test_local_bootstrap.py'
+      - 'backend/ai-server/tests/mlx_lora_compat_smoke.py'
+      - 'backend/ai-server/tests/mlx_tiny_training_smoke.py'
+      - '.github/workflows/mlx-arm64-compat.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  mlx-apple-silicon:
+    name: MLX tensor / LoRA training and fuse on Apple Silicon
+    runs-on: macos-15
+    timeout-minutes: 25
+    defaults:
+      run:
+        working-directory: backend/ai-server
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Verify local bootstrap guards without installing packages
+        run: python -m unittest discover -s tests -p test_local_bootstrap.py -v
+      - name: Install native MLX and NumPy candidate versions
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install 'numpy==2.5.4' 'mlx-lm==0.32.2' 'python-dotenv>=1.2.2' 'PyYAML>=6.0'
+          python -m pip check
+      - name: Verify Apple Silicon tensor and Campus One LoRA CLI
+        run: python tests/mlx_lora_compat_smoke.py
+      - name: Train, reload and fuse a generated local model without network downloads
+        timeout-minutes: 5
+        run: python tests/mlx_tiny_training_smoke.py
+      - name: Acceptance boundary
+        run: |
+          echo '::notice::Validates a generated tiny model through real Campus One LoRA/fuse subprocesses, reloads and output comparison. This is not pretrained-model quality, existing user checkpoint, ONNX or production-data acceptance.'
