@@ -18,6 +18,11 @@ import { safeNavigate } from '../utils/safeNavigate';
 import { getMobileQuickActions } from '../services/quickCampusActions';
 import type { CampusAgentWriteProposal, CampusAgentWriteTool } from '../features/campusAssistantActions';
 import { CampusAgentActionReview } from './CampusAgentActionReview';
+import {
+  refreshCampusSenseSnapshot,
+  validCampusSenseSnapshot,
+  type CampusSenseSnapshot,
+} from '../services/campusSenseSnapshot';
 
 const SERVICE_AFTER_WRITE: Record<CampusAgentWriteTool, string> = {
   submitLeaveRequest: 'CoursesHome',
@@ -83,7 +88,7 @@ function AssistantConversation({
     Array<CampusAssistantMessage & {
       requiresService?: boolean;
       source?: CampusAssistantMode;
-      tool?: 'saved-timetable' | 'online-required' | 'open-service';
+      tool?: 'saved-timetable' | 'campus-snapshot' | 'online-required' | 'open-service';
       route?: string;
       proposals?: CampusAgentWriteProposal[];
     }>
@@ -91,6 +96,10 @@ function AssistantConversation({
   const [draft, setDraft] = useState(initialPrompt.slice(0, 1600));
   const [mode, setMode] = useState<CampusAssistantMode>('device');
   const [deviceStatus, setDeviceStatus] = useState<OnDeviceAssistantReadiness | null>(null);
+  const [sense, setSense] = useState<CampusSenseSnapshot | null>(null);
+  const [syncBusy, setSyncBusy] = useState(false);
+  const [senseError, setSenseError] = useState('');
+  const syncLock = useRef(false);
   const [deviceCheck, setDeviceCheck] = useState(0);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
@@ -99,6 +108,7 @@ function AssistantConversation({
   const lock = useRef(false);
   const publicServices = resolveSchoolPublicServices(schoolId);
   const quickActions = getMobileQuickActions(draft);
+  const currentSense = validCampusSenseSnapshot(sense, { uid, schoolId });
   useEffect(() => {
     mounted.current = true;
     return () => {
@@ -121,6 +131,27 @@ function AssistantConversation({
     setMessages([]);
     setError('');
   };
+  const syncCampus = async () => {
+    if (!uid || lock.current || syncLock.current || !current()) return;
+    syncLock.current = true;
+    setSyncBusy(true);
+    setSenseError('');
+    try {
+      const snapshot = await refreshCampusSenseSnapshot({
+        scope: { uid, schoolId },
+        isCurrent: current,
+      });
+      if (current()) setSense(snapshot);
+    } catch {
+      if (current()) {
+        setSense(null);
+        setSenseError('資料同步失敗。請確認帳號、學校權限與網路，再試一次；沒有使用舊資料冒充最新結果。');
+      }
+    } finally {
+      syncLock.current = false;
+      if (current()) setSyncBusy(false);
+    }
+  };
   const send = async () => {
     const question = draft.trim();
     if ((!uid && mode === 'campus') || !question || lock.current || !current()) return;
@@ -132,6 +163,7 @@ function AssistantConversation({
       const reply = await askCampusAssistant({
         scope: { uid, schoolId },
         schoolName,
+        senseSnapshot: currentSense,
         messages: next,
         isCurrent: current,
         mode,
@@ -222,6 +254,56 @@ function AssistantConversation({
           )}
         </View>
       </AICard>
+      {mode === 'device' ? (
+        <AICard title="校園感知 · 你決定何時同步">
+          <View style={{ gap: 10 }}>
+            <Text style={{ color: aiTokens.text, fontSize: 14, fontWeight: '700' }}>
+              {currentSense
+                ? '已取得本次授權資料'
+                : sense ? '校園摘要已過期，請重新同步' : '尚未同步校園摘要'}
+            </Text>
+            <Text style={{ color: aiTokens.muted, fontSize: 13, lineHeight: 21 }}>
+              {currentSense
+                ? '同步時間：' + new Intl.DateTimeFormat('zh-TW', {
+                    timeZone: 'Asia/Taipei', month: 'numeric', day: 'numeric',
+                    hour: '2-digit', minute: '2-digit',
+                  }).format(new Date(currentSense.checkedAt)) +
+                  '。作業：' + (currentSense.assignments.status === 'available'
+                    ? currentSense.assignments.count + ' 筆（僅限已串接課程）' : '來源不可用') +
+                  '；公告：' + (currentSense.announcements.status === 'available'
+                    ? currentSense.announcements.items.length + ' 筆摘要' : '來源不可用') +
+                  '；正式課表：' + (currentSense.schedule.status === 'available'
+                    ? currentSense.schedule.count + ' 筆' : '尚未接通') + '。'
+                : '點擊同步後，手機會透過你的登入權限讀取已接通的校園摘要。本機模型仍在手機推論，問題與對話不會隨同步送出。'}
+            </Text>
+            <Text style={{ color: aiTokens.muted, fontSize: 12, lineHeight: 19 }}>
+              摘要僅保留在這次畫面的記憶體，15 分鐘後失效。未同步也能查本機儲存課表；未接通的校方系統不會出現在摘要中。
+            </Text>
+            <AIButton
+              label={syncBusy ? '正在同步校園資料…' : currentSense ? '重新同步校園資料' : '同步我的校園資料'}
+              variant="ghost"
+              disabled={busy || syncBusy || !uid}
+              onPress={() => void syncCampus()}
+            />
+            {currentSense ? (
+              <AIButton
+                label="清除本次校園摘要"
+                variant="ghost"
+                disabled={busy || syncBusy}
+                onPress={() => { setSense(null); setSenseError(''); }}
+              />
+            ) : null}
+            {!uid ? (
+              <Text style={{ color: aiTokens.muted, fontSize: 12 }}>
+                登入帳號並取得所選學校的有效權限後才能同步；純本機文字問答仍可使用。
+              </Text>
+            ) : null}
+            {senseError ? (
+              <Text accessibilityRole="alert" style={{ color: aiTokens.danger }}>{senseError}</Text>
+            ) : null}
+          </View>
+        </AICard>
+      ) : null}
       <AICard>
         <Text style={{ color: aiTokens.muted, lineHeight: 24 }}>
           {mode === 'device'
@@ -259,6 +341,7 @@ function AssistantConversation({
               '幫我把期末報告拆成可以完成的步驟',
               '請依手機儲存的課表整理學習安排',
               '我要找校園圖書館，應該開啟哪個功能？',
+              ...(currentSense ? ['今天要先處理什麼？', '我還有哪些作業待交？'] : []),
             ].map((question) => (
               <AIButton
                 key={question}
@@ -290,8 +373,10 @@ function AssistantConversation({
             ))}
           {message.role === 'assistant' && message.source === 'device' && (
             <Text style={{ color: aiTokens.muted, fontSize: 12, marginTop: 10 }}>
-              {message.tool
-                ? '本機規則／已保存資料 · 未進行雲端推論或即時校園查詢'
+              {message.tool === 'campus-snapshot'
+                ? '手機規則計算 · 先前主動同步的授權摘要（非即時結果）'
+                : message.tool
+                  ? '本機規則／已保存資料 · 未進行雲端推論或即時校園查詢'
                 : '手機模型生成 · 未進行校園網路查詢，重要資訊請到正式服務確認'}
             </Text>
           )}
