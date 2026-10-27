@@ -146,7 +146,7 @@ export function restoreCreditPlan(raw: string | null): CreditPlan | null {
         !Number.isFinite(course.credits) ||
         course.credits <= 0 ||
         course.credits > 30 ||
-        Math.round(course.credits * 100) !== course.credits * 100 ||
+        Math.abs(Math.round(course.credits * 100) - course.credits * 100) > 1e-6 ||
         !Number.isInteger(course.term) ||
         course.term < 1 ||
         course.term > 8 ||
