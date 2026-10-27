@@ -1,6 +1,7 @@
 import { createSign } from 'node:crypto';
 
-const AUDIENCE = 'https://identitytoolkit.googleapis.com/google.identity.signin';
+export const FIREBASE_CUSTOM_TOKEN_AUDIENCE =
+  'https://identitytoolkit.googleapis.com/google.identity.identitytoolkit.v1.IdentityToolkit';
 const TOKEN_TTL_SECONDS = 3600;
 const RESERVED_CLAIMS = new Set([
   'acr',
@@ -50,7 +51,7 @@ export function signFirebaseCustomToken(
   const payload: Record<string, unknown> = {
     iss: account.client_email,
     sub: account.client_email,
-    aud: AUDIENCE,
+    aud: FIREBASE_CUSTOM_TOKEN_AUDIENCE,
     iat: nowSeconds,
     exp: nowSeconds + TOKEN_TTL_SECONDS,
     uid,

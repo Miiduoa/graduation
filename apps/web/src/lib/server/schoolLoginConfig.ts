@@ -39,7 +39,7 @@ const PROVIDENCE_LOGIN: SchoolLoginConfig = {
     lms: 'https://tronclass.pu.edu.tw',
   },
   accountPattern: {
-    student: /^[0-9]{9,10}$/,
+    student: /^[0-9]{7,10}$/,
     teacher: /^[A-Za-z][A-Za-z0-9._-]{1,31}$/,
   },
   uid: {
