@@ -474,3 +474,67 @@ describe('live attendance session handlers', () => {
     await expect(handlers.joinLiveSession({ data: {} })).rejects.toBeInstanceOf(HttpsError);
   });
 });
+
+describe('audited instructor attendance correction', () => {
+  function setup() {
+    const store = seedStore();
+    const handlers = createLiveSessionHandlers({
+      db: store.db as never,
+      now: () => Date.parse('2026-10-27T03:00:00Z'),
+    });
+    const start = () =>
+      handlers.startLiveSession({
+        auth: { uid: 'teacher' },
+        data: { groupId: 'class-1', requestId: 'start-correction-test' },
+      });
+    const correction = (sessionId: string, data: Record<string, unknown> = {}, uid = 'teacher') =>
+      handlers.correctAttendanceRecord({
+        auth: { uid },
+        data: {
+          groupId: 'class-1',
+          sessionId,
+          studentUid: 'student',
+          status: 'absent',
+          reason: '授課教師已查核課堂情況',
+          requestId: 'adjustment-1',
+          ...data,
+        },
+      });
+    return { store, handlers, start, correction };
+  }
+
+  it('records an explicit absence and durable reason without changing present-counts', async () => {
+    const { store, start, correction } = setup();
+    const session = await start();
+    const result = await correction(session.sessionId);
+    expect(result).toMatchObject({ success: true, reused: false, status: 'absent' });
+    expect(store.docs.get(`groups/class-1/attendanceSessions/${session.sessionId}`)?.attendeeCount).toBe(0);
+    expect(store.docs.get(
+      `groups/class-1/attendanceSessions/${session.sessionId}/attendanceRecords/student`,
+    )).toMatchObject({ status: 'absent', source: 'manual', checkedInAt: null });
+    expect([...store.docs.keys()].filter((key) => key.includes('/attendanceCorrections/')))
+      .toHaveLength(1);
+  });
+
+  it('prevents students from correcting records and rejects reusing an operation with changes', async () => {
+    const { store, start, correction } = setup();
+    const session = await start();
+    await expect(correction(session.sessionId, {}, 'student'))
+      .rejects.toMatchObject({ code: 'permission-denied' });
+    await correction(session.sessionId, { status: 'present' });
+    const again = await correction(session.sessionId, { status: 'present' });
+    expect(again).toMatchObject({ success: true, reused: true });
+    await expect(correction(session.sessionId, { status: 'late' }))
+      .rejects.toMatchObject({ code: 'already-exists' });
+    expect(store.docs.get(`groups/class-1/liveSessions/${session.sessionId}`)?.attendeeCount).toBe(1);
+  });
+
+  it('does not persist audit or partial attendance on an aborted transaction', async () => {
+    const { store, start, correction } = setup();
+    const session = await start();
+    store.failNextCommit();
+    await expect(correction(session.sessionId)).rejects.toThrow('commit unavailable');
+    expect([...store.docs.keys()].filter((key) => key.includes('/attendanceCorrections/')))
+      .toHaveLength(0);
+  });
+});
