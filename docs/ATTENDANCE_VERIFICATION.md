@@ -35,6 +35,42 @@ pnpm --filter mobile typecheck
 
 Verify an active instructor and student account against the Firebase emulator or staging backend. Confirm a successful check-in only after server acknowledgment, QR expiry, permission revocation, switching account/school, and that absent/nonexistent records never appear as verified presence.
 
+
+## Instructor correction workflow (development branch, 2026-10-27)
+
+The `correctAttendanceRecord` callable introduces explicit, instructor-verified
+attendance corrections. The operation is not automatic attendance inference:
+
+- Only an authenticated, active `owner` or `instructor` in the course can correct
+  an active enrolled student's record.
+- The request carries course ID, session ID, student UID, explicit status
+  (`present`, `late`, `absent`, `excused`), a 6–300 character reason and a
+  client-stable retry request ID. Server-owned membership and schema-v2 session
+  snapshots are validated within a Firestore transaction.
+- A correction creates or updates the student's receipt and appends an immutable
+  `attendanceCorrections` document in the same transaction. The document stores
+  previous and new statuses, instructor identity, reason, request identity and
+  timestamp. Students cannot read teacher audit history and no client can write it.
+- Attendee counters change only when transitioning into or out of `present/late`,
+  and synchronize between the canonical attendance session and live session.
+  Repeated requests with the same ID are idempotent; mismatched replays are rejected.
+- The teacher web dashboard allows instructors to select a verified member,
+  record a reason, inspect the recent audit trail and immediately refresh the
+  saved roster. Students see corrected `absent` and `excused` as explicit
+  school-workspace statuses, not as fabricated missing check-ins.
+
+This does **not** synchronize corrections back to TronClass or a school's
+official transcript. The audit log is authoritative **only within Campus One**.
+
+Verification before deployment:
+
+```sh
+node --test backend/functions/attendanceSessions.test.js
+pnpm --filter web exec vitest run src/lib/server/attendanceSessionHandlers.test.ts src/lib/server/fnDispatch.attendance.test.ts src/components/AttendanceCorrectionPanel.test.tsx src/lib/courseAttendance.test.ts
+pnpm --filter web typecheck
+pnpm test:rules
+```
+
 ## Contract required before enabling additional methods
 
 Any future attendance callable must:
