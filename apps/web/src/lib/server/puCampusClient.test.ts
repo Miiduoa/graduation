@@ -377,12 +377,13 @@ it('rewrites alcat http redirects to https and rejects other hosts', () => {
   expect(rewriteCampusPortalLocation('https://evil.test/steal', posted, portal)).toBeNull();
   expect(rewriteCampusPortalLocation('https://tronclass.pu.edu.tw/api', posted, portal)).toBeNull();
   expect(rewriteCampusPortalLocation('https://alcat.pu.edu.tw.evil.test/', posted, portal)).toBeNull();
+  expect(rewriteCampusPortalLocation('https://alcat.pu.edu.tw:8443/steal', posted, portal)).toBeNull();
 });
 
 it('follows rewritten alcat redirects and never requests an external host', async () => {
   const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
     const href = String(url);
-    expect(href.startsWith('https://alcat.pu.edu.tw')).toBe(true);
+    expect(new URL(href).origin).toBe('https://alcat.pu.edu.tw');
     expect(href).not.toContain('evil.test');
     if (href === 'https://alcat.pu.edu.tw/') {
       return htmlResponse(200, ALCAT_LOGIN_HTML);
@@ -406,8 +407,8 @@ it('follows rewritten alcat redirects and never requests an external host', asyn
     studentName: '陳同學',
     cookies: { PHPSESSID: 'abc' },
   });
-  expect(fetchMock.mock.calls.some(([url]) => String(url).startsWith('http://alcat.pu.edu.tw'))).toBe(
-    false,
+  expect(fetchMock.mock.calls.every(([url]) => new URL(String(url)).protocol === 'https:')).toBe(
+    true,
   );
   expect(
     fetchMock.mock.calls.some(([url]) => String(url) === 'https://alcat.pu.edu.tw/stu_query/query_course.html'),
