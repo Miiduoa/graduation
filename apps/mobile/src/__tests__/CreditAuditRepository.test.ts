@@ -2,6 +2,9 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { getDocs } from 'firebase/firestore';
 import {
   getCreditAuditStorageKey,
+  getCreditChecklistStorageKey,
+  loadCreditChecklistStatus,
+  saveCreditChecklistStatus,
   loadCreditAuditSavedCourses,
   listStoredEnrollments,
 } from '../features/academics/repository';
@@ -55,6 +58,19 @@ test('reads only a well-formed scoped draft and refuses malformed payloads rathe
   await expect(loadCreditAuditSavedCourses(storageKey)).rejects.toThrow();
   getItemMock.mockResolvedValueOnce(JSON.stringify([{ ...rows[0], credits: '2.5' }]));
   await expect(loadCreditAuditSavedCourses(storageKey)).rejects.toThrow(/內容/);
+});
+
+test('reference checklist only reads its scoped storage and rejects corrupt states', async () => {
+  const key = getCreditChecklistStorageKey('student-a', 'pu', 'pu-csie-115');
+  expect(key).not.toBe(getCreditChecklistStorageKey('student-b', 'pu', 'pu-csie-115'));
+  expect(key).not.toBe(getCreditChecklistStorageKey('student-a', 'nchu', 'pu-csie-115'));
+  expect(key).not.toBe(getCreditChecklistStorageKey('student-a', 'pu', 'another-template'));
+  getItemMock.mockResolvedValueOnce(JSON.stringify({ english_proficiency: true }));
+  expect(await loadCreditChecklistStatus(key)).toEqual({ english_proficiency: true });
+  getItemMock.mockResolvedValueOnce(JSON.stringify({ english_proficiency: 'yes' }));
+  await expect(loadCreditChecklistStatus(key)).rejects.toThrow(/驗證/);
+  await saveCreditChecklistStatus(key, { english_proficiency: false });
+  expect(AsyncStorage.setItem).toHaveBeenCalledWith(key, JSON.stringify({ english_proficiency: false }));
 });
 
 test('legacy enrollment lookup includes only rows explicitly scoped to current campus', async () => {
