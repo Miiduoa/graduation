@@ -214,6 +214,7 @@ it.each([
   [503, '尚未開放', '這間學校尚未開放學號登入'],
   [503, '學校系統暫時無法連線', '學校系統暫時連不上，請稍後再試'],
   [503, TEACHER_LMS_UNAVAILABLE_COPY, TEACHER_LMS_UNAVAILABLE_COPY],
+  [503, '老師登入暫未開放；學生請輸入純數字學號', TEACHER_LMS_UNAVAILABLE_COPY],
   [429, 'Too many requests', '嘗試太多次，請稍後再試'],
   [503, '暫時無法驗證老師身分', SCHOOL_LOGIN_GENERIC_ERROR],
   [500, 'PU student login failed', SCHOOL_LOGIN_GENERIC_ERROR],
