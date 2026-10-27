@@ -2,14 +2,13 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { ActivityIndicator, Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
-import { getDb } from '../firebase';
 import { useAuth } from '../state/auth';
 import { useSchool } from '../state/school';
 import { theme } from '../ui/theme';
 import { courseChipScrollContentStyle } from '../ui/courseChipShell';
 import { safeNavigate } from '../utils/safeNavigate';
 import {
-  loadVerifiedAttendanceHistory,
+  loadMyVerifiedAttendanceHistory,
   summarizeVerifiedAttendance,
   type AttendanceReceiptStatus,
   type VerifiedCourseHistory,
@@ -59,7 +58,7 @@ export default function MyAttendanceHistoryScreen() {
     setState({ scope, loading: ready, courses: [], error: false });
     setExpanded(null);
     if (!ready) return;
-    Promise.resolve().then(() => loadVerifiedAttendanceHistory(getDb(), uid, schoolId)).then(
+    Promise.resolve().then(() => loadMyVerifiedAttendanceHistory(uid, schoolId)).then(
       (courses) => {
         if (!disposed) setState({ scope, loading: false, courses, error: false });
       },
