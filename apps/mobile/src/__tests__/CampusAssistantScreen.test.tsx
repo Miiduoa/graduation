@@ -440,3 +440,39 @@ test('the seven-day agent entry shows sourced steps and only navigates to verifi
   });
   expect(confirmCampusAgentWrite).not.toHaveBeenCalled();
 });
+
+test('an idle campus sense dashboard expires automatically rather than showing stale data as synced', async () => {
+  const syncedAt = new Date().toISOString();
+  jest.mocked(refreshCampusSenseSnapshot).mockResolvedValueOnce({
+    userId: 'A', schoolId: 'pu', checkedAt: syncedAt,
+    schedule: { status: 'unavailable', count: null },
+    assignments: { status: 'available', count: 1, items: [] },
+    announcements: { status: 'available', items: [] },
+  });
+
+  // Capture the real screen expiry timer without replacing React Native timers.
+  const scheduled = jest.spyOn(global, 'setTimeout');
+  let afterExpiry: jest.SpyInstance | undefined;
+  try {
+    const view = render(<CampusAssistantScreen />);
+    await act(async () => fireEvent.press(view.getByText('同步我的校園資料')));
+    expect(view.getByText('已取得本次授權資料')).toBeTruthy();
+
+    const timeout = scheduled.mock.calls.find(
+      ([callback, delay]) => typeof callback === 'function' &&
+        typeof delay === 'number' && delay >= 14 * 60 * 1000,
+    )?.[0];
+    expect(typeof timeout).toBe('function');
+
+    afterExpiry = jest.spyOn(Date, 'now').mockReturnValue(
+      Date.parse(syncedAt) + 15 * 60 * 1000 + 1000,
+    );
+    await act(async () => (timeout as () => void)());
+    expect(view.queryByText('已取得本次授權資料')).toBeNull();
+    expect(view.getByText('校園摘要已過期，請重新同步')).toBeTruthy();
+    view.unmount();
+  } finally {
+    afterExpiry?.mockRestore();
+    scheduled.mockRestore();
+  }
+});
