@@ -12,6 +12,29 @@ An attendance record requires server confirmation. Opening a screen, validating 
 - The compatibility screen does not collect six-digit tokens, location or selfies, invoke `verifyAttendanceClaim`, publish a successful check-in event or claim that it recorded attendance. `verifyAttendanceClaim` is still not exported by `backend/functions/index.js`; no backend entry point was enabled by this change.
 - Numeric-code, location and selfie-liveness methods remain unavailable. There is no queued retry or automatic sync for an unconfirmed claim.
 
+## Verified attendance history and teaching workbench (2026-10-27)
+
+- The native `MyAttendanceHistoryScreen` no longer fabricates attendance by treating missing TronClass statuses as `present`, and never substitutes mock courses when official records are unavailable.
+- The student history reads the signed-in user's own `groups/{groupId}/attendanceSessions/{sessionId}/attendanceRecords/{uid}` documents for schema-v2 sessions from Firestore's server, scoped to active course memberships and the selected school. Verified `present` and `late` count as attended; only an explicit validated `absent` record means absent. A missing receipt is **unconfirmed**, and a failed server read is **unavailable**.
+- History cards show actual confirmed check-ins and course-scoped session details. They intentionally avoid calculating an official attendance percentage from the limited receipt window; truncated history and classes without official session data cannot support it.
+- The teaching web workbench adds saved-session overview, active/ended filters, searchable attendance rosters, and CSV export of visible confirmed rows. No absent students are inferred from the roster, which only contains confirmed entries.
+- The teacher web QR is now obtained from the server rather than the local Firestore cache. The page refuses to reveal the code after expiry and hides an already revealed code on page backgrounding or expiry. Server-side `joinLiveSession` remains authoritative.
+- The native attendance landing shortcut now navigates to an authenticated attendance history or teaching workbench instead of constructing demo session IDs or advertising five operational check-in methods.
+- These changes are only UI, history and safety improvements. They **do not activate** number-code, geofence, selfie, offline signing or institutional LMS write-back.
+
+### Verification checklist
+
+Run the targeted tests before merging:
+
+```sh
+pnpm --filter web exec vitest run src/components/CourseAttendance.test.tsx src/lib/courseAttendance.test.ts
+pnpm --filter mobile exec jest src/__tests__/MyAttendanceHistoryScreen.test.tsx src/__tests__/services/verifiedAttendanceHistory.test.ts --runInBand
+pnpm --filter web typecheck
+pnpm --filter mobile typecheck
+```
+
+Verify an active instructor and student account against the Firebase emulator or staging backend. Confirm a successful check-in only after server acknowledgment, QR expiry, permission revocation, switching account/school, and that absent/nonexistent records never appear as verified presence.
+
 ## Contract required before enabling additional methods
 
 Any future attendance callable must:
