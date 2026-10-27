@@ -1,0 +1,52 @@
+name: Credit Review Browser Checks
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - 'apps/web/src/components/academic/CreditTranscriptReview*'
+      - 'apps/web/src/lib/creditTranscriptStorage*'
+      - 'apps/web/src/app/credit-planner/**'
+      - 'packages/shared/src/creditTranscriptReview.ts'
+      - 'scripts/qa/credit-review-browser.mjs'
+      - '.github/workflows/credit-review-browser.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: credit-review-browser-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  browser:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '22.23.4'
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Verify Web review interaction and storage contracts
+        run: |
+          mkdir -p artifacts/credit-review-browser
+          pnpm --filter web exec vitest run src/components/academic/CreditTranscriptReview.test.tsx src/lib/creditTranscriptStorage.test.ts --reporter=json --outputFile="$GITHUB_WORKSPACE/artifacts/credit-review-browser/vitest-results.json"
+      - name: Prepare Chinese browser fonts
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y fonts-noto-cjk
+          google-chrome --version
+      - name: Run isolated real-browser credit review checks
+        env:
+          SOURCE_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: node scripts/qa/credit-review-browser.mjs
+      - name: Preserve browser results and screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: credit-review-browser
+          path: artifacts/credit-review-browser/
+          retention-days: 14
