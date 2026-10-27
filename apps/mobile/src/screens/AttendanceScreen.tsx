@@ -351,6 +351,7 @@ export function AttendanceScreen(props: any) {
 
   // ── Derived ──
   const pendingLeaves = leaveRequests.filter((r) => r.status === 'pending');
+  const hasMeasuredAttendance = studentCourses.some((course) => course.totalSessions > 0);
   const rateColor =
     overallRate >= 85 ? theme.colors.success : overallRate >= 70 ? '#FF9500' : theme.colors.danger;
   const todayStr = new Date().toLocaleDateString('zh-TW', {
@@ -501,7 +502,7 @@ export function AttendanceScreen(props: any) {
               </>
             ) : (
               <>
-                <StatPill label="出席率" value={`${overallRate}%`} color={rateColor} />
+                <StatPill label="出席率" value={hasMeasuredAttendance ? `${overallRate}%` : '—'} color={hasMeasuredAttendance ? rateColor : theme.colors.muted} />
                 <View
                   style={{ width: 1, backgroundColor: theme.colors.border, marginVertical: 12 }}
                 />
