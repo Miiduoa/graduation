@@ -408,7 +408,9 @@ class LocalLLMEngine {
     }
 
     await AsyncStorage.setItem(STORAGE_KEYS.activeModel, cfg.modelId);
-    this.setState({ modelId: cfg.modelId, error: undefined });
+    // Selecting a preference does not hot-swap an already loaded native model.
+    // Keep state.modelId tied to the actual llama context until loadModel succeeds.
+    this.setState({ error: undefined });
     return true;
   }
 

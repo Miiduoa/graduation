@@ -1,5 +1,3 @@
-import type { LocalLLMEngine } from '../../services/localLLMInference';
-
 const mockGetInfo = jest.fn();
 const mockMakeDirectory = jest.fn(async () => undefined);
 const mockDelete = jest.fn(async () => undefined);
@@ -150,4 +148,15 @@ test('a pre-cancelled external signal never returns a generated answer', async (
   expect(result.content).toBe('');
   expect(mockCompletion).not.toHaveBeenCalled();
   expect(engine.getState().status).toBe('ready');
+});
+
+test('changing the saved model preference cannot impersonate an already loaded context', async () => {
+  mockGetInfo.mockResolvedValue({ exists: true, size: 5_000_000_000 });
+  await expect(engine.loadModel('qwen2.5-0.5b')).resolves.toBe(true);
+  const before = engine.getState();
+  expect(before).toMatchObject({ status: 'ready', modelId: 'qwen2.5-0.5b' });
+  await expect(engine.setActiveModel('qwen2.5-7b')).resolves.toBe(true);
+  await expect(engine.getSavedModelId()).resolves.toBe('qwen2.5-7b');
+  expect(engine.getState()).toMatchObject({ status: 'ready', modelId: 'qwen2.5-0.5b' });
+  expect(mockInitLlama).toHaveBeenCalledTimes(1);
 });
