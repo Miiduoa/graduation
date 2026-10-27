@@ -345,7 +345,7 @@ test('one-tap daily brief senses authorized sources and synthesizes on the phone
   });
   const view = render(<CampusAssistantScreen />);
   expect(request).not.toHaveBeenCalled();
-  await act(async () => fireEvent.press(view.getByText('一鍵整理今日重點')));
+  await act(async () => fireEvent.press(view.getByText('今日重點')));
   expect(refreshCampusSenseSnapshot).toHaveBeenCalledTimes(1);
   expect(request).toHaveBeenCalledWith(expect.objectContaining({
     mode: 'device',
