@@ -7,8 +7,6 @@ import { getDb } from '../../firebase';
 import { loadPersistedValue, savePersistedValue } from '../../services/persistedStorage';
 import { getScopedStorageKey } from '../../services/scopedStorage';
 
-const LEGACY_STORAGE_KEY = '@credit_audit_courses';
-
 export type StoredEnrollment = {
   id: string;
   courseId: string;
@@ -43,7 +41,7 @@ export function getCreditAuditStorageKey(userId: string | null, schoolId: string
 export async function loadCreditAuditSavedCourses(storageKey: string): Promise<SavedCourse[]> {
   return loadPersistedValue<SavedCourse[]>({
     storageKey,
-    legacyKeys: [LEGACY_STORAGE_KEY],
+    // Never read the global legacy key: it is not bound to an account or campus.
     fallback: [],
     deserialize: (raw) => JSON.parse(raw) as SavedCourse[],
   });
@@ -73,10 +71,12 @@ export async function listStoredEnrollments(
   }
 
   const legacySnapshot = await getDocs(collectionFromSegments(db, ['users', uid, 'enrollments']));
-  return legacySnapshot.docs.map((docSnap) => ({
-    id: docSnap.id,
-    ...(docSnap.data() as Omit<StoredEnrollment, 'id'>),
-  }));
+  // Older global enrollments may include rows from another campus. Only include
+  // rows explicitly carrying this campus ID; legacy rows without one remain hidden.
+  return legacySnapshot.docs.flatMap((docSnap) => {
+    const data = docSnap.data() as Omit<StoredEnrollment, 'id'> & { schoolId?: string };
+    return data.schoolId === schoolId ? [{ ...data, id: docSnap.id }] : [];
+  });
 }
 
 export async function upsertCreditAuditEnrollment(params: {
