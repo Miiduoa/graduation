@@ -203,7 +203,7 @@ function Workspace({ scopeKey, schoolName, guest, navigation }: {
     const snapshot = inputs;
     const result = prepareCreditPlanBatchSave(plan, snapshot,
       (kind) => `${kind}-${Date.now()}-${Math.random().toString(36).slice(2)}`);
-    if (!result.ok) {
+    if (result.ok === false) {
       Alert.alert('請先修正再儲存', result.issues.join('\n'));
       return;
     }
