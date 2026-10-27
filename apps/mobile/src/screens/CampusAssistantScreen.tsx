@@ -28,6 +28,7 @@ import {
   refreshCampusSenseSnapshot,
   validCampusSenseSnapshot,
   type CampusSenseSnapshot,
+  type CampusSenseProgress,
 } from '../services/campusSenseSnapshot';
 
 const SERVICE_AFTER_WRITE: Record<CampusAgentWriteTool, string> = {
@@ -119,6 +120,7 @@ function AssistantConversation({
   const [sense, setSense] = useState<CampusSenseSnapshot | null>(null);
   const [, refreshSenseAge] = useState(0);
   const [syncBusy, setSyncBusy] = useState(false);
+  const [syncProgress, setSyncProgress] = useState<CampusSenseProgress | null>(null);
   const [senseError, setSenseError] = useState('');
   const syncLock = useRef(false);
   const [deviceCheck, setDeviceCheck] = useState(0);
@@ -158,30 +160,48 @@ function AssistantConversation({
     return () => { active = false; };
   }, [deviceCheck]);
   const changeMode = (next: CampusAssistantMode) => {
-    if (lock.current || next === mode) return;
+    if (lock.current || syncLock.current || next === mode) return;
     setMode(next);
     setMessages([]);
     setError('');
   };
+  const progressFor = (controller: AbortController) => (progress: CampusSenseProgress) => {
+    if (current() && !controller.signal.aborted && inFlight.current === controller) setSyncProgress(progress);
+  };
+  const cancelledSync = () => {
+    setSenseError('已取消這次同步，未套用部分資料。先前摘要仍依原同步時間判定有效性。');
+  };
   const syncCampus = async () => {
     if (!uid || lock.current || syncLock.current || !current()) return;
     syncLock.current = true;
+    const controller = new AbortController();
+    inFlight.current = controller;
     setSyncBusy(true);
+    setSyncProgress(null);
     setSenseError('');
     try {
       const snapshot = await refreshCampusSenseSnapshot({
         scope: { uid, schoolId },
         isCurrent: current,
+        signal: controller.signal,
+        onProgress: progressFor(controller),
       });
-      if (current()) setSense(snapshot);
+      if (current() && !controller.signal.aborted) setSense(snapshot);
     } catch {
       if (current()) {
-        setSense(null);
-        setSenseError('資料同步失敗。請確認帳號、學校權限與網路，再試一次；沒有使用舊資料冒充最新結果。');
+        if (controller.signal.aborted) cancelledSync();
+        else {
+          setSense(null);
+          setSenseError('資料同步失敗。請確認帳號、學校權限與網路，再試一次；沒有使用舊資料冒充最新結果。');
+        }
       }
     } finally {
+      if (inFlight.current === controller) inFlight.current = null;
       syncLock.current = false;
-      if (current()) setSyncBusy(false);
+      if (current()) {
+        setSyncBusy(false);
+        setSyncProgress(null);
+      }
     }
   };
   const briefPlan = async (question: string) => {
@@ -190,6 +210,7 @@ function AssistantConversation({
     syncLock.current = true;
     setBusy(true);
     setSyncBusy(true);
+    setSyncProgress(null);
     setError('');
     setSenseError('');
     const controller = new AbortController();
@@ -200,11 +221,14 @@ function AssistantConversation({
         snapshot = await refreshCampusSenseSnapshot({
           scope: { uid, schoolId },
           isCurrent: current,
+          signal: controller.signal,
+          onProgress: progressFor(controller),
         });
         if (!current() || controller.signal.aborted) return;
         setSense(snapshot);
       } catch (syncError) {
-        if (!current() || controller.signal.aborted) return;
+        if (!current()) return;
+        if (controller.signal.aborted) { cancelledSync(); return; }
         // A permission or contract failure revokes reliance on any prior summary.
         const transient = isTransientCampusSyncError(syncError);
         snapshot = transient ? validCampusSenseSnapshot(sense, { uid, schoolId }) : null;
@@ -217,6 +241,7 @@ function AssistantConversation({
       }
       if (!current() || controller.signal.aborted) return;
       setSyncBusy(false);
+      setSyncProgress(null);
       const next: CampusAssistantMessage[] = [
         ...messages, { role: 'user', content: question },
       ];
@@ -265,13 +290,14 @@ function AssistantConversation({
       if (current()) {
         setBusy(false);
         setSyncBusy(false);
+        setSyncProgress(null);
       }
     }
   };
 
   const send = async () => {
     const question = draft.trim();
-    if ((!uid && mode === 'campus') || !question || lock.current || !current()) return;
+    if ((!uid && mode === 'campus') || !question || lock.current || syncLock.current || !current()) return;
     lock.current = true;
     setBusy(true);
     setError('');
@@ -354,7 +380,7 @@ function AssistantConversation({
               variant={mode === 'device' ? 'primary' : 'ghost'}
               size="sm"
               style={{ flex: 1 }}
-              disabled={busy}
+              disabled={busy || syncBusy}
               onPress={() => changeMode('device')}
             />
             <AIButton
@@ -362,7 +388,7 @@ function AssistantConversation({
               variant={mode === 'campus' ? 'primary' : 'ghost'}
               size="sm"
               style={{ flex: 1 }}
-              disabled={busy}
+              disabled={busy || syncBusy}
               onPress={() => changeMode('campus')}
             />
           </View>
@@ -379,13 +405,13 @@ function AssistantConversation({
               <AIButton
                 label={deviceStatus?.ready ? '管理手機 AI 模型' : '下載／管理免費 AI 模型'}
                 variant="ghost"
-                disabled={busy}
+                disabled={busy || syncBusy}
                 onPress={() => safeNavigate(navigation, 'AIModelManager')}
               />
               <AIButton
                 label="重新檢查模型狀態"
                 variant="ghost"
-                disabled={busy}
+                disabled={busy || syncBusy}
                 onPress={() => setDeviceCheck((value) => value + 1)}
               />
             </>
@@ -403,7 +429,14 @@ function AssistantConversation({
           authenticated={Boolean(uid)}
           busy={busy}
           syncBusy={syncBusy}
+          progress={syncProgress}
           error={senseError}
+          onCancelSync={() => {
+            if (!current() || !syncLock.current) return;
+            inFlight.current?.abort();
+            cancelledSync();
+          }}
+          assignmentContext={{ userId: uid, schoolId, isCurrent: current, navigation }}
           onSync={() => void syncCampus()}
           onBrief={() => void briefPlan('今天要先處理什麼？')}
           onWeekBrief={() => void briefPlan('依手機課表與授權作業安排接下來七天的學習計畫')}
@@ -464,7 +497,7 @@ function AssistantConversation({
           {message.role === 'assistant' && message.localReads?.length ? (
             <CampusLocalReadResults
               results={message.localReads}
-              disabled={busy}
+              disabled={busy || syncBusy}
               onOpenRoute={(route) => {
                 if (!current()) return;
                 const destination = VERIFIED_SERVICE_ROUTES[route];
@@ -479,7 +512,7 @@ function AssistantConversation({
           {message.role === 'assistant' && message.plan ? (
             <CampusEvidencePlanCard
               plan={message.plan}
-              disabled={busy}
+              disabled={busy || syncBusy}
               navigation={navigation}
               reminderContext={{
                 userId: uid,
@@ -525,7 +558,7 @@ function AssistantConversation({
               <AIButton
                 label={'開啟' + VERIFIED_SERVICE_ROUTES[message.route].label}
                 variant="ghost"
-                disabled={busy}
+                disabled={busy || syncBusy}
                 onPress={() => {
                   const destination = message.route && VERIFIED_SERVICE_ROUTES[message.route];
                   if (destination) safeNavigate(navigation, destination.route);
@@ -541,7 +574,7 @@ function AssistantConversation({
                     key={action.destination}
                     label={'查看' + action.label}
                     variant="ghost"
-                    disabled={busy}
+                    disabled={busy || syncBusy}
                     onPress={() => safeNavigate(navigation, action.route)}
                   />
                 ))}
@@ -598,7 +631,7 @@ function AssistantConversation({
                     key={action.destination}
                     label={'前往' + action.label}
                     variant="ghost"
-                    disabled={busy}
+                    disabled={busy || syncBusy}
                     onPress={() => {
                       if (!current()) return;
                       safeNavigate(navigation, action.route);
@@ -617,7 +650,7 @@ function AssistantConversation({
             ) : null}
             <AIButton
               label={busy ? '正在查詢…' : error ? '重試查詢' : '送出問題'}
-              disabled={busy || !draft.trim()}
+              disabled={busy || syncBusy || !draft.trim()}
               onPress={() => void send()}
             />
             {busy && mode === 'device' ? (
