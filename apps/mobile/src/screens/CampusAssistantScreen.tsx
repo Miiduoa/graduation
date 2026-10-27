@@ -52,6 +52,18 @@ const VERIFIED_SERVICE_ROUTES: Record<string, { route: string; label: string }> 
   '/dms': { route: 'Dms', label: '私訊' },
 };
 
+function isTransientCampusSyncError(error: unknown): boolean {
+  const candidate = error && typeof error === 'object'
+    ? error as { code?: unknown; message?: unknown } : {};
+  const code = typeof candidate.code === 'string' ? candidate.code.toLowerCase() : '';
+  const message = typeof candidate.message === 'string' ? candidate.message.toLowerCase() : '';
+  if (/permission-denied|unauthenticated|failed-precondition|invalid-argument|session-changed/.test(code + ' ' + message)) {
+    return false;
+  }
+  // Only a clearly transient failure may reuse a still-valid in-memory snapshot.
+  return /network|offline|unavailable|deadline-exceeded|timeout|timed out|connection/.test(code + ' ' + message);
+}
+
 export function CampusAssistantScreen({ navigation, route }: ServiceScreenProps) {
   useSyncExternalStore(subscribeToTheme, getThemeVersion, getThemeVersion);
   const { user } = useAuth();
@@ -188,15 +200,17 @@ function AssistantConversation({
         });
         if (!current() || controller.signal.aborted) return;
         setSense(snapshot);
-      } catch {
+      } catch (syncError) {
         if (!current() || controller.signal.aborted) return;
-        // Failed networking does not invalidate a previously verified local copy,
-        // but its original timestamp still controls the 15-minute expiry.
-        snapshot = validCampusSenseSnapshot(sense, { uid, schoolId });
+        // A permission or contract failure revokes reliance on any prior summary.
+        const transient = isTransientCampusSyncError(syncError);
+        snapshot = transient ? validCampusSenseSnapshot(sense, { uid, schoolId }) : null;
         if (!snapshot) setSense(null);
         setSenseError(snapshot
           ? '校園連線失敗，改用先前已授權且未過期的摘要；這不是即時學校狀態。'
-          : '校園連線失敗，改用手機已保存的個人課表；作業與公告沒有即時查證。');
+          : transient
+            ? '校園連線失敗，改用手機已保存的個人課表；作業與公告沒有即時查證。'
+            : '校園權限或資料無法驗證，已捨棄校園摘要；僅能使用手機內已保存的個人課表。');
       }
       if (!current() || controller.signal.aborted) return;
       setSyncBusy(false);
