@@ -248,10 +248,12 @@ export function classifyCampusFailure(error: unknown): PuCampusError {
 }
 
 export function createPuCampusGateway(
-  options: { fetch?: FetchLike; timeoutMs?: number } = {},
+  options: { fetch?: FetchLike; timeoutMs?: number; portalOrigin?: string; lmsOrigin?: string } = {},
 ): PuCampusGateway {
   const request = options.fetch ?? fetch;
   const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+  const portalOrigin = options.portalOrigin || ALCAT_ORIGIN;
+  const lmsOrigin = options.lmsOrigin || TRONCLASS_ORIGIN;
 
   async function send(url: string, init: RequestInit & { cookies?: CookieJar } = {}): Promise<SentPage> {
     const controller = new AbortController();
@@ -308,12 +310,12 @@ export function createPuCampusGateway(
   return {
     async loginStudent(studentId, password) {
       try {
-        const warmup = await send(`${ALCAT_ORIGIN}/`);
+        const warmup = await send(`${portalOrigin}/`);
         if (isClosedPage(warmup.html)) {
           throw new PuCampusError('closed', '尚未開放');
         }
         const body = `uid=${encodeURIComponent(studentId)}&upassword=${encodeURIComponent(password)}&en_flag=zh`;
-        const posted = await send(`${ALCAT_ORIGIN}/index_check.php`, {
+        const posted = await send(`${portalOrigin}/index_check.php`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
           body,
@@ -332,7 +334,7 @@ export function createPuCampusGateway(
           posted.status === 302 && posted.location
             ? (await getFollow(posted.location, posted.cookies)).cookies
             : posted.cookies;
-        const verify = await getFollow(`${ALCAT_ORIGIN}/stu_query/query_course.html`, sessionCookies);
+        const verify = await getFollow(`${portalOrigin}/stu_query/query_course.html`, sessionCookies);
         if (isClosedPage(verify.html)) {
           throw new PuCampusError('closed', '尚未開放');
         }
@@ -353,7 +355,7 @@ export function createPuCampusGateway(
 
     async fetchStudentInfo(cookies) {
       try {
-        const page = await getFollow(`${ALCAT_ORIGIN}/stu_query/query_course.html`, cookies);
+        const page = await getFollow(`${portalOrigin}/stu_query/query_course.html`, cookies);
         if (isClosedPage(page.html)) {
           throw new PuCampusError('closed', '尚未開放');
         }
@@ -372,7 +374,7 @@ export function createPuCampusGateway(
 
     async loginTronClass(account, password) {
       try {
-        const posted = await send(`${TRONCLASS_ORIGIN}/api/login`, {
+        const posted = await send(`${lmsOrigin}/api/login`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
           body: JSON.stringify({ user_name: account, password }),
@@ -388,7 +390,7 @@ export function createPuCampusGateway(
           throw new PuCampusError('credentials', '學號或密碼錯誤');
         }
         const loginData = asRecord(posted.json);
-        const profilePage = await send(`${TRONCLASS_ORIGIN}/api/profile`, {
+        const profilePage = await send(`${lmsOrigin}/api/profile`, {
           cookies: posted.cookies,
           headers: { Accept: 'application/json' },
         });
@@ -415,7 +417,7 @@ export function createPuCampusGateway(
 
     async fetchTronClassCourses(session) {
       try {
-        const posted = await send(`${TRONCLASS_ORIGIN}/api/my-courses`, {
+        const posted = await send(`${lmsOrigin}/api/my-courses`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
           body: JSON.stringify({ conditions: { status: ['ongoing'] }, page: 1, page_size: 50 }),
