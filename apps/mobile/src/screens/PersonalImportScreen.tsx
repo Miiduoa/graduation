@@ -17,6 +17,8 @@ import {
   createPersonalImportId,
   serializePersonalImportsCsv,
   parsePersonalImport,
+  extractSchoolPageTables,
+  type SchoolPageTable,
   parsePersonalImportBackup,
   parsePersonalImportDocument,
   personalImportDocumentFormat,
@@ -315,6 +317,7 @@ function ImportWorkspace({
   const [savedFeedback, setSavedFeedback] = useState('');
   const [exporting, setExporting] = useState(false);
   const [documentPrep, setDocumentPrep] = useState<DocumentPrep | null>(null);
+  const [schoolPage, setSchoolPage] = useState<{ name: string; tables: SchoolPageTable[] } | null>(null);
   const alive = useRef(true);
   const focused = useRef(true);
   const generation = useRef(0);
@@ -468,6 +471,7 @@ function ImportWorkspace({
     const run = generation.current;
     setBusy(true);
     setNotice('');
+    setSchoolPage(null);
     try {
       const picked = await ImagePicker.launchImageLibraryAsync({
         mediaTypes: ['images'],
@@ -520,10 +524,12 @@ function ImportWorkspace({
     const run = generation.current;
     setBusy(true);
     setNotice('');
+    setSchoolPage(null);
     try {
       const result = await DocumentPicker.getDocumentAsync({
         type: [
           'text/*',
+          'text/html',
           'application/csv',
           'text/tab-separated-values',
           'application/octet-stream',
@@ -536,6 +542,16 @@ function ImportWorkspace({
       if (!current(run) || result.canceled) return;
       const asset = result.assets[0];
       const name = asset.name || '';
+      if (/\.html?$/i.test(name)) {
+        const file = new File(asset.uri);
+        if ((asset.size || file.size) > 512_000)
+          throw new Error('學校網頁存檔超過 500 KB，請只保存表格或改用 CSV。');
+        const tables = extractSchoolPageTables(await file.text(), kind, profile);
+        if (!current(run)) return;
+        setSchoolPage({ name, tables });
+        setNotice('找到 ' + tables.length + ' 張校務表格。選取內容後，仍需核對才會儲存。');
+        return;
+      }
       if (personalImportDocumentFormat(name)) {
         const size = asset.size;
         if (typeof size === 'number') {
@@ -560,7 +576,7 @@ function ImportWorkspace({
         return;
       }
       if (!/\.(txt|csv|tsv|ics)$/i.test(name))
-        throw new Error('目前支援 TXT、CSV、TSV、ICS、PDF、XLSX。舊版 XLS 請先另存為 XLSX。');
+        throw new Error('目前支援 HTML、TXT、CSV、TSV、ICS、PDF、XLSX。舊版 XLS 請先另存為 XLSX。');
       const file = new File(asset.uri);
       if ((asset.size || file.size) > 512 * 1024)
         throw new Error('文字檔上限 512 KB，請分批匯入。');
@@ -988,6 +1004,7 @@ function ImportWorkspace({
                 onPress={() => {
                   cancel();
                   setKind(value);
+                  setSchoolPage(null);
                   clearDocumentSource();
                   setDocumentPrep(null);
                   if (!backupPreview) {
@@ -1209,9 +1226,36 @@ function ImportWorkspace({
                 ) : null}
               </View>
               <Text style={{ color: theme.colors.muted }}>
-                截圖支援 PNG、JPG，最多 8 MB。圖片在裝置上辨識。文字檔支援 TXT、CSV、TSV；行事曆可讀
-                ICS。PDF／XLSX 上限 8 MiB，只在裝置讀取、不會上傳。
+                截圖支援 PNG、JPG，最多 8 MB；從學校網站儲存的 HTML 可選取課程或成績表格（500 KB 內）。
+                文字檔支援 TXT、CSV、TSV、ICS；PDF／XLSX 上限 8 MiB。內容在裝置上讀取，不會上傳。
               </Text>
+              {schoolPage ? (
+                <View style={{ gap: 12, padding: 16, backgroundColor: theme.colors.focusSurface, borderRadius: 12, borderWidth: 1, borderColor: theme.colors.border }}>
+                  <Text style={{ ...textStyle, fontWeight: '700' }}>選擇校務網頁表格</Text>
+                  <Text style={{ color: theme.colors.muted }}>來源：{schoolPage.name}。只讀取表格文字，未連線學校或使用帳號密碼。請先選正確表格，再核對資料。</Text>
+                  {schoolPage.tables.map((table) => (
+                    <Button
+                      key={table.id}
+                      text={table.label + (table.suggestedTerm ? ' · ' + table.suggestedTerm.academicYear + ' 學年度第 ' + table.suggestedTerm.semester + ' 學期' : '')}
+                      disabled={busy || saving}
+                      onPress={() => {
+                        setText(table.text);
+                        if (table.suggestedTerm) {
+                          if (!academicYear.trim()) setYear(table.suggestedTerm.academicYear);
+                          if (!semester.trim()) setSemester(table.suggestedTerm.semester);
+                        }
+                        setSource({ type: 'file', name: schoolPage.name });
+                        setRows([]);
+                        setIssues([]);
+                        setBackupPreview(null);
+                        setSchoolPage(null);
+                        setNotice('已帶入 ' + table.rowCount + ' 筆文字。請檢查下方內容，再點選整理成可編輯資料。');
+                      }}
+                    />
+                  ))}
+                  <Button text="取消選擇表格" onPress={() => setSchoolPage(null)} disabled={busy || saving} />
+                </View>
+              ) : null}
               {busy ? <ActivityIndicator accessibilityLabel="正在讀取資料" /> : null}
               <TextInput
                 accessibilityLabel="貼上或修正原始文字"
