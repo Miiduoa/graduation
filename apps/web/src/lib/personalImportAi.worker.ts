@@ -207,7 +207,7 @@ async function recognize(request: PersonalImportAiWorkerRequest): Promise<string
   let image: RawImage | undefined;
   try {
     if (request.image) image = await decodeImage(request.image, RawImageClass);
-    progress(request.id, '正在載入辨識模型；首次使用需要下載，之後會使用裝置快取');
+    progress(request.id, '正在檢查資料範圍；這一步只需要前處理資源，尚未載入完整模型');
     let lastProgressAt = 0;
     let downloaded = 0;
     const fileProgress = new Map<string, number>();
@@ -233,16 +233,6 @@ async function recognize(request: PersonalImportAiWorkerRequest): Promise<string
       revision: IMPORT_AI_MODEL_REVISION,
       progress_callback: onProgress,
     });
-    model = await Qwen3VLForConditionalGeneration.from_pretrained(IMPORT_AI_MODEL_ID, {
-      revision: IMPORT_AI_MODEL_REVISION,
-      device: 'webgpu',
-      dtype: {
-        embed_tokens: 'q4f16',
-        vision_encoder: 'fp16',
-        decoder_model_merged: 'q4f16',
-      },
-      progress_callback: onProgress,
-    });
     const content = image
       ? [{ type: 'image' }, { type: 'text', text: request.prompt }]
       : [{ type: 'text', text: request.prompt }];
@@ -255,10 +245,27 @@ async function recognize(request: PersonalImportAiWorkerRequest): Promise<string
     if (
       !(inputIds instanceof Tensor) ||
       inputIds.dims.length !== 2 ||
-      inputIds.dims[1] > IMPORT_AI_MAX_INPUT_TOKENS
+      inputIds.dims[0] !== 1 ||
+      !Number.isSafeInteger(inputIds.dims[1]) ||
+      inputIds.dims[1] < 1 ||
+      inputIds.dims[1] > IMPORT_AI_MAX_INPUT_TOKENS ||
+      inputIds.data.length !== inputIds.dims[1]
     ) {
       throw new ImportRecognitionError('這次的資料超出單次辨識範圍，請分成較小的圖片或文字段落。');
     }
+    // Tokenization includes the image tokens. Reject an oversized or malformed
+    // request before allocating GPU sessions or downloading the model weights.
+    progress(request.id, '資料範圍檢查完成，正在載入辨識模型；已下載的檔案會使用裝置快取');
+    model = await Qwen3VLForConditionalGeneration.from_pretrained(IMPORT_AI_MODEL_ID, {
+      revision: IMPORT_AI_MODEL_REVISION,
+      device: 'webgpu',
+      dtype: {
+        embed_tokens: 'q4f16',
+        vision_encoder: 'fp16',
+        decoder_model_merged: 'q4f16',
+      },
+      progress_callback: onProgress,
+    });
     progress(
       request.id,
       image ? 'AI 正在對照圖片中的欄位、日期與內容' : 'AI 正在整理欄位、日期與內容',
@@ -269,8 +276,22 @@ async function recognize(request: PersonalImportAiWorkerRequest): Promise<string
       do_sample: false,
       return_dict_in_generate: false,
     });
-    if (!(output instanceof Tensor))
-      throw new ImportRecognitionError('AI 沒有傳回可讀取的辨識結果，請重試。');
+    if (
+      !(output instanceof Tensor) ||
+      output.dims.length !== 2 ||
+      output.dims[0] !== 1 ||
+      !Number.isSafeInteger(output.dims[1]) ||
+      output.dims[1] <= inputIds.dims[1] ||
+      output.dims[1] > inputIds.dims[1] + IMPORT_AI_MAX_OUTPUT_TOKENS ||
+      output.data.length !== output.dims[1]
+    )
+      throw new ImportRecognitionError('AI 沒有傳回完整且可讀取的辨識結果，草稿仍保留，請重試。');
+    // Decoder-only generation must return this request's input prefix. A shape
+    // mismatch or another sequence must never be decoded into a plausible draft.
+    for (let index = 0; index < inputIds.dims[1]; index++) {
+      if (output.data[index] !== inputIds.data[index])
+        throw new ImportRecognitionError('AI 回傳結果與這次來源不一致，草稿仍保留，請重試。');
+    }
     const generated = output.slice(null, [inputIds.dims[1], output.dims[1]]);
     const eosConfig = model.generation_config?.eos_token_id ?? [151645, 151643];
     const eos = Array.isArray(eosConfig) ? eosConfig : [eosConfig];
