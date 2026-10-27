@@ -7,11 +7,11 @@ let captured: Blob | undefined;
 let downloadedName = '';
 const table = (name = '資料庫') =>
   `<table><caption>學期成績</caption><tr><th>課程名稱</th><th>學分</th><th>成績</th></tr><tr><td>${name}</td><td>3</td><td>85</td></tr></table>`;
-function runCapture() {
-  const url = buildSchoolPageCaptureBookmarklet();
-  expect(url.startsWith('javascript:')).toBe(true);
-  // Execute the actual copied bookmark, so bundler-scope dependencies cannot hide.
-  window.eval(decodeURIComponent(url.slice('javascript:'.length)));
+function runCapture(value = buildSchoolPageCaptureBookmarklet()) {
+  const url = new URL(value);
+  if (url.protocol !== 'javascript:') throw new Error('擷取書籤必須使用 javascript: 協定。');
+  // 執行實際複製的書籤，確保它不依賴打包器作用域內的函式。
+  window.eval(decodeURIComponent(url.pathname));
   return document.getElementById('campus-one-school-table-capture')!.shadowRoot!;
 }
 function press(root: ShadowRoot, text: string) {
@@ -64,6 +64,15 @@ afterEach(() => {
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
 });
+
+it.each(['https://school.example/records', 'data:text/javascript,void(0)', 'javascriptx:void(0)'])(
+  'rejects a non-bookmark protocol before executing the capture: %s',
+  (url) => {
+    expect(() => runCapture(url)).toThrow('擷取書籤必須使用 javascript: 協定。');
+    expect(document.getElementById('campus-one-school-table-capture')).toBeNull();
+    expect(captured).toBeUndefined();
+  },
+);
 
 it('requires a download click, exports only the selected table, and round-trips through the existing school importer', async () => {
   document.body.innerHTML = `<p>不應擷取的其他私人資料</p>${table('資料庫')}${table('統計學')}`;
