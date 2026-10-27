@@ -1,5 +1,5 @@
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { beforeEach, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import LoginPage from './page';
 import {
   SCHOOL_LOGIN_GENERIC_ERROR,
@@ -85,6 +85,10 @@ beforeEach(() => {
   state.selectedSchoolId = null;
   state.schoolDirectoryLoading = false;
   signIn.mockResolvedValue({ uid: 'one' });
+  vi.stubGlobal('location', { ...window.location, replace });
+});
+afterEach(() => {
+  vi.unstubAllGlobals();
 });
 it('keeps a school return destination during an availability failure instead of offering the wrong account', () => {
   state.user = null;
@@ -102,6 +106,56 @@ it('returns an already signed-in school user to the requested page only when stu
   state.studentId = true;
   render(<LoginPage />);
   await waitFor(() => expect(replace).toHaveBeenCalledWith('/grades'));
+});
+it.each(['', 'schoolId=pu'])(
+  'returns home after school sign-in when the login URL has no returnUrl (%s)',
+  async (search) => {
+    state.user = null;
+    state.studentId = true;
+    state.params = new URLSearchParams(search);
+    state.selectedSchoolId = search.includes('pu') ? 'pu' : null;
+    render(<LoginPage />);
+    fillSchoolLogin();
+    fireEvent.submit(screen.getByLabelText('學號').closest('form')!);
+    await waitFor(() => expect(replace).toHaveBeenCalledWith('/'));
+    expect(replace).toHaveBeenCalledOnce();
+  },
+);
+it('still returns home if campus selection rehydrates while school sign-in is finishing', async () => {
+  state.user = null;
+  state.studentId = true;
+  state.params = new URLSearchParams();
+  state.selectedSchoolId = 'pu';
+  let finish!: (value: unknown) => void;
+  signIn.mockImplementationOnce(
+    () =>
+      new Promise((resolve) => {
+        finish = resolve;
+      }),
+  );
+  const view = render(<LoginPage />);
+  fillSchoolLogin();
+  fireEvent.submit(screen.getByLabelText('學號').closest('form')!);
+  expect(signIn).toHaveBeenCalledOnce();
+  state.schoolDirectoryLoading = true;
+  state.selectedSchoolId = null;
+  view.rerender(<LoginPage />);
+  state.schoolDirectoryLoading = false;
+  state.selectedSchoolId = 'pu';
+  view.rerender(<LoginPage />);
+  await act(async () => finish({ uid: 'pu-one' }));
+  expect(replace).toHaveBeenCalledOnce();
+  expect(replace).toHaveBeenCalledWith('/');
+});
+it('returns home instead of honoring an off-site returnUrl after school sign-in', async () => {
+  state.user = null;
+  state.studentId = true;
+  state.params = new URLSearchParams({ returnUrl: 'https://evil.test' });
+  render(<LoginPage />);
+  fillSchoolLogin();
+  fireEvent.submit(screen.getByLabelText('學號').closest('form')!);
+  await waitFor(() => expect(replace).toHaveBeenCalledWith('/'));
+  expect(replace.mock.calls.some((call) => String(call[0]).includes('evil.test'))).toBe(false);
 });
 it('does not show the student-id form when the selected school is ntu', () => {
   state.user = null;

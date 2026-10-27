@@ -40,8 +40,7 @@ export function getCreditAuditStorageKey(userId: string | null, schoolId: string
 }
 
 export async function loadCreditAuditSavedCourses(storageKey: string): Promise<SavedCourse[]> {
-  // Only the account+campus key is eligible. An unscoped legacy fallback could
-  // display one student's grades under another account on a shared device.
+  // 只讀這個帳號加校區的鍵。若退回沒有範圍的舊資料，共用裝置上可能把甲生的成績顯示在乙生帳號下。
   const raw = await AsyncStorage.getItem(storageKey);
   if (raw === null) return [];
 
@@ -118,8 +117,7 @@ export async function listStoredEnrollments(
   }
 
   const legacySnapshot = await getDocs(collectionFromSegments(db, ['users', uid, 'enrollments']));
-  // Older global enrollments may include rows from another campus. Only include
-  // rows explicitly carrying this campus ID; legacy rows without one remain hidden.
+  // 舊的全域修課紀錄可能含其他校區的列。只收明確帶有這個校區 ID 的列；沒有校區 ID 的舊列維持隱藏。
   return legacySnapshot.docs.flatMap((docSnap) => {
     const data = docSnap.data() as Omit<StoredEnrollment, 'id'> & { schoolId?: string };
     return data.schoolId === schoolId ? [{ ...data, id: docSnap.id }] : [];
