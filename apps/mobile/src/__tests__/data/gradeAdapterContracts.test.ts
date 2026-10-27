@@ -22,6 +22,7 @@ import {
 let mockGradeRequester: { uid: string; getIdToken?: () => Promise<string> } | null = {
   uid: 'user-b',
 };
+const originalFetch = globalThis.fetch;
 
 jest.mock('../../firebase', () => ({
   ...jest.requireActual('../../firebase'),
@@ -61,6 +62,7 @@ const ownerlessACache = {
 };
 
 beforeEach(() => {
+  globalThis.fetch = originalFetch;
   mockGradeRequester = { uid: 'user-b' };
   mockGetCachedGrades.mockReset();
   mockGetAnyCachedGrades.mockReset();
@@ -68,6 +70,9 @@ beforeEach(() => {
   mockSeedCachedGrades.mockReset().mockResolvedValue(undefined);
   mockGetCachedGrades.mockResolvedValue(ownerlessACache);
   mockGetAnyCachedGrades.mockResolvedValue(ownerlessACache);
+});
+afterAll(() => {
+  globalThis.fetch = originalFetch;
 });
 
 describe('PU / NCHU grade adapter contracts', () => {
@@ -341,7 +346,24 @@ function backendAdapter(value: unknown = freshBackendGrades) {
   const adapter = new PUAdapter();
   adapter.setBackendSession('backend-session-b', 'school-student-b', 'B');
   const fetchData = jest.fn().mockResolvedValue(value);
-  (adapter as unknown as { fetchData: typeof fetchData }).fetchData = fetchData;
+  if (mockGradeRequester) mockGradeRequester.getIdToken = async () => 'owner-token';
+  globalThis.fetch = jest.fn(async () => {
+    const result = await fetchData();
+    return {
+      ok: true,
+      status: 200,
+      json: async () => ({
+        result: {
+          success: true,
+          ownerUid: 'user-b',
+          schoolId: 'pu',
+          source: 'pu-campus',
+          dataType: 'grades',
+          result,
+        },
+      }),
+    } as Response;
+  });
   return { adapter, fetchData };
 }
 
@@ -429,7 +451,7 @@ describe('PUAdapter.listGrades authenticated ownership boundary', () => {
 
   test('backend failure cannot fall back to the previous account cache', async () => {
     const { adapter } = backendAdapter(null);
-    await expect(adapter.listGrades('user-b')).rejects.toThrow('無法讀取校務成績');
+    await expect(adapter.listGrades('user-b')).rejects.toThrow('無法讀取成績');
     expect(mockRefreshGrades).not.toHaveBeenCalled();
     expect(mockGetAnyCachedGrades).not.toHaveBeenCalled();
   });
@@ -463,6 +485,6 @@ describe('PUAdapter.listGrades authenticated ownership boundary', () => {
     const empty = backendAdapter({ success: true, grades: [] });
     await expect(empty.adapter.listGrades('user-b')).resolves.toEqual([]);
     const malformed = backendAdapter({ success: true });
-    await expect(malformed.adapter.listGrades('user-b')).rejects.toThrow('無法讀取校務成績');
+    await expect(malformed.adapter.listGrades('user-b')).rejects.toThrow('無法讀取成績');
   });
 });

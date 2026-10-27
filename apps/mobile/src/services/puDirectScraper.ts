@@ -102,6 +102,8 @@ export type PUSession = {
   studentName: string | null;
   /** 後端統一登入模式下，E 校園 cookie 保存在 Cloud Functions。 */
   backendSessionId?: string | null;
+  /** 伺服器登入並完成 Firebase 身分驗證的使用者；不是原生 Cookie 的持有人證明。 */
+  backendOwnerUid?: string;
 };
 
 export type PUStudentInfo = {
