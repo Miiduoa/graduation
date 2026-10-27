@@ -234,6 +234,10 @@ export async function scheduleCampusAssignmentReminder(
         },
       });
       if (returnedId !== key.identifier) throw new CampusReminderError('native-failed');
+      const nativeInventory = await scheduledInventory();
+      if (!nativeInventory.some((row) => row.identifier === key.identifier)) {
+        throw new CampusReminderError('native-failed');
+      }
       checkAccount(input.scope, input.isCurrent, epoch);
       validateAssignment(input, Date.now(), epoch);
       await AsyncStorage.setItem(key.storageKey, JSON.stringify({
