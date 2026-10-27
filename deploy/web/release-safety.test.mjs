@@ -33,3 +33,57 @@ test('functions package keeps index.js as the upload entry', () => {
   assert.equal(read('deploy/functions-server/Dockerfile').includes('CMD ["node", "server.js"]'), true);
   assert.equal(read('deploy/functions-server/fly.toml').includes('ONLINE_ORDERING_ENABLED is intentionally unset'), true);
 });
+
+// Web 的校務讀取共用這六份純來源檔，不應把整個 Functions 部署內容帶進映像。
+const schoolReaderSources = [
+  'backend/functions/puScraper.js',
+  'backend/functions/tronClassScraper.js',
+  'backend/functions/lib/puGradeDocument.js',
+  'backend/functions/lib/puCreditSummary.js',
+  'backend/functions/lib/puCourseTime.js',
+  'backend/functions/lib/taipeiDay.js',
+];
+const schoolReaderDirectories = ['backend/', 'backend/functions/', 'backend/functions/lib/'];
+
+for (const recipe of ['Dockerfile', 'Dockerfile.nuni']) {
+  test(`school-reader packaging: ${recipe} supplies only the required backend sources before building`, () => {
+    const source = read(`deploy/web/${recipe}`);
+    const buildStart = source.indexOf('FROM base AS build');
+    const buildEnd = source.indexOf('FROM base AS runtime');
+    assert.ok(buildStart >= 0 && buildEnd > buildStart, 'build and runtime must remain separate');
+    const build = source.slice(buildStart, buildEnd);
+    const compileAt = build.indexOf('RUN pnpm --filter web build');
+    assert.ok(compileAt >= 0, 'the production build must remain enabled');
+    const copied = [];
+    for (const match of source.matchAll(/^COPY\s+(.+)$/gm)) {
+      const parts = match[1].trim().split(/\s+/);
+      const sources = parts.slice(0, -1).filter((part) => !part.startsWith('--'));
+      const backend = sources.filter((part) => part.startsWith('backend/'));
+      if (!backend.length) continue;
+      assert.ok(match.index > buildStart && match.index < buildStart + compileAt,
+        'school sources belong before compilation, not in the runtime stage');
+      for (const path of backend) {
+        assert.ok(schoolReaderSources.includes(path), `unexpected backend copy: ${path}`);
+        assert.equal(parts.at(-1), `./${dirname(path)}/`, `source layout changed: ${path}`);
+        copied.push(path);
+      }
+    }
+    assert.deepEqual(copied.sort(), [...schoolReaderSources].sort(), 'missing or duplicate school source');
+    assert.doesNotMatch(source, /^COPY\s+(?:\.\s|backend\/?\s|backend\/functions\/?\s)/m);
+    assert.match(source, /^USER node$/m, 'runtime must remain unprivileged');
+  });
+
+  test(`school-reader packaging: ${recipe} context retains its exact allowlist and credential exclusions`, () => {
+    const lines = read(`deploy/web/${recipe}.dockerignore`).split(/\r?\n/)
+      .map((line) => line.trim()).filter((line) => line && !line.startsWith('#'));
+    assert.equal(lines[0], '**', 'context must start denied');
+    const backend = lines.filter((line) => line.startsWith('!backend'));
+    assert.deepEqual(backend.sort(), [...schoolReaderDirectories, ...schoolReaderSources]
+      .map((path) => `!${path}`).sort(), 'do not broaden the backend context');
+    const lastInclude = Math.max(...lines.map((line, index) => line.startsWith('!') ? index : -1));
+    for (const pattern of ['**/node_modules', '**/.next', '**/.env', '**/.env.*',
+      '**/coverage', '**/*.tsbuildinfo', '**/*serviceAccount*.json', '**/*.pem', '**/*.key']) {
+      assert.ok(lines.lastIndexOf(pattern) > lastInclude, `credential/build exclusion must win: ${pattern}`);
+    }
+  });
+}
