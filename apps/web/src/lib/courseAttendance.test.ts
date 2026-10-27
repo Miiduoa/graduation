@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
-import { getDoc, getDocFromServer, getDocs } from 'firebase/firestore';
+import { getDocFromServer, getDocsFromServer } from 'firebase/firestore';
 import {
   attendanceCsv,
   attendanceError,
@@ -7,6 +7,7 @@ import {
   joinCourseAttendance,
   loadCourseAttendance,
   loadAttendanceCode,
+  loadAttendanceRecords,
   startCourseAttendance,
   studentAttendanceHeading,
   studentCheckInSession,
@@ -35,9 +36,8 @@ vi.mock('firebase/firestore', () => ({
   limit: (value: number) => value,
   orderBy: (...parts: unknown[]) => parts,
   where: (...parts: unknown[]) => parts,
-  getDoc: vi.fn(),
   getDocFromServer: vi.fn(),
-  getDocs: vi.fn(),
+  getDocsFromServer: vi.fn(),
 }));
 const document = (data: Record<string, unknown> | null) => ({
   exists: () => !!data,
@@ -51,26 +51,34 @@ beforeEach(() => {
 });
 afterEach(() => vi.unstubAllGlobals());
 it('does not read session or class data for a revoked member', async () => {
-  vi.mocked(getDoc).mockResolvedValue(document({ status: 'removed', role: 'instructor' }) as never);
+  vi.mocked(getDocFromServer).mockResolvedValue(document({ status: 'removed', role: 'instructor' }) as never);
   await expect(loadCourseAttendance('class', 'alice')).rejects.toThrow();
-  expect(getDocs).not.toHaveBeenCalled();
+  expect(getDocsFromServer).not.toHaveBeenCalled();
 });
 it('uses private per-user receipts and excludes old public session documents', async () => {
-  vi.mocked(getDoc)
+  vi.mocked(getDocFromServer)
     .mockResolvedValueOnce(document({ status: 'active', role: 'member' }) as never)
     .mockResolvedValueOnce(document({ name: 'Class' }) as never)
-    .mockResolvedValueOnce(document({ checkedInAt: '2026-10-07T01:00:00Z' }) as never);
-  vi.mocked(getDocs).mockResolvedValue({
+    .mockResolvedValueOnce(
+      document({
+        uid: 'alice',
+        groupId: 'class',
+        sessionId: 's1',
+        status: 'present',
+        checkedInAt: '2026-10-07T01:00:00Z',
+      }) as never,
+    );
+  vi.mocked(getDocsFromServer).mockResolvedValue({
     docs: [{ id: 's1', data: () => ({ active: true, schemaVersion: 2 }) }],
   } as never);
   const result = await loadCourseAttendance('class', 'alice');
-  expect(getDocs).toHaveBeenCalledWith([
+  expect(getDocsFromServer).toHaveBeenCalledWith([
     'groups/class/attendanceSessions',
     ['schemaVersion', '==', 2],
     ['startedAt', 'desc'],
     50,
   ]);
-  expect(getDoc).toHaveBeenLastCalledWith(
+  expect(getDocFromServer).toHaveBeenLastCalledWith(
     'groups/class/attendanceSessions/s1/attendanceRecords/alice',
   );
   expect(result.canStart).toBe(false);
@@ -171,4 +179,50 @@ it('fetches the teacher QR token from the server rather than offline cache', asy
   expect(getDocFromServer).toHaveBeenCalledWith('groups/class/liveSessionSecrets/s1');
   vi.mocked(getDocFromServer).mockRejectedValueOnce(new Error('offline'));
   await expect(loadAttendanceCode('class', 's1')).rejects.toThrow('offline');
+});
+
+it('does not report a confirmed check-in from an absent or mismatched receipt', async () => {
+  vi.mocked(getDocFromServer)
+    .mockResolvedValueOnce(document({ status: 'active', role: 'member' }) as never)
+    .mockResolvedValueOnce(document({ name: 'Class' }) as never)
+    .mockResolvedValueOnce(
+      document({
+        uid: 'alice',
+        groupId: 'another-class',
+        sessionId: 's1',
+        status: 'present',
+        checkedInAt: '2026-10-07T01:00:00Z',
+      }) as never,
+    );
+  vi.mocked(getDocsFromServer).mockResolvedValue({
+    docs: [{ id: 's1', data: () => ({ active: true, schemaVersion: 2 }) }],
+  } as never);
+  const response = await loadCourseAttendance('class', 'alice');
+  expect(response.sessions[0].ownRecord).toBeNull();
+});
+it('teacher roster includes only server-confirmed present or late records', async () => {
+  vi.mocked(getDocsFromServer).mockResolvedValue({
+    docs: [
+      { id: 'alice', data: () => ({
+        uid: 'alice', groupId: 'class', sessionId: 's1',
+        status: 'present', checkedInAt: '2026-10-07T01:00:00Z',
+      }) },
+      { id: 'bob', data: () => ({
+        uid: 'bob', groupId: 'class', sessionId: 's1',
+        status: 'absent', checkedInAt: null,
+      }) },
+      { id: 'mallory', data: () => ({
+        uid: 'mallory', groupId: 'other-class', sessionId: 's1',
+        status: 'present', checkedInAt: '2026-10-07T01:00:00Z',
+      }) },
+    ],
+  } as never);
+  expect(await loadAttendanceRecords('class', 's1')).toMatchObject([
+    { uid: 'alice', checkedInAt: '2026-10-07T01:00:00.000Z' },
+  ]);
+});
+it('rejects reading stale cached permission and never treats offline cache as authority', async () => {
+  vi.mocked(getDocFromServer).mockRejectedValueOnce(new Error('offline'));
+  await expect(loadCourseAttendance('class', 'alice')).rejects.toThrow('offline');
+  expect(getDocsFromServer).not.toHaveBeenCalled();
 });
