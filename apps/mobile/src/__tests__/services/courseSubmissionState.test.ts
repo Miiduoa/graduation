@@ -115,3 +115,35 @@ test('a passed due date cannot be described as actionable unless the instructor 
   expect(canSubmitCourseWork({ ...pending, dueAt: 'invalid', allowLateSubmission: true }, now)).toBe(false);
   expect(canSubmitCourseWork({ ...pending, dueAt: null }, now)).toBe(true);
 });
+
+test('closed overdue work stays blocked even when late submission is marked allowed', () => {
+  const now = new Date('2026-10-26T12:00:00+08:00');
+  const closedLate = {
+    closed: true,
+    dueAt: '2026-10-20T23:59:00+08:00',
+    allowLateSubmission: true,
+    submission: { kind: 'not_submitted' as const },
+  };
+  expect(canSubmitCourseWork(closedLate, now)).toBe(false);
+  expect(
+    canSubmitCourseWork({ ...closedLate, closed: false }, now),
+  ).toBe(true);
+});
+
+test('Taipei-naive due strings share the same instant as an explicit +08:00 deadline', () => {
+  const now = new Date('2026-10-26T12:00:00+08:00');
+  const naive = {
+    closed: false,
+    dueAt: '2026-10-26T15:59:00',
+    submission: { kind: 'not_submitted' as const },
+  };
+  const explicit = { ...naive, dueAt: '2026-10-26T15:59:00+08:00' };
+  expect(canSubmitCourseWork(naive, now)).toBe(canSubmitCourseWork(explicit, now));
+  expect(canSubmitCourseWork(naive, new Date('2026-10-26T16:00:00+08:00'))).toBe(false);
+});
+
+
+test.each(['', '   '])('blank deadline %j requires confirmation', (dueAt) => {
+  expect(canSubmitCourseWork({ closed: false, dueAt, allowLateSubmission: true,
+    submission: { kind: 'not_submitted' } })).toBe(false);
+});
