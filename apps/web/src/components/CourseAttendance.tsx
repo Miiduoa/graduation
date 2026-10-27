@@ -8,6 +8,7 @@ import { SchoolAccountRequired } from './SchoolAccountRequired';
 import { SiteShell } from './SiteShell';
 import { Button } from './ui/Button';
 import { Input } from './ui/Input';
+import { AttendanceQrScanner } from './AttendanceQrScanner';
 import { AttendanceCorrectionPanel } from './AttendanceCorrectionPanel';
 import { resolveSchoolPageContext, type SchoolSearchParams } from '@/lib/pageContext';
 import {
@@ -216,10 +217,16 @@ function Session({
               });
             }}
           >
+            <AttendanceQrScanner
+              groupId={courseId}
+              sessionId={session.id}
+              disabled={busy || expired}
+              onToken={setToken}
+            />
             <Input
               id={`code-${session.id}`}
               label="教師提供的簽到碼"
-              hint="也可以在手機版課堂頁掃描教師的 QR Code。"
+              hint="可掃描 QR Code 自動帶入，也可直接輸入老師提供的簽到碼。"
               value={token}
               onChange={(event) => setToken(event.target.value)}
               required
