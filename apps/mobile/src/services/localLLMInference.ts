@@ -327,6 +327,11 @@ class LocalLLMEngine {
     return { ...this.state };
   }
 
+  /** Identity of the context actually in memory, independent of saved preference. */
+  getLoadedModelId(): string | null {
+    return this.context && this.config ? this.config.modelId : null;
+  }
+
   getRuntimeAvailability(): LLMRuntimeAvailability {
     return getRuntimeAvailability();
   }

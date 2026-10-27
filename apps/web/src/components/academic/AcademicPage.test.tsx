@@ -470,15 +470,15 @@ it('ignores an in-flight Providence response after leaving and returning to PU',
   expect(screen.getByText('返回後的新資料')).toBeTruthy();
 });
 
-it('keeps school context on academic navigation for NTHU', async () => {
+it('keeps school context on grade subsection navigation for NTHU', async () => {
   setBrowse('nthu');
   render(<GradesPage />);
   await screen.findByRole('heading', { name: '這所學校尚未提供官方成績來源' });
-  expect(screen.getByRole('link', { name: '我的課表' }).getAttribute('href')).toBe(
-    '/timetable?schoolId=nthu&campus=nthu',
+  expect(screen.getByRole('link', { name: '學期成績' }).getAttribute('href')).toBe(
+    '/grades?schoolId=nthu&campus=nthu&school=NTHU',
   );
-  expect(screen.getByRole('link', { name: '學分規劃' }).getAttribute('href')).toBe(
-    '/credit-planner?schoolId=nthu&campus=nthu',
+  expect(screen.getByRole('link', { name: '課堂回饋' }).getAttribute('href')).toBe(
+    '/grades?tab=feedback&schoolId=nthu&campus=nthu&school=NTHU',
   );
 });
 

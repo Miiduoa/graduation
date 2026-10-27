@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
+  Image,
   Modal,
   Pressable,
   ScrollView,
@@ -76,6 +77,14 @@ import {
   type PersonalImportLedger,
 } from '../services/personalImports';
 import { sharePersonalImportBackup } from '../services/personalImportBackupSharing';
+import { personalImportDocumentAiSource } from '@campus/shared/src/imports/aiRecognition';
+import {
+  getMobileImportAiAvailability,
+  MOBILE_IMPORT_AI_MAX_CHARACTERS,
+  runMobilePersonalImportAi,
+  subscribeMobileImportAi,
+} from '../services/imports/personalImportAi';
+import AIModelManagerScreen from './AIModelManagerScreen';
 
 const DOCUMENT_PREVIEW_ROWS = 6;
 
@@ -299,6 +308,19 @@ function ImportWorkspace({
   const [loadError, setLoadError] = useState('');
   const [notice, setNotice] = useState('');
   const [busy, setBusy] = useState(false);
+  const [aiState, setAiState] = useState(getMobileImportAiAvailability);
+  const [aiRunning, setAiRunning] = useState(false);
+  const [aiReviewed, setAiReviewed] = useState(false);
+  const [modelManagerOpen, setModelManagerOpen] = useState(false);
+  const [reviewFilter, setReviewFilter] = useState<'all' | 'attention'>('all');
+  const [attentionSnapshot, setAttentionSnapshot] = useState<Set<string>>(() => new Set());
+  const [sourceImage, setSourceImage] = useState<{
+    uri: string;
+    width: number;
+    height: number;
+  } | null>(null);
+  const [imageViewerOpen, setImageViewerOpen] = useState(false);
+  const [imageViewerWidth, setImageViewerWidth] = useState(1);
   const [saving, setSaving] = useState(false);
   const [catalog, setCatalog] = useState<{ context: string; rows: NuniWorkspace[] } | null>(null);
   const workspaces = catalog?.context === platform.session?.context ? catalog?.rows || [] : [];
@@ -317,7 +339,9 @@ function ImportWorkspace({
   const [savedFeedback, setSavedFeedback] = useState('');
   const [exporting, setExporting] = useState(false);
   const [documentPrep, setDocumentPrep] = useState<DocumentPrep | null>(null);
-  const [schoolPage, setSchoolPage] = useState<{ name: string; tables: SchoolPageTable[] } | null>(null);
+  const [schoolPage, setSchoolPage] = useState<{ name: string; tables: SchoolPageTable[] } | null>(
+    null,
+  );
   const alive = useRef(true);
   const focused = useRef(true);
   const generation = useRef(0);
@@ -331,9 +355,13 @@ function ImportWorkspace({
   const documentSource = useRef<DocumentSource | null>(null);
   const profile = periodProfileForSchool(scope.schoolId);
   const active = () => alive.current && focused.current && availableRef.current;
-  const current = (run: number) => alive.current && focused.current && generation.current === run;
+  const current = (run: number) => active() && generation.current === run;
   const clearDocumentSource = () => {
     documentSource.current = null;
+  };
+  const clearSourceImage = () => {
+    setSourceImage(null);
+    setImageViewerOpen(false);
   };
   const cancel = () => {
     generation.current += 1;
@@ -341,7 +369,27 @@ function ImportWorkspace({
     ocr.current?.cancel();
     documents.current?.cancel();
     setBusy(false);
+    setAiRunning(false);
   };
+  useEffect(() => {
+    const update = () => setAiState(getMobileImportAiAvailability());
+    const unsubscribe = subscribeMobileImportAi(update);
+    update();
+    return unsubscribe;
+  }, []);
+  useEffect(() => {
+    if (!available) {
+      generation.current += 1;
+      abort.current?.abort();
+      ocr.current?.cancel();
+      documents.current?.cancel();
+      setBusy(false);
+      setAiRunning(false);
+      setModelManagerOpen(false);
+      setSourceImage(null);
+      setImageViewerOpen(false);
+    }
+  }, [available]);
   useEffect(() => {
     alive.current = true;
     return () => {
@@ -376,6 +424,7 @@ function ImportWorkspace({
         ocr.current?.cancel();
         documents.current?.cancel();
         setBusy(false);
+        setAiRunning(false);
       };
     }, [load]),
   );
@@ -430,9 +479,125 @@ function ImportWorkspace({
   const invalidCount = chosen.filter((row) =>
     rowIssues.get(row.id)?.some((issue) => issue.severity === 'error'),
   ).length;
+  const needsAttention = (row: PersonalImportRow) =>
+    !!rowIssues.get(row.id)?.some((issue) => issue.severity === 'error') ||
+    issues.some((issue) => issue.rowId === row.id && issue.severity === 'error');
+  const attentionCount = rows.filter(needsAttention).length;
+  const reviewRows =
+    reviewFilter === 'attention' ? rows.filter((row) => attentionSnapshot.has(row.id)) : rows;
+  const rowIdsKey = rows.map((row) => row.id).join('|');
+  useEffect(() => {
+    setReviewFilter('all');
+    setAttentionSnapshot(new Set());
+  }, [rowIdsKey]);
+  const isAiPreview = issues.some((issue) => issue.code === 'ai-review-required');
+  const generalIssues = issues.filter(
+    (issue) => !['ai-review-required', 'ai-uncertain-field'].includes(issue.code),
+  );
+  const updateDraft = (before: PersonalImportRow, next: PersonalImportRow) => {
+    setAiReviewed(false);
+    setRows((items) => items.map((item) => (item.id === before.id ? next : item)));
+    const validation = validatePersonalImportRow(next, { periodProfile: profile });
+    setIssues((items) =>
+      items.filter(
+        (issue) =>
+          !(
+            ['unrecognized-field', 'ai-uncertain-field'].includes(issue.code) &&
+            issue.rowId === next.id &&
+            issue.field &&
+            before[issue.field] !== next[issue.field] &&
+            !validation.some((item) => item.field === issue.field && item.severity === 'error')
+          ),
+      ),
+    );
+  };
+
+  const organizeWithAi = async (input?: {
+    text: string;
+    source: { type: 'paste' | 'file' | 'screenshot'; name?: string };
+    fromDocument?: boolean;
+  }) => {
+    const inputText = input?.text ?? text;
+    const inputSource = input?.source ?? source;
+    if (
+      !active() ||
+      busy ||
+      savingRef.current ||
+      (!input?.fromDocument && rows.length) ||
+      !inputText.trim()
+    )
+      return;
+    cancel();
+    const run = generation.current;
+    const controller = new AbortController();
+    abort.current = controller;
+    setBusy(true);
+    setAiRunning(true);
+    setAiReviewed(false);
+    setNotice('本機 AI 正在整理文字、對照來源，完成後仍需由你核對。');
+    try {
+      const parsed = await runMobilePersonalImportAi(
+        inputText,
+        { kind, schoolId, academicYear, semester, source: inputSource, periodProfile: profile },
+        controller.signal,
+      );
+      if (!current(run) || controller.signal.aborted) return;
+      if (!parsed.rows.length) throw new Error('沒有可核對的資料。');
+      const validationKeys = new Set(
+        parsed.rows
+          .flatMap((row) => validatePersonalImportRow(row, { periodProfile: profile }))
+          .map((issue) => JSON.stringify(issue)),
+      );
+      setRows(parsed.rows);
+      setSelected(new Set(parsed.rows.map((row) => row.id)));
+      setIssues(parsed.issues.filter((issue) => !validationKeys.has(JSON.stringify(issue))));
+      setVisibleRowCount(50);
+      setReviewFilter('all');
+      setExpanded(null);
+      setSchoolPage(null);
+      if (input?.fromDocument) {
+        clearDocumentSource();
+        setDocumentPrep(null);
+        setBackupPreview(null);
+        setText(inputText);
+        setSource(inputSource);
+        clearSourceImage();
+      }
+      setNotice(
+        parsed.rows.length
+          ? `AI 已整理 ${parsed.rows.length} 筆待核對資料。請對照原文，修正缺漏並確認，才會新增。`
+          : 'AI 沒有整理出可核對的資料，原文仍保留。可縮短內容重試，或使用一般整理。',
+      );
+    } catch {
+      if (current(run) && !controller.signal.aborted)
+        setNotice('AI 未能完成這次整理。原文與已儲存資料仍保留，可分批重試或使用一般整理。');
+    } finally {
+      if (current(run)) {
+        setBusy(false);
+        setAiRunning(false);
+        setAiState(getMobileImportAiAvailability());
+      }
+    }
+  };
+  const organizeDocumentWithAi = () => {
+    if (!documentPrep || !active() || busy || savingRef.current || aiState.status !== 'ready')
+      return;
+    try {
+      const input = personalImportDocumentAiSource(
+        documentPrep.document,
+        { selected: Object.keys(documentPrep.selections), headers: { ...documentPrep.selections } },
+        MOBILE_IMPORT_AI_MAX_CHARACTERS,
+      );
+      void organizeWithAi({ ...input, fromDocument: true });
+    } catch (error) {
+      setNotice(personalImportErrorMessage(error, '選取內容還不能交給 AI，請縮小範圍或重新選擇。'));
+    }
+  };
 
   const preview = () => {
     cancel();
+    setAiReviewed(false);
+    setReviewFilter('all');
     try {
       const parsed = parsePersonalImport(text, {
         kind,
@@ -502,6 +667,8 @@ function ImportWorkspace({
       if (!current(run)) return;
       setText(result);
       setSource({ type: 'screenshot', name: asset.fileName || '截圖' });
+      setSourceImage({ uri: asset.uri, width: asset.width, height: asset.height });
+      setImageViewerOpen(false);
       clearDocumentSource();
       setDocumentPrep(null);
       setBackupPreview(null);
@@ -587,6 +754,7 @@ function ImportWorkspace({
       setDocumentPrep(null);
       setText(resultText);
       setSource({ type: 'file', name });
+      clearSourceImage();
       setBackupPreview(null);
       setRows([]);
       setIssues([]);
@@ -722,6 +890,7 @@ function ImportWorkspace({
       setBackupPreview(null);
       setText('');
       setSource({ type: 'file', name: documentPrep.document.name });
+      clearSourceImage();
       setVisibleRowCount(50);
       setRows(parsedRows);
       setSelected(new Set(parsedRows.map((row) => row.id)));
@@ -769,6 +938,7 @@ function ImportWorkspace({
       setDocumentPrep(null);
       setText('');
       setRows(restored);
+      clearSourceImage();
       setSelected(new Set(restored.map((row) => row.id)));
       setIssues([]);
       setVisibleRowCount(50);
@@ -812,7 +982,16 @@ function ImportWorkspace({
       throw new Error('有課班連結無法驗證，請重新選擇或取消連結。');
   };
   const save = async () => {
-    if (savingRef.current || !chosen.length || invalidCount || structuralErrors.length || !ledger)
+    if (
+      savingRef.current ||
+      busy ||
+      !active() ||
+      !chosen.length ||
+      invalidCount ||
+      structuralErrors.length ||
+      !ledger ||
+      (isAiPreview && !aiReviewed)
+    )
       return;
     savingRef.current = true;
     ledgerGeneration.current += 1;
@@ -831,6 +1010,7 @@ function ImportWorkspace({
       setExpanded(null);
       setText('');
       setSource({ type: 'paste' });
+      clearSourceImage();
       setNotice(personalImportSavedNotice(result.added, !!ledger.sync?.enabled));
     } catch (error) {
       if (active()) setNotice(personalImportErrorMessage(error, '儲存失敗，請重試。'));
@@ -986,14 +1166,46 @@ function ImportWorkspace({
           keyboardShouldPersistTaps="handled"
           contentContainerStyle={{ padding: 18, gap: 16, paddingBottom: 120 }}
         >
-          <Text style={textStyle}>
-            個人資料依目前帳號與學校分開，不會改動學校的正式紀錄。未開啟帳號同步時，資料只留在這台裝置。
-            {scope.owner === 'guest:device' ? '目前是訪客資料，登入後不會自動搬移。' : ''}
-          </Text>
-          <Text style={{ color: theme.colors.muted }}>
-            目前學校：{school?.name || scope.schoolId}
-            。教師姓名可先記錄；要連結課班，請從你已加入的課班手動選擇。
-          </Text>
+          <View
+            style={{
+              padding: 18,
+              borderRadius: 18,
+              gap: 10,
+              backgroundColor: theme.colors.surface,
+              borderColor: theme.colors.border,
+              borderWidth: 1,
+            }}
+          >
+            <Text style={{ color: theme.colors.muted, fontSize: 13 }}>
+              {school?.name || scope.schoolId} ·{' '}
+              {scope.owner === 'guest:device' ? '此裝置的訪客資料' : '我的個人資料'}
+            </Text>
+            <Text
+              accessibilityRole="header"
+              style={{ ...textStyle, fontSize: 22, lineHeight: 30, fontWeight: '700' }}
+            >
+              把學校資料整理好
+            </Text>
+            <Text style={{ color: theme.colors.muted, lineHeight: 22 }}>
+              放入表格、截圖或文字，核對後才新增。已存資料不會整份被取代。
+            </Text>
+            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 14, paddingTop: 4 }}>
+              {['1 放入資料', '2 核對內容', '3 確認新增'].map((step, index) => (
+                <Text
+                  key={step}
+                  style={{
+                    fontSize: 13,
+                    fontWeight: '600',
+                    color: (rows.length ? index === 1 : index === 0)
+                      ? theme.colors.accentStrong
+                      : theme.colors.muted,
+                  }}
+                >
+                  {step}
+                </Text>
+              ))}
+            </View>
+          </View>
           <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
             {kinds.map(([value, title]) => (
               <Button
@@ -1004,6 +1216,8 @@ function ImportWorkspace({
                 onPress={() => {
                   cancel();
                   setKind(value);
+                  setAiReviewed(false);
+                  setReviewFilter('all');
                   setSchoolPage(null);
                   clearDocumentSource();
                   setDocumentPrep(null);
@@ -1019,24 +1233,6 @@ function ImportWorkspace({
                 }}
               />
             ))}
-          </View>
-          <PersonalImportSyncPanel
-            scope={scope}
-            active={active}
-            available={available}
-            onSynced={load}
-          />
-          <Text style={{ ...textStyle, fontWeight: '700' }}>備份與換裝置</Text>
-          <Text style={{ color: theme.colors.muted }}>
-            備份包含目前帳號與學校的全部課表、成績、活動與來源文字，檔案沒有加密。請只存到你信任的位置；分享選單開啟不代表已保存。
-          </Text>
-          <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
-            <Button
-              text="備份全部個人資料"
-              onPress={shareBackup}
-              disabled={busy || saving || !ledger?.records.length || !!loadError}
-            />
-            <Button text="從備份檔還原" onPress={readBackup} disabled={busy || saving} />
           </View>
           {backupPreview ? (
             <View style={{ gap: 10 }}>
@@ -1079,7 +1275,8 @@ function ImportWorkspace({
               </Text>
               <Text style={{ color: theme.colors.muted }}>
                 {documentPrep.document.format === 'pdf' ? 'PDF' : 'Excel'}
-                。請自行選取工作表或頁面與標題列；不會自動只取第一頁。檔案只在這台裝置讀取。
+                。請選取工作表或頁面與讀取起始列；一般讀取使用標題列，AI
+                可直接理解原始內容。檔案只在這台裝置讀取。
               </Text>
               {documentPrep.document.warnings.map((warning, index) => (
                 <Text key={`doc-warn-${index}`} style={{ color: theme.colors.muted }}>
@@ -1101,12 +1298,18 @@ function ImportWorkspace({
               ) : null}
               {busy ? (
                 <>
-                  <ActivityIndicator accessibilityLabel="正在讀取文件" />
+                  <ActivityIndicator
+                    accessibilityLabel={aiRunning ? 'AI 正在整理文件' : '正在讀取文件'}
+                  />
                   <Button
-                    text="取消讀取"
+                    text={aiRunning ? '取消 AI 整理' : '取消讀取'}
                     onPress={() => {
                       cancel();
-                      setNotice('已取消重新辨識，原本的文件預覽保留。');
+                      setNotice(
+                        aiRunning
+                          ? '已取消 AI 整理，文件與選取範圍仍保留。'
+                          : '已取消重新辨識，原本的文件預覽保留。',
+                      );
                     }}
                   />
                 </>
@@ -1148,7 +1351,7 @@ function ImportWorkspace({
                     ))}
                     {selectedSection ? (
                       <>
-                        <Text style={textStyle}>標題列（欄位名稱所在列）</Text>
+                        <Text style={textStyle}>標題列／AI 讀取起始列</Text>
                         <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
                           {section.rows.slice(0, DOCUMENT_PREVIEW_ROWS).map((row) => (
                             <Button
@@ -1183,6 +1386,45 @@ function ImportWorkspace({
                 disabled={busy || saving || !Object.keys(documentPrep.selections).length}
                 onPress={applyDocumentSelection}
               />
+              <View
+                style={{
+                  padding: 16,
+                  borderRadius: 14,
+                  backgroundColor: theme.colors.focusSurface,
+                  borderColor: theme.colors.border,
+                  borderWidth: 1,
+                  gap: 10,
+                }}
+              >
+                <Text style={{ ...textStyle, fontWeight: '600' }}>
+                  欄位不規則？交給本機 AI 整理
+                </Text>
+                <Text accessibilityLiveRegion="polite" style={{ color: theme.colors.text }}>
+                  {aiState.title}
+                </Text>
+                <Text style={{ color: theme.colors.muted, lineHeight: 22 }}>
+                  AI 會從選取的起始列理解文字，不必先辨認標準欄位名稱。一次最多 1,000
+                  字；失敗或取消會保留文件與選取範圍。
+                </Text>
+                <Button
+                  text="用 AI 整理選取內容"
+                  kind="primary"
+                  disabled={
+                    busy ||
+                    saving ||
+                    aiState.status !== 'ready' ||
+                    !Object.keys(documentPrep.selections).length
+                  }
+                  onPress={organizeDocumentWithAi}
+                />
+                <Button
+                  text="管理本機模型"
+                  disabled={
+                    busy || saving || aiState.status === 'unavailable' || aiState.status === 'busy'
+                  }
+                  onPress={() => setModelManagerOpen(true)}
+                />
+              </View>
               <Button
                 text="取消，回到先前草稿"
                 disabled={busy || saving}
@@ -1195,9 +1437,11 @@ function ImportWorkspace({
                 label="這批資料的學年度（例如 115）"
                 value={academicYear}
                 onChange={(value) => {
+                  if (busy) cancel();
                   setYear(value);
                   setRows([]);
                   setIssues([]);
+                  setAiReviewed(false);
                 }}
                 disabled={saving}
               />
@@ -1205,19 +1449,64 @@ function ImportWorkspace({
                 label="這批資料的學期（例如 1、2、暑期）"
                 value={semester}
                 onChange={(value) => {
+                  if (busy) cancel();
                   setSemester(value);
                   setRows([]);
                   setIssues([]);
+                  setAiReviewed(false);
                 }}
                 disabled={saving}
               />
-              <Text style={textStyle}>1. 放入資料</Text>
+              <Text
+                accessibilityRole="header"
+                style={{ ...textStyle, fontSize: 19, fontWeight: '700' }}
+              >
+                1. 放入資料
+              </Text>
               <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
-                <Button text="選擇截圖" onPress={pickImage} disabled={busy || saving} />
-                <Button text="選擇檔案" onPress={pickFile} disabled={busy || saving} />
+                <View
+                  style={{
+                    flex: 1,
+                    minWidth: 140,
+                    padding: 14,
+                    borderRadius: 14,
+                    borderColor: theme.colors.border,
+                    borderWidth: 1,
+                    backgroundColor: theme.colors.surface,
+                    gap: 8,
+                  }}
+                >
+                  <Text style={{ color: theme.colors.text, fontWeight: '600' }}>
+                    學校表格／文件
+                  </Text>
+                  <Text style={{ color: theme.colors.muted, lineHeight: 21 }}>
+                    保留原始欄位，適合課表與成績單。
+                  </Text>
+                  <Button text="選擇檔案" onPress={pickFile} disabled={busy || saving} />
+                </View>
+                <View
+                  style={{
+                    flex: 1,
+                    minWidth: 140,
+                    padding: 14,
+                    borderRadius: 14,
+                    borderColor: theme.colors.border,
+                    borderWidth: 1,
+                    backgroundColor: theme.colors.surface,
+                    gap: 8,
+                  }}
+                >
+                  <Text style={{ color: theme.colors.text, fontWeight: '600' }}>手機裡的截圖</Text>
+                  <Text style={{ color: theme.colors.muted, lineHeight: 21 }}>
+                    讀出文字後，再讓本機 AI 協助整理。
+                  </Text>
+                  <Button text="選擇截圖" onPress={pickImage} disabled={busy || saving} />
+                </View>
+              </View>
+              <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
                 {busy ? (
                   <Button
-                    text="取消讀取"
+                    text={aiRunning ? '取消 AI 整理' : '取消讀取'}
                     onPress={() => {
                       cancel();
                       setNotice('已取消，原有資料沒有變更。');
@@ -1226,20 +1515,43 @@ function ImportWorkspace({
                 ) : null}
               </View>
               <Text style={{ color: theme.colors.muted }}>
-                截圖支援 PNG、JPG，最多 8 MB；從學校網站儲存的 HTML 可選取課程或成績表格（500 KB 內）。
-                文字檔支援 TXT、CSV、TSV、ICS；PDF／XLSX 上限 8 MiB。內容在裝置上讀取，不會上傳。
+                截圖支援 PNG、JPG，最多 8 MB；從學校網站儲存的 HTML 可選取課程或成績表格（500 KB
+                內）。 文字檔支援 TXT、CSV、TSV、ICS；PDF／XLSX 上限 8
+                MiB。內容在裝置上讀取，不會上傳。
               </Text>
               {schoolPage ? (
-                <View style={{ gap: 12, padding: 16, backgroundColor: theme.colors.focusSurface, borderRadius: 12, borderWidth: 1, borderColor: theme.colors.border }}>
+                <View
+                  style={{
+                    gap: 12,
+                    padding: 16,
+                    backgroundColor: theme.colors.focusSurface,
+                    borderRadius: 12,
+                    borderWidth: 1,
+                    borderColor: theme.colors.border,
+                  }}
+                >
                   <Text style={{ ...textStyle, fontWeight: '700' }}>選擇校務網頁表格</Text>
-                  <Text style={{ color: theme.colors.muted }}>來源：{schoolPage.name}。只讀取表格文字，未連線學校或使用帳號密碼。請先選正確表格，再核對資料。</Text>
+                  <Text style={{ color: theme.colors.muted }}>
+                    來源：{schoolPage.name}
+                    。只讀取表格文字，未連線學校或使用帳號密碼。請先選正確表格，再核對資料。
+                  </Text>
                   {schoolPage.tables.map((table) => (
                     <Button
                       key={table.id}
-                      text={table.label + (table.suggestedTerm ? ' · ' + table.suggestedTerm.academicYear + ' 學年度第 ' + table.suggestedTerm.semester + ' 學期' : '')}
+                      text={
+                        table.label +
+                        (table.suggestedTerm
+                          ? ' · ' +
+                            table.suggestedTerm.academicYear +
+                            ' 學年度第 ' +
+                            table.suggestedTerm.semester +
+                            ' 學期'
+                          : '')
+                      }
                       disabled={busy || saving}
                       onPress={() => {
                         setText(table.text);
+                        clearSourceImage();
                         if (table.suggestedTerm) {
                           if (!academicYear.trim()) setYear(table.suggestedTerm.academicYear);
                           if (!semester.trim()) setSemester(table.suggestedTerm.semester);
@@ -1249,11 +1561,19 @@ function ImportWorkspace({
                         setIssues([]);
                         setBackupPreview(null);
                         setSchoolPage(null);
-                        setNotice('已帶入 ' + table.rowCount + ' 筆文字。請檢查下方內容，再點選整理成可編輯資料。');
+                        setNotice(
+                          '已帶入 ' +
+                            table.rowCount +
+                            ' 筆文字。請檢查下方內容，再點選整理成可編輯資料。',
+                        );
                       }}
                     />
                   ))}
-                  <Button text="取消選擇表格" onPress={() => setSchoolPage(null)} disabled={busy || saving} />
+                  <Button
+                    text="取消選擇表格"
+                    onPress={() => setSchoolPage(null)}
+                    disabled={busy || saving}
+                  />
                 </View>
               ) : null}
               {busy ? <ActivityIndicator accessibilityLabel="正在讀取資料" /> : null}
@@ -1267,9 +1587,13 @@ function ImportWorkspace({
                 onChangeText={(value) => {
                   if (busy) cancel();
                   setText(value);
-                  if (!value || source.type !== 'screenshot') setSource({ type: 'paste' });
+                  if (!value || source.type !== 'screenshot') {
+                    setSource({ type: 'paste' });
+                    clearSourceImage();
+                  }
                   setRows([]);
                   setIssues([]);
+                  setAiReviewed(false);
                 }}
                 style={[inputStyle, { minHeight: 130, textAlignVertical: 'top' }]}
               />
@@ -1282,9 +1606,73 @@ function ImportWorkspace({
                     ? 'CSV／TSV 欄位：課程名稱,學分,成績,課號,教師'
                     : 'CSV／TSV 欄位：活動名稱,日期,開始時間,結束時間,地點。全天活動加「全天」欄並填「是」，時間留空。'}
               </Text>
+              <View
+                style={{
+                  padding: 16,
+                  borderRadius: 16,
+                  gap: 10,
+                  backgroundColor: theme.colors.focusSurface,
+                  borderColor: theme.colors.border,
+                  borderWidth: 1,
+                }}
+              >
+                <View
+                  style={{
+                    flexDirection: 'row',
+                    justifyContent: 'space-between',
+                    flexWrap: 'wrap',
+                    gap: 8,
+                  }}
+                >
+                  <Text style={{ ...textStyle, fontWeight: '700' }}>用免費 AI 整理文字</Text>
+                  <Text style={{ color: theme.colors.muted, fontSize: 12 }}>在手機執行</Text>
+                </View>
+                <Text
+                  accessibilityLiveRegion="polite"
+                  style={{ color: theme.colors.text, fontWeight: '600' }}
+                >
+                  {aiState.title}
+                </Text>
+                <Text style={{ color: theme.colors.muted, lineHeight: 21 }}>{aiState.detail}</Text>
+                <Text style={{ color: theme.colors.muted, lineHeight: 21 }}>
+                  手機 AI 理解的是讀出的文字；週格位置可能無法從文字還原，格狀課表建議先選學校表格。
+                </Text>
+                <Text
+                  style={{
+                    color:
+                      text.length > MOBILE_IMPORT_AI_MAX_CHARACTERS
+                        ? theme.colors.danger
+                        : theme.colors.muted,
+                    fontSize: 12,
+                  }}
+                >
+                  {text.length.toLocaleString()}／{MOBILE_IMPORT_AI_MAX_CHARACTERS.toLocaleString()}{' '}
+                  字 · 較長內容請分批，不會自動刪去後段。
+                </Text>
+                <Button
+                  text={aiRunning ? 'AI 正在整理…' : '讓本機 AI 整理'}
+                  kind="primary"
+                  disabled={
+                    !text.trim() ||
+                    text.length > MOBILE_IMPORT_AI_MAX_CHARACTERS ||
+                    aiState.status !== 'ready' ||
+                    busy ||
+                    saving ||
+                    rows.length > 0
+                  }
+                  onPress={() => void organizeWithAi()}
+                />
+                <Button
+                  text="管理本機模型"
+                  disabled={
+                    busy || saving || aiState.status === 'unavailable' || aiState.status === 'busy'
+                  }
+                  onPress={() => setModelManagerOpen(true)}
+                />
+              </View>
               <Button
                 text="整理成可編輯資料"
-                kind="primary"
+                kind="outline"
                 disabled={!text.trim() || busy || saving}
                 onPress={preview}
               />
@@ -1292,6 +1680,8 @@ function ImportWorkspace({
                 text="手動新增一筆"
                 disabled={busy || saving}
                 onPress={() => {
+                  setAiReviewed(false);
+                  setReviewFilter('all');
                   const row: PersonalImportRow = {
                     id: createPersonalImportId(),
                     kind,
@@ -1308,14 +1698,43 @@ function ImportWorkspace({
               />
             </>
           )}
+          {sourceImage && !documentPrep && !backupPreview ? (
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="放大核對原始截圖"
+              onPress={() => setImageViewerOpen(true)}
+              style={{
+                borderRadius: 16,
+                borderColor: theme.colors.border,
+                borderWidth: 1,
+                padding: 14,
+                gap: 10,
+                backgroundColor: theme.colors.surface,
+              }}
+            >
+              <View style={{ flexDirection: 'row', justifyContent: 'space-between', gap: 8 }}>
+                <Text style={{ ...textStyle, fontWeight: '600' }}>對照原始截圖</Text>
+                <Text style={{ color: theme.colors.accentStrong }}>點一下放大</Text>
+              </View>
+              <Image
+                accessibilityLabel="原始匯入截圖"
+                source={{ uri: sourceImage.uri }}
+                resizeMode="contain"
+                style={{ width: '100%', height: 240, borderRadius: 8 }}
+              />
+              <Text style={{ color: theme.colors.muted, fontSize: 12, lineHeight: 18 }}>
+                原圖只供本次核對，不會寫入匯入紀錄或備份。
+              </Text>
+            </Pressable>
+          ) : null}
           {notice ? (
             <Text accessibilityRole="alert" style={textStyle}>
               {notice}
             </Text>
           ) : null}
-          {issues.length && !documentPrep ? (
+          {generalIssues.length && !documentPrep ? (
             <View style={{ gap: 5 }}>
-              {issues.map((issue, i) => (
+              {generalIssues.map((issue, i) => (
                 <Text key={i} style={{ color: theme.colors.muted }}>
                   {issue.message}
                 </Text>
@@ -1330,38 +1749,120 @@ function ImportWorkspace({
               >
                 2. 核對 {rows.length} 筆資料
               </Text>
+              <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 10 }}>
+                {[
+                  ['資料總數', rows.length],
+                  ['待修正', attentionCount],
+                  ['已選取', chosen.length],
+                ].map(([label, count]) => (
+                  <View
+                    key={label}
+                    style={{
+                      flex: 1,
+                      minWidth: 90,
+                      borderRadius: 12,
+                      backgroundColor: theme.colors.surface,
+                      padding: 14,
+                      gap: 6,
+                    }}
+                  >
+                    <Text style={{ color: theme.colors.muted, fontSize: 12 }}>{label}</Text>
+                    <Text
+                      style={{
+                        color:
+                          label === '待修正' && Number(count) > 0
+                            ? theme.colors.danger
+                            : theme.colors.text,
+                        fontSize: 24,
+                        fontWeight: '700',
+                      }}
+                    >
+                      {count}
+                    </Text>
+                  </View>
+                ))}
+              </View>
+              <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
+                <Button
+                  text={`全部資料（${rows.length}）`}
+                  kind={reviewFilter === 'all' ? 'primary' : 'outline'}
+                  onPress={() => {
+                    setReviewFilter('all');
+                    setVisibleRowCount(50);
+                  }}
+                />
+                <Button
+                  text={`只看待修正（${attentionCount}）`}
+                  kind={reviewFilter === 'attention' ? 'primary' : 'outline'}
+                  onPress={() => {
+                    setReviewFilter('attention');
+                    setAttentionSnapshot(new Set(rows.filter(needsAttention).map((row) => row.id)));
+                    setVisibleRowCount(50);
+                  }}
+                />
+              </View>
+              {reviewFilter === 'attention' && !reviewRows.length ? (
+                <Text style={{ color: theme.colors.muted }}>
+                  目前沒有缺少必填欄位的資料；仍請核對來源與辨識內容。
+                </Text>
+              ) : null}
               <Text style={textStyle}>{linksStatus}</Text>
               <Button text="重新讀取可連結課班" onPress={loadLinks} disabled={saving} />
-              {rows.slice(0, visibleRowCount).map((row, index) => (
+              {reviewRows.slice(0, visibleRowCount).map((row) => (
                 <View
                   key={row.id}
                   style={{
-                    borderTopWidth: 1,
+                    borderWidth: 1,
                     borderColor: theme.colors.border,
-                    paddingTop: 16,
+                    borderRadius: 16,
+                    backgroundColor: theme.colors.surface,
+                    padding: 16,
                     gap: 10,
                   }}
                 >
                   <Pressable
                     disabled={saving}
                     accessibilityRole="checkbox"
-                    accessibilityState={{ checked: selected.has(row.id) }}
-                    onPress={() =>
+                    accessibilityLabel={`匯入 ${row.title || '未命名資料'}`}
+                    accessibilityState={{ checked: selected.has(row.id), disabled: saving }}
+                    style={{ minHeight: 44, justifyContent: 'center' }}
+                    onPress={() => {
+                      setAiReviewed(false);
                       setSelected((value) => {
                         const next = new Set(value);
                         if (next.has(row.id)) next.delete(row.id);
                         else next.add(row.id);
                         return next;
-                      })
-                    }
+                      });
+                    }}
                   >
                     <Text style={{ ...textStyle, fontWeight: '700' }}>
-                      {selected.has(row.id) ? '☑' : '□'} {index + 1}.{' '}
+                      {selected.has(row.id) ? '☑' : '□'} {rows.indexOf(row) + 1}.{' '}
                       {backupPreview ? `${names[row.kind]} · ` : ''}
                       {row.title || '名稱待填'}
                     </Text>
                   </Pressable>
                   <Text style={textStyle}>{rowSummary(row, profile)}</Text>
+                  {isAiPreview && row.source.rawText ? (
+                    <View
+                      style={{
+                        backgroundColor: theme.colors.surfaceMuted,
+                        padding: 12,
+                        borderRadius: 10,
+                        gap: 4,
+                      }}
+                    >
+                      <Text style={{ color: theme.colors.muted, fontSize: 12 }}>
+                        來源文字 · 請對照
+                      </Text>
+                      <Text
+                        selectable
+                        style={{ color: theme.colors.textSecondary, lineHeight: 22 }}
+                      >
+                        {row.source.rawText}
+                      </Text>
+                    </View>
+                  ) : null}
                   {backupPreview?.proposedLinks[row.id] ? (
                     <Text style={{ color: theme.colors.muted }}>
                       原備份有課班對照：
@@ -1381,6 +1882,18 @@ function ImportWorkspace({
                       {issue.message}
                     </Text>
                   ))}
+                  {issues
+                    .filter(
+                      (issue) => issue.rowId === row.id && issue.code === 'ai-uncertain-field',
+                    )
+                    .map((issue, index) => (
+                      <Text
+                        key={`ai-field-${index}`}
+                        style={{ color: theme.colors.muted, lineHeight: 22 }}
+                      >
+                        {issue.message}
+                      </Text>
+                    ))}
                   <Button
                     text={expanded === row.id ? '收起欄位' : '編輯與連結課班'}
                     disabled={saving}
@@ -1393,18 +1906,16 @@ function ImportWorkspace({
                       workspaces={workspaces}
                       periodProfile={profile}
                       onRefreshWorkspaces={() => void loadLinks()}
-                      onChange={(next) =>
-                        setRows((items) => items.map((item) => (item.id === row.id ? next : item)))
-                      }
+                      onChange={(next) => updateDraft(row, next)}
                     />
                   ) : null}
                 </View>
               ))}
-              {rows.length > visibleRowCount ? (
+              {reviewRows.length > visibleRowCount ? (
                 <>
                   <Text style={{ color: theme.colors.muted }}>
-                    目前顯示前 {visibleRowCount} 筆，共 {rows.length} 筆；已勾選 {chosen.length}{' '}
-                    筆。
+                    目前顯示前 {visibleRowCount} 筆，共 {reviewRows.length} 筆；已勾選{' '}
+                    {chosen.length} 筆。
                   </Text>
                   <Button
                     text="顯示接下來 50 筆"
@@ -1423,6 +1934,31 @@ function ImportWorkspace({
                   勾選的資料有 {invalidCount} 筆需要修正。也可取消勾選，先儲存其他資料。
                 </Text>
               ) : null}
+              {isAiPreview ? (
+                <Pressable
+                  accessibilityRole="checkbox"
+                  accessibilityLabel="已逐筆核對 AI 結果"
+                  accessibilityState={{ checked: aiReviewed, disabled: saving || busy }}
+                  disabled={saving || busy}
+                  onPress={() => setAiReviewed((value) => !value)}
+                  style={{
+                    minHeight: 52,
+                    padding: 16,
+                    borderRadius: 12,
+                    borderWidth: 1,
+                    borderColor: aiReviewed ? theme.colors.accent : theme.colors.border,
+                    backgroundColor: theme.colors.focusSurface,
+                    gap: 6,
+                  }}
+                >
+                  <Text style={{ ...textStyle, fontWeight: '600' }}>
+                    {aiReviewed ? '☑' : '□'} 已逐筆核對 AI 結果
+                  </Text>
+                  <Text style={{ color: theme.colors.muted, lineHeight: 21 }}>
+                    名稱、日期、時段與數字都已對照來源。修改欄位或選取範圍後，需要重新確認。
+                  </Text>
+                </Pressable>
+              ) : null}
               <Button
                 text={`確認新增 ${chosen.length} 筆`}
                 kind="primary"
@@ -1431,6 +1967,8 @@ function ImportWorkspace({
                   !chosen.length ||
                   invalidCount > 0 ||
                   structuralErrors.length > 0 ||
+                  (isAiPreview && !aiReviewed) ||
+                  busy ||
                   !ledger ||
                   saving
                 }
@@ -1441,6 +1979,24 @@ function ImportWorkspace({
               </Text>
             </>
           ) : null}
+          <PersonalImportSyncPanel
+            scope={scope}
+            active={active}
+            available={available}
+            onSynced={load}
+          />
+          <Text style={{ ...textStyle, fontWeight: '700' }}>備份與換裝置</Text>
+          <Text style={{ color: theme.colors.muted }}>
+            備份包含目前帳號與學校的全部課表、成績、活動與來源文字，檔案沒有加密。請只存到你信任的位置；分享選單開啟不代表已保存。
+          </Text>
+          <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
+            <Button
+              text="備份全部個人資料"
+              onPress={shareBackup}
+              disabled={busy || saving || !ledger?.records.length || !!loadError}
+            />
+            <Button text="從備份檔還原" onPress={readBackup} disabled={busy || saving} />
+          </View>
           <Text
             accessibilityRole="header"
             style={{ ...textStyle, fontSize: 20, fontWeight: '700' }}
@@ -1578,6 +2134,61 @@ function ImportWorkspace({
           ) : null}
         </ScrollView>
       )}
+      {sourceImage && imageViewerOpen && available ? (
+        <Modal
+          visible
+          animationType="slide"
+          presentationStyle="pageSheet"
+          onRequestClose={() => setImageViewerOpen(false)}
+        >
+          <View style={{ flex: 1, padding: 16, gap: 12, backgroundColor: theme.colors.bg }}>
+            <Text
+              accessibilityRole="header"
+              style={{ ...textStyle, fontSize: 20, fontWeight: '700' }}
+            >
+              核對原始截圖
+            </Text>
+            <Text style={{ color: theme.colors.muted, lineHeight: 21 }}>
+              可捲動查看整張截圖，對照課名、星期、時段與數字。
+            </Text>
+            <Button text="回到核對清單" onPress={() => setImageViewerOpen(false)} />
+            <ScrollView
+              style={{ flex: 1 }}
+              maximumZoomScale={4}
+              minimumZoomScale={1}
+              onLayout={(event) => setImageViewerWidth(Math.max(1, event.nativeEvent.layout.width))}
+            >
+              <Image
+                accessibilityLabel="放大的原始匯入截圖"
+                source={{ uri: sourceImage.uri }}
+                resizeMode="contain"
+                style={{
+                  width: imageViewerWidth,
+                  height: (imageViewerWidth * sourceImage.height) / Math.max(1, sourceImage.width),
+                }}
+              />
+            </ScrollView>
+          </View>
+        </Modal>
+      ) : null}
+      {modelManagerOpen && available ? (
+        <Modal
+          visible
+          animationType="slide"
+          presentationStyle="pageSheet"
+          onRequestClose={() => setModelManagerOpen(false)}
+        >
+          <View style={{ flex: 1, backgroundColor: theme.colors.bg }}>
+            <View style={{ padding: 16, gap: 8 }}>
+              <Text style={{ ...textStyle, fontWeight: '600' }}>
+                啟用後回來繼續匯入，原始文字會保留。
+              </Text>
+              <Button text="回到資料匯入" onPress={() => setModelManagerOpen(false)} />
+            </View>
+            <AIModelManagerScreen />
+          </View>
+        </Modal>
+      ) : null}
       <Modal
         visible={undoOpen}
         transparent
