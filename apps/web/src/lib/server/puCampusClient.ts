@@ -1,4 +1,5 @@
 import { parseFragment, serialize, type DefaultTreeAdapterMap } from 'parse5';
+import { createIpv4PinnedFetch } from './campusIpv4Fetch';
 
 const ALCAT_ORIGIN = 'https://alcat.pu.edu.tw';
 const TRONCLASS_ORIGIN = 'https://tronclass.pu.edu.tw';
@@ -125,16 +126,24 @@ export function rewriteCampusPortalLocation(
   }
 }
 
+const TIMEOUT_CODES = new Set([
+  'ETIMEDOUT',
+  'ESOCKETTIMEDOUT',
+  'UND_ERR_CONNECT_TIMEOUT',
+  'UND_ERR_HEADERS_TIMEOUT',
+  'UND_ERR_BODY_TIMEOUT',
+]);
+
 function readErrorCode(error: unknown): string | undefined {
-  if (!error || typeof error !== 'object') return undefined;
-  const record = error as { code?: unknown; cause?: unknown; name?: unknown };
-  if (typeof record.code === 'string' && record.code.trim()) return record.code;
-  const cause = record.cause;
-  if (cause && typeof cause === 'object') {
-    const nested = (cause as { code?: unknown }).code;
-    if (typeof nested === 'string' && nested.trim()) return nested;
+  const seen = new Set<unknown>();
+  let current: unknown = error;
+  while (current && typeof current === 'object' && !seen.has(current)) {
+    seen.add(current);
+    const record = current as { code?: unknown; cause?: unknown; name?: unknown };
+    if (typeof record.code === 'string' && record.code.trim()) return record.code;
+    if (record.name === 'AbortError' || record.name === 'TimeoutError') return String(record.name);
+    current = record.cause;
   }
-  if (record.name === 'AbortError' || record.name === 'TimeoutError') return String(record.name);
   return undefined;
 }
 
@@ -306,7 +315,7 @@ export function classifyCampusFailure(error: unknown, details: CampusErrorDetail
   }
   const name = error instanceof Error ? error.name : '';
   const code = details.code || readErrorCode(error);
-  if (name === 'TimeoutError' || name === 'AbortError' || code === 'ETIMEDOUT' || code === 'ESOCKETTIMEDOUT') {
+  if (name === 'TimeoutError' || name === 'AbortError' || (code != null && TIMEOUT_CODES.has(code))) {
     return new PuCampusError('timeout', '學校系統無回應', { ...details, code: code || name });
   }
   return new PuCampusError('unavailable', '學校系統無回應', { ...details, code });
@@ -315,7 +324,7 @@ export function classifyCampusFailure(error: unknown, details: CampusErrorDetail
 export function createPuCampusGateway(
   options: { fetch?: FetchLike; timeoutMs?: number; portalOrigin?: string; lmsOrigin?: string } = {},
 ): PuCampusGateway {
-  const request = options.fetch ?? fetch;
+  const request = options.fetch ?? createIpv4PinnedFetch();
   const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
   const portalOrigin = options.portalOrigin || ALCAT_ORIGIN;
   const lmsOrigin = options.lmsOrigin || TRONCLASS_ORIGIN;

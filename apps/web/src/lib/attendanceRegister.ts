@@ -20,6 +20,12 @@ export type AttendanceRegister = {
   active: boolean;
 };
 
+type RecordedStatus = Exclude<RegisterStatus, 'unconfirmed' | 'unavailable'>;
+
+function isRecordedStatus(value: unknown): value is RecordedStatus {
+  return value === 'present' || value === 'late' || value === 'absent' || value === 'excused';
+}
+
 function timestamp(value: unknown): string | null {
   try {
     const candidate = value && typeof value === 'object' && 'toDate' in value &&
@@ -49,12 +55,16 @@ export function assembleAttendanceRegister(
     if (
       data.uid !== student.uid || data.groupId !== scope.courseId ||
       data.sessionId !== scope.sessionId ||
-      !['present', 'late', 'absent', 'excused'].includes(String(data.status)) ||
-      (['present', 'late'].includes(String(data.status)) && !checkedInAt) ||
+      // 不可用字串轉型接受陣列等錯誤型別，否則統計與篩選會得到不同結果。
+      !isRecordedStatus(data.status) ||
+      ((data.status === 'present' || data.status === 'late') && !checkedInAt) ||
+      (data.source !== undefined && data.source !== null &&
+        data.source !== 'qr' && data.source !== 'manual') ||
+      (data.source === 'qr' && data.status !== 'present' && data.status !== 'late') ||
       (data.source === 'manual' && !correctedAt)
     ) return { ...empty, status: 'unavailable' };
     return {
-      ...student, status: data.status as RegisterStatus,
+      ...student, status: data.status,
       source: data.source === 'qr' || data.source === 'manual' ? data.source : null,
       checkedInAt: data.status === 'present' || data.status === 'late' ? checkedInAt : null,
       correctedAt: data.source === 'manual' ? correctedAt : null,
