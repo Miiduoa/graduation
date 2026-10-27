@@ -279,6 +279,7 @@ export async function signInWithPuStudentId(
   studentId: string,
   password: string,
   signal?: AbortSignal,
+  schoolId?: string,
 ): Promise<User | null> {
   const attempt = ++schoolLoginAttempt;
   const mainAuth = getAuth();
@@ -302,6 +303,7 @@ export async function signInWithPuStudentId(
     body: JSON.stringify({
       studentId,
       password,
+      ...(schoolId ? { schoolId } : {}),
     }),
     signal,
   });
