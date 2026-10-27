@@ -85,3 +85,14 @@ it('rejects unrelated HTML and oversized pages without requesting a network reso
   expect(() => extractSchoolPageTables('<html><body>登入頁</body></html>', 'timetable'))
     .toThrow(/沒有找到網頁表格/);
 });
+
+it('finds a grade table nested inside a school portal layout without duplicating rows', () => {
+  const html = '<table class="layout"><tr><td><table class="grades">' +
+    '<tr><th>課程名稱</th><th>學分</th><th>成績</th></tr>' +
+    '<tr><td>演算法</td><td>3</td><td>93</td></tr>' +
+    '</table></td></tr></table>';
+  const found = extractSchoolPageTables(html, 'grades');
+  expect(found).toHaveLength(1);
+  expect(parsePersonalImport(found[0].text, { ...opts, kind: 'grades' }).rows[0])
+    .toMatchObject({ title: '演算法', grade: '93', credits: 3 });
+});
