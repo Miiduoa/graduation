@@ -13,16 +13,44 @@
 set -e
 cd "$(dirname "$0")"
 
-# 確保虛擬環境存在
-if [ ! -d ".venv" ]; then
+# NumPy 2.5 需要 Python 3.12 以上；先確認環境，不覆寫既有虛擬環境。
+check_python() {
+    "$1" - <<'PYTHON'
+import sys
+if sys.version_info < (3, 12):
+    print(
+        "本機 AI 依賴需要 Python 3.12 以上；目前是 " + sys.version.split()[0] +
+        "。請先備份既有環境與資料，再用相容版本另建虛擬環境。",
+        file=sys.stderr,
+    )
+    sys.exit(1)
+PYTHON
+}
+
+if [ -e ".venv" ] || [ -L ".venv" ]; then
+    if [ ! -x ".venv/bin/python" ] || [ ! -f ".venv/bin/activate" ]; then
+        echo "既有 .venv 不完整，已停止；不會覆寫或刪除。請先檢查與備份環境。" >&2
+        exit 1
+    fi
+    check_python ".venv/bin/python"
+else
+    PYTHON_BIN="${PYTHON_BIN:-python3}"
+    if ! command -v "$PYTHON_BIN" >/dev/null 2>&1; then
+        echo "找不到 Python；請以 PYTHON_BIN 指定 Python 3.12 以上的執行檔。" >&2
+        exit 1
+    fi
+    check_python "$PYTHON_BIN"
     echo "建立 Python 虛擬環境..."
-    python3 -m venv .venv
+    "$PYTHON_BIN" -m venv .venv
 fi
 
 source .venv/bin/activate
 
-# 安裝依賴
-pip install -q -r requirements.txt 2>/dev/null
+# 用虛擬環境自己的 pip，保留安裝錯誤；失敗時不得啟動服務或訓練。
+if ! .venv/bin/python -m pip install -q -r requirements.txt; then
+    echo "依賴安裝失敗，未啟動服務或訓練。請依上方錯誤修正；既有 .venv 已保留。" >&2
+    exit 1
+fi
 
 # 確保 Ollama 在執行中（只有 ollama provider 需要）
 LLM_PROVIDER_VALUE="${LLM_PROVIDER:-}"
