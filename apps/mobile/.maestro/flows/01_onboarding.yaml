@@ -11,23 +11,23 @@ tags:
     visible:
       id: login-landing
     timeout: 90000
-- assertVisible:
-    id: public-Map
 - assertNotVisible:
     id: tab-Today
+- assertVisible:
+    id: platform-workspace-start
 - takeScreenshot: guest_startup
 
-# The platform account is the path for courses, assignments and merchant work.
+# Account and import actions precede the public-service directory.
+# Center the actual action; do not assume an off-screen native node is tappable.
 - scrollUntilVisible:
     element:
       id: login-start
     direction: DOWN
+    centerElement: true
 - assertVisible: 'Google 帳號'
 - tapOn:
     id: login-start
 # Assert the visible terminal state rather than a non-interactive page container.
-# The iOS failure artifact contains nuni-workspace in its hierarchy while its
-# visible heading and recovery controls are rendered as separate native nodes.
 # A remote session failure is not a successful login; recovery must remain usable.
 - extendedWaitUntil:
     visible:
@@ -63,23 +63,21 @@ tags:
           enabled: true
 - takeScreenshot: platform_account_state
 
-# On iOS the navigation header owns the back action; a device-level back gesture
-# does not reliably pop the React Navigation stack.
+# On iOS the navigation header owns the back action.
 - tapOn:
     id: BackButton
 - extendedWaitUntil:
     visible:
       id: login-landing
     timeout: 20000
-# The campus import entry is always available, even when student-ID login is not.
 - scrollUntilVisible:
     element:
       id: school-import-start
     direction: UP
+    centerElement: true
 - assertVisible:
     id: school-import-start
-# School-issued sign-in is hidden unless a verified provider is available.
-# Both states must show a truthful explanation; never assume school login works.
+# Never assume an unavailable school provider can authenticate a student.
 - runFlow:
     when:
       visible:
@@ -95,3 +93,29 @@ tags:
       - assertNotVisible:
           id: school-login-start
 - takeScreenshot: school_login_availability
+
+# Exercise the real import route and return, not merely the entry label.
+# This does not grant guest access to another account's records or run a model.
+- tapOn:
+    id: school-import-start
+- extendedWaitUntil:
+    visible: '匯入我的資料'
+    timeout: 20000
+- assertNotVisible:
+    id: login-landing
+- takeScreenshot: personal_import_entry
+- tapOn:
+    id: BackButton
+- extendedWaitUntil:
+    visible:
+      id: login-landing
+    timeout: 20000
+
+# Retain the public map entry assertion after bringing it into the viewport.
+- scrollUntilVisible:
+    element:
+      id: public-Map
+    direction: DOWN
+    centerElement: true
+- assertVisible:
+    id: public-Map
