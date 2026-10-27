@@ -13,6 +13,7 @@ const { runTool, byName } = require('../tools/registry');
 const { assertToolInputBounds } = require('../inputLimits');
 const { assertOnlineOrderingEnabled } = require('../../lib/onlineOrdering');
 const { matchAgentProposal } = require('../actionProposal');
+const { confirmedAgentWrite } = require('../actionReceipt');
 
 const REGION = 'asia-east1';
 
@@ -157,9 +158,18 @@ module.exports = onCall(
         await finishClaim('failed');
         return errPayload;
       }
-      const rest = result && typeof result === 'object' ? { ...result } : {};
-      if ('success' in rest && rest.success !== true) delete rest.success;
-      const okPayload = { success: true, toolName, ...rest };
+      if (!confirmedAgentWrite(toolName, result, rawInput, { uid, schoolId })) {
+        const unverified = {
+          success: false,
+          toolName,
+          errorCode: 'unverified_receipt',
+          errorMessage: 'Unable to confirm the operation. Check the service record before retrying.',
+        };
+        await appendAgentRunToolStep(uid, agentRunId, toolName, { keys: Object.keys(rawInput).slice(0, 16) }, unverified, durationMs);
+        await finishClaim('unverified');
+        return unverified;
+      }
+      const okPayload = { ...result, toolName, success: true };
       await appendAgentRunToolStep(uid, agentRunId, toolName, rawInput, okPayload, durationMs);
       await finishClaim('completed');
       return okPayload;
