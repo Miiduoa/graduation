@@ -1,5 +1,6 @@
 import { isPeriodProfileId, slotIndexForLabel } from '../timetable/schoolPeriods';
 import { createPersonalImportId } from './records';
+import { hasCreditEvidence, hasPeriodEvidence } from './numericEvidence';
 import { validatePersonalImportDocument, type PersonalImportDocument } from './documents';
 import {
   isPersonalImportDate,
@@ -267,15 +268,6 @@ function parseEnvelope(raw: string): Record<string, unknown> {
   return value;
 }
 
-function evidenceHasNumber(evidence: string, value: number | string): boolean {
-  const target = String(value).normalize('NFKC');
-  return (
-    normalizePersonalImportText(evidence)
-      .match(/[A-Za-z]+|\d+(?:\.\d+)?/gu)
-      ?.some((token) => token.toUpperCase() === target.toUpperCase()) ?? false
-  );
-}
-
 function evidenceHasGrade(evidence: string, value: string): boolean {
   const text = normalizePersonalImportText(evidence);
   const target = normalizePersonalImportText(value).trim();
@@ -314,8 +306,9 @@ function supported(
   evidence: string,
 ): boolean {
   if (field === 'dayOfWeek') return evidenceHasDay(evidence, value as number);
-  if (field === 'startPeriod' || field === 'endPeriod' || field === 'credits')
-    return evidenceHasNumber(evidence, value as string | number);
+  if (field === 'startPeriod' || field === 'endPeriod')
+    return hasPeriodEvidence(evidence, value as string | number);
+  if (field === 'credits') return hasCreditEvidence(evidence, value as number);
   if (field === 'grade') return evidenceHasGrade(evidence, String(value));
   if (field === 'allDay') return value === false || /全天|整天|all[ -]?day/iu.test(evidence);
   if (field === 'date' || field === 'endDate') return evidenceHasDate(evidence, String(value));
@@ -356,9 +349,11 @@ export function parsePersonalImportAiResponse(
         candidate.uncertainFields.some((item) => typeof item !== 'string'))
     )
       throw new Error('AI 回傳的待確認欄位格式不完整，請重試。');
+    // Match fields against the actual source, not spacing rewritten by the model.
+    const groundingText = excerpt?.text ?? evidence;
     const uncertain = new Set<string>((candidate.uncertainFields as string[] | undefined) ?? []);
     const eventRange =
-      options.kind === 'events' && candidate.allDay === true ? explicitAllDayRange(evidence) : null;
+      options.kind === 'events' && candidate.allDay === true ? explicitAllDayRange(groundingText) : null;
     const row: PersonalImportRow = {
       id: createPersonalImportId(),
       kind: options.kind,
@@ -411,7 +406,7 @@ export function parsePersonalImportAiResponse(
       if (
         mode === 'text' &&
         !exclusiveRangeEnd &&
-        !supported(field, clean as string | number | boolean, evidence)
+        !supported(field, clean as string | number | boolean, groundingText)
       ) {
         warn(field);
         continue;
