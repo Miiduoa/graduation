@@ -327,3 +327,31 @@ test('switching schools drops sensed data and ignores a late sync response', asy
   expect(view.queryByText('已取得本次授權資料')).toBeNull();
   expect(view.getByText('尚未同步校園摘要')).toBeTruthy();
 });
+
+test('one-tap daily brief senses authorized sources and synthesizes on the phone', async () => {
+  const sensed = {
+    userId: 'A', schoolId: 'pu', checkedAt: new Date().toISOString(),
+    schedule: { status: 'unavailable' as const, count: null },
+    assignments: {
+      status: 'available' as const, count: 1,
+      items: [{ title: '資料庫作業', groupName: '資料庫', dueAt: '2026-10-28T09:00:00Z' }],
+    },
+    announcements: { status: 'available' as const, items: [] },
+  };
+  jest.mocked(refreshCampusSenseSnapshot).mockResolvedValueOnce(sensed);
+  request.mockResolvedValueOnce({
+    source: 'device', tool: 'campus-snapshot',
+    content: '下一步：先核對資料庫作業', route: '/classroom', hasActions: false,
+  });
+  const view = render(<CampusAssistantScreen />);
+  expect(request).not.toHaveBeenCalled();
+  await act(async () => fireEvent.press(view.getByText('一鍵整理今日重點')));
+  expect(refreshCampusSenseSnapshot).toHaveBeenCalledTimes(1);
+  expect(request).toHaveBeenCalledWith(expect.objectContaining({
+    mode: 'device',
+    senseSnapshot: sensed,
+    messages: [{ role: 'user', content: '今天要先處理什麼？' }],
+  }));
+  expect(view.getByText('下一步：先核對資料庫作業')).toBeTruthy();
+  expect(view.getByText(/先前主動同步的授權摘要/)).toBeTruthy();
+});
