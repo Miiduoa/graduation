@@ -307,3 +307,37 @@ it('HTTP correction requires a real teacher identity and writes a counted, audit
   expect([...teacher.store.docs.keys()].filter((key) => key.includes('/attendanceCorrections/')))
     .toHaveLength(1);
 });
+
+it('exposes manual corrections on the explicit hosted allowlist but requires a bearer token', async () => {
+  const { runtime: deps, store } = runtime({ uid: 'teacher' });
+  const denied = await dispatchFnRequest(
+    'correctAttendanceRecord',
+    request('correctAttendanceRecord', {
+      body: { data: {
+        groupId: 'class-1',
+        sessionId: 'session-existing',
+        studentUid: 'student',
+        status: 'present',
+        reason: '授課教師現場確認學生出席',
+        requestId: 'manual-correction-id',
+      } },
+    }),
+    deps,
+  );
+  expect(denied.status).toBe(401);
+  expect((await denied.json()).error.status).toBe('UNAUTHENTICATED');
+  expect([...store.docs.keys()].some((key) => key.includes('attendanceCorrections'))).toBe(false);
+});
+it('does not accidentally expose unrelated privileged functions when corrections are enabled', async () => {
+  const { runtime: deps } = runtime({ uid: 'teacher' });
+  const blocked = await dispatchFnRequest(
+    'verifyAttendanceClaim',
+    request('verifyAttendanceClaim', {
+      body: { data: { groupId: 'class-1' } },
+      headers: { Authorization: 'Bearer valid-token' },
+    }),
+    deps,
+  );
+  expect(blocked.status).toBe(404);
+  expect((await blocked.json()).error.status).toBe('NOT_FOUND');
+});
