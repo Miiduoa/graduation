@@ -7,6 +7,7 @@ import {
 } from 'firebase/firestore';
 import { getCampusPostById } from './firestore';
 import {
+  BOOKMARK_UNAVAILABLE_COPY,
   isCampusPostBookmarked,
   listCampusPostBookmarkIds,
   loadCampusPostBookmarks,
@@ -45,6 +46,10 @@ beforeEach(() => {
 });
 
 describe('school-scoped bookmarked campus posts', () => {
+  it('exports a stable unavailable copy for permission-denied UI', () => {
+    expect(BOOKMARK_UNAVAILABLE_COPY).toBe('收藏功能暫時無法使用');
+  });
+
   it('ignores malformed or cross-campus list entries', async () => {
     vi.mocked(getDocs).mockResolvedValue(listing(
       { id: 'one', schoolId: 'pu', postId: 'one' },

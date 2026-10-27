@@ -12,8 +12,20 @@ import {
   requireRateLimitSalt,
   type LoginRateGate,
 } from './loginRateLimit';
-import { createPuCampusGateway, PuCampusError, type PuCampusGateway } from './puCampusClient';
-import { normalizePuAccount, normalizePuStudentId } from './puIdentity';
+import {
+  createPuCampusGateway,
+  PuCampusError,
+  type CampusLoginRoute,
+  type CampusLoginStage,
+  type PuCampusGateway,
+} from './puCampusClient';
+import {
+  canonicalizePuStudentId,
+  normalizePuAccount,
+  normalizePuStudentId,
+  providenceAlcatUidCandidates,
+  PROVIDENCE_SCHOOL_ID,
+} from './puIdentity';
 import {
   getSchoolLoginConfig,
   matchSchoolLoginAccount,
@@ -29,11 +41,28 @@ const TEACHER_ROLES = new Set(['teacher', 'instructor', 'faculty', 'professor'])
 
 export class PuLoginHttpError extends Error {
   readonly status: number;
+  readonly code?: string;
+  readonly route?: CampusLoginRoute;
+  readonly stage?: CampusLoginStage;
+  readonly causeCode?: string;
 
-  constructor(status: number, message: string) {
+  constructor(
+    status: number,
+    message: string,
+    details: {
+      code?: string;
+      route?: CampusLoginRoute;
+      stage?: CampusLoginStage;
+      causeCode?: string;
+    } = {},
+  ) {
     super(message);
     this.name = 'PuLoginHttpError';
     this.status = status;
+    this.code = details.code;
+    this.route = details.route;
+    this.stage = details.stage;
+    this.causeCode = details.causeCode;
   }
 }
 
@@ -49,7 +78,10 @@ export type SignInPuDeps = {
 
 export const SCHOOL_UNAVAILABLE = '學校系統暫時無法連線';
 export const TEACHER_SCHOOL_UNAVAILABLE = SCHOOL_UNAVAILABLE;
+export const TEACHER_LMS_UNAVAILABLE = '老師登入暫未開放；學生請輸入純數字學號';
+export const TEACHER_LMS_UNAVAILABLE_CODE = 'teacher_lms_unreachable';
 export const TEACHER_IDENTITY_UNVERIFIED = '暫時無法驗證老師身分';
+export const STUDENT_LMS_SOFT_TIMEOUT_MS = 2500;
 
 type ExpectedCampusFailureReason = 'campus_closed' | 'campus_unreachable';
 
@@ -61,19 +93,48 @@ function expectedCampusFailureReason(error: unknown): ExpectedCampusFailureReaso
   }
   if (error instanceof PuLoginHttpError) {
     if (error.message === '尚未開放') return 'campus_closed';
-    if (error.message === SCHOOL_UNAVAILABLE) return 'campus_unreachable';
+    if (
+      error.message === SCHOOL_UNAVAILABLE ||
+      error.message === TEACHER_LMS_UNAVAILABLE ||
+      error.code === TEACHER_LMS_UNAVAILABLE_CODE
+    ) {
+      return 'campus_unreachable';
+    }
   }
   return null;
 }
 
-function logExpectedCampusFailure(error: unknown, startedAt: number, school: string): void {
+function campusLogFields(error: unknown): {
+  route?: CampusLoginRoute;
+  stage?: CampusLoginStage;
+  code?: string;
+} {
+  if (error instanceof PuCampusError) {
+    return { route: error.route, stage: error.stage, code: error.code };
+  }
+  if (error instanceof PuLoginHttpError) {
+    return { route: error.route, stage: error.stage, code: error.causeCode || error.code };
+  }
+  return {};
+}
+
+function logExpectedCampusFailure(
+  error: unknown,
+  startedAt: number,
+  school: string,
+  route: CampusLoginRoute,
+): void {
   const reason = expectedCampusFailureReason(error);
   if (!reason) return;
+  const fields = campusLogFields(error);
   console.info(
     JSON.stringify({
       msg: 'pu_campus_login_expected_failure',
       reason,
       school,
+      route: fields.route || route,
+      ...(fields.stage ? { stage: fields.stage } : {}),
+      ...(fields.code ? { code: fields.code } : {}),
       elapsedMs: Math.max(0, Date.now() - startedAt),
     }),
   );
@@ -110,11 +171,33 @@ function asRecord(value: unknown): Record<string, unknown> {
     : {};
 }
 
-function clientMessage(error: PuCampusError): { status: number; message: string } {
+function loginHttpDetails(error: PuCampusError, route?: CampusLoginRoute) {
+  return {
+    route: error.route || route,
+    stage: error.stage,
+    causeCode: error.code,
+  };
+}
+
+function clientMessage(
+  error: PuCampusError,
+  route: CampusLoginRoute = error.route || 'student',
+): { status: number; message: string; code?: string } {
   if (error.kind === 'credentials') return { status: 401, message: '學號或密碼錯誤' };
   if (error.kind === 'closed') return { status: 503, message: '尚未開放' };
   if (error.kind === 'unverified') return { status: 503, message: TEACHER_IDENTITY_UNVERIFIED };
+  if (route === 'teacher' && (error.kind === 'timeout' || error.kind === 'unavailable')) {
+    return { status: 503, message: TEACHER_LMS_UNAVAILABLE, code: TEACHER_LMS_UNAVAILABLE_CODE };
+  }
   return { status: 503, message: SCHOOL_UNAVAILABLE };
+}
+
+function throwMappedCampusError(error: PuCampusError, route: CampusLoginRoute): never {
+  const mapped = clientMessage(error, route);
+  throw new PuLoginHttpError(mapped.status, mapped.message, {
+    code: mapped.code,
+    ...loginHttpDetails(error, route),
+  });
 }
 
 function redact(value: unknown, secret: string): string {
@@ -189,7 +272,10 @@ function isSchoolSideFailure(error: unknown): boolean {
   if (error instanceof PuLoginHttpError) {
     return (
       error.status === 503 &&
-      (error.message === SCHOOL_UNAVAILABLE || error.message === '尚未開放')
+      (error.message === SCHOOL_UNAVAILABLE ||
+        error.message === TEACHER_LMS_UNAVAILABLE ||
+        error.code === TEACHER_LMS_UNAVAILABLE_CODE ||
+        error.message === '尚未開放')
     );
   }
   return false;
@@ -216,9 +302,15 @@ export async function handleSignInPuStudentId(
       throw new PuLoginHttpError(400, 'Missing required fields: studentId, password');
     }
 
-    const studentId = normalizePuStudentId(rawAccount);
+    const canonicalStudentId =
+      config.schoolId === PROVIDENCE_SCHOOL_ID ? canonicalizePuStudentId(rawAccount) : null;
+    const studentId = canonicalStudentId || normalizePuStudentId(rawAccount);
     const teacherAccount = rawAccount;
-    const kind = matchSchoolLoginAccount(config, studentId) || matchSchoolLoginAccount(config, teacherAccount);
+    const kind = canonicalStudentId
+      ? 'student'
+      : matchSchoolLoginAccount(config, teacherAccount) === 'teacher'
+        ? 'teacher'
+        : matchSchoolLoginAccount(config, studentId);
     if (!kind) {
       throw new PuLoginHttpError(400, '學號格式不正確');
     }
@@ -242,10 +334,19 @@ export async function handleSignInPuStudentId(
     const campusStartedAt = Date.now();
     try {
       return kind === 'student'
-        ? await signInStudent(studentId, password, campus, deps, config)
+        ? await signInStudent(
+            studentId,
+            config.schoolId === PROVIDENCE_SCHOOL_ID
+              ? providenceAlcatUidCandidates(rawAccount)
+              : [studentId],
+            password,
+            campus,
+            deps,
+            config,
+          )
         : await signInTeacher(teacherAccount, password, campus, deps, config);
     } catch (error) {
-      logExpectedCampusFailure(error, campusStartedAt, config.schoolId);
+      logExpectedCampusFailure(error, campusStartedAt, config.schoolId, kind);
       if (isSchoolSideFailure(error)) {
         await refundLoginAccountLimit(accountKey, rateCtx);
       }
@@ -260,8 +361,7 @@ export async function handleSignInPuStudentId(
       throw error;
     }
     if (error instanceof PuCampusError) {
-      const mapped = clientMessage(error);
-      throw new PuLoginHttpError(mapped.status, mapped.message);
+      throwMappedCampusError(error, error.route || 'student');
     }
     if (error instanceof Error && error.message === 'account-deletion') {
       throw new PuLoginHttpError(400, '帳號正在刪除或已停用。');
@@ -274,8 +374,36 @@ export async function handleSignInPuStudentId(
   }
 }
 
+async function loginStudentWithAlternateUid(
+  campus: PuCampusGateway,
+  portalUids: readonly string[],
+  password: string,
+): Promise<{ login: Awaited<ReturnType<PuCampusGateway['loginStudent']>>; portalUid: string }> {
+  const uids = portalUids.filter((uid) => uid.length > 0).slice(0, 2);
+  const first = uids[0];
+  if (!first) {
+    throw new PuLoginHttpError(400, '學號格式不正確');
+  }
+  try {
+    return { login: await campus.loginStudent(first, password), portalUid: first };
+  } catch (error) {
+    const alternate = uids[1];
+    if (!alternate || !(error instanceof PuCampusError) || error.kind !== 'credentials') {
+      if (error instanceof PuCampusError) throwMappedCampusError(error, 'student');
+      throw error;
+    }
+    try {
+      return { login: await campus.loginStudent(alternate, password), portalUid: alternate };
+    } catch (second) {
+      if (second instanceof PuCampusError) throwMappedCampusError(second, 'student');
+      throw second;
+    }
+  }
+}
+
 async function signInStudent(
-  rawStudentId: string,
+  canonicalStudentId: string,
+  portalUids: readonly string[],
   password: string,
   campus: PuCampusGateway,
   deps: SignInPuDeps,
@@ -284,25 +412,31 @@ async function signInStudent(
   if (config.studentAdapter !== 'form-password') {
     closedWithoutCampus();
   }
-  let login;
-  try {
-    login = await campus.loginStudent(rawStudentId, password);
-  } catch (error) {
-    if (error instanceof PuCampusError) {
-      const mapped = clientMessage(error);
-      throw new PuLoginHttpError(mapped.status, mapped.message);
-    }
-    throw error;
-  }
+  const { login, portalUid } = await loginStudentWithAlternateUid(campus, portalUids, password);
   if (!login.cookies || Object.keys(login.cookies).length === 0) {
     throw new PuLoginHttpError(401, '學號或密碼錯誤');
   }
 
   let tronClass: Awaited<ReturnType<PuCampusGateway['loginTronClass']>> | null = null;
+  const softStartedAt = Date.now();
   try {
-    tronClass = await campus.loginTronClass(rawStudentId, password);
+    tronClass = await campus.loginTronClass(portalUid, password, {
+      timeoutMs: STUDENT_LMS_SOFT_TIMEOUT_MS,
+      route: 'student',
+    });
   } catch (error) {
-    console.warn('[signInPuStudentId] TronClass login failed (soft):', redact(error, password));
+    const fields = campusLogFields(error);
+    console.info(
+      JSON.stringify({
+        msg: 'pu_campus_login_soft_failure',
+        reason: 'campus_unreachable',
+        school: config.schoolId,
+        route: 'student',
+        stage: fields.stage || 'submit',
+        ...(fields.code ? { code: fields.code } : {}),
+        elapsedMs: Math.max(0, Date.now() - softStartedAt),
+      }),
+    );
   }
 
   let profile: Awaited<ReturnType<PuCampusGateway['fetchStudentInfo']>> = {};
@@ -310,12 +444,11 @@ async function signInStudent(
     profile = await campus.fetchStudentInfo(login.cookies);
   } catch (error) {
     if (error instanceof PuCampusError && error.kind !== 'credentials') {
-      const mapped = clientMessage(error);
-      throw new PuLoginHttpError(mapped.status, mapped.message);
+      throwMappedCampusError(error, 'student');
     }
   }
 
-  const studentId = normalizePuStudentId(profile.studentId || rawStudentId);
+  const studentId = canonicalStudentId;
   const displayName = String(profile.name || login.studentName || `${studentId} 同學`).trim();
   const department = String(profile.class || '').trim();
   const email = schoolEmail(config, studentId);
@@ -395,19 +528,10 @@ async function signInTeacher(
   }
   let session;
   try {
-    session = await campus.loginTronClass(account, password);
+    session = await campus.loginTronClass(account, password, { route: 'teacher' });
   } catch (error) {
     if (error instanceof PuCampusError) {
-      if (error.kind === 'closed') {
-        throw new PuLoginHttpError(503, '尚未開放');
-      }
-      if (error.kind === 'unverified') {
-        throw new PuLoginHttpError(503, TEACHER_IDENTITY_UNVERIFIED);
-      }
-      if (error.kind === 'timeout' || error.kind === 'unavailable') {
-        throw new PuLoginHttpError(503, SCHOOL_UNAVAILABLE);
-      }
-      throw new PuLoginHttpError(401, '學號或密碼錯誤');
+      throwMappedCampusError(error, 'teacher');
     }
     throw error;
   }
@@ -420,11 +544,7 @@ async function signInTeacher(
     courses = await campus.fetchTronClassCourses(session);
   } catch (error) {
     if (error instanceof PuCampusError && error.kind !== 'credentials') {
-      if (error.kind === 'timeout' || error.kind === 'unavailable') {
-        throw new PuLoginHttpError(503, SCHOOL_UNAVAILABLE);
-      }
-      const mapped = clientMessage(error);
-      throw new PuLoginHttpError(mapped.status, mapped.message);
+      throwMappedCampusError(error, 'teacher');
     }
   }
 

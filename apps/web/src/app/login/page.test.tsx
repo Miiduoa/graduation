@@ -1,6 +1,12 @@
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, expect, it, vi } from 'vitest';
 import LoginPage from './page';
+import {
+  SCHOOL_LOGIN_GENERIC_ERROR,
+  SchoolLoginHttpError,
+  TEACHER_LMS_UNAVAILABLE_CODE,
+  TEACHER_LMS_UNAVAILABLE_COPY,
+} from '@/lib/schoolLoginErrorCopy';
 import { STUDENT_ID_PREPARING_COPY } from '@/lib/signInOptions';
 const { replace, signIn, state } = vi.hoisted(() => ({
   replace: vi.fn(),
@@ -194,8 +200,46 @@ it('retains the reconnection form after a rejected school login', async () => {
   fireEvent.change(screen.getByLabelText('學號'), { target: { value: '1234567' } });
   fireEvent.change(screen.getByLabelText('密碼'), { target: { value: 'test-only-password' } });
   fireEvent.click(screen.getByRole('button', { name: '連線學校帳號' }));
-  expect(await screen.findByRole('alert')).toBeTruthy();
+  expect((await screen.findByRole('alert')).textContent).toBe(SCHOOL_LOGIN_GENERIC_ERROR);
   expect(replace).not.toHaveBeenCalled();
+});
+
+it.each([
+  [401, '學號或密碼錯誤', '學號或密碼錯誤'],
+  [401, '<img src=x onerror=alert(1)>', '學號或密碼錯誤'],
+  [503, '尚未開放', '這間學校尚未開放學號登入'],
+  [503, '學校系統暫時無法連線', '學校系統暫時連不上，請稍後再試'],
+  [503, TEACHER_LMS_UNAVAILABLE_COPY, TEACHER_LMS_UNAVAILABLE_COPY],
+  [429, 'Too many requests', '嘗試太多次，請稍後再試'],
+  [503, '暫時無法驗證老師身分', SCHOOL_LOGIN_GENERIC_ERROR],
+  [500, 'PU student login failed', SCHOOL_LOGIN_GENERIC_ERROR],
+] as const)(
+  'shows a fixed school login notice for HTTP %s',
+  async (status, serverError, copy) => {
+    state.user = null;
+    state.studentId = true;
+    signIn.mockRejectedValue(new SchoolLoginHttpError(status, serverError));
+    render(<LoginPage />);
+    fillSchoolLogin();
+    fireEvent.submit(screen.getByLabelText('學號').closest('form')!);
+    const notice = (await screen.findByRole('alert')).textContent;
+    expect(notice).toBe(copy);
+    expect(notice).not.toContain('<');
+    expect(notice).not.toContain('onerror');
+    expect(replace).not.toHaveBeenCalled();
+  },
+);
+
+it('shows the teacher LMS notice from the error code even if the server body is unknown', async () => {
+  state.user = null;
+  state.studentId = true;
+  signIn.mockRejectedValue(
+    new SchoolLoginHttpError(503, '<script>evil</script>', TEACHER_LMS_UNAVAILABLE_CODE),
+  );
+  render(<LoginPage />);
+  fillSchoolLogin();
+  fireEvent.submit(screen.getByLabelText('學號').closest('form')!);
+  expect((await screen.findByRole('alert')).textContent).toBe(TEACHER_LMS_UNAVAILABLE_COPY);
 });
 
 it('offers school verification for an academic task without a misleading Google alternative', () => {
