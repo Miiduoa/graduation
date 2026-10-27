@@ -195,3 +195,34 @@ it('WOW Class 失敗時仍可讀取 e 校園，不把另一來源偽裝成空清
   expect(screen.queryByRole('link', { name: '前往 資料庫管理 的對應課堂' })).toBeNull();
   expect(screen.queryByText('0 / 1 門')).toBeNull();
 });
+
+
+it('來源 A→B→A 不恢復舊結果，晚到回應也不復活', async () => {
+  const original = props();
+  const view = render(<SchoolCourseReconciliation {...original} />); await start();
+  let finish!: (value: AcademicSnapshot<'courses'>) => void;
+  vi.mocked(loadAcademicRecords).mockImplementationOnce(() => new Promise((resolve) => { finish = resolve; }));
+  fireEvent.click(screen.getByRole('button', { name: '重新核對校方課表' }));
+  view.rerender(<SchoolCourseReconciliation {...original} lms={null} />);
+  view.rerender(<SchoolCourseReconciliation {...original} />);
+  await act(async () => { finish(academic()); });
+  expect(screen.queryByRole('heading', { name: '資料庫管理' })).toBeNull();
+  expect(screen.getByRole('button', { name: '核對校方課表' }).hasAttribute('disabled')).toBe(false);
+  await start();
+  expect(loadAcademicRecords).toHaveBeenCalledTimes(3);
+});
+
+it('離頁後回應不帶入重新開啟的工作區', async () => {
+  let finish!: (value: AcademicSnapshot<'courses'>) => void;
+  vi.mocked(loadAcademicRecords).mockImplementationOnce(() => new Promise((resolve) => { finish = resolve; }));
+  const original = props();
+  const view = render(<SchoolCourseReconciliation {...original} />);
+  fireEvent.click(screen.getByRole('button', { name: '核對校方課表' }));
+  view.unmount();
+  render(<SchoolCourseReconciliation {...original} />);
+  await act(async () => { finish(academic()); });
+  expect(screen.queryByRole('heading', { name: '資料庫管理' })).toBeNull();
+  expect(loadAcademicRecords).toHaveBeenCalledTimes(1);
+  await start();
+  expect(loadAcademicRecords).toHaveBeenCalledTimes(2);
+});
