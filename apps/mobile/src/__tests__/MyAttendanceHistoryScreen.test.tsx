@@ -118,3 +118,23 @@ test('changing the selected school discards the previous school history', async 
   await act(async () => resolveOld([course]));
   expect(view.queryByText('資料結構')).toBeNull();
 });
+
+test('labels a teacher correction using its approval timestamp rather than a QR scan time', async () => {
+  jest.mocked(loadMyVerifiedAttendanceHistory).mockResolvedValue([
+    {
+      ...course,
+      sessions: [
+        {
+          ...course.sessions[0],
+          source: 'manual',
+          correctedAt: new Date('2026-10-27T04:00:00Z'),
+        },
+      ],
+    },
+  ]);
+  const view = render(<MyAttendanceHistoryScreen />);
+  await view.findByText('資料結構');
+  fireEvent.press(view.getByLabelText('展開資料結構點名紀錄'));
+  expect(view.getByText(/教師核定/)).toBeTruthy();
+  expect(view.queryByText(/掃碼簽到/)).toBeNull();
+});

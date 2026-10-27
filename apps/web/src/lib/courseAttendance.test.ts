@@ -270,3 +270,22 @@ it('submits teacher corrections only after validating an explicit reason and aut
     status: 'absent', requestId: 'same-attempt',
   });
 });
+
+it('distinguishes a teacher-attested late arrival from a QR check-in when exporting CSV', () => {
+  const csv = attendanceCsv([
+    {
+      uid: 'learner',
+      studentId: 'S027',
+      displayName: '學生乙',
+      checkedInAt: '2026-10-27T01:00:00.000Z',
+      source: 'manual',
+      status: 'late',
+      correctedAt: '2026-10-27T04:00:00.000Z',
+    },
+  ]);
+  expect(csv).toContain('"出席狀態"');
+  expect(csv).toContain('"紀錄來源"');
+  expect(csv).toContain('"遲到"');
+  expect(csv).toContain('"教師補登"');
+  expect(csv).toContain('"2026-10-27T04:00:00.000Z"');
+});

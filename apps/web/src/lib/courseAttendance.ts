@@ -17,6 +17,9 @@ export interface AttendanceRecord {
   displayName: string;
   studentId: string;
   checkedInAt: string | null;
+  status?: 'present' | 'late' | null;
+  source?: 'qr' | 'manual' | null;
+  correctedAt?: string | null;
 }
 export interface AttendanceSession {
   id: string;
@@ -102,6 +105,9 @@ function record(uid: string, data: Record<string, unknown>): AttendanceRecord {
     displayName: typeof data.displayName === 'string' ? data.displayName : '',
     studentId: typeof data.studentId === 'string' ? data.studentId : '',
     checkedInAt: iso(data.checkedInAt),
+    status: data.status === 'present' || data.status === 'late' ? data.status : null,
+    source: data.source === 'qr' || data.source === 'manual' ? data.source : null,
+    correctedAt: iso(data.correctedAt),
   };
 }
 export async function loadCourseAttendance(
@@ -353,8 +359,15 @@ export function attendanceCsv(records: AttendanceRecord[]): string {
   return (
     '\uFEFF' +
     [
-      ['學號或帳號', '姓名', '簽到時間'],
-      ...records.map((row) => [row.studentId || row.uid, row.displayName, row.checkedInAt ?? '']),
+      ['學號或帳號', '姓名', '紀錄時間', '出席狀態', '紀錄來源', '教師核定時間'],
+      ...records.map((row) => [
+        row.studentId || row.uid,
+        row.displayName,
+        row.checkedInAt ?? '',
+        row.status === 'present' ? '出席' : row.status === 'late' ? '遲到' : '未標記',
+        row.source === 'manual' ? '教師補登' : row.source === 'qr' ? 'QR 簽到' : '未標記',
+        row.source === 'manual' ? row.correctedAt ?? '' : '',
+      ]),
     ]
       .map((row) => row.map(cell).join(','))
       .join('\r\n')

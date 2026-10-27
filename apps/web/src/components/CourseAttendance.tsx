@@ -189,7 +189,9 @@ function Session({
       )}
       {confirmed && (
         <p role="status" className={styles.confirmed}>
-          {session.ownStatus === 'late' ? '已記錄遲到' : '已簽到'} · {date(confirmed)}
+          {session.ownRecord?.source === 'manual'
+            ? `${session.ownStatus === 'late' ? '教師已補登遲到' : '教師已補登出席'} · 核定 ${date(session.ownRecord.correctedAt ?? confirmed)}`
+            : `${session.ownStatus === 'late' ? '已記錄遲到' : '已簽到'} · ${date(confirmed)}`}
         </p>
       )}
       {!canReadRoster &&
@@ -342,8 +344,19 @@ function Session({
                     <span>
                       <strong>{row.displayName || row.studentId || row.uid}</strong>
                       {row.displayName && <small>{row.studentId || row.uid}</small>}
+                      <small>
+                        {row.status === 'late' ? '遲到' : '出席'}
+                        {row.source === 'manual'
+                          ? ' · 教師補登'
+                          : row.source === 'qr'
+                            ? ' · QR 簽到'
+                            : ' · 已核實'}
+                      </small>
                     </span>
-                    <time>{date(row.checkedInAt)}</time>
+                    <time>
+                      {row.source === 'manual' ? '教師核定：' : '紀錄時間：'}
+                      {date(row.source === 'manual' ? row.correctedAt ?? row.checkedInAt : row.checkedInAt)}
+                    </time>
                   </li>
                 ))}
               </ul>
