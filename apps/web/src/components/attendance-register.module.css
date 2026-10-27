@@ -27,7 +27,7 @@
 .footnote { margin: 0; color: var(--muted); font-size: 12px; line-height: 1.8; }
 @media (max-width: 640px) {
   .register { padding: 14px; }
-  .heading > button { width: 100%; }
+  .heading > button { flex: 1 0 100%; }
   .rows li { grid-template-columns: minmax(0, 1fr) auto; }
   .state { grid-column: 1; }
   .rows li > button { grid-column: 2; grid-row: 1 / 3; }
