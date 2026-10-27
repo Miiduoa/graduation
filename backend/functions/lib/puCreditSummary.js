@@ -1,10 +1,23 @@
 'use strict';
 
-// Derived progress from fetched grade rows, not an official graduation audit.
+// 通過判定與平均只採用同一組有效分數，不做布林值、陣列或物件的隱式轉型。
+function parseNumericScore(score) {
+  if (typeof score === 'number') {
+    return Number.isFinite(score) && score >= 0 ? score : null;
+  }
+  if (typeof score !== 'string') return null;
+  const value = score.trim();
+  if (!/^\d+(?:\.\d+)?$/.test(value)) return null;
+  const numeric = Number(value);
+  return Number.isFinite(numeric) ? numeric : null;
+}
+
+// 由已讀取成績推算修課進度，不代表校方畢業審核。
 function classifyGrade(score) {
-  if (typeof score === 'number' && Number.isFinite(score)) return score >= 60 ? 'passed' : 'failed';
-  const value = String(score ?? '').trim();
-  if (/^\d+(?:\.\d+)?$/.test(value)) return Number(value) >= 60 ? 'passed' : 'failed';
+  const numeric = parseNumericScore(score);
+  if (numeric !== null) return numeric >= 60 ? 'passed' : 'failed';
+  if (typeof score !== 'string') return 'unknown';
+  const value = score.trim();
   if (/^(?:pass|通過)(?:\(pass\))?$/i.test(value)) return 'passed';
   if (/^(?:fail|未通過|不及格)$/i.test(value)) return 'failed';
   return 'unknown';
@@ -51,8 +64,8 @@ function buildDerivedCreditSummary(gradeResult) {
     const row = semesters.get(semester);
     row.courses += 1;
     if (status === 'passed') row.credits += credits;
-    const numeric = typeof grade.score === 'number' ? grade.score : Number(grade.score);
-    if (String(grade.score ?? '').trim() !== '' && Number.isFinite(numeric) && numeric >= 0) {
+    const numeric = parseNumericScore(grade.score);
+    if (numeric !== null) {
       row.weightedScore += numeric * credits;
       row.weightedCredits += credits;
     }
