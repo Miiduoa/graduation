@@ -4,6 +4,7 @@ import { AIOverlayHost } from '../components/AIOverlayHost';
 import { CampusAssistantScreen } from '../screens/CampusAssistantScreen';
 import { askCampusAssistant } from '../features/campusAssistant';
 import { confirmCampusAgentWrite } from '../features/campusAssistantActions';
+import { refreshCampusSenseSnapshot } from '../services/campusSenseSnapshot';
 const mockClose = jest.fn();
 let mockOverlay = { visible: true, mode: 'chat', initialPrompt: '查校方公告' };
 jest.mock('../app/useAIOverlay', () => ({
@@ -40,6 +41,10 @@ jest.mock('../features/campusAssistant', () => ({
 jest.mock('../features/campusAssistantActions', () => ({
   confirmCampusAgentWrite: jest.fn(),
 }));
+jest.mock('../services/campusSenseSnapshot', () => ({
+  ...jest.requireActual('../services/campusSenseSnapshot'),
+  refreshCampusSenseSnapshot: jest.fn(),
+}));
 jest.mock('@expo/vector-icons', () => ({ Ionicons: () => null }));
 const request = askCampusAssistant as jest.Mock;
 function selectCampusMode(view: ReturnType<typeof render>) {
@@ -60,6 +65,7 @@ beforeEach(() => {
   // Prevent a pending result from one navigation test reaching another account.
   request.mockReset();
   jest.mocked(confirmCampusAgentWrite).mockReset();
+  jest.mocked(refreshCampusSenseSnapshot).mockReset();
   mockUid = 'A';
   mockSchool = 'pu';
   mockOverlay = { visible: true, mode: 'chat', initialPrompt: '查校方公告' };
@@ -268,4 +274,56 @@ test('a lost write receipt is never displayed as success or offered for automati
   expect(view.queryByText('伺服器已確認執行成功')).toBeNull();
   expect(view.queryByText('確認並執行')).toBeNull();
   expect(confirmCampusAgentWrite).toHaveBeenCalledTimes(1);
+});
+
+test('a user explicitly syncs authorized context before it reaches local inference', async () => {
+  const snapshot = {
+    userId: 'A', schoolId: 'pu', checkedAt: new Date().toISOString(),
+    schedule: { status: 'unavailable' as const, count: null },
+    assignments: { status: 'available' as const, count: 2, items: [
+      { title: '報告', groupName: '資料庫', dueAt: null },
+    ] },
+    announcements: { status: 'available' as const, items: [] },
+  };
+  jest.mocked(refreshCampusSenseSnapshot).mockResolvedValue(snapshot);
+  request.mockResolvedValueOnce({
+    content: '資料庫報告', source: 'device', tool: 'campus-snapshot', hasActions: false,
+  });
+  const view = render(<CampusAssistantScreen />);
+  expect(refreshCampusSenseSnapshot).not.toHaveBeenCalled();
+  await act(async () => fireEvent.press(view.getByText('同步我的校園資料')));
+  expect(refreshCampusSenseSnapshot).toHaveBeenCalledWith({
+    scope: { uid: 'A', schoolId: 'pu' }, isCurrent: expect.any(Function),
+  });
+  expect(view.getByText('已取得本次授權資料')).toBeTruthy();
+  fireEvent.changeText(view.getByLabelText('詢問校園助理'), '我的待交作業');
+  await act(async () => fireEvent.press(view.getByText('送出問題')));
+  expect(request).toHaveBeenCalledWith(expect.objectContaining({
+    mode: 'device', senseSnapshot: snapshot,
+  }));
+  expect(view.getByText(/先前主動同步的授權摘要/)).toBeTruthy();
+  fireEvent.press(view.getByText('清除本次校園摘要'));
+  expect(view.getByText('尚未同步校園摘要')).toBeTruthy();
+});
+
+test('switching schools drops sensed data and ignores a late sync response', async () => {
+  const pending = deferred<{
+    userId: string; schoolId: string; checkedAt: string;
+    schedule: { status: 'unavailable'; count: null };
+    assignments: { status: 'available'; count: number; items: [] };
+    announcements: { status: 'available'; items: [] };
+  }>();
+  jest.mocked(refreshCampusSenseSnapshot).mockReturnValueOnce(pending.promise);
+  const view = render(<CampusAssistantScreen />);
+  fireEvent.press(view.getByText('同步我的校園資料'));
+  mockSchool = 'other';
+  view.rerender(<CampusAssistantScreen />);
+  await act(async () => pending.resolve({
+    userId: 'A', schoolId: 'pu', checkedAt: new Date().toISOString(),
+    schedule: { status: 'unavailable', count: null },
+    assignments: { status: 'available', count: 0, items: [] },
+    announcements: { status: 'available', items: [] },
+  }));
+  expect(view.queryByText('已取得本次授權資料')).toBeNull();
+  expect(view.getByText('尚未同步校園摘要')).toBeTruthy();
 });
