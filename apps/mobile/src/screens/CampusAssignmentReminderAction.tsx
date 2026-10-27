@@ -74,7 +74,7 @@ export function CampusAssignmentReminderAction({
     setSaving(true);
     setMessage('');
     try {
-      const { scheduleCampusAssignmentReminder } = await import('../services/campusAssignmentReminders');
+      const { scheduleCampusAssignmentReminder } = require('../services/campusAssignmentReminders') as typeof import('../services/campusAssignmentReminders');
       const receipt = await scheduleCampusAssignmentReminder({
         scope,
         step,
@@ -101,7 +101,7 @@ export function CampusAssignmentReminderAction({
     setSaving(true);
     setMessage('');
     try {
-      const { cancelCampusAssignmentReminder } = await import('../services/campusAssignmentReminders');
+      const { cancelCampusAssignmentReminder } = require('../services/campusAssignmentReminders') as typeof import('../services/campusAssignmentReminders');
       await cancelCampusAssignmentReminder({
         scope, step, leadMinutes: confirmedLead, isCurrent,
       });
