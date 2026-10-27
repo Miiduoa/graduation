@@ -346,3 +346,83 @@ test('already cancelled requests never read private local context or start an LL
   expect(localLLM.generate).not.toHaveBeenCalled();
   expect(mockCallable).not.toHaveBeenCalled();
 });
+
+test('verified multi-step study plan runs on the phone without GGUF or cloud calls', async () => {
+  const { collectOnDeviceSchoolContext } = require('../../services/onDeviceSchoolContext');
+  const checkedAt = new Date().toISOString();
+  jest.mocked(collectOnDeviceSchoolContext).mockResolvedValueOnce({
+    checkedAt,
+    schoolId: 'pu', schoolName: '靜宜大學',
+    timetable: {
+      source: 'saved-device-copy',
+      updatedAt: checkedAt,
+      courses: [
+        { name: '資料庫', day: 1, start: 2, end: 3 },
+        { name: '網路概論', day: 1, start: 6, end: 7 },
+      ],
+    },
+  });
+  jest.mocked(localLLM.isModelDownloaded).mockResolvedValue(false);
+  jest.mocked(localLLM.getDownloadedModels).mockResolvedValue([]);
+  const snapshot = {
+    userId: 'A', schoolId: 'pu', checkedAt,
+    schedule: { status: 'unavailable' as const, count: null },
+    assignments: {
+      status: 'available' as const, count: 1,
+      items: [{ title: '程式設計期末報告', groupName: '程式設計', dueAt: new Date(Date.now() + 12 * 60 * 60 * 1000).toISOString() }],
+    },
+    announcements: { status: 'unavailable' as const, items: [] },
+  };
+  const result = await askCampusAssistant({
+    ...input(),
+    mode: 'device',
+    messages: [{ role: 'user', content: '今天要先處理什麼？' }],
+    senseSnapshot: snapshot,
+  });
+  expect(result).toMatchObject({
+    source: 'device', tool: 'campus-plan',
+    hasActions: false,
+    plan: { steps: expect.arrayContaining([
+      expect.objectContaining({
+        title: '程式設計期末報告', priority: 'urgent',
+        route: '/classroom', evidence: 'authorized-assignments',
+      }),
+    ]) },
+  });
+  expect(result.content).toContain('程式設計期末報告');
+  expect(localLLM.generate).not.toHaveBeenCalled();
+  expect(localLLM.loadModel).not.toHaveBeenCalled();
+  expect(mockCallable).not.toHaveBeenCalled();
+  expect(httpsCallable).not.toHaveBeenCalled();
+});
+
+test('offline plan never uses an expired snapshot belonging to another account', async () => {
+  const { collectOnDeviceSchoolContext } = require('../../services/onDeviceSchoolContext');
+  const checkedAt = new Date().toISOString();
+  jest.mocked(collectOnDeviceSchoolContext).mockResolvedValueOnce({
+    checkedAt, schoolId: 'pu', schoolName: '靜宜大學',
+    timetable: {
+      source: 'saved-device-copy', updatedAt: checkedAt,
+      courses: [{ name: '本人的資料庫課程', day: 1, start: 1, end: 2 }],
+    },
+  });
+  const result = await askCampusAssistant({
+    ...input(), mode: 'device',
+    messages: [{ role: 'user', content: '安排本週的課表與作業' }],
+    senseSnapshot: {
+      userId: 'other-person', schoolId: 'pu',
+      checkedAt: new Date(Date.now() - 60 * 60 * 1000).toISOString(),
+      schedule: { status: 'unavailable', count: null },
+      assignments: {
+        status: 'available', count: 1,
+        items: [{ title: '別人的私人作業', groupName: '私人課程', dueAt: null }],
+      },
+      announcements: { status: 'available', items: [] },
+    },
+  });
+  expect(result.tool).toBe('campus-plan');
+  expect(result.content).not.toContain('別人的私人作業');
+  expect(result.plan?.steps.every((step: { evidence: string }) =>
+    step.evidence !== 'authorized-assignments')).toBe(true);
+  expect(mockCallable).not.toHaveBeenCalled();
+});
