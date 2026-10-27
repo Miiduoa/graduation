@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { beforeEach, expect, it, vi } from 'vitest';
 import GradesPage from '@/app/grades/page';
 import TimetablePage from '@/app/timetable/page';
@@ -276,13 +276,19 @@ it('ignores an old account response even after logging out and back into the sam
       }),
   );
   const view = render(<GradesPage />);
+  // The controller starts reads in a microtask. Establish the old in-flight
+  // request before signing out; disposal before it starts cancels it entirely.
+  await waitFor(() => expect(loadAcademicRecords).toHaveBeenCalledTimes(1));
+  expect(loadAcademicRecords).toHaveBeenLastCalledWith('grades', 'one', 'pu');
   account.user = null;
   view.rerender(<GradesPage />);
   account.user = { uid: 'one' };
   view.rerender(<GradesPage />);
   await screen.findByText('真實來源科目');
+  expect(loadAcademicRecords).toHaveBeenCalledTimes(2);
   await act(async () => finish(grades('one', '舊回應不得出現')));
   expect(screen.queryByText('舊回應不得出現')).toBeNull();
+  expect(screen.getByText('真實來源科目')).toBeTruthy();
 });
 it('removes the previous account transcript before loading the next account', async () => {
   const view = render(<GradesPage />);
@@ -373,7 +379,7 @@ it('requires personal input for credit planning and clears it when the account c
   fireEvent.change(approved, { target: { value: '60' } });
   fireEvent.change(screen.getByLabelText('希望累計的學分'), { target: { value: '128' } });
   fireEvent.change(screen.getByLabelText('預計再修學分'), { target: { value: '20' } });
-  expect(screen.getByRole('status').textContent).toContain('48');
+  expect(within(screen.getByRole('region', { name: '個人學分試算' })).getByRole('status').textContent).toContain('48');
   account.user = { uid: 'two' };
   vi.mocked(loadAcademicRecords).mockResolvedValue(grades('two'));
   view.rerender(<CreditPlannerPage />);
@@ -525,4 +531,34 @@ it('never falls back to Providence for an invalid school id', async () => {
   expect(screen.queryByRole('link', { name: /學校帳號/ })).toBeNull();
   expect(screen.queryByText('成績請先到學校的 e 校園查看。')).toBeNull();
   expect(loadAcademicRecords).not.toHaveBeenCalled();
+});
+
+
+it('offers local credit planning in another campus without reading Providence grades', async () => {
+  navigation.path = '/credit-planner';
+  setBrowse('nthu');
+  render(<CreditPlannerPage />);
+  expect(await screen.findByLabelText('已確認可採計學分（自行填寫）')).toBeTruthy();
+  expect(screen.getByRole('heading', { name: '這所學校尚未提供官方成績來源' })).toBeTruthy();
+  expect(loadAcademicRecords).not.toHaveBeenCalled();
+  fireEvent.change(screen.getByLabelText('已確認可採計學分（自行填寫）'), { target: { value: '48' } });
+  fireEvent.change(screen.getByLabelText('希望累計的學分'), { target: { value: '128' } });
+  expect(screen.getByRole('region', { name: '個人學分試算' }).textContent).toContain('80 學分');
+});
+
+it('hides locally scoped plans while school selection or account state is unresolved', async () => {
+  navigation.path = '/credit-planner';
+  setBrowse(null, { catalogStatus: 'loading', loading: true, search: '' });
+  const view = render(<CreditPlannerPage />);
+  expect(screen.queryByRole('region', { name: '個人學分試算' })).toBeNull();
+  expect(loadAcademicRecords).not.toHaveBeenCalled();
+
+  setBrowse('pu');
+  account.loading = true;
+  view.rerender(<CreditPlannerPage />);
+  expect(screen.queryByRole('region', { name: '個人學分試算' })).toBeNull();
+
+  account.loading = false;
+  view.rerender(<CreditPlannerPage />);
+  expect(await screen.findByLabelText('已確認可採計學分（自行填寫）')).toBeTruthy();
 });

@@ -256,6 +256,28 @@ export default function CreditSummaryScreen(props: Props) {
 
       <Pressable
         accessibilityRole="button"
+        accessibilityLabel="規劃未來每學期課程"
+        onPress={() => navigation?.navigate?.('CreditPlanning')}
+        style={{
+          marginHorizontal: aiTokens.space.md,
+          marginTop: aiTokens.space.lg,
+          minHeight: 64,
+          justifyContent: 'center',
+          paddingHorizontal: aiTokens.space.lg,
+          borderRadius: aiTokens.radius.lg,
+          backgroundColor: aiTokens.aiGradientStart,
+          borderWidth: 1,
+          borderColor: aiTokens.border,
+        }}
+      >
+        <Text style={{ color: aiTokens.text, fontSize: 16, fontWeight: '700' }}>規劃未來每學期課程 →</Text>
+        <Text style={{ color: aiTokens.muted, fontSize: 12, marginTop: 5 }}>
+          安排候選課程、試算目標並與 Web 交換 JSON 備份
+        </Text>
+      </Pressable>
+
+      <Pressable
+        accessibilityRole="button"
         accessibilityLabel="查看完整試算與各學期明細"
         onPress={() => navigation?.navigate?.('CreditAuditLegacy')}
         style={{ margin: aiTokens.space.md, minHeight: 44, justifyContent: 'center' }}

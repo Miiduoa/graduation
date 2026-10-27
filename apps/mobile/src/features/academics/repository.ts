@@ -4,10 +4,9 @@ import { deleteDoc, getDocs, serverTimestamp, setDoc, writeBatch } from 'firebas
 
 import { collectionFromSegments, docFromSegments } from '../../data/firestorePath';
 import { getDb } from '../../firebase';
-import { loadPersistedValue, savePersistedValue } from '../../services/persistedStorage';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { savePersistedValue } from '../../services/persistedStorage';
 import { getScopedStorageKey } from '../../services/scopedStorage';
-
-const LEGACY_STORAGE_KEY = '@credit_audit_courses';
 
 export type StoredEnrollment = {
   id: string;
@@ -41,12 +40,58 @@ export function getCreditAuditStorageKey(userId: string | null, schoolId: string
 }
 
 export async function loadCreditAuditSavedCourses(storageKey: string): Promise<SavedCourse[]> {
-  return loadPersistedValue<SavedCourse[]>({
-    storageKey,
-    legacyKeys: [LEGACY_STORAGE_KEY],
-    fallback: [],
-    deserialize: (raw) => JSON.parse(raw) as SavedCourse[],
-  });
+  // Only the account+campus key is eligible. An unscoped legacy fallback could
+  // display one student's grades under another account on a shared device.
+  const raw = await AsyncStorage.getItem(storageKey);
+  if (raw === null) return [];
+
+  const parsed: unknown = JSON.parse(raw);
+  if (!Array.isArray(parsed) || parsed.length > 2_000) {
+    throw new Error('個人課程資料格式錯誤');
+  }
+  for (const item of parsed) {
+    if (
+      !item || typeof item !== 'object' || Array.isArray(item) ||
+      typeof item.id !== 'string' || !item.id ||
+      typeof item.name !== 'string' || !item.name.trim() || item.name.length > 200 ||
+      typeof item.credits !== 'number' || !Number.isFinite(item.credits) ||
+      item.credits < 0 || item.credits > 30 ||
+      typeof item.passed !== 'boolean' ||
+      !['required', 'elective', 'general', 'english', 'other'].includes(item.category)
+    ) {
+      throw new Error('個人課程內容無法驗證');
+    }
+  }
+  return parsed as SavedCourse[];
+}
+
+export function getCreditChecklistStorageKey(
+  uid: string | null,
+  schoolId: string,
+  templateId: string,
+): string {
+  return getScopedStorageKey(`credit-audit-checklist:${templateId}`, { uid, schoolId });
+}
+
+export async function loadCreditChecklistStatus(storageKey: string): Promise<Record<string, boolean>> {
+  const raw = await AsyncStorage.getItem(storageKey);
+  if (raw === null) return {};
+  const value: unknown = JSON.parse(raw);
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new Error('檢核清單格式錯誤');
+  }
+  const rows = Object.entries(value);
+  if (rows.length > 50 || rows.some(([key, done]) => !/^[A-Za-z0-9_-]{1,80}$/.test(key) || typeof done !== 'boolean')) {
+    throw new Error('檢核清單內容無法驗證');
+  }
+  return value as Record<string, boolean>;
+}
+
+export async function saveCreditChecklistStatus(
+  storageKey: string,
+  status: Record<string, boolean>,
+): Promise<void> {
+  await AsyncStorage.setItem(storageKey, JSON.stringify(status));
 }
 
 export async function saveCreditAuditSavedCourses(
@@ -73,10 +118,12 @@ export async function listStoredEnrollments(
   }
 
   const legacySnapshot = await getDocs(collectionFromSegments(db, ['users', uid, 'enrollments']));
-  return legacySnapshot.docs.map((docSnap) => ({
-    id: docSnap.id,
-    ...(docSnap.data() as Omit<StoredEnrollment, 'id'>),
-  }));
+  // Older global enrollments may include rows from another campus. Only include
+  // rows explicitly carrying this campus ID; legacy rows without one remain hidden.
+  return legacySnapshot.docs.flatMap((docSnap) => {
+    const data = docSnap.data() as Omit<StoredEnrollment, 'id'> & { schoolId?: string };
+    return data.schoolId === schoolId ? [{ ...data, id: docSnap.id }] : [];
+  });
 }
 
 export async function upsertCreditAuditEnrollment(params: {
@@ -107,7 +154,7 @@ export async function upsertCreditAuditEnrollment(params: {
       passed: params.course.passed,
       grade: params.course.grade ?? null,
       semester: params.course.semester ?? null,
-      status: 'completed',
+      status: params.course.passed ? 'completed' : 'in_progress',
       source: 'credit-audit-input',
       createdAt: serverTimestamp(),
       updatedAt: serverTimestamp(),
@@ -157,7 +204,7 @@ export async function syncCreditAuditCoursesToCloud(params: {
         passed: course.passed,
         grade: course.grade ?? null,
         semester: course.semester ?? null,
-        status: 'completed',
+        status: course.passed ? 'completed' : 'in_progress',
         source: 'credit-audit-input',
         localCreatedAt: course.createdAt,
         updatedAt: serverTimestamp(),

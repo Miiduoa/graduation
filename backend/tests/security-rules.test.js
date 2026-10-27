@@ -889,6 +889,47 @@ describe('firestore security rules', () => {
     );
   });
 
+  test('only active instructors may read immutable attendance corrections', async () => {
+    await seedFirestore(async (db) => {
+      const group = db.collection('groups').doc('group-1');
+      await group.set({ schoolId: 'tw-demo-uni', type: 'course' });
+      await db.collection('schools').doc('tw-demo-uni').collection('members').doc('teacher').set({
+        role: 'faculty', status: 'active',
+      });
+      await db.collection('schools').doc('tw-demo-uni').collection('members').doc('alice').set({
+        role: 'student', status: 'active',
+      });
+            await group.collection('members').doc('teacher').set({
+        role: 'instructor', status: 'active',
+      });
+      await group.collection('members').doc('alice').set({
+        role: 'member', status: 'active',
+      });
+      await group.collection('attendanceSessions').doc('session-1').set({
+        active: false, schemaVersion: 2,
+      });
+      await group
+        .collection('attendanceSessions').doc('session-1')
+        .collection('attendanceCorrections').doc('change-1').set({
+          teacherUid: 'teacher',
+          studentUid: 'alice',
+          previousStatus: null,
+          nextStatus: 'absent',
+          reason: '授課教師現場核實缺席',
+        });
+    });
+
+    const path = 'groups/group-1/attendanceSessions/session-1/attendanceCorrections/change-1';
+    const teacher = testEnv.authenticatedContext('teacher').firestore();
+    const student = testEnv.authenticatedContext('alice').firestore();
+    const outsider = testEnv.authenticatedContext('outsider').firestore();
+    await assertSucceeds(teacher.doc(path).get());
+    await assertFails(student.doc(path).get());
+    await assertFails(outsider.doc(path).get());
+    await assertFails(teacher.doc(path).set({ nextStatus: 'present' }, { merge: true }));
+    await assertFails(student.doc(path).delete());
+  });
+
   test('deny client-created wallet transactions', async () => {
     const db = testEnv.authenticatedContext('alice').firestore();
 

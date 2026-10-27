@@ -46,3 +46,21 @@ it('lets the caller toggle bookmark from the unfavorited state', () => {
   expect(onBookmark).toHaveBeenCalledTimes(1);
   expect(screen.getByRole('button', { name: '收藏貼文' }).textContent).toContain('收藏');
 });
+
+it('disables the bookmark button and does not fire when the feature is unavailable', () => {
+  const onBookmark = vi.fn();
+  render(
+    <PostBookmarkShareActions
+      saved={false}
+      bookmarkUnavailable
+      onBookmark={onBookmark}
+      onShare={() => undefined}
+      shareAriaLabel="分享"
+    />,
+  );
+  const bookmark = screen.getByRole('button', { name: '收藏功能暫時無法使用' });
+  expect((bookmark as HTMLButtonElement).disabled).toBe(true);
+  expect(bookmark.getAttribute('title')).toBe('收藏功能暫時無法使用');
+  fireEvent.click(bookmark);
+  expect(onBookmark).not.toHaveBeenCalled();
+});

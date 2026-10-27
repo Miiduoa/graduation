@@ -1,5 +1,5 @@
 /* eslint-disable */
-import React, { useMemo, useState, useEffect, useCallback } from 'react';
+import React, { useMemo, useState, useEffect, useCallback, useRef } from 'react';
 import { ScrollView, Text, TextInput, View, Alert, Pressable } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import * as DocumentPicker from 'expo-document-picker';
@@ -7,6 +7,9 @@ import { File, Paths } from 'expo-file-system';
 import { isAvailableAsync, shareAsync } from 'expo-sharing';
 import {
   getCreditAuditStorageKey,
+  getCreditChecklistStorageKey,
+  loadCreditChecklistStatus,
+  saveCreditChecklistStatus,
   loadCreditAuditSavedCourses,
   saveCreditAuditSavedCourses,
   syncCreditAuditCoursesToCloud,
@@ -24,44 +27,25 @@ import {
 import { TAB_BAR_CONTENT_BOTTOM_PADDING } from '../ui/navigationTheme';
 import { theme } from '../ui/theme';
 import {
-  calculateCredits,
   calculateDetailedCredits,
   type CreditCategory,
-  type DetailedGradTemplate,
 } from '@campus/shared/src/creditAudit';
-import { mockGradRuleTemplateV1, mockCourses, demoEnrollments } from '@campus/shared/src/mockData';
 import {
   puCSIE_115,
-  puDetailedTemplates,
-  puDepartments,
   flattenCategories,
   mapDetailedToLegacyCategory,
 } from '@campus/shared/src/puGradRequirements';
 import { useAuth } from '../state/auth';
 import { useSchool } from '../state/school';
 import { analytics } from '../services/analytics';
-
-function escapeCsvValue(value: string | number | boolean | null | undefined): string {
-  const normalized = value == null ? '' : String(value);
-  const escaped = normalized.replace(/"/g, '""');
-  return /[",\n]/.test(escaped) ? `"${escaped}"` : escaped;
-}
-
-function buildCsvContent(courses: SavedCourse[]): string {
-  const header = ['課程名稱', '學分', '分類', '成績', '學期', '通過'];
-  const rows = courses.map((course) => [
-    course.name,
-    course.credits,
-    course.category,
-    course.grade ?? '',
-    course.semester ?? '',
-    course.passed ? '是' : '否',
-  ]);
-
-  return [header, ...rows]
-    .map((row) => row.map((cell) => escapeCsvValue(cell)).join(','))
-    .join('\r\n');
-}
+import {
+  exportManualCreditCsv,
+  manualCreditAmount,
+  manualCreditProgress,
+  mayOfferPuCsie115Reference,
+  parseManualCreditCsv,
+  validCourseName,
+} from './creditAudit/manualCreditCourses';
 
 const legacyCategories: Array<{ key: CreditCategory; label: string; color: string }> = [
   { key: 'required', label: '必修', color: '#FF3B30' },
@@ -71,18 +55,22 @@ const legacyCategories: Array<{ key: CreditCategory; label: string; color: strin
   { key: 'other', label: '其他', color: '#FF9500' },
 ];
 
-const semesters = [
-  '111-1',
-  '111-2',
-  '112-1',
-  '112-2',
-  '113-1',
-  '113-2',
-  '114-1',
-  '114-2',
-  '115-1',
-  '115-2',
-];
+/** Historical terms remain accessible, while the current year is always near the front. */
+function localAcademicTerm(now = new Date()): { year: number; semester: 1 | 2 } {
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'Asia/Taipei',
+    year: 'numeric',
+    month: 'numeric',
+  }).formatToParts(now);
+  const calendarYear = Number(parts.find((part) => part.type === 'year')?.value);
+  const month = Number(parts.find((part) => part.type === 'month')?.value);
+  const year = calendarYear - 1911 - (month < 8 ? 1 : 0);
+  return { year, semester: month >= 8 || month <= 1 ? 1 : 2 };
+}
+
+const currentTerm = localAcademicTerm();
+const semesters = Array.from({ length: 13 }, (_, offset) => currentTerm.year + 2 - offset)
+  .flatMap((year) => [`${year}-1`, `${year}-2`]);
 
 const gradeOptions = ['A+', 'A', 'A-', 'B+', 'B', 'B-', 'C+', 'C', 'C-', 'D', 'E', 'F'];
 
@@ -115,26 +103,28 @@ export function CreditAuditInputScreen(props: any) {
   const [category, setCategory] = useState<CreditCategory>('elective');
   const [detailedCatKey, setDetailedCatKey] = useState('dept_elective');
   const [detailedSubKey, setDetailedSubKey] = useState<string | undefined>(undefined);
-  const [passed, setPassed] = useState(true);
-  const [grade, setGrade] = useState('A');
-  const [semester, setSemester] = useState('114-1');
+  const [passed, setPassed] = useState(false);
+  const [grade, setGrade] = useState('');
+  const [semester, setSemester] = useState(`${currentTerm.year}-${currentTerm.semester}`);
 
-  // Detailed graduation template (default to PU CSIE 115)
-  const [selectedTemplateId, setSelectedTemplateId] = useState(puCSIE_115.id);
-  const detailedTemplate = useMemo(
-    () => puDetailedTemplates.find((t) => t.id === selectedTemplateId) ?? puCSIE_115,
-    [selectedTemplateId],
-  );
+  // The only bundled sample is PU CSIE 115. Never silently apply it to another
+  // department, year, account or campus as a graduation audit.
+  const [referenceEnabled, setReferenceEnabled] = useState(false);
+  const canUseReference = mayOfferPuCsie115Reference(school.id, auth.profile?.department);
+  const referenceActive = canUseReference && referenceEnabled;
+  const detailedTemplate = puCSIE_115;
   const detailedCategoryOptions = useMemo(
     () => flattenCategories(detailedTemplate),
     [detailedTemplate],
   );
 
-  // Non-credit requirement satisfaction (persisted per user later)
+  // Reference checklist status is scoped to the account, campus and template.
   const [nonCreditSatisfied, setNonCreditSatisfied] = useState<Record<string, boolean>>({});
 
   const [savedCourses, setSavedCourses] = useState<SavedCourse[]>([]);
+  const [loadedScope, setLoadedScope] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const requestIdRef = useRef(0);
   const [saving, setSaving] = useState(false);
   const [syncing, setSyncing] = useState(false);
   const [importing, setImporting] = useState(false);
@@ -142,30 +132,51 @@ export function CreditAuditInputScreen(props: any) {
     () => getCreditAuditStorageKey(auth.user?.uid ?? null, school.id),
     [auth.user?.uid, school.id],
   );
+  const checklistKey = useMemo(
+    () => getCreditChecklistStorageKey(auth.user?.uid ?? null, school.id, detailedTemplate.id),
+    [auth.user?.uid, school.id, detailedTemplate.id],
+  );
+
+  const activeScope = useRef(storageKey);
+  activeScope.current = storageKey;
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   const loadSavedCourses = useCallback(async () => {
+    const request = ++requestIdRef.current;
+    setLoading(true);
+    setLoadedScope(null);
+    setSavedCourses([]);
+    setLoadError(null);
     try {
-      setSavedCourses(await loadCreditAuditSavedCourses(storageKey));
-    } catch (error) {
-      console.error('Failed to load saved courses:', error);
+      const [rows, checklist] = await Promise.all([
+        loadCreditAuditSavedCourses(storageKey),
+        loadCreditChecklistStatus(checklistKey),
+      ]);
+      if (request !== requestIdRef.current) return;
+      if (!Array.isArray(rows)) throw new Error('儲存格式錯誤');
+      setSavedCourses(rows);
+      setNonCreditSatisfied(checklist);
+    } catch {
+      if (request !== requestIdRef.current) return;
+      setLoadError('本機課程資料無法讀取，這次不會以空資料覆寫原紀錄。');
     } finally {
-      setLoading(false);
+      if (request === requestIdRef.current) {
+        setLoadedScope(storageKey);
+        setLoading(false);
+      }
     }
-  }, [storageKey]);
+  }, [storageKey, checklistKey]);
 
   useEffect(() => {
     analytics.logScreenView('CreditAuditInput');
+    setReferenceEnabled(false);
+    setNonCreditSatisfied({});
     void loadSavedCourses();
+    return () => { requestIdRef.current += 1; };
   }, [loadSavedCourses]);
 
   const saveCourses = useCallback(
-    async (courses: SavedCourse[]) => {
-      try {
-        await saveCreditAuditSavedCourses(storageKey, courses);
-      } catch (error) {
-        console.error('Failed to save courses:', error);
-      }
-    },
+    (courses: SavedCourse[]) => saveCreditAuditSavedCourses(storageKey, courses),
     [storageKey],
   );
 
@@ -190,15 +201,13 @@ export function CreditAuditInputScreen(props: any) {
       savedCourses.map((sc) => ({
         name: sc.name,
         credits: sc.credits,
-        categoryKey:
-          ((sc as any).detailedCatKey ??
-          mapDetailedToLegacyCategory((sc as any).detailedCatKey ?? '') !== 'other')
-            ? ((sc as any).detailedCatKey ?? categoryToDetailedKey(sc.category))
-            : categoryToDetailedKey(sc.category),
-        subCategoryKey: (sc as any).detailedSubKey,
+        categoryKey: referenceActive && sc.detailedCatKey
+          ? sc.detailedCatKey
+          : categoryToDetailedKey(sc.category),
+        subCategoryKey: referenceActive ? sc.detailedSubKey : undefined,
         passed: sc.passed,
       })),
-    [savedCourses],
+    [savedCourses, referenceActive],
   );
 
   const detailedAudit = useMemo(
@@ -237,32 +246,20 @@ export function CreditAuditInputScreen(props: any) {
     detailedAudit,
   ]);
 
-  // Legacy calculation (kept for backward compat)
-  const currentTotals = useMemo(() => {
-    const savedCoursesForCalc = savedCourses.map((sc) => ({
-      id: sc.id,
-      departmentId: 'dept-demo-cs',
-      name: sc.name,
-      credits: sc.credits,
-      category: sc.category,
-    }));
-    const savedEnrollments = savedCourses.map((sc) => ({
-      id: `en-${sc.id}`,
-      uid: auth.user?.uid || 'demo',
-      courseId: sc.id,
-      status: 'completed' as const,
-      passed: sc.passed,
-    }));
-    const coursesById = Object.fromEntries(
-      [...mockCourses, ...savedCoursesForCalc].map((c) => [c.id, c]),
-    );
-    const enrollments = [...demoEnrollments, ...savedEnrollments];
-    return calculateCredits({ template: mockGradRuleTemplateV1, coursesById, enrollments });
-  }, [savedCourses, auth.user?.uid]);
+  const personalProgress = useMemo(() => manualCreditProgress(savedCourses), [savedCourses]);
 
   const handleSaveCourse = async () => {
-    if (!name.trim()) {
-      Alert.alert('請輸入課程名稱', '課程名稱為必填欄位');
+    if (!validCourseName(name)) {
+      Alert.alert('請檢查課程名稱', '請輸入 1–80 字的課程名稱');
+      return;
+    }
+    const validCredits = manualCreditAmount(credits);
+    if (validCredits === null) {
+      Alert.alert('請檢查學分', '每門課應為 0.01–30 學分，最多兩位小數');
+      return;
+    }
+    if (passed && ['E', 'F'].includes(grade.toUpperCase())) {
+      Alert.alert('通過狀態與成績不一致', '請重新核對自行填寫的課程狀態。');
       return;
     }
 
@@ -272,12 +269,12 @@ export function CreditAuditInputScreen(props: any) {
       const courseDraft = {
         id: newCourseId,
         name: name.trim(),
-        credits: Number(credits) || 0,
+        credits: validCredits,
         category,
         detailedCatKey,
         detailedSubKey,
         passed,
-        grade: passed ? grade : undefined,
+        grade: passed && grade ? grade : undefined,
         semester,
       };
 
@@ -299,20 +296,22 @@ export function CreditAuditInputScreen(props: any) {
       };
 
       const updatedCourses = [...savedCourses, newCourse];
-      setSavedCourses(updatedCourses);
+      const savingScope = storageKey;
       await saveCourses(updatedCourses);
+      if (activeScope.current !== savingScope) return;
+      setSavedCourses(updatedCourses);
 
       analytics.logEvent('credit_course_added', {
         category,
-        credits: Number(credits),
+        credits: validCredits,
         passed,
       });
 
       setName('');
       setCredits('3');
       setCategory('elective');
-      setPassed(true);
-      setGrade('A');
+      setPassed(false);
+      setGrade('');
 
       Alert.alert(
         '已儲存',
@@ -328,15 +327,20 @@ export function CreditAuditInputScreen(props: any) {
   };
 
   const handleDeleteCourse = (courseId: string) => {
-    Alert.alert('確認刪除', '確定要刪除這門課程嗎？', [
+    Alert.alert('確認刪除', '確定刪除這門本機課程？已同步的雲端紀錄不會跟著刪除。', [
       { text: '取消', style: 'cancel' },
       {
         text: '刪除',
         style: 'destructive',
         onPress: async () => {
           const updatedCourses = savedCourses.filter((c) => c.id !== courseId);
-          setSavedCourses(updatedCourses);
-          await saveCourses(updatedCourses);
+          const savingScope = storageKey;
+          try {
+            await saveCourses(updatedCourses);
+            if (activeScope.current === savingScope) setSavedCourses(updatedCourses);
+          } catch {
+            Alert.alert('刪除失敗', '這次未能更新本機紀錄，請重試。');
+          }
         },
       },
     ]);
@@ -363,8 +367,10 @@ export function CreditAuditInputScreen(props: any) {
           ? { ...course, syncedToCloud: true }
           : course,
       );
-      setSavedCourses(updatedCourses);
+      const savingScope = storageKey;
       await saveCourses(updatedCourses);
+      if (activeScope.current !== savingScope) return;
+      setSavedCourses(updatedCourses);
 
       analytics.logEvent('credit_courses_synced', {
         count: unsyncedCourses.length,
@@ -372,7 +378,7 @@ export function CreditAuditInputScreen(props: any) {
 
       Alert.alert('同步成功', `已同步 ${unsyncedCourses.length} 門課程到雲端`);
     } catch (error) {
-      Alert.alert('同步失敗', error instanceof Error ? error.message : '請稍後再試');
+      Alert.alert('同步狀態未確認', '可能已寫入雲端，但本機同步狀態尚未保存。請先核對，避免重複操作。');
     } finally {
       setSyncing(false);
     }
@@ -387,7 +393,7 @@ export function CreditAuditInputScreen(props: any) {
     try {
       const timestamp = new Date().toISOString().slice(0, 10);
       const file = new File(Paths.cache, `credit-audit-${timestamp}.csv`);
-      const csvContent = `\uFEFF${buildCsvContent(savedCourses)}`;
+      const csvContent = exportManualCreditCsv(savedCourses);
 
       await file.write(csvContent);
 
@@ -412,98 +418,58 @@ export function CreditAuditInputScreen(props: any) {
   }, [savedCourses]);
 
   const handleImportCSV = async () => {
+    const selectedScope = storageKey;
     try {
       const result = await DocumentPicker.getDocumentAsync({
         type: ['text/csv', 'text/comma-separated-values', 'application/csv'],
         copyToCacheDirectory: true,
       });
-
-      if (result.canceled || !result.assets?.[0]) {
-        return;
-      }
-
-      setImporting(true);
+      if (result.canceled || !result.assets?.[0] || activeScope.current !== selectedScope) return;
       const file = result.assets[0];
-
-      const pickedFile = new File(file.uri);
-      const content = await pickedFile.text();
-
-      const lines = content.split('\n').filter((line) => line.trim());
-      if (lines.length < 2) {
-        Alert.alert('格式錯誤', 'CSV 檔案必須包含標題行和至少一筆資料');
+      if (file.size != null && file.size > 600_000) {
+        Alert.alert('檔案過大', '每次最多匯入約 600 KB，請先分批整理。');
         return;
       }
-
-      const headers = lines[0].split(',').map((h) => h.trim().toLowerCase());
-      const nameIdx = headers.findIndex(
-        (h) => h.includes('name') || h.includes('課程') || h.includes('名稱'),
-      );
-      const creditsIdx = headers.findIndex((h) => h.includes('credit') || h.includes('學分'));
-      const categoryIdx = headers.findIndex(
-        (h) => h.includes('category') || h.includes('分類') || h.includes('類別'),
-      );
-      const gradeIdx = headers.findIndex((h) => h.includes('grade') || h.includes('成績'));
-      const semesterIdx = headers.findIndex((h) => h.includes('semester') || h.includes('學期'));
-
-      if (nameIdx === -1 || creditsIdx === -1) {
-        Alert.alert('格式錯誤', 'CSV 必須包含課程名稱和學分欄位');
-        return;
-      }
-
-      const importedCourses: SavedCourse[] = [];
-
-      for (let i = 1; i < lines.length; i++) {
-        const values = lines[i].split(',').map((v) => v.trim());
-        if (values.length < 2) continue;
-
-        const courseName = values[nameIdx];
-        const courseCredits = parseInt(values[creditsIdx]) || 0;
-
-        if (!courseName) continue;
-
-        let courseCategory: CreditCategory = 'elective';
-        if (categoryIdx !== -1) {
-          const cat = values[categoryIdx]?.toLowerCase();
-          if (cat?.includes('必修') || cat?.includes('required')) courseCategory = 'required';
-          else if (cat?.includes('通識') || cat?.includes('general')) courseCategory = 'general';
-          else if (cat?.includes('英文') || cat?.includes('english')) courseCategory = 'english';
-          else if (cat?.includes('其他') || cat?.includes('other')) courseCategory = 'other';
-        }
-
-        const courseGrade = gradeIdx !== -1 ? values[gradeIdx] : 'A';
-        const courseSemester = semesterIdx !== -1 ? values[semesterIdx] : semester;
-        const coursePassed = !courseGrade || !['F', 'E'].includes(courseGrade.toUpperCase());
-
-        importedCourses.push({
-          id: `import-${Date.now()}-${i}-${Math.random().toString(36).substr(2, 5)}`,
-          name: courseName,
-          credits: courseCredits,
-          category: courseCategory,
-          passed: coursePassed,
-          grade: coursePassed ? courseGrade : undefined,
-          semester: courseSemester,
-          createdAt: new Date().toISOString(),
-          syncedToCloud: false,
-        });
-      }
-
-      if (importedCourses.length === 0) {
-        Alert.alert('匯入失敗', '未能從 CSV 中解析出有效的課程資料');
-        return;
-      }
-
-      const updatedCourses = [...savedCourses, ...importedCourses];
-      setSavedCourses(updatedCourses);
-      await saveCourses(updatedCourses);
-
-      analytics.logEvent('credit_courses_imported', {
-        count: importedCourses.length,
-      });
-
-      Alert.alert('匯入成功', `已匯入 ${importedCourses.length} 門課程`);
+      setImporting(true);
+      const content = await new File(file.uri).text();
+      const parsed = parseManualCreditCsv(content);
+      if (activeScope.current !== selectedScope) return;
+      const note = [
+        `辨識到 ${parsed.courses.length} 門課程。`,
+        parsed.skipped ? `已略過 ${parsed.skipped} 筆非課程或無效資料。` : '',
+        parsed.missingPassEvidence
+          ? `其中 ${parsed.missingPassEvidence} 門沒有明確「通過」標記，將暫不計入自行標示通過的學分。`
+          : '',
+        '匯入只是個人紀錄，不代表學校正式採計。',
+      ].filter(Boolean).join('\n');
+      Alert.alert('確認匯入課程', note, [
+        { text: '取消', style: 'cancel' },
+        {
+          text: `匯入 ${parsed.courses.length} 門`,
+          onPress: async () => {
+            if (activeScope.current !== selectedScope) return;
+            const now = new Date().toISOString();
+            const importedCourses: SavedCourse[] = parsed.courses.map((course, index) => ({
+              ...course,
+              id: `import-${Date.now()}-${index}-${Math.random().toString(36).slice(2, 7)}`,
+              createdAt: now,
+              syncedToCloud: false,
+            }));
+            const next = [...savedCourses, ...importedCourses];
+            try {
+              await saveCourses(next);
+              if (activeScope.current !== selectedScope) return;
+              setSavedCourses(next);
+              analytics.logEvent('credit_courses_imported', { count: importedCourses.length });
+              Alert.alert('匯入完成', `已儲存 ${importedCourses.length} 門本機課程，尚未同步雲端。`);
+            } catch {
+              Alert.alert('匯入失敗', '本機儲存未完成，現有課程仍保留。');
+            }
+          },
+        },
+      ]);
     } catch (error) {
-      console.error('CSV import error:', error);
-      Alert.alert('匯入失敗', '讀取檔案時發生錯誤');
+      Alert.alert('匯入失敗', error instanceof Error ? error.message : '無法解析這份 CSV');
     } finally {
       setImporting(false);
     }
@@ -517,16 +483,22 @@ export function CreditAuditInputScreen(props: any) {
 
     Alert.alert(
       '清除所有資料',
-      `確定要刪除全部 ${savedCourses.length} 門課程嗎？此操作無法復原。`,
+      `確定清除本機的 ${savedCourses.length} 門課程？這不會刪除之前同步到雲端的紀錄。`,
       [
         { text: '取消', style: 'cancel' },
         {
           text: '清除',
           style: 'destructive',
           onPress: async () => {
-            setSavedCourses([]);
-            await saveCourses([]);
-            Alert.alert('已清除', '所有課程資料已刪除');
+            const savingScope = storageKey;
+            try {
+              await saveCourses([]);
+              if (activeScope.current !== savingScope) return;
+              setSavedCourses([]);
+              Alert.alert('已清除本機資料', '本機課程已清除；先前同步到雲端的資料不會跟著刪除。');
+            } catch {
+              Alert.alert('清除失敗', '無法更新本機紀錄，請重新操作。');
+            }
           },
         },
       ],
@@ -535,14 +507,26 @@ export function CreditAuditInputScreen(props: any) {
 
   const unsyncedCount = savedCourses.filter((c) => !c.syncedToCloud).length;
 
-  const TABS = ['新增課程', '畢業進度', '已儲存', '匯入/匯出'];
+  const TABS = ['新增課程', '修課概覽', '已儲存', '匯入/匯出'];
 
-  if (loading) {
+  if (loading || loadedScope !== storageKey) {
     return (
       <Screen title="學分試算">
         <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
           <Spinner size={32} />
           <Text style={{ color: theme.colors.muted, marginTop: 12 }}>載入中...</Text>
+        </View>
+      </Screen>
+    );
+  }
+  if (loadError) {
+    return (
+      <Screen title="個人學分規劃">
+        <View style={{ padding: 24, gap: 14 }}>
+          <Text style={{ color: theme.colors.text, fontSize: 16, lineHeight: 24 }}>
+            {loadError}
+          </Text>
+          <Button text="重新讀取本機課程" kind="primary" onPress={() => void loadSavedCourses()} />
         </View>
       </Screen>
     );
@@ -590,7 +574,7 @@ export function CreditAuditInputScreen(props: any) {
                   <TextInput
                     value={credits}
                     onChangeText={setCredits}
-                    keyboardType="number-pad"
+                    keyboardType="decimal-pad"
                     style={{
                       marginTop: 4,
                       paddingVertical: 12,
@@ -644,8 +628,9 @@ export function CreditAuditInputScreen(props: any) {
               <View style={{ height: 12 }} />
 
               <Text style={{ color: theme.colors.muted, marginBottom: 4 }}>
-                學分分類（依 {detailedTemplate.departmentName} 畢業規則）
+                {referenceActive ? '參考學程分類（自行標示，非校方認列）' : '個人課程分類（自行標示）'}
               </Text>
+              {referenceActive ? (
               <View style={{ gap: 6, marginTop: 4 }}>
                 {detailedTemplate.categories.map((cat) => {
                   const isMainSelected = detailedCatKey === cat.key && !detailedSubKey;
@@ -734,20 +719,53 @@ export function CreditAuditInputScreen(props: any) {
                 })}
               </View>
 
+              ) : (
+              <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 4 }}>
+                {legacyCategories.map((entry) => (
+                  <Pressable
+                    key={entry.key}
+                    accessibilityRole="radio"
+                    accessibilityState={{ checked: category === entry.key }}
+                    accessibilityLabel={entry.label}
+                    onPress={() => {
+                      setCategory(entry.key);
+                      setDetailedCatKey(categoryToDetailedKey(entry.key));
+                      setDetailedSubKey(undefined);
+                    }}
+                    style={{
+                      minHeight: 44,
+                      justifyContent: 'center',
+                      paddingHorizontal: 16,
+                      borderRadius: theme.radius.md,
+                      borderWidth: 1,
+                      borderColor: category === entry.key ? theme.colors.accent : theme.colors.border,
+                      backgroundColor: category === entry.key ? theme.colors.accentSoft : theme.colors.surface2,
+                    }}
+                  >
+                    <Text style={{ color: theme.colors.text, fontWeight: category === entry.key ? '700' : '500' }}>
+                      {entry.label}
+                    </Text>
+                  </Pressable>
+                ))}
+              </View>
+              )}
+
               <View style={{ height: 12 }} />
 
-              <Text style={{ color: theme.colors.muted, marginBottom: 4 }}>成績</Text>
+              <Text style={{ color: theme.colors.muted, marginBottom: 4 }}>
+                通過狀態（自行確認，不代表校方已認列）
+              </Text>
               <View style={{ flexDirection: 'row', gap: 8, marginTop: 4 }}>
                 <View style={{ flex: 1 }}>
                   <Button
-                    text="通過"
+                    text="已確認通過"
                     kind={passed ? 'primary' : 'secondary'}
                     onPress={() => setPassed(true)}
                   />
                 </View>
                 <View style={{ flex: 1 }}>
                   <Button
-                    text="未通過"
+                    text="尚未確認／未通過"
                     kind={!passed ? 'primary' : 'secondary'}
                     onPress={() => setPassed(false)}
                   />
@@ -756,7 +774,9 @@ export function CreditAuditInputScreen(props: any) {
 
               {passed && (
                 <View style={{ marginTop: 12 }}>
-                  <Text style={{ color: theme.colors.muted, marginBottom: 4 }}>等第成績</Text>
+                  <Text style={{ color: theme.colors.muted, marginBottom: 4 }}>
+                    等第成績（可留空，不自動填 A）
+                  </Text>
                   <ScrollView horizontal showsHorizontalScrollIndicator={false}>
                     <View style={{ flexDirection: 'row', gap: 6 }}>
                       {gradeOptions.map((g) => (
@@ -799,8 +819,9 @@ export function CreditAuditInputScreen(props: any) {
               </View>
             </AnimatedCard>
 
+            {referenceActive ? (
             <AnimatedCard
-              title="即時試算預覽"
+              title="115 入學資工系參考情境"
               subtitle={`${detailedTemplate.departmentName} ${detailedTemplate.academicYear} 學年度`}
               delay={100}
             >
@@ -942,16 +963,75 @@ export function CreditAuditInputScreen(props: any) {
                 )}
               </View>
             </AnimatedCard>
+            ) : (
+              <AnimatedCard title="我的修課學分" subtitle="已確認通過為自行標示，未套用畢業門檻">
+                <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'baseline' }}>
+                  <Text style={{ color: theme.colors.muted, fontSize: 13 }}>自行標示通過</Text>
+                  <Text style={{ fontSize: 28, fontWeight: '700', color: theme.colors.text }}>
+                    {personalProgress.selfReportedCredits} <Text style={{ fontSize: 13 }}>學分</Text>
+                  </Text>
+                </View>
+                <Text style={{ color: theme.colors.muted, fontSize: 12, marginTop: 10, lineHeight: 19 }}>
+                  共 {personalProgress.totalCourses} 門手動記錄；{personalProgress.pendingCourses} 門尚未明示通過。
+                  這裡未核對重修、抵免、通識分類或畢業審查，請以學校正式資料為準。
+                </Text>
+              </AnimatedCard>
+            )}
           </>
         )}
 
         {tab === 1 && (
           <>
-            {/* 系所選擇 */}
+            <AnimatedCard title="個人修課總覽" subtitle="根據手動記錄整理，不代替正式畢業審查">
+              <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'baseline' }}>
+                <Text style={{ color: theme.colors.muted }}>自行標示通過的課程學分</Text>
+                <Text style={{ color: theme.colors.text, fontSize: 28, fontWeight: '700' }}>
+                  {personalProgress.selfReportedCredits}
+                </Text>
+              </View>
+              <Text style={{ color: theme.colors.muted, fontSize: 12, marginTop: 10, lineHeight: 20 }}>
+                {personalProgress.reportedPassedCourses} 門標示通過，{personalProgress.pendingCourses} 門未確認。
+                未扣除重修與不能採計的課程，也未推定學校畢業資格。
+              </Text>
+              {canUseReference ? (
+                <Pressable
+                  accessibilityRole="button"
+                  style={{ minHeight: 44, paddingVertical: 12, justifyContent: 'center' }}
+                  onPress={() => {
+                    if (referenceActive) {
+                      setReferenceEnabled(false);
+                      return;
+                    }
+                    Alert.alert(
+                      '啟用 115 學年度資工系參考規則？',
+                      '僅供靜宜資訊工程學系 115 學年度入學學生自行估算。請先確認你的入學年度；系統不會把此範本當作正式畢業審查。',
+                      [
+                        { text: '取消', style: 'cancel' },
+                        { text: '我已核對，啟用參考', onPress: () => setReferenceEnabled(true) },
+                      ],
+                    );
+                  }}
+                >
+                  <Text style={{ color: theme.colors.accent, fontWeight: '700' }}>
+                    {referenceActive ? '關閉系所參考規則' : '手動啟用 115 資工系參考規則'}
+                  </Text>
+                </Pressable>
+              ) : (
+                <Text style={{ color: theme.colors.muted, fontSize: 12, marginTop: 10, lineHeight: 19 }}>
+                  此學校／系所目前沒有對應的已核實畢業規則，無法以其他科系範本推定你的畢業門檻。
+                </Text>
+              )}
+            </AnimatedCard>
+            {referenceActive ? (
+              <>
+            {/* 使用者明確選擇後，才顯示對應系所的參考規則。 */}
             <AnimatedCard
-              title="畢業規則"
+              title="系所學分參考"
               subtitle={`${detailedTemplate.schoolName} — ${detailedTemplate.departmentName}`}
             >
+              <Text style={{ color: theme.colors.muted, fontSize: 12, lineHeight: 19, marginBottom: 12 }}>
+                僅計算手動標示的學分與此版分類門檻；未核對必修課代碼、重修替代、抵免、修課年度及正式畢業資格。
+              </Text>
               <View style={{ gap: 8 }}>
                 <Text style={{ color: theme.colors.muted, fontSize: 12 }}>
                   {detailedTemplate.academicYear} 學年度入學 ／ {detailedTemplate.division} ／{' '}
@@ -990,7 +1070,7 @@ export function CreditAuditInputScreen(props: any) {
                 <Text style={{ color: theme.colors.muted, fontSize: 12, textAlign: 'right' }}>
                   {detailedAudit.total.remaining > 0
                     ? `還需 ${detailedAudit.total.remaining} 學分`
-                    : '已達標！'}
+                    : '參考學分量達門檻（非正式認列）'}
                 </Text>
               </View>
             </AnimatedCard>
@@ -1139,10 +1219,13 @@ export function CreditAuditInputScreen(props: any) {
                     <Pressable
                       key={req.key}
                       onPress={() => {
-                        setNonCreditSatisfied((prev) => ({
-                          ...prev,
-                          [req.key]: !prev[req.key],
-                        }));
+                        const previousScope = storageKey;
+                        const next = { ...nonCreditSatisfied, [req.key]: !nonCreditSatisfied[req.key] };
+                        void saveCreditChecklistStatus(checklistKey, next)
+                          .then(() => {
+                            if (activeScope.current === previousScope) setNonCreditSatisfied(next);
+                          })
+                          .catch(() => Alert.alert('尚未儲存', '這次勾選無法保存，請稍後重試。'));
                       }}
                       style={{
                         flexDirection: 'row',
@@ -1191,7 +1274,7 @@ export function CreditAuditInputScreen(props: any) {
                   );
                 })}
                 <Text style={{ color: theme.colors.muted, fontSize: 11, textAlign: 'center' }}>
-                  點擊可切換完成狀態
+                  個人勾選結果只保存在此裝置，不代表校方認證完成
                 </Text>
               </View>
             </AnimatedCard>
@@ -1213,6 +1296,15 @@ export function CreditAuditInputScreen(props: any) {
                 </View>
               </AnimatedCard>
             )}
+              </>
+            ) : (
+              <AnimatedCard title="下一步怎麼安排" subtitle="先核對校方門檻，再決定修課計畫">
+                <Text style={{ color: theme.colors.muted, lineHeight: 20 }}>
+                  可在「新增課程」整理成績與修課，或從 Web 學分規劃逐學期安排候選課程。
+                  目前沒有你的學制與入學年度的正式採計規則，避免直接顯示錯誤的畢業達標百分比。
+                </Text>
+              </AnimatedCard>
+            )}
           </>
         )}
 
@@ -1220,7 +1312,7 @@ export function CreditAuditInputScreen(props: any) {
           <>
             <AnimatedCard
               title={`已儲存課程（${savedCourses.length}）`}
-              subtitle={unsyncedCount > 0 ? `${unsyncedCount} 門尚未同步` : '所有課程已同步'}
+              subtitle={savedCourses.length === 0 ? '尚無本機課程' : unsyncedCount > 0 ? `${unsyncedCount} 門尚未同步` : '目前課程皆已標示同步'}
             >
               {savedCourses.length === 0 ? (
                 <View style={{ alignItems: 'center', padding: 24 }}>
@@ -1281,7 +1373,7 @@ export function CreditAuditInputScreen(props: any) {
                             <Pill text={catInfo?.label || course.category} />
                             {course.semester && <Pill text={course.semester} />}
                             {course.grade && <Pill text={course.grade} kind="accent" />}
-                            {!course.passed && <Pill text="未通過" kind="accent" />}
+                            {!course.passed && <Pill text="未標示通過" kind="accent" />}
                           </View>
                         </View>
                         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
@@ -1323,11 +1415,12 @@ export function CreditAuditInputScreen(props: any) {
 
         {tab === 3 && (
           <>
-            <AnimatedCard title="匯入課程" subtitle="從 CSV 檔案批量匯入">
+            <AnimatedCard title="匯入課程" subtitle="先預覽、再確認寫入這台手機">
               <Text style={{ color: theme.colors.muted, lineHeight: 20, marginBottom: 12 }}>
                 支援的 CSV 格式：{'\n'}
                 課程名稱, 學分, 分類, 成績, 學期{'\n'}
-                例如：資料庫系統, 3, 必修, A, 113-1
+                例如：資料庫系統, 3, 必修, A, 113-1, 否
+                {'\\n'}沒有「通過」欄位的匯入資料，一律先列為未確認，不會自動認定已取得學分。
               </Text>
               <Button
                 text={importing ? '匯入中...' : '選擇 CSV 檔案'}

@@ -80,6 +80,7 @@ export type {
 import { collectionFromSegments, docFromSegments } from './firestorePath';
 import { areUniversalDevAccountsEnabled } from './runtime';
 import { subscribePreferredCollection } from './preferredCollection';
+import { SchoolLoginHttpError } from './schoolLoginErrorCopy';
 
 const firebaseConfig = {
   apiKey: process.env.NEXT_PUBLIC_FIREBASE_API_KEY,
@@ -279,8 +280,12 @@ export async function signInWithPuStudentId(
   studentId: string,
   password: string,
   signal?: AbortSignal,
+  schoolId?: string,
 ): Promise<User | null> {
   const attempt = ++schoolLoginAttempt;
+  if (schoolId && schoolId !== 'pu') {
+    throw new SchoolLoginHttpError(503, '尚未開放');
+  }
   const mainAuth = getAuth();
   if (!mainAuth) return null;
   if (isEmulatorTestEnv()) {
@@ -302,6 +307,7 @@ export async function signInWithPuStudentId(
     body: JSON.stringify({
       studentId,
       password,
+      ...(schoolId ? { schoolId } : {}),
     }),
     signal,
   });
@@ -309,11 +315,13 @@ export async function signInWithPuStudentId(
   const data = (await parseFunctionJsonResponse(
     response,
     'PU student login endpoint returned an invalid response',
-  )) as Partial<PuStudentLoginResponse> & { error?: string };
+  )) as Partial<PuStudentLoginResponse> & { error?: string; code?: string };
 
   if (!response.ok || typeof data.customToken !== 'string') {
-    throw new Error(
-      typeof data.error === 'string' ? data.error : '學號登入失敗，請確認帳號密碼是否正確',
+    throw new SchoolLoginHttpError(
+      response.status,
+      typeof data.error === 'string' ? data.error : '',
+      typeof data.code === 'string' ? data.code : '',
     );
   }
 

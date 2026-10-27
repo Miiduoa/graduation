@@ -1134,6 +1134,12 @@ service cloud.firestore {
             || (isActiveGroupMember(groupId) && recordId == request.auth.uid);
           allow write: if false;
         }
+        // Server-only immutable teacher corrections. Students cannot enumerate audit details.
+        match /attendanceCorrections/{correctionId} {
+          allow read: if isActiveGroupMember(groupId)
+            && get(/databases/$(database)/documents/groups/$(groupId)/members/$(request.auth.uid)).data.role in ['owner', 'instructor'];
+          allow write: if false;
+        }
       }
     }
 

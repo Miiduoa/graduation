@@ -947,3 +947,26 @@ test('unknown school keeps raw times and still does not contact course access', 
   expect(view.queryByText(/目前使用/)).toBeNull();
   expect(mockRequest).not.toHaveBeenCalled();
 });
+
+test('native saved school HTML tables enter editable review rather than saving immediately', async () => {
+  const html = '<table><tr><th>課程名稱</th><th>學分</th><th>成績</th></tr>' +
+    '<tr><td>離散數學</td><td>3</td><td>92</td></tr></table>';
+  mockFileText.mockResolvedValue(html);
+  jest.mocked(DocumentPicker.getDocumentAsync).mockResolvedValue({
+    canceled: false,
+    assets: [{ uri: 'file:///grades.html', name: 'grades.html', size: html.length, mimeType: 'text/html' }],
+  });
+  const view = render(<PersonalImportScreen />);
+  await waitFor(() => expect(view.queryByLabelText('讀取匯入紀錄')).toBeNull());
+  fireEvent.press(view.getByText('成績與學分'));
+  fireEvent.changeText(view.getByLabelText('這批資料的學年度（例如 115）'), '115');
+  fireEvent.changeText(view.getByLabelText('這批資料的學期（例如 1、2、暑期）'), '1');
+  fireEvent.press(view.getByText('選擇檔案'));
+  expect(await view.findByText('選擇校務網頁表格')).toBeTruthy();
+  expect((await loadPersonalImports(scope)).records).toHaveLength(0);
+  fireEvent.press(view.getByText(/表格 1 · 1 筆/));
+  expect(view.getByLabelText('貼上或修正原始文字').props.value).toContain('離散數學');
+  fireEvent.press(view.getByText('整理成可編輯資料'));
+  expect(view.getByText(personalImportPreviewNotice(1))).toBeTruthy();
+  expect((await loadPersonalImports(scope)).records).toHaveLength(0);
+});
