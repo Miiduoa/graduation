@@ -13,12 +13,12 @@ jest.mock('firebase/functions', () => ({
   httpsCallable: jest.fn(() => mockCallable),
 }));
 jest.mock('../../firebase', () => ({
-  getAuthInstance: () => ({ currentUser: mockUid ? { mockUid } : null }),
+  getAuthInstance: () => ({ currentUser: mockUid ? { uid: mockUid } : null }),
   getFunctionsInstance: () => ({}),
   isFirebaseMockMode: () => mockMode,
 }));
 
-const scope = { mockUid: 'A', schoolId: 'pu' };
+const scope = { uid: 'A', schoolId: 'pu' };
 const envelope = () => ({
   schoolId: 'pu',
   checkedAt: new Date().toISOString(),
@@ -88,8 +88,8 @@ test('rejects stale and mismatched summaries rather than accepting false live st
     .rejects.toThrow('invalid-sense-response');
 
   const result = await refreshCampusSenseSnapshot({ scope, isCurrent: () => true });
-  expect(validCampusSenseSnapshot(result, { mockUid: 'other', schoolId: 'pu' })).toBeNull();
-  expect(validCampusSenseSnapshot(result, { mockUid: 'A', schoolId: 'other-school' })).toBeNull();
+  expect(validCampusSenseSnapshot(result, { uid: 'other', schoolId: 'pu' })).toBeNull();
+  expect(validCampusSenseSnapshot(result, { uid: 'A', schoolId: 'other-school' })).toBeNull();
   expect(validCampusSenseSnapshot(result, scope, Date.now() + CAMPUS_SENSE_MAX_AGE_MS + 1000))
     .toBeNull();
 });
