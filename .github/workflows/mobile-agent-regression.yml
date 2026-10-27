@@ -7,6 +7,7 @@ on:
     paths:
       - 'apps/mobile/src/**'
       - 'backend/functions/agent/assignmentSummary*'
+      - 'backend/functions/agent/assignmentPaging*'
       - 'backend/functions/agent/handlers/getCampusAssistantSnapshot.js'
       - '.github/workflows/mobile-agent-regression.yml'
   pull_request:
@@ -17,6 +18,7 @@ on:
     paths:
       - 'apps/mobile/src/**'
       - 'backend/functions/agent/assignmentSummary*'
+      - 'backend/functions/agent/assignmentPaging*'
       - 'backend/functions/agent/handlers/getCampusAssistantSnapshot.js'
       - '.github/workflows/mobile-agent-regression.yml'
 
@@ -64,12 +66,15 @@ jobs:
             src/__tests__/services/campusStudyAgenda.test.ts \
             src/__tests__/services/campusAssignmentReminders.test.ts \
             src/__tests__/services/campusAssignmentTarget.test.ts \
+            src/__tests__/services/campusAssignmentPreview.test.ts \
             src/__tests__/services/campusSenseSnapshot.test.ts \
+            src/__tests__/services/campusSensePaging.test.ts \
             src/__tests__/services/offlineCampusTools.test.ts \
             src/__tests__/services/localCampusToolProtocol.test.ts \
             src/__tests__/features/campusAssistant.test.ts \
             src/__tests__/features/campusAssistantSemantic.test.ts \
             src/__tests__/CampusAssistantScreen.test.tsx \
+            src/__tests__/CampusAssignmentCoverage.test.tsx \
             src/__tests__/CampusAssignmentHandoff.test.tsx \
             src/__tests__/CampusStudyAgendaCard.test.tsx \
             src/__tests__/CampusLocalReadResults.test.tsx \
@@ -77,4 +82,4 @@ jobs:
             --runInBand --ci
 
       - name: Check authorized assignment snapshot contract
-        run: pnpm --filter functions test --runInBand agent/assignmentSummary.test.js agent/executeCampusAssistantCore.sources.test.js
+        run: pnpm --filter functions test --runInBand agent/assignmentSummary.test.js agent/assignmentPaging.test.js agent/executeCampusAssistantCore.sources.test.js
