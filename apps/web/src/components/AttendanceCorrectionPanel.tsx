@@ -11,6 +11,7 @@ import {
   type AttendanceStudent,
 } from '@/lib/courseAttendance';
 import { Button } from './ui/Button';
+import { AttendanceRegisterPanel } from './AttendanceRegisterPanel';
 import styles from './course-attendance-correction.module.css';
 
 const statuses: { status: AttendanceCorrectionStatus; label: string }[] = [
@@ -46,6 +47,8 @@ export function AttendanceCorrectionPanel({
   const [reason, setReason] = useState('');
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
+  const [registerRevision, setRegisterRevision] = useState(0);
+  const reasonInput = useRef<HTMLTextAreaElement>(null);
   const operationId = useRef<string | null>(null);
   const mounted = useRef(true);
   const revision = useRef(0);
@@ -56,6 +59,11 @@ export function AttendanceCorrectionPanel({
       student.displayName.toLocaleLowerCase('zh-TW').includes(query) ||
       student.studentId.toLocaleLowerCase('zh-TW').includes(query);
   }).slice(0, 80);
+  const selectedStudent = students.find((student) => student.uid === selectedUid);
+  // 名冊直接選到第 80 位之後的學生時，仍須保留對應選項。
+  const selectableStudents = selectedStudent && !matchingStudents.some((student) => student.uid === selectedUid)
+    ? [selectedStudent, ...matchingStudents]
+    : matchingStudents;
 
   useEffect(() => {
     mounted.current = true;
@@ -65,8 +73,9 @@ export function AttendanceCorrectionPanel({
     };
   }, []);
 
-  async function showPanel() {
-    if (open) {
+  async function showPanel(studentUid?: string) {
+    if (submitting.current) return;
+    if (open && !studentUid) {
       revision.current += 1;
       setOpen(false);
       setStudents([]);
@@ -82,6 +91,10 @@ export function AttendanceCorrectionPanel({
     setLoading(true);
     setError('');
     setNotice('');
+    setStudentQuery('');
+    setReason('');
+    setStatus('present');
+    operationId.current = null;
     try {
       const [roster, history] = await Promise.all([
         loadCourseAttendanceRoster(courseId),
@@ -90,8 +103,11 @@ export function AttendanceCorrectionPanel({
       if (!mounted.current || revision.current !== current) return;
       setStudents(roster);
       setAudits(history);
-      // 教師必須自己選定要更正的對象。
-      setSelectedUid('');
+      // 必須主動選擇更正對象；全班名冊選到的人也需重新確認修課資格。
+      setSelectedUid(studentUid && roster.some((student) => student.uid === studentUid) ? studentUid : '');
+      if (studentUid) window.setTimeout(() => {
+        if (mounted.current && revision.current === current) reasonInput.current?.focus();
+      }, 0);
     } catch (problem) {
       if (mounted.current && revision.current === current) {
         setStudents([]);
@@ -128,6 +144,7 @@ export function AttendanceCorrectionPanel({
       operationId.current = null;
       setNotice(result.reused ? '這筆更正已保存，已確認先前操作結果。' : '已保存更正，並建立操作稽核紀錄。');
       setReason('');
+      setRegisterRevision((value) => value + 1);
       try {
         await onUpdated();
         const refreshed = await loadAttendanceCorrections(courseId, sessionId);
@@ -162,6 +179,9 @@ export function AttendanceCorrectionPanel({
           {open ? '收合更正' : '管理出席更正'}
         </Button>
       </div>
+      <AttendanceRegisterPanel key={`${courseId}:${sessionId}`}
+        courseId={courseId} sessionId={sessionId} revision={registerRevision}
+        disabled={busy || loading} onCorrect={(uid) => void showPanel(uid)} />
       {open && (
         <>
           {loading ? <p role="status" className={styles.note}>正在確認教師權限與課程名冊…</p> : null}
@@ -189,7 +209,7 @@ export function AttendanceCorrectionPanel({
                 onChange={(event) => { setSelectedUid(event.target.value); invalidatePendingRetry(); }}
               >
                 <option value="" disabled>請選擇要更正的學生</option>
-                {matchingStudents.map((student) => (
+                {selectableStudents.map((student) => (
                   <option key={student.uid} value={student.uid}>
                     {student.displayName}{student.studentId ? `（${student.studentId}）` : ''}
                   </option>
@@ -220,6 +240,7 @@ export function AttendanceCorrectionPanel({
               </select>
               <label htmlFor={`correction-reason-${sessionId}`}>更正原因</label>
               <textarea
+                ref={reasonInput}
                 id={`correction-reason-${sessionId}`}
                 rows={3}
                 minLength={6}
