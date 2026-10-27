@@ -80,6 +80,7 @@ export type {
 import { collectionFromSegments, docFromSegments } from './firestorePath';
 import { areUniversalDevAccountsEnabled } from './runtime';
 import { subscribePreferredCollection } from './preferredCollection';
+import { SchoolLoginHttpError } from './schoolLoginErrorCopy';
 
 const firebaseConfig = {
   apiKey: process.env.NEXT_PUBLIC_FIREBASE_API_KEY,
@@ -314,8 +315,9 @@ export async function signInWithPuStudentId(
   )) as Partial<PuStudentLoginResponse> & { error?: string };
 
   if (!response.ok || typeof data.customToken !== 'string') {
-    throw new Error(
-      typeof data.error === 'string' ? data.error : '學號登入失敗，請確認帳號密碼是否正確',
+    throw new SchoolLoginHttpError(
+      response.status,
+      typeof data.error === 'string' ? data.error : '',
     );
   }
 

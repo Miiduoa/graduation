@@ -19,6 +19,7 @@ import { NuniSignIn } from '@/components/NuniSignIn';
 import { platformDestination } from '@/lib/accountDestination';
 import { isPublicCampusPath, publicCampusServices } from '@/lib/publicCampusServices';
 import { useOptionalSelectedSchool } from '@/components/SelectedSchoolProvider';
+import { schoolLoginFailureCopy } from '@/lib/schoolLoginErrorCopy';
 import { STUDENT_ID_PREPARING_COPY, useSignInOptions } from '@/lib/signInOptions';
 
 function loginDestination(value: string | null): string {
@@ -131,9 +132,9 @@ function LoginForm({
       setPassword('');
       returning.current = true;
       goAfterLogin(router, destination);
-    } catch {
+    } catch (error) {
       if (controller.signal.aborted) return;
-      setError('登入失敗。請確認學號與密碼，或稍後再試。');
+      setError(schoolLoginFailureCopy(error));
     } finally {
       if (!controller.signal.aborted) {
         busyRef.current = null;
