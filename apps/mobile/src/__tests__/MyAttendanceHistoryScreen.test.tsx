@@ -1,7 +1,7 @@
 import React from 'react';
 import { act, fireEvent, render } from '@testing-library/react-native';
 import MyAttendanceHistoryScreen from '../screens/MyAttendanceHistoryScreen';
-import { loadVerifiedAttendanceHistory } from '../services/verifiedAttendanceHistory';
+import { loadMyVerifiedAttendanceHistory } from '../services/verifiedAttendanceHistory';
 import { safeNavigate } from '../utils/safeNavigate';
 
 let mockAuth = { user: { uid: 'student-a' }, profile: { schoolId: 'school-a' }, loading: false };
@@ -12,7 +12,7 @@ jest.mock('../ui/courseChipShell', () => ({ courseChipScrollContentStyle: () => 
 jest.mock('../utils/safeNavigate', () => ({ safeNavigate: jest.fn() }));
 jest.mock('@react-navigation/native', () => ({ useNavigation: () => ({}) }));
 jest.mock('../services/verifiedAttendanceHistory', () => ({
-  loadVerifiedAttendanceHistory: jest.fn(),
+  loadMyVerifiedAttendanceHistory: jest.fn(),
   summarizeVerifiedAttendance: (courses: Array<{ sessions: Array<{ status: string }> }>) => {
     const sessions = courses.flatMap((course) => course.sessions);
     return {
@@ -44,14 +44,14 @@ const course = {
 beforeEach(() => {
   jest.clearAllMocks();
   mockAuth = { user: { uid: 'student-a' }, profile: { schoolId: 'school-a' }, loading: false };
-  jest.mocked(loadVerifiedAttendanceHistory).mockResolvedValue([course]);
+  jest.mocked(loadMyVerifiedAttendanceHistory).mockResolvedValue([course]);
 });
 
 test('shows only confirmed session counts and routes to the real course', async () => {
   const view = render(<MyAttendanceHistoryScreen />);
   expect(await view.findByText('資料結構')).toBeTruthy();
   expect(view.getByText('已確認的簽到')).toBeTruthy();
-  expect(loadVerifiedAttendanceHistory).toHaveBeenCalledWith({}, 'student-a', 'school-a');
+  expect(loadMyVerifiedAttendanceHistory).toHaveBeenCalledWith('student-a', 'school-a');
   fireEvent.press(view.getByLabelText('展開資料結構點名紀錄'));
   expect(view.getByText('已確認簽到')).toBeTruthy();
   fireEvent.press(view.getByText('前往課堂簽到'));
@@ -59,7 +59,7 @@ test('shows only confirmed session counts and routes to the real course', async 
 });
 
 test('a missing receipt is not shown as attendance or absence', async () => {
-  jest.mocked(loadVerifiedAttendanceHistory).mockResolvedValue([
+  jest.mocked(loadMyVerifiedAttendanceHistory).mockResolvedValue([
     { ...course, sessions: [{ ...course.sessions[0], status: 'unconfirmed', checkedInAt: null }] },
   ]);
   const view = render(<MyAttendanceHistoryScreen />);
@@ -71,12 +71,12 @@ test('a missing receipt is not shown as attendance or absence', async () => {
 
 test('stale account responses cannot appear after switching the login', async () => {
   let finish!: (result: [typeof course]) => void;
-  jest.mocked(loadVerifiedAttendanceHistory).mockImplementationOnce(
+  jest.mocked(loadMyVerifiedAttendanceHistory).mockImplementationOnce(
     () => new Promise((resolve) => { finish = resolve; }),
   );
   const view = render(<MyAttendanceHistoryScreen />);
   mockAuth = { user: { uid: 'student-b' }, profile: { schoolId: 'school-a' }, loading: false };
-  jest.mocked(loadVerifiedAttendanceHistory).mockResolvedValueOnce([]);
+  jest.mocked(loadMyVerifiedAttendanceHistory).mockResolvedValueOnce([]);
   view.rerender(<MyAttendanceHistoryScreen />);
   await view.findByText('目前沒有可驗證的課堂點名');
   await act(async () => finish([course]));
