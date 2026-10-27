@@ -273,7 +273,11 @@ async function dispatchSchoolLogin(
       return jsonResponse(503, { error: error.message }, cors);
     }
     if (error instanceof PuLoginHttpError) {
-      return jsonResponse(error.status, { error: error.message }, cors);
+      return jsonResponse(
+        error.status,
+        error.code ? { error: error.message, code: error.code } : { error: error.message },
+        cors,
+      );
     }
     if (error instanceof HttpsError) {
       return jsonResponse(error.httpErrorCode.status, { error: error.message }, cors);

@@ -3,7 +3,11 @@ import { expect, it, vi } from 'vitest';
 import { createLoginRateGate, LOGIN_RATE_LIMIT } from './loginRateLimit';
 import { createMemoryGroupStore } from './memoryGroupStore';
 import { createPuCampusGateway, PuCampusError, type PuCampusGateway } from './puCampusClient';
-import { handleSignInPuStudentId } from './signInPuStudentId';
+import {
+  handleSignInPuStudentId,
+  TEACHER_LMS_UNAVAILABLE,
+  TEACHER_LMS_UNAVAILABLE_CODE,
+} from './signInPuStudentId';
 
 const SECRET = 'never-log-this-password';
 const TEACHER = 'changyi';
@@ -165,7 +169,11 @@ it('returns 503 when TronClass is down and refunds the account debit', async () 
   for (let i = 0; i < LOGIN_RATE_LIMIT.account.limit + 1; i += 1) {
     await expect(
       handleSignInPuStudentId({ studentId: TEACHER, password: SECRET }, `10.0.0.${i + 1}`, runtime),
-    ).rejects.toMatchObject({ status: 503, message: '學校系統暫時無法連線' });
+    ).rejects.toMatchObject({
+      status: 503,
+      message: TEACHER_LMS_UNAVAILABLE,
+      code: TEACHER_LMS_UNAVAILABLE_CODE,
+    });
   }
 });
 
