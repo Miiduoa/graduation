@@ -58,6 +58,7 @@ export function CampusAssignmentReminderAction({
   const [confirmedLead, setConfirmedLead] = useState<CampusReminderLead | null>(null);
   const [statusLoading, setStatusLoading] = useState(false);
   const [statusError, setStatusError] = useState('');
+  const [statusRefresh, setStatusRefresh] = useState(0);
   const [message, setMessage] = useState('');
   const lock = useRef(false);
   const scope = { uid: userId, schoolId };
@@ -95,7 +96,7 @@ export function CampusAssignmentReminderAction({
         if (active && isCurrent()) setStatusLoading(false);
       });
     return () => { active = false; };
-  }, [userId, schoolId, step.title, step.dueAt, verified?.checkedAt]);
+  }, [userId, schoolId, step.title, step.groupName, step.dueAt, verified?.checkedAt, statusRefresh]);
 
   const schedule = async () => {
     if (lock.current || statusLoading || statusError || disabled || !canUse ||
@@ -158,9 +159,18 @@ export function CampusAssignmentReminderAction({
       {statusLoading && confirmedLead === null ? (
         <Text style={{ color: aiTokens.muted, fontSize: 12 }}>正在核對手機已設定的提醒…</Text>
       ) : statusError ? (
-        <Text accessibilityRole="alert" style={{ color: aiTokens.warning, fontSize: 12 }}>
-          {statusError}
-        </Text>
+        <View style={{ gap: 8 }}>
+          <Text accessibilityRole="alert" style={{ color: aiTokens.warning, fontSize: 12 }}>
+            {statusError}
+          </Text>
+          <AIButton
+            label="重新確認本機提醒狀態"
+            variant="ghost"
+            size="sm"
+            disabled={disabled || saving}
+            onPress={() => setStatusRefresh((value) => value + 1)}
+          />
+        </View>
       ) : confirmedLead !== null ? (
         <>
           <Text style={{ color: aiTokens.text, fontSize: 12, fontWeight: '700' }}>
