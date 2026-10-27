@@ -6,7 +6,7 @@ import { WebView } from 'react-native-webview';
 import { randomUUID } from 'expo-crypto';
 import {
   extractSchoolPageTables, parsePersonalImport, periodProfileForSchool,
-  validatePersonalImportRow, personalImportErrorMessage,
+  personalImportErrorMessage,
   type SchoolPageTable, type PersonalImportRow, type ImportIssue,
 } from '@campus/shared';
 import { useSchool } from '../state/school';
@@ -19,6 +19,8 @@ import {
 import { Button } from '../ui/components';
 import { theme } from '../ui/theme';
 import { useThemeMode } from '../state/theme';
+import { portalReviewIssues, reconcilePortalRowIssues } from '@campus/shared/src/imports/portalRowReview';
+import { SchoolPortalRowEditor } from './SchoolPortalRowEditor';
 
 type Kind = 'timetable' | 'grades';
 type Stage = 'consent' | 'browse' | 'choose' | 'review' | 'done';
@@ -103,6 +105,10 @@ function PortalFlow({ portal, scope, isScopeCurrent, onClose, onOpenRecords, clo
   const [semester, setSemester] = useState('');
   const [rows, setRows] = useState<PersonalImportRow[]>([]);
   const [issues, setIssues] = useState<ImportIssue[]>([]);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const editing = useRef<string | null>(null);
+  const [corrected, setCorrected] = useState<Set<string>>(new Set());
+  const [confirmReparse, setConfirmReparse] = useState(false);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [visible, setVisible] = useState(20);
   const [saving, setSaving] = useState(false);
@@ -154,6 +160,7 @@ function PortalFlow({ portal, scope, isScopeCurrent, onClose, onOpenRecords, clo
     hasDraft.current = false; resumeStage.current = 'choose';
     setSelection(null); setText(''); setYear(''); setSemester('');
     setRows([]); setIssues([]); setSelected(new Set()); setVisible(20);
+    editing.current = null; setEditingId(null); setCorrected(new Set()); setConfirmReparse(false);
     setConfirmRead(false); setConfirmClose(false);
   };
   // Only an explicit restart creates a new incognito browser. Review keeps it mounted.
@@ -165,7 +172,7 @@ function PortalFlow({ portal, scope, isScopeCurrent, onClose, onOpenRecords, clo
     setBrowserEpoch((value) => value + 1);
   };
   const returnToBrowser = () => {
-    if (writeLock.current || !active()) return;
+    if (writeLock.current || editing.current || !active()) return;
     stop(); setError(''); setConfirmRead(false); moveTo('browse');
   };
   const resumeDraft = () => {
@@ -205,8 +212,10 @@ function PortalFlow({ portal, scope, isScopeCurrent, onClose, onOpenRecords, clo
       setError(''); moveTo('choose');
     } catch { setError('讀到表格，但未辨識出目前資料類型。請切到課表／成績列表，或改用檔案匯入。'); }
   };
-  const preview = () => {
-    if (writeLock.current || !active()) return;
+  const preview = (discardCorrections = false) => {
+    if (writeLock.current || editing.current || !active()) return;
+    if (corrected.size && !discardCorrections) { setConfirmReparse(true); return; }
+    setConfirmReparse(false); setCorrected(new Set());
     try {
       const parsed = parsePersonalImport(text, {
         kind, schoolId: scope.schoolId, academicYear: year, semester,
@@ -218,11 +227,30 @@ function PortalFlow({ portal, scope, isScopeCurrent, onClose, onOpenRecords, clo
     } catch (err) { setRows([]); setError(personalImportErrorMessage(err, '無法整理這份表格。')); }
   };
   const chosen = rows.filter((row) => selected.has(row.id));
-  const validation = useMemo(() => rows.flatMap((row) => validatePersonalImportRow(row, { periodProfile: profile })), [rows, profile]);
-  const errors = [...new Map([...issues, ...validation].filter((issue) => issue.severity === 'error' && (!issue.rowId || selected.has(issue.rowId)))
-    .map((issue) => [JSON.stringify(issue), issue])).values()];
+  const reviewIssues = useMemo(() => portalReviewIssues(rows, issues, profile), [rows, issues, profile]);
+  const errors = reviewIssues.filter((issue) => issue.severity === 'error' && (!issue.rowId || selected.has(issue.rowId)));
+  const invalidIds = new Set(reviewIssues.filter((issue) => issue.severity === 'error' && issue.rowId).map((issue) => issue.rowId!));
+  const globalErrors = reviewIssues.some((issue) => issue.severity === 'error' && !issue.rowId);
+  const beginEdit = (id: string) => {
+    if (writeLock.current || editing.current || !active() || confirmClose) return;
+    editing.current = id; setEditingId(id); setError('');
+  };
+  const cancelEdit = () => { editing.current = null; setEditingId(null); };
+  const applyEdit = (next: PersonalImportRow) => {
+    if (writeLock.current || !active() || editing.current !== next.id || confirmClose) return;
+    const previous = rows.find((row) => row.id === next.id);
+    if (!previous || previous.schoolId !== next.schoolId || previous.kind !== next.kind) return;
+    setRows((old) => old.map((row) => row.id === next.id ? next : row));
+    setIssues((old) => reconcilePortalRowIssues(old, previous, next, profile));
+    setCorrected((old) => new Set([...old, next.id])); cancelEdit();
+  };
+  const selectRows = (mode: 'all' | 'none' | 'valid') => {
+    if (writeLock.current || editing.current || !active() || confirmClose) return;
+    if (mode === 'valid' && globalErrors) return;
+    setSelected(new Set(rows.filter((row) => mode === 'all' || (mode === 'valid' && !invalidIds.has(row.id))).map((row) => row.id)));
+  };
   const save = async () => {
-    if (writeLock.current || !active() || !chosen.length || errors.length || confirmClose) return;
+    if (writeLock.current || editing.current || !active() || !chosen.length || errors.length || confirmClose || confirmReparse) return;
     writeLock.current = true; setSaving(true); setError('');
     try {
       const result = await appendPersonalImports(scope, chosen, active);
@@ -243,8 +271,8 @@ function PortalFlow({ portal, scope, isScopeCurrent, onClose, onOpenRecords, clo
   const field = (label: string, value: string, change: (next: string) => void, multiline = false) => (
     <View style={{ gap: 6 }}><Text style={copy}>{label}</Text><TextInput accessibilityLabel={label}
       style={[input, multiline ? { minHeight: 120, textAlignVertical: 'top' } : {}]} value={value}
-      multiline={multiline} editable={!saving} maxLength={multiline ? 100_000 : 32} autoCorrect={false}
-      onChangeText={(next) => { change(next); setRows([]); setIssues([]); }} /></View>
+      multiline={multiline} editable={!saving && !editingId && !corrected.size} maxLength={multiline ? 100_000 : 32} autoCorrect={false}
+      onChangeText={(next) => { if (writeLock.current || editing.current || corrected.size) return; change(next); setRows([]); setIssues([]); }} /></View>
   );
   const visibleError = error || (stage === 'browse' ? browserError : '');
   return <SafeAreaView style={{ flex: 1, backgroundColor: theme.colors.bg }}>
@@ -334,26 +362,46 @@ function PortalFlow({ portal, scope, isScopeCurrent, onClose, onOpenRecords, clo
       </> : null}
       {stage === 'review' ? <>
         <Text style={copy}>先確認學期及表格文字，再整理成預覽。修改文字後須重新整理；原有紀錄不會被覆蓋。</Text>
-        <Button text="回校方頁面核對" kind="outline" disabled={saving} onPress={returnToBrowser} />
+        <Button text="回校方頁面核對" kind="outline" disabled={saving || !!editingId} onPress={returnToBrowser} />
         {field('學年度', year, setYear)}{field('學期', semester, setSemester)}
         {field('校務表格文字（可修正）', text, setText, true)}
-        <Button text="整理並核對匯入內容" disabled={saving || !text.trim()} onPress={preview} />
+        <Button text="整理並核對匯入內容" disabled={saving || !!editingId || !text.trim()} onPress={() => preview()} />
+        {corrected.size ? <Text style={copy}>{`已逐筆修正 ${corrected.size} 筆。原始文字暫時鎖定，避免覆蓋修正；需要重整原文時請按上方整理按鈕確認。`}</Text> : null}
+        {confirmReparse ? <View style={{ gap: 8 }}>
+          <Text accessibilityRole="alert" style={copy}>重新整理會以原始表格取代逐筆修正及選列；尚未儲存的修正不會保留。</Text>
+          <Button text="放棄逐筆修正並重新整理" disabled={saving || !!editingId} onPress={() => preview(true)} />
+          <Button text="保留逐筆修正" kind="outline" onPress={() => setConfirmReparse(false)} />
+        </View> : null}
         {rows.length ? <>
           <Text style={copy}>{`預覽 ${rows.length} 筆，選取 ${chosen.length} 筆。未顯示的列仍會保留；請核對學校、學期、節次與成績。`}</Text>
+          <Text style={copy}>{`待修正 ${invalidIds.size} 筆；可直接修正欄位，不必改寫整段文字。排除的資料不會被匯入。`}</Text>
+          <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
+            <Button text="全選資料" kind="outline" disabled={saving || !!editingId} onPress={() => selectRows('all')} />
+            <Button text="全部取消" kind="outline" disabled={saving || !!editingId} onPress={() => selectRows('none')} />
+            <Button text="只選可匯入資料" kind="outline" disabled={saving || !!editingId || globalErrors} onPress={() => selectRows('valid')} />
+          </View>
+          {editingId ? <Text style={copy}>請先套用或取消這筆修正，才能確認匯入或切換資料。</Text> : null}
           {rows.slice(0, visible).map((row) => <View key={row.id} style={{ borderTopWidth: 1, borderColor: theme.colors.border, paddingTop: 12, gap: 6 }}>
-            <Button text={`${selected.has(row.id) ? '已選' : '未選'}：${row.title}`} kind="outline" disabled={saving} onPress={() => setSelected((old) => {
+            <Button text={`${selected.has(row.id) ? '已選' : '未選'}：${row.title}`} kind="outline" disabled={saving || !!editingId} onPress={() => setSelected((old) => {
               const next = new Set(old); if (next.has(row.id)) next.delete(row.id); else next.add(row.id); return next;
             })} />
             <Text style={copy}>{`${row.academicYear}／${row.semester}`}{kind === 'grades'
               ? ` · ${row.credits ?? '未提供'} 學分 · 成績 ${row.grade ?? '未提供'}`
               : ` · 星期 ${row.dayOfWeek ?? '?'} · ${row.startTime || row.periodLabel || `節次 ${row.startPeriod ?? '?'}–${row.endPeriod ?? '?'}`} · ${row.location || '教室未提供'}`}</Text>
+            {corrected.has(row.id) ? <Text style={copy}>已手動修正，原始來源保留</Text> : null}
+            {reviewIssues.filter((issue) => issue.rowId === row.id).map((issue, index) => (
+              <Text key={`${issue.code}:${index}`} accessibilityRole={issue.severity === 'error' ? 'alert' : undefined} style={copy}>{issue.message}</Text>
+            ))}
+            {editingId === row.id ? <SchoolPortalRowEditor key={row.id} row={row} profile={profile}
+              disabled={saving || confirmClose} onApply={applyEdit} onCancel={cancelEdit} /> :
+              <Button text={`修正欄位：${row.title}`} kind="outline" disabled={saving || !!editingId || confirmClose} onPress={() => beginEdit(row.id)} />}
           </View>)}
           {rows.length > visible ? <Button text={`再顯示 ${Math.min(20, rows.length - visible)} 筆`} onPress={() => setVisible((count) => count + 20)} /> : null}
-          {errors.slice(0, 10).map((issue, index) => <Text key={index} accessibilityRole="alert" style={copy}>{issue.message}</Text>)}
+          {errors.filter((issue) => !issue.rowId).slice(0, 10).map((issue, index) => <Text key={index} accessibilityRole="alert" style={copy}>{issue.message}</Text>)}
           {errors.length > 10 ? <Text style={copy}>{`另有 ${errors.length - 10} 個問題，請修正表格後重新整理。`}</Text> : null}
-          <Button text={saving ? '正在儲存…' : `確認匯入 ${chosen.length} 筆`} disabled={saving || confirmClose || !chosen.length || !!errors.length} onPress={() => void save()} />
+          <Button text={saving ? '正在儲存…' : `確認匯入 ${chosen.length} 筆`} disabled={saving || !!editingId || confirmClose || confirmReparse || !chosen.length || !!errors.length} onPress={() => void save()} />
         </> : null}
-        <Button text="重選表格" kind="outline" disabled={saving} onPress={() => { setRows([]); setError(''); resumeStage.current = 'choose'; moveTo('choose'); }} />
+        <Button text="重選表格" kind="outline" disabled={saving || !!editingId || !!corrected.size} onPress={() => { setRows([]); setError(''); resumeStage.current = 'choose'; moveTo('choose'); }} />
       </> : null}
       {stage === 'done' && receipt ? <>
         <Text accessibilityRole="header" style={{ ...copy, fontSize: 20, fontWeight: '700' }}>{undone ? '已撤回這次新增資料' : '匯入完成'}</Text>
