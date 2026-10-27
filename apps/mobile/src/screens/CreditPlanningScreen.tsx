@@ -10,7 +10,7 @@ import { Ionicons } from '@expo/vector-icons';
 import {
   MAX_MILESTONES, MAX_PLANNED_COURSES, PLANNER_CATEGORIES,
   creditPlanSummary, emptyCreditPlan, formatCredits, parseCredits,
-  type CreditPlan, type PlannedCourse, type PlannerCategory, type PlannerCourseStatus,
+  type CreditPlan, type PlannedCourse,
 } from '@campus/shared/src/creditPlanner';
 import { Screen, Spinner } from '../ui/components';
 import { CreditPlanFeasibilityCard } from './creditAudit/CreditPlanFeasibilityCard';
@@ -25,16 +25,20 @@ import {
 } from '../features/academics/creditPlanRepository';
 import type { CreditPlanTicket } from '../features/academics/creditPlanSession';
 import { useCreditPlanningWorkspace } from './creditAudit/useCreditPlanningWorkspace';
+import type { NavigationAction } from '@react-navigation/native';
+import {
+  creditPlanDirtySections, creditCourseHasChanges,
+  emptyCreditCourseForm as emptyForm, type CreditCourseForm as CourseForm,
+} from '../features/academics/creditPlanDrafts';
+import {
+  CreditPlanNavigationGuard, useCreditPlanDraftProtection,
+} from './creditAudit/useCreditPlanDraftProtection';
 
-type Props = { navigation?: { goBack?: () => void } };
-type CourseForm = {
-  name: string; credits: string; term: number;
-  category: PlannerCategory; status: PlannerCourseStatus;
-};
+type Props = { navigation?: {
+  goBack?: () => void;
+  dispatch?: (action: NavigationAction) => void;
+} };
 const categories = PLANNER_CATEGORIES;
-const emptyForm = (term = 1): CourseForm => ({
-  name: '', credits: '3', term, category: 'elective', status: 'considering',
-});
 const invalid = (value: string) => value.trim() !== '' && parseCredits(value) === null;
 const metric = (value: number | null) => value === null ? '—' : formatCredits(value);
 
@@ -129,6 +133,36 @@ function Workspace({ scopeKey, schoolName, guest, navigation }: {
   const nameInput = useRef<TextInput>(null);
   const editorY = useRef(0);
   const busy = saving || transferring;
+  const inputs = useMemo(() => ({ goals, categoryGoals, form, editId, milestoneLabel }),
+    [goals, categoryGoals, form, editId, milestoneLabel]);
+  const dirtySections = creditPlanDirtySections(plan, inputs);
+  const courseDirty = plan ? creditCourseHasChanges(plan, inputs) : false;
+  const confirmAction = useCreditPlanDraftProtection({ inputs, ticket, session, busy });
+
+  function requestLeave(leave: () => void) {
+    if (busy) {
+      Alert.alert('請先完成目前操作', '正在儲存或處理備份，完成後再返回，避免遺失尚未儲存的輸入。');
+      return;
+    }
+    confirmAction(dirtySections.length > 0, leave, {
+      title: '尚有未儲存的內容',
+      message: `${dirtySections.join('、')}尚未儲存。離開會捨棄這些輸入，已儲存的規劃不受影響。`,
+      confirmText: '捨棄並離開',
+    });
+  }
+  function requestExport() {
+    confirmAction(dirtySections.length > 0, () => void exportBackup(), {
+      title: '備份不含尚未儲存的輸入',
+      message: `${dirtySections.join('、')}尚未儲存。請先儲存各區塊，或只匯出目前已儲存的版本；輸入仍會保留。`,
+      confirmText: '只匯出已儲存版本', cancelText: '返回儲存', destructive: false,
+    });
+  }
+  function cancelCourseEdit() {
+    confirmAction(courseDirty, () => { setEditId(null); setForm(emptyForm(form.term)); }, {
+      title: '捨棄課程修改？', message: '這門課尚未儲存的修改會被捨棄，原有課程不會刪除。',
+      confirmText: '捨棄修改',
+    });
+  }
 
   function applyFormValues(value: CreditPlan) {
     setGoals({ recognized: value.recognized, target: value.target, extra: value.extra });
@@ -203,10 +237,21 @@ function Workspace({ scopeKey, schoolName, guest, navigation }: {
   }
   function editCourse(course: PlannedCourse) {
     if (busy) return;
-    setEditId(course.id);
-    setForm({ ...course, credits: formatCredits(course.credits) });
-    scroll.current?.scrollTo({ y: Math.max(0, editorY.current - 12), animated: true });
-    nameInput.current?.focus();
+    const focusEditor = () => {
+      scroll.current?.scrollTo({ y: Math.max(0, editorY.current - 12), animated: true });
+      nameInput.current?.focus();
+    };
+    // Tapping the same course is a shortcut back to its current draft, not a reset.
+    if (editId === course.id) { focusEditor(); return; }
+    confirmAction(courseDirty, () => {
+      setEditId(course.id);
+      setForm({ ...course, credits: formatCredits(course.credits) });
+      focusEditor();
+    }, {
+      title: '捨棄目前課程輸入？',
+      message: `目前課程尚未儲存。改編輯「${course.name}」會捨棄這份課程輸入，其他區塊不受影響。`,
+      confirmText: '捨棄並切換',
+    });
   }
   function removeCourse(course: PlannedCourse) {
     if (!plan || busy) return;
@@ -314,12 +359,18 @@ function Workspace({ scopeKey, schoolName, guest, navigation }: {
     }
   }
 
-  const back = navigation?.goBack ? <Action title="返回" label="返回學分總覽" onPress={() => navigation.goBack?.()} /> : undefined;
+  const navigationGuard = navigation?.dispatch ? <CreditPlanNavigationGuard
+    preventRemove={busy || dirtySections.length > 0} onAttemptLeave={requestLeave}
+    dispatch={navigation.dispatch} /> : null;
+  const back = navigation?.goBack ? <Action title="返回" label="返回學分總覽" disabled={busy}
+    onPress={() => navigation.dispatch ? navigation.goBack?.() : requestLeave(() => navigation.goBack?.())} /> : undefined;
   if (phase === 'loading') return <Screen title="未來學分規劃" headerRight={back}>
+    {navigationGuard}
     <View style={{ padding: 24, gap: 14 }}><Spinner size={28} />
       <Text style={{ color: t.muted }}>正在讀取這台裝置的個人規劃…</Text></View>
   </Screen>;
   if (phase === 'error' || !plan || !summary) return <Screen title="未來學分規劃" headerRight={back}>
+    {navigationGuard}
     <View style={{ padding: 24, gap: 14 }}>
       <Text style={{ color: t.text, fontSize: 15, lineHeight: 23 }}>{workspace.error || '目前無法載入規劃。'}</Text>
       <Text style={{ color: t.muted }}>原有資料沒有被重設或覆寫。</Text>
@@ -330,8 +381,18 @@ function Workspace({ scopeKey, schoolName, guest, navigation }: {
   </Screen>;
 
   return <Screen title="未來學分規劃" subtitle={`${schoolName} · 個人修課草稿`} headerRight={back}>
+    {navigationGuard}
     <ScrollView ref={scroll} keyboardShouldPersistTaps="handled"
       contentContainerStyle={{ padding: 16, paddingBottom: TAB_BAR_CONTENT_BOTTOM_PADDING + 28, gap: 17 }}>
+      {dirtySections.length > 0 ? <View style={{ padding: 14, gap: 6, borderRadius: 12,
+        borderWidth: 1, borderColor: t.border, backgroundColor: t.surface2 }}>
+        <Text accessibilityLiveRegion="polite" style={{ color: t.text, fontWeight: '700' }}>
+          {`尚未儲存：${dirtySections.join('、')}`}
+        </Text>
+        <Text style={{ color: t.muted, fontSize: 12, lineHeight: 19 }}>
+          請分別儲存各區塊；試算與備份目前只包含已儲存的內容。
+        </Text>
+      </View> : null}
       <View style={{ padding: 22, borderRadius: 22, backgroundColor: t.accentSoft, borderWidth: 1, borderColor: t.border, gap: 12 }}>
         <Text style={{ color: t.text, fontSize: 25, lineHeight: 34, fontWeight: '700' }}>把未來的學分，排成可執行的計畫。</Text>
         <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 12 }}>
@@ -394,7 +455,7 @@ function Workspace({ scopeKey, schoolName, guest, navigation }: {
               onPress={() => setForm((old) => ({ ...old, status: 'registered' }))} />
           </View>
           <Action title={editId ? '儲存課程修改' : '加入修課規劃'} primary disabled={busy} onPress={commitCourse} />
-          {editId ? <Action title="取消修改" disabled={busy} onPress={() => { setEditId(null); setForm(emptyForm(form.term)); }} /> : null}
+          {editId ? <Action title="取消修改" disabled={busy} onPress={cancelCourseEdit} /> : null}
         </Card>
       </View>
       <Heading title={`已安排課程 · ${plan.courses.length} 門`} subtitle="點選編輯會直接回到上方課程表單。" />
@@ -467,7 +528,7 @@ function Workspace({ scopeKey, schoolName, guest, navigation }: {
       <Heading title="備份與跨裝置移轉" subtitle="手機與 Web 使用相同的 JSON 格式；不會自動雲端同步。" />
       <Card>
         <Text style={{ color: t.muted, fontSize: 12, lineHeight: 20 }}>規劃只存在此帳號、此校園的本機空間。匯入前會列出課程數與目標，確認後才取代目前內容。</Text>
-        <Action title="匯出規劃 JSON" disabled={busy} onPress={() => void exportBackup()} />
+        <Action title="匯出規劃 JSON" disabled={busy} onPress={requestExport} />
         <Action title="匯入 Web／手機 JSON 備份" disabled={busy} onPress={() => void importBackup()} />
         {guest ? <Text style={{ color: t.muted, fontSize: 12 }}>目前是訪客模式；共用裝置請避免輸入私人資料，並在使用後清除裝置資料。</Text> : null}
       </Card>
