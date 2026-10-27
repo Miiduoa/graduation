@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { beforeEach, expect, it, vi } from 'vitest';
 import GradesPage from '@/app/grades/page';
 import TimetablePage from '@/app/timetable/page';
@@ -373,7 +373,7 @@ it('requires personal input for credit planning and clears it when the account c
   fireEvent.change(approved, { target: { value: '60' } });
   fireEvent.change(screen.getByLabelText('希望累計的學分'), { target: { value: '128' } });
   fireEvent.change(screen.getByLabelText('預計再修學分'), { target: { value: '20' } });
-  expect(screen.getByRole('status').textContent).toContain('48');
+  expect(within(screen.getByRole('region', { name: '個人學分試算' })).getByRole('status').textContent).toContain('48');
   account.user = { uid: 'two' };
   vi.mocked(loadAcademicRecords).mockResolvedValue(grades('two'));
   view.rerender(<CreditPlannerPage />);
