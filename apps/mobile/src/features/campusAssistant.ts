@@ -15,7 +15,7 @@ export interface OnDeviceAssistantReadiness {
 }
 
 export class OnDeviceAssistantError extends Error {
-  constructor(public readonly code: 'native-unavailable' | 'model-required' | 'model-failed' | 'model-busy' | 'session-changed') {
+  constructor(public readonly code: 'native-unavailable' | 'model-required' | 'model-failed' | 'model-busy' | 'cancelled' | 'session-changed') {
     super(code === 'session-changed' ? 'Assistant session changed' : code);
     this.name = 'OnDeviceAssistantError';
   }
@@ -61,6 +61,8 @@ export async function askCampusAssistant(input: {
   scope: CampusAssistantScope;
   messages: CampusAssistantMessage[];
   isCurrent: () => boolean;
+  /** Optional per-request native cancellation; never cancels unrelated tasks. */
+  signal?: AbortSignal;
   schoolName?: string | null;
   /** Authorized campus reads are only used after an explicit user refresh. */
   senseSnapshot?: CampusSenseSnapshot | null;
@@ -75,6 +77,12 @@ export async function askCampusAssistant(input: {
   proposals?: CampusAgentWriteProposal[];
 }> {
   const mode = input.mode ?? 'device';
+  const assertNotCancelled = () => {
+    if (mode === 'device' && input.signal?.aborted) {
+      throw new OnDeviceAssistantError('cancelled');
+    }
+  };
+  assertNotCancelled();
   scopeCheck(input, mode === 'campus');
   const messages = input.messages
     .slice(-20)
@@ -100,6 +108,7 @@ export async function askCampusAssistant(input: {
       schoolName: input.schoolName,
     });
     scopeCheck(input, false);
+    assertNotCancelled();
 
     // Safe read-only tools run even without a GGUF download or a native runtime.
     // They do not query a backend, perform mutations, or invent missing school data.
@@ -118,6 +127,7 @@ export async function askCampusAssistant(input: {
     const { localLLM } = engine();
     const readiness = await getOnDeviceAssistantReadiness();
     scopeCheck(input, false);
+    assertNotCancelled();
     if (!readiness.available) throw new OnDeviceAssistantError('native-unavailable');
     const state = localLLM.getState();
     // The inference engine is shared with other mobile features. Reloading a
@@ -130,6 +140,7 @@ export async function askCampusAssistant(input: {
     if (state.status !== 'ready' || state.modelId !== readiness.modelId) {
       const loaded = await localLLM.loadModel(readiness.modelId);
       scopeCheck(input, false);
+      assertNotCancelled();
       if (!loaded) throw new OnDeviceAssistantError('model-failed');
     }
 
@@ -150,8 +161,10 @@ export async function askCampusAssistant(input: {
       ],
       maxTokens: readiness.modelId === 'qwen2.5-0.5b' ? 512 : 700,
       temperature: 0.45,
+      signal: input.signal,
     });
     scopeCheck(input, false);
+    assertNotCancelled();
     const answer = completion.content.replace(/<think>[\s\S]*?<\/think>/g, '').trim();
     if (!answer || answer.includes('<think>')) throw new OnDeviceAssistantError('model-failed');
     return { content: answer, hasActions: false, source: 'device' };
