@@ -41,6 +41,8 @@ describe('PU session continuity and bounded requests', () => {
 
   test('keeps same-name session cookie rotations through the grade bridge', async () => {
     const requests = mockRequests((options, index) => {
+      if (index === 0) return { status: 404 };
+      index -= 1;
       if (index === 0) return { html: '<p>校務轉接</p>', headers: { 'set-cookie': ['SID=renewed; Path=/; Secure'] } };
       if (index === 1) return { html: '<p>校務選單</p>' };
       return { html: gradePage };
@@ -48,25 +50,28 @@ describe('PU session continuity and bounded requests', () => {
     const result = await puFetchGrades({ SID: 'original' });
     expect(result.success).toBe(true);
     expect(requests.map(row => row.hostname + row.path)).toEqual([
+      'alcat.pu.edu.tw/stu_query/score_all.php',
       'alcat.pu.edu.tw/score_query/score_all.php',
       'alcat.pu.edu.tw/index_menu.php',
       'mypu.pu.edu.tw/score_query/score_all.php',
     ]);
-    expect(requests[1].headers.Cookie).toBe('SID=renewed');
     expect(requests[2].headers.Cookie).toBe('SID=renewed');
+    expect(requests[3].headers.Cookie).toBe('SID=renewed');
     expect(requests.every(row => row.family === 4)).toBe(true);
   });
 
   test('resolves relative redirects against the actual current page', async () => {
     const requests = mockRequests((options, index) => {
+      if (index === 0) return { status: 404 };
+      index -= 1;
       if (index === 0) return { status: 303, headers: { location: 'next.php', 'set-cookie': ['SID=next; Path=/'] } };
       if (index === 1) return { html: gradePage };
       return { html: '<p>暫無其他資料</p>' };
     });
     const result = await puFetchGrades({ SID: 'original' });
     expect(result.success).toBe(true);
-    expect(requests[1]).toMatchObject({ hostname: 'alcat.pu.edu.tw', path: '/score_query/next.php' });
-    expect(requests[1].headers.Cookie).toBe('SID=next');
+    expect(requests[2]).toMatchObject({ hostname: 'alcat.pu.edu.tw', path: '/score_query/next.php' });
+    expect(requests[2].headers.Cookie).toBe('SID=next');
   });
 
   test.each([

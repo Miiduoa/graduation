@@ -519,23 +519,42 @@ async function puFetchGrades(cookies, semester) {
 
     // Approach B: Try SSO bridge URLs from alcat → mypu
     const bridgePaths = [
-      '/score_query/score_all.php', // alcat might proxy to mypu
+      '/stu_query/score_all.php', // 與原生 App 使用相同的 e 校園歷年修課入口。
+      '/score_query/score_all.php', // 舊版校務轉接頁仍保留為備援。
       '/index_menu.php', // menu page might set cross-domain session
     ];
     let usableBridge = null;
     for (const bp of bridgePaths) {
       try {
         const bridgeRes = await getFollowRedirect(ALCAT_HOST, bp, portalCookies);
+        // 明確拒絕或限流時停止，不改用其他入口持續請求。
+        if ([401, 403, 429].includes(bridgeRes.status)) {
+          if (usableBridge?.grades.length) return usableBridge;
+          return {
+            success: false,
+            code: bridgeRes.status === 401 ? 'session-expired' : bridgeRes.status === 429 ? 'resource-exhausted' : 'permission-denied',
+            grades: [],
+            error: bridgeRes.status === 401 ? 'E校園 session 已失效，請重新登入' : '學校目前無法提供這份成績，請稍後至 e 校園確認',
+          };
+        }
         // 同名 Cookie 的輪替也是更新；不能用 Cookie 數量判斷是否有新 session。
         portalCookies = { ...portalCookies, ...bridgeRes.cookies };
         mypuCookies = { ...mypuCookies, ...bridgeRes.cookies };
         // If alcat's score page actually returns grade data directly, use it
         if (bp.includes('score') && bridgeRes.status === 200) {
+          if (looksLikePuLoginPage(bridgeRes.data)) {
+            return { success: false, code: 'session-expired', grades: [], error: 'E校園 session 已失效，請重新登入' };
+          }
           const bridgeParsed = parsePuGradeDocument(bridgeRes.data, semester);
           if (bridgeParsed.success) {
-            usableBridge = bridgeParsed;
-            // Prefer the bridge if it contains multiple semesters.
-            if (bridgeParsed.allSemesters.length > 1) return bridgeParsed;
+            // 不把先前已讀到的成績，替換成另一入口的空表格。
+            if (!usableBridge || bridgeParsed.grades.length > 0) usableBridge = bridgeParsed;
+            // 直接歷年入口有可辨識資料就採用，不必多繞一次 mypu。
+            // 這不表示已涵蓋全部修業期間，也不混接不同來源的明細。
+            if (bridgeParsed.grades.length > 0 &&
+              (bp === '/stu_query/score_all.php' || bridgeParsed.allSemesters.length > 1)) {
+              return bridgeParsed;
+            }
           }
         }
       } catch (e) {
@@ -547,13 +566,23 @@ async function puFetchGrades(cookies, semester) {
     // Keep a valid single-semester bridge result if mypu is unavailable.
     try {
       const gradeRes = await getFollowRedirect(MYPU_HOST, GRADE_PATH, mypuCookies);
+      if ([401, 403, 429].includes(gradeRes.status)) {
+        if (usableBridge?.grades.length) return usableBridge;
+        return {
+          success: false,
+          code: gradeRes.status === 401 ? 'session-expired' : gradeRes.status === 429 ? 'resource-exhausted' : 'permission-denied',
+          grades: [],
+          error: '學校目前無法提供這份成績，請稍後至 e 校園確認',
+        };
+      }
       if (gradeRes.status !== 200) throw new Error(`HTTP ${gradeRes.status}`);
       if (looksLikePuLoginPage(gradeRes.data)) {
         if (usableBridge) return usableBridge;
         return { success: false, code: 'session-expired', grades: [], error: 'E校園 session 已失效，請重新登入' };
       }
       const parsed = parsePuGradeDocument(gradeRes.data, semester);
-      return parsed.success ? parsed : (usableBridge || parsed);
+      if (parsed.success && (parsed.grades.length > 0 || !usableBridge?.grades.length)) return parsed;
+      return usableBridge || parsed;
     } catch (error) {
       if (usableBridge) return usableBridge;
       throw error;

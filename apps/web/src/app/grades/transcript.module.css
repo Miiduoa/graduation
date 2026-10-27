@@ -1,0 +1,37 @@
+.filters {
+  display: grid;
+  grid-template-columns: minmax(12rem, 2fr) repeat(3, minmax(8rem, 1fr));
+  gap: 12px;
+  margin: 20px 0 12px;
+}
+.filters label { min-width: 0; }
+.filters input,
+.filters select { width: 100%; min-height: 44px; box-sizing: border-box; }
+.results {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px;
+  padding: 12px 0;
+}
+.results p { margin: 0; }
+.actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.actions button,
+.more button { min-height: 44px; }
+.secondary { font-size: 0.875rem; overflow-wrap: anywhere; }
+.more { display: flex; justify-content: center; padding: 16px 0; }
+.notice { margin: 8px 0 16px; font-size: 0.875rem; line-height: 1.65; }
+.filters input:focus-visible,
+.filters select:focus-visible,
+.actions button:focus-visible,
+.more button:focus-visible { outline: 2px solid currentColor; outline-offset: 3px; }
+@media (max-width: 900px) {
+  .filters { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 480px) {
+  .filters { grid-template-columns: minmax(0, 1fr); }
+  .actions { width: 100%; }
+  .actions button { flex: 1 1 auto; }
+  .more button { width: 100%; }
+}
