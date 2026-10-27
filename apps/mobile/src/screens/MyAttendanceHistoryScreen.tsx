@@ -41,11 +41,12 @@ export default function MyAttendanceHistoryScreen() {
   const auth = useAuth();
   const { school } = useSchool();
   const uid = auth.user?.uid ?? '';
-  const schoolId = auth.profile?.schoolId ?? school.id;
+  const schoolId = school.id ?? auth.profile?.schoolId;
   const ready = !!uid && !!schoolId && !auth.loading && !auth.tokenExpired && !auth.tokenError;
   const scope = JSON.stringify([uid, schoolId, ready]);
   const [revision, setRevision] = useState(0);
   const [expanded, setExpanded] = useState<string | null>(null);
+  const [visibleCount, setVisibleCount] = useState(8);
   const [state, setState] = useState<HistoryState>({
     scope,
     loading: true,
@@ -57,6 +58,7 @@ export default function MyAttendanceHistoryScreen() {
     let disposed = false;
     setState({ scope, loading: ready, courses: [], error: false });
     setExpanded(null);
+    setVisibleCount(8);
     if (!ready) return;
     Promise.resolve().then(() => loadMyVerifiedAttendanceHistory(uid, schoolId)).then(
       (courses) => {
@@ -169,7 +171,7 @@ export default function MyAttendanceHistoryScreen() {
                       accessibilityLabel={`展開${course.courseName}點名紀錄`}
                       accessibilityState={{ expanded: isExpanded }}
                       style={styles.courseTop}
-                      onPress={() => setExpanded(isExpanded ? null : course.courseId)}
+                      onPress={() => { setExpanded(isExpanded ? null : course.courseId); setVisibleCount(8); }}
                     >
                       <View style={styles.courseTitleArea}>
                         <Text style={styles.courseName} numberOfLines={2}>{course.courseName}</Text>
@@ -184,7 +186,7 @@ export default function MyAttendanceHistoryScreen() {
                         {course.sessions.length === 0 ? (
                           <Text style={styles.muted}>{course.error ? '這門課目前無法讀取，請稍後重試。' : '尚無正式點名場次。'}</Text>
                         ) : (
-                          course.sessions.slice(0, 8).map((entry) => {
+                          course.sessions.slice(0, visibleCount).map((entry) => {
                             const verified = entry.status === 'present' || entry.status === 'late';
                             return (
                               <View key={entry.sessionId} style={styles.recordRow}>
@@ -199,8 +201,15 @@ export default function MyAttendanceHistoryScreen() {
                             );
                           })
                         )}
-                        {course.sessions.length > 8 && (
-                          <Text style={styles.muted}>先顯示最近 8 場紀錄</Text>
+                        {course.sessions.length > visibleCount && (
+                          <Pressable
+                            accessibilityRole="button"
+                            style={styles.secondaryButton}
+                            onPress={() => setVisibleCount((count) => Math.min(count + 8, course.sessions.length))}
+                          >
+                            <Text style={styles.actionText}>顯示更多紀錄（剩餘 {course.sessions.length - visibleCount} 場）</Text>
+                            <Ionicons name="chevron-down-outline" size={16} color={theme.colors.accent} />
+                          </Pressable>
                         )}
                         <Pressable
                           accessibilityRole="button"
