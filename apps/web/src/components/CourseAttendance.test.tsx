@@ -238,3 +238,76 @@ it('keeps the teacher route and school context when returning to the course or s
   expect(screen.queryByRole('link', { name: '登入帳號' })).toBeNull();
   expect(screen.getByRole('main').id).toBe('page-content');
 });
+
+it('filters the verified teacher roster by student name or ID without including unmatched rows', async () => {
+  auth.uid = 'teacher';
+  vi.mocked(loadCourseAttendance).mockResolvedValue(data(true));
+  vi.mocked(loadAttendanceRecords).mockResolvedValue([
+    { uid: 'alice', displayName: '學生甲', studentId: 'S001', checkedInAt: '2026-10-07T01:02:00Z' },
+    { uid: 'bob', displayName: '學生乙', studentId: 'S002', checkedInAt: '2026-10-07T01:03:00Z' },
+  ]);
+  render(<CourseAttendance courseId="course" />);
+  fireEvent.click(await screen.findByRole('button', { name: '查看簽到名單' }));
+  expect(await screen.findByText('學生甲')).toBeTruthy();
+  fireEvent.change(screen.getByLabelText('搜尋簽到學生'), { target: { value: 'S002' } });
+  expect(screen.queryByText('學生甲')).toBeNull();
+  expect(screen.getByText('學生乙')).toBeTruthy();
+  expect(screen.getByText('1 / 2 筆')).toBeTruthy();
+  fireEvent.change(screen.getByLabelText('搜尋簽到學生'), { target: { value: '找不到' } });
+  expect(screen.getByText('沒有符合搜尋條件的學生。')).toBeTruthy();
+  expect(screen.getByRole('button', { name: '匯出目前名單' }).hasAttribute('disabled')).toBe(true);
+});
+
+it('filters sessions without exposing an extra student check-in box', async () => {
+  vi.mocked(loadCourseAttendance).mockResolvedValue({
+    ...data(),
+    sessions: [
+      data().sessions[0],
+      {
+        ...data().sessions[0],
+        id: 'ended',
+        active: false,
+        teacherId: 'teacher',
+        endedAt: '2026-10-07T01:30:00Z',
+      },
+    ],
+  });
+  render(<CourseAttendance courseId="course" />);
+  expect(await screen.findByRole('group', { name: '篩選點名紀錄' })).toBeTruthy();
+  fireEvent.click(screen.getByRole('button', { name: '已結束' }));
+  expect(screen.queryByLabelText('教師提供的簽到碼')).toBeNull();
+  expect(screen.getByRole('button', { name: '已結束' }).getAttribute('aria-pressed')).toBe('true');
+  fireEvent.click(screen.getByRole('button', { name: '進行中' }));
+  expect(screen.getByLabelText('教師提供的簽到碼')).toBeTruthy();
+  expect(screen.getAllByRole('button', { name: '確認簽到' })).toHaveLength(1);
+});
+
+it('does not reveal a teacher QR after the server-side expiry window', async () => {
+  auth.uid = 'teacher';
+  vi.mocked(loadCourseAttendance).mockResolvedValue(data(true));
+  vi.mocked(loadAttendanceCode).mockResolvedValue('secret-must-not-show');
+  render(<CourseAttendance courseId="course" />);
+  fireEvent.click(await screen.findByRole('button', { name: '顯示簽到碼' }));
+  await screen.findByRole('alert');
+  expect(loadAttendanceCode).toHaveBeenCalledWith('course', 'session');
+  expect(screen.queryByText('secret-must-not-show')).toBeNull();
+  expect(screen.queryByAltText('本次課堂簽到 QR Code')).toBeNull();
+});
+
+it('labels manually corrected attendance as an instructor decision, not an instant QR check-in', async () => {
+  const saved = data();
+  saved.sessions[0].ownStatus = 'present';
+  saved.sessions[0].ownRecord = {
+    uid: 'student',
+    displayName: '學生乙',
+    studentId: 'S027',
+    checkedInAt: '2026-10-27T01:00:00.000Z',
+    status: 'present',
+    source: 'manual',
+    correctedAt: '2026-10-27T04:00:00.000Z',
+  };
+  vi.mocked(loadCourseAttendance).mockResolvedValue(saved);
+  render(<CourseAttendance courseId="course" />);
+  expect(await screen.findByText(/教師已補登出席 · 核定/)).toBeTruthy();
+  expect(screen.queryByLabelText('教師提供的簽到碼')).toBeNull();
+});

@@ -7,6 +7,7 @@ const { onSchedule } = require('firebase-functions/v2/scheduler');
 const { onCall: firebaseOnCall, onRequest, HttpsError } = require('firebase-functions/v2/https');
 const { createAccountGuardedOnCall } = require('./accountLifecycle');
 const { createSchoolLoginProfileWriter } = require('./schoolLoginProfile');
+const { canUsePuStudentLogin } = require('./schoolConnectionGuard');
 const onCall = createAccountGuardedOnCall({ onCall: firebaseOnCall, getDb: () => db });
 const { defineSecret } = require('firebase-functions/params');
 const { readSecretValue } = require('./secretParams');
@@ -1796,6 +1797,11 @@ exports.signInPuStudentId = onRequest(
     try {
       assertTrustedOrigin(req);
       requirePostJson(req);
+      if (!canUsePuStudentLogin(req.body?.schoolId)) {
+        res.set('Cache-Control', 'no-store');
+        res.status(503).json({ error: '尚未開放' });
+        return;
+      }
 
       const ip = getClientIp(req);
       const rawStudentId = normalizePuStudentId(req.body?.studentId);
@@ -5390,6 +5396,7 @@ exports.submitPollResponse = onCall({ region: REGION }, async (request) => {
 });
 
 exports.joinLiveSession = onCall({ region: REGION }, liveSessionHandlers.joinLiveSession);
+exports.correctAttendanceRecord = onCall({ region: REGION }, liveSessionHandlers.correctAttendanceRecord);
 
 exports.submitReaction = onCall({ region: REGION }, async (request) => {
   const uid = request.auth?.uid;

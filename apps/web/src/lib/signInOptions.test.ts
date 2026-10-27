@@ -15,12 +15,26 @@ beforeEach(() => {
 
 it('hides school login unless a usable school-issued provider is listed', () => {
   expect(STUDENT_ID_PREPARING_COPY).toBe(
-    '目前只能用 Google 帳號登入，登入後再綁定你的學校。',
+    '此校園尚未開放學號直接登入。你仍可匯入自己取得的課表、成績與活動；Google 帳號用於平台交流與課班服務。',
   );
   expect(hasUsableSchoolLoginProvider(['google-consumer'])).toBe(false);
   expect(hasUsableSchoolLoginProvider([])).toBe(false);
   expect(hasUsableSchoolLoginProvider(['school-issued'])).toBe(true);
   expect(hasUsableSchoolLoginProvider(['student-id'])).toBe(true);
+});
+
+it('requests sign-in options for the selected school', async () => {
+  request.mockResolvedValueOnce({ google: true, studentId: false });
+  const { result } = renderHook(() => useSignInOptions('ntu'));
+  await waitFor(() => expect(result.current.loading).toBe(false));
+  expect(request).toHaveBeenCalledWith(
+    'sign-in-options',
+    undefined,
+    undefined,
+    undefined,
+    { schoolId: 'ntu' },
+  );
+  expect(result.current.studentId).toBe(false);
 });
 
 it('treats student ID as unavailable unless the backend says it is available', () => {

@@ -47,6 +47,7 @@ vi.mock('@/lib/community/firestore', () => ({
   updateCampusPost: vi.fn(),
 }));
 vi.mock('@/lib/community/bookmarks', () => ({
+  BOOKMARK_UNAVAILABLE_COPY: '收藏功能暫時無法使用',
   isCampusPostBookmarked: mocks.isBookmarked,
   saveCampusPostBookmark: mocks.saveBookmark,
   removeCampusPostBookmark: mocks.removeBookmark,
@@ -80,26 +81,54 @@ it('does not show a red bookmark error when reading status is permission-denied'
     Object.assign(new Error('Missing or insufficient permissions.'), { code: 'permission-denied' }),
   );
   render(<PostDetailPage />);
-  expect(await screen.findByRole('button', { name: '收藏貼文' })).toBeTruthy();
+  const bookmark = await screen.findByRole('button', { name: '收藏功能暫時無法使用' });
+  expect((bookmark as HTMLButtonElement).disabled).toBe(true);
+  expect(screen.getByText('收藏功能暫時無法使用')).toBeTruthy();
   expect(screen.queryByText('無法讀取收藏狀態，請確認校籍與連線。')).toBeNull();
   expect(screen.queryByRole('alert')).toBeNull();
+  fireEvent.click(bookmark);
+  expect(mocks.saveBookmark).not.toHaveBeenCalled();
 });
 
-it('prompts only after the user fails to save a bookmark', async () => {
-  mocks.isBookmarked.mockRejectedValueOnce(
-    Object.assign(new Error('denied'), { code: 'permission-denied' }),
-  );
+it('disables bookmark controls after a permission-denied save instead of offering a retry', async () => {
   mocks.saveBookmark.mockRejectedValueOnce(
     Object.assign(new Error('denied'), { code: 'permission-denied' }),
   );
   render(<PostDetailPage />);
   const bookmark = await screen.findByRole('button', { name: '收藏貼文' });
+  await waitFor(() => expect((bookmark as HTMLButtonElement).disabled).toBe(false));
   expect(screen.queryByText('這次收藏未成功更新，請確認校籍與連線後重試。')).toBeNull();
   await act(async () => {
     fireEvent.click(bookmark);
   });
+  await waitFor(() => expect(mocks.saveBookmark).toHaveBeenCalledWith('alice', 'pu', 'p-1'));
+  await screen.findByText('收藏功能暫時無法使用');
+  expect(screen.queryByText('這次收藏未成功更新，請確認校籍與連線後重試。')).toBeNull();
+  expect(screen.queryByRole('alert')).toBeNull();
+  const unavailable = screen.getByRole('button', { name: '收藏功能暫時無法使用' });
+  expect((unavailable as HTMLButtonElement).disabled).toBe(true);
+  fireEvent.click(unavailable);
+  expect(mocks.saveBookmark).toHaveBeenCalledTimes(1);
+});
+
+it('keeps bookmark writes retryable after a network failure', async () => {
+  mocks.saveBookmark
+    .mockRejectedValueOnce(new Error('unavailable'))
+    .mockResolvedValueOnce(undefined);
+  render(<PostDetailPage />);
+  const bookmark = await screen.findByRole('button', { name: '收藏貼文' });
+  await waitFor(() => expect((bookmark as HTMLButtonElement).disabled).toBe(false));
+  await act(async () => {
+    fireEvent.click(bookmark);
+  });
   await screen.findByText('這次收藏未成功更新，請確認校籍與連線後重試。');
-  expect(mocks.saveBookmark).toHaveBeenCalledWith('alice', 'pu', 'p-1');
+  expect(screen.queryByText('收藏功能暫時無法使用')).toBeNull();
+  expect((screen.getByRole('button', { name: '收藏貼文' }) as HTMLButtonElement).disabled).toBe(false);
+  await act(async () => {
+    fireEvent.click(screen.getByRole('button', { name: '收藏貼文' }));
+  });
+  await waitFor(() => expect(mocks.saveBookmark).toHaveBeenCalledTimes(2));
+  await waitFor(() => expect(screen.getByRole('button', { name: '取消收藏貼文' })).toBeTruthy());
 });
 
 it('still explains a non-permission bookmark read failure', async () => {
