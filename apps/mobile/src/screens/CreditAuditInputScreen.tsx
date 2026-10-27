@@ -598,8 +598,9 @@ export function CreditAuditInputScreen(props: any) {
               <View style={{ height: 12 }} />
 
               <Text style={{ color: theme.colors.muted, marginBottom: 4 }}>
-                學分分類（依 {detailedTemplate.departmentName} 畢業規則）
+                {referenceActive ? '參考學程分類（自行標示，非校方認列）' : '個人課程分類（自行標示）'}
               </Text>
+              {referenceActive ? (
               <View style={{ gap: 6, marginTop: 4 }}>
                 {detailedTemplate.categories.map((cat) => {
                   const isMainSelected = detailedCatKey === cat.key && !detailedSubKey;
@@ -688,20 +689,53 @@ export function CreditAuditInputScreen(props: any) {
                 })}
               </View>
 
+              ) : (
+              <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 4 }}>
+                {legacyCategories.map((entry) => (
+                  <Pressable
+                    key={entry.key}
+                    accessibilityRole="radio"
+                    accessibilityState={{ checked: category === entry.key }}
+                    accessibilityLabel={entry.label}
+                    onPress={() => {
+                      setCategory(entry.key);
+                      setDetailedCatKey(categoryToDetailedKey(entry.key));
+                      setDetailedSubKey(undefined);
+                    }}
+                    style={{
+                      minHeight: 44,
+                      justifyContent: 'center',
+                      paddingHorizontal: 16,
+                      borderRadius: theme.radius.md,
+                      borderWidth: 1,
+                      borderColor: category === entry.key ? theme.colors.accent : theme.colors.border,
+                      backgroundColor: category === entry.key ? theme.colors.accentSoft : theme.colors.surface2,
+                    }}
+                  >
+                    <Text style={{ color: theme.colors.text, fontWeight: category === entry.key ? '700' : '500' }}>
+                      {entry.label}
+                    </Text>
+                  </Pressable>
+                ))}
+              </View>
+              )}
+
               <View style={{ height: 12 }} />
 
-              <Text style={{ color: theme.colors.muted, marginBottom: 4 }}>成績</Text>
+              <Text style={{ color: theme.colors.muted, marginBottom: 4 }}>
+                通過狀態（自行確認，不代表校方已認列）
+              </Text>
               <View style={{ flexDirection: 'row', gap: 8, marginTop: 4 }}>
                 <View style={{ flex: 1 }}>
                   <Button
-                    text="通過"
+                    text="已確認通過"
                     kind={passed ? 'primary' : 'secondary'}
                     onPress={() => setPassed(true)}
                   />
                 </View>
                 <View style={{ flex: 1 }}>
                   <Button
-                    text="未通過"
+                    text="尚未確認／未通過"
                     kind={!passed ? 'primary' : 'secondary'}
                     onPress={() => setPassed(false)}
                   />
@@ -710,7 +744,9 @@ export function CreditAuditInputScreen(props: any) {
 
               {passed && (
                 <View style={{ marginTop: 12 }}>
-                  <Text style={{ color: theme.colors.muted, marginBottom: 4 }}>等第成績</Text>
+                  <Text style={{ color: theme.colors.muted, marginBottom: 4 }}>
+                    等第成績（可留空，不自動填 A）
+                  </Text>
                   <ScrollView horizontal showsHorizontalScrollIndicator={false}>
                     <View style={{ flexDirection: 'row', gap: 6 }}>
                       {gradeOptions.map((g) => (
@@ -753,8 +789,9 @@ export function CreditAuditInputScreen(props: any) {
               </View>
             </AnimatedCard>
 
+            {referenceActive ? (
             <AnimatedCard
-              title="即時試算預覽"
+              title="115 入學資工系參考情境"
               subtitle={`${detailedTemplate.departmentName} ${detailedTemplate.academicYear} 學年度`}
               delay={100}
             >
@@ -896,12 +933,68 @@ export function CreditAuditInputScreen(props: any) {
                 )}
               </View>
             </AnimatedCard>
+            ) : (
+              <AnimatedCard title="我的修課學分" subtitle="已確認通過為自行標示，未套用畢業門檻">
+                <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'baseline' }}>
+                  <Text style={{ color: theme.colors.muted, fontSize: 13 }}>自行標示通過</Text>
+                  <Text style={{ fontSize: 28, fontWeight: '700', color: theme.colors.text }}>
+                    {personalProgress.selfReportedCredits} <Text style={{ fontSize: 13 }}>學分</Text>
+                  </Text>
+                </View>
+                <Text style={{ color: theme.colors.muted, fontSize: 12, marginTop: 10, lineHeight: 19 }}>
+                  共 {personalProgress.totalCourses} 門手動記錄；{personalProgress.pendingCourses} 門尚未明示通過。
+                  這裡未核對重修、抵免、通識分類或畢業審查，請以學校正式資料為準。
+                </Text>
+              </AnimatedCard>
+            )}
           </>
         )}
 
         {tab === 1 && (
           <>
-            {/* 系所選擇 */}
+            <AnimatedCard title="個人修課總覽" subtitle="根據手動記錄整理，不代替正式畢業審查">
+              <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'baseline' }}>
+                <Text style={{ color: theme.colors.muted }}>自行標示通過的課程學分</Text>
+                <Text style={{ color: theme.colors.text, fontSize: 28, fontWeight: '700' }}>
+                  {personalProgress.selfReportedCredits}
+                </Text>
+              </View>
+              <Text style={{ color: theme.colors.muted, fontSize: 12, marginTop: 10, lineHeight: 20 }}>
+                {personalProgress.reportedPassedCourses} 門標示通過，{personalProgress.pendingCourses} 門未確認。
+                未扣除重修與不能採計的課程，也未推定學校畢業資格。
+              </Text>
+              {canUseReference ? (
+                <Pressable
+                  accessibilityRole="button"
+                  style={{ minHeight: 44, paddingVertical: 12, justifyContent: 'center' }}
+                  onPress={() => {
+                    if (referenceActive) {
+                      setReferenceEnabled(false);
+                      return;
+                    }
+                    Alert.alert(
+                      '啟用 115 學年度資工系參考規則？',
+                      '僅供靜宜資訊工程學系 115 學年度入學學生自行估算。請先確認你的入學年度；系統不會把此範本當作正式畢業審查。',
+                      [
+                        { text: '取消', style: 'cancel' },
+                        { text: '我已核對，啟用參考', onPress: () => setReferenceEnabled(true) },
+                      ],
+                    );
+                  }}
+                >
+                  <Text style={{ color: theme.colors.accent, fontWeight: '700' }}>
+                    {referenceActive ? '關閉系所參考規則' : '手動啟用 115 資工系參考規則'}
+                  </Text>
+                </Pressable>
+              ) : (
+                <Text style={{ color: theme.colors.muted, fontSize: 12, marginTop: 10, lineHeight: 19 }}>
+                  此學校／系所目前沒有對應的已核實畢業規則，無法以其他科系範本推定你的畢業門檻。
+                </Text>
+              )}
+            </AnimatedCard>
+            {referenceActive ? (
+              <>
+            {/* 使用者明確選擇後，才顯示對應系所的參考規則。 */}
             <AnimatedCard
               title="畢業規則"
               subtitle={`${detailedTemplate.schoolName} — ${detailedTemplate.departmentName}`}
@@ -1165,6 +1258,15 @@ export function CreditAuditInputScreen(props: any) {
                     </View>
                   ))}
                 </View>
+              </AnimatedCard>
+            )}
+              </>
+            ) : (
+              <AnimatedCard title="下一步怎麼安排" subtitle="先核對校方門檻，再決定修課計畫">
+                <Text style={{ color: theme.colors.muted, lineHeight: 20 }}>
+                  可在「新增課程」整理成績與修課，或從 Web 學分規劃逐學期安排候選課程。
+                  目前沒有你的學制與入學年度的正式採計規則，避免直接顯示錯誤的畢業達標百分比。
+                </Text>
               </AnimatedCard>
             )}
           </>
