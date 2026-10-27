@@ -77,19 +77,6 @@ const MODEL_INFO: ModelInfo[] = [
     features: ['基本問答', '校園資訊', '快速回覆'],
     badge: '最省空間',
   },
-  {
-    id: 'qwen3-1.7b',
-    name: 'Qwen3 1.7B 中文加強版',
-    description: '免費本機模型，約 1.28 GB，適合想提升中文理解與文字規劃品質的使用者。原生實機效能仍需驗證。',
-    sizeLabel: '約 1.28 GB',
-    sizeBytes: MODEL_REGISTRY['qwen3-1.7b'].modelSize,
-    quality: '標準',
-    qualityStars: 3,
-    speedStars: 3,
-    recommended: false,
-    features: ['手機本機推論', '繁體中文', '較長對話', '免付費模型 API'],
-    badge: '實驗性 · 需更多記憶體',
-  },
   // ── 標準級 ──
   {
     id: 'qwen2.5-3b',
