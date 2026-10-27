@@ -27,10 +27,12 @@ const timestamp = (value: string | null) =>
 export function AttendanceCorrectionPanel({
   courseId,
   sessionId,
+  active = false,
   onUpdated,
 }: {
   courseId: string;
   sessionId: string;
+  active?: boolean;
   onUpdated: () => Promise<void>;
 }) {
   const [open, setOpen] = useState(false);
@@ -95,7 +97,10 @@ export function AttendanceCorrectionPanel({
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (submitting.current || !selectedUid || reason.trim().length < 6 || loading) return;
+    if (
+      submitting.current || !selectedUid || reason.trim().length < 6 || loading ||
+      (active && (status === 'absent' || status === 'excused'))
+    ) return;
     submitting.current = true;
     setBusy(true);
     setError('');
@@ -180,7 +185,13 @@ export function AttendanceCorrectionPanel({
                 }}
               >
                 {statuses.map((entry) => (
-                  <option key={entry.status} value={entry.status}>{entry.label}</option>
+                  <option
+                    key={entry.status}
+                    value={entry.status}
+                    disabled={active && (entry.status === 'absent' || entry.status === 'excused')}
+                  >
+                    {entry.label}
+                  </option>
                 ))}
               </select>
               <label htmlFor={`correction-reason-${sessionId}`}>更正原因</label>
@@ -195,9 +206,13 @@ export function AttendanceCorrectionPanel({
                 placeholder="例如：授課教師現場確認出席、已核准請假或核對點名紀錄"
                 onChange={(event) => { setReason(event.target.value); invalidatePendingRetry(); }}
               />
-              <p className={styles.note}>學生沒有簽到，不代表缺席。選擇「缺席」將建立一筆由教師正式確認的紀錄。</p>
+              <p className={styles.note}>
+                {active
+                  ? '點名仍在進行中，可以補登出席或遲到。必須結束點名後才能核定缺席或請假。'
+                  : '學生沒有簽到，不代表缺席。選擇「缺席」將建立一筆由教師正式確認的紀錄。'}
+              </p>
               <div className={styles.actions}>
-                <Button type="submit" variant="primary" disabled={busy || !selectedUid || reason.trim().length < 6}>
+                <Button type="submit" variant="primary" disabled={busy || !selectedUid || reason.trim().length < 6 || (active && (status === 'absent' || status === 'excused'))}>
                   {busy ? '正在儲存…' : '確認並保存更正'}
                 </Button>
               </div>
