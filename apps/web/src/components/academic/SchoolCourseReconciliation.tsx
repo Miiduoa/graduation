@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { AcademicConnectionError, loadAcademicRecords } from '@/lib/academicClient';
 import { formatSemester } from '@/lib/academicRecords';
 import {
@@ -40,7 +40,15 @@ function readTime(value: string) {
 }
 
 export function SchoolCourseReconciliation(props: Props) {
-  return <ReconciliationWorkspace key={`${props.uid}:${props.schoolId}`} {...props} />;
+  const [identity, setIdentity] = useState(() => ({
+    uid: props.uid, schoolId: props.schoolId, source: props.lms, revision: 0,
+  }));
+  // 新來源即建立新工作區；即使時間戳相同或切回舊來源，也不復用先前結果。
+  if (identity.uid !== props.uid || identity.schoolId !== props.schoolId || identity.source !== props.lms) {
+    setIdentity({ uid: props.uid, schoolId: props.schoolId, source: props.lms, revision: identity.revision + 1 });
+    return null;
+  }
+  return <ReconciliationWorkspace key={identity.revision} {...props} />;
 }
 
 function ReconciliationWorkspace({ uid, schoolId, lms, returnUrl, canReconnect }: Props) {
@@ -51,13 +59,8 @@ function ReconciliationWorkspace({ uid, schoolId, lms, returnUrl, canReconnect }
   const [lmsLimit, setLmsLimit] = useState(PAGE_SIZE);
   const generation = useRef(0);
   const busy = useRef(false);
-  const scope = useRef({ uid, schoolId, lms });
-  scope.current = { uid, schoolId, lms };
-  useEffect(() => {
-    setState(null);
-    busy.current = false;
-    return () => { generation.current += 1; busy.current = false; };
-  }, [uid, schoolId, lms]);
+  // 工作區移除時同步作廢請求；只忽略回應，不宣稱取消已送出的校務讀取。
+  useLayoutEffect(() => () => { generation.current += 1; busy.current = false; }, []);
   const visible = state?.source === lms ? state : null;
   const comparison = visible?.status === 'ready' ? visible.comparison : undefined;
   const query = search.normalize('NFKC').trim().toLocaleLowerCase();
@@ -71,8 +74,7 @@ function ReconciliationWorkspace({ uid, schoolId, lms, returnUrl, canReconnect }
     if (busy.current) return;
     busy.current = true;
     const request = ++generation.current;
-    const active = () => request === generation.current && scope.current.lms === lms &&
-      scope.current.uid === uid && scope.current.schoolId === schoolId;
+    const active = () => request === generation.current;
     setState({ source: lms, status: 'loading' });
     try {
       const academic = await loadAcademicRecords('courses', uid, schoolId);
