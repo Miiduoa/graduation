@@ -27,7 +27,7 @@ function Metric({ label, value, available }: {
 }
 
 export function CampusSenseDashboard({
-  snapshot, expired, authenticated, busy, syncBusy, error, onSync, onClear,
+  snapshot, expired, authenticated, busy, syncBusy, error, onSync, onClear, onBrief,
 }: {
   snapshot: CampusSenseSnapshot | null;
   expired: boolean;
@@ -37,6 +37,7 @@ export function CampusSenseDashboard({
   error: string;
   onSync: () => void;
   onClear: () => void;
+  onBrief: () => void;
 }) {
   const freshness = snapshot ? new Intl.DateTimeFormat('zh-TW', {
     timeZone: 'Asia/Taipei', month: 'numeric', day: 'numeric',
@@ -85,6 +86,11 @@ export function CampusSenseDashboard({
             授權同步作業與公告摘要，讓手機依照實際資料安排下一步。未同步仍可使用本機課表與文字助理。
           </Text>
         )}
+        <AIButton
+          label={busy ? '正在整理今日行動…' : '一鍵整理今日重點'}
+          disabled={!authenticated || busy || syncBusy}
+          onPress={onBrief}
+        />
         <AIButton
           label={syncBusy ? '正在同步校園資料…' : snapshot ? '重新同步校園資料' : '同步我的校園資料'}
           disabled={!authenticated || busy || syncBusy}
