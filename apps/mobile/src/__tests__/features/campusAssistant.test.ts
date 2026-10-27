@@ -292,3 +292,57 @@ test('a snapshot for another user is never used even if the school is the same',
   expect(result.content).not.toContain('別人的秘密');
   expect(localLLM.generate).not.toHaveBeenCalled();
 });
+
+test('passes a request-scoped cancellation signal and rejects a stale local completion', async () => {
+  const controller = new AbortController();
+  let resolve!: (value: unknown) => void;
+  jest.mocked(localLLM.generate).mockReturnValue(
+    new Promise((yes) => { resolve = yes; }) as never,
+  );
+  const pending = askCampusAssistant({
+    ...input(), mode: 'device', signal: controller.signal,
+    messages: [{ role: 'user', content: '安排讀書計畫' }],
+  });
+  for (let attempt = 0; attempt < 20 && jest.mocked(localLLM.generate).mock.calls.length === 0; attempt += 1) {
+    await Promise.resolve();
+  }
+  expect(localLLM.generate).toHaveBeenCalledTimes(1);
+  expect(jest.mocked(localLLM.generate).mock.calls[0][0].signal).toBe(controller.signal);
+  controller.abort();
+  resolve({ content: '取消後不應顯示的私人資訊', tokensGenerated: 12 });
+  await expect(pending).rejects.toMatchObject({ code: 'cancelled' });
+  expect(mockCallable).not.toHaveBeenCalled();
+});
+
+test('a native stop rejection still produces a clear cancelled outcome', async () => {
+  const controller = new AbortController();
+  let reject!: (reason: unknown) => void;
+  jest.mocked(localLLM.generate).mockReturnValue(
+    new Promise((_, no) => { reject = no; }) as never,
+  );
+  const pending = askCampusAssistant({
+    ...input(), mode: 'device', signal: controller.signal,
+    messages: [{ role: 'user', content: '整理我的課程進度' }],
+  });
+  for (let attempt = 0; attempt < 20 && jest.mocked(localLLM.generate).mock.calls.length === 0; attempt += 1) {
+    await Promise.resolve();
+  }
+  expect(localLLM.generate).toHaveBeenCalledTimes(1);
+  controller.abort();
+  reject(new Error('native completion interrupted'));
+  await expect(pending).rejects.toMatchObject({ code: 'cancelled' });
+  expect(mockCallable).not.toHaveBeenCalled();
+});
+
+test('already cancelled requests never read private local context or start an LLM', async () => {
+  const controller = new AbortController();
+  controller.abort();
+  const { collectOnDeviceSchoolContext } = require('../../services/onDeviceSchoolContext');
+  await expect(askCampusAssistant({
+    ...input(), mode: 'device', signal: controller.signal,
+    messages: [{ role: 'user', content: '請幫我安排下週讀書計畫' }],
+  })).rejects.toMatchObject({ code: 'cancelled' });
+  expect(collectOnDeviceSchoolContext).not.toHaveBeenCalled();
+  expect(localLLM.generate).not.toHaveBeenCalled();
+  expect(mockCallable).not.toHaveBeenCalled();
+});
