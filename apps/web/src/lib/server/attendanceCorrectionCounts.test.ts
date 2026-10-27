@@ -54,8 +54,8 @@ it.each([
     code: 'failed-precondition',
   });
   expect([...store.docs.keys()]).toEqual(beforeKeys);
-  expect(store.docs.get(livePath)?.attendeeCount).toBe(live);
-  expect(store.docs.get(attendancePath)?.attendeeCount).toBe(attendance);
+  expect(store.docs.get(livePath)?.attendeeCount).toEqual(live);
+  expect(store.docs.get(attendancePath)?.attendeeCount).toEqual(attendance);
   expect(store.docs.has(`${attendancePath}/attendanceRecords/student`)).toBe(false);
 });
 
