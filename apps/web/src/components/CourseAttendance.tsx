@@ -283,17 +283,31 @@ function Session({
         <div className={styles.roster}>
           <div className={styles.sessionHeading}>
             <h4>已確認的簽到紀錄</h4>
-            <Button disabled={!records.length} onClick={download}>
-              下載這份名單
+            <Button disabled={!visibleRecords.length} onClick={download}>
+              匯出目前名單
             </Button>
           </div>
+          {records.length > 0 && (
+            <div className={styles.rosterSearch}>
+              <label htmlFor={`roster-search-${session.id}`}>搜尋簽到學生</label>
+              <input
+                id={`roster-search-${session.id}`}
+                type="search"
+                value={rosterQuery}
+                onChange={(event) => setRosterQuery(event.target.value)}
+                placeholder="輸入姓名、學號或帳號"
+                autoComplete="off"
+              />
+              <span>{visibleRecords.length} / {records.length} 筆</span>
+            </div>
+          )}
           {records.length ? (
             <>
               <p className={styles.detail}>
                 顯示最近 {records.length} 筆紀錄，最多 200 筆。未簽到不會自動計為缺席。
               </p>
               <ul>
-                {records.map((row) => (
+                {visibleRecords.map((row) => (
                   <li key={row.uid}>
                     <span>
                       <strong>{row.displayName || row.studentId || row.uid}</strong>
@@ -303,6 +317,9 @@ function Session({
                   </li>
                 ))}
               </ul>
+              {visibleRecords.length === 0 && (
+                <p className={styles.detail}>沒有符合搜尋條件的學生。</p>
+              )}
             </>
           ) : (
             <p>目前還沒有人簽到。</p>
@@ -334,6 +351,7 @@ function Workspace({ courseId, uid }: { courseId: string; uid: string }) {
   const mounted = useRef(true);
   const startLock = useRef(false);
   const [accessAttempt, setAccessAttempt] = useState(0);
+  const [historyFilter, setHistoryFilter] = useState<'all' | 'active' | 'ended'>('all');
   const permission = useRef<string | null>(null);
   const permissionVersion = useRef(0);
   const reload = useCallback(async () => {
@@ -435,6 +453,27 @@ function Workspace({ courseId, uid }: { courseId: string; uid: string }) {
       )}
       {data && (
         <>
+          <section className={styles.overview} aria-label="課堂點名概況">
+            <div>
+              <span>已保存的點名</span>
+              <strong>{data.sessions.length}</strong>
+              <small>最近最多 50 場</small>
+            </div>
+            <div>
+              <span>目前進行中</span>
+              <strong>{data.sessions.filter((session) => session.active).length}</strong>
+              <small>由教師開啟的場次</small>
+            </div>
+            <div>
+              <span>{data.canReadRoster ? '已確認簽到筆數' : '我的已確認簽到'}</span>
+              <strong>
+                {data.canReadRoster
+                  ? data.sessions.reduce((sum, session) => sum + session.attendeeCount, 0)
+                  : data.sessions.filter((session) => session.ownRecord).length}
+              </strong>
+              <small>僅包含可查的紀錄</small>
+            </div>
+          </section>
           {data.canStart && (
             <section className={styles.startPanel}>
               <div>
@@ -459,15 +498,37 @@ function Workspace({ courseId, uid }: { courseId: string; uid: string }) {
               ) : null}
             </section>
           )}
-          <h2 className={styles.history}>點名紀錄</h2>
-          <p className={styles.detail}>顯示最近 50 次已保存的點名。</p>
+          <div className={styles.historyHeading}>
+            <div>
+              <h2 className={styles.history}>點名紀錄</h2>
+              <p className={styles.detail}>最近 50 場已保存的點名；未簽到不會自動視為缺席。</p>
+            </div>
+            <div className={styles.filters} role="group" aria-label="篩選點名紀錄">
+              {([
+                ['all', '全部'],
+                ['active', '進行中'],
+                ['ended', '已結束'],
+              ] as const).map(([value, label]) => (
+                <button
+                  key={value}
+                  type="button"
+                  aria-pressed={historyFilter === value}
+                  onClick={() => setHistoryFilter(value)}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+          </div>
           {data.sessions.length ? (
             data.sessions
               .filter(
                 (session) =>
-                  data.canReadRoster ||
-                  !session.active ||
-                  session.id === studentCheckInSession(data.sessions)?.id,
+                  (data.canReadRoster ||
+                    !session.active ||
+                    session.id === studentCheckInSession(data.sessions)?.id) &&
+                  (historyFilter === 'all' ||
+                    (historyFilter === 'active' ? session.active : !session.active)),
               )
               .map((session) => (
               <Session
