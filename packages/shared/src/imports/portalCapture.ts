@@ -101,14 +101,120 @@ export function schoolPortalCaptureScript(request: PortalCaptureRequest): string
         /^(INPUT|TEXTAREA|SELECT|OPTION|BUTTON|FORM|SCRIPT|STYLE|TEMPLATE|NOSCRIPT|SVG|IFRAME|FRAME|OBJECT|EMBED)$/.test(node.tagName) ||
         node.isContentEditable || node.getAttribute('contenteditable') === 'true') return '';
       if (node.tagName === 'BR') return ' / ';
-      var content = Array.prototype.map.call(node.childNodes, plain).join('');
-      return /^(DIV|P|LI)$/.test(node.tagName) && content.trim() ? content + ' / ' : content;
+      // Separate actual block siblings, not layout wrappers around a single header.
+      var content = '', previousBlock = false;
+      Array.prototype.forEach.call(node.childNodes, function (child) {
+        var part = plain(child);
+        if (!part) return;
+        var block = child.nodeType === 1 && /^(DIV|P|LI)$/.test(child.tagName);
+        if (content.trim() && part.trim() && (block || previousBlock) &&
+          !content.endsWith(' / ') && !part.startsWith(' / ')) content += ' / ';
+        content += part;
+        if (part.trim()) previousBlock = block;
+      });
+      return content;
     }
-    function span(cell, name) {
-      var value = cell.getAttribute(name);
-      if (!value) return '';
-      if (!/^\\d+$/.test(value) || Number(value) < 1 || Number(value) > 32) throw new Error('too-large');
-      return ' ' + name + '="' + Number(value) + '"';
+    var tableSelector = 'table,[role="table"],[role="grid"],[role="treegrid"]';
+    var cellSelector = '[role="columnheader"],[role="rowheader"],[role="cell"],[role="gridcell"]';
+    function spanValue(cell, name, aria) {
+      var value = cell.getAttribute(aria ? 'aria-' + name : name);
+      if (value === null || value === '') return 1;
+      if (!/^\\d+$/.test(value) || Number(value) < 1) throw new Error(aria ? 'unavailable' : 'too-large');
+      if (Number(value) > 32) throw new Error('too-large');
+      return Number(value);
+    }
+    function span(cell, name, aria) {
+      return cell.getAttribute(aria ? 'aria-' + name : name)
+        ? ' ' + name + '="' + spanValue(cell, name, aria) + '"' : '';
+    }
+    function countValue(element, name) {
+      var value = element.getAttribute(name);
+      if (value === null) return null;
+      // -1 explicitly means the total is unknown, not that the visible slice is complete.
+      if (!/^(?:0|[1-9]\\d*)$/.test(value) || !Number.isSafeInteger(Number(value))) throw new Error('unavailable');
+      return Number(value);
+    }
+    function unsettled(element) {
+      return !!element.closest('[aria-busy="true"]') ||
+        !!(element.getAttribute('aria-owns') || '').trim();
+    }
+    function verifyIndex(element, name, expected) {
+      var actual = countValue(element, name);
+      if (actual !== null && actual !== expected) throw new Error('unavailable');
+    }
+    function collectTables(doc) {
+      // Only explicit table semantics are supported. Never guess from CSS class names.
+      var tables = doc.querySelectorAll(tableSelector);
+      if (tables.length > 60) throw new Error('too-large');
+      Array.prototype.forEach.call(tables, function (table) {
+        if (!visible(table) || table.querySelector(tableSelector)) return;
+        var hasPassword = Array.prototype.some.call(table.getElementsByTagName('input'), function (input) {
+          return String(input.getAttribute('type') || '').toLowerCase() === 'password';
+        });
+        if (hasPassword) return;
+        // Hierarchies, externally owned rows, and loading placeholders are not flat records.
+        if (table.getAttribute('role') === 'treegrid' || unsettled(table)) throw new Error('unavailable');
+        Array.prototype.forEach.call(table.querySelectorAll('[role="rowgroup"]'), function (group) {
+          if (unsettled(group)) throw new Error('unavailable');
+        });
+        var aria = table.tagName !== 'TABLE';
+        var sourceRows = aria ? table.querySelectorAll('[role="row"]') : table.rows;
+        if (rowCount + sourceRows.length > 1200) throw new Error('too-large');
+        var rows = Array.prototype.filter.call(sourceRows, function (row) {
+          return visible(row) && (!aria || row.closest(tableSelector) === table);
+        });
+        var declaredRows = countValue(table, 'aria-rowcount');
+        var declaredColumns = countValue(table, 'aria-colcount');
+        if (declaredRows !== null && declaredRows !== rows.length) throw new Error('unavailable');
+        if (!rows.length) return;
+        var structural = aria || declaredRows !== null || declaredColumns !== null ||
+          !!table.querySelector('[aria-rowindex],[aria-colindex]');
+        var carried = [], width = null;
+        tableCount += 1;
+        if (tableCount > 30) throw new Error('too-large');
+        add('<table>');
+        rows.forEach(function (row, rowIndex) {
+          if (unsettled(row)) throw new Error('unavailable');
+          verifyIndex(row, 'aria-rowindex', rowIndex + 1);
+          verifyIndex(row, 'aria-colindex', 1);
+          var cells = aria ? Array.prototype.filter.call(row.querySelectorAll(cellSelector), function (cell) {
+            return cell.closest('[role="row"]') === row && cell.closest(tableSelector) === table;
+          }) : Array.prototype.slice.call(row.cells);
+          rowCount += 1;
+          if (rowCount > 1200 || cells.length > 32) throw new Error('too-large');
+          var cursor = 0;
+          add('<tr>');
+          cells.forEach(function (cell) {
+            if (unsettled(cell)) throw new Error('unavailable');
+            var down = spanValue(cell, 'rowspan', aria), across = spanValue(cell, 'colspan', aria);
+            if (structural) {
+              while (carried[cursor] > rowIndex) cursor += 1;
+              verifyIndex(cell, 'aria-rowindex', rowIndex + 1);
+              verifyIndex(cell, 'aria-colindex', cursor + 1);
+              if (cursor + across > 32) throw new Error('too-large');
+              if (rowIndex + down > rows.length) throw new Error('unavailable');
+              for (var column = cursor; column < cursor + across; column += 1) {
+                if (carried[column] > rowIndex) throw new Error('unavailable');
+                carried[column] = rowIndex + down;
+              }
+              cursor += across;
+            }
+            var role = cell.getAttribute('role');
+            var tag = aria ? (role === 'columnheader' || role === 'rowheader' ? 'th' : 'td') : (cell.tagName === 'TH' ? 'th' : 'td');
+            // A DIV used as a cell is a boundary, not a separator appended to its own text.
+            var text = visible(cell) ? plain(cell).trim() : '';
+            if (text.length > 500) throw new Error('too-large');
+            add('<' + tag + span(cell, 'rowspan', aria) + span(cell, 'colspan', aria) + '>' + escapeText(text) + '</' + tag + '>');
+          });
+          if (structural) {
+            var occupied = carried.filter(function (until) { return until > rowIndex; }).length;
+            if (width === null) width = occupied;
+            if (occupied !== width || (declaredColumns !== null && occupied !== declaredColumns)) throw new Error('unavailable');
+          }
+          add('</tr>');
+        });
+        add('</table>');
+      });
     }
     function collect(doc) {
       var headings = [];
@@ -125,34 +231,7 @@ export function schoolPortalCaptureScript(request: PortalCaptureRequest): string
           terms.forEach(function (term) { add('<h2>' + escapeText(term) + '</h2>'); });
         }
       });
-      var tables = doc.getElementsByTagName('table');
-      if (tables.length > 60) throw new Error('too-large');
-      Array.prototype.forEach.call(tables, function (table) {
-        if (!visible(table) || table.getElementsByTagName('table').length) return;
-        var hasPassword = Array.prototype.some.call(table.getElementsByTagName('input'), function (input) {
-          return String(input.getAttribute('type') || '').toLowerCase() === 'password';
-        });
-        if (hasPassword) return;
-        tableCount += 1;
-        if (tableCount > 30) throw new Error('too-large');
-        // Reject oversize documents before walking each cell or computing styles.
-        if (rowCount + table.rows.length > 1200) throw new Error('too-large');
-        add('<table>');
-        Array.prototype.forEach.call(table.rows, function (row) {
-          if (!visible(row)) return;
-          rowCount += 1;
-          if (rowCount > 1200 || row.cells.length > 32) throw new Error('too-large');
-          add('<tr>');
-          Array.prototype.forEach.call(row.cells, function (cell) {
-            var tag = cell.tagName === 'TH' ? 'th' : 'td';
-            var text = visible(cell) ? plain(cell).trim() : '';
-            if (text.length > 500) throw new Error('too-large');
-            add('<' + tag + span(cell, 'rowspan') + span(cell, 'colspan') + '>' + escapeText(text) + '</' + tag + '>');
-          });
-          add('</tr>');
-        });
-        add('</table>');
-      });
+      collectTables(doc);
     }
     try {
       var queue = [document], seen = [], frames = 0;
