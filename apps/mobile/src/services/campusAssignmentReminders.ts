@@ -205,8 +205,11 @@ export async function scheduleCampusAssignmentReminder(
     validateAssignment(input, Date.now());
     if (!permission.granted) throw new CampusReminderError('permission-required');
 
-    let scheduled = false;
+    let scheduleAttempted = false;
     try {
+      // A native bridge may persist the alarm and then reject its JS promise.
+      // Always attempt an own-ID rollback once scheduling has been attempted.
+      scheduleAttempted = true;
       const returnedId = await Notifications.scheduleNotificationAsync({
         identifier: key.identifier,
         content: {
@@ -221,7 +224,6 @@ export async function scheduleCampusAssignmentReminder(
           ...(Platform.OS === 'android' ? { channelId: 'campus-agent-local-reminders' } : {}),
         },
       });
-      scheduled = true;
       if (returnedId !== key.identifier) throw new CampusReminderError('native-failed');
       checkAccount(input.scope, input.isCurrent);
       validateAssignment(input, Date.now());
@@ -234,7 +236,7 @@ export async function scheduleCampusAssignmentReminder(
       return { outcome: 'scheduled', triggerAt: new Date(source.triggerAt).toISOString() };
     } catch (error) {
       // Transaction-like rollback: never report success if the device or receipt fails.
-      if (scheduled) {
+      if (scheduleAttempted) {
         await Notifications.cancelScheduledNotificationAsync(key.identifier).catch(() => null);
       }
       if (error instanceof CampusReminderError) throw error;
