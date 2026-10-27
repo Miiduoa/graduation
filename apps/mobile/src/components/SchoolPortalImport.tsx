@@ -21,6 +21,8 @@ import { theme } from '../ui/theme';
 import { useThemeMode } from '../state/theme';
 import { portalReviewIssues, reconcilePortalRowIssues } from '@campus/shared/src/imports/portalRowReview';
 import { SchoolPortalRowEditor } from './SchoolPortalRowEditor';
+import { SchoolPortalReimport } from './SchoolPortalReimport';
+import { undoPortalReimport, type PortalReimportReceipt } from '../services/portalReimport';
 
 type Kind = 'timetable' | 'grades';
 type Stage = 'consent' | 'browse' | 'choose' | 'review' | 'done';
@@ -112,7 +114,9 @@ function PortalFlow({ portal, scope, isScopeCurrent, onClose, onOpenRecords, clo
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [visible, setVisible] = useState(20);
   const [saving, setSaving] = useState(false);
-  const [receipt, setReceipt] = useState<{ added: number; duplicates: number; batchId: string | null } | null>(null);
+  const [receipt, setReceipt] = useState<{ added: number; duplicates: number; batchId: string | null; reimport?: PortalReimportReceipt } | null>(null);
+  const [reconciling, setReconciling] = useState(false);
+  const reconcileLock = useRef(false);
   const [confirmUndo, setConfirmUndo] = useState(false);
   const [undone, setUndone] = useState(false);
   const [confirmRead, setConfirmRead] = useState(false);
@@ -134,7 +138,7 @@ function PortalFlow({ portal, scope, isScopeCurrent, onClose, onOpenRecords, clo
     setBusy(false);
   }, []);
   const askClose = useCallback(() => {
-    if (writeLock.current) return;
+    if (writeLock.current || reconcileLock.current) return;
     stop(); setConfirmRead(false);
     if (hasDraft.current) setConfirmClose(true);
     else onClose();
@@ -157,6 +161,7 @@ function PortalFlow({ portal, scope, isScopeCurrent, onClose, onOpenRecords, clo
     };
   }, [stop]);
   const clearDraft = () => {
+    reconcileLock.current = false; setReconciling(false);
     hasDraft.current = false; resumeStage.current = 'choose';
     setSelection(null); setText(''); setYear(''); setSemester('');
     setRows([]); setIssues([]); setSelected(new Set()); setVisible(20);
@@ -165,22 +170,22 @@ function PortalFlow({ portal, scope, isScopeCurrent, onClose, onOpenRecords, clo
   };
   // Only an explicit restart creates a new incognito browser. Review keeps it mounted.
   const resetBrowser = () => {
-    if (writeLock.current || !active()) return;
+    if (writeLock.current || reconcileLock.current || !active()) return;
     stop(); setError(''); setBrowserError(''); setLoaded(false); setCanBack(false);
     currentUrl.current = portal.url; setOrigin(new URL(portal.url).origin);
     setUrl(portal.url); setConfirmRead(false); moveTo('browse');
     setBrowserEpoch((value) => value + 1);
   };
   const returnToBrowser = () => {
-    if (writeLock.current || editing.current || !active()) return;
+    if (writeLock.current || reconcileLock.current || editing.current || !active()) return;
     stop(); setError(''); setConfirmRead(false); moveTo('browse');
   };
   const resumeDraft = () => {
-    if (writeLock.current || !active() || !hasDraft.current) return;
+    if (writeLock.current || reconcileLock.current || !active() || !hasDraft.current) return;
     stop(); setError(''); setConfirmRead(false); moveTo(resumeStage.current);
   };
   const continueImport = (nextKind: Kind) => {
-    if (writeLock.current || !active() || stageRef.current !== 'done') return;
+    if (writeLock.current || reconcileLock.current || !active() || stageRef.current !== 'done') return;
     stop(); clearDraft(); setReceipt(null); setConfirmUndo(false); setUndone(false);
     setKind(nextKind); setError(''); moveTo('browse');
   };
@@ -213,7 +218,7 @@ function PortalFlow({ portal, scope, isScopeCurrent, onClose, onOpenRecords, clo
     } catch { setError('讀到表格，但未辨識出目前資料類型。請切到課表／成績列表，或改用檔案匯入。'); }
   };
   const preview = (discardCorrections = false) => {
-    if (writeLock.current || editing.current || !active()) return;
+    if (writeLock.current || reconcileLock.current || editing.current || !active()) return;
     if (corrected.size && !discardCorrections) { setConfirmReparse(true); return; }
     setConfirmReparse(false); setCorrected(new Set());
     try {
@@ -232,12 +237,12 @@ function PortalFlow({ portal, scope, isScopeCurrent, onClose, onOpenRecords, clo
   const invalidIds = new Set(reviewIssues.filter((issue) => issue.severity === 'error' && issue.rowId).map((issue) => issue.rowId!));
   const globalErrors = reviewIssues.some((issue) => issue.severity === 'error' && !issue.rowId);
   const beginEdit = (id: string) => {
-    if (writeLock.current || editing.current || !active() || confirmClose) return;
+    if (writeLock.current || reconcileLock.current || editing.current || !active() || confirmClose) return;
     editing.current = id; setEditingId(id); setError('');
   };
   const cancelEdit = () => { editing.current = null; setEditingId(null); };
   const applyEdit = (next: PersonalImportRow) => {
-    if (writeLock.current || !active() || editing.current !== next.id || confirmClose) return;
+    if (writeLock.current || reconcileLock.current || !active() || editing.current !== next.id || confirmClose) return;
     const previous = rows.find((row) => row.id === next.id);
     if (!previous || previous.schoolId !== next.schoolId || previous.kind !== next.kind) return;
     setRows((old) => old.map((row) => row.id === next.id ? next : row));
@@ -245,12 +250,16 @@ function PortalFlow({ portal, scope, isScopeCurrent, onClose, onOpenRecords, clo
     setCorrected((old) => new Set([...old, next.id])); cancelEdit();
   };
   const selectRows = (mode: 'all' | 'none' | 'valid') => {
-    if (writeLock.current || editing.current || !active() || confirmClose) return;
+    if (writeLock.current || reconcileLock.current || editing.current || !active() || confirmClose) return;
     if (mode === 'valid' && globalErrors) return;
     setSelected(new Set(rows.filter((row) => mode === 'all' || (mode === 'valid' && !invalidIds.has(row.id))).map((row) => row.id)));
   };
+  const beginReimport = () => {
+    if (writeLock.current || reconcileLock.current || editing.current || !active() || !chosen.length || errors.length || confirmClose || confirmReparse) return;
+    reconcileLock.current = true; setReconciling(true);
+  };
   const save = async () => {
-    if (writeLock.current || editing.current || !active() || !chosen.length || errors.length || confirmClose || confirmReparse) return;
+    if (writeLock.current || reconcileLock.current || editing.current || !active() || !chosen.length || errors.length || confirmClose || confirmReparse) return;
     writeLock.current = true; setSaving(true); setError('');
     try {
       const result = await appendPersonalImports(scope, chosen, active);
@@ -262,9 +271,13 @@ function PortalFlow({ portal, scope, isScopeCurrent, onClose, onOpenRecords, clo
     finally { writeLock.current = false; if (alive.current) setSaving(false); }
   };
   const undo = async () => {
-    if (!confirmUndo || !receipt?.batchId || writeLock.current || !active()) return;
+    if (!confirmUndo || !receipt?.batchId || writeLock.current || reconcileLock.current || !active()) return;
     writeLock.current = true; setSaving(true); setError('');
-    try { await undoLastPersonalImport(scope, receipt.batchId, active); if (active()) setUndone(true); }
+    try {
+      if (receipt.reimport) await undoPortalReimport(scope, receipt.reimport, active);
+      else await undoLastPersonalImport(scope, receipt.batchId, active);
+      if (active()) setUndone(true);
+    }
     catch (err) { if (active()) setError(personalImportErrorMessage(err, '撤回未完成，請到匯入紀錄核對。')); }
     finally { writeLock.current = false; if (alive.current) setSaving(false); }
   };
@@ -272,7 +285,7 @@ function PortalFlow({ portal, scope, isScopeCurrent, onClose, onOpenRecords, clo
     <View style={{ gap: 6 }}><Text style={copy}>{label}</Text><TextInput accessibilityLabel={label}
       style={[input, multiline ? { minHeight: 120, textAlignVertical: 'top' } : {}]} value={value}
       multiline={multiline} editable={!saving && !editingId && !corrected.size} maxLength={multiline ? 100_000 : 32} autoCorrect={false}
-      onChangeText={(next) => { if (writeLock.current || editing.current || corrected.size) return; change(next); setRows([]); setIssues([]); }} /></View>
+      onChangeText={(next) => { if (writeLock.current || reconcileLock.current || editing.current || corrected.size) return; change(next); setRows([]); setIssues([]); }} /></View>
   );
   const visibleError = error || (stage === 'browse' ? browserError : '');
   return <SafeAreaView style={{ flex: 1, backgroundColor: theme.colors.bg }}>
@@ -400,12 +413,18 @@ function PortalFlow({ portal, scope, isScopeCurrent, onClose, onOpenRecords, clo
           {errors.filter((issue) => !issue.rowId).slice(0, 10).map((issue, index) => <Text key={index} accessibilityRole="alert" style={copy}>{issue.message}</Text>)}
           {errors.length > 10 ? <Text style={copy}>{`另有 ${errors.length - 10} 個問題，請修正表格後重新整理。`}</Text> : null}
           <Button text={saving ? '正在儲存…' : `確認匯入 ${chosen.length} 筆`} disabled={saving || !!editingId || confirmClose || confirmReparse || !chosen.length || !!errors.length} onPress={() => void save()} />
+          <Button text="核對重複與更新既有資料" kind="outline"
+            disabled={saving || reconciling || !!editingId || confirmClose || confirmReparse || !chosen.length || !!errors.length} onPress={beginReimport} />
+          <Text style={copy}>一般匯入只新增、不覆蓋；已有同學期資料時，可先核對差異，再明確確認更新。</Text>
         </> : null}
         <Button text="重選表格" kind="outline" disabled={saving || !!editingId || !!corrected.size} onPress={() => { setRows([]); setError(''); resumeStage.current = 'choose'; moveTo('choose'); }} />
       </> : null}
       {stage === 'done' && receipt ? <>
-        <Text accessibilityRole="header" style={{ ...copy, fontSize: 20, fontWeight: '700' }}>{undone ? '已撤回這次新增資料' : '匯入完成'}</Text>
-        <Text style={copy}>{undone ? '後續編輯的紀錄不會被撤回。' : `已新增 ${receipt.added} 筆，相同資料 ${receipt.duplicates} 筆未重複新增。`}</Text>
+        <Text accessibilityRole="header" style={{ ...copy, fontSize: 20, fontWeight: '700' }}>{undone ? (receipt.reimport?.updated ? '已撤回這次新增與更新' : '已撤回這次新增資料') : '匯入完成'}</Text>
+        <Text style={copy}>{undone ? '後續編輯的紀錄不會被撤回。' : receipt.reimport
+          ? `已新增 ${receipt.added} 筆、更新 ${receipt.reimport.updated} 筆；保留舊值 ${receipt.reimport.kept} 筆，相同列 ${receipt.duplicates} 筆未重複新增。`
+          : `已新增 ${receipt.added} 筆，相同資料 ${receipt.duplicates} 筆未重複新增。`}</Text>
+        {receipt.reimport && receipt.batchId && !undone ? <Text style={copy}>本頁撤回會同時恢復這次更新前的值；若紀錄已被後續編輯或同步改變，會停止撤回。離開此頁不保留撤回暫存。</Text> : null}
         <Text style={copy}>{scope.owner === 'guest:device' ? '儲存於這台裝置的訪客空間。' : '儲存於目前帳號與校園的個人匯入空間。'}已啟用的個人資料同步仍依原設定運作；未新增校務背景同步。</Text>
         <Button text="查看與編輯已匯入資料" disabled={saving} onPress={() => onOpenRecords(kind)} />
         <Button text="繼續匯入其他學期" kind="outline" disabled={saving} onPress={() => continueImport(kind)} />
@@ -418,5 +437,13 @@ function PortalFlow({ portal, scope, isScopeCurrent, onClose, onOpenRecords, clo
         </> : null}
       </> : null}
     </ScrollView> : null}
+    {reconciling ? <SchoolPortalReimport scope={scope} rows={chosen}
+      isCurrent={() => alive.current && isScopeCurrent(scope)}
+      onCancel={() => { reconcileLock.current = false; setReconciling(false); }}
+      onSaved={(result) => {
+        if (!alive.current || !isScopeCurrent(scope)) return;
+        setReceipt({ added: result.added, duplicates: result.duplicates, batchId: result.batchId, reimport: result });
+        setConfirmUndo(false); setUndone(false); clearDraft(); moveTo('done');
+      }} /> : null}
   </SafeAreaView>;
 }
