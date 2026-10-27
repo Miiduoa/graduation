@@ -58,6 +58,7 @@ function Session({
   const [teacherCode, setTeacherCode] = useState('');
   const [qr, setQr] = useState('');
   const [records, setRecords] = useState<AttendanceRecord[] | null>(null);
+  const [rosterQuery, setRosterQuery] = useState('');
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
   const [busy, setBusy] = useState(false);
@@ -71,6 +72,41 @@ function Session({
     };
   }, []);
   const confirmed = session.ownRecord?.checkedInAt ?? confirmedAt;
+  const [clock, setClock] = useState(Date.now());
+  const deadline = session.qrExpiresAt ? Date.parse(session.qrExpiresAt) : NaN;
+  const remainingSeconds = Number.isFinite(deadline)
+    ? Math.max(0, Math.ceil((deadline - clock) / 1000))
+    : null;
+  const expired = session.active && remainingSeconds === 0;
+  const visibleRecords = records?.filter((row) =>
+    [row.displayName, row.studentId, row.uid].some((value) =>
+      value.toLocaleLowerCase().includes(rosterQuery.trim().toLocaleLowerCase()),
+    ),
+  ) ?? [];
+
+  useEffect(() => {
+    if (!session.active || (!canStart && !checkInEnabled)) return;
+    const timer = window.setInterval(() => setClock(Date.now()), 1000);
+    return () => window.clearInterval(timer);
+  }, [session.active, canStart, checkInEnabled]);
+
+  useEffect(() => {
+    if (!teacherCode) return;
+    const hideSecret = () => {
+      setTeacherCode('');
+      setQr('');
+    };
+    const hideOnBackground = () => {
+      if (document.visibilityState !== 'visible') hideSecret();
+    };
+    document.addEventListener('visibilitychange', hideOnBackground);
+    const ttl = Number.isFinite(deadline) ? Math.max(0, deadline - Date.now()) : 0;
+    const timer = window.setTimeout(hideSecret, ttl);
+    return () => {
+      document.removeEventListener('visibilitychange', hideOnBackground);
+      window.clearTimeout(timer);
+    };
+  }, [teacherCode, deadline]);
 
   async function run(action: () => Promise<void>) {
     if (lock.current) return;
@@ -94,6 +130,9 @@ function Session({
   }
   async function showCode() {
     const code = await loadAttendanceCode(courseId, session.id);
+    if (!Number.isFinite(deadline) || deadline <= Date.now()) {
+      throw Object.assign(new Error('簽到期限已結束'), { code: 'functions/deadline-exceeded' });
+    }
     const image = await QRCode.toDataURL(
       JSON.stringify({ groupId: courseId, sessionId: session.id, qrToken: code }),
       { width: 260, margin: 2 },
@@ -104,9 +143,9 @@ function Session({
     }
   }
   function download() {
-    if (!records) return;
+    if (!records || visibleRecords.length === 0) return;
     const url = URL.createObjectURL(
-      new Blob([attendanceCsv(records)], { type: 'text/csv;charset=utf-8' }),
+      new Blob([attendanceCsv(visibleRecords)], { type: 'text/csv;charset=utf-8' }),
     );
     const anchor = document.createElement('a');
     anchor.href = url;
@@ -120,6 +159,9 @@ function Session({
         <div>
           <p className={styles.label}>{studentAttendanceHeading(courseName, session.active)}</p>
           <h3>{date(session.startedAt)}</h3>
+          <span className={session.active ? styles.activeTag : styles.endedTag}>
+            {session.active ? (expired ? '簽到期限已到' : '點名進行中') : '已結束'}
+          </span>
         </div>
         {canReadRoster && (
           <p className={styles.count}>
@@ -127,7 +169,15 @@ function Session({
           </p>
         )}
       </div>
-      {session.active && <p className={styles.detail}>簽到期限：{date(session.qrExpiresAt)}</p>}
+      {session.active && (
+        <p className={styles.detail}>
+          簽到期限：{date(session.qrExpiresAt)}
+          {remainingSeconds !== null && !expired && (canStart || checkInEnabled)
+            ? ` · 剩餘 ${Math.floor(remainingSeconds / 60)} 分 ${String(remainingSeconds % 60).padStart(2, '0')} 秒`
+            : null}
+          {expired ? ' · 期限已過，請由老師重新開啟' : null}
+        </p>
+      )}
       {confirmed && (
         <p role="status" className={styles.confirmed}>
           已簽到 · {date(confirmed)}
@@ -207,7 +257,7 @@ function Session({
           </Button>
         )}
       </div>
-      {teacherCode && session.active && (
+      {teacherCode && session.active && !expired && (
         <div className={styles.codePanel}>
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img src={qr} width={260} height={260} alt="本次課堂簽到 QR Code" />
