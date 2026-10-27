@@ -197,8 +197,8 @@ it('keeps the selected campus in both semester and classroom-feedback tabs', () 
     const href = new URL(screen.getByRole('link', { name }).getAttribute('href')!, 'https://campus.example');
     expect(href.pathname).toBe('/grades');
     expect(href.searchParams.get('tab')).toBe(tab);
-    expect(href.searchParams.get('campus')).toBe('nthu');
-    expect(href.searchParams.get('schoolId')).toBe('nthu');
+    expect(href.searchParams.get('campus')).toBe('pu');
+    expect(href.searchParams.get('schoolId')).toBe('pu');
     expect(href.searchParams.get('school')).toBe('NTHU');
   }
   expect(screen.getByRole('link', { name: '學期成績' }).getAttribute('aria-current')).toBe('page');
@@ -276,13 +276,19 @@ it('ignores an old account response even after logging out and back into the sam
       }),
   );
   const view = render(<GradesPage />);
+  // The controller starts reads in a microtask. Establish the old in-flight
+  // request before signing out; disposal before it starts cancels it entirely.
+  await waitFor(() => expect(loadAcademicRecords).toHaveBeenCalledTimes(1));
+  expect(loadAcademicRecords).toHaveBeenLastCalledWith('grades', 'one', 'pu');
   account.user = null;
   view.rerender(<GradesPage />);
   account.user = { uid: 'one' };
   view.rerender(<GradesPage />);
   await screen.findByText('真實來源科目');
+  expect(loadAcademicRecords).toHaveBeenCalledTimes(2);
   await act(async () => finish(grades('one', '舊回應不得出現')));
   expect(screen.queryByText('舊回應不得出現')).toBeNull();
+  expect(screen.getByText('真實來源科目')).toBeTruthy();
 });
 it('removes the previous account transcript before loading the next account', async () => {
   const view = render(<GradesPage />);
