@@ -10,12 +10,18 @@ import {
   splitPersonalImportAiTextBatch,
   type PersonalImportAiTextBatch,
 } from '@campus/shared/src/imports/aiTextBatches';
+import {
+  auditPersonalImportAiTable,
+  personalImportAiTableAuditMessage,
+  personalImportAiTableCoverageNotice,
+} from '@campus/shared/src/imports/aiTableAudit';
 import { localLLM } from '../localLLMInference';
 
 export const MOBILE_IMPORT_AI_MAX_CHARACTERS = PERSONAL_IMPORT_AI_MAX_TEXT;
 const BATCH_CHARACTERS = 1_000;
 const GENERATION_TIMEOUT_MS = 120_000;
 const MAX_BATCH_SPLITS = 8;
+type RetryReason = 'length' | 'coverage' | null;
 
 export type MobileImportAiAvailability = {
   status: 'ready' | 'busy' | 'missing' | 'unavailable';
@@ -24,7 +30,7 @@ export type MobileImportAiAvailability = {
 };
 
 let pending = false;
-let batchProgress: { current: number; total: number; startLine: number; endLine: number; retry: boolean } | null = null;
+let batchProgress: { current: number; total: number; startLine: number; endLine: number; retry: RetryReason } | null = null;
 const listeners = new Set<() => void>();
 const emit = () => {
   for (const listener of listeners) {
@@ -47,11 +53,14 @@ export function getMobileImportAiAvailability(): MobileImportAiAvailability {
   }
   const state = localLLM.getState();
   if (pending || ['generating', 'loading', 'downloading'].includes(state.status)) {
+    const retryDetail = batchProgress?.retry === 'coverage'
+      ? '逐列核對發現漏列或欄位錯配，已縮小範圍重新整理。'
+      : batchProgress?.retry === 'length' ? '上一段內容較多，已縮小範圍重新整理。' : '';
     return {
       status: 'busy',
       title: batchProgress ? `正在整理第 ${batchProgress.current}／${batchProgress.total} 段` : '本機模型正在忙碌',
       detail: batchProgress
-        ? `${batchProgress.retry ? '上一段內容較多，已縮小範圍重新整理。' : ''}目前處理原始文字第 ${batchProgress.startLine}–${batchProgress.endLine} 行；全部完成後才會產生待核對草稿。`
+        ? `${retryDetail}目前處理原始文字第 ${batchProgress.startLine}–${batchProgress.endLine} 行；全部完成後才會產生待核對草稿。`
         : '前一次運算或模型準備完成後，就能再次整理。現在的文字與草稿都會保留。',
     };
   }
@@ -117,7 +126,7 @@ export async function runMobilePersonalImportAi(
     ] : []),
   ].join('\n');
   // Validate all original prompts before taking ownership or starting native work.
-  const work = batches.map((batch) => ({ batch, prompt: promptFor(batch), retry: false }));
+  const work = batches.map((batch) => ({ batch, prompt: promptFor(batch), retry: null as RetryReason }));
   pending = true;
 
   return new Promise((resolve, reject) => {
@@ -148,6 +157,8 @@ export async function runMobilePersonalImportAi(
     const recognizeAll = async () => {
       const combined: ReturnType<typeof parsePersonalImportAiResponse> = { rows: [], issues: [] };
       let splits = 0;
+      let auditedRecords = 0;
+      let hasUnauditedSource = false;
       for (let index = 0; index < work.length; index++) {
         if (settled || signal.aborted) return;
         if (localLLM.getLoadedModelId() !== modelId) throw new Error('model changed');
@@ -179,33 +190,45 @@ export async function runMobilePersonalImportAi(
         clearTimeout(timer);
         if (settled || signal.aborted) return;
         if (localLLM.getLoadedModelId() !== modelId) throw new Error('model changed');
-        if (result.finishReason === 'length' && splits < MAX_BATCH_SPLITS) {
+        const retrySmaller = (reason: Exclude<RetryReason, null>) => {
+          if (splits >= MAX_BATCH_SPLITS) return false;
           const smaller = splitPersonalImportAiTextBatch(batch);
-          if (smaller) {
-            // Replace only the failed range. Previously completed rows remain private;
-            // truncated JSON is never parsed or concatenated with the retry result.
-            const retries = smaller.map((part) => ({ batch: part, prompt: promptFor(part), retry: true }));
-            work.splice(index, 1, ...retries);
-            splits++;
-            index--;
-            continue;
-          }
-        }
+          if (!smaller) return false;
+          // Replace only this range. Neither truncated nor mismatched output is
+          // published; both recovery reasons share the same total retry budget.
+          const retries = smaller.map((part) => ({ batch: part, prompt: promptFor(part), retry: reason }));
+          work.splice(index, 1, ...retries);
+          splits++;
+          index--;
+          return true;
+        };
+        if (result.finishReason === 'length' && retrySmaller('length')) continue;
         if (result.finishReason !== 'stop') {
           throw new ImportBatchError('AI 沒有完成整份資料，請減少這次文字後重試；不會只保留部分結果。');
         }
         const parsed = parsePersonalImportAiResponse(result.content, batch.text, context);
+        const audit = auditPersonalImportAiTable(batch.text, parsed.rows, context.kind, batch.columnContext, context.periodProfile);
+        if (audit.status === 'mismatch') {
+          if (retrySmaller('coverage')) continue;
+          throw new ImportBatchError(personalImportAiTableAuditMessage(audit, batch.startLine));
+        }
         if (combined.rows.length + parsed.rows.length > PERSONAL_IMPORT_AI_MAX_ROWS) {
           throw new ImportBatchError('AI 整理的總筆數過多，請分批核對；這次不會保留部分結果。');
         }
+        if (audit.status === 'matched') auditedRecords += audit.expectedRecords;
+        else hasUnauditedSource = true;
         combined.rows.push(...parsed.rows.map((row) => ({
           ...row,
-          source: { ...row.source, line: (row.source.line ?? 1) + batch.startLine - 1 },
+          source: {
+            ...row.source,
+            line: (audit.status === 'matched' ? audit.sourceLines[row.id] ?? row.source.line : row.source.line) + batch.startLine - 1,
+          },
         })));
         combined.issues.push(...parsed.issues);
       }
       if (settled || signal.aborted) return;
       settled = true;
+      if (auditedRecords) combined.issues.push(personalImportAiTableCoverageNotice(auditedRecords, hasUnauditedSource));
       resolve(combined);
     };
     void recognizeAll()
