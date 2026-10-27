@@ -4,6 +4,7 @@ import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { CreditAuditScreen } from './CreditAuditScreen';
 import { CreditAuditInputScreen } from './CreditAuditInputScreen';
 import CreditSummaryScreen from './CreditSummaryScreen';
+import CreditPlanningScreen from './CreditPlanningScreen';
 import { theme } from '../ui/theme';
 import { useThemeMode } from '../state/theme';
 
@@ -36,6 +37,11 @@ export function CreditAuditStack() {
         name="CreditAuditInput"
         component={CreditAuditInputScreen}
         options={{ title: '新增修課' }}
+      />
+      <Stack.Screen
+        name="CreditPlanning"
+        component={CreditPlanningScreen}
+        options={{ title: '未來學分規劃', headerShown: false }}
       />
     </Stack.Navigator>
   );
