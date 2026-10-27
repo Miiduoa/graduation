@@ -112,8 +112,11 @@ export function rewriteCampusPortalLocation(
   try {
     const target = new URL(location, requestUrl);
     const portal = new URL(portalOrigin);
+    if (target.protocol !== 'http:' && target.protocol !== 'https:') return null;
     if (target.username || target.password) return null;
-    if (target.hostname.toLowerCase() !== portal.hostname.toLowerCase()) return null;
+    if (target.hostname.toLowerCase() !== portal.hostname.toLowerCase() || target.port !== portal.port) {
+      return null;
+    }
     target.protocol = 'https:';
     target.hash = '';
     return target.toString();
