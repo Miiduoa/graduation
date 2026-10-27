@@ -30,7 +30,7 @@ export default function AttendanceMultiMethodScreen(props: RouteProps) {
   const courseId = params?.courseId ?? params?.sessionConfig?.courseId ?? '';
   const sessionId = params?.sessionId ?? params?.sessionConfig?.sessionId ?? '';
   const userId = auth.user?.uid ?? '';
-  const schoolId = auth.profile?.schoolId ?? school.id;
+  const schoolId = school.id ?? auth.profile?.schoolId;
   const supportedCourse =
     !!courseId && courseId !== 'demo' && !courseId.startsWith('tc:') && !isDemoCourseId(courseId);
   const enabled =
