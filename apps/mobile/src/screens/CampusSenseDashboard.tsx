@@ -1,25 +1,19 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { Text, View } from 'react-native';
 import { AICard, AIButton, aiTokens } from '../ui/aiFirst';
-import type { CampusSenseSnapshot } from '../services/campusSenseSnapshot';
+import type { CampusSenseSnapshot, CampusSenseProgress } from '../services/campusSenseSnapshot';
 import { CampusAssignmentCoverage } from './CampusAssignmentCoverage';
+import { CampusAssignmentWorkbench, type CampusAssignmentWorkbenchContext } from './CampusAssignmentWorkbench';
 
 function Metric({ label, value, available, detail = '已讀取' }: {
   label: string; value: string; available: boolean; detail?: string;
 }) {
   return (
-    <View style={{
-      backgroundColor: aiTokens.panel,
-      minWidth: 86, flexGrow: 1, flexBasis: '28%',
-      paddingVertical: 14, paddingHorizontal: 12, borderRadius: 12,
-    }}>
+    <View style={{ backgroundColor: aiTokens.panel, minWidth: 86, flexGrow: 1, flexBasis: '28%',
+      paddingVertical: 14, paddingHorizontal: 12, borderRadius: 12 }}>
       <Text style={{ color: aiTokens.muted, fontSize: 12, marginBottom: 6 }}>{label}</Text>
-      <Text numberOfLines={1} style={{
-        color: available ? aiTokens.text : aiTokens.warning,
-        fontSize: available ? 23 : 14, fontWeight: '700',
-      }}>
-        {value}
-      </Text>
+      <Text numberOfLines={1} style={{ color: available ? aiTokens.text : aiTokens.warning,
+        fontSize: available ? 23 : 14, fontWeight: '700' }}>{value}</Text>
       <Text style={{ color: aiTokens.muted, marginTop: 5, fontSize: 11 }}>
         {available ? detail : '無資料來源'}
       </Text>
@@ -29,6 +23,7 @@ function Metric({ label, value, available, detail = '已讀取' }: {
 
 export function CampusSenseDashboard({
   snapshot, expired, authenticated, busy, syncBusy, error, onSync, onClear, onBrief, onWeekBrief,
+  progress, onCancelSync, assignmentContext,
 }: {
   snapshot: CampusSenseSnapshot | null;
   expired: boolean;
@@ -40,7 +35,11 @@ export function CampusSenseDashboard({
   onClear: () => void;
   onBrief: () => void;
   onWeekBrief: () => void;
+  progress?: CampusSenseProgress | null;
+  onCancelSync?: () => void;
+  assignmentContext?: CampusAssignmentWorkbenchContext;
 }) {
+  const [showWorkbench, setShowWorkbench] = useState(false);
   const freshness = snapshot ? new Intl.DateTimeFormat('zh-TW', {
     timeZone: 'Asia/Taipei', month: 'numeric', day: 'numeric',
     hour: '2-digit', minute: '2-digit',
@@ -87,6 +86,31 @@ export function CampusSenseDashboard({
         </View>
         <AIButton label={syncBusy ? '正在同步校園資料…' : snapshot ? '重新同步校園資料' : '同步我的校園資料'}
           disabled={!authenticated || busy || syncBusy} onPress={onSync} />
+        {syncBusy ? (
+          <View style={{ backgroundColor: aiTokens.panel, borderRadius: 12, padding: 12, gap: 8 }}>
+            <Text accessibilityLiveRegion="polite" style={{ color: aiTokens.text, fontSize: 13 }}>
+              {progress?.total != null
+                ? '正在核對作業：' + progress.loaded + ' / ' + progress.total + ' 筆'
+                : '正在連線並核對校園資料權限…'}
+            </Text>
+            {progress && progress.pages > 0 ? <Text style={{ color: aiTokens.muted, fontSize: 12 }}>
+              已核對 {progress.pages} 頁；本次最多讀取 {progress.pageLimit} 頁。完成前不會套用部分清單。
+            </Text> : null}
+            {onCancelSync ? <AIButton label="取消這次同步" size="sm" variant="ghost" onPress={onCancelSync} /> : null}
+            <Text style={{ color: aiTokens.muted, fontSize: 12, lineHeight: 19 }}>
+              取消會停止後續讀取並忽略晚到結果；已送出的伺服器請求仍可能完成。
+            </Text>
+          </View>
+        ) : null}
+        {snapshot && assignmentContext && snapshot.assignments.status === 'available' ? (
+          <>
+            <AIButton label={showWorkbench ? '收合作業工作台' : '查看與篩選已同步作業'}
+              variant="ghost" disabled={busy || syncBusy} onPress={() => setShowWorkbench((value) => !value)} />
+            {showWorkbench ? <CampusAssignmentWorkbench
+              key={JSON.stringify([assignmentContext.userId, assignmentContext.schoolId, snapshot.checkedAt])}
+              snapshot={snapshot} context={assignmentContext} disabled={busy || syncBusy} /> : null}
+          </>
+        ) : null}
         {snapshot ? (
           <AIButton label="清除本次校園摘要" variant="ghost" size="sm"
             disabled={busy || syncBusy} onPress={onClear} />
@@ -94,11 +118,9 @@ export function CampusSenseDashboard({
         <Text style={{ color: aiTokens.muted, fontSize: 12, lineHeight: 19 }}>
           同步需要連線及校園存取權限；不會上傳問題或對話。本次資料不寫入儲存，15 分鐘後過期。
         </Text>
-        {!authenticated ? (
-          <Text style={{ color: aiTokens.muted, fontSize: 12 }}>
-            登入並取得校園權限後即可同步；不影響純本機問答。
-          </Text>
-        ) : null}
+        {!authenticated ? <Text style={{ color: aiTokens.muted, fontSize: 12 }}>
+          登入並取得校園權限後即可同步；不影響純本機問答。
+        </Text> : null}
         {error ? <Text accessibilityRole="alert" style={{ color: aiTokens.danger }}>{error}</Text> : null}
       </View>
     </AICard>
