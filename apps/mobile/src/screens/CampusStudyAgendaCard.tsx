@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { Text, TouchableOpacity, View } from 'react-native';
 import { AIButton, aiTokens } from '../ui/aiFirst';
 import { periodLabel, type CampusStudyAgenda } from '../services/campusStudyAgenda';
+import type { CampusAssignmentIdentity } from '../services/campusAssignmentTarget';
 
 const OUTSIDE_LABEL = {
   undated: '截止時間未確認',
@@ -9,10 +10,11 @@ const OUTSIDE_LABEL = {
   'after-window': '截止日在本次規劃之後',
 };
 
-export function CampusStudyAgendaCard({ agenda, disabled, onOpenRoute }: {
+export function CampusStudyAgendaCard({ agenda, disabled, onOpenRoute, renderAssignmentAction }: {
   agenda: CampusStudyAgenda;
   disabled: boolean;
   onOpenRoute?: (route: '/classroom' | '/timetable') => void;
+  renderAssignmentAction?: (assignment: CampusAssignmentIdentity) => React.ReactNode;
 }) {
   const [openDates, setOpenDates] = useState<Set<string>>(() => new Set(
     agenda.days.slice(0, 1).map((day) => day.date),
@@ -81,6 +83,7 @@ export function CampusStudyAgendaCard({ agenda, disabled, onOpenRoute }: {
                     <Text style={{ color: task.overdue ? aiTokens.danger : aiTokens.muted, fontSize: 12, lineHeight: 19 }}>
                       {task.timeLabel} 截止{task.groupName ? ' · ' + task.groupName : ''}{task.overdue ? ' · 期限已過，需核對繳交狀態' : ''}
                     </Text>
+                    {renderAssignmentAction?.(task)}
                   </View>
                 )) : (
                   <Text style={{ color: aiTokens.muted, fontSize: 12 }}>已同步摘要未列出當日截止作業。</Text>
@@ -103,6 +106,7 @@ export function CampusStudyAgendaCard({ agenda, disabled, onOpenRoute }: {
             <View key={index} style={{ gap: 3, paddingHorizontal: 8 }}>
               <Text style={{ color: aiTokens.text, fontSize: 13 }}>{task.title}</Text>
               <Text style={{ color: aiTokens.muted, fontSize: 12 }}>{OUTSIDE_LABEL[task.reason]}</Text>
+              {renderAssignmentAction?.(task)}
             </View>
           )) : null}
         </View>
