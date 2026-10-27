@@ -1,9 +1,10 @@
 import { suggestCampusDestinations } from '@campus/shared/src/campusIntent';
 import type { OnDeviceSchoolContext } from './onDeviceSchoolContext';
+import { CAMPUS_SENSE_MAX_AGE_MS, type CampusSenseSnapshot } from './campusSenseSnapshot';
 
 export type OfflineCampusToolResult = {
   content: string;
-  tool: 'saved-timetable' | 'online-required' | 'open-service';
+  tool: 'saved-timetable' | 'campus-snapshot' | 'online-required' | 'open-service';
   route?: string;
 };
 
@@ -66,6 +67,85 @@ function gaps(courses: OnDeviceSchoolContext['timetable']['courses'], day: numbe
     previousEnd = Math.max(previousEnd ?? row.end, row.end);
   }
   return free;
+}
+
+
+function syncedTime(value: string): string {
+  return new Intl.DateTimeFormat('zh-TW', {
+    timeZone: 'Asia/Taipei', month: 'numeric', day: 'numeric',
+    hour: '2-digit', minute: '2-digit',
+  }).format(new Date(value));
+}
+
+/**
+ * Offline processing of the last explicitly refreshed, authorized summary.
+ * The app has already fenced this snapshot by account/school before passing it in.
+ */
+function syncedCampusAnswer(
+  question: string,
+  context: OnDeviceSchoolContext,
+  snapshot?: CampusSenseSnapshot | null,
+): OfflineCampusToolResult | null {
+  if (!snapshot || snapshot.schoolId !== context.schoolId) return null;
+  const fetched = Date.parse(snapshot.checkedAt);
+  const now = Date.parse(context.checkedAt);
+  if (!Number.isFinite(fetched) || !Number.isFinite(now) ||
+      fetched > now + 30_000 || now - fetched > CAMPUS_SENSE_MAX_AGE_MS) return null;
+
+  const askingAssignments = /作業|待交|待繳|截止|繳交期限/.test(question);
+  const askingAnnouncements = /公告|通知/.test(question);
+  const askingPriority = /今日重點|今天要做|今天先做|先處理什麼|待辦摘要|校園摘要/.test(question);
+  // Writing a submission is never a read-only snapshot action.
+  if (/幫我.{0,12}(?:交作業|繳作業|提交|刪除|修改)|(?:代交|自動繳交)/.test(question)) {
+    return null;
+  }
+  if (!askingAssignments && !askingAnnouncements && !askingPriority) return null;
+
+  const lines: string[] = [
+    '上次主動同步：' + syncedTime(snapshot.checkedAt) + '（非即時查詢）。',
+    '資料只包含 Campus One 已接通並獲授權的來源，並非完整的校方 LMS。',
+  ];
+  let matched = false;
+  if (askingAssignments || askingPriority) {
+    const assignments = snapshot.assignments;
+    if (assignments.status === 'available') {
+      matched = true;
+      lines.push('已接通課程的待交作業：' + assignments.count + ' 筆。');
+      if (!assignments.items.length) {
+        lines.push('這次同步沒有列出作業，不代表其他校務系統已全部繳交。');
+      } else {
+        for (const item of assignments.items.slice(0, askingPriority ? 3 : 8)) {
+          const due = item.dueAt ? '｜截止 ' + syncedTime(item.dueAt) : '｜截止時間未提供';
+          lines.push('• ' + item.title + (item.groupName ? '（' + item.groupName + '）' : '') + due);
+        }
+        if (assignments.count !== null && assignments.count > assignments.items.length) {
+          lines.push('其餘待交內容請開啟課程頁核對。');
+        }
+      }
+    } else {
+      lines.push('待交作業來源目前無法取得，不能判定是否已繳交。');
+    }
+  }
+  if (askingAnnouncements || askingPriority) {
+    const announcements = snapshot.announcements;
+    if (announcements.status === 'available') {
+      matched = true;
+      lines.push('同步時可讀取的校園公告（僅列部分）：');
+      if (!announcements.items.length) lines.push('本次沒有列出公告，不能當作校方最新公告為空。');
+      for (const item of announcements.items.slice(0, askingPriority ? 2 : 8)) {
+        lines.push('• ' + item.title +
+          (item.publishedAt ? '｜發布 ' + syncedTime(item.publishedAt) : '｜發布時間未提供'));
+      }
+    } else {
+      lines.push('校園公告來源目前無法取得，不能判定有沒有新公告。');
+    }
+  }
+  if (!matched) return null;
+  return {
+    tool: 'campus-snapshot',
+    route: askingAssignments || askingPriority ? '/classroom' : '/announcements',
+    content: lines.join('\n'),
+  };
 }
 
 function realtimeOnly(question: string): OfflineCampusToolResult | null {
@@ -155,15 +235,21 @@ function openReadOnlyService(question: string): OfflineCampusToolResult | null {
 export function runOfflineCampusTool(
   question: string,
   context: OnDeviceSchoolContext,
+  senseSnapshot?: CampusSenseSnapshot | null,
 ): OfflineCampusToolResult | null {
   const text = question.trim().slice(0, 1600);
   if (!text) return null;
   const requestedWrite = userWriteRequest(text);
   if (requestedWrite) return requestedWrite;
+  const synced = syncedCampusAnswer(text, context, senseSnapshot);
+  if (synced) return synced;
   const live = realtimeOnly(text);
   if (live) return live;
   const navigation = openReadOnlyService(text);
   if (navigation) return navigation;
+  // A planning request needs a synthesized answer, not a raw timetable dump.
+  if (/(規劃|安排|制定|拆成|讀書計畫|學習計畫)/.test(text) &&
+      /(課表|空堂|學習|讀書|複習|報告)/.test(text)) return null;
   const wantsTimetable = /課表|有課|沒課|上課|哪幾堂|哪些課|幾堂課|空堂|空檔|課程時間/.test(text);
   if (!wantsTimetable) return null;
 
