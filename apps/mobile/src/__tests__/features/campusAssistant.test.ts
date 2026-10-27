@@ -247,3 +247,48 @@ test.each(['generating', 'loading', 'downloading'])(
     expect(mockCallable).not.toHaveBeenCalled();
   },
 );
+
+test('offline agent uses an explicitly synced authorized summary without cloud inference', async () => {
+  const senseSnapshot = {
+    userId: 'A',
+    schoolId: 'pu',
+    checkedAt: new Date().toISOString(),
+    schedule: { status: 'unavailable' as const, count: null },
+    assignments: {
+      status: 'available' as const, count: 1,
+      items: [{ title: '程式設計練習', groupName: '程式設計', dueAt: null }],
+    },
+    announcements: { status: 'available' as const, items: [] },
+  };
+  const result = await askCampusAssistant({
+    ...input(), mode: 'device',
+    messages: [{ role: 'user', content: '我有哪些作業還沒交？' }],
+    senseSnapshot,
+  });
+  expect(result).toMatchObject({ source: 'device', tool: 'campus-snapshot', route: '/classroom' });
+  expect(result.content).toContain('程式設計練習');
+  expect(localLLM.generate).not.toHaveBeenCalled();
+  expect(mockCallable).not.toHaveBeenCalled();
+  expect(httpsCallable).not.toHaveBeenCalled();
+});
+
+test('a snapshot for another user is never used even if the school is the same', async () => {
+  const result = await askCampusAssistant({
+    ...input(), mode: 'device',
+    messages: [{ role: 'user', content: '我有哪些作業還沒交？' }],
+    senseSnapshot: {
+      userId: 'another-user',
+      schoolId: 'pu',
+      checkedAt: new Date().toISOString(),
+      schedule: { status: 'unavailable', count: null },
+      assignments: {
+        status: 'available', count: 1,
+        items: [{ title: '別人的秘密', groupName: '其他班級', dueAt: null }],
+      },
+      announcements: { status: 'available', items: [] },
+    },
+  });
+  expect(result.tool).toBe('online-required');
+  expect(result.content).not.toContain('別人的秘密');
+  expect(localLLM.generate).not.toHaveBeenCalled();
+});
