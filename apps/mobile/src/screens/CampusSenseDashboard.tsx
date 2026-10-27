@@ -27,7 +27,7 @@ function Metric({ label, value, available }: {
 }
 
 export function CampusSenseDashboard({
-  snapshot, expired, authenticated, busy, syncBusy, error, onSync, onClear, onBrief,
+  snapshot, expired, authenticated, busy, syncBusy, error, onSync, onClear, onBrief, onWeekBrief,
 }: {
   snapshot: CampusSenseSnapshot | null;
   expired: boolean;
@@ -38,6 +38,7 @@ export function CampusSenseDashboard({
   onSync: () => void;
   onClear: () => void;
   onBrief: () => void;
+  onWeekBrief: () => void;
 }) {
   const freshness = snapshot ? new Intl.DateTimeFormat('zh-TW', {
     timeZone: 'Asia/Taipei', month: 'numeric', day: 'numeric',
@@ -86,11 +87,21 @@ export function CampusSenseDashboard({
             授權同步作業與公告摘要，讓手機依照實際資料安排下一步。未同步仍可使用本機課表與文字助理。
           </Text>
         )}
-        <AIButton
-          label={busy ? '正在整理今日行動…' : '一鍵整理今日重點'}
-          disabled={!authenticated || busy || syncBusy}
-          onPress={onBrief}
-        />
+        <View style={{ flexDirection: 'row', gap: 8 }}>
+          <AIButton
+            label={busy ? '正在整理…' : '今日重點'}
+            style={{ flex: 1 }}
+            disabled={!authenticated || busy || syncBusy}
+            onPress={onBrief}
+          />
+          <AIButton
+            label="未來七天"
+            style={{ flex: 1 }}
+            variant="ghost"
+            disabled={!authenticated || busy || syncBusy}
+            onPress={onWeekBrief}
+          />
+        </View>
         <AIButton
           label={syncBusy ? '正在同步校園資料…' : snapshot ? '重新同步校園資料' : '同步我的校園資料'}
           disabled={!authenticated || busy || syncBusy}
