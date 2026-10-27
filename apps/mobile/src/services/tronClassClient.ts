@@ -32,6 +32,7 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 import { getCloudFunctionUrl, getFirebaseAuthHeaders } from './cloudFunctions';
+import { loadTronClassBackendCourses } from './ownedTronClassCourses';
 import { secureDeleteItem, secureDeleteMany, secureGetItem, secureSetItem } from './secureStorage';
 import {
   TRONCLASS_DATA_DISABLED_MESSAGE,
@@ -76,9 +77,9 @@ export type TCCourse = {
   name: string;
   course_code: string;
   department: { id: number; name: string } | null;
-  instructors: Array<{ id: number; name: string; avatar_big_url?: string }>;
+  instructors: Array<{ id?: number; name: string; avatar_big_url?: string }>;
   credit: number | null;
-  semester: { code: string; id: number; name: string } | null;
+  semester: { code?: string; id?: number; name: string } | null;
   klass: { id: number; name: string } | null;
   grade: { id: number; name: string } | null;
   course_outline: string | null;
@@ -86,7 +87,7 @@ export type TCCourse = {
   end_date: string | null;
   status: string;
   role: string; // student, teacher, ta
-  student_count: number;
+  student_count?: number;
   classroom_schedule: unknown | null;
 };
 
@@ -1296,7 +1297,10 @@ export async function tcFetchCourses(
 
   await ensureBackendSessionLoaded();
   if (shouldUseBackendSession()) {
-    return await fetchTronClassBackend<TCCourse[]>('courses', { status });
+    const sessionId = _tcBackendSessionId;
+    const courses = await loadTronClassBackendCourses(sessionId, status);
+    if (_tcBackendSessionId !== sessionId) throw new Error('課程連線已變更，請重新讀取課程。');
+    return courses;
   }
 
   // 玩課雲用 POST /api/my-courses，不是 GET /api/users/{id}/courses

@@ -11,6 +11,8 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import type { PuCreditAuditPayload } from '@campus/shared/src';
 import { Platform } from 'react-native';
+import { getAuthInstance } from '../firebase';
+import { loadOwnedSchoolCourses, loadOwnedSchoolGrades } from './ownedSchoolAcademicRecords';
 import {
   puFetchCourses,
   puFetchCreditAudit,
@@ -45,6 +47,7 @@ import {
   tcFetchSyllabus,
   autoRefreshTCSession,
   hasTCSession,
+  getTCBackendSessionId,
   type TCCourse,
   type TCActivity,
   type TCModule,
@@ -524,44 +527,17 @@ export async function getAnyCachedCreditAudit(): Promise<PuCreditAuditPayload | 
 export async function refreshCourses(session: PUSession): Promise<PUCourseResult | null> {
   const generation = cacheGeneration;
   console.log('[puDataCache] refreshing courses…');
-  if (session.backendSessionId) {
+  if (session.backendSessionId || session.backendOwnerUid) {
     try {
-      const result = await fetchPUCampusBackend<{
-        success?: boolean;
-        courses?: PUCourseResult['courses'];
-        studentInfo?: {
-          studentId?: string | null;
-          name?: string | null;
-          class?: string | null;
-          className?: string | null;
-          currentSemester?: string | null;
-          department?: string | null;
-          grade?: string | null;
-          enrollmentStatus?: string | null;
-        } | null;
-        semester?: string | null;
-        totalCredits?: number;
-      }>(session, 'courses');
-
-      // fetchPUCampusBackend 已驗證外層 success，這裡只需檢查 result 存在
-      if (result && Array.isArray(result.courses)) {
-        const normalized: PUCourseResult = {
-          courses: result.courses ?? [],
-          studentInfo: normalizeStudentInfo(result.studentInfo),
-          semester: result.semester ?? null,
-          totalCredits: result.totalCredits ?? 0,
-        };
-        await writeCache(KEYS.courses, normalized, generation);
-        console.log(
-          `[puDataCache] refreshCourses backend OK: ${normalized.courses.length} courses`,
-        );
-        return normalized;
-      }
+      const requester = getAuthInstance().currentUser;
+      if (!requester || (session.backendOwnerUid && session.backendOwnerUid !== requester.uid)) return null;
+      const result = await loadOwnedSchoolCourses(requester.uid);
+      if (getAuthInstance().currentUser !== requester) return null;
+      await writeCache(KEYS.courses, result, generation);
+      return result;
     } catch (error) {
       console.warn('[puDataCache] refreshCourses backend failed:', error);
-      // 後端 Cookie 不在裝置上，無法改用原生直連重試。
     }
-    // 後端模式下不 fallback 到 nativeFetch（無 cookie）
     return null;
   }
 
@@ -578,25 +554,14 @@ export async function refreshCourses(session: PUSession): Promise<PUCourseResult
 export async function refreshGrades(session: PUSession): Promise<PUGradeResult | null> {
   const generation = cacheGeneration;
   console.log('[puDataCache] refreshing grades…');
-  if (session.backendSessionId) {
+  if (session.backendSessionId || session.backendOwnerUid) {
     try {
-      const result = await fetchPUCampusBackend<{
-        success?: boolean;
-        grades?: PUGradeResult['grades'];
-        allSemesters?: string[];
-        summary?: PUGradeResult['summary'];
-      }>(session, 'grades');
-
-      if (result && Array.isArray(result.grades)) {
-        const normalized: PUGradeResult = {
-          grades: result.grades ?? [],
-          allSemesters: result.allSemesters ?? [],
-          summary: result.summary ?? {},
-        };
-        await writeCache(KEYS.grades, normalized, generation);
-        console.log(`[puDataCache] refreshGrades backend OK: ${normalized.grades.length} grades`);
-        return normalized;
-      }
+      const requester = getAuthInstance().currentUser;
+      if (!requester || (session.backendOwnerUid && session.backendOwnerUid !== requester.uid)) return null;
+      const result = await loadOwnedSchoolGrades(requester.uid);
+      if (getAuthInstance().currentUser !== requester) return null;
+      await writeCache(KEYS.grades, result, generation);
+      return result;
     } catch (error) {
       console.warn('[puDataCache] refreshGrades backend failed:', error);
     }
@@ -615,7 +580,7 @@ export async function refreshGrades(session: PUSession): Promise<PUGradeResult |
 export async function refreshAnnouncements(session: PUSession): Promise<PUAnnouncement[] | null> {
   const generation = cacheGeneration;
   console.log('[puDataCache] refreshing announcements…');
-  if (session.backendSessionId) {
+  if (session.backendSessionId || session.backendOwnerUid) {
     try {
       const result = await fetchPUCampusBackend<{
         success?: boolean;
@@ -646,7 +611,7 @@ export async function refreshAnnouncements(session: PUSession): Promise<PUAnnoun
 export async function refreshStudentInfo(session: PUSession): Promise<PUStudentInfo | null> {
   const generation = cacheGeneration;
   console.log('[puDataCache] refreshing studentInfo…');
-  if (session.backendSessionId) {
+  if (session.backendSessionId || session.backendOwnerUid) {
     try {
       const result = await fetchPUCampusBackend<{
         success?: boolean;
@@ -687,7 +652,7 @@ export async function refreshCreditAudit(session: PUSession): Promise<PuCreditAu
   const generation = cacheGeneration;
   // 後端只提供成績推導的 creditSummary，並沒有 v2 學分試算表。
   // 後端 session 的 Cookie 不在裝置上，不能把它當作原生直連登入。
-  if (session.backendSessionId) return null;
+  if (session.backendSessionId || session.backendOwnerUid) return null;
   const result = await puFetchCreditAudit(session);
   requireCurrentCache(generation);
   if (result.success && result.data) {
@@ -862,7 +827,8 @@ export async function refreshTCCourses(): Promise<TCCourse[] | null> {
   console.log('[puDataCache] refreshing TronClass courses…');
   const skipped = await preservedTcCacheUnlessFetchEnabled(getAnyCachedTCCourses);
   if (skipped !== undefined) return skipped;
-  await ensureTronClassSession();
+  // 本人課程端點自行驗證 session，後端模式不先觸發含帳密的 profile refresh。
+  if (!(await getTCBackendSessionId())) await ensureTronClassSession();
   const courses = await tcFetchCourses('ongoing');
   await writeCache(KEYS.tcCourses, courses, generation);
   return courses;
@@ -1117,6 +1083,9 @@ export type SyncAllResult = {
 export type SyncAllOptions = {
   tcCourses?: TCCourse[] | null;
   includeEssential?: boolean;
+  fetchTronClass?: boolean;
+  /** Hosted 登入只預抓已具本人端點的課表、成績與課程清單。 */
+  includeExtended?: boolean;
 };
 
 /**
@@ -1134,6 +1103,8 @@ export async function syncAllData(
   console.log('[puDataCache] syncAllData: starting deferred sync…');
 
   const includeEssential = options.includeEssential === true;
+  const fetchTronClass = isTronClassDataFetchEnabled() && options.fetchTronClass !== false;
+  const includeExtended = options.includeExtended !== false;
 
   let courses: PUCourseResult | null = null;
   let grades: PUGradeResult | null = null;
@@ -1166,13 +1137,13 @@ export async function syncAllData(
           }),
       cachedAnn
         ? Promise.resolve(cachedAnn)
-        : refreshAnnouncements(session).catch((e) => {
+        : !includeExtended ? Promise.resolve(null) : refreshAnnouncements(session).catch((e) => {
             console.warn('[puDataCache] announcements sync error:', e);
             return null;
           }),
       cachedInfo
         ? Promise.resolve(cachedInfo)
-        : refreshStudentInfo(session).catch((e) => {
+        : !includeExtended ? Promise.resolve(null) : refreshStudentInfo(session).catch((e) => {
             console.warn('[puDataCache] studentInfo sync error:', e);
             return null;
           }),
@@ -1190,7 +1161,7 @@ export async function syncAllData(
   // 將學分讀取納入本次回執，避免登入已宣告完成、資料卻仍在未追蹤的背景工作。
   const creditAuditTask = refreshCreditAudit(session).catch(() => null);
 
-  const tcCourses = !isTronClassDataFetchEnabled() ? null :
+  const tcCourses = !fetchTronClass ? null :
     options.tcCourses ??
     (await getCachedTCCourses()) ??
     (await refreshTCCourses().catch((e) => {
@@ -1215,7 +1186,7 @@ export async function syncAllData(
   const courseIds = tcCourses?.map((c) => c.id) ?? [];
 
   // 第一波：核心資料（作業、模組、出席、待辦、公告）
-  if (courseIds.length > 0) {
+  if (courseIds.length > 0 && includeExtended) {
     [tcActivities, tcModules, tcAttendance, tcTodos, tcAnnouncements] = await Promise.all([
       refreshTCActivitiesForCourses(courseIds).catch((e) => {
         console.warn('[puDataCache] TC activities sync error:', e);
@@ -1270,7 +1241,7 @@ export async function syncAllData(
     }).catch(() => {
       console.warn('[puDataCache] 第二波詳細資料部分同步失敗');
     });
-  } else if (isTronClassDataFetchEnabled()) {
+  } else if (fetchTronClass && includeExtended) {
     [tcAttendance, tcTodos, tcAnnouncements] = await Promise.all([
       refreshTCAttendance().catch((e) => {
         console.warn('[puDataCache] TC attendance sync error:', e);

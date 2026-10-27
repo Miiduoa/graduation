@@ -1,11 +1,18 @@
-import { loadOwnedSchoolGrades } from '../../services/ownedSchoolAcademicRecords';
+import Constants from 'expo-constants';
+import {
+  loadOwnedSchoolCourses,
+  loadOwnedSchoolGrades,
+} from '../../services/ownedSchoolAcademicRecords';
 
 const mockRequester = { uid: 'student-a', getIdToken: jest.fn(async () => 'firebase-token') };
 let mockCurrentUser: typeof mockRequester | null = mockRequester;
 let mockPrimaryUrl = 'https://functions.test/getMyAcademicRecords';
 const mockFetch = jest.fn();
 jest.mock('../../firebase', () => ({ getAuthInstance: () => ({ currentUser: mockCurrentUser }) }));
-jest.mock('../../services/cloudFunctions', () => ({ getCloudFunctionUrl: () => mockPrimaryUrl }));
+jest.mock('../../services/cloudFunctions', () => ({
+  ...jest.requireActual('../../services/cloudFunctions'),
+  getCloudFunctionUrl: () => mockPrimaryUrl,
+}));
 const response = (status: number, patch: Record<string, unknown> = {}) => ({
   ok: status >= 200 && status < 300,
   status,
@@ -28,6 +35,9 @@ const response = (status: number, patch: Record<string, unknown> = {}) => ({
 });
 const originalFetch = globalThis.fetch;
 beforeEach(() => {
+  Object.assign(Constants.expoConfig!, {
+    extra: { appEnv: 'production', firebase: { projectId: 'campus-one-tw' } },
+  });
   mockCurrentUser = mockRequester;
   mockPrimaryUrl = 'https://functions.test/getMyAcademicRecords';
   mockFetch.mockReset();
@@ -44,6 +54,46 @@ test('restored Firebase login reads owner-selected grades without sending school
   const [, options] = mockFetch.mock.calls[0];
   expect(JSON.parse(options.body)).toEqual({ data: { dataType: 'grades' } });
   expect(options.headers.Authorization).toBe('Bearer firebase-token');
+});
+
+test('owner-selected courses preserve their school source and normalize the profile class alias', async () => {
+  mockFetch.mockResolvedValue(
+    response(200, {
+      dataType: 'courses',
+      result: {
+        success: true,
+        courses: [{ code: 'CS101', name: '資料庫', credits: 1.5 }],
+        studentInfo: { class: '資工一' },
+        semester: '1151',
+        totalCredits: 1.5,
+      },
+    }),
+  );
+  const result = await loadOwnedSchoolCourses('student-a');
+  expect(result.courses).toHaveLength(1);
+  expect(result.studentInfo.className).toBe('資工一');
+  expect(result.totalCredits).toBe(1.5);
+  expect(JSON.parse(mockFetch.mock.calls[0][1].body)).toEqual({ data: { dataType: 'courses' } });
+});
+
+test('a course request cannot accept grades or a mismatched owner as its response', async () => {
+  mockFetch.mockResolvedValue(response(200));
+  await expect(loadOwnedSchoolCourses('student-a')).rejects.toThrow('無法讀取課表');
+  mockFetch.mockResolvedValue(
+    response(200, {
+      dataType: 'courses',
+      ownerUid: 'other',
+      result: { success: true, courses: [] },
+    }),
+  );
+  await expect(loadOwnedSchoolCourses('student-a')).rejects.toThrow('無法讀取課表');
+});
+
+test('missing school credit totals do not become an invented zero', async () => {
+  mockFetch.mockResolvedValue(
+    response(200, { dataType: 'courses', result: { success: true, courses: [] } }),
+  );
+  await expect(loadOwnedSchoolCourses('student-a')).rejects.toThrow('缺少學分資訊');
 });
 
 test.each([
