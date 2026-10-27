@@ -273,101 +273,118 @@ export function calculateDetailedCredits(input: {
   courses: Array<{
     name: string;
     credits: number;
-    categoryKey: string; // matches DetailedCreditCategory.key
-    subCategoryKey?: string; // matches CreditSubCategory.key
+    categoryKey: string;
+    subCategoryKey?: string;
     passed: boolean;
   }>;
   nonCreditSatisfied?: Record<string, boolean>;
 }): DetailedCreditAuditResult {
   const { template, courses, nonCreditSatisfied = {} } = input;
   const warnings: string[] = [];
+  const categories = new Map(template.categories.map((category) => [category.key, category]));
+  const rawEarned = new Map<string, number>();
+  const rawSubEarned = new Map<string, Map<string, number>>();
+  const seenCourses = new Set<string>();
 
-  // Tally earned credits per category & sub-category
-  const earnedMap: Record<string, number> = {};
-  const subEarnedMap: Record<string, Record<string, number>> = {};
-
-  for (const c of courses) {
-    if (!c.passed) continue;
-    const cred = Number(c.credits);
-    if (!Number.isFinite(cred) || cred < 0) continue;
-
-    earnedMap[c.categoryKey] = (earnedMap[c.categoryKey] ?? 0) + cred;
-
-    if (c.subCategoryKey) {
-      if (!subEarnedMap[c.categoryKey]) subEarnedMap[c.categoryKey] = {};
-      subEarnedMap[c.categoryKey][c.subCategoryKey] =
-        (subEarnedMap[c.categoryKey]?.[c.subCategoryKey] ?? 0) + cred;
+  for (const course of courses) {
+    if (course.passed !== true) continue;
+    const category = categories.get(course.categoryKey);
+    if (!category) {
+      warnings.push(`「${course.name}」分類不在目前參考規則中，未列入試算。`);
+      continue;
+    }
+    if (
+      typeof course.credits !== 'number' ||
+      !Number.isFinite(course.credits) ||
+      course.credits <= 0 ||
+      course.credits > 30
+    ) {
+      warnings.push(`「${course.name}」學分格式不正確，未列入試算。`);
+      continue;
+    }
+    const sub = course.subCategoryKey
+      ? category.subCategories?.find((item) => item.key === course.subCategoryKey)
+      : undefined;
+    if (course.subCategoryKey && !sub) {
+      warnings.push(`「${course.name}」的細分類別與目前參考規則不符，未列入試算。`);
+      continue;
+    }
+    const name = course.name.trim();
+    if (!name) continue;
+    const unique = JSON.stringify([category.key, name.toLocaleLowerCase('zh-TW')]);
+    if (seenCourses.has(unique)) {
+      warnings.push(`「${name}」有重複通過紀錄，已保守排除重複採計；請向系辦確認重修或重複修課規則。`);
+      continue;
+    }
+    seenCourses.add(unique);
+    rawEarned.set(category.key, (rawEarned.get(category.key) ?? 0) + course.credits);
+    if (sub) {
+      const subMap = rawSubEarned.get(category.key) ?? new Map<string, number>();
+      subMap.set(sub.key, (subMap.get(sub.key) ?? 0) + course.credits);
+      rawSubEarned.set(category.key, subMap);
     }
   }
 
-  // Apply maxCredits caps (e.g. 外系上限 20)
-  for (const cat of template.categories) {
-    if (cat.maxCredits != null && (earnedMap[cat.key] ?? 0) > cat.maxCredits) {
-      const excess = (earnedMap[cat.key] ?? 0) - cat.maxCredits;
-      warnings.push(
-        `「${cat.label}」已修 ${earnedMap[cat.key]} 學分，超過上限 ${cat.maxCredits} 學分，超出 ${excess} 學分不計入畢業學分`,
-      );
-      earnedMap[cat.key] = cat.maxCredits;
-    }
-    for (const sub of cat.subCategories ?? []) {
-      if (sub.maxCredits != null) {
-        const subEarned = subEarnedMap[cat.key]?.[sub.key] ?? 0;
-        if (subEarned > sub.maxCredits) {
-          subEarnedMap[cat.key]![sub.key] = sub.maxCredits;
-        }
+  const byCategory: DetailedCreditAuditResult['byCategory'] = [];
+  for (const category of template.categories) {
+    let earned = rawEarned.get(category.key) ?? 0;
+    const subCategories = category.subCategories?.map((sub) => {
+      const raw = rawSubEarned.get(category.key)?.get(sub.key) ?? 0;
+      const counted = sub.maxCredits == null ? raw : Math.min(raw, Math.max(0, sub.maxCredits));
+      if (raw > counted) {
+        const excess = raw - counted;
+        earned -= excess;
+        warnings.push(`「${sub.label}」已修 ${raw} 學分，超過可採計上限 ${sub.maxCredits} 學分，${excess} 學分不計。`);
       }
+      return {
+        key: sub.key,
+        label: sub.label,
+        earned: Number(counted.toFixed(2)),
+        required: sub.minCredits,
+        remaining: Number(Math.max(0, sub.minCredits - counted).toFixed(2)),
+      };
+    });
+
+    const beforeCap = earned;
+    if (category.maxCredits != null && earned > category.maxCredits) {
+      earned = Math.max(0, category.maxCredits);
+      warnings.push(
+        `「${category.label}」已修 ${Number(beforeCap.toFixed(2))} 學分，超過可採計上限 ${category.maxCredits} 學分，超出部分不計。`,
+      );
     }
+    earned = Number(Math.max(0, earned).toFixed(2));
+    byCategory.push({
+      key: category.key,
+      label: category.label,
+      earned,
+      required: category.minCredits,
+      remaining: Number(Math.max(0, category.minCredits - earned).toFixed(2)),
+      subCategories,
+    });
   }
 
-  // Build per-category results
-  const byCategory: DetailedCreditAuditResult['byCategory'] = template.categories.map((cat) => {
-    const earned = earnedMap[cat.key] ?? 0;
-    const required = cat.minCredits;
-    return {
-      key: cat.key,
-      label: cat.label,
-      earned,
-      required,
-      remaining: Math.max(0, required - earned),
-      subCategories: cat.subCategories?.map((sub) => {
-        const subEarned = subEarnedMap[cat.key]?.[sub.key] ?? 0;
-        return {
-          key: sub.key,
-          label: sub.label,
-          earned: subEarned,
-          required: sub.minCredits,
-          remaining: Math.max(0, sub.minCredits - subEarned),
-        };
-      }),
-    };
-  });
-
-  // Total
-  const totalEarned = Object.values(earnedMap).reduce((a, b) => a + b, 0);
+  const totalEarned = Number(byCategory.reduce((sum, category) => sum + category.earned, 0).toFixed(2));
   const totalRequired = template.totalCreditsRequired;
-
-  // Non-credit requirements
-  const nonCreditStatus = template.nonCreditRequirements.map((req) => ({
-    key: req.key,
-    label: req.label,
-    satisfied: nonCreditSatisfied[req.key] ?? false,
+  const nonCreditStatus = template.nonCreditRequirements.map((requirement) => ({
+    key: requirement.key,
+    label: requirement.label,
+    satisfied: nonCreditSatisfied[requirement.key] === true,
   }));
-
-  // Overall satisfaction
-  const creditsSatisfied =
+  // This result is a *reference-rule calculation*. Actual graduation also
+  // depends on mandatory course identity, retake exemptions and school review.
+  const satisfied =
     totalEarned >= totalRequired &&
-    byCategory.every((cat) => cat.earned >= cat.required) &&
-    byCategory.every(
-      (cat) => !cat.subCategories || cat.subCategories.every((sub) => sub.earned >= sub.required),
-    );
-  const allNonCreditSatisfied = nonCreditStatus.every((n) => n.satisfied);
-  const satisfied = creditsSatisfied && allNonCreditSatisfied;
+    byCategory.every((category) => category.earned >= category.required) &&
+    byCategory.every((category) =>
+      category.subCategories?.every((sub) => sub.earned >= sub.required) ?? true,
+    ) &&
+    nonCreditStatus.every((item) => item.satisfied);
 
   return {
     total: {
       earned: totalEarned,
       required: totalRequired,
-      remaining: Math.max(0, totalRequired - totalEarned),
+      remaining: Number(Math.max(0, totalRequired - totalEarned).toFixed(2)),
     },
     byCategory,
     nonCreditStatus,
