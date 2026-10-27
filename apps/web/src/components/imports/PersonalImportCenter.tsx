@@ -560,9 +560,13 @@ function ImportWorkspace({
     source,
     periodProfile,
   };
-  const parse = (input: string, inputSource = source) => {
+  const parse = (
+    input: string,
+    inputSource = source,
+    term?: { academicYear: string; semester: string },
+  ) => {
     setSchoolPage(null);
-    const parsed = parsePersonalImport(input, { ...options, source: inputSource });
+    const parsed = parsePersonalImport(input, { ...options, source: inputSource, ...(term ?? {}) });
     setRows(parsed.rows);
     setBackup(null);
     setReviewPage(0);
@@ -1076,12 +1080,18 @@ function ImportWorkspace({
                   onClick={() => {
                     const selectedSource = { type: 'file' as const, name: schoolPage.name };
                     setSource(selectedSource);
+                    const term = {
+                      academicYear: year.trim() || table.suggestedTerm?.academicYear || '',
+                      semester: semester.trim() || table.suggestedTerm?.semester || '',
+                    };
                     if (table.suggestedTerm) {
-                      if (!year.trim()) setYear(table.suggestedTerm.academicYear);
-                      if (!semester.trim()) setSemester(table.suggestedTerm.semester);
+                      if (!year.trim()) setYear(term.academicYear);
+                      if (!semester.trim()) setSemester(term.semester);
                     }
                     setText(table.text);
-                    parse(table.text, selectedSource);
+                    // React state updates are deferred; parsing must use the same
+                    // values that will appear in the academic-term fields.
+                    parse(table.text, selectedSource, term);
                   }}
                 >
                   <strong>{table.label}</strong>
