@@ -165,7 +165,7 @@ test('generates with the token format of the actually loaded GGUF model', async 
   mockGetInfo.mockResolvedValue({ exists: true, size: 5_000_000_000 });
   const messages = [
     { role: 'system' as const, content: 'Answer in Chinese' },
-    { role: 'user' as const, content: 'Plan today's tasks' },
+    { role: 'user' as const, content: "Plan today's tasks" },
   ];
 
   await expect(engine.loadModel('mistral-7b-v0.3')).resolves.toBe(true);
