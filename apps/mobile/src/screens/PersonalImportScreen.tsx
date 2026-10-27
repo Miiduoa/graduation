@@ -1004,6 +1004,7 @@ function ImportWorkspace({
                 onPress={() => {
                   cancel();
                   setKind(value);
+                  setSchoolPage(null);
                   clearDocumentSource();
                   setDocumentPrep(null);
                   if (!backupPreview) {
