@@ -162,6 +162,11 @@ export async function askCampusAssistant(input: {
       maxTokens: readiness.modelId === 'qwen2.5-0.5b' ? 512 : 700,
       temperature: 0.45,
       signal: input.signal,
+    }).catch((error) => {
+      // Native aborts can reject instead of returning an empty completion.
+      // Distinguish an intentional cancellation from a broken GGUF model.
+      assertNotCancelled();
+      throw error;
     });
     scopeCheck(input, false);
     assertNotCancelled();
