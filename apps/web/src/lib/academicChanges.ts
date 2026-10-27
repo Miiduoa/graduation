@@ -38,8 +38,8 @@ const field = (label: string, value: string | number | null | undefined): Field 
 };
 function score(value: string | number): Field {
   const normalized = text(String(value));
-  // Numeric representations may change without the actual score changing.
-  // Zero is a real score; unknown/letter grades remain verbatim source values.
+  // 數字寫法可能變了，實際分數卻沒變。
+  // 零是真實分數；未知或等第成績維持來源原文。
   const numeric = /^[-+]?\d+(?:\.\d+)?$/.test(normalized) && Number.isFinite(Number(normalized));
   return { label: '成績', value: numeric ? String(Number(normalized)) : normalized, display: normalized };
 }
@@ -102,7 +102,7 @@ function sameGroup(before: Row[], after: Row[]): boolean {
     JSON.stringify(before.map(fingerprint).sort()) === JSON.stringify(after.map(fingerprint).sort());
 }
 
-/** Compare successful reads only. IDs include mutable values, so they are not identity keys. */
+/** 只比較成功讀取的結果。這些 ID 含會變動的值，不能當身分鍵。 */
 export function compareAcademicSnapshots(
   kind: AcademicChangeKind,
   previous: AcademicChangeSnapshot | null,
@@ -126,7 +126,7 @@ export function compareAcademicSnapshots(
   if (kind === 'courses' && 'courses' in previous.records && 'courses' in next.records &&
     text(previous.records.semester) !== text(next.records.semester)) return report('semester-reset');
   if (!beforeRows.length) return report('baseline');
-  // A whole empty response is not evidence that every course was dropped.
+  // 整份回傳是空的，不能當成每門課都被退選。
   if (!afterRows.length) return report('empty');
   const before = grouped(beforeRows);
   const after = grouped(afterRows);
@@ -140,8 +140,8 @@ export function compareAcademicSnapshots(
     const change = (type: AcademicChange['type'], fields: AcademicFieldChange[] = []) => {
       changes.push({ key, title: current.title, semester: current.semester, type, fields });
     };
-    // Grades may lack a course code; never pair two same-name sections by array order.
-    // A course with multiple meetings likewise requires source review, not a guessed match.
+    // 成績可能沒有科目代碼；同名不同班次不可依陣列順序硬配。
+    // 一門課有多個上課時段同樣要回頭核對來源，不能猜配對。
     if (oldRows.length > 1 || newRows.length > 1) {
       change('review');
     } else if (!oldRows.length) {

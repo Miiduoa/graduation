@@ -384,8 +384,8 @@ function createLiveSessionHandlers({ db, now = Date.now, notifyStarted, logger =
   }
 
   /**
-   * Instructor-attested adjustment. A missing receipt does not imply absence:
-   * only this authenticated, audited transaction may create such a status.
+   * 由教師親自確認的調整。沒有簽到憑證不代表缺席：
+   * 只有這筆已驗證、會留下稽核的交易才能寫入這種狀態。
    */
   async function correctAttendanceRecord(request) {
     const teacherUid = actor(request);
@@ -447,8 +447,8 @@ function createLiveSessionHandlers({ db, now = Date.now, notifyStarted, logger =
           throw new HttpsError('permission-denied', 'Account is no longer available');
         }
       }
-      // Admin SDK bypasses Rules; recheck school access in the same write transaction,
-      // including retries of a previously committed correction.
+      // Admin SDK 會略過安全規則；同一筆寫入交易裡要再確認學校成員資格，
+      // 包含重試已成功寫入的更正。
       const schoolMembers = db.collection('schools').doc(schoolId).collection('members');
       const [teacherSchool, studentSchool] = await transaction.getAll(
         schoolMembers.doc(teacherUid), schoolMembers.doc(studentUid),
@@ -480,7 +480,7 @@ function createLiveSessionHandlers({ db, now = Date.now, notifyStarted, logger =
         };
       }
 
-      // Do not finalize an absence or excused status while students can still sign in.
+      // 學生還能簽到時，不要把狀態敲定成缺席或請假。
       if (liveSnap.data().active === true && ['absent', 'excused'].includes(status)) {
         throw new HttpsError('failed-precondition', 'Finish the attendance session before finalizing absence or leave');
       }

@@ -1134,7 +1134,7 @@ service cloud.firestore {
             || (isActiveGroupMember(groupId) && recordId == request.auth.uid);
           allow write: if false;
         }
-        // Server-only immutable teacher corrections. Students cannot enumerate audit details.
+        // 僅伺服器可寫、寫入後不可改的教師更正紀錄。學生不能列舉稽核明細。
         match /attendanceCorrections/{correctionId} {
           allow read: if isActiveGroupMember(groupId)
             && get(/databases/$(database)/documents/groups/$(groupId)/members/$(request.auth.uid)).data.role in ['owner', 'instructor'];

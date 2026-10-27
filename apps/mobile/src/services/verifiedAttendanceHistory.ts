@@ -61,8 +61,8 @@ function asDate(value: unknown): Date | null {
 }
 
 /**
- * A missing receipt is not proof of absence. Only the server-owned record
- * for the signed-in member can confirm an attendance status.
+ * 沒有簽到憑證不能當成缺席。只有伺服器端、屬於目前登入成員的紀錄
+ * 才能確認出席狀態。
  */
 export function verifiedReceiptStatus(
   data: Record<string, unknown> | null,
@@ -107,7 +107,7 @@ export async function loadVerifiedAttendanceHistory(
   return Promise.all(
     memberships.map(async (membership) => {
       try {
-        // Same schema-v2 server-owned sessions used by the teacher roster.
+        // 與教師點名冊相同，使用伺服器端持有的 schema v2 場次。
         const snapshot = await getDocsFromServer(
           query(
             collection(db, 'groups', membership.groupId, 'attendanceSessions'),
@@ -169,7 +169,7 @@ export async function loadVerifiedAttendanceHistory(
           error: false,
         } satisfies VerifiedCourseHistory;
       } catch {
-        // Keep the course visible while making incomplete data explicit.
+        // 課程仍顯示，但把資料不完整的狀況明白標出來。
         return {
           courseId: membership.groupId,
           courseName: membership.name,
@@ -181,7 +181,7 @@ export async function loadVerifiedAttendanceHistory(
   );
 }
 
-/** Screen-facing adapter: Firebase setup belongs in the data service, not the view. */
+/** 給畫面用的接法：Firebase 初始化放在資料服務，不要放在畫面。 */
 export function loadMyVerifiedAttendanceHistory(uid: string, schoolId?: string) {
   return loadVerifiedAttendanceHistory(getDb(), uid, schoolId);
 }
