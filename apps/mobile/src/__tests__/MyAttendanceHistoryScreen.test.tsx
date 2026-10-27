@@ -4,9 +4,9 @@ import MyAttendanceHistoryScreen from '../screens/MyAttendanceHistoryScreen';
 import { loadVerifiedAttendanceHistory } from '../services/verifiedAttendanceHistory';
 import { safeNavigate } from '../utils/safeNavigate';
 
-let auth = { user: { uid: 'student-a' }, profile: { schoolId: 'school-a' }, loading: false };
+let mockAuth = { user: { uid: 'student-a' }, profile: { schoolId: 'school-a' }, loading: false };
 jest.mock('../firebase', () => ({ getDb: () => ({}) }));
-jest.mock('../state/auth', () => ({ useAuth: () => auth }));
+jest.mock('../state/auth', () => ({ useAuth: () => mockAuth }));
 jest.mock('../state/school', () => ({ useSchool: () => ({ school: { id: 'school-a' } }) }));
 jest.mock('../ui/courseChipShell', () => ({ courseChipScrollContentStyle: () => ({}) }));
 jest.mock('../utils/safeNavigate', () => ({ safeNavigate: jest.fn() }));
@@ -43,7 +43,7 @@ const course = {
 
 beforeEach(() => {
   jest.clearAllMocks();
-  auth = { user: { uid: 'student-a' }, profile: { schoolId: 'school-a' }, loading: false };
+  mockAuth = { user: { uid: 'student-a' }, profile: { schoolId: 'school-a' }, loading: false };
   jest.mocked(loadVerifiedAttendanceHistory).mockResolvedValue([course]);
 });
 
@@ -75,7 +75,7 @@ test('stale account responses cannot appear after switching the login', async ()
     () => new Promise((resolve) => { finish = resolve; }),
   );
   const view = render(<MyAttendanceHistoryScreen />);
-  auth = { user: { uid: 'student-b' }, profile: { schoolId: 'school-a' }, loading: false };
+  mockAuth = { user: { uid: 'student-b' }, profile: { schoolId: 'school-a' }, loading: false };
   jest.mocked(loadVerifiedAttendanceHistory).mockResolvedValueOnce([]);
   view.rerender(<MyAttendanceHistoryScreen />);
   await view.findByText('目前沒有可驗證的課堂點名');
