@@ -105,23 +105,6 @@ export interface LLMRuntimeAvailability {
 // ═══════════════════════════════════════════════════
 
 export const MODEL_REGISTRY: Record<string, LLMConfig> = {
-  // A stronger, opt-in model for phones with more free memory. Not yet
-  // performance-certified on every iOS/Android device.
-  'qwen3-1.7b': {
-    modelId: 'qwen3-1.7b',
-    modelUrl:
-      'https://huggingface.co/ggml-org/Qwen3-1.7B-GGUF/resolve/main/Qwen3-1.7B-Q4_K_M.gguf',
-    modelFileName: 'Qwen3-1.7B-Q4_K_M.gguf',
-    modelSize: 1_282_439_328,
-    contextLength: 4096,
-    maxTokens: 900,
-    temperature: 0.55,
-    topP: 0.9,
-    topK: 30,
-    repeatPenalty: 1.1,
-    threads: 4,
-    gpuLayers: 99,
-  },
   // 低門檻、可在一般手機上試用的免費 GGUF（下載後只在裝置端推論）
   'qwen2.5-0.5b': {
     modelId: 'qwen2.5-0.5b',
@@ -726,17 +709,13 @@ class LocalLLMEngine {
   private formatPrompt(messages: LLMMessage[]): string {
     let prompt = '';
 
-    const lastUserIndex = messages.map((message) => message.role).lastIndexOf('user');
-    for (const [index, msg] of messages.entries()) {
+    for (const msg of messages) {
       switch (msg.role) {
         case 'system':
           prompt += `<|im_start|>system\n${msg.content}<|im_end|>\n`;
           break;
         case 'user':
-          // Qwen3 supports the soft non-thinking switch. Keep its answer
-          // within a usable mobile response budget instead of spending all
-          // tokens on an internal reasoning prefix.
-          prompt += `<|im_start|>user\n${msg.content}${this.config?.modelId === 'qwen3-1.7b' && index === lastUserIndex ? '\n/no_think' : ''}<|im_end|>\n`;
+          prompt += `<|im_start|>user\n${msg.content}<|im_end|>\n`;
           break;
         case 'assistant':
           prompt += `<|im_start|>assistant\n${msg.content}<|im_end|>\n`;
