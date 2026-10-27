@@ -62,7 +62,8 @@ beforeEach(async () => {
     status: 200,
     url: 'https://cdn.example.test/model.gguf',
   })) as never;
-  const storage = require('@react-native-async-storage/async-storage').default;
+  const storageModule = require('@react-native-async-storage/async-storage');
+  const storage = storageModule.default ?? storageModule;
   await storage.clear();
   engine = require('../../services/localLLMInference').localLLM;
 });
@@ -88,7 +89,8 @@ test('cancel stops the native transfer, cleans the incomplete GGUF and leaves no
     expect.stringContaining('Qwen2.5-0.5B-Instruct-Q4_K_M.gguf'), { idempotent: true },
   );
   expect(engine.getState()).toMatchObject({ status: 'uninitialized', error: undefined });
-  const storage = require('@react-native-async-storage/async-storage').default;
+  const storageModule = require('@react-native-async-storage/async-storage');
+  const storage = storageModule.default ?? storageModule;
   await expect(storage.getItem('@local_llm:model_ready')).resolves.toBeNull();
   expect(progress).not.toHaveBeenCalled();
 });
