@@ -11,6 +11,11 @@ tags:
     visible:
       id: login-landing
     timeout: 90000
+# 校務匯入卡片會隨螢幕尺寸及字級增高；先捲動到公開入口，再檢查可見性。
+- scrollUntilVisible:
+    element:
+      id: public-Map
+    direction: DOWN
 - assertVisible:
     id: public-Map
 - assertNotVisible:
