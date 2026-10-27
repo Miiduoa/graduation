@@ -1,5 +1,5 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { getDocs } from 'firebase/firestore';
+import { getDocs, setDoc, writeBatch } from 'firebase/firestore';
 import {
   getCreditAuditStorageKey,
   getCreditChecklistStorageKey,
@@ -7,6 +7,8 @@ import {
   saveCreditChecklistStatus,
   loadCreditAuditSavedCourses,
   listStoredEnrollments,
+  upsertCreditAuditEnrollment,
+  syncCreditAuditCoursesToCloud,
 } from '../features/academics/repository';
 
 jest.mock('@react-native-async-storage/async-storage', () => ({
@@ -85,4 +87,38 @@ test('legacy enrollment lookup includes only rows explicitly scoped to current c
     } as never);
   const rows = await listStoredEnrollments('student-a', 'pu');
   expect(rows.map((row) => row.id)).toEqual(['correct']);
+});
+
+test('cloud enrollments distinguish self-reported passed courses from pending credit', async () => {
+  await upsertCreditAuditEnrollment({
+    uid: 'student-a', schoolId: 'pu',
+    course: { id: 'pending', name: '待確認', credits: 2.5, category: 'elective', passed: false },
+  });
+  expect(jest.mocked(setDoc)).toHaveBeenCalledWith(
+    expect.anything(),
+    expect.objectContaining({ passed: false, status: 'in_progress', source: 'credit-audit-input' }),
+  );
+  await upsertCreditAuditEnrollment({
+    uid: 'student-a', schoolId: 'pu',
+    course: { id: 'passed', name: '已確認', credits: 3, category: 'required', passed: true },
+  });
+  expect(jest.mocked(setDoc)).toHaveBeenLastCalledWith(
+    expect.anything(),
+    expect.objectContaining({ passed: true, status: 'completed', source: 'credit-audit-input' }),
+  );
+
+  const set = jest.fn();
+  const commit = jest.fn().mockResolvedValue(undefined);
+  jest.mocked(writeBatch).mockReturnValue({ set, commit } as never);
+  await syncCreditAuditCoursesToCloud({
+    uid: 'student-a', schoolId: 'pu',
+    courses: [
+      { id: 'pending', name: '待確認', credits: 2.5, category: 'elective', passed: false, createdAt: '2026-10-27', syncedToCloud: false },
+      { id: 'passed', name: '已確認', credits: 3, category: 'required', passed: true, createdAt: '2026-10-27', syncedToCloud: false },
+    ],
+  });
+  expect(set).toHaveBeenCalledTimes(2);
+  expect(set.mock.calls[0][1]).toMatchObject({ passed: false, status: 'in_progress' });
+  expect(set.mock.calls[1][1]).toMatchObject({ passed: true, status: 'completed' });
+  expect(commit).toHaveBeenCalledTimes(1);
 });
