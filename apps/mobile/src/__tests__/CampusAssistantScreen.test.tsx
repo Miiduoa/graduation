@@ -535,3 +535,33 @@ test('a temporary network error reuses only a recent, authorized in-memory sense
   expect(view.getByText('依上次有效快照整理今日作業')).toBeTruthy();
   expect(confirmCampusAgentWrite).not.toHaveBeenCalled();
 });
+
+test('a denied campus permission drops the old snapshot even when it was recently valid', async () => {
+  const sensed = {
+    userId: 'A', schoolId: 'pu', checkedAt: new Date().toISOString(),
+    schedule: { status: 'unavailable' as const, count: null },
+    assignments: { status: 'available' as const, count: 1,
+      items: [{ title: '需授權的作業', groupName: '學程', dueAt: null }] },
+    announcements: { status: 'available' as const, items: [] },
+  };
+  const denied = Object.assign(new Error('Member no longer authorized'), {
+    code: 'functions/permission-denied',
+  });
+  jest.mocked(refreshCampusSenseSnapshot)
+    .mockResolvedValueOnce(sensed)
+    .mockRejectedValueOnce(denied);
+  request.mockResolvedValueOnce({
+    content: '只根據手機課表回覆', tool: 'campus-plan',
+    source: 'device', hasActions: false,
+  });
+  const view = render(<CampusAssistantScreen />);
+  await act(async () => fireEvent.press(view.getByText('同步我的校園資料')));
+  expect(view.getByText('已取得本次授權資料')).toBeTruthy();
+  await act(async () => fireEvent.press(view.getByText('今日重點')));
+  expect(request).toHaveBeenCalledWith(expect.objectContaining({
+    mode: 'device', senseSnapshot: null,
+  }));
+  expect(view.queryByText('已取得本次授權資料')).toBeNull();
+  expect(view.getByText(/權限或資料無法驗證，已捨棄校園摘要/)).toBeTruthy();
+  expect(confirmCampusAgentWrite).not.toHaveBeenCalled();
+});
