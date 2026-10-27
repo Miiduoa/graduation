@@ -1,19 +1,43 @@
-import { afterEach, expect, it } from 'vitest';
+// @vitest-environment node
+import { createRequire } from 'node:module';
+import { expect, it } from 'vitest';
 import { schoolPortalCaptureScript, readPortalCapture, schoolPortalFor } from '@campus/shared/src/imports/portalCapture';
+
+// Use the project's existing jsdom dependency without sharing a React test's
+// document, selector cache, globals or styles. No browser API is mocked here.
+type PortalWindow = {
+  document: Document;
+  location: { origin: string };
+  eval(source: string): unknown;
+  close(): void;
+};
+const { JSDOM } = createRequire(import.meta.url)('jsdom') as {
+  JSDOM: new (html: string, options: { url: string; runScripts: 'outside-only' }) => { window: PortalWindow };
+};
 const portal = schoolPortalFor('pu')!;
 const request = { id: 'capture_12345678', origin: 'https://alcat.pu.edu.tw' };
 const gradeTable = '<table><tr><th>課程名稱</th><th>學分</th><th>成績</th></tr><tr><td>統計學</td><td>3</td><td>90</td></tr></table>';
-function capture(html: string) {
-  document.body.innerHTML = html;
-  const messages: string[] = [];
-  const bridge = { top: null as unknown, location: { origin: request.origin }, ReactNativeWebView: { postMessage: (message: string) => messages.push(message) } };
-  bridge.top = bridge;
-  // Runs the exact injected script with a real jsdom document, never a regex-only simulation.
-  new Function('window', 'document', schoolPortalCaptureScript(request))(bridge, document);
-  expect(messages).toHaveLength(1);
-  return JSON.parse(messages[0]);
+function capture(html: string, prepare?: (window: PortalWindow) => void) {
+  // outside-only executes our capture script but never scripts supplied by the
+  // fixture. Subresource loading is left disabled; no school network is used.
+  const dom = new JSDOM(`<!doctype html><html><body>${html}</body></html>`, {
+    url: `${request.origin}/grades`,
+    runScripts: 'outside-only',
+  });
+  try {
+    const messages: string[] = [];
+    Object.defineProperty(dom.window, 'ReactNativeWebView', {
+      value: { postMessage: (message: string) => messages.push(message) },
+    });
+    prepare?.(dom.window);
+    expect(dom.window.location.origin).toBe(request.origin);
+    dom.window.eval(schoolPortalCaptureScript(request));
+    expect(messages).toHaveLength(1);
+    return JSON.parse(messages[0]);
+  } finally {
+    dom.window.close();
+  }
 }
-afterEach(() => { document.body.innerHTML = ''; });
 it('extracts visible table text, headings and rowspan in a generic school portal', () => {
   const result = capture('<h2>115 學年度 第 1 學期</h2><table><tr><th>星期一</th></tr><tr><td rowspan="2">程式設計<br>主顧303</td></tr><tr></tr></table>');
   expect(result.html).toContain('115 學年度');
@@ -62,7 +86,26 @@ it('does not invent records when the page is image-only or empty', () => {
   expect(capture('<img alt="課表" src="/timetable.png">').error).toBe('no-table');
 });
 it('does not access cookies or browser storage while reading a real DOM', () => {
-  Object.defineProperty(document, 'cookie', { configurable: true, get: () => { throw new Error('cookie access'); } });
-  expect(capture(gradeTable).html).toContain('統計學');
-  delete (document as unknown as { cookie?: string }).cookie;
+  const result = capture(gradeTable, (window) => {
+    Object.defineProperty(window.document, 'cookie', { get: () => { throw new Error('cookie access'); } });
+    for (const name of ['localStorage', 'sessionStorage']) {
+      Object.defineProperty(window, name, { get: () => { throw new Error('storage access'); } });
+    }
+  });
+  expect(result.html).toContain('統計學');
+});
+it('does not execute page scripts and does not leak state between two portal documents', () => {
+  const first = capture('<script>document.body.textContent="page-script-executed";</script>' + gradeTable);
+  const second = capture('<table><tr><td>' + gradeTable.replace('統計學', '資料庫') + '</td></tr></table>');
+  expect(first.html).toContain('統計學');
+  expect(first.html).not.toContain('page-script-executed');
+  expect(second.html).toContain('資料庫');
+  expect(second.html).not.toContain('統計學');
+});
+it('honors page CSS when collecting visible text from a nested table', () => {
+  const result = capture('<style>.private-field { display:none } .hidden-table { visibility:hidden }</style>' +
+    '<table><tr><td>' + gradeTable.replace('統計學', '統計學<span class="private-field">private-label</span>') + '</td></tr></table>' +
+    gradeTable.replace('<table>', '<table class="hidden-table">').replace('統計學', 'hidden-course'));
+  expect(result.html).toContain('統計學');
+  expect(result.html).not.toMatch(/private-label|hidden-course/);
 });
