@@ -273,9 +273,9 @@ export function runOfflineCampusTool(
   if (requestedWrite) return requestedWrite;
   // A source-backed plan performs a bounded, read-only multi-step analysis.
   // It receives the verified owner explicitly rather than trusting a cached UID.
-  const plan = buildOfflineCampusPlan({
+  const plan = ownerUid ? buildOfflineCampusPlan({
     question: text, context, snapshot: senseSnapshot, uid: ownerUid,
-  });
+  }) : null;
   if (plan) {
     return {
       tool: 'campus-plan',
