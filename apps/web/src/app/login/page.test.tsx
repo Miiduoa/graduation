@@ -96,6 +96,7 @@ it('keeps a school return destination during an availability failure instead of 
   expect(state.retryOptions).toHaveBeenCalledOnce();
 });
 it('returns an already signed-in school user to the requested page only when student ID is available', async () => {
+  state.user = { uid: 'pu-one' };
   state.studentId = true;
   render(<LoginPage />);
   await waitFor(() => expect(replace).toHaveBeenCalledWith('/grades'));
@@ -473,6 +474,7 @@ function fillSchoolLogin() {
   fireEvent.change(screen.getByLabelText('密碼'), { target: { value: 'test-only-password' } });
 }
 it('waits for restored school identity before redirecting or accepting credentials', () => {
+  state.user = { uid: 'pu-one' };
   state.studentId = true;
   state.loading = true;
   const view = render(<LoginPage />);
@@ -601,4 +603,12 @@ it('clears the rejected school password while preserving the student ID', async 
   await screen.findByText('學號或密碼錯誤');
   expect((screen.getByLabelText('密碼') as HTMLInputElement).value).toBe('');
   expect((screen.getByLabelText('學號') as HTMLInputElement).value).toBe('a1234567');
+});
+
+it('does not treat another Firebase user as a verified school session', () => {
+  state.user = { uid: 'external-google-account' };
+  state.studentId = true;
+  render(<LoginPage />);
+  expect(screen.getByLabelText('學號')).toBeTruthy();
+  expect(replace).not.toHaveBeenCalled();
 });

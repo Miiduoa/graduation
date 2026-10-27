@@ -76,6 +76,9 @@ function LoginForm({
   const schoolTask = reconnect || platformDestination(destination) !== destination;
   const schoolAvailable = options.studentId;
   const schoolRequired = schoolTask && schoolAvailable;
+  const hasSchoolIdentity = Boolean(
+    user?.uid.startsWith('pu-') && (!selectedSchoolId || selectedSchoolId === 'pu'),
+  );
   const schoolUnavailable =
     schoolTask && !options.loading && !options.error && !schoolAvailable;
   // School destinations stay school-only; Google must not appear to fulfill them.
@@ -115,14 +118,14 @@ function LoginForm({
       !schoolLoading &&
       !busyRef.current &&
       !returning.current &&
-      user &&
+      hasSchoolIdentity &&
       schoolRequired &&
       !reconnect
     ) {
       returning.current = true;
       goAfterLogin(router, destination);
     }
-  }, [user, schoolLoading, router, destination, reconnect, schoolRequired]);
+  }, [hasSchoolIdentity, schoolLoading, router, destination, reconnect, schoolRequired]);
   async function login(event: FormEvent) {
     event.preventDefault();
     if (busyRef.current || returning.current || schoolLoading || !schoolAvailable) return;
