@@ -184,12 +184,18 @@ function Session({
       )}
       {confirmed && (
         <p role="status" className={styles.confirmed}>
-          已簽到 · {date(confirmed)}
+          {session.ownStatus === 'late' ? '已記錄遲到' : '已簽到'} · {date(confirmed)}
         </p>
       )}
       {!canReadRoster &&
         !confirmed &&
-        (session.active && checkInEnabled ? (
+        (session.ownStatus === 'absent' ? (
+          <p role="status" className={styles.detail}>
+            教師已登記本次缺席。如需更正，請聯絡授課教師。
+          </p>
+        ) : session.ownStatus === 'excused' ? (
+          <p role="status" className={styles.detail}>本次課堂已登記請假。</p>
+        ) : session.active && checkInEnabled ? (
           <form
             className={styles.form}
             onSubmit={(event) => {
