@@ -893,7 +893,7 @@ it('applies the school HTML term to preview rows in the same click, not just to 
   expect((screen.getByLabelText('這份資料的學年度') as HTMLInputElement).value).toBe('115');
   expect(screen.getAllByLabelText('學期').every((field) => (field as HTMLInputElement).value === '1')).toBe(true);
   await waitFor(() => expect(
-    JSON.parse(sessionStorage.getItem(personalImportDraftKey(context)) || '{}').rows?.[0],
+    JSON.parse(sessionStorage.getItem(personalImportDraftKey(context)) || '{}').draft?.rows?.[0],
   ).toMatchObject({ title: '統計學', academicYear: '115', semester: '1' }));
   expect(readPersonalImports(context)).toHaveLength(0);
 });
