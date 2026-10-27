@@ -24,9 +24,27 @@ export interface CreditPlan {
   extra: string;
   terms: number;
   courses: PlannedCourse[];
+  categoryGoals: Record<PlannerCategory, CreditCategoryGoal>;
+  milestones: CreditMilestone[];
 }
 
 export const MAX_PLANNED_COURSES = 120;
+export const MAX_MILESTONES = 24;
+
+export interface CreditCategoryGoal {
+  recognized: string;
+  target: string;
+}
+
+export interface CreditMilestone {
+  id: string;
+  label: string;
+  done: boolean;
+}
+
+function emptyCategoryGoals(): Record<PlannerCategory, CreditCategoryGoal> {
+  return { required: { recognized: '', target: '' }, elective: { recognized: '', target: '' }, general: { recognized: '', target: '' }, other: { recognized: '', target: '' } };
+}
 
 export function emptyCreditPlan(): CreditPlan {
   return {
@@ -36,6 +54,8 @@ export function emptyCreditPlan(): CreditPlan {
     extra: '',
     terms: 4,
     courses: [],
+    categoryGoals: emptyCategoryGoals(),
+    milestones: [],
   };
 }
 
@@ -86,7 +106,21 @@ export function creditPlanSummary(plan: CreditPlan) {
     label,
     credits: sumCredits(plan.courses.filter((course) => course.category === key).map((c) => c.credits)),
   }));
+  const categoryGaps = byCategory.map(({ key, label, credits }) => {
+    const entry = plan.categoryGoals[key];
+    const recognizedCategory = parseCredits(entry.recognized);
+    const targetCategory = entry.target.trim() ? parseCredits(entry.target) : null;
+    const estimated = recognizedCategory === null ? null : sumCredits([recognizedCategory, credits]);
+    const remainingCategory = targetCategory === null || estimated === null ? null : Number(Math.max(0, targetCategory - estimated).toFixed(2));
+    return { key, label, planned: credits, recognized: recognizedCategory, target: targetCategory, estimated, remaining: remainingCategory };
+  });
+  const categorizedRecognized = sumCredits(categoryGaps.map((c) => c.recognized ?? 0));
+  const categoryOvercount = recognized !== null && categorizedRecognized > recognized;
+  const milestonesComplete = plan.milestones.filter((milestone) => milestone.done).length;
   return {
+    categoryGaps,
+    categoryOvercount,
+    milestonesComplete,
     recognized,
     target,
     extra,
@@ -119,7 +153,9 @@ export function restoreCreditPlan(raw: string | null): CreditPlan | null {
       plan.terms! < 1 ||
       plan.terms! > 8 ||
       !Array.isArray(plan.courses) ||
-      plan.courses.length > MAX_PLANNED_COURSES
+      plan.courses.length > MAX_PLANNED_COURSES ||
+      !plan.categoryGoals || typeof plan.categoryGoals !== 'object' ||
+      !Array.isArray(plan.milestones) || plan.milestones.length > MAX_MILESTONES
     ) {
       return null;
     }
@@ -129,6 +165,21 @@ export function restoreCreditPlan(raw: string | null): CreditPlan | null {
       )
     ) {
       return null;
+    }
+    for (const { key } of PLANNER_CATEGORIES) {
+      const entry = plan.categoryGoals?.[key];
+      if (
+        !entry || typeof entry.recognized !== 'string' || typeof entry.target !== 'string' ||
+        [entry.recognized, entry.target].some((number) => number.length > 12 ||
+          (number.trim() && parseCredits(number) === null))
+      ) return null;
+    }
+    const milestoneIds = new Set<string>();
+    for (const item of plan.milestones) {
+      if (!item || typeof item.id !== 'string' || !item.id || item.id.length > 100 ||
+        milestoneIds.has(item.id) || typeof item.label !== 'string' ||
+        !item.label.trim() || item.label.length > 80 || typeof item.done !== 'boolean') return null;
+      milestoneIds.add(item.id);
     }
     const ids = new Set<string>();
     for (const course of plan.courses) {
@@ -189,6 +240,14 @@ export function exportCreditPlanCsv(plan: CreditPlan): string {
   rows.push(['', '已確認可採計學分（自行輸入）', plan.recognized, '', '']);
   rows.push(['', '希望累計的學分', plan.target, '', '']);
   rows.push(['', '其他預計再修學分（未列成課程）', plan.extra, '', '']);
+  for (const { key, label } of PLANNER_CATEGORIES) {
+    const entry = plan.categoryGoals[key];
+    rows.push(['分類門檻', label + '已確認', entry.recognized, '', '']);
+    rows.push(['分類門檻', label + '目標', entry.target, '', '']);
+  }
+  for (const milestone of plan.milestones) {
+    rows.push(['非學分條件', milestone.label, '', '', milestone.done ? '自行勾選完成' : '尚未完成']);
+  }
   rows.push(['', '說明', '', '', '個人規劃，不代表學校正式審查或保證通過']);
   return '\ufeff' + rows.map((row) => row.map(csvCell).join(',')).join('\r\n') + '\r\n';
 }
