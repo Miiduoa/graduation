@@ -177,10 +177,8 @@ export default function AIModelManagerScreen({ navigation }: any) {
       setDownloadedModels(downloaded);
 
       const status = await localAssistant.getStatus();
-      // 只有在模型真正 ready 時才標記為使用中
-      if (status.llmState.modelId && status.llmState.status === 'ready') {
-        setActiveModel(status.llmState.modelId);
-      }
+      // A preference alone is not proof that the native context loaded.
+      setActiveModel(status.llmState.status === 'ready' ? status.llmState.modelId ?? null : null);
     } catch (e) {
       console.warn('[AIModelManager] loadState error:', e);
     }
@@ -207,6 +205,10 @@ export default function AIModelManagerScreen({ navigation }: any) {
     async (modelId: string) => {
       const info = MODEL_INFO.find((m) => m.id === modelId);
       if (!info) return;
+      if (['generating', 'loading', 'downloading'].includes(localLLM.getState().status)) {
+        Alert.alert('AI 正在使用中', '目前還有模型下載或推論工作，請先完成或取消後再操作。');
+        return;
+      }
 
       const runtime = localLLM.getRuntimeAvailability();
       setRuntimeAvailability(runtime);
@@ -266,11 +268,10 @@ export default function AIModelManagerScreen({ navigation }: any) {
         return false;
       }
 
-      await localLLM.setActiveModel(modelId);
-      await localAssistant.setConfig({ modelId });
-
+      // Only persist a new preference after the native context is ready.
       const ok = await localLLM.loadModel(modelId);
       if (ok) {
+        await localAssistant.setConfig({ modelId }).catch(() => {});
         setActiveModel(modelId);
         Alert.alert(messages.successTitle, messages.successBody);
         return true;
@@ -436,8 +437,9 @@ export default function AIModelManagerScreen({ navigation }: any) {
           const isDownloading =
             (llmState.status === 'downloading' && llmState.modelId === model.id) ||
             !!downloadProgress[model.id];
-          const canActivate = runtimeAvailability.available;
-          const canDownload = runtimeAvailability.available;
+          const engineBusy = ['downloading', 'loading', 'generating'].includes(llmState.status);
+          const canActivate = runtimeAvailability.available && !engineBusy;
+          const canDownload = runtimeAvailability.available && !engineBusy;
 
           return (
             <Animated.View
@@ -573,7 +575,7 @@ export default function AIModelManagerScreen({ navigation }: any) {
                     <Text
                       style={[styles.actionBtnText, !canDownload && styles.actionBtnTextDisabled]}
                     >
-                      {canDownload ? '下載模型' : '需開發版 App'}
+                      {canDownload ? '下載模型' : engineBusy ? '請稍後再試' : '需開發版 App'}
                     </Text>
                   </TouchableOpacity>
                 )}
@@ -597,12 +599,13 @@ export default function AIModelManagerScreen({ navigation }: any) {
                       <Text
                         style={[styles.actionBtnText, !canActivate && styles.actionBtnTextDisabled]}
                       >
-                        {canActivate ? '啟用' : '需重建 App'}
+                        {canActivate ? '啟用' : engineBusy ? '請稍後再試' : '需重建 App'}
                       </Text>
                     </TouchableOpacity>
                     <TouchableOpacity
-                      style={[styles.actionBtn, styles.deleteBtn]}
+                      style={[styles.actionBtn, styles.deleteBtn, engineBusy && styles.actionBtnDisabled]}
                       onPress={() => handleDelete(model.id)}
+                      disabled={engineBusy}
                     >
                       <Ionicons name="trash-outline" size={18} color={theme.colors.danger} />
                     </TouchableOpacity>
