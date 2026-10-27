@@ -5,20 +5,20 @@ import {
   CAMPUS_SENSE_MAX_AGE_MS,
 } from '../../services/campusSenseSnapshot';
 
-let uid: string | null = 'A';
+let mockUid: string | null = 'A';
 let mockMode = false;
-const callable = jest.fn();
+const mockCallable = jest.fn();
 
 jest.mock('firebase/functions', () => ({
-  httpsCallable: jest.fn(() => callable),
+  httpsCallable: jest.fn(() => mockCallable),
 }));
 jest.mock('../../firebase', () => ({
-  getAuthInstance: () => ({ currentUser: uid ? { uid } : null }),
+  getAuthInstance: () => ({ currentUser: mockUid ? { mockUid } : null }),
   getFunctionsInstance: () => ({}),
   isFirebaseMockMode: () => mockMode,
 }));
 
-const scope = { uid: 'A', schoolId: 'pu' };
+const scope = { mockUid: 'A', schoolId: 'pu' };
 const envelope = () => ({
   schoolId: 'pu',
   checkedAt: new Date().toISOString(),
@@ -38,9 +38,9 @@ const envelope = () => ({
 
 beforeEach(() => {
   jest.clearAllMocks();
-  uid = 'A';
+  mockUid = 'A';
   mockMode = false;
-  callable.mockResolvedValue({ data: envelope() });
+  mockCallable.mockResolvedValue({ data: envelope() });
 });
 
 test('refreshes only a signed-in authorized account and requested school', async () => {
@@ -51,51 +51,51 @@ test('refreshes only a signed-in authorized account and requested school', async
     assignments: { status: 'available', count: 2 },
   });
   expect(httpsCallable).toHaveBeenCalledWith({}, 'getCampusAssistantSnapshot');
-  expect(callable).toHaveBeenCalledWith({ schoolId: 'pu' });
+  expect(mockCallable).toHaveBeenCalledWith({ schoolId: 'pu' });
   expect(validCampusSenseSnapshot(result, scope)).not.toBeNull();
 });
 
 test.each(['guest', 'other-account', 'mock-mode', 'navigated-away'])(
   'never requests a private snapshot on %s', async (reason) => {
-    if (reason === 'guest') uid = null;
-    if (reason === 'other-account') uid = 'B';
+    if (reason === 'guest') mockUid = null;
+    if (reason === 'other-account') mockUid = 'B';
     if (reason === 'mock-mode') mockMode = true;
     await expect(refreshCampusSenseSnapshot({
       scope, isCurrent: () => reason !== 'navigated-away',
     })).rejects.toThrow('session-changed');
-    expect(callable).not.toHaveBeenCalled();
+    expect(mockCallable).not.toHaveBeenCalled();
   },
 );
 
 test('discards a delayed response after switching account', async () => {
   let resolve!: (value: unknown) => void;
-  callable.mockReturnValueOnce(new Promise((next) => { resolve = next; }));
+  mockCallable.mockReturnValueOnce(new Promise((next) => { resolve = next; }));
   const request = refreshCampusSenseSnapshot({ scope, isCurrent: () => true });
-  uid = 'B';
+  mockUid = 'B';
   resolve({ data: envelope() });
   await expect(request).rejects.toThrow('session-changed');
 });
 
 test('rejects stale and mismatched summaries rather than accepting false live status', async () => {
-  callable.mockResolvedValueOnce({
+  mockCallable.mockResolvedValueOnce({
     data: { ...envelope(), checkedAt: new Date(Date.now() - CAMPUS_SENSE_MAX_AGE_MS - 1000).toISOString() },
   });
   await expect(refreshCampusSenseSnapshot({ scope, isCurrent: () => true }))
     .rejects.toThrow('expired-sense-response');
 
-  callable.mockResolvedValueOnce({ data: { ...envelope(), schoolId: 'other-school' } });
+  mockCallable.mockResolvedValueOnce({ data: { ...envelope(), schoolId: 'other-school' } });
   await expect(refreshCampusSenseSnapshot({ scope, isCurrent: () => true }))
     .rejects.toThrow('invalid-sense-response');
 
   const result = await refreshCampusSenseSnapshot({ scope, isCurrent: () => true });
-  expect(validCampusSenseSnapshot(result, { uid: 'other', schoolId: 'pu' })).toBeNull();
-  expect(validCampusSenseSnapshot(result, { uid: 'A', schoolId: 'other-school' })).toBeNull();
+  expect(validCampusSenseSnapshot(result, { mockUid: 'other', schoolId: 'pu' })).toBeNull();
+  expect(validCampusSenseSnapshot(result, { mockUid: 'A', schoolId: 'other-school' })).toBeNull();
   expect(validCampusSenseSnapshot(result, scope, Date.now() + CAMPUS_SENSE_MAX_AGE_MS + 1000))
     .toBeNull();
 });
 
 test('unavailable sources cannot be turned into verified zero counts', async () => {
-  callable.mockResolvedValueOnce({
+  mockCallable.mockResolvedValueOnce({
     data: {
       ...envelope(),
       assignments: { status: 'unavailable', count: 0, items: [{ title: '未授權作業' }] },
@@ -108,7 +108,7 @@ test('unavailable sources cannot be turned into verified zero counts', async () 
 });
 
 test('malformed authenticated responses are rejected rather than hallucinated', async () => {
-  callable.mockResolvedValueOnce({
+  mockCallable.mockResolvedValueOnce({
     data: { ...envelope(), assignments: { status: 'available', count: 2, items: [{ title: null }] } },
   });
   await expect(refreshCampusSenseSnapshot({ scope, isCurrent: () => true }))
