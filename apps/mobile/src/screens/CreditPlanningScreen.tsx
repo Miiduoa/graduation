@@ -205,7 +205,7 @@ export default function CreditPlanningScreen() {
   const activeScope = useRef(scopeKey);
   activeScope.current = scopeKey;
   const generation = useRef(0);
-  const lock = useRef(false);
+  const savingScope = useRef<string | null>(null);
 
   const [plan, setPlan] = useState<CreditPlan | null>(null);
   const [loadedScope, setLoadedScope] = useState<string | null>(null);
@@ -223,6 +223,7 @@ export default function CreditPlanningScreen() {
     const request = ++generation.current;
     setPlan(null);
     setLoadedScope(null);
+    setSaving(false);
     setNotice('');
     setLoadError('');
     try {
@@ -249,8 +250,8 @@ export default function CreditPlanningScreen() {
   const summary = useMemo(() => plan ? creditPlanSummary(plan) : null, [plan]);
 
   async function save(next: CreditPlan, successMessage: string): Promise<boolean> {
-    if (lock.current || activeScope.current !== scopeKey || loadedScope !== scopeKey) return false;
-    lock.current = true;
+    if (savingScope.current === scopeKey || activeScope.current !== scopeKey || loadedScope !== scopeKey) return false;
+    savingScope.current = scopeKey;
     setSaving(true);
     try {
       await writeMobileCreditPlan(scopeKey, next);
@@ -264,7 +265,7 @@ export default function CreditPlanningScreen() {
       }
       return false;
     } finally {
-      lock.current = false;
+      if (savingScope.current === scopeKey) savingScope.current = null;
       if (activeScope.current === scopeKey) setSaving(false);
     }
   }
