@@ -260,3 +260,16 @@ test('notification budget is shared with other scheduled notifications', async (
   });
   expect(mockSchedule).not.toHaveBeenCalled();
 });
+
+test('an ambiguous native bridge rejection cancels the deterministic own slot', async () => {
+  mockSchedule.mockImplementationOnce(async ({ identifier, content }) => {
+    mockScheduled.set(identifier, { identifier, content });
+    throw new Error('Native bridge response lost after scheduling');
+  });
+  await expect(scheduleCampusAssignmentReminder(request())).rejects.toMatchObject({
+    code: 'native-failed',
+  });
+  expect(mockCancel).toHaveBeenCalledTimes(1);
+  expect(mockScheduled.size).toBe(0);
+  expect(mockReceipts.size).toBe(0);
+});
