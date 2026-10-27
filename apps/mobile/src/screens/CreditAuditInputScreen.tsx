@@ -127,29 +127,42 @@ export function CreditAuditInputScreen(props: any) {
     [auth.user?.uid, school.id],
   );
 
+  const activeScope = useRef(storageKey);
+  activeScope.current = storageKey;
+  const [loadError, setLoadError] = useState<string | null>(null);
+
   const loadSavedCourses = useCallback(async () => {
+    const request = ++requestIdRef.current;
+    setLoading(true);
+    setLoadedScope(null);
+    setSavedCourses([]);
+    setLoadError(null);
     try {
-      setSavedCourses(await loadCreditAuditSavedCourses(storageKey));
-    } catch (error) {
-      console.error('Failed to load saved courses:', error);
+      const rows = await loadCreditAuditSavedCourses(storageKey);
+      if (request !== requestIdRef.current) return;
+      if (!Array.isArray(rows)) throw new Error('儲存格式錯誤');
+      setSavedCourses(rows);
+    } catch {
+      if (request !== requestIdRef.current) return;
+      setLoadError('本機課程資料無法讀取，這次不會以空資料覆寫原紀錄。');
     } finally {
-      setLoading(false);
+      if (request === requestIdRef.current) {
+        setLoadedScope(storageKey);
+        setLoading(false);
+      }
     }
   }, [storageKey]);
 
   useEffect(() => {
     analytics.logScreenView('CreditAuditInput');
+    setReferenceEnabled(false);
+    setNonCreditSatisfied({});
     void loadSavedCourses();
+    return () => { requestIdRef.current += 1; };
   }, [loadSavedCourses]);
 
   const saveCourses = useCallback(
-    async (courses: SavedCourse[]) => {
-      try {
-        await saveCreditAuditSavedCourses(storageKey, courses);
-      } catch (error) {
-        console.error('Failed to save courses:', error);
-      }
-    },
+    (courses: SavedCourse[]) => saveCreditAuditSavedCourses(storageKey, courses),
     [storageKey],
   );
 
@@ -174,15 +187,13 @@ export function CreditAuditInputScreen(props: any) {
       savedCourses.map((sc) => ({
         name: sc.name,
         credits: sc.credits,
-        categoryKey:
-          ((sc as any).detailedCatKey ??
-          mapDetailedToLegacyCategory((sc as any).detailedCatKey ?? '') !== 'other')
-            ? ((sc as any).detailedCatKey ?? categoryToDetailedKey(sc.category))
-            : categoryToDetailedKey(sc.category),
-        subCategoryKey: (sc as any).detailedSubKey,
+        categoryKey: referenceActive && sc.detailedCatKey
+          ? sc.detailedCatKey
+          : categoryToDetailedKey(sc.category),
+        subCategoryKey: referenceActive ? sc.detailedSubKey : undefined,
         passed: sc.passed,
       })),
-    [savedCourses],
+    [savedCourses, referenceActive],
   );
 
   const detailedAudit = useMemo(
@@ -505,7 +516,7 @@ export function CreditAuditInputScreen(props: any) {
 
   const TABS = ['新增課程', '修課概覽', '已儲存', '匯入/匯出'];
 
-  if (loading) {
+  if (loading || loadedScope !== storageKey) {
     return (
       <Screen title="學分試算">
         <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
