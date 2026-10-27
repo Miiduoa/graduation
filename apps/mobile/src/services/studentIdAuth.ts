@@ -44,6 +44,8 @@ import {
 import { isTronClassDataFetchEnabled } from './tronClassDataEnabled';
 import {
   syncAllData,
+  clearPUCache,
+  type SyncAllResult,
   refreshCourses,
   refreshGrades,
   refreshStudentInfo,
@@ -58,6 +60,7 @@ import { PUAdapter } from '../data/apiAdapters/PUAdapter';
 import { getCloudFunctionUrl } from './cloudFunctions';
 import { getAuthInstance, hasUsableFirebaseConfig } from '../firebase';
 import type { UserRole } from '../state/auth';
+import { buildSchoolSyncSummary, type SchoolSyncSummary } from './schoolSyncSummary';
 
 // ─── Progress Callback ──────────────────────────────────
 
@@ -90,6 +93,7 @@ export type StudentIdLoginResult = {
   role: UserRole;
   schoolId: string;
   session: PUSession;
+  syncSummary?: SchoolSyncSummary;
 };
 
 export { isStudentIdLoginAvailable } from './schoolLoginAvailability';
@@ -506,6 +510,8 @@ async function handleBackendLoginSuccess(
     /* Adapter 尚未註冊 */
   }
 
+  // 新連線不沿用前一個帳號的校務快取。
+  await clearPUCache();
   // 快取後端回傳的資料（如果有的話）
   let seededCount = 0;
   if (data.courses) {
@@ -605,12 +611,15 @@ async function handleBackendLoginSuccess(
     progress('syncingTronClass', '同步 TronClass 課程資料');
   }
 
+  let synchronized: SyncAllResult | null = null;
   try {
-    await syncAllData(session, { includeEssential: true });
+    synchronized = await syncAllData(session, { includeEssential: true });
     console.log('[studentIdAuth] syncAllData completed');
   } catch (err) {
     console.warn('[studentIdAuth] syncAllData failed (continuing):', err);
   }
+
+  result.syncSummary = buildSchoolSyncSummary(synchronized, tcAllowed);
 
   // ── 登入後資料路由：推斷角色 + 建立師生關聯 ──
   try {
@@ -706,12 +715,8 @@ async function handleHybridLogin(
     }
   })();
 
-  // 等待兩者完成（最多等 15 秒，避免 IPv6 DNS 問題卡太久）
-  const loginTimeout = new Promise<void>((resolve) => setTimeout(resolve, 15000));
-  await Promise.race([
-    Promise.allSettled(tcAllowed ? [tcLoginPromise, puLoginPromise] : [puLoginPromise]),
-    loginTimeout,
-  ]);
+  // 各請求本身已有逾時；等到登入完成再決定結果，避免舊請求在下一次登入時晚到。
+  await Promise.allSettled(tcAllowed ? [tcLoginPromise, puLoginPromise] : [puLoginPromise]);
 
   // ── 判斷登入結果 ──
   if (!puLoginOk && !tcLoginOk) {
@@ -739,6 +744,8 @@ async function handleHybridLogin(
     session = { loggedIn: true, studentName: tcSession?.userName ?? null };
     _currentPUSession = session;
   }
+
+  await clearPUCache();
 
   // ── Step 2: 嘗試同步 E校園 資料（如果 E校園 有連上） ──
   let displayName = session!.studentName ?? tcSession?.userName ?? `${userAccount} 同學`;
@@ -824,11 +831,13 @@ async function handleHybridLogin(
     session: session!,
   };
 
+  let synchronized: SyncAllResult | null = null;
+
   // ── Step 4: TronClass 資料同步（建置關閉或登入失敗時僅同步 E 校園可及資料）──
   if (tcLoginOk) {
     progress('syncingTronClass', '同步 TronClass 課程資料');
     try {
-      await syncAllData(session!, { includeEssential: true });
+      synchronized = await syncAllData(session!, { includeEssential: true });
       console.log('[studentIdAuth] Hybrid: syncAllData completed');
     } catch (err) {
       console.warn('[studentIdAuth] Hybrid: syncAllData failed (continuing):', err);
@@ -842,12 +851,14 @@ async function handleHybridLogin(
     }
 
     try {
-      await syncAllData(session!, { includeEssential: true });
+      synchronized = await syncAllData(session!, { includeEssential: true });
       console.log('[studentIdAuth] Hybrid: syncAllData completed (E-campus / 無 TronClass)');
     } catch (err) {
       console.warn('[studentIdAuth] Hybrid: syncAllData failed (continuing):', err);
     }
   }
+
+  result.syncSummary = buildSchoolSyncSummary(synchronized, tcAllowed);
 
   // ── 登入後資料路由：推斷角色 + 建立師生關聯 ──
   try {

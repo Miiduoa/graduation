@@ -13,6 +13,8 @@ import {
 import type { PuCampusGateway } from './puCampusClient';
 import type { SchoolLoginFirestore } from './schoolLoginProfile';
 import type { ServiceAccountSigner } from './firebaseCustomToken';
+import type { AcademicFetchers, AcademicFirestore } from './academicRecordsHandlers';
+import type { LmsCoursesFetcher } from './tronClassCoursesHandler';
 import { LoginRateLimitError, LoginRateStoreError, type LoginRateGate } from './loginRateLimit';
 import { clientIpFromRequest, PuLoginHttpError } from './signInPuStudentId';
 
@@ -34,6 +36,8 @@ export type FnRuntime = {
   ) => Promise<{ uid: string } & Record<string, unknown>>;
   createCustomToken?: (uid: string, claims: Record<string, string>) => Promise<string>;
   puCampus?: PuCampusGateway;
+  academicFetchers?: AcademicFetchers;
+  lmsCoursesFetcher?: LmsCoursesFetcher;
   serviceAccount?: ServiceAccountSigner | null;
   rateLimitGate?: LoginRateGate;
   rateLimitSalt?: string;
@@ -121,7 +125,19 @@ async function invokeHostedCallable(
   name: string,
   request: CallableRequest,
   db: FnRuntime['db'],
+  academicFetchers?: AcademicFetchers,
+  lmsCoursesFetcher?: LmsCoursesFetcher,
 ): Promise<unknown> {
+  if (name === 'getMyTronClassCourses') {
+    const { createTronClassCoursesHandler } = await import('./tronClassCoursesHandler');
+    const fetchCourses = lmsCoursesFetcher ?? (await import('./tronClassSchoolSource')).tronClassSchoolSource;
+    return createTronClassCoursesHandler({ db: db as unknown as AcademicFirestore, fetchCourses })(request);
+  }
+  if (name === 'getMyAcademicRecords') {
+    const { createAcademicRecordsHandler } = await import('./academicRecordsHandlers');
+    const fetchers = academicFetchers ?? (await import('./academicSchoolSource')).academicSchoolSource;
+    return createAcademicRecordsHandler({ db: db as unknown as AcademicFirestore, fetchers })(request);
+  }
   if (name === 'joinGroupByCode' || name === 'leaveGroup') {
     const { createGroupInviteHandlers } = await import('./groupInviteHandlers');
     return createGroupInviteHandlers({ db })[name](request);
@@ -219,7 +235,8 @@ export async function dispatchFnRequest(
     const auth = await verifyCallableAuth(
       request.headers.get('authorization'),
       resolved.verifyIdToken,
-      isLeaveWebCallable(name) || name === 'correctAttendanceRecord',
+      isLeaveWebCallable(name) || name === 'correctAttendanceRecord' ||
+        name === 'getMyAcademicRecords' || name === 'getMyTronClassCourses',
     );
     uid = auth?.uid;
     if (uid) {
@@ -236,7 +253,8 @@ export async function dispatchFnRequest(
       data: (body as { data: unknown }).data,
       auth,
     };
-    const result = await invokeHostedCallable(name, callableRequest, resolved.db);
+    const result = await invokeHostedCallable(name, callableRequest, resolved.db,
+      resolved.academicFetchers, resolved.lmsCoursesFetcher);
     return jsonResponse(200, { result }, cors);
   } catch (error) {
     const mapped = mapThrownError(error);

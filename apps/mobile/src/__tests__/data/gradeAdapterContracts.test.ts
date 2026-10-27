@@ -19,7 +19,9 @@ import {
   seedCachedGrades,
 } from '../../services/puDataCache';
 
-let mockGradeRequester: { uid: string } | null = { uid: 'user-b' };
+let mockGradeRequester: { uid: string; getIdToken?: () => Promise<string> } | null = {
+  uid: 'user-b',
+};
 
 jest.mock('../../firebase', () => ({
   ...jest.requireActual('../../firebase'),
@@ -359,6 +361,53 @@ describe('PUAdapter.listGrades authenticated ownership boundary', () => {
     await expect(new PUAdapter().listGrades('user-b')).rejects.toThrow('請重新連線學校帳號');
     expect(mockGetCachedGrades).not.toHaveBeenCalled();
     expect(mockGetAnyCachedGrades).not.toHaveBeenCalled();
+  });
+
+  test('a restored Firebase account reads its server-owned grades without an in-memory session', async () => {
+    mockGradeRequester = { uid: 'user-b', getIdToken: async () => 'restored-user-token' };
+    const originalFetch = globalThis.fetch;
+    const fetch = jest.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        result: {
+          success: true,
+          ownerUid: 'user-b',
+          schoolId: 'pu',
+          source: 'pu-campus',
+          dataType: 'grades',
+          result: {
+            success: true,
+            grades: [{ semester: '1151', courseName: '資料庫', credits: 3, score: 88 }],
+          },
+        },
+      }),
+    } as Response);
+    globalThis.fetch = fetch;
+    try {
+      const rows = await new PUAdapter().listGrades('user-b', '1151');
+      expect(rows).toHaveLength(1);
+      expect(rows[0]).toMatchObject({
+        userId: 'user-b',
+        schoolId: 'tw-pu',
+        gradeSource: 'school-official',
+        courseName: '資料庫',
+      });
+      expect(fetch).toHaveBeenCalledWith(
+        expect.stringContaining('getMyAcademicRecords'),
+        expect.objectContaining({
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: 'Bearer restored-user-token',
+          },
+          body: JSON.stringify({ data: { dataType: 'grades' } }),
+        }),
+      );
+      expect(mockGetAnyCachedGrades).not.toHaveBeenCalled();
+      expect(mockRefreshGrades).not.toHaveBeenCalled();
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
   });
 
   test('keeps fresh backend rows and binds only the authenticated requester', async () => {

@@ -14,6 +14,7 @@ const destinations: Record<CampusQuickDestination, Omit<MobileQuickAction, 'dest
   '/map': { route: 'MapV2', label: '校園地圖', description: '找地點並開啟導航' },
   '/bus': { route: 'BusV2', label: '公車', description: '路線與站牌資訊' },
   '/classroom': { route: 'CoursesHome', label: '課程與作業', description: '前往本人課程，尋找作業及教材' },
+  '/school-courses': { route: 'CoursesHome', label: 'WOW Class 課程', description: '前往學校課堂，依目前校園與帳號查看課程' },
   '/timetable': { route: 'PersonalTimetable', label: '我的課表', description: '查看今天及本週課程' },
   '/library': { route: 'Library', label: '圖書館', description: '館藏與借閱入口' },
   '/grades': { route: 'Grades', label: '成績', description: '查看本人可用的成績資料' },

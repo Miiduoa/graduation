@@ -238,13 +238,78 @@ it('shows failure and retries without falling back to demo or previously loaded 
   await screen.findByText('真實來源科目');
 });
 
-it('shows that academic Cloud Functions are not enabled instead of a retryable failure', async () => {
+it('shows that the school reader is disabled without exposing infrastructure details', async () => {
   vi.mocked(loadAcademicRecords).mockRejectedValueOnce(new AcademicConnectionError('unconfigured'));
   render(<GradesPage />);
-  expect(await screen.findByText('學校資料雲端讀取尚未啟用')).toBeTruthy();
-  expect(screen.getByText(/目前尚未接上雲端函式服務/)).toBeTruthy();
+  expect(await screen.findByText('學校資料讀取尚未啟用')).toBeTruthy();
+  expect(screen.getByText(/目前無法從學校取得這份資料/)).toBeTruthy();
+  expect(screen.queryByText(/雲端函式/)).toBeNull();
   expect(screen.queryByRole('button', { name: '重新讀取' })).toBeNull();
   expect(screen.queryByText(/請稍後再試/)).toBeNull();
+});
+
+it('shows actual read coverage and keeps partial grades visible', async () => {
+  const snapshot = grades();
+  snapshot.records.coverage = { status: 'partial', skippedRows: 2 };
+  vi.mocked(loadAcademicRecords).mockResolvedValue(snapshot);
+  render(<GradesPage />);
+  expect(await screen.findByText('真實來源科目')).toBeTruthy();
+  const result = within(screen.getByRole('region', { name: '學校資料讀取結果' }));
+  expect(result.getByText('2 個學期 · 2 筆成績')).toBeTruthy();
+  expect(result.getByText('部分讀取')).toBeTruthy();
+  expect(result.getByRole('link', { name: 'WOW Class ↗' }).getAttribute('href')).toBe('https://tronclass.pu.edu.tw/');
+  expect(screen.getByText(/有 2 筆來源資料的學期或學分尚無法確認/)).toBeTruthy();
+  expect(loadAcademicRecords).toHaveBeenCalledTimes(1);
+});
+
+it('displays school averages and rankings separately from calculated figures and follows the semester filter', async () => {
+  const snapshot = grades();
+  snapshot.records.summary = {
+    '1142': { semesterAverage: '82.35', classRanking: '5/40', behaviorScore: 0 },
+    '1151': { semesterAverage: '尚未公布' },
+  };
+  vi.mocked(loadAcademicRecords).mockResolvedValue(snapshot);
+  render(<GradesPage />);
+  const source = within(await screen.findByRole('region', { name: '學校提供的學期摘要' }));
+  expect(source.getByText('82.35')).toBeTruthy();
+  expect(source.getByText('5/40')).toBeTruthy();
+  expect(source.getByText('0')).toBeTruthy();
+  fireEvent.change(screen.getByLabelText('學期'), { target: { value: '1151' } });
+  expect(source.queryByText('5/40')).toBeNull();
+  expect(source.getByText('尚未公布')).toBeTruthy();
+  expect(source.getAllByText('未提供')).toHaveLength(3);
+});
+
+it('keeps unknown official graduation credits separate from the derived passed-credit total', async () => {
+  navigation.path = '/credit-planner';
+  const snapshot = grades();
+  snapshot.records.creditSummary = {
+    source: 'derived-from-grade-rows', officialAudit: false, totalRequired: null, totalEarned: 0, totalCourses: 2,
+  };
+  vi.mocked(loadAcademicRecords).mockResolvedValue(snapshot);
+  render(<CreditPlannerPage />);
+  const result = within(await screen.findByRole('region', { name: '學分讀取結果' }));
+  expect(result.getByText('0')).toBeTruthy();
+  expect(result.getByText('尚未取得')).toBeTruthy();
+  expect(result.getByText(/以 60 分或通過判斷/)).toBeTruthy();
+  expect((screen.getByLabelText('已確認可採計學分（自行填寫）') as HTMLInputElement).value).toBe('');
+});
+
+it('does not represent a missing credit summary as zero and can clear grade filters', async () => {
+  navigation.path = '/credit-planner';
+  const view = render(<CreditPlannerPage />);
+  const result = within(await screen.findByRole('region', { name: '學分讀取結果' }));
+  expect(result.getByText('—')).toBeTruthy();
+  expect(result.queryByText('0')).toBeNull();
+  view.unmount();
+  navigation.path = '/grades';
+  render(<GradesPage />);
+  await screen.findByText('真實來源科目');
+  fireEvent.change(screen.getByLabelText('搜尋科目'), { target: { value: '不存在的科目' } });
+  expect(screen.getByText('目前顯示 0 筆成績')).toBeTruthy();
+  fireEvent.click(screen.getByRole('button', { name: '清除篩選' }));
+  expect(screen.getByText('真實來源科目')).toBeTruthy();
+  expect(loadAcademicRecords).toHaveBeenCalledTimes(2);
 });
 
 it('asks to check the network only when the academic fetch fails at the network layer', async () => {

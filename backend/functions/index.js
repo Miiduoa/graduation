@@ -38,6 +38,7 @@ const { createSubmitProductFeedback } = require('./productFeedback');
 const { createEventRegistrationHandlers, prepareRegistrationPolicy } = require('./eventRegistration');
 const { readRealtimeBusCache } = require('./busArrivals');
 const { createPuCampusDataHandler, createGetMyAcademicRecords } = require('./academicRecords');
+const { canonicalizePuStudentId, createPuTronClassRefresher } = require('./puTronClassRefresh');
 const { createCalendarSubscriptionHandler } = require('./calendarSubscription');
 const { createExportUserDataHandler } = require('./userDataExport');
 const { createDeleteUserAccountHandler } = require('./accountDeletion');
@@ -95,6 +96,7 @@ const {
   tcFetchActivities,
   tcFetchAttendance,
   tcFetchProfile,
+  tcFetchIdentityProfile,
   tcFetchTodos,
   tcFetchCourseDetail,
   tcFetchExams,
@@ -1933,6 +1935,11 @@ exports.signInPuStudentId = onRequest(
           ownerUid,
         });
       }
+
+      await db.collection('_puSessions').doc(puSessionId).set(
+        { tronClassSessionId },
+        { merge: true },
+      );
 
       res.set('Cache-Control', 'no-store');
       res.json({
@@ -5784,19 +5791,29 @@ exports.puFetchCampusData = onRequest(
   }),
 );
 
+const refreshPuTronClassSession = createPuTronClassRefresher({
+  db,
+  login: tcLogin,
+  fetchIdentityProfile: tcFetchIdentityProfile,
+  sessionTtlMs: PU_BACKEND_SESSION_TTL_MS,
+});
+
 exports.puRefreshTronClassSession = onRequest(
   {
     region: REGION,
     cors: STRICT_CORS,
   },
   async (req, res) => {
+    res.set('Cache-Control', 'no-store');
     try {
       assertTrustedOrigin(req);
       requirePostJson(req);
-      const authUser = await verifyRequestFirebaseUser(req);
+      const authUser = await verifyRequestFirebaseUser(req, (token) =>
+        getAdminAuth().verifyIdToken(token, true),
+      );
 
-      const studentId = normalizePuStudentId(req.body?.studentId);
-      const password = String(req.body?.password || '');
+      const studentId = canonicalizePuStudentId(req.body?.studentId);
+      const password = typeof req.body?.password === 'string' ? req.body.password : '';
 
       if (!studentId || !password) {
         res.status(400).json({ error: 'Missing required fields: studentId, password' });
@@ -5817,32 +5834,13 @@ exports.puRefreshTronClassSession = onRequest(
         windowMs: 15 * 60 * 1000,
       });
 
-      const loginResult = await tcLogin(studentId, password);
-      if (
-        !loginResult.success ||
-        !loginResult.cookies ||
-        Object.keys(loginResult.cookies).length === 0 ||
-        !loginResult.session
-      ) {
-        res.status(401).json({
-          error: loginResult.error || 'TronClass 登入失敗',
-        });
-        return;
-      }
-
-      const tronClassSessionId = await createOwnedPuTronClassSession({
-        studentId,
-        cookies: loginResult.cookies,
-        session: loginResult.session,
-        ownerUid: authUser.uid,
+      const result = await refreshPuTronClassSession({
+        authUser,
+        studentId: req.body.studentId,
+        password,
       });
 
-      res.set('Cache-Control', 'no-store');
-      res.json({
-        success: true,
-        tronClassSessionId,
-        tronClassUserId: loginResult.session.userId ?? null,
-      });
+      res.json(result);
     } catch (error) {
       console.error('[puRefreshTronClassSession] Error:', error);
       writeHttpError(res, error, 'Failed to refresh TronClass session');

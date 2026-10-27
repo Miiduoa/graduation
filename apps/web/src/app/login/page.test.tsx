@@ -517,6 +517,19 @@ it('retains the full original academic task after school verification', async ()
     expect(replace).toHaveBeenCalledWith('/timetable?school=pu&schoolId=tw-pu#today'),
   );
 });
+it('uses school credentials and returns to WOW Class courses with the selected campus', async () => {
+  state.user = null;
+  state.studentId = true;
+  state.selectedSchoolId = 'pu';
+  const destination = '/school-courses?school=pu&schoolId=pu&campus=pu';
+  state.params = new URLSearchParams({ returnUrl: destination });
+  render(<LoginPage />);
+  expect(screen.queryByTestId('platform-sign-in')).toBeNull();
+  fillSchoolLogin();
+  fireEvent.submit(screen.getByLabelText('學號').closest('form')!);
+  await waitFor(() => expect(replace).toHaveBeenCalledWith(destination));
+  expect(signIn).toHaveBeenCalledWith('A1234567', 'test-only-password', expect.any(AbortSignal), 'pu');
+});
 it('does not accept school credentials while student ID is unavailable', () => {
   state.user = null;
   render(<LoginPage />);

@@ -1,6 +1,4 @@
-import { httpsCallable } from 'firebase/functions';
-import { getAuth, getFunctionsInstance, isFirebaseConfigured } from './firebase';
-import { areFunctionsConfigured } from './functionsUrl';
+import { getAuth, getCloudFunctionUrl, isFirebaseConfigured } from './firebase';
 import {
   normalizeCourseRecords,
   normalizeGradeRecords,
@@ -8,6 +6,7 @@ import {
   type AcademicGradeResponse,
 } from './academicRecords';
 import { isOfficialAcademicSchool } from './academicOfficialSchool';
+import { withSchoolDataDeadline } from './schoolDataRequest';
 
 export type AcademicKind = 'courses' | 'grades';
 export type AcademicData = { courses: AcademicCourseResponse; grades: AcademicGradeResponse };
@@ -27,6 +26,50 @@ export class AcademicConnectionError extends Error {
   }
 }
 
+async function readAcademicResponse(kind: AcademicKind, uid: string): Promise<unknown> {
+  const user = getAuth()?.currentUser;
+  if (!user || user.uid !== uid) throw new AcademicConnectionError('reconnect');
+  return withSchoolDataDeadline(async (signal) => {
+    const token = await user.getIdToken();
+    // 取得 token 期間可能切換帳號；舊讀取不能帶著新登入繼續送出。
+    if (getAuth()?.currentUser !== user) throw new AcademicConnectionError('reconnect');
+    if (signal.aborted) throw new AcademicConnectionError('unavailable');
+    const response = await fetch(getCloudFunctionUrl('getMyAcademicRecords'), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      body: JSON.stringify({ data: { dataType: kind } }),
+      cache: 'no-store',
+      signal,
+    });
+    const payload: unknown = await response.json();
+    if (getAuth()?.currentUser !== user) throw new AcademicConnectionError('reconnect');
+    if (signal.aborted) throw new AcademicConnectionError('unavailable');
+    if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
+      throw new Error('Invalid academic response');
+    }
+    const envelope = payload as Record<string, unknown>;
+    if (!response.ok || envelope.error) {
+      const error = envelope.error;
+      const details = error && typeof error === 'object' ? error as Record<string, unknown> : {};
+      const status = typeof details.status === 'string' ? details.status : '';
+      const message = typeof error === 'string' ? error
+        : typeof details.message === 'string' ? details.message : '';
+      const cause = new Error(message || '校務資料讀取失敗。');
+      if (status === 'UNAUTHENTICATED' || status === 'FAILED_PRECONDITION' || response.status === 401) {
+        throw new AcademicConnectionError('reconnect', cause);
+      }
+      if (status === 'PERMISSION_DENIED' || response.status === 403) {
+        throw new AcademicConnectionError('permission', cause);
+      }
+      if (/尚未啟用|未設定/.test(message)) {
+        throw new AcademicConnectionError('unconfigured', cause);
+      }
+      throw new AcademicConnectionError('unavailable', cause);
+    }
+    return envelope.result ?? envelope.data;
+  });
+}
+
 /**
  * Loads official academic records for the signed-in account.
  * `expectedSchool` is a client gate only — the callable still receives `{ dataType }`.
@@ -43,15 +86,8 @@ export async function loadAcademicRecords<K extends AcademicKind>(
   if (!uid || !isFirebaseConfigured() || getAuth()?.currentUser?.uid !== uid) {
     throw new AcademicConnectionError('unavailable');
   }
-  if (!areFunctionsConfigured()) {
-    throw new AcademicConnectionError('unconfigured');
-  }
   try {
-    const call = httpsCallable<{ dataType: AcademicKind }, unknown>(
-      getFunctionsInstance(),
-      'getMyAcademicRecords',
-    );
-    const { data } = await call({ dataType: kind });
+    const data = await readAcademicResponse(kind, uid);
     if (!data || typeof data !== 'object') throw new Error('Invalid academic response');
     const row = data as Record<string, unknown>;
     if (
@@ -75,6 +111,7 @@ export async function loadAcademicRecords<K extends AcademicKind>(
       records,
     } as AcademicSnapshot<K>;
   } catch (error) {
+    if (error instanceof AcademicConnectionError) throw error;
     const code = (error as { code?: string })?.code;
     if (code === 'functions/failed-precondition' || code === 'functions/unauthenticated') {
       throw new AcademicConnectionError('reconnect', error);
