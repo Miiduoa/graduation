@@ -81,7 +81,7 @@ export async function loadCreditChecklistStatus(storageKey: string): Promise<Rec
     throw new Error('檢核清單格式錯誤');
   }
   const rows = Object.entries(value);
-  if (rows.length > 50 || rows.some(([key, done]) => !/^[\\w-]{1,80}$/.test(key) || typeof done !== 'boolean')) {
+  if (rows.length > 50 || rows.some(([key, done]) => !/^[A-Za-z0-9_-]{1,80}$/.test(key) || typeof done !== 'boolean')) {
     throw new Error('檢核清單內容無法驗證');
   }
   return value as Record<string, boolean>;
