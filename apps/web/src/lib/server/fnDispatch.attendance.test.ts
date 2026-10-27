@@ -258,3 +258,52 @@ it('returns 400 for an oversized joinLiveSession body', async () => {
   expect(res.status).toBe(400);
   expect((await res.json()).error.status).toBe('INVALID_ARGUMENT');
 });
+
+it('HTTP correction requires a real teacher identity and writes a counted, audited receipt', async () => {
+  const teacher = runtime({ uid: 'teacher' });
+  const started = await dispatchFnRequest(
+    'startLiveSession',
+    request('startLiveSession', {
+      body: { data: { groupId: 'class-1', requestId: 'manual-session' } },
+      headers: { Authorization: 'Bearer valid-token' },
+    }),
+    teacher.runtime,
+  );
+  expect(started.status).toBe(200);
+  const session = (await started.json()) as { result: { sessionId: string } };
+  const data = {
+    groupId: 'class-1',
+    sessionId: session.result.sessionId,
+    studentUid: 'student',
+    status: 'late',
+    reason: '授課教師依現場紀錄確認遲到',
+    requestId: 'teacher-confirm-1',
+  };
+  const student = runtime({ uid: 'student', store: teacher.store });
+  const denied = await dispatchFnRequest(
+    'correctAttendanceRecord',
+    request('correctAttendanceRecord', {
+      body: { data },
+      headers: { Authorization: 'Bearer valid-token' },
+    }),
+    student.runtime,
+  );
+  expect(denied.status).toBe(403);
+  expect((await denied.json()).error.status).toBe('PERMISSION_DENIED');
+  const approved = await dispatchFnRequest(
+    'correctAttendanceRecord',
+    request('correctAttendanceRecord', {
+      body: { data },
+      headers: { Authorization: 'Bearer valid-token' },
+    }),
+    teacher.runtime,
+  );
+  expect(approved.status).toBe(200);
+  expect((await approved.json()).result).toMatchObject({ success: true, status: 'late' });
+  const attendance = teacher.store.docs.get(
+    `groups/class-1/attendanceSessions/${session.result.sessionId}`,
+  );
+  expect(attendance?.attendeeCount).toBe(1);
+  expect([...teacher.store.docs.keys()].filter((key) => key.includes('/attendanceCorrections/')))
+    .toHaveLength(1);
+});
