@@ -112,11 +112,13 @@ function Review({ snapshot }: Props) {
   </section>;
   return <section className={styles.root} aria-label="已修學分核對工作區">
     <header className={styles.heading}>
-      <div><p className={styles.kicker}>從既有成績開始</p><h2>不用重抄成績，核對後再帶入。</h2>
-        <p>先選擇通過標準，再核對重修與分類。成績通過不等於正式畢業採計。</p></div>
-      <Link className="btn" href={planHref}>返回個人規劃</Link>
+      <div><p className={styles.kicker}>從既有成績開始</p><h2>核對已修學分</h2>
+        <p>先核對，再更新個人規劃；不更動校方成績。</p></div>
+      <Link className="btn" href={planHref}>返回規劃</Link>
     </header>
-    <p className={styles.note}>來源包含 {records.grades.length} 筆、{records.semesters.length} 個學期。只使用這次成功讀取的校務紀錄；可能不含抵免或其他學期，套用前請核對完整性。</p>
+    <details className={styles.source}><summary>{records.grades.length} 筆成績 · {records.semesters.length} 個學期 · 來源與採計說明</summary>
+      <p className={styles.note}>只使用這次成功讀取的校務紀錄，可能不含抵免或其他學期。通過不等於正式採計；套用前請核對完整性。</p>
+    </details>
     {error || reviewState.error ? <p role="alert" className={styles.error}>{error || reviewState.error}</p> : null}
     {!records.grades.length ? <div className={styles.card}><h3>目前沒有可核對的成績</h3><p>不會以空資料清零已確認學分，原規劃仍保留。</p></div> : preview && totals ? <>
       <div className={styles.card}>
@@ -146,16 +148,18 @@ function Review({ snapshot }: Props) {
         </div>
       </div>
     </> : <>
-      <div className={styles.card}><h3>1 · 選擇核對標準</h3><p>依自己的學制選擇參考及格分數。未評分、未知等第、零學分與矛盾標記不會自動計入。</p>
+      <details className={styles.standard} open={passMark === null}>
+        <summary>{passMark === null ? '1 · 選擇核對標準' : `參考及格門檻 ${passMark} 分 · 點此調整`}</summary>
+        <p className={styles.note}>依自己的學制選擇參考及格分數。未評分、未知等第、零學分與矛盾標記不會自動計入。改選標準會清除目前選取。</p>
         <div className={styles.actions}>{[60, 70].map((mark) => <button key={mark} type="button" aria-pressed={passMark === mark}
           className={`btn ${passMark === mark ? 'primary' : ''}`} onClick={() => { setPassMark(mark); setSelected([]); setLimit(25); }}>{mark} 分</button>)}</div>
-      </div>
+      </details>
       {review ? <>
         <div className={styles.toolbar}><span aria-live="polite">已選 <strong>{selected.length}</strong> 門 · <strong>{totals ? formatCredits(totals.credits) : '0'}</strong> 學分</span>
           <button type="button" className="btn primary" disabled={!totals} onClick={preparePreview}>預覽套用差異</button></div>
         <div className={styles.card}><h3>2 · 核對課程與分類</h3>
           <div className={styles.actions}>
-            <button type="button" className="btn" onClick={() => setSelected((old) => [...old, ...suggestedTranscriptSelection(review).filter((item) => !old.some((entry) => entry.key === item.key))])}>選取無重複疑義的通過紀錄</button>
+            <button type="button" className="btn" onClick={() => setSelected((old) => [...old, ...suggestedTranscriptSelection(review).filter((item) => !old.some((entry) => entry.key === item.key))])} title="僅選取明確通過且沒有同名或同課號疑義的校務紀錄">選取建議課程</button>
             <button type="button" className="btn" disabled={!selected.length} onClick={() => setSelected([])}>取消全部選取</button>
           </div>
           <label className={styles.search}>搜尋課程或學期<input value={query} onChange={(event) => { setQuery(event.target.value); setLimit(25); }} placeholder="輸入課程名稱或學期" /></label>
