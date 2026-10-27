@@ -54,3 +54,23 @@ test('missing or invalid cached data does not become a fabricated timetable', as
   });
   expect(formatOnDeviceSchoolPrompt(result)).toContain('無法回答正式課程安排');
 });
+
+test('keeps the complete saved course set for offline tools, while limiting model context', async () => {
+  const courses = Array.from({ length: 12 }, (_, index) => ({
+    name: `測試課程${index + 1}`,
+    day: index === 11 ? 5 : 1,
+    start: (index % 13) + 1,
+    end: (index % 13) + 1,
+  }));
+  jest.mocked(loadOfflinePersonalTimetable).mockResolvedValue({
+    ...timetable, courses,
+  } as never);
+  const result = await collectOnDeviceSchoolContext({ uid: 'alice', schoolId: 'pu' });
+  expect(result.timetable.courses).toHaveLength(12);
+  expect(result.timetable.courses[11].name).toBe('測試課程12');
+  const prompt = formatOnDeviceSchoolPrompt(result);
+  expect(prompt).toContain('測試課程8');
+  expect(prompt).not.toContain('測試課程12');
+  expect(prompt).toContain('尚有 4 門未列出');
+  expect(prompt).toContain('不可據此判定某天沒課');
+});

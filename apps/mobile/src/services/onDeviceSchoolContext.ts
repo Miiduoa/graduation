@@ -34,7 +34,7 @@ export async function collectOnDeviceSchoolContext(
       timetable: {
         source: 'saved-device-copy',
         updatedAt: typeof timetable.updatedAt === 'string' ? timetable.updatedAt : null,
-        courses: timetable.courses.slice(0, 8).map((course) => ({
+        courses: timetable.courses.slice(0, 80).map((course) => ({
           name: String(course.name).slice(0, 48),
           day: course.day,
           start: course.start,
@@ -59,8 +59,18 @@ export function formatOnDeviceSchoolPrompt(snapshot: OnDeviceSchoolContext): str
     hour: '2-digit',
     minute: '2-digit',
   }).format(new Date(snapshot.checkedAt));
+  // The rule-based timetable tool uses every saved course. Keep only a short
+  // excerpt in the LLM prompt so a small local model cannot overflow context.
+  const sampleCourses = snapshot.timetable.courses.slice(0, 8);
+  const omitted = snapshot.timetable.courses.length - sampleCourses.length;
   const note = snapshot.timetable.source === 'saved-device-copy'
-    ? `裝置上有一份個人儲存課表；保存時間：${snapshot.timetable.updatedAt || '不詳'}。課程時段 start/end 是節次索引，不能冒充鐘點或官方當天課程：${JSON.stringify(snapshot.timetable.courses)}`
+    ? [
+        `裝置上有一份個人儲存課表；保存時間：${snapshot.timetable.updatedAt || '不詳'}。`,
+        `課程時段 start/end 是節次索引，不能冒充鐘點或官方當天課程：${JSON.stringify(sampleCourses)}`,
+        omitted > 0
+          ? `僅向模型提供前 8 門課，尚有 ${omitted} 門未列出；不可據此判定某天沒課，完整查詢請使用本機課表工具。`
+          : '',
+      ].filter(Boolean).join(' ')
     : '目前沒有可確認的本機個人課表，因此無法回答正式課程安排。';
   return [
     '你是 Campus One 在使用者手機上運算的個人助理。',
