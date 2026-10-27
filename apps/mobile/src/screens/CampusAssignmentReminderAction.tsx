@@ -1,4 +1,4 @@
-import React, { useRef, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { Text, View } from 'react-native';
 import { AIButton, aiTokens } from '../ui/aiFirst';
 import { validCampusSenseSnapshot, type CampusSenseSnapshot } from '../services/campusSenseSnapshot';
@@ -56,6 +56,9 @@ export function CampusAssignmentReminderAction({
   const [lead, setLead] = useState<CampusReminderLead>(60);
   const [saving, setSaving] = useState(false);
   const [confirmedLead, setConfirmedLead] = useState<CampusReminderLead | null>(null);
+  const [statusLoading, setStatusLoading] = useState(false);
+  const [statusError, setStatusError] = useState('');
+  const [statusRefresh, setStatusRefresh] = useState(0);
   const [message, setMessage] = useState('');
   const lock = useRef(false);
   const scope = { uid: userId, schoolId };
@@ -68,8 +71,36 @@ export function CampusAssignmentReminderAction({
   const oneDayAvailable = Number.isFinite(deadline) && deadline > Date.now() + (1441 * 60_000);
   const leadChoice = lead === 1440 && !oneDayAvailable ? 60 : lead;
 
+  // The OS owns reminder delivery, not React component state. Reconcile when
+  // the card remounts, preventing a second reminder after navigating away.
+  useEffect(() => {
+    let active = true;
+    if (!userId || !schoolId || !step.dueAt ||
+        step.evidence !== 'authorized-assignments' || !verified) {
+      setConfirmedLead(null);
+      setStatusError('');
+      return () => { active = false; };
+    }
+    setStatusLoading(true);
+    setStatusError('');
+    const { getCampusAssignmentReminderStatus } =
+      require('../services/campusAssignmentReminders') as typeof import('../services/campusAssignmentReminders');
+    void getCampusAssignmentReminderStatus({ scope, step, isCurrent })
+      .then((leads) => {
+        if (active && isCurrent()) setConfirmedLead(leads[0] ?? null);
+      })
+      .catch(() => {
+        if (active && isCurrent()) setStatusError('無法確認裝置提醒狀態，暫不新增以免重複。');
+      })
+      .finally(() => {
+        if (active && isCurrent()) setStatusLoading(false);
+      });
+    return () => { active = false; };
+  }, [userId, schoolId, step.title, step.groupName, step.dueAt, verified?.checkedAt, statusRefresh]);
+
   const schedule = async () => {
-    if (lock.current || disabled || !canUse || !verified || !step.dueAt || !isCurrent()) return;
+    if (lock.current || statusLoading || statusError || disabled || !canUse ||
+        !verified || !step.dueAt || !isCurrent()) return;
     lock.current = true;
     setSaving(true);
     setMessage('');
@@ -107,7 +138,7 @@ export function CampusAssignmentReminderAction({
       });
       if (!isCurrent()) return;
       setConfirmedLead(null);
-      setMessage('已向手機系統取消這次本機提醒。');
+      setMessage('已確認手機系統不再保留這筆提醒。');
       setExpanded(false);
     } catch (error) {
       if (isCurrent()) setMessage(reminderErrorMessage(error));
@@ -125,7 +156,22 @@ export function CampusAssignmentReminderAction({
     <View style={{
       borderTopWidth: 1, borderColor: aiTokens.border, paddingTop: 11, gap: 9,
     }}>
-      {confirmedLead !== null ? (
+      {statusLoading && confirmedLead === null ? (
+        <Text style={{ color: aiTokens.muted, fontSize: 12 }}>正在核對手機已設定的提醒…</Text>
+      ) : statusError ? (
+        <View style={{ gap: 8 }}>
+          <Text accessibilityRole="alert" style={{ color: aiTokens.warning, fontSize: 12 }}>
+            {statusError}
+          </Text>
+          <AIButton
+            label="重新確認本機提醒狀態"
+            variant="ghost"
+            size="sm"
+            disabled={disabled || saving}
+            onPress={() => setStatusRefresh((value) => value + 1)}
+          />
+        </View>
+      ) : confirmedLead !== null ? (
         <>
           <Text style={{ color: aiTokens.text, fontSize: 12, fontWeight: '700' }}>
             已設定截止前 {confirmedLead === 60 ? '1 小時' : '1 天'}提醒
