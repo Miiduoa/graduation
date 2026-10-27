@@ -59,6 +59,7 @@ test('student can set goals and add a hypothetical future course without alterin
   await waitFor(() => expect(writeMobileCreditPlan).toHaveBeenCalledWith(
     'plan:student-a:pu', expect.objectContaining({ recognized: '60', target: '128' }),
   ));
+  await view.findByText('個人目標已保存在這台裝置。');
   fireEvent.changeText(view.getByLabelText('課程名稱'), '資料庫管理');
   fireEvent.press(view.getByText('加入修課規劃'));
   await waitFor(() => {
