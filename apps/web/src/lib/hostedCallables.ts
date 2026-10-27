@@ -7,6 +7,7 @@ export const HOSTED_WEB_CALLABLES = [
   'startLiveSession',
   'endLiveSession',
   'joinLiveSession',
+  'correctAttendanceRecord',
   'submitLeaveRequest',
   'withdrawLeaveRequest',
   'reviewLeaveRequest',
