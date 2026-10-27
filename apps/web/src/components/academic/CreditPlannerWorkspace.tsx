@@ -229,6 +229,7 @@ export function CreditPlannerWorkspace({
           已確認可採計學分（自行填寫）
           <input
             value={plan.recognized}
+            aria-label="已確認可採計學分（自行填寫）"
             onChange={(event) => updateField('recognized', event.target.value)}
             inputMode="decimal"
             type="number"
@@ -244,6 +245,7 @@ export function CreditPlannerWorkspace({
           希望累計的學分
           <input
             value={plan.target}
+            aria-label="希望累計的學分"
             onChange={(event) => updateField('target', event.target.value)}
             inputMode="decimal"
             type="number"
@@ -259,6 +261,7 @@ export function CreditPlannerWorkspace({
           預計再修學分
           <input
             value={plan.extra}
+            aria-label="預計再修學分"
             onChange={(event) => updateField('extra', event.target.value)}
             inputMode="decimal"
             type="number"
