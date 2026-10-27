@@ -146,7 +146,7 @@ async function scheduledInventory() {
   }
 }
 
-function busyKey(input: CampusReminderRequest): string {
+function busyKey(input: Pick<CampusReminderRequest, 'scope' | 'step' | 'leadMinutes'>): string {
   return JSON.stringify([
     input.scope.uid, input.scope.schoolId, input.step.title,
     input.step.groupName || '', input.step.dueAt, input.leadMinutes,
@@ -259,7 +259,7 @@ export async function cancelCampusAssignmentReminder(input: {
   if (input.step.evidence !== 'authorized-assignments' || !input.step.dueAt) {
     throw new CampusReminderError('invalid-source');
   }
-  const lock = busyKey({ ...input, snapshot: null as never });
+  const lock = busyKey(input);
   if (pending.has(lock)) throw new CampusReminderError('busy');
   pending.add(lock);
   try {
