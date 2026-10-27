@@ -2,6 +2,8 @@ import { expect, it } from 'vitest';
 import {
   SCHOOL_LOGIN_GENERIC_ERROR,
   SchoolLoginHttpError,
+  TEACHER_LMS_UNAVAILABLE_CODE,
+  TEACHER_LMS_UNAVAILABLE_COPY,
   schoolLoginErrorCopy,
   schoolLoginFailureCopy,
 } from './schoolLoginErrorCopy';
@@ -15,6 +17,7 @@ it.each([
   [503, '尚未開放', '這間學校尚未開放學號登入'],
   [503, ' 尚未開放 ', '這間學校尚未開放學號登入'],
   [503, '學校系統暫時無法連線', '學校系統暫時連不上，請稍後再試'],
+  [503, '老師登入暫未開放；學生請輸入純數字學號', '老師登入暫未開放；學生請輸入純數字學號'],
 ] as const)('maps HTTP %s with a known payload to a fixed notice', (status, serverError, copy) => {
   expect(schoolLoginErrorCopy(status, serverError)).toBe(copy);
   expect(new SchoolLoginHttpError(status, serverError).message).toBe(copy);
@@ -46,4 +49,10 @@ it('uses the generic notice for non-HTTP failures, including teacher and student
   expect(
     schoolLoginFailureCopy(new SchoolLoginHttpError(503, '暫時無法驗證老師身分')),
   ).toBe(SCHOOL_LOGIN_GENERIC_ERROR);
+  expect(
+    schoolLoginFailureCopy(new SchoolLoginHttpError(503, 'ignored', TEACHER_LMS_UNAVAILABLE_CODE)),
+  ).toBe(TEACHER_LMS_UNAVAILABLE_COPY);
+  expect(schoolLoginErrorCopy(503, 'ignored', TEACHER_LMS_UNAVAILABLE_CODE)).toBe(
+    TEACHER_LMS_UNAVAILABLE_COPY,
+  );
 });
