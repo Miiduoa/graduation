@@ -30,6 +30,7 @@ import {
   creditPlanDirtySections, creditCourseHasChanges,
   emptyCreditCourseForm as emptyForm, type CreditCourseForm as CourseForm,
 } from '../features/academics/creditPlanDrafts';
+import { prepareCreditPlanBatchSave } from '../features/academics/creditPlanBatchSave';
 import {
   CreditPlanNavigationGuard, useCreditPlanDraftProtection,
 } from './creditAudit/useCreditPlanDraftProtection';
@@ -135,6 +136,8 @@ function Workspace({ scopeKey, schoolName, guest, navigation }: {
   const busy = saving || transferring;
   const inputs = useMemo(() => ({ goals, categoryGoals, form, editId, milestoneLabel }),
     [goals, categoryGoals, form, editId, milestoneLabel]);
+  const latestInputs = useRef(inputs);
+  latestInputs.current = inputs;
   const dirtySections = creditPlanDirtySections(plan, inputs);
   const courseDirty = plan ? creditCourseHasChanges(plan, inputs) : false;
   const confirmAction = useCreditPlanDraftProtection({ inputs, ticket, session, busy });
@@ -194,6 +197,32 @@ function Workspace({ scopeKey, schoolName, guest, navigation }: {
     if (transfer.current !== id) return;
     transfer.current = null;
     if (session.isLive(expected)) setTransferring(false);
+  }
+  function commitAll() {
+    if (!plan || busy || !dirtySections.length) return;
+    const snapshot = inputs;
+    const result = prepareCreditPlanBatchSave(plan, snapshot,
+      (kind) => `${kind}-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+    if (!result.ok) {
+      Alert.alert('請先修正再儲存', result.issues.join('\n'));
+      return;
+    }
+    void save(result.plan, '所有變更已保存在這台裝置。', ticket).then((saved) => {
+      if (!saved || !session.isCurrent(saved.ticket)) return;
+      const latest = latestInputs.current;
+      // 晚到的原生輸入事件仍保留成草稿，不因儲存成功而被清空。
+      if (result.courseId !== null && latest.editId === snapshot.editId) {
+        const unchanged = (['name', 'credits', 'term', 'category', 'status'] as const)
+          .every((key) => latest.form[key] === snapshot.form[key]);
+        if (unchanged) {
+          setForm(emptyForm(latest.form.term));
+          setEditId(null);
+        } else {
+          setEditId(result.courseId);
+        }
+      }
+      if (result.milestoneAdded && latest.milestoneLabel === snapshot.milestoneLabel) setMilestoneLabel('');
+    });
   }
   function commitGoals() {
     if (!plan || busy) return;
@@ -382,17 +411,18 @@ function Workspace({ scopeKey, schoolName, guest, navigation }: {
 
   return <Screen title="未來學分規劃" subtitle={`${schoolName} · 個人修課草稿`} headerRight={back}>
     {navigationGuard}
-    <ScrollView ref={scroll} keyboardShouldPersistTaps="handled"
+    {dirtySections.length > 0 ? <View testID="credit-plan-save-bar" style={{ margin: 16, marginBottom: 0,
+      padding: 14, gap: 6, borderRadius: 12, borderWidth: 1, borderColor: t.border, backgroundColor: t.surface2 }}>
+      <Text accessibilityLiveRegion="polite" style={{ color: t.text, fontWeight: '700' }}>
+        {`尚未儲存：${dirtySections.join('、')}`}
+      </Text>
+      <Text style={{ color: t.muted, fontSize: 12, lineHeight: 19 }}>
+        可一次儲存所有變更，或分區儲存；試算與備份仍以已儲存內容為準。
+      </Text>
+      <Action title="儲存所有變更" primary disabled={busy} onPress={commitAll} />
+    </View> : null}
+    <ScrollView ref={scroll} style={{ flex: 1 }} keyboardShouldPersistTaps="handled"
       contentContainerStyle={{ padding: 16, paddingBottom: TAB_BAR_CONTENT_BOTTOM_PADDING + 28, gap: 17 }}>
-      {dirtySections.length > 0 ? <View style={{ padding: 14, gap: 6, borderRadius: 12,
-        borderWidth: 1, borderColor: t.border, backgroundColor: t.surface2 }}>
-        <Text accessibilityLiveRegion="polite" style={{ color: t.text, fontWeight: '700' }}>
-          {`尚未儲存：${dirtySections.join('、')}`}
-        </Text>
-        <Text style={{ color: t.muted, fontSize: 12, lineHeight: 19 }}>
-          請分別儲存各區塊；試算與備份目前只包含已儲存的內容。
-        </Text>
-      </View> : null}
       <View style={{ padding: 22, borderRadius: 22, backgroundColor: t.accentSoft, borderWidth: 1, borderColor: t.border, gap: 12 }}>
         <Text style={{ color: t.text, fontSize: 25, lineHeight: 34, fontWeight: '700' }}>把未來的學分，排成可執行的計畫。</Text>
         <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 12 }}>
