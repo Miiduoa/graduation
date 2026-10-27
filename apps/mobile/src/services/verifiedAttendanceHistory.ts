@@ -73,7 +73,8 @@ export function verifiedReceiptStatus(
     data.groupId !== identity.groupId ||
     data.sessionId !== identity.sessionId ||
     typeof status !== 'string' ||
-    !RECEIPT_STATUSES.has(status as AttendanceReceiptStatus)
+    !RECEIPT_STATUSES.has(status as AttendanceReceiptStatus) ||
+    (['present', 'late'].includes(status) && !asDate(data.checkedInAt))
   ) {
     return 'unavailable';
   }
@@ -134,14 +135,18 @@ export async function loadVerifiedAttendanceHistory(
                 ),
               );
               const row = receipt.exists() ? receipt.data() : null;
+              const status = verifiedReceiptStatus(row, {
+                uid,
+                groupId: membership.groupId,
+                sessionId: session.id,
+              });
               return {
                 ...base,
-                status: verifiedReceiptStatus(row, {
-                  uid,
-                  groupId: membership.groupId,
-                  sessionId: session.id,
-                }),
-                checkedInAt: row && row.uid === uid ? asDate(row.checkedInAt) : null,
+                status,
+                checkedInAt:
+                  (status === 'present' || status === 'late') && row
+                    ? asDate(row.checkedInAt)
+                    : null,
               } satisfies AttendanceHistoryEntry;
             } catch {
               return { ...base, status: 'unavailable', checkedInAt: null } satisfies AttendanceHistoryEntry;
