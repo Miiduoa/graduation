@@ -107,6 +107,7 @@ function AssistantConversation({
   const [linkError, setLinkError] = useState('');
   const mounted = useRef(true);
   const lock = useRef(false);
+  const inFlight = useRef<AbortController | null>(null);
   const publicServices = resolveSchoolPublicServices(schoolId);
   const quickActions = getMobileQuickActions(draft);
   const currentSense = validCampusSenseSnapshot(sense, { uid, schoolId });
@@ -114,6 +115,8 @@ function AssistantConversation({
     mounted.current = true;
     return () => {
       mounted.current = false;
+      inFlight.current?.abort();
+      inFlight.current = null;
     };
   }, []);
   const current = () => mounted.current && isScopeCurrent();
@@ -161,12 +164,14 @@ function AssistantConversation({
     setSyncBusy(true);
     setError('');
     setSenseError('');
+    const controller = new AbortController();
+    inFlight.current = controller;
     try {
       const snapshot = await refreshCampusSenseSnapshot({
         scope: { uid, schoolId },
         isCurrent: current,
       });
-      if (!current()) return;
+      if (!current() || controller.signal.aborted) return;
       setSense(snapshot);
       setSyncBusy(false);
       const question = '今天要先處理什麼？';
@@ -181,6 +186,7 @@ function AssistantConversation({
         messages: next,
         mode: 'device',
         isCurrent: current,
+        signal: controller.signal,
       });
       if (current()) {
         setMessages([
@@ -198,9 +204,14 @@ function AssistantConversation({
       }
     } catch {
       if (current()) {
-        setSenseError('無法取得或整理本次校園摘要。請核對網路、帳號與校園資料來源。');
+        if (controller.signal.aborted) {
+          setError('已停止這次本地整理；資料不會自動傳送到雲端 AI。');
+        } else {
+          setSenseError('無法取得或整理本次校園摘要。請核對網路、帳號與校園資料來源。');
+        }
       }
     } finally {
+      if (inFlight.current === controller) inFlight.current = null;
       lock.current = false;
       syncLock.current = false;
       if (current()) {
@@ -216,6 +227,8 @@ function AssistantConversation({
     lock.current = true;
     setBusy(true);
     setError('');
+    const controller = new AbortController();
+    inFlight.current = controller;
     const next: CampusAssistantMessage[] = [...messages, { role: 'user', content: question }];
     try {
       const reply = await askCampusAssistant({
@@ -225,6 +238,7 @@ function AssistantConversation({
         messages: next,
         isCurrent: current,
         mode,
+        ...(mode === 'device' ? { signal: controller.signal } : {}),
       });
       if (current()) {
         setMessages([
@@ -250,6 +264,8 @@ function AssistantConversation({
             setError('目前 App 沒有本地推論引擎。請使用包含 llama.rn 的 iOS／Android 原生版本，Expo Go 不支援。');
           } else if (failure.code === 'model-busy') {
             setError('手機 AI 正在執行其他任務或安裝模型；這次問題已保留，請稍後再送出。');
+          } else if (failure.code === 'cancelled') {
+            setError('已停止本機回答，問題仍保留在輸入欄，可修改後重試。');
           } else if (failure.code === 'session-changed') {
             setError('帳號或學校已變更，這次回覆已捨棄。');
           } else {
@@ -262,12 +278,16 @@ function AssistantConversation({
         }
       }
     } finally {
+      if (inFlight.current === controller) inFlight.current = null;
       lock.current = false;
       if (current()) setBusy(false);
     }
   };
   return (
-    <AIDetailScreen title="校園助理" onBack={() => navigation?.goBack?.()}>
+    <AIDetailScreen title="校園助理" onBack={() => {
+      inFlight.current?.abort();
+      navigation?.goBack?.();
+    }}>
       <AICard
         title="工作模式"
         badge={mode === 'device' ? '手機內推論' : '校園連線'}
@@ -511,6 +531,13 @@ function AssistantConversation({
               disabled={busy || !draft.trim()}
               onPress={() => void send()}
             />
+            {busy && mode === 'device' ? (
+              <AIButton
+                label="停止本機回答"
+                variant="ghost"
+                onPress={() => inFlight.current?.abort()}
+              />
+            ) : null}
           </View>
         </AICard>
       ) : null}
