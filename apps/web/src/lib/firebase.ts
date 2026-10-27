@@ -283,6 +283,9 @@ export async function signInWithPuStudentId(
   schoolId?: string,
 ): Promise<User | null> {
   const attempt = ++schoolLoginAttempt;
+  if (schoolId && schoolId !== 'pu') {
+    throw new SchoolLoginHttpError(503, '尚未開放');
+  }
   const mainAuth = getAuth();
   if (!mainAuth) return null;
   if (isEmulatorTestEnv()) {
