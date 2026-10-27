@@ -6,7 +6,9 @@ on:
   pull_request:
     paths:
       - 'backend/ai-server/requirements.txt'
+      - 'backend/ai-server/run.sh'
       - 'backend/ai-server/training/**'
+      - 'backend/ai-server/tests/test_local_bootstrap.py'
       - 'backend/ai-server/tests/mlx_lora_compat_smoke.py'
       - 'backend/ai-server/tests/mlx_tiny_training_smoke.py'
       - '.github/workflows/mlx-arm64-compat.yml'
@@ -14,7 +16,9 @@ on:
     branches: [main]
     paths:
       - 'backend/ai-server/requirements.txt'
+      - 'backend/ai-server/run.sh'
       - 'backend/ai-server/training/**'
+      - 'backend/ai-server/tests/test_local_bootstrap.py'
       - 'backend/ai-server/tests/mlx_lora_compat_smoke.py'
       - 'backend/ai-server/tests/mlx_tiny_training_smoke.py'
       - '.github/workflows/mlx-arm64-compat.yml'
@@ -36,6 +40,8 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
+      - name: Verify local bootstrap guards without installing packages
+        run: python -m unittest discover -s tests -p test_local_bootstrap.py -v
       - name: Install native MLX and NumPy candidate versions
         run: |
           python -m pip install --upgrade pip
