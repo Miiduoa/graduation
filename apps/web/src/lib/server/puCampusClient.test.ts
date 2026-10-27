@@ -58,6 +58,9 @@ it('classifies a closed portal as 尚未開放', async () => {
 it('does not treat the live alcat login page as maintenance', async () => {
   expect(ALCAT_LOGIN_HTML).toContain('<!-- 系統維護公告 -->');
   expect(ALCAT_LOGIN_HTML).toContain('name="uid"');
+  expect(ALCAT_LOGIN_HTML).toContain('placeholder="帳號"');
+  expect(ALCAT_LOGIN_HTML).not.toMatch(/name="uid"[^>]*maxlength=/i);
+  expect(ALCAT_LOGIN_HTML).not.toMatch(/name="uid"[^>]*pattern=/i);
   expect(ALCAT_LOGIN_HTML).toContain('name="upassword"');
   expect(ALCAT_LOGIN_HTML).not.toMatch(/upassword=[^"'\s>]+/);
   expect(campusPageHasLoginForm(ALCAT_LOGIN_HTML)).toBe(true);

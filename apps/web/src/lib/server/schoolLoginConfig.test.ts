@@ -32,7 +32,10 @@ it('keeps Providence as the only open school with the current adapters', () => {
   expect(schoolLoginAccountScope('pu')).toBe('school-login-pu-account');
   expect(schoolLoginIpScope('pu')).toBe('school-login-pu-ip');
   expect(matchSchoolLoginAccount(pu!, '1110700321')).toBe('student');
+  expect(matchSchoolLoginAccount(pu!, '7654321')).toBe('student');
+  expect(matchSchoolLoginAccount(pu!, '87654321')).toBe('student');
   expect(matchSchoolLoginAccount(pu!, 'changyi')).toBe('teacher');
+  expect(matchSchoolLoginAccount(pu!, 'T0000001')).toBe('teacher');
 });
 
 it('treats omitted schoolId as Providence and unknown ids as unavailable', () => {
