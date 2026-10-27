@@ -5,7 +5,9 @@
  */
 export function abortableCampusRead<T>(read: () => Promise<T>, signal?: AbortSignal): Promise<T> {
   if (signal?.aborted) return Promise.reject(new Error('sense-cancelled'));
-  if (!signal) return Promise.resolve().then(read);
+  if (!signal) {
+    try { return read(); } catch (error) { return Promise.reject(error); }
+  }
   return new Promise<T>((resolve, reject) => {
     let settled = false;
     const finish = (success: boolean, value: unknown) => {
@@ -19,9 +21,10 @@ export function abortableCampusRead<T>(read: () => Promise<T>, signal?: AbortSig
     signal.addEventListener('abort', cancel, { once: true });
     // Guard a signal that changed between the initial check and listener setup.
     if (signal.aborted) { cancel(); return; }
-    Promise.resolve().then(() => {
-      if (signal.aborted) throw new Error('sense-cancelled');
-      return read();
-    }).then((value) => finish(true, value), (error: unknown) => finish(false, error));
+    try {
+      read().then((value) => finish(true, value), (error: unknown) => finish(false, error));
+    } catch (error) {
+      finish(false, error);
+    }
   });
 }
