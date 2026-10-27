@@ -76,6 +76,31 @@ describe('personal credit workspace', () => {
     });
   });
 
+  it('tracks manual category gaps and separate non-credit conditions', async () => {
+    renderWorkspace();
+    await screen.findByLabelText('課程名稱');
+    fireEvent.change(screen.getByLabelText('已確認可採計學分（自行填寫）'), {
+      target: { value: '60' },
+    });
+    fireEvent.change(screen.getByLabelText('課程名稱'), { target: { value: '資料庫系統' } });
+    fireEvent.change(screen.getByLabelText('類別（自行分類）'), { target: { value: 'required' } });
+    fireEvent.click(screen.getByRole('button', { name: '加入規劃' }));
+    fireEvent.click(screen.getByText('進階檢查：分類門檻與非學分條件'));
+    fireEvent.change(screen.getByLabelText('必修已確認採計學分'), { target: { value: '20' } });
+    fireEvent.change(screen.getByLabelText('必修目標門檻'), { target: { value: '30' } });
+    expect(screen.getByText(/此類還差 7 學分/)).toBeTruthy();
+    fireEvent.change(screen.getByLabelText('新增條件'), {
+      target: { value: '英文能力門檻' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: '加入條件' }));
+    expect(screen.getByText('自行勾選 0 / 1 項')).toBeTruthy();
+    fireEvent.click(screen.getByRole('checkbox', { name: '英文能力門檻' }));
+    expect(screen.getByText('自行勾選 1 / 1 項')).toBeTruthy();
+    const raw = window.localStorage.getItem(creditPlanStorageKey('u1', 'pu'));
+    expect(raw).toContain('英文能力門檻');
+    expect(raw).toContain('"done":true');
+  });
+
   it('keeps working with corrupt browser storage without trusting it as a transcript', async () => {
     window.localStorage.setItem(creditPlanStorageKey('u1', 'pu'), '{bad');
     renderWorkspace();
