@@ -17,6 +17,8 @@ RUN pnpm install --frozen-lockfile --filter web... --ignore-scripts
 COPY tsconfig.json ./
 COPY apps/web/ ./apps/web/
 COPY packages/shared/ ./packages/shared/
+COPY backend/functions/puScraper.js backend/functions/tronClassScraper.js ./backend/functions/
+COPY backend/functions/lib/puGradeDocument.js backend/functions/lib/puCreditSummary.js backend/functions/lib/puCourseTime.js backend/functions/lib/taipeiDay.js ./backend/functions/lib/
 
 # These are public browser settings. Never pass server credentials as build args.
 ARG NEXT_PUBLIC_FIREBASE_API_KEY
