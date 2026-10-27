@@ -6,7 +6,6 @@ import {
 import type { CampusSenseSnapshot } from '../../services/campusSenseSnapshot';
 import type { CampusPlanStep } from '../../services/offlineCampusPlanner';
 import * as Notifications from 'expo-notifications';
-import AsyncStorage from '@react-native-async-storage/async-storage';
 
 let mockUid: string | null = 'A';
 let mockConfig = false;
@@ -48,9 +47,9 @@ jest.mock('expo-notifications', () => ({
   SchedulableTriggerInputTypes: { DATE: 'date' },
   AndroidImportance: { DEFAULT: 3 },
   getPermissionsAsync: jest.fn(async () => mockPermission),
-  requestPermissionsAsync: (...args: unknown[]) => mockRequestPermission(...args),
+  requestPermissionsAsync: () => mockRequestPermission(),
   setNotificationChannelAsync: jest.fn(async () => undefined),
-  getAllScheduledNotificationsAsync: (...args: unknown[]) => mockGetAll(...args),
+  getAllScheduledNotificationsAsync: () => mockGetAll(),
   scheduleNotificationAsync: (...args: unknown[]) =>
     mockSchedule(...(args as [{ identifier: string; content: unknown }])),
   cancelScheduledNotificationAsync: (...args: unknown[]) => mockCancel(...(args as [string])),
@@ -127,7 +126,7 @@ test('schedules a real one-time OS reminder after explicit confirmation, without
   expect(JSON.stringify(event)).not.toContain(input.scope.uid);
   expect(JSON.stringify(event)).not.toContain('資料庫系統');
   expect(result.triggerAt).toBe(new Date(Date.parse(input.step.dueAt!) - 60 * 60 * 1000).toISOString());
-  expect(Notifications.requestPermissionsAsync).not.toHaveBeenCalled();
+  expect(mockRequestPermission).not.toHaveBeenCalled();
   expect(mockReceipts.size).toBe(1);
 });
 
