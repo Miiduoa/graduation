@@ -80,7 +80,8 @@ export function AttendanceCorrectionPanel({
       if (!mounted.current || revision.current !== current) return;
       setStudents(roster);
       setAudits(history);
-      if (roster.length > 0) setSelectedUid(roster[0].uid);
+      // An instructor must deliberately choose the person being corrected.
+      setSelectedUid('');
     } catch (problem) {
       if (mounted.current && revision.current === current) {
         setStudents([]);
@@ -158,8 +159,10 @@ export function AttendanceCorrectionPanel({
                 id={`correction-user-${sessionId}`}
                 value={selectedUid}
                 disabled={busy}
+                required
                 onChange={(event) => { setSelectedUid(event.target.value); invalidatePendingRetry(); }}
               >
+                <option value="" disabled>請選擇要更正的學生</option>
                 {students.map((student) => (
                   <option key={student.uid} value={student.uid}>
                     {student.displayName}{student.studentId ? `（${student.studentId}）` : ''}
