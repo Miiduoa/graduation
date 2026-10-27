@@ -54,6 +54,7 @@ attendance corrections. The operation is not automatic attendance inference:
 - Attendee counters change only when transitioning into or out of `present/late`,
   and synchronize between the canonical attendance session and live session.
   Repeated requests with the same ID are idempotent; mismatched replays are rejected.
+- An attendance session must be closed before absent/excused can be finalized. While QR sign-in is active, instructors may only confirm attendance or lateness.
 - The teacher web dashboard allows instructors to select a verified member,
   record a reason, inspect the recent audit trail and immediately refresh the
   saved roster. Students see corrected `absent` and `excused` as explicit
@@ -65,7 +66,7 @@ official transcript. The audit log is authoritative **only within Campus One**.
 Verification before deployment:
 
 ```sh
-node --test backend/functions/attendanceSessions.test.js
+pnpm --filter functions exec jest attendanceSessions.test.js --runInBand
 pnpm --filter web exec vitest run src/lib/server/attendanceSessionHandlers.test.ts src/lib/server/fnDispatch.attendance.test.ts src/components/AttendanceCorrectionPanel.test.tsx src/lib/courseAttendance.test.ts
 pnpm --filter web typecheck
 pnpm test:rules
