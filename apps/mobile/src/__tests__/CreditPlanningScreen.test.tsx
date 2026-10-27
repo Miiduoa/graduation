@@ -1,6 +1,5 @@
 import React from 'react';
 import { fireEvent, render, waitFor } from '@testing-library/react-native';
-import { Text, View } from 'react-native';
 import CreditPlanningScreen from '../screens/CreditPlanningScreen';
 import { emptyCreditPlan, type CreditPlan } from '@campus/shared/src/creditPlanner';
 import {
@@ -14,16 +13,21 @@ let mockSchool = { id: 'pu', name: '靜宜大學' };
 jest.mock('../state/auth', () => ({ useAuth: () => ({ user: mockUid ? { uid: mockUid } : null }) }));
 jest.mock('../state/school', () => ({ useSchool: () => ({ school: mockSchool }) }));
 jest.mock('../state/theme', () => ({ useThemeMode: () => 'light' }));
-jest.mock('../ui/components', () => ({
-  Screen: ({ title, subtitle, children }: { title: string; subtitle?: string; children: React.ReactNode }) => (
-    <View>
-      <Text>{title}</Text>
-      <Text>{subtitle}</Text>
-      {children}
-    </View>
-  ),
-  Spinner: () => null,
-}));
+jest.mock('../ui/components', () => {
+  const React = require('react');
+  const { Text, View } = require('react-native');
+  return {
+    Screen: ({ title, subtitle, children }: { title: string; subtitle?: string; children: React.ReactNode }) =>
+      React.createElement(
+        View,
+        null,
+        React.createElement(Text, null, title),
+        React.createElement(Text, null, subtitle),
+        children,
+      ),
+    Spinner: () => null,
+  };
+});
 jest.mock('../ui/navigationTheme', () => ({ TAB_BAR_CONTENT_BOTTOM_PADDING: 80 }));
 jest.mock('@expo/vector-icons', () => ({ Ionicons: () => null }));
 jest.mock('expo-document-picker', () => ({ getDocumentAsync: jest.fn() }));
