@@ -45,7 +45,7 @@ tags:
 - scrollUntilVisible:
     element:
       id: school-import-start
-    direction: DOWN
+    direction: UP
 - assertVisible:
     id: school-import-start
 # School-issued sign-in is hidden unless a verified provider is available.
