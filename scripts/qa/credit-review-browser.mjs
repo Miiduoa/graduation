@@ -134,10 +134,11 @@ try {
     const token = `?theme=${theme}&viewport=${width}`;
     await send('Page.navigate', { url: `${origin}/${token}` });
     await until(() => evaluate(`window.__fixtureToken===${JSON.stringify(token)} && Boolean(document.querySelector('[aria-label="已修學分核對工作區"]'))`), '元件載入');
-    await click(button('60 分')); await click(button('選取無重複疑義的通過紀錄'));
+    await click(button('60 分')); await click(button('選取建議課程'));
     await check(`${label}:選取兩筆無重複通過成績`, `document.querySelectorAll('input[type=checkbox]:checked').length===2`);
+    await check(`${label}:已選門檻收合且仍可調整`, `[...document.querySelectorAll('details')].some(x=>x.querySelector('summary')?.textContent.includes('參考及格門檻')&&!x.open)`);
     await check(`${label}:選取頁無水平溢位`, 'document.documentElement.scrollWidth<=window.innerWidth+1');
-    await check(`${label}:觸控按鈕高度`, `[...document.querySelectorAll('button')].every(x=>x.getBoundingClientRect().height>=43.5)`);
+    await check(`${label}:觸控按鈕高度`, `[...document.querySelectorAll('button')].filter(x=>x.checkVisibility()).every(x=>x.getBoundingClientRect().height>=43.5)`);
     await screenshot(`${label}-selection.png`);
     await click(button('預覽套用差異'));
     await check(`${label}:確認前尚未寫入`, `JSON.parse(localStorage.getItem(window.__fixtureKey)).recognized==='3'`);
