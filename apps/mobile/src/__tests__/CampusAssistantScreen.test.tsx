@@ -387,3 +387,56 @@ test('leaving the assistant aborts any in-progress on-device generation', () => 
   expect(signal.aborted).toBe(true);
   // No need to resolve a native generation that was explicitly stopped.
 });
+
+test('the seven-day agent entry shows sourced steps and only navigates to verified screens', async () => {
+  const checkedAt = new Date().toISOString();
+  const sensed = {
+    userId: 'A', schoolId: 'pu', checkedAt,
+    schedule: { status: 'unavailable' as const, count: null },
+    assignments: {
+      status: 'available' as const, count: 1,
+      items: [{ title: '資訊管理期末報告', groupName: '資管', dueAt: null }],
+    },
+    announcements: { status: 'available' as const, items: [] },
+  };
+  jest.mocked(refreshCampusSenseSnapshot).mockResolvedValueOnce(sensed);
+  request.mockResolvedValueOnce({
+    source: 'device', tool: 'campus-plan', hasActions: false,
+    content: '七日計畫詳細文字，只用於純文字模式',
+    route: '/classroom',
+    plan: {
+      title: '接下來七天的學習行動',
+      overview: '上次主動同步：10/27。只使用已授權資料。',
+      checkedAt,
+      limitations: ['尚未接通正式課表來源。'],
+      steps: [{
+        id: 'assignment-0',
+        title: '資訊管理期末報告',
+        detail: '核對課程頁面的截止日與繳交狀態。',
+        priority: 'verify',
+        evidence: 'authorized-assignments',
+        route: '/classroom',
+      }],
+    },
+  });
+  const navigate = jest.fn();
+  const view = render(<CampusAssistantScreen navigation={{ navigate }} />);
+  await act(async () => fireEvent.press(view.getByText('未來七天')));
+  expect(refreshCampusSenseSnapshot).toHaveBeenCalledTimes(1);
+  expect(request).toHaveBeenCalledWith(expect.objectContaining({
+    mode: 'device',
+    senseSnapshot: sensed,
+    messages: [{ role: 'user', content: '依手機課表與授權作業安排接下來七天的學習計畫' }],
+  }));
+  expect(view.getByText('接下來七天的學習行動')).toBeTruthy();
+  expect(view.getByText('資訊管理期末報告')).toBeTruthy();
+  expect(view.getByText('依據：已授權作業摘要')).toBeTruthy();
+  expect(view.queryByText('七日計畫詳細文字，只用於純文字模式')).toBeNull();
+  expect(confirmCampusAgentWrite).not.toHaveBeenCalled();
+
+  fireEvent.press(view.getByText('開啟課程與作業核對'));
+  expect(navigate).toHaveBeenCalledWith('學習', {
+    screen: 'CoursesHome', params: undefined,
+  });
+  expect(confirmCampusAgentWrite).not.toHaveBeenCalled();
+});
