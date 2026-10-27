@@ -2,6 +2,7 @@ import {
   exportManualCreditCsv,
   manualCreditAmount,
   manualCreditProgress,
+  mayOfferPuCsie115Reference,
   parseCreditCsvRows,
   parseManualCreditCsv,
   validCourseName,
@@ -21,6 +22,14 @@ const course = (patch: Partial<SavedCourse> = {}): SavedCourse => ({
 });
 
 describe('manual academic credits', () => {
+  test('does not offer a wrong graduation template to other schools or departments', () => {
+    expect(mayOfferPuCsie115Reference('pu', '資訊工程學系')).toBe(true);
+    expect(mayOfferPuCsie115Reference('tw-pu', '資訊工程學系')).toBe(true);
+    expect(mayOfferPuCsie115Reference('pu', '資訊管理學系')).toBe(false);
+    expect(mayOfferPuCsie115Reference('nchu', '資訊工程學系')).toBe(false);
+    expect(mayOfferPuCsie115Reference('pu', undefined)).toBe(false);
+  });
+
   test('refuses empty, negative, over-precise and over-cap credits', () => {
     for (const input of ['', '0', '-1', '1e3', '3.555', '30.01', 'Infinity', 'NaN', 'abc']) {
       expect(manualCreditAmount(input)).toBeNull();
