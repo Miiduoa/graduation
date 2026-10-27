@@ -1,8 +1,8 @@
 import {
   collection,
   doc,
-  getDoc,
-  getDocs,
+  getDocFromServer,
+  getDocsFromServer,
   limit,
   onSnapshot,
   orderBy,
@@ -97,13 +97,13 @@ export async function loadCourseAttendance(
 ): Promise<CourseAttendance> {
   if (!uid || !isFirebaseConfigured()) throw new Error('校園服務尚未連線。');
   const db = getDb();
-  const member = await getDoc(doc(db, 'groups', courseId, 'members', uid));
+  const member = await getDocFromServer(doc(db, 'groups', courseId, 'members', uid));
   if (!member.exists() || member.data().status !== 'active')
     throw new Error('課程成員資格已失效。');
   const role = member.data().role;
   const [course, sessions] = await Promise.all([
-    getDoc(doc(db, 'groups', courseId)),
-    getDocs(
+    getDocFromServer(doc(db, 'groups', courseId)),
+    getDocsFromServer(
       query(
         collection(db, 'groups', courseId, 'attendanceSessions'),
         where('schemaVersion', '==', 2),
@@ -121,7 +121,7 @@ export async function loadCourseAttendance(
     sessions: await Promise.all(
       sessions.docs.map(async (entry) => {
         const data = entry.data();
-        const own = await getDoc(
+        const own = await getDocFromServer(
           doc(db, 'groups', courseId, 'attendanceSessions', entry.id, 'attendanceRecords', uid),
         );
         return {
@@ -132,7 +132,15 @@ export async function loadCourseAttendance(
           endedAt: iso(data.endedAt),
           qrExpiresAt: iso(data.qrExpiresAt),
           attendeeCount: Math.max(0, Number(data.attendeeCount) || 0),
-          ownRecord: own.exists() ? record(uid, own.data()) : null,
+          ownRecord:
+            own.exists() &&
+            own.data().uid === uid &&
+            own.data().groupId === courseId &&
+            own.data().sessionId === entry.id &&
+            ['present', 'late'].includes(own.data().status) &&
+            iso(own.data().checkedInAt)
+              ? record(uid, own.data())
+              : null,
         };
       }),
     ),
@@ -142,17 +150,25 @@ export async function loadAttendanceRecords(
   courseId: string,
   sessionId: string,
 ): Promise<AttendanceRecord[]> {
-  const snapshot = await getDocs(
+  const snapshot = await getDocsFromServer(
     query(
       collection(getDb(), 'groups', courseId, 'attendanceSessions', sessionId, 'attendanceRecords'),
       orderBy('checkedInAt', 'desc'),
       limit(200),
     ),
   );
-  return snapshot.docs.map((entry) => record(entry.id, entry.data()));
+  return snapshot.docs
+    .filter((entry) =>
+      ['present', 'late'].includes(entry.data().status) &&
+      entry.data().uid === entry.id &&
+      entry.data().groupId === courseId &&
+      entry.data().sessionId === sessionId &&
+      iso(entry.data().checkedInAt),
+    )
+    .map((entry) => record(entry.id, entry.data()));
 }
 export async function loadAttendanceCode(courseId: string, sessionId: string): Promise<string> {
-  const snapshot = await getDoc(doc(getDb(), 'groups', courseId, 'liveSessionSecrets', sessionId));
+  const snapshot = await getDocFromServer(doc(getDb(), 'groups', courseId, 'liveSessionSecrets', sessionId));
   if (!snapshot.exists() || typeof snapshot.data().qrToken !== 'string')
     throw new Error('找不到簽到碼，請結束這次點名後重新開啟。');
   return snapshot.data().qrToken;

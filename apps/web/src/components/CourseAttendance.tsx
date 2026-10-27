@@ -58,6 +58,7 @@ function Session({
   const [teacherCode, setTeacherCode] = useState('');
   const [qr, setQr] = useState('');
   const [records, setRecords] = useState<AttendanceRecord[] | null>(null);
+  const [rosterQuery, setRosterQuery] = useState('');
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
   const [busy, setBusy] = useState(false);
@@ -71,6 +72,46 @@ function Session({
     };
   }, []);
   const confirmed = session.ownRecord?.checkedInAt ?? confirmedAt;
+  const [clock, setClock] = useState<number | null>(null);
+  const deadline = session.qrExpiresAt ? Date.parse(session.qrExpiresAt) : NaN;
+  const remainingSeconds = Number.isFinite(deadline) && clock !== null
+    ? Math.max(0, Math.ceil((deadline - clock) / 1000))
+    : null;
+  const expired = session.active && remainingSeconds === 0;
+  const visibleRecords = records?.filter((row) =>
+    [row.displayName, row.studentId, row.uid].some((value) =>
+      value.toLocaleLowerCase().includes(rosterQuery.trim().toLocaleLowerCase()),
+    ),
+  ) ?? [];
+
+  useEffect(() => {
+    if (!session.active || (!canStart && !checkInEnabled)) return;
+    const tick = () => setClock(Date.now());
+    const initial = window.setTimeout(tick, 0);
+    const timer = window.setInterval(tick, 1000);
+    return () => {
+      window.clearTimeout(initial);
+      window.clearInterval(timer);
+    };
+  }, [session.active, canStart, checkInEnabled]);
+
+  useEffect(() => {
+    if (!teacherCode) return;
+    const hideSecret = () => {
+      setTeacherCode('');
+      setQr('');
+    };
+    const hideOnBackground = () => {
+      if (document.visibilityState !== 'visible') hideSecret();
+    };
+    document.addEventListener('visibilitychange', hideOnBackground);
+    const ttl = Number.isFinite(deadline) ? Math.max(0, deadline - Date.now()) : 0;
+    const timer = window.setTimeout(hideSecret, ttl);
+    return () => {
+      document.removeEventListener('visibilitychange', hideOnBackground);
+      window.clearTimeout(timer);
+    };
+  }, [teacherCode, deadline]);
 
   async function run(action: () => Promise<void>) {
     if (lock.current) return;
@@ -94,19 +135,22 @@ function Session({
   }
   async function showCode() {
     const code = await loadAttendanceCode(courseId, session.id);
+    if (!Number.isFinite(deadline) || deadline <= Date.now()) {
+      throw Object.assign(new Error('簽到期限已結束'), { code: 'functions/deadline-exceeded' });
+    }
     const image = await QRCode.toDataURL(
       JSON.stringify({ groupId: courseId, sessionId: session.id, qrToken: code }),
       { width: 260, margin: 2 },
     );
-    if (live.current) {
+    if (live.current && document.visibilityState === 'visible' && Date.now() < deadline) {
       setTeacherCode(code);
       setQr(image);
     }
   }
   function download() {
-    if (!records) return;
+    if (!records || visibleRecords.length === 0) return;
     const url = URL.createObjectURL(
-      new Blob([attendanceCsv(records)], { type: 'text/csv;charset=utf-8' }),
+      new Blob([attendanceCsv(visibleRecords)], { type: 'text/csv;charset=utf-8' }),
     );
     const anchor = document.createElement('a');
     anchor.href = url;
@@ -120,6 +164,9 @@ function Session({
         <div>
           <p className={styles.label}>{studentAttendanceHeading(courseName, session.active)}</p>
           <h3>{date(session.startedAt)}</h3>
+          <span className={session.active ? styles.activeTag : styles.endedTag}>
+            {session.active ? (expired ? '簽到期限已到' : '點名進行中') : '已結束'}
+          </span>
         </div>
         {canReadRoster && (
           <p className={styles.count}>
@@ -127,7 +174,15 @@ function Session({
           </p>
         )}
       </div>
-      {session.active && <p className={styles.detail}>簽到期限：{date(session.qrExpiresAt)}</p>}
+      {session.active && (
+        <p className={styles.detail}>
+          簽到期限：{date(session.qrExpiresAt)}
+          {remainingSeconds !== null && !expired && (canStart || checkInEnabled)
+            ? ` · 剩餘 ${Math.floor(remainingSeconds / 60)} 分 ${String(remainingSeconds % 60).padStart(2, '0')} 秒`
+            : null}
+          {expired ? ' · 期限已過，請由老師重新開啟' : null}
+        </p>
+      )}
       {confirmed && (
         <p role="status" className={styles.confirmed}>
           已簽到 · {date(confirmed)}
@@ -207,7 +262,7 @@ function Session({
           </Button>
         )}
       </div>
-      {teacherCode && session.active && (
+      {teacherCode && session.active && !expired && (
         <div className={styles.codePanel}>
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img src={qr} width={260} height={260} alt="本次課堂簽到 QR Code" />
@@ -233,17 +288,31 @@ function Session({
         <div className={styles.roster}>
           <div className={styles.sessionHeading}>
             <h4>已確認的簽到紀錄</h4>
-            <Button disabled={!records.length} onClick={download}>
-              下載這份名單
+            <Button disabled={!visibleRecords.length} onClick={download}>
+              匯出目前名單
             </Button>
           </div>
+          {records.length > 0 && (
+            <div className={styles.rosterSearch}>
+              <label htmlFor={`roster-search-${session.id}`}>搜尋簽到學生</label>
+              <input
+                id={`roster-search-${session.id}`}
+                type="search"
+                value={rosterQuery}
+                onChange={(event) => setRosterQuery(event.target.value)}
+                placeholder="輸入姓名、學號或帳號"
+                autoComplete="off"
+              />
+              <span>{visibleRecords.length} / {records.length} 筆</span>
+            </div>
+          )}
           {records.length ? (
             <>
               <p className={styles.detail}>
                 顯示最近 {records.length} 筆紀錄，最多 200 筆。未簽到不會自動計為缺席。
               </p>
               <ul>
-                {records.map((row) => (
+                {visibleRecords.map((row) => (
                   <li key={row.uid}>
                     <span>
                       <strong>{row.displayName || row.studentId || row.uid}</strong>
@@ -253,6 +322,9 @@ function Session({
                   </li>
                 ))}
               </ul>
+              {visibleRecords.length === 0 && (
+                <p className={styles.detail}>沒有符合搜尋條件的學生。</p>
+              )}
             </>
           ) : (
             <p>目前還沒有人簽到。</p>
@@ -284,6 +356,7 @@ function Workspace({ courseId, uid }: { courseId: string; uid: string }) {
   const mounted = useRef(true);
   const startLock = useRef(false);
   const [accessAttempt, setAccessAttempt] = useState(0);
+  const [historyFilter, setHistoryFilter] = useState<'all' | 'active' | 'ended'>('all');
   const permission = useRef<string | null>(null);
   const permissionVersion = useRef(0);
   const reload = useCallback(async () => {
@@ -352,6 +425,14 @@ function Workspace({ courseId, uid }: { courseId: string; uid: string }) {
       if (mounted.current) setStarting(false);
     }
   }
+  const visibleSessions = data?.sessions.filter(
+    (session) =>
+      (data.canReadRoster ||
+        !session.active ||
+        session.id === studentCheckInSession(data.sessions)?.id) &&
+      (historyFilter === 'all' ||
+        (historyFilter === 'active' ? session.active : !session.active)),
+  ) ?? [];
   return (
     <>
       <div className={styles.workspaceHeading}>
@@ -385,6 +466,27 @@ function Workspace({ courseId, uid }: { courseId: string; uid: string }) {
       )}
       {data && (
         <>
+          <section className={styles.overview} aria-label="課堂點名概況">
+            <div>
+              <span>已保存的點名</span>
+              <strong>{data.sessions.length}</strong>
+              <small>最近最多 50 場</small>
+            </div>
+            <div>
+              <span>目前進行中</span>
+              <strong>{data.sessions.filter((session) => session.active).length}</strong>
+              <small>由教師開啟的場次</small>
+            </div>
+            <div>
+              <span>{data.canReadRoster ? '已確認簽到筆數' : '我的已確認簽到'}</span>
+              <strong>
+                {data.canReadRoster
+                  ? data.sessions.reduce((sum, session) => sum + session.attendeeCount, 0)
+                  : data.sessions.filter((session) => session.ownRecord).length}
+              </strong>
+              <small>僅包含可查的紀錄</small>
+            </div>
+          </section>
           {data.canStart && (
             <section className={styles.startPanel}>
               <div>
@@ -409,17 +511,30 @@ function Workspace({ courseId, uid }: { courseId: string; uid: string }) {
               ) : null}
             </section>
           )}
-          <h2 className={styles.history}>點名紀錄</h2>
-          <p className={styles.detail}>顯示最近 50 次已保存的點名。</p>
-          {data.sessions.length ? (
-            data.sessions
-              .filter(
-                (session) =>
-                  data.canReadRoster ||
-                  !session.active ||
-                  session.id === studentCheckInSession(data.sessions)?.id,
-              )
-              .map((session) => (
+          <div className={styles.historyHeading}>
+            <div>
+              <h2 className={styles.history}>點名紀錄</h2>
+              <p className={styles.detail}>最近 50 場已保存的點名；未簽到不會自動視為缺席。</p>
+            </div>
+            <div className={styles.filters} role="group" aria-label="篩選點名紀錄">
+              {([
+                ['all', '全部'],
+                ['active', '進行中'],
+                ['ended', '已結束'],
+              ] as const).map(([value, label]) => (
+                <button
+                  key={value}
+                  type="button"
+                  aria-pressed={historyFilter === value}
+                  onClick={() => setHistoryFilter(value)}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+          </div>
+          {visibleSessions.length ? (
+            visibleSessions.map((session) => (
               <Session
                 key={`${session.id}:${data.canStart}:${data.canReadRoster}`}
                 session={session}
@@ -434,11 +549,13 @@ function Workspace({ courseId, uid }: { courseId: string; uid: string }) {
             ))
           ) : (
             <div className={styles.empty}>
-              <h3>還沒有點名紀錄</h3>
+              <h3>{data.sessions.length ? '沒有符合條件的點名' : '還沒有點名紀錄'}</h3>
               <p>
-                {data.canStart
-                  ? '開啟點名後，學生就能在自己的課程頁簽到。'
-                  : '教師開啟點名後，請更新這個頁面。'}
+                {data.sessions.length
+                  ? '改選「全部」查看其他場次，或更新紀錄確認最新狀態。'
+                  : data.canStart
+                    ? '開啟點名後，學生就能在自己的課程頁簽到。'
+                    : '教師開啟點名後，請更新這個頁面。'}
               </p>
             </div>
           )}

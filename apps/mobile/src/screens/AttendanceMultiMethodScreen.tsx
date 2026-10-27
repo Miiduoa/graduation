@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { RefreshControl, ScrollView, Text, View } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
 import { listAttendanceSessions } from '../data/courseSpaceSource';
 import { isDemoCourseId } from '../data/demoCoursesAdapter';
@@ -29,7 +30,7 @@ export default function AttendanceMultiMethodScreen(props: RouteProps) {
   const courseId = params?.courseId ?? params?.sessionConfig?.courseId ?? '';
   const sessionId = params?.sessionId ?? params?.sessionConfig?.sessionId ?? '';
   const userId = auth.user?.uid ?? '';
-  const schoolId = auth.profile?.schoolId ?? school.id;
+  const schoolId = school.id ?? auth.profile?.schoolId;
   const supportedCourse =
     !!courseId && courseId !== 'demo' && !courseId.startsWith('tc:') && !isDemoCourseId(courseId);
   const enabled =
@@ -85,7 +86,7 @@ export default function AttendanceMultiMethodScreen(props: RouteProps) {
     ? requestedSession
       ? [requestedSession]
       : []
-    : sessions.filter((session) => session.active);
+    : sessions.filter((session) => session.active).slice(0, 1);
   const loading = enabled && (!current || current.loading);
   const refresh = () => setRevision((value) => value + 1);
 
@@ -95,11 +96,19 @@ export default function AttendanceMultiMethodScreen(props: RouteProps) {
       contentContainerStyle={courseChipScrollContentStyle(true)}
       accessibilityLabel="課堂簽到與點名紀錄"
       refreshControl={
-        <RefreshControl refreshing={false} onRefresh={refresh} tintColor={theme.colors.accent} />
+        <RefreshControl refreshing={loading && revision > 0} onRefresh={refresh} tintColor={theme.colors.accent} />
       }
     >
       <View style={{ gap: 16 }}>
-        <Text style={{ fontSize: 24, fontWeight: '700', color: theme.colors.text }}>課堂簽到</Text>
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
+          <View style={{ width: 48, height: 48, alignItems: 'center', justifyContent: 'center', borderRadius: 16, backgroundColor: theme.colors.accentSoft }}>
+            <Ionicons name="qr-code-outline" color={theme.colors.accent} size={25} />
+          </View>
+          <View style={{ flex: 1 }}>
+            <Text style={{ fontSize: 24, fontWeight: '700', color: theme.colors.text }}>課堂簽到</Text>
+            <Text style={{ fontSize: 12, lineHeight: 21, color: theme.colors.muted }}>只顯示授課教師正式開啟的點名</Text>
+          </View>
+        </View>
         {loading ? (
           <LoadingState title="課堂簽到" subtitle="正在確認課程與點名場次…" rows={2} />
         ) : null}
@@ -112,8 +121,11 @@ export default function AttendanceMultiMethodScreen(props: RouteProps) {
             <Card
               key={session.id}
               title={session.groupName}
-              subtitle="請進入課堂，掃描老師顯示的 QR Code 或輸入簽到碼。"
+              subtitle="點名進行中 · 請進入課堂掃描老師顯示的 QR Code。"
             >
+              <Text style={{ color: theme.colors.textSecondary, lineHeight: 21, marginBottom: 12 }}>
+                {session.startedAt ? `開始時間：${session.startedAt.toLocaleString('zh-TW', { timeZone: 'Asia/Taipei' })}` : '等待開始時間同步'}
+              </Text>
               <Button
                 text="進入課堂簽到"
                 icon="qr-code-outline"
@@ -143,19 +155,30 @@ export default function AttendanceMultiMethodScreen(props: RouteProps) {
             {enabled ? <Button text="重新確認" kind="ghost" onPress={refresh} /> : null}
           </Card>
         ) : null}
-        <Text style={{ color: theme.colors.muted, lineHeight: 22 }}>
-          數字密碼、定位與自拍等多方式簽到尚未開放；這個頁面不會建立出席紀錄。正式簽到請在課堂內完成，並確認畫面顯示「已完成簽到」。
-        </Text>
+        <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 12, padding: 16, borderRadius: 16, backgroundColor: theme.colors.surface, borderWidth: 1, borderColor: theme.colors.border }}>
+          <Ionicons name="shield-checkmark-outline" size={21} color={theme.colors.accent} />
+          <View style={{ flex: 1, gap: 4 }}>
+            <Text style={{ color: theme.colors.text, fontSize: 14, fontWeight: '700' }}>以伺服器簽到結果為準</Text>
+            <Text style={{ color: theme.colors.muted, lineHeight: 21, fontSize: 12 }}>
+              此頁不會直接建立出席紀錄。進入課堂掃碼後，請確認出現「已完成簽到」。數字密碼、定位和自拍簽到尚未開放。
+            </Text>
+          </View>
+        </View>
         {!loading && sessions.length > 0 ? (
           <Card title="本課程點名紀錄" subtitle="最近五次點名">
             <View style={{ gap: 12 }}>
               {sessions.slice(0, 5).map((session) => (
-                <View key={session.id} style={{ gap: 4 }}>
-                  <Text style={{ color: theme.colors.text }}>
-                    {session.startedAt?.toLocaleString('zh-TW') ?? '未提供開始時間'}
-                  </Text>
-                  <Text style={{ color: theme.colors.muted }}>
-                    {session.active ? '進行中' : '已結束'} · {session.attendeeCount ?? 0} 人已簽到
+                <View key={session.id} style={{ gap: 4, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 5 }}>
+                  <View style={{ flex: 1, gap: 5 }}>
+                    <Text style={{ color: theme.colors.text, fontWeight: '600' }}>
+                      {session.startedAt?.toLocaleString('zh-TW', { timeZone: 'Asia/Taipei' }) ?? '未提供開始時間'}
+                    </Text>
+                    <Text style={{ color: theme.colors.muted, fontSize: 12 }}>
+                      已簽到 {session.attendeeCount ?? 0} 人
+                    </Text>
+                  </View>
+                  <Text style={{ color: session.active ? theme.colors.success : theme.colors.muted, fontSize: 12, fontWeight: '700' }}>
+                    {session.active ? '進行中' : '已結束'}
                   </Text>
                 </View>
               ))}
