@@ -307,8 +307,10 @@ export default function AIModelManagerScreen({ navigation }: any) {
           failureFallback: '模型已下載，但載入到本機 AI 推理引擎時失敗。請稍後重試啟用。',
         });
       } else {
-        const errMsg = localLLM.getState().error ?? '下載失敗，請檢查網路連線後重試。';
-        Alert.alert('下載失敗', errMsg);
+        const state = localLLM.getState();
+        if (state.status !== 'uninitialized' || state.error) {
+          Alert.alert('下載未完成', state.error ?? '下載未完成。請確認是否有其他模型操作正在進行。');
+        }
         setDownloadProgress((prev) => {
           const next = { ...prev };
           delete next[modelId];
@@ -351,10 +353,14 @@ export default function AIModelManagerScreen({ navigation }: any) {
             text: '刪除',
             style: 'destructive',
             onPress: async () => {
-              await localLLM.deleteModel(modelId);
-              setDownloadedModels((prev) => prev.filter((id) => id !== modelId));
-              if (activeModel === modelId) setActiveModel(null);
-              checkDiskSpace();
+              try {
+                await localLLM.deleteModel(modelId);
+                setDownloadedModels((prev) => prev.filter((id) => id !== modelId));
+                if (activeModel === modelId) setActiveModel(null);
+                void checkDiskSpace();
+              } catch (error: any) {
+                Alert.alert('無法刪除模型', error?.message || '模型正在使用中，請稍後再試。');
+              }
             },
           },
         ],
@@ -613,7 +619,7 @@ export default function AIModelManagerScreen({ navigation }: any) {
                 {isDownloading && (
                   <TouchableOpacity
                     style={[styles.actionBtn, styles.cancelBtn]}
-                    onPress={() => localLLM.abort()}
+                    onPress={() => { void localLLM.cancelDownload(model.id); }}
                   >
                     <Ionicons name="close-circle-outline" size={18} color={theme.colors.danger} />
                     <Text style={[styles.actionBtnText, { color: theme.colors.danger }]}>取消</Text>
