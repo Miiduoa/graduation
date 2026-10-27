@@ -2,6 +2,8 @@ import React from 'react';
 import { Text, View } from 'react-native';
 import { AIButton, aiTokens } from '../ui/aiFirst';
 import type { CampusEvidencePlan, CampusPlanPriority, CampusPlanRoute } from '../services/offlineCampusPlanner';
+import type { CampusSenseSnapshot } from '../services/campusSenseSnapshot';
+import { CampusAssignmentReminderAction } from './CampusAssignmentReminderAction';
 
 const PRIORITY: Record<CampusPlanPriority, string> = {
   overdue: '期限已過',
@@ -28,10 +30,17 @@ export function CampusEvidencePlanCard({
   plan,
   disabled,
   onOpenRoute,
+  reminderContext,
 }: {
   plan: CampusEvidencePlan;
   disabled: boolean;
   onOpenRoute?: (route: CampusPlanRoute) => void;
+  reminderContext?: {
+    userId: string;
+    schoolId: string;
+    snapshot: CampusSenseSnapshot | null;
+    isCurrent: () => boolean;
+  };
 }) {
   return (
     <View style={{ gap: 12, marginTop: 14 }}>
@@ -85,6 +94,17 @@ export function CampusEvidencePlanCard({
                 size="sm"
                 disabled={disabled}
                 onPress={() => onOpenRoute(step.route)}
+              />
+            ) : null}
+            {reminderContext ? (
+              <CampusAssignmentReminderAction
+                key={step.id + ':' + step.dueAt}
+                step={step}
+                snapshot={reminderContext.snapshot}
+                userId={reminderContext.userId}
+                schoolId={reminderContext.schoolId}
+                isCurrent={reminderContext.isCurrent}
+                disabled={disabled}
               />
             ) : null}
           </View>

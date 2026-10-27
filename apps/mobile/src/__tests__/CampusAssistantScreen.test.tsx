@@ -1,10 +1,11 @@
 import React from 'react';
-import { act, fireEvent, render } from '@testing-library/react-native';
+import { act, fireEvent, render, waitFor } from '@testing-library/react-native';
 import { AIOverlayHost } from '../components/AIOverlayHost';
 import { CampusAssistantScreen } from '../screens/CampusAssistantScreen';
 import { askCampusAssistant } from '../features/campusAssistant';
 import { confirmCampusAgentWrite } from '../features/campusAssistantActions';
 import { refreshCampusSenseSnapshot } from '../services/campusSenseSnapshot';
+import { scheduleCampusAssignmentReminder, cancelCampusAssignmentReminder } from '../services/campusAssignmentReminders';
 const mockClose = jest.fn();
 let mockOverlay = { visible: true, mode: 'chat', initialPrompt: '查校方公告' };
 jest.mock('../app/useAIOverlay', () => ({
@@ -45,6 +46,10 @@ jest.mock('../services/campusSenseSnapshot', () => ({
   ...jest.requireActual('../services/campusSenseSnapshot'),
   refreshCampusSenseSnapshot: jest.fn(),
 }));
+jest.mock('../services/campusAssignmentReminders', () => ({
+  scheduleCampusAssignmentReminder: jest.fn(),
+  cancelCampusAssignmentReminder: jest.fn(),
+}));
 jest.mock('@expo/vector-icons', () => ({ Ionicons: () => null }));
 const request = askCampusAssistant as jest.Mock;
 function selectCampusMode(view: ReturnType<typeof render>) {
@@ -66,6 +71,8 @@ beforeEach(() => {
   request.mockReset();
   jest.mocked(confirmCampusAgentWrite).mockReset();
   jest.mocked(refreshCampusSenseSnapshot).mockReset();
+  jest.mocked(scheduleCampusAssignmentReminder).mockReset();
+  jest.mocked(cancelCampusAssignmentReminder).mockReset();
   mockUid = 'A';
   mockSchool = 'pu';
   mockOverlay = { visible: true, mode: 'chat', initialPrompt: '查校方公告' };
@@ -564,4 +571,98 @@ test('a denied campus permission drops the old snapshot even when it was recentl
   expect(view.queryByText('已取得本次授權資料')).toBeNull();
   expect(view.getByText(/權限或資料無法驗證，已捨棄校園摘要/)).toBeTruthy();
   expect(confirmCampusAgentWrite).not.toHaveBeenCalled();
+});
+
+test('source-verified assignment requires review and confirmation before a local reminder exists', async () => {
+  const dueAt = new Date(Date.now() + 48 * 60 * 60 * 1000).toISOString();
+  const checkedAt = new Date().toISOString();
+  const sense = {
+    userId: 'A', schoolId: 'pu', checkedAt,
+    schedule: { status: 'unavailable' as const, count: null },
+    assignments: {
+      status: 'available' as const, count: 1,
+      items: [{ title: '可信任的期末報告', groupName: '資訊管理', dueAt }],
+    },
+    announcements: { status: 'unavailable' as const, items: [] },
+  };
+  const step = {
+    id: 'assignment-0', title: '可信任的期末報告',
+    groupName: '資訊管理', dueAt, priority: 'normal',
+    evidence: 'authorized-assignments', route: '/classroom',
+    detail: '請核對作業頁面的截止與繳交狀態。',
+  };
+  jest.mocked(refreshCampusSenseSnapshot).mockResolvedValueOnce(sense);
+  request.mockResolvedValueOnce({
+    source: 'device', tool: 'campus-plan', hasActions: false,
+    content: '任務規劃',
+    plan: {
+      title: '今日優先行動', overview: '上次主動同步',
+      checkedAt, limitations: [], steps: [step],
+    },
+  });
+  jest.mocked(scheduleCampusAssignmentReminder).mockResolvedValueOnce({
+    outcome: 'scheduled', triggerAt: new Date(Date.parse(dueAt) - 86400000).toISOString(),
+  });
+  jest.mocked(cancelCampusAssignmentReminder).mockResolvedValueOnce(true);
+
+  const view = render(<CampusAssistantScreen />);
+  await act(async () => fireEvent.press(view.getByText('同步我的校園資料')));
+  fireEvent.changeText(view.getByLabelText('詢問校園助理'), '今天要先處理什麼？');
+  await act(async () => fireEvent.press(view.getByText('送出問題')));
+
+  expect(view.getByText('可信任的期末報告')).toBeTruthy();
+  expect(scheduleCampusAssignmentReminder).not.toHaveBeenCalled();
+  fireEvent.press(view.getByText('設定手機本機截止提醒'));
+  expect(view.getByText('確認設定本機提醒')).toBeTruthy();
+  expect(scheduleCampusAssignmentReminder).not.toHaveBeenCalled();
+  fireEvent.press(view.getByText('1 天前'));
+  await act(async () => fireEvent.press(view.getByText('確認設定本機提醒')));
+
+  await waitFor(() => expect(scheduleCampusAssignmentReminder).toHaveBeenCalledTimes(1));
+  expect(jest.mocked(scheduleCampusAssignmentReminder).mock.calls[0][0]).toMatchObject({
+    scope: { uid: 'A', schoolId: 'pu' },
+    snapshot: sense,
+    leadMinutes: 1440,
+    step: { title: '可信任的期末報告', dueAt, evidence: 'authorized-assignments' },
+  });
+  expect(view.getByText('本機提醒已排程成功，這不會提交作業或修改校務資料。')).toBeTruthy();
+  expect(confirmCampusAgentWrite).not.toHaveBeenCalled();
+  await act(async () => fireEvent.press(view.getByText('取消這項本機提醒')));
+  expect(cancelCampusAssignmentReminder).toHaveBeenCalledWith(expect.objectContaining({
+    scope: { uid: 'A', schoolId: 'pu' }, leadMinutes: 1440,
+  }));
+});
+
+test('no real due time means the agent never offers a notification action', async () => {
+  const checkedAt = new Date().toISOString();
+  const sense = {
+    userId: 'A', schoolId: 'pu', checkedAt,
+    schedule: { status: 'unavailable' as const, count: null },
+    assignments: {
+      status: 'available' as const, count: 1,
+      items: [{ title: '沒有截止日期的練習', groupName: '資料庫', dueAt: null }],
+    },
+    announcements: { status: 'unavailable' as const, items: [] },
+  };
+  jest.mocked(refreshCampusSenseSnapshot).mockResolvedValueOnce(sense);
+  request.mockResolvedValueOnce({
+    source: 'device', tool: 'campus-plan', hasActions: false,
+    content: '有限資訊',
+    plan: {
+      title: '今日優先行動', overview: '上次主動同步',
+      checkedAt, limitations: ['來源沒有截止日期'],
+      steps: [{
+        id: 'assignment-0', title: '沒有截止日期的練習',
+        priority: 'verify', evidence: 'authorized-assignments',
+        route: '/classroom', detail: '需核對正式截止時間。',
+      }],
+    },
+  });
+  const view = render(<CampusAssistantScreen />);
+  await act(async () => fireEvent.press(view.getByText('同步我的校園資料')));
+  fireEvent.changeText(view.getByLabelText('詢問校園助理'), '今天要做什麼？');
+  await act(async () => fireEvent.press(view.getByText('送出問題')));
+  expect(view.getByText('沒有截止日期的練習')).toBeTruthy();
+  expect(view.queryByText('設定手機本機截止提醒')).toBeNull();
+  expect(scheduleCampusAssignmentReminder).not.toHaveBeenCalled();
 });
