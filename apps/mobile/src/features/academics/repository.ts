@@ -4,7 +4,8 @@ import { deleteDoc, getDocs, serverTimestamp, setDoc, writeBatch } from 'firebas
 
 import { collectionFromSegments, docFromSegments } from '../../data/firestorePath';
 import { getDb } from '../../firebase';
-import { loadPersistedValue, savePersistedValue } from '../../services/persistedStorage';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { savePersistedValue } from '../../services/persistedStorage';
 import { getScopedStorageKey } from '../../services/scopedStorage';
 
 export type StoredEnrollment = {
@@ -39,12 +40,29 @@ export function getCreditAuditStorageKey(userId: string | null, schoolId: string
 }
 
 export async function loadCreditAuditSavedCourses(storageKey: string): Promise<SavedCourse[]> {
-  return loadPersistedValue<SavedCourse[]>({
-    storageKey,
-    // Never read the global legacy key: it is not bound to an account or campus.
-    fallback: [],
-    deserialize: (raw) => JSON.parse(raw) as SavedCourse[],
-  });
+  // Only the account+campus key is eligible. An unscoped legacy fallback could
+  // display one student's grades under another account on a shared device.
+  const raw = await AsyncStorage.getItem(storageKey);
+  if (raw === null) return [];
+
+  const parsed: unknown = JSON.parse(raw);
+  if (!Array.isArray(parsed) || parsed.length > 2_000) {
+    throw new Error('個人課程資料格式錯誤');
+  }
+  for (const item of parsed) {
+    if (
+      !item || typeof item !== 'object' || Array.isArray(item) ||
+      typeof item.id !== 'string' || !item.id ||
+      typeof item.name !== 'string' || !item.name.trim() || item.name.length > 200 ||
+      typeof item.credits !== 'number' || !Number.isFinite(item.credits) ||
+      item.credits < 0 || item.credits > 30 ||
+      typeof item.passed !== 'boolean' ||
+      !['required', 'elective', 'general', 'english', 'other'].includes(item.category)
+    ) {
+      throw new Error('個人課程內容無法驗證');
+    }
+  }
+  return parsed as SavedCourse[];
 }
 
 export async function saveCreditAuditSavedCourses(
