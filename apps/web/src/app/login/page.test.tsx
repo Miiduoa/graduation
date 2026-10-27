@@ -4,6 +4,8 @@ import LoginPage from './page';
 import {
   SCHOOL_LOGIN_GENERIC_ERROR,
   SchoolLoginHttpError,
+  TEACHER_LMS_UNAVAILABLE_CODE,
+  TEACHER_LMS_UNAVAILABLE_COPY,
 } from '@/lib/schoolLoginErrorCopy';
 import { STUDENT_ID_PREPARING_COPY } from '@/lib/signInOptions';
 const { replace, signIn, state } = vi.hoisted(() => ({
@@ -207,6 +209,7 @@ it.each([
   [401, '<img src=x onerror=alert(1)>', '學號或密碼錯誤'],
   [503, '尚未開放', '這間學校尚未開放學號登入'],
   [503, '學校系統暫時無法連線', '學校系統暫時連不上，請稍後再試'],
+  [503, TEACHER_LMS_UNAVAILABLE_COPY, TEACHER_LMS_UNAVAILABLE_COPY],
   [429, 'Too many requests', '嘗試太多次，請稍後再試'],
   [503, '暫時無法驗證老師身分', SCHOOL_LOGIN_GENERIC_ERROR],
   [500, 'PU student login failed', SCHOOL_LOGIN_GENERIC_ERROR],
@@ -226,6 +229,18 @@ it.each([
     expect(replace).not.toHaveBeenCalled();
   },
 );
+
+it('shows the teacher LMS notice from the error code even if the server body is unknown', async () => {
+  state.user = null;
+  state.studentId = true;
+  signIn.mockRejectedValue(
+    new SchoolLoginHttpError(503, '<script>evil</script>', TEACHER_LMS_UNAVAILABLE_CODE),
+  );
+  render(<LoginPage />);
+  fillSchoolLogin();
+  fireEvent.submit(screen.getByLabelText('學號').closest('form')!);
+  expect((await screen.findByRole('alert')).textContent).toBe(TEACHER_LMS_UNAVAILABLE_COPY);
+});
 
 it('offers school verification for an academic task without a misleading Google alternative', () => {
   state.user = null;

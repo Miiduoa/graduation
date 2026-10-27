@@ -1,6 +1,9 @@
 export const PROVIDENCE_SCHOOL_ID = 'pu';
 
 const STUDENT_ID = /^[0-9]{9,10}$/;
+const STUDENT_S_PREFIX = /^[sS]([0-9]{9,10})$/;
+const STUDENT_EMAIL = /^([0-9]{9,10})@pu\.edu\.tw$/i;
+const STUDENT_S_EMAIL = /^[sS]([0-9]{9,10})@pu\.edu\.tw$/i;
 const TEACHER_ACCOUNT = /^[A-Za-z][A-Za-z0-9._-]{1,31}$/;
 
 export function normalizePuAccount(value: unknown): string {
@@ -13,12 +16,24 @@ export function normalizePuStudentId(value: unknown): string {
     .toUpperCase();
 }
 
+export function canonicalizePuStudentId(value: unknown): string | null {
+  const raw = normalizePuAccount(value);
+  const digits =
+    STUDENT_ID.exec(raw)?.[0] ||
+    STUDENT_S_PREFIX.exec(raw)?.[1] ||
+    STUDENT_EMAIL.exec(raw)?.[1] ||
+    STUDENT_S_EMAIL.exec(raw)?.[1] ||
+    null;
+  return digits;
+}
+
 export function isPuStudentId(studentId: string): boolean {
   return STUDENT_ID.test(studentId);
 }
 
 export function isPuTeacherAccount(account: string): boolean {
-  return TEACHER_ACCOUNT.test(account) && !STUDENT_ID.test(account);
+  if (canonicalizePuStudentId(account)) return false;
+  return TEACHER_ACCOUNT.test(account);
 }
 
 export function buildPuStudentUid(studentId: string): string {
