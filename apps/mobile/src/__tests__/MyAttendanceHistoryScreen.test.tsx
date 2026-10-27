@@ -13,7 +13,17 @@ jest.mock('../utils/safeNavigate', () => ({ safeNavigate: jest.fn() }));
 jest.mock('@react-navigation/native', () => ({ useNavigation: () => ({}) }));
 jest.mock('../services/verifiedAttendanceHistory', () => ({
   loadVerifiedAttendanceHistory: jest.fn(),
-  summarizeVerifiedAttendance: jest.requireActual('../services/verifiedAttendanceHistory').summarizeVerifiedAttendance,
+  summarizeVerifiedAttendance: (courses: Array<{ sessions: Array<{ status: string }> }>) => {
+    const sessions = courses.flatMap((course) => course.sessions);
+    return {
+      sessions: sessions.length,
+      confirmed: sessions.filter((row) => row.status === 'present' || row.status === 'late').length,
+      excused: sessions.filter((row) => row.status === 'excused').length,
+      absent: sessions.filter((row) => row.status === 'absent').length,
+      unconfirmed: sessions.filter((row) => row.status === 'unconfirmed').length,
+      unavailable: sessions.filter((row) => row.status === 'unavailable').length,
+    };
+  },
 }));
 
 const course = {
