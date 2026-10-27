@@ -34,7 +34,7 @@ function time(value: string): string {
   });
 }
 
-/** Page-memory only. Failure is never treated as an empty successful response. */
+/** 只留在這個頁面的記憶體。失敗絕不當成空白的成功結果。 */
 export function AcademicChangeSummary<K extends AcademicChangeKind>({
   kind,
   state,
@@ -68,7 +68,7 @@ export function AcademicChangeSummary<K extends AcademicChangeKind>({
     setView({ ...next, report });
   }, [kind, state]);
 
-  // Mask synchronously, before effects run, when identity or request state changes.
+  // 身分或請求狀態一變，在 effect 執行前就同步遮住畫面。
   if (!state || state.status !== 'ready' || state.refreshing || !view ||
     state.scope !== view.scope || state.snapshot !== view.snapshot) return null;
   return <Report key={`${kind}:${view.report.to}`} report={view.report} />;
