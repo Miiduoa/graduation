@@ -75,7 +75,11 @@ test('keeps original timestamps and announcements instead of refreshing their ag
 
 test('never silently truncates a legacy server list and labels partial responses accurately', async () => {
   const data = page(0, 45);
-  const { paging: _paging, ...assignments } = data.assignments;
+  const assignments = {
+    status: data.assignments.status,
+    count: data.assignments.count,
+    items: data.assignments.items,
+  };
   mockCallable.mockResolvedValueOnce({ data: { ...data, assignments } });
   const complete = await read();
   expect(complete.assignments.items).toHaveLength(45);
