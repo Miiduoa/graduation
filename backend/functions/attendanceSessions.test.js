@@ -497,6 +497,7 @@ describe('live attendance session handlers', () => {
 
   test('a verified instructor explicitly records absence with an immutable audit receipt', async () => {
     const session = await handlers.startLiveSession(startRequest());
+    await handlers.endLiveSession(sessionRequest(session, {}, 'teacher'));
     const result = await handlers.correctAttendanceRecord(correctionRequest(session));
     expect(result).toMatchObject({ success: true, reused: false, status: 'absent', checkedInAt: null });
     const recordPath = `${path(session, 'attendanceSessions')}/attendanceRecords/student`;
@@ -537,6 +538,7 @@ describe('live attendance session handlers', () => {
   test('changing a confirmed QR receipt to excused reduces counters on both session documents', async () => {
     const session = await handlers.startLiveSession(startRequest());
     await handlers.joinLiveSession(sessionRequest(session));
+    await handlers.endLiveSession(sessionRequest(session, {}, 'teacher'));
     const result = await handlers.correctAttendanceRecord(correctionRequest(session, {
       status: 'excused', reason: '教務已核准課堂請假申請',
     }));
@@ -571,8 +573,22 @@ describe('live attendance session handlers', () => {
       .rejects.toMatchObject({ code: 'invalid-argument' });
   });
 
+  test('does not finalize absence or leave before the live QR check-in closes', async () => {
+    const session = await handlers.startLiveSession(startRequest());
+    for (const status of ['absent', 'excused']) {
+      await expect(
+        handlers.correctAttendanceRecord(correctionRequest(session, {
+          status, requestId: 'closed-window-' + status,
+        })),
+      ).rejects.toMatchObject({ code: 'failed-precondition' });
+    }
+    expect([...store.docs.keys()].filter((key) => key.includes('/attendanceCorrections/'))).toHaveLength(0);
+    expect(store.docs.get(path(session, 'attendanceSessions')).attendeeCount).toBe(0);
+  });
+
   test('transaction storage failures do not leave a correction or a false attendance count', async () => {
     const session = await handlers.startLiveSession(startRequest());
+    await handlers.endLiveSession(sessionRequest(session, {}, 'teacher'));
     store.failNextCommit();
     await expect(handlers.correctAttendanceRecord(correctionRequest(session)))
       .rejects.toThrow('transaction unavailable');
