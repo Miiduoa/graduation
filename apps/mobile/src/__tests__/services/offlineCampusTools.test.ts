@@ -1,5 +1,6 @@
 import { runOfflineCampusTool } from '../../services/offlineCampusTools';
 import type { OnDeviceSchoolContext } from '../../services/onDeviceSchoolContext';
+import type { CampusSenseSnapshot } from '../../services/campusSenseSnapshot';
 
 const snapshot: OnDeviceSchoolContext = {
   schoolId: 'pu',
@@ -134,4 +135,65 @@ test('offline local data checks take precedence over navigation shortcuts', () =
     .toMatchObject({ tool: 'online-required', route: '/announcements' });
   expect(runOfflineCampusTool('幫我查宿舍報修進度', snapshot))
     .toMatchObject({ tool: 'online-required', route: '/dormitory' });
+});
+
+const authorizedSense: CampusSenseSnapshot = {
+  userId: 'alice',
+  schoolId: 'pu',
+  checkedAt: snapshot.checkedAt,
+  schedule: { status: 'unavailable', count: null },
+  assignments: {
+    status: 'available',
+    count: 9,
+    items: [
+      { title: '資料庫期末報告', groupName: '資料庫', dueAt: '2026-10-30T09:00:00Z' },
+      { title: '程式設計練習', groupName: '程式設計', dueAt: null },
+    ],
+  },
+  announcements: {
+    status: 'available',
+    items: [{ title: '校園網路維護公告', publishedAt: '2026-10-25T01:00:00Z' }],
+  },
+};
+
+test('uses an explicitly synced snapshot for factual offline agent tools', () => {
+  const pending = runOfflineCampusTool('我還有哪些作業待交？', snapshot, authorizedSense);
+  expect(pending).toMatchObject({ tool: 'campus-snapshot', route: '/classroom' });
+  expect(pending?.content).toContain('資料庫期末報告');
+  expect(pending?.content).toContain('9 筆');
+  expect(pending?.content).toContain('非即時查詢');
+  expect(pending?.content).not.toContain('即時已更新');
+
+  const notice = runOfflineCampusTool('有哪些校園公告？', snapshot, authorizedSense);
+  expect(notice).toMatchObject({ tool: 'campus-snapshot', route: '/announcements' });
+  expect(notice?.content).toContain('校園網路維護公告');
+});
+
+test('produces a source-aware daily summary without calling an LLM', () => {
+  const result = runOfflineCampusTool('我今天要做什麼？', snapshot, authorizedSense);
+  expect(result?.content).toContain('資料庫期末報告');
+  expect(result?.content).toContain('校園網路維護公告');
+  expect(result?.content).toContain('上次主動同步');
+});
+
+test('never uses a snapshot for a different campus, stale timestamp, or unavailable reader', () => {
+  const other = runOfflineCampusTool('我還有哪些作業待交？', snapshot, {
+    ...authorizedSense, schoolId: 'different-school',
+  });
+  expect(other?.tool).toBe('online-required');
+
+  const stale = runOfflineCampusTool('我還有哪些作業待交？', snapshot, {
+    ...authorizedSense, checkedAt: '2026-10-25T01:00:00.000Z',
+  });
+  expect(stale?.tool).toBe('online-required');
+
+  const unavailable = runOfflineCampusTool('我還有哪些作業待交？', snapshot, {
+    ...authorizedSense, assignments: { status: 'unavailable', count: null, items: [] },
+  });
+  expect(unavailable?.tool).toBe('online-required');
+});
+
+test('does not silently replace timetable planning with a literal course list', () => {
+  expect(runOfflineCampusTool('請依我的課表幫我規劃下週的學習計畫', snapshot))
+    .toBeNull();
 });
