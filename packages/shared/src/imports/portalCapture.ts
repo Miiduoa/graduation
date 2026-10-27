@@ -66,6 +66,7 @@ export function schoolPortalCaptureScript(request: PortalCaptureRequest): string
     if (window.top !== window || window.location.origin !== origin) return;
     var limit = ${PORTAL_CAPTURE_LIMIT};
     var html = '', blockedFrames = 0, tableCount = 0, rowCount = 0, nodes = 0;
+    var computedStyles = new WeakMap();
     function send(payload) {
       window.ReactNativeWebView.postMessage(JSON.stringify(Object.assign({version: 1, id: id, origin: origin}, payload)));
     }
@@ -80,7 +81,11 @@ export function schoolPortalCaptureScript(request: PortalCaptureRequest): string
       var node = element;
       while (node && node.nodeType === 1) {
         if (node.hidden || node.getAttribute('aria-hidden') === 'true') return false;
-        var css = node.ownerDocument.defaultView.getComputedStyle(node);
+        var css = computedStyles.get(node);
+        if (!css) {
+          css = node.ownerDocument.defaultView.getComputedStyle(node);
+          computedStyles.set(node, css);
+        }
         if (css.display === 'none' || css.visibility === 'hidden' || css.visibility === 'collapse') return false;
         node = node.parentElement;
       }
@@ -126,6 +131,8 @@ export function schoolPortalCaptureScript(request: PortalCaptureRequest): string
         if (hasPassword) return;
         tableCount += 1;
         if (tableCount > 30) throw new Error('too-large');
+        // Reject oversize documents before walking each cell or computing styles.
+        if (rowCount + table.rows.length > 1200) throw new Error('too-large');
         add('<table>');
         Array.prototype.forEach.call(table.rows, function (row) {
           if (!visible(row)) return;
