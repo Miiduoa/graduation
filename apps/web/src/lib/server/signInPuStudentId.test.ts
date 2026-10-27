@@ -337,7 +337,7 @@ it('logs expected campus failures without account, password, or IP', async () =>
   expect(JSON.stringify(timeoutLog)).not.toContain('3.3.3.3');
 });
 
-it('tells students to use a numeric id when the teacher LMS cannot be reached', async () => {
+it('tells teachers the LMS is temporarily unavailable when TronClass cannot be reached', async () => {
   const lines: string[] = [];
   vi.spyOn(console, 'info').mockImplementation((...args) => {
     lines.push(args.map((item) => String(item)).join(' '));

@@ -1,4 +1,5 @@
 import { expect, it } from 'vitest';
+import { isTeacherLmsUnavailableNotice } from '@campus/shared/src/schoolLogin';
 import {
   SCHOOL_LOGIN_GENERIC_ERROR,
   SchoolLoginHttpError,
@@ -7,6 +8,13 @@ import {
   schoolLoginErrorCopy,
   schoolLoginFailureCopy,
 } from './schoolLoginErrorCopy';
+
+it('recognises current and legacy teacher LMS notices', () => {
+  expect(isTeacherLmsUnavailableNotice(TEACHER_LMS_UNAVAILABLE_COPY)).toBe(true);
+  expect(isTeacherLmsUnavailableNotice('老師登入暫未開放；學生請輸入純數字學號')).toBe(true);
+  expect(isTeacherLmsUnavailableNotice(TEACHER_LMS_UNAVAILABLE_CODE)).toBe(true);
+  expect(isTeacherLmsUnavailableNotice('學校系統暫時無法連線')).toBe(false);
+});
 
 it.each([
   [401, '學號或密碼錯誤', '學號或密碼錯誤'],
@@ -17,7 +25,8 @@ it.each([
   [503, '尚未開放', '這間學校尚未開放學號登入'],
   [503, ' 尚未開放 ', '這間學校尚未開放學號登入'],
   [503, '學校系統暫時無法連線', '學校系統暫時連不上，請稍後再試'],
-  [503, '老師登入暫未開放；學生請輸入純數字學號', '老師登入暫未開放；學生請輸入純數字學號'],
+  [503, '老師登入暫時無法使用', '老師登入暫時無法使用'],
+  [503, '老師登入暫未開放；學生請輸入純數字學號', '老師登入暫時無法使用'],
 ] as const)('maps HTTP %s with a known payload to a fixed notice', (status, serverError, copy) => {
   expect(schoolLoginErrorCopy(status, serverError)).toBe(copy);
   expect(new SchoolLoginHttpError(status, serverError).message).toBe(copy);

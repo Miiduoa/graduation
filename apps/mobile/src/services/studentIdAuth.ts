@@ -18,6 +18,10 @@
  */
 
 import Constants from 'expo-constants';
+import {
+  TEACHER_LMS_UNAVAILABLE_COPY,
+  isTeacherLmsUnavailableNotice,
+} from '@campus/shared/src/schoolLogin';
 import { isStudentIdLoginAvailable } from './schoolLoginAvailability';
 import { signInWithCustomToken } from 'firebase/auth';
 
@@ -126,6 +130,7 @@ async function tryBackendUnifiedLogin(
     announcements: PUAnnouncement[] | null;
   };
   error?: string;
+  code?: string;
 }> {
   try {
     const url = getCloudFunctionUrl('signInPuStudentId');
@@ -161,8 +166,9 @@ async function tryBackendUnifiedLogin(
 
     if (!response.ok || !data?.success) {
       const errorMsg = (data?.error as string) || `HTTP ${response.status}`;
+      const code = typeof data?.code === 'string' ? data.code : undefined;
       console.warn('[studentIdAuth] Backend unified login failed:', errorMsg);
-      return { success: false, error: errorMsg };
+      return { success: false, error: errorMsg, code };
     }
 
     if (!useLocalMockAuth && typeof data.customToken !== 'string') {
@@ -456,7 +462,17 @@ export async function signInWithStudentId(params: {
   // ── 策略 B: 後端失敗 → 降級為手機直連 E校園 + TronClass ──
   // 無論後端為何失敗（404、timeout、網路錯誤），都自動降級
   console.log('[studentIdAuth] Backend unavailable, falling back to hybrid login…');
-  return await handleHybridLogin(studentId, params, progress);
+  try {
+    return await handleHybridLogin(studentId, params, progress);
+  } catch (error) {
+    if (
+      isTeacherLmsUnavailableNotice(backendResult.code) ||
+      isTeacherLmsUnavailableNotice(backendResult.error)
+    ) {
+      throw new Error(TEACHER_LMS_UNAVAILABLE_COPY);
+    }
+    throw error;
+  }
 }
 
 /**

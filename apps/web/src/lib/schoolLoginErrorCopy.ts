@@ -1,6 +1,11 @@
+import {
+  TEACHER_LMS_UNAVAILABLE_CODE,
+  TEACHER_LMS_UNAVAILABLE_COPY,
+  isTeacherLmsUnavailableNotice,
+} from '@campus/shared/src/schoolLogin';
+
 export const SCHOOL_LOGIN_GENERIC_ERROR = '登入失敗。請確認學號與密碼，或稍後再試。';
-export const TEACHER_LMS_UNAVAILABLE_COPY = '老師登入暫未開放；學生請輸入純數字學號';
-export const TEACHER_LMS_UNAVAILABLE_CODE = 'teacher_lms_unreachable';
+export { TEACHER_LMS_UNAVAILABLE_CODE, TEACHER_LMS_UNAVAILABLE_COPY };
 
 const CLOSED_SERVER_ERROR = '尚未開放';
 const UNAVAILABLE_SERVER_ERROR = '學校系統暫時無法連線';
@@ -30,10 +35,7 @@ export function schoolLoginErrorCopy(status: number, serverError?: string, code?
   if (status === 503 && message === UNAVAILABLE_SERVER_ERROR) {
     return '學校系統暫時連不上，請稍後再試';
   }
-  if (
-    status === 503 &&
-    (errorCode === TEACHER_LMS_UNAVAILABLE_CODE || message === TEACHER_LMS_UNAVAILABLE_COPY)
-  ) {
+  if (status === 503 && isTeacherLmsUnavailableNotice(errorCode || message)) {
     return TEACHER_LMS_UNAVAILABLE_COPY;
   }
   return SCHOOL_LOGIN_GENERIC_ERROR;
