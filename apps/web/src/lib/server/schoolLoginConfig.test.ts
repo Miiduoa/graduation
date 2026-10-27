@@ -1,4 +1,4 @@
-import { expect, it } from 'vitest';
+import { expect, it, vi } from 'vitest';
 import {
   getSchoolLoginConfig,
   isSchoolLoginOffered,
@@ -8,6 +8,7 @@ import {
   schoolLoginHasAdapter,
   schoolLoginIpScope,
 } from './schoolLoginConfig';
+import { writeSchoolLoginProfile } from './schoolLoginProfile';
 
 it('keeps Providence as the only open school with the current adapters', () => {
   const pu = getSchoolLoginConfig('pu');
@@ -42,4 +43,18 @@ it('treats omitted schoolId as Providence and unknown ids as unavailable', () =>
   expect(isSchoolLoginOffered('pu')).toBe(true);
   expect(isSchoolLoginOffered('ntu')).toBe(false);
   expect(isSchoolLoginOffered('unknown-campus')).toBe(false);
+});
+
+it('never writes an explicitly unknown school login into Providence membership', async () => {
+  const doc = vi.fn();
+  const runTransaction = vi.fn();
+  const db = { doc, runTransaction } as unknown as Parameters<typeof writeSchoolLoginProfile>[0]['db'];
+  const profile = { email: 'student@example.test', displayName: 'Student', role: 'student' };
+  for (const schoolId of ['ntu', '../pu', 'nonexistent-university']) {
+    await expect(
+      writeSchoolLoginProfile({ db, uid: 'test-student', schoolId, profile }),
+    ).rejects.toThrow('school-login-unavailable');
+  }
+  expect(doc).not.toHaveBeenCalled();
+  expect(runTransaction).not.toHaveBeenCalled();
 });
