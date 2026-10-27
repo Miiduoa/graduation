@@ -893,7 +893,13 @@ describe('firestore security rules', () => {
     await seedFirestore(async (db) => {
       const group = db.collection('groups').doc('group-1');
       await group.set({ schoolId: 'tw-demo-uni', type: 'course' });
-      await group.collection('members').doc('teacher').set({
+      await db.collection('schools').doc('tw-demo-uni').collection('members').doc('teacher').set({
+        role: 'faculty', status: 'active',
+      });
+      await db.collection('schools').doc('tw-demo-uni').collection('members').doc('alice').set({
+        role: 'student', status: 'active',
+      });
+            await group.collection('members').doc('teacher').set({
         role: 'instructor', status: 'active',
       });
       await group.collection('members').doc('alice').set({
