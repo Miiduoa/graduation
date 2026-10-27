@@ -84,4 +84,49 @@ describe('personal credit workspace', () => {
     expect(screen.getByText(/這份規劃不等於畢業資格審查/)).toBeTruthy();
     expect(emptyCreditPlan().recognized).toBe('');
   });
+  it('restores valid backup only with confirmation and keeps the active campus scope', async () => {
+    renderWorkspace();
+    await screen.findByLabelText('課程名稱');
+    fireEvent.change(screen.getByLabelText('已確認可採計學分（自行填寫）'), { target: { value: '20' } });
+    const restored = {
+      ...emptyCreditPlan(), recognized: '64', target: '128',
+      courses: [{ id: 'c1', name: '資訊倫理', credits: 2, category: 'general', term: 2, status: 'registered' }],
+    };
+    const file = new File([JSON.stringify(restored)], 'credits.json', { type: 'application/json' });
+    Object.defineProperty(file, 'text', { value: vi.fn().mockResolvedValue(JSON.stringify(restored)) });
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValueOnce(false).mockReturnValueOnce(true);
+
+    fireEvent.change(screen.getByLabelText('匯入 JSON 備份'), { target: { files: [file] } });
+    await waitFor(() => expect(confirm).toHaveBeenCalledTimes(1));
+    expect((screen.getByLabelText('已確認可採計學分（自行填寫）') as HTMLInputElement).value).toBe('20');
+    fireEvent.change(screen.getByLabelText('匯入 JSON 備份'), { target: { files: [file] } });
+    await waitFor(() => expect((screen.getByLabelText('已確認可採計學分（自行填寫）') as HTMLInputElement).value).toBe('64'));
+    expect(screen.getByText('資訊倫理')).toBeTruthy();
+    expect(window.localStorage.getItem(creditPlanStorageKey('u1', 'pu'))).toContain('資訊倫理');
+    expect(window.localStorage.getItem(creditPlanStorageKey('u2', 'pu'))).toBeNull();
+  });
+
+  it('rejects malformed JSON without changing the working plan', async () => {
+    renderWorkspace();
+    await screen.findByLabelText('課程名稱');
+    fireEvent.change(screen.getByLabelText('已確認可採計學分（自行填寫）'), { target: { value: '33' } });
+    const file = new File(['{bad'], 'broken.json', { type: 'application/json' });
+    Object.defineProperty(file, 'text', { value: vi.fn().mockResolvedValue('{bad') });
+    const confirm = vi.spyOn(window, 'confirm');
+    fireEvent.change(screen.getByLabelText('匯入 JSON 備份'), { target: { files: [file] } });
+    await screen.findByText(/備份格式不符或資料無效/);
+    expect(confirm).not.toHaveBeenCalled();
+    expect((screen.getByLabelText('已確認可採計學分（自行填寫）') as HTMLInputElement).value).toBe('33');
+  });
+
+  it('does not overwrite damaged browser draft until the student changes the plan', async () => {
+    const key = creditPlanStorageKey('u1', 'pu');
+    window.localStorage.setItem(key, '{original-broken');
+    renderWorkspace();
+    await screen.findByLabelText('已確認可採計學分（自行填寫）');
+    expect(window.localStorage.getItem(key)).toBe('{original-broken');
+    fireEvent.change(screen.getByLabelText('已確認可採計學分（自行填寫）'), { target: { value: '12' } });
+    await waitFor(() => expect(window.localStorage.getItem(key)).toContain('"12"'));
+  });
+
 });

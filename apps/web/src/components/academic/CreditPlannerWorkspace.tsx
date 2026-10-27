@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState, type FormEvent } from 'react';
+import { useEffect, useMemo, useRef, useState, type ChangeEvent, type FormEvent } from 'react';
 import {
   MAX_PLANNED_COURSES,
   PLANNER_CATEGORIES,
@@ -39,16 +39,23 @@ function newCourseId() {
   return Date.now().toString(36) + '-' + Math.random().toString(36).slice(2);
 }
 
-function downloadPlan(plan: CreditPlan) {
-  const csv = exportCreditPlanCsv(plan);
-  const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' }));
+function downloadFile(content: string, type: string, filename: string) {
+  const url = URL.createObjectURL(new Blob([content], { type }));
   const link = document.createElement('a');
   link.href = url;
-  link.download = '學分規劃.csv';
+  link.download = filename;
   document.body.appendChild(link);
   link.click();
   link.remove();
   window.setTimeout(() => URL.revokeObjectURL(url), 0);
+}
+
+function downloadPlan(plan: CreditPlan) {
+  downloadFile(exportCreditPlanCsv(plan), 'text/csv;charset=utf-8', '學分規劃.csv');
+}
+
+function downloadBackup(plan: CreditPlan) {
+  downloadFile(JSON.stringify(plan, null, 2), 'application/json;charset=utf-8', '學分規劃備份.json');
 }
 
 function isInvalid(value: string) {
@@ -65,6 +72,8 @@ export function CreditPlannerWorkspace({
   userId: string | null;
 }) {
   const key = useMemo(() => creditPlanStorageKey(userId, schoolId), [userId, schoolId]);
+  const backupInput = useRef<HTMLInputElement>(null);
+  const skipInvalidDraftSave = useRef(false);
   const [plan, setPlan] = useState<CreditPlan>(emptyCreditPlan);
   const [hydratedKey, setHydratedKey] = useState<string | null>(null);
   const [saveNotice, setSaveNotice] = useState('');
@@ -79,7 +88,10 @@ export function CreditPlannerWorkspace({
     try {
       const raw = window.localStorage.getItem(key);
       restored = restoreCreditPlan(raw);
-      if (raw && !restored) setSaveNotice('先前的本機草稿格式有誤，已略過；原資料未被匯入。');
+      if (raw && !restored) {
+        skipInvalidDraftSave.current = true;
+        setSaveNotice('先前的本機草稿格式有誤，已略過；原資料暫時保留，建立新規劃後會取代它。');
+      }
     } catch {
       setSaveNotice('瀏覽器不允許儲存，這次規劃可能在重新整理後遺失。');
     }
@@ -89,6 +101,10 @@ export function CreditPlannerWorkspace({
 
   useEffect(() => {
     if (hydratedKey !== key) return;
+    if (skipInvalidDraftSave.current) {
+      skipInvalidDraftSave.current = false;
+      return;
+    }
     // An incomplete number (such as "12.") must not overwrite the last valid draft.
     if (!restoreCreditPlan(JSON.stringify(plan))) return;
     try {
@@ -175,6 +191,36 @@ export function CreditPlannerWorkspace({
     setRemoved(null);
   }
 
+  async function importBackup(event: ChangeEvent<HTMLInputElement>) {
+    const input = event.currentTarget;
+    const file = input.files?.[0];
+    input.value = '';
+    if (!file) return;
+    if (file.size > 90_000) {
+      setSaveNotice('備份檔案超過 90 KB，無法匯入。');
+      return;
+    }
+    try {
+      const imported = restoreCreditPlan(await file.text());
+      if (!imported) {
+        setSaveNotice('備份格式不符或資料無效，現有規劃不變。');
+        return;
+      }
+      if (!window.confirm('確定以這份 JSON 備份取代目前的個人學分規劃？目前規劃可以先匯出備份。')) {
+        setSaveNotice('已取消匯入，現有規劃不變。');
+        return;
+      }
+      setPlan(imported);
+      setDraft(emptyCourse);
+      setEditingId(null);
+      setRemoved(null);
+      setFormError('');
+      setSaveNotice('備份已匯入這個帳號與校園的本機規劃。');
+    } catch {
+      setSaveNotice('備份檔案無法讀取，現有規劃不變。');
+    }
+  }
+
   function resetPlan() {
     if (!window.confirm('確定清除這間學校、這個帳號在本機的學分規劃？這個動作無法復原。')) return;
     setPlan(emptyCreditPlan());
@@ -212,6 +258,20 @@ export function CreditPlannerWorkspace({
           <button type="button" onClick={() => downloadPlan(plan)} className={styles.secondary}>
             匯出 CSV
           </button>
+          <button type="button" onClick={() => downloadBackup(plan)} className={styles.secondary}>
+            備份 JSON
+          </button>
+          <button type="button" onClick={() => backupInput.current?.click()} className={styles.secondary}>
+            匯入備份
+          </button>
+          <input
+            ref={backupInput}
+            type="file"
+            accept=".json,application/json"
+            className={styles.backupInput}
+            aria-label="匯入 JSON 備份"
+            onChange={(event) => void importBackup(event)}
+          />
           <button type="button" onClick={resetPlan} className={styles.textButton}>
             清除規劃
           </button>
