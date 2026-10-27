@@ -104,8 +104,8 @@ function ReconciliationWorkspace({ uid, schoolId, lms, returnUrl, canReconnect }
       {visible?.status === 'loading' ? <p className={styles.message} role="status">正在讀取 e 校園的選課學分與上課地點…</p> : null}
       {visible?.status === 'error' ? <div className={styles.message} role="alert">
         <h3>{needsLogin ? 'e 校園需要重新連線' : '校方課表暫時無法核對'}</h3>
-        <p>{needsLogin ? 'WOW Class 課堂仍可開啟；正式選課資料需要有效的 e 校園連線。'
-          : '沒有把讀取失敗當成零學分。你仍可使用下方 WOW Class 課堂，或重新核對。'}</p>
+        <p>{needsLogin ? '正式選課資料需要有效的 e 校園連線；你可以重新連線，或先前往校方網站核對。'
+          : '校方課表尚未取得，不會顯示為零學分。請稍後重試，或前往校方網站核對。'}</p>
         <div className={styles.actions}>
           {needsLogin && canReconnect ? <Link className="btn" href={`/login?reconnect=school&returnUrl=${encodeURIComponent(returnUrl)}`}>重新連線 e 校園</Link> : null}
           <a className="btn" href="https://alcat.pu.edu.tw/" target="_blank" rel="noopener noreferrer">前往 e 校園 ↗</a>
