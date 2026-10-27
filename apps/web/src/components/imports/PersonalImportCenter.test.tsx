@@ -892,7 +892,6 @@ it('applies the school HTML term to preview rows in the same click, not just to 
   fireEvent.click(screen.getByRole('button', { name: /表格 1 · 1 筆/ }));
   expect((screen.getByLabelText('這份資料的學年度') as HTMLInputElement).value).toBe('115');
   expect((screen.getByLabelText('學期') as HTMLInputElement).value).toBe('1');
-  const draft = JSON.parse(sessionStorage.getItem(personalImportDraftKey(context)) || '{}');
   await waitFor(() => expect(
     JSON.parse(sessionStorage.getItem(personalImportDraftKey(context)) || '{}').rows?.[0],
   ).toMatchObject({ title: '統計學', academicYear: '115', semester: '1' }));
