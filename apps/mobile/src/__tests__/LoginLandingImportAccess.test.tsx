@@ -1,5 +1,5 @@
 import React from 'react';
-import { act, fireEvent, render } from '@testing-library/react-native';
+import { fireEventAsync, renderAsync } from '@testing-library/react-native';
 import type { useNuniSession } from '../state/nuniSession';
 import LoginLandingScreen from '../screens/LoginLandingScreen';
 import { safeNavigate } from '../utils/safeNavigate';
@@ -48,12 +48,8 @@ beforeEach(() => {
   };
 });
 
-async function landing() {
-  let view!: ReturnType<typeof render>;
-  await act(async () => {
-    view = render(<LoginLandingScreen />);
-  });
-  return view;
+function landing() {
+  return renderAsync(<LoginLandingScreen />);
 }
 
 it('places the import and account actions before the long public-service list', async () => {
@@ -74,7 +70,7 @@ it('provides a named header shortcut to the platform workspace without starting 
   const shortcut = view.getByTestId('platform-workspace-start');
   expect(shortcut.props.accessibilityRole).toBe('button');
   expect(shortcut.props.accessibilityLabel).toBe('開啟課程與作業');
-  fireEvent.press(shortcut);
+  await fireEventAsync.press(shortcut);
   expect(safeNavigate).toHaveBeenCalledWith(mockNavigation, 'NuniWorkspace');
   expect(mockAuth.signIn).not.toHaveBeenCalled();
 });
@@ -84,7 +80,7 @@ it.each([false, true])('keeps manual import independent of provider availability
   const view = await landing();
   expect(Boolean(view.queryByTestId('school-login-start'))).toBe(available);
   expect(Boolean(view.queryByTestId('school-login-hint'))).toBe(!available);
-  fireEvent.press(view.getByTestId('school-import-start'));
+  await fireEventAsync.press(view.getByTestId('school-import-start'));
   expect(safeNavigate).toHaveBeenCalledWith(mockNavigation, 'PersonalImport', {
     kind: 'timetable',
   });
@@ -100,14 +96,14 @@ it.each([
   mockAuth = { ...mockAuth, ...patch };
   const view = await landing();
   expect(view.getByText(label)).toBeTruthy();
-  fireEvent.press(view.getByTestId('login-start'));
+  await fireEventAsync.press(view.getByTestId('login-start'));
   expect(safeNavigate).toHaveBeenCalledWith(mockNavigation, 'NuniWorkspace');
   expect(mockAuth.signIn).not.toHaveBeenCalled();
 });
 
 it('opens public information without starting an account or school login', async () => {
   const view = await landing();
-  fireEvent.press(view.getByTestId('public-Map'));
+  await fireEventAsync.press(view.getByTestId('public-Map'));
   expect(safeNavigate).toHaveBeenCalledTimes(1);
   expect(safeNavigate).toHaveBeenCalledWith(mockNavigation, 'Map');
   expect(mockAuth.signIn).not.toHaveBeenCalled();
