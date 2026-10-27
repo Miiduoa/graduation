@@ -339,7 +339,7 @@ function SchoolLoginContent(
           <Button
             text="匯入課表、成績或活動"
             kind="secondary"
-            onPress={() => nav.navigate?.('PersonalImport', { kind: 'timetable' })}
+            onPress={() => nav.navigate?.('PersonalImport')}
             disabled={formLocked}
           />
         </AnimatedCard>
