@@ -211,20 +211,30 @@ function AssistantConversation({
   };
   return (
     <AIDetailScreen title="校園助理" onBack={() => navigation?.goBack?.()}>
-      <AICard title="選擇 AI 模式">
-        <View style={{ gap: 9 }}>
-          <AIButton
-            label={mode === 'device' ? '✓ 手機本地 AI · 免費推論' : '手機本地 AI · 免費推論'}
-            variant="ghost"
-            disabled={busy}
-            onPress={() => changeMode('device')}
-          />
-          <AIButton
-            label={mode === 'campus' ? '✓ 校園即時 · 需網路' : '校園即時 · 需網路'}
-            variant="ghost"
-            disabled={busy}
-            onPress={() => changeMode('campus')}
-          />
+      <AICard
+        title="工作模式"
+        badge={mode === 'device' ? '手機內推論' : '校園連線'}
+        badgeTone={mode === 'device' ? 'success' : 'ai'}
+      >
+        <View style={{ gap: 12 }}>
+          <View style={{ flexDirection: 'row', gap: 8 }}>
+            <AIButton
+              label={mode === 'device' ? '✓ 手機本地 AI · 免費推論' : '手機本地 AI · 免費推論'}
+              variant={mode === 'device' ? 'primary' : 'ghost'}
+              size="sm"
+              style={{ flex: 1 }}
+              disabled={busy}
+              onPress={() => changeMode('device')}
+            />
+            <AIButton
+              label={mode === 'campus' ? '✓ 校園即時 · 需網路' : '校園即時 · 需網路'}
+              variant={mode === 'campus' ? 'primary' : 'ghost'}
+              size="sm"
+              style={{ flex: 1 }}
+              disabled={busy}
+              onPress={() => changeMode('campus')}
+            />
+          </View>
           {mode === 'device' ? (
             <>
               <Text style={{ color: aiTokens.muted, lineHeight: 22, fontSize: 13 }}>
