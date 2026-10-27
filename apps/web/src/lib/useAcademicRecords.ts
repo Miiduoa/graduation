@@ -25,7 +25,7 @@ export type AcademicRecordState<K extends AcademicKind> = {
   error?: unknown;
 };
 
-/** Automatic refresh is opt-in and only reads the current supported campus. */
+/** 自動更新需自行開啟，且只讀目前支援的校區。 */
 export function useAcademicRecords<K extends AcademicKind>(
   kind: K,
   enabled = true,
@@ -67,8 +67,8 @@ export function useAcademicRecords<K extends AcademicKind>(
           return 'ready';
         } catch (error) {
           const reason = error instanceof AcademicConnectionError ? error.reason : 'unavailable';
-          // An unsuccessful refresh never advances the timestamp or presents old
-          // records as a new successful response. Terminal errors stop polling.
+          // 更新失敗時不推進時間戳，也不把舊資料當成新的成功結果。
+          // 終止性錯誤會停止輪詢。
           if (current) setState({ scope, status: 'error', reason, error });
           return reason;
         }

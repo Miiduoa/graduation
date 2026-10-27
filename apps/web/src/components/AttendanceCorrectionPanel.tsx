@@ -90,7 +90,7 @@ export function AttendanceCorrectionPanel({
       if (!mounted.current || revision.current !== current) return;
       setStudents(roster);
       setAudits(history);
-      // An instructor must deliberately choose the person being corrected.
+      // 教師必須自己選定要更正的對象。
       setSelectedUid('');
     } catch (problem) {
       if (mounted.current && revision.current === current) {
