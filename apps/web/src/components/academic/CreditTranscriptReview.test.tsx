@@ -19,7 +19,7 @@ function sample(): AcademicSnapshot<'grades'> {
 }
 function pick() {
   fireEvent.click(screen.getByRole('button', { name: '60 分' }));
-  fireEvent.click(screen.getByRole('button', { name: '選取無重複疑義的通過紀錄' }));
+  fireEvent.click(screen.getByRole('button', { name: '選取建議課程' }));
 }
 function preview() { pick(); fireEvent.click(screen.getByRole('button', { name: '預覽套用差異' })); }
 function confirm() {
