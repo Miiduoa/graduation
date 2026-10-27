@@ -436,30 +436,33 @@ export function AttendanceScreen(props: any) {
             </View>
           </View>
 
-          {/* ── 智慧簽到入口 ── */}
+          {/* 從正式課堂工作台進入，避免以外部課號或假場次發起簽到。 */}
           <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={isTeacher ? '前往教師課堂點名' : '查看正式課堂簽到'}
             onPress={() =>
-              nav?.navigate?.('AttendanceMultiMethod', {
-                courseId: myCourses[0]?.id ?? 'demo',
-                sessionId: `demo-${Date.now()}`,
-              })
+              nav?.navigate?.(isTeacher ? 'TeacherCockpit' : 'MyAttendanceHistory')
             }
             style={{
               marginHorizontal: theme.space.lg,
               marginBottom: 12,
-              padding: 14,
-              borderRadius: 12,
-              backgroundColor: '#34C759',
+              padding: 16,
+              minHeight: 52,
+              borderRadius: 14,
+              backgroundColor: theme.colors.accentSoft,
               flexDirection: 'row',
               alignItems: 'center',
-              gap: 10,
+              gap: 12,
               justifyContent: 'center',
+              borderWidth: 1,
+              borderColor: theme.colors.border,
             }}
           >
-            <Ionicons name="shield-checkmark-outline" size={20} color="#fff" />
-            <Text style={{ color: '#fff', fontSize: 15, fontWeight: '700' }}>
-              智慧簽到（5 種方式）
+            <Ionicons name="shield-checkmark-outline" size={20} color={theme.colors.accent} />
+            <Text style={{ color: theme.colors.accent, fontSize: 15, fontWeight: '700' }}>
+              {isTeacher ? '前往教師課堂點名' : '查看正式課堂簽到'}
             </Text>
+            <Ionicons name="arrow-forward-outline" size={18} color={theme.colors.accent} />
           </Pressable>
 
           {/* Stats Row */}
