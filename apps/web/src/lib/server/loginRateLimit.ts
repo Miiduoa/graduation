@@ -15,8 +15,8 @@ export const LOGIN_RATE_LIMIT = {
 } as const;
 
 export const RATE_LIMITS_COLLECTION = '_rateLimits';
-export const ACCOUNT_SCOPE = 'pu-student-login-account';
-export const IP_SCOPE = 'pu-student-login-ip';
+export const ACCOUNT_SCOPE = 'school-login-pu-account';
+export const IP_SCOPE = 'school-login-pu-ip';
 
 type RateLimitSnapshot = {
   exists: boolean;
@@ -71,6 +71,8 @@ export type LoginRateContext = {
   salt?: string;
   now?: number;
   gate?: LoginRateGate;
+  accountScope?: string;
+  ipScope?: string;
 };
 
 function utcDay(now: number): string {
@@ -304,17 +306,26 @@ async function writeSharedLimit(
   }
 }
 
+function accountScopeOf(ctx: LoginRateContext): string {
+  return ctx.accountScope || ACCOUNT_SCOPE;
+}
+
+function ipScopeOf(ctx: LoginRateContext): string {
+  return ctx.ipScope || IP_SCOPE;
+}
+
 export async function consumeLoginIpLimit(ip: string, ctx: LoginRateContext): Promise<void> {
   const gate = resolveGate(ctx);
   const now = ctx.now ?? Date.now();
   const salt = requireRateLimitSalt(ctx.salt);
   const key = ip || 'unknown';
-  gate.increment(IP_SCOPE, key, LOGIN_RATE_LIMIT.ip.limit, LOGIN_RATE_LIMIT.ip.windowMs);
+  const scope = ipScopeOf(ctx);
+  gate.increment(scope, key, LOGIN_RATE_LIMIT.ip.limit, LOGIN_RATE_LIMIT.ip.windowMs);
   try {
     await writeSharedLimit(
       ctx.db,
       gate,
-      IP_SCOPE,
+      scope,
       key,
       LOGIN_RATE_LIMIT.ip.limit,
       LOGIN_RATE_LIMIT.ip.windowMs,
@@ -322,7 +333,7 @@ export async function consumeLoginIpLimit(ip: string, ctx: LoginRateContext): Pr
       salt,
     );
   } catch (error) {
-    gate.decrement(IP_SCOPE, key);
+    gate.decrement(scope, key);
     throw error;
   }
 }
@@ -331,12 +342,13 @@ export async function consumeLoginAccountLimit(account: string, ctx: LoginRateCo
   const gate = resolveGate(ctx);
   const now = ctx.now ?? Date.now();
   const salt = requireRateLimitSalt(ctx.salt);
-  gate.increment(ACCOUNT_SCOPE, account, LOGIN_RATE_LIMIT.account.limit, LOGIN_RATE_LIMIT.account.windowMs);
+  const scope = accountScopeOf(ctx);
+  gate.increment(scope, account, LOGIN_RATE_LIMIT.account.limit, LOGIN_RATE_LIMIT.account.windowMs);
   try {
     await writeSharedLimit(
       ctx.db,
       gate,
-      ACCOUNT_SCOPE,
+      scope,
       account,
       LOGIN_RATE_LIMIT.account.limit,
       LOGIN_RATE_LIMIT.account.windowMs,
@@ -344,7 +356,7 @@ export async function consumeLoginAccountLimit(account: string, ctx: LoginRateCo
       salt,
     );
   } catch (error) {
-    gate.decrement(ACCOUNT_SCOPE, account);
+    gate.decrement(scope, account);
     throw error;
   }
 }
@@ -353,18 +365,19 @@ export async function refundLoginAccountLimit(account: string, ctx: LoginRateCon
   const gate = resolveGate(ctx);
   const now = ctx.now ?? Date.now();
   const salt = requireRateLimitSalt(ctx.salt);
+  const scope = accountScopeOf(ctx);
   try {
     gate.reserveWrites(1);
   } catch {
     return;
   }
   try {
-    const wrote = await refundLoginRateLimit(ctx.db, ACCOUNT_SCOPE, account, now, salt);
+    const wrote = await refundLoginRateLimit(ctx.db, scope, account, now, salt);
     if (!wrote) {
       gate.releaseWrites(1);
       return;
     }
-    gate.decrement(ACCOUNT_SCOPE, account);
+    gate.decrement(scope, account);
   } catch {
     gate.releaseWrites(1);
   }

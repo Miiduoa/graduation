@@ -96,11 +96,29 @@ it('returns a custom token and writes student profile fields without clobbering 
   });
 });
 
-it('rejects non-pu schools, invalid student ids, and missing fields', async () => {
-  const { runtime } = deps();
+it('rejects unknown or closed schools with 尚未開放 without campus or account rate limits', async () => {
+  const loginStudent = vi.fn(async () => ({ cookies: { PHPSESSID: 'stu-cookie' } }));
+  const loginTronClass = vi.fn(async () => {
+    throw new Error('should not run');
+  });
+  const { runtime, store } = deps({ campus: campus({ loginStudent, loginTronClass }) });
   await expect(
-    handleSignInPuStudentId({ studentId: STUDENT, password: SECRET, schoolId: 'ntpu' }, '1.1.1.1', runtime),
-  ).rejects.toMatchObject({ status: 400, message: '只接受靜宜大學帳號' });
+    handleSignInPuStudentId({ studentId: STUDENT, password: SECRET, schoolId: 'ntu' }, '1.1.1.1', runtime),
+  ).rejects.toMatchObject({ status: 503, message: '尚未開放' });
+  await expect(
+    handleSignInPuStudentId(
+      { studentId: STUDENT, password: SECRET, schoolId: 'no-such-school' },
+      '8.8.8.8',
+      runtime,
+    ),
+  ).rejects.toMatchObject({ status: 503, message: '尚未開放' });
+  expect(loginStudent).not.toHaveBeenCalled();
+  expect(loginTronClass).not.toHaveBeenCalled();
+  expect([...store.docs.keys()].filter((path) => path.startsWith('_rateLimits/'))).toEqual([]);
+});
+
+it('rejects invalid student ids and missing fields', async () => {
+  const { runtime } = deps();
   await expect(
     handleSignInPuStudentId({ studentId: '12', password: SECRET }, '1.1.1.1', runtime),
   ).rejects.toMatchObject({ status: 400, message: '學號格式不正確' });

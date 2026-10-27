@@ -13,18 +13,15 @@ import {
   type LoginRateGate,
 } from './loginRateLimit';
 import { createPuCampusGateway, PuCampusError, type PuCampusGateway } from './puCampusClient';
+import { normalizePuAccount, normalizePuStudentId } from './puIdentity';
 import {
-  assertOnlyProvidence,
-  buildPuStudentEmail,
-  buildPuStudentUid,
-  buildPuTeacherEmail,
-  buildPuTeacherUid,
-  isPuStudentId,
-  isPuTeacherAccount,
-  normalizePuAccount,
-  normalizePuStudentId,
-  PROVIDENCE_SCHOOL_ID,
-} from './puIdentity';
+  getSchoolLoginConfig,
+  matchSchoolLoginAccount,
+  schoolLoginAccountScope,
+  schoolLoginHasAdapter,
+  schoolLoginIpScope,
+  type SchoolLoginConfig,
+} from './schoolLoginConfig';
 import { writeSchoolLoginProfile, type SchoolLoginFirestore } from './schoolLoginProfile';
 
 const SESSION_TTL_MS = 30 * 24 * 60 * 60 * 1000;
@@ -69,17 +66,42 @@ function expectedCampusFailureReason(error: unknown): ExpectedCampusFailureReaso
   return null;
 }
 
-function logExpectedCampusFailure(error: unknown, startedAt: number): void {
+function logExpectedCampusFailure(error: unknown, startedAt: number, school: string): void {
   const reason = expectedCampusFailureReason(error);
   if (!reason) return;
   console.info(
     JSON.stringify({
       msg: 'pu_campus_login_expected_failure',
       reason,
-      school: PROVIDENCE_SCHOOL_ID,
+      school,
       elapsedMs: Math.max(0, Date.now() - startedAt),
     }),
   );
+}
+
+function closedWithoutCampus(): never {
+  throw new PuLoginHttpError(503, '尚未開放');
+}
+
+function campusFromConfig(config: SchoolLoginConfig, injected?: PuCampusGateway): PuCampusGateway {
+  if (injected) return injected;
+  return createPuCampusGateway({
+    portalOrigin: config.endpoints.portal,
+    lmsOrigin: config.endpoints.lms,
+  });
+}
+
+function studentUid(config: SchoolLoginConfig, studentId: string): string {
+  return `${config.uid.studentPrefix}${studentId.toLowerCase()}`;
+}
+
+function teacherUid(config: SchoolLoginConfig, account: string): string {
+  return `${config.uid.teacherPrefix}${account.toLowerCase()}`;
+}
+
+function schoolEmail(config: SchoolLoginConfig, local: string): string {
+  if (local.includes('@')) return local.toLowerCase();
+  return `${local.toLowerCase()}@${config.emailDomain}`;
 }
 
 function asRecord(value: unknown): Record<string, unknown> {
@@ -181,10 +203,12 @@ export async function handleSignInPuStudentId(
   const payload = asRecord(body);
   const password = String(payload.password || '');
   try {
-    try {
-      assertOnlyProvidence(payload.schoolId);
-    } catch {
-      throw new PuLoginHttpError(400, '只接受靜宜大學帳號');
+    const config = getSchoolLoginConfig(payload.schoolId);
+    if (!config || config.status !== 'open') {
+      closedWithoutCampus();
+    }
+    if (!config.studentAdapter && !config.teacherAdapter) {
+      closedWithoutCampus();
     }
 
     const rawAccount = normalizePuAccount(payload.studentId ?? payload.account);
@@ -194,30 +218,34 @@ export async function handleSignInPuStudentId(
 
     const studentId = normalizePuStudentId(rawAccount);
     const teacherAccount = rawAccount;
-    const isStudent = isPuStudentId(studentId);
-    const isTeacher = !isStudent && isPuTeacherAccount(teacherAccount);
-    if (!isStudent && !isTeacher) {
+    const kind = matchSchoolLoginAccount(config, studentId) || matchSchoolLoginAccount(config, teacherAccount);
+    if (!kind) {
       throw new PuLoginHttpError(400, '學號格式不正確');
     }
+    if (!schoolLoginHasAdapter(config, kind)) {
+      closedWithoutCampus();
+    }
 
-    const accountKey = isStudent ? studentId : teacherAccount.toLowerCase();
+    const accountKey = kind === 'student' ? studentId : teacherAccount.toLowerCase();
     const rateCtx = {
       db: deps.db,
       now: deps.now?.() ?? Date.now(),
       salt: requireRateLimitSalt(deps.rateLimitSalt),
       gate: deps.rateLimitGate ?? getLoginRateGate(),
+      accountScope: schoolLoginAccountScope(config.schoolId),
+      ipScope: schoolLoginIpScope(config.schoolId),
     };
     await consumeLoginIpLimit(ip, rateCtx);
     await consumeLoginAccountLimit(accountKey, rateCtx);
 
-    const campus = deps.campus ?? createPuCampusGateway();
+    const campus = campusFromConfig(config, deps.campus);
     const campusStartedAt = Date.now();
     try {
-      return isStudent
-        ? await signInStudent(studentId, password, campus, deps)
-        : await signInTeacher(teacherAccount, password, campus, deps);
+      return kind === 'student'
+        ? await signInStudent(studentId, password, campus, deps, config)
+        : await signInTeacher(teacherAccount, password, campus, deps, config);
     } catch (error) {
-      logExpectedCampusFailure(error, campusStartedAt);
+      logExpectedCampusFailure(error, campusStartedAt, config.schoolId);
       if (isSchoolSideFailure(error)) {
         await refundLoginAccountLimit(accountKey, rateCtx);
       }
@@ -251,7 +279,11 @@ async function signInStudent(
   password: string,
   campus: PuCampusGateway,
   deps: SignInPuDeps,
+  config: SchoolLoginConfig,
 ): Promise<Record<string, unknown>> {
+  if (config.studentAdapter !== 'form-password') {
+    closedWithoutCampus();
+  }
   let login;
   try {
     login = await campus.loginStudent(rawStudentId, password);
@@ -286,12 +318,13 @@ async function signInStudent(
   const studentId = normalizePuStudentId(profile.studentId || rawStudentId);
   const displayName = String(profile.name || login.studentName || `${studentId} 同學`).trim();
   const department = String(profile.class || '').trim();
-  const email = buildPuStudentEmail(studentId);
-  const uid = buildPuStudentUid(studentId);
+  const email = schoolEmail(config, studentId);
+  const uid = studentUid(config, studentId);
 
   const schoolRole = await writeSchoolLoginProfile({
     db: deps.db,
     uid,
+    schoolId: config.membershipSchoolId,
     profile: {
       email,
       displayName,
@@ -307,7 +340,7 @@ async function signInStudent(
   });
 
   const customToken = await mintToken(deps, uid, {
-    schoolId: PROVIDENCE_SCHOOL_ID,
+    schoolId: config.schoolId,
     role: schoolRole.role,
   });
 
@@ -355,7 +388,11 @@ async function signInTeacher(
   password: string,
   campus: PuCampusGateway,
   deps: SignInPuDeps,
+  config: SchoolLoginConfig,
 ): Promise<Record<string, unknown>> {
+  if (config.teacherAdapter !== 'lms-password' || config.teacherProof !== 'tronclass-profile') {
+    closedWithoutCampus();
+  }
   let session;
   try {
     session = await campus.loginTronClass(account, password);
@@ -398,13 +435,14 @@ async function signInTeacher(
   }
 
   const displayName = String(session.userName || account).trim();
-  const email = buildPuTeacherEmail(account);
-  const uid = buildPuTeacherUid(account);
+  const email = schoolEmail(config, account);
+  const uid = teacherUid(config, account);
   const offeringIds = safeOfferingIds(displayName, taught);
 
   const schoolRole = await writeSchoolLoginProfile({
     db: deps.db,
     uid,
+    schoolId: config.membershipSchoolId,
     profile: {
       email,
       displayName,
@@ -418,7 +456,7 @@ async function signInTeacher(
   });
 
   const customToken = await mintToken(deps, uid, {
-    schoolId: PROVIDENCE_SCHOOL_ID,
+    schoolId: config.schoolId,
     role: schoolRole.role,
   });
 
