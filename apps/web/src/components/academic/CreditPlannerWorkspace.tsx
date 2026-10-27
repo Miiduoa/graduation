@@ -17,6 +17,7 @@ import {
   type PlannerCourseStatus,
 } from '@/lib/creditPlanner';
 import styles from './CreditPlannerWorkspace.module.css';
+import { CreditPlannerRequirements } from './CreditPlannerRequirements';
 
 type CourseDraft = {
   name: string;
@@ -547,6 +548,7 @@ export function CreditPlannerWorkspace({
           ))}
         </div>
       )}
+      <CreditPlannerRequirements plan={plan} setPlan={setPlan} />
       <p className={styles.disclaimer}>
         <strong>重要：</strong>這份規劃不等於畢業資格審查。必修、通識領域、重修抵免、學程限制及非學分條件都須依入學年度與校方正式規定確認。
         課程狀態與類別都由你手動設定，不保證會開課、選上、修過或獲得認列。
