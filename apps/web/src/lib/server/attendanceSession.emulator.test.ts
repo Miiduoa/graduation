@@ -31,7 +31,13 @@ describeEmulator('attendance session handlers against the Firestore emulator', (
   beforeEach(async () => {
     time = Date.parse('2026-10-07T03:00:00Z');
     await db.recursiveDelete(db.collection('groups'));
-    await db.doc('groups/class-1').set({ name: '程式設計' });
+    await db.recursiveDelete(db.collection('schools'));
+    await db.recursiveDelete(db.collection('users'));
+    await db.doc('groups/class-1').set({
+      name: '程式設計',
+      type: 'course',
+      schoolId: 'school-1',
+    });
     await db.doc('groups/class-1/members/teacher').set({
       uid: 'teacher',
       role: 'instructor',
@@ -44,14 +50,52 @@ describeEmulator('attendance session handlers against the Firestore emulator', (
       displayName: '陳同學',
       studentId: 'S123',
     });
+    await db.doc('schools/school-1/members/teacher').set({ status: 'active' });
+    await db.doc('schools/school-1/members/student').set({ status: 'active' });
     handlers = createLiveSessionHandlers({ db: db as never, now: () => time });
   });
 
-  it('starts, joins once, and rejects a non-member with the same token', async () => {
-    const started = await handlers.startLiveSession({
+  function startSession() {
+    return handlers.startLiveSession({
       auth: { uid: 'teacher' },
       data: { groupId: 'class-1', requestId: 'attempt-1' },
     });
+  }
+
+  function correction(
+    sessionId: string,
+    requestId: string,
+    status: 'present' | 'late' | 'absent' | 'excused' = 'present',
+    studentUid = 'student',
+  ) {
+    return handlers.correctAttendanceRecord({
+      auth: { uid: 'teacher' },
+      data: {
+        groupId: 'class-1',
+        sessionId,
+        studentUid,
+        requestId,
+        status,
+        reason: '授課教師已核對課堂出席紀錄',
+      },
+    });
+  }
+
+  function attendanceRef(sessionId: string) {
+    return db.doc(`groups/class-1/attendanceSessions/${sessionId}`);
+  }
+
+  async function expectCounters(sessionId: string, expected: number) {
+    const [live, attendance] = await db.getAll(
+      db.doc(`groups/class-1/liveSessions/${sessionId}`),
+      attendanceRef(sessionId),
+    );
+    expect(live.data()?.attendeeCount).toBe(expected);
+    expect(attendance.data()?.attendeeCount).toBe(expected);
+  }
+
+  it('starts, joins once, and rejects a non-member with the same token', async () => {
+    const started = await startSession();
     const first = await handlers.joinLiveSession({
       auth: { uid: 'student' },
       data: {
@@ -80,8 +124,7 @@ describeEmulator('attendance session handlers against the Firestore emulator', (
         },
       }),
     ).rejects.toMatchObject({ code: 'permission-denied' });
-    const attendance = await db.doc(`groups/class-1/attendanceSessions/${started.sessionId}`).get();
-    expect(attendance.data()?.attendeeCount).toBe(1);
+    await expectCounters(started.sessionId, 1);
   });
 
   it('rejects a join after the QR window expires', async () => {
@@ -101,4 +144,112 @@ describeEmulator('attendance session handlers against the Firestore emulator', (
       }),
     ).rejects.toMatchObject({ code: 'deadline-exceeded' });
   });
+
+  it('persists the full QR, close, late correction and excused workflow without erasing audit history', async () => {
+    const session = await startSession();
+    const joinRequest = {
+      auth: { uid: 'student' },
+      data: { groupId: 'class-1', sessionId: session.sessionId, qrToken: session.qrToken },
+    };
+    const joined = await handlers.joinLiveSession(joinRequest);
+    await expect(correction(session.sessionId, 'too-early', 'absent'))
+      .rejects.toMatchObject({ code: 'failed-precondition' });
+    expect((await attendanceRef(session.sessionId).collection('attendanceCorrections').get()).size).toBe(0);
+    await expectCounters(session.sessionId, 1);
+    await handlers.endLiveSession({
+      auth: { uid: 'teacher' },
+      data: { groupId: 'class-1', sessionId: session.sessionId },
+    });
+
+    time += 60_000;
+    await correction(session.sessionId, 'mark-late', 'late');
+    const recordRef = attendanceRef(session.sessionId).collection('attendanceRecords').doc('student');
+    const late = (await recordRef.get()).data();
+    expect(late).toMatchObject({
+      uid: 'student', groupId: 'class-1', sessionId: session.sessionId,
+      status: 'late', source: 'manual', correctedBy: 'teacher',
+    });
+    expect(late?.checkedInAt.toDate().toISOString()).toBe(joined.checkedInAt);
+    expect(late?.correctedAt.toMillis()).toBe(time);
+    await expectCounters(session.sessionId, 1);
+
+    time += 60_000;
+    await correction(session.sessionId, 'mark-excused', 'excused');
+    expect((await recordRef.get()).data()).toMatchObject({
+      status: 'excused', source: 'manual', checkedInAt: null,
+    });
+    await expectCounters(session.sessionId, 0);
+    const audit = await attendanceRef(session.sessionId).collection('attendanceCorrections').get();
+    expect(audit.size).toBe(2);
+    expect(audit.docs.map((entry) => entry.data())).toEqual(expect.arrayContaining([
+      expect.objectContaining({ previousStatus: 'present', nextStatus: 'late', teacherUid: 'teacher' }),
+      expect.objectContaining({ previousStatus: 'late', nextStatus: 'excused', teacherUid: 'teacher' }),
+    ]));
+    await expect(handlers.joinLiveSession(joinRequest))
+      .rejects.toMatchObject({ code: 'failed-precondition' });
+    await expectCounters(session.sessionId, 0);
+  }, 20_000);
+
+  it('commits one receipt, one audit and one increment for simultaneous identical correction retries', async () => {
+    const session = await startSession();
+    const results = await Promise.all([
+      correction(session.sessionId, 'same-request'),
+      correction(session.sessionId, 'same-request'),
+    ]);
+    expect(results.filter((result) => result.reused === false)).toHaveLength(1);
+    expect(results.filter((result) => result.reused === true)).toHaveLength(1);
+    await expectCounters(session.sessionId, 1);
+    expect((await attendanceRef(session.sessionId).collection('attendanceRecords').get()).size).toBe(1);
+    expect((await attendanceRef(session.sessionId).collection('attendanceCorrections').get()).size).toBe(1);
+    await expect(correction(session.sessionId, 'same-request', 'late'))
+      .rejects.toMatchObject({ code: 'already-exists' });
+    await expectCounters(session.sessionId, 1);
+  }, 20_000);
+
+  it('serializes simultaneous corrections for different students without losing an attendee increment', async () => {
+    await db.doc('groups/class-1/members/other-student').set({ role: 'student', status: 'active' });
+    await db.doc('schools/school-1/members/other-student').set({ status: 'active' });
+    const session = await startSession();
+    await Promise.all([
+      correction(session.sessionId, 'first-student'),
+      correction(session.sessionId, 'second-student', 'late', 'other-student'),
+    ]);
+    await expectCounters(session.sessionId, 2);
+    expect((await attendanceRef(session.sessionId).collection('attendanceRecords').get()).size).toBe(2);
+    expect((await attendanceRef(session.sessionId).collection('attendanceCorrections').get()).size).toBe(2);
+  }, 20_000);
+
+  it.each(['teacher', 'student'])('rechecks %s school membership even for an already committed correction', async (uid) => {
+    const session = await startSession();
+    await correction(session.sessionId, 'saved-request');
+    await db.doc(`schools/school-1/members/${uid}`).update({ status: 'inactive' });
+    await db.doc(`schools/other-school/members/${uid}`).set({ status: 'active' });
+    for (const requestId of ['saved-request', 'new-request']) {
+      await expect(handlers.correctAttendanceRecord({
+        auth: { uid: 'teacher' },
+        data: {
+          groupId: 'class-1', sessionId: session.sessionId, studentUid: 'student',
+          status: 'present', reason: '授課教師已核對課堂出席紀錄', requestId,
+          schoolId: 'other-school',
+        },
+      })).rejects.toMatchObject({ code: 'permission-denied' });
+    }
+    await expectCounters(session.sessionId, 1);
+    expect((await attendanceRef(session.sessionId).collection('attendanceCorrections').get()).size).toBe(1);
+  }, 20_000);
+
+  it.each([
+    { uid: 'teacher', account: { accountDeletionInProgress: true } },
+    { uid: 'student', account: { accountDeletionInProgress: true } },
+    { uid: 'teacher', account: { status: 'deleted' } },
+    { uid: 'student', account: { status: 'deleted' } },
+  ])('rejects unavailable $uid accounts without partial writes', async ({ uid, account }) => {
+    const session = await startSession();
+    await db.doc(`users/${uid}`).set(account);
+    await expect(correction(session.sessionId, 'unavailable-account'))
+      .rejects.toMatchObject({ code: 'permission-denied' });
+    await expectCounters(session.sessionId, 0);
+    expect((await attendanceRef(session.sessionId).collection('attendanceRecords').get()).size).toBe(0);
+    expect((await attendanceRef(session.sessionId).collection('attendanceCorrections').get()).size).toBe(0);
+  }, 20_000);
 });

@@ -11,6 +11,7 @@ import {
   loadMyVerifiedAttendanceHistory,
   summarizeVerifiedAttendance,
   type AttendanceReceiptStatus,
+  type AttendanceHistoryEntry,
   type VerifiedCourseHistory,
 } from '../services/verifiedAttendanceHistory';
 
@@ -34,6 +35,18 @@ function formatTime(date: Date | null): string {
   return date
     ? date.toLocaleString('zh-TW', { timeZone: 'Asia/Taipei', month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })
     : '時間待確認';
+}
+
+function historyRecordHint(entry: AttendanceHistoryEntry): string {
+  const state = entry.active ? '進行中' : '已結束';
+  if (entry.source === 'manual') {
+    const confirmedAt = entry.correctedAt ?? entry.checkedInAt;
+    return confirmedAt ? `${state} · 教師核定 ${formatTime(confirmedAt)}` : `${state} · 教師更正`;
+  }
+  if (entry.checkedInAt) {
+    return `${state} · ${entry.source === 'qr' ? '掃碼簽到' : '確認紀錄'} ${formatTime(entry.checkedInAt)}`;
+  }
+  return state;
 }
 
 export default function MyAttendanceHistoryScreen() {
@@ -192,7 +205,7 @@ export default function MyAttendanceHistoryScreen() {
                               <View key={entry.sessionId} style={styles.recordRow}>
                                 <View style={styles.recordMain}>
                                   <Text style={styles.recordDate}>{formatTime(entry.startedAt)}</Text>
-                                  <Text style={styles.recordHint}>{entry.active ? '進行中' : '已結束'}{entry.checkedInAt ? ` · 簽到 ${formatTime(entry.checkedInAt)}` : ''}</Text>
+                                  <Text style={styles.recordHint}>{historyRecordHint(entry)}</Text>
                                 </View>
                                 <Text style={[styles.recordStatus, verified ? styles.successText : entry.status === 'unconfirmed' || entry.status === 'unavailable' ? styles.mutedText : styles.warningStatus]}>
                                   {statusText[entry.status]}
