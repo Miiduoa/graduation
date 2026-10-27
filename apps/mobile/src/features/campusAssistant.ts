@@ -14,7 +14,7 @@ export interface OnDeviceAssistantReadiness {
 }
 
 export class OnDeviceAssistantError extends Error {
-  constructor(public readonly code: 'native-unavailable' | 'model-required' | 'model-failed' | 'session-changed') {
+  constructor(public readonly code: 'native-unavailable' | 'model-required' | 'model-failed' | 'model-busy' | 'session-changed') {
     super(code === 'session-changed' ? 'Assistant session changed' : code);
     this.name = 'OnDeviceAssistantError';
   }
@@ -115,8 +115,14 @@ export async function askCampusAssistant(input: {
     const readiness = await getOnDeviceAssistantReadiness();
     scopeCheck(input, false);
     if (!readiness.available) throw new OnDeviceAssistantError('native-unavailable');
-    if (!readiness.ready) throw new OnDeviceAssistantError('model-required');
     const state = localLLM.getState();
+    // The inference engine is shared with other mobile features. Reloading a
+    // context while it is generating can release native memory still in use.
+    if (state.status === 'generating' || state.status === 'loading' ||
+        state.status === 'downloading') {
+      throw new OnDeviceAssistantError('model-busy');
+    }
+    if (!readiness.ready) throw new OnDeviceAssistantError('model-required');
     if (state.status !== 'ready' || state.modelId !== readiness.modelId) {
       const loaded = await localLLM.loadModel(readiness.modelId);
       scopeCheck(input, false);
