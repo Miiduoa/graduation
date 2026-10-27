@@ -153,6 +153,63 @@ function AssistantConversation({
       if (current()) setSyncBusy(false);
     }
   };
+  const briefToday = async () => {
+    if (!uid || lock.current || syncLock.current || !current()) return;
+    lock.current = true;
+    syncLock.current = true;
+    setBusy(true);
+    setSyncBusy(true);
+    setError('');
+    setSenseError('');
+    try {
+      const snapshot = await refreshCampusSenseSnapshot({
+        scope: { uid, schoolId },
+        isCurrent: current,
+      });
+      if (!current()) return;
+      setSense(snapshot);
+      setSyncBusy(false);
+      const question = '今天要先處理什麼？';
+      const next: CampusAssistantMessage[] = [
+        ...messages, { role: 'user', content: question },
+      ];
+      // Reuse the phone's deterministic read-only tools before asking its GGUF.
+      const reply = await askCampusAssistant({
+        scope: { uid, schoolId },
+        schoolName,
+        senseSnapshot: snapshot,
+        messages: next,
+        mode: 'device',
+        isCurrent: current,
+      });
+      if (current()) {
+        setMessages([
+          ...next,
+          {
+            role: 'assistant',
+            content: reply.content,
+            requiresService: reply.hasActions,
+            source: reply.source,
+            tool: reply.tool,
+            route: reply.route,
+          },
+        ]);
+        setDraft('');
+      }
+    } catch {
+      if (current()) {
+        setSenseError('無法取得或整理本次校園摘要。請核對網路、帳號與校園資料來源。');
+      }
+    } finally {
+      lock.current = false;
+      syncLock.current = false;
+      if (current()) {
+        setBusy(false);
+        setSyncBusy(false);
+      }
+    }
+  };
+
   const send = async () => {
     const question = draft.trim();
     if ((!uid && mode === 'campus') || !question || lock.current || !current()) return;
@@ -274,6 +331,7 @@ function AssistantConversation({
           syncBusy={syncBusy}
           error={senseError}
           onSync={() => void syncCampus()}
+          onBrief={() => void briefToday()}
           onClear={() => { setSense(null); setSenseError(''); }}
         />
       ) : null}
