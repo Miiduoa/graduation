@@ -70,6 +70,18 @@ it('retries an ambiguous correction with the same idempotency key', async () => 
   expect(await screen.findByText('這筆更正已保存，已確認先前操作結果。')).toBeTruthy();
 });
 
+it('searches by student ID and requires deliberate matching selection', async () => {
+  render(<AttendanceCorrectionPanel courseId="class-a" sessionId="session-a" onUpdated={vi.fn()} />);
+  fireEvent.click(screen.getByRole('button', { name: '管理出席更正' }));
+  expect(await screen.findByLabelText('搜尋學生')).toBeTruthy();
+  fireEvent.change(screen.getByLabelText('搜尋學生'), { target: { value: 'S002' } });
+  expect(screen.queryByRole('option', { name: /學生甲/ })).toBeNull();
+  expect(screen.getByRole('option', { name: /學生乙/ })).toBeTruthy();
+  expect(screen.getByRole('button', { name: '確認並保存更正' }).hasAttribute('disabled')).toBe(true);
+  fireEvent.change(screen.getByLabelText('搜尋學生'), { target: { value: 'UNKNOWN' } });
+  expect(screen.getByText('沒有符合的學生，請調整姓名或學號搜尋條件。')).toBeTruthy();
+});
+
 it('does not display a teacher correction form when roster access is denied', async () => {
   vi.mocked(loadCourseAttendanceRoster).mockRejectedValueOnce(new Error('沒有教師權限'));
   render(<AttendanceCorrectionPanel courseId="class-a" sessionId="session-a" onUpdated={vi.fn()} />);
