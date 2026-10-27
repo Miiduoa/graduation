@@ -293,3 +293,21 @@ it('does not reveal a teacher QR after the server-side expiry window', async () 
   expect(screen.queryByText('secret-must-not-show')).toBeNull();
   expect(screen.queryByAltText('本次課堂簽到 QR Code')).toBeNull();
 });
+
+it('labels manually corrected attendance as an instructor decision, not an instant QR check-in', async () => {
+  const saved = data();
+  saved.sessions[0].ownStatus = 'present';
+  saved.sessions[0].ownRecord = {
+    uid: 'student',
+    displayName: '學生乙',
+    studentId: 'S027',
+    checkedInAt: '2026-10-27T01:00:00.000Z',
+    status: 'present',
+    source: 'manual',
+    correctedAt: '2026-10-27T04:00:00.000Z',
+  };
+  vi.mocked(loadCourseAttendance).mockResolvedValue(saved);
+  render(<CourseAttendance courseId="course" />);
+  expect(await screen.findByText(/教師已補登出席 · 核定/)).toBeTruthy();
+  expect(screen.queryByLabelText('教師提供的簽到碼')).toBeNull();
+});

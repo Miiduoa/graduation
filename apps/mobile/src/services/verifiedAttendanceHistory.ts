@@ -26,6 +26,8 @@ export type AttendanceHistoryEntry = {
   active: boolean;
   status: AttendanceReceiptStatus;
   checkedInAt: Date | null;
+  source?: 'qr' | 'manual' | null;
+  correctedAt?: Date | null;
 };
 
 export type VerifiedCourseHistory = {
@@ -147,6 +149,13 @@ export async function loadVerifiedAttendanceHistory(
                   (status === 'present' || status === 'late') && row
                     ? asDate(row.checkedInAt)
                     : null,
+                source: row && status !== 'unavailable' &&
+                  (row.source === 'qr' || row.source === 'manual')
+                    ? row.source
+                    : null,
+                correctedAt: row && status !== 'unavailable' && row.source === 'manual'
+                  ? asDate(row.correctedAt)
+                  : null,
               } satisfies AttendanceHistoryEntry;
             } catch {
               return { ...base, status: 'unavailable', checkedInAt: null } satisfies AttendanceHistoryEntry;

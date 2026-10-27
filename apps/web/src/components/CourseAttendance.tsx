@@ -8,6 +8,7 @@ import { SchoolAccountRequired } from './SchoolAccountRequired';
 import { SiteShell } from './SiteShell';
 import { Button } from './ui/Button';
 import { Input } from './ui/Input';
+import { AttendanceCorrectionPanel } from './AttendanceCorrectionPanel';
 import { resolveSchoolPageContext, type SchoolSearchParams } from '@/lib/pageContext';
 import {
   attendanceCsv,
@@ -72,6 +73,9 @@ function Session({
     };
   }, []);
   const confirmed = session.ownRecord?.checkedInAt ?? confirmedAt;
+  useEffect(() => {
+    if (!session.ownRecord) setConfirmedAt(null);
+  }, [session.ownRecord]);
   const [clock, setClock] = useState<number | null>(null);
   const deadline = session.qrExpiresAt ? Date.parse(session.qrExpiresAt) : NaN;
   const remainingSeconds = Number.isFinite(deadline) && clock !== null
@@ -185,12 +189,20 @@ function Session({
       )}
       {confirmed && (
         <p role="status" className={styles.confirmed}>
-          已簽到 · {date(confirmed)}
+          {session.ownRecord?.source === 'manual'
+            ? `${session.ownStatus === 'late' ? '教師已補登遲到' : '教師已補登出席'} · 核定 ${date(session.ownRecord.correctedAt ?? confirmed)}`
+            : `${session.ownStatus === 'late' ? '已記錄遲到' : '已簽到'} · ${date(confirmed)}`}
         </p>
       )}
       {!canReadRoster &&
         !confirmed &&
-        (session.active && checkInEnabled ? (
+        (session.ownStatus === 'absent' ? (
+          <p role="status" className={styles.detail}>
+            教師已登記本次缺席。如需更正，請聯絡授課教師。
+          </p>
+        ) : session.ownStatus === 'excused' ? (
+          <p role="status" className={styles.detail}>本次課堂已登記請假。</p>
+        ) : session.active && checkInEnabled ? (
           <form
             className={styles.form}
             onSubmit={(event) => {
@@ -262,6 +274,21 @@ function Session({
           </Button>
         )}
       </div>
+      {canStart && (
+        <AttendanceCorrectionPanel
+          courseId={courseId}
+          sessionId={session.id}
+          active={session.active}
+          onUpdated={async () => {
+            await reload();
+            const latest = await loadAttendanceRecords(courseId, session.id);
+            if (live.current) {
+              setRecords(latest);
+              setRosterQuery('');
+            }
+          }}
+        />
+      )}
       {teacherCode && session.active && !expired && (
         <div className={styles.codePanel}>
           {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -317,8 +344,19 @@ function Session({
                     <span>
                       <strong>{row.displayName || row.studentId || row.uid}</strong>
                       {row.displayName && <small>{row.studentId || row.uid}</small>}
+                      <small>
+                        {row.status === 'late' ? '遲到' : '出席'}
+                        {row.source === 'manual'
+                          ? ' · 教師補登'
+                          : row.source === 'qr'
+                            ? ' · QR 簽到'
+                            : ' · 已核實'}
+                      </small>
                     </span>
-                    <time>{date(row.checkedInAt)}</time>
+                    <time>
+                      {row.source === 'manual' ? '教師核定：' : '紀錄時間：'}
+                      {date(row.source === 'manual' ? row.correctedAt ?? row.checkedInAt : row.checkedInAt)}
+                    </time>
                   </li>
                 ))}
               </ul>
