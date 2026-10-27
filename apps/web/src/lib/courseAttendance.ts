@@ -35,6 +35,18 @@ export interface CourseAttendance {
   canReadRoster: boolean;
   sessions: AttendanceSession[];
 }
+export type AttendanceCorrectionStatus = 'present' | 'late' | 'absent' | 'excused';
+
+export type AttendanceStudent = { uid: string; displayName: string; studentId: string };
+export type AttendanceCorrection = {
+  id: string;
+  studentUid: string;
+  teacherUid: string;
+  previousStatus: string | null;
+  nextStatus: AttendanceCorrectionStatus;
+  reason: string;
+  correctedAt: string | null;
+};
 export interface StartAttendanceResult {
   success: boolean;
   sessionId: string;
@@ -184,7 +196,7 @@ function withCallableCode(message: string, status: string): Error {
 }
 
 async function call<T>(
-  name: 'startLiveSession' | 'endLiveSession' | 'joinLiveSession',
+  name: 'startLiveSession' | 'endLiveSession' | 'joinLiveSession' | 'correctAttendanceRecord',
   input: Record<string, unknown>,
 ): Promise<T> {
   if (!isFirebaseConfigured()) throw new Error('校園服務尚未連線。');
@@ -235,12 +247,89 @@ export function joinCourseAttendance(groupId: string, sessionId: string, qrToken
     { groupId, sessionId, qrToken: qrToken.trim() },
   );
 }
+
+async function requireInstructor(courseId: string) {
+  if (!isFirebaseConfigured()) throw new Error('校園服務尚未連線。');
+  const uid = getAuth()?.currentUser?.uid;
+  if (!uid) throw withCallableCode('登入已失效，請重新登入。', 'UNAUTHENTICATED');
+  const docRef = doc(getDb(), 'groups', courseId, 'members', uid);
+  const member = await getDocFromServer(docRef);
+  if (
+    !member.exists() ||
+    member.data().status !== 'active' ||
+    !['owner', 'instructor'].includes(member.data().role)
+  ) {
+    throw withCallableCode('需要授課教師權限', 'PERMISSION_DENIED');
+  }
+}
+
+export async function loadCourseAttendanceRoster(courseId: string): Promise<AttendanceStudent[]> {
+  await requireInstructor(courseId);
+  const snapshot = await getDocsFromServer(collection(getDb(), 'groups', courseId, 'members'));
+  return snapshot.docs
+    .filter((entry) => entry.data().status === 'active' && ['member', 'student'].includes(entry.data().role))
+    .map((entry) => {
+      const data = entry.data();
+      return {
+        uid: entry.id,
+        displayName: String(data.displayName || data.userName || '未提供姓名'),
+        studentId: String(data.studentId || ''),
+      };
+    })
+    .sort((a, b) => (a.studentId || a.displayName).localeCompare(b.studentId || b.displayName, 'zh-TW'));
+}
+
+export async function loadAttendanceCorrections(
+  courseId: string,
+  sessionId: string,
+): Promise<AttendanceCorrection[]> {
+  await requireInstructor(courseId);
+  const snapshot = await getDocsFromServer(
+    query(
+      collection(getDb(), 'groups', courseId, 'attendanceSessions', sessionId, 'attendanceCorrections'),
+      orderBy('correctedAt', 'desc'),
+      limit(20),
+    ),
+  );
+  return snapshot.docs.map((entry) => {
+    const data = entry.data();
+    return {
+      id: entry.id,
+      studentUid: String(data.studentUid || ''),
+      teacherUid: String(data.teacherUid || ''),
+      previousStatus: typeof data.previousStatus === 'string' ? data.previousStatus : null,
+      nextStatus: data.nextStatus as AttendanceCorrectionStatus,
+      reason: String(data.reason || ''),
+      correctedAt: iso(data.correctedAt),
+    };
+  });
+}
+
+export function correctCourseAttendance(input: {
+  groupId: string;
+  sessionId: string;
+  studentUid: string;
+  status: AttendanceCorrectionStatus;
+  reason: string;
+  requestId: string;
+}) {
+  if (!input.reason.trim() || input.reason.trim().length < 6) {
+    return Promise.reject(new Error('請填寫至少 6 個字元的更正原因。'));
+  }
+  return call<{ success: boolean; reused: boolean; status: AttendanceCorrectionStatus }>(
+    'correctAttendanceRecord',
+    { ...input, reason: input.reason.trim() },
+  );
+}
+
 export function attendanceError(error: unknown): string {
   if (isFunctionsUnconfiguredError(error)) return '點名尚未啟用';
   const code = (error as { code?: string })?.code?.replace('functions/', '');
   if (code === 'permission-denied') return '無法使用這次點名，請確認課程資格與簽到碼。';
   if (code === 'unauthenticated') return '登入已失效，請重新登入。';
   if (code === 'deadline-exceeded') return '簽到碼已過期，請聯絡授課教師。';
+  if (code === 'already-exists') return '操作識別碼已用於不同更正，請重新確認後送出。';
+  if (code === 'invalid-argument') return '資料格式不符，請檢查學生、狀態與更正原因。';
   if (code === 'not-found' || code === 'failed-precondition')
     return '點名已結束或尚未開放，請更新紀錄。';
   return '未能確認操作結果。請更新紀錄確認；若未完成，可以重試。';
