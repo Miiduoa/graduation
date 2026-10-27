@@ -66,7 +66,7 @@ export function CreditPlannerWorkspace({
 }) {
   const key = useMemo(() => creditPlanStorageKey(userId, schoolId), [userId, schoolId]);
   const [plan, setPlan] = useState<CreditPlan>(emptyCreditPlan);
-  const [hydrated, setHydrated] = useState(false);
+  const [hydratedKey, setHydratedKey] = useState<string | null>(null);
   const [saveNotice, setSaveNotice] = useState('');
   const [draft, setDraft] = useState<CourseDraft>(emptyCourse);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -84,11 +84,11 @@ export function CreditPlannerWorkspace({
       setSaveNotice('瀏覽器不允許儲存，這次規劃可能在重新整理後遺失。');
     }
     setPlan(restored ?? emptyCreditPlan());
-    setHydrated(true);
+    setHydratedKey(key);
   }, [key]);
 
   useEffect(() => {
-    if (!hydrated) return;
+    if (hydratedKey !== key) return;
     // An incomplete number (such as "12.") must not overwrite the last valid draft.
     if (!restoreCreditPlan(JSON.stringify(plan))) return;
     try {
@@ -96,7 +96,7 @@ export function CreditPlannerWorkspace({
     } catch {
       setSaveNotice('無法將草稿存在這台瀏覽器，請先匯出 CSV 備份。');
     }
-  }, [plan, key, hydrated]);
+  }, [plan, key, hydratedKey]);
 
   function updateField(field: 'recognized' | 'target' | 'extra', value: string) {
     setPlan((current) => ({ ...current, [field]: value }));
@@ -185,7 +185,7 @@ export function CreditPlannerWorkspace({
     setSaveNotice('已清除這份規劃，不會影響學校成績。');
   }
 
-  if (!hydrated) {
+  if (hydratedKey !== key) {
     return (
       <section className={styles.workspace} aria-label="個人學分試算">
         <p className={styles.muted}>正在讀取這台瀏覽器的學分規劃…</p>
