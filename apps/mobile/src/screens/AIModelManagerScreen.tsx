@@ -19,6 +19,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import NetInfo from '@react-native-community/netinfo';
+import * as Device from 'expo-device';
 import * as FileSystem from 'expo-file-system/legacy';
 import {
   localLLM,
@@ -48,6 +49,13 @@ interface ModelInfo {
   features: string[];
   badge?: string;
 }
+
+const recommendedOnDeviceModelId =
+  Platform.OS === 'ios' &&
+  typeof Device.totalMemory === 'number' &&
+  Device.totalMemory >= 6 * 1024 * 1024 * 1024
+    ? 'qwen2.5-3b'
+    : 'qwen2.5-0.5b';
 
 const MODEL_INFO: ModelInfo[] = [
   // ── 輕量級 ──
@@ -431,6 +439,7 @@ export default function AIModelManagerScreen({ navigation }: any) {
 
         {/* Model Cards */}
         {MODEL_INFO.map((model) => {
+          const recommended = model.id === recommendedOnDeviceModelId;
           const isDownloaded = downloadedModels.includes(model.id);
           const isActive = activeModel === model.id;
           const progress = downloadProgress[model.id];
@@ -447,18 +456,18 @@ export default function AIModelManagerScreen({ navigation }: any) {
               style={[
                 styles.modelCard,
                 isActive && styles.modelCardActive,
-                model.recommended && { transform: [{ scale: pulseAnim }] },
+                recommended && { transform: [{ scale: pulseAnim }] },
               ]}
             >
               {/* Badge */}
-              {model.badge && (
+              {(recommended || model.badge) && (
                 <View
                   style={[
                     styles.badge,
-                    model.recommended ? styles.badgeRecommended : styles.badgeNormal,
+                    recommended ? styles.badgeRecommended : styles.badgeNormal,
                   ]}
                 >
-                  <Text style={[styles.badgeText, !model.recommended && { color: theme.colors.textSecondary }]}>{model.badge}</Text>
+                  <Text style={[styles.badgeText, !recommended && { color: theme.colors.textSecondary }]}>{recommended ? '此裝置建議' : model.badge}</Text>
                 </View>
               )}
 
