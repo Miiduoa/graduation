@@ -130,7 +130,7 @@ async function invokeHostedCallable(
     const { createTimetableShareHandlers } = await import('./timetableShareHandlers');
     return createTimetableShareHandlers({ db })[name](request);
   }
-  if (name === 'startLiveSession' || name === 'endLiveSession' || name === 'joinLiveSession') {
+  if (name === 'startLiveSession' || name === 'endLiveSession' || name === 'joinLiveSession' || name === 'correctAttendanceRecord') {
     const { createLiveSessionHandlers } = await import('./attendanceSessionHandlers');
     return createLiveSessionHandlers({ db })[name](request);
   }
