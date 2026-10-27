@@ -25,6 +25,7 @@ import Constants from 'expo-constants';
 import * as FileSystem from 'expo-file-system/legacy';
 import { NativeModules, Platform, TurboModuleRegistry } from 'react-native';
 import type { LlamaContext, TokenData } from 'llama.rn';
+import { formatLocalModelChat, defaultLocalStopSequences } from './localLLMChatPrompt';
 
 // Expo FileSystem compat
 const getDocDir = () => FileSystem.documentDirectory ?? 'file:///data/user/0/app/';
@@ -707,28 +708,7 @@ class LocalLLMEngine {
    * 使用 ChatML 格式 (Qwen2.5 / Phi-3.5 / SmolLM2 均支援)
    */
   private formatPrompt(messages: LLMMessage[]): string {
-    let prompt = '';
-
-    for (const msg of messages) {
-      switch (msg.role) {
-        case 'system':
-          prompt += `<|im_start|>system\n${msg.content}<|im_end|>\n`;
-          break;
-        case 'user':
-          prompt += `<|im_start|>user\n${msg.content}<|im_end|>\n`;
-          break;
-        case 'assistant':
-          prompt += `<|im_start|>assistant\n${msg.content}<|im_end|>\n`;
-          break;
-        case 'tool':
-          prompt += `<|im_start|>tool\nName: ${msg.name ?? 'unknown'}\nResult: ${msg.content}<|im_end|>\n`;
-          break;
-      }
-    }
-
-    // 開始 assistant 回答
-    prompt += '<|im_start|>assistant\n';
-    return prompt;
+    return formatLocalModelChat(messages, this.config?.modelId);
   }
 
   /**
@@ -751,7 +731,7 @@ class LocalLLMEngine {
       maxTokens = this.config.maxTokens,
       temperature = this.config.temperature,
       topP = this.config.topP,
-      stopSequences = ['<|im_end|>', '<|im_start|>'],
+      stopSequences = defaultLocalStopSequences(this.config.modelId),
       onToken,
       signal,
     } = options;
