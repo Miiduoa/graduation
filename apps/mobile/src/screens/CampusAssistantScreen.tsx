@@ -180,12 +180,25 @@ function AssistantConversation({
     const controller = new AbortController();
     inFlight.current = controller;
     try {
-      const snapshot = await refreshCampusSenseSnapshot({
-        scope: { uid, schoolId },
-        isCurrent: current,
-      });
+      let snapshot: CampusSenseSnapshot | null = null;
+      try {
+        snapshot = await refreshCampusSenseSnapshot({
+          scope: { uid, schoolId },
+          isCurrent: current,
+        });
+        if (!current() || controller.signal.aborted) return;
+        setSense(snapshot);
+      } catch {
+        if (!current() || controller.signal.aborted) return;
+        // Failed networking does not invalidate a previously verified local copy,
+        // but its original timestamp still controls the 15-minute expiry.
+        snapshot = validCampusSenseSnapshot(sense, { uid, schoolId });
+        if (!snapshot) setSense(null);
+        setSenseError(snapshot
+          ? '校園連線失敗，改用先前已授權且未過期的摘要；這不是即時學校狀態。'
+          : '校園連線失敗，改用手機已保存的個人課表；作業與公告沒有即時查證。');
+      }
       if (!current() || controller.signal.aborted) return;
-      setSense(snapshot);
       setSyncBusy(false);
       const next: CampusAssistantMessage[] = [
         ...messages, { role: 'user', content: question },
@@ -224,7 +237,7 @@ function AssistantConversation({
         if (controller.signal.aborted) {
           setError('已停止這次本地整理；資料不會自動傳送到雲端 AI。');
         } else {
-          setSenseError('無法取得或整理本次校園摘要。請核對網路、帳號與校園資料來源。');
+          setError('本機無法完成這次整理。請檢查已儲存課表或免費手機模型；沒有自動將問題傳給雲端 AI。');
         }
       }
     } finally {
