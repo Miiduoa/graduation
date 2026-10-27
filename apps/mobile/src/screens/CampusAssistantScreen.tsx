@@ -20,6 +20,7 @@ import type { CampusAgentWriteProposal, CampusAgentWriteTool } from '../features
 import { CampusAgentActionReview } from './CampusAgentActionReview';
 import { CampusSenseDashboard } from './CampusSenseDashboard';
 import {
+  CAMPUS_SENSE_MAX_AGE_MS,
   refreshCampusSenseSnapshot,
   validCampusSenseSnapshot,
   type CampusSenseSnapshot,
@@ -98,6 +99,9 @@ function AssistantConversation({
   const [mode, setMode] = useState<CampusAssistantMode>('device');
   const [deviceStatus, setDeviceStatus] = useState<OnDeviceAssistantReadiness | null>(null);
   const [sense, setSense] = useState<CampusSenseSnapshot | null>(null);
+  // A timer triggers a render at expiry so "已同步" never stays visible indefinitely
+  // when the user leaves this screen open without interacting.
+  const [, refreshSenseAge] = useState(0);
   const [syncBusy, setSyncBusy] = useState(false);
   const [senseError, setSenseError] = useState('');
   const syncLock = useRef(false);
@@ -111,6 +115,14 @@ function AssistantConversation({
   const publicServices = resolveSchoolPublicServices(schoolId);
   const quickActions = getMobileQuickActions(draft);
   const currentSense = validCampusSenseSnapshot(sense, { uid, schoolId });
+  useEffect(() => {
+    if (!sense) return;
+    const syncedAt = Date.parse(sense.checkedAt);
+    if (!Number.isFinite(syncedAt)) return;
+    const remaining = Math.max(0, syncedAt + CAMPUS_SENSE_MAX_AGE_MS - Date.now());
+    const expiry = setTimeout(() => refreshSenseAge((value) => value + 1), remaining + 50);
+    return () => clearTimeout(expiry);
+  }, [sense?.checkedAt]);
   useEffect(() => {
     mounted.current = true;
     return () => {
