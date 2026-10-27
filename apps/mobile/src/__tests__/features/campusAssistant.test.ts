@@ -26,7 +26,7 @@ jest.mock('../../services/localLLMInference', () => ({
 }));
 jest.mock('../../services/onDeviceSchoolContext', () => ({
   collectOnDeviceSchoolContext: jest.fn(async ({ schoolId }: { schoolId: string }) => ({
-    checkedAt: '2026-10-26T12:00:00Z',
+    checkedAt: new Date().toISOString(),
     schoolId, schoolName: '靜宜大學',
     timetable: { source: 'not-available', updatedAt: null, courses: [] },
   })),
