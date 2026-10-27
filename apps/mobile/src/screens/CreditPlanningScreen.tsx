@@ -26,6 +26,7 @@ import {
   type PlannerCourseStatus,
 } from '@campus/shared/src/creditPlanner';
 import { Screen, Spinner } from '../ui/components';
+import { CreditPlanFeasibilityCard } from './creditAudit/CreditPlanFeasibilityCard';
 import { useAuth } from '../state/auth';
 import { useSchool } from '../state/school';
 import { theme, type ThemeColors } from '../ui/theme';
@@ -505,6 +506,8 @@ export default function CreditPlanningScreen() {
             假設規劃的每門課全部修過且可採計，才有上述預估值。已選課不代表已取得，達到總學分也不等於正式畢業。
           </Text>
         </View>
+
+        <CreditPlanFeasibilityCard plan={plan} />
 
         <SectionTitle title="設定學分目標" subtitle="只填學校已確認採計的學分；不要把下面還沒修的課先加進去。" />
         <Card>
