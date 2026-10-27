@@ -1,0 +1,36 @@
+.panel {
+  min-width: 0;
+  padding: clamp(16px, 3vw, 24px);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+  color: var(--text);
+  margin-block: 16px;
+}
+.heading, .rowHeading {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px 16px;
+}
+.heading h2 { margin: 0; font-size: 18px; line-height: 1.5; }
+.badge { padding: 4px 8px; border-radius: var(--radius-sm); background: var(--accent-soft); color: var(--brand); font-size: 12px; }
+.summary { font-weight: 600; line-height: 1.6; margin: 12px 0 4px; }
+.note { color: var(--muted); font-size: 13px; line-height: 1.7; margin: 8px 0; }
+.list { list-style: none; margin: 16px 0; padding: 0; }
+.list > li { border-top: 1px solid var(--border); padding: 16px 0; overflow-wrap: anywhere; }
+.list > li:last-child { padding-bottom: 0; }
+.rowHeading strong { font-size: 15px; line-height: 1.6; }
+.rowHeading > span { color: var(--muted); font-size: 12px; }
+.fields { margin: 10px 0 0; display: grid; gap: 10px; }
+.fields > div { display: grid; grid-template-columns: 100px minmax(0, 1fr); gap: 12px; }
+.fields dt { color: var(--muted); font-size: 13px; }
+.fields dd { margin: 0; font-size: 14px; line-height: 1.7; overflow-wrap: anywhere; }
+.before { color: var(--muted); }
+.panel button { min-height: 44px; max-width: 100%; white-space: normal; }
+.panel button:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 3px; }
+@media (max-width: 480px) {
+  .fields > div { grid-template-columns: 1fr; gap: 2px; }
+  .panel button { width: 100%; }
+}

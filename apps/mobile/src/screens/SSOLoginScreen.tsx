@@ -179,6 +179,7 @@ function SchoolLoginContent(
       await auth.refreshProfile();
       if (!isCurrent(attempt)) return;
       setStep('success');
+      setStudentPwInput('');
 
       const deptLabel = result.department ? `（${result.department}）` : '';
       showSuccess(attempt, `歡迎，${result.displayName}${deptLabel}`, () => {
@@ -191,6 +192,7 @@ function SchoolLoginContent(
       if (!isCurrent(attempt)) return;
       activeAttempt.current = null;
       console.warn('Student ID login error:', loginError);
+      setStudentPwInput('');
       setError('學校帳號登入未完成，請確認帳號密碼與網路連線後重試。');
       setIsRetryable(true);
       setStep('error');
@@ -326,6 +328,21 @@ function SchoolLoginContent(
             <Text style={[styles.statusTitle, styles.statusContent]}>登入完成</Text>
           </View>
         ) : null}
+
+        <AnimatedCard
+          title="不用學校帳號，也能匯入"
+          subtitle="讀取你自己下載的校務資料"
+        >
+          <Text style={styles.note}>
+            可匯入學校網頁 HTML 存檔、課表截圖、PDF、CSV；先選表格核對再儲存，不必提供校務密碼。
+          </Text>
+          <Button
+            text="匯入課表、成績或活動"
+            kind="secondary"
+            onPress={() => nav.navigate?.('PersonalImport')}
+            disabled={formLocked}
+          />
+        </AnimatedCard>
 
         <AnimatedCard title="Google 帳號" subtitle="和網頁版使用同一個帳號">
           <Button
