@@ -1,5 +1,5 @@
 # Target the local MLX path on a real macOS arm64 GitHub-hosted runner.
-# No model weights or tokens are downloaded; this is not full training acceptance.
+# No pretrained weights or tokens are downloaded; user checkpoints are not touched.
 name: Local MLX Apple Silicon Compatibility
 
 on:
@@ -8,6 +8,7 @@ on:
       - 'backend/ai-server/requirements.txt'
       - 'backend/ai-server/training/**'
       - 'backend/ai-server/tests/mlx_lora_compat_smoke.py'
+      - 'backend/ai-server/tests/mlx_tiny_training_smoke.py'
       - '.github/workflows/mlx-arm64-compat.yml'
   push:
     branches: [main]
@@ -15,6 +16,7 @@ on:
       - 'backend/ai-server/requirements.txt'
       - 'backend/ai-server/training/**'
       - 'backend/ai-server/tests/mlx_lora_compat_smoke.py'
+      - 'backend/ai-server/tests/mlx_tiny_training_smoke.py'
       - '.github/workflows/mlx-arm64-compat.yml'
   workflow_dispatch:
 
@@ -23,7 +25,7 @@ permissions:
 
 jobs:
   mlx-apple-silicon:
-    name: MLX tensor / LoRA CLI smoke on Apple Silicon
+    name: MLX tensor / LoRA training and fuse on Apple Silicon
     runs-on: macos-15
     timeout-minutes: 25
     defaults:
@@ -41,6 +43,9 @@ jobs:
           python -m pip check
       - name: Verify Apple Silicon tensor and Campus One LoRA CLI
         run: python tests/mlx_lora_compat_smoke.py
+      - name: Train, reload and fuse a generated local model without network downloads
+        timeout-minutes: 5
+        run: python tests/mlx_tiny_training_smoke.py
       - name: Acceptance boundary
         run: |
-          echo '::notice::Validates tiny MLX tensor and argument/configuration paths only; actual model loads, adapter training, and existing data remain to be verified.'
+          echo '::notice::Validates a generated tiny model through real Campus One LoRA/fuse subprocesses, reloads and output comparison. This is not pretrained-model quality, existing user checkpoint, ONNX or production-data acceptance.'
