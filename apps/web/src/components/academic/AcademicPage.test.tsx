@@ -537,7 +537,7 @@ it('offers local credit planning in another campus without reading Providence gr
   expect(loadAcademicRecords).not.toHaveBeenCalled();
   fireEvent.change(screen.getByLabelText('已確認可採計學分（自行填寫）'), { target: { value: '48' } });
   fireEvent.change(screen.getByLabelText('希望累計的學分'), { target: { value: '128' } });
-  expect(screen.getByRole('status').textContent).toContain('80 學分');
+  expect(screen.getByRole('region', { name: '個人學分試算' }).textContent).toContain('80 學分');
 });
 
 it('hides locally scoped plans while school selection or account state is unresolved', async () => {
