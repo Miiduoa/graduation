@@ -72,9 +72,9 @@ function Session({
     };
   }, []);
   const confirmed = session.ownRecord?.checkedInAt ?? confirmedAt;
-  const [clock, setClock] = useState(Date.now());
+  const [clock, setClock] = useState<number | null>(null);
   const deadline = session.qrExpiresAt ? Date.parse(session.qrExpiresAt) : NaN;
-  const remainingSeconds = Number.isFinite(deadline)
+  const remainingSeconds = Number.isFinite(deadline) && clock !== null
     ? Math.max(0, Math.ceil((deadline - clock) / 1000))
     : null;
   const expired = session.active && remainingSeconds === 0;
@@ -86,8 +86,13 @@ function Session({
 
   useEffect(() => {
     if (!session.active || (!canStart && !checkInEnabled)) return;
-    const timer = window.setInterval(() => setClock(Date.now()), 1000);
-    return () => window.clearInterval(timer);
+    const tick = () => setClock(Date.now());
+    const initial = window.setTimeout(tick, 0);
+    const timer = window.setInterval(tick, 1000);
+    return () => {
+      window.clearTimeout(initial);
+      window.clearInterval(timer);
+    };
   }, [session.active, canStart, checkInEnabled]);
 
   useEffect(() => {
