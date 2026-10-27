@@ -1,5 +1,9 @@
 import { randomBytes } from 'node:crypto';
 import { FieldValue } from 'firebase-admin/firestore';
+import {
+  TEACHER_LMS_UNAVAILABLE_CODE,
+  TEACHER_LMS_UNAVAILABLE_COPY,
+} from '@campus/shared/src/schoolLogin';
 import { courseOfferingId } from '@campus/shared/src/timetable/course';
 import { signFirebaseCustomToken, type ServiceAccountSigner } from './firebaseCustomToken';
 import {
@@ -78,8 +82,8 @@ export type SignInPuDeps = {
 
 export const SCHOOL_UNAVAILABLE = '學校系統暫時無法連線';
 export const TEACHER_SCHOOL_UNAVAILABLE = SCHOOL_UNAVAILABLE;
-export const TEACHER_LMS_UNAVAILABLE = '老師登入暫未開放；學生請輸入純數字學號';
-export const TEACHER_LMS_UNAVAILABLE_CODE = 'teacher_lms_unreachable';
+export const TEACHER_LMS_UNAVAILABLE = TEACHER_LMS_UNAVAILABLE_COPY;
+export { TEACHER_LMS_UNAVAILABLE_CODE };
 export const TEACHER_IDENTITY_UNVERIFIED = '暫時無法驗證老師身分';
 export const STUDENT_LMS_SOFT_TIMEOUT_MS = 2500;
 

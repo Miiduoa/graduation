@@ -243,7 +243,7 @@ it('returns the teacher LMS unavailability code without echoing the password', a
   expect(res.status).toBe(503);
   const body = await res.json();
   expect(body).toEqual({
-    error: '老師登入暫未開放；學生請輸入純數字學號',
+    error: '老師登入暫時無法使用',
     code: 'teacher_lms_unreachable',
   });
   expect(JSON.stringify(body)).not.toContain(SECRET);
