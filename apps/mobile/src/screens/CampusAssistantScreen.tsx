@@ -30,6 +30,7 @@ const SERVICE_AFTER_WRITE: Record<CampusAgentWriteTool, string> = {
 };
 
 const VERIFIED_SERVICE_ROUTES: Record<string, { route: string; label: string }> = {
+  '/map': { route: 'MapV2', label: '校園地圖' },
   '/timetable': { route: 'PersonalTimetable', label: '我的課表' },
   '/announcements': { route: '公告總覽', label: '校園公告' },
   '/events': { route: '活動總覽', label: '校園活動' },

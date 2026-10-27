@@ -95,3 +95,43 @@ test('does not invent current weather when offline', () => {
   expect(result?.content).toContain('需要正式資料來源');
   expect(result?.route).toBeUndefined();
 });
+
+test('reports saved classes beyond the first eight instead of falsely claiming no class', () => {
+  const more = Array.from({ length: 9 }, (_, index) => ({
+    name: `星期一課程${index}`, day: 1, start: index + 1, end: index + 1,
+  }));
+  const large = {
+    ...snapshot,
+    timetable: {
+      ...snapshot.timetable,
+      courses: [
+        ...more,
+        { name: '最後一門星期五課程', day: 5, start: 5, end: 6 },
+      ],
+    },
+  } as OnDeviceSchoolContext;
+  const friday = runOfflineCampusTool('星期五有哪些課', large);
+  expect(friday?.content).toContain('最後一門星期五課程');
+  const weekly = runOfflineCampusTool('這週課表', large);
+  expect(weekly?.content).toContain('星期五：1 堂');
+  expect(weekly?.content).toContain('星期一：9 堂');
+});
+
+test('opens known read-only campus services directly without a local model', () => {
+  const library = runOfflineCampusTool('幫我開啟圖書館', snapshot);
+  expect(library).toMatchObject({ tool: 'open-service', route: '/library' });
+  expect(library?.content).toContain('沒有替你送出任何申請');
+  expect(runOfflineCampusTool('圖書館怎麼走', snapshot))
+    .toMatchObject({ tool: 'open-service', route: '/map' });
+  expect(runOfflineCampusTool('打開我的課表', snapshot))
+    .toMatchObject({ tool: 'open-service', route: '/timetable' });
+  // A destructive screen is not on the no-model navigation allowlist.
+  expect(runOfflineCampusTool('幫我刪除帳號', snapshot)).toBeNull();
+});
+
+test('offline local data checks take precedence over navigation shortcuts', () => {
+  expect(runOfflineCampusTool('幫我查最新校園公告', snapshot))
+    .toMatchObject({ tool: 'online-required', route: '/announcements' });
+  expect(runOfflineCampusTool('幫我查宿舍報修進度', snapshot))
+    .toMatchObject({ tool: 'online-required', route: '/dormitory' });
+});
