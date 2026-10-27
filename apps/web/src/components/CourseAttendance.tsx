@@ -420,6 +420,14 @@ function Workspace({ courseId, uid }: { courseId: string; uid: string }) {
       if (mounted.current) setStarting(false);
     }
   }
+  const visibleSessions = data?.sessions.filter(
+    (session) =>
+      (data.canReadRoster ||
+        !session.active ||
+        session.id === studentCheckInSession(data.sessions)?.id) &&
+      (historyFilter === 'all' ||
+        (historyFilter === 'active' ? session.active : !session.active)),
+  ) ?? [];
   return (
     <>
       <div className={styles.workspaceHeading}>
@@ -520,42 +528,29 @@ function Workspace({ courseId, uid }: { courseId: string; uid: string }) {
               ))}
             </div>
           </div>
-          {data.sessions.length ? (
-            (() => {
-              const shown = data.sessions.filter(
-                (session) =>
-                  (data.canReadRoster ||
-                    !session.active ||
-                    session.id === studentCheckInSession(data.sessions)?.id) &&
-                  (historyFilter === 'all' ||
-                    (historyFilter === 'active' ? session.active : !session.active)),
-              );
-              return shown.length ? shown.map((session) => (
-                <Session
-                  key={`${session.id}:${data.canStart}:${data.canReadRoster}`}
-                  session={session}
-                  courseId={courseId}
-                  courseName={data.courseName}
-                  uid={uid}
-                  canStart={data.canStart}
-                  canReadRoster={data.canReadRoster}
-                  checkInEnabled={studentCheckInSession(data.sessions)?.id === session.id}
-                  reload={reload}
-                />
-              )) : (
-                <div className={styles.empty}>
-                  <h3>沒有符合條件的點名</h3>
-                  <p>改選「全部」查看其他場次，或更新紀錄確認最新狀態。</p>
-                </div>
-              );
-            })()
+          {visibleSessions.length ? (
+            visibleSessions.map((session) => (
+              <Session
+                key={`${session.id}:${data.canStart}:${data.canReadRoster}`}
+                session={session}
+                courseId={courseId}
+                courseName={data.courseName}
+                uid={uid}
+                canStart={data.canStart}
+                canReadRoster={data.canReadRoster}
+                checkInEnabled={studentCheckInSession(data.sessions)?.id === session.id}
+                reload={reload}
+              />
+            ))
           ) : (
             <div className={styles.empty}>
-              <h3>還沒有點名紀錄</h3>
+              <h3>{data.sessions.length ? '沒有符合條件的點名' : '還沒有點名紀錄'}</h3>
               <p>
-                {data.canStart
-                  ? '開啟點名後，學生就能在自己的課程頁簽到。'
-                  : '教師開啟點名後，請更新這個頁面。'}
+                {data.sessions.length
+                  ? '改選「全部」查看其他場次，或更新紀錄確認最新狀態。'
+                  : data.canStart
+                    ? '開啟點名後，學生就能在自己的課程頁簽到。'
+                    : '教師開啟點名後，請更新這個頁面。'}
               </p>
             </div>
           )}
