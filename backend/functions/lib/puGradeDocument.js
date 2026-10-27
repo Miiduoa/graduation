@@ -1,47 +1,95 @@
 'use strict';
 
-// Parse the grade table shape documented by the PU integration.
-// This parser is intentionally pure: no HTTP, cookies, or Firebase dependencies.
-function stripCell(html) {
-  return String(html || '')
-    .replace(/<br\s*\/?>/gi, ' ')
-    .replace(/<[^>]+>/g, '')
-    .replace(/&nbsp;/gi, ' ')
-    .replace(/&amp;/gi, '&')
-    .replace(/&lt;/gi, '<')
-    .replace(/&gt;/gi, '>')
-    .replace(/\s+/g, ' ')
-    .trim();
+const { parseFragment } = require('parse5');
+
+const MAX_DOCUMENT_LENGTH = 4 * 1024 * 1024;
+const OMITTED = new Set(['script', 'style', 'template', 'input', 'select', 'button', '#comment']);
+
+function nodeText(node, skipTables = false) {
+  if (OMITTED.has(node.nodeName) || (skipTables && node.nodeName === 'table')) return '';
+  if (node.nodeName === '#text') return node.value || '';
+  if (node.nodeName === 'br') return ' ';
+  return (node.childNodes || []).map(child => nodeText(child, skipTables)).join(' ');
 }
 
-function parseGradeSemesterCodes(html) {
-  if (typeof html !== 'string') return [];
-  const found = [];
-  const regex = /學期別\(Semester\)[：:]\s*(\d{2,3})\s*\[\s*(\d+)\s*\]/gi;
-  let match;
-  while ((match = regex.exec(html)) !== null) {
-    const code = match[1] + match[2];
-    if (!found.includes(code)) found.push(code);
+function cleanText(value) {
+  return String(value || '').replace(/\u00a0/g, ' ').replace(/\s+/g, ' ').trim();
+}
+
+function normalizedLabel(value) {
+  return cleanText(value).replace(/[\s（()）：:]/g, '').toLowerCase();
+}
+
+function semesterCodesInText(value) {
+  const codes = [];
+  const pattern = /(?:學期別\s*(?:[（(]\s*Semester\s*[）)])?\s*[：:]?\s*(\d{2,3})\s*\[\s*([123])\s*\]|(\d{2,3})\s*學年度\s*第?\s*([123一二三])\s*學期)/gi;
+  for (const match of value.matchAll(pattern)) {
+    const term = match[2] || ({ 一: '1', 二: '2', 三: '3' }[match[4]] || match[4]);
+    codes.push((match[1] || match[3]) + term);
   }
-  return found;
+  return codes;
 }
 
-function rowsInTable(tableHtml) {
+function semesterCell(value) {
+  const text = cleanText(value);
+  const heading = semesterCodesInText(text);
+  if (heading.length === 1) return heading[0];
+  const match = text.match(/^(\d{2,3})\s*(?:[-/]\s*([123])|\[\s*([123])\s*\]|([123]))$/);
+  return match ? match[1] + (match[2] || match[3] || match[4]) : '';
+}
+
+function tableRows(table) {
   const rows = [];
-  const rowRegex = /<tr\b[^>]*>([\s\S]*?)<\/tr>/gi;
-  let row;
-  while ((row = rowRegex.exec(tableHtml)) !== null) {
-    const cells = [];
-    const cellRegex = /<t[dh]\b[^>]*>([\s\S]*?)<\/t[dh]>/gi;
-    let cell;
-    while ((cell = cellRegex.exec(row[1])) !== null) cells.push(stripCell(cell[1]));
-    if (cells.length) rows.push(cells);
+  function visit(node) {
+    if (node !== table && node.nodeName === 'table') return;
+    if (node.nodeName === 'tr') {
+      rows.push((node.childNodes || []).filter(child => child.nodeName === 'td' || child.nodeName === 'th'));
+      return;
+    }
+    for (const child of node.childNodes || []) visit(child);
   }
-  return rows;
+  visit(table);
+  const spans = new Map();
+  return rows.map(cells => {
+    const values = [];
+    for (const [column, span] of spans) {
+      values[column] = span.text;
+      if (--span.remaining <= 0) spans.delete(column);
+    }
+    let column = 0;
+    for (const cell of cells) {
+      while (values[column] !== undefined) column += 1;
+      const attrs = Object.fromEntries((cell.attrs || []).map(attr => [attr.name, attr.value]));
+      const colspan = Math.min(40, Math.max(1, Number.parseInt(attrs.colspan, 10) || 1));
+      const rowspan = Math.min(1000, Math.max(1, Number.parseInt(attrs.rowspan, 10) || 1));
+      const text = cleanText(nodeText(cell, true));
+      for (let offset = 0; offset < colspan; offset++) {
+        values[column + offset] = offset === 0 ? text : '';
+        if (rowspan > 1) spans.set(column + offset, { text: offset === 0 ? text : '', remaining: rowspan - 1 });
+      }
+      column += colspan;
+    }
+    return values;
+  });
+}
+
+function headerColumns(cells) {
+  const fields = {};
+  cells.forEach((value, index) => {
+    const label = normalizedLabel(value);
+    if (/^(?:學期別|學期|semester)/.test(label)) fields.semester = index;
+    else if (/^(?:選課代號|課程代碼|科目代碼|coursecode|courseid)/.test(label)) fields.code = index;
+    else if (/^(?:修別|類別|課程類別|coursetype|type)/.test(label)) fields.courseType = index;
+    else if (/^(?:科目名稱|課程名稱|科目|課程|coursename|coursetitle|course$)/.test(label)) fields.title = index;
+    else if (/^(?:修課班級|開課班級|上課班級|班級|class)/.test(label)) fields.class = index;
+    else if (/^(?:學分數|學分|credits?)/.test(label)) fields.credits = index;
+    else if (/^(?:成績|分數|score|grade)/.test(label)) fields.score = index;
+  });
+  return fields.title !== undefined && fields.credits !== undefined && fields.score !== undefined ? fields : null;
 }
 
 function isSummaryLabel(label) {
-  return /平均|average|操行|behavior|排名|ranking/i.test(label);
+  return /^(?:學期(?:學業)?平均(?:成績|分數)?|平均(?:成績|分數)?|(?:學期)?操行(?:成績)?|系排名|班排名|(?:semester\s+)?average(?:\s+(?:score|grade))?|behavior(?:\s+score)?|(?:department|class)\s+rank(?:ing)?)(?:\s*[（(]|\s*$)/i.test(label);
 }
 
 function appendSummary(summary, semester, label, score) {
@@ -54,73 +102,106 @@ function appendSummary(summary, semester, label, score) {
 }
 
 function parseGradeValue(value) {
-  if (/^(?:通過|pass)(?:\(pass\))?$/i.test(value)) return 'Pass';
-  const text = String(value || '').trim();
-  if (/^\d+(?:\.\d+)?$/.test(text)) return Number(text);
-  return text;
+  if (/^(?:通過|pass)(?:\s*[（(]pass[）)])?$/i.test(value)) return 'Pass';
+  if (/^\d+(?:\.\d+)?$/.test(value)) return Number(value);
+  return value;
+}
+
+function readDocument(html) {
+  const document = parseFragment(html);
+  const grades = [];
+  const summary = {};
+  const allSemesters = [];
+  const seen = new Set();
+  let semester = '';
+  let precedingText = '';
+  let recognizedTable = false;
+  let skippedRows = 0;
+  function rememberSemester(code) {
+    if (code && !allSemesters.includes(code)) allSemesters.push(code);
+    return code;
+  }
+  function consumeHeadings(text) {
+    for (const code of semesterCodesInText(cleanText(text))) semester = rememberSemester(code);
+  }
+  function consumeTable(table) {
+    const rows = tableRows(table);
+    const headerIndex = rows.findIndex(row => headerColumns(row));
+    if (headerIndex < 0) return false;
+    recognizedTable = true;
+    consumeHeadings(precedingText);
+    consumeHeadings(rows.slice(0, headerIndex).flat().join(' '));
+    const caption = (table.childNodes || []).find(node => node.nodeName === 'caption');
+    if (caption) consumeHeadings(nodeText(caption));
+    const columns = headerColumns(rows[headerIndex]);
+    for (const cells of rows.slice(headerIndex + 1)) {
+      if (headerColumns(cells)) continue;
+      const title = cleanText(cells[columns.title]);
+      if (!title) continue;
+      const ownSemester = columns.semester === undefined ? semester : semesterCell(cells[columns.semester]);
+      if (!ownSemester) { skippedRows += 1; continue; }
+      rememberSemester(ownSemester);
+      const score = cleanText(cells[columns.score]);
+      if (isSummaryLabel(title)) {
+        if (score) appendSummary(summary, ownSemester, title, score);
+        continue;
+      }
+      const creditsText = cleanText(cells[columns.credits]);
+      if (!/^\d+(?:\.\d+)?$/.test(creditsText)) { skippedRows += 1; continue; }
+      const credits = Number(creditsText);
+      const boundary = title.search(/[A-Z]/);
+      const record = {
+        semester: ownSemester,
+        courseName: boundary > 0 ? title.slice(0, boundary).trim() : title,
+        courseNameEn: boundary > 0 ? title.slice(boundary).trim() : '',
+        class: cleanText(cells[columns.class]),
+        courseType: cleanText(cells[columns.courseType]),
+        credits,
+        score: parseGradeValue(score),
+      };
+      const courseCode = cleanText(cells[columns.code]);
+      if (courseCode) record.courseCode = courseCode;
+      const key = JSON.stringify(record);
+      if (seen.has(key)) continue;
+      seen.add(key);
+      grades.push(record);
+    }
+    precedingText = '';
+    return true;
+  }
+  function visit(node) {
+    if (OMITTED.has(node.nodeName)) return;
+    if (node.nodeName === 'table' && consumeTable(node)) return;
+    if (node.nodeName === '#text') precedingText = (precedingText + ' ' + node.value).slice(-4000);
+    for (const child of node.childNodes || []) visit(child);
+  }
+  visit(document);
+  consumeHeadings(precedingText);
+  return { grades, allSemesters, summary, recognizedTable, skippedRows };
+}
+
+function parseGradeSemesterCodes(html) {
+  if (typeof html !== 'string' || html.length > MAX_DOCUMENT_LENGTH) return [];
+  return readDocument(html).allSemesters;
 }
 
 function parsePuGradeDocument(html, semesterFilter = '') {
-  if (typeof html !== 'string' || !html.trim()) {
-    return { success: false, grades: [], allSemesters: [], summary: {}, error: 'Empty grade document' };
+  if (typeof html !== 'string' || !html.trim() || html.length > MAX_DOCUMENT_LENGTH) {
+    return { success: false, grades: [], allSemesters: [], summary: {}, error: 'Empty or oversized grade document' };
   }
-  const headers = /學期別\(Semester\)[：:]\s*(\d{2,3})\s*\[\s*(\d+)\s*\]/gi;
-  const matches = [...html.matchAll(headers)];
-  const allSemesters = parseGradeSemesterCodes(html);
-  if (!matches.length) {
-    return { success: false, grades: [], allSemesters: [], summary: {}, error: 'Unrecognized semester headings' };
+  const { grades, allSemesters, summary, recognizedTable, skippedRows } = readDocument(html);
+  if (!allSemesters.length) {
+    return { success: false, grades: [], allSemesters, summary, error: 'Unrecognized semester headings or columns' };
   }
-
-  const grades = [];
-  const summary = {};
-  const seen = new Set();
-  for (let i = 0; i < matches.length; i++) {
-    const header = matches[i];
-    const semester = header[1] + header[2];
-    const start = header.index + header[0].length;
-    const end = i + 1 < matches.length ? matches[i + 1].index : html.length;
-    const section = html.slice(start, end);
-    const tables = section.match(/<table\b[^>]*>[\s\S]*?<\/table>/gi) || [];
-    for (const table of tables) {
-      if (!/(?:科目|Course)/i.test(table) || !/(?:成績|Score)/i.test(table)) continue;
-      for (const cells of rowsInTable(table)) {
-        if (cells.length < 5) continue;
-        const title = cells[0];
-        if (!title || /^(?:科目名稱|Course\b)/i.test(title)) continue;
-        const score = cells[cells.length - 1];
-        if (isSummaryLabel(title)) {
-          appendSummary(summary, semester, title, score);
-          continue;
-        }
-        const className = cells[cells.length - 4];
-        const courseType = cells[cells.length - 3];
-        const creditsText = cells[cells.length - 2];
-        const credits = Number(creditsText);
-        if (!Number.isFinite(credits) || credits < 0 || !score) continue;
-        const boundary = title.search(/[A-Z]/);
-        const courseName = boundary > 0 ? title.slice(0, boundary).trim() : title.trim();
-        const courseNameEn = boundary > 0 ? title.slice(boundary).trim() : '';
-        const record = {
-          semester, courseName, courseNameEn, class: className, courseType,
-          credits, score: parseGradeValue(score)
-        };
-        const key = JSON.stringify(record);
-        if (seen.has(key)) continue;
-        seen.add(key);
-        grades.push(record);
-      }
-    }
-  }
-  if (!grades.length) {
-    return {
-      success: false, grades: [], allSemesters, summary,
-      error: 'No recognizable grade rows; document may have changed'
-    };
+  if (!recognizedTable || !grades.length) {
+    return { success: false, grades: [], allSemesters, summary, error: 'No recognizable grade rows; document may have changed' };
   }
   return {
     success: true,
     grades: semesterFilter ? grades.filter(item => item.semester === semesterFilter) : grades,
-    allSemesters, summary
+    allSemesters,
+    summary,
+    coverage: { status: skippedRows > 0 ? 'partial' : 'unknown', skippedRows },
   };
 }
 

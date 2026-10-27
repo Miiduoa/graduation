@@ -1,6 +1,7 @@
 'use strict';
 
 const { getFirestore, FieldValue } = require('firebase-admin/firestore');
+const { createAuthzHelpers } = require('../authz');
 const { createRequestId } = require('../assistantAgent');
 const { enforceRateLimit, getClientIp, isProductionRuntime } = require('../securityUtils');
 const {
@@ -210,7 +211,9 @@ async function runCampusAssistantWithAgentRuntime(request) {
   }
 
   const userProfile = uid ? await fetchAssistantUserProfile(uid) : null;
-  const schoolId = userProfile?.schoolId ?? context.schoolId ?? null;
+  const selectedSchoolId = typeof context.schoolId === 'string' ? context.schoolId.trim() : '';
+  const schoolId = selectedSchoolId || userProfile?.schoolId || null;
+  if (uid && schoolId) await createAuthzHelpers(db).assertActiveSchoolMember(schoolId, uid);
 
   if (uid && schoolId) {
     await db
@@ -234,47 +237,58 @@ async function runCampusAssistantWithAgentRuntime(request) {
 
   let prefetched = { scope: { uid, schoolId } };
   if (uid && schoolId) {
-    const toolCtx = {
-      uid,
-      schoolId,
-      groupId: context.groupId,
-      timeZone,
-      prefetched: {},
-    };
+    const toolCtx = { uid, schoolId, groupId: context.groupId, timeZone, prefetched: {} };
+    const reads = [
+      {
+        key: 'todaySchedule',
+        tool: 'getTodaySchedule',
+        input: {},
+        load: () => runTool('getTodaySchedule', toolCtx, {}),
+      },
+      {
+        key: 'assignments',
+        tool: 'getAssignments',
+        input: context.groupId ? { groupId: context.groupId } : {},
+        load: () => runTool('getAssignments', toolCtx, { preferredGroupId: context.groupId }),
+      },
+      {
+        key: 'announcements',
+        tool: 'getAnnouncements',
+        input: { schoolId },
+        load: () => runTool('getAnnouncements', toolCtx, { schoolId }),
+      },
+      {
+        key: 'dailyBrief',
+        tool: 'fetchAssistantDailyBrief',
+        input: {},
+        load: () => fetchAssistantDailyBrief(uid, schoolId),
+      },
+    ];
+
+    // A failed reader must not hide the data returned by the other sources.
+    const readStarted = Date.now();
+    const settled = await Promise.allSettled(reads.map((item) => item.load()));
+    for (let index = 0; index < reads.length; index += 1) {
+      const item = reads[index];
+      const result = settled[index];
+      if (result.status === 'fulfilled') {
+        prefetched[item.key] = result.value;
+        const output = Array.isArray(result.value)
+          ? { count: result.value.length }
+          : item.key === 'dailyBrief'
+            ? { hasBrief: Boolean(result.value?.summary) }
+            : { status: result.value?.status || 'available' };
+        await recordStep(item.tool, item.input, output, Date.now() - readStarted);
+      } else {
+        await recordStep(item.tool, item.input, { status: 'unavailable' }, Date.now() - readStarted);
+      }
+    }
     try {
-      const t0 = Date.now();
-      const todaySchedule = await runTool('getTodaySchedule', toolCtx, {});
-      prefetched.todaySchedule = todaySchedule;
-      await recordStep('getTodaySchedule', {}, todaySchedule, Date.now() - t0);
-
-      const t1 = Date.now();
-      const assignments = await runTool('getAssignments', toolCtx, {
-        preferredGroupId: context.groupId,
-      });
-      prefetched.assignments = assignments;
-      await recordStep(
-        'getAssignments',
-        context.groupId ? { groupId: context.groupId } : {},
-        { count: assignments.length },
-        Date.now() - t1,
-      );
-
-      const t2 = Date.now();
-      const announcements = await runTool('getAnnouncements', toolCtx, { schoolId });
-      prefetched.announcements = announcements;
-      await recordStep('getAnnouncements', { schoolId }, { count: announcements.length }, Date.now() - t2);
-
-      const t3 = Date.now();
-      const prioritySummary = await runTool('getPrioritySummary', { ...toolCtx, prefetched: { todaySchedule, assignments, announcements } }, {});
-      await recordStep('getPrioritySummary', {}, prioritySummary, Date.now() - t3);
-
-      const t4 = Date.now();
-      const dailyBrief = await fetchAssistantDailyBrief(uid, schoolId);
-      await recordStep('fetchAssistantDailyBrief', {}, { hasBrief: Boolean(dailyBrief?.summary) }, Date.now() - t4);
-
-      prefetched = { scope: { uid, schoolId }, todaySchedule, assignments, announcements, dailyBrief, prioritySummary };
-    } catch (e) {
-      await recordStep('prefetch_error', {}, { error: String(e?.message || e) }, 0);
+      const prioritySummary = await runTool('getPrioritySummary', { ...toolCtx, prefetched }, {});
+      prefetched.prioritySummary = prioritySummary;
+      await recordStep('getPrioritySummary', {}, prioritySummary, Date.now() - readStarted);
+    } catch {
+      await recordStep('getPrioritySummary', {}, { status: 'unavailable' }, Date.now() - readStarted);
     }
 
     const writePlan = getIntentWritePlan(intentMeta.name);
@@ -447,6 +461,20 @@ async function runCampusAssistantWithAgentRuntime(request) {
     };
   }
 
+  const actionProposals = (Array.isArray(envelope.actions) ? envelope.actions : [])
+    .filter((action) =>
+      action?.action === 'queue_action' &&
+      action.requiresConfirmation === true &&
+      action.params?.agentRunId === runId &&
+      typeof action.params?.toolName === 'string' &&
+      action.params.input && typeof action.params.input === 'object' &&
+      !Array.isArray(action.params.input))
+    .slice(0, 8)
+    .map((action) => ({
+      toolName: action.params.toolName,
+      input: dropEmpty(action.params.input),
+    }));
+
   if (uid && schoolId) {
     await db
       .collection('users')
@@ -462,6 +490,7 @@ async function runCampusAssistantWithAgentRuntime(request) {
           intent,
           steps,
           toolCalls: steps,
+          actionProposals,
           finalAnswer: response.content,
           evaluationScore: evaluation.score,
           evaluationReason: evaluation.reason,

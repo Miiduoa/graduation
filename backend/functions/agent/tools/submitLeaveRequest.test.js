@@ -1,95 +1,73 @@
 'use strict';
 
-const mockSet = jest.fn();
-const mockCourseGet = jest.fn();
-const mockLeaveDoc = jest.fn(() => ({ id: 'gen-id', set: mockSet }));
+const { transactionStore } = require('../../testSupport/transactionStore');
+let mockStore;
+jest.mock('firebase-admin/firestore', () => ({
+  getFirestore: () => mockStore.db,
+  FieldValue: { serverTimestamp: () => 'server-timestamp' },
+}));
+const submitLeaveRequest = require('./submitLeaveRequest');
+const ctx = { uid: 'alice', schoolId: 'pu', agentActionKey: 'server-run:0' };
+const input = { courseId: 'c1', date: '2026-10-28', type: '病假' };
 
-const mockCollection = jest.fn((name) => {
-  if (name === 'leaveRequests') {
-    return { doc: mockLeaveDoc };
-  }
-  if (name === 'users') {
-    return {
-      doc: jest.fn(() => ({
-        collection: jest.fn((sub) => {
-          if (sub === 'courses') {
-            return {
-              doc: jest.fn(() => ({ get: mockCourseGet })),
-            };
-          }
-          return { doc: jest.fn(() => ({})) };
-        }),
-      })),
-    };
-  }
-  return { doc: jest.fn() };
+beforeEach(() => {
+  mockStore = transactionStore([
+    ['users/alice', { schoolId: 'pu' }],
+    ['schools/pu/members/alice', { status: 'active' }],
+    ['users/alice/schools/pu/personalTimetable/current', {
+      schoolId: 'pu', courses: [{ id: 'c1', name: '資料庫', teacher: '王老師' }],
+    }],
+  ]);
+  mockStore.db.doc = (path) => path.split('/').reduce((ref, key, index) =>
+    index % 2 === 0 ? ref.collection(key) : ref.doc(key), mockStore.db);
 });
 
-jest.mock('firebase-admin/firestore', () => ({
-  getFirestore: jest.fn(() => ({ collection: mockCollection })),
-  FieldValue: { serverTimestamp: jest.fn(() => 'srv-ts') },
-}));
-
-const submitLeaveRequest = require('./submitLeaveRequest');
-
-describe('submitLeaveRequest tool', () => {
-  beforeEach(() => {
-    jest.clearAllMocks();
-    mockCourseGet.mockResolvedValue({ exists: false, data: () => ({}) });
+test('creates the normal reviewable leave format with server course evidence', async () => {
+  const result = await submitLeaveRequest.execute(ctx, input);
+  expect(result).toMatchObject({ status: 'pending', alreadySubmitted: false });
+  expect(mockStore.docs.get('leaveRequests/' + result.requestId)).toMatchObject({
+    uid: 'alice', schoolId: 'pu', kind: 'sick', source: 'campus-one', officialSubmitted: false,
+    courses: [{ courseId: 'c1', courseName: '資料庫', offeringId: '資料庫｜王老師', reviewStatus: 'pending' }],
   });
+});
 
-  test('writes leave request document', async () => {
-    const out = await submitLeaveRequest.execute(
-      { uid: 'u1', schoolId: 's1' },
-      { courseId: 'c1', date: '2026-05-11', type: 'sick' },
-    );
-    expect(out.requestId).toBe('gen-id');
-    expect(out.status).toBe('pending');
-    expect(mockCollection).toHaveBeenCalledWith('leaveRequests');
-    expect(mockSet).toHaveBeenCalledWith(
-      expect.objectContaining({
-        uid: 'u1',
-        schoolId: 's1',
-        courseId: 'c1',
-        date: '2026-05-11',
-        type: 'sick',
-        status: 'pending',
-        groupId: null,
-      }),
-    );
+test('caller groupId and fabricated source fields cannot change the approved course', async () => {
+  const result = await submitLeaveRequest.execute({ ...ctx, groupId: 'other-school-group' }, {
+    ...input, groupId: 'foreign', teacherUid: 'attacker', schoolId: 'other',
   });
+  const saved = mockStore.docs.get('leaveRequests/' + result.requestId);
+  expect(saved).not.toHaveProperty('groupId');
+  expect(saved.schoolId).toBe('pu');
+  expect(saved.courses[0].offeringId).toBe('資料庫｜王老師');
+});
 
-  test('prefers ctx.groupId over course doc', async () => {
-    mockCourseGet.mockResolvedValue({
-      exists: true,
-      data: () => ({ groupId: 'g-course' }),
-    });
-    await submitLeaveRequest.execute(
-      { uid: 'u1', schoolId: 's1', groupId: 'g-ctx' },
-      { courseId: 'c1', date: '2026-05-11', type: 'sick' },
-    );
-    expect(mockSet).toHaveBeenCalledWith(expect.objectContaining({ groupId: 'g-ctx' }));
-  });
+test('one server action key creates one request and a replay reuses it', async () => {
+  const first = await submitLeaveRequest.execute(ctx, input);
+  const second = await submitLeaveRequest.execute(ctx, input);
+  expect(second).toMatchObject({ requestId: first.requestId, alreadySubmitted: true });
+  expect([...mockStore.docs.keys()].filter((key) => key.startsWith('leaveRequests/'))).toHaveLength(1);
+  await expect(submitLeaveRequest.execute(ctx, { ...input, date: '2026-10-29' }))
+    .rejects.toMatchObject({ code: 'already-exists' });
+});
 
-  test('loads groupId from users/uid/courses/courseId when ctx has none', async () => {
-    mockCourseGet.mockResolvedValue({
-      exists: true,
-      data: () => ({ groupId: 'g-course' }),
-    });
-    await submitLeaveRequest.execute(
-      { uid: 'u1', schoolId: 's1' },
-      { courseId: 'c1', date: '2026-05-11', type: 'sick' },
-    );
-    expect(mockSet).toHaveBeenCalledWith(expect.objectContaining({ groupId: 'g-course' }));
-  });
+test('rejects courses outside the current personal timetable without writing', async () => {
+  await expect(submitLeaveRequest.execute(ctx, { ...input, courseId: 'foreign' }))
+    .rejects.toMatchObject({ code: 'failed-precondition' });
+  expect([...mockStore.docs.keys()].some((key) => key.startsWith('leaveRequests/'))).toBe(false);
+});
 
-  test('throws without uid', async () => {
-    await expect(
-      submitLeaveRequest.execute({ schoolId: 's1' }, { courseId: 'c', date: 'd', type: 't' }),
-    ).rejects.toThrow('requires ctx.uid');
-  });
+test.each([
+  ['schools/pu/members/alice', { status: 'inactive' }, 'permission-denied'],
+  ['users/alice', { accountDeletionInProgress: true }, 'failed-precondition'],
+  ['users/alice/schools/pu/personalTimetable/current', { schoolId: 'ntu', courses: [{ id: 'c1', name: '其他學校課程' }] }, 'failed-precondition'],
+])('rejects revoked or mismatched source %s', async (path, data, code) => {
+  mockStore.docs.set(path, data);
+  await expect(submitLeaveRequest.execute(ctx, input)).rejects.toMatchObject({ code });
+  expect([...mockStore.docs.keys()].some((key) => key.startsWith('leaveRequests/'))).toBe(false);
+});
 
-  test('requiresConfirmation meta is true', () => {
-    expect(submitLeaveRequest.requiresConfirmation).toBe(true);
-  });
+test('rejects invalid dates, unsupported leave types and missing identity', async () => {
+  await expect(submitLeaveRequest.execute(ctx, { ...input, date: '2026-02-30' })).rejects.toMatchObject({ code: 'invalid-argument' });
+  await expect(submitLeaveRequest.execute(ctx, { ...input, type: '任意假別' })).rejects.toMatchObject({ code: 'invalid-argument' });
+  await expect(submitLeaveRequest.execute({ schoolId: 'pu' }, input)).rejects.toMatchObject({ code: 'unauthenticated' });
 });

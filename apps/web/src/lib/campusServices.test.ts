@@ -20,6 +20,13 @@ it('lists lost-found as a school-account service, not a platform Google task', (
   expect(lostFound?.access).not.toBe('platform');
 });
 
+it.each(['WOW Class', 'TronClass', 'LMS'])('finds the school course service through %s', (query) => {
+  const courseService = searchCampusServices(query).find((service) => service.href === '/school-courses');
+  expect(courseService?.name).toBe('WOW Class 課程');
+  expect(courseService?.access).toBe('school');
+  expect(courseService?.category).toBe('study');
+});
+
 it.each(['總機', '職涯', '實習'])('finds school info through %s without a retired career entry', (query) => {
   const services = searchCampusServices(query);
   expect(services.some((service) => service.href === '/school-info')).toBe(true);

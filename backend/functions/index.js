@@ -38,6 +38,7 @@ const { createSubmitProductFeedback } = require('./productFeedback');
 const { createEventRegistrationHandlers, prepareRegistrationPolicy } = require('./eventRegistration');
 const { readRealtimeBusCache } = require('./busArrivals');
 const { createPuCampusDataHandler, createGetMyAcademicRecords } = require('./academicRecords');
+const { canonicalizePuStudentId, createPuTronClassRefresher } = require('./puTronClassRefresh');
 const { createCalendarSubscriptionHandler } = require('./calendarSubscription');
 const { createExportUserDataHandler } = require('./userDataExport');
 const { createDeleteUserAccountHandler } = require('./accountDeletion');
@@ -95,6 +96,7 @@ const {
   tcFetchActivities,
   tcFetchAttendance,
   tcFetchProfile,
+  tcFetchIdentityProfile,
   tcFetchTodos,
   tcFetchCourseDetail,
   tcFetchExams,
@@ -372,24 +374,6 @@ function getUserSchoolCollection(uid, schoolId, collectionName) {
 
 function getUserSchoolDoc(uid, schoolId, collectionName, docId) {
   return getUserSchoolCollection(uid, schoolId, collectionName).doc(docId);
-}
-
-function buildAvailabilityUpdate(currentData = {}, delta) {
-  const updates = {};
-
-  if (typeof currentData.availableCopies === 'number') {
-    updates.availableCopies = FieldValue.increment(delta);
-  }
-
-  if (typeof currentData.available === 'number') {
-    updates.available = FieldValue.increment(delta);
-  }
-
-  if (Object.keys(updates).length === 0) {
-    updates.availableCopies = FieldValue.increment(delta);
-  }
-
-  return updates;
 }
 
 const PROVIDENCE_UNIVERSITY_SCHOOL_ID = 'pu';
@@ -1077,6 +1061,7 @@ function generateGroupJoinCode(length = 8) {
 // =====================================================
 
 exports.askCampusAssistant = require('./agent/handlers/askCampusAssistant');
+exports.getCampusAssistantSnapshot = require('./agent/handlers/getCampusAssistantSnapshot');
 exports.understandCampusRequest = require('./agent/handlers/understandCampusRequest');
 exports.executeAgentWrite = require('./agent/handlers/executeAgentWrite');
 exports.aiOrderFood = require('./aiOrderFood');
@@ -1933,6 +1918,11 @@ exports.signInPuStudentId = onRequest(
           ownerUid,
         });
       }
+
+      await db.collection('_puSessions').doc(puSessionId).set(
+        { tronClassSessionId },
+        { merge: true },
+      );
 
       res.set('Cache-Control', 'no-store');
       res.json({
@@ -3363,201 +3353,29 @@ exports.searchBooks = onCall(
   },
 );
 
+// 一般服務與 Agent 共用交易寫入，避免兩個入口各自查庫存後同時成功。
+async function executeCampusServiceTool(request, tool) {
+  const uid = request.auth?.uid;
+  if (!uid) throw new HttpsError('unauthenticated', '請先登入。');
+  const parsed = tool.inputSchema.safeParse(request.data);
+  if (!parsed.success) throw new HttpsError('invalid-argument', '請確認服務欄位完整且格式正確。');
+  const result = await tool.execute({ uid, schoolId: request.data?.schoolId }, parsed.data);
+  return { ...result, success: true };
+}
+
 exports.borrowBook = onCall(
-  {
-    region: REGION,
-  },
-  async (request) => {
-    const uid = request.auth?.uid;
-    if (!uid) {
-      throw new HttpsError('unauthenticated', 'Must be logged in');
-    }
-
-    const { schoolId, bookId } = request.data;
-
-    if (!schoolId || !bookId) {
-      throw new HttpsError('invalid-argument', 'Missing required fields');
-    }
-
-    const bookRef = db.collection('schools').doc(schoolId).collection('libraryBooks').doc(bookId);
-    const bookDoc = await bookRef.get();
-
-    if (!bookDoc.exists) {
-      throw new HttpsError('not-found', 'Book not found');
-    }
-
-    const bookData = bookDoc.data();
-    const availableCopies = Number(bookData.availableCopies ?? bookData.available ?? 0);
-    if (availableCopies <= 0) {
-      throw new HttpsError('failed-precondition', 'No copies available');
-    }
-
-    // 檢查借閱數量限制
-    const userLoansSnap = await db
-      .collection('schools')
-      .doc(schoolId)
-      .collection('libraryLoans')
-      .where('userId', '==', uid)
-      .where('status', 'in', ['borrowed', 'active'])
-      .get();
-
-    if (userLoansSnap.size >= 10) {
-      throw new HttpsError('failed-precondition', 'Maximum loan limit reached');
-    }
-
-    const dueDate = new Date();
-    dueDate.setDate(dueDate.getDate() + 14);
-
-    const batch = db.batch();
-
-    const loanRef = db.collection('schools').doc(schoolId).collection('libraryLoans').doc();
-    const scopedLoanRef = getUserSchoolDoc(uid, schoolId, 'libraryLoans', loanRef.id);
-    const loanPayload = {
-      userId: uid,
-      schoolId,
-      bookId,
-      bookTitle: bookData.title || null,
-      borrowedAt: FieldValue.serverTimestamp(),
-      dueAt: Timestamp.fromDate(dueDate),
-      status: 'borrowed',
-      renewCount: 0,
-    };
-    batch.set(loanRef, loanPayload);
-    batch.set(scopedLoanRef, loanPayload);
-
-    batch.update(bookRef, buildAvailabilityUpdate(bookData, -1));
-
-    await batch.commit();
-
-    return {
-      success: true,
-      loanId: loanRef.id,
-      dueAt: dueDate.toISOString(),
-    };
-  },
+  { region: REGION },
+  (request) => executeCampusServiceTool(request, require('./agent/tools/borrowBook')),
 );
 
 exports.returnBook = onCall(
-  {
-    region: REGION,
-  },
-  async (request) => {
-    const uid = request.auth?.uid;
-    if (!uid) {
-      throw new HttpsError('unauthenticated', 'Must be logged in');
-    }
-
-    const { schoolId, loanId } = request.data;
-
-    if (!schoolId || !loanId) {
-      throw new HttpsError('invalid-argument', 'Missing required fields');
-    }
-
-    const loanRef = db.collection('schools').doc(schoolId).collection('libraryLoans').doc(loanId);
-    const loanDoc = await loanRef.get();
-
-    if (!loanDoc.exists) {
-      throw new HttpsError('not-found', 'Loan not found');
-    }
-
-    const loanData = loanDoc.data();
-    if (loanData.userId !== uid) {
-      throw new HttpsError('permission-denied', 'This is not your loan');
-    }
-
-    if (!['borrowed', 'active'].includes(loanData.status)) {
-      throw new HttpsError('failed-precondition', 'Loan is not active');
-    }
-
-    const batch = db.batch();
-    const scopedLoanRef = getUserSchoolDoc(uid, schoolId, 'libraryLoans', loanId);
-    const bookRef = db
-      .collection('schools')
-      .doc(schoolId)
-      .collection('libraryBooks')
-      .doc(loanData.bookId);
-    const bookDocForReturn = await bookRef.get();
-
-    batch.update(loanRef, {
-      status: 'returned',
-      returnedAt: FieldValue.serverTimestamp(),
-    });
-    batch.set(
-      scopedLoanRef,
-      {
-        userId: uid,
-        schoolId,
-        status: 'returned',
-        returnedAt: FieldValue.serverTimestamp(),
-      },
-      { merge: true },
-    );
-
-    batch.update(bookRef, buildAvailabilityUpdate(bookDocForReturn.data(), 1));
-
-    await batch.commit();
-
-    return { success: true };
-  },
+  { region: REGION },
+  (request) => executeCampusServiceTool(request, require('./agent/tools/returnBook')),
 );
 
 exports.renewBook = onCall(
-  {
-    region: REGION,
-  },
-  async (request) => {
-    const uid = request.auth?.uid;
-    if (!uid) {
-      throw new HttpsError('unauthenticated', 'Must be logged in');
-    }
-
-    const { schoolId, loanId } = request.data;
-
-    if (!schoolId || !loanId) {
-      throw new HttpsError('invalid-argument', 'Missing required fields');
-    }
-
-    const loanRef = db.collection('schools').doc(schoolId).collection('libraryLoans').doc(loanId);
-    const loanDoc = await loanRef.get();
-
-    if (!loanDoc.exists) {
-      throw new HttpsError('not-found', 'Loan not found');
-    }
-
-    const loanData = loanDoc.data();
-    if (loanData.userId !== uid) {
-      throw new HttpsError('permission-denied', 'This is not your loan');
-    }
-
-    if (loanData.renewCount >= 2) {
-      throw new HttpsError('failed-precondition', 'Maximum renewal limit reached');
-    }
-
-    const newDueDate = loanData.dueAt.toDate();
-    newDueDate.setDate(newDueDate.getDate() + 7);
-
-    await loanRef.update({
-      dueAt: Timestamp.fromDate(newDueDate),
-      renewCount: FieldValue.increment(1),
-      lastRenewedAt: FieldValue.serverTimestamp(),
-    });
-    await getUserSchoolDoc(uid, schoolId, 'libraryLoans', loanId).set(
-      {
-        userId: uid,
-        schoolId,
-        dueAt: Timestamp.fromDate(newDueDate),
-        renewCount: FieldValue.increment(1),
-        lastRenewedAt: FieldValue.serverTimestamp(),
-      },
-      { merge: true },
-    );
-
-    return {
-      success: true,
-      newDueAt: newDueDate.toISOString(),
-      renewCount: loanData.renewCount + 1,
-    };
-  },
+  { region: REGION },
+  (request) => executeCampusServiceTool(request, require('./agent/tools/renewBook')),
 );
 
 // =====================================================
@@ -3565,89 +3383,8 @@ exports.renewBook = onCall(
 // =====================================================
 
 exports.reserveSeat = onCall(
-  {
-    region: REGION,
-  },
-  async (request) => {
-    const uid = request.auth?.uid;
-    if (!uid) {
-      throw new HttpsError('unauthenticated', 'Must be logged in');
-    }
-
-    const { schoolId, seatId, date, startTime, endTime } = request.data;
-
-    if (!schoolId || !seatId || !date || !startTime || !endTime) {
-      throw new HttpsError('invalid-argument', 'Missing required fields');
-    }
-
-    // 檢查是否有衝突預約
-    const conflictsSnap = await db
-      .collection('schools')
-      .doc(schoolId)
-      .collection('seatReservations')
-      .where('seatId', '==', seatId)
-      .where('date', '==', date)
-      .where('status', '==', 'active')
-      .get();
-
-    for (const doc of conflictsSnap.docs) {
-      const existing = doc.data();
-      // 時間重疊檢查
-      if (
-        (startTime >= existing.startTime && startTime < existing.endTime) ||
-        (endTime > existing.startTime && endTime <= existing.endTime) ||
-        (startTime <= existing.startTime && endTime >= existing.endTime)
-      ) {
-        throw new HttpsError('failed-precondition', 'Time slot already reserved');
-      }
-    }
-
-    // 檢查用戶當日預約數量
-    const userReservationsSnap = await db
-      .collection('schools')
-      .doc(schoolId)
-      .collection('seatReservations')
-      .where('userId', '==', uid)
-      .where('date', '==', date)
-      .where('status', '==', 'active')
-      .get();
-
-    if (userReservationsSnap.size >= 2) {
-      throw new HttpsError('failed-precondition', 'Maximum daily reservations reached');
-    }
-
-    const reservationRef = db
-      .collection('schools')
-      .doc(schoolId)
-      .collection('seatReservations')
-      .doc();
-    const scopedReservationRef = getUserSchoolDoc(
-      uid,
-      schoolId,
-      'seatReservations',
-      reservationRef.id,
-    );
-    const reservationPayload = {
-      userId: uid,
-      schoolId,
-      seatId,
-      date,
-      startTime,
-      endTime,
-      status: 'active',
-      createdAt: FieldValue.serverTimestamp(),
-    };
-
-    await db.runTransaction(async (transaction) => {
-      transaction.set(reservationRef, reservationPayload);
-      transaction.set(scopedReservationRef, reservationPayload);
-    });
-
-    return {
-      success: true,
-      reservationId: reservationRef.id,
-    };
-  },
+  { region: REGION },
+  (request) => executeCampusServiceTool(request, require('./agent/tools/reserveSeat')),
 );
 
 exports.cancelSeatReservation = onCall(
@@ -4032,144 +3769,13 @@ exports.confirmPackagePickup = onCall(
 );
 
 exports.reserveWashingMachine = onCall(
-  {
-    region: REGION,
-  },
-  async (request) => {
-    const uid = request.auth?.uid;
-    if (!uid) {
-      throw new HttpsError('unauthenticated', 'Must be logged in');
-    }
-
-    const { schoolId, dormitory, machineId, startTime } = request.data;
-
-    if (!schoolId || !dormitory || !machineId || !startTime) {
-      throw new HttpsError('invalid-argument', 'Missing required fields');
-    }
-
-    await assertActiveSchoolMember(schoolId, uid);
-
-    const machineRef = db
-      .collection('schools')
-      .doc(schoolId)
-      .collection('washingMachines')
-      .doc(machineId);
-    const machineDoc = await machineRef.get();
-    if (!machineDoc.exists) {
-      throw new HttpsError('not-found', 'Washing machine not found');
-    }
-
-    if (machineDoc.data().status !== 'available') {
-      throw new HttpsError('failed-precondition', 'Machine is not available');
-    }
-
-    const existingReservation = await db
-      .collection('schools')
-      .doc(schoolId)
-      .collection('washingReservations')
-      .where('machineId', '==', machineId)
-      .where('startTime', '==', startTime)
-      .where('status', 'in', ['reserved', 'active'])
-      .get();
-
-    if (!existingReservation.empty) {
-      throw new HttpsError('already-exists', 'This time slot is already reserved');
-    }
-
-    const reservationRef = db
-      .collection('schools')
-      .doc(schoolId)
-      .collection('washingReservations')
-      .doc();
-    const reservedUntil = new Date(Date.now() + 10 * 60 * 1000);
-
-    await db.runTransaction(async (transaction) => {
-      transaction.set(reservationRef, {
-        userId: uid,
-        schoolId,
-        dormitory,
-        machineId,
-        startTime,
-        status: 'reserved',
-        reservedUntil: Timestamp.fromDate(reservedUntil),
-        createdAt: FieldValue.serverTimestamp(),
-      });
-      transaction.update(machineRef, {
-        status: 'reserved',
-        reservedBy: uid,
-        reservedUntil: Timestamp.fromDate(reservedUntil),
-        updatedAt: FieldValue.serverTimestamp(),
-      });
-    });
-
-    return {
-      success: true,
-      reservationId: reservationRef.id,
-      reservedUntil: reservedUntil.toISOString(),
-    };
-  },
+  { region: REGION },
+  (request) => executeCampusServiceTool(request, require('./agent/tools/reserveWashingMachine')),
 );
 
 exports.cancelWashingReservation = onCall(
-  {
-    region: REGION,
-  },
-  async (request) => {
-    const uid = request.auth?.uid;
-    if (!uid) {
-      throw new HttpsError('unauthenticated', 'Must be logged in');
-    }
-
-    const { schoolId, reservationId } = request.data;
-
-    if (!schoolId || !reservationId) {
-      throw new HttpsError('invalid-argument', 'Missing required fields');
-    }
-
-    const reservationRef = db
-      .collection('schools')
-      .doc(schoolId)
-      .collection('washingReservations')
-      .doc(reservationId);
-    const reservationDoc = await reservationRef.get();
-    if (!reservationDoc.exists) {
-      throw new HttpsError('not-found', 'Reservation not found');
-    }
-
-    const reservation = reservationDoc.data();
-    if (reservation.userId !== uid) {
-      throw new HttpsError('permission-denied', 'This is not your reservation');
-    }
-
-    if (['completed', 'cancelled'].includes(reservation.status)) {
-      throw new HttpsError('failed-precondition', 'Reservation cannot be cancelled');
-    }
-
-    const machineRef = db
-      .collection('schools')
-      .doc(schoolId)
-      .collection('washingMachines')
-      .doc(reservation.machineId);
-
-    await db.runTransaction(async (transaction) => {
-      transaction.update(reservationRef, {
-        status: 'cancelled',
-        cancelledAt: FieldValue.serverTimestamp(),
-      });
-      transaction.set(
-        machineRef,
-        {
-          status: 'available',
-          reservedBy: null,
-          reservedUntil: null,
-          updatedAt: FieldValue.serverTimestamp(),
-        },
-        { merge: true },
-      );
-    });
-
-    return { success: true };
-  },
+  { region: REGION },
+  (request) => executeCampusServiceTool(request, require('./agent/tools/cancelWashingReservation')),
 );
 
 // =====================================================
@@ -5784,19 +5390,29 @@ exports.puFetchCampusData = onRequest(
   }),
 );
 
+const refreshPuTronClassSession = createPuTronClassRefresher({
+  db,
+  login: tcLogin,
+  fetchIdentityProfile: tcFetchIdentityProfile,
+  sessionTtlMs: PU_BACKEND_SESSION_TTL_MS,
+});
+
 exports.puRefreshTronClassSession = onRequest(
   {
     region: REGION,
     cors: STRICT_CORS,
   },
   async (req, res) => {
+    res.set('Cache-Control', 'no-store');
     try {
       assertTrustedOrigin(req);
       requirePostJson(req);
-      const authUser = await verifyRequestFirebaseUser(req);
+      const authUser = await verifyRequestFirebaseUser(req, (token) =>
+        getAdminAuth().verifyIdToken(token, true),
+      );
 
-      const studentId = normalizePuStudentId(req.body?.studentId);
-      const password = String(req.body?.password || '');
+      const studentId = canonicalizePuStudentId(req.body?.studentId);
+      const password = typeof req.body?.password === 'string' ? req.body.password : '';
 
       if (!studentId || !password) {
         res.status(400).json({ error: 'Missing required fields: studentId, password' });
@@ -5817,32 +5433,13 @@ exports.puRefreshTronClassSession = onRequest(
         windowMs: 15 * 60 * 1000,
       });
 
-      const loginResult = await tcLogin(studentId, password);
-      if (
-        !loginResult.success ||
-        !loginResult.cookies ||
-        Object.keys(loginResult.cookies).length === 0 ||
-        !loginResult.session
-      ) {
-        res.status(401).json({
-          error: loginResult.error || 'TronClass 登入失敗',
-        });
-        return;
-      }
-
-      const tronClassSessionId = await createOwnedPuTronClassSession({
-        studentId,
-        cookies: loginResult.cookies,
-        session: loginResult.session,
-        ownerUid: authUser.uid,
+      const result = await refreshPuTronClassSession({
+        authUser,
+        studentId: req.body.studentId,
+        password,
       });
 
-      res.set('Cache-Control', 'no-store');
-      res.json({
-        success: true,
-        tronClassSessionId,
-        tronClassUserId: loginResult.session.userId ?? null,
-      });
+      res.json(result);
     } catch (error) {
       console.error('[puRefreshTronClassSession] Error:', error);
       writeHttpError(res, error, 'Failed to refresh TronClass session');

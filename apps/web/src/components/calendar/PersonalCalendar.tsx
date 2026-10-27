@@ -1,6 +1,5 @@
 'use client';
 
-import Link from 'next/link';
 import { useEffect, useRef, useState } from 'react';
 import {
   buildPersonalEventsCalendar,
@@ -292,10 +291,6 @@ function PersonalCalendarWorkspace() {
 
   return (
     <div className={styles.root}>
-      <nav className={styles.nav}>
-        <Link href="/timetable">我的課表</Link>
-        <Link href="/import?kind=events">從截圖或檔案匯入</Link>
-      </nav>
       <section className={styles.panel}>
         <div className={styles.heading}>
           <h2>活動、考試與自己的安排</h2>

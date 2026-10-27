@@ -100,7 +100,7 @@ function isCredentialError(body) {
   );
 }
 
-function httpsRequest(url, { method = 'GET', body, cookies = {}, headers = {} } = {}) {
+function httpsRequest(url, { method = 'GET', body, cookies = {}, headers = {}, timeoutMs, maxResponseBytes } = {}) {
   return new Promise((resolve, reject) => {
     const parsed = normalizeRequestUrl(url);
     const bodyBuffer = body ? Buffer.from(body, 'utf8') : null;
@@ -117,7 +117,24 @@ function httpsRequest(url, { method = 'GET', body, cookies = {}, headers = {} } 
       requestHeaders.Cookie = cookieString(cookies);
     }
 
-    const request = https.request(
+    let request;
+    let settled = false;
+    let timer;
+    const finish = (error, result) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      if (error) reject(error);
+      else resolve(result);
+    };
+    if (timeoutMs) {
+      timer = setTimeout(() => {
+        finish(new Error('TronClass request timed out'));
+        request?.destroy?.();
+      }, timeoutMs);
+      timer.unref?.();
+    }
+    request = https.request(
       {
         protocol: parsed.protocol,
         hostname: parsed.hostname,
@@ -130,12 +147,23 @@ function httpsRequest(url, { method = 'GET', body, cookies = {}, headers = {} } 
       },
       (response) => {
         const chunks = [];
+        let responseBytes = 0;
         const jar = { ...cookies };
         parseCookies(response.headers['set-cookie'], jar);
 
-        response.on('data', (chunk) => chunks.push(chunk));
+        response.on('error', error => finish(error));
+        response.on('aborted', () => finish(new Error('TronClass response interrupted')));
+        response.on('data', (chunk) => {
+          responseBytes += chunk.length;
+          if (maxResponseBytes && responseBytes > maxResponseBytes) {
+            finish(new Error('TronClass response is too large'));
+            request?.destroy?.();
+            return;
+          }
+          if (!settled) chunks.push(chunk);
+        });
         response.on('end', () => {
-          resolve({
+          finish(null, {
             status: response.statusCode || 0,
             headers: response.headers,
             body: Buffer.concat(chunks).toString('utf8'),
@@ -146,7 +174,7 @@ function httpsRequest(url, { method = 'GET', body, cookies = {}, headers = {} } 
       },
     );
 
-    request.on('error', reject);
+    request.on('error', error => finish(error));
 
     if (bodyBuffer) {
       request.write(bodyBuffer);
@@ -235,6 +263,8 @@ async function tcFetchJson(url, cookies, options = {}) {
     method: options.method || 'GET',
     body: options.body,
     cookies,
+    timeoutMs: options.timeoutMs,
+    maxResponseBytes: options.maxResponseBytes,
     headers: {
       Accept: 'application/json',
       ...(options.headers || {}),
@@ -242,17 +272,6 @@ async function tcFetchJson(url, cookies, options = {}) {
   });
 
   return parseTcJsonResponse(result);
-}
-
-async function tcPostJson(url, cookies, payload) {
-  return tcFetchJson(url, cookies, {
-    method: 'POST',
-    body: JSON.stringify(payload),
-    headers: {
-      'Content-Type': 'application/json',
-      Accept: 'application/json',
-    },
-  });
 }
 
 async function tcFetchAllPages(basePath, dataKey, cookies, params = {}, pageSize = 20) {
@@ -289,10 +308,10 @@ async function tcFetchAllPages(basePath, dataKey, cookies, params = {}, pageSize
   return allItems;
 }
 
-async function tcEnsureUserId(cookies, knownUserId = null) {
+async function tcEnsureUserId(cookies, knownUserId = null, requestLimits = {}) {
   if (knownUserId) return knownUserId;
 
-  const profile = await tcFetchJson(`${TC_BASE}/api/profile`, cookies).catch((error) => {
+  const profile = await tcFetchJson(`${TC_BASE}/api/profile`, cookies, requestLimits).catch((error) => {
     if (isSessionExpiredError(error)) {
       throw error;
     }
@@ -302,6 +321,7 @@ async function tcEnsureUserId(cookies, knownUserId = null) {
   if (profileUserId) return profileUserId;
 
   const indexPage = await httpsRequest(`${TC_BASE}/user/index`, {
+    ...requestLimits,
     cookies,
     headers: {
       Accept: 'text/html',
@@ -549,77 +569,103 @@ async function tcLogin(uid, password) {
 }
 
 async function tcFetchCourses(cookies, { userId, status = 'ongoing' } = {}) {
-  let items = [];
+  const deadline = Date.now() + 25_000;
+  let items;
   try {
-    items = await tcFetchMyCourses(cookies, status);
+    items = await tcFetchMyCourses(cookies, status, deadline);
   } catch (error) {
-    if (isSessionExpiredError(error)) {
+    if (isSessionExpiredError(error) || error.code === 'TC_COURSES_INVALID' || error instanceof SyntaxError) {
       throw error;
     }
     console.warn('[TronClass] /api/my-courses failed, falling back to user courses:', error);
   }
 
-  if (items.length === 0) {
-    const resolvedUserId = await tcEnsureUserId(cookies, userId);
+  if (!items) {
+    const knownUserId = Number.isSafeInteger(Number(userId)) && Number(userId) > 0 ? Number(userId) : null;
+    const resolvedUserId = await tcEnsureUserId(cookies, knownUserId, courseRequestLimits(deadline));
     if (!resolvedUserId) {
       throw new Error('TronClass session 已失效，請重新登入');
     }
 
-    const conditions = JSON.stringify({ status: [status] });
+    const conditions = JSON.stringify({ status: [status === 'upcoming' ? 'notStarted' : status] });
     const fields =
       'id,name,course_code,department(id,name),teachers(id,name,avatar_url),cover_image_url,student_count,status,role';
-    items = await tcFetchAllPages(
-      `api/users/${resolvedUserId}/courses`,
-      'courses',
-      cookies,
-      { conditions, fields },
-      50,
-    );
+    items = await tcFetchCoursePages(async (page, pageSize) => {
+      const query = new URLSearchParams({ conditions, fields, page: String(page), page_size: String(pageSize) });
+      return tcFetchJson(`${TC_BASE}/api/users/${resolvedUserId}/courses?${query}`, cookies, courseRequestLimits(deadline));
+    });
   }
 
   return items.map((course) => normalizeTcCourse(course, status));
 }
 
-async function tcFetchMyCourses(cookies, status = 'ongoing') {
+function invalidCourseResponse(message) {
+  const error = new Error(message);
+  error.code = 'TC_COURSES_INVALID';
+  return error;
+}
+
+function courseRequestLimits(deadline) {
+  const remaining = deadline - Date.now();
+  if (remaining <= 0) throw new Error('TronClass course request timed out');
+  return { timeoutMs: Math.min(8_000, remaining), maxResponseBytes: 2 * 1024 * 1024 };
+}
+
+async function tcFetchCoursePages(fetchPage) {
   const allCourses = [];
+  const seen = new Set();
   const pageSize = 50;
-  const tronStatus = status === 'upcoming' ? 'notStarted' : status;
-
-  for (let page = 1; ; page += 1) {
-    const data = await tcPostJson(`${TC_BASE}/api/my-courses`, cookies, {
-      conditions: { status: [tronStatus] },
-      page,
-      page_size: pageSize,
-    });
-
-    const courses = Array.isArray(data?.courses) ? data.courses : [];
-    if (courses.length === 0) break;
-
-    allCourses.push(...courses);
-
-    const totalPages =
-      typeof data?.paging?.pages === 'number'
-        ? data.paging.pages
-        : typeof data?.pages === 'number'
-          ? data.pages
-          : 1;
-    if (page >= totalPages) break;
+  const maxPages = 20;
+  for (let page = 1; page <= maxPages; page += 1) {
+    const data = await fetchPage(page, pageSize);
+    if (!data || typeof data !== 'object' || !Array.isArray(data.courses)) {
+      throw invalidCourseResponse('TronClass course response has no course list');
+    }
+    const courses = data.courses;
+    const pageCount = data.paging?.pages ?? data.pages;
+    const totalPages = pageCount === undefined || pageCount === null ? null : Number(pageCount);
+    if (totalPages !== null && (!Number.isSafeInteger(totalPages) || totalPages < 0 || totalPages > maxPages ||
+      (typeof pageCount !== 'number' && (typeof pageCount !== 'string' || !/^\d+$/.test(pageCount))))) {
+      throw invalidCourseResponse('TronClass course pagination is invalid or exceeds its limit');
+    }
+    if (courses.length > pageSize || (courses.length === 0 && totalPages !== null && totalPages > page) ||
+      (courses.length > 0 && totalPages === 0)) {
+      throw invalidCourseResponse('TronClass course page is incomplete or oversized');
+    }
+    for (const course of courses) {
+      if (!course || typeof course !== 'object' || Array.isArray(course) ||
+        !/^[1-9]\d*$/.test(String(course.id ?? '')) || !Number.isSafeInteger(Number(course.id)) ||
+        typeof course.name !== 'string' || !course.name.trim()) {
+        throw invalidCourseResponse('TronClass returned an invalid course');
+      }
+      const id = String(course.id);
+      if (seen.has(id)) throw invalidCourseResponse('TronClass returned a repeated course page');
+      seen.add(id);
+      allCourses.push(course);
+    }
+    if (totalPages !== null ? page >= Math.max(1, totalPages) : courses.length < pageSize) return allCourses;
   }
+  throw invalidCourseResponse('TronClass course pagination exceeded its limit');
+}
 
-  return allCourses;
+async function tcFetchMyCourses(cookies, status = 'ongoing', deadline) {
+  const tronStatus = status === 'upcoming' ? 'notStarted' : status;
+  return tcFetchCoursePages((page, pageSize) => tcFetchJson(`${TC_BASE}/api/my-courses`, cookies, {
+    ...courseRequestLimits(deadline),
+    method: 'POST',
+    body: JSON.stringify({ conditions: { status: [tronStatus] }, page, page_size: pageSize }),
+    headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+  }));
 }
 
 function normalizeTcCourse(course, fallbackStatus) {
   const department =
     course.department && typeof course.department === 'object' ? course.department : null;
-  const people = course.teachers ?? course.instructors ?? [];
+  const people = Array.isArray(course.teachers) ? course.teachers : Array.isArray(course.instructors) ? course.instructors : [];
   const rawCredit = course.credit ?? course.credits ?? null;
-  const credit =
-    typeof rawCredit === 'string'
-      ? Number.parseFloat(rawCredit) || null
-      : typeof rawCredit === 'number'
-        ? rawCredit
-        : null;
+  const parsedCredit = typeof rawCredit === 'string' && /^\d+(?:\.\d+)?$/.test(rawCredit.trim())
+    ? Number(rawCredit) : typeof rawCredit === 'number' ? rawCredit : null;
+  const credit = parsedCredit !== null && Number.isFinite(parsedCredit) && parsedCredit >= 0 ? parsedCredit : null;
 
   return {
     id: course.id,
@@ -761,6 +807,18 @@ async function tcFetchProfile(cookies, { userId } = {}) {
     avatar_url: null,
     role: 'student',
   };
+}
+
+// Account linking requires a fresh authenticated profile, not tcFetchProfile's
+// display-only fallback constructed from a previously known numeric user ID.
+async function tcFetchIdentityProfile(cookies) {
+  const response = await httpsRequest(`${TC_BASE}/api/profile`, {
+    cookies,
+    headers: { Accept: 'application/json' },
+    timeoutMs: 8000,
+    maxResponseBytes: 1024 * 1024,
+  });
+  return { profile: parseTcJsonResponse(response), cookies: response.cookies };
 }
 
 async function tcFetchTodos(cookies) {
@@ -1251,6 +1309,7 @@ module.exports = {
   tcFetchActivities,
   tcFetchAttendance,
   tcFetchProfile,
+  tcFetchIdentityProfile,
   tcFetchTodos,
   tcFetchCourseDetail,
   tcFetchExams,

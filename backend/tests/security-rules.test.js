@@ -1432,6 +1432,20 @@ describe('firestore security rules', () => {
     );
   });
 
+  test('service transaction guards cannot be forged by the owner or another client', async () => {
+    for (const uid of ['alice', 'mallory']) {
+      const client = testEnv.authenticatedContext(uid).firestore();
+      for (const path of [
+        'users/alice/schools/pu/serviceWriteGuards/library',
+        'users/alice/schools/pu/serviceWriteGuards/seats',
+        'schools/pu/serviceWriteGuards/resource-lock',
+      ]) {
+        await assertFails(client.doc(path).set({ updatedAt: new Date() }));
+        await assertFails(client.doc(path).delete());
+      }
+    }
+  });
+
   test('postLoginRuns: owner can read, client cannot write', async () => {
     await seedFirestore(async (db) => {
       await db.collection('users').doc('alice').collection('postLoginRuns').doc('r1').set({

@@ -1,0 +1,84 @@
+name: Mobile Agent Regression
+
+on:
+  push:
+    branches:
+      - 'feat/mobile-ai-*'
+    paths:
+      - 'apps/mobile/src/**'
+      - 'backend/functions/agent/assignmentSummary*'
+      - 'backend/functions/agent/assignmentPaging*'
+      - 'backend/functions/agent/handlers/getCampusAssistantSnapshot.js'
+      - '.github/workflows/mobile-agent-regression.yml'
+  pull_request:
+    branches:
+      - main
+      - develop
+      - 'feat/assistant-sense-and-actions-*'
+    paths:
+      - 'apps/mobile/src/**'
+      - 'backend/functions/agent/assignmentSummary*'
+      - 'backend/functions/agent/assignmentPaging*'
+      - 'backend/functions/agent/handlers/getCampusAssistantSnapshot.js'
+      - '.github/workflows/mobile-agent-regression.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: mobile-agent-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  mobile-agent-checks:
+    name: Mobile Agent Checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v7
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v6
+
+      - name: Set up Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: '22.23.4'
+          cache: 'pnpm'
+
+      - name: Install from lockfile
+        run: pnpm install --frozen-lockfile
+
+      - name: Type-check native app
+        run: pnpm --filter mobile typecheck
+
+      - name: Lint native app
+        run: pnpm --filter mobile lint
+
+      - name: Check agent scope, evidence and UI regressions
+        env:
+          TZ: Asia/Taipei
+          NODE_OPTIONS: --max-old-space-size=4096
+        run: |
+          pnpm --filter mobile exec jest \
+            src/__tests__/services/offlineCampusPlanner.test.ts \
+            src/__tests__/services/campusStudyAgenda.test.ts \
+            src/__tests__/services/campusAssignmentReminders.test.ts \
+            src/__tests__/services/campusAssignmentTarget.test.ts \
+            src/__tests__/services/campusSenseSnapshot.test.ts \
+            src/__tests__/services/campusSensePaging.test.ts \
+            src/__tests__/services/offlineCampusTools.test.ts \
+            src/__tests__/services/localCampusToolProtocol.test.ts \
+            src/__tests__/features/campusAssistant.test.ts \
+            src/__tests__/features/campusAssistantSemantic.test.ts \
+            src/__tests__/CampusAssistantScreen.test.tsx \
+            src/__tests__/CampusAssignmentCoverage.test.tsx \
+            src/__tests__/CampusAssignmentHandoff.test.tsx \
+            src/__tests__/CampusStudyAgendaCard.test.tsx \
+            src/__tests__/CampusLocalReadResults.test.tsx \
+            src/__tests__/AuthSignOut.test.tsx \
+            --runInBand --ci
+
+      - name: Check authorized assignment snapshot contract
+        run: pnpm --filter functions test --runInBand agent/assignmentSummary.test.js agent/assignmentPaging.test.js agent/executeCampusAssistantCore.sources.test.js

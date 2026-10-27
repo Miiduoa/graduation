@@ -1,6 +1,12 @@
 .conversation {
-  max-width: 840px;
+  max-width: 1080px;
   margin: 0 auto;
+}
+.messages,
+.composer {
+  max-width: 850px;
+  margin-left: auto;
+  margin-right: auto;
 }
 .toolbar,
 .submitRow {
@@ -191,5 +197,300 @@
   }
   .submitRow .note {
     max-width: 70%;
+  }
+}
+
+.sense {
+  margin: 4px 0 30px;
+  padding: clamp(18px, 3vw, 28px);
+  border: 1px solid var(--border);
+  border-radius: 24px;
+  background: var(--panel);
+}
+.senseHeader,
+.senseItemTop,
+.actionHeader,
+.actionControls {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 14px;
+}
+.senseHeader {
+  align-items: center;
+  margin-bottom: 22px;
+}
+.eyebrow {
+  color: var(--brand2, var(--muted));
+  font-size: 11px;
+  font-weight: 750;
+  letter-spacing: 0.1em;
+}
+.senseHeader h2 {
+  margin: 6px 0;
+  color: var(--text);
+  font-size: clamp(21px, 3vw, 27px);
+  letter-spacing: -0.035em;
+  line-height: 1.25;
+}
+.senseHeader p,
+.senseFootnote {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.65;
+}
+.refresh,
+.actionSecondary {
+  flex-shrink: 0;
+  min-height: 40px;
+  padding: 8px 13px;
+  border: 1px solid var(--border-strong);
+  border-radius: 12px;
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 650;
+  cursor: pointer;
+}
+.senseGrid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+.senseItem {
+  min-width: 0;
+  min-height: 270px;
+  display: flex;
+  flex-direction: column;
+  padding: 18px;
+  border: 1px solid var(--border);
+  border-radius: 18px;
+  background: var(--surface);
+}
+.senseItemTop {
+  align-items: center;
+  margin-bottom: 18px;
+  font-size: 13px;
+  font-weight: 700;
+}
+.senseItemTop a {
+  flex-shrink: 0;
+  color: var(--brand2, var(--text));
+  text-decoration: none;
+  font-size: 12px;
+  font-weight: 550;
+}
+.senseMetric {
+  color: var(--text);
+  font-size: 32px;
+  font-weight: 760;
+  line-height: 1.3;
+  letter-spacing: -0.045em;
+  font-variant-numeric: tabular-nums;
+}
+.senseMetric small {
+  font-size: 12px;
+  font-weight: 550;
+  letter-spacing: 0;
+  color: var(--muted);
+}
+.sensePending {
+  font-size: 20px;
+  letter-spacing: -0.025em;
+  line-height: 1.65;
+}
+.senseMuted {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.65;
+  margin: 8px 0 0;
+}
+.senseDetails {
+  margin: 4px 0 12px;
+}
+.senseDetails p {
+  margin: 12px 0 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.senseDetails b {
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 610;
+  overflow-wrap: anywhere;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.senseDetails span {
+  color: var(--muted);
+  font-size: 11px;
+}
+.senseAsk {
+  align-self: flex-start;
+  margin-top: auto;
+  padding: 11px 0 0;
+  border: 0;
+  background: transparent;
+  color: var(--brand2, var(--text));
+  font: inherit;
+  font-weight: 650;
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+}
+.senseFootnote {
+  margin-top: 14px;
+}
+.senseUnavailable {
+  padding: 18px;
+  border: 1px dashed var(--border-strong);
+  border-radius: 14px;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.6;
+}
+.actionReview {
+  margin: 18px 0 0;
+  padding: 18px;
+  border: 1px solid var(--border-strong);
+  border-radius: 16px;
+  background: var(--panel);
+}
+.actionHeader {
+  align-items: center;
+}
+.actionHeader h3 {
+  margin: 6px 0;
+  color: var(--text);
+  font-size: 15px;
+  line-height: 1.4;
+}
+.actionHeader p,
+.actionDetails > .note {
+  margin: 0;
+  font-size: 12px;
+  color: var(--muted);
+  line-height: 1.6;
+}
+.actionTag {
+  display: inline-block;
+  font-size: 11px;
+  color: var(--brand2, var(--text));
+  font-weight: 750;
+}
+.actionDetails {
+  margin-top: 16px;
+  padding-top: 16px;
+  border-top: 1px solid var(--border);
+}
+.actionDetails dl {
+  margin: 0 0 12px;
+  display: grid;
+  gap: 8px;
+}
+.actionDetails dl > div {
+  display: grid;
+  grid-template-columns: 90px minmax(0, 1fr);
+  gap: 12px;
+  font-size: 13px;
+}
+.actionDetails dt {
+  color: var(--muted);
+}
+.actionDetails dd {
+  min-width: 0;
+  margin: 0;
+  font-weight: 550;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+.actionControls {
+  margin-top: 16px;
+  justify-content: flex-end;
+  align-items: center;
+}
+.actionPrimary {
+  min-height: 42px;
+  padding: 10px 15px;
+  border: 0;
+  border-radius: 12px;
+  background: var(--brand2, var(--text));
+  color: var(--surface);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+}
+.actionSuccess,
+.actionWarning {
+  margin-top: 14px;
+  padding: 14px;
+  border: 1px solid var(--border-strong);
+  border-radius: 12px;
+  font-size: 13px;
+  line-height: 1.7;
+}
+.actionSuccess {
+  background: var(--accent-soft);
+}
+.actionWarning {
+  color: var(--danger);
+}
+.actionSuccess p,
+.actionWarning p {
+  margin: 6px 0;
+  overflow-wrap: anywhere;
+}
+.actionSuccess a,
+.actionWarning a {
+  color: var(--text);
+  text-underline-offset: 3px;
+}
+
+@media (max-width: 850px) {
+  .senseGrid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .senseItem:last-child {
+    grid-column: 1 / -1;
+    min-height: 180px;
+  }
+}
+@media (max-width: 600px) {
+  .sense {
+    padding: 16px;
+    border-radius: 20px;
+  }
+  .senseHeader {
+    flex-wrap: wrap;
+  }
+  .senseGrid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .senseItem,
+  .senseItem:last-child {
+    grid-column: auto;
+    min-height: 0;
+  }
+  .senseItem {
+    padding: 16px;
+  }
+  .senseAsk {
+    padding-top: 18px;
+  }
+  .actionHeader {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+  .actionDetails dl > div {
+    grid-template-columns: 75px minmax(0, 1fr);
+  }
+  .actionControls {
+    flex-wrap: wrap;
   }
 }

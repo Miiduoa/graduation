@@ -867,6 +867,16 @@ export function AuthProvider(props: { children: React.ReactNode }) {
       // 這解決了登出後清理過程中發生錯誤時，使用者已登出但本地還有上一個使用者資料殘留的問題
       const cleanupErrors: Error[] = [];
       const cleanupTasks: Promise<unknown>[] = [
+        // Cancel only Campus Agent's own device notifications before Firebase
+        // changes identity; this synchronously fences in-flight local writes.
+        (async () => {
+          const reminders = require('../services/campusAssignmentReminders') as
+            typeof import('../services/campusAssignmentReminders');
+          return reminders.beginCampusAssignmentReminderSignOutCleanup();
+        })().catch((e) => {
+          console.warn('[auth] Campus Agent local reminder cleanup failed:', e);
+          throw e;
+        }),
         clearAllCache().catch((e) => {
           console.warn('[auth] clearAllCache failed:', e);
           throw e;
@@ -955,6 +965,15 @@ export function AuthProvider(props: { children: React.ReactNode }) {
         throw e;
       } finally {
         isSigningOutRef.current = false;
+        // A failed sign-out must not permanently disable reminders for a
+        // still-signed-in account. An epoch bump invalidates prior tasks.
+        try {
+          const reminders = require('../services/campusAssignmentReminders') as
+            typeof import('../services/campusAssignmentReminders');
+          reminders.endCampusAssignmentReminderSignOutCleanup();
+        } catch (e) {
+          console.warn('[auth] Reminder sign-out fence cleanup failed:', e);
+        }
       }
     },
     [profile?.schoolId, user?.uid],
@@ -968,7 +987,7 @@ export function AuthProvider(props: { children: React.ReactNode }) {
         const result = await handleSignOut();
         if (result.hadCleanupErrors) {
           const { Alert } = require('react-native');
-          Alert.alert('登出成功', '部分快取資料清理失敗，但這不會影響您下次登入。', [
+          Alert.alert('登出成功', '部分本機通知或快取未能完整清理。請檢查這台手機的通知設定，以免收到舊帳號提醒。', [
             { text: '好', style: 'default' },
           ]);
         }

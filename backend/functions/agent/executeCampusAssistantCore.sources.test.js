@@ -139,21 +139,19 @@ test('web search fallback forwards the selected authorized schoolId', async () =
   expect(result.debug.route).toBe('agent_web_search');
 });
 
-test('an authenticated profile fixes the school context before any campus read', async () => {
+test('an authenticated profile does not authorize a different selected campus', async () => {
   mockDocuments.set('users/alice', {
     primarySchoolId: 'pu',
     schoolId: 'old-school',
     role: 'student',
   });
   mockDocuments.set('schools/pu/members/alice', { status: 'active' });
-  const result = await run('announcements', { uid: 'alice', schoolId: 'model-selected-school' });
-  expect(result.content).toContain('校方發布的公告');
-  expect(mockModel.mock.calls[0][0].toolCtx.schoolId).toBe('pu');
-  expect(
-    mockReads.some(
-      (read) => read.path.includes('model-selected-school') || read.path.includes('old-school'),
-    ),
-  ).toBe(false);
+  await expect(
+    run('announcements', { uid: 'alice', schoolId: 'model-selected-school' }),
+  ).rejects.toMatchObject({ code: 'permission-denied' });
+  expect(mockModel).not.toHaveBeenCalled();
+  expect(mockReads.some((read) => read.path === 'schools/model-selected-school/announcements')).toBe(false);
+  expect(mockReads.some((read) => read.path === 'schools/pu/announcements')).toBe(false);
 });
 
 test('an account without active membership never reaches public or personal assistant reads', async () => {
@@ -215,7 +213,7 @@ test('the actual callable completes a model reply with real compose, tools, scop
     auth: { uid: 'alice', token: { role: 'student' } },
     data: {
       messages: [{ role: 'user', content: '  查公告  ' }],
-      context: { schoolId: 'untrusted-school', sessionId: 'verified-session' },
+      context: { schoolId: 'pu', sessionId: 'verified-session' },
     },
   });
 
@@ -551,24 +549,22 @@ describe('校園助理（/ai-assistant）沒有模型可用時照實說沒辦法
   });
 });
 
-test('a school change between runtime and core discards prefetched private data from the previous school', async () => {
+test('a profile school change during an assistant run never overrides the selected authorized campus', async () => {
   mockDocuments.set('users/alice', { schoolId: 'pu', role: 'student' });
   mockDocuments.set('schools/pu/members/alice', { status: 'active' });
   mockDocuments.set('schools/nthu/members/alice', { status: 'active' });
   mockDocuments.set('users/alice/schools/pu/dailyBriefs', [
-    row('today', { schoolId: 'pu', content: '先前學校的私人摘要' }),
+    row('today', { schoolId: 'pu', content: '目前選擇學校的私人摘要' }),
   ]);
   mockDocuments.set('schools/nthu/announcements', [
     row('notice-new', {
       schoolId: 'nthu',
-      title: '目前學校的正式公告',
+      title: '其他學校的正式公告',
       publishedAt: new Date('2026-10-08T00:00:00Z'),
     }),
   ]);
   let profileReads = 0;
   mockReadHook = (path) => {
-    // Admission reads the lifecycle marker first; switch after runtime prefetch
-    // and before the core refresh, preserving the original race being tested.
     if (path === 'users/alice' && ++profileReads === 3) {
       mockDocuments.set('users/alice', { schoolId: 'nthu', role: 'student' });
     }
@@ -577,12 +573,26 @@ test('a school change between runtime and core discards prefetched private data 
     auth: { uid: 'alice', token: { role: 'student' } },
     data: { messages: [{ role: 'user', content: '查公告' }], context: { schoolId: 'pu' } },
   });
-  expect(result.content).toContain('目前學校的正式公告');
-  expect(result.content).not.toContain('校方發布的公告');
+  expect(result.content).toContain('校方發布的公告');
+  expect(result.content).not.toContain('其他學校的正式公告');
   const modelInput = mockModel.mock.calls[0][0];
-  expect(modelInput.toolCtx.schoolId).toBe('nthu');
-  expect(modelInput.messages[0].content).not.toContain('先前學校的私人摘要');
-  expect(modelInput.toolCtx.prefetched).toEqual({});
+  expect(modelInput.toolCtx.schoolId).toBe('pu');
+  expect(modelInput.messages[0].content).toContain('目前選擇學校的私人摘要');
+  expect(mockReads.some(({ path }) => path === 'schools/nthu/announcements')).toBe(false);
+});
+
+test('an active member can select their other campus without fetching default-campus data', async () => {
+  mockDocuments.set('users/alice', { schoolId: 'pu', role: 'student' });
+  mockDocuments.set('schools/pu/members/alice', { status: 'active' });
+  mockDocuments.set('schools/nthu/members/alice', { status: 'active' });
+  mockDocuments.set('schools/nthu/announcements', [
+    row('notice-nthu', { schoolId: 'nthu', title: '清華校區正式公告', publishedAt: new Date('2026-10-08T00:00:00Z') }),
+  ]);
+  const result = await run('announcements', { uid: 'alice', schoolId: 'nthu' });
+  expect(result.content).toContain('清華校區正式公告');
+  expect(result.content).not.toContain('校方發布的公告');
+  expect(mockModel.mock.calls[0][0].toolCtx.schoolId).toBe('nthu');
+  expect(mockReads.some(({ path }) => path === 'schools/pu/announcements')).toBe(false);
 });
 
 test('the actual callable accepts the 4000-character Web question and preserves its tail for the model', async () => {

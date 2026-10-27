@@ -1,5 +1,6 @@
 'use client';
 
+import Link from 'next/link';
 import { useMemo } from 'react';
 import { AcademicPage } from '@/components/academic/AcademicPage';
 import { CreditPlannerWorkspace } from '@/components/academic/CreditPlannerWorkspace';
@@ -27,12 +28,26 @@ function SchoolCreditRecords({ records }: { records: AcademicGradeResponse }) {
       <h2>學校成績紀錄參考</h2>
       <p className={styles.note}>
         以下是目前連線學校回傳的原始修課紀錄，包含未通過與重修，不等於已採計學分。
-        為避免重複採計，不會自動將它們加到上方的個人規劃。
+        核對後可在下方安排個人規劃，這份紀錄不會直接改寫已確認可採計學分。
       </p>
+      <section className={styles.creditReadout} aria-label="學分讀取結果">
+        <div>
+          <p>依成績推算通過學分</p>
+          <strong>{records.creditSummary ? records.creditSummary.totalEarned : '—'}</strong>
+          <small>{records.creditSummary
+            ? '以 60 分或通過判斷，可能包含重修紀錄'
+            : '目前未取得可核對的推算摘要'}</small>
+        </div>
+        <div>
+          <p>學校畢業採計學分</p>
+          <strong className={styles.creditUnknown}>尚未取得</strong>
+          <small>抵免、重修與各類門檻仍需核對學校學分試算表</small>
+        </div>
+      </section>
       <div className={styles.overview}>
         <div className={styles.metric}>
           <p>已取得的學期</p>
-          <strong>{records.semesters.length}</strong>
+          <strong>{new Set(records.grades.map((grade) => grade.semester)).size}</strong>
           <small>依學校回傳的成績資料</small>
         </div>
         <div className={styles.metric}>
@@ -42,7 +57,7 @@ function SchoolCreditRecords({ records }: { records: AcademicGradeResponse }) {
         </div>
         <div className={styles.metric}>
           <p>紀錄中的修課學分</p>
-          <strong>{summary.totalCredits}</strong>
+          <strong>{summary.courseCount ? summary.totalCredits : '—'}</strong>
           <small>不代表畢業可採計學分</small>
         </div>
       </div>
@@ -109,14 +124,21 @@ export default function CreditPlannerPage() {
       kind="grades"
       title="學分規劃"
       subtitle="從學分目標到每學期課程，建立屬於自己的修課安排。"
-      closedAlternative="學分請先到學校的 e 校園或向系辦確認；上方個人試算仍可使用。"
+      closedAlternative="學分請先到學校的 e 校園或向系辦確認；下方個人試算仍可使用。"
       workspace={({ userId, schoolId, schoolName }) => (
-        <CreditPlannerWorkspace
-          key={JSON.stringify([userId, schoolId])}
-          userId={userId}
-          schoolId={schoolId}
-          schoolName={schoolName}
-        />
+        <>
+          {schoolId === 'pu' ? (
+            <Link className="btn" href={`/credit-planner/review?school=${encodeURIComponent(schoolId)}`}>
+              從成績核對並帶入已修學分
+            </Link>
+          ) : null}
+          <CreditPlannerWorkspace
+            key={JSON.stringify([userId, schoolId])}
+            userId={userId}
+            schoolId={schoolId}
+            schoolName={schoolName}
+          />
+        </>
       )}
     >
       {({ records }) => <SchoolCreditRecords records={records} />}

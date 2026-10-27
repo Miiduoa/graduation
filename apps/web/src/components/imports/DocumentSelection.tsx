@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useId, useState } from 'react';
 import {
   parsePersonalImportDocument,
   PERSONAL_IMPORT_MAX_ROWS,
@@ -18,6 +18,9 @@ export function DocumentSelection({
   onSelectionChange,
   onConfirm,
   onCancel,
+  onAi,
+  aiDisabled = false,
+  aiNote,
 }: {
   document: PersonalImportDocument;
   options: PersonalImportOptions;
@@ -25,13 +28,21 @@ export function DocumentSelection({
   onSelectionChange?: (selection: { selected: string[]; headers: Record<string, number> }) => void;
   onConfirm: (rows: PersonalImportRow[], issues: ImportIssue[]) => void;
   onCancel: () => void;
+  onAi?: (selection: { selected: string[]; headers: Record<string, number> }) => void;
+  aiDisabled?: boolean;
+  aiNote?: string;
 }) {
+  const aiNoteId = useId();
   const first = document.sections.find((section) => !section.needsOcr && section.rows.length);
-  const [selected, setSelected] = useState<string[]>(initialSelection?.selected ?? (first ? [first.id] : []));
-  const [headers, setHeaders] = useState<Record<string, number>>(() =>
-    initialSelection?.headers ?? Object.fromEntries(
-      document.sections.map((section) => [section.id, section.rows[0]?.line ?? 1]),
-    ),
+  const [selected, setSelected] = useState<string[]>(
+    initialSelection?.selected ?? (first ? [first.id] : []),
+  );
+  const [headers, setHeaders] = useState<Record<string, number>>(
+    () =>
+      initialSelection?.headers ??
+      Object.fromEntries(
+        document.sections.map((section) => [section.id, section.rows[0]?.line ?? 1]),
+      ),
   );
   const [error, setError] = useState('');
   return (
@@ -123,6 +134,34 @@ export function DocumentSelection({
         </div>
       ))}
       {error && <p role="alert">{error}</p>}
+      {onAi && (
+        <div className={styles.aiTools}>
+          <div>
+            <strong>標題或欄位沒有對上？</strong>
+            <p>
+              AI 不需要固定欄位名稱。請將上方的標題列設為資料起始列，AI
+              會整理選取內容從該列開始的文字，完成後再由你核對。
+            </p>
+            {aiNote && (
+              <p id={aiNoteId} className={styles.note}>
+                {aiNote}
+              </p>
+            )}
+          </div>
+          <button
+            type="button"
+            className="btn"
+            disabled={!selected.length || aiDisabled}
+            aria-describedby={aiNote ? aiNoteId : undefined}
+            onClick={() => {
+              setError('');
+              onAi({ selected, headers });
+            }}
+          >
+            用 AI 整理選取內容
+          </button>
+        </div>
+      )}
       <div className={styles.actions}>
         <button
           type="button"
