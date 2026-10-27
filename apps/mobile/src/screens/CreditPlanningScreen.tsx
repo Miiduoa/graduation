@@ -1,4 +1,3 @@
-'use strict';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Alert,
@@ -22,7 +21,6 @@ import {
   formatCredits,
   parseCredits,
   type CreditPlan,
-  type CreditCategoryGoal,
   type PlannedCourse,
   type PlannerCategory,
   type PlannerCourseStatus,
@@ -43,7 +41,9 @@ import {
 } from '../features/academics/creditPlanRepository';
 
 const t = new Proxy({} as ThemeColors, {
-  get(_target, key: keyof ThemeColors) { return theme.colors[key]; },
+  get(_target, key: string | symbol) {
+    return typeof key === 'string' ? theme.colors[key as keyof ThemeColors] : undefined;
+  },
 });
 const space = 16;
 const categories = PLANNER_CATEGORIES;
