@@ -356,6 +356,11 @@ export function PrivateConversationView({
   const [feedback, setFeedback] = useState('');
   const [reading, setReading] = useState(false);
   const [reacting, setReacting] = useState<string | null>(null);
+  const [copiedMessageId, setCopiedMessageId] = useState<string | null>(null);
+  const [showJumpToLatest, setShowJumpToLatest] = useState(false);
+  const messageListRef = useRef<HTMLOListElement>(null);
+  const followsLatestRef = useRef(true);
+  const lastVisibleRef = useRef<{ scope: string; messageId: string } | null>(null);
   const sendLock = useRef(false);
   const readLock = useRef(false);
   const reactionLock = useRef(false);
@@ -365,6 +370,41 @@ export function PrivateConversationView({
     currentConversation.current = conversationId;
   }, [conversationId]);
   const active = () => isCurrent() && currentConversation.current === conversationId;
+  const lastMessageId =
+    state.status === 'ready' ? state.data?.messages.at(-1)?.id ?? '' : '';
+  useLayoutEffect(() => {
+    const list = messageListRef.current;
+    if (!list || state.status !== 'ready' || !state.data) return;
+    const scope = `${session.uid}:${session.schoolId}:${conversationId}`;
+    const previous = lastVisibleRef.current;
+    const firstLoad = previous?.scope !== scope;
+    const newMessage = !firstLoad && previous?.messageId !== lastMessageId;
+    lastVisibleRef.current = { scope, messageId: lastMessageId };
+    // New conversations start at the latest message. Incoming messages only
+    // move the viewport if the reader was already following the bottom.
+    if (firstLoad || (newMessage && followsLatestRef.current && !messageSearch.trim())) {
+      list.scrollTop = list.scrollHeight;
+      followsLatestRef.current = true;
+      setShowJumpToLatest(false);
+    } else if (newMessage && !messageSearch.trim()) {
+      setShowJumpToLatest(true);
+    }
+  }, [
+    session.uid,
+    session.schoolId,
+    conversationId,
+    state.status,
+    state.data,
+    lastMessageId,
+    messageSearch,
+  ]);
+  const jumpToLatest = () => {
+    const list = messageListRef.current;
+    if (!list) return;
+    list.scrollTop = list.scrollHeight;
+    followsLatestRef.current = true;
+    setShowJumpToLatest(false);
+  };
   const draftKey = `campus-one:dm-draft:${session.uid}:${session.schoolId}:${conversationId}`;
   // Keep draft state bound to its conversation: effects for a newly selected
   // conversation must never persist text from the previous account or thread.
@@ -402,6 +442,7 @@ export function PrivateConversationView({
       if (!active()) return;
       setDraft('');
       attempt.current = null;
+      jumpToLatest();
     } catch {
       if (active()) setFeedback('尚未確認送出，內容已保留。請重新連線後再試。');
     } finally {
@@ -441,6 +482,17 @@ export function PrivateConversationView({
       if (active()) setReacting(null);
     }
   };
+  const copyMessage = async (messageId: string, content: string) => {
+    if (!active()) return;
+    setFeedback('');
+    try {
+      if (!navigator.clipboard?.writeText) throw new Error('Clipboard unavailable');
+      await navigator.clipboard.writeText(content);
+      if (active()) setCopiedMessageId(messageId);
+    } catch {
+      if (active()) setFeedback('無法自動複製訊息，請選取文字後手動複製。');
+    }
+  };
   const visibleMessages = (state.data?.messages ?? []).filter(
     (row) =>
       !messageSearch.trim() ||
@@ -477,16 +529,43 @@ export function PrivateConversationView({
               <span className={styles.readIndicator}>對話已讀</span>
             )}
           </div>
-          <label className={styles.field}>
-            搜尋此對話
-            <input
-              type="search"
-              value={messageSearch}
-              onChange={(event) => setMessageSearch(event.target.value)}
-              placeholder="搜尋最近 100 則訊息"
-            />
-          </label>
-          <ol className={styles.messages} aria-label="對話內容">
+          <div className={styles.toolbar}>
+            <label className={styles.field}>
+              搜尋此對話
+              <input
+                type="search"
+                value={messageSearch}
+                onChange={(event) => setMessageSearch(event.target.value)}
+                placeholder="搜尋最近 100 則訊息"
+              />
+            </label>
+            {messageSearch && (
+              <button className={styles.button} type="button" onClick={() => setMessageSearch('')}>
+                清除搜尋
+              </button>
+            )}
+          </div>
+          {showJumpToLatest && !messageSearch.trim() && (
+            <div className={styles.jumpRow}>
+              <button className={styles.jumpButton} type="button" onClick={jumpToLatest}>
+                跳到最新訊息
+              </button>
+            </div>
+          )}
+          <ol
+            ref={messageListRef}
+            className={styles.messages}
+            role="log"
+            aria-label="對話內容"
+            aria-live="polite"
+            aria-relevant="additions"
+            onScroll={(event) => {
+              const list = event.currentTarget;
+              const following = list.scrollHeight - list.scrollTop - list.clientHeight < 96;
+              followsLatestRef.current = following;
+              setShowJumpToLatest(!following);
+            }}
+          >
             {visibleMessages.length ? (
               visibleMessages.map((row) => (
                 <li
@@ -500,7 +579,18 @@ export function PrivateConversationView({
                         ? row.content
                         : '此類型訊息請在 App 中查看。'}
                   </p>
-                  <time dateTime={row.createdAt ?? undefined}>{time(row.createdAt)}</time>
+                  <div className={styles.messageMeta}>
+                    <time dateTime={row.createdAt ?? undefined}>{time(row.createdAt)}</time>
+                    {!row.recalled && (row.type === 'text' || row.type === 'reply') && (
+                      <button
+                        className={styles.copyMessage}
+                        type="button"
+                        onClick={() => void copyMessage(row.id, row.content)}
+                      >
+                        {copiedMessageId === row.id ? '已複製' : '複製'}
+                      </button>
+                    )}
+                  </div>
                   {!row.recalled && (row.type === 'text' || row.type === 'reply') && (
                     <div className={styles.messageReactions} aria-label="訊息表情回應">
                       {(['👍', '❤️'] as const).map((emoji) => {
@@ -553,7 +643,7 @@ export function PrivateConversationView({
             disabled={sending || state.status !== 'ready'}
             onChange={(event) => setDraft(event.target.value)}
             onKeyDown={(event) => {
-              if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') {
+              if (!event.nativeEvent.isComposing && (event.metaKey || event.ctrlKey) && event.key === 'Enter') {
                 event.preventDefault();
                 void send();
               }

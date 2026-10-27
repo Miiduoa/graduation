@@ -18,6 +18,13 @@ import { SiteShell } from '@/components/SiteShell';
 import { SchoolScopePlaceholder } from '@/components/SchoolScopePlaceholder';
 import { useAuth } from '@/components/AuthGuard';
 import { useBrowsingSchoolPageContext } from '@/lib/useBrowsingSchoolPageContext';
+import { PostActionsRow, PostBookmarkShareActions } from '../../_components/PostActionBar';
+import {
+  isCampusPostBookmarked,
+  saveCampusPostBookmark,
+  removeCampusPostBookmark,
+} from '@/lib/community/bookmarks';
+import { isPermissionDeniedError } from '@campus/shared/src/signedInSocialReads';
 import {
   addCampusReply,
   deleteCampusPost,
@@ -67,6 +74,51 @@ function PostDetailInner({ schoolId }: { schoolId: string }) {
   const [sendingReply, setSendingReply] = useState(false);
   const [likeBusy, setLikeBusy] = useState(false);
   const [editOpen, setEditOpen] = useState(false);
+  const [bookmarkState, setBookmarkState] = useState<{ scope: string; saved: boolean } | null>(null);
+  const [bookmarkBusy, setBookmarkBusy] = useState(false);
+  const [bookmarkError, setBookmarkError] = useState('');
+  const [bookmarkRevision, setBookmarkRevision] = useState(0);
+  const bookmarkScope = `${user?.uid ?? ''}:${schoolId}:${postId ?? ''}`;
+  const bookmarkReady = bookmarkState?.scope === bookmarkScope;
+  const saved = bookmarkReady ? bookmarkState.saved : false;
+
+  useEffect(() => {
+    const uid = user?.uid;
+    if (!uid || !schoolId || !postId) return;
+    let live = true;
+    void isCampusPostBookmarked(uid, schoolId, postId)
+      .then((value) => {
+        if (!live) return;
+        setBookmarkState({ scope: `${uid}:${schoolId}:${postId}`, saved: value });
+        setBookmarkError('');
+      })
+      .catch((error) => {
+        if (!live) return;
+        if (isPermissionDeniedError(error)) {
+          setBookmarkState({ scope: `${uid}:${schoolId}:${postId}`, saved: false });
+          setBookmarkError('');
+          return;
+        }
+        setBookmarkError('無法讀取收藏狀態，請確認校籍與連線。');
+      });
+    return () => { live = false; };
+  }, [user?.uid, schoolId, postId, bookmarkRevision]);
+
+  const onToggleBookmark = async () => {
+    if (!user?.uid || !postId || !bookmarkReady || bookmarkBusy) return;
+    const uid = user.uid;
+    setBookmarkBusy(true);
+    setBookmarkError('');
+    try {
+      if (saved) await removeCampusPostBookmark(uid, schoolId, postId);
+      else await saveCampusPostBookmark(uid, schoolId, postId);
+      setBookmarkState({ scope: `${uid}:${schoolId}:${postId}`, saved: !saved });
+    } catch {
+      setBookmarkError('這次收藏未成功更新，請確認校籍與連線後重試。');
+    } finally {
+      setBookmarkBusy(false);
+    }
+  };
 
   const loadPost = useCallback(async () => {
     if (!postId || !schoolId) return;
@@ -223,7 +275,7 @@ function PostDetailInner({ schoolId }: { schoolId: string }) {
 
   const onShare = async () => {
     if (!postId || !post) return;
-    const url = `${window.location.origin}/community/post/${postId}`;
+    const url = `${window.location.origin}/community/post/${encodeURIComponent(postId)}?schoolId=${encodeURIComponent(schoolId)}`;
     if (navigator.share) {
       try {
         await navigator.share({ title: post.title, text: post.content, url });
@@ -414,16 +466,7 @@ function PostDetailInner({ schoolId }: { schoolId: string }) {
           </div>
         )}
 
-        <div
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: 14,
-            marginTop: 16,
-            paddingTop: 12,
-            borderTop: '1px solid var(--border)',
-          }}
-        >
+        <PostActionsRow>
           <button type="button" onClick={onToggleLike} disabled={likeBusy} style={statChip}>
             <span style={{ color: liked ? 'var(--danger, var(--danger))' : 'var(--muted)' }}>
               {liked ? '❤️' : '🤍'}
@@ -441,12 +484,22 @@ function PostDetailInner({ schoolId }: { schoolId: string }) {
             <span>💬</span>
             <span style={{ fontWeight: 700, color: 'var(--muted)' }}>{cc}</span>
           </div>
-          <div style={{ flex: 1 }} />
-          <button type="button" onClick={onShare} style={statChip}>
-            <span>🔗</span>
-            <span style={{ fontWeight: 700, color: 'var(--muted)' }}>分享</span>
-          </button>
-        </div>
+          <PostBookmarkShareActions
+            saved={saved}
+            bookmarkDisabled={!bookmarkReady || bookmarkBusy}
+            onBookmark={() => void onToggleBookmark()}
+            onShare={() => void onShare()}
+            shareAriaLabel="分享"
+          />
+        </PostActionsRow>
+        {bookmarkError && (
+          <p role="alert" style={{ margin: '8px 0 0', color: 'var(--danger)', fontSize: 13 }}>
+            {bookmarkError}{' '}
+            <button type="button" onClick={() => setBookmarkRevision((prev) => prev + 1)}>
+              重試
+            </button>
+          </p>
+        )}
       </div>
 
       {/* Replies */}
@@ -746,8 +799,11 @@ const btnGhost: React.CSSProperties = {
 };
 
 const statChip: React.CSSProperties = {
-  display: 'flex',
+  display: 'inline-flex',
+  flexDirection: 'row',
+  flexWrap: 'nowrap',
   alignItems: 'center',
+  flexShrink: 0,
   gap: 6,
   background: 'var(--surface)',
   padding: '6px 12px',
@@ -755,4 +811,5 @@ const statChip: React.CSSProperties = {
   border: '1px solid var(--border)',
   cursor: 'pointer',
   fontSize: 13,
+  whiteSpace: 'nowrap',
 };
