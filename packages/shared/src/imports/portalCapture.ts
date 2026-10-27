@@ -14,7 +14,7 @@ export const PORTAL_CAPTURE_LIMIT = 400_000;
 export const PORTAL_CAPTURE_TIMEOUT = 12_000;
 export function schoolPortalOrigin(portal: SchoolPortal, value: string): string | null {
   try {
-    if (!value || value.length > 4096 || /[\u0000-\u0020\\]/.test(value)) return null;
+    if (!value || value.length > 4096 || Array.from(value).some((char) => char.charCodeAt(0) <= 32 || char === '\\')) return null;
     const url = new URL(value);
     if (url.protocol !== 'https:' || url.username || url.password || url.port) return null;
     if (url.hostname !== portal.domain && !url.hostname.endsWith(`.${portal.domain}`)) return null;

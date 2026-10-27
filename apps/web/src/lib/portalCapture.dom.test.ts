@@ -8,10 +8,17 @@ function capture(html: string) {
   const messages: string[] = [];
   const bridge = { top: null as unknown, location: { origin: request.origin }, ReactNativeWebView: { postMessage: (message: string) => messages.push(message) } };
   bridge.top = bridge;
-  // Runs the exact injected script with a real jsdom document, never a regex-only simulation.
   new Function('window', 'document', schoolPortalCaptureScript(request))(bridge, document);
   expect(messages).toHaveLength(1);
-  return JSON.parse(messages[0]);
+  const result = JSON.parse(messages[0]);
+  if (result.error === 'unavailable') {
+    // Diagnostic execution uses only the synthetic fixture, never a real school page.
+    const diagnostic = schoolPortalCaptureScript(request).replace(
+      "} catch (error) { send({error:", "} catch (error) { throw error; send({error:",
+    );
+    new Function('window', 'document', diagnostic)(bridge, document);
+  }
+  return result;
 }
 afterEach(() => { document.body.innerHTML = ''; });
 it('extracts visible table text, headings and rowspan in a generic school portal', () => {
