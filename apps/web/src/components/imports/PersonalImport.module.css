@@ -365,3 +365,33 @@
     grid-template-columns: 1fr;
   }
 }
+
+.schoolPageChooser {
+  display: grid;
+  gap: 16px;
+  margin-top: 18px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--bg-soft);
+  padding: 18px;
+}
+.schoolPageChooser h3 { font-size: 17px; margin: 0 0 6px; }
+.schoolPageChooser p { font-size: 13px; color: var(--muted); line-height: 1.7; margin: 0; }
+.schoolPageCandidates { display: grid; gap: 8px; }
+.schoolPageCandidates button {
+  width: 100%;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--text);
+  padding: 14px;
+  text-align: left;
+  cursor: pointer;
+  font: inherit;
+}
+.schoolPageCandidates button:hover { border-color: var(--brand); }
+.schoolPageCandidates button:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
+.schoolPageCandidates button:disabled { cursor: not-allowed; opacity: 0.55; }
+.schoolPageCandidates strong, .schoolPageCandidates span { display: block; }
+.schoolPageCandidates strong { font-size: 13px; line-height: 1.6; overflow-wrap: anywhere; }
+.schoolPageCandidates span { font-size: 12px; color: var(--muted); margin-top: 4px; }
