@@ -8,6 +8,7 @@ import { SchoolAccountRequired } from './SchoolAccountRequired';
 import { SiteShell } from './SiteShell';
 import { Button } from './ui/Button';
 import { Input } from './ui/Input';
+import { AttendanceCorrectionPanel } from './AttendanceCorrectionPanel';
 import { resolveSchoolPageContext, type SchoolSearchParams } from '@/lib/pageContext';
 import {
   attendanceCsv,
@@ -72,6 +73,9 @@ function Session({
     };
   }, []);
   const confirmed = session.ownRecord?.checkedInAt ?? confirmedAt;
+  useEffect(() => {
+    if (!session.ownRecord) setConfirmedAt(null);
+  }, [session.ownRecord]);
   const [clock, setClock] = useState(Date.now());
   const deadline = session.qrExpiresAt ? Date.parse(session.qrExpiresAt) : NaN;
   const remainingSeconds = Number.isFinite(deadline)
@@ -257,6 +261,20 @@ function Session({
           </Button>
         )}
       </div>
+      {canStart && (
+        <AttendanceCorrectionPanel
+          courseId={courseId}
+          sessionId={session.id}
+          onUpdated={async () => {
+            await reload();
+            const latest = await loadAttendanceRecords(courseId, session.id);
+            if (live.current) {
+              setRecords(latest);
+              setRosterQuery('');
+            }
+          }}
+        />
+      )}
       {teacherCode && session.active && !expired && (
         <div className={styles.codePanel}>
           {/* eslint-disable-next-line @next/next/no-img-element */}
