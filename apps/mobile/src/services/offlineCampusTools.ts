@@ -1,10 +1,12 @@
 import { suggestCampusDestinations } from '@campus/shared/src/campusIntent';
 import type { OnDeviceSchoolContext } from './onDeviceSchoolContext';
 import { CAMPUS_SENSE_MAX_AGE_MS, type CampusSenseSnapshot } from './campusSenseSnapshot';
+import { buildOfflineCampusPlan, type CampusEvidencePlan } from './offlineCampusPlanner';
 
 export type OfflineCampusToolResult = {
   content: string;
-  tool: 'saved-timetable' | 'campus-snapshot' | 'online-required' | 'open-service';
+  tool: 'saved-timetable' | 'campus-snapshot' | 'campus-plan' | 'online-required' | 'open-service';
+  plan?: CampusEvidencePlan;
   route?: string;
 };
 
@@ -263,11 +265,25 @@ export function runOfflineCampusTool(
   question: string,
   context: OnDeviceSchoolContext,
   senseSnapshot?: CampusSenseSnapshot | null,
+  ownerUid = '',
 ): OfflineCampusToolResult | null {
   const text = question.trim().slice(0, 1600);
   if (!text) return null;
   const requestedWrite = userWriteRequest(text);
   if (requestedWrite) return requestedWrite;
+  // A source-backed plan performs a bounded, read-only multi-step analysis.
+  // It receives the verified owner explicitly rather than trusting a cached UID.
+  const plan = ownerUid ? buildOfflineCampusPlan({
+    question: text, context, snapshot: senseSnapshot, uid: ownerUid,
+  }) : null;
+  if (plan) {
+    return {
+      tool: 'campus-plan',
+      content: plan.content,
+      plan,
+      route: plan.steps[0]?.route,
+    };
+  }
   const synced = syncedCampusAnswer(text, context, senseSnapshot);
   if (synced) return synced;
   const live = realtimeOnly(text);

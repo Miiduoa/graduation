@@ -2,6 +2,7 @@ import { httpsCallable } from 'firebase/functions';
 import { getAuthInstance, getFunctionsInstance, isFirebaseMockMode } from '../firebase';
 import { campusAgentWriteProposals, type CampusAgentWriteProposal } from './campusAssistantActions';
 import { validCampusSenseSnapshot, type CampusSenseSnapshot } from '../services/campusSenseSnapshot';
+import type { CampusEvidencePlan } from '../services/offlineCampusPlanner';
 
 export type CampusAssistantMessage = { role: 'user' | 'assistant'; content: string };
 export type CampusAssistantScope = { uid: string; schoolId: string };
@@ -72,7 +73,8 @@ export async function askCampusAssistant(input: {
   content: string;
   hasActions: boolean;
   source: CampusAssistantMode;
-  tool?: 'saved-timetable' | 'campus-snapshot' | 'online-required' | 'open-service';
+  tool?: 'saved-timetable' | 'campus-snapshot' | 'campus-plan' | 'online-required' | 'open-service';
+  plan?: CampusEvidencePlan;
   route?: string;
   proposals?: CampusAgentWriteProposal[];
 }> {
@@ -113,7 +115,7 @@ export async function askCampusAssistant(input: {
     // Safe read-only tools run even without a GGUF download or a native runtime.
     // They do not query a backend, perform mutations, or invent missing school data.
     const senseSnapshot = validCampusSenseSnapshot(input.senseSnapshot, input.scope);
-    const localAnswer = runOfflineCampusTool(messages[messages.length - 1].content, snapshot, senseSnapshot);
+    const localAnswer = runOfflineCampusTool(messages[messages.length - 1].content, snapshot, senseSnapshot, uid);
     if (localAnswer) {
       return {
         content: localAnswer.content,
@@ -121,6 +123,7 @@ export async function askCampusAssistant(input: {
         source: 'device',
         tool: localAnswer.tool,
         route: localAnswer.route,
+        ...(localAnswer.plan ? { plan: localAnswer.plan } : {}),
       };
     }
 
