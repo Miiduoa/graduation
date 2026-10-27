@@ -482,7 +482,7 @@ test('a campus without school login offers an import action in the native accoun
   const view = render(<SSOLoginScreen />);
   expect(view.queryByTestId('student-id-input')).toBeNull();
   fireEvent.press(view.getByText('匯入課表、成績或活動'));
-  expect(mockNavigation.navigate).toHaveBeenCalledWith('PersonalImport', { kind: 'timetable' });
+  expect(mockNavigation.navigate).toHaveBeenCalledWith('PersonalImport');
   expect(signInWithStudentId).not.toHaveBeenCalled();
 });
 
