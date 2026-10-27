@@ -56,6 +56,31 @@ it('passes cancellation to the school request and never applies a late credentia
   expect(state.signIn).not.toHaveBeenCalled();
   expect(state.update).not.toHaveBeenCalled();
 });
+it.each([
+  [401, '學號或密碼錯誤', '學號或密碼錯誤'],
+  [503, '尚未開放', '這間學校尚未開放學號登入'],
+  [503, '學校系統暫時無法連線', '學校系統暫時連不上，請稍後再試'],
+  [429, 'Too many requests', '嘗試太多次，請稍後再試'],
+  [503, '暫時無法驗證老師身分', '登入失敗。請確認學號與密碼，或稍後再試。'],
+  [500, '<script>evil</script>', '登入失敗。請確認學號與密碼，或稍後再試。'],
+] as const)(
+  'rejects school login HTTP %s with a fixed notice instead of the server body',
+  async (status, serverError, copy) => {
+    state.fetch.mockImplementation(async () => Response.json({ error: serverError }, { status }));
+    await expect(signInWithPuStudentId('A1234567', 'test-password')).rejects.toMatchObject({
+      name: 'SchoolLoginHttpError',
+      status,
+      message: copy,
+    });
+    await expect(signInWithPuStudentId('CHANGYI', 'test-password')).rejects.toMatchObject({
+      name: 'SchoolLoginHttpError',
+      status,
+      message: copy,
+    });
+    expect(state.signIn).not.toHaveBeenCalled();
+  },
+);
+
 it('establishes a school session for a still-active login task and disposes temporary Auth', async () => {
   state.fetch.mockResolvedValueOnce(Response.json({ customToken: 'test-credential' }));
   await expect(
