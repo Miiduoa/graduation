@@ -356,7 +356,7 @@ test('pending logout explains the next step without presenting a restored accoun
 test('hides the school login button when no usable school provider is listed', () => {
   setSchoolLoginProviderKinds([]);
   const landing = render(<LoginLandingScreen />);
-  expect(landing.getByText(SCHOOL_LOGIN_BIND_HINT)).toBeTruthy();
+  expect(landing.getByText('這間學校尚未開放學號直接連線；你仍可匯入自己從校務系統取得的資料。')).toBeTruthy();
   expect(landing.queryByTestId('school-login-start')).toBeNull();
   expect(landing.queryByText('前往學校登入')).toBeNull();
   landing.unmount();
@@ -378,7 +378,7 @@ test('a release without school SSO keeps public and platform entries, but does n
   });
   setSchoolLoginProviderKinds([]);
   const landing = render(<LoginLandingScreen />);
-  expect(landing.getByText(SCHOOL_LOGIN_BIND_HINT)).toBeTruthy();
+  expect(landing.getByText('這間學校尚未開放學號直接連線；你仍可匯入自己從校務系統取得的資料。')).toBeTruthy();
   expect(landing.queryByTestId('school-login-start')).toBeNull();
   fireEvent.press(landing.getByTestId('public-Map'));
   expect(safeNavigate).toHaveBeenCalledWith(mockNavigation, 'Map');
@@ -401,7 +401,7 @@ test('the guest school-login entry always follows the selected university', () =
   mockSchool = { id: 'nthu', name: '國立清華大學', shortName: '清大' };
   view.rerender(<LoginLandingScreen />);
   expect(view.queryByTestId('school-login-start')).toBeNull();
-  expect(view.getByText(SCHOOL_LOGIN_BIND_HINT)).toBeTruthy();
+  expect(view.getByText('這間學校尚未開放學號直接連線；你仍可匯入自己從校務系統取得的資料。')).toBeTruthy();
   expect(view.getByTestId('login-start')).toBeTruthy();
   mockSchool = { id: 'pu', name: '靜宜大學', shortName: '靜宜' };
   view.rerender(<LoginLandingScreen />);
