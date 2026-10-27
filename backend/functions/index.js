@@ -5390,6 +5390,7 @@ exports.submitPollResponse = onCall({ region: REGION }, async (request) => {
 });
 
 exports.joinLiveSession = onCall({ region: REGION }, liveSessionHandlers.joinLiveSession);
+exports.correctAttendanceRecord = onCall({ region: REGION }, liveSessionHandlers.correctAttendanceRecord);
 
 exports.submitReaction = onCall({ region: REGION }, async (request) => {
   const uid = request.auth?.uid;
