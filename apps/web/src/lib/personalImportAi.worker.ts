@@ -32,6 +32,12 @@ let busy = false;
 
 class ImportRecognitionError extends Error {}
 
+function tokenId(value: unknown): number {
+  if (typeof value !== 'number' && typeof value !== 'bigint') return -1;
+  const token = Number(value);
+  return Number.isSafeInteger(token) && token >= 0 ? token : -1;
+}
+
 function progress(id: number, message: string): void {
   scope.postMessage({ type: 'progress', id, message });
 }
@@ -241,7 +247,7 @@ async function recognize(request: PersonalImportAiWorkerRequest): Promise<string
       tokenize: false,
     });
     const inputs = await processor(text, image);
-    const inputIds = inputs.input_ids;
+    const inputIds: unknown = inputs.input_ids;
     if (
       !(inputIds instanceof Tensor) ||
       inputIds.dims.length !== 2 ||
@@ -253,6 +259,14 @@ async function recognize(request: PersonalImportAiWorkerRequest): Promise<string
     ) {
       throw new ImportRecognitionError('這次的資料超出單次辨識範圍，請分成較小的圖片或文字段落。');
     }
+    // Snapshot before awaiting model code: a runtime may reuse or mutate the
+    // input tensor during generation. Never read its live length to slice output.
+    const inputLength = inputIds.dims[1];
+    const inputPrefix = Array.from({ length: inputLength }, (_, index) =>
+      tokenId(inputIds.data[index]),
+    );
+    if (inputPrefix.some((token) => token < 0))
+      throw new ImportRecognitionError('AI 輸入格式不完整，請重新選擇來源後再試。');
     // Tokenization includes the image tokens. Reject an oversized or malformed
     // request before allocating GPU sessions or downloading the model weights.
     progress(request.id, '資料範圍檢查完成，正在載入辨識模型；已下載的檔案會使用裝置快取');
@@ -270,7 +284,7 @@ async function recognize(request: PersonalImportAiWorkerRequest): Promise<string
       request.id,
       image ? 'AI 正在對照圖片中的欄位、日期與內容' : 'AI 正在整理欄位、日期與內容',
     );
-    const output = await model.generate({
+    const output: unknown = await model.generate({
       ...inputs,
       max_new_tokens: IMPORT_AI_MAX_OUTPUT_TOKENS,
       do_sample: false,
@@ -281,18 +295,21 @@ async function recognize(request: PersonalImportAiWorkerRequest): Promise<string
       output.dims.length !== 2 ||
       output.dims[0] !== 1 ||
       !Number.isSafeInteger(output.dims[1]) ||
-      output.dims[1] <= inputIds.dims[1] ||
-      output.dims[1] > inputIds.dims[1] + IMPORT_AI_MAX_OUTPUT_TOKENS ||
+      output.dims[1] <= inputLength ||
+      output.dims[1] > inputLength + IMPORT_AI_MAX_OUTPUT_TOKENS ||
       output.data.length !== output.dims[1]
     )
       throw new ImportRecognitionError('AI 沒有傳回完整且可讀取的辨識結果，草稿仍保留，請重試。');
     // Decoder-only generation must return this request's input prefix. A shape
     // mismatch or another sequence must never be decoded into a plausible draft.
-    for (let index = 0; index < inputIds.dims[1]; index++) {
-      if (output.data[index] !== inputIds.data[index])
+    for (let index = 0; index < output.dims[1]; index++) {
+      const token = tokenId(output.data[index]);
+      if (token < 0)
+        throw new ImportRecognitionError('AI 回傳的序列格式不完整，草稿仍保留，請重試。');
+      if (index < inputLength && token !== inputPrefix[index])
         throw new ImportRecognitionError('AI 回傳結果與這次來源不一致，草稿仍保留，請重試。');
     }
-    const generated = output.slice(null, [inputIds.dims[1], output.dims[1]]);
+    const generated = output.slice(null, [inputLength, output.dims[1]]);
     const eosConfig = model.generation_config?.eos_token_id ?? [151645, 151643];
     const eos = Array.isArray(eosConfig) ? eosConfig : [eosConfig];
     const lastToken = Number(generated.data[generated.data.length - 1]);
