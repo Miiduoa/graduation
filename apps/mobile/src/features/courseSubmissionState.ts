@@ -49,7 +49,7 @@ export function submissionStatusText(state: CourseSubmissionState | undefined): 
         ? `已繳交 · 已發布評分 ${state.grade.score} 分`
         : `已繳交 · ${formatTaipeiDateTime(state.submittedAt, { seconds: false })}`;
     case 'instructor':
-      return '教師檢視 · 學生繳交請至批改頁查看';
+      return '教師檢視 · 開啟網頁批改可查看學生繳交';
     case 'unconfirmed':
       return '尚未確認正式繳交，請進入作業核對';
     case 'unavailable':
@@ -94,8 +94,10 @@ export function canSubmitCourseWork(
   },
   now = new Date(),
 ): boolean {
+  // Align with firestore acceptsStudentSubmission: closed always blocks;
+  // dueAt == null is unrestricted; unparseable dueAt cannot be treated as open.
   if (item.closed || !canListAsPendingWork(item.submission)) return false;
-  if (!item.dueAt) return true;
+  if (item.dueAt == null) return true;
   const due = parseTaipeiInstant(item.dueAt);
   if (due === null) return false;
   return due >= now.getTime() || item.allowLateSubmission === true;
