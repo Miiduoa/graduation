@@ -504,8 +504,12 @@ describe('audited instructor attendance correction', () => {
   }
 
   it('records an explicit absence and durable reason without changing present-counts', async () => {
-    const { store, start, correction } = setup();
+    const { store, start, correction, handlers } = setup();
     const session = await start();
+    await handlers.endLiveSession({
+      auth: { uid: 'teacher' },
+      data: { groupId: 'class-1', sessionId: session.sessionId },
+    });
     const result = await correction(session.sessionId);
     expect(result).toMatchObject({ success: true, reused: false, status: 'absent' });
     expect(store.docs.get(`groups/class-1/attendanceSessions/${session.sessionId}`)?.attendeeCount).toBe(0);
@@ -529,9 +533,22 @@ describe('audited instructor attendance correction', () => {
     expect(store.docs.get(`groups/class-1/liveSessions/${session.sessionId}`)?.attendeeCount).toBe(1);
   });
 
-  it('does not persist audit or partial attendance on an aborted transaction', async () => {
+  it('does not finalize an absence while QR sign-in remains active', async () => {
     const { store, start, correction } = setup();
     const session = await start();
+    await expect(correction(session.sessionId))
+      .rejects.toMatchObject({ code: 'failed-precondition' });
+    expect([...store.docs.keys()].filter((key) => key.includes('/attendanceCorrections/')))
+      .toHaveLength(0);
+  });
+
+  it('does not persist audit or partial attendance on an aborted transaction', async () => {
+    const { store, start, correction, handlers } = setup();
+    const session = await start();
+    await handlers.endLiveSession({
+      auth: { uid: 'teacher' },
+      data: { groupId: 'class-1', sessionId: session.sessionId },
+    });
     store.failNextCommit();
     await expect(correction(session.sessionId)).rejects.toThrow('commit unavailable');
     expect([...store.docs.keys()].filter((key) => key.includes('/attendanceCorrections/')))
