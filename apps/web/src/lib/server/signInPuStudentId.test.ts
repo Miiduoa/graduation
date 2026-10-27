@@ -1,0 +1,357 @@
+// @vitest-environment node
+import { afterEach, expect, it, vi } from 'vitest';
+import { decodeFirebaseCustomTokenPayload } from './firebaseCustomToken';
+import {
+  ACCOUNT_SCOPE,
+  createLoginRateGate,
+  hashRateLimitDocId,
+  LOGIN_RATE_LIMIT,
+  LoginRateLimitError,
+  RATE_LIMITS_COLLECTION,
+} from './loginRateLimit';
+import { createMemoryGroupStore } from './memoryGroupStore';
+import { PuCampusError, type PuCampusGateway } from './puCampusClient';
+import { clientIpFromRequest, handleSignInPuStudentId, PuLoginHttpError } from './signInPuStudentId';
+
+const STUDENT = '1110700321';
+const SECRET = 'never-log-this-password';
+
+function campus(overrides: Partial<PuCampusGateway> = {}): PuCampusGateway {
+  return {
+    loginStudent: async () => ({
+      cookies: { PHPSESSID: 'stu-cookie' },
+      studentName: '陳同學',
+    }),
+    fetchStudentInfo: async () => ({
+      studentId: STUDENT,
+      name: '陳同學',
+      class: '資管三A',
+    }),
+    loginTronClass: async () => ({
+      cookies: { session: 'tc-cookie' },
+      userId: 9,
+      userName: '陳同學',
+      role: 'student',
+    }),
+    fetchTronClassCourses: async () => [],
+    ...overrides,
+  };
+}
+
+function deps(options?: {
+  store?: ReturnType<typeof createMemoryGroupStore>;
+  campus?: PuCampusGateway;
+  token?: string;
+}) {
+  const store = options?.store ?? createMemoryGroupStore();
+  return {
+    store,
+    runtime: {
+      db: store.db,
+      campus: options?.campus ?? campus(),
+      signCustomToken: async (uid: string, claims: Record<string, string>) =>
+        options?.token ?? `token:${uid}:${claims.role}:${claims.schoolId}`,
+      rateLimitGate: createLoginRateGate(),
+      rateLimitSalt: 'test-rate-limit-salt',
+    },
+  };
+}
+
+afterEach(() => {
+  vi.restoreAllMocks();
+});
+
+it('returns a custom token and writes student profile fields without clobbering extras', async () => {
+  const store = createMemoryGroupStore([
+    ['users/pu-1110700321', { bio: 'keep-me', favoriteColor: 'blue' }],
+  ]);
+  const { runtime } = deps({ store });
+  const result = await handleSignInPuStudentId(
+    { studentId: STUDENT, password: SECRET, schoolId: 'pu' },
+    '1.1.1.1',
+    runtime,
+  );
+  expect(result).toMatchObject({
+    success: true,
+    customToken: 'token:pu-1110700321:student:pu',
+    uid: 'pu-1110700321',
+    studentId: STUDENT,
+    displayName: '陳同學',
+    department: '資管三A',
+    isNewUser: false,
+  });
+  expect(store.docs.get('users/pu-1110700321')).toMatchObject({
+    bio: 'keep-me',
+    favoriteColor: 'blue',
+    studentId: STUDENT,
+    displayName: '陳同學',
+    role: 'student',
+    schoolId: 'pu',
+    email: '1110700321@pu.edu.tw',
+  });
+  expect(store.docs.get('schools/pu/members/pu-1110700321')).toMatchObject({
+    studentId: STUDENT,
+    status: 'active',
+    role: 'member',
+  });
+});
+
+it('rejects non-pu schools, invalid student ids, and missing fields', async () => {
+  const { runtime } = deps();
+  await expect(
+    handleSignInPuStudentId({ studentId: STUDENT, password: SECRET, schoolId: 'ntpu' }, '1.1.1.1', runtime),
+  ).rejects.toMatchObject({ status: 400, message: '只接受靜宜大學帳號' });
+  await expect(
+    handleSignInPuStudentId({ studentId: '12', password: SECRET }, '1.1.1.1', runtime),
+  ).rejects.toMatchObject({ status: 400, message: '學號格式不正確' });
+  await expect(
+    handleSignInPuStudentId({ studentId: STUDENT }, '1.1.1.1', runtime),
+  ).rejects.toMatchObject({ status: 400, message: 'Missing required fields: studentId, password' });
+});
+
+it('maps campus credential, timeout and closed errors', async () => {
+  const { runtime: creds } = deps({
+    campus: campus({
+      loginStudent: async () => {
+        throw new PuCampusError('credentials', '學號或密碼錯誤');
+      },
+    }),
+  });
+  await expect(
+    handleSignInPuStudentId({ studentId: STUDENT, password: SECRET }, '2.2.2.2', creds),
+  ).rejects.toMatchObject({ status: 401, message: '學號或密碼錯誤' });
+
+  const { runtime: timeout } = deps({
+    campus: campus({
+      loginStudent: async () => {
+        throw new PuCampusError('timeout', '學校系統無回應');
+      },
+    }),
+  });
+  await expect(
+    handleSignInPuStudentId({ studentId: STUDENT, password: SECRET }, '3.3.3.3', timeout),
+  ).rejects.toMatchObject({ status: 503, message: '學校系統暫時無法連線' });
+
+  const { runtime: closed } = deps({
+    campus: campus({
+      loginStudent: async () => {
+        throw new PuCampusError('closed', '尚未開放');
+      },
+    }),
+  });
+  await expect(
+    handleSignInPuStudentId({ studentId: STUDENT, password: SECRET }, '4.4.4.4', closed),
+  ).rejects.toMatchObject({ status: 503, message: '尚未開放' });
+});
+
+it('never puts the password into logs, thrown errors, or the JSON result', async () => {
+  const errors: unknown[] = [];
+  vi.spyOn(console, 'error').mockImplementation((...args) => {
+    errors.push(args);
+  });
+  vi.spyOn(console, 'warn').mockImplementation((...args) => {
+    errors.push(args);
+  });
+  const { runtime } = deps({
+    campus: campus({
+      loginTronClass: async () => {
+        throw new Error(`upstream exploded ${SECRET}`);
+      },
+      fetchStudentInfo: async () => {
+        throw new Error(`profile ${SECRET}`);
+      },
+    }),
+  });
+  const result = await handleSignInPuStudentId(
+    { studentId: STUDENT, password: SECRET },
+    '5.5.5.5',
+    runtime,
+  );
+  expect(JSON.stringify(result)).not.toContain(SECRET);
+  expect(JSON.stringify(errors)).not.toContain(SECRET);
+  const { runtime: failing } = deps({
+    campus: campus({
+      loginStudent: async () => {
+        throw new Error(`login boom ${SECRET}`);
+      },
+    }),
+  });
+  await expect(
+    handleSignInPuStudentId({ studentId: STUDENT, password: SECRET }, '5.5.5.6', failing),
+  ).rejects.toMatchObject({ status: 500, message: 'PU student login failed' });
+  try {
+    await handleSignInPuStudentId({ studentId: STUDENT, password: SECRET }, '5.5.5.7', failing);
+  } catch (error) {
+    expect(error).toBeInstanceOf(PuLoginHttpError);
+    expect(String(error)).not.toContain(SECRET);
+  }
+  expect(JSON.stringify(errors)).not.toContain(SECRET);
+});
+
+it('signs real custom token claims when a service account is provided', async () => {
+  const { generateKeyPairSync } = await import('node:crypto');
+  const { privateKey } = generateKeyPairSync('rsa', { modulusLength: 2048 });
+  const { runtime } = deps();
+  const result = await handleSignInPuStudentId(
+    { studentId: STUDENT, password: SECRET },
+    '6.6.6.6',
+    {
+      ...runtime,
+      signCustomToken: undefined,
+      serviceAccount: {
+        client_email: 'firebase-adminsdk@campus-one-tw.iam.gserviceaccount.com',
+        private_key: privateKey.export({ type: 'pkcs8', format: 'pem' }).toString(),
+      },
+    },
+  );
+  const payload = decodeFirebaseCustomTokenPayload(String(result.customToken));
+  expect(payload.uid).toBe('pu-1110700321');
+  expect(payload.claims).toEqual({ schoolId: 'pu', role: 'student' });
+});
+
+it('rate-limits repeated student attempts before calling the campus', async () => {
+  const loginStudent = vi.fn(async () => {
+    throw new PuCampusError('credentials', '學號或密碼錯誤');
+  });
+  const { runtime, store } = deps({ campus: campus({ loginStudent }) });
+  for (let i = 0; i < 5; i += 1) {
+    await expect(
+      handleSignInPuStudentId({ studentId: STUDENT, password: SECRET }, '9.9.9.9', runtime),
+    ).rejects.toMatchObject({ status: 401 });
+  }
+  await expect(
+    handleSignInPuStudentId({ studentId: STUDENT, password: SECRET }, '9.9.9.9', runtime),
+  ).rejects.toMatchObject({ status: 429, message: 'Too many requests' });
+  expect(loginStudent).toHaveBeenCalledTimes(5);
+  const rateLimitPaths = [...store.docs.keys()].filter((path) => path.startsWith('_rateLimits/'));
+  expect(rateLimitPaths.join('\n')).not.toContain(STUDENT);
+});
+
+it('lets at most 5 concurrent attempts for the same account reach campus', async () => {
+  const loginStudent = vi.fn(async () => {
+    throw new PuCampusError('credentials', '學號或密碼錯誤');
+  });
+  const { runtime } = deps({ campus: campus({ loginStudent }) });
+  const results = await Promise.all(
+    Array.from({ length: 20 }, (_, index) =>
+      handleSignInPuStudentId(
+        { studentId: STUDENT, password: SECRET },
+        `10.1.0.${index + 1}`,
+        runtime,
+      ).catch((error: unknown) => error),
+    ),
+  );
+  expect(loginStudent.mock.calls.length).toBeLessThanOrEqual(LOGIN_RATE_LIMIT.account.limit);
+  expect(
+    results.filter((item) => item instanceof LoginRateLimitError || (item instanceof PuLoginHttpError && item.status === 429))
+      .length,
+  ).toBeGreaterThan(0);
+});
+
+it('rejects from shared Firestore even when this process memory is empty', async () => {
+  const loginStudent = vi.fn(async () => {
+    throw new PuCampusError('credentials', '學號或密碼錯誤');
+  });
+  const salt = 'test-rate-limit-salt';
+  const hashed = hashRateLimitDocId(ACCOUNT_SCOPE, STUDENT, salt);
+  const store = createMemoryGroupStore([
+    [
+      `${RATE_LIMITS_COLLECTION}/${hashed}`,
+      { count: LOGIN_RATE_LIMIT.account.limit, ttl: new Date(Date.now() + 15 * 60 * 1000), scope: ACCOUNT_SCOPE },
+    ],
+  ]);
+  const { runtime } = deps({ store, campus: campus({ loginStudent }) });
+  await expect(
+    handleSignInPuStudentId({ studentId: STUDENT, password: SECRET }, '9.9.8.8', runtime),
+  ).rejects.toMatchObject({ status: 429, message: 'Too many requests' });
+  expect(loginStudent).not.toHaveBeenCalled();
+});
+
+it('refunds the account debit after a campus timeout', async () => {
+  let mode: 'timeout' | 'credentials' = 'timeout';
+  const loginStudent = vi.fn(async () => {
+    if (mode === 'timeout') throw new PuCampusError('timeout', '學校系統無回應');
+    throw new PuCampusError('credentials', '學號或密碼錯誤');
+  });
+  const { runtime } = deps({ campus: campus({ loginStudent }) });
+  for (let i = 0; i < LOGIN_RATE_LIMIT.account.limit; i += 1) {
+    await expect(
+      handleSignInPuStudentId({ studentId: STUDENT, password: SECRET }, `11.0.0.${i + 1}`, runtime),
+    ).rejects.toMatchObject({ status: 503, message: '學校系統暫時無法連線' });
+  }
+  mode = 'credentials';
+  await expect(
+    handleSignInPuStudentId({ studentId: STUDENT, password: SECRET }, '11.0.0.9', runtime),
+  ).rejects.toMatchObject({ status: 401, message: '學號或密碼錯誤' });
+  expect(loginStudent).toHaveBeenCalledTimes(LOGIN_RATE_LIMIT.account.limit + 1);
+});
+
+it('returns 503 without campus when the service-account secret is empty', async () => {
+  const loginStudent = vi.fn(async () => ({ cookies: { PHPSESSID: 'stu-cookie' } }));
+  const { runtime } = deps({ campus: campus({ loginStudent }) });
+  const previous = process.env.FIREBASE_SERVICE_ACCOUNT_JSON;
+  delete process.env.FIREBASE_SERVICE_ACCOUNT_JSON;
+  try {
+    await expect(
+      handleSignInPuStudentId(
+        { studentId: STUDENT, password: SECRET },
+        '9.9.9.6',
+        {
+          db: runtime.db,
+          campus: runtime.campus,
+          signCustomToken: runtime.signCustomToken,
+          rateLimitGate: runtime.rateLimitGate,
+        },
+      ),
+    ).rejects.toMatchObject({ status: 503, message: '服務暫時無法使用' });
+    expect(loginStudent).not.toHaveBeenCalled();
+  } finally {
+    if (previous === undefined) delete process.env.FIREBASE_SERVICE_ACCOUNT_JSON;
+    else process.env.FIREBASE_SERVICE_ACCOUNT_JSON = previous;
+  }
+});
+
+it('returns 503 and does not call the campus when rate-limit storage fails', async () => {
+  const loginStudent = vi.fn(async () => ({ cookies: { PHPSESSID: 'stu-cookie' } }));
+  const store = createMemoryGroupStore();
+  store.failNextCommit();
+  const { runtime } = deps({ store, campus: campus({ loginStudent }) });
+  await expect(
+    handleSignInPuStudentId({ studentId: STUDENT, password: SECRET }, '9.9.9.8', runtime),
+  ).rejects.toMatchObject({ status: 503, message: '服務暫時無法使用' });
+  expect(loginStudent).not.toHaveBeenCalled();
+});
+
+it('returns 503 without Firestore or campus when the daily write budget is spent', async () => {
+  const loginStudent = vi.fn(async () => ({ cookies: { PHPSESSID: 'stu-cookie' } }));
+  const store = createMemoryGroupStore();
+  const runTransaction = vi.spyOn(store.db, 'runTransaction');
+  const { runtime } = deps({ store, campus: campus({ loginStudent }) });
+  runtime.rateLimitGate = createLoginRateGate({ dailyWriteLimit: 0 });
+  await expect(
+    handleSignInPuStudentId({ studentId: STUDENT, password: SECRET }, '9.9.9.7', runtime),
+  ).rejects.toMatchObject({ status: 503, message: '服務暫時無法使用' });
+  expect(loginStudent).not.toHaveBeenCalled();
+  expect(runTransaction).not.toHaveBeenCalled();
+});
+
+it('uses only Fly-Client-IP and otherwise a shared unknown bucket', () => {
+  expect(
+    clientIpFromRequest(
+      new Request('https://nuni.tw/api/fn/signInPuStudentId', {
+        headers: {
+          'fly-client-ip': '203.0.113.10',
+          'x-forwarded-for': '198.51.100.1, 203.0.113.10',
+          'x-real-ip': '192.0.2.1',
+        },
+      }),
+    ),
+  ).toBe('203.0.113.10');
+  expect(
+    clientIpFromRequest(
+      new Request('https://nuni.tw/api/fn/signInPuStudentId', {
+        headers: { 'x-forwarded-for': '198.51.100.1, 203.0.113.9', 'x-real-ip': '192.0.2.1' },
+      }),
+    ),
+  ).toBe('unknown');
+});
