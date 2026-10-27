@@ -18,6 +18,7 @@ import { safeNavigate } from '../utils/safeNavigate';
 import { getMobileQuickActions } from '../services/quickCampusActions';
 import type { CampusAgentWriteProposal, CampusAgentWriteTool } from '../features/campusAssistantActions';
 import { CampusAgentActionReview } from './CampusAgentActionReview';
+import { CampusSenseDashboard } from './CampusSenseDashboard';
 import {
   refreshCampusSenseSnapshot,
   validCampusSenseSnapshot,
@@ -255,54 +256,16 @@ function AssistantConversation({
         </View>
       </AICard>
       {mode === 'device' ? (
-        <AICard title="校園感知 · 你決定何時同步">
-          <View style={{ gap: 10 }}>
-            <Text style={{ color: aiTokens.text, fontSize: 14, fontWeight: '700' }}>
-              {currentSense
-                ? '已取得本次授權資料'
-                : sense ? '校園摘要已過期，請重新同步' : '尚未同步校園摘要'}
-            </Text>
-            <Text style={{ color: aiTokens.muted, fontSize: 13, lineHeight: 21 }}>
-              {currentSense
-                ? '同步時間：' + new Intl.DateTimeFormat('zh-TW', {
-                    timeZone: 'Asia/Taipei', month: 'numeric', day: 'numeric',
-                    hour: '2-digit', minute: '2-digit',
-                  }).format(new Date(currentSense.checkedAt)) +
-                  '。作業：' + (currentSense.assignments.status === 'available'
-                    ? currentSense.assignments.count + ' 筆（僅限已串接課程）' : '來源不可用') +
-                  '；公告：' + (currentSense.announcements.status === 'available'
-                    ? currentSense.announcements.items.length + ' 筆摘要' : '來源不可用') +
-                  '；正式課表：' + (currentSense.schedule.status === 'available'
-                    ? currentSense.schedule.count + ' 筆' : '尚未接通') + '。'
-                : '點擊同步後，手機會透過你的登入權限讀取已接通的校園摘要。本機模型仍在手機推論，問題與對話不會隨同步送出。'}
-            </Text>
-            <Text style={{ color: aiTokens.muted, fontSize: 12, lineHeight: 19 }}>
-              摘要僅保留在這次畫面的記憶體，15 分鐘後失效。未同步也能查本機儲存課表；未接通的校方系統不會出現在摘要中。
-            </Text>
-            <AIButton
-              label={syncBusy ? '正在同步校園資料…' : currentSense ? '重新同步校園資料' : '同步我的校園資料'}
-              variant="ghost"
-              disabled={busy || syncBusy || !uid}
-              onPress={() => void syncCampus()}
-            />
-            {currentSense ? (
-              <AIButton
-                label="清除本次校園摘要"
-                variant="ghost"
-                disabled={busy || syncBusy}
-                onPress={() => { setSense(null); setSenseError(''); }}
-              />
-            ) : null}
-            {!uid ? (
-              <Text style={{ color: aiTokens.muted, fontSize: 12 }}>
-                登入帳號並取得所選學校的有效權限後才能同步；純本機文字問答仍可使用。
-              </Text>
-            ) : null}
-            {senseError ? (
-              <Text accessibilityRole="alert" style={{ color: aiTokens.danger }}>{senseError}</Text>
-            ) : null}
-          </View>
-        </AICard>
+        <CampusSenseDashboard
+          snapshot={currentSense}
+          expired={Boolean(sense)}
+          authenticated={Boolean(uid)}
+          busy={busy}
+          syncBusy={syncBusy}
+          error={senseError}
+          onSync={() => void syncCampus()}
+          onClear={() => { setSense(null); setSenseError(''); }}
+        />
       ) : null}
       <AICard>
         <Text style={{ color: aiTokens.muted, lineHeight: 24 }}>
