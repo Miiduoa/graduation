@@ -466,3 +466,32 @@ test('public landing exposes school-scoped CourseCatalog Health Dormitory Career
   expect(view.getByText(/前往國立成功大學住宿相關校方入口/)).toBeTruthy();
   expect(signInWithStudentId).not.toHaveBeenCalled();
 });
+
+test('guest campus connection surfaces the self-import path before the public directory', () => {
+  mockSchool = { id: 'ntu', name: '國立臺灣大學', shortName: '臺大' };
+  const view = render(<LoginLandingScreen />);
+  expect(view.queryByTestId('school-login-start')).toBeNull();
+  expect(view.getByText('這間學校尚未開放學號直接連線；你仍可匯入自己從校務系統取得的資料。')).toBeTruthy();
+  fireEvent.press(view.getByTestId('school-import-start'));
+  expect(safeNavigate).toHaveBeenCalledWith(mockNavigation, 'PersonalImport', { kind: 'timetable' });
+  expect(view.queryByTestId('school-login-start')).toBeNull();
+});
+
+test('a campus without school login offers an import action in the native account screen', () => {
+  mockSchool = { id: 'ntu', name: '國立臺灣大學', shortName: '臺大' };
+  const view = render(<SSOLoginScreen />);
+  expect(view.queryByTestId('student-id-input')).toBeNull();
+  fireEvent.press(view.getByText('匯入課表、成績或活動'));
+  expect(mockNavigation.navigate).toHaveBeenCalledWith('PersonalImport', { kind: 'timetable' });
+  expect(signInWithStudentId).not.toHaveBeenCalled();
+});
+
+test('native school login failure clears the password and allows a fresh attempt', async () => {
+  jest.mocked(signInWithStudentId).mockRejectedValueOnce(new Error('invalid credentials'));
+  const view = render(<SSOLoginScreen />);
+  enterSchoolCredentials(view);
+  fireEvent.press(view.getByText('使用學號登入'));
+  await view.findByText('學校帳號登入未完成，請確認帳號密碼與網路連線後重試。');
+  expect(view.getByTestId('student-password-input').props.value).toBe('');
+  expect(view.getByTestId('student-id-input').props.value).toBe('S123456');
+});
