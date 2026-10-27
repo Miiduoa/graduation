@@ -126,7 +126,7 @@ test('schedules a real one-time OS reminder after explicit confirmation, without
   expect(result.outcome).toBe('scheduled');
   expect(mockSchedule).toHaveBeenCalledTimes(1);
   const event = mockSchedule.mock.calls[0][0];
-  expect(event.identifier).toMatch(new RegExp('^' + CAMPUS_AGENT_REMINDER_PREFIX.replace(/\./g, '\\.')));
+  expect(event.identifier.startsWith(CAMPUS_AGENT_REMINDER_PREFIX)).toBe(true);
   expect(event.content).toEqual(expect.objectContaining({
     title: '校園作業提醒',
     body: expect.not.stringContaining('資訊管理期末報告'),

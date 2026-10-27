@@ -1,8 +1,16 @@
 import type { OnDeviceSchoolContext } from './onDeviceSchoolContext';
 import type { CampusSenseSnapshot } from './campusSenseSnapshot';
 import { CAMPUS_SENSE_MAX_AGE_MS } from './campusSenseSnapshot';
+import {
+  buildCampusStudyAgenda,
+  formatCampusStudyAgenda,
+  periodLabel,
+  resolveStudyWindow,
+  taipeiDayNumber,
+  type CampusStudyAgenda,
+} from './campusStudyAgenda';
 
-/** A plan is a read-only explanation, never an instruction to perform a write. */
+/** A plan is read-only; local reminder creation has its own explicit confirmation. */
 export type CampusPlanRoute = '/classroom' | '/timetable' | '/announcements';
 export type CampusPlanPriority = 'overdue' | 'urgent' | 'soon' | 'normal' | 'verify';
 export type CampusPlanEvidence = 'authorized-assignments' | 'saved-timetable' | 'authorized-announcements' | 'verification';
@@ -25,41 +33,22 @@ export interface CampusEvidencePlan {
   checkedAt: string;
   steps: CampusPlanStep[];
   limitations: string[];
+  /** Complete dated view; optional for existing clients and stored replies. */
+  agenda?: CampusStudyAgenda;
   /** Plain-text fallback for text-to-speech and non-card clients. */
   content: string;
 }
 
-type WindowKind = 'today' | 'tomorrow' | 'week' | 'next-week';
 const DAY_MS = 86_400_000;
 const DAY_NAMES = ['日', '一', '二', '三', '四', '五', '六'];
-
-function twDateParts(value: Date): { dayId: number; weekday: number } {
-  const parts = new Intl.DateTimeFormat('en-US', {
-    timeZone: 'Asia/Taipei', year: 'numeric', month: '2-digit', day: '2-digit',
-  }).formatToParts(value);
-  const number = (name: string) => Number(parts.find((part) => part.type === name)?.value ?? '');
-  const year = number('year');
-  const month = number('month');
-  const day = number('day');
-  const dayId = Date.UTC(year, month - 1, day) / DAY_MS;
-  return { dayId, weekday: new Date(dayId * DAY_MS).getUTCDay() };
-}
 
 function cleaned(value: string): string {
   return value.replace(/\s+/g, ' ').trim().slice(0, 130);
 }
 
-function windowFromRequest(question: string): WindowKind {
-  if (/下週|下星期|下禮拜/.test(question)) return 'next-week';
-  if (/明天|明日/.test(question) && !/這週|本週/.test(question)) return 'tomorrow';
-  if (/接下來.{0,4}(?:七天|7天)|未來.{0,4}(?:七天|7天)|本週|這週|一週|一周|學習計畫|讀書計畫|週計畫/.test(question)) return 'week';
-  return 'today';
-}
-
 function wantsSourceBackedPlan(question: string): boolean {
   const planning = /安排|規劃|計畫|今日重點|今天要做|今天要先|今天先做|今天該做|先處理|先完成|優先順序|待辦摘要|校園摘要|本週重點|這週重點|接下來七天|未來七天|讀書進度|怎麼分配/.test(question);
-  const scope = /今天|明天|今日|這週|本週|下週|七天|7天|課表|空堂|作業|待交|待繳|截止|學習|讀書|複習|報告|待辦|校園/.test(question);
-  // No model-suggested write can become an offline executable action.
+  const scope = /今天|明天|今日|這週|本週|下週|下星期|下禮拜|七天|7天|課表|空堂|作業|待交|待繳|截止|學習|讀書|複習|報告|待辦|校園/.test(question);
   const write = /(?:幫我|替我|直接|立刻).{0,22}(?:送出|提交|請假|下單|付款|發訊息|訂餐|報修|刪除|改成已讀)/.test(question);
   return planning && scope && !write;
 }
@@ -70,24 +59,25 @@ function validAuthorizedSnapshot(
   uid: string,
   now: number,
 ): CampusSenseSnapshot | null {
-  if (!uid || !snapshot || snapshot.userId !== uid ||
-      snapshot.schoolId !== context.schoolId) return null;
+  if (!uid || !snapshot || snapshot.userId !== uid || snapshot.schoolId !== context.schoolId) return null;
   const checkedAt = Date.parse(snapshot.checkedAt);
-  if (!Number.isFinite(checkedAt) || checkedAt > now + 30_000 ||
-      now - checkedAt > CAMPUS_SENSE_MAX_AGE_MS) return null;
+  if (!Number.isFinite(checkedAt) || checkedAt > now + 30_000 || now - checkedAt > CAMPUS_SENSE_MAX_AGE_MS) return null;
   return snapshot;
 }
 
 function localDate(value: string): string {
   return new Intl.DateTimeFormat('zh-TW', {
-    timeZone: 'Asia/Taipei', month: 'numeric', day: 'numeric',
-    hour: '2-digit', minute: '2-digit',
+    timeZone: 'Asia/Taipei', month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit',
   }).format(new Date(value));
 }
 
+function dueTimestamp(value: string | null): number {
+  if (!value || !/T.*(?:Z|[+-]\d{2}:\d{2})$/i.test(value)) return NaN;
+  return Date.parse(value);
+}
+
 function duePriority(dueAt: string | null, now: number): CampusPlanPriority {
-  if (!dueAt) return 'verify';
-  const due = Date.parse(dueAt);
+  const due = dueTimestamp(dueAt);
   if (!Number.isFinite(due)) return 'verify';
   if (due < now) return 'overdue';
   if (due - now <= DAY_MS) return 'urgent';
@@ -114,47 +104,37 @@ export function buildOfflineCampusPlan(input: {
 }): CampusEvidencePlan | null {
   const question = input.question.trim().slice(0, 1600);
   if (!wantsSourceBackedPlan(question)) return null;
-
   const now = Date.parse(input.context.checkedAt);
   if (!Number.isFinite(now)) return null;
   const sense = validAuthorizedSnapshot(input.snapshot, input.context, input.uid, now);
   const hasTimetable = input.context.timetable.source === 'saved-device-copy';
   if (!sense && !hasTimetable) return null;
-
-  const today = twDateParts(new Date(now));
-  if (!Number.isFinite(today.dayId)) return null;
-  const range = windowFromRequest(question);
-  const startDay = range === 'tomorrow' ? today.dayId + 1
-    : range === 'next-week' ? today.dayId + (8 - today.weekday) % 7 + (today.weekday === 1 ? 7 : 0)
-    : today.dayId;
-  const endDay = startDay + ((range === 'week' || range === 'next-week') ? 7 : 1);
-  const title = range === 'week' ? '接下來七天的學習行動'
-    : range === 'next-week' ? '下週學習行動'
-    : range === 'tomorrow' ? '明日學習行動'
-    : '今日優先行動';
-
+  const window = resolveStudyWindow(question, now);
+  if (!window) return null;
+  const { startDay, endDay, title } = window;
   const limitations: string[] = [];
   const steps: CampusPlanStep[] = [];
+  const agenda = buildCampusStudyAgenda({
+    window, now,
+    courses: hasTimetable ? input.context.timetable.courses : null,
+    assignments: sense?.assignments.status === 'available' ? sense.assignments.items : null,
+  });
 
   if (sense?.assignments.status === 'available') {
     const rows = [...sense.assignments.items].sort((a, b) => {
-      const first = a.dueAt ? Date.parse(a.dueAt) : Infinity;
-      const second = b.dueAt ? Date.parse(b.dueAt) : Infinity;
-      return first - second;
+      const first = dueTimestamp(a.dueAt);
+      const second = dueTimestamp(b.dueAt);
+      return (Number.isFinite(first) ? first : Infinity) - (Number.isFinite(second) ? second : Infinity);
     });
     const relevant = rows.filter((item) => {
-      if (!item.dueAt) return true;
-      const due = Date.parse(item.dueAt);
+      const due = dueTimestamp(item.dueAt);
       if (!Number.isFinite(due)) return true;
-      const dueDay = twDateParts(new Date(due)).dayId;
-      // Carry overdue items forward until a proper source confirms submission.
+      const dueDay = taipeiDayNumber(due);
       return due < now || (dueDay >= startDay && dueDay < endDay);
     });
-    // If nothing is due in this window, show the closest future deadline instead.
     const selected = (relevant.length ? relevant : rows.slice(0, 1)).slice(0, 3);
     for (const [index, assignment] of selected.entries()) {
-      const confirmedDueAt = assignment.dueAt && Number.isFinite(Date.parse(assignment.dueAt))
-        ? assignment.dueAt : null;
+      const confirmedDueAt = Number.isFinite(dueTimestamp(assignment.dueAt)) ? assignment.dueAt : null;
       const priority = duePriority(confirmedDueAt, now);
       const due = confirmedDueAt
         ? '截止 ' + localDate(confirmedDueAt) + '；' + priorityLabel(priority)
@@ -164,9 +144,7 @@ export function buildOfflineCampusPlan(input: {
         title: cleaned(assignment.title),
         detail: (assignment.groupName ? cleaned(assignment.groupName) + '｜' : '') +
           due + '。請到課程頁確認繳交方式與最新狀態。',
-        priority,
-        evidence: 'authorized-assignments',
-        route: '/classroom',
+        priority, evidence: 'authorized-assignments', route: '/classroom',
         ...(confirmedDueAt ? { dueAt: confirmedDueAt } : {}),
         ...(assignment.groupName ? { groupName: assignment.groupName } : {}),
       });
@@ -182,40 +160,25 @@ export function buildOfflineCampusPlan(input: {
   }
 
   if (hasTimetable) {
-    const timetable = input.context.timetable;
-    const courses = timetable.courses.filter((course) =>
-      course.day > 0 && course.day < 7 &&
-      course.start > 0 && course.end >= course.start);
-    const activeDays: number[] = [];
-    for (let day = startDay; day < endDay; day += 1) {
-      if (courses.some((course) => course.day === new Date(day * DAY_MS).getUTCDay())) {
-        activeDays.push(day);
-      }
-    }
-    if (activeDays.length) {
-      const first = activeDays[0];
-      const weekday = new Date(first * DAY_MS).getUTCDay();
-      const lessons = courses.filter((course) => course.day === weekday)
-        .sort((a, b) => a.start - b.start);
+    const firstDay = agenda.days.find((day) => day.courses.length > 0);
+    if (firstDay) {
+      const weekday = new Date(firstDay.date + 'T00:00:00Z').getUTCDay();
+      const lessons = firstDay.courses;
       const names = lessons.slice(0, 3).map((course) => cleaned(course.name)).join('、');
-      const dayLabel = '星期' + DAY_NAMES[weekday];
-      let gap = '';
-      for (let index = 1; index < lessons.length; index += 1) {
-        const prev = lessons[index - 1];
-        const next = lessons[index];
-        if (next.start > prev.end + 1) {
-          gap = '已排課程之間有第 ' + (prev.end + 1) + '–' + (next.start - 1) + ' 節空檔，可評估安排複習；';
-          break;
-        }
-      }
+      const gap = firstDay.gaps.length
+        ? '已排課程之間有' + firstDay.gaps.map(periodLabel).join('、') + '空檔，可評估安排複習；'
+        : '';
+      const conflict = firstDay.conflicts.length
+        ? '課表重疊：' + firstDay.conflicts.map(periodLabel).join('、') + '，請先核對；'
+        : '';
+      const isToday = agenda.days.length === 1 && startDay === taipeiDayNumber(now);
       steps.push({
         id: 'timetable-review',
-        title: (range === 'today' ? '今日手機課表副本' : '課表副本') + '｜' + dayLabel,
+        title: (isToday ? '今日手機課表副本' : '課表副本') + '｜星期' + DAY_NAMES[weekday],
         detail: lessons.length + ' 門已保存課程（' + names + (lessons.length > 3 ? '等' : '') +
-          '）。' + gap + '實際鐘點、停課或調課仍須核對正式課表。',
-        priority: 'normal',
-        evidence: 'saved-timetable',
-        route: '/timetable',
+          '）。' + conflict + gap + '實際鐘點、停課或調課仍須核對正式課表。',
+        priority: firstDay.conflicts.length ? 'verify' : 'normal',
+        evidence: 'saved-timetable', route: '/timetable',
       });
     } else {
       limitations.push('手機課表副本在這個期間沒有排課，不代表校方正式課表沒有課。');
@@ -226,46 +189,33 @@ export function buildOfflineCampusPlan(input: {
 
   if (sense?.announcements.status === 'available' && sense.announcements.items.length) {
     steps.push({
-      id: 'announcement-review',
-      title: '核對最新校園通知',
+      id: 'announcement-review', title: '核對最新校園通知',
       detail: '上次同步含 ' + sense.announcements.items.length +
         ' 則公告摘要；先確認與你的課程及期限是否有關，不把舊公告當作最新消息。',
-      priority: 'verify',
-      evidence: 'authorized-announcements',
-      route: '/announcements',
+      priority: 'verify', evidence: 'authorized-announcements', route: '/announcements',
     });
   } else {
     limitations.push('沒有可確認的新公告摘要，請至公告頁核對是否有更新。');
   }
-
   if (!steps.length) {
     steps.push({
-      id: 'verify-course',
-      title: '先核對課程與作業來源',
+      id: 'verify-course', title: '先核對課程與作業來源',
       detail: '目前缺少足夠資訊，先開啟已登入的課程頁查核，再決定今天的工作。',
-      priority: 'verify',
-      evidence: 'verification',
-      route: '/classroom',
+      priority: 'verify', evidence: 'verification', route: '/classroom',
     });
   }
-
   const checked = sense ? '上次主動同步：' + localDate(sense.checkedAt) : '只使用手機內已保存課表';
   const overview = checked + '。以下是依現有資料整理的行動建議，不是校方即時紀錄。';
   const content = [
-    title,
-    overview,
-    ...steps.slice(0, 5).map((step, i) =>
-      (i + 1) + '. ' + step.title + '：' + step.detail),
+    title, overview,
+    ...steps.slice(0, 5).map((step, i) => (i + 1) + '. ' + step.title + '：' + step.detail),
+    '逐日安排（台灣時間）：', ...formatCampusStudyAgenda(agenda),
+    ...(agenda.outsideWindow.length ? ['另有 ' + agenda.outsideWindow.length + ' 項作業的期限未確認或不在這個日期範圍，請開啟課程頁核對。'] : []),
     ...limitations.slice(0, 3).map((item) => '資料提醒：' + item),
     '建議下一步：開啟相應服務核對，沒有替你提交任何作業、申請或行事曆事件。',
   ].join('\n');
-
   return {
-    title,
-    overview,
-    checkedAt: input.context.checkedAt,
-    steps: steps.slice(0, 5),
-    limitations: limitations.slice(0, 4),
-    content,
+    title, overview, checkedAt: input.context.checkedAt,
+    steps: steps.slice(0, 5), limitations: limitations.slice(0, 4), agenda, content,
   };
 }

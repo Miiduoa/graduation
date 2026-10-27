@@ -4,6 +4,7 @@ import { AIButton, aiTokens } from '../ui/aiFirst';
 import type { CampusEvidencePlan, CampusPlanPriority, CampusPlanRoute } from '../services/offlineCampusPlanner';
 import type { CampusSenseSnapshot } from '../services/campusSenseSnapshot';
 import { CampusAssignmentReminderAction } from './CampusAssignmentReminderAction';
+import { CampusStudyAgendaCard } from './CampusStudyAgendaCard';
 
 const PRIORITY: Record<CampusPlanPriority, string> = {
   overdue: '期限已過',
@@ -110,6 +111,14 @@ export function CampusEvidencePlanCard({
           </View>
         );
       })}
+      {plan.agenda ? (
+        <CampusStudyAgendaCard
+          key={plan.checkedAt + ':' + plan.title}
+          agenda={plan.agenda}
+          disabled={disabled}
+          onOpenRoute={onOpenRoute}
+        />
+      ) : null}
       {plan.limitations.length ? (
         <Text style={{ color: aiTokens.muted, fontSize: 12, lineHeight: 20 }}>
           資料限制：{plan.limitations.slice(0, 3).join(' ')}
