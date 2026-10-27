@@ -355,3 +355,35 @@ test('one-tap daily brief senses authorized sources and synthesizes on the phone
   expect(view.getByText('下一步：先核對資料庫作業')).toBeTruthy();
   expect(view.getByText(/先前主動同步的授權摘要/)).toBeTruthy();
 });
+
+test('stopping on-device generation aborts the owned request and discards a late reply', async () => {
+  const pending = deferred<{ content: string; hasActions: boolean; source: 'device' }>();
+  request.mockReturnValueOnce(pending.promise);
+  const view = render(<CampusAssistantScreen />);
+  fireEvent.changeText(view.getByLabelText('詢問校園助理'), '請規劃三天的報告進度');
+  fireEvent.press(view.getByText('送出問題'));
+  const signal = request.mock.calls[0][0].signal as AbortSignal;
+  expect(signal).toBeDefined();
+  expect(signal.aborted).toBe(false);
+  fireEvent.press(view.getByText('停止本機回答'));
+  expect(signal.aborted).toBe(true);
+  await act(async () => {
+    pending.resolve({ content: '已被取消的過期回答', hasActions: false, source: 'device' });
+  });
+  expect(view.queryByText('已被取消的過期回答')).toBeNull();
+  expect(view.getByLabelText('詢問校園助理').props.value).toBe('請規劃三天的報告進度');
+  expect(view.getByText(/已停止本機回答/)).toBeTruthy();
+});
+
+test('leaving the assistant aborts any in-progress on-device generation', () => {
+  const old = deferred<{ content: string; hasActions: boolean; source: 'device' }>();
+  request.mockReturnValueOnce(old.promise);
+  const view = render(<CampusAssistantScreen />);
+  fireEvent.changeText(view.getByLabelText('詢問校園助理'), '幫我做學習計畫');
+  fireEvent.press(view.getByText('送出問題'));
+  const signal = request.mock.calls[0][0].signal as AbortSignal;
+  expect(signal.aborted).toBe(false);
+  view.unmount();
+  expect(signal.aborted).toBe(true);
+  // No need to resolve a native generation that was explicitly stopped.
+});
