@@ -28,7 +28,7 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - name: Test portal DOM and message boundary with coverage
-        run: pnpm --filter web exec vitest run src/lib/portalCapture.test.ts src/lib/portalCapture.dom.test.ts --coverage --reporter=json --outputFile=portal-vitest-results.json
+        run: pnpm --filter web exec vitest run src/lib/portalCapture.test.ts src/lib/portalCapture.dom.test.ts src/lib/portalCapture.privacy.test.ts --coverage --reporter=json --outputFile=portal-vitest-results.json
       - name: Test native review and original login screens
         if: ${{ !cancelled() }}
         run: pnpm --filter mobile test src/__tests__/SchoolPortalImport.test.tsx src/__tests__/GuestLoginScreens.test.tsx --ci --json --outputFile=portal-jest-results.json
