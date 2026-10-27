@@ -12,6 +12,10 @@ import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect, useNavigation, type NavigationProp } from '@react-navigation/native';
 
 import { PROVIDENCE_UNIVERSITY_SCHOOL_ID } from '@campus/shared/src';
+import {
+  TEACHER_LMS_UNAVAILABLE_COPY,
+  isTeacherLmsUnavailableNotice,
+} from '@campus/shared/src/schoolLogin';
 
 import { useAuth } from '../state/auth';
 import { useSchool } from '../state/school';
@@ -193,7 +197,12 @@ function SchoolLoginContent(
       activeAttempt.current = null;
       console.warn('Student ID login error:', loginError);
       setStudentPwInput('');
-      setError('學校帳號登入未完成，請確認帳號密碼與網路連線後重試。');
+      const message = loginError instanceof Error ? loginError.message : '';
+      setError(
+        isTeacherLmsUnavailableNotice(message)
+          ? TEACHER_LMS_UNAVAILABLE_COPY
+          : '學校帳號登入未完成，請確認帳號密碼與網路連線後重試。',
+      );
       setIsRetryable(true);
       setStep('error');
     }

@@ -467,6 +467,46 @@ it('aborts a student TronClass sidecar within the supplied timeout', async () =>
   expect(Date.now() - started).toBeLessThan(1000);
 });
 
+it('keeps DNS, TCP and TLS codes on teacher LMS failures', async () => {
+  const cases = [
+    ['ENOTFOUND', 'unavailable'],
+    ['ECONNREFUSED', 'unavailable'],
+    ['CERT_HAS_EXPIRED', 'unavailable'],
+    ['UND_ERR_CONNECT_TIMEOUT', 'timeout'],
+  ] as const;
+  for (const [code, kind] of cases) {
+    const gateway = createPuCampusGateway({
+      fetch: async () => {
+        const error = new Error('connect');
+        (error as Error & { code?: string }).code = code;
+        throw error;
+      },
+    });
+    await expect(gateway.loginTronClass('changyi', SECRET, { route: 'teacher' })).rejects.toMatchObject({
+      kind,
+      route: 'teacher',
+      stage: 'submit',
+      code,
+    });
+  }
+});
+
+it('reads a nested DNS code from the fetch cause chain', async () => {
+  const gateway = createPuCampusGateway({
+    fetch: async () => {
+      const error = new Error('fetch failed');
+      (error as Error & { cause?: unknown }).cause = Object.assign(new Error('getaddrinfo'), {
+        code: 'ENOTFOUND',
+      });
+      throw error;
+    },
+  });
+  await expect(gateway.loginTronClass('changyi', SECRET, { route: 'teacher' })).rejects.toMatchObject({
+    kind: 'unavailable',
+    code: 'ENOTFOUND',
+  });
+});
+
 it('keeps ETIMEDOUT on teacher LMS failures', async () => {
   const gateway = createPuCampusGateway({
     fetch: async () => {
