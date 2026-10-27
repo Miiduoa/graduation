@@ -32,7 +32,7 @@ export interface AcademicRefreshController {
   dispose(): void;
 }
 
-/** One controller belongs to one account, campus and record kind. It stores no data. */
+/** 一個控制器只對應一個帳號、校區與資料種類，本身不存放資料。 */
 export function createAcademicRefreshController(options: {
   read: () => Promise<AcademicRefreshOutcome>;
   environment: AcademicRefreshEnvironment;
@@ -86,7 +86,7 @@ export function createAcademicRefreshController(options: {
 
   function perform(manual: boolean): Promise<void> {
     if (disposed) return Promise.resolve();
-    // Repeated clicks and focus/online events share the existing read.
+    // 重複點擊與焦點／連線事件共用進行中的讀取。
     if (pending) return pending;
     if (!manual && (!automatic || blocked || !env.visible() || !env.online())) {
       reconcile();
@@ -94,7 +94,7 @@ export function createAcademicRefreshController(options: {
     }
     if (manual) blocked = false;
     clearTimer();
-    // Lock before invoking read(), including if it throws synchronously.
+    // 呼叫 read() 前先鎖住，即使它同步丟出錯誤也一樣。
     pending = Promise.resolve()
       .then(() => (disposed ? undefined : options.read()))
       .catch((): AcademicRefreshOutcome => 'unavailable')
@@ -135,7 +135,7 @@ export function createAcademicRefreshController(options: {
   };
 }
 
-/** Uses foreground events only; it never registers a worker or stores credentials. */
+/** 只用前景事件；不會註冊 worker，也不存放帳密。 */
 export function browserAcademicRefreshEnvironment(): AcademicRefreshEnvironment {
   return {
     now: () => Date.now(),

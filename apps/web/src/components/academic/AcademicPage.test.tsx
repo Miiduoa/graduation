@@ -276,8 +276,8 @@ it('ignores an old account response even after logging out and back into the sam
       }),
   );
   const view = render(<GradesPage />);
-  // The controller starts reads in a microtask. Establish the old in-flight
-  // request before signing out; disposal before it starts cancels it entirely.
+  // 控制器會在 microtask 才開始讀取。先讓舊的進行中請求成立，再登出；
+  // 若在開始前就釋放，請求會整筆取消。
   await waitFor(() => expect(loadAcademicRecords).toHaveBeenCalledTimes(1));
   expect(loadAcademicRecords).toHaveBeenLastCalledWith('grades', 'one', 'pu');
   account.user = null;
