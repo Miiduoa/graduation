@@ -29,7 +29,7 @@ export function CampusAssignmentCoverage({ assignments }: {
       <Text style={{ color: complete ? aiTokens.text : aiTokens.warning, fontSize: 13, fontWeight: '600' }}>
         作業已取得 {loaded} / {total} 筆{complete ? ' · 來源內完整' : ' · 部分資料'}
       </Text>
-      <View accessibilityRole="progressbar"
+      <View accessible accessibilityRole="progressbar"
         accessibilityLabel="已接通作業資料完整度"
         accessibilityValue={{ min: 0, max: Math.max(total, 1), now: total === 0 ? 1 : Math.min(loaded, total), text: loaded + ' / ' + total + ' 筆' }}
         style={{ height: 4, borderRadius: 2, overflow: 'hidden', backgroundColor: aiTokens.border }}>
