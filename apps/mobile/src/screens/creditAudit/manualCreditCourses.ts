@@ -24,7 +24,7 @@ export function validCourseName(name: string): boolean {
 
 function escapeCsvCell(value: string | number): string {
   const source = String(value);
-  // CSV values are quoted for commas/newlines; the prefix prevents spreadsheet formula evaluation.
+  // CSV 欄位會加引號以處理逗號與換行；前綴用來避免試算表把內容當公式執行。
   const safe = /^[\s]*[=+\-@]/.test(source) ? "'" + source : source;
   return '"' + safe.replace(/"/g, '""') + '"';
 }
@@ -140,8 +140,8 @@ function headerIndex(headers: string[], aliases: string[]): number {
 }
 
 /**
- * A grade without an explicit pass flag is unverified, not a completed credit.
- * Supports both the legacy mobile CSV and Web planner's projected-course CSV.
+ * 沒有明確及格標記的成績只算未核可，不能當成已取得學分。
+ * 同時支援舊版手機 CSV 與網頁規劃器的預修課程 CSV。
  */
 export function parseManualCreditCsv(input: string): CreditCsvImportResult {
   const rows = parseCreditCsvRows(input);
@@ -163,7 +163,7 @@ export function parseManualCreditCsv(input: string): CreditCsvImportResult {
     const name = (cells[nameAt] ?? '').trim();
     const credits = manualCreditAmount(cells[creditsAt] ?? '');
     const term = (cells[semesterAt] ?? '').trim();
-    // Skip summary/footer rows from the Web planner rather than adding them as real courses.
+    // 略過網頁規劃器的合計／表尾列，不要當成真實課程加入。
     if (statusAt >= 0 && semesterAt >= 0 && !/^未來第\s*\d+\s*學期$/.test(term)) {
       skipped += 1;
       continue;

@@ -59,7 +59,7 @@ export function emptyCreditPlan(): CreditPlan {
   };
 }
 
-/** Blank is different from zero; scientific notation and over-precise inputs are not accepted. */
+/** 空白與零不同；不接受科學記號或過高精度的輸入。 */
 export function parseCredits(value: string): number | null {
   const trimmed = value.trim();
   if (!/^\d{1,4}(?:\.\d{1,2})?$/.test(trimmed)) return null;
@@ -137,7 +137,7 @@ export function creditPlanSummary(plan: CreditPlan) {
   };
 }
 
-/** Reject malformed local data rather than exposing or calculating an untrusted partial plan. */
+/** 本機資料格式不對就拒絕，不要露出或計算不可信的部分規劃。 */
 export function restoreCreditPlan(raw: string | null): CreditPlan | null {
   if (!raw || raw.length > 90_000) return null;
   try {
@@ -214,7 +214,7 @@ export function restoreCreditPlan(raw: string | null): CreditPlan | null {
   }
 }
 
-/** Accounts and campuses never share browser-side drafts. No grade data is stored. */
+/** 帳號與校區不共用瀏覽器端草稿，也不存放成績資料。 */
 export function creditPlanStorageKey(userId: string | null, schoolId: string | null): string {
   return 'campus:credit-planner:v1:' +
     encodeURIComponent(userId ?? 'guest') + ':' + encodeURIComponent(schoolId ?? 'personal');
