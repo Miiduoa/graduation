@@ -1,5 +1,4 @@
 import { FieldValue } from 'firebase-admin/firestore';
-import { PROVIDENCE_SCHOOL_ID } from './puIdentity';
 import { getSchoolLoginConfig } from './schoolLoginConfig';
 
 const DISPLAY_ROLES = new Set([
@@ -76,8 +75,11 @@ export async function writeSchoolLoginProfile({
   courseOfferingIds?: string[];
   schoolId?: string;
 }): Promise<{ role: string; memberRole: string; isNewUser: boolean }> {
-  const membershipSchoolId =
-    getSchoolLoginConfig(schoolId)?.membershipSchoolId || PROVIDENCE_SCHOOL_ID;
+  const school = getSchoolLoginConfig(schoolId);
+  if (!school || school.status !== 'open' || !school.membershipSchoolId) {
+    throw new Error('school-login-unavailable');
+  }
+  const membershipSchoolId = school.membershipSchoolId;
   const userRef = db.doc('users/' + uid);
   const memberRef = db.doc('schools/' + membershipSchoolId + '/members/' + uid);
   const offeringRefs = courseOfferingIds
