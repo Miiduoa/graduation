@@ -101,6 +101,13 @@ it('returns a custom token and writes student profile fields without clobbering 
     status: 'active',
     role: 'member',
   });
+  expect(store.docs.get(`_puSessions/${result.puSessionId}`)).toMatchObject({
+    ownerUid: result.uid,
+    tronClassSessionId: result.tronClassSessionId,
+  });
+  expect(store.docs.get(`_puTronClassSessions/${result.tronClassSessionId}`)).toMatchObject({
+    ownerUid: result.uid,
+  });
 });
 
 it('rejects unknown or closed schools with 尚未開放 without campus or account rate limits', async () => {

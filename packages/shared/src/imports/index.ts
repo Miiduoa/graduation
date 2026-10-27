@@ -10,3 +10,4 @@ export * from './today';
 export * from './eventCalendar';
 export * from './eventDraft';
 export * from './schoolPageTables';
+export * from './aiRecognition';

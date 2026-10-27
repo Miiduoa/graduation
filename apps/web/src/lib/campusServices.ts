@@ -84,6 +84,14 @@ export const CAMPUS_SERVICES = [
     category: 'study',
   },
   {
+    name: 'WOW Class 課程',
+    text: '讀取學習平臺的課堂清單，前往教材、作業與公告',
+    href: '/school-courses',
+    access: 'school',
+    keywords: 'WOW Class TronClass LMS 課程 教材 作業 老師',
+    category: 'study',
+  },
+  {
     name: '學分規劃',
     text: '依修課紀錄與自訂目標整理學分',
     href: '/credit-planner',

@@ -498,8 +498,8 @@ export function createLiveSessionHandlers({
           throw new HttpsError('permission-denied', 'Account is no longer available');
         }
       }
-      // Admin SDK bypasses Rules; school revocation must participate in this
-      // transaction before a new write or an idempotent receipt is returned.
+      // Admin SDK 會略過安全規則；學校成員資格若已撤銷，必須在這筆交易裡一併檢查，
+      // 確認後才能新寫入或回傳已完成的更正結果。
       const schoolMembers = db.collection('schools').doc(schoolId).collection('members');
       const [teacherSchool, studentSchool] = await transaction.getAll(
         schoolMembers.doc(teacherUid), schoolMembers.doc(studentUid),
@@ -531,7 +531,7 @@ export function createLiveSessionHandlers({
         };
       }
 
-      // Do not finalize an absence or excused status while students can still sign in.
+      // 學生還能簽到時，不要把狀態敲定成缺席或請假。
       if (liveSnap.data().active === true && ['absent', 'excused'].includes(status)) {
         throw new HttpsError('failed-precondition', 'Finish the attendance session before finalizing absence or leave');
       }

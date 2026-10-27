@@ -1,66 +1,41 @@
 'use strict';
 
 const { z } = require('zod');
-const { getFirestore, FieldValue } = require('firebase-admin/firestore');
+const { createHash, randomUUID } = require('node:crypto');
+const { getFirestore } = require('firebase-admin/firestore');
+const { createSubmitLeaveHandler } = require('../../leaveRequests');
+const { assertServiceScope } = require('./serviceWriteGuard');
 
 const inputSchema = z.object({
-  courseId: z.string().min(1),
-  date: z.string().min(1),
-  type: z.string().min(1),
+  courseId: z.string().min(1).max(100),
+  date: z.string().min(1).max(10),
+  type: z.string().min(1).max(30),
 });
+const kindByLabel = {
+  病假: 'sick', 事假: 'personal', 家庭照顧假: 'family', 公假: 'official',
+  生理假: 'menstrual', 心理健康假: 'mental', 喪假: 'bereavement', 其他: 'other',
+};
 
-/**
- * 建立請假申請文件（後端 Admin 寫入）。敏感操作：預設僅在使用者確認後由 executeAgentWrite 或同等路徑呼叫。
- * teacherUid：若需對應審核教師，須有可靠來源（例如課程／群組文件上的 instructorUid）；現階段不寫入以免誤植。
- */
+// Agent 與一般請假表單共用本人課表、校籍及原子寫入，不能另建無法核閱的舊格式。
 async function execute(ctx, rawInput) {
   const input = inputSchema.parse(rawInput ?? {});
-  const uid = ctx.uid;
-  if (!uid) {
-    throw new Error('submitLeaveRequest requires ctx.uid');
-  }
-
-  let groupId =
-    ctx.groupId != null && String(ctx.groupId).trim() ? String(ctx.groupId).trim() : null;
-
-  const db = getFirestore();
-  if (!groupId && input.courseId) {
-    const courseSnap = await db
-      .collection('users')
-      .doc(uid)
-      .collection('courses')
-      .doc(input.courseId)
-      .get();
-    if (courseSnap.exists) {
-      const cd = courseSnap.data() || {};
-      const g = cd.groupId;
-      if (g != null && String(g).trim()) {
-        groupId = String(g).trim();
-      }
-    }
-  }
-
-  const ref = db.collection('leaveRequests').doc();
-  await ref.set({
-    uid,
-    schoolId: ctx.schoolId ?? null,
-    groupId,
-    courseId: input.courseId,
-    date: input.date,
-    type: input.type,
-    status: 'pending',
-    createdAt: FieldValue.serverTimestamp(),
+  assertServiceScope(ctx);
+  const requestKey = typeof ctx.agentActionKey === 'string' ? ctx.agentActionKey : randomUUID();
+  const requestId = 'agent-leave-' + createHash('sha256')
+    .update(JSON.stringify([ctx.uid, ctx.schoolId, requestKey])).digest('hex').slice(0, 32);
+  const result = await createSubmitLeaveHandler({ db: getFirestore() })({
+    auth: { uid: ctx.uid },
+    data: {
+      schoolId: ctx.schoolId, requestId, startDate: input.date, endDate: input.date,
+      kind: kindByLabel[input.type] || input.type, period: 'all', detail: '',
+      courseIds: [input.courseId],
+    },
   });
-
-  return { requestId: ref.id, status: 'pending' };
+  return { requestId: result.id, status: 'pending', alreadySubmitted: result.alreadySubmitted };
 }
 
 module.exports = {
   name: 'submitLeaveRequest',
-  description:
-    '（僅限使用者確認後由後端代為執行，不開放給 LLM 自動呼叫。）建立一筆待審請假申請。',
-  inputSchema,
-  execute,
-  /** 為 true 時 runtime prefetch 後不會自動執行，須前端確認後呼叫 executeAgentWrite */
-  requiresConfirmation: true,
+  description: '使用者確認後，依本人在該校已儲存的課表建立 Campus One 待審請假申請。',
+  inputSchema, execute, requiresConfirmation: true,
 };

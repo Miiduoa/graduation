@@ -195,6 +195,49 @@ describe('schedule interpretation', () => {
 });
 
 describe('grade interpretation', () => {
+  it('keeps a source course with an unpublished blank score out of the weighted average', () => {
+    const result = normalizeGradeRecords(gradeResponse([
+      grade({ courseName: '已公布', score: 80, credits: 3 }),
+      grade({ courseName: '尚未公布', score: '', credits: 2 }),
+    ]));
+    expect(result.grades).toHaveLength(2);
+    expect(result.grades[1].score).toBe('');
+    expect(calculateGradeSummary(result.grades)).toMatchObject({
+      courseCount: 2, totalCredits: 5, numericGradeCount: 1, numericCredits: 3, weightedAverage: 80,
+    });
+  });
+
+  it('retains partial coverage without turning a zero skipped count into a complete transcript', () => {
+    expect(normalizeGradeRecords(gradeResponse([grade()], {
+      coverage: { status: 'partial', skippedRows: 2 },
+    })).coverage).toEqual({ status: 'partial', skippedRows: 2 });
+    expect(normalizeGradeRecords(gradeResponse([grade()], {
+      coverage: { status: 'complete', skippedRows: 0 },
+    })).coverage).toEqual({ status: 'unknown', skippedRows: 0 });
+  });
+
+  it('accepts a verified derived credit summary without upgrading it to an official audit', () => {
+    const result = normalizeGradeRecords(gradeResponse([grade()], {
+      creditSummary: { source: 'derived-from-grade-rows', officialAudit: false, totalRequired: null, totalEarned: 3, totalCourses: 1 },
+    }));
+    expect(result.creditSummary).toEqual({
+      source: 'derived-from-grade-rows', officialAudit: false, totalRequired: null, totalEarned: 3, totalCourses: 1,
+    });
+    expect(result.creditSummaryUnavailable).toBeUndefined();
+  });
+
+  it.each([
+    null,
+    { source: 'derived-from-grade-rows', officialAudit: true, totalRequired: 128, totalEarned: 3, totalCourses: 1 },
+    { source: 'derived-from-grade-rows', officialAudit: false, totalRequired: null, totalEarned: 10, totalCourses: 1 },
+    { source: 'derived-from-grade-rows', officialAudit: false, totalRequired: null, totalEarned: 3, totalCourses: 2 },
+  ])('retains valid grade rows when a credit summary is invalid: %j', (creditSummary) => {
+    const result = normalizeGradeRecords(gradeResponse([grade()], { creditSummary }));
+    expect(result.grades).toHaveLength(1);
+    expect(result.creditSummary).toBeUndefined();
+    expect(result.creditSummaryUnavailable).toBe(true);
+  });
+
   it('preserves text scores and school summaries, using only source semesters', () => {
     const result = normalizeGradeRecords(
       gradeResponse(

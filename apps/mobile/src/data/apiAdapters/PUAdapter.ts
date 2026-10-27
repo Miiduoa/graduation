@@ -1,6 +1,4 @@
-// @ts-nocheck — main 上既有的型別破洞（seedCachedCreditAudit / AnnouncementResponse /
-// CourseResponse / PuCreditAuditPayload / puFetchCreditAudit 都未匯出），等 owner 修。
-import { PROVIDENCE_UNIVERSITY_SCHOOL_ID } from '@campus/shared/src';
+import { PROVIDENCE_UNIVERSITY_SCHOOL_ID, type PuCreditAuditPayload } from '@campus/shared/src';
 import { BaseApiAdapter } from './BaseAdapter';
 import type { AdapterCapabilities, AuthCredentials } from './types';
 import type {
@@ -19,27 +17,22 @@ import type {
   AttendanceSummary,
 } from '../types';
 import { CAMPUS_POIS, getCampusPoi, type CampusPoi, type CampusPoiCategory } from '../puCampusData';
-import { puLogin, type PUSession } from '../../services/puDirectScraper';
+import { puLogin, type PUSession, type PUCourseResult } from '../../services/puDirectScraper';
 import {
   getCachedCourses,
   getCachedGrades,
   getCachedAnnouncements,
-  getCachedCreditAudit,
-  getAnyCachedCourses,
   getAnyCachedGrades,
   getAnyCachedAnnouncements,
-  getAnyCachedCreditAudit,
   refreshCourses,
+  refreshCreditAudit,
   refreshAnnouncements,
-  seedCachedCourses,
   seedCachedAnnouncements,
-  seedCachedCreditAudit,
   getCachedTCCourses,
   getCachedTCActivities,
   getCachedTCModules,
   getCachedTCAttendance,
   getCachedTCTodos,
-  getAnyCachedTCCourses,
   getAnyCachedTCActivities,
   getAnyCachedTCModules,
   getAnyCachedTCTodos,
@@ -50,9 +43,10 @@ import {
   refreshTCAttendance,
   refreshTCTodos,
 } from '../../services/puDataCache';
-import type { TCCourse, TCActivity, TCModule, TCAttendance } from '../../services/tronClassClient';
+import { getTCBackendSessionId, type TCCourse, type TCActivity, type TCModule, type TCAttendance } from '../../services/tronClassClient';
 import { getCloudFunctionUrl, getFirebaseAuthHeaders } from '../../services/cloudFunctions';
 import { getAuthInstance } from '../../firebase';
+import { loadOwnedSchoolCourses, loadOwnedSchoolGrades } from '../../services/ownedSchoolAcademicRecords';
 import {
   PU_GRADE_POINT_POLICY,
   convertPuPercentScoreToGradePoint,
@@ -60,14 +54,16 @@ import {
 
 export { PU_GRADE_POINT_POLICY, convertPuPercentScoreToGradePoint };
 
+type AnnouncementResponse = {
+  success: boolean;
+  announcements: Array<{ title: string; url: string; date: string }>;
+};
+
+
 function toValidDate(value: string | null | undefined): Date | null {
   if (!value) return null;
   const parsed = new Date(value);
   return Number.isNaN(parsed.getTime()) ? null : parsed;
-}
-
-function isExpectedWebBackendSessionMiss(error: unknown): boolean {
-  return error instanceof Error && error.message.includes('Web 版需要後端 TronClass session');
 }
 
 /**
@@ -148,6 +144,7 @@ export class PUAdapter extends BaseApiAdapter {
   readonly apiVersion = '1.0';
 
   private sessionId: string | null = null;
+  private backendOwnerUid: string | null = null;
   private studentId: string | null = null;
   private studentName: string | null = null;
 
@@ -157,7 +154,7 @@ export class PUAdapter extends BaseApiAdapter {
   private get useDirectMode(): boolean {
     // Prefer backend campus proxy whenever a server-side session is available.
     // Direct mode is only for local fallback when no backend campus session exists.
-    return !this.sessionId;
+    return !this.sessionId && !this.backendOwnerUid;
   }
 
   // ---------------------------------------------------------------------------
@@ -232,6 +229,7 @@ export class PUAdapter extends BaseApiAdapter {
   async logout(): Promise<void> {
     this.credentials = null;
     this.sessionId = null;
+    this.backendOwnerUid = null;
     this.studentId = null;
     this.studentName = null;
     this.directSession = null;
@@ -244,6 +242,8 @@ export class PUAdapter extends BaseApiAdapter {
 
   /** 設定直接 scraping session（登入後注入） */
   setDirectSession(session: PUSession, studentId: string): void {
+    this.sessionId = null;
+    this.backendOwnerUid = null;
     this.directSession = session;
     this.studentId = studentId;
     this.studentName = session.studentName;
@@ -255,11 +255,13 @@ export class PUAdapter extends BaseApiAdapter {
   }
 
   setBackendSession(
-    sessionId: string,
+    sessionId: string | null,
     studentId?: string | null,
     studentName?: string | null,
+    ownerUid?: string,
   ): void {
-    this.sessionId = sessionId.trim() || null;
+    this.sessionId = sessionId?.trim() || null;
+    this.backendOwnerUid = ownerUid || null;
     if (studentId) {
       this.studentId = studentId;
     }
@@ -274,63 +276,18 @@ export class PUAdapter extends BaseApiAdapter {
     };
   }
 
-  /**
-   * E校園課程 → TCCourse 格式轉換（TronClass 不可用時的 fallback）
-   */
-  private convertPUCoursesToTC(
-    puCourses: import('../../services/puDirectScraper').PUCourse[],
-  ): TCCourse[] {
-    return puCourses.map((c, index) => ({
-      id: -(index + 1), // 負數 ID 表示來自 E校園
-      name: c.name || c.nameEn || c.code,
-      course_code: c.code,
-      department: null,
-      instructors: c.teacherName ? [{ id: 0, name: c.teacherName }] : [],
-      credit: c.credits,
-      semester: null,
-      klass: null,
-      grade: null,
-      course_outline: null,
-      start_date: null,
-      end_date: null,
-      status: 'ongoing',
-      role: 'student',
-      student_count: 0,
-      classroom_schedule: c.timePlaceRaw || null,
-    }));
-  }
-
   private async ensureTCCourses(): Promise<TCCourse[]> {
+    // 正式後端連線需要重新驗證本人來源，不使用沒有 owner 證明的舊清單。
+    if (await getTCBackendSessionId()) {
+      const courses = await refreshTCCourses();
+      if (courses === null) throw new Error('尚未取得玩課雲課程，請重新連線後再試。');
+      return courses;
+    }
     const cached = await getCachedTCCourses();
     if (cached) return cached;
-
-    const stale = await getAnyCachedTCCourses();
-    try {
-      return (await refreshTCCourses()) ?? stale ?? [];
-    } catch (error) {
-      if (stale) {
-        const logger = isExpectedWebBackendSessionMiss(error) ? console.debug : console.warn;
-        logger('[PUAdapter] Falling back to stale TronClass courses:', error);
-        return stale;
-      }
-      // TronClass 完全不可用 → 嘗試用 E校園 課表資料
-      const logger = isExpectedWebBackendSessionMiss(error) ? console.debug : console.warn;
-      logger('[PUAdapter] TronClass unavailable, trying E-campus courses fallback:', error);
-      try {
-        const puData = (await getCachedCourses()) ?? (await getAnyCachedCourses());
-        if (puData?.courses?.length) {
-          console.log(
-            '[PUAdapter] Using E-campus courses as fallback:',
-            puData.courses.length,
-            'courses',
-          );
-          return this.convertPUCoursesToTC(puData.courses);
-        }
-      } catch {
-        /* ignore */
-      }
-      return []; // 不 throw，讓畫面顯示空狀態而非錯誤
-    }
+    const courses = await refreshTCCourses();
+    if (courses === null) throw new Error('尚未取得玩課雲課程，請重新連線後再試。');
+    return courses;
   }
 
   private async ensureTCActivitiesMap(courseIds: number[]): Promise<Record<number, TCActivity[]>> {
@@ -468,10 +425,6 @@ export class PUAdapter extends BaseApiAdapter {
         const fresh = await refreshAnnouncements(this.directSession);
         if (fresh && fresh.length > 0) return this.mapAnnouncements(fresh);
       } else if (!this.useDirectMode) {
-        type AnnouncementResponse = {
-          success: boolean;
-          announcements: Array<{ title: string; url: string; date: string }>;
-        };
         const data = await this.fetchData<AnnouncementResponse>("announcements");
         if (data?.success && data.announcements?.length > 0) {
           const items = data.announcements.map((a) => ({ title: a.title, url: a.url, date: a.date }));
@@ -514,7 +467,7 @@ export class PUAdapter extends BaseApiAdapter {
   // ---------------------------------------------------------------------------
 
   private mapCourses(
-    data: import('../../services/puDirectScraper').PUCourseResult,
+    data: PUCourseResult,
     semester?: string,
   ): Course[] {
     if (data.studentInfo?.studentId) this.studentId = data.studentInfo.studentId;
@@ -547,147 +500,32 @@ export class PUAdapter extends BaseApiAdapter {
       );
   }
 
-  async listCourses(_studentId?: string, semester?: string): Promise<Course[]> {
-    console.log(`[PUAdapter] listCourses called — mode=${this.useDirectMode ? "direct" : "backend"}, sessionId=${!!this.sessionId}, directSession=${!!this.directSession}`);
-    // ── 1. 快取優先（所有模式都先讀快取） ──
-    const cached = await getCachedCourses();
-    if (cached && cached.courses.length > 0) {
-      console.log(`[PUAdapter] listCourses → PU cache hit: ${cached.courses.length} courses`);
-      return this.mapCourses(cached, semester);
-    }
-    console.log(`[PUAdapter] listCourses → PU cache miss (cached=${cached ? 'empty' : 'null'})`);
-
-    // ── 2. 快取過期或空 → 嘗試遠端抓取 ──
-    try {
-      if (this.useDirectMode && this.directSession) {
-        const fresh = await refreshCourses(this.directSession);
-        if (fresh && fresh.courses.length > 0) return this.mapCourses(fresh, semester);
-      } else if (!this.useDirectMode) {
-        type CourseResponse = {
-          success: boolean;
-          courses: Array<{
-            code: string;
-            classOffered: string;
-            name: string;
-            nameEn: string;
-            courseType: string;
-            credits: number;
-            dayOfWeek: number | null;
-            periods: number[];
-            startTime: string | null;
-            endTime: string | null;
-            location: string;
-            timePlaceRaw: string;
-            teacherEmail: string;
-          }>;
-          studentInfo: {
-            class: string | null;
-            studentId: string | null;
-            name: string | null;
-          };
-          semester: string | null;
-          totalCredits: number;
-        };
-
-        const data = await this.fetchData<CourseResponse>("courses", { semester });
-        if (data?.success && data.courses?.length > 0) {
-          if (data.studentInfo?.studentId) this.studentId = data.studentInfo.studentId;
-          if (data.studentInfo?.name) this.studentName = data.studentInfo.name;
-
-          // 同步寫入快取
-          await seedCachedCourses({
-            courses: data.courses.map((c) => ({
-              code: c.code,
-              classOffered: c.classOffered ?? "",
-              name: c.name,
-              nameEn: c.nameEn ?? "",
-              courseType: c.courseType ?? "",
-              credits: c.credits,
-              dayOfWeek: c.dayOfWeek,
-              periods: c.periods ?? [],
-              startTime: c.startTime,
-              endTime: c.endTime,
-              location: c.location ?? "",
-              timePlaceRaw: c.timePlaceRaw ?? "",
-              teacherEmail: c.teacherEmail ?? "",
-            })),
-            studentInfo: {
-              studentId: data.studentInfo?.studentId ?? this.studentId,
-              name: data.studentInfo?.name ?? this.studentName,
-              className: data.studentInfo?.class ?? null,
-              currentSemester: data.semester ?? null,
-            },
-            semester: data.semester ?? null,
-            totalCredits: data.totalCredits ?? 0,
-          }).catch(() => {});
-
-          const detectedSemester = data.semester || semester || "未指定";
-          return data.courses
-            .filter((c) => c.dayOfWeek !== null)
-            .map((course): Course => ({
-              id: `pu-crs-${course.code}-${course.dayOfWeek}`,
-              code: course.code,
-              name: course.name,
-              instructor: course.teacherEmail.split("@")[0] || "未知教師",
-              teacher: course.teacherEmail.split("@")[0] || "未知教師",
-              credits: course.credits,
-              semester: detectedSemester,
-              schedule: [
-                {
-                  dayOfWeek: (course.dayOfWeek || 1) as 1 | 2 | 3 | 4 | 5 | 6 | 7,
-                  startTime: course.startTime || "08:10",
-                  endTime: course.endTime || "09:00",
-                  location: course.location,
-                },
-              ],
-              dayOfWeek: (course.dayOfWeek || 1) as 1 | 2 | 3 | 4 | 5 | 6 | 7,
-              startTime: course.startTime || "08:10",
-              endTime: course.endTime || "09:00",
-              location: course.location,
-            }));
-        }
+  async listCourses(studentId?: string, semester?: string): Promise<Course[]> {
+    if (!this.useDirectMode || !this.directSession) {
+      const requester = getAuthInstance().currentUser;
+      const sessionId = this.sessionId;
+      const directSession = this.directSession;
+      const ownerUid = this.backendOwnerUid;
+      if (!requester || (studentId && requester.uid !== studentId) || (ownerUid && ownerUid !== requester.uid)) {
+        throw new Error('請重新連線學校帳號後再讀取課表。');
       }
-    } catch (err) {
-      console.warn("[PUAdapter] listCourses remote fetch failed:", err);
+      const result = await loadOwnedSchoolCourses(requester.uid);
+      if (getAuthInstance().currentUser !== requester || this.sessionId !== sessionId ||
+          this.directSession !== directSession || this.backendOwnerUid !== ownerUid) {
+        throw new Error('帳號已變更，請重新讀取課表。');
+      }
+      return this.mapCourses(result, semester);
     }
 
-    // ── 3. 遠端失敗 → 讀任何快取（離線模式） ──
-    const stale = await getAnyCachedCourses();
-    if (stale && stale.courses.length > 0) return this.mapCourses(stale, semester);
-
-    const data = await this.fetchData<CourseResponse>('courses', { semester });
-    if (!data?.success || !data.courses) return [];
-
-    if (data.studentInfo?.studentId) this.studentId = data.studentInfo.studentId;
-    if (data.studentInfo?.name) this.studentName = data.studentInfo.name;
-
-    const detectedSemester = data.semester || semester || '未指定';
-
-    return data.courses
-      .filter((c) => c.dayOfWeek !== null)
-      .map(
-        (course): Course => ({
-          id: `pu-crs-${course.code}-${course.dayOfWeek}`,
-          code: course.code,
-          name: course.name,
-          instructor: course.teacherEmail.split('@')[0] || '未知教師',
-          teacher: course.teacherEmail.split('@')[0] || '未知教師',
-          credits: course.credits,
-          semester: detectedSemester,
-          schedule: [
-            {
-              dayOfWeek: (course.dayOfWeek || 1) as 1 | 2 | 3 | 4 | 5 | 6 | 7,
-              startTime: course.startTime || '08:10',
-              endTime: course.endTime || '09:00',
-              location: course.location,
-            },
-          ],
-          dayOfWeek: (course.dayOfWeek || 1) as 1 | 2 | 3 | 4 | 5 | 6 | 7,
-          startTime: course.startTime || '08:10',
-          endTime: course.endTime || '09:00',
-          location: course.location,
-        }),
-      );
+    // 原生直連保留自己的課表路徑；不把它標記成由伺服器驗證的校務資料。
+    const directSession = this.directSession;
+    const cached = await getCachedCourses();
+    if (this.directSession !== directSession) throw new Error('校務連線已變更，請重新讀取課表。');
+    if (cached) return this.mapCourses(cached, semester);
+    const fresh = await refreshCourses(directSession);
+    if (this.directSession !== directSession) throw new Error('校務連線已變更，請重新讀取課表。');
+    if (fresh) return this.mapCourses(fresh, semester);
+    throw new Error('無法讀取校務課表，請稍後再試。');
   }
 
   async getCourse(id: string): Promise<Course | null> {
@@ -708,124 +546,33 @@ export class PUAdapter extends BaseApiAdapter {
   // ---------------------------------------------------------------------------
 
   async listGrades(studentId: string, semester?: string): Promise<Grade[]> {
-    // 原生 cookie jar 和舊快取都沒有帳號歸屬證明。成績只走伺服器驗證 owner 的 session。
+    // 原生 cookie jar 和舊快取沒有帳號歸屬證明；成績只由伺服器選取本人 session。
     const requester = getAuthInstance().currentUser;
     const sessionId = this.sessionId;
-    if (!requester || requester.uid !== studentId || !sessionId) {
+    const directSession = this.directSession;
+    const ownerUid = this.backendOwnerUid;
+    if (!requester || requester.uid !== studentId || (this.useDirectMode && directSession) ||
+        (ownerUid && ownerUid !== requester.uid)) {
       throw new Error('請重新連線學校帳號後再讀取成績。');
     }
-    const isCurrent = () =>
-      getAuthInstance().currentUser === requester && this.sessionId === sessionId;
-
-    let remoteFailed = false;
-    let remoteEmptySuccess = false;
-
-    try {
-      if (!this.useDirectMode) {
-        type GradeResponse = {
-          success: boolean;
-          grades: Array<{
-            semester: string;
-            courseName: string;
-            courseNameEn: string;
-            class: string;
-            courseType: string;
-            credits: number;
-            score: number | string;
-          }>;
-          allSemesters: string[];
-          summary: Record<
-            string,
-            {
-              departmentRanking?: string;
-              classRanking?: string;
-              behaviorScore?: number | string;
-              semesterAverage?: number | string;
-            }
-          >;
-        };
-
-        const data = await this.fetchData<GradeResponse>("grades", { semester });
-        if (!isCurrent()) throw new Error('帳號已變更，請重新讀取成績。');
-        if (data?.success && Array.isArray(data.grades)) {
-          if (data.grades?.length > 0) {
-            return mapPuOfficialGrades(data.grades, {
-              studentId: requester.uid,
-              schoolId: this.schoolId,
-              gradeSource: 'school-official',
-              semester,
-            });
-          }
-          remoteEmptySuccess = true;
-        } else {
-          remoteFailed = true;
-        }
-      } else {
-        // 直連模式但無 session：無法確認空結果，視為讀取失敗
-        remoteFailed = true;
-      }
-    } catch (err) {
-      console.warn("[PUAdapter] listGrades remote fetch failed:", err);
-      remoteFailed = true;
+    const result = await loadOwnedSchoolGrades(requester.uid);
+    if (getAuthInstance().currentUser !== requester || this.sessionId !== sessionId ||
+        this.directSession !== directSession || this.backendOwnerUid !== ownerUid) {
+      throw new Error('帳號已變更，請重新讀取成績。');
     }
-
-    if (!isCurrent()) throw new Error('帳號已變更，請重新讀取成績。');
-    if (remoteEmptySuccess) {
-      return [];
-    }
-
-    if (remoteFailed) {
-      throw new Error('無法讀取校務成績，請稍後再試。');
-    }
-
-    return [];
+    return mapPuOfficialGrades(result.grades, {
+      studentId: requester.uid, schoolId: this.schoolId,
+      gradeSource: 'school-official', semester,
+    });
   }
 
   async getCreditAudit(): Promise<PuCreditAuditPayload | null> {
-    // Only accept v2 format data — reject any old format
-    const isV2 = (d: PuCreditAuditPayload | null): d is PuCreditAuditPayload =>
-      d != null && (d as any).version === 2;
-
-    const cached = await getCachedCreditAudit();
-    if (isV2(cached)) {
-      console.log("[PUAdapter] getCreditAudit: returning v2 cached data, subtotal:", (cached as any).creditTotals?.subtotal);
-      return cached;
-    }
-
-    try {
-      if (this.useDirectMode && this.directSession) {
-        console.log("[PUAdapter] getCreditAudit: fetching fresh via direct scraping");
-        const fresh = await puFetchCreditAudit(this.directSession);
-        if (fresh.success && fresh.data && isV2(fresh.data)) {
-          await seedCachedCreditAudit(fresh.data).catch(() => undefined);
-          return fresh.data;
-        }
-        console.warn("[PUAdapter] getCreditAudit: direct fetch result:", fresh.success, "isV2:", isV2(fresh.data));
-      } else if (!this.useDirectMode) {
-        type CreditAuditResponse = {
-          success?: boolean;
-          creditAudit?: PuCreditAuditPayload | null;
-        };
-
-        const data = await this.fetchData<CreditAuditResponse>("creditAudit");
-        if (data?.success && data.creditAudit && isV2(data.creditAudit)) {
-          await seedCachedCreditAudit(data.creditAudit).catch(() => undefined);
-          return data.creditAudit;
-        }
-        console.warn("[PUAdapter] getCreditAudit: backend fetch returned no v2 data");
-      }
-    } catch (err) {
-      console.warn("[PUAdapter] getCreditAudit remote fetch failed:", err);
-    }
-
-    // 遠端失敗 → 讀任何快取（離線模式）
-    const stale = await getAnyCachedCreditAudit();
-    if (isV2(stale)) {
-      console.log("[PUAdapter] getCreditAudit: returning stale v2 cached data");
-      return stale;
-    }
-
-    return null;
+    // 歷年成績和完整學分試算表是不同契約。後端的成績摘要不能冒充校方畢業審核。
+    if (!this.directSession || this.sessionId) return null;
+    const session = this.directSession;
+    const result = await refreshCreditAudit(session);
+    if (this.directSession !== session) return null;
+    return result;
   }
 
   // ---------------------------------------------------------------------------
@@ -926,13 +673,7 @@ export class PUAdapter extends BaseApiAdapter {
 
   async listCourseSpaces(_userId?: string, _schoolId?: string): Promise<CourseSpace[]> {
     console.log(`[PUAdapter] listCourseSpaces called`);
-    let courses: TCCourse[];
-    try {
-      courses = await this.ensureTCCourses();
-    } catch (err) {
-      console.warn(`[PUAdapter] listCourseSpaces → ensureTCCourses failed:`, err);
-      return [];
-    }
+    const courses = await this.ensureTCCourses();
     console.log(`[PUAdapter] listCourseSpaces → TC courses: ${courses.length}`);
     if (courses.length === 0) return [];
 

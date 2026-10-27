@@ -53,6 +53,17 @@ describe('getLeaveRequestStatus tool', () => {
     await expect(getLeaveRequestStatus.execute({ schoolId: 's1' }, {})).rejects.toThrow('requires ctx.uid');
   });
 
+  test('reads the current reviewable leave format without losing its dates and kind', async () => {
+    mockGet.mockResolvedValue({ docs: [{ id: 'current', data: () => ({
+      startDate: '2026-10-28', endDate: '2026-10-29', kind: 'sick', status: 'partial',
+      courses: [{ courseId: 'c1', reviewStatus: 'approved' }],
+    }) }] });
+    const result = await getLeaveRequestStatus.execute({ uid: 'u1', schoolId: 's1' }, {});
+    expect(result.items[0]).toMatchObject({
+      date: '2026-10-28 至 2026-10-29', type: '病假', status: 'partial', courseId: 'c1',
+    });
+  });
+
   test('requiresConfirmation is false', () => {
     expect(getLeaveRequestStatus.requiresConfirmation).toBeFalsy();
   });

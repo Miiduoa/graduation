@@ -12,6 +12,8 @@ const { fetchAssistantUserProfile } = require('../../lib/assistantFetchers');
 const { runTool, byName } = require('../tools/registry');
 const { assertToolInputBounds } = require('../inputLimits');
 const { assertOnlineOrderingEnabled } = require('../../lib/onlineOrdering');
+const { matchAgentProposal } = require('../actionProposal');
+const { confirmedAgentWrite } = require('../actionReceipt');
 
 const REGION = 'asia-east1';
 
@@ -82,30 +84,65 @@ module.exports = onCall(
     }
     if (toolName === 'createOrder') assertOnlineOrderingEnabled();
 
-    const userProfile = await fetchAssistantUserProfile(uid);
-    const schoolId = userProfile?.schoolId ?? null;
-    if (!schoolId) {
-      throw new HttpsError('failed-precondition', 'Missing school membership');
-    }
-
-    await assertActiveSchoolMember(schoolId, uid);
-
     const reqCtx =
       request.data?.context && typeof request.data.context === 'object' ? request.data.context : {};
+    const userProfile = await fetchAssistantUserProfile(uid);
+    const requestedSchool = reqCtx.schoolId;
+    if (requestedSchool !== undefined &&
+      (typeof requestedSchool !== 'string' || !/^[A-Za-z0-9_-]{1,40}$/.test(requestedSchool))) {
+      throw new HttpsError('invalid-argument', 'Invalid school');
+    }
+    const schoolId = requestedSchool || userProfile?.schoolId || null;
+    if (!schoolId) throw new HttpsError('failed-precondition', 'Missing school membership');
+    await assertActiveSchoolMember(schoolId, uid);
+
     const toolCtx = {
       uid,
       schoolId,
-      groupId: reqCtx.groupId,
       timeZone: reqCtx.timezone || reqCtx.timeZone || 'Asia/Taipei',
       prefetched: {},
     };
 
     const rawInput =
       request.data?.input && typeof request.data.input === 'object' ? request.data.input : {};
-    const agentRunId =
-      request.data?.agentRunId != null && String(request.data.agentRunId).trim()
-        ? String(request.data.agentRunId).trim()
-        : '';
+    const agentRunId = String(request.data?.agentRunId || '').trim();
+    if (!/^[a-f0-9-]{32,36}$/i.test(agentRunId)) {
+      throw new HttpsError('failed-precondition', 'Please prepare the action in the assistant again');
+    }
+    const runRef = db.collection('users').doc(uid).collection('agentRuns').doc(agentRunId);
+    let proposalIndex = -1;
+    await db.runTransaction(async (tx) => {
+      const snap = await tx.get(runRef);
+      const index = matchAgentProposal(snap.exists ? snap.data() : null, {
+        uid, schoolId, toolName, input: rawInput,
+      });
+      if (index < 0) {
+        throw new HttpsError('permission-denied', 'Action is not part of a current assistant proposal');
+      }
+      if (snap.data()?.actionClaims?.[String(index)]) {
+        throw new HttpsError('already-exists', 'Action already attempted; check the service record');
+      }
+      tx.set(runRef, {
+        actionClaims: {
+          [String(index)]: { status: 'started', startedAt: FieldValue.serverTimestamp() },
+        },
+      }, { merge: true });
+      proposalIndex = index;
+    });
+    // 動作識別由已驗證的伺服器草稿決定，不能由客戶端指定群組或防重鍵。
+    toolCtx.agentActionKey = `${agentRunId}:${proposalIndex}`;
+    const finishClaim = async (status) => {
+      await runRef.set({
+        actionClaims: {
+          [String(proposalIndex)]: {
+            status,
+            updatedAt: FieldValue.serverTimestamp(),
+          },
+        },
+      }, { merge: true }).catch((error) => {
+        console.warn('[executeAgentWrite] claim update failed:', error?.message || error);
+      });
+    };
 
     const t0 = Date.now();
     try {
@@ -119,14 +156,26 @@ module.exports = onCall(
           errorMessage: String(result.errorMessage || '').slice(0, 400),
         };
         await appendAgentRunToolStep(uid, agentRunId, toolName, rawInput, errPayload, durationMs);
+        await finishClaim('failed');
         return errPayload;
       }
-      const rest = result && typeof result === 'object' ? { ...result } : {};
-      if ('success' in rest && rest.success !== true) delete rest.success;
-      const okPayload = { success: true, toolName, ...rest };
+      if (!confirmedAgentWrite(toolName, result, rawInput, { uid, schoolId })) {
+        const unverified = {
+          success: false,
+          toolName,
+          errorCode: 'unverified_receipt',
+          errorMessage: 'Unable to confirm the operation. Check the service record before retrying.',
+        };
+        await appendAgentRunToolStep(uid, agentRunId, toolName, { keys: Object.keys(rawInput).slice(0, 16) }, unverified, durationMs);
+        await finishClaim('unverified');
+        return unverified;
+      }
+      const okPayload = { ...result, toolName, success: true };
       await appendAgentRunToolStep(uid, agentRunId, toolName, rawInput, okPayload, durationMs);
+      await finishClaim('completed');
       return okPayload;
     } catch (e) {
+      await finishClaim('unverified');
       const msg = String(e?.message || e).slice(0, 400);
       await appendAgentRunToolStep(
         uid,
