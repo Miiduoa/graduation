@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type FormEvent } from 'react';
 import {
   attendanceError,
   correctCourseAttendance,
@@ -92,7 +92,7 @@ export function AttendanceCorrectionPanel({
     }
   }
 
-  async function submit(event: React.FormEvent<HTMLFormElement>) {
+  async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (submitting.current || !selectedUid || reason.trim().length < 6 || loading) return;
     submitting.current = true;
