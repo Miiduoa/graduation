@@ -19,6 +19,7 @@ import Image from 'next/image';
 import { useAuth } from '@/components/AuthGuard';
 import { PostActionsRow, PostBookmarkShareActions } from './PostActionBar';
 import {
+  BOOKMARK_UNAVAILABLE_COPY,
   listCampusPostBookmarkIds,
   loadCampusPostBookmarks,
   saveCampusPostBookmark,
@@ -120,7 +121,7 @@ function ScopedFeedTab(props: FeedTabProps & { user: { uid: string } }) {
   const [bookmarkedPosts, setBookmarkedPosts] = useState<CampusPostDoc[]>([]);
   const [bookmarksLoading, setBookmarksLoading] = useState(false);
   const [bookmarksError, setBookmarksError] = useState('');
-  const [bookmarksSilent, setBookmarksSilent] = useState(false);
+  const [bookmarkUnavailable, setBookmarkUnavailable] = useState(false);
   const [bookmarkRevision, setBookmarkRevision] = useState(0);
   const bookmarkFlights = useRef<Set<string>>(new Set());
   const [bookmarksPending, setBookmarksPending] = useState<ReadonlySet<string>>(new Set());
@@ -225,7 +226,7 @@ function ScopedFeedTab(props: FeedTabProps & { user: { uid: string } }) {
       setBookmarkScope('');
       setBookmarkedIds(new Set());
       setBookmarkedPosts([]);
-      setBookmarksSilent(false);
+      setBookmarkUnavailable(false);
       return;
     }
     const scope = `${uid}:${schoolId}`;
@@ -243,7 +244,7 @@ function ScopedFeedTab(props: FeedTabProps & { user: { uid: string } }) {
         if (!live) return;
         setBookmarkedIds(new Set(ids));
       }
-      setBookmarksSilent(false);
+      setBookmarkUnavailable(false);
       setBookmarkScope(scope);
     })()
       .catch((error) => {
@@ -253,10 +254,10 @@ function ScopedFeedTab(props: FeedTabProps & { user: { uid: string } }) {
           setBookmarkedPosts([]);
           setBookmarkScope(scope);
           setBookmarksError('');
-          setBookmarksSilent(true);
+          setBookmarkUnavailable(true);
           return;
         }
-        setBookmarksSilent(false);
+        setBookmarkUnavailable(false);
         setBookmarksError('暫時無法讀取收藏，請確認連線與校籍後重試。');
       })
       .finally(() => {
@@ -331,7 +332,7 @@ function ScopedFeedTab(props: FeedTabProps & { user: { uid: string } }) {
   };
 
   const toggleBookmark = async (item: CampusPostDoc) => {
-    if (!user?.uid || !schoolId || bookmarkFlights.current.has(item.id)) return;
+    if (!user?.uid || !schoolId || bookmarkUnavailable || bookmarkFlights.current.has(item.id)) return;
     const removing = savedIds.has(item.id);
     bookmarkFlights.current.add(item.id);
     setBookmarksPending((prev) => new Set([...prev, item.id]));
@@ -348,8 +349,13 @@ function ScopedFeedTab(props: FeedTabProps & { user: { uid: string } }) {
       if (removing) setBookmarkedPosts((prev) => prev.filter((post) => post.id !== item.id));
       setBookmarkScope(currentBookmarkScope);
       setBookmarkRevision((prev) => prev + 1);
-    } catch {
-      setBookmarkFeedback({ postId: item.id, text: '收藏未更新，請確認連線及校籍後重試。' });
+    } catch (error) {
+      if (isPermissionDeniedError(error)) {
+        setBookmarkUnavailable(true);
+        setBookmarkFeedback(null);
+      } else {
+        setBookmarkFeedback({ postId: item.id, text: '收藏未更新，請確認連線及校籍後重試。' });
+      }
     } finally {
       bookmarkFlights.current.delete(item.id);
       setBookmarksPending((prev) => {
@@ -646,7 +652,7 @@ function ScopedFeedTab(props: FeedTabProps & { user: { uid: string } }) {
           </button>
         </div>
       </div>
-      {!selectedFeedLoading && !selectedFeedError && !bookmarksSilent && (
+      {!selectedFeedLoading && !selectedFeedError && !(savedView && bookmarkUnavailable) && (
         <p className={styles.feedScope} role="status">
           {savedView
             ? `顯示 ${visible.length} 則 · 本校最近最多 40 筆私人收藏，跨裝置同步`
@@ -666,6 +672,11 @@ function ScopedFeedTab(props: FeedTabProps & { user: { uid: string } }) {
       {followingFeedback && (
         <p className={styles.feedError} role="alert">{followingFeedback}</p>
       )}
+      {bookmarkUnavailable && (
+        <p className={styles.feedScope} role="status">
+          {BOOKMARK_UNAVAILABLE_COPY}
+        </p>
+      )}
       {savedView && bookmarksError && (
         <div className={styles.feedError} role="alert">
           {bookmarksError}{' '}
@@ -680,7 +691,7 @@ function ScopedFeedTab(props: FeedTabProps & { user: { uid: string } }) {
         <div className="card" style={{ padding: 24, textAlign: 'center', color: 'var(--muted)' }} role="status">
           {savedView ? '正在讀取收藏…' : followingView ? '正在讀取追蹤動態…' : '載入中…'}
         </div>
-      ) : selectedFeedError ? null : visible.length === 0 ? (
+      ) : selectedFeedError ? null : visible.length === 0 && !(savedView && bookmarkUnavailable) ? (
         <div className="card" style={{ padding: 32, textAlign: 'center', color: 'var(--muted)' }}>
           {search.trim()
             ? '找不到符合的貼文'
@@ -889,6 +900,7 @@ function ScopedFeedTab(props: FeedTabProps & { user: { uid: string } }) {
                   <PostBookmarkShareActions
                     saved={savedIds.has(item.id)}
                     bookmarkDisabled={bookmarksPending.has(item.id)}
+                    bookmarkUnavailable={bookmarkUnavailable}
                     onBookmark={() => void toggleBookmark(item)}
                     onShare={() => void sharePost(item)}
                     shareAriaLabel={`分享貼文：${item.title}`}

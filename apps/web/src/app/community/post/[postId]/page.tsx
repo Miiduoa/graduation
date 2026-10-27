@@ -20,6 +20,7 @@ import { useAuth } from '@/components/AuthGuard';
 import { useBrowsingSchoolPageContext } from '@/lib/useBrowsingSchoolPageContext';
 import { PostActionsRow, PostBookmarkShareActions } from '../../_components/PostActionBar';
 import {
+  BOOKMARK_UNAVAILABLE_COPY,
   isCampusPostBookmarked,
   saveCampusPostBookmark,
   removeCampusPostBookmark,
@@ -77,6 +78,7 @@ function PostDetailInner({ schoolId }: { schoolId: string }) {
   const [bookmarkState, setBookmarkState] = useState<{ scope: string; saved: boolean } | null>(null);
   const [bookmarkBusy, setBookmarkBusy] = useState(false);
   const [bookmarkError, setBookmarkError] = useState('');
+  const [bookmarkUnavailable, setBookmarkUnavailable] = useState(false);
   const [bookmarkRevision, setBookmarkRevision] = useState(0);
   const bookmarkScope = `${user?.uid ?? ''}:${schoolId}:${postId ?? ''}`;
   const bookmarkReady = bookmarkState?.scope === bookmarkScope;
@@ -90,22 +92,25 @@ function PostDetailInner({ schoolId }: { schoolId: string }) {
       .then((value) => {
         if (!live) return;
         setBookmarkState({ scope: `${uid}:${schoolId}:${postId}`, saved: value });
+        setBookmarkUnavailable(false);
         setBookmarkError('');
       })
       .catch((error) => {
         if (!live) return;
         if (isPermissionDeniedError(error)) {
           setBookmarkState({ scope: `${uid}:${schoolId}:${postId}`, saved: false });
+          setBookmarkUnavailable(true);
           setBookmarkError('');
           return;
         }
+        setBookmarkUnavailable(false);
         setBookmarkError('無法讀取收藏狀態，請確認校籍與連線。');
       });
     return () => { live = false; };
   }, [user?.uid, schoolId, postId, bookmarkRevision]);
 
   const onToggleBookmark = async () => {
-    if (!user?.uid || !postId || !bookmarkReady || bookmarkBusy) return;
+    if (!user?.uid || !postId || !bookmarkReady || bookmarkBusy || bookmarkUnavailable) return;
     const uid = user.uid;
     setBookmarkBusy(true);
     setBookmarkError('');
@@ -113,8 +118,13 @@ function PostDetailInner({ schoolId }: { schoolId: string }) {
       if (saved) await removeCampusPostBookmark(uid, schoolId, postId);
       else await saveCampusPostBookmark(uid, schoolId, postId);
       setBookmarkState({ scope: `${uid}:${schoolId}:${postId}`, saved: !saved });
-    } catch {
-      setBookmarkError('這次收藏未成功更新，請確認校籍與連線後重試。');
+    } catch (error) {
+      if (isPermissionDeniedError(error)) {
+        setBookmarkUnavailable(true);
+        setBookmarkError('');
+      } else {
+        setBookmarkError('這次收藏未成功更新，請確認校籍與連線後重試。');
+      }
     } finally {
       setBookmarkBusy(false);
     }
@@ -487,11 +497,17 @@ function PostDetailInner({ schoolId }: { schoolId: string }) {
           <PostBookmarkShareActions
             saved={saved}
             bookmarkDisabled={!bookmarkReady || bookmarkBusy}
+            bookmarkUnavailable={bookmarkUnavailable}
             onBookmark={() => void onToggleBookmark()}
             onShare={() => void onShare()}
             shareAriaLabel="分享"
           />
         </PostActionsRow>
+        {bookmarkUnavailable && (
+          <p role="status" style={{ margin: '8px 0 0', color: 'var(--muted)', fontSize: 13 }}>
+            {BOOKMARK_UNAVAILABLE_COPY}
+          </p>
+        )}
         {bookmarkError && (
           <p role="alert" style={{ margin: '8px 0 0', color: 'var(--danger)', fontSize: 13 }}>
             {bookmarkError}{' '}
