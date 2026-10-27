@@ -463,6 +463,12 @@ function AssistantConversation({
             <CampusEvidencePlanCard
               plan={message.plan}
               disabled={busy}
+              reminderContext={{
+                userId: uid,
+                schoolId,
+                snapshot: currentSense,
+                isCurrent: current,
+              }}
               onOpenRoute={(route: CampusPlanRoute) => {
                 const destination = VERIFIED_SERVICE_ROUTES[route];
                 if (destination) safeNavigate(navigation, destination.route);
