@@ -438,7 +438,8 @@ function createLiveSessionHandlers({ db, now = Date.now, notifyStarted, logger =
         liveSnap.data().groupId !== groupId ||
         attendanceSnap.data().groupId !== groupId ||
         liveSnap.data().sessionId !== sessionId ||
-        attendanceSnap.data().sessionId !== sessionId
+        attendanceSnap.data().sessionId !== sessionId ||
+        liveSnap.data().active !== attendanceSnap.data().active
       ) {
         throw new HttpsError('failed-precondition', 'An active course record is required');
       }
@@ -467,12 +468,14 @@ function createLiveSessionHandlers({ db, now = Date.now, notifyStarted, logger =
       const wasPresent = ['present', 'late'].includes(previousStatus);
       const isPresent = ['present', 'late'].includes(status);
       const delta = Number(isPresent) - Number(wasPresent);
+      const liveCount = liveSnap.data().attendeeCount;
+      const attendanceCount = attendanceSnap.data().attendeeCount;
       if (
-        delta < 0 &&
-        (!Number.isInteger(liveSnap.data().attendeeCount) ||
-          !Number.isInteger(attendanceSnap.data().attendeeCount) ||
-          liveSnap.data().attendeeCount < 1 ||
-          attendanceSnap.data().attendeeCount < 1)
+        !Number.isSafeInteger(liveCount) ||
+        !Number.isSafeInteger(attendanceCount) ||
+        liveCount !== attendanceCount ||
+        liveCount < 0 ||
+        (delta < 0 && liveCount < 1)
       ) {
         throw new HttpsError('failed-precondition', 'Attendance counts require administrator repair');
       }
