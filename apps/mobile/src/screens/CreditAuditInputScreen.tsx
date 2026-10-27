@@ -1,5 +1,5 @@
 /* eslint-disable */
-import React, { useMemo, useState, useEffect, useCallback } from 'react';
+import React, { useMemo, useState, useEffect, useCallback, useRef } from 'react';
 import { ScrollView, Text, TextInput, View, Alert, Pressable } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import * as DocumentPicker from 'expo-document-picker';
@@ -24,44 +24,25 @@ import {
 import { TAB_BAR_CONTENT_BOTTOM_PADDING } from '../ui/navigationTheme';
 import { theme } from '../ui/theme';
 import {
-  calculateCredits,
   calculateDetailedCredits,
   type CreditCategory,
-  type DetailedGradTemplate,
 } from '@campus/shared/src/creditAudit';
-import { mockGradRuleTemplateV1, mockCourses, demoEnrollments } from '@campus/shared/src/mockData';
 import {
   puCSIE_115,
-  puDetailedTemplates,
-  puDepartments,
   flattenCategories,
   mapDetailedToLegacyCategory,
 } from '@campus/shared/src/puGradRequirements';
 import { useAuth } from '../state/auth';
 import { useSchool } from '../state/school';
 import { analytics } from '../services/analytics';
-
-function escapeCsvValue(value: string | number | boolean | null | undefined): string {
-  const normalized = value == null ? '' : String(value);
-  const escaped = normalized.replace(/"/g, '""');
-  return /[",\n]/.test(escaped) ? `"${escaped}"` : escaped;
-}
-
-function buildCsvContent(courses: SavedCourse[]): string {
-  const header = ['課程名稱', '學分', '分類', '成績', '學期', '通過'];
-  const rows = courses.map((course) => [
-    course.name,
-    course.credits,
-    course.category,
-    course.grade ?? '',
-    course.semester ?? '',
-    course.passed ? '是' : '否',
-  ]);
-
-  return [header, ...rows]
-    .map((row) => row.map((cell) => escapeCsvValue(cell)).join(','))
-    .join('\r\n');
-}
+import { isProvidenceUniversitySchool } from './creditAudit/gradeScope';
+import {
+  exportManualCreditCsv,
+  manualCreditAmount,
+  manualCreditProgress,
+  parseManualCreditCsv,
+  validCourseName,
+} from './creditAudit/manualCreditCourses';
 
 const legacyCategories: Array<{ key: CreditCategory; label: string; color: string }> = [
   { key: 'required', label: '必修', color: '#FF3B30' },
@@ -115,16 +96,17 @@ export function CreditAuditInputScreen(props: any) {
   const [category, setCategory] = useState<CreditCategory>('elective');
   const [detailedCatKey, setDetailedCatKey] = useState('dept_elective');
   const [detailedSubKey, setDetailedSubKey] = useState<string | undefined>(undefined);
-  const [passed, setPassed] = useState(true);
-  const [grade, setGrade] = useState('A');
+  const [passed, setPassed] = useState(false);
+  const [grade, setGrade] = useState('');
   const [semester, setSemester] = useState('114-1');
 
-  // Detailed graduation template (default to PU CSIE 115)
-  const [selectedTemplateId, setSelectedTemplateId] = useState(puCSIE_115.id);
-  const detailedTemplate = useMemo(
-    () => puDetailedTemplates.find((t) => t.id === selectedTemplateId) ?? puCSIE_115,
-    [selectedTemplateId],
-  );
+  // The only bundled sample is PU CSIE 115. Never silently apply it to another
+  // department, year, account or campus as a graduation audit.
+  const [referenceEnabled, setReferenceEnabled] = useState(false);
+  const canUseReference = isProvidenceUniversitySchool(school.id) &&
+    /資訊工程|computer science/i.test(auth.profile?.department ?? '');
+  const referenceActive = canUseReference && referenceEnabled;
+  const detailedTemplate = puCSIE_115;
   const detailedCategoryOptions = useMemo(
     () => flattenCategories(detailedTemplate),
     [detailedTemplate],
@@ -134,7 +116,9 @@ export function CreditAuditInputScreen(props: any) {
   const [nonCreditSatisfied, setNonCreditSatisfied] = useState<Record<string, boolean>>({});
 
   const [savedCourses, setSavedCourses] = useState<SavedCourse[]>([]);
+  const [loadedScope, setLoadedScope] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const requestIdRef = useRef(0);
   const [saving, setSaving] = useState(false);
   const [syncing, setSyncing] = useState(false);
   const [importing, setImporting] = useState(false);
@@ -237,32 +221,16 @@ export function CreditAuditInputScreen(props: any) {
     detailedAudit,
   ]);
 
-  // Legacy calculation (kept for backward compat)
-  const currentTotals = useMemo(() => {
-    const savedCoursesForCalc = savedCourses.map((sc) => ({
-      id: sc.id,
-      departmentId: 'dept-demo-cs',
-      name: sc.name,
-      credits: sc.credits,
-      category: sc.category,
-    }));
-    const savedEnrollments = savedCourses.map((sc) => ({
-      id: `en-${sc.id}`,
-      uid: auth.user?.uid || 'demo',
-      courseId: sc.id,
-      status: 'completed' as const,
-      passed: sc.passed,
-    }));
-    const coursesById = Object.fromEntries(
-      [...mockCourses, ...savedCoursesForCalc].map((c) => [c.id, c]),
-    );
-    const enrollments = [...demoEnrollments, ...savedEnrollments];
-    return calculateCredits({ template: mockGradRuleTemplateV1, coursesById, enrollments });
-  }, [savedCourses, auth.user?.uid]);
+  const personalProgress = useMemo(() => manualCreditProgress(savedCourses), [savedCourses]);
 
   const handleSaveCourse = async () => {
-    if (!name.trim()) {
-      Alert.alert('請輸入課程名稱', '課程名稱為必填欄位');
+    if (!validCourseName(name)) {
+      Alert.alert('請檢查課程名稱', '請輸入 1–80 字的課程名稱');
+      return;
+    }
+    const validCredits = manualCreditAmount(credits);
+    if (validCredits === null) {
+      Alert.alert('請檢查學分', '每門課應為 0.01–30 學分，最多兩位小數');
       return;
     }
 
@@ -272,12 +240,12 @@ export function CreditAuditInputScreen(props: any) {
       const courseDraft = {
         id: newCourseId,
         name: name.trim(),
-        credits: Number(credits) || 0,
+        credits: validCredits,
         category,
         detailedCatKey,
         detailedSubKey,
         passed,
-        grade: passed ? grade : undefined,
+        grade: passed && grade ? grade : undefined,
         semester,
       };
 
@@ -304,15 +272,15 @@ export function CreditAuditInputScreen(props: any) {
 
       analytics.logEvent('credit_course_added', {
         category,
-        credits: Number(credits),
+        credits: validCredits,
         passed,
       });
 
       setName('');
       setCredits('3');
       setCategory('elective');
-      setPassed(true);
-      setGrade('A');
+      setPassed(false);
+      setGrade('');
 
       Alert.alert(
         '已儲存',
@@ -387,7 +355,7 @@ export function CreditAuditInputScreen(props: any) {
     try {
       const timestamp = new Date().toISOString().slice(0, 10);
       const file = new File(Paths.cache, `credit-audit-${timestamp}.csv`);
-      const csvContent = `\uFEFF${buildCsvContent(savedCourses)}`;
+      const csvContent = exportManualCreditCsv(savedCourses);
 
       await file.write(csvContent);
 
@@ -535,7 +503,7 @@ export function CreditAuditInputScreen(props: any) {
 
   const unsyncedCount = savedCourses.filter((c) => !c.syncedToCloud).length;
 
-  const TABS = ['新增課程', '畢業進度', '已儲存', '匯入/匯出'];
+  const TABS = ['新增課程', '修課概覽', '已儲存', '匯入/匯出'];
 
   if (loading) {
     return (
