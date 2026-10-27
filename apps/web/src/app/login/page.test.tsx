@@ -590,7 +590,7 @@ it('offers an import path for a campus without student ID sign-in', () => {
   render(<LoginPage />);
   expect(screen.queryByLabelText('學號')).toBeNull();
   expect(screen.getByRole('link', { name: /前往資料匯入/ }).getAttribute('href')).toBe('/import?schoolId=ntu');
-  expect(screen.getByText(/這項匯入不需要學校與平台合作/)).toBeTruthy();
+  expect(screen.getByText(/直接複製網頁表格貼上，或匯入從學校下載的 HTML、PDF、CSV 與截圖/)).toBeTruthy();
 });
 
 it('clears the rejected school password while preserving the student ID', async () => {
