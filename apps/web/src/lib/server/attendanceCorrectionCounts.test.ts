@@ -11,7 +11,9 @@ const attendancePath = `${base}/attendanceSessions/${sessionId}`;
 function storeWithCounts(liveCount: unknown, attendanceCount: unknown) {
   const metadata = { schemaVersion: 2, groupId: 'class-1', sessionId, active: false };
   return createMemoryGroupStore([
-    [base, { name: '程式設計' }],
+    [base, { name: '程式設計', type: 'course', schoolId: 'school-1' }],
+    ['schools/school-1/members/teacher', { status: 'active' }],
+    ['schools/school-1/members/student', { status: 'active' }],
     [`${base}/members/teacher`, { role: 'instructor', status: 'active' }],
     [`${base}/members/student`, { role: 'student', status: 'active' }],
     [livePath, { ...metadata, attendeeCount: liveCount }],

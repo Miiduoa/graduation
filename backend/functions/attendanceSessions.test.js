@@ -9,7 +9,9 @@ const { createLiveSessionHandlers } = require('./attendanceSessions');
 
 function memoryStore() {
   const docs = new Map([
-    ['groups/class-1', { name: '程式設計' }],
+    ['groups/class-1', { name: '程式設計', type: 'course', schoolId: 'school-1' }],
+    ['schools/school-1/members/teacher', { status: 'active' }],
+    ['schools/school-1/members/student', { status: 'active' }],
     ['groups/class-1/members/teacher', { role: 'instructor', status: 'active' }],
     [
       'groups/class-1/members/student',
@@ -135,7 +137,7 @@ describe('live attendance session handlers', () => {
     await expect(handlers.startLiveSession(startRequest(data))).rejects.toMatchObject({
       code: 'invalid-argument',
     });
-    expect(store.docs.size).toBe(3);
+    expect(store.docs.size).toBe(5);
   });
 
   test.each([
@@ -179,7 +181,7 @@ describe('live attendance session handlers', () => {
     await expect(handlers.startLiveSession(startRequest())).rejects.toThrow(
       'transaction unavailable',
     );
-    expect(store.docs.size).toBe(3);
+    expect(store.docs.size).toBe(5);
     expect(notifyStarted).not.toHaveBeenCalled();
   });
 
@@ -191,7 +193,7 @@ describe('live attendance session handlers', () => {
     time += 60_000;
     const second = await handlers.startLiveSession(startRequest());
     expect(second).toEqual({ ...first, reused: true });
-    expect(store.docs.size).toBe(6);
+    expect(store.docs.size).toBe(8);
     expect(notifyStarted).toHaveBeenCalledTimes(1);
     expect(logger.warn).toHaveBeenCalledTimes(1);
   });
@@ -596,4 +598,70 @@ describe('live attendance session handlers', () => {
     expect([...store.docs.keys()].filter((key) => key.includes('/attendanceCorrections/'))).toHaveLength(0);
   });
 
+  test.each([
+    ['schools/school-1/members/teacher', null],
+    ['schools/school-1/members/student', null],
+    ['schools/school-1/members/teacher', { status: 'inactive' }],
+    ['schools/school-1/members/student', { status: 'inactive' }],
+    ['users/teacher', { accountDeletionInProgress: true }],
+    ['users/student', { accountDeletionInProgress: true }],
+    ['users/teacher', { status: 'deleted' }],
+    ['users/student', { status: 'deleted' }],
+  ])('school or account revocation blocks correction at %s', async (documentPath, replacement) => {
+    const session = await handlers.startLiveSession(startRequest());
+    await handlers.endLiveSession(sessionRequest(session, {}, 'teacher'));
+    if (replacement === null) store.docs.delete(documentPath);
+    else store.docs.set(documentPath, replacement);
+    const before = new Map(store.docs);
+    await expect(handlers.correctAttendanceRecord(correctionRequest(session)))
+      .rejects.toMatchObject({ code: 'permission-denied' });
+    expect(store.docs).toEqual(before);
+  });
+
+  test.each([
+    null,
+    { type: 'course' },
+    { type: 'club', schoolId: 'school-1' },
+    { type: 'course', schoolId: '../school-1' },
+  ])('requires a real school-scoped course for correction: %j', async (course) => {
+    const session = await handlers.startLiveSession(startRequest());
+    if (course === null) store.docs.delete('groups/class-1');
+    else store.docs.set('groups/class-1', course);
+    const before = new Map(store.docs);
+    await expect(handlers.correctAttendanceRecord(correctionRequest(session, { status: 'present' })))
+      .rejects.toMatchObject({ code: 'failed-precondition' });
+    expect(store.docs).toEqual(before);
+  });
+
+  test('a prior correction receipt does not bypass newly revoked school membership', async () => {
+    const session = await handlers.startLiveSession(startRequest());
+    const request = correctionRequest(session, { status: 'present' });
+    await handlers.correctAttendanceRecord(request);
+    store.docs.set('schools/school-1/members/teacher', { status: 'inactive' });
+    const before = new Map(store.docs);
+    await expect(handlers.correctAttendanceRecord(request))
+      .rejects.toMatchObject({ code: 'permission-denied' });
+    expect(store.docs).toEqual(before);
+    expect(store.docs.get(path(session, 'attendanceSessions')).attendeeCount).toBe(1);
+  });
+
+  test('client-supplied school context cannot substitute for the course school', async () => {
+    const session = await handlers.startLiveSession(startRequest());
+    store.docs.delete('schools/school-1/members/teacher');
+    store.docs.set('schools/other-school/members/teacher', { status: 'active' });
+    await expect(handlers.correctAttendanceRecord(correctionRequest(session, {
+      status: 'present', schoolId: 'other-school',
+    }))).rejects.toMatchObject({ code: 'permission-denied' });
+    expect(store.docs.get(path(session, 'attendanceSessions')).attendeeCount).toBe(0);
+  });
+
+  test.each([null, '0', false])('rejects malformed counters without coercing %j into zero', async (count) => {
+    const session = await handlers.startLiveSession(startRequest());
+    store.docs.get(path(session, 'attendanceSessions')).attendeeCount = count;
+    store.docs.get(path(session, 'liveSessions')).attendeeCount = count;
+    const before = new Map(store.docs);
+    await expect(handlers.correctAttendanceRecord(correctionRequest(session, { status: 'present' })))
+      .rejects.toMatchObject({ code: 'failed-precondition' });
+    expect(store.docs).toEqual(before);
+  });
 });

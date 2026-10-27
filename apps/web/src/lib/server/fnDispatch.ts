@@ -219,7 +219,7 @@ export async function dispatchFnRequest(
     const auth = await verifyCallableAuth(
       request.headers.get('authorization'),
       resolved.verifyIdToken,
-      isLeaveWebCallable(name),
+      isLeaveWebCallable(name) || name === 'correctAttendanceRecord',
     );
     uid = auth?.uid;
     if (uid) {
