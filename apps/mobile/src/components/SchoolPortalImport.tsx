@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState, type MutableRefObject } from 'react';
 import { ActivityIndicator, AppState, Modal, Platform, ScrollView, Text, TextInput, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
@@ -21,6 +21,8 @@ import { theme } from '../ui/theme';
 import { useThemeMode } from '../state/theme';
 
 type Kind = 'timetable' | 'grades';
+type Stage = 'consent' | 'browse' | 'choose' | 'review' | 'done';
+type CloseRequest = MutableRefObject<(() => void) | null>;
 type Selection = { name: string; tables: SchoolPageTable[]; partial: boolean };
 function usePortalStyles() {
   useThemeMode();
@@ -41,21 +43,23 @@ export function SchoolPortalImportEntry({ onOpenRecords, disabled = false }: {
 }) {
   const { school } = useSchool();
   const [openedSchool, setOpenedSchool] = useState<string | null>(null);
-  const close = useCallback(() => setOpenedSchool(null), []);
+  const closeRequest = useRef<(() => void) | null>(null);
+  const close = useCallback(() => { closeRequest.current = null; setOpenedSchool(null); }, []);
   const portal = schoolPortalFor(school.id);
-  useEffect(() => { setOpenedSchool(null); }, [school.id, disabled]);
+  useEffect(() => { close(); }, [school.id, disabled, close]);
   if (!portal || Platform.OS === 'web') return null;
   return <>
     <Button text="在 App 內開啟校務網站匯入" disabled={disabled} onPress={() => setOpenedSchool(school.id)} />
     {openedSchool === school.id && !disabled ? (
-      <Modal visible animationType="slide" onRequestClose={close}>
-        <PortalSession portal={portal} onClose={close} onOpenRecords={(kind) => { close(); onOpenRecords(kind); }} />
+      <Modal visible animationType="slide" onRequestClose={() => (closeRequest.current ?? close)()}>
+        <PortalSession portal={portal} onClose={close} closeRequest={closeRequest}
+          onOpenRecords={(kind) => { close(); onOpenRecords(kind); }} />
       </Modal>
     ) : null}
   </>;
 }
-function PortalSession({ portal, onClose, onOpenRecords }: {
-  portal: SchoolPortal; onClose(): void; onOpenRecords(kind: Kind): void;
+function PortalSession({ portal, onClose, onOpenRecords, closeRequest }: {
+  portal: SchoolPortal; onClose(): void; onOpenRecords(kind: Kind): void; closeRequest: CloseRequest;
 }) {
   const scope = usePersonalImportScope();
   const { copy } = usePortalStyles();
@@ -71,15 +75,20 @@ function PortalSession({ portal, onClose, onOpenRecords }: {
     <Text style={copy}>帳號或學校正在變更，已停止本次匯入。請關閉後重新開始。</Text>
     <Button text="關閉校務匯入" onPress={onClose} />
   </SafeAreaView>;
-  return <PortalFlow key={`${scope.owner}:${scope.schoolId}`} portal={portal} scope={scope} isScopeCurrent={isScopeCurrent} onClose={onClose} onOpenRecords={onOpenRecords} />;
+  return <PortalFlow key={`${scope.owner}:${scope.schoolId}`} portal={portal} scope={scope} isScopeCurrent={isScopeCurrent}
+    onClose={onClose} onOpenRecords={onOpenRecords} closeRequest={closeRequest} />;
 }
-function PortalFlow({ portal, scope, isScopeCurrent, onClose, onOpenRecords }: {
-  portal: SchoolPortal; scope: PersonalImportScope; isScopeCurrent(scope: PersonalImportScope): boolean; onClose(): void; onOpenRecords(kind: Kind): void;
+function PortalFlow({ portal, scope, isScopeCurrent, onClose, onOpenRecords, closeRequest }: {
+  portal: SchoolPortal; scope: PersonalImportScope; isScopeCurrent(scope: PersonalImportScope): boolean;
+  onClose(): void; onOpenRecords(kind: Kind): void; closeRequest: CloseRequest;
 }) {
   const { copy, input } = usePortalStyles();
-  const [stage, setStage] = useState<'consent' | 'browse' | 'choose' | 'review' | 'done'>('consent');
+  const [stage, setStage] = useState<Stage>('consent');
+  const stageRef = useRef<Stage>('consent');
+  const moveTo = (next: Stage) => { stageRef.current = next; setStage(next); };
   const [kind, setKind] = useState<Kind>('timetable');
   const [url, setUrl] = useState(portal.url);
+  const source = useMemo(() => ({ uri: url }), [url]);
   const [browserEpoch, setBrowserEpoch] = useState(0);
   const currentUrl = useRef(portal.url);
   const [origin, setOrigin] = useState(new URL(portal.url).origin);
@@ -87,6 +96,7 @@ function PortalFlow({ portal, scope, isScopeCurrent, onClose, onOpenRecords }: {
   const [canBack, setCanBack] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
+  const [browserError, setBrowserError] = useState('');
   const [selection, setSelection] = useState<Selection | null>(null);
   const [text, setText] = useState('');
   const [year, setYear] = useState('');
@@ -99,6 +109,10 @@ function PortalFlow({ portal, scope, isScopeCurrent, onClose, onOpenRecords }: {
   const [receipt, setReceipt] = useState<{ added: number; duplicates: number; batchId: string | null } | null>(null);
   const [confirmUndo, setConfirmUndo] = useState(false);
   const [undone, setUndone] = useState(false);
+  const [confirmRead, setConfirmRead] = useState(false);
+  const [confirmClose, setConfirmClose] = useState(false);
+  const hasDraft = useRef(false);
+  const resumeStage = useRef<'choose' | 'review'>('choose');
   const alive = useRef(true);
   const foreground = useRef(AppState.currentState !== 'background' && AppState.currentState !== 'inactive');
   const writeLock = useRef(false);
@@ -113,11 +127,21 @@ function PortalFlow({ portal, scope, isScopeCurrent, onClose, onOpenRecords }: {
     timer.current = null;
     setBusy(false);
   }, []);
+  const askClose = useCallback(() => {
+    if (writeLock.current) return;
+    stop(); setConfirmRead(false);
+    if (hasDraft.current) setConfirmClose(true);
+    else onClose();
+  }, [onClose, stop]);
+  useEffect(() => {
+    closeRequest.current = askClose;
+    return () => { if (closeRequest.current === askClose) closeRequest.current = null; };
+  }, [askClose, closeRequest]);
   useEffect(() => {
     alive.current = true;
     const listener = AppState.addEventListener('change', (state) => {
       foreground.current = state === 'active';
-      if (state !== 'active') stop();
+      if (state !== 'active') { stop(); setConfirmRead(false); }
     });
     return () => {
       alive.current = false;
@@ -126,18 +150,41 @@ function PortalFlow({ portal, scope, isScopeCurrent, onClose, onOpenRecords }: {
       listener.remove();
     };
   }, [stop]);
+  const clearDraft = () => {
+    hasDraft.current = false; resumeStage.current = 'choose';
+    setSelection(null); setText(''); setYear(''); setSemester('');
+    setRows([]); setIssues([]); setSelected(new Set()); setVisible(20);
+    setConfirmRead(false); setConfirmClose(false);
+  };
+  // Only an explicit restart creates a new incognito browser. Review keeps it mounted.
   const resetBrowser = () => {
-    stop(); setError(''); setLoaded(false); setCanBack(false);
+    if (writeLock.current || !active()) return;
+    stop(); setError(''); setBrowserError(''); setLoaded(false); setCanBack(false);
     currentUrl.current = portal.url; setOrigin(new URL(portal.url).origin);
-    setUrl(portal.url); setSelection(null); setRows([]); setStage('browse');
+    setUrl(portal.url); setConfirmRead(false); moveTo('browse');
     setBrowserEpoch((value) => value + 1);
   };
-  const read = () => {
-    if (!loaded || pending.current || !active()) return;
+  const returnToBrowser = () => {
+    if (writeLock.current || !active()) return;
+    stop(); setError(''); setConfirmRead(false); moveTo('browse');
+  };
+  const resumeDraft = () => {
+    if (writeLock.current || !active() || !hasDraft.current) return;
+    stop(); setError(''); setConfirmRead(false); moveTo(resumeStage.current);
+  };
+  const continueImport = (nextKind: Kind) => {
+    if (writeLock.current || !active() || stageRef.current !== 'done') return;
+    stop(); clearDraft(); setReceipt(null); setConfirmUndo(false); setUndone(false);
+    setKind(nextKind); setError(''); moveTo('browse');
+  };
+  const read = (replaceDraft = false) => {
+    if (stageRef.current !== 'browse' || !loaded || pending.current || !active() || writeLock.current) return;
+    if (hasDraft.current && !replaceDraft) { setConfirmRead(true); return; }
     const currentOrigin = schoolPortalOrigin(portal, currentUrl.current);
     if (!currentOrigin || !web.current) return;
+    // Keep the previous draft until a new table has actually been parsed successfully.
     const request = { id: randomUUID(), origin: currentOrigin };
-    pending.current = request; setBusy(true); setError('');
+    pending.current = request; setBusy(true); setError(''); setConfirmRead(false);
     timer.current = setTimeout(() => {
       if (pending.current !== request) return;
       stop(); if (active()) setError('讀取逾時，未匯入任何資料。請確認校務頁面已載入，再試一次。');
@@ -146,15 +193,16 @@ function PortalFlow({ portal, scope, isScopeCurrent, onClose, onOpenRecords }: {
     catch { stop(); setError(captureErrors.unavailable); }
   };
   const receive = (eventUrl: string, data: string) => {
-    if (!active()) return;
+    if (!active() || stageRef.current !== 'browse') return;
     const result = readPortalCapture(portal, pending.current, eventUrl, currentUrl.current, data);
     if (result.status === 'ignored') return;
     stop();
     if (result.status === 'error') { setError(captureErrors[result.reason]); return; }
     try {
       const tables = extractSchoolPageTables(result.value.html, kind, profile);
+      clearDraft(); hasDraft.current = true;
       setSelection({ name: `${portal.label} · ${result.value.origin}`, tables, partial: result.value.blockedFrames > 0 });
-      setError(''); setStage('choose');
+      setError(''); moveTo('choose');
     } catch { setError('讀到表格，但未辨識出目前資料類型。請切到課表／成績列表，或改用檔案匯入。'); }
   };
   const preview = () => {
@@ -174,14 +222,14 @@ function PortalFlow({ portal, scope, isScopeCurrent, onClose, onOpenRecords }: {
   const errors = [...new Map([...issues, ...validation].filter((issue) => issue.severity === 'error' && (!issue.rowId || selected.has(issue.rowId)))
     .map((issue) => [JSON.stringify(issue), issue])).values()];
   const save = async () => {
-    if (writeLock.current || !active() || !chosen.length || errors.length) return;
+    if (writeLock.current || !active() || !chosen.length || errors.length || confirmClose) return;
     writeLock.current = true; setSaving(true); setError('');
     try {
       const result = await appendPersonalImports(scope, chosen, active);
       if (!active()) return;
       setReceipt({ added: result.added, duplicates: result.duplicates,
         batchId: result.added ? result.ledger.batches[result.ledger.batches.length - 1]?.id ?? null : null });
-      setRows([]); setText(''); setSelection(null); setStage('done');
+      clearDraft(); moveTo('done');
     } catch (err) { if (active()) setError(personalImportErrorMessage(err, '儲存未完成，核對內容仍保留，可重試。')); }
     finally { writeLock.current = false; if (alive.current) setSaving(false); }
   };
@@ -198,32 +246,49 @@ function PortalFlow({ portal, scope, isScopeCurrent, onClose, onOpenRecords }: {
       multiline={multiline} editable={!saving} maxLength={multiline ? 100_000 : 32} autoCorrect={false}
       onChangeText={(next) => { change(next); setRows([]); setIssues([]); }} /></View>
   );
+  const visibleError = error || (stage === 'browse' ? browserError : '');
   return <SafeAreaView style={{ flex: 1, backgroundColor: theme.colors.bg }}>
     <View style={{ padding: 16, gap: 8, borderBottomWidth: 1, borderColor: theme.colors.border }}>
       <Text accessibilityRole="header" style={{ ...copy, fontSize: 19, fontWeight: '700' }}>{`${portal.label} · 本人資料匯入`}</Text>
       <Text style={{ color: theme.colors.muted }}>{stage === 'browse' ? origin : '登入校方網站、選擇表格、核對儲存'}</Text>
-      <Button text="關閉校務匯入" kind="outline" disabled={saving} onPress={onClose} />
-      {error ? <Text accessibilityRole="alert" style={copy}>{error}</Text> : null}
+      <Button text="關閉校務匯入" kind="outline" disabled={saving} onPress={askClose} />
+      {confirmClose ? <View style={{ gap: 8 }}>
+        <Text accessibilityRole="alert" style={copy}>這份表格尚未儲存。關閉會捨棄目前草稿與校務網頁，已匯入的紀錄不受影響。</Text>
+        <Button text="繼續核對" onPress={() => setConfirmClose(false)} />
+        <Button text="放棄未儲存資料並關閉" kind="outline" disabled={saving} onPress={() => { if (!writeLock.current) onClose(); }} />
+      </View> : null}
+      {visibleError ? <Text accessibilityRole="alert" style={copy}>{visibleError}</Text> : null}
     </View>
-    {stage === 'browse' ? <>
+    {/* A stable tree position retains the browser during review; it is never mounted before consent. */}
+    {stage !== 'consent' ? <View testID="school-portal-browser-container"
+      style={{ flex: 1, display: stage === 'browse' ? 'flex' : 'none' }}
+      pointerEvents={stage === 'browse' ? 'auto' : 'none'} accessibilityElementsHidden={stage !== 'browse'}
+      importantForAccessibility={stage === 'browse' ? 'auto' : 'no-hide-descendants'}>
       <View style={{ padding: 12, gap: 8 }}>
         <Text style={copy}>{`請自行登入，開啟本人的${kind === 'grades' ? '成績' : '課表'}列表，再按讀取。登入成功不等於匯入完成。`}</Text>
         <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
           <Button text="回上一頁" kind="outline" disabled={!canBack || busy} onPress={() => { stop(); setLoaded(false); web.current?.goBack(); }} />
-          <Button text="重新載入入口" kind="outline" onPress={resetBrowser} />
+          <Button text="重新載入入口" kind="outline" disabled={busy} onPress={resetBrowser} />
         </View>
-        <Button text={busy ? '正在讀取表格…' : '讀取這頁表格'} disabled={!loaded || busy} onPress={read} />
+        <Button text={busy ? '正在讀取表格…' : '讀取這頁表格'} disabled={!loaded || busy || confirmClose} onPress={() => read()} />
+        {hasDraft.current ? <Button text="繼續核對未儲存表格" kind="outline" onPress={resumeDraft} /> : null}
+        {confirmRead ? <View style={{ gap: 8 }}>
+          <Text accessibilityRole="alert" style={copy}>重新讀取成功後會取代未儲存的草稿；讀取失敗則保留原稿。</Text>
+          <Button text="讀取新表格並取代草稿" onPress={() => read(true)} />
+          <Button text="保留原稿" kind="outline" onPress={() => setConfirmRead(false)} />
+        </View> : null}
         {!loaded ? <ActivityIndicator accessibilityLabel="正在載入校務頁面" /> : null}
       </View>
       {/* Intercept every scheme here: an unmatched originWhitelist entry otherwise opens the OS browser. */}
-      <WebView key={browserEpoch} testID="school-portal-browser" ref={web} source={{ uri: url }} style={{ flex: 1 }}
+      <WebView key={browserEpoch} testID="school-portal-browser" ref={web} source={source} style={{ flex: 1 }}
         incognito cacheEnabled={false} sharedCookiesEnabled={false} thirdPartyCookiesEnabled={false}
         allowFileAccess={false} allowFileAccessFromFileURLs={false} allowUniversalAccessFromFileURLs={false}
         mixedContentMode="never" javaScriptCanOpenWindowsAutomatically={false} setSupportMultipleWindows
         geolocationEnabled={false} allowsBackForwardNavigationGestures={false} originWhitelist={['*']}
         onShouldStartLoadWithRequest={(request) => {
+          if (stageRef.current !== 'browse' || !active()) return false;
           const allowed = !!schoolPortalOrigin(portal, request.url);
-          if (!allowed) { stop(); setError('已阻止離開此校園的網站。外部驗證或下載請改用系統瀏覽器與檔案匯入。'); }
+          if (!allowed) { stop(); setBrowserError('已阻止離開此校園的網站。外部驗證或下載請改用系統瀏覽器與檔案匯入。'); }
           return allowed;
         }}
         onNavigationStateChange={(state) => {
@@ -233,24 +298,26 @@ function PortalFlow({ portal, scope, isScopeCurrent, onClose, onOpenRecords }: {
           currentUrl.current = state.url; setOrigin(allowed); setCanBack(state.canGoBack);
         }}
         onLoadStart={() => { stop(); setLoaded(false); }}
-        onLoad={() => setLoaded(!!schoolPortalOrigin(portal, currentUrl.current))}
-        onError={() => { stop(); setLoaded(false); setError('校方頁面未能載入。請檢查網路後重新載入，或改用檔案匯入。'); }}
-        onHttpError={() => { stop(); setLoaded(false); setError('校方頁面回傳錯誤，未進行匯入。'); }}
-        onContentProcessDidTerminate={() => { stop(); setLoaded(false); setError('校務瀏覽器已中斷，請重新載入入口。'); }}
-        onRenderProcessGone={() => { stop(); setLoaded(false); setError('校務瀏覽器已中斷，請重新載入入口。'); }}
+        onLoad={() => { setLoaded(!!schoolPortalOrigin(portal, currentUrl.current)); setBrowserError(''); }}
+        onError={() => { stop(); setLoaded(false); setBrowserError('校方頁面未能載入。請檢查網路後重新載入，或改用檔案匯入。'); }}
+        onHttpError={() => { stop(); setLoaded(false); setBrowserError('校方頁面回傳錯誤，未進行匯入。'); }}
+        onContentProcessDidTerminate={() => { stop(); setLoaded(false); setBrowserError('校務瀏覽器已中斷，請重新載入入口。'); }}
+        onRenderProcessGone={() => { stop(); setLoaded(false); setBrowserError('校務瀏覽器已中斷，請重新載入入口。'); }}
         onOpenWindow={(event) => {
+          if (stageRef.current !== 'browse' || !active()) return;
           const target = event.nativeEvent.targetUrl;
-          if (!schoolPortalOrigin(portal, target)) { setError('新視窗不屬於此校園，未開啟。'); return; }
+          if (!schoolPortalOrigin(portal, target)) { setBrowserError('新視窗不屬於此校園，未開啟。'); return; }
           stop(); setLoaded(false); currentUrl.current = target; setUrl(target);
         }}
-        onFileDownload={() => setError('此頁提供下載檔案，請使用系統瀏覽器下載後，改從檔案匯入。')}
+        onFileDownload={() => setBrowserError('此頁提供下載檔案，請使用系統瀏覽器下載後，改從檔案匯入。')}
         onMessage={(event) => receive(event.nativeEvent.url, event.nativeEvent.data)} />
-    </> : <ScrollView contentContainerStyle={{ padding: 20, gap: 14 }} keyboardShouldPersistTaps="handled">
+    </View> : null}
+    {stage !== 'browse' ? <ScrollView contentContainerStyle={{ padding: 20, gap: 14 }} keyboardShouldPersistTaps="handled">
       {stage === 'consent' ? <>
         <Text style={copy}>你會在校方網站登入。此匯入功能不擷取密碼欄位、Cookie 或網站儲存內容，只在你按下「讀取這頁表格」後帶出可見表格文字。</Text>
         <Text style={copy}>這是網頁輔助匯入，不是跨校自動登入或背景同步。網站若要求驗證碼、多因素驗證或不接受內嵌瀏覽器，請自行完成驗證或改用檔案匯入。</Text>
         <Text style={copy}>只匯入你有權使用的資料；讀取內容仍須核對，不會成為校方認證的修課或成績證明。</Text>
-        <Text style={copy}>此瀏覽器不與外部瀏覽器共用登入 Cookie；關閉流程會卸載頁面。不同手機的網站相容性仍需驗證。</Text>
+        <Text style={copy}>核對與連續匯入期間保留同一個校務瀏覽器，不與外部瀏覽器共用登入 Cookie；關閉、離開畫面或切換帳號／校園會卸載頁面。校方仍可能要求重新登入，不同手機的網站相容性仍需驗證。</Text>
         <Text style={copy}>{`校方網址：${portal.url}`}</Text>
         <Button text={kind === 'timetable' ? '已選課表' : '改為課表'} kind="outline" onPress={() => setKind('timetable')} />
         <Button text={kind === 'grades' ? '已選成績' : '改為成績'} kind="outline" onPress={() => setKind('grades')} />
@@ -261,12 +328,13 @@ function PortalFlow({ portal, scope, isScopeCurrent, onClose, onOpenRecords }: {
         <Text style={copy}>{`找到 ${selection.tables.length} 張表格。選擇本人的資料，接著核對欄位；目前尚未儲存。`}</Text>
         {selection.tables.map((table) => <Button key={table.id} text={table.label} kind="outline" onPress={() => {
           setText(table.text); setYear(table.suggestedTerm?.academicYear ?? ''); setSemester(table.suggestedTerm?.semester ?? '');
-          setRows([]); setError(''); setStage('review');
+          setRows([]); setIssues([]); setSelected(new Set()); setError(''); resumeStage.current = 'review'; moveTo('review');
         }} />)}
-        <Button text="返回校方入口重新讀取" kind="outline" onPress={resetBrowser} />
+        <Button text="返回校方頁面" kind="outline" onPress={returnToBrowser} />
       </> : null}
       {stage === 'review' ? <>
         <Text style={copy}>先確認學期及表格文字，再整理成預覽。修改文字後須重新整理；原有紀錄不會被覆蓋。</Text>
+        <Button text="回校方頁面核對" kind="outline" disabled={saving} onPress={returnToBrowser} />
         {field('學年度', year, setYear)}{field('學期', semester, setSemester)}
         {field('校務表格文字（可修正）', text, setText, true)}
         <Button text="整理並核對匯入內容" disabled={saving || !text.trim()} onPress={preview} />
@@ -283,20 +351,24 @@ function PortalFlow({ portal, scope, isScopeCurrent, onClose, onOpenRecords }: {
           {rows.length > visible ? <Button text={`再顯示 ${Math.min(20, rows.length - visible)} 筆`} onPress={() => setVisible((count) => count + 20)} /> : null}
           {errors.slice(0, 10).map((issue, index) => <Text key={index} accessibilityRole="alert" style={copy}>{issue.message}</Text>)}
           {errors.length > 10 ? <Text style={copy}>{`另有 ${errors.length - 10} 個問題，請修正表格後重新整理。`}</Text> : null}
-          <Button text={saving ? '正在儲存…' : `確認匯入 ${chosen.length} 筆`} disabled={saving || !chosen.length || !!errors.length} onPress={() => void save()} />
+          <Button text={saving ? '正在儲存…' : `確認匯入 ${chosen.length} 筆`} disabled={saving || confirmClose || !chosen.length || !!errors.length} onPress={() => void save()} />
         </> : null}
-        <Button text="重選表格" kind="outline" disabled={saving} onPress={() => { setRows([]); setError(''); setStage('choose'); }} />
+        <Button text="重選表格" kind="outline" disabled={saving} onPress={() => { setRows([]); setError(''); resumeStage.current = 'choose'; moveTo('choose'); }} />
       </> : null}
       {stage === 'done' && receipt ? <>
         <Text accessibilityRole="header" style={{ ...copy, fontSize: 20, fontWeight: '700' }}>{undone ? '已撤回這次新增資料' : '匯入完成'}</Text>
         <Text style={copy}>{undone ? '後續編輯的紀錄不會被撤回。' : `已新增 ${receipt.added} 筆，相同資料 ${receipt.duplicates} 筆未重複新增。`}</Text>
         <Text style={copy}>{scope.owner === 'guest:device' ? '儲存於這台裝置的訪客空間。' : '儲存於目前帳號與校園的個人匯入空間。'}已啟用的個人資料同步仍依原設定運作；未新增校務背景同步。</Text>
         <Button text="查看與編輯已匯入資料" disabled={saving} onPress={() => onOpenRecords(kind)} />
+        <Button text="繼續匯入其他學期" kind="outline" disabled={saving} onPress={() => continueImport(kind)} />
+        <Button text={kind === 'grades' ? '接著匯入課表' : '接著匯入成績'} kind="outline" disabled={saving}
+          onPress={() => continueImport(kind === 'grades' ? 'timetable' : 'grades')} />
+        <Text style={copy}>繼續匯入會保留目前校務網頁；請自行切換學期或頁面後再讀取。已儲存批次仍可到匯入紀錄管理。</Text>
         {receipt.batchId && !undone ? <>
           <Button text={confirmUndo ? '確認撤回這次匯入' : '撤回這次匯入'} kind="outline" disabled={saving} onPress={() => confirmUndo ? void undo() : setConfirmUndo(true)} />
           {confirmUndo ? <Button text="保留資料" kind="outline" disabled={saving} onPress={() => setConfirmUndo(false)} /> : null}
         </> : null}
       </> : null}
-    </ScrollView>}
+    </ScrollView> : null}
   </SafeAreaView>;
 }
