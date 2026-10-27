@@ -70,7 +70,7 @@ module.exports = onCall(
     const assignments = summarizeSettled(assignmentsResult, (items) => ({
       status: 'available',
       count: Array.isArray(items) ? items.length : 0,
-      items: (Array.isArray(items) ? items : []).slice(0, 3).map((item) => ({
+      items: (Array.isArray(items) ? items : []).slice(0, 8).map((item) => ({
         title: String(item.title || '').slice(0, 140),
         groupName: String(item.groupName || '').slice(0, 100),
         dueAt: toIso(item.dueAt),
@@ -79,7 +79,7 @@ module.exports = onCall(
 
     const announcements = summarizeSettled(announcementsResult, (items) => ({
       status: 'available',
-      items: (Array.isArray(items) ? items : []).slice(0, 3).map((item) => ({
+      items: (Array.isArray(items) ? items : []).slice(0, 8).map((item) => ({
         title: String(item.title || '').slice(0, 140),
         publishedAt: toIso(item.publishedAt),
       })),
