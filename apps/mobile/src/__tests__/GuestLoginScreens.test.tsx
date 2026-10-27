@@ -486,6 +486,27 @@ test('a campus without school login offers an import action in the native accoun
   expect(signInWithStudentId).not.toHaveBeenCalled();
 });
 
+test('teacher LMS outage tells the user teacher login is temporarily unavailable', async () => {
+  jest.mocked(signInWithStudentId).mockRejectedValueOnce(new Error('老師登入暫時無法使用'));
+  const view = render(<SSOLoginScreen />);
+  enterSchoolCredentials(view);
+  fireEvent.press(view.getByText('使用學號登入'));
+  await view.findByText('老師登入暫時無法使用');
+  expect(view.getByRole('alert')).toHaveTextContent('老師登入暫時無法使用');
+  expect(view.queryByText(/學校帳號登入未完成|請確認帳號密碼/)).toBeNull();
+});
+
+test('legacy teacher LMS copy still shows the current teacher-unavailable notice', async () => {
+  jest
+    .mocked(signInWithStudentId)
+    .mockRejectedValueOnce(new Error('老師登入暫未開放；學生請輸入純數字學號'));
+  const view = render(<SSOLoginScreen />);
+  enterSchoolCredentials(view);
+  fireEvent.press(view.getByText('使用學號登入'));
+  await view.findByText('老師登入暫時無法使用');
+  expect(view.queryByText(/暫未開放|純數字學號/)).toBeNull();
+});
+
 test('native school login failure clears the password and allows a fresh attempt', async () => {
   jest.mocked(signInWithStudentId).mockRejectedValueOnce(new Error('invalid credentials'));
   const view = render(<SSOLoginScreen />);
