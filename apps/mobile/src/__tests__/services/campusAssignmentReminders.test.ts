@@ -1,6 +1,9 @@
 import {
   scheduleCampusAssignmentReminder,
   cancelCampusAssignmentReminder,
+  getCampusAssignmentReminderStatus,
+  beginCampusAssignmentReminderSignOutCleanup,
+  endCampusAssignmentReminderSignOutCleanup,
   CAMPUS_AGENT_REMINDER_PREFIX,
 } from '../../services/campusAssignmentReminders';
 import type { CampusSenseSnapshot } from '../../services/campusSenseSnapshot';
@@ -27,6 +30,10 @@ const mockSetItem = jest.fn(async (key: string, value: string) => {
 const mockRemoveItem = jest.fn(async (key: string) => {
   mockReceipts.delete(key);
 });
+const mockGetAllKeys = jest.fn(async () => Array.from(mockReceipts.keys()));
+const mockMultiRemove = jest.fn(async (keys: string[]) => {
+  for (const key of keys) mockReceipts.delete(key);
+});
 const mockRequestPermission = jest.fn(async () => mockPermission);
 
 jest.mock('react-native', () => ({ Platform: { OS: 'ios' } }));
@@ -36,6 +43,8 @@ jest.mock('@react-native-async-storage/async-storage', () => ({
     getItem: (...args: unknown[]) => mockGetItem(...(args as [string])),
     setItem: (...args: unknown[]) => mockSetItem(...(args as [string, string])),
     removeItem: (...args: unknown[]) => mockRemoveItem(...(args as [string])),
+    getAllKeys: () => mockGetAllKeys(),
+    multiRemove: (...args: unknown[]) => mockMultiRemove(...(args as [string[]])),
   },
 }));
 jest.mock('expo-crypto', () => ({
@@ -271,5 +280,82 @@ test('an ambiguous native bridge rejection cancels the deterministic own slot', 
   });
   expect(mockCancel).toHaveBeenCalledTimes(1);
   expect(mockScheduled.size).toBe(0);
+  expect(mockReceipts.size).toBe(0);
+});
+
+
+test('reads OS-backed status after remount and never mistakes a stale receipt for an alarm', async () => {
+  const item = request();
+  await scheduleCampusAssignmentReminder(item);
+  const status = await getCampusAssignmentReminderStatus({
+    scope, step: item.step, isCurrent: () => true,
+  });
+  expect(status).toEqual([60]);
+  mockScheduled.clear(); // Simulates OS delivery or cancellation outside Campus One.
+  expect(await getCampusAssignmentReminderStatus({
+    scope, step: item.step, isCurrent: () => true,
+  })).toEqual([]);
+});
+
+test('cancel must see native disappearance before reporting success or discarding the receipt', async () => {
+  const item = request();
+  await scheduleCampusAssignmentReminder(item);
+  mockCancel.mockImplementationOnce(async () => { /* OS silently retained it */ });
+  await expect(cancelCampusAssignmentReminder({
+    scope, step: item.step, leadMinutes: 60, isCurrent: () => true,
+  })).rejects.toMatchObject({ code: 'native-failed' });
+  expect(mockScheduled.size).toBe(1);
+  expect(mockReceipts.size).toBe(1);
+});
+
+test('logout clears only Campus Agent OS alarms and fences scheduling until cleanup ends', async () => {
+  const first = request();
+  await scheduleCampusAssignmentReminder(first);
+  mockScheduled.set('another-feature.1', { identifier: 'another-feature.1', content: {} });
+  const cleanup = beginCampusAssignmentReminderSignOutCleanup();
+  try {
+    await expect(scheduleCampusAssignmentReminder(request())).rejects.toMatchObject({
+      code: 'session-changed',
+    });
+    await expect(cleanup).resolves.toBe(1);
+    expect(mockScheduled.size).toBe(1);
+    expect(mockScheduled.has('another-feature.1')).toBe(true);
+    expect(mockReceipts.size).toBe(0);
+    expect(mockMultiRemove).toHaveBeenCalledTimes(1);
+  } finally {
+    endCampusAssignmentReminderSignOutCleanup();
+  }
+});
+
+test('in-flight permission dialog cannot create an alarm after sign-out begins', async () => {
+  mockPermission = { granted: false, canAskAgain: true, status: 'undetermined' };
+  let resolvePermission!: (value: typeof mockPermission) => void;
+  mockRequestPermission.mockImplementationOnce(() =>
+    new Promise((resolve) => { resolvePermission = resolve; }));
+  const inFlight = scheduleCampusAssignmentReminder(request());
+  for (let i = 0; i < 100 && mockRequestPermission.mock.calls.length === 0; i += 1) {
+    await Promise.resolve();
+  }
+  expect(mockRequestPermission).toHaveBeenCalledTimes(1);
+  const cleanup = beginCampusAssignmentReminderSignOutCleanup();
+  try {
+    resolvePermission({ granted: true, canAskAgain: true, status: 'granted' });
+    await expect(inFlight).rejects.toMatchObject({ code: 'session-changed' });
+    await cleanup;
+    expect(mockScheduled.size).toBe(0);
+    expect(mockSchedule).not.toHaveBeenCalled();
+  } finally {
+    endCampusAssignmentReminderSignOutCleanup();
+  }
+});
+
+test('does not report native success if the scheduled alarm is not found during verification', async () => {
+  const first = request();
+  // Inventory read #1: before scheduling, #2: after scheduling.
+  mockGetAll.mockImplementationOnce(async () => []);
+  mockGetAll.mockImplementationOnce(async () => []);
+  await expect(scheduleCampusAssignmentReminder(first))
+    .rejects.toMatchObject({ code: 'native-failed' });
+  expect(mockCancel).toHaveBeenCalledTimes(1);
   expect(mockReceipts.size).toBe(0);
 });

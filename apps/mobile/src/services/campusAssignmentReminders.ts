@@ -35,6 +35,10 @@ type ReminderRecord = { version: 1; identifier: string; triggerAt: string };
 export const CAMPUS_AGENT_REMINDER_PREFIX = 'campus-agent.due.';
 export const CAMPUS_AGENT_REMINDER_BUDGET = 32;
 const pending = new Set<string>();
+// Sign-out fences work synchronously, before any asynchronous notification cleanup.
+// Every in-flight operation captures the epoch so it cannot finish after teardown.
+let reminderEpoch = 0;
+let reminderTeardownActive = false;
 
 export class CampusReminderError extends Error {
   constructor(
@@ -47,8 +51,11 @@ export class CampusReminderError extends Error {
   }
 }
 
-function checkAccount(scope: CampusReminderScope, isCurrent: () => boolean) {
-  if (!isCurrent() || isFirebaseMockMode() || !scope.uid || !scope.schoolId ||
+function checkAccount(
+  scope: CampusReminderScope, isCurrent: () => boolean, expectedEpoch = reminderEpoch,
+) {
+  if (reminderTeardownActive || expectedEpoch !== reminderEpoch ||
+      !isCurrent() || isFirebaseMockMode() || !scope.uid || !scope.schoolId ||
       getAuthInstance().currentUser?.uid !== scope.uid) {
     throw new CampusReminderError('session-changed');
   }
@@ -61,8 +68,9 @@ function normalizeTitle(value: string): string {
 function validateAssignment(
   req: CampusReminderRequest,
   now: number,
+  expectedEpoch = reminderEpoch,
 ): { dueAt: string; triggerAt: number; title: string; groupName: string } {
-  checkAccount(req.scope, req.isCurrent);
+  checkAccount(req.scope, req.isCurrent, expectedEpoch);
   if (req.leadMinutes !== 60 && req.leadMinutes !== 1440 ||
       req.step.evidence !== 'authorized-assignments' || req.step.route !== '/classroom' ||
       !req.step.dueAt || !req.step.title) {
@@ -160,21 +168,22 @@ export async function scheduleCampusAssignmentReminder(
   const lock = busyKey(input);
   if (pending.has(lock)) throw new CampusReminderError('busy');
   pending.add(lock);
+  const epoch = reminderEpoch;
   try {
     const now = Date.now();
-    const source = validateAssignment(input, now);
+    const source = validateAssignment(input, now, epoch);
     if (!supportsLocalNotification()) throw new CampusReminderError('unsupported');
     const key = await reminderKey(input.scope, {
       title: source.title, groupName: source.groupName, dueAt: source.dueAt,
     }, input.leadMinutes);
-    checkAccount(input.scope, input.isCurrent);
+    checkAccount(input.scope, input.isCurrent, epoch);
     // Reject a source that elapsed while native modules were initializing.
-    validateAssignment(input, Date.now());
+    validateAssignment(input, Date.now(), epoch);
 
     const previous = await readRecord(key.storageKey);
     const inventory = await scheduledInventory();
-    checkAccount(input.scope, input.isCurrent);
-    validateAssignment(input, Date.now());
+    checkAccount(input.scope, input.isCurrent, epoch);
+    validateAssignment(input, Date.now(), epoch);
 
     if (inventory.some((item) => item.identifier === key.identifier)) {
       if (previous && previous.identifier !== key.identifier) throw new CampusReminderError('native-failed');
@@ -183,6 +192,7 @@ export async function scheduleCampusAssignmentReminder(
           version: 1, identifier: key.identifier, triggerAt: new Date(source.triggerAt).toISOString(),
         } satisfies ReminderRecord)).catch(() => { throw new CampusReminderError('native-failed'); });
       }
+      checkAccount(input.scope, input.isCurrent, epoch);
       return { outcome: 'already-scheduled', triggerAt: new Date(source.triggerAt).toISOString() };
     }
     if (inventory.length >= CAMPUS_AGENT_REMINDER_BUDGET) {
@@ -196,13 +206,13 @@ export async function scheduleCampusAssignmentReminder(
         importance: Notifications.AndroidImportance.DEFAULT,
       });
     }
-    checkAccount(input.scope, input.isCurrent);
+    checkAccount(input.scope, input.isCurrent, epoch);
     let permission = await Notifications.getPermissionsAsync();
     if (!permission.granted && permission.canAskAgain) {
       permission = await Notifications.requestPermissionsAsync();
     }
-    checkAccount(input.scope, input.isCurrent);
-    validateAssignment(input, Date.now());
+    checkAccount(input.scope, input.isCurrent, epoch);
+    validateAssignment(input, Date.now(), epoch);
     if (!permission.granted) throw new CampusReminderError('permission-required');
 
     let scheduleAttempted = false;
@@ -225,14 +235,18 @@ export async function scheduleCampusAssignmentReminder(
         },
       });
       if (returnedId !== key.identifier) throw new CampusReminderError('native-failed');
-      checkAccount(input.scope, input.isCurrent);
-      validateAssignment(input, Date.now());
+      const nativeInventory = await scheduledInventory();
+      if (!nativeInventory.some((row) => row.identifier === key.identifier)) {
+        throw new CampusReminderError('native-failed');
+      }
+      checkAccount(input.scope, input.isCurrent, epoch);
+      validateAssignment(input, Date.now(), epoch);
       await AsyncStorage.setItem(key.storageKey, JSON.stringify({
         version: 1,
         identifier: key.identifier,
         triggerAt: new Date(source.triggerAt).toISOString(),
       } satisfies ReminderRecord));
-      checkAccount(input.scope, input.isCurrent);
+      checkAccount(input.scope, input.isCurrent, epoch);
       return { outcome: 'scheduled', triggerAt: new Date(source.triggerAt).toISOString() };
     } catch (error) {
       // Transaction-like rollback: never report success if the device or receipt fails.
@@ -250,6 +264,74 @@ export async function scheduleCampusAssignmentReminder(
   }
 }
 
+/**
+ * A read-only, native-backed status check. Never mistake a persisted receipt for
+ * an OS-scheduled reminder. A restarted UI can recover pending alarms.
+ */
+export async function getCampusAssignmentReminderStatus(input: {
+  scope: CampusReminderScope;
+  step: CampusPlanStep;
+  isCurrent: () => boolean;
+}): Promise<CampusReminderLead[]> {
+  const epoch = reminderEpoch;
+  checkAccount(input.scope, input.isCurrent, epoch);
+  if (!input.step.dueAt || !input.step.title ||
+      input.step.evidence !== 'authorized-assignments' || input.step.route !== '/classroom') {
+    return [];
+  }
+  const keys = await Promise.all(([60, 1440] as const).map((lead) =>
+    reminderKey(input.scope, input.step, lead)));
+  checkAccount(input.scope, input.isCurrent, epoch);
+  const inventory = await scheduledInventory();
+  checkAccount(input.scope, input.isCurrent, epoch);
+  const ids = new Set(inventory.map((item) => item.identifier));
+  // Any legacy receipt with no corresponding OS alarm is obsolete.
+  return ([60, 1440] as const).filter((_, i) => ids.has(keys[i].identifier));
+}
+
+/**
+ * Called synchronously when the user starts a confirmed sign-out. Only the
+ * Campus Agent reminder namespace is touched, never other local notifications.
+ * The epoch fences pending schedule/cancel work, which then self-rollback.
+ */
+export function beginCampusAssignmentReminderSignOutCleanup(): Promise<number> {
+  reminderTeardownActive = true;
+  reminderEpoch += 1;
+  return (async () => {
+    if (!supportsLocalNotification()) return 0;
+    const initial = await scheduledInventory();
+    const ours = initial.filter((item) =>
+      item.identifier.startsWith(CAMPUS_AGENT_REMINDER_PREFIX));
+    const outcomes = await Promise.allSettled(ours.map((item) =>
+      Notifications.cancelScheduledNotificationAsync(item.identifier)));
+    if (outcomes.some((result) => result.status === 'rejected')) {
+      throw new CampusReminderError('native-failed');
+    }
+    const remaining = await scheduledInventory();
+    if (remaining.some((item) =>
+      item.identifier.startsWith(CAMPUS_AGENT_REMINDER_PREFIX))) {
+      throw new CampusReminderError('native-failed');
+    }
+    // Past hashed receipt keys contain no user info and are never used as proof
+    // of scheduling. Best-effort deletion avoids retaining stale local state.
+    const keys = await AsyncStorage.getAllKeys().catch(() => [] as string[]);
+    const receiptKeys = keys.filter((key) =>
+      key.startsWith('@campus-agent-due-reminder:v1:'));
+    if (receiptKeys.length) {
+      await AsyncStorage.multiRemove(receiptKeys).catch(() => {
+        throw new CampusReminderError('native-failed');
+      });
+    }
+    return ours.length;
+  })();
+}
+
+/** Release the fence only after the sign-out handler finishes (or fails). */
+export function endCampusAssignmentReminderSignOutCleanup(): void {
+  reminderEpoch += 1;
+  reminderTeardownActive = false;
+}
+
 /** Only remove an alarm for the signed-in owner. This cannot touch other features. */
 export async function cancelCampusAssignmentReminder(input: {
   scope: CampusReminderScope;
@@ -257,7 +339,8 @@ export async function cancelCampusAssignmentReminder(input: {
   leadMinutes: CampusReminderLead;
   isCurrent: () => boolean;
 }): Promise<boolean> {
-  checkAccount(input.scope, input.isCurrent);
+  const epoch = reminderEpoch;
+  checkAccount(input.scope, input.isCurrent, epoch);
   if (input.step.evidence !== 'authorized-assignments' || !input.step.dueAt) {
     throw new CampusReminderError('invalid-source');
   }
@@ -266,14 +349,21 @@ export async function cancelCampusAssignmentReminder(input: {
   pending.add(lock);
   try {
     const key = await reminderKey(input.scope, input.step, input.leadMinutes);
-    checkAccount(input.scope, input.isCurrent);
+    checkAccount(input.scope, input.isCurrent, epoch);
     const record = await readRecord(key.storageKey);
     const inventory = await scheduledInventory();
-    checkAccount(input.scope, input.isCurrent);
+    checkAccount(input.scope, input.isCurrent, epoch);
     if (record && record.identifier !== key.identifier) throw new CampusReminderError('native-failed');
     const exists = inventory.some((row) => row.identifier === key.identifier);
-    if (exists) await Notifications.cancelScheduledNotificationAsync(key.identifier);
-    checkAccount(input.scope, input.isCurrent);
+    if (exists) {
+      await Notifications.cancelScheduledNotificationAsync(key.identifier);
+      // An API resolve is not proof that the alarm disappeared.
+      const afterCancel = await scheduledInventory();
+      if (afterCancel.some((row) => row.identifier === key.identifier)) {
+        throw new CampusReminderError('native-failed');
+      }
+    }
+    checkAccount(input.scope, input.isCurrent, epoch);
     if (record) await AsyncStorage.removeItem(key.storageKey);
     return exists;
   } catch (error) {
