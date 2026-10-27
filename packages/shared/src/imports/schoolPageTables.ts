@@ -81,6 +81,7 @@ function tableRows(table: string): string[][] {
     throw new SchoolPageImportError('學校網頁表格超過 1,200 列，請改存成 CSV，或分批匯入。');
   }
   for (const tr of trs) {
+    if (isHidden(tr.slice(0, tr.indexOf('>') + 1))) continue;
     const columns: (string | undefined)[] = [];
     for (const [column, carry] of carries) {
       columns[column] = carry.text;
@@ -241,9 +242,22 @@ export function extractSchoolPageTables(
     throw new SchoolPageImportError('沒有找到網頁表格。請在校務網站開啟課表或成績列表，再儲存頁面。');
   const cleaned = markup.replace(/<!--[\s\S]*?-->/g, '')
     .replace(/<(script|style|noscript|template|svg|iframe)\b[^>]*>[\s\S]*?<\/\1\s*>/gi, '');
-  const all = cleaned.match(/<table\b[^>]*>[\s\S]*?<\/table\s*>/gi) ?? [];
-  if (all.length > MAX_TABLES)
-    throw new SchoolPageImportError('這個頁面包含太多表格，請只複製要匯入的表格。');
+  // Nested layout tables are common in school portals: keep every complete
+  // innermost table instead of pairing an outer <table> with the first </table>.
+  const all: string[] = [];
+  const starts: number[] = [];
+  for (const tag of cleaned.matchAll(/<\/?table\b[^>]*>/gi)) {
+    if (!tag[0].startsWith('</')) {
+      starts.push(tag.index ?? 0);
+    } else if (starts.length) {
+      const start = starts.pop()!;
+      const matched = cleaned.slice(start, (tag.index ?? 0) + tag[0].length);
+      const firstClose = matched.indexOf('>') + 1;
+      if (!/<table\b/i.test(matched.slice(firstClose))) all.push(matched);
+      if (all.length > MAX_TABLES)
+        throw new SchoolPageImportError('這個頁面包含太多表格，請只複製要匯入的表格。');
+    }
+  }
   const found: SchoolPageTable[] = [];
   all.forEach((table, index) => {
     const rows = tableRows(table);
