@@ -13,6 +13,9 @@
 !packages/
 !packages/shared/
 !packages/shared/**
+!scripts/
+!scripts/import-ai/
+!scripts/import-ai/**
 !deploy/
 !deploy/web/
 !deploy/web/start.cjs

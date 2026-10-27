@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { useOptionalSelectedSchool } from '@/components/SelectedSchoolProvider';
 import {
   createPersonalImportId,
@@ -39,6 +39,8 @@ import {
   type PersonalImportDocument,
 } from '@campus/shared';
 import { createNuniClasses, type NuniWorkspace } from '@campus/shared/src/nuni';
+import { buildSchoolPageCaptureBookmarklet } from '@campus/shared/src/imports/schoolPageCapture';
+import { personalImportDocumentAiSource } from '@campus/shared/src/imports/aiRecognition';
 import { browserRequest, useOptionalNuniSession } from '@/features/nuni/Session';
 import {
   changePersonalImport,
@@ -57,6 +59,11 @@ import {
 } from '@/lib/personalImportDrafts';
 import { recognizePersonalImportImage } from '@/lib/personalImportOcr';
 import { createPersonalImportImagePreview } from '@/lib/personalImportImagePreview';
+import {
+  deletePersonalImportAiModelCache,
+  getPersonalImportAiAvailability,
+  runPersonalImportAi,
+} from '@/lib/personalImportAi';
 import styles from './PersonalImport.module.css';
 import { CourseAccessPanel } from './CourseAccessPanel';
 import { DocumentSelection } from './DocumentSelection';
@@ -74,6 +81,13 @@ const EXAMPLES: Record<PersonalImportKind, string> = {
   events: '活動名稱,日期,開始時間,結束時間,地點\n期中考,2026-11-05,10:00,12:00,主顧303',
 };
 const REVIEW_PAGE_SIZE = 25;
+const SCHOOL_CAPTURE_BOOKMARK = buildSchoolPageCaptureBookmarklet();
+const subscribeClient = () => () => {};
+type AiImportRequest = {
+  input: { text?: string; image?: File };
+  source: Pick<PersonalImportSource, 'type' | 'name'>;
+  fromDocument?: boolean;
+};
 function errorMessage(error: unknown, fallback = '這次沒有完成，草稿仍保留，請再試一次。') {
   return personalImportErrorMessage(error, fallback);
 }
@@ -102,21 +116,26 @@ function RowFields({
   workspaces,
   periodProfile,
   onRefreshWorkspaces,
+  aiSource = false,
 }: {
   row: PersonalImportRow;
   onChange: (row: PersonalImportRow) => void;
   workspaces: NuniWorkspace[];
   periodProfile?: PeriodProfileId;
   onRefreshWorkspaces?: () => void;
+  aiSource?: boolean;
 }) {
   const update = (field: keyof PersonalImportRow, value: string | number | boolean | undefined) =>
     onChange({ ...row, [field]: value });
   const issues = validatePersonalImportRow(row, { periodProfile });
+  const invalid = (name: keyof PersonalImportRow) =>
+    issues.some((issue) => issue.severity === 'error' && issue.field === name);
   const field = (name: keyof PersonalImportRow, label: string, type = 'text') => (
     <label className={styles.field}>
       {label}
       <input
         type={type}
+        aria-invalid={invalid(name) || undefined}
         value={String(row[name] ?? '')}
         maxLength={name === 'title' ? 200 : 300}
         onChange={(event) =>
@@ -134,6 +153,7 @@ function RowFields({
       {label}
       <input
         type="number"
+        aria-invalid={invalid(name) || undefined}
         min={name === 'credits' ? 0 : 1}
         max={max}
         step={name === 'credits' ? '0.5' : '1'}
@@ -159,6 +179,7 @@ function RowFields({
             <label className={styles.field}>
               星期
               <select
+                aria-invalid={invalid('dayOfWeek') || undefined}
                 value={row.dayOfWeek ?? ''}
                 onChange={(event) =>
                   update('dayOfWeek', event.target.value ? Number(event.target.value) : undefined)
@@ -177,6 +198,7 @@ function RowFields({
                   <label className={styles.field} key={name}>
                     {name === 'startPeriod' ? '開始節次' : '結束節次'}
                     <select
+                      aria-invalid={invalid(name as 'startPeriod' | 'endPeriod') || undefined}
                       value={row[name as 'startPeriod' | 'endPeriod'] ?? ''}
                       onChange={(event) =>
                         update(
@@ -320,7 +342,7 @@ function RowFields({
         </ul>
       )}
       <details className={styles.source}>
-        <summary>核對原始文字</summary>
+        <summary>{aiSource ? 'AI 辨讀的來源片段（請與原檔核對）' : '核對原始文字'}</summary>
         <pre>{row.source.rawText || '這筆是手動新增的資料。'}</pre>
       </details>
     </>
@@ -383,11 +405,35 @@ function ImportWorkspace({
   const [backup, setBackup] = useState<Omit<PersonalImportBackupPreview, 'rows'> | null>(null);
   const [importDocument, setDocument] = useState<PersonalImportDocument | null>(null);
   const [hasDocumentFile, setHasDocumentFile] = useState(false);
-  const [schoolPage, setSchoolPage] = useState<{ name: string; tables: SchoolPageTable[] } | null>(null);
+  const [schoolPage, setSchoolPage] = useState<{ name: string; tables: SchoolPageTable[] } | null>(
+    null,
+  );
   const [documentSelection, setDocumentSelection] =
     useState<PersonalImportDraft['documentSelection']>(null);
   const [documentVersion, setDocumentVersion] = useState(0);
   const [reviewPage, setReviewPage] = useState(0);
+  // Hold the chosen issue list while a field is being fixed, so typing never
+  // removes the focused row. Switching filters refreshes the list.
+  const [reviewIssueIds, setReviewIssueIds] = useState<string[] | null>(null);
+  const [pasteOpen, setPasteOpen] = useState(false);
+  const [captureCopyStatus, setCaptureCopyStatus] = useState('');
+  const [captureManualCopy, setCaptureManualCopy] = useState(false);
+  const [aiReviewed, setAiReviewed] = useState(false);
+  const [pendingAi, setPendingAi] = useState<AiImportRequest | null>(null);
+  const [removingAiModel, setRemovingAiModel] = useState(false);
+  const clientReady = useSyncExternalStore(
+    subscribeClient,
+    () => true,
+    () => false,
+  );
+  const aiAvailability = clientReady
+    ? getPersonalImportAiAvailability()
+    : {
+        available: false,
+        reason: '正在檢查這台裝置…',
+        downloadLabel: '',
+      };
+  const [sourceImage, setSourceImage] = useState<File | null>(null);
   const [excluded, setExcluded] = useState<string[]>([]);
   const [parseIssues, setParseIssues] = useState<ImportIssue[]>([]);
   const [notice, setNotice] = useState('');
@@ -415,9 +461,13 @@ function ImportWorkspace({
   const previewUrl = useRef('');
   const writing = useRef(false);
   const fileInput = useRef<HTMLInputElement>(null);
+  const aiImageInput = useRef<HTMLInputElement>(null);
+  const originalText = useRef<HTMLTextAreaElement>(null);
+  const reviewRows = useRef(new Map<string, HTMLElement>());
   const pdfInput = useRef<HTMLInputElement>(null);
   const review = useRef<HTMLElement>(null);
   const undoKeep = useRef<HTMLButtonElement>(null);
+  const keepAiDraft = useRef<HTMLButtonElement>(null);
   const setPreview = (url: string) => {
     if (previewUrl.current === url) return;
     if (previewUrl.current) URL.revokeObjectURL(previewUrl.current);
@@ -427,6 +477,9 @@ function ImportWorkspace({
   useEffect(() => {
     if (undoOpen) undoKeep.current?.focus();
   }, [undoOpen]);
+  useEffect(() => {
+    if (pendingAi) keepAiDraft.current?.focus();
+  }, [pendingAi]);
   useEffect(() => {
     const value = new URLSearchParams(window.location.search).get('kind');
     if (KINDS.some((entry) => entry.value === value)) setKind(value as PersonalImportKind);
@@ -566,6 +619,8 @@ function ImportWorkspace({
     term?: { academicYear: string; semester: string },
   ) => {
     setSchoolPage(null);
+    setReviewIssueIds(null);
+    setAiReviewed(false);
     const parsed = parsePersonalImport(input, { ...options, source: inputSource, ...(term ?? {}) });
     setRows(parsed.rows);
     setBackup(null);
@@ -594,12 +649,13 @@ function ImportWorkspace({
     );
   };
   const updateDraft = (before: PersonalImportRow, next: PersonalImportRow) => {
+    setAiReviewed(false);
     setRows((current) => current.map((item) => (item.id === next.id ? next : item)));
     setParseIssues((current) =>
       current.filter(
         (issue) =>
           !(
-            issue.code === 'unrecognized-field' &&
+            ['unrecognized-field', 'ai-uncertain-field'].includes(issue.code) &&
             issue.rowId === next.id &&
             issue.field &&
             before[issue.field] !== next[issue.field] &&
@@ -609,6 +665,140 @@ function ImportWorkspace({
           ),
       ),
     );
+  };
+  const copySchoolCaptureTool = async () => {
+    try {
+      if (!navigator.clipboard?.writeText) throw new Error('clipboard unavailable');
+      await navigator.clipboard.writeText(SCHOOL_CAPTURE_BOOKMARK);
+      if (active.current && !suspended.current)
+        setCaptureCopyStatus('工具網址已複製。請新增一個書籤，將網址替換成剛剛複製的內容。');
+    } catch {
+      if (active.current && !suspended.current) {
+        setCaptureManualCopy(true);
+        setCaptureCopyStatus(
+          '瀏覽器未能自動複製，請全選下方工具網址並複製，再貼到新書籤的網址欄。',
+        );
+      }
+    }
+  };
+  const removeAiModel = async () => {
+    if (reading || saving || removingAiModel || suspended.current) return;
+    setRemovingAiModel(true);
+    try {
+      await deletePersonalImportAiModelCache();
+      if (active.current && !suspended.current)
+        setNotice('已移除本瀏覽器的辨識模型快取，下次使用會重新下載。');
+    } catch (error) {
+      if (active.current && !suspended.current)
+        setNotice(errorMessage(error, '辨識模型快取尚未移除，請稍後再試。'));
+    } finally {
+      if (active.current) setRemovingAiModel(false);
+    }
+  };
+  const processAi = async (request: AiImportRequest) => {
+    if (
+      suspended.current ||
+      reading ||
+      saving ||
+      removingAiModel ||
+      (importDocument && !request.fromDocument) ||
+      !aiAvailability.available
+    )
+      return;
+    if (!request.input.image && !request.input.text?.trim()) return;
+    const controller = new AbortController();
+    job.current?.abort();
+    job.current = controller;
+    setPendingAi(null);
+    setReading(true);
+    setProgress('正在準備免費裝置端 AI…');
+    setNotice('');
+    const currentRead = () =>
+      active.current &&
+      !suspended.current &&
+      !controller.signal.aborted &&
+      job.current === controller;
+    let preparedPreview = '';
+    try {
+      if (request.input.image) {
+        const png = await createPersonalImportImagePreview(request.input.image, controller.signal);
+        if (!currentRead()) return;
+        preparedPreview = URL.createObjectURL(png);
+      }
+      const result = await runPersonalImportAi({
+        input: request.input,
+        options: { ...options, source: request.source },
+        signal: controller.signal,
+        onProgress: (message) => {
+          if (currentRead()) setProgress(message);
+        },
+      });
+      if (!currentRead()) return;
+      if (!result.rows.length) {
+        setNotice(
+          'AI 沒有整理出可核對的資料，原本的草稿仍保留。請試著裁切到表格，或貼上學校的表格文字。',
+        );
+        return;
+      }
+      setRows(result.rows);
+      setParseIssues(
+        result.issues.filter(
+          (issue) =>
+            issue.severity !== 'error' ||
+            !result.rows.some(
+              (row) =>
+                row.id === issue.rowId &&
+                validatePersonalImportRow(row, { periodProfile }).some(
+                  (validation) =>
+                    validation.code === issue.code && validation.field === issue.field,
+                ),
+            ),
+        ),
+      );
+      setBackup(null);
+      setSchoolPage(null);
+      setReviewPage(0);
+      setReviewIssueIds(null);
+      setExcluded([]);
+      setAiReviewed(false);
+      setText(request.input.text ?? '');
+      setSource(request.source);
+      if (request.fromDocument) {
+        documentFile.current = null;
+        setHasDocumentFile(false);
+        setDocument(null);
+        setDocumentSelection(null);
+        setSourceImage(null);
+        setPreview('');
+      }
+      if (request.input.image) {
+        setSourceImage(request.input.image);
+        setPreview(preparedPreview);
+        preparedPreview = '';
+      }
+      setNotice(
+        `AI 已整理 ${result.rows.length} 筆草稿。請對照來源，核對課名、日期、時間及數字，再確認匯入。`,
+      );
+      requestAnimationFrame(() =>
+        review.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }),
+      );
+    } catch (error) {
+      if (currentRead())
+        setNotice(errorMessage(error, 'AI 這次沒有完成，原本的草稿仍保留。可重試或使用一般讀取。'));
+    } finally {
+      if (preparedPreview) URL.revokeObjectURL(preparedPreview);
+      if (active.current && job.current === controller) {
+        setReading(false);
+        setProgress('');
+        job.current = null;
+      }
+    }
+  };
+  const requestAi = (request: AiImportRequest) => {
+    if (reading || saving || removingAiModel || suspended.current || !aiAvailability.available)
+      return;
+    if (rows.length) setPendingAi(request);
+    else void processAi(request);
   };
   const readFile = async (file?: File, pdfMode?: 'ocr') => {
     if (!file || suspended.current || reading || saving || rows.length) return;
@@ -629,15 +819,25 @@ function ImportWorkspace({
       pendingPreview = '';
     };
     const currentRead = () =>
-      active.current && !suspended.current && !controller.signal.aborted && job.current === controller;
+      active.current &&
+      !suspended.current &&
+      !controller.signal.aborted &&
+      job.current === controller;
     controller.signal.addEventListener('abort', discardPendingPreview, { once: true });
     try {
       if (/\.html?$/i.test(file.name)) {
-        if (file.size > 512_000) throw new Error('學校網頁存檔超過 500 KB，請只複製課表或成績表格。');
+        if (file.size > 512_000)
+          throw new Error('學校網頁存檔超過 500 KB，請只複製課表或成績表格。');
         const tables = extractSchoolPageTables(await file.text(), kind, periodProfile);
         if (!currentRead()) return;
+        setSourceImage(null);
+        setPreview('');
         setSchoolPage({ name: file.name, tables });
-        setNotice('已辨識 ' + tables.length + ' 張符合目前資料類型的表格。請選擇要讀取的資料，不會直接儲存。');
+        setNotice(
+          '已辨識 ' +
+            tables.length +
+            ' 張符合目前資料類型的表格。請選擇要讀取的資料，不會直接儲存。',
+        );
         return;
       }
       if (/\.(pdf|xlsx)$/i.test(file.name)) {
@@ -648,6 +848,8 @@ function ImportWorkspace({
         );
         const document = await readPersonalImportDocumentFile(file, controller.signal, { pdfMode });
         if (!active.current || suspended.current || controller.signal.aborted) return;
+        setSourceImage(null);
+        setPreview('');
         documentFile.current = file;
         setHasDocumentFile(true);
         setDocument(document);
@@ -671,6 +873,7 @@ function ImportWorkspace({
         setParseIssues([]);
         setText('');
         setPreview('');
+        setSourceImage(null);
         setSource({ type: 'paste' });
         setNotice(
           restoredRows.length
@@ -706,6 +909,8 @@ function ImportWorkspace({
         discardPendingPreview();
         return;
       }
+      setSourceImage(image ? file : null);
+      if (!image) setPreview('');
       setText(input);
       setSource(nextSource);
       parse(input, nextSource);
@@ -727,6 +932,10 @@ function ImportWorkspace({
   const discardDraft = () => {
     try {
       clearPersonalImportDraft(scope);
+      setSourceImage(null);
+      setReviewIssueIds(null);
+      setAiReviewed(false);
+      setPendingAi(null);
       setRows([]);
       setText('');
       setSource({ type: 'paste' });
@@ -754,14 +963,57 @@ function ImportWorkspace({
       ),
     ),
     ...parseIssues.filter(
-      (issue) => !issue.rowId || selected.some((row) => row.id === issue.rowId),
+      (issue) =>
+        issue.severity === 'error' &&
+        (!issue.rowId || selected.some((row) => row.id === issue.rowId)),
     ),
   ];
   const invalidLinks = selected.some(
     (row) => row.linkedCourseId && !workspaces.some((item) => item.id === row.linkedCourseId),
   );
+  const aiNeedsReview = parseIssues.some(
+    (issue) =>
+      issue.code === 'ai-review-required' &&
+      (!issue.rowId || selected.some((row) => row.id === issue.rowId)),
+  );
+  const invalidRowIds = rows
+    .filter(
+      (row) =>
+        validatePersonalImportRow(row, { periodProfile }).some(
+          (issue) => issue.severity === 'error',
+        ) ||
+        parseIssues.some((issue) => issue.severity === 'error' && issue.rowId === row.id) ||
+        (row.linkedCourseId && !workspaces.some((item) => item.id === row.linkedCourseId)),
+    )
+    .map((row) => row.id);
+  const filteredRows = reviewIssueIds
+    ? rows.filter((row) => reviewIssueIds.includes(row.id))
+    : rows;
+  const currentReviewPage = Math.min(
+    reviewPage,
+    Math.max(0, Math.ceil(filteredRows.length / REVIEW_PAGE_SIZE) - 1),
+  );
+  const focusFirstIssue = () => {
+    setReviewIssueIds(invalidRowIds);
+    setReviewPage(0);
+    requestAnimationFrame(() => {
+      const row = reviewRows.current.get(invalidRowIds[0]);
+      row?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      (row?.querySelector('[aria-invalid="true"]') as HTMLElement | null)?.focus();
+      if (!row?.querySelector('[aria-invalid="true"]')) row?.focus();
+    });
+  };
   const save = async () => {
-    if (writing.current || !selected.length || errors.length || invalidLinks) return;
+    if (
+      reading ||
+      suspended.current ||
+      writing.current ||
+      !selected.length ||
+      errors.length ||
+      invalidLinks ||
+      (aiNeedsReview && !aiReviewed)
+    )
+      return;
     writing.current = true;
     setSaving(true);
     try {
@@ -793,6 +1045,9 @@ function ImportWorkspace({
       setText('');
       setSource({ type: 'paste' });
       setPreview('');
+      setSourceImage(null);
+      setReviewIssueIds(null);
+      setAiReviewed(false);
     } catch (error) {
       if (active.current) setNotice(errorMessage(error));
     } finally {
@@ -854,17 +1109,13 @@ function ImportWorkspace({
   );
   return (
     <div className={styles.root}>
-      <nav className={styles.nav} aria-label="個人資料">
-        <Link href="/timetable">我的課表</Link>
-        <Link href="/grades">成績紀錄</Link>
-        <Link href="/calendar">個人行事曆</Link>
-        <Link href="/classroom">課程空間</Link>
-      </nav>
       <section className={styles.intro}>
         <div>
-          <p className={styles.eyebrow}>自行匯入</p>
-          <h2>匯入課表、成績或活動</h2>
-          <p>選擇截圖或檔案，也可以貼上文字。核對課名、日期與成績後，再加入個人紀錄。</p>
+          <p className={styles.eyebrow}>你的校園資料，一次整理</p>
+          <h2>把課表與紀錄帶進來</h2>
+          <p>
+            貼上學校表格、選擇檔案，或讓裝置端 AI 讀取截圖。先看清楚，再加入你的課表、成績與行事曆。
+          </p>
         </div>
         <p className={styles.storage}>
           {schoolName}
@@ -874,7 +1125,27 @@ function ImportWorkspace({
           <small>同步狀態見下方。清除瀏覽器資料前，請先確認已同步或下載完整備份。</small>
         </p>
       </section>
-      <PersonalImportSyncPanel scope={scope} available={!paused && !saving} />
+      <ol className={styles.steps} aria-label="匯入進度">
+        {['帶入資料', '核對與修正', '保存紀錄'].map((label, index) => {
+          const current = rows.length
+            ? 1
+            : reading || text || importDocument || schoolPage
+              ? 0
+              : lastBatch
+                ? 2
+                : 0;
+          return (
+            <li
+              key={label}
+              aria-current={index === current ? 'step' : undefined}
+              data-complete={index < current}
+            >
+              <span>{index + 1}</span>
+              <strong>{label}</strong>
+            </li>
+          );
+        })}
+      </ol>
       <div className={styles.kinds} role="group" aria-label="選擇匯入內容">
         {KINDS.map((item) => (
           <button
@@ -889,6 +1160,10 @@ function ImportWorkspace({
               setPreview('');
               setSource({ type: 'paste' });
               setSchoolPage(null);
+              setSourceImage(null);
+              setPendingAi(null);
+              setReviewIssueIds(null);
+              setAiReviewed(false);
             }}
           >
             <strong>{item.title}</strong>
@@ -949,6 +1224,137 @@ function ImportWorkspace({
           </h2>
           <small>原始截圖與文件只在這台裝置讀取</small>
         </div>
+        <div className={styles.sourceChoices} role="group" aria-label="選擇匯入方式">
+          <button
+            type="button"
+            className={styles.sourceChoice}
+            disabled={reading || saving || rows.length > 0 || !!importDocument}
+            onClick={() => {
+              setPasteOpen(true);
+              requestAnimationFrame(() => originalText.current?.focus());
+            }}
+          >
+            <span className={styles.sourceNumber}>01</span>
+            <strong>學校網頁表格</strong>
+            <span>登入自己的校務系統，複製課表或成績表格。</span>
+            <small>保留欄位，適合已有電子資料</small>
+          </button>
+          <button
+            type="button"
+            className={styles.sourceChoice}
+            disabled={
+              reading ||
+              saving ||
+              removingAiModel ||
+              rows.length > 0 ||
+              !!importDocument ||
+              !aiAvailability.available
+            }
+            onClick={() => aiImageInput.current?.click()}
+            aria-describedby="import-ai-download-note"
+          >
+            <span className={styles.sourceNumber}>02</span>
+            <strong>AI 讀取截圖</strong>
+            <span>讓本機視覺模型讀取課表、成績或活動圖片。</span>
+            <small>免費 · 首次需下載模型</small>
+          </button>
+          <button
+            type="button"
+            className={styles.sourceChoice}
+            disabled={reading || saving || rows.length > 0 || !!importDocument}
+            onClick={() => fileInput.current?.click()}
+          >
+            <span className={styles.sourceNumber}>03</span>
+            <strong>檔案與備份</strong>
+            <span>讀取 PDF、試算表、行事曆，或還原備份。</span>
+            <small>也能一般讀取截圖，不下載 AI 模型</small>
+          </button>
+        </div>
+        <p id="import-ai-download-note" className={styles.note}>
+          {aiAvailability.available
+            ? `AI 在這台裝置執行，不需 API 金鑰。首次下載${aiAvailability.downloadLabel}；圖片與文字不送到雲端辨識。`
+            : aiAvailability.reason ||
+              '目前瀏覽器無法使用裝置端 AI，可使用學校表格、檔案或一般圖片讀取。'}
+        </p>
+        <div className={styles.modelTools}>
+          <button
+            type="button"
+            className="btn"
+            disabled={reading || saving || removingAiModel}
+            onClick={() => void removeAiModel()}
+          >
+            {removingAiModel ? '正在移除模型快取…' : '移除下載模型'}
+          </button>
+        </div>
+        <details className={styles.captureGuide}>
+          <summary>從已登入的學校網頁擷取</summary>
+          <p>使用自己已登入的校務頁面，選取課表或成績表格並存成檔案。單次擷取，不會自動同步。</p>
+          <ol>
+            <li>複製下方工具網址，新增一個「Campus One 擷取表格」書籤，貼到書籤的網址欄。</li>
+            <li>自行登入學校網站，開啟要匯入的課表或成績頁，再點這個書籤。</li>
+            <li>
+              選擇表格並下載，回到這裡選取 <strong>CampusOne-school-table.html</strong>
+              ，核對後匯入。
+            </li>
+          </ol>
+          <div className={styles.actions}>
+            <button type="button" className="btn" onClick={() => void copySchoolCaptureTool()}>
+              複製擷取工具
+            </button>
+            <button
+              type="button"
+              className="btn"
+              disabled={reading || saving || rows.length > 0 || !!importDocument}
+              onClick={() => fileInput.current?.click()}
+            >
+              選擇擷取的 HTML 檔
+            </button>
+          </div>
+          {captureCopyStatus && (
+            <p role="status" className={styles.note}>
+              {captureCopyStatus}
+            </p>
+          )}
+          <details open={captureManualCopy || undefined} className={styles.source}>
+            <summary>手動複製工具網址</summary>
+            <label className={styles.field}>
+              校務擷取書籤網址
+              <textarea
+                rows={3}
+                readOnly
+                value={SCHOOL_CAPTURE_BOOKMARK}
+                onFocus={(event) => event.currentTarget.select()}
+              />
+            </label>
+          </details>
+          <p className={styles.note}>
+            部分網站會限制書籤程式，或以圖片、內嵌頁面呈現資料。工具沒有開啟或找不到表格時，請直接複製表格或使用截圖匯入。
+          </p>
+        </details>
+        <input
+          ref={aiImageInput}
+          type="file"
+          accept="image/png,image/jpeg,image/webp"
+          className={styles.file}
+          aria-label="選擇交給 AI 辨識的截圖"
+          disabled={
+            reading ||
+            saving ||
+            removingAiModel ||
+            rows.length > 0 ||
+            !!importDocument ||
+            !aiAvailability.available
+          }
+          onChange={(event) => {
+            const file = event.target.files?.[0];
+            if (file)
+              requestAi({
+                input: { image: file },
+                source: { type: 'screenshot', name: file.name },
+              });
+            event.target.value = '';
+          }}
+        />
         {schoolSelection && (
           <label className={styles.field}>
             這份資料的校園
@@ -1019,17 +1425,19 @@ function ImportWorkspace({
             </button>
             <span>也可以拖曳到這裡</span>
             <small>
-              PNG／JPEG／WebP，單張 10 MB 內；PDF／XLSX，8 MiB 內；HTML 校務網頁 500 KB 內；CSV／TSV／TXT／ICS，400 KB 內
+              PNG／JPEG／WebP，單張 10 MB 內；PDF／XLSX，8 MiB 內；HTML 校務網頁 500 KB
+              內；CSV／TSV／TXT／ICS，400 KB 內
             </small>
             <small>
               換裝置：也可選擇 Campus One 完整備份（JSON，8 MB 內），一次帶回三類資料與所有學期。
             </small>
           </div>
-          <details className={styles.paste} open={!!text}>
+          <details className={styles.paste} open={pasteOpen || !!text}>
             <summary>或貼上從學校網頁複製的表格／文字</summary>
             <label className={styles.field}>
               原始文字
               <textarea
+                ref={originalText}
                 rows={7}
                 value={text}
                 onPaste={(event) => {
@@ -1038,6 +1446,8 @@ function ImportWorkspace({
                   try {
                     const tables = extractSchoolPageTables(html, kind, periodProfile);
                     event.preventDefault();
+                    setSourceImage(null);
+                    setPreview('');
                     setSchoolPage({ name: '校務網頁複製內容', tables });
                     setNotice('已辨識複製的校務表格。請先選擇要匯入的表格，再核對每筆資料。');
                   } catch {
@@ -1063,13 +1473,19 @@ function ImportWorkspace({
             >
               整理成待確認清單
             </button>
+            <p className={styles.note}>
+              學校網頁：選取整張表格並複製，直接貼到上方。也可選擇自行儲存的 HTML 網頁。
+            </p>
           </details>
         </fieldset>
         {schoolPage && !importDocument && !rows.length && (
           <section className={styles.schoolPageChooser} aria-label="選擇校務網頁表格">
             <div>
               <h3>從校務網頁取出資料</h3>
-              <p>來源：{schoolPage.name}。以下只保留表格文字，不執行原網頁程式，也不連線到學校。請選擇正確表格並核對欄位。</p>
+              <p>
+                來源：{schoolPage.name}
+                。以下只保留表格文字，不執行原網頁程式，也不連線到學校。請選擇正確表格並核對欄位。
+              </p>
             </div>
             <div className={styles.schoolPageCandidates}>
               {schoolPage.tables.map((table) => (
@@ -1079,6 +1495,8 @@ function ImportWorkspace({
                   disabled={reading || saving}
                   onClick={() => {
                     const selectedSource = { type: 'file' as const, name: schoolPage.name };
+                    setSourceImage(null);
+                    setPreview('');
                     setSource(selectedSource);
                     const term = {
                       academicYear: year.trim() || table.suggestedTerm?.academicYear || '',
@@ -1095,16 +1513,90 @@ function ImportWorkspace({
                   }}
                 >
                   <strong>{table.label}</strong>
-                  <span>{table.layout === 'weekly' ? '週課表轉換' : '校務資料列'} · {table.rowCount} 筆 · 點擊後進入核對</span>
-                  {table.suggestedTerm && <span>網頁標示：{table.suggestedTerm.academicYear} 學年度第 {table.suggestedTerm.semester} 學期（只補空欄，匯入前請確認）</span>}
+                  <span>
+                    {table.layout === 'weekly' ? '週課表轉換' : '校務資料列'} · {table.rowCount} 筆
+                    · 點擊後進入核對
+                  </span>
+                  {table.suggestedTerm && (
+                    <span>
+                      網頁標示：{table.suggestedTerm.academicYear} 學年度第{' '}
+                      {table.suggestedTerm.semester} 學期（只補空欄，匯入前請確認）
+                    </span>
+                  )}
                 </button>
               ))}
             </div>
-            <button type="button" className="btn" onClick={() => setSchoolPage(null)}>取消選擇表格</button>
+            <button type="button" className="btn" onClick={() => setSchoolPage(null)}>
+              取消選擇表格
+            </button>
           </section>
         )}
+        {(text.trim() || sourceImage) && !importDocument && (
+          <div className={styles.aiTools}>
+            <div>
+              <strong>欄位沒有對上？</strong>
+              <p>可用免費 AI 重新整理目前來源，完成後再核對一次。</p>
+            </div>
+            <div className={styles.actions}>
+              {sourceImage && (
+                <button
+                  type="button"
+                  className="btn"
+                  disabled={reading || saving || removingAiModel || !aiAvailability.available}
+                  onClick={() =>
+                    sourceImage && requestAi({ input: { image: sourceImage }, source })
+                  }
+                >
+                  AI 重新讀取圖片
+                </button>
+              )}
+              {text.trim() && (
+                <button
+                  type="button"
+                  className="btn"
+                  disabled={reading || saving || removingAiModel || !aiAvailability.available}
+                  onClick={() => requestAi({ input: { text }, source })}
+                >
+                  AI 整理這段文字
+                </button>
+              )}
+            </div>
+          </div>
+        )}
+        {pendingAi && (
+          <div
+            className={styles.replacePrompt}
+            role="alertdialog"
+            aria-labelledby="import-ai-replace-title"
+            aria-describedby="import-ai-replace-body"
+          >
+            <strong id="import-ai-replace-title">重新整理這份草稿？</strong>
+            <p id="import-ai-replace-body">
+              AI 完成後會替換目前 {rows.length}{' '}
+              筆待確認內容，包含你已修改的欄位。已保存的紀錄不受影響；失敗或取消時會保留原草稿。
+            </p>
+            <div className={styles.actions}>
+              <button
+                type="button"
+                className="btn primary"
+                disabled={reading || saving}
+                onClick={() => void processAi(pendingAi)}
+              >
+                確認以 AI 重新整理
+              </button>
+              <button
+                type="button"
+                className="btn"
+                ref={keepAiDraft}
+                onClick={() => setPendingAi(null)}
+              >
+                保留目前草稿
+              </button>
+            </div>
+          </div>
+        )}
         {reading && (
-          <div className={styles.actions}>
+          <div className={styles.reading} aria-busy="true">
             <p role="status">{progress || '正在讀取檔案…'}</p>
             <button
               type="button"
@@ -1121,7 +1613,8 @@ function ImportWorkspace({
           </div>
         )}
         <p className={styles.note}>
-          辨識在這台裝置執行，使用本站提供的辨識程式與中英文字庫。格狀課表或模糊照片可能需要手動補欄位，無法確認的時間不會猜填。
+          一般圖片讀取使用裝置端文字辨識；AI
+          讀圖另使用需下載的視覺模型。兩種方式都會先產生草稿，無法確認的欄位留待核對。
         </p>
         {kind === 'timetable' && (
           <p className={styles.note}>
@@ -1130,7 +1623,7 @@ function ImportWorkspace({
               : '尚未選用學校節次表。請保留原始上課時間；其他學校與週末課程會顯示在下方個人紀錄。'}
           </p>
         )}
-        {preview && (
+        {preview && !rows.length && (
           <details className={styles.source} open>
             <summary>對照這張截圖</summary>
             {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -1139,7 +1632,7 @@ function ImportWorkspace({
         )}
       </section>
       {importDocument && (
-        <fieldset disabled={reading} className={styles.fieldset}>
+        <fieldset disabled={reading || saving} className={styles.fieldset}>
           {importDocument.format === 'pdf' && (
             <div className={styles.panel}>
               <p>預覽只有標題，或表格文字不完整？可以重新辨識整頁，再核對一次。</p>
@@ -1174,6 +1667,24 @@ function ImportWorkspace({
             initialSelection={documentSelection}
             onSelectionChange={setDocumentSelection}
             options={options}
+            aiDisabled={reading || saving || removingAiModel || !aiAvailability.available}
+            aiNote={
+              aiAvailability.available
+                ? `免費在這台裝置整理文字，不需 API 金鑰。首次下載${aiAvailability.downloadLabel}；文件內容不送到雲端辨識。`
+                : aiAvailability.reason || '目前瀏覽器無法使用裝置端 AI，仍可使用一般整理。'
+            }
+            onAi={(selection) => {
+              try {
+                const selectedSource = personalImportDocumentAiSource(importDocument, selection);
+                void processAi({
+                  input: { text: selectedSource.text },
+                  source: selectedSource.source,
+                  fromDocument: true,
+                });
+              } catch (error) {
+                setNotice(errorMessage(error, '無法整理選取內容，請調整頁面、工作表或起始列。'));
+              }
+            }}
             onCancel={() => {
               documentFile.current = null;
               setHasDocumentFile(false);
@@ -1243,24 +1754,27 @@ function ImportWorkspace({
             手動加一筆
           </button>
         </div>
-        {parseIssues.length > 0 && (
+        {parseIssues.some((issue) => issue.severity === 'error') && (
           <div role="alert" className={styles.error}>
             <p>
               原始資料有欄位需要確認。格式辨識錯誤可直接修改；表格結構或重複行程規則請修正原文後重新整理。
             </p>
             <ul>
-              {parseIssues.map((issue, index) => (
-                <li key={index}>{issue.message}</li>
-              ))}
+              {parseIssues
+                .filter((issue) => issue.severity === 'error')
+                .map((issue, index) => (
+                  <li key={index}>{issue.message}</li>
+                ))}
             </ul>
           </div>
         )}
-        <p className={styles.note}>
-          {linkStatus} <Link href="/classroom">前往課程空間</Link>
-        </p>
-        <p className={styles.note}>
-          課程連結只方便你開啟已加入的課。匯入不會自動加入班級、驗證教師身分或修改正式成績。
-        </p>
+        <details className={styles.source}>
+          <summary>需要把資料連結到課程空間？</summary>
+          <p>
+            {linkStatus} <Link href="/classroom">前往課程空間</Link>
+          </p>
+          <p>課程連結方便你開啟已加入的課，匯入後仍是個人紀錄。</p>
+        </details>
         {backup && (
           <div className={styles.notice}>
             <strong>正在核對完整備份</strong>
@@ -1278,6 +1792,30 @@ function ImportWorkspace({
           <p className={styles.empty}>帶入資料後，會在這裡逐筆顯示。你也可以直接手動新增。</p>
         ) : (
           <>
+            <div className={styles.reviewSummary} aria-label="核對摘要">
+              <div>
+                <strong>{rows.length}</strong>
+                <span>筆待核對</span>
+              </div>
+              <div data-warning={invalidRowIds.length > 0}>
+                <strong>{invalidRowIds.length}</strong>
+                <span>筆需要修正</span>
+              </div>
+              <div>
+                <strong>{selected.length}</strong>
+                <span>筆準備加入</span>
+              </div>
+              {invalidRowIds.length > 0 && (
+                <button
+                  type="button"
+                  className="btn"
+                  disabled={reading || saving}
+                  onClick={focusFirstIssue}
+                >
+                  前往第一筆待修正
+                </button>
+              )}
+            </div>
             <div className={styles.actions}>
               <strong>
                 {selected.length} / {rows.length} 筆已選擇
@@ -1285,13 +1823,16 @@ function ImportWorkspace({
               <button
                 className="btn"
                 type="button"
-                disabled={saving}
+                disabled={saving || reading}
                 onClick={() => {
                   setRows([]);
                   setBackup(null);
                   setReviewPage(0);
                   setExcluded([]);
                   setParseIssues([]);
+                  setAiReviewed(false);
+                  setPendingAi(null);
+                  setReviewIssueIds(null);
                   setNotice('已取消待確認清單，原始文字仍保留，可修改後重新整理。');
                 }}
               >
@@ -1300,84 +1841,223 @@ function ImportWorkspace({
               <button
                 className="btn"
                 type="button"
-                disabled={saving}
-                onClick={() => setExcluded([])}
+                disabled={saving || reading}
+                onClick={() => {
+                  setExcluded([]);
+                  setAiReviewed(false);
+                }}
               >
                 全選
               </button>
               <button
                 className="btn"
                 type="button"
-                disabled={saving}
-                onClick={() => setExcluded(rows.map((row) => row.id))}
+                disabled={saving || reading}
+                onClick={() => {
+                  setExcluded(rows.map((row) => row.id));
+                  setAiReviewed(false);
+                }}
               >
                 全部取消勾選
               </button>
             </div>
-            <fieldset className={styles.fieldset} disabled={saving || reading}>
-              {rows
-                .slice(reviewPage * REVIEW_PAGE_SIZE, (reviewPage + 1) * REVIEW_PAGE_SIZE)
-                .map((row, index) => (
-                  <article className={styles.row} key={row.id}>
-                    <label className={styles.check}>
-                      <input
-                        type="checkbox"
-                        checked={!excluded.includes(row.id)}
-                        onChange={(event) =>
-                          setExcluded((current) =>
-                            event.target.checked
-                              ? current.filter((id) => id !== row.id)
-                              : [...current, row.id],
-                          )
-                        }
-                      />
-                      <strong>
-                        第 {reviewPage * REVIEW_PAGE_SIZE + index + 1} 筆 ·{' '}
-                        {KINDS.find((entry) => entry.value === row.kind)?.title}
-                        {row.title ? ` · ${row.title}` : ''}
-                      </strong>
-                    </label>
-                    {backup?.proposedLinks[row.id] && (
-                      <p className={styles.note}>
-                        原備份有課程連結。
-                        {workspaces.find((item) => item.id === backup.proposedLinks[row.id])
-                          ?.title || '請核對目前可用的課程'}
-                        ；要連結請在下方重新選擇，也可先保留個人紀錄。
-                      </p>
-                    )}
-                    <RowFields
-                      row={row}
-                      periodProfile={periodProfile}
-                      workspaces={workspaces}
-                      onRefreshWorkspaces={() => setLinkRefreshVersion((v) => v + 1)}
-                      onChange={(next) => updateDraft(row, next)}
-                    />
-                  </article>
-                ))}
-            </fieldset>
-            {rows.length > REVIEW_PAGE_SIZE && (
-              <nav className={styles.actions} aria-label="待確認資料分頁">
-                <button
-                  className="btn"
-                  type="button"
-                  disabled={saving || reviewPage === 0}
-                  onClick={() => setReviewPage((page) => page - 1)}
-                >
-                  上一頁
-                </button>
-                <span>
-                  第 {reviewPage + 1} / {Math.ceil(rows.length / REVIEW_PAGE_SIZE)} 頁 · 每頁{' '}
-                  {REVIEW_PAGE_SIZE} 筆
-                </span>
-                <button
-                  className="btn"
-                  type="button"
-                  disabled={saving || (reviewPage + 1) * REVIEW_PAGE_SIZE >= rows.length}
-                  onClick={() => setReviewPage((page) => page + 1)}
-                >
-                  下一頁
-                </button>
-              </nav>
+            <div className={styles.reviewFilters} role="group" aria-label="篩選待確認資料">
+              <button
+                type="button"
+                aria-pressed={reviewIssueIds === null}
+                disabled={reading || saving}
+                onClick={() => {
+                  setReviewIssueIds(null);
+                  setReviewPage(0);
+                }}
+              >
+                全部 {rows.length} 筆
+              </button>
+              <button
+                type="button"
+                aria-pressed={reviewIssueIds !== null}
+                disabled={reading || saving}
+                onClick={() => {
+                  setReviewIssueIds(invalidRowIds);
+                  setReviewPage(0);
+                }}
+              >
+                待修正 {invalidRowIds.length} 筆
+              </button>
+            </div>
+            {reviewIssueIds && (
+              <p className={styles.note}>
+                已修正的項目會留在目前清單，方便你完成對照；重新選擇「待修正」會更新清單。
+              </p>
+            )}
+            <div className={styles.reviewLayout} data-has-source={!!preview || !!text}>
+              {(preview || text) && (
+                <aside className={styles.sourcePane} aria-label="匯入來源對照">
+                  <div className={styles.sourcePaneHeading}>
+                    <strong>來源對照</strong>
+                    <span>{source.name || '貼上的文字'}</span>
+                  </div>
+                  {preview ? (
+                    <>
+                      <a
+                        href={preview}
+                        target="_blank"
+                        rel="noreferrer"
+                        aria-label="另開原始截圖以放大核對"
+                      >
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img
+                          src={preview}
+                          alt="你選擇的資料截圖，僅供核對"
+                          className={styles.preview}
+                        />
+                      </a>
+                      <small>點圖片可另開放大；原圖只保留在這次畫面。</small>
+                    </>
+                  ) : (
+                    <pre>{text}</pre>
+                  )}
+                </aside>
+              )}
+              <div className={styles.reviewContent}>
+                {!filteredRows.length && (
+                  <p className={styles.empty}>目前沒有需要修正的項目。切換「全部」繼續核對。</p>
+                )}
+                <fieldset className={styles.fieldset} disabled={saving || reading}>
+                  {filteredRows
+                    .slice(
+                      currentReviewPage * REVIEW_PAGE_SIZE,
+                      (currentReviewPage + 1) * REVIEW_PAGE_SIZE,
+                    )
+                    .map((row) => (
+                      <article
+                        className={styles.row}
+                        key={row.id}
+                        tabIndex={-1}
+                        ref={(element) => {
+                          if (element) reviewRows.current.set(row.id, element);
+                          else reviewRows.current.delete(row.id);
+                        }}
+                        data-needs-correction={invalidRowIds.includes(row.id)}
+                      >
+                        <label className={styles.check}>
+                          <input
+                            type="checkbox"
+                            checked={!excluded.includes(row.id)}
+                            onChange={(event) => {
+                              setAiReviewed(false);
+                              setExcluded((current) =>
+                                event.target.checked
+                                  ? current.filter((id) => id !== row.id)
+                                  : [...current, row.id],
+                              );
+                            }}
+                          />
+                          <strong>
+                            第 {rows.indexOf(row) + 1} 筆 ·{' '}
+                            {KINDS.find((entry) => entry.value === row.kind)?.title}
+                            {row.title ? ` · ${row.title}` : ''}
+                          </strong>
+                        </label>
+                        <div className={styles.rowBadges}>
+                          {invalidRowIds.includes(row.id) ? (
+                            <span data-warning="true">需要修正</span>
+                          ) : (
+                            <span>欄位已補齊</span>
+                          )}
+                          {parseIssues.some(
+                            (issue) =>
+                              issue.code === 'ai-review-required' && issue.rowId === row.id,
+                          ) && <span>AI 草稿 · 請對照來源</span>}
+                        </div>
+                        {backup?.proposedLinks[row.id] && (
+                          <p className={styles.note}>
+                            原備份有課程連結。
+                            {workspaces.find((item) => item.id === backup.proposedLinks[row.id])
+                              ?.title || '請核對目前可用的課程'}
+                            ；要連結請在下方重新選擇，也可先保留個人紀錄。
+                          </p>
+                        )}
+                        <RowFields
+                          row={row}
+                          aiSource={parseIssues.some(
+                            (issue) =>
+                              issue.code === 'ai-review-required' && issue.rowId === row.id,
+                          )}
+                          periodProfile={periodProfile}
+                          workspaces={workspaces}
+                          onRefreshWorkspaces={() => setLinkRefreshVersion((v) => v + 1)}
+                          onChange={(next) => updateDraft(row, next)}
+                        />
+                        {parseIssues.some(
+                          (issue) =>
+                            issue.rowId === row.id &&
+                            issue.severity === 'warning' &&
+                            issue.code !== 'ai-review-required',
+                        ) && (
+                          <ul className={styles.issues} aria-label="AI 待核對提示">
+                            {parseIssues
+                              .filter(
+                                (issue) =>
+                                  issue.rowId === row.id &&
+                                  issue.severity === 'warning' &&
+                                  issue.code !== 'ai-review-required',
+                              )
+                              .map((issue, index) => (
+                                <li key={`${issue.code}-${index}`}>{issue.message}</li>
+                              ))}
+                          </ul>
+                        )}
+                      </article>
+                    ))}
+                </fieldset>
+                {filteredRows.length > REVIEW_PAGE_SIZE && (
+                  <nav className={styles.actions} aria-label="待確認資料分頁">
+                    <button
+                      className="btn"
+                      type="button"
+                      disabled={saving || reading || currentReviewPage === 0}
+                      onClick={() => setReviewPage(currentReviewPage - 1)}
+                    >
+                      上一頁
+                    </button>
+                    <span>
+                      第 {currentReviewPage + 1} /{' '}
+                      {Math.ceil(filteredRows.length / REVIEW_PAGE_SIZE)} 頁 · 每頁{' '}
+                      {REVIEW_PAGE_SIZE} 筆
+                    </span>
+                    <button
+                      className="btn"
+                      type="button"
+                      disabled={
+                        saving ||
+                        reading ||
+                        (currentReviewPage + 1) * REVIEW_PAGE_SIZE >= filteredRows.length
+                      }
+                      onClick={() => setReviewPage(currentReviewPage + 1)}
+                    >
+                      下一頁
+                    </button>
+                  </nav>
+                )}
+              </div>
+            </div>
+            {aiNeedsReview && (
+              <div className={styles.aiReview}>
+                <strong>AI 整理完成，最後由你核對</strong>
+                <p>
+                  請對照原檔確認課名、日期、星期、節次與成績數字。AI 留白或讀錯的欄位，可直接修改。
+                </p>
+                <label className={styles.check}>
+                  <input
+                    type="checkbox"
+                    checked={aiReviewed}
+                    disabled={reading || saving}
+                    onChange={(event) => setAiReviewed(event.target.checked)}
+                  />
+                  <span>我已對照來源，逐筆核對這次 AI 整理的內容</span>
+                </label>
+              </div>
             )}
             <div className={styles.confirm}>
               <div>
@@ -1387,14 +2067,22 @@ function ImportWorkspace({
                     ? `已選資料有 ${errors.length} 個欄位需要確認，可修改或取消勾選該筆。`
                     : invalidLinks
                       ? '有課程連結尚未確認，請重新選擇或先保留個人紀錄。'
-                      : '相同資料會略過。確認後可撤銷這次新增。'}
+                      : aiNeedsReview && !aiReviewed
+                        ? '請先勾選已完成逐筆核對，再確認匯入。'
+                        : '相同資料會略過。確認後可撤銷這次新增。'}
                 </p>
               </div>
               <button
                 type="button"
                 className="btn primary"
                 disabled={
-                  saving || !!ledger.error || !selected.length || errors.length > 0 || invalidLinks
+                  saving ||
+                  reading ||
+                  !!ledger.error ||
+                  !selected.length ||
+                  errors.length > 0 ||
+                  invalidLinks ||
+                  (aiNeedsReview && !aiReviewed)
                 }
                 onClick={() => void save()}
               >
@@ -1404,6 +2092,12 @@ function ImportWorkspace({
           </>
         )}
       </section>
+      <details className={styles.syncDetails}>
+        <summary>
+          同步與保存設定 <span>目前帳號在{schoolName}的個人資料</span>
+        </summary>
+        <PersonalImportSyncPanel scope={scope} available={!paused && !saving && !reading} />
+      </details>
       <section className={styles.panel} aria-label="已匯入的個人資料">
         <div className={styles.heading}>
           <h2>

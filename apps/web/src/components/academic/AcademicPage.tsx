@@ -229,23 +229,6 @@ export function AcademicPage<K extends AcademicKind>(props: Props<K>) {
   return (
     <SiteShell title={props.title} subtitle={props.subtitle}>
       {props.lead}
-      <nav className={styles.navigation} aria-label="我的課務">
-        {(
-          [
-            ['/timetable', '我的課表'],
-            ['/grades', '成績紀錄'],
-            ['/credit-planner', '學分規劃'],
-          ] as const
-        ).map(([href, name]) => (
-          <Link
-            key={href}
-            href={`${href}${schoolSearch}`}
-            aria-current={path === href ? 'page' : undefined}
-          >
-            {name}
-          </Link>
-        ))}
-      </nav>
       {props.workspace && browse.status === 'ready' && browse.schoolId && !loading && !error
         ? props.workspace({
             userId: user?.uid ?? null,
