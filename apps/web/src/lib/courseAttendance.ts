@@ -27,6 +27,7 @@ export interface AttendanceSession {
   qrExpiresAt: string | null;
   attendeeCount: number;
   ownRecord: AttendanceRecord | null;
+  ownStatus?: 'present' | 'late' | 'absent' | 'excused' | null;
 }
 export interface CourseAttendance {
   courseId: string;
@@ -144,6 +145,16 @@ export async function loadCourseAttendance(
           endedAt: iso(data.endedAt),
           qrExpiresAt: iso(data.qrExpiresAt),
           attendeeCount: Math.max(0, Number(data.attendeeCount) || 0),
+          ownStatus:
+            own.exists() &&
+            own.data().uid === uid &&
+            own.data().groupId === courseId &&
+            own.data().sessionId === entry.id &&
+            ['present', 'late', 'absent', 'excused'].includes(own.data().status) &&
+            (!['present', 'late'].includes(own.data().status) ||
+              iso(own.data().checkedInAt))
+              ? own.data().status
+              : null,
           ownRecord:
             own.exists() &&
             own.data().uid === uid &&
