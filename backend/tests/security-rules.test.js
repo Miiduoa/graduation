@@ -1,4 +1,5 @@
 const { after, before, beforeEach, describe, test } = require('node:test');
+const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const {
@@ -1064,7 +1065,7 @@ describe('firestore security rules', () => {
         name: 'Secure Systems',
       });
       for (const uid of ['alice', 'bob', 'charlie']) {
-        await db.collection('schools').doc('tw-demo-uni').collection('members').doc(uid).set({
+        await db.doc(`schools/tw-demo-uni/members/${uid}`).set({
           role: 'student',
           status: 'active',
         });
@@ -1107,6 +1108,14 @@ describe('firestore security rules', () => {
           scores: {},
           submittedAt: null,
         });
+      // A same-school account with a stale review assignment must not gain
+      // access without current membership in this course.
+      await db.doc('schools/tw-demo-uni/members/outsider').set({
+        role: 'student', status: 'active',
+      });
+      await db.doc('groups/group-1/assignments/assignment-1/peerReviews/outsider').set({
+        reviewerId: 'outsider', submissionOwnerId: 'bob',
+      });
     });
 
     const reviewerDb = testEnv.authenticatedContext('alice').firestore();
@@ -1131,6 +1140,10 @@ describe('firestore security rules', () => {
         .collection('submissions')
         .doc('bob')
         .get(),
+    );
+    const outsiderDb = testEnv.authenticatedContext('outsider').firestore();
+    await assertFails(
+      outsiderDb.doc('groups/group-1/assignments/assignment-1/submissions/bob').get(),
     );
   });
 
@@ -1524,6 +1537,114 @@ describe('course assignment submissions', () => {
       await db.doc('groups/course-1/assignments/work-1').set({ title: 'Work', published: true, ...overrides });
     });
   }
+  test('teacher publication, student receipt and released feedback remain scoped through revocation', async () => {
+    // Only identity and enrollment are fixtures; every assignment, answer and grade
+    // below is written through an authenticated client under the production rules.
+    await seedFirestore(async (db) => {
+      await db.doc('groups/course-1').set({ name: 'Course', schoolId: 'school-1', type: 'course' });
+      for (const uid of ['alice', 'bob', 'teacher']) {
+        await db.doc(`schools/school-1/members/${uid}`).set({
+          role: uid === 'teacher' ? 'faculty' : 'student', status: 'active',
+        });
+        await db.doc(`groups/course-1/members/${uid}`).set({
+          role: uid === 'teacher' ? 'instructor' : 'member', status: 'active',
+        });
+      }
+    });
+    const teacher = testEnv.authenticatedContext('teacher').firestore();
+    const student = testEnv.authenticatedContext('alice').firestore();
+    const classmate = testEnv.authenticatedContext('bob').firestore();
+    const assignmentPath = 'groups/course-1/assignments/work-1';
+    const assignment = {
+      title: 'Course reflection', description: 'Explain your reasoning.',
+      type: 'assignment', groupId: 'course-1', schoolId: 'school-1',
+      points: 100, dueAt: new Date(Date.now() + 60 * 60 * 1000).toISOString(),
+      allowLateSubmission: false, published: true, status: 'published',
+      createdBy: 'teacher', createdAt: serverTimestamp(), updatedAt: serverTimestamp(),
+    };
+    await assertFails(student.doc(assignmentPath).set(assignment));
+    await assertSucceeds(teacher.doc(assignmentPath).set(assignment));
+    const publishedAssignment = await assertSucceeds(student.doc(assignmentPath).get({ source: 'server' }));
+    assert.equal(publishedAssignment.data().published, true);
+    assert.equal((await assertSucceeds(pathTo(student).get({ source: 'server' }))).exists, false);
+
+    await assertSucceeds(pathTo(student).set(answer()));
+    const receipt = (await assertSucceeds(pathTo(student).get({ source: 'server' }))).data();
+    assert.equal(receipt.status, 'submitted');
+    assert.equal(receipt.content, 'My answer');
+    assert.equal(receipt.userId, 'alice');
+    assert.equal(typeof receipt.submittedAt.toMillis(), 'number');
+    const teacherQueue = await assertSucceeds(teacher.collection(`${assignmentPath}/submissions`).get());
+    assert.deepEqual(teacherQueue.docs.map((entry) => entry.id), ['alice']);
+    await assertFails(pathTo(classmate).get({ source: 'server' }));
+    await assertFails(classmate.collection(`${assignmentPath}/submissions`).get());
+
+    // Grading drafts are held in the teacher UI. This shared receipt is not a
+    // draft store: the canonical grade fields must be published atomically.
+    await assertFails(pathTo(teacher).update({
+      gradeScore: 75, gradeFeedback: 'Private draft', gradePublished: false,
+    }));
+    const beforeRelease = (await assertSucceeds(pathTo(student).get({ source: 'server' }))).data();
+    assert.equal('gradeScore' in beforeRelease, false);
+    assert.equal('gradeFeedback' in beforeRelease, false);
+
+    await assertSucceeds(pathTo(teacher).update({
+      gradeScore: 0, gradeFeedback: '請補上推導過程。', gradePublished: true,
+      gradePublishedBy: 'teacher', gradePublishedAt: serverTimestamp(),
+    }));
+    const released = (await assertSucceeds(pathTo(student).get({ source: 'server' }))).data();
+    assert.equal(released.gradeScore, 0);
+    assert.equal(released.gradeFeedback, '請補上推導過程。');
+    assert.equal(released.gradePublished, true);
+    assert.equal(released.gradePublishedBy, 'teacher');
+    assert.equal(typeof released.gradePublishedAt.toMillis(), 'number');
+    assert.equal(released.submittedAt.toMillis(), receipt.submittedAt.toMillis());
+    assert.equal(released.content, receipt.content);
+    await assertFails(pathTo(classmate).get({ source: 'server' }));
+
+    await assertSucceeds(teacher.doc(`${assignmentPath}/peerReviews/bob`).set({
+      reviewerId: 'bob', submissionOwnerId: 'alice',
+    }));
+    await assertSucceeds(pathTo(classmate).get({ source: 'server' }));
+    await seedFirestore((db) => db.doc('groups/course-1/members/bob').update({ status: 'removed' }));
+    await assertFails(pathTo(classmate).get({ source: 'server' }));
+    await seedFirestore(async (db) => {
+      await db.doc('groups/course-1/members/bob').update({ status: 'active' });
+      await db.doc('schools/school-1/members/bob').update({ status: 'removed' });
+    });
+    await assertFails(pathTo(classmate).get({ source: 'server' }));
+
+    await seedFirestore((db) => db.doc('groups/course-1/members/alice').update({ status: 'removed' }));
+    await assertFails(pathTo(student).get({ source: 'server' }));
+    await assertSucceeds(pathTo(teacher).get({ source: 'server' }));
+    await seedFirestore(async (db) => {
+      await db.doc('groups/course-1/members/alice').update({ status: 'active' });
+      await db.doc('schools/school-1/members/alice').update({ status: 'removed' });
+    });
+    await assertFails(pathTo(student).get({ source: 'server' }));
+  });
+  test('teacher explicitly reopening late submission produces one immutable student receipt', async () => {
+    await seedAssignment({
+      type: 'assignment', createdBy: 'teacher', status: 'published',
+      description: 'Explain your reasoning.', points: 100,
+      dueAt: '2000-01-01T00:00:00Z', allowLateSubmission: false,
+    });
+    const teacher = testEnv.authenticatedContext('teacher').firestore();
+    const student = testEnv.authenticatedContext('alice').firestore();
+    await assertFails(pathTo(student).set(answer()));
+    assert.equal((await assertSucceeds(pathTo(student).get({ source: 'server' }))).exists, false);
+    await assertSucceeds(teacher.doc('groups/course-1/assignments/work-1').update({
+      allowLateSubmission: true, lastEditedBy: 'teacher', updatedAt: serverTimestamp(),
+    }));
+    await assertSucceeds(pathTo(student).set(answer()));
+    const receipt = (await assertSucceeds(pathTo(student).get({ source: 'server' }))).data();
+    assert.equal(receipt.status, 'submitted');
+    assert.ok(receipt.submittedAt.toMillis() > Date.parse('2000-01-01T00:00:00Z'));
+    await assertFails(pathTo(student).set(answer({ content: 'Unconfirmed replacement' })));
+    const preserved = (await assertSucceeds(pathTo(student).get({ source: 'server' }))).data();
+    assert.equal(preserved.content, receipt.content);
+    assert.equal(preserved.submittedAt.toMillis(), receipt.submittedAt.toMillis());
+  });
   test('revoked enrollment and unassigned peer review cannot read private submissions', async () => {
     await seedAssignment({
       type: 'assignment', createdBy: 'teacher', status: 'published',

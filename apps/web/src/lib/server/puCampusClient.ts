@@ -1,3 +1,5 @@
+import { parseFragment, serialize, type DefaultTreeAdapterMap } from 'parse5';
+
 const ALCAT_ORIGIN = 'https://alcat.pu.edu.tw';
 const TRONCLASS_ORIGIN = 'https://tronclass.pu.edu.tw';
 const DEFAULT_TIMEOUT_MS = 10_000;
@@ -78,29 +80,81 @@ function mergeCookies(jar: CookieJar, headers: Headers): CookieJar {
   return next;
 }
 
-function looksLikeLoginPage(html: string): boolean {
-  const normalized = html.toLowerCase();
+const CLOSED_PAGE_TEXT = /尚未開放|系統維護|暫停服務|暫時關閉/;
+const IGNORED_HTML_NODES = new Set(['#comment', 'script', 'style']);
+
+type HtmlNode = DefaultTreeAdapterMap['node'];
+type HtmlParent = DefaultTreeAdapterMap['parentNode'];
+
+function isHtmlParent(node: HtmlNode): node is HtmlParent {
+  return 'childNodes' in node && Array.isArray(node.childNodes);
+}
+
+function pruneIgnoredHtml(node: HtmlNode): void {
+  if (!isHtmlParent(node)) return;
+  node.childNodes = node.childNodes.filter((child) => {
+    if (IGNORED_HTML_NODES.has(child.nodeName.toLowerCase())) return false;
+    pruneIgnoredHtml(child);
+    return true;
+  });
+}
+
+function collectHtmlText(node: HtmlNode): string {
+  if (node.nodeName === '#text' && 'value' in node) {
+    return String(node.value || '');
+  }
+  if (!isHtmlParent(node)) return '';
+  return node.childNodes.map(collectHtmlText).join(' ');
+}
+
+function inspectCampusHtml(html: string): { markup: string; text: string } {
+  const fragment = parseFragment(String(html || ''));
+  pruneIgnoredHtml(fragment);
+  return {
+    markup: serialize(fragment),
+    text: collectHtmlText(fragment).replace(/\u00a0/g, ' ').replace(/\s+/g, ' ').trim(),
+  };
+}
+
+function stripIgnoredHtml(html: string): string {
+  return inspectCampusHtml(html).markup;
+}
+
+function visibleCampusText(html: string): string {
+  return inspectCampusHtml(html).text;
+}
+
+export function campusPageHasLoginForm(html: string): boolean {
+  const markup = stripIgnoredHtml(html).toLowerCase();
   return (
-    normalized.includes('action="index_check.php"') ||
-    normalized.includes("action='index_check.php'") ||
-    (normalized.includes('name="uid"') && normalized.includes('name="upassword"'))
+    markup.includes('action="index_check.php"') ||
+    markup.includes("action='index_check.php'") ||
+    (markup.includes('name="uid"') && markup.includes('name="upassword"'))
   );
 }
 
 function hasStudentContext(html: string): boolean {
+  const markup = stripIgnoredHtml(html);
   return (
-    html.includes('學號(Student No.)') ||
-    html.includes('姓名(Student Name)') ||
-    html.includes('query_course')
+    markup.includes('學號(Student No.)') ||
+    markup.includes('姓名(Student Name)') ||
+    markup.includes('query_course')
   );
 }
 
+export function campusPageLooksClosed(html: string): boolean {
+  if (campusPageHasLoginForm(html)) return false;
+  return CLOSED_PAGE_TEXT.test(visibleCampusText(html));
+}
+
 function isClosedPage(html: string): boolean {
-  return /尚未開放|系統維護|暫停服務|暫時關閉/.test(html);
+  return campusPageLooksClosed(html);
 }
 
 function isCredentialPage(html: string): boolean {
-  return /帳號或密碼錯誤|login_fail|Login Failed|密碼錯誤|_INVALID_PASSWORD_/.test(html);
+  return /帳號或密碼錯誤|login_fail|Login Failed|密碼錯誤|_INVALID_PASSWORD_/.test(
+    stripIgnoredHtml(html),
+  );
 }
 
 function asRecord(value: unknown): Record<string, unknown> {
@@ -194,10 +248,12 @@ export function classifyCampusFailure(error: unknown): PuCampusError {
 }
 
 export function createPuCampusGateway(
-  options: { fetch?: FetchLike; timeoutMs?: number } = {},
+  options: { fetch?: FetchLike; timeoutMs?: number; portalOrigin?: string; lmsOrigin?: string } = {},
 ): PuCampusGateway {
   const request = options.fetch ?? fetch;
   const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+  const portalOrigin = options.portalOrigin || ALCAT_ORIGIN;
+  const lmsOrigin = options.lmsOrigin || TRONCLASS_ORIGIN;
 
   async function send(url: string, init: RequestInit & { cookies?: CookieJar } = {}): Promise<SentPage> {
     const controller = new AbortController();
@@ -254,12 +310,12 @@ export function createPuCampusGateway(
   return {
     async loginStudent(studentId, password) {
       try {
-        const warmup = await send(`${ALCAT_ORIGIN}/`);
+        const warmup = await send(`${portalOrigin}/`);
         if (isClosedPage(warmup.html)) {
           throw new PuCampusError('closed', '尚未開放');
         }
         const body = `uid=${encodeURIComponent(studentId)}&upassword=${encodeURIComponent(password)}&en_flag=zh`;
-        const posted = await send(`${ALCAT_ORIGIN}/index_check.php`, {
+        const posted = await send(`${portalOrigin}/index_check.php`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
           body,
@@ -278,15 +334,11 @@ export function createPuCampusGateway(
           posted.status === 302 && posted.location
             ? (await getFollow(posted.location, posted.cookies)).cookies
             : posted.cookies;
-        const verify = await getFollow(`${ALCAT_ORIGIN}/stu_query/query_course.html`, sessionCookies);
+        const verify = await getFollow(`${portalOrigin}/stu_query/query_course.html`, sessionCookies);
         if (isClosedPage(verify.html)) {
           throw new PuCampusError('closed', '尚未開放');
         }
-        if (
-          verify.status !== 200 ||
-          looksLikeLoginPage(verify.html) ||
-          !hasStudentContext(verify.html)
-        ) {
+        if (verify.status !== 200 || !hasStudentContext(verify.html)) {
           throw new PuCampusError('credentials', '學號或密碼錯誤');
         }
         const nameMatch =
@@ -303,11 +355,11 @@ export function createPuCampusGateway(
 
     async fetchStudentInfo(cookies) {
       try {
-        const page = await getFollow(`${ALCAT_ORIGIN}/stu_query/query_course.html`, cookies);
+        const page = await getFollow(`${portalOrigin}/stu_query/query_course.html`, cookies);
         if (isClosedPage(page.html)) {
           throw new PuCampusError('closed', '尚未開放');
         }
-        if (looksLikeLoginPage(page.html) || !hasStudentContext(page.html)) {
+        if (!hasStudentContext(page.html)) {
           return {};
         }
         return {
@@ -322,7 +374,7 @@ export function createPuCampusGateway(
 
     async loginTronClass(account, password) {
       try {
-        const posted = await send(`${TRONCLASS_ORIGIN}/api/login`, {
+        const posted = await send(`${lmsOrigin}/api/login`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
           body: JSON.stringify({ user_name: account, password }),
@@ -338,7 +390,7 @@ export function createPuCampusGateway(
           throw new PuCampusError('credentials', '學號或密碼錯誤');
         }
         const loginData = asRecord(posted.json);
-        const profilePage = await send(`${TRONCLASS_ORIGIN}/api/profile`, {
+        const profilePage = await send(`${lmsOrigin}/api/profile`, {
           cookies: posted.cookies,
           headers: { Accept: 'application/json' },
         });
@@ -365,7 +417,7 @@ export function createPuCampusGateway(
 
     async fetchTronClassCourses(session) {
       try {
-        const posted = await send(`${TRONCLASS_ORIGIN}/api/my-courses`, {
+        const posted = await send(`${lmsOrigin}/api/my-courses`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
           body: JSON.stringify({ conditions: { status: ['ongoing'] }, page: 1, page_size: 50 }),

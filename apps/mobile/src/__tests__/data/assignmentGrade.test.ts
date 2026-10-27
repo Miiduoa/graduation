@@ -37,3 +37,14 @@ test('ignores unpublished drafts and legacy grade fields', () => {
     }),
   ).toBeNull();
 });
+
+
+test('normalizes Firestore publication timestamps without exposing invalid dates', () => {
+  expect(publishedAssignmentGrade({
+    gradePublished: true, gradeScore: 90,
+    gradePublishedAt: { toDate: () => new Date('2026-10-26T09:00:00Z') },
+  })?.publishedAt).toBe('2026-10-26T09:00:00.000Z');
+  for (const gradePublishedAt of ['invalid', { toDate: () => { throw new Error('invalid'); } }]) {
+    expect(publishedAssignmentGrade({ gradePublished: true, gradeScore: 90, gradePublishedAt })?.publishedAt).toBeNull();
+  }
+});

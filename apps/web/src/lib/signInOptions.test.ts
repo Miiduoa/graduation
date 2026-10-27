@@ -23,6 +23,20 @@ it('hides school login unless a usable school-issued provider is listed', () => 
   expect(hasUsableSchoolLoginProvider(['student-id'])).toBe(true);
 });
 
+it('requests sign-in options for the selected school', async () => {
+  request.mockResolvedValueOnce({ google: true, studentId: false });
+  const { result } = renderHook(() => useSignInOptions('ntu'));
+  await waitFor(() => expect(result.current.loading).toBe(false));
+  expect(request).toHaveBeenCalledWith(
+    'sign-in-options',
+    undefined,
+    undefined,
+    undefined,
+    { schoolId: 'ntu' },
+  );
+  expect(result.current.studentId).toBe(false);
+});
+
 it('treats student ID as unavailable unless the backend says it is available', () => {
   expect(parseSignInOptions({ google: true })).toEqual({ google: true, studentId: false });
   expect(parseSignInOptions({ google: true, studentId: true })).toEqual({
