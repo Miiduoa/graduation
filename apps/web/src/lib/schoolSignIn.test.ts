@@ -180,3 +180,14 @@ it.each(['school verification', 'Firebase exchange'])('does not undo an explicit
   expect(state.update).not.toHaveBeenCalled();
   expect(state.auth.currentUser).toBeNull();
 });
+
+it('never sends another campus\'s credentials to the Providence sign-in endpoint', async () => {
+  await expect(
+    signInWithPuStudentId('A1234567', 'test-password', undefined, 'ntu'),
+  ).rejects.toMatchObject({
+    name: 'SchoolLoginHttpError',
+    status: 503,
+  });
+  expect(state.fetch).not.toHaveBeenCalled();
+  expect(state.signIn).not.toHaveBeenCalled();
+});
