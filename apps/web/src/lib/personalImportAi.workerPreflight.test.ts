@@ -62,7 +62,7 @@ beforeEach(async () => {
   sdk.processor.apply_chat_template.mockReturnValue('local prompt');
   sdk.processor.mockImplementation(async () => {
     stages.push('preprocess');
-    return { input_ids: new sdk.Tensor([11n, 12n]) };
+    return { input_ids: new sdk.Tensor([BigInt(11), BigInt(12)]) };
   });
   sdk.processor.batch_decode.mockReturnValue(['{"complete":true,"rows":[]}']);
   sdk.Qwen3VLForConditionalGeneration.from_pretrained.mockImplementation(async () => {
@@ -71,7 +71,7 @@ beforeEach(async () => {
   });
   sdk.model.generate.mockImplementation(async ({ input_ids }) => {
     stages.push('generate');
-    return new sdk.Tensor([...input_ids.data, 99n, 151645n]);
+    return new sdk.Tensor([...input_ids.data, BigInt(99), BigInt(151645)]);
   });
   sdk.model.dispose.mockImplementation(async () => { stages.push('dispose'); });
   sdk.RawImage.fromCanvas.mockReturnValue({ rgb: () => ({ data: pixels }) });
@@ -118,11 +118,11 @@ describe('import preflight before model allocation', () => {
   it('checks the complete processor input before downloading weights or allocating a model', async () => {
     expect(await recognize()).toMatchObject({ type: 'result', id: 19 });
     expect(stages).toEqual(['runtime', 'processor', 'preprocess', 'weights', 'generate', 'dispose']);
-    expect(sdk.processor.batch_decode.mock.calls[0][0].data).toEqual([99n, 151645n]);
+    expect(sdk.processor.batch_decode.mock.calls[0][0].data).toEqual([BigInt(99), BigInt(151645)]);
   });
   it.each([false, true])('rejects an over-budget input before model download (image=%s)', async (image) => {
     sdk.processor.mockResolvedValue({
-      input_ids: new sdk.Tensor(Array<bigint>(IMPORT_AI_MAX_INPUT_TOKENS + 1).fill(11n)),
+      input_ids: new sdk.Tensor(Array<bigint>(IMPORT_AI_MAX_INPUT_TOKENS + 1).fill(BigInt(11))),
     });
     expect(await recognize(image ? png() : undefined)).toMatchObject({
       type: 'error', message: expect.stringContaining('單次辨識範圍'),
@@ -134,7 +134,7 @@ describe('import preflight before model allocation', () => {
     }
   });
   it('accepts the exact input budget without silently dropping source tokens', async () => {
-    const input = new sdk.Tensor(Array<bigint>(IMPORT_AI_MAX_INPUT_TOKENS).fill(11n));
+    const input = new sdk.Tensor(Array<bigint>(IMPORT_AI_MAX_INPUT_TOKENS).fill(BigInt(11)));
     sdk.processor.mockResolvedValue({ input_ids: input });
     expect(await recognize()).toMatchObject({ type: 'result' });
     expect(sdk.model.generate.mock.calls[0][0].input_ids).toBe(input);
@@ -143,12 +143,12 @@ describe('import preflight before model allocation', () => {
   it.each([
     [], [1], [2, 1], [1, 0], [1, -1], [1, 2.5], [1, NaN], [1, Infinity], [1, 2, 1], [1, 3],
   ].map((dims) => [dims]))('rejects malformed input dimensions %j without loading weights', async (dims) => {
-    sdk.processor.mockResolvedValue({ input_ids: new sdk.Tensor([11n, 12n], dims) });
+    sdk.processor.mockResolvedValue({ input_ids: new sdk.Tensor([BigInt(11), BigInt(12)], dims) });
     expect(await recognize()).toMatchObject({ type: 'error' });
     noWeights();
   });
   it('rejects an input_ids-shaped object that is not an SDK Tensor', async () => {
-    sdk.processor.mockResolvedValue({ input_ids: { dims: [1, 2], data: [11n, 12n] } });
+    sdk.processor.mockResolvedValue({ input_ids: { dims: [1, 2], data: [BigInt(11), BigInt(12)] } });
     expect(await recognize()).toMatchObject({ type: 'error' });
     noWeights();
   });
@@ -168,13 +168,13 @@ describe('import generation sequence integrity', () => {
   it.each([
     [], [4], [2, 2], [1, 0], [1, 2], [1, 4.5], [1, NaN], [1, Infinity], [1, 4, 1], [1, 5],
   ].map((dims) => [dims]))('does not decode malformed output dimensions %j', async (dims) => {
-    sdk.model.generate.mockResolvedValue(new sdk.Tensor([11n, 12n, 99n, 151645n], dims));
+    sdk.model.generate.mockResolvedValue(new sdk.Tensor([BigInt(11), BigInt(12), BigInt(99), BigInt(151645)], dims));
     expect(await recognize()).toMatchObject({ type: 'error' });
     expect(sdk.processor.batch_decode).not.toHaveBeenCalled();
     expect(sdk.model.dispose).toHaveBeenCalledOnce();
   });
   it('does not decode output belonging to a different input sequence', async () => {
-    sdk.model.generate.mockResolvedValue(new sdk.Tensor([21n, 22n, 99n, 151645n]));
+    sdk.model.generate.mockResolvedValue(new sdk.Tensor([BigInt(21), BigInt(22), BigInt(99), BigInt(151645)]));
     expect(await recognize(png())).toMatchObject({
       type: 'error', message: expect.stringContaining('來源不一致'),
     });
@@ -184,14 +184,14 @@ describe('import generation sequence integrity', () => {
   });
   it('rejects output exceeding the configured generation budget, even with an end token', async () => {
     sdk.model.generate.mockResolvedValue(new sdk.Tensor([
-      11n, 12n, ...Array<bigint>(IMPORT_AI_MAX_OUTPUT_TOKENS).fill(99n), 151645n,
+      BigInt(11), BigInt(12), ...Array<bigint>(IMPORT_AI_MAX_OUTPUT_TOKENS).fill(BigInt(99)), BigInt(151645),
     ]));
     expect(await recognize()).toMatchObject({ type: 'error' });
     expect(sdk.processor.batch_decode).not.toHaveBeenCalled();
     expect(sdk.model.dispose).toHaveBeenCalledOnce();
   });
   it('does not treat the unchanged input prefix as a generated response', async () => {
-    sdk.model.generate.mockResolvedValue(new sdk.Tensor([11n, 12n]));
+    sdk.model.generate.mockResolvedValue(new sdk.Tensor([BigInt(11), BigInt(12)]));
     expect(await recognize()).toMatchObject({ type: 'error' });
     expect(sdk.processor.batch_decode).not.toHaveBeenCalled();
     expect(sdk.model.dispose).toHaveBeenCalledOnce();
