@@ -1031,8 +1031,9 @@ service cloud.firestore {
           && resource.data.get('type', '') != 'assignment';
 
         match /submissions/{submissionId} {
-          allow read: if (isActiveGroupMember(groupId) && submissionId == request.auth.uid)
-            || canReadSubmissionDoc(groupId, assignmentId, submissionId, resource.data);
+          allow read: if isActiveGroupMember(groupId)
+            && (submissionId == request.auth.uid
+              || canReadSubmissionDoc(groupId, assignmentId, submissionId, resource.data));
           allow create: if validStudentSubmission(groupId, assignmentId, submissionId)
             && request.resource.data.keys().hasOnly([
               'userId', 'groupId', 'assignmentId', 'content', 'attachments', 'answers', 'status', 'submittedAt', 'updatedAt'
@@ -1316,6 +1317,22 @@ service cloud.firestore {
           allow read: if isSelf(uid);
           allow write: if false;
         }
+      }
+
+      // Separate from users/{uid}/schools/{schoolId}/**: that legacy subtree has
+      // a broad owner-read rule, which would bypass school-membership revocation.
+      match /campusPostBookmarks/{schoolId}/posts/{postId} {
+        allow read: if isSelf(uid) && isSchoolMember(schoolId);
+        allow create: if isSelf(uid)
+          && isSchoolMember(schoolId)
+          && request.resource.data.keys().hasOnly(['schoolId', 'postId', 'createdAt'])
+          && request.resource.data.keys().hasAll(['schoolId', 'postId', 'createdAt'])
+          && request.resource.data.schoolId == schoolId
+          && request.resource.data.postId == postId
+          && request.resource.data.createdAt == request.time
+          && exists(/databases/$(database)/documents/schools/$(schoolId)/campusPosts/$(postId));
+        allow delete: if isSelf(uid) && isSchoolMember(schoolId);
+        allow update: if false;
       }
 
       match /groups/{groupRef} {
@@ -1635,10 +1652,20 @@ service cloud.firestore {
         && (resource.data.followerUid == request.auth.uid || resource.data.targetUid == request.auth.uid)
         && isSchoolMember(resource.data.schoolId);
       allow create: if isSignedIn()
+        && request.resource.data.keys().hasAll(['schoolId', 'followerUid', 'targetUid', 'createdAt'])
+        && request.resource.data.keys().hasOnly(['schoolId', 'followerUid', 'targetUid', 'createdAt'])
+        && request.resource.data.schoolId is string
         && request.resource.data.followerUid == request.auth.uid
+        && request.resource.data.targetUid is string
+        && request.resource.data.targetUid.size() > 0
+        && request.resource.data.targetUid.size() <= 128
         && request.resource.data.followerUid != request.resource.data.targetUid
-        && request.resource.data.schoolId != null
-        && isSchoolMember(request.resource.data.schoolId);
+        && followId == 'fol_' + request.resource.data.schoolId + '_' + request.auth.uid + '_' + request.resource.data.targetUid
+        && request.resource.data.createdAt == request.time
+        && isSchoolMember(request.resource.data.schoolId)
+        && exists(/databases/$(database)/documents/schools/$(request.resource.data.schoolId)/members/$(request.resource.data.targetUid))
+        && get(/databases/$(database)/documents/schools/$(request.resource.data.schoolId)/members/$(request.resource.data.targetUid)).data.status == 'active';
+      // Allow owners to remove their own follow even after membership is revoked.
       allow delete: if isSignedIn() && resource.data.followerUid == request.auth.uid;
       allow update: if false;
     }

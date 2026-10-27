@@ -1,7 +1,12 @@
+import type { ServiceAccountSigner } from './firebaseCustomToken';
+
 const REQUIRED_PROJECT_ID = 'campus-one-tw';
 
 type FirebaseAdmin = {
-  verifyIdToken: (token: string) => Promise<{ uid: string } & Record<string, unknown>>;
+  verifyIdToken: (
+    token: string,
+    checkRevoked?: boolean,
+  ) => Promise<{ uid: string } & Record<string, unknown>>;
   db: import('firebase-admin/firestore').Firestore;
 };
 
@@ -23,10 +28,11 @@ export function hasServiceAccountJson(env: NodeJS.ProcessEnv = process.env): boo
   return Boolean(String(env.FIREBASE_SERVICE_ACCOUNT_JSON || '').trim());
 }
 
-function parseServiceAccount(raw: string): {
+export function parseServiceAccount(raw: string): {
   project_id: string;
   client_email: string;
   private_key: string;
+  private_key_id?: string;
 } | null {
   let parsed: unknown;
   try {
@@ -52,6 +58,23 @@ function parseServiceAccount(raw: string): {
     private_key: record.private_key.includes('\\n')
       ? record.private_key.replace(/\\n/g, '\n')
       : record.private_key,
+    ...(typeof record.private_key_id === 'string' && record.private_key_id
+      ? { private_key_id: record.private_key_id }
+      : {}),
+  };
+}
+
+export function readServiceAccountSigner(
+  env: NodeJS.ProcessEnv = process.env,
+): ServiceAccountSigner | null {
+  const raw = String(env.FIREBASE_SERVICE_ACCOUNT_JSON || '').trim();
+  if (!raw) return null;
+  const account = parseServiceAccount(raw);
+  if (!account || account.project_id !== REQUIRED_PROJECT_ID) return null;
+  return {
+    client_email: account.client_email,
+    private_key: account.private_key,
+    ...(account.private_key_id ? { private_key_id: account.private_key_id } : {}),
   };
 }
 
@@ -85,8 +108,8 @@ async function initializeFirebaseAdmin(env: NodeJS.ProcessEnv): Promise<Firebase
     const auth = getAuth(app);
     cached = {
       db: getFirestore(app),
-      verifyIdToken: async (token: string) => {
-        const decoded = await auth.verifyIdToken(token);
+      verifyIdToken: async (token: string, checkRevoked?: boolean) => {
+        const decoded = await auth.verifyIdToken(token, checkRevoked === true);
         return decoded as { uid: string } & Record<string, unknown>;
       },
     };

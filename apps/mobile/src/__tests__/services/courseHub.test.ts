@@ -1,9 +1,11 @@
 import { getDocFromServer, getDocsFromServer } from 'firebase/firestore';
 import { getAuthInstance, isFirebaseMockMode } from '../../firebase';
 import { loadCourseHub, courseResourceUrl, type CourseHubScope } from '../../features/courseHub';
+import { canSubmitCourseWork } from '../../features/courseSubmissionState';
 import { tcFetchCourseDetail } from '../../services/tronClassClient';
 import { isTronClassDataFetchEnabled } from '../../services/tronClassDataEnabled';
 import { resolveCourseHubTarget } from '../../utils/courseHubRoute';
+import { parseTaipeiInstant } from '@campus/shared/src/taipeiTime';
 
 jest.mock('../../firebase', () => ({
   getDb: () => 'db',
@@ -111,7 +113,7 @@ test('loads authoritative same-course content, hides drafts and rejects unsafe m
   expect(getDocsFromServer).toHaveBeenCalledWith('groups/course-a/modules/0/materials');
   expect(getDocsFromServer).toHaveBeenCalledWith('groups/course-a/modules/1/materials');
   expect(getDocsFromServer).not.toHaveBeenCalledWith('groups/course-a/modules/2/materials');
-  expect(getDocFromServer).toHaveBeenCalledTimes(9);
+  expect(getDocFromServer).toHaveBeenCalledTimes(13);
   expect(JSON.stringify(result)).not.toMatch(/13\/15|6\/7|88|A-/);
 });
 test('confirmed empty and rejected sections stay distinct', async () => {
@@ -267,4 +269,150 @@ test('nested module files replace the unit link and drop unsafe or unpublished f
       order: 1,
     },
   ]);
+});
+
+test('student receipts reflect server-acknowledged submissions without leaking unpublished grades', async () => {
+  jest.mocked(getDocsFromServer).mockImplementation(async (ref) => (
+    String(ref).endsWith('/assignments')
+      ? collectionResult([{
+          title: '閱讀心得',
+          type: 'assignment',
+          published: true,
+          status: 'published',
+          dueAt: '2026-10-28T15:59:00Z',
+        }])
+      : collectionResult([])
+  ));
+  records['groups/course-a/assignments/0/submissions/alice'] = {
+    status: 'submitted',
+    submittedAt: '2026-10-26T08:10:00Z',
+    gradePublished: false,
+    gradeScore: 99,
+    gradeFeedback: '尚未發布的教師回饋',
+  };
+
+  const result = await loadCourseHub(scope);
+  expect(result.assignments.items).toMatchObject([{
+    title: '閱讀心得',
+    submission: { kind: 'submitted', submittedAt: '2026-10-26T08:10:00.000Z', grade: null },
+  }]);
+  expect(JSON.stringify(result)).not.toContain('尚未發布的教師回饋');
+  expect(getDocFromServer).toHaveBeenCalledWith(
+    'groups/course-a/assignments/0/submissions/alice',
+  );
+
+  records['groups/course-a/assignments/0/submissions/alice'].gradePublished = true;
+  records['groups/course-a/assignments/0/submissions/alice'].gradeScore = 92;
+  const published = await loadCourseHub(scope);
+  expect(published.assignments.items[0].submission).toMatchObject({
+    kind: 'submitted',
+    grade: { score: 92, feedback: '尚未發布的教師回饋' },
+  });
+});
+
+test('receipt failures remain explicit and an enrollment revocation blocks the entire response', async () => {
+  jest.mocked(getDocsFromServer).mockImplementation(async (ref) => (
+    String(ref).endsWith('/assignments')
+      ? collectionResult([{
+          title: '期末作業',
+          type: 'assignment',
+          published: true,
+          status: 'published',
+          dueAt: '2026-10-28T16:00:00Z',
+        }])
+      : collectionResult([])
+  ));
+  jest.mocked(getDocFromServer).mockImplementation(async (ref) => {
+    if (String(ref).endsWith('/submissions/alice')) throw new Error('permission-denied');
+    return document(records[String(ref)]);
+  });
+  const result = await loadCourseHub(scope);
+  expect(result.assignments.items[0].submission).toEqual({ kind: 'unavailable' });
+
+  jest.mocked(getDocFromServer).mockImplementation(async (ref) => {
+    if (String(ref).endsWith('/submissions/alice')) {
+      records['groups/course-a/members/alice'].status = 'left';
+      return document();
+    }
+    return document(records[String(ref)]);
+  });
+  await expect(loadCourseHub(scope)).rejects.toThrow('無法存取');
+});
+
+test.each(['owner', 'admin', 'instructor', 'moderator'])('%s sees teaching actions instead of personal student receipts', async (role) => {
+  records['groups/course-a/members/alice'].role = role;
+  jest.mocked(getDocsFromServer)
+    .mockResolvedValueOnce(collectionResult([{
+      title: '進行中的作業',
+      type: 'assignment',
+      published: true,
+      status: 'published',
+    }]))
+    .mockResolvedValueOnce(collectionResult([]));
+  const result = await loadCourseHub(scope);
+  expect(result.canTeach).toBe(true);
+  expect(result.assignments.items[0].submission).toEqual({ kind: 'instructor' });
+  expect(getDocFromServer).not.toHaveBeenCalledWith(expect.stringContaining('/submissions/'));
+});
+
+test('loader keeps missing deadlines open and blocks present but unreadable deadlines before policy', async () => {
+  jest.mocked(getDocsFromServer).mockImplementation(async (ref) => (
+    String(ref).endsWith('/assignments')
+      ? collectionResult([
+          {
+            title: '未設截止',
+            type: 'assignment',
+            published: true,
+            status: 'published',
+            dueAt: null,
+          },
+          {
+            title: '壞掉的截止',
+            type: 'assignment',
+            published: true,
+            status: 'published',
+            dueAt: 'not-a-real-deadline',
+            allowLateSubmission: true,
+          },
+          {
+            title: '台北牆鐘截止',
+            type: 'assignment',
+            published: true,
+            status: 'published',
+            dueAt: '2026-10-28T23:59:00',
+          },
+        ])
+      : collectionResult([])
+  ));
+
+  const result = await loadCourseHub(scope);
+  const [missing, malformed, taipeiWall] = result.assignments.items;
+  const now = new Date('2026-10-26T12:00:00+08:00');
+
+  expect(missing.dueAt).toBeNull();
+  expect(canSubmitCourseWork({ ...missing, submission: { kind: 'not_submitted' } }, now)).toBe(true);
+
+  expect(malformed.dueAt).toBeTruthy();
+  expect(parseTaipeiInstant(malformed.dueAt!)).toBeNull();
+  expect(
+    canSubmitCourseWork(
+      { ...malformed, submission: { kind: 'not_submitted' }, allowLateSubmission: true },
+      now,
+    ),
+  ).toBe(false);
+
+  expect(taipeiWall.dueAt).toBe('2026-10-28T15:59:00.000Z');
+  expect(parseTaipeiInstant(taipeiWall.dueAt!)).toBe(parseTaipeiInstant('2026-10-28T23:59:00+08:00'));
+  expect(canSubmitCourseWork({ ...taipeiWall, submission: { kind: 'not_submitted' } }, now)).toBe(true);
+});
+
+
+test.each(['', '   ', 1793023200000, { unexpected: true }])('malformed present deadline %j is never unrestricted', async (dueAt) => {
+  jest.mocked(getDocsFromServer).mockResolvedValueOnce(collectionResult([{
+    title: '截止時間待確認', type: 'assignment', published: true, status: 'published',
+    dueAt, allowLateSubmission: true,
+  }]));
+  const result = await loadCourseHub(scope);
+  expect(result.assignments.items[0].dueAt).not.toBeNull();
+  expect(canSubmitCourseWork(result.assignments.items[0])).toBe(false);
 });
