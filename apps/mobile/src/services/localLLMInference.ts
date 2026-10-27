@@ -611,9 +611,10 @@ class LocalLLMEngine {
     // Claim the loading slot before any async filesystem work.
     this.setState({ status: 'loading', modelId: cfg.modelId, error: undefined });
 
-    // 檢查模型檔案
+    // 檢查模型檔案；I/O 失敗不能永久卡在 loading。
     const modelPath = this.getModelPath(cfg);
-    const fileInfo = await FileSystem.getInfoAsync(modelPath);
+    try {
+      const fileInfo = await FileSystem.getInfoAsync(modelPath);
     if (!fileInfo.exists) {
       this.setState({
         status: 'error',
@@ -631,7 +632,6 @@ class LocalLLMEngine {
       return false;
     }
 
-    try {
       const runtimeAvailability = getRuntimeAvailability();
       if (!runtimeAvailability.available) {
         throw new Error(runtimeAvailability.reason ?? RUNTIME_UNAVAILABLE_MESSAGE);
@@ -663,7 +663,8 @@ class LocalLLMEngine {
       this.config = cfg;
       this.setState({ status: 'ready', modelId: cfg.modelId });
 
-      await AsyncStorage.setItem(STORAGE_KEYS.activeModel, cfg.modelId);
+      // A preference-write failure does not invalidate a loaded native context.
+      await AsyncStorage.setItem(STORAGE_KEYS.activeModel, cfg.modelId).catch(() => {});
       return true;
     } catch (e: any) {
       this.setState({
@@ -736,8 +737,8 @@ class LocalLLMEngine {
       throw new Error('Model not loaded. Call loadModel() or ensureReady() first.');
     }
 
-    if (this.state.status === 'generating') {
-      throw new Error('Already generating. Abort the current generation first.');
+    if (this.state.status !== 'ready') {
+      throw new Error('Native model is busy. Complete the current operation first.');
     }
 
     this.setState({ status: 'generating' });
@@ -753,9 +754,11 @@ class LocalLLMEngine {
       signal,
     } = options;
 
-    // 連接外部 signal
+    // Forward aborts to the native llama context and remove listeners afterwards.
+    const onExternalAbort = () => this.abort();
     if (signal) {
-      signal.addEventListener('abort', () => this.abortController?.abort());
+      signal.addEventListener('abort', onExternalAbort);
+      if (signal.aborted) this.abort();
     }
 
     const prompt = this.formatPrompt(messages);
@@ -763,6 +766,7 @@ class LocalLLMEngine {
     try {
       const startTime = Date.now();
       let generated = '';
+      if (this.abortController?.signal.aborted) throw new Error('Aborted');
 
       const result = await this.context.completion(
         {
@@ -782,6 +786,10 @@ class LocalLLMEngine {
       );
 
       const totalTimeMs = Date.now() - startTime;
+      if (this.abortController?.signal.aborted) {
+        this.setState({ status: 'ready' });
+        return { content: '', tokensGenerated: 0, tokensPerSecond: 0, finishReason: 'error', totalTimeMs };
+      }
       const tps = result.timings?.predicted_per_second ?? 0;
 
       this.setState({ status: 'ready', tokensPerSecond: tps });
@@ -810,15 +818,21 @@ class LocalLLMEngine {
       this.setState({ status: 'error', error: e.message });
       throw e;
     } finally {
+      signal?.removeEventListener('abort', onExternalAbort);
       this.abortController = null;
     }
   }
 
   /**
-   * 中斷目前生成
+   * 中斷目前生成：直接通知 llama.rn 原生引擎停止推論。
    */
   abort() {
     this.abortController?.abort();
+    if (this.state.status === 'generating' && this.context) {
+      void this.context.stopCompletion().catch((error) => {
+        console.warn('[LocalLLM] Native completion stop failed:', error);
+      });
+    }
   }
 
   // ── Conversation Management ──
