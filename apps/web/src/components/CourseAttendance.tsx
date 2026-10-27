@@ -137,7 +137,7 @@ function Session({
       JSON.stringify({ groupId: courseId, sessionId: session.id, qrToken: code }),
       { width: 260, margin: 2 },
     );
-    if (live.current) {
+    if (live.current && document.visibilityState === 'visible' && Date.now() < deadline) {
       setTeacherCode(code);
       setQr(image);
     }
