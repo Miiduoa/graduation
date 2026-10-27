@@ -8,6 +8,9 @@ import {
   loadCourseAttendance,
   loadAttendanceCode,
   loadAttendanceRecords,
+  loadCourseAttendanceRoster,
+  loadAttendanceCorrections,
+  correctCourseAttendance,
   startCourseAttendance,
   studentAttendanceHeading,
   studentCheckInSession,
@@ -225,4 +228,45 @@ it('rejects reading stale cached permission and never treats offline cache as au
   vi.mocked(getDocFromServer).mockRejectedValueOnce(new Error('offline'));
   await expect(loadCourseAttendance('class', 'alice')).rejects.toThrow('offline');
   expect(getDocsFromServer).not.toHaveBeenCalled();
+});
+
+it('limits the roster view to currently enrolled students for a verified instructor', async () => {
+  vi.mocked(getDocFromServer).mockResolvedValue(document({ status: 'active', role: 'instructor' }) as never);
+  vi.mocked(getDocsFromServer).mockResolvedValue({
+    docs: [
+      { id: 'student-a', data: () => ({ role: 'member', status: 'active', displayName: '學生甲', studentId: 'S001' }) },
+      { id: 'old', data: () => ({ role: 'member', status: 'removed', displayName: '退選學生' }) },
+      { id: 'teacher', data: () => ({ role: 'instructor', status: 'active', displayName: '教師' }) },
+    ],
+  } as never);
+  expect(await loadCourseAttendanceRoster('class')).toEqual([
+    { uid: 'student-a', displayName: '學生甲', studentId: 'S001' },
+  ]);
+});
+
+it('does not permit a student to view the teacher correction roster or audit', async () => {
+  vi.mocked(getDocFromServer).mockResolvedValue(document({ status: 'active', role: 'member' }) as never);
+  await expect(loadCourseAttendanceRoster('class')).rejects.toMatchObject({ code: 'functions/permission-denied' });
+  await expect(loadAttendanceCorrections('class', 'session')).rejects.toMatchObject({ code: 'functions/permission-denied' });
+  expect(getDocsFromServer).not.toHaveBeenCalled();
+});
+
+it('submits teacher corrections only after validating an explicit reason and authentication', async () => {
+  await expect(correctCourseAttendance({
+    groupId: 'class', sessionId: 'session', studentUid: 'student',
+    status: 'absent', reason: '', requestId: 'same-attempt',
+  })).rejects.toThrow();
+  expect(fetchMock).not.toHaveBeenCalled();
+  fetchMock.mockResolvedValue({
+    ok: true, status: 200, json: async () => ({ result: { success: true, reused: false, status: 'absent' } }),
+  });
+  await expect(correctCourseAttendance({
+    groupId: 'class', sessionId: 'session', studentUid: 'student',
+    status: 'absent', reason: '授課教師已核實學生未出席', requestId: 'same-attempt',
+  })).resolves.toMatchObject({ success: true, status: 'absent' });
+  expect(fetchMock.mock.calls[0][0]).toBe('/api/fn/correctAttendanceRecord');
+  expect(JSON.parse(fetchMock.mock.calls[0][1].body).data).toMatchObject({
+    groupId: 'class', sessionId: 'session', studentUid: 'student',
+    status: 'absent', requestId: 'same-attempt',
+  });
 });
