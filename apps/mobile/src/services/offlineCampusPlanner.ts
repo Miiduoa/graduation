@@ -150,10 +150,12 @@ export function buildOfflineCampusPlan(input: {
     // If nothing is due in this window, show the closest future deadline instead.
     const selected = (relevant.length ? relevant : rows.slice(0, 1)).slice(0, 3);
     for (const [index, assignment] of selected.entries()) {
-      const priority = duePriority(assignment.dueAt, now);
-      const due = assignment.dueAt
-        ? '截止 ' + localDate(assignment.dueAt) + '；' + priorityLabel(priority)
-        : '來源沒有提供截止日期；請先核對作業頁';
+      const confirmedDueAt = assignment.dueAt && Number.isFinite(Date.parse(assignment.dueAt))
+        ? assignment.dueAt : null;
+      const priority = duePriority(confirmedDueAt, now);
+      const due = confirmedDueAt
+        ? '截止 ' + localDate(confirmedDueAt) + '；' + priorityLabel(priority)
+        : '來源沒有可核對的截止日期；請先核對作業頁';
       steps.push({
         id: 'assignment-' + index,
         title: cleaned(assignment.title),
