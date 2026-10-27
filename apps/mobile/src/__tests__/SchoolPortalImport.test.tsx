@@ -20,17 +20,19 @@ jest.mock('@react-navigation/native', () => ({
 }));
 jest.mock('expo-crypto', () => ({ randomUUID: () => `request_${++mockSerial}_12345678` }));
 jest.mock('react-native-webview', () => {
-  const React = jest.requireActual('react');
-  const { View } = jest.requireActual('react-native');
-  return { WebView: React.forwardRef((props: Record<string, unknown>, ref: React.Ref<unknown>) => {
-    React.useImperativeHandle(ref, () => ({ injectJavaScript: mockInject, goBack: mockBack }));
-    return <View {...props} />;
-  }) };
+  const MockReact = jest.requireActual('react');
+  const { View: MockView } = jest.requireActual('react-native');
+  const MockWebView = MockReact.forwardRef(function MockPortalWebView(props: Record<string, unknown>, ref: unknown) {
+    MockReact.useImperativeHandle(ref, () => ({ injectJavaScript: mockInject, goBack: mockBack }));
+    return MockReact.createElement(MockView, props);
+  });
+  return { WebView: MockWebView };
 });
 jest.mock('../ui/components', () => {
+  const MockReact = jest.requireActual('react');
   const { Pressable, Text } = jest.requireActual('react-native');
   return { Button: ({ text, disabled, onPress }: { text: string; disabled?: boolean; onPress(): void }) =>
-    <Pressable accessibilityRole="button" accessibilityLabel={text} accessibilityState={{ disabled: !!disabled }} disabled={disabled} onPress={onPress}><Text>{text}</Text></Pressable> };
+    MockReact.createElement(Pressable, { accessibilityRole: 'button', accessibilityLabel: text, accessibilityState: { disabled: !!disabled }, disabled, onPress }, MockReact.createElement(Text, null, text)) };
 });
 jest.mock('../services/personalImports', () => ({ appendPersonalImports: jest.fn(), undoLastPersonalImport: jest.fn() }));
 const html = '<h2>115 學年度第 1 學期</h2><table><tr><th>課程名稱</th><th>學分</th><th>成績</th></tr><tr><td>統計學</td><td>3</td><td>90</td></tr></table>';
