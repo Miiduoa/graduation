@@ -37,6 +37,22 @@ function weekAssignments(items: HubAssignment[], now = new Date()): HubAssignmen
     return dueUtc >= start && dueUtc < end;
   }).sort((a, b) => (parseTaipeiInstant(a.dueAt!) ?? 0) - (parseTaipeiInstant(b.dueAt!) ?? 0));
 }
+
+function deadlineLabel(item: HubAssignment): string {
+  if (item.closed) return '已關閉';
+  if (!item.dueAt) return '未提供截止時間';
+  if (parseTaipeiInstant(item.dueAt) === null) return '截止時間無法確認';
+  return `截止：${formatTaipeiDateTime(item.dueAt, { seconds: false })}`;
+}
+
+function overduePolicyText(item: HubAssignment, now = new Date()): string | null {
+  if (item.submission?.kind === 'submitted' || !item.dueAt) return null;
+  const dueMs = parseTaipeiInstant(item.dueAt);
+  if (dueMs === null || dueMs >= now.getTime()) return null;
+  return !item.closed && item.allowLateSubmission
+    ? '已過截止時間 · 教師允許補交'
+    : '已過截止時間 · 請洽授課教師';
+}
 export default function CourseHubAiFirstScreen({ navigation, route }: Props) {
   const { user } = useAuth();
   const { school } = useSchool();
@@ -155,13 +171,23 @@ function CourseContent({
       courseName: data.name,
     });
   };
+  const openGrading = () => {
+    if (target?.source !== 'group' || !data?.canTeach) return;
+    void open(`https://nuni.tw/teacher/course/${encodeURIComponent(target.groupId)}?school=${encodeURIComponent(schoolId)}`);
+  };
   const openAssignment = (item: HubAssignment) => {
     if (!isCurrent() || !data || target?.source !== 'group') return;
+    if (data.canTeach || item.submission?.kind === 'instructor') {
+      openGrading();
+      return;
+    }
+    const dueAt =
+      item.dueAt && parseTaipeiInstant(item.dueAt) !== null ? item.dueAt : undefined;
     safeNavigate(navigation, 'HomeworkSubmit', {
       courseId: target.groupId,
       hwId: item.id,
       hwTitle: item.title,
-      ...(item.dueAt ? { dueAt: item.dueAt } : {}),
+      ...(dueAt ? { dueAt } : {}),
     });
   };
   const go = (screen: string) => {
@@ -176,6 +202,11 @@ function CourseContent({
     : assignments.filter((item) => workFilter === 'submitted'
       ? item.submission?.kind === 'submitted'
       : canListAsPendingWork(item.submission));
+  const weekItems = weekAssignments(assignments);
+  const receiptUnconfirmed = assignments.some(
+    (item) =>
+      item.submission?.kind === 'unavailable' || item.submission?.kind === 'unconfirmed',
+  );
   const body = { ...theme.typography.body, color: theme.colors.muted };
   const gap = { gap: theme.space.md };
   return (
@@ -214,29 +245,33 @@ function CourseContent({
           <View ref={weekRef} nativeID="week" testID="course-week" collapsable={false}>
           <AICard title="本週">
             <View style={gap}>
-              {weekAssignments(data.assignments.status === 'ready' ? data.assignments.items : []).length ? (
-                weekAssignments(data.assignments.status === 'ready' ? data.assignments.items : []).map(
-                  (item) => (
-                    <View key={item.id} style={{ gap: 4 }}>
-                      <Text style={{ ...theme.typography.body, color: theme.colors.text, fontWeight: '700' }}>
-                        {item.title}
-                      </Text>
-                      <Text style={body}>
-                        {'截止：' + formatTaipeiDateTime(item.dueAt!, { seconds: false })}
-                      </Text>
-                      <AIButton
-                        label={'查看本週作業：' + item.title}
-                        variant="ghost"
-                        onPress={() => openAssignment(item)}
-                      />
-                    </View>
-                  ),
-                )
-              ) : data.assignments.status === 'error' ? (
-                <Text accessibilityRole="alert" style={body}>無法讀取這門課的作業，請更新課程後再試。</Text>
-              ) : data.assignments.items.some((item) => item.submission?.kind === 'unavailable') ? (
-                <Text accessibilityRole="alert" style={body}>部分繳交狀態暫時無法確認，請重新整理或開啟作業核對。</Text>
-              ) : (
+              {data.assignments.status === 'error' ? (
+                <Text accessibilityRole="alert" style={body}>
+                  無法讀取這門課的作業，請更新課程後再試。
+                </Text>
+              ) : null}
+              {receiptUnconfirmed ? (
+                <Text accessibilityRole="alert" style={body}>
+                  部分繳交狀態暫時無法確認，請重新整理或開啟作業核對。
+                </Text>
+              ) : null}
+              {weekItems.length ? (
+                weekItems.map((item) => (
+                  <View key={item.id} style={{ gap: 4 }}>
+                    <Text style={{ ...theme.typography.body, color: theme.colors.text, fontWeight: '700' }}>
+                      {item.title}
+                    </Text>
+                    <Text style={body}>
+                      {'截止：' + formatTaipeiDateTime(item.dueAt!, { seconds: false })}
+                    </Text>
+                    <AIButton
+                      label={'查看本週作業：' + item.title}
+                      variant="ghost"
+                      onPress={() => openAssignment(item)}
+                    />
+                  </View>
+                ))
+              ) : data.assignments.status === 'error' || receiptUnconfirmed ? null : (
                 <Text style={body}>本週沒有待繳交的作業。</Text>
               )}
             </View>
@@ -273,6 +308,12 @@ function CourseContent({
             <>
               <AICard title="課程入口">
                 <View style={gap}>
+                  {data.canTeach ? (
+                    <>
+                      <AIButton label="開啟網頁批改" disabled={opening} onPress={openGrading} />
+                      <Text style={body}>在網頁查看學生繳交、評分與發布回饋；可能需要重新登入學校帳號。</Text>
+                    </>
+                  ) : null}
                   <AIButton
                     label="課程群組與公告"
                     variant="ghost"
@@ -361,48 +402,46 @@ function CourseContent({
                       {!visibleAssignments.length ? (
                         <Text style={body}>這個分類目前沒有作業。</Text>
                       ) : null}
-                      {visibleAssignments.map((item) => (
-                        <View key={item.id} style={gap}>
-                          <Text
-                            style={{
-                              ...theme.typography.body,
-                              color: theme.colors.text,
-                              fontWeight: '700',
-                            }}
-                          >
-                            {item.title}
-                          </Text>
-                          {item.description ? <Text style={body}>{item.description}</Text> : null}
-                          <Text style={body}>
-                            {item.closed
-                              ? '已關閉'
-                              : item.dueAt
-                                ? `截止：${formatTaipeiDateTime(item.dueAt, { seconds: false })}`
-                                : '未提供截止時間'}
-                          </Text>
-                          <Text style={{ ...theme.typography.bodySmall, color: theme.colors.textSecondary }}>
-                            {submissionStatusText(item.submission)}
-                          </Text>
-                          {item.submission?.kind !== 'submitted' &&
-                          item.dueAt && (parseTaipeiInstant(item.dueAt) ?? Infinity) < Date.now() ? (
-                            <Text style={{ ...theme.typography.bodySmall, color: theme.colors.warning }}>
-                              {item.allowLateSubmission ? '已過截止時間 · 教師允許補交' : '已過截止時間 · 請洽授課教師'}
+                      {visibleAssignments.map((item) => {
+                        const overdue = overduePolicyText(item);
+                        return (
+                          <View key={item.id} style={gap}>
+                            <Text
+                              style={{
+                                ...theme.typography.body,
+                                color: theme.colors.text,
+                                fontWeight: '700',
+                              }}
+                            >
+                              {item.title}
                             </Text>
-                          ) : null}
-                          {item.submission?.kind === 'submitted' && item.submission.grade?.feedback ? (
-                            <Text style={body}>教師回饋：{item.submission.grade.feedback}</Text>
-                          ) : null}
-                          <AIButton
-                            label={
-                              (item.submission?.kind === 'submitted'
-                                ? '查看繳交紀錄：'
-                                : item.closed ? '查看已關閉作業：' : '查看作業：') + item.title
-                            }
-                            variant="ghost"
-                            onPress={() => openAssignment(item)}
-                          />
-                        </View>
-                      ))}
+                            {item.description ? <Text style={body}>{item.description}</Text> : null}
+                            <Text style={body}>{deadlineLabel(item)}</Text>
+                            <Text style={{ ...theme.typography.bodySmall, color: theme.colors.textSecondary }}>
+                              {submissionStatusText(item.submission)}
+                            </Text>
+                            {overdue ? (
+                              <Text style={{ ...theme.typography.bodySmall, color: theme.colors.warning }}>
+                                {overdue}
+                              </Text>
+                            ) : null}
+                            {item.submission?.kind === 'submitted' && item.submission.grade?.feedback ? (
+                              <Text style={body}>教師回饋：{item.submission.grade.feedback}</Text>
+                            ) : null}
+                            <AIButton
+                              label={
+                                (item.submission?.kind === 'instructor'
+                                  ? '開啟網頁批改：'
+                                  : item.submission?.kind === 'submitted'
+                                    ? '查看繳交紀錄：'
+                                  : item.closed ? '查看已關閉作業：' : '查看作業：') + item.title
+                              }
+                              variant="ghost"
+                              onPress={() => openAssignment(item)}
+                            />
+                          </View>
+                        );
+                      })}
                     </>
                   )}
                 </View>
