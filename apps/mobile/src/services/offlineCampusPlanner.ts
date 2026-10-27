@@ -14,6 +14,9 @@ export interface CampusPlanStep {
   priority: CampusPlanPriority;
   evidence: CampusPlanEvidence;
   route: CampusPlanRoute;
+  /** Only server-authorized assignment steps may carry a verified deadline. */
+  dueAt?: string;
+  groupName?: string;
 }
 
 export interface CampusEvidencePlan {
@@ -164,6 +167,8 @@ export function buildOfflineCampusPlan(input: {
         priority,
         evidence: 'authorized-assignments',
         route: '/classroom',
+        ...(confirmedDueAt ? { dueAt: confirmedDueAt } : {}),
+        ...(assignment.groupName ? { groupName: assignment.groupName } : {}),
       });
     }
     if (sense.assignments.count !== null && sense.assignments.count > sense.assignments.items.length) {
