@@ -1,0 +1,45 @@
+.panel { margin-top: 20px; border: 1px solid var(--border); border-radius: 18px; background: var(--surface); color: var(--text); overflow: hidden; }
+.panel > summary { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 20px; cursor: pointer; min-height: 64px; list-style: none; }
+.panel > summary::-webkit-details-marker { display: none; }
+.panel > summary strong { display: block; font-size: 18px; letter-spacing: -.02em; }
+.panel > summary small { display: block; color: var(--muted); font-size: 12px; line-height: 1.7; margin-top: 6px; }
+.body { padding: 0 20px 20px; display: grid; gap: 16px; }
+.actions, .filters { display: flex; flex-wrap: wrap; gap: 10px; }
+.panel button, .panel select, .panel input { box-sizing: border-box; min-height: 44px; min-width: 0; border: 1px solid var(--border-strong); border-radius: 10px; color: var(--text); background: var(--surface); font: inherit; padding: 10px 12px; }
+.panel button { cursor: pointer; font-size: 13px; font-weight: 600; }
+.panel button:hover:not(:disabled) { background: var(--bg-soft); }
+.panel button:disabled { opacity: .5; cursor: not-allowed; }
+.panel button:focus-visible, .panel select:focus-visible, .panel input:focus-visible, .panel summary:focus-visible { outline: 3px solid var(--brand); outline-offset: 2px; }
+.panel label { display: grid; gap: 6px; font-size: 12px; color: var(--muted); }
+.panel input { font-size: 16px; }
+.filters > label:first-child { flex: 1 1 200px; }
+.filters > label:last-child { flex: 0 1 180px; }
+.scoreboard { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.scoreboard > div { padding: 18px; border: 1px solid var(--border); border-radius: 14px; background: var(--bg-soft); min-width: 0; }
+.scoreboard > div:last-child { background: var(--accent-soft); }
+.scoreboard h4, .results h4 { font-size: 14px; margin: 0 0 14px; }
+.scoreboard span { color: var(--muted); font-size: 12px; }
+.scoreboard strong { display: block; font-size: clamp(24px, 4vw, 34px); margin: 7px 0; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.scoreboard strong small { font-size: 12px; font-weight: 400; }
+.scoreboard p { font-size: 12px; line-height: 1.7; margin: 5px 0 0; color: var(--muted); }
+.note, .empty { color: var(--muted); font-size: 12px; line-height: 1.8; margin: 0; }
+.delta { margin: 0; font-size: 13px; font-weight: 600; line-height: 1.8; }
+.results { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px; }
+.results section { min-width: 0; }
+.results table { border-collapse: collapse; width: 100%; font-size: 12px; table-layout: fixed; }
+.results th, .results td { padding: 11px 4px; text-align: right; border-bottom: 1px solid var(--border); font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.results th:first-child { text-align: left; }
+.results td small { display: block; color: var(--muted); font-size: 10px; }
+.courses { list-style: none; padding: 0; margin: 0; display: grid; gap: 8px; }
+.courses li { display: flex; align-items: center; justify-content: space-between; gap: 16px; border: 1px solid var(--border); border-radius: 12px; padding: 12px 14px; }
+.courses li > div { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.courses strong { font-size: 14px; }
+.courses p { font-size: 11px; color: var(--muted); line-height: 1.6; margin: 5px 0 0; }
+.courses label { flex: 0 0 150px; }
+.warning { padding: 12px; margin: 0; border: 1px solid var(--border-strong); border-left: 3px solid var(--warning); background: var(--bg-soft); border-radius: 10px; font-size: 12px; line-height: 1.8; }
+.footer { display: grid; gap: 10px; padding: 16px; background: var(--bg-soft); border-radius: 13px; }
+.footer strong { font-size: 13px; }
+.footer p { margin: 0; color: var(--muted); font-size: 12px; line-height: 1.8; }
+@media (max-width: 680px) { .body { padding: 0 14px 14px; } .panel > summary { padding: 16px; } .results { grid-template-columns: minmax(0, 1fr); } .courses li { flex-wrap: wrap; } .courses label { flex: 1 1 100%; } }
+@media (max-width: 380px) { .scoreboard { grid-template-columns: minmax(0, 1fr); } }
+@media print { .actions, .filters, .courses, .footer button { display: none; } }
