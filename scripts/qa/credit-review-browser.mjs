@@ -109,21 +109,43 @@ try {
       waiting.set(id, { resolve, reject, timeout }); socket.send(JSON.stringify({ id, method, params }));
     });
   }
-  async function evaluate(expression) {
-    const result = await send('Runtime.evaluate', { expression, awaitPromise: true, returnByValue: true });
-    if (result.exceptionDetails) throw new Error(JSON.stringify(result.exceptionDetails));
-    return result.result.value;
+  // 程式與資料分開：函式本體固定，文字／selector 透過 CDP arguments 傳值。
+  // 不將按鈕文字、網址參數或其他資料插入待執行的 JavaScript 字串。
+  async function callInPage(fn, ...values) {
+    assert.equal(typeof fn, 'function', '只能執行測試內定義的函式');
+    const global = await send('Runtime.evaluate', { expression: 'globalThis', returnByValue: false });
+    if (global.exceptionDetails || !global.result.objectId) throw new Error('瀏覽器執行環境尚未就緒');
+    const objectId = global.result.objectId;
+    try {
+      const result = await send('Runtime.callFunctionOn', {
+        objectId, functionDeclaration: fn.toString(),
+        arguments: values.map((value) => ({ value })), awaitPromise: true, returnByValue: true,
+      });
+      if (result.exceptionDetails) throw new Error(JSON.stringify(result.exceptionDetails));
+      return result.result.value;
+    } finally {
+      // 換頁時物件可能已隨舊 context 釋放，不讓清理失敗蓋過原操作結果。
+      await send('Runtime.releaseObject', { objectId }).catch(() => {});
+    }
   }
-  const button = (text) => `[...document.querySelectorAll('button')].find(x=>x.textContent.trim()===${JSON.stringify(text)})`;
-  async function click(expression) {
-    const point = await evaluate(`(()=>{const el=(${expression});if(!el||el.disabled)throw new Error('找不到可操作元件');el.scrollIntoView({block:'center',behavior:'instant'});const r=el.getBoundingClientRect();return {x:r.x+r.width/2,y:r.y+r.height/2};})()`);
+  async function click(kind, value) {
+    const point = await callInPage((type, text) => {
+      if (type !== 'button' && type !== 'selector') throw new Error('不支援的測試選取方式');
+      const el = type === 'button'
+        ? [...document.querySelectorAll('button')].find((node) => node.textContent.trim() === text)
+        : document.querySelector(text);
+      if (!el || el.disabled) throw new Error('找不到可操作元件');
+      el.scrollIntoView({ block: 'center', behavior: 'instant' });
+      const r = el.getBoundingClientRect();
+      return { x: r.x + r.width / 2, y: r.y + r.height / 2 };
+    }, kind, value);
     await send('Input.dispatchMouseEvent', { type: 'mousePressed', ...point, button: 'left', clickCount: 1 });
     await send('Input.dispatchMouseEvent', { type: 'mouseReleased', ...point, button: 'left', clickCount: 1 });
     await delay(80);
   }
-  async function check(name, expression) { assert.equal(await evaluate(expression), true, name); report.checks.push(name); }
+  async function check(name, fn, ...values) { assert.equal(await callInPage(fn, ...values), true, name); report.checks.push(name); }
   async function screenshot(name) {
-    await evaluate("window.scrollTo({top:0,behavior:'instant'})"); await delay(120);
+    await callInPage(() => window.scrollTo({ top: 0, behavior: 'instant' })); await delay(120);
     const { data } = await send('Page.captureScreenshot', { format: 'png', captureBeyondViewport: false });
     await writeFile(path.join(output, name), Buffer.from(data, 'base64')); report.screenshots.push(name);
   }
@@ -133,27 +155,46 @@ try {
     await send('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 1, mobile: false });
     const token = `?theme=${theme}&viewport=${width}`;
     await send('Page.navigate', { url: `${origin}/${token}` });
-    await until(() => evaluate(`window.__fixtureToken===${JSON.stringify(token)} && Boolean(document.querySelector('[aria-label="已修學分核對工作區"]'))`), '元件載入');
-    await click(button('60 分')); await click(button('選取無重複疑義的通過紀錄'));
-    await check(`${label}:選取兩筆無重複通過成績`, `document.querySelectorAll('input[type=checkbox]:checked').length===2`);
-    await check(`${label}:選取頁無水平溢位`, 'document.documentElement.scrollWidth<=window.innerWidth+1');
-    await check(`${label}:觸控按鈕高度`, `[...document.querySelectorAll('button')].every(x=>x.getBoundingClientRect().height>=43.5)`);
+    await until(() => callInPage((expected) => window.__fixtureToken === expected &&
+      Boolean(document.querySelector('[aria-label="已修學分核對工作區"]')), token), '元件載入');
+    await click('button', '60 分'); await click('button', '選取建議課程');
+    await check(`${label}:選取兩筆無重複通過成績`, () => document.querySelectorAll('input[type=checkbox]:checked').length === 2);
+    await check(`${label}:已選門檻收合且仍可調整`, () => [...document.querySelectorAll('details')]
+      .some((node) => node.querySelector('summary')?.textContent.includes('參考及格門檻') && !node.open));
+    await check(`${label}:選取頁無水平溢位`, () => document.documentElement.scrollWidth <= window.innerWidth + 1);
+    await check(`${label}:觸控按鈕高度`, () => [...document.querySelectorAll('button')]
+      .filter((node) => node.checkVisibility()).every((node) => node.getBoundingClientRect().height >= 43.5));
     await screenshot(`${label}-selection.png`);
-    await click(button('預覽套用差異'));
-    await check(`${label}:確認前尚未寫入`, `JSON.parse(localStorage.getItem(window.__fixtureKey)).recognized==='3'`);
-    await check(`${label}:未決重複安排禁止送出`, `(${button('確認套用到個人規劃')}).disabled===true`);
-    await check(`${label}:預覽無水平溢位`, 'document.documentElement.scrollWidth<=window.innerWidth+1');
+    await click('button', '預覽套用差異');
+    await check(`${label}:確認前尚未寫入`, () => JSON.parse(localStorage.getItem(window.__fixtureKey)).recognized === '3');
+    await check(`${label}:未決重複安排禁止送出`, () => [...document.querySelectorAll('button')]
+      .find((node) => node.textContent.trim() === '確認套用到個人規劃')?.disabled === true);
+    await check(`${label}:預覽無水平溢位`, () => document.documentElement.scrollWidth <= window.innerWidth + 1);
     await screenshot(`${label}-preview.png`);
-    await click(`document.querySelector('input[type=radio]')`);
-    await click(`document.querySelector('input[type=checkbox]')`);
-    await click(button('確認套用到個人規劃'));
-    await until(() => evaluate(`Boolean(document.querySelector('[aria-label="已修學分核對結果"]'))`), '保存回執');
-    await check(`${label}:僅套用5.5學分且移除已修安排`, `(()=>{const p=JSON.parse(localStorage.getItem(window.__fixtureKey));return p.recognized==='5.5'&&p.courses.length===0&&p.target==='128';})()`);
+    await click('selector', 'input[type=radio]');
+    await click('selector', 'input[type=checkbox]');
+    await click('button', '確認套用到個人規劃');
+    await until(() => callInPage(() => Boolean(document.querySelector('[aria-label="已修學分核對結果"]'))), '保存回執');
+    await check(`${label}:僅套用5.5學分且移除已修安排`, () => {
+      const p = JSON.parse(localStorage.getItem(window.__fixtureKey));
+      return p.recognized === '5.5' && p.courses.length === 0 && p.target === '128';
+    });
     await screenshot(`${label}-saved.png`);
   }
   await send('Page.navigate', { url: `${origin}/?case=empty` });
-  await until(() => evaluate(`document.body.textContent.includes('目前沒有可核對的成績')`), '空資料提示');
-  await check('空來源不清零原規劃', `JSON.parse(localStorage.getItem(window.__fixtureKey)).recognized==='3'`);
+  await until(() => callInPage(() => document.body.textContent.includes('目前沒有可核對的成績')), '空資料提示');
+  await check('空來源不清零原規劃', () => JSON.parse(localStorage.getItem(window.__fixtureKey)).recognized === '3');
+  const probe = '核對測試\");window.__creditInjected=true;//';
+  await callInPage((label) => {
+    const node = document.createElement('button');
+    node.id = 'credit-security-probe'; node.textContent = label;
+    node.onclick = () => { window.__creditProbeClicks = (window.__creditProbeClicks || 0) + 1; };
+    document.body.append(node);
+  }, probe);
+  await click('button', probe);
+  await check('含引號與程式片段的按鈕文字只當作資料', () =>
+    window.__creditProbeClicks === 1 && window.__creditInjected === undefined);
+  await callInPage(() => document.getElementById('credit-security-probe')?.remove());
   assert.deepEqual(report.errors, [], '瀏覽器出現例外或非本機請求');
   await writeFile(path.join(output, 'chrome.log'), logs);
   console.log(JSON.stringify({ passed: report.checks.length, screenshots: report.screenshots.length, sourceHead: report.sourceHead }));

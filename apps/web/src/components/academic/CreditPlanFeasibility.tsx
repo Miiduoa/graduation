@@ -4,6 +4,7 @@ import { useMemo } from 'react';
 import { analyzeCreditPlan } from '@campus/shared/src/creditPlanInsights';
 import { formatCredits, type CreditPlan } from '@campus/shared/src/creditPlanner';
 import styles from './CreditPlanFeasibility.module.css';
+import { CreditPlanScenarios } from './CreditPlanScenarios';
 
 function numberOrDash(value: number | null): string {
   return value === null ? '—' : formatCredits(value);
@@ -77,6 +78,7 @@ export function CreditPlanFeasibility({ plan }: { plan: CreditPlan }) {
           </p>
         </div>
       </div>
+      <CreditPlanScenarios plan={plan} />
     </section>
   );
 }

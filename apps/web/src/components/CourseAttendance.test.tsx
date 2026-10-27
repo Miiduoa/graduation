@@ -311,3 +311,9 @@ it('labels manually corrected attendance as an instructor decision, not an insta
   expect(await screen.findByText(/教師已補登出席 · 核定/)).toBeTruthy();
   expect(screen.queryByLabelText('教師提供的簽到碼')).toBeNull();
 });
+
+vi.mock('@/lib/watchAttendanceLive', () => ({
+  watchAttendanceLive: (options: { onState: (state: 'live') => void }) => {
+    options.onState('live'); return () => {};
+  },
+}));

@@ -18,13 +18,19 @@ tags:
 - takeScreenshot: guest_startup
 
 # Account and import actions precede the public-service directory.
-# Center the actual action; do not assume an off-screen native node is tappable.
+# Check the heading before scrolling to its action; they need not share a viewport.
+# Stop when each target is fully visible, without an extra centering swipe.
+- scrollUntilVisible:
+    element:
+      text: 'Google 帳號'
+    direction: DOWN
+    centerElement: false
+- assertVisible: 'Google 帳號'
 - scrollUntilVisible:
     element:
       id: login-start
     direction: DOWN
-    centerElement: true
-- assertVisible: 'Google 帳號'
+    centerElement: false
 - tapOn:
     id: login-start
 # Assert the visible terminal state rather than a non-interactive page container.

@@ -10,6 +10,8 @@ import { Button } from './ui/Button';
 import { Input } from './ui/Input';
 import { AttendanceQrScanner } from './AttendanceQrScanner';
 import { AttendanceCorrectionPanel } from './AttendanceCorrectionPanel';
+import { AttendanceSyncStatus } from './AttendanceSyncStatus';
+import { watchAttendanceLive, type AttendanceLiveState } from '@/lib/watchAttendanceLive';
 import { resolveSchoolPageContext, type SchoolSearchParams } from '@/lib/pageContext';
 import {
   attendanceCsv,
@@ -73,7 +75,8 @@ function Session({
       live.current = false;
     };
   }, []);
-  const confirmed = session.ownRecord?.checkedInAt ?? confirmedAt;
+  const confirmed = session.ownStatus === 'absent' || session.ownStatus === 'excused'
+    ? null : session.ownRecord?.checkedInAt ?? confirmedAt;
   useEffect(() => {
     if (!session.ownRecord) setConfirmedAt(null);
   }, [session.ownRecord]);
@@ -401,6 +404,9 @@ function Workspace({ courseId, uid }: { courseId: string; uid: string }) {
   const mounted = useRef(true);
   const startLock = useRef(false);
   const [accessAttempt, setAccessAttempt] = useState(0);
+  const [liveAttempt, setLiveAttempt] = useState(0);
+  const [accessGeneration, setAccessGeneration] = useState(0);
+  const [liveState, setLiveState] = useState<AttendanceLiveState>('connecting');
   const [historyFilter, setHistoryFilter] = useState<'all' | 'active' | 'ended'>('all');
   const permission = useRef<string | null>(null);
   const permissionVersion = useRef(0);
@@ -415,6 +421,7 @@ function Workspace({ courseId, uid }: { courseId: string; uid: string }) {
     } catch {
       if (request === generation.current && mounted.current) {
         setData(null);
+        setLiveState('connecting');
         setError('無法讀取點名紀錄。請確認連線與課程資格後重試。');
       }
     } finally {
@@ -429,8 +436,10 @@ function Workspace({ courseId, uid }: { courseId: string; uid: string }) {
       previous = role;
       permission.current = role;
       permissionVersion.current += 1;
+      setAccessGeneration((value) => value + 1);
       generation.current += 1;
       setData(null);
+      setLiveState('connecting');
       setNotice('');
       if (role) void reload();
       else {
@@ -444,8 +453,29 @@ function Workspace({ courseId, uid }: { courseId: string; uid: string }) {
       stop();
     };
   }, [courseId, uid, reload, accessAttempt]);
+  const canListen = data !== null;
+  const rosterAccess = data?.canReadRoster ?? false;
+  useEffect(() => {
+    if (!canListen) return;
+    let active = true;
+    const access = permissionVersion.current;
+    const stop = watchAttendanceLive({
+      courseId, uid, canReadRoster: rosterAccess,
+      onState: (state) => {
+        if (active && mounted.current && permission.current && access === permissionVersion.current) setLiveState(state);
+      },
+      onSessions: (sessions) => {
+        if (!active || !mounted.current || !permission.current || access !== permissionVersion.current) return;
+        // 訂閱已收到更新時，較早開始的手動查詢不能把畫面退回舊場次。
+        generation.current += 1;
+        setLoading(false);
+        setData((previous) => previous ? { ...previous, sessions } : previous);
+      },
+    });
+    return () => { active = false; stop(); };
+  }, [courseId, uid, canListen, rosterAccess, liveAttempt, accessGeneration]);
   async function start() {
-    if (startLock.current || !permission.current) return;
+    if (startLock.current || !permission.current || liveState !== 'live') return;
     const access = permissionVersion.current;
     startLock.current = true;
     setStarting(true);
@@ -487,6 +517,7 @@ function Workspace({ courseId, uid }: { courseId: string; uid: string }) {
         <Button
           disabled={loading || starting}
           onClick={() => {
+            setLiveAttempt((attempt) => attempt + 1);
             if (permission.current) void reload();
             else setAccessAttempt((attempt) => attempt + 1);
           }}
@@ -509,7 +540,8 @@ function Workspace({ courseId, uid }: { courseId: string; uid: string }) {
           讀取點名紀錄…
         </p>
       )}
-      {data && (
+      {data && <AttendanceSyncStatus state={liveState} teacher={data.canReadRoster} />}
+      {data && liveState === 'live' && (
         <>
           <section className={styles.overview} aria-label="課堂點名概況">
             <div>
@@ -600,7 +632,7 @@ function Workspace({ courseId, uid }: { courseId: string; uid: string }) {
                   ? '改選「全部」查看其他場次，或更新紀錄確認最新狀態。'
                   : data.canStart
                     ? '開啟點名後，學生就能在自己的課程頁簽到。'
-                    : '教師開啟點名後，請更新這個頁面。'}
+                    : '保持課堂頁開啟；教師開始點名時會自動顯示簽到入口。'}
               </p>
             </div>
           )}
