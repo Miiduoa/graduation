@@ -17,15 +17,19 @@ jest.mock('expo-file-system/legacy', () => ({
   createDownloadResumable: (...args: unknown[]) => mockCreateDownload(...args),
 }));
 
-jest.mock('react-native', () => {
-  const actual = jest.requireActual('react-native');
-  return {
-    ...actual,
-    Platform: { ...actual.Platform, OS: 'ios' },
-    NativeModules: { ...actual.NativeModules, RNLlama: {} },
-    TurboModuleRegistry: { get: () => ({}) },
-  };
-});
+// The native React Native module cannot be loaded by Jest: it expects DevMenu
+// to exist in a device binary. Only the three RN APIs used by this unit's
+// engine are mocked, so test failures come from engine behaviour, not DevMenu.
+jest.mock('react-native', () => ({
+  Platform: { OS: 'ios', select: (values: Record<string, unknown>) => values.ios ?? values.default },
+  NativeModules: { RNLlama: {} },
+  TurboModuleRegistry: { get: () => ({}) },
+}));
+// The global Jest setup resets the legacy agent between tests. This suite
+// does not use that agent, and loading it would import unrelated RN modules.
+jest.mock('../../services/aiLocalAgent', () => ({
+  resetAdaptiveLearnedPatternsForTests: jest.fn(),
+}));
 jest.mock('llama.rn', () => ({ initLlama: (...args: unknown[]) => mockInitLlama(...args) }));
 
 let engine: typeof import('../../services/localLLMInference').localLLM;
