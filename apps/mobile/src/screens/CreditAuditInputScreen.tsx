@@ -1026,9 +1026,12 @@ export function CreditAuditInputScreen(props: any) {
               <>
             {/* 使用者明確選擇後，才顯示對應系所的參考規則。 */}
             <AnimatedCard
-              title="畢業規則"
+              title="系所學分參考"
               subtitle={`${detailedTemplate.schoolName} — ${detailedTemplate.departmentName}`}
             >
+              <Text style={{ color: theme.colors.muted, fontSize: 12, lineHeight: 19, marginBottom: 12 }}>
+                僅計算手動標示的學分與此版分類門檻；未核對必修課代碼、重修替代、抵免、修課年度及正式畢業資格。
+              </Text>
               <View style={{ gap: 8 }}>
                 <Text style={{ color: theme.colors.muted, fontSize: 12 }}>
                   {detailedTemplate.academicYear} 學年度入學 ／ {detailedTemplate.division} ／{' '}
@@ -1067,7 +1070,7 @@ export function CreditAuditInputScreen(props: any) {
                 <Text style={{ color: theme.colors.muted, fontSize: 12, textAlign: 'right' }}>
                   {detailedAudit.total.remaining > 0
                     ? `還需 ${detailedAudit.total.remaining} 學分`
-                    : '已達標！'}
+                    : '參考學分量達門檻（非正式認列）'}
                 </Text>
               </View>
             </AnimatedCard>
