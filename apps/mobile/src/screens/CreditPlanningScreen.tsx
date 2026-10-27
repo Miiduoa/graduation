@@ -111,7 +111,7 @@ function Field({
         placeholder={placeholder}
         placeholderTextColor={t.muted}
         keyboardType={keyboardType}
-        autoCorrect={false}
+        autoCorrect={keyboardType === 'default'}
         style={{
           borderColor: fieldInvalid(value) && keyboardType === 'decimal-pad' ? t.danger : t.border,
           borderWidth: 1,
@@ -257,6 +257,7 @@ export default function CreditPlanningScreen() {
       await writeMobileCreditPlan(scopeKey, next);
       if (activeScope.current !== scopeKey) return false;
       setPlan(next);
+      setLoadError('');
       setNotice(successMessage);
       return true;
     } catch (error) {
@@ -363,7 +364,7 @@ export default function CreditPlanningScreen() {
   }
 
   async function importBackup() {
-    if (!plan || saving) return;
+    if (saving || loadedScope !== scopeKey) return;
     const expectedScope = scopeKey;
     try {
       const result = await DocumentPicker.getDocumentAsync({
@@ -445,6 +446,10 @@ export default function CreditPlanningScreen() {
           <Text style={{ color: t.text, fontSize: 15, lineHeight: 23 }}>{loadError || '目前無法載入規劃。'}</Text>
           <Text style={{ color: t.muted, fontSize: 12 }}>原有資料沒有被重設或覆寫。</Text>
           <Action title="重新讀取" primary onPress={() => void load()} />
+          <Action title="使用 JSON 備份修復" onPress={() => void importBackup()} />
+          <Text style={{ color: t.muted, fontSize: 12, lineHeight: 20 }}>
+            只有你主動選擇備份並確認取代時，才會寫入本機規劃；原始資料不會因為讀取失敗而自動清除。
+          </Text>
         </View>
       </Screen>
     );
