@@ -736,7 +736,7 @@ class LocalLLMEngine {
           // Qwen3 supports the soft non-thinking switch. Keep its answer
           // within a usable mobile response budget instead of spending all
           // tokens on an internal reasoning prefix.
-          prompt += `<|im_start|>user\n${msg.content}${this.config?.modelId === 'qwen3-1.7b' && index === lastUserIndex ? '\\n/no_think' : ''}<|im_end|>\n`;
+          prompt += `<|im_start|>user\n${msg.content}${this.config?.modelId === 'qwen3-1.7b' && index === lastUserIndex ? '\n/no_think' : ''}<|im_end|>\n`;
           break;
         case 'assistant':
           prompt += `<|im_start|>assistant\n${msg.content}<|im_end|>\n`;
