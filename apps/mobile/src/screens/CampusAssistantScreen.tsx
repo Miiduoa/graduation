@@ -20,6 +20,8 @@ import type { CampusAgentWriteProposal, CampusAgentWriteTool } from '../features
 import { CampusAgentActionReview } from './CampusAgentActionReview';
 import { CampusSenseDashboard } from './CampusSenseDashboard';
 import { CampusEvidencePlanCard } from './CampusEvidencePlanCard';
+import { CampusLocalReadResults } from './CampusLocalReadResults';
+import type { LocalCampusReadResult } from '../services/localCampusToolProtocol';
 import type { CampusEvidencePlan, CampusPlanRoute } from '../services/offlineCampusPlanner';
 import {
   CAMPUS_SENSE_MAX_AGE_MS,
@@ -104,8 +106,9 @@ function AssistantConversation({
     Array<CampusAssistantMessage & {
       requiresService?: boolean;
       source?: CampusAssistantMode;
-      tool?: 'saved-timetable' | 'campus-snapshot' | 'campus-plan' | 'online-required' | 'open-service';
+      tool?: 'saved-timetable' | 'campus-snapshot' | 'campus-plan' | 'online-required' | 'open-service' | 'local-agent';
       plan?: CampusEvidencePlan;
+      localReads?: LocalCampusReadResult[];
       route?: string;
       proposals?: CampusAgentWriteProposal[];
     }>
@@ -242,6 +245,7 @@ function AssistantConversation({
             tool: reply.tool,
             route: reply.route,
             plan: reply.plan,
+            localReads: reply.localReads,
           },
         ]);
         setDraft('');
@@ -299,6 +303,7 @@ function AssistantConversation({
             tool: reply.tool,
             route: reply.route,
             plan: reply.plan,
+            localReads: reply.localReads,
             proposals: reply.proposals,
           },
         ]);
@@ -455,10 +460,22 @@ function AssistantConversation({
         </AICard>
       ) : null}
       {messages.map((message, index) => (
-        <AICard key={index} title={message.role === 'user' ? '你的問題' : message.plan ? '校園行動計畫' : message.tool ? '手機離線工具' : message.source === 'device' ? '手機本地 AI' : '校園即時助理'}>
-          <Text selectable style={{ color: aiTokens.text, lineHeight: 25 }}>
-            {message.plan ? message.plan.overview : message.content}
-          </Text>
+        <AICard key={index} title={message.role === 'user' ? '你的問題' : message.localReads?.length ? '手機工具查詢' : message.plan ? '校園行動計畫' : message.tool ? '手機離線工具' : message.source === 'device' ? '手機本地 AI' : '校園即時助理'}>
+          {message.role === 'assistant' && message.localReads?.length ? (
+            <CampusLocalReadResults
+              results={message.localReads}
+              disabled={busy}
+              onOpenRoute={(route) => {
+                if (!current()) return;
+                const destination = VERIFIED_SERVICE_ROUTES[route];
+                if (destination) safeNavigate(navigation, destination.route);
+              }}
+            />
+          ) : (
+            <Text selectable style={{ color: aiTokens.text, lineHeight: 25 }}>
+              {message.plan ? message.plan.overview : message.content}
+            </Text>
+          )}
           {message.role === 'assistant' && message.plan ? (
             <CampusEvidencePlanCard
               plan={message.plan}
@@ -490,7 +507,9 @@ function AssistantConversation({
             ))}
           {message.role === 'assistant' && message.source === 'device' && (
             <Text style={{ color: aiTokens.muted, fontSize: 12, marginTop: 10 }}>
-              {message.tool === 'campus-plan'
+              {message.tool === 'local-agent'
+                ? '手機模型理解需求 · 本機工具核對資料 · 僅執行唯讀查詢'
+                : message.tool === 'campus-plan'
                 ? '手機端多步驟規劃 · 資料來源與期限已標示 · 未執行任何寫入'
                 : message.tool === 'campus-snapshot'
                 ? '手機規則計算 · 先前主動同步的授權摘要（非即時結果）'
@@ -499,7 +518,7 @@ function AssistantConversation({
                 : '手機模型生成 · 未進行校園網路查詢，重要資訊請到正式服務確認'}
             </Text>
           )}
-          {message.role === 'assistant' && !message.plan && message.route && VERIFIED_SERVICE_ROUTES[message.route] ? (
+          {message.role === 'assistant' && !message.plan && !message.localReads?.length && message.route && VERIFIED_SERVICE_ROUTES[message.route] ? (
             <View style={{ marginTop: 12 }}>
               <AIButton
                 label={'開啟' + VERIFIED_SERVICE_ROUTES[message.route].label}
@@ -511,7 +530,7 @@ function AssistantConversation({
                 }}
               />
             </View>
-          ) : message.role === 'assistant' && !message.plan && index > 0 ? (
+          ) : message.role === 'assistant' && !message.plan && !message.localReads?.length && index > 0 ? (
             <View style={{ marginTop: 12, gap: 8 }}>
               {getMobileQuickActions(messages[index - 1]?.role === 'user' ? messages[index - 1].content : '')
                 .slice(0, 3)
