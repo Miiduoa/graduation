@@ -383,7 +383,137 @@ function createLiveSessionHandlers({ db, now = Date.now, notifyStarted, logger =
     });
   }
 
-  return { startLiveSession, endLiveSession, joinLiveSession };
+
+  /**
+   * Instructor-attested adjustment. A missing receipt does not imply absence:
+   * only this authenticated, audited transaction may create such a status.
+   */
+  async function correctAttendanceRecord(request) {
+    const teacherUid = actor(request);
+    const data = request.data || {};
+    const groupId = documentId(data.groupId, 'groupId');
+    const sessionId = documentId(data.sessionId, 'sessionId');
+    const studentUid = documentId(data.studentUid, 'studentUid');
+    const requestId =
+      data.requestId === undefined ? randomUUID() : documentId(data.requestId, 'requestId');
+    if (teacherUid === studentUid)
+      throw new HttpsError('permission-denied', 'Cannot correct your own record');
+    const status = data.status;
+    if (!['present', 'late', 'absent', 'excused'].includes(status))
+      throw new HttpsError('invalid-argument', 'A supported attendance status is required');
+    const reason = typeof data.reason === 'string' ? data.reason.trim() : '';
+    if (reason.length < 6 || reason.length > 300)
+      throw new HttpsError('invalid-argument', 'A reason between 6 and 300 characters is required');
+
+    const group = db.collection('groups').doc(groupId);
+    const attendance = group.collection('attendanceSessions').doc(sessionId);
+    const record = attendance.collection('attendanceRecords').doc(studentUid);
+    const correctionId = 'correction_' + createHash('sha256')
+      .update(JSON.stringify([groupId, sessionId, teacherUid, requestId]))
+      .digest('hex');
+    const correction = attendance.collection('attendanceCorrections').doc(correctionId);
+    const requestHash = createHash('sha256')
+      .update(JSON.stringify([studentUid, status, reason]))
+      .digest('hex');
+
+    return db.runTransaction(async (transaction) => {
+      const [teacher, student, liveSnap, attendanceSnap, recordSnap, auditSnap] =
+        await transaction.getAll(
+          group.collection('members').doc(teacherUid),
+          group.collection('members').doc(studentUid),
+          group.collection('liveSessions').doc(sessionId),
+          attendance,
+          record,
+          correction,
+        );
+      requireMember(teacher, true);
+      const membership = requireMember(student);
+      if (!['member', 'student'].includes(membership.role))
+        throw new HttpsError('permission-denied', 'Target must be an active student member');
+      if (
+        !liveSnap.exists ||
+        !attendanceSnap.exists ||
+        liveSnap.data().schemaVersion !== SCHEMA_VERSION ||
+        attendanceSnap.data().schemaVersion !== SCHEMA_VERSION ||
+        liveSnap.data().groupId !== groupId ||
+        attendanceSnap.data().groupId !== groupId ||
+        liveSnap.data().sessionId !== sessionId ||
+        attendanceSnap.data().sessionId !== sessionId
+      ) {
+        throw new HttpsError('failed-precondition', 'An active course record is required');
+      }
+
+      if (auditSnap.exists) {
+        if (auditSnap.data().requestHash !== requestHash)
+          throw new HttpsError('already-exists', 'Request ID already used for another correction');
+        return {
+          success: true,
+          reused: true,
+          status: auditSnap.data().nextStatus,
+        };
+      }
+
+      const previous = recordSnap.exists ? recordSnap.data() : null;
+      if (
+        previous &&
+        (previous.uid !== studentUid ||
+          previous.groupId !== groupId ||
+          previous.sessionId !== sessionId ||
+          !['present', 'late', 'absent', 'excused'].includes(previous.status))
+      ) {
+        throw new HttpsError('failed-precondition', 'Attendance record requires administrator repair');
+      }
+      const previousStatus = previous?.status || null;
+      const wasPresent = ['present', 'late'].includes(previousStatus);
+      const isPresent = ['present', 'late'].includes(status);
+      const delta = Number(isPresent) - Number(wasPresent);
+      const correctedAt = Timestamp.fromMillis(now());
+      const checkedInAt = isPresent
+        ? wasPresent && timestampMillis(previous?.checkedInAt) !== null
+          ? previous.checkedInAt
+          : correctedAt
+        : null;
+      const updatedRecord = {
+        uid: studentUid,
+        groupId,
+        sessionId,
+        status,
+        source: 'manual',
+        checkedInAt,
+        correctedBy: teacherUid,
+        correctedAt,
+        ...profileFields(membership),
+      };
+      if (recordSnap.exists) transaction.update(record, updatedRecord);
+      else transaction.create(record, updatedRecord);
+      if (delta !== 0) {
+        transaction.update(attendance, { attendeeCount: FieldValue.increment(delta) });
+        transaction.update(group.collection('liveSessions').doc(sessionId), {
+          attendeeCount: FieldValue.increment(delta),
+        });
+      }
+      transaction.create(correction, {
+        requestHash,
+        requestId,
+        groupId,
+        sessionId,
+        studentUid,
+        teacherUid,
+        previousStatus,
+        nextStatus: status,
+        reason,
+        correctedAt,
+      });
+      return {
+        success: true,
+        reused: false,
+        status,
+        checkedInAt: checkedInAt ? checkedInAt.toDate().toISOString() : null,
+      };
+    });
+  }
+
+  return { startLiveSession, endLiveSession, joinLiveSession, correctAttendanceRecord };
 }
 
 module.exports = { createLiveSessionHandlers };
