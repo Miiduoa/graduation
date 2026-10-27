@@ -526,9 +526,11 @@ export function createLiveSessionHandlers({
       const wasPresent = previousStatus === 'present' || previousStatus === 'late';
       const isPresent = status === 'present' || status === 'late';
       const delta = Number(isPresent) - Number(wasPresent);
-      const liveCount = Number(liveSnap.data().attendeeCount);
-      const attendanceCount = Number(attendanceSnap.data().attendeeCount);
+      const liveCount = liveSnap.data().attendeeCount;
+      const attendanceCount = attendanceSnap.data().attendeeCount;
       if (
+        typeof liveCount !== 'number' ||
+        typeof attendanceCount !== 'number' ||
         !Number.isSafeInteger(liveCount) ||
         !Number.isSafeInteger(attendanceCount) ||
         liveCount !== attendanceCount ||
