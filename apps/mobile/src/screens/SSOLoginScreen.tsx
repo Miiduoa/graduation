@@ -23,6 +23,7 @@ import {
   loadSchoolLoginProviderKinds,
 } from '../services/schoolLoginAvailability';
 import { Screen, Button, AnimatedCard } from '../ui/components';
+import { SchoolPortalImportEntry } from '../components/SchoolPortalImport';
 import { useTabBarContentBottomPadding } from '../ui/navigationTheme';
 import { theme } from '../ui/theme';
 import { useThemeStyleSheet } from '../ui/useThemeStyleSheet';
@@ -328,6 +329,11 @@ function SchoolLoginContent(
             <Text style={[styles.statusTitle, styles.statusContent]}>登入完成</Text>
           </View>
         ) : null}
+
+        <SchoolPortalImportEntry
+          disabled={formLocked}
+          onOpenRecords={() => nav.navigate?.('PersonalImport')}
+        />
 
         <AnimatedCard
           title="不用學校帳號，也能匯入"
