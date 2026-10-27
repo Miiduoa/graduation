@@ -476,3 +476,92 @@ test('an idle campus sense dashboard expires automatically rather than showing s
     scheduled.mockRestore();
   }
 });
+
+test('one-tap weekly plan still uses local timetable when the campus is offline', async () => {
+  jest.mocked(refreshCampusSenseSnapshot).mockRejectedValueOnce(new Error('network-unavailable'));
+  request.mockResolvedValueOnce({
+    source: 'device', tool: 'campus-plan',
+    content: '只根據本機課表建立七日計畫',
+    hasActions: false,
+    plan: {
+      title: '接下來七天的學習行動',
+      overview: '只使用手機內已保存課表。',
+      checkedAt: new Date().toISOString(),
+      limitations: ['沒有可確認的授權作業摘要。'],
+      steps: [{
+        id: 'timetable-review',
+        title: '手機保存課表',
+        detail: '此為本地副本，不是校方即時課表。',
+        priority: 'normal', evidence: 'saved-timetable',
+        route: '/timetable',
+      }],
+    },
+  });
+  const view = render(<CampusAssistantScreen />);
+  await act(async () => fireEvent.press(view.getByText('未來七天')));
+  expect(refreshCampusSenseSnapshot).toHaveBeenCalledTimes(1);
+  expect(request).toHaveBeenCalledWith(expect.objectContaining({
+    mode: 'device', senseSnapshot: null,
+    messages: [{ role: 'user', content: '依手機課表與授權作業安排接下來七天的學習計畫' }],
+  }));
+  expect(view.getByText('手機保存課表')).toBeTruthy();
+  expect(view.getByText(/連線失敗，改用手機已保存的個人課表/)).toBeTruthy();
+  expect(confirmCampusAgentWrite).not.toHaveBeenCalled();
+});
+
+test('a temporary network error reuses only a recent, authorized in-memory sense', async () => {
+  const sensed = {
+    userId: 'A', schoolId: 'pu', checkedAt: new Date().toISOString(),
+    schedule: { status: 'unavailable' as const, count: null },
+    assignments: { status: 'available' as const, count: 1,
+      items: [{ title: '已授權作業', groupName: '資管', dueAt: null }] },
+    announcements: { status: 'available' as const, items: [] },
+  };
+  jest.mocked(refreshCampusSenseSnapshot)
+    .mockResolvedValueOnce(sensed)
+    .mockRejectedValueOnce(new Error('offline'));
+  request.mockResolvedValueOnce({
+    source: 'device', tool: 'campus-snapshot',
+    content: '依上次有效快照整理今日作業', hasActions: false,
+  });
+  const view = render(<CampusAssistantScreen />);
+  await act(async () => fireEvent.press(view.getByText('同步我的校園資料')));
+  await act(async () => fireEvent.press(view.getByText('今日重點')));
+  expect(request).toHaveBeenCalledWith(expect.objectContaining({
+    mode: 'device',
+    senseSnapshot: sensed,
+  }));
+  expect(view.getByText(/改用先前已授權且未過期的摘要/)).toBeTruthy();
+  expect(view.getByText('依上次有效快照整理今日作業')).toBeTruthy();
+  expect(confirmCampusAgentWrite).not.toHaveBeenCalled();
+});
+
+test('a denied campus permission drops the old snapshot even when it was recently valid', async () => {
+  const sensed = {
+    userId: 'A', schoolId: 'pu', checkedAt: new Date().toISOString(),
+    schedule: { status: 'unavailable' as const, count: null },
+    assignments: { status: 'available' as const, count: 1,
+      items: [{ title: '需授權的作業', groupName: '學程', dueAt: null }] },
+    announcements: { status: 'available' as const, items: [] },
+  };
+  const denied = Object.assign(new Error('Member no longer authorized'), {
+    code: 'functions/permission-denied',
+  });
+  jest.mocked(refreshCampusSenseSnapshot)
+    .mockResolvedValueOnce(sensed)
+    .mockRejectedValueOnce(denied);
+  request.mockResolvedValueOnce({
+    content: '只根據手機課表回覆', tool: 'campus-plan',
+    source: 'device', hasActions: false,
+  });
+  const view = render(<CampusAssistantScreen />);
+  await act(async () => fireEvent.press(view.getByText('同步我的校園資料')));
+  expect(view.getByText('已取得本次授權資料')).toBeTruthy();
+  await act(async () => fireEvent.press(view.getByText('今日重點')));
+  expect(request).toHaveBeenCalledWith(expect.objectContaining({
+    mode: 'device', senseSnapshot: null,
+  }));
+  expect(view.queryByText('已取得本次授權資料')).toBeNull();
+  expect(view.getByText(/權限或資料無法驗證，已捨棄校園摘要/)).toBeTruthy();
+  expect(confirmCampusAgentWrite).not.toHaveBeenCalled();
+});

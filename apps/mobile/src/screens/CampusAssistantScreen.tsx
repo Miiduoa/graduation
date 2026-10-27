@@ -52,6 +52,18 @@ const VERIFIED_SERVICE_ROUTES: Record<string, { route: string; label: string }> 
   '/dms': { route: 'Dms', label: '私訊' },
 };
 
+function isTransientCampusSyncError(error: unknown): boolean {
+  const candidate = error && typeof error === 'object'
+    ? error as { code?: unknown; message?: unknown } : {};
+  const code = typeof candidate.code === 'string' ? candidate.code.toLowerCase() : '';
+  const message = typeof candidate.message === 'string' ? candidate.message.toLowerCase() : '';
+  if (/permission-denied|unauthenticated|failed-precondition|invalid-argument|session-changed/.test(code + ' ' + message)) {
+    return false;
+  }
+  // Only a clearly transient failure may reuse a still-valid in-memory snapshot.
+  return /network|offline|unavailable|deadline-exceeded|timeout|timed out|connection/.test(code + ' ' + message);
+}
+
 export function CampusAssistantScreen({ navigation, route }: ServiceScreenProps) {
   useSyncExternalStore(subscribeToTheme, getThemeVersion, getThemeVersion);
   const { user } = useAuth();
@@ -180,12 +192,27 @@ function AssistantConversation({
     const controller = new AbortController();
     inFlight.current = controller;
     try {
-      const snapshot = await refreshCampusSenseSnapshot({
-        scope: { uid, schoolId },
-        isCurrent: current,
-      });
+      let snapshot: CampusSenseSnapshot | null = null;
+      try {
+        snapshot = await refreshCampusSenseSnapshot({
+          scope: { uid, schoolId },
+          isCurrent: current,
+        });
+        if (!current() || controller.signal.aborted) return;
+        setSense(snapshot);
+      } catch (syncError) {
+        if (!current() || controller.signal.aborted) return;
+        // A permission or contract failure revokes reliance on any prior summary.
+        const transient = isTransientCampusSyncError(syncError);
+        snapshot = transient ? validCampusSenseSnapshot(sense, { uid, schoolId }) : null;
+        if (!snapshot) setSense(null);
+        setSenseError(snapshot
+          ? '校園連線失敗，改用先前已授權且未過期的摘要；這不是即時學校狀態。'
+          : transient
+            ? '校園連線失敗，改用手機已保存的個人課表；作業與公告沒有即時查證。'
+            : '校園權限或資料無法驗證，已捨棄校園摘要；僅能使用手機內已保存的個人課表。');
+      }
       if (!current() || controller.signal.aborted) return;
-      setSense(snapshot);
       setSyncBusy(false);
       const next: CampusAssistantMessage[] = [
         ...messages, { role: 'user', content: question },
@@ -224,7 +251,7 @@ function AssistantConversation({
         if (controller.signal.aborted) {
           setError('已停止這次本地整理；資料不會自動傳送到雲端 AI。');
         } else {
-          setSenseError('無法取得或整理本次校園摘要。請核對網路、帳號與校園資料來源。');
+          setError('本機無法完成這次整理。請檢查已儲存課表或免費手機模型；沒有自動將問題傳給雲端 AI。');
         }
       }
     } finally {
