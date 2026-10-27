@@ -59,7 +59,7 @@ export default function MyAttendanceHistoryScreen() {
     setState({ scope, loading: ready, courses: [], error: false });
     setExpanded(null);
     if (!ready) return;
-    loadVerifiedAttendanceHistory(getDb(), uid, schoolId).then(
+    Promise.resolve().then(() => loadVerifiedAttendanceHistory(getDb(), uid, schoolId)).then(
       (courses) => {
         if (!disposed) setState({ scope, loading: false, courses, error: false });
       },
