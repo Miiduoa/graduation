@@ -66,6 +66,7 @@ jobs:
             src/__tests__/services/campusStudyAgenda.test.ts \
             src/__tests__/services/campusAssignmentReminders.test.ts \
             src/__tests__/services/campusAssignmentTarget.test.ts \
+            src/__tests__/services/campusAssignmentPreview.test.ts \
             src/__tests__/services/campusSenseSnapshot.test.ts \
             src/__tests__/services/campusSensePaging.test.ts \
             src/__tests__/services/offlineCampusTools.test.ts \

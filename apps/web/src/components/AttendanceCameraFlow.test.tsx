@@ -70,3 +70,9 @@ it('releases the active camera when course membership is revoked', async () => {
   expect(screen.queryByRole('button', { name: '開啟相機掃碼' })).toBeNull();
   expect(joinCourseAttendance).not.toHaveBeenCalled();
 });
+
+vi.mock('@/lib/watchAttendanceLive', () => ({
+  watchAttendanceLive: (options: { onState: (state: 'live') => void }) => {
+    options.onState('live'); return () => {};
+  },
+}));
