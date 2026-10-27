@@ -3,6 +3,7 @@ import { getAuthInstance, getFunctionsInstance, isFirebaseMockMode } from '../fi
 import { campusAgentWriteProposals, type CampusAgentWriteProposal } from './campusAssistantActions';
 import { validCampusSenseSnapshot, type CampusSenseSnapshot } from '../services/campusSenseSnapshot';
 import type { CampusEvidencePlan } from '../services/offlineCampusPlanner';
+import type { LocalCampusReadResult } from '../services/localCampusToolProtocol';
 
 export type CampusAssistantMessage = { role: 'user' | 'assistant'; content: string };
 export type CampusAssistantScope = { uid: string; schoolId: string };
@@ -73,8 +74,9 @@ export async function askCampusAssistant(input: {
   content: string;
   hasActions: boolean;
   source: CampusAssistantMode;
-  tool?: 'saved-timetable' | 'campus-snapshot' | 'campus-plan' | 'online-required' | 'open-service';
+  tool?: 'saved-timetable' | 'campus-snapshot' | 'campus-plan' | 'online-required' | 'open-service' | 'local-agent';
   plan?: CampusEvidencePlan;
+  localReads?: LocalCampusReadResult[];
   route?: string;
   proposals?: CampusAgentWriteProposal[];
 }> {
@@ -147,6 +149,37 @@ export async function askCampusAssistant(input: {
       if (!loaded) throw new OnDeviceAssistantError('model-failed');
     }
 
+    // Unmatched paraphrases/follow-ups can use the installed model to select
+    // bounded reads. Facts are still produced by scoped deterministic tools.
+    const { resolveLocalCampusSemanticReads } = require('../services/localCampusSemanticReads') as
+      typeof import('../services/localCampusSemanticReads');
+    const selectedReads = await resolveLocalCampusSemanticReads({
+      messages, context: snapshot, snapshot: senseSnapshot,
+      uid, schoolId: input.scope.schoolId,
+      assertCurrent: () => { scopeCheck(input, false); assertNotCancelled(); },
+      generate: (prompt) => localLLM.generate({
+        messages: prompt, maxTokens: 192, temperature: 0,
+        signal: input.signal,
+      }),
+    }).catch((error) => {
+      scopeCheck(input, false);
+      assertNotCancelled();
+      throw error;
+    });
+    if (selectedReads) {
+      return {
+        content: selectedReads.content,
+        hasActions: false, source: 'device', tool: 'local-agent',
+        localReads: selectedReads.results,
+      };
+    }
+    // Another screen must not swap the shared context between the selection
+    // inference and fallback chat. Do not reload or steal that screen's work.
+    const afterSelection = localLLM.getState();
+    if (afterSelection.status !== 'ready' || afterSelection.modelId !== readiness.modelId) {
+      throw new OnDeviceAssistantError('model-busy');
+    }
+
     // Each request gets explicitly scoped history; never reuse a global chat history
     // that could contain data from a previous account or campus.
     // Reserve enough context for the instruction, trusted data and generated answer.
@@ -159,7 +192,10 @@ export async function askCampusAssistant(input: {
     }));
     const completion = await localLLM.generate({
       messages: [
-        { role: 'system', content: formatOnDeviceSchoolPrompt(snapshot, senseSnapshot) },
+        { role: 'system', content: formatOnDeviceSchoolPrompt(
+          { ...snapshot, checkedAt: new Date().toISOString() },
+          validCampusSenseSnapshot(input.senseSnapshot, input.scope),
+        ) },
         ...compactHistory,
       ],
       maxTokens: readiness.modelId === 'qwen2.5-0.5b' ? 512 : 700,
