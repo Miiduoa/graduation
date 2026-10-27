@@ -232,3 +232,18 @@ test('offline timetable read works without downloading a GGUF and never invokes 
   expect(localLLM.generate).not.toHaveBeenCalled();
   expect(httpsCallable).not.toHaveBeenCalled();
 });
+
+
+test.each(['generating', 'loading', 'downloading'])(
+  'does not reload a shared native LLM context while %s',
+  async (status) => {
+    jest.mocked(localLLM.getState).mockReturnValue({ status, modelId: 'qwen2.5-0.5b' });
+    await expect(askCampusAssistant({
+      ...input(), mode: 'device',
+      messages: [{ role: 'user', content: '幫我規劃複習進度' }],
+    })).rejects.toMatchObject({ code: 'model-busy' });
+    expect(localLLM.loadModel).not.toHaveBeenCalled();
+    expect(localLLM.generate).not.toHaveBeenCalled();
+    expect(mockCallable).not.toHaveBeenCalled();
+  },
+);

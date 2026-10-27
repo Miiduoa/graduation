@@ -158,6 +158,8 @@ function AssistantConversation({
             setError('手機尚未下載 AI 模型，請先安裝免費模型。訊息已保留，不會自動改用雲端。');
           } else if (failure.code === 'native-unavailable') {
             setError('目前 App 沒有本地推論引擎。請使用包含 llama.rn 的 iOS／Android 原生版本，Expo Go 不支援。');
+          } else if (failure.code === 'model-busy') {
+            setError('手機 AI 正在執行其他任務或安裝模型；這次問題已保留，請稍後再送出。');
           } else if (failure.code === 'session-changed') {
             setError('帳號或學校已變更，這次回覆已捨棄。');
           } else {
