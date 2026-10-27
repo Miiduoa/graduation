@@ -1,11 +1,12 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
-import { getDoc, getDocs } from 'firebase/firestore';
+import { getDoc, getDocFromServer, getDocs } from 'firebase/firestore';
 import {
   attendanceCsv,
   attendanceError,
   hasOwnActiveAttendance,
   joinCourseAttendance,
   loadCourseAttendance,
+  loadAttendanceCode,
   startCourseAttendance,
   studentAttendanceHeading,
   studentCheckInSession,
@@ -35,6 +36,7 @@ vi.mock('firebase/firestore', () => ({
   orderBy: (...parts: unknown[]) => parts,
   where: (...parts: unknown[]) => parts,
   getDoc: vi.fn(),
+  getDocFromServer: vi.fn(),
   getDocs: vi.fn(),
 }));
 const document = (data: Record<string, unknown> | null) => ({
@@ -161,4 +163,12 @@ it('escapes commas, quotes and spreadsheet formula prefixes in exports', () => {
   ]);
   expect(csv).toContain('"\'=1+1"');
   expect(csv).toContain('"陳,""同學"""');
+});
+
+it('fetches the teacher QR token from the server rather than offline cache', async () => {
+  vi.mocked(getDocFromServer).mockResolvedValue(document({ qrToken: 'server-issued-token' }) as never);
+  await expect(loadAttendanceCode('class', 's1')).resolves.toBe('server-issued-token');
+  expect(getDocFromServer).toHaveBeenCalledWith('groups/class/liveSessionSecrets/s1');
+  vi.mocked(getDocFromServer).mockRejectedValueOnce(new Error('offline'));
+  await expect(loadAttendanceCode('class', 's1')).rejects.toThrow('offline');
 });
