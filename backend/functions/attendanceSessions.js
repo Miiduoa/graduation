@@ -383,7 +383,6 @@ function createLiveSessionHandlers({ db, now = Date.now, notifyStarted, logger =
     });
   }
 
-
   /**
    * Instructor-attested adjustment. A missing receipt does not imply absence:
    * only this authenticated, audited transaction may create such a status.
@@ -417,7 +416,7 @@ function createLiveSessionHandlers({ db, now = Date.now, notifyStarted, logger =
       .digest('hex');
 
     return db.runTransaction(async (transaction) => {
-      const [teacher, student, liveSnap, attendanceSnap, recordSnap, auditSnap] =
+      const [teacher, student, liveSnap, attendanceSnap, recordSnap, auditSnap, course, teacherAccount, studentAccount] =
         await transaction.getAll(
           group.collection('members').doc(teacherUid),
           group.collection('members').doc(studentUid),
@@ -425,11 +424,37 @@ function createLiveSessionHandlers({ db, now = Date.now, notifyStarted, logger =
           attendance,
           record,
           correction,
+          group,
+          db.collection('users').doc(teacherUid),
+          db.collection('users').doc(studentUid),
         );
       requireMember(teacher, true);
       const membership = requireMember(student);
       if (!['member', 'student'].includes(membership.role))
         throw new HttpsError('permission-denied', 'Target must be an active student member');
+      const schoolId = course.exists ? course.data().schoolId : null;
+      if (
+        !course.exists || course.data().type !== 'course' ||
+        typeof schoolId !== 'string' || !/^[A-Za-z0-9_-]{1,128}$/.test(schoolId)
+      ) {
+        throw new HttpsError('failed-precondition', 'A school-scoped course is required');
+      }
+      for (const account of [teacherAccount, studentAccount]) {
+        if (account.exists && (
+          account.data().accountDeletionInProgress === true ||
+          account.data().status === 'deleted'
+        )) {
+          throw new HttpsError('permission-denied', 'Account is no longer available');
+        }
+      }
+      // Admin SDK bypasses Rules; recheck school access in the same write transaction,
+      // including retries of a previously committed correction.
+      const schoolMembers = db.collection('schools').doc(schoolId).collection('members');
+      const [teacherSchool, studentSchool] = await transaction.getAll(
+        schoolMembers.doc(teacherUid), schoolMembers.doc(studentUid),
+      );
+      requireMember(teacherSchool);
+      requireMember(studentSchool);
       if (
         !liveSnap.exists ||
         !attendanceSnap.exists ||
@@ -439,6 +464,7 @@ function createLiveSessionHandlers({ db, now = Date.now, notifyStarted, logger =
         attendanceSnap.data().groupId !== groupId ||
         liveSnap.data().sessionId !== sessionId ||
         attendanceSnap.data().sessionId !== sessionId ||
+        typeof liveSnap.data().active !== 'boolean' ||
         liveSnap.data().active !== attendanceSnap.data().active
       ) {
         throw new HttpsError('failed-precondition', 'An active course record is required');
