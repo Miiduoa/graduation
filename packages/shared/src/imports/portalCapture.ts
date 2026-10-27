@@ -5,6 +5,8 @@ const PORTALS: Record<string, Omit<SchoolPortal, 'schoolId'>> = {
   nchu: { label: '中興單一入口', url: 'https://portal.nchu.edu.tw/', domain: 'nchu.edu.tw' },
   nccu: { label: '政大 iNCCU', url: 'https://i.nccu.edu.tw/', domain: 'nccu.edu.tw' },
   ncu: { label: '中央 Portal', url: 'https://portal.ncu.edu.tw/', domain: 'ncu.edu.tw' },
+  ntu: { label: '臺大 myNTU', url: 'https://my.ntu.edu.tw/', domain: 'ntu.edu.tw' },
+  nthu: { label: '清華校務資訊系統', url: 'https://www.ccxp.nthu.edu.tw/ccxp/INQUIRE/', domain: 'nthu.edu.tw' },
 };
 export function schoolPortalFor(schoolId: string): SchoolPortal | null {
   const key = schoolId.startsWith('tw-') ? schoolId.slice(3) : schoolId;
@@ -14,7 +16,7 @@ export const PORTAL_CAPTURE_LIMIT = 400_000;
 export const PORTAL_CAPTURE_TIMEOUT = 12_000;
 export function schoolPortalOrigin(portal: SchoolPortal, value: string): string | null {
   try {
-    if (!value || value.length > 4096 || Array.from(value).some((char) => char.charCodeAt(0) <= 32 || char === '\\')) return null;
+    if (!value || value.length > 4096 || Array.from(value).some((char) => char.charCodeAt(0) <= 32 || char.charCodeAt(0) === 127 || char === '\\')) return null;
     const url = new URL(value);
     if (url.protocol !== 'https:' || url.username || url.password || url.port) return null;
     if (url.hostname !== portal.domain && !url.hostname.endsWith(`.${portal.domain}`)) return null;
@@ -86,7 +88,7 @@ export function schoolPortalCaptureScript(request: PortalCaptureRequest): string
           css = node.ownerDocument.defaultView.getComputedStyle(node);
           computedStyles.set(node, css);
         }
-        if (css.display === 'none' || css.visibility === 'hidden' || css.visibility === 'collapse') return false;
+        if (css.display === 'none' || css.visibility === 'hidden' || css.visibility === 'collapse' || css.opacity === '0') return false;
         node = node.parentElement;
       }
       return true;
@@ -118,7 +120,9 @@ export function schoolPortalCaptureScript(request: PortalCaptureRequest): string
         if (visible(heading)) {
           var title = plain(heading).trim();
           if (title.length > 500) throw new Error('too-large');
-          if (title) add('<h2>' + escapeText(title) + '</h2>');
+          // Retain only explicit term fragments, never names or unrelated profile headings.
+          var terms = title.normalize('NFKC').match(/(?:民國\\s*)?(?:1\\d{2}|20\\d{2})\\s*學年度\\s*(?:第?\\s*[12一二]\\s*學期|[上下]\\s*學期|暑(?:期|修))/g) || [];
+          terms.forEach(function (term) { add('<h2>' + escapeText(term) + '</h2>'); });
         }
       });
       var tables = doc.getElementsByTagName('table');
