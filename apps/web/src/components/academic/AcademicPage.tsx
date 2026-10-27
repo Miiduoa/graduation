@@ -19,6 +19,7 @@ import { loadFailureCopy } from '@campus/shared/src/loadFailureCopy';
 import styles from './academic.module.css';
 import { PersonalImportSummary } from '@/components/imports/PersonalImportSummary';
 import { AcademicRefreshControls } from './AcademicRefreshControls';
+import { AcademicChangeSummary } from './AcademicChangeSummary';
 
 type Props<K extends AcademicKind> = {
   kind: K;
@@ -48,6 +49,7 @@ function Records<K extends AcademicKind>(props: RecordsProps<K>) {
         status={automaticStatus}
         onChange={setAutomatic}
       />
+      <AcademicChangeSummary kind={props.kind} state={state} />
       <RecordContent {...props} state={state} refresh={refresh} />
     </>
   );
