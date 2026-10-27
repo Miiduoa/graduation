@@ -1,5 +1,4 @@
 import {
-  PLANNER_CATEGORIES,
   creditPlanSummary,
   formatCredits,
   type CreditPlan,
@@ -160,6 +159,3 @@ export function analyzeCreditPlan(plan: CreditPlan): CreditPlanFeasibility {
     guidance: guidance.slice(0, 6),
   };
 }
-
-/** Human-readable category definitions are intentionally separate from policy. */
-export const creditPlanInsightCategories = PLANNER_CATEGORIES;
