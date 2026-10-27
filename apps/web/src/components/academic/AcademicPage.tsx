@@ -223,11 +223,13 @@ export function AcademicPage<K extends AcademicKind>(props: Props<K>) {
           </Link>
         ))}
       </nav>
-      {props.workspace?.({
-        userId: user?.uid ?? null,
-        schoolId: browse.status === 'ready' ? browse.schoolId : null,
-        schoolName: browse.status === 'ready' ? browse.schoolName : '',
-      })}
+      {props.workspace && browse.status === 'ready' && browse.schoolId && !loading && !error
+        ? props.workspace({
+            userId: user?.uid ?? null,
+            schoolId: browse.schoolId,
+            schoolName: browse.schoolName,
+          })
+        : null}
       <PersonalImportSummary kind="grades" />
       {browse.status === 'loading' ? (
         <BrowseUnavailable status="loading" schoolName="" />
