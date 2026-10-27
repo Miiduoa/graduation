@@ -37,7 +37,7 @@ const captureErrors = {
 
 /** The account hooks and WebView are mounted only after the explicit entry action. */
 export function SchoolPortalImportEntry({ onOpenRecords, disabled = false }: {
-  onOpenRecords(): void; disabled?: boolean;
+  onOpenRecords(kind: Kind): void; disabled?: boolean;
 }) {
   const { school } = useSchool();
   const [openedSchool, setOpenedSchool] = useState<string | null>(null);
@@ -49,13 +49,13 @@ export function SchoolPortalImportEntry({ onOpenRecords, disabled = false }: {
     <Button text="在 App 內開啟校務網站匯入" disabled={disabled} onPress={() => setOpenedSchool(school.id)} />
     {openedSchool === school.id && !disabled ? (
       <Modal visible animationType="slide" onRequestClose={close}>
-        <PortalSession portal={portal} onClose={close} onOpenRecords={() => { close(); onOpenRecords(); }} />
+        <PortalSession portal={portal} onClose={close} onOpenRecords={(kind) => { close(); onOpenRecords(kind); }} />
       </Modal>
     ) : null}
   </>;
 }
 function PortalSession({ portal, onClose, onOpenRecords }: {
-  portal: SchoolPortal; onClose(): void; onOpenRecords(): void;
+  portal: SchoolPortal; onClose(): void; onOpenRecords(kind: Kind): void;
 }) {
   const scope = usePersonalImportScope();
   const { copy } = usePortalStyles();
@@ -74,7 +74,7 @@ function PortalSession({ portal, onClose, onOpenRecords }: {
   return <PortalFlow key={`${scope.owner}:${scope.schoolId}`} portal={portal} scope={scope} isScopeCurrent={isScopeCurrent} onClose={onClose} onOpenRecords={onOpenRecords} />;
 }
 function PortalFlow({ portal, scope, isScopeCurrent, onClose, onOpenRecords }: {
-  portal: SchoolPortal; scope: PersonalImportScope; isScopeCurrent(scope: PersonalImportScope): boolean; onClose(): void; onOpenRecords(): void;
+  portal: SchoolPortal; scope: PersonalImportScope; isScopeCurrent(scope: PersonalImportScope): boolean; onClose(): void; onOpenRecords(kind: Kind): void;
 }) {
   const { copy, input } = usePortalStyles();
   const [stage, setStage] = useState<'consent' | 'browse' | 'choose' | 'review' | 'done'>('consent');
@@ -200,14 +200,14 @@ function PortalFlow({ portal, scope, isScopeCurrent, onClose, onOpenRecords }: {
   );
   return <SafeAreaView style={{ flex: 1, backgroundColor: theme.colors.bg }}>
     <View style={{ padding: 16, gap: 8, borderBottomWidth: 1, borderColor: theme.colors.border }}>
-      <Text accessibilityRole="header" style={{ ...copy, fontSize: 19, fontWeight: '700' }}>{portal.label} · 本人資料匯入</Text>
-      <Text style={{ color: theme.colors.muted }}>{stage === 'browse' ? origin : '登入校方網站 → 選擇表格 → 核對儲存'}</Text>
+      <Text accessibilityRole="header" style={{ ...copy, fontSize: 19, fontWeight: '700' }}>{`${portal.label} · 本人資料匯入`}</Text>
+      <Text style={{ color: theme.colors.muted }}>{stage === 'browse' ? origin : '登入校方網站、選擇表格、核對儲存'}</Text>
       <Button text="關閉校務匯入" kind="outline" disabled={saving} onPress={onClose} />
       {error ? <Text accessibilityRole="alert" style={copy}>{error}</Text> : null}
     </View>
     {stage === 'browse' ? <>
       <View style={{ padding: 12, gap: 8 }}>
-        <Text style={copy}>請自行登入，開啟本人的{kind === 'grades' ? '成績' : '課表'}列表，再按讀取。登入成功不等於匯入完成。</Text>
+        <Text style={copy}>{`請自行登入，開啟本人的${kind === 'grades' ? '成績' : '課表'}列表，再按讀取。登入成功不等於匯入完成。`}</Text>
         <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
           <Button text="回上一頁" kind="outline" disabled={!canBack || busy} onPress={() => { stop(); setLoaded(false); web.current?.goBack(); }} />
           <Button text="重新載入入口" kind="outline" onPress={resetBrowser} />
@@ -251,14 +251,14 @@ function PortalFlow({ portal, scope, isScopeCurrent, onClose, onOpenRecords }: {
         <Text style={copy}>這是網頁輔助匯入，不是跨校自動登入或背景同步。網站若要求驗證碼、多因素驗證或不接受內嵌瀏覽器，請自行完成驗證或改用檔案匯入。</Text>
         <Text style={copy}>只匯入你有權使用的資料；讀取內容仍須核對，不會成為校方認證的修課或成績證明。</Text>
         <Text style={copy}>此瀏覽器不與外部瀏覽器共用登入 Cookie；關閉流程會卸載頁面。不同手機的網站相容性仍需驗證。</Text>
-        <Text style={copy}>校方網址：{portal.url}</Text>
+        <Text style={copy}>{`校方網址：${portal.url}`}</Text>
         <Button text={kind === 'timetable' ? '已選課表' : '改為課表'} kind="outline" onPress={() => setKind('timetable')} />
         <Button text={kind === 'grades' ? '已選成績' : '改為成績'} kind="outline" onPress={() => setKind('grades')} />
         <Button text="同意並開啟校方網站" onPress={resetBrowser} />
       </> : null}
       {selection?.partial ? <Text accessibilityRole="alert" style={copy}>部分內嵌頁面無法讀取；下列資料可能不完整，請逐筆與校方頁面核對。</Text> : null}
       {stage === 'choose' && selection ? <>
-        <Text style={copy}>找到 {selection.tables.length} 張表格。選擇本人的資料，接著核對欄位；目前尚未儲存。</Text>
+        <Text style={copy}>{`找到 ${selection.tables.length} 張表格。選擇本人的資料，接著核對欄位；目前尚未儲存。`}</Text>
         {selection.tables.map((table) => <Button key={table.id} text={table.label} kind="outline" onPress={() => {
           setText(table.text); setYear(table.suggestedTerm?.academicYear ?? ''); setSemester(table.suggestedTerm?.semester ?? '');
           setRows([]); setError(''); setStage('review');
@@ -271,18 +271,18 @@ function PortalFlow({ portal, scope, isScopeCurrent, onClose, onOpenRecords }: {
         {field('校務表格文字（可修正）', text, setText, true)}
         <Button text="整理並核對匯入內容" disabled={saving || !text.trim()} onPress={preview} />
         {rows.length ? <>
-          <Text style={copy}>預覽 {rows.length} 筆，選取 {chosen.length} 筆。未顯示的列仍會保留；請核對學校、學期、節次與成績。</Text>
+          <Text style={copy}>{`預覽 ${rows.length} 筆，選取 ${chosen.length} 筆。未顯示的列仍會保留；請核對學校、學期、節次與成績。`}</Text>
           {rows.slice(0, visible).map((row) => <View key={row.id} style={{ borderTopWidth: 1, borderColor: theme.colors.border, paddingTop: 12, gap: 6 }}>
             <Button text={`${selected.has(row.id) ? '已選' : '未選'}：${row.title}`} kind="outline" disabled={saving} onPress={() => setSelected((old) => {
               const next = new Set(old); if (next.has(row.id)) next.delete(row.id); else next.add(row.id); return next;
             })} />
-            <Text style={copy}>{row.academicYear}／{row.semester}{kind === 'grades'
+            <Text style={copy}>{`${row.academicYear}／${row.semester}`}{kind === 'grades'
               ? ` · ${row.credits ?? '未提供'} 學分 · 成績 ${row.grade ?? '未提供'}`
               : ` · 星期 ${row.dayOfWeek ?? '?'} · ${row.startTime || row.periodLabel || `節次 ${row.startPeriod ?? '?'}–${row.endPeriod ?? '?'}`} · ${row.location || '教室未提供'}`}</Text>
           </View>)}
           {rows.length > visible ? <Button text={`再顯示 ${Math.min(20, rows.length - visible)} 筆`} onPress={() => setVisible((count) => count + 20)} /> : null}
           {errors.slice(0, 10).map((issue, index) => <Text key={index} accessibilityRole="alert" style={copy}>{issue.message}</Text>)}
-          {errors.length > 10 ? <Text style={copy}>另有 {errors.length - 10} 個問題，請修正表格後重新整理。</Text> : null}
+          {errors.length > 10 ? <Text style={copy}>{`另有 ${errors.length - 10} 個問題，請修正表格後重新整理。`}</Text> : null}
           <Button text={saving ? '正在儲存…' : `確認匯入 ${chosen.length} 筆`} disabled={saving || !chosen.length || !!errors.length} onPress={() => void save()} />
         </> : null}
         <Button text="重選表格" kind="outline" disabled={saving} onPress={() => { setRows([]); setError(''); setStage('choose'); }} />
@@ -291,7 +291,7 @@ function PortalFlow({ portal, scope, isScopeCurrent, onClose, onOpenRecords }: {
         <Text accessibilityRole="header" style={{ ...copy, fontSize: 20, fontWeight: '700' }}>{undone ? '已撤回這次新增資料' : '匯入完成'}</Text>
         <Text style={copy}>{undone ? '後續編輯的紀錄不會被撤回。' : `已新增 ${receipt.added} 筆，相同資料 ${receipt.duplicates} 筆未重複新增。`}</Text>
         <Text style={copy}>{scope.owner === 'guest:device' ? '儲存於這台裝置的訪客空間。' : '儲存於目前帳號與校園的個人匯入空間。'}已啟用的個人資料同步仍依原設定運作；未新增校務背景同步。</Text>
-        <Button text="查看與編輯已匯入資料" disabled={saving} onPress={onOpenRecords} />
+        <Button text="查看與編輯已匯入資料" disabled={saving} onPress={() => onOpenRecords(kind)} />
         {receipt.batchId && !undone ? <>
           <Button text={confirmUndo ? '確認撤回這次匯入' : '撤回這次匯入'} kind="outline" disabled={saving} onPress={() => confirmUndo ? void undo() : setConfirmUndo(true)} />
           {confirmUndo ? <Button text="保留資料" kind="outline" disabled={saving} onPress={() => setConfirmUndo(false)} /> : null}
