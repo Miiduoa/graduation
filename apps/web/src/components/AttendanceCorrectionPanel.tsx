@@ -39,6 +39,7 @@ export function AttendanceCorrectionPanel({
   const [busy, setBusy] = useState(false);
   const [loading, setLoading] = useState(false);
   const [students, setStudents] = useState<AttendanceStudent[]>([]);
+  const [studentQuery, setStudentQuery] = useState('');
   const [audits, setAudits] = useState<AttendanceCorrection[]>([]);
   const [selectedUid, setSelectedUid] = useState('');
   const [status, setStatus] = useState<AttendanceCorrectionStatus>('present');
@@ -49,6 +50,12 @@ export function AttendanceCorrectionPanel({
   const mounted = useRef(true);
   const revision = useRef(0);
   const submitting = useRef(false);
+  const matchingStudents = students.filter((student) => {
+    const query = studentQuery.trim().toLocaleLowerCase('zh-TW');
+    return !query ||
+      student.displayName.toLocaleLowerCase('zh-TW').includes(query) ||
+      student.studentId.toLocaleLowerCase('zh-TW').includes(query);
+  }).slice(0, 80);
 
   useEffect(() => {
     mounted.current = true;
@@ -65,6 +72,7 @@ export function AttendanceCorrectionPanel({
       setStudents([]);
       setAudits([]);
       setSelectedUid('');
+      setStudentQuery('');
       setError('');
       setNotice('');
       return;
@@ -159,6 +167,19 @@ export function AttendanceCorrectionPanel({
           {loading ? <p role="status" className={styles.note}>正在確認教師權限與課程名冊…</p> : null}
           {!loading && students.length > 0 && (
             <form className={styles.form} onSubmit={(event) => void submit(event)}>
+              <label htmlFor={`correction-search-${sessionId}`}>搜尋學生</label>
+              <input
+                id={`correction-search-${sessionId}`}
+                type="search"
+                value={studentQuery}
+                placeholder="輸入姓名或學號"
+                disabled={busy}
+                onChange={(event) => {
+                  setStudentQuery(event.target.value);
+                  setSelectedUid('');
+                  invalidatePendingRetry();
+                }}
+              />
               <label htmlFor={`correction-user-${sessionId}`}>選擇學生</label>
               <select
                 id={`correction-user-${sessionId}`}
@@ -168,12 +189,15 @@ export function AttendanceCorrectionPanel({
                 onChange={(event) => { setSelectedUid(event.target.value); invalidatePendingRetry(); }}
               >
                 <option value="" disabled>請選擇要更正的學生</option>
-                {students.map((student) => (
+                {matchingStudents.map((student) => (
                   <option key={student.uid} value={student.uid}>
                     {student.displayName}{student.studentId ? `（${student.studentId}）` : ''}
                   </option>
                 ))}
               </select>
+              {matchingStudents.length === 0 && (
+                <p role="status" className={styles.note}>沒有符合的學生，請調整姓名或學號搜尋條件。</p>
+              )}
               <label htmlFor={`correction-status-${sessionId}`}>核定狀態</label>
               <select
                 id={`correction-status-${sessionId}`}
