@@ -10,6 +10,7 @@ import {
   type Firestore,
 } from 'firebase/firestore';
 import { listCourseMemberships } from './courseWorkspace';
+import { getDb } from '../firebase';
 
 export type AttendanceReceiptStatus =
   | 'present'
@@ -164,4 +165,9 @@ export async function loadVerifiedAttendanceHistory(
       }
     }),
   );
+}
+
+/** Screen-facing adapter: Firebase setup belongs in the data service, not the view. */
+export function loadMyVerifiedAttendanceHistory(uid: string, schoolId?: string) {
+  return loadVerifiedAttendanceHistory(getDb(), uid, schoolId);
 }
