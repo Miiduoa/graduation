@@ -55,7 +55,7 @@
 .undo button {
   font: inherit;
   cursor: pointer;
-  min-height: 40px;
+  min-height: 44px;
   border-radius: 12px;
   transition: background-color 120ms ease, border-color 120ms ease;
 }
@@ -64,7 +64,7 @@
   padding: 0 18px;
   background: var(--brand);
   border: 1px solid var(--brand);
-  color: #fff;
+  color: var(--on-brand);
   font-weight: 650;
 }
 
@@ -492,7 +492,7 @@
 }
 
 .courseControls button {
-  min-height: 36px;
+  min-height: 44px;
   padding: 0 6px;
   font-size: 12px;
 }
