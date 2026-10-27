@@ -1,6 +1,7 @@
 import { httpsCallable } from 'firebase/functions';
 import { getAuthInstance, getFunctionsInstance, isFirebaseMockMode } from '../firebase';
 import { campusAgentWriteProposals, type CampusAgentWriteProposal } from './campusAssistantActions';
+import { validCampusSenseSnapshot, type CampusSenseSnapshot } from '../services/campusSenseSnapshot';
 
 export type CampusAssistantMessage = { role: 'user' | 'assistant'; content: string };
 export type CampusAssistantScope = { uid: string; schoolId: string };
@@ -61,13 +62,15 @@ export async function askCampusAssistant(input: {
   messages: CampusAssistantMessage[];
   isCurrent: () => boolean;
   schoolName?: string | null;
+  /** Authorized campus reads are only used after an explicit user refresh. */
+  senseSnapshot?: CampusSenseSnapshot | null;
   /** Offline by default. Campus mode is explicit and requires an authenticated backend. */
   mode?: CampusAssistantMode;
 }): Promise<{
   content: string;
   hasActions: boolean;
   source: CampusAssistantMode;
-  tool?: 'saved-timetable' | 'online-required' | 'open-service';
+  tool?: 'saved-timetable' | 'campus-snapshot' | 'online-required' | 'open-service';
   route?: string;
   proposals?: CampusAgentWriteProposal[];
 }> {
@@ -100,7 +103,8 @@ export async function askCampusAssistant(input: {
 
     // Safe read-only tools run even without a GGUF download or a native runtime.
     // They do not query a backend, perform mutations, or invent missing school data.
-    const localAnswer = runOfflineCampusTool(messages[messages.length - 1].content, snapshot);
+    const senseSnapshot = validCampusSenseSnapshot(input.senseSnapshot, input.scope);
+    const localAnswer = runOfflineCampusTool(messages[messages.length - 1].content, snapshot, senseSnapshot);
     if (localAnswer) {
       return {
         content: localAnswer.content,
@@ -141,7 +145,7 @@ export async function askCampusAssistant(input: {
     }));
     const completion = await localLLM.generate({
       messages: [
-        { role: 'system', content: formatOnDeviceSchoolPrompt(snapshot) },
+        { role: 'system', content: formatOnDeviceSchoolPrompt(snapshot, senseSnapshot) },
         ...compactHistory,
       ],
       maxTokens: readiness.modelId === 'qwen2.5-0.5b' ? 512 : 700,
