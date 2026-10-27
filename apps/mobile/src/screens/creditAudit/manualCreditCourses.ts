@@ -1,6 +1,12 @@
 import type { CreditCategory } from '@campus/shared/src/creditAudit';
 import type { SavedCourse } from '../../features/academics';
 
+export function mayOfferPuCsie115Reference(schoolId: string, department?: string | null): boolean {
+  const canonical = schoolId.trim().toLowerCase();
+  return (canonical === 'pu' || canonical === 'tw-pu') &&
+    /資訊工程|computer science/i.test(department ?? '');
+}
+
 export const MAX_CREDIT_IMPORT_BYTES = 600_000;
 export const MAX_CREDIT_IMPORT_COURSES = 300;
 
