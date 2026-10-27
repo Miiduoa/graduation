@@ -1,4 +1,5 @@
 import type { ReactNode } from 'react';
+import { BOOKMARK_UNAVAILABLE_COPY } from '@/lib/community/bookmarks';
 import styles from '../community.module.css';
 
 export function PostActionsRow({ children }: { children: ReactNode }) {
@@ -8,12 +9,14 @@ export function PostActionsRow({ children }: { children: ReactNode }) {
 export function PostBookmarkShareActions({
   saved,
   bookmarkDisabled,
+  bookmarkUnavailable,
   onBookmark,
   onShare,
   shareAriaLabel,
 }: {
   saved: boolean;
   bookmarkDisabled?: boolean;
+  bookmarkUnavailable?: boolean;
   onBookmark: () => void;
   onShare: () => void;
   shareAriaLabel: string;
@@ -23,10 +26,14 @@ export function PostBookmarkShareActions({
       <button
         type="button"
         className={`${styles.postAction} ${styles.postBookmark}`}
-        onClick={onBookmark}
-        disabled={bookmarkDisabled}
+        onClick={() => {
+          if (bookmarkDisabled || bookmarkUnavailable) return;
+          onBookmark();
+        }}
+        disabled={bookmarkDisabled || bookmarkUnavailable}
         aria-pressed={saved}
-        aria-label={saved ? '取消收藏貼文' : '收藏貼文'}
+        aria-label={bookmarkUnavailable ? BOOKMARK_UNAVAILABLE_COPY : saved ? '取消收藏貼文' : '收藏貼文'}
+        title={bookmarkUnavailable ? BOOKMARK_UNAVAILABLE_COPY : undefined}
       >
         <span aria-hidden="true">{saved ? '🔖' : '▤'}</span>
         <span className={styles.postActionFull}>{saved ? '已收藏' : '收藏'}</span>
