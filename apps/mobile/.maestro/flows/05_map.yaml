@@ -12,15 +12,16 @@ tags:
       id: login-landing
     timeout: 90000
 
-- assertVisible:
-    id: public-Map
-
-# Keep the tap target clear of the development warning banner at the screen edge.
+# Locate the public entry below the import card before checking visibility.
+# Centering also keeps the tap target clear of the development warning banner.
 - scrollUntilVisible:
     element:
       id: public-Map
     direction: DOWN
     centerElement: true
+
+- assertVisible:
+    id: public-Map
 
 - tapOn:
     id: public-Map
