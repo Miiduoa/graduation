@@ -336,6 +336,11 @@ class LocalLLMEngine {
   private listeners: Set<(state: LLMState) => void> = new Set();
   private conversationHistory: LLMMessage[] = [];
   private abortController: AbortController | null = null;
+  private activeDownload: {
+    modelId: string;
+    task: ReturnType<typeof FileSystem.createDownloadResumable> | null;
+    cancelled: boolean;
+  } | null = null;
 
   // ── State Management ──
 
@@ -430,7 +435,7 @@ class LocalLLMEngine {
   }
 
   /**
-   * 下載模型到本地（支援斷點續傳）
+   * 下載模型到本地（可取消；重新下載會重新開始）
    */
   async downloadModel(
     modelId?: string,
@@ -442,6 +447,10 @@ class LocalLLMEngine {
       return false;
     }
 
+    // Claim a single download before any awaits. Other screens share this engine.
+    if (this.activeDownload || ['generating', 'loading', 'downloading'].includes(this.state.status)) {
+      return false;
+    }
     const runtimeAvailability = getRuntimeAvailability();
     if (!runtimeAvailability.available) {
       this.setState({
@@ -452,32 +461,42 @@ class LocalLLMEngine {
       });
       return false;
     }
-
+    const operation = {
+      modelId: cfg.modelId,
+      task: null as ReturnType<typeof FileSystem.createDownloadResumable> | null,
+      cancelled: false,
+    };
+    this.activeDownload = operation;
     const modelDir = `${getDocDir()}models/`;
-    const dirInfo = await FileSystem.getInfoAsync(modelDir);
-    if (!dirInfo.exists) {
-      await FileSystem.makeDirectoryAsync(modelDir, { intermediates: true });
-    }
-
     const modelPath = this.getModelPath(cfg);
-    this.setState({ status: 'downloading', modelId: cfg.modelId });
+    this.setState({ status: 'downloading', modelId: cfg.modelId, error: undefined, downloadProgress: undefined });
 
     try {
+      const dirInfo = await FileSystem.getInfoAsync(modelDir);
+      if (operation.cancelled) throw new Error('model-download-cancelled');
+      if (!dirInfo.exists) {
+        await FileSystem.makeDirectoryAsync(modelDir, { intermediates: true });
+      }
+      if (operation.cancelled) throw new Error('model-download-cancelled');
       const existingInfo = await FileSystem.getInfoAsync(modelPath);
+      if (operation.cancelled) throw new Error('model-download-cancelled');
       if (existingInfo.exists) {
         if (this.isCompleteModelFile(cfg, (existingInfo as { size?: number }).size)) {
           await AsyncStorage.setItem(
             STORAGE_KEYS.modelReady,
             JSON.stringify({ modelId: cfg.modelId, downloadedAt: Date.now() }),
           );
+          if (operation.cancelled) throw new Error('model-download-cancelled');
           this.setState({ status: 'uninitialized', downloadProgress: undefined });
           return true;
         }
         await FileSystem.deleteAsync(modelPath, { idempotent: true });
+        if (operation.cancelled) throw new Error('model-download-cancelled');
       }
 
       // 先 resolve Hugging Face/Xet 的 signed URL，避免 iOS FileSystem 在大檔 redirect 時回傳 NSURLErrorDomain -1。
       const downloadUrl = await resolveDownloadUrl(cfg);
+      if (operation.cancelled) throw new Error('model-download-cancelled');
 
       const downloadResumable = FileSystem.createDownloadResumable(
         downloadUrl,
@@ -486,6 +505,7 @@ class LocalLLMEngine {
           headers: HF_DOWNLOAD_HEADERS,
         },
         (downloadProgress) => {
+          if (operation.cancelled) return;
           const progress: ModelDownloadProgress = {
             bytesDownloaded: downloadProgress.totalBytesWritten,
             totalBytes: downloadProgress.totalBytesExpectedToWrite,
@@ -503,10 +523,13 @@ class LocalLLMEngine {
         },
       );
 
+      operation.task = downloadResumable;
+      if (operation.cancelled) throw new Error('model-download-cancelled');
       console.log(`[LocalLLM] Starting download: ${cfg.modelUrl}`);
       console.log(`[LocalLLM] Saving to: ${modelPath}`);
 
       const result = await downloadResumable.downloadAsync();
+      if (operation.cancelled) throw new Error('model-download-cancelled');
       if (!result) {
         throw new Error('下載回傳 null — 可能是網路連線中斷或 URL 無效');
       }
@@ -523,14 +546,23 @@ class LocalLLMEngine {
       }
 
 
+      if (operation.cancelled) throw new Error('model-download-cancelled');
       await AsyncStorage.setItem(
         STORAGE_KEYS.modelReady,
         JSON.stringify({ modelId: cfg.modelId, downloadedAt: Date.now() }),
       );
-
+      if (operation.cancelled) throw new Error('model-download-cancelled');
       this.setState({ status: 'uninitialized', downloadProgress: undefined });
       return true;
     } catch (e: any) {
+      if (operation.cancelled) {
+        // Cancellation is not an error and never marks a partial GGUF as installed.
+        if (operation.task) {
+          await FileSystem.deleteAsync(modelPath, { idempotent: true }).catch(() => {});
+        }
+        this.setState({ status: 'uninitialized', modelId: cfg.modelId, error: undefined, downloadProgress: undefined });
+        return false;
+      }
       console.warn(`[LocalLLM] Download failed (${cfg.modelId}):`, e?.message ?? e);
       const userMsg = normalizeDownloadModelError(e);
       this.setState({
@@ -540,7 +572,25 @@ class LocalLLMEngine {
         downloadProgress: undefined,
       });
       return false;
+    } finally {
+      if (this.activeDownload === operation) this.activeDownload = null;
     }
+  }
+
+  /** Stop the native HTTP transfer, not a text-generation request. */
+  async cancelDownload(modelId?: string): Promise<boolean> {
+    const operation = this.activeDownload;
+    if (!operation || (modelId && operation.modelId !== modelId)) return false;
+    operation.cancelled = true;
+    if (operation.task) {
+      try {
+        await operation.task.cancelAsync();
+      } catch (error) {
+        // downloadAsync will also settle and run cleanup. Do not claim success.
+        console.warn('[LocalLLM] Download cancellation request failed:', error);
+      }
+    }
+    return true;
   }
 
   /**
@@ -552,6 +602,14 @@ class LocalLLMEngine {
       this.setState({ status: 'error', error: `Unknown model: ${modelId}` });
       return false;
     }
+    if (this.activeDownload || ['generating', 'loading', 'downloading'].includes(this.state.status)) {
+      return false;
+    }
+    if (this.state.status === 'ready' && this.config?.modelId === cfg.modelId && this.context) {
+      return true;
+    }
+    // Claim the loading slot before any async filesystem work.
+    this.setState({ status: 'loading', modelId: cfg.modelId, error: undefined });
 
     // 檢查模型檔案
     const modelPath = this.getModelPath(cfg);
@@ -572,8 +630,6 @@ class LocalLLMEngine {
       });
       return false;
     }
-
-    this.setState({ status: 'loading', modelId: cfg.modelId });
 
     try {
       const runtimeAvailability = getRuntimeAvailability();
@@ -912,6 +968,9 @@ class LocalLLMEngine {
    * 釋放模型資源
    */
   async release() {
+    if (this.activeDownload || ['generating', 'loading', 'downloading'].includes(this.state.status)) {
+      throw new Error('本地 AI 正在執行其他工作，請完成後再釋放模型。');
+    }
     if (this.context) {
       await this.context.release();
       this.context = null;
@@ -926,6 +985,9 @@ class LocalLLMEngine {
   async deleteModel(modelId?: string): Promise<void> {
     const cfg = MODEL_REGISTRY[modelId ?? getDefaultLocalLlmModelId()];
     if (!cfg) return;
+    if (this.activeDownload || ['generating', 'loading', 'downloading'].includes(this.state.status)) {
+      throw new Error('本地 AI 正在使用中，無法刪除模型；請先完成或取消目前的工作。');
+    }
 
     if (this.config?.modelId === cfg.modelId) {
       await this.release();
