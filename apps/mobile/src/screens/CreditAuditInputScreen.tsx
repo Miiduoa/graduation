@@ -52,18 +52,22 @@ const legacyCategories: Array<{ key: CreditCategory; label: string; color: strin
   { key: 'other', label: '其他', color: '#FF9500' },
 ];
 
-const semesters = [
-  '111-1',
-  '111-2',
-  '112-1',
-  '112-2',
-  '113-1',
-  '113-2',
-  '114-1',
-  '114-2',
-  '115-1',
-  '115-2',
-];
+/** Historical terms remain accessible, while the current year is always near the front. */
+function localAcademicTerm(now = new Date()): { year: number; semester: 1 | 2 } {
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'Asia/Taipei',
+    year: 'numeric',
+    month: 'numeric',
+  }).formatToParts(now);
+  const calendarYear = Number(parts.find((part) => part.type === 'year')?.value);
+  const month = Number(parts.find((part) => part.type === 'month')?.value);
+  const year = calendarYear - 1911 - (month < 8 ? 1 : 0);
+  return { year, semester: month >= 8 || month <= 1 ? 1 : 2 };
+}
+
+const currentTerm = localAcademicTerm();
+const semesters = Array.from({ length: 13 }, (_, offset) => currentTerm.year + 2 - offset)
+  .flatMap((year) => [`${year}-1`, `${year}-2`]);
 
 const gradeOptions = ['A+', 'A', 'A-', 'B+', 'B', 'B-', 'C+', 'C', 'C-', 'D', 'E', 'F'];
 
@@ -98,7 +102,7 @@ export function CreditAuditInputScreen(props: any) {
   const [detailedSubKey, setDetailedSubKey] = useState<string | undefined>(undefined);
   const [passed, setPassed] = useState(false);
   const [grade, setGrade] = useState('');
-  const [semester, setSemester] = useState('114-1');
+  const [semester, setSemester] = useState(`${currentTerm.year}-${currentTerm.semester}`);
 
   // The only bundled sample is PU CSIE 115. Never silently apply it to another
   // department, year, account or campus as a graduation audit.
@@ -242,6 +246,10 @@ export function CreditAuditInputScreen(props: any) {
     const validCredits = manualCreditAmount(credits);
     if (validCredits === null) {
       Alert.alert('請檢查學分', '每門課應為 0.01–30 學分，最多兩位小數');
+      return;
+    }
+    if (passed && ['E', 'F'].includes(grade.toUpperCase())) {
+      Alert.alert('通過狀態與成績不一致', '請重新核對自行填寫的課程狀態。');
       return;
     }
 
@@ -423,7 +431,7 @@ export function CreditAuditInputScreen(props: any) {
           ? `其中 ${parsed.missingPassEvidence} 門沒有明確「通過」標記，將暫不計入自行標示通過的學分。`
           : '',
         '匯入只是個人紀錄，不代表學校正式採計。',
-      ].filter(Boolean).join('\\n');
+      ].filter(Boolean).join('\n');
       Alert.alert('確認匯入課程', note, [
         { text: '取消', style: 'cancel' },
         {
@@ -497,6 +505,18 @@ export function CreditAuditInputScreen(props: any) {
         <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
           <Spinner size={32} />
           <Text style={{ color: theme.colors.muted, marginTop: 12 }}>載入中...</Text>
+        </View>
+      </Screen>
+    );
+  }
+  if (loadError) {
+    return (
+      <Screen title="個人學分規劃">
+        <View style={{ padding: 24, gap: 14 }}>
+          <Text style={{ color: theme.colors.text, fontSize: 16, lineHeight: 24 }}>
+            {loadError}
+          </Text>
+          <Button text="重新讀取本機課程" kind="primary" onPress={() => void loadSavedCourses()} />
         </View>
       </Screen>
     );
@@ -1276,7 +1296,7 @@ export function CreditAuditInputScreen(props: any) {
           <>
             <AnimatedCard
               title={`已儲存課程（${savedCourses.length}）`}
-              subtitle={unsyncedCount > 0 ? `${unsyncedCount} 門尚未同步` : '所有課程已同步'}
+              subtitle={savedCourses.length === 0 ? '尚無本機課程' : unsyncedCount > 0 ? `${unsyncedCount} 門尚未同步` : '目前課程皆已標示同步'}
             >
               {savedCourses.length === 0 ? (
                 <View style={{ alignItems: 'center', padding: 24 }}>
@@ -1337,7 +1357,7 @@ export function CreditAuditInputScreen(props: any) {
                             <Pill text={catInfo?.label || course.category} />
                             {course.semester && <Pill text={course.semester} />}
                             {course.grade && <Pill text={course.grade} kind="accent" />}
-                            {!course.passed && <Pill text="未通過" kind="accent" />}
+                            {!course.passed && <Pill text="未標示通過" kind="accent" />}
                           </View>
                         </View>
                         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
@@ -1379,11 +1399,12 @@ export function CreditAuditInputScreen(props: any) {
 
         {tab === 3 && (
           <>
-            <AnimatedCard title="匯入課程" subtitle="從 CSV 檔案批量匯入">
+            <AnimatedCard title="匯入課程" subtitle="先預覽、再確認寫入這台手機">
               <Text style={{ color: theme.colors.muted, lineHeight: 20, marginBottom: 12 }}>
                 支援的 CSV 格式：{'\n'}
                 課程名稱, 學分, 分類, 成績, 學期{'\n'}
-                例如：資料庫系統, 3, 必修, A, 113-1
+                例如：資料庫系統, 3, 必修, A, 113-1, 否
+                {'\\n'}沒有「通過」欄位的匯入資料，一律先列為未確認，不會自動認定已取得學分。
               </Text>
               <Button
                 text={importing ? '匯入中...' : '選擇 CSV 檔案'}
