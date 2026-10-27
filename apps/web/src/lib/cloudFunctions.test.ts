@@ -13,6 +13,11 @@ it('points hosted group invite callables at this Next.js app without a functions
   expect(getCloudFunctionUrl('startLiveSession', { env })).toBe('/api/fn/startLiveSession');
   expect(getCloudFunctionUrl('endLiveSession', { env })).toBe('/api/fn/endLiveSession');
   expect(getCloudFunctionUrl('joinLiveSession', { env })).toBe('/api/fn/joinLiveSession');
+  expect(getCloudFunctionUrl('submitLeaveRequest', { env })).toBe('/api/fn/submitLeaveRequest');
+  expect(getCloudFunctionUrl('withdrawLeaveRequest', { env })).toBe('/api/fn/withdrawLeaveRequest');
+  expect(getCloudFunctionUrl('reviewLeaveRequest', { env })).toBe('/api/fn/reviewLeaveRequest');
+  expect(getCloudFunctionUrl('listLeaveReviewQueue', { env })).toBe('/api/fn/listLeaveReviewQueue');
+  expect(getCloudFunctionUrl('signInPuStudentId', { env })).toBe('/api/fn/signInPuStudentId');
   expect(getCloudFunctionUrl('createGroup', { env })).toBe(
     'https://asia-east1-campus-one-tw.cloudfunctions.net/createGroup',
   );
@@ -52,7 +57,8 @@ it('lets the emulator win over NEXT_PUBLIC_FUNCTIONS_BASE_URL', () => {
     NEXT_PUBLIC_FIREBASE_EMULATOR_FUNCTIONS_PORT: '5001',
   };
   expect(getFunctionsBaseUrl(env)).toBeNull();
-  expect(getCloudFunctionUrl('signInPuStudentId', { env })).toBe(
-    'http://localhost:5001/demo-campus/asia-east1/signInPuStudentId',
+  expect(getCloudFunctionUrl('signInPuStudentId', { env })).toBe('/api/fn/signInPuStudentId');
+  expect(getCloudFunctionUrl('askCampusAssistant', { env })).toBe(
+    'http://localhost:5001/demo-campus/asia-east1/askCampusAssistant',
   );
 });

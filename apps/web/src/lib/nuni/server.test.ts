@@ -51,6 +51,7 @@ beforeEach(() => {
   vi.stubEnv('PLATFORM_GOOGLE_LOGIN_ENABLED', 'true');
   vi.stubEnv('PLATFORM_GOOGLE_CLIENT_SECRET', 'test-client-secret');
   vi.stubEnv('NUNI_API_BASE_URL', 'https://api.nuni.tw');
+  vi.stubEnv('SCHOOL_STUDENT_ID_LOGIN_ENABLED', '');
   vi.stubGlobal('fetch', fetcher.mockReset());
 });
 afterEach(() => {
@@ -183,19 +184,21 @@ describe('Nuni browser session boundary', () => {
       await (await handleNuni(request('api/nuni/sign-in-options'), ['sign-in-options'])).json(),
     ).toEqual({ google: true, studentId: false });
   });
-  it('advertises student ID only when the API lists it, never by default', async () => {
-    fetcher.mockResolvedValueOnce(response({ kinds: ['google-consumer'] }));
-    expect(
-      await (await handleNuni(request('api/nuni/sign-in-options'), ['sign-in-options'])).json(),
-    ).toEqual({ google: true, studentId: false });
+  it('advertises student ID only when the school login switch is on', async () => {
     fetcher.mockResolvedValueOnce(response({ kinds: ['google-consumer', 'school-issued'] }));
     expect(
       await (await handleNuni(request('api/nuni/sign-in-options'), ['sign-in-options'])).json(),
+    ).toEqual({ google: true, studentId: false });
+    vi.stubEnv('SCHOOL_STUDENT_ID_LOGIN_ENABLED', 'true');
+    fetcher.mockResolvedValueOnce(response({ kinds: ['google-consumer'] }));
+    expect(
+      await (await handleNuni(request('api/nuni/sign-in-options'), ['sign-in-options'])).json(),
     ).toEqual({ google: true, studentId: true });
+    vi.stubEnv('SCHOOL_STUDENT_ID_LOGIN_ENABLED', '');
     fetcher.mockResolvedValueOnce(response({ kinds: ['student-id'] }));
     expect(
       await (await handleNuni(request('api/nuni/sign-in-options'), ['sign-in-options'])).json(),
-    ).toEqual({ google: false, studentId: true });
+    ).toEqual({ google: false, studentId: false });
   });
   it('does not treat an unrelated successful JSON response as acknowledged logout', async () => {
     const value = session();

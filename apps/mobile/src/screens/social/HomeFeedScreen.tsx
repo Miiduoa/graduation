@@ -4,6 +4,7 @@ import React, { useCallback, useMemo, useRef, useState } from 'react';
 import {
   View,
   Text,
+  TextInput,
   FlatList,
   Image,
   Pressable,
@@ -33,6 +34,7 @@ import {
   type CampusPostDoc,
 } from '../../services/feed';
 import { listBoards, listSubscribedBoardIds, type CampusBoard } from '../../services/boards';
+import { listFollowingIds, followUser, unfollowUser } from '../../services/follows';
 import {
   listActiveStoriesForSchool,
   groupStoriesByAuthor,
@@ -42,13 +44,24 @@ import {
 import { fetchSchoolDirectoryProfiles } from '../../services/memberDirectory';
 import { toDate } from '../../utils/format';
 import { useCampusSocialStackNav } from './CampusSocialNavContext';
+import { selectMobileFeedPosts, type MobileFeedOrder } from './feedDiscoveryModel';
+import {
+  listCampusPostBookmarkIds,
+  loadCampusPostBookmarks,
+  saveCampusPostBookmark,
+  removeCampusPostBookmark,
+} from '../../services/campusPostBookmarks';
 
-type FilterKey = 'all' | 'subscribed' | 'media';
+type FilterKey = 'all' | 'following' | 'subscribed' | 'media' | 'saved';
+const EMPTY_SAVED_POSTS: CampusPostDoc[] = [];
+const EMPTY_FOLLOWING_IDS: ReadonlySet<string> = new Set();
 
 const FILTERS: { key: FilterKey; label: string; icon: keyof typeof Ionicons.glyphMap }[] = [
   { key: 'all', label: '全部', icon: 'sparkles-outline' },
+  { key: 'following', label: '追蹤', icon: 'people-outline' },
   { key: 'subscribed', label: '我訂閱', icon: 'notifications-outline' },
   { key: 'media', label: '圖文', icon: 'image-outline' },
+  { key: 'saved', label: '收藏', icon: 'bookmark-outline' },
 ];
 
 function formatTs(t: unknown): string {
@@ -77,6 +90,11 @@ function mediaUrlsOf(p: CampusPostDoc): string[] {
   return Array.isArray(p.mediaUrls) ? p.mediaUrls.filter((u) => typeof u === 'string' && u.length > 0) : [];
 }
 
+function isAccessDenied(cause: unknown): boolean {
+  const code = (cause as { code?: string })?.code ?? '';
+  return code.endsWith('permission-denied') || code.endsWith('unauthenticated');
+}
+
 export function HomeFeedScreen() {
   const { user, loading } = useAuth();
   const { school } = useSchool();
@@ -99,6 +117,13 @@ function HomeFeedContent() {
   const auth = useAuth();
   const { school } = useSchool();
   const insets = useSafeAreaInsets();
+  // The parent remounts this content for every account/school change.
+  // Native alerts also need fencing: they outlive the unmounted React tree.
+  const active = useRef(true);
+  React.useLayoutEffect(() => {
+    active.current = true;
+    return () => { active.current = false; };
+  }, []);
 
   const [posts, setPosts] = useState<CampusPostDoc[]>([]);
   const [boards, setBoards] = useState<CampusBoard[]>([]);
@@ -107,10 +132,40 @@ function HomeFeedContent() {
   const [nameByUid, setNameByUid] = useState<Record<string, string>>({});
   const [avatarByUid, setAvatarByUid] = useState<Record<string, string>>({});
   const [filter, setFilter] = useState<FilterKey>('all');
+  const [order, setOrder] = useState<MobileFeedOrder>('recommended');
+  const [search, setSearch] = useState('');
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [loadError, setLoadError] = useState('');
-  const likeFlightRef = useRef(false);
+  const [accessDenied, setAccessDenied] = useState(false);
+  const likeFlightsRef = useRef<Set<string>>(new Set());
+  const [pendingLikes, setPendingLikes] = useState<ReadonlySet<string>>(new Set());
+  const [bookmarkScope, setBookmarkScope] = useState('');
+  const [bookmarkedIds, setBookmarkedIds] = useState<ReadonlySet<string>>(new Set());
+  const [bookmarkedPosts, setBookmarkedPosts] = useState<CampusPostDoc[]>([]);
+  const [bookmarksLoading, setBookmarksLoading] = useState(false);
+  const [bookmarksError, setBookmarksError] = useState('');
+  const [bookmarkRevision, setBookmarkRevision] = useState(0);
+  const bookmarkFlights = useRef<Set<string>>(new Set());
+  const [bookmarksPending, setBookmarksPending] = useState<ReadonlySet<string>>(new Set());
+  const savedView = filter === 'saved';
+  const currentBookmarkScope = `${auth.user?.uid ?? ''}:${school?.id ?? ''}`;
+  const validBookmarks = bookmarkScope === currentBookmarkScope;
+  const savedIds = validBookmarks ? bookmarkedIds : new Set<string>();
+  const savedPosts = validBookmarks ? bookmarkedPosts : EMPTY_SAVED_POSTS;
+  const followingView = filter === 'following';
+  const [followingScope, setFollowingScope] = useState('');
+  const [followingIds, setFollowingIds] = useState<ReadonlySet<string>>(new Set());
+  const [followingLoading, setFollowingLoading] = useState(false);
+  const [followingError, setFollowingError] = useState('');
+  const [followingRevision, setFollowingRevision] = useState(0);
+  const [followingPending, setFollowingPending] = useState<ReadonlySet<string>>(new Set());
+  const followFlights = useRef<Set<string>>(new Set());
+  const currentFollowingScope = `${auth.user?.uid ?? ''}:${school?.id ?? ''}`;
+  const followingScopeRef = useRef(currentFollowingScope);
+  followingScopeRef.current = currentFollowingScope;
+  const validFollowing = followingScope === currentFollowingScope;
+  const followedIds = validFollowing ? followingIds : EMPTY_FOLLOWING_IDS;
   const loadVersion = useRef(0);
 
   const load = useCallback(async () => {
@@ -131,14 +186,15 @@ function HomeFeedContent() {
         listActiveStoriesForSchool(school.id, 80, { throwOnError: true }),
       ]);
       if (loadVersion.current !== version) return;
+      setAccessDenied(false);
       setPosts(rankFeedPosts(rows, 80));
       setBoards(boardList);
       setSubscribedBoardIds(new Set(subs));
       setStories(groupStoriesByAuthor(storyRows, auth.user.uid));
     } catch (cause) {
       if (loadVersion.current !== version) return;
-      const code = (cause as { code?: string })?.code ?? '';
-      if (code.endsWith('permission-denied') || code.endsWith('unauthenticated')) {
+      if (isAccessDenied(cause)) {
+        setAccessDenied(true);
         setPosts([]);
         setBoards([]);
         setSubscribedBoardIds(new Set());
@@ -157,8 +213,161 @@ function HomeFeedContent() {
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
+    setBookmarkRevision((prev) => prev + 1);
+    setFollowingRevision((prev) => prev + 1);
     await load();
   }, [load]);
+
+  React.useEffect(() => {
+    const uid = auth.user?.uid;
+    const schoolId = school?.id;
+    if (!uid || !schoolId || isFirebaseMockMode()) {
+      setBookmarkScope(uid && schoolId ? `${uid}:${schoolId}` : '');
+      setBookmarkedIds(new Set());
+      setBookmarkedPosts([]);
+      setBookmarksLoading(false);
+      setBookmarksError(isFirebaseMockMode() && savedView ? '示範模式不會讀取或寫入真實收藏。' : '');
+      return;
+    }
+    let live = true;
+    setBookmarksError('');
+    if (savedView) setBookmarksLoading(true);
+    void (async () => {
+      if (savedView) {
+        const saved = await loadCampusPostBookmarks(uid, schoolId);
+        if (!live) return;
+        setBookmarkedIds(new Set(saved.ids));
+        setBookmarkedPosts(saved.posts);
+      } else {
+        const ids = await listCampusPostBookmarkIds(uid, schoolId);
+        if (!live) return;
+        setBookmarkedIds(new Set(ids));
+      }
+      setBookmarkScope(`${uid}:${schoolId}`);
+    })()
+      .catch((cause) => {
+        if (!live) return;
+        if (isAccessDenied(cause)) {
+          setBookmarkScope('');
+          setBookmarkedIds(new Set());
+          setBookmarkedPosts([]);
+        }
+        setBookmarksError('收藏無法讀取，請檢查連線與校籍後重試。');
+      })
+      .finally(() => {
+        if (live) setBookmarksLoading(false);
+      });
+    return () => { live = false; };
+  }, [auth.user?.uid, school?.id, savedView, bookmarkRevision]);
+
+  React.useEffect(() => {
+    const uid = auth.user?.uid;
+    const schoolId = school?.id;
+    if (!uid || !schoolId || isFirebaseMockMode()) {
+      setFollowingIds(new Set());
+      setFollowingScope(uid && schoolId ? `${uid}:${schoolId}` : '');
+      setFollowingLoading(false);
+      setFollowingError(isFirebaseMockMode() ? '示範模式不會讀取真實追蹤清單。' : '');
+      return;
+    }
+    const scope = `${uid}:${schoolId}`;
+    let live = true;
+    setFollowingLoading(true);
+    setFollowingError('');
+    void listFollowingIds(schoolId, uid, 200, { throwOnError: true })
+      .then((ids) => {
+        if (!live) return;
+        setFollowingIds(new Set(ids));
+        setFollowingScope(scope);
+      })
+      .catch((cause) => {
+        if (!live) return;
+        if (isAccessDenied(cause)) {
+          setFollowingScope('');
+          setFollowingIds(new Set());
+        }
+        setFollowingError('追蹤清單暫時無法讀取，請確認連線及校籍後重試。');
+      })
+      .finally(() => {
+        if (live) setFollowingLoading(false);
+      });
+    return () => { live = false; };
+  }, [auth.user?.uid, school?.id, followingRevision]);
+
+  const onToggleFollow = useCallback(async (targetUid: string) => {
+    const uid = auth.user?.uid;
+    const schoolId = school?.id;
+    if (
+      !uid || !schoolId || !targetUid || targetUid === uid ||
+      !validFollowing || followingLoading || !!followingError || isFirebaseMockMode() ||
+      followFlights.current.has(targetUid)
+    ) return;
+    const scope = currentFollowingScope;
+    const removing = followedIds.has(targetUid);
+    followFlights.current.add(targetUid);
+    setFollowingPending((prev) => new Set([...prev, targetUid]));
+    try {
+      if (removing) await unfollowUser(schoolId, uid, targetUid);
+      else await followUser(schoolId, uid, targetUid);
+      if (!active.current || followingScopeRef.current !== scope) return;
+      setFollowingIds((prev) => {
+        const next = new Set(prev);
+        if (removing) next.delete(targetUid);
+        else next.add(targetUid);
+        return next;
+      });
+      setFollowingRevision((prev) => prev + 1);
+    } catch {
+      if (active.current && followingScopeRef.current === scope)
+        Alert.alert('追蹤未更新', '請確認網路與對方校籍後重試。');
+    } finally {
+      followFlights.current.delete(targetUid);
+      if (active.current && followingScopeRef.current === scope) {
+        setFollowingPending((prev) => {
+          const next = new Set(prev);
+          next.delete(targetUid);
+          return next;
+        });
+      }
+    }
+  }, [auth.user?.uid, school?.id, validFollowing, followingLoading, followingError, followedIds, currentFollowingScope]);
+
+  const onToggleBookmark = useCallback(async (post: CampusPostDoc) => {
+    const uid = auth.user?.uid;
+    const schoolId = school?.id;
+    if (!uid || !schoolId || isFirebaseMockMode() || bookmarkFlights.current.has(post.id)) {
+      if (isFirebaseMockMode()) Alert.alert('尚未連線', '示範模式不會寫入真實收藏。');
+      return;
+    }
+    const removing = savedIds.has(post.id);
+    bookmarkFlights.current.add(post.id);
+    setBookmarksPending((prev) => new Set([...prev, post.id]));
+    try {
+      if (removing) await removeCampusPostBookmark(uid, schoolId, post.id);
+      else await saveCampusPostBookmark(uid, schoolId, post.id);
+      if (!active.current) return;
+      setBookmarkedIds((prev) => {
+        const next = new Set(prev);
+        if (removing) next.delete(post.id);
+        else next.add(post.id);
+        return next;
+      });
+      if (removing) setBookmarkedPosts((prev) => prev.filter((p) => p.id !== post.id));
+      setBookmarkScope(`${uid}:${schoolId}`);
+      setBookmarkRevision((prev) => prev + 1);
+    } catch {
+      if (active.current) Alert.alert('收藏未更新', '請確認網路與校籍後重試。');
+    } finally {
+      bookmarkFlights.current.delete(post.id);
+      if (active.current) {
+        setBookmarksPending((prev) => {
+          const next = new Set(prev);
+          next.delete(post.id);
+          return next;
+        });
+      }
+    }
+  }, [auth.user?.uid, school?.id, savedIds]);
 
   const onToggleLike = useCallback(
     async (row: CampusPostDoc) => {
@@ -168,36 +377,49 @@ function HomeFeedContent() {
         if (!uid) Alert.alert('請登入', '登入後即可按讚貼文');
         return;
       }
-      if (likeFlightRef.current) return;
-      likeFlightRef.current = true;
+      if (likeFlightsRef.current.has(row.id)) return;
+      likeFlightsRef.current.add(row.id);
+      setPendingLikes((prev) => new Set([...prev, row.id]));
 
-      // 樂觀更新
-      setPosts((prev) =>
-        prev.map((p) => {
+      // The server remains authoritative after optimistic feedback.
+      const optimistic = (items: CampusPostDoc[]) =>
+        items.map((p) => {
           if (p.id !== row.id) return p;
           const arr = Array.isArray(p.likedBy) ? [...p.likedBy] : [];
           const idx = arr.indexOf(uid);
           if (idx >= 0) arr.splice(idx, 1);
           else arr.push(uid);
           return {
-            ...p,
-            likedBy: arr,
-            likes:
-              typeof p.likes === 'number' ? p.likes + (idx >= 0 ? -1 : 1) : arr.length,
+            ...p, likedBy: arr,
+            likes: typeof p.likes === 'number' ? Math.max(0, p.likes + (idx >= 0 ? -1 : 1)) : arr.length,
           };
-        }),
-      );
+        });
+      setPosts(optimistic);
+      setBookmarkedPosts(optimistic);
 
       try {
         await toggleCampusPostLike(sid, row.id, uid);
       } catch (e: any) {
-        Alert.alert('按讚失敗', e?.message ?? String(e));
-        await load();
+        if (!active.current) return;
+        const rollback = (items: CampusPostDoc[]) =>
+          items.map((post) =>
+            post.id === row.id ? { ...post, likedBy: row.likedBy, likes: row.likes } : post,
+          );
+        setPosts(rollback);
+        setBookmarkedPosts(rollback);
+        Alert.alert('按讚失敗', '目前無法更新貼文，請確認連線後再試。');
       } finally {
-        likeFlightRef.current = false;
+        likeFlightsRef.current.delete(row.id);
+        if (active.current) {
+          setPendingLikes((prev) => {
+            const next = new Set(prev);
+            next.delete(row.id);
+            return next;
+          });
+        }
       }
     },
-    [auth.user?.uid, school?.id, load],
+    [auth.user?.uid, school?.id],
   );
 
   React.useEffect(() => {
@@ -213,7 +435,7 @@ function HomeFeedContent() {
     (async () => {
       // 把貼文作者 + Story 作者一起 hydrate（少一次 batch）
       const uids = new Set<string>();
-      posts.forEach((p) => {
+      [...posts, ...savedPosts].forEach((p) => {
         if (!p.anonymous && p.authorUid) uids.add(p.authorUid);
       });
       stories.forEach((g) => uids.add(g.authorUid));
@@ -236,7 +458,7 @@ function HomeFeedContent() {
     return () => {
       cancelled = true;
     };
-  }, [posts, stories, school?.id]);
+  }, [posts, savedPosts, stories, school?.id]);
 
   const boardNameById = useMemo(() => {
     const m: Record<string, string> = {};
@@ -246,15 +468,26 @@ function HomeFeedContent() {
     return m;
   }, [boards]);
 
-  const visiblePosts = useMemo(() => {
-    if (filter === 'subscribed') {
-      return posts.filter((p) => subscribedBoardIds.has(p.boardId));
-    }
-    if (filter === 'media') {
-      return posts.filter((p) => mediaUrlsOf(p).length > 0);
-    }
-    return posts;
-  }, [posts, filter, subscribedBoardIds]);
+  const visiblePosts = useMemo(
+    () => selectMobileFeedPosts(savedView ? savedPosts : posts, {
+      filter: filter === 'saved' ? 'all' : filter,
+      order,
+      search,
+      subscribedIds: subscribedBoardIds,
+      followingIds: followedIds,
+      boards: boardNameById,
+      authors: nameByUid,
+    }),
+    [posts, savedPosts, savedView, filter, order, search, subscribedBoardIds, followedIds, boardNameById, nameByUid],
+  );
+  const savedUnavailable = savedView && (bookmarksLoading || !validBookmarks || !!bookmarksError);
+  const followingUnavailable = followingView && (followingLoading || !validFollowing || !!followingError);
+  const discoveryUnavailable = accessDenied || savedUnavailable || followingUnavailable;
+
+  const selectFilter = (next: FilterKey) => {
+    if (next === 'saved' && !savedView) setBookmarksLoading(true);
+    setFilter(next);
+  };
 
   const authorLine = (p: CampusPostDoc) => {
     if (p.anonymous) return p.aliasSnapshot ?? '匿名貼文';
@@ -295,6 +528,30 @@ function HomeFeedContent() {
           </Pressable>
         </View>
       )}
+      {!!followingError && (
+        <View style={{ paddingHorizontal: 16, paddingVertical: 9, gap: 6 }}>
+          <Text accessibilityRole="alert" style={{ color: theme.colors.danger }}>{followingError}</Text>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="重新載入追蹤"
+            onPress={() => setFollowingRevision((prev) => prev + 1)}
+          >
+            <Text style={{ color: theme.colors.accent, fontWeight: '700' }}>重新載入追蹤</Text>
+          </Pressable>
+        </View>
+      )}
+      {savedView && !!bookmarksError && (
+        <View style={{ paddingHorizontal: 16, paddingVertical: 9, gap: 8 }}>
+          <Text accessibilityRole="alert" style={{ color: theme.colors.danger }}>{bookmarksError}</Text>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="重新載入收藏"
+            onPress={() => setBookmarkRevision((prev) => prev + 1)}
+          >
+            <Text style={{ color: theme.colors.accent, fontWeight: '700' }}>重新載入收藏</Text>
+          </Pressable>
+        </View>
+      )}
       {loading ? (
         <View style={styles.center}>
           <ActivityIndicator color={theme.colors.accent} />
@@ -302,7 +559,7 @@ function HomeFeedContent() {
       ) : (
         <FlatList
           style={{ flex: 1 }}
-          data={visiblePosts}
+          data={discoveryUnavailable ? [] : visiblePosts}
           keyExtractor={(p) => p.id}
           removeClippedSubviews
           windowSize={7}
@@ -310,28 +567,122 @@ function HomeFeedContent() {
           maxToRenderPerBatch={8}
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
           keyboardShouldPersistTaps="handled"
+          keyboardDismissMode="on-drag"
           ListHeaderComponent={
+            <>
             <FeedHeader
               stories={stories}
               avatarByUid={avatarByUid}
               nameByUid={nameByUid}
               myUid={auth.user.uid}
               filter={filter}
-              onSelectFilter={setFilter}
-              onOpenStoryGroup={(grp) => openStoryGroup(grp, nav)}
+              onSelectFilter={selectFilter}
+              onOpenStoryGroup={(grp) => openStoryGroup(grp, nav, school?.id)}
               onComposeStory={goStoryCompose}
               onComposePost={goCompose}
             />
+            <View style={{ paddingHorizontal: 14, paddingTop: 8, gap: 9 }}>
+              <View style={{
+                flexDirection: 'row', alignItems: 'center', minHeight: 44, gap: 9,
+                paddingHorizontal: 12, borderWidth: StyleSheet.hairlineWidth,
+                borderColor: theme.colors.border, borderRadius: theme.radius.md,
+                backgroundColor: theme.colors.surface,
+              }}>
+                <Ionicons name="search" size={18} color={theme.colors.textSecondary} />
+                <TextInput
+                  style={{ flex: 1, minWidth: 0, color: theme.colors.text, paddingVertical: 10 }}
+                  accessibilityLabel="搜尋本校貼文"
+                  value={search}
+                  onChangeText={setSearch}
+                  placeholder="搜尋貼文、看板、標籤或作者"
+                  placeholderTextColor={theme.colors.textSecondary}
+                  returnKeyType="search"
+                  autoCorrect={false}
+                />
+                {!!search && (
+                  <Pressable
+                    accessibilityRole="button"
+                    accessibilityLabel="清除搜尋"
+                    hitSlop={10}
+                    onPress={() => setSearch('')}
+                  >
+                    <Ionicons name="close-circle" size={20} color={theme.colors.textSecondary} />
+                  </Pressable>
+                )}
+              </View>
+              <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+                {!discoveryUnavailable && <Text style={{ color: theme.colors.textSecondary, fontSize: 12 }}>
+                  {savedView
+                    ? `顯示 ${visiblePosts.length} 則收藏`
+                    : followingView
+                      ? `追蹤作者的貼文 ${visiblePosts.length} 則`
+                      : `已載入 ${posts.length} 則 · 顯示 ${visiblePosts.length} 則`}
+                </Text>}
+                <View style={{ flexDirection: 'row', gap: 6 }}>
+                  {([
+                    { key: 'recommended', label: savedView ? '收藏順序' : '推薦' },
+                    { key: 'latest', label: savedView ? '貼文最新' : '最新' },
+                  ] as const).map((item) => (
+                    <Pressable
+                      key={item.key}
+                      accessibilityRole="button"
+                      accessibilityLabel={item.label}
+                      accessibilityState={{ selected: order === item.key }}
+                      onPress={() => setOrder(item.key)}
+                      style={{
+                        minHeight: 40, minWidth: 56, paddingHorizontal: 12,
+                        alignItems: 'center', justifyContent: 'center',
+                        borderRadius: theme.radius.md,
+                        backgroundColor: order === item.key ? theme.colors.accent : theme.colors.surface,
+                        borderWidth: StyleSheet.hairlineWidth, borderColor: theme.colors.border,
+                      }}
+                    >
+                      <Text style={{
+                        color: order === item.key ? theme.colors.onAccent : theme.colors.textSecondary,
+                        fontSize: 12, fontWeight: '700',
+                      }}>{item.label}</Text>
+                    </Pressable>
+                  ))}
+                </View>
+              </View>
+              {!discoveryUnavailable && <Text style={{ color: theme.colors.textSecondary, fontSize: 11, lineHeight: 16 }}>
+                {savedView
+                  ? '顯示本校最近最多 40 筆私人收藏，可跨裝置同步'
+                  : followingView
+                    ? '只顯示目前載入的本校貼文中追蹤的作者'
+                    : '搜尋與排序僅適用於本次載入的本校貼文'}
+              </Text>}
+            </View>
+            </>
           }
           ListEmptyComponent={
-            loadError ? null : (
-              <EmptyState
+            loadError || (savedView && !!bookmarksError) || (followingView && !!followingError) ? null : (
+              (savedView && (bookmarksLoading || !validBookmarks)) ||
+                (followingView && (followingLoading || !validFollowing)) ? (
+                <View style={{ alignItems: 'center', paddingVertical: 28, gap: 10 }}>
+                  <ActivityIndicator color={theme.colors.accent} />
+                  <Text style={{ color: theme.colors.textSecondary }}>
+                    {followingView ? '正在讀取追蹤動態…' : '正在讀取收藏…'}
+                  </Text>
+                </View>
+              ) : <EmptyState
                 showCalmHero
-                title={filter === 'subscribed' ? '尚無已訂閱看板的新貼文' : '尚無校園貼文'}
+                title={search.trim()
+                  ? '找不到符合的貼文'
+                  : filter === 'following' ? '追蹤的作者尚未發文'
+                    : filter === 'saved' ? '還沒有收藏貼文'
+                    : filter === 'subscribed' ? '尚無已訂閱看板的新貼文'
+                    : '尚無校園貼文'}
                 subtitle={
-                  filter === 'subscribed'
-                    ? '到「看板」訂閱你想追的版面，或點右下角發第一篇。'
-                    : '點右下角的鉛筆，發出你的第一篇貼文。'
+                  search.trim()
+                    ? '請縮短關鍵字或清除搜尋，目前僅搜尋已載入的貼文。'
+                    : filter === 'following'
+                      ? '先到「全部」動態追蹤感興趣的作者；目前只篩選已載入貼文。'
+                      : filter === 'saved'
+                        ? '到校園動態收藏有用的內容，之後可跨裝置找回。'
+                    : filter === 'subscribed'
+                      ? '到「看板」訂閱你想追的版面，或點右下角發第一篇。'
+                      : '點右下角的鉛筆，發出你的第一篇貼文。'
                 }
               />
             )
@@ -378,6 +729,36 @@ function HomeFeedContent() {
                       <Text style={styles.boardChip}>＃{board}</Text>
                     </Pressable>
                   </View>
+                  {!isFirebaseMockMode() &&
+                    !item.anonymous &&
+                    item.authorUid &&
+                    item.authorUid !== uid &&
+                    validFollowing && (
+                      <Pressable
+                        accessibilityRole="button"
+                        accessibilityLabel={followedIds.has(item.authorUid)
+                          ? `取消追蹤 ${authorLine(item)}`
+                          : `追蹤 ${authorLine(item)}`}
+                        accessibilityState={{
+                          selected: followedIds.has(item.authorUid),
+                          disabled: followingLoading || !!followingError || followingPending.has(item.authorUid),
+                        }}
+                        disabled={followingLoading || !!followingError || followingPending.has(item.authorUid)}
+                        hitSlop={8}
+                        onPress={(event) => {
+                          event.stopPropagation?.();
+                          void onToggleFollow(item.authorUid!);
+                        }}
+                        style={[styles.authorFollow, followedIds.has(item.authorUid) && styles.authorFollowActive]}
+                      >
+                        <Text style={[
+                          styles.authorFollowText,
+                          followedIds.has(item.authorUid) && styles.authorFollowTextActive,
+                        ]}>
+                          {followedIds.has(item.authorUid) ? '追蹤中' : '追蹤'}
+                        </Text>
+                      </Pressable>
+                    )}
                 </View>
 
                 <Text numberOfLines={2} style={styles.cardTitle}>
@@ -402,6 +783,10 @@ function HomeFeedContent() {
                 <View style={styles.cardFooter}>
                   <Pressable
                     style={styles.statHit}
+                    accessibilityRole="button"
+                    accessibilityLabel={liked ? '取消按讚' : '按讚'}
+                    accessibilityState={{ selected: liked, disabled: pendingLikes.has(item.id) }}
+                    disabled={pendingLikes.has(item.id)}
                     hitSlop={{ top: 8, bottom: 8, left: 6, right: 6 }}
                     onPress={(e) => {
                       e.stopPropagation?.();
@@ -424,12 +809,33 @@ function HomeFeedContent() {
                   <View style={{ flex: 1 }} />
                   <Pressable
                     accessibilityRole="button"
+                    accessibilityLabel={savedIds.has(item.id) ? '取消收藏貼文' : '收藏貼文'}
+                    accessibilityState={{ selected: savedIds.has(item.id), disabled: bookmarksPending.has(item.id) }}
+                    disabled={bookmarksPending.has(item.id)}
+                    style={styles.statHit}
+                    hitSlop={8}
+                    onPress={(event) => {
+                      event?.stopPropagation?.();
+                      void onToggleBookmark(item);
+                    }}
+                  >
+                    <Ionicons
+                      name={savedIds.has(item.id) ? 'bookmark' : 'bookmark-outline'}
+                      size={18}
+                      color={savedIds.has(item.id) ? theme.colors.accent : theme.colors.textSecondary}
+                    />
+                    <Text style={[styles.statLabel, savedIds.has(item.id) && { color: theme.colors.accent }]}>
+                      {savedIds.has(item.id) ? '已收藏' : '收藏'}
+                    </Text>
+                  </Pressable>
+                  <Pressable
+                    accessibilityRole="button"
                     accessibilityLabel={`分享貼文：${item.title}`}
                     style={styles.statHit}
                     hitSlop={8}
                     onPress={(event) => {
                       event.stopPropagation?.();
-                      const url = `campus://post/${item.id}`;
+                      const url = `https://nuni.tw/community/post/${encodeURIComponent(item.id)}?schoolId=${encodeURIComponent(school?.id ?? '')}`;
                       void Share.share({ title: item.title, message: `${item.title}\n${url}`, url })
                         .catch(() => Alert.alert('暫時無法分享', '請稍後再試或從貼文詳情分享。'));
                     }}
@@ -500,7 +906,12 @@ function FeedHeader(props: {
           showsHorizontalScrollIndicator={false}
           contentContainerStyle={{ paddingHorizontal: 14, gap: 14 }}
         >
-          <Pressable style={styles.storyItem} onPress={onComposeStory} accessibilityLabel="發布 Story">
+          <Pressable
+            style={styles.storyItem}
+            onPress={() => myGroup ? onOpenStoryGroup(myGroup) : onComposeStory()}
+            accessibilityRole="button"
+            accessibilityLabel={myGroup ? '查看我的 Story' : '發布 Story'}
+          >
             <View style={[styles.storyRing, styles.storyAddRing]}>
               {myGroup ? (
                 avatarByUid[myUid] ? (
@@ -520,10 +931,31 @@ function FeedHeader(props: {
               {myGroup ? '我的 Story' : '新增'}
             </Text>
           </Pressable>
+          {!!myGroup && (
+            <Pressable
+              style={styles.storyItem}
+              onPress={onComposeStory}
+              accessibilityRole="button"
+              accessibilityLabel="新增 Story"
+            >
+              <View style={[styles.storyRing, styles.storyAddRing]}>
+                <View style={[styles.storyImg, styles.storyAddInner]}>
+                  <Ionicons name="add" size={26} color={theme.colors.accent} />
+                </View>
+              </View>
+              <Text style={styles.storyName}>新增</Text>
+            </Pressable>
+          )}
           {others.map((g) => {
             const av = avatarByUid[g.authorUid];
             return (
-              <Pressable key={g.authorUid} style={styles.storyItem} onPress={() => onOpenStoryGroup(g)}>
+              <Pressable
+                key={g.authorUid}
+                style={styles.storyItem}
+                onPress={() => onOpenStoryGroup(g)}
+                accessibilityRole="button"
+                accessibilityLabel={`查看 ${nameByUid[g.authorUid] ?? '同學'} 的 Story`}
+              >
                 <View style={styles.storyRing}>
                   {av ? (
                     <Image source={{ uri: av }} style={styles.storyImg} />
@@ -545,13 +977,16 @@ function FeedHeader(props: {
       </View>
 
       {/* Filter chips */}
-      <View style={styles.filterRow}>
+      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.filterRow}>
         {FILTERS.map((f) => {
           const active = filter === f.key;
           return (
             <Pressable
               key={f.key}
               onPress={() => onSelectFilter(f.key)}
+              accessibilityRole="tab"
+              accessibilityLabel={`${f.label}分類`}
+              accessibilityState={{ selected: active }}
               style={[styles.filterChip, active && styles.filterChipActive]}
             >
               <Ionicons
@@ -563,7 +998,7 @@ function FeedHeader(props: {
             </Pressable>
           );
         })}
-      </View>
+      </ScrollView>
     </View>
   );
 }
@@ -593,19 +1028,14 @@ function MediaGrid({ uris }: { uris: string[] }) {
 
 // ─── 開啟 Story group → 全螢幕 viewer ─────────────────────
 
-function openStoryGroup(grp: StoryAuthorGroup, nav: any) {
-  // 直接傳 stories 給 StoryCompose 重用？不行 — 改用 navigate to a dedicated viewer modal.
-  // 為了避免新增更多 route，先 fallback：show first story's text via Alert; user 可從 RealtimeSocialScreen 看完整 viewer。
-  const first = grp.stories[0];
-  if (!first) return;
-  const summary = first.text ?? '(媒體 Story)';
-  Alert.alert(`${grp.isMine ? '我的' : ''}Story · ${grp.stories.length} 則`, summary, [
-    {
-      text: '到「即時」分頁看詳情',
-      onPress: () => nav?.navigate?.('CampusSocialScreen' as never, { initialTab: 'realtime' }),
-    },
-    { text: '關閉', style: 'cancel' },
-  ]);
+function openStoryGroup(grp: StoryAuthorGroup, nav: any, schoolId?: string) {
+  if (!grp.stories.length || !schoolId || !grp.stories.every((story) => story.schoolId === schoolId)) return;
+  // Open the existing full-screen story viewer within the same school context.
+  nav?.navigate?.('CampusSocialScreen' as never, {
+    initialTab: 'realtime',
+    storyAuthorUid: grp.authorUid,
+    storySchoolId: schoolId,
+  });
 }
 
 const createStyles = () => StyleSheet.create({
@@ -712,6 +1142,22 @@ const createStyles = () => StyleSheet.create({
       fontSize: 12,
     },
 
+  authorFollow: {
+    minHeight: 36,
+    paddingHorizontal: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: 18,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: theme.colors.border,
+    backgroundColor: theme.colors.surface,
+  },
+  authorFollowActive: {
+    borderColor: theme.colors.accent,
+    backgroundColor: theme.colors.accentSoft,
+  },
+  authorFollowText: { fontSize: 12, fontWeight: '700', color: theme.colors.text },
+  authorFollowTextActive: { color: theme.colors.accent },
   cardTitle: { fontSize: 16, fontWeight: '700', color: theme.colors.text, marginBottom: 4 },
   preview: { fontSize: 14, color: theme.colors.textSecondary, lineHeight: 20 },
 
