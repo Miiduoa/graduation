@@ -35,11 +35,11 @@ import {
 import { useAuth } from '../state/auth';
 import { useSchool } from '../state/school';
 import { analytics } from '../services/analytics';
-import { isProvidenceUniversitySchool } from './creditAudit/gradeScope';
 import {
   exportManualCreditCsv,
   manualCreditAmount,
   manualCreditProgress,
+  mayOfferPuCsie115Reference,
   parseManualCreditCsv,
   validCourseName,
 } from './creditAudit/manualCreditCourses';
@@ -107,8 +107,7 @@ export function CreditAuditInputScreen(props: any) {
   // The only bundled sample is PU CSIE 115. Never silently apply it to another
   // department, year, account or campus as a graduation audit.
   const [referenceEnabled, setReferenceEnabled] = useState(false);
-  const canUseReference = isProvidenceUniversitySchool(school.id) &&
-    /資訊工程|computer science/i.test(auth.profile?.department ?? '');
+  const canUseReference = mayOfferPuCsie115Reference(school.id, auth.profile?.department);
   const referenceActive = canUseReference && referenceEnabled;
   const detailedTemplate = puCSIE_115;
   const detailedCategoryOptions = useMemo(
