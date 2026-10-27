@@ -2,6 +2,7 @@ import {
   collection,
   doc,
   getDoc,
+  getDocFromServer,
   getDocs,
   limit,
   onSnapshot,
@@ -152,7 +153,7 @@ export async function loadAttendanceRecords(
   return snapshot.docs.map((entry) => record(entry.id, entry.data()));
 }
 export async function loadAttendanceCode(courseId: string, sessionId: string): Promise<string> {
-  const snapshot = await getDoc(doc(getDb(), 'groups', courseId, 'liveSessionSecrets', sessionId));
+  const snapshot = await getDocFromServer(doc(getDb(), 'groups', courseId, 'liveSessionSecrets', sessionId));
   if (!snapshot.exists() || typeof snapshot.data().qrToken !== 'string')
     throw new Error('找不到簽到碼，請結束這次點名後重新開啟。');
   return snapshot.data().qrToken;
