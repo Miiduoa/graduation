@@ -82,7 +82,7 @@ test('mobile displays honest average load and does not allocate unscheduled cred
   expect(view.getByText('平均每學期還需')).toBeTruthy();
   expect(view.getByText('尚未排入學期')).toBeTruthy();
   expect(view.getByText(/學期推演不會把/)).toBeTruthy();
-  expect(view.getByText('累積 60')).toBeTruthy();
+  expect(view.getAllByText('累積 60')).toHaveLength(4);
 });
 
 test('changing school/account reloads a fresh isolated plan without saving prior state into the new scope', async () => {
