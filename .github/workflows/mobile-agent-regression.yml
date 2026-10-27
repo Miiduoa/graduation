@@ -60,8 +60,11 @@ jobs:
             src/__tests__/services/campusStudyAgenda.test.ts \
             src/__tests__/services/campusAssignmentReminders.test.ts \
             src/__tests__/services/offlineCampusTools.test.ts \
+            src/__tests__/services/localCampusToolProtocol.test.ts \
             src/__tests__/features/campusAssistant.test.ts \
+            src/__tests__/features/campusAssistantSemantic.test.ts \
             src/__tests__/CampusAssistantScreen.test.tsx \
             src/__tests__/CampusStudyAgendaCard.test.tsx \
+            src/__tests__/CampusLocalReadResults.test.tsx \
             src/__tests__/AuthSignOut.test.tsx \
             --runInBand --ci
