@@ -3,12 +3,14 @@
 import { useEffect, useState } from 'react';
 import { attendanceError } from '@/lib/courseAttendance';
 import { loadAttendanceRegister } from '@/lib/loadAttendanceRegister';
+import { watchAttendanceRegister, type LiveAttendanceRegister, type RegisterSyncState } from '@/lib/watchAttendanceRegister';
 import {
   REGISTER_LABELS, attendanceRegisterCsv, filterAttendanceRegister, summarizeAttendanceRegister,
   type AttendanceRegister, type RegisterFilter, type RegisterStatus,
 } from '@/lib/attendanceRegister';
 import { Button } from './ui/Button';
 import styles from './attendance-register.module.css';
+import liveStyles from './attendance-register-live.module.css';
 
 const PAGE_SIZE = 30;
 const filters: RegisterFilter[] = ['all', 'unconfirmed', 'present', 'late', 'absent', 'excused', 'unavailable'];
@@ -30,6 +32,7 @@ export function AttendanceRegisterPanel(props: Props) {
   const [filter, setFilter] = useState<RegisterFilter>('all');
   const [search, setSearch] = useState('');
   const [shown, setShown] = useState(PAGE_SIZE);
+  const [liveMode, setLiveMode] = useState(false);
   return (
     <section className={styles.register} aria-label="全班出席名冊">
       <div className={styles.heading}>
@@ -42,8 +45,24 @@ export function AttendanceRegisterPanel(props: Props) {
       </div>
       {open && (
         <div id={`register-${props.sessionId}`}>
-          <RegisterContents key={`${props.courseId}:${props.sessionId}:${props.revision ?? 0}:${attempt}`}
-            {...props} filter={filter} search={search} shown={shown}
+          <div className={liveStyles.control}>
+            <div>
+              <strong>{liveMode ? '即時名冊已開啟' : '手動查核名冊'}</strong>
+              <p id={`register-live-hint-${props.sessionId}`}>
+                {liveMode
+                  ? '學生簽到、教師更正與修課異動會自動更新；背景與離線時暫停。'
+                  : '開啟後不用反覆重新整理；會使用資料庫讀取額度，收合名冊即停止。'}
+              </p>
+            </div>
+            <Button type="button" variant="outline" role="switch"
+              aria-label="自動更新全班名冊" aria-checked={liveMode}
+              aria-describedby={`register-live-hint-${props.sessionId}`} disabled={props.disabled}
+              onClick={() => setLiveMode((value) => !value)}>
+              {liveMode ? '關閉自動更新' : '開啟自動更新'}
+            </Button>
+          </div>
+          <RegisterContents key={`${props.courseId}:${props.sessionId}:${liveMode ? 'live' : props.revision ?? 0}:${attempt}`}
+            {...props} liveMode={liveMode} filter={filter} search={search} shown={shown}
             onFilter={(value) => { setFilter(value); setShown(PAGE_SIZE); }}
             onSearch={(value) => { setSearch(value); setShown(PAGE_SIZE); }}
             onMore={() => setShown((value) => value + PAGE_SIZE)}
@@ -55,25 +74,52 @@ export function AttendanceRegisterPanel(props: Props) {
 }
 
 function RegisterContents({
-  courseId, sessionId, disabled, onCorrect, filter, search, shown,
+  courseId, sessionId, disabled, onCorrect, liveMode, filter, search, shown,
   onFilter, onSearch, onMore, onRefresh,
 }: Props & {
-  filter: RegisterFilter; search: string; shown: number;
+  liveMode: boolean; filter: RegisterFilter; search: string; shown: number;
   onFilter: (value: RegisterFilter) => void;
   onSearch: (value: string) => void;
   onMore: () => void; onRefresh: () => void;
 }) {
-  const [data, setData] = useState<AttendanceRegister | null>(null);
+  const [data, setData] = useState<(AttendanceRegister & Partial<Pick<LiveAttendanceRegister, 'membersComplete' | 'receiptsComplete'>>) | null>(null);
+  const [syncState, setSyncState] = useState<RegisterSyncState>('connecting');
   const [error, setError] = useState('');
   const [exportError, setExportError] = useState('');
   useEffect(() => {
     let current = true;
+    if (liveMode) {
+      const stop = watchAttendanceRegister({
+        courseId, sessionId,
+        onData: (value) => { if (current) setData(value); },
+        onState: (state) => {
+          if (!current) return;
+          setSyncState(state);
+          // 網路恢復不代表已向伺服器核實；不保留可供誤用的舊名冊。
+          if (state !== 'live') setData(null);
+        },
+      });
+      return () => { current = false; stop(); };
+    }
     void loadAttendanceRegister(courseId, sessionId).then(
       (value) => { if (current) setData(value); },
       (problem: unknown) => { if (current) setError(attendanceError(problem)); },
     );
     return () => { current = false; };
-  }, [courseId, sessionId]);
+  }, [courseId, sessionId, liveMode]);
+  if (liveMode && syncState !== 'live') {
+    const copy: Record<Exclude<RegisterSyncState, 'live'>, string> = {
+      connecting: '正在向伺服器核對完整名冊；確認前不顯示舊資料。',
+      paused: '名冊自動更新已暫停，返回此頁後會重新核對。',
+      offline: '目前離線，已隱藏名冊並停止匯出與更正；連線後會重新核對。',
+      error: '名冊同步中斷或授課資格已變更。請重新連線確認，不沿用舊資料。',
+    };
+    return <div className={styles.message}>
+      <p role={syncState === 'error' ? 'alert' : 'status'}>{copy[syncState]}</p>
+      {(syncState === 'error' || syncState === 'offline') &&
+        <Button type="button" onClick={onRefresh} disabled={disabled}>重新連線名冊</Button>}
+    </div>;
+  }
   if (error) return (
     <div className={styles.message}>
       <p role="alert">名冊暫時無法核實。{error}</p>
@@ -106,8 +152,8 @@ function RegisterContents({
   return (
     <div className={styles.content}>
       <div className={styles.toolbar}>
-        <p>目前修課 {data.rows.length} 人 · {data.active ? '點名進行中' : '點名已結束'}<br />
-          <small>查核於 {time(data.checkedAt)}；不是自動更新的即時名單。</small></p>
+        <p>{data.membersComplete === false ? '已讀取修課' : '目前修課'} {data.rows.length} 人 · {data.active ? '點名進行中' : '點名已結束'}<br />
+          <small>查核於 {time(data.checkedAt)}；{liveMode ? '自動更新中，匯出仍為當下快照。' : '不是自動更新的即時名單。'}</small></p>
         <div className={styles.actions}>
           <Button onClick={onRefresh} disabled={disabled}>更新全班名冊</Button>
           <Button onClick={download} disabled={disabled || !data.complete || !visible.length}>匯出篩選名冊</Button>
@@ -127,7 +173,9 @@ function RegisterContents({
           placeholder="姓名、學號或帳號" autoComplete="off" onChange={(event) => onSearch(event.target.value)} />
       </label>
       {!data.complete && <p role="status" className={styles.warning}>
-        本次最多核對 500 筆出席紀錄，尚未讀取的資料一律標為待核實；不會推定為缺席，也不開放匯出不完整名冊。
+        {data.membersComplete === false
+          ? '即時模式最多核對 500 筆有效成員，這不是完整班級名冊。請關閉自動更新，使用手動查核；目前不開放匯出。'
+          : '本次最多核對 500 筆出席紀錄，尚未讀取的資料一律標為待核實；不會推定為缺席，也不開放匯出不完整名冊。'}
       </p>}
       {data.complete && hasUnverified && <p role="status" className={styles.warning}>
         部分紀錄的身分或時間無法核實，暫不開放直接更正；請由管理者檢查資料。
