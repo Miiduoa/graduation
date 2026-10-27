@@ -17,7 +17,10 @@ export type PersonalImportAiTableAudit =
 type Field = 'title' | 'courseCode' | 'credits' | 'grade' | 'dayOfWeek' |
   'startTime' | 'endTime' | 'date' | 'startPeriod' | 'endPeriod';
 type Header = { columns: number; fields: Map<Field, number> };
-type SourceRecord = { cells: string[]; evidence: string; title: string; line: number };
+type SourceRecord = {
+  cells: string[]; evidence: string; title: string; line: number;
+  firstExcerpt?: string; prefixLength: number;
+};
 const normalized = (value: string) => value.normalize('NFKC').trim().toLowerCase();
 const compact = (value: string) => normalized(value).replace(/\s+/gu, '');
 const aliases: Record<Field, readonly string[]> = {
@@ -85,8 +88,11 @@ function sourceTable(text: string, kind: PersonalImportKind, context: string) {
     // label a partial scan as complete coverage or count a summary as a course.
     if (records.some((record) => /^(?:合計|總計|小計|總學分|總學分數|學期平均|total|subtotal)$/iu
       .test(record.cells[titleColumn].trim()))) continue;
-    tables.push({ header, records: records.map((record) => ({
+    tables.push({ header, records: records.map((record, index) => ({
       cells: record.cells,
+      // The first data row may quote its source header too; never another data row.
+      firstExcerpt: index === 0 ? compact(text.slice(0, record.contentEnd)) : undefined,
+      prefixLength: compact(text.slice(0, record.start)).length,
       evidence: compact(text.slice(record.start, record.contentEnd)),
       title: compact(record.cells[titleColumn]),
       line: text.slice(0, record.start).split('\n').length,
@@ -161,7 +167,9 @@ export function auditPersonalImportAiTable(
     const evidence = compact(row.source.rawText);
     if (!evidence || row.kind !== kind) return [];
     return records.flatMap((record, index) =>
-      record.evidence.includes(evidence) && evidence.replace(/""/gu, '"').includes(record.title) &&
+      (record.evidence.includes(evidence) || (record.firstExcerpt?.indexOf(evidence,
+        Math.max(0, record.prefixLength - evidence.length + 1)) ?? -1) >= 0) &&
+      evidence.replace(/""/gu, '"').includes(record.title) &&
       [...header.fields].every(([field, column]) => cellSupports(field, record.cells[column], row[field], periodProfile))
         ? [index] : [],
     );
