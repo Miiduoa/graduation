@@ -9,6 +9,7 @@ import { useNuniSession } from '../state/nuniSession';
 import { useSchool } from '../state/school';
 import { SchoolBrowsingControl } from '../components/SchoolBrowsingControl';
 import { TodayTimetablePanel } from '../components/TodayTimetablePanel';
+import { SchoolPortalImportEntry } from '../components/SchoolPortalImportEntry';
 import {
   isSchoolLoginEntryAvailable,
   loadSchoolLoginProviderKinds,
@@ -82,6 +83,7 @@ export default function LoginLandingScreen() {
               <Text style={s.schoolButtonText}>使用學號連線</Text>
             </Pressable>
           ) : null}
+          <SchoolPortalImportEntry onImported={(kind) => safeNavigate(navigation, 'PersonalImport', { kind })} />
           <Pressable
             testID="school-import-start"
             accessibilityRole="button"
