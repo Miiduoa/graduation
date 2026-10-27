@@ -521,28 +521,34 @@ function Workspace({ courseId, uid }: { courseId: string; uid: string }) {
             </div>
           </div>
           {data.sessions.length ? (
-            data.sessions
-              .filter(
+            (() => {
+              const shown = data.sessions.filter(
                 (session) =>
                   (data.canReadRoster ||
                     !session.active ||
                     session.id === studentCheckInSession(data.sessions)?.id) &&
                   (historyFilter === 'all' ||
                     (historyFilter === 'active' ? session.active : !session.active)),
-              )
-              .map((session) => (
-              <Session
-                key={`${session.id}:${data.canStart}:${data.canReadRoster}`}
-                session={session}
-                courseId={courseId}
-                courseName={data.courseName}
-                uid={uid}
-                canStart={data.canStart}
-                canReadRoster={data.canReadRoster}
-                checkInEnabled={studentCheckInSession(data.sessions)?.id === session.id}
-                reload={reload}
-              />
-            ))
+              );
+              return shown.length ? shown.map((session) => (
+                <Session
+                  key={`${session.id}:${data.canStart}:${data.canReadRoster}`}
+                  session={session}
+                  courseId={courseId}
+                  courseName={data.courseName}
+                  uid={uid}
+                  canStart={data.canStart}
+                  canReadRoster={data.canReadRoster}
+                  checkInEnabled={studentCheckInSession(data.sessions)?.id === session.id}
+                  reload={reload}
+                />
+              )) : (
+                <div className={styles.empty}>
+                  <h3>沒有符合條件的點名</h3>
+                  <p>改選「全部」查看其他場次，或更新紀錄確認最新狀態。</p>
+                </div>
+              );
+            })()
           ) : (
             <div className={styles.empty}>
               <h3>還沒有點名紀錄</h3>
