@@ -77,4 +77,4 @@ jobs:
             --runInBand --ci
 
       - name: Check authorized assignment snapshot contract
-        run: pnpm --filter functions exec jest agent/assignmentSummary.test.js --runInBand --ci
+        run: pnpm --filter functions test --runInBand agent/assignmentSummary.test.js agent/executeCampusAssistantCore.sources.test.js
