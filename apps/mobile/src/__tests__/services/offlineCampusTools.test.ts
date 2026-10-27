@@ -174,6 +174,11 @@ test('produces a source-aware daily summary without calling an LLM', () => {
   expect(result?.content).toContain('資料庫期末報告');
   expect(result?.content).toContain('校園網路維護公告');
   expect(result?.content).toContain('上次主動同步');
+  expect(result?.content).toContain('今日手機課表副本');
+  expect(result?.content).toContain('建議下一步');
+  expect(result?.content).toContain('資料庫期末報告');
+  const alternate = runOfflineCampusTool('今天要先處理什麼？', snapshot, authorizedSense);
+  expect(alternate?.tool).toBe('campus-snapshot');
 });
 
 test('never uses a snapshot for a different campus, stale timestamp, or unavailable reader', () => {
