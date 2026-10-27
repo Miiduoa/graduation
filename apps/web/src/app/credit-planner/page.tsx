@@ -1,5 +1,6 @@
 'use client';
 
+import Link from 'next/link';
 import { useMemo } from 'react';
 import { AcademicPage } from '@/components/academic/AcademicPage';
 import { CreditPlannerWorkspace } from '@/components/academic/CreditPlannerWorkspace';
@@ -111,12 +112,19 @@ export default function CreditPlannerPage() {
       subtitle="從學分目標到每學期課程，建立屬於自己的修課安排。"
       closedAlternative="學分請先到學校的 e 校園或向系辦確認；上方個人試算仍可使用。"
       workspace={({ userId, schoolId, schoolName }) => (
-        <CreditPlannerWorkspace
-          key={JSON.stringify([userId, schoolId])}
-          userId={userId}
-          schoolId={schoolId}
-          schoolName={schoolName}
-        />
+        <>
+          {schoolId === 'pu' ? (
+            <Link className="btn" href={`/credit-planner/review?school=${encodeURIComponent(schoolId)}`}>
+              從成績核對並帶入已修學分
+            </Link>
+          ) : null}
+          <CreditPlannerWorkspace
+            key={JSON.stringify([userId, schoolId])}
+            userId={userId}
+            schoolId={schoolId}
+            schoolName={schoolName}
+          />
+        </>
       )}
     >
       {({ records }) => <SchoolCreditRecords records={records} />}
