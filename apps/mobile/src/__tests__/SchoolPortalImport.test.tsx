@@ -2,6 +2,7 @@ import React from 'react';
 import { AppState } from 'react-native';
 import { act, cleanup, fireEvent, render } from '@testing-library/react-native';
 import { SchoolPortalImportEntry } from '../components/SchoolPortalImport';
+import { Button } from '../ui/components';
 import { appendPersonalImports, undoLastPersonalImport } from '../services/personalImports';
 import { PORTAL_CAPTURE_TIMEOUT } from '@campus/shared/src/imports/portalCapture';
 
@@ -66,8 +67,8 @@ beforeEach(() => {
     mockAppState = callback as (state: string) => void;
     return { remove: jest.fn() };
   });
-  jest.mocked(appendPersonalImports).mockResolvedValue({ added: 1, duplicates: 0, ledger: { version: 1, records: [], batches: [{ id: 'new-batch', createdAt: new Date().toISOString(), count: 1 }] } });
-  jest.mocked(undoLastPersonalImport).mockResolvedValue({ removed: 1, ledger: { version: 1, records: [], batches: [] } });
+  jest.mocked(appendPersonalImports).mockReset().mockResolvedValue({ added: 1, duplicates: 0, ledger: { version: 1, records: [], batches: [{ id: 'new-batch', createdAt: new Date().toISOString(), count: 1 }] } });
+  jest.mocked(undoLastPersonalImport).mockReset().mockResolvedValue({ removed: 1, ledger: { version: 1, records: [], batches: [] } });
 });
 afterEach(() => { cleanup(); jest.useRealTimers(); jest.restoreAllMocks(); });
 
@@ -95,6 +96,7 @@ test('reads only on explicit action and saves only after review and confirmation
   expect(await view.findByText('匯入完成')).toBeTruthy();
   fireEvent.press(view.getByText('查看與編輯已匯入資料'));
   expect(mockOpenRecords).toHaveBeenCalledTimes(1);
+  expect(mockOpenRecords).toHaveBeenCalledWith('grades');
 });
 test('uses the exact same ledger contract for another configured campus', async () => {
   mockSchool = { id: 'nchu', name: '中興' }; mockScope = { owner: 'nuni:one', schoolId: 'nchu' };
@@ -134,12 +136,16 @@ test('discards capture responses after navigation even within the same origin', 
   expect(view.queryByText(/找到 1 張表格/)).toBeNull();
 });
 test('times out and rejects late data rather than reporting an empty import success', () => {
-  jest.useFakeTimers(); const view = render(tree()); open(view); fireEvent.press(view.getByText('讀取這頁表格'));
-  const browser = view.getByTestId('school-portal-browser').props; const late = message();
-  act(() => jest.advanceTimersByTime(PORTAL_CAPTURE_TIMEOUT));
-  expect(view.getByText(/讀取逾時/)).toBeTruthy();
-  act(() => browser.onMessage(late));
-  expect(appendPersonalImports).not.toHaveBeenCalled();
+  jest.useFakeTimers({ doNotFake: ['setImmediate', 'nextTick'] });
+  try {
+    const view = render(tree()); open(view); fireEvent.press(view.getByText('讀取這頁表格'));
+    const browser = view.getByTestId('school-portal-browser').props; const late = message();
+    act(() => jest.advanceTimersByTime(PORTAL_CAPTURE_TIMEOUT));
+    expect(view.getByText(/讀取逾時/)).toBeTruthy();
+    act(() => browser.onMessage(late));
+    expect(view.queryByText(/找到 1 張表格/)).toBeNull();
+    expect(appendPersonalImports).not.toHaveBeenCalled();
+  } finally { jest.useRealTimers(); }
 });
 test('clears the active capture when the app leaves the foreground', () => {
   const view = render(tree()); open(view); fireEvent.press(view.getByText('讀取這頁表格'));
@@ -187,9 +193,11 @@ test('blocks duplicate same-tick saves using a synchronous lock', async () => {
   let finish!: (value: Awaited<ReturnType<typeof appendPersonalImports>>) => void;
   jest.mocked(appendPersonalImports).mockImplementationOnce(() => new Promise((resolve) => { finish = resolve; }));
   const view = render(tree()); review(view);
-  const press = view.getByRole('button', { name: '確認匯入 1 筆' }).props.onPress;
-  act(() => { press(); press(); }); expect(appendPersonalImports).toHaveBeenCalledTimes(1);
+  const press = view.UNSAFE_getAllByType(Button).find((button) => button.props.text === '確認匯入 1 筆')!.props.onPress;
+  act(() => { press(); press(); });
+  expect(appendPersonalImports).toHaveBeenCalledTimes(1);
   await act(async () => finish({ added: 1, duplicates: 0, ledger: { version: 1, records: [], batches: [{ id: 'new', createdAt: new Date().toISOString(), count: 1 }] } }));
+  expect(view.getByText('匯入完成')).toBeTruthy();
 });
 test('does not expose undo for an earlier batch when all incoming rows are duplicates', async () => {
   jest.mocked(appendPersonalImports).mockResolvedValueOnce({ added: 0, duplicates: 1, ledger: { version: 1, records: [], batches: [{ id: 'older-batch', createdAt: new Date().toISOString(), count: 2 }] } });

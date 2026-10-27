@@ -84,7 +84,7 @@ export default function LoginLandingScreen() {
             </Pressable>
           ) : null}
           <SchoolPortalImportEntry
-            onOpenRecords={() => safeNavigate(navigation, 'PersonalImport', { kind: 'timetable' })}
+            onOpenRecords={(kind) => safeNavigate(navigation, 'PersonalImport', { kind })}
           />
           <Pressable
             testID="school-import-start"

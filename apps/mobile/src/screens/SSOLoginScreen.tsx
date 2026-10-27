@@ -16,6 +16,7 @@ import { PROVIDENCE_UNIVERSITY_SCHOOL_ID } from '@campus/shared/src';
 import { useAuth } from '../state/auth';
 import { useSchool } from '../state/school';
 import { finishLoginReturn } from '../utils/loginReturn';
+import { safeNavigate } from '../utils/safeNavigate';
 import { signInWithStudentId, type LoginProgress } from '../services/studentIdAuth';
 import {
   SCHOOL_LOGIN_BIND_HINT,
@@ -332,7 +333,7 @@ function SchoolLoginContent(
 
         <SchoolPortalImportEntry
           disabled={formLocked}
-          onOpenRecords={() => nav.navigate?.('PersonalImport')}
+          onOpenRecords={(kind) => safeNavigate(nav, 'PersonalImport', { kind })}
         />
 
         <AnimatedCard
