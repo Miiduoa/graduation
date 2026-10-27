@@ -33,6 +33,9 @@ function decimal(value: number): number {
 }
 
 function ceilingToHundredth(value: number): number {
+  // Math.ceil(-epsilon) is -0. Zero should remain a real nonnegative zero,
+  // particularly for students whose personal total target is already met.
+  if (value <= 0) return 0;
   return Math.ceil(value * 100 - 1e-8) / 100;
 }
 
