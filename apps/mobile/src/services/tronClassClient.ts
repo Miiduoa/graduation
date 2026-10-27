@@ -1,4 +1,4 @@
-// @ts-nocheck — pre-existing type breakage from main; mobile demoStore PR 範圍外
+// @ts-nocheck — 此既有原生傳輸模組尚未完成型別遷移。
 /**
  * TronClass API Client for Providence University (靜宜大學)
  *
@@ -32,6 +32,7 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 import { getCloudFunctionUrl, getFirebaseAuthHeaders } from './cloudFunctions';
+import { loadTronClassBackendCourses } from './ownedTronClassCourses';
 import { secureDeleteItem, secureDeleteMany, secureGetItem, secureSetItem } from './secureStorage';
 import {
   TRONCLASS_DATA_DISABLED_MESSAGE,
@@ -76,9 +77,9 @@ export type TCCourse = {
   name: string;
   course_code: string;
   department: { id: number; name: string } | null;
-  instructors: Array<{ id: number; name: string; avatar_big_url?: string }>;
+  instructors: Array<{ id?: number; name: string; avatar_big_url?: string }>;
   credit: number | null;
-  semester: { code: string; id: number; name: string } | null;
+  semester: { code?: string; id?: number; name: string } | null;
   klass: { id: number; name: string } | null;
   grade: { id: number; name: string } | null;
   course_outline: string | null;
@@ -86,7 +87,7 @@ export type TCCourse = {
   end_date: string | null;
   status: string;
   role: string; // student, teacher, ta
-  student_count: number;
+  student_count?: number;
   classroom_schedule: unknown | null;
 };
 
@@ -414,6 +415,7 @@ export async function setTCBackendSession(
 
 export async function clearTCSession(): Promise<void> {
   _tcUserId = null;
+  _tcXSessionId = null;
   _tcBackendSessionId = null;
   _tcBackendSessionLoaded = true;
   await secureDeleteItem(TC_BACKEND_SESSION_KEY).catch(() => undefined);
@@ -749,99 +751,6 @@ async function fetchTronClassBackend<T>(
   return data.result as T;
 }
 
-// ─── Helper: XHR-based request (for reliable cookie capture) ────
-
-/**
- * 使用 XMLHttpRequest 發送請求（比 fetch 更可靠地取得 Set-Cookie）
- * React Native 的 XHR.getAllResponseHeaders() 會暴露所有 headers
- */
-function xhrRequest(
-  url: string,
-  options: {
-    method?: string;
-    body?: string;
-    headers?: Record<string, string>;
-  } = {},
-): Promise<{ body: string; status: number; url: string; allHeaders: string }> {
-  return new Promise((resolve, reject) => {
-    const xhr = new XMLHttpRequest();
-    xhr.open(options.method ?? "GET", url, true);
-    xhr.withCredentials = true; // 讓原生層也管理 cookies（雙重保險）
-
-    // 設定 headers
-    if (options.headers) {
-      for (const [key, value] of Object.entries(options.headers)) {
-        try { xhr.setRequestHeader(key, value); } catch { /* some headers are restricted */ }
-      }
-    }
-
-    xhr.onload = () => {
-      const allHeaders = xhr.getAllResponseHeaders() ?? "";
-      resolve({
-        body: xhr.responseText ?? "",
-        status: xhr.status,
-        url: xhr.responseURL || url,
-        allHeaders,
-      });
-    };
-    xhr.onerror = () => reject(new Error(`XHR error: ${url}`));
-    xhr.ontimeout = () => reject(new Error(`XHR timeout: ${url}`));
-    xhr.timeout = 30000;
-
-    xhr.send(options.body ?? null);
-  });
-}
-
-/**
- * 從 XHR getAllResponseHeaders() 解析並儲存 cookies
- */
-function saveCookiesFromXHRHeaders(allHeaders: string, requestUrl: string): void {
-  const urlObj = new URL(requestUrl);
-  const defaultDomain = urlObj.hostname;
-  let count = 0;
-
-  // getAllResponseHeaders() 回傳 "key: value\r\n" 格式
-  const lines = allHeaders.split(/\r?\n/);
-  for (const line of lines) {
-    const match = line.match(/^set-cookie:\s*(.+)/i);
-    if (!match) continue;
-
-    const cookie = match[1];
-    const parts = cookie.split(";").map(s => s.trim());
-    if (!parts[0]) continue;
-    const eqIdx = parts[0].indexOf("=");
-    if (eqIdx < 0) continue;
-
-    const name = parts[0].substring(0, eqIdx).trim();
-    const value = parts[0].substring(eqIdx + 1).trim();
-    if (!name) continue;
-
-    let domain = defaultDomain;
-    let path = "/";
-    let secure = false;
-
-    for (const attr of parts.slice(1)) {
-      const [k, v] = attr.split("=").map(s => s?.trim() ?? "");
-      const kl = k.toLowerCase();
-      if (kl === "domain" && v) domain = v.startsWith(".") ? v.substring(1) : v;
-      if (kl === "path" && v) path = v;
-      if (kl === "secure") secure = true;
-    }
-
-    const existing = _cookieJar.findIndex(c => c.name === name && c.domain === domain && c.path === path);
-    if (existing >= 0) {
-      _cookieJar[existing].value = value;
-    } else {
-      _cookieJar.push({ name, value, domain, path, secure });
-    }
-    count++;
-  }
-
-  if (count > 0) {
-    console.log(`[CookieJar/XHR] Saved ${count} cookies from ${defaultDomain}, jar size: ${_cookieJar.length}`);
-  }
-}
-
 // ─── Helper: Native Fetch ────────────────────────────────
 
 async function tcFetch(
@@ -1046,7 +955,8 @@ export async function tcLogin(
     console.warn('[TronClass] Backend proxy error:', err);
   }
 
-  // ── 策略 2: 手機直連 Keycloak CAS ──
+  // 直連成功後的請求必須使用原生 Cookie，不能繼續送往剛失效的後端 session。
+  await clearTCSession();
   return await tcLoginDirectCAS(uid, password);
 }
 
@@ -1097,7 +1007,12 @@ async function tcLoginDirectCAS(
       password: password,
     });
 
-    const postUrl = formAction.startsWith('http') ? formAction : `${IDENTITY_BASE}${formAction}`;
+    const postTarget = new URL(formAction, loginPage.url || casUrl);
+    if (postTarget.protocol !== 'https:' || postTarget.hostname !== 'identity.pu.edu.tw' ||
+        postTarget.username || postTarget.password || (postTarget.port && postTarget.port !== '443')) {
+      return { success: false, session: null, error: '學校登入頁面的來源無法確認，請稍後重試' };
+    }
+    const postUrl = postTarget.href;
 
     const loginResult = await tcFetch(postUrl, {
       method: 'POST',
@@ -1106,14 +1021,6 @@ async function tcLoginDirectCAS(
       accept: 'text/html',
       timeoutMs: 12000,
     });
-    // XHR follows redirects automatically, so postXHR.url is the final URL
-    saveCookiesFromXHRHeaders(postXHR.allHeaders, postXHR.url);
-    const postResult = {
-      body: postXHR.body,
-      status: postXHR.status,
-      url: postXHR.url,
-    };
-
     console.log('[TronClass] POST status:', loginResult.status);
     console.log('[TronClass] Landed on:', loginResult.url);
 
@@ -1390,7 +1297,10 @@ export async function tcFetchCourses(
 
   await ensureBackendSessionLoaded();
   if (shouldUseBackendSession()) {
-    return await fetchTronClassBackend<TCCourse[]>('courses', { status });
+    const sessionId = _tcBackendSessionId;
+    const courses = await loadTronClassBackendCourses(sessionId, status);
+    if (_tcBackendSessionId !== sessionId) throw new Error('課程連線已變更，請重新讀取課程。');
+    return courses;
   }
 
   // 玩課雲用 POST /api/my-courses，不是 GET /api/users/{id}/courses
@@ -1412,8 +1322,7 @@ export async function tcFetchCourses(
     });
 
     if (result.status !== 200) {
-      console.warn('[TronClass] /api/my-courses returned:', result.status);
-      break;
+      throw new Error(`課程讀取未完成（HTTP ${result.status}），請重新連線課程平台`);
     }
 
     let data: {
@@ -1440,11 +1349,13 @@ export async function tcFetchCourses(
     try {
       data = JSON.parse(result.body);
     } catch {
-      console.warn('[TronClass] /api/my-courses JSON parse failed');
-      break;
+      throw new Error('課程平台未回傳可讀取的資料，請重新登入');
     }
 
-    const courses = data.courses ?? [];
+    if (!data || !Array.isArray(data.courses)) {
+      throw new Error('課程平台回應缺少課程清單，請稍後重試');
+    }
+    const courses = data.courses;
     if (courses.length === 0) break;
 
     for (const c of courses) {
@@ -1469,6 +1380,9 @@ export async function tcFetchCourses(
     }
 
     const totalPages = data.paging?.pages ?? 1;
+    if (!Number.isSafeInteger(totalPages) || totalPages < 1 || totalPages > 100) {
+      throw new Error('課程平台的分頁資訊異常，請稍後重試');
+    }
     if (page >= totalPages) break;
     page++;
   }

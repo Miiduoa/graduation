@@ -78,6 +78,20 @@ describe('verified campus data read-through', () => {
     expect(tool).not.toHaveBeenCalled();
   });
 
+  test('opens school courses without reading LMS data through voice tools', async () => {
+    const readers = fake();
+    const result = await connectCampusServiceData({
+      uid: 'alice', schoolId: 'pu', destinations: ['/school-courses'],
+    }, readers);
+    expect(result).toEqual([expect.objectContaining({
+      destination: '/school-courses', status: 'open-service', source: 'none', items: [],
+    })]);
+    expect(result[0].message).toContain('使用學校帳號');
+    expect(readers.tool).not.toHaveBeenCalled();
+    expect(readers.records).not.toHaveBeenCalled();
+    expect(readers.events).not.toHaveBeenCalled();
+  });
+
   test('a failing reader is unavailable, never empty', async () => {
     const output = await connectCampusServiceData({
       uid: 'alice', schoolId: 'pu', destinations: ['/classroom'],

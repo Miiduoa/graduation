@@ -1,7 +1,7 @@
 import React from 'react';
-import { act, render } from '@testing-library/react-native';
-import { StyleSheet, View } from 'react-native';
-import { Button, FilterChip, Badge } from '../../ui/components';
+import { act, fireEvent, render } from '@testing-library/react-native';
+import { StyleSheet, TextInput, View } from 'react-native';
+import { Button, FilterChip, Badge, SearchBar, SegmentedControl } from '../../ui/components';
 import { ConfidenceBadge, HeroActionCard } from '../../ui/campusOs';
 import { AnnouncementItem } from '../../ui/ListItems';
 import { CourseChipEmpty } from '../../ui/courseChipShell';
@@ -138,4 +138,109 @@ test('role workspaces retain readable accent cards after a live theme change', (
     backgroundColor: colors.accent,
   });
   expect(view.getByText('開啟教材')).toHaveStyle({ color: colors.accent });
+});
+
+test('search announces its purpose and keeps clear and typing on the same preferred callback', () => {
+  const onChange = jest.fn();
+  const onChangeText = jest.fn();
+  const onFocus = jest.fn();
+  const onSubmit = jest.fn();
+  const view = render(
+    <SearchBar
+      value="王同學"
+      placeholder="搜尋成員"
+      onChange={onChange}
+      onChangeText={onChangeText}
+      onFocus={onFocus}
+      onSubmit={onSubmit}
+    />,
+  );
+  const input = view.getByRole('search', { name: '搜尋成員' });
+  fireEvent(input, 'focus');
+  fireEvent.changeText(input, '陳同學');
+  fireEvent(input, 'submitEditing');
+  const clear = view.getByRole('button', { name: '清除搜尋' });
+  expect(clear).toHaveStyle({ width: 44, height: 44 });
+  expect(input).toHaveStyle({ fontSize: 15 });
+  fireEvent.press(clear);
+  expect(onChangeText.mock.calls).toEqual([['陳同學'], ['']]);
+  expect(onChange).not.toHaveBeenCalled();
+  expect(onFocus).toHaveBeenCalledTimes(1);
+  expect(onSubmit).toHaveBeenCalledTimes(1);
+
+  view.rerender(<SearchBar value="" accessibilityLabel="依姓名尋找成員" onChange={onChange} />);
+  fireEvent.changeText(view.getByRole('search', { name: '依姓名尋找成員' }), '林同學');
+  expect(onChange).toHaveBeenCalledWith('林同學');
+  expect(view.queryByRole('button', { name: '清除搜尋' })).toBeNull();
+});
+
+test('disabled search prevents editing, clearing, submitting and focus actions', () => {
+  const onChange = jest.fn();
+  const onFocus = jest.fn();
+  const onSubmit = jest.fn();
+  const view = render(
+    <SearchBar value="王同學" disabled onChange={onChange} onFocus={onFocus} onSubmit={onSubmit} />,
+  );
+  const input = view.getByRole('search', { name: '搜尋' });
+  expect(input).toHaveAccessibilityState({ disabled: true });
+  expect(view.UNSAFE_getByType(TextInput).props.editable).toBe(false);
+  expect(view.getByRole('button', { name: '清除搜尋' })).toBeDisabled();
+  fireEvent.changeText(input, '李同學');
+  fireEvent.press(view.getByRole('button', { name: '清除搜尋' }));
+  fireEvent(input, 'focus');
+  fireEvent(input, 'submitEditing');
+  expect(onChange).not.toHaveBeenCalled();
+  expect(onFocus).not.toHaveBeenCalled();
+  expect(onSubmit).not.toHaveBeenCalled();
+});
+
+test('segments expose the controlled selection and disable unavailable options', () => {
+  const onSelect = jest.fn();
+  const onChange = jest.fn();
+  const options = [
+    { id: 'courses', label: '課程' },
+    { key: 'grades', label: '成績' },
+    { id: 'audit', label: '學分', disabled: true },
+  ];
+  const view = render(
+    <SegmentedControl
+      options={options}
+      selected="courses"
+      onSelect={onSelect}
+      onChange={onChange}
+    />,
+  );
+  expect(view.getByRole('tab', { name: '課程' })).toHaveAccessibilityState({ selected: true });
+  expect(view.getByRole('tab', { name: '成績' })).toHaveAccessibilityState({ selected: false });
+  for (const tab of view.getAllByRole('tab')) expect(tab).toHaveStyle({ minHeight: 44 });
+  fireEvent.press(view.getByRole('tab', { name: '成績' }));
+  fireEvent.press(view.getByRole('tab', { name: '學分' }));
+  expect(view.getByRole('tab', { name: '學分' })).toBeDisabled();
+  expect(onSelect.mock.calls).toEqual([['grades']]);
+  expect(onChange).not.toHaveBeenCalled();
+  // Selection follows the caller's state, including a live theme change.
+  view.rerender(<SegmentedControl options={options} selected="grades" onChange={onChange} />);
+  act(() => applyTheme('dark'));
+  expect(view.getByRole('tab', { name: '成績' })).toHaveAccessibilityState({ selected: true });
+  expect(view.getByText('成績')).toHaveStyle({
+    color: createDarkTheme().colors.accent,
+    fontSize: 13,
+  });
+  fireEvent.press(view.getByRole('tab', { name: '課程' }));
+  expect(onChange).toHaveBeenCalledWith('courses');
+});
+
+test('all segments respect disabled state while string options retain their default selection', () => {
+  const onChange = jest.fn();
+  const view = render(<SegmentedControl options={['本週', '下週']} disabled onChange={onChange} />);
+  expect(view.getByRole('tab', { name: '本週' })).toHaveAccessibilityState({
+    selected: true,
+    disabled: true,
+  });
+  expect(view.getByRole('tab', { name: '下週' })).toHaveAccessibilityState({
+    selected: false,
+    disabled: true,
+  });
+  fireEvent.press(view.getByRole('tab', { name: '下週' }));
+  expect(onChange).not.toHaveBeenCalled();
 });

@@ -12,15 +12,14 @@ tags:
       id: login-landing
     timeout: 90000
 
-- assertVisible:
-    id: public-Map
-
 # Keep the tap target clear of the development warning banner at the screen edge.
 - scrollUntilVisible:
     element:
       id: public-Map
     direction: DOWN
     centerElement: true
+- assertVisible:
+    id: public-Map
 
 - tapOn:
     id: public-Map

@@ -67,6 +67,30 @@ export async function writeMobileCreditPlan(scopeKey: string, plan: CreditPlan):
   await inScopeOrder(scopeKey, () => AsyncStorage.setItem(scopeKey, raw));
 }
 
+/** 同一份本機規劃在預覽後若被其他畫面更新，就拒絕舊確認，不覆寫新資料。 */
+export async function replaceReviewedCreditPlan(
+  scopeKey: string,
+  expected: CreditPlan,
+  next: CreditPlan,
+  isCurrent: () => boolean,
+): Promise<void> {
+  const before = JSON.stringify(expected);
+  const after = JSON.stringify(next);
+  if (!restoreCreditPlan(before) || !restoreCreditPlan(after)) {
+    throw new Error('核對內容格式不正確，未更新規劃。');
+  }
+  await inScopeOrder(scopeKey, async () => {
+    if (!isCurrent()) throw new Error('這次核對已失效，未更新規劃。');
+    const raw = await AsyncStorage.getItem(scopeKey);
+    const current = raw === null ? emptyCreditPlan() : restoreCreditPlan(raw);
+    if (!current || JSON.stringify(current) !== before) {
+      throw new Error('原規劃已變更或無法讀取，請重新讀取並核對；沒有覆寫現有資料。');
+    }
+    if (!isCurrent()) throw new Error('這次核對已失效，未更新規劃。');
+    await AsyncStorage.setItem(scopeKey, after);
+  });
+}
+
 export function portableCreditPlanJson(plan: CreditPlan): string {
   // Compact JSON keeps valid long Chinese course names within the portable limit.
   const data = JSON.stringify(plan);

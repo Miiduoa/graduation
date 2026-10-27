@@ -11,6 +11,8 @@ type CloudFunctionConfig = {
   cloudFunctionBaseUrl?: string;
   functionsBaseUrl?: string;
   useCloudFunctionEmulator?: boolean | string;
+  appEnv?: string;
+  allowLocalMockAuth?: boolean;
 };
 
 function trimTrailingSlash(value: string): string {
@@ -87,6 +89,28 @@ export function getCloudFunctionBaseUrl(): string {
 
 export function getCloudFunctionUrl(functionName: string): string {
   return `${getCloudFunctionBaseUrl()}/${functionName}`;
+}
+
+/** 僅用於未部署端點的 404；本機測試不得把輸入的校務帳密送到正式服務。 */
+export function canUseHostedSchoolFallback(primaryUrl: string): boolean {
+  const extra = getExpoExtra();
+  const projectId = getProjectId(extra);
+  if (shouldUseEmulator(extra, projectId)) return false;
+  if (projectId !== 'campus-one-tw') return false;
+  if (extra.appEnv === 'development' && extra.allowLocalMockAuth === true) return false;
+  try {
+    const url = new URL(primaryUrl);
+    return (
+      url.protocol === 'https:' &&
+      !url.username &&
+      !url.password &&
+      !['localhost', '[::1]', '::1', '10.0.2.2'].includes(url.hostname) &&
+      !url.hostname.endsWith('.localhost') &&
+      !/^127\./.test(url.hostname)
+    );
+  } catch {
+    return false;
+  }
 }
 
 export async function getFirebaseAuthHeaders(): Promise<Record<string, string>> {

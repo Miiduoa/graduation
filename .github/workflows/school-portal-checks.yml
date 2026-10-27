@@ -1,0 +1,48 @@
+name: School Portal Checks
+on:
+  pull_request:
+    paths:
+      - 'packages/shared/src/imports/**'
+      - 'apps/mobile/src/components/SchoolPortalImport.tsx'
+      - 'apps/mobile/src/components/SchoolPortalRowEditor.tsx'
+      - 'apps/mobile/src/__tests__/SchoolPortalImport.test.tsx'
+      - 'apps/mobile/src/__tests__/SchoolPortalSession.test.tsx'
+      - 'apps/mobile/src/__tests__/SchoolPortalReview.test.tsx'
+      - 'apps/mobile/src/screens/LoginLandingScreen.tsx'
+      - 'apps/mobile/src/screens/SSOLoginScreen.tsx'
+      - 'apps/web/src/lib/portalCapture*.test.ts'
+      - 'apps/web/src/lib/portalRowReview.test.ts'
+      - '.github/workflows/school-portal-checks.yml'
+permissions:
+  contents: read
+concurrency:
+  group: school-portal-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  portal-regression:
+    name: Portal capture and native flow
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '22.23.4'
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Test portal DOM and message boundary with coverage
+        run: pnpm --filter web exec vitest run src/lib/portalCapture.test.ts src/lib/portalCapture.dom.test.ts src/lib/portalCapture.privacy.test.ts src/lib/portalRowReview.test.ts --coverage --reporter=json --outputFile=portal-vitest-results.json
+      - name: Test native review and original login screens
+        if: ${{ !cancelled() }}
+        run: pnpm --filter mobile test src/__tests__/SchoolPortalImport.test.tsx src/__tests__/SchoolPortalSession.test.tsx src/__tests__/SchoolPortalReview.test.tsx src/__tests__/GuestLoginScreens.test.tsx --ci --json --outputFile=portal-jest-results.json
+      - name: Preserve machine-readable results
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: school-portal-test-results
+          path: |
+            apps/web/portal-vitest-results.json
+            apps/mobile/portal-jest-results.json
+          if-no-files-found: error
+          retention-days: 7

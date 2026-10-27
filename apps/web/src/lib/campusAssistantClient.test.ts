@@ -2,6 +2,8 @@ import { beforeEach, expect, it, vi } from 'vitest';
 import {
   callCampusAssistant,
   confirmCreateOrder,
+  getCampusAssistantSnapshot,
+  executeCampusAgentWrite,
   type CampusAssistantEnvelope,
 } from './campusAssistantClient';
 
@@ -106,4 +108,38 @@ it('discards an aborted request even if the callable completes successfully', as
   controller.abort();
   finish({ data: { content: '舊課程資料' } });
   await expect(response).rejects.toMatchObject({ name: 'AbortError' });
+});
+
+it('requests the signed-in account snapshot for the selected school only', async () => {
+  state.callable.mockResolvedValue({
+    data: {
+      schoolId: 'pu',
+      checkedAt: '2026-10-26T12:00:00Z',
+      schedule: { status: 'unavailable', count: null },
+      assignments: { status: 'available', count: 0, items: [] },
+      announcements: { status: 'unavailable', items: [] },
+    },
+  });
+  await expect(getCampusAssistantSnapshot('alice', 'pu')).resolves.toMatchObject({ schoolId: 'pu' });
+  expect(state.callable).toHaveBeenCalledWith({ schoolId: 'pu' });
+  await expect(getCampusAssistantSnapshot('alice', 'nthu')).rejects.toMatchObject({ code: 'invalid-response' });
+});
+
+it('submits a confirmed write with its run id and no fabricated receipt', async () => {
+  state.callable.mockResolvedValue({ data: { success: true, toolName: 'submitLeaveRequest', requestId: 'req-9' } });
+  await expect(executeCampusAgentWrite({
+    userId: 'alice', schoolId: 'pu', toolName: 'submitLeaveRequest',
+    payload: { courseId: 'class-1', date: '2026-10-27', type: '事假' },
+    agentRunId: '01234567-89ab-4cde-8012-3456789abcde',
+  })).resolves.toMatchObject({ success: true, requestId: 'req-9' });
+  expect(state.callable).toHaveBeenCalledWith(expect.objectContaining({
+    toolName: 'submitLeaveRequest',
+    agentRunId: '01234567-89ab-4cde-8012-3456789abcde',
+    context: expect.objectContaining({ schoolId: 'pu' }),
+  }));
+  state.callable.mockResolvedValue({ data: { status: 'ok' } });
+  await expect(executeCampusAgentWrite({
+    userId: 'alice', schoolId: 'pu', toolName: 'submitLeaveRequest',
+    payload: { courseId: 'class-1' }, agentRunId: '01234567-89ab-4cde-8012-3456789abcde',
+  })).rejects.toMatchObject({ code: 'invalid-response' });
 });

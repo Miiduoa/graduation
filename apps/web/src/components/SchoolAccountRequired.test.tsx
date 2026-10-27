@@ -63,3 +63,11 @@ it('offers the school login without the switch note when nobody is signed in', (
     '/login?returnUrl=%2Ffriends',
   );
 });
+
+it('preserves the school course destination and campus when opening school login', () => {
+  options.studentId = true;
+  const returnUrl = '/school-courses?school=pu&schoolId=pu&campus=pu';
+  render(<SchoolAccountRequired returnUrl={returnUrl} alternative="請先至 WOW Class 查看課程。" />);
+  const href = screen.getByRole('link', { name: '用學校帳號登入' }).getAttribute('href');
+  expect(href).toBe(`/login?returnUrl=${encodeURIComponent(returnUrl)}`);
+});

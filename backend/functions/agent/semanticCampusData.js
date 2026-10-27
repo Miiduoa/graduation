@@ -27,6 +27,7 @@ const CONNECTABLE_LABELS = Object.freeze({
 const ROUTE_HINTS = Object.freeze({
   '/bus': '公車到站需要先選路線與站牌，請到公車頁查詢實際到站資訊。',
   '/grades': '正式成績需要學校授權的個人資料連線，請至成績頁確認來源及登入狀態。',
+  '/school-courses': '請到 WOW Class 課程頁使用學校帳號讀取課堂；此入口不會代為交作業，也不代表已取得正式學分。',
   '/credit-planner': '學分規劃需要本人修課紀錄，請在學分規劃頁匯入或查核資料。',
   '/calendar': '個人行事曆由裝置端管理，伺服器不會讀取未同步的行程。',
   '/messages': '私人訊息需在登入帳號後，從訊息頁讀取。',

@@ -1,15 +1,5 @@
-/* eslint-disable */
-import React, { useState, useRef, useCallback } from 'react';
-import {
-  Animated,
-  Pressable,
-  StyleSheet,
-  Text,
-  TextInput,
-  View,
-  TextInputProps,
-  ScrollView,
-} from 'react-native';
+import React, { useState } from 'react';
+import { Pressable, StyleSheet, Text, TextInput, View, type TextInputProps } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { theme } from './theme';
 import { useThemeStyleSheet } from './useThemeStyleSheet';
@@ -20,9 +10,10 @@ type InputProps = TextInputProps & {
   label?: string;
   error?: string;
   hint?: string;
-  leftIcon?: string;
-  rightIcon?: string;
+  leftIcon?: React.ComponentProps<typeof Ionicons>['name'];
+  rightIcon?: React.ComponentProps<typeof Ionicons>['name'];
   onRightIconPress?: () => void;
+  rightIconAccessibilityLabel?: string;
   required?: boolean;
   disabled?: boolean;
 };
@@ -34,16 +25,33 @@ export function Input({
   leftIcon,
   rightIcon,
   onRightIconPress,
+  rightIconAccessibilityLabel,
   required,
   disabled,
   style,
+  editable,
+  readOnly,
+  onFocus,
+  onBlur,
+  onChange,
+  onChangeText,
+  accessibilityLabel,
+  accessibilityHint,
+  accessibilityState,
+  'aria-disabled': ariaDisabled,
   ...props
 }: InputProps) {
   const styles = useThemeStyleSheet(createStyles);
   const [isFocused, setIsFocused] = useState(false);
+  const isDisabled = Boolean(
+    disabled || editable === false || readOnly || ariaDisabled || accessibilityState?.disabled,
+  );
+  const inputHint = [required ? '必填' : '', error || hint, accessibilityHint]
+    .filter(Boolean)
+    .join('。');
   const borderColor = error
     ? theme.colors.danger
-    : isFocused
+    : isFocused && !isDisabled
       ? theme.colors.accent
       : theme.colors.border;
 
@@ -52,14 +60,19 @@ export function Input({
       {label && (
         <View style={styles.labelRow}>
           <Text style={styles.label}>{label}</Text>
-          {required && <Text style={styles.required}>*</Text>}
+          {required && (
+            <Text accessible={false} style={styles.required}>
+              *
+            </Text>
+          )}
         </View>
       )}
 
-      <View style={[styles.inputWrapper, { borderColor }, disabled && styles.inputDisabled]}>
+      <View style={[styles.inputWrapper, { borderColor }, isDisabled && styles.inputDisabled]}>
         {leftIcon && (
           <Ionicons
-            name={leftIcon as any}
+            name={leftIcon}
+            accessible={false}
             size={20}
             color={theme.colors.muted}
             style={styles.inputLeftIcon}
@@ -67,36 +80,71 @@ export function Input({
         )}
 
         <TextInput
+          {...props}
           style={[styles.input, leftIcon && styles.inputWithLeftIcon, style]}
-          placeholderTextColor={theme.colors.muted}
-          editable={!disabled}
+          placeholderTextColor={props.placeholderTextColor ?? theme.colors.muted}
+          editable={!isDisabled}
+          readOnly={isDisabled}
+          accessibilityLabel={accessibilityLabel ?? label}
+          accessibilityHint={inputHint || undefined}
+          accessibilityState={{ ...accessibilityState, disabled: isDisabled }}
+          aria-disabled={isDisabled}
           onFocus={(e) => {
+            if (isDisabled) return;
             setIsFocused(true);
-            props.onFocus?.(e);
+            onFocus?.(e);
           }}
           onBlur={(e) => {
             setIsFocused(false);
-            props.onBlur?.(e);
+            onBlur?.(e);
           }}
-          {...props}
+          onChange={
+            onChange
+              ? (event) => {
+                  if (!isDisabled) onChange(event);
+                }
+              : undefined
+          }
+          onChangeText={
+            onChangeText
+              ? (value) => {
+                  if (!isDisabled) onChangeText(value);
+                }
+              : undefined
+          }
         />
 
         {rightIcon && (
           <Pressable
-            onPress={onRightIconPress}
-            disabled={!onRightIconPress}
+            onPress={() => {
+              if (!isDisabled) onRightIconPress?.();
+            }}
+            disabled={isDisabled || !onRightIconPress}
+            accessible={!!onRightIconPress}
+            accessibilityRole={onRightIconPress ? 'button' : undefined}
+            accessibilityLabel={
+              onRightIconPress
+                ? rightIconAccessibilityLabel || `${label || '輸入欄位'}的操作`
+                : undefined
+            }
+            accessibilityState={{ disabled: isDisabled || !onRightIconPress }}
             style={({ pressed }) => [
               styles.inputRightIcon,
-              pressed && onRightIconPress && styles.inputRightIconPressed,
+              pressed && !isDisabled && onRightIconPress && styles.inputRightIconPressed,
             ]}
           >
-            <Ionicons name={rightIcon as any} size={20} color={theme.colors.muted} />
+            <Ionicons name={rightIcon} accessible={false} size={20} color={theme.colors.muted} />
           </Pressable>
         )}
       </View>
 
       {(error || hint) && (
-        <Text style={[styles.hint, error && styles.errorText]}>{error || hint}</Text>
+        <Text
+          accessibilityLiveRegion={error ? 'polite' : undefined}
+          style={[styles.hint, error && styles.errorText]}
+        >
+          {error || hint}
+        </Text>
       )}
     </View>
   );
@@ -104,7 +152,10 @@ export function Input({
 
 // ===== Password Input =====
 
-type PasswordInputProps = Omit<InputProps, 'secureTextEntry' | 'rightIcon' | 'onRightIconPress'>;
+type PasswordInputProps = Omit<
+  InputProps,
+  'secureTextEntry' | 'rightIcon' | 'onRightIconPress' | 'rightIconAccessibilityLabel'
+>;
 
 export function PasswordInput(props: PasswordInputProps) {
   const [showPassword, setShowPassword] = useState(false);
@@ -114,7 +165,8 @@ export function PasswordInput(props: PasswordInputProps) {
       {...props}
       secureTextEntry={!showPassword}
       rightIcon={showPassword ? 'eye-off' : 'eye'}
-      onRightIconPress={() => setShowPassword(!showPassword)}
+      rightIconAccessibilityLabel={showPassword ? '隱藏密碼' : '顯示密碼'}
+      onRightIconPress={() => setShowPassword((visible) => !visible)}
     />
   );
 }
@@ -317,7 +369,6 @@ type SelectProps<T> = {
 
 export function Select<T>({
   value,
-  onChange,
   options,
   label,
   placeholder = '請選擇',
@@ -369,10 +420,8 @@ type SliderProps = {
 
 export function Slider({
   value,
-  onChange,
   min = 0,
   max = 100,
-  step = 1,
   label,
   showValue = true,
   formatValue = (v) => String(v),
@@ -380,15 +429,6 @@ export function Slider({
 }: SliderProps) {
   const styles = useThemeStyleSheet(createStyles);
   const percentage = ((value - min) / (max - min)) * 100;
-
-  const handlePress = useCallback(
-    (event: { nativeEvent: { locationX: number } }) => {
-      if (disabled) return;
-      // This is a simplified implementation
-      // For a full slider, consider using @react-native-community/slider
-    },
-    [disabled],
-  );
 
   return (
     <View style={styles.sliderContainer}>

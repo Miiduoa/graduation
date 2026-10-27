@@ -499,6 +499,12 @@ async function signInStudent(
     }, now);
   }
 
+  // 將同一次登入的兩個來源連在一起，之後讀課程不必再次傳送帳密或 session ID。
+  const portalSession = deps.db.doc('_puSessions/' + puSessionId);
+  if (typeof portalSession.set === 'function') {
+    await portalSession.set({ tronClassSessionId }, { merge: true });
+  }
+
   return {
     success: true,
     customToken,

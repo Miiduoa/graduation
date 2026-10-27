@@ -225,7 +225,7 @@
   }
 }
 
-/* Attendance workbench */
+/* 出席工作台 */
 .overview {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));

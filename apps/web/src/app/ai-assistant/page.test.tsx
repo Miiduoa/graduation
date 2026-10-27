@@ -2,7 +2,7 @@ import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import type { ReactNode } from 'react';
 import { beforeEach, expect, it, vi } from 'vitest';
 import AssistantPage from './page';
-import { callCampusAssistant, type CampusAssistantEnvelope } from '@/lib/campusAssistantClient';
+import { callCampusAssistant, executeCampusAgentWrite, getCampusAssistantSnapshot, type CampusAssistantEnvelope } from '@/lib/campusAssistantClient';
 
 const state = vi.hoisted(() => ({
   uid: 'alice' as string | null,
@@ -39,6 +39,8 @@ vi.mock('@/components/SiteShell', () => ({
 vi.mock('@/lib/campusAssistantClient', async (original) => ({
   ...(await original<typeof import('@/lib/campusAssistantClient')>()),
   callCampusAssistant: vi.fn(),
+  executeCampusAgentWrite: vi.fn(),
+  getCampusAssistantSnapshot: vi.fn(),
 }));
 vi.mock('@/lib/functionsUrl', async (original) => ({
   ...(await original<typeof import('@/lib/functionsUrl')>()),
@@ -55,6 +57,13 @@ beforeEach(() => {
   state.uid = 'alice';
   state.query = '';
   state.functionsConfigured = true;
+  vi.mocked(getCampusAssistantSnapshot).mockImplementation(async (_userId, schoolId) => ({
+    schoolId,
+    checkedAt: '2026-10-26T12:00:00.000Z',
+    schedule: { status: 'unavailable', count: null },
+    assignments: { status: 'available', count: 0, items: [] },
+    announcements: { status: 'available', items: [] },
+  }));
 });
 function ask(content = '私人課表') {
   fireEvent.change(screen.getByLabelText('你的問題'), { target: { value: content } });
@@ -301,4 +310,80 @@ it('does not send campus-specific requests before a campus is selected', () => {
   expect(screen.getByText('請先選擇一所學校，再使用校園助理。')).toBeTruthy();
   expect(screen.queryByRole('form', { name: '傳送問題' })).toBeNull();
   expect(callCampusAssistant).not.toHaveBeenCalled();
+});
+
+it('shows real authorized assignments and does not infer a schedule from missing data', async () => {
+  vi.mocked(getCampusAssistantSnapshot).mockResolvedValueOnce({
+    schoolId: 'pu',
+    checkedAt: '2026-10-26T12:00:00.000Z',
+    schedule: { status: 'unavailable', count: null },
+    assignments: { status: 'available', count: 1, items: [
+      { title: '資料庫期末報告', groupName: '資料庫', dueAt: '2026-10-28T12:00:00.000Z' },
+    ] },
+    announcements: { status: 'unavailable', items: [] },
+  });
+  render(<AssistantPage />);
+  await screen.findByText('資料庫期末報告');
+  expect(screen.getByText(/助理目前無法取得正式課表/)).toBeTruthy();
+  expect(screen.getByText('公告來源暫時無法確認')).toBeTruthy();
+  fireEvent.click(screen.getByRole('button', { name: '整理優先順序' }));
+  expect((screen.getByLabelText('你的問題') as HTMLTextAreaElement).value).toContain('待繳作業');
+  expect(callCampusAssistant).not.toHaveBeenCalled();
+});
+
+it('requires a second explicit confirmation before executing a validated action', async () => {
+  const runId = '01234567-89ab-4cde-8012-3456789abcde';
+  vi.mocked(callCampusAssistant).mockResolvedValue({
+    content: '請先確認報修內容',
+    run: { runId, status: 'completed' },
+    actions: [{
+      action: 'queue_action',
+      label: '確認送出報修',
+      requiresConfirmation: true,
+      params: {
+        toolName: 'createDormRepairRequest',
+        agentRunId: runId,
+        input: { dormitory: 'A棟', room: '301', category: '冷氣', description: '不冷' },
+      },
+    }],
+  });
+  vi.mocked(executeCampusAgentWrite).mockResolvedValue({
+    success: true, toolName: 'createDormRepairRequest', repairId: 'repair-123',
+  });
+  render(<AssistantPage />);
+  ask('A棟301冷氣不冷');
+  await screen.findByText('請先確認報修內容');
+  expect(executeCampusAgentWrite).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole('button', { name: '檢視草稿' }));
+  expect(screen.getByText('301')).toBeTruthy();
+  fireEvent.click(screen.getByRole('button', { name: '確認並執行' }));
+  await screen.findByText('伺服器已確認執行成功');
+  expect(executeCampusAgentWrite).toHaveBeenCalledTimes(1);
+  expect(vi.mocked(executeCampusAgentWrite).mock.calls[0][0]).toMatchObject({
+    userId: 'alice', schoolId: 'pu', agentRunId: runId,
+    toolName: 'createDormRepairRequest',
+  });
+  expect(screen.getByText(/repair-123/)).toBeTruthy();
+});
+
+it('never offers execution for an action not bound to its server run', async () => {
+  vi.mocked(callCampusAssistant).mockResolvedValue({
+    content: '草稿',
+    run: { runId: '01234567-89ab-4cde-8012-3456789abcde' },
+    actions: [{
+      action: 'queue_action',
+      label: '危險草稿',
+      requiresConfirmation: true,
+      params: {
+        toolName: 'createDormRepairRequest',
+        agentRunId: 'ffffffff-ffff-ffff-ffff-ffffffffffff',
+        input: { dormitory: 'A棟', room: '301', category: '冷氣', description: '不冷' },
+      },
+    }],
+  });
+  render(<AssistantPage />);
+  ask('報修');
+  await screen.findByText('草稿');
+  expect(screen.queryByRole('button', { name: '檢視草稿' })).toBeNull();
+  expect(executeCampusAgentWrite).not.toHaveBeenCalled();
 });
