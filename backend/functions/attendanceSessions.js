@@ -467,6 +467,15 @@ function createLiveSessionHandlers({ db, now = Date.now, notifyStarted, logger =
       const wasPresent = ['present', 'late'].includes(previousStatus);
       const isPresent = ['present', 'late'].includes(status);
       const delta = Number(isPresent) - Number(wasPresent);
+      if (
+        delta < 0 &&
+        (!Number.isInteger(liveSnap.data().attendeeCount) ||
+          !Number.isInteger(attendanceSnap.data().attendeeCount) ||
+          liveSnap.data().attendeeCount < 1 ||
+          attendanceSnap.data().attendeeCount < 1)
+      ) {
+        throw new HttpsError('failed-precondition', 'Attendance counts require administrator repair');
+      }
       const correctedAt = Timestamp.fromMillis(now());
       const checkedInAt = isPresent
         ? wasPresent && timestampMillis(previous?.checkedInAt) !== null
