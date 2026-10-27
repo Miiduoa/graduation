@@ -7,8 +7,9 @@ import { listAttendanceSessions } from '../data/courseSpaceSource';
 import { safeNavigate } from '../utils/safeNavigate';
 
 let mockAuth = { user: { uid: 'student-a' }, profile: { schoolId: 'school-a' } };
+let mockSchoolId = 'school-a';
 jest.mock('../state/auth', () => ({ useAuth: () => mockAuth }));
-jest.mock('../state/school', () => ({ useSchool: () => ({ school: { id: 'school-a' } }) }));
+jest.mock('../state/school', () => ({ useSchool: () => ({ school: { id: mockSchoolId } }) }));
 jest.mock('../data/courseSpaceSource', () => ({ listAttendanceSessions: jest.fn() }));
 jest.mock('../data/demoCoursesAdapter', () => ({ isDemoCourseId: (id: string) => id === '71378' }));
 jest.mock('../utils/safeNavigate', () => ({ safeNavigate: jest.fn() }));
@@ -52,6 +53,7 @@ const route = { params: { courseId: 'course-a', sessionId: 'live-1' } };
 beforeEach(() => {
   jest.clearAllMocks();
   mockAuth = { user: { uid: 'student-a' }, profile: { schoolId: 'school-a' } };
+  mockSchoolId = 'school-a';
   jest.mocked(listAttendanceSessions).mockResolvedValue([session]);
 });
 
@@ -108,6 +110,7 @@ test('account and school changes reject the previous pending classroom response'
   );
   const view = render(<AttendanceMultiMethodScreen route={route} />);
   mockAuth = { user: { uid: 'student-b' }, profile: { schoolId: 'school-b' } };
+  mockSchoolId = 'school-b';
   jest.mocked(listAttendanceSessions).mockResolvedValueOnce([]);
   view.rerender(<AttendanceMultiMethodScreen route={route} />);
   await view.findByText('目前沒有可用的課堂簽到');
