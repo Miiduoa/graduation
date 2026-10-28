@@ -22,7 +22,7 @@ function replyWith(html: string) {
       res.emit('data', Buffer.from(html));
       res.emit('end');
     };
-    return req as ReturnType<typeof https.request>;
+    return req as unknown as ReturnType<typeof https.request>;
   });
 }
 
