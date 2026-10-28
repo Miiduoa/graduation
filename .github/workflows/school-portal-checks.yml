@@ -14,6 +14,7 @@ on:
       - 'apps/mobile/src/__tests__/SchoolPortalReview.test.tsx'
       - 'apps/mobile/src/__tests__/SchoolPortalReimport.test.tsx'
       - 'apps/mobile/src/__tests__/SchoolPortalBatch.test.tsx'
+      - 'apps/mobile/src/__tests__/SchoolPortalBatchLedger.test.ts'
       - 'apps/mobile/src/screens/LoginLandingScreen.tsx'
       - 'apps/mobile/src/screens/SSOLoginScreen.tsx'
       - 'apps/web/src/lib/portalCapture*.test.ts'
@@ -43,7 +44,7 @@ jobs:
         run: pnpm --filter web exec vitest run src/lib/portalCapture.test.ts src/lib/portalCapture.dom.test.ts src/lib/portalCapture.privacy.test.ts src/lib/portalCapture.grids.test.ts src/lib/portalRowReview.test.ts src/lib/portalReimport.test.ts src/lib/schoolTableBatch.test.ts --coverage --reporter=json --outputFile=portal-vitest-results.json
       - name: Test native review and original login screens
         if: ${{ !cancelled() }}
-        run: pnpm --filter mobile test src/__tests__/SchoolPortalImport.test.tsx src/__tests__/SchoolPortalSession.test.tsx src/__tests__/SchoolPortalReview.test.tsx src/__tests__/SchoolPortalReimport.test.tsx src/__tests__/SchoolPortalBatch.test.tsx src/__tests__/GuestLoginScreens.test.tsx --ci --json --outputFile=portal-jest-results.json
+        run: pnpm --filter mobile test src/__tests__/SchoolPortalImport.test.tsx src/__tests__/SchoolPortalSession.test.tsx src/__tests__/SchoolPortalReview.test.tsx src/__tests__/SchoolPortalReimport.test.tsx src/__tests__/SchoolPortalBatch.test.tsx src/__tests__/SchoolPortalBatchLedger.test.ts src/__tests__/GuestLoginScreens.test.tsx --ci --json --outputFile=portal-jest-results.json
       - name: Preserve machine-readable results
         if: ${{ !cancelled() }}
         uses: actions/upload-artifact@v4
