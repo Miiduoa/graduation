@@ -1,12 +1,12 @@
 import type { ReactNode } from 'react';
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
-import QRCode from 'qrcode';
 import { CourseAttendance } from './CourseAttendance';
 import { endCourseAttendance, loadAttendanceCode, loadCourseAttendance, type CourseAttendance as Data } from '@/lib/courseAttendance';
 
 const state = vi.hoisted(() => ({
   uid: 'teacher',
+  encodeQr: vi.fn<(payload: string, options: { width: number; margin: number; errorCorrectionLevel: 'M' }) => Promise<string>>(),
   access: null as null | ((role: string | null) => void),
   sessions: null as null | ((sessions: Data['sessions']) => void),
 }));
@@ -18,7 +18,7 @@ vi.mock('./AttendanceCorrectionPanel', () => ({ AttendanceCorrectionPanel: () =>
 vi.mock('./AttendanceQrScanner', () => ({ AttendanceQrScanner: () => null }));
 vi.mock('./AttendanceSyncStatus', () => ({ AttendanceSyncStatus: () => null }));
 vi.mock('@/lib/pageContext', () => ({ resolveSchoolPageContext: () => ({ schoolSearch: '' }) }));
-vi.mock('qrcode', () => ({ default: { toDataURL: vi.fn() } }));
+vi.mock('qrcode', () => ({ default: { toDataURL: state.encodeQr } }));
 vi.mock('@/lib/watchAttendanceLive', () => ({
   watchAttendanceLive: (options: { onState: (state: string) => void; onSessions: (sessions: Data['sessions']) => void }) => {
     state.sessions = options.onSessions; options.onState('live'); return () => {};
@@ -47,7 +47,7 @@ beforeEach(() => {
   vi.spyOn(navigator, 'onLine', 'get').mockReturnValue(true);
   vi.mocked(loadCourseAttendance).mockResolvedValue(data());
   vi.mocked(loadAttendanceCode).mockResolvedValue('server-issued-classroom-token');
-  vi.mocked(QRCode.toDataURL).mockResolvedValue('data:image/png;base64,QUJDRA==');
+  state.encodeQr.mockResolvedValue('data:image/png;base64,QUJDRA==');
   Object.defineProperty(HTMLDialogElement.prototype, 'showModal', { configurable: true,
     value: function(this: HTMLDialogElement) { this.setAttribute('open', ''); } });
   Object.defineProperty(HTMLDialogElement.prototype, 'close', { configurable: true,
@@ -60,7 +60,7 @@ async function showQr() {
 }
 it('uses a high-resolution existing server token and presents no roster in the dialog', async () => {
   render(<CourseAttendance courseId="course" audience="teacher" />); await showQr();
-  expect(QRCode.toDataURL).toHaveBeenCalledWith(JSON.stringify({ groupId: 'course', sessionId: 'session', qrToken: 'server-issued-classroom-token' }),
+  expect(state.encodeQr).toHaveBeenCalledWith(JSON.stringify({ groupId: 'course', sessionId: 'session', qrToken: 'server-issued-classroom-token' }),
     { width: 768, margin: 4, errorCorrectionLevel: 'M' });
   fireEvent.click(screen.getByRole('button', { name: '放大投影 QR Code' }));
   const projection = screen.getByRole('dialog', { name: '資料結構' });
@@ -80,14 +80,14 @@ it('discards a QR lookup that crossed a background transition even after the pag
   visibility.mockReturnValue('hidden'); act(() => document.dispatchEvent(new Event('visibilitychange')));
   visibility.mockReturnValue('visible'); act(() => document.dispatchEvent(new Event('visibilitychange')));
   await act(async () => finish('late-token'));
-  expect(screen.queryByText('late-token')).toBeNull(); expect(QRCode.toDataURL).not.toHaveBeenCalled();
+  expect(screen.queryByText('late-token')).toBeNull(); expect(state.encodeQr).not.toHaveBeenCalled();
 });
 it('discards a late image encoder result after the page is hidden', async () => {
   let finish!: (value: string) => void;
-  vi.mocked(QRCode.toDataURL).mockImplementationOnce(() => new Promise<string>((resolve) => { finish = resolve; }));
+  state.encodeQr.mockImplementationOnce(() => new Promise<string>((resolve) => { finish = resolve; }));
   render(<CourseAttendance courseId="course" />);
   fireEvent.click(await screen.findByRole('button', { name: '顯示簽到碼' }));
-  await waitFor(() => expect(QRCode.toDataURL).toHaveBeenCalled());
+  await waitFor(() => expect(state.encodeQr).toHaveBeenCalled());
   act(() => window.dispatchEvent(new Event('pagehide')));
   await act(async () => finish('data:image/png;base64,QUJDRA=='));
   expect(screen.queryByAltText('本次課堂簽到 QR Code')).toBeNull();

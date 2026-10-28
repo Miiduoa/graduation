@@ -162,7 +162,7 @@ function Session({
       JSON.stringify({ groupId: courseId, sessionId: session.id, qrToken: code }),
       { width: 768, margin: 4, errorCorrectionLevel: 'M' },
     );
-    if (live.current && request === qrGeneration.current && navigator.onLine !== false &&
+    if (live.current && request === qrGeneration.current && Boolean(navigator.onLine) &&
         document.visibilityState === 'visible' && Date.now() < deadline) {
       setTeacherCode(code);
       setQr(image);
