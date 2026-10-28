@@ -19,6 +19,7 @@ import {
 import styles from './CreditPlannerWorkspace.module.css';
 import { CreditPlannerRequirements } from './CreditPlannerRequirements';
 import { CreditPlanFeasibility } from './CreditPlanFeasibility';
+import { replaceLocalScenarioPlan } from '@/lib/creditScenarioWrite';
 
 type CourseDraft = {
   name: string;
@@ -84,11 +85,21 @@ export function CreditPlannerWorkspace({
   const [formError, setFormError] = useState('');
   const [removed, setRemoved] = useState<{ course: PlannedCourse; index: number } | null>(null);
   const summary = useMemo(() => creditPlanSummary(plan), [plan]);
+  const stored = useRef<{ key: string; raw: string | null } | null>(null);
+  const live = useRef(true);
+  const scope = useRef({ key, generation: 0 });
+  if (scope.current.key !== key) scope.current = { key, generation: scope.current.generation + 1 };
+  const latest = useRef({ plan, draft, editingId });
+  latest.current = { plan, draft, editingId };
+  useEffect(() => { live.current = true; return () => { live.current = false; }; }, []);
 
   useEffect(() => {
     let restored: CreditPlan | null = null;
+    stored.current = null;
+    skipInvalidDraftSave.current = false;
     try {
       const raw = window.localStorage.getItem(key);
+      stored.current = { key, raw };
       restored = restoreCreditPlan(raw);
       if (raw && !restored) {
         skipInvalidDraftSave.current = true;
@@ -110,11 +121,30 @@ export function CreditPlannerWorkspace({
     // An incomplete number (such as "12.") must not overwrite the last valid draft.
     if (!restoreCreditPlan(JSON.stringify(plan))) return;
     try {
-      window.localStorage.setItem(key, JSON.stringify(plan));
+      if (stored.current?.key !== key || window.localStorage.getItem(key) !== stored.current.raw) {
+        setSaveNotice('其他分頁已更新規劃，本頁輸入仍保留但尚未儲存；請先備份輸入，再重新讀取最新內容。');
+        return;
+      }
+      const raw = JSON.stringify(plan);
+      if (stored.current.raw !== raw) window.localStorage.setItem(key, raw);
+      stored.current = { key, raw };
     } catch {
       setSaveNotice('無法將草稿存在這台瀏覽器，請先匯出 CSV 備份。');
     }
   }, [plan, key, hydratedKey]);
+
+  async function commitScenario(expected: CreditPlan, next: CreditPlan): Promise<CreditPlan | null> {
+    const generation = scope.current.generation;
+    const isCurrent = () => live.current && scope.current.key === key && scope.current.generation === generation &&
+      hydratedKey === key && latest.current.plan === expected && !latest.current.editingId && !latest.current.draft.name.trim();
+    if (!isCurrent()) throw new Error('請先完成或取消課程輸入，再重新比較方案。');
+    const saved = replaceLocalScenarioPlan(window.localStorage, key, expected, next, isCurrent);
+    stored.current = { key, raw: JSON.stringify(saved) };
+    setPlan(saved);
+    setRemoved(null);
+    setSaveNotice('修課安排已保存在這台瀏覽器。');
+    return saved;
+  }
 
   function updateField(field: 'recognized' | 'target' | 'extra', value: string) {
     setPlan((current) => ({ ...current, [field]: value }));
@@ -381,7 +411,8 @@ export function CreditPlannerWorkspace({
         )}
       </div>
 
-      <CreditPlanFeasibility plan={plan} />
+      <CreditPlanFeasibility plan={plan} scenarioWriter={commitScenario}
+        scenarioBlocked={editingId || draft.name.trim() ? '請先完成或取消課程輸入，再採用或復原方案。' : undefined} />
 
       <div className={styles.sectionHeading}>
         <div>

@@ -10,6 +10,8 @@ import {
 } from '@campus/shared/src/creditPlanScenarios';
 import { portableCreditPlanJson } from '../../features/academics/creditPlanRepository';
 import { theme } from '../../ui/theme';
+import type { CreditScenarioWriter } from '@campus/shared/src/creditScenarioAdoption';
+import { CreditScenarioAdoptionActions } from './CreditScenarioAdoptionActions';
 
 const number = (value: number | null) => value === null ? '未設定' : formatCredits(value);
 function Action({ title, onPress, disabled = false, selected = false }: {
@@ -25,7 +27,9 @@ function Action({ title, onPress, disabled = false, selected = false }: {
   </Pressable>;
 }
 
-export function CreditPlanScenarioCard({ plan }: { plan: CreditPlan }) {
+export function CreditPlanScenarioCard({ plan, scenarioWriter, scenarioBlocked }: {
+  plan: CreditPlan; scenarioWriter?: CreditScenarioWriter; scenarioBlocked?: string;
+}) {
   const c = theme.colors;
   const [expanded, setExpanded] = useState(false);
   const [draft, setDraft] = useState<{ source: CreditPlan; value: CreditScenario } | null>(null);
@@ -93,6 +97,9 @@ export function CreditPlanScenarioCard({ plan }: { plan: CreditPlan }) {
       <Text style={{ color: c.text, fontSize: 18, fontWeight: '700' }}>換個修法，先看差多少 {expanded ? '−' : '＋'}</Text>
       <Text style={{ color: c.muted, fontSize: 12, lineHeight: 19 }}>不修、延後或只修已選課；先比較，不直接更動原規劃。</Text>
     </Pressable>
+        <CreditScenarioAdoptionActions plan={plan} candidate={comparison?.plan ?? null}
+          writer={scenarioWriter} visible={expanded} blocked={exporting ? '請先完成分享，再採用方案。' : scenarioBlocked}
+          onApplied={() => { setDraft(null); setEditing(null); }} />
     {expanded ? <View style={{ paddingHorizontal: 16, paddingBottom: 18, gap: 14 }}>
       <Text style={{ color: c.muted, fontSize: 12, lineHeight: 19 }}>只比較已儲存的課程，不含表單未儲存的輸入。已選課狀態由你手動設定，仍假設未來通過且可採計。</Text>
       {!validPlan ? <Text style={{ color: c.text }}>請先修正原規劃的無效欄位，再開始比較。</Text> : null}
@@ -159,7 +166,7 @@ export function CreditPlanScenarioCard({ plan }: { plan: CreditPlan }) {
           {comparison.afterInsights.workloadCautions.length ? <Text style={{ color: c.text, lineHeight: 20 }}>部分學期超過 25 學分，請核對個人負擔與學校上限；25 只是提醒，不是正式規定。</Text> : null}
           <View style={{ backgroundColor: c.surface2, borderRadius: 12, padding: 14, gap: 10 }}>
             <Text style={{ color: c.text, fontWeight: '700' }}>原規劃仍完整保留</Text>
-            <Text style={{ color: c.muted, fontSize: 12, lineHeight: 20 }}>比較不會退選或修改校方紀錄。可分享此方案的 JSON 備份，再由現有匯入流程確認採用；請另外保留原規劃備份。分享完成後仍需自行核對是否確實保存。</Text>
+            <Text style={{ color: c.muted, fontSize: 12, lineHeight: 20 }}>比較不會退選或修改校方紀錄。可直接預覽並採用；跨裝置移轉仍可分享 JSON。請另外保留原規劃備份。分享完成後仍需自行核對是否確實保存。</Text>
             <Action title={exporting ? '正在處理比較備份…' : '匯出此比較方案 JSON'} disabled={!comparison.changed || exporting} onPress={() => void exportScenario()} />
           </View>
         </> : null}
