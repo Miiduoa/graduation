@@ -177,6 +177,54 @@ createRoot(document.getElementById('root')).render(<Fixture/>);
     report.checks.push(`${label}:空結果禁止匯出`);
     await click('button', '清除篩選');
     await check(`${label}:清除篩選回到40筆`, () => document.querySelectorAll('[aria-label="成績明細"] > li').length === 40);
+
+    // 用同一頁面的更新入口加入「有校方摘要、沒有科目明細」的合成學期。
+    await inPage(() => window.__replaceSnapshot(current => ({
+      ...current,
+      records: { ...current.records, summary: { '1141': { semesterAverage: '88.5' } } },
+    })));
+    await until(() => inPage(() => document.body.textContent.includes('來源另列出 1 個學期')), '學期缺漏提示');
+    await check(`${label}:摘要學期不冒充科目明細`, () => {
+      const panel = document.querySelector('[aria-label="學期資料範圍"]');
+      return panel.textContent.includes('2 個學期有明細') && panel.textContent.includes('不代表沒有修課或已取得 0 學分');
+    });
+    await inPage(() => {
+      const summary = document.querySelector('[aria-label="學期資料範圍"] summary');
+      summary.scrollIntoView({ block: 'center', behavior: 'instant' });
+      summary.focus();
+    });
+    await send('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13 });
+    await send('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13 });
+    await until(() => inPage(() => document.querySelector('[aria-label="學期資料範圍"] details').open), '鍵盤展開學期範圍');
+    report.checks.push(`${label}:Enter鍵展開原生學期清單`);
+    await check(`${label}:展開學期清單沒有水平溢位且觸控目標足夠`, () => {
+      const panel = document.querySelector('[aria-label="學期資料範圍"]');
+      return document.documentElement.scrollWidth <= innerWidth + 1 &&
+        [...panel.querySelectorAll('button,summary')].every(node => node.getBoundingClientRect().height >= 43.5);
+    });
+    await inPage(() => document.querySelector('[aria-label="學期資料範圍"]').scrollIntoView({ block: 'start', behavior: 'instant' }));
+    const coverageScreenshot = `coverage-${label}.png`;
+    const coverageImage = await send('Page.captureScreenshot', { format: 'png' });
+    await writeFile(path.join(output, coverageScreenshot), Buffer.from(coverageImage.data, 'base64'));
+    report.screenshots.push(coverageScreenshot);
+    await click('input[type="search"]');
+    await send('Input.insertText', { text: '不存在的課程' });
+    await click('[aria-label="查看 114 學年度第 1 學期，尚無明細"]');
+    await check(`${label}:點選缺漏學期清除遮蔽篩選並禁止空匯出`, () =>
+      document.querySelector('select').value === '1141' && document.querySelector('input[type="search"]').value === '' &&
+      document.querySelectorAll('[aria-label="成績明細"] > li').length === 0 &&
+      [...document.querySelectorAll('button')].some(node => node.textContent.trim() === '匯出符合條件的 0 筆 CSV' && node.disabled));
+    await check(`${label}:缺漏明細仍保留校方平均且不推論沒修課`, () =>
+      document.body.textContent.includes('88.5') && document.body.textContent.includes('這不代表沒有修課'));
+    await click('[aria-label="查看 114 學年度第 2 學期，已讀取 40 筆"]');
+    await check(`${label}:返回有資料學期只顯示該學期明細`, () =>
+      document.querySelector('select').value === '1142' &&
+      document.querySelectorAll('[aria-label="成績明細"] > li').length === 40 &&
+      document.querySelector('[aria-label="查看 114 學年度第 2 學期，已讀取 40 筆"]').getAttribute('aria-pressed') === 'true' &&
+      document.body.textContent.includes('符合 40 筆 · 已顯示 40 筆'));
+    await click('button', '清除篩選');
+    await check(`${label}:結束核對後恢復全部85筆範圍`, () =>
+      document.querySelector('select').value === '' && document.body.textContent.includes('符合 85 筆 · 已顯示 40 筆'));
   }
   await click('button', '匯出符合條件的 85 筆 CSV');
   let downloaded;
