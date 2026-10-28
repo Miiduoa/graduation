@@ -92,16 +92,37 @@ function cookieHeader(jar: CookieJar): string {
 }
 
 function mergeCookies(jar: CookieJar, headers: Headers): CookieJar {
-  const next = { ...jar };
+  const next = new Map(Object.entries(jar));
   const listed = typeof headers.getSetCookie === 'function' ? headers.getSetCookie() : [];
   const fallback = headers.get('set-cookie');
   const lines = listed.length > 0 ? listed : fallback ? [fallback] : [];
   for (const line of lines) {
-    const pair = String(line).split(';')[0]?.trim() || '';
+    const [pair = '', ...attributes] = String(line).split(';').map((part) => part.trim());
     const idx = pair.indexOf('=');
-    if (idx > 0) next[pair.slice(0, idx)] = pair.slice(idx + 1);
+    if (idx <= 0) continue;
+    const name = pair.slice(0, idx);
+    const value = pair.slice(idx + 1);
+    let maxAge: number | undefined;
+    let expires: number | undefined;
+    for (const attribute of attributes) {
+      const separator = attribute.indexOf('=');
+      if (separator < 0) continue;
+      const key = attribute.slice(0, separator).trim().toLowerCase();
+      const setting = attribute.slice(separator + 1).trim();
+      if (key === 'max-age' && /^-?\d+$/.test(setting)) {
+        const seconds = Number(setting);
+        if (Number.isFinite(seconds)) maxAge = seconds;
+      } else if (key === 'expires') {
+        const date = Date.parse(setting);
+        if (Number.isFinite(date)) expires = date;
+      }
+    }
+    // 校方明確撤銷時不保留舊 session；Max-Age 優先於 Expires。
+    const removed = maxAge !== undefined ? maxAge <= 0 : expires !== undefined && expires <= Date.now();
+    if (!value || removed) next.delete(name);
+    else next.set(name, value);
   }
-  return next;
+  return Object.fromEntries(next);
 }
 
 export function rewriteCampusPortalLocation(
@@ -518,8 +539,11 @@ export function createPuCampusGateway(
         }
         const profileData = authenticatedJson(profilePage);
         if (profileData && identityBelongsToAccount(account, profileData)) {
+          if (!sessionCookieValue(profilePage.cookies)) {
+            throw new PuCampusError('credentials', '學校連線已失效，請重新登入', { route, stage: 'verify' });
+          }
           return {
-            cookies: posted.cookies,
+            cookies: profilePage.cookies,
             userId: userIdFrom(profileData) ?? userIdFrom(loginData),
             userName: displayNameFrom(profileData, account),
             role: roleFrom(profileData),

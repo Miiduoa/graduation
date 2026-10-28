@@ -152,6 +152,7 @@ function Courses({ uid, schoolId, returnUrl }: { uid: string; schoolId: 'pu'; re
                 <dl>
                   <div><dt>授課教師</dt><dd>{course.teachers.length ? course.teachers.join('、') : '未提供'}</dd></div>
                   <div><dt>學期</dt><dd>{formatSemester(course.semester)}</dd></div>
+                  <div><dt>WOW Class 標示學分</dt><dd>{typeof course.credit === 'number' ? `${course.credit} 學分` : '未提供'}</dd></div>
                 </dl>
                 <a href={course.href} target="_blank" rel="noopener noreferrer" aria-label={`前往 ${course.name} 的 WOW Class 課堂`}>開啟課堂 ↗</a>
               </li>)}
@@ -167,7 +168,7 @@ function Courses({ uid, schoolId, returnUrl }: { uid: string; schoolId: 'pu'; re
         uid={uid} schoolId={schoolId} lms={null} returnUrl={returnUrl}
         canReconnect={Boolean(!options.loading && options.studentId)}
       /> : null}
-      <p className={styles.note}>這裡顯示 WOW Class 課堂清單。正式選課、歷年成績及畢業採計學分請分別查看「我的課表」、「成績紀錄」與「學分規劃」。</p>
+      <p className={styles.note}>學分為 WOW Class 原列資料，不代表已修得或畢業採計；「未提供」不會當成 0 學分。正式選課、歷年成績及畢業採計學分請分別查看「我的課表」、「成績紀錄」與「學分規劃」。</p>
     </>
   );
 }

@@ -46,6 +46,9 @@ function publicCourses(input: unknown) {
       id,
       name,
       code: shortText(row.course_code, 100),
+      // 只轉交讀取器已確認的來源學分；缺值不代表 0，也不是畢業採計。
+      credit: typeof row.credit === 'number' && Number.isFinite(row.credit) && row.credit >= 0
+        ? row.credit : null,
       teachers: people.map((person) => shortText(person?.name, 100)).filter(Boolean).slice(0, 30),
       semester: semesterName(row.semester),
       status: shortText(row.status, 40),
