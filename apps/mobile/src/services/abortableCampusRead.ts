@@ -14,7 +14,10 @@ export function abortableCampusRead<T>(
     let settled = false;
     let timer: ReturnType<typeof setTimeout> | undefined;
     const cleanup = () => {
-      if (timer !== undefined) clearTimeout(timer);
+      if (timer !== undefined) {
+        clearTimeout(timer);
+        timer = undefined;
+      }
       signal?.removeEventListener('abort', cancel);
     };
     const finish = (result: { value: T } | { error: unknown }) => {
