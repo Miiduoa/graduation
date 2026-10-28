@@ -25,6 +25,7 @@ function deferred<T>() {
   return { promise, resolve };
 }
 beforeEach(() => {
+  sessionStorage.clear();
   vi.resetAllMocks();
   vi.mocked(attendanceActorUid).mockReturnValue('teacher-a');
   vi.mocked(loadCourseAttendanceRoster).mockResolvedValue(roster);

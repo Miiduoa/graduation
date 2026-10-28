@@ -15,6 +15,8 @@ import {
 import { Button } from './ui/Button';
 import { AttendanceRegisterPanel } from './AttendanceRegisterPanel';
 import { AttendanceCorrectionReview } from './AttendanceCorrectionReview';
+import { AttendanceCorrectionResume } from './AttendanceCorrectionResume';
+import { rememberCorrectionBookmark, clearCorrectionBookmark } from '@/lib/attendanceCorrectionBookmark';
 import { correctionReviewScope, type CorrectionReview } from '@/lib/attendanceCorrectionReview';
 import { isAttendanceResultUncertain } from '@/lib/attendanceRequest';
 import styles from './course-attendance-correction.module.css';
@@ -43,10 +45,14 @@ type CorrectionAttempt = {
 
 export function AttendanceCorrectionPanel(props: Props) {
   // Route changes must unmount old reads, drafts and pending results together.
-  return <AttendanceCorrectionEditor
-    key={JSON.stringify([props.courseId, props.sessionId, attendanceActorUid()])}
-    {...props}
-  />;
+  const actorUid = attendanceActorUid();
+  return <AttendanceCorrectionResume
+    key={JSON.stringify([props.courseId, props.sessionId, actorUid])}
+    scope={{ actorUid: actorUid ?? '', courseId: props.courseId, sessionId: props.sessionId }}
+    currentActor={attendanceActorUid}
+  >
+    <AttendanceCorrectionEditor {...props} />
+  </AttendanceCorrectionResume>;
 }
 
 function AttendanceCorrectionEditor({ courseId, sessionId, active = false, onUpdated }: Props) {
@@ -70,6 +76,7 @@ function AttendanceCorrectionEditor({ courseId, sessionId, active = false, onUpd
   const reasonInput = useRef<HTMLTextAreaElement>(null);
   const attempt = useRef<CorrectionAttempt | null>(null);
   const [pendingRetry, setPendingRetry] = useState<CorrectionAttempt | null>(null);
+  const [bookmarkSaved, setBookmarkSaved] = useState(false);
   const recoveryButton = useRef<HTMLButtonElement>(null);
   const locked = busy || pendingRetry !== null;
   const mounted = useRef(true);
@@ -148,6 +155,18 @@ function AttendanceCorrectionEditor({ courseId, sessionId, active = false, onUpd
 
   async function save(current: CorrectionAttempt, recovering: boolean) {
     if (submitting.current) return;
+    const actorUid = current.command.actorUid;
+    if (!actorUid || actorUid !== attendanceActorUid()) {
+      setError('登入帳號已變更，請重新登入原帳號核對紀錄。');
+      return;
+    }
+    const bookmarkScope = { actorUid, courseId, sessionId };
+    const stored = rememberCorrectionBookmark(bookmarkScope, current.command.requestId);
+    if (stored === 'conflict') {
+      setError('此場次已有其他待確認操作，請重新整理後先查核原收據。沒有送出新的更正。');
+      return;
+    }
+    setBookmarkSaved(stored === 'saved');
     submitting.current = true;
     attempt.current = current;
     setBusy(true);
@@ -156,6 +175,7 @@ function AttendanceCorrectionEditor({ courseId, sessionId, active = false, onUpd
     const requestIdentity = revision.current;
     try {
       const result = await correctCourseAttendance(current.command);
+      clearCorrectionBookmark(bookmarkScope, current.command.requestId);
       if (!mounted.current || requestIdentity !== revision.current) return;
       attempt.current = null;
       setPendingRetry(null);
@@ -175,8 +195,11 @@ function AttendanceCorrectionEditor({ courseId, sessionId, active = false, onUpd
         }
       }
     } catch (problem) {
+      const code = (problem as { code?: string })?.code?.replace('functions/', '');
+      if (code === 'aborted' || (!recovering && !isAttendanceResultUncertain(problem))) {
+        clearCorrectionBookmark(bookmarkScope, current.command.requestId);
+      }
       if (mounted.current && revision.current === requestIdentity) {
-        const code = (problem as { code?: string })?.code?.replace('functions/', '');
         if (code === 'aborted') {
           attempt.current = null;
           setPendingRetry(null);
@@ -348,7 +371,10 @@ function AttendanceCorrectionEditor({ courseId, sessionId, active = false, onUpd
                 disabled={busy} onClick={() => void save(pendingRetry, true)}>
                 {busy ? '正在確認原更正…' : '確認原更正結果'}
               </button>
-              <p className={styles.note}>沿用原請求編號與核對版本，不會另建一筆。離開頁面後，請先查核紀錄再更正。</p>
+              <p className={styles.note}>沿用原請求編號與核對版本，不會另建一筆。</p>
+              <p className={styles.note}>{bookmarkSaved
+                ? '已在此分頁保留操作識別碼；重新整理後可唯讀查核收據，不會自動重送更正。'
+                : '瀏覽器無法保留操作識別碼；請先留在本頁確認結果。離開後須自行查核名冊與更正歷程。'}</p>
             </section>
           )}
           {error && <p role="alert" className={styles.error}>{error}</p>}
