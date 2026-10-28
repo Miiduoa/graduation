@@ -8,6 +8,7 @@ import {
   type CreditScenario, type CreditScenarioPreset,
 } from '@campus/shared/src/creditPlanScenarios';
 import styles from './CreditPlanScenarios.module.css';
+import { CreditScenarioDeadline } from './CreditScenarioDeadline';
 
 const number = (value: number | null) => value === null ? '未設定' : formatCredits(value);
 
@@ -77,6 +78,7 @@ export function CreditPlanScenarios({ plan }: { plan: CreditPlan }) {
         {stale ? <p className={styles.warning} role="alert">原規劃已更新，舊比較不再適用。請按上方按鈕以最新內容重新開始。</p> : null}
         {result?.ok === false ? <p className={styles.warning} role="alert">{result.message}</p> : null}
         {comparison ? <>
+          <CreditScenarioDeadline before={plan} after={comparison.plan} />
           <div className={styles.scoreboard}>
             <div><h4>原規劃</h4><span>全部通過仍缺</span><strong>{number(comparison.before.remaining)}<small> 學分</small></strong>
               <p>已排課程 {number(comparison.before.courseCredits)} 學分</p>

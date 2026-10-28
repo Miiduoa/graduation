@@ -10,6 +10,7 @@ import {
 } from '@campus/shared/src/creditPlanScenarios';
 import { portableCreditPlanJson } from '../../features/academics/creditPlanRepository';
 import { theme } from '../../ui/theme';
+import { CreditScenarioDeadlineCard } from './CreditScenarioDeadlineCard';
 
 const number = (value: number | null) => value === null ? '未設定' : formatCredits(value);
 function Action({ title, onPress, disabled = false, selected = false }: {
@@ -105,6 +106,7 @@ export function CreditPlanScenarioCard({ plan }: { plan: CreditPlan }) {
         {stale ? <Text accessibilityRole="alert" style={{ color: c.text, lineHeight: 22 }}>原規劃已更新，舊比較不再適用。請以上方按鈕重新開始。</Text> : null}
         {result?.ok === false ? <Text accessibilityRole="alert" style={{ color: c.text }}>{result.message}</Text> : null}
         {comparison ? <>
+          <CreditScenarioDeadlineCard before={plan} after={comparison.plan} />
           <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 10 }}>
             {[
               { title: '原規劃', summary: comparison.before, insight: comparison.beforeInsights },

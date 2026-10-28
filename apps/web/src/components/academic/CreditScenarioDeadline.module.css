@@ -1,0 +1,37 @@
+.panel { min-width: 0; border: 1px solid var(--border); border-radius: 16px; padding: 18px; background: var(--surface); color: var(--text); }
+.panel * { box-sizing: border-box; }
+.eyebrow { color: var(--muted); font-size: 12px; font-weight: 650; }
+.panel h4 { margin: 6px 0; font-size: 19px; line-height: 1.4; }
+.panel header p, .note { margin: 8px 0; color: var(--muted); font-size: 12px; line-height: 1.8; }
+.controls { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; margin: 16px 0; }
+.controls label { display: grid; gap: 7px; align-content: start; min-width: 0; font-size: 13px; font-weight: 600; }
+.controls select, .controls input { width: 100%; min-width: 0; min-height: 46px; padding: 10px 12px; border: 1px solid var(--border-strong); border-radius: 10px; color: var(--text); background: var(--surface); font: inherit; font-size: 16px; }
+.controls small { font-size: 11px; font-weight: 400; line-height: 1.6; color: var(--muted); }
+.controls input[aria-invalid='true'] { border-color: var(--danger); }
+.panel :is(input, select, summary):focus-visible { outline: 3px solid var(--focus-ring); outline-offset: 3px; }
+.conclusion { padding: 13px 14px; border-radius: 11px; border-left: 3px solid var(--brand); background: var(--accent-soft); font-size: 14px; line-height: 1.8; font-weight: 650; margin: 14px 0; }
+.metrics { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+.metrics section { min-width: 0; padding: 14px; border: 1px solid var(--border); border-radius: 12px; }
+.metrics section:last-child { background: var(--bg-soft); }
+.metrics span { font-size: 12px; color: var(--muted); }
+.metrics strong { display: block; font-size: 28px; font-variant-numeric: tabular-nums; margin-top: 8px; overflow-wrap: anywhere; }
+.metrics small { color: var(--muted); font-size: 12px; font-weight: 400; }
+.metrics p { margin: 7px 0 0; color: var(--muted); font-size: 12px; line-height: 1.7; }
+.delta { margin: 12px 0; font-size: 13px; line-height: 1.8; }
+.breakdown { border-top: 1px solid var(--border); margin-top: 12px; padding-top: 4px; }
+.breakdown summary { cursor: pointer; min-height: 46px; align-content: center; padding: 10px 0; font-size: 13px; font-weight: 600; line-height: 1.7; }
+.tables { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+.tables table { width: 100%; border-collapse: collapse; font-size: 12px; table-layout: fixed; }
+.tables caption { text-align: left; color: var(--muted); margin: 6px 0 10px; font-size: 12px; line-height: 1.6; }
+.tables th, .tables td { padding: 10px 4px; border-bottom: 1px solid var(--border); text-align: left; overflow-wrap: anywhere; }
+.tables td { font-variant-numeric: tabular-nums; }
+.tables td small { display: block; color: var(--warning); font-size: 11px; line-height: 1.6; }
+.later { list-style: none; padding: 0; margin: 6px 0 12px; display: grid; gap: 8px; }
+.later li { display: flex; justify-content: space-between; flex-wrap: wrap; gap: 5px 12px; font-size: 12px; padding: 9px 0; border-bottom: 1px solid var(--border); line-height: 1.7; }
+.later strong { overflow-wrap: anywhere; }
+.later span { color: var(--muted); }
+.warning, .warnings { background: var(--warning-soft); color: var(--warning); border-radius: 10px; padding: 12px 14px; font-size: 12px; line-height: 1.8; }
+.warnings { padding-left: 29px; }
+@media (max-width: 620px) { .tables { grid-template-columns: minmax(0, 1fr); } }
+@media (max-width: 430px) { .panel { padding: 14px; } .controls, .metrics { grid-template-columns: minmax(0, 1fr); } }
+@media print { .panel { break-inside: avoid; } }
