@@ -46,7 +46,7 @@ async function start() {
 it('等使用者主動核對才讀取本人課表，搜尋不再讀學校', async () => {
   render(<SchoolCourseReconciliation {...props()} />);
   expect(loadAcademicRecords).not.toHaveBeenCalled(); await start();
-  expect(loadAcademicRecords).toHaveBeenCalledWith('courses', 'one', 'pu');
+  expect(loadAcademicRecords).toHaveBeenCalledWith('courses', 'one', 'pu', { signal: expect.any(AbortSignal) });
   expect(screen.getByText('三 2–4 · 1655')).toBeTruthy();
   expect(screen.getByText('1 / 1 門')).toBeTruthy();
   expect(matchedLink()?.getAttribute('href')).toBe('https://tronclass.pu.edu.tw/course/100/content');
@@ -83,7 +83,8 @@ it('重新核對失敗不繼續顯示先前的成功對照', async () => {
   render(<SchoolCourseReconciliation {...props()} />); await start();
   vi.mocked(loadAcademicRecords).mockRejectedValueOnce(new AcademicConnectionError('permission'));
   fireEvent.click(screen.getByRole('button', { name: '重新核對校方課表' }));
-  expect(screen.queryByRole('heading', { name: '資料庫管理' })).toBeNull(); await screen.findByRole('alert');
+  expect(matchedLink()).toBeNull(); await screen.findByRole('alert');
+  expect(screen.queryByRole('heading', { name: '資料庫管理' })).toBeNull();
   const target = new URL(screen.getByRole('link', { name: '重新連線 e 校園' }).getAttribute('href')!, 'https://campus.local');
   expect(target.searchParams.get('returnUrl')).toBe('/school-courses?schoolId=pu&campus=pu');
 });
@@ -235,3 +236,4 @@ it('StrictMode 生命週期清理後仍可核對，不重複發出請求', async
   render(<StrictMode><SchoolCourseReconciliation {...props()} /></StrictMode>);
   await start(); expect(loadAcademicRecords).toHaveBeenCalledTimes(1); expect(matchedLink()).toBeTruthy();
 });
+
