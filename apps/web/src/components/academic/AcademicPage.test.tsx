@@ -369,6 +369,10 @@ it('removes the previous account transcript before loading the next account', as
 it('offers reconnection without pretending an expired session has an empty transcript', async () => {
   vi.mocked(loadAcademicRecords).mockRejectedValue(new AcademicConnectionError('reconnect'));
   render(<GradesPage />);
+  expect(await screen.findByRole('heading', { name: '暫時無法讀取學校成績' })).toBeTruthy();
+  expect(screen.queryByText('正在向學校讀取資料…')).toBeNull();
+  fireEvent.click(screen.getByRole('button', { name: '重新讀取' }));
+  await waitFor(() => expect(loadAcademicRecords).toHaveBeenCalledTimes(2));
   const link = await screen.findByRole('link', { name: '連線學校帳號' });
   expect(link.getAttribute('href')).toContain('reconnect=school');
   expect(link.getAttribute('href')).toContain(encodeURIComponent('/grades?schoolId=pu&campus=pu'));

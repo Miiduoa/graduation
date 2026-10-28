@@ -34,6 +34,21 @@ const GRADE_PATH = '/score_query/score_all.php';
 const REQUEST_TIMEOUT_MS = 10_000;
 const MAX_RESPONSE_BYTES = 4 * 1024 * 1024;
 const CAMPUS_HOSTS = new Set([ALCAT_HOST, MYPU_HOST]);
+/** 成績 SSO 整條（含單跳重試）須低於前端 45 秒讀取期限。 */
+const GRADE_FETCH_BUDGET_MS = 40_000;
+const MAX_TRANSIENT_HOP_RETRIES = 2;
+const TRANSIENT_NETWORK_CODES = new Set([
+  'ECONNRESET',
+  'ETIMEDOUT',
+  'ESOCKETTIMEDOUT',
+  'EPIPE',
+  'ECONNREFUSED',
+  'EHOSTUNREACH',
+  'ENETUNREACH',
+  'UND_ERR_CONNECT_TIMEOUT',
+  'UND_ERR_HEADERS_TIMEOUT',
+  'UND_ERR_BODY_TIMEOUT',
+]);
 // ---------------------------------------------------------------------------
 // HTTP helpers
 // ---------------------------------------------------------------------------
@@ -56,7 +71,40 @@ function cookieString(jar) {
     .join('; ');
 }
 
-function httpsRequest(hostname, path, method, cookies, body) {
+function campusErrorCode(error) {
+  if (!error || typeof error !== 'object') return 'unknown';
+  if (typeof error.code === 'string' && error.code.trim()) return error.code;
+  if (typeof error.name === 'string' && error.name.trim()) return error.name;
+  return 'unknown';
+}
+
+function isTransientCampusError(error) {
+  const code = campusErrorCode(error);
+  if (TRANSIENT_NETWORK_CODES.has(code)) return true;
+  const message = error instanceof Error ? error.message : String(error || '');
+  return /timed out|ECONNRESET|interrupted/i.test(message);
+}
+
+function logGradeEvent(event, error) {
+  console.warn(JSON.stringify({
+    msg: 'pu_fetch_grades',
+    event,
+    code: campusErrorCode(error),
+  }));
+}
+
+function hopTimeoutMs(deadlineAt) {
+  if (deadlineAt == null) return REQUEST_TIMEOUT_MS;
+  const leftover = deadlineAt - Date.now();
+  if (leftover <= 0) {
+    const error = new Error('Campus request timed out');
+    error.code = 'ETIMEDOUT';
+    throw error;
+  }
+  return Math.min(REQUEST_TIMEOUT_MS, leftover);
+}
+
+function httpsRequest(hostname, path, method, cookies, body, timeoutMs = REQUEST_TIMEOUT_MS) {
   return new Promise((resolve, reject) => {
     if (!CAMPUS_HOSTS.has(hostname) || !path.startsWith('/') || path.startsWith('//')) {
       reject(new Error('Untrusted campus URL'));
@@ -91,7 +139,7 @@ function httpsRequest(hostname, path, method, cookies, body) {
       error.code = 'ETIMEDOUT';
       finish(error);
       req?.destroy?.();
-    }, REQUEST_TIMEOUT_MS);
+    }, timeoutMs);
     timer.unref?.();
     req = https.request({ hostname, path, method, headers, family: 4 }, (res) => {
       const chunks = [];
@@ -126,11 +174,30 @@ function httpsRequest(hostname, path, method, cookies, body) {
 }
 
 // Convenience wrappers
-function get(hostname, path, cookies) {
-  return httpsRequest(hostname, path, 'GET', cookies || {});
+function get(hostname, path, cookies, timeoutMs) {
+  return httpsRequest(hostname, path, 'GET', cookies || {}, undefined, timeoutMs);
 }
-function post(hostname, path, cookies, body) {
-  return httpsRequest(hostname, path, 'POST', cookies || {}, body);
+function post(hostname, path, cookies, body, timeoutMs) {
+  return httpsRequest(hostname, path, 'POST', cookies || {}, body, timeoutMs);
+}
+
+async function requestHop(hostname, path, method, cookies, body, extra = {}) {
+  const retries = extra.hopRetries || 0;
+  const attempts = 1 + retries;
+  let lastError;
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    try {
+      const timeoutMs = hopTimeoutMs(extra.deadlineAt);
+      return method === 'POST'
+        ? await post(hostname, path, cookies, body, timeoutMs)
+        : await get(hostname, path, cookies, timeoutMs);
+    } catch (error) {
+      lastError = error;
+      if (!isTransientCampusError(error) || attempt === attempts - 1) throw error;
+      if (extra.deadlineAt != null && extra.deadlineAt - Date.now() <= 0) throw error;
+    }
+  }
+  throw lastError;
 }
 
 function assertCampusUrl(url) {
@@ -145,14 +212,22 @@ async function requestFollowRedirect(hostname, path, cookies, {
   method = 'GET',
   body,
   maxRedirects = 3,
+  hopRetries = 0,
+  deadlineAt,
 } = {}) {
   let current = new URL(path, `https://${hostname}/`);
   assertCampusUrl(current);
   let currentMethod = method;
   let currentBody = body;
-  let res = currentMethod === 'POST'
-    ? await post(current.hostname, current.pathname + current.search, cookies, currentBody)
-    : await get(current.hostname, current.pathname + current.search, cookies);
+  const hop = { hopRetries, deadlineAt };
+  let res = await requestHop(
+    current.hostname,
+    current.pathname + current.search,
+    currentMethod,
+    cookies,
+    currentBody,
+    hop,
+  );
   let redirects = 0;
   while ([301, 302, 303, 307, 308].includes(res.status) && res.headers.location) {
     if (redirects >= maxRedirects) throw new Error('Too many campus redirects');
@@ -162,17 +237,22 @@ async function requestFollowRedirect(hostname, path, cookies, {
       currentMethod = 'GET';
       currentBody = undefined;
     }
-    res = currentMethod === 'POST'
-      ? await post(current.hostname, current.pathname + current.search, res.cookies, currentBody)
-      : await get(current.hostname, current.pathname + current.search, res.cookies);
+    res = await requestHop(
+      current.hostname,
+      current.pathname + current.search,
+      currentMethod,
+      res.cookies,
+      currentBody,
+      hop,
+    );
     redirects++;
   }
   return { ...res, url: current.toString() };
 }
 
 // 僅在既有校務主機間跟隨轉址，不把登入 Cookie 送到其他網站。
-function getFollowRedirect(hostname, path, cookies, maxRedirects = 3) {
-  return requestFollowRedirect(hostname, path, cookies, { maxRedirects });
+function getFollowRedirect(hostname, path, cookies, maxRedirects = 3, extra = {}) {
+  return requestFollowRedirect(hostname, path, cookies, { maxRedirects, ...extra });
 }
 
 // ---------------------------------------------------------------------------
@@ -343,8 +423,8 @@ function cookieJar(value) {
   return Object.keys(next).length ? next : null;
 }
 
-async function fetchMypuScoreAll(mypuCookies, semester) {
-  const gradeRes = await getFollowRedirect(MYPU_HOST, GRADE_PATH, mypuCookies || {});
+async function fetchMypuScoreAll(mypuCookies, semester, extra = {}) {
+  const gradeRes = await getFollowRedirect(MYPU_HOST, GRADE_PATH, mypuCookies || {}, 3, extra);
   if (gradeRes.status !== 200) throw new Error(`HTTP ${gradeRes.status}`);
   const cookies = cookieJar(gradeRes.cookies) || cookieJar(mypuCookies);
   if (looksLikePuLoginPage(gradeRes.data)) {
@@ -623,6 +703,8 @@ async function puFetchCourses(cookies, semester) {
  * the same tested parser. No guessed semester codes or synthetic grades.
  */
 async function puFetchGrades(cookies, semester, options = {}) {
+  const deadlineAt = Date.now() + GRADE_FETCH_BUDGET_MS;
+  const hopOpts = { hopRetries: MAX_TRANSIENT_HOP_RETRIES, deadlineAt };
   try {
     if (!cookies || !Object.keys(cookies).length) throw new Error('No session cookies');
 
@@ -630,24 +712,26 @@ async function puFetchGrades(cookies, semester, options = {}) {
     // chkLogin → index_ToNewPlt.php 自動 POST → mypu index_redirect_mypu.php → score_all.php。
     // 課表仍走 alcat query_course.html，不經這條轉接。
     // mypu cookie 與 alcat cookie 分開保存，避免同名 PHPSESSID 互相覆蓋。
+    // 帳密 POST 不在這條路徑；暫時性錯誤只重試該跳。
     const storedMypu = cookieJar(options.mypuCookies);
     if (storedMypu) {
       try {
-        const cached = await fetchMypuScoreAll(storedMypu, semester);
+        const cached = await fetchMypuScoreAll(storedMypu, semester, hopOpts);
         if (!cached.loginPage) {
           const parsed = cached.parsed;
           if (parsed) return { ...parsed, mypuCookies: cached.cookies };
         }
       } catch (error) {
-        console.warn('[puFetchGrades] Stored mypu cookies failed:', error.message);
+        logGradeEvent('stored_mypu_failed', error);
       }
     }
 
-    let mypuCookies = storedMypu || {};
+    let mypuCookies = {};
     let usableBridge = null;
+    let bridgeTransient = false;
 
     try {
-      const hop = await getFollowRedirect(ALCAT_HOST, SCORE_BRIDGE_PATH, cookies, 5);
+      const hop = await getFollowRedirect(ALCAT_HOST, SCORE_BRIDGE_PATH, cookies, 5, hopOpts);
       if (looksLikePuLoginPage(hop.data)) return expiredSessionResult('grades');
       if (hop.status === 200) {
         const parsedHop = parsePuGradeDocument(hop.data, semester);
@@ -662,7 +746,7 @@ async function puFetchGrades(cookies, semester, options = {}) {
           form.action.hostname,
           form.action.pathname + form.action.search,
           {},
-          { method: 'POST', body: encodeFormFields(form.fields), maxRedirects: 5 },
+          { method: 'POST', body: encodeFormFields(form.fields), maxRedirects: 5, ...hopOpts },
         );
         mypuCookies = cookieJar(posted.cookies) || {};
         if (looksLikePuLoginPage(posted.data)) return expiredSessionResult('grades');
@@ -677,14 +761,21 @@ async function puFetchGrades(cookies, semester, options = {}) {
         }
       }
     } catch (e) {
-      console.warn('[puFetchGrades] Score SSO bridge failed:', e.message);
+      logGradeEvent('score_sso_bridge_failed', e);
+      bridgeTransient = isTransientCampusError(e);
     }
 
     // Keep a valid single-semester bridge result if mypu is unavailable.
     try {
-      const gradeRes = await fetchMypuScoreAll(mypuCookies, semester);
+      if (!Object.keys(mypuCookies).length && bridgeTransient) {
+        return { success: false, grades: [] };
+      }
+      const gradeRes = await fetchMypuScoreAll(mypuCookies, semester, hopOpts);
       if (gradeRes.loginPage) {
         if (usableBridge) return { ...usableBridge, mypuCookies: gradeRes.cookies };
+        if (bridgeTransient && !Object.keys(mypuCookies).length) {
+          return { success: false, grades: [] };
+        }
         return expiredSessionResult('grades');
       }
       const parsed = gradeRes.parsed;
@@ -694,11 +785,12 @@ async function puFetchGrades(cookies, semester, options = {}) {
         : { ...(usableBridge || parsed), mypuCookies: nextCookies };
     } catch (error) {
       if (usableBridge) return { ...usableBridge, mypuCookies: cookieJar(mypuCookies) };
+      if (bridgeTransient) return { success: false, grades: [] };
       throw error;
     }
   } catch (err) {
-    console.error('[puFetchGrades] Error:', err);
-    return { success: false, grades: [], error: err.message };
+    logGradeEvent('grades_failed', err);
+    return { success: false, grades: [] };
   }
 }
 
@@ -950,5 +1042,8 @@ module.exports = {
   parseGradeSemesterCodes,
   looksLikePuLoginPage,
   parseCampusAutoPostForm,
+  isTransientCampusError,
   SCORE_BRIDGE_PATH,
+  MAX_TRANSIENT_HOP_RETRIES,
+  GRADE_FETCH_BUDGET_MS,
 };

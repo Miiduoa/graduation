@@ -8,6 +8,7 @@ import {
   createPuCampusGateway,
   DEFAULT_TIMEOUT_MS,
   isCasPasswordPostUrl,
+  isTransientCampusError,
   PuCampusError,
   rewriteAllowedCampusLocation,
   rewriteCampusPortalLocation,
@@ -184,6 +185,93 @@ it('accepts a student portal page that still has the maintenance HTML comment', 
     studentName: '陳同學',
     cookies: { PHPSESSID: 'abc' },
   });
+});
+
+function connectionReset(): Error {
+  return Object.assign(new Error('socket hang up'), { code: 'ECONNRESET' });
+}
+
+function studentPage() {
+  return htmlResponse(
+    200,
+    `學號(Student No.): ${STUDENT} 姓名(Student Name): 陳同學 query_course`,
+  );
+}
+
+it('retries a transient home hop without sending a second password POST', async () => {
+  let homes = 0;
+  const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+    const href = String(url);
+    if (href === 'https://alcat.pu.edu.tw/' && !init?.method) {
+      homes += 1;
+      if (homes === 1) throw connectionReset();
+      return htmlResponse(200, ALCAT_LOGIN_HTML, { 'set-cookie': 'PHPSESSID=abc; Path=/' });
+    }
+    if (href.endsWith('/index_check.php') && String(init?.method || '').toUpperCase() === 'POST') {
+      return htmlResponse(200, '<html>ok</html>', { 'set-cookie': 'PHPSESSID=abc; Path=/' });
+    }
+    return studentPage();
+  });
+  const gateway = createPuCampusGateway({ fetch: fetchMock });
+  await expect(gateway.loginStudent(STUDENT, SECRET)).resolves.toMatchObject({
+    studentName: '陳同學',
+  });
+  expect(homes).toBe(2);
+  expect(
+    fetchMock.mock.calls.filter(
+      ([url, init]) =>
+        String(url).endsWith('/index_check.php') &&
+        String(init?.method || '').toUpperCase() === 'POST',
+    ),
+  ).toHaveLength(1);
+});
+
+it('does not retry the password POST on ECONNRESET', async () => {
+  const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+    const href = String(url);
+    if (href === 'https://alcat.pu.edu.tw/' && !init?.method) {
+      return htmlResponse(200, ALCAT_LOGIN_HTML, { 'set-cookie': 'PHPSESSID=abc; Path=/' });
+    }
+    if (href.endsWith('/index_check.php')) throw connectionReset();
+    return studentPage();
+  });
+  const gateway = createPuCampusGateway({ fetch: fetchMock });
+  await expect(gateway.loginStudent(STUDENT, SECRET)).rejects.toMatchObject({
+    kind: 'unavailable',
+    code: 'ECONNRESET',
+  });
+  expect(
+    fetchMock.mock.calls.filter(
+      ([url, init]) =>
+        String(url).endsWith('/index_check.php') &&
+        String(init?.method || '').toUpperCase() === 'POST',
+    ),
+  ).toHaveLength(1);
+});
+
+it('aborts student login within the total budget instead of stacking hop timeouts', async () => {
+  vi.useFakeTimers();
+  const gateway = createPuCampusGateway({
+    timeoutMs: 15_000,
+    fetch: (_url, init) =>
+      new Promise((_, reject) => {
+        init?.signal?.addEventListener('abort', () => {
+          const error = new Error('aborted');
+          error.name = 'AbortError';
+          reject(error);
+        });
+      }),
+  });
+  const pending = expect(
+    gateway.loginStudent(STUDENT, SECRET, { timeoutMs: 80, hopTimeoutMs: 50 }),
+  ).rejects.toMatchObject({ kind: 'timeout' });
+  await vi.advanceTimersByTimeAsync(80);
+  await pending;
+});
+
+it('classifies ECONNRESET as a transient campus error', () => {
+  expect(isTransientCampusError(connectionReset())).toBe(true);
+  expect(isTransientCampusError(new PuCampusError('credentials', '學號或密碼錯誤'))).toBe(false);
 });
 
 it('still treats a post-login visible maintenance page without a form as closed', async () => {
@@ -380,7 +468,7 @@ it('still accepts an 11-second e-campus submit within the 15-second budget', asy
   vi.useRealTimers();
 });
 
-it('aborts e-campus submit after the 15-second budget', async () => {
+it('retries a hung home hop within the 15-second hop budget then fails that stage', async () => {
   vi.useFakeTimers();
   const gateway = createPuCampusGateway({
     timeoutMs: 15_000,
@@ -400,6 +488,7 @@ it('aborts e-campus submit after the 15-second budget', async () => {
     code: 'AbortError',
   });
   await vi.advanceTimersByTimeAsync(15_000);
+  await vi.advanceTimersByTimeAsync(30_000);
   await pending;
   vi.useRealTimers();
 });

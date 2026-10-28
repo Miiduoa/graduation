@@ -1,4 +1,9 @@
 import { parseFragment, serialize, type DefaultTreeAdapterMap } from 'parse5';
+import {
+  MAX_TRANSIENT_HOP_RETRIES,
+  STUDENT_LOGIN_TOTAL_TIMEOUT_MS,
+  studentLoginHopTimeoutMs,
+} from '../schoolLoginTimeouts';
 import { createIpv4PinnedFetch } from './campusIpv4Fetch';
 
 const ALCAT_ORIGIN = 'https://alcat.pu.edu.tw';
@@ -74,8 +79,19 @@ export type TronClassLoginOptions = {
   route?: CampusLoginRoute;
 };
 
+export type StudentLoginOptions = {
+  /** 整段 e 校園登入總預算；未傳時用 STUDENT_LOGIN_TOTAL_TIMEOUT_MS。 */
+  timeoutMs?: number;
+  /** 單跳上限，需與總預算分開；未傳時等於 gateway 預設逾時。 */
+  hopTimeoutMs?: number;
+};
+
 export type PuCampusGateway = {
-  loginStudent: (studentId: string, password: string) => Promise<StudentCampusLogin>;
+  loginStudent: (
+    studentId: string,
+    password: string,
+    options?: StudentLoginOptions,
+  ) => Promise<StudentCampusLogin>;
   fetchStudentInfo: (cookies: CookieJar) => Promise<StudentCampusInfo>;
   loginTronClass: (
     account: string,
@@ -196,6 +212,15 @@ const TIMEOUT_CODES = new Set([
   'UND_ERR_CONNECT_TIMEOUT',
   'UND_ERR_HEADERS_TIMEOUT',
   'UND_ERR_BODY_TIMEOUT',
+]);
+
+const TRANSIENT_NETWORK_CODES = new Set([
+  ...TIMEOUT_CODES,
+  'ECONNRESET',
+  'EPIPE',
+  'ECONNREFUSED',
+  'EHOSTUNREACH',
+  'ENETUNREACH',
 ]);
 
 function readErrorCode(error: unknown): string | undefined {
@@ -419,6 +444,16 @@ function authenticatedJson(page: SentPage): Record<string, unknown> | null {
     return null;
   }
   return asRecord(page.json);
+}
+
+export function isTransientCampusError(error: unknown): boolean {
+  if (error instanceof PuCampusError) {
+    return error.kind === 'timeout' || error.kind === 'unavailable';
+  }
+  const name = error instanceof Error ? error.name : '';
+  if (name === 'TimeoutError' || name === 'AbortError') return true;
+  const code = readErrorCode(error);
+  return Boolean(code && TRANSIENT_NETWORK_CODES.has(code));
 }
 
 export function classifyCampusFailure(error: unknown, details: CampusErrorDetails = {}): PuCampusError {
@@ -695,25 +730,102 @@ export function createPuCampusGateway(
   }
 
   return {
-    async loginStudent(studentId, password) {
+    async loginStudent(studentId, password, options = {}) {
       const student = { route: 'student' as const };
-      try {
-        const warmup = await send(`${portalOrigin}/`, {
-          context: { ...student, stage: 'home' },
-          confineOrigin: portalOrigin,
+      const started = Date.now();
+      const budget = options.timeoutMs ?? STUDENT_LOGIN_TOTAL_TIMEOUT_MS;
+      const hopCap = options.hopTimeoutMs ?? timeoutMs;
+      const leftover = () => budget - (Date.now() - started);
+      const deadlineError = (stage: CampusLoginStage) =>
+        new PuCampusError('timeout', '學校系統無回應', {
+          ...student,
+          stage,
+          code: 'DEADLINE',
         });
+
+      async function sendWithinBudget(
+        url: string,
+        init: RequestInit & {
+          cookies?: CookieJar;
+          confineOrigin?: string;
+        },
+        stage: CampusLoginStage,
+        retry: boolean,
+      ): Promise<SentPage> {
+        const attempts = retry ? MAX_TRANSIENT_HOP_RETRIES + 1 : 1;
+        let lastError: unknown;
+        for (let attempt = 0; attempt < attempts; attempt += 1) {
+          const leftoverMs = leftover();
+          if (leftoverMs <= 0) throw deadlineError(stage);
+          try {
+            return await send(url, {
+              ...init,
+              timeoutMs: studentLoginHopTimeoutMs(hopCap, leftoverMs),
+              context: { ...student, stage },
+              confineOrigin: init.confineOrigin,
+            });
+          } catch (error) {
+            lastError = error;
+            if (!retry || !isTransientCampusError(error) || attempt === attempts - 1) {
+              throw error;
+            }
+          }
+        }
+        throw lastError;
+      }
+
+      async function followWithinBudget(
+        url: string,
+        cookies: CookieJar,
+        hops: number,
+        stage: CampusLoginStage,
+      ): Promise<SentPage> {
+        let current = url;
+        let jar = cookies;
+        let page = await sendWithinBudget(
+          current,
+          { cookies: jar, confineOrigin: portalOrigin },
+          stage,
+          true,
+        );
+        let remainingHops = hops;
+        while ((page.status === 301 || page.status === 302) && page.location && remainingHops > 0) {
+          current = page.location;
+          jar = page.cookies;
+          page = await sendWithinBudget(
+            current,
+            { cookies: jar, confineOrigin: portalOrigin },
+            stage,
+            true,
+          );
+          remainingHops -= 1;
+        }
+        return page;
+      }
+
+      try {
+        const warmup = await sendWithinBudget(
+          `${portalOrigin}/`,
+          { confineOrigin: portalOrigin },
+          'home',
+          true,
+        );
         if (isClosedPage(warmup.html)) {
           throw new PuCampusError('closed', '尚未開放', { ...student, stage: 'home' });
         }
         const body = `uid=${encodeURIComponent(studentId)}&upassword=${encodeURIComponent(password)}&en_flag=zh`;
-        const posted = await send(`${portalOrigin}/index_check.php`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-          body,
-          cookies: warmup.cookies,
-          context: { ...student, stage: 'submit' },
-          confineOrigin: portalOrigin,
-        });
+        const posted = await sendWithinBudget(
+          `${portalOrigin}/index_check.php`,
+          {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+            body,
+            cookies: warmup.cookies,
+            confineOrigin: portalOrigin,
+          },
+          'submit',
+          false,
+        );
         if (isClosedPage(posted.html)) {
           throw new PuCampusError('closed', '尚未開放', { ...student, stage: 'submit' });
         }
@@ -725,14 +837,13 @@ export function createPuCampusGateway(
         }
         const sessionCookies =
           posted.status === 302 && posted.location
-            ? (await getFollow(posted.location, posted.cookies, 3, { ...student, stage: 'redirect' }))
-                .cookies
+            ? (await followWithinBudget(posted.location, posted.cookies, 3, 'redirect')).cookies
             : posted.cookies;
-        const verify = await getFollow(
+        const verify = await followWithinBudget(
           `${portalOrigin}/stu_query/query_course.html`,
           sessionCookies,
           3,
-          { ...student, stage: 'verify' },
+          'verify',
         );
         if (isClosedPage(verify.html)) {
           throw new PuCampusError('closed', '尚未開放', { ...student, stage: 'verify' });

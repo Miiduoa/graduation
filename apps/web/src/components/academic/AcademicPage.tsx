@@ -79,24 +79,15 @@ function RecordContent<K extends AcademicKind>({
     const reconnect = state.reason === 'reconnect';
     const permission = state.reason === 'permission';
     const unconfigured = state.reason === 'unconfigured';
-    if (reconnect || permission) {
-      if (options.loading) {
-        return (
-          <div className={styles.status} role="status">
-            正在確認這項功能…
-          </div>
-        );
-      }
-      if (!options.studentId) {
-        return <SchoolAccountRequired returnUrl={returnUrl} alternative={closedAlternative} />;
-      }
+    if ((reconnect || permission) && !options.loading && !options.studentId) {
+      return <SchoolAccountRequired returnUrl={returnUrl} alternative={closedAlternative} />;
     }
     return (
       <section className={styles.status} role={unconfigured ? 'status' : 'alert'}>
         <p className={styles.eyebrow}>學校資料</p>
         <h2>
           {reconnect
-            ? '請重新連線學校帳號'
+            ? '暫時無法讀取學校成績'
             : permission
               ? '目前帳號無法讀取這份資料'
               : unconfigured
@@ -105,7 +96,7 @@ function RecordContent<K extends AcademicKind>({
         </h2>
         <p>
           {reconnect
-            ? '學校登入已到期，重新登入後就能更新課表與成績。'
+            ? '學校成績連線尚未就緒或已中斷。請先重新讀取；若仍失敗，再重新連線學校帳號。'
             : permission
               ? '請確認目前使用的是你的學校帳號。'
               : unconfigured
@@ -113,18 +104,19 @@ function RecordContent<K extends AcademicKind>({
                 : `${loadFailureCopy(state.error, { online: navigator.onLine })}。這次未取得資料，不會以舊紀錄代替。`}
         </p>
         <div className={styles.actions}>
-          {reconnect || permission ? (
-            <Link
-              className="btn primary"
-              href={`/login?reconnect=school&returnUrl=${encodeURIComponent(returnUrl)}`}
-            >
-              連線學校帳號
-            </Link>
-          ) : unconfigured ? null : (
+          {unconfigured ? null : (
             <button className="btn primary" onClick={() => void refresh()}>
               重新讀取
             </button>
           )}
+          {(reconnect || permission) && options.studentId ? (
+            <Link
+              className="btn"
+              href={`/login?reconnect=school&returnUrl=${encodeURIComponent(returnUrl)}`}
+            >
+              連線學校帳號
+            </Link>
+          ) : null}
           {!reconnect && !permission && !unconfigured && options.studentId && (
             <Link
               className="btn"

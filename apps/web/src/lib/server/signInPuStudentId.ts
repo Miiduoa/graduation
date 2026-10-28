@@ -45,8 +45,12 @@ import {
   MAX_STUDENT_CREDENTIAL_POSTS,
   MAX_STUDENT_PORTAL_TIMEOUT_MS,
   MIN_STUDENT_PORTAL_TIMEOUT_MS,
+  STUDENT_LMS_CONNECTING_WINDOW_MS,
+  STUDENT_LOGIN_TOTAL_TIMEOUT_MS,
   studentLmsHopTimeoutMs,
   studentLmsTotalTimeoutMs,
+  studentLoginHopTimeoutMs,
+  studentLoginTotalTimeoutMs,
   studentPortalTimeoutMs,
 } from '../schoolLoginTimeouts';
 import { linkOwnedTronClassSession } from '../../../../../backend/functions/lib/puSessionStore.js';
@@ -106,8 +110,12 @@ export {
   MAX_STUDENT_CREDENTIAL_POSTS,
   MAX_STUDENT_PORTAL_TIMEOUT_MS,
   MIN_STUDENT_PORTAL_TIMEOUT_MS,
+  STUDENT_LMS_CONNECTING_WINDOW_MS,
+  STUDENT_LOGIN_TOTAL_TIMEOUT_MS,
   studentLmsHopTimeoutMs,
   studentLmsTotalTimeoutMs,
+  studentLoginHopTimeoutMs,
+  studentLoginTotalTimeoutMs,
   studentPortalTimeoutMs,
 };
 /** @deprecated 請用 DEFAULT_STUDENT_LMS_TOTAL_TIMEOUT_MS；保留給舊測試名稱。 */
@@ -456,10 +464,38 @@ export async function handleSignInPuStudentId(
   }
 }
 
+async function withStudentLoginBudget<T>(
+  work: (remainingMs: () => number) => Promise<T>,
+): Promise<T> {
+  const started = Date.now();
+  const total = studentLoginTotalTimeoutMs();
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => {
+      reject(
+        new PuCampusError('timeout', '學校系統無回應', {
+          route: 'student',
+          stage: 'submit',
+          code: 'DEADLINE',
+        }),
+      );
+    }, total);
+  });
+  try {
+    return await Promise.race([
+      work(() => Math.max(0, total - (Date.now() - started))),
+      timeout,
+    ]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 async function loginStudentWithAlternateUid(
   campus: PuCampusGateway,
   portalUids: readonly string[],
   password: string,
+  remainingMs: () => number,
 ): Promise<{ login: Awaited<ReturnType<PuCampusGateway['loginStudent']>>; portalUid: string }> {
   const uids = portalUids.filter((uid) => uid.length > 0).slice(0, 2);
   const first = uids[0];
@@ -471,8 +507,19 @@ async function loginStudentWithAlternateUid(
     if (posts >= MAX_STUDENT_CREDENTIAL_POSTS) {
       throw new PuLoginHttpError(503, SCHOOL_UNAVAILABLE);
     }
+    const left = remainingMs();
+    if (left <= 0) {
+      throw new PuCampusError('timeout', '學校系統無回應', {
+        route: 'student',
+        stage: 'submit',
+        code: 'DEADLINE',
+      });
+    }
     posts += 1;
-    return campus.loginStudent(uid, password);
+    return campus.loginStudent(uid, password, {
+      timeoutMs: left,
+      hopTimeoutMs: studentLoginHopTimeoutMs(studentPortalTimeoutMs(), left),
+    });
   }
   try {
     return { login: await attempt(first), portalUid: first };
@@ -483,7 +530,7 @@ async function loginStudentWithAlternateUid(
       throw error;
     }
     const alternate = uids[1];
-    if (isRetryableCampusFailure(error)) {
+    if (isRetryableCampusFailure(error) && remainingMs() > 0) {
       try {
         return { login: await attempt(first), portalUid: first };
       } catch (retryError) {
@@ -515,7 +562,9 @@ async function signInStudent(
   if (config.studentAdapter !== 'form-password') {
     closedWithoutCampus();
   }
-  const { login, portalUid } = await loginStudentWithAlternateUid(campus, portalUids, password);
+  const { login, portalUid } = await withStudentLoginBudget((remainingMs) =>
+    loginStudentWithAlternateUid(campus, portalUids, password, remainingMs),
+  );
   if (!login.cookies || Object.keys(login.cookies).length === 0) {
     throw new PuLoginHttpError(401, '學號或密碼錯誤');
   }
@@ -562,6 +611,7 @@ async function signInStudent(
     studentId,
     ownerUid: uid,
     cookies: login.cookies,
+    lmsConnectingUntil: new Date(now + STUDENT_LMS_CONNECTING_WINDOW_MS),
   }, now);
 
   if (requestAbandoned(deps)) {

@@ -21,13 +21,31 @@ import {
   PuLoginHttpError,
   studentLmsHopTimeoutMs,
   studentLmsTotalTimeoutMs,
+  studentLoginTotalTimeoutMs,
   studentPortalTimeoutMs,
+  STUDENT_LMS_CONNECTING_WINDOW_MS,
+  STUDENT_LOGIN_TOTAL_TIMEOUT_MS,
   TEACHER_LMS_UNAVAILABLE,
   TEACHER_LMS_UNAVAILABLE_CODE,
 } from './signInPuStudentId';
 
 const STUDENT = '1110700321';
 const SECRET = 'never-log-this-password';
+
+function studentLoginOptions() {
+  return expect.objectContaining({
+    timeoutMs: expect.any(Number),
+    hopTimeoutMs: expect.any(Number),
+  });
+}
+
+function loginStudentCallOptions(loginStudent: {
+  mock: { calls: unknown[][] };
+}): { timeoutMs: number; hopTimeoutMs: number } {
+  const options = loginStudent.mock.calls[0]?.[2];
+  expect(options).toEqual(studentLoginOptions());
+  return options as { timeoutMs: number; hopTimeoutMs: number };
+}
 
 function campus(overrides: Partial<PuCampusGateway> = {}): PuCampusGateway {
   return {
@@ -274,8 +292,8 @@ it('retries the other alcat uid once after credentials then stops', async () => 
   await expect(
     handleSignInPuStudentId({ studentId: 's7654321', password: SECRET }, '1.1.1.1', runtime),
   ).rejects.toMatchObject({ status: 401, message: '學號或密碼錯誤' });
-  expect(loginStudent).toHaveBeenNthCalledWith(1, 's7654321', SECRET);
-  expect(loginStudent).toHaveBeenNthCalledWith(2, '7654321', SECRET);
+  expect(loginStudent).toHaveBeenNthCalledWith(1, 's7654321', SECRET, studentLoginOptions());
+  expect(loginStudent).toHaveBeenNthCalledWith(2, '7654321', SECRET, studentLoginOptions());
   expect(loginStudent).toHaveBeenCalledTimes(2);
   expect(loginTronClass).not.toHaveBeenCalled();
 });
@@ -288,8 +306,8 @@ it('succeeds on the second alcat form after the first is rejected', async () => 
   const { runtime } = deps({ campus: campus({ loginStudent }) });
   const result = await handleSignInPuStudentId({ studentId: 's7654321', password: SECRET }, '1.1.1.1', runtime);
   expect(result).toMatchObject({ uid: 'pu-7654321', studentId: '7654321', success: true });
-  expect(loginStudent).toHaveBeenNthCalledWith(1, 's7654321', SECRET);
-  expect(loginStudent).toHaveBeenNthCalledWith(2, '7654321', SECRET);
+  expect(loginStudent).toHaveBeenNthCalledWith(1, 's7654321', SECRET, studentLoginOptions());
+  expect(loginStudent).toHaveBeenNthCalledWith(2, '7654321', SECRET, studentLoginOptions());
 });
 
 it('retries the same alcat uid once after a campus timeout and does not try the other uid', async () => {
@@ -301,8 +319,8 @@ it('retries the same alcat uid once after a campus timeout and does not try the 
     handleSignInPuStudentId({ studentId: 's7654321', password: SECRET }, '1.1.1.1', runtime),
   ).rejects.toMatchObject({ status: 503, message: '學校系統暫時無法連線' });
   expect(loginStudent).toHaveBeenCalledTimes(2);
-  expect(loginStudent).toHaveBeenNthCalledWith(1, 's7654321', SECRET);
-  expect(loginStudent).toHaveBeenNthCalledWith(2, 's7654321', SECRET);
+  expect(loginStudent).toHaveBeenNthCalledWith(1, 's7654321', SECRET, studentLoginOptions());
+  expect(loginStudent).toHaveBeenNthCalledWith(2, 's7654321', SECRET, studentLoginOptions());
 });
 
 it('succeeds on the second alcat attempt after a timeout', async () => {
@@ -323,6 +341,7 @@ it('succeeds on the second alcat attempt after a timeout', async () => {
 });
 
 it('keeps a configurable portal timeout at or above 15 seconds', () => {
+  expect(studentLoginTotalTimeoutMs()).toBe(STUDENT_LOGIN_TOTAL_TIMEOUT_MS);
   expect(studentPortalTimeoutMs(undefined)).toBe(MIN_STUDENT_PORTAL_TIMEOUT_MS);
   expect(studentPortalTimeoutMs('8000')).toBe(MIN_STUDENT_PORTAL_TIMEOUT_MS);
   expect(studentPortalTimeoutMs('20000')).toBe(20_000);
@@ -353,8 +372,8 @@ it('does not stack a timeout retry on top of dual-uid fallback beyond two passwo
     handleSignInPuStudentId({ studentId: 's7654321', password: SECRET }, '1.1.1.1', runtime),
   ).rejects.toMatchObject({ status: 503, message: '學校系統暫時無法連線' });
   expect(loginStudent).toHaveBeenCalledTimes(MAX_STUDENT_CREDENTIAL_POSTS);
-  expect(loginStudent).toHaveBeenNthCalledWith(1, 's7654321', SECRET);
-  expect(loginStudent).toHaveBeenNthCalledWith(2, '7654321', SECRET);
+  expect(loginStudent).toHaveBeenNthCalledWith(1, 's7654321', SECRET, studentLoginOptions());
+  expect(loginStudent).toHaveBeenNthCalledWith(2, '7654321', SECRET, studentLoginOptions());
 });
 
 it('still signs in when e-campus submit takes 11 seconds and does not wait for WOW Class', async () => {
@@ -383,6 +402,55 @@ it('still signs in when e-campus submit takes 11 seconds and does not wait for W
   });
   expect(JSON.stringify(result)).not.toContain(SECRET);
   expect(loginTronClass).not.toHaveBeenCalled();
+});
+
+it('returns 503 and does not write a session when the campus login exceeds the total budget', async () => {
+  vi.useFakeTimers();
+  const loginStudent = vi.fn(() => new Promise<never>(() => {}));
+  const { runtime, store, scheduled } = deps({ campus: campus({ loginStudent }) });
+  const pending = expect(
+    handleSignInPuStudentId({ studentId: STUDENT, password: SECRET }, '1.1.1.1', runtime),
+  ).rejects.toMatchObject({ status: 503, message: '學校系統暫時無法連線' });
+  await vi.advanceTimersByTimeAsync(STUDENT_LOGIN_TOTAL_TIMEOUT_MS);
+  await pending;
+  expect(loginStudent).toHaveBeenCalledWith(STUDENT, SECRET, studentLoginOptions());
+  const options = loginStudentCallOptions(loginStudent);
+  expect(options.timeoutMs).toBeLessThanOrEqual(STUDENT_LOGIN_TOTAL_TIMEOUT_MS);
+  expect(options.hopTimeoutMs).toBeLessThanOrEqual(options.timeoutMs);
+  expect(scheduled).toEqual([]);
+  expect([...store.docs.keys()].some((path) => path.startsWith('_puSessions/'))).toBe(false);
+  expect([...store.docs.keys()].some((path) => path.startsWith('users/'))).toBe(false);
+});
+
+it('caps loginStudent hop retries with the remaining total budget', async () => {
+  const loginStudent = vi.fn(async () => ({
+    cookies: { PHPSESSID: 'stu-cookie' },
+    studentName: '陳同學',
+  }));
+  const { runtime } = deps({ campus: campus({ loginStudent }) });
+  await handleSignInPuStudentId({ studentId: STUDENT, password: SECRET }, '1.1.1.1', runtime);
+  expect(loginStudent).toHaveBeenCalledTimes(1);
+  const options = loginStudentCallOptions(loginStudent);
+  expect(options.timeoutMs).toBeLessThanOrEqual(STUDENT_LOGIN_TOTAL_TIMEOUT_MS);
+  expect(options.hopTimeoutMs).toBe(MIN_STUDENT_PORTAL_TIMEOUT_MS);
+  expect(options.hopTimeoutMs).toBeLessThanOrEqual(options.timeoutMs);
+});
+
+it('marks WOW Class as connecting on the portal session after e-campus login', async () => {
+  const { runtime, store } = deps();
+  const before = Date.now();
+  const result = await handleSignInPuStudentId(
+    { studentId: STUDENT, password: SECRET },
+    '1.1.1.1',
+    runtime,
+  );
+  const portal = store.docs.get(`_puSessions/${result.puSessionId}`) as {
+    lmsConnectingUntil?: Date;
+  };
+  expect(portal.lmsConnectingUntil).toBeInstanceOf(Date);
+  expect(portal.lmsConnectingUntil!.getTime()).toBeGreaterThanOrEqual(
+    before + STUDENT_LMS_CONNECTING_WINDOW_MS,
+  );
 });
 
 it('returns a clear school timeout without minting a session after the retry is exhausted', async () => {

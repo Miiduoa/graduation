@@ -21,6 +21,8 @@ const STATUS_LABELS: Record<TronClassCourseStatus, string> = {
   ongoing: '進行中', completed: '已結束', upcoming: '未開始',
 };
 const COURSE_STATUSES: TronClassCourseStatus[] = ['ongoing', 'completed', 'upcoming'];
+const LMS_CONNECTING_RETRY_LIMIT = 5;
+const LMS_CONNECTING_RETRY_MS = 10_000;
 type CourseReadState = {
   scope: string;
   status: 'loading' | 'ready' | 'error';
@@ -34,6 +36,7 @@ function Courses({ uid, schoolId, returnUrl }: { uid: string; schoolId: 'pu'; re
   const [status, setStatus] = useState<TronClassCourseStatus>('ongoing');
   const [search, setSearch] = useState('');
   const [reload, setReload] = useState(0);
+  const [autoTries, setAutoTries] = useState(0);
   const [state, setState] = useState<CourseReadState | null>(null);
   const scope = JSON.stringify([uid, schoolId, status, reload]);
 
@@ -60,10 +63,20 @@ function Courses({ uid, schoolId, returnUrl }: { uid: string; schoolId: 'pu'; re
   }, [snapshot, search]);
   const error = visible?.error;
   const reason = error instanceof AcademicConnectionError ? error.reason : 'unavailable';
+  const connecting = reason === 'connecting';
   const needsLogin = reason === 'reconnect' || reason === 'permission';
+  useEffect(() => {
+    if (!connecting || autoTries >= LMS_CONNECTING_RETRY_LIMIT) return;
+    const timer = window.setTimeout(() => {
+      setAutoTries((value) => value + 1);
+      setReload((value) => value + 1);
+    }, LMS_CONNECTING_RETRY_MS);
+    return () => window.clearTimeout(timer);
+  }, [connecting, autoTries, scope]);
   function selectStatus(next: TronClassCourseStatus) {
     if (next === status) return;
     setStatus(next);
+    setAutoTries(0);
     setReload((value) => value + 1);
   }
   function refreshCourses() {
@@ -107,7 +120,16 @@ function Courses({ uid, schoolId, returnUrl }: { uid: string; schoolId: 'pu'; re
         {!visible || visible.status === 'loading' ? (
           <div className={styles.status} role="status">正在讀取 WOW Class 課程…</div>
         ) : visible.status === 'error' ? (
-          needsLogin && !options.loading && !options.studentId ? (
+          connecting ? (
+            <section className={styles.status} role="status">
+              <h2>正在連線 WOW Class</h2>
+              <p>正在連線 WOW Class，約需 1 分鐘。連線完成後會自動再讀取課程。</p>
+              <div className={styles.actions}>
+                <button type="button" className="btn primary" onClick={refreshCourses}>重新讀取課程</button>
+                <a className="btn" href="https://tronclass.pu.edu.tw/" target="_blank" rel="noopener noreferrer">前往 WOW Class ↗</a>
+              </div>
+            </section>
+          ) : needsLogin && !options.loading && !options.studentId ? (
             <SchoolAccountRequired returnUrl={returnUrl} alternative="請先至 WOW Class 查看課程。" />
           ) : (
             <section className={styles.status} role="alert">
