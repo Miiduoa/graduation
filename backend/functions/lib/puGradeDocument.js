@@ -38,19 +38,43 @@ function semesterCell(value) {
   return match ? match[1] + (match[2] || match[3] || match[4]) : '';
 }
 
+// Only a standalone heading cell may change the surrounding semester context.
+// A malformed heading clears that context rather than borrowing the prior term.
+function tableSemesterHeading(cells) {
+  if (cells.length !== 1) return null;
+  const label = cleanText(nodeText(cells[0], true));
+  if (!/^(?:學期別|\d{2,3}\s*學年度)/.test(label)) return null;
+  const match = label.match(/^(?:學期別\s*(?:[（(]\s*Semester\s*[）)])?\s*[：:]?\s*(\d{2,3})\s*\[\s*([123])\s*\]|(\d{2,3})\s*學年度\s*第?\s*([123一二三])\s*學期)$/i);
+  if (!match) return '';
+  const term = match[2] || ({ 一: '1', 二: '2', 三: '3' }[match[4]] || match[4]);
+  return (match[1] || match[3]) + term;
+}
+
 function tableRows(table) {
   const rows = [];
-  function visit(node) {
+  const groupSizes = new Map();
+  function visit(node, group = table) {
     if (node !== table && node.nodeName === 'table') return;
+    if (['thead', 'tbody', 'tfoot'].includes(node.nodeName)) group = node;
     if (node.nodeName === 'tr') {
-      rows.push((node.childNodes || []).filter(child => child.nodeName === 'td' || child.nodeName === 'th'));
+      rows.push({
+        group,
+        cells: (node.childNodes || []).filter(child => child.nodeName === 'td' || child.nodeName === 'th'),
+      });
+      groupSizes.set(group, (groupSizes.get(group) || 0) + 1);
       return;
     }
-    for (const child of node.childNodes || []) visit(child);
+    for (const child of node.childNodes || []) visit(child, group);
   }
   visit(table);
   const spans = new Map();
-  return rows.map(cells => {
+  let previousGroup = null;
+  return rows.map(({ cells, group }) => {
+    // HTML rowspans do not cross row-group boundaries; zero means the rest of this group.
+    if (previousGroup !== group) spans.clear();
+    previousGroup = group;
+    const remainingRows = groupSizes.get(group);
+    groupSizes.set(group, remainingRows - 1);
     const values = [];
     for (const [column, span] of spans) {
       values[column] = span.text;
@@ -61,7 +85,8 @@ function tableRows(table) {
       while (values[column] !== undefined) column += 1;
       const attrs = Object.fromEntries((cell.attrs || []).map(attr => [attr.name, attr.value]));
       const colspan = Math.min(40, Math.max(1, Number.parseInt(attrs.colspan, 10) || 1));
-      const rowspan = Math.min(1000, Math.max(1, Number.parseInt(attrs.rowspan, 10) || 1));
+      const rawRowspan = Number.parseInt(attrs.rowspan, 10);
+      const rowspan = Math.min(1000, remainingRows, Math.max(1, rawRowspan === 0 ? remainingRows : rawRowspan || 1));
       const text = cleanText(nodeText(cell, true));
       for (let offset = 0; offset < colspan; offset++) {
         values[column + offset] = offset === 0 ? text : '';
@@ -69,7 +94,7 @@ function tableRows(table) {
       }
       column += colspan;
     }
-    return values;
+    return { values, semesterHeading: tableSemesterHeading(cells) };
   });
 }
 
@@ -78,7 +103,7 @@ function headerColumns(cells) {
   cells.forEach((value, index) => {
     const label = normalizedLabel(value);
     if (/^(?:學期別|學期|semester)/.test(label)) fields.semester = index;
-    else if (/^(?:選課代號|課程代碼|科目代碼|coursecode|courseid)/.test(label)) fields.code = index;
+    else if (/^(?:選課代號|課程代碼|科目代碼|課號|科目編號|課程編號|coursecode|courseid)/.test(label)) fields.code = index;
     else if (/^(?:修別|類別|課程類別|coursetype|type)/.test(label)) fields.courseType = index;
     else if (/^(?:科目名稱|課程名稱|科目|課程|coursename|coursetitle|course$)/.test(label)) fields.title = index;
     else if (/^(?:修課班級|開課班級|上課班級|班級|class)/.test(label)) fields.class = index;
@@ -103,7 +128,7 @@ function appendSummary(summary, semester, label, score) {
 
 function parseGradeValue(value) {
   if (/^(?:通過|pass)(?:\s*[（(]pass[）)])?$/i.test(value)) return 'Pass';
-  if (/^\d+(?:\.\d+)?$/.test(value)) return Number(value);
+  if (/^\d+(?:\.\d+)?$/.test(value) && Number.isFinite(Number(value))) return Number(value);
   return value;
 }
 
@@ -126,16 +151,31 @@ function readDocument(html) {
   }
   function consumeTable(table) {
     const rows = tableRows(table);
-    const headerIndex = rows.findIndex(row => headerColumns(row));
+    const headerIndex = rows.findIndex(row => headerColumns(row.values));
     if (headerIndex < 0) return false;
     recognizedTable = true;
     consumeHeadings(precedingText);
-    consumeHeadings(rows.slice(0, headerIndex).flat().join(' '));
     const caption = (table.childNodes || []).find(node => node.nodeName === 'caption');
-    if (caption) consumeHeadings(nodeText(caption));
-    const columns = headerColumns(rows[headerIndex]);
-    for (const cells of rows.slice(headerIndex + 1)) {
-      if (headerColumns(cells)) continue;
+    if (caption) {
+      const captionSemester = tableSemesterHeading([caption]);
+      if (captionSemester !== null) semester = rememberSemester(captionSemester);
+      else consumeHeadings(nodeText(caption));
+    }
+    for (const row of rows.slice(0, headerIndex)) {
+      if (row.semesterHeading !== null) semester = rememberSemester(row.semesterHeading);
+      else consumeHeadings(row.values.join(' '));
+    }
+    let columns = headerColumns(rows[headerIndex].values);
+    for (const { values: cells, semesterHeading } of rows.slice(headerIndex + 1)) {
+      if (semesterHeading !== null) {
+        semester = rememberSemester(semesterHeading);
+        continue;
+      }
+      const repeatedHeader = headerColumns(cells);
+      if (repeatedHeader) {
+        columns = repeatedHeader;
+        continue;
+      }
       const title = cleanText(cells[columns.title]);
       if (!title) continue;
       const ownSemester = columns.semester === undefined ? semester : semesterCell(cells[columns.semester]);
@@ -149,6 +189,7 @@ function readDocument(html) {
       const creditsText = cleanText(cells[columns.credits]);
       if (!/^\d+(?:\.\d+)?$/.test(creditsText)) { skippedRows += 1; continue; }
       const credits = Number(creditsText);
+      if (!Number.isFinite(credits)) { skippedRows += 1; continue; }
       const boundary = title.search(/[A-Z]/);
       const record = {
         semester: ownSemester,

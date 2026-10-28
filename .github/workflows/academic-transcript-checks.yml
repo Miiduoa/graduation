@@ -7,6 +7,11 @@ on:
       - 'apps/web/src/app/grades/**'
       - 'apps/web/src/lib/gradeTranscript*'
       - 'apps/web/src/lib/academicRecords*'
+      - 'apps/web/src/lib/transcriptCoverage*'
+      - 'apps/web/src/lib/transcriptReview*'
+      - 'apps/web/src/lib/server/academicSchoolSource*'
+      - 'backend/functions/lib/puGradeDocument.js'
+      - 'backend/functions/puGradeDocument.sections.test.js'
       - 'apps/web/src/components/academic/**'
       - 'apps/web/src/app/globals.css'
       - 'scripts/qa/academic-transcript-browser.mjs'
@@ -48,6 +53,12 @@ jobs:
           src/lib/academicRecords.courseCodes.test.ts
           src/components/academic/CreditTranscriptReview.test.tsx
           src/components/academic/CreditTranscriptReview.courseCodes.test.tsx
+          src/lib/transcriptReview.test.ts
+          src/components/academic/TranscriptReviewPanel.test.tsx
+          src/app/grades/review.integration.test.tsx
+          src/lib/server/academicSchoolSource.review.test.ts
+          src/lib/transcriptCoverage.test.ts
+          src/app/grades/coverage.integration.test.tsx
           --reporter=json --outputFile=academic-transcript-results.json
       - name: Summarize exact test results
         if: always() && steps.tests.outcome != 'skipped'

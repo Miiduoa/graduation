@@ -7,6 +7,8 @@ import { GradesTabs, isGradesFeedbackTab } from '@/components/academic/GradesTab
 import { SchoolSemesterSummary } from '@/components/academic/SchoolSemesterSummary';
 import { TranscriptReviewPanel, TranscriptReviewHint } from '@/components/academic/TranscriptReviewPanel';
 import { transcriptReviewReason } from '@/lib/transcriptReview';
+import { transcriptSemesterCoverage } from '@/lib/transcriptCoverage';
+import { TranscriptCoveragePanel } from '@/components/academic/TranscriptCoveragePanel';
 import { StudentGradesPage } from '@/features/nuni/StudentGrades';
 import {
   calculateGradeSummary,
@@ -24,6 +26,7 @@ import {
 
 function Grades({ records, fetchedAt }: { records: AcademicGradeResponse; fetchedAt: string }) {
   const [semester, setSemester] = useState('');
+  const semesterCoverage = useMemo(() => transcriptSemesterCoverage(records), [records]);
   const [reviewOnly, setReviewOnly] = useState(false);
   const [search, setSearch] = useState('');
   const [sort, setSort] = useState<TranscriptSort>('semester');
@@ -51,6 +54,9 @@ function Grades({ records, fetchedAt }: { records: AcademicGradeResponse; fetche
   const resetList = () => { setVisibleCount(40); setExportNotice(''); };
   const clearFilters = () => {
     setReviewOnly(false); setSearch(''); setSemester(''); setCourseType(''); setScoreKind('all'); resetList();
+  };
+  const inspectSemester = (code: string) => {
+    setSemester(code); setReviewOnly(false); setSearch(''); setCourseType(''); setScoreKind('all'); resetList();
   };
   const exportRows = () => {
     setExportNotice('');
@@ -84,7 +90,7 @@ function Grades({ records, fetchedAt }: { records: AcademicGradeResponse; fetche
           學期
           <select value={semester} onChange={(event) => { setSemester(event.target.value); resetList(); }}>
             <option value="">全部學期</option>
-            {[...records.semesters].sort((a, b) => b.localeCompare(a, undefined, { numeric: true })).map((code) => (
+            {semesterCoverage.map(({ semester: code }) => (
               <option key={code} value={code}>
                 {formatSemester(code)}
               </option>
@@ -111,6 +117,7 @@ function Grades({ records, fetchedAt }: { records: AcademicGradeResponse; fetche
           <small>僅計 {summary.numericCredits} 學分的數字成績</small>
         </div>
       </div>
+      <TranscriptCoveragePanel semesters={semesterCoverage} selected={semester} onSelect={inspectSemester} />
       <SchoolSemesterSummary records={records} semester={semester} />
       <TranscriptReviewPanel grades={selected} active={reviewOnly} onChange={(active) => {
         setReviewOnly(active); setSearch(''); setCourseType(''); setScoreKind('all'); resetList();
@@ -193,7 +200,9 @@ function Grades({ records, fetchedAt }: { records: AcademicGradeResponse; fetche
         </ul>
       ) : (
         <p className={styles.empty}>
-          {records.grades.length
+          {semester && semesterCoverage.some(entry => entry.semester === semester && entry.rowCount === 0)
+            ? `${formatSemester(semester)}：來源提到這個學期，但本次沒有取得科目明細。請更新資料或至 e 校園核對；這不代表沒有修課。`
+            : records.grades.length
             ? '沒有符合條件的成績。'
             : '學校這次回傳的成績清單是空的，請稍後更新或至 e 校園確認。'}
         </p>

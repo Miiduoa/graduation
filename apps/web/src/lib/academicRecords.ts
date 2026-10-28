@@ -318,7 +318,7 @@ export function calculateGradeSummary(grades: readonly AcademicGrade[]): GradeSu
 export function formatSemester(code: string | null | undefined): string {
   if (!code?.trim()) return '學期未提供';
   const value = code.trim();
-  const match = /^(\d{2,3})([12])$/.exec(value);
+  const match = /^(\d{2,3})([123])$/.exec(value);
   return match ? `${match[1]} 學年度第 ${match[2]} 學期` : value;
 }
 
