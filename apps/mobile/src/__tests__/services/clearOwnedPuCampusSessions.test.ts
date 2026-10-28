@@ -1,4 +1,7 @@
-import { clearOwnedPuCampusSessions } from '../../services/clearOwnedPuCampusSessions';
+import {
+  CLEAR_CAMPUS_SESSIONS_TIMEOUT_MS,
+  clearOwnedPuCampusSessions,
+} from '../../services/clearOwnedPuCampusSessions';
 
 const mockCurrentUser = { getIdToken: jest.fn() };
 jest.mock('../../firebase', () => ({
@@ -11,6 +14,7 @@ jest.mock('../../services/cloudFunctions', () => ({
 }));
 
 beforeEach(() => {
+  jest.useRealTimers();
   jest.clearAllMocks();
   mockCurrentUser.getIdToken.mockResolvedValue('id-token');
   global.fetch = jest.fn().mockResolvedValue({
@@ -32,4 +36,29 @@ test('asks the server to delete the signed-in campus sessions before local logou
       body: JSON.stringify({ data: {} }),
     }),
   );
+  expect((global.fetch as jest.Mock).mock.calls[0][1].signal).toBeInstanceOf(AbortSignal);
+});
+
+test('continues after 5 seconds if the campus session clear hangs', async () => {
+  jest.useFakeTimers();
+  (global.fetch as jest.Mock).mockImplementation(
+    (_url: string, init: RequestInit) =>
+      new Promise((_, reject) => {
+        init.signal?.addEventListener('abort', () => {
+          const error = new Error('Aborted');
+          error.name = 'AbortError';
+          reject(error);
+        });
+      }),
+  );
+  const pending = clearOwnedPuCampusSessions();
+  let settled = false;
+  void pending.then(() => {
+    settled = true;
+  });
+  await jest.advanceTimersByTimeAsync(CLEAR_CAMPUS_SESSIONS_TIMEOUT_MS - 1);
+  expect(settled).toBe(false);
+  await jest.advanceTimersByTimeAsync(1);
+  await pending;
+  expect(settled).toBe(true);
 });

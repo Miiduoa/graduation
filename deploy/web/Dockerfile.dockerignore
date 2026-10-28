@@ -25,6 +25,7 @@
 !backend/functions/lib/puCreditSummary.js
 !backend/functions/lib/puCourseTime.js
 !backend/functions/lib/taipeiDay.js
+!backend/functions/lib/puSessionStore.js
 **/node_modules
 **/.next
 **/.env

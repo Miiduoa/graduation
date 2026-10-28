@@ -20,6 +20,7 @@ import {
 import { getAuthInstance, getDb } from '../firebase';
 import { getReleaseConfig } from './release';
 import { getCloudFunctionUrl } from './cloudFunctions';
+import { clearOwnedPuCampusSessions } from './clearOwnedPuCampusSessions';
 
 export type { SchoolSSOConfig, SSOProvider, SSOUserInfo } from '@campus/shared/src/auth';
 
@@ -658,8 +659,11 @@ export async function linkSSOToFirebase(
 }
 
 export async function unlinkSSO(schoolId: string, uid: string): Promise<void> {
-  const { clearOwnedPuCampusSessions } = await import('./clearOwnedPuCampusSessions');
-  await clearOwnedPuCampusSessions();
+  try {
+    await clearOwnedPuCampusSessions();
+  } catch (error) {
+    console.warn('[sso] Failed to clear campus sessions before unlinking school', error);
+  }
 
   const db = getDb();
 
