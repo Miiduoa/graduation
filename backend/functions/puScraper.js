@@ -133,27 +133,46 @@ function post(hostname, path, cookies, body) {
   return httpsRequest(hostname, path, 'POST', cookies || {}, body);
 }
 
-// 僅在既有校務主機間跟隨轉址，不把登入 Cookie 送到其他網站。
-async function getFollowRedirect(hostname, path, cookies, maxRedirects = 3) {
+function assertCampusUrl(url) {
+  if (!CAMPUS_HOSTS.has(url.hostname) || !['https:', 'http:'].includes(url.protocol) ||
+    url.username || url.password || (url.port && url.port !== '443')) {
+    throw new Error('Untrusted campus redirect');
+  }
+  url.protocol = 'https:';
+}
+
+async function requestFollowRedirect(hostname, path, cookies, {
+  method = 'GET',
+  body,
+  maxRedirects = 3,
+} = {}) {
   let current = new URL(path, `https://${hostname}/`);
-  const assertCampusUrl = (url) => {
-    if (!CAMPUS_HOSTS.has(url.hostname) || !['https:', 'http:'].includes(url.protocol) ||
-      url.username || url.password || (url.port && url.port !== '443')) {
-      throw new Error('Untrusted campus redirect');
-    }
-    url.protocol = 'https:';
-  };
   assertCampusUrl(current);
-  let res = await get(current.hostname, current.pathname + current.search, cookies);
+  let currentMethod = method;
+  let currentBody = body;
+  let res = currentMethod === 'POST'
+    ? await post(current.hostname, current.pathname + current.search, cookies, currentBody)
+    : await get(current.hostname, current.pathname + current.search, cookies);
   let redirects = 0;
   while ([301, 302, 303, 307, 308].includes(res.status) && res.headers.location) {
     if (redirects >= maxRedirects) throw new Error('Too many campus redirects');
     current = new URL(res.headers.location, current);
     assertCampusUrl(current);
-    res = await get(current.hostname, current.pathname + current.search, res.cookies);
+    if (res.status !== 307 && res.status !== 308) {
+      currentMethod = 'GET';
+      currentBody = undefined;
+    }
+    res = currentMethod === 'POST'
+      ? await post(current.hostname, current.pathname + current.search, res.cookies, currentBody)
+      : await get(current.hostname, current.pathname + current.search, res.cookies);
     redirects++;
   }
-  return res;
+  return { ...res, url: current.toString() };
+}
+
+// 僅在既有校務主機間跟隨轉址，不把登入 Cookie 送到其他網站。
+function getFollowRedirect(hostname, path, cookies, maxRedirects = 3) {
+  return requestFollowRedirect(hostname, path, cookies, { maxRedirects });
 }
 
 // ---------------------------------------------------------------------------
@@ -235,13 +254,81 @@ function hasPuEmptyCourseMessage(html) {
 }
 
 function looksLikePuLoginPage(html) {
-  const normalized = String(html || '').toLowerCase();
-  return (
+  const raw = String(html || '');
+  const normalized = raw.toLowerCase();
+  if (
     normalized.includes('action="index_check.php"') ||
     normalized.includes("action='index_check.php'") ||
     (normalized.includes('name="uid"') && normalized.includes('name="upassword"')) ||
     (normalized.includes("name='uid'") && normalized.includes("name='upassword'"))
-  );
+  ) {
+    return true;
+  }
+  const compact = raw.replace(/\s+/g, '');
+  if (compact.includes('尚未登入') && (compact.includes('已逾時') || compact.includes('請重新登入'))) {
+    return true;
+  }
+  return /not\s*yet\s*logged\s*in/i.test(raw);
+}
+
+const SCORE_BRIDGE_PATH = '/index_chkLogin.php?link=index_ToNewPlt.php?sysID=score_query';
+const MYPU_REDIRECT_PATH = '/index_redirect_mypu.php';
+
+function isMypuRedirectAction(url) {
+  return url.hostname === MYPU_HOST && url.pathname === MYPU_REDIRECT_PATH;
+}
+
+function encodeFormFields(fields) {
+  return Object.entries(fields)
+    .map(([key, value]) => `${encodeURIComponent(key)}=${encodeURIComponent(value)}`)
+    .join('&');
+}
+
+/** Parse the auto-submit POST form on alcat index_ToNewPlt.php. */
+function parseCampusAutoPostForm(html, baseUrl) {
+  const formMatch = String(html || '').match(/<form\b[^>]*>[\s\S]*?<\/form>/i);
+  if (!formMatch) return null;
+  const openTag = formMatch[0].match(/^<form\b[^>]*>/i)?.[0] || '';
+  const method = (openTag.match(/\bmethod\s*=\s*["']([^"']+)["']/i)?.[1] || 'get').trim().toLowerCase();
+  if (method !== 'post') return null;
+  const actionRaw = (openTag.match(/\baction\s*=\s*["']([^"']*)["']/i)?.[1] || '').replace(/&amp;/g, '&');
+  let action;
+  try {
+    action = new URL(actionRaw, baseUrl);
+  } catch {
+    return null;
+  }
+  if (!CAMPUS_HOSTS.has(action.hostname) ||
+    !['https:', 'http:'].includes(action.protocol) ||
+    action.username || action.password || (action.port && action.port !== '443')) {
+    return null;
+  }
+  action.protocol = 'https:';
+  if (!isMypuRedirectAction(action)) return null;
+
+  const fields = {};
+  const inputRegex = /<input\b[^>]*>/gi;
+  let input;
+  while ((input = inputRegex.exec(formMatch[0])) !== null) {
+    const tag = input[0];
+    const type = (tag.match(/\btype\s*=\s*["']([^"']+)["']/i)?.[1] || 'text').toLowerCase();
+    if (type === 'submit' || type === 'button' || type === 'image' || type === 'file') continue;
+    const name = tag.match(/\bname\s*=\s*["']([^"']+)["']/i)?.[1];
+    if (!name) continue;
+    const value = tag.match(/\bvalue\s*=\s*["']([^"']*)["']/i)?.[1] ?? '';
+    fields[name] = value.replace(/&amp;/g, '&');
+  }
+  return { action, fields };
+}
+
+function expiredSessionResult(kind) {
+  const empty = kind === 'grades' ? { grades: [] } : { courses: [] };
+  return {
+    success: false,
+    code: 'session-expired',
+    ...empty,
+    error: 'E校園 session 已失效，請重新登入',
+  };
 }
 
 function hasPuStudentContext(html) {
@@ -426,7 +513,7 @@ async function puFetchCourses(cookies, semester) {
 
     const html = res.data;
     if (looksLikePuLoginPage(html) || !hasPuStudentContext(html)) {
-      return { success: false, code: 'session-expired', courses: [], error: 'E校園 session 已失效，請重新登入' };
+      return expiredSessionResult('courses');
     }
 
     // ---- Extract student info ----
@@ -513,44 +600,55 @@ async function puFetchGrades(cookies, semester) {
   try {
     if (!cookies || !Object.keys(cookies).length) throw new Error('No session cookies');
 
-    // 先走既有校務入口，避免 mypu 首頁建立訪客 Cookie 後蓋掉有效登入。
+    // alcat /score_query/score_all.php 已 404。改走現行 SSO：
+    // chkLogin → index_ToNewPlt.php 自動 POST → mypu index_redirect_mypu.php → score_all.php。
+    // 課表仍走 alcat query_course.html，不經這條轉接。
     let portalCookies = { ...cookies };
     let mypuCookies = { ...cookies };
-
-    // Approach B: Try SSO bridge URLs from alcat → mypu
-    const bridgePaths = [
-      '/score_query/score_all.php', // alcat might proxy to mypu
-      '/index_menu.php', // menu page might set cross-domain session
-    ];
     let usableBridge = null;
-    for (const bp of bridgePaths) {
-      try {
-        const bridgeRes = await getFollowRedirect(ALCAT_HOST, bp, portalCookies);
-        // 同名 Cookie 的輪替也是更新；不能用 Cookie 數量判斷是否有新 session。
-        portalCookies = { ...portalCookies, ...bridgeRes.cookies };
-        mypuCookies = { ...mypuCookies, ...bridgeRes.cookies };
-        // If alcat's score page actually returns grade data directly, use it
-        if (bp.includes('score') && bridgeRes.status === 200) {
-          const bridgeParsed = parsePuGradeDocument(bridgeRes.data, semester);
-          if (bridgeParsed.success) {
-            usableBridge = bridgeParsed;
-            // Prefer the bridge if it contains multiple semesters.
-            if (bridgeParsed.allSemesters.length > 1) return bridgeParsed;
+
+    try {
+      const hop = await getFollowRedirect(ALCAT_HOST, SCORE_BRIDGE_PATH, portalCookies, 5);
+      portalCookies = { ...portalCookies, ...hop.cookies };
+      mypuCookies = { ...mypuCookies, ...hop.cookies };
+      if (looksLikePuLoginPage(hop.data)) return expiredSessionResult('grades');
+      if (hop.status === 200) {
+        const parsedHop = parsePuGradeDocument(hop.data, semester);
+        if (parsedHop.success) {
+          usableBridge = parsedHop;
+          if (parsedHop.allSemesters.length > 1) return parsedHop;
+        }
+      }
+      const form = parseCampusAutoPostForm(hop.data, hop.url || `https://${ALCAT_HOST}/`);
+      if (form) {
+        const posted = await requestFollowRedirect(
+          form.action.hostname,
+          form.action.pathname + form.action.search,
+          mypuCookies,
+          { method: 'POST', body: encodeFormFields(form.fields), maxRedirects: 5 },
+        );
+        portalCookies = { ...portalCookies, ...posted.cookies };
+        mypuCookies = { ...mypuCookies, ...posted.cookies };
+        if (looksLikePuLoginPage(posted.data)) return expiredSessionResult('grades');
+        if (posted.status === 200) {
+          const parsedPost = parsePuGradeDocument(posted.data, semester);
+          if (parsedPost.success) {
+            usableBridge = parsedPost;
+            if (parsedPost.allSemesters.length > 1) return parsedPost;
           }
         }
-      } catch (e) {
-        console.warn(`[puFetchGrades] Bridge ${bp} failed:`, e.message);
       }
+    } catch (e) {
+      console.warn('[puFetchGrades] Score SSO bridge failed:', e.message);
     }
 
-    // ── Step 2: Fetch the grade page ──
     // Keep a valid single-semester bridge result if mypu is unavailable.
     try {
       const gradeRes = await getFollowRedirect(MYPU_HOST, GRADE_PATH, mypuCookies);
       if (gradeRes.status !== 200) throw new Error(`HTTP ${gradeRes.status}`);
       if (looksLikePuLoginPage(gradeRes.data)) {
         if (usableBridge) return usableBridge;
-        return { success: false, code: 'session-expired', grades: [], error: 'E校園 session 已失效，請重新登入' };
+        return expiredSessionResult('grades');
       }
       const parsed = parsePuGradeDocument(gradeRes.data, semester);
       return parsed.success ? parsed : (usableBridge || parsed);
@@ -810,4 +908,7 @@ module.exports = {
   puFetchAbsence,
   puFetchCreditSummary,
   parseGradeSemesterCodes,
+  looksLikePuLoginPage,
+  parseCampusAutoPostForm,
+  SCORE_BRIDGE_PATH,
 };

@@ -141,6 +141,39 @@ it('rejects invalid student ids and missing fields', async () => {
   ).rejects.toMatchObject({ status: 400, message: 'Missing required fields: studentId, password' });
 });
 
+it('logs the actual TronClass soft-failure reason instead of campus_unreachable', async () => {
+  const lines: string[] = [];
+  vi.spyOn(console, 'info').mockImplementation((...args) => {
+    lines.push(args.map((item) => String(item)).join(' '));
+  });
+  const loginTronClass = vi.fn(async () => {
+    throw new PuCampusError('unavailable', '學校系統無回應', {
+      route: 'student',
+      stage: 'submit',
+      code: 'HTTP_400',
+    });
+  });
+  const { runtime } = deps({ campus: campus({ loginTronClass }) });
+  await handleSignInPuStudentId({ studentId: STUDENT, password: SECRET }, '1.1.1.1', runtime);
+  const soft = lines
+    .map((line) => {
+      try {
+        return JSON.parse(line) as Record<string, unknown>;
+      } catch {
+        return null;
+      }
+    })
+    .find((row) => row?.msg === 'pu_campus_login_soft_failure');
+  expect(soft).toMatchObject({
+    msg: 'pu_campus_login_soft_failure',
+    reason: 'unavailable',
+    code: 'HTTP_400',
+    route: 'student',
+    stage: 'submit',
+  });
+  expect(soft?.reason).not.toBe('campus_unreachable');
+});
+
 it.each([
   ['s1110700321', 's1110700321'],
   ['S1110700321', 's1110700321'],

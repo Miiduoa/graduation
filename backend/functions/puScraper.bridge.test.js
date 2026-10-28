@@ -1,0 +1,123 @@
+const { EventEmitter } = require('events');
+const fs = require('fs');
+const path = require('path');
+const https = require('https');
+const {
+  puFetchGrades,
+  looksLikePuLoginPage,
+  parseCampusAutoPostForm,
+  SCORE_BRIDGE_PATH,
+} = require('./puScraper');
+
+const FIXTURES = path.join(__dirname, 'fixtures');
+const notLoggedInHtml = fs.readFileSync(path.join(FIXTURES, 'mypu-not-logged-in.html'), 'utf8');
+const toNewPltHtml = fs.readFileSync(path.join(FIXTURES, 'alcat-tonewplt-score.html'), 'utf8');
+const scoreAllHtml = fs.readFileSync(path.join(FIXTURES, 'mypu-score-all.html'), 'utf8');
+
+function mockRequests(respond) {
+  const requests = [];
+  jest.spyOn(https, 'request').mockImplementation((options, callback) => {
+    requests.push(options);
+    const request = new EventEmitter();
+    request.write = jest.fn();
+    request.destroy = jest.fn();
+    request.end = () => {
+      const fixture = respond(options, requests.length - 1, request);
+      if (!fixture) return;
+      const response = new EventEmitter();
+      response.headers = fixture.headers || {};
+      response.statusCode = fixture.status || 200;
+      callback(response);
+      response.emit('data', Buffer.from(fixture.html || ''));
+      response.emit('end');
+    };
+    return request;
+  });
+  return requests;
+}
+
+describe('PU mypu score SSO bridge', () => {
+  beforeEach(() => {
+    jest.spyOn(console, 'error').mockImplementation(() => {});
+    jest.spyOn(console, 'warn').mockImplementation(() => {});
+  });
+  afterEach(() => jest.restoreAllMocks());
+
+  test('recognizes the depersonalized mypu login-expired snapshot', () => {
+    expect(notLoggedInHtml).toContain('尚未登入');
+    expect(notLoggedInHtml).toContain('已逾時');
+    expect(notLoggedInHtml).not.toMatch(/s\d{7,}/);
+    expect(looksLikePuLoginPage(notLoggedInHtml)).toBe(true);
+    expect(looksLikePuLoginPage(toNewPltHtml)).toBe(false);
+    expect(looksLikePuLoginPage(scoreAllHtml)).toBe(false);
+    expect(looksLikePuLoginPage('<p>系統維護中，請稍後再試</p>')).toBe(false);
+  });
+
+  test('parses the auto-submit POST fields from the ToNewPlt snapshot', () => {
+    const form = parseCampusAutoPostForm(toNewPltHtml, 'https://alcat.pu.edu.tw/index_ToNewPlt.php');
+    expect(form?.action.href).toBe('https://mypu.pu.edu.tw/index_redirect_mypu.php');
+    expect(form?.fields).toEqual({
+      sysID: 'score_query',
+      uid: 's0000000',
+      chk: 'fixture-sso-token',
+      from: 'alcat',
+    });
+  });
+
+  test('does not POST the session to an unrelated form action', () => {
+    const html = `<form method="post" action="https://evil.test/collect">
+      <input type="hidden" name="sid" value="original">
+    </form>`;
+    expect(parseCampusAutoPostForm(html, 'https://alcat.pu.edu.tw/index_ToNewPlt.php')).toBeNull();
+  });
+
+  test('follows chkLogin → ToNewPlt POST → mypu score_all with the snapshot pages', async () => {
+    const requests = mockRequests((options, index, request) => {
+      if (index === 0) {
+        return {
+          status: 302,
+          headers: { location: '/index_ToNewPlt.php?sysID=score_query' },
+        };
+      }
+      if (index === 1) return { html: toNewPltHtml };
+      if (index === 2) {
+        expect(options.method).toBe('POST');
+        expect(String(request.write.mock.calls[0]?.[0] || '')).toContain('sysID=score_query');
+        expect(String(request.write.mock.calls[0]?.[0] || '')).toContain('uid=s0000000');
+        return {
+          status: 302,
+          headers: {
+            location: '/score_query/score_all.php',
+            'set-cookie': ['PHPSESSID=mypu-fixture; Path=/'],
+          },
+        };
+      }
+      return { html: scoreAllHtml, headers: { 'set-cookie': ['PHPSESSID=mypu-fixture; Path=/'] } };
+    });
+
+    const result = await puFetchGrades({ SID: 'alcat-session' });
+    expect(result.success).toBe(true);
+    expect(result.grades).toHaveLength(2);
+    expect(result.allSemesters).toEqual(expect.arrayContaining(['1151', '1142']));
+    expect(requests.map((row) => `${row.method || 'GET'} ${row.hostname}${row.path}`)).toEqual([
+      `GET alcat.pu.edu.tw${SCORE_BRIDGE_PATH}`,
+      'GET alcat.pu.edu.tw/index_ToNewPlt.php?sysID=score_query',
+      'POST mypu.pu.edu.tw/index_redirect_mypu.php',
+      'GET mypu.pu.edu.tw/score_query/score_all.php',
+    ]);
+    expect(requests[3].headers.Cookie).toMatch(/PHPSESSID=mypu-fixture/);
+  });
+
+  test('reports session-expired when mypu returns the not-logged-in snapshot', async () => {
+    mockRequests((options, index) => {
+      if (index === 0) return { html: toNewPltHtml };
+      if (index === 1) return { html: '<p>轉接完成</p>', headers: { 'set-cookie': ['PHPSESSID=dead; Path=/'] } };
+      return { html: notLoggedInHtml };
+    });
+    await expect(puFetchGrades({ SID: 'stale' })).resolves.toMatchObject({
+      success: false,
+      code: 'session-expired',
+      grades: [],
+    });
+  });
+});

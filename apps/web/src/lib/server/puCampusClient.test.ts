@@ -7,17 +7,16 @@ import {
   campusPageLooksClosed,
   createPuCampusGateway,
   PuCampusError,
+  rewriteAllowedCampusLocation,
   rewriteCampusPortalLocation,
 } from './puCampusClient';
 
-const ALCAT_LOGIN_HTML = readFileSync(
-  join(dirname(fileURLToPath(import.meta.url)), 'fixtures/alcat-login.html'),
-  'utf8',
-);
-const ALCAT_MAINTENANCE_HTML = readFileSync(
-  join(dirname(fileURLToPath(import.meta.url)), 'fixtures/alcat-maintenance.html'),
-  'utf8',
-);
+const fixture = (name: string) =>
+  readFileSync(join(dirname(fileURLToPath(import.meta.url)), 'fixtures', name), 'utf8');
+const ALCAT_LOGIN_HTML = fixture('alcat-login.html');
+const ALCAT_MAINTENANCE_HTML = fixture('alcat-maintenance.html');
+const TRONCLASS_CAS_LOGIN_HTML = fixture('tronclass-cas-login.html');
+const MYPU_NOT_LOGGED_IN_HTML = fixture('mypu-not-logged-in.html');
 
 const STUDENT = '1110700321';
 const SECRET = 'super-secret-pass';
@@ -202,14 +201,14 @@ function jsonResponse(status: number, body: unknown, headers?: Record<string, st
   });
 }
 
-it('rejects TronClass HTTP 200 that has user JSON but no session cookie', async () => {
+it('rejects TronClass HTTP 200 that has user JSON but no session cookie after CAS also fails', async () => {
   const gateway = createPuCampusGateway({
     fetch: async () =>
       jsonResponse(200, { id: 44, name: '王老師', role: 'teacher', user_name: 'changyi' }),
   });
   await expect(gateway.loginTronClass('changyi', SECRET)).rejects.toMatchObject({
-    kind: 'credentials',
-    message: '學號或密碼錯誤',
+    kind: 'unavailable',
+    code: 'HTTP_200',
   });
 });
 
@@ -337,9 +336,9 @@ it('reads student info even if the portal HTML still has a maintenance comment',
 });
 
 it('does not treat an expired session notice as maintenance', async () => {
+  expect(campusPageLooksClosed(MYPU_NOT_LOGGED_IN_HTML)).toBe(false);
   const gateway = createPuCampusGateway({
-    fetch: async () =>
-      htmlResponse(200, '<html><body>您尚未登入系統或已逾時，請重新登入。</body></html>'),
+    fetch: async () => htmlResponse(200, MYPU_NOT_LOGGED_IN_HTML),
   });
   await expect(gateway.fetchStudentInfo({ PHPSESSID: 'dead' })).resolves.toEqual({});
 });
@@ -365,12 +364,137 @@ it('maps an aborted external request to timeout', async () => {
   });
 });
 
+it('does not treat TronClass HTTP 400 as a credential error', async () => {
+  const fetchMock = vi.fn(async (url: string) => {
+    if (String(url).endsWith('/api/login')) return jsonResponse(400, { message: 'bad request' });
+    return htmlResponse(200, '<html>no form</html>');
+  });
+  const gateway = createPuCampusGateway({ fetch: fetchMock });
+  await expect(gateway.loginTronClass('changyi', SECRET, { route: 'student' })).rejects.toMatchObject({
+    kind: 'unavailable',
+    code: 'HTTP_400',
+  });
+  expect(fetchMock.mock.calls.some(([url]) => String(url).includes('/login?next='))).toBe(true);
+});
+
+it('falls back to identity CAS when native TronClass login returns 400', async () => {
+  const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+    const href = String(url);
+    const method = String(init?.method || 'GET').toUpperCase();
+    if (href.endsWith('/api/login') && method === 'POST') {
+      return jsonResponse(400, { error: 'native login disabled' });
+    }
+    if (href.startsWith('https://tronclass.pu.edu.tw/login')) {
+      return new Response('', {
+        status: 302,
+        headers: {
+          Location:
+            'https://identity.pu.edu.tw/auth/realms/pu/protocol/cas/login?service=https://tronclass.pu.edu.tw/login',
+        },
+      });
+    }
+    if (href.startsWith('https://identity.pu.edu.tw/auth/realms/pu/protocol/cas/login')) {
+      return htmlResponse(200, TRONCLASS_CAS_LOGIN_HTML);
+    }
+    if (href.includes('/login-actions/authenticate') && method === 'POST') {
+      expect(href).toContain('session_code=fixtureSessionCode');
+      expect(String(init?.body || '')).toContain(`username=${encodeURIComponent('changyi')}`);
+      expect(String(init?.body || '')).toContain(`password=${encodeURIComponent(SECRET)}`);
+      return new Response('', {
+        status: 302,
+        headers: {
+          Location: 'https://tronclass.pu.edu.tw/user/index?ticket=ST-fixture',
+          'set-cookie': 'KEYCLOAK_IDENTITY=kc; Path=/',
+        },
+      });
+    }
+    if (href.startsWith('https://tronclass.pu.edu.tw/user/index')) {
+      return htmlResponse(200, '<html><body>ok</body></html>', {
+        'set-cookie': 'session=tc-cas; Path=/',
+      });
+    }
+    if (href.endsWith('/api/profile')) {
+      return jsonResponse(200, {
+        id: 44,
+        name: '王老師',
+        login_name: 'changyi',
+        role: 'teacher',
+      });
+    }
+    throw new Error(`unexpected ${href}`);
+  });
+  const gateway = createPuCampusGateway({ fetch: fetchMock });
+  await expect(gateway.loginTronClass('changyi', SECRET, { route: 'teacher' })).resolves.toMatchObject({
+    userId: 44,
+    userName: '王老師',
+    role: 'teacher',
+    cookies: expect.objectContaining({ session: 'tc-cas' }),
+  });
+  expect(fetchMock.mock.calls.some(([url]) => String(url).includes('evil'))).toBe(false);
+});
+
+it('maps Keycloak credential errors after CAS fallback, not the native 400', async () => {
+  const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+    const href = String(url);
+    const method = String(init?.method || 'GET').toUpperCase();
+    if (href.endsWith('/api/login')) return jsonResponse(400, { message: 'bad request' });
+    if (href.startsWith('https://tronclass.pu.edu.tw/login')) {
+      return new Response('', {
+        status: 302,
+        headers: { Location: 'https://identity.pu.edu.tw/auth/realms/pu/protocol/cas/login' },
+      });
+    }
+    if (method === 'GET' && href.includes('identity.pu.edu.tw')) {
+      return htmlResponse(200, TRONCLASS_CAS_LOGIN_HTML);
+    }
+    if (method === 'POST' && href.includes('identity.pu.edu.tw')) {
+      return htmlResponse(200, '<span id="error-message">無效的使用者名稱或密碼</span>');
+    }
+    throw new Error(`unexpected ${href}`);
+  });
+  const gateway = createPuCampusGateway({ fetch: fetchMock });
+  await expect(gateway.loginTronClass('changyi', SECRET)).rejects.toMatchObject({
+    kind: 'credentials',
+    message: '學號或密碼錯誤',
+  });
+});
+
+it('does not follow a CAS redirect off identity or TronClass', async () => {
+  const fetchMock = vi.fn(async (url: string) => {
+    const href = String(url);
+    expect(href).not.toContain('evil.test');
+    if (href.endsWith('/api/login')) return jsonResponse(400, { message: 'bad request' });
+    if (href.startsWith('https://tronclass.pu.edu.tw/login')) {
+      return new Response('', { status: 302, headers: { Location: 'https://evil.test/steal' } });
+    }
+    throw new Error(`unexpected ${href}`);
+  });
+  const gateway = createPuCampusGateway({ fetch: fetchMock });
+  await expect(gateway.loginTronClass('changyi', SECRET)).rejects.toMatchObject({
+    kind: 'unavailable',
+  });
+  expect(fetchMock.mock.calls.some(([url]) => String(url).includes('evil.test'))).toBe(false);
+});
+
 it('rewrites alcat http redirects to https and rejects other hosts', () => {
   const portal = 'https://alcat.pu.edu.tw';
   const posted = 'https://alcat.pu.edu.tw/index_check.php';
   expect(rewriteCampusPortalLocation('http://alcat.pu.edu.tw/stu_query/x', posted, portal)).toBe(
     'https://alcat.pu.edu.tw/stu_query/x',
   );
+  expect(
+    rewriteAllowedCampusLocation(
+      'https://identity.pu.edu.tw/auth/realms/pu/login',
+      'https://tronclass.pu.edu.tw/login',
+      ['https://tronclass.pu.edu.tw', 'https://identity.pu.edu.tw'],
+    ),
+  ).toBe('https://identity.pu.edu.tw/auth/realms/pu/login');
+  expect(
+    rewriteAllowedCampusLocation('https://evil.test/steal', 'https://tronclass.pu.edu.tw/login', [
+      'https://tronclass.pu.edu.tw',
+      'https://identity.pu.edu.tw',
+    ]),
+  ).toBeNull();
   expect(rewriteCampusPortalLocation('/stu_query/query_course.html', posted, portal)).toBe(
     'https://alcat.pu.edu.tw/stu_query/query_course.html',
   );

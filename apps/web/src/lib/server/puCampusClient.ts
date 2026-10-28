@@ -3,7 +3,9 @@ import { createIpv4PinnedFetch } from './campusIpv4Fetch';
 
 const ALCAT_ORIGIN = 'https://alcat.pu.edu.tw';
 const TRONCLASS_ORIGIN = 'https://tronclass.pu.edu.tw';
+const IDENTITY_ORIGIN = 'https://identity.pu.edu.tw';
 const DEFAULT_TIMEOUT_MS = 10_000;
+const CAS_MIN_REMAINING_MS = 500;
 const USER_AGENT =
   'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36';
 
@@ -83,6 +85,7 @@ type SentPage = {
   cookies: CookieJar;
   json: unknown;
   location: string | null;
+  url: string;
 };
 
 function cookieHeader(jar: CookieJar): string {
@@ -104,26 +107,37 @@ function mergeCookies(jar: CookieJar, headers: Headers): CookieJar {
   return next;
 }
 
-export function rewriteCampusPortalLocation(
+export function rewriteAllowedCampusLocation(
   location: string | null | undefined,
   requestUrl: string,
-  portalOrigin: string,
+  allowedOrigins: readonly string[],
 ): string | null {
   if (!location) return null;
   try {
     const target = new URL(location, requestUrl);
-    const portal = new URL(portalOrigin);
     if (target.protocol !== 'http:' && target.protocol !== 'https:') return null;
     if (target.username || target.password) return null;
-    if (target.hostname.toLowerCase() !== portal.hostname.toLowerCase() || target.port !== portal.port) {
-      return null;
-    }
+    const allowed = allowedOrigins.some((origin) => {
+      const item = new URL(origin);
+      return (
+        target.hostname.toLowerCase() === item.hostname.toLowerCase() && target.port === item.port
+      );
+    });
+    if (!allowed) return null;
     target.protocol = 'https:';
     target.hash = '';
     return target.toString();
   } catch {
     return null;
   }
+}
+
+export function rewriteCampusPortalLocation(
+  location: string | null | undefined,
+  requestUrl: string,
+  portalOrigin: string,
+): string | null {
+  return rewriteAllowedCampusLocation(location, requestUrl, [portalOrigin]);
 }
 
 const TIMEOUT_CODES = new Set([
@@ -219,9 +233,30 @@ function isClosedPage(html: string): boolean {
 }
 
 function isCredentialPage(html: string): boolean {
-  return /帳號或密碼錯誤|login_fail|Login Failed|密碼錯誤|_INVALID_PASSWORD_/.test(
+  return /帳號或密碼錯誤|login_fail|Login Failed|密碼錯誤|_INVALID_PASSWORD_|無效的使用者名稱或密碼|Invalid username or password|Invalid credentials/.test(
     stripIgnoredHtml(html),
   );
+}
+
+function extractCasLoginForm(
+  html: string,
+  fallbackUrl: string,
+  allowedOrigins: readonly string[],
+): { action: string; hiddenFields: Record<string, string> } | null {
+  if (!/<form[\s>]/i.test(html)) return null;
+  const formActionMatch = html.match(/<form[^>]+action=["']([^"']+)["']/i);
+  const actionRaw = (formActionMatch?.[1] || fallbackUrl).replace(/&amp;/g, '&');
+  const action = rewriteAllowedCampusLocation(actionRaw, fallbackUrl, allowedOrigins);
+  if (!action) return null;
+  const hiddenFields: Record<string, string> = {};
+  const hiddenRegex = /<input[^>]+type=["']hidden["'][^>]*>/gi;
+  let match: RegExpExecArray | null;
+  while ((match = hiddenRegex.exec(html)) !== null) {
+    const nameMatch = match[0].match(/name=["']([^"']+)["']/i);
+    const valueMatch = match[0].match(/value=["']([^"']*)["']/i);
+    if (nameMatch?.[1]) hiddenFields[nameMatch[1]] = (valueMatch?.[1] ?? '').replace(/&amp;/g, '&');
+  }
+  return { action, hiddenFields };
 }
 
 function asRecord(value: unknown): Record<string, unknown> {
@@ -322,12 +357,20 @@ export function classifyCampusFailure(error: unknown, details: CampusErrorDetail
 }
 
 export function createPuCampusGateway(
-  options: { fetch?: FetchLike; timeoutMs?: number; portalOrigin?: string; lmsOrigin?: string } = {},
+  options: {
+    fetch?: FetchLike;
+    timeoutMs?: number;
+    portalOrigin?: string;
+    lmsOrigin?: string;
+    identityOrigin?: string;
+  } = {},
 ): PuCampusGateway {
   const request = options.fetch ?? createIpv4PinnedFetch();
   const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
   const portalOrigin = options.portalOrigin || ALCAT_ORIGIN;
   const lmsOrigin = options.lmsOrigin || TRONCLASS_ORIGIN;
+  const identityOrigin = options.identityOrigin || IDENTITY_ORIGIN;
+  const lmsAllowedOrigins = [lmsOrigin, identityOrigin];
 
   async function send(
     url: string,
@@ -336,6 +379,7 @@ export function createPuCampusGateway(
       timeoutMs?: number;
       context?: CampusErrorDetails;
       confineOrigin?: string;
+      confineOrigins?: readonly string[];
     } = {},
   ): Promise<SentPage> {
     const waitMs = init.timeoutMs ?? timeoutMs;
@@ -358,8 +402,9 @@ export function createPuCampusGateway(
       });
       const html = await response.text();
       const locationHeader = response.headers.get('location');
-      const location = init.confineOrigin
-        ? rewriteCampusPortalLocation(locationHeader, url, init.confineOrigin)
+      const allowedOrigins = init.confineOrigins || (init.confineOrigin ? [init.confineOrigin] : null);
+      const location = allowedOrigins
+        ? rewriteAllowedCampusLocation(locationHeader, url, allowedOrigins)
         : locationHeader
           ? new URL(locationHeader, url).toString()
           : null;
@@ -368,6 +413,7 @@ export function createPuCampusGateway(
         html,
         cookies: mergeCookies(init.cookies || {}, response.headers),
         location,
+        url,
         json: (() => {
           try {
             return JSON.parse(html) as unknown;
@@ -392,14 +438,96 @@ export function createPuCampusGateway(
     let current = url;
     let jar = cookies;
     let page = await send(current, { cookies: jar, context, confineOrigin: portalOrigin });
-    let remaining = hops;
-    while ((page.status === 301 || page.status === 302) && page.location && remaining > 0) {
+    let remainingHops = hops;
+    while ((page.status === 301 || page.status === 302) && page.location && remainingHops > 0) {
       current = page.location;
       jar = page.cookies;
       page = await send(current, { cookies: jar, context, confineOrigin: portalOrigin });
-      remaining -= 1;
+      remainingHops -= 1;
     }
     return page;
+  }
+
+  async function followLms(
+    url: string,
+    init: {
+      cookies?: CookieJar;
+      method?: string;
+      body?: string;
+      headers?: HeadersInit;
+      hops?: number;
+      timeoutMs?: number;
+      context?: CampusErrorDetails;
+    } = {},
+  ): Promise<SentPage> {
+    let current = url;
+    let jar = init.cookies || {};
+    let method = init.method;
+    let body = init.body;
+    let hops = init.hops ?? 8;
+    let page = await send(current, {
+      method,
+      body,
+      headers: init.headers,
+      cookies: jar,
+      timeoutMs: init.timeoutMs,
+      context: init.context,
+      confineOrigins: lmsAllowedOrigins,
+    });
+    while ([301, 302, 303, 307, 308].includes(page.status) && page.location && hops > 0) {
+      current = page.location;
+      jar = page.cookies;
+      if (page.status !== 307 && page.status !== 308) {
+        method = 'GET';
+        body = undefined;
+      }
+      page = await send(current, {
+        method,
+        body,
+        headers: init.headers,
+        cookies: jar,
+        timeoutMs: init.timeoutMs,
+        context: init.context,
+        confineOrigins: lmsAllowedOrigins,
+      });
+      hops -= 1;
+    }
+    return page;
+  }
+
+  async function readTronClassProfile(
+    cookies: CookieJar,
+    account: string,
+    loginData: Record<string, unknown>,
+    route: CampusLoginRoute,
+    timeoutMsRemaining: number,
+    unauthorized: 'credentials' | 'missing' = 'missing',
+  ): Promise<TronClassSession | null> {
+    const profilePage = await send(`${lmsOrigin}/api/profile`, {
+      cookies,
+      headers: { Accept: 'application/json' },
+      timeoutMs: timeoutMsRemaining,
+      context: { route, stage: 'verify' },
+    });
+    if (profilePage.status === 401 || profilePage.status === 403 || profilePage.status === 302) {
+      if (unauthorized === 'credentials') {
+        throw new PuCampusError('credentials', '學號或密碼錯誤', { route, stage: 'verify' });
+      }
+      return null;
+    }
+    const profileData = authenticatedJson(profilePage);
+    if (profileData && identityBelongsToAccount(account, profileData)) {
+      return {
+        cookies,
+        userId: userIdFrom(profileData) ?? userIdFrom(loginData),
+        userName: displayNameFrom(profileData, account),
+        role: roleFrom(profileData),
+      };
+    }
+    if (profileData) {
+      throw new PuCampusError('credentials', '學號或密碼錯誤', { route, stage: 'verify' });
+    }
+    return null;
   }
 
   return {
@@ -487,6 +615,7 @@ export function createPuCampusGateway(
       const budget = options.timeoutMs;
       const remaining = () =>
         budget == null ? timeoutMs : Math.max(1, budget - (Date.now() - started));
+      const leftover = () => (budget == null ? timeoutMs : budget - (Date.now() - started));
       const route = options.route || 'teacher';
       try {
         const posted = await send(`${lmsOrigin}/api/login`, {
@@ -496,37 +625,94 @@ export function createPuCampusGateway(
           timeoutMs: remaining(),
           context: { route, stage: 'submit' },
         });
-        if (posted.status === 400 || isCredentialPage(posted.html)) {
+        if (posted.status === 200 && isCredentialPage(posted.html)) {
           throw new PuCampusError('credentials', '學號或密碼錯誤', { route, stage: 'submit' });
         }
-        if (posted.status !== 200) {
-          throw new PuCampusError('unavailable', '學校系統無回應', { route, stage: 'submit' });
+        if (posted.status === 200 && sessionCookieValue(posted.cookies)) {
+          const loginData = asRecord(posted.json);
+          const session = await readTronClassProfile(
+            posted.cookies,
+            account,
+            loginData,
+            route,
+            remaining(),
+            'credentials',
+          );
+          if (session) return session;
+          throw new PuCampusError('unverified', '暫時無法驗證老師身分', { route, stage: 'verify' });
         }
-        // HTTP 200 不夠：原生 API 可能回 200 JSON 卻沒有 session cookie。
-        if (!sessionCookieValue(posted.cookies)) {
+        const nativeFallback = new PuCampusError('unavailable', '學校系統無回應', {
+          route,
+          stage: 'submit',
+          code: `HTTP_${posted.status}`,
+        });
+
+        if (leftover() < CAS_MIN_REMAINING_MS) {
+          throw nativeFallback;
+        }
+
+        const loginPage = await followLms(`${lmsOrigin}/login?next=/user/index`, {
+          headers: { Accept: 'text/html' },
+          hops: 5,
+          timeoutMs: remaining(),
+          context: { route, stage: 'redirect' },
+        });
+        if (loginPage.status !== 200) {
+          throw nativeFallback || new PuCampusError('unavailable', '學校系統無回應', {
+            route,
+            stage: 'redirect',
+            code: `HTTP_${loginPage.status}`,
+          });
+        }
+        const form = extractCasLoginForm(loginPage.html, loginPage.url, lmsAllowedOrigins);
+        if (!form) {
+          throw nativeFallback || new PuCampusError('unavailable', '學校系統無回應', {
+            route,
+            stage: 'redirect',
+          });
+        }
+        const formData = new URLSearchParams({
+          ...form.hiddenFields,
+          username: account,
+          password,
+          login: '',
+        }).toString();
+        const postedCas = await followLms(form.action, {
+          method: 'POST',
+          body: formData,
+          cookies: loginPage.cookies,
+          headers: {
+            Accept: 'text/html',
+            'Content-Type': 'application/x-www-form-urlencoded',
+            Referer: `${identityOrigin}/`,
+          },
+          hops: 8,
+          timeoutMs: remaining(),
+          context: { route, stage: 'submit' },
+        });
+        if (isCredentialPage(postedCas.html)) {
           throw new PuCampusError('credentials', '學號或密碼錯誤', { route, stage: 'submit' });
         }
-        const loginData = asRecord(posted.json);
-        const profilePage = await send(`${lmsOrigin}/api/profile`, {
-          cookies: posted.cookies,
-          headers: { Accept: 'application/json' },
+        const indexPage = await followLms(`${lmsOrigin}/user/index`, {
+          cookies: postedCas.cookies,
+          headers: { Accept: 'text/html' },
+          hops: 3,
           timeoutMs: remaining(),
           context: { route, stage: 'verify' },
         });
-        if (profilePage.status === 401 || profilePage.status === 403 || profilePage.status === 302) {
+        if (isCredentialPage(indexPage.html)) {
           throw new PuCampusError('credentials', '學號或密碼錯誤', { route, stage: 'verify' });
         }
-        const profileData = authenticatedJson(profilePage);
-        if (profileData && identityBelongsToAccount(account, profileData)) {
-          return {
-            cookies: posted.cookies,
-            userId: userIdFrom(profileData) ?? userIdFrom(loginData),
-            userName: displayNameFrom(profileData, account),
-            role: roleFrom(profileData),
-          };
-        }
-        if (profileData) {
-          throw new PuCampusError('credentials', '學號或密碼錯誤', { route, stage: 'verify' });
+        const casSession = await readTronClassProfile(
+          indexPage.cookies,
+          account,
+          {},
+          route,
+          remaining(),
+        );
+        if (casSession) return casSession;
+        if (indexPage.html.includes('/auth/realms/pu') || indexPage.html.includes('identity.pu.edu.tw')) {
+          throw new PuCampusError('unavailable', '學校系統無回應', { route, stage: 'verify' });
         }
         throw new PuCampusError('unverified', '暫時無法驗證老師身分', { route, stage: 'verify' });
       } catch (error) {
