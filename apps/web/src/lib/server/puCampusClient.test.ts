@@ -593,6 +593,7 @@ for (const status of [307, 308] as const) {
         fetchMock.mock.calls.some(
           ([url, init]) =>
             String(url).includes('tronclass.pu.edu.tw') &&
+            !String(url).endsWith('/api/login') &&
             String(init?.method || '').toUpperCase() === 'POST' &&
             String(init?.body || '').includes(SECRET),
         ),

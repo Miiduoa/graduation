@@ -578,7 +578,7 @@ export function createPuCampusGateway(
     while ([301, 302, 303, 307, 308].includes(page.status) && hops > 0) {
       const preservesBody = page.status === 307 || page.status === 308;
       if (carryingPassword && preservesBody) {
-        if (!isCasPasswordPostUrl(page.location)) {
+        if (!page.location || !isCasPasswordPostUrl(page.location)) {
           logCasPasswordPostRejected({
             reason: 'redirect_preserves_body',
             host: hostnameOf(page.location),
