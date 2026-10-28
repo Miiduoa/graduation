@@ -168,7 +168,7 @@ function Courses({ uid, schoolId, returnUrl }: { uid: string; schoolId: 'pu'; re
         uid={uid} schoolId={schoolId} lms={null} returnUrl={returnUrl}
         canReconnect={Boolean(!options.loading && options.studentId)}
       /> : null}
-      <p className={styles.note}>學分為 WOW Class 原列資料，不代表已修得或畢業採計；「未提供」不會當成 0 學分。正式選課、歷年成績及畢業採計學分請分別查看「我的課表」、「成績紀錄」與「學分規劃」。</p>
+      <p className={styles.note}>學分為 WOW Class 原列資料，不代表已修得或畢業採計；未提供表示來源沒有標示。正式選課、歷年成績及畢業採計學分請分別查看「我的課表」、「成績紀錄」與「學分規劃」。</p>
     </>
   );
 }
