@@ -6,6 +6,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { useAuth } from '@/components/AuthGuard';
 import { SchoolAccountRequired } from '@/components/SchoolAccountRequired';
 import { SiteShell } from '@/components/SiteShell';
+import { SchoolCourseReconciliation } from '@/components/academic/SchoolCourseReconciliation';
 import { AcademicConnectionError } from '@/lib/academicClient';
 import { formatSemester } from '@/lib/academicRecords';
 import { isOfficialAcademicSchool } from '@/lib/academicOfficialSchool';
@@ -135,6 +136,11 @@ function Courses({ uid, schoolId, returnUrl }: { uid: string; schoolId: 'pu'; re
                 {visible.refreshing ? '更新中…' : '更新課程'}
               </button>
             </div>
+            {!visible.refreshing ? <SchoolCourseReconciliation
+              key={`${snapshot.status}:${snapshot.fetchedAt}`}
+              uid={uid} schoolId={schoolId} lms={snapshot} returnUrl={returnUrl}
+              canReconnect={Boolean(!options.loading && options.studentId)}
+            /> : null}
             {search.trim() && <p className={styles.resultCount} role="status">
               找到 {rows.length} 門課程
               <button type="button" onClick={() => setSearch('')}>清除搜尋</button>
@@ -156,6 +162,11 @@ function Courses({ uid, schoolId, returnUrl }: { uid: string; schoolId: 'pu'; re
           </>
         ) : null}
       </section>
+      {visible?.status === 'error' ? <SchoolCourseReconciliation
+        key={`academic-only:${scope}`}
+        uid={uid} schoolId={schoolId} lms={null} returnUrl={returnUrl}
+        canReconnect={Boolean(!options.loading && options.studentId)}
+      /> : null}
       <p className={styles.note}>這裡顯示 WOW Class 課堂清單。正式選課、歷年成績及畢業採計學分請分別查看「我的課表」、「成績紀錄」與「學分規劃」。</p>
     </>
   );
