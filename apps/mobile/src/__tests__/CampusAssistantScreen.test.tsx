@@ -304,6 +304,7 @@ test('a user explicitly syncs authorized context before it reaches local inferen
   await act(async () => fireEvent.press(view.getByText('同步我的校園資料')));
   expect(refreshCampusSenseSnapshot).toHaveBeenCalledWith({
     scope: { uid: 'A', schoolId: 'pu' }, isCurrent: expect.any(Function),
+    signal: expect.anything(), onProgress: expect.any(Function),
   });
   expect(view.getByText('已取得本次授權資料')).toBeTruthy();
   fireEvent.changeText(view.getByLabelText('詢問校園助理'), '我的待交作業');
@@ -677,7 +678,6 @@ test('an already scheduled local reminder is restored when reopening the assista
   expect(cancelCampusAssignmentReminder).toHaveBeenCalledTimes(1);
   expect(view.getByText('已確認手機系統不再保留這筆提醒。')).toBeTruthy();
 });
-
 test('unverified OS reminder status blocks scheduling until a successful recheck', async () => {
   const dueAt = new Date(Date.now() + 48 * 60 * 60 * 1000).toISOString();
   const checkedAt = new Date().toISOString();
