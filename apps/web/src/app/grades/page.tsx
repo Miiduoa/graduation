@@ -5,6 +5,10 @@ import { useSearchParams } from 'next/navigation';
 import { AcademicPage } from '@/components/academic/AcademicPage';
 import { GradesTabs, isGradesFeedbackTab } from '@/components/academic/GradesTabs';
 import { SchoolSemesterSummary } from '@/components/academic/SchoolSemesterSummary';
+import { TranscriptReviewPanel, TranscriptReviewHint } from '@/components/academic/TranscriptReviewPanel';
+import { transcriptReviewReason } from '@/lib/transcriptReview';
+import { transcriptSemesterCoverage } from '@/lib/transcriptCoverage';
+import { TranscriptCoveragePanel } from '@/components/academic/TranscriptCoveragePanel';
 import { StudentGradesPage } from '@/features/nuni/StudentGrades';
 import {
   calculateGradeSummary,
@@ -12,46 +16,81 @@ import {
   type AcademicGradeResponse,
 } from '@/lib/academicRecords';
 import styles from '@/components/academic/academic.module.css';
+import transcriptStyles from './transcript.module.css';
+import {
+  buildTranscriptCsv,
+  selectTranscriptRows,
+  type TranscriptScoreKind,
+  type TranscriptSort,
+} from '@/lib/gradeTranscript';
 
-function Grades({ records }: { records: AcademicGradeResponse }) {
+function Grades({ records, fetchedAt }: { records: AcademicGradeResponse; fetchedAt: string }) {
   const [semester, setSemester] = useState('');
+  const semesterCoverage = useMemo(() => transcriptSemesterCoverage(records), [records]);
+  const [reviewOnly, setReviewOnly] = useState(false);
   const [search, setSearch] = useState('');
-  const [sort, setSort] = useState('semester');
+  const [sort, setSort] = useState<TranscriptSort>('semester');
+  const [courseType, setCourseType] = useState('');
+  const [scoreKind, setScoreKind] = useState<TranscriptScoreKind>('all');
+  const [visibleCount, setVisibleCount] = useState(40);
+  const [exportNotice, setExportNotice] = useState('');
+  const courseTypes = useMemo(
+    () => [...new Set(records.grades.map((grade) => grade.courseType).filter(Boolean))]
+      .sort((a, b) => a.localeCompare(b, 'zh-TW')),
+    [records],
+  );
   const selected = useMemo(
     () => records.grades.filter((grade) => !semester || grade.semester === semester),
     [records, semester],
   );
   const summary = useMemo(() => calculateGradeSummary(selected), [selected]);
   const rows = useMemo(
-    () =>
-      selected
-        .filter((grade) =>
-          grade.courseName.toLocaleLowerCase().includes(search.trim().toLocaleLowerCase()),
-        )
-        .sort((a, b) => {
-          if (sort === 'name') return a.courseName.localeCompare(b.courseName, 'zh-TW');
-          if (sort === 'score')
-            return (
-              (typeof b.score === 'number' ? b.score : -Infinity) -
-                (typeof a.score === 'number' ? a.score : -Infinity) ||
-              a.courseName.localeCompare(b.courseName, 'zh-TW')
-            );
-          return (
-            b.semester.localeCompare(a.semester, undefined, { numeric: true }) ||
-            a.courseName.localeCompare(b.courseName, 'zh-TW')
-          );
-        }),
-    [selected, search, sort],
+    () => selectTranscriptRows(records.grades, { semester, search, courseType, scoreKind, sort })
+      .filter((grade) => !reviewOnly || transcriptReviewReason(grade.score) !== null),
+    [records, semester, search, courseType, scoreKind, sort, reviewOnly],
   );
+  const visibleRows = rows.slice(0, visibleCount);
+  const hasFilter = Boolean(reviewOnly || search.trim() || semester || courseType || scoreKind !== 'all');
+  const resetList = () => { setVisibleCount(40); setExportNotice(''); };
+  const clearFilters = () => {
+    setReviewOnly(false); setSearch(''); setSemester(''); setCourseType(''); setScoreKind('all'); resetList();
+  };
+  const inspectSemester = (code: string) => {
+    setSemester(code); setReviewOnly(false); setSearch(''); setCourseType(''); setScoreKind('all'); resetList();
+  };
+  const exportRows = () => {
+    setExportNotice('');
+    let objectUrl: string | undefined;
+    let anchor: HTMLAnchorElement | undefined;
+    try {
+      const csv = buildTranscriptCsv({ rows, fetchedAt, coverage: records.coverage });
+      objectUrl = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' }));
+      anchor = document.createElement('a');
+      anchor.href = objectUrl;
+      anchor.download = 'campus-one-grades.csv';
+      document.body.appendChild(anchor);
+      anchor.click();
+      setExportNotice(`已產生 ${rows.length} 筆成績的 CSV，請查看瀏覽器下載項目。`);
+    } catch {
+      setExportNotice('目前無法產生檔案，請重新讀取資料後再試。');
+    } finally {
+      anchor?.remove();
+      if (objectUrl) {
+        const url = objectUrl;
+        // 讓瀏覽器完成下載交接後釋放暫存，資料不會上傳至其他服務。
+        setTimeout(() => URL.revokeObjectURL(url), 10_000);
+      }
+    }
+  };
   return (
     <>
       <div className={styles.toolbar}>
         <h2>你的成績紀錄</h2>
         <label className={styles.field}>
           學期
-          <select value={semester} onChange={(event) => setSemester(event.target.value)}>
+          <select value={semester} onChange={(event) => { setSemester(event.target.value); resetList(); }}>
             <option value="">全部學期</option>
-            {[...records.semesters].sort((a, b) => b.localeCompare(a, undefined, { numeric: true })).map((code) => (
+            {semesterCoverage.map(({ semester: code }) => (
               <option key={code} value={code}>
                 {formatSemester(code)}
               </option>
@@ -78,41 +117,77 @@ function Grades({ records }: { records: AcademicGradeResponse }) {
           <small>僅計 {summary.numericCredits} 學分的數字成績</small>
         </div>
       </div>
+      <TranscriptCoveragePanel semesters={semesterCoverage} selected={semester} onSelect={inspectSemester} />
       <SchoolSemesterSummary records={records} semester={semester} />
-      <div className={styles.toolbar}>
+      <TranscriptReviewPanel grades={selected} active={reviewOnly} onChange={(active) => {
+        setReviewOnly(active); setSearch(''); setCourseType(''); setScoreKind('all'); resetList();
+      }} />
+      <p className={transcriptStyles.notice}>
+        上方學分與平均按所選學期計算；下方搜尋、修別與成績類型只篩選明細，不改變學期合計。
+      </p>
+      <div className={transcriptStyles.filters}>
         <label className={styles.field}>
           搜尋科目
           <input
             type="search"
-            placeholder="輸入科目名稱"
+            placeholder="中英文科目、班級或學期"
             value={search}
-            onChange={(event) => setSearch(event.target.value)}
+            onChange={(event) => { setSearch(event.target.value); resetList(); }}
           />
         </label>
         <label className={styles.field}>
+          修別
+          <select value={courseType} onChange={(event) => { setCourseType(event.target.value); resetList(); }}>
+            <option value="">全部修別</option>
+            {courseTypes.map((type) => <option key={type} value={type}>{type}</option>)}
+          </select>
+        </label>
+        <label className={styles.field}>
+          成績類型
+          <select value={scoreKind} onChange={(event) => {
+            setScoreKind(event.target.value as TranscriptScoreKind); resetList();
+          }}>
+            <option value="all">全部結果</option>
+            <option value="numeric">數字成績（含 0 分）</option>
+            <option value="text">文字成績</option>
+            <option value="missing">尚未提供</option>
+          </select>
+        </label>
+        <label className={styles.field}>
           排序
-          <select value={sort} onChange={(event) => setSort(event.target.value)}>
+          <select value={sort} onChange={(event) => { setSort(event.target.value as TranscriptSort); resetList(); }}>
             <option value="semester">學期，由新到舊</option>
             <option value="name">科目名稱</option>
             <option value="score">數字成績，由高到低</option>
           </select>
         </label>
       </div>
-      {(search.trim() || semester) && <p className={styles.resultCount} role="status">
-        目前顯示 {rows.length} 筆成績
-        <button type="button" onClick={() => { setSearch(''); setSemester(''); }}>清除篩選</button>
-      </p>}
+      <div className={transcriptStyles.results}>
+        <p role="status" aria-live="polite">符合 {rows.length} 筆 · 已顯示 {visibleRows.length} 筆</p>
+        <div className={transcriptStyles.actions}>
+          {hasFilter && <button className="btn" type="button" onClick={clearFilters}>清除篩選</button>}
+          <button className="btn" type="button" disabled={!rows.length} onClick={exportRows}>
+            匯出符合條件的 {rows.length} 筆 CSV
+          </button>
+        </div>
+      </div>
+      <p className={transcriptStyles.notice}>
+        匯出包含全部符合條件的明細，不限畫面已展開的筆數。檔案會註明來源、讀取時間與資料範圍，並非正式成績單。
+      </p>
+      {exportNotice && <p role="status">{exportNotice}</p>}
       {rows.length ? (
-        <ul className={styles.list}>
-          {rows.map((grade) => (
+        <ul className={styles.list} aria-label="成績明細">
+          {visibleRows.map((grade) => (
             <li key={grade.id}>
               <div>
                 <h3>{grade.courseName}</h3>
+                {grade.courseNameEn && <p className={transcriptStyles.secondary}>{grade.courseNameEn}</p>}
                 <p>
                   {formatSemester(grade.semester)} · {grade.courseType || '類別未提供'} ·{' '}
                   {grade.credits} 學分
                 </p>
                 {grade.class && <p>{grade.class}</p>}
+                <TranscriptReviewHint score={grade.score} />
               </div>
               <div
                 className={`${styles.score} ${typeof grade.score === 'string' && grade.score.length > 3 ? styles.scoreText : ''}`}
@@ -125,11 +200,18 @@ function Grades({ records }: { records: AcademicGradeResponse }) {
         </ul>
       ) : (
         <p className={styles.empty}>
-          {records.grades.length
+          {semester && semesterCoverage.some(entry => entry.semester === semester && entry.rowCount === 0)
+            ? `${formatSemester(semester)}：來源提到這個學期，但本次沒有取得科目明細。請更新資料或至 e 校園核對；這不代表沒有修課。`
+            : records.grades.length
             ? '沒有符合條件的成績。'
             : '學校這次回傳的成績清單是空的，請稍後更新或至 e 校園確認。'}
         </p>
       )}
+      {rows.length > visibleRows.length && <div className={transcriptStyles.more}>
+        <button className="btn" type="button" onClick={() => setVisibleCount((count) => count + 40)}>
+          再顯示 {Math.min(40, rows.length - visibleRows.length)} 筆成績
+        </button>
+      </div>}
       <p className={styles.note}>
         成績按學校回傳內容顯示。「通過」、未定成績與其他文字結果保留原文，不換算成零分或
         GPA。平均分數僅供查看紀錄，正式平均、排名與畢業資格請以學校公告為準。
@@ -151,7 +233,7 @@ export default function GradesPage() {
       closedAlternative="成績請先到學校的 e 校園查看。"
       lead={<GradesTabs active="semester" />}
     >
-      {({ records }) => <Grades records={records} />}
+      {({ records, fetchedAt }) => <Grades records={records} fetchedAt={fetchedAt} />}
     </AcademicPage>
   );
 }

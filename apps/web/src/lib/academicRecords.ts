@@ -36,6 +36,8 @@ export interface AcademicCourseResponse {
 
 export interface AcademicGrade {
   id: string;
+  /** 只保留來源提供的課號；未提供時不由名稱或列序號猜測。 */
+  courseCode?: string;
   semester: string;
   courseName: string;
   courseNameEn: string;
@@ -220,6 +222,7 @@ export function normalizeGradeRecords(input: unknown): AcademicGradeResponse {
   const grades: AcademicGrade[] = [];
   for (const item of response.grades) {
     const row = record(item, '成績');
+    const courseCode = text(row.courseCode, '課號');
     const grade = {
       semester: text(row.semester, '成績學期', true),
       courseName: text(row.courseName, '科目名稱', true),
@@ -228,6 +231,7 @@ export function normalizeGradeRecords(input: unknown): AcademicGradeResponse {
       courseType: text(row.courseType, '課程類別'),
       credits: credits(row.credits),
       score: gradeValue(row.score, true),
+      ...(courseCode ? { courseCode } : {}),
     };
     if (!semesters.includes(grade.semester)) semesters.push(grade.semester);
     const key = JSON.stringify(grade);
@@ -314,7 +318,7 @@ export function calculateGradeSummary(grades: readonly AcademicGrade[]): GradeSu
 export function formatSemester(code: string | null | undefined): string {
   if (!code?.trim()) return '學期未提供';
   const value = code.trim();
-  const match = /^(\d{2,3})([12])$/.exec(value);
+  const match = /^(\d{2,3})([123])$/.exec(value);
   return match ? `${match[1]} 學年度第 ${match[2]} 學期` : value;
 }
 

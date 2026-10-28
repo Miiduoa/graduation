@@ -1,0 +1,30 @@
+.panel {
+  padding: 18px 20px;
+  margin: 20px 0;
+  border: 1px solid var(--border);
+  border-inline-start: 3px solid var(--brand);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--text);
+  overflow-wrap: anywhere;
+}
+.heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 16px;
+}
+.heading > div { flex: 1 1 220px; min-width: 0; }
+.heading h3 { margin: 0; font-size: 16px; font-weight: 600; line-height: 1.5; }
+.heading p { margin: 8px 0 0; line-height: 1.7; font-size: 13px; color: var(--muted); }
+.heading button { min-height: 44px; max-width: 100%; white-space: normal; }
+.heading button:focus-visible { outline: 2px solid currentColor; outline-offset: 3px; }
+.scope { margin: 12px 0 0; font-size: 13px; line-height: 1.7; }
+.note { margin: 8px 0 0; color: var(--muted); font-size: 12px; line-height: 1.8; }
+.hint { display: inline-block; padding: 3px 8px; border: 1px solid var(--border-strong); border-radius: 4px; font-size: 12px; line-height: 1.7; }
+@media (max-width: 480px) {
+  .panel { padding: 16px; }
+  .heading { align-items: stretch; gap: 12px; }
+  .heading button { flex: 1 1 100%; }
+}
