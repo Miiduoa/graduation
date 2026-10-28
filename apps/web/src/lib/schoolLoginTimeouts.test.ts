@@ -1,10 +1,10 @@
 import { expect, it } from 'vitest';
+import { STUDENT_LOGIN_CLIENT_TIMEOUT_MS } from '@campus/shared/src/schoolLogin';
 import {
   DEFAULT_STUDENT_LMS_HOP_TIMEOUT_MS,
   DEFAULT_STUDENT_LMS_TOTAL_TIMEOUT_MS,
   MAX_STUDENT_CREDENTIAL_POSTS,
   MIN_STUDENT_PORTAL_TIMEOUT_MS,
-  STUDENT_LOGIN_CLIENT_TIMEOUT_MS,
   studentLmsHopTimeoutMs,
   studentLmsTotalTimeoutMs,
   studentPortalTimeoutMs,

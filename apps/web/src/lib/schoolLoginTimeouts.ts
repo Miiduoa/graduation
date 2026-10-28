@@ -14,12 +14,7 @@ export const MIN_STUDENT_LMS_HOP_TIMEOUT_MS = 1_000;
 /** 同一組密碼對學校送出帳密 POST 的上限（含雙 UID 備援與逾時重試）。 */
 export const MAX_STUDENT_CREDENTIAL_POSTS = 2;
 
-/**
- * 前端學號登入整段等待：覆蓋「兩跳各接近 15 秒再重試」（15×4=60 秒）加上發 token 緩衝。
- * 必須大於伺服器最長 submit，避免前端先 abort、後端卻寫入孤兒 session。
- */
-export const STUDENT_LOGIN_CLIENT_TIMEOUT_MS =
-  MIN_STUDENT_PORTAL_TIMEOUT_MS * MAX_STUDENT_CREDENTIAL_POSTS * 2 + 20_000;
+export { STUDENT_LOGIN_CLIENT_TIMEOUT_MS } from '@campus/shared/src/schoolLogin';
 
 export function studentPortalTimeoutMs(
   raw: string | undefined = process.env.PU_STUDENT_LOGIN_TIMEOUT_MS,

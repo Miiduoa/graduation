@@ -5,6 +5,12 @@ export const TEACHER_LMS_UNAVAILABLE_CODE = 'teacher_lms_unreachable';
 export const TEACHER_LMS_UNAVAILABLE_COPY = '老師登入暫時無法使用';
 export const TEACHER_LMS_UNAVAILABLE_COPY_LEGACY = '老師登入暫未開放；學生請輸入純數字學號';
 
+/**
+ * 學號登入整段等待：覆蓋「兩跳各接近 15 秒再重試」（15×4=60 秒）加上發 token 緩衝。
+ * Web 與 App 共用，避免前端先 abort、後端卻寫入孤兒 session。
+ */
+export const STUDENT_LOGIN_CLIENT_TIMEOUT_MS = 80_000;
+
 const USABLE_SCHOOL_LOGIN_KINDS = new Set(['school-issued', 'student-id']);
 
 export function hasUsableSchoolLoginProvider(kinds: unknown): boolean {
