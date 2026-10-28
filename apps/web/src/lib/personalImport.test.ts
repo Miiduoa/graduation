@@ -250,9 +250,9 @@ describe('personal import parsing preserves evidence', () => {
     );
     const approximate = parsePersonalImport(text.replace('08:10', '08:00'), timetable);
     expect(approximate.rows[0].startPeriod).toBeUndefined();
-    expect(errors(approximate.issues)).toContainEqual(
-      expect.objectContaining({ code: 'invalid-period' }),
-    );
+    expect(approximate.rows[0].endPeriod).toBeUndefined();
+    expect(approximate.rows[0]).toMatchObject({ startTime: '08:00', endTime: '10:00' });
+    expect(errors(approximate.issues)).toEqual([]);
   });
 
   it('rejects conflicts between explicit periods and clock times', () => {
@@ -312,9 +312,9 @@ describe('personal import parsing preserves evidence', () => {
       ncku,
     );
     expect(puClock.rows[0].startPeriod).toBeUndefined();
-    expect(errors(puClock.issues)).toContainEqual(
-      expect.objectContaining({ code: 'invalid-period' }),
-    );
+    expect(puClock.rows[0].endPeriod).toBeUndefined();
+    expect(puClock.rows[0]).toMatchObject({ startTime: '08:10', endTime: '10:00' });
+    expect(errors(puClock.issues)).toEqual([]);
   });
 
   it('maps NTPU evening periods 10–13 to 18:30 and keeps them out of other schools', () => {

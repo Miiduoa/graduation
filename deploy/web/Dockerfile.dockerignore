@@ -23,6 +23,7 @@
 !backend/functions/lib/
 !backend/functions/lib/puGradeDocument.js
 !backend/functions/lib/puCreditSummary.js
+!backend/functions/lib/puCreditOverview.js
 !backend/functions/lib/puCourseTime.js
 !backend/functions/lib/taipeiDay.js
 **/node_modules

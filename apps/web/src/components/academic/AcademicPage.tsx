@@ -28,6 +28,7 @@ type Props<K extends AcademicKind> = {
   subtitle: string;
   closedAlternative: string;
   lead?: ReactNode;
+  schoolOverview?: (scope: { user: { uid: string }; schoolId: 'pu' }) => ReactNode;
   workspace?: (scope: { userId: string | null; schoolId: string | null; schoolName: string }) => ReactNode;
   children: (snapshot: AcademicSnapshot<K>) => ReactNode;
 };
@@ -252,6 +253,8 @@ export function AcademicPage<K extends AcademicKind>(props: Props<K>) {
     <SiteShell title={props.title} subtitle={props.subtitle}>
       {props.lead}
       <PersonalImportSummary kind="grades" />
+      {readyOfficial && user && !loading && !error
+        ? props.schoolOverview?.({ user, schoolId: 'pu' }) : null}
       {browse.status === 'loading' ? (
         <BrowseUnavailable status="loading" schoolName="" />
       ) : browse.status === 'error' ? (

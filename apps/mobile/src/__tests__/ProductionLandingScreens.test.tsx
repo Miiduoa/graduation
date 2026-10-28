@@ -31,6 +31,9 @@ let mockAuth: {
 };
 
 jest.mock('../state/auth', () => ({ useAuth: () => mockAuth }));
+jest.mock('../state/school', () => ({
+  useSchool: () => ({ school: { id: mockAuth.profile?.schoolId ?? 'pu' } }),
+}));
 jest.mock('../hooks/usePermissions', () => ({ usePermissions: () => ({ isStudent: true }) }));
 jest.mock('../data/studentHome', () => ({ loadStudentHome: jest.fn() }));
 jest.mock('../components/LearningNextClassCard', () => ({ LearningNextClassCard: () => null }));

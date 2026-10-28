@@ -50,12 +50,13 @@ for (const name of ['Dockerfile', 'Dockerfile.nuni']) {
   });
 }
 
-// Web 的校務讀取共用這六份純來源檔，不應把整個 Functions 部署內容帶進映像。
+// Web 校務讀取只帶入需要的來源檔，不複製整個 Functions 部署內容。
 const schoolReaderSources = [
   'backend/functions/puScraper.js',
   'backend/functions/tronClassScraper.js',
   'backend/functions/lib/puGradeDocument.js',
   'backend/functions/lib/puCreditSummary.js',
+  'backend/functions/lib/puCreditOverview.js',
   'backend/functions/lib/puCourseTime.js',
   'backend/functions/lib/taipeiDay.js',
 ];

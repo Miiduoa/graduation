@@ -1,0 +1,30 @@
+.panel {
+  padding: clamp(20px, 3vw, 30px);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  margin: 18px 0 28px;
+}
+.header { display: flex; justify-content: space-between; align-items: flex-start; gap: 20px; }
+.header h2 { margin: 6px 0 10px; font-size: 20px; font-weight: 600; }
+.header button { flex-shrink: 0; min-height: 44px; }
+.source, .description, .timestamp, .note { color: var(--muted); line-height: 1.7; }
+.source { font-size: 12px; margin: 0; }
+.description { font-size: 14px; margin: 8px 0; }
+.metrics { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 24px; padding: 22px 0; }
+.metrics span { display: block; font-size: 13px; color: var(--muted); }
+.metrics strong { display: block; margin-top: 8px; font-size: clamp(24px, 3vw, 34px); font-weight: 600; font-variant-numeric: tabular-nums; }
+.breakdown { margin: 0; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 20px; padding: 20px 0; border-top: 1px solid var(--border); }
+.breakdown dt { color: var(--muted); font-size: 13px; }
+.breakdown dd { margin: 7px 0 0; font-size: 17px; font-variant-numeric: tabular-nums; }
+.timestamp { font-size: 12px; }
+.note { font-size: 13px; padding-top: 16px; border-top: 1px solid var(--border); }
+.notice { margin: 18px 0; padding: 12px 15px; background: var(--accent-soft); border-left: 3px solid var(--brand); line-height: 1.7; font-size: 14px; }
+.actions { display: flex; gap: 14px; flex-wrap: wrap; align-items: center; }
+.actions a { color: var(--brand); min-height: 44px; display: inline-flex; align-items: center; text-underline-offset: 3px; }
+@media (max-width: 600px) {
+  .header { flex-direction: column; gap: 12px; }
+  .breakdown { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .metrics { gap: 14px; }
+}
+@media (max-width: 360px) { .metrics { grid-template-columns: 1fr; } }

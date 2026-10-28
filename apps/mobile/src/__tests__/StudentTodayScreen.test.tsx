@@ -28,6 +28,9 @@ const mockTimetable = {
 };
 
 jest.mock('../state/auth', () => ({ useAuth: () => mockAuth }));
+jest.mock('../state/school', () => ({
+  useSchool: () => ({ school: { id: mockAuth.profile?.schoolId ?? 'pu' } }),
+}));
 jest.mock('../data/studentHome', () => ({ loadStudentHome: jest.fn() }));
 jest.mock('../ui/navigationTheme', () => ({ useTabBarContentBottomPadding: () => 80 }));
 jest.mock('../services/companionSignalRecorder', () => ({ recordCompanionEvent: jest.fn() }));

@@ -34,6 +34,7 @@ import { useSchool } from '../state/school';
 import { usePersonalImportScope } from '../state/personalImportScope';
 import { loadPersonalImports, personalImportCourses, selectPersonalTimetableCourses } from '../services/personalImports';
 import { PersonalImportSummary } from '../components/PersonalImportSummary';
+import { SchoolTimetableImport } from '../components/SchoolTimetableImport';
 import { safeNavigate } from '../utils/safeNavigate';
 import type { PersonalImportRecord } from '@campus/shared';
 import {
@@ -232,6 +233,14 @@ function PersonalTimetableWorkspace({ initialTerm }: { initialTerm?: string }) {
   return (
     <Screen title="我的課表" subtitle="查看上課時間與空堂">
       <ScrollView contentContainerStyle={{ padding: 16, gap: 16, paddingBottom: 120 }}>
+        {importScope && schoolId === 'pu' ? <SchoolTimetableImport
+          scope={importScope}
+          uid={auth.user?.uid || null}
+          isCurrent={() => scopeRef.current === importScopeKey}
+          onConnect={() => { safeNavigate(navigation, 'SSOLogin'); }}
+          onOpenImports={() => { safeNavigate(navigation, 'PersonalImport', { kind: 'timetable' }); }}
+          onSaved={(termKey) => { if (termKey) setImportTerm(termKey); void load(); }}
+        /> : null}
         <PersonalImportSummary kind="timetable" />
         {importStatus === 'error' ? (
           <View>
@@ -293,10 +302,15 @@ function PersonalTimetableWorkspace({ initialTerm }: { initialTerm?: string }) {
           <Button text="新增" disabled={!profile} onPress={() => { setImportTerm('legacy'); setEditing(cleanCourse({ day, start: 1, end: 1 }, { periodCount: periods.length })); }} />
         </View>
         {!profile ? <Text style={{ color: theme.colors.muted }}>這所學校尚未提供節次時間表。可在匯入紀錄填寫實際時間；不套用其他學校的節次。</Text> : null}
-        {listedImports.map((row) => <Pressable key={row.id} onPress={() => safeNavigate(navigation, 'PersonalImport', { kind: 'timetable' })} style={{ gap: 6, paddingVertical: 12 }}>
-          <Text style={{ color: theme.colors.text, fontWeight: '600' }}>{row.title}</Text>
-          <Text style={{ color: theme.colors.muted }}>週{['', '一', '二', '三', '四', '五', '六', '日'][row.dayOfWeek || 0] || '未填'} · {row.startTime && row.endTime ? `${row.startTime}–${row.endTime}` : '時間未確認'} · {row.location || '教室未填'} · 個人匯入</Text>
-        </Pressable>)}
+        {listedImports.map((row) => {
+          const explicit = !!(row.startTime || row.endTime);
+          const startTime = explicit ? row.startTime : times[(row.startPeriod ?? 0) - 1]?.[0];
+          const endTime = explicit ? row.endTime : times[(row.endPeriod ?? 0) - 1]?.[1];
+          return <Pressable key={row.id} onPress={() => safeNavigate(navigation, 'PersonalImport', { kind: 'timetable' })} style={{ gap: 6, paddingVertical: 12 }}>
+            <Text style={{ color: theme.colors.text, fontWeight: '600' }}>{row.title}</Text>
+            <Text style={{ color: theme.colors.muted }}>週{['', '一', '二', '三', '四', '五', '六', '日'][row.dayOfWeek || 0] || '未填'} · {startTime && endTime ? `${startTime}–${endTime}` : '時間未確認'} · {row.location || '教室未填'} · 個人匯入</Text>
+          </Pressable>;
+        })}
         {view === 'day' ? (
           <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
             {WEEKDAY_LABELS.map((label, index) => (

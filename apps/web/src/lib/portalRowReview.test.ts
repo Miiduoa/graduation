@@ -76,10 +76,22 @@ describe('portal row form', () => {
     const result = applyPortalRowDraft(row, createPortalRowDraft(row));
     expect(result.ok).toBe(true); if (result.ok) expect(result.row).toMatchObject({ periodLabel: '3–4', startPeriod: undefined, endPeriod: undefined });
   });
-  it('rejects reversed times and preserves weekend behavior of the shared validator', () => {
+  it('rejects reversed times', () => {
     const row = course({ schoolId: 'other' });
     expect(applyPortalRowDraft(row, { ...createPortalRowDraft(row), startTime: '12:00', endTime: '10:00' }).ok).toBe(false);
-    expect(applyPortalRowDraft(course(), { ...createPortalRowDraft(course(), 'pu'), dayOfWeek: '7' }, 'pu').ok).toBe(false);
+  });
+  it.each([6, 7])('preserves weekend day %s when reviewing a Providence course', (dayOfWeek) => {
+    const row = course();
+    const result = applyPortalRowDraft(row, { ...createPortalRowDraft(row, 'pu'), dayOfWeek: String(dayOfWeek) }, 'pu');
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.row.dayOfWeek).toBe(dayOfWeek);
+    expect(result.issues.some((issue) => issue.code === 'invalid-weekday')).toBe(false);
+  });
+  it.each(['0', '8'])('rejects day %s outside the seven-day timetable range', (dayOfWeek) => {
+    const row = course();
+    const result = applyPortalRowDraft(row, { ...createPortalRowDraft(row, 'pu'), dayOfWeek }, 'pu');
+    expect(result.ok).toBe(false);
+    expect(result.issues.some((issue) => issue.field === 'dayOfWeek')).toBe(true);
   });
   it('revalidates real parser errors after a malformed credit value is corrected', () => {
     const parsed = parsePersonalImport('課程名稱,學分,成績\n統計學,3O,90', { kind: 'grades', schoolId: 'pu', academicYear: '115', semester: '1' });

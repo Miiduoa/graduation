@@ -17,6 +17,8 @@ import {
 import { computeCreditTotals } from './creditAudit/creditMath';
 import { isProvidenceUniversitySchool } from './creditAudit/gradeScope';
 import { loadCreditRecords } from './creditAudit/loadCreditRecords';
+import { SchoolCreditOverviewCard } from '../components/SchoolCreditOverviewCard';
+import { rootNavigateMeScreen } from '../app/rootNavigation';
 
 const SHOWN: PUCreditCat[] = ['required', 'elective', 'general', 'common', 'free'];
 
@@ -123,6 +125,10 @@ export default function CreditSummaryScreen(props: Props) {
       }
       onBack={() => navigation?.goBack?.()}
     >
+      {isPu && auth.user && !auth.loading && !auth.profileLoading && !auth.tokenExpired &&
+        auth.profile?.uid === auth.user.uid && isProvidenceUniversitySchool(auth.profile.schoolId)
+        ? <SchoolCreditOverviewCard key={`${uid}:${schoolId}`} user={auth.user} schoolId={schoolId}
+          onReconnect={() => { rootNavigateMeScreen('SSOLogin'); }} /> : null}
       {showLoading ? (
         <Text style={{ margin: aiTokens.space.md, color: aiTokens.muted, fontSize: 15 }}>
           讀取修課紀錄中…

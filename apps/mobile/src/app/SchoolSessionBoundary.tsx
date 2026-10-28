@@ -1,8 +1,9 @@
-import React from 'react';
+import React, { useEffect, useRef } from 'react';
 import { useAuth } from '../state/auth';
 import { useSchool } from '../state/school';
 import { toPublicSchoolId } from '../data/schoolIds';
 import { isStudentIdLoginAvailable } from '../services/schoolLoginAvailability';
+import { invalidateSchoolLoginSync } from '../services/schoolLoginSync';
 
 type SchoolSession = Pick<
   ReturnType<typeof useAuth>,
@@ -36,6 +37,15 @@ export function SchoolSessionBoundary({
 }) {
   const auth = useAuth();
   const { school } = useSchool();
+  const previous = useRef({ user: auth.user, schoolId: toPublicSchoolId(school.id) });
+  useEffect(() => {
+    const schoolId = toPublicSchoolId(school.id);
+    if (previous.current.user !== auth.user || previous.current.schoolId !== schoolId) {
+      invalidateSchoolLoginSync(previous.current.user, previous.current.schoolId);
+    }
+    previous.current = { user: auth.user, schoolId };
+    if (auth.tokenExpired) invalidateSchoolLoginSync(auth.user, schoolId);
+  }, [auth.user, auth.tokenExpired, school.id]);
   return hasReadySchoolSession(auth, school.id) ? (
     <React.Fragment key={`${auth.user!.uid}:${school.id}`}>
       {children}

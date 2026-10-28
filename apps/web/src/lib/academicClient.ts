@@ -26,7 +26,7 @@ export class AcademicConnectionError extends Error {
   }
 }
 
-async function readAcademicResponse(kind: AcademicKind, uid: string): Promise<unknown> {
+export async function readAcademicResponse(kind: AcademicKind | 'creditOverview', uid: string): Promise<unknown> {
   const user = getAuth()?.currentUser;
   if (!user || user.uid !== uid) throw new AcademicConnectionError('reconnect');
   return withSchoolDataDeadline(async (signal) => {

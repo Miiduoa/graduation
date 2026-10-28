@@ -51,6 +51,9 @@ export function mapPersonalImportPeriods(
   const profile = profileOf(options);
   if (row.kind !== 'timetable' || !profile) return row;
   const mapped = mapClockToPeriodSlots(row.startTime, row.endTime, profile);
+  // A complete clock range can remain outside the grid. Mapping just one end
+  // would turn an otherwise valid range into an incomplete period selection.
+  if (!mapped.start || !mapped.end) return row;
   return {
     ...row,
     ...(row.startPeriod === undefined && mapped.start ? { startPeriod: mapped.start } : {}),
@@ -119,17 +122,15 @@ export function validatePersonalImportRow(
     const mapped = mapPersonalImportPeriods(row, options);
     const profile = profileOf(options);
     const slots = profile ? periodCount(profile) : undefined;
-    const weekdays = profile ? 5 : 7;
-    if (!Number.isInteger(row.dayOfWeek) || row.dayOfWeek! < 1 || row.dayOfWeek! > weekdays)
+    if (!Number.isInteger(row.dayOfWeek) || row.dayOfWeek! < 1 || row.dayOfWeek! > 7)
       error(
         'invalid-weekday',
         'dayOfWeek',
-        profile
-          ? `${PERIOD_PROFILE_TITLES[profile]}課表目前支援星期一至五，請確認上課日。`
-          : '請確認上課日（星期一至日）。',
+        '請確認上課日（星期一至日）。',
       );
     const hasPeriods = mapped.startPeriod !== undefined || mapped.endPeriod !== undefined;
-    if (profile || hasPeriods || (!row.startTime && !row.endTime && !row.periodLabel?.trim())) {
+    const hasClockRange = !!row.startTime && !!row.endTime;
+    if (hasPeriods || (!hasClockRange && (profile || !row.periodLabel?.trim()))) {
       for (const field of ['startPeriod', 'endPeriod'] as const) {
         if (
           !Number.isInteger(mapped[field]) ||

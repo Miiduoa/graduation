@@ -1,13 +1,22 @@
 // @vitest-environment node
 import { beforeEach, expect, it, vi } from 'vitest';
-const mocks = vi.hoisted(() => ({ courses: vi.fn(), grades: vi.fn() }));
+const mocks = vi.hoisted(() => ({ courses: vi.fn(), grades: vi.fn(), creditOverview: vi.fn() }));
 vi.mock('../../../../../backend/functions/puScraper.js', () => ({
   puFetchCourses: mocks.courses,
   puFetchGrades: mocks.grades,
+  puFetchCreditOverview: mocks.creditOverview,
 }));
 import { academicSchoolSource } from './academicSchoolSource';
 
 beforeEach(() => vi.clearAllMocks());
+
+it('reads school credit totals independently from grade-derived summaries', async () => {
+  const result = { success: true, creditOverview: { source: 'pu-credit-review' } };
+  mocks.creditOverview.mockResolvedValueOnce(result);
+  expect(await academicSchoolSource.creditOverview!({ portal: 'owned' }, '')).toBe(result);
+  expect(mocks.creditOverview).toHaveBeenCalledWith({ portal: 'owned' }, '');
+  expect(mocks.grades).not.toHaveBeenCalled();
+});
 
 it('derives a clearly marked credit summary from the same successful grade response', async () => {
   mocks.grades.mockResolvedValue({

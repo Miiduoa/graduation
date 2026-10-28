@@ -18,7 +18,7 @@ COPY apps/web/ ./apps/web/
 COPY packages/shared/ ./packages/shared/
 COPY scripts/import-ai/ ./scripts/import-ai/
 COPY backend/functions/puScraper.js backend/functions/tronClassScraper.js ./backend/functions/
-COPY backend/functions/lib/puGradeDocument.js backend/functions/lib/puCreditSummary.js backend/functions/lib/puCourseTime.js backend/functions/lib/taipeiDay.js ./backend/functions/lib/
+COPY backend/functions/lib/puGradeDocument.js backend/functions/lib/puCreditSummary.js backend/functions/lib/puCreditOverview.js backend/functions/lib/puCourseTime.js backend/functions/lib/taipeiDay.js ./backend/functions/lib/
 ARG NEXT_PUBLIC_FIREBASE_API_KEY
 ARG NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN
 ARG NEXT_PUBLIC_FIREBASE_PROJECT_ID

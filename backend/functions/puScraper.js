@@ -18,6 +18,7 @@
 
 const https = require('https');
 const { parsePuGradeDocument, parseGradeSemesterCodes } = require('./lib/puGradeDocument');
+const { parsePuCreditOverview } = require('./lib/puCreditOverview');
 const { buildDerivedCreditSummary } = require('./lib/puCreditSummary');
 const { parsePuCourseTime } = require('./lib/puCourseTime');
 const { taipeiDateKey } = require('./lib/taipeiDay');
@@ -31,6 +32,7 @@ const MYPU_HOST = 'mypu.pu.edu.tw';
 const LOGIN_PATH = '/index_check.php';
 const COURSE_RESULT_PATH = '/stu_query/query_course.html';
 const GRADE_PATH = '/score_query/score_all.php';
+const CREDIT_OVERVIEW_PATH = '/grade_review/tab_1.php';
 const REQUEST_TIMEOUT_MS = 10_000;
 const MAX_RESPONSE_BYTES = 4 * 1024 * 1024;
 const CAMPUS_HOSTS = new Set([ALCAT_HOST, MYPU_HOST]);
@@ -564,6 +566,27 @@ async function puFetchGrades(cookies, semester) {
   }
 }
 
+/** Read the existing credit-review overview only; its subtotal is not a graduation decision. */
+async function puFetchCreditOverview(cookies) {
+  if (!cookies || typeof cookies !== 'object' || Array.isArray(cookies) || !Object.keys(cookies).length) {
+    return { success: false, code: 'session-expired', creditOverview: null, error: '校務連線已到期，請重新連線。' };
+  }
+  try {
+    // At most two existing bounded requests: one fixed page and one trusted redirect.
+    const response = await getFollowRedirect(ALCAT_HOST, CREDIT_OVERVIEW_PATH, cookies, 1);
+    if ([401, 403].includes(response.status)) {
+      return { success: false, code: 'session-expired', creditOverview: null, error: '校務連線已到期，請重新連線。' };
+    }
+    const contentType = response.headers['content-type'];
+    if (response.status !== 200 || (contentType && !/^(?:text\/html|application\/xhtml\+xml)(?:\s*;|$)/i.test(contentType))) {
+      return { success: false, code: 'unavailable', creditOverview: null, error: '暫時無法讀取校方學分累計資料。' };
+    }
+    return parsePuCreditOverview(response.data);
+  } catch {
+    return { success: false, code: 'unavailable', creditOverview: null, error: '暫時無法讀取校方學分累計資料。' };
+  }
+}
+
 /**
  * Extract date from HTML context near a link.
  * Tries multiple date patterns: YYYY-MM-DD, ROC year format (YY-MM-DD).
@@ -797,14 +820,11 @@ async function puFetchStudentInfo(cookies) {
   }
 }
 
-// Legacy credit-audit URL discovery was removed: it was not exported,
-// contained unresolved parser references, and could not produce verified
-// graduation eligibility from the available academic records.
-
 module.exports = {
   puLogin,
   puFetchCourses,
   puFetchGrades,
+  puFetchCreditOverview,
   puFetchAnnouncements,
   puFetchStudentInfo,
   puFetchAbsence,

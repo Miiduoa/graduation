@@ -1,5 +1,6 @@
 import type { CallableRequest } from './groupInviteHandlers';
 import { HttpsError } from './httpsError';
+import { normalizePuCreditOverview } from '@campus/shared/src/puCreditOverview';
 
 type RecordData = Record<string, unknown>;
 export type SchoolDataSnapshot = { exists: boolean; data: () => RecordData | undefined };
@@ -19,6 +20,7 @@ export type AcademicFirestore = {
 export type AcademicFetchers = {
   courses: (cookies: Record<string, string>, semester: string) => Promise<unknown>;
   grades: (cookies: Record<string, string>, semester: string) => Promise<unknown>;
+  creditOverview?: (cookies: Record<string, string>, semester: string) => Promise<unknown>;
 };
 
 function record(value: unknown): RecordData {
@@ -54,7 +56,7 @@ function unavailable(): never {
 
 function publicResult(kind: keyof AcademicFetchers, result: RecordData): RecordData {
   // 校務 cookie 與內部錯誤只留在伺服器，回應只包含頁面需要的資料欄位。
-  const keys = kind === 'courses'
+  const keys = kind === 'creditOverview' ? ['creditOverview'] : kind === 'courses'
     ? ['courses', 'studentInfo', 'semester', 'totalCredits']
     : ['grades', 'summary', 'allSemesters', 'creditSummary', 'coverage'];
   return Object.fromEntries([
@@ -93,9 +95,9 @@ export function createAcademicRecordsHandler({
     }
     const data = record(request.data);
     const kind = data.dataType;
-    if (typeof kind !== 'string' || !['courses', 'grades'].includes(kind) ||
+    if (typeof kind !== 'string' || !['courses', 'grades', 'creditOverview'].includes(kind) ||
       Object.keys(data).some((key) => key !== 'dataType')) {
-      throw new HttpsError('invalid-argument', '請選擇課表或成績資料。');
+      throw new HttpsError('invalid-argument', '請選擇課表、成績或學分累計。');
     }
     const dataType = kind as keyof AcademicFetchers;
     try {
@@ -112,9 +114,16 @@ export function createAcademicRecordsHandler({
       if (!selected || !session || session.ownerUid !== uid || !cookies ||
         !(schoolSessionExpiry(session.expiresAt) > now())) reconnect();
 
-      const result = record(await fetchers[dataType](cookies, ''));
+      const fetcher = fetchers[dataType];
+      if (!fetcher) unavailable();
+      const result = record(await fetcher(cookies, ''));
       if (result.code === 'session-expired') reconnect();
-      if (result.success !== true || !Array.isArray(result[dataType])) unavailable();
+      if (result.success !== true) unavailable();
+      if (dataType === 'creditOverview') {
+        const overview = normalizePuCreditOverview(result.creditOverview);
+        if (!overview) unavailable();
+        result.creditOverview = overview;
+      } else if (!Array.isArray(result[dataType])) unavailable();
 
       // 學校回應較慢時，重新確認帳號、校籍與 session，避免撤銷後仍回傳資料。
       await requireAcademicAccount(db, uid);

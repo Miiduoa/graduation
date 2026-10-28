@@ -8,6 +8,11 @@ import { getCloudFunctionUrl } from '../cloudFunctions';
 const UID = 'pu-410000001';
 const SESSION = '_puSessions/current';
 const expiry = () => new Date(Date.now() + 60_000);
+const creditTotals = () => ({
+  version: 1, source: 'pu-credit-review',
+  totals: { required: 40.5, elective: 20, externalElective: 3, generalOld: 0, generalNew: 8, subtotal: 71.5, totalRequired: 128, minorDouble: null },
+  coverage: { status: 'partial', missingFields: ['minorDouble'] },
+});
 
 function setup() {
   const store = createMemoryGroupStore([
@@ -30,10 +35,13 @@ function setup() {
     error: 'private internal response',
   });
   const verifyIdToken = vi.fn().mockResolvedValue({ uid: UID, schoolId: 'pu' });
+  const creditOverview = vi.fn().mockResolvedValue({
+    success: true, creditOverview: { ...creditTotals(), cookies: 'nested-private' }, cookies: 'private',
+  });
   const runtime: FnRuntime = {
     db: store.db as unknown as FnRuntime['db'],
     verifyIdToken,
-    academicFetchers: { courses, grades },
+    academicFetchers: { courses, grades, creditOverview },
   };
   const request = (data: unknown = { dataType: 'grades' }, authorized = true) =>
     dispatchFnRequest('getMyAcademicRecords', new Request('https://nuni.tw/api/fn/getMyAcademicRecords', {
@@ -44,10 +52,50 @@ function setup() {
       },
       body: JSON.stringify({ data }),
     }), runtime);
-  return { store, courses, grades, verifyIdToken, runtime, request };
+  return { store, courses, grades, creditOverview, verifyIdToken, runtime, request };
 }
 
 beforeEach(() => resetUidRateLimitForTests());
+
+it('returns owner-scoped school credit totals independently from grades and drops private fields', async () => {
+  const { request, creditOverview, grades, courses } = setup();
+  const response = await request({ dataType: 'creditOverview' });
+  expect(response.status).toBe(200);
+  const body = await response.json();
+  expect(body.result).toMatchObject({ ownerUid: UID, dataType: 'creditOverview',
+    result: { success: true, creditOverview: creditTotals() } });
+  expect(creditOverview).toHaveBeenCalledWith({ portal: 'private-school-cookie' }, '');
+  expect(grades).not.toHaveBeenCalled();
+  expect(courses).not.toHaveBeenCalled();
+  expect(JSON.stringify(body)).not.toMatch(/cookies|private|officialAudit|totalEarned/);
+});
+
+it('rejects malformed totals and unavailable source readers instead of returning zero totals', async () => {
+  const { request, creditOverview, runtime } = setup();
+  for (const result of [
+    { success: false }, { success: true },
+    { success: true, creditOverview: { ...creditTotals(), totals: { ...creditTotals().totals, subtotal: '71.5' } } },
+  ]) {
+    creditOverview.mockResolvedValueOnce(result);
+    expect((await request({ dataType: 'creditOverview' })).status).toBe(503);
+  }
+  delete runtime.academicFetchers!.creditOverview;
+  expect((await request({ dataType: 'creditOverview' })).status).toBe(503);
+});
+
+it('enforces login, request scope and session revocation for credit totals', async () => {
+  const { request, creditOverview, store } = setup();
+  expect((await request({ dataType: 'creditOverview' }, false)).status).toBe(401);
+  expect((await request({ dataType: 'creditOverview', studentId: 'other' })).status).toBe(400);
+  expect(creditOverview).not.toHaveBeenCalled();
+  creditOverview.mockImplementationOnce(async () => {
+    store.docs.delete(SESSION);
+    return { success: true, creditOverview: creditTotals() };
+  });
+  const response = await request({ dataType: 'creditOverview' });
+  expect(response.status).toBe(400);
+  expect((await response.json()).error.status).toBe('FAILED_PRECONDITION');
+});
 
 it('uses the same-origin academic endpoint without enabling any Cloud Functions service', () => {
   expect(getCloudFunctionUrl('getMyAcademicRecords', { env: {} })).toBe('/api/fn/getMyAcademicRecords');

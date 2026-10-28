@@ -1,9 +1,10 @@
-import { puFetchCourses, puFetchGrades } from '../../../../../backend/functions/puScraper.js';
+import { puFetchCourses, puFetchGrades, puFetchCreditOverview } from '../../../../../backend/functions/puScraper.js';
 import { buildDerivedCreditSummary } from '../../../../../backend/functions/lib/puCreditSummary.js';
 import type { AcademicFetchers } from './academicRecordsHandlers';
 
 export const academicSchoolSource: AcademicFetchers = {
   courses: puFetchCourses,
+  creditOverview: puFetchCreditOverview,
   async grades(cookies, semester) {
     const result = await puFetchGrades(cookies, semester);
     if (!result.success) return result;

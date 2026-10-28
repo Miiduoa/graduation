@@ -2,7 +2,10 @@ import React from 'react';
 import { act, fireEvent, render, waitFor } from '@testing-library/react-native';
 import { CreditAuditScreen } from '../screens/CreditAuditScreen';
 import CreditSummaryScreen from '../screens/CreditSummaryScreen';
+import { rootNavigateMeScreen } from '../app/rootNavigation';
+import { SchoolCreditOverviewError } from '../services/ownedSchoolCreditOverview';
 import type { Grade } from '../data/types';
+import type { PuCreditOverviewSnapshot } from '@campus/shared/src/puCreditOverview';
 import {
   collapseRetakeAttempts,
   computeReferenceGpa,
@@ -15,6 +18,7 @@ import { mapPuOfficialGrades } from '../data/apiAdapters/PUAdapter';
 import { mapNchuOfficialGrades } from '../data/apiAdapters/NCHUAdapter';
 
 const mockListGrades = jest.fn<Promise<Grade[]>, [string, string | undefined, string | undefined]>();
+const mockLoadSchoolCreditOverview = jest.fn();
 /** 刻意保留：確認舊的未驗證 getGPA 不會覆寫本頁參考 GPA。 */
 const mockGetGPA = jest.fn<
   Promise<{ gpa: number; totalCredits: number; totalPoints: number }>,
@@ -24,6 +28,9 @@ let mockHasDataSource = true;
 let mockAuth: {
   user: { uid: string } | null;
   profile: { uid: string; schoolId: string; department?: string; role?: string } | null;
+  loading?: boolean;
+  profileLoading?: boolean;
+  tokenExpired?: boolean;
 } = {
   user: { uid: 'user-a' },
   profile: { uid: 'user-a', schoolId: 'pu', department: '資訊管理學系', role: 'student' },
@@ -31,7 +38,12 @@ let mockAuth: {
 let mockSchool = { id: 'pu', name: '靜宜大學', shortName: '靜宜' };
 
 jest.mock('../state/auth', () => ({ useAuth: () => mockAuth }));
+jest.mock('../app/rootNavigation', () => ({ rootNavigateMeScreen: jest.fn() }));
 jest.mock('../state/school', () => ({ useSchool: () => ({ school: mockSchool }) }));
+jest.mock('../services/ownedSchoolCreditOverview', () => ({
+  ...jest.requireActual('../services/ownedSchoolCreditOverview'),
+  loadOwnedSchoolCreditOverview: (...args: unknown[]) => mockLoadSchoolCreditOverview(...args),
+}));
 jest.mock('../services/demoSession', () => ({
   shouldBlockForNoLogin: () => false,
   isDemoUid: () => false,
@@ -83,6 +95,18 @@ function deferred<T>() {
   return { promise, resolve };
 }
 
+function schoolCreditOverview(subtotal = 71.5): PuCreditOverviewSnapshot {
+  return {
+    ownerUid: 'user-a', schoolId: 'pu', fetchedAt: '2026-10-28T00:00:00Z',
+    overview: {
+      version: 1, source: 'pu-credit-review',
+      totals: { required: 40.5, elective: 20, externalElective: 3, generalOld: 0,
+        generalNew: 8, subtotal, totalRequired: 128, minorDouble: null },
+      coverage: { status: 'partial', missingFields: ['minorDouble'] },
+    },
+  };
+}
+
 async function expandFirstSemester(view: ReturnType<typeof render>) {
   const header = await view.findByLabelText(/展開明細/);
   await act(async () => {
@@ -99,6 +123,7 @@ beforeEach(() => {
   };
   mockSchool = { id: 'pu', name: '靜宜大學', shortName: '靜宜' };
   mockListGrades.mockResolvedValue([grade()]);
+  mockLoadSchoolCreditOverview.mockReset().mockRejectedValue(new SchoolCreditOverviewError('unavailable'));
   // 若仍被呼叫，會回傳「他校誇大」數值；UI 不得採用
   mockGetGPA.mockResolvedValue({ gpa: 9.9, totalCredits: 999, totalPoints: 9999 });
 });
@@ -518,3 +543,46 @@ test('CreditSummaryScreen failure then retry; non-PU summary omits PU graduation
   expect(other.getAllByText(/未套用畢業門檻|沒有套用靜宜/).length).toBeGreaterThan(0);
   expect(other.queryByText(/總學分已達標/)).toBeNull();
 });
+
+test('CreditSummaryScreen reconnect action opens the existing school login screen', async () => {
+  mockLoadSchoolCreditOverview.mockRejectedValueOnce(new SchoolCreditOverviewError('reconnect'));
+  const view = render(<CreditSummaryScreen />);
+  fireEvent.press(await view.findByLabelText('重新連線學校帳號'));
+  expect(rootNavigateMeScreen).toHaveBeenCalledWith('SSOLogin');
+});
+
+test.each(['profile-loading', 'token-expired', 'wrong-profile-user', 'wrong-profile-school'])(
+  'CreditSummaryScreen hides school totals for %s and cannot restore a pending old read',
+  async (condition) => {
+    mockLoadSchoolCreditOverview.mockResolvedValueOnce(schoolCreditOverview());
+    const view = render(<CreditSummaryScreen />);
+    await view.findByText('71.5 學分');
+    const pending = deferred<PuCreditOverviewSnapshot>();
+    mockLoadSchoolCreditOverview.mockReturnValueOnce(pending.promise);
+    fireEvent.press(view.getByLabelText('更新校方學分累計'));
+    expect(view.getByText('71.5 學分')).toBeTruthy();
+
+    const readyAuth = mockAuth;
+    if (condition === 'profile-loading') mockAuth = { ...readyAuth, profileLoading: true };
+    else if (condition === 'token-expired') mockAuth = { ...readyAuth, tokenExpired: true };
+    else if (condition === 'wrong-profile-user')
+      mockAuth = { ...readyAuth, profile: { ...readyAuth.profile!, uid: 'user-b' } };
+    else mockAuth = { ...readyAuth, profile: { ...readyAuth.profile!, schoolId: 'nthu' } };
+    view.rerender(<CreditSummaryScreen />);
+    expect(view.queryByTestId('school-credit-overview')).toBeNull();
+    expect(view.queryByText('71.5 學分')).toBeNull();
+
+    await act(async () => { pending.resolve(schoolCreditOverview(74.5)); });
+    expect(view.queryByTestId('school-credit-overview')).toBeNull();
+    expect(view.queryByText('74.5 學分')).toBeNull();
+    expect(mockLoadSchoolCreditOverview).toHaveBeenCalledTimes(2);
+
+    mockLoadSchoolCreditOverview.mockResolvedValueOnce(schoolCreditOverview(92));
+    mockAuth = readyAuth;
+    view.rerender(<CreditSummaryScreen />);
+    expect(await view.findByText('92 學分')).toBeTruthy();
+    expect(view.queryByText('71.5 學分')).toBeNull();
+    expect(view.queryByText('74.5 學分')).toBeNull();
+    expect(mockLoadSchoolCreditOverview).toHaveBeenCalledTimes(3);
+  },
+);
