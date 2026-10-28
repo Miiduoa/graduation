@@ -59,8 +59,19 @@ function ReconciliationWorkspace({ uid, schoolId, lms, returnUrl, canReconnect }
   const [lmsLimit, setLmsLimit] = useState(PAGE_SIZE);
   const generation = useRef(0);
   const busy = useRef(false);
-  // 工作區移除時同步作廢請求；只忽略回應，不宣稱取消已送出的校務讀取。
-  useLayoutEffect(() => () => { generation.current += 1; busy.current = false; }, []);
+  const lifetime = useRef<AbortController | null>(null);
+  // 每次已提交的來源都有獨立生命週期；切回相同物件也不能復活舊請求。
+  // signal 只控制結果是否可採用，不宣稱取消已送出的校務 HTTP 請求。
+  useLayoutEffect(() => {
+    const controller = new AbortController();
+    lifetime.current = controller;
+    return () => {
+      controller.abort();
+      generation.current += 1;
+      busy.current = false;
+      if (lifetime.current === controller) lifetime.current = null;
+    };
+  }, [uid, schoolId, lms]);
   const visible = state?.source === lms ? state : null;
   const comparison = visible?.status === 'ready' ? visible.comparison : undefined;
   const query = search.normalize('NFKC').trim().toLocaleLowerCase();
@@ -71,10 +82,11 @@ function ReconciliationWorkspace({ uid, schoolId, lms, returnUrl, canReconnect }
   ) ?? [], [comparison, onlyReview, query]);
 
   async function compare() {
-    if (busy.current) return;
+    const controller = lifetime.current;
+    if (!controller || controller.signal.aborted || busy.current) return;
     busy.current = true;
     const request = ++generation.current;
-    const active = () => request === generation.current;
+    const active = () => !controller.signal.aborted && request === generation.current;
     setState({ source: lms, status: 'loading' });
     try {
       const academic = await loadAcademicRecords('courses', uid, schoolId);
