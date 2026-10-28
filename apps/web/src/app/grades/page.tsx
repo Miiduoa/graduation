@@ -17,6 +17,8 @@ function Grades({ records }: { records: AcademicGradeResponse }) {
   const [semester, setSemester] = useState('');
   const [search, setSearch] = useState('');
   const [sort, setSort] = useState('semester');
+  const query = search.normalize('NFKC').trim().toLocaleLowerCase();
+  const semesterUnavailable = !!semester && !records.semesters.includes(semester);
   const selected = useMemo(
     () => records.grades.filter((grade) => !semester || grade.semester === semester),
     [records, semester],
@@ -26,7 +28,7 @@ function Grades({ records }: { records: AcademicGradeResponse }) {
     () =>
       selected
         .filter((grade) =>
-          grade.courseName.toLocaleLowerCase().includes(search.trim().toLocaleLowerCase()),
+          grade.courseName.normalize('NFKC').toLocaleLowerCase().includes(query),
         )
         .sort((a, b) => {
           if (sort === 'name') return a.courseName.localeCompare(b.courseName, 'zh-TW');
@@ -41,7 +43,7 @@ function Grades({ records }: { records: AcademicGradeResponse }) {
             a.courseName.localeCompare(b.courseName, 'zh-TW')
           );
         }),
-    [selected, search, sort],
+    [selected, query, sort],
   );
   return (
     <>
@@ -49,8 +51,11 @@ function Grades({ records }: { records: AcademicGradeResponse }) {
         <h2>你的成績紀錄</h2>
         <label className={styles.field}>
           學期
-          <select value={semester} onChange={(event) => setSemester(event.target.value)}>
+          <select aria-label="學期" value={semester} onChange={(event) => setSemester(event.target.value)}>
             <option value="">全部學期</option>
+            {semesterUnavailable && <option value={semester}>
+              {formatSemester(semester)}（本次未取得）
+            </option>}
             {[...records.semesters].sort((a, b) => b.localeCompare(a, undefined, { numeric: true })).map((code) => (
               <option key={code} value={code}>
                 {formatSemester(code)}
@@ -91,7 +96,7 @@ function Grades({ records }: { records: AcademicGradeResponse }) {
         </label>
         <label className={styles.field}>
           排序
-          <select value={sort} onChange={(event) => setSort(event.target.value)}>
+          <select aria-label="排序" value={sort} onChange={(event) => setSort(event.target.value)}>
             <option value="semester">學期，由新到舊</option>
             <option value="name">科目名稱</option>
             <option value="score">數字成績，由高到低</option>
@@ -125,7 +130,9 @@ function Grades({ records }: { records: AcademicGradeResponse }) {
         </ul>
       ) : (
         <p className={styles.empty}>
-          {records.grades.length
+          {semesterUnavailable
+            ? '這次資料未包含你選擇的學期，並不代表成績已刪除。已保留篩選，可清除篩選查看本次取得的其他學期。'
+            : records.grades.length
             ? '沒有符合條件的成績。'
             : '學校這次回傳的成績清單是空的，請稍後更新或至 e 校園確認。'}
         </p>

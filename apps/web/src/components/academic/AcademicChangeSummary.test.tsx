@@ -41,7 +41,7 @@ it('masks the previous change immediately on account switch', () => {
 it('does not treat a transient failed read as an empty response or a successful baseline', () => {
   const first = ready(70);
   const view = render(panel(first));
-  view.rerender(panel({ scope: first.scope, status: 'error', reason: 'unavailable' }));
+  view.rerender(panel({ scope: first.scope, status: 'error', reason: 'unavailable', snapshot: first.snapshot, stale: true }));
   expect(screen.queryByRole('region', { name: '校務更新差異' })).toBeNull();
   view.rerender(panel(ready(80, 10)));
   expect(screen.getByText('70')).toBeTruthy();
