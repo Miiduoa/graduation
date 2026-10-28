@@ -385,8 +385,12 @@ it('does not open a school login form when student ID is unavailable', async () 
   account.studentId = false;
   vi.mocked(loadAcademicRecords).mockRejectedValue(new AcademicConnectionError('reconnect'));
   render(<GradesPage />);
-  expect(await screen.findByRole('heading', { name: '這個功能還沒接通' })).toBeTruthy();
-  expect(screen.getByText('成績請先到學校的 e 校園查看。')).toBeTruthy();
+  expect(await screen.findByText('成績請先到學校的 e 校園查看。')).toBeTruthy();
+  expect(screen.queryByRole('region', { name: '學校資料讀取結果' })).toBeNull();
+  expect(screen.queryByLabelText('搜尋科目')).toBeNull();
+  expect(screen.queryByRole('button', { name: '更新資料' })).toBeNull();
+  expect(screen.getByRole('region', { name: '自行匯入的資料' })).toBeTruthy();
+  expect(loadAcademicRecords).toHaveBeenCalledTimes(1);
   expect(screen.queryByRole('link', { name: /學校帳號/ })).toBeNull();
 });
 it('keeps weekend and unrecognized school courses as drafts until confirm', async () => {
