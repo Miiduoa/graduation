@@ -96,7 +96,8 @@ describe('academic record boundaries', () => {
     });
     expect(formatSemester(null)).toBe('學期未提供');
     expect(formatSemester('1142')).toBe('114 學年度第 2 學期');
-    expect(formatSemester('993')).toBe('993');
+    expect(formatSemester('993')).toBe('99 學年度第 3 學期');
+    expect(formatSemester('994')).toBe('994');
   });
 
   it('retains the source fields, removes identical rows, and does not mutate the payload', () => {
