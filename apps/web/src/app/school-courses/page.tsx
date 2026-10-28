@@ -123,7 +123,9 @@ function Courses({ uid, schoolId, returnUrl }: { uid: string; schoolId: 'pu'; re
           connecting ? (
             <section className={styles.status} role="status">
               <h2>正在連線 WOW Class</h2>
-              <p>正在連線 WOW Class，約需 1 分鐘。連線完成後會自動再讀取課程。</p>
+              <p>{autoTries >= LMS_CONNECTING_RETRY_LIMIT
+                ? '尚未連上 WOW Class。可以手動重新讀取，或稍後再到這頁查看。'
+                : '正在連線 WOW Class，約需 1 分鐘。連線完成後會自動再讀取課程。'}</p>
               <div className={styles.actions}>
                 <button type="button" className="btn primary" onClick={refreshCourses}>重新讀取課程</button>
                 <a className="btn" href="https://tronclass.pu.edu.tw/" target="_blank" rel="noopener noreferrer">前往 WOW Class ↗</a>

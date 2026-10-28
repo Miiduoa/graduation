@@ -17,8 +17,11 @@ export const STUDENT_LOGIN_CLIENT_TIMEOUT_MS =
 
 /** 登入後背景 WOW Class 仍在進行時，課程 API 回傳的 details.code。 */
 export const LMS_CONNECTING_CODE = 'lms-connecting';
-/** 登入後視為 WOW Class 背景連線進行中的最長時間。 */
-export const STUDENT_LMS_CONNECTING_WINDOW_MS = 90_000;
+/**
+ * 登入後視為 WOW Class 背景連線進行中的預設最長時間。
+ * 對齊背景 SSO 預設總預算 30 秒再加前端餘裕，避免窗口比 SSO 長太多。
+ */
+export const STUDENT_LMS_CONNECTING_WINDOW_MS = 45_000;
 /** 暫時性錯誤時，同一跳（不含帳密 POST）最多再試幾次。 */
 export const MAX_TRANSIENT_HOP_RETRIES = 2;
 

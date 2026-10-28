@@ -107,10 +107,31 @@ it('shows WOW Class as connecting and retries instead of claiming login failed',
   });
   expect(screen.getByRole('heading', { name: '正在連線 WOW Class' })).toBeTruthy();
   expect(screen.getByText(/約需 1 分鐘/)).toBeTruthy();
+  expect(screen.getByText(/會自動再讀取課程/)).toBeTruthy();
   expect(screen.queryByRole('heading', { name: '請重新連線 WOW Class' })).toBeNull();
   await act(async () => { await vi.advanceTimersByTimeAsync(10_000); });
   expect(screen.getByRole('heading', { name: '資料庫管理' })).toBeTruthy();
   expect(loadTronClassCourses).toHaveBeenCalledTimes(2);
+  vi.useRealTimers();
+});
+
+it('stops promising automatic reads after the connecting retry budget', async () => {
+  vi.useFakeTimers();
+  vi.mocked(loadTronClassCourses).mockRejectedValue(new AcademicConnectionError('connecting'));
+  render(<SchoolCoursesPage />);
+  await act(async () => {
+    await Promise.resolve();
+  });
+  expect(screen.getByText(/會自動再讀取課程/)).toBeTruthy();
+  for (let i = 0; i < 5; i += 1) {
+    await act(async () => { await vi.advanceTimersByTimeAsync(10_000); });
+  }
+  expect(loadTronClassCourses).toHaveBeenCalledTimes(6);
+  expect(screen.getByRole('heading', { name: '正在連線 WOW Class' })).toBeTruthy();
+  expect(screen.queryByText(/會自動再讀取/)).toBeNull();
+  expect(screen.getByText(/可以手動重新讀取/)).toBeTruthy();
+  await act(async () => { await vi.advanceTimersByTimeAsync(10_000); });
+  expect(loadTronClassCourses).toHaveBeenCalledTimes(6);
   vi.useRealTimers();
 });
 

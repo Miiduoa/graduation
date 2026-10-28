@@ -1,4 +1,7 @@
-import { STUDENT_LOGIN_TOTAL_TIMEOUT_MS } from '@campus/shared/src/schoolLogin';
+import {
+  STUDENT_LOGIN_CLIENT_MARGIN_MS,
+  STUDENT_LOGIN_TOTAL_TIMEOUT_MS,
+} from '@campus/shared/src/schoolLogin';
 
 /** 學生 e 校園驗證單次逾時下限；可用 PU_STUDENT_LOGIN_TIMEOUT_MS 再拉長，不可低於此值。 */
 export const MIN_STUDENT_PORTAL_TIMEOUT_MS = 15_000;
@@ -23,6 +26,13 @@ export const MIN_STUDENT_LMS_HOP_TIMEOUT_MS = 1_000;
 
 /** 同一組密碼對學校送出帳密 POST 的上限（含雙 UID 備援與逾時重試）。 */
 export const MAX_STUDENT_CREDENTIAL_POSTS = 2;
+
+/** 背景 SSO 進行中視窗：SSO 總預算再加前端餘裕。SSO 確定失敗時應清掉 connecting 標記。 */
+export function studentLmsConnectingWindowMs(
+  totalMs: number = studentLmsTotalTimeoutMs(),
+): number {
+  return totalMs + STUDENT_LOGIN_CLIENT_MARGIN_MS;
+}
 
 /** 學號登入整條牆鐘總預算；單跳逾時不可把整條撐過這個上限。 */
 export function studentLoginTotalTimeoutMs(): number {

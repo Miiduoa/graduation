@@ -47,6 +47,7 @@ import {
   MIN_STUDENT_PORTAL_TIMEOUT_MS,
   STUDENT_LMS_CONNECTING_WINDOW_MS,
   STUDENT_LOGIN_TOTAL_TIMEOUT_MS,
+  studentLmsConnectingWindowMs,
   studentLmsHopTimeoutMs,
   studentLmsTotalTimeoutMs,
   studentLoginHopTimeoutMs,
@@ -112,6 +113,7 @@ export {
   MIN_STUDENT_PORTAL_TIMEOUT_MS,
   STUDENT_LMS_CONNECTING_WINDOW_MS,
   STUDENT_LOGIN_TOTAL_TIMEOUT_MS,
+  studentLmsConnectingWindowMs,
   studentLmsHopTimeoutMs,
   studentLmsTotalTimeoutMs,
   studentLoginHopTimeoutMs,
@@ -611,7 +613,7 @@ async function signInStudent(
     studentId,
     ownerUid: uid,
     cookies: login.cookies,
-    lmsConnectingUntil: new Date(now + STUDENT_LMS_CONNECTING_WINDOW_MS),
+    lmsConnectingUntil: new Date(now + studentLmsConnectingWindowMs()),
   }, now);
 
   if (requestAbandoned(deps)) {
@@ -670,6 +672,23 @@ async function portalSessionStillOwned(
   return Boolean(data && data.ownerUid === ownerUid);
 }
 
+async function clearLmsConnectingState(
+  db: SignInPuDeps['db'],
+  puSessionId: string,
+  ownerUid: string,
+): Promise<void> {
+  const ref = db.doc('_puSessions/' + puSessionId) as {
+    get?: () => Promise<{ exists?: boolean; data?: () => Record<string, unknown> | undefined }>;
+    set?: (data: Record<string, unknown>, options?: { merge?: boolean }) => Promise<unknown>;
+  };
+  if (typeof ref.get !== 'function' || typeof ref.set !== 'function') return;
+  const snap = await ref.get();
+  if (snap.exists !== true) return;
+  const data = typeof snap.data === 'function' ? snap.data() : undefined;
+  if (!data || data.ownerUid !== ownerUid) return;
+  await ref.set({ lmsConnectingUntil: null }, { merge: true });
+}
+
 async function attachStudentLmsSession(options: {
   campus: PuCampusGateway;
   portalUid: string;
@@ -682,6 +701,7 @@ async function attachStudentLmsSession(options: {
   school: string;
 }): Promise<void> {
   const startedAt = Date.now();
+  let linked = false;
   try {
     if (!(await portalSessionStillOwned(options.db, options.puSessionId, options.uid))) return;
     const tronClass = await options.campus.loginTronClass(options.portalUid, options.password, {
@@ -693,24 +713,28 @@ async function attachStudentLmsSession(options: {
     const tronClassSessionId = randomBytes(16).toString('hex');
     const portalRef = options.db.doc('_puSessions/' + options.puSessionId);
     const tronRef = options.db.doc('_puTronClassSessions/' + tronClassSessionId);
-    await linkOwnedTronClassSession(
-      options.db,
-      portalRef,
-      options.uid,
-      tronRef,
-      {
-        studentId: options.studentId,
-        ownerUid: options.uid,
-        cookies: tronClass.cookies,
-        userId: tronClass.userId,
-        userName: tronClass.userName,
-        createdAt: FieldValue.serverTimestamp(),
-        expiresAt: new Date(options.now + SESSION_TTL_MS),
-      },
-      { tronClassSessionId },
+    linked = Boolean(
+      await linkOwnedTronClassSession(
+        options.db,
+        portalRef,
+        options.uid,
+        tronRef,
+        {
+          studentId: options.studentId,
+          ownerUid: options.uid,
+          cookies: tronClass.cookies,
+          userId: tronClass.userId,
+          userName: tronClass.userName,
+          createdAt: FieldValue.serverTimestamp(),
+          expiresAt: new Date(options.now + SESSION_TTL_MS),
+        },
+        { tronClassSessionId, lmsConnectingUntil: null },
+      ),
     );
   } catch (error) {
     logStudentSoftFailure(error, options.school, startedAt);
+  } finally {
+    if (!linked) await clearLmsConnectingState(options.db, options.puSessionId, options.uid);
   }
 }
 

@@ -230,7 +230,7 @@ it('shows failure and retries without falling back to demo or previously loaded 
   await screen.findByText('真實來源科目');
   vi.mocked(loadAcademicRecords).mockRejectedValueOnce(new AcademicConnectionError('unavailable'));
   fireEvent.click(screen.getByRole('button', { name: '更新資料' }));
-  expect(await screen.findByText('暫時無法讀取學校資料')).toBeTruthy();
+  expect(await screen.findByRole('heading', { name: '暫時無法讀取學校成績' })).toBeTruthy();
   expect(screen.getByText(/暫時讀不到資料，請稍後再試/)).toBeTruthy();
   expect(screen.queryByText(/請確認網路後再試/)).toBeNull();
   expect(screen.queryByText('真實來源科目')).toBeNull();
@@ -317,7 +317,7 @@ it('asks to check the network only when the academic fetch fails at the network 
     new AcademicConnectionError('unavailable', new TypeError('Failed to fetch')),
   );
   render(<GradesPage />);
-  expect(await screen.findByText('暫時無法讀取學校資料')).toBeTruthy();
+  expect(await screen.findByRole('heading', { name: '暫時無法讀取學校成績' })).toBeTruthy();
   expect(screen.getByText(/請確認網路後再試/)).toBeTruthy();
   expect(screen.queryByText(/暫時讀不到資料，請稍後再試/)).toBeNull();
 });
@@ -369,13 +369,13 @@ it('removes the previous account transcript before loading the next account', as
 it('offers reconnection without pretending an expired session has an empty transcript', async () => {
   vi.mocked(loadAcademicRecords).mockRejectedValue(new AcademicConnectionError('reconnect'));
   render(<GradesPage />);
-  expect(await screen.findByRole('heading', { name: '暫時無法讀取學校成績' })).toBeTruthy();
+  expect(await screen.findByRole('heading', { name: '請重新連線學校帳號' })).toBeTruthy();
   expect(screen.queryByText('正在向學校讀取資料…')).toBeNull();
-  fireEvent.click(screen.getByRole('button', { name: '重新讀取' }));
-  await waitFor(() => expect(loadAcademicRecords).toHaveBeenCalledTimes(2));
-  const link = await screen.findByRole('link', { name: '連線學校帳號' });
+  const link = screen.getByRole('link', { name: '連線學校帳號' });
   expect(link.getAttribute('href')).toContain('reconnect=school');
   expect(link.getAttribute('href')).toContain(encodeURIComponent('/grades?schoolId=pu&campus=pu'));
+  expect(link.className).toMatch(/primary/);
+  expect(screen.queryByRole('button', { name: '重新讀取' })).toBeNull();
   expect(screen.queryByText('課程紀錄')).toBeNull();
 });
 it('does not open a school login form when student ID is unavailable', async () => {

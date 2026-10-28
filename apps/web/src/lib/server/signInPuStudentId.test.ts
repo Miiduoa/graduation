@@ -19,6 +19,7 @@ import {
   MAX_STUDENT_CREDENTIAL_POSTS,
   MIN_STUDENT_PORTAL_TIMEOUT_MS,
   PuLoginHttpError,
+  studentLmsConnectingWindowMs,
   studentLmsHopTimeoutMs,
   studentLmsTotalTimeoutMs,
   studentLoginTotalTimeoutMs,
@@ -449,8 +450,32 @@ it('marks WOW Class as connecting on the portal session after e-campus login', a
   };
   expect(portal.lmsConnectingUntil).toBeInstanceOf(Date);
   expect(portal.lmsConnectingUntil!.getTime()).toBeGreaterThanOrEqual(
-    before + STUDENT_LMS_CONNECTING_WINDOW_MS,
+    before + studentLmsConnectingWindowMs(),
   );
+  expect(studentLmsConnectingWindowMs()).toBe(STUDENT_LMS_CONNECTING_WINDOW_MS);
+});
+
+it('clears the WOW Class connecting window after background SSO fails', async () => {
+  const loginTronClass = vi.fn(async () => {
+    throw new PuCampusError('timeout', '學校系統無回應', {
+      route: 'student',
+      stage: 'submit',
+      code: 'AbortError',
+    });
+  });
+  const { runtime, store, flushSso } = deps({ campus: campus({ loginTronClass }) });
+  const result = await handleSignInPuStudentId(
+    { studentId: STUDENT, password: SECRET },
+    '1.1.1.1',
+    runtime,
+  );
+  const path = `_puSessions/${result.puSessionId}`;
+  expect((store.docs.get(path) as { lmsConnectingUntil?: Date }).lmsConnectingUntil).toBeInstanceOf(
+    Date,
+  );
+  await flushSso();
+  expect(loginTronClass).toHaveBeenCalledOnce();
+  expect((store.docs.get(path) as { lmsConnectingUntil?: Date | null }).lmsConnectingUntil).toBeNull();
 });
 
 it('returns a clear school timeout without minting a session after the retry is exhausted', async () => {
