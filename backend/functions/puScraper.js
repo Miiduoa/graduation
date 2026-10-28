@@ -540,11 +540,12 @@ async function puFetchGrades(cookies, semester) {
         // 同名 Cookie 的輪替也是更新；不能用 Cookie 數量判斷是否有新 session。
         portalCookies = { ...portalCookies, ...bridgeRes.cookies };
         mypuCookies = { ...mypuCookies, ...bridgeRes.cookies };
+        // 選單轉接頁也可能回到登入畫面；停止後續來源，不沿用失效 session。
+        if (bridgeRes.status === 200 && looksLikePuLoginPage(bridgeRes.data)) {
+          return { success: false, code: 'session-expired', grades: [], error: 'E校園 session 已失效，請重新登入' };
+        }
         // If alcat's score page actually returns grade data directly, use it
         if (bp.includes('score') && bridgeRes.status === 200) {
-          if (looksLikePuLoginPage(bridgeRes.data)) {
-            return { success: false, code: 'session-expired', grades: [], error: 'E校園 session 已失效，請重新登入' };
-          }
           const bridgeParsed = parsePuGradeDocument(bridgeRes.data, semester);
           if (bridgeParsed.success) {
             // 不把先前已讀到的成績，替換成另一入口的空表格。
