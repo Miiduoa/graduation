@@ -306,9 +306,16 @@ it('does not represent a missing credit summary as zero and can clear grade filt
   render(<GradesPage />);
   await screen.findByText('真實來源科目');
   fireEvent.change(screen.getByLabelText('搜尋科目'), { target: { value: '不存在的科目' } });
-  expect(screen.getByText('目前顯示 0 筆成績')).toBeTruthy();
+  expect(screen.getByText('符合 0 筆 · 已顯示 0 筆').getAttribute('role')).toBe('status');
+  expect(screen.getByText('沒有符合條件的成績。')).toBeTruthy();
+  expect(screen.queryByRole('list', { name: '成績明細' })).toBeNull();
+  expect(screen.getByRole('button', { name: '匯出符合條件的 0 筆 CSV' }).hasAttribute('disabled')).toBe(true);
   fireEvent.click(screen.getByRole('button', { name: '清除篩選' }));
   expect(screen.getByText('真實來源科目')).toBeTruthy();
+  expect(screen.getByText('符合 2 筆 · 已顯示 2 筆')).toBeTruthy();
+  expect(within(screen.getByRole('list', { name: '成績明細' })).getAllByRole('listitem')).toHaveLength(2);
+  expect(screen.getByRole('button', { name: '匯出符合條件的 2 筆 CSV' }).hasAttribute('disabled')).toBe(false);
+  expect((screen.getByLabelText('搜尋科目') as HTMLInputElement).value).toBe('');
   expect(loadAcademicRecords).toHaveBeenCalledTimes(2);
 });
 
