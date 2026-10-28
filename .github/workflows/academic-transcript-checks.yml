@@ -45,6 +45,9 @@ jobs:
           src/app/grades/page.test.tsx
           src/components/academic/AcademicPage.test.tsx
           src/lib/academicRecords.test.ts
+          src/lib/academicRecords.courseCodes.test.ts
+          src/components/academic/CreditTranscriptReview.test.tsx
+          src/components/academic/CreditTranscriptReview.courseCodes.test.tsx
           --reporter=json --outputFile=academic-transcript-results.json
       - name: Summarize exact test results
         if: always() && steps.tests.outcome != 'skipped'

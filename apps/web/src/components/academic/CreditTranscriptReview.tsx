@@ -43,6 +43,7 @@ function Review({ snapshot }: Props) {
     try {
       return { value: reviewTranscript(records.grades.map((grade) => ({
         id: grade.id, courseName: grade.courseName, semester: grade.semester,
+        courseCode: grade.courseCode,
         courseType: grade.courseType, credits: grade.credits, score: grade.score, source: 'school' as const,
       })), passMark), error: '' };
     } catch (failure) { return { value: null, error: message(failure) }; }
@@ -54,7 +55,8 @@ function Review({ snapshot }: Props) {
   }, [review, selected]);
   const overlaps = preview && totals ? transcriptPlanOverlaps(preview.plan, totals) : [];
   const visible = review?.rows.filter((row) => {
-    const matches = `${row.name} ${row.semester}`.toLocaleLowerCase().includes(query.trim().toLocaleLowerCase());
+    const matches = `${row.name} ${row.code} ${row.semester}`.normalize('NFKC').toLocaleLowerCase()
+      .includes(query.normalize('NFKC').trim().toLocaleLowerCase());
     return matches && (filter === 'all' || (filter === 'selected' ? selected.some((item) => item.key === row.key) :
       row.duplicateCount > 1 || !row.eligible || row.category === 'other'));
   }) ?? [];
@@ -162,7 +164,7 @@ function Review({ snapshot }: Props) {
             <button type="button" className="btn" onClick={() => setSelected((old) => [...old, ...suggestedTranscriptSelection(review).filter((item) => !old.some((entry) => entry.key === item.key))])} title="僅選取明確通過且沒有同名或同課號疑義的校務紀錄">選取建議課程</button>
             <button type="button" className="btn" disabled={!selected.length} onClick={() => setSelected([])}>取消全部選取</button>
           </div>
-          <label className={styles.search}>搜尋課程或學期<input value={query} onChange={(event) => { setQuery(event.target.value); setLimit(25); }} placeholder="輸入課程名稱或學期" /></label>
+          <label className={styles.search}>搜尋課程或學期<input value={query} onChange={(event) => { setQuery(event.target.value); setLimit(25); }} placeholder="輸入課程名稱、課號或學期" /></label>
           <div className={styles.actions}>{([['all', '全部'], ['review', '需核對'], ['selected', '已選']] as const).map(([value, label]) =>
             <button type="button" className="btn" aria-pressed={filter === value} key={value} onClick={() => { setFilter(value); setLimit(25); }}>{label}</button>)}</div>
         </div>
@@ -171,7 +173,7 @@ function Review({ snapshot }: Props) {
           return <li className={styles.card} key={row.key}>
             <div className={styles.rowHead}><label className={styles.selectCourse}>
               <input type="checkbox" checked={Boolean(picked)} disabled={!row.eligible} aria-label={`選取${row.name} ${row.semester}`} onChange={() => toggle(row.key)} />
-              <span><strong>{row.name}</strong><small>{row.semester || '學期未提供'} · 成績 {row.scoreLabel} · 原分類 {row.sourceType || '未提供'}</small></span>
+              <span><strong>{row.name}</strong>{row.code && <small>課號 {row.code}</small>}<small>{row.semester || '學期未提供'} · 成績 {row.scoreLabel} · 原分類 {row.sourceType || '未提供'}</small></span>
             </label><strong>{row.credits ?? '—'} 學分</strong></div>
             <p className={styles.note}>{row.reason}{row.duplicateCount > 1 ? `；同名或同課號共 ${row.duplicateCount} 筆，核對後只能選取一筆。` : ''}</p>
             {picked ? <label className={styles.category}>{row.name}的規劃分類<select aria-label={`${row.name}的規劃分類`} value={picked.category}
