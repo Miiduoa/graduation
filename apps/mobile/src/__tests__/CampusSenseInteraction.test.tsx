@@ -46,21 +46,20 @@ beforeEach(() => {
   jest.mocked(askCampusAssistant).mockReset();
 });
 
-test('manual sync cancellation unlocks the draft, ignores a late result and permits an explicit retry', async () => {
+test('manual sync cancellation preserves the draft, ignores a late result and permits an explicit retry', async () => {
   const pending = deferred<{ data: CampusSenseSnapshot }>();
   mockCallable.mockReturnValueOnce(pending.promise);
   const view = render(<CampusAssistantScreen />);
   fireEvent.changeText(view.getByLabelText('詢問校園助理'), '保留我的問題');
   await act(async () => fireEvent.press(view.getByText('同步我的校園資料')));
-  expect(view.getByText('正在確認校園資料來源…')).toBeTruthy();
-  expect(view.getByLabelText('詢問校園助理').props.editable).toBe(false);
+  expect(view.getByText('正在連線並核對校園資料權限…')).toBeTruthy();
+  expect(view.getByLabelText('詢問校園助理').props.editable).toBe(true);
   fireEvent.press(view.getByText('送出問題'));
   fireEvent.press(view.getByText('校園即時 · 需網路'));
   expect(askCampusAssistant).not.toHaveBeenCalled();
   expect(view.getByText('✓ 手機本地 AI · 免費推論')).toBeTruthy();
-  await act(async () => fireEvent.press(view.getByText('停止同步')));
-  await waitFor(() => expect(view.queryByText('停止同步')).toBeNull());
-  expect(view.getByLabelText('詢問校園助理').props.editable).toBe(true);
+  await act(async () => fireEvent.press(view.getByText('取消這次同步')));
+  await waitFor(() => expect(view.queryByText('取消這次同步')).toBeNull());
   expect(view.getByLabelText('詢問校園助理').props.value).toBe('保留我的問題');
   await act(async () => pending.resolve({ data: snapshot([row('old', '不得顯示的舊資料')]) }));
   expect(view.queryByText('已取得本次授權資料')).toBeNull();
@@ -75,8 +74,8 @@ test('stopping a weekly brief while reading does not fall back to inference or c
   mockCallable.mockReturnValueOnce(pending.promise);
   const view = render(<CampusAssistantScreen />);
   await act(async () => fireEvent.press(view.getByText('未來七天')));
-  await act(async () => fireEvent.press(view.getByText('停止同步')));
-  await waitFor(() => expect(view.queryByText('停止同步')).toBeNull());
+  await act(async () => fireEvent.press(view.getByText('取消這次同步')));
+  await waitFor(() => expect(view.queryByText('取消這次同步')).toBeNull());
   expect(askCampusAssistant).not.toHaveBeenCalled();
   await act(async () => pending.resolve({ data: snapshot([row('a')]) }));
   expect(askCampusAssistant).not.toHaveBeenCalled();
@@ -92,9 +91,9 @@ test('validated page progress is visible but the partial list is never installed
   } }).mockReturnValueOnce(pending.promise);
   const view = render(<CampusAssistantScreen />);
   await act(async () => fireEvent.press(view.getByText('同步我的校園資料')));
-  expect(view.getByText('已核對 50 / 80 筆作業')).toBeTruthy();
+  expect(view.getByText('正在核對作業：50 / 80 筆')).toBeTruthy();
   expect(view.queryByText('已取得本次授權資料')).toBeNull();
-  await act(async () => fireEvent.press(view.getByText('停止同步')));
+  await act(async () => fireEvent.press(view.getByText('取消這次同步')));
   expect(mockCallable).toHaveBeenCalledTimes(2);
   expect(view.queryByText('已取得本次授權資料')).toBeNull();
 });
@@ -109,7 +108,7 @@ test.each(['account', 'school'] as const)('%s switch prevents late progress or a
   view.rerender(<CampusAssistantScreen />);
   await act(async () => pending.resolve({ data: old }));
   expect(view.queryByText('已取得本次授權資料')).toBeNull();
-  expect(view.queryByText('停止同步')).toBeNull();
+  expect(view.queryByText('取消這次同步')).toBeNull();
   expect(view.queryByText('上一個帳號的作業')).toBeNull();
 });
 
@@ -153,4 +152,23 @@ test('partial lists never render a removed/completed conclusion', () => {
   view.rerender(<CampusSenseChangesCard {...props} snapshot={second} />);
   expect(view.getByText(/這次或上次資料不完整/)).toBeTruthy();
   expect(view.queryByText('本次清單未列出')).toBeNull();
+});
+
+test('an old-only task is purged when the comparison baseline expires before the new snapshot', async () => {
+  jest.useFakeTimers();
+  try {
+    jest.setSystemTime(new Date('2026-10-28T02:00:00Z'));
+    const first = snapshot([row('old', '只存在舊基準的任務')]);
+    const props = { userId: 'A', schoolId: 'pu', isCurrent: () => true, disabled: false };
+    const view = render(<CampusSenseChangesCard {...props} snapshot={first} />);
+    jest.setSystemTime(new Date('2026-10-28T02:10:00Z'));
+    view.rerender(<CampusSenseChangesCard {...props} snapshot={snapshot([])} />);
+    expect(view.getByText('只存在舊基準的任務')).toBeTruthy();
+    await act(async () => jest.advanceTimersByTimeAsync(5 * 60000 + 50));
+    expect(view.queryByText('只存在舊基準的任務')).toBeNull();
+    expect(view.getByText(/先前基準已過期/)).toBeTruthy();
+    view.unmount();
+  } finally {
+    jest.useRealTimers();
+  }
 });

@@ -2,7 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { Text, View } from 'react-native';
 import { AICard, AIButton, aiTokens } from '../ui/aiFirst';
 import { compareCampusAssignments, type CampusAssignmentChanges, type CampusAssignmentChangeKind } from '../services/campusSenseChanges';
-import { validCampusSenseSnapshot, type CampusSenseSnapshot } from '../services/campusSenseSnapshot';
+import { CAMPUS_SENSE_MAX_AGE_MS, validCampusSenseSnapshot, type CampusSenseSnapshot } from '../services/campusSenseSnapshot';
 import type { safeNavigate } from '../utils/safeNavigate';
 import { CampusAssignmentOpenButton } from './CampusAssignmentOpenButton';
 
@@ -60,17 +60,31 @@ export function CampusSenseChangesCard({ snapshot, userId, schoolId, disabled, i
     setLimit(5);
   }, [snapshot, userId, schoolId]);
 
+  useEffect(() => {
+    if (!comparison?.result.from) return;
+    const expiresAt = Date.parse(comparison.result.from) + CAMPUS_SENSE_MAX_AGE_MS;
+    const expiry = setTimeout(() => {
+      // A fresh snapshot must not extend the lifetime of older comparison rows.
+      setComparison((current) => current === comparison ? {
+        snapshot: current.snapshot,
+        result: { ...current.result, status: 'not-comparable', reason: 'scope-or-age', from: null, changes: [] },
+      } : current);
+    }, Math.max(0, expiresAt - Date.now()) + 1);
+    return () => clearTimeout(expiry);
+  }, [comparison]);
+
   // Never paint the preceding scope/result while the comparison effect catches up.
   if (!snapshot || comparison?.snapshot !== snapshot ||
       !validCampusSenseSnapshot(snapshot, { uid: userId, schoolId })) return null;
   const { result } = comparison;
+  const expired = result.from !== null && Date.now() - Date.parse(result.from) > CAMPUS_SENSE_MAX_AGE_MS;
   return (
-    <AICard title="本次同步變更" badge={result.status === 'compared' ? `${result.changes.length} 項` : '尚不比較'}>
+    <AICard title="本次同步變更" badge={result.status === 'compared' && !expired ? `${result.changes.length} 項` : '尚不比較'}>
       <View style={{ gap: 12 }}>
         <Text style={{ color: aiTokens.muted, fontSize: 12, lineHeight: 20 }}>
-          {REASON[result.reason]}
+          {REASON[expired ? 'scope-or-age' : result.reason]}
         </Text>
-        {result.status === 'compared' ? (
+        {result.status === 'compared' && !expired ? (
           <>
             <Text style={{ color: aiTokens.muted, fontSize: 12 }}>
               比較時間：{displayTime(result.from)} → {displayTime(result.to)}

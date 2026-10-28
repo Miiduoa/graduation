@@ -1,11 +1,12 @@
 /**
- * Stop accepting an obsolete read without claiming to cancel an already-sent
- * Firebase request. Both promise branches stay observed after abort/timeout.
+ * Firebase callable promises do not expose a transport abort handle. Stop the
+ * local wait, consume any late rejection, and let the caller stop subsequent
+ * pages. Already-sent server work is not recalled by cancellation or timeout.
  */
 export const CAMPUS_SENSE_PAGE_TIMEOUT_MS = 45_000;
 
-export function awaitCampusSenseRead<T>(
-  start: () => Promise<T>,
+export function abortableCampusRead<T>(
+  read: () => Promise<T>,
   signal?: AbortSignal,
   timeoutMs = CAMPUS_SENSE_PAGE_TIMEOUT_MS,
 ): Promise<T> {
@@ -14,7 +15,7 @@ export function awaitCampusSenseRead<T>(
     let timer: ReturnType<typeof setTimeout> | undefined;
     const cleanup = () => {
       if (timer !== undefined) clearTimeout(timer);
-      signal?.removeEventListener('abort', abort);
+      signal?.removeEventListener('abort', cancel);
     };
     const finish = (result: { value: T } | { error: unknown }) => {
       if (settled) return;
@@ -23,27 +24,17 @@ export function awaitCampusSenseRead<T>(
       if ('error' in result) reject(result.error);
       else resolve(result.value);
     };
-    const abort = () => finish({ error: new Error('sense-cancelled') });
-    if (signal?.aborted) {
-      abort();
-      return;
-    }
+    const cancel = () => finish({ error: new Error('sense-cancelled') });
+    if (signal?.aborted) { cancel(); return; }
     if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) {
       finish({ error: new Error('sense-timeout') });
       return;
     }
-    signal?.addEventListener('abort', abort, { once: true });
-    // Account for abort between the initial check and listener installation.
-    if (signal?.aborted) {
-      abort();
-      return;
-    }
+    signal?.addEventListener('abort', cancel, { once: true });
+    if (signal?.aborted) { cancel(); return; }
     timer = setTimeout(() => finish({ error: new Error('sense-timeout') }), timeoutMs);
     try {
-      start().then(
-        (value) => finish({ value }),
-        (error: unknown) => finish({ error }),
-      );
+      read().then((value) => finish({ value }), (error: unknown) => finish({ error }));
     } catch (error) {
       finish({ error });
     }

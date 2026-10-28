@@ -1,4 +1,4 @@
-import { awaitCampusSenseRead, CAMPUS_SENSE_PAGE_TIMEOUT_MS } from '../../services/campusSenseReadTask';
+import { abortableCampusRead as awaitCampusSenseRead, CAMPUS_SENSE_PAGE_TIMEOUT_MS } from '../../services/abortableCampusRead';
 import { refreshCampusSenseSnapshot, CAMPUS_SENSE_TOTAL_TIMEOUT_MS } from '../../services/campusSenseSnapshot';
 
 const mockCallable = jest.fn();
@@ -90,11 +90,11 @@ test('reports only validated counts and publishes completion after all pages', a
   const snapshot = await refreshCampusSenseSnapshot({ scope, isCurrent: () => true, onProgress });
   expect(snapshot.assignments.items).toHaveLength(137);
   expect(onProgress.mock.calls.map(([progress]) => progress)).toEqual([
-    { phase: 'reading', loaded: 0, total: null, pages: 0 },
-    { phase: 'reading', loaded: 50, total: 137, pages: 1 },
-    { phase: 'reading', loaded: 100, total: 137, pages: 2 },
-    { phase: 'reading', loaded: 137, total: 137, pages: 3 },
-    { phase: 'complete', loaded: 137, total: 137, pages: 3 },
+    { phase: 'reading', loaded: 0, total: null, pages: 0, pageLimit: 8 },
+    { phase: 'reading', loaded: 50, total: 137, pages: 1, pageLimit: 8 },
+    { phase: 'reading', loaded: 100, total: 137, pages: 2, pageLimit: 8 },
+    { phase: 'reading', loaded: 137, total: 137, pages: 3, pageLimit: 8 },
+    { phase: 'complete', loaded: 137, total: 137, pages: 3, pageLimit: 8 },
   ]);
   expect(JSON.stringify(onProgress.mock.calls)).not.toContain('Private assignment');
   expect(jest.getTimerCount()).toBe(0);
@@ -135,7 +135,7 @@ test('scope changes cannot emit personal progress or trigger continuations', asy
   await expect(refreshCampusSenseSnapshot({ scope, isCurrent: () => true, onProgress }))
     .rejects.toThrow('session-changed');
   expect(onProgress).toHaveBeenCalledTimes(1);
-  expect(onProgress).toHaveBeenCalledWith({ phase: 'reading', loaded: 0, total: null, pages: 0 });
+  expect(onProgress).toHaveBeenCalledWith({ phase: 'reading', loaded: 0, total: null, pages: 0, pageLimit: 8 });
 });
 
 test('the whole refresh has a bounded wait even when individual pages stay below their timeout', async () => {

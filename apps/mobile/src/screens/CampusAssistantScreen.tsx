@@ -19,8 +19,6 @@ import { getMobileQuickActions } from '../services/quickCampusActions';
 import type { CampusAgentWriteProposal, CampusAgentWriteTool } from '../features/campusAssistantActions';
 import { CampusAgentActionReview } from './CampusAgentActionReview';
 import { CampusSenseDashboard } from './CampusSenseDashboard';
-import { CampusSenseChangesCard } from './CampusSenseChangesCard';
-import { CampusSenseSyncProgress } from './CampusSenseSyncProgress';
 import { CampusEvidencePlanCard } from './CampusEvidencePlanCard';
 import { CampusLocalReadResults } from './CampusLocalReadResults';
 import type { LocalCampusReadResult } from '../services/localCampusToolProtocol';
@@ -168,23 +166,19 @@ function AssistantConversation({
     setError('');
   };
   const progressFor = (controller: AbortController) => (progress: CampusSenseProgress) => {
-    if (current() && !controller.signal.aborted && inFlight.current === controller) {
-      setSyncProgress(progress);
-    }
+    if (current() && !controller.signal.aborted && inFlight.current === controller) setSyncProgress(progress);
   };
-  const stopSync = () => {
-    inFlight.current?.abort();
-    setSenseError('已停止同步，不會套用未完成的結果或讀取下一頁；已送出的唯讀請求可能仍在完成。');
+  const cancelledSync = () => {
+    setSenseError('已取消這次同步，未套用部分資料。先前摘要仍依原同步時間判定有效性。');
   };
   const syncCampus = async () => {
     if (!uid || lock.current || syncLock.current || !current()) return;
-    lock.current = true;
     syncLock.current = true;
+    const controller = new AbortController();
+    inFlight.current = controller;
     setSyncBusy(true);
     setSyncProgress(null);
     setSenseError('');
-    const controller = new AbortController();
-    inFlight.current = controller;
     try {
       const snapshot = await refreshCampusSenseSnapshot({
         scope: { uid, schoolId },
@@ -195,22 +189,18 @@ function AssistantConversation({
       if (current() && !controller.signal.aborted) setSense(snapshot);
     } catch {
       if (current()) {
-        if (controller.signal.aborted) {
-          setSenseError('已停止同步；先前摘要仍以原同步時間為準，沒有套用未完成的結果。');
-        } else {
+        if (controller.signal.aborted) cancelledSync();
+        else {
           setSense(null);
-          setSenseError('資料同步失敗或逾時。請確認帳號、學校權限與網路，再試一次；沒有使用舊資料冒充最新結果。');
+          setSenseError('資料同步失敗。請確認帳號、學校權限與網路，再試一次；沒有使用舊資料冒充最新結果。');
         }
       }
     } finally {
-      if (inFlight.current === controller) {
-        inFlight.current = null;
-        lock.current = false;
-        syncLock.current = false;
-        if (current()) {
-          setSyncBusy(false);
-          setSyncProgress(null);
-        }
+      if (inFlight.current === controller) inFlight.current = null;
+      syncLock.current = false;
+      if (current()) {
+        setSyncBusy(false);
+        setSyncProgress(null);
       }
     }
   };
@@ -238,10 +228,7 @@ function AssistantConversation({
         setSense(snapshot);
       } catch (syncError) {
         if (!current()) return;
-        if (controller.signal.aborted) {
-          setSenseError('已停止同步與這次整理；沒有套用未完成的資料，也沒有改用雲端 AI。');
-          return;
-        }
+        if (controller.signal.aborted) { cancelledSync(); return; }
         // A permission or contract failure revokes reliance on any prior summary.
         const transient = isTransientCampusSyncError(syncError);
         snapshot = transient ? validCampusSenseSnapshot(sense, { uid, schoolId }) : null;
@@ -297,15 +284,13 @@ function AssistantConversation({
         }
       }
     } finally {
-      if (inFlight.current === controller) {
-        inFlight.current = null;
-        lock.current = false;
-        syncLock.current = false;
-        if (current()) {
-          setBusy(false);
-          setSyncBusy(false);
-          setSyncProgress(null);
-        }
+      if (inFlight.current === controller) inFlight.current = null;
+      lock.current = false;
+      syncLock.current = false;
+      if (current()) {
+        setBusy(false);
+        setSyncBusy(false);
+        setSyncProgress(null);
       }
     }
   };
@@ -438,23 +423,25 @@ function AssistantConversation({
         </View>
       </AICard>
       {mode === 'device' ? (
-        <>
-          <CampusSenseDashboard
-            snapshot={currentSense}
-            expired={Boolean(sense)}
-            authenticated={Boolean(uid)}
-            busy={busy}
-            syncBusy={syncBusy}
-            error={senseError}
-            onSync={() => void syncCampus()}
-            onBrief={() => void briefPlan('今天要先處理什麼？')}
-            onWeekBrief={() => void briefPlan('依手機課表與授權作業安排接下來七天的學習計畫')}
-            onClear={() => { setSense(null); setSenseError(''); }}
-          />
-          {syncBusy ? <CampusSenseSyncProgress progress={syncProgress} onCancel={stopSync} /> : null}
-          <CampusSenseChangesCard snapshot={currentSense} userId={uid} schoolId={schoolId}
-            disabled={busy || syncBusy} isCurrent={current} navigation={navigation} />
-        </>
+        <CampusSenseDashboard
+          snapshot={currentSense}
+          expired={Boolean(sense)}
+          authenticated={Boolean(uid)}
+          busy={busy}
+          syncBusy={syncBusy}
+          progress={syncProgress}
+          error={senseError}
+          onCancelSync={() => {
+            if (!current() || !syncLock.current) return;
+            inFlight.current?.abort();
+            cancelledSync();
+          }}
+          assignmentContext={{ userId: uid, schoolId, isCurrent: current, navigation }}
+          onSync={() => void syncCampus()}
+          onBrief={() => void briefPlan('今天要先處理什麼？')}
+          onWeekBrief={() => void briefPlan('依手機課表與授權作業安排接下來七天的學習計畫')}
+          onClear={() => { setSense(null); setSenseError(''); }}
+        />
       ) : null}
       <AICard>
         <Text style={{ color: aiTokens.muted, lineHeight: 24 }}>
@@ -615,7 +602,7 @@ function AssistantConversation({
               value={draft}
               maxLength={1600}
               multiline
-              editable={!busy && !syncBusy}
+              editable={!busy}
               onChangeText={(value) => {
                 if (!lock.current) {
                   setDraft(value);
