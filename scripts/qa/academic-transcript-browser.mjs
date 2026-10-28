@@ -193,7 +193,7 @@ createRoot(document.getElementById('root')).render(<Fixture/>);
       summary.scrollIntoView({ block: 'center', behavior: 'instant' });
       summary.focus();
     });
-    await send('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13 });
+    await send('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13, text: '\r', unmodifiedText: '\r' });
     await send('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13 });
     await until(() => inPage(() => document.querySelector('[aria-label="學期資料範圍"] details').open), '鍵盤展開學期範圍');
     report.checks.push(`${label}:Enter鍵展開原生學期清單`);
