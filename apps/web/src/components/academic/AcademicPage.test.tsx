@@ -330,8 +330,13 @@ it('clears private records synchronously when signing out', async () => {
   account.studentId = false;
   view.rerender(<GradesPage />);
   expect(screen.queryByText('真實來源科目')).toBeNull();
-  expect(screen.getByRole('heading', { name: '這個功能還沒接通' })).toBeTruthy();
+  expect(screen.queryByText('前期科目')).toBeNull();
+  expect(screen.queryByRole('region', { name: '學校資料讀取結果' })).toBeNull();
+  expect(screen.queryByLabelText('搜尋科目')).toBeNull();
+  expect(screen.queryByRole('button', { name: '更新資料' })).toBeNull();
   expect(screen.getByText('成績請先到學校的 e 校園查看。')).toBeTruthy();
+  expect(screen.getByRole('region', { name: '自行匯入的資料' })).toBeTruthy();
+  expect(loadAcademicRecords).toHaveBeenCalledTimes(1);
   expect(screen.queryByRole('link', { name: /學校帳號/ })).toBeNull();
 });
 it('ignores an old account response even after logging out and back into the same UID', async () => {
