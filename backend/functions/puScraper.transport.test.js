@@ -55,9 +55,10 @@ describe('PU session continuity and bounded requests', () => {
       'POST mypu.pu.edu.tw/index_redirect_mypu.php',
       'GET mypu.pu.edu.tw/score_query/score_all.php',
     ]);
-    expect(requests[1].headers.Cookie).toBe('SID=renewed');
-    expect(requests[2].headers.Cookie).toMatch(/SID=renewed/);
+    expect(requests[1].headers.Cookie).toBeUndefined();
     expect(requests[2].headers.Cookie).toMatch(/PHPSESSID=mypu/);
+    expect(requests[2].headers.Cookie || '').not.toMatch(/(?:^|;\s*)SID=/);
+    expect(result.mypuCookies).toEqual({ PHPSESSID: 'mypu' });
     expect(requests.every(row => row.family === 4)).toBe(true);
   });
 

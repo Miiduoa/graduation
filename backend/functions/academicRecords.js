@@ -20,6 +20,21 @@ function hasCookies(session) {
   );
 }
 
+function cookieMap(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  const entries = Object.entries(value);
+  if (
+    !entries.length ||
+    entries.some(
+      ([key, item]) =>
+        !key || /[\s;=\r\n]/.test(key) || typeof item !== 'string' || /[;\r\n]/.test(item),
+    )
+  ) {
+    return null;
+  }
+  return Object.fromEntries(entries);
+}
+
 function createPuCampusDataHandler({ db, fetchers, logger = console }) {
   return async (req, res) => {
     res.set('Cache-Control', 'no-store');
@@ -59,12 +74,22 @@ function createPuCampusDataHandler({ db, fetchers, logger = console }) {
         res.status(401).json({ error: 'Invalid or expired PU session' });
         return;
       }
-      const result = await fetchers[dataType](session.cookies, semester);
+      const result =
+        dataType === 'grades'
+          ? await fetchers.grades(session.cookies, semester, {
+              mypuCookies: cookieMap(session.mypuCookies),
+            })
+          : await fetchers[dataType](session.cookies, semester);
       if (!result?.success) {
         res.status(503).json({ error: result?.error || 'Failed to fetch campus data' });
         return;
       }
-      res.json({ success: true, result });
+      const nextMypu = dataType === 'grades' ? cookieMap(result.mypuCookies) : null;
+      if (nextMypu && typeof sessionRef.set === 'function') {
+        await sessionRef.set({ mypuCookies: nextMypu }, { merge: true });
+      }
+      const { mypuCookies: _mypuCookies, ...publicCampusResult } = result;
+      res.json({ success: true, result: publicCampusResult });
     } catch (error) {
       logger.error('PU campus data request failed', error?.message);
       writeHttpError(res, error, 'Failed to fetch PU campus data');
@@ -124,15 +149,26 @@ function createGetMyAcademicRecords({ db, assertActiveSchoolMember, fetchers, lo
       ) {
         throw new HttpsError('failed-precondition', '校務連線已過期，請重新以學號登入。');
       }
-      const result = await fetchers[dataType](session.cookies, '');
+      const sessionSnap = sessions.docs[0];
+      const result =
+        dataType === 'grades'
+          ? await fetchers.grades(session.cookies, '', {
+              mypuCookies: cookieMap(session.mypuCookies),
+            })
+          : await fetchers[dataType](session.cookies, '');
       if (result?.success === false && result.code === 'session-expired') {
         throw new HttpsError('failed-precondition', '校務連線已過期，請重新以學號登入。');
       }
       if (!result?.success || !Array.isArray(result[dataType])) {
         throw new HttpsError('unavailable', '目前無法取得學校資料，請稍後重試或重新以學號登入。');
       }
+      const nextMypu = dataType === 'grades' ? cookieMap(result.mypuCookies) : null;
+      if (nextMypu && typeof sessionSnap?.ref?.set === 'function') {
+        await sessionSnap.ref.set({ mypuCookies: nextMypu }, { merge: true });
+      }
       // A membership revoked while the school request was pending must not return data.
       await requireMembership(uid);
+      const { mypuCookies: _mypuCookies, ...publicCampusResult } = result;
       return {
         success: true,
         ownerUid: uid,
@@ -140,7 +176,7 @@ function createGetMyAcademicRecords({ db, assertActiveSchoolMember, fetchers, lo
         source: 'pu-campus',
         dataType,
         fetchedAt: new Date().toISOString(),
-        result,
+        result: publicCampusResult,
       };
     } catch (error) {
       if (error instanceof HttpsError) throw error;

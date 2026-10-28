@@ -432,7 +432,80 @@ it('falls back to identity CAS when native TronClass login returns 400', async (
     role: 'teacher',
     cookies: expect.objectContaining({ session: 'tc-cas' }),
   });
+  expect(
+    fetchMock.mock.calls.filter(([url]) => {
+      try {
+        return new URL(String(url)).pathname === '/user/index';
+      } catch {
+        return false;
+      }
+    }),
+  ).toHaveLength(1);
+  const profile = fetchMock.mock.calls.find(([url]) => String(url).endsWith('/api/profile'));
+  expect(new Headers(profile?.[1]?.headers).get('X-Requested-With')).toBe('XMLHttpRequest');
+  expect(new Headers(profile?.[1]?.headers).get('Referer')).toBe('https://tronclass.pu.edu.tw/user/index');
   expect(fetchMock.mock.calls.some(([url]) => String(url).includes('evil'))).toBe(false);
+});
+
+it('keeps a CAS student session when /api/profile aborts after /user/index', async () => {
+  const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+    const href = String(url);
+    const method = String(init?.method || 'GET').toUpperCase();
+    if (href.endsWith('/api/login') && method === 'POST') {
+      return jsonResponse(400, { error: 'native login disabled' });
+    }
+    if (href.startsWith('https://tronclass.pu.edu.tw/login')) {
+      return new Response('', {
+        status: 302,
+        headers: {
+          Location: 'https://identity.pu.edu.tw/auth/realms/pu/protocol/cas/login',
+        },
+      });
+    }
+    if (href.startsWith('https://identity.pu.edu.tw/auth/realms/pu/protocol/cas/login')) {
+      return htmlResponse(200, TRONCLASS_CAS_LOGIN_HTML);
+    }
+    if (href.includes('/login-actions/authenticate') && method === 'POST') {
+      return new Response('', {
+        status: 302,
+        headers: {
+          Location: 'https://tronclass.pu.edu.tw/user/index?ticket=ST-fixture',
+        },
+      });
+    }
+    if (href.startsWith('https://tronclass.pu.edu.tw/user/index')) {
+      return htmlResponse(
+        200,
+        '<html><body><input id="userId" value="57"><span class="user-name">陳同學</span></body></html>',
+        { 'set-cookie': 'session=tc-cas; Path=/' },
+      );
+    }
+    if (href.endsWith('/api/profile')) {
+      const error = new Error('aborted');
+      error.name = 'AbortError';
+      throw error;
+    }
+    throw new Error(`unexpected ${method} ${href}`);
+  });
+  const gateway = createPuCampusGateway({ fetch: fetchMock });
+  await expect(gateway.loginTronClass('changyi', SECRET, { route: 'student' })).resolves.toMatchObject({
+    userId: 57,
+    userName: '陳同學',
+    role: 'student',
+    cookies: expect.objectContaining({ session: 'tc-cas' }),
+  });
+  expect(
+    fetchMock.mock.calls.filter(([url]) => {
+      try {
+        return new URL(String(url)).pathname === '/user/index';
+      } catch {
+        return false;
+      }
+    }),
+  ).toHaveLength(1);
+  expect(casFormPasswordPosts(fetchMock).every(([url]) => String(url).includes('identity.pu.edu.tw'))).toBe(
+    true,
+  );
 });
 
 it('maps Keycloak credential errors after CAS fallback, not the native 400', async () => {

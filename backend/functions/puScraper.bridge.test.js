@@ -106,6 +106,68 @@ describe('PU mypu score SSO bridge', () => {
       'GET mypu.pu.edu.tw/score_query/score_all.php',
     ]);
     expect(requests[3].headers.Cookie).toMatch(/PHPSESSID=mypu-fixture/);
+    expect(requests[3].headers.Cookie || '').not.toMatch(/(?:^|;\s*)SID=/);
+    expect(result.mypuCookies).toEqual({ PHPSESSID: 'mypu-fixture' });
+  });
+
+  test('reuses stored mypu cookies so two grade fetches only bridge once', async () => {
+    const requests = mockRequests((options) => {
+      const hostPath = `${options.hostname}${options.path}`;
+      if (hostPath.includes('index_chkLogin')) {
+        return { status: 302, headers: { location: '/index_ToNewPlt.php?sysID=score_query' } };
+      }
+      if (hostPath.includes('index_ToNewPlt')) return { html: toNewPltHtml };
+      if (hostPath.includes('index_redirect_mypu')) {
+        return {
+          status: 302,
+          headers: {
+            location: '/score_query/score_all.php',
+            'set-cookie': ['PHPSESSID=mypu-live; Path=/'],
+          },
+        };
+      }
+      return { html: scoreAllHtml, headers: { 'set-cookie': ['PHPSESSID=mypu-live; Path=/'] } };
+    });
+
+    const first = await puFetchGrades({ SID: 'alcat-session' });
+    expect(first.success).toBe(true);
+    expect(first.mypuCookies).toEqual({ PHPSESSID: 'mypu-live' });
+    const second = await puFetchGrades({ SID: 'alcat-session' }, '', {
+      mypuCookies: first.mypuCookies,
+    });
+    expect(second.success).toBe(true);
+    expect(second.grades).toHaveLength(2);
+    expect(requests.filter((row) => String(row.path).includes('index_chkLogin'))).toHaveLength(1);
+    expect(requests.filter((row) => String(row.path).includes('index_redirect_mypu'))).toHaveLength(1);
+    expect(requests.filter((row) => String(row.path).includes('score_all.php')).length).toBeGreaterThan(1);
+  });
+
+  test('re-bridges once when stored mypu cookies return the not-logged-in page', async () => {
+    let scoreGets = 0;
+    const requests = mockRequests((options) => {
+      const hostPath = `${options.hostname}${options.path}`;
+      if (hostPath.includes('score_all.php')) {
+        scoreGets += 1;
+        if (scoreGets === 1) return { html: notLoggedInHtml };
+        return { html: scoreAllHtml, headers: { 'set-cookie': ['PHPSESSID=mypu-refreshed; Path=/'] } };
+      }
+      if (hostPath.includes('index_chkLogin') || hostPath.includes('index_ToNewPlt')) {
+        return { html: toNewPltHtml };
+      }
+      if (hostPath.includes('index_redirect_mypu')) {
+        return {
+          html: '<p>轉接完成</p>',
+          headers: { 'set-cookie': ['PHPSESSID=mypu-refreshed; Path=/'] },
+        };
+      }
+      return { html: scoreAllHtml };
+    });
+    const result = await puFetchGrades({ SID: 'alcat-session' }, '', {
+      mypuCookies: { PHPSESSID: 'stale-mypu' },
+    });
+    expect(result.success).toBe(true);
+    expect(result.mypuCookies).toEqual({ PHPSESSID: 'mypu-refreshed' });
+    expect(requests.filter((row) => String(row.path).includes('index_chkLogin'))).toHaveLength(1);
   });
 
   test('reports session-expired when mypu returns the not-logged-in snapshot', async () => {

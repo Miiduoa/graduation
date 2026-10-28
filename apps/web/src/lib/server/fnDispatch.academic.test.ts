@@ -62,7 +62,7 @@ it('reads only the authenticated owner session and returns provenance with no se
   expect(response.status).toBe(200);
   expect(response.headers.get('Cache-Control')).toBe('no-store');
   expect(verifyIdToken).toHaveBeenCalledWith('firebase-id-token', true);
-  expect(grades).toHaveBeenCalledWith({ portal: 'private-school-cookie' }, '');
+  expect(grades).toHaveBeenCalledWith({ portal: 'private-school-cookie' }, '', { mypuCookies: null });
   const body = await response.json();
   expect(body.result).toMatchObject({
     success: true, ownerUid: UID, schoolId: 'pu', source: 'pu-campus', dataType: 'grades',
@@ -70,6 +70,31 @@ it('reads only the authenticated owner session and returns provenance with no se
   });
   expect(Number.isFinite(Date.parse(body.result.fetchedAt))).toBe(true);
   expect(JSON.stringify(body)).not.toMatch(/private-school-cookie|should-never|other-user-cookie|cookies|internal response/);
+});
+
+it('stores mypu cookies on the portal session and only bridges once across two grade reads', async () => {
+  const { request, store, grades } = setup();
+  grades.mockImplementation(async (_cookies, _semester, options) => ({
+    success: true,
+    grades: [{ semester: '1151', courseName: '資料庫', credits: 3, score: 86 }],
+    allSemesters: ['1151'],
+    mypuCookies: { PHPSESSID: 'mypu-live' },
+    usedStored: Boolean(options?.mypuCookies?.PHPSESSID),
+  }));
+  expect((await request()).status).toBe(200);
+  expect((await request()).status).toBe(200);
+  expect(store.docs.get(SESSION)).toMatchObject({
+    cookies: { portal: 'private-school-cookie' },
+    mypuCookies: { PHPSESSID: 'mypu-live' },
+  });
+  expect(grades).toHaveBeenNthCalledWith(1, { portal: 'private-school-cookie' }, '', {
+    mypuCookies: null,
+  });
+  expect(grades).toHaveBeenNthCalledWith(2, { portal: 'private-school-cookie' }, '', {
+    mypuCookies: { PHPSESSID: 'mypu-live' },
+  });
+  const body = await (await request()).json();
+  expect(JSON.stringify(body)).not.toMatch(/mypu-live|PHPSESSID|private-school-cookie/);
 });
 
 it('uses the school timetable source for courses', async () => {

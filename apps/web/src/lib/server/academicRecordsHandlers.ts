@@ -4,7 +4,12 @@ import { HttpsError } from './httpsError';
 type RecordData = Record<string, unknown>;
 export type SchoolDataSnapshot = { exists: boolean; data: () => RecordData | undefined };
 type Snapshot = SchoolDataSnapshot;
-type SessionSnapshot = Snapshot & { ref: { get: () => Promise<Snapshot> } };
+type SessionSnapshot = Snapshot & {
+  ref: {
+    get: () => Promise<Snapshot>;
+    set?: (data: RecordData, options?: { merge?: boolean }) => Promise<unknown>;
+  };
+};
 type SessionQuery = {
   where: (field: string, operator: string, value: unknown) => SessionQuery;
   orderBy: (field: string, direction: 'desc') => SessionQuery;
@@ -16,9 +21,17 @@ export type AcademicFirestore = {
   doc: (path: string) => { get: () => Promise<Snapshot> };
   collection: (path: string) => SessionQuery;
 };
+export type AcademicGradeOptions = {
+  mypuCookies?: Record<string, string> | null;
+};
+
 export type AcademicFetchers = {
   courses: (cookies: Record<string, string>, semester: string) => Promise<unknown>;
-  grades: (cookies: Record<string, string>, semester: string) => Promise<unknown>;
+  grades: (
+    cookies: Record<string, string>,
+    semester: string,
+    options?: AcademicGradeOptions,
+  ) => Promise<unknown>;
 };
 
 function record(value: unknown): RecordData {
@@ -112,9 +125,18 @@ export function createAcademicRecordsHandler({
       if (!selected || !session || session.ownerUid !== uid || !cookies ||
         !(schoolSessionExpiry(session.expiresAt) > now())) reconnect();
 
-      const result = record(await fetchers[dataType](cookies, ''));
+      const storedMypu = schoolSessionCookies(session.mypuCookies);
+      const result = record(
+        dataType === 'grades'
+          ? await fetchers.grades(cookies, '', { mypuCookies: storedMypu })
+          : await fetchers.courses(cookies, ''),
+      );
       if (result.code === 'session-expired') reconnect();
       if (result.success !== true || !Array.isArray(result[dataType])) unavailable();
+      const nextMypu = dataType === 'grades' ? schoolSessionCookies(result.mypuCookies) : null;
+      if (nextMypu && typeof selected.ref.set === 'function') {
+        await selected.ref.set({ mypuCookies: nextMypu }, { merge: true });
+      }
 
       // 學校回應較慢時，重新確認帳號、校籍與 session，避免撤銷後仍回傳資料。
       await requireAcademicAccount(db, uid);

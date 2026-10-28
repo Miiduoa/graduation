@@ -47,6 +47,10 @@ function fixture() {
       const query = {
         doc: (id) => ({
           get: async () => ({ exists: sessions.has(id), data: () => sessions.get(id) }),
+          set: async (data, options) => {
+            const current = sessions.get(id) || {};
+            sessions.set(id, options?.merge ? { ...current, ...data } : { ...data });
+          },
           delete: async () => {
             removed(id);
             sessions.delete(id);
@@ -74,7 +78,16 @@ function fixture() {
             )
             .sort((a, b) => b.expiresAt.toDate() - a.expiresAt.toDate())
             .slice(0, maximum)
-            .map((row) => ({ data: () => row })),
+            .map((row) => ({
+              data: () => row,
+              ref: {
+                set: async (data, options) => {
+                  if (options?.merge) Object.assign(row, data);
+                  else Object.keys(row).forEach((key) => delete row[key]);
+                  if (!options?.merge) Object.assign(row, data);
+                },
+              },
+            })),
         }),
       };
       return query;
@@ -177,7 +190,7 @@ describe('PU campus HTTP session ownership', () => {
     const res = await invoke(f, 'own-session');
     expect(res.statusCode).toBe(200);
     expect(res.body.result.grades[0].score).toBe(88);
-    expect(f.fetchers.grades).toHaveBeenCalledWith({ SID: 'own-cookie' }, '');
+    expect(f.fetchers.grades).toHaveBeenCalledWith({ SID: 'own-cookie' }, '', { mypuCookies: null });
   });
   test('rejects and removes an expired owned session before fetching', async () => {
     const f = fixture();
@@ -208,7 +221,11 @@ describe('authenticated academic records', () => {
         dataType,
       });
       expect(result.result[dataType]).toHaveLength(1);
-      expect(f.fetchers[dataType]).toHaveBeenCalledWith({ SID: 'latest' }, '');
+      expect(f.fetchers[dataType]).toHaveBeenCalledWith(
+        { SID: 'latest' },
+        '',
+        ...(dataType === 'grades' ? [{ mypuCookies: null }] : []),
+      );
       expect(f.queryCalls).toEqual([
         ['ownerUid', '==', f.uid],
         ['expiresAt', '>', new Date(NOW)],
@@ -286,7 +303,11 @@ describe('authenticated academic records', () => {
       await expect(
         createGetMyAcademicRecords(f.dependencies)(f.request({ dataType })),
       ).rejects.toMatchObject({ code: 'failed-precondition' });
-      expect(f.fetchers[dataType]).toHaveBeenCalledWith({ SID: 'own-cookie' }, '');
+      expect(f.fetchers[dataType]).toHaveBeenCalledWith(
+        { SID: 'own-cookie' },
+        '',
+        ...(dataType === 'grades' ? [{ mypuCookies: null }] : []),
+      );
       expect(f.sessions.get('own-session').expiresAt.toDate().getTime()).toBeGreaterThan(NOW);
       expect(f.removed).not.toHaveBeenCalled();
     },
@@ -312,6 +333,25 @@ describe('authenticated academic records', () => {
       });
     },
   );
+  test('stores mypu cookies on the owner session and reuses them on the next grades read', async () => {
+    const f = fixture();
+    f.fetchers.grades.mockResolvedValue({
+      success: true,
+      grades: [{ courseName: '資訊管理', score: 88, credits: 3 }],
+      mypuCookies: { PHPSESSID: 'mypu-live' },
+    });
+    await createGetMyAcademicRecords(f.dependencies)(f.request());
+    expect(f.sessions.get('own-session').mypuCookies).toEqual({ PHPSESSID: 'mypu-live' });
+    const result = await createGetMyAcademicRecords(f.dependencies)(f.request());
+    expect(JSON.stringify(result)).not.toMatch(/mypu-live|PHPSESSID/);
+    expect(f.fetchers.grades).toHaveBeenNthCalledWith(1, { SID: 'own-cookie' }, '', {
+      mypuCookies: null,
+    });
+    expect(f.fetchers.grades).toHaveBeenNthCalledWith(2, { SID: 'own-cookie' }, '', {
+      mypuCookies: { PHPSESSID: 'mypu-live' },
+    });
+  });
+
   test('propagates school service outage as a retryable failure', async () => {
     const f = fixture();
     f.fetchers.grades.mockRejectedValue(new Error('Network unavailable'));

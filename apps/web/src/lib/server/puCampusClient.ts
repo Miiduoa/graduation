@@ -7,6 +7,8 @@ const IDENTITY_ORIGIN = 'https://identity.pu.edu.tw';
 const IDENTITY_PASSWORD_HOST = 'identity.pu.edu.tw';
 const DEFAULT_TIMEOUT_MS = 10_000;
 const CAS_MIN_REMAINING_MS = 500;
+const LMS_PROFILE_TIMEOUT_MS = 2_500;
+const LMS_PROFILE_MIN_REMAINING_MS = 800;
 const USER_AGENT =
   'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36';
 
@@ -329,6 +331,34 @@ function sessionCookieValue(jar: CookieJar): string {
   return '';
 }
 
+function parseTronClassUserIdFromHtml(html: string): number | null {
+  const match =
+    html.match(/userId['":\s]+(\d+)/) ||
+    html.match(/user_id['":\s]+(\d+)/i) ||
+    html.match(/id=["']userId["'][^>]*value=["'](\d+)["']/i) ||
+    html.match(/value=["'](\d+)["'][^>]*id=["']userId["']/i);
+  return positiveId(match?.[1]);
+}
+
+function parseTronClassUserNameFromHtml(html: string, fallback: string): string {
+  const match =
+    html.match(/class=["']user-?name["'][^>]*>([^<]+)</i) || html.match(/"name"\s*:\s*"([^"]+)"/);
+  return readTrimmed(match?.[1]) || fallback;
+}
+
+function isTronClassUserIndexUrl(url: string): boolean {
+  try {
+    const path = new URL(url).pathname.toLowerCase();
+    return path === '/user/index' || path.startsWith('/user/index/');
+  } catch {
+    return false;
+  }
+}
+
+function isCasLoginBounce(html: string): boolean {
+  return html.includes('/auth/realms/pu') || html.includes('identity.pu.edu.tw');
+}
+
 function looksLikeHtml(body: string): boolean {
   return body.trimStart().startsWith('<');
 }
@@ -630,7 +660,11 @@ export function createPuCampusGateway(
   ): Promise<TronClassSession | null> {
     const profilePage = await send(`${lmsOrigin}/api/profile`, {
       cookies,
-      headers: { Accept: 'application/json' },
+      headers: {
+        Accept: 'application/json',
+        'X-Requested-With': 'XMLHttpRequest',
+        Referer: `${lmsOrigin}/user/index`,
+      },
       timeoutMs: timeoutMsRemaining,
       context: { route, stage: 'verify' },
     });
@@ -817,27 +851,48 @@ export function createPuCampusGateway(
         if (isCredentialPage(postedCas.html)) {
           throw new PuCampusError('credentials', '學號或密碼錯誤', { route, stage: 'submit' });
         }
-        const indexPage = await followLms(`${lmsOrigin}/user/index`, {
-          cookies: postedCas.cookies,
-          headers: { Accept: 'text/html' },
-          hops: 3,
-          timeoutMs: remaining(),
-          context: { route, stage: 'verify' },
-        });
+        const indexPage =
+          postedCas.status === 200 && isTronClassUserIndexUrl(postedCas.url)
+            ? postedCas
+            : await followLms(`${lmsOrigin}/user/index`, {
+                cookies: postedCas.cookies,
+                headers: { Accept: 'text/html' },
+                hops: 3,
+                timeoutMs: remaining(),
+                context: { route, stage: 'verify' },
+              });
         if (isCredentialPage(indexPage.html)) {
           throw new PuCampusError('credentials', '學號或密碼錯誤', { route, stage: 'verify' });
         }
-        const casSession = await readTronClassProfile(
-          indexPage.cookies,
-          account,
-          {},
-          route,
-          remaining(),
-        );
-        if (casSession) return casSession;
-        if (indexPage.html.includes('/auth/realms/pu') || indexPage.html.includes('identity.pu.edu.tw')) {
+        if (isCasLoginBounce(indexPage.html)) {
           throw new PuCampusError('unavailable', '學校系統無回應', { route, stage: 'verify' });
         }
+        const casSession =
+          sessionCookieValue(indexPage.cookies) || isTronClassUserIndexUrl(indexPage.url)
+            ? {
+                cookies: indexPage.cookies,
+                userId: parseTronClassUserIdFromHtml(indexPage.html),
+                userName: parseTronClassUserNameFromHtml(indexPage.html, account),
+                role: route === 'student' ? 'student' : '',
+              }
+            : null;
+        const profileWait = leftover();
+        if (profileWait >= LMS_PROFILE_MIN_REMAINING_MS) {
+          try {
+            const verified = await readTronClassProfile(
+              indexPage.cookies,
+              account,
+              {},
+              route,
+              Math.min(LMS_PROFILE_TIMEOUT_MS, profileWait),
+            );
+            if (verified) return verified;
+          } catch (error) {
+            const timedOut = error instanceof PuCampusError && error.kind === 'timeout';
+            if (!timedOut || !casSession) throw error;
+          }
+        }
+        if (casSession) return casSession;
         throw new PuCampusError('unverified', '暫時無法驗證老師身分', { route, stage: 'verify' });
       } catch (error) {
         throw classifyCampusFailure(error, { route });

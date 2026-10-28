@@ -331,6 +331,32 @@ function expiredSessionResult(kind) {
   };
 }
 
+function cookieJar(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  const next = {};
+  for (const [key, item] of Object.entries(value)) {
+    if (!key || /[\s;=\r\n]/.test(key) || typeof item !== 'string' || /[;\r\n]/.test(item)) {
+      return null;
+    }
+    if (item) next[key] = item;
+  }
+  return Object.keys(next).length ? next : null;
+}
+
+async function fetchMypuScoreAll(mypuCookies, semester) {
+  const gradeRes = await getFollowRedirect(MYPU_HOST, GRADE_PATH, mypuCookies || {});
+  if (gradeRes.status !== 200) throw new Error(`HTTP ${gradeRes.status}`);
+  const cookies = cookieJar(gradeRes.cookies) || cookieJar(mypuCookies);
+  if (looksLikePuLoginPage(gradeRes.data)) {
+    return { loginPage: true, cookies };
+  }
+  return {
+    loginPage: false,
+    cookies,
+    parsed: parsePuGradeDocument(gradeRes.data, semester),
+  };
+}
+
 function hasPuStudentContext(html) {
   const text = String(html || '');
   return (
@@ -596,27 +622,38 @@ async function puFetchCourses(cookies, semester) {
  * Fetch historical grades. Parse both direct and SSO bridge pages with
  * the same tested parser. No guessed semester codes or synthetic grades.
  */
-async function puFetchGrades(cookies, semester) {
+async function puFetchGrades(cookies, semester, options = {}) {
   try {
     if (!cookies || !Object.keys(cookies).length) throw new Error('No session cookies');
 
     // alcat /score_query/score_all.php 已 404。改走現行 SSO：
     // chkLogin → index_ToNewPlt.php 自動 POST → mypu index_redirect_mypu.php → score_all.php。
     // 課表仍走 alcat query_course.html，不經這條轉接。
-    let portalCookies = { ...cookies };
-    let mypuCookies = { ...cookies };
+    // mypu cookie 與 alcat cookie 分開保存，避免同名 PHPSESSID 互相覆蓋。
+    const storedMypu = cookieJar(options.mypuCookies);
+    if (storedMypu) {
+      try {
+        const cached = await fetchMypuScoreAll(storedMypu, semester);
+        if (!cached.loginPage) {
+          const parsed = cached.parsed;
+          if (parsed) return { ...parsed, mypuCookies: cached.cookies };
+        }
+      } catch (error) {
+        console.warn('[puFetchGrades] Stored mypu cookies failed:', error.message);
+      }
+    }
+
+    let mypuCookies = storedMypu || {};
     let usableBridge = null;
 
     try {
-      const hop = await getFollowRedirect(ALCAT_HOST, SCORE_BRIDGE_PATH, portalCookies, 5);
-      portalCookies = { ...portalCookies, ...hop.cookies };
-      mypuCookies = { ...mypuCookies, ...hop.cookies };
+      const hop = await getFollowRedirect(ALCAT_HOST, SCORE_BRIDGE_PATH, cookies, 5);
       if (looksLikePuLoginPage(hop.data)) return expiredSessionResult('grades');
       if (hop.status === 200) {
         const parsedHop = parsePuGradeDocument(hop.data, semester);
         if (parsedHop.success) {
           usableBridge = parsedHop;
-          if (parsedHop.allSemesters.length > 1) return parsedHop;
+          if (parsedHop.allSemesters.length > 1) return { ...parsedHop, mypuCookies: cookieJar(mypuCookies) };
         }
       }
       const form = parseCampusAutoPostForm(hop.data, hop.url || `https://${ALCAT_HOST}/`);
@@ -624,17 +661,18 @@ async function puFetchGrades(cookies, semester) {
         const posted = await requestFollowRedirect(
           form.action.hostname,
           form.action.pathname + form.action.search,
-          mypuCookies,
+          {},
           { method: 'POST', body: encodeFormFields(form.fields), maxRedirects: 5 },
         );
-        portalCookies = { ...portalCookies, ...posted.cookies };
-        mypuCookies = { ...mypuCookies, ...posted.cookies };
+        mypuCookies = cookieJar(posted.cookies) || {};
         if (looksLikePuLoginPage(posted.data)) return expiredSessionResult('grades');
         if (posted.status === 200) {
           const parsedPost = parsePuGradeDocument(posted.data, semester);
           if (parsedPost.success) {
             usableBridge = parsedPost;
-            if (parsedPost.allSemesters.length > 1) return parsedPost;
+            if (parsedPost.allSemesters.length > 1) {
+              return { ...parsedPost, mypuCookies: cookieJar(mypuCookies) };
+            }
           }
         }
       }
@@ -644,16 +682,18 @@ async function puFetchGrades(cookies, semester) {
 
     // Keep a valid single-semester bridge result if mypu is unavailable.
     try {
-      const gradeRes = await getFollowRedirect(MYPU_HOST, GRADE_PATH, mypuCookies);
-      if (gradeRes.status !== 200) throw new Error(`HTTP ${gradeRes.status}`);
-      if (looksLikePuLoginPage(gradeRes.data)) {
-        if (usableBridge) return usableBridge;
+      const gradeRes = await fetchMypuScoreAll(mypuCookies, semester);
+      if (gradeRes.loginPage) {
+        if (usableBridge) return { ...usableBridge, mypuCookies: gradeRes.cookies };
         return expiredSessionResult('grades');
       }
-      const parsed = parsePuGradeDocument(gradeRes.data, semester);
-      return parsed.success ? parsed : (usableBridge || parsed);
+      const parsed = gradeRes.parsed;
+      const nextCookies = gradeRes.cookies;
+      return parsed.success
+        ? { ...parsed, mypuCookies: nextCookies }
+        : { ...(usableBridge || parsed), mypuCookies: nextCookies };
     } catch (error) {
-      if (usableBridge) return usableBridge;
+      if (usableBridge) return { ...usableBridge, mypuCookies: cookieJar(mypuCookies) };
       throw error;
     }
   } catch (err) {
