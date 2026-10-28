@@ -1,11 +1,12 @@
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { expect, it, vi } from 'vitest';
+import { afterEach, expect, it, vi } from 'vitest';
 import {
   campusPageHasLoginForm,
   campusPageLooksClosed,
   createPuCampusGateway,
+  DEFAULT_TIMEOUT_MS,
   isCasPasswordPostUrl,
   PuCampusError,
   rewriteAllowedCampusLocation,
@@ -22,6 +23,10 @@ const MYPU_NOT_LOGGED_IN_HTML = fixture('mypu-not-logged-in.html');
 
 const STUDENT = '1110700321';
 const SECRET = 'super-secret-pass';
+
+afterEach(() => {
+  vi.useRealTimers();
+});
 
 function htmlResponse(status: number, html: string, headers?: Record<string, string>) {
   return new Response(html, { status, headers: { 'Content-Type': 'text/html', ...headers } });
@@ -343,6 +348,60 @@ it('does not treat an expired session notice as maintenance', async () => {
     fetch: async () => htmlResponse(200, MYPU_NOT_LOGGED_IN_HTML),
   });
   await expect(gateway.fetchStudentInfo({ PHPSESSID: 'dead' })).resolves.toEqual({});
+});
+
+it('gives e-campus submit at least 15 seconds', () => {
+  expect(DEFAULT_TIMEOUT_MS).toBeGreaterThanOrEqual(15_000);
+});
+
+it('still accepts an 11-second e-campus submit within the 15-second budget', async () => {
+  vi.useFakeTimers();
+  const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+    const href = String(url);
+    if (href === 'https://alcat.pu.edu.tw/' && !init?.method) {
+      return htmlResponse(200, ALCAT_LOGIN_HTML, { 'set-cookie': 'PHPSESSID=abc; Path=/' });
+    }
+    if (href.endsWith('/index_check.php')) {
+      await new Promise((resolve) => setTimeout(resolve, 11_000));
+      return htmlResponse(200, '<html>ok</html>', { 'set-cookie': 'PHPSESSID=abc; Path=/' });
+    }
+    return htmlResponse(
+      200,
+      `<!-- 系統維護公告 -->學號(Student No.): ${STUDENT} 姓名(Student Name): 陳同學 query_course`,
+    );
+  });
+  const gateway = createPuCampusGateway({ timeoutMs: 15_000, fetch: fetchMock });
+  const pending = gateway.loginStudent(STUDENT, SECRET);
+  await vi.advanceTimersByTimeAsync(11_000);
+  await expect(pending).resolves.toMatchObject({
+    studentName: '陳同學',
+    cookies: { PHPSESSID: 'abc' },
+  });
+  vi.useRealTimers();
+});
+
+it('aborts e-campus submit after the 15-second budget', async () => {
+  vi.useFakeTimers();
+  const gateway = createPuCampusGateway({
+    timeoutMs: 15_000,
+    fetch: (_url, init) =>
+      new Promise((_, reject) => {
+        init?.signal?.addEventListener('abort', () => {
+          const error = new Error('aborted');
+          error.name = 'AbortError';
+          reject(error);
+        });
+      }),
+  });
+  const pending = expect(gateway.loginStudent(STUDENT, SECRET)).rejects.toMatchObject({
+    kind: 'timeout',
+    route: 'student',
+    stage: 'home',
+    code: 'AbortError',
+  });
+  await vi.advanceTimersByTimeAsync(15_000);
+  await pending;
+  vi.useRealTimers();
 });
 
 it('maps an aborted external request to timeout', async () => {

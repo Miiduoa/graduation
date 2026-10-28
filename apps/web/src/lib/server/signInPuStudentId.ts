@@ -78,6 +78,8 @@ export type SignInPuDeps = {
   now?: () => number;
   rateLimitSalt?: string;
   rateLimitGate?: LoginRateGate;
+  /** 登入回應送出後才跑成績／WOW Class SSO；測試可改成先收集再手動執行。 */
+  scheduleCampusSso?: (task: () => Promise<void>) => void;
 };
 
 export const SCHOOL_UNAVAILABLE = '學校系統暫時無法連線';
@@ -85,7 +87,22 @@ export const TEACHER_SCHOOL_UNAVAILABLE = SCHOOL_UNAVAILABLE;
 export const TEACHER_LMS_UNAVAILABLE = TEACHER_LMS_UNAVAILABLE_COPY;
 export { TEACHER_LMS_UNAVAILABLE_CODE };
 export const TEACHER_IDENTITY_UNVERIFIED = '暫時無法驗證老師身分';
-export const STUDENT_LMS_SOFT_TIMEOUT_MS = 8000;
+/** 學生 e 校園驗證單次逾時下限；可用 PU_STUDENT_LOGIN_TIMEOUT_MS 再拉長，不可低於此值。 */
+export const MIN_STUDENT_PORTAL_TIMEOUT_MS = 15_000;
+export const MAX_STUDENT_PORTAL_TIMEOUT_MS = 60_000;
+/** 登入後背景 TronClass／WOW Class SSO，失敗不影響已完成的學號驗證。 */
+export const STUDENT_LMS_SOFT_TIMEOUT_MS = MIN_STUDENT_PORTAL_TIMEOUT_MS;
+
+export function studentPortalTimeoutMs(
+  raw: string | undefined = process.env.PU_STUDENT_LOGIN_TIMEOUT_MS,
+): number {
+  const parsed = Number(raw);
+  if (!Number.isFinite(parsed)) return MIN_STUDENT_PORTAL_TIMEOUT_MS;
+  return Math.min(
+    MAX_STUDENT_PORTAL_TIMEOUT_MS,
+    Math.max(MIN_STUDENT_PORTAL_TIMEOUT_MS, Math.trunc(parsed)),
+  );
+}
 
 type ExpectedCampusFailureReason = 'campus_closed' | 'campus_unreachable';
 
@@ -122,6 +139,25 @@ function campusLogFields(error: unknown): {
   return {};
 }
 
+function logStudentSoftFailure(error: unknown, school: string, startedAt: number): void {
+  const fields = campusLogFields(error);
+  const reason =
+    error instanceof PuCampusError
+      ? error.kind
+      : expectedCampusFailureReason(error) || 'lms_login_failed';
+  console.info(
+    JSON.stringify({
+      msg: 'pu_campus_login_soft_failure',
+      reason,
+      school,
+      route: 'student',
+      stage: fields.stage || 'submit',
+      ...(fields.code ? { code: fields.code } : {}),
+      elapsedMs: Math.max(0, Date.now() - startedAt),
+    }),
+  );
+}
+
 function logExpectedCampusFailure(
   error: unknown,
   startedAt: number,
@@ -153,7 +189,26 @@ function campusFromConfig(config: SchoolLoginConfig, injected?: PuCampusGateway)
   return createPuCampusGateway({
     portalOrigin: config.endpoints.portal,
     lmsOrigin: config.endpoints.lms,
+    timeoutMs: studentPortalTimeoutMs(),
   });
+}
+
+function scheduleCampusSsoTask(
+  schedule: SignInPuDeps['scheduleCampusSso'],
+  task: () => Promise<void>,
+): void {
+  const run = schedule ?? ((work) => { void work(); });
+  run(async () => {
+    try {
+      await task();
+    } catch {
+      // SSO 失敗已在 task 內記錄，不可再拋回登入請求。
+    }
+  });
+}
+
+function isRetryableCampusFailure(error: unknown): boolean {
+  return error instanceof PuCampusError && (error.kind === 'timeout' || error.kind === 'unavailable');
 }
 
 function studentUid(config: SchoolLoginConfig, studentId: string): string {
@@ -378,6 +433,19 @@ export async function handleSignInPuStudentId(
   }
 }
 
+async function loginStudentWithTimeoutRetry(
+  campus: PuCampusGateway,
+  portalUid: string,
+  password: string,
+): Promise<Awaited<ReturnType<PuCampusGateway['loginStudent']>>> {
+  try {
+    return await campus.loginStudent(portalUid, password);
+  } catch (error) {
+    if (!isRetryableCampusFailure(error)) throw error;
+    return await campus.loginStudent(portalUid, password);
+  }
+}
+
 async function loginStudentWithAlternateUid(
   campus: PuCampusGateway,
   portalUids: readonly string[],
@@ -389,7 +457,7 @@ async function loginStudentWithAlternateUid(
     throw new PuLoginHttpError(400, '學號格式不正確');
   }
   try {
-    return { login: await campus.loginStudent(first, password), portalUid: first };
+    return { login: await loginStudentWithTimeoutRetry(campus, first, password), portalUid: first };
   } catch (error) {
     const alternate = uids[1];
     if (!alternate || !(error instanceof PuCampusError) || error.kind !== 'credentials') {
@@ -397,7 +465,10 @@ async function loginStudentWithAlternateUid(
       throw error;
     }
     try {
-      return { login: await campus.loginStudent(alternate, password), portalUid: alternate };
+      return {
+        login: await loginStudentWithTimeoutRetry(campus, alternate, password),
+        portalUid: alternate,
+      };
     } catch (second) {
       if (second instanceof PuCampusError) throwMappedCampusError(second, 'student');
       throw second;
@@ -421,44 +492,9 @@ async function signInStudent(
     throw new PuLoginHttpError(401, '學號或密碼錯誤');
   }
 
-  let tronClass: Awaited<ReturnType<PuCampusGateway['loginTronClass']>> | null = null;
-  const softStartedAt = Date.now();
-  try {
-    tronClass = await campus.loginTronClass(portalUid, password, {
-      timeoutMs: STUDENT_LMS_SOFT_TIMEOUT_MS,
-      route: 'student',
-    });
-  } catch (error) {
-    const fields = campusLogFields(error);
-    const reason =
-      error instanceof PuCampusError
-        ? error.kind
-        : expectedCampusFailureReason(error) || 'lms_login_failed';
-    console.info(
-      JSON.stringify({
-        msg: 'pu_campus_login_soft_failure',
-        reason,
-        school: config.schoolId,
-        route: 'student',
-        stage: fields.stage || 'submit',
-        ...(fields.code ? { code: fields.code } : {}),
-        elapsedMs: Math.max(0, Date.now() - softStartedAt),
-      }),
-    );
-  }
-
-  let profile: Awaited<ReturnType<PuCampusGateway['fetchStudentInfo']>> = {};
-  try {
-    profile = await campus.fetchStudentInfo(login.cookies);
-  } catch (error) {
-    if (error instanceof PuCampusError && error.kind !== 'credentials') {
-      throwMappedCampusError(error, 'student');
-    }
-  }
-
   const studentId = canonicalStudentId;
-  const displayName = String(profile.name || login.studentName || `${studentId} 同學`).trim();
-  const department = String(profile.class || '').trim();
+  const displayName = String(login.studentName || `${studentId} 同學`).trim();
+  const department = String(login.studentClass || '').trim();
   const email = schoolEmail(config, studentId);
   const uid = studentUid(config, studentId);
 
@@ -492,22 +528,19 @@ async function signInStudent(
     cookies: login.cookies,
   }, now);
 
-  let tronClassSessionId: string | null = null;
-  if (tronClass && tronClass.cookies && Object.keys(tronClass.cookies).length > 0) {
-    tronClassSessionId = await writeSession(deps.db, '_puTronClassSessions', {
+  scheduleCampusSsoTask(deps.scheduleCampusSso, () =>
+    attachStudentLmsSession({
+      campus,
+      portalUid,
+      password,
       studentId,
-      ownerUid: uid,
-      cookies: tronClass.cookies,
-      userId: tronClass.userId,
-      userName: tronClass.userName,
-    }, now);
-  }
-
-  // 將同一次登入的兩個來源連在一起，之後讀課程不必再次傳送帳密或 session ID。
-  const portalSession = deps.db.doc('_puSessions/' + puSessionId);
-  if (typeof portalSession.set === 'function') {
-    await portalSession.set({ tronClassSessionId }, { merge: true });
-  }
+      uid,
+      puSessionId,
+      db: deps.db,
+      now,
+      school: config.schoolId,
+    }),
+  );
 
   return {
     success: true,
@@ -519,15 +552,57 @@ async function signInStudent(
     isNewUser: schoolRole.isNewUser,
     role: schoolRole.role,
     puSessionId,
-    tronClassSessionId,
-    tronClassUserId: tronClass?.userId ?? null,
-    tronClassOk: !!tronClassSessionId,
-    studentInfo: profile.studentId || profile.name ? profile : null,
+    tronClassSessionId: null,
+    tronClassUserId: null,
+    tronClassOk: false,
+    studentInfo:
+      login.studentName || login.studentClass
+        ? { name: login.studentName || null, class: login.studentClass || null }
+        : null,
     courses: null,
     grades: null,
     creditAudit: null,
     announcements: null,
   };
+}
+
+async function attachStudentLmsSession(options: {
+  campus: PuCampusGateway;
+  portalUid: string;
+  password: string;
+  studentId: string;
+  uid: string;
+  puSessionId: string;
+  db: SignInPuDeps['db'];
+  now: number;
+  school: string;
+}): Promise<void> {
+  const startedAt = Date.now();
+  try {
+    const tronClass = await options.campus.loginTronClass(options.portalUid, options.password, {
+      timeoutMs: STUDENT_LMS_SOFT_TIMEOUT_MS,
+      route: 'student',
+    });
+    if (!tronClass?.cookies || Object.keys(tronClass.cookies).length === 0) return;
+    const tronClassSessionId = await writeSession(
+      options.db,
+      '_puTronClassSessions',
+      {
+        studentId: options.studentId,
+        ownerUid: options.uid,
+        cookies: tronClass.cookies,
+        userId: tronClass.userId,
+        userName: tronClass.userName,
+      },
+      options.now,
+    );
+    const portalSession = options.db.doc('_puSessions/' + options.puSessionId);
+    if (typeof portalSession.set === 'function') {
+      await portalSession.set({ tronClassSessionId }, { merge: true });
+    }
+  } catch (error) {
+    logStudentSoftFailure(error, options.school, startedAt);
+  }
 }
 
 async function signInTeacher(

@@ -24,9 +24,10 @@ vi.mock('firebase/auth', async (original) => ({
   updateCurrentUser: state.update,
 }));
 let signInWithPuStudentId: typeof import('./firebase').signInWithPuStudentId;
+let STUDENT_LOGIN_CLIENT_TIMEOUT_MS: typeof import('./firebase').STUDENT_LOGIN_CLIENT_TIMEOUT_MS;
 beforeEach(async () => {
   vi.resetModules();
-  ({ signInWithPuStudentId } = await import('./firebase'));
+  ({ signInWithPuStudentId, STUDENT_LOGIN_CLIENT_TIMEOUT_MS } = await import('./firebase'));
   vi.clearAllMocks();
   state.auth.currentUser = null;
   vi.stubGlobal('fetch', state.fetch);
@@ -36,7 +37,10 @@ beforeEach(async () => {
   });
   state.deleteApp.mockResolvedValue(undefined);
 });
-afterEach(() => vi.unstubAllGlobals());
+afterEach(() => {
+  vi.useRealTimers();
+  vi.unstubAllGlobals();
+});
 function deferred<T>() {
   let resolve!: (value: T) => void;
   const promise = new Promise<T>((done) => {
@@ -49,10 +53,44 @@ it('passes cancellation to the school request and never applies a late credentia
   state.fetch.mockReturnValueOnce(response.promise);
   const controller = new AbortController();
   const pending = signInWithPuStudentId('A1234567', 'test-password', controller.signal);
-  expect(state.fetch.mock.calls[0][1].signal).toBe(controller.signal);
+  const used = state.fetch.mock.calls[0][1].signal as AbortSignal;
+  expect(used.aborted).toBe(false);
   controller.abort();
+  expect(used.aborted).toBe(true);
   response.resolve(Response.json({ customToken: 'test-credential' }));
   await expect(pending).rejects.toMatchObject({ name: 'AbortError' });
+  expect(state.signIn).not.toHaveBeenCalled();
+  expect(state.update).not.toHaveBeenCalled();
+});
+it('still signs in when the school responds after 11 seconds', async () => {
+  vi.useFakeTimers();
+  const response = deferred<Response>();
+  state.fetch.mockReturnValueOnce(response.promise);
+  const pending = signInWithPuStudentId('A1234567', 'test-password');
+  await vi.advanceTimersByTimeAsync(11_000);
+  response.resolve(Response.json({ customToken: 'test-credential' }));
+  await expect(pending).resolves.toEqual({ uid: 'student' });
+  expect(state.update).toHaveBeenCalled();
+});
+it('maps a hung school request to a clear unavailable notice without signing in', async () => {
+  vi.useFakeTimers();
+  state.fetch.mockImplementation(
+    (_url: string, init?: { signal?: AbortSignal }) =>
+      new Promise((_, reject) => {
+        init?.signal?.addEventListener('abort', () => {
+          const error = new Error('aborted');
+          error.name = 'AbortError';
+          reject(error);
+        });
+      }),
+  );
+  const pending = expect(signInWithPuStudentId('A1234567', 'test-password')).rejects.toMatchObject({
+    name: 'SchoolLoginHttpError',
+    status: 503,
+    message: '學校系統暫時連不上，請稍後再試',
+  });
+  await vi.advanceTimersByTimeAsync(STUDENT_LOGIN_CLIENT_TIMEOUT_MS);
+  await pending;
   expect(state.signIn).not.toHaveBeenCalled();
   expect(state.update).not.toHaveBeenCalled();
 });

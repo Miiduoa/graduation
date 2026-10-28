@@ -5,7 +5,8 @@ const ALCAT_ORIGIN = 'https://alcat.pu.edu.tw';
 const TRONCLASS_ORIGIN = 'https://tronclass.pu.edu.tw';
 const IDENTITY_ORIGIN = 'https://identity.pu.edu.tw';
 const IDENTITY_PASSWORD_HOST = 'identity.pu.edu.tw';
-const DEFAULT_TIMEOUT_MS = 10_000;
+/** 單次校園 HTTP 逾時。Fly nrt 到學校比台灣慢，需大於舊版 10 秒。 */
+export const DEFAULT_TIMEOUT_MS = 15_000;
 const CAS_MIN_REMAINING_MS = 500;
 const LMS_PROFILE_TIMEOUT_MS = 2_500;
 const LMS_PROFILE_MIN_REMAINING_MS = 800;
@@ -43,6 +44,7 @@ export type CookieJar = Record<string, string>;
 export type StudentCampusLogin = {
   cookies: CookieJar;
   studentName?: string;
+  studentClass?: string;
 };
 
 export type StudentCampusInfo = {
@@ -741,6 +743,7 @@ export function createPuCampusGateway(
         return {
           cookies: verify.cookies,
           studentName: nameMatch?.[1],
+          studentClass: verify.html.match(/班級\(Class\)[：:]\s*([^\s<]+)/)?.[1],
         };
       } catch (error) {
         throw classifyCampusFailure(error, student);
