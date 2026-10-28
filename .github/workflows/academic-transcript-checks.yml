@@ -8,6 +8,8 @@ on:
       - 'apps/web/src/lib/gradeTranscript*'
       - 'apps/web/src/lib/academicRecords*'
       - 'apps/web/src/components/academic/**'
+      - 'apps/web/src/app/globals.css'
+      - 'scripts/qa/academic-transcript-browser.mjs'
       - '.github/workflows/academic-transcript-checks.yml'
   workflow_dispatch:
 
@@ -68,11 +70,22 @@ jobs:
             process.exitCode = 1;
           }
           NODE
+      - name: Prepare browser fonts
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y fonts-noto-cjk
+          google-chrome --version
+      - name: Verify actual transcript UI and CSV download
+        env:
+          SOURCE_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: node scripts/qa/academic-transcript-browser.mjs
       - name: Preserve regression report
         if: always() && steps.tests.outcome != 'skipped'
         uses: actions/upload-artifact@v4
         with:
           name: academic-transcript-results
-          path: apps/web/academic-transcript-results.json
+          path: |
+            apps/web/academic-transcript-results.json
+            artifacts/academic-transcript-browser/
           if-no-files-found: error
           retention-days: 7
