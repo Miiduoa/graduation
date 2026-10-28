@@ -10,7 +10,8 @@ import {
   where,
 } from 'firebase/firestore';
 import { getAuth, getCloudFunctionUrl, getDb, isFirebaseConfigured } from './firebase';
-import { FunctionsUnconfiguredError, isFunctionsUnconfiguredError } from './functionsUrl';
+import { isFunctionsUnconfiguredError } from './functionsUrl';
+import { ATTENDANCE_RESULT_UNKNOWN, requestAttendance } from './attendanceRequest';
 
 export interface AttendanceRecord {
   uid: string;
@@ -212,40 +213,21 @@ function withCallableCode(message: string, status: string): Error {
   return error;
 }
 
+export function attendanceActorUid(): string | null {
+  return isFirebaseConfigured() ? getAuth()?.currentUser?.uid ?? null : null;
+}
+
 async function call<T>(
   name: 'startLiveSession' | 'endLiveSession' | 'joinLiveSession' | 'correctAttendanceRecord',
   input: Record<string, unknown>,
+  expectedUid?: string,
 ): Promise<T> {
   if (!isFirebaseConfigured()) throw new Error('校園服務尚未連線。');
-  const user = getAuth()?.currentUser;
-  if (!user) throw withCallableCode('登入已失效，請重新登入。', 'UNAUTHENTICATED');
-  const idToken = await user.getIdToken();
-  const response = await fetch(getCloudFunctionUrl(name), {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${idToken}` },
-    body: JSON.stringify({ data: input }),
-    cache: 'no-store',
+  return requestAttendance<T>(name, input, {
+    getUser: () => getAuth()?.currentUser ?? null,
+    resolveUrl: getCloudFunctionUrl,
+    expectedUid,
   });
-  const payload = (await response.json()) as {
-    error?: { status?: unknown; message?: unknown };
-    result?: unknown;
-    data?: unknown;
-  };
-  const errorMessage =
-    payload?.error && typeof payload.error === 'object' ? String(payload.error.message || '') : '';
-  if (response.status === 503 || /尚未啟用/.test(errorMessage)) {
-    throw new FunctionsUnconfiguredError('點名尚未啟用');
-  }
-  if (!response.ok || payload.error) {
-    const status =
-      payload?.error && typeof payload.error === 'object' ? String(payload.error.status || '') : '';
-    throw withCallableCode(errorMessage || '無法確認操作結果。', status || 'UNKNOWN');
-  }
-  const result = payload.result ?? payload.data;
-  if (!result || typeof result !== 'object' || (result as { success?: boolean }).success !== true) {
-    throw new Error('無法確認操作結果。');
-  }
-  return result as T;
 }
 export function startCourseAttendance(groupId: string, requestId: string) {
   return call<StartAttendanceResult>('startLiveSession', {
@@ -322,26 +304,34 @@ export async function loadAttendanceCorrections(
   });
 }
 
-export function correctCourseAttendance(input: {
+export type AttendanceCorrectionCommand = {
   groupId: string;
   sessionId: string;
   studentUid: string;
   status: AttendanceCorrectionStatus;
   reason: string;
   requestId: string;
-}) {
-  if (!input.reason.trim() || input.reason.trim().length < 6) {
-    return Promise.reject(new Error('請填寫至少 6 個字元的更正原因。'));
+  expectedRevision?: number | null;
+  /** Local retry binding only; the server authenticates the bearer token. */
+  actorUid?: string;
+};
+
+export function correctCourseAttendance(input: AttendanceCorrectionCommand) {
+  if (!input.reason.trim() || input.reason.trim().length < 6 || input.reason.trim().length > 300) {
+    return Promise.reject(withCallableCode('請填寫 6 至 300 個字元的更正原因。', 'INVALID_ARGUMENT'));
   }
+  const { actorUid, ...command } = input;
   return call<{ success: boolean; reused: boolean; status: AttendanceCorrectionStatus }>(
     'correctAttendanceRecord',
-    { ...input, reason: input.reason.trim() },
+    { ...command, reason: input.reason.trim() },
+    actorUid,
   );
 }
 
 export function attendanceError(error: unknown): string {
   if (isFunctionsUnconfiguredError(error)) return '點名尚未啟用';
   const code = (error as { code?: string })?.code?.replace('functions/', '');
+  if (code === ATTENDANCE_RESULT_UNKNOWN) return '尚未確認操作結果，伺服器可能已保存。請確認原操作結果，不要另建一筆。';
   if (code === 'permission-denied') return '無法使用這次點名，請確認課程資格與簽到碼。';
   if (code === 'unauthenticated') return '登入已失效，請重新登入。';
   if (code === 'deadline-exceeded') return '簽到碼已過期，請聯絡授課教師。';

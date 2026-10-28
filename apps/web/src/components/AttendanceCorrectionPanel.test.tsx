@@ -13,6 +13,7 @@ vi.mock('@/lib/attendanceCorrectionReview', () => ({
   loadCorrectionReview: vi.fn(),
 }));
 vi.mock('@/lib/courseAttendance', () => ({
+  attendanceActorUid: () => 'teacher',
   attendanceError: (error: unknown) => error instanceof Error ? error.message : '錯誤',
   correctCourseAttendance: vi.fn(),
   loadAttendanceCorrections: vi.fn(),
@@ -71,15 +72,17 @@ it('retries an ambiguous correction with the same idempotency key', async () => 
   fireEvent.click(screen.getByRole('button', { name: '管理出席更正' }));
   await screen.findByLabelText('更正原因');
   fireEvent.change(screen.getByLabelText('選擇學生'), { target: { value: 'student-one' } });
+  fireEvent.change(screen.getByLabelText('核定狀態'), { target: { value: 'absent' } });
   fireEvent.change(screen.getByLabelText('更正原因'), { target: { value: '授課老師已確認沒有出席' } });
   await waitFor(() => expect(screen.getByRole('button', { name: '確認並保存更正' }).hasAttribute('disabled')).toBe(false));
   fireEvent.click(screen.getByRole('button', { name: '確認並保存更正' }));
   await screen.findByRole('alert');
-  await waitFor(() => expect(screen.getByRole('button', { name: '確認並保存更正' }).hasAttribute('disabled')).toBe(false));
-  fireEvent.click(screen.getByRole('button', { name: '確認並保存更正' }));
+  await waitFor(() => expect(screen.getByRole('button', { name: '確認原更正結果' }).hasAttribute('disabled')).toBe(false));
+  fireEvent.click(screen.getByRole('button', { name: '確認原更正結果' }));
   await waitFor(() => expect(correctCourseAttendance).toHaveBeenCalledTimes(2));
   const attempts = vi.mocked(correctCourseAttendance).mock.calls;
   expect(attempts[0][0].requestId).toBe(attempts[1][0].requestId);
+  expect(attempts[0][0]).toEqual(attempts[1][0]);
   expect(await screen.findByText('這筆更正已保存，已確認先前操作結果。')).toBeTruthy();
 });
 
