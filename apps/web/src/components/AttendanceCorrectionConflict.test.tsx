@@ -10,6 +10,7 @@ vi.mock('@/lib/attendanceCorrectionReview', () => ({
   loadCorrectionReview: vi.fn(),
 }));
 vi.mock('@/lib/courseAttendance', () => ({
+  attendanceActorUid: () => 'teacher',
   attendanceError: () => '操作未完成', correctCourseAttendance: vi.fn(),
   loadAttendanceCorrections: vi.fn(), loadCourseAttendanceRoster: vi.fn(),
 }));
@@ -95,8 +96,10 @@ it('keeps the reviewed revision and operation identity when a response is lost',
   await waitFor(() => expect(button().hasAttribute('disabled')).toBe(false));
   fireEvent.click(button());
   await screen.findByRole('alert');
-  await waitFor(() => expect(button().hasAttribute('disabled')).toBe(false));
-  fireEvent.click(button());
+  const retry = await screen.findByRole('button', { name: '確認原更正結果' });
+  await waitFor(() => expect(retry.hasAttribute('disabled')).toBe(false));
+  expect(screen.getByLabelText('更正原因').hasAttribute('disabled')).toBe(true);
+  fireEvent.click(retry);
   await waitFor(() => expect(correctCourseAttendance).toHaveBeenCalledTimes(2));
   expect(vi.mocked(correctCourseAttendance).mock.calls[0][0]).toEqual(vi.mocked(correctCourseAttendance).mock.calls[1][0]);
 });

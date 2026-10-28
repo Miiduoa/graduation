@@ -10,6 +10,7 @@ vi.mock('@/lib/attendanceCorrectionReview', () => ({
   loadCorrectionReview: vi.fn(),
 }));
 vi.mock('@/lib/courseAttendance', () => ({
+  attendanceActorUid: () => 'teacher',
   attendanceError: () => '無法核實',
   correctCourseAttendance: vi.fn(), loadAttendanceCorrections: vi.fn(), loadCourseAttendanceRoster: vi.fn(),
 }));
