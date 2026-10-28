@@ -33,5 +33,6 @@
 .warning, .warnings { background: var(--warning-soft); color: var(--warning); border-radius: 10px; padding: 12px 14px; font-size: 12px; line-height: 1.8; }
 .warnings { padding-left: 29px; }
 @media (max-width: 620px) { .tables { grid-template-columns: minmax(0, 1fr); } }
-@media (max-width: 430px) { .panel { padding: 14px; } .controls, .metrics { grid-template-columns: minmax(0, 1fr); } }
+@media (max-width: 430px) { .panel { padding: 14px; } .controls { grid-template-columns: minmax(0, 1fr); } }
 @media print { .panel { break-inside: avoid; } }
+@media (max-width: 350px) { .metrics { grid-template-columns: minmax(0, 1fr); } }

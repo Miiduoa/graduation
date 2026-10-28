@@ -67,13 +67,13 @@ it('exposes batch progress through the existing availability subscription', asyn
   unsubscribe();
 });
 
-it('rejects the whole result when a later batch is truncated and never starts subsequent work', async () => {
+it('rejects the whole result when a later batch stays truncated down to one record', async () => {
   let calls = 0;
   jest.mocked(localLLM.generate).mockImplementation(async (request) => ({
-    ...resultFor(request.messages[0].content), finishReason: ++calls === 2 ? 'length' : 'stop',
+    ...resultFor(request.messages[0].content), finishReason: ++calls >= 2 ? 'length' : 'stop',
   }));
   await expect(runMobilePersonalImportAi(source, options, new AbortController().signal)).rejects.toThrow('部分結果');
-  expect(localLLM.generate).toHaveBeenCalledTimes(2);
+  expect(localLLM.generate).toHaveBeenCalledTimes(5);
 });
 
 it('rejects invented evidence in a later batch instead of returning earlier successful rows', async () => {
