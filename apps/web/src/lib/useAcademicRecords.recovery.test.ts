@@ -93,9 +93,22 @@ it.each(['account', 'school', 'disabled', 'verification'] as const)('aborts and 
   if (change === 'verification') account.loading = true;
   vi.mocked(loadAcademicRecords).mockResolvedValue(snapshot('b'));
   view.rerender({ school: change === 'school' ? 'nthu' : 'pu', enabled: change !== 'disabled' });
-  expect(active?.aborted).toBe(true); expect(view.result.current.state).toBeNull(); await flush();
+  expect(active?.aborted).toBe(true);
+  // A→B 可立即顯示 B 的載入狀態；不得顯示 A 的私有快照。
+  expect(view.result.current.state?.snapshot?.ownerUid).not.toBe('a');
+  if (change === 'account') {
+    if (view.result.current.state) expect(view.result.current.state.scope).toBe(JSON.stringify(['b', 'grades', true, 'pu']));
+  } else {
+    expect(view.result.current.state).toBeNull();
+  }
+  await flush();
+  if (change === 'account') {
+    expect(view.result.current.state).toMatchObject({ status: 'ready', snapshot: { ownerUid: 'b' } });
+  }
   await act(async () => { pending.resolve(snapshot('a')); });
   expect(view.result.current.state?.snapshot?.ownerUid).not.toBe('a');
+  if (change === 'account') expect(view.result.current.state?.snapshot?.ownerUid).toBe('b');
+  else expect(view.result.current.state).toBeNull();
 });
 
 it('does not restore an earlier A snapshot when A returns after B', async () => {
