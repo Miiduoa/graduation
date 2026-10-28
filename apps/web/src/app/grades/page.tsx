@@ -5,6 +5,8 @@ import { useSearchParams } from 'next/navigation';
 import { AcademicPage } from '@/components/academic/AcademicPage';
 import { GradesTabs, isGradesFeedbackTab } from '@/components/academic/GradesTabs';
 import { SchoolSemesterSummary } from '@/components/academic/SchoolSemesterSummary';
+import { TranscriptReviewPanel, TranscriptReviewHint } from '@/components/academic/TranscriptReviewPanel';
+import { transcriptReviewReason } from '@/lib/transcriptReview';
 import { StudentGradesPage } from '@/features/nuni/StudentGrades';
 import {
   calculateGradeSummary,
@@ -22,6 +24,7 @@ import {
 
 function Grades({ records, fetchedAt }: { records: AcademicGradeResponse; fetchedAt: string }) {
   const [semester, setSemester] = useState('');
+  const [reviewOnly, setReviewOnly] = useState(false);
   const [search, setSearch] = useState('');
   const [sort, setSort] = useState<TranscriptSort>('semester');
   const [courseType, setCourseType] = useState('');
@@ -39,14 +42,15 @@ function Grades({ records, fetchedAt }: { records: AcademicGradeResponse; fetche
   );
   const summary = useMemo(() => calculateGradeSummary(selected), [selected]);
   const rows = useMemo(
-    () => selectTranscriptRows(records.grades, { semester, search, courseType, scoreKind, sort }),
-    [records, semester, search, courseType, scoreKind, sort],
+    () => selectTranscriptRows(records.grades, { semester, search, courseType, scoreKind, sort })
+      .filter((grade) => !reviewOnly || transcriptReviewReason(grade.score) !== null),
+    [records, semester, search, courseType, scoreKind, sort, reviewOnly],
   );
   const visibleRows = rows.slice(0, visibleCount);
-  const hasFilter = Boolean(search.trim() || semester || courseType || scoreKind !== 'all');
+  const hasFilter = Boolean(reviewOnly || search.trim() || semester || courseType || scoreKind !== 'all');
   const resetList = () => { setVisibleCount(40); setExportNotice(''); };
   const clearFilters = () => {
-    setSearch(''); setSemester(''); setCourseType(''); setScoreKind('all'); resetList();
+    setReviewOnly(false); setSearch(''); setSemester(''); setCourseType(''); setScoreKind('all'); resetList();
   };
   const exportRows = () => {
     setExportNotice('');
@@ -108,6 +112,9 @@ function Grades({ records, fetchedAt }: { records: AcademicGradeResponse; fetche
         </div>
       </div>
       <SchoolSemesterSummary records={records} semester={semester} />
+      <TranscriptReviewPanel grades={selected} active={reviewOnly} onChange={(active) => {
+        setReviewOnly(active); setSearch(''); setCourseType(''); setScoreKind('all'); resetList();
+      }} />
       <p className={transcriptStyles.notice}>
         上方學分與平均按所選學期計算；下方搜尋、修別與成績類型只篩選明細，不改變學期合計。
       </p>
@@ -173,6 +180,7 @@ function Grades({ records, fetchedAt }: { records: AcademicGradeResponse; fetche
                   {grade.credits} 學分
                 </p>
                 {grade.class && <p>{grade.class}</p>}
+                <TranscriptReviewHint score={grade.score} />
               </div>
               <div
                 className={`${styles.score} ${typeof grade.score === 'string' && grade.score.length > 3 ? styles.scoreText : ''}`}
