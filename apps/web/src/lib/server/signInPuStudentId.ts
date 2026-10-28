@@ -85,7 +85,7 @@ export const TEACHER_SCHOOL_UNAVAILABLE = SCHOOL_UNAVAILABLE;
 export const TEACHER_LMS_UNAVAILABLE = TEACHER_LMS_UNAVAILABLE_COPY;
 export { TEACHER_LMS_UNAVAILABLE_CODE };
 export const TEACHER_IDENTITY_UNVERIFIED = '暫時無法驗證老師身分';
-export const STUDENT_LMS_SOFT_TIMEOUT_MS = 2500;
+export const STUDENT_LMS_SOFT_TIMEOUT_MS = 8000;
 
 type ExpectedCampusFailureReason = 'campus_closed' | 'campus_unreachable';
 
@@ -430,10 +430,14 @@ async function signInStudent(
     });
   } catch (error) {
     const fields = campusLogFields(error);
+    const reason =
+      error instanceof PuCampusError
+        ? error.kind
+        : expectedCampusFailureReason(error) || 'lms_login_failed';
     console.info(
       JSON.stringify({
         msg: 'pu_campus_login_soft_failure',
-        reason: 'campus_unreachable',
+        reason,
         school: config.schoolId,
         route: 'student',
         stage: fields.stage || 'submit',
