@@ -615,8 +615,7 @@ async function portalSessionStillOwned(
   const portalRef = db.doc('_puSessions/' + puSessionId);
   if (typeof portalRef.get !== 'function') return true;
   const snap = await portalRef.get();
-  const exists = typeof snap.exists === 'function' ? snap.exists() === true : snap.exists === true;
-  if (!exists) return false;
+  if (snap.exists !== true) return false;
   const data = typeof snap.data === 'function' ? snap.data() : undefined;
   return Boolean(data && data.ownerUid === ownerUid);
 }
