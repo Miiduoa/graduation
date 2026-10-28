@@ -21,6 +21,8 @@ import { theme } from '../ui/theme';
 import { useThemeMode } from '../state/theme';
 import { portalReviewIssues, reconcilePortalRowIssues } from '@campus/shared/src/imports/portalRowReview';
 import { SchoolPortalRowEditor } from './SchoolPortalRowEditor';
+import { SchoolPortalTablePicker } from './SchoolPortalTablePicker';
+import { parseSchoolTableBatch, type SchoolTableChoice, type SchoolTableBatch } from '@campus/shared/src/imports/schoolTableBatch';
 import { SchoolPortalReimport } from './SchoolPortalReimport';
 import { undoPortalReimport, type PortalReimportReceipt } from '../services/portalReimport';
 
@@ -102,6 +104,9 @@ function PortalFlow({ portal, scope, isScopeCurrent, onClose, onOpenRecords, clo
   const [error, setError] = useState('');
   const [browserError, setBrowserError] = useState('');
   const [selection, setSelection] = useState<Selection | null>(null);
+  const [tablePicker, setTablePicker] = useState(false);
+  const [tableChoices, setTableChoices] = useState<SchoolTableChoice[]>([]);
+  const [tableBatch, setTableBatch] = useState<{ choices: SchoolTableChoice[]; tables: SchoolTableBatch['tables'] } | null>(null);
   const [text, setText] = useState('');
   const [year, setYear] = useState('');
   const [semester, setSemester] = useState('');
@@ -164,6 +169,7 @@ function PortalFlow({ portal, scope, isScopeCurrent, onClose, onOpenRecords, clo
     reconcileLock.current = false; setReconciling(false);
     hasDraft.current = false; resumeStage.current = 'choose';
     setSelection(null); setText(''); setYear(''); setSemester('');
+    setTablePicker(false); setTableChoices([]); setTableBatch(null);
     setRows([]); setIssues([]); setSelected(new Set()); setVisible(20);
     editing.current = null; setEditingId(null); setCorrected(new Set()); setConfirmReparse(false);
     setConfirmRead(false); setConfirmClose(false);
@@ -217,12 +223,26 @@ function PortalFlow({ portal, scope, isScopeCurrent, onClose, onOpenRecords, clo
       setError(''); moveTo('choose');
     } catch { setError('讀到表格，但未辨識出目前資料類型。請切到課表／成績列表，或改用檔案匯入。'); }
   };
+  const prepareTableBatch = () => {
+    if (!selection || stageRef.current !== 'choose' || !active() || writeLock.current || reconcileLock.current || confirmClose) return;
+    try {
+      const prepared = parseSchoolTableBatch(selection.tables, tableChoices, {
+        kind, schoolId: scope.schoolId, periodProfile: profile, source: { type: 'paste', name: selection.name },
+      });
+      setTableBatch({ choices: tableChoices.map((choice) => ({ ...choice })), tables: prepared.tables });
+      setText(''); setYear(''); setSemester(''); setCorrected(new Set()); setConfirmReparse(false);
+      setRows(prepared.rows); setIssues(prepared.issues); setSelected(new Set(prepared.rows.map((row) => row.id)));
+      setVisible(20); setError(''); resumeStage.current = 'review'; moveTo('review');
+    } catch (err) { setError(personalImportErrorMessage(err, '無法整理所選表格，尚未儲存任何資料。')); }
+  };
   const preview = (discardCorrections = false) => {
     if (writeLock.current || reconcileLock.current || editing.current || !active()) return;
     if (corrected.size && !discardCorrections) { setConfirmReparse(true); return; }
     setConfirmReparse(false); setCorrected(new Set());
     try {
-      const parsed = parsePersonalImport(text, {
+      const parsed = tableBatch && selection ? parseSchoolTableBatch(selection.tables, tableBatch.choices, {
+        kind, schoolId: scope.schoolId, periodProfile: profile, source: { type: 'paste', name: selection.name },
+      }) : parsePersonalImport(text, {
         kind, schoolId: scope.schoolId, academicYear: year, semester,
         periodProfile: profile, source: { type: 'paste', name: selection?.name },
       });
@@ -367,18 +387,28 @@ function PortalFlow({ portal, scope, isScopeCurrent, onClose, onOpenRecords, clo
       {selection?.partial ? <Text accessibilityRole="alert" style={copy}>部分內嵌頁面無法讀取；下列資料可能不完整，請逐筆與校方頁面核對。</Text> : null}
       {stage === 'choose' && selection ? <>
         <Text style={copy}>{`找到 ${selection.tables.length} 張表格。選擇本人的資料，接著核對欄位；目前尚未儲存。`}</Text>
-        {selection.tables.map((table) => <Button key={table.id} text={table.label} kind="outline" onPress={() => {
-          setText(table.text); setYear(table.suggestedTerm?.academicYear ?? ''); setSemester(table.suggestedTerm?.semester ?? '');
-          setRows([]); setIssues([]); setSelected(new Set()); setError(''); resumeStage.current = 'review'; moveTo('review');
-        }} />)}
+        {tablePicker ? <SchoolPortalTablePicker tables={selection.tables} choices={tableChoices}
+          disabled={saving || confirmClose} onChange={setTableChoices} onContinue={prepareTableBatch}
+          onCancel={() => setTablePicker(false)} /> : <>
+          {selection.tables.length > 1 ? <Button text="一次核對多張表格" disabled={confirmClose} onPress={() => setTablePicker(true)} /> : null}
+          {selection.tables.map((table) => <Button key={table.id} text={table.label} kind="outline" onPress={() => {
+            setTableBatch(null);
+            setText(table.text); setYear(table.suggestedTerm?.academicYear ?? ''); setSemester(table.suggestedTerm?.semester ?? '');
+            setRows([]); setIssues([]); setSelected(new Set()); setError(''); resumeStage.current = 'review'; moveTo('review');
+          }} />)}
+        </>}
         <Button text="返回校方頁面" kind="outline" onPress={returnToBrowser} />
       </> : null}
       {stage === 'review' ? <>
-        <Text style={copy}>先確認學期及表格文字，再整理成預覽。修改文字後須重新整理；原有紀錄不會被覆蓋。</Text>
+        <Text style={copy}>{tableBatch
+          ? `已整理 ${tableBatch.tables.length} 張表格；各列保留自己的學期與來源。這只涵蓋本次選取的表格，不代表歷年資料完整。`
+          : '先確認學期及表格文字，再整理成預覽。修改文字後須重新整理；原有紀錄不會被覆蓋。'}</Text>
         <Button text="回校方頁面核對" kind="outline" disabled={saving || !!editingId} onPress={returnToBrowser} />
-        {field('學年度', year, setYear)}{field('學期', semester, setSemester)}
-        {field('校務表格文字（可修正）', text, setText, true)}
-        <Button text="整理並核對匯入內容" disabled={saving || !!editingId || !text.trim()} onPress={() => preview()} />
+        {tableBatch ? tableBatch.tables.map((table) => <Text key={table.id} style={copy}>{`${table.label} · 已整理 ${table.rowCount} 筆`}</Text>) : <>
+          {field('學年度', year, setYear)}{field('學期', semester, setSemester)}
+          {field('校務表格文字（可修正）', text, setText, true)}
+        </>}
+        <Button text="整理並核對匯入內容" disabled={saving || !!editingId || (!tableBatch && !text.trim())} onPress={() => preview()} />
         {corrected.size ? <Text style={copy}>{`已逐筆修正 ${corrected.size} 筆。原始文字暫時鎖定，避免覆蓋修正；需要重整原文時請按上方整理按鈕確認。`}</Text> : null}
         {confirmReparse ? <View style={{ gap: 8 }}>
           <Text accessibilityRole="alert" style={copy}>重新整理會以原始表格取代逐筆修正及選列；尚未儲存的修正不會保留。</Text>
@@ -401,6 +431,7 @@ function PortalFlow({ portal, scope, isScopeCurrent, onClose, onOpenRecords, clo
             <Text style={copy}>{`${row.academicYear}／${row.semester}`}{kind === 'grades'
               ? ` · ${row.credits ?? '未提供'} 學分 · 成績 ${row.grade ?? '未提供'}`
               : ` · 星期 ${row.dayOfWeek ?? '?'} · ${row.startTime || row.periodLabel || `節次 ${row.startPeriod ?? '?'}–${row.endPeriod ?? '?'}`} · ${row.location || '教室未提供'}`}</Text>
+            {tableBatch ? <Text style={{ color: theme.colors.muted }}>{`來源：${row.source.name} · 第 ${row.source.line} 行`}</Text> : null}
             {corrected.has(row.id) ? <Text style={copy}>已手動修正，原始來源保留</Text> : null}
             {reviewIssues.filter((issue) => issue.rowId === row.id).map((issue, index) => (
               <Text key={`${issue.code}:${index}`} accessibilityRole={issue.severity === 'error' ? 'alert' : undefined} style={copy}>{issue.message}</Text>
