@@ -9,6 +9,7 @@ import { SiteShell } from './SiteShell';
 import { Button } from './ui/Button';
 import { Input } from './ui/Input';
 import { AttendanceQrScanner } from './AttendanceQrScanner';
+import { AttendanceQrPresentation } from './AttendanceQrPresentation';
 import { AttendanceCorrectionPanel } from './AttendanceCorrectionPanel';
 import { AttendanceSyncStatus } from './AttendanceSyncStatus';
 import { watchAttendanceLive, type AttendanceLiveState } from '@/lib/watchAttendanceLive';
@@ -61,6 +62,12 @@ function Session({
   const [token, setToken] = useState('');
   const [teacherCode, setTeacherCode] = useState('');
   const [qr, setQr] = useState('');
+  const qrGeneration = useRef(0);
+  const hideCode = useCallback(() => {
+    qrGeneration.current += 1;
+    setTeacherCode('');
+    setQr('');
+  }, []);
   const [records, setRecords] = useState<AttendanceRecord[] | null>(null);
   const [rosterQuery, setRosterQuery] = useState('');
   const [error, setError] = useState('');
@@ -104,22 +111,25 @@ function Session({
   }, [session.active, canStart, checkInEnabled]);
 
   useEffect(() => {
-    if (!teacherCode) return;
-    const hideSecret = () => {
-      setTeacherCode('');
-      setQr('');
-    };
-    const hideOnBackground = () => {
-      if (document.visibilityState !== 'visible') hideSecret();
-    };
-    document.addEventListener('visibilitychange', hideOnBackground);
-    const ttl = Number.isFinite(deadline) ? Math.max(0, deadline - Date.now()) : 0;
-    const timer = window.setTimeout(hideSecret, ttl);
+    // Invalidate pending reads too: returning from the background must not reveal a late QR.
+    const visibility = () => { if (document.visibilityState !== 'visible') hideCode(); };
+    document.addEventListener('visibilitychange', visibility);
+    window.addEventListener('pagehide', hideCode);
+    window.addEventListener('offline', hideCode);
     return () => {
-      document.removeEventListener('visibilitychange', hideOnBackground);
-      window.clearTimeout(timer);
+      qrGeneration.current += 1;
+      document.removeEventListener('visibilitychange', visibility);
+      window.removeEventListener('pagehide', hideCode);
+      window.removeEventListener('offline', hideCode);
     };
-  }, [teacherCode, deadline]);
+  }, [hideCode, session.active, canStart]);
+
+  useEffect(() => {
+    if (!teacherCode) return;
+    const ttl = Number.isFinite(deadline) ? Math.max(0, deadline - Date.now()) : 0;
+    const timer = window.setTimeout(hideCode, ttl);
+    return () => window.clearTimeout(timer);
+  }, [teacherCode, deadline, hideCode]);
 
   async function run(action: () => Promise<void>) {
     if (lock.current) return;
@@ -142,15 +152,18 @@ function Session({
     }
   }
   async function showCode() {
+    const request = ++qrGeneration.current;
     const code = await loadAttendanceCode(courseId, session.id);
     if (!Number.isFinite(deadline) || deadline <= Date.now()) {
       throw Object.assign(new Error('簽到期限已結束'), { code: 'functions/deadline-exceeded' });
     }
+    if (!live.current || request !== qrGeneration.current || navigator.onLine === false) return;
     const image = await QRCode.toDataURL(
       JSON.stringify({ groupId: courseId, sessionId: session.id, qrToken: code }),
-      { width: 260, margin: 2 },
+      { width: 768, margin: 4, errorCorrectionLevel: 'M' },
     );
-    if (live.current && document.visibilityState === 'visible' && Date.now() < deadline) {
+    if (live.current && request === qrGeneration.current && navigator.onLine !== false &&
+        document.visibilityState === 'visible' && Date.now() < deadline) {
       setTeacherCode(code);
       setQr(image);
     }
@@ -317,6 +330,12 @@ function Session({
             >
               複製簽到碼
             </Button>
+            <AttendanceQrPresentation
+              image={qr} courseName={courseName} expiresAt={session.qrExpiresAt}
+              remainingSeconds={remainingSeconds} attendeeCount={session.attendeeCount}
+              onHideCode={hideCode}
+            />
+            <Button type="button" variant="outline" onClick={hideCode}>隱藏簽到碼</Button>
             <p className={styles.detail}>簽到碼過期後，請結束本次點名，再開啟新的點名。</p>
           </div>
         </div>
