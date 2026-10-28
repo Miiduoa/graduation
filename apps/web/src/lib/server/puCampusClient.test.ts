@@ -6,6 +6,7 @@ import {
   campusPageHasLoginForm,
   campusPageLooksClosed,
   createPuCampusGateway,
+  isCasPasswordPostUrl,
   PuCampusError,
   rewriteAllowedCampusLocation,
   rewriteCampusPortalLocation,
@@ -16,6 +17,7 @@ const fixture = (name: string) =>
 const ALCAT_LOGIN_HTML = fixture('alcat-login.html');
 const ALCAT_MAINTENANCE_HTML = fixture('alcat-maintenance.html');
 const TRONCLASS_CAS_LOGIN_HTML = fixture('tronclass-cas-login.html');
+const TRONCLASS_CAS_TRONCLASS_ACTION_HTML = fixture('tronclass-cas-login-tronclass-action.html');
 const MYPU_NOT_LOGGED_IN_HTML = fixture('mypu-not-logged-in.html');
 
 const STUDENT = '1110700321';
@@ -457,6 +459,234 @@ it('maps Keycloak credential errors after CAS fallback, not the native 400', asy
     kind: 'credentials',
     message: '學號或密碼錯誤',
   });
+});
+
+it('allows CAS password POST only to https identity.pu.edu.tw', () => {
+  expect(isCasPasswordPostUrl('https://identity.pu.edu.tw/auth/realms/pu/login-actions/authenticate')).toBe(
+    true,
+  );
+  expect(isCasPasswordPostUrl('https://identity.pu.edu.tw:443/login')).toBe(true);
+  expect(isCasPasswordPostUrl('https://Identity.PU.edu.tw/login')).toBe(true);
+  expect(isCasPasswordPostUrl('http://identity.pu.edu.tw/login')).toBe(false);
+  expect(isCasPasswordPostUrl('https://identity.pu.edu.tw:8443/login')).toBe(false);
+  expect(isCasPasswordPostUrl('https://tronclass.pu.edu.tw/login')).toBe(false);
+  expect(isCasPasswordPostUrl('https://identity.pu.edu.tw.evil.test/login')).toBe(false);
+  expect(isCasPasswordPostUrl('https://user:pass@identity.pu.edu.tw/login')).toBe(false);
+});
+
+function casFormPasswordPosts(fetchMock: ReturnType<typeof vi.fn>) {
+  return fetchMock.mock.calls.filter(([, init]) => {
+    const method = String(init?.method || 'GET').toUpperCase();
+    const body = String(init?.body || '');
+    const contentType = new Headers(init?.headers).get('content-type') || '';
+    return (
+      method === 'POST' &&
+      body.includes(SECRET) &&
+      contentType.includes('application/x-www-form-urlencoded')
+    );
+  });
+}
+
+it('does not POST CAS credentials when the form action is tronclass', async () => {
+  const logs: string[] = [];
+  const info = vi.spyOn(console, 'info').mockImplementation((msg) => {
+    logs.push(String(msg));
+  });
+  const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+    const href = String(url);
+    const method = String(init?.method || 'GET').toUpperCase();
+    if (href.endsWith('/api/login') && method === 'POST') {
+      return jsonResponse(400, { error: 'native login disabled' });
+    }
+    if (href.startsWith('https://tronclass.pu.edu.tw/login')) {
+      return new Response('', {
+        status: 302,
+        headers: {
+          Location: 'https://identity.pu.edu.tw/auth/realms/pu/protocol/cas/login',
+        },
+      });
+    }
+    if (href.startsWith('https://identity.pu.edu.tw/')) {
+      return htmlResponse(200, TRONCLASS_CAS_TRONCLASS_ACTION_HTML);
+    }
+    throw new Error(`unexpected ${href}`);
+  });
+  try {
+    const gateway = createPuCampusGateway({ fetch: fetchMock });
+    await expect(gateway.loginTronClass('changyi', SECRET, { route: 'teacher' })).rejects.toMatchObject({
+      kind: 'unavailable',
+      code: 'CAS_UNTRUSTED_ACTION',
+    });
+    expect(casFormPasswordPosts(fetchMock)).toEqual([]);
+    expect(
+      fetchMock.mock.calls.some(
+        ([url, init]) =>
+          String(url).includes('tronclass.pu.edu.tw') &&
+          String(init?.method || '').toUpperCase() === 'POST' &&
+          String(init?.body || '').includes(SECRET) &&
+          !String(url).endsWith('/api/login'),
+      ),
+    ).toBe(false);
+    const rejected = logs
+      .map((line) => {
+        try {
+          return JSON.parse(line) as { msg?: string; reason?: string; host?: string };
+        } catch {
+          return null;
+        }
+      })
+      .find((row) => row?.msg === 'pu_tronclass_cas_post_rejected');
+    expect(rejected).toMatchObject({
+      reason: 'untrusted_action',
+      host: 'tronclass.pu.edu.tw',
+    });
+    expect(logs.join('\n')).not.toContain(SECRET);
+  } finally {
+    info.mockRestore();
+  }
+});
+
+for (const status of [307, 308] as const) {
+  it(`does not resend CAS credentials on ${status} to another host`, async () => {
+    const logs: string[] = [];
+    const info = vi.spyOn(console, 'info').mockImplementation((msg) => {
+      logs.push(String(msg));
+    });
+    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+      const href = String(url);
+      const method = String(init?.method || 'GET').toUpperCase();
+      if (href.endsWith('/api/login') && method === 'POST') {
+        return jsonResponse(400, { error: 'native login disabled' });
+      }
+      if (href.startsWith('https://tronclass.pu.edu.tw/login')) {
+        return new Response('', {
+          status: 302,
+          headers: {
+            Location: 'https://identity.pu.edu.tw/auth/realms/pu/protocol/cas/login',
+          },
+        });
+      }
+      if (href.startsWith('https://identity.pu.edu.tw/auth/realms/pu/protocol/cas/login')) {
+        return htmlResponse(200, TRONCLASS_CAS_LOGIN_HTML);
+      }
+      if (href.includes('/login-actions/authenticate') && method === 'POST') {
+        expect(href).toContain('identity.pu.edu.tw');
+        return new Response('', {
+          status,
+          headers: {
+            Location: 'https://tronclass.pu.edu.tw/login-actions/authenticate?next=stolen',
+          },
+        });
+      }
+      throw new Error(`unexpected ${method} ${href}`);
+    });
+    try {
+      const gateway = createPuCampusGateway({ fetch: fetchMock });
+      await expect(gateway.loginTronClass('changyi', SECRET, { route: 'teacher' })).rejects.toMatchObject({
+        kind: 'unavailable',
+        code: 'CAS_POST_REDIRECT',
+      });
+      const passwordPosts = casFormPasswordPosts(fetchMock);
+      expect(passwordPosts).toHaveLength(1);
+      expect(new URL(String(passwordPosts[0]?.[0])).hostname).toBe('identity.pu.edu.tw');
+      expect(
+        fetchMock.mock.calls.some(
+          ([url, init]) =>
+            String(url).includes('tronclass.pu.edu.tw') &&
+            String(init?.method || '').toUpperCase() === 'POST' &&
+            String(init?.body || '').includes(SECRET),
+        ),
+      ).toBe(false);
+      const rejected = logs
+        .map((line) => {
+          try {
+            return JSON.parse(line) as {
+              msg?: string;
+              reason?: string;
+              host?: string;
+              status?: number;
+            };
+          } catch {
+            return null;
+          }
+        })
+        .find((row) => row?.msg === 'pu_tronclass_cas_post_rejected');
+      expect(rejected).toMatchObject({
+        reason: 'redirect_preserves_body',
+        host: 'tronclass.pu.edu.tw',
+        status,
+      });
+      expect(logs.join('\n')).not.toContain(SECRET);
+    } finally {
+      info.mockRestore();
+    }
+  });
+}
+
+it('may resend CAS credentials on 307 only when the target stays on identity', async () => {
+  const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+    const href = String(url);
+    const method = String(init?.method || 'GET').toUpperCase();
+    if (href.endsWith('/api/login') && method === 'POST') {
+      return jsonResponse(400, { error: 'native login disabled' });
+    }
+    if (href.startsWith('https://tronclass.pu.edu.tw/login')) {
+      return new Response('', {
+        status: 302,
+        headers: {
+          Location: 'https://identity.pu.edu.tw/auth/realms/pu/protocol/cas/login',
+        },
+      });
+    }
+    if (href.startsWith('https://identity.pu.edu.tw/auth/realms/pu/protocol/cas/login')) {
+      return htmlResponse(200, TRONCLASS_CAS_LOGIN_HTML);
+    }
+    if (href.includes('/login-actions/authenticate') && method === 'POST') {
+      if (href.includes('session_code=fixtureSessionCode')) {
+        return new Response('', {
+          status: 307,
+          headers: {
+            Location:
+              'https://identity.pu.edu.tw/auth/realms/pu/login-actions/authenticate?session_code=nextHop',
+          },
+        });
+      }
+      expect(String(init?.body || '')).toContain(`password=${encodeURIComponent(SECRET)}`);
+      return new Response('', {
+        status: 302,
+        headers: {
+          Location: 'https://tronclass.pu.edu.tw/user/index?ticket=ST-fixture',
+          'set-cookie': 'KEYCLOAK_IDENTITY=kc; Path=/',
+        },
+      });
+    }
+    if (href.startsWith('https://tronclass.pu.edu.tw/user/index')) {
+      expect(String(init?.method || 'GET').toUpperCase()).toBe('GET');
+      expect(String(init?.body || '')).not.toContain(SECRET);
+      return htmlResponse(200, '<html><body>ok</body></html>', {
+        'set-cookie': 'session=tc-cas; Path=/',
+      });
+    }
+    if (href.endsWith('/api/profile')) {
+      return jsonResponse(200, {
+        id: 44,
+        name: '王老師',
+        login_name: 'changyi',
+        role: 'teacher',
+      });
+    }
+    throw new Error(`unexpected ${method} ${href}`);
+  });
+  const gateway = createPuCampusGateway({ fetch: fetchMock });
+  await expect(gateway.loginTronClass('changyi', SECRET, { route: 'teacher' })).resolves.toMatchObject({
+    userId: 44,
+    cookies: expect.objectContaining({ session: 'tc-cas' }),
+  });
+  const passwordPosts = casFormPasswordPosts(fetchMock);
+  expect(passwordPosts).toHaveLength(2);
+  expect(
+    passwordPosts.every(([url]) => new URL(String(url)).hostname === 'identity.pu.edu.tw'),
+  ).toBe(true);
 });
 
 it('does not follow a CAS redirect off identity or TronClass', async () => {

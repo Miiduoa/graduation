@@ -4,6 +4,7 @@ import { createIpv4PinnedFetch } from './campusIpv4Fetch';
 const ALCAT_ORIGIN = 'https://alcat.pu.edu.tw';
 const TRONCLASS_ORIGIN = 'https://tronclass.pu.edu.tw';
 const IDENTITY_ORIGIN = 'https://identity.pu.edu.tw';
+const IDENTITY_PASSWORD_HOST = 'identity.pu.edu.tw';
 const DEFAULT_TIMEOUT_MS = 10_000;
 const CAS_MIN_REMAINING_MS = 500;
 const USER_AGENT =
@@ -140,6 +141,48 @@ export function rewriteCampusPortalLocation(
   return rewriteAllowedCampusLocation(location, requestUrl, [portalOrigin]);
 }
 
+/** CAS 含密碼的 POST 只能送到這個精確主機，不含帳密、也不接受非 443 連接埠。 */
+export function isCasPasswordPostUrl(url: string | null | undefined): boolean {
+  if (!url) return false;
+  try {
+    const target = new URL(url);
+    return (
+      target.protocol === 'https:' &&
+      !target.username &&
+      !target.password &&
+      target.hostname.toLowerCase() === IDENTITY_PASSWORD_HOST &&
+      (target.port === '' || target.port === '443')
+    );
+  } catch {
+    return false;
+  }
+}
+
+function hostnameOf(url: string | null | undefined): string | undefined {
+  if (!url) return undefined;
+  try {
+    const host = new URL(url).hostname.trim().toLowerCase();
+    return host || undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function logCasPasswordPostRejected(details: {
+  reason: 'untrusted_action' | 'redirect_preserves_body';
+  host?: string;
+  status?: number;
+}): void {
+  console.info(
+    JSON.stringify({
+      msg: 'pu_tronclass_cas_post_rejected',
+      reason: details.reason,
+      ...(details.host ? { host: details.host } : {}),
+      ...(details.status != null ? { status: details.status } : {}),
+    }),
+  );
+}
+
 const TIMEOUT_CODES = new Set([
   'ETIMEDOUT',
   'ESOCKETTIMEDOUT',
@@ -241,13 +284,16 @@ function isCredentialPage(html: string): boolean {
 function extractCasLoginForm(
   html: string,
   fallbackUrl: string,
-  allowedOrigins: readonly string[],
 ): { action: string; hiddenFields: Record<string, string> } | null {
   if (!/<form[\s>]/i.test(html)) return null;
   const formActionMatch = html.match(/<form[^>]+action=["']([^"']+)["']/i);
   const actionRaw = (formActionMatch?.[1] || fallbackUrl).replace(/&amp;/g, '&');
-  const action = rewriteAllowedCampusLocation(actionRaw, fallbackUrl, allowedOrigins);
-  if (!action) return null;
+  let action: string;
+  try {
+    action = new URL(actionRaw, fallbackUrl).toString();
+  } catch {
+    return null;
+  }
   const hiddenFields: Record<string, string> = {};
   const hiddenRegex = /<input[^>]+type=["']hidden["'][^>]*>/gi;
   let match: RegExpExecArray | null;
@@ -495,6 +541,85 @@ export function createPuCampusGateway(
     return page;
   }
 
+  async function postCasCredentials(
+    action: string,
+    init: {
+      cookies?: CookieJar;
+      body: string;
+      headers?: HeadersInit;
+      hops?: number;
+      timeoutMs?: number;
+      context?: CampusErrorDetails;
+    },
+  ): Promise<SentPage> {
+    if (!isCasPasswordPostUrl(action)) {
+      logCasPasswordPostRejected({
+        reason: 'untrusted_action',
+        host: hostnameOf(action),
+      });
+      throw new PuCampusError('unavailable', '學校系統無回應', {
+        ...(init.context || {}),
+        code: 'CAS_UNTRUSTED_ACTION',
+      });
+    }
+    let current = action;
+    let jar = init.cookies || {};
+    let hops = init.hops ?? 8;
+    let carryingPassword = true;
+    let page = await send(current, {
+      method: 'POST',
+      body: init.body,
+      headers: init.headers,
+      cookies: jar,
+      timeoutMs: init.timeoutMs,
+      context: init.context,
+      confineOrigins: lmsAllowedOrigins,
+    });
+    while ([301, 302, 303, 307, 308].includes(page.status) && hops > 0) {
+      const preservesBody = page.status === 307 || page.status === 308;
+      if (carryingPassword && preservesBody) {
+        if (!isCasPasswordPostUrl(page.location)) {
+          logCasPasswordPostRejected({
+            reason: 'redirect_preserves_body',
+            host: hostnameOf(page.location),
+            status: page.status,
+          });
+          throw new PuCampusError('unavailable', '學校系統無回應', {
+            ...(init.context || {}),
+            code: 'CAS_POST_REDIRECT',
+          });
+        }
+        current = page.location;
+        jar = page.cookies;
+        page = await send(current, {
+          method: 'POST',
+          body: init.body,
+          headers: init.headers,
+          cookies: jar,
+          timeoutMs: init.timeoutMs,
+          context: init.context,
+          confineOrigins: lmsAllowedOrigins,
+        });
+        hops -= 1;
+        continue;
+      }
+      if (!page.location) break;
+      carryingPassword = false;
+      current = page.location;
+      jar = page.cookies;
+      page = await send(current, {
+        method: 'GET',
+        headers: init.headers,
+        cookies: jar,
+        timeoutMs: init.timeoutMs,
+        context: init.context,
+        confineOrigins: lmsAllowedOrigins,
+      });
+      hops -= 1;
+    }
+    return page;
+  }
+
   async function readTronClassProfile(
     cookies: CookieJar,
     account: string,
@@ -664,7 +789,7 @@ export function createPuCampusGateway(
             code: `HTTP_${loginPage.status}`,
           });
         }
-        const form = extractCasLoginForm(loginPage.html, loginPage.url, lmsAllowedOrigins);
+        const form = extractCasLoginForm(loginPage.html, loginPage.url);
         if (!form) {
           throw nativeFallback || new PuCampusError('unavailable', '學校系統無回應', {
             route,
@@ -677,8 +802,7 @@ export function createPuCampusGateway(
           password,
           login: '',
         }).toString();
-        const postedCas = await followLms(form.action, {
-          method: 'POST',
+        const postedCas = await postCasCredentials(form.action, {
           body: formData,
           cookies: loginPage.cookies,
           headers: {
