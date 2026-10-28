@@ -930,6 +930,34 @@ it('does not follow a post-login redirect off alcat', async () => {
   expect(fetchMock.mock.calls.some(([url]) => String(url).includes('evil.test'))).toBe(false);
 });
 
+it('caps each TronClass hop below the total SSO budget', async () => {
+  const started = Date.now();
+  const gateway = createPuCampusGateway({
+    timeoutMs: 8_000,
+    fetch: (_url, init) =>
+      new Promise((_, reject) => {
+        init?.signal?.addEventListener('abort', () => {
+          const error = new Error('aborted');
+          error.name = 'AbortError';
+          reject(error);
+        });
+      }),
+  });
+  await expect(
+    gateway.loginTronClass('changyi', SECRET, {
+      timeoutMs: 5_000,
+      hopTimeoutMs: 40,
+      route: 'student',
+    }),
+  ).rejects.toMatchObject({
+    kind: 'timeout',
+    route: 'student',
+    stage: 'submit',
+    code: 'AbortError',
+  });
+  expect(Date.now() - started).toBeLessThan(1000);
+});
+
 it('aborts a student TronClass sidecar within the supplied timeout', async () => {
   const started = Date.now();
   const gateway = createPuCampusGateway({

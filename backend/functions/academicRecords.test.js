@@ -16,6 +16,7 @@ let nextUid = 0;
 
 function fixture() {
   const uid = `student-${++nextUid}`;
+  const tronSessions = new Map();
   const sessions = new Map([
     [
       'own-session',
@@ -45,6 +46,45 @@ function fixture() {
         return {
           doc: (id) => ({ get: async () => ({ exists: id === uid, data: () => profile }) }),
         };
+      }
+      if (collectionName === '_puTronClassSessions') {
+        const constraints = [];
+        let maximum = Infinity;
+        const tronRef = (id) => ({
+          id,
+          path: `_puTronClassSessions/${id}`,
+          get: async () => ({ exists: tronSessions.has(id), data: () => tronSessions.get(id) }),
+          delete: async () => {
+            tronSessions.delete(id);
+          },
+        });
+        const query = {
+          doc: (id) => tronRef(id),
+          where: (field, op, value) => {
+            constraints.push({ field, op, value });
+            return query;
+          },
+          limit: (count) => {
+            maximum = count;
+            return query;
+          },
+          get: async () => {
+            const rows = [...tronSessions.entries()]
+              .filter(([, row]) =>
+                constraints.every(({ field, op, value }) =>
+                  op === '==' ? row[field] === value : false,
+                ),
+              )
+              .slice(0, maximum)
+              .map(([id, row]) => ({
+                id,
+                data: () => row,
+                ref: tronRef(id),
+              }));
+            return { docs: rows, empty: rows.length === 0 };
+          },
+        };
+        return query;
       }
       if (collectionName !== '_puSessions') throw new Error('Unexpected collection');
       const constraints = [];
@@ -133,7 +173,7 @@ function fixture() {
     auth: { uid, token: { schoolId: 'pu' } },
     data,
   });
-  return { uid, sessions, profile, removed, fetchers, dependencies, request, queryCalls };
+  return { uid, sessions, tronSessions, profile, removed, fetchers, dependencies, request, queryCalls };
 }
 
 beforeEach(() => {
@@ -455,10 +495,14 @@ describe('clearPuCampusSessions', () => {
   test('deletes only the caller sessions including cookies and mypuCookies', async () => {
     const f = fixture();
     f.sessions.get('own-session').mypuCookies = { PHPSESSID: 'mypu-live' };
+    f.tronSessions.set('own-lms', { ownerUid: f.uid, cookies: { session: 'tc-own' } });
+    f.tronSessions.set('other-lms', { ownerUid: 'other-student', cookies: { session: 'tc-other' } });
     const result = await createClearPuCampusSessions(f.dependencies)({ auth: { uid: f.uid } });
-    expect(result).toEqual({ success: true, deleted: 1 });
+    expect(result).toEqual({ success: true, deleted: 2 });
     expect(f.sessions.has('own-session')).toBe(false);
+    expect(f.tronSessions.has('own-lms')).toBe(false);
     expect(f.sessions.get('other-session').cookies).toEqual({ SID: 'private-cookie' });
+    expect(f.tronSessions.get('other-lms').cookies).toEqual({ session: 'tc-other' });
     expect(f.removed).toHaveBeenCalledWith('own-session');
   });
 

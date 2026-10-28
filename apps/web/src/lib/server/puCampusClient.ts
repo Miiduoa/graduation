@@ -67,7 +67,10 @@ export type TronClassCourse = {
 };
 
 export type TronClassLoginOptions = {
+  /** 整段 TronClass／CAS 總預算；未傳時每跳用 gateway 預設逾時。 */
   timeoutMs?: number;
+  /** 單跳上限，需與總預算分開；未傳時等於 gateway 預設逾時。 */
+  hopTimeoutMs?: number;
   route?: CampusLoginRoute;
 };
 
@@ -775,9 +778,9 @@ export function createPuCampusGateway(
     async loginTronClass(account, password, options = {}) {
       const started = Date.now();
       const budget = options.timeoutMs;
-      const remaining = () =>
-        budget == null ? timeoutMs : Math.max(1, budget - (Date.now() - started));
-      const leftover = () => (budget == null ? timeoutMs : budget - (Date.now() - started));
+      const hopCap = options.hopTimeoutMs ?? timeoutMs;
+      const leftover = () => (budget == null ? hopCap : budget - (Date.now() - started));
+      const remaining = () => Math.max(1, Math.min(hopCap, leftover()));
       const route = options.route || 'teacher';
       try {
         const posted = await send(`${lmsOrigin}/api/login`, {

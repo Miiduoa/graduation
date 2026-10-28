@@ -72,6 +72,10 @@ it('still signs in when the school responds after 11 seconds', async () => {
   await expect(pending).resolves.toEqual({ uid: 'student' });
   expect(state.update).toHaveBeenCalled();
 });
+it('waits long enough for two 15s hops plus a retry before aborting the school request', () => {
+  expect(STUDENT_LOGIN_CLIENT_TIMEOUT_MS).toBeGreaterThanOrEqual(60_000);
+});
+
 it('maps a hung school request to a clear unavailable notice without signing in', async () => {
   vi.useFakeTimers();
   state.fetch.mockImplementation(

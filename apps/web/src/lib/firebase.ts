@@ -81,9 +81,9 @@ import { collectionFromSegments, docFromSegments } from './firestorePath';
 import { areUniversalDevAccountsEnabled } from './runtime';
 import { subscribePreferredCollection } from './preferredCollection';
 import { SchoolLoginHttpError, UNAVAILABLE_SERVER_ERROR } from './schoolLoginErrorCopy';
+import { STUDENT_LOGIN_CLIENT_TIMEOUT_MS } from './schoolLoginTimeouts';
 
-/** 學號登入整段等待上限：含 e 校園一次重試，需大於伺服器單次 15 秒。 */
-export const STUDENT_LOGIN_CLIENT_TIMEOUT_MS = 45_000;
+export { STUDENT_LOGIN_CLIENT_TIMEOUT_MS };
 
 function schoolLoginFetchSignal(external?: AbortSignal): {
   signal: AbortSignal;

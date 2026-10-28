@@ -13,10 +13,14 @@ import { createMemoryGroupStore } from './memoryGroupStore';
 import { PuCampusError, type PuCampusGateway } from './puCampusClient';
 import {
   clientIpFromRequest,
+  DEFAULT_STUDENT_LMS_HOP_TIMEOUT_MS,
+  DEFAULT_STUDENT_LMS_TOTAL_TIMEOUT_MS,
   handleSignInPuStudentId,
+  MAX_STUDENT_CREDENTIAL_POSTS,
   MIN_STUDENT_PORTAL_TIMEOUT_MS,
   PuLoginHttpError,
-  STUDENT_LMS_SOFT_TIMEOUT_MS,
+  studentLmsHopTimeoutMs,
+  studentLmsTotalTimeoutMs,
   studentPortalTimeoutMs,
   TEACHER_LMS_UNAVAILABLE,
   TEACHER_LMS_UNAVAILABLE_CODE,
@@ -213,7 +217,8 @@ it.each([
   expect(loginTronClass).not.toHaveBeenCalled();
   await flushSso();
   expect(loginTronClass).toHaveBeenCalledWith(portalUid, SECRET, {
-    timeoutMs: STUDENT_LMS_SOFT_TIMEOUT_MS,
+    timeoutMs: DEFAULT_STUDENT_LMS_TOTAL_TIMEOUT_MS,
+    hopTimeoutMs: DEFAULT_STUDENT_LMS_HOP_TIMEOUT_MS,
     route: 'student',
   });
 });
@@ -240,7 +245,8 @@ it.each([
   expect(loginTronClass).not.toHaveBeenCalled();
   await flushSso();
   expect(loginTronClass).toHaveBeenCalledWith(portalUid, SECRET, {
-    timeoutMs: STUDENT_LMS_SOFT_TIMEOUT_MS,
+    timeoutMs: DEFAULT_STUDENT_LMS_TOTAL_TIMEOUT_MS,
+    hopTimeoutMs: DEFAULT_STUDENT_LMS_HOP_TIMEOUT_MS,
     route: 'student',
   });
 });
@@ -321,6 +327,34 @@ it('keeps a configurable portal timeout at or above 15 seconds', () => {
   expect(studentPortalTimeoutMs('8000')).toBe(MIN_STUDENT_PORTAL_TIMEOUT_MS);
   expect(studentPortalTimeoutMs('20000')).toBe(20_000);
   expect(studentPortalTimeoutMs('999999')).toBe(60_000);
+});
+
+it('keeps TronClass SSO budget separate from e-campus and longer by default', () => {
+  expect(studentLmsTotalTimeoutMs(undefined)).toBe(DEFAULT_STUDENT_LMS_TOTAL_TIMEOUT_MS);
+  expect(studentLmsHopTimeoutMs(undefined)).toBe(DEFAULT_STUDENT_LMS_HOP_TIMEOUT_MS);
+  expect(studentLmsTotalTimeoutMs('8000')).toBe(15_000);
+  expect(studentLmsTotalTimeoutMs('45000')).toBe(45_000);
+  expect(studentLmsHopTimeoutMs('20000', 30_000)).toBe(20_000);
+  expect(studentLmsHopTimeoutMs('999999', 30_000)).toBe(30_000);
+  expect(DEFAULT_STUDENT_LMS_TOTAL_TIMEOUT_MS).toBeGreaterThan(MIN_STUDENT_PORTAL_TIMEOUT_MS);
+});
+
+it('does not stack a timeout retry on top of dual-uid fallback beyond two password POSTs', async () => {
+  const loginStudent = vi.fn(async (studentId: string) => {
+    if (studentId === 's7654321') throw new PuCampusError('credentials', '學號或密碼錯誤');
+    throw new PuCampusError('timeout', '學校系統無回應', {
+      route: 'student',
+      stage: 'submit',
+      code: 'AbortError',
+    });
+  });
+  const { runtime } = deps({ campus: campus({ loginStudent }) });
+  await expect(
+    handleSignInPuStudentId({ studentId: 's7654321', password: SECRET }, '1.1.1.1', runtime),
+  ).rejects.toMatchObject({ status: 503, message: '學校系統暫時無法連線' });
+  expect(loginStudent).toHaveBeenCalledTimes(MAX_STUDENT_CREDENTIAL_POSTS);
+  expect(loginStudent).toHaveBeenNthCalledWith(1, 's7654321', SECRET);
+  expect(loginStudent).toHaveBeenNthCalledWith(2, '7654321', SECRET);
 });
 
 it('still signs in when e-campus submit takes 11 seconds and does not wait for WOW Class', async () => {
@@ -735,6 +769,127 @@ it('returns 503 without Firestore or campus when the daily write budget is spent
   ).rejects.toMatchObject({ status: 503, message: '服務暫時無法使用' });
   expect(loginStudent).not.toHaveBeenCalled();
   expect(runTransaction).not.toHaveBeenCalled();
+});
+
+it('does not write a TronClass session when the portal document is gone', async () => {
+  const store = createMemoryGroupStore();
+  const loginTronClass = vi.fn(async () => {
+    for (const path of [...store.docs.keys()]) {
+      if (path.startsWith('_puSessions/')) store.docs.delete(path);
+    }
+    return {
+      cookies: { session: 'tc-cookie' },
+      userId: 9,
+      userName: '陳同學',
+      role: 'student',
+    };
+  });
+  const { runtime, flushSso } = deps({ store, campus: campus({ loginTronClass }) });
+  const result = await handleSignInPuStudentId(
+    { studentId: STUDENT, password: SECRET },
+    '1.1.1.1',
+    runtime,
+  );
+  await flushSso();
+  expect(loginTronClass).toHaveBeenCalledOnce();
+  expect(store.docs.has(`_puSessions/${result.puSessionId}`)).toBe(false);
+  expect([...store.docs.keys()].some((path) => path.startsWith('_puTronClassSessions/'))).toBe(
+    false,
+  );
+});
+
+it('does not write a TronClass session when portal ownerUid no longer matches', async () => {
+  const { runtime, store, flushSso } = deps({
+    campus: campus({
+      loginTronClass: async () => {
+        const portal = [...store.docs.entries()].find(([path]) => path.startsWith('_puSessions/'));
+        if (portal) store.docs.set(portal[0], { ...portal[1], ownerUid: 'someone-else' });
+        return {
+          cookies: { session: 'tc-cookie' },
+          userId: 9,
+          userName: '陳同學',
+          role: 'student',
+        };
+      },
+    }),
+  });
+  const result = await handleSignInPuStudentId(
+    { studentId: STUDENT, password: SECRET },
+    '1.1.1.1',
+    runtime,
+  );
+  await flushSso();
+  expect(store.docs.get(`_puSessions/${result.puSessionId}`)).toMatchObject({
+    ownerUid: 'someone-else',
+  });
+  expect(store.docs.get(`_puSessions/${result.puSessionId}`)).not.toHaveProperty(
+    'tronClassSessionId',
+  );
+  expect([...store.docs.keys()].some((path) => path.startsWith('_puTronClassSessions/'))).toBe(
+    false,
+  );
+});
+
+it('skips background SSO when the portal session was already cleared', async () => {
+  const loginTronClass = vi.fn(async () => {
+    throw new Error('should not run');
+  });
+  const { runtime, store, flushSso } = deps({ campus: campus({ loginTronClass }) });
+  const result = await handleSignInPuStudentId(
+    { studentId: STUDENT, password: SECRET },
+    '1.1.1.1',
+    runtime,
+  );
+  store.docs.delete(`_puSessions/${result.puSessionId}`);
+  await flushSso();
+  expect(loginTronClass).not.toHaveBeenCalled();
+  expect([...store.docs.keys()].some((path) => path.startsWith('_puTronClassSessions/'))).toBe(
+    false,
+  );
+});
+
+it('does not keep a portal session when the client disconnects before the response', async () => {
+  const controller = new AbortController();
+  const { runtime, store, scheduled } = deps();
+  runtime.signCustomToken = async (uid, claims) => {
+    controller.abort();
+    return `token:${uid}:${claims.role}:${claims.schoolId}`;
+  };
+  await expect(
+    handleSignInPuStudentId(
+      { studentId: STUDENT, password: SECRET },
+      '1.1.1.1',
+      { ...runtime, requestSignal: controller.signal },
+    ),
+  ).rejects.toMatchObject({ status: 503, message: '學校系統暫時無法連線' });
+  expect(scheduled).toEqual([]);
+  expect([...store.docs.keys()].some((path) => path.startsWith('_puSessions/'))).toBe(false);
+});
+
+it('discards a portal session written after the client already gave up', async () => {
+  const controller = new AbortController();
+  const { runtime, store, scheduled } = deps();
+  const inner = store.db.doc.bind(store.db);
+  (store.db as { doc: typeof inner }).doc = (path: string) => {
+    const ref = inner(path);
+    if (!String(path).startsWith('_puSessions/')) return ref;
+    const set = ref.set.bind(ref);
+    ref.set = async (data: Record<string, unknown>, options?: { merge?: boolean }) => {
+      const written = await set(data, options);
+      controller.abort();
+      return written;
+    };
+    return ref;
+  };
+  await expect(
+    handleSignInPuStudentId(
+      { studentId: STUDENT, password: SECRET },
+      '1.1.1.1',
+      { ...runtime, requestSignal: controller.signal },
+    ),
+  ).rejects.toMatchObject({ status: 503, message: '學校系統暫時無法連線' });
+  expect(scheduled).toEqual([]);
+  expect([...store.docs.keys()].some((path) => path.startsWith('_puSessions/'))).toBe(false);
 });
 
 it('uses only Fly-Client-IP and otherwise a shared unknown bucket', () => {
