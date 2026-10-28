@@ -12,6 +12,8 @@ import {
 } from '@/lib/courseAttendance';
 import { Button } from './ui/Button';
 import { AttendanceRegisterPanel } from './AttendanceRegisterPanel';
+import { AttendanceCorrectionReview } from './AttendanceCorrectionReview';
+import { correctionReviewScope, type CorrectionReview } from '@/lib/attendanceCorrectionReview';
 import styles from './course-attendance-correction.module.css';
 
 const statuses: { status: AttendanceCorrectionStatus; label: string }[] = [
@@ -48,6 +50,11 @@ export function AttendanceCorrectionPanel({
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
   const [registerRevision, setRegisterRevision] = useState(0);
+  const [review, setReview] = useState<CorrectionReview | null>(null);
+  const [reviewAttempt, setReviewAttempt] = useState(0);
+  const scope = correctionReviewScope(courseId, sessionId, selectedUid);
+  const reviewed = review?.scope === scope ? review : null;
+  const isActive = active || reviewed?.active === true;
   const reasonInput = useRef<HTMLTextAreaElement>(null);
   const operationId = useRef<string | null>(null);
   const mounted = useRef(true);
@@ -86,6 +93,7 @@ export function AttendanceCorrectionPanel({
       setNotice('');
       return;
     }
+    setReview(null);
     const current = ++revision.current;
     setOpen(true);
     setLoading(true);
@@ -122,28 +130,32 @@ export function AttendanceCorrectionPanel({
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (
-      submitting.current || !selectedUid || reason.trim().length < 6 || loading ||
-      (active && (status === 'absent' || status === 'excused'))
+      submitting.current || !selectedUid || !reviewed || reason.trim().length < 6 || loading ||
+      (isActive && (status === 'absent' || status === 'excused'))
     ) return;
     submitting.current = true;
     setBusy(true);
     setError('');
     setNotice('');
-    operationId.current ??= crypto.randomUUID();
     const requestIdentity = revision.current;
     try {
-      const result = await correctCourseAttendance({
+      operationId.current ??= crypto.randomUUID();
+      const command = {
         groupId: courseId,
         sessionId,
         studentUid: selectedUid,
         status,
         reason,
         requestId: operationId.current,
-      });
+        expectedRevision: reviewed.revision,
+      };
+      const result = await correctCourseAttendance(command);
       if (!mounted.current || requestIdentity !== revision.current) return;
       operationId.current = null;
       setNotice(result.reused ? '這筆更正已保存，已確認先前操作結果。' : '已保存更正，並建立操作稽核紀錄。');
       setReason('');
+      setReview(null);
+      setReviewAttempt((value) => value + 1);
       setRegisterRevision((value) => value + 1);
       try {
         await onUpdated();
@@ -155,7 +167,14 @@ export function AttendanceCorrectionPanel({
         }
       }
     } catch (problem) {
-      if (mounted.current && revision.current === requestIdentity) setError(attendanceError(problem));
+      if (mounted.current && revision.current === requestIdentity) {
+        if ((problem as { code?: string })?.code?.replace('functions/', '') === 'aborted') {
+          operationId.current = null;
+          setReview(null);
+          setReviewAttempt((value) => value + 1);
+          setError('紀錄可能已由其他操作更新，本次沒有覆寫。正在重新核對；請比較目前狀態，再按確認送出。');
+        } else setError(attendanceError(problem));
+      }
     } finally {
       submitting.current = false;
       if (mounted.current && revision.current === requestIdentity) setBusy(false);
@@ -175,7 +194,7 @@ export function AttendanceCorrectionPanel({
           <h4>出席更正</h4>
           <p>僅授課教師可操作。每筆更正都會記錄修改前後狀態、操作人員及原因。</p>
         </div>
-        <Button variant="outline" disabled={busy} onClick={() => void showPanel()}>
+        <Button type="button" variant="outline" disabled={busy} onClick={() => void showPanel()}>
           {open ? '收合更正' : '管理出席更正'}
         </Button>
       </div>
@@ -197,6 +216,7 @@ export function AttendanceCorrectionPanel({
                 onChange={(event) => {
                   setStudentQuery(event.target.value);
                   setSelectedUid('');
+                  setReview(null);
                   invalidatePendingRetry();
                 }}
               />
@@ -206,7 +226,7 @@ export function AttendanceCorrectionPanel({
                 value={selectedUid}
                 disabled={busy}
                 required
-                onChange={(event) => { setSelectedUid(event.target.value); invalidatePendingRetry(); }}
+                onChange={(event) => { setSelectedUid(event.target.value); setReview(null); invalidatePendingRetry(); }}
               >
                 <option value="" disabled>請選擇要更正的學生</option>
                 {selectableStudents.map((student) => (
@@ -232,12 +252,17 @@ export function AttendanceCorrectionPanel({
                   <option
                     key={entry.status}
                     value={entry.status}
-                    disabled={active && (entry.status === 'absent' || entry.status === 'excused')}
+                    disabled={isActive && (entry.status === 'absent' || entry.status === 'excused')}
                   >
                     {entry.label}
                   </option>
                 ))}
               </select>
+              {selectedUid && <AttendanceCorrectionReview
+                key={`${scope}:${reviewAttempt}`}
+                courseId={courseId} sessionId={sessionId} studentUid={selectedUid}
+                proposedStatus={titleFor(status)} disabled={busy} onReview={setReview}
+              />}
               <label htmlFor={`correction-reason-${sessionId}`}>更正原因</label>
               <textarea
                 ref={reasonInput}
@@ -252,12 +277,12 @@ export function AttendanceCorrectionPanel({
                 onChange={(event) => { setReason(event.target.value); invalidatePendingRetry(); }}
               />
               <p className={styles.note}>
-                {active
+                {isActive
                   ? '點名仍在進行中，可以補登出席或遲到。必須結束點名後才能核定缺席或請假。'
                   : '學生沒有簽到，不代表缺席。選擇「缺席」將建立一筆由教師正式確認的紀錄。'}
               </p>
               <div className={styles.actions}>
-                <Button type="submit" variant="primary" disabled={busy || !selectedUid || reason.trim().length < 6 || (active && (status === 'absent' || status === 'excused'))}>
+                <Button type="submit" variant="primary" disabled={busy || !selectedUid || !reviewed || reason.trim().length < 6 || (isActive && (status === 'absent' || status === 'excused'))}>
                   {busy ? '正在儲存…' : '確認並保存更正'}
                 </Button>
               </div>

@@ -1,3 +1,4 @@
+import { loadCorrectionReview } from '@/lib/attendanceCorrectionReview';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, expect, it, vi } from 'vitest';
 import { AttendanceCorrectionPanel } from './AttendanceCorrectionPanel';
@@ -7,6 +8,10 @@ import {
   loadCourseAttendanceRoster,
 } from '@/lib/courseAttendance';
 
+vi.mock('@/lib/attendanceCorrectionReview', () => ({
+  correctionReviewScope: (course: string, session: string, uid: string) => JSON.stringify([course, session, uid]),
+  loadCorrectionReview: vi.fn(),
+}));
 vi.mock('@/lib/courseAttendance', () => ({
   attendanceError: (error: unknown) => error instanceof Error ? error.message : '錯誤',
   correctCourseAttendance: vi.fn(),
@@ -21,6 +26,11 @@ const roster = [
 
 beforeEach(() => {
   vi.clearAllMocks();
+  vi.mocked(loadCorrectionReview).mockImplementation(async (course, session, uid) => ({
+    scope: JSON.stringify([course, session, uid]), revision: null, active: false,
+    row: { uid, displayName: '核對學生', studentId: uid, status: 'unconfirmed', source: null,
+      checkedInAt: null, correctedAt: null },
+  }));
   vi.mocked(loadCourseAttendanceRoster).mockResolvedValue(roster);
   vi.mocked(loadAttendanceCorrections).mockResolvedValue([]);
   vi.mocked(correctCourseAttendance).mockResolvedValue({ success: true, reused: false, status: 'late' });
@@ -38,6 +48,7 @@ it('requires a confirmed roster and explicit reason for an instructor to correct
   fireEvent.change(screen.getByLabelText('更正原因'), {
     target: { value: '教師已經核對學生的遲到時間' },
   });
+  await waitFor(() => expect(screen.getByRole('button', { name: '確認並保存更正' }).hasAttribute('disabled')).toBe(false));
   fireEvent.click(screen.getByRole('button', { name: '確認並保存更正' }));
   await waitFor(() => expect(correctCourseAttendance).toHaveBeenCalledTimes(1));
   expect(correctCourseAttendance).toHaveBeenCalledWith(expect.objectContaining({
@@ -61,8 +72,10 @@ it('retries an ambiguous correction with the same idempotency key', async () => 
   await screen.findByLabelText('更正原因');
   fireEvent.change(screen.getByLabelText('選擇學生'), { target: { value: 'student-one' } });
   fireEvent.change(screen.getByLabelText('更正原因'), { target: { value: '授課老師已確認沒有出席' } });
+  await waitFor(() => expect(screen.getByRole('button', { name: '確認並保存更正' }).hasAttribute('disabled')).toBe(false));
   fireEvent.click(screen.getByRole('button', { name: '確認並保存更正' }));
   await screen.findByRole('alert');
+  await waitFor(() => expect(screen.getByRole('button', { name: '確認並保存更正' }).hasAttribute('disabled')).toBe(false));
   fireEvent.click(screen.getByRole('button', { name: '確認並保存更正' }));
   await waitFor(() => expect(correctCourseAttendance).toHaveBeenCalledTimes(2));
   const attempts = vi.mocked(correctCourseAttendance).mock.calls;
