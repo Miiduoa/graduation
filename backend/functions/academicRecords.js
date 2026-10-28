@@ -6,6 +6,11 @@ const {
   writeHttpError,
 } = require('./securityUtils');
 const { assertSessionOwner, verifyRequestFirebaseUser } = require('./sessionSecurity');
+const {
+  publicCampusDataResult,
+  persistOwnedMypuCookies,
+  deleteOwnedPuSessions,
+} = require('./lib/puSessionStore');
 
 function sessionExpiresAt(session) {
   const value = session?.expiresAt?.toDate?.();
@@ -85,11 +90,10 @@ function createPuCampusDataHandler({ db, fetchers, logger = console }) {
         return;
       }
       const nextMypu = dataType === 'grades' ? cookieMap(result.mypuCookies) : null;
-      if (nextMypu && typeof sessionRef.set === 'function') {
-        await sessionRef.set({ mypuCookies: nextMypu }, { merge: true });
+      if (nextMypu) {
+        await persistOwnedMypuCookies(db, sessionRef, authUser.uid, nextMypu);
       }
-      const { mypuCookies: _mypuCookies, ...publicCampusResult } = result;
-      res.json({ success: true, result: publicCampusResult });
+      res.json({ success: true, result: publicCampusDataResult(dataType, result) });
     } catch (error) {
       logger.error('PU campus data request failed', error?.message);
       writeHttpError(res, error, 'Failed to fetch PU campus data');
@@ -163,12 +167,11 @@ function createGetMyAcademicRecords({ db, assertActiveSchoolMember, fetchers, lo
         throw new HttpsError('unavailable', '目前無法取得學校資料，請稍後重試或重新以學號登入。');
       }
       const nextMypu = dataType === 'grades' ? cookieMap(result.mypuCookies) : null;
-      if (nextMypu && typeof sessionSnap?.ref?.set === 'function') {
-        await sessionSnap.ref.set({ mypuCookies: nextMypu }, { merge: true });
+      if (nextMypu) {
+        await persistOwnedMypuCookies(db, sessionSnap.ref, uid, nextMypu);
       }
       // A membership revoked while the school request was pending must not return data.
       await requireMembership(uid);
-      const { mypuCookies: _mypuCookies, ...publicCampusResult } = result;
       return {
         success: true,
         ownerUid: uid,
@@ -176,7 +179,7 @@ function createGetMyAcademicRecords({ db, assertActiveSchoolMember, fetchers, lo
         source: 'pu-campus',
         dataType,
         fetchedAt: new Date().toISOString(),
-        result: publicCampusResult,
+        result: publicCampusDataResult(dataType, result),
       };
     } catch (error) {
       if (error instanceof HttpsError) throw error;
@@ -189,4 +192,85 @@ function createGetMyAcademicRecords({ db, assertActiveSchoolMember, fetchers, lo
   };
 }
 
-module.exports = { createPuCampusDataHandler, createGetMyAcademicRecords };
+function createPuFetchData({ db, fetchers, logger = console }) {
+  return async (request) => {
+    try {
+      const ownerUid = request.auth?.uid;
+      if (!ownerUid) {
+        throw new HttpsError('unauthenticated', 'Must be logged in');
+      }
+
+      const { sessionId, dataType, semester } = request.data || {};
+      if (!sessionId || !dataType) {
+        throw new HttpsError('invalid-argument', 'Missing sessionId or dataType');
+      }
+
+      const allowedTypes = ['courses', 'grades', 'announcements', 'studentInfo'];
+      if (!allowedTypes.includes(dataType) || !Object.hasOwn(fetchers, dataType)) {
+        throw new HttpsError('invalid-argument', `Invalid dataType: ${dataType}`);
+      }
+
+      enforceRateLimit({
+        scope: 'pu-fetch-data',
+        key: `pu-fetch-${sessionId}`,
+        limit: 20,
+        windowMs: 5 * 60 * 1000,
+      });
+
+      const sessionRef = db.collection('_puSessions').doc(sessionId);
+      const sessionDoc = await sessionRef.get();
+      if (!sessionDoc.exists) {
+        throw new HttpsError('permission-denied', 'Invalid or expired session');
+      }
+
+      const sessionData = sessionDoc.data();
+      if (sessionData.ownerUid !== ownerUid) {
+        throw new HttpsError('permission-denied', 'Session does not belong to this user');
+      }
+
+      const now = new Date();
+      if (sessionData.expiresAt.toDate() < now) {
+        await sessionRef.delete().catch(() => null);
+        throw new HttpsError('permission-denied', 'Session expired');
+      }
+
+      const result =
+        dataType === 'grades'
+          ? await fetchers.grades(sessionData.cookies, semester || '', {
+              mypuCookies: cookieMap(sessionData.mypuCookies),
+            })
+          : await fetchers[dataType](sessionData.cookies, semester || '');
+      if (!result?.success) {
+        throw new HttpsError('unavailable', result?.error || 'Failed to fetch data');
+      }
+
+      const nextMypu = dataType === 'grades' ? cookieMap(result.mypuCookies) : null;
+      if (nextMypu) {
+        await persistOwnedMypuCookies(db, sessionRef, ownerUid, nextMypu);
+      }
+
+      logger.log?.(`[puFetchData] Successfully fetched ${dataType} for session: ${sessionId}`);
+      return publicCampusDataResult(dataType, result);
+    } catch (error) {
+      logger.error?.('[puFetchData] Error:', error);
+      if (error instanceof HttpsError) throw error;
+      throw new HttpsError('internal', error.message);
+    }
+  };
+}
+
+function createClearPuCampusSessions({ db }) {
+  return async (request) => {
+    const uid = request.auth?.uid;
+    if (!uid) throw new HttpsError('unauthenticated', '請先登入校園帳號。');
+    const deleted = await deleteOwnedPuSessions(db, uid);
+    return { success: true, deleted };
+  };
+}
+
+module.exports = {
+  createPuCampusDataHandler,
+  createGetMyAcademicRecords,
+  createPuFetchData,
+  createClearPuCampusSessions,
+};

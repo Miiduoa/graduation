@@ -54,6 +54,7 @@ it('uses the same-origin academic endpoint without enabling any Cloud Functions 
   expect(getCloudFunctionUrl('getMyAcademicRecords', {
     env: { NEXT_PUBLIC_FUNCTIONS_BASE_URL: 'https://separate-functions.example' },
   })).toBe('/api/fn/getMyAcademicRecords');
+  expect(getCloudFunctionUrl('clearPuCampusSessions', { env: {} })).toBe('/api/fn/clearPuCampusSessions');
 });
 
 it('reads only the authenticated owner session and returns provenance with no session secrets', async () => {
@@ -70,6 +71,22 @@ it('reads only the authenticated owner session and returns provenance with no se
   });
   expect(Number.isFinite(Date.parse(body.result.fetchedAt))).toBe(true);
   expect(JSON.stringify(body)).not.toMatch(/private-school-cookie|should-never|other-user-cookie|cookies|internal response/);
+});
+
+it('does not recreate a deleted portal session when a late grade read has mypu cookies', async () => {
+  const { request, store, grades } = setup();
+  grades.mockImplementationOnce(async () => {
+    store.docs.delete(SESSION);
+    return {
+      success: true,
+      grades: [{ semester: '1151', courseName: '資料庫', credits: 3, score: 86 }],
+      mypuCookies: { PHPSESSID: 'mypu-orphan' },
+    };
+  });
+  const response = await request();
+  expect(response.status).toBe(400);
+  expect(store.docs.has(SESSION)).toBe(false);
+  expect(JSON.stringify(await response.json())).not.toMatch(/mypu-orphan|PHPSESSID/);
 });
 
 it('stores mypu cookies on the portal session and only bridges once across two grade reads', async () => {
@@ -204,6 +221,31 @@ it('does not expose network errors or session values to clients', async () => {
   const response = await request();
   expect(response.status).toBe(503);
   expect(JSON.stringify(await response.json())).not.toContain('SECRET');
+});
+
+it('deletes the owner campus sessions including cookies and mypuCookies', async () => {
+  const { store, verifyIdToken } = setup();
+  store.docs.set(SESSION, {
+    ...store.docs.get(SESSION),
+    mypuCookies: { PHPSESSID: 'mypu-live' },
+  });
+  const response = await dispatchFnRequest(
+    'clearPuCampusSessions',
+    new Request('https://nuni.tw/api/fn/clearPuCampusSessions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: 'Bearer firebase-id-token' },
+      body: JSON.stringify({ data: {} }),
+    }),
+    {
+      db: store.db as unknown as FnRuntime['db'],
+      verifyIdToken,
+    },
+  );
+  expect(response.status).toBe(200);
+  expect(verifyIdToken).toHaveBeenCalledWith('firebase-id-token', true);
+  expect(await response.json()).toEqual({ result: { success: true, deleted: 1 } });
+  expect(store.docs.has(SESSION)).toBe(false);
+  expect(store.docs.has('_puSessions/another-account')).toBe(true);
 });
 
 it('retains the existing request limit on repeated reads', async () => {

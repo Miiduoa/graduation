@@ -138,6 +138,10 @@ async function invokeHostedCallable(
     const fetchers = academicFetchers ?? (await import('./academicSchoolSource')).academicSchoolSource;
     return createAcademicRecordsHandler({ db: db as unknown as AcademicFirestore, fetchers })(request);
   }
+  if (name === 'clearPuCampusSessions') {
+    const { createClearPuCampusSessions } = await import('./academicRecordsHandlers');
+    return createClearPuCampusSessions({ db: db as unknown as AcademicFirestore })(request);
+  }
   if (name === 'joinGroupByCode' || name === 'leaveGroup') {
     const { createGroupInviteHandlers } = await import('./groupInviteHandlers');
     return createGroupInviteHandlers({ db })[name](request);
@@ -236,7 +240,8 @@ export async function dispatchFnRequest(
       request.headers.get('authorization'),
       resolved.verifyIdToken,
       isLeaveWebCallable(name) || name === 'correctAttendanceRecord' ||
-        name === 'getMyAcademicRecords' || name === 'getMyTronClassCourses',
+        name === 'getMyAcademicRecords' || name === 'getMyTronClassCourses' ||
+        name === 'clearPuCampusSessions',
     );
     uid = auth?.uid;
     if (uid) {

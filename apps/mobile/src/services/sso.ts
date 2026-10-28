@@ -658,6 +658,9 @@ export async function linkSSOToFirebase(
 }
 
 export async function unlinkSSO(schoolId: string, uid: string): Promise<void> {
+  const { clearOwnedPuCampusSessions } = await import('./clearOwnedPuCampusSessions');
+  await clearOwnedPuCampusSessions();
+
   const db = getDb();
 
   const userRef = doc(db, 'users', uid);

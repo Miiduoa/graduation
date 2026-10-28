@@ -7,11 +7,15 @@ import { AuthGuard, AuthProvider, GuestAuthProvider, useAuth } from './AuthGuard
 import { getAuth } from '@/features/auth/client';
 import { onAuthStateChanged, signOut } from 'firebase/auth';
 const teachingSignOut = vi.hoisted(() => vi.fn());
+const clearOwnedPuCampusSessions = vi.hoisted(() => vi.fn(async () => undefined));
 vi.mock('@/lib/supabaseClient', () => ({
   getSupabaseClient: () => ({ auth: { signOut: teachingSignOut } }),
 }));
 vi.mock('@/features/auth/client', () => ({ getAuth: vi.fn() }));
 vi.mock('firebase/auth', () => ({ onAuthStateChanged: vi.fn(), signOut: vi.fn() }));
+vi.mock('@/lib/clearOwnedPuCampusSessions', () => ({
+  clearOwnedPuCampusSessions,
+}));
 function Status() {
   const { user, loading } = useAuth();
   return <div>{loading ? 'Checking account' : user ? `Account ${user.uid}` : 'Signed out'}</div>;
@@ -175,5 +179,38 @@ it('shared logout closes both sessions and hides readers before either network r
   fireEvent.click(screen.getByRole('button', { name: 'Log out' }));
   expect(screen.getByText('Signed out')).toBeTruthy();
   expect(teachingSignOut).toHaveBeenCalledTimes(2);
+  await waitFor(() => expect(typeof finish).toBe('function'));
   await act(async () => finish());
+});
+
+it('deletes campus sessions on the server before Firebase sign-out', async () => {
+  let changed!: (user: unknown) => void;
+  const user = { uid: 'alice', getIdToken: vi.fn().mockResolvedValue('id-token') };
+  vi.mocked(getAuth).mockReturnValue({ currentUser: user } as never);
+  vi.mocked(onAuthStateChanged).mockImplementation((_auth, callback) => {
+    changed = callback as (user: unknown) => void;
+    return () => {};
+  });
+  function Logout() {
+    const { signOutUser } = useAuth();
+    return <button onClick={() => void signOutUser()}>Log out</button>;
+  }
+  render(
+    <AuthProvider>
+      <Logout />
+    </AuthProvider>,
+  );
+  await act(async () => changed(user));
+  const order: string[] = [];
+  clearOwnedPuCampusSessions.mockImplementation(async () => {
+    order.push('clear');
+  });
+  vi.mocked(signOut).mockImplementation(async () => {
+    order.push('signOut');
+  });
+  await act(async () => {
+    fireEvent.click(screen.getByRole('button', { name: 'Log out' }));
+  });
+  expect(clearOwnedPuCampusSessions).toHaveBeenCalledWith(user);
+  expect(order).toEqual(['clear', 'signOut']);
 });
