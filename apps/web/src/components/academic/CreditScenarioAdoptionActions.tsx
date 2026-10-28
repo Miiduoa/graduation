@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { CreditPlan } from '@campus/shared/src/creditPlanner';
 import {
   prepareCreditScenarioAdoption, prepareCreditScenarioUndo, creditScenarioChangeSummary,
@@ -19,7 +19,7 @@ export function CreditScenarioAdoptionActions({ plan, candidate, writer, blocked
   const lock = useRef(false);
   const live = useRef(true);
   const latest = useRef({ plan, candidate, blocked, writer });
-  latest.current = { plan, candidate, blocked, writer };
+  useLayoutEffect(() => { latest.current = { plan, candidate, blocked, writer }; }, [plan, candidate, blocked, writer]);
   const title = useRef<HTMLHeadingElement>(null);
   const trigger = useRef<HTMLButtonElement>(null);
   useEffect(() => { live.current = true; return () => { live.current = false; }; }, []);

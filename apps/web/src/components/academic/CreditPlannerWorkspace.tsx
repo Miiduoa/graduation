@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useRef, useState, type ChangeEvent, type FormEvent } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ChangeEvent, type FormEvent } from 'react';
 import {
   MAX_PLANNED_COURSES,
   PLANNER_CATEGORIES,
@@ -88,10 +88,15 @@ export function CreditPlannerWorkspace({
   const stored = useRef<{ key: string; raw: string | null } | null>(null);
   const live = useRef(true);
   const scope = useRef({ key, generation: 0 });
-  if (scope.current.key !== key) scope.current = { key, generation: scope.current.generation + 1 };
   const latest = useRef({ plan, draft, editingId });
-  latest.current = { plan, draft, editingId };
-  useEffect(() => { live.current = true; return () => { live.current = false; }; }, []);
+  // Update event guards only after this render is committed. Abandoned renders
+  // must not publish a new account scope or draft to a pending confirmation.
+  useLayoutEffect(() => {
+    scope.current = { key, generation: scope.current.generation + 1 };
+    live.current = true;
+    return () => { live.current = false; };
+  }, [key]);
+  useLayoutEffect(() => { latest.current = { plan, draft, editingId }; }, [plan, draft, editingId]);
 
   useEffect(() => {
     let restored: CreditPlan | null = null;
