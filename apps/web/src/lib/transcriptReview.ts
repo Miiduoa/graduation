@@ -10,11 +10,12 @@ export function transcriptReviewReason(score: unknown): TranscriptReviewReason |
   if (typeof score !== 'string') return 'invalid';
   const text = score.trim();
   if (!text) return 'missing';
-  if (/^[+-]?(?:\d+(?:\.\d+)?|\.\d+)$/.test(text)) {
+  if (/^-(?:\d+(?:\.\d+)?|\.\d+)$/.test(text)) return 'invalid';
+  if (/^\d+(?:\.\d+)?$/.test(text)) {
     const numeric = Number(text);
     return Number.isFinite(numeric) && numeric >= 0 && numeric <= 100 ? null : 'invalid';
   }
-  if (/^(?:通過(?:\s*[（(]Pass[）)])?|Pass|不通過|未通過|Fail|Failed)$/i.test(text)) return null;
+  if (/^(?:pass|通過)(?:\(pass\))?$/i.test(text) || /^(?:fail|未通過|不及格)$/i.test(text)) return null;
   // SAT、抵免、等第及其他代碼保留原文；沒有來源規則時不猜測含義。
   return 'unrecognized';
 }

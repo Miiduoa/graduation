@@ -7,12 +7,12 @@ function row(score: number | string, credits = 0.5): AcademicGrade {
 }
 
 describe('transcript review is not an earned-credit classifier', () => {
-  it.each([0, 59, 60, 69.5, 70, 100, '0', '59.5', '+70', '.5', 'Pass', 'pass', '通過', '通過（Pass）', '通過 (Pass)', 'Fail', 'Failed', '不通過', '未通過'])(
+  it.each([0, 59, 60, 69.5, 70, 100, '0', '59.5', 'Pass', 'pass', '通過', '通過(Pass)', 'Fail', '不及格', '未通過'])(
     'does not turn a known result into missing data: %s', (score) => {
       expect(transcriptReviewReason(score)).toBeNull();
     },
   );
-  it.each(['SAT', 'UNSAT', 'A+', 'P', '抵免', '免修', '未完成', '60分', '1e2', '0x60', 'Infinity', '=100', 'Ｐａｓｓ'])(
+  it.each(['SAT', 'UNSAT', 'A+', 'P', '抵免', '免修', '未完成', '60分', '1e2', '0x60', 'Infinity', '=100', 'Ｐａｓｓ', '+70', '.5', '通過（Pass）', '通過 (Pass)', 'Failed', '不通過'])(
     'keeps unverified labels for review instead of assuming passed credits: %s', (score) => {
       expect(transcriptReviewReason(score)).toBe('unrecognized');
     },

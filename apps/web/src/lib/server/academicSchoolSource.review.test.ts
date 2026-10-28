@@ -94,7 +94,7 @@ describe('academicSchoolSource full grade pipeline', () => {
     ['Pass', 3.5], ['通過', 3.5], ['通過(Pass)', 3.5],
     ['SAT', 3], ['UNSAT', 3], ['A+', 3], ['抵免', 3], ['免修', 3],
     ['未完成', 3], ['', 3], ['0', 3], ['59.5', 3], ['Fail', 3], ['不通過', 3],
-  ])('keeps raw results and a conservative derived summary for %s', async (score, earned) => {
+  ] as const)('keeps raw results and a conservative derived summary for %s', async (score, earned) => {
     replyWith(`<p>學期別(Semester)：114[2]</p><table>
       <tr><th>科目</th><th>班級</th><th>修別</th><th>學分</th><th>成績</th></tr>
       <tr><td>資料庫</td><td>資管</td><td>必修</td><td>3</td><td>88</td></tr>
