@@ -36,11 +36,12 @@ function snapshot(size = 30): CampusSenseSnapshot {
 }
 const context = () => ({ userId: 'A', schoolId: 'pu', isCurrent: () => true, navigation: { navigate: jest.fn() } });
 beforeEach(() => {
-  jest.useFakeTimers(); jest.setSystemTime(new Date(now));
+  // 只固定資料時效判斷；保留測試清理程序需要的實際事件排程。
+  jest.spyOn(Date, 'now').mockReturnValue(now);
   mockUid = 'A'; mockSchool = 'pu';
   jest.mocked(refreshCampusSenseSnapshot).mockReset(); jest.mocked(askCampusAssistant).mockReset();
 });
-afterEach(() => { cleanup(); jest.useRealTimers(); });
+afterEach(() => { cleanup(); jest.restoreAllMocks(); });
 
 test('searches a record on the last page and opens its authorized assignment without inference', () => {
   const ctx = context();
@@ -101,11 +102,19 @@ test.each(['user', 'school', 'stale'])('never displays private rows for a %s mis
 });
 
 test('an idle open workbench removes private rows when the source expires', () => {
+  const scheduled = jest.spyOn(global, 'setTimeout');
   const view = render(<CampusAssignmentWorkbench snapshot={snapshot()} context={context()} disabled={false} />);
   expect(view.getByText('任務 0')).toBeTruthy();
-  act(() => { jest.advanceTimersByTime(900001); });
+  // 取得元件實際註冊的過期回呼，不另外製造一套過期邏輯。
+  const expire = scheduled.mock.calls.find(
+    ([callback, delay]) => typeof callback === 'function' && delay === 900001,
+  )?.[0];
+  expect(typeof expire).toBe('function');
+  jest.mocked(Date.now).mockReturnValue(now + 900001);
+  act(() => { (expire as () => void)(); });
   expect(view.queryByText('任務 0')).toBeNull();
   expect(view.getByText(/作業資料已失效/)).toBeTruthy();
+  view.unmount();
 });
 
 test('the assistant exposes search without another sync or model request and clears it on campus switch', async () => {
