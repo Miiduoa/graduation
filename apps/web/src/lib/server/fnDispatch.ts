@@ -41,6 +41,7 @@ export type FnRuntime = {
   serviceAccount?: ServiceAccountSigner | null;
   rateLimitGate?: LoginRateGate;
   rateLimitSalt?: string;
+  scheduleCampusSso?: (task: () => Promise<void>) => void;
 };
 
 function jsonResponse(status: number, body: unknown, extra?: HeadersInit): Response {
@@ -279,6 +280,7 @@ async function dispatchSchoolLogin(
     const body = await readJsonBody(request);
     const { handleSignInPuStudentId } = await import('./signInPuStudentId');
     const { readServiceAccountSigner } = await import('./firebaseAdmin');
+    const { scheduleAfterResponse } = await import('./scheduleAfterResponse');
     const result = await handleSignInPuStudentId(body, clientIpFromRequest(request), {
       db: runtime.db as unknown as SchoolLoginFirestore,
       campus: runtime.puCampus,
@@ -286,6 +288,8 @@ async function dispatchSchoolLogin(
       serviceAccount: runtime.serviceAccount ?? readServiceAccountSigner(),
       rateLimitGate: runtime.rateLimitGate,
       rateLimitSalt: runtime.rateLimitSalt,
+      scheduleCampusSso: runtime.scheduleCampusSso ?? scheduleAfterResponse,
+      requestSignal: request.signal,
     });
     return jsonResponse(200, result, cors);
   } catch (error) {

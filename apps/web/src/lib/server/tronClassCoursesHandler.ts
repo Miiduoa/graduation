@@ -1,3 +1,4 @@
+import { LMS_CONNECTING_CODE } from '../schoolLoginTimeouts';
 import type { CallableRequest } from './groupInviteHandlers';
 import { HttpsError } from './httpsError';
 import {
@@ -14,6 +15,12 @@ export type LmsCoursesFetcher = (
 
 function reconnect(): never {
   throw new HttpsError('failed-precondition', 'WOW Class 尚未連線或登入已到期，請重新連線學校帳號。');
+}
+
+function connecting(): never {
+  throw new HttpsError('unavailable', '正在連線 WOW Class，請稍候再讀取課程。', {
+    code: LMS_CONNECTING_CODE,
+  });
 }
 
 function shortText(value: unknown, maximum = 300): string {
@@ -86,7 +93,10 @@ export function createTronClassCoursesHandler({
       const portal = portalSnapshot?.data();
       if (portal?.ownerUid !== uid || !(schoolSessionExpiry(portal.expiresAt) > now())) reconnect();
       const linkedId = portal.tronClassSessionId;
-      if (typeof linkedId !== 'string' || !/^[a-f0-9]{32}$/.test(linkedId)) reconnect();
+      if (typeof linkedId !== 'string' || !/^[a-f0-9]{32}$/.test(linkedId)) {
+        if (schoolSessionExpiry(portal.lmsConnectingUntil) > now()) connecting();
+        reconnect();
+      }
       const sessionRef = db.doc(`_puTronClassSessions/${linkedId}`);
       const sessionSnapshot = await sessionRef.get();
       const session = sessionSnapshot.data();

@@ -1,5 +1,5 @@
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
-import { beforeEach, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import SchoolCoursesPage from './page';
 import { AcademicConnectionError } from '@/lib/academicClient';
 import { loadTronClassCourses, type SchoolLmsSnapshot, type TronClassCourseStatus } from '@/lib/tronClassCourses';
@@ -52,6 +52,9 @@ beforeEach(() => {
   context.uid = 'one'; context.schoolId = 'pu'; context.loading = false; context.studentId = true;
   vi.mocked(loadTronClassCourses).mockReset().mockImplementation(async (_uid, status) => snapshot(status));
 });
+afterEach(() => {
+  vi.useRealTimers();
+});
 
 it('reads real course records for the selected account and searches locally', async () => {
   render(<SchoolCoursesPage />);
@@ -91,6 +94,45 @@ it('rejects a late ongoing reply after switching to completed courses', async ()
   await screen.findByText('已結束 · 已讀取 1 門課程');
   await act(async () => { finish(old); });
   expect(screen.queryByText('過期課程不得顯示')).toBeNull();
+});
+
+it('shows WOW Class as connecting and retries instead of claiming login failed', async () => {
+  vi.useFakeTimers();
+  vi.mocked(loadTronClassCourses)
+    .mockRejectedValueOnce(new AcademicConnectionError('connecting'))
+    .mockResolvedValueOnce(snapshot());
+  render(<SchoolCoursesPage />);
+  await act(async () => {
+    await Promise.resolve();
+  });
+  expect(screen.getByRole('heading', { name: '正在連線 WOW Class' })).toBeTruthy();
+  expect(screen.getByText(/約需 1 分鐘/)).toBeTruthy();
+  expect(screen.getByText(/會自動再讀取課程/)).toBeTruthy();
+  expect(screen.queryByRole('heading', { name: '請重新連線 WOW Class' })).toBeNull();
+  await act(async () => { await vi.advanceTimersByTimeAsync(10_000); });
+  expect(screen.getByRole('heading', { name: '資料庫管理' })).toBeTruthy();
+  expect(loadTronClassCourses).toHaveBeenCalledTimes(2);
+  vi.useRealTimers();
+});
+
+it('stops promising automatic reads after the connecting retry budget', async () => {
+  vi.useFakeTimers();
+  vi.mocked(loadTronClassCourses).mockRejectedValue(new AcademicConnectionError('connecting'));
+  render(<SchoolCoursesPage />);
+  await act(async () => {
+    await Promise.resolve();
+  });
+  expect(screen.getByText(/會自動再讀取課程/)).toBeTruthy();
+  for (let i = 0; i < 5; i += 1) {
+    await act(async () => { await vi.advanceTimersByTimeAsync(10_000); });
+  }
+  expect(loadTronClassCourses).toHaveBeenCalledTimes(6);
+  expect(screen.getByRole('heading', { name: '正在連線 WOW Class' })).toBeTruthy();
+  expect(screen.queryByText(/會自動再讀取/)).toBeNull();
+  expect(screen.getByText(/可以手動重新讀取/)).toBeTruthy();
+  await act(async () => { await vi.advanceTimersByTimeAsync(10_000); });
+  expect(loadTronClassCourses).toHaveBeenCalledTimes(6);
+  vi.useRealTimers();
 });
 
 it('offers a scoped reconnect without hiding access to academic records', async () => {

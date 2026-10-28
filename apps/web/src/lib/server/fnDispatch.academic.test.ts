@@ -18,6 +18,8 @@ function setup() {
       ownerUid: 'pu-499999999', cookies: { portal: 'other-user-cookie' },
       expiresAt: new Date(Date.now() + 120_000),
     }],
+    ['_puTronClassSessions/current-lms', { ownerUid: UID, cookies: { session: 'tc-own' } }],
+    ['_puTronClassSessions/other-lms', { ownerUid: 'pu-499999999', cookies: { session: 'tc-other' } }],
   ]);
   const courses = vi.fn().mockResolvedValue({ success: true, courses: [{ courseName: '資料庫' }] });
   const grades = vi.fn().mockResolvedValue({
@@ -243,9 +245,11 @@ it('deletes the owner campus sessions including cookies and mypuCookies', async 
   );
   expect(response.status).toBe(200);
   expect(verifyIdToken).toHaveBeenCalledWith('firebase-id-token', true);
-  expect(await response.json()).toEqual({ result: { success: true, deleted: 1 } });
+  expect(await response.json()).toEqual({ result: { success: true, deleted: 2 } });
   expect(store.docs.has(SESSION)).toBe(false);
+  expect(store.docs.has('_puTronClassSessions/current-lms')).toBe(false);
   expect(store.docs.has('_puSessions/another-account')).toBe(true);
+  expect(store.docs.has('_puTronClassSessions/other-lms')).toBe(true);
 });
 
 it('retains the existing request limit on repeated reads', async () => {

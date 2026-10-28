@@ -1,17 +1,22 @@
 const {
   publicCampusDataResult,
   persistOwnedMypuCookies,
+  linkOwnedTronClassSession,
   deleteOwnedPuSessions,
 } = require('./puSessionStore');
 
-function memoryDb(seed = {}) {
-  const docs = new Map(
-    Object.entries(seed).map(([id, data]) => [id, { ...data }]),
-  );
-  function ref(id) {
+function memoryDb(seed = {}, extra = {}) {
+  const byCollection = {
+    _puSessions: new Map(Object.entries(seed).map(([id, data]) => [id, { ...data }])),
+    _puTronClassSessions: new Map(
+      Object.entries(extra._puTronClassSessions || {}).map(([id, data]) => [id, { ...data }]),
+    ),
+  };
+  function ref(collectionName, id) {
+    const docs = byCollection[collectionName];
     return {
       id,
-      path: `_puSessions/${id}`,
+      path: `${collectionName}/${id}`,
       get: async () => ({
         exists: docs.has(id),
         data: () => docs.get(id),
@@ -26,13 +31,15 @@ function memoryDb(seed = {}) {
     };
   }
   return {
-    docs,
+    docs: byCollection._puSessions,
+    tronDocs: byCollection._puTronClassSessions,
     collection: (name) => {
-      expect(name).toBe('_puSessions');
+      expect(['_puSessions', '_puTronClassSessions']).toContain(name);
+      const docs = byCollection[name];
       const filters = [];
       let maximum = Infinity;
       const query = {
-        doc: (id) => ref(id),
+        doc: (id) => ref(name, id),
         where: (field, op, value) => {
           filters.push({ field, op, value });
           return query;
@@ -52,7 +59,7 @@ function memoryDb(seed = {}) {
             .map(([id, data]) => ({
               id,
               data: () => data,
-              ref: ref(id),
+              ref: ref(name, id),
             }));
           return { docs: rows, empty: rows.length === 0 };
         },
@@ -149,19 +156,76 @@ describe('persistOwnedMypuCookies', () => {
   });
 });
 
-describe('deleteOwnedPuSessions', () => {
-  test('deletes every session owned by the caller including cookies and mypuCookies', async () => {
+describe('linkOwnedTronClassSession', () => {
+  const tronData = { ownerUid: 'alice', cookies: { session: 'tc' } };
+
+  test('writes TronClass session and portal merge only when portal exists and owner matches', async () => {
     const db = memoryDb({
-      a: { ownerUid: 'alice', cookies: { SID: 'one' }, mypuCookies: { PHPSESSID: 'mypu' } },
-      b: { ownerUid: 'alice', cookies: { SID: 'two' } },
-      c: { ownerUid: 'bob', cookies: { SID: 'keep' }, mypuCookies: { PHPSESSID: 'other' } },
+      own: { ownerUid: 'alice', cookies: { SID: 'alcat' } },
     });
-    await expect(deleteOwnedPuSessions(db, 'alice')).resolves.toBe(2);
+    const portal = db.collection('_puSessions').doc('own');
+    const tron = db.collection('_puTronClassSessions').doc('tc1');
+    await expect(
+      linkOwnedTronClassSession(db, portal, 'alice', tron, tronData, { tronClassSessionId: 'tc1' }),
+    ).resolves.toBe(true);
+    expect(db.tronDocs.get('tc1')).toMatchObject(tronData);
+    expect(db.docs.get('own')).toMatchObject({
+      ownerUid: 'alice',
+      tronClassSessionId: 'tc1',
+    });
+  });
+
+  test('does not create a TronClass session when the portal document is gone', async () => {
+    const db = memoryDb();
+    const portal = db.collection('_puSessions').doc('gone');
+    const tron = db.collection('_puTronClassSessions').doc('tc1');
+    await expect(
+      linkOwnedTronClassSession(db, portal, 'alice', tron, tronData, { tronClassSessionId: 'tc1' }),
+    ).resolves.toBe(false);
+    expect(db.tronDocs.has('tc1')).toBe(false);
+    expect(db.docs.has('gone')).toBe(false);
+  });
+
+  test('does not create a TronClass session when ownerUid belongs to another account', async () => {
+    const db = memoryDb({
+      other: { ownerUid: 'bob', cookies: { SID: 'private' } },
+    });
+    const portal = db.collection('_puSessions').doc('other');
+    const tron = db.collection('_puTronClassSessions').doc('tc1');
+    await expect(
+      linkOwnedTronClassSession(db, portal, 'alice', tron, tronData, { tronClassSessionId: 'tc1' }),
+    ).resolves.toBe(false);
+    expect(db.tronDocs.has('tc1')).toBe(false);
+    expect(db.docs.get('other').tronClassSessionId).toBeUndefined();
+  });
+});
+
+describe('deleteOwnedPuSessions', () => {
+  test('deletes portal and TronClass sessions owned by the caller', async () => {
+    const db = memoryDb(
+      {
+        a: { ownerUid: 'alice', cookies: { SID: 'one' }, mypuCookies: { PHPSESSID: 'mypu' } },
+        b: { ownerUid: 'alice', cookies: { SID: 'two' } },
+        c: { ownerUid: 'bob', cookies: { SID: 'keep' }, mypuCookies: { PHPSESSID: 'other' } },
+      },
+      {
+        _puTronClassSessions: {
+          t1: { ownerUid: 'alice', cookies: { session: 'tc-alice' } },
+          t2: { ownerUid: 'bob', cookies: { session: 'tc-bob' } },
+        },
+      },
+    );
+    await expect(deleteOwnedPuSessions(db, 'alice')).resolves.toBe(3);
     expect([...db.docs.keys()]).toEqual(['c']);
+    expect([...db.tronDocs.keys()]).toEqual(['t2']);
     expect(db.docs.get('c')).toMatchObject({
       ownerUid: 'bob',
       cookies: { SID: 'keep' },
       mypuCookies: { PHPSESSID: 'other' },
+    });
+    expect(db.tronDocs.get('t2')).toMatchObject({
+      ownerUid: 'bob',
+      cookies: { session: 'tc-bob' },
     });
   });
 });

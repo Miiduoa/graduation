@@ -1,12 +1,14 @@
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { expect, it, vi } from 'vitest';
+import { afterEach, expect, it, vi } from 'vitest';
 import {
   campusPageHasLoginForm,
   campusPageLooksClosed,
   createPuCampusGateway,
+  DEFAULT_TIMEOUT_MS,
   isCasPasswordPostUrl,
+  isTransientCampusError,
   PuCampusError,
   rewriteAllowedCampusLocation,
   rewriteCampusPortalLocation,
@@ -22,6 +24,10 @@ const MYPU_NOT_LOGGED_IN_HTML = fixture('mypu-not-logged-in.html');
 
 const STUDENT = '1110700321';
 const SECRET = 'super-secret-pass';
+
+afterEach(() => {
+  vi.useRealTimers();
+});
 
 function htmlResponse(status: number, html: string, headers?: Record<string, string>) {
   return new Response(html, { status, headers: { 'Content-Type': 'text/html', ...headers } });
@@ -179,6 +185,93 @@ it('accepts a student portal page that still has the maintenance HTML comment', 
     studentName: '陳同學',
     cookies: { PHPSESSID: 'abc' },
   });
+});
+
+function connectionReset(): Error {
+  return Object.assign(new Error('socket hang up'), { code: 'ECONNRESET' });
+}
+
+function studentPage() {
+  return htmlResponse(
+    200,
+    `學號(Student No.): ${STUDENT} 姓名(Student Name): 陳同學 query_course`,
+  );
+}
+
+it('retries a transient home hop without sending a second password POST', async () => {
+  let homes = 0;
+  const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+    const href = String(url);
+    if (href === 'https://alcat.pu.edu.tw/' && !init?.method) {
+      homes += 1;
+      if (homes === 1) throw connectionReset();
+      return htmlResponse(200, ALCAT_LOGIN_HTML, { 'set-cookie': 'PHPSESSID=abc; Path=/' });
+    }
+    if (href.endsWith('/index_check.php') && String(init?.method || '').toUpperCase() === 'POST') {
+      return htmlResponse(200, '<html>ok</html>', { 'set-cookie': 'PHPSESSID=abc; Path=/' });
+    }
+    return studentPage();
+  });
+  const gateway = createPuCampusGateway({ fetch: fetchMock });
+  await expect(gateway.loginStudent(STUDENT, SECRET)).resolves.toMatchObject({
+    studentName: '陳同學',
+  });
+  expect(homes).toBe(2);
+  expect(
+    fetchMock.mock.calls.filter(
+      ([url, init]) =>
+        String(url).endsWith('/index_check.php') &&
+        String(init?.method || '').toUpperCase() === 'POST',
+    ),
+  ).toHaveLength(1);
+});
+
+it('does not retry the password POST on ECONNRESET', async () => {
+  const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+    const href = String(url);
+    if (href === 'https://alcat.pu.edu.tw/' && !init?.method) {
+      return htmlResponse(200, ALCAT_LOGIN_HTML, { 'set-cookie': 'PHPSESSID=abc; Path=/' });
+    }
+    if (href.endsWith('/index_check.php')) throw connectionReset();
+    return studentPage();
+  });
+  const gateway = createPuCampusGateway({ fetch: fetchMock });
+  await expect(gateway.loginStudent(STUDENT, SECRET)).rejects.toMatchObject({
+    kind: 'unavailable',
+    code: 'ECONNRESET',
+  });
+  expect(
+    fetchMock.mock.calls.filter(
+      ([url, init]) =>
+        String(url).endsWith('/index_check.php') &&
+        String(init?.method || '').toUpperCase() === 'POST',
+    ),
+  ).toHaveLength(1);
+});
+
+it('aborts student login within the total budget instead of stacking hop timeouts', async () => {
+  vi.useFakeTimers();
+  const gateway = createPuCampusGateway({
+    timeoutMs: 15_000,
+    fetch: (_url, init) =>
+      new Promise((_, reject) => {
+        init?.signal?.addEventListener('abort', () => {
+          const error = new Error('aborted');
+          error.name = 'AbortError';
+          reject(error);
+        });
+      }),
+  });
+  const pending = expect(
+    gateway.loginStudent(STUDENT, SECRET, { timeoutMs: 80, hopTimeoutMs: 50 }),
+  ).rejects.toMatchObject({ kind: 'timeout' });
+  await vi.advanceTimersByTimeAsync(80);
+  await pending;
+});
+
+it('classifies ECONNRESET as a transient campus error', () => {
+  expect(isTransientCampusError(connectionReset())).toBe(true);
+  expect(isTransientCampusError(new PuCampusError('credentials', '學號或密碼錯誤'))).toBe(false);
 });
 
 it('still treats a post-login visible maintenance page without a form as closed', async () => {
@@ -343,6 +436,61 @@ it('does not treat an expired session notice as maintenance', async () => {
     fetch: async () => htmlResponse(200, MYPU_NOT_LOGGED_IN_HTML),
   });
   await expect(gateway.fetchStudentInfo({ PHPSESSID: 'dead' })).resolves.toEqual({});
+});
+
+it('gives e-campus submit at least 15 seconds', () => {
+  expect(DEFAULT_TIMEOUT_MS).toBeGreaterThanOrEqual(15_000);
+});
+
+it('still accepts an 11-second e-campus submit within the 15-second budget', async () => {
+  vi.useFakeTimers();
+  const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+    const href = String(url);
+    if (href === 'https://alcat.pu.edu.tw/' && !init?.method) {
+      return htmlResponse(200, ALCAT_LOGIN_HTML, { 'set-cookie': 'PHPSESSID=abc; Path=/' });
+    }
+    if (href.endsWith('/index_check.php')) {
+      await new Promise((resolve) => setTimeout(resolve, 11_000));
+      return htmlResponse(200, '<html>ok</html>', { 'set-cookie': 'PHPSESSID=abc; Path=/' });
+    }
+    return htmlResponse(
+      200,
+      `<!-- 系統維護公告 -->學號(Student No.): ${STUDENT} 姓名(Student Name): 陳同學 query_course`,
+    );
+  });
+  const gateway = createPuCampusGateway({ timeoutMs: 15_000, fetch: fetchMock });
+  const pending = gateway.loginStudent(STUDENT, SECRET);
+  await vi.advanceTimersByTimeAsync(11_000);
+  await expect(pending).resolves.toMatchObject({
+    studentName: '陳同學',
+    cookies: { PHPSESSID: 'abc' },
+  });
+  vi.useRealTimers();
+});
+
+it('retries a hung home hop within the 15-second hop budget then fails that stage', async () => {
+  vi.useFakeTimers();
+  const gateway = createPuCampusGateway({
+    timeoutMs: 15_000,
+    fetch: (_url, init) =>
+      new Promise((_, reject) => {
+        init?.signal?.addEventListener('abort', () => {
+          const error = new Error('aborted');
+          error.name = 'AbortError';
+          reject(error);
+        });
+      }),
+  });
+  const pending = expect(gateway.loginStudent(STUDENT, SECRET)).rejects.toMatchObject({
+    kind: 'timeout',
+    route: 'student',
+    stage: 'home',
+    code: 'AbortError',
+  });
+  await vi.advanceTimersByTimeAsync(15_000);
+  await vi.advanceTimersByTimeAsync(30_000);
+  await pending;
+  vi.useRealTimers();
 });
 
 it('maps an aborted external request to timeout', async () => {
@@ -869,6 +1017,34 @@ it('does not follow a post-login redirect off alcat', async () => {
     studentName: '陳同學',
   });
   expect(fetchMock.mock.calls.some(([url]) => String(url).includes('evil.test'))).toBe(false);
+});
+
+it('caps each TronClass hop below the total SSO budget', async () => {
+  const started = Date.now();
+  const gateway = createPuCampusGateway({
+    timeoutMs: 8_000,
+    fetch: (_url, init) =>
+      new Promise((_, reject) => {
+        init?.signal?.addEventListener('abort', () => {
+          const error = new Error('aborted');
+          error.name = 'AbortError';
+          reject(error);
+        });
+      }),
+  });
+  await expect(
+    gateway.loginTronClass('changyi', SECRET, {
+      timeoutMs: 5_000,
+      hopTimeoutMs: 40,
+      route: 'student',
+    }),
+  ).rejects.toMatchObject({
+    kind: 'timeout',
+    route: 'student',
+    stage: 'submit',
+    code: 'AbortError',
+  });
+  expect(Date.now() - started).toBeLessThan(1000);
 });
 
 it('aborts a student TronClass sidecar within the supplied timeout', async () => {

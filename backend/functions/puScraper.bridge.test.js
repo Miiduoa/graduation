@@ -7,6 +7,8 @@ const {
   looksLikePuLoginPage,
   parseCampusAutoPostForm,
   SCORE_BRIDGE_PATH,
+  GRADE_FETCH_BUDGET_MS,
+  MAX_TRANSIENT_HOP_RETRIES,
 } = require('./puScraper');
 
 const FIXTURES = path.join(__dirname, 'fixtures');
@@ -24,6 +26,12 @@ function mockRequests(respond) {
     request.end = () => {
       const fixture = respond(options, requests.length - 1, request);
       if (!fixture) return;
+      if (fixture.error) {
+        const error = new Error(fixture.error.message || 'socket hang up');
+        error.code = fixture.error.code || 'ECONNRESET';
+        process.nextTick(() => request.emit('error', error));
+        return;
+      }
       const response = new EventEmitter();
       response.headers = fixture.headers || {};
       response.statusCode = fixture.status || 200;
@@ -168,6 +176,61 @@ describe('PU mypu score SSO bridge', () => {
     expect(result.success).toBe(true);
     expect(result.mypuCookies).toEqual({ PHPSESSID: 'mypu-refreshed' });
     expect(requests.filter((row) => String(row.path).includes('index_chkLogin'))).toHaveLength(1);
+  });
+
+  test('retries a transient chkLogin hop without treating it as an expired session', async () => {
+    let chkLogin = 0;
+    mockRequests((options) => {
+      const hostPath = `${options.hostname}${options.path}`;
+      if (hostPath.includes('index_chkLogin')) {
+        chkLogin += 1;
+        if (chkLogin === 1) return { error: { code: 'ECONNRESET', message: 'socket hang up' } };
+        return { html: toNewPltHtml };
+      }
+      if (hostPath.includes('index_redirect_mypu')) {
+        return {
+          status: 302,
+          headers: {
+            location: '/score_query/score_all.php',
+            'set-cookie': ['PHPSESSID=mypu-retried; Path=/'],
+          },
+        };
+      }
+      return { html: scoreAllHtml, headers: { 'set-cookie': ['PHPSESSID=mypu-retried; Path=/'] } };
+    });
+    const result = await puFetchGrades({ SID: 'alcat-session' });
+    expect(result.success).toBe(true);
+    expect(result.mypuCookies).toEqual({ PHPSESSID: 'mypu-retried' });
+    expect(chkLogin).toBe(2);
+  });
+
+  test('does not report session-expired when the score bridge keeps resetting', async () => {
+    const requests = mockRequests(() => ({
+      error: { code: 'ECONNRESET', message: 'socket hang up' },
+    }));
+    const result = await puFetchGrades({ SID: 'alcat-session' });
+    expect(result).toMatchObject({ success: false, grades: [] });
+    expect(result.code).not.toBe('session-expired');
+    expect(requests.filter((row) => String(row.path).includes('index_chkLogin')).length).toBe(3);
+    expect(JSON.stringify(result)).not.toMatch(/alcat-session|SID|PHPSESSID|ECONNRESET/);
+  });
+
+  test('counts mypu hop retries toward the grade fetch budget', async () => {
+    const started = 1_700_000_000_000;
+    let now = started;
+    jest.spyOn(Date, 'now').mockImplementation(() => now);
+    const requests = mockRequests(() => {
+      now += 20_000;
+      return { error: { code: 'ECONNRESET', message: 'socket hang up' } };
+    });
+    const result = await puFetchGrades({ SID: 'alcat-session' });
+    expect(result).toMatchObject({ success: false, grades: [] });
+    expect(result.code).not.toBe('session-expired');
+    const chkLogin = requests.filter((row) => String(row.path).includes('index_chkLogin')).length;
+    expect(chkLogin).toBeGreaterThan(0);
+    expect(chkLogin).toBeLessThan(1 + MAX_TRANSIENT_HOP_RETRIES);
+    expect(now - started).toBeLessThanOrEqual(GRADE_FETCH_BUDGET_MS);
+    expect(JSON.stringify(result)).not.toMatch(/alcat-session|SID|PHPSESSID|ECONNRESET/);
   });
 
   test('reports session-expired when mypu returns the not-logged-in snapshot', async () => {
