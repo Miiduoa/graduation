@@ -77,12 +77,6 @@ function Courses({ uid, schoolId, returnUrl }: { uid: string; schoolId: 'pu'; re
 
   return (
     <>
-      <SchoolCourseReconciliation
-        uid={uid} schoolId={schoolId} lms={visible?.refreshing ? null : snapshot ?? null}
-        lmsStatus={!visible || visible.status === 'loading' ? 'loading'
-          : visible.status === 'error' ? 'unavailable' : visible.refreshing ? 'refreshing' : 'ready'}
-        returnUrl={returnUrl} canReconnect={Boolean(!options.loading && options.studentId)}
-      />
       <div className={courseStyles.toolbar}>
         <div className={styles.segment} role="tablist" aria-label="WOW Class 課程狀態">
           {(Object.entries(STATUS_LABELS) as [TronClassCourseStatus, string][]).map(([value, label]) => (
@@ -109,6 +103,12 @@ function Courses({ uid, schoolId, returnUrl }: { uid: string; schoolId: 'pu'; re
             onChange={(event) => setSearch(event.target.value)} />
         </label>
       </div>
+      <SchoolCourseReconciliation
+        uid={uid} schoolId={schoolId} lms={visible?.refreshing ? null : snapshot ?? null}
+        lmsStatus={!visible || visible.status === 'loading' ? 'loading'
+          : visible.status === 'error' ? 'unavailable' : visible.refreshing ? 'refreshing' : 'ready'}
+        returnUrl={returnUrl} canReconnect={Boolean(!options.loading && options.studentId)}
+      />
       <section id="school-course-results" role="tabpanel" aria-labelledby={`courses-tab-${status}`}>
         {!visible || visible.status === 'loading' ? (
           <div className={styles.status} role="status">正在讀取 WOW Class 課程…</div>

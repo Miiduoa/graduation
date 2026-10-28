@@ -43,6 +43,10 @@ beforeEach(() => {
 it('LMS 未完成時即可讀校方學分，完成後在同一工作區補上課堂', async () => {
   const pending = deferred<SchoolLmsSnapshot>(); vi.mocked(loadTronClassCourses).mockReturnValueOnce(pending.promise);
   render(<SchoolCoursesPage />);
+  const tabs = screen.getByRole('tablist', { name: 'WOW Class 課程狀態' });
+  const panel = screen.getByRole('region', { name: '校方課表與 WOW Class 對照' });
+  // 狀態切換在長課表上方，兩個來源仍在同一個穩定的工作區。
+  expect(tabs.compareDocumentPosition(panel) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   expect(loadAcademicRecords).not.toHaveBeenCalled(); await readAcademic();
   expect(screen.getByText('等待課堂資料')).toBeTruthy(); expect(matchedLink()).toBeNull();
   await act(async () => { pending.resolve(lms()); });
