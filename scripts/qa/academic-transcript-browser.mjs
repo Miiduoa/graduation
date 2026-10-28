@@ -198,13 +198,17 @@ createRoot(document.getElementById('root')).render(<Fixture/>);
 } finally {
   for (const request of pending.values()) clearTimeout(request.timer);
   socket?.close();
-  if (chrome && chrome.exitCode === null) {
+  if (chrome && chrome.exitCode === null && chrome.signalCode === null) {
     const ended = new Promise(resolve => chrome.once('exit', resolve));
     chrome.kill('SIGTERM'); await Promise.race([ended, pause(3000)]);
-    if (chrome.exitCode === null) chrome.kill('SIGKILL');
+    if (chrome.exitCode === null && chrome.signalCode === null) {
+      chrome.kill('SIGKILL'); await Promise.race([ended, pause(3000)]);
+    }
   }
   if (server) await new Promise(resolve => server.close(resolve));
   await writeFile(path.join(output, 'report.json'), JSON.stringify(report, null, 2));
-  await rm(fixture, { recursive: true, force: true }); await rm(profile, { recursive: true, force: true });
+  await rm(fixture, { recursive: true, force: true });
+  // Chrome 子程序可能仍在收尾寫入；只重試暫存清理，不重跑或略過驗收。
+  await rm(profile, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   console.log(JSON.stringify({ success: report.success, checks: report.checks.length, screenshots: report.screenshots.length, errors: report.errors }, null, 2));
 }
