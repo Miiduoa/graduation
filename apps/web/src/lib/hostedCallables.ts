@@ -17,6 +17,7 @@ export const HOSTED_WEB_CALLABLES = [
   'getMyTronClassCourses',
   'getMyTronClassLms',
   'submitMyTronClassHomework',
+  'getMyTronClassHomeworkStatus',
   'clearPuCampusSessions',
 ] as const;
 
