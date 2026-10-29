@@ -1,0 +1,13 @@
+# 靜宜校園 HTTPS 轉送（免費 Workers）。部署：cd deploy/edge-relay && npx wrangler deploy
+# 密鑰請用 wrangler secret put RELAY_SECRET，不要寫進這個檔。
+
+name = "pu-edge-relay"
+main = "src/index.ts"
+compatibility_date = "2026-10-29"
+workers_dev = true
+
+[placement]
+region = "gcp:asia-east1"
+
+[vars]
+ALLOWED_HOSTS = "*.pu.edu.tw"

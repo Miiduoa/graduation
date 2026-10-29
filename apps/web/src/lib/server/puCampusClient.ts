@@ -4,7 +4,7 @@ import {
   STUDENT_LOGIN_TOTAL_TIMEOUT_MS,
   studentLoginHopTimeoutMs,
 } from '../schoolLoginTimeouts';
-import { createIpv4PinnedFetch } from './campusIpv4Fetch';
+import { createPuRelayFetch } from './puEdgeRelay';
 
 const ALCAT_ORIGIN = 'https://alcat.pu.edu.tw';
 const TRONCLASS_ORIGIN = 'https://tronclass.pu.edu.tw';
@@ -472,6 +472,8 @@ export function classifyCampusFailure(error: unknown, details: CampusErrorDetail
   return new PuCampusError('unavailable', '學校系統無回應', { ...details, code });
 }
 
+export { createPuRelayFetch, readPuEdgeRelayConfig } from './puEdgeRelay';
+
 export function createPuCampusGateway(
   options: {
     fetch?: FetchLike;
@@ -481,7 +483,7 @@ export function createPuCampusGateway(
     identityOrigin?: string;
   } = {},
 ): PuCampusGateway {
-  const request = options.fetch ?? createIpv4PinnedFetch();
+  const request = options.fetch ?? createPuRelayFetch();
   const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
   const portalOrigin = options.portalOrigin || ALCAT_ORIGIN;
   const lmsOrigin = options.lmsOrigin || TRONCLASS_ORIGIN;
