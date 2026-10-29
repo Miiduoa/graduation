@@ -14,6 +14,15 @@
 4. 模型管理加入選用的 Qwen3 1.7B Q4_K_M（約 1.28 GB、Apache-2.0）。使用原有 llama.rn、本機 GGUF 格式與 Qwen3 ChatML 提示詞。它是實驗性選項，**不切換所有裝置的預設模型**；仍需 iOS／Android 真機確認下載、載入、取消及長時間推論。
 5. 模式與權限邊界不變。純手機提問不會暗中轉送到 Firebase AI；使用者明確切換「校園即時」才走已登入的伺服器。服務申請和付款不因本次變更而直接執行。
 
+## 同步後立即顯示下一步
+
+在學生主動同步並確認來源可用後，手機端直接依已授權的作業摘要呈現最多三個需注意的項目：
+
+- 24 小時內的截止時間優先，其次是最近已到期、七天內與缺乏日期的作業；採台灣時間解讀資訊，保留同名不同來源的作業。
+- 可核對來源身分的作業，點擊前重新比對原快照與帳號／校園，再前往既有的 `HomeworkSubmit` 服務；沒有來源 ID 的作業不會產生臆測導頁。
+- 同步資料只有 15 分鐘有效；超過時間、跨帳號或跨校時不顯示。來源部分讀取時清楚標示缺漏數量，不把缺少資訊說成「已完成」。
+- 這是**畫面內的即時排序**，不會背景通知、追蹤學校或自動代交作業；不使用 LLM 推論或任何額外付費服務。
+
 ## 資料與執行邊界
 
 | 資料或步驟 | 源頭／條件 | 不能推論的事 |
@@ -33,6 +42,8 @@
 ```bash
 pnpm --dir apps/mobile typecheck
 pnpm --dir apps/mobile test -- --runInBand src/__tests__/features/campusAssistant.test.ts
+pnpm --dir apps/mobile test -- --runInBand src/__tests__/services/campusAttentionFeed.test.ts
+pnpm --dir apps/mobile test -- --runInBand src/__tests__/CampusAttentionCard.test.tsx
 pnpm --dir apps/mobile test -- --runInBand src/__tests__/features/campusAssistantSemantic.test.ts
 pnpm --dir apps/mobile test -- --runInBand src/__tests__/CampusAssistantScreen.test.tsx
 pnpm --dir apps/mobile test -- --runInBand src/__tests__/services/localLLMDownload.test.ts
@@ -44,6 +55,7 @@ pnpm --dir apps/mobile test -- --runInBand src/__tests__/services/localLLMDownlo
 - 取消、切換帳號／學校之後不顯示晚到結果，也不偽造「核對成功」。
 - 沒有資料／模型時顯示限制；不能將前一次資料冒充即時。
 - 新模型 URL、檔案名稱、提示詞模板由單元測試核對，**單元測試不是原生手機驗收**。
+- 修正 CourseHub 的本週收據測試使用會隨時間過期的固定日期，保留正式作業頁原有行為與時間檢查。
 
 真機發布前必須另外核對 Expo 原生 build、iOS/Android 記憶體與熱耗、弱網下載、模型權重校驗、導覽可及性、來源時效和學校正式帳號測試。若真機載入 Qwen3 不穩定，保留既有 Qwen2.5 預設方案。
 
