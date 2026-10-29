@@ -39,6 +39,12 @@ export type LmsReadonlySource = {
     courseId: number,
   ) => Promise<LmsReadResult<unknown[]>>;
   fetchSiteAnnouncements: (cookies: Record<string, string>) => Promise<LmsReadResult<unknown[]>>;
+  fetchHomeworkSubmissions?: (
+    cookies: Record<string, string>, courseId: number, homeworkId: number,
+  ) => Promise<unknown[]>;
+  submitHomeworkText?: (
+    cookies: Record<string, string>, courseId: number, homeworkId: number, content: string,
+  ) => Promise<{ accepted: boolean; receiptId: string | null; submittedAt: string | null }>;
 };
 
 async function wrapRead<T>(run: () => Promise<T>): Promise<LmsReadResult<T>> {
@@ -68,4 +74,8 @@ export const tronClassLmsReadonlySource: LmsReadonlySource = {
     wrapRead(() => tronClassScraper.tcFetchCourseAnnouncementsStrict(cookies, courseId)),
   fetchSiteAnnouncements: (cookies) =>
     wrapRead(() => tronClassScraper.tcFetchAnnouncementsStrict(cookies)),
+  fetchHomeworkSubmissions: (cookies, courseId, homeworkId) =>
+    tronClassScraper.tcFetchHomeworkSubmissions(cookies, courseId, homeworkId),
+  submitHomeworkText: (cookies, courseId, homeworkId, content) =>
+    tronClassScraper.tcSubmitHomeworkText(cookies, courseId, homeworkId, content),
 };
