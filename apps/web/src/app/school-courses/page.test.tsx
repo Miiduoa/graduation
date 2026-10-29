@@ -61,6 +61,7 @@ it('reads real course records for the selected account and searches locally', as
   expect(await screen.findByRole('heading', { name: '資料庫管理' })).toBeTruthy();
   expect(loadTronClassCourses).toHaveBeenCalledWith('one', 'ongoing', 'pu');
   expect(screen.getByText('進行中 · 已讀取 1 門課程')).toBeTruthy();
+  expect(screen.getByRole('link', { name: '本課作業與教材' }).getAttribute('href')).toBe('/school-lms?course=100');
   expect(screen.getByRole('link', { name: '前往 資料庫管理 的 WOW Class 課堂' }).getAttribute('href')).toBe('https://tronclass.pu.edu.tw/course/100/content');
   fireEvent.change(screen.getByLabelText('搜尋課程、代碼或老師'), { target: { value: '王老師' } });
   expect(screen.getByText('找到 1 門課程')).toBeTruthy();

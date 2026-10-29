@@ -15,6 +15,7 @@ import type { SchoolLoginFirestore } from './schoolLoginProfile';
 import type { ServiceAccountSigner } from './firebaseCustomToken';
 import type { AcademicFetchers, AcademicFirestore } from './academicRecordsHandlers';
 import type { LmsCoursesFetcher } from './tronClassCoursesHandler';
+import type { LmsReadonlySource } from './tronClassLmsSource';
 import { LoginRateLimitError, LoginRateStoreError, type LoginRateGate } from './loginRateLimit';
 import { clientIpFromRequest, PuLoginHttpError } from './signInPuStudentId';
 
@@ -38,6 +39,7 @@ export type FnRuntime = {
   puCampus?: PuCampusGateway;
   academicFetchers?: AcademicFetchers;
   lmsCoursesFetcher?: LmsCoursesFetcher;
+  lmsReadonlySource?: LmsReadonlySource;
   serviceAccount?: ServiceAccountSigner | null;
   rateLimitGate?: LoginRateGate;
   rateLimitSalt?: string;
@@ -128,11 +130,17 @@ async function invokeHostedCallable(
   db: FnRuntime['db'],
   academicFetchers?: AcademicFetchers,
   lmsCoursesFetcher?: LmsCoursesFetcher,
+  lmsReadonlySource?: LmsReadonlySource,
 ): Promise<unknown> {
   if (name === 'getMyTronClassCourses') {
     const { createTronClassCoursesHandler } = await import('./tronClassCoursesHandler');
     const fetchCourses = lmsCoursesFetcher ?? (await import('./tronClassSchoolSource')).tronClassSchoolSource;
     return createTronClassCoursesHandler({ db: db as unknown as AcademicFirestore, fetchCourses })(request);
+  }
+  if (name === 'getMyTronClassLms') {
+    const { createTronClassLmsHandler } = await import('./tronClassLmsHandler');
+    const source = lmsReadonlySource ?? (await import('./tronClassLmsSource')).tronClassLmsReadonlySource;
+    return createTronClassLmsHandler({ db: db as unknown as AcademicFirestore, source })(request);
   }
   if (name === 'getMyAcademicRecords') {
     const { createAcademicRecordsHandler } = await import('./academicRecordsHandlers');
@@ -242,6 +250,7 @@ export async function dispatchFnRequest(
       resolved.verifyIdToken,
       isLeaveWebCallable(name) || name === 'correctAttendanceRecord' ||
         name === 'getMyAcademicRecords' || name === 'getMyTronClassCourses' ||
+        name === 'getMyTronClassLms' ||
         name === 'clearPuCampusSessions',
     );
     uid = auth?.uid;
@@ -260,7 +269,7 @@ export async function dispatchFnRequest(
       auth,
     };
     const result = await invokeHostedCallable(name, callableRequest, resolved.db,
-      resolved.academicFetchers, resolved.lmsCoursesFetcher);
+      resolved.academicFetchers, resolved.lmsCoursesFetcher, resolved.lmsReadonlySource);
     return jsonResponse(200, { result }, cors);
   } catch (error) {
     const mapped = mapThrownError(error);

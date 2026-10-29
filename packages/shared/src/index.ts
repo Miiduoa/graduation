@@ -108,3 +108,4 @@ export * from './foodPageCopy';
 export * from './signedInSocialReads';
 export * from './imports';
 export * from './providenceCampus';
+export * from './puLmsReadonly';
