@@ -34,6 +34,7 @@ function createStore(overrides: {
 async function reuse(store: ReturnType<typeof createStore>) {
   return reuseOwnedTronClassSession({
     db: store.db, uid: UID, studentId: STUDENT, portalId: NEXT_ID,
+    validateSession: async () => true,
   });
 }
 
@@ -74,4 +75,15 @@ it('does not overwrite a session that was independently attached to the new port
   const store = createStore({ next: { tronClassSessionId: 'b'.repeat(32) } });
   expect(await reuse(store)).toBe(false);
   expect(store.docs.get('_puSessions/' + NEXT_ID)?.tronClassSessionId).toBe('b'.repeat(32));
+});
+
+
+it('does not reuse a remote session which the school no longer accepts', async () => {
+  const store = createStore();
+  const validateSession = async () => false;
+  const result = await reuseOwnedTronClassSession({
+    db: store.db, uid: UID, studentId: STUDENT, portalId: NEXT_ID, validateSession,
+  });
+  expect(result).toBe(false);
+  expect(store.docs.get('_puSessions/' + NEXT_ID)).not.toHaveProperty('tronClassSessionId');
 });
