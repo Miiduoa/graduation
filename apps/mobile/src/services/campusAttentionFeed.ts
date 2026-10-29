@@ -91,11 +91,24 @@ const PLAN_PRIORITY: Record<CampusAttentionPriority, CampusPlanPriority> = {
  * proposed for a local reminder. Scheduling itself rechecks the live identity
  * and snapshot expiry and still requires the student's confirmation.
  */
-export function buildCampusAttentionReminderStep(item: CampusAttentionItem): CampusPlanStep | null {
+export function buildCampusAttentionReminderStep(
+  item: CampusAttentionItem,
+  snapshot: CampusSenseSnapshot,
+): CampusPlanStep | null {
   const dueAt = item.assignment.dueAt;
   if ((item.priority !== 'due-soon' && item.priority !== 'this-week') ||
       !dueAt || !/T.*(?:Z|[+-]\d{2}:\d{2})$/i.test(dueAt) ||
-      !parseCampusAssignmentSource(item.assignment.source)) return null;
+      !parseCampusAssignmentSource(item.assignment.source) ||
+      snapshot.assignments.status !== 'available') return null;
+
+  // The OS reminder identifier includes title/course/due time, not source IDs.
+  // Never propose two different source records that would collide on that key.
+  const normalizedTitle = item.assignment.title.replace(/\s+/g, ' ').trim().slice(0, 130);
+  const matching = snapshot.assignments.items.filter((assignment) =>
+    assignment.title.replace(/\s+/g, ' ').trim().slice(0, 130) === normalizedTitle &&
+    assignment.groupName === item.assignment.groupName &&
+    assignment.dueAt === dueAt);
+  if (matching.length !== 1 || matching[0] !== item.assignment) return null;
   return {
     id: 'attention-' + item.key,
     title: item.assignment.title.replace(/\s+/g, ' ').trim().slice(0, 130),
