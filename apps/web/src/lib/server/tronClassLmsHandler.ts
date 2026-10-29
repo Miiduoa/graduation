@@ -125,6 +125,9 @@ function parseHomework(
     submitted: isHomeworkSubmitted(row),
     description: homeworkDescriptionText(data.description ?? row.description),
     href: tronClassActivityHref(course.id, id),
+    submissionType: typeof (row.submission_type ?? data.submission_type ?? row.submit_type) === 'string'
+      ? String(row.submission_type ?? data.submission_type ?? row.submit_type).slice(0, 50)
+      : null,
   };
 }
 
