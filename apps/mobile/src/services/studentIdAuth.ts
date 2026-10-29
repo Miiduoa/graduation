@@ -7,6 +7,7 @@
 
 import Constants from 'expo-constants';
 import {
+  STUDENT_LOGIN_CLIENT_TIMEOUT_MS,
   TEACHER_LMS_UNAVAILABLE_COPY,
   isTeacherLmsUnavailableNotice,
 } from '@campus/shared/src/schoolLogin';
@@ -141,7 +142,7 @@ async function tryBackendUnifiedLogin(
     timeout = setTimeout(() => {
       controller.abort();
       reject(new Error('學校登入逾時，請稍後再試。'));
-    }, 45_000);
+    }, STUDENT_LOGIN_CLIENT_TIMEOUT_MS);
   });
   try {
     console.log('[studentIdAuth] Trying backend unified login…');

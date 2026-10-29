@@ -167,6 +167,12 @@ function existingCourseButton() {
 }
 
 describe('personal timetable data retention', () => {
+  it('shows official school courses on the grid without waiting for a local import', async () => {
+    mocks.load.mockResolvedValue({ ...timetable(), courses: [] });
+    await ready();
+    expect(screen.getAllByText('匯入資料庫').length).toBeGreaterThan(0);
+  });
+
   it('opens an imported course in the currently viewed campus', async () => {
     mocks.records = [
       {

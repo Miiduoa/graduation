@@ -4,6 +4,7 @@ import { AuthProvider, useAuth } from '../state/auth';
 import { signOut } from 'firebase/auth';
 import { clearAllCache } from '../data/cachedSource';
 import { clearMockAuthSession } from '../services/mockAuth';
+import { clearOwnedPuCampusSessions } from '../services/clearOwnedPuCampusSessions';
 
 const mockFirebaseAuth: { currentUser: { uid: string } | null } = { currentUser: { uid: 'u1' } };
 const mockBeginReminderCleanup = jest.fn(async () => 0);
@@ -45,6 +46,9 @@ jest.mock('../services/puDataCache', () => ({
 }));
 jest.mock('../services/postLoginContextHolder', () => ({ setInMemoryPostLoginContext: jest.fn() }));
 jest.mock('../services/studentIdAuth', () => ({ clearPUSession: jest.fn() }));
+jest.mock('../services/clearOwnedPuCampusSessions', () => ({
+  clearOwnedPuCampusSessions: jest.fn().mockResolvedValue(undefined),
+}));
 jest.mock('../services/tronClassClient', () => ({
   clearTCSession: jest.fn(),
   purgeLegacyTCSensitiveStorage: async () => undefined,
@@ -125,9 +129,29 @@ test('matching-account deletion logout completes actual SDK signout', async () =
   await act(async () => undefined);
   await act(async () => auth.signOut('u1'));
   expect(signOut).toHaveBeenCalledWith(mockFirebaseAuth);
+  expect(clearOwnedPuCampusSessions).toHaveBeenCalled();
   expect(mockBeginReminderCleanup).toHaveBeenCalledTimes(1);
   expect(mockEndReminderCleanup).toHaveBeenCalledTimes(1);
   expect(mockFirebaseAuth.currentUser).toBeNull();
+});
+
+test('clears campus sessions before Firebase sign-out', async () => {
+  const order: string[] = [];
+  jest.mocked(clearOwnedPuCampusSessions).mockImplementation(async () => {
+    order.push('clear');
+  });
+  jest.mocked(signOut).mockImplementation(async () => {
+    order.push('signOut');
+    mockFirebaseAuth.currentUser = null;
+  });
+  render(
+    <AuthProvider>
+      <Probe />
+    </AuthProvider>,
+  );
+  await act(async () => undefined);
+  await act(async () => auth.signOut('u1'));
+  expect(order).toEqual(['clear', 'signOut']);
 });
 
 test('a second bound logout reports the pending operation instead of false completion', async () => {
