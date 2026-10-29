@@ -25,11 +25,16 @@ export function TronClassHomeworkComposer({
     .includes((submissionType || '').toLowerCase());
 
   useEffect(() => {
-    try { setText(window.sessionStorage.getItem(key) || ''); }
-    catch { setText(''); }
-    setPreview(false);
-    setReceipt(null);
-    setUncertain('');
+    let active = true;
+    void Promise.resolve().then(() => {
+      if (!active) return;
+      try { setText(window.sessionStorage.getItem(key) || ''); }
+      catch { setText(''); }
+      setPreview(false);
+      setReceipt(null);
+      setUncertain('');
+    });
+    return () => { active = false; };
   }, [key]);
 
   function edit(value: string) {
