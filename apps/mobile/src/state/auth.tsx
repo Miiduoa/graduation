@@ -42,6 +42,7 @@ import {
   getAnyCachedTCCourses,
 } from '../services/puDataCache';
 import { clearPUSession } from '../services/studentIdAuth';
+import { clearOwnedPuCampusSessions } from '../services/clearOwnedPuCampusSessions';
 import {
   clearTCSession,
   purgeLegacyTCSensitiveStorage,
@@ -913,6 +914,12 @@ export function AuthProvider(props: { children: React.ReactNode }) {
               console.warn('[auth] Failed to remove push token during sign out:', e);
               throw e;
             }),
+        );
+        cleanupTasks.push(
+          clearOwnedPuCampusSessions().catch((e) => {
+            console.warn('[auth] Failed to clear campus sessions during sign out:', e);
+            throw e;
+          }),
         );
       }
 

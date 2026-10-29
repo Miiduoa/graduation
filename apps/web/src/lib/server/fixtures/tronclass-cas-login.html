@@ -1,0 +1,24 @@
+<!DOCTYPE html>
+<html lang="zh-Hant-TW">
+<head>
+  <meta charset="utf-8">
+  <title>登入 - 靜宜大學</title>
+</head>
+<body>
+  <div id="kc-form">
+    <form
+      id="kc-form-login"
+      action="https://identity.pu.edu.tw/auth/realms/pu/login-actions/authenticate?session_code=fixtureSessionCode&amp;execution=fixtureExecution&amp;client_id=tronclass&amp;tab_id=fixtureTab"
+      method="post"
+    >
+      <input type="hidden" name="credentialId" value="">
+      <label for="username">帳號</label>
+      <input id="username" name="username" type="text" autocomplete="username">
+      <label for="password">密碼</label>
+      <input id="password" name="password" type="password" autocomplete="current-password">
+      <input type="hidden" name="login" value="">
+      <input type="submit" value="登入">
+    </form>
+  </div>
+</body>
+</html>

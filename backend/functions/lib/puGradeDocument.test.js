@@ -132,4 +132,90 @@ describe('PU grade document parser', () => {
     expect(parsed.grades).toHaveLength(1);
     expect(parsed.coverage).toEqual({ status: 'partial', skippedRows: 1 });
   });
+
+  test('reads 學年 headings without 度 and full-width credit digits', () => {
+    const parsed = parsePuGradeDocument(`
+      <p>114學年第2學期</p>
+      <table>
+        <tr><th>科目名稱(Course)</th><th>修課班級(Class)</th><th>修別(Course type)</th><th>學分數(Credits)</th><th>成績(Score)</th></tr>
+        <tr><td>微積分</td><td>全校</td><td>必修</td><td>３學分</td><td>90</td></tr>
+      </table>`);
+    expect(parsed).toMatchObject({ success: true, allSemesters: ['1142'] });
+    expect(parsed.grades[0]).toMatchObject({ semester: '1142', courseName: '微積分', credits: 3, score: 90 });
+    expect(parsed.coverage).toEqual({ status: 'unknown', skippedRows: 0 });
+  });
+
+  test('does not treat bilingual follow-up rows or empty-semester summaries as unverified courses', () => {
+    const parsed = parsePuGradeDocument(`<table>
+      <tr><th>學期別</th><th>課程名稱</th><th>修課班級</th><th>修別</th><th>學分數</th><th>成績</th></tr>
+      <tr><td>1151</td><td>資料庫系統</td><td>資管三A</td><td>必修</td><td>3</td><td>86</td></tr>
+      <tr><td></td><td>DATABASE SYSTEMS</td><td></td><td></td><td></td><td></td></tr>
+      <tr><td></td><td>學期平均成績(Semester average)</td><td></td><td></td><td></td><td>86</td></tr>
+      <tr><td></td><td>操行成績(Behavior score)</td><td></td><td></td><td></td><td>90</td></tr>
+      <tr><td></td><td>班排名(Class ranking)</td><td></td><td></td><td></td><td>10 / 40</td></tr>
+      <tr><td></td><td>系排名(Department ranking)</td><td></td><td></td><td></td><td>20 / 80</td></tr>
+      <tr><td>1142</td><td>程式設計</td><td>資管二A</td><td>必修</td><td>3</td><td>90</td></tr>
+      <tr><td></td><td>PROGRAMMING</td><td></td><td></td><td></td><td></td></tr>
+    </table>`);
+    expect(parsed.success).toBe(true);
+    expect(parsed.grades).toEqual([
+      expect.objectContaining({
+        semester: '1151', courseName: '資料庫系統', courseNameEn: 'DATABASE SYSTEMS', credits: 3, score: 86,
+      }),
+      expect.objectContaining({
+        semester: '1142', courseName: '程式設計', courseNameEn: 'PROGRAMMING', credits: 3, score: 90,
+      }),
+    ]);
+    expect(parsed.summary['1151']).toEqual({
+      semesterAverage: '86', behaviorScore: '90', classRanking: '10 / 40', departmentRanking: '20 / 80',
+    });
+    expect(parsed.coverage).toEqual({ status: 'unknown', skippedRows: 0 });
+  });
+
+  test('mypu six-column transcript does not count per-semester footer rows as missing courses', () => {
+    const titles = [
+      '資料庫系統', '線性代數', '英文', '體育', '程式設計', '統計學', '會計學',
+      '微積分', '經濟學', '計算機概論', '中文', '歷史', '心理學', '管理學',
+      '行銷學', '財務管理', '作業研究', '資訊倫理', '系統分析', '網路概論',
+      '資料結構', '作業系統', '軟體工程', '專題', '實習', '通識講座',
+      '服務學習', '軍訓', '音樂', '美術', '哲學', '法律與生活', '環境科學', '程式實習',
+    ];
+    const groups = [
+      ['1151', 6, true], ['1142', 6, true], ['1141', 5, true], ['1132', 5, true],
+      ['1131', 4, true], ['1122', 4, true], ['1121', 4, false],
+    ];
+    const footers = ['學期平均成績(Semester average)', '操行成績(Behavior score)', '班排名(Class ranking)', '系排名(Department ranking)'];
+    const courseRows = [];
+    const htmlRows = [];
+    let offset = 0;
+    groups.forEach(([code, count, hasFooter], groupIndex) => {
+      for (let i = 0; i < count; i += 1) {
+        const title = titles[offset];
+        const cells = [code, title, '資管', i % 2 ? '選修' : '必修', String(1 + (i % 3)), String(70 + i)];
+        courseRows.push(title);
+        htmlRows.push('<tr>' + cells.map((cell) => '<td>' + cell + '</td>').join('') + '</tr>');
+        offset += 1;
+      }
+      if (hasFooter) {
+        footers.forEach((label, kind) => {
+          const score = kind === 0 ? String(80 + groupIndex) : kind === 1 ? String(85 + groupIndex) : `${groupIndex + 1} / 40`;
+          htmlRows.push(`<tr><td></td><td>${label}</td><td></td><td></td><td></td><td>${score}</td></tr>`);
+        });
+      }
+    });
+    const parsed = parsePuGradeDocument(`<table>
+      <tr><th>學期別</th><th>課程名稱</th><th>修課班級</th><th>修別</th><th>學分數</th><th>成績</th></tr>
+      ${htmlRows.join('')}
+    </table>`);
+    expect(courseRows).toHaveLength(34);
+    expect(htmlRows).toHaveLength(58);
+    expect(parsed.success).toBe(true);
+    expect(parsed.grades).toHaveLength(34);
+    expect(parsed.grades.map((row) => row.courseName)).toEqual(courseRows);
+    expect(parsed.summary['1151']).toEqual({
+      semesterAverage: '80', behaviorScore: '85', classRanking: '1 / 40', departmentRanking: '1 / 40',
+    });
+    expect(parsed.summary['1142'].semesterAverage).toBe('81');
+    expect(parsed.coverage).toEqual({ status: 'unknown', skippedRows: 0 });
+  });
 });

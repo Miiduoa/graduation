@@ -80,7 +80,44 @@ export type {
 import { collectionFromSegments, docFromSegments } from './firestorePath';
 import { areUniversalDevAccountsEnabled } from './runtime';
 import { subscribePreferredCollection } from './preferredCollection';
-import { SchoolLoginHttpError } from './schoolLoginErrorCopy';
+import { SchoolLoginHttpError, UNAVAILABLE_SERVER_ERROR } from './schoolLoginErrorCopy';
+import { STUDENT_LOGIN_CLIENT_TIMEOUT_MS } from './schoolLoginTimeouts';
+
+export { STUDENT_LOGIN_CLIENT_TIMEOUT_MS };
+
+function schoolLoginFetchSignal(external?: AbortSignal): {
+  signal: AbortSignal;
+  didTimeout: () => boolean;
+  cancel: () => void;
+} {
+  const controller = new AbortController();
+  let timedOut = false;
+  const onExternalAbort = () => {
+    clearTimeout(timer);
+    controller.abort(external?.reason);
+  };
+  const timer = setTimeout(() => {
+    timedOut = true;
+    if (external) external.removeEventListener('abort', onExternalAbort);
+    controller.abort();
+  }, STUDENT_LOGIN_CLIENT_TIMEOUT_MS);
+  if (external) {
+    if (external.aborted) {
+      clearTimeout(timer);
+      controller.abort(external.reason);
+    } else {
+      external.addEventListener('abort', onExternalAbort, { once: true });
+    }
+  }
+  return {
+    signal: controller.signal,
+    didTimeout: () => timedOut && !external?.aborted,
+    cancel() {
+      clearTimeout(timer);
+      if (external) external.removeEventListener('abort', onExternalAbort);
+    },
+  };
+}
 
 const firebaseConfig = {
   apiKey: process.env.NEXT_PUBLIC_FIREBASE_API_KEY,
@@ -299,18 +336,30 @@ export async function signInWithPuStudentId(
     return credential.user;
   }
   const previousUser = mainAuth.currentUser;
-  const response = await fetch(getCloudFunctionUrl('signInPuStudentId'), {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({
-      studentId,
-      password,
-      ...(schoolId ? { schoolId } : {}),
-    }),
-    signal,
-  });
+  const request = schoolLoginFetchSignal(signal);
+  let response: Response;
+  try {
+    response = await fetch(getCloudFunctionUrl('signInPuStudentId'), {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        studentId,
+        password,
+        ...(schoolId ? { schoolId } : {}),
+      }),
+      signal: request.signal,
+    });
+  } catch (error) {
+    if (signal?.aborted) throw error;
+    if (request.didTimeout()) {
+      throw new SchoolLoginHttpError(503, UNAVAILABLE_SERVER_ERROR);
+    }
+    throw error;
+  } finally {
+    request.cancel();
+  }
 
   const data = (await parseFunctionJsonResponse(
     response,
