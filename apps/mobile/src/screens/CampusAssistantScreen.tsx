@@ -11,6 +11,7 @@ import {
   OnDeviceAssistantError,
   type CampusAssistantMessage,
   type CampusAssistantMode,
+  type CampusAssistantProgressPhase,
   type OnDeviceAssistantReadiness,
 } from '../features/campusAssistant';
 import type { ServiceScreenProps } from './UnavailableFeatureScreen';
@@ -30,6 +31,18 @@ import {
   type CampusSenseSnapshot,
   type CampusSenseProgress,
 } from '../services/campusSenseSnapshot';
+
+const ASSISTANT_PROGRESS_LABELS: Record<CampusAssistantProgressPhase, string> = {
+  'reading-context': '正在讀取手機已保存的課表',
+  'checking-sources': '正在確認校園資料來源與有效時間',
+  'checking-model': '正在檢查手機 AI 模型',
+  'loading-model': '正在載入免費手機模型',
+  'checking-tools': '模型正在選擇可用的本機查詢工具',
+  'reading-sources': '正在讀取已授權的校園資料',
+  composing: '手機模型正在整理回覆',
+  'querying-campus': '正在向已登入的校園服務查詢',
+  'checking-result': '正在核對本次查詢結果',
+};
 
 const SERVICE_AFTER_WRITE: Record<CampusAgentWriteTool, string> = {
   submitLeaveRequest: 'CoursesHome',
@@ -124,6 +137,7 @@ function AssistantConversation({
   const [senseError, setSenseError] = useState('');
   const syncLock = useRef(false);
   const [deviceCheck, setDeviceCheck] = useState(0);
+  const [agentStage, setAgentStage] = useState<CampusAssistantProgressPhase | null>(null);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
   const [linkError, setLinkError] = useState('');
@@ -163,7 +177,13 @@ function AssistantConversation({
     if (lock.current || syncLock.current || next === mode) return;
     setMode(next);
     setMessages([]);
+    setAgentStage(null);
     setError('');
+  };
+  const reportAgent = (controller: AbortController) => (phase: CampusAssistantProgressPhase) => {
+    if (current() && !controller.signal.aborted && inFlight.current === controller) {
+      setAgentStage(phase);
+    }
   };
   const progressFor = (controller: AbortController) => (progress: CampusSenseProgress) => {
     if (current() && !controller.signal.aborted && inFlight.current === controller) setSyncProgress(progress);
@@ -210,6 +230,7 @@ function AssistantConversation({
     syncLock.current = true;
     setBusy(true);
     setSyncBusy(true);
+    setAgentStage(null);
     setSyncProgress(null);
     setError('');
     setSenseError('');
@@ -254,6 +275,7 @@ function AssistantConversation({
         mode: 'device',
         isCurrent: current,
         signal: controller.signal,
+        onProgress: reportAgent(controller),
       });
       if (controller.signal.aborted && current()) {
         setError('已停止這次本地整理，沒有將取消後的回答加入對話。');
@@ -291,6 +313,7 @@ function AssistantConversation({
         setBusy(false);
         setSyncBusy(false);
         setSyncProgress(null);
+        setAgentStage(null);
       }
     }
   };
@@ -300,6 +323,7 @@ function AssistantConversation({
     if ((!uid && mode === 'campus') || !question || lock.current || syncLock.current || !current()) return;
     lock.current = true;
     setBusy(true);
+    setAgentStage(null);
     setError('');
     const controller = new AbortController();
     inFlight.current = controller;
@@ -312,6 +336,7 @@ function AssistantConversation({
         messages: next,
         isCurrent: current,
         mode,
+        onProgress: reportAgent(controller),
         ...(mode === 'device' ? { signal: controller.signal } : {}),
       });
       if (controller.signal.aborted && current()) {
@@ -360,7 +385,10 @@ function AssistantConversation({
     } finally {
       if (inFlight.current === controller) inFlight.current = null;
       lock.current = false;
-      if (current()) setBusy(false);
+      if (current()) {
+        setBusy(false);
+        setAgentStage(null);
+      }
     }
   };
   return (
@@ -640,6 +668,29 @@ function AssistantConversation({
                 ))}
                 <Text style={{ color: aiTokens.muted, fontSize: 12 }}>
                   只是開啟頁面，提交或付款仍要自行確認。
+                </Text>
+              </View>
+            ) : null}
+            {busy && agentStage ? (
+              <View
+                accessibilityLiveRegion="polite"
+                style={{
+                  borderWidth: 1,
+                  borderColor: aiTokens.border,
+                  backgroundColor: aiTokens.panel,
+                  borderRadius: 12,
+                  paddingVertical: 12,
+                  paddingHorizontal: 14,
+                  gap: 5,
+                }}
+              >
+                <Text style={{ color: aiTokens.text, fontSize: 14, fontWeight: '600' }}>
+                  {ASSISTANT_PROGRESS_LABELS[agentStage]}
+                </Text>
+                <Text style={{ color: aiTokens.muted, fontSize: 12, lineHeight: 18 }}>
+                  {mode === 'device'
+                    ? '處理會在這台裝置完成；來源不足時會標示，不會假裝已完成服務操作。'
+                    : '連線查詢須通過帳號與服務權限核對；不代表已完成申請或交易。'}
                 </Text>
               </View>
             ) : null}
