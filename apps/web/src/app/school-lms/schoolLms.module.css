@@ -320,3 +320,34 @@
 @media (max-width: 600px) {
   .verifyStrip > button { width: 100%; }
 }
+
+
+.syncActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+.syncActions button {
+  min-height: 44px;
+}
+.syncProgress {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding: 12px 16px;
+  margin: -8px 0 20px;
+  border: 1px solid var(--border);
+  background: var(--accent-soft);
+  border-radius: 12px;
+  font-size: 13px;
+  color: var(--muted);
+}
+.syncProgress button {
+  min-height: 44px;
+}
+@media (max-width: 600px) {
+  .syncActions { width: 100%; }
+  .syncActions button { flex: 1 1 auto; }
+}
