@@ -30,7 +30,15 @@ function reader(responses) {
   };
   const module = { exports: {} };
   vm.runInNewContext(fs.readFileSync(path.join(__dirname, 'tronClassScraper.js'), 'utf8'), {
-    module, require: (name) => { assert.equal(name, 'https'); return transport; },
+    module, require: (name) => {
+      if (name === 'https') return transport;
+      if (name === './lib/puCampusTransport') {
+        // The production transport now supports an optional relay; keep this
+        // sandbox's real HTTP construction on the injected HTTPS fixture.
+        return { sendWithCampusFetch: async () => null, setCampusHttpFetch: () => {} };
+      }
+      throw new Error('Unexpected dependency in isolated scraper: ' + name);
+    },
     URL, URLSearchParams, Buffer, setTimeout, clearTimeout,
     console: { log() {}, warn() {} },
   }, { filename: 'tronClassScraper.js' });
