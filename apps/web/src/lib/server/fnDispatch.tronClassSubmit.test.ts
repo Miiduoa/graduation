@@ -216,9 +216,7 @@ it('does not accept another homework receipt as a duplicate of the selected work
 });
 
 it('stops remote writing when the administrator has not enabled the school endpoint', async () => {
-  const { request, source } = setup();
-  const { createMemoryGroupStore: createStore } = await import('./memoryGroupStore');
-  expect(createStore).toBeDefined();
+  const { source } = setup();
   // Default production mode is fail-closed; this test checks the handler directly.
   const { createTronClassHomeworkSubmitHandler } = await import('./tronClassHomeworkSubmitHandler');
   const handler = createTronClassHomeworkSubmitHandler({
