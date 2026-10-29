@@ -20,7 +20,7 @@ const NON_MATERIAL_TYPES = new Set([
 ]);
 
 export type HomeworkPageAdvance = 'continue' | 'complete' | 'incomplete';
-export type DeadlineBucket = 'today' | 'next7Days' | 'later' | 'none';
+export type DeadlineBucket = 'overdue' | 'today' | 'next7Days' | 'later' | 'none';
 export type SchoolReadErrorKind = 'session' | 'unavailable';
 
 export function isHomeworkSubmitted(homework: { submitted?: unknown }): boolean {
@@ -33,6 +33,10 @@ export function isHomeworkTodo(homework: { submitted?: unknown }): boolean {
 
 export function isUploadDownloadable(upload: { allow_download?: unknown }): boolean {
   return upload.allow_download === true;
+}
+
+export function isMobileUploadDownloadable(upload: { allow_download?: unknown }): boolean {
+  return upload.allow_download !== false;
 }
 
 export function isMaterialActivityType(type: unknown): boolean {
@@ -105,11 +109,12 @@ export function homeworkDeadlineBucket(
 ): DeadlineBucket {
   const due = homeworkDeadlineMs(deadline);
   if (due === null) return 'none';
+  if (due < now.getTime()) return 'overdue';
   const nowDay = taipeiDayUtc(now);
   const dueDay = taipeiDayUtc(due);
   if (nowDay === null || dueDay === null) return 'none';
   const diffDays = Math.round((dueDay - nowDay) / 86_400_000);
-  if (diffDays <= 0) return 'today';
+  if (diffDays === 0) return 'today';
   if (diffDays <= 7) return 'next7Days';
   return 'later';
 }
@@ -117,21 +122,24 @@ export function homeworkDeadlineBucket(
 export function selectDeadlineAxis<T extends { submitted: boolean; deadline: string | null }>(
   items: readonly T[],
   now: Date,
-): { today: T[]; next7Days: T[] } {
+): { overdue: T[]; today: T[]; next7Days: T[] } {
+  const overdue: T[] = [];
   const today: T[] = [];
   const next7Days: T[] = [];
   for (const item of items) {
     if (item.submitted === true) continue;
     const bucket = homeworkDeadlineBucket(item.deadline, now);
-    if (bucket === 'today') today.push(item);
+    if (bucket === 'overdue') overdue.push(item);
+    else if (bucket === 'today') today.push(item);
     else if (bucket === 'next7Days') next7Days.push(item);
   }
   const byDeadline = (left: T, right: T) =>
     (homeworkDeadlineMs(left.deadline) ?? Number.POSITIVE_INFINITY) -
     (homeworkDeadlineMs(right.deadline) ?? Number.POSITIVE_INFINITY);
+  overdue.sort(byDeadline);
   today.sort(byDeadline);
   next7Days.sort(byDeadline);
-  return { today, next7Days };
+  return { overdue, today, next7Days };
 }
 
 export function classifySchoolReadError(error: unknown): SchoolReadErrorKind {

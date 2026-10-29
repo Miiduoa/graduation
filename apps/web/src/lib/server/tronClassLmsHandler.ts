@@ -7,10 +7,11 @@ import {
   schoolSessionExpiry,
   type AcademicFirestore,
 } from './academicRecordsHandlers';
-import type { LmsReadResult, LmsReadonlySource } from './tronClassLmsSource';
+import type { LmsReadonlySource } from './tronClassLmsSource';
 import type {
   LmsAnnouncementItem,
   LmsCourseError,
+  LmsCourseSummary,
   LmsHomeworkItem,
   LmsMaterialFile,
   LmsMaterialItem,
@@ -39,6 +40,7 @@ import {
 export type {
   LmsAnnouncementItem,
   LmsCourseError,
+  LmsCourseSummary,
   LmsHomeworkItem,
   LmsMaterialFile,
   LmsMaterialItem,
@@ -249,57 +251,27 @@ async function readPagedHomework(
   return { items: [], error: { courseId: course.id, courseName: course.name, area: 'homework', status: null } };
 }
 
-async function mergeActivities(
-  source: LmsReadonlySource,
-  cookies: Record<string, string>,
-  courseId: number,
-): Promise<LmsReadResult<unknown[]>> {
-  const first = await source.fetchActivities(cookies, courseId, '');
-  const extras: LmsReadResult<unknown[]>[] = [
-    await source.fetchActivities(cookies, courseId, 'type=courseware_activity'),
-  ];
-  if (!first.ok || first.value.length === 0) {
-    extras.push(await source.fetchActivities(cookies, courseId, 'sub_course_id=0'));
-  }
-  const merged: unknown[] = [];
-  const seen = new Set<number>();
-  const add = (result: LmsReadResult<unknown[]>) => {
-    if (!result.ok) return;
-    for (const item of result.value) {
-      const id = positiveId(record(item).id);
-      if (!id || seen.has(id)) continue;
-      seen.add(id);
-      merged.push(item);
-    }
-  };
-  add(first);
-  extras.forEach(add);
-  if (merged.length > 0) return { ok: true, value: merged };
-  if (first.ok) return first;
-  const failed = [first, ...extras].find((item) => !item.ok);
-  return failed && !failed.ok ? failed : { ok: true, value: [] };
-}
-
-type CourseBundle = {
-  homework: LmsHomeworkItem[];
+type CourseContents = {
   announcements: LmsAnnouncementItem[];
   materials: LmsMaterialItem[];
   errors: LmsCourseError[];
 };
 
-async function loadCourseBundle(
+type CachedCourseContents = CourseContents & {
+  fetchedAt: string;
+  expiresAt: string;
+};
+
+async function loadCourseContents(
   source: LmsReadonlySource,
   cookies: Record<string, string>,
   course: CourseRow,
-): Promise<CourseBundle> {
+): Promise<CourseContents> {
   const errors: LmsCourseError[] = [];
-  const [homeworkResult, activitiesResult, announcementResult] = await Promise.all([
-    readPagedHomework(source, cookies, course),
-    mergeActivities(source, cookies, course.id),
+  const [activitiesResult, announcementResult] = await Promise.all([
+    source.fetchActivities(cookies, course.id, ''),
     source.fetchCourseAnnouncements(cookies, course.id),
   ]);
-  const homework = homeworkResult.items;
-  if (homeworkResult.error) errors.push(homeworkResult.error);
 
   const materials: LmsMaterialItem[] = [];
   const activityAnnouncements: LmsAnnouncementItem[] = [];
@@ -334,7 +306,36 @@ async function loadCourseBundle(
     });
   }
 
-  return { homework, announcements, materials, errors };
+  return { announcements, materials, errors };
+}
+
+function readCachedExtras(value: unknown, nowMs: number): {
+  extras: Record<string, CachedCourseContents>;
+  pruned: boolean;
+} {
+  const extras: Record<string, CachedCourseContents> = {};
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return { extras, pruned: Boolean(value) };
+  }
+  let pruned = false;
+  for (const [key, item] of Object.entries(value as Record<string, unknown>)) {
+    const courseId = positiveId(key);
+    const row = record(item);
+    if (!courseId || !cacheStillFresh(row.expiresAt, nowMs) ||
+      typeof row.fetchedAt !== 'string' || typeof row.expiresAt !== 'string' ||
+      !Array.isArray(row.announcements) || !Array.isArray(row.materials) || !Array.isArray(row.errors)) {
+      pruned = true;
+      continue;
+    }
+    extras[String(courseId)] = {
+      fetchedAt: row.fetchedAt,
+      expiresAt: row.expiresAt,
+      announcements: row.announcements as LmsAnnouncementItem[],
+      materials: row.materials as LmsMaterialItem[],
+      errors: row.errors as LmsCourseError[],
+    };
+  }
+  return { extras, pruned };
 }
 
 function publicSnapshot(value: unknown, uid: string): LmsReadonlySnapshot | null {
@@ -342,9 +343,59 @@ function publicSnapshot(value: unknown, uid: string): LmsReadonlySnapshot | null
   const row = value as Record<string, unknown>;
   if (row.success !== true || row.ownerUid !== uid || row.schoolId !== 'pu' || row.source !== 'pu-tronclass' ||
     typeof row.fetchedAt !== 'string' || !Number.isFinite(Date.parse(row.fetchedAt)) ||
+    !Array.isArray(row.courses) || !Array.isArray(row.contentsLoadedFor) ||
     !Array.isArray(row.homework) || !Array.isArray(row.announcements) || !Array.isArray(row.materials) ||
     !Array.isArray(row.courseErrors)) return null;
   return row as LmsReadonlySnapshot;
+}
+
+function homeworkOnlySnapshot(snapshot: LmsReadonlySnapshot): LmsReadonlySnapshot {
+  return {
+    ...snapshot,
+    announcements: [],
+    materials: [],
+    contentsLoadedFor: [],
+    courseErrors: snapshot.courseErrors.filter((item) => item.area === 'homework'),
+    siteAnnouncementError: null,
+  };
+}
+
+function mergeExtras(
+  snapshot: LmsReadonlySnapshot,
+  extras: Record<string, CachedCourseContents>,
+): LmsReadonlySnapshot {
+  const homeworkErrors = snapshot.courseErrors.filter((item) => item.area === 'homework');
+  const loaded = Object.keys(extras).map(Number).filter((id) => Number.isSafeInteger(id) && id > 0);
+  return {
+    ...snapshot,
+    announcements: loaded.flatMap((id) => extras[String(id)]?.announcements ?? []),
+    materials: loaded.flatMap((id) => extras[String(id)]?.materials ?? []),
+    courseErrors: [...homeworkErrors, ...loaded.flatMap((id) => extras[String(id)]?.errors ?? [])],
+    contentsLoadedFor: loaded,
+  };
+}
+
+function parseRequest(data: unknown): { refresh: boolean; courseId: number | null } {
+  const body = data === undefined ? {} : data;
+  if (!body || typeof body !== 'object' || Array.isArray(body)) {
+    throw new HttpsError('invalid-argument', '請使用有效的讀取參數。');
+  }
+  const row = body as Record<string, unknown>;
+  const refresh = row.refresh === true;
+  if (row.refresh !== undefined && row.refresh !== true && row.refresh !== false) {
+    throw new HttpsError('invalid-argument', '請使用有效的讀取參數。');
+  }
+  let courseId: number | null = null;
+  if (row.courseId !== undefined) {
+    if (typeof row.courseId !== 'number' || !positiveId(row.courseId)) {
+      throw new HttpsError('invalid-argument', '請使用有效的讀取參數。');
+    }
+    courseId = positiveId(row.courseId);
+  }
+  if (Object.keys(row).some((key) => key !== 'refresh' && key !== 'courseId')) {
+    throw new HttpsError('invalid-argument', '請使用有效的讀取參數。');
+  }
+  return { refresh, courseId };
 }
 
 export function createTronClassLmsHandler({
@@ -362,15 +413,7 @@ export function createTronClassLmsHandler({
     if (request.auth?.token?.schoolId !== 'pu') {
       throw new HttpsError('permission-denied', '此帳號尚未連結靜宜大學。');
     }
-    const data = request.data === undefined ? {} : request.data;
-    if (!data || typeof data !== 'object' || Array.isArray(data)) {
-      throw new HttpsError('invalid-argument', '請使用有效的讀取參數。');
-    }
-    const body = data as Record<string, unknown>;
-    const refresh = body.refresh === true;
-    if (Object.keys(body).some((key) => key !== 'refresh') || (body.refresh !== undefined && body.refresh !== true && body.refresh !== false)) {
-      throw new HttpsError('invalid-argument', '請使用有效的讀取參數。');
-    }
+    const { refresh, courseId } = parseRequest(request.data);
 
     try {
       await requireAcademicAccount(db, uid);
@@ -392,90 +435,137 @@ export function createTronClassLmsHandler({
         !(schoolSessionExpiry(session.expiresAt) > now())) reconnect();
 
       const cacheRef = db.doc(`${LMS_CACHE_COLLECTION}/${uid}`);
-      if (!refresh) {
-        const cached = await cacheRef.get();
-        const cacheData = cached.data();
-        if (cached.exists && cacheData?.ownerUid === uid && cacheStillFresh(cacheData.expiresAt, now())) {
-          const snapshot = publicSnapshot(cacheData.snapshot, uid);
-          if (snapshot) {
-            return {
-              ...snapshot,
-              cache: {
-                hit: true,
-                expiresAt: snapshot.cache.expiresAt,
-              },
-            };
+      let extras: Record<string, CachedCourseContents> = {};
+      let cachedHomework: LmsReadonlySnapshot | null = null;
+      const cached = await cacheRef.get();
+      const cacheData = cached.data();
+      if (cached.exists) {
+        if (cacheData?.ownerUid !== uid || !cacheStillFresh(cacheData.expiresAt, now()) ||
+          !publicSnapshot(cacheData.snapshot, uid)) {
+          await cacheRef.delete?.();
+        } else {
+          const pruned = readCachedExtras(cacheData.extras, now());
+          extras = refresh ? {} : pruned.extras;
+          cachedHomework = refresh ? null : homeworkOnlySnapshot(publicSnapshot(cacheData.snapshot, uid)!);
+          if (!refresh && pruned.pruned) {
+            try {
+              await cacheRef.set?.({
+                ownerUid: uid,
+                fetchedAt: cacheData.fetchedAt,
+                expiresAt: cacheData.expiresAt,
+                snapshot: homeworkOnlySnapshot(publicSnapshot(cacheData.snapshot, uid)!),
+                extras,
+              }, { merge: false });
+            } catch {
+              // 清掉過期 extras 失敗時仍繼續讀取。
+            }
           }
         }
       }
 
-      let courses: CourseRow[] = [];
-      let upcomingCoursesError: LmsReadonlySnapshot['upcomingCoursesError'] = null;
-      try {
-        courses = publicCourses(await source.fetchCourses(cookies, {
-          ...(typeof session.userId === 'number' ? { userId: session.userId } : {}),
-          status: 'ongoing',
-        }));
-      } catch (error) {
-        if (error instanceof Error && /session 已失效/.test(error.message)) reconnect();
-        throw error;
+      if (cachedHomework && !refresh && courseId && extras[String(courseId)]) {
+        return {
+          ...mergeExtras(cachedHomework, extras),
+          cache: { hit: true, expiresAt: cachedHomework.cache.expiresAt },
+        };
       }
-      try {
-        const upcoming = publicCourses(await source.fetchCourses(cookies, {
-          ...(typeof session.userId === 'number' ? { userId: session.userId } : {}),
-          status: 'upcoming',
-        }));
-        const seen = new Set(courses.map((course) => course.id));
-        for (const course of upcoming) {
-          if (!seen.has(course.id)) courses.push(course);
+      if (cachedHomework && !refresh && !courseId) {
+        return {
+          ...mergeExtras(cachedHomework, extras),
+          cache: { hit: true, expiresAt: cachedHomework.cache.expiresAt },
+        };
+      }
+
+      let snapshot = cachedHomework;
+      let fetchedFromSchool = !cachedHomework;
+      if (!snapshot) {
+        let courses: CourseRow[] = [];
+        let upcomingCoursesError: LmsReadonlySnapshot['upcomingCoursesError'] = null;
+        try {
+          courses = publicCourses(await source.fetchCourses(cookies, {
+            ...(typeof session.userId === 'number' ? { userId: session.userId } : {}),
+            status: 'ongoing',
+          }));
+        } catch (error) {
+          if (error instanceof Error && /session 已失效/.test(error.message)) reconnect();
+          throw error;
         }
-      } catch (error) {
-        if (error instanceof Error && /session 已失效/.test(error.message)) reconnect();
-        upcomingCoursesError = { status: null };
+        try {
+          const upcoming = publicCourses(await source.fetchCourses(cookies, {
+            ...(typeof session.userId === 'number' ? { userId: session.userId } : {}),
+            status: 'upcoming',
+          }));
+          const seen = new Set(courses.map((course) => course.id));
+          for (const course of upcoming) {
+            if (!seen.has(course.id)) courses.push(course);
+          }
+        } catch (error) {
+          if (error instanceof Error && /session 已失效/.test(error.message)) reconnect();
+          upcomingCoursesError = { status: null };
+        }
+
+        const homeworkResults = courses.length
+          ? await mapPool(courses, LMS_COURSE_CONCURRENCY, (course) => readPagedHomework(source, cookies, course))
+          : [];
+
+        await requireAcademicAccount(db, uid);
+        const [currentPortal, currentSession] = await Promise.all([portalSnapshot.ref.get(), sessionRef.get()]);
+        if (!currentPortal.exists || currentPortal.data()?.ownerUid !== uid ||
+          currentPortal.data()?.tronClassSessionId !== linkedId ||
+          !(schoolSessionExpiry(currentPortal.data()?.expiresAt) > now()) ||
+          !currentSession.exists || currentSession.data()?.ownerUid !== uid ||
+          !(schoolSessionExpiry(currentSession.data()?.expiresAt) > now()) ||
+          !schoolSessionCookies(currentSession.data()?.cookies)) reconnect();
+
+        const fetchedAt = new Date(now()).toISOString();
+        const expiresAt = new Date(now() + LMS_SNAPSHOT_TTL_MS).toISOString();
+        snapshot = {
+          success: true,
+          ownerUid: uid,
+          schoolId: 'pu',
+          source: 'pu-tronclass',
+          fetchedAt,
+          cache: { hit: false, expiresAt },
+          courses: courses.map((course): LmsCourseSummary => ({ id: course.id, name: course.name })),
+          contentsLoadedFor: [],
+          homework: homeworkResults.flatMap((item) => item.items),
+          announcements: [],
+          materials: [],
+          courseErrors: homeworkResults.flatMap((item) => item.error ? [item.error] : []),
+          siteAnnouncementError: null,
+          upcomingCoursesError,
+        };
+        extras = {};
       }
 
-      const siteResult = await source.fetchSiteAnnouncements(cookies);
-      const siteAnnouncementError = siteResult.ok ? null : { status: siteResult.status };
-      const siteAnnouncements = siteResult.ok
-        ? siteResult.value.map((item) => parseAnnouncement(item, 'site', null)).filter((item): item is LmsAnnouncementItem => Boolean(item))
-        : [];
+      if (courseId) {
+        const course = snapshot.courses.find((item) => item.id === courseId);
+        if (course && (refresh || !extras[String(courseId)])) {
+          const contents = await loadCourseContents(source, cookies, course);
+          fetchedFromSchool = true;
+          const fetchedAt = new Date(now()).toISOString();
+          extras[String(courseId)] = {
+            ...contents,
+            fetchedAt,
+            expiresAt: new Date(now() + LMS_SNAPSHOT_TTL_MS).toISOString(),
+          };
+        }
+      }
 
-      const bundles = courses.length
-        ? await mapPool(courses, LMS_COURSE_CONCURRENCY, (course) => loadCourseBundle(source, cookies, course))
-        : [];
-
-      await requireAcademicAccount(db, uid);
-      const [currentPortal, currentSession] = await Promise.all([portalSnapshot.ref.get(), sessionRef.get()]);
-      if (!currentPortal.exists || currentPortal.data()?.ownerUid !== uid ||
-        currentPortal.data()?.tronClassSessionId !== linkedId ||
-        !(schoolSessionExpiry(currentPortal.data()?.expiresAt) > now()) ||
-        !currentSession.exists || currentSession.data()?.ownerUid !== uid ||
-        !(schoolSessionExpiry(currentSession.data()?.expiresAt) > now()) ||
-        !schoolSessionCookies(currentSession.data()?.cookies)) reconnect();
-
-      const fetchedAt = new Date(now()).toISOString();
-      const expiresAt = new Date(now() + LMS_SNAPSHOT_TTL_MS).toISOString();
-      const snapshot: LmsReadonlySnapshot = {
-        success: true,
-        ownerUid: uid,
-        schoolId: 'pu',
-        source: 'pu-tronclass',
-        fetchedAt,
-        cache: { hit: false, expiresAt },
-        homework: bundles.flatMap((bundle) => bundle.homework),
-        announcements: [...siteAnnouncements, ...bundles.flatMap((bundle) => bundle.announcements)],
-        materials: bundles.flatMap((bundle) => bundle.materials),
-        courseErrors: bundles.flatMap((bundle) => bundle.errors),
-        siteAnnouncementError,
-        upcomingCoursesError,
-      };
-
+      const merged = mergeExtras(homeworkOnlySnapshot(snapshot), extras);
+      merged.cache = { hit: !fetchedFromSchool && !refresh, expiresAt: snapshot.cache.expiresAt };
       try {
-        await cacheRef.set?.({ ownerUid: uid, fetchedAt, expiresAt: new Date(now() + LMS_SNAPSHOT_TTL_MS), snapshot }, { merge: false });
+        await cacheRef.set?.({
+          ownerUid: uid,
+          fetchedAt: snapshot.fetchedAt,
+          expiresAt: new Date(Date.parse(snapshot.cache.expiresAt)),
+          snapshot: homeworkOnlySnapshot(snapshot),
+          extras,
+        }, { merge: false });
       } catch {
         // 快取寫入失敗仍回傳剛讀到的資料。
       }
-      return snapshot;
+      return merged;
     } catch (error) {
       if (error instanceof HttpsError) throw error;
       if (error instanceof Error && /session 已失效/.test(error.message)) reconnect();

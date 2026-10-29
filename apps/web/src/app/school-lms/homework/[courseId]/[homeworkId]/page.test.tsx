@@ -37,6 +37,7 @@ function snapshot(): LmsReadonlySnapshot {
   return {
     success: true, ownerUid: 'one', schoolId: 'pu', source: 'pu-tronclass',
     fetchedAt: '2026-05-29T04:00:00.000Z', cache: { hit: true, expiresAt: '2026-05-29T04:10:00.000Z' },
+    courses: [{ id: 10001, name: '資料庫系統' }], contentsLoadedFor: [],
     homework: [{
       id: 20001, courseId: 10001, courseName: '資料庫系統', title: '期末專題提案',
       deadline: '2026-05-29T15:59:00Z', deadlineLabel: '2026/5/29 下午11:59', submitted: false,

@@ -13,6 +13,7 @@ import { useSignInOptions } from '@/lib/signInOptions';
 import {
   lmsDeadlineAxis,
   loadTronClassLms,
+  type LmsHomeworkItem,
   type LmsReadonlySnapshot,
 } from '@/lib/tronClassLms';
 import { loadFailureCopy } from '@campus/shared/src/loadFailureCopy';
@@ -39,6 +40,24 @@ function areaLabel(area: string) {
   return area === 'homework' ? '作業' : area === 'announcements' ? '公告' : '教材';
 }
 
+function HomeworkCard({ item }: { item: LmsHomeworkItem }) {
+  return (
+    <li>
+      <div className={lmsStyles.heading}>
+        <h3>{item.title}</h3>
+        <span className={`${lmsStyles.badge} ${item.submitted ? lmsStyles.done : lmsStyles.todo}`}>
+          {item.submitted ? '已交' : '未交'}
+        </span>
+      </div>
+      <p className={lmsStyles.meta}>{item.courseName} · {item.deadlineLabel || '截止時間未提供'}</p>
+      <div className={lmsStyles.actions}>
+        <Link href={`/school-lms/homework/${item.courseId}/${item.id}`}>查看說明</Link>
+        <a href={item.href} target="_blank" rel="noopener noreferrer">玩課雲同一筆 ↗</a>
+      </div>
+    </li>
+  );
+}
+
 function LmsBody({ uid, schoolId, returnUrl }: { uid: string; schoolId: 'pu'; returnUrl: string }) {
   const options = useSignInOptions();
   const params = useSearchParams();
@@ -49,11 +68,14 @@ function LmsBody({ uid, schoolId, returnUrl }: { uid: string; schoolId: 'pu'; re
   const [autoTries, setAutoTries] = useState(0);
   const [now, setNow] = useState(() => new Date());
   const [state, setState] = useState<ReadState | null>(null);
-  const scope = JSON.stringify([uid, schoolId, reload, refresh]);
+  const courseId = courseFilter && /^[1-9]\d*$/.test(courseFilter) ? Number(courseFilter) : null;
+  const scope = JSON.stringify([uid, schoolId, reload, refresh, courseId]);
 
   useEffect(() => {
     let active = true;
-    void loadTronClassLms(uid, { refresh, expectedSchool: schoolId }).then((snapshot) => {
+    void loadTronClassLms(uid, {
+      refresh, expectedSchool: schoolId, ...(courseId ? { courseId } : {}),
+    }).then((snapshot) => {
       if (!active) return;
       if (snapshot.ownerUid !== uid || snapshot.schoolId !== schoolId) {
         throw new AcademicConnectionError('unavailable');
@@ -64,7 +86,7 @@ function LmsBody({ uid, schoolId, returnUrl }: { uid: string; schoolId: 'pu'; re
       if (active) setState({ scope, status: 'error', error });
     });
     return () => { active = false; };
-  }, [uid, schoolId, scope, refresh]);
+  }, [uid, schoolId, scope, refresh, courseId]);
 
   const visible = state?.scope === scope ? state : null;
   const snapshot = visible?.status === 'ready' ? visible.snapshot : undefined;
@@ -72,14 +94,16 @@ function LmsBody({ uid, schoolId, returnUrl }: { uid: string; schoolId: 'pu'; re
   const reason = error instanceof AcademicConnectionError ? error.reason : 'unavailable';
   const connecting = reason === 'connecting';
   const needsLogin = reason === 'reconnect' || reason === 'permission';
-  const courseId = courseFilter && /^[1-9]\d*$/.test(courseFilter) ? Number(courseFilter) : null;
   const homework = useMemo(() => snapshot?.homework.filter((item) => !courseId || item.courseId === courseId) ?? [], [snapshot, courseId]);
   const announcements = useMemo(() => snapshot?.announcements.filter((item) => !courseId || item.courseId === courseId) ?? [], [snapshot, courseId]);
   const materials = useMemo(() => snapshot?.materials.filter((item) => !courseId || item.courseId === courseId) ?? [], [snapshot, courseId]);
   const axis = useMemo(
-    () => (snapshot ? lmsDeadlineAxis({ ...snapshot, homework }, now) : { today: [], next7Days: [] }),
+    () => (snapshot ? lmsDeadlineAxis({ ...snapshot, homework }, now) : { overdue: [], today: [], next7Days: [] }),
     [snapshot, homework, now],
   );
+  const contentsReady = Boolean(snapshot && (
+    courseId ? snapshot.contentsLoadedFor.includes(courseId) : snapshot.contentsLoadedFor.length > 0 || announcements.length > 0 || materials.length > 0
+  ));
 
   useEffect(() => {
     if (!connecting || autoTries >= LMS_CONNECTING_RETRY_LIMIT) return;
@@ -92,7 +116,7 @@ function LmsBody({ uid, schoolId, returnUrl }: { uid: string; schoolId: 'pu'; re
 
   function refreshLms() {
     const next = reload + 1;
-    const nextScope = JSON.stringify([uid, schoolId, next, true]);
+    const nextScope = JSON.stringify([uid, schoolId, next, true, courseId]);
     setRefresh(true);
     setState((previous) => previous?.scope === scope && previous.status === 'ready'
       ? { ...previous, scope: nextScope, refreshing: true }
@@ -174,41 +198,31 @@ function LmsBody({ uid, schoolId, returnUrl }: { uid: string; schoolId: 'pu'; re
             {view === 'axis' ? (
               <div className={lmsStyles.axis}>
                 <section>
+                  <h2>已逾期</h2>
+                  {axis.overdue.length ? (
+                    <ul className={lmsStyles.list}>
+                      {axis.overdue.map((item) => (
+                        <HomeworkCard key={`${item.courseId}:${item.id}`} item={item} />
+                      ))}
+                    </ul>
+                  ) : <p className={styles.note}>目前沒有逾期未交的作業。</p>}
+                </section>
+                <section>
                   <h2>今天截止</h2>
                   {axis.today.length ? (
                     <ul className={lmsStyles.list}>
                       {axis.today.map((item) => (
-                        <li key={`${item.courseId}:${item.id}`}>
-                          <div className={lmsStyles.heading}>
-                            <h3>{item.title}</h3>
-                            <span className={`${lmsStyles.badge} ${lmsStyles.todo}`}>未交</span>
-                          </div>
-                          <p className={lmsStyles.meta}>{item.courseName} · {item.deadlineLabel || '截止時間未提供'}</p>
-                          <div className={lmsStyles.actions}>
-                            <Link href={`/school-lms/homework/${item.courseId}/${item.id}`}>查看說明</Link>
-                            <a href={item.href} target="_blank" rel="noopener noreferrer">玩課雲同一筆 ↗</a>
-                          </div>
-                        </li>
+                        <HomeworkCard key={`${item.courseId}:${item.id}`} item={item} />
                       ))}
                     </ul>
-                  ) : <p className={styles.note}>今天沒有未交且即將截止的作業。</p>}
+                  ) : <p className={styles.note}>今天沒有未交且尚未截止的作業。</p>}
                 </section>
                 <section>
                   <h2>七天內截止</h2>
                   {axis.next7Days.length ? (
                     <ul className={lmsStyles.list}>
                       {axis.next7Days.map((item) => (
-                        <li key={`${item.courseId}:${item.id}`}>
-                          <div className={lmsStyles.heading}>
-                            <h3>{item.title}</h3>
-                            <span className={`${lmsStyles.badge} ${lmsStyles.todo}`}>未交</span>
-                          </div>
-                          <p className={lmsStyles.meta}>{item.courseName} · {item.deadlineLabel || '截止時間未提供'}</p>
-                          <div className={lmsStyles.actions}>
-                            <Link href={`/school-lms/homework/${item.courseId}/${item.id}`}>查看說明</Link>
-                            <a href={item.href} target="_blank" rel="noopener noreferrer">玩課雲同一筆 ↗</a>
-                          </div>
-                        </li>
+                        <HomeworkCard key={`${item.courseId}:${item.id}`} item={item} />
                       ))}
                     </ul>
                   ) : <p className={styles.note}>七天內沒有其他未交作業。</p>}
@@ -219,40 +233,44 @@ function LmsBody({ uid, schoolId, returnUrl }: { uid: string; schoolId: 'pu'; re
               homework.length ? (
                 <ul className={lmsStyles.list}>
                   {homework.map((item) => (
-                    <li key={`${item.courseId}:${item.id}`}>
-                      <div className={lmsStyles.heading}>
-                        <h3>{item.title}</h3>
-                        <span className={`${lmsStyles.badge} ${item.submitted ? lmsStyles.done : lmsStyles.todo}`}>
-                          {item.submitted ? '已交' : '未交'}
-                        </span>
-                      </div>
-                      <p className={lmsStyles.meta}>{item.courseName} · {item.deadlineLabel || '截止時間未提供'}</p>
-                      <div className={lmsStyles.actions}>
-                        <Link href={`/school-lms/homework/${item.courseId}/${item.id}`}>查看說明</Link>
-                        <a href={item.href} target="_blank" rel="noopener noreferrer">玩課雲同一筆 ↗</a>
-                      </div>
-                    </li>
+                    <HomeworkCard key={`${item.courseId}:${item.id}`} item={item} />
                   ))}
                 </ul>
               ) : <div className={styles.status} role="status"><h2>目前沒有作業資料</h2><p>若上方有讀取錯誤，請改到玩課雲核對，不要把這當成「沒有作業」。</p></div>
             ) : null}
-            {view === 'announcements' ? (
-              announcements.length ? (
-                <ul className={lmsStyles.list}>
-                  {announcements.map((item) => (
-                    <li key={item.id}>
-                      <h3>{item.title}</h3>
-                      <p className={lmsStyles.meta}>{item.courseName || '全校'} · {item.content ? item.content.slice(0, 160) : '沒有內文'}</p>
-                      <div className={lmsStyles.actions}>
-                        <a href={item.href} target="_blank" rel="noopener noreferrer">玩課雲同一筆 ↗</a>
-                      </div>
-                    </li>
-                  ))}
-                </ul>
-              ) : <div className={styles.status} role="status"><h2>目前沒有公告資料</h2><p>若學校端未開放公告或這次讀取失敗，這裡不會用空白清單冒充。</p></div>
-            ) : null}
-            {view === 'materials' ? (
-              materials.length ? (
+            {view === 'announcements' || view === 'materials' ? (
+              !contentsReady && !courseId ? (
+                <div className={styles.status} role="status">
+                  <h2>{view === 'announcements' ? '進入課程後才讀取公告' : '進入課程後才讀取教材'}</h2>
+                  <p>為減少對學校的請求，公告與教材不會在打開清單時一次抓完全部課程。請點一門課再查看。</p>
+                  {snapshot?.courses.length ? (
+                    <ul className={lmsStyles.list}>
+                      {snapshot.courses.map((course) => (
+                        <li key={course.id}>
+                          <h3>{course.name}</h3>
+                          <div className={lmsStyles.actions}>
+                            <Link href={`/school-lms?course=${course.id}`}>{view === 'announcements' ? '讀取此課公告' : '讀取此課教材'}</Link>
+                          </div>
+                        </li>
+                      ))}
+                    </ul>
+                  ) : null}
+                </div>
+              ) : view === 'announcements' ? (
+                announcements.length ? (
+                  <ul className={lmsStyles.list}>
+                    {announcements.map((item) => (
+                      <li key={item.id}>
+                        <h3>{item.title}</h3>
+                        <p className={lmsStyles.meta}>{item.courseName || '全校'} · {item.content ? item.content.slice(0, 160) : '沒有內文'}</p>
+                        <div className={lmsStyles.actions}>
+                          <a href={item.href} target="_blank" rel="noopener noreferrer">玩課雲同一筆 ↗</a>
+                        </div>
+                      </li>
+                    ))}
+                  </ul>
+                ) : <div className={styles.status} role="status"><h2>目前沒有公告資料</h2><p>若學校端未開放公告或這次讀取失敗，這裡不會用空白清單冒充。</p></div>
+              ) : materials.length ? (
                 <ul className={lmsStyles.list}>
                   {materials.map((item) => (
                     <li key={`${item.courseId}:${item.id}`}>
@@ -280,7 +298,7 @@ function LmsBody({ uid, schoolId, returnUrl }: { uid: string; schoolId: 'pu'; re
           </>
         ) : null}
       </section>
-      <p className={styles.note}>這裡只讀取玩課雲的作業、公告與教材，不會上傳或繳交。已交的作業不會出現在今天／七天內待辦。</p>
+      <p className={styles.note}>這裡只讀取玩課雲的作業、公告與教材，不會上傳或繳交。已交的作業不會出現在待辦；逾期未交會列在「已逾期」，不會混進今天截止。</p>
     </>
   );
 }

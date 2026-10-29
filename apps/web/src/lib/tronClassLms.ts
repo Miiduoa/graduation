@@ -6,6 +6,7 @@ import { selectDeadlineAxis } from '@campus/shared/src/puLmsReadonly';
 import type {
   LmsAnnouncementItem,
   LmsCourseError,
+  LmsCourseSummary,
   LmsHomeworkItem,
   LmsMaterialItem,
   LmsReadonlySnapshot,
@@ -14,6 +15,7 @@ import type {
 export type {
   LmsAnnouncementItem,
   LmsCourseError,
+  LmsCourseSummary,
   LmsHomeworkItem,
   LmsMaterialItem,
   LmsReadonlySnapshot,
@@ -91,6 +93,13 @@ function readMaterial(value: unknown): LmsMaterialItem {
   };
 }
 
+function readCourse(value: unknown): LmsCourseSummary {
+  const row = asRecord(value);
+  const id = positiveId(row?.id);
+  if (!row || !id || typeof row.name !== 'string' || !row.name.trim()) throw new Error('Invalid course');
+  return { id, name: row.name };
+}
+
 function readCourseError(value: unknown): LmsCourseError {
   const row = asRecord(value);
   const courseId = positiveId(row?.courseId);
@@ -108,7 +117,7 @@ function readCourseError(value: unknown): LmsCourseError {
 
 export async function loadTronClassLms(
   uid: string,
-  options: { refresh?: boolean; expectedSchool?: string } = {},
+  options: { refresh?: boolean; courseId?: number; expectedSchool?: string } = {},
 ): Promise<LmsReadonlySnapshot> {
   const expectedSchool = options.expectedSchool ?? 'pu';
   const user = getAuth()?.currentUser;
@@ -123,7 +132,12 @@ export async function loadTronClassLms(
       const response = await fetch(getCloudFunctionUrl('getMyTronClassLms'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ data: options.refresh ? { refresh: true } : {} }),
+        body: JSON.stringify({
+          data: {
+            ...(options.refresh ? { refresh: true } : {}),
+            ...(options.courseId ? { courseId: options.courseId } : {}),
+          },
+        }),
         cache: 'no-store',
         signal,
       });
@@ -149,7 +163,9 @@ export async function loadTronClassLms(
       if (!row || row.success !== true || row.ownerUid !== uid || row.schoolId !== expectedSchool ||
         row.source !== 'pu-tronclass' || typeof row.fetchedAt !== 'string' ||
         !Number.isFinite(Date.parse(row.fetchedAt)) || !cache || cache.hit !== true && cache.hit !== false ||
-        typeof cache.expiresAt !== 'string' || !Array.isArray(row.homework) || row.homework.length > 5000 ||
+        typeof cache.expiresAt !== 'string' ||         !Array.isArray(row.courses) || row.courses.length > 1000 ||
+        !Array.isArray(row.contentsLoadedFor) || row.contentsLoadedFor.length > 1000 ||
+        !Array.isArray(row.homework) || row.homework.length > 5000 ||
         !Array.isArray(row.announcements) || row.announcements.length > 2000 ||
         !Array.isArray(row.materials) || row.materials.length > 5000 ||
         !Array.isArray(row.courseErrors) || row.courseErrors.length > 500) {
@@ -162,6 +178,12 @@ export async function loadTronClassLms(
         source: 'pu-tronclass',
         fetchedAt: row.fetchedAt,
         cache: { hit: cache.hit, expiresAt: cache.expiresAt },
+        courses: row.courses.map(readCourse),
+        contentsLoadedFor: row.contentsLoadedFor.map((value) => {
+          const id = positiveId(value);
+          if (!id) throw new Error('Invalid course');
+          return id;
+        }),
         homework: row.homework.map(readHomework),
         announcements: row.announcements.map(readAnnouncement),
         materials: row.materials.map(readMaterial),

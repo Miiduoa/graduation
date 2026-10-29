@@ -33,6 +33,7 @@ export type AcademicFirestore = {
   doc: (path: string) => {
     get: () => Promise<Snapshot>;
     set?: (data: RecordData, options?: { merge?: boolean }) => Promise<unknown>;
+    delete?: () => Promise<unknown>;
   };
   collection: (path: string) => SessionQuery;
   runTransaction?: <T>(fn: (tx: AcademicTransaction) => Promise<T>) => Promise<T>;

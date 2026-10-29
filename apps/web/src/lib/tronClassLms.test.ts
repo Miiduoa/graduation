@@ -13,6 +13,7 @@ function snapshot(change: Record<string, unknown> = {}) {
   return {
     success: true, ownerUid: 'student-a', schoolId: 'pu', source: 'pu-tronclass',
     fetchedAt: '2026-05-29T04:00:00.000Z', cache: { hit: false, expiresAt: '2026-05-29T04:10:00.000Z' },
+    courses: [{ id: 10001, name: '資料庫系統' }], contentsLoadedFor: [],
     homework: [{
       id: 20001, courseId: 10001, courseName: '資料庫系統', title: '期末專題提案',
       deadline: '2026-05-29T15:59:00Z', deadlineLabel: '2026/5/29 下午11:59', submitted: false,
@@ -45,6 +46,13 @@ it('sends refresh when the user asks to bypass cache', async () => {
   await loadTronClassLms('student-a', { refresh: true });
   expect(fetchMock).toHaveBeenCalledWith('/api/fn/getMyTronClassLms', expect.objectContaining({
     body: JSON.stringify({ data: { refresh: true } }),
+  }));
+});
+
+it('asks for one course contents only when opening that course', async () => {
+  await loadTronClassLms('student-a', { courseId: 10001 });
+  expect(fetchMock).toHaveBeenCalledWith('/api/fn/getMyTronClassLms', expect.objectContaining({
+    body: JSON.stringify({ data: { courseId: 10001 } }),
   }));
 });
 

@@ -40,7 +40,7 @@ import {
   isTronClassDataFetchEnabled,
   tronClassBackendReadWhenDisabled,
 } from './tronClassDataEnabled';
-import { isHomeworkSubmitted, isMaterialActivityType, isUploadDownloadable } from '@campus/shared/src/puLmsReadonly';
+import { isHomeworkSubmitted, isMaterialActivityType, isMobileUploadDownloadable } from '@campus/shared/src/puLmsReadonly';
 
 // ─── Constants ───────────────────────────────────────────
 
@@ -2640,7 +2640,7 @@ export async function tcFetchCourseActivities(courseId: number): Promise<TCCours
               key: String(u.key ?? u.file_key ?? ''),
               type: String(u.type ?? u.mime_type ?? ''),
               size: Number(u.size ?? 0),
-              allow_download: isUploadDownloadable(u),
+              allow_download: isMobileUploadDownloadable(u),
             }))
           : Array.isArray(a.attachments)
           ? (a.attachments as Record<string, unknown>[]).map((u) => ({
@@ -2649,7 +2649,7 @@ export async function tcFetchCourseActivities(courseId: number): Promise<TCCours
               key: String(u.key ?? u.upload_id ?? ''),
               type: String(u.type ?? u.mime_type ?? ''),
               size: Number(u.size ?? 0),
-              allow_download: isUploadDownloadable(u),
+              allow_download: isMobileUploadDownloadable(u),
             }))
           : [],
       }),

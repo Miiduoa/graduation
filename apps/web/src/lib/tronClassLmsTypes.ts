@@ -44,6 +44,11 @@ export type LmsCourseError = {
   status: number | null;
 };
 
+export type LmsCourseSummary = {
+  id: number;
+  name: string;
+};
+
 export type LmsReadonlySnapshot = {
   success: true;
   ownerUid: string;
@@ -51,6 +56,8 @@ export type LmsReadonlySnapshot = {
   source: 'pu-tronclass';
   fetchedAt: string;
   cache: { hit: boolean; expiresAt: string };
+  courses: LmsCourseSummary[];
+  contentsLoadedFor: number[];
   homework: LmsHomeworkItem[];
   announcements: LmsAnnouncementItem[];
   materials: LmsMaterialItem[];

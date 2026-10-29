@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, within } from '@testing-library/react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import SchoolLmsPage from './page';
 import { AcademicConnectionError } from '@/lib/academicClient';
@@ -48,10 +48,15 @@ function snapshot(): LmsReadonlySnapshot {
     success: true, ownerUid: context.uid ?? 'one', schoolId: 'pu', source: 'pu-tronclass',
     fetchedAt: '2026-05-29T04:00:00.000Z',
     cache: { hit: false, expiresAt: '2026-05-29T04:10:00.000Z' },
+    courses: [{ id: 10001, name: '資料庫系統' }], contentsLoadedFor: [10001],
     homework: [{
       id: 20001, courseId: 10001, courseName: '資料庫系統', title: '期末專題提案',
       deadline: '2026-05-29T15:59:00Z', deadlineLabel: '2026/5/29 下午11:59', submitted: false,
       description: '請上傳提案 PDF', href: 'https://tronclass.pu.edu.tw/course/10001/content#/activity/20001',
+    }, {
+      id: 20004, courseId: 10001, courseName: '資料庫系統', title: '補交實驗報告',
+      deadline: '2026-05-28T15:59:00Z', deadlineLabel: '2026/5/28 下午11:59', submitted: false,
+      description: '昨天已截止', href: 'https://tronclass.pu.edu.tw/course/10001/content#/activity/20004',
     }, {
       id: 20002, courseId: 10001, courseName: '資料庫系統', title: '週次練習',
       deadline: '2026-05-29T15:59:00Z', deadlineLabel: '2026/5/29 下午11:59', submitted: true,
@@ -68,6 +73,7 @@ function snapshot(): LmsReadonlySnapshot {
 
 beforeEach(() => {
   context.uid = 'one'; context.schoolId = 'pu'; context.loading = false; context.studentId = true;
+  vi.useFakeTimers({ now: new Date('2026-05-29T04:00:00Z'), toFake: ['Date'] });
   vi.mocked(loadTronClassLms).mockReset().mockResolvedValue(snapshot());
 });
 afterEach(() => { vi.useRealTimers(); });
@@ -76,10 +82,21 @@ it('lists today homework and reaches the description in one click', async () => 
   render(<SchoolLmsPage />);
   expect(await screen.findByRole('heading', { name: '期末專題提案' })).toBeTruthy();
   expect(screen.queryByRole('heading', { name: '週次練習' })).toBeNull();
-  expect(screen.getByRole('link', { name: '查看說明' }).getAttribute('href')).toBe('/school-lms/homework/10001/20001');
-  expect(screen.getByRole('link', { name: '玩課雲同一筆 ↗' }).getAttribute('href')).toBe(
+  const today = screen.getByRole('heading', { name: '今天截止' }).closest('section');
+  expect(today).toBeTruthy();
+  expect(within(today as HTMLElement).getByRole('link', { name: '查看說明' }).getAttribute('href')).toBe('/school-lms/homework/10001/20001');
+  expect(within(today as HTMLElement).getByRole('link', { name: '玩課雲同一筆 ↗' }).getAttribute('href')).toBe(
     'https://tronclass.pu.edu.tw/course/10001/content#/activity/20001',
   );
+});
+
+it('keeps overdue homework out of today and in its own section', async () => {
+  render(<SchoolLmsPage />);
+  expect(await screen.findByRole('heading', { name: '已逾期' })).toBeTruthy();
+  expect(screen.getByRole('heading', { name: '補交實驗報告' })).toBeTruthy();
+  const today = screen.getByRole('heading', { name: '今天截止' }).closest('section');
+  expect(today?.textContent).toContain('期末專題提案');
+  expect(today?.textContent).not.toContain('補交實驗報告');
 });
 
 it('shows submitted work in the full list and never as a todo', async () => {
@@ -88,6 +105,20 @@ it('shows submitted work in the full list and never as a todo', async () => {
   fireEvent.click(screen.getByRole('tab', { name: '全部作業' }));
   expect(screen.getByRole('heading', { name: '週次練習' })).toBeTruthy();
   expect(screen.getByText('已交')).toBeTruthy();
+});
+
+it('does not load course materials until the user opens a course', async () => {
+  vi.mocked(loadTronClassLms).mockResolvedValueOnce({
+    ...snapshot(),
+    contentsLoadedFor: [],
+    announcements: [],
+    materials: [],
+  });
+  render(<SchoolLmsPage />);
+  await screen.findByRole('heading', { name: '期末專題提案' });
+  fireEvent.click(screen.getByRole('tab', { name: '教材' }));
+  expect(screen.getByRole('heading', { name: '進入課程後才讀取教材' })).toBeTruthy();
+  expect(screen.getByRole('link', { name: '讀取此課教材' }).getAttribute('href')).toBe('/school-lms?course=10001');
 });
 
 it('does not offer a download for files the school locked', async () => {

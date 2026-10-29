@@ -37,6 +37,15 @@ export const LMS_FIXTURE_HOMEWORK_WEEK = {
   data: { description: '七天內截止' },
 };
 
+export const LMS_FIXTURE_HOMEWORK_OVERDUE = {
+  id: 20004,
+  title: '補交實驗報告',
+  type: 'homework',
+  submitted: false,
+  deadline: '2026-05-28T15:59:00Z',
+  data: { description: '昨天已截止' },
+};
+
 export const LMS_FIXTURE_MATERIAL = {
   id: 30001,
   course_id: 10001,

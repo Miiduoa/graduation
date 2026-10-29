@@ -7,6 +7,7 @@ import {
   isHomeworkSubmitted,
   isHomeworkTodo,
   isMaterialActivityType,
+  isMobileUploadDownloadable,
   isUploadDownloadable,
   schoolHttpStatus,
   selectDeadlineAxis,
@@ -14,6 +15,7 @@ import {
 import {
   LMS_FIXTURE_HOMEWORK_DONE,
   LMS_FIXTURE_HOMEWORK_OPEN,
+  LMS_FIXTURE_HOMEWORK_OVERDUE,
   LMS_FIXTURE_HOMEWORK_WEEK,
   LMS_FIXTURE_NOW,
 } from './server/fixtures/tronclass-lms-readonly';
@@ -33,6 +35,8 @@ describe('submitted boolean', () => {
 describe('timezone display', () => {
   it('shows UTC deadlines in Taipei wall time', () => {
     expect(formatHomeworkDeadlineTaipei('2026-05-29T15:59:00Z')).toBe('2026/5/29 下午11:59');
+    expect(homeworkDeadlineBucket('2026-05-28T15:59:00Z', LMS_FIXTURE_NOW)).toBe('overdue');
+    expect(homeworkDeadlineBucket('2026-05-29T03:00:00Z', LMS_FIXTURE_NOW)).toBe('overdue');
     expect(homeworkDeadlineBucket('2026-05-29T15:59:00Z', LMS_FIXTURE_NOW)).toBe('today');
     expect(homeworkDeadlineBucket('2026-06-03T15:59:00Z', LMS_FIXTURE_NOW)).toBe('next7Days');
     expect(homeworkDeadlineBucket('2026-06-10T15:59:00Z', LMS_FIXTURE_NOW)).toBe('later');
@@ -40,12 +44,14 @@ describe('timezone display', () => {
 });
 
 describe('deadline axis', () => {
-  it('keeps submitted homework off the todo axis', () => {
+  it('keeps submitted homework off the todo axis and overdue out of today', () => {
     const axis = selectDeadlineAxis([
       { ...LMS_FIXTURE_HOMEWORK_OPEN, deadline: LMS_FIXTURE_HOMEWORK_OPEN.deadline },
       { ...LMS_FIXTURE_HOMEWORK_DONE, deadline: LMS_FIXTURE_HOMEWORK_DONE.deadline },
       { ...LMS_FIXTURE_HOMEWORK_WEEK, deadline: LMS_FIXTURE_HOMEWORK_WEEK.deadline },
+      { ...LMS_FIXTURE_HOMEWORK_OVERDUE, deadline: LMS_FIXTURE_HOMEWORK_OVERDUE.deadline },
     ], LMS_FIXTURE_NOW);
+    expect(axis.overdue.map((item) => item.id)).toEqual([20004]);
     expect(axis.today.map((item) => item.id)).toEqual([20001]);
     expect(axis.next7Days.map((item) => item.id)).toEqual([20003]);
   });
@@ -71,6 +77,9 @@ describe('errors and downloads', () => {
     expect(isUploadDownloadable({ allow_download: true })).toBe(true);
     expect(isUploadDownloadable({ allow_download: false })).toBe(false);
     expect(isUploadDownloadable({})).toBe(false);
+    expect(isMobileUploadDownloadable({ allow_download: true })).toBe(true);
+    expect(isMobileUploadDownloadable({ allow_download: false })).toBe(false);
+    expect(isMobileUploadDownloadable({})).toBe(true);
     expect(isMaterialActivityType('material')).toBe(true);
     expect(isMaterialActivityType('courseware_activity')).toBe(true);
     expect(isMaterialActivityType('announcement')).toBe(false);
