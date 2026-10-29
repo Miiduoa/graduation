@@ -55,6 +55,7 @@ import {
   studentPortalTimeoutMs,
 } from '../schoolLoginTimeouts';
 import { linkOwnedTronClassSession } from '../../../../../backend/functions/lib/puSessionStore.js';
+import { reuseOwnedTronClassSession } from './reuseTronClassSession';
 
 const SESSION_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 const TEACHER_ROLES = new Set(['teacher', 'instructor', 'faculty', 'professor']);
@@ -704,6 +705,18 @@ async function attachStudentLmsSession(options: {
   let linked = false;
   try {
     if (!(await portalSessionStillOwned(options.db, options.puSessionId, options.uid))) return;
+    try {
+      linked = await reuseOwnedTronClassSession({
+        db: options.db,
+        uid: options.uid,
+        studentId: options.studentId,
+        portalId: options.puSessionId,
+      });
+    } catch (error) {
+      logStudentSoftFailure(error, options.school, startedAt);
+    }
+    if (linked) return;
+
     const tronClass = await options.campus.loginTronClass(options.portalUid, options.password, {
       timeoutMs: studentLmsTotalTimeoutMs(),
       hopTimeoutMs: studentLmsHopTimeoutMs(),
