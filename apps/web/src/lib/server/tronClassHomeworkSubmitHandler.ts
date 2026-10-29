@@ -30,8 +30,10 @@ function parseInput(value: unknown) {
   return { courseId, homeworkId, content: content.trim() };
 }
 
-function isOwnReceipt(value: unknown, userId: number, receiptId: string | null): boolean {
+function isOwnReceipt(value: unknown, userId: number, receiptId: string | null, homeworkId: number): boolean {
   const item = row(value);
+  const linkedHomework = item.homework_id ?? item.homework_activity_id ?? item.activity_id;
+  if (linkedHomework != null && Number(linkedHomework) !== homeworkId) return false;
   const id = item.id ?? item.submission_id;
   const owner = Number(item.student_id ?? item.user_id ?? NaN);
   const status = String(item.status ?? item.submission_status ?? '').toLowerCase();
@@ -144,7 +146,7 @@ export function createTronClassHomeworkSubmitHandler({
     if (!Array.isArray(existing)) {
       throw new HttpsError('unavailable', '目前無法確認繳交歷史，未進行繳交。');
     }
-    const submitted = existing.filter((item) => isOwnReceipt(item, userId, null));
+    const submitted = existing.filter((item) => isOwnReceipt(item, userId, null, homeworkId));
     const max = Number(policy.max_submissions ?? policy.max_submission_count);
     if (Number.isSafeInteger(max) && max > 0 && submitted.length >= max) {
       throw new HttpsError('failed-precondition', '這份作業已達老師設定的繳交次數上限。');
@@ -187,7 +189,7 @@ export function createTronClassHomeworkSubmitHandler({
     let verified = false;
     try {
       const updated = await source.fetchHomeworkSubmissions(cookies, courseId, homeworkId);
-      verified = updated.some((item) => isOwnReceipt(item, userId, receipt.receiptId));
+      verified = updated.some((item) => isOwnReceipt(item, userId, receipt.receiptId, homeworkId));
     } catch {
       // 已寫入的請求絕不因確認逾時而再次 POST。
     }
