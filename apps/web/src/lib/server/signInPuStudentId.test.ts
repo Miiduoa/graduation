@@ -1005,3 +1005,24 @@ it('uses only Fly-Client-IP and otherwise a shared unknown bucket', () => {
     ),
   ).toBe('unknown');
 });
+
+
+it('reuses a previously linked WOW Class session on the next login', async () => {
+  const loginTronClass = vi.fn(async () => ({
+    cookies: { session: 'tc-cookie' }, userId: 9, userName: '陳同學', role: 'student',
+  }));
+  const { runtime, flushSso, store } = deps({ campus: campus({ loginTronClass }) });
+  const first = await handleSignInPuStudentId(
+    { studentId: STUDENT, password: SECRET, schoolId: 'pu' }, '1.1.1.1', runtime,
+  );
+  await flushSso();
+  const original = store.docs.get('_puSessions/' + first.puSessionId)?.tronClassSessionId;
+  expect(original).toBeTruthy();
+
+  const second = await handleSignInPuStudentId(
+    { studentId: STUDENT, password: SECRET, schoolId: 'pu' }, '1.1.1.1', runtime,
+  );
+  await flushSso();
+  expect(store.docs.get('_puSessions/' + second.puSessionId)?.tronClassSessionId).toBe(original);
+  expect(loginTronClass).toHaveBeenCalledTimes(1);
+});
