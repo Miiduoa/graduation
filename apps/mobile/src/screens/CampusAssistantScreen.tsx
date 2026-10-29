@@ -68,6 +68,13 @@ const VERIFIED_SERVICE_ROUTES: Record<string, { route: string; label: string }> 
   '/dms': { route: 'Dms', label: '私訊' },
 };
 
+/** Only the currently connected assignment/announcement summary can resolve these requests. */
+function canRefreshMissingCampusEvidence(route: string | undefined, question: string): boolean {
+  if (route === '/announcements') return /公告|通知/.test(question);
+  if (route === '/classroom') return /作業|待交|待繳|繳交期限/.test(question);
+  return false;
+}
+
 function isTransientCampusSyncError(error: unknown): boolean {
   const candidate = error && typeof error === 'object'
     ? error as { code?: unknown; message?: unknown } : {};
@@ -578,7 +585,8 @@ function AssistantConversation({
             ))}
           {message.role === 'assistant' && message.source === 'device' &&
             message.tool === 'online-required' && uid && index === messages.length - 1 &&
-            messages[index - 1]?.role === 'user' ? (
+            messages[index - 1]?.role === 'user' &&
+            canRefreshMissingCampusEvidence(message.route, messages[index - 1].content) ? (
               <View style={{ marginTop: 12, gap: 6 }}>
                 <AIButton
                   label="更新授權資料，再由手機回答（需網路）"
