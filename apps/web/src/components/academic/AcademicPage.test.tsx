@@ -431,7 +431,9 @@ it('keeps weekend and unrecognized school courses as drafts until confirm', asyn
   });
   render(<TimetablePage />);
   expect(await screen.findByRole('heading', { name: '匯入課表' })).toBeTruthy();
-  await waitFor(() => expect(loadAcademicRecords).toHaveBeenCalledWith('courses', 'one', 'pu'));
+  await waitFor(() => expect(loadAcademicRecords).toHaveBeenCalledWith(
+    'courses', 'one', 'pu', expect.objectContaining({ signal: expect.any(AbortSignal) }),
+  ));
   fireEvent.click(screen.getByRole('button', { name: '從學校課表帶入' }));
   expect(screen.getByText('課表尚未被修改，按確認匯入後才會套用')).toBeTruthy();
   expect(screen.getByText('週末課')).toBeTruthy();
