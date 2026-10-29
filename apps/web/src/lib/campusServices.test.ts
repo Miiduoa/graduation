@@ -27,6 +27,12 @@ it.each(['WOW Class', 'TronClass', 'LMS'])('finds the school course service thro
   expect(courseService?.category).toBe('study');
 });
 
+it('lists the read-only homework surface beside the course list', () => {
+  const service = searchCampusServices('玩課雲作業').find((item) => item.href === '/school-lms');
+  expect(service?.name).toBe('玩課雲作業與教材');
+  expect(service?.access).toBe('school');
+});
+
 it.each(['總機', '職涯', '實習'])('finds school info through %s without a retired career entry', (query) => {
   const services = searchCampusServices(query);
   expect(services.some((service) => service.href === '/school-info')).toBe(true);

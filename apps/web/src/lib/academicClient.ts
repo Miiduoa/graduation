@@ -6,6 +6,7 @@ import {
   type AcademicGradeResponse,
 } from './academicRecords';
 import { isOfficialAcademicSchool } from './academicOfficialSchool';
+import { LMS_CONNECTING_CODE } from './schoolLoginTimeouts';
 import { withSchoolDataDeadline } from './schoolDataRequest';
 
 export type AcademicKind = 'courses' | 'grades';
@@ -19,7 +20,7 @@ export type AcademicSnapshot<K extends AcademicKind> = {
 class AcademicResponseError extends Error {}
 export class AcademicConnectionError extends Error {
   constructor(
-    public readonly reason: 'reconnect' | 'unavailable' | 'permission' | 'unconfigured',
+    public readonly reason: 'reconnect' | 'unavailable' | 'permission' | 'unconfigured' | 'connecting',
     cause?: unknown,
   ) {
     super(reason, cause === undefined ? undefined : { cause });
@@ -30,6 +31,14 @@ export class AcademicConnectionError extends Error {
   get canRetainSnapshot(): boolean {
     return this.reason === 'unavailable' && !(this.cause instanceof AcademicResponseError);
   }
+}
+
+function callableDetailCode(error: unknown): string {
+  if (!error || typeof error !== 'object' || Array.isArray(error)) return '';
+  const details = (error as Record<string, unknown>).details;
+  if (!details || typeof details !== 'object' || Array.isArray(details)) return '';
+  const code = (details as Record<string, unknown>).code;
+  return typeof code === 'string' ? code : '';
 }
 
 async function readAcademicResponse(kind: AcademicKind, uid: string, parentSignal?: AbortSignal): Promise<unknown> {
@@ -72,6 +81,9 @@ async function readAcademicResponse(kind: AcademicKind, uid: string, parentSigna
       const message = typeof error === 'string' ? error
         : typeof details.message === 'string' ? details.message : '';
       const cause = new Error(message || '校務資料讀取失敗。');
+      if (callableDetailCode(details) === LMS_CONNECTING_CODE) {
+        throw new AcademicConnectionError('connecting', cause);
+      }
       if (status === 'UNAUTHENTICATED' || status === 'FAILED_PRECONDITION') {
         throw new AcademicConnectionError('reconnect', cause);
       }

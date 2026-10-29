@@ -15,6 +15,7 @@ import { getAuth } from '@/features/auth/client';
 import Link from 'next/link';
 import { getSupabaseClient } from '@/lib/supabaseClient';
 import { readLoginReturnParam, sanitizeInternalPath } from '@/lib/navigation';
+import { clearOwnedPuCampusSessions } from '@/lib/clearOwnedPuCampusSessions';
 
 interface AuthState {
   user: User | null;
@@ -133,10 +134,11 @@ export function AuthProvider({ children }: AuthProviderProps) {
 
   const signOutUser = useCallback(async () => {
     const auth = getAuth();
+    const currentUser = auth?.currentUser ?? null;
     // Hide user-scoped readers immediately, including when a network logout later fails.
     setState({ user: null, loading: false, error: null });
     const results = await Promise.allSettled([
-      auth ? signOut(auth) : Promise.resolve(),
+      clearOwnedPuCampusSessions(currentUser).then(() => (auth ? signOut(auth) : undefined)),
       clearTeachingSession(),
     ]);
     const failure = results.find((result) => result.status === 'rejected');

@@ -23,7 +23,7 @@ export type AcademicRecordState<K extends AcademicKind> = {
   refreshing?: boolean;
   /** 僅供閱讀的前次資料；不是本次更新成功，也不推進差異比對。 */
   stale?: boolean;
-  reason?: 'reconnect' | 'unavailable' | 'permission' | 'unconfigured';
+  reason?: 'reconnect' | 'unavailable' | 'permission' | 'unconfigured' | 'connecting';
   error?: unknown;
 };
 

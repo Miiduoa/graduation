@@ -73,6 +73,9 @@ it('recovers a transient refresh failure without treating it as an empty success
   render(page()); await flush();
   vi.mocked(loadAcademicRecords).mockRejectedValueOnce(new AcademicConnectionError('unavailable'));
   fireEvent.click(screen.getByRole('button', { name: '更新資料' })); await flush();
+  expect(screen.getByRole('heading', { name: '暫時無法讀取學校成績' })).toBeTruthy();
+  expect(screen.getByRole('button', { name: '重新讀取' }).className).toMatch(/primary/);
+  expect(screen.queryByRole('heading', { name: '請重新連線學校帳號' })).toBeNull();
   expect(screen.getByRole('alert')).toBeTruthy();
   expect(screen.queryByRole('region', { name: '校務更新差異' })).toBeNull();
   fireEvent.click(screen.getByRole('button', { name: '重新讀取' })); await flush();
@@ -87,6 +90,8 @@ it('removes the old summary and stops automatic reads when authorization expires
   vi.mocked(loadAcademicRecords).mockRejectedValueOnce(new AcademicConnectionError('reconnect'));
   await act(async () => { await vi.advanceTimersByTimeAsync(INTERVAL); });
   expect(screen.getByRole('heading', { name: '請重新連線學校帳號' })).toBeTruthy();
+  expect(screen.getByRole('link', { name: '連線學校帳號' }).className).toMatch(/primary/);
+  expect(screen.queryByRole('button', { name: '重新讀取' })).toBeNull();
   expect(screen.queryByRole('region', { name: '校務更新差異' })).toBeNull();
   await act(async () => { await vi.advanceTimersByTimeAsync(INTERVAL * 3); });
   expect(loadAcademicRecords).toHaveBeenCalledTimes(2);

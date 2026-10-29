@@ -5,7 +5,14 @@ jest.mock('https', () => ({
 }));
 
 const https = require('https');
-const { tcFetchCourses, tcFetchProfile, tcFetchIdentityProfile } = require('./tronClassScraper');
+const {
+  tcFetchCourses,
+  tcFetchProfile,
+  tcFetchIdentityProfile,
+  tcFetchHomeworkActivitiesPage,
+  tcFetchActivitiesRaw,
+  tcFetchCourseAnnouncementsStrict,
+} = require('./tronClassScraper');
 
 function mockHttpsResponse({ status = 200, headers = {}, body = '{}' }) {
   https.request.mockImplementationOnce((options, callback) => {
@@ -202,5 +209,45 @@ describe('tronClassScraper', () => {
     await jest.advanceTimersByTimeAsync(16_000);
     await pending;
     expect(https.request).toHaveBeenCalledTimes(2);
+  });
+
+  test('reads a homework page without inventing rows', async () => {
+    mockHttpsResponse({
+      body: JSON.stringify({
+        homework_activities: [{ id: 20001, title: '期末專題提案', submitted: false }],
+        total: 1,
+        page: 1,
+        page_size: 50,
+      }),
+    });
+    await expect(tcFetchHomeworkActivitiesPage({ session: 'cookie' }, 10001, 1)).resolves.toMatchObject({
+      total: 1,
+      homework_activities: [{ id: 20001, title: '期末專題提案', submitted: false }],
+    });
+    expect(https.request.mock.calls[0][0].path).toBe('/api/courses/10001/homework-activities?page=1&page_size=50');
+  });
+
+  test('keeps school 500 on homework instead of returning an empty list', async () => {
+    mockHttpsResponse({ status: 500, body: '{}' });
+    await expect(tcFetchHomeworkActivitiesPage({ session: 'cookie' }, 10001, 1)).rejects.toMatchObject({
+      status: 500,
+    });
+  });
+
+  test('reads activities without a courseware_activity-only filter', async () => {
+    mockHttpsResponse({
+      body: JSON.stringify({ activities: [{ id: 30001, title: '講義', type: 'material' }] }),
+    });
+    await expect(tcFetchActivitiesRaw({ session: 'cookie' }, 10001, '')).resolves.toEqual([
+      { id: 30001, title: '講義', type: 'material' },
+    ]);
+    expect(https.request.mock.calls[0][0].path).toBe('/api/courses/10001/activities');
+  });
+
+  test('does not treat course announcement 404 as an empty success', async () => {
+    mockHttpsResponse({ status: 404, body: '{}' });
+    await expect(tcFetchCourseAnnouncementsStrict({ session: 'cookie' }, 10001)).rejects.toMatchObject({
+      status: 404,
+    });
   });
 });

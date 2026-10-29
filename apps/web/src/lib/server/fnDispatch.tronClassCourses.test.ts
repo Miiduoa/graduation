@@ -97,6 +97,21 @@ it('does not substitute campus cookies when TronClass did not connect during log
   expect(fetchCourses).not.toHaveBeenCalled();
 });
 
+it('reports WOW Class as connecting while the login sidecar window is still open', async () => {
+  const { request, store, fetchCourses } = setup();
+  Object.assign(store.docs.get(PORTAL)!, {
+    tronClassSessionId: null,
+    lmsConnectingUntil: new Date(Date.now() + 90_000),
+  });
+  const response = await request();
+  const body = await response.json();
+  expect(response.status).toBe(503);
+  expect(body.error.status).toBe('UNAVAILABLE');
+  expect(body.error.details).toEqual({ code: 'lms-connecting' });
+  expect(JSON.stringify(body)).not.toMatch(/secret|cookies|session/);
+  expect(fetchCourses).not.toHaveBeenCalled();
+});
+
 it.each([{ ownerUid: 'someone-else' }, { expiresAt: new Date(0) }, { cookies: {} }])('rejects invalid linked LMS sessions: %j', async (change) => {
   const { request, store, fetchCourses } = setup();
   Object.assign(store.docs.get(LMS)!, change);
