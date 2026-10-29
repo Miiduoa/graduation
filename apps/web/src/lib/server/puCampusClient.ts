@@ -1,10 +1,17 @@
 import { parseFragment, serialize, type DefaultTreeAdapterMap } from 'parse5';
+import { CAMPUS_HOST_BLOCKED_CODE } from '@campus/shared/src/schoolLogin';
 import {
   MAX_TRANSIENT_HOP_RETRIES,
   STUDENT_LOGIN_TOTAL_TIMEOUT_MS,
   studentLoginHopTimeoutMs,
 } from '../schoolLoginTimeouts';
 import { createPuRelayFetch, normalizeRelayHostname, normalizeRelayTarget } from './puEdgeRelay';
+import {
+  assertCampusHostAllowed,
+  CampusHostBlockedError,
+  noteCampusResponse,
+} from './puCampusCircuit';
+import { canonicalizePuStudentId } from './puIdentity';
 
 const ALCAT_ORIGIN = 'https://alcat.pu.edu.tw';
 const TRONCLASS_ORIGIN = 'https://tronclass.pu.edu.tw';
@@ -63,6 +70,8 @@ export type TronClassSession = {
   userId: number | null;
   userName: string;
   role: string;
+  /** /api/profile JSON；學生登入必須用這份核對學號，不可只信 CAS HTML。 */
+  profile?: Record<string, unknown>;
 };
 
 export type TronClassCourse = {
@@ -435,10 +444,14 @@ function accountIdentifiers(data: Record<string, unknown>): string[] {
     .filter(Boolean);
 }
 
-function identityBelongsToAccount(account: string, data: Record<string, unknown>): boolean {
+export function identityBelongsToAccount(account: string, data: Record<string, unknown>): boolean {
   const wanted = account.trim().toLowerCase();
   if (!wanted) return false;
-  return accountIdentifiers(data).includes(wanted);
+  const ids = accountIdentifiers(data);
+  if (ids.includes(wanted)) return true;
+  const wantedDigits = canonicalizePuStudentId(wanted);
+  if (!wantedDigits) return false;
+  return ids.some((id) => canonicalizePuStudentId(id) === wantedDigits);
 }
 
 function authenticatedJson(page: SentPage): Record<string, unknown> | null {
@@ -460,6 +473,12 @@ export function isTransientCampusError(error: unknown): boolean {
 }
 
 export function classifyCampusFailure(error: unknown, details: CampusErrorDetails = {}): PuCampusError {
+  if (error instanceof CampusHostBlockedError) {
+    return new PuCampusError('unavailable', '學校系統無回應', {
+      ...details,
+      code: CAMPUS_HOST_BLOCKED_CODE,
+    });
+  }
   if (error instanceof PuCampusError) {
     return new PuCampusError(error.kind, error.message, {
       route: error.route || details.route,
@@ -508,6 +527,7 @@ export function createPuCampusGateway(
     const timer = setTimeout(() => controller.abort(), waitMs);
     const context = init.context || {};
     try {
+      assertCampusHostAllowed(url);
       const headers = new Headers(init.headers);
       headers.set('User-Agent', USER_AGENT);
       headers.set('Accept-Language', 'zh-TW,zh;q=0.9');
@@ -522,6 +542,7 @@ export function createPuCampusGateway(
         signal: controller.signal,
       });
       const html = await response.text();
+      noteCampusResponse(url, response.status, html);
       const locationHeader = response.headers.get('location');
       const allowedOrigins = init.confineOrigins || (init.confineOrigin ? [init.confineOrigin] : null);
       const location = allowedOrigins
@@ -727,6 +748,7 @@ export function createPuCampusGateway(
         userId: userIdFrom(profileData) ?? userIdFrom(loginData),
         userName: displayNameFrom(profileData, account),
         role: roleFrom(profileData),
+        profile: profileData,
       };
     }
     if (profileData) {
@@ -921,7 +943,11 @@ export function createPuCampusGateway(
             'credentials',
           );
           if (session) return session;
-          throw new PuCampusError('unverified', '暫時無法驗證老師身分', { route, stage: 'verify' });
+          throw new PuCampusError(
+            'unverified',
+            route === 'student' ? '暫時無法驗證學生身分' : '暫時無法驗證老師身分',
+            { route, stage: 'verify' },
+          );
         }
         const nativeFallback = new PuCampusError('unavailable', '學校系統無回應', {
           route,
@@ -996,7 +1022,7 @@ export function createPuCampusGateway(
                 cookies: indexPage.cookies,
                 userId: parseTronClassUserIdFromHtml(indexPage.html),
                 userName: parseTronClassUserNameFromHtml(indexPage.html, account),
-                role: route === 'student' ? 'student' : '',
+                role: '',
               }
             : null;
         const profileWait = leftover();
@@ -1012,8 +1038,11 @@ export function createPuCampusGateway(
             if (verified) return verified;
           } catch (error) {
             const timedOut = error instanceof PuCampusError && error.kind === 'timeout';
-            if (!timedOut || !casSession) throw error;
+            if (!timedOut || !casSession || route === 'student') throw error;
           }
+        }
+        if (route === 'student') {
+          throw new PuCampusError('unverified', '暫時無法驗證學生身分', { route, stage: 'verify' });
         }
         if (casSession) return casSession;
         throw new PuCampusError('unverified', '暫時無法驗證老師身分', { route, stage: 'verify' });

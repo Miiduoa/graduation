@@ -17,6 +17,10 @@ import {
   OFFICIAL_ACADEMIC_SOURCE_LABEL,
 } from '@/lib/academicOfficialSchool';
 import { loadFailureCopy } from '@campus/shared/src/loadFailureCopy';
+import {
+  OFFICIAL_COURSES_UNAVAILABLE_COPY,
+  OFFICIAL_GRADES_UNAVAILABLE_COPY,
+} from '@campus/shared/src/schoolLogin';
 import styles from './academic.module.css';
 import { PersonalImportSummary } from '@/components/imports/PersonalImportSummary';
 import { AcademicRefreshControls } from './AcademicRefreshControls';
@@ -80,6 +84,7 @@ function RecordContent<K extends AcademicKind>({
     const reconnect = state.reason === 'reconnect';
     const permission = state.reason === 'permission';
     const unconfigured = state.reason === 'unconfigured';
+    const officialUnavailable = state.reason === 'officialUnavailable';
     if (reconnect || permission) {
       if (options.loading) {
         return (
@@ -102,9 +107,13 @@ function RecordContent<K extends AcademicKind>({
               ? '目前帳號無法讀取這份資料'
               : unconfigured
                 ? '學校資料讀取尚未啟用'
-                : kind === 'grades'
-                  ? '暫時無法讀取學校成績'
-                  : '暫時無法讀取學校資料'}
+                : officialUnavailable
+                  ? kind === 'grades'
+                    ? OFFICIAL_GRADES_UNAVAILABLE_COPY
+                    : OFFICIAL_COURSES_UNAVAILABLE_COPY
+                  : kind === 'grades'
+                    ? '暫時無法讀取學校成績'
+                    : '暫時無法讀取學校資料'}
         </h2>
         <p>
           {reconnect
@@ -113,7 +122,11 @@ function RecordContent<K extends AcademicKind>({
               ? '請確認目前使用的是你的學校帳號。'
               : unconfigured
                 ? '目前無法從學校取得這份資料。你可以先到 e 校園查詢，或匯入自己的成績檔案。'
-                : `${loadFailureCopy(state.error, { online: navigator.onLine })}。這次未取得資料，不會以舊紀錄代替。`}
+                : officialUnavailable
+                  ? kind === 'grades'
+                    ? '學校成績系統目前無法從網站連線。已登入的帳號仍有效，也不會用舊成績代替。請稍後再試，或直接到 e 校園查詢。'
+                    : '官方課表暫時無法從 e 校園取得。已登入的帳號仍有效；可改看 WOW Class 課程清單，或直接到 e 校園查詢。'
+                  : `${loadFailureCopy(state.error, { online: navigator.onLine })}。這次未取得資料，不會以舊紀錄代替。`}
         </p>
         <div className={styles.actions}>
           {reconnect || permission ? (
@@ -128,7 +141,12 @@ function RecordContent<K extends AcademicKind>({
               重新讀取
             </button>
           )}
-          {!reconnect && !permission && !unconfigured && options.studentId && (
+          {officialUnavailable && kind === 'courses' ? (
+            <Link className="btn" href="/school-courses">
+              改看 WOW Class 課程清單
+            </Link>
+          ) : null}
+          {!reconnect && !permission && !unconfigured && !officialUnavailable && options.studentId && (
             <Link
               className="btn"
               href={`/login?reconnect=school&returnUrl=${encodeURIComponent(returnUrl)}`}

@@ -6,7 +6,7 @@ import {
   type AcademicGradeResponse,
 } from './academicRecords';
 import { isOfficialAcademicSchool } from './academicOfficialSchool';
-import { LMS_CONNECTING_CODE } from './schoolLoginTimeouts';
+import { LMS_CONNECTING_CODE, OFFICIAL_CAMPUS_UNAVAILABLE_CODE } from './schoolLoginTimeouts';
 import { withSchoolDataDeadline } from './schoolDataRequest';
 
 export type AcademicKind = 'courses' | 'grades';
@@ -18,9 +18,17 @@ export type AcademicSnapshot<K extends AcademicKind> = {
   records: AcademicData[K];
 };
 
+export type AcademicConnectionReason =
+  | 'reconnect'
+  | 'unavailable'
+  | 'permission'
+  | 'unconfigured'
+  | 'connecting'
+  | 'officialUnavailable';
+
 export class AcademicConnectionError extends Error {
   constructor(
-    public readonly reason: 'reconnect' | 'unavailable' | 'permission' | 'unconfigured' | 'connecting',
+    public readonly reason: AcademicConnectionReason,
     cause?: unknown,
   ) {
     super(reason, cause === undefined ? undefined : { cause });
@@ -67,6 +75,9 @@ async function readAcademicResponse(kind: AcademicKind, uid: string): Promise<un
       const cause = new Error(message || '校務資料讀取失敗。');
       if (callableDetailCode(details) === LMS_CONNECTING_CODE) {
         throw new AcademicConnectionError('connecting', cause);
+      }
+      if (callableDetailCode(details) === OFFICIAL_CAMPUS_UNAVAILABLE_CODE) {
+        throw new AcademicConnectionError('officialUnavailable', cause);
       }
       if (status === 'UNAUTHENTICATED' || status === 'FAILED_PRECONDITION' || response.status === 401) {
         throw new AcademicConnectionError('reconnect', cause);

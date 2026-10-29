@@ -1,7 +1,9 @@
 // @vitest-environment node
-import { beforeEach, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, expect, it, vi } from 'vitest';
+import { OFFICIAL_CAMPUS_UNAVAILABLE_CODE, OFFICIAL_GRADES_UNAVAILABLE_COPY } from '@campus/shared/src/schoolLogin';
 import { dispatchFnRequest, type FnRuntime } from './fnDispatch';
 import { createMemoryGroupStore } from './memoryGroupStore';
+import { markCampusHostBlocked, resetCampusCircuitForTests } from './puCampusCircuit';
 import { resetUidRateLimitForTests } from './uidRateLimit';
 import { getCloudFunctionUrl } from '../cloudFunctions';
 
@@ -50,6 +52,7 @@ function setup() {
 }
 
 beforeEach(() => resetUidRateLimitForTests());
+afterEach(() => resetCampusCircuitForTests());
 
 it('uses the same-origin academic endpoint without enabling any Cloud Functions service', () => {
   expect(getCloudFunctionUrl('getMyAcademicRecords', { env: {} })).toBe('/api/fn/getMyAcademicRecords');
@@ -179,13 +182,45 @@ it.each([
   { expiresAt: '2099-01-01' },
   { cookies: {} },
   { cookies: { portal: 'invalid\r\nheader' } },
-])('requires a fresh valid school session: %j', async (fields) => {
+])('returns official campus unavailable without a usable e-campus session: %j', async (fields) => {
   const { request, store, grades } = setup();
   store.docs.set(SESSION, { ...store.docs.get(SESSION), ...fields });
   const response = await request();
-  expect(response.status).toBe(400);
-  expect((await response.json()).error.status).toBe('FAILED_PRECONDITION');
+  expect(response.status).toBe(503);
+  expect(await response.json()).toMatchObject({
+    error: {
+      status: 'UNAVAILABLE',
+      message: OFFICIAL_GRADES_UNAVAILABLE_COPY,
+      details: { code: OFFICIAL_CAMPUS_UNAVAILABLE_CODE },
+    },
+  });
   expect(grades).not.toHaveBeenCalled();
+});
+
+it('returns official campus unavailable when alcat is circuit-open', async () => {
+  markCampusHostBlocked('alcat.pu.edu.tw', 'block_page');
+  const { request, grades } = setup();
+  const response = await request();
+  expect(response.status).toBe(503);
+  expect(await response.json()).toMatchObject({
+    error: {
+      status: 'UNAVAILABLE',
+      message: OFFICIAL_GRADES_UNAVAILABLE_COPY,
+      details: { code: OFFICIAL_CAMPUS_UNAVAILABLE_CODE },
+    },
+  });
+  expect(grades).not.toHaveBeenCalled();
+});
+
+it('returns official campus unavailable for grades when mypu is circuit-open', async () => {
+  markCampusHostBlocked('mypu.pu.edu.tw', 'http_555');
+  const { request, grades, courses } = setup();
+  const gradesResponse = await request({ dataType: 'grades' });
+  expect(gradesResponse.status).toBe(503);
+  expect(grades).not.toHaveBeenCalled();
+  const coursesResponse = await request({ dataType: 'courses' });
+  expect(coursesResponse.status).toBe(200);
+  expect(courses).toHaveBeenCalledTimes(1);
 });
 
 it('asks to reconnect after the school rejects an otherwise unexpired session', async () => {

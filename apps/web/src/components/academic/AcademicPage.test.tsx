@@ -248,6 +248,28 @@ it('shows that the school reader is disabled without exposing infrastructure det
   expect(screen.queryByText(/請稍後再試/)).toBeNull();
 });
 
+it('shows official grades as temporarily unavailable without fake records or a reconnect prompt', async () => {
+  vi.mocked(loadAcademicRecords).mockRejectedValueOnce(new AcademicConnectionError('officialUnavailable'));
+  render(<GradesPage />);
+  expect(await screen.findByRole('heading', { name: '官方成績暫時無法取得' })).toBeTruthy();
+  expect(screen.getByText(/學校成績系統目前無法從網站連線/)).toBeTruthy();
+  expect(screen.queryByText('真實來源科目')).toBeNull();
+  expect(screen.queryByRole('link', { name: '重新連線學校帳號' })).toBeNull();
+  expect(screen.getByRole('button', { name: '重新讀取' })).toBeTruthy();
+  expect(screen.getByRole('link', { name: '前往 e 校園 ↗' })).toBeTruthy();
+});
+
+it('points official timetable unavailability at WOW Class instead of inventing a schedule', async () => {
+  navigation.path = '/timetable';
+  vi.mocked(loadAcademicRecords).mockRejectedValue(new AcademicConnectionError('officialUnavailable'));
+  render(<TimetablePage />);
+  expect(await screen.findByText(/官方課表暫時無法取得/)).toBeTruthy();
+  expect(screen.getByRole('link', { name: 'WOW Class 課程清單' }).getAttribute('href')).toBe(
+    '/school-courses',
+  );
+  expect(screen.queryByText('資料庫')).toBeNull();
+});
+
 it('shows actual read coverage and keeps partial grades visible', async () => {
   const snapshot = grades();
   snapshot.records.coverage = { status: 'partial', skippedRows: 2 };

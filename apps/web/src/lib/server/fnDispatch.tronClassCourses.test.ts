@@ -89,9 +89,18 @@ it('does not read when the token or school membership is missing', async () => {
   expect(fetchCourses).not.toHaveBeenCalled();
 });
 
+it('reads an owned WOW Class session even without a portal link', async () => {
+  const { request, store, fetchCourses } = setup();
+  store.docs.delete(PORTAL);
+  const response = await request();
+  expect(response.status).toBe(200);
+  expect(fetchCourses).toHaveBeenCalledWith({ session: 'lms-secret' }, { userId: 10, status: 'ongoing' });
+});
+
 it('does not substitute campus cookies when TronClass did not connect during login', async () => {
   const { request, store, fetchCourses } = setup();
   store.docs.get(PORTAL)!.tronClassSessionId = null;
+  store.docs.delete(LMS);
   const response = await request();
   expect((await response.json()).error.status).toBe('FAILED_PRECONDITION');
   expect(fetchCourses).not.toHaveBeenCalled();
@@ -99,6 +108,7 @@ it('does not substitute campus cookies when TronClass did not connect during log
 
 it('reports WOW Class as connecting while the login sidecar window is still open', async () => {
   const { request, store, fetchCourses } = setup();
+  store.docs.delete(LMS);
   Object.assign(store.docs.get(PORTAL)!, {
     tronClassSessionId: null,
     lmsConnectingUntil: new Date(Date.now() + 90_000),

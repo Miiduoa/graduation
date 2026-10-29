@@ -17,6 +17,12 @@ export const STUDENT_LOGIN_CLIENT_TIMEOUT_MS =
 
 /** 登入後背景 WOW Class 仍在進行時，課程 API 回傳的 details.code。 */
 export const LMS_CONNECTING_CODE = 'lms-connecting';
+/** e 校園／成績系統暫時無法從伺服器連線時，學術 API 的 details.code。 */
+export const OFFICIAL_CAMPUS_UNAVAILABLE_CODE = 'official-campus-unavailable';
+export const OFFICIAL_GRADES_UNAVAILABLE_COPY = '官方成績暫時無法取得';
+export const OFFICIAL_COURSES_UNAVAILABLE_COPY = '官方課表暫時無法取得';
+/** 學校防火牆封鎖頁或轉送 555 時標記主機。 */
+export const CAMPUS_HOST_BLOCKED_CODE = 'campus_blocked';
 /**
  * 登入後視為 WOW Class 背景連線進行中的預設最長時間。
  * 對齊背景 SSO 預設總預算 30 秒再加前端餘裕，避免窗口比 SSO 長太多。

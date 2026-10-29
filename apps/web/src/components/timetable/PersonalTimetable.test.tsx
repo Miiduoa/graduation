@@ -27,6 +27,27 @@ const mocks = vi.hoisted(() => ({
   meetup: vi.fn(),
   push: vi.fn(),
   records: [] as PersonalImportRecord[],
+  schoolRecords: {
+    state: {
+      status: 'ready' as 'ready' | 'error',
+      reason: undefined as string | undefined,
+      snapshot: {
+        schoolId: 'pu',
+        records: {
+          courses: [
+            {
+              id: 'school-course',
+              name: '匯入資料庫',
+              periods: [3, 4],
+              dayOfWeek: 2,
+              teacherName: '林老師',
+              location: '主顧303',
+            },
+          ],
+        },
+      },
+    },
+  },
 }));
 vi.mock('@/components/AuthGuard', () => ({ useAuth: () => mocks.auth }));
 vi.mock('@/components/SelectedSchoolProvider', () => ({
@@ -67,25 +88,7 @@ vi.mock('@/lib/timetable/store', () => ({
 }));
 vi.mock('@/lib/timetable/friends', () => ({ listAcceptedFriends: mocks.friends }));
 vi.mock('@/lib/useAcademicRecords', () => ({
-  useAcademicRecords: () => ({
-    state: {
-      snapshot: {
-        schoolId: 'pu',
-        records: {
-          courses: [
-            {
-              id: 'school-course',
-              name: '匯入資料庫',
-              periods: [3, 4],
-              dayOfWeek: 2,
-              teacherName: '林老師',
-              location: '主顧303',
-            },
-          ],
-        },
-      },
-    },
-  }),
+  useAcademicRecords: () => mocks.schoolRecords,
 }));
 
 function timetable(name = '原本課程') {
@@ -117,6 +120,25 @@ beforeEach(() => {
   mocks.school.selectedSchoolId = 'pu';
   mocks.school.loading = false;
   mocks.records = [];
+  mocks.schoolRecords.state = {
+    status: 'ready',
+    reason: undefined,
+    snapshot: {
+      schoolId: 'pu',
+      records: {
+        courses: [
+          {
+            id: 'school-course',
+            name: '匯入資料庫',
+            periods: [3, 4],
+            dayOfWeek: 2,
+            teacherName: '林老師',
+            location: '主顧303',
+          },
+        ],
+      },
+    },
+  };
   mocks.load.mockReset().mockResolvedValue(timetable());
   mocks.save.mockReset().mockResolvedValue({ stored: 'cloud' });
   mocks.share
@@ -316,6 +338,19 @@ describe('personal timetable data retention', () => {
     await waitFor(() => expect(screen.getAllByText(/無法確認儲存結果/).length).toBeGreaterThan(0));
     expect(section.getByText('匯入資料庫')).toBeTruthy();
     expect(existingCourseButton()).toBeTruthy();
+  });
+
+  it('explains official timetable unavailability without inventing school courses', async () => {
+    mocks.schoolRecords.state = { status: 'error', reason: 'officialUnavailable', snapshot: undefined as never };
+    await ready();
+    const section = within(screen.getByRole('region', { name: '匯入課表' }));
+    expect(section.getByText(/官方課表暫時無法取得/)).toBeTruthy();
+    expect(section.getByRole('link', { name: 'WOW Class 課程清單' }).getAttribute('href')).toBe(
+      '/school-courses',
+    );
+    fireEvent.click(section.getByRole('button', { name: '從學校課表帶入' }));
+    expect(screen.getByText('官方課表暫時無法取得')).toBeTruthy();
+    expect(section.queryByText('匯入資料庫')).toBeNull();
   });
 
   it('does not replace the timetable with an empty selection', async () => {

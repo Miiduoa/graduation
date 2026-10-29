@@ -19,6 +19,7 @@ import {
   verifyRelaySignature,
   type FetchLike,
 } from './puEdgeRelay';
+import { isCampusHostBlocked, resetCampusCircuitForTests } from './puCampusCircuit';
 
 const GOLDEN_SECRET = 'test-relay-secret';
 const GOLDEN_TS = '1700000000';
@@ -36,6 +37,7 @@ const SECRET = 'unit-test-secret';
 const FIXED_NONCE = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
 
 afterEach(() => {
+  resetCampusCircuitForTests();
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
   vi.useRealTimers();
@@ -245,4 +247,23 @@ it('verifyRelaySignature matches createPuRelayFetch output', async () => {
 it('normalizes trailing-dot campus hosts to the same relay target', () => {
   expect(normalizeRelayTarget('https://alcat.pu.edu.tw./index_check.php')).toBe(GOLDEN_TARGET);
   expect(normalizeRelayTarget('https://identity.pu.edu.tw./auth')).toBe('https://identity.pu.edu.tw/auth');
+});
+
+it('opens the alcat circuit when the relay returns HTTP 555 and then skips that host', async () => {
+  const relay = vi.fn<FetchLike>(async () => new Response('blocked', { status: 555 }));
+  const fetchLike = createPuRelayFetch({
+    env: { PU_EDGE_RELAY_URL: RELAY_URL, PU_EDGE_RELAY_SECRET: SECRET },
+    fetch: relay,
+    now: () => 1_711_000_000_000,
+    nonce: () => FIXED_NONCE,
+  });
+  vi.spyOn(console, 'info').mockImplementation(() => {});
+  await expect(fetchLike('https://alcat.pu.edu.tw/index_check.php')).rejects.toMatchObject({
+    name: 'CampusHostBlockedError',
+  });
+  expect(isCampusHostBlocked('alcat.pu.edu.tw')).toBe(true);
+  await expect(fetchLike('https://alcat.pu.edu.tw/index_check.php')).rejects.toMatchObject({
+    name: 'CampusHostBlockedError',
+  });
+  expect(relay).toHaveBeenCalledTimes(1);
 });

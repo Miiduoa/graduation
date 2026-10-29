@@ -52,6 +52,7 @@ import { loginHref } from '@/lib/navigation';
 import { useSignInOptions } from '@/lib/signInOptions';
 import { listAcceptedFriends } from '@/lib/timetable/friends';
 import { useAcademicRecords } from '@/lib/useAcademicRecords';
+import { OFFICIAL_COURSES_UNAVAILABLE_COPY } from '@campus/shared/src/schoolLogin';
 import type { AcademicCourse } from '@/lib/academicRecords';
 import { CourseEditor as EditableCourseDialog } from './CourseEditor';
 import { TimetableGrid, UnscheduledCourses } from './TimetableGrid';
@@ -762,6 +763,10 @@ function TimetableWorkspace({ schoolId }: { schoolId: string }) {
   const bringSchool = async () => {
     const snapshot = schoolRecords.state?.snapshot;
     const records = snapshot?.schoolId === schoolId ? snapshot.records : null;
+    if (schoolRecords.state?.reason === 'officialUnavailable') {
+      setNotice(OFFICIAL_COURSES_UNAVAILABLE_COPY);
+      return;
+    }
     if (!records?.courses?.length) {
       setNotice('現在沒有學校選課紀錄可帶入。');
       return;
@@ -1015,6 +1020,13 @@ function TimetableWorkspace({ schoolId }: { schoolId: string }) {
       <section className={styles.panel} aria-label="匯入課表">
         <h2>匯入課表</h2>
         <p className={styles.notice}>截圖、文字與檔案都可以先整理成草稿，再逐筆確認。</p>
+        {schoolRecords.state?.status === 'error' && schoolRecords.state.reason === 'officialUnavailable' ? (
+          <p className={styles.notice} role="status">
+            {OFFICIAL_COURSES_UNAVAILABLE_COPY}。可改看{' '}
+            <Link href="/school-courses">WOW Class 課程清單</Link>
+            ，或直接到 e 校園查詢。
+          </p>
+        ) : null}
         <div className={`${styles.toolbar} ${movement.toolbar}`}>
           <Link className="btn primary" href={importHref}>
             匯入截圖或檔案

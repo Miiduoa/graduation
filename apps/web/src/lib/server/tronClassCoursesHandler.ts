@@ -91,10 +91,28 @@ export function createTronClassCoursesHandler({
         .orderBy('expiresAt', 'desc').limit(1).get();
       const portalSnapshot = sessions.docs[0];
       const portal = portalSnapshot?.data();
-      if (portal?.ownerUid !== uid || !(schoolSessionExpiry(portal.expiresAt) > now())) reconnect();
-      const linkedId = portal.tronClassSessionId;
-      if (typeof linkedId !== 'string' || !/^[a-f0-9]{32}$/.test(linkedId)) {
-        if (schoolSessionExpiry(portal.lmsConnectingUntil) > now()) connecting();
+      const linkedFromPortal = typeof portal?.tronClassSessionId === 'string'
+        && /^[a-f0-9]{32}$/.test(portal.tronClassSessionId)
+        && portal.ownerUid === uid
+        ? portal.tronClassSessionId
+        : null;
+      let linkedId = linkedFromPortal;
+      if (!linkedId) {
+        const lmsSessions = await db.collection('_puTronClassSessions')
+          .where('ownerUid', '==', uid)
+          .orderBy('expiresAt', 'desc')
+          .limit(1)
+          .get();
+        const owned = lmsSessions.docs[0];
+        const ownedData = owned?.data();
+        const ownedId = owned?.ref.id;
+        if (owned && ownedData?.ownerUid === uid && schoolSessionExpiry(ownedData.expiresAt) > now()
+          && typeof ownedId === 'string' && /^[a-f0-9]{32}$/.test(ownedId)) {
+          linkedId = ownedId;
+        }
+      }
+      if (!linkedId) {
+        if (portal?.ownerUid === uid && schoolSessionExpiry(portal.lmsConnectingUntil) > now()) connecting();
         reconnect();
       }
       const sessionRef = db.doc(`_puTronClassSessions/${linkedId}`);
@@ -115,13 +133,16 @@ export function createTronClassCoursesHandler({
         throw error;
       }
       await requireAcademicAccount(db, uid);
-      const [currentPortal, currentSession] = await Promise.all([portalSnapshot.ref.get(), sessionRef.get()]);
-      if (!currentPortal.exists || currentPortal.data()?.ownerUid !== uid ||
-        currentPortal.data()?.tronClassSessionId !== linkedId ||
-        !(schoolSessionExpiry(currentPortal.data()?.expiresAt) > now()) ||
-        !currentSession.exists || currentSession.data()?.ownerUid !== uid ||
+      const currentSession = await sessionRef.get();
+      if (!currentSession.exists || currentSession.data()?.ownerUid !== uid ||
         !(schoolSessionExpiry(currentSession.data()?.expiresAt) > now()) ||
         !schoolSessionCookies(currentSession.data()?.cookies)) reconnect();
+      if (linkedFromPortal && portalSnapshot) {
+        const currentPortal = await portalSnapshot.ref.get();
+        if (!currentPortal.exists || currentPortal.data()?.ownerUid !== uid ||
+          currentPortal.data()?.tronClassSessionId !== linkedId ||
+          !(schoolSessionExpiry(currentPortal.data()?.expiresAt) > now())) reconnect();
+      }
 
       return { success: true, ownerUid: uid, schoolId: 'pu', source: 'pu-tronclass',
         fetchedAt: new Date(now()).toISOString(), status, courses };

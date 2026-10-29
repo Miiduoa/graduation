@@ -5,6 +5,7 @@ import { useAuth } from '@/components/AuthGuard';
 import {
   AcademicConnectionError,
   loadAcademicRecords,
+  type AcademicConnectionReason,
   type AcademicKind,
   type AcademicSnapshot,
 } from './academicClient';
@@ -21,7 +22,7 @@ export type AcademicRecordState<K extends AcademicKind> = {
   status: 'loading' | 'ready' | 'error';
   snapshot?: AcademicSnapshot<K>;
   refreshing?: boolean;
-  reason?: 'reconnect' | 'unavailable' | 'permission' | 'unconfigured' | 'connecting';
+  reason?: AcademicConnectionReason;
   error?: unknown;
 };
 

@@ -9,6 +9,9 @@ export const MAX_STUDENT_PORTAL_TIMEOUT_MS = 60_000;
 export {
   LMS_CONNECTING_CODE,
   MAX_TRANSIENT_HOP_RETRIES,
+  OFFICIAL_CAMPUS_UNAVAILABLE_CODE,
+  OFFICIAL_COURSES_UNAVAILABLE_COPY,
+  OFFICIAL_GRADES_UNAVAILABLE_COPY,
   STUDENT_LMS_CONNECTING_WINDOW_MS,
   STUDENT_LOGIN_CLIENT_MARGIN_MS,
   STUDENT_LOGIN_CLIENT_TIMEOUT_MS,
@@ -24,7 +27,10 @@ export const MAX_STUDENT_LMS_TOTAL_TIMEOUT_MS = 120_000;
 export const DEFAULT_STUDENT_LMS_HOP_TIMEOUT_MS = 15_000;
 export const MIN_STUDENT_LMS_HOP_TIMEOUT_MS = 1_000;
 
-/** 同一組密碼對學校送出帳密 POST 的上限（含雙 UID 備援與逾時重試）。 */
+/**
+ * 同一組密碼對學校送出帳密 POST 的上限。只保留數字學號與 s 前綴各一次，
+ * 因為 CAS／TronClass 接受的帳號格式不一定與使用者輸入相同；不再對同一組帳密做逾時重試。
+ */
 export const MAX_STUDENT_CREDENTIAL_POSTS = 2;
 
 /** 背景 SSO 進行中視窗：SSO 總預算再加前端餘裕。SSO 確定失敗時應清掉 connecting 標記。 */

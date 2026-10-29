@@ -1,5 +1,11 @@
+import {
+  OFFICIAL_CAMPUS_UNAVAILABLE_CODE,
+  OFFICIAL_COURSES_UNAVAILABLE_COPY,
+  OFFICIAL_GRADES_UNAVAILABLE_COPY,
+} from '@campus/shared/src/schoolLogin';
 import type { CallableRequest } from './groupInviteHandlers';
 import { HttpsError } from './httpsError';
+import { CampusHostBlockedError, isCampusHostBlocked } from './puCampusCircuit';
 import {
   deleteOwnedPuSessions,
   persistOwnedMypuCookies,
@@ -78,6 +84,19 @@ function unavailable(): never {
   throw new HttpsError('unavailable', '目前無法取得學校資料，請稍後重試。');
 }
 
+function officialUnavailable(kind: keyof AcademicFetchers): never {
+  throw new HttpsError(
+    'unavailable',
+    kind === 'grades' ? OFFICIAL_GRADES_UNAVAILABLE_COPY : OFFICIAL_COURSES_UNAVAILABLE_COPY,
+    { code: OFFICIAL_CAMPUS_UNAVAILABLE_CODE },
+  );
+}
+
+function officialCampusBlocked(kind: keyof AcademicFetchers): boolean {
+  if (isCampusHostBlocked('alcat.pu.edu.tw')) return true;
+  return kind === 'grades' && isCampusHostBlocked('mypu.pu.edu.tw');
+}
+
 function publicResult(kind: keyof AcademicFetchers, result: RecordData): RecordData {
   return publicCampusDataResult(kind, result) as RecordData;
 }
@@ -119,6 +138,7 @@ export function createAcademicRecordsHandler({
     const dataType = kind as keyof AcademicFetchers;
     try {
       await requireAcademicAccount(db, uid);
+      if (officialCampusBlocked(dataType)) officialUnavailable(dataType);
       // 使用登入已建立的本人 session；前端不能指定他人的學號、學校或 session。
       const sessions = await db.collection('_puSessions')
         .where('ownerUid', '==', uid)
@@ -129,7 +149,9 @@ export function createAcademicRecordsHandler({
       const session = selected?.data();
       const cookies = schoolSessionCookies(session?.cookies);
       if (!selected || !session || session.ownerUid !== uid || !cookies ||
-        !(schoolSessionExpiry(session.expiresAt) > now())) reconnect();
+        !(schoolSessionExpiry(session.expiresAt) > now())) {
+        officialUnavailable(dataType);
+      }
 
       const storedMypu = schoolSessionCookies(session.mypuCookies);
       const result = record(
@@ -162,6 +184,7 @@ export function createAcademicRecordsHandler({
       };
     } catch (error) {
       if (error instanceof HttpsError) throw error;
+      if (error instanceof CampusHostBlockedError) officialUnavailable(dataType);
       // 不把含有網址、cookie 或原始 HTML 的底層錯誤回傳給瀏覽器。
       unavailable();
     }

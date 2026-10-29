@@ -3,6 +3,7 @@
 import Link from 'next/link';
 import { useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { AcademicConnectionError, loadAcademicRecords } from '@/lib/academicClient';
+import { OFFICIAL_COURSES_UNAVAILABLE_COPY } from '@campus/shared/src/schoolLogin';
 import { formatSemester } from '@/lib/academicRecords';
 import {
   reconcileSchoolCourses, schoolCourseHref,
@@ -103,6 +104,8 @@ function ReconciliationWorkspace({ uid, schoolId, lms, returnUrl, canReconnect }
 
   const needsLogin = visible?.error instanceof AcademicConnectionError &&
     ['reconnect', 'permission'].includes(visible.error.reason);
+  const officialUnavailable = visible?.error instanceof AcademicConnectionError &&
+    visible.error.reason === 'officialUnavailable';
   return (
     <section className={styles.panel} aria-label="校方課表與 WOW Class 對照" aria-busy={visible?.status === 'loading'}>
       <header className={styles.header}>
@@ -117,8 +120,10 @@ function ReconciliationWorkspace({ uid, schoolId, lms, returnUrl, canReconnect }
       </header>
       {visible?.status === 'loading' ? <p className={styles.message} role="status">正在讀取 e 校園的選課學分與上課地點…</p> : null}
       {visible?.status === 'error' ? <div className={styles.message} role="alert">
-        <h3>{needsLogin ? 'e 校園需要重新連線' : '校方課表暫時無法核對'}</h3>
-        <p>{needsLogin ? '正式選課資料需要有效的 e 校園連線；你可以重新連線，或先前往校方網站核對。'
+        <h3>{officialUnavailable ? OFFICIAL_COURSES_UNAVAILABLE_COPY : needsLogin ? 'e 校園需要重新連線' : '校方課表暫時無法核對'}</h3>
+        <p>{officialUnavailable
+          ? '官方課表暫時無法從 e 校園取得，不會顯示為零學分。WOW Class 清單仍可查看；請稍後重試，或前往校方網站核對。'
+          : needsLogin ? '正式選課資料需要有效的 e 校園連線；你可以重新連線，或先前往校方網站核對。'
           : '校方課表尚未取得，不會顯示為零學分。請稍後重試，或前往校方網站核對。'}</p>
         <div className={styles.actions}>
           {needsLogin && canReconnect ? <Link className="btn" href={`/login?reconnect=school&returnUrl=${encodeURIComponent(returnUrl)}`}>重新連線 e 校園</Link> : null}

@@ -37,11 +37,12 @@ function campus(overrides: Partial<PuCampusGateway> = {}): PuCampusGateway {
   return {
     loginStudent: async () => ({ cookies: { PHPSESSID: 'ok' }, studentName: '陳同學' }),
     fetchStudentInfo: async () => ({ studentId: STUDENT, name: '陳同學', class: '資管三A' }),
-    loginTronClass: async () => ({
-      cookies: {},
-      userId: null,
+    loginTronClass: async (account) => ({
+      cookies: { session: 'tc-cookie' },
+      userId: 9,
       userName: '陳同學',
       role: 'student',
+      profile: { login_name: account, role: 'student', name: '陳同學' },
     }),
     fetchTronClassCourses: async () => [],
     ...overrides,
@@ -106,35 +107,39 @@ it('does not treat leftover NEXT_PUBLIC flag as the write switch', async () => {
   expect((await res.json()).customToken).toBe('token:pu-1110700321:student');
 });
 
-it('schedules background SSO with Next.js after() after a successful student login', async () => {
-  const loginTronClass = vi.fn(async () => ({
+it('schedules background e-campus scan with Next.js after() after a successful student login', async () => {
+  const loginStudent = vi.fn(async () => ({ cookies: { PHPSESSID: 'ok' }, studentName: '陳同學' }));
+  const loginTronClass = vi.fn(async (account: string) => ({
     cookies: { session: 'tc-cookie' },
     userId: 9,
     userName: '陳同學',
     role: 'student',
+    profile: { login_name: account, role: 'student', name: '陳同學' },
   }));
   const { runtime: deps, store } = runtime();
-  deps.puCampus = campus({ loginTronClass });
+  deps.puCampus = campus({ loginStudent, loginTronClass });
   const res = await dispatchFnRequest(
     'signInPuStudentId',
     request({ studentId: STUDENT, password: SECRET }),
     deps,
   );
   expect(res.status).toBe(200);
-  expect(loginTronClass).not.toHaveBeenCalled();
+  expect(loginTronClass).toHaveBeenCalledOnce();
+  expect(loginStudent).not.toHaveBeenCalled();
   expect(afterResponse.scheduleAfterResponse).toHaveBeenCalledOnce();
   expect(afterResponse.scheduled).toHaveLength(1);
-  await afterResponse.scheduled[0]?.();
-  expect(loginTronClass).toHaveBeenCalledOnce();
-  const body = (await res.json()) as { puSessionId?: string; uid?: string };
-  const portal = store.docs.get(`_puSessions/${body.puSessionId}`) as {
-    tronClassSessionId?: string;
-    ownerUid?: string;
-  };
-  expect(portal.ownerUid).toBe(body.uid);
-  expect(typeof portal.tronClassSessionId).toBe('string');
-  expect(store.docs.get(`_puTronClassSessions/${portal.tronClassSessionId}`)).toMatchObject({
+  const body = (await res.json()) as { puSessionId?: string | null; uid?: string; tronClassSessionId?: string };
+  expect(body.puSessionId).toBeNull();
+  expect(store.docs.get(`_puTronClassSessions/${body.tronClassSessionId}`)).toMatchObject({
     ownerUid: body.uid,
+  });
+  await afterResponse.scheduled[0]?.();
+  expect(loginStudent).toHaveBeenCalledOnce();
+  const portalPaths = [...store.docs.keys()].filter((path) => path.startsWith('_puSessions/'));
+  expect(portalPaths).toHaveLength(1);
+  expect(store.docs.get(portalPaths[0])).toMatchObject({
+    ownerUid: body.uid,
+    tronClassSessionId: body.tronClassSessionId,
   });
 });
 
@@ -142,9 +147,15 @@ it('does not keep a campus session when the client aborts before the login respo
   const controller = new AbortController();
   const { runtime: deps, store } = runtime();
   deps.puCampus = campus({
-    loginStudent: async () => {
+    loginTronClass: async (account) => {
       controller.abort();
-      return { cookies: { PHPSESSID: 'ok' }, studentName: '陳同學' };
+      return {
+        cookies: { session: 'tc-cookie' },
+        userId: 9,
+        userName: '陳同學',
+        role: 'student',
+        profile: { login_name: account, role: 'student', name: '陳同學' },
+      };
     },
   });
   const res = await dispatchFnRequest(
@@ -160,6 +171,7 @@ it('does not keep a campus session when the client aborts before the login respo
   expect(res.status).toBe(503);
   expect(afterResponse.scheduleAfterResponse).not.toHaveBeenCalled();
   expect([...store.docs.keys()].some((path) => path.startsWith('_puSessions/'))).toBe(false);
+  expect([...store.docs.keys()].some((path) => path.startsWith('_puTronClassSessions/'))).toBe(false);
 });
 
 it('uses the original HTTP body and response shape, not callable wrapping', async () => {
@@ -190,7 +202,7 @@ it('does not require a bearer token', async () => {
 it('returns 401 for bad campus credentials without the password', async () => {
   const { runtime: deps } = runtime();
   deps.puCampus = campus({
-    loginStudent: async () => {
+    loginTronClass: async () => {
       throw new PuCampusError('credentials', '學號或密碼錯誤');
     },
   });
@@ -208,7 +220,7 @@ it('returns 401 for bad campus credentials without the password', async () => {
 it('does not let a spoofed X-Forwarded-For hop bypass the IP limit', async () => {
   const { runtime: deps } = runtime();
   deps.puCampus = campus({
-    loginStudent: async () => {
+    loginTronClass: async () => {
       throw new PuCampusError('credentials', '學號或密碼錯誤');
     },
   });
@@ -245,10 +257,10 @@ it('does not let a spoofed X-Forwarded-For hop bypass the IP limit', async () =>
 
 it('returns 503 without Firestore or campus when the daily write budget is spent', async () => {
   const { runtime: deps, store } = runtime();
-  const loginStudent = vi.fn(async () => {
+  const loginTronClass = vi.fn(async () => {
     throw new PuCampusError('credentials', '學號或密碼錯誤');
   });
-  deps.puCampus = campus({ loginStudent });
+  deps.puCampus = campus({ loginTronClass });
   deps.rateLimitGate = createLoginRateGate({ dailyWriteLimit: 0 });
   const runTransaction = vi.spyOn(store.db, 'runTransaction');
   const res = await dispatchFnRequest(
@@ -258,16 +270,16 @@ it('returns 503 without Firestore or campus when the daily write budget is spent
   );
   expect(res.status).toBe(503);
   expect(await res.json()).toEqual({ error: '服務暫時無法使用' });
-  expect(loginStudent).not.toHaveBeenCalled();
+  expect(loginTronClass).not.toHaveBeenCalled();
   expect(runTransaction).not.toHaveBeenCalled();
 });
 
 it('returns 503 without campus when FIREBASE_SERVICE_ACCOUNT_JSON is empty', async () => {
   const { runtime: deps } = runtime();
-  const loginStudent = vi.fn(async () => {
+  const loginTronClass = vi.fn(async () => {
     throw new PuCampusError('credentials', '學號或密碼錯誤');
   });
-  deps.puCampus = campus({ loginStudent });
+  deps.puCampus = campus({ loginTronClass });
   delete deps.rateLimitSalt;
   delete process.env.FIREBASE_SERVICE_ACCOUNT_JSON;
   const res = await dispatchFnRequest(
@@ -277,15 +289,15 @@ it('returns 503 without campus when FIREBASE_SERVICE_ACCOUNT_JSON is empty', asy
   );
   expect(res.status).toBe(503);
   expect(await res.json()).toEqual({ error: '服務暫時無法使用' });
-  expect(loginStudent).not.toHaveBeenCalled();
+  expect(loginTronClass).not.toHaveBeenCalled();
 });
 
 it('returns 503 when shared rate-limit storage cannot be written', async () => {
   const { runtime: deps, store } = runtime();
-  const loginStudent = vi.fn(async () => {
+  const loginTronClass = vi.fn(async () => {
     throw new PuCampusError('credentials', '學號或密碼錯誤');
   });
-  deps.puCampus = campus({ loginStudent });
+  deps.puCampus = campus({ loginTronClass });
   store.failNextCommit();
   const res = await dispatchFnRequest(
     'signInPuStudentId',
@@ -294,7 +306,7 @@ it('returns 503 when shared rate-limit storage cannot be written', async () => {
   );
   expect(res.status).toBe(503);
   expect(await res.json()).toEqual({ error: '服務暫時無法使用' });
-  expect(loginStudent).not.toHaveBeenCalled();
+  expect(loginTronClass).not.toHaveBeenCalled();
 });
 
 it('returns the teacher LMS unavailability code without echoing the password', async () => {
