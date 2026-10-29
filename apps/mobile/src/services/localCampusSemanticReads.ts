@@ -54,12 +54,18 @@ export async function resolveLocalCampusSemanticReads(input: {
       : call.tool === 'assignments' ? sense?.assignments.status === 'available'
       : call.tool === 'announcements' ? sense?.announcements.status === 'available'
       : context.timetable.source === 'saved-device-copy' || Boolean(sense);
+    const checkedAt = call.tool === 'timetable'
+      ? context.timetable.updatedAt
+      : call.tool === 'study-plan'
+        ? sense?.checkedAt ?? context.timetable.updatedAt
+        : sense?.checkedAt ?? null;
     results.push({
       id: call.tool + ':' + index,
       label: query.label,
       content: answer?.content || '目前沒有足夠且可核對的本機資料，請先在對應服務儲存或同步資料。',
       route: query.route,
       source: query.source,
+      checkedAt,
       status: available && answer && answer.tool !== 'online-required' ? 'available' : 'unavailable',
     });
   }
