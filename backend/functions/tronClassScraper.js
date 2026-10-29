@@ -1105,6 +1105,33 @@ async function tcFetchHomeworkSubmissions(cookies, courseId, homeworkId) {
 }
 
 /**
+ * For submission verification, never mistake an inaccessible endpoint for
+ * an empty submission history.
+ */
+async function tcFetchHomeworkSubmissionsStrict(cookies, courseId, homeworkId) {
+  const paths = [
+    '/api/courses/' + courseId + '/homework-activities/' + homeworkId + '/student-submissions',
+    '/api/courses/' + courseId + '/homework-activities/' + homeworkId + '/submissions',
+    '/api/courses/' + courseId + '/activities/' + homeworkId + '/student-submissions',
+  ];
+  for (const path of paths) {
+    let result;
+    try {
+      result = await tcFetchJson(TC_BASE + path, cookies);
+    } catch (error) {
+      if (isSessionExpiredError(error)) throw error;
+      if (error?.status === 404) continue;
+      throw error;
+    }
+    const submissions = Array.isArray(result) ? result :
+      result?.submissions ?? result?.student_submissions;
+    if (!Array.isArray(submissions)) throw httpError(502);
+    return submissions;
+  }
+  throw httpError(404);
+}
+
+/**
  * 提交文字作業。只對明確選擇的作業寫入一次，不自動重送 POST。
  * 若學校未開放這個端點，呼叫端保留原站繳交入口。
  */
@@ -1458,6 +1485,7 @@ module.exports = {
   tcFetchActivityDetail,
   tcFetchHomeworkDetail,
   tcFetchHomeworkSubmissions,
+  tcFetchHomeworkSubmissionsStrict,
   tcSubmitHomeworkText,
   tcFetchExamDetail,
   tcFetchExamAttempts,
