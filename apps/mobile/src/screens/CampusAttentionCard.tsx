@@ -3,44 +3,12 @@ import { Text, View } from 'react-native';
 import { AICard, aiTokens } from '../ui/aiFirst';
 import { assignmentDeadlineLabel } from '../services/campusAssignmentQuery';
 import {
-  buildCampusAttentionFeed, type CampusAttentionPriority,
+  buildCampusAttentionFeed, buildCampusAttentionReminderStep, type CampusAttentionPriority,
 } from '../services/campusAttentionFeed';
 import type { CampusSenseSnapshot } from '../services/campusSenseSnapshot';
 import { CampusAssignmentOpenButton } from './CampusAssignmentOpenButton';
 import { CampusAssignmentReminderAction } from './CampusAssignmentReminderAction';
-import { parseCampusAssignmentSource } from '../services/campusAssignmentSource';
-import type { CampusPlanPriority, CampusPlanStep } from '../services/offlineCampusPlanner';
 import type { CampusAssignmentWorkbenchContext } from './CampusAssignmentWorkbench';
-
-const PLAN_PRIORITY: Record<CampusAttentionPriority, CampusPlanPriority> = {
-  'due-soon': 'urgent',
-  'past-due': 'overdue',
-  'this-week': 'soon',
-  'unknown-date': 'verify',
-  later: 'normal',
-};
-
-/** Never schedule a reminder from a date-only string or model-authored text. */
-function verifiedReminderStep(item: {
-  key: string;
-  assignment: CampusSenseSnapshot['assignments']['items'][number];
-  priority: CampusAttentionPriority;
-}): CampusPlanStep | null {
-  const dueAt = item.assignment.dueAt;
-  if ((item.priority !== 'due-soon' && item.priority !== 'this-week') ||
-      !dueAt || !/T.*(?:Z|[+-]\d{2}:\d{2})$/i.test(dueAt) ||
-      !parseCampusAssignmentSource(item.assignment.source)) return null;
-  return {
-    id: 'attention-' + item.key,
-    title: item.assignment.title.replace(/\s+/g, ' ').trim().slice(0, 130),
-    detail: '依已授權作業的截止時間設定手機提醒。',
-    priority: PLAN_PRIORITY[item.priority],
-    evidence: 'authorized-assignments',
-    route: '/classroom',
-    dueAt,
-    groupName: item.assignment.groupName,
-  };
-}
 
 const PRIORITY_LABEL: Record<CampusAttentionPriority, string> = {
   'due-soon': '24 小時內截止',
@@ -82,7 +50,9 @@ export function CampusAttentionCard({ snapshot, context, disabled }: {
         <Text style={{ color: aiTokens.muted, fontSize: 12, lineHeight: 19 }}>
           依 {synced} 已同步的授權作業整理。僅顯示可能需要注意的期限，不代表所有學校系統都已接通或作業尚未繳交。
         </Text>
-        {feed.items.map((item) => (
+        {feed.items.map((item) => {
+          const reminderStep = buildCampusAttentionReminderStep(item);
+          return (
           <View
             key={item.key}
             style={{
@@ -115,9 +85,9 @@ export function CampusAttentionCard({ snapshot, context, disabled }: {
                 disabled={disabled}
               />
             ) : null}
-            {verifiedReminderStep(item) ? (
+            {reminderStep ? (
               <CampusAssignmentReminderAction
-                step={verifiedReminderStep(item)!}
+                step={reminderStep}
                 snapshot={snapshot}
                 userId={context.userId}
                 schoolId={context.schoolId}
@@ -126,7 +96,8 @@ export function CampusAttentionCard({ snapshot, context, disabled }: {
               />
             ) : null}
           </View>
-        ))}
+          );
+        })}
         {feed.remainingVisible > 0 ? (
           <Text style={{ color: aiTokens.muted, fontSize: 12 }}>
             還有 {feed.remainingVisible} 筆已同步作業，可在下方作業工作台查看完整清單。
