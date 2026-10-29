@@ -1,0 +1,61 @@
+import { render, screen } from '@testing-library/react';
+import { beforeEach, expect, it, vi } from 'vitest';
+import HomeworkDetailPage from './page';
+import { loadTronClassLms } from '@/lib/tronClassLms';
+import type { LmsReadonlySnapshot } from '@/lib/tronClassLmsTypes';
+
+const context = vi.hoisted(() => ({ uid: 'one' as string | null }));
+vi.mock('@/components/AuthGuard', () => ({
+  useAuth: () => ({ user: context.uid ? { uid: context.uid } : null, loading: false, error: null }),
+}));
+vi.mock('@/lib/useCampusBrowseContext', () => ({
+  useCampusBrowseContext: () => ({
+    status: 'ready', schoolId: 'pu', schoolName: '靜宜大學', schoolSearch: '?schoolId=pu&campus=pu',
+  }),
+}));
+vi.mock('@/lib/signInOptions', () => ({ useSignInOptions: () => ({ studentId: true, loading: false }) }));
+vi.mock('@/components/AppHeader', () => ({ AppHeader: () => null }));
+vi.mock('@/components/OfflineBanner', () => ({ OfflineBanner: () => null }));
+vi.mock('@/components/PWAInstallBanner', () => ({ PWAInstallBanner: () => null }));
+vi.mock('@/components/UpdateBanner', () => ({ UpdateBanner: () => null }));
+vi.mock('@/components/SiteFooter', () => ({ SiteFooter: () => null }));
+vi.mock('@/components/SelectedSchoolProvider', () => ({
+  useOptionalSelectedSchool: () => ({ selectedSchool: { id: 'pu' }, loading: false, catalogStatus: 'ready' }),
+}));
+vi.mock('next/navigation', () => ({
+  usePathname: () => '/school-lms/homework/10001/20001',
+  useSearchParams: () => new URLSearchParams(),
+  useParams: () => ({ courseId: '10001', homeworkId: '20001' }),
+}));
+vi.mock('@/lib/tronClassLms', () => ({
+  loadTronClassLms: vi.fn(),
+  findLmsHomework: (snapshot: LmsReadonlySnapshot, courseId: number, homeworkId: number) =>
+    snapshot.homework.find((item) => item.courseId === courseId && item.id === homeworkId),
+}));
+
+function snapshot(): LmsReadonlySnapshot {
+  return {
+    success: true, ownerUid: 'one', schoolId: 'pu', source: 'pu-tronclass',
+    fetchedAt: '2026-05-29T04:00:00.000Z', cache: { hit: true, expiresAt: '2026-05-29T04:10:00.000Z' },
+    homework: [{
+      id: 20001, courseId: 10001, courseName: '資料庫系統', title: '期末專題提案',
+      deadline: '2026-05-29T15:59:00Z', deadlineLabel: '2026/5/29 下午11:59', submitted: false,
+      description: '請上傳提案 PDF', href: 'https://tronclass.pu.edu.tw/course/10001/content#/activity/20001',
+    }],
+    announcements: [], materials: [], courseErrors: [], siteAnnouncementError: null, upcomingCoursesError: null,
+  };
+}
+
+beforeEach(() => {
+  context.uid = 'one';
+  vi.mocked(loadTronClassLms).mockReset().mockResolvedValue(snapshot());
+});
+
+it('shows the homework description and the matching WOW Class link', async () => {
+  render(<HomeworkDetailPage />);
+  expect(await screen.findByRole('heading', { name: '期末專題提案' })).toBeTruthy();
+  expect(await screen.findByText('請上傳提案 PDF')).toBeTruthy();
+  expect(screen.getByRole('link', { name: '玩課雲同一筆 ↗' }).getAttribute('href')).toBe(
+    'https://tronclass.pu.edu.tw/course/10001/content#/activity/20001',
+  );
+});
