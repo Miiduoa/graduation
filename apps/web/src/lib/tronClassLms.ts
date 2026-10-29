@@ -219,3 +219,50 @@ export function findLmsHomework(
 ): LmsHomeworkItem | undefined {
   return snapshot.homework.find((item) => item.courseId === courseId && item.id === homeworkId);
 }
+
+
+export type TronClassSubmissionReceipt = {
+  status: 'verified' | 'pending';
+  receiptId: string | null;
+  submittedAt: string | null;
+};
+
+export async function submitTronClassHomework(
+  uid: string,
+  courseId: number,
+  homeworkId: number,
+  content: string,
+): Promise<TronClassSubmissionReceipt> {
+  const user = getAuth()?.currentUser;
+  if (!user || !uid || user.uid !== uid || !isFirebaseConfigured() ||
+      !positiveId(courseId) || !positiveId(homeworkId)) {
+    throw new AcademicConnectionError('reconnect');
+  }
+  const token = await user.getIdToken();
+  if (getAuth()?.currentUser !== user) throw new AcademicConnectionError('reconnect');
+  // No automatic retry: a timeout after the remote POST is not proof of failure.
+  const response = await fetch(getCloudFunctionUrl('submitMyTronClassHomework'), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token },
+    body: JSON.stringify({ data: { courseId, homeworkId, content, confirmed: true } }),
+    cache: 'no-store',
+  });
+  const envelope = asRecord(await response.json().catch(() => null));
+  if (getAuth()?.currentUser !== user) throw new AcademicConnectionError('reconnect');
+  if (!response.ok || !envelope || envelope.error) {
+    const reason = asRecord(envelope?.error);
+    throw new Error(typeof reason?.message === 'string'
+      ? reason.message.slice(0, 300) : '校方繳交狀態尚未確認，請先至玩課雲核對。');
+  }
+  const result = asRecord(envelope.result);
+  if (!result || !['verified', 'pending'].includes(String(result.status)) ||
+      !(result.receiptId === null || typeof result.receiptId === 'string') ||
+      !(result.submittedAt === null || typeof result.submittedAt === 'string')) {
+    throw new Error('校方回執尚未確認，請先至玩課雲核對。');
+  }
+  return {
+    status: result.status as TronClassSubmissionReceipt['status'],
+    receiptId: result.receiptId as string | null,
+    submittedAt: result.submittedAt as string | null,
+  };
+}
