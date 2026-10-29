@@ -56,7 +56,9 @@ export function TronClassHomeworkComposer({
     try {
       const result = await submitTronClassHomework(uid, courseId, homeworkId, text);
       setReceipt(result);
-      try { window.sessionStorage.removeItem(key); } catch { /* private browsing */ }
+      if (result.status === 'verified') {
+        try { window.sessionStorage.removeItem(key); } catch { /* private browsing */ }
+      }
     } catch (error) {
       setUncertain(error instanceof Error ? error.message : '校方回應不明，請先核對作業。');
     } finally {
