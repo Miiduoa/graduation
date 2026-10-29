@@ -267,3 +267,52 @@ export async function submitTronClassHomework(
     submittedAt: result.submittedAt as string | null,
   };
 }
+
+
+export type TronClassHomeworkStatus = {
+  status: 'verified' | 'pending' | 'not_submitted';
+  receiptId: string | null;
+  submittedAt: string | null;
+  checkedAt: string;
+};
+
+export async function checkTronClassHomework(
+  uid: string,
+  courseId: number,
+  homeworkId: number,
+): Promise<TronClassHomeworkStatus> {
+  const user = getAuth()?.currentUser;
+  if (!user || user.uid !== uid || !isFirebaseConfigured() ||
+      !positiveId(courseId) || !positiveId(homeworkId)) {
+    throw new AcademicConnectionError('reconnect');
+  }
+  const token = await user.getIdToken();
+  if (getAuth()?.currentUser !== user) throw new AcademicConnectionError('reconnect');
+  const response = await fetch(getCloudFunctionUrl('getMyTronClassHomeworkStatus'), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token },
+    body: JSON.stringify({ data: { courseId, homeworkId } }),
+    cache: 'no-store',
+  });
+  const envelope = asRecord(await response.json().catch(() => null));
+  if (getAuth()?.currentUser !== user) throw new AcademicConnectionError('reconnect');
+  if (!response.ok || !envelope || envelope.error) {
+    const error = asRecord(envelope?.error);
+    throw new Error(typeof error?.message === 'string'
+      ? error.message.slice(0, 300) : '暫時無法核對玩課雲繳交紀錄。');
+  }
+  const result = asRecord(envelope.result);
+  if (!result ||
+      !['verified', 'pending', 'not_submitted'].includes(String(result.status)) ||
+      !(result.receiptId === null || typeof result.receiptId === 'string') ||
+      !(result.submittedAt === null || typeof result.submittedAt === 'string') ||
+      typeof result.checkedAt !== 'string' || !Number.isFinite(Date.parse(result.checkedAt))) {
+    throw new Error('玩課雲回執無法辨識，請至原站核對。');
+  }
+  return {
+    status: result.status as TronClassHomeworkStatus['status'],
+    receiptId: result.receiptId as string | null,
+    submittedAt: result.submittedAt as string | null,
+    checkedAt: result.checkedAt,
+  };
+}
