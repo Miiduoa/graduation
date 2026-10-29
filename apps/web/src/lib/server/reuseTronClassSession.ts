@@ -3,7 +3,6 @@ import { schoolSessionCookies, schoolSessionExpiry } from './academicRecordsHand
 
 type SessionRecord = Record<string, unknown>;
 type SessionSnap = { exists: boolean; data: () => SessionRecord };
-type SessionRef = { id?: string; get?: () => Promise<SessionSnap> };
 type SessionQuery = {
   where: (field: string, op: string, value: unknown) => SessionQuery;
   orderBy: (field: string, direction: 'desc') => SessionQuery;
