@@ -21,6 +21,7 @@ const { parsePuGradeDocument, parseGradeSemesterCodes } = require('./lib/puGrade
 const { buildDerivedCreditSummary } = require('./lib/puCreditSummary');
 const { parsePuCourseTime } = require('./lib/puCourseTime');
 const { taipeiDateKey } = require('./lib/taipeiDay');
+const { sendWithCampusFetch, setCampusHttpFetch } = require('./lib/puCampusTransport');
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -105,11 +106,37 @@ function hopTimeoutMs(deadlineAt) {
 }
 
 function httpsRequest(hostname, path, method, cookies, body, timeoutMs = REQUEST_TIMEOUT_MS) {
+  if (!CAMPUS_HOSTS.has(hostname) || !path.startsWith('/') || path.startsWith('//')) {
+    return Promise.reject(new Error('Untrusted campus URL'));
+  }
+  const extraHeaders = {
+    'User-Agent':
+      'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+    Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+    'Accept-Language': 'zh-TW,zh;q=0.9,en-US;q=0.8,en;q=0.7',
+  };
+  if (body) extraHeaders['Content-Type'] = 'application/x-www-form-urlencoded';
+  return sendWithCampusFetch({
+    url: `https://${hostname}${path}`,
+    method,
+    cookies,
+    body,
+    headers: extraHeaders,
+    timeoutMs,
+    maxResponseBytes: MAX_RESPONSE_BYTES,
+  }).then((relayed) => {
+    if (!relayed) return httpsRequestDirect(hostname, path, method, cookies, body, timeoutMs);
+    return {
+      status: relayed.status,
+      headers: relayed.headers,
+      data: relayed.body,
+      cookies: relayed.cookies,
+    };
+  });
+}
+
+function httpsRequestDirect(hostname, path, method, cookies, body, timeoutMs = REQUEST_TIMEOUT_MS) {
   return new Promise((resolve, reject) => {
-    if (!CAMPUS_HOSTS.has(hostname) || !path.startsWith('/') || path.startsWith('//')) {
-      reject(new Error('Untrusted campus URL'));
-      return;
-    }
     const bodyBuf = body ? Buffer.from(body, 'utf8') : null;
     const headers = {
       'User-Agent':
@@ -1032,6 +1059,7 @@ async function puFetchStudentInfo(cookies) {
 // graduation eligibility from the available academic records.
 
 module.exports = {
+  setCampusHttpFetch,
   puLogin,
   puFetchCourses,
   puFetchGrades,

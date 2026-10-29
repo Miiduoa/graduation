@@ -11,6 +11,7 @@
  */
 
 const https = require('https');
+const { sendWithCampusFetch, setCampusHttpFetch } = require('./lib/puCampusTransport');
 
 const TC_BASE = 'https://tronclass.pu.edu.tw';
 const TC_LOGIN_ENTRY_URL = `${TC_BASE}/login?next=/user/index`;
@@ -101,8 +102,32 @@ function isCredentialError(body) {
 }
 
 function httpsRequest(url, { method = 'GET', body, cookies = {}, headers = {}, timeoutMs, maxResponseBytes } = {}) {
+  const parsed = normalizeRequestUrl(url);
+  return sendWithCampusFetch({
+    url: parsed.toString(),
+    method,
+    body,
+    cookies,
+    headers: { ...COMMON_HEADERS, ...headers },
+    timeoutMs,
+    maxResponseBytes,
+    timeoutMessage: 'TronClass request timed out',
+  }).then((relayed) => {
+    if (relayed) {
+      return {
+        status: relayed.status,
+        headers: relayed.headers,
+        body: relayed.body,
+        cookies: relayed.cookies,
+        url: parsed.toString(),
+      };
+    }
+    return httpsRequestDirect(parsed, { method, body, cookies, headers, timeoutMs, maxResponseBytes });
+  });
+}
+
+function httpsRequestDirect(parsed, { method = 'GET', body, cookies = {}, headers = {}, timeoutMs, maxResponseBytes } = {}) {
   return new Promise((resolve, reject) => {
-    const parsed = normalizeRequestUrl(url);
     const bodyBuffer = body ? Buffer.from(body, 'utf8') : null;
     const requestHeaders = {
       ...COMMON_HEADERS,
@@ -1303,6 +1328,7 @@ async function tcFetchCourseFullData(cookies, courseId) {
 }
 
 module.exports = {
+  setCampusHttpFetch,
   tcLogin,
   tcFetchCourses,
   tcFetchModules,
