@@ -131,3 +131,17 @@ it('keeps ambiguous writes locked in the UI if the school still has no receipt',
   expect(screen.queryByRole('button', { name: '確認繳交至玩課雲' })).toBeNull();
   expect(submitTronClassHomework).toHaveBeenCalledTimes(1);
 });
+
+
+it('keeps an editable local draft while remote submissions are disabled', async () => {
+  render(<TronClassHomeworkComposer {...props} writeEnabled={false} />);
+  expect(screen.getByText(/校方直接繳交尚未開通/)).toBeTruthy();
+  expect(screen.queryByRole('button', { name: '確認繳交至玩課雲' })).toBeNull();
+  fireEvent.change(screen.getByRole('textbox', { name: '作業草稿' }), {
+    target: { value: '先完成的文字作業' },
+  });
+  expect(screen.getByRole('button', { name: '複製作業草稿' })).toBeTruthy();
+  expect(window.sessionStorage.getItem('tronclass-draft:pu-student:10001:20001'))
+    .toBe('先完成的文字作業');
+  expect(submitTronClassHomework).not.toHaveBeenCalled();
+});
