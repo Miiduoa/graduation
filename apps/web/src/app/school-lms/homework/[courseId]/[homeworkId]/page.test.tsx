@@ -96,3 +96,32 @@ it('shows the homework description and the matching WOW Class link', async () =>
     'https://tronclass.pu.edu.tw/course/10001/content#/activity/20001',
   );
 });
+
+
+it('does not expose a school write button before the server explicitly enables it', async () => {
+  const data = snapshot();
+  vi.mocked(loadTronClassLms).mockResolvedValue({
+    ...data,
+    capabilities: { textHomeworkSubmit: false },
+  });
+  render(<HomeworkDetailPage />);
+  expect(await screen.findByRole('heading', { name: '期末專題提案' })).toBeTruthy();
+  expect(screen.getByText('校方直接繳交尚未開通')).toBeTruthy();
+  expect(screen.queryByRole('button', { name: '預覽並確認繳交' })).toBeNull();
+});
+
+it('does not retain a previous account homework when the viewer switches accounts', async () => {
+  const loaded = snapshot();
+  vi.mocked(loadTronClassLms).mockResolvedValueOnce(loaded);
+  const { rerender } = render(<HomeworkDetailPage />);
+  expect(await screen.findByRole('heading', { name: '期末專題提案' })).toBeTruthy();
+  context.uid = 'other';
+  let resolveNext!: (value: LmsReadonlySnapshot) => void;
+  vi.mocked(loadTronClassLms).mockImplementationOnce(() => new Promise((resolve) => {
+    resolveNext = resolve;
+  }));
+  rerender(<HomeworkDetailPage />);
+  expect(screen.queryByRole('heading', { name: '期末專題提案' })).toBeNull();
+  await act(async () => resolveNext({ ...snapshot(), ownerUid: 'other', homework: [] }));
+  expect(await screen.findByRole('heading', { name: '這次讀取裡沒有這份作業' })).toBeTruthy();
+});
