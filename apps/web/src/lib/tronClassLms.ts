@@ -44,6 +44,7 @@ function readHomework(value: unknown): LmsHomeworkItem {
   return {
     id, courseId, courseName: row.courseName, title: row.title, deadline: row.deadline,
     deadlineLabel: row.deadlineLabel, submitted: row.submitted, description: row.description, href: row.href,
+    submissionType: typeof row.submissionType === 'string' ? row.submissionType.slice(0, 50) : null,
   };
 }
 
