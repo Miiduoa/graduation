@@ -14,10 +14,11 @@ type Props = {
   homeworkId: number;
   href: string;
   submissionType?: string | null;
+  writeEnabled?: boolean;
 };
 
 export function TronClassHomeworkComposer({
-  uid, courseId, homeworkId, href, submissionType,
+  uid, courseId, homeworkId, href, submissionType, writeEnabled = true,
 }: Props) {
   const [text, setText] = useState('');
   const [preview, setPreview] = useState(false);
@@ -99,6 +100,16 @@ export function TronClassHomeworkComposer({
         <h3>這份作業需要上傳檔案</h3>
         <p className={styles.meta}>目前尚未支援玩課雲附件直接繳交，請使用原站完成上傳。</p>
         <a className="btn primary" href={href} target="_blank" rel="noopener noreferrer">開啟玩課雲繳交</a>
+      </section>
+    );
+  }
+
+  if (!writeEnabled) {
+    return (
+      <section className={styles.composer} aria-label="玩課雲作業繳交">
+        <h3>校方直接繳交尚未開通</h3>
+        <p className={styles.meta}>作業、公告及教材可在 Campus One 閱讀。為避免未驗證的作業送出流程影響正式繳交，請先至玩課雲原站完成這份作業。</p>
+        <a className="btn primary" href={href} target="_blank" rel="noopener noreferrer">前往玩課雲繳交</a>
       </section>
     );
   }
