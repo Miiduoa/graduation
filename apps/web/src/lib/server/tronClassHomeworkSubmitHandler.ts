@@ -112,23 +112,39 @@ export function createTronClassHomeworkSubmitHandler({
       throw new HttpsError('permission-denied', '目前修課清單不包含這門課，未進行繳交。');
     }
     const homework = await getHomework(source, cookies, courseId, homeworkId);
+    const detail = source.fetchHomeworkDetail
+      ? row(await source.fetchHomeworkDetail(cookies, courseId, homeworkId))
+      : {};
+    const policy = { ...homework, ...row(homework.data), ...detail, ...row(detail.data) };
     if (isHomeworkSubmitted(homework as { submitted?: unknown }) ||
-        homework.is_submitted === true ||
+        homework.is_submitted === true || policy.is_submitted === true ||
         ['submitted', 'graded'].includes(String(homework.submission_status || ''))) {
       throw new HttpsError('already-exists', '校方已顯示這份作業繳交完成，請勿重複送出。');
     }
-    const type = String(homework.submission_type ?? row(homework.data).submission_type ?? '').toLowerCase();
-    if (['file', 'files', 'attachment', 'upload'].includes(type)) {
+    if (policy.closed === true || policy.is_closed === true ||
+        ['closed', 'archived'].includes(String(policy.status || '').toLowerCase())) {
+      throw new HttpsError('failed-precondition', '老師已關閉這份作業，無法直接繳交。');
+    }
+    const type = String(policy.submission_type ?? policy.submit_type ?? '').toLowerCase();
+    if (['file', 'files', 'attachment', 'upload', 'file_only'].includes(type)) {
       throw new HttpsError('failed-precondition', '這份作業只接受附件，請至玩課雲上傳檔案。');
     }
-    const deadline = homework.deadline ?? homework.end_time;
+    const deadline = policy.deadline ?? policy.end_time ?? policy.end_date;
     const due = typeof deadline === 'string' ? Date.parse(deadline) : NaN;
     if (Number.isFinite(due) && due < now() &&
-        homework.allow_late !== true && row(homework.data).allow_late !== true) {
+        policy.allow_late !== true && policy.allow_late_submission !== true) {
       throw new HttpsError('failed-precondition', '作業已過截止時間，請至玩課雲確認是否可補交。');
     }
     const existing = await source.fetchHomeworkSubmissions(cookies, courseId, homeworkId);
-    if (existing.some((item) => isOwnReceipt(item, userId, null))) {
+    if (!Array.isArray(existing)) {
+      throw new HttpsError('unavailable', '目前無法確認繳交歷史，未進行繳交。');
+    }
+    const submitted = existing.filter((item) => isOwnReceipt(item, userId, null));
+    const max = Number(policy.max_submissions ?? policy.max_submission_count);
+    if (Number.isSafeInteger(max) && max > 0 && submitted.length >= max) {
+      throw new HttpsError('failed-precondition', '這份作業已達老師設定的繳交次數上限。');
+    }
+    if (submitted.length) {
       throw new HttpsError('already-exists', '玩課雲已有你的繳交紀錄，請先核對。');
     }
 
