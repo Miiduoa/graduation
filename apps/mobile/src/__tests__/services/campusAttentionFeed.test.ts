@@ -87,7 +87,7 @@ test('only real source IDs with timezone-bound deadlines can enter the confirmed
   const original = snapshot();
   const feed = buildCampusAttentionFeed({ snapshot: original, scope, now: NOW })!;
   const imminent = feed.items[0];
-  expect(buildCampusAttentionReminderStep(imminent)).toMatchObject({
+  expect(buildCampusAttentionReminderStep(imminent, original)).toMatchObject({
     title: '同名作業',
     dueAt: original.assignments.items[4].dueAt,
     groupName: '資料庫',
@@ -95,21 +95,34 @@ test('only real source IDs with timezone-bound deadlines can enter the confirmed
     route: '/classroom',
     priority: 'urgent',
   });
-  expect(buildCampusAttentionReminderStep(feed.items[1])).toBeNull(); // past deadline
+  expect(buildCampusAttentionReminderStep(feed.items[1], original)).toBeNull(); // past deadline
 
   const missingIdentity = {
     ...imminent, assignment: { ...imminent.assignment, source: undefined },
   };
-  expect(buildCampusAttentionReminderStep(missingIdentity)).toBeNull();
+  expect(buildCampusAttentionReminderStep(missingIdentity, original)).toBeNull();
   const withoutTimezone = {
     ...imminent, assignment: { ...imminent.assignment, dueAt: '2026-10-30' },
   };
-  expect(buildCampusAttentionReminderStep(withoutTimezone)).toBeNull();
+  expect(buildCampusAttentionReminderStep(withoutTimezone, original)).toBeNull();
   const malformedIdentity = {
     ...imminent, assignment: {
       ...imminent.assignment,
       source: { kind: 'group-assignment' as const, groupId: 'https://evil.test', assignmentId: 'id' },
     },
   };
-  expect(buildCampusAttentionReminderStep(malformedIdentity)).toBeNull();
+  expect(buildCampusAttentionReminderStep(malformedIdentity, original)).toBeNull();
+});
+
+test('same title and deadline across distinct source IDs cannot create a colliding reminder', () => {
+  const source = snapshot();
+  const near = source.assignments.items[4];
+  source.assignments.items.push({
+    ...near,
+    source: { kind: 'group-assignment', groupId: 'db', assignmentId: 'a3' },
+  });
+  source.assignments.count = source.assignments.items.length;
+  const feed = buildCampusAttentionFeed({ snapshot: source, scope, now: NOW })!;
+  expect(feed.items[0].priority).toBe('due-soon');
+  expect(buildCampusAttentionReminderStep(feed.items[0], source)).toBeNull();
 });
