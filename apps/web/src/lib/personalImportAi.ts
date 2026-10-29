@@ -6,6 +6,7 @@ import {
   type PersonalImportAiResult,
 } from '@campus/shared/src/imports/aiRecognition';
 import type { PersonalImportOptions } from '@campus/shared/src/imports/types';
+import { auditPersonalImportAiTable, personalImportAiTableAuditMessage, personalImportAiTableCoverageNotice } from '@campus/shared/src/imports/aiTableAudit';
 import { IMPORT_AI_CACHE_NAME, IMPORT_AI_DOWNLOAD_LABEL } from './personalImportAiConfig';
 
 export type PersonalImportAiRequest = {
@@ -158,7 +159,22 @@ export async function runPersonalImportAi({
       }
     });
     if (signal.aborted) throw abortError();
-    return parsePersonalImportAiResponse(raw, source, snapshot, mode);
+    const parsed = parsePersonalImportAiResponse(raw, source, snapshot, mode);
+    if (mode === 'image') return parsed; // Generated transcription is not an independent source.
+    onProgress('正在逐列對照原始表格，檢查漏列與欄位配對。');
+    if (signal.aborted) throw abortError();
+    const audit = auditPersonalImportAiTable(source, parsed.rows, snapshot.kind, '', snapshot.periodProfile);
+    if (audit.status === 'mismatch') throw new Error(personalImportAiTableAuditMessage(audit));
+    if (audit.status === 'matched') {
+      return {
+        ...parsed,
+        issues: [...parsed.issues, personalImportAiTableCoverageNotice(audit.expectedRecords)],
+        rows: parsed.rows.map((row) => ({
+          ...row, source: { ...row.source, line: audit.sourceLines[row.id] ?? row.source.line },
+        })),
+      };
+    }
+    return parsed;
   } finally {
     worker?.terminate();
     running = false;

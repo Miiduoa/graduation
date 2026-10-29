@@ -49,9 +49,14 @@ describe('lossless import text batches', () => {
       offset += batch.text.length;
     }
   });
-  it('never splits quoted multiline TSV cells using newline guesses', () => {
-    const text = `課程名稱\t學分\t成績\n${('"跨行\n課名"\t3\t85\n').repeat(100)}`;
-    expect(() => plan(text)).toThrow('無法安全拆開');
+  it('splits complete quoted multiline TSV records without cutting a cell', () => {
+    const record = '"跨行\n課名"\t3\t85\n';
+    const text = `課程名稱\t學分\t成績\n${record.repeat(100)}`;
+    const batches = plan(text);
+    expect(batches).toHaveLength(13);
+    expect(batches.map((batch) => batch.text).join('')).toBe(text);
+    expect(batches.every((batch) => batch.text.endsWith(record))).toBe(true);
+    expect(batches.reduce((count, batch) => count + batch.text.split(record).length - 1, 0)).toBe(100);
   });
   it.each(['\n', '\r\n'])('rejects an oversized quoted cell containing a blank line (%j)', (newline) => {
     const source = '課程名稱\t學分\t備註' + newline + '資料庫\t3\t"' +

@@ -20,12 +20,18 @@ function normalizedLabel(value) {
   return cleanText(value).replace(/[\s（()）：:]/g, '').toLowerCase();
 }
 
+const TERM_DIGIT = { 一: '1', 二: '2', 三: '3', 上: '1', 下: '2', 暑: '3' };
+
+function termDigit(value) {
+  return TERM_DIGIT[value] || (/^[123]$/.test(value) ? value : '');
+}
+
 function semesterCodesInText(value) {
   const codes = [];
-  const pattern = /(?:學期別\s*(?:[（(]\s*Semester\s*[）)])?\s*[：:]?\s*(\d{2,3})\s*\[\s*([123])\s*\]|(\d{2,3})\s*學年度\s*第?\s*([123一二三])\s*學期)/gi;
+  const pattern = /(?:學期別\s*(?:[（(]\s*Semester\s*[）)])?\s*[：:]?\s*(\d{2,3})\s*\[\s*([123])\s*\]|(\d{2,3})\s*學年(?:度)?\s*第?\s*([123一二三上下暑])\s*學期?)/gi;
   for (const match of value.matchAll(pattern)) {
-    const term = match[2] || ({ 一: '1', 二: '2', 三: '3' }[match[4]] || match[4]);
-    codes.push((match[1] || match[3]) + term);
+    const term = match[2] || termDigit(match[4]);
+    if (term) codes.push((match[1] || match[3]) + term);
   }
   return codes;
 }
@@ -34,8 +40,25 @@ function semesterCell(value) {
   const text = cleanText(value);
   const heading = semesterCodesInText(text);
   if (heading.length === 1) return heading[0];
-  const match = text.match(/^(\d{2,3})\s*(?:[-/]\s*([123])|\[\s*([123])\s*\]|([123]))$/);
-  return match ? match[1] + (match[2] || match[3] || match[4]) : '';
+  const match = text.match(/^(\d{2,3})\s*(?:[-/]\s*([123])|\[\s*([123])\s*\]|([123上下暑]))$/);
+  if (!match) return '';
+  const term = match[2] || match[3] || termDigit(match[4]);
+  return term ? match[1] + term : '';
+}
+
+function parseCredits(value) {
+  const text = cleanText(value)
+    .replace(/[\uFF10-\uFF19]/g, (ch) => String.fromCharCode(ch.charCodeAt(0) - 0xFF10 + 48))
+    .replace(/\uFF0E/g, '.')
+    .replace(/學分(?:數)?$/u, '')
+    .trim();
+  if (!/^\d+(?:\.\d+)?$/.test(text)) return null;
+  const credits = Number(text);
+  return Number.isFinite(credits) ? credits : null;
+}
+
+function isLatinTitle(value) {
+  return /^[A-Za-z][A-Za-z0-9 .,&'()/\-]*$/.test(value);
 }
 
 function tableRows(table) {
@@ -137,18 +160,28 @@ function readDocument(html) {
     for (const cells of rows.slice(headerIndex + 1)) {
       if (headerColumns(cells)) continue;
       const title = cleanText(cells[columns.title]);
-      if (!title) continue;
-      const ownSemester = columns.semester === undefined ? semester : semesterCell(cells[columns.semester]);
-      if (!ownSemester) { skippedRows += 1; continue; }
-      rememberSemester(ownSemester);
+      const semesterText = columns.semester === undefined ? '' : cleanText(cells[columns.semester]);
+      const parsedSemester = semesterText ? semesterCell(semesterText) : '';
+      const inheritedSemester = parsedSemester || (semesterText ? '' : semester);
       const score = cleanText(cells[columns.score]);
-      if (isSummaryLabel(title)) {
-        if (score) appendSummary(summary, ownSemester, title, score);
+      const summaryLabel = [title, semesterText].find((label) => label && isSummaryLabel(label));
+      if (summaryLabel) {
+        if (inheritedSemester && score) appendSummary(summary, rememberSemester(inheritedSemester), summaryLabel, score);
+        if (inheritedSemester) semester = inheritedSemester;
         continue;
       }
+      if (!title) continue;
       const creditsText = cleanText(cells[columns.credits]);
-      if (!/^\d+(?:\.\d+)?$/.test(creditsText)) { skippedRows += 1; continue; }
-      const credits = Number(creditsText);
+      const credits = parseCredits(creditsText);
+      if (isLatinTitle(title) && credits === null && grades.length) {
+        const previous = grades[grades.length - 1];
+        if (!previous.courseNameEn) previous.courseNameEn = title;
+        continue;
+      }
+      const ownSemester = inheritedSemester;
+      if (!ownSemester) { skippedRows += 1; continue; }
+      semester = rememberSemester(ownSemester);
+      if (credits === null) { skippedRows += 1; continue; }
       const boundary = title.search(/[A-Z]/);
       const record = {
         semester: ownSemester,

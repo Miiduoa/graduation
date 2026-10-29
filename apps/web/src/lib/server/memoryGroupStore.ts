@@ -76,6 +76,9 @@ export function createMemoryGroupStore(seed: Array<[string, DocData]> = []) {
         const existing = options?.merge ? docs.get(path) || {} : {};
         docs.set(path, applyFields(existing, data));
       },
+      delete: async () => {
+        docs.delete(path);
+      },
     };
   }
 
