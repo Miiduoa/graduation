@@ -755,3 +755,20 @@ test('no real due time means the agent never offers a notification action', asyn
   expect(view.queryByText('設定手機本機截止提醒')).toBeNull();
   expect(scheduleCampusAssignmentReminder).not.toHaveBeenCalled();
 });
+
+test('shows a real in-flight device stage and clears it after the answer', async () => {
+  const pending = deferred<{ content: string; hasActions: boolean; source: 'device' }>();
+  request.mockImplementationOnce(({ onProgress }: { onProgress: (stage: string) => void }) => {
+    onProgress('reading-context');
+    return pending.promise;
+  });
+  const view = render(<CampusAssistantScreen />);
+  fireEvent.changeText(view.getByLabelText('詢問校園助理'), '幫我整理這週作業');
+  act(() => fireEvent.press(view.getByText('送出問題')));
+  expect(view.getByText('正在讀取手機已保存的課表')).toBeTruthy();
+  await act(async () => {
+    pending.resolve({ content: '已整理可確認的資訊', hasActions: false, source: 'device' });
+  });
+  expect(view.queryByText('正在讀取手機已保存的課表')).toBeNull();
+  expect(view.getByText('已整理可確認的資訊')).toBeTruthy();
+});
