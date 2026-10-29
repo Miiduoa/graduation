@@ -96,6 +96,15 @@ export function createTronClassHomeworkSubmitHandler({
       throw new HttpsError('failed-precondition', '無法確認玩課雲本人工作階段，未進行繳交。');
     }
 
+    // An earlier request may already have reached the school. Reject it before
+    // fetching remote state, as a transient read error must not allow a second POST.
+    const key = createHash('sha256').update(uid + ':' + courseId + ':' + homeworkId).digest('hex');
+    const lockRef = db.doc('_puTronClassHomeworkSubmissionLocks/' + key);
+    const earlier = await lockRef.get();
+    if (earlier.exists && earlier.data()?.state !== 'failed') {
+      throw new HttpsError('already-exists', '這份作業已有繳交請求，請先核對玩課雲狀態，避免重複繳交。');
+    }
+
     // 不接受前端傳入課程所有權或作業狀態。
     const courses = await source.fetchCourses(cookies, { userId, status: 'ongoing' });
     if (!Array.isArray(courses) ||
@@ -124,8 +133,6 @@ export function createTronClassHomeworkSubmitHandler({
     }
 
     // 單一使用者同一份作業只發起一次不可自動重試的 POST。
-    const key = createHash('sha256').update(uid + ':' + courseId + ':' + homeworkId).digest('hex');
-    const lockRef = db.doc('_puTronClassHomeworkSubmissionLocks/' + key);
     await db.runTransaction(async (tx) => {
       const [currentPortal, currentLms, previous] = await Promise.all([
         tx.get(portalSnap.ref), tx.get(lmsRef), tx.get(lockRef),
