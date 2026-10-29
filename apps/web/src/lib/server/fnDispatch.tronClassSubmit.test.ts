@@ -50,7 +50,14 @@ function setup() {
         headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: 'Bearer token' } : {}) },
         body: JSON.stringify({ data }),
       }), runtime);
-  return { store, source, request, verifyIdToken };
+  const check = async (data: unknown = { courseId: 10001, homeworkId: 20001 }, token = true) =>
+    dispatchFnRequest('getMyTronClassHomeworkStatus',
+      new Request('https://nuni.tw/api/fn/getMyTronClassHomeworkStatus', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: 'Bearer token' } : {}) },
+        body: JSON.stringify({ data }),
+      }), runtime);
+  return { store, source, request, check, verifyIdToken };
 }
 
 beforeEach(() => resetUidRateLimitForTests());
@@ -138,4 +145,47 @@ it('keeps a 2xx response unverified until school reports a matching receipt', as
   const response = await request();
   expect(response.status).toBe(200);
   expect((await response.json()).result.status).toBe('pending');
+});
+
+
+it('checks a verified personal receipt without triggering a second school POST', async () => {
+  const { check, source } = setup();
+  vi.mocked(source.fetchHomeworkSubmissions!).mockReset().mockResolvedValue([{
+    id: 99, student_id: 10, status: 'submitted', submitted_at: '2026-10-29T10:00:00Z',
+  }]);
+  const response = await check();
+  expect(response.status).toBe(200);
+  expect((await response.json()).result).toMatchObject({ status: 'verified', receiptId: '99' });
+  expect(source.submitHomeworkText).not.toHaveBeenCalled();
+});
+
+it('returns pending for an uncertain POST even if school has not indexed the receipt yet', async () => {
+  const { request, check, source } = setup();
+  vi.mocked(source.submitHomeworkText!).mockRejectedValueOnce(new Error('timeout'));
+  await request();
+  vi.mocked(source.fetchHomeworkSubmissions!).mockReset().mockResolvedValue([]);
+  const response = await check();
+  expect(response.status).toBe(200);
+  expect((await response.json()).result.status).toBe('pending');
+  expect(source.submitHomeworkText).toHaveBeenCalledTimes(1);
+});
+
+it('refuses to report an empty success when the school receipt API fails', async () => {
+  const { check, source } = setup();
+  vi.mocked(source.fetchHomeworkSubmissions!).mockRejectedValue(new Error('HTTP 502'));
+  const response = await check();
+  expect(response.status).toBe(503);
+  expect((await response.json()).error.message).toMatch(/無法查核/);
+  expect(source.submitHomeworkText).not.toHaveBeenCalled();
+});
+
+it('validates identity, enrollment and payload on school receipt lookups', async () => {
+  const { check, source, verifyIdToken } = setup();
+  expect((await check({}, false)).status).toBe(401);
+  expect((await check({ courseId: '10001', homeworkId: 20001 })).status).toBe(400);
+  vi.mocked(verifyIdToken).mockResolvedValueOnce({ uid: UID, schoolId: 'other' });
+  expect((await check()).status).toBe(403);
+  vi.mocked(source.fetchCourses).mockResolvedValueOnce([{ id: 99999 }]);
+  expect((await check()).status).toBe(403);
+  expect(source.fetchHomeworkSubmissions).not.toHaveBeenCalled();
 });
