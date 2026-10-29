@@ -355,11 +355,11 @@ function publicSnapshot(value: unknown, uid: string): LmsReadonlySnapshot | null
 function homeworkOnlySnapshot(snapshot: LmsReadonlySnapshot): LmsReadonlySnapshot {
   return {
     ...snapshot,
-    announcements: [],
+    announcements: snapshot.announcements.filter((item) => item.source === 'site'),
     materials: [],
     contentsLoadedFor: [],
     courseErrors: snapshot.courseErrors.filter((item) => item.area === 'homework'),
-    siteAnnouncementError: null,
+    siteAnnouncementError: snapshot.siteAnnouncementError,
   };
 }
 
@@ -371,7 +371,8 @@ function mergeExtras(
   const loaded = Object.keys(extras).map(Number).filter((id) => Number.isSafeInteger(id) && id > 0);
   return {
     ...snapshot,
-    announcements: loaded.flatMap((id) => extras[String(id)]?.announcements ?? []),
+    announcements: [...snapshot.announcements.filter((item) => item.source === 'site'),
+      ...loaded.flatMap((id) => extras[String(id)]?.announcements ?? [])],
     materials: loaded.flatMap((id) => extras[String(id)]?.materials ?? []),
     courseErrors: [...homeworkErrors, ...loaded.flatMap((id) => extras[String(id)]?.errors ?? [])],
     contentsLoadedFor: loaded,
@@ -511,8 +512,16 @@ export function createTronClassLmsHandler({
           upcomingCoursesError = { status: null };
         }
 
-        const homeworkResults = courses.length
-          ? await mapPool(courses, LMS_COURSE_CONCURRENCY, (course) => readPagedHomework(source, cookies, course))
+        const [homeworkResults, siteResult] = await Promise.all([
+          courses.length
+            ? mapPool(courses, LMS_COURSE_CONCURRENCY, (course) => readPagedHomework(source, cookies, course))
+            : Promise.resolve([]),
+          source.fetchSiteAnnouncements(cookies),
+        ]);
+        const siteAnnouncements = siteResult.ok
+          ? siteResult.value
+            .map((raw) => parseAnnouncement(raw, 'site', null))
+            .filter((item): item is LmsAnnouncementItem => Boolean(item))
           : [];
 
         await requireAcademicAccount(db, uid);
@@ -536,10 +545,10 @@ export function createTronClassLmsHandler({
           courses: courses.map((course): LmsCourseSummary => ({ id: course.id, name: course.name })),
           contentsLoadedFor: [],
           homework: homeworkResults.flatMap((item) => item.items),
-          announcements: [],
+          announcements: siteAnnouncements,
           materials: [],
           courseErrors: homeworkResults.flatMap((item) => item.error ? [item.error] : []),
-          siteAnnouncementError: null,
+          siteAnnouncementError: siteResult.ok ? null : { status: siteResult.status },
           upcomingCoursesError,
         };
         extras = {};
