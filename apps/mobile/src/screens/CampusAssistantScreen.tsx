@@ -224,7 +224,7 @@ function AssistantConversation({
       }
     }
   };
-  const briefPlan = async (question: string) => {
+  const briefPlan = async (question: string, replaceMissingSourceAnswer = false) => {
     if (!uid || lock.current || syncLock.current || !current()) return;
     lock.current = true;
     syncLock.current = true;
@@ -263,8 +263,16 @@ function AssistantConversation({
       if (!current() || controller.signal.aborted) return;
       setSyncBusy(false);
       setSyncProgress(null);
+      // A source-refresh retry replaces only its own previous unavailable answer.
+      // It must not remove unrelated conversation turns or duplicate the request.
+      const last = messages[messages.length - 1];
+      const previous = messages[messages.length - 2];
+      const replacePrevious = replaceMissingSourceAnswer &&
+        last?.role === 'assistant' && last.tool === 'online-required' &&
+        previous?.role === 'user' && previous.content === question;
       const next: CampusAssistantMessage[] = [
-        ...messages, { role: 'user', content: question },
+        ...(replacePrevious ? messages.slice(0, -2) : messages),
+        { role: 'user', content: question },
       ];
       // Reuse the phone's deterministic read-only tools before asking its GGUF.
       const reply = await askCampusAssistant({
@@ -568,6 +576,21 @@ function AssistantConversation({
                   : undefined}
               />
             ))}
+          {message.role === 'assistant' && message.source === 'device' &&
+            message.tool === 'online-required' && uid && index === messages.length - 1 &&
+            messages[index - 1]?.role === 'user' ? (
+              <View style={{ marginTop: 12, gap: 6 }}>
+                <AIButton
+                  label="更新授權資料，再由手機回答（需網路）"
+                  variant="ghost"
+                  disabled={busy || syncBusy}
+                  onPress={() => void briefPlan(messages[index - 1].content, true)}
+                />
+                <Text style={{ color: aiTokens.muted, fontSize: 12, lineHeight: 19 }}>
+                  只在你點擊後向校園服務讀取帳號可存取的摘要；問題仍交由手機端處理，不會自動提交作業或申請。
+                </Text>
+              </View>
+            ) : null}
           {message.role === 'assistant' && message.source === 'device' && (
             <Text style={{ color: aiTokens.muted, fontSize: 12, marginTop: 10 }}>
               {message.tool === 'local-agent'
