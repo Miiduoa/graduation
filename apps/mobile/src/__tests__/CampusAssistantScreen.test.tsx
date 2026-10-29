@@ -810,3 +810,17 @@ test('a user-confirmed refresh replaces the missing-source reply without duplica
   expect(view.getByText('已依授權資料整理作業')).toBeTruthy();
   expect(view.queryByText('需要正式資料來源才能核實')).toBeNull();
 });
+
+test('does not offer a school-snapshot refresh for unrelated live bus information', async () => {
+  request.mockResolvedValueOnce({
+    content: '公車到站時間需要即時資訊',
+    source: 'device', tool: 'online-required',
+    route: '/bus', hasActions: false,
+  });
+  const view = render(<CampusAssistantScreen />);
+  fireEvent.changeText(view.getByLabelText('詢問校園助理'), '公車還有幾分鐘到站？');
+  await act(async () => fireEvent.press(view.getByText('送出問題')));
+  expect(view.getByText('公車到站時間需要即時資訊')).toBeTruthy();
+  expect(view.queryByText('更新授權資料，再由手機回答（需網路）')).toBeNull();
+  expect(refreshCampusSenseSnapshot).not.toHaveBeenCalled();
+});
