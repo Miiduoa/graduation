@@ -142,6 +142,11 @@ async function invokeHostedCallable(
     const source = lmsReadonlySource ?? (await import('./tronClassLmsSource')).tronClassLmsReadonlySource;
     return createTronClassLmsHandler({ db: db as unknown as AcademicFirestore, source })(request);
   }
+  if (name === 'submitMyTronClassHomework') {
+    const { createTronClassHomeworkSubmitHandler } = await import('./tronClassHomeworkSubmitHandler');
+    const source = lmsReadonlySource ?? (await import('./tronClassLmsSource')).tronClassLmsReadonlySource;
+    return createTronClassHomeworkSubmitHandler({ db: db as unknown as AcademicFirestore, source })(request);
+  }
   if (name === 'getMyAcademicRecords') {
     const { createAcademicRecordsHandler } = await import('./academicRecordsHandlers');
     const fetchers = academicFetchers ?? (await import('./academicSchoolSource')).academicSchoolSource;
@@ -250,7 +255,7 @@ export async function dispatchFnRequest(
       resolved.verifyIdToken,
       isLeaveWebCallable(name) || name === 'correctAttendanceRecord' ||
         name === 'getMyAcademicRecords' || name === 'getMyTronClassCourses' ||
-        name === 'getMyTronClassLms' ||
+        name === 'getMyTronClassLms' || name === 'submitMyTronClassHomework' ||
         name === 'clearPuCampusSessions',
     );
     uid = auth?.uid;
