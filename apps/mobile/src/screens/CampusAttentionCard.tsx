@@ -53,49 +53,49 @@ export function CampusAttentionCard({ snapshot, context, disabled }: {
         {feed.items.map((item) => {
           const reminderStep = buildCampusAttentionReminderStep(item);
           return (
-          <View
-            key={item.key}
-            style={{
-              backgroundColor: aiTokens.panel,
-              borderColor: aiTokens.border,
-              borderWidth: 1,
-              borderRadius: 12,
-              padding: 13,
-              gap: 6,
-            }}
-          >
-            <Text style={{
-              color: item.priority === 'due-soon' || item.priority === 'past-due'
-                ? aiTokens.warning : aiTokens.muted,
-              fontSize: 12, fontWeight: '600',
-            }}>
-              {PRIORITY_LABEL[item.priority]}
-            </Text>
-            <Text numberOfLines={2} style={{ color: aiTokens.text, fontWeight: '700', fontSize: 15, lineHeight: 22 }}>
-              {item.assignment.title}
-            </Text>
-            <Text style={{ color: aiTokens.muted, fontSize: 12, lineHeight: 19 }}>
-              {item.assignment.groupName || '課程名稱未提供'} · {assignmentDeadlineLabel(item.assignment, now)}
-            </Text>
-            {context.navigation ? (
-              <CampusAssignmentOpenButton
-                assignment={item.assignment}
-                context={reminderContext}
-                navigation={context.navigation}
-                disabled={disabled}
-              />
-            ) : null}
-            {reminderStep ? (
-              <CampusAssignmentReminderAction
-                step={reminderStep}
-                snapshot={snapshot}
-                userId={context.userId}
-                schoolId={context.schoolId}
-                isCurrent={context.isCurrent}
-                disabled={disabled}
-              />
-            ) : null}
-          </View>
+            <View
+              key={item.key}
+              style={{
+                backgroundColor: aiTokens.panel,
+                borderColor: aiTokens.border,
+                borderWidth: 1,
+                borderRadius: 12,
+                padding: 13,
+                gap: 6,
+              }}
+            >
+              <Text style={{
+                color: item.priority === 'due-soon' || item.priority === 'past-due'
+                  ? aiTokens.warning : aiTokens.muted,
+                fontSize: 12, fontWeight: '600',
+              }}>
+                {PRIORITY_LABEL[item.priority]}
+              </Text>
+              <Text numberOfLines={2} style={{ color: aiTokens.text, fontWeight: '700', fontSize: 15, lineHeight: 22 }}>
+                {item.assignment.title}
+              </Text>
+              <Text style={{ color: aiTokens.muted, fontSize: 12, lineHeight: 19 }}>
+                {item.assignment.groupName || '課程名稱未提供'} · {assignmentDeadlineLabel(item.assignment, now)}
+              </Text>
+              {context.navigation ? (
+                <CampusAssignmentOpenButton
+                  assignment={item.assignment}
+                  context={reminderContext}
+                  navigation={context.navigation}
+                  disabled={disabled}
+                />
+              ) : null}
+              {reminderStep ? (
+                <CampusAssignmentReminderAction
+                  step={reminderStep}
+                  snapshot={snapshot}
+                  userId={context.userId}
+                  schoolId={context.schoolId}
+                  isCurrent={context.isCurrent}
+                  disabled={disabled}
+                />
+              ) : null}
+            </View>
           );
         })}
         {feed.remainingVisible > 0 ? (
