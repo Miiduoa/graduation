@@ -75,7 +75,7 @@ export const tronClassLmsReadonlySource: LmsReadonlySource = {
   fetchSiteAnnouncements: (cookies) =>
     wrapRead(() => tronClassScraper.tcFetchAnnouncementsStrict(cookies)),
   fetchHomeworkSubmissions: (cookies, courseId, homeworkId) =>
-    tronClassScraper.tcFetchHomeworkSubmissions(cookies, courseId, homeworkId),
+    tronClassScraper.tcFetchHomeworkSubmissionsStrict(cookies, courseId, homeworkId),
   submitHomeworkText: (cookies, courseId, homeworkId, content) =>
     tronClassScraper.tcSubmitHomeworkText(cookies, courseId, homeworkId, content),
 };
