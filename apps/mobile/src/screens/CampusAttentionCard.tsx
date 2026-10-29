@@ -28,11 +28,11 @@ function verifiedReminderStep(item: {
 }): CampusPlanStep | null {
   const dueAt = item.assignment.dueAt;
   if ((item.priority !== 'due-soon' && item.priority !== 'this-week') ||
-      !dueAt || !/T.*(?:Z|[+-]\\d{2}:\\d{2})$/i.test(dueAt) ||
+      !dueAt || !/T.*(?:Z|[+-]\d{2}:\d{2})$/i.test(dueAt) ||
       !parseCampusAssignmentSource(item.assignment.source)) return null;
   return {
     id: 'attention-' + item.key,
-    title: item.assignment.title.replace(/\\s+/g, ' ').trim().slice(0, 130),
+    title: item.assignment.title.replace(/\s+/g, ' ').trim().slice(0, 130),
     detail: '依已授權作業的截止時間設定手機提醒。',
     priority: PLAN_PRIORITY[item.priority],
     evidence: 'authorized-assignments',
