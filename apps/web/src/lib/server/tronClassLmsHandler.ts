@@ -292,11 +292,24 @@ async function loadCourseContents(
       combinedActivities.set(id, activity);
       continue;
     }
-    const currentFiles = uploadsOf(current);
-    const alternateFiles = uploadsOf(activity);
+    const filesByKey = new Map<string, Record<string, unknown>>();
+    for (const upload of [...uploadsOf(current), ...uploadsOf(activity)]) {
+      const key = shortText(upload.key || upload.file_key || upload.upload_id || upload.name || upload.filename, 200);
+      if (!key) continue;
+      const previous = filesByKey.get(key);
+      filesByKey.set(key, {
+        ...previous, ...upload,
+        // Conflicting permissions must never expand the school's download permission.
+        allow_download: previous?.allow_download === false || upload.allow_download === false
+          ? false : previous?.allow_download === true && upload.allow_download === true,
+      });
+    }
     combinedActivities.set(id, {
       ...current,
-      ...(alternateFiles.length > currentFiles.length ? activity : {}),
+      ...activity,
+      title: shortText(activity.title || activity.name) || shortText(current.title || current.name),
+      type: shortText(activity.type) || shortText(current.type),
+      uploads: [...filesByKey.values()],
     });
   }
   if (activitiesResult.ok || coursewareResult.ok) {
