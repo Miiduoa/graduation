@@ -91,6 +91,7 @@ function deps(options?: {
         options?.token ?? `token:${uid}:${claims.role}:${claims.schoolId}`,
       rateLimitGate: createLoginRateGate(),
       rateLimitSalt: 'test-rate-limit-salt',
+      validateTronClassSession: async () => true,
       scheduleCampusSso: (task: () => Promise<void>) => {
         scheduled.push(task);
       },
@@ -1025,4 +1026,29 @@ it('reuses a previously linked WOW Class session on the next login', async () =>
   await flushSso();
   expect(store.docs.get('_puSessions/' + second.puSessionId)?.tronClassSessionId).toBe(original);
   expect(loginTronClass).toHaveBeenCalledTimes(1);
+});
+
+
+it('reconnects automatically when an old school cookie fails verification', async () => {
+  const loginTronClass = vi.fn(async () => ({
+    cookies: { session: 'new-verified-cookie' }, userId: 9,
+    userName: '陳同學', role: 'student',
+  }));
+  const { runtime, store, flushSso } = deps({ campus: campus({ loginTronClass }) });
+  const first = await handleSignInPuStudentId(
+    { studentId: STUDENT, password: SECRET, schoolId: 'pu' }, '1.1.1.1', runtime,
+  );
+  await flushSso();
+  const linkedBefore = store.docs.get('_puSessions/' + first.puSessionId)?.tronClassSessionId;
+  expect(linkedBefore).toBeTruthy();
+  runtime.validateTronClassSession = async () => false;
+
+  const second = await handleSignInPuStudentId(
+    { studentId: STUDENT, password: SECRET, schoolId: 'pu' }, '1.1.1.1', runtime,
+  );
+  await flushSso();
+  expect(loginTronClass).toHaveBeenCalledTimes(2);
+  const linkedAfter = store.docs.get('_puSessions/' + second.puSessionId)?.tronClassSessionId;
+  expect(linkedAfter).toBeTruthy();
+  expect(linkedAfter).not.toBe(linkedBefore);
 });
