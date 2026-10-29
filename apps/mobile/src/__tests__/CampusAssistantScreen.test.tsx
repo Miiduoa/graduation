@@ -772,3 +772,41 @@ test('shows a real in-flight device stage and clears it after the answer', async
   expect(view.queryByText('正在讀取手機已保存的課表')).toBeNull();
   expect(view.getByText('已整理可確認的資訊')).toBeTruthy();
 });
+
+test('a user-confirmed refresh replaces the missing-source reply without duplicate questions', async () => {
+  const question = '幫我查最新待交作業';
+  const verified = {
+    userId: 'A', schoolId: 'pu', checkedAt: new Date().toISOString(),
+    schedule: { status: 'unavailable', count: null },
+    assignments: {
+      status: 'available', count: 1,
+      items: [{ title: '已同步的課堂作業', groupName: '程式設計', dueAt: null }],
+    },
+    announcements: { status: 'unavailable', items: [] },
+  };
+  request
+    .mockResolvedValueOnce({
+      content: '需要正式資料來源才能核實', source: 'device',
+      tool: 'online-required', route: '/classroom', hasActions: false,
+    })
+    .mockResolvedValueOnce({
+      content: '已依授權資料整理作業', source: 'device',
+      tool: 'campus-snapshot', hasActions: false,
+    });
+  jest.mocked(refreshCampusSenseSnapshot).mockResolvedValueOnce(verified as never);
+  const view = render(<CampusAssistantScreen />);
+  fireEvent.changeText(view.getByLabelText('詢問校園助理'), question);
+  await act(async () => fireEvent.press(view.getByText('送出問題')));
+  expect(view.getByText('需要正式資料來源才能核實')).toBeTruthy();
+  const refresh = view.getByText('更新授權資料，再由手機回答（需網路）');
+  await act(async () => fireEvent.press(refresh));
+  expect(refreshCampusSenseSnapshot).toHaveBeenCalledTimes(1);
+  expect(jest.mocked(refreshCampusSenseSnapshot).mock.calls[0][0].scope).toEqual({ uid: 'A', schoolId: 'pu' });
+  expect(request.mock.calls[1][0]).toMatchObject({
+    mode: 'device',
+    senseSnapshot: verified,
+    messages: [{ role: 'user', content: question }],
+  });
+  expect(view.getByText('已依授權資料整理作業')).toBeTruthy();
+  expect(view.queryByText('需要正式資料來源才能核實')).toBeNull();
+});
