@@ -6,8 +6,11 @@ const {
   RELAY_TARGET_HEADER,
   RELAY_TS_HEADER,
   createCjsRelayFetch,
+  hostMatchesRelayAltHosts,
   isAllowedRelayTarget,
   normalizeRelayTarget,
+  parseRelayAltHosts,
+  readPuEdgeRelayAltConfig,
   readPuEdgeRelayConfig,
   sendWithCampusFetch,
   setCampusHttpFetch,
@@ -30,6 +33,9 @@ afterEach(() => {
   setCampusHttpFetch(null);
   delete process.env.PU_EDGE_RELAY_URL;
   delete process.env.PU_EDGE_RELAY_SECRET;
+  delete process.env.PU_EDGE_RELAY_ALT_URL;
+  delete process.env.PU_EDGE_RELAY_ALT_SECRET;
+  delete process.env.PU_EDGE_RELAY_ALT_HOSTS;
 });
 
 test('CJS HMAC matches the shared golden vector', () => {
@@ -150,4 +156,110 @@ test('env-based relay signs body hash, cookie and nonce to the worker URL', asyn
 
 test('without injection or env, sendWithCampusFetch leaves https.request in charge', async () => {
   await expect(sendWithCampusFetch({ url: 'https://alcat.pu.edu.tw/' })).resolves.toBeNull();
+});
+
+test('alt relay stays off unless url, secret and exact hosts are all set', () => {
+  expect(readPuEdgeRelayAltConfig({})).toBeNull();
+  process.env.PU_EDGE_RELAY_ALT_URL = 'https://alt.example';
+  process.env.PU_EDGE_RELAY_ALT_SECRET = 'alt-secret';
+  expect(readPuEdgeRelayAltConfig()).toBeNull();
+  process.env.PU_EDGE_RELAY_ALT_HOSTS = 'alcat.pu.edu.tw, *.pu.edu.tw, mypu.pu.edu.tw';
+  expect(readPuEdgeRelayAltConfig()).toEqual({
+    url: 'https://alt.example',
+    secret: 'alt-secret',
+    hosts: ['alcat.pu.edu.tw', 'mypu.pu.edu.tw'],
+  });
+  expect(parseRelayAltHosts('alcat.pu.edu.tw., www.alcat.pu.edu.tw')).toEqual([
+    'alcat.pu.edu.tw',
+    'www.alcat.pu.edu.tw',
+  ]);
+  expect(hostMatchesRelayAltHosts('www.alcat.pu.edu.tw', ['alcat.pu.edu.tw'])).toBe(false);
+  expect(hostMatchesRelayAltHosts('alcat.pu.edu.tw.', ['alcat.pu.edu.tw'])).toBe(true);
+});
+
+test('env-based alt relay signs listed hosts to the alt URL and keeps others on primary', async () => {
+  const logs = [];
+  const info = jest.spyOn(console, 'info').mockImplementation((message) => logs.push(String(message)));
+  const seen = [];
+  const relayFetch = createCjsRelayFetch(
+    {
+      url: 'https://pu-edge-relay.example.workers.dev',
+      secret: 'unit-test-secret',
+      alt: {
+        url: 'https://alt-relay.example.supabase.co/functions/v1/pu-edge-relay',
+        secret: 'unit-test-alt-secret',
+        hosts: ['alcat.pu.edu.tw', 'mypu.pu.edu.tw'],
+      },
+    },
+    async (url, init) => {
+      seen.push({ url, target: new Headers(init.headers).get(RELAY_TARGET_HEADER) });
+      return new Response('ok', { headers: { 'x-pu-relay-colo': 'supabase-ap-northeast-1' } });
+    },
+    () => 1_700_000_000_000,
+    () => 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
+  );
+
+  await sendWithCampusFetch({
+    url: 'https://alcat.pu.edu.tw./index_check.php',
+    method: 'GET',
+    fetch: relayFetch,
+  });
+  await sendWithCampusFetch({
+    url: 'https://identity.pu.edu.tw/auth',
+    method: 'GET',
+    fetch: relayFetch,
+  });
+  await sendWithCampusFetch({
+    url: 'https://www.alcat.pu.edu.tw/',
+    method: 'GET',
+    fetch: relayFetch,
+  });
+
+  expect(seen[0]).toEqual({
+    url: 'https://alt-relay.example.supabase.co/functions/v1/pu-edge-relay',
+    target: 'https://alcat.pu.edu.tw/index_check.php',
+  });
+  expect(seen[1]).toEqual({
+    url: 'https://pu-edge-relay.example.workers.dev',
+    target: 'https://identity.pu.edu.tw/auth',
+  });
+  expect(seen[2]).toEqual({
+    url: 'https://pu-edge-relay.example.workers.dev',
+    target: 'https://www.alcat.pu.edu.tw/',
+  });
+  expect(JSON.parse(logs[0])).toMatchObject({ host: 'alcat.pu.edu.tw', via: 'alt' });
+  expect(JSON.parse(logs[1])).not.toHaveProperty('via');
+  const alcatHeaders = await (async () => {
+    const fetchImpl = jest.fn(async (_url, init) => {
+      return new Response('ok');
+    });
+    const signed = createCjsRelayFetch(
+      {
+        url: 'https://pu-edge-relay.example.workers.dev',
+        secret: 'unit-test-secret',
+        alt: {
+          url: 'https://alt-relay.example.supabase.co/functions/v1/pu-edge-relay',
+          secret: 'unit-test-alt-secret',
+          hosts: ['alcat.pu.edu.tw'],
+        },
+      },
+      fetchImpl,
+      () => 1_700_000_000_000,
+      () => 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
+    );
+    await signed('https://alcat.pu.edu.tw/index_check.php', { method: 'GET' });
+    return new Headers(fetchImpl.mock.calls[0][1].headers);
+  })();
+  expect(alcatHeaders.get(RELAY_SIGN_HEADER)).toBe(
+    signRelayRequest('unit-test-alt-secret', {
+      timestamp: '1700000000',
+      nonce: 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
+      method: 'GET',
+      target: 'https://alcat.pu.edu.tw/index_check.php',
+      bodySha256: EMPTY_BODY_SHA256,
+      cookie: '',
+      contentType: '',
+    }),
+  );
+  info.mockRestore();
 });

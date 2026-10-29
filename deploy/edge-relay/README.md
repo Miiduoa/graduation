@@ -76,6 +76,8 @@ fly secrets set \
   -a nuni-web
 ```
 
+部分主機（例如 `alcat.pu.edu.tw`、`mypu.pu.edu.tw`）可改走東京的 Supabase 轉送，見 `deploy/supabase-relay/README.md`。沒設備援變數時，這裡的行為不變。
+
 若東京的 `nuni-functions` 也要打學校，用**同一組名稱**：
 
 ```sh
