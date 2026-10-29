@@ -53,7 +53,7 @@ function HomeworkCard({ item }: { item: LmsHomeworkItem }) {
       </div>
       <p className={lmsStyles.meta}>{item.courseName} · {item.deadlineLabel || '截止時間未提供'}</p>
       <div className={lmsStyles.actions}>
-        <Link href={`/school-lms/homework/${item.courseId}/${item.id}`}>查看說明</Link>
+        <Link href={`/school-lms/homework/${item.courseId}/${item.id}`}>{item.submitted ? '查看作業' : '查看與繳交'}</Link>
         <a href={item.href} target="_blank" rel="noopener noreferrer">玩課雲同一筆 ↗</a>
       </div>
     </li>
