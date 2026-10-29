@@ -27,6 +27,7 @@ export function TronClassHomeworkComposer({
   const [uncertain, setUncertain] = useState('');
   const [checking, setChecking] = useState(false);
   const [verificationNote, setVerificationNote] = useState('');
+  const [copyStatus, setCopyStatus] = useState('');
   const key = 'tronclass-draft:' + uid + ':' + courseId + ':' + homeworkId;
   const fileOnly = ['file', 'files', 'upload', 'attachment']
     .includes((submissionType || '').toLowerCase());
@@ -41,6 +42,7 @@ export function TronClassHomeworkComposer({
       setReceipt(null);
       setUncertain('');
       setVerificationNote('');
+      setCopyStatus('');
     });
     return () => { active = false; };
   }, [key]);
@@ -106,10 +108,45 @@ export function TronClassHomeworkComposer({
 
   if (!writeEnabled) {
     return (
-      <section className={styles.composer} aria-label="玩課雲作業繳交">
-        <h3>校方直接繳交尚未開通</h3>
-        <p className={styles.meta}>作業、公告及教材可在 Campus One 閱讀。為避免未驗證的作業送出流程影響正式繳交，請先至玩課雲原站完成這份作業。</p>
-        <a className="btn primary" href={href} target="_blank" rel="noopener noreferrer">前往玩課雲繳交</a>
+      <section className={styles.composer} aria-label="文字作業草稿">
+        <div className={styles.composerHeading}>
+          <div>
+            <p className={styles.eyebrow}>作業工作台</p>
+            <h3>文字作業草稿</h3>
+          </div>
+          <span className={styles.composerHint}>本機暫存 · 未繳交</span>
+        </div>
+        <p className={styles.meta}>目前可在 Campus One 撰寫與保存本分頁草稿；校方直接繳交尚未開通。請複製文字後前往玩課雲確認作業規則並正式繳交。</p>
+        <label className={styles.editorLabel} htmlFor="tronclass-offline-draft">作業草稿</label>
+        <textarea
+          id="tronclass-offline-draft"
+          className={styles.editor}
+          rows={8}
+          maxLength={12000}
+          value={text}
+          onChange={(event) => edit(event.target.value)}
+          placeholder="在這裡編輯作業文字，會保留於目前瀏覽器分頁。"
+        />
+        <div className={styles.editorFoot}>
+          <span>尚未送往校方系統。重新登入或切換裝置後不保證保留草稿。</span>
+          <span>{text.length.toLocaleString('zh-TW')} / 12,000</span>
+        </div>
+        {copyStatus ? <p className={styles.verificationNote} role="status">{copyStatus}</p> : null}
+        <div className={styles.actions}>
+          <button type="button" className="btn"
+            disabled={!text.trim()}
+            onClick={() => {
+              void (async () => {
+                try {
+                  await navigator.clipboard.writeText(text);
+                  setCopyStatus('已複製草稿；這不代表已完成作業繳交。');
+                } catch {
+                  setCopyStatus('無法自動複製，請手動選取草稿內容。');
+                }
+              })();
+            }}>複製作業草稿</button>
+          <a className="btn primary" href={href} target="_blank" rel="noopener noreferrer">前往玩課雲正式繳交</a>
+        </div>
       </section>
     );
   }
