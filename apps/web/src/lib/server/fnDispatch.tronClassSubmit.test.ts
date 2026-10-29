@@ -190,3 +190,45 @@ it('validates identity, enrollment and payload on school receipt lookups', async
   expect((await check()).status).toBe(403);
   expect(source.fetchHomeworkSubmissions).not.toHaveBeenCalled();
 });
+
+
+it('rejects a receipt belonging to a different homework even with the same student ID', async () => {
+  const { check, source } = setup();
+  vi.mocked(source.fetchHomeworkSubmissions!).mockReset().mockResolvedValue([{
+    id: 17, homework_id: 99999, student_id: 10,
+    status: 'submitted', submitted_at: '2026-10-29T10:00:00Z',
+  }]);
+  const status = await (await check()).json();
+  expect(status.result.status).toBe('not_submitted');
+  expect(source.submitHomeworkText).not.toHaveBeenCalled();
+});
+
+it('does not accept another homework receipt as a duplicate of the selected work', async () => {
+  const { request, source } = setup();
+  vi.mocked(source.fetchHomeworkSubmissions!).mockReset().mockResolvedValue([{
+    id: 17, homework_id: 99999, student_id: 10,
+    status: 'submitted', submitted_at: '2026-10-29T10:00:00Z',
+  }]);
+  const response = await request();
+  expect(response.status).toBe(200);
+  expect((await response.json()).result.status).toBe('pending');
+  expect(source.submitHomeworkText).toHaveBeenCalledOnce();
+});
+
+it('stops remote writing when the administrator has not enabled the school endpoint', async () => {
+  const { request, source } = setup();
+  const { createMemoryGroupStore: createStore } = await import('./memoryGroupStore');
+  expect(createStore).toBeDefined();
+  // Default production mode is fail-closed; this test checks the handler directly.
+  const { createTronClassHomeworkSubmitHandler } = await import('./tronClassHomeworkSubmitHandler');
+  const handler = createTronClassHomeworkSubmitHandler({
+    db: setup().store.db as never,
+    source,
+    writeEnabled: false,
+  });
+  await expect(handler({
+    auth: { uid: UID, token: { schoolId: 'pu' } },
+    data: INPUT,
+  })).rejects.toMatchObject({ code: 'unimplemented' });
+  expect(source.submitHomeworkText).not.toHaveBeenCalled();
+});
