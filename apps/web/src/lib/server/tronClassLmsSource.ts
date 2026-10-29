@@ -42,6 +42,9 @@ export type LmsReadonlySource = {
   fetchHomeworkSubmissions?: (
     cookies: Record<string, string>, courseId: number, homeworkId: number,
   ) => Promise<unknown[]>;
+  fetchHomeworkDetail?: (
+    cookies: Record<string, string>, courseId: number, homeworkId: number,
+  ) => Promise<Record<string, unknown>>;
   submitHomeworkText?: (
     cookies: Record<string, string>, courseId: number, homeworkId: number, content: string,
   ) => Promise<{ accepted: boolean; receiptId: string | null; submittedAt: string | null }>;
@@ -74,6 +77,8 @@ export const tronClassLmsReadonlySource: LmsReadonlySource = {
     wrapRead(() => tronClassScraper.tcFetchCourseAnnouncementsStrict(cookies, courseId)),
   fetchSiteAnnouncements: (cookies) =>
     wrapRead(() => tronClassScraper.tcFetchAnnouncementsStrict(cookies)),
+  fetchHomeworkDetail: (cookies, courseId, homeworkId) =>
+    tronClassScraper.tcFetchHomeworkDetailStrict(cookies, courseId, homeworkId),
   fetchHomeworkSubmissions: (cookies, courseId, homeworkId) =>
     tronClassScraper.tcFetchHomeworkSubmissionsStrict(cookies, courseId, homeworkId),
   submitHomeworkText: (cookies, courseId, homeworkId, content) =>
