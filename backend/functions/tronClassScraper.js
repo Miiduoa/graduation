@@ -1078,6 +1078,27 @@ async function tcFetchHomeworkDetail(cookies, courseId, homeworkId) {
 }
 
 /**
+ * A submission must use current school settings rather than an older
+ * list-page copy of deadline and allowed submission modes.
+ */
+async function tcFetchHomeworkDetailStrict(cookies, courseId, homeworkId) {
+  let data;
+  try {
+    data = await tcFetchJson(TC_BASE +
+      '/api/courses/' + courseId + '/homework-activities/' + homeworkId, cookies);
+  } catch (error) {
+    if (error?.status !== 404) throw error;
+    data = await tcFetchJson(TC_BASE + '/api/activities/' + homeworkId, cookies);
+  }
+  if (!data || typeof data !== 'object' || Array.isArray(data)) throw httpError(502);
+  const detail = data.homework_activity && typeof data.homework_activity === 'object'
+    ? data.homework_activity : data;
+  if (detail.id != null && Number(detail.id) !== homeworkId) throw httpError(502);
+  if (detail.course_id != null && Number(detail.course_id) !== courseId) throw httpError(502);
+  return detail;
+}
+
+/**
  * 取得作業的學生提交記錄 (自己的)
  * 回傳: 提交時間、檔案、批改結果、教師評語
  */
@@ -1484,6 +1505,7 @@ module.exports = {
   // ── 新增端點 ──
   tcFetchActivityDetail,
   tcFetchHomeworkDetail,
+  tcFetchHomeworkDetailStrict,
   tcFetchHomeworkSubmissions,
   tcFetchHomeworkSubmissionsStrict,
   tcSubmitHomeworkText,
