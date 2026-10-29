@@ -57,6 +57,7 @@ function Records<K extends AcademicKind>(props: RecordsProps<K>) {
 }
 
 function RecordContent<K extends AcademicKind>({
+  kind,
   state,
   refresh,
   closedAlternative,
@@ -101,7 +102,9 @@ function RecordContent<K extends AcademicKind>({
               ? '目前帳號無法讀取這份資料'
               : unconfigured
                 ? '學校資料讀取尚未啟用'
-                : '暫時無法讀取學校資料'}
+                : kind === 'grades'
+                  ? '暫時無法讀取學校成績'
+                  : '暫時無法讀取學校資料'}
         </h2>
         <p>
           {reconnect

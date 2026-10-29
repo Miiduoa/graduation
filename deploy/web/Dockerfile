@@ -19,7 +19,7 @@ COPY apps/web/ ./apps/web/
 COPY packages/shared/ ./packages/shared/
 COPY scripts/import-ai/ ./scripts/import-ai/
 COPY backend/functions/puScraper.js backend/functions/tronClassScraper.js ./backend/functions/
-COPY backend/functions/lib/puGradeDocument.js backend/functions/lib/puCreditSummary.js backend/functions/lib/puCourseTime.js backend/functions/lib/taipeiDay.js ./backend/functions/lib/
+COPY backend/functions/lib/puGradeDocument.js backend/functions/lib/puCreditSummary.js backend/functions/lib/puCourseTime.js backend/functions/lib/taipeiDay.js backend/functions/lib/puSessionStore.js backend/functions/lib/puCampusTransport.js ./backend/functions/lib/
 
 # These are public browser settings. Never pass server credentials as build args.
 ARG NEXT_PUBLIC_FIREBASE_API_KEY

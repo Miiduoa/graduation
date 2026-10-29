@@ -1,24 +1,54 @@
 import type { CallableRequest } from './groupInviteHandlers';
 import { HttpsError } from './httpsError';
+import {
+  deleteOwnedPuSessions,
+  persistOwnedMypuCookies,
+  publicCampusDataResult,
+} from '../../../../../backend/functions/lib/puSessionStore.js';
 
 type RecordData = Record<string, unknown>;
 export type SchoolDataSnapshot = { exists: boolean; data: () => RecordData | undefined };
 type Snapshot = SchoolDataSnapshot;
-type SessionSnapshot = Snapshot & { ref: { get: () => Promise<Snapshot> } };
+export type AcademicDocRef = {
+  path?: string;
+  id?: string;
+  get: () => Promise<Snapshot>;
+  set?: (data: RecordData, options?: { merge?: boolean }) => Promise<unknown>;
+  delete?: () => Promise<unknown>;
+};
+type SessionSnapshot = Snapshot & { ref: AcademicDocRef };
 type SessionQuery = {
   where: (field: string, operator: string, value: unknown) => SessionQuery;
   orderBy: (field: string, direction: 'desc') => SessionQuery;
   limit: (count: number) => SessionQuery;
-  get: () => Promise<{ docs: SessionSnapshot[] }>;
+  get: () => Promise<{ docs: SessionSnapshot[]; empty?: boolean }>;
+};
+
+export type AcademicTransaction = {
+  get: (ref: AcademicDocRef) => Promise<Snapshot>;
+  set: (ref: AcademicDocRef, data: RecordData, options?: { merge?: boolean }) => void;
 };
 
 export type AcademicFirestore = {
-  doc: (path: string) => { get: () => Promise<Snapshot> };
+  doc: (path: string) => {
+    get: () => Promise<Snapshot>;
+    set?: (data: RecordData, options?: { merge?: boolean }) => Promise<unknown>;
+    delete?: () => Promise<unknown>;
+  };
   collection: (path: string) => SessionQuery;
+  runTransaction?: <T>(fn: (tx: AcademicTransaction) => Promise<T>) => Promise<T>;
 };
+export type AcademicGradeOptions = {
+  mypuCookies?: Record<string, string> | null;
+};
+
 export type AcademicFetchers = {
   courses: (cookies: Record<string, string>, semester: string) => Promise<unknown>;
-  grades: (cookies: Record<string, string>, semester: string) => Promise<unknown>;
+  grades: (
+    cookies: Record<string, string>,
+    semester: string,
+    options?: AcademicGradeOptions,
+  ) => Promise<unknown>;
 };
 
 function record(value: unknown): RecordData {
@@ -53,14 +83,7 @@ function unavailable(): never {
 }
 
 function publicResult(kind: keyof AcademicFetchers, result: RecordData): RecordData {
-  // 校務 cookie 與內部錯誤只留在伺服器，回應只包含頁面需要的資料欄位。
-  const keys = kind === 'courses'
-    ? ['courses', 'studentInfo', 'semester', 'totalCredits']
-    : ['grades', 'summary', 'allSemesters', 'creditSummary', 'coverage'];
-  return Object.fromEntries([
-    ['success', true],
-    ...keys.filter((key) => result[key] !== undefined).map((key) => [key, result[key]]),
-  ]);
+  return publicCampusDataResult(kind, result) as RecordData;
 }
 
 export async function requireAcademicAccount(db: AcademicFirestore, uid: string): Promise<void> {
@@ -112,9 +135,18 @@ export function createAcademicRecordsHandler({
       if (!selected || !session || session.ownerUid !== uid || !cookies ||
         !(schoolSessionExpiry(session.expiresAt) > now())) reconnect();
 
-      const result = record(await fetchers[dataType](cookies, ''));
+      const storedMypu = schoolSessionCookies(session.mypuCookies);
+      const result = record(
+        dataType === 'grades'
+          ? await fetchers.grades(cookies, '', { mypuCookies: storedMypu })
+          : await fetchers.courses(cookies, ''),
+      );
       if (result.code === 'session-expired') reconnect();
       if (result.success !== true || !Array.isArray(result[dataType])) unavailable();
+      const nextMypu = dataType === 'grades' ? schoolSessionCookies(result.mypuCookies) : null;
+      if (nextMypu) {
+        await persistOwnedMypuCookies(db, selected.ref, uid, nextMypu);
+      }
 
       // 學校回應較慢時，重新確認帳號、校籍與 session，避免撤銷後仍回傳資料。
       await requireAcademicAccount(db, uid);
@@ -137,5 +169,14 @@ export function createAcademicRecordsHandler({
       // 不把含有網址、cookie 或原始 HTML 的底層錯誤回傳給瀏覽器。
       unavailable();
     }
+  };
+}
+
+export function createClearPuCampusSessions({ db }: { db: AcademicFirestore }) {
+  return async (request: CallableRequest) => {
+    const uid = request.auth?.uid;
+    if (!uid) throw new HttpsError('unauthenticated', '請先登入校園帳號。');
+    const deleted = await deleteOwnedPuSessions(db, uid);
+    return { success: true, deleted };
   };
 }

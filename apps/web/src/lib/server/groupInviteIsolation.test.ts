@@ -15,6 +15,7 @@ it('does not import the Functions index, trigger runners, or custom-claims helpe
     'src/lib/server/timetableShareHandlers.ts',
     'src/lib/server/attendanceSessionHandlers.ts',
     'src/lib/server/leaveRequestHandlers.ts',
+    'src/lib/server/tronClassLmsHandler.ts',
     'src/lib/server/leaveWebApiEnabled.ts',
     'src/lib/server/signInPuStudentId.ts',
     'src/lib/server/schoolStudentIdLoginEnabled.ts',

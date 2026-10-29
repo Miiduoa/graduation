@@ -8,7 +8,7 @@ export const SCHOOL_LOGIN_GENERIC_ERROR = '登入失敗。請確認學號與密�
 export { TEACHER_LMS_UNAVAILABLE_CODE, TEACHER_LMS_UNAVAILABLE_COPY };
 
 const CLOSED_SERVER_ERROR = '尚未開放';
-const UNAVAILABLE_SERVER_ERROR = '學校系統暫時無法連線';
+export const UNAVAILABLE_SERVER_ERROR = '學校系統暫時無法連線';
 
 export class SchoolLoginHttpError extends Error {
   readonly status: number;
