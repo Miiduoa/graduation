@@ -15,10 +15,12 @@ function record(value: unknown): Record<string, unknown> {
 }
 
 function receiptForUser(
-  records: unknown[], userId: number, expectedReceiptId: string | null,
+  records: unknown[], userId: number, expectedReceiptId: string | null, homeworkId: number,
 ): { receiptId: string | null; submittedAt: string | null } | null {
   for (const raw of records) {
     const item = record(raw);
+    const linkedHomework = item.homework_id ?? item.homework_activity_id ?? item.activity_id;
+    if (linkedHomework != null && Number(linkedHomework) !== homeworkId) continue;
     const owner = Number(item.student_id ?? item.user_id ?? NaN);
     const id = item.id ?? item.submission_id;
     const ownerKnown = Number.isSafeInteger(owner) && owner > 0;
@@ -103,7 +105,7 @@ export function createTronClassHomeworkStatusHandler({
     }
     await requireAcademicAccount(db, uid);
     const expectedId = typeof lock?.receiptId === 'string' ? lock.receiptId : null;
-    const evidence = receiptForUser(records, userId, expectedId);
+    const evidence = receiptForUser(records, userId, expectedId, homeworkId);
     const checkedAt = new Date(now()).toISOString();
     if (evidence) {
       if (lockSnap.exists && typeof lockRef.set === 'function') {
