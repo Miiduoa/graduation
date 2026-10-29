@@ -40,6 +40,7 @@ export type FnRuntime = {
   academicFetchers?: AcademicFetchers;
   lmsCoursesFetcher?: LmsCoursesFetcher;
   lmsReadonlySource?: LmsReadonlySource;
+  lmsHomeworkWriteEnabled?: boolean;
   serviceAccount?: ServiceAccountSigner | null;
   rateLimitGate?: LoginRateGate;
   rateLimitSalt?: string;
@@ -131,6 +132,7 @@ async function invokeHostedCallable(
   academicFetchers?: AcademicFetchers,
   lmsCoursesFetcher?: LmsCoursesFetcher,
   lmsReadonlySource?: LmsReadonlySource,
+  lmsHomeworkWriteEnabled?: boolean,
 ): Promise<unknown> {
   if (name === 'getMyTronClassCourses') {
     const { createTronClassCoursesHandler } = await import('./tronClassCoursesHandler');
@@ -150,7 +152,10 @@ async function invokeHostedCallable(
   if (name === 'submitMyTronClassHomework') {
     const { createTronClassHomeworkSubmitHandler } = await import('./tronClassHomeworkSubmitHandler');
     const source = lmsReadonlySource ?? (await import('./tronClassLmsSource')).tronClassLmsReadonlySource;
-    return createTronClassHomeworkSubmitHandler({ db: db as unknown as AcademicFirestore, source })(request);
+    return createTronClassHomeworkSubmitHandler({
+      db: db as unknown as AcademicFirestore, source,
+      writeEnabled: lmsHomeworkWriteEnabled ?? process.env.TRONCLASS_HOMEWORK_WRITE_ENABLED === 'true',
+    })(request);
   }
   if (name === 'getMyAcademicRecords') {
     const { createAcademicRecordsHandler } = await import('./academicRecordsHandlers');
@@ -280,7 +285,8 @@ export async function dispatchFnRequest(
       auth,
     };
     const result = await invokeHostedCallable(name, callableRequest, resolved.db,
-      resolved.academicFetchers, resolved.lmsCoursesFetcher, resolved.lmsReadonlySource);
+      resolved.academicFetchers, resolved.lmsCoursesFetcher, resolved.lmsReadonlySource,
+      resolved.lmsHomeworkWriteEnabled);
     return jsonResponse(200, { result }, cors);
   } catch (error) {
     const mapped = mapThrownError(error);
