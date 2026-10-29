@@ -1,4 +1,4 @@
-import { buildCampusAttentionFeed } from '../../services/campusAttentionFeed';
+import { buildCampusAttentionFeed, buildCampusAttentionReminderStep } from '../../services/campusAttentionFeed';
 import { CAMPUS_SENSE_MAX_AGE_MS, type CampusSenseSnapshot } from '../../services/campusSenseSnapshot';
 
 const NOW = Date.parse('2026-10-29T08:00:00Z');
@@ -81,4 +81,35 @@ test('complete empty snapshots have zero items, not a fabricated task', () => {
   expect(buildCampusAttentionFeed({ snapshot: source, scope, now: NOW })).toMatchObject({
     items: [], remainingVisible: 0, missingFromSource: 0, incomplete: false,
   });
+});
+
+test('only real source IDs with timezone-bound deadlines can enter the confirmed local reminder flow', () => {
+  const original = snapshot();
+  const feed = buildCampusAttentionFeed({ snapshot: original, scope, now: NOW })!;
+  const imminent = feed.items[0];
+  expect(buildCampusAttentionReminderStep(imminent)).toMatchObject({
+    title: '同名作業',
+    dueAt: original.assignments.items[4].dueAt,
+    groupName: '資料庫',
+    evidence: 'authorized-assignments',
+    route: '/classroom',
+    priority: 'urgent',
+  });
+  expect(buildCampusAttentionReminderStep(feed.items[1])).toBeNull(); // past deadline
+
+  const missingIdentity = {
+    ...imminent, assignment: { ...imminent.assignment, source: undefined },
+  };
+  expect(buildCampusAttentionReminderStep(missingIdentity)).toBeNull();
+  const withoutTimezone = {
+    ...imminent, assignment: { ...imminent.assignment, dueAt: '2026-10-30' },
+  };
+  expect(buildCampusAttentionReminderStep(withoutTimezone)).toBeNull();
+  const malformedIdentity = {
+    ...imminent, assignment: {
+      ...imminent.assignment,
+      source: { kind: 'group-assignment' as const, groupId: 'https://evil.test', assignmentId: 'id' },
+    },
+  };
+  expect(buildCampusAttentionReminderStep(malformedIdentity)).toBeNull();
 });
