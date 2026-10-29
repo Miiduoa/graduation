@@ -110,6 +110,8 @@ type SentPage = {
   json: unknown;
   location: string | null;
   url: string;
+  /** The server explicitly deleted its session cookie, not merely omitted one. */
+  sessionExplicitlyExpired?: boolean;
 };
 
 function cookieHeader(jar: CookieJar): string {
@@ -555,6 +557,11 @@ export function createPuCampusGateway(
         status: response.status,
         html,
         cookies: mergeCookies(init.cookies || {}, response.headers),
+        // Reuse the cookie parser to distinguish an explicit session deletion from a
+        // native login response without cookies, which may still need CAS fallback.
+        sessionExplicitlyExpired: !sessionCookieValue(
+          mergeCookies({ session: '__campus_session_probe__' }, response.headers),
+        ),
         location,
         url,
         json: (() => {
@@ -933,6 +940,10 @@ export function createPuCampusGateway(
         });
         if (posted.status === 200 && isCredentialPage(posted.html)) {
           throw new PuCampusError('credentials', '學號或密碼錯誤', { route, stage: 'submit' });
+        }
+        if (posted.status === 200 && posted.sessionExplicitlyExpired) {
+          // Do not retry credentials through CAS after a verified explicit logout.
+          throw new PuCampusError('credentials', '學校連線已失效，請重新登入', { route, stage: 'submit' });
         }
         if (posted.status === 200 && sessionCookieValue(posted.cookies)) {
           const loginData = asRecord(posted.json);
