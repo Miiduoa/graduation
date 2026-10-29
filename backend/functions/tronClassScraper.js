@@ -1129,7 +1129,7 @@ async function tcSubmitHomeworkText(cookies, courseId, homeworkId, content) {
     if (response.status < 200 || response.status >= 300) {
       throw httpError(response.status);
     }
-    let data = {};
+    let data;
     try {
       data = response.body ? JSON.parse(response.body) : {};
     } catch {
