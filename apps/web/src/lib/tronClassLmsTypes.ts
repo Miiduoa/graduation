@@ -8,6 +8,7 @@ export type LmsHomeworkItem = {
   submitted: boolean;
   description: string;
   href: string;
+  submissionType?: string | null;
 };
 
 export type LmsAnnouncementItem = {
