@@ -106,7 +106,8 @@ it('does not expose a school write button before the server explicitly enables i
   });
   render(<HomeworkDetailPage />);
   expect(await screen.findByRole('heading', { name: '期末專題提案' })).toBeTruthy();
-  expect(screen.getByText('校方直接繳交尚未開通')).toBeTruthy();
+  expect(screen.getByText(/校方直接繳交尚未開通/)).toBeTruthy();
+  expect(screen.getByRole('textbox', { name: '作業草稿' })).toBeTruthy();
   expect(screen.queryByRole('button', { name: '預覽並確認繳交' })).toBeNull();
 });
 
