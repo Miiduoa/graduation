@@ -194,6 +194,7 @@ test('drains more than 200 personal records, sessions and nested orphaned data w
     ['users/alice/postLoginRuns/run', { studentId: 'private' }],
     ['users/bob/private/one', { secret: 'keep' }],
     ['_puSessions/bob', { ownerUid: 'bob' }],
+    ['_puTronClassLmsCache/alice', { ownerUid: 'alice', snapshot: { homework: [] } }],
     ['notifications/bob', { userId: 'bob' }],
   ];
   for (let i = 0; i < 405; i++) {

@@ -40,6 +40,7 @@ import {
   isTronClassDataFetchEnabled,
   tronClassBackendReadWhenDisabled,
 } from './tronClassDataEnabled';
+import { isHomeworkSubmitted, isMaterialActivityType, isMobileUploadDownloadable } from '@campus/shared/src/puLmsReadonly';
 
 // ─── Constants ───────────────────────────────────────────
 
@@ -1909,7 +1910,7 @@ export async function tcFetchHomeworkActivities(courseId: number): Promise<any[]
       result.push({
         ...hw,
         // 標準化欄位給 UI 用
-        submitted: hw.submitted === true,
+        submitted: isHomeworkSubmitted(hw),
         graded: hw.score_published === true && Number.isFinite(scorePct) && scorePct > 0,
         student_score_percentage: scorePct,
         student_submitted_at: hw.updated_at ?? null,
@@ -2587,17 +2588,6 @@ export type TCExamInfo = {
  * 不能只抓 `courseware_activity` 一種。改成抓全部 activities 再過濾「非作業非考試」。
  */
 export async function tcFetchCourseActivities(courseId: number): Promise<TCCourseActivity[]> {
-  // 排除作業 / 考試類型；其他都算教材
-  const HOMEWORK_OR_EXAM = new Set([
-    'homework',
-    'exam',
-    'quiz',
-    'classroom',
-    'live',
-    'attendance',
-    'survey',
-  ]);
-
   // 抓全部 activities（不加 type filter）
   const urls = [
     `${TC_BASE}/api/courses/${courseId}/activities`,
@@ -2634,7 +2624,7 @@ export async function tcFetchCourseActivities(courseId: number): Promise<TCCours
   }
 
   return allActivities
-    .filter((a) => !HOMEWORK_OR_EXAM.has(String(a.type ?? '').toLowerCase()))
+    .filter((a) => isMaterialActivityType(a.type))
     .map(
       (a): TCCourseActivity => ({
         id: Number(a.id ?? 0),
@@ -2650,7 +2640,7 @@ export async function tcFetchCourseActivities(courseId: number): Promise<TCCours
               key: String(u.key ?? u.file_key ?? ''),
               type: String(u.type ?? u.mime_type ?? ''),
               size: Number(u.size ?? 0),
-              allow_download: u.allow_download !== false,
+              allow_download: isMobileUploadDownloadable(u),
             }))
           : Array.isArray(a.attachments)
           ? (a.attachments as Record<string, unknown>[]).map((u) => ({
@@ -2659,7 +2649,7 @@ export async function tcFetchCourseActivities(courseId: number): Promise<TCCours
               key: String(u.key ?? u.upload_id ?? ''),
               type: String(u.type ?? u.mime_type ?? ''),
               size: Number(u.size ?? 0),
-              allow_download: u.allow_download !== false,
+              allow_download: isMobileUploadDownloadable(u),
             }))
           : [],
       }),
