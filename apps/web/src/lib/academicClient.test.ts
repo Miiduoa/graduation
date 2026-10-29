@@ -116,6 +116,13 @@ it.each([
   await expect(loadAcademicRecords('grades', 'student-a')).rejects.toMatchObject({ reason });
 });
 
+it('maps an in-progress WOW Class sidecar to connecting', async () => {
+  fetchMock.mockImplementationOnce(async () => new Response(JSON.stringify({
+    error: { status: 'UNAVAILABLE', message: '正在連線 WOW Class，請稍候再讀取課程。', details: { code: 'lms-connecting' } },
+  }), { status: 503, headers: { 'Content-Type': 'application/json' } }));
+  await expect(loadAcademicRecords('grades', 'student-a')).rejects.toMatchObject({ reason: 'connecting' });
+});
+
 it('only identifies a disabled service from an explicit server response', async () => {
   fetchMock.mockImplementationOnce(async () => failure(503, 'UNAVAILABLE', '尚未啟用'));
   await expect(loadAcademicRecords('grades', 'student-a')).rejects.toMatchObject({ reason: 'unconfigured' });

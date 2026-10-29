@@ -115,6 +115,7 @@ test('recursive cleanup includes orphan descendants while preserving financial r
     ['groups/g/submissions/alice', { userId: 'alice', score: 90 }],
     ['_puSessions/alice-campus', { ownerUid: 'alice', cookies: 'private' }],
     ['_puTronClassSessions/alice-lms', { ownerUid: 'alice', cookies: 'private' }],
+    ['_puTronClassLmsCache/alice', { ownerUid: 'alice', snapshot: { homework: [] } }],
     ['_puSessions/bob-campus', { ownerUid: 'bob', cookies: 'keep' }],
   ]);
   assert.equal(await exists('users/alice/private/orphan'), false);
@@ -126,6 +127,7 @@ test('recursive cleanup includes orphan descendants while preserving financial r
     'users/alice/schools/pu/favorites/orphan/details/deep',
     '_puSessions/alice-campus',
     '_puTronClassSessions/alice-lms',
+    '_puTronClassLmsCache/alice',
   ])
     assert.equal(await exists(path), false, path);
   assert.equal(await exists('users/bob/private/orphan/children/deep'), true);

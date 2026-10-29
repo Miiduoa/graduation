@@ -1,5 +1,20 @@
 // @vitest-environment node
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
+
+const afterResponse = vi.hoisted(() => {
+  const scheduled: Array<() => Promise<void>> = [];
+  return {
+    scheduled,
+    scheduleAfterResponse: vi.fn((task: () => Promise<void>) => {
+      scheduled.push(task);
+    }),
+  };
+});
+
+vi.mock('./scheduleAfterResponse', () => ({
+  scheduleAfterResponse: afterResponse.scheduleAfterResponse,
+}));
+
 import { dispatchFnRequest, type FnRuntime } from './fnDispatch';
 import { resetFirebaseAdminForTests } from './firebaseAdmin';
 import { createLoginRateGate, LOGIN_RATE_LIMIT } from './loginRateLimit';
@@ -59,6 +74,8 @@ afterEach(() => {
   resetFirebaseAdminForTests();
   resetUidRateLimitForTests();
   delete process.env.FIREBASE_SERVICE_ACCOUNT_JSON;
+  afterResponse.scheduled.splice(0, afterResponse.scheduled.length);
+  afterResponse.scheduleAfterResponse.mockClear();
   vi.unstubAllEnvs();
 });
 
@@ -87,6 +104,62 @@ it('does not treat leftover NEXT_PUBLIC flag as the write switch', async () => {
   );
   expect(res.status).toBe(200);
   expect((await res.json()).customToken).toBe('token:pu-1110700321:student');
+});
+
+it('schedules background SSO with Next.js after() after a successful student login', async () => {
+  const loginTronClass = vi.fn(async () => ({
+    cookies: { session: 'tc-cookie' },
+    userId: 9,
+    userName: '陳同學',
+    role: 'student',
+  }));
+  const { runtime: deps, store } = runtime();
+  deps.puCampus = campus({ loginTronClass });
+  const res = await dispatchFnRequest(
+    'signInPuStudentId',
+    request({ studentId: STUDENT, password: SECRET }),
+    deps,
+  );
+  expect(res.status).toBe(200);
+  expect(loginTronClass).not.toHaveBeenCalled();
+  expect(afterResponse.scheduleAfterResponse).toHaveBeenCalledOnce();
+  expect(afterResponse.scheduled).toHaveLength(1);
+  await afterResponse.scheduled[0]?.();
+  expect(loginTronClass).toHaveBeenCalledOnce();
+  const body = (await res.json()) as { puSessionId?: string; uid?: string };
+  const portal = store.docs.get(`_puSessions/${body.puSessionId}`) as {
+    tronClassSessionId?: string;
+    ownerUid?: string;
+  };
+  expect(portal.ownerUid).toBe(body.uid);
+  expect(typeof portal.tronClassSessionId).toBe('string');
+  expect(store.docs.get(`_puTronClassSessions/${portal.tronClassSessionId}`)).toMatchObject({
+    ownerUid: body.uid,
+  });
+});
+
+it('does not keep a campus session when the client aborts before the login response', async () => {
+  const controller = new AbortController();
+  const { runtime: deps, store } = runtime();
+  deps.puCampus = campus({
+    loginStudent: async () => {
+      controller.abort();
+      return { cookies: { PHPSESSID: 'ok' }, studentName: '陳同學' };
+    },
+  });
+  const res = await dispatchFnRequest(
+    'signInPuStudentId',
+    new Request('https://nuni.tw/api/fn/signInPuStudentId', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ studentId: STUDENT, password: SECRET }),
+      signal: controller.signal,
+    }),
+    deps,
+  );
+  expect(res.status).toBe(503);
+  expect(afterResponse.scheduleAfterResponse).not.toHaveBeenCalled();
+  expect([...store.docs.keys()].some((path) => path.startsWith('_puSessions/'))).toBe(false);
 });
 
 it('uses the original HTTP body and response shape, not callable wrapping', async () => {

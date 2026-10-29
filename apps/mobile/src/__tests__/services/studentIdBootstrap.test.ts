@@ -421,7 +421,7 @@ test('an aborted backend wait cannot store credentials or send a late hosted req
     const pending = signInWithStudentId(params);
     const checked = expect(pending).rejects.toThrow();
     await reached.promise;
-    jest.advanceTimersByTime(45_000);
+    jest.advanceTimersByTime(80_000);
     await checked;
     reply.resolve(response(404));
     await Promise.resolve();

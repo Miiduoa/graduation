@@ -15,6 +15,7 @@ import type { SchoolLoginFirestore } from './schoolLoginProfile';
 import type { ServiceAccountSigner } from './firebaseCustomToken';
 import type { AcademicFetchers, AcademicFirestore } from './academicRecordsHandlers';
 import type { LmsCoursesFetcher } from './tronClassCoursesHandler';
+import type { LmsReadonlySource } from './tronClassLmsSource';
 import { LoginRateLimitError, LoginRateStoreError, type LoginRateGate } from './loginRateLimit';
 import { clientIpFromRequest, PuLoginHttpError } from './signInPuStudentId';
 
@@ -38,9 +39,11 @@ export type FnRuntime = {
   puCampus?: PuCampusGateway;
   academicFetchers?: AcademicFetchers;
   lmsCoursesFetcher?: LmsCoursesFetcher;
+  lmsReadonlySource?: LmsReadonlySource;
   serviceAccount?: ServiceAccountSigner | null;
   rateLimitGate?: LoginRateGate;
   rateLimitSalt?: string;
+  scheduleCampusSso?: (task: () => Promise<void>) => void;
 };
 
 function jsonResponse(status: number, body: unknown, extra?: HeadersInit): Response {
@@ -127,16 +130,26 @@ async function invokeHostedCallable(
   db: FnRuntime['db'],
   academicFetchers?: AcademicFetchers,
   lmsCoursesFetcher?: LmsCoursesFetcher,
+  lmsReadonlySource?: LmsReadonlySource,
 ): Promise<unknown> {
   if (name === 'getMyTronClassCourses') {
     const { createTronClassCoursesHandler } = await import('./tronClassCoursesHandler');
     const fetchCourses = lmsCoursesFetcher ?? (await import('./tronClassSchoolSource')).tronClassSchoolSource;
     return createTronClassCoursesHandler({ db: db as unknown as AcademicFirestore, fetchCourses })(request);
   }
+  if (name === 'getMyTronClassLms') {
+    const { createTronClassLmsHandler } = await import('./tronClassLmsHandler');
+    const source = lmsReadonlySource ?? (await import('./tronClassLmsSource')).tronClassLmsReadonlySource;
+    return createTronClassLmsHandler({ db: db as unknown as AcademicFirestore, source })(request);
+  }
   if (name === 'getMyAcademicRecords') {
     const { createAcademicRecordsHandler } = await import('./academicRecordsHandlers');
     const fetchers = academicFetchers ?? (await import('./academicSchoolSource')).academicSchoolSource;
     return createAcademicRecordsHandler({ db: db as unknown as AcademicFirestore, fetchers })(request);
+  }
+  if (name === 'clearPuCampusSessions') {
+    const { createClearPuCampusSessions } = await import('./academicRecordsHandlers');
+    return createClearPuCampusSessions({ db: db as unknown as AcademicFirestore })(request);
   }
   if (name === 'joinGroupByCode' || name === 'leaveGroup') {
     const { createGroupInviteHandlers } = await import('./groupInviteHandlers');
@@ -236,7 +249,9 @@ export async function dispatchFnRequest(
       request.headers.get('authorization'),
       resolved.verifyIdToken,
       isLeaveWebCallable(name) || name === 'correctAttendanceRecord' ||
-        name === 'getMyAcademicRecords' || name === 'getMyTronClassCourses',
+        name === 'getMyAcademicRecords' || name === 'getMyTronClassCourses' ||
+        name === 'getMyTronClassLms' ||
+        name === 'clearPuCampusSessions',
     );
     uid = auth?.uid;
     if (uid) {
@@ -254,7 +269,7 @@ export async function dispatchFnRequest(
       auth,
     };
     const result = await invokeHostedCallable(name, callableRequest, resolved.db,
-      resolved.academicFetchers, resolved.lmsCoursesFetcher);
+      resolved.academicFetchers, resolved.lmsCoursesFetcher, resolved.lmsReadonlySource);
     return jsonResponse(200, { result }, cors);
   } catch (error) {
     const mapped = mapThrownError(error);
@@ -274,6 +289,7 @@ async function dispatchSchoolLogin(
     const body = await readJsonBody(request);
     const { handleSignInPuStudentId } = await import('./signInPuStudentId');
     const { readServiceAccountSigner } = await import('./firebaseAdmin');
+    const { scheduleAfterResponse } = await import('./scheduleAfterResponse');
     const result = await handleSignInPuStudentId(body, clientIpFromRequest(request), {
       db: runtime.db as unknown as SchoolLoginFirestore,
       campus: runtime.puCampus,
@@ -281,6 +297,8 @@ async function dispatchSchoolLogin(
       serviceAccount: runtime.serviceAccount ?? readServiceAccountSigner(),
       rateLimitGate: runtime.rateLimitGate,
       rateLimitSalt: runtime.rateLimitSalt,
+      scheduleCampusSso: runtime.scheduleCampusSso ?? scheduleAfterResponse,
+      requestSignal: request.signal,
     });
     return jsonResponse(200, result, cors);
   } catch (error) {
