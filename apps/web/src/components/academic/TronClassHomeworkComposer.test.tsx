@@ -27,7 +27,7 @@ it('requires text preview and a deliberate second confirmation', async () => {
   });
   expect(submitTronClassHomework).not.toHaveBeenCalled();
   fireEvent.click(screen.getByRole('button', { name: '預覽並確認繳交' }));
-  expect(screen.getByText('我的作業內容')).toBeTruthy();
+  expect(screen.getByRole('region', { name: '繳交內容預覽' }).textContent).toContain('我的作業內容');
   expect(submitTronClassHomework).not.toHaveBeenCalled();
   fireEvent.click(screen.getByRole('button', { name: '確認繳交至玩課雲' }));
   await screen.findByText('已確認繳交');
