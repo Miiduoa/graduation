@@ -94,8 +94,9 @@ it('loads one activities request when opening a course and does not download loc
   const body = await (await request({ courseId: 10001 })).json();
   expect(source.fetchHomeworkPage).not.toHaveBeenCalled();
   expect(source.fetchCourses).not.toHaveBeenCalled();
-  expect(source.fetchActivities).toHaveBeenCalledTimes(1);
+  expect(source.fetchActivities).toHaveBeenCalledTimes(2);
   expect(source.fetchActivities).toHaveBeenCalledWith({ session: 'lms-secret' }, 10001, '');
+  expect(source.fetchActivities).toHaveBeenCalledWith({ session: 'lms-secret' }, 10001, 'type=courseware_activity');
   expect(source.fetchCourseAnnouncements).toHaveBeenCalledTimes(1);
   expect(body.result.materials[0].files).toEqual([
     expect.objectContaining({ name: 'notes.pdf', allowDownload: true, downloadHref: 'https://tronclass.pu.edu.tw/api/uploads/upload-key-notes/blob' }),
@@ -151,7 +152,7 @@ it('uses activity announcements on 404 without marking the course as empty succe
     expect.objectContaining({ title: '討論區公告', source: 'activity' }),
   ]);
   expect(body.result.materials).toHaveLength(1);
-  expect(source.fetchActivities).toHaveBeenCalledTimes(1);
+  expect(source.fetchActivities).toHaveBeenCalledTimes(2);
 });
 
 it('keeps ongoing homework when upcoming courses cannot be listed', async () => {
@@ -261,4 +262,28 @@ it('does not erase homework when site-wide announcements are unavailable', async
   const body = await (await request()).json();
   expect(body.result.homework).toHaveLength(2);
   expect(body.result.siteAnnouncementError).toEqual({ status: 503 });
+});
+
+
+it('enriches a course material from the courseware endpoint without duplicate cards', async () => {
+  const { request, source } = setup();
+  vi.mocked(source.fetchActivities).mockImplementation(async (_cookies, _courseId, query) => {
+    if (query === 'type=courseware_activity') {
+      return { ok: true, value: [{
+        id: 30001, title: '簡樸生活講義', type: 'material',
+        uploads: [{ name: 'new.pdf', key: 'new-safe-key', allow_download: true }],
+      }] };
+    }
+    return { ok: true, value: [{
+      id: 30001, title: '簡樸生活講義', type: 'material', uploads: [],
+    }] };
+  });
+  const response = await request({ courseId: 10001 });
+  expect(response.status).toBe(200);
+  const body = await response.json();
+  expect(body.result.materials).toHaveLength(1);
+  expect(body.result.materials[0].files).toEqual([
+    expect.objectContaining({ name: 'new.pdf', allowDownload: true }),
+  ]);
+  expect(source.fetchActivities).toHaveBeenCalledTimes(2);
 });
