@@ -1105,6 +1105,57 @@ async function tcFetchHomeworkSubmissions(cookies, courseId, homeworkId) {
 }
 
 /**
+ * 提交文字作業。只對明確選擇的作業寫入一次，不自動重送 POST。
+ * 若學校未開放這個端點，呼叫端保留原站繳交入口。
+ */
+async function tcSubmitHomeworkText(cookies, courseId, homeworkId, content) {
+  const urls = [
+    TC_BASE + '/api/courses/' + courseId + '/homework-activities/' + homeworkId + '/submissions',
+    TC_BASE + '/api/courses/' + courseId + '/homework/' + homeworkId + '/submissions',
+  ];
+  for (const [index, url] of urls.entries()) {
+    const response = await httpsRequest(url, {
+      method: 'POST',
+      body: JSON.stringify({ content }),
+      cookies,
+      headers: { 'Accept': 'application/json', 'Content-Type': 'application/json' },
+      timeoutMs: 15_000,
+      maxResponseBytes: 16_384,
+    });
+    if (response.status === 404 && index === 0) continue;
+    if (isSessionInvalidStatus(response.status)) {
+      throw new Error('TronClass session 已失效，請重新登入');
+    }
+    if (response.status < 200 || response.status >= 300) {
+      throw httpError(response.status);
+    }
+    let data = {};
+    try {
+      data = response.body ? JSON.parse(response.body) : {};
+    } catch {
+      // 校方可能回傳非 JSON 頁面；不將 HTML 登入頁當成成功。
+      throw httpError(502);
+    }
+    if (!data || typeof data !== 'object' || Array.isArray(data) ||
+        data.success === false || data.error) {
+      throw httpError(502);
+    }
+    const receipt = data.submission && typeof data.submission === 'object'
+      ? data.submission : data;
+    const id = receipt.id ?? receipt.submission_id ?? null;
+    const rawTime = receipt.submitted_at ?? receipt.created_at ?? null;
+    return {
+      accepted: true,
+      receiptId: (typeof id === 'number' && Number.isSafeInteger(id) && id > 0) ||
+        (typeof id === 'string' && /^[1-9][0-9]{0,19}$/.test(id)) ? String(id) : null,
+      submittedAt: typeof rawTime === 'string' && Number.isFinite(Date.parse(rawTime))
+        ? rawTime : null,
+    };
+  }
+  throw httpError(404);
+}
+
+/**
  * 取得單一考試詳情 (含考試說明、時長、題數、作答次數限制)
  */
 async function tcFetchExamDetail(cookies, courseId, examId) {
@@ -1407,6 +1458,7 @@ module.exports = {
   tcFetchActivityDetail,
   tcFetchHomeworkDetail,
   tcFetchHomeworkSubmissions,
+  tcSubmitHomeworkText,
   tcFetchExamDetail,
   tcFetchExamAttempts,
   tcFetchDiscussions,
