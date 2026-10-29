@@ -60,10 +60,12 @@ async function getHomework(source: LmsReadonlySource, cookies: Record<string, st
 /** 文字繳交：本人身分、即時修課、作業與原站回執缺一不可。 */
 export function createTronClassHomeworkSubmitHandler({
   db, source, now = Date.now,
+  writeEnabled = process.env.TRONCLASS_HOMEWORK_WRITE_ENABLED === 'true',
 }: {
   db: AcademicFirestore;
   source: LmsReadonlySource;
   now?: () => number;
+  writeEnabled?: boolean;
 }) {
   return async (request: CallableRequest): Promise<Result> => {
     const uid = request.auth?.uid;
@@ -72,6 +74,9 @@ export function createTronClassHomeworkSubmitHandler({
       throw new HttpsError('permission-denied', '這個帳號沒有靜宜大學玩課雲寫入權限。');
     }
     const { courseId, homeworkId, content } = parseInput(request.data);
+    if (!writeEnabled) {
+      throw new HttpsError('unimplemented', '校方作業直接繳交尚未正式開通，請先使用玩課雲原站。');
+    }
     if (!source.submitHomeworkText || !source.fetchHomeworkSubmissions || !db.runTransaction) {
       throw new HttpsError('unimplemented', '目前環境尚未啟用校方文字繳交。');
     }
