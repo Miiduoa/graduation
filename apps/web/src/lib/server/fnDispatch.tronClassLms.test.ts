@@ -71,7 +71,7 @@ it('loads homework without per-course activities on a cold list', async () => {
   expect(source.fetchHomeworkPage).toHaveBeenCalledTimes(1);
   expect(source.fetchActivities).not.toHaveBeenCalled();
   expect(source.fetchCourseAnnouncements).not.toHaveBeenCalled();
-  expect(source.fetchSiteAnnouncements).not.toHaveBeenCalled();
+  expect(source.fetchSiteAnnouncements).toHaveBeenCalledOnce();
   const body = await response.json();
   expect(body.result.homework).toEqual([
     expect.objectContaining({
@@ -236,4 +236,29 @@ it.each([{ refresh: 'yes' }, { sessionId: LMS_ID }, { status: 'ongoing' }, { cou
   const { request, source } = setup();
   expect((await request(data)).status).toBe(400);
   expect(source.fetchCourses).not.toHaveBeenCalled();
+});
+
+
+it('imports site announcements once and keeps them in the per-user cache', async () => {
+  const { request, source } = setup();
+  vi.mocked(source.fetchSiteAnnouncements).mockResolvedValue({
+    ok: true,
+    value: [{ id: 890, title: '全校公告', content: '學校學習平臺通知', created_at: '2026-05-20T02:00:00Z' }],
+  });
+  const first = await (await request()).json();
+  expect(first.result.announcements).toEqual([
+    expect.objectContaining({ title: '全校公告', source: 'site', courseId: null }),
+  ]);
+  const cached = await (await request()).json();
+  expect(cached.result.cache.hit).toBe(true);
+  expect(cached.result.announcements).toEqual(first.result.announcements);
+  expect(source.fetchSiteAnnouncements).toHaveBeenCalledTimes(1);
+});
+
+it('does not erase homework when site-wide announcements are unavailable', async () => {
+  const { request, source } = setup();
+  vi.mocked(source.fetchSiteAnnouncements).mockResolvedValue({ ok: false, status: 503 });
+  const body = await (await request()).json();
+  expect(body.result.homework).toHaveLength(2);
+  expect(body.result.siteAnnouncementError).toEqual({ status: 503 });
 });
