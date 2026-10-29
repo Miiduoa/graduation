@@ -145,6 +145,7 @@ function AssistantConversation({
   const [senseError, setSenseError] = useState('');
   const syncLock = useRef(false);
   const [deviceCheck, setDeviceCheck] = useState(0);
+  const [workbenchOpen, setWorkbenchOpen] = useState(false);
   const [agentStage, setAgentStage] = useState<CampusAssistantProgressPhase | null>(null);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
@@ -195,6 +196,7 @@ function AssistantConversation({
     if (lock.current || syncLock.current || next === mode) return;
     setMode(next);
     setMessages([]);
+    setWorkbenchOpen(false);
     setAgentStage(null);
     setError('');
   };
@@ -216,6 +218,7 @@ function AssistantConversation({
     inFlight.current = controller;
     setSyncBusy(true);
     setSyncProgress(null);
+    setWorkbenchOpen(false);
     setSenseError('');
     try {
       const snapshot = await refreshCampusSenseSnapshot({
@@ -476,7 +479,8 @@ function AssistantConversation({
           )}
         </View>
       </AICard>
-      {mode === 'device' && currentSense ? (
+      {mode === 'device' && currentSense && !workbenchOpen &&
+        !messages.some((item) => item.role === 'assistant' && (item.plan || item.localReads?.length)) ? (
         <CampusAttentionCard
           snapshot={currentSense}
           context={{ userId: uid, schoolId, isCurrent: current, navigation }}
@@ -498,6 +502,8 @@ function AssistantConversation({
             cancelledSync();
           }}
           assignmentContext={{ userId: uid, schoolId, isCurrent: current, navigation }}
+          workbenchOpen={workbenchOpen}
+          onWorkbenchChange={setWorkbenchOpen}
           onSync={() => void syncCampus()}
           onBrief={() => void briefPlan('今天要先處理什麼？')}
           onWeekBrief={() => void briefPlan('依手機課表與授權作業安排接下來七天的學習計畫')}
