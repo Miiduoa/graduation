@@ -271,15 +271,36 @@ async function loadCourseContents(
   course: CourseRow,
 ): Promise<CourseContents> {
   const errors: LmsCourseError[] = [];
-  const [activitiesResult, announcementResult] = await Promise.all([
+  const [activitiesResult, coursewareResult, announcementResult] = await Promise.all([
     source.fetchActivities(cookies, course.id, ''),
+    source.fetchActivities(cookies, course.id, 'type=courseware_activity'),
     source.fetchCourseAnnouncements(cookies, course.id),
   ]);
 
   const materials: LmsMaterialItem[] = [];
   const activityAnnouncements: LmsAnnouncementItem[] = [];
-  if (activitiesResult.ok) {
-    for (const raw of activitiesResult.value) {
+  const primaryItems = activitiesResult.ok ? activitiesResult.value : [];
+  const coursewareItems = coursewareResult.ok ? coursewareResult.value : [];
+  // A filtered activity can expose files omitted from the general endpoint.
+  const combinedActivities = new Map<number, Record<string, unknown>>();
+  for (const raw of [...primaryItems, ...coursewareItems]) {
+    const activity = record(raw);
+    const id = positiveId(activity.id);
+    if (!id) continue;
+    const current = combinedActivities.get(id);
+    if (!current) {
+      combinedActivities.set(id, activity);
+      continue;
+    }
+    const currentFiles = uploadsOf(current);
+    const alternateFiles = uploadsOf(activity);
+    combinedActivities.set(id, {
+      ...current,
+      ...(alternateFiles.length > currentFiles.length ? activity : {}),
+    });
+  }
+  if (activitiesResult.ok || coursewareResult.ok) {
+    for (const raw of combinedActivities.values()) {
       const material = parseMaterial(raw, course);
       if (material) materials.push(material);
       if (isAnnouncementActivityType(record(raw).type)) {
@@ -296,7 +317,7 @@ async function loadCourseContents(
     announcements = announcementResult.value
       .map((item) => parseAnnouncement(item, 'course', course))
       .filter((item): item is LmsAnnouncementItem => Boolean(item));
-  } else if (activitiesResult.ok) {
+  } else if (activitiesResult.ok || coursewareResult.ok) {
     announcements = activityAnnouncements;
     if (announcementResult.status !== 404) {
       errors.push({
