@@ -418,6 +418,9 @@ export function createTronClassLmsHandler({
       throw new HttpsError('permission-denied', '此帳號尚未連結靜宜大學。');
     }
     const { refresh, courseId } = parseRequest(request.data);
+    const capabilities = {
+      textHomeworkSubmit: process.env.TRONCLASS_HOMEWORK_WRITE_ENABLED === 'true',
+    };
 
     try {
       await requireAcademicAccount(db, uid);
@@ -475,12 +478,14 @@ export function createTronClassLmsHandler({
         return {
           ...mergeExtras(cachedHomework, extras),
           cache: { hit: true, expiresAt: cachedHomework.cache.expiresAt },
+          capabilities,
         };
       }
       if (cachedHomework && !refresh && !courseId) {
         return {
           ...mergeExtras(cachedHomework, extras),
           cache: { hit: true, expiresAt: cachedHomework.cache.expiresAt },
+          capabilities,
         };
       }
 
@@ -581,7 +586,7 @@ export function createTronClassLmsHandler({
       } catch {
         // 快取寫入失敗仍回傳剛讀到的資料。
       }
-      return merged;
+      return { ...merged, capabilities };
     } catch (error) {
       if (error instanceof HttpsError) throw error;
       if (error instanceof Error && /session 已失效/.test(error.message)) reconnect();
