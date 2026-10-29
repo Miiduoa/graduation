@@ -146,7 +146,7 @@ function LmsBody({ uid, schoolId, returnUrl }: { uid: string; schoolId: 'pu'; re
             <section className={styles.status} role="status">
               <h2>正在連線玩課雲</h2>
               <p>{autoTries >= LMS_CONNECTING_RETRY_LIMIT
-                ? '尚未連上玩課雲。可以手動重新讀取，或稍後再到這頁查看。'
+                ? '還沒連上玩課雲，請稍後按重新讀取。'
                 : '正在連線玩課雲。登入後會在背景接上課堂，完成後會自動再讀取。'}</p>
               <div className={styles.actions}>
                 <button type="button" className="btn primary" onClick={refreshLms}>重新讀取</button>

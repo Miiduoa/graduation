@@ -134,7 +134,7 @@ it('shows 正在連線玩課雲 and retries instead of jumping to an error', asy
   let calls = 0;
   vi.mocked(loadTronClassLms).mockImplementation(async () => {
     calls += 1;
-    if (calls === 1) throw new AcademicConnectionError('unavailable');
+    if (calls === 1) throw new AcademicConnectionError('connecting');
     return snapshot();
   });
   render(<SchoolLmsPage />);
@@ -144,7 +144,7 @@ it('shows 正在連線玩課雲 and retries instead of jumping to an error', asy
   expect(screen.getByRole('heading', { name: '正在連線玩課雲' })).toBeTruthy();
   expect(screen.queryByRole('alert')).toBeNull();
   expect(screen.queryByRole('heading', { name: '暫時無法讀取玩課雲資料' })).toBeNull();
-  await act(async () => { await vi.advanceTimersByTimeAsync(1_000); });
+  await act(async () => { await vi.advanceTimersByTimeAsync(2_000); });
   expect(screen.getByRole('heading', { name: '期末專題提案' })).toBeTruthy();
   expect(loadTronClassLms).toHaveBeenCalledTimes(2);
 });
@@ -158,15 +158,31 @@ it('backs off connecting retries and never uses an error alert', async () => {
     await Promise.resolve();
   });
   expect(screen.getByText(/會自動再讀取/)).toBeTruthy();
-  for (const delay of [1_000, 2_000, 4_000, 8_000, 16_000]) {
+  for (const delay of [2_000, 4_000, 8_000, 16_000, 16_000]) {
     await act(async () => { await vi.advanceTimersByTimeAsync(delay); });
   }
   expect(loadTronClassLms).toHaveBeenCalledTimes(6);
   expect(screen.getByRole('heading', { name: '正在連線玩課雲' })).toBeTruthy();
   expect(screen.queryByRole('alert')).toBeNull();
-  expect(screen.getByText(/可以手動重新讀取/)).toBeTruthy();
+  expect(screen.getByText(/還沒連上玩課雲，請稍後按重新讀取/)).toBeTruthy();
   await act(async () => { await vi.advanceTimersByTimeAsync(16_000); });
   expect(loadTronClassLms).toHaveBeenCalledTimes(6);
+  vi.useRealTimers();
+});
+
+it('does not auto-retry a generic 503 when the school session is already ready', async () => {
+  vi.useRealTimers();
+  vi.useFakeTimers();
+  vi.mocked(loadTronClassLms).mockRejectedValue(new AcademicConnectionError('unavailable'));
+  render(<SchoolLmsPage />);
+  await act(async () => {
+    await Promise.resolve();
+  });
+  expect(screen.getByRole('heading', { name: '暫時無法讀取玩課雲資料' })).toBeTruthy();
+  expect(screen.getByRole('alert')).toBeTruthy();
+  expect(screen.queryByRole('heading', { name: '正在連線玩課雲' })).toBeNull();
+  await act(async () => { await vi.advanceTimersByTimeAsync(16_000); });
+  expect(loadTronClassLms).toHaveBeenCalledTimes(1);
   vi.useRealTimers();
 });
 

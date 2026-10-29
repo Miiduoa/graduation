@@ -74,6 +74,13 @@ it('maps the background LMS connecting window instead of a hard unavailable erro
   await expect(loadTronClassLms('student-a')).rejects.toMatchObject({ reason: 'connecting' });
 });
 
+it('maps a generic 503 without lms-connecting to unavailable', async () => {
+  fetchMock.mockImplementationOnce(async () => new Response(JSON.stringify({
+    error: { status: 'UNAVAILABLE', message: '暫時無法讀取 WOW Class，校務成績與學分可分別查看。' },
+  }), { status: 503 }));
+  await expect(loadTronClassLms('student-a')).rejects.toMatchObject({ reason: 'unavailable' });
+});
+
 it('treats a 503 connecting message as connecting even without details.code', async () => {
   fetchMock.mockImplementationOnce(async () => new Response(JSON.stringify({
     error: { status: 'UNAVAILABLE', message: '正在連線玩課雲，請稍候再讀取作業。' },

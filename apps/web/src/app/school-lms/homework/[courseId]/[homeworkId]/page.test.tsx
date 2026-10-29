@@ -1,5 +1,5 @@
-import { render, screen } from '@testing-library/react';
-import { beforeEach, expect, it, vi } from 'vitest';
+import { act, render, screen } from '@testing-library/react';
+import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import HomeworkDetailPage from './page';
 import { AcademicConnectionError } from '@/lib/academicClient';
 import { loadTronClassLms } from '@/lib/tronClassLms';
@@ -57,15 +57,35 @@ beforeEach(() => {
   context.uid = 'one';
   vi.mocked(loadTronClassLms).mockReset().mockResolvedValue(snapshot());
 });
+afterEach(() => {
+  vi.clearAllTimers();
+  vi.useRealTimers();
+});
 
 it('shows 正在連線玩課雲 instead of an error while the LMS session is still hanging', async () => {
-  vi.mocked(loadTronClassLms).mockImplementation(async () => {
-    throw new AcademicConnectionError('unavailable');
-  });
+  vi.useFakeTimers();
+  vi.mocked(loadTronClassLms).mockRejectedValue(new AcademicConnectionError('connecting'));
   render(<HomeworkDetailPage />);
-  expect(await screen.findByRole('heading', { name: '正在連線玩課雲' })).toBeTruthy();
+  await act(async () => {
+    await Promise.resolve();
+  });
+  expect(screen.getByRole('heading', { name: '正在連線玩課雲' })).toBeTruthy();
   expect(screen.queryByRole('alert')).toBeNull();
   expect(screen.queryByRole('heading', { name: '暫時無法讀取作業說明' })).toBeNull();
+});
+
+it('does not auto-retry a generic 503 when the school session is already ready', async () => {
+  vi.useFakeTimers();
+  vi.mocked(loadTronClassLms).mockRejectedValue(new AcademicConnectionError('unavailable'));
+  render(<HomeworkDetailPage />);
+  await act(async () => {
+    await Promise.resolve();
+  });
+  expect(screen.getByRole('heading', { name: '暫時無法讀取作業說明' })).toBeTruthy();
+  expect(screen.getByRole('alert')).toBeTruthy();
+  expect(screen.queryByRole('heading', { name: '正在連線玩課雲' })).toBeNull();
+  await act(async () => { await vi.advanceTimersByTimeAsync(16_000); });
+  expect(loadTronClassLms).toHaveBeenCalledTimes(1);
 });
 
 it('shows the homework description and the matching WOW Class link', async () => {

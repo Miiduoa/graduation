@@ -38,6 +38,7 @@ export default function HomeworkDetailPage() {
   const returnUrl = `${path}${browse.schoolSearch}`;
   const courseId = idsFrom(String(route.courseId || ''));
   const homeworkId = idsFrom(String(route.homeworkId || ''));
+  const uid = user?.uid;
   const [state, setState] = useState<'loading' | 'ready' | 'error'>('loading');
   const [reason, setReason] = useState<string>('unavailable');
   const [autoTries, setAutoTries] = useState(0);
@@ -46,11 +47,11 @@ export default function HomeworkDetailPage() {
   const connecting = state === 'error' && isLmsConnectingRetryReason(reason);
 
   useEffect(() => {
-    if (!user || browse.schoolId !== 'pu' || !courseId || !homeworkId) return;
+    if (!uid || browse.schoolId !== 'pu' || !courseId || !homeworkId) return;
     let active = true;
-    void loadTronClassLms(user.uid, { expectedSchool: 'pu' }).then((snapshot) => {
+    void loadTronClassLms(uid, { expectedSchool: 'pu' }).then((snapshot) => {
       if (!active) return;
-      if (snapshot.ownerUid !== user.uid) throw new AcademicConnectionError('unavailable');
+      if (snapshot.ownerUid !== uid) throw new AcademicConnectionError('unavailable');
       setItem(findLmsHomework(snapshot, courseId, homeworkId));
       setState('ready');
     }).catch((caught: unknown) => {
@@ -59,7 +60,7 @@ export default function HomeworkDetailPage() {
       setState('error');
     });
     return () => { active = false; };
-  }, [user, browse.schoolId, courseId, homeworkId, reload]);
+  }, [uid, browse.schoolId, courseId, homeworkId, reload]);
 
   useEffect(() => {
     if (!connecting || autoTries >= LMS_CONNECTING_RETRY_LIMIT) return;
@@ -92,9 +93,14 @@ export default function HomeworkDetailPage() {
         <section className={styles.status} role="status">
           <h2>正在連線玩課雲</h2>
           <p>{autoTries >= LMS_CONNECTING_RETRY_LIMIT
-            ? '尚未連上玩課雲。可以回到清單稍後再打開，或改到玩課雲查看。'
+            ? '還沒連上玩課雲，請稍後按重新讀取。'
             : '正在連線玩課雲。登入後會在背景接上課堂，完成後會自動再讀取。'}</p>
           <div className={styles.actions}>
+            <button type="button" className="btn primary" onClick={() => {
+              setAutoTries(0);
+              setState('loading');
+              setReload((value) => value + 1);
+            }}>重新讀取</button>
             <Link className="btn" href="/school-lms">回到作業清單</Link>
           </div>
         </section>
