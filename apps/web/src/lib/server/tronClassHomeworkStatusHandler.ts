@@ -76,6 +76,16 @@ export function createTronClassHomeworkStatusHandler({
       schoolSessionExpiry(session.expiresAt) <= now() || !cookies || !userId) {
       throw new HttpsError('failed-precondition', '玩課雲連線已過期，請重新連線。');
     }
+    let courses: unknown;
+    try {
+      courses = await source.fetchCourses(cookies, { userId, status: 'ongoing' });
+    } catch {
+      throw new HttpsError('unavailable', '暫時無法確認修課資料，請稍後再試。');
+    }
+    if (!Array.isArray(courses) ||
+      !courses.some((item) => positive(record(item).id) === courseId)) {
+      throw new HttpsError('permission-denied', '目前修課清單不包含這門課。');
+    }
     const key = createHash('sha256').update(uid + ':' + courseId + ':' + homeworkId).digest('hex');
     const lockRef = db.doc('_puTronClassHomeworkSubmissionLocks/' + key);
     const lockSnap = await lockRef.get();
