@@ -426,3 +426,43 @@ test('offline plan never uses an expired snapshot belonging to another account',
     step.evidence !== 'authorized-assignments')).toBe(true);
   expect(mockCallable).not.toHaveBeenCalled();
 });
+
+test('reports only actual on-device stages and never relabels local inference as a cloud action', async () => {
+  const stages: string[] = [];
+  const response = await askCampusAssistant({
+    ...input(),
+    mode: 'device',
+    messages: [{ role: 'user', content: '幫我規劃閱讀進度' }],
+    onProgress: (stage) => stages.push(stage),
+  });
+  expect(response).toMatchObject({ source: 'device', hasActions: false });
+  expect(stages).toEqual([
+    'reading-context',
+    'checking-sources',
+    'checking-model',
+    'checking-tools',
+    'composing',
+    'checking-result',
+  ]);
+  expect(mockCallable).not.toHaveBeenCalled();
+});
+
+test('a deterministic local answer does not pretend to have loaded the phone model', async () => {
+  const stages: string[] = [];
+  const response = await askCampusAssistant({
+    ...input(),
+    mode: 'device',
+    messages: [{ role: 'user', content: '查最新校園公告' }],
+    onProgress: (stage) => stages.push(stage),
+  });
+  expect(response).toMatchObject({ source: 'device', tool: 'online-required' });
+  expect(stages).toEqual(['reading-context', 'checking-sources', 'checking-result']);
+  expect(localLLM.generate).not.toHaveBeenCalled();
+});
+
+test('campus stage describes the real authenticated request, not an on-device inference', async () => {
+  const stages: string[] = [];
+  await askCampusAssistant({ ...input(), onProgress: (stage) => stages.push(stage) });
+  expect(stages).toEqual(['querying-campus', 'checking-result']);
+  expect(httpsCallable).toHaveBeenCalledTimes(1);
+});
