@@ -15,6 +15,7 @@ export const HOSTED_WEB_CALLABLES = [
   'signInPuStudentId',
   'getMyAcademicRecords',
   'getMyTronClassCourses',
+  'getMyTronClassLms',
   'clearPuCampusSessions',
 ] as const;
 

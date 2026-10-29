@@ -6,14 +6,18 @@ import { fileURLToPath } from 'node:url';
 import { afterEach, expect, it, vi } from 'vitest';
 import {
   createPuRelayFetch,
+  hostMatchesRelayAltHosts,
   isRelayPlacementMiss,
   normalizeRelayTarget,
+  parseRelayAltHosts,
+  readPuEdgeRelayAltConfig,
   readPuEdgeRelayConfig,
   RELAY_COLO_HEADER,
   RELAY_NONCE_HEADER,
   RELAY_SIGN_HEADER,
   RELAY_TARGET_HEADER,
   RELAY_TS_HEADER,
+  selectPuEdgeRelayRoute,
   sha256Hex,
   signRelayRequest,
   verifyRelaySignature,
@@ -34,7 +38,16 @@ const GOLDEN_SIGN = '8a8512b7c00a0ae25cd545ef61b5c8d905cc5a973167ae3e60f94e63298
 
 const RELAY_URL = 'https://pu-edge-relay.example.workers.dev';
 const SECRET = 'unit-test-secret';
+const ALT_URL = 'https://alt-relay.example.supabase.co/functions/v1/pu-edge-relay';
+const ALT_SECRET = 'unit-test-alt-secret';
 const FIXED_NONCE = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
+const PRIMARY_ENV = { PU_EDGE_RELAY_URL: RELAY_URL, PU_EDGE_RELAY_SECRET: SECRET };
+const ALT_ENV = {
+  ...PRIMARY_ENV,
+  PU_EDGE_RELAY_ALT_URL: ALT_URL,
+  PU_EDGE_RELAY_ALT_SECRET: ALT_SECRET,
+  PU_EDGE_RELAY_ALT_HOSTS: 'alcat.pu.edu.tw, mypu.pu.edu.tw',
+};
 
 afterEach(() => {
   resetCampusCircuitForTests();
@@ -89,6 +102,16 @@ it('keeps worker protocol source identical to the web protocol', () => {
     'utf8',
   );
   expect(stripHeader(worker)).toBe(stripHeader(web));
+});
+
+it('keeps the Supabase relay on the shared worker protocol instead of a second copy', () => {
+  const source = readFileSync(
+    join(dirname(fileURLToPath(import.meta.url)), '../../../../../deploy/supabase-relay/index.ts'),
+    'utf8',
+  );
+  expect(source).toMatch(/from ['"]\.\.\/edge-relay\/src\/protocol\.ts['"]/);
+  expect(source).not.toMatch(/async function hmacSha256Hex/);
+  expect(source).not.toMatch(/RELAY_SECRET\s*=/);
 });
 
 it('uses the same HMAC canonical string on web and Node crypto', async () => {
@@ -247,6 +270,145 @@ it('verifyRelaySignature matches createPuRelayFetch output', async () => {
 it('normalizes trailing-dot campus hosts to the same relay target', () => {
   expect(normalizeRelayTarget('https://alcat.pu.edu.tw./index_check.php')).toBe(GOLDEN_TARGET);
   expect(normalizeRelayTarget('https://identity.pu.edu.tw./auth')).toBe('https://identity.pu.edu.tw/auth');
+});
+
+it('treats alt relay as off unless url, secret and exact hosts are all set', () => {
+  expect(readPuEdgeRelayAltConfig(PRIMARY_ENV)).toBeNull();
+  expect(readPuEdgeRelayAltConfig({ ...PRIMARY_ENV, PU_EDGE_RELAY_ALT_URL: ALT_URL })).toBeNull();
+  expect(
+    readPuEdgeRelayAltConfig({
+      ...PRIMARY_ENV,
+      PU_EDGE_RELAY_ALT_URL: ALT_URL,
+      PU_EDGE_RELAY_ALT_SECRET: ALT_SECRET,
+    }),
+  ).toBeNull();
+  expect(
+    readPuEdgeRelayAltConfig({
+      ...PRIMARY_ENV,
+      PU_EDGE_RELAY_ALT_SECRET: ALT_SECRET,
+      PU_EDGE_RELAY_ALT_HOSTS: 'alcat.pu.edu.tw',
+    }),
+  ).toBeNull();
+  expect(
+    readPuEdgeRelayAltConfig({
+      ...PRIMARY_ENV,
+      PU_EDGE_RELAY_ALT_URL: 'http://alt.example',
+      PU_EDGE_RELAY_ALT_SECRET: ALT_SECRET,
+      PU_EDGE_RELAY_ALT_HOSTS: 'alcat.pu.edu.tw',
+    }),
+  ).toBeNull();
+  expect(readPuEdgeRelayAltConfig(ALT_ENV)).toEqual({
+    url: ALT_URL,
+    secret: ALT_SECRET,
+    hosts: ['alcat.pu.edu.tw', 'mypu.pu.edu.tw'],
+  });
+});
+
+it('matches alt hosts exactly and ignores wildcards or lookalike subdomains', () => {
+  expect(parseRelayAltHosts(' alcat.pu.edu.tw., *.pu.edu.tw, mypu.pu.edu.tw:443, mypu.pu.edu.tw ')).toEqual([
+    'alcat.pu.edu.tw',
+    'mypu.pu.edu.tw',
+  ]);
+  expect(hostMatchesRelayAltHosts('alcat.pu.edu.tw.', ['alcat.pu.edu.tw'])).toBe(true);
+  expect(hostMatchesRelayAltHosts('ALCAT.PU.EDU.TW', ['alcat.pu.edu.tw'])).toBe(true);
+  expect(hostMatchesRelayAltHosts('www.alcat.pu.edu.tw', ['alcat.pu.edu.tw'])).toBe(false);
+  expect(hostMatchesRelayAltHosts('alcat.pu.edu.tw.evil.test', ['alcat.pu.edu.tw'])).toBe(false);
+  expect(hostMatchesRelayAltHosts('identity.pu.edu.tw', ['alcat.pu.edu.tw', 'mypu.pu.edu.tw'])).toBe(false);
+  const primary = { url: RELAY_URL, secret: SECRET };
+  const alt = { url: ALT_URL, secret: ALT_SECRET, hosts: ['alcat.pu.edu.tw'] };
+  expect(selectPuEdgeRelayRoute('https://alcat.pu.edu.tw/index_check.php', primary, alt).viaAlt).toBe(true);
+  expect(selectPuEdgeRelayRoute('https://identity.pu.edu.tw/auth', primary, alt).viaAlt).toBe(false);
+  expect(selectPuEdgeRelayRoute('https://www.alcat.pu.edu.tw/', primary, alt).viaAlt).toBe(false);
+  expect(selectPuEdgeRelayRoute('not-a-url', primary, alt).viaAlt).toBe(false);
+});
+
+it('sends listed campus hosts to the alt relay and keeps the rest on the primary', async () => {
+  const direct = vi.fn<FetchLike>(async () => new Response('direct'));
+  const relay = vi.fn<FetchLike>(async (url) => new Response(`via:${url}`));
+  const info = vi.spyOn(console, 'info').mockImplementation(() => {});
+  const fetchLike = createPuRelayFetch({
+    env: ALT_ENV,
+    directFetch: direct,
+    fetch: relay,
+    now: () => 1_700_000_000_000,
+    nonce: () => FIXED_NONCE,
+  });
+
+  const alcat = await fetchLike('https://alcat.pu.edu.tw./index_check.php');
+  expect(await alcat.text()).toBe(`via:${ALT_URL}`);
+  expect(relay.mock.calls[0]?.[0]).toBe(ALT_URL);
+  const alcatHeaders = new Headers(relay.mock.calls[0]?.[1]?.headers);
+  expect(alcatHeaders.get(RELAY_TARGET_HEADER)).toBe(GOLDEN_TARGET);
+  expect(alcatHeaders.get(RELAY_SIGN_HEADER)).toBe(
+    await signRelayRequest(ALT_SECRET, {
+      timestamp: '1700000000',
+      nonce: FIXED_NONCE,
+      method: 'GET',
+      target: GOLDEN_TARGET,
+      bodySha256: await sha256Hex(new Uint8Array()),
+      cookie: '',
+      contentType: '',
+    }),
+  );
+  expect(JSON.parse(String(info.mock.calls[0]?.[0]))).toMatchObject({
+    host: 'alcat.pu.edu.tw',
+    via: 'alt',
+  });
+
+  const identity = await fetchLike('https://identity.pu.edu.tw/auth');
+  expect(await identity.text()).toBe(`via:${RELAY_URL}`);
+  expect(relay.mock.calls[1]?.[0]).toBe(RELAY_URL);
+  const identityHeaders = new Headers(relay.mock.calls[1]?.[1]?.headers);
+  expect(identityHeaders.get(RELAY_SIGN_HEADER)).toBe(
+    await signRelayRequest(SECRET, {
+      timestamp: '1700000000',
+      nonce: FIXED_NONCE,
+      method: 'GET',
+      target: 'https://identity.pu.edu.tw/auth',
+      bodySha256: await sha256Hex(new Uint8Array()),
+      cookie: '',
+      contentType: '',
+    }),
+  );
+  expect(JSON.parse(String(info.mock.calls[1]?.[0]))).not.toHaveProperty('via');
+
+  const nested = await fetchLike('https://www.alcat.pu.edu.tw/');
+  expect(relay.mock.calls[2]?.[0]).toBe(RELAY_URL);
+  expect(await nested.text()).toBe(`via:${RELAY_URL}`);
+  expect(direct).not.toHaveBeenCalled();
+  info.mockRestore();
+});
+
+it('does not open the alt relay when the primary relay is off', async () => {
+  const direct = vi.fn<FetchLike>(async () => new Response('direct'));
+  const relay = vi.fn<FetchLike>(async () => new Response('relay'));
+  const fetchLike = createPuRelayFetch({
+    env: {
+      PU_EDGE_RELAY_ALT_URL: ALT_URL,
+      PU_EDGE_RELAY_ALT_SECRET: ALT_SECRET,
+      PU_EDGE_RELAY_ALT_HOSTS: 'alcat.pu.edu.tw',
+    },
+    directFetch: direct,
+    fetch: relay,
+  });
+  const response = await fetchLike('https://alcat.pu.edu.tw/');
+  expect(await response.text()).toBe('direct');
+  expect(relay).not.toHaveBeenCalled();
+});
+
+it('keeps existing primary routing when alt env is only partially set', async () => {
+  const relay = vi.fn<FetchLike>(async (url) => new Response(`via:${url}`));
+  const fetchLike = createPuRelayFetch({
+    env: {
+      ...PRIMARY_ENV,
+      PU_EDGE_RELAY_ALT_URL: ALT_URL,
+      PU_EDGE_RELAY_ALT_HOSTS: 'alcat.pu.edu.tw',
+    },
+    fetch: relay,
+  });
+  vi.spyOn(console, 'info').mockImplementation(() => {});
+  await fetchLike('https://alcat.pu.edu.tw/');
+  expect(relay.mock.calls[0]?.[0]).toBe(RELAY_URL);
 });
 
 it('opens the alcat circuit when the relay returns HTTP 555 and then skips that host', async () => {

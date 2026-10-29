@@ -45,6 +45,7 @@ it('keeps 34 navigable voice shortcuts inside the expanded service catalog', () 
   expect(serviceRoutes.filter(href => !shortcutSet.has(href as (typeof CAMPUS_QUICK_DESTINATIONS)[number]))).toEqual([
     '/leave',
     '/leave/review',
+    '/school-lms',
   ]);
 });
 

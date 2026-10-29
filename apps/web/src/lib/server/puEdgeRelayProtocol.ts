@@ -1,4 +1,4 @@
-/** 靜宜校園轉送共用簽章與白名單。必須與 `deploy/edge-relay/src/protocol.ts`、Functions `puCampusTransport.js` 保持一致。 */
+/** 靜宜校園轉送共用簽章與白名單。必須與 `deploy/edge-relay/src/protocol.ts`、Functions `puCampusTransport.js` 保持一致。Supabase 轉送直接 import 那份 protocol，不要再複製。 */
 
 export const RELAY_TS_HEADER = 'x-pu-relay-ts';
 export const RELAY_NONCE_HEADER = 'x-pu-relay-nonce';

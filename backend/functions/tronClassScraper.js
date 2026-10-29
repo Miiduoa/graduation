@@ -273,7 +273,10 @@ function parseTcJsonResponse(result) {
   }
 
   if (result.status !== 200) {
-    throw new Error(`HTTP ${result.status}`);
+    const error = new Error(`HTTP ${result.status}`);
+    error.status = result.status;
+    error.code = 'TC_HTTP';
+    throw error;
   }
 
   if (result.body.trimStart().startsWith('<')) {
@@ -923,6 +926,40 @@ async function tcFetchSelfScore(cookies, courseId) {
   }
 }
 
+function httpError(status) {
+  const error = new Error(`HTTP ${status}`);
+  error.status = status;
+  error.code = 'TC_HTTP';
+  return error;
+}
+
+async function tcFetchHomeworkActivitiesPage(cookies, courseId, page, pageSize = 50) {
+  const data = await tcFetchJson(
+    `${TC_BASE}/api/courses/${courseId}/homework-activities?page=${page}&page_size=${pageSize}`,
+    cookies,
+  );
+  if (!data || typeof data !== 'object' || Array.isArray(data) || !Array.isArray(data.homework_activities)) {
+    throw httpError(200);
+  }
+  const total = data.total === undefined || data.total === null ? null : Number(data.total);
+  return {
+    homework_activities: data.homework_activities,
+    total: total !== null && Number.isSafeInteger(total) && total >= 0 ? total : null,
+    page: data.page ?? page,
+    page_size: data.page_size ?? pageSize,
+  };
+}
+
+async function tcFetchActivitiesRaw(cookies, courseId, query = '') {
+  const suffix = query ? `?${query}` : '';
+  const data = await tcFetchJson(`${TC_BASE}/api/courses/${courseId}/activities${suffix}`, cookies);
+  const activities = data?.activities;
+  if (!Array.isArray(activities)) {
+    throw httpError(200);
+  }
+  return activities;
+}
+
 async function tcFetchHomeworkStatus(cookies, courseId) {
   try {
     const data = await tcFetchJson(
@@ -967,14 +1004,31 @@ async function tcFetchExamStatus(cookies, courseId) {
 
 async function tcFetchAnnouncements(cookies) {
   try {
-    const data = await tcFetchJson(`${TC_BASE}/api/announcement`, cookies);
-    return data?.announcements ?? [];
+    return await tcFetchAnnouncementsStrict(cookies);
   } catch (error) {
     if (String(error?.message || '').includes('session 已失效')) {
       throw error;
     }
     return [];
   }
+}
+
+async function tcFetchAnnouncementsStrict(cookies) {
+  const data = await tcFetchJson(`${TC_BASE}/api/announcement`, cookies);
+  const items = data?.announcements;
+  if (!Array.isArray(items)) throw httpError(200);
+  return items;
+}
+
+async function tcFetchCourseAnnouncementsStrict(cookies, courseId) {
+  const data = await tcFetchJson(`${TC_BASE}/api/courses/${courseId}/announcements`, cookies);
+  const items =
+    data?.announcements ??
+    data?.notifications ??
+    data?.activities ??
+    (Array.isArray(data) ? data : null);
+  if (!Array.isArray(items)) throw httpError(200);
+  return items;
 }
 
 // ---------------------------------------------------------------------------
@@ -1342,9 +1396,13 @@ module.exports = {
   tcFetchScoreItems,
   tcFetchSelfScore,
   tcFetchHomeworkStatus,
+  tcFetchHomeworkActivitiesPage,
+  tcFetchActivitiesRaw,
   tcFetchHomeworkScores,
   tcFetchExamStatus,
   tcFetchAnnouncements,
+  tcFetchAnnouncementsStrict,
+  tcFetchCourseAnnouncementsStrict,
   // ── 新增端點 ──
   tcFetchActivityDetail,
   tcFetchHomeworkDetail,

@@ -4,6 +4,7 @@
  * `deploy/edge-relay/src/protocol.ts` 一致。
  *
  * 只有 PU_EDGE_RELAY_URL 與 PU_EDGE_RELAY_SECRET 都有設時才轉送。
+ * 備援三個變數都設時，PU_EDGE_RELAY_ALT_HOSTS 列到的主機改走備援（精確主機名，不含子網域）。
  * 不記錄 body、cookie、學號、密碼。
  */
 const { createHmac, createHash, randomBytes } = require('node:crypto');
@@ -126,6 +127,48 @@ function readPuEdgeRelayConfig(env = process.env) {
   return { url, secret };
 }
 
+function parseRelayAltHosts(raw) {
+  const seen = new Set();
+  const hosts = [];
+  for (const item of String(raw || '').split(',')) {
+    const host = normalizeRelayHostname(item);
+    if (!host || host.includes('*') || host.includes('/') || host.includes(':') || seen.has(host)) {
+      continue;
+    }
+    seen.add(host);
+    hosts.push(host);
+  }
+  return hosts;
+}
+
+function hostMatchesRelayAltHosts(hostname, hosts) {
+  const host = normalizeRelayHostname(hostname);
+  if (!host || host.includes('*') || host.includes('/') || host.includes(':')) return false;
+  return (hosts || []).some((item) => item === host);
+}
+
+function readPuEdgeRelayAltConfig(env = process.env) {
+  const base = readPuEdgeRelayConfig({
+    PU_EDGE_RELAY_URL: env.PU_EDGE_RELAY_ALT_URL,
+    PU_EDGE_RELAY_SECRET: env.PU_EDGE_RELAY_ALT_SECRET,
+  });
+  const hosts = parseRelayAltHosts(env.PU_EDGE_RELAY_ALT_HOSTS);
+  if (!base || hosts.length === 0) return null;
+  return { ...base, hosts };
+}
+
+function selectPuEdgeRelayRoute(target, primary, alt) {
+  if (!alt) return { route: primary, viaAlt: false };
+  try {
+    if (hostMatchesRelayAltHosts(new URL(target).hostname, alt.hosts)) {
+      return { route: alt, viaAlt: true };
+    }
+  } catch {
+    return { route: primary, viaAlt: false };
+  }
+  return { route: primary, viaAlt: false };
+}
+
 function setCampusHttpFetch(fn) {
   campusHttpFetch = typeof fn === 'function' ? fn : null;
   cachedEnvRelayFetch = null;
@@ -140,10 +183,11 @@ function getCampusHttpFetch(env = process.env) {
     cachedEnvRelayKey = '';
     return null;
   }
-  const key = `${config.url}\n${config.secret}`;
+  const alt = readPuEdgeRelayAltConfig(env);
+  const key = `${config.url}\n${config.secret}\n${alt ? `${alt.url}\n${alt.secret}\n${alt.hosts.join(',')}` : ''}`;
   if (cachedEnvRelayFetch && cachedEnvRelayKey === key) return cachedEnvRelayFetch;
   cachedEnvRelayKey = key;
-  cachedEnvRelayFetch = createCjsRelayFetch(config);
+  cachedEnvRelayFetch = createCjsRelayFetch({ ...config, alt });
   return cachedEnvRelayFetch;
 }
 
@@ -167,11 +211,14 @@ function createCjsRelayFetch(config, fetchImpl = globalThis.fetch, now = Date.no
   if (typeof fetchImpl !== 'function') {
     throw new Error('Campus relay fetch is unavailable');
   }
+  const primary = { url: config.url, secret: config.secret };
+  const alt = config.alt && Array.isArray(config.alt.hosts) ? config.alt : null;
   return async (url, init = {}) => {
     const normalized = normalizeRelayTarget(String(url)) || String(url);
     if (!isAllowedRelayTarget(normalized, DEFAULT_ALLOWED_HOSTS)) {
       throw new Error('Untrusted campus URL');
     }
+    const { route, viaAlt } = selectPuEdgeRelayRoute(normalized, primary, alt);
     const method = String(init.method || 'GET').trim().toUpperCase() || 'GET';
     const timestamp = String(Math.floor(now() / 1000));
     const nonce = String(nonceFn()).trim().toLowerCase();
@@ -179,7 +226,7 @@ function createCjsRelayFetch(config, fetchImpl = globalThis.fetch, now = Date.no
     const headers = new Headers(init.headers);
     const cookie = headerLookup(headers, 'cookie');
     const contentType = headerLookup(headers, 'content-type');
-    const signature = signRelayRequest(config.secret, {
+    const signature = signRelayRequest(route.secret, {
       timestamp,
       nonce,
       method,
@@ -202,7 +249,7 @@ function createCjsRelayFetch(config, fetchImpl = globalThis.fetch, now = Date.no
       relayInit.body = bytes;
     }
     const started = Date.now();
-    const response = await fetchImpl(config.url, relayInit);
+    const response = await fetchImpl(route.url, relayInit);
     try {
       const parsed = new URL(normalized);
       const colo = response.headers.get(RELAY_COLO_HEADER) || response.headers.get('cf-placement') || '';
@@ -215,6 +262,7 @@ function createCjsRelayFetch(config, fetchImpl = globalThis.fetch, now = Date.no
           ms: Date.now() - started,
           ...(colo ? { colo } : {}),
           ...(isRelayPlacementMiss(colo) ? { placement_miss: true } : {}),
+          ...(viaAlt ? { via: 'alt' } : {}),
         }),
       );
     } catch {
@@ -325,15 +373,19 @@ module.exports = {
   RELAY_TS_HEADER,
   createCjsRelayFetch,
   getCampusHttpFetch,
+  hostMatchesRelayAltHosts,
   hostnameMatchesAllowlist,
   isAllowedRelayTarget,
   isRelayPlacementMiss,
   normalizeRelayHostname,
   normalizeRelayTarget,
   parseAllowedHosts,
+  parseRelayAltHosts,
   randomRelayNonce,
+  readPuEdgeRelayAltConfig,
   readPuEdgeRelayConfig,
   relayCanonical,
+  selectPuEdgeRelayRoute,
   sendWithCampusFetch,
   setCampusHttpFetch,
   sha256Hex,
