@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState, useSyncExternalStore } from 'react';
-import { Linking, Text, TextInput, View } from 'react-native';
+import { AppState, Linking, Text, TextInput, View } from 'react-native';
 import { resolveSchoolPublicServices } from '@campus/shared/src/schoolPublicServices';
 import { AIDetailScreen, AICard, AIButton, aiTokens } from '../ui/aiFirst';
 import { getThemeVersion, subscribeToTheme } from '../ui/theme';
@@ -170,6 +170,16 @@ function AssistantConversation({
       inFlight.current?.abort();
       inFlight.current = null;
     };
+  }, []);
+  // Native timers can pause while the app is in the background. Revalidate
+  // the 15-minute source window when the student returns to the foreground.
+  useEffect(() => {
+    const subscription = AppState.addEventListener('change', (state) => {
+      if (state === 'active' && mounted.current && isScopeCurrent()) {
+        refreshSenseAge((revision) => revision + 1);
+      }
+    });
+    return () => subscription.remove();
   }, []);
   const current = () => mounted.current && isScopeCurrent();
   useEffect(() => {
