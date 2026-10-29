@@ -1,4 +1,5 @@
 import React from 'react';
+import { AppState } from 'react-native';
 import { act, fireEvent, render, waitFor } from '@testing-library/react-native';
 import { AIOverlayHost } from '../components/AIOverlayHost';
 import { CampusAssistantScreen } from '../screens/CampusAssistantScreen';
@@ -823,4 +824,35 @@ test('does not offer a school-snapshot refresh for unrelated live bus informatio
   expect(view.getByText('公車到站時間需要即時資訊')).toBeTruthy();
   expect(view.queryByText('更新授權資料，再由手機回答（需網路）')).toBeNull();
   expect(refreshCampusSenseSnapshot).not.toHaveBeenCalled();
+});
+
+test('source cards expire on foreground resume even when native background timers were suspended', async () => {
+  const now = Date.parse('2026-10-29T10:00:00Z');
+  const incoming = {
+    userId: 'A', schoolId: 'pu', checkedAt: new Date(now).toISOString(),
+    schedule: { status: 'unavailable', count: null },
+    assignments: { status: 'available', count: 1, items: [
+      { title: '最近需要核對的作業', groupName: '資料庫', dueAt: new Date(now + 3600_000).toISOString() },
+    ] },
+    announcements: { status: 'unavailable', items: [] },
+  };
+  const handlers: Array<(state: string) => void> = [];
+  jest.spyOn(Date, 'now').mockReturnValue(now);
+  jest.spyOn(AppState, 'addEventListener').mockImplementation((_event, listener) => {
+    handlers.push(listener as (state: string) => void);
+    return { remove: jest.fn() } as never;
+  });
+  jest.mocked(refreshCampusSenseSnapshot).mockResolvedValueOnce(incoming as never);
+  try {
+    const view = render(<CampusAssistantScreen />);
+    await act(async () => fireEvent.press(view.getByText('同步我的校園資料')));
+    expect(view.getByText('先確認這幾件事')).toBeTruthy();
+    expect(view.getByText('最近需要核對的作業')).toBeTruthy();
+    jest.mocked(Date.now).mockReturnValue(now + 16 * 60_000);
+    act(() => handlers.forEach((listener) => listener('active')));
+    expect(view.queryByText('最近需要核對的作業')).toBeNull();
+    expect(view.getByText('校園摘要已過期，請重新同步')).toBeTruthy();
+  } finally {
+    jest.restoreAllMocks();
+  }
 });
