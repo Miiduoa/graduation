@@ -1,6 +1,8 @@
 import type { CampusSenseSnapshot } from './campusSenseSnapshot';
 import { validCampusSenseSnapshot } from './campusSenseSnapshot';
 import { assignmentDueTime } from './campusAssignmentQuery';
+import { parseCampusAssignmentSource } from './campusAssignmentSource';
+import type { CampusPlanPriority, CampusPlanStep } from './offlineCampusPlanner';
 
 type Assignment = CampusSenseSnapshot['assignments']['items'][number];
 export type CampusAttentionPriority = 'due-soon' | 'past-due' | 'this-week' | 'unknown-date' | 'later';
@@ -72,5 +74,36 @@ export function buildCampusAttentionFeed(input: {
     remainingVisible: Math.max(0, rows.length - 3),
     missingFromSource,
     incomplete: missingFromSource > 0 || snapshot.assignments.coverage?.complete === false,
+  };
+}
+
+
+const PLAN_PRIORITY: Record<CampusAttentionPriority, CampusPlanPriority> = {
+  'due-soon': 'urgent',
+  'past-due': 'overdue',
+  'this-week': 'soon',
+  'unknown-date': 'verify',
+  later: 'normal',
+};
+
+/**
+ * Only an authorized, sourced assignment with an explicit timezone may be
+ * proposed for a local reminder. Scheduling itself rechecks the live identity
+ * and snapshot expiry and still requires the student's confirmation.
+ */
+export function buildCampusAttentionReminderStep(item: CampusAttentionItem): CampusPlanStep | null {
+  const dueAt = item.assignment.dueAt;
+  if ((item.priority !== 'due-soon' && item.priority !== 'this-week') ||
+      !dueAt || !/T.*(?:Z|[+-]\d{2}:\d{2})$/i.test(dueAt) ||
+      !parseCampusAssignmentSource(item.assignment.source)) return null;
+  return {
+    id: 'attention-' + item.key,
+    title: item.assignment.title.replace(/\s+/g, ' ').trim().slice(0, 130),
+    detail: '依已授權作業的截止時間設定手機提醒。',
+    priority: PLAN_PRIORITY[item.priority],
+    evidence: 'authorized-assignments',
+    route: '/classroom',
+    dueAt,
+    groupName: item.assignment.groupName,
   };
 }
