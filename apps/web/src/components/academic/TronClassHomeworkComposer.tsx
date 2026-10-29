@@ -1,7 +1,11 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { submitTronClassHomework, type TronClassSubmissionReceipt } from '@/lib/tronClassLms';
+import {
+  checkTronClassHomework,
+  submitTronClassHomework,
+  type TronClassSubmissionReceipt,
+} from '@/lib/tronClassLms';
 import styles from '@/app/school-lms/schoolLms.module.css';
 
 type Props = {
@@ -20,6 +24,8 @@ export function TronClassHomeworkComposer({
   const [sending, setSending] = useState(false);
   const [receipt, setReceipt] = useState<TronClassSubmissionReceipt | null>(null);
   const [uncertain, setUncertain] = useState('');
+  const [checking, setChecking] = useState(false);
+  const [verificationNote, setVerificationNote] = useState('');
   const key = 'tronclass-draft:' + uid + ':' + courseId + ':' + homeworkId;
   const fileOnly = ['file', 'files', 'upload', 'attachment']
     .includes((submissionType || '').toLowerCase());
@@ -33,6 +39,7 @@ export function TronClassHomeworkComposer({
       setPreview(false);
       setReceipt(null);
       setUncertain('');
+      setVerificationNote('');
     });
     return () => { active = false; };
   }, [key]);
@@ -57,6 +64,33 @@ export function TronClassHomeworkComposer({
     }
   }
 
+  async function verifyReceipt() {
+    if (checking || sending) return;
+    setChecking(true);
+    setVerificationNote('');
+    try {
+      const result = await checkTronClassHomework(uid, courseId, homeworkId);
+      if (result.status === 'verified') {
+        setReceipt({ status: 'verified', receiptId: result.receiptId, submittedAt: result.submittedAt });
+        setUncertain('');
+        try { window.sessionStorage.removeItem(key); } catch { /* private browsing */ }
+      } else if (result.status === 'pending') {
+        setReceipt({ status: 'pending', receiptId: result.receiptId, submittedAt: result.submittedAt });
+        setUncertain('');
+      } else if (uncertain || receipt) {
+        setReceipt(null);
+        setUncertain('校方尚未回傳可確認的繳交紀錄。為避免重複提交，請先核對原站的完整繳交歷史。');
+      } else {
+        setVerificationNote('玩課雲目前沒有回傳這份作業的本人繳交紀錄。');
+      }
+    } catch (error) {
+      setVerificationNote(error instanceof Error
+        ? error.message : '暫時無法查核校方繳交紀錄。');
+    } finally {
+      setChecking(false);
+    }
+  }
+
   if (fileOnly) {
     return (
       <section className={styles.composer} aria-label="繳交作業">
@@ -76,6 +110,7 @@ export function TronClassHomeworkComposer({
         </div>
         <span className={styles.composerHint}>僅限純文字 · 需校方回執</span>
       </div>
+      {verificationNote ? <p className={styles.verificationNote} role="status">{verificationNote}</p> : null}
       {receipt ? (
         <div className={styles.receipt} role="status">
           <h4>{receipt.status === 'verified' ? '已確認繳交' : '已送出，等待校方確認'}</h4>
@@ -83,17 +118,31 @@ export function TronClassHomeworkComposer({
             ? '已從玩課雲讀到你的繳交紀錄。'
             : '校方已接收寫入請求，但尚未取得可核對的提交紀錄。請在原站確認，勿重複繳交。'}</p>
           {receipt.receiptId ? <p>收件編號：{receipt.receiptId}</p> : null}
+          {receipt.status === 'pending' ? (
+            <button type="button" className="btn primary" onClick={() => void verifyReceipt()} disabled={checking}>
+              {checking ? '查核中…' : '重新查核校方回執'}
+            </button>
+          ) : null}
           <a href={href} target="_blank" rel="noopener noreferrer">查看玩課雲繳交紀錄</a>
         </div>
       ) : uncertain ? (
         <div className={styles.submitAlert} role="alert">
           <h4>暫停再次送出，避免重複繳交</h4>
           <p>{uncertain}</p>
-          <p>已保留此分頁的文字草稿；請先到校方網站核對狀態。</p>
-          <a className="btn primary" href={href} target="_blank" rel="noopener noreferrer">開啟玩課雲核對</a>
+          <p>已保留此分頁的文字草稿。可以先在這裡查核校方回執，不會再次送出作業。</p>
+          <div className={styles.actions}>
+            <button type="button" className="btn primary" disabled={checking}
+              onClick={() => void verifyReceipt()}>{checking ? '查核中…' : '查核校方繳交結果'}</button>
+            <a className="btn" href={href} target="_blank" rel="noopener noreferrer">開啟玩課雲核對</a>
+          </div>
         </div>
       ) : (
         <>
+          <div className={styles.verifyStrip}>
+            <span>已在其他裝置交過作業？</span>
+            <button type="button" className="btn" disabled={checking}
+              onClick={() => void verifyReceipt()}>{checking ? '查核中…' : '查核校方繳交紀錄'}</button>
+          </div>
           <label className={styles.editorLabel} htmlFor="tronclass-homework-content">繳交內容</label>
           <textarea
             id="tronclass-homework-content"
