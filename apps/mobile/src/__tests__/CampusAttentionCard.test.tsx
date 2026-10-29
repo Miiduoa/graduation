@@ -28,7 +28,10 @@ const snapshot: CampusSenseSnapshot = {
   announcements: { status: 'unavailable', items: [] },
 };
 
-beforeEach(() => mockReminder.mockClear());
+beforeEach(() => {
+  mockReminder.mockClear();
+  jest.mocked(safeNavigate).mockClear();
+});
 afterEach(() => jest.restoreAllMocks());
 
 test('shows actual source deadlines after a verified sync and opens only a checked task', () => {
