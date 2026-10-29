@@ -42,6 +42,7 @@ function setup() {
   const verifyIdToken = vi.fn().mockResolvedValue({ uid: UID, schoolId: 'pu' });
   const runtime: FnRuntime = {
     db: store.db as unknown as FnRuntime['db'], verifyIdToken, lmsReadonlySource: source,
+    lmsHomeworkWriteEnabled: true,
   };
   const request = async (data: unknown = INPUT, token = true) =>
     dispatchFnRequest('submitMyTronClassHomework',
