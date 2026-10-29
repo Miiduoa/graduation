@@ -18,6 +18,8 @@ export async function resolveLocalCampusSemanticReads(input: {
   uid: string;
   schoolId: string;
   assertCurrent: () => void;
+  /** Fired only when an allowed local read is about to run. */
+  onReadStart?: () => void;
   generate: (messages: NonNullable<ReturnType<typeof localCampusReadPrompt>>) => Promise<{
     content: string; finishReason: string;
   }>;
@@ -38,6 +40,8 @@ export async function resolveLocalCampusSemanticReads(input: {
 
   const results: LocalCampusReadResult[] = [];
   for (const [index, call] of plan.calls.entries()) {
+    input.assertCurrent();
+    input.onReadStart?.();
     input.assertCurrent();
     const now = Date.now();
     // Do not extend snapshot life by starting a long native inference.
