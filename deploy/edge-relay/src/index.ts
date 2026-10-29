@@ -216,7 +216,9 @@ export async function handleRelayRequest(
     redirect: 'manual',
   };
   if (method !== 'GET' && method !== 'HEAD' && bodyBytes.byteLength) {
-    init.body = bodyBytes;
+    const copy = new ArrayBuffer(bodyBytes.byteLength);
+    new Uint8Array(copy).set(bodyBytes);
+    init.body = copy;
   }
 
   try {

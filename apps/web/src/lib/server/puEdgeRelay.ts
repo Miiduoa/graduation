@@ -148,7 +148,9 @@ export function createPuRelayFetch(
       signal: init.signal,
     };
     if (method !== 'GET' && method !== 'HEAD' && bytes.byteLength) {
-      relayInit.body = bytes;
+      const copy = new ArrayBuffer(bytes.byteLength);
+      new Uint8Array(copy).set(bytes);
+      relayInit.body = copy;
     }
     const started = Date.now();
     const response = await relayFetch(config.url, relayInit);

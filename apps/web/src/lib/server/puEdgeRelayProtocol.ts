@@ -85,8 +85,14 @@ async function hmacSha256Hex(secret: string, message: string): Promise<string> {
   return bytesToHex(new Uint8Array(mac));
 }
 
+function toArrayBuffer(data: Uint8Array): ArrayBuffer {
+  const copy = new ArrayBuffer(data.byteLength);
+  new Uint8Array(copy).set(data);
+  return copy;
+}
+
 export async function sha256Hex(data: Uint8Array): Promise<string> {
-  const digest = await crypto.subtle.digest('SHA-256', data);
+  const digest = await crypto.subtle.digest('SHA-256', toArrayBuffer(data));
   return bytesToHex(new Uint8Array(digest));
 }
 
