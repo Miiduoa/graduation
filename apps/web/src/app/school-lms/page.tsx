@@ -107,7 +107,9 @@ function LmsBody({ uid, schoolId, returnUrl }: { uid: string; schoolId: 'pu'; re
     [snapshot, homework, now],
   );
   const contentsReady = Boolean(snapshot && (
-    courseId ? snapshot.contentsLoadedFor.includes(courseId) : snapshot.contentsLoadedFor.length > 0 || announcements.length > 0 || materials.length > 0
+    courseId ? snapshot.contentsLoadedFor.includes(courseId)
+      : snapshot.contentsLoadedFor.length > 0 ||
+        (view === 'announcements' && announcements.some((item) => item.source === 'site'))
   ));
 
   useEffect(() => {
