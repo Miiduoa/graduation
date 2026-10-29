@@ -276,3 +276,24 @@ it('preserves successfully imported coursework when a later course fails', async
   fireEvent.click(screen.getByRole('tab', { name: '教材' }));
   expect(screen.getByRole('heading', { name: '簡樸生活講義' })).toBeTruthy();
 });
+
+
+it('site-wide announcements do not pretend unread course materials are empty', async () => {
+  vi.mocked(loadTronClassLms).mockResolvedValueOnce({
+    ...snapshot(),
+    contentsLoadedFor: [],
+    materials: [],
+    announcements: [{
+      id: 'site:site:123', courseId: null, courseName: null,
+      title: '玩課雲公告', content: '本學期通知', publishedAt: null,
+      href: 'https://tronclass.pu.edu.tw/', source: 'site',
+    }],
+  });
+  render(<SchoolLmsPage />);
+  await screen.findByRole('heading', { name: '期末專題提案' });
+  fireEvent.click(screen.getByRole('tab', { name: '公告' }));
+  expect(screen.getByRole('heading', { name: '玩課雲公告' })).toBeTruthy();
+  fireEvent.click(screen.getByRole('tab', { name: '教材' }));
+  expect(screen.getByRole('heading', { name: '進入課程後才讀取教材' })).toBeTruthy();
+  expect(screen.queryByRole('heading', { name: '目前沒有教材資料' })).toBeNull();
+});
