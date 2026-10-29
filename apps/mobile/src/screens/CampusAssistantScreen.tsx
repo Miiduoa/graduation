@@ -20,6 +20,7 @@ import { getMobileQuickActions } from '../services/quickCampusActions';
 import type { CampusAgentWriteProposal, CampusAgentWriteTool } from '../features/campusAssistantActions';
 import { CampusAgentActionReview } from './CampusAgentActionReview';
 import { CampusSenseDashboard } from './CampusSenseDashboard';
+import { CampusAttentionCard } from './CampusAttentionCard';
 import { CampusEvidencePlanCard } from './CampusEvidencePlanCard';
 import { CampusLocalReadResults } from './CampusLocalReadResults';
 import type { LocalCampusReadResult } from '../services/localCampusToolProtocol';
@@ -465,6 +466,13 @@ function AssistantConversation({
           )}
         </View>
       </AICard>
+      {mode === 'device' && currentSense ? (
+        <CampusAttentionCard
+          snapshot={currentSense}
+          context={{ userId: uid, schoolId, isCurrent: current, navigation }}
+          disabled={busy || syncBusy}
+        />
+      ) : null}
       {mode === 'device' ? (
         <CampusSenseDashboard
           snapshot={currentSense}
