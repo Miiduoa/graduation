@@ -3,6 +3,7 @@ import {
   classifySchoolReadError,
   formatHomeworkDeadlineTaipei,
   homeworkDeadlineBucket,
+  homeworkDescriptionText,
   homeworkPageAdvance,
   isHomeworkSubmitted,
   isHomeworkTodo,
@@ -84,5 +85,32 @@ describe('errors and downloads', () => {
     expect(isMaterialActivityType('courseware_activity')).toBe(true);
     expect(isMaterialActivityType('announcement')).toBe(false);
     expect(isMaterialActivityType('homework')).toBe(false);
+  });
+});
+
+describe('homework description plain text', () => {
+  it('drops script and style blocks including spaced and mixed-case closers', () => {
+    expect(homeworkDescriptionText('<p>請上傳提案 PDF</p>')).toBe('請上傳提案 PDF');
+    expect(homeworkDescriptionText('<script>alert(1)</script>可見')).toBe('可見');
+    expect(homeworkDescriptionText('<script>alert(1)</script >可見')).toBe('可見');
+    expect(homeworkDescriptionText('<SCRIPT TYPE="text/javascript">x</Script\t>可見')).toBe('可見');
+    expect(homeworkDescriptionText('<style>body{color:red}</style>講義')).toBe('講義');
+    expect(homeworkDescriptionText('<!-- 註解 --><b>正文</b>')).toBe('正文');
+  });
+
+  it('decodes each HTML entity only once so &amp;lt; stays &lt;', () => {
+    expect(homeworkDescriptionText('&amp;lt;')).toBe('&lt;');
+    expect(homeworkDescriptionText('A &amp; B')).toBe('A & B');
+    expect(homeworkDescriptionText('A &lt; B &gt; C')).toBe('A < B > C');
+    expect(homeworkDescriptionText('空白&nbsp;分隔')).toBe('空白 分隔');
+  });
+
+  it('caps input length and does not hang on repeated unclosed script openers', () => {
+    const repeated = '<script'.repeat(4000);
+    const started = Date.now();
+    const text = homeworkDescriptionText(`${repeated}還有說明`);
+    expect(Date.now() - started).toBeLessThan(100);
+    expect(text).toBe('');
+    expect(homeworkDescriptionText('x'.repeat(30_000), 12)).toBe('xxxxxxxxxxxx');
   });
 });

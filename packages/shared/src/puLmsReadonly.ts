@@ -159,19 +159,213 @@ export function schoolHttpStatus(error: unknown): number | null {
   return match ? Number(match[1]) : null;
 }
 
+const DESCRIPTION_INPUT_MAX = 20_000;
+const NAMED_ENTITIES: Record<string, string> = {
+  amp: '&',
+  lt: '<',
+  gt: '>',
+  nbsp: ' ',
+  quot: '"',
+  apos: "'",
+};
+
+function isAsciiLetter(code: number): boolean {
+  return (code >= 65 && code <= 90) || (code >= 97 && code <= 122);
+}
+
+function isAsciiDigit(code: number): boolean {
+  return code >= 48 && code <= 57;
+}
+
+function isHtmlSpace(code: number): boolean {
+  return code === 32 || code === 9 || code === 10 || code === 13 || code === 12;
+}
+
+function lowerAscii(value: string, start: number, end: number): string {
+  let out = '';
+  for (let i = start; i < end; i += 1) {
+    const code = value.charCodeAt(i);
+    out += code >= 65 && code <= 90 ? String.fromCharCode(code + 32) : value.charAt(i);
+  }
+  return out;
+}
+
+function skipHtmlSpace(value: string, index: number): number {
+  while (index < value.length && isHtmlSpace(value.charCodeAt(index))) index += 1;
+  return index;
+}
+
+function skipQuoted(value: string, index: number): number {
+  const quote = value.charCodeAt(index);
+  index += 1;
+  while (index < value.length && value.charCodeAt(index) !== quote) index += 1;
+  return index < value.length ? index + 1 : index;
+}
+
+function skipUntilGt(value: string, index: number): number {
+  while (index < value.length) {
+    const code = value.charCodeAt(index);
+    if (code === 34 || code === 39) {
+      index = skipQuoted(value, index);
+      continue;
+    }
+    if (code === 62) return index + 1;
+    index += 1;
+  }
+  return index;
+}
+
+function readTagName(value: string, index: number): { name: string; next: number } {
+  const start = index;
+  while (index < value.length && isAsciiLetter(value.charCodeAt(index))) index += 1;
+  return { name: lowerAscii(value, start, index), next: index };
+}
+
+function skipCloseTag(value: string, index: number, name: string): number {
+  let next = skipHtmlSpace(value, index + 1);
+  if (value.charAt(next) !== '/') return -1;
+  next = skipHtmlSpace(value, next + 1);
+  if (next + name.length > value.length) return -1;
+  if (lowerAscii(value, next, next + name.length) !== name) return -1;
+  next += name.length;
+  while (next < value.length) {
+    const code = value.charCodeAt(next);
+    if (code === 62) return next + 1;
+    if (code === 60) return -1;
+    next += 1;
+  }
+  return -1;
+}
+
+function skipBlockedElement(value: string, index: number, name: string): number {
+  index = skipUntilGt(value, index);
+  while (index < value.length) {
+    if (value.charAt(index) === '<') {
+      const close = skipCloseTag(value, index, name);
+      if (close !== -1) return close;
+    }
+    index += 1;
+  }
+  return value.length;
+}
+
+function decodeEntity(value: string, index: number): { text: string; next: number } | null {
+  if (value.charAt(index) !== '&') return null;
+  const after = index + 1;
+  if (value.charAt(after) === '#') {
+    let cursor = after + 1;
+    let code = 0;
+    if (value.charAt(cursor) === 'x' || value.charAt(cursor) === 'X') {
+      cursor += 1;
+      const hexStart = cursor;
+      while (cursor < value.length) {
+        const ch = value.charCodeAt(cursor);
+        const hex = ch >= 48 && ch <= 57 ? ch - 48
+          : ch >= 65 && ch <= 70 ? ch - 55
+            : ch >= 97 && ch <= 102 ? ch - 87 : -1;
+        if (hex < 0) break;
+        code = code * 16 + hex;
+        cursor += 1;
+        if (cursor - hexStart > 6) return null;
+      }
+    } else {
+      const decStart = cursor;
+      while (cursor < value.length && isAsciiDigit(value.charCodeAt(cursor))) {
+        code = code * 10 + (value.charCodeAt(cursor) - 48);
+        cursor += 1;
+        if (cursor - decStart > 7) return null;
+      }
+    }
+    if (cursor === after + 1 || value.charAt(cursor) !== ';' || code <= 0 || code > 0x10ffff) return null;
+    return { text: String.fromCodePoint(code), next: cursor + 1 };
+  }
+  let cursor = after;
+  while (cursor < value.length && cursor - after < 8 && isAsciiLetter(value.charCodeAt(cursor))) {
+    cursor += 1;
+  }
+  if (value.charAt(cursor) !== ';') return null;
+  const mapped = NAMED_ENTITIES[lowerAscii(value, after, cursor)];
+  return mapped === undefined ? null : { text: mapped, next: cursor + 1 };
+}
+
+function htmlToPlainText(value: string): string {
+  let index = 0;
+  let out = '';
+  let pendingSpace = false;
+  const emit = (chunk: string) => {
+    for (let i = 0; i < chunk.length; i += 1) {
+      const code = chunk.charCodeAt(i);
+      if (isHtmlSpace(code) || code === 160) {
+        pendingSpace = out.length > 0;
+        continue;
+      }
+      if (pendingSpace) {
+        out += ' ';
+        pendingSpace = false;
+      }
+      out += chunk.charAt(i);
+    }
+  };
+  while (index < value.length) {
+    const ch = value.charAt(index);
+    if (ch === '<') {
+      if (
+        value.charAt(index + 1) === '!' &&
+        value.charAt(index + 2) === '-' &&
+        value.charAt(index + 3) === '-'
+      ) {
+        index += 4;
+        while (index < value.length) {
+          if (
+            value.charAt(index) === '-' &&
+            value.charAt(index + 1) === '-' &&
+            value.charAt(index + 2) === '>'
+          ) {
+            index += 3;
+            break;
+          }
+          index += 1;
+        }
+        pendingSpace = out.length > 0;
+        continue;
+      }
+      let tagAt = skipHtmlSpace(value, index + 1);
+      const closing = value.charAt(tagAt) === '/';
+      if (closing) tagAt = skipHtmlSpace(value, tagAt + 1);
+      const tag = readTagName(value, tagAt);
+      if (!tag.name) {
+        emit('<');
+        index += 1;
+        continue;
+      }
+      if (tag.name === 'script' || tag.name === 'style') {
+        index = closing ? skipUntilGt(value, tag.next) : skipBlockedElement(value, tag.next, tag.name);
+        pendingSpace = out.length > 0;
+        continue;
+      }
+      index = skipUntilGt(value, tag.next);
+      pendingSpace = out.length > 0;
+      continue;
+    }
+    if (ch === '&') {
+      const entity = decodeEntity(value, index);
+      if (entity) {
+        emit(entity.text);
+        index = entity.next;
+        continue;
+      }
+    }
+    emit(ch);
+    index += 1;
+  }
+  return out;
+}
+
 export function homeworkDescriptionText(value: unknown, max = 8_000): string {
-  if (typeof value !== 'string') return '';
-  return value
-    .replace(/<script[\s\S]*?<\/script>/gi, ' ')
-    .replace(/<style[\s\S]*?<\/style>/gi, ' ')
-    .replace(/<[^>]+>/g, ' ')
-    .replace(/&nbsp;/g, ' ')
-    .replace(/&amp;/g, '&')
-    .replace(/&lt;/g, '<')
-    .replace(/&gt;/g, '>')
-    .replace(/\s+/g, ' ')
-    .trim()
-    .slice(0, max);
+  if (typeof value !== 'string' || max <= 0) return '';
+  const input = value.length > DESCRIPTION_INPUT_MAX ? value.slice(0, DESCRIPTION_INPUT_MAX) : value;
+  const text = htmlToPlainText(input);
+  return text.length > max ? text.slice(0, max) : text;
 }
 
 export function cacheStillFresh(expiresAt: unknown, nowMs: number): boolean {
