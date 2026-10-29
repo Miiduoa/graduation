@@ -181,6 +181,7 @@ export async function loadTronClassLms(
         source: 'pu-tronclass',
         fetchedAt: row.fetchedAt,
         cache: { hit: cache.hit, expiresAt: cache.expiresAt },
+        capabilities: { textHomeworkSubmit: asRecord(row.capabilities)?.textHomeworkSubmit === true },
         courses: row.courses.map(readCourse),
         contentsLoadedFor: row.contentsLoadedFor.map((value) => {
           const id = positiveId(value);
