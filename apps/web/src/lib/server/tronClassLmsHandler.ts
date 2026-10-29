@@ -301,7 +301,7 @@ async function loadCourseContents(
         ...previous, ...upload,
         // Conflicting permissions must never expand the school's download permission.
         allow_download: previous?.allow_download === false || upload.allow_download === false
-          ? false : previous?.allow_download === true && upload.allow_download === true,
+          ? false : previous?.allow_download === true || upload.allow_download === true,
       });
     }
     combinedActivities.set(id, {
