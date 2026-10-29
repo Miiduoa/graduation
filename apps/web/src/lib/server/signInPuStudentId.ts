@@ -97,6 +97,10 @@ export type SignInPuDeps = {
   rateLimitGate?: LoginRateGate;
   /** 登入回應送出後才跑成績／WOW Class SSO；正式路徑傳 Next.js after()。 */
   scheduleCampusSso?: (task: () => Promise<void>) => void;
+  validateTronClassSession?: (session: {
+    cookies: Record<string, string>;
+    userId: number | null;
+  }) => Promise<boolean>;
   /** 前端中斷連線時不寫入、也不採用已寫入的 portal session。 */
   requestSignal?: AbortSignal;
 };
@@ -633,6 +637,7 @@ async function signInStudent(
       db: deps.db,
       now,
       school: config.schoolId,
+      validateTronClassSession: deps.validateTronClassSession,
     }),
   );
 
@@ -700,6 +705,7 @@ async function attachStudentLmsSession(options: {
   db: SignInPuDeps['db'];
   now: number;
   school: string;
+  validateTronClassSession?: SignInPuDeps['validateTronClassSession'];
 }): Promise<void> {
   const startedAt = Date.now();
   let linked = false;
@@ -711,6 +717,14 @@ async function attachStudentLmsSession(options: {
         uid: options.uid,
         studentId: options.studentId,
         portalId: options.puSessionId,
+        validateSession: options.validateTronClassSession ?? (async ({ cookies, userId }) => {
+          const { tronClassLmsReadonlySource } = await import('./tronClassLmsSource');
+          await tronClassLmsReadonlySource.fetchCourses(cookies, {
+            ...(userId ? { userId } : {}),
+            status: 'ongoing',
+          });
+          return true;
+        }),
       });
     } catch (error) {
       logStudentSoftFailure(error, options.school, startedAt);
