@@ -11,6 +11,11 @@ import { isOfficialAcademicSchool } from '@/lib/academicOfficialSchool';
 import { useCampusBrowseContext } from '@/lib/useCampusBrowseContext';
 import { useSignInOptions } from '@/lib/signInOptions';
 import { findLmsHomework, loadTronClassLms } from '@/lib/tronClassLms';
+import {
+  isLmsConnectingRetryReason,
+  LMS_CONNECTING_RETRY_LIMIT,
+  lmsConnectingRetryDelayMs,
+} from '@/lib/lmsConnectingRetry';
 import { loadFailureCopy } from '@campus/shared/src/loadFailureCopy';
 import styles from '@/components/academic/academic.module.css';
 import lmsStyles from '../../../schoolLms.module.css';
@@ -35,7 +40,10 @@ export default function HomeworkDetailPage() {
   const homeworkId = idsFrom(String(route.homeworkId || ''));
   const [state, setState] = useState<'loading' | 'ready' | 'error'>('loading');
   const [reason, setReason] = useState<string>('unavailable');
+  const [autoTries, setAutoTries] = useState(0);
+  const [reload, setReload] = useState(0);
   const [item, setItem] = useState<ReturnType<typeof findLmsHomework>>();
+  const connecting = state === 'error' && isLmsConnectingRetryReason(reason);
 
   useEffect(() => {
     if (!user || browse.schoolId !== 'pu' || !courseId || !homeworkId) return;
@@ -51,7 +59,17 @@ export default function HomeworkDetailPage() {
       setState('error');
     });
     return () => { active = false; };
-  }, [user, browse.schoolId, courseId, homeworkId]);
+  }, [user, browse.schoolId, courseId, homeworkId, reload]);
+
+  useEffect(() => {
+    if (!connecting || autoTries >= LMS_CONNECTING_RETRY_LIMIT) return;
+    const timer = window.setTimeout(() => {
+      setAutoTries((value) => value + 1);
+      setState('loading');
+      setReload((value) => value + 1);
+    }, lmsConnectingRetryDelayMs(autoTries));
+    return () => window.clearTimeout(timer);
+  }, [connecting, autoTries, reload]);
 
   return (
     <SiteShell title="作業說明" subtitle="讀取玩課雲同一筆作業的說明，不會上傳或繳交。">
@@ -70,6 +88,16 @@ export default function HomeworkDetailPage() {
           <p><Link href="/school-lms">回到作業清單</Link></p></section>
       ) : state === 'loading' ? (
         <div className={styles.status} role="status">正在讀取作業說明…</div>
+      ) : connecting ? (
+        <section className={styles.status} role="status">
+          <h2>正在連線玩課雲</h2>
+          <p>{autoTries >= LMS_CONNECTING_RETRY_LIMIT
+            ? '尚未連上玩課雲。可以回到清單稍後再打開，或改到玩課雲查看。'
+            : '正在連線玩課雲。登入後會在背景接上課堂，完成後會自動再讀取。'}</p>
+          <div className={styles.actions}>
+            <Link className="btn" href="/school-lms">回到作業清單</Link>
+          </div>
+        </section>
       ) : state === 'error' ? (
         <section className={styles.status} role="alert">
           <h2>{reason === 'reconnect' || reason === 'permission' ? '請重新連線 WOW Class' : '暫時無法讀取作業說明'}</h2>

@@ -1,6 +1,7 @@
 import { render, screen } from '@testing-library/react';
 import { beforeEach, expect, it, vi } from 'vitest';
 import HomeworkDetailPage from './page';
+import { AcademicConnectionError } from '@/lib/academicClient';
 import { loadTronClassLms } from '@/lib/tronClassLms';
 import type { LmsReadonlySnapshot } from '@/lib/tronClassLmsTypes';
 
@@ -32,6 +33,11 @@ vi.mock('@/lib/tronClassLms', () => ({
   findLmsHomework: (snapshot: LmsReadonlySnapshot, courseId: number, homeworkId: number) =>
     snapshot.homework.find((item) => item.courseId === courseId && item.id === homeworkId),
 }));
+vi.mock('@/lib/academicClient', () => ({
+  AcademicConnectionError: class extends Error {
+    constructor(public readonly reason: string) { super(reason); }
+  },
+}));
 
 function snapshot(): LmsReadonlySnapshot {
   return {
@@ -50,6 +56,16 @@ function snapshot(): LmsReadonlySnapshot {
 beforeEach(() => {
   context.uid = 'one';
   vi.mocked(loadTronClassLms).mockReset().mockResolvedValue(snapshot());
+});
+
+it('shows 正在連線玩課雲 instead of an error while the LMS session is still hanging', async () => {
+  vi.mocked(loadTronClassLms).mockImplementation(async () => {
+    throw new AcademicConnectionError('unavailable');
+  });
+  render(<HomeworkDetailPage />);
+  expect(await screen.findByRole('heading', { name: '正在連線玩課雲' })).toBeTruthy();
+  expect(screen.queryByRole('alert')).toBeNull();
+  expect(screen.queryByRole('heading', { name: '暫時無法讀取作業說明' })).toBeNull();
 });
 
 it('shows the homework description and the matching WOW Class link', async () => {

@@ -149,7 +149,9 @@ export async function loadTronClassLms(
       if (!response.ok || envelope.error) {
         const error = asRecord(envelope.error) ?? {};
         const extra = asRecord(error.details) ?? {};
-        if (extra.code === LMS_CONNECTING_CODE) throw new AcademicConnectionError('connecting');
+        if (extra.code === LMS_CONNECTING_CODE || /正在連線/.test(String(error.message || ''))) {
+          throw new AcademicConnectionError('connecting');
+        }
         if (response.status === 401 || ['UNAUTHENTICATED', 'FAILED_PRECONDITION'].includes(String(error.status))) {
           throw new AcademicConnectionError('reconnect');
         }

@@ -52,7 +52,7 @@ function reconnect(): never {
 }
 
 function connecting(): never {
-  throw new HttpsError('unavailable', '正在連線 WOW Class，請稍候再讀取課程。', {
+  throw new HttpsError('unavailable', '正在連線玩課雲，請稍候再讀取作業。', {
     code: LMS_CONNECTING_CODE,
   });
 }
@@ -423,8 +423,9 @@ export function createTronClassLmsHandler({
       const portal = portalSnapshot?.data();
       if (portal?.ownerUid !== uid || !(schoolSessionExpiry(portal.expiresAt) > now())) reconnect();
       const linkedId = portal.tronClassSessionId;
+      const lmsStillConnecting = schoolSessionExpiry(portal.lmsConnectingUntil) > now();
       if (typeof linkedId !== 'string' || !/^[a-f0-9]{32}$/.test(linkedId)) {
-        if (schoolSessionExpiry(portal.lmsConnectingUntil) > now()) connecting();
+        if (lmsStillConnecting) connecting();
         reconnect();
       }
       const sessionRef = db.doc(`_puTronClassSessions/${linkedId}`);
@@ -432,7 +433,10 @@ export function createTronClassLmsHandler({
       const session = sessionSnapshot.data();
       const cookies = schoolSessionCookies(session?.cookies);
       if (!sessionSnapshot.exists || session?.ownerUid !== uid || !cookies ||
-        !(schoolSessionExpiry(session.expiresAt) > now())) reconnect();
+        !(schoolSessionExpiry(session.expiresAt) > now())) {
+        if (lmsStillConnecting) connecting();
+        reconnect();
+      }
 
       const cacheRef = db.doc(`${LMS_CACHE_COLLECTION}/${uid}`);
       let extras: Record<string, CachedCourseContents> = {};

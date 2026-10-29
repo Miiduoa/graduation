@@ -164,6 +164,33 @@ it('keeps ongoing homework when upcoming courses cannot be listed', async () => 
   expect(body.result.upcomingCoursesError).toEqual({ status: null });
 });
 
+it('reports 玩課雲 as connecting while login is still hanging the LMS session', async () => {
+  const { request, source, store } = setup();
+  Object.assign(store.docs.get(PORTAL)!, {
+    tronClassSessionId: null,
+    lmsConnectingUntil: new Date(Date.now() + 90_000),
+  });
+  const response = await request();
+  const body = await response.json();
+  expect(response.status).toBe(503);
+  expect(body.error.status).toBe('UNAVAILABLE');
+  expect(body.error.message).toMatch(/正在連線玩課雲/);
+  expect(body.error.details).toEqual({ code: 'lms-connecting' });
+  expect(source.fetchCourses).not.toHaveBeenCalled();
+});
+
+it('keeps connecting when the linked LMS document is not written yet', async () => {
+  const { request, source, store } = setup();
+  Object.assign(store.docs.get(PORTAL)!, {
+    lmsConnectingUntil: new Date(Date.now() + 90_000),
+  });
+  store.docs.delete(LMS);
+  const response = await request();
+  expect(response.status).toBe(503);
+  expect((await response.json()).error.details).toEqual({ code: 'lms-connecting' });
+  expect(source.fetchCourses).not.toHaveBeenCalled();
+});
+
 it('maps session expiry to reconnect and does not leak the school payload', async () => {
   const { request, source } = setup();
   vi.mocked(source.fetchHomeworkPage).mockRejectedValueOnce(new Error('TronClass session 已失效，請重新登入'));

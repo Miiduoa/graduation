@@ -63,6 +63,24 @@ it('maps reconnect failures without showing another account snapshot', async () 
   await expect(loadTronClassLms('student-a')).rejects.toMatchObject({ reason: 'reconnect' });
 });
 
+it('maps the background LMS connecting window instead of a hard unavailable error', async () => {
+  fetchMock.mockImplementationOnce(async () => new Response(JSON.stringify({
+    error: {
+      status: 'UNAVAILABLE',
+      message: '正在連線玩課雲，請稍候再讀取作業。',
+      details: { code: 'lms-connecting' },
+    },
+  }), { status: 503 }));
+  await expect(loadTronClassLms('student-a')).rejects.toMatchObject({ reason: 'connecting' });
+});
+
+it('treats a 503 connecting message as connecting even without details.code', async () => {
+  fetchMock.mockImplementationOnce(async () => new Response(JSON.stringify({
+    error: { status: 'UNAVAILABLE', message: '正在連線玩課雲，請稍候再讀取作業。' },
+  }), { status: 503 }));
+  await expect(loadTronClassLms('student-a')).rejects.toMatchObject({ reason: 'connecting' });
+});
+
 it('rejects a download link on a file the school marked as not downloadable', async () => {
   fetchMock.mockImplementationOnce(async () => new Response(JSON.stringify({
     result: snapshot({

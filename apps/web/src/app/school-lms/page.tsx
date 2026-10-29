@@ -16,12 +16,14 @@ import {
   type LmsHomeworkItem,
   type LmsReadonlySnapshot,
 } from '@/lib/tronClassLms';
+import {
+  isLmsConnectingRetryReason,
+  LMS_CONNECTING_RETRY_LIMIT,
+  lmsConnectingRetryDelayMs,
+} from '@/lib/lmsConnectingRetry';
 import { loadFailureCopy } from '@campus/shared/src/loadFailureCopy';
 import styles from '@/components/academic/academic.module.css';
 import lmsStyles from './schoolLms.module.css';
-
-const LMS_CONNECTING_RETRY_LIMIT = 5;
-const LMS_CONNECTING_RETRY_MS = 10_000;
 type View = 'axis' | 'homework' | 'announcements' | 'materials';
 const VIEW_LABELS: Record<View, string> = {
   axis: '今天／七天內', homework: '全部作業', announcements: '公告', materials: '教材',
@@ -91,8 +93,8 @@ function LmsBody({ uid, schoolId, returnUrl }: { uid: string; schoolId: 'pu'; re
   const visible = state?.scope === scope ? state : null;
   const snapshot = visible?.status === 'ready' ? visible.snapshot : undefined;
   const error = visible?.error;
-  const reason = error instanceof AcademicConnectionError ? error.reason : 'unavailable';
-  const connecting = reason === 'connecting';
+  const reason = error instanceof AcademicConnectionError ? error.reason : (visible?.status === 'error' ? 'unavailable' : '');
+  const connecting = isLmsConnectingRetryReason(reason);
   const needsLogin = reason === 'reconnect' || reason === 'permission';
   const homework = useMemo(() => snapshot?.homework.filter((item) => !courseId || item.courseId === courseId) ?? [], [snapshot, courseId]);
   const announcements = useMemo(() => snapshot?.announcements.filter((item) => !courseId || item.courseId === courseId) ?? [], [snapshot, courseId]);
@@ -110,13 +112,14 @@ function LmsBody({ uid, schoolId, returnUrl }: { uid: string; schoolId: 'pu'; re
     const timer = window.setTimeout(() => {
       setAutoTries((value) => value + 1);
       setReload((value) => value + 1);
-    }, LMS_CONNECTING_RETRY_MS);
+    }, lmsConnectingRetryDelayMs(autoTries));
     return () => window.clearTimeout(timer);
   }, [connecting, autoTries, scope]);
 
   function refreshLms() {
     const next = reload + 1;
     const nextScope = JSON.stringify([uid, schoolId, next, true, courseId]);
+    setAutoTries(0);
     setRefresh(true);
     setState((previous) => previous?.scope === scope && previous.status === 'ready'
       ? { ...previous, scope: nextScope, refreshing: true }
@@ -141,10 +144,10 @@ function LmsBody({ uid, schoolId, returnUrl }: { uid: string; schoolId: 'pu'; re
         ) : visible.status === 'error' ? (
           connecting ? (
             <section className={styles.status} role="status">
-              <h2>正在連線 WOW Class</h2>
+              <h2>正在連線玩課雲</h2>
               <p>{autoTries >= LMS_CONNECTING_RETRY_LIMIT
-                ? '尚未連上 WOW Class。可以手動重新讀取，或稍後再到這頁查看。'
-                : '正在連線 WOW Class，約需 1 分鐘。連線完成後會自動再讀取。'}</p>
+                ? '尚未連上玩課雲。可以手動重新讀取，或稍後再到這頁查看。'
+                : '正在連線玩課雲。登入後會在背景接上課堂，完成後會自動再讀取。'}</p>
               <div className={styles.actions}>
                 <button type="button" className="btn primary" onClick={refreshLms}>重新讀取</button>
                 <a className="btn" href="https://tronclass.pu.edu.tw/" target="_blank" rel="noopener noreferrer">前往玩課雲 ↗</a>
