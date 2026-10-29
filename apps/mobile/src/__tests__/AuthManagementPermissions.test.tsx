@@ -63,6 +63,9 @@ jest.mock('../services/puDataCache', () => ({
 }));
 jest.mock('../services/postLoginContextHolder', () => ({ setInMemoryPostLoginContext: jest.fn() }));
 jest.mock('../services/studentIdAuth', () => ({ clearPUSession: jest.fn() }));
+jest.mock('../services/clearOwnedPuCampusSessions', () => ({
+  clearOwnedPuCampusSessions: jest.fn().mockResolvedValue(undefined),
+}));
 jest.mock('../services/tronClassClient', () => ({
   clearTCSession: jest.fn(),
   purgeLegacyTCSensitiveStorage: async () => undefined,

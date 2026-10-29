@@ -25,6 +25,8 @@
 !backend/functions/lib/puCreditSummary.js
 !backend/functions/lib/puCourseTime.js
 !backend/functions/lib/taipeiDay.js
+!backend/functions/lib/puSessionStore.js
+!backend/functions/lib/puCampusTransport.js
 !deploy/
 !deploy/web/
 !deploy/web/start.cjs

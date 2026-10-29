@@ -242,6 +242,7 @@ function createDeleteUserAccountHandler({
       ['eventRegistrationRequests', 'userId'],
       ['_puSessions', 'ownerUid'],
       ['_puTronClassSessions', 'ownerUid'],
+      ['_puTronClassLmsCache', 'ownerUid'],
     ])
       await deleteQuery(db, collection, field, uid);
 

@@ -40,32 +40,44 @@ describe('PU session continuity and bounded requests', () => {
   });
 
   test('keeps same-name session cookie rotations through the grade bridge', async () => {
+    const form = `<form method="post" action="https://mypu.pu.edu.tw/index_redirect_mypu.php">
+      <input type="hidden" name="sysID" value="score_query">
+    </form>`;
     const requests = mockRequests((options, index) => {
-      if (index === 0) return { html: '<p>校務轉接</p>', headers: { 'set-cookie': ['SID=renewed; Path=/; Secure'] } };
-      if (index === 1) return { html: '<p>校務選單</p>' };
+      if (index === 0) return { html: form, headers: { 'set-cookie': ['SID=renewed; Path=/; Secure'] } };
+      if (index === 1) return { html: '<p>已轉入 MyPU</p>', headers: { 'set-cookie': ['PHPSESSID=mypu; Path=/'] } };
       return { html: gradePage };
     });
     const result = await puFetchGrades({ SID: 'original' });
     expect(result.success).toBe(true);
-    expect(requests.map(row => row.hostname + row.path)).toEqual([
-      'alcat.pu.edu.tw/score_query/score_all.php',
-      'alcat.pu.edu.tw/index_menu.php',
-      'mypu.pu.edu.tw/score_query/score_all.php',
+    expect(requests.map(row => `${row.method || 'GET'} ${row.hostname}${row.path}`)).toEqual([
+      'GET alcat.pu.edu.tw/index_chkLogin.php?link=index_ToNewPlt.php?sysID=score_query',
+      'POST mypu.pu.edu.tw/index_redirect_mypu.php',
+      'GET mypu.pu.edu.tw/score_query/score_all.php',
     ]);
-    expect(requests[1].headers.Cookie).toBe('SID=renewed');
-    expect(requests[2].headers.Cookie).toBe('SID=renewed');
+    expect(requests[1].headers.Cookie).toBeUndefined();
+    expect(requests[2].headers.Cookie).toMatch(/PHPSESSID=mypu/);
+    expect(requests[2].headers.Cookie || '').not.toMatch(/(?:^|;\s*)SID=/);
+    expect(result.mypuCookies).toEqual({ PHPSESSID: 'mypu' });
     expect(requests.every(row => row.family === 4)).toBe(true);
   });
 
   test('resolves relative redirects against the actual current page', async () => {
     const requests = mockRequests((options, index) => {
       if (index === 0) return { status: 303, headers: { location: 'next.php', 'set-cookie': ['SID=next; Path=/'] } };
-      if (index === 1) return { html: gradePage };
-      return { html: '<p>暫無其他資料</p>' };
+      if (index === 1) {
+        return {
+          html: `<form method="post" action="https://mypu.pu.edu.tw/index_redirect_mypu.php">
+            <input type="hidden" name="sysID" value="score_query">
+          </form>`,
+        };
+      }
+      if (index === 2) return { html: '<p>已轉入 MyPU</p>' };
+      return { html: gradePage };
     });
     const result = await puFetchGrades({ SID: 'original' });
     expect(result.success).toBe(true);
-    expect(requests[1]).toMatchObject({ hostname: 'alcat.pu.edu.tw', path: '/score_query/next.php' });
+    expect(requests[1]).toMatchObject({ hostname: 'alcat.pu.edu.tw', path: '/next.php' });
     expect(requests[1].headers.Cookie).toBe('SID=next');
   });
 
