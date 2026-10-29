@@ -4,7 +4,12 @@ import { CampusAttentionCard } from '../screens/CampusAttentionCard';
 import { safeNavigate } from '../utils/safeNavigate';
 import { CAMPUS_SENSE_MAX_AGE_MS, type CampusSenseSnapshot } from '../services/campusSenseSnapshot';
 
+const mockReminder = jest.fn(() => null);
+jest.mock('../screens/CampusAssignmentReminderAction', () => ({
+  CampusAssignmentReminderAction: (props: unknown) => mockReminder(props),
+}));
 jest.mock('../utils/safeNavigate', () => ({ safeNavigate: jest.fn() }));
+
 
 const NOW = Date.parse('2026-10-29T10:00:00Z');
 const snapshot: CampusSenseSnapshot = {
@@ -23,6 +28,7 @@ const snapshot: CampusSenseSnapshot = {
   announcements: { status: 'unavailable', items: [] },
 };
 
+beforeEach(() => mockReminder.mockClear());
 afterEach(() => jest.restoreAllMocks());
 
 test('shows actual source deadlines after a verified sync and opens only a checked task', () => {
@@ -35,6 +41,16 @@ test('shows actual source deadlines after a verified sync and opens only a check
   expect(view.getByText('24 小時內截止')).toBeTruthy();
   expect(view.getByText('資料庫作業')).toBeTruthy();
   expect(view.getByText(/僅顯示可能需要注意的期限/)).toBeTruthy();
+  expect(mockReminder).toHaveBeenCalledTimes(1);
+  expect(mockReminder).toHaveBeenCalledWith(expect.objectContaining({
+    step: expect.objectContaining({
+      evidence: 'authorized-assignments',
+      route: '/classroom',
+      dueAt: snapshot.assignments.items[0].dueAt,
+    }),
+    userId: 'alice',
+    schoolId: 'pu',
+  }));
   fireEvent.press(view.getByText('查看這份作業'));
   expect(safeNavigate).toHaveBeenCalledWith(navigation, 'HomeworkSubmit', {
     groupId: 'db-course', assignmentId: 'work-one',
