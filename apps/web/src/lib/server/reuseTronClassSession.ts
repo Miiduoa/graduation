@@ -14,12 +14,13 @@ type SessionDb = SchoolLoginFirestore & { collection?: (path: string) => Session
 const SESSION_ID = /^[a-f0-9]{32}$/;
 
 export async function reuseOwnedTronClassSession({
-  db, uid, studentId, portalId, now = Date.now,
+  db, uid, studentId, portalId, validateSession, now = Date.now,
 }: {
   db: SchoolLoginFirestore;
   uid: string;
   studentId: string;
   portalId: string;
+  validateSession: (session: { cookies: Record<string, string>; userId: number | null }) => Promise<boolean>;
   now?: () => number;
 }): Promise<boolean> {
   const store = db as SessionDb;
@@ -38,6 +39,24 @@ export async function reuseOwnedTronClassSession({
     const portalRef = db.doc('_puSessions/' + portalId);
     const lmsRef = db.doc('_puTronClassSessions/' + linkedId);
     const oldRef = db.doc('_puSessions/' + candidate.id);
+    const lmsSnap = await lmsRef.get?.();
+    const saved = lmsSnap?.data();
+    const savedCookies = schoolSessionCookies(saved?.cookies);
+    const savedUserId = Number(saved?.userId);
+    if (!lmsSnap?.exists || saved?.ownerUid !== uid || saved?.studentId !== studentId ||
+        !(schoolSessionExpiry(saved.expiresAt) > now()) || !savedCookies) continue;
+    // Backend TTL alone does not prove the school's cookie is still accepted.
+    let valid = false;
+    try {
+      valid = await validateSession({
+        cookies: savedCookies,
+        userId: Number.isSafeInteger(savedUserId) && savedUserId > 0 ? savedUserId : null,
+      });
+    } catch {
+      valid = false;
+    }
+    if (!valid) continue;
+
     const success = await db.runTransaction(async (tx) => {
       const [current, original, lms] = await Promise.all([
         tx.get(portalRef), tx.get(oldRef), tx.get(lmsRef),
