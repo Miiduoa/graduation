@@ -23,7 +23,7 @@ function Metric({ label, value, available, detail = '已讀取' }: {
 
 export function CampusSenseDashboard({
   snapshot, expired, authenticated, busy, syncBusy, error, onSync, onClear, onBrief, onWeekBrief,
-  progress, onCancelSync, assignmentContext,
+  progress, onCancelSync, assignmentContext, workbenchOpen, onWorkbenchChange,
 }: {
   snapshot: CampusSenseSnapshot | null;
   expired: boolean;
@@ -38,8 +38,17 @@ export function CampusSenseDashboard({
   progress?: CampusSenseProgress | null;
   onCancelSync?: () => void;
   assignmentContext?: CampusAssignmentWorkbenchContext;
+  /** Optional controlled state lets the assistant hide duplicate summary actions. */
+  workbenchOpen?: boolean;
+  onWorkbenchChange?: (open: boolean) => void;
 }) {
-  const [showWorkbench, setShowWorkbench] = useState(false);
+  const [internalWorkbenchOpen, setInternalWorkbenchOpen] = useState(false);
+  const showWorkbench = workbenchOpen ?? internalWorkbenchOpen;
+  const toggleWorkbench = () => {
+    const next = !showWorkbench;
+    setInternalWorkbenchOpen(next);
+    onWorkbenchChange?.(next);
+  };
   const freshness = snapshot ? new Intl.DateTimeFormat('zh-TW', {
     timeZone: 'Asia/Taipei', month: 'numeric', day: 'numeric',
     hour: '2-digit', minute: '2-digit',
@@ -105,7 +114,7 @@ export function CampusSenseDashboard({
         {snapshot && assignmentContext && snapshot.assignments.status === 'available' ? (
           <>
             <AIButton label={showWorkbench ? '收合作業工作台' : '查看與篩選已同步作業'}
-              variant="ghost" disabled={busy || syncBusy} onPress={() => setShowWorkbench((value) => !value)} />
+              variant="ghost" disabled={busy || syncBusy} onPress={toggleWorkbench} />
             {showWorkbench ? <CampusAssignmentWorkbench
               key={JSON.stringify([assignmentContext.userId, assignmentContext.schoolId, snapshot.checkedAt])}
               snapshot={snapshot} context={assignmentContext} disabled={busy || syncBusy} /> : null}
