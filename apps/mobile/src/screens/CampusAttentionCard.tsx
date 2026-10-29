@@ -51,7 +51,7 @@ export function CampusAttentionCard({ snapshot, context, disabled }: {
           依 {synced} 已同步的授權作業整理。僅顯示可能需要注意的期限，不代表所有學校系統都已接通或作業尚未繳交。
         </Text>
         {feed.items.map((item) => {
-          const reminderStep = buildCampusAttentionReminderStep(item);
+          const reminderStep = snapshot ? buildCampusAttentionReminderStep(item, snapshot) : null;
           return (
             <View
               key={item.key}
