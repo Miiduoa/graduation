@@ -171,6 +171,11 @@ function LmsBody({ uid, schoolId, returnUrl }: { uid: string; schoolId: 'pu'; re
           )
         ) : snapshot ? (
           <>
+            <div className={lmsStyles.overview} aria-label="課堂資料摘要">
+              <div><strong>{snapshot.courses.length}</strong><span>已連結課程</span></div>
+              <div><strong>{homework.filter((item) => !item.submitted).length}</strong><span>待繳交作業</span></div>
+              <div><strong>{homework.filter((item) => item.submitted).length}</strong><span>校方顯示已繳</span></div>
+            </div>
             <div className={lmsStyles.source} aria-busy={visible.refreshing || undefined}>
               <div>
                 <p className={lmsStyles.count}>已讀取 {snapshot.homework.length} 筆作業 · {snapshot.materials.length} 份教材</p>
@@ -301,7 +306,7 @@ function LmsBody({ uid, schoolId, returnUrl }: { uid: string; schoolId: 'pu'; re
           </>
         ) : null}
       </section>
-      <p className={styles.note}>這裡只讀取玩課雲的作業、公告與教材，不會上傳或繳交。已交的作業不會出現在待辦；逾期未交會列在「已逾期」，不會混進今天截止。</p>
+      <p className={styles.note}>目前支援在作業詳情頁直接繳交純文字；附件仍須在玩課雲原站上傳。只有讀到校方繳交紀錄才算確認成功。作業和截止狀態以畫面顯示的最新同步時間為準。</p>
     </>
   );
 }
@@ -317,7 +322,7 @@ export default function SchoolLmsPage() {
   });
   const returnUrl = `${path}${browse.schoolSearch}`;
   return (
-    <SiteShell title="玩課雲作業與教材" subtitle="跨課程查看截止、已交狀態、公告與可下載教材。">
+    <SiteShell title="玩課雲學習工作台" subtitle="跨課程掌握作業進度、教材與公告，並在 Campus One 編輯文字作業。">
       {loading || browse.status === 'loading' ? (
         <div className={styles.status} role="status">正在確認學校與帳號…</div>
       ) : browse.status === 'error' || error ? (
