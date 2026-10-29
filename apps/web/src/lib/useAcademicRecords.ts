@@ -21,7 +21,7 @@ export type AcademicRecordState<K extends AcademicKind> = {
   status: 'loading' | 'ready' | 'error';
   snapshot?: AcademicSnapshot<K>;
   refreshing?: boolean;
-  reason?: 'reconnect' | 'unavailable' | 'permission' | 'unconfigured';
+  reason?: 'reconnect' | 'unavailable' | 'permission' | 'unconfigured' | 'connecting';
   error?: unknown;
 };
 

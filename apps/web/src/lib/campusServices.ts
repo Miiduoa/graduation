@@ -92,6 +92,14 @@ export const CAMPUS_SERVICES = [
     category: 'study',
   },
   {
+    name: '玩課雲作業與教材',
+    text: '跨課程查看截止、已交狀態、公告與可下載教材',
+    href: '/school-lms',
+    access: 'school',
+    keywords: '玩課雲 作業 截止 教材 公告 WOW Class TronClass',
+    category: 'study',
+  },
+  {
     name: '學分規劃',
     text: '依修課紀錄與自訂目標整理學分',
     href: '/credit-planner',

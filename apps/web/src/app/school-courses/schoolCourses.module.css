@@ -84,14 +84,18 @@
   margin: 0;
   overflow-wrap: anywhere;
 }
-.courses a {
+.cardActions {
   display: flex;
-  align-items: center;
-  justify-content: space-between;
-  min-height: 44px;
+  flex-wrap: wrap;
+  gap: 12px 20px;
   margin-top: auto;
   padding-top: 12px;
   border-top: 1px solid var(--border);
+}
+.courses a {
+  display: flex;
+  align-items: center;
+  min-height: 44px;
   color: var(--brand);
   font-size: 14px;
   font-weight: 500;

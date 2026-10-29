@@ -76,6 +76,13 @@ it.each([[400, 'FAILED_PRECONDITION', 'reconnect'], [401, 'UNAUTHENTICATED', 're
   },
 );
 
+it('maps an in-progress WOW Class sidecar instead of a reconnect failure', async () => {
+  fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({
+    error: { status: 'UNAVAILABLE', details: { code: 'lms-connecting' } },
+  }), { status: 503 }));
+  await expect(loadTronClassCourses('student-a')).rejects.toMatchObject({ reason: 'connecting' });
+});
+
 it('keeps a real empty course list while rejecting malformed courses', async () => {
   fetchMock.mockImplementationOnce(async () => response({ courses: [] }));
   expect((await loadTronClassCourses('student-a')).courses).toEqual([]);

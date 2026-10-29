@@ -1,5 +1,6 @@
 import { getAuth, getCloudFunctionUrl, isFirebaseConfigured } from './firebase';
 import { AcademicConnectionError } from './academicClient';
+import { LMS_CONNECTING_CODE } from './schoolLoginTimeouts';
 import { withSchoolDataDeadline } from './schoolDataRequest';
 
 export type TronClassCourseStatus = 'ongoing' | 'completed' | 'upcoming';
@@ -55,6 +56,11 @@ export async function loadTronClassCourses(
       if (!response.ok || envelope.error) {
         const error = envelope.error && typeof envelope.error === 'object'
           ? envelope.error as Record<string, unknown> : {};
+        const extra = error.details && typeof error.details === 'object' && !Array.isArray(error.details)
+          ? error.details as Record<string, unknown> : {};
+        if (extra.code === LMS_CONNECTING_CODE) {
+          throw new AcademicConnectionError('connecting');
+        }
         if (response.status === 401 || ['UNAUTHENTICATED', 'FAILED_PRECONDITION'].includes(String(error.status))) {
           throw new AcademicConnectionError('reconnect');
         }
