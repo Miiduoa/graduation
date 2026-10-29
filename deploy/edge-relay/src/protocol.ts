@@ -1,16 +1,54 @@
 /** 靜宜校園轉送共用簽章與白名單。必須與 nuni-web `puEdgeRelayProtocol.ts`、Functions `puCampusTransport.js` 保持一致。 */
 
 export const RELAY_TS_HEADER = 'x-pu-relay-ts';
+export const RELAY_NONCE_HEADER = 'x-pu-relay-nonce';
 export const RELAY_SIGN_HEADER = 'x-pu-relay-sign';
 export const RELAY_TARGET_HEADER = 'x-pu-relay-target';
 export const RELAY_COLO_HEADER = 'x-pu-relay-colo';
 export const RELAY_REPLAY_WINDOW_SECONDS = 60;
+export const RELAY_NONCE_PATTERN = /^[0-9a-f]{32}$/;
+export const EMPTY_BODY_SHA256 = 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855';
+export const TAIWAN_NEAR_COLOS = ['TPE', 'KHH'] as const;
 
 const DEFAULT_ALLOWED_HOSTS = ['*.pu.edu.tw'];
 
-export function relayCanonical(timestamp: string, method: string, target: string): string {
-  const verb = method.trim().toUpperCase() || 'GET';
-  return `${timestamp}\n${verb}\n${target}`;
+export type RelaySignFields = {
+  timestamp: string;
+  nonce: string;
+  method: string;
+  target: string;
+  bodySha256: string;
+  cookie: string;
+  contentType: string;
+};
+
+export function normalizeRelayHostname(hostname: string): string {
+  return hostname.trim().toLowerCase().replace(/\.+$/g, '');
+}
+
+export function normalizeRelayTarget(target: string): string | null {
+  try {
+    const url = new URL(target);
+    const host = normalizeRelayHostname(url.hostname);
+    if (!host) return null;
+    url.hostname = host;
+    return url.toString();
+  } catch {
+    return null;
+  }
+}
+
+export function relayCanonical(fields: RelaySignFields): string {
+  const verb = fields.method.trim().toUpperCase() || 'GET';
+  return [
+    fields.timestamp,
+    fields.nonce.trim().toLowerCase(),
+    verb,
+    fields.target,
+    fields.bodySha256.trim().toLowerCase(),
+    fields.cookie,
+    fields.contentType,
+  ].join('\n');
 }
 
 function bytesToHex(bytes: Uint8Array): string {
@@ -47,13 +85,26 @@ async function hmacSha256Hex(secret: string, message: string): Promise<string> {
   return bytesToHex(new Uint8Array(mac));
 }
 
-export async function signRelayRequest(
-  secret: string,
-  timestamp: string,
-  method: string,
-  target: string,
-): Promise<string> {
-  return hmacSha256Hex(secret, relayCanonical(timestamp, method, target));
+export async function sha256Hex(data: Uint8Array): Promise<string> {
+  const digest = await crypto.subtle.digest('SHA-256', data);
+  return bytesToHex(new Uint8Array(digest));
+}
+
+export function randomRelayNonce(): string {
+  const bytes = new Uint8Array(16);
+  crypto.getRandomValues(bytes);
+  return bytesToHex(bytes);
+}
+
+export function relayHeaderValues(headers: Headers): { cookie: string; contentType: string } {
+  return {
+    cookie: headers.get('cookie') ?? '',
+    contentType: headers.get('content-type') ?? '',
+  };
+}
+
+export async function signRelayRequest(secret: string, fields: RelaySignFields): Promise<string> {
+  return hmacSha256Hex(secret, relayCanonical(fields));
 }
 
 export function isRelayTimestampFresh(
@@ -77,7 +128,7 @@ export function parseAllowedHosts(raw: string | undefined | null): string[] {
 }
 
 export function hostnameMatchesAllowlist(hostname: string, patterns: readonly string[]): boolean {
-  const host = hostname.trim().toLowerCase();
+  const host = normalizeRelayHostname(hostname);
   if (!host || host.includes(':')) return false;
   return patterns.some((pattern) => {
     const item = pattern.trim().toLowerCase();
@@ -102,21 +153,40 @@ export function isAllowedRelayTarget(target: string, patterns: readonly string[]
   }
 }
 
+export function parseCfPlacement(placement: string): { kind: 'local' | 'remote' | ''; colo: string } {
+  const raw = placement.trim();
+  const placed = raw.match(/^(local|remote)-([A-Za-z0-9]{3})$/i);
+  if (placed) return { kind: placed[1]!.toLowerCase() as 'local' | 'remote', colo: placed[2]!.toUpperCase() };
+  if (/^[A-Za-z]{3}$/.test(raw)) return { kind: '', colo: raw.toUpperCase() };
+  return { kind: '', colo: '' };
+}
+
+export function isTaiwanNearbyColo(colo: string): boolean {
+  return (TAIWAN_NEAR_COLOS as readonly string[]).includes(colo.trim().toUpperCase());
+}
+
+export function isRelayPlacementMiss(placement: string): boolean {
+  return !isTaiwanNearbyColo(parseCfPlacement(placement).colo);
+}
+
+export function readRequestPlacement(request: Request): string {
+  const header = request.headers.get('cf-placement')?.trim() || '';
+  if (header) return header;
+  const cf = (request as Request & { cf?: { placement?: string } }).cf;
+  if (typeof cf?.placement === 'string' && cf.placement.trim()) return cf.placement.trim();
+  return '';
+}
+
 export async function verifyRelaySignature(options: {
   secret: string;
-  timestamp: string;
-  method: string;
-  target: string;
+  fields: RelaySignFields;
   signature: string;
   nowMs?: number;
 }): Promise<boolean> {
   if (!options.secret || !options.signature) return false;
-  if (!isRelayTimestampFresh(options.timestamp, options.nowMs)) return false;
-  const expected = await signRelayRequest(
-    options.secret,
-    options.timestamp,
-    options.method,
-    options.target,
-  );
+  if (!RELAY_NONCE_PATTERN.test(options.fields.nonce.trim().toLowerCase())) return false;
+  if (!/^[0-9a-f]{64}$/.test(options.fields.bodySha256.trim().toLowerCase())) return false;
+  if (!isRelayTimestampFresh(options.fields.timestamp, options.nowMs)) return false;
+  const expected = await signRelayRequest(options.secret, options.fields);
   return timingSafeEqualHex(expected, options.signature.trim().toLowerCase());
 }

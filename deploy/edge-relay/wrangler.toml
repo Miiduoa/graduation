@@ -9,5 +9,14 @@ workers_dev = true
 [placement]
 region = "gcp:asia-east1"
 
+[observability]
+enabled = false
+
+[observability.logs]
+invocation_logs = false
+
+[observability.traces]
+enabled = false
+
 [vars]
 ALLOWED_HOSTS = "*.pu.edu.tw"

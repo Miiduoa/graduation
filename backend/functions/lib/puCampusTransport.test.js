@@ -1,17 +1,30 @@
-const { createHmac } = require('node:crypto');
+const { createHash, createHmac } = require('node:crypto');
 const {
+  EMPTY_BODY_SHA256,
+  RELAY_NONCE_HEADER,
   RELAY_SIGN_HEADER,
   RELAY_TARGET_HEADER,
   RELAY_TS_HEADER,
   createCjsRelayFetch,
   isAllowedRelayTarget,
+  normalizeRelayTarget,
   readPuEdgeRelayConfig,
   sendWithCampusFetch,
   setCampusHttpFetch,
+  sha256Hex,
   signRelayRequest,
 } = require('./puCampusTransport');
 
-const GOLDEN_SIGN = 'e62e22b5464464754b36735ef948b92c0dc504f367f5c749344a2b2f61ef6a82';
+const GOLDEN_FIELDS = {
+  timestamp: '1700000000',
+  nonce: '0123456789abcdef0123456789abcdef',
+  method: 'POST',
+  target: 'https://alcat.pu.edu.tw/index_check.php',
+  bodySha256: '5c38824100d9ffcf24823e691ad711b0b640cec9d58fd4d770f9a1049b9fd3a0',
+  cookie: 'SID=abc',
+  contentType: 'application/x-www-form-urlencoded',
+};
+const GOLDEN_SIGN = '8a8512b7c00a0ae25cd545ef61b5c8d905cc5a973167ae3e60f94e63298ed8b0';
 
 afterEach(() => {
   setCampusHttpFetch(null);
@@ -20,14 +33,25 @@ afterEach(() => {
 });
 
 test('CJS HMAC matches the shared golden vector', () => {
-  expect(
-    signRelayRequest('test-relay-secret', '1700000000', 'POST', 'https://alcat.pu.edu.tw/index_check.php'),
-  ).toBe(GOLDEN_SIGN);
+  expect(sha256Hex(Buffer.from('uid=1110700321&upassword=secret'))).toBe(GOLDEN_FIELDS.bodySha256);
+  expect(signRelayRequest('test-relay-secret', GOLDEN_FIELDS)).toBe(GOLDEN_SIGN);
   expect(
     createHmac('sha256', 'test-relay-secret')
-      .update('1700000000\nPOST\nhttps://alcat.pu.edu.tw/index_check.php', 'utf8')
+      .update(
+        [
+          GOLDEN_FIELDS.timestamp,
+          GOLDEN_FIELDS.nonce,
+          GOLDEN_FIELDS.method,
+          GOLDEN_FIELDS.target,
+          GOLDEN_FIELDS.bodySha256,
+          GOLDEN_FIELDS.cookie,
+          GOLDEN_FIELDS.contentType,
+        ].join('\n'),
+        'utf8',
+      )
       .digest('hex'),
   ).toBe(GOLDEN_SIGN);
+  expect(createHash('sha256').update(Buffer.alloc(0)).digest('hex')).toBe(EMPTY_BODY_SHA256);
 });
 
 test('relay stays off unless both https URL and secret exist', () => {
@@ -41,15 +65,19 @@ test('relay stays off unless both https URL and secret exist', () => {
   });
 });
 
-test('allowlist accepts nested pu.edu.tw and rejects lookalikes', () => {
+test('allowlist accepts nested pu.edu.tw, trailing-dot FQDN, and rejects lookalikes', () => {
   const allow = ['*.pu.edu.tw'];
   expect(isAllowedRelayTarget('https://alcat.pu.edu.tw/index_check.php', allow)).toBe(true);
+  expect(isAllowedRelayTarget('https://alcat.pu.edu.tw./index_check.php', allow)).toBe(true);
   expect(isAllowedRelayTarget('https://webpacx.lib.pu.edu.tw/', allow)).toBe(true);
   expect(isAllowedRelayTarget('https://identity.pu.edu.tw/auth', allow)).toBe(true);
   expect(isAllowedRelayTarget('http://alcat.pu.edu.tw/', allow)).toBe(false);
   expect(isAllowedRelayTarget('https://alcat.pu.edu.tw:8443/', allow)).toBe(false);
   expect(isAllowedRelayTarget('https://alcat.pu.edu.tw.evil.test/', allow)).toBe(false);
   expect(isAllowedRelayTarget('https://notpu.edu.tw/', allow)).toBe(false);
+  expect(normalizeRelayTarget('https://alcat.pu.edu.tw./index_check.php')).toBe(
+    'https://alcat.pu.edu.tw/index_check.php',
+  );
 });
 
 test('injected fetch preserves cookies and does not follow redirects', async () => {
@@ -76,7 +104,9 @@ test('injected fetch preserves cookies and does not follow redirects', async () 
   expect(result.body).toBe('moved');
 });
 
-test('env-based relay signs requests to the worker URL', async () => {
+test('env-based relay signs body hash, cookie and nonce to the worker URL', async () => {
+  const logs = [];
+  const info = jest.spyOn(console, 'info').mockImplementation((message) => logs.push(String(message)));
   const relayFetch = createCjsRelayFetch(
     { url: 'https://pu-edge-relay.example.workers.dev', secret: 'unit-test-secret' },
     async (url, init) => {
@@ -85,24 +115,37 @@ test('env-based relay signs requests to the worker URL', async () => {
       expect(init.redirect).toBe('manual');
       const headers = new Headers(init.headers);
       expect(headers.get(RELAY_TARGET_HEADER)).toBe('https://tronclass.pu.edu.tw/api/profile');
+      expect(headers.get(RELAY_NONCE_HEADER)).toBe('bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb');
       expect(headers.get(RELAY_SIGN_HEADER)).toBe(
-        signRelayRequest(
-          'unit-test-secret',
-          headers.get(RELAY_TS_HEADER),
-          'GET',
-          'https://tronclass.pu.edu.tw/api/profile',
-        ),
+        signRelayRequest('unit-test-secret', {
+          timestamp: headers.get(RELAY_TS_HEADER),
+          nonce: headers.get(RELAY_NONCE_HEADER),
+          method: 'GET',
+          target: 'https://tronclass.pu.edu.tw/api/profile',
+          bodySha256: EMPTY_BODY_SHA256,
+          cookie: '',
+          contentType: '',
+        }),
       );
-      return new Response('ok');
+      const out = new Headers({ 'x-pu-relay-colo': 'remote-TPE' });
+      return new Response('ok', { headers: out });
     },
     () => 1_700_000_000_000,
+    () => 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
   );
   const result = await sendWithCampusFetch({
-    url: 'https://tronclass.pu.edu.tw/api/profile',
+    url: 'https://tronclass.pu.edu.tw./api/profile',
     method: 'GET',
     fetch: relayFetch,
   });
   expect(result.body).toBe('ok');
+  expect(JSON.parse(logs[0])).toMatchObject({
+    msg: 'pu_edge_relay_client',
+    host: 'tronclass.pu.edu.tw',
+    path: '/api/profile',
+    colo: 'remote-TPE',
+  });
+  info.mockRestore();
 });
 
 test('without injection or env, sendWithCampusFetch leaves https.request in charge', async () => {

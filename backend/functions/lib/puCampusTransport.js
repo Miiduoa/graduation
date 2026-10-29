@@ -6,27 +6,65 @@
  * 只有 PU_EDGE_RELAY_URL 與 PU_EDGE_RELAY_SECRET 都有設時才轉送。
  * 不記錄 body、cookie、學號、密碼。
  */
-const { createHmac } = require('node:crypto');
+const { createHmac, createHash, randomBytes } = require('node:crypto');
 
 const RELAY_TS_HEADER = 'x-pu-relay-ts';
+const RELAY_NONCE_HEADER = 'x-pu-relay-nonce';
 const RELAY_SIGN_HEADER = 'x-pu-relay-sign';
 const RELAY_TARGET_HEADER = 'x-pu-relay-target';
+const RELAY_COLO_HEADER = 'x-pu-relay-colo';
 const RELAY_REPLAY_WINDOW_SECONDS = 60;
+const RELAY_NONCE_PATTERN = /^[0-9a-f]{32}$/;
+const EMPTY_BODY_SHA256 = 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855';
+const TAIWAN_NEAR_COLOS = new Set(['TPE', 'KHH']);
 const DEFAULT_ALLOWED_HOSTS = ['*.pu.edu.tw'];
 
 let campusHttpFetch = null;
 let cachedEnvRelayFetch = null;
 let cachedEnvRelayKey = '';
 
-function relayCanonical(timestamp, method, target) {
-  const verb = String(method || 'GET').trim().toUpperCase() || 'GET';
-  return `${timestamp}\n${verb}\n${target}`;
+function normalizeRelayHostname(hostname) {
+  return String(hostname || '')
+    .trim()
+    .toLowerCase()
+    .replace(/\.+$/g, '');
 }
 
-function signRelayRequest(secret, timestamp, method, target) {
-  return createHmac('sha256', secret)
-    .update(relayCanonical(timestamp, method, target), 'utf8')
-    .digest('hex');
+function normalizeRelayTarget(target) {
+  try {
+    const url = new URL(target);
+    const host = normalizeRelayHostname(url.hostname);
+    if (!host) return null;
+    url.hostname = host;
+    return url.toString();
+  } catch {
+    return null;
+  }
+}
+
+function relayCanonical(fields) {
+  const verb = String(fields.method || 'GET').trim().toUpperCase() || 'GET';
+  return [
+    fields.timestamp,
+    String(fields.nonce || '').trim().toLowerCase(),
+    verb,
+    fields.target,
+    String(fields.bodySha256 || '').trim().toLowerCase(),
+    fields.cookie || '',
+    fields.contentType || '',
+  ].join('\n');
+}
+
+function sha256Hex(data) {
+  return createHash('sha256').update(data).digest('hex');
+}
+
+function signRelayRequest(secret, fields) {
+  return createHmac('sha256', secret).update(relayCanonical(fields), 'utf8').digest('hex');
+}
+
+function randomRelayNonce() {
+  return randomBytes(16).toString('hex');
 }
 
 function parseAllowedHosts(raw) {
@@ -38,7 +76,7 @@ function parseAllowedHosts(raw) {
 }
 
 function hostnameMatchesAllowlist(hostname, patterns) {
-  const host = String(hostname || '').trim().toLowerCase();
+  const host = normalizeRelayHostname(hostname);
   if (!host || host.includes(':')) return false;
   return patterns.some((pattern) => {
     const item = String(pattern || '').trim().toLowerCase();
@@ -61,6 +99,18 @@ function isAllowedRelayTarget(target, patterns) {
   } catch {
     return false;
   }
+}
+
+function parseCfPlacement(placement) {
+  const raw = String(placement || '').trim();
+  const placed = raw.match(/^(local|remote)-([A-Za-z0-9]{3})$/i);
+  if (placed) return { kind: placed[1].toLowerCase(), colo: placed[2].toUpperCase() };
+  if (/^[A-Za-z]{3}$/.test(raw)) return { kind: '', colo: raw.toUpperCase() };
+  return { kind: '', colo: '' };
+}
+
+function isRelayPlacementMiss(placement) {
+  return !TAIWAN_NEAR_COLOS.has(parseCfPlacement(placement).colo);
 }
 
 function readPuEdgeRelayConfig(env = process.env) {
@@ -97,32 +147,80 @@ function getCampusHttpFetch(env = process.env) {
   return cachedEnvRelayFetch;
 }
 
-function createCjsRelayFetch(config, fetchImpl = globalThis.fetch, now = Date.now) {
+function bodyBuffer(body) {
+  if (body == null) return Buffer.alloc(0);
+  if (Buffer.isBuffer(body)) return body;
+  if (body instanceof Uint8Array) return Buffer.from(body);
+  return Buffer.from(String(body), 'utf8');
+}
+
+function headerLookup(headers, name) {
+  const wanted = name.toLowerCase();
+  let found = '';
+  new Headers(headers || {}).forEach((value, key) => {
+    if (key.toLowerCase() === wanted) found = value;
+  });
+  return found;
+}
+
+function createCjsRelayFetch(config, fetchImpl = globalThis.fetch, now = Date.now, nonceFn = randomRelayNonce) {
   if (typeof fetchImpl !== 'function') {
     throw new Error('Campus relay fetch is unavailable');
   }
   return async (url, init = {}) => {
-    const target = String(url);
-    if (!isAllowedRelayTarget(target, DEFAULT_ALLOWED_HOSTS)) {
+    const normalized = normalizeRelayTarget(String(url)) || String(url);
+    if (!isAllowedRelayTarget(normalized, DEFAULT_ALLOWED_HOSTS)) {
       throw new Error('Untrusted campus URL');
     }
     const method = String(init.method || 'GET').trim().toUpperCase() || 'GET';
     const timestamp = String(Math.floor(now() / 1000));
-    const signature = signRelayRequest(config.secret, timestamp, method, target);
+    const nonce = String(nonceFn()).trim().toLowerCase();
+    const bytes = bodyBuffer(init.body);
     const headers = new Headers(init.headers);
+    const cookie = headerLookup(headers, 'cookie');
+    const contentType = headerLookup(headers, 'content-type');
+    const signature = signRelayRequest(config.secret, {
+      timestamp,
+      nonce,
+      method,
+      target: normalized,
+      bodySha256: bytes.length ? sha256Hex(bytes) : EMPTY_BODY_SHA256,
+      cookie,
+      contentType,
+    });
     headers.set(RELAY_TS_HEADER, timestamp);
+    headers.set(RELAY_NONCE_HEADER, nonce);
     headers.set(RELAY_SIGN_HEADER, signature);
-    headers.set(RELAY_TARGET_HEADER, target);
+    headers.set(RELAY_TARGET_HEADER, normalized);
     const relayInit = {
       method,
       headers,
       redirect: 'manual',
       signal: init.signal,
     };
-    if (method !== 'GET' && method !== 'HEAD' && init.body != null) {
-      relayInit.body = init.body;
+    if (method !== 'GET' && method !== 'HEAD' && bytes.length) {
+      relayInit.body = bytes;
     }
-    return fetchImpl(config.url, relayInit);
+    const started = Date.now();
+    const response = await fetchImpl(config.url, relayInit);
+    try {
+      const parsed = new URL(normalized);
+      const colo = response.headers.get(RELAY_COLO_HEADER) || response.headers.get('cf-placement') || '';
+      console.info(
+        JSON.stringify({
+          msg: 'pu_edge_relay_client',
+          host: parsed.hostname,
+          path: parsed.pathname,
+          status: response.status,
+          ms: Date.now() - started,
+          ...(colo ? { colo } : {}),
+          ...(isRelayPlacementMiss(colo) ? { placement_miss: true } : {}),
+        }),
+      );
+    } catch {
+      // 日誌失敗不影響轉送。
+    }
+    return response;
   };
 }
 
@@ -217,6 +315,10 @@ async function sendWithCampusFetch(options) {
 
 module.exports = {
   DEFAULT_ALLOWED_HOSTS,
+  EMPTY_BODY_SHA256,
+  RELAY_COLO_HEADER,
+  RELAY_NONCE_HEADER,
+  RELAY_NONCE_PATTERN,
   RELAY_REPLAY_WINDOW_SECONDS,
   RELAY_SIGN_HEADER,
   RELAY_TARGET_HEADER,
@@ -225,10 +327,15 @@ module.exports = {
   getCampusHttpFetch,
   hostnameMatchesAllowlist,
   isAllowedRelayTarget,
+  isRelayPlacementMiss,
+  normalizeRelayHostname,
+  normalizeRelayTarget,
   parseAllowedHosts,
+  randomRelayNonce,
   readPuEdgeRelayConfig,
   relayCanonical,
   sendWithCampusFetch,
   setCampusHttpFetch,
+  sha256Hex,
   signRelayRequest,
 };

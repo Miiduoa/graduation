@@ -4,7 +4,7 @@ import {
   STUDENT_LOGIN_TOTAL_TIMEOUT_MS,
   studentLoginHopTimeoutMs,
 } from '../schoolLoginTimeouts';
-import { createPuRelayFetch } from './puEdgeRelay';
+import { createPuRelayFetch, normalizeRelayHostname, normalizeRelayTarget } from './puEdgeRelay';
 
 const ALCAT_ORIGIN = 'https://alcat.pu.edu.tw';
 const TRONCLASS_ORIGIN = 'https://tronclass.pu.edu.tw';
@@ -141,10 +141,13 @@ export function rewriteAllowedCampusLocation(
     const target = new URL(location, requestUrl);
     if (target.protocol !== 'http:' && target.protocol !== 'https:') return null;
     if (target.username || target.password) return null;
+    const host = normalizeRelayHostname(target.hostname);
+    if (!host) return null;
+    target.hostname = host;
     const allowed = allowedOrigins.some((origin) => {
       const item = new URL(origin);
       return (
-        target.hostname.toLowerCase() === item.hostname.toLowerCase() && target.port === item.port
+        host === normalizeRelayHostname(item.hostname) && target.port === item.port
       );
     });
     if (!allowed) return null;
@@ -173,7 +176,7 @@ export function isCasPasswordPostUrl(url: string | null | undefined): boolean {
       target.protocol === 'https:' &&
       !target.username &&
       !target.password &&
-      target.hostname.toLowerCase() === IDENTITY_PASSWORD_HOST &&
+      normalizeRelayHostname(target.hostname) === IDENTITY_PASSWORD_HOST &&
       (target.port === '' || target.port === '443')
     );
   } catch {
@@ -184,7 +187,7 @@ export function isCasPasswordPostUrl(url: string | null | undefined): boolean {
 function hostnameOf(url: string | null | undefined): string | undefined {
   if (!url) return undefined;
   try {
-    const host = new URL(url).hostname.trim().toLowerCase();
+    const host = normalizeRelayHostname(new URL(url).hostname);
     return host || undefined;
   } catch {
     return undefined;
@@ -524,7 +527,8 @@ export function createPuCampusGateway(
       const location = allowedOrigins
         ? rewriteAllowedCampusLocation(locationHeader, url, allowedOrigins)
         : locationHeader
-          ? new URL(locationHeader, url).toString()
+          ? normalizeRelayTarget(new URL(locationHeader, url).toString()) ||
+            new URL(locationHeader, url).toString()
           : null;
       return {
         status: response.status,

@@ -928,6 +928,10 @@ it('does not follow a CAS redirect off identity or TronClass', async () => {
   expect(fetchMock.mock.calls.some(([url]) => String(url).includes('evil.test'))).toBe(false);
 });
 
+it('treats identity trailing-dot FQDN as the same password host', () => {
+  expect(isCasPasswordPostUrl('https://identity.pu.edu.tw./auth/realms/pu/login-actions/authenticate')).toBe(true);
+});
+
 it('rewrites alcat http redirects to https and rejects other hosts', () => {
   const portal = 'https://alcat.pu.edu.tw';
   const posted = 'https://alcat.pu.edu.tw/index_check.php';
@@ -952,6 +956,9 @@ it('rewrites alcat http redirects to https and rejects other hosts', () => {
   );
   expect(rewriteCampusPortalLocation('https://alcat.pu.edu.tw/ok', posted, portal)).toBe(
     'https://alcat.pu.edu.tw/ok',
+  );
+  expect(rewriteCampusPortalLocation('https://alcat.pu.edu.tw./stu_query/x', posted, portal)).toBe(
+    'https://alcat.pu.edu.tw/stu_query/x',
   );
   expect(rewriteCampusPortalLocation('https://evil.test/steal', posted, portal)).toBeNull();
   expect(rewriteCampusPortalLocation('https://tronclass.pu.edu.tw/api', posted, portal)).toBeNull();
