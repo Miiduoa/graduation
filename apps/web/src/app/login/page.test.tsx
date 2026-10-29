@@ -90,6 +90,7 @@ beforeEach(() => {
 });
 afterEach(() => {
   vi.unstubAllGlobals();
+  vi.useRealTimers();
 });
 it('keeps a school return destination during an availability failure instead of offering the wrong account', () => {
   state.user = null;
@@ -262,6 +263,43 @@ it('retains the reconnection form after a rejected school login', async () => {
   fireEvent.click(screen.getByRole('button', { name: '連線學校帳號' }));
   expect((await screen.findByRole('alert')).textContent).toBe(SCHOOL_LOGIN_GENERIC_ERROR);
   expect(replace).not.toHaveBeenCalled();
+});
+
+it('navigates after an 11-second school verification instead of bouncing back to login', async () => {
+  vi.useFakeTimers();
+  state.user = null;
+  state.studentId = true;
+  let finish!: (value: unknown) => void;
+  signIn.mockImplementationOnce(
+    () =>
+      new Promise((resolve) => {
+        finish = resolve;
+      }),
+  );
+  render(<LoginPage />);
+  fillSchoolLogin();
+  fireEvent.submit(screen.getByLabelText('學號').closest('form')!);
+  expect(replace).not.toHaveBeenCalled();
+  expect(screen.queryByRole('alert')).toBeNull();
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(11_000);
+    finish({ uid: 'pu-one' });
+  });
+  expect(replace).toHaveBeenCalledOnce();
+  expect(replace).toHaveBeenCalledWith('/grades');
+});
+
+it('shows a school timeout notice and stays on the login form', async () => {
+  state.user = null;
+  state.studentId = true;
+  signIn.mockRejectedValue(new SchoolLoginHttpError(503, '學校系統暫時無法連線'));
+  render(<LoginPage />);
+  fillSchoolLogin();
+  fireEvent.submit(screen.getByLabelText('學號').closest('form')!);
+  expect((await screen.findByRole('alert')).textContent).toBe('學校系統暫時連不上，請稍後再試');
+  expect(replace).not.toHaveBeenCalled();
+  expect(screen.getByRole('button', { name: '連線學校帳號' })).toBeTruthy();
+  expect(screen.getByLabelText('學號')).toBeTruthy();
 });
 
 it.each([

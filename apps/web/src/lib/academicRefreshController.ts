@@ -3,7 +3,8 @@ export type AcademicRefreshOutcome =
   | 'unavailable'
   | 'reconnect'
   | 'permission'
-  | 'unconfigured';
+  | 'unconfigured'
+  | 'connecting';
 
 export type AcademicAutomaticStatus =
   | 'off'
