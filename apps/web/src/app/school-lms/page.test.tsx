@@ -84,7 +84,7 @@ it('lists today homework and reaches the description in one click', async () => 
   expect(screen.queryByRole('heading', { name: '週次練習' })).toBeNull();
   const today = screen.getByRole('heading', { name: '今天截止' }).closest('section');
   expect(today).toBeTruthy();
-  expect(within(today as HTMLElement).getByRole('link', { name: '查看說明' }).getAttribute('href')).toBe('/school-lms/homework/10001/20001');
+  expect(within(today as HTMLElement).getByRole('link', { name: '查看與繳交' }).getAttribute('href')).toBe('/school-lms/homework/10001/20001');
   expect(within(today as HTMLElement).getByRole('link', { name: '玩課雲同一筆 ↗' }).getAttribute('href')).toBe(
     'https://tronclass.pu.edu.tw/course/10001/content#/activity/20001',
   );
@@ -211,4 +211,13 @@ it('refreshes from the school instead of silently keeping stale rows', async () 
   await screen.findByRole('heading', { name: '期末專題提案' });
   fireEvent.click(screen.getByRole('button', { name: '重新整理' }));
   expect(loadTronClassLms).toHaveBeenLastCalledWith('one', { refresh: true, expectedSchool: 'pu' });
+});
+
+
+it('shows imported course, pending, and submitted counts without inventing status', async () => {
+  render(<SchoolLmsPage />);
+  await screen.findByRole('heading', { name: '期末專題提案' });
+  expect(screen.getByText('已連結課程').previousElementSibling?.textContent).toBe('1');
+  expect(screen.getByText('待繳交作業').previousElementSibling?.textContent).toBe('2');
+  expect(screen.getByText('校方顯示已繳').previousElementSibling?.textContent).toBe('1');
 });
