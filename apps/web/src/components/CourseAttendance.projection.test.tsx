@@ -59,6 +59,8 @@ async function showQr() {
   await screen.findByAltText('本次課堂簽到 QR Code');
 }
 it('uses a high-resolution existing server token and presents no roster in the dialog', async () => {
+  const initialSession = data();
+  vi.mocked(loadCourseAttendance).mockResolvedValue(initialSession);
   render(<CourseAttendance courseId="course" audience="teacher" />); await showQr();
   expect(state.encodeQr).toHaveBeenCalledWith(JSON.stringify({ groupId: 'course', sessionId: 'session', qrToken: 'server-issued-classroom-token' }),
     { width: 768, margin: 4, errorCorrectionLevel: 'M' });
@@ -66,7 +68,8 @@ it('uses a high-resolution existing server token and presents no roster in the d
   const projection = screen.getByRole('dialog', { name: '資料結構' });
   expect(within(projection).queryByText('僅教師可見的更正工作區')).toBeNull();
   expect(within(projection).queryByText('server-issued-classroom-token')).toBeNull();
-  act(() => state.sessions?.([{ ...data().sessions[0], attendeeCount: 25 }]));
+  // A live count update preserves the issued session and its original QR expiry.
+  act(() => state.sessions?.([{ ...initialSession.sessions[0], attendeeCount: 25 }]));
   expect(within(projection).getByText('25')).toBeTruthy();
   fireEvent.click(within(projection).getByRole('button', { name: '結束投影' }));
   expect(endCourseAttendance).not.toHaveBeenCalled();
