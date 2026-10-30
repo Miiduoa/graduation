@@ -256,6 +256,26 @@ it('keeps a post pending when school responds with an unfinished record', async 
   expect(source.submitHomeworkText).toHaveBeenCalledOnce();
 });
 
+
+it('does not verify a different receipt id after posting or on recheck', async () => {
+  const { request, check, source } = setup();
+  const otherReceipt = {
+    id: 17, homework_id: 20001, student_id: 10,
+    status: 'submitted', submitted_at: new Date().toISOString(),
+  };
+  vi.mocked(source.fetchHomeworkSubmissions!).mockReset()
+    .mockResolvedValueOnce([])
+    .mockResolvedValueOnce([otherReceipt])
+    .mockResolvedValueOnce([otherReceipt]);
+  const writeResponse = await request();
+  expect(writeResponse.status).toBe(200);
+  expect((await writeResponse.json()).result.status).toBe('pending');
+  const checkResponse = await check();
+  expect(checkResponse.status).toBe(200);
+  expect((await checkResponse.json()).result.status).toBe('pending');
+  expect(source.submitHomeworkText).toHaveBeenCalledOnce();
+});
+
 it('stops remote writing when the administrator has not enabled the school endpoint', async () => {
   const { source } = setup();
   // Default production mode is fail-closed; this test checks the handler directly.
