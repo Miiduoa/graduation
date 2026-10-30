@@ -1,0 +1,96 @@
+name: Read-only merge source snapshot
+
+on:
+  push:
+    branches: [chore/merge-snapshot-20261030]
+
+permissions:
+  contents: read
+
+jobs:
+  snapshot:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Export tracked source objects without credentials or school requests
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import hashlib
+          import json
+          import pathlib
+          import subprocess
+
+          out = pathlib.Path('integration-export')
+          (out / 'objects').mkdir(parents=True)
+          (out / 'trees').mkdir()
+          def git(*args):
+              return subprocess.check_output(['git', *args])
+          expected_main = '7dc77f5cb15265937d41bd5516c3e3c6a15e96ca'
+          main = git('rev-parse', 'refs/remotes/origin/main').decode().strip()
+          if main != expected_main:
+              raise SystemExit('Main changed; rebuild the integration snapshot against its new head.')
+          refs = git('for-each-ref', '--format=%(refname:short) %(objectname)', 'refs/remotes/origin').decode().splitlines()
+          selected = {}
+          for line in refs:
+              ref, sha = line.rsplit(' ', 1)
+              if ref in ('origin/HEAD', 'origin/chore/merge-snapshot-20261030'):
+                  continue
+              selected[ref] = sha
+          selected['baseline/main'] = main
+          for ref, sha in list(selected.items()):
+              common = git('merge-base', main, sha).decode().strip()
+              selected['merge-base/' + common] = common
+          suffixes = {'.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs', '.json', '.yaml', '.yml', '.css', '.scss', '.sql', '.md', '.html', '.txt', '.sh', '.toml', '.lock', '.gitignore'}
+          objects = set()
+          metadata = {}
+          for ref, sha in selected.items():
+              entries = []
+              for row in git('ls-tree', '-r', '-z', sha).split(b'\0'):
+                  if not row:
+                      continue
+                  header, raw_path = row.split(b'\t', 1)
+                  mode, kind, oid = header.decode().split()
+                  path = raw_path.decode()
+                  item = {'path': path, 'mode': mode, 'type': kind, 'sha': oid}
+                  entries.append(item)
+                  basename = pathlib.PurePosixPath(path).name
+                  allowed = pathlib.PurePosixPath(path).suffix in suffixes or basename.startswith('Dockerfile') or basename in {'LICENSE', 'Procfile', '.npmrc', '.nvmrc', '.gitignore'}
+                  sensitive_name = basename == '.env' or basename.startswith('.env.') or basename.endswith(('.pem', '.key', '.p12', '.pfx'))
+                  if kind == 'blob' and mode != '120000' and allowed and not sensitive_name:
+                      objects.add(oid)
+              (out / 'trees' / (sha + '.json')).write_text(json.dumps(entries, ensure_ascii=False, indent=2))
+              metadata[ref] = {'sha': sha, 'tree': git('rev-parse', sha + '^{tree}').decode().strip(), 'merge_base': git('merge-base', main, sha).decode().strip()}
+          process = subprocess.Popen(['git', 'cat-file', '--batch'], stdin=subprocess.PIPE, stdout=subprocess.PIPE)
+          assert process.stdin is not None and process.stdout is not None
+          for oid in sorted(objects):
+              process.stdin.write((oid + '\n').encode())
+              process.stdin.flush()
+              response = process.stdout.readline().decode().strip().split()
+              if len(response) != 3 or response[0] != oid or response[1] != 'blob':
+                  raise SystemExit('Unexpected Git object response')
+              size = int(response[2])
+              data = process.stdout.read(size)
+              if len(data) != size or process.stdout.read(1) != b'\n':
+                  raise SystemExit('Truncated Git object')
+              actual = hashlib.sha1(b'blob ' + str(size).encode() + b'\0' + data).hexdigest()
+              if actual != oid:
+                  raise SystemExit('Git object hash mismatch')
+              (out / 'objects' / oid).write_bytes(data)
+          process.stdin.close()
+          if process.wait() != 0:
+              raise SystemExit('Git object reader failed')
+          (out / 'refs.json').write_text(json.dumps(metadata, ensure_ascii=False, indent=2))
+          (out / 'README.txt').write_text('Read-only source snapshot for integration analysis. No credentials, installed packages, environment files, or school requests. Objects are verified against their Git blob SHA. This artifact is not a test pass or deployment.\n')
+          print(f'Exported {len(metadata)} refs and {len(objects)} verified source objects; main {main}.')
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: merge-source-snapshot
+          path: integration-export/
+          retention-days: 1
+          if-no-files-found: error
