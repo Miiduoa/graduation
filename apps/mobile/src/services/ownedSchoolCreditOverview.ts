@@ -1,3 +1,6 @@
+import {
+  isPuEcampusDataFetchEnabled, PU_ECAMPUS_DATA_PAUSED_MESSAGE,
+} from '@campus/shared/src/puEcampusDataPolicy';
 import { getAuthInstance } from '../firebase';
 import { getSchoolCreditOverviewUrl } from './cloudFunctions';
 import {
@@ -5,8 +8,8 @@ import {
 } from '@campus/shared/src/puCreditOverview';
 
 export class SchoolCreditOverviewError extends Error {
-  constructor(public readonly reason: 'reconnect' | 'permission' | 'unavailable') {
-    super(reason === 'reconnect' ? '請重新連線學校帳號。'
+  constructor(public readonly reason: 'reconnect' | 'permission' | 'unavailable' | 'paused') {
+    super(reason === 'paused' ? PU_ECAMPUS_DATA_PAUSED_MESSAGE : reason === 'reconnect' ? '請重新連線學校帳號。'
       : reason === 'permission' ? '目前無法確認你的在校身分。' : '暫時無法讀取校方學分累計。');
     this.name = 'SchoolCreditOverviewError';
   }
@@ -17,6 +20,8 @@ export async function loadOwnedSchoolCreditOverview(uid: string): Promise<PuCred
   const requester = getAuthInstance().currentUser;
   if (!requester || requester.uid !== uid || typeof requester.getIdToken !== 'function')
     throw new SchoolCreditOverviewError('reconnect');
+  // Older hosted endpoints may not have the pause yet. Stop locally before fetching a token.
+  if (!isPuEcampusDataFetchEnabled()) throw new SchoolCreditOverviewError('paused');
   const controller = new AbortController();
   let timer: ReturnType<typeof setTimeout>;
   const expired = new Promise<never>((_, reject) => {

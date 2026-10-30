@@ -39,7 +39,7 @@ export function SchoolCreditOverviewCard({ user, schoolId, onReconnect }: {
       if (generation.current === current) setState({ scope, user, loading: false, snapshot });
     } catch (error) {
       if (generation.current !== current) return;
-      const transient = error instanceof SchoolCreditOverviewError && error.reason === 'unavailable';
+      const transient = error instanceof SchoolCreditOverviewError && (error.reason === 'unavailable' || error.reason === 'paused');
       setState((previous) => ({ scope, user, loading: false,
         error: error instanceof SchoolCreditOverviewError ? error.message : '暫時無法讀取校方學分累計。',
         reason: error instanceof SchoolCreditOverviewError ? error.reason : 'unavailable',
@@ -59,6 +59,7 @@ export function SchoolCreditOverviewCard({ user, schoolId, onReconnect }: {
   const visible = state?.scope === scope && state.user === user ? state : null;
   const snapshot = visible?.snapshot;
   const loading = !visible || visible.loading;
+  const paused = visible?.reason === 'paused';
   const timestamp = snapshot && new Date(snapshot.fetchedAt).toLocaleString('zh-TW', {
     timeZone: 'Asia/Taipei', month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit',
   });
@@ -68,7 +69,8 @@ export function SchoolCreditOverviewCard({ user, schoolId, onReconnect }: {
     <Text style={styles.note}>直接讀取試算總覽，與下方成績推算及個人規劃分開呈現。</Text>
     {loading && !snapshot && <Text style={styles.note} accessibilityLiveRegion="polite">正在讀取校方學分試算表…</Text>}
     {visible?.error && <Text style={styles.notice} accessibilityLiveRegion="polite">
-      {snapshot ? `本次更新未完成，目前顯示 ${timestamp} 取得的資料。` : visible.error}
+      {paused ? `${visible.error}${snapshot ? `目前顯示 ${timestamp} 取得的資料。` : ''}`
+        : snapshot ? `本次更新未完成，目前顯示 ${timestamp} 取得的資料。` : visible.error}
     </Text>}
     {snapshot && <>
       <Text style={styles.source}>{PU_CREDIT_OVERVIEW_LABELS.subtotal}</Text>
@@ -91,8 +93,8 @@ export function SchoolCreditOverviewCard({ user, schoolId, onReconnect }: {
           <Text style={styles.actionText}>重新連線學校帳號</Text>
         </Pressable> : null}
       <Pressable accessibilityRole="button" accessibilityLabel="更新校方學分累計"
-        accessibilityState={{ disabled: loading }} disabled={loading} onPress={() => void read()} style={styles.action}>
-        <Text style={[styles.actionText, loading && styles.disabled]}>{loading ? '讀取中…' : '更新學分累計'}</Text>
+        accessibilityState={{ disabled: loading || paused }} disabled={loading || paused} onPress={() => void read()} style={styles.action}>
+        <Text style={[styles.actionText, (loading || paused) && styles.disabled]}>{loading ? '讀取中…' : paused ? '暫停更新' : '更新學分累計'}</Text>
       </Pressable>
       <Pressable accessibilityRole="link" accessibilityLabel="前往校方學分試算表"
         onPress={() => { setLinkError(false); void Linking.openURL(PU_CREDIT_REVIEW_URL).catch(() => setLinkError(true)); }} style={styles.action}>

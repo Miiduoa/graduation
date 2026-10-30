@@ -50,6 +50,8 @@ function destination(label: string) {
 it.each([
   ['/timetable', '課表', 'timetable'],
   ['/school-courses', 'WOW Class 課程', 'timetable'],
+  ['/school-lms', '作業與教材', 'timetable'],
+  ['/school-lms/homework/10001/20001', '作業與教材', 'timetable'],
   ['/grades', '成績', 'grades'],
   ['/credit-planner', '學分規劃', 'grades'],
   ['/credit-planner/review', '學分規劃', 'grades'],
@@ -65,6 +67,7 @@ it.each([
     expect(links.map((link) => link.textContent)).toEqual([
       '課表',
       'WOW Class 課程',
+      '作業與教材',
       '成績',
       '學分規劃',
       '行事曆',

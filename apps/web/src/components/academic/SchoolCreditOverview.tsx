@@ -1,6 +1,7 @@
 'use client';
 
 import Link from 'next/link';
+import { PU_ECAMPUS_DATA_PAUSED_CODE, PU_ECAMPUS_DATA_PAUSED_MESSAGE } from '@campus/shared/src/puEcampusDataPolicy';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   PU_CREDIT_OVERVIEW_FIELDS, PU_CREDIT_OVERVIEW_LABELS, PU_CREDIT_OVERVIEW_NOTE,
@@ -65,6 +66,9 @@ export function SchoolCreditOverview({ user, schoolId }: { user: { uid: string }
   const loading = !visible || visible.loading;
   const reason = visible?.error instanceof AcademicConnectionError ? visible.error.reason : 'unavailable';
   const reconnect = reason === 'reconnect' || reason === 'permission';
+  const cause = visible?.error instanceof AcademicConnectionError ? visible.error.cause : null;
+  const paused = !!cause && typeof cause === 'object' && 'code' in cause
+    && cause.code === PU_ECAMPUS_DATA_PAUSED_CODE;
   const timestamp = snapshot && new Date(snapshot.fetchedAt).toLocaleString('zh-TW', {
     timeZone: 'Asia/Taipei', month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit',
   });
@@ -77,12 +81,13 @@ export function SchoolCreditOverview({ user, schoolId }: { user: { uid: string }
           <h2>校方回報的學分累計</h2>
           <p className={styles.description}>直接讀取試算總覽，與下方成績推算及個人規劃分開呈現。</p>
         </div>
-        <button className="btn" disabled={loading} onClick={() => void read()}>
-          {loading ? '讀取中…' : '更新學分累計'}
+        <button className="btn" disabled={loading || paused} onClick={() => void read()}>
+          {loading ? '讀取中…' : paused ? '暫停更新' : '更新學分累計'}
         </button>
       </header>
       {Boolean(visible?.error) && <p className={styles.notice} role="status">
-        {snapshot ? `本次更新未完成，目前顯示 ${timestamp} 取得的資料。`
+        {paused ? `${PU_ECAMPUS_DATA_PAUSED_MESSAGE}${snapshot ? `目前顯示 ${timestamp} 取得的資料。` : ''}`
+          : snapshot ? `本次更新未完成，目前顯示 ${timestamp} 取得的資料。`
           : reconnect ? '校務連線已到期或無法確認本人身分，重新連線後可讀取學分累計。'
             : '這次未能取得可確認的學分累計。可以重試，或先開啟校方試算表核對。'}
       </p>}

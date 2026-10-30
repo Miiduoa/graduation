@@ -291,10 +291,21 @@ function TimetableWorkspace({ schoolId }: { schoolId: string }) {
     !terms.length || activeTerm === 'manual' || legacyTerm === activeTerm
       ? timetable?.courses || []
       : [];
+  const schoolOverlayCourses =
+    schoolRecords.state?.snapshot?.schoolId === schoolId
+      ? schoolRecords.state.snapshot.records.courses
+          .map((course) => fromSchoolCourse(course))
+          .filter((course) => course.day >= 1 && course.day <= 5 && course.start > 0)
+      : [];
   const visibleCourses = [
     ...legacyCourses,
     ...importedCourses.filter(
       (course) => !legacyCourses.some((manual) => samePersonalCourse(manual, course)),
+    ),
+    ...schoolOverlayCourses.filter(
+      (course) =>
+        !legacyCourses.some((manual) => samePersonalCourse(manual, course)) &&
+        !importedCourses.some((imported) => samePersonalCourse(imported, course)),
     ),
   ];
   const missingImportTimes = imported.records.filter(

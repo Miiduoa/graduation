@@ -5,6 +5,8 @@ it.each([
   ['/', 'today'],
   ['/timetable', 'study'],
   ['/school-courses', 'study'],
+  ['/school-lms', 'study'],
+  ['/school-lms/homework/10001/20001', 'study'],
   ['/course/cs101/assignments', 'study'],
   ['/teacher/course/cs101', 'study'],
   ['/classroom/grades', 'study'],

@@ -37,7 +37,12 @@ const { createOrderStatusHandlers } = require('./orderTransitions');
 const { createSubmitProductFeedback } = require('./productFeedback');
 const { createEventRegistrationHandlers, prepareRegistrationPolicy } = require('./eventRegistration');
 const { readRealtimeBusCache } = require('./busArrivals');
-const { createPuCampusDataHandler, createGetMyAcademicRecords } = require('./academicRecords');
+const {
+  createPuCampusDataHandler,
+  createGetMyAcademicRecords,
+  createPuFetchData,
+  createClearPuCampusSessions,
+} = require('./academicRecords');
 const { canonicalizePuStudentId, createPuTronClassRefresher } = require('./puTronClassRefresh');
 const { createCalendarSubscriptionHandler } = require('./calendarSubscription');
 const { createExportUserDataHandler } = require('./userDataExport');
@@ -89,6 +94,10 @@ const {
   puFetchAbsence,
   puFetchCreditSummary,
 } = require('./puScraper');
+const {
+  PU_ECAMPUS_DATA_PAUSED_CODE,
+  PU_ECAMPUS_DATA_PAUSED_MESSAGE,
+} = require('./generated/shared/puEcampusDataPolicy');
 const {
   tcLogin,
   tcFetchCourses,
@@ -1817,6 +1826,14 @@ exports.signInPuStudentId = onRequest(
       });
 
       const loginResult = await puLogin(rawStudentId, password);
+      if (loginResult.code === PU_ECAMPUS_DATA_PAUSED_CODE) {
+        res.set('Cache-Control', 'no-store');
+        res.status(503).json({
+          error: PU_ECAMPUS_DATA_PAUSED_MESSAGE,
+          code: PU_ECAMPUS_DATA_PAUSED_CODE,
+        });
+        return;
+      }
       if (
         !loginResult.success ||
         !loginResult.cookies ||
@@ -5243,6 +5260,11 @@ exports.puAuthenticate = onCall(
 
       const loginResult = await puLogin(uid, upassword);
 
+      if (loginResult.code === PU_ECAMPUS_DATA_PAUSED_CODE) {
+        throw new HttpsError('unavailable', PU_ECAMPUS_DATA_PAUSED_MESSAGE, {
+          code: PU_ECAMPUS_DATA_PAUSED_CODE,
+        });
+      }
       if (!loginResult.success) {
         throw new HttpsError('authentication-failed', loginResult.error || 'Login failed');
       }
@@ -5278,92 +5300,20 @@ exports.puFetchData = onCall(
   {
     region: REGION,
   },
-  async (request) => {
-    try {
-      const ownerUid = request.auth?.uid;
-      if (!ownerUid) {
-        throw new HttpsError('unauthenticated', 'Must be logged in');
-      }
+  createPuFetchData({
+    db,
+    fetchers: {
+      courses: puFetchCourses,
+      grades: puFetchGrades,
+      announcements: puFetchAnnouncements,
+      studentInfo: puFetchStudentInfo,
+    },
+  }),
+);
 
-      const { sessionId, dataType, semester } = request.data || {};
-
-      if (!sessionId || !dataType) {
-        throw new HttpsError('invalid-argument', 'Missing sessionId or dataType');
-      }
-
-      // Allowed data types
-      const allowedTypes = ['courses', 'grades', 'announcements', 'studentInfo'];
-      if (!allowedTypes.includes(dataType)) {
-        throw new HttpsError('invalid-argument', `Invalid dataType: ${dataType}`);
-      }
-
-      // Rate limiting per session
-      const rateLimitKey = `pu-fetch-${sessionId}`;
-      enforceRateLimit({
-        scope: 'pu-fetch-data',
-        key: rateLimitKey,
-        limit: 20,
-        windowMs: 5 * 60 * 1000, // 5 minutes
-      });
-
-      // Retrieve session from Firestore
-      const db = getFirestore();
-      const sessionDoc = await db.collection('_puSessions').doc(sessionId).get();
-
-      if (!sessionDoc.exists) {
-        throw new HttpsError('permission-denied', 'Invalid or expired session');
-      }
-
-      const sessionData = sessionDoc.data();
-      if (sessionData.ownerUid !== ownerUid) {
-        throw new HttpsError('permission-denied', 'Session does not belong to this user');
-      }
-
-      const now = new Date();
-
-      // Check session expiration
-      if (sessionData.expiresAt.toDate() < now) {
-        await db.collection('_puSessions').doc(sessionId).delete();
-        throw new HttpsError('permission-denied', 'Session expired');
-      }
-
-      const cookies = sessionData.cookies;
-
-      let result;
-
-      // Route to appropriate scraper function
-      switch (dataType) {
-        case 'courses':
-          result = await puFetchCourses(cookies, semester || '');
-          break;
-        case 'grades':
-          result = await puFetchGrades(cookies, semester || '');
-          break;
-        case 'announcements':
-          result = await puFetchAnnouncements(cookies);
-          break;
-        case 'studentInfo':
-          result = await puFetchStudentInfo(cookies);
-          break;
-        default:
-          throw new HttpsError('invalid-argument', `Unknown dataType: ${dataType}`);
-      }
-
-      if (!result.success) {
-        throw new HttpsError('unavailable', result.error || 'Failed to fetch data');
-      }
-
-      console.log(`[puFetchData] Successfully fetched ${dataType} for session: ${sessionId}`);
-
-      return result;
-    } catch (error) {
-      console.error('[puFetchData] Error:', error);
-      if (error instanceof HttpsError) {
-        throw error;
-      }
-      throw new HttpsError('internal', error.message);
-    }
-  },
+exports.clearPuCampusSessions = onCall(
+  { region: REGION },
+  createClearPuCampusSessions({ db }),
 );
 
 exports.getMyAcademicRecords = onCall(

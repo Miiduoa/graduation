@@ -1,3 +1,9 @@
+// The unchanged source/ownership cases exercise the enabled capability.
+vi.mock('@campus/shared/src/puEcampusDataPolicy', async (importOriginal) => ({
+  ...await importOriginal<typeof import('@campus/shared/src/puEcampusDataPolicy')>(),
+  assertPuEcampusDataFetchEnabled: () => {},
+}));
+
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { loadSchoolCreditOverview } from './schoolCreditOverview';
 

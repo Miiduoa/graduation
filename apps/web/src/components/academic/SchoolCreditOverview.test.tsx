@@ -103,3 +103,26 @@ it('does not duplicate a pending request or replace a first failure with zero to
   await waitFor(() => expect(screen.getByText(/這次未能取得可確認的學分累計/)).toBeTruthy());
   expect(screen.queryByText('0 學分')).toBeNull();
 });
+
+it('preserves the last verified totals on an operational pause and disables retry', async () => {
+  render(<SchoolCreditOverview user={accountA} schoolId="pu" />);
+  await screen.findByText('71.5 學分');
+  const cause = Object.assign(new Error('E校園資料擷取已暫停，已匯入的資料仍可使用。'), { code: 'PU_ECAMPUS_DATA_PAUSED' });
+  load.mockRejectedValueOnce(new AcademicConnectionError('unavailable', cause));
+  fireEvent.click(screen.getByRole('button', { name: '更新學分累計' }));
+  const button = await screen.findByRole('button', { name: '暫停更新' });
+  expect((button as HTMLButtonElement).disabled).toBe(true);
+  expect(screen.getByText('71.5 學分')).toBeTruthy();
+  expect(screen.getByText(/E校園資料擷取已暫停/)).toBeTruthy();
+  fireEvent.click(button);
+  expect(load).toHaveBeenCalledTimes(2);
+  expect(screen.queryByRole('link', { name: '重新連線學校帳號' })).toBeNull();
+});
+
+it('a first paused read shows no invented zero and no enabled retry', async () => {
+  load.mockRejectedValueOnce(new AcademicConnectionError('unavailable', { code: 'PU_ECAMPUS_DATA_PAUSED' }));
+  render(<SchoolCreditOverview user={accountA} schoolId="pu" />);
+  expect((await screen.findByRole('button', { name: '暫停更新' }) as HTMLButtonElement).disabled).toBe(true);
+  expect(screen.queryByText('0 學分')).toBeNull();
+  expect(load).toHaveBeenCalledTimes(1);
+});

@@ -1,3 +1,4 @@
+import { assertPuEcampusDataFetchEnabled } from '@campus/shared/src/puEcampusDataPolicy';
 import { normalizePuCreditOverview, type PuCreditOverviewSnapshot } from '@campus/shared/src/puCreditOverview';
 import { AcademicConnectionError, readAcademicResponse } from './academicClient';
 import { getAuth, isFirebaseConfigured } from './firebase';
@@ -9,6 +10,8 @@ export async function loadSchoolCreditOverview(uid: string, schoolId: string): P
     throw new AcademicConnectionError('unavailable');
   if (requester?.uid !== uid) throw new AcademicConnectionError('reconnect');
   try {
+    // Stop before token retrieval and any old deployment endpoint; do not clear stored data.
+    assertPuEcampusDataFetchEnabled();
     const value = await readAcademicResponse('creditOverview', uid);
     const row = value && typeof value === 'object' && !Array.isArray(value)
       ? value as Record<string, unknown> : {};

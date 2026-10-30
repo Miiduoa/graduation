@@ -94,3 +94,25 @@ test('does not duplicate a pending request or report a failed first read as zero
   expect(view.queryByText('0 學分')).toBeNull();
   expect(view.getByText('暫時無法讀取校方學分累計。')).toBeTruthy();
 });
+
+test('preserves verified totals during a pause and disables retries', async () => {
+  const view = render(<SchoolCreditOverviewCard user={accountA} schoolId="pu" />);
+  await view.findByText('71.5 學分');
+  mockRead.mockRejectedValueOnce(new SchoolCreditOverviewError('paused'));
+  fireEvent.press(view.getByLabelText('更新校方學分累計'));
+  await view.findByText('暫停更新');
+  expect(view.getByText('71.5 學分')).toBeTruthy();
+  expect(view.getByText(/E校園資料擷取已暫停/)).toBeTruthy();
+  expect(view.getByLabelText('更新校方學分累計').props.accessibilityState.disabled).toBe(true);
+  fireEvent.press(view.getByLabelText('更新校方學分累計'));
+  expect(mockRead).toHaveBeenCalledTimes(2);
+});
+
+test('the first paused read does not invent zero totals or offer reconnect', async () => {
+  mockRead.mockRejectedValueOnce(new SchoolCreditOverviewError('paused'));
+  const view = render(<SchoolCreditOverviewCard user={accountA} schoolId="pu" onReconnect={jest.fn()} />);
+  await view.findByText('暫停更新');
+  expect(view.queryByText('0 學分')).toBeNull();
+  expect(view.queryByLabelText('重新連線學校帳號')).toBeNull();
+  expect(mockRead).toHaveBeenCalledTimes(1);
+});

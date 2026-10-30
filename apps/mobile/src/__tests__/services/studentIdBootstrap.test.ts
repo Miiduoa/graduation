@@ -1,3 +1,10 @@
+// Exercise the enabled parsing/ownership contract independently of the release pause.
+jest.mock('@campus/shared/src/puEcampusDataPolicy', () => ({
+  ...jest.requireActual('@campus/shared/src/puEcampusDataPolicy'),
+  isPuEcampusDataFetchEnabled: () => true,
+  assertPuEcampusDataFetchEnabled: () => {},
+}));
+
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import Constants from 'expo-constants';
 import { signInWithCustomToken, signOut } from 'firebase/auth';
@@ -421,7 +428,7 @@ test('an aborted backend wait cannot store credentials or send a late hosted req
     const pending = signInWithStudentId(params);
     const checked = expect(pending).rejects.toThrow();
     await reached.promise;
-    jest.advanceTimersByTime(45_000);
+    jest.advanceTimersByTime(80_000);
     await checked;
     reply.resolve(response(404));
     await Promise.resolve();

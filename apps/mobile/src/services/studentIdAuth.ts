@@ -6,7 +6,9 @@
  */
 
 import Constants from 'expo-constants';
+import { assertPuEcampusDataFetchEnabled } from '@campus/shared/src/puEcampusDataPolicy';
 import {
+  STUDENT_LOGIN_CLIENT_TIMEOUT_MS,
   TEACHER_LMS_UNAVAILABLE_COPY,
   isTeacherLmsUnavailableNotice,
 } from '@campus/shared/src/schoolLogin';
@@ -150,7 +152,7 @@ async function tryBackendUnifiedLogin(
     timeout = setTimeout(() => {
       controller.abort();
       reject(new Error('學校登入逾時，請稍後再試。'));
-    }, 45_000);
+    }, STUDENT_LOGIN_CLIENT_TIMEOUT_MS);
   });
   try {
     console.log('[studentIdAuth] Trying backend unified login…');
@@ -488,6 +490,7 @@ export async function signInWithStudentId(params: {
   }
   assertBeforeExchange();
 
+  assertPuEcampusDataFetchEnabled();
   progress('authenticating', '驗證靜宜帳密');
 
   // ── 策略 A: 嘗試後端統一登入 ──

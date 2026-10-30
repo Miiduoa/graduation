@@ -1,3 +1,9 @@
+// Exercise source formats with the operational policy explicitly enabled only in this fixture suite.
+jest.mock('./generated/shared/puEcampusDataPolicy', () => ({
+  ...jest.requireActual('./generated/shared/puEcampusDataPolicy'),
+  assertPuEcampusDataFetchEnabled: jest.fn(),
+}));
+
 const { EventEmitter } = require('events');
 const https = require('https');
 const { puFetchCreditOverview } = require('./puScraper');

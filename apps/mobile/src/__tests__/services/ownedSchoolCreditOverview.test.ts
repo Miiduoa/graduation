@@ -1,3 +1,9 @@
+// The original source/ownership contract remains tested with the capability enabled.
+jest.mock('@campus/shared/src/puEcampusDataPolicy', () => ({
+  ...jest.requireActual('@campus/shared/src/puEcampusDataPolicy'),
+  isPuEcampusDataFetchEnabled: () => true,
+}));
+
 import Constants from 'expo-constants';
 import { loadOwnedSchoolCreditOverview } from '../../services/ownedSchoolCreditOverview';
 

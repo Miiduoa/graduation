@@ -4,6 +4,10 @@ import { dispatchFnRequest, type FnRuntime } from './fnDispatch';
 import { createMemoryGroupStore } from './memoryGroupStore';
 import { resetUidRateLimitForTests } from './uidRateLimit';
 import { getCloudFunctionUrl } from '../cloudFunctions';
+import {
+  PU_ECAMPUS_DATA_PAUSED_CODE,
+  PU_ECAMPUS_DATA_PAUSED_MESSAGE,
+} from '@campus/shared/src/puEcampusDataPolicy';
 
 const UID = 'pu-410000001';
 const SESSION = '_puSessions/current';
@@ -23,6 +27,8 @@ function setup() {
       ownerUid: 'pu-499999999', cookies: { portal: 'other-user-cookie' },
       expiresAt: new Date(Date.now() + 120_000),
     }],
+    ['_puTronClassSessions/current-lms', { ownerUid: UID, cookies: { session: 'tc-own' } }],
+    ['_puTronClassSessions/other-lms', { ownerUid: 'pu-499999999', cookies: { session: 'tc-other' } }],
   ]);
   const courses = vi.fn().mockResolvedValue({ success: true, courses: [{ courseName: '資料庫' }] });
   const grades = vi.fn().mockResolvedValue({
@@ -97,11 +103,30 @@ it('enforces login, request scope and session revocation for credit totals', asy
   expect((await response.json()).error.status).toBe('FAILED_PRECONDITION');
 });
 
+it('preserves the existing session and returns the pause code when e-campus reads are stopped', async () => {
+  const { request, store, grades } = setup();
+  const session = store.docs.get(SESSION);
+  grades.mockResolvedValue({
+    success: false, grades: [], code: PU_ECAMPUS_DATA_PAUSED_CODE,
+    error: PU_ECAMPUS_DATA_PAUSED_MESSAGE,
+  });
+  const response = await request();
+  expect(response.status).toBe(503);
+  expect(await response.json()).toMatchObject({
+    error: {
+      status: 'UNAVAILABLE', message: PU_ECAMPUS_DATA_PAUSED_MESSAGE,
+      details: { code: PU_ECAMPUS_DATA_PAUSED_CODE },
+    },
+  });
+  expect(store.docs.get(SESSION)).toEqual(session);
+});
+
 it('uses the same-origin academic endpoint without enabling any Cloud Functions service', () => {
   expect(getCloudFunctionUrl('getMyAcademicRecords', { env: {} })).toBe('/api/fn/getMyAcademicRecords');
   expect(getCloudFunctionUrl('getMyAcademicRecords', {
     env: { NEXT_PUBLIC_FUNCTIONS_BASE_URL: 'https://separate-functions.example' },
   })).toBe('/api/fn/getMyAcademicRecords');
+  expect(getCloudFunctionUrl('clearPuCampusSessions', { env: {} })).toBe('/api/fn/clearPuCampusSessions');
 });
 
 it('reads only the authenticated owner session and returns provenance with no session secrets', async () => {
@@ -110,7 +135,7 @@ it('reads only the authenticated owner session and returns provenance with no se
   expect(response.status).toBe(200);
   expect(response.headers.get('Cache-Control')).toBe('no-store');
   expect(verifyIdToken).toHaveBeenCalledWith('firebase-id-token', true);
-  expect(grades).toHaveBeenCalledWith({ portal: 'private-school-cookie' }, '');
+  expect(grades).toHaveBeenCalledWith({ portal: 'private-school-cookie' }, '', { mypuCookies: null });
   const body = await response.json();
   expect(body.result).toMatchObject({
     success: true, ownerUid: UID, schoolId: 'pu', source: 'pu-campus', dataType: 'grades',
@@ -118,6 +143,47 @@ it('reads only the authenticated owner session and returns provenance with no se
   });
   expect(Number.isFinite(Date.parse(body.result.fetchedAt))).toBe(true);
   expect(JSON.stringify(body)).not.toMatch(/private-school-cookie|should-never|other-user-cookie|cookies|internal response/);
+});
+
+it('does not recreate a deleted portal session when a late grade read has mypu cookies', async () => {
+  const { request, store, grades } = setup();
+  grades.mockImplementationOnce(async () => {
+    store.docs.delete(SESSION);
+    return {
+      success: true,
+      grades: [{ semester: '1151', courseName: '資料庫', credits: 3, score: 86 }],
+      mypuCookies: { PHPSESSID: 'mypu-orphan' },
+    };
+  });
+  const response = await request();
+  expect(response.status).toBe(400);
+  expect(store.docs.has(SESSION)).toBe(false);
+  expect(JSON.stringify(await response.json())).not.toMatch(/mypu-orphan|PHPSESSID/);
+});
+
+it('stores mypu cookies on the portal session and only bridges once across two grade reads', async () => {
+  const { request, store, grades } = setup();
+  grades.mockImplementation(async (_cookies, _semester, options) => ({
+    success: true,
+    grades: [{ semester: '1151', courseName: '資料庫', credits: 3, score: 86 }],
+    allSemesters: ['1151'],
+    mypuCookies: { PHPSESSID: 'mypu-live' },
+    usedStored: Boolean(options?.mypuCookies?.PHPSESSID),
+  }));
+  expect((await request()).status).toBe(200);
+  expect((await request()).status).toBe(200);
+  expect(store.docs.get(SESSION)).toMatchObject({
+    cookies: { portal: 'private-school-cookie' },
+    mypuCookies: { PHPSESSID: 'mypu-live' },
+  });
+  expect(grades).toHaveBeenNthCalledWith(1, { portal: 'private-school-cookie' }, '', {
+    mypuCookies: null,
+  });
+  expect(grades).toHaveBeenNthCalledWith(2, { portal: 'private-school-cookie' }, '', {
+    mypuCookies: { PHPSESSID: 'mypu-live' },
+  });
+  const body = await (await request()).json();
+  expect(JSON.stringify(body)).not.toMatch(/mypu-live|PHPSESSID|private-school-cookie/);
 });
 
 it('uses the school timetable source for courses', async () => {
@@ -229,9 +295,51 @@ it('does not expose network errors or session values to clients', async () => {
   expect(JSON.stringify(await response.json())).not.toContain('SECRET');
 });
 
+it('deletes the owner campus sessions including cookies and mypuCookies', async () => {
+  const { store, verifyIdToken } = setup();
+  store.docs.set(SESSION, {
+    ...store.docs.get(SESSION),
+    mypuCookies: { PHPSESSID: 'mypu-live' },
+  });
+  const response = await dispatchFnRequest(
+    'clearPuCampusSessions',
+    new Request('https://nuni.tw/api/fn/clearPuCampusSessions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: 'Bearer firebase-id-token' },
+      body: JSON.stringify({ data: {} }),
+    }),
+    {
+      db: store.db as unknown as FnRuntime['db'],
+      verifyIdToken,
+    },
+  );
+  expect(response.status).toBe(200);
+  expect(verifyIdToken).toHaveBeenCalledWith('firebase-id-token', true);
+  expect(await response.json()).toEqual({ result: { success: true, deleted: 2 } });
+  expect(store.docs.has(SESSION)).toBe(false);
+  expect(store.docs.has('_puTronClassSessions/current-lms')).toBe(false);
+  expect(store.docs.has('_puSessions/another-account')).toBe(true);
+  expect(store.docs.has('_puTronClassSessions/other-lms')).toBe(true);
+});
+
 it('retains the existing request limit on repeated reads', async () => {
   const { request, grades } = setup();
   for (let count = 0; count < 10; count += 1) expect((await request()).status).toBe(200);
   expect((await request()).status).toBe(429);
   expect(grades).toHaveBeenCalledTimes(10);
+});
+
+it('preserves the session and pause reason for the new credit-overview source', async () => {
+  const { request, store, creditOverview } = setup();
+  const session = store.docs.get(SESSION);
+  creditOverview.mockResolvedValue({
+    success: false, creditOverview: null,
+    code: PU_ECAMPUS_DATA_PAUSED_CODE, error: PU_ECAMPUS_DATA_PAUSED_MESSAGE,
+  });
+  const response = await request({ dataType: 'creditOverview' });
+  expect(response.status).toBe(503);
+  expect(await response.json()).toMatchObject({
+    error: { status: 'UNAVAILABLE', details: { code: PU_ECAMPUS_DATA_PAUSED_CODE } },
+  });
+  expect(store.docs.get(SESSION)).toEqual(session);
 });
