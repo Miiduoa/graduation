@@ -125,6 +125,9 @@ function parseHomework(
     submitted: isHomeworkSubmitted(row),
     description: homeworkDescriptionText(data.description ?? row.description),
     href: tronClassActivityHref(course.id, id),
+    submissionType: typeof (row.submission_type ?? data.submission_type ?? row.submit_type) === 'string'
+      ? String(row.submission_type ?? data.submission_type ?? row.submit_type).slice(0, 50)
+      : null,
   };
 }
 
@@ -268,15 +271,49 @@ async function loadCourseContents(
   course: CourseRow,
 ): Promise<CourseContents> {
   const errors: LmsCourseError[] = [];
-  const [activitiesResult, announcementResult] = await Promise.all([
+  const [activitiesResult, coursewareResult, announcementResult] = await Promise.all([
     source.fetchActivities(cookies, course.id, ''),
+    source.fetchActivities(cookies, course.id, 'type=courseware_activity'),
     source.fetchCourseAnnouncements(cookies, course.id),
   ]);
 
   const materials: LmsMaterialItem[] = [];
   const activityAnnouncements: LmsAnnouncementItem[] = [];
-  if (activitiesResult.ok) {
-    for (const raw of activitiesResult.value) {
+  const primaryItems = activitiesResult.ok ? activitiesResult.value : [];
+  const coursewareItems = coursewareResult.ok ? coursewareResult.value : [];
+  // A filtered activity can expose files omitted from the general endpoint.
+  const combinedActivities = new Map<number, Record<string, unknown>>();
+  for (const raw of [...primaryItems, ...coursewareItems]) {
+    const activity = record(raw);
+    const id = positiveId(activity.id);
+    if (!id) continue;
+    const current = combinedActivities.get(id);
+    if (!current) {
+      combinedActivities.set(id, activity);
+      continue;
+    }
+    const filesByKey = new Map<string, Record<string, unknown>>();
+    for (const upload of [...uploadsOf(current), ...uploadsOf(activity)]) {
+      const key = shortText(upload.key || upload.file_key || upload.upload_id || upload.name || upload.filename, 200);
+      if (!key) continue;
+      const previous = filesByKey.get(key);
+      filesByKey.set(key, {
+        ...previous, ...upload,
+        // Conflicting permissions must never expand the school's download permission.
+        allow_download: previous?.allow_download === false || upload.allow_download === false
+          ? false : previous?.allow_download === true || upload.allow_download === true,
+      });
+    }
+    combinedActivities.set(id, {
+      ...current,
+      ...activity,
+      title: shortText(activity.title || activity.name) || shortText(current.title || current.name),
+      type: shortText(activity.type) || shortText(current.type),
+      uploads: [...filesByKey.values()],
+    });
+  }
+  if (activitiesResult.ok || coursewareResult.ok) {
+    for (const raw of combinedActivities.values()) {
       const material = parseMaterial(raw, course);
       if (material) materials.push(material);
       if (isAnnouncementActivityType(record(raw).type)) {
@@ -293,7 +330,7 @@ async function loadCourseContents(
     announcements = announcementResult.value
       .map((item) => parseAnnouncement(item, 'course', course))
       .filter((item): item is LmsAnnouncementItem => Boolean(item));
-  } else if (activitiesResult.ok) {
+  } else if (activitiesResult.ok || coursewareResult.ok) {
     announcements = activityAnnouncements;
     if (announcementResult.status !== 404) {
       errors.push({
@@ -352,11 +389,11 @@ function publicSnapshot(value: unknown, uid: string): LmsReadonlySnapshot | null
 function homeworkOnlySnapshot(snapshot: LmsReadonlySnapshot): LmsReadonlySnapshot {
   return {
     ...snapshot,
-    announcements: [],
+    announcements: snapshot.announcements.filter((item) => item.source === 'site'),
     materials: [],
     contentsLoadedFor: [],
     courseErrors: snapshot.courseErrors.filter((item) => item.area === 'homework'),
-    siteAnnouncementError: null,
+    siteAnnouncementError: snapshot.siteAnnouncementError,
   };
 }
 
@@ -368,7 +405,8 @@ function mergeExtras(
   const loaded = Object.keys(extras).map(Number).filter((id) => Number.isSafeInteger(id) && id > 0);
   return {
     ...snapshot,
-    announcements: loaded.flatMap((id) => extras[String(id)]?.announcements ?? []),
+    announcements: [...snapshot.announcements.filter((item) => item.source === 'site'),
+      ...loaded.flatMap((id) => extras[String(id)]?.announcements ?? [])],
     materials: loaded.flatMap((id) => extras[String(id)]?.materials ?? []),
     courseErrors: [...homeworkErrors, ...loaded.flatMap((id) => extras[String(id)]?.errors ?? [])],
     contentsLoadedFor: loaded,
@@ -414,6 +452,9 @@ export function createTronClassLmsHandler({
       throw new HttpsError('permission-denied', '此帳號尚未連結靜宜大學。');
     }
     const { refresh, courseId } = parseRequest(request.data);
+    const capabilities = {
+      textHomeworkSubmit: process.env.TRONCLASS_HOMEWORK_WRITE_ENABLED === 'true',
+    };
 
     try {
       await requireAcademicAccount(db, uid);
@@ -471,12 +512,14 @@ export function createTronClassLmsHandler({
         return {
           ...mergeExtras(cachedHomework, extras),
           cache: { hit: true, expiresAt: cachedHomework.cache.expiresAt },
+          capabilities,
         };
       }
       if (cachedHomework && !refresh && !courseId) {
         return {
           ...mergeExtras(cachedHomework, extras),
           cache: { hit: true, expiresAt: cachedHomework.cache.expiresAt },
+          capabilities,
         };
       }
 
@@ -508,8 +551,16 @@ export function createTronClassLmsHandler({
           upcomingCoursesError = { status: null };
         }
 
-        const homeworkResults = courses.length
-          ? await mapPool(courses, LMS_COURSE_CONCURRENCY, (course) => readPagedHomework(source, cookies, course))
+        const [homeworkResults, siteResult] = await Promise.all([
+          courses.length
+            ? mapPool(courses, LMS_COURSE_CONCURRENCY, (course) => readPagedHomework(source, cookies, course))
+            : Promise.resolve([]),
+          source.fetchSiteAnnouncements(cookies),
+        ]);
+        const siteAnnouncements = siteResult.ok
+          ? siteResult.value
+            .map((raw) => parseAnnouncement(raw, 'site', null))
+            .filter((item): item is LmsAnnouncementItem => Boolean(item))
           : [];
 
         await requireAcademicAccount(db, uid);
@@ -533,10 +584,10 @@ export function createTronClassLmsHandler({
           courses: courses.map((course): LmsCourseSummary => ({ id: course.id, name: course.name })),
           contentsLoadedFor: [],
           homework: homeworkResults.flatMap((item) => item.items),
-          announcements: [],
+          announcements: siteAnnouncements,
           materials: [],
           courseErrors: homeworkResults.flatMap((item) => item.error ? [item.error] : []),
-          siteAnnouncementError: null,
+          siteAnnouncementError: siteResult.ok ? null : { status: siteResult.status },
           upcomingCoursesError,
         };
         extras = {};
@@ -569,7 +620,7 @@ export function createTronClassLmsHandler({
       } catch {
         // 快取寫入失敗仍回傳剛讀到的資料。
       }
-      return merged;
+      return { ...merged, capabilities };
     } catch (error) {
       if (error instanceof HttpsError) throw error;
       if (error instanceof Error && /session 已失效/.test(error.message)) reconnect();

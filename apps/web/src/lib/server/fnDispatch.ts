@@ -40,6 +40,7 @@ export type FnRuntime = {
   academicFetchers?: AcademicFetchers;
   lmsCoursesFetcher?: LmsCoursesFetcher;
   lmsReadonlySource?: LmsReadonlySource;
+  lmsHomeworkWriteEnabled?: boolean;
   serviceAccount?: ServiceAccountSigner | null;
   rateLimitGate?: LoginRateGate;
   rateLimitSalt?: string;
@@ -131,6 +132,7 @@ async function invokeHostedCallable(
   academicFetchers?: AcademicFetchers,
   lmsCoursesFetcher?: LmsCoursesFetcher,
   lmsReadonlySource?: LmsReadonlySource,
+  lmsHomeworkWriteEnabled?: boolean,
 ): Promise<unknown> {
   if (name === 'getMyTronClassCourses') {
     const { createTronClassCoursesHandler } = await import('./tronClassCoursesHandler');
@@ -141,6 +143,19 @@ async function invokeHostedCallable(
     const { createTronClassLmsHandler } = await import('./tronClassLmsHandler');
     const source = lmsReadonlySource ?? (await import('./tronClassLmsSource')).tronClassLmsReadonlySource;
     return createTronClassLmsHandler({ db: db as unknown as AcademicFirestore, source })(request);
+  }
+  if (name === 'getMyTronClassHomeworkStatus') {
+    const { createTronClassHomeworkStatusHandler } = await import('./tronClassHomeworkStatusHandler');
+    const source = lmsReadonlySource ?? (await import('./tronClassLmsSource')).tronClassLmsReadonlySource;
+    return createTronClassHomeworkStatusHandler({ db: db as unknown as AcademicFirestore, source })(request);
+  }
+  if (name === 'submitMyTronClassHomework') {
+    const { createTronClassHomeworkSubmitHandler } = await import('./tronClassHomeworkSubmitHandler');
+    const source = lmsReadonlySource ?? (await import('./tronClassLmsSource')).tronClassLmsReadonlySource;
+    return createTronClassHomeworkSubmitHandler({
+      db: db as unknown as AcademicFirestore, source,
+      writeEnabled: lmsHomeworkWriteEnabled ?? process.env.TRONCLASS_HOMEWORK_WRITE_ENABLED === 'true',
+    })(request);
   }
   if (name === 'getMyAcademicRecords') {
     const { createAcademicRecordsHandler } = await import('./academicRecordsHandlers');
@@ -250,7 +265,8 @@ export async function dispatchFnRequest(
       resolved.verifyIdToken,
       isLeaveWebCallable(name) || name === 'correctAttendanceRecord' ||
         name === 'getMyAcademicRecords' || name === 'getMyTronClassCourses' ||
-        name === 'getMyTronClassLms' ||
+        name === 'getMyTronClassLms' || name === 'submitMyTronClassHomework' ||
+        name === 'getMyTronClassHomeworkStatus' ||
         name === 'clearPuCampusSessions',
     );
     uid = auth?.uid;
@@ -269,7 +285,8 @@ export async function dispatchFnRequest(
       auth,
     };
     const result = await invokeHostedCallable(name, callableRequest, resolved.db,
-      resolved.academicFetchers, resolved.lmsCoursesFetcher, resolved.lmsReadonlySource);
+      resolved.academicFetchers, resolved.lmsCoursesFetcher, resolved.lmsReadonlySource,
+      resolved.lmsHomeworkWriteEnabled);
     return jsonResponse(200, { result }, cors);
   } catch (error) {
     const mapped = mapThrownError(error);

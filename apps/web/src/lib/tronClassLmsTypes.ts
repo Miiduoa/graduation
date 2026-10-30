@@ -8,6 +8,7 @@ export type LmsHomeworkItem = {
   submitted: boolean;
   description: string;
   href: string;
+  submissionType?: string | null;
 };
 
 export type LmsAnnouncementItem = {
@@ -56,6 +57,7 @@ export type LmsReadonlySnapshot = {
   source: 'pu-tronclass';
   fetchedAt: string;
   cache: { hit: boolean; expiresAt: string };
+  capabilities?: { textHomeworkSubmit: boolean };
   courses: LmsCourseSummary[];
   contentsLoadedFor: number[];
   homework: LmsHomeworkItem[];

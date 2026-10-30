@@ -1078,6 +1078,27 @@ async function tcFetchHomeworkDetail(cookies, courseId, homeworkId) {
 }
 
 /**
+ * A submission must use current school settings rather than an older
+ * list-page copy of deadline and allowed submission modes.
+ */
+async function tcFetchHomeworkDetailStrict(cookies, courseId, homeworkId) {
+  let data;
+  try {
+    data = await tcFetchJson(TC_BASE +
+      '/api/courses/' + courseId + '/homework-activities/' + homeworkId, cookies);
+  } catch (error) {
+    if (error?.status !== 404) throw error;
+    data = await tcFetchJson(TC_BASE + '/api/activities/' + homeworkId, cookies);
+  }
+  if (!data || typeof data !== 'object' || Array.isArray(data)) throw httpError(502);
+  const detail = data.homework_activity && typeof data.homework_activity === 'object'
+    ? data.homework_activity : data;
+  if (detail.id != null && Number(detail.id) !== homeworkId) throw httpError(502);
+  if (detail.course_id != null && Number(detail.course_id) !== courseId) throw httpError(502);
+  return detail;
+}
+
+/**
  * 取得作業的學生提交記錄 (自己的)
  * 回傳: 提交時間、檔案、批改結果、教師評語
  */
@@ -1102,6 +1123,84 @@ async function tcFetchHomeworkSubmissions(cookies, courseId, homeworkId) {
     }
   }
   return [];
+}
+
+/**
+ * For submission verification, never mistake an inaccessible endpoint for
+ * an empty submission history.
+ */
+async function tcFetchHomeworkSubmissionsStrict(cookies, courseId, homeworkId) {
+  const paths = [
+    '/api/courses/' + courseId + '/homework-activities/' + homeworkId + '/student-submissions',
+    '/api/courses/' + courseId + '/homework-activities/' + homeworkId + '/submissions',
+    '/api/courses/' + courseId + '/activities/' + homeworkId + '/student-submissions',
+  ];
+  for (const path of paths) {
+    let result;
+    try {
+      result = await tcFetchJson(TC_BASE + path, cookies);
+    } catch (error) {
+      if (isSessionExpiredError(error)) throw error;
+      if (error?.status === 404) continue;
+      throw error;
+    }
+    const submissions = Array.isArray(result) ? result :
+      result?.submissions ?? result?.student_submissions;
+    if (!Array.isArray(submissions)) throw httpError(502);
+    return submissions;
+  }
+  throw httpError(404);
+}
+
+/**
+ * 提交文字作業。只對明確選擇的作業寫入一次，不自動重送 POST。
+ * 若學校未開放這個端點，呼叫端保留原站繳交入口。
+ */
+async function tcSubmitHomeworkText(cookies, courseId, homeworkId, content) {
+  const urls = [
+    TC_BASE + '/api/courses/' + courseId + '/homework-activities/' + homeworkId + '/submissions',
+    TC_BASE + '/api/courses/' + courseId + '/homework/' + homeworkId + '/submissions',
+  ];
+  for (const [index, url] of urls.entries()) {
+    const response = await httpsRequest(url, {
+      method: 'POST',
+      body: JSON.stringify({ content }),
+      cookies,
+      headers: { 'Accept': 'application/json', 'Content-Type': 'application/json' },
+      timeoutMs: 15_000,
+      maxResponseBytes: 16_384,
+    });
+    if (response.status === 404 && index === 0) continue;
+    if (isSessionInvalidStatus(response.status)) {
+      throw new Error('TronClass session 已失效，請重新登入');
+    }
+    if (response.status < 200 || response.status >= 300) {
+      throw httpError(response.status);
+    }
+    let data;
+    try {
+      data = response.body ? JSON.parse(response.body) : {};
+    } catch {
+      // 校方可能回傳非 JSON 頁面；不將 HTML 登入頁當成成功。
+      throw httpError(502);
+    }
+    if (!data || typeof data !== 'object' || Array.isArray(data) ||
+        data.success === false || data.error) {
+      throw httpError(502);
+    }
+    const receipt = data.submission && typeof data.submission === 'object'
+      ? data.submission : data;
+    const id = receipt.id ?? receipt.submission_id ?? null;
+    const rawTime = receipt.submitted_at ?? receipt.created_at ?? null;
+    return {
+      accepted: true,
+      receiptId: (typeof id === 'number' && Number.isSafeInteger(id) && id > 0) ||
+        (typeof id === 'string' && /^[1-9][0-9]{0,19}$/.test(id)) ? String(id) : null,
+      submittedAt: typeof rawTime === 'string' && Number.isFinite(Date.parse(rawTime))
+        ? rawTime : null,
+    };
+  }
+  throw httpError(404);
 }
 
 /**
@@ -1406,7 +1505,10 @@ module.exports = {
   // ── 新增端點 ──
   tcFetchActivityDetail,
   tcFetchHomeworkDetail,
+  tcFetchHomeworkDetailStrict,
   tcFetchHomeworkSubmissions,
+  tcFetchHomeworkSubmissionsStrict,
+  tcSubmitHomeworkText,
   tcFetchExamDetail,
   tcFetchExamAttempts,
   tcFetchDiscussions,

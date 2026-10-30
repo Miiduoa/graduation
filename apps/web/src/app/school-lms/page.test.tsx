@@ -84,7 +84,7 @@ it('lists today homework and reaches the description in one click', async () => 
   expect(screen.queryByRole('heading', { name: '週次練習' })).toBeNull();
   const today = screen.getByRole('heading', { name: '今天截止' }).closest('section');
   expect(today).toBeTruthy();
-  expect(within(today as HTMLElement).getByRole('link', { name: '查看說明' }).getAttribute('href')).toBe('/school-lms/homework/10001/20001');
+  expect(within(today as HTMLElement).getByRole('link', { name: '查看與繳交' }).getAttribute('href')).toBe('/school-lms/homework/10001/20001');
   expect(within(today as HTMLElement).getByRole('link', { name: '玩課雲同一筆 ↗' }).getAttribute('href')).toBe(
     'https://tronclass.pu.edu.tw/course/10001/content#/activity/20001',
   );
@@ -211,4 +211,89 @@ it('refreshes from the school instead of silently keeping stale rows', async () 
   await screen.findByRole('heading', { name: '期末專題提案' });
   fireEvent.click(screen.getByRole('button', { name: '重新整理' }));
   expect(loadTronClassLms).toHaveBeenLastCalledWith('one', { refresh: true, expectedSchool: 'pu' });
+});
+
+
+it('shows imported course, pending, and submitted counts without inventing status', async () => {
+  render(<SchoolLmsPage />);
+  await screen.findByRole('heading', { name: '期末專題提案' });
+  expect(screen.getByText('已連結課程').previousElementSibling?.textContent).toBe('1');
+  expect(screen.getByText('待繳交作業').previousElementSibling?.textContent).toBe('2');
+  expect(screen.getByText('校方顯示已繳').previousElementSibling?.textContent).toBe('1');
+});
+
+
+it('imports course material and announcements across courses with explicit progress', async () => {
+  const initial = { ...snapshot(),
+    courses: [{ id: 10001, name: '資料庫系統' }, { id: 10002, name: '資訊倫理' }],
+    contentsLoadedFor: [], materials: [], announcements: [],
+  };
+  vi.mocked(loadTronClassLms).mockResolvedValueOnce(initial);
+  render(<SchoolLmsPage />);
+  await screen.findByRole('heading', { name: '期末專題提案' });
+  vi.mocked(loadTronClassLms)
+    .mockResolvedValueOnce({ ...initial, contentsLoadedFor: [10001], materials: snapshot().materials })
+    .mockResolvedValueOnce({ ...initial,
+      contentsLoadedFor: [10001, 10002],
+      materials: [...snapshot().materials, {
+        id: 999, courseId: 10002, courseName: '資訊倫理',
+        title: '倫理課講義', type: 'material',
+        href: 'https://tronclass.pu.edu.tw/course/10002/content#/activity/999',
+        files: [],
+      }],
+    });
+  fireEvent.click(screen.getByRole('button', { name: '同步各課教材與公告' }));
+  await act(async () => {
+    await Promise.resolve();
+    await Promise.resolve();
+    await Promise.resolve();
+  });
+  expect(loadTronClassLms).toHaveBeenCalledWith('one', { expectedSchool: 'pu', courseId: 10001 });
+  expect(loadTronClassLms).toHaveBeenCalledWith('one', { expectedSchool: 'pu', courseId: 10002 });
+  expect(screen.getByText(/已同步 2 \/ 2 門課/)).toBeTruthy();
+  fireEvent.click(screen.getByRole('tab', { name: '教材' }));
+  expect(screen.getByRole('heading', { name: '倫理課講義' })).toBeTruthy();
+});
+
+it('preserves successfully imported coursework when a later course fails', async () => {
+  const initial = { ...snapshot(),
+    courses: [{ id: 10001, name: '資料庫系統' }, { id: 10002, name: '資訊倫理' }],
+    contentsLoadedFor: [], materials: [], announcements: [],
+  };
+  vi.mocked(loadTronClassLms).mockResolvedValueOnce(initial);
+  render(<SchoolLmsPage />);
+  await screen.findByRole('heading', { name: '期末專題提案' });
+  vi.mocked(loadTronClassLms)
+    .mockResolvedValueOnce({ ...initial, contentsLoadedFor: [10001], materials: snapshot().materials })
+    .mockRejectedValueOnce(new Error('unavailable'));
+  fireEvent.click(screen.getByRole('button', { name: '同步各課教材與公告' }));
+  await act(async () => {
+    await Promise.resolve();
+    await Promise.resolve();
+    await Promise.resolve();
+  });
+  expect(screen.getByText(/部分課程無法同步/)).toBeTruthy();
+  fireEvent.click(screen.getByRole('tab', { name: '教材' }));
+  expect(screen.getByRole('heading', { name: '簡樸生活講義' })).toBeTruthy();
+});
+
+
+it('site-wide announcements do not pretend unread course materials are empty', async () => {
+  vi.mocked(loadTronClassLms).mockResolvedValueOnce({
+    ...snapshot(),
+    contentsLoadedFor: [],
+    materials: [],
+    announcements: [{
+      id: 'site:site:123', courseId: null, courseName: null,
+      title: '玩課雲公告', content: '本學期通知', publishedAt: null,
+      href: 'https://tronclass.pu.edu.tw/', source: 'site',
+    }],
+  });
+  render(<SchoolLmsPage />);
+  await screen.findByRole('heading', { name: '期末專題提案' });
+  fireEvent.click(screen.getByRole('tab', { name: '公告' }));
+  expect(screen.getByRole('heading', { name: '玩課雲公告' })).toBeTruthy();
+  fireEvent.click(screen.getByRole('tab', { name: '教材' }));
+  expect(screen.getByRole('heading', { name: '進入課程後才讀取教材' })).toBeTruthy();
+  expect(screen.queryByRole('heading', { name: '目前沒有教材資料' })).toBeNull();
 });

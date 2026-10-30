@@ -28,6 +28,10 @@ const data: CourseHubData = {
   assignments: { status: 'ready', items: [] },
 };
 const route = { params: { groupId: 'course-a', groupName: '過時的課名' } };
+afterEach(() => {
+  jest.useRealTimers();
+});
+
 beforeEach(() => {
   jest.clearAllMocks();
   mockUser = { uid: 'alice' };
@@ -193,6 +197,11 @@ test('closed assignments remain viewable but never appear among actionable weekl
 });
 
 test('confirmed submission and published feedback never remain a pending weekly task', async () => {
+  // Keep deadline assertions independent of the CI runner's current date.
+  jest.useFakeTimers({
+    now: new Date('2026-10-29T10:00:00Z'),
+    doNotFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval'],
+  });
   const navigation = { navigate: jest.fn() };
   jest.mocked(loadCourseHub).mockResolvedValue({
     ...data,
@@ -332,6 +341,11 @@ test('student filters distinguish confirmed submissions, unfinished work and unk
 });
 
 test('weekly actionable work still surfaces receipt warnings and never claims empty success for unknown receipts', async () => {
+  // Keep deadline assertions independent of the CI runner's current date.
+  jest.useFakeTimers({
+    now: new Date('2026-10-29T10:00:00Z'),
+    doNotFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval'],
+  });
   jest.mocked(loadCourseHub).mockResolvedValue({
     ...data,
     assignments: {

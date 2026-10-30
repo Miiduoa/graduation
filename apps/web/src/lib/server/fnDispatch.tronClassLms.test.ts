@@ -71,7 +71,7 @@ it('loads homework without per-course activities on a cold list', async () => {
   expect(source.fetchHomeworkPage).toHaveBeenCalledTimes(1);
   expect(source.fetchActivities).not.toHaveBeenCalled();
   expect(source.fetchCourseAnnouncements).not.toHaveBeenCalled();
-  expect(source.fetchSiteAnnouncements).not.toHaveBeenCalled();
+  expect(source.fetchSiteAnnouncements).toHaveBeenCalledOnce();
   const body = await response.json();
   expect(body.result.homework).toEqual([
     expect.objectContaining({
@@ -94,8 +94,9 @@ it('loads one activities request when opening a course and does not download loc
   const body = await (await request({ courseId: 10001 })).json();
   expect(source.fetchHomeworkPage).not.toHaveBeenCalled();
   expect(source.fetchCourses).not.toHaveBeenCalled();
-  expect(source.fetchActivities).toHaveBeenCalledTimes(1);
+  expect(source.fetchActivities).toHaveBeenCalledTimes(2);
   expect(source.fetchActivities).toHaveBeenCalledWith({ session: 'lms-secret' }, 10001, '');
+  expect(source.fetchActivities).toHaveBeenCalledWith({ session: 'lms-secret' }, 10001, 'type=courseware_activity');
   expect(source.fetchCourseAnnouncements).toHaveBeenCalledTimes(1);
   expect(body.result.materials[0].files).toEqual([
     expect.objectContaining({ name: 'notes.pdf', allowDownload: true, downloadHref: 'https://tronclass.pu.edu.tw/api/uploads/upload-key-notes/blob' }),
@@ -151,7 +152,7 @@ it('uses activity announcements on 404 without marking the course as empty succe
     expect.objectContaining({ title: '討論區公告', source: 'activity' }),
   ]);
   expect(body.result.materials).toHaveLength(1);
-  expect(source.fetchActivities).toHaveBeenCalledTimes(1);
+  expect(source.fetchActivities).toHaveBeenCalledTimes(2);
 });
 
 it('keeps ongoing homework when upcoming courses cannot be listed', async () => {
@@ -236,4 +237,53 @@ it.each([{ refresh: 'yes' }, { sessionId: LMS_ID }, { status: 'ongoing' }, { cou
   const { request, source } = setup();
   expect((await request(data)).status).toBe(400);
   expect(source.fetchCourses).not.toHaveBeenCalled();
+});
+
+
+it('imports site announcements once and keeps them in the per-user cache', async () => {
+  const { request, source } = setup();
+  vi.mocked(source.fetchSiteAnnouncements).mockResolvedValue({
+    ok: true,
+    value: [{ id: 890, title: '全校公告', content: '學校學習平臺通知', created_at: '2026-05-20T02:00:00Z' }],
+  });
+  const first = await (await request()).json();
+  expect(first.result.announcements).toEqual([
+    expect.objectContaining({ title: '全校公告', source: 'site', courseId: null }),
+  ]);
+  const cached = await (await request()).json();
+  expect(cached.result.cache.hit).toBe(true);
+  expect(cached.result.announcements).toEqual(first.result.announcements);
+  expect(source.fetchSiteAnnouncements).toHaveBeenCalledTimes(1);
+});
+
+it('does not erase homework when site-wide announcements are unavailable', async () => {
+  const { request, source } = setup();
+  vi.mocked(source.fetchSiteAnnouncements).mockResolvedValue({ ok: false, status: 503 });
+  const body = await (await request()).json();
+  expect(body.result.homework).toHaveLength(2);
+  expect(body.result.siteAnnouncementError).toEqual({ status: 503 });
+});
+
+
+it('enriches a course material from the courseware endpoint without duplicate cards', async () => {
+  const { request, source } = setup();
+  vi.mocked(source.fetchActivities).mockImplementation(async (_cookies, _courseId, query) => {
+    if (query === 'type=courseware_activity') {
+      return { ok: true, value: [{
+        id: 30001, title: '簡樸生活講義', type: 'material',
+        uploads: [{ name: 'new.pdf', key: 'new-safe-key', allow_download: true }],
+      }] };
+    }
+    return { ok: true, value: [{
+      id: 30001, title: '簡樸生活講義', type: 'material', uploads: [],
+    }] };
+  });
+  const response = await request({ courseId: 10001 });
+  expect(response.status).toBe(200);
+  const body = await response.json();
+  expect(body.result.materials).toHaveLength(1);
+  expect(body.result.materials[0].files).toEqual([
+    expect.objectContaining({ name: 'new.pdf', allowDownload: true }),
+  ]);
+  expect(source.fetchActivities).toHaveBeenCalledTimes(2);
 });

@@ -6,6 +6,7 @@ import { useEffect, useState } from 'react';
 import { useAuth } from '@/components/AuthGuard';
 import { SchoolAccountRequired } from '@/components/SchoolAccountRequired';
 import { SiteShell } from '@/components/SiteShell';
+import { TronClassHomeworkComposer } from '@/components/academic/TronClassHomeworkComposer';
 import { AcademicConnectionError } from '@/lib/academicClient';
 import { isOfficialAcademicSchool } from '@/lib/academicOfficialSchool';
 import { useCampusBrowseContext } from '@/lib/useCampusBrowseContext';
@@ -44,7 +45,11 @@ export default function HomeworkDetailPage() {
   const [autoTries, setAutoTries] = useState(0);
   const [reload, setReload] = useState(0);
   const [item, setItem] = useState<ReturnType<typeof findLmsHomework>>();
-  const connecting = state === 'error' && isLmsConnectingRetryReason(reason);
+  const [writeEnabled, setWriteEnabled] = useState(false);
+  const [resolvedScope, setResolvedScope] = useState('');
+  const scope = JSON.stringify([uid, browse.schoolId, courseId, homeworkId, reload]);
+  const visibleState = resolvedScope === scope ? state : 'loading';
+  const connecting = visibleState === 'error' && isLmsConnectingRetryReason(reason);
 
   useEffect(() => {
     if (!uid || browse.schoolId !== 'pu' || !courseId || !homeworkId) return;
@@ -53,14 +58,17 @@ export default function HomeworkDetailPage() {
       if (!active) return;
       if (snapshot.ownerUid !== uid) throw new AcademicConnectionError('unavailable');
       setItem(findLmsHomework(snapshot, courseId, homeworkId));
+      setWriteEnabled(snapshot.capabilities?.textHomeworkSubmit === true);
+      setResolvedScope(scope);
       setState('ready');
     }).catch((caught: unknown) => {
       if (!active) return;
       setReason(caught instanceof AcademicConnectionError ? caught.reason : 'unavailable');
+      setResolvedScope(scope);
       setState('error');
     });
     return () => { active = false; };
-  }, [uid, browse.schoolId, courseId, homeworkId, reload]);
+  }, [uid, browse.schoolId, courseId, homeworkId, reload, scope]);
 
   useEffect(() => {
     if (!connecting || autoTries >= LMS_CONNECTING_RETRY_LIMIT) return;
@@ -73,7 +81,7 @@ export default function HomeworkDetailPage() {
   }, [connecting, autoTries, reload]);
 
   return (
-    <SiteShell title="作業說明" subtitle="讀取玩課雲同一筆作業的說明，不會上傳或繳交。">
+    <SiteShell title="作業工作台" subtitle="查看說明、編輯文字草稿與核對玩課雲繳交狀態。">
       {loading || browse.status === 'loading' ? (
         <div className={styles.status} role="status">正在確認學校與帳號…</div>
       ) : browse.status === 'error' || error ? (
@@ -87,7 +95,7 @@ export default function HomeworkDetailPage() {
       ) : !courseId || !homeworkId ? (
         <section className={styles.status} role="alert"><h2>作業連結無效</h2>
           <p><Link href="/school-lms">回到作業清單</Link></p></section>
-      ) : state === 'loading' ? (
+      ) : visibleState === 'loading' ? (
         <div className={styles.status} role="status">正在讀取作業說明…</div>
       ) : connecting ? (
         <section className={styles.status} role="status">
@@ -104,7 +112,7 @@ export default function HomeworkDetailPage() {
             <Link className="btn" href="/school-lms">回到作業清單</Link>
           </div>
         </section>
-      ) : state === 'error' ? (
+      ) : visibleState === 'error' ? (
         <section className={styles.status} role="alert">
           <h2>{reason === 'reconnect' || reason === 'permission' ? '請重新連線 WOW Class' : '暫時無法讀取作業說明'}</h2>
           <p>{reason === 'reconnect' || reason === 'permission'
@@ -131,6 +139,19 @@ export default function HomeworkDetailPage() {
           <p className={lmsStyles.meta}>{item.courseName} · {item.submitted ? '已交' : '未交'} · {item.deadlineLabel || '截止時間未提供'}</p>
           <h2>{item.title}</h2>
           <p>{item.description || '學校這次沒有回傳作業說明文字。'}</p>
+          {uid && !item.submitted ? (
+            <TronClassHomeworkComposer
+              key={uid + ':' + courseId + ':' + homeworkId}
+              uid={uid}
+              courseId={courseId}
+              homeworkId={homeworkId}
+              href={item.href}
+              submissionType={item.submissionType}
+              writeEnabled={writeEnabled}
+            />
+          ) : item.submitted ? (
+            <p className={lmsStyles.submittedNote} role="status">玩課雲目前顯示已繳交。若要更新版本，請從原站確認是否開放重新繳交。</p>
+          ) : null}
           <div className={lmsStyles.actions}>
             <a className="btn primary" href={item.href} target="_blank" rel="noopener noreferrer">玩課雲同一筆 ↗</a>
             <Link className="btn" href="/school-lms">回到作業清單</Link>

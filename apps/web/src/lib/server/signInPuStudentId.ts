@@ -55,6 +55,7 @@ import {
   studentPortalTimeoutMs,
 } from '../schoolLoginTimeouts';
 import { linkOwnedTronClassSession } from '../../../../../backend/functions/lib/puSessionStore.js';
+import { reuseOwnedTronClassSession } from './reuseTronClassSession';
 
 const SESSION_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 const TEACHER_ROLES = new Set(['teacher', 'instructor', 'faculty', 'professor']);
@@ -96,6 +97,10 @@ export type SignInPuDeps = {
   rateLimitGate?: LoginRateGate;
   /** 登入回應送出後才跑成績／WOW Class SSO；正式路徑傳 Next.js after()。 */
   scheduleCampusSso?: (task: () => Promise<void>) => void;
+  validateTronClassSession?: (session: {
+    cookies: Record<string, string>;
+    userId: number | null;
+  }) => Promise<boolean>;
   /** 前端中斷連線時不寫入、也不採用已寫入的 portal session。 */
   requestSignal?: AbortSignal;
 };
@@ -632,6 +637,7 @@ async function signInStudent(
       db: deps.db,
       now,
       school: config.schoolId,
+      validateTronClassSession: deps.validateTronClassSession,
     }),
   );
 
@@ -699,11 +705,32 @@ async function attachStudentLmsSession(options: {
   db: SignInPuDeps['db'];
   now: number;
   school: string;
+  validateTronClassSession?: SignInPuDeps['validateTronClassSession'];
 }): Promise<void> {
   const startedAt = Date.now();
   let linked = false;
   try {
     if (!(await portalSessionStillOwned(options.db, options.puSessionId, options.uid))) return;
+    try {
+      linked = await reuseOwnedTronClassSession({
+        db: options.db,
+        uid: options.uid,
+        studentId: options.studentId,
+        portalId: options.puSessionId,
+        validateSession: options.validateTronClassSession ?? (async ({ cookies, userId }) => {
+          const { tronClassLmsReadonlySource } = await import('./tronClassLmsSource');
+          await tronClassLmsReadonlySource.fetchCourses(cookies, {
+            ...(userId ? { userId } : {}),
+            status: 'ongoing',
+          });
+          return true;
+        }),
+      });
+    } catch (error) {
+      logStudentSoftFailure(error, options.school, startedAt);
+    }
+    if (linked) return;
+
     const tronClass = await options.campus.loginTronClass(options.portalUid, options.password, {
       timeoutMs: studentLmsTotalTimeoutMs(),
       hopTimeoutMs: studentLmsHopTimeoutMs(),

@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { usePathname, useSearchParams } from 'next/navigation';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useAuth } from '@/components/AuthGuard';
 import { SchoolAccountRequired } from '@/components/SchoolAccountRequired';
 import { SiteShell } from '@/components/SiteShell';
@@ -53,7 +53,7 @@ function HomeworkCard({ item }: { item: LmsHomeworkItem }) {
       </div>
       <p className={lmsStyles.meta}>{item.courseName} · {item.deadlineLabel || '截止時間未提供'}</p>
       <div className={lmsStyles.actions}>
-        <Link href={`/school-lms/homework/${item.courseId}/${item.id}`}>查看說明</Link>
+        <Link href={`/school-lms/homework/${item.courseId}/${item.id}`}>{item.submitted ? '查看作業' : '查看與繳交'}</Link>
         <a href={item.href} target="_blank" rel="noopener noreferrer">玩課雲同一筆 ↗</a>
       </div>
     </li>
@@ -70,6 +70,9 @@ function LmsBody({ uid, schoolId, returnUrl }: { uid: string; schoolId: 'pu'; re
   const [autoTries, setAutoTries] = useState(0);
   const [now, setNow] = useState(() => new Date());
   const [state, setState] = useState<ReadState | null>(null);
+  const [syncProgress, setSyncProgress] = useState<{ done: number; total: number; error: string } | null>(null);
+  const syncGeneration = useRef(0);
+  useEffect(() => () => { syncGeneration.current += 1; }, []);
   const courseId = courseFilter && /^[1-9]\d*$/.test(courseFilter) ? Number(courseFilter) : null;
   const scope = JSON.stringify([uid, schoolId, reload, refresh, courseId]);
 
@@ -104,7 +107,9 @@ function LmsBody({ uid, schoolId, returnUrl }: { uid: string; schoolId: 'pu'; re
     [snapshot, homework, now],
   );
   const contentsReady = Boolean(snapshot && (
-    courseId ? snapshot.contentsLoadedFor.includes(courseId) : snapshot.contentsLoadedFor.length > 0 || announcements.length > 0 || materials.length > 0
+    courseId ? snapshot.contentsLoadedFor.includes(courseId)
+      : snapshot.contentsLoadedFor.length > 0 ||
+        (view === 'announcements' && announcements.some((item) => item.source === 'site'))
   ));
 
   useEffect(() => {
@@ -116,7 +121,42 @@ function LmsBody({ uid, schoolId, returnUrl }: { uid: string; schoolId: 'pu'; re
     return () => window.clearTimeout(timer);
   }, [connecting, autoTries, scope]);
 
+  async function syncCourseContents() {
+    if (!snapshot || syncProgress && syncProgress.done < syncProgress.total && !syncProgress.error) return;
+    // A bounded batch protects the university service and keeps progress visible.
+    const remaining = snapshot.courses
+      .filter((course) => !snapshot.contentsLoadedFor.includes(course.id))
+      .slice(0, 12);
+    if (!remaining.length) {
+      setSyncProgress({ done: 0, total: 0, error: '' });
+      return;
+    }
+    const generation = ++syncGeneration.current;
+    setSyncProgress({ done: 0, total: remaining.length, error: '' });
+    for (let i = 0; i < remaining.length; i += 1) {
+      try {
+        const updated = await loadTronClassLms(uid, {
+          expectedSchool: schoolId, courseId: remaining[i].id,
+        });
+        if (generation !== syncGeneration.current) return;
+        if (updated.ownerUid !== uid || updated.schoolId !== schoolId) {
+          throw new AcademicConnectionError('reconnect');
+        }
+        setState((previous) => previous?.scope === scope && previous.status === 'ready'
+          ? { ...previous, snapshot: updated } : previous);
+        setSyncProgress({ done: i + 1, total: remaining.length, error: '' });
+      } catch {
+        if (generation !== syncGeneration.current) return;
+        setSyncProgress({ done: i, total: remaining.length,
+          error: '部分課程無法同步。已保留成功取得的資料，請稍後繼續。' });
+        return;
+      }
+    }
+  }
+
   function refreshLms() {
+    syncGeneration.current += 1;
+    setSyncProgress(null);
     const next = reload + 1;
     const nextScope = JSON.stringify([uid, schoolId, next, true, courseId]);
     setAutoTries(0);
@@ -171,6 +211,11 @@ function LmsBody({ uid, schoolId, returnUrl }: { uid: string; schoolId: 'pu'; re
           )
         ) : snapshot ? (
           <>
+            <div className={lmsStyles.overview} aria-label="課堂資料摘要">
+              <div><strong>{snapshot.courses.length}</strong><span>已連結課程</span></div>
+              <div><strong>{homework.filter((item) => !item.submitted).length}</strong><span>待繳交作業</span></div>
+              <div><strong>{homework.filter((item) => item.submitted).length}</strong><span>校方顯示已繳</span></div>
+            </div>
             <div className={lmsStyles.source} aria-busy={visible.refreshing || undefined}>
               <div>
                 <p className={lmsStyles.count}>已讀取 {snapshot.homework.length} 筆作業 · {snapshot.materials.length} 份教材</p>
@@ -178,10 +223,31 @@ function LmsBody({ uid, schoolId, returnUrl }: { uid: string; schoolId: 'pu'; re
                   timeZone: 'Asia/Taipei', month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit',
                 })} {snapshot.cache.hit ? '快取' : '讀取'} · 快取約 10 分鐘</p>
               </div>
-              <button type="button" className="btn" disabled={visible.refreshing} onClick={refreshLms}>
-                {visible.refreshing ? '更新中…' : '重新整理'}
-              </button>
+              <div className={lmsStyles.syncActions}>
+                <button type="button" className="btn"
+                  disabled={visible.refreshing || Boolean(syncProgress && syncProgress.total && syncProgress.done < syncProgress.total && !syncProgress.error)}
+                  onClick={() => void syncCourseContents()}>
+                  {syncProgress && syncProgress.total && syncProgress.done < syncProgress.total && !syncProgress.error
+                    ? '同步課程中…' : snapshot.courses.some((course) => !snapshot.contentsLoadedFor.includes(course.id))
+                      ? '同步各課教材與公告' : '全部課程已讀取'}
+                </button>
+                <button type="button" className="btn" disabled={visible.refreshing}
+                  onClick={refreshLms}>{visible.refreshing ? '更新中…' : '重新整理'}</button>
+              </div>
             </div>
+            {syncProgress ? (
+              <div className={lmsStyles.syncProgress} role="status" aria-live="polite">
+                {syncProgress.error
+                  ? syncProgress.error
+                  : syncProgress.total
+                    ? `已同步 ${syncProgress.done} / ${syncProgress.total} 門課（每次最多 12 門）`
+                    : '目前所列課程的教材與公告都已讀取。'}
+                {syncProgress.error || syncProgress.done < syncProgress.total ? (
+                  <button type="button" className="btn"
+                    onClick={() => { syncGeneration.current += 1; setSyncProgress(null); }}>停止本次同步</button>
+                ) : null}
+              </div>
+            ) : null}
             {snapshot.courseErrors.length || snapshot.siteAnnouncementError || snapshot.upcomingCoursesError ? (
               <section className={lmsStyles.errors} role="status">
                 <h2>部分資料未能讀取</h2>
@@ -245,7 +311,7 @@ function LmsBody({ uid, schoolId, returnUrl }: { uid: string; schoolId: 'pu'; re
               !contentsReady && !courseId ? (
                 <div className={styles.status} role="status">
                   <h2>{view === 'announcements' ? '進入課程後才讀取公告' : '進入課程後才讀取教材'}</h2>
-                  <p>為減少對學校的請求，公告與教材不會在打開清單時一次抓完全部課程。請點一門課再查看。</p>
+                  <p>可點選單一課程讀取，也可使用上方「同步各課教材與公告」，逐批匯入並保留已讀取的結果。</p>
                   {snapshot?.courses.length ? (
                     <ul className={lmsStyles.list}>
                       {snapshot.courses.map((course) => (
@@ -301,7 +367,7 @@ function LmsBody({ uid, schoolId, returnUrl }: { uid: string; schoolId: 'pu'; re
           </>
         ) : null}
       </section>
-      <p className={styles.note}>這裡只讀取玩課雲的作業、公告與教材，不會上傳或繳交。已交的作業不會出現在待辦；逾期未交會列在「已逾期」，不會混進今天截止。</p>
+      <p className={styles.note}>目前支援在作業詳情頁直接繳交純文字；附件仍須在玩課雲原站上傳。只有讀到校方繳交紀錄才算確認成功。作業和截止狀態以畫面顯示的最新同步時間為準。</p>
     </>
   );
 }
@@ -317,7 +383,7 @@ export default function SchoolLmsPage() {
   });
   const returnUrl = `${path}${browse.schoolSearch}`;
   return (
-    <SiteShell title="玩課雲作業與教材" subtitle="跨課程查看截止、已交狀態、公告與可下載教材。">
+    <SiteShell title="玩課雲學習工作台" subtitle="跨課程掌握作業進度、教材與公告，並在 Campus One 編輯文字作業。">
       {loading || browse.status === 'loading' ? (
         <div className={styles.status} role="status">正在確認學校與帳號…</div>
       ) : browse.status === 'error' || error ? (
