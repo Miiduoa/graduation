@@ -7,6 +7,7 @@ import { loadOwnedSchoolCourses } from '../services/ownedSchoolAcademicRecords';
 import type { PersonalImportScope } from '../services/personalImports';
 import { undoPortalReimport, type PortalReimportReceipt } from '../services/portalReimport';
 import { previewSchoolTimetable, schoolCourseTimeLabel, type SchoolTimetablePreview } from '../services/schoolTimetableImport';
+import { schoolTimetableTermLabel } from '../services/schoolTimetableTermLabel';
 import { useThemeMode } from '../state/theme';
 import { Button } from '../ui/components';
 import { theme } from '../ui/theme';
@@ -121,7 +122,7 @@ function SchoolTimetableImportPanel(props: Props) {
     </View> : null}
     {data ? <>
       <View style={{ gap: 4 }}>
-        <Text style={{ ...copy, fontWeight: '700' }}>{data.termKey ? `${data.termKey.replace('|', ' 學年度 · 第 ')} 學期` : `來源學期：${data.sourceSemester || '未提供'}`}</Text>
+        <Text style={{ ...copy, fontWeight: '700' }}>{schoolTimetableTermLabel(data.termKey, data.sourceSemester)}</Text>
         <Text style={copy}>{`本次課程合計 ${data.listedCredits} 學分 · ${data.courses.length} 筆課程`}</Text>
         <Text style={muted}>{`可核對帶入 ${available.length} 筆${blocked ? `，另有 ${blocked} 筆待補齊時間或學期` : ''}。週末與完整時間會保留；相同資料會在下一步略過。`}</Text>
       </View>
