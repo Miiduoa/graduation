@@ -1,4 +1,5 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
+import { useFocusEffect } from '@react-navigation/native';
 import {
   ActivityIndicator,
   Linking,
@@ -292,10 +293,12 @@ function SignedInWorkspace({
 }) {
   const s = useThemeStyleSheet(createStyles);
   const [tab, setTab] = useNuniDraftState<Tab>('workspace:tab', 'courses');
-  useEffect(() => {
+  const selectRequestedTab = useCallback(() => {
     if (initialTab && ['courses', 'food', 'merchant', 'account'].includes(initialTab))
       setTab(initialTab);
   }, [initialTab, setTab]);
+  useEffect(selectRequestedTab, [selectRequestedTab]);
+  useFocusEffect(selectRequestedTab);
   return (
     <View testID="nuni-workspace" style={s.page}>
       <View accessibilityRole="tablist" style={s.tabs}>

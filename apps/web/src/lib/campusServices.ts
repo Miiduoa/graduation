@@ -77,26 +77,10 @@ export const CAMPUS_SERVICES = [
   },
   {
     name: '成績',
-    text: '查詢學校提供的學期成績',
+    text: '查看個人匯入的學期成績；學校成績已不再同步',
     href: '/grades',
-    access: 'school',
+    access: 'device',
     keywords: '分數 學期 grade',
-    category: 'study',
-  },
-  {
-    name: 'WOW Class 課程',
-    text: '讀取學習平臺的課堂清單，前往教材、作業與公告',
-    href: '/school-courses',
-    access: 'school',
-    keywords: 'WOW Class TronClass LMS 課程 教材 作業 老師',
-    category: 'study',
-  },
-  {
-    name: '玩課雲作業與教材',
-    text: '跨課程查看截止、已交狀態、公告與可下載教材',
-    href: '/school-lms',
-    access: 'school',
-    keywords: '玩課雲 作業 截止 教材 公告 WOW Class TronClass',
     category: 'study',
   },
   {
@@ -120,7 +104,7 @@ export const CAMPUS_SERVICES = [
     text: '閱讀教材、繳交作業、回答測驗，查看老師回饋',
     href: '/classroom',
     access: 'platform',
-    keywords: 'nuni 課程 教材 作業 測驗 繳交 作答 老師 回饋 邀請 classroom',
+    keywords: 'nuni 課程 教材 作業 測驗 繳交 作答 老師 回饋 邀請 classroom LMS WOW Class TronClass 玩課雲作業',
     category: 'study',
   },
   {

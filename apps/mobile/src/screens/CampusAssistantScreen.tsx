@@ -575,7 +575,7 @@ function AssistantConversation({
                     label={'查看' + action.label}
                     variant="ghost"
                     disabled={busy || syncBusy}
-                    onPress={() => safeNavigate(navigation, action.route)}
+                    onPress={() => safeNavigate(navigation, action.route, action.params)}
                   />
                 ))}
             </View>
@@ -634,7 +634,7 @@ function AssistantConversation({
                     disabled={busy || syncBusy}
                     onPress={() => {
                       if (!current()) return;
-                      safeNavigate(navigation, action.route);
+                      safeNavigate(navigation, action.route, action.params);
                     }}
                   />
                 ))}

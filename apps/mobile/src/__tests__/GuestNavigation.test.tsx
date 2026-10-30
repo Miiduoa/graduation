@@ -133,7 +133,7 @@ jest.mock('../screens/CampusContentScreens', () => {
   };
 });
 
-test('the signed-out stack opens school login through the real navigation helper', async () => {
+test('the signed-out course shortcut opens the native workspace through the real navigation helper', async () => {
   const onUnhandledAction = jest.fn();
   const navigation = createNavigationContainerRef();
   const content = () => (
@@ -142,12 +142,13 @@ test('the signed-out stack opens school login through the real navigation helper
     </NavigationContainer>
   );
   const view = render(content());
-  fireEvent.press(await view.findByTestId('school-login-start'));
-  await waitFor(() => expect(view.getByTestId('school-login-form')).toBeTruthy());
+  fireEvent.press(await view.findByTestId('platform-workspace-start'));
+  await waitFor(() => expect(view.getByTestId('platform-workspace')).toBeTruthy());
   expect(navigation.getRootState().index).toBe(1);
-  expect(navigation.getCurrentRoute()?.name).toBe('SSOLogin');
+  expect(navigation.getCurrentRoute()?.name).toBe('NuniWorkspace');
+  expect(navigation.getCurrentRoute()?.params).toEqual({ tab: 'courses' });
   view.rerender(content());
-  expect(navigation.getCurrentRoute()?.name).toBe('SSOLogin');
+  expect(navigation.getCurrentRoute()?.name).toBe('NuniWorkspace');
   expect(onUnhandledAction).not.toHaveBeenCalled();
 });
 
@@ -195,8 +196,9 @@ test.each([
   expect(navigation.canGoBack()).toBe(true);
   act(() => navigation.goBack());
   await view.findByTestId('login-landing');
-  fireEvent.press(view.getByTestId('school-login-start'));
-  await view.findByTestId('school-login-form');
+  expect(view.queryByTestId('school-login-start')).toBeNull();
+  fireEvent.press(view.getByTestId('platform-workspace-start'));
+  await view.findByTestId('platform-workspace');
 });
 
 test('a warm platform link works in the school-signed-out stack and cleans up its subscription', async () => {

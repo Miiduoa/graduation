@@ -29,14 +29,14 @@ describe('natural-language campus shortcuts', () => {
   });
 });
 
-it('keeps 34 navigable voice shortcuts inside the expanded service catalog', () => {
+it('keeps navigable voice shortcuts inside the service catalog without retired destinations', () => {
   const serviceRoutes = CAMPUS_SERVICES.map(row => row.href);
   const serviceSet = new Set(serviceRoutes);
   const shortcutSet = new Set(CAMPUS_QUICK_DESTINATIONS);
 
   expect(serviceRoutes.length).toBe(serviceSet.size);
   expect(shortcutSet.size).toBe(CAMPUS_QUICK_DESTINATIONS.length);
-  expect(CAMPUS_QUICK_DESTINATIONS).toHaveLength(34);
+  expect(CAMPUS_QUICK_DESTINATIONS).not.toContain('/school-courses');
   expect([...shortcutSet].every(href => serviceSet.has(href))).toBe(true);
 
   // The leave workflow added these two routes to main after the original voice
@@ -45,7 +45,6 @@ it('keeps 34 navigable voice shortcuts inside the expanded service catalog', () 
   expect(serviceRoutes.filter(href => !shortcutSet.has(href as (typeof CAMPUS_QUICK_DESTINATIONS)[number]))).toEqual([
     '/leave',
     '/leave/review',
-    '/school-lms',
   ]);
 });
 
@@ -56,15 +55,15 @@ it.each([
   'ＷＯＷ Ｃｌａｓｓ 的課程',
   'open wowclass',
   '進入 Tron Class',
-])('opens the school course service for an explicit platform name: %s', (utterance) => {
+])('opens the native classroom for a retired platform name: %s', (utterance) => {
   expect(getQuickCampusActions(utterance)).toEqual([
-    expect.objectContaining({ href: '/school-courses', name: 'WOW Class 課程', access: 'school' }),
+    expect.objectContaining({ href: '/classroom', name: '課程空間', access: 'platform' }),
   ]);
 });
 
-it('prioritizes a named school platform while preserving generic course suggestions', () => {
+it('deduplicates retired platform and assignment shortcuts into one native classroom', () => {
   expect(getQuickCampusActions('TronClass 上的作業').map((action) => action.href)).toEqual([
-    '/school-courses', '/classroom',
+    '/classroom',
   ]);
   expect(getQuickCampusActions('今天要上什麼課？').map((action) => action.href)).toEqual(['/timetable']);
   expect(getQuickCampusActions('我要看課堂教材').map((action) => action.href)).toEqual(['/classroom']);

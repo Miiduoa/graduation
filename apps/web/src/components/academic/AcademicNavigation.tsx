@@ -8,8 +8,7 @@ import styles from './AcademicNavigation.module.css';
 
 const SECTIONS = [
   { path: '/timetable', label: '課表' },
-  { path: '/school-courses', label: 'WOW Class 課程' },
-  { path: '/school-lms', label: '作業與教材' },
+  { path: '/classroom', label: '課程空間' },
   { path: '/grades', label: '成績' },
   { path: '/credit-planner', label: '學分規劃' },
   { path: '/calendar', label: '行事曆' },
@@ -62,7 +61,6 @@ function AcademicLinks({ pathname }: { pathname: string }) {
 export function AcademicNavigation() {
   const currentPath = usePathname();
   const pathname = currentPath === '/credit-planner/review' ? '/credit-planner'
-    : currentPath?.startsWith('/school-lms/') ? '/school-lms'
     : currentPath;
   if (
     !pathname ||

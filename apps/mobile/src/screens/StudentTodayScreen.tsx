@@ -213,7 +213,7 @@ export default function StudentTodayScreen() {
       openTodo(todoRows[0], true);
       return;
     }
-    safeNavigate(navigation, quick.route);
+    safeNavigate(navigation, quick.route, quick.params);
   };
   const refresh = async () => {
     const request = ++refreshGeneration.current;

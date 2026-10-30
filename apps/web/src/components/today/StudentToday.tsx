@@ -320,9 +320,9 @@ function NextActionBody({
     if (lmsUnconnected) {
       return (
         <>
-          <p className={styles.headline}>課程待辦還沒連上</p>
-          <p className={styles.meta}>先確認已加入的課程，再查看作業與測驗。</p>
-          <Link className={styles.action} href="/groups">
+          <p className={styles.headline}>到課程空間查看待辦</p>
+          <p className={styles.meta}>在 nuni 課程空間加入課堂，查看作業與測驗。</p>
+          <Link className={styles.action} href="/classroom">
             查看我的課程
           </Link>
         </>

@@ -1062,7 +1062,7 @@ test('role comes from the current authenticated profile, never a UID prefix or a
     </mockAuthContext.Provider>,
   );
   expect(view.queryByText('StudentTodayScreen')).toBeNull();
-  expect(view.getByText(/目前無法確認帳號身分/)).toBeTruthy();
+  expect(view.getByText(/目前無法確認此學校身分/)).toBeTruthy();
 });
 test.each(['AIChat', 'AIAgentConsole'])(
   'Home %s sends through the callable chat UI and displays only its reply',

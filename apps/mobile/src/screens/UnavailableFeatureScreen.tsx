@@ -14,7 +14,7 @@ export type ServiceScreenProps = {
   navigation?: Parameters<typeof safeNavigate>[0] & { goBack?: () => void };
   route?: { name?: string; params?: Record<string, unknown> };
 };
-type Action = { label: string; route: string };
+type Action = { label: string; route: string; params?: Record<string, unknown> };
 const publicActions: Action[] = [
   { label: '查看校方公告', route: '公告總覽' },
   { label: '查看校園活動', route: '活動總覽' },
@@ -252,7 +252,9 @@ export function UnavailableFeatureScreen({
               key={action.route}
               label={action.label}
               variant="ghost"
-              onPress={() => safeNavigate(navigation, action.route)}
+              onPress={() => action.params
+                ? safeNavigate(navigation, action.route, action.params)
+                : safeNavigate(navigation, action.route)}
             />
           ))}
         </View>

@@ -26,8 +26,7 @@ const CONNECTABLE_LABELS = Object.freeze({
 });
 const ROUTE_HINTS = Object.freeze({
   '/bus': '公車到站需要先選路線與站牌，請到公車頁查詢實際到站資訊。',
-  '/grades': '正式成績需要學校授權的個人資料連線，請至成績頁確認來源及登入狀態。',
-  '/school-courses': '請到 WOW Class 課程頁使用學校帳號讀取課堂；此入口不會代為交作業，也不代表已取得正式學分。',
+  '/grades': '學校成績已不再同步；請至成績頁查看保留的個人匯入資料。',
   '/credit-planner': '學分規劃需要本人修課紀錄，請在學分規劃頁匯入或查核資料。',
   '/calendar': '個人行事曆由裝置端管理，伺服器不會讀取未同步的行程。',
   '/messages': '私人訊息需在登入帳號後，從訊息頁讀取。',
@@ -135,7 +134,7 @@ async function connectOne(destination, input, readers) {
       ].filter(Boolean).join(' · ')));
       return summary(destination, rows.some(Boolean) ? 'available' : 'empty',
         data.length ? '已核對目前平台中尚未繳交的作業，尚未代為提交。'
-          : '目前這個帳號沒有從已加入課程讀到待交作業；未連線的校外 LMS 不包含在內。',
+          : '目前這個帳號沒有從已加入的 nuni 課程讀到待交作業；學校 LMS 已停止串接。',
         rows);
     }
     case '/announcements': {

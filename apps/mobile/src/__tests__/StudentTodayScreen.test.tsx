@@ -370,3 +370,13 @@ test('a natural-language location query opens the registered campus map without 
     params: undefined,
   });
 });
+
+
+test('the general homework shortcut opens the courses tab when no specific task is available', async () => {
+  jest.mocked(loadStudentHome).mockResolvedValue({ courses: [], tasks: [] });
+  const view = render(<StudentTodayScreen />);
+  fireEvent.press(await view.findByLabelText('直接前往交作業'));
+  expect(mockNavigate).toHaveBeenCalledWith('我的', {
+    screen: 'NuniWorkspace', params: { tab: 'courses' },
+  });
+});

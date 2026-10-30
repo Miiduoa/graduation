@@ -755,3 +755,24 @@ test('no real due time means the agent never offers a notification action', asyn
   expect(view.queryByText('設定手機本機截止提醒')).toBeNull();
   expect(scheduleCampusAssignmentReminder).not.toHaveBeenCalled();
 });
+
+
+test.each(['draft', 'reply'] as const)(
+  'the %s course shortcut forwards the native courses tab',
+  async (location) => {
+    const navigate = jest.fn();
+    request.mockResolvedValueOnce({ content: '請前往課程查看作業。', hasActions: false });
+    const view = render(<CampusAssistantScreen navigation={{ navigate }} />);
+    selectCampusMode(view);
+    fireEvent.changeText(view.getByLabelText('詢問校園助理'), '我要交作業');
+    if (location === 'reply') {
+      await act(async () => fireEvent.press(view.getByText('送出問題')));
+      fireEvent.press(view.getByText('查看課程與作業'));
+    } else {
+      fireEvent.press(view.getByText('前往課程與作業'));
+    }
+    expect(navigate).toHaveBeenCalledWith('我的', {
+      screen: 'NuniWorkspace', params: { tab: 'courses' },
+    });
+  },
+);

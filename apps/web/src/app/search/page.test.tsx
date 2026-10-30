@@ -230,9 +230,10 @@ it('restores filters after navigation and ignores unsupported categories', () =>
   expect(screen.getByRole('link', { name: /^圖書館/ })).toBeTruthy();
 });
 
-it('shows a school login limitation before opening a service without hiding its entry', () => {
+it('keeps imported grades accessible regardless of school login availability', () => {
   const view = render(<SearchPage />);
-  expect(screen.getByRole('link', { name: /^成績/ }).textContent).toContain('尚未開放登入');
+  expect(screen.getByRole('link', { name: /^成績/ }).textContent).toContain('學校成績已不再同步');
+  expect(screen.getByRole('link', { name: /^成績/ }).textContent).not.toContain('尚未開放登入');
   options.studentId = true;
   view.rerender(<SearchPage />);
   expect(screen.getByRole('link', { name: /^成績/ }).textContent).not.toContain('尚未開放登入');

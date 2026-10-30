@@ -1,4 +1,5 @@
 import { Linking } from 'react-native';
+import { useFocusEffect } from '@react-navigation/native';
 import { act, fireEvent, render, waitFor } from '@testing-library/react-native';
 import { NuniWorkspaceScreen } from '../screens/NuniWorkspaceScreen';
 import { NuniError } from '@campus/shared/src/nuni';
@@ -553,4 +554,20 @@ test.each([
     expect(view.getByText('目前無法確認登入狀態')).toBeTruthy();
     expect(view.queryByText('登入或建立帳號')).toBeNull();
   }
+});
+
+
+test('returning through the courses shortcut resets a manually selected tab without disrupting tab changes', () => {
+  mockAuth.session = principal;
+  jest.mocked(useFocusEffect).mockClear();
+  const route = { params: { tab: 'courses' as const } };
+  const view = render(<NuniWorkspaceScreen route={route} />);
+  fireEvent.press(view.getByRole('tab', { name: '點餐' }));
+  expect(view.getByRole('tab', { name: '點餐' }).props.accessibilityState.selected).toBe(true);
+  view.rerender(<NuniWorkspaceScreen route={{ params: { tab: 'courses' } }} />);
+  const focus = jest.mocked(useFocusEffect).mock.calls.at(-1)?.[0];
+  act(() => { focus?.(); });
+  expect(view.getByRole('tab', { name: '課程' }).props.accessibilityState.selected).toBe(true);
+  fireEvent.press(view.getByRole('tab', { name: '點餐' }));
+  expect(view.getByRole('tab', { name: '點餐' }).props.accessibilityState.selected).toBe(true);
 });

@@ -136,7 +136,8 @@ it('keeps a known task actionable while timetable data is still loading', () => 
 it('does not declare there are no assignments when the course platform is unconnected', () => {
   view({ timetableStatus: 'ready', lmsUnconnected: true });
   expect(screen.queryByText(TODAY_COPY.emptyDay)).toBeNull();
-  expect(screen.getByRole('link', { name: '查看我的課程' }).getAttribute('href')).toBe('/groups');
+  expect(screen.getByText('到課程空間查看待辦')).toBeTruthy();
+  expect(screen.getByRole('link', { name: '查看我的課程' }).getAttribute('href')).toBe('/classroom');
 });
 
 it('shows upcoming work due after 24 hours as the next assignment, not due today', () => {

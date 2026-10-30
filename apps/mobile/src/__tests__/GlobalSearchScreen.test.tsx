@@ -315,7 +315,7 @@ test('spoken-style questions show direct service links even without an exact key
   const view = render(<GlobalSearchScreen navigation={navigation} />);
   await search(view, '圖書館怎麼走');
   fireEvent.press(view.getByLabelText('前往校園地圖'));
-  expect(safeNavigate).toHaveBeenCalledWith(navigation, 'MapV2');
+  expect(safeNavigate).toHaveBeenCalledWith(navigation, 'MapV2', undefined);
 });
 
 
@@ -333,5 +333,13 @@ test('AI understands a multi-step campus request without navigating or writing o
   expect(view.getByText('AI 建議直接開啟')).toBeTruthy();
   expect(safeNavigate).not.toHaveBeenCalled();
   fireEvent.press(view.getByLabelText('前往圖書館'));
-  expect(safeNavigate).toHaveBeenCalledWith(navigation, 'Library');
+  expect(safeNavigate).toHaveBeenCalledWith(navigation, 'Library', undefined);
+});
+
+
+test('course search shortcuts select the courses tab in the native workspace', async () => {
+  const view = render(<GlobalSearchScreen navigation={navigation} />);
+  await search(view, '我要交作業');
+  fireEvent.press(view.getByLabelText('前往課程與作業'));
+  expect(safeNavigate).toHaveBeenCalledWith(navigation, 'NuniWorkspace', { tab: 'courses' });
 });

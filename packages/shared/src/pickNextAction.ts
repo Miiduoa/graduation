@@ -12,7 +12,7 @@ export const TODAY_COPY = {
   retry: '再試一次',
   noTimetable: '還沒有課表。',
   importTimetable: '匯入課表',
-  lmsUnconnected: '這裡會顯示課程平台上的作業，目前還沒連上。',
+  lmsUnconnected: '前往 nuni 課程查看作業與測驗。',
   nextClass: '下一堂課',
   nextAssignment: '下一件作業',
   dueToday: '今天截止',

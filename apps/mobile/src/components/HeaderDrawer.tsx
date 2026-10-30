@@ -195,7 +195,7 @@ export function HeaderDrawerHost() {
                 }}
               >
                 <Pressable
-                  onPress={() => go(auth.user ? 'ProfileEdit' : 'SSOLogin')}
+                  onPress={() => go(auth.user ? 'ProfileEdit' : 'NuniWorkspace', auth.user ? undefined : { tab: 'account' })}
                   style={({ pressed }) => ({ opacity: pressed ? 0.7 : 1 })}
                 >
                   <LinearGradient
@@ -278,7 +278,7 @@ export function HeaderDrawerHost() {
               ) : null}
               {!auth.user ? (
                 <Pressable
-                  onPress={() => go('SSOLogin')}
+                  onPress={() => go('NuniWorkspace')}
                   style={({ pressed }) => ({
                     marginTop: 10,
                     paddingVertical: 8,
@@ -290,7 +290,7 @@ export function HeaderDrawerHost() {
                   })}
                 >
                   <Text style={{ color: theme.colors.onAccent, fontSize: 12, fontWeight: '700' }}>
-                    學校帳號登入
+                    Google 帳號與課程
                   </Text>
                 </Pressable>
               ) : null}
@@ -316,7 +316,7 @@ export function HeaderDrawerHost() {
               <DrawerRow
                 icon="ic_profile"
                 label="個人資料"
-                onPress={() => go(auth.user ? 'ProfileEdit' : 'SSOLogin')}
+                onPress={() => go(auth.user ? 'ProfileEdit' : 'NuniWorkspace', auth.user ? undefined : { tab: 'account' })}
               />
               <DrawerRow
                 icon="ic_qr_code"

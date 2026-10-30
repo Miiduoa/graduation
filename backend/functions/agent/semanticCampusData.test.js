@@ -75,19 +75,21 @@ describe('verified campus data read-through', () => {
     }, fake({ tool }));
     expect(result).toHaveLength(3);
     expect(result.every(x => x.status === 'open-service')).toBe(true);
+    expect(result.find(x => x.destination === '/grades').message).toBe('學校成績已不再同步；請至成績頁查看保留的個人匯入資料。');
     expect(tool).not.toHaveBeenCalled();
   });
 
-  test('opens school courses without reading LMS data through voice tools', async () => {
-    const readers = fake();
+  test('reads native classroom assignments without requesting a school account', async () => {
+    const readers = fake({ tool: jest.fn(async () => []) });
     const result = await connectCampusServiceData({
-      uid: 'alice', schoolId: 'pu', destinations: ['/school-courses'],
+      uid: 'alice', schoolId: 'pu', utterance: '我要開玩課雲', destinations: ['/classroom'],
     }, readers);
     expect(result).toEqual([expect.objectContaining({
-      destination: '/school-courses', status: 'open-service', source: 'none', items: [],
+      destination: '/classroom', status: 'empty', source: 'campus-platform', items: [],
     })]);
-    expect(result[0].message).toContain('使用學校帳號');
-    expect(readers.tool).not.toHaveBeenCalled();
+    expect(result[0].message).toContain('學校 LMS 已停止串接');
+    expect(result[0].message).not.toContain('學校帳號');
+    expect(readers.tool).toHaveBeenCalledWith('getAssignments', expect.objectContaining({ uid: 'alice', schoolId: 'pu' }), {});
     expect(readers.records).not.toHaveBeenCalled();
     expect(readers.events).not.toHaveBeenCalled();
   });
