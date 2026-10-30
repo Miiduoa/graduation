@@ -21,7 +21,9 @@ export type AcademicRecordState<K extends AcademicKind> = {
   status: 'loading' | 'ready' | 'error';
   snapshot?: AcademicSnapshot<K>;
   refreshing?: boolean;
-  reason?: 'reconnect' | 'unavailable' | 'permission' | 'unconfigured' | 'connecting';
+  /** E 校園暫停更新中；有先前讀到的資料時照樣顯示，並標示資料時間。 */
+  paused?: boolean;
+  reason?: 'reconnect' | 'unavailable' | 'permission' | 'unconfigured' | 'connecting' | 'paused';
   error?: unknown;
 };
 
@@ -67,6 +69,17 @@ export function useAcademicRecords<K extends AcademicKind>(
           return 'ready';
         } catch (error) {
           const reason = error instanceof AcademicConnectionError ? error.reason : 'unavailable';
+          if (reason === 'paused') {
+            // E 校園暫停更新：保留這次頁面已讀到的資料與原本的讀取時間；沒有就顯示空狀態。
+            if (current) {
+              setState((previous) =>
+                previous?.scope === scope && previous.snapshot
+                  ? { scope, status: 'ready', snapshot: previous.snapshot, refreshing: false, paused: true }
+                  : { scope, status: 'error', reason, paused: true },
+              );
+            }
+            return reason;
+          }
           // 更新失敗時不推進時間戳，也不把舊資料當成新的成功結果。
           // 終止性錯誤會停止輪詢。
           if (current) setState({ scope, status: 'error', reason, error });

@@ -4,7 +4,8 @@ export type AcademicRefreshOutcome =
   | 'reconnect'
   | 'permission'
   | 'unconfigured'
-  | 'connecting';
+  | 'connecting'
+  | 'paused';
 
 export type AcademicAutomaticStatus =
   | 'off'
@@ -101,7 +102,9 @@ export function createAcademicRefreshController(options: {
       .catch((): AcademicRefreshOutcome => 'unavailable')
       .then((outcome) => {
         if (disposed || outcome === undefined) return;
-        blocked = outcome === 'reconnect' || outcome === 'permission' || outcome === 'unconfigured';
+        // E 校園暫停更新時停止自動更新，不在背景重試；手動更新仍可再確認。
+        blocked = outcome === 'reconnect' || outcome === 'permission' ||
+          outcome === 'unconfigured' || outcome === 'paused';
         failures = outcome === 'ready' ? 0 : Math.min(failures + 1, 8);
         const delay = outcome === 'ready'
           ? ACADEMIC_REFRESH_INTERVAL_MS

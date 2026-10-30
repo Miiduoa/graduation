@@ -256,3 +256,25 @@ it('does not begin a queued read after the owning account has been disposed', as
   await request;
   assert.equal(reads, 0);
 });
+
+it('E 校園暫停（paused）時停止自動更新，只有手動更新會再讀', async () => {
+  const time = clock();
+  let reads = 0;
+  const statuses: AcademicAutomaticStatus[] = [];
+  const controller = createAcademicRefreshController({
+    environment: time.environment,
+    read: async () => { reads++; return 'paused'; },
+    onStatus: (status) => statuses.push(status),
+  });
+  controller.setAutomatic(true);
+  await controller.refresh();
+  time.advance(MAX_BACKOFF * 4);
+  time.wake();
+  await flush();
+  assert.equal(reads, 1);
+  assert.equal(time.timers.size, 0);
+  assert.equal(statuses.at(-1), 'blocked');
+  await controller.refresh();
+  assert.equal(reads, 2);
+  controller.dispose();
+});

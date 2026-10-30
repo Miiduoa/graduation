@@ -631,3 +631,23 @@ it('hides locally scoped plans while school selection or account state is unreso
   view.rerender(<CreditPlannerPage />);
   expect(await screen.findByLabelText('已確認可採計學分（自行填寫）')).toBeTruthy();
 });
+
+it('E 校園暫停且沒有先前資料時顯示暫停空狀態，不顯示重試', async () => {
+  vi.mocked(loadAcademicRecords).mockRejectedValue(new AcademicConnectionError('paused'));
+  render(<GradesPage />);
+  expect(await screen.findByRole('heading', { name: 'E 校園資料暫停更新中' })).toBeTruthy();
+  expect(document.querySelector('[data-ecampus-paused="true"]')).toBeTruthy();
+  expect(screen.queryByRole('button', { name: '重新讀取' })).toBeNull();
+  expect(screen.queryByText('真實來源科目')).toBeNull();
+});
+
+it('E 校園暫停時保留先前讀到的成績並標示資料時間', async () => {
+  render(<GradesPage />);
+  await screen.findByText('真實來源科目');
+  vi.mocked(loadAcademicRecords).mockRejectedValue(new AcademicConnectionError('paused'));
+  fireEvent.click(screen.getByRole('button', { name: '更新資料' }));
+  expect(await screen.findByText(/E 校園資料暫停更新中，以下為先前讀取的資料/)).toBeTruthy();
+  expect(screen.getByText('真實來源科目')).toBeTruthy();
+  const button = screen.getByRole('button', { name: '暫停更新' }) as HTMLButtonElement;
+  expect(button.disabled).toBe(true);
+});

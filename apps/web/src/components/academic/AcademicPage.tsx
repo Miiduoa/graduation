@@ -17,6 +17,7 @@ import {
   OFFICIAL_ACADEMIC_SOURCE_LABEL,
 } from '@/lib/academicOfficialSchool';
 import { loadFailureCopy } from '@campus/shared/src/loadFailureCopy';
+import { ECAMPUS_PAUSED_MESSAGE } from '@/lib/ecampusPause';
 import styles from './academic.module.css';
 import { PersonalImportSummary } from '@/components/imports/PersonalImportSummary';
 import { AcademicRefreshControls } from './AcademicRefreshControls';
@@ -74,6 +75,29 @@ function RecordContent<K extends AcademicKind>({
       <div className={styles.status} role="status">
         正在向學校讀取資料…
       </div>
+    );
+  }
+  if ((state.status === 'error' || !state.snapshot) && state.reason === 'paused') {
+    return (
+      <section className={styles.status} role="status" data-ecampus-paused="true">
+        <p className={styles.eyebrow}>學校資料</p>
+        <h2>{ECAMPUS_PAUSED_MESSAGE}</h2>
+        <p>
+          {kind === 'grades'
+            ? '目前沒有可顯示的成績。恢復更新後會自動顯示；你也可以先到 e 校園查詢，或匯入自己的成績檔案。'
+            : '目前沒有可顯示的課表。恢復更新後會自動顯示；你也可以先到 e 校園查詢。'}
+        </p>
+        <div className={styles.actions}>
+          <a
+            className="btn"
+            href={OFFICIAL_ACADEMIC_PORTAL_URL}
+            target="_blank"
+            rel="noopener noreferrer"
+          >
+            前往 e 校園 ↗
+          </a>
+        </div>
+      </section>
     );
   }
   if (state.status === 'error' || !state.snapshot) {
@@ -163,7 +187,7 @@ function RecordContent<K extends AcademicKind>({
           <div className={styles.sourceTitle}>
             <h2>{count ? range : gradeRecords ? '這次未取得成績明細' : '這次未取得課程明細'}</h2>
             <span className={styles.sourceBadge}>
-              {state.refreshing ? '更新中' : gradeRecords?.coverage?.status === 'partial' ? '部分讀取' : count ? '已讀取' : '待確認'}
+              {state.paused ? '暫停更新' : state.refreshing ? '更新中' : gradeRecords?.coverage?.status === 'partial' ? '部分讀取' : count ? '已讀取' : '待確認'}
             </span>
           </div>
           <p>
@@ -179,10 +203,13 @@ function RecordContent<K extends AcademicKind>({
           </p>
           {gradeRecords && <p>顯示本次取得的成績範圍；課堂作業與教材請至 <a href="https://tronclass.pu.edu.tw/" target="_blank" rel="noopener noreferrer">WOW Class ↗</a>。</p>}
         </div>
-        <button className="btn" disabled={state.refreshing} onClick={() => void refresh()}>
-          {state.refreshing ? '更新中…' : '更新資料'}
+        <button className="btn" disabled={state.refreshing || state.paused} onClick={() => void refresh()}>
+          {state.paused ? '暫停更新' : state.refreshing ? '更新中…' : '更新資料'}
         </button>
       </section>
+      {state.paused && <p className={styles.warning} role="status" data-ecampus-paused="true">
+        {ECAMPUS_PAUSED_MESSAGE}，以下為先前讀取的資料，資料時間如上。
+      </p>}
       {gradeRecords?.coverage?.status === 'partial' && <p className={styles.warning} role="status">
         有 {gradeRecords.coverage.skippedRows} 筆來源資料的學期或學分尚無法確認，未納入下方明細與合計。已辨識的成績仍可查看，請至 e 校園核對缺漏。
       </p>}

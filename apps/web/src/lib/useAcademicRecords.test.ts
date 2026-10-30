@@ -144,3 +144,28 @@ it('rejects a mismatched owner returned by a reader and does not show their data
   expect(view.result.current.state?.snapshot).toBeUndefined();
   view.unmount();
 });
+
+it('E 校園暫停時保留先前資料與資料時間，並停止自動更新', async () => {
+  const view = renderHook(() => useAcademicRecords('grades', true, 'pu', true));
+  await flush();
+  vi.mocked(loadAcademicRecords).mockRejectedValue(new AcademicConnectionError('paused'));
+  await act(async () => { await view.result.current.refresh(); });
+  expect(view.result.current.state).toMatchObject({
+    status: 'ready', paused: true, refreshing: false,
+    snapshot: { fetchedAt: '2026-10-27T00:00:00.000Z' },
+  });
+  await act(async () => { await vi.advanceTimersByTimeAsync(INTERVAL * 5); });
+  expect(loadAcademicRecords).toHaveBeenCalledTimes(2);
+  view.unmount();
+});
+
+it('E 校園暫停且沒有先前資料時顯示暫停的空狀態，不重試', async () => {
+  vi.mocked(loadAcademicRecords).mockRejectedValue(new AcademicConnectionError('paused'));
+  const view = renderHook(() => useAcademicRecords('grades', true, 'pu', true));
+  await flush();
+  expect(view.result.current.state).toMatchObject({ status: 'error', reason: 'paused', paused: true });
+  expect(view.result.current.state?.snapshot).toBeUndefined();
+  await act(async () => { await vi.advanceTimersByTimeAsync(INTERVAL * 5); });
+  expect(loadAcademicRecords).toHaveBeenCalledTimes(1);
+  view.unmount();
+});

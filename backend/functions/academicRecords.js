@@ -11,6 +11,12 @@ const {
   persistOwnedMypuCookies,
   deleteOwnedPuSessions,
 } = require('./lib/puSessionStore');
+const {
+  ECAMPUS_PAUSED_CODE,
+  ECAMPUS_PAUSED_MESSAGE,
+  isEcampusFetchPaused,
+  isEcampusPausedResult,
+} = require('./lib/ecampusFetchPause');
 
 function sessionExpiresAt(session) {
   const value = session?.expiresAt?.toDate?.();
@@ -38,6 +44,22 @@ function cookieMap(value) {
     return null;
   }
   return Object.fromEntries(entries);
+}
+
+/** getMyAcademicRecords 的暫停回應：不是錯誤，前端顯示「E 校園資料暫停更新中」。 */
+function pausedAcademicRecords(uid, dataType) {
+  return {
+    success: true,
+    paused: true,
+    code: ECAMPUS_PAUSED_CODE,
+    message: ECAMPUS_PAUSED_MESSAGE,
+    ownerUid: uid,
+    schoolId: 'pu',
+    source: 'pu-campus',
+    dataType,
+    fetchedAt: null,
+    result: null,
+  };
 }
 
 function createPuCampusDataHandler({ db, fetchers, logger = console }) {
@@ -79,12 +101,20 @@ function createPuCampusDataHandler({ db, fetchers, logger = console }) {
         res.status(401).json({ error: 'Invalid or expired PU session' });
         return;
       }
+      if (isEcampusFetchPaused()) {
+        res.status(503).json({ error: ECAMPUS_PAUSED_MESSAGE, code: ECAMPUS_PAUSED_CODE });
+        return;
+      }
       const result =
         dataType === 'grades'
           ? await fetchers.grades(session.cookies, semester, {
               mypuCookies: cookieMap(session.mypuCookies),
             })
           : await fetchers[dataType](session.cookies, semester);
+      if (isEcampusPausedResult(result)) {
+        res.status(503).json({ error: ECAMPUS_PAUSED_MESSAGE, code: ECAMPUS_PAUSED_CODE });
+        return;
+      }
       if (!result?.success) {
         res.status(503).json({ error: result?.error || 'Failed to fetch campus data' });
         return;
@@ -134,6 +164,8 @@ function createGetMyAcademicRecords({ db, assertActiveSchoolMember, fetchers, lo
         throw new HttpsError('permission-denied', '此帳號尚未連結靜宜大學。');
       }
       await requireMembership(uid);
+      // E 校園暫停時不讀 session、不打學校，直接回暫停狀態。
+      if (isEcampusFetchPaused()) return pausedAcademicRecords(uid, dataType);
       const now = new Date();
       // PU sessions use a fixed TTL, so the greatest expiry is the newest session.
       const sessions = await db
@@ -160,6 +192,7 @@ function createGetMyAcademicRecords({ db, assertActiveSchoolMember, fetchers, lo
               mypuCookies: cookieMap(session.mypuCookies),
             })
           : await fetchers[dataType](session.cookies, '');
+      if (isEcampusPausedResult(result)) return pausedAcademicRecords(uid, dataType);
       if (result?.success === false && result.code === 'session-expired') {
         throw new HttpsError('failed-precondition', '校務連線已過期，請重新以學號登入。');
       }
@@ -234,12 +267,18 @@ function createPuFetchData({ db, fetchers, logger = console }) {
         throw new HttpsError('permission-denied', 'Session expired');
       }
 
+      if (isEcampusFetchPaused()) {
+        throw new HttpsError('unavailable', ECAMPUS_PAUSED_MESSAGE, { code: ECAMPUS_PAUSED_CODE });
+      }
       const result =
         dataType === 'grades'
           ? await fetchers.grades(sessionData.cookies, semester || '', {
               mypuCookies: cookieMap(sessionData.mypuCookies),
             })
           : await fetchers[dataType](sessionData.cookies, semester || '');
+      if (isEcampusPausedResult(result)) {
+        throw new HttpsError('unavailable', ECAMPUS_PAUSED_MESSAGE, { code: ECAMPUS_PAUSED_CODE });
+      }
       if (!result?.success) {
         throw new HttpsError('unavailable', result?.error || 'Failed to fetch data');
       }

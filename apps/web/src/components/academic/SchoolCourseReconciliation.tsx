@@ -3,6 +3,7 @@
 import Link from 'next/link';
 import { useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { AcademicConnectionError, loadAcademicRecords } from '@/lib/academicClient';
+import { ECAMPUS_PAUSED_MESSAGE } from '@/lib/ecampusPause';
 import { formatSemester } from '@/lib/academicRecords';
 import {
   reconcileSchoolCourses, schoolCourseHref,
@@ -103,6 +104,7 @@ function ReconciliationWorkspace({ uid, schoolId, lms, returnUrl, canReconnect }
 
   const needsLogin = visible?.error instanceof AcademicConnectionError &&
     ['reconnect', 'permission'].includes(visible.error.reason);
+  const paused = visible?.error instanceof AcademicConnectionError && visible.error.reason === 'paused';
   return (
     <section className={styles.panel} aria-label="校方課表與 WOW Class 對照" aria-busy={visible?.status === 'loading'}>
       <header className={styles.header}>
@@ -116,9 +118,10 @@ function ReconciliationWorkspace({ uid, schoolId, lms, returnUrl, canReconnect }
         </button>
       </header>
       {visible?.status === 'loading' ? <p className={styles.message} role="status">正在讀取 e 校園的選課學分與上課地點…</p> : null}
-      {visible?.status === 'error' ? <div className={styles.message} role="alert">
-        <h3>{needsLogin ? 'e 校園需要重新連線' : '校方課表暫時無法核對'}</h3>
-        <p>{needsLogin ? '正式選課資料需要有效的 e 校園連線；你可以重新連線，或先前往校方網站核對。'
+      {visible?.status === 'error' ? <div className={styles.message} role={paused ? 'status' : 'alert'}>
+        <h3>{paused ? ECAMPUS_PAUSED_MESSAGE : needsLogin ? 'e 校園需要重新連線' : '校方課表暫時無法核對'}</h3>
+        <p>{paused ? '校方課表暫時不更新，不會顯示為零學分。你可以先前往校方網站核對。'
+          : needsLogin ? '正式選課資料需要有效的 e 校園連線；你可以重新連線，或先前往校方網站核對。'
           : '校方課表尚未取得，不會顯示為零學分。請稍後重試，或前往校方網站核對。'}</p>
         <div className={styles.actions}>
           {needsLogin && canReconnect ? <Link className="btn" href={`/login?reconnect=school&returnUrl=${encodeURIComponent(returnUrl)}`}>重新連線 e 校園</Link> : null}
