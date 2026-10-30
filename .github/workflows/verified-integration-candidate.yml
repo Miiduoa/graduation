@@ -1,0 +1,35 @@
+name: Verified integration candidate
+
+on:
+  push:
+    branches: [chore/merge-snapshot-20261030]
+    paths:
+      - '.integration/**'
+      - '.github/workflows/verified-integration-candidate.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: verified-credit-overview-candidate
+  cancel-in-progress: false
+
+jobs:
+  candidate:
+    if: github.repository == 'Miiduoa/graduation' && github.ref == 'refs/heads/chore/merge-snapshot-20261030'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - name: Reproduce the reviewed tree and publish only the fixed new candidate branch
+        run: python3 .integration/build_candidate.py
+      - uses: actions/upload-artifact@v4
+        with:
+          name: verified-credit-overview-candidate
+          path: candidate-receipt.json
+          if-no-files-found: error
+          retention-days: 1

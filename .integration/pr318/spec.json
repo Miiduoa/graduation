@@ -1,0 +1,33 @@
+{
+  "feature_ref": "fix/school-credit-overview-20261028",
+  "feature_sha": "c1ebf0e1a70680bf473e27ec2af746de1925bd02",
+  "incoming_ref": "fix/pause-ecampus-fetch-20261030",
+  "incoming_sha": "7d4147e432b04dbfd1bfee5a75040a06b26fb8c9",
+  "main_sha": "7dc77f5cb15265937d41bd5516c3e3c6a15e96ca",
+  "merge_base": "7b76ca7176cb5b9045d87abe953e95b5a1e32050",
+  "expected_tree": "8a696e93efc65d3630e76e88c6cf0182c69eddac",
+  "patch_sha256": "b81d737cd243df06fd471bec0850d0fd8c631d8005e5786025565758a601e215",
+  "candidate_branch": "integration/credit-overview-paused-20261030",
+  "resolutions": {
+    "apps/mobile/src/__tests__/SchoolCreditOverviewCard.test.tsx": {"before":"f396841b0021fcc25fe74fcd82eb4bb751438e89","after":"63b37a33094d8221f608a21305d1d05e62f4760e","mode":"100644"},
+    "apps/mobile/src/__tests__/services/ownedSchoolCreditOverview.paused.test.ts": {"before":null,"after":"0e20342275e242af933005071b7a04d94b7c1174","mode":"100644"},
+    "apps/mobile/src/__tests__/services/ownedSchoolCreditOverview.test.ts": {"before":"c17dc55fad7590a403439083ceb9543c2f1a3877","after":"f26135d9a2149087777c7f0b29532597b5e95d17","mode":"100644"},
+    "apps/mobile/src/components/SchoolCreditOverviewCard.tsx": {"before":"f0ae06b9dade3310ac7d8ebd002dacc6f5657931","after":"261816eac2a99148a8c109975c4ac9ec3c33e7cd","mode":"100644"},
+    "apps/mobile/src/services/ownedSchoolCreditOverview.ts": {"before":"ea6e423b7f9dfa8420d9fce57623e2b6ec7108c4","after":"0bfd0269ee0f42318b2fb0daa39476a942c75084","mode":"100644"},
+    "apps/web/src/components/academic/SchoolCreditOverview.test.tsx": {"before":"8dd5559ddf59922324a90c6d68b03f48ed3e51e9","after":"c3395930c3b135671efa141ad6d318509702a1cf","mode":"100644"},
+    "apps/web/src/components/academic/SchoolCreditOverview.tsx": {"before":"f427c3e96d74b3199311589d4947c2cf98ee9f23","after":"f8633ff4846e2029cdf6fb750bb6e2a3a8bd3a94","mode":"100644"},
+    "apps/web/src/lib/academicClient.ts": {"before":"0eb8606449bd7364392dcc7094efc1beb2e6e7ef","after":"3f36a4b99274bcd836229656c8e39bd81dc9ad48","mode":"100644"},
+    "apps/web/src/lib/schoolCreditOverview.paused.test.ts": {"before":null,"after":"056cf6a75738088d65f0e64a1c2f89e07bd40824","mode":"100644"},
+    "apps/web/src/lib/schoolCreditOverview.test.ts": {"before":"53d2de631bd6a4a7a574bc6f792e779e46fe87d9","after":"629e497697860669bc5804c596381f21cccaa88c","mode":"100644"},
+    "apps/web/src/lib/schoolCreditOverview.ts": {"before":"8feed64bbc36837ae9a4858001850ad42c6b52f4","after":"ede51ed6c4f89103117cb7d6d7350a40cbf78e3e","mode":"100644"},
+    "apps/web/src/lib/server/academicRecordsHandlers.ts": {"before":"72c874af70359103f5cd38c68bc9f22fb2dc6aea","after":"c200a00259fe4531c47fcee5b4ffe10be6977e07","mode":"100644"},
+    "apps/web/src/lib/server/academicSchoolSource.ts": {"before":"331c1877f9a4255f228c0a0ee66c695931f664c8","after":"c96010007982844964751266e3c0603ed8cc47cf","mode":"100644"},
+    "apps/web/src/lib/server/fnDispatch.academic.test.ts": {"before":"5a9fff25f45395e950ddad9c9cf197776244d4ae","after":"35cc18288a5746c0a22654450eae2a684461082a","mode":"100644"},
+    "backend/functions/puScraper.creditOverview.test.js": {"before":"5188ce46bffd8b09601364b15834c546affd94f0","after":"a2ba62388abfd4b507ac3a5ae8419b90333da573","mode":"100644"},
+    "backend/functions/puScraper.js": {"before":"3111242321a4a648b9edea9f4c3cc25f936cbb3e","after":"9ba3d98aca86871e131e9f4e762608f291129086","mode":"100644"},
+    "backend/functions/puScraper.pause.test.js": {"before":"87d0d2e58335f2765f837cf1553aeea3fe390a76","after":"bcc4d3b3bca7cf22506af6dadbaa7a25e5aa6fc3","mode":"100644"},
+    "deploy/web/Dockerfile": {"before":"f812af167793c93afdb6c76062aaf3fe10345b35","after":"794f97e7504be7ba67a0747c3132a6d4476620ba","mode":"100644"},
+    "deploy/web/Dockerfile.nuni": {"before":"fab12699015e784b019fe79c6430efc89a5206ff","after":"1e277dc0c52f19571df381fb50843e0e05264ecb","mode":"100644"},
+    "deploy/web/release-safety.test.mjs": {"before":"c56f8ddd37800273e708bf465d0a35fdb275cc29","after":"a4914078edabbf47be7a2e361ff25e5680b592a2","mode":"100644"}
+  }
+}
