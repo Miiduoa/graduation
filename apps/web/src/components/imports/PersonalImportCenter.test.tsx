@@ -1157,7 +1157,7 @@ it('rejects oversized document AI input before downloading and allows a smaller 
         ...unstructuredDocument.sections[1],
         rows: [
           unstructuredDocument.sections[1].rows[0],
-          { line: 2, cells: ['長'.repeat(8_001)] },
+          { line: 2, cells: ['長'.repeat(40_001)] },
           unstructuredDocument.sections[1].rows[2],
         ],
       },
@@ -1167,7 +1167,7 @@ it('rejects oversized document AI input before downloading and allows a smaller 
   render(<PersonalImportCenter />);
   await chooseDocumentRanges(document);
   fireEvent.click(screen.getByRole('button', { name: '用 AI 整理選取內容' }));
-  expect(screen.getByText(/選取內容超過 8,000 字元/)).toBeTruthy();
+  expect(screen.getByText(/選取內容超過 40,000 字元/)).toBeTruthy();
   expect(runPersonalImportAi).not.toHaveBeenCalled();
   expect(screen.getByRole('region', { name: '選擇文件內容' })).toBeTruthy();
   expect((screen.getByLabelText('「成績」的標題列') as HTMLSelectElement).value).toBe('2');
@@ -1436,4 +1436,83 @@ it('provides a selectable bookmark URL when automatic clipboard access is unavai
   expect(field.readOnly).toBe(true);
   expect(field.value).toMatch(/^javascript:/);
   expect(field.closest('details')?.open).toBe(true);
+});
+
+it('checkpoints a completed image batch before navigation and retains its preview on cancel', async () => {
+  vi.mocked(runPersonalImportAi).mockImplementation(() => new Promise(() => {}));
+  const view = render(<PersonalImportCenter />);
+  chooseAiScreenshot();
+  await waitFor(() => expect(runPersonalImportAi).toHaveBeenCalledOnce());
+  const request = vi.mocked(runPersonalImportAi).mock.calls[0][0];
+  await act(async () => request.onPartial?.(aiGradePreview('已完成課程')));
+  expect(screen.getByRole('complementary', { name: '匯入來源對照' })).toBeTruthy();
+  fireEvent.click(screen.getByRole('button', { name: '取消讀取' }));
+  expect(screen.getByDisplayValue('已完成課程')).toBeTruthy();
+  expect(URL.revokeObjectURL).not.toHaveBeenCalledWith('blob:preview');
+  view.unmount();
+  render(<PersonalImportCenter />);
+  expect(await screen.findByDisplayValue('已完成課程')).toBeTruthy();
+  expect(readPersonalImports(context)).toHaveLength(0);
+});
+
+it('removes failed-batch retry when the user discards the source', async () => {
+  const completed = aiGradePreview();
+  vi.mocked(runPersonalImportAi).mockResolvedValue({
+    ...completed,
+    retry: {
+      completed,
+      batches: [{ text: '英文,2,90', startLine: 3, columnContext: '課程名稱,學分,成績' }],
+    },
+  });
+  render(<PersonalImportCenter />);
+  chooseAiScreenshot();
+  await screen.findByRole('button', { name: '重試未完成的 1 段' });
+  fireEvent.click(screen.getByRole('button', { name: '清除暫存草稿' }));
+  fireEvent.click(screen.getByRole('button', { name: '確認清除草稿' }));
+  expect(screen.queryByRole('button', { name: '重試未完成的 1 段' })).toBeNull();
+});
+
+it('preserves edits to completed rows when retrying only the unfinished batch', async () => {
+  const completed = aiGradePreview();
+  vi.mocked(runPersonalImportAi)
+    .mockResolvedValueOnce({
+      ...completed,
+      retry: {
+        completed,
+        batches: [{ text: '英文,2,90', startLine: 3, columnContext: '課程名稱,學分,成績' }],
+      },
+    })
+    .mockImplementationOnce(async (request) => ({ ...request.retry!.completed }));
+  render(<PersonalImportCenter />);
+  chooseAiScreenshot();
+  await screen.findByRole('button', { name: '重試未完成的 1 段' });
+  fireEvent.change(screen.getByLabelText('成績'), { target: { value: '88' } });
+  fireEvent.click(screen.getByRole('button', { name: '重試未完成的 1 段' }));
+  await waitFor(() => expect(runPersonalImportAi).toHaveBeenCalledTimes(2));
+  expect(vi.mocked(runPersonalImportAi).mock.calls[1][0].retry?.completed.rows[0].grade).toBe('88');
+  expect((screen.getByLabelText('成績') as HTMLInputElement).value).toBe('88');
+});
+
+it('keeps a completed row excluded when retrying unfinished ranges', async () => {
+  const completed = aiGradePreview();
+  vi.mocked(runPersonalImportAi)
+    .mockResolvedValueOnce({
+      ...completed,
+      retry: {
+        completed,
+        batches: [{ text: '英文,2,90', startLine: 3, columnContext: '課程名稱,學分,成績' }],
+      },
+    })
+    .mockImplementationOnce(async (request) => ({ ...request.retry!.completed }));
+  render(<PersonalImportCenter />);
+  chooseAiScreenshot();
+  await screen.findByRole('button', { name: '重試未完成的 1 段' });
+  const selected = screen.getByRole('checkbox', { name: /第 1 筆/ }) as HTMLInputElement;
+  fireEvent.click(selected);
+  expect(selected.checked).toBe(false);
+  fireEvent.click(screen.getByRole('button', { name: '重試未完成的 1 段' }));
+  await waitFor(() => expect(runPersonalImportAi).toHaveBeenCalledTimes(2));
+  expect((screen.getByRole('checkbox', { name: /第 1 筆/ }) as HTMLInputElement).checked).toBe(
+    false,
+  );
 });

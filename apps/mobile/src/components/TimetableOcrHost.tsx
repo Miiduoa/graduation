@@ -20,6 +20,20 @@ export const TimetableOcrHost = forwardRef<TimetableOcrHandle>(function Timetabl
     coordinator.current = new OcrCoordinator((script) => web.current?.injectJavaScript(script));
   const instance = coordinator.current;
   const [baseUrl, setBaseUrl] = useState('');
+  const [hostGeneration, setHostGeneration] = useState(0);
+  const needsRestart = useRef(false);
+  const hostEpoch = useRef(0);
+  const restart = () => {
+    if (hostEpoch.current !== hostGeneration) return;
+    instance.fail(
+      new TimetableOcrError(
+        '圖片辨識程式已停止，可能是裝置記憶體不足。請裁切圖片後重試，或改貼文字。',
+        'unavailable',
+      ),
+    );
+    instance.reset();
+    needsRestart.current = true;
+  };
   useEffect(() => {
     let open = true;
     void prepareOcrBaseUrl()
@@ -39,6 +53,11 @@ export const TimetableOcrHost = forwardRef<TimetableOcrHandle>(function Timetabl
     () => ({
       recognize: async (base64, mime, signal) => {
         if (!baseUrl) await prepareOcrBaseUrl();
+        if (needsRestart.current) {
+          needsRestart.current = false;
+          hostEpoch.current += 1;
+          setHostGeneration(hostEpoch.current);
+        }
         return instance.recognize(base64, mime, signal);
       },
       cancel: () => instance.cancel(),
@@ -55,6 +74,7 @@ export const TimetableOcrHost = forwardRef<TimetableOcrHandle>(function Timetabl
     >
       {baseUrl ? (
         <WebView
+          key={hostGeneration}
           ref={web}
           originWhitelist={['file://*', 'about:*']}
           source={{ html: TIMETABLE_OCR_HTML, baseUrl }}
@@ -62,11 +82,13 @@ export const TimetableOcrHost = forwardRef<TimetableOcrHandle>(function Timetabl
           allowFileAccessFromFileURLs
           allowUniversalAccessFromFileURLs
           javaScriptEnabled
-          onMessage={(event) => instance.message(event.nativeEvent.data)}
-          onError={() => {
-            instance.fail(new TimetableOcrError('辨識程式未能載入，請改貼文字。', 'unavailable'));
-            instance.reset();
+          onMessage={(event) => {
+            if (!needsRestart.current && hostEpoch.current === hostGeneration)
+              instance.message(event.nativeEvent.data);
           }}
+          onError={restart}
+          onContentProcessDidTerminate={restart}
+          onRenderProcessGone={restart}
         />
       ) : null}
     </View>

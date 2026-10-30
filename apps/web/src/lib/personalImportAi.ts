@@ -1,182 +1,306 @@
 'use client';
 
+import { parsePersonalImport } from '@campus/shared/src/imports/parser';
 import {
-  buildPersonalImportAiPrompt,
   parsePersonalImportAiResponse,
   type PersonalImportAiResult,
 } from '@campus/shared/src/imports/aiRecognition';
+import {
+  requestPersonalImportCloud,
+  maskPersonalImportText,
+  isPersonalImportCloudMaskSafe,
+} from '@campus/shared/src/imports/aiCloud';
+import {
+  planResilientPersonalImportBatches,
+  splitPersonalImportAiTextBatch,
+  type PersonalImportAiTextBatch,
+} from '@campus/shared/src/imports/aiTextBatches';
+import {
+  auditPersonalImportAiTable,
+  personalImportAiTableAuditMessage,
+} from '@campus/shared/src/imports/aiTableAudit';
 import type { PersonalImportOptions } from '@campus/shared/src/imports/types';
-import { auditPersonalImportAiTable, personalImportAiTableAuditMessage, personalImportAiTableCoverageNotice } from '@campus/shared/src/imports/aiTableAudit';
-import { IMPORT_AI_CACHE_NAME, IMPORT_AI_DOWNLOAD_LABEL } from './personalImportAiConfig';
+import { recognizePersonalImportImage } from './personalImportOcr';
+import {
+  deletePersonalImportAiModelCache as deleteLocalCache,
+  getPersonalImportAiAvailability as localAvailability,
+  runLocalPersonalImportAi,
+} from './personalImportAiLocal';
 
+export type ImportRecognitionBatch = PersonalImportAiTextBatch & { rulesOnly?: boolean };
+export type PersonalImportAiRetry = {
+  batches: ImportRecognitionBatch[];
+  completed: PersonalImportAiResult;
+  replaceRowIds?: string[];
+  cloudSafe?: boolean;
+};
+export type PersonalImportAiRunResult = PersonalImportAiResult & { retry?: PersonalImportAiRetry };
 export type PersonalImportAiRequest = {
   input: { text?: string; image?: File };
   options: PersonalImportOptions;
   signal: AbortSignal;
   onProgress: (message: string) => void;
+  onPartial?: (result: PersonalImportAiRunResult) => void;
+  cloudHeaders?: Record<string, string>;
+  knownNames?: readonly string[];
+  retry?: PersonalImportAiRetry;
+};
+
+let running = false;
+const cancelled = () => new DOMException('已停止整理，已完成的草稿仍保留。', 'AbortError');
+const clone = (result: PersonalImportAiResult): PersonalImportAiResult => ({
+  rows: [...result.rows],
+  issues: [...result.issues],
+});
+const append = (target: PersonalImportAiResult, result: PersonalImportAiResult) => {
+  target.rows.push(...result.rows);
+  target.issues.push(...result.issues);
 };
 
 export function getPersonalImportAiAvailability(): {
   available: boolean;
   reason?: string;
   downloadLabel: string;
+  localAvailable?: boolean;
 } {
-  const downloadLabel = IMPORT_AI_DOWNLOAD_LABEL;
-  if (
-    typeof window === 'undefined' ||
-    typeof Worker === 'undefined' ||
-    typeof navigator === 'undefined' ||
-    !(navigator as Navigator & { gpu?: unknown }).gpu ||
-    window.isSecureContext === false
-  ) {
-    return {
-      available: false,
-      downloadLabel,
-      reason:
-        '這個瀏覽器尚未提供裝置端 AI 所需的圖形加速。可先從學校複製表格、讀取檔案，或使用支援 WebGPU 的瀏覽器。',
-    };
-  }
-  return { available: true, downloadLabel };
+  const local = localAvailability();
+  return { ...local, available: typeof window !== 'undefined', localAvailable: local.available };
 }
-
-let sequence = 0;
-let running = false;
-let deletingCache = false;
-const abortError = () => new DOMException('已停止這次 AI 辨識，原有草稿仍保留。', 'AbortError');
-
-export async function deletePersonalImportAiModelCache(): Promise<void> {
+export async function deletePersonalImportAiModelCache() {
   if (running) throw new Error('AI 正在辨識，請先停止或等辨識完成後再移除模型。');
-  if (deletingCache) throw new Error('正在移除模型快取，請稍候。');
-  if (typeof caches === 'undefined')
-    throw new Error('此瀏覽器無法管理模型快取，請從瀏覽器設定清除本站資料。');
-  deletingCache = true;
-  try {
-    await caches.delete(IMPORT_AI_CACHE_NAME);
-    if (await caches.has(IMPORT_AI_CACHE_NAME)) throw new Error('cache still exists');
-  } catch {
-    throw new Error('模型快取尚未完全移除，請重試或從瀏覽器設定清除本站資料。');
-  } finally {
-    deletingCache = false;
-  }
+  await deleteLocalCache();
 }
 
-/** An isolated worker owns every download and inference; terminating it cancels actual work. */
-export async function runPersonalImportAi({
-  input,
-  options,
-  signal,
-  onProgress,
-}: PersonalImportAiRequest): Promise<PersonalImportAiResult> {
-  if (signal.aborted) throw abortError();
-  if (deletingCache) throw new Error('正在移除模型快取，請完成後再辨識。');
-  if (running) throw new Error('另一份資料正在使用裝置端 AI，請等完成後再試。');
-  const availability = getPersonalImportAiAvailability();
-  if (!availability.available) throw new Error(availability.reason);
-  if (input.image && !['image/png', 'image/jpeg', 'image/webp'].includes(input.image.type))
-    throw new Error('AI 圖片辨識支援 PNG、JPEG 或 WebP，請先將其他格式轉成圖片。');
-  if (input.image && input.image.size > 10 * 1024 * 1024)
-    throw new Error('圖片超過 10 MB，請裁切到需要的課表或表格後再試。');
-  const mode = input.image ? 'image' : 'text';
-  const source = mode === 'image' ? '' : (input.text ?? '');
-  const prompt = buildPersonalImportAiPrompt(source, options, mode);
-  const snapshot: PersonalImportOptions = {
-    ...options,
-    source: options.source ? { ...options.source } : undefined,
+function rules(
+  batch: ImportRecognitionBatch,
+  options: PersonalImportOptions,
+): PersonalImportAiResult {
+  const prefix = batch.columnContext ? `${batch.columnContext}\n` : '';
+  const prefixLines = prefix.split('\n').length - 1;
+  const result = parsePersonalImport(prefix + batch.text, options);
+  return {
+    ...result,
+    rows: result.rows
+      .filter((row) => row.source.line > prefixLines)
+      .map((row) => ({
+        ...row,
+        source: { ...row.source, line: row.source.line - prefixLines + batch.startLine - 1 },
+      })),
   };
+}
+
+/** 每段完成就交付草稿；失敗範圍可以重試，不重跑已完成的段落。 */
+export async function runPersonalImportAi(
+  request: PersonalImportAiRequest,
+): Promise<PersonalImportAiRunResult> {
+  const { signal } = request;
+  if (signal.aborted) throw cancelled();
+  if (running) throw new Error('另一份資料正在整理，請稍候再試。');
   running = true;
-  let worker: Worker | undefined;
-  try {
-    worker = new Worker(new URL('./personalImportAi.worker.ts', import.meta.url), {
-      type: 'module',
-    });
-    const currentWorker = worker;
-    const id = ++sequence;
-    const raw = await new Promise<string>((resolve, reject) => {
-      let settled = false;
-      const finish = (error?: Error, value?: string) => {
-        if (settled) return;
-        settled = true;
-        clearTimeout(timer);
-        signal.removeEventListener('abort', abort);
-        currentWorker.onmessage = null;
-        currentWorker.onerror = null;
-        currentWorker.onmessageerror = null;
-        currentWorker.terminate();
-        if (error) reject(error);
-        else resolve(value!);
-      };
-      const abort = () => finish(abortError());
-      const timer = setTimeout(
-        () => finish(new Error('AI 準備或辨識逾時，已停止工作。請確認網路、縮小來源後重試。')),
-        10 * 60_000,
-      );
-      currentWorker.onmessage = (event: MessageEvent<unknown>) => {
-        const message = event.data;
-        if (
-          !message ||
-          typeof message !== 'object' ||
-          !('id' in message) ||
-          message.id !== id ||
-          signal.aborted
-        )
-          return;
-        const data = message as { type?: string; message?: unknown; raw?: unknown };
-        if (data.type === 'progress' && typeof data.message === 'string') onProgress(data.message);
-        else if (data.type === 'result' && typeof data.raw === 'string')
-          finish(undefined, data.raw);
-        else if (data.type === 'error')
-          finish(
-            new Error(
-              typeof data.message === 'string'
-                ? data.message
-                : '裝置端 AI 無法完成辨識，請縮小來源後重試。',
-            ),
-          );
-      };
-      currentWorker.onerror = () =>
-        finish(
-          new Error(
-            '裝置端 AI 啟動失敗，可能是圖形加速或記憶體不足。請關閉其他分頁後重試，或改用表格匯入。',
-          ),
-        );
-      currentWorker.onmessageerror = () =>
-        finish(new Error('AI 辨識結果無法讀取，原有草稿仍保留。'));
-      signal.addEventListener('abort', abort, { once: true });
-      if (signal.aborted) {
-        abort();
-        return;
-      }
-      onProgress('正在準備裝置端 AI；首次使用會下載模型，資料不會上傳。');
-      try {
-        currentWorker.postMessage({
-          type: 'recognize',
-          id,
-          prompt,
-          ...(input.image ? { image: input.image } : {}),
-        });
-      } catch {
-        finish(new Error('無法交付這份資料給裝置端 AI，請重新選擇檔案。'));
-      }
-    });
-    if (signal.aborted) throw abortError();
-    const parsed = parsePersonalImportAiResponse(raw, source, snapshot, mode);
-    if (mode === 'image') return parsed; // Generated transcription is not an independent source.
-    onProgress('正在逐列對照原始表格，檢查漏列與欄位配對。');
-    if (signal.aborted) throw abortError();
-    const audit = auditPersonalImportAiTable(source, parsed.rows, snapshot.kind, '', snapshot.periodProfile);
-    if (audit.status === 'mismatch') throw new Error(personalImportAiTableAuditMessage(audit));
-    if (audit.status === 'matched') {
-      return {
-        ...parsed,
-        issues: [...parsed.issues, personalImportAiTableCoverageNotice(audit.expectedRecords)],
-        rows: parsed.rows.map((row) => ({
-          ...row, source: { ...row.source, line: audit.sourceLines[row.id] ?? row.source.line },
-        })),
-      };
+  const workerSession: { worker?: Worker } = {};
+  const options = {
+    ...request.options,
+    source: request.options.source ? { ...request.options.source } : undefined,
+  };
+  const progress = (message: string) => {
+    if (signal.aborted) return;
+    try {
+      request.onProgress(message);
+    } catch {
+      /* 畫面更新失敗不能中斷辨識。 */
     }
-    return parsed;
+  };
+  const successful = clone(request.retry?.completed ?? { rows: [], issues: [] });
+  const failed: Array<{ batch: ImportRecognitionBatch; result: PersonalImportAiResult }> = [];
+  let work: ImportRecognitionBatch[] = [];
+  let index = 0;
+  let splits = 0;
+  let cloudEnabled = true;
+  let sourceMaskSafe = request.retry?.cloudSafe !== false;
+  let cloudFallbackMessage = '';
+  let localEnabled = localAvailability().available;
+  let provider = '';
+  const snapshot = (): PersonalImportAiRunResult => {
+    const result = clone(successful);
+    for (const item of failed) append(result, item.result);
+    result.rows.sort((left, right) => left.source.line - right.source.line);
+    if (provider)
+      result.issues.push({ code: 'import-provider', severity: 'warning', message: provider });
+    const remaining = [...failed.map((item) => item.batch), ...work.slice(index + 1)];
+    return {
+      ...result,
+      ...(remaining.length
+        ? {
+            retry: {
+              batches: remaining,
+              completed: clone(successful),
+              replaceRowIds: failed.flatMap((item) => item.result.rows.map((row) => row.id)),
+              cloudSafe: sourceMaskSafe,
+            },
+          }
+        : {}),
+    };
+  };
+  const publish = () => {
+    if (signal.aborted) return;
+    try {
+      request.onPartial?.(snapshot());
+    } catch {
+      /* 完成結果仍由此次工作保留。 */
+    }
+  };
+  try {
+    let source = request.input.text ?? '';
+    if (!request.retry && request.input.image) {
+      progress('正在這台裝置讀取圖片文字，原圖不會上傳。');
+      try {
+        source = await recognizePersonalImportImage(request.input.image, signal, progress);
+      } catch (error) {
+        if (signal.aborted) throw cancelled();
+        if (!localEnabled) throw error;
+        provider = '圖片文字辨識未完成，目前改用本機視覺模型；原圖不會上傳。';
+        progress(provider);
+        const visual = await runLocalPersonalImportAi({
+          input: { image: request.input.image },
+          options,
+          signal,
+          workerSession,
+          onProgress: (message) => progress(`${provider}${message}`),
+        });
+        if (signal.aborted) throw cancelled();
+        append(successful, visual);
+        publish();
+        return snapshot();
+      }
+    }
+    if (signal.aborted) throw cancelled();
+    if (request.retry) {
+      work = [...request.retry.batches];
+      cloudEnabled = sourceMaskSafe;
+    } else {
+      sourceMaskSafe = cloudEnabled = isPersonalImportCloudMaskSafe(source);
+      if (!cloudEnabled)
+        cloudFallbackMessage = '這份資料無法可靠遮罩姓名欄位，已保留在裝置上整理。';
+      const planned = planResilientPersonalImportBatches(
+        cloudEnabled ? maskPersonalImportText(source, request.knownNames) : source,
+        {
+          maxBatchCharacters: 1_000,
+          maxTotalCharacters: 40_000,
+          maxBatches: 80,
+        },
+      );
+      work = planned.batches;
+      successful.issues.push(
+        ...planned.issues.map((message) => ({
+          code: 'import-batch-plan',
+          severity: 'warning' as const,
+          message,
+        })),
+      );
+    }
+    for (index = 0; index < work.length; index++) {
+      if (signal.aborted) throw cancelled();
+      const batch = work[index];
+      let result: PersonalImportAiResult | undefined;
+      let failure = batch.rulesOnly ? '這一段無法安全拆分，已改用規則解析。' : cloudFallbackMessage;
+      const label = `第 ${index + 1}／${work.length} 段（原文第 ${batch.startLine} 行起）`;
+      if (cloudEnabled && !batch.rulesOnly) {
+        provider = '目前使用雲端整理，送出前已遮罩可辨識的姓名、學號與證號。';
+        progress(`${provider}正在整理${label}。`);
+        const response = await requestPersonalImportCloud({
+          text: batch.text,
+          columnContext: batch.columnContext,
+          kind: options.kind,
+          headers: request.cloudHeaders,
+          signal,
+        });
+        if (response.ok) {
+          try {
+            result = parsePersonalImportAiResponse(response.output, response.sourceText, options);
+            const audit = auditPersonalImportAiTable(
+              response.sourceText,
+              result.rows,
+              options.kind,
+              response.columnContext,
+              options.periodProfile,
+            );
+            if (audit.status === 'mismatch')
+              throw new Error(personalImportAiTableAuditMessage(audit));
+            if (audit.status === 'matched')
+              result.rows = result.rows.map((row) => ({
+                ...row,
+                source: { ...row.source, line: audit.sourceLines[row.id] ?? row.source.line },
+              }));
+          } catch {
+            result = undefined;
+            failure = '雲端回傳內容不完整或無法對照來源。';
+            const smaller = splits < 8 ? splitPersonalImportAiTextBatch(batch) : null;
+            if (smaller) {
+              splits++;
+              work.splice(index, 1, ...smaller);
+              index--;
+              progress('這段內容尚未完整整理，已縮小範圍重試；完成的草稿仍保留。');
+              continue;
+            }
+          }
+        } else {
+          cloudEnabled = false;
+          failure = response.message;
+          cloudFallbackMessage = response.message;
+          progress(response.message);
+        }
+      }
+      if (!result && localEnabled && !batch.rulesOnly) {
+        provider = '目前使用本機模型整理，這一段資料不會送到雲端。';
+        progress(`${failure}${provider}正在整理${label}。`);
+        try {
+          result = await runLocalPersonalImportAi({
+            input: { text: batch.text },
+            options,
+            columnContext: batch.columnContext,
+            signal,
+            workerSession,
+            onProgress: (message) => progress(`${provider}${label}：${message}`),
+          });
+        } catch (error) {
+          if (signal.aborted) throw cancelled();
+          failure = error instanceof Error ? error.message : '本機模型未能完成這一段。';
+          const smaller =
+            workerSession.worker && splits < 8 ? splitPersonalImportAiTextBatch(batch) : null;
+          if (smaller) {
+            splits++;
+            work.splice(index, 1, ...smaller);
+            index--;
+            continue;
+          }
+          if (!workerSession.worker) localEnabled = false;
+        }
+      }
+      if (signal.aborted) throw cancelled();
+      if (result) {
+        result.rows = result.rows.map((row) => ({
+          ...row,
+          source: { ...row.source, line: row.source.line + batch.startLine - 1 },
+        }));
+        append(successful, result);
+      } else {
+        provider = localEnabled
+          ? '目前使用規則解析，已完成的草稿仍保留。'
+          : '本機模型無法使用，目前使用規則解析；已完成的草稿仍保留。';
+        progress(`${failure}${provider}`);
+        const fallback = rules(batch, options);
+        fallback.issues.push({
+          code: 'import-batch-failed',
+          severity: 'warning',
+          message: `${label}未完成模型整理。${failure}${fallback.rows.length ? '已保留規則解析草稿，請逐筆核對。' : '此段已略過，原文仍保留。'}可重試未完成段落。`,
+        });
+        failed.push({ batch, result: fallback });
+      }
+      publish();
+    }
+    return snapshot();
   } finally {
-    worker?.terminate();
+    workerSession.worker?.terminate();
     running = false;
   }
 }

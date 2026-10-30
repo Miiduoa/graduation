@@ -1,0 +1,219 @@
+import type { PersonalImportOptions } from '@campus/shared';
+import { localLLM } from '../services/localLLMInference';
+import { runMobilePersonalImportAi } from '../services/imports/personalImportAi';
+
+jest.mock('../services/localLLMInference', () => ({
+  localLLM: {
+    getRuntimeAvailability: jest.fn(),
+    getState: jest.fn(),
+    getLoadedModelId: jest.fn(),
+    subscribe: jest.fn(() => jest.fn()),
+    generate: jest.fn(),
+    abort: jest.fn(),
+  },
+}));
+const options: PersonalImportOptions = {
+  kind: 'grades',
+  schoolId: 'pu',
+  academicYear: '115',
+  semester: '1',
+};
+const text = '資料庫，學分 3，成績 85';
+const output = JSON.stringify({
+  complete: true,
+  rows: [{ title: '資料庫', credits: 3, grade: '85', evidence: text }],
+});
+const originalFetch = global.fetch;
+const mockFetch = jest.fn();
+beforeEach(() => {
+  jest.resetAllMocks();
+  global.fetch = mockFetch;
+  jest.mocked(localLLM.getRuntimeAvailability).mockReturnValue({ available: true });
+  jest.mocked(localLLM.getState).mockReturnValue({ status: 'ready', modelId: 'qwen2.5-3b' });
+  jest.mocked(localLLM.getLoadedModelId).mockReturnValue('qwen2.5-3b');
+  jest.mocked(localLLM.generate).mockResolvedValue({
+    content: output,
+    finishReason: 'stop',
+    tokensGenerated: 50,
+    tokensPerSecond: 5,
+    totalTimeMs: 100,
+  });
+});
+afterEach(async () => {
+  for (let i = 0; i < 10; i++) await Promise.resolve();
+  global.fetch = originalFetch;
+  jest.useRealTimers();
+});
+const request = { platformContext: `ps_${'a'.repeat(43)}` };
+const response = (status: number, body: unknown) => ({
+  ok: status === 200,
+  status,
+  json: async () => body,
+});
+
+test('cloud succeeds with no native engine or downloaded model', async () => {
+  jest.mocked(localLLM.getRuntimeAvailability).mockReturnValue({ available: false });
+  jest.mocked(localLLM.getState).mockReturnValue({ status: 'uninitialized' });
+  jest.mocked(localLLM.getLoadedModelId).mockReturnValue(null);
+  mockFetch.mockResolvedValue(
+    response(200, { output, sourceText: text.normalize('NFKC'), columnContext: '' }),
+  );
+  const result = await runMobilePersonalImportAi(
+    text,
+    options,
+    new AbortController().signal,
+    request,
+  );
+  expect(result.rows).toHaveLength(1);
+  expect(localLLM.generate).not.toHaveBeenCalled();
+  expect(mockFetch).toHaveBeenCalledWith(
+    'https://nuni.tw/api/personal-import/recognize',
+    expect.objectContaining({
+      headers: expect.objectContaining({ Authorization: `Platform ${request.platformContext}` }),
+    }),
+  );
+  expect(result.issues.some((issue) => issue.message.includes('目前使用雲端 AI'))).toBe(true);
+});
+
+test.each([
+  [429, {}, '額度'],
+  [503, { code: 'disabled' }, '尚未啟用'],
+  [502, {}, '暫時無法'],
+  [401, {}, '登入狀態'],
+] as const)(
+  'cloud status %s falls back to the loaded local model',
+  async (status, body, notice) => {
+    mockFetch.mockResolvedValue(response(status, body));
+    const result = await runMobilePersonalImportAi(
+      text,
+      options,
+      new AbortController().signal,
+      request,
+    );
+    expect(result.rows).toHaveLength(1);
+    expect(localLLM.generate).toHaveBeenCalledTimes(1);
+    expect(
+      result.issues.some(
+        (issue) => issue.message.includes(notice) && issue.message.includes('目前使用本機 AI'),
+      ),
+    ).toBe(true);
+  },
+);
+
+test('cloud input masks identity fields before fetch', async () => {
+  mockFetch.mockResolvedValue(response(503, { code: 'disabled' }));
+  await runMobilePersonalImportAi(
+    `姓名：王小明 學號：411123456\n身分證：A123456789\n${text}`,
+    options,
+    new AbortController().signal,
+    request,
+  );
+  const body = JSON.parse(mockFetch.mock.calls[0][1].body);
+  expect(body.text).not.toMatch(/王小明|411123456|A123456789/);
+});
+
+test('cloud timeout falls back even if fetch never settles', async () => {
+  jest.useFakeTimers();
+  mockFetch.mockReturnValue(new Promise(() => {}));
+  const pending = runMobilePersonalImportAi(text, options, new AbortController().signal, request);
+  jest.advanceTimersByTime(25_000);
+  const result = await pending;
+  expect(result.rows).toHaveLength(1);
+  expect(result.issues.some((issue) => issue.message.includes('雲端整理等候逾時'))).toBe(true);
+});
+
+test('unsupported native runtime uses the rule parser after cloud quota exhaustion', async () => {
+  mockFetch.mockResolvedValue(response(429, {}));
+  jest.mocked(localLLM.getRuntimeAvailability).mockReturnValue({ available: false });
+  const result = await runMobilePersonalImportAi(
+    '課程名稱\t學分\t成績\n資料庫\t3\t85',
+    options,
+    new AbortController().signal,
+    request,
+  );
+  expect(result.rows[0]).toMatchObject({ title: '資料庫', credits: 3, grade: '85' });
+  expect(localLLM.generate).not.toHaveBeenCalled();
+  expect(result.issues.some((issue) => issue.message.includes('目前使用一般規則'))).toBe(true);
+});
+
+test('small Qwen model reserves space for the prompt and caps output at 512 tokens', async () => {
+  jest.mocked(localLLM.getLoadedModelId).mockReturnValue('qwen2.5-0.5b');
+  const result = await runMobilePersonalImportAi(text, options, new AbortController().signal);
+  expect(result.rows).toHaveLength(1);
+  expect(localLLM.generate).toHaveBeenCalledWith(expect.objectContaining({ maxTokens: 512 }));
+});
+
+test('cloud isolates a malformed later segment and retries only its unfinished source range', async () => {
+  const source =
+    '課程名稱,學分,成績\n' + Array.from({ length: 17 }, (_, index) => `課${index},3,85`).join('\n');
+  let failOne = true;
+  const sent: string[] = [];
+  mockFetch.mockImplementation(async (_url, init) => {
+    const body = JSON.parse(init.body);
+    sent.push(body.text);
+    const lines: string[] = body.text
+      .trimEnd()
+      .split('\n')
+      .filter((line: string) => /^課\d+,/u.test(line));
+    return response(200, {
+      sourceText: body.text,
+      columnContext: body.columnContext,
+      output:
+        failOne && lines.some((line) => line.startsWith('課8,'))
+          ? '{"complete":true,"rows":['
+          : JSON.stringify({
+              complete: true,
+              rows: lines.map((line) => ({
+                title: line.split(',')[0],
+                credits: 3,
+                grade: '85',
+                evidence: line,
+              })),
+            }),
+    });
+  });
+  const result = await runMobilePersonalImportAi(
+    source,
+    options,
+    new AbortController().signal,
+    request,
+  );
+  expect(result.rows).toHaveLength(16);
+  expect(result.rows.map((row) => row.title)).not.toContain('課8');
+  expect(result.retryBatches).toHaveLength(1);
+  expect(result.retryBatches![0].startLine).toBe(10);
+  expect(sent.filter((piece) => piece.includes('課0,'))).toHaveLength(1);
+  failOne = false;
+  const retried = await runMobilePersonalImportAi(source, options, new AbortController().signal, {
+    ...request,
+    retryBatches: result.retryBatches,
+  });
+  expect(retried.rows).toHaveLength(1);
+  expect(retried.rows[0]).toMatchObject({ title: '課8', source: { line: 10 } });
+  expect(localLLM.generate).not.toHaveBeenCalled();
+});
+
+test('whole-document masking protects a vertical name before paragraph segmentation', async () => {
+  mockFetch.mockResolvedValue(response(503, { code: 'disabled' }));
+  await runMobilePersonalImportAi(
+    `姓名\n\n王小明\n\n${text}`,
+    options,
+    new AbortController().signal,
+    request,
+  );
+  expect(mockFetch).toHaveBeenCalled();
+  expect(mockFetch.mock.calls.every(([, init]) => !init.body.includes('王小明'))).toBe(true);
+});
+
+test('unmasked local retry ranges cannot bypass whole-document identity masking', async () => {
+  await runMobilePersonalImportAi(
+    `姓名\n\n王小明\n\n${text}`,
+    options,
+    new AbortController().signal,
+    {
+      ...request,
+      retryBatches: [{ text: '王小明\n\n', startLine: 3 }],
+    },
+  );
+  expect(mockFetch).not.toHaveBeenCalled();
+});

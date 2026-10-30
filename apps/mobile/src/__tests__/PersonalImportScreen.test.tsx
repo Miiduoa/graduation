@@ -1027,7 +1027,7 @@ test('AI results remain drafts until source review and explicit save', async () 
   await waitFor(() => expect(view.queryByLabelText('讀取匯入紀錄')).toBeNull());
   prepareAi(view);
   expect(runMobilePersonalImportAi).not.toHaveBeenCalled();
-  fireEvent.press(view.getByText('讓本機 AI 整理'));
+  fireEvent.press(view.getByText('用 AI 整理文字'));
   await view.findByLabelText('已逐筆核對 AI 結果');
   expect(view.getByText(aiSource)).toBeTruthy();
   expect(jest.mocked(runMobilePersonalImportAi).mock.calls[0][1]).toMatchObject({
@@ -1049,7 +1049,7 @@ test('editing an AI field or changing selection requires a new acknowledgement',
   const view = render(<PersonalImportScreen />);
   await waitFor(() => expect(view.queryByLabelText('讀取匯入紀錄')).toBeNull());
   prepareAi(view);
-  fireEvent.press(view.getByText('讓本機 AI 整理'));
+  fireEvent.press(view.getByText('用 AI 整理文字'));
   await view.findByLabelText('已逐筆核對 AI 結果');
   fireEvent.press(view.getByLabelText('已逐筆核對 AI 結果'));
   fireEvent.press(view.getByText('編輯與連結課班'));
@@ -1070,7 +1070,7 @@ test('an AI failure preserves the original text and offers the existing parser',
     .mockRejectedValue(new Error('native error contains private source'));
   const view = render(<PersonalImportScreen />);
   prepareAi(view);
-  fireEvent.press(view.getByText('讓本機 AI 整理'));
+  fireEvent.press(view.getByText('用 AI 整理文字'));
   await view.findByText(/AI 未能完成這次整理/);
   expect(view.getByLabelText('貼上或修正原始文字').props.value).toBe(aiSource);
   expect(view.queryByText(/native error/)).toBeNull();
@@ -1089,7 +1089,7 @@ test('cancelled AI output cannot replace subsequently typed text', async () => {
   );
   const view = render(<PersonalImportScreen />);
   prepareAi(view);
-  fireEvent.press(view.getByText('讓本機 AI 整理'));
+  fireEvent.press(view.getByText('用 AI 整理文字'));
   fireEvent.press(view.getByText('取消 AI 整理'));
   expect(jest.mocked(runMobilePersonalImportAi).mock.calls[0][2].aborted).toBe(true);
   fireEvent.changeText(view.getByLabelText('貼上或修正原始文字'), '新的內容');
@@ -1111,7 +1111,7 @@ test.each(['學年度', '學期'])(
     );
     const view = render(<PersonalImportScreen />);
     prepareAi(view);
-    fireEvent.press(view.getByText('讓本機 AI 整理'));
+    fireEvent.press(view.getByText('用 AI 整理文字'));
     fireEvent.changeText(
       view.getByLabelText(
         field === '學年度' ? '這批資料的學年度（例如 115）' : '這批資料的學期（例如 1、2、暑期）',
@@ -1135,7 +1135,7 @@ test('an authentication refresh cancels AI work even if the same account returns
   );
   const view = render(<PersonalImportScreen />);
   prepareAi(view);
-  fireEvent.press(view.getByText('讓本機 AI 整理'));
+  fireEvent.press(view.getByText('用 AI 整理文字'));
   mockScope = null;
   view.rerender(<PersonalImportScreen />);
   expect(jest.mocked(runMobilePersonalImportAi).mock.calls[0][2].aborted).toBe(true);
@@ -1164,7 +1164,7 @@ test('oversize AI sources remain intact and do not start generation', async () =
   const view = render(<PersonalImportScreen />);
   const longText = '文'.repeat(1001);
   fireEvent.changeText(view.getByLabelText('貼上或修正原始文字'), longText);
-  fireEvent.press(view.getByText('讓本機 AI 整理'));
+  fireEvent.press(view.getByText('用 AI 整理文字'));
   expect(runMobilePersonalImportAi).not.toHaveBeenCalled();
   expect(view.getByLabelText('貼上或修正原始文字').props.value).toBe(longText);
   await act(async () => {});
@@ -1231,7 +1231,7 @@ test('correcting the exclusive end of an AI multi-day event clears that field er
   await waitFor(() => expect(view.queryByLabelText('讀取匯入紀錄')).toBeNull());
   fireEvent.press(view.getByText('行事曆'));
   fireEvent.changeText(view.getByLabelText('貼上或修正原始文字'), source);
-  fireEvent.press(view.getByText('讓本機 AI 整理'));
+  fireEvent.press(view.getByText('用 AI 整理文字'));
   await view.findByLabelText('已逐筆核對 AI 結果');
   fireEvent.press(view.getByLabelText('已逐筆核對 AI 結果'));
   fireEvent.press(view.getByText('確認新增 1 筆'));
@@ -1274,7 +1274,7 @@ test('original screenshot remains available after AI failure and is not saved wi
   fireEvent.press(view.getByText('選擇截圖'));
   const original = await view.findByLabelText('原始匯入截圖');
   expect(original.props.source).toEqual({ uri: 'file:///my-grades.png' });
-  fireEvent.press(view.getByText('讓本機 AI 整理'));
+  fireEvent.press(view.getByText('用 AI 整理文字'));
   await view.findByText(/AI 未能完成這次整理/);
   expect(view.getByLabelText('原始匯入截圖').props.source).toEqual({
     uri: 'file:///my-grades.png',
@@ -1463,4 +1463,49 @@ test('an overlong document selection is preserved and never silently truncated f
   expect(view.getByText('準備讀取：nonstandard.xlsx')).toBeTruthy();
   expect(view.getByText('☑ 修課紀錄')).toBeTruthy();
   expect((await loadPersonalImports(scope)).records).toHaveLength(0);
+});
+
+test('failed-range retry keeps edits made to completed rows', async () => {
+  readyAi();
+  const retrySource = '統計，學分 2，成績 91';
+  const first = { ...aiResult(), retryBatches: [{ text: retrySource, startLine: 2 }] };
+  jest.mocked(runMobilePersonalImportAi).mockResolvedValueOnce(first).mockImplementationOnce(async (_text, options) => {
+    const next = parsePersonalImportAiResponse(JSON.stringify({ complete: true, rows: [{ title: '統計', credits: 2, grade: '91', evidence: retrySource }] }), retrySource, options);
+    return { ...next, retryBatches: [] };
+  });
+  const view = render(<PersonalImportScreen />);
+  prepareAi(view);
+  fireEvent.changeText(view.getByLabelText('貼上或修正原始文字'), `${aiSource}\n${retrySource}`);
+  fireEvent.press(view.getByText('用 AI 整理文字'));
+  await view.findByLabelText('已逐筆核對 AI 結果');
+  fireEvent.press(view.getByText('編輯與連結課班'));
+  fireEvent.changeText(view.getByLabelText('成績'), '90');
+  fireEvent.press(view.getByText('重試未完成段落'));
+  await waitFor(() => expect(runMobilePersonalImportAi).toHaveBeenCalledTimes(2));
+  await view.findByText('確認新增 2 筆');
+  expect(jest.mocked(runMobilePersonalImportAi).mock.calls[1][3]?.retryBatches).toEqual(first.retryBatches);
+  fireEvent.press(view.getAllByText('編輯與連結課班')[0]);
+  expect(view.getByLabelText('成績').props.value).toBe('90');
+});
+
+test('completed progress is restored after leaving the screen before the next batch finishes', async () => {
+  readyAi();
+  let finish!: () => void;
+  jest.mocked(runMobilePersonalImportAi).mockImplementation((_text, _options, _signal, request) => {
+    request?.onProgress?.({ ...aiResult(), retryBatches: [{ text: '尚未完成的課程', startLine: 2 }] });
+    return new Promise((resolve) => { finish = () => resolve(aiResult()); });
+  });
+  const view = render(<PersonalImportScreen />);
+  prepareAi(view);
+  fireEvent.changeText(view.getByLabelText('貼上或修正原始文字'), `${aiSource}\n尚未完成的課程`);
+  fireEvent.press(view.getByText('用 AI 整理文字'));
+  await view.findByLabelText('已逐筆核對 AI 結果');
+  view.unmount();
+  const restored = render(<PersonalImportScreen />);
+  await restored.findByText('已恢復上次完成的待核對草稿；未完成段落可以重試。');
+  expect(restored.getByLabelText('貼上或修正原始文字').props.value).toBe(`${aiSource}\n尚未完成的課程`);
+  expect(restored.getByText('重試未完成段落')).toBeTruthy();
+  expect(restored.getByText('確認新增 1 筆')).toBeTruthy();
+  await act(async () => finish());
+  expect(restored.getByText('確認新增 1 筆')).toBeTruthy();
 });

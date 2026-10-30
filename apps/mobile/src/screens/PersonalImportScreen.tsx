@@ -83,8 +83,13 @@ import {
   MOBILE_IMPORT_AI_MAX_CHARACTERS,
   runMobilePersonalImportAi,
   subscribeMobileImportAi,
+  type MobileImportAiResult,
 } from '../services/imports/personalImportAi';
 import AIModelManagerScreen from './AIModelManagerScreen';
+import {
+  loadPersonalImportDraft,
+  savePersonalImportDraft,
+} from '../services/imports/personalImportDraft';
 
 const DOCUMENT_PREVIEW_ROWS = 6;
 
@@ -308,8 +313,13 @@ function ImportWorkspace({
   const [loadError, setLoadError] = useState('');
   const [notice, setNotice] = useState('');
   const [busy, setBusy] = useState(false);
-  const [aiState, setAiState] = useState(getMobileImportAiAvailability);
+  const [aiState, setAiState] = useState(() => getMobileImportAiAvailability(!!session));
   const [aiRunning, setAiRunning] = useState(false);
+  const [aiRetry, setAiRetry] = useState<{
+    text: string;
+    source: typeof source;
+    batches: NonNullable<MobileImportAiResult['retryBatches']>;
+  } | null>(null);
   const [aiReviewed, setAiReviewed] = useState(false);
   const [modelManagerOpen, setModelManagerOpen] = useState(false);
   const [reviewFilter, setReviewFilter] = useState<'all' | 'attention'>('all');
@@ -372,11 +382,11 @@ function ImportWorkspace({
     setAiRunning(false);
   };
   useEffect(() => {
-    const update = () => setAiState(getMobileImportAiAvailability());
+    const update = () => setAiState(getMobileImportAiAvailability(!!session));
     const unsubscribe = subscribeMobileImportAi(update);
     update();
     return unsubscribe;
-  }, []);
+  }, [session]);
   useEffect(() => {
     if (!available) {
       generation.current += 1;
@@ -400,6 +410,79 @@ function ImportWorkspace({
       clearDocumentSource();
     };
   }, []);
+
+  const draftLoaded = useRef(false);
+  useEffect(() => {
+    let open = true;
+    const run = generation.current;
+    void loadPersonalImportDraft(scope)
+      .then((draft) => {
+        if (!open || !draft || generation.current !== run) return;
+        setKind(draft.options.kind);
+        setYear(draft.options.academicYear);
+        setSemester(draft.options.semester);
+        setText(draft.text);
+        setSource(draft.options.source ?? { type: 'paste' });
+        setRows(draft.rows);
+        setIssues(draft.issues);
+        setSelected(new Set(draft.rows.map((row) => row.id)));
+        setAiReviewed(false);
+        setAiRetry(
+          draft.retryBatches.length
+            ? {
+                text: draft.text,
+                source: draft.options.source ?? { type: 'paste' },
+                batches: draft.retryBatches,
+              }
+            : null,
+        );
+        setNotice('已恢復上次完成的待核對草稿；未完成段落可以重試。');
+      })
+      .catch(() => {
+        if (open && generation.current === run)
+          setNotice('讀不到上次未完成的草稿，這次仍可重新整理。已儲存資料沒有變更。');
+      })
+      .finally(() => {
+        draftLoaded.current = true;
+      });
+    return () => {
+      open = false;
+    };
+  }, [owner, schoolId]);
+  useEffect(() => {
+    if (!draftLoaded.current || aiRunning) return;
+    const draftRun = generation.current;
+    const hasDraft =
+      rows.length > 0 && (aiRetry || issues.some((issue) => issue.code.startsWith('ai-')));
+    void savePersonalImportDraft(
+      scope,
+      hasDraft
+        ? {
+            text,
+            options: { kind, schoolId, academicYear, semester, source, periodProfile: profile },
+            rows,
+            issues,
+            retryBatches: aiRetry?.text === text ? aiRetry.batches : [],
+          }
+        : null,
+    ).catch(() => {
+      if (alive.current && generation.current === draftRun)
+        setNotice('目前草稿仍保留在畫面上，但無法保存到裝置。離開前請先完成核對；稍後可重試。');
+    });
+  }, [
+    owner,
+    schoolId,
+    kind,
+    academicYear,
+    semester,
+    source,
+    text,
+    rows,
+    issues,
+    aiRetry,
+    aiRunning,
+    profile,
+  ]);
 
   const load = useCallback(async () => {
     const run = ++ledgerGeneration.current;
@@ -516,6 +599,7 @@ function ImportWorkspace({
     text: string;
     source: { type: 'paste' | 'file' | 'screenshot'; name?: string };
     fromDocument?: boolean;
+    retry?: boolean;
   }) => {
     const inputText = input?.text ?? text;
     const inputSource = input?.source ?? source;
@@ -523,7 +607,7 @@ function ImportWorkspace({
       !active() ||
       busy ||
       savingRef.current ||
-      (!input?.fromDocument && rows.length) ||
+      (!input?.fromDocument && !input?.retry && rows.length) ||
       !inputText.trim()
     )
       return;
@@ -534,23 +618,102 @@ function ImportWorkspace({
     setBusy(true);
     setAiRunning(true);
     setAiReviewed(false);
-    setNotice('本機 AI 正在整理文字、對照來源，完成後仍需由你核對。');
+    setNotice(
+      session
+        ? '優先使用雲端 AI；送出前會遮蔽可辨識的姓名、學號與身分證號。'
+        : '正在使用本機模型或一般規則整理，資料留在這台手機。',
+    );
     try {
       const parsed = await runMobilePersonalImportAi(
         inputText,
         { kind, schoolId, academicYear, semester, source: inputSource, periodProfile: profile },
         controller.signal,
+        {
+          platformContext: session?.context,
+          retryBatches: input?.retry ? aiRetry?.batches : undefined,
+          onProgress: (partial) => {
+            if (!current(run) || controller.signal.aborted) return;
+            const partialRows = input?.retry ? [...rows, ...partial.rows] : partial.rows;
+            const partialIssues = input?.retry
+              ? [
+                  ...issues.filter(
+                    (issue) => !['ai-batch-failed', 'ai-processing-mode'].includes(issue.code),
+                  ),
+                  ...partial.issues,
+                ]
+              : partial.issues;
+            setRows(partialRows);
+            setIssues(partialIssues);
+            setSelected(new Set(partialRows.map((row) => row.id)));
+            setAiRetry(
+              partial.retryBatches?.length
+                ? { text: inputText, source: inputSource, batches: partial.retryBatches }
+                : null,
+            );
+            void savePersonalImportDraft(scope, {
+              text: inputText,
+              options: {
+                kind,
+                schoolId,
+                academicYear,
+                semester,
+                source: inputSource,
+                periodProfile: profile,
+              },
+              rows: partialRows,
+              issues: partialIssues,
+              retryBatches: partial.retryBatches ?? [],
+            }).catch(() => {
+              if (current(run))
+                setNotice(
+                  '已完成的結果仍保留在畫面上，但無法保存草稿。離開前請先完成核對；稍後可重試。',
+                );
+            });
+          },
+        },
       );
       if (!current(run) || controller.signal.aborted) return;
-      if (!parsed.rows.length) throw new Error('沒有可核對的資料。');
+      setAiRetry(
+        parsed.retryBatches?.length
+          ? { text: inputText, source: inputSource, batches: parsed.retryBatches }
+          : null,
+      );
+      if (!parsed.rows.length) {
+        setNotice(
+          parsed.issues
+            .filter((issue) => !issue.rowId)
+            .map((issue) => issue.message)
+            .join(' ') || '沒有找到可核對的資料，請重試或使用一般整理。',
+        );
+        return;
+      }
       const validationKeys = new Set(
         parsed.rows
           .flatMap((row) => validatePersonalImportRow(row, { periodProfile: profile }))
           .map((issue) => JSON.stringify(issue)),
       );
-      setRows(parsed.rows);
-      setSelected(new Set(parsed.rows.map((row) => row.id)));
-      setIssues(parsed.issues.filter((issue) => !validationKeys.has(JSON.stringify(issue))));
+      const nextRows = input?.retry ? [...rows, ...parsed.rows] : parsed.rows;
+      setRows(nextRows);
+      setSelected(
+        new Set(
+          input?.retry
+            ? [...selected, ...parsed.rows.map((row) => row.id)]
+            : parsed.rows.map((row) => row.id),
+        ),
+      );
+      const nextIssues = parsed.issues.filter(
+        (issue) => !validationKeys.has(JSON.stringify(issue)),
+      );
+      setIssues(
+        input?.retry
+          ? [
+              ...issues.filter(
+                (issue) => !['ai-batch-failed', 'ai-processing-mode'].includes(issue.code),
+              ),
+              ...nextIssues,
+            ]
+          : nextIssues,
+      );
       setVisibleRowCount(50);
       setReviewFilter('all');
       setExpanded(null);
@@ -565,7 +728,7 @@ function ImportWorkspace({
       }
       setNotice(
         parsed.rows.length
-          ? `AI 已整理 ${parsed.rows.length} 筆待核對資料。請對照原文，修正缺漏並確認，才會新增。`
+          ? `已整理 ${nextRows.length} 筆待核對資料。${parsed.retryBatches?.length ? '未完成的段落可重試，完成的結果已保留。' : ''}請對照原文確認後再新增。`
           : 'AI 沒有整理出可核對的資料，原文仍保留。可縮短內容重試，或使用一般整理。',
       );
     } catch {
@@ -575,12 +738,12 @@ function ImportWorkspace({
       if (current(run)) {
         setBusy(false);
         setAiRunning(false);
-        setAiState(getMobileImportAiAvailability());
+        setAiState(getMobileImportAiAvailability(!!session));
       }
     }
   };
   const organizeDocumentWithAi = () => {
-    if (!documentPrep || !active() || busy || savingRef.current || aiState.status !== 'ready')
+    if (!documentPrep || !active() || busy || savingRef.current || aiState.status === 'busy')
       return;
     try {
       const input = personalImportDocumentAiSource(
@@ -617,6 +780,7 @@ function ImportWorkspace({
       setBackupPreview(null);
       setVisibleRowCount(50);
       setRows(parsed.rows);
+      setAiRetry(null);
       setSelected(new Set(parsed.rows.map((row) => row.id)));
       // Parser errors (including unsupported calendar recurrence) survive field editing.
       // Only current row validation is recalculated from the editable values below.
@@ -673,6 +837,7 @@ function ImportWorkspace({
       setDocumentPrep(null);
       setBackupPreview(null);
       setRows([]);
+      setAiRetry(null);
       setIssues([]);
       setNotice(
         result.trim()
@@ -757,6 +922,7 @@ function ImportWorkspace({
       clearSourceImage();
       setBackupPreview(null);
       setRows([]);
+      setAiRetry(null);
       setIssues([]);
       if (/\.ics$/i.test(name)) setKind('events');
       setNotice(`已讀取 ${name}，請核對內容後整理。`);
@@ -893,6 +1059,7 @@ function ImportWorkspace({
       clearSourceImage();
       setVisibleRowCount(50);
       setRows(parsedRows);
+      setAiRetry(null);
       setSelected(new Set(parsedRows.map((row) => row.id)));
       setIssues(parsedIssues.filter((issue) => !validationKeys.has(JSON.stringify(issue))));
       setExpanded(parsedRows[0]?.id || null);
@@ -938,6 +1105,7 @@ function ImportWorkspace({
       setDocumentPrep(null);
       setText('');
       setRows(restored);
+      setAiRetry(null);
       clearSourceImage();
       setSelected(new Set(restored.map((row) => row.id)));
       setIssues([]);
@@ -1005,6 +1173,7 @@ function ImportWorkspace({
       setLedger(result.ledger);
       setBackupPreview(null);
       setRows([]);
+      setAiRetry(null);
       setSelected(new Set());
       setIssues([]);
       setExpanded(null);
@@ -1216,6 +1385,7 @@ function ImportWorkspace({
                 onPress={() => {
                   cancel();
                   setKind(value);
+                  setAiRetry(null);
                   setAiReviewed(false);
                   setReviewFilter('all');
                   setSchoolPage(null);
@@ -1223,6 +1393,7 @@ function ImportWorkspace({
                   setDocumentPrep(null);
                   if (!backupPreview) {
                     setRows([]);
+                    setAiRetry(null);
                     setIssues([]);
                   }
                   setEditing(null);
@@ -1262,6 +1433,7 @@ function ImportWorkspace({
                 onPress={() => {
                   setBackupPreview(null);
                   setRows([]);
+                  setAiRetry(null);
                   setIssues([]);
                   setSelected(new Set());
                   setNotice('已取消預覽，原有資料沒有變更。');
@@ -1396,15 +1568,13 @@ function ImportWorkspace({
                   gap: 10,
                 }}
               >
-                <Text style={{ ...textStyle, fontWeight: '600' }}>
-                  欄位不規則？交給本機 AI 整理
-                </Text>
+                <Text style={{ ...textStyle, fontWeight: '600' }}>欄位不規則？交給 AI 整理</Text>
                 <Text accessibilityLiveRegion="polite" style={{ color: theme.colors.text }}>
                   {aiState.title}
                 </Text>
                 <Text style={{ color: theme.colors.muted, lineHeight: 22 }}>
-                  AI 會從選取的起始列理解文字，不必先辨認標準欄位名稱。一次最多 1,000
-                  字；失敗或取消會保留文件與選取範圍。
+                  AI
+                  會從選取的起始列理解文字，長內容會自動分段。失敗段落可重試，已完成的結果會保留。
                 </Text>
                 <Button
                   text="用 AI 整理選取內容"
@@ -1412,7 +1582,7 @@ function ImportWorkspace({
                   disabled={
                     busy ||
                     saving ||
-                    aiState.status !== 'ready' ||
+                    aiState.status === 'busy' ||
                     !Object.keys(documentPrep.selections).length
                   }
                   onPress={organizeDocumentWithAi}
@@ -1440,6 +1610,7 @@ function ImportWorkspace({
                   if (busy) cancel();
                   setYear(value);
                   setRows([]);
+                  setAiRetry(null);
                   setIssues([]);
                   setAiReviewed(false);
                 }}
@@ -1452,6 +1623,7 @@ function ImportWorkspace({
                   if (busy) cancel();
                   setSemester(value);
                   setRows([]);
+                  setAiRetry(null);
                   setIssues([]);
                   setAiReviewed(false);
                 }}
@@ -1498,7 +1670,7 @@ function ImportWorkspace({
                 >
                   <Text style={{ color: theme.colors.text, fontWeight: '600' }}>手機裡的截圖</Text>
                   <Text style={{ color: theme.colors.muted, lineHeight: 21 }}>
-                    讀出文字後，再讓本機 AI 協助整理。
+                    讀出文字後，再讓 AI 協助整理。
                   </Text>
                   <Button text="選擇截圖" onPress={pickImage} disabled={busy || saving} />
                 </View>
@@ -1558,6 +1730,7 @@ function ImportWorkspace({
                         }
                         setSource({ type: 'file', name: schoolPage.name });
                         setRows([]);
+                        setAiRetry(null);
                         setIssues([]);
                         setBackupPreview(null);
                         setSchoolPage(null);
@@ -1587,11 +1760,13 @@ function ImportWorkspace({
                 onChangeText={(value) => {
                   if (busy) cancel();
                   setText(value);
+                  setAiRetry(null);
                   if (!value || source.type !== 'screenshot') {
                     setSource({ type: 'paste' });
                     clearSourceImage();
                   }
                   setRows([]);
+                  setAiRetry(null);
                   setIssues([]);
                   setAiReviewed(false);
                 }}
@@ -1625,7 +1800,9 @@ function ImportWorkspace({
                   }}
                 >
                   <Text style={{ ...textStyle, fontWeight: '700' }}>用免費 AI 整理文字</Text>
-                  <Text style={{ color: theme.colors.muted, fontSize: 12 }}>在手機執行</Text>
+                  <Text style={{ color: theme.colors.muted, fontSize: 12 }}>
+                    雲端優先・本機備援
+                  </Text>
                 </View>
                 <Text
                   accessibilityLiveRegion="polite"
@@ -1650,12 +1827,12 @@ function ImportWorkspace({
                   字 · 較長內容請分批，不會自動刪去後段。
                 </Text>
                 <Button
-                  text={aiRunning ? 'AI 正在整理…' : '讓本機 AI 整理'}
+                  text={aiRunning ? 'AI 正在整理…' : '用 AI 整理文字'}
                   kind="primary"
                   disabled={
                     !text.trim() ||
                     text.length > MOBILE_IMPORT_AI_MAX_CHARACTERS ||
-                    aiState.status !== 'ready' ||
+                    aiState.status === 'busy' ||
                     busy ||
                     saving ||
                     rows.length > 0
@@ -1670,6 +1847,15 @@ function ImportWorkspace({
                   onPress={() => setModelManagerOpen(true)}
                 />
               </View>
+              {aiRetry && aiRetry.text === text ? (
+                <Button
+                  text="重試未完成段落"
+                  disabled={busy || saving || aiState.status === 'busy'}
+                  onPress={() =>
+                    void organizeWithAi({ text: aiRetry.text, source: aiRetry.source, retry: true })
+                  }
+                />
+              ) : null}
               <Button
                 text="整理成可編輯資料"
                 kind="outline"
@@ -1821,10 +2007,13 @@ function ImportWorkspace({
                   }}
                 >
                   <Pressable
-                    disabled={saving}
+                    disabled={saving || aiRunning}
                     accessibilityRole="checkbox"
                     accessibilityLabel={`匯入 ${row.title || '未命名資料'}`}
-                    accessibilityState={{ checked: selected.has(row.id), disabled: saving }}
+                    accessibilityState={{
+                      checked: selected.has(row.id),
+                      disabled: saving || aiRunning,
+                    }}
                     style={{ minHeight: 44, justifyContent: 'center' }}
                     onPress={() => {
                       setAiReviewed(false);
@@ -1901,7 +2090,7 @@ function ImportWorkspace({
                   />
                   {expanded === row.id ? (
                     <RowEditor
-                      disabled={saving}
+                      disabled={saving || aiRunning}
                       row={row}
                       workspaces={workspaces}
                       periodProfile={profile}
