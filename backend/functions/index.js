@@ -95,6 +95,10 @@ const {
   puFetchCreditSummary,
 } = require('./puScraper');
 const {
+  PU_ECAMPUS_DATA_PAUSED_CODE,
+  PU_ECAMPUS_DATA_PAUSED_MESSAGE,
+} = require('./generated/shared/puEcampusDataPolicy');
+const {
   tcLogin,
   tcFetchCourses,
   tcFetchModules,
@@ -1822,6 +1826,14 @@ exports.signInPuStudentId = onRequest(
       });
 
       const loginResult = await puLogin(rawStudentId, password);
+      if (loginResult.code === PU_ECAMPUS_DATA_PAUSED_CODE) {
+        res.set('Cache-Control', 'no-store');
+        res.status(503).json({
+          error: PU_ECAMPUS_DATA_PAUSED_MESSAGE,
+          code: PU_ECAMPUS_DATA_PAUSED_CODE,
+        });
+        return;
+      }
       if (
         !loginResult.success ||
         !loginResult.cookies ||
@@ -5248,6 +5260,11 @@ exports.puAuthenticate = onCall(
 
       const loginResult = await puLogin(uid, upassword);
 
+      if (loginResult.code === PU_ECAMPUS_DATA_PAUSED_CODE) {
+        throw new HttpsError('unavailable', PU_ECAMPUS_DATA_PAUSED_MESSAGE, {
+          code: PU_ECAMPUS_DATA_PAUSED_CODE,
+        });
+      }
       if (!loginResult.success) {
         throw new HttpsError('authentication-failed', loginResult.error || 'Login failed');
       }

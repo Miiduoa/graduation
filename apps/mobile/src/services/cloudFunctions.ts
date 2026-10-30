@@ -91,8 +91,7 @@ export function getCloudFunctionUrl(functionName: string): string {
   return `${getCloudFunctionBaseUrl()}/${functionName}`;
 }
 
-/** 僅用於未部署端點的 404；本機測試不得把輸入的校務帳密送到正式服務。 */
-export function canUseHostedSchoolFallback(primaryUrl: string): boolean {
+function isHostedSchoolEndpointEligible(primaryUrl: string): boolean {
   const extra = getExpoExtra();
   const projectId = getProjectId(extra);
   if (shouldUseEmulator(extra, projectId)) return false;
@@ -111,6 +110,19 @@ export function canUseHostedSchoolFallback(primaryUrl: string): boolean {
   } catch {
     return false;
   }
+}
+
+/** 僅用於未部署端點的 404；本機測試不得把輸入的校務帳密送到正式服務。 */
+export function canUseHostedSchoolFallback(primaryUrl: string): boolean {
+  return isHostedSchoolEndpointEligible(primaryUrl);
+}
+
+/** 學分累計目前由 Web 提供；符合正式校務條件時直接選擇支援此資料類型的端點。 */
+export function getSchoolCreditOverviewUrl(): string {
+  const configuredUrl = getCloudFunctionUrl('getMyAcademicRecords');
+  return isHostedSchoolEndpointEligible(configuredUrl)
+    ? 'https://nuni.tw/api/fn/getMyAcademicRecords'
+    : configuredUrl;
 }
 
 export async function getFirebaseAuthHeaders(): Promise<Record<string, string>> {

@@ -9,11 +9,13 @@ import {
   type AcademicSnapshot,
 } from '@/lib/academicClient';
 import { normalizeCourseRecords, normalizeGradeRecords } from '@/lib/academicRecords';
+import { loadSchoolCreditOverview } from '@/lib/schoolCreditOverview';
+import type { PuCreditOverviewSnapshot } from '@campus/shared/src/puCreditOverview';
 
 const account = vi.hoisted(() => ({
   user: { uid: 'one' } as { uid: string } | null,
   loading: false,
-  error: null,
+  error: null as Error | null,
   studentId: true,
 }));
 const browse = vi.hoisted(() => ({
@@ -65,6 +67,7 @@ vi.mock('@/lib/academicClient', async (original) => ({
   ...(await original<typeof import('@/lib/academicClient')>()),
   loadAcademicRecords: vi.fn(),
 }));
+vi.mock('@/lib/schoolCreditOverview', () => ({ loadSchoolCreditOverview: vi.fn() }));
 vi.mock('@/components/imports/PersonalImportSummary', () => ({
   PersonalImportSummary: () => (
     <section aria-label="自行匯入的資料">個人匯入入口</section>
@@ -159,6 +162,18 @@ function grades(uid = 'one', name = '真實來源科目'): AcademicSnapshot<'gra
   };
 }
 
+function schoolCreditOverview(uid = 'one', subtotal = 71.5): PuCreditOverviewSnapshot {
+  return {
+    ownerUid: uid, schoolId: 'pu', fetchedAt: '2026-10-28T00:00:00.000Z',
+    overview: {
+      version: 1, source: 'pu-credit-review',
+      totals: { required: 40.5, elective: 20, externalElective: 3, generalOld: 0,
+        generalNew: 8, subtotal, totalRequired: 128, minorDouble: null },
+      coverage: { status: 'partial', missingFields: ['minorDouble'] },
+    },
+  };
+}
+
 function setBrowse(
   schoolId: string | null,
   extras?: Partial<typeof browse> & { search?: string },
@@ -182,10 +197,12 @@ beforeEach(() => {
   vi.clearAllMocks();
   account.user = { uid: 'one' };
   account.loading = false;
+  account.error = null;
   account.studentId = true;
   navigation.path = '/grades';
   setBrowse('pu');
   vi.mocked(loadAcademicRecords).mockResolvedValue(grades());
+  vi.mocked(loadSchoolCreditOverview).mockImplementation(async (uid) => schoolCreditOverview(uid));
   timetableApi.loadPersonalTimetable.mockResolvedValue(emptyTimetable());
   timetableApi.savePersonalTimetable.mockResolvedValue({ stored: 'local' });
 });
@@ -280,7 +297,7 @@ it('displays school averages and rankings separately from calculated figures and
   expect(source.getAllByText('未提供')).toHaveLength(3);
 });
 
-it('keeps unknown official graduation credits separate from the derived passed-credit total', async () => {
+it('keeps school trial-balance totals separate from grade-derived credits and manual graduation planning', async () => {
   navigation.path = '/credit-planner';
   const snapshot = grades();
   snapshot.records.creditSummary = {
@@ -290,10 +307,77 @@ it('keeps unknown official graduation credits separate from the derived passed-c
   render(<CreditPlannerPage />);
   const result = within(await screen.findByRole('region', { name: '學分讀取結果' }));
   expect(result.getByText('0')).toBeTruthy();
-  expect(result.getByText('尚未取得')).toBeTruthy();
   expect(result.getByText(/以 60 分或通過判斷/)).toBeTruthy();
+  const school = within(await screen.findByRole('region', { name: '校方學分試算總覽' }));
+  expect(await school.findByText('71.5 學分')).toBeTruthy();
+  expect(school.getByText('128 學分')).toBeTruthy();
+  expect(school.getByText(/不等於畢業採計/)).toBeTruthy();
   expect((screen.getByLabelText('已確認可採計學分（自行填寫）') as HTMLInputElement).value).toBe('');
 });
+
+it('reads the school credit overview even when transcript retrieval fails', async () => {
+  navigation.path = '/credit-planner';
+  vi.mocked(loadAcademicRecords).mockRejectedValue(new AcademicConnectionError('unavailable'));
+  render(<CreditPlannerPage />);
+  expect(await screen.findByText('暫時無法讀取學校資料')).toBeTruthy();
+  expect(await screen.findByText('71.5 學分')).toBeTruthy();
+  expect(loadSchoolCreditOverview).toHaveBeenCalledWith('one', 'pu');
+  expect(screen.getByLabelText('已確認可採計學分（自行填寫）')).toBeTruthy();
+});
+
+it('gates the credit overview on a settled signed-in account and supported school', async () => {
+  navigation.path = '/credit-planner';
+  account.user = null;
+  const view = render(<CreditPlannerPage />);
+  expect(screen.queryByRole('region', { name: '校方學分試算總覽' })).toBeNull();
+  account.user = { uid: 'one' };
+  account.loading = true;
+  view.rerender(<CreditPlannerPage />);
+  expect(screen.queryByRole('region', { name: '校方學分試算總覽' })).toBeNull();
+  account.loading = false;
+  setBrowse('nthu');
+  view.rerender(<CreditPlannerPage />);
+  expect(screen.queryByRole('region', { name: '校方學分試算總覽' })).toBeNull();
+  expect(loadSchoolCreditOverview).not.toHaveBeenCalled();
+  setBrowse('pu');
+  view.rerender(<CreditPlannerPage />);
+  expect(await screen.findByText('71.5 學分')).toBeTruthy();
+  account.user = null;
+  view.rerender(<CreditPlannerPage />);
+  expect(screen.queryByText('71.5 學分')).toBeNull();
+});
+
+it.each(['loading', 'error'])(
+  'removes school credit totals during auth %s and discards a pending update before recovery',
+  async (condition) => {
+    navigation.path = '/credit-planner';
+    const view = render(<CreditPlannerPage />);
+    await screen.findByText('71.5 學分');
+    let finishOld!: (value: PuCreditOverviewSnapshot) => void;
+    vi.mocked(loadSchoolCreditOverview).mockImplementationOnce(() => new Promise((resolve) => { finishOld = resolve; }));
+    fireEvent.click(screen.getByRole('button', { name: '更新學分累計' }));
+    expect(screen.getByText('71.5 學分')).toBeTruthy();
+
+    if (condition === 'loading') account.loading = true;
+    else account.error = new Error('authentication unavailable');
+    view.rerender(<CreditPlannerPage />);
+    expect(screen.queryByRole('region', { name: '校方學分試算總覽' })).toBeNull();
+    expect(screen.queryByText('71.5 學分')).toBeNull();
+    await act(async () => { finishOld(schoolCreditOverview('one', 74.5)); });
+    expect(screen.queryByRole('region', { name: '校方學分試算總覽' })).toBeNull();
+    expect(screen.queryByText('74.5 學分')).toBeNull();
+    expect(loadSchoolCreditOverview).toHaveBeenCalledTimes(2);
+
+    vi.mocked(loadSchoolCreditOverview).mockResolvedValueOnce(schoolCreditOverview('one', 92));
+    account.loading = false;
+    account.error = null;
+    view.rerender(<CreditPlannerPage />);
+    expect(await screen.findByText('92 學分')).toBeTruthy();
+    expect(screen.queryByText('71.5 學分')).toBeNull();
+    expect(screen.queryByText('74.5 學分')).toBeNull();
+    expect(loadSchoolCreditOverview).toHaveBeenCalledTimes(3);
+  },
+);
 
 it('does not represent a missing credit summary as zero and can clear grade filters', async () => {
   navigation.path = '/credit-planner';

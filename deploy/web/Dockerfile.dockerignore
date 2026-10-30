@@ -14,6 +14,7 @@
 !packages/shared/
 !packages/shared/**
 !scripts/
+!scripts/build-functions-shared.cjs
 !scripts/import-ai/
 !scripts/import-ai/**
 !backend/
@@ -23,6 +24,7 @@
 !backend/functions/lib/
 !backend/functions/lib/puGradeDocument.js
 !backend/functions/lib/puCreditSummary.js
+!backend/functions/lib/puCreditOverview.js
 !backend/functions/lib/puCourseTime.js
 !backend/functions/lib/taipeiDay.js
 !backend/functions/lib/puSessionStore.js

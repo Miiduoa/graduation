@@ -29,11 +29,35 @@ const data: CourseHubData = {
 };
 const route = { params: { groupId: 'course-a', groupName: '過時的課名' } };
 beforeEach(() => {
+  // The fixtures cover Oct 20 overdue work, Oct 29 weekly work and Nov 10 future work.
+  jest.useFakeTimers({
+    now: new Date('2026-10-28T12:00:00+08:00'),
+    // Freeze Date only so React Native rendering and async queries keep their real timers.
+    doNotFake: [
+      'hrtime',
+      'nextTick',
+      'performance',
+      'queueMicrotask',
+      'requestAnimationFrame',
+      'cancelAnimationFrame',
+      'requestIdleCallback',
+      'cancelIdleCallback',
+      'setImmediate',
+      'clearImmediate',
+      'setInterval',
+      'clearInterval',
+      'setTimeout',
+      'clearTimeout',
+    ],
+  });
   jest.clearAllMocks();
   mockUser = { uid: 'alice' };
   mockSchool = { id: 'pu' };
   jest.mocked(loadCourseHub).mockResolvedValue(data);
   jest.mocked(webBrowserOpenWithPuTronClassGate).mockResolvedValue(true);
+});
+afterEach(() => {
+  jest.useRealTimers();
 });
 test('uses real course name with scoped useful actions and no invented outcomes', async () => {
   const navigation = { navigate: jest.fn() };

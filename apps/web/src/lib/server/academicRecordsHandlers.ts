@@ -1,5 +1,10 @@
 import type { CallableRequest } from './groupInviteHandlers';
 import { HttpsError } from './httpsError';
+import { normalizePuCreditOverview } from '@campus/shared/src/puCreditOverview';
+import {
+  PU_ECAMPUS_DATA_PAUSED_CODE,
+  PU_ECAMPUS_DATA_PAUSED_MESSAGE,
+} from '@campus/shared/src/puEcampusDataPolicy';
 import {
   deleteOwnedPuSessions,
   persistOwnedMypuCookies,
@@ -49,6 +54,7 @@ export type AcademicFetchers = {
     semester: string,
     options?: AcademicGradeOptions,
   ) => Promise<unknown>;
+  creditOverview?: (cookies: Record<string, string>, semester: string) => Promise<unknown>;
 };
 
 function record(value: unknown): RecordData {
@@ -83,6 +89,9 @@ function unavailable(): never {
 }
 
 function publicResult(kind: keyof AcademicFetchers, result: RecordData): RecordData {
+  if (kind === 'creditOverview') {
+    return { success: true, creditOverview: result.creditOverview };
+  }
   return publicCampusDataResult(kind, result) as RecordData;
 }
 
@@ -116,9 +125,9 @@ export function createAcademicRecordsHandler({
     }
     const data = record(request.data);
     const kind = data.dataType;
-    if (typeof kind !== 'string' || !['courses', 'grades'].includes(kind) ||
+    if (typeof kind !== 'string' || !['courses', 'grades', 'creditOverview'].includes(kind) ||
       Object.keys(data).some((key) => key !== 'dataType')) {
-      throw new HttpsError('invalid-argument', '請選擇課表或成績資料。');
+      throw new HttpsError('invalid-argument', '請選擇課表、成績或學分累計。');
     }
     const dataType = kind as keyof AcademicFetchers;
     try {
@@ -135,14 +144,26 @@ export function createAcademicRecordsHandler({
       if (!selected || !session || session.ownerUid !== uid || !cookies ||
         !(schoolSessionExpiry(session.expiresAt) > now())) reconnect();
 
+      const fetcher = fetchers[dataType];
+      if (!fetcher) unavailable();
       const storedMypu = schoolSessionCookies(session.mypuCookies);
       const result = record(
         dataType === 'grades'
           ? await fetchers.grades(cookies, '', { mypuCookies: storedMypu })
-          : await fetchers.courses(cookies, ''),
+          : await fetcher(cookies, ''),
       );
+      if (result.code === PU_ECAMPUS_DATA_PAUSED_CODE) {
+        throw new HttpsError('unavailable', PU_ECAMPUS_DATA_PAUSED_MESSAGE, {
+          code: PU_ECAMPUS_DATA_PAUSED_CODE,
+        });
+      }
       if (result.code === 'session-expired') reconnect();
-      if (result.success !== true || !Array.isArray(result[dataType])) unavailable();
+      if (result.success !== true) unavailable();
+      if (dataType === 'creditOverview') {
+        const overview = normalizePuCreditOverview(result.creditOverview);
+        if (!overview) unavailable();
+        result.creditOverview = overview;
+      } else if (!Array.isArray(result[dataType])) unavailable();
       const nextMypu = dataType === 'grades' ? schoolSessionCookies(result.mypuCookies) : null;
       if (nextMypu) {
         await persistOwnedMypuCookies(db, selected.ref, uid, nextMypu);

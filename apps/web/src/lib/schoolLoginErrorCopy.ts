@@ -3,6 +3,10 @@ import {
   TEACHER_LMS_UNAVAILABLE_COPY,
   isTeacherLmsUnavailableNotice,
 } from '@campus/shared/src/schoolLogin';
+import {
+  PU_ECAMPUS_DATA_PAUSED_CODE,
+  PU_ECAMPUS_DATA_PAUSED_MESSAGE,
+} from '@campus/shared/src/puEcampusDataPolicy';
 
 export const SCHOOL_LOGIN_GENERIC_ERROR = '登入失敗。請確認學號與密碼，或稍後再試。';
 export { TEACHER_LMS_UNAVAILABLE_CODE, TEACHER_LMS_UNAVAILABLE_COPY };
@@ -29,6 +33,10 @@ export function schoolLoginErrorCopy(status: number, serverError?: string, code?
   const errorCode = String(code || '').trim();
   if (status === 401) return '學號或密碼錯誤';
   if (status === 429) return '嘗試太多次，請稍後再試';
+  if (status === 503 &&
+    (errorCode === PU_ECAMPUS_DATA_PAUSED_CODE || message === PU_ECAMPUS_DATA_PAUSED_MESSAGE)) {
+    return PU_ECAMPUS_DATA_PAUSED_MESSAGE;
+  }
   if (status === 503 && message === CLOSED_SERVER_ERROR) {
     return '這間學校尚未開放學號登入';
   }

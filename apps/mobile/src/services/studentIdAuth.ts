@@ -6,6 +6,7 @@
  */
 
 import Constants from 'expo-constants';
+import { assertPuEcampusDataFetchEnabled } from '@campus/shared/src/puEcampusDataPolicy';
 import {
   STUDENT_LOGIN_CLIENT_TIMEOUT_MS,
   TEACHER_LMS_UNAVAILABLE_COPY,
@@ -50,6 +51,14 @@ import { canUseHostedSchoolFallback, getCloudFunctionUrl } from './cloudFunction
 import { getAuthInstance, hasUsableFirebaseConfig } from '../firebase';
 import type { UserRole } from '../state/auth';
 import { buildSchoolSyncSummary, type SchoolSyncSummary } from './schoolSyncSummary';
+import {
+  beginSchoolLoginSync,
+  clearSchoolLoginSync,
+  completeSchoolLoginSync,
+  interruptSchoolLoginSync,
+  updateSchoolLoginSync,
+  type SchoolSyncAttempt,
+} from './schoolLoginSync';
 
 // ─── Progress Callback ──────────────────────────────────
 
@@ -69,6 +78,7 @@ export function getPUSession(): PUSession | null {
 export function clearPUSession(): void {
   schoolLoginGeneration += 1;
   _currentPUSession = null;
+  clearSchoolLoginSync();
   clearTCSavedCredentials().catch(() => {});
   clearTCSession().catch(() => {});
 }
@@ -480,6 +490,7 @@ export async function signInWithStudentId(params: {
   }
   assertBeforeExchange();
 
+  assertPuEcampusDataFetchEnabled();
   progress('authenticating', '驗證靜宜帳密');
 
   // ── 策略 A: 嘗試後端統一登入 ──
@@ -487,7 +498,20 @@ export async function signInWithStudentId(params: {
   assertBeforeExchange();
 
   if (backendResult.success && backendResult.data) {
-    return await handleBackendLoginSuccess(backendResult.data, params, progress, assertBeforeExchange, assertAttempt);
+    let syncAttempt: SchoolSyncAttempt | null = null;
+    try {
+      return await handleBackendLoginSuccess(
+        backendResult.data,
+        params,
+        progress,
+        assertBeforeExchange,
+        assertAttempt,
+        (attempt) => { syncAttempt = attempt; },
+      );
+    } catch (error) {
+      if (syncAttempt) interruptSchoolLoginSync(syncAttempt);
+      throw error;
+    }
   }
 
   if (!backendResult.allowNativeFallback) {
@@ -521,6 +545,7 @@ async function handleBackendLoginSuccess(
   progress: OnLoginProgress,
   assertBeforeExchange: () => void,
   assertAttempt: () => void,
+  onSyncStarted: (attempt: SchoolSyncAttempt) => void,
 ): Promise<StudentIdLoginResult> {
   const { studentId, displayName, department, puSessionId, tronClassSessionId, tronClassUserId } =
     data;
@@ -566,6 +591,10 @@ async function handleBackendLoginSuccess(
     throw new Error('登入服務未完成身分驗證，請稍後再試。');
   }
   assertCurrent();
+
+  // Auth can replace the login navigation tree before school reads finish.
+  const syncAttempt = requester ? beginSchoolLoginSync(requester, params.schoolId) : null;
+  if (syncAttempt) onSyncStarted(syncAttempt);
 
   progress('syncingCampus', '同步 E 校園資料');
 
@@ -656,6 +685,7 @@ async function handleBackendLoginSuccess(
     assertCurrent();
     progress('syncingTronClass', '已略過 LMS（TronClass）連線');
   } else {
+    if (syncAttempt) updateSchoolLoginSync(syncAttempt, 'learning');
     await setTCSavedCredentials(params.studentId, params.password);
     assertCurrent();
     progress('syncingTronClass', '登入 TronClass');
@@ -701,6 +731,7 @@ async function handleBackendLoginSuccess(
   assertCurrent();
 
   result.syncSummary = buildSchoolSyncSummary(synchronized, tcAllowed);
+  if (syncAttempt) updateSchoolLoginSync(syncAttempt, 'finishing');
 
   // ── 登入後資料路由：推斷角色 + 建立師生關聯 ──
   try {
@@ -723,6 +754,8 @@ async function handleBackendLoginSuccess(
     email: result.email,
   });
   assertCurrent();
+
+  if (syncAttempt) completeSchoolLoginSync(syncAttempt, result.syncSummary);
 
   return result;
 }

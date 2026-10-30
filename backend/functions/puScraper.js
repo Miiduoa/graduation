@@ -18,10 +18,16 @@
 
 const https = require('https');
 const { parsePuGradeDocument, parseGradeSemesterCodes } = require('./lib/puGradeDocument');
+const { parsePuCreditOverview } = require('./lib/puCreditOverview');
 const { buildDerivedCreditSummary } = require('./lib/puCreditSummary');
 const { parsePuCourseTime } = require('./lib/puCourseTime');
 const { taipeiDateKey } = require('./lib/taipeiDay');
 const { sendWithCampusFetch, setCampusHttpFetch } = require('./lib/puCampusTransport');
+const {
+  assertPuEcampusDataFetchEnabled,
+  PU_ECAMPUS_DATA_PAUSED_CODE,
+  PU_ECAMPUS_DATA_PAUSED_MESSAGE,
+} = require('./generated/shared/puEcampusDataPolicy');
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -32,6 +38,7 @@ const MYPU_HOST = 'mypu.pu.edu.tw';
 const LOGIN_PATH = '/index_check.php';
 const COURSE_RESULT_PATH = '/stu_query/query_course.html';
 const GRADE_PATH = '/score_query/score_all.php';
+const CREDIT_OVERVIEW_PATH = '/grade_review/tab_1.php';
 const REQUEST_TIMEOUT_MS = 10_000;
 const MAX_RESPONSE_BYTES = 4 * 1024 * 1024;
 const CAMPUS_HOSTS = new Set([ALCAT_HOST, MYPU_HOST]);
@@ -50,6 +57,16 @@ const TRANSIENT_NETWORK_CODES = new Set([
   'UND_ERR_HEADERS_TIMEOUT',
   'UND_ERR_BODY_TIMEOUT',
 ]);
+
+function pausedFetchResult(error, fields) {
+  if (error?.code !== PU_ECAMPUS_DATA_PAUSED_CODE) return null;
+  return {
+    success: false,
+    ...fields,
+    code: PU_ECAMPUS_DATA_PAUSED_CODE,
+    error: PU_ECAMPUS_DATA_PAUSED_MESSAGE,
+  };
+}
 // ---------------------------------------------------------------------------
 // HTTP helpers
 // ---------------------------------------------------------------------------
@@ -106,6 +123,8 @@ function hopTimeoutMs(deadlineAt) {
 }
 
 function httpsRequest(hostname, path, method, cookies, body, timeoutMs = REQUEST_TIMEOUT_MS) {
+  // Gate before both the relay and direct transport, including every redirect hop.
+  assertPuEcampusDataFetchEnabled();
   if (!CAMPUS_HOSTS.has(hostname) || !path.startsWith('/') || path.startsWith('//')) {
     return Promise.reject(new Error('Untrusted campus URL'));
   }
@@ -620,6 +639,8 @@ async function puLogin(uid, upassword) {
       studentName: nameMatch ? nameMatch[1] : undefined,
     };
   } catch (err) {
+    const paused = pausedFetchResult(err, { cookies: {} });
+    if (paused) return paused;
     console.error('[puLogin] Error:', err);
     return { success: false, cookies: {}, error: err.message };
   }
@@ -720,6 +741,8 @@ async function puFetchCourses(cookies, semester) {
       totalCredits,
     };
   } catch (err) {
+    const paused = pausedFetchResult(err, { courses: [] });
+    if (paused) return paused;
     console.error('[puFetchCourses] Error:', err);
     return { success: false, courses: [], error: err.message };
   }
@@ -749,6 +772,7 @@ async function puFetchGrades(cookies, semester, options = {}) {
           if (parsed) return { ...parsed, mypuCookies: cached.cookies };
         }
       } catch (error) {
+        if (error?.code === PU_ECAMPUS_DATA_PAUSED_CODE) throw error;
         logGradeEvent('stored_mypu_failed', error);
       }
     }
@@ -788,6 +812,7 @@ async function puFetchGrades(cookies, semester, options = {}) {
         }
       }
     } catch (e) {
+      if (e?.code === PU_ECAMPUS_DATA_PAUSED_CODE) throw e;
       logGradeEvent('score_sso_bridge_failed', e);
       bridgeTransient = isTransientCampusError(e);
     }
@@ -811,13 +836,39 @@ async function puFetchGrades(cookies, semester, options = {}) {
         ? { ...parsed, mypuCookies: nextCookies }
         : { ...(usableBridge || parsed), mypuCookies: nextCookies };
     } catch (error) {
+      if (error?.code === PU_ECAMPUS_DATA_PAUSED_CODE) throw error;
       if (usableBridge) return { ...usableBridge, mypuCookies: cookieJar(mypuCookies) };
       if (bridgeTransient) return { success: false, grades: [] };
       throw error;
     }
   } catch (err) {
+    const paused = pausedFetchResult(err, { grades: [] });
+    if (paused) return paused;
     logGradeEvent('grades_failed', err);
     return { success: false, grades: [] };
+  }
+}
+
+/** Read the existing credit-review overview only; its subtotal is not a graduation decision. */
+async function puFetchCreditOverview(cookies) {
+  if (!cookies || typeof cookies !== 'object' || Array.isArray(cookies) || !Object.keys(cookies).length) {
+    return { success: false, code: 'session-expired', creditOverview: null, error: '校務連線已到期，請重新連線。' };
+  }
+  try {
+    // At most two existing bounded requests: one fixed page and one trusted redirect.
+    const response = await getFollowRedirect(ALCAT_HOST, CREDIT_OVERVIEW_PATH, cookies, 1);
+    if ([401, 403].includes(response.status)) {
+      return { success: false, code: 'session-expired', creditOverview: null, error: '校務連線已到期，請重新連線。' };
+    }
+    const contentType = response.headers['content-type'];
+    if (response.status !== 200 || (contentType && !/^(?:text\/html|application\/xhtml\+xml)(?:\s*;|$)/i.test(contentType))) {
+      return { success: false, code: 'unavailable', creditOverview: null, error: '暫時無法讀取校方學分累計資料。' };
+    }
+    return parsePuCreditOverview(response.data);
+  } catch (error) {
+    const paused = pausedFetchResult(error, { creditOverview: null });
+    if (paused) return paused;
+    return { success: false, code: 'unavailable', creditOverview: null, error: '暫時無法讀取校方學分累計資料。' };
   }
 }
 
@@ -928,6 +979,8 @@ async function puFetchAnnouncements(cookies) {
 
     return { success: true, announcements: extractAnnouncementsFromHtml(html) };
   } catch (err) {
+    const paused = pausedFetchResult(err, { announcements: [] });
+    if (paused) return paused;
     console.error('[puFetchAnnouncements] Error:', err);
     return { success: false, announcements: [], error: err.message };
   }
@@ -985,6 +1038,8 @@ async function puFetchAbsence(cookies) {
 
     return { success: true, absences };
   } catch (err) {
+    const paused = pausedFetchResult(err, { absences: [] });
+    if (paused) return paused;
     console.error('[puFetchAbsence] Error:', err);
     return { success: true, absences: [] };
   }
@@ -1003,7 +1058,8 @@ async function puFetchCreditSummary(cookies) {
   try {
     if (!cookies || !Object.keys(cookies).length) throw new Error('No session cookies');
     // A derived grade summary is not a verified graduation credit audit.
-    return buildDerivedCreditSummary(await puFetchGrades(cookies));
+    const grades = await puFetchGrades(cookies);
+    return pausedFetchResult(grades, { creditSummary: null }) || buildDerivedCreditSummary(grades);
   } catch (err) {
     console.error('[puFetchCreditSummary] Error:', err);
     return { success: false, creditSummary: null, error: err.message };
@@ -1049,20 +1105,19 @@ async function puFetchStudentInfo(cookies) {
       },
     };
   } catch (err) {
+    const paused = pausedFetchResult(err, { studentInfo: {} });
+    if (paused) return paused;
     console.error('[puFetchStudentInfo] Error:', err);
     return { success: false, studentInfo: {}, error: err.message };
   }
 }
-
-// Legacy credit-audit URL discovery was removed: it was not exported,
-// contained unresolved parser references, and could not produce verified
-// graduation eligibility from the available academic records.
 
 module.exports = {
   setCampusHttpFetch,
   puLogin,
   puFetchCourses,
   puFetchGrades,
+  puFetchCreditOverview,
   puFetchAnnouncements,
   puFetchStudentInfo,
   puFetchAbsence,

@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { useMemo } from 'react';
 import { AcademicPage } from '@/components/academic/AcademicPage';
 import { CreditPlannerWorkspace } from '@/components/academic/CreditPlannerWorkspace';
+import { SchoolCreditOverview } from '@/components/academic/SchoolCreditOverview';
 import {
   calculateGradeSummary,
   formatSemester,
@@ -37,11 +38,6 @@ function SchoolCreditRecords({ records }: { records: AcademicGradeResponse }) {
           <small>{records.creditSummary
             ? '以 60 分或通過判斷，可能包含重修紀錄'
             : '目前未取得可核對的推算摘要'}</small>
-        </div>
-        <div>
-          <p>學校畢業採計學分</p>
-          <strong className={styles.creditUnknown}>尚未取得</strong>
-          <small>抵免、重修與各類門檻仍需核對學校學分試算表</small>
         </div>
       </section>
       <div className={styles.overview}>
@@ -125,6 +121,8 @@ export default function CreditPlannerPage() {
       title="學分規劃"
       subtitle="從學分目標到每學期課程，建立屬於自己的修課安排。"
       closedAlternative="學分請先到學校的 e 校園或向系辦確認；下方個人試算仍可使用。"
+      schoolOverview={({ user, schoolId }) => <SchoolCreditOverview
+        key={`${user.uid}:${schoolId}`} user={user} schoolId={schoolId} />}
       workspace={({ userId, schoolId, schoolName }) => (
         <>
           {schoolId === 'pu' ? (

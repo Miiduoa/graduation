@@ -8,6 +8,7 @@ installCampusRelayFetch(readCampusHttpSetter(puScraper), createPuRelayFetch());
 
 export const academicSchoolSource: AcademicFetchers = {
   courses: puScraper.puFetchCourses,
+  creditOverview: puScraper.puFetchCreditOverview,
   async grades(cookies, semester, options) {
     const result = await puScraper.puFetchGrades(cookies, semester, options);
     if (!result.success) return result;

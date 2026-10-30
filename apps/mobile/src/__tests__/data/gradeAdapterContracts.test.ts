@@ -1,3 +1,10 @@
+// Exercise the enabled parsing/ownership contract independently of the release pause.
+jest.mock('@campus/shared/src/puEcampusDataPolicy', () => ({
+  ...jest.requireActual('@campus/shared/src/puEcampusDataPolicy'),
+  isPuEcampusDataFetchEnabled: () => true,
+  assertPuEcampusDataFetchEnabled: () => {},
+}));
+
 import { NCHUAdapter, mapNchuOfficialGrades } from '../../data/apiAdapters/NCHUAdapter';
 import {
   PUAdapter,

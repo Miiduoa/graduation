@@ -8,6 +8,7 @@ import { usePermissions } from '../hooks/usePermissions';
 import { safeNavigate } from '../utils/safeNavigate';
 import { loadFailureCopy } from '../utils/loadFailureCopy';
 import { rootNavigate, rootNavigateNested } from '../app/rootNavigation';
+import { SchoolLoginSyncNotice } from '../components/SchoolLoginSyncNotice';
 
 export default function MeAiFirstScreen() {
   useSyncExternalStore(subscribeToTheme, getThemeVersion, getThemeVersion);
@@ -68,6 +69,7 @@ export default function MeAiFirstScreen() {
         />
       </AISection>
       <AISection title="學校帳號資料">
+        <SchoolLoginSyncNotice inset />
         <AICard title={auth.profileLoading ? '正在讀取帳號資料' : '目前登入帳號'}>
           <Text style={{ color: aiTokens.textSecondary, lineHeight: 22 }}>
             {auth.user?.email || profile?.email || '尚未提供電子郵件'}

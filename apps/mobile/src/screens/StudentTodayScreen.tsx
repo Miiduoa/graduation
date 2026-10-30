@@ -10,6 +10,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { QuickCampusEntry } from '../components/QuickCampusEntry';
+import { SchoolLoginSyncNotice } from '../components/SchoolLoginSyncNotice';
 import type { MobileQuickAction } from '../services/quickCampusActions';
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import { useAuth } from '../state/auth';
@@ -251,6 +252,7 @@ export default function StudentTodayScreen() {
           </Text>
           {updatedAt ? <Text style={s.updated}>{formatUpdatedAt(updatedAt)}</Text> : null}
         </View>
+        <SchoolLoginSyncNotice />
         {firstLoad ? (
           <TodaySkeleton styles={s} />
         ) : (

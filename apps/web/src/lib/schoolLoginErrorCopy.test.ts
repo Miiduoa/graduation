@@ -1,6 +1,10 @@
 import { expect, it } from 'vitest';
 import { isTeacherLmsUnavailableNotice } from '@campus/shared/src/schoolLogin';
 import {
+  PU_ECAMPUS_DATA_PAUSED_CODE,
+  PU_ECAMPUS_DATA_PAUSED_MESSAGE,
+} from '@campus/shared/src/puEcampusDataPolicy';
+import {
   SCHOOL_LOGIN_GENERIC_ERROR,
   SchoolLoginHttpError,
   TEACHER_LMS_UNAVAILABLE_CODE,
@@ -14,6 +18,11 @@ it('recognises current and legacy teacher LMS notices', () => {
   expect(isTeacherLmsUnavailableNotice('老師登入暫未開放；學生請輸入純數字學號')).toBe(true);
   expect(isTeacherLmsUnavailableNotice(TEACHER_LMS_UNAVAILABLE_CODE)).toBe(true);
   expect(isTeacherLmsUnavailableNotice('學校系統暫時無法連線')).toBe(false);
+});
+
+it('shows the explicit e-campus pause instead of asking users to check their password', () => {
+  expect(schoolLoginErrorCopy(503, '', PU_ECAMPUS_DATA_PAUSED_CODE)).toBe(PU_ECAMPUS_DATA_PAUSED_MESSAGE);
+  expect(schoolLoginErrorCopy(503, PU_ECAMPUS_DATA_PAUSED_MESSAGE)).toBe(PU_ECAMPUS_DATA_PAUSED_MESSAGE);
 });
 
 it.each([
