@@ -29,12 +29,33 @@ const data: CourseHubData = {
 };
 const route = { params: { groupId: 'course-a', groupName: '過時的課名' } };
 beforeEach(() => {
+  // 測資的截止日固定在 10/29 前後，鎖定「現在」避免日期過了就紅燈。
+  jest.useFakeTimers({
+    now: new Date('2026-10-27T12:00:00+08:00'),
+    doNotFake: [
+      'nextTick',
+      'setImmediate',
+      'clearImmediate',
+      'setInterval',
+      'clearInterval',
+      'setTimeout',
+      'clearTimeout',
+      'queueMicrotask',
+      'requestAnimationFrame',
+      'cancelAnimationFrame',
+      'requestIdleCallback',
+      'cancelIdleCallback',
+      'hrtime',
+      'performance',
+    ],
+  });
   jest.clearAllMocks();
   mockUser = { uid: 'alice' };
   mockSchool = { id: 'pu' };
   jest.mocked(loadCourseHub).mockResolvedValue(data);
   jest.mocked(webBrowserOpenWithPuTronClassGate).mockResolvedValue(true);
 });
+afterEach(() => jest.useRealTimers());
 test('uses real course name with scoped useful actions and no invented outcomes', async () => {
   const navigation = { navigate: jest.fn() };
   const view = render(<CourseHub route={route} navigation={navigation} />);

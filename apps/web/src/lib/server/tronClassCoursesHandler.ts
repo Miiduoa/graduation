@@ -61,6 +61,8 @@ function publicCourses(input: unknown) {
   });
 }
 
+const TRONCLASS_SESSION_SCAN_LIMIT = 20;
+
 export function createTronClassCoursesHandler({
   db,
   fetchCourses,
@@ -98,17 +100,21 @@ export function createTronClassCoursesHandler({
         : null;
       let linkedId = linkedFromPortal;
       if (!linkedId) {
+        // 不用 orderBy，避免 _puTronClassSessions 需要新增複合索引；在記憶體挑最新且未過期的一筆。
         const lmsSessions = await db.collection('_puTronClassSessions')
           .where('ownerUid', '==', uid)
-          .orderBy('expiresAt', 'desc')
-          .limit(1)
+          .limit(TRONCLASS_SESSION_SCAN_LIMIT)
           .get();
-        const owned = lmsSessions.docs[0];
-        const ownedData = owned?.data();
-        const ownedId = owned?.ref.id;
-        if (owned && ownedData?.ownerUid === uid && schoolSessionExpiry(ownedData.expiresAt) > now()
-          && typeof ownedId === 'string' && /^[a-f0-9]{32}$/.test(ownedId)) {
-          linkedId = ownedId;
+        let newestExpiry = -Infinity;
+        for (const owned of lmsSessions.docs) {
+          const ownedData = owned?.data();
+          const ownedId = owned?.ref?.id;
+          const expiry = schoolSessionExpiry(ownedData?.expiresAt);
+          if (ownedData?.ownerUid === uid && expiry > now() && expiry > newestExpiry
+            && typeof ownedId === 'string' && /^[a-f0-9]{32}$/.test(ownedId)) {
+            newestExpiry = expiry;
+            linkedId = ownedId;
+          }
         }
       }
       if (!linkedId) {

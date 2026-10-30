@@ -932,6 +932,10 @@ export function createPuCampusGateway(
         if (posted.status === 200 && isCredentialPage(posted.html)) {
           throw new PuCampusError('credentials', '學號或密碼錯誤', { route, stage: 'submit' });
         }
+        // 學生路線：/api/login 已明確回帳密錯誤時不再改走 CAS，減少同一組密碼送出次數。
+        if (route === 'student' && posted.status >= 400 && posted.status < 500 && isCredentialPage(posted.html)) {
+          throw new PuCampusError('credentials', '學號或密碼錯誤', { route, stage: 'submit' });
+        }
         if (posted.status === 200 && sessionCookieValue(posted.cookies)) {
           const loginData = asRecord(posted.json);
           const session = await readTronClassProfile(
