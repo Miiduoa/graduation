@@ -1611,6 +1611,7 @@ function ImportWorkspace({
                 label="這批資料的學年度（例如 115）"
                 value={academicYear}
                 onChange={(value) => {
+                  generation.current += 1;
                   if (busy) cancel();
                   setYear(value);
                   setRows([]);
@@ -1624,6 +1625,7 @@ function ImportWorkspace({
                 label="這批資料的學期（例如 1、2、暑期）"
                 value={semester}
                 onChange={(value) => {
+                  generation.current += 1;
                   if (busy) cancel();
                   setSemester(value);
                   setRows([]);
@@ -1762,6 +1764,7 @@ function ImportWorkspace({
                 maxLength={100_000}
                 value={text}
                 onChangeText={(value) => {
+                  generation.current += 1;
                   if (busy) cancel();
                   setText(value);
                   setAiRetry(null);

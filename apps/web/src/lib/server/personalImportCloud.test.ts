@@ -340,3 +340,13 @@ describe('personal import persistent daily quota', () => {
     expect([...values]).toEqual(before);
   });
 });
+
+it.each(['姓名', '教師'])('rejects ambiguous space separated %s columns before quota and upstream', async (label) => {
+  const { dependencies, fetcher, getQuotaStore } = setup();
+  for (const body of [
+    { text: `${label} 課程名稱 學分 成績\n王小明 微積分 3 85`, kind: 'grades' },
+    { text: '王小明 微積分 3 85', columnContext: `${label} 課程名稱 學分 成績`, kind: 'grades' },
+  ]) expect((await handlePersonalImportCloud(request(body), dependencies)).status).toBe(422);
+  expect(fetcher).not.toHaveBeenCalled();
+  expect(getQuotaStore).not.toHaveBeenCalled();
+});

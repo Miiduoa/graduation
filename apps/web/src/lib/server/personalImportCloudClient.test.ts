@@ -200,3 +200,21 @@ describe('personal import cloud client', () => {
     expect(result).toMatchObject({ ok: false, reason: 'unavailable' });
   });
 });
+
+it.each(['姓名', '教師'])('refuses space separated %s headers with or without column context', async (label) => {
+  const header = `${label} 課程名稱 學分 成績`;
+  const text = '王小明 微積分 3 85';
+  const fetcher = vi.fn();
+  expect(isPersonalImportCloudMaskSafe(`${header}\n${text}`)).toBe(false);
+  expect(await requestPersonalImportCloud({ text, columnContext: header, kind: 'grades', fetcher })).toMatchObject({ ok: false, reason: 'invalid-input' });
+  expect(fetcher).not.toHaveBeenCalled();
+});
+
+it.each(['姓名 未知欄名\n王小明 另一值', '姓名 教師\n王小明 林小美'])(
+  'refuses uncertain space separated private headers: %s', async (text) => {
+    const fetcher = vi.fn();
+    expect(isPersonalImportCloudMaskSafe(text)).toBe(false);
+    expect(await requestPersonalImportCloud({ text, kind: 'grades', fetcher })).toMatchObject({ ok: false, reason: 'invalid-input' });
+    expect(fetcher).not.toHaveBeenCalled();
+  },
+);

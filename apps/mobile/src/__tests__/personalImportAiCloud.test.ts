@@ -249,3 +249,27 @@ test('a retry range that cannot be matched to the original document stays on the
   );
   expect(mockFetch).not.toHaveBeenCalled();
 });
+
+test.each([null, undefined, '[個資已遮罩]'])('cloud teacher %s is restored with original evidence for every row', async (teacher) => {
+  const source = '課程名稱,教師,學分,成績\n資料庫,王小明,3,85\n微積分,林小美,2,90';
+  mockFetch.mockImplementation(async (_url, init) => {
+    const body = JSON.parse(init.body);
+    return response(200, { sourceText: body.text, columnContext: body.columnContext, output: JSON.stringify({ complete: true, rows: [
+      { title: '資料庫', teacher, credits: 3, grade: '85', evidence: '資料庫,[個資已遮罩],3,85' },
+      { title: '微積分', teacher, credits: 2, grade: '90', evidence: '微積分,[個資已遮罩],2,90' },
+    ] }) });
+  });
+  const result = await runMobilePersonalImportAi(source, options, new AbortController().signal, request);
+  expect(result.rows).toMatchObject([
+    { teacher: '王小明', source: { line: 2, rawText: '資料庫,王小明,3,85' } },
+    { teacher: '林小美', source: { line: 3, rawText: '微積分,林小美,2,90' } },
+  ]);
+  expect(localLLM.generate).not.toHaveBeenCalled();
+});
+
+test('cloud teacher mask is cleared with a missing teacher warning when restoration is impossible', async () => {
+  mockFetch.mockResolvedValue(response(200, { sourceText: text.normalize('NFKC'), columnContext: '', output: JSON.stringify({ complete: true, rows: [{ title: '資料庫', credits: 3, grade: '85', teacher: '[姓名已遮罩]', evidence: text }] }) }));
+  const result = await runMobilePersonalImportAi(text, options, new AbortController().signal, request);
+  expect(result.rows[0].teacher).toBeUndefined();
+  expect(result.issues).toContainEqual(expect.objectContaining({ field: 'teacher', rowId: result.rows[0].id }));
+});

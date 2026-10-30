@@ -1,4 +1,6 @@
 import type { PersonalImportOptions } from './types';
+import type { PersonalImportAiResult } from './aiRecognition';
+import { parsePersonalImport } from './parser';
 import { readImportDelimitedRecords, type ImportDelimitedRecord } from './aiDelimitedText';
 
 export const PERSONAL_IMPORT_CLOUD_MAX_TEXT = 8_000;
@@ -143,6 +145,11 @@ function maskPrivateTables(text: string): { text: string; safe: boolean } {
 export function isPersonalImportCloudMaskSafe(text: string, context = ''): boolean {
   const normalized = (context ? `${context}\n${text}` : text).normalize('NFKC');
   if (hasAmbiguousPrivateList(normalized)) return false;
+  // OCR 空白分欄沒有可靠的欄界；不能把相鄰欄名誤當成姓名值遮罩。
+  if (normalized.split('\n').some((line) => {
+    const cells = line.trim().split(/ +/u);
+    return cells.length > 1 && cells.some((cell) => privateField.test(cell));
+  })) return false;
   const vertical = maskPrivateVerticalFields(normalized);
   return vertical.safe && maskPrivateTables(vertical.text).safe;
 }
@@ -261,5 +268,34 @@ export async function requestPersonalImportCloud(input: {
   } finally {
     clearTimeout(timer);
     if (abortListener) input.signal?.removeEventListener('abort', abortListener);
+  }
+}
+
+/** 雲端只能核對遮罩副本；交付草稿前以裝置上的原文還原來源與教師。 */
+export function restorePersonalImportCloudRows(
+  result: PersonalImportAiResult,
+  text: string,
+  options: PersonalImportOptions,
+  columnContext = '',
+): void {
+  const prefix = columnContext && !text.includes(columnContext) ? `${columnContext}\n` : '';
+  const prefixLines = prefix.split('\n').length - 1;
+  const local = parsePersonalImport(prefix + text, options).rows;
+  const lines = text.split('\n');
+  for (const row of result.rows) {
+    const matches = local.filter((candidate) =>
+      candidate.source.line - prefixLines === row.source.line && candidate.title === row.title);
+    const original = matches.length === 1 ? matches[0] : undefined;
+    const rawText = original?.source.rawText ?? lines.slice(
+      row.source.line - 1,
+      row.source.line - 1 + row.source.rawText.split('\n').length,
+    ).join('\n');
+    row.source.rawText = rawText;
+    // 教師已被送出前遮罩，不能採信模型自行補出的姓名。
+    row.teacher = original?.teacher && !/已遮罩/u.test(original.teacher) ? original.teacher : undefined;
+    if (!row.teacher && options.kind !== 'events') result.issues.push({
+      code: 'cloud-teacher-missing', severity: 'warning', rowId: row.id, field: 'teacher',
+      message: '無法從原文還原教師，請核對並補上教師。',
+    });
   }
 }

@@ -7,6 +7,7 @@ import {
 } from '@campus/shared/src/imports/aiRecognition';
 import {
   requestPersonalImportCloud,
+  restorePersonalImportCloudRows,
   maskPersonalImportCloudBatch,
   isPersonalImportCloudMaskSafe,
 } from '@campus/shared/src/imports/aiCloud';
@@ -76,7 +77,7 @@ function rules(
   batch: ImportRecognitionBatch,
   options: PersonalImportOptions,
 ): PersonalImportAiResult {
-  const prefix = batch.columnContext ? `${batch.columnContext}\n` : '';
+  const prefix = batch.columnContext && !batch.text.includes(batch.columnContext) ? `${batch.columnContext}\n` : '';
   const prefixLines = prefix.split('\n').length - 1;
   const result = parsePersonalImport(prefix + batch.text, options);
   return {
@@ -243,6 +244,7 @@ export async function runPersonalImportAi(
                 ...row,
                 source: { ...row.source, line: audit.sourceLines[row.id] ?? row.source.line },
               }));
+            restorePersonalImportCloudRows(result, batch.text, options, batch.columnContext);
           } catch {
             result = undefined;
             failure = '雲端回傳內容不完整或無法對照來源。';

@@ -238,3 +238,39 @@ it.each(['', ' \n\t '])('uses the local visual model when OCR returns blank text
   expect(runLocalPersonalImportAi).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ input: { image } }));
   expect(fetcher).not.toHaveBeenCalled();
 });
+
+it('does not duplicate the header in rules after disabled cloud and unavailable local model', async () => {
+  fetcher.mockResolvedValue(new Response('{"code":"disabled"}', { status: 503 }));
+  vi.mocked(localAvailability).mockReturnValue({ available: false, downloadLabel: '' });
+  const result = await run(`${source}\n微積分,2,90`);
+  expect(result.rows.map((row) => row.title)).toEqual(['資料庫', '微積分']);
+});
+
+it.each(['姓名', '教師'])('keeps space separated %s tables local', async (label) => {
+  await run(`${label} 課程名稱 學分 成績\n王小明 微積分 3 85`);
+  expect(fetcher).not.toHaveBeenCalled();
+});
+
+it.each([null, undefined, '[個資已遮罩]'])('restores original teachers and each evidence when cloud teacher is %s', async (teacher) => {
+  const original = '課程名稱,教師,學分,成績\n資料庫,王小明,3,85\n微積分,林小美,2,90';
+  fetcher.mockImplementation(async (_url, init) => {
+    const body = JSON.parse(init.body);
+    return success(body.text, JSON.stringify({ complete: true, rows: [
+      { ...record, teacher, evidence: '資料庫,[個資已遮罩],3,85' },
+      { title: '微積分', teacher, credits: 2, grade: '90', evidence: '微積分,[個資已遮罩],2,90' },
+    ] }), body.columnContext);
+  });
+  const result = await run(original);
+  expect(result.rows).toMatchObject([
+    { teacher: '王小明', source: { line: 2, rawText: '資料庫,王小明,3,85' } },
+    { teacher: '林小美', source: { line: 3, rawText: '微積分,林小美,2,90' } },
+  ]);
+  expect(runLocalPersonalImportAi).not.toHaveBeenCalled();
+});
+
+it('clears a cloud teacher mask and warns when the original has no teacher', async () => {
+  fetcher.mockResolvedValue(success(source, JSON.stringify({ complete: true, rows: [{ ...record, teacher: '[姓名已遮罩]' }] })));
+  const result = await run();
+  expect(result.rows[0].teacher).toBeUndefined();
+  expect(result.issues).toContainEqual(expect.objectContaining({ field: 'teacher', rowId: result.rows[0].id }));
+});

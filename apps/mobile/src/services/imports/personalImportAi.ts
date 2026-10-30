@@ -20,6 +20,7 @@ import {
 } from '@campus/shared/src/imports/aiTableAudit';
 import {
   requestPersonalImportCloud,
+  restorePersonalImportCloudRows,
   maskPersonalImportCloudBatch,
   isPersonalImportCloudMaskSafe,
 } from '@campus/shared/src/imports/aiCloud';
@@ -455,6 +456,8 @@ export async function runMobilePersonalImportAi(
               source: { ...row.source, line: audit.sourceLines[row.id] ?? row.source.line },
             }));
           } else hasUnauditedSource = true;
+          if (sourceText !== batch.text || mode === 'cloud')
+            restorePersonalImportCloudRows(parsed, batch.text, context, batch.columnContext);
           addRows(parsed, batch);
         } catch {
           if (retrySmaller('invalid')) continue;
