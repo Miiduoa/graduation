@@ -7,7 +7,6 @@ import { AIDetailScreen, AICard, aiTokens } from '../ui/aiFirst';
 import { getThemeVersion, subscribeToTheme } from '../ui/theme';
 import { UnavailableFeatureScreen, type ServiceScreenProps } from './UnavailableFeatureScreen';
 import { resolveDashboardRole, type ResolvedDashboardRole } from '../services/dashboardRole';
-import { isSchoolLoginEntryAvailable } from '../services/schoolLoginAvailability';
 export { resolveDashboardRole, type ResolvedDashboardRole } from '../services/dashboardRole';
 
 const roleTitles: Partial<Record<ResolvedDashboardRole, string>> = {
@@ -33,13 +32,18 @@ export function RoleWorkspaceScreen({
               { label: '管理公告與活動', route: 'AdminDashboard' },
               { label: '查看校方公告', route: '公告總覽' },
             ]
-          : undefined
+          : role === 'guest'
+            ? [
+                { label: '前往 nuni 課程', route: 'NuniWorkspace', params: { tab: 'courses' } },
+                { label: '查看校方公告', route: '公告總覽' },
+              ]
+            : undefined
       }
       description={
         role === 'admin'
           ? '可以管理校方公告與活動，或查看目前公開的校園資訊。'
           : role === 'guest'
-            ? '可以先查看校方公告與校園活動。個人課務服務需要登入並確認學校身分。'
+            ? '使用 Google 帳號加入 nuni 課程、繳交作業，也可以查看校方公告與校園活動。'
             : '此身分的工作台尚未開放。你可以先查看校方公告與校園活動。'
       }
     />
@@ -61,11 +65,9 @@ export default function RoleAwareTodayScreen(props: ServiceScreenProps) {
       <UnavailableFeatureScreen
         {...props}
         title="確認帳號身分"
-        description="目前無法確認帳號身分。請到登入頁重新確認；也可以先查看公開公告。"
+        description="目前無法確認此學校身分。你仍可使用 nuni 課程，或查看公開公告。"
         actions={[
-          ...(isSchoolLoginEntryAvailable()
-            ? [{ label: '前往學校登入', route: 'SSOLogin' }]
-            : []),
+          { label: '前往 nuni 課程', route: 'NuniWorkspace', params: { tab: 'courses' } },
           { label: '查看校方公告', route: '公告總覽' },
         ]}
       />

@@ -241,8 +241,7 @@ test('guest landing exposes stable native smoke targets and follows shared light
   });
   fireEvent.press(view.getByTestId('login-start'));
   expect(safeNavigate).toHaveBeenCalledWith(mockNavigation, 'NuniWorkspace');
-  fireEvent.press(view.getByTestId('school-login-start'));
-  expect(safeNavigate).toHaveBeenCalledWith(mockNavigation, 'SSOLogin');
+  expect(view.queryByTestId('school-login-start')).toBeNull();
   act(() => applyTheme('dark'));
   expect(view.getByTestId('login-landing')).toHaveStyle({
     backgroundColor: createDarkTheme().colors.bg,
@@ -416,7 +415,7 @@ test('hides the school login button when no usable school provider is listed', (
   setSchoolLoginProviderKinds([]);
   const landing = render(<LoginLandingScreen />);
   expect(
-    landing.getByText('這間學校尚未開放學號直接連線；你仍可匯入自己從校務系統取得的資料。'),
+    landing.getByText('學校帳號連線已停止。你仍可匯入自己從校務系統取得的課表、成績與活動資料，已匯入的資料會保留。'),
   ).toBeTruthy();
   expect(landing.queryByTestId('school-login-start')).toBeNull();
   expect(landing.queryByText('前往學校登入')).toBeNull();
@@ -440,7 +439,7 @@ test('a release without school SSO keeps public and platform entries, but does n
   setSchoolLoginProviderKinds([]);
   const landing = render(<LoginLandingScreen />);
   expect(
-    landing.getByText('這間學校尚未開放學號直接連線；你仍可匯入自己從校務系統取得的資料。'),
+    landing.getByText('學校帳號連線已停止。你仍可匯入自己從校務系統取得的課表、成績與活動資料，已匯入的資料會保留。'),
   ).toBeTruthy();
   expect(landing.queryByTestId('school-login-start')).toBeNull();
   fireEvent.press(landing.getByTestId('public-Map'));
@@ -457,19 +456,19 @@ test('a release without school SSO keeps public and platform entries, but does n
   expect(signInWithStudentId).not.toHaveBeenCalled();
 });
 
-test('the guest school-login entry always follows the selected university', () => {
+test('the guest landing never offers retired school login when the selected university changes', () => {
   const view = render(<LoginLandingScreen />);
-  expect(view.getByTestId('school-login-start')).toBeTruthy();
+  expect(view.queryByTestId('school-login-start')).toBeNull();
   mockSchool = { id: 'nthu', name: '國立清華大學', shortName: '清大' };
   view.rerender(<LoginLandingScreen />);
   expect(view.queryByTestId('school-login-start')).toBeNull();
   expect(
-    view.getByText('這間學校尚未開放學號直接連線；你仍可匯入自己從校務系統取得的資料。'),
+    view.getByText('學校帳號連線已停止。你仍可匯入自己從校務系統取得的課表、成績與活動資料，已匯入的資料會保留。'),
   ).toBeTruthy();
   expect(view.getByTestId('login-start')).toBeTruthy();
   mockSchool = { id: 'pu', name: '靜宜大學', shortName: '靜宜' };
   view.rerender(<LoginLandingScreen />);
-  expect(view.getByTestId('school-login-start')).toBeTruthy();
+  expect(view.queryByTestId('school-login-start')).toBeNull();
 });
 
 test('a direct school login route cannot show Providence credentials while browsing NTHU', () => {
@@ -538,7 +537,7 @@ test('guest campus connection surfaces the self-import path before the public di
   const view = render(<LoginLandingScreen />);
   expect(view.queryByTestId('school-login-start')).toBeNull();
   expect(
-    view.getByText('這間學校尚未開放學號直接連線；你仍可匯入自己從校務系統取得的資料。'),
+    view.getByText('學校帳號連線已停止。你仍可匯入自己從校務系統取得的課表、成績與活動資料，已匯入的資料會保留。'),
   ).toBeTruthy();
   fireEvent.press(view.getByTestId('school-import-start'));
   expect(safeNavigate).toHaveBeenCalledWith(mockNavigation, 'PersonalImport', {

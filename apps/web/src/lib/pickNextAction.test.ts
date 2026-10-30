@@ -168,7 +168,7 @@ describe('today screen copy and ordering', () => {
     expect(TODAY_COPY.retry).toBe('再試一次');
     expect(TODAY_COPY.noTimetable).toBe('還沒有課表。');
     expect(TODAY_COPY.importTimetable).toBe('匯入課表');
-    expect(TODAY_COPY.lmsUnconnected).toBe('這裡會顯示課程平台上的作業，目前還沒連上。');
+    expect(TODAY_COPY.lmsUnconnected).toBe('前往 nuni 課程查看作業與測驗。');
     expect(TODAY_COPY.nextAssignment).toBe('下一件作業');
   });
 

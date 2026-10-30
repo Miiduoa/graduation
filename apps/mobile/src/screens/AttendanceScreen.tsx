@@ -34,6 +34,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 
 import { theme } from '../ui/theme';
+import { safeNavigate } from '../utils/safeNavigate';
 import { TAB_BAR_CONTENT_BOTTOM_PADDING } from '../ui/navigationTheme';
 import { useAuth } from '../state/auth';
 import { usePermissions } from '../hooks/usePermissions';
@@ -607,8 +608,17 @@ export function AttendanceScreen(props: any) {
                       textAlign: 'center',
                     }}
                   >
-                    尚未取得授課資料{'\n'}請先登入 E 校園帳號
+                    目前沒有授課資料{'\n'}前往 nuni 課程查看課堂與作業
                   </Text>
+                  <Pressable
+                    accessibilityRole="button"
+                    onPress={() => safeNavigate(nav, 'NuniWorkspace', { tab: 'courses' })}
+                    style={{ paddingHorizontal: 16, paddingVertical: 12, marginTop: 8 }}
+                  >
+                    <Text style={{ color: theme.colors.accent, fontSize: 14, fontWeight: '600' }}>
+                      前往 nuni 課程
+                    </Text>
+                  </Pressable>
                 </View>
               ) : (
                 teacherCourses.map((course, idx) => (
@@ -920,8 +930,17 @@ export function AttendanceScreen(props: any) {
                       textAlign: 'center',
                     }}
                   >
-                    尚未取得課程資料{'\n'}請先登入 E 校園帳號
+                    目前沒有課程資料{'\n'}前往 nuni 課程查看課堂與作業
                   </Text>
+                  <Pressable
+                    accessibilityRole="button"
+                    onPress={() => safeNavigate(nav, 'NuniWorkspace', { tab: 'courses' })}
+                    style={{ paddingHorizontal: 16, paddingVertical: 12, marginTop: 8 }}
+                  >
+                    <Text style={{ color: theme.colors.accent, fontSize: 14, fontWeight: '600' }}>
+                      前往 nuni 課程
+                    </Text>
+                  </Pressable>
                 </View>
               ) : (
                 studentCourses.map((course, idx) => {

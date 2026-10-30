@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
@@ -10,27 +10,12 @@ import { useSchool } from '../state/school';
 import { SchoolBrowsingControl } from '../components/SchoolBrowsingControl';
 import { TodayTimetablePanel } from '../components/TodayTimetablePanel';
 import { SchoolPortalImportEntry } from '../components/SchoolPortalImport';
-import {
-  isSchoolLoginEntryAvailable,
-  loadSchoolLoginProviderKinds,
-} from '../services/schoolLoginAvailability';
 
 export default function LoginLandingScreen() {
   const navigation = useNavigation();
   const auth = useNuniSession();
   const { school } = useSchool();
   const s = useThemeStyleSheet(createStyles);
-  const [, refreshProviders] = useState(0);
-  const schoolEntry = isSchoolLoginEntryAvailable(school.id);
-  useEffect(() => {
-    let active = true;
-    void loadSchoolLoginProviderKinds().then(() => {
-      if (active) refreshProviders((revision) => revision + 1);
-    });
-    return () => {
-      active = false;
-    };
-  }, []);
   return (
     <SafeAreaView testID="login-landing" style={s.page}>
       <ScrollView contentContainerStyle={s.content}>
@@ -49,7 +34,7 @@ export default function LoginLandingScreen() {
             testID="platform-workspace-start"
             accessibilityRole="button"
             accessibilityLabel="開啟課程與作業"
-            onPress={() => safeNavigate(navigation, 'NuniWorkspace')}
+            onPress={() => safeNavigate(navigation, 'NuniWorkspace', { tab: 'courses' })}
             style={({ pressed }) => [s.workspaceShortcut, pressed && s.rowPressed]}
           >
             <Text style={s.workspaceShortcutText}>課程與作業</Text>
@@ -61,29 +46,17 @@ export default function LoginLandingScreen() {
             把自己的校園資料，整理在一起
           </Text>
           <Text style={s.body}>
-            選擇學校後，可以連線支援的校務系統，或直接匯入自己下載的課表、成績與活動資料。校園地圖、公車與公開資訊仍然不必登入。
+            使用 Google 帳號加入課程、繳交作業，也可以匯入自己下載的課表、成績與活動資料。校園地圖、公車與公開資訊不必登入。
           </Text>
         </View>
         <SchoolBrowsingControl />
         <View style={s.schoolPanel}>
           <Text accessibilityRole="header" style={s.title}>
-            {schoolEntry ? '從學校帳號取得資料' : '從學校資料開始'}
+            匯入自己的校園資料
           </Text>
-          <Text style={s.body} testID={schoolEntry ? undefined : 'school-login-hint'}>
-            {schoolEntry
-              ? '靜宜大學目前可直接使用 e 校園帳號讀取個人校務資料，不需要重新手動建立課表。'
-              : '這間學校尚未開放學號直接連線；你仍可匯入自己從校務系統取得的資料。'}
+          <Text style={s.body}>
+            學校帳號連線已停止。你仍可匯入自己從校務系統取得的課表、成績與活動資料，已匯入的資料會保留。
           </Text>
-          {schoolEntry ? (
-            <Pressable
-              testID="school-login-start"
-              accessibilityRole="button"
-              style={({ pressed }) => [s.schoolButton, pressed && s.rowPressed]}
-              onPress={() => safeNavigate(navigation, 'SSOLogin')}
-            >
-              <Text style={s.schoolButtonText}>使用學號連線</Text>
-            </Pressable>
-          ) : null}
           <SchoolPortalImportEntry
             onOpenRecords={(kind) => safeNavigate(navigation, 'PersonalImport', { kind })}
           />
@@ -315,17 +288,6 @@ const createStyles = () =>
       borderWidth: 1,
       borderRadius: 14,
     },
-    schoolButton: {
-      minHeight: 50,
-      alignSelf: 'stretch',
-      justifyContent: 'center',
-      paddingVertical: 12,
-      paddingHorizontal: 16,
-      marginTop: 4,
-      borderRadius: 8,
-      backgroundColor: theme.colors.accent,
-    },
-    schoolButtonText: { color: theme.colors.onAccent, textAlign: 'center', fontSize: 15, fontWeight: '600' },
     importButton: {
       minHeight: 48,
       alignSelf: 'stretch',

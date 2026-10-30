@@ -151,3 +151,14 @@ test('when the ordinary service list matches, it does not duplicate the same des
   expect(view.getAllByText('宿舍')).toHaveLength(1);
   expect(view.queryByLabelText('依需求前往宿舍')).toBeNull();
 });
+
+
+test('course shortcuts select the courses tab in the native workspace', () => {
+  const navigation = { navigate: jest.fn() };
+  const view = render(<CampusHubScreen navigation={navigation} />);
+  fireEvent.changeText(view.getByPlaceholderText('搜尋地點或服務'), '我要交作業');
+  fireEvent.press(view.getByLabelText('依需求前往課程與作業'));
+  expect(safeNavigate).toHaveBeenCalledWith(navigation, 'NuniWorkspace', { tab: 'courses' }, {
+    fallbackMessage: '目前無法開啟對應服務，請稍後重試。',
+  });
+});

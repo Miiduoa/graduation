@@ -285,7 +285,7 @@ function CampusDirectory({ schoolId, navigation }: { schoolId: string; navigatio
                 accessibilityLabel={'依需求前往' + action.label}
                 onPress={() => {
                   Keyboard.dismiss();
-                  safeNavigate(navigation, action.route, undefined, {
+                  safeNavigate(navigation, action.route, action.params, {
                     fallbackMessage: '目前無法開啟對應服務，請稍後重試。',
                   });
                 }}

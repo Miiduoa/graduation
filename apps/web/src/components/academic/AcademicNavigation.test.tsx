@@ -49,9 +49,7 @@ function destination(label: string) {
 
 it.each([
   ['/timetable', '課表', 'timetable'],
-  ['/school-courses', 'WOW Class 課程', 'timetable'],
-  ['/school-lms', '作業與教材', 'timetable'],
-  ['/school-lms/homework/10001/20001', '作業與教材', 'timetable'],
+  ['/classroom', '課程空間', 'timetable'],
   ['/grades', '成績', 'grades'],
   ['/credit-planner', '學分規劃', 'grades'],
   ['/credit-planner/review', '學分規劃', 'grades'],
@@ -66,8 +64,7 @@ it.each([
     const links = within(nav).getAllByRole('link');
     expect(links.map((link) => link.textContent)).toEqual([
       '課表',
-      'WOW Class 課程',
-      '作業與教材',
+      '課程空間',
       '成績',
       '學分規劃',
       '行事曆',
@@ -77,6 +74,7 @@ it.each([
       within(nav).getByRole('link', { name: label }),
     ]);
     expect(destination('匯入資料').searchParams.get('kind')).toBe(kind);
+    expect(destination('課程空間').pathname).toBe('/classroom');
     expect(screen.getByText('此頁內容')).toBeTruthy();
   },
 );
@@ -126,6 +124,9 @@ it.each(['invalid', '115|', '115|1|2'])('does not forward an invalid timetable t
 it.each([
   '/admin',
   '/teacher',
+  '/school-courses',
+  '/school-lms',
+  '/school-lms/homework/10001/20001',
   '/classroom/grades',
   '/timetable/s/shared',
   '/grades-other',

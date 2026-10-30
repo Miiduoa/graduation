@@ -926,7 +926,7 @@ function SearchWorkspace({
                           if (activeScope.current !== scopeKey) return;
                           remember();
                           Keyboard.dismiss();
-                          safeNavigate(navigation, action.route);
+                          safeNavigate(navigation, action.route, action.params);
                         }}
                         style={({ pressed }) => ({
                           minHeight: 52,

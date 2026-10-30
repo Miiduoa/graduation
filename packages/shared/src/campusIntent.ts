@@ -6,7 +6,6 @@ export const CAMPUS_QUICK_DESTINATIONS = [
   "/map",
   "/bus",
   "/classroom",
-  "/school-courses",
   "/timetable",
   "/library",
   "/grades",
@@ -54,7 +53,7 @@ export function suggestCampusDestinations(input: string): CampusQuickDestination
   const locationQuestion = /在哪|位置|怎麼走|如何走|帶我去|走去|導航|找教室|地圖/.test(phrase);
   const busQuestion = /公車|巴士|站牌|到站|搭車|幾號車/.test(phrase);
 
-  if (/\bwow\s*class\b|\btron\s*class\b|玩課雲/.test(normalized)) result.push('/school-courses');
+  if (/\bwow\s*class\b|\btron\s*class\b|玩課雲/.test(normalized)) result.push('/classroom');
   if (locationQuestion && !busQuestion) result.push('/map');
   match(/公車|巴士|站牌|到站|搭車|幾號車/, '/bus');
   match(/交作業|繳作業|繳交作業|交報告|繳報告|作業|測驗|教材|上傳作業/, '/classroom');

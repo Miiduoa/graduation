@@ -71,15 +71,16 @@ it('provides a named header shortcut to the platform workspace without starting 
   expect(shortcut.props.accessibilityRole).toBe('button');
   expect(shortcut.props.accessibilityLabel).toBe('開啟課程與作業');
   await fireEventAsync.press(shortcut);
-  expect(safeNavigate).toHaveBeenCalledWith(mockNavigation, 'NuniWorkspace');
+  expect(safeNavigate).toHaveBeenCalledWith(mockNavigation, 'NuniWorkspace', { tab: 'courses' });
   expect(mockAuth.signIn).not.toHaveBeenCalled();
 });
 
 it.each([false, true])('keeps manual import independent of provider availability (%s)', async (available) => {
   mockProviderAvailable = available;
   const view = await landing();
-  expect(Boolean(view.queryByTestId('school-login-start'))).toBe(available);
-  expect(Boolean(view.queryByTestId('school-login-hint'))).toBe(!available);
+  expect(view.queryByTestId('school-login-start')).toBeNull();
+  expect(view.getByText(/學校帳號連線已停止/)).toBeTruthy();
+  expect(view.queryByText('使用學號連線')).toBeNull();
   await fireEventAsync.press(view.getByTestId('school-import-start'));
   expect(safeNavigate).toHaveBeenCalledWith(mockNavigation, 'PersonalImport', {
     kind: 'timetable',

@@ -6,6 +6,8 @@ import { askCampusAssistant } from '../features/campusAssistant';
 import { confirmCampusAgentWrite } from '../features/campusAssistantActions';
 import { refreshCampusSenseSnapshot } from '../services/campusSenseSnapshot';
 import { scheduleCampusAssignmentReminder, cancelCampusAssignmentReminder, getCampusAssignmentReminderStatus } from '../services/campusAssignmentReminders';
+import { runOfflineCampusTool } from '../services/offlineCampusTools';
+import { resolveLocalCampusSemanticReads } from '../services/localCampusSemanticReads';
 const mockClose = jest.fn();
 let mockOverlay = { visible: true, mode: 'chat', initialPrompt: '查校方公告' };
 jest.mock('../app/useAIOverlay', () => ({
@@ -199,6 +201,65 @@ test('a verified offline timetable result opens only its allowlisted local servi
   expect(navigate).toHaveBeenCalledWith('學習', {
     screen: 'PersonalTimetable',
     params: undefined,
+  });
+});
+
+test('an offline classroom reply opens the NuniWorkspace courses tab', async () => {
+  const question = '我有幾份作業還沒交';
+  request.mockImplementationOnce(async ({ messages }) => {
+    const reply = runOfflineCampusTool(messages[messages.length - 1].content, {
+      schoolId: 'pu', schoolName: '靜宜大學', checkedAt: new Date().toISOString(),
+      timetable: { source: 'not-available', updatedAt: null, courses: [] },
+    });
+    expect(reply).toMatchObject({ tool: 'online-required', route: '/classroom' });
+    return { ...reply, source: 'device', hasActions: false };
+  });
+  const navigate = jest.fn();
+  const view = render(<CampusAssistantScreen navigation={{ navigate }} />);
+  fireEvent.changeText(view.getByLabelText('詢問校園助理'), question);
+  await act(async () => fireEvent.press(view.getByText('送出問題')));
+  expect(view.getByText('手機離線工具')).toBeTruthy();
+  expect(request).toHaveBeenCalledWith(expect.objectContaining({
+    mode: 'device', messages: [{ role: 'user', content: question }],
+  }));
+  fireEvent.press(view.getByText('開啟課程與作業'));
+  expect(navigate).toHaveBeenCalledWith('我的', {
+    screen: 'NuniWorkspace', params: { tab: 'courses' },
+  });
+});
+
+test('a local assignment read card opens the NuniWorkspace courses tab', async () => {
+  const checkedAt = new Date().toISOString();
+  request.mockImplementationOnce(async ({ messages }) => {
+    const reply = await resolveLocalCampusSemanticReads({
+      messages, uid: 'A', schoolId: 'pu', assertCurrent: () => {},
+      context: {
+        schoolId: 'pu', schoolName: '靜宜大學', checkedAt,
+        timetable: { source: 'not-available', updatedAt: null, courses: [] },
+      },
+      snapshot: {
+        userId: 'A', schoolId: 'pu', checkedAt,
+        schedule: { status: 'unavailable', count: null },
+        assignments: {
+          status: 'available', count: 1,
+          items: [{ title: '資料庫作業', groupName: '資料庫', dueAt: null }],
+        },
+        announcements: { status: 'available', items: [] },
+      },
+      generate: async () => ({ content: '{"v":1,"calls":[{"tool":"assignments"}]}', finishReason: 'stop' }),
+    });
+    expect(reply?.results).toEqual([expect.objectContaining({ route: '/classroom', status: 'available' })]);
+    return { content: reply?.content, localReads: reply?.results, source: 'device', tool: 'local-agent', hasActions: false };
+  });
+  const navigate = jest.fn();
+  const view = render(<CampusAssistantScreen navigation={{ navigate }} />);
+  fireEvent.changeText(view.getByLabelText('詢問校園助理'), '有哪些待交作業？');
+  await act(async () => fireEvent.press(view.getByText('送出問題')));
+  expect(view.getByText('手機工具查詢')).toBeTruthy();
+  expect(view.getByText(/• 資料庫作業/)).toBeTruthy();
+  fireEvent.press(view.getByText('開啟課程與作業核對'));
+  expect(navigate).toHaveBeenCalledWith('我的', {
+    screen: 'NuniWorkspace', params: { tab: 'courses' },
   });
 });
 
@@ -448,8 +509,8 @@ test('the seven-day agent entry shows sourced steps and only navigates to verifi
   expect(confirmCampusAgentWrite).not.toHaveBeenCalled();
 
   fireEvent.press(view.getByText('開啟課程與作業核對'));
-  expect(navigate).toHaveBeenCalledWith('學習', {
-    screen: 'CoursesHome', params: undefined,
+  expect(navigate).toHaveBeenCalledWith('我的', {
+    screen: 'NuniWorkspace', params: { tab: 'courses' },
   });
   expect(confirmCampusAgentWrite).not.toHaveBeenCalled();
 });
@@ -755,3 +816,24 @@ test('no real due time means the agent never offers a notification action', asyn
   expect(view.queryByText('設定手機本機截止提醒')).toBeNull();
   expect(scheduleCampusAssignmentReminder).not.toHaveBeenCalled();
 });
+
+
+test.each(['draft', 'reply'] as const)(
+  'the %s course shortcut forwards the native courses tab',
+  async (location) => {
+    const navigate = jest.fn();
+    request.mockResolvedValueOnce({ content: '請前往課程查看作業。', hasActions: false });
+    const view = render(<CampusAssistantScreen navigation={{ navigate }} />);
+    selectCampusMode(view);
+    fireEvent.changeText(view.getByLabelText('詢問校園助理'), '我要交作業');
+    if (location === 'reply') {
+      await act(async () => fireEvent.press(view.getByText('送出問題')));
+      fireEvent.press(view.getByText('查看課程與作業'));
+    } else {
+      fireEvent.press(view.getByText('前往課程與作業'));
+    }
+    expect(navigate).toHaveBeenCalledWith('我的', {
+      screen: 'NuniWorkspace', params: { tab: 'courses' },
+    });
+  },
+);

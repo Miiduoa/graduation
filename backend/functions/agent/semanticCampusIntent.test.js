@@ -33,23 +33,25 @@ describe('read-only AI semantic intent', () => {
   test('accepts only known destinations, never writes or arbitrary URLs', () => {
     const value = parseModelCampusIntent(JSON.stringify({
       summary: '先開啟課程。',
-      destinations: ['/classroom', '/submit-homework', 'https://evil.example', '/classroom', '/map'],
+      destinations: ['/classroom', '/school-courses', '/submit-homework', 'https://evil.example', '/classroom', '/map'],
     }));
     expect(value.destinations).toEqual(['/classroom', '/map']);
     expect(value.destinations.every(x => SAFE_DESTINATIONS.includes(x))).toBe(true);
   });
 
-  test('accepts the named school platform as a navigation destination', async () => {
+  test('routes retired school platform requests to the native classroom', async () => {
     const model = jest.fn(async () => ({
       provider: 'gemini', content: JSON.stringify({
-        summary: '開啟 WOW Class 課程頁。',
-        destinations: ['/school-courses'],
+        summary: '開啟 nuni 原生課堂。',
+        destinations: ['/classroom'],
         clarifyingQuestion: null,
       }),
     }));
     const result = await understandCampusUtterance({ utterance: '我要開玩課雲', schoolId: 'pu' }, model);
-    expect(result).toMatchObject({ status: 'understood', destinations: ['/school-courses'] });
+    expect(result).toMatchObject({ status: 'understood', destinations: ['/classroom'] });
     expect(model.mock.calls[0][0].messages[0].content).toContain('WOW Class、TronClass 或玩課雲');
+    expect(model.mock.calls[0][0].messages[0].content).toContain('導向 nuni 原生課堂 /classroom');
+    expect(model.mock.calls[0][0].messages[0].content).not.toContain('/school-courses');
     expect(model.mock.calls[0][0]).not.toHaveProperty('toolDefs');
   });
 
@@ -61,6 +63,7 @@ describe('read-only AI semantic intent', () => {
   test('rejects malformed and unsupported proposals', () => {
     expect(parseModelCampusIntent('幫你完成付款了！')).toBeNull();
     expect(parseModelCampusIntent('{"destinations":["/delete-all"],"summary":"ok"}')).toBeNull();
+    expect(parseModelCampusIntent('{"destinations":["/school-courses"],"summary":"ok"}')).toBeNull();
     expect(parseModelCampusIntent('{"destinations":[],"summary":"已繳交"}')).toBeNull();
     expect(parseModelCampusIntent('[]')).toBeNull();
   });
