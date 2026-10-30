@@ -18,11 +18,15 @@ import {
 } from './loginRateLimit';
 import {
   createPuCampusGateway,
+  identityBelongsToAccount,
   PuCampusError,
   type CampusLoginRoute,
   type CampusLoginStage,
   type PuCampusGateway,
+  type TronClassSession,
 } from './puCampusClient';
+import { isCampusHostBlocked } from './puCampusCircuit';
+import { isEcampusFetchPausedForLogin, isStudentLoginViaTronClass } from './studentLoginSwitches';
 import {
   canonicalizePuStudentId,
   normalizePuAccount,
@@ -105,6 +109,8 @@ export const TEACHER_SCHOOL_UNAVAILABLE = SCHOOL_UNAVAILABLE;
 export const TEACHER_LMS_UNAVAILABLE = TEACHER_LMS_UNAVAILABLE_COPY;
 export { TEACHER_LMS_UNAVAILABLE_CODE };
 export const TEACHER_IDENTITY_UNVERIFIED = '暫時無法驗證老師身分';
+export const STUDENT_IDENTITY_UNVERIFIED = '暫時無法驗證學生身分';
+export const STUDENT_ROLE_REJECTED = '此帳號不是學生身分';
 export {
   DEFAULT_STUDENT_LMS_HOP_TIMEOUT_MS,
   DEFAULT_STUDENT_LMS_TOTAL_TIMEOUT_MS,
@@ -244,6 +250,7 @@ function isRetryableCampusFailure(error: unknown): boolean {
   return error instanceof PuCampusError && (error.kind === 'timeout' || error.kind === 'unavailable');
 }
 
+
 function studentUid(config: SchoolLoginConfig, studentId: string): string {
   return `${config.uid.studentPrefix}${studentId.toLowerCase()}`;
 }
@@ -277,7 +284,12 @@ function clientMessage(
 ): { status: number; message: string; code?: string } {
   if (error.kind === 'credentials') return { status: 401, message: '學號或密碼錯誤' };
   if (error.kind === 'closed') return { status: 503, message: '尚未開放' };
-  if (error.kind === 'unverified') return { status: 503, message: TEACHER_IDENTITY_UNVERIFIED };
+  if (error.kind === 'unverified') {
+    return {
+      status: 503,
+      message: route === 'teacher' ? TEACHER_IDENTITY_UNVERIFIED : STUDENT_IDENTITY_UNVERIFIED,
+    };
+  }
   if (route === 'teacher' && (error.kind === 'timeout' || error.kind === 'unavailable')) {
     return { status: 503, message: TEACHER_LMS_UNAVAILABLE, code: TEACHER_LMS_UNAVAILABLE_CODE };
   }
@@ -553,7 +565,95 @@ async function loginStudentWithAlternateUid(
   }
 }
 
+
+async function loginStudentIdentity(
+  campus: PuCampusGateway,
+  portalUids: readonly string[],
+  password: string,
+  remainingMs: () => number,
+): Promise<{ session: TronClassSession; portalUid: string }> {
+  const uids = portalUids.filter((uid) => uid.length > 0).slice(0, MAX_STUDENT_CREDENTIAL_POSTS);
+  const first = uids[0];
+  if (!first) {
+    throw new PuLoginHttpError(400, '學號格式不正確');
+  }
+  let posts = 0;
+  async function attempt(uid: string) {
+    if (posts >= MAX_STUDENT_CREDENTIAL_POSTS) {
+      throw new PuLoginHttpError(503, SCHOOL_UNAVAILABLE);
+    }
+    const left = remainingMs();
+    if (left <= 0) {
+      throw new PuCampusError('timeout', '學校系統無回應', {
+        route: 'student',
+        stage: 'submit',
+        code: 'DEADLINE',
+      });
+    }
+    posts += 1;
+    return campus.loginTronClass(uid, password, {
+      timeoutMs: left,
+      hopTimeoutMs: studentLmsHopTimeoutMs(),
+      route: 'student',
+    });
+  }
+  try {
+    return { session: await attempt(first), portalUid: first };
+  } catch (error) {
+    const alternate = uids[1];
+    // 只在帳密格式被拒時改試另一種 UID，不對同一組帳密做逾時重試。
+    if (error instanceof PuCampusError && error.kind === 'credentials' && alternate) {
+      try {
+        return { session: await attempt(alternate), portalUid: alternate };
+      } catch (second) {
+        if (second instanceof PuCampusError) throwMappedCampusError(second, 'student');
+        throw second;
+      }
+    }
+    if (error instanceof PuCampusError) throwMappedCampusError(error, 'student');
+    throw error;
+  }
+}
+
+function assertStudentIdentity(canonicalStudentId: string, session: TronClassSession): void {
+  if (!hasTronClassSessionCookie(session.cookies)) {
+    throw new PuLoginHttpError(401, '學號或密碼錯誤');
+  }
+  if (!session.profile) {
+    throw new PuLoginHttpError(503, STUDENT_IDENTITY_UNVERIFIED);
+  }
+  if (!identityBelongsToAccount(canonicalStudentId, session.profile)) {
+    throw new PuLoginHttpError(401, '學號或密碼錯誤');
+  }
+  const role = String(session.role || '').trim().toLowerCase();
+  if (!role) {
+    throw new PuLoginHttpError(503, STUDENT_IDENTITY_UNVERIFIED);
+  }
+  // 只接受 TronClass profile 明確為 student；老師、助教、校管或未知角色一律拒絕。
+  if (role !== 'student') {
+    throw new PuLoginHttpError(403, STUDENT_ROLE_REJECTED, { route: 'student', stage: 'verify' });
+  }
+}
+
 async function signInStudent(
+  canonicalStudentId: string,
+  portalUids: readonly string[],
+  password: string,
+  campus: PuCampusGateway,
+  deps: SignInPuDeps,
+  config: SchoolLoginConfig,
+): Promise<Record<string, unknown>> {
+  if (config.studentAdapter !== 'form-password') {
+    closedWithoutCampus();
+  }
+  // 開關關閉（預設）時維持 alcat 舊流程；設回關閉即可回滾。
+  if (!isStudentLoginViaTronClass()) {
+    return signInStudentViaPortal(canonicalStudentId, portalUids, password, campus, deps, config);
+  }
+  return signInStudentViaTronClass(canonicalStudentId, portalUids, password, campus, deps, config);
+}
+
+async function signInStudentViaPortal(
   canonicalStudentId: string,
   portalUids: readonly string[],
   password: string,
@@ -659,6 +759,114 @@ async function signInStudent(
   };
 }
 
+
+async function signInStudentViaTronClass(
+  canonicalStudentId: string,
+  portalUids: readonly string[],
+  password: string,
+  campus: PuCampusGateway,
+  deps: SignInPuDeps,
+  config: SchoolLoginConfig,
+): Promise<Record<string, unknown>> {
+  if (config.studentAdapter !== 'form-password') {
+    closedWithoutCampus();
+  }
+  const { session, portalUid } = await withStudentLoginBudget((remainingMs) =>
+    loginStudentIdentity(campus, portalUids, password, remainingMs),
+  );
+  assertStudentIdentity(canonicalStudentId, session);
+
+  const studentId = canonicalStudentId;
+  const displayName = String(session.userName || `${studentId} 同學`).trim();
+  const department = '';
+  const email = schoolEmail(config, studentId);
+  const uid = studentUid(config, studentId);
+
+  const schoolRole = await writeSchoolLoginProfile({
+    db: deps.db,
+    uid,
+    schoolId: config.membershipSchoolId,
+    profile: {
+      email,
+      displayName,
+      studentId,
+      department,
+      role: 'student',
+    },
+    membershipFields: {
+      studentId,
+      displayName,
+      department,
+    },
+  });
+
+  if (requestAbandoned(deps)) {
+    throw new PuLoginHttpError(503, SCHOOL_UNAVAILABLE);
+  }
+
+  const customToken = await mintToken(deps, uid, {
+    schoolId: config.schoolId,
+    role: schoolRole.role,
+  });
+
+  if (requestAbandoned(deps)) {
+    throw new PuLoginHttpError(503, SCHOOL_UNAVAILABLE);
+  }
+
+  const now = deps.now?.() ?? Date.now();
+  const tronClassSessionId = await writeSession(
+    deps.db,
+    '_puTronClassSessions',
+    {
+      studentId,
+      ownerUid: uid,
+      cookies: session.cookies,
+      userId: session.userId,
+      userName: session.userName,
+    },
+    now,
+  );
+
+  if (requestAbandoned(deps)) {
+    await discardWrittenSession(deps.db, `_puTronClassSessions/${tronClassSessionId}`);
+    throw new PuLoginHttpError(503, SCHOOL_UNAVAILABLE);
+  }
+
+  scheduleCampusSsoTask(deps.scheduleCampusSso, () =>
+    attachStudentPortalSession({
+      campus,
+      portalUid,
+      password,
+      studentId,
+      uid,
+      tronClassSessionId,
+      db: deps.db,
+      now,
+      school: config.schoolId,
+    }),
+  );
+
+  return {
+    success: true,
+    customToken,
+    uid,
+    studentId,
+    displayName,
+    department,
+    isNewUser: schoolRole.isNewUser,
+    role: schoolRole.role,
+    puSessionId: null,
+    tronClassSessionId,
+    tronClassUserId: session.userId,
+    tronClassOk: true,
+    studentInfo: session.userName ? { name: session.userName, class: null } : null,
+    courses: null,
+    grades: null,
+    creditAudit: null,
+    announcements: null,
+  };
+}
+
 async function portalSessionStillOwned(
   db: SignInPuDeps['db'],
   puSessionId: string,
@@ -735,6 +943,87 @@ async function attachStudentLmsSession(options: {
     logStudentSoftFailure(error, options.school, startedAt);
   } finally {
     if (!linked) await clearLmsConnectingState(options.db, options.puSessionId, options.uid);
+  }
+}
+
+
+function alcatHostBlocked(): boolean {
+  return isCampusHostBlocked('alcat.pu.edu.tw');
+}
+
+/** E 校園被斷路或暫停抓取時，背景不再補登 alcat。 */
+function skipStudentPortalAttach(): boolean {
+  return isEcampusFetchPausedForLogin() || alcatHostBlocked();
+}
+
+/** 背景補登完成時，使用者可能已登出；同一位使用者的 TronClass session 不在就不寫入。 */
+async function tronClassSessionStillOwned(
+  db: SignInPuDeps['db'],
+  tronClassSessionId: string,
+  ownerUid: string,
+  now: number,
+): Promise<boolean> {
+  const ref = db.doc('_puTronClassSessions/' + tronClassSessionId) as {
+    get?: () => Promise<{ exists?: boolean; data?: () => Record<string, unknown> | undefined }>;
+  };
+  if (typeof ref.get !== 'function') return false;
+  const snap = await ref.get();
+  if (snap.exists !== true) return false;
+  const data = typeof snap.data === 'function' ? snap.data() : undefined;
+  if (!data || data.ownerUid !== ownerUid) return false;
+  const expiresAt = data.expiresAt as { toMillis?: () => number } | Date | number | string | undefined;
+  const expiry =
+    expiresAt instanceof Date
+      ? expiresAt.getTime()
+      : typeof expiresAt === 'number'
+        ? expiresAt
+        : typeof expiresAt === 'string'
+          ? Date.parse(expiresAt)
+          : typeof expiresAt?.toMillis === 'function'
+            ? expiresAt.toMillis()
+            : Number.NaN;
+  return !Number.isFinite(expiry) || expiry > now;
+}
+
+async function attachStudentPortalSession(options: {
+  campus: PuCampusGateway;
+  portalUid: string;
+  password: string;
+  studentId: string;
+  uid: string;
+  tronClassSessionId: string;
+  db: SignInPuDeps['db'];
+  now: number;
+  school: string;
+}): Promise<void> {
+  const startedAt = Date.now();
+  try {
+    if (skipStudentPortalAttach()) return;
+    if (!(await tronClassSessionStillOwned(options.db, options.tronClassSessionId, options.uid, Date.now()))) {
+      return;
+    }
+    const login = await options.campus.loginStudent(options.portalUid, options.password, {
+      timeoutMs: studentPortalTimeoutMs(),
+      hopTimeoutMs: studentLoginHopTimeoutMs(studentPortalTimeoutMs(), studentPortalTimeoutMs()),
+    });
+    if (!login.cookies || Object.keys(login.cookies).length === 0) return;
+    if (skipStudentPortalAttach()) return;
+    if (!(await tronClassSessionStillOwned(options.db, options.tronClassSessionId, options.uid, Date.now()))) {
+      return;
+    }
+    await writeSession(
+      options.db,
+      '_puSessions',
+      {
+        studentId: options.studentId,
+        ownerUid: options.uid,
+        cookies: login.cookies,
+        tronClassSessionId: options.tronClassSessionId,
+      },
+      options.now,
+    );
+  } catch (error) {
+    logStudentSoftFailure(error, options.school, startedAt);
   }
 }
 

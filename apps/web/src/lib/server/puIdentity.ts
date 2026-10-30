@@ -38,8 +38,9 @@ export function isPuTeacherAccount(account: string): boolean {
 }
 
 /**
- * e 校園登入表單的 uid 沒有 maxlength 或 pattern，官方說明帳號欄只填靜宜帳號、不要加
- * @pu.edu.tw。有 s 前綴時先送小寫 s＋數字；否則先送數字。帳密錯誤時可再試另一種一次。
+ * 靜宜帳號可能是數字學號或 s 前綴。CAS／TronClass 與 e 校園接受的格式不一定相同，
+ * 因此帳密錯誤時可再試另一種一次。有 s 前綴時先送小寫 s＋數字，否則先送數字。
+ * 不會對同一組帳密做逾時重試。
  */
 export function providenceAlcatUidCandidates(rawAccount: string): string[] {
   const digits = canonicalizePuStudentId(rawAccount);

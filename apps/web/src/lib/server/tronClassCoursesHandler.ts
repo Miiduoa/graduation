@@ -61,6 +61,8 @@ function publicCourses(input: unknown) {
   });
 }
 
+const TRONCLASS_SESSION_SCAN_LIMIT = 20;
+
 export function createTronClassCoursesHandler({
   db,
   fetchCourses,
@@ -91,10 +93,32 @@ export function createTronClassCoursesHandler({
         .orderBy('expiresAt', 'desc').limit(1).get();
       const portalSnapshot = sessions.docs[0];
       const portal = portalSnapshot?.data();
-      if (portal?.ownerUid !== uid || !(schoolSessionExpiry(portal.expiresAt) > now())) reconnect();
-      const linkedId = portal.tronClassSessionId;
-      if (typeof linkedId !== 'string' || !/^[a-f0-9]{32}$/.test(linkedId)) {
-        if (schoolSessionExpiry(portal.lmsConnectingUntil) > now()) connecting();
+      const linkedFromPortal = typeof portal?.tronClassSessionId === 'string'
+        && /^[a-f0-9]{32}$/.test(portal.tronClassSessionId)
+        && portal.ownerUid === uid
+        ? portal.tronClassSessionId
+        : null;
+      let linkedId = linkedFromPortal;
+      if (!linkedId) {
+        // 不用 orderBy，避免 _puTronClassSessions 需要新增複合索引；在記憶體挑最新且未過期的一筆。
+        const lmsSessions = await db.collection('_puTronClassSessions')
+          .where('ownerUid', '==', uid)
+          .limit(TRONCLASS_SESSION_SCAN_LIMIT)
+          .get();
+        let newestExpiry = -Infinity;
+        for (const owned of lmsSessions.docs) {
+          const ownedData = owned?.data();
+          const ownedId = owned?.ref?.id;
+          const expiry = schoolSessionExpiry(ownedData?.expiresAt);
+          if (ownedData?.ownerUid === uid && expiry > now() && expiry > newestExpiry
+            && typeof ownedId === 'string' && /^[a-f0-9]{32}$/.test(ownedId)) {
+            newestExpiry = expiry;
+            linkedId = ownedId;
+          }
+        }
+      }
+      if (!linkedId) {
+        if (portal?.ownerUid === uid && schoolSessionExpiry(portal.lmsConnectingUntil) > now()) connecting();
         reconnect();
       }
       const sessionRef = db.doc(`_puTronClassSessions/${linkedId}`);
@@ -115,13 +139,16 @@ export function createTronClassCoursesHandler({
         throw error;
       }
       await requireAcademicAccount(db, uid);
-      const [currentPortal, currentSession] = await Promise.all([portalSnapshot.ref.get(), sessionRef.get()]);
-      if (!currentPortal.exists || currentPortal.data()?.ownerUid !== uid ||
-        currentPortal.data()?.tronClassSessionId !== linkedId ||
-        !(schoolSessionExpiry(currentPortal.data()?.expiresAt) > now()) ||
-        !currentSession.exists || currentSession.data()?.ownerUid !== uid ||
+      const currentSession = await sessionRef.get();
+      if (!currentSession.exists || currentSession.data()?.ownerUid !== uid ||
         !(schoolSessionExpiry(currentSession.data()?.expiresAt) > now()) ||
         !schoolSessionCookies(currentSession.data()?.cookies)) reconnect();
+      if (linkedFromPortal && portalSnapshot) {
+        const currentPortal = await portalSnapshot.ref.get();
+        if (!currentPortal.exists || currentPortal.data()?.ownerUid !== uid ||
+          currentPortal.data()?.tronClassSessionId !== linkedId ||
+          !(schoolSessionExpiry(currentPortal.data()?.expiresAt) > now())) reconnect();
+      }
 
       return { success: true, ownerUid: uid, schoolId: 'pu', source: 'pu-tronclass',
         fetchedAt: new Date(now()).toISOString(), status, courses };

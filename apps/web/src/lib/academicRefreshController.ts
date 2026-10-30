@@ -4,7 +4,8 @@ export type AcademicRefreshOutcome =
   | 'reconnect'
   | 'permission'
   | 'unconfigured'
-  | 'connecting';
+  | 'connecting'
+  | 'officialUnavailable';
 
 export type AcademicAutomaticStatus =
   | 'off'

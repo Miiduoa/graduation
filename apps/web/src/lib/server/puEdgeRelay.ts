@@ -1,5 +1,9 @@
 import { createIpv4PinnedFetch } from './campusIpv4Fetch';
 import {
+  assertCampusHostAllowed,
+  noteCampusResponse,
+} from './puCampusCircuit';
+import {
   isAllowedRelayTarget,
   isRelayPlacementMiss,
   normalizeRelayHostname,
@@ -168,6 +172,26 @@ function logClientRelay(fields: {
  * 只有 `PU_EDGE_RELAY_URL` 與 `PU_EDGE_RELAY_SECRET` 都有設時才轉送；否則維持 IPv4 直連。
  * 備援三個變數都設時，`PU_EDGE_RELAY_ALT_HOSTS` 列到的主機改走備援，其餘維持主轉送。
  */
+async function inspectCampusFetchResponse(url: string, response: Response): Promise<Response> {
+  if (response.status === 555) {
+    noteCampusResponse(url, response.status, '');
+  }
+  const type = response.headers.get('content-type') || '';
+  if (/text|html|json|xml/i.test(type)) {
+    const preview = await response.clone().text();
+    noteCampusResponse(url, response.status, preview);
+  }
+  return response;
+}
+
+function withCampusCircuit(fetchLike: FetchLike): FetchLike {
+  return async (url, init) => {
+    assertCampusHostAllowed(String(url));
+    const response = await fetchLike(url, init);
+    return inspectCampusFetchResponse(String(url), response);
+  };
+}
+
 export function createPuRelayFetch(
   options: {
     env?: PuEdgeRelayEnv | NodeJS.ProcessEnv;
@@ -181,9 +205,9 @@ export function createPuRelayFetch(
   const config = readPuEdgeRelayConfig(env);
   const alt = readPuEdgeRelayAltConfig(env);
   const direct = options.directFetch ?? createIpv4PinnedFetch();
-  if (!config) return direct;
+  if (!config) return withCampusCircuit(direct);
   const relayFetch = options.fetch ?? ((url, init) => fetch(url, init));
-  return async (url, init = {}) => {
+  return withCampusCircuit(async (url, init = {}) => {
     const normalized = normalizeRelayTarget(String(url)) || String(url);
     if (!isAllowedRelayTarget(normalized, ['*.pu.edu.tw'])) {
       return direct(url, init);
@@ -238,5 +262,5 @@ export function createPuRelayFetch(
       });
     }
     return response;
-  };
+  });
 }

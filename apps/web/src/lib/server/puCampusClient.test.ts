@@ -7,12 +7,18 @@ import {
   campusPageLooksClosed,
   createPuCampusGateway,
   DEFAULT_TIMEOUT_MS,
+  identityBelongsToAccount,
   isCasPasswordPostUrl,
   isTransientCampusError,
   PuCampusError,
   rewriteAllowedCampusLocation,
   rewriteCampusPortalLocation,
 } from './puCampusClient';
+import {
+  CAMPUS_BLOCK_PAGE_TEXT,
+  CAMPUS_HOST_BLOCKED_CODE,
+  resetCampusCircuitForTests,
+} from './puCampusCircuit';
 
 const fixture = (name: string) =>
   readFileSync(join(dirname(fileURLToPath(import.meta.url)), 'fixtures', name), 'utf8');
@@ -26,6 +32,7 @@ const STUDENT = '1110700321';
 const SECRET = 'super-secret-pass';
 
 afterEach(() => {
+  resetCampusCircuitForTests();
   vi.useRealTimers();
 });
 
@@ -412,7 +419,31 @@ it('accepts TronClass login only after profile returns this account', async () =
     userName: '王老師',
     role: 'teacher',
     cookies: { session: 'tc-cookie' },
+    profile: expect.objectContaining({ login_name: 'changyi' }),
   });
+});
+
+it('treats digit and s-prefix student identifiers as the same campus account', () => {
+  expect(identityBelongsToAccount('1110700321', { login_name: 's1110700321' })).toBe(true);
+  expect(identityBelongsToAccount('s1110700321', { login_name: '1110700321' })).toBe(true);
+  expect(identityBelongsToAccount('1110700321', { login_name: 'changyi' })).toBe(false);
+});
+
+it('trips the alcat circuit on HTTP 555 instead of retrying credentials', async () => {
+  const fetchMock = vi.fn(async (url: string) => {
+    if (String(url).endsWith('/')) return htmlResponse(555, CAMPUS_BLOCK_PAGE_TEXT);
+    throw new Error(`unexpected ${url}`);
+  });
+  const gateway = createPuCampusGateway({ fetch: fetchMock });
+  await expect(gateway.loginStudent(STUDENT, SECRET)).rejects.toMatchObject({
+    kind: 'unavailable',
+    code: CAMPUS_HOST_BLOCKED_CODE,
+  });
+  await expect(gateway.loginStudent(STUDENT, SECRET)).rejects.toMatchObject({
+    kind: 'unavailable',
+    code: CAMPUS_HOST_BLOCKED_CODE,
+  });
+  expect(fetchMock).toHaveBeenCalledTimes(1);
 });
 
 it('reads student info even if the portal HTML still has a maintenance comment', async () => {
@@ -595,7 +626,7 @@ it('falls back to identity CAS when native TronClass login returns 400', async (
   expect(fetchMock.mock.calls.some(([url]) => String(url).includes('evil'))).toBe(false);
 });
 
-it('keeps a CAS student session when /api/profile aborts after /user/index', async () => {
+it('rejects a CAS student session when /api/profile aborts after /user/index', async () => {
   const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
     const href = String(url);
     const method = String(init?.method || 'GET').toUpperCase();
@@ -636,11 +667,9 @@ it('keeps a CAS student session when /api/profile aborts after /user/index', asy
     throw new Error(`unexpected ${method} ${href}`);
   });
   const gateway = createPuCampusGateway({ fetch: fetchMock });
-  await expect(gateway.loginTronClass('changyi', SECRET, { route: 'student' })).resolves.toMatchObject({
-    userId: 57,
-    userName: '陳同學',
-    role: 'student',
-    cookies: expect.objectContaining({ session: 'tc-cas' }),
+  await expect(gateway.loginTronClass(STUDENT, SECRET, { route: 'student' })).rejects.toMatchObject({
+    kind: 'timeout',
+    route: 'student',
   });
   expect(
     fetchMock.mock.calls.filter(([url]) => {

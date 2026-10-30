@@ -89,9 +89,18 @@ it('does not read when the token or school membership is missing', async () => {
   expect(fetchCourses).not.toHaveBeenCalled();
 });
 
+it('reads an owned WOW Class session even without a portal link', async () => {
+  const { request, store, fetchCourses } = setup();
+  store.docs.delete(PORTAL);
+  const response = await request();
+  expect(response.status).toBe(200);
+  expect(fetchCourses).toHaveBeenCalledWith({ session: 'lms-secret' }, { userId: 10, status: 'ongoing' });
+});
+
 it('does not substitute campus cookies when TronClass did not connect during login', async () => {
   const { request, store, fetchCourses } = setup();
   store.docs.get(PORTAL)!.tronClassSessionId = null;
+  store.docs.delete(LMS);
   const response = await request();
   expect((await response.json()).error.status).toBe('FAILED_PRECONDITION');
   expect(fetchCourses).not.toHaveBeenCalled();
@@ -99,6 +108,7 @@ it('does not substitute campus cookies when TronClass did not connect during log
 
 it('reports WOW Class as connecting while the login sidecar window is still open', async () => {
   const { request, store, fetchCourses } = setup();
+  store.docs.delete(LMS);
   Object.assign(store.docs.get(PORTAL)!, {
     tronClassSessionId: null,
     lmsConnectingUntil: new Date(Date.now() + 90_000),
@@ -152,4 +162,47 @@ it('maps session expiry to reconnect and does not expose underlying network erro
   const response = await request();
   expect(response.status).toBe(503);
   expect(JSON.stringify(await response.json())).not.toContain('lms-secret');
+});
+
+it('finds the WOW Class session without orderBy so no composite index is needed', async () => {
+  const { request, store, fetchCourses } = setup();
+  store.docs.delete(PORTAL);
+  store.docs.delete(LMS);
+  const now = Date.now();
+  const expiredId = 'b'.repeat(32);
+  const olderId = 'c'.repeat(32);
+  const newestId = 'd'.repeat(32);
+  store.docs.set(`_puTronClassSessions/${expiredId}`, {
+    ownerUid: UID, cookies: { session: 'expired' }, userId: 10, expiresAt: new Date(now - 1_000),
+  });
+  store.docs.set(`_puTronClassSessions/${olderId}`, {
+    ownerUid: UID, cookies: { session: 'older' }, userId: 10, expiresAt: new Date(now + 30_000),
+  });
+  store.docs.set(`_puTronClassSessions/${newestId}`, {
+    ownerUid: UID, cookies: { session: 'newest' }, userId: 10, expiresAt: new Date(now + 90_000),
+  });
+  store.docs.set(`_puTronClassSessions/${'e'.repeat(32)}`, {
+    ownerUid: 'pu-someone-else', cookies: { session: 'other' }, userId: 11, expiresAt: new Date(now + 999_000),
+  });
+  const db = store.db as unknown as { collection: (name: string) => Record<string, unknown> };
+  const original = db.collection.bind(db);
+  const limits: number[] = [];
+  const guard = (query: Record<string, unknown>, name: string): Record<string, unknown> => ({
+    ...query,
+    where: (...args: unknown[]) =>
+      guard((query.where as (...a: unknown[]) => Record<string, unknown>)(...args), name),
+    limit: (count: number) => {
+      if (name === '_puTronClassSessions') limits.push(count);
+      return guard((query.limit as (n: number) => Record<string, unknown>)(count), name);
+    },
+    orderBy: (...args: unknown[]) => {
+      if (name === '_puTronClassSessions') throw new Error('orderBy needs a composite index');
+      return guard((query.orderBy as (...a: unknown[]) => Record<string, unknown>)(...args), name);
+    },
+  });
+  db.collection = (name: string) => guard(original(name), name);
+  const response = await request();
+  expect(response.status).toBe(200);
+  expect(limits).toEqual([20]);
+  expect(fetchCourses).toHaveBeenCalledWith({ session: 'newest' }, { userId: 10, status: 'ongoing' });
 });

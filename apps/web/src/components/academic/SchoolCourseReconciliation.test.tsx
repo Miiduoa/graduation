@@ -83,6 +83,16 @@ it('來源失敗不顯示零學分，重新核對可以恢復', async () => {
   expect(screen.queryByRole('alert')).toBeNull();
 });
 
+it('官方課表無法取得時不顯示零學分也不要求重新登入', async () => {
+  vi.mocked(loadAcademicRecords).mockRejectedValueOnce(new AcademicConnectionError('officialUnavailable'));
+  render(<SchoolCourseReconciliation {...props()} />);
+  fireEvent.click(screen.getByRole('button', { name: '核對校方課表' }));
+  const alert = await screen.findByRole('alert');
+  expect(alert.textContent).toContain('官方課表暫時無法取得');
+  expect(screen.queryByText('0 學分')).toBeNull();
+  expect(screen.queryByRole('link', { name: '重新連線 e 校園' })).toBeNull();
+});
+
 it('重新核對失敗不繼續顯示先前的成功對照', async () => {
   render(<SchoolCourseReconciliation {...props()} />); await start();
   vi.mocked(loadAcademicRecords).mockRejectedValueOnce(new AcademicConnectionError('permission'));
