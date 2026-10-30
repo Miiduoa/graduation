@@ -173,7 +173,8 @@ it('returns pending for an uncertain POST even if school has not indexed the rec
 
 it('refuses to report an empty success when the school receipt API fails', async () => {
   const { check, source } = setup();
-  vi.mocked(source.fetchHomeworkSubmissions!).mockRejectedValue(new Error('HTTP 502'));
+  // Clear setup()'s queued successful responses so this failure is exercised.
+  vi.mocked(source.fetchHomeworkSubmissions!).mockReset().mockRejectedValue(new Error('HTTP 502'));
   const response = await check();
   expect(response.status).toBe(503);
   expect((await response.json()).error.message).toMatch(/無法查核/);
