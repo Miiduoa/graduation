@@ -1,4 +1,5 @@
 import { getAuthInstance } from '../firebase';
+import { assertPuEcampusDataFetchEnabled } from '@campus/shared/src/puEcampusDataPolicy';
 import { canUseHostedSchoolFallback, getCloudFunctionUrl } from './cloudFunctions';
 import type { PUCourseResult, PUGradeResult, PUStudentInfo } from './puDirectScraper';
 
@@ -26,6 +27,7 @@ async function loadOwnedSchoolRecords(
   uid: string,
   dataType: SchoolDataType,
 ): Promise<PUCourseResult | PUGradeResult> {
+  assertPuEcampusDataFetchEnabled();
   const label = dataType === 'courses' ? '課表' : '成績';
   const requester = getAuthInstance().currentUser;
   if (!requester || requester.uid !== uid || typeof requester.getIdToken !== 'function') {

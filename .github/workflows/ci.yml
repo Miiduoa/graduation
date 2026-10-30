@@ -266,6 +266,9 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      - name: Build shared modules used by the Web school data source
+        run: node scripts/build-functions-shared.cjs
+
       - name: Test web server lifecycle
         run: node --test deploy/web/start.test.cjs deploy/web/release-check.test.mjs deploy/web/transit-release-gate.test.mjs deploy/web/release-safety.test.mjs
 

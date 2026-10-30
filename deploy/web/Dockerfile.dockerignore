@@ -14,6 +14,7 @@
 !packages/shared/
 !packages/shared/**
 !scripts/
+!scripts/build-functions-shared.cjs
 !scripts/import-ai/
 !scripts/import-ai/**
 !backend/

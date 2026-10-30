@@ -4,6 +4,10 @@ import { dispatchFnRequest, type FnRuntime } from './fnDispatch';
 import { createMemoryGroupStore } from './memoryGroupStore';
 import { resetUidRateLimitForTests } from './uidRateLimit';
 import { getCloudFunctionUrl } from '../cloudFunctions';
+import {
+  PU_ECAMPUS_DATA_PAUSED_CODE,
+  PU_ECAMPUS_DATA_PAUSED_MESSAGE,
+} from '@campus/shared/src/puEcampusDataPolicy';
 
 const UID = 'pu-410000001';
 const SESSION = '_puSessions/current';
@@ -50,6 +54,24 @@ function setup() {
 }
 
 beforeEach(() => resetUidRateLimitForTests());
+
+it('preserves the existing session and returns the pause code when e-campus reads are stopped', async () => {
+  const { request, store, grades } = setup();
+  const session = store.docs.get(SESSION);
+  grades.mockResolvedValue({
+    success: false, grades: [], code: PU_ECAMPUS_DATA_PAUSED_CODE,
+    error: PU_ECAMPUS_DATA_PAUSED_MESSAGE,
+  });
+  const response = await request();
+  expect(response.status).toBe(503);
+  expect(await response.json()).toMatchObject({
+    error: {
+      status: 'UNAVAILABLE', message: PU_ECAMPUS_DATA_PAUSED_MESSAGE,
+      details: { code: PU_ECAMPUS_DATA_PAUSED_CODE },
+    },
+  });
+  expect(store.docs.get(SESSION)).toEqual(session);
+});
 
 it('uses the same-origin academic endpoint without enabling any Cloud Functions service', () => {
   expect(getCloudFunctionUrl('getMyAcademicRecords', { env: {} })).toBe('/api/fn/getMyAcademicRecords');

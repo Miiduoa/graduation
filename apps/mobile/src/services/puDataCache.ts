@@ -10,6 +10,7 @@
  */
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import type { PuCreditAuditPayload } from '@campus/shared/src';
+import { isPuEcampusDataFetchEnabled } from '@campus/shared/src/puEcampusDataPolicy';
 import { Platform } from 'react-native';
 import { getAuthInstance } from '../firebase';
 import { loadOwnedSchoolCourses, loadOwnedSchoolGrades } from './ownedSchoolAcademicRecords';
@@ -317,6 +318,7 @@ async function fetchPUCampusBackend<T>(
   dataType: PUCampusBackendDataType,
   extra: Record<string, unknown> = {},
 ): Promise<T | null> {
+  if (!isPuEcampusDataFetchEnabled()) return null;
   const sessionId = session.backendSessionId?.trim();
   if (!sessionId) return null;
 
@@ -525,6 +527,7 @@ export async function getAnyCachedCreditAudit(): Promise<PuCreditAuditPayload | 
 // ─── 單項刷新 ────────────────────────────────────────────
 
 export async function refreshCourses(session: PUSession): Promise<PUCourseResult | null> {
+  if (!isPuEcampusDataFetchEnabled()) return null;
   const generation = cacheGeneration;
   console.log('[puDataCache] refreshing courses…');
   if (session.backendSessionId || session.backendOwnerUid) {
@@ -552,6 +555,7 @@ export async function refreshCourses(session: PUSession): Promise<PUCourseResult
 }
 
 export async function refreshGrades(session: PUSession): Promise<PUGradeResult | null> {
+  if (!isPuEcampusDataFetchEnabled()) return null;
   const generation = cacheGeneration;
   console.log('[puDataCache] refreshing grades…');
   if (session.backendSessionId || session.backendOwnerUid) {
@@ -578,6 +582,7 @@ export async function refreshGrades(session: PUSession): Promise<PUGradeResult |
 }
 
 export async function refreshAnnouncements(session: PUSession): Promise<PUAnnouncement[] | null> {
+  if (!isPuEcampusDataFetchEnabled()) return null;
   const generation = cacheGeneration;
   console.log('[puDataCache] refreshing announcements…');
   if (session.backendSessionId || session.backendOwnerUid) {
@@ -609,6 +614,7 @@ export async function refreshAnnouncements(session: PUSession): Promise<PUAnnoun
 }
 
 export async function refreshStudentInfo(session: PUSession): Promise<PUStudentInfo | null> {
+  if (!isPuEcampusDataFetchEnabled()) return null;
   const generation = cacheGeneration;
   console.log('[puDataCache] refreshing studentInfo…');
   if (session.backendSessionId || session.backendOwnerUid) {
@@ -649,6 +655,7 @@ export async function refreshStudentInfo(session: PUSession): Promise<PUStudentI
 }
 
 export async function refreshCreditAudit(session: PUSession): Promise<PuCreditAuditPayload | null> {
+  if (!isPuEcampusDataFetchEnabled()) return null;
   const generation = cacheGeneration;
   // 後端只提供成績推導的 creditSummary，並沒有 v2 學分試算表。
   // 後端 session 的 Cookie 不在裝置上，不能把它當作原生直連登入。
@@ -1262,10 +1269,7 @@ export async function syncAllData(
   requireCurrentCache(generation);
 
   const successCount = [
-    courses,
-    grades,
-    announcements,
-    studentInfo,
+    ...(isPuEcampusDataFetchEnabled() ? [courses, grades, announcements, studentInfo] : []),
     tcCourses,
     tcActivities,
     tcModules,

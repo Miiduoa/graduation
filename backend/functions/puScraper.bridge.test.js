@@ -1,3 +1,9 @@
+// Keep the source-format fixtures independent of the operational read pause.
+jest.mock('./generated/shared/puEcampusDataPolicy', () => ({
+  ...jest.requireActual('./generated/shared/puEcampusDataPolicy'),
+  assertPuEcampusDataFetchEnabled: jest.fn(),
+}));
+
 const { EventEmitter } = require('events');
 const fs = require('fs');
 const path = require('path');
