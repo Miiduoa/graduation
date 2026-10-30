@@ -307,3 +307,21 @@ it('keeps archived attendance readable without offering check-in', async () => {
   const view = await openAttendance();
   expect(view.queryByRole('button', { name: '簽到' })).toBeNull();
 });
+
+it('preserves the in-flight check-in and confirmation across tabs', async () => {
+  const pending = deferred<unknown>();
+  mockRequest.mockImplementation((path, context, input) =>
+    path.endsWith('/check-in') ? pending.promise : response(path, context, input),
+  );
+  const view = await openAttendance();
+  fireEvent.press(view.getByRole('button', { name: '簽到' }));
+  fireEvent.press(view.getByRole('button', { name: '作業 0' }));
+  fireEvent.press(view.getByRole('button', { name: '點名' }));
+  const button = await view.findByRole('button', { name: '正在確認簽到…' });
+  fireEvent.press(button);
+  expect(button.props.accessibilityState.disabled).toBe(true);
+  await act(async () => pending.resolve({ accepted: true }));
+  await view.findByText('簽到待確認，請更新簽到狀態。');
+  fireEvent.press(view.getByRole('button', { name: '簽到' }));
+  expect(mockRequest.mock.calls.filter(([path]) => path.endsWith('/check-in'))).toHaveLength(1);
+});

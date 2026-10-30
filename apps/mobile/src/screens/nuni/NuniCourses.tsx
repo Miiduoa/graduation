@@ -85,7 +85,7 @@ import {
 } from '../../services/nuniActivityTasks';
 import { StudyAgenda } from './StudyAgenda';
 import { createNuniClassroom } from '@campus/shared/src/nuniClassroom';
-import { NuniAttendance } from './NuniAttendance';
+import { NuniAttendance, createAttendanceStore } from './NuniAttendance';
 
 type Classes = ReturnType<typeof createNuniClasses>;
 type Field = {
@@ -654,6 +654,7 @@ function CourseScope({
     () => createNuniClassroom((path, input) => request(path, session.context, input)),
     [request, session.context],
   );
+  const [attendanceStore] = useState(createAttendanceStore);
   const scrollRef = useRef<ScrollView>(null);
   const contentOffsetYRef = useRef(0);
   const [selected, setSelected] = useNuniDraftState<string | null>(
@@ -699,6 +700,7 @@ function CourseScope({
     >
       {selected ? (
         <CourseDetail
+          attendanceStore={attendanceStore}
           key={selected}
           id={selected}
           classes={classes}
@@ -986,6 +988,7 @@ type CourseData = {
   quizzes: NuniQuiz[];
 };
 function CourseDetail({
+  attendanceStore,
   id,
   classes,
   classroom,
@@ -995,6 +998,7 @@ function CourseDetail({
   scrollRef,
   contentOffsetYRef,
 }: {
+  attendanceStore: ReturnType<typeof createAttendanceStore>;
   id: string;
   classes: Classes;
   classroom: ReturnType<typeof createNuniClassroom>;
@@ -1364,6 +1368,7 @@ function CourseDetail({
           !result.loading &&
           !result.error ? (
             <NuniAttendance
+              attendanceStore={attendanceStore}
               classroom={classroom}
               course={data.course}
               mode={tab === 'members' ? 'members' : 'attendance'}

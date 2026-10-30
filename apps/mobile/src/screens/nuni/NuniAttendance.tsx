@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { Pressable, Text, TextInput, View } from 'react-native';
 import { NuniError, type NuniWorkspace } from '@campus/shared/src/nuni';
 import {
@@ -11,7 +11,29 @@ import { useTheme } from '../../state/theme';
 
 type Classroom = ReturnType<typeof createNuniClassroom>;
 type Roster = Awaited<ReturnType<Classroom['roster']>>;
+export function createAttendanceStore() {
+  const states = new Map<string, { busy: boolean; pending: string | null }>();
+  const listeners = new Set<() => void>();
+  const empty = { busy: false, pending: null };
+  return {
+    subscribe(listener: () => void) {
+      listeners.add(listener);
+      return () => {
+        listeners.delete(listener);
+      };
+    },
+    get(key: string) {
+      return states.get(key) ?? empty;
+    },
+    set(key: string, value: typeof empty) {
+      states.set(key, value);
+      listeners.forEach((listener) => listener());
+    },
+  };
+}
+
 type Props = {
+  attendanceStore: ReturnType<typeof createAttendanceStore>;
   classroom: Classroom;
   course: NuniWorkspace;
   mode: 'attendance' | 'members';
@@ -67,21 +89,27 @@ export function NuniAttendance(props: Props) {
   );
 }
 
-function AttendanceScope({ classroom, course, mode, onAccessDenied }: Props) {
+function AttendanceScope({ classroom, course, mode, onAccessDenied, attendanceStore }: Props) {
   const theme = useTheme();
   const [sessions, setSessions] = useState<NuniClassroomSession[]>([]);
   const [roster, setRoster] = useState<Roster | null>(null);
   const [members, setMembers] = useState<NuniWorkspaceMember[] | null>(null);
   const [loading, setLoading] = useState(true);
-  const [busy, setBusy] = useState(false);
+  const state = useSyncExternalStore(attendanceStore.subscribe, () =>
+    attendanceStore.get(course.id),
+  );
+  const busy = state.busy;
+  const pendingConfirmation = state.pending;
+  const setBusy = (value: boolean) =>
+    attendanceStore.set(course.id, { ...attendanceStore.get(course.id), busy: value });
+  const setPendingConfirmation = (value: string | null) =>
+    attendanceStore.set(course.id, { ...attendanceStore.get(course.id), pending: value });
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
   const [code, setCode] = useState('');
-  const [pendingConfirmation, setPendingConfirmation] = useState<string | null>(null);
   const mounted = useRef(false);
   const blocked = useRef(false);
   const generation = useRef(0);
-  const mutating = useRef(false);
   const deniedCallback = useRef(onAccessDenied);
   deniedCallback.current = onAccessDenied;
   const teacher = course.memberRole !== 'student';
@@ -171,23 +199,27 @@ function AttendanceScope({ classroom, course, mode, onAccessDenied }: Props) {
       teacher ||
       course.state !== 'active' ||
       loading ||
-      mutating.current ||
+      attendanceStore.get(course.id).busy ||
       pendingConfirmation ||
       blocked.current
     )
       return;
     const run = generation.current;
-    mutating.current = true;
+    setPendingConfirmation(live.id);
     setBusy(true);
     setError('');
     setNotice('');
     try {
       await classroom.checkIn(course.id, live.id, code.trim() || undefined);
+      setPendingConfirmation(live.id);
       if (!current(run)) return;
       setCode('');
       setPendingConfirmation(live.id);
       await reload(live.id);
     } catch (failure) {
+      if (failure instanceof NuniError && failure.status > 0 && failure.status < 500) setPendingConfirmation(null);
+      if (!(failure instanceof NuniError) || failure.status === 0 || failure.status >= 500)
+        setPendingConfirmation(live.id);
       if (!current(run)) return;
       if (accessDenied(failure)) deny();
       else if (!(failure instanceof NuniError) || failure.status === 0 || failure.status >= 500) {
@@ -202,10 +234,7 @@ function AttendanceScope({ classroom, course, mode, onAccessDenied }: Props) {
               : '簽到未完成，請確認網路後重試。',
         );
     } finally {
-      if (mounted.current && !blocked.current) {
-        mutating.current = false;
-        setBusy(false);
-      }
+      setBusy(false);
     }
   }
 
@@ -225,6 +254,7 @@ function AttendanceScope({ classroom, course, mode, onAccessDenied }: Props) {
           {notice}
         </Text>
       ) : null}
+      {pendingConfirmation ? <Text style={textStyle}>簽到待確認，請更新簽到狀態。</Text> : null}
       {!blocked.current ? (
         <>
           <Action
