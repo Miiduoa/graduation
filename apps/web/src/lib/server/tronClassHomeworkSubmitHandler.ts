@@ -4,6 +4,7 @@ import type { AcademicFirestore } from './academicRecordsHandlers';
 import { requireAcademicAccount, schoolSessionCookies, schoolSessionExpiry } from './academicRecordsHandlers';
 import type { LmsReadonlySource } from './tronClassLmsSource';
 import { HttpsError } from './httpsError';
+import { hasConfirmedTronClassSubmissionEvidence } from './tronClassReceiptEvidence';
 import { HOMEWORK_MAX_PAGES, HOMEWORK_PAGE_SIZE, isHomeworkSubmitted } from '@campus/shared/src/puLmsReadonly';
 
 type Row = Record<string, unknown>;
@@ -36,10 +37,7 @@ function isOwnReceipt(value: unknown, userId: number, receiptId: string | null, 
   if (linkedHomework != null && Number(linkedHomework) !== homeworkId) return false;
   const id = item.id ?? item.submission_id;
   const owner = Number(item.student_id ?? item.user_id ?? NaN);
-  const status = String(item.status ?? item.submission_status ?? '').toLowerCase();
-  const hasEvidence = Boolean(item.submitted_at || item.created_at ||
-    ['submitted', 'graded', 'finished'].includes(status));
-  if (!hasEvidence) return false;
+  if (!hasConfirmedTronClassSubmissionEvidence(item)) return false;
   if (Number.isSafeInteger(owner) && owner > 0) return owner === userId;
   return Boolean(receiptId && id != null && String(id) === receiptId);
 }
@@ -145,6 +143,20 @@ export function createTronClassHomeworkSubmitHandler({
     const existing = await source.fetchHomeworkSubmissions(cookies, courseId, homeworkId);
     if (!Array.isArray(existing)) {
       throw new HttpsError('unavailable', '目前無法確認繳交歷史，未進行繳交。');
+    }
+    // A school-created draft is not a confirmed receipt, but its write policy
+    // is unknown. Do not create a second POST until the student checks the original site.
+    const unresolvedOwnRecord = existing.some((value) => {
+      const item = row(value);
+      const linked = item.homework_id ?? item.homework_activity_id ?? item.activity_id;
+      if (linked != null && Number(linked) !== homeworkId) return false;
+      const owner = Number(item.student_id ?? item.user_id ?? NaN);
+      return Number.isSafeInteger(owner) && owner === userId &&
+        !hasConfirmedTronClassSubmissionEvidence(item);
+    });
+    if (unresolvedOwnRecord) {
+      throw new HttpsError('failed-precondition',
+        '玩課雲已有你的草稿或狀態未明紀錄，請先到原站核對，未進行繳交。');
     }
     const submitted = existing.filter((item) => isOwnReceipt(item, userId, null, homeworkId));
     const max = Number(policy.max_submissions ?? policy.max_submission_count);
