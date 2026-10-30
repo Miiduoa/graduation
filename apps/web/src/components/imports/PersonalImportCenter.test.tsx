@@ -24,7 +24,12 @@ import {
 } from '@/lib/personalImports';
 import { serializePersonalImportBackup, type PersonalImportRecord } from '@campus/shared';
 import { browserRequest } from '@/features/nuni/Session';
-import { personalImportDraftKey } from '@/lib/personalImportDrafts';
+import {
+  personalImportDraftKey,
+  personalImportPartialDraftKey,
+  readPersonalImportDraft,
+  readPersonalImportPartialDraft,
+} from '@/lib/personalImportDrafts';
 const context = vi.hoisted(() => ({
   owner: 'guest',
   schoolId: 'pu',
@@ -1122,6 +1127,9 @@ it.each(['failure', 'cancel'] as const)(
         screen.getByRole('button', { name: '用 AI 整理選取內容' }).hasAttribute('disabled'),
       ).toBe(true);
       expect(screen.getByRole('checkbox', { name: '成績 · 3 列' }).matches(':disabled')).toBe(true);
+      await act(async () =>
+        vi.mocked(runPersonalImportAi).mock.calls[0][0].onPartial?.(documentAiPreview()),
+      );
       fireEvent.click(screen.getByRole('button', { name: '取消讀取' }));
       expect(vi.mocked(runPersonalImportAi).mock.calls[0][0].signal.aborted).toBe(true);
       await act(async () => finish(documentAiPreview()));
@@ -1304,7 +1312,12 @@ it.each(['cancel', 'account', 'school'] as const)(
       view.rerender(<PersonalImportCenter />);
     }
     expect(signal.aborted).toBe(true);
+    await act(async () =>
+      vi.mocked(runPersonalImportAi).mock.calls[0][0].onPartial?.(aiGradePreview('過期的部分結果')),
+    );
     await act(async () => finish(aiGradePreview('舊來源的私人課程')));
+    expect(screen.queryByDisplayValue('過期的部分結果')).toBeNull();
+    expect(sessionStorage.getItem(personalImportPartialDraftKey(context))).toBeNull();
     expect(screen.queryByDisplayValue('舊來源的私人課程')).toBeNull();
     expect(screen.queryByRole('button', { name: '確認匯入 1 筆' })).toBeNull();
     expect(readPersonalImports(context)).toHaveLength(0);
@@ -1327,14 +1340,133 @@ it('keeps the previous draft editable after cancelling a pending AI replacement'
   fireEvent.click(screen.getByRole('button', { name: '確認以 AI 重新整理' }));
   await waitFor(() => expect(runPersonalImportAi).toHaveBeenCalledOnce());
   expect(screen.getByRole('button', { name: '確認匯入 1 筆' }).hasAttribute('disabled')).toBe(true);
+  const request = vi.mocked(runPersonalImportAi).mock.calls[0][0];
+  await act(async () => request.onPartial?.(aiGradePreview()));
+  expect((screen.getByLabelText('成績') as HTMLInputElement).value).toBe('88');
+  expect(readPersonalImportDraft(context)?.rows[0].grade).toBe('88');
+  expect(readPersonalImportPartialDraft(context)?.rows[0].grade).toBe('85');
   fireEvent.click(screen.getByRole('button', { name: '取消讀取' }));
+  await act(async () => request.onPartial?.(aiGradePreview('取消後的部分結果')));
   await act(async () => finish(aiGradePreview('不應取代')));
   expect((screen.getByLabelText('名稱') as HTMLInputElement).value).toBe('資料庫');
   expect((screen.getByLabelText('成績') as HTMLInputElement).value).toBe('88');
   expect(screen.getByRole('button', { name: '確認匯入 1 筆' }).hasAttribute('disabled')).toBe(
     false,
   );
+  expect(readPersonalImportDraft(context)?.rows[0].grade).toBe('88');
+  expect(readPersonalImportPartialDraft(context)?.rows[0].title).toBe('資料庫');
 });
+
+it.each(['cancel', 'failure'] as const)(
+  'restores the edited draft and separate partial results after replacement %s',
+  async (outcome) => {
+    let fail!: (error: Error) => void;
+    vi.mocked(runPersonalImportAi).mockImplementation(
+      () => new Promise((_resolve, reject) => { fail = reject; }),
+    );
+    const view = render(<PersonalImportCenter />);
+    await prepare();
+    fireEvent.change(screen.getByLabelText('成績'), { target: { value: '88' } });
+    fireEvent.click(screen.getByRole('button', { name: 'AI 整理這段文字' }));
+    fireEvent.click(screen.getByRole('button', { name: '確認以 AI 重新整理' }));
+    await waitFor(() => expect(runPersonalImportAi).toHaveBeenCalledOnce());
+    await act(async () =>
+      vi.mocked(runPersonalImportAi).mock.calls[0][0].onPartial?.(aiGradePreview('部分課程')),
+    );
+    if (outcome === 'cancel') fireEvent.click(screen.getByRole('button', { name: '取消讀取' }));
+    else await act(async () => fail(new Error('稍後段落無法整理')));
+    expect(readPersonalImportDraft(context)?.rows[0].grade).toBe('88');
+    view.unmount();
+    render(<PersonalImportCenter />);
+    expect((screen.getByLabelText('成績') as HTMLInputElement).value).toBe('88');
+    expect(screen.getByRole('region', { name: '另存的部分整理結果' })).toBeTruthy();
+    expect(screen.queryByDisplayValue('部分課程')).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: '以部分結果取代目前草稿' }));
+    expect(screen.getByDisplayValue('部分課程')).toBeTruthy();
+    expect(readPersonalImportDraft(context)?.rows[0].title).toBe('部分課程');
+    expect(readPersonalImportPartialDraft(context)).toBeNull();
+    expect(readPersonalImports(context)).toHaveLength(0);
+  },
+);
+
+it('keeps partial replacement results isolated from a different account or school', async () => {
+  vi.mocked(runPersonalImportAi).mockImplementation(() => new Promise(() => {}));
+  const view = render(<PersonalImportCenter />);
+  await prepare();
+  fireEvent.change(screen.getByLabelText('成績'), { target: { value: '88' } });
+  fireEvent.click(screen.getByRole('button', { name: 'AI 整理這段文字' }));
+  fireEvent.click(screen.getByRole('button', { name: '確認以 AI 重新整理' }));
+  const request = vi.mocked(runPersonalImportAi).mock.calls[0][0];
+  await act(async () => request.onPartial?.(aiGradePreview('原學校的部分結果')));
+  context.owner = 'platform:another';
+  context.schoolId = 'nthu';
+  view.rerender(<PersonalImportCenter />);
+  await act(async () => request.onPartial?.(aiGradePreview('過期的部分結果')));
+  expect(screen.queryByRole('region', { name: '另存的部分整理結果' })).toBeNull();
+  expect(readPersonalImportPartialDraft(context)).toBeNull();
+  context.owner = 'guest';
+  context.schoolId = 'pu';
+  view.rerender(<PersonalImportCenter />);
+  expect((screen.getByLabelText('成績') as HTMLInputElement).value).toBe('88');
+  expect(readPersonalImportPartialDraft(context)?.rows[0].title).toBe('原學校的部分結果');
+});
+
+it('retains the edited original if storing a partial replacement fails', async () => {
+  vi.mocked(runPersonalImportAi).mockImplementation(() => new Promise(() => {}));
+  render(<PersonalImportCenter />);
+  await prepare();
+  fireEvent.change(screen.getByLabelText('成績'), { target: { value: '88' } });
+  const write = Storage.prototype.setItem;
+  vi.spyOn(Storage.prototype, 'setItem').mockImplementation(function (this: Storage, key, value) {
+    if (key === personalImportPartialDraftKey(context)) throw new Error('storage full');
+    write.call(this, key, value);
+  });
+  fireEvent.click(screen.getByRole('button', { name: 'AI 整理這段文字' }));
+  fireEvent.click(screen.getByRole('button', { name: '確認以 AI 重新整理' }));
+  await act(async () =>
+    vi.mocked(runPersonalImportAi).mock.calls[0][0].onPartial?.(aiGradePreview()),
+  );
+  fireEvent.click(screen.getByRole('button', { name: '取消讀取' }));
+  expect(screen.getByRole('alert').textContent).toContain('部分結果：草稿暫存沒有成功');
+  expect((screen.getByLabelText('成績') as HTMLInputElement).value).toBe('88');
+  expect(readPersonalImportDraft(context)?.rows[0].grade).toBe('88');
+  expect(readPersonalImportPartialDraft(context)).toBeNull();
+});
+
+it.each(['write', 'cleanup'] as const)(
+  'keeps stored and displayed drafts consistent if adopting partial results encounters a %s error',
+  async (failure) => {
+    vi.mocked(runPersonalImportAi).mockImplementation(() => new Promise(() => {}));
+    render(<PersonalImportCenter />);
+    await prepare();
+    fireEvent.change(screen.getByLabelText('成績'), { target: { value: '88' } });
+    fireEvent.click(screen.getByRole('button', { name: 'AI 整理這段文字' }));
+    fireEvent.click(screen.getByRole('button', { name: '確認以 AI 重新整理' }));
+    await act(async () =>
+      vi.mocked(runPersonalImportAi).mock.calls[0][0].onPartial?.(aiGradePreview()),
+    );
+    fireEvent.click(screen.getByRole('button', { name: '取消讀取' }));
+    if (failure === 'write') {
+      const write = Storage.prototype.setItem;
+      vi.spyOn(Storage.prototype, 'setItem').mockImplementation(function (this: Storage, key, value) {
+        if (key === personalImportDraftKey(context)) throw new Error('storage full');
+        write.call(this, key, value);
+      });
+    } else {
+      const remove = Storage.prototype.removeItem;
+      vi.spyOn(Storage.prototype, 'removeItem').mockImplementation(function (this: Storage, key) {
+        if (key === personalImportPartialDraftKey(context)) throw new Error('storage unavailable');
+        remove.call(this, key);
+      });
+    }
+    fireEvent.click(screen.getByRole('button', { name: '以部分結果取代目前草稿' }));
+    const expectedGrade = failure === 'write' ? '88' : '85';
+    expect((screen.getByLabelText('成績') as HTMLInputElement).value).toBe(expectedGrade);
+    expect(readPersonalImportDraft(context)?.rows[0].grade).toBe(expectedGrade);
+    expect(readPersonalImportPartialDraft(context)?.rows[0].grade).toBe('85');
+    expect(screen.getByRole('alert')).toBeTruthy();
+  },
+);
 
 it('filters and focuses incorrect rows without removing a field while it is being corrected', async () => {
   render(<PersonalImportCenter />);
@@ -1444,14 +1576,17 @@ it('checkpoints a completed image batch before navigation and retains its previe
   chooseAiScreenshot();
   await waitFor(() => expect(runPersonalImportAi).toHaveBeenCalledOnce());
   const request = vi.mocked(runPersonalImportAi).mock.calls[0][0];
-  await act(async () => request.onPartial?.(aiGradePreview('已完成課程')));
+  const sourceText = '課程名稱,學分,成績\n已完成課程,3,85\n待整理課程,2,90';
+  await act(async () => request.onPartial?.({ ...aiGradePreview('已完成課程'), sourceText }));
   expect(screen.getByRole('complementary', { name: '匯入來源對照' })).toBeTruthy();
   fireEvent.click(screen.getByRole('button', { name: '取消讀取' }));
   expect(screen.getByDisplayValue('已完成課程')).toBeTruthy();
+  expect(readPersonalImportDraft(context)?.text).toBe(sourceText);
   expect(URL.revokeObjectURL).not.toHaveBeenCalledWith('blob:preview');
   view.unmount();
   render(<PersonalImportCenter />);
   expect(await screen.findByDisplayValue('已完成課程')).toBeTruthy();
+  expect((screen.getByLabelText('原始文字') as HTMLTextAreaElement).value).toBe(sourceText);
   expect(readPersonalImports(context)).toHaveLength(0);
 });
 

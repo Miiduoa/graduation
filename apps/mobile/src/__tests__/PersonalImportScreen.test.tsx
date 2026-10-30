@@ -22,6 +22,7 @@ import {
   type MobileImportAiAvailability,
 } from '../services/imports/personalImportAi';
 import { parsePersonalImportAiResponse } from '@campus/shared/src/imports/aiRecognition';
+import { loadPersonalImportDraft } from '../services/imports/personalImportDraft';
 
 let mockScope: { owner: string; schoolId: string } | null;
 const mockRequest = jest.fn();
@@ -1509,3 +1510,122 @@ test('completed progress is restored after leaving the screen before the next ba
   await act(async () => finish());
   expect(restored.getByText('確認新增 1 筆')).toBeTruthy();
 });
+
+async function startDocumentProgress(view: ReturnType<typeof render>, previousText = '') {
+  let finish!: () => void;
+  const pending = jest.mocked(runMobilePersonalImportAi);
+  pending.mockImplementation(
+    (text, options) =>
+      new Promise((resolve) => {
+        finish = () => resolve(recognizeSelectedDocument(text, options));
+      }),
+  );
+  const document = nonstandardDocument();
+  document.sections[0].rows.push({ line: 4, cells: ['統計', '2', '91'] });
+  chooseDocument(document);
+  prepareAi(view);
+  fireEvent.changeText(view.getByLabelText('貼上或修正原始文字'), previousText);
+  fireEvent.press(view.getByText('選擇檔案'));
+  await view.findByText('準備讀取：nonstandard.xlsx');
+  fireEvent.press(view.getByText('□ 修課紀錄'));
+  fireEvent.press(view.getByText('第 2 列'));
+  fireEvent.press(view.getByText('用 AI 整理選取內容'));
+  const [text, options, signal, request] = pending.mock.calls[0];
+  const lines = text.split('\n');
+  const retryLine = lines.findIndex((line) => line.includes('統計'));
+  const retryBatches = [{ text: lines[retryLine], startLine: retryLine + 1 }];
+  const partial = { ...recognizeSelectedDocument(text, options), retryBatches };
+  await act(async () => request?.onProgress?.(partial));
+  await waitFor(async () =>
+    expect(await loadPersonalImportDraft(scope)).toMatchObject({
+      text,
+      options: { source: options.source },
+      retryBatches,
+    }),
+  );
+  return { text, options, signal, request, partial, retryBatches, finish };
+}
+
+test.each(['', '先前貼上的其他內容'])(
+  'cancelled document progress keeps the full source and retry range instead of %p through autosave and remount',
+  async (previousText) => {
+    readyAi();
+    const view = render(<PersonalImportScreen />);
+    await waitFor(() => expect(view.queryByLabelText('讀取匯入紀錄')).toBeNull());
+    const progress = await startDocumentProgress(view, previousText);
+    fireEvent.press(view.getByText('取消 AI 整理'));
+    expect(progress.signal.aborted).toBe(true);
+    await waitFor(async () =>
+      expect(await loadPersonalImportDraft(scope)).toMatchObject({
+        text: progress.text,
+        options: { source: progress.options.source },
+        retryBatches: progress.retryBatches,
+      }),
+    );
+    expect(view.getByLabelText('貼上或修正原始文字').props.value).toBe(progress.text);
+    expect(view.getByText('重試未完成段落')).toBeTruthy();
+    fireEvent.press(view.getByText('編輯與連結課班'));
+    fireEvent.changeText(view.getByLabelText('成績'), '88');
+    await waitFor(async () =>
+      expect(await loadPersonalImportDraft(scope)).toMatchObject({
+        text: progress.text,
+        options: { source: progress.options.source },
+        rows: [{ grade: '88', source: { type: 'file' } }],
+        retryBatches: progress.retryBatches,
+      }),
+    );
+    await act(async () => {
+      progress.request?.onProgress?.({ ...progress.partial, retryBatches: [] });
+      progress.finish();
+    });
+    expect(view.getByLabelText('成績').props.value).toBe('88');
+    expect((await loadPersonalImportDraft(scope))?.retryBatches).toHaveLength(1);
+    view.unmount();
+    const restored = render(<PersonalImportScreen />);
+    await restored.findByText('已恢復上次完成的待核對草稿；未完成段落可以重試。');
+    expect(restored.getByLabelText('貼上或修正原始文字').props.value).toBe(progress.text);
+    expect(restored.getByText('重試未完成段落')).toBeTruthy();
+    fireEvent.press(restored.getByText('編輯與連結課班'));
+    expect(restored.getByLabelText('成績').props.value).toBe('88');
+    expect(await loadPersonalImportDraft(scope)).toMatchObject({
+      text: progress.text,
+      options: { source: progress.options.source },
+      retryBatches: progress.retryBatches,
+    });
+    expect((await loadPersonalImports(scope)).records).toHaveLength(0);
+  },
+);
+
+test.each([
+  ['account', { ...scope, owner: 'nuni:pa-b' }],
+  ['school', { ...scope, schoolId: 'other-school' }],
+] as const)(
+  'late document progress cannot write after a %s switch or alter the saved retry range',
+  async (_label, nextScope) => {
+    readyAi();
+    const view = render(<PersonalImportScreen />);
+    await waitFor(() => expect(view.queryByLabelText('讀取匯入紀錄')).toBeNull());
+    const progress = await startDocumentProgress(view);
+    mockScope = nextScope;
+    view.rerender(<PersonalImportScreen />);
+    await waitFor(() => expect(view.queryByLabelText('讀取匯入紀錄')).toBeNull());
+    expect(progress.signal.aborted).toBe(true);
+    await act(async () => {
+      progress.request?.onProgress?.({ ...progress.partial, retryBatches: [] });
+      progress.finish();
+    });
+    expect(view.getByLabelText('貼上或修正原始文字').props.value).toBe('');
+    expect(view.queryByText('確認新增 1 筆')).toBeNull();
+    expect(await loadPersonalImportDraft(nextScope)).toBeNull();
+    expect(await loadPersonalImportDraft(scope)).toMatchObject({
+      text: progress.text,
+      options: { source: progress.options.source },
+      retryBatches: progress.retryBatches,
+    });
+    mockScope = { ...scope };
+    view.rerender(<PersonalImportScreen />);
+    await view.findByText('已恢復上次完成的待核對草稿；未完成段落可以重試。');
+    expect(view.getByLabelText('貼上或修正原始文字').props.value).toBe(progress.text);
+    expect(view.getByText('重試未完成段落')).toBeTruthy();
+  },
+);

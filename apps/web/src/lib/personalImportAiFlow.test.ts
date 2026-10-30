@@ -70,6 +70,24 @@ it.each([429, 503, 504, 500, 401])(
   },
 );
 
+it.each([429, 503])('keeps teacher and verbatim evidence in local and rule fallbacks for status %s', async (status) => {
+  const teacherSource = '課程名稱,教師,學分,成績\n資料庫,王小明,3,85';
+  const evidence = '資料庫,王小明,3,85';
+  const teacherOutput = JSON.stringify({ complete: true, rows: [{ ...record, teacher: '王小明', evidence }] });
+  fetcher.mockResolvedValue(new Response('{"code":"disabled"}', { status }));
+  vi.mocked(runLocalPersonalImportAi).mockImplementation(async ({ input }) =>
+    parsePersonalImportAiResponse(teacherOutput, input.text!, options));
+  const local = await run(teacherSource);
+  expect(JSON.parse(fetcher.mock.calls[0][1].body).text).not.toContain('王小明');
+  expect(runLocalPersonalImportAi).toHaveBeenCalledWith(expect.objectContaining({ input: { text: teacherSource } }));
+  expect(local.rows[0]).toMatchObject({ teacher: '王小明', source: { rawText: evidence } });
+
+  vi.mocked(localAvailability).mockReturnValue({ available: false, downloadLabel: '' });
+  const rules = await run(teacherSource);
+  expect(rules.rows[0]).toMatchObject({ teacher: '王小明', source: { rawText: evidence } });
+  expect(rules.retry?.batches[0].text).toBe(teacherSource);
+});
+
 it('times out a hung cloud request and proceeds locally', async () => {
   vi.useFakeTimers();
   fetcher.mockReturnValue(new Promise(() => {}));
@@ -87,6 +105,28 @@ it('masks private data before any network call', async () => {
   });
   await run('姓名：王小明 學號：s12345678\n身分證：A123456789\n資料庫,3,85');
   expect(fetcher).toHaveBeenCalledOnce();
+});
+
+it('keeps an unsafe original document local even when a saved retry says cloud is safe', async () => {
+  const source = '姓名,未知欄名\n王小明,另一值';
+  await run(source, {
+    retry: {
+      batches: [{ text: '王小明,另一值', startLine: 2, columnContext: '' }],
+      completed: { rows: [], issues: [] },
+      cloudSafe: true,
+      sourceText: source,
+    },
+  });
+  expect(fetcher).not.toHaveBeenCalled();
+  expect(runLocalPersonalImportAi).toHaveBeenCalledWith(expect.objectContaining({ input: { text: '王小明,另一值' } }));
+});
+
+it('masks a known name only in the cloud copy and retains it in the local input', async () => {
+  const text = `${source}\n王小明`;
+  fetcher.mockResolvedValue(new Response('{"code":"disabled"}', { status: 503 }));
+  await run(text, { knownNames: ['王小明'] });
+  expect(JSON.parse(fetcher.mock.calls[0][1].body).text).not.toContain('王小明');
+  expect(runLocalPersonalImportAi).toHaveBeenCalledWith(expect.objectContaining({ input: { text } }));
 });
 
 it('uses rules on unsupported browsers while leaving cloud available', async () => {
@@ -188,4 +228,13 @@ it('falls back to the local visual model when image OCR cannot finish', async ()
   expect(result.issues).toContainEqual(
     expect.objectContaining({ message: expect.stringContaining('本機視覺模型') }),
   );
+});
+
+it.each(['', ' \n\t '])('uses the local visual model when OCR returns blank text: %j', async (text) => {
+  const image = new File(['pixels'], '成績.png', { type: 'image/png' });
+  vi.mocked(recognizePersonalImportImage).mockResolvedValue(text);
+  const result = await run('', { input: { image } });
+  expect(result.rows).toHaveLength(1);
+  expect(runLocalPersonalImportAi).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ input: { image } }));
+  expect(fetcher).not.toHaveBeenCalled();
 });

@@ -112,6 +112,26 @@ test('cloud input masks identity fields before fetch', async () => {
   expect(body.text).not.toMatch(/王小明|411123456|A123456789/);
 });
 
+test.each([429, 503])('status %s preserves the original teacher and evidence for both local fallbacks', async (status) => {
+  const source = '課程名稱,教師,學分,成績\n資料庫,王小明,3,85';
+  const evidence = '資料庫,王小明,3,85';
+  mockFetch.mockResolvedValue(response(status, { code: 'disabled' }));
+  jest.mocked(localLLM.generate).mockResolvedValue({
+    content: JSON.stringify({ complete: true, rows: [{ title: '資料庫', teacher: '王小明', credits: 3, grade: '85', evidence }] }),
+    finishReason: 'stop', tokensGenerated: 50, tokensPerSecond: 5, totalTimeMs: 100,
+  });
+  const local = await runMobilePersonalImportAi(source, options, new AbortController().signal, request);
+  expect(JSON.parse(mockFetch.mock.calls[0][1].body).text).not.toContain('王小明');
+  expect(localLLM.generate).toHaveBeenCalledWith(expect.objectContaining({
+    messages: [expect.objectContaining({ content: expect.stringContaining(evidence) })],
+  }));
+  expect(local.rows[0]).toMatchObject({ teacher: '王小明', source: { rawText: evidence } });
+
+  jest.mocked(localLLM.getRuntimeAvailability).mockReturnValue({ available: false });
+  const rules = await runMobilePersonalImportAi(source, options, new AbortController().signal, request);
+  expect(rules.rows[0]).toMatchObject({ teacher: '王小明', source: { rawText: evidence } });
+});
+
 test('cloud timeout falls back even if fetch never settles', async () => {
   jest.useFakeTimers();
   mockFetch.mockReturnValue(new Promise(() => {}));
@@ -206,6 +226,7 @@ test('whole-document masking protects a vertical name before paragraph segmentat
 });
 
 test('unmasked local retry ranges cannot bypass whole-document identity masking', async () => {
+  mockFetch.mockResolvedValue(response(503, { code: 'disabled' }));
   await runMobilePersonalImportAi(
     `姓名\n\n王小明\n\n${text}`,
     options,
@@ -214,6 +235,17 @@ test('unmasked local retry ranges cannot bypass whole-document identity masking'
       ...request,
       retryBatches: [{ text: '王小明\n\n', startLine: 3 }],
     },
+  );
+  expect(mockFetch).toHaveBeenCalledTimes(1);
+  expect(JSON.parse(mockFetch.mock.calls[0][1].body).text).toBe('[個資已遮罩]\n\n');
+});
+
+test('a retry range that cannot be matched to the original document stays on the device', async () => {
+  await runMobilePersonalImportAi(
+    `姓名\n\n王小明\n\n${text}`,
+    options,
+    new AbortController().signal,
+    { ...request, retryBatches: [{ text: '王小明\n\n', startLine: 2, columnContext: '' }] },
   );
   expect(mockFetch).not.toHaveBeenCalled();
 });

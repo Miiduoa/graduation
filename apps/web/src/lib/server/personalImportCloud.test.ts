@@ -3,11 +3,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { NextRequest } from 'next/server';
 import { NuniError } from '@campus/shared/src/nuni';
 import { SESSION_COOKIE, sealCookie, sessionContext } from '../nuni/server';
-import { handlePersonalImportCloud, PERSONAL_IMPORT_CLOUD_DAILY_LIMIT, reservePersonalImportCloudQuota, type PersonalImportCloudDependencies } from './personalImportCloud';
+import { handlePersonalImportCloud, PERSONAL_IMPORT_CLOUD_ACCOUNT_MINUTE_LIMIT, PERSONAL_IMPORT_CLOUD_DAILY_LIMIT, PERSONAL_IMPORT_CLOUD_GLOBAL_DAILY_LIMIT, reservePersonalImportCloudQuota, type PersonalImportCloudDependencies } from './personalImportCloud';
 
 const session = { sessionHandle: `ps_${'a'.repeat(43)}`, expiresAt: Date.now() + 3600_000 };
 const principal = { authenticated: true, platformAccountId: 'pa_12345678-1234-1234-1234-123456789abc', isPlatformOperator: false };
 const config = { accountId: 'test-account', token: 'test-token' };
+const dailyLimits = { globalDaily: PERSONAL_IMPORT_CLOUD_GLOBAL_DAILY_LIMIT, accountMinute: PERSONAL_IMPORT_CLOUD_DAILY_LIMIT };
 
 function quotaStore() {
   const values = new Map<string, Record<string, unknown>>();
@@ -39,7 +40,7 @@ function request(body: unknown = { text: '微積分 3 85', kind: 'grades' }, mod
 
 function setup() {
   const store = quotaStore();
-  const fetcher = vi.fn().mockResolvedValue(Response.json({ success: true, result: { response: { complete: true, rows: [] } } }));
+  const fetcher = vi.fn().mockImplementation(async () => Response.json({ success: true, result: { response: { complete: true, rows: [] } } }));
   const verifySession = vi.fn().mockResolvedValue(principal);
   const getQuotaStore = vi.fn().mockResolvedValue(store.db);
   return { store, fetcher, verifySession, getQuotaStore, dependencies: { config, fetcher, verifySession, getQuotaStore } satisfies PersonalImportCloudDependencies };
@@ -48,6 +49,8 @@ function setup() {
 beforeEach(() => {
   vi.stubEnv('WEB_PUBLIC_ORIGIN', 'https://nuni.tw');
   vi.stubEnv('BFF_SESSION_SECRET', 'personal-import-test-cookie-material-only');
+  vi.stubEnv('PERSONAL_IMPORT_CLOUD_GLOBAL_DAILY_LIMIT', '');
+  vi.stubEnv('PERSONAL_IMPORT_CLOUD_ACCOUNT_MINUTE_LIMIT', '');
 });
 afterEach(() => { vi.unstubAllEnvs(); vi.useRealTimers(); });
 
@@ -59,7 +62,7 @@ describe('personal import cloud endpoint', () => {
     expect(await result.json()).toMatchObject({ provider: 'cloud', output: '{"complete":true,"rows":[]}', sourceText: '微積分 3 85' });
     expect(verifySession).toHaveBeenCalledWith(expect.objectContaining({ sessionHandle: session.sessionHandle }), expect.any(AbortSignal));
     expect(fetcher).toHaveBeenCalledOnce();
-    expect([...store.values.values()]).toEqual([expect.objectContaining({ count: 1 })]);
+    expect([...store.values.values()]).toEqual([expect.objectContaining({ count: 1 }), expect.objectContaining({ count: 1 })]);
     expect([...store.values.keys()][0]).not.toContain(principal.platformAccountId);
   });
 
@@ -117,6 +120,22 @@ describe('personal import cloud endpoint', () => {
     expect(fetcher.mock.calls[0][1].body).not.toContain('王小明');
   });
 
+  it.each([
+    ['姓名：\n王小明\n微積分 3 85', '王小明'],
+    ['教師：\n林小美\n微積分 3 85', '林小美'],
+    ['聯絡信箱：student@example.edu.tw\n微積分 3 85', 'student@example.edu.tw'],
+    ['電話：0912-345-678\n微積分 3 85', '0912-345-678'],
+    ['電話：02-2345-6789\n微積分 3 85', '02-2345-6789'],
+  ])('never forwards OCR personal data from direct API input: %s', async (text, sensitive) => {
+    const { dependencies, fetcher } = setup();
+    const result = await handlePersonalImportCloud(request({ text, kind: 'grades' }), dependencies);
+    expect(result.status).toBe(200);
+    expect(fetcher).toHaveBeenCalledOnce();
+    expect(fetcher.mock.calls[0][1].body).not.toContain(sensitive);
+    expect(fetcher.mock.calls[0][1].body).toContain('微積分 3 85');
+    expect(JSON.stringify(await result.json())).not.toContain(sensitive);
+  });
+
   it('rejects an ambiguous name column without spending quota or sending the source', async () => {
     const { dependencies, fetcher, getQuotaStore } = setup();
     const result = await handlePersonalImportCloud(request({ text: '課程名稱,姓名,學分\n"未關閉,王小明,3', kind: 'grades' }), dependencies);
@@ -156,8 +175,67 @@ describe('personal import cloud endpoint', () => {
 
   it('returns 429 without contacting Cloudflare once the per-person daily quota is spent', async () => {
     const { dependencies, store, fetcher } = setup();
-    for (let index = 0; index < PERSONAL_IMPORT_CLOUD_DAILY_LIMIT; index++) await reservePersonalImportCloudQuota(store.db, principal.platformAccountId, Date.now());
+    for (let index = 0; index < PERSONAL_IMPORT_CLOUD_DAILY_LIMIT; index++) await reservePersonalImportCloudQuota(store.db, principal.platformAccountId, Date.now(), dailyLimits);
     expect((await handlePersonalImportCloud(request(), dependencies)).status).toBe(429);
+    expect(fetcher).not.toHaveBeenCalled();
+  });
+
+  it('enforces the configured service daily budget across different accounts', async () => {
+    vi.stubEnv('PERSONAL_IMPORT_CLOUD_GLOBAL_DAILY_LIMIT', '2');
+    const { dependencies, store, fetcher, verifySession } = setup();
+    for (let index = 0; index < 2; index++) {
+      verifySession.mockResolvedValue({ ...principal, platformAccountId: `pa_12345678-1234-1234-1234-123456789ab${index}` });
+      expect((await handlePersonalImportCloud(request(), dependencies)).status).toBe(200);
+    }
+    const before = structuredClone([...store.values]);
+    verifySession.mockResolvedValue({ ...principal, platformAccountId: 'pa_12345678-1234-1234-1234-123456789abd' });
+    const result = await handlePersonalImportCloud(request(), dependencies);
+    expect(result.status).toBe(429);
+    expect(await result.json()).toMatchObject({ code: 'quota' });
+    expect(result.headers.get('Retry-After')).toBe('60');
+    expect(fetcher).toHaveBeenCalledTimes(2);
+    expect([...store.values]).toEqual(before);
+  });
+
+  it('enforces the configured rolling account rate and allows local fallback', async () => {
+    vi.stubEnv('PERSONAL_IMPORT_CLOUD_ACCOUNT_MINUTE_LIMIT', '2');
+    const { dependencies, store, fetcher } = setup();
+    const now = Date.parse('2026-10-30T01:00:00Z');
+    for (let index = 0; index < 2; index++) expect((await handlePersonalImportCloud(request(), { ...dependencies, now: () => now })).status).toBe(200);
+    const before = structuredClone([...store.values]);
+    const result = await handlePersonalImportCloud(request(), { ...dependencies, now: () => now + 59_999 });
+    expect(result.status).toBe(429);
+    expect(await result.json()).toMatchObject({ code: 'quota' });
+    expect(fetcher).toHaveBeenCalledTimes(2);
+    expect([...store.values]).toEqual(before);
+    expect((await handlePersonalImportCloud(request(), { ...dependencies, now: () => now + 60_000 })).status).toBe(200);
+  });
+
+  it.each(['PERSONAL_IMPORT_CLOUD_GLOBAL_DAILY_LIMIT', 'PERSONAL_IMPORT_CLOUD_ACCOUNT_MINUTE_LIMIT'])('allows %s=0 to stop cloud use without spending quota', async (name) => {
+    vi.stubEnv(name, '0');
+    const { dependencies, store, fetcher } = setup();
+    expect((await handlePersonalImportCloud(request(), dependencies)).status).toBe(429);
+    expect(fetcher).not.toHaveBeenCalled();
+    expect(store.values.size).toBe(0);
+  });
+
+  it.each(['-1', 'NaN', 'Infinity', '1.5', '9007199254740992'])('uses conservative defaults for invalid limit %s', async (value) => {
+    vi.stubEnv('PERSONAL_IMPORT_CLOUD_GLOBAL_DAILY_LIMIT', value);
+    vi.stubEnv('PERSONAL_IMPORT_CLOUD_ACCOUNT_MINUTE_LIMIT', value);
+    const { dependencies, store, fetcher } = setup();
+    const now = Date.parse('2026-10-30T01:00:00Z');
+    store.values.set('_personalImportAiUsage/_global', { day: '2026-10-30', count: PERSONAL_IMPORT_CLOUD_GLOBAL_DAILY_LIMIT });
+    expect((await handlePersonalImportCloud(request(), { ...dependencies, now: () => now })).status).toBe(429);
+    store.values.clear();
+    for (let index = 0; index < PERSONAL_IMPORT_CLOUD_ACCOUNT_MINUTE_LIMIT; index++) expect((await handlePersonalImportCloud(request(), { ...dependencies, now: () => now })).status).toBe(200);
+    expect((await handlePersonalImportCloud(request(), { ...dependencies, now: () => now })).status).toBe(429);
+    expect(fetcher).toHaveBeenCalledTimes(PERSONAL_IMPORT_CLOUD_ACCOUNT_MINUTE_LIMIT);
+  });
+
+  it('does not contact the provider when the quota transaction fails', async () => {
+    const { dependencies, store, fetcher } = setup();
+    vi.spyOn(store.db, 'runTransaction').mockRejectedValue(new Error('quota store unavailable'));
+    expect((await handlePersonalImportCloud(request(), dependencies)).status).toBe(503);
     expect(fetcher).not.toHaveBeenCalled();
   });
 
@@ -188,17 +266,17 @@ describe('personal import cloud endpoint', () => {
 describe('personal import persistent daily quota', () => {
   it('admits exactly the limit under concurrent reservations', async () => {
     const { db } = quotaStore();
-    const results = await Promise.all(Array.from({ length: 90 }, () => reservePersonalImportCloudQuota(db, principal.platformAccountId, Date.parse('2026-10-30T01:00:00Z'))));
+    const results = await Promise.all(Array.from({ length: 90 }, () => reservePersonalImportCloudQuota(db, principal.platformAccountId, Date.parse('2026-10-30T01:00:00Z'), dailyLimits)));
     expect(results.filter(Boolean)).toHaveLength(PERSONAL_IMPORT_CLOUD_DAILY_LIMIT);
   });
 
   it('separates accounts and resets at midnight in Taiwan', async () => {
     const { db } = quotaStore();
     const before = Date.parse('2026-10-30T15:59:59Z');
-    for (let index = 0; index < PERSONAL_IMPORT_CLOUD_DAILY_LIMIT; index++) await reservePersonalImportCloudQuota(db, principal.platformAccountId, before);
+    for (let index = 0; index < PERSONAL_IMPORT_CLOUD_DAILY_LIMIT; index++) await reservePersonalImportCloudQuota(db, principal.platformAccountId, before, dailyLimits);
     expect(await reservePersonalImportCloudQuota(db, principal.platformAccountId, before)).toBe(false);
     expect(await reservePersonalImportCloudQuota(db, 'another-account', before)).toBe(true);
-    expect(await reservePersonalImportCloudQuota(db, principal.platformAccountId, before + 1000)).toBe(true);
+    expect(await reservePersonalImportCloudQuota(db, principal.platformAccountId, before + 60_000)).toBe(true);
   });
 
   it('does not let a delayed pre-midnight transaction overwrite the next day', async () => {
@@ -207,6 +285,58 @@ describe('personal import persistent daily quota', () => {
     expect(await reservePersonalImportCloudQuota(db, principal.platformAccountId, before + 1000)).toBe(true);
     expect(await reservePersonalImportCloudQuota(db, principal.platformAccountId, before)).toBe(false);
     expect(await reservePersonalImportCloudQuota(db, principal.platformAccountId, before + 1000)).toBe(true);
-    expect([...values.values()]).toEqual([{ day: '2026-10-31', count: 2 }]);
+    expect([...values.values()]).toEqual([expect.objectContaining({ day: '2026-10-31', count: 2 }), { day: '2026-10-31', count: 2 }]);
+  });
+
+  it('reserves all budgets atomically for concurrent requests from many accounts', async () => {
+    const { db, values } = quotaStore();
+    const now = Date.parse('2026-10-30T01:00:00Z');
+    const results = await Promise.all(Array.from({ length: 90 }, (_, index) => reservePersonalImportCloudQuota(db, `account-${index}`, now, { ...dailyLimits, globalDaily: 20 })));
+    expect(results.filter(Boolean)).toHaveLength(20);
+    expect(values.get('_personalImportAiUsage/_global')).toEqual({ day: '2026-10-30', count: 20 });
+    expect(values.size).toBe(21);
+    expect([...values.entries()].filter(([path]) => path !== '_personalImportAiUsage/_global').every(([, data]) => data.count === 1)).toBe(true);
+  });
+
+  it('enforces the rolling window for concurrent requests and across midnight', async () => {
+    const { db, values } = quotaStore();
+    const now = Date.parse('2026-10-30T15:59:59Z');
+    const results = await Promise.all(Array.from({ length: 90 }, () => reservePersonalImportCloudQuota(db, principal.platformAccountId, now)));
+    expect(results.filter(Boolean)).toHaveLength(PERSONAL_IMPORT_CLOUD_ACCOUNT_MINUTE_LIMIT);
+    const before = structuredClone([...values]);
+    expect(await reservePersonalImportCloudQuota(db, principal.platformAccountId, now + 1000)).toBe(false);
+    expect([...values]).toEqual(before);
+    expect(await reservePersonalImportCloudQuota(db, 'another-account', now + 1000)).toBe(true);
+    expect(await reservePersonalImportCloudQuota(db, principal.platformAccountId, now + 60_000)).toBe(true);
+    expect(values.get('_personalImportAiUsage/_global')).toEqual({ day: '2026-10-31', count: 2 });
+  });
+
+  it('shares persisted budgets with a new store wrapper and rejects stale requests from other accounts', async () => {
+    const { db, values } = quotaStore();
+    const now = Date.parse('2026-10-30T16:00:00Z');
+    expect(await reservePersonalImportCloudQuota(db, 'first-account', now, { ...dailyLimits, globalDaily: 1 })).toBe(true);
+    const before = structuredClone([...values]);
+    expect(await reservePersonalImportCloudQuota({ ...db }, 'second-account', now, { ...dailyLimits, globalDaily: 1 })).toBe(false);
+    expect(await reservePersonalImportCloudQuota({ ...db }, 'second-account', now - 1)).toBe(false);
+    expect([...values]).toEqual(before);
+    expect(await reservePersonalImportCloudQuota({ ...db }, 'second-account', now + 86_400_000, { ...dailyLimits, globalDaily: 1 })).toBe(true);
+  });
+
+  it.each([-1, '1', NaN, 1.5])('fails closed on a corrupt global counter: %s', async (count) => {
+    const { db, values } = quotaStore();
+    values.set('_personalImportAiUsage/_global', { day: '2026-10-30', count });
+    expect(await reservePersonalImportCloudQuota(db, principal.platformAccountId, Date.parse('2026-10-30T01:00:00Z'))).toBe(false);
+    expect(values.size).toBe(1);
+  });
+
+  it.each([null, 'broken', [-1], ['1'], [NaN], [Date.parse('2026-10-30T01:00:01Z')]])('fails closed on corrupt or future rate timestamps: %s', async (timestamps) => {
+    const { db, values } = quotaStore();
+    const now = Date.parse('2026-10-30T01:00:00Z');
+    await reservePersonalImportCloudQuota(db, principal.platformAccountId, now);
+    const accountPath = [...values.keys()].find((path) => !path.endsWith('/_global'))!;
+    values.set(accountPath, { day: '2026-10-30', count: 1, timestamps });
+    const before = structuredClone([...values]);
+    expect(await reservePersonalImportCloudQuota(db, principal.platformAccountId, now)).toBe(false);
+    expect([...values]).toEqual(before);
   });
 });

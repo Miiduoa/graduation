@@ -1,10 +1,85 @@
 // @vitest-environment node
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { isPersonalImportCloudMaskSafe, maskPersonalImportCloudInput, maskPersonalImportText, requestPersonalImportCloud } from '@campus/shared/src/imports/aiCloud';
+import { isPersonalImportCloudMaskSafe, maskPersonalImportCloudBatch, maskPersonalImportCloudInput, maskPersonalImportText, requestPersonalImportCloud } from '@campus/shared/src/imports/aiCloud';
+import { planResilientPersonalImportBatches, splitPersonalImportAiTextBatch } from '@campus/shared/src/imports/aiTextBatches';
 
 afterEach(() => vi.useRealTimers());
 
 describe('personal import cloud client', () => {
+  it.each([
+    ['姓名：\n王小明', '王小明'],
+    ['教師：\n林小美', '林小美'],
+    ['姓名：\r\n\r\n王小明', '王小明'],
+    ['電子郵件：student.name+school@example.edu.tw', 'student.name+school@example.edu.tw'],
+    ['0912-345-678', '0912-345-678'],
+    ['02-2345-6789', '02-2345-6789'],
+    ['+886-912-345-678', '+886-912-345-678'],
+    ['電話：(02) 2345-6789\n微積分 3 85', '(02) 2345-6789'],
+    ['電話：+1-202-555-0191', '+1-202-555-0191'],
+    ['電子郵件：王小明@example.com', '王小明@example.com'],
+    ['(02) 2345-6789', '(02) 2345-6789'],
+    ['王小明@example.com', '王小明@example.com'],
+  ])('masks OCR identity and contact formats before sending: %s', async (text, privateValue) => {
+    const fetcher = vi.fn(async (_url: unknown, init: RequestInit) => {
+      const body = JSON.parse(String(init.body));
+      expect(body.text).not.toContain(privateValue);
+      return Response.json({ output: '{}', sourceText: body.text, columnContext: body.columnContext });
+    });
+    expect(isPersonalImportCloudMaskSafe(text)).toBe(true);
+    expect(maskPersonalImportText(maskPersonalImportText(text))).toBe(maskPersonalImportText(text));
+    expect(await requestPersonalImportCloud({ text, kind: 'grades', fetcher: fetcher as typeof fetch })).toMatchObject({ ok: true });
+    expect(fetcher).toHaveBeenCalledOnce();
+  });
+
+  it.each(['姓名：\n王小明,林小美', '教師：\n王小明\t林小美', '姓名：\n課程名稱,學分,成績', '教師：王小明,林小美'])('keeps ambiguous personal field boundaries on the device: %s', async (text) => {
+    const fetcher = vi.fn();
+    expect(isPersonalImportCloudMaskSafe(text)).toBe(false);
+    expect(await requestPersonalImportCloud({ text, kind: 'grades', fetcher })).toMatchObject({ ok: false, reason: 'invalid-input' });
+    expect(fetcher).not.toHaveBeenCalled();
+  });
+
+  it('masks a tab-delimited labeled value without hiding the following academic field', () => {
+    const source = '教師：王小明\t學分：3\t成績：85';
+    expect(isPersonalImportCloudMaskSafe(source)).toBe(true);
+    expect(maskPersonalImportText(source)).toBe('教師:[姓名已遮罩]\t學分:3\t成績:85');
+  });
+
+  it('derives cloud batches from the complete masked document while keeping the original scope', () => {
+    const source = '姓名：\n\n王小明\n\n課程名稱,學分,成績\n資料庫,3,85';
+    const batch = { text: '王小明\n\n', startLine: 3, columnContext: '' };
+    expect(maskPersonalImportCloudBatch(source, batch)).toEqual({ sourceText: '[個資已遮罩]\n\n', columnContext: '' });
+    expect(batch.text).toBe('王小明\n\n');
+    expect(maskPersonalImportCloudBatch(source, { ...batch, startLine: 2 })).toBeNull();
+    expect(maskPersonalImportCloudBatch(source, { ...batch, text: '王小' })).toBeNull();
+  });
+
+  it.each(['姓名', '姓名：'])('preserves course records after the vertical label %s', (label) => {
+    const source = `${label}\n王小明\n微積分 3 85\n英文，學分 2，成績 80\n課程名稱,教師,學分,成績\n資料庫,林小美,3,90`;
+    const masked = maskPersonalImportText(source);
+    expect(isPersonalImportCloudMaskSafe(source)).toBe(true);
+    expect(masked).not.toMatch(/王小明|林小美/);
+    expect(masked).toContain('微積分 3 85');
+    expect(masked).toContain('英文,學分 2,成績 80');
+    expect(masked).toContain('資料庫,[個資已遮罩],3,90');
+    expect(maskPersonalImportText(masked)).toBe(masked);
+  });
+
+  it('keeps raw split records and source lines while masking multiline private cells in every cloud slice', () => {
+    const source = '課程名稱,教師,學分,成績\n' + Array.from({ length: 9 }, (_, index) => `課程${index},"王\n小明",3,85`).join('\n');
+    const planned = planResilientPersonalImportBatches(source, { maxBatchCharacters: 1000, maxTotalCharacters: 40000, maxBatches: 80 });
+    const split = splitPersonalImportAiTextBatch(planned.batches[0])!;
+    const slices = [...split, ...planned.batches.slice(1)];
+    expect(slices.map((batch) => batch.text).join('')).toBe(source);
+    for (const batch of slices) {
+      const masked = maskPersonalImportCloudBatch(source, batch)!;
+      expect(masked).not.toBeNull();
+      expect(masked.sourceText).not.toMatch(/王|小明/);
+      expect(masked.sourceText.split('\n')).toHaveLength(batch.text.split('\n').length);
+      expect(masked.columnContext).toBe('課程名稱,教師,學分,成績');
+    }
+    expect(slices.map((batch) => maskPersonalImportCloudBatch(source, batch)!.sourceText).join('')).toBe(maskPersonalImportText(source));
+  });
+
   it('masks labels, known names, fullwidth IDs, student numbers and name columns without losing grades', () => {
     const source = '姓名：王小明 學號：411234567\n身份證：Ａ１２３４５６７８９\n陳小華\n課程名稱\t姓名\t學號\t學分\t成績\n微積分\t林小美\t412345678\t3\t85';
     const masked = maskPersonalImportText(source, ['陳小華']);

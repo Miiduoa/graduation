@@ -53,8 +53,11 @@ import {
 import { usePersonalImportScope, usePersonalImports } from '@/lib/usePersonalImports';
 import {
   clearPersonalImportDraft,
+  clearPersonalImportPartialDraft,
   readPersonalImportDraft,
+  readPersonalImportPartialDraft,
   writePersonalImportDraft,
+  writePersonalImportPartialDraft,
   type PersonalImportDraft,
 } from '@/lib/personalImportDrafts';
 import { recognizePersonalImportImage } from '@/lib/personalImportOcr';
@@ -423,6 +426,9 @@ function ImportWorkspace({
   const [aiReviewed, setAiReviewed] = useState(false);
   const [pendingAi, setPendingAi] = useState<AiImportRequest | null>(null);
   const [retryAi, setRetryAi] = useState<AiImportRequest | null>(null);
+  const [partialDraft, setPartialDraft] = useState<PersonalImportDraft | null>(null);
+  const [partialRequest, setPartialRequest] = useState<AiImportRequest | null>(null);
+  const [partialStorageError, setPartialStorageError] = useState('');
   const [removingAiModel, setRemovingAiModel] = useState(false);
   const clientReady = useSyncExternalStore(
     subscribeClient,
@@ -513,6 +519,11 @@ function ImportWorkspace({
       setDraftReadFailed(true);
       setDraftStorageError(errorMessage(error));
     }
+    try {
+      setPartialDraft(readPersonalImportPartialDraft(scope));
+    } catch {
+      setNotice('上次整理的部分結果無法還原，目前草稿仍保留。');
+    }
     setDraftReady(true);
     active.current = true;
     return () => {
@@ -561,14 +572,17 @@ function ImportWorkspace({
     documentSelection,
   ]);
   useEffect(() => {
-    if (!draftStorageError || (!text && !rows.length && !importDocument)) return;
+    if (
+      !(draftStorageError || partialStorageError) ||
+      (!text && !rows.length && !importDocument && !partialDraft)
+    ) return;
     const warnBeforeLeaving = (event: BeforeUnloadEvent) => {
       event.preventDefault();
       event.returnValue = '';
     };
     window.addEventListener('beforeunload', warnBeforeLeaving);
     return () => window.removeEventListener('beforeunload', warnBeforeLeaving);
-  }, [draftStorageError, text, rows.length, importDocument]);
+  }, [draftStorageError, partialStorageError, text, rows.length, importDocument, partialDraft]);
   useEffect(
     () => () => {
       if (previewUrl.current) URL.revokeObjectURL(previewUrl.current);
@@ -710,7 +724,9 @@ function ImportWorkspace({
     )
       return;
     if (!request.input.image && !request.input.text?.trim()) return;
-    setRetryAi(null);
+    // Keep the reviewed draft unchanged until the replacement has completed.
+    const preserveDraft = rows.length > 0 || !!importDocument;
+    if (!preserveDraft) setRetryAi(null);
     const controller = new AbortController();
     job.current?.abort();
     job.current = controller;
@@ -740,12 +756,37 @@ function ImportWorkspace({
         retry: request.retry,
         onPartial: (partial) => {
           if (!currentRead()) return;
-          setRetryAi(partial.retry ? { ...request, retry: partial.retry } : null);
+          if (!preserveDraft)
+            setRetryAi(partial.retry ? { ...request, retry: partial.retry } : null);
           if (!partial.rows.length) return;
+          if (preserveDraft) {
+            const nextDraft: PersonalImportDraft = {
+              kind,
+              year,
+              semester,
+              text: partial.sourceText ?? partial.retry?.sourceText ?? request.input.text ?? '',
+              source: request.source,
+              rows: partial.rows,
+              parseIssues: partial.issues,
+              excluded: request.retry
+                ? excluded.filter((id) => partial.rows.some((row) => row.id === id))
+                : [],
+              backup: null,
+            };
+            setPartialDraft(nextDraft);
+            setPartialRequest(partial.retry ? { ...request, retry: partial.retry } : null);
+            try {
+              writePersonalImportPartialDraft(scope, nextDraft);
+              setPartialStorageError('');
+            } catch (error) {
+              setPartialStorageError(errorMessage(error));
+            }
+            return;
+          }
           setRows(partial.rows);
           setParseIssues(partial.issues);
           setAiReviewed(false);
-          setText(request.input.text ?? '');
+          setText(partial.sourceText ?? partial.retry?.sourceText ?? request.input.text ?? '');
           setSource(request.source);
           setBackup(null);
           setSchoolPage(null);
@@ -771,7 +812,7 @@ function ImportWorkspace({
                 kind,
                 year,
                 semester,
-                text: request.input.text ?? '',
+                text: partial.sourceText ?? partial.retry?.sourceText ?? request.input.text ?? '',
                 source: request.source,
                 rows: partial.rows,
                 parseIssues: partial.issues,
@@ -790,13 +831,21 @@ function ImportWorkspace({
         },
       });
       if (!currentRead()) return;
-      setRetryAi(result.retry ? { ...request, retry: result.retry } : null);
       if (!result.rows.length) {
         setNotice(
           result.issues.map((issue) => issue.message).join(' ') ||
             '沒有整理出可核對的資料，原本的草稿仍保留。請重試或貼上學校的表格文字。',
         );
         return;
+      }
+      setRetryAi(result.retry ? { ...request, retry: result.retry } : null);
+      setPartialDraft(null);
+      setPartialRequest(null);
+      try {
+        clearPersonalImportPartialDraft(scope);
+        setPartialStorageError('');
+      } catch (error) {
+        setPartialStorageError(errorMessage(error));
       }
       setRows(result.rows);
       setParseIssues(
@@ -821,7 +870,7 @@ function ImportWorkspace({
         request.retry ? excluded.filter((id) => result.rows.some((row) => row.id === id)) : [],
       );
       setAiReviewed(false);
-      setText(request.input.text ?? '');
+      setText(result.sourceText ?? result.retry?.sourceText ?? request.input.text ?? '');
       setSource(request.source);
       if (request.fromDocument) {
         documentFile.current = null;
@@ -859,6 +908,46 @@ function ImportWorkspace({
       return;
     if (rows.length) setPendingAi(request);
     else void processAi(request);
+  };
+  const adoptPartialDraft = () => {
+    if (!partialDraft || reading || saving || suspended.current) return;
+    // Persist the explicit replacement before removing its recovery copy.
+    try {
+      if (draftReadFailed) throw new Error('請先清除無法還原的暫存，再採用部分結果。');
+      writePersonalImportDraft(scope, partialDraft);
+    } catch (error) {
+      setDraftStorageError(errorMessage(error));
+      return;
+    }
+    try {
+      clearPersonalImportPartialDraft(scope);
+      setPartialStorageError('');
+    } catch (error) {
+      setPartialStorageError(errorMessage(error));
+    }
+    setKind(partialDraft.kind);
+    setYear(partialDraft.year);
+    setSemester(partialDraft.semester);
+    setRows(partialDraft.rows);
+    setParseIssues(partialDraft.parseIssues);
+    setExcluded(partialDraft.excluded);
+    setText(partialDraft.text);
+    setSource(partialDraft.source);
+    setBackup(null);
+    setDocument(null);
+    setDocumentSelection(null);
+    documentFile.current = null;
+    setHasDocumentFile(false);
+    setSchoolPage(null);
+    setSourceImage(null);
+    setPreview('');
+    setReviewPage(0);
+    setReviewIssueIds(null);
+    setAiReviewed(false);
+    setRetryAi(partialRequest);
+    setPartialDraft(null);
+    setPartialRequest(null);
+    setNotice('已採用這次整理的部分結果，請逐筆核對後再匯入。');
   };
   const readFile = async (file?: File, pdfMode?: 'ocr') => {
     if (!file || suspended.current || reading || saving || rows.length) return;
@@ -998,6 +1087,9 @@ function ImportWorkspace({
       setAiReviewed(false);
       setPendingAi(null);
       setRetryAi(null);
+      setPartialDraft(null);
+      setPartialRequest(null);
+      setPartialStorageError('');
       setRows([]);
       setText('');
       setSource({ type: 'paste' });
@@ -1100,6 +1192,8 @@ function ImportWorkspace({
       );
       if (result.added) setLastBatch(result.batchId);
       setRetryAi(null);
+      setPartialDraft(null);
+      setPartialRequest(null);
       setRows([]);
       setBackup(null);
       setReviewPage(0);
@@ -1633,6 +1727,42 @@ function ImportWorkspace({
               )}
             </div>
           </div>
+        )}
+        {partialStorageError && <p role="alert">部分結果：{partialStorageError}</p>}
+        {partialDraft && (
+          <section className={styles.notice} aria-label="另存的部分整理結果">
+            <p>
+              已另外保留 {partialDraft.rows.length} 筆部分結果，目前草稿與手動修改仍保留。
+              採用部分結果會取代目前草稿；原始圖片請另行開啟對照。
+            </p>
+            <div className={styles.actions}>
+              <button
+                type="button"
+                className="btn"
+                disabled={reading || saving}
+                onClick={adoptPartialDraft}
+              >
+                以部分結果取代目前草稿
+              </button>
+              <button
+                type="button"
+                className="btn"
+                disabled={reading || saving}
+                onClick={() => {
+                  try {
+                    clearPersonalImportPartialDraft(scope);
+                    setPartialDraft(null);
+                    setPartialRequest(null);
+                    setPartialStorageError('');
+                  } catch (error) {
+                    setPartialStorageError(errorMessage(error));
+                  }
+                }}
+              >
+                捨棄部分結果
+              </button>
+            </div>
+          </section>
         )}
         {retryAi?.retry && !reading && (
           <button

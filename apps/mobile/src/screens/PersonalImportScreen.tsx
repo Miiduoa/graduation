@@ -623,6 +623,16 @@ function ImportWorkspace({
         ? '優先使用雲端 AI；送出前會遮蔽可辨識的姓名、學號與身分證號。'
         : '正在使用本機模型或一般規則整理，資料留在這台手機。',
     );
+    const acceptDocumentSource = () => {
+      if (!input?.fromDocument) return;
+      // Keep the editable source and the saved progress on the same document before cancellation.
+      setText(inputText);
+      setSource(inputSource);
+      clearDocumentSource();
+      setDocumentPrep(null);
+      setBackupPreview(null);
+      clearSourceImage();
+    };
     try {
       const parsed = await runMobilePersonalImportAi(
         inputText,
@@ -642,6 +652,7 @@ function ImportWorkspace({
                   ...partial.issues,
                 ]
               : partial.issues;
+            if (partialRows.length) acceptDocumentSource();
             setRows(partialRows);
             setIssues(partialIssues);
             setSelected(new Set(partialRows.map((row) => row.id)));
@@ -718,14 +729,7 @@ function ImportWorkspace({
       setReviewFilter('all');
       setExpanded(null);
       setSchoolPage(null);
-      if (input?.fromDocument) {
-        clearDocumentSource();
-        setDocumentPrep(null);
-        setBackupPreview(null);
-        setText(inputText);
-        setSource(inputSource);
-        clearSourceImage();
-      }
+      acceptDocumentSource();
       setNotice(
         parsed.rows.length
           ? `已整理 ${nextRows.length} 筆待核對資料。${parsed.retryBatches?.length ? '未完成的段落可重試，完成的結果已保留。' : ''}請對照原文確認後再新增。`

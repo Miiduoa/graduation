@@ -20,7 +20,7 @@ import {
 } from '@campus/shared/src/imports/aiTableAudit';
 import {
   requestPersonalImportCloud,
-  maskPersonalImportText,
+  maskPersonalImportCloudBatch,
   isPersonalImportCloudMaskSafe,
 } from '@campus/shared/src/imports/aiCloud';
 import { localLLM } from '../localLLMInference';
@@ -152,22 +152,16 @@ export async function runMobilePersonalImportAi(
   if (text.length > MOBILE_IMPORT_AI_MAX_CHARACTERS)
     throw new Error('這次文字超過 40,000 字元，請分批整理；原文仍保留。');
   let cloudAvailable = !!request.platformContext && isPersonalImportCloudMaskSafe(text);
-  const sourceText = cloudAvailable ? maskPersonalImportText(text) : text;
   if (
     cloudAvailable &&
     request.retryBatches?.some(
-      (batch) =>
-        !sourceText
-          .split('\n')
-          .slice(batch.startLine - 1)
-          .join('\n')
-          .startsWith(batch.text),
+      (batch) => !maskPersonalImportCloudBatch(text, batch),
     )
   )
     cloudAvailable = false;
   const batches: ResilientPersonalImportAiTextBatch[] =
     request.retryBatches?.map((batch) => ({ ...batch })) ??
-    planResilientPersonalImportBatches(sourceText, {
+    planResilientPersonalImportBatches(text, {
       maxBatchCharacters: BATCH_CHARACTERS,
       maxTotalCharacters: MOBILE_IMPORT_AI_MAX_CHARACTERS,
       maxBatches: 64,
@@ -342,13 +336,18 @@ export async function runMobilePersonalImportAi(
         let output: string | undefined;
         let sourceText = batch.text;
         let columnContext = batch.columnContext;
-        if (cloudAvailable) {
+        const cloudInput = cloudAvailable ? maskPersonalImportCloudBatch(text, batch) : null;
+        if (cloudAvailable && !cloudInput) {
+          cloudAvailable = false;
+          fallbackMessage = '這一段無法可靠對照原文並遮蔽個資，資料留在這台手機。';
+        }
+        if (cloudAvailable && cloudInput) {
           mode = 'cloud';
           emit();
           const cloud = await requestPersonalImportCloud({
-            text: batch.text,
+            text: cloudInput.sourceText,
             kind: context.kind,
-            columnContext: batch.columnContext,
+            columnContext: cloudInput.columnContext,
             endpoint: 'https://nuni.tw/api/personal-import/recognize',
             headers: { Authorization: `Platform ${request.platformContext}` },
             signal,

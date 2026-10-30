@@ -17,9 +17,53 @@ const messages: Record<PersonalImportCloudFailure, string> = {
   'invalid-input': '這段內容無法交給雲端整理，改用本機整理。',
 };
 
-const privateFieldPattern = '(?:(?:學生)?姓名|(?:學生)?學號|身分證(?:字號)?|身份證(?:字號)?|(?:授課)?教師|老師|(?:student\\s*)?name|student\\s*(?:id|number)|teacher(?:\\s*name)?)';
+const privateFieldPattern = '(?:(?:學生)?姓名|(?:學生)?學號|身分證(?:字號)?|身份證(?:字號)?|(?:授課)?教師|老師|電子郵件|電郵|(?:聯絡)?電話|手機(?:號碼)?|(?:student\\s*)?name|student\\s*(?:id|number)|teacher(?:\\s*name)?|e-?mail|phone|mobile)';
 const privateField = new RegExp(`^${privateFieldPattern}$`, 'iu');
 const tableField = /^(?:(?:課程|科目|活動)?名稱|課號|科目代碼|課程代碼|學分數?|成績|分數|學年度|學期|(?:授課)?教師|教室|星期|開始節次|結束節次|日期|開始時間|結束時間|地點|班級|系所|序號|編號|course(?: name| code)?|credits?|grade|score|semester|teacher|room|day|date|start|end|title|location)$/iu;
+
+function isAcademicBoundary(value: string): boolean {
+  return tableField.test(value) || /^【[^【】]+】$/u.test(value) ||
+    value.split(/[\t,|]/u).filter((cell) => tableField.test(cell.trim())).length >= 2 ||
+    (/學分\s*[:：]?\s*\d/u.test(value) && /(?:成績|分數)\s*[:：]?\s*(?:\d|[A-F])/iu.test(value)) ||
+    /\S[ \t]+\d+(?:\.\d+)?[ \t]+(?:\d{1,3}(?:\.\d+)?|[A-F][+-]?|通過|及格)$/iu.test(value);
+}
+
+function hasAmbiguousPrivateList(text: string): boolean {
+  const labeledValue = new RegExp(`${privateFieldPattern}[ \\t]*[:=][ \\t]*([^\\n]*)`, 'giu');
+  for (const match of text.matchAll(labeledValue)) {
+    for (const tail of match[1].split(/[\t,;|]/u).slice(1)) {
+      if (!tail.trim()) continue;
+      const field = tail.trim().match(/^([^:=]+)[:=]/u)?.[1].trim();
+      if (!field || (!privateField.test(field) && !tableField.test(field) && !/^(?:課程|科目)$/u.test(field))) return true;
+    }
+  }
+  return false;
+}
+
+/** OCR 會把標籤和值拆成不同列；保留換行，無法辨別欄位邊界時停用雲端。 */
+function maskPrivateVerticalFields(text: string): { text: string; safe: boolean } {
+  const lines = text.split('\n');
+  const label = new RegExp(`^${privateFieldPattern}[ \\t]*[:=]?$`, 'iu');
+  const inlineLabel = new RegExp(`^${privateFieldPattern}[ \\t]*[:=]`, 'iu');
+  let safe = true;
+  for (let index = 0; index < lines.length; index++) {
+    if (!label.test(lines[index].trim())) continue;
+    let values = 0;
+    for (let next = index + 1; next < lines.length; next++) {
+      const value = lines[next].trim();
+      if (!value) continue;
+      if (label.test(value) || inlineLabel.test(value) || isAcademicBoundary(value)) break;
+      if (!/^[\p{L}\p{M}\d .@_+()\-'’·•]+$/u.test(value) && !/^\[(?:姓名|學號|證號|個資|聯絡資料)已遮罩\]$/u.test(value)) {
+        safe = false;
+        break;
+      }
+      lines[next] = `[個資已遮罩]${lines[next].endsWith('\r') ? '\r' : ''}`;
+      values++;
+    }
+    if (!values) safe = false;
+  }
+  return { text: lines.join('\n'), safe };
+}
 
 function rawCellSpans(text: string, record: ImportDelimitedRecord, delimiter: string): Array<[number, number]> {
   const spans: Array<[number, number]> = [];
@@ -71,7 +115,8 @@ function maskPrivateTables(text: string): { text: string; safe: boolean } {
           return { text: masked, safe: false };
         privateColumns = named;
         width = cells.length;
-      } else if (academic >= 2 || (cells.length === 1 && (academic === 1 || /^【[^【】]+】$/u.test(cells[0])))) {
+      } else if (academic >= 2 || (cells.length === 1 && isAcademicBoundary(cells[0])) ||
+        (width === 1 && isAcademicBoundary(masked.slice(record.start, record.contentEnd).trim()))) {
         privateColumns = [];
         width = 0;
       } else if (privateColumns.length) {
@@ -96,7 +141,10 @@ function maskPrivateTables(text: string): { text: string; safe: boolean } {
 
 /** 格式不完整的姓名欄不送出，保留在裝置上交由本機整理。 */
 export function isPersonalImportCloudMaskSafe(text: string, context = ''): boolean {
-  return maskPrivateTables((context ? `${context}\n${text}` : text).normalize('NFKC')).safe;
+  const normalized = (context ? `${context}\n${text}` : text).normalize('NFKC');
+  if (hasAmbiguousPrivateList(normalized)) return false;
+  const vertical = maskPrivateVerticalFields(normalized);
+  return vertical.safe && maskPrivateTables(vertical.text).safe;
 }
 
 /** 遮罩明示姓名欄、已知姓名，以及學號與身分證格式；保留課程數值。 */
@@ -106,15 +154,39 @@ export function maskPersonalImportText(text: string, knownNames: readonly string
     const value = name.normalize('NFKC').trim();
     if (value.length >= 2) masked = masked.split(value).join('[姓名已遮罩]');
   }
-  masked = maskPrivateTables(masked).text;
+  masked = maskPrivateTables(maskPrivateVerticalFields(masked).text).text;
   masked = masked.split('\n').map((line) => line
-      .replace(/((?:學生姓名|姓名|(?:授課)?教師|老師|student\s*name|name|teacher(?:\s*name)?)[ \t]*[:=][ \t]*)([^\n\t,;|]+?)(?=\s+(?:學號|身分證|身份證|班級|系所|學分|成績|課程|科目|student\s*id|credits?|grade|score)\s*[:=]|$|[,;|])/giu, '$1[姓名已遮罩]')
+      .replace(/((?:電子郵件|電郵|(?:聯絡)?電話|手機(?:號碼)?|e-?mail|phone|mobile)[ \t]*[:=][ \t]*)([^\n\t,;|]+?)(?=\s+(?:學號|身分證|身份證|班級|系所|學分|成績|課程|科目|姓名|教師|電子郵件|電郵|電話|手機|student\s*id|credits?|grade|score|e-?mail|phone)\s*[:=]|$|[\t,;|])/giu, '$1[聯絡資料已遮罩]')
+      .replace(/((?:學生姓名|姓名|(?:授課)?教師|老師|student\s*name|name|teacher(?:\s*name)?)[ \t]*[:=][ \t]*)([^\n\t,;|]+?)(?=\s+(?:學號|身分證|身份證|班級|系所|學分|成績|課程|科目|student\s*id|credits?|grade|score)\s*[:=]|$|[\t,;|])/giu, '$1[姓名已遮罩]')
       .replace(/((?:學生姓名|姓名|(?:授課)?教師|老師)[ ]+)([^\s,;|:]{2,20})(?![ \t]*[:=])/gu, '$1[姓名已遮罩]')
       .replace(/((?:學生)?學號|student\s*(?:id|number))([ \t]*[:=]?[ \t]*)[A-Za-z0-9_-]{4,24}/giu, '$1$2[學號已遮罩]')
   ).join('\n');
   return masked
+    .replace(/[\p{L}\p{N}._%+-]+@(?:[\p{L}\p{N}-]+\.)+[\p{L}]{2,}/giu, '[聯絡資料已遮罩]')
+    .replace(/\(0[2-8]\)[ -]?\d{3,4}[ -]?\d{4}\b/gu, '[聯絡資料已遮罩]')
+    .replace(/(?<![A-Za-z0-9])(?:\+?886[ -]?(?:0[ -]?)?|0)(?:9\d{2}[ -]?\d{3}[ -]?\d{3}|[2-8][ -]?\d{3,4}[ -]?\d{4})(?!\d)/gu, '[聯絡資料已遮罩]')
     .replace(/\b[A-Z][12]\d{8}\b/giu, '[證號已遮罩]')
     .replace(/\b[A-Z]{0,3}\d{7,12}\b/giu, '[學號已遮罩]');
+}
+
+/** 雲端片段取自整份文件的遮罩副本，本機與重試仍使用原始文字。 */
+export function maskPersonalImportCloudBatch(
+  source: string,
+  batch: { text: string; startLine: number; columnContext?: string },
+  knownNames: readonly string[] = [],
+): { sourceText: string; columnContext: string } | null {
+  if (!Number.isSafeInteger(batch.startLine) || batch.startLine < 1 || !isPersonalImportCloudMaskSafe(source)) return null;
+  const lines = source.split('\n');
+  const start = batch.startLine - 1;
+  if (start >= lines.length) return null;
+  const offset = start ? lines.slice(0, start).join('\n').length + 1 : 0;
+  if (source.slice(offset, offset + batch.text.length) !== batch.text ||
+    (offset + batch.text.length < source.length && !batch.text.endsWith('\n'))) return null;
+  const masked = maskPersonalImportText(source, knownNames).split('\n');
+  if (masked.length !== lines.length) return null;
+  const length = batch.text.split('\n').length - (batch.text.endsWith('\n') ? 1 : 0);
+  const sourceText = masked.slice(start, start + length).join('\n') + (batch.text.endsWith('\n') ? '\n' : '');
+  return { sourceText, columnContext: maskPersonalImportText(batch.columnContext ?? '', knownNames) };
 }
 
 export function maskPersonalImportCloudInput(text: string, context = '', knownNames: readonly string[] = []): { sourceText: string; columnContext: string } {

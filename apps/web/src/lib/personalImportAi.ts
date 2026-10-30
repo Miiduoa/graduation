@@ -7,7 +7,7 @@ import {
 } from '@campus/shared/src/imports/aiRecognition';
 import {
   requestPersonalImportCloud,
-  maskPersonalImportText,
+  maskPersonalImportCloudBatch,
   isPersonalImportCloudMaskSafe,
 } from '@campus/shared/src/imports/aiCloud';
 import {
@@ -33,8 +33,9 @@ export type PersonalImportAiRetry = {
   completed: PersonalImportAiResult;
   replaceRowIds?: string[];
   cloudSafe?: boolean;
+  sourceText?: string;
 };
-export type PersonalImportAiRunResult = PersonalImportAiResult & { retry?: PersonalImportAiRetry };
+export type PersonalImportAiRunResult = PersonalImportAiResult & { retry?: PersonalImportAiRetry; sourceText?: string };
 export type PersonalImportAiRequest = {
   input: { text?: string; image?: File };
   options: PersonalImportOptions;
@@ -118,6 +119,7 @@ export async function runPersonalImportAi(
   let cloudEnabled = true;
   let sourceMaskSafe = request.retry?.cloudSafe !== false;
   let cloudFallbackMessage = '';
+  let originalSource = request.retry?.sourceText ?? request.input.text ?? '';
   let localEnabled = localAvailability().available;
   let provider = '';
   const snapshot = (): PersonalImportAiRunResult => {
@@ -129,6 +131,7 @@ export async function runPersonalImportAi(
     const remaining = [...failed.map((item) => item.batch), ...work.slice(index + 1)];
     return {
       ...result,
+      sourceText: originalSource,
       ...(remaining.length
         ? {
             retry: {
@@ -136,6 +139,7 @@ export async function runPersonalImportAi(
               completed: clone(successful),
               replaceRowIds: failed.flatMap((item) => item.result.rows.map((row) => row.id)),
               cloudSafe: sourceMaskSafe,
+              sourceText: originalSource,
             },
           }
         : {}),
@@ -155,6 +159,7 @@ export async function runPersonalImportAi(
       progress('正在這台裝置讀取圖片文字，原圖不會上傳。');
       try {
         source = await recognizePersonalImportImage(request.input.image, signal, progress);
+        if (!source.trim()) throw new Error('圖片文字辨識未取得文字。');
       } catch (error) {
         if (signal.aborted) throw cancelled();
         if (!localEnabled) throw error;
@@ -174,6 +179,7 @@ export async function runPersonalImportAi(
       }
     }
     if (signal.aborted) throw cancelled();
+    if (!request.retry) originalSource = source;
     if (request.retry) {
       work = [...request.retry.batches];
       cloudEnabled = sourceMaskSafe;
@@ -182,7 +188,7 @@ export async function runPersonalImportAi(
       if (!cloudEnabled)
         cloudFallbackMessage = '這份資料無法可靠遮罩姓名欄位，已保留在裝置上整理。';
       const planned = planResilientPersonalImportBatches(
-        cloudEnabled ? maskPersonalImportText(source, request.knownNames) : source,
+        source,
         {
           maxBatchCharacters: 1_000,
           maxTotalCharacters: 40_000,
@@ -204,12 +210,18 @@ export async function runPersonalImportAi(
       let result: PersonalImportAiResult | undefined;
       let failure = batch.rulesOnly ? '這一段無法安全拆分，已改用規則解析。' : cloudFallbackMessage;
       const label = `第 ${index + 1}／${work.length} 段（原文第 ${batch.startLine} 行起）`;
-      if (cloudEnabled && !batch.rulesOnly) {
+      const cloudInput = cloudEnabled && !batch.rulesOnly
+        ? maskPersonalImportCloudBatch(originalSource, batch, request.knownNames) : null;
+      if (cloudEnabled && !batch.rulesOnly && !cloudInput) {
+        cloudEnabled = false;
+        failure = cloudFallbackMessage = '這一段無法可靠對照原文並遮罩個資，已保留在裝置上整理。';
+      }
+      if (cloudEnabled && cloudInput && !batch.rulesOnly) {
         provider = '目前使用雲端整理，送出前已遮罩可辨識的姓名、學號與證號。';
         progress(`${provider}正在整理${label}。`);
         const response = await requestPersonalImportCloud({
-          text: batch.text,
-          columnContext: batch.columnContext,
+          text: cloudInput.sourceText,
+          columnContext: cloudInput.columnContext,
           kind: options.kind,
           headers: request.cloudHeaders,
           signal,

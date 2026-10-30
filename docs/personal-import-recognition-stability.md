@@ -1,6 +1,6 @@
 # 個人匯入辨識穩定性與雲端備援
 
-基準：`7dc77f5cb15265937d41bd5516c3e3c6a15e96ca`；分支 `fix/import-recognition-stability`。以下原始行號均指基準版本。變更尚未提交或部署。
+基準：`7dc77f5cb15265937d41bd5516c3e3c6a15e96ca`；分支 `fix/import-recognition-stability`。以下原始行號均指基準版本。本次修正套用於 `485cfbb2bc594b2c4e211d0033912e404717daf1`，尚未提交或部署。
 
 ## 根本原因與證據
 
@@ -22,10 +22,10 @@
 
 - 雲端優先，其次本機模型，最後規則解析；每段都會在畫面說明目前模式。
 - 來源最多 40,000 字元，按完整資料列／可辨認段落分段；單段以 1,000 字元、最多八筆完整紀錄為目標。不能安全拆開的紀錄留在裝置上走規則解析，其他段落繼續。
-- 完成段落立即更新草稿。JSON 不完整、欄位錯配或輸出截斷會在已知邊界縮小重試；失敗範圍留有明確提示，使用者可只重試未完成段落。草稿需核對後才寫入個人紀錄。
+- 初次整理完成的段落立即保存。網頁重跑時以獨立暫存保存新部分結果，既有草稿及手動修改保留到完成或明確採用部分結果；取消不覆蓋原稿。JSON 不完整、欄位錯配或輸出截斷會在已知邊界縮小重試；失敗範圍留有明確提示，使用者可只重試未完成段落。草稿需核對後才寫入個人紀錄。
 - Web worker 在同次匯入中共用已載入模型，每段釋放 tensor，輸入／輸出預算降為 4096／2048；本機載入上限三分鐘，生成上限兩分鐘。最終完成、取消或致命錯誤會終止 worker。
-- 手機依 Qwen context 控制輸出長度；逾時保留成果，但原生 completion 尚未結束前仍保留鎖，避免同時載入／推論。手機草稿依帳號與學校隔離、依序保存。
-- 圖片先在裝置上 OCR，只將遮罩後的文字交給雲端。網頁 OCR 失敗時可嘗試本機視覺模型。原圖不送 Cloudflare；OCR Host 終止後可重建，舊 Host 的事件不能干擾新的工作。
+- 手機依 Qwen context 控制輸出長度；逾時保留成果，但原生 completion 尚未結束前仍保留鎖，避免同時載入／推論。手機草稿依帳號與學校隔離、依序保存；文件部分成果同時更新來源文字，取消後的自動保存仍保有全文與重試範圍。
+- 圖片先在裝置上 OCR，只將遮罩後的文字交給雲端。網頁 OCR 拋錯或回傳空白文字時可嘗試本機視覺模型。原圖不送 Cloudflare；OCR Host 終止後可重建，舊 Host 的事件不能干擾新的工作。
 
 ## 雲端端點
 
@@ -34,9 +34,10 @@
 - 使用現有平台 session 檢查，再向既有 `sessions/current` 驗證；網頁沿用 Cookie／`X-Campus-Session`，手機沿用 `Authorization: Platform …`。沒有修改登入或 session 實作。
 - 僅伺服器從環境變數讀取 `CF_AI_ACCOUNT_ID`、`CF_AI_API_TOKEN`。未設定回 `503 disabled`，前端自動備援。本次沒有讀取、設定或列印實際值，也沒有改 `.env`。
 - 目前模型為 `@cf/qwen/qwen3-30b-a3b-fp8`，使用 Workers AI REST JSON schema。支援方式依 [Cloudflare 模型文件](https://developers.cloudflare.com/workers-ai/models/qwen3-30b-a3b-fp8/)與 [JSON Mode 文件](https://developers.cloudflare.com/workers-ai/features/json-mode/)核對。
-- 每位已驗證的平台帳號、每個台灣日曆日最多 60 次模型請求；每段算一次，自動縮小重試也計次。單次文字加欄位參考最多 8,000 字元。
-- 使用現有 Firebase Admin 的 Firestore transaction 儲存配額，不依賴單一伺服器記憶體；配額儲存不可用時停止雲端呼叫並退回本機。延遲的前一天請求不能重設新一天計數。
-- 客戶端與伺服器都遮罩可辨識的姓名、教師、學號及證號。支援含引號、跨行 CSV／TSV、混合欄位與直向 OCR；整份來源先遮罩再分段，防止標籤與姓名分開後漏出。無法可靠判斷的個資欄留在裝置上處理。
+- 每位已驗證的平台帳號、每個台灣日曆日最多 60 次模型請求；全站預設每日最多 2,000 次，同帳號任意連續 60 秒預設最多 10 次。每段算一次，自動縮小重試也計次；已預留後的失敗請求不退回額度。單次文字加欄位參考最多 8,000 字元。
+- `PERSONAL_IMPORT_CLOUD_GLOBAL_DAILY_LIMIT` 調整全站每日上限；`PERSONAL_IMPORT_CLOUD_ACCOUNT_MINUTE_LIMIT` 調整每帳號 60 秒上限（最多仍受每日 60 次限制）。接受非負整數；`0` 停止雲端呼叫；空值或無效值採預設值。上限於每次請求讀取，變更配置後依平台要求重啟或重新部署即可生效。
+- 使用現有 Firebase Admin 的單一 Firestore transaction，同時讀取並預留帳號與 `_personalImportAiUsage/_global` 全站額度；帳號文件另存最近請求時間。任何限制不通過都不更新計數、不呼叫 Cloudflare，回 `429 quota` 與 `Retry-After: 60`，前端立即退本機。跨午夜不清空短時間限流；延遲的前一天請求不能重設新一天計數。計數損壞或儲存不可用時停止雲端呼叫，不依賴單一伺服器記憶體。
+- 客戶端與伺服器都遮罩可辨識的姓名、教師、學號、證號、電子郵件及電話。支援含引號、跨行 CSV／TSV、混合欄位與直向 OCR，包括冒號後換行的姓名／教師。保留原始來源供本機模型、規則解析及草稿使用；僅雲端副本先按整份來源遮罩再分段，防止標籤與姓名分開後漏出。無法可靠判斷或對齊的個資欄留在裝置上處理。
 - 伺服器 20 秒、客戶端 25 秒上限。未啟用、429、逾時、5xx 或無法驗證登入時自動備援。服務日額度仍以 Cloudflare 帳號當時的方案為準。
 
 ## 驗證與未驗證範圍
@@ -44,51 +45,35 @@
 使用 Node 22，最終驗證：
 
 - `pnpm typecheck`：Web、Mobile、shared 全部通過。
-- `pnpm --filter web exec vitest run src/lib/personalImport src/components/imports/PersonalImportCenter.test.tsx src/lib/server/personalImportCloud`：26 個測試檔、647 項通過，包含 44 項雲端／遮罩測試。
-- `pnpm --filter mobile test --testPathPattern='[Pp]ersonalImport|[Tt]imetableOcr|localLLM'`：16 個測試組、183 項通過。
-- `git diff --check`：通過。
-- 基準重現：手機後段失敗測試在原版本拒絕整次匯入，修正後保留完成資料；worker 新增三個回歸案例在原版本失敗，修正後通過；OCR 舊 Host 錯誤回呼在修正前中止新工作，修正後被忽略。
+- `pnpm --filter web exec vitest run src/lib/personalImport src/components/imports/PersonalImportCenter.test.tsx src/lib/server/personalImportCloud`：26 個測試檔、710 項通過。
+- `EXPO_NO_DOTENV=1 pnpm --filter mobile test --testPathPattern='[Pp]ersonalImport|[Tt]imetableOcr|localLLM'`：16 個測試組、190 項通過。
+- `git diff --check`、`git diff --cached --check`、`git diff --check origin/main`：通過。
+- 本次反例回歸：跨行姓名／教師、電子郵件、連字號／括號電話、無法可靠判斷的多人欄位；429／503 後本機模型及規則解析保留教師與原始證據；網頁成績 85 改為 88 後重跑首段並取消，畫面與暫存仍為 88；手機文件取消及重新開啟後保留全文與一個重試範圍；空白 OCR 確實呼叫本機視覺模型。
 
-自動化驗證包含雲端成功、未登入拒絕、未啟用／429／5xx／逾時備援、個資遮罩、配額交易／跨日競態、後段失敗保留、失敗段重試、取消／晚到回應、草稿恢復與 OCR renderer 重建。
+自動化驗證包含雲端成功、未登入拒絕、未啟用／429／5xx／逾時備援、個資遮罩、配額交易／跨日競態、後段失敗保留、失敗段重試、取消／晚到回應、草稿恢復與 OCR renderer 重建。新增配額案例涵蓋多帳號共用上限、單帳號併發與跨午夜短期限制、無效環境設定、損壞計數及儲存失敗；拒絕時不扣額度、不呼叫模型。交易測試使用記憶體序列化儲存，未執行真實 Firestore 併發驗收。
 
 未使用正式 Cloudflare token 或真實平台帳號呼叫端點；未執行真實 1.9 GB WebGPU 模型下載／推論、手機 Qwen 真機推論、實機記憶體壓力與作業系統終止測試。沒有部署，也沒有 commit／push。單元與元件測試不等同於上述正式環境驗收。
 
-## 變更檔案
+## 本次審查修正檔案
 
 ### 實作
 
-- `apps/mobile/src/components/TimetableOcrHost.tsx`
-- `apps/mobile/src/screens/PersonalImportScreen.tsx`
-- `apps/mobile/src/services/imports/personalImportAi.ts`
-- `apps/mobile/src/services/imports/personalImportDraft.ts`
-- `apps/web/src/app/api/personal-import/recognize/route.ts`
-- `apps/web/src/components/imports/PersonalImportCenter.tsx`
-- `apps/web/src/lib/personalImportAi.ts`
-- `apps/web/src/lib/personalImportAi.worker.ts`
-- `apps/web/src/lib/personalImportAiConfig.ts`
-- `apps/web/src/lib/personalImportAiLocal.ts`
-- `apps/web/src/lib/server/personalImportCloud.ts`
-- `packages/shared/src/imports/aiCloud.ts`
-- `packages/shared/src/imports/aiRecognition.ts`
-- `packages/shared/src/imports/aiTextBatches.ts`
+- `packages/shared/src/imports/aiCloud.ts`：跨行個資與聯絡方式遮罩、完整來源與雲端片段對齊。
+- `apps/web/src/lib/personalImportAi.ts`：保留原文備援、空白 OCR 視覺備援、重試來源。
+- `apps/mobile/src/services/imports/personalImportAi.ts`：保留原文備援與重試來源對齊。
+- `apps/web/src/components/imports/PersonalImportCenter.tsx`：重跑保留原稿、另存與採用部分結果。
+- `apps/web/src/lib/personalImportDrafts.ts`：獨立部分結果暫存與恢復。
+- `apps/mobile/src/screens/PersonalImportScreen.tsx`：文件進度同步來源、防止取消後自動保存覆寫。
+- `apps/web/src/lib/server/personalImportCloud.ts`：全站每日與每帳號滾動限流。
 
 ### 測試
 
-- `apps/mobile/src/__tests__/PersonalImportScreen.test.tsx`
-- `apps/mobile/src/__tests__/TimetableOcrHost.test.tsx`
-- `apps/mobile/src/__tests__/personalImportAi.test.ts`
-- `apps/mobile/src/__tests__/personalImportAiBatches.test.ts`
-- `apps/mobile/src/__tests__/personalImportAiCloud.test.ts`
-- `apps/mobile/src/__tests__/personalImportAiCoverage.test.ts`
-- `apps/mobile/src/__tests__/personalImportAiRecovery.test.ts`
-- `apps/mobile/src/__tests__/personalImportDraft.test.ts`
-- `apps/web/src/components/imports/PersonalImportCenter.test.tsx`
-- `apps/web/src/lib/personalImportAi.tableCoverage.test.ts`
-- `apps/web/src/lib/personalImportAi.test.ts`
-- `apps/web/src/lib/personalImportAi.worker.test.ts`
-- `apps/web/src/lib/personalImportAiFlow.test.ts`
-- `apps/web/src/lib/personalImportAiResilientBatches.test.ts`
-- `apps/web/src/lib/personalImportAiSchema.test.ts`
-- `apps/web/src/lib/server/personalImportCloud.test.ts`
 - `apps/web/src/lib/server/personalImportCloudClient.test.ts`
+- `apps/web/src/lib/server/personalImportCloud.test.ts`
+- `apps/web/src/lib/personalImportAiFlow.test.ts`
+- `apps/mobile/src/__tests__/personalImportAiCloud.test.ts`
+- `apps/web/src/components/imports/PersonalImportCenter.test.tsx`
+- `apps/web/src/lib/personalImportDrafts.test.ts`
+- `apps/mobile/src/__tests__/PersonalImportScreen.test.tsx`
 
+另更新本文件；共 15 個檔案。既有依賴連結的刪除不屬於本次修改。
