@@ -9,7 +9,7 @@ import { SiteFooter } from '@/components/SiteFooter';
 import { useAuth } from '@/components/AuthGuard';
 import { AccountIdentity } from '@/components/AccountIdentity';
 import { browserRequest, useNuniSession } from '@/features/nuni/Session';
-import { loadHomeData, type HomeCourse, type HomeData } from '@/lib/homeOverview';
+import type { HomeCourse, HomeData } from '@/lib/homeOverview';
 import { loadNuniHomeData } from '@/lib/nuniHomeOverview';
 import { useClientHydrated } from '@/lib/useClientHydrated';
 import { useOptionalSelectedSchool } from '@/components/SelectedSchoolProvider';
@@ -64,7 +64,7 @@ export default function HomePage() {
       const next =
         context && accountId
           ? await loadNuniHomeData((path, input) => browserRequest(path, context, input), accountId)
-          : await loadHomeData(uid!);
+          : { courses: [], tasks: [], unreadCount: 0 };
       if (request === generation.current) {
         setResult({ owner, data: next, updatedAt: new Date() });
       }
@@ -85,7 +85,7 @@ export default function HomePage() {
     } finally {
       if (request === generation.current) setLoading(false);
     }
-  }, [owner, context, accountId, uid, sessionLoading, blocked, refreshSession]);
+  }, [owner, context, accountId, sessionLoading, blocked, refreshSession]);
   useEffect(() => {
     void refresh();
     return () => {
@@ -125,7 +125,7 @@ export default function HomePage() {
     const timer = window.setTimeout(() => setLeavingTodoIds([]), 200);
     return () => window.clearTimeout(timer);
   }, [todos]);
-  const lmsUnconnected = signedIn && !error && !context && (data?.courses.length ?? 0) === 0;
+  const lmsUnconnected = signedIn && !!data && !error && data.courses.length === 0;
 
   return (
     <div className={styles.page}>
@@ -135,6 +135,11 @@ export default function HomePage() {
       <AppHeader />
       <main id="today-content" className={styles.main} tabIndex={-1}>
         <QuickCampusEntry />
+        {!sessionLoading && uid && !context ? (
+          <p className={styles.notice}>
+            E 校園與 TronClass 的學校來源已停用。<Link href="/classroom">前往 nuni 課程</Link>
+          </p>
+        ) : null}
         {isTeacherRole(role) && (
           <p className={styles.notice}>
             <Link href="/teacher">老師工作台 →</Link> 看學生送來的課程申訴。
@@ -181,7 +186,7 @@ export default function HomePage() {
             refreshing={loading && !!data}
             todos={todos}
             courses={data?.courses ?? []}
-            todosError={error}
+            todosError={error || data?.tasksError || ''}
             lmsUnconnected={lmsUnconnected}
             leavingTodoIds={leavingTodoIds}
             onRetryTodos={() => void refresh()}

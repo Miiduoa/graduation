@@ -166,7 +166,9 @@ it('shows graded, waiting and missing work and does not invent a nuni score', ()
   expect(screen.queryByText(/97/)).toBeNull();
   fireEvent.click(screen.getByRole('link', { name: /作業一/ }));
   expect(onOpen).toHaveBeenCalled();
-  expect(screen.getByRole('link', { name: /作業一/ }).getAttribute('href')).toContain('#assignment-');
+  expect(screen.getByRole('link', { name: /作業一/ }).getAttribute('href')).toContain(
+    '#assignment-',
+  );
 });
 
 it('keeps a failed course from hiding another course that already loaded', () => {
@@ -249,9 +251,8 @@ it('asks an unsigned visitor to sign in instead of showing a fake gradebook', ()
   expect(screen.getByRole('heading', { name: '課業成績與回饋' })).toBeTruthy();
   expect(screen.getByText(GRADE_COPY.unsigned)).toBeTruthy();
   expect(screen.getByRole('button', { name: '使用 Google 帳號繼續' })).toBeTruthy();
-  expect(screen.getByRole('link', { name: '學校帳號登入' }).getAttribute('href')).toBe(
-    '/login?reconnect=school&returnUrl=%2Fgrades%3Ftab%3Dfeedback',
-  );
+  expect(screen.queryByRole('link', { name: '學校帳號登入' })).toBeNull();
+  expect(screen.getByText(/學校來源已停用/)).toBeTruthy();
 });
 
 it('says it is loading while the session is still resolving', () => {
@@ -324,4 +325,27 @@ it('hydrates published grade rows without unread or time on the server markup', 
     await act(async () => root?.unmount());
     container.remove();
   }
+});
+
+it('guides an empty nuni gradebook to courses without reading the school source', async () => {
+  sessionState.session = { context: 'session-a', platformAccountId: 'student-a' };
+  loaders.nuni.mockResolvedValue({ teachingCount: 0, courses: [], listError: null });
+  render(<StudentGradesPage />);
+  expect(await screen.findByText(GRADE_COPY.emptyCourses, { exact: false })).toBeTruthy();
+  expect(screen.getByRole('link', { name: '加入 nuni 課程' }).getAttribute('href')).toBe(
+    '/classroom',
+  );
+  expect(loaders.school).not.toHaveBeenCalled();
+});
+
+it('retries a failed nuni gradebook instead of presenting it as empty', async () => {
+  sessionState.session = { context: 'session-a', platformAccountId: 'student-a' };
+  loaders.nuni
+    .mockResolvedValueOnce({ teachingCount: 0, courses: [], listError: '讀取失敗' })
+    .mockResolvedValueOnce({ teachingCount: 0, courses: [], listError: null });
+  render(<StudentGradesPage />);
+  expect(await screen.findByText(/課程空間名單還沒讀到/)).toBeTruthy();
+  expect(screen.queryByText(GRADE_COPY.emptyCourses)).toBeNull();
+  fireEvent.click(screen.getByRole('button', { name: '更新成績' }));
+  expect(await screen.findByRole('link', { name: '加入 nuni 課程' })).toBeTruthy();
 });

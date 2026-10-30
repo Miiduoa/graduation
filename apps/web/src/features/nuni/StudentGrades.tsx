@@ -7,7 +7,6 @@ import { NuniError } from '@campus/shared/src/nuni';
 import { GradesTabs } from '@/components/academic/GradesTabs';
 import { SiteShell } from '@/components/SiteShell';
 import { NuniSignIn } from '@/components/NuniSignIn';
-import { schoolLoginHref } from '@/lib/navigation';
 import { useAuth } from '@/components/AuthGuard';
 import { useClientHydrated } from '@/lib/useClientHydrated';
 import { browserRequest, useNuniSession } from './Session';
@@ -29,7 +28,6 @@ import {
   subscribeGradeRead,
 } from '@/lib/lmsStudentGrades';
 import { isNuniSessionError, loadNuniStudentGrades } from '@/lib/nuniStudentGrades';
-import { loadSchoolStudentGrades } from '@/lib/schoolStudentGrades';
 import styles from './StudentGrades.module.css';
 import shared from './NuniApp.module.css';
 
@@ -164,6 +162,7 @@ export function StudentGradesBoard({
       {!courses.length && !nuni?.listError && !school?.listError ? (
         <p className={styles.empty} role="status">
           {GRADE_COPY.emptyCourses}
+          <Link href="/classroom">加入 nuni 課程</Link>
         </p>
       ) : null}
       {visibleCourses.map((course) => (
@@ -238,7 +237,11 @@ function CourseSection({
           {course.quizError}
         </p>
       ) : null}
-      {course.status === 'ready' && !items.length && filter === 'all' && !course.assignmentError && !course.quizError ? (
+      {course.status === 'ready' &&
+      !items.length &&
+      filter === 'all' &&
+      !course.assignmentError &&
+      !course.quizError ? (
         <p className={styles.muted} role="status">
           {GRADE_COPY.emptyItems}
         </p>
@@ -279,11 +282,7 @@ function GradeRow({
   const when = item.publishedAt || item.submittedAt;
   return (
     <li>
-      <Link
-        href={item.href}
-        className={styles.row}
-        onClick={() => onOpen(item, ownerId)}
-      >
+      <Link href={item.href} className={styles.row} onClick={() => onOpen(item, ownerId)}>
         <span>
           <strong>{item.title}</strong>
           <span className={styles.meta}>
@@ -295,9 +294,7 @@ function GradeRow({
           ) : item.status === 'missing' ? (
             <span className={styles.preview}>還沒看到你的繳交紀錄。</span>
           ) : null}
-          {item.feedback ? (
-            <span className={styles.preview}>老師評語：{item.feedback}</span>
-          ) : null}
+          {item.feedback ? <span className={styles.preview}>老師評語：{item.feedback}</span> : null}
           {when && hydrated ? (
             <span className={styles.meta}>
               <time dateTime={when}>{formatTaipeiDateTime(when, { seconds: false })}</time>
@@ -320,9 +317,7 @@ export function StudentGradesPage() {
   const online = useOnline();
   const [filter, setFilter] = useState<GradeFilter>('all');
   const [nuniBook, setNuniBook] = useState<StudentGradebook | null>(null);
-  const [schoolBook, setSchoolBook] = useState<StudentGradebook | null>(null);
   const [nuniLoading, setNuniLoading] = useState(false);
-  const [schoolLoading, setSchoolLoading] = useState(false);
   const generation = useRef(0);
   const nuniAccount = hydrated ? nuni.session?.platformAccountId : undefined;
   const nuniContext = hydrated ? nuni.session?.context : undefined;
@@ -358,23 +353,7 @@ export function StudentGradesPage() {
       setNuniBook(null);
       setNuniLoading(false);
     }
-    if (uid) {
-      setSchoolLoading(true);
-      try {
-        const next = await loadSchoolStudentGrades(uid, { online });
-        if (request === generation.current) setSchoolBook(next);
-      } catch {
-        if (request === generation.current) {
-          setSchoolBook({ teachingCount: 0, courses: [], listError: GRADE_COPY.courseFailed });
-        }
-      } finally {
-        if (request === generation.current) setSchoolLoading(false);
-      }
-    } else {
-      setSchoolBook(null);
-      setSchoolLoading(false);
-    }
-  }, [nuniAccount, nuniContext, uid, online, refreshNuni]);
+  }, [nuniAccount, nuniContext, online, refreshNuni]);
 
   useEffect(() => {
     if (sessionLoading || blocked) return;
@@ -384,24 +363,21 @@ export function StudentGradesPage() {
     };
   }, [load, sessionLoading, blocked]);
 
-  const busy = sessionLoading || nuniLoading || schoolLoading;
+  const busy = sessionLoading || nuniLoading;
   const teachingOnly =
-    signedIn &&
-    !busy &&
-    (nuniBook?.teachingCount ?? 0) + (schoolBook?.teachingCount ?? 0) > 0 &&
-    !(nuniBook?.courses.length || schoolBook?.courses.length);
+    signedIn && !busy && (nuniBook?.teachingCount ?? 0) > 0 && !nuniBook?.courses.length;
 
-  const openItem = useCallback(
-    (item: GradeItem, itemOwner: string) => {
-      if (itemOwner) markPublishedGradeRead(itemOwner, item);
-    },
-    [],
-  );
+  const openItem = useCallback((item: GradeItem, itemOwner: string) => {
+    if (itemOwner) markPublishedGradeRead(itemOwner, item);
+  }, []);
 
   return (
     <SiteShell>
       <div className={styles.page}>
         <GradesTabs active="feedback" />
+        <p className={styles.notice}>
+          E 校園與 TronClass 的學校來源已停用。<Link href="/classroom">前往 nuni 課程</Link>
+        </p>
         <div className={styles.heading}>
           <div>
             <p className={styles.eyebrow}>課程空間</p>
@@ -442,12 +418,8 @@ export function StudentGradesPage() {
             <h2>登入後查看成績</h2>
             <p className={styles.muted}>{GRADE_COPY.unsigned}</p>
             <NuniSignIn returnUrl={LMS_GRADES_HREF} />
-            <p className={styles.muted}>若這門課走學校帳號，請改用學校登入。</p>
-            <Link className={styles.button} href={schoolLoginHref(LMS_GRADES_HREF)}>
-              學校帳號登入
-            </Link>
           </section>
-        ) : busy && !nuniBook && !schoolBook ? (
+        ) : busy && !nuniBook ? (
           <div aria-busy="true">
             <p role="status">{GRADE_COPY.loading}</p>
             <div className={styles.skeleton} aria-hidden="true">
@@ -463,7 +435,7 @@ export function StudentGradesPage() {
         ) : (
           <StudentGradesBoard
             nuni={nuniBook}
-            school={schoolBook}
+            school={null}
             nuniAccountId={nuniAccount}
             schoolUid={uid}
             filter={filter}

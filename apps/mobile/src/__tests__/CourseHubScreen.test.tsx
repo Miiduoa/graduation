@@ -28,12 +28,23 @@ const data: CourseHubData = {
   assignments: { status: 'ready', items: [] },
 };
 const route = { params: { groupId: 'course-a', groupName: '過時的課名' } };
+const ActualDate = Date;
+class CourseTestDate extends ActualDate {
+  constructor(...args: unknown[]) {
+    super('2026-10-26T04:00:00Z');
+    return Reflect.construct(ActualDate, args.length ? args : ['2026-10-26T04:00:00Z'], new.target);
+  }
+}
 beforeEach(() => {
+  global.Date = CourseTestDate as DateConstructor;
   jest.clearAllMocks();
   mockUser = { uid: 'alice' };
   mockSchool = { id: 'pu' };
   jest.mocked(loadCourseHub).mockResolvedValue(data);
   jest.mocked(webBrowserOpenWithPuTronClassGate).mockResolvedValue(true);
+});
+afterEach(() => {
+  global.Date = ActualDate;
 });
 test('uses real course name with scoped useful actions and no invented outcomes', async () => {
   const navigation = { navigate: jest.fn() };

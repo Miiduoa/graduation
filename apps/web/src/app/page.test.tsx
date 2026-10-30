@@ -142,33 +142,18 @@ beforeEach(() => {
   });
 });
 
-it('clears visible school account data and ignores an old response after account switching', async () => {
-  let finishAlice!: (value: HomeData) => void;
-  let finishBob!: (value: HomeData) => void;
-  vi.mocked(loadHomeData).mockImplementation(
-    (uid) =>
-      new Promise((resolve) => {
-        if (uid === 'alice') finishAlice = resolve;
-        else finishBob = resolve;
-      }),
+it('does not read the retired school source and offers nuni courses', async () => {
+  render(<HomePage />);
+  expect(await screen.findByText(/E 校園與 TronClass 的學校來源已停用/)).toBeTruthy();
+  expect(loadHomeData).not.toHaveBeenCalled();
+  expect(screen.getByRole('link', { name: '前往 nuni 課程' }).getAttribute('href')).toBe(
+    '/classroom',
   );
-  const view = render(<HomePage />);
-  await waitFor(() => expect(loadHomeData).toHaveBeenCalledWith('alice'));
-  state.uid = 'bob';
-  view.rerender(<HomePage />);
-  await waitFor(() => expect(loadHomeData).toHaveBeenCalledWith('bob'));
-  await act(async () => finishAlice(data('Alice private course')));
-  expect(screen.queryByText('Alice private course 作業')).toBeNull();
-  await act(async () => finishBob(data('Bob course')));
-  expect(screen.getAllByText('Bob course 作業').length).toBeGreaterThan(0);
-  state.uid = null;
-  view.rerender(<HomePage />);
-  expect(screen.queryByText('Bob course 作業')).toBeNull();
-  expect(screen.getAllByText(TODAY_COPY.unsigned).length).toBeGreaterThan(0);
 });
 
 it('does not report an empty course list as success after a failed load', async () => {
-  vi.mocked(loadHomeData).mockRejectedValue(new Error('permission-denied'));
+  state.session = { context: 'test', platformAccountId: 'student' };
+  vi.mocked(loadNuniHomeData).mockRejectedValue(new Error('permission-denied'));
   render(<HomePage />);
   expect(await screen.findByRole('alert')).toBeTruthy();
   expect(screen.queryByText(TODAY_COPY.emptyDay)).toBeNull();
@@ -300,7 +285,8 @@ it('removes a loaded overview when refreshing discovers revoked access', async (
 
 it('keeps confirmed work visible while the same account refreshes in the background', async () => {
   let finishRefresh!: (value: HomeData) => void;
-  vi.mocked(loadHomeData)
+  state.session = { context: 'test', platformAccountId: 'student' };
+  vi.mocked(loadNuniHomeData)
     .mockResolvedValueOnce(data('資料結構'))
     .mockImplementationOnce(
       () =>
@@ -311,7 +297,7 @@ it('keeps confirmed work visible while the same account refreshes in the backgro
   render(<HomePage />);
   expect((await screen.findAllByText('資料結構 作業')).length).toBeGreaterThan(0);
   await act(async () => window.dispatchEvent(new Event('pageshow')));
-  expect(loadHomeData).toHaveBeenCalledTimes(2);
+  expect(loadNuniHomeData).toHaveBeenCalledTimes(2);
   expect(screen.getAllByText('資料結構 作業').length).toBeGreaterThan(0);
   expect(screen.queryByTestId('today-skeleton')).toBeNull();
   expect(screen.getByRole('status').textContent).toBe('正在更新課程待辦…');
@@ -429,7 +415,7 @@ it('shows the LMS-unconnected sentence instead of pretending there is no homewor
     unreadCount: 0,
   });
   render(<HomePage />);
-  expect(await screen.findByText(TODAY_COPY.lmsUnconnected)).toBeTruthy();
+  expect(await screen.findByText(/還沒有 nuni 課程資料/)).toBeTruthy();
   expect(screen.queryByText('目前沒有待繳作業。')).toBeNull();
 });
 
@@ -488,4 +474,24 @@ it('hydrates the signed-in home page against the server loading markup', async (
     await act(async () => root?.unmount());
     container.remove();
   }
+});
+
+it('shows confirmed work and retry together when another source failed', async () => {
+  state.session = { context: 'test', platformAccountId: 'student' };
+  vi.mocked(loadNuniHomeData).mockResolvedValue(
+    data('已載入課程', { tasksError: '部分測驗還沒讀到' }),
+  );
+  render(<HomePage />);
+  expect(await screen.findByText('部分測驗還沒讀到')).toBeTruthy();
+  expect(screen.getAllByText('已載入課程 作業').length).toBeGreaterThan(0);
+  expect(screen.getByRole('button', { name: TODAY_COPY.retry })).toBeTruthy();
+});
+
+it('offers course joining for a verified empty nuni account', async () => {
+  state.session = { context: 'test', platformAccountId: 'student' };
+  vi.mocked(loadNuniHomeData).mockResolvedValue({ courses: [], tasks: [], unreadCount: 0 });
+  render(<HomePage />);
+  expect(await screen.findByText(/還沒有 nuni 課程資料/)).toBeTruthy();
+  expect(screen.getByRole('link', { name: '加入課程' }).getAttribute('href')).toBe('/classroom');
+  expect(screen.queryByRole('alert')).toBeNull();
 });
