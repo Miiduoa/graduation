@@ -41,12 +41,12 @@ const SERVICE_AFTER_WRITE: Record<CampusAgentWriteTool, string> = {
   reserveWashingMachine: 'Dormitory',
 };
 
-const VERIFIED_SERVICE_ROUTES: Record<string, { route: string; label: string }> = {
+const VERIFIED_SERVICE_ROUTES: Record<string, { route: string; params?: Record<string, unknown>; label: string }> = {
   '/map': { route: 'MapV2', label: '校園地圖' },
   '/timetable': { route: 'PersonalTimetable', label: '我的課表' },
   '/announcements': { route: '公告總覽', label: '校園公告' },
   '/events': { route: '活動總覽', label: '校園活動' },
-  '/classroom': { route: 'CoursesHome', label: '課程與作業' },
+  '/classroom': { route: 'NuniWorkspace', params: { tab: 'courses' }, label: '課程與作業' },
   '/grades': { route: 'Grades', label: '成績' },
   '/bus': { route: 'BusV2', label: '公車' },
   '/cafeteria': { route: '餐廳總覽', label: '校園餐廳' },
@@ -501,7 +501,7 @@ function AssistantConversation({
               onOpenRoute={(route) => {
                 if (!current()) return;
                 const destination = VERIFIED_SERVICE_ROUTES[route];
-                if (destination) safeNavigate(navigation, destination.route);
+                if (destination) safeNavigate(navigation, destination.route, destination.params);
               }}
             />
           ) : (
@@ -523,7 +523,7 @@ function AssistantConversation({
               onOpenRoute={(route: CampusPlanRoute) => {
                 if (!current()) return;
                 const destination = VERIFIED_SERVICE_ROUTES[route];
-                if (destination) safeNavigate(navigation, destination.route);
+                if (destination) safeNavigate(navigation, destination.route, destination.params);
               }}
             />
           ) : null}
@@ -561,7 +561,7 @@ function AssistantConversation({
                 disabled={busy || syncBusy}
                 onPress={() => {
                   const destination = message.route && VERIFIED_SERVICE_ROUTES[message.route];
-                  if (destination) safeNavigate(navigation, destination.route);
+                  if (destination) safeNavigate(navigation, destination.route, destination.params);
                 }}
               />
             </View>
