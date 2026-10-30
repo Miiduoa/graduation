@@ -5,6 +5,10 @@ import {
   TEACHER_LMS_UNAVAILABLE_COPY,
 } from '@campus/shared/src/schoolLogin';
 import { courseOfferingId } from '@campus/shared/src/timetable/course';
+import {
+  PU_ECAMPUS_DATA_PAUSED_CODE,
+  PU_ECAMPUS_DATA_PAUSED_MESSAGE,
+} from '@campus/shared/src/puEcampusDataPolicy';
 import { signFirebaseCustomToken, type ServiceAccountSigner } from './firebaseCustomToken';
 import {
   consumeLoginAccountLimit,
@@ -123,15 +127,17 @@ export {
 /** @deprecated 請用 DEFAULT_STUDENT_LMS_TOTAL_TIMEOUT_MS；保留給舊測試名稱。 */
 export const STUDENT_LMS_SOFT_TIMEOUT_MS = DEFAULT_STUDENT_LMS_TOTAL_TIMEOUT_MS;
 
-type ExpectedCampusFailureReason = 'campus_closed' | 'campus_unreachable';
+type ExpectedCampusFailureReason = 'campus_closed' | 'campus_unreachable' | 'campus_paused';
 
 function expectedCampusFailureReason(error: unknown): ExpectedCampusFailureReason | null {
   if (error instanceof PuCampusError) {
+    if (error.kind === 'paused') return 'campus_paused';
     if (error.kind === 'closed') return 'campus_closed';
     if (error.kind === 'timeout' || error.kind === 'unavailable') return 'campus_unreachable';
     return null;
   }
   if (error instanceof PuLoginHttpError) {
+    if (error.code === PU_ECAMPUS_DATA_PAUSED_CODE) return 'campus_paused';
     if (error.message === '尚未開放') return 'campus_closed';
     if (
       error.message === SCHOOL_UNAVAILABLE ||
@@ -275,6 +281,9 @@ function clientMessage(
   error: PuCampusError,
   route: CampusLoginRoute = error.route || 'student',
 ): { status: number; message: string; code?: string } {
+  if (error.kind === 'paused') {
+    return { status: 503, message: PU_ECAMPUS_DATA_PAUSED_MESSAGE, code: PU_ECAMPUS_DATA_PAUSED_CODE };
+  }
   if (error.kind === 'credentials') return { status: 401, message: '學號或密碼錯誤' };
   if (error.kind === 'closed') return { status: 503, message: '尚未開放' };
   if (error.kind === 'unverified') return { status: 503, message: TEACHER_IDENTITY_UNVERIFIED };
@@ -359,13 +368,14 @@ function hasTronClassSessionCookie(cookies: Record<string, string> | undefined):
 
 function isSchoolSideFailure(error: unknown): boolean {
   if (error instanceof PuCampusError) {
-    return error.kind === 'timeout' || error.kind === 'unavailable' || error.kind === 'closed';
+    return error.kind === 'timeout' || error.kind === 'unavailable' || error.kind === 'closed' || error.kind === 'paused';
   }
   if (error instanceof PuLoginHttpError) {
     return (
       error.status === 503 &&
       (error.message === SCHOOL_UNAVAILABLE ||
         error.message === TEACHER_LMS_UNAVAILABLE ||
+        error.code === PU_ECAMPUS_DATA_PAUSED_CODE ||
         error.code === TEACHER_LMS_UNAVAILABLE_CODE ||
         error.message === '尚未開放')
     );

@@ -23,6 +23,10 @@ import { portalReviewIssues, reconcilePortalRowIssues } from '@campus/shared/src
 import { SchoolPortalRowEditor } from './SchoolPortalRowEditor';
 import { SchoolPortalReimport } from './SchoolPortalReimport';
 import { undoPortalReimport, type PortalReimportReceipt } from '../services/portalReimport';
+import {
+  isPuEcampusDataFetchEnabled,
+  PU_ECAMPUS_DATA_PAUSED_MESSAGE,
+} from '@campus/shared/src/puEcampusDataPolicy';
 
 type Kind = 'timetable' | 'grades';
 type Stage = 'consent' | 'browse' | 'choose' | 'review' | 'done';
@@ -41,6 +45,12 @@ const captureErrors = {
   unavailable: '未能讀取這個頁面。可以重新載入，或改用檔案匯入，現有紀錄沒有變更。',
 };
 
+function isPortalCapturePaused(portal: SchoolPortal): boolean {
+  return (portal.schoolId === 'pu' || portal.schoolId === 'tw-pu') && !isPuEcampusDataFetchEnabled();
+}
+
+const portalPausedCopy = `${PU_ECAMPUS_DATA_PAUSED_MESSAGE}仍可使用檔案或文字匯入。`;
+
 /** The account hooks and WebView are mounted only after the explicit entry action. */
 export function SchoolPortalImportEntry({ onOpenRecords, disabled = false }: {
   onOpenRecords(kind: Kind): void; disabled?: boolean;
@@ -50,11 +60,15 @@ export function SchoolPortalImportEntry({ onOpenRecords, disabled = false }: {
   const closeRequest = useRef<(() => void) | null>(null);
   const close = useCallback(() => { closeRequest.current = null; setOpenedSchool(null); }, []);
   const portal = schoolPortalFor(school.id);
-  useEffect(() => { close(); }, [school.id, disabled, close]);
+  const paused = portal ? isPortalCapturePaused(portal) : false;
+  useEffect(() => { close(); }, [school.id, disabled, paused, close]);
   if (!portal || Platform.OS === 'web') return null;
   return <>
-    <Button text="在 App 內開啟校務網站匯入" disabled={disabled} onPress={() => setOpenedSchool(school.id)} />
-    {openedSchool === school.id && !disabled ? (
+    {paused ? <Text style={{ color: theme.colors.text, lineHeight: 23 }}>{portalPausedCopy}</Text> : null}
+    <Button text="在 App 內開啟校務網站匯入" disabled={disabled || paused} onPress={() => {
+      if (!disabled && !isPortalCapturePaused(portal)) setOpenedSchool(school.id);
+    }} />
+    {openedSchool === school.id && !disabled && !paused ? (
       <Modal visible animationType="slide" onRequestClose={() => (closeRequest.current ?? close)()}>
         <PortalSession portal={portal} onClose={close} closeRequest={closeRequest}
           onOpenRecords={(kind) => { close(); onOpenRecords(kind); }} />
@@ -75,6 +89,10 @@ function PortalSession({ portal, onClose, onOpenRecords, closeRequest }: {
   const isScopeCurrent = useCallback((expected: PersonalImportScope) => current.current?.owner === expected.owner && current.current?.schoolId === expected.schoolId, []);
   const same = scope && first.current && scope.owner === first.current.owner &&
     scope.schoolId === first.current.schoolId && scope.schoolId === portal.schoolId;
+  if (isPortalCapturePaused(portal)) return <SafeAreaView style={{ flex: 1, padding: 20, backgroundColor: theme.colors.bg }}>
+    <Text accessibilityRole="alert" style={copy}>{portalPausedCopy}</Text>
+    <Button text="關閉校務匯入" onPress={onClose} />
+  </SafeAreaView>;
   if (!same) return <SafeAreaView style={{ flex: 1, padding: 20, backgroundColor: theme.colors.bg }}>
     <Text style={copy}>帳號或學校正在變更，已停止本次匯入。請關閉後重新開始。</Text>
     <Button text="關閉校務匯入" onPress={onClose} />
@@ -130,7 +148,7 @@ function PortalFlow({ portal, scope, isScopeCurrent, onClose, onOpenRecords, clo
   const pending = useRef<PortalCaptureRequest | null>(null);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const profile = periodProfileForSchool(scope.schoolId);
-  const active = () => alive.current && foreground.current && isScopeCurrent(scope);
+  const active = () => alive.current && foreground.current && isScopeCurrent(scope) && !isPortalCapturePaused(portal);
   const stop = useCallback(() => {
     pending.current = null;
     if (timer.current) clearTimeout(timer.current);

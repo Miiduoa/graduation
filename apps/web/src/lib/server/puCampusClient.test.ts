@@ -2,6 +2,12 @@ import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, expect, it, vi } from 'vitest';
+// Exercise the existing transport/parser contracts with synthetic responses after resumption.
+// The pause suite separately verifies the real default policy never calls fetch.
+vi.mock('@campus/shared/src/puEcampusDataPolicy', async (importOriginal) => ({
+  ...await importOriginal<typeof import('@campus/shared/src/puEcampusDataPolicy')>(),
+  isPuEcampusDataFetchEnabled: () => true,
+}));
 import {
   campusPageHasLoginForm,
   campusPageLooksClosed,

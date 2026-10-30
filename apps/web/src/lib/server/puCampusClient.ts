@@ -1,5 +1,10 @@
 import { parseFragment, serialize, type DefaultTreeAdapterMap } from 'parse5';
 import {
+  isPuEcampusDataFetchEnabled,
+  PU_ECAMPUS_DATA_PAUSED_CODE,
+  PU_ECAMPUS_DATA_PAUSED_MESSAGE,
+} from '@campus/shared/src/puEcampusDataPolicy';
+import {
   MAX_TRANSIENT_HOP_RETRIES,
   STUDENT_LOGIN_TOTAL_TIMEOUT_MS,
   studentLoginHopTimeoutMs,
@@ -18,7 +23,7 @@ const LMS_PROFILE_MIN_REMAINING_MS = 800;
 const USER_AGENT =
   'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36';
 
-export type CampusErrorKind = 'credentials' | 'timeout' | 'closed' | 'unavailable' | 'unverified';
+export type CampusErrorKind = 'credentials' | 'timeout' | 'closed' | 'unavailable' | 'unverified' | 'paused';
 export type CampusLoginRoute = 'student' | 'teacher';
 export type CampusLoginStage = 'home' | 'submit' | 'redirect' | 'verify';
 
@@ -503,6 +508,15 @@ export function createPuCampusGateway(
       confineOrigins?: readonly string[];
     } = {},
   ): Promise<SentPage> {
+    const hostname = normalizeRelayHostname(new URL(url).hostname);
+    const portalHostname = normalizeRelayHostname(new URL(portalOrigin).hostname);
+    if (!isPuEcampusDataFetchEnabled() &&
+      (hostname === portalHostname || hostname === 'alcat.pu.edu.tw' || hostname === 'mypu.pu.edu.tw')) {
+      throw new PuCampusError('paused', PU_ECAMPUS_DATA_PAUSED_MESSAGE, {
+        ...init.context,
+        code: PU_ECAMPUS_DATA_PAUSED_CODE,
+      });
+    }
     const waitMs = init.timeoutMs ?? timeoutMs;
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), waitMs);
