@@ -350,3 +350,16 @@ it.each(['姓名', '教師'])('rejects ambiguous space separated %s columns befo
   expect(fetcher).not.toHaveBeenCalled();
   expect(getQuotaStore).not.toHaveBeenCalled();
 });
+
+it.each([';', '；', '，', '、', '/', '::', '•'])('rejects unreliable private tables separated by %s before quota and upstream', async (delimiter) => {
+  const { dependencies, fetcher, getQuotaStore } = setup();
+  for (const label of ['姓名', '教師', '學生', '學號']) {
+    const header = `${label}${delimiter}課程名稱${delimiter}學分${delimiter}成績`;
+    const text = `王小明${delimiter}微積分${delimiter}3`;
+    for (const input of [{ text: `${header}\n${text}` }, { text, columnContext: header }]) {
+      expect((await handlePersonalImportCloud(request({ ...input, kind: 'grades' }), dependencies)).status).toBe(422);
+    }
+  }
+  expect(fetcher).not.toHaveBeenCalled();
+  expect(getQuotaStore).not.toHaveBeenCalled();
+});

@@ -218,3 +218,22 @@ it.each(['姓名 未知欄名\n王小明 另一值', '姓名 教師\n王小明 �
     expect(fetcher).not.toHaveBeenCalled();
   },
 );
+it.each([';', '；', '，', '、'])('masks reliable private tables separated by %s', (delimiter) => {
+  for (const label of ['姓名', '教師', '學生', '學號']) {
+    const source = `${label}${delimiter}課程名稱${delimiter}學分${delimiter}成績\n王小明${delimiter}微積分${delimiter}3${delimiter}85`;
+    expect(isPersonalImportCloudMaskSafe(source)).toBe(true);
+    expect(maskPersonalImportText(source)).not.toContain('王小明');
+  }
+});
+
+it.each([';', '；', '，', '、', '/', '::', '•'])('refuses unreliable private tables separated by %s without network calls', async (delimiter) => {
+  for (const label of ['姓名', '教師', '學生', '學號']) {
+    const header = `${label}${delimiter}課程名稱${delimiter}學分${delimiter}成績`;
+    const text = `王小明${delimiter}微積分${delimiter}3`;
+    for (const input of [{ text: `${header}\n${text}` }, { text, columnContext: header }]) {
+      const fetcher = vi.fn();
+      expect(await requestPersonalImportCloud({ ...input, kind: 'grades', fetcher })).toMatchObject({ ok: false, reason: 'invalid-input' });
+      expect(fetcher).not.toHaveBeenCalled();
+    }
+  }
+});

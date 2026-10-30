@@ -19,13 +19,14 @@ const messages: Record<PersonalImportCloudFailure, string> = {
   'invalid-input': '這段內容無法交給雲端整理，改用本機整理。',
 };
 
-const privateFieldPattern = '(?:(?:學生)?姓名|(?:學生)?學號|身分證(?:字號)?|身份證(?:字號)?|(?:授課)?教師|老師|電子郵件|電郵|(?:聯絡)?電話|手機(?:號碼)?|(?:student\\s*)?name|student\\s*(?:id|number)|teacher(?:\\s*name)?|e-?mail|phone|mobile)';
+const privateFieldPattern = '(?:(?:學生)?姓名|學生|(?:學生)?學號|身分證(?:字號)?|身份證(?:字號)?|(?:授課)?教師|老師|電子郵件|電郵|(?:聯絡)?電話|手機(?:號碼)?|(?:student\\s*)?name|student\\s*(?:id|number)|teacher(?:\\s*name)?|e-?mail|phone|mobile)';
 const privateField = new RegExp(`^${privateFieldPattern}$`, 'iu');
+const privateTableDelimiters = ['\t', ',', '|', ';', '、'] as const;
 const tableField = /^(?:(?:課程|科目|活動)?名稱|課號|科目代碼|課程代碼|學分數?|成績|分數|學年度|學期|(?:授課)?教師|教室|星期|開始節次|結束節次|日期|開始時間|結束時間|地點|班級|系所|序號|編號|course(?: name| code)?|credits?|grade|score|semester|teacher|room|day|date|start|end|title|location)$/iu;
 
 function isAcademicBoundary(value: string): boolean {
   return tableField.test(value) || /^【[^【】]+】$/u.test(value) ||
-    value.split(/[\t,|]/u).filter((cell) => tableField.test(cell.trim())).length >= 2 ||
+    value.split(/[\t,|;、]/u).filter((cell) => tableField.test(cell.trim())).length >= 2 ||
     (/學分\s*[:：]?\s*\d/u.test(value) && /(?:成績|分數)\s*[:：]?\s*(?:\d|[A-F])/iu.test(value)) ||
     /\S[ \t]+\d+(?:\.\d+)?[ \t]+(?:\d{1,3}(?:\.\d+)?|[A-F][+-]?|通過|及格)$/iu.test(value);
 }
@@ -33,7 +34,7 @@ function isAcademicBoundary(value: string): boolean {
 function hasAmbiguousPrivateList(text: string): boolean {
   const labeledValue = new RegExp(`${privateFieldPattern}[ \\t]*[:=][ \\t]*([^\\n]*)`, 'giu');
   for (const match of text.matchAll(labeledValue)) {
-    for (const tail of match[1].split(/[\t,;|]/u).slice(1)) {
+    for (const tail of match[1].split(/[\t,;|、]/u).slice(1)) {
       if (!tail.trim()) continue;
       const field = tail.trim().match(/^([^:=]+)[:=]/u)?.[1].trim();
       if (!field || (!privateField.test(field) && !tableField.test(field) && !/^(?:課程|科目)$/u.test(field))) return true;
@@ -86,12 +87,11 @@ function rawCellSpans(text: string, record: ImportDelimitedRecord, delimiter: st
 
 function maskPrivateTables(text: string): { text: string; safe: boolean } {
   let masked = text;
-  for (const delimiter of ['\t', ',', '|'] as const) {
+  for (const delimiter of privateTableDelimiters) {
     const escaped = delimiter === '|' ? '\\|' : delimiter;
     const privateCell = new RegExp(`(?:^|${escaped})[ \\t]*"?${privateFieldPattern}"?[ \\t]*(?=${escaped}|$)`, 'imu');
     if (!privateCell.test(masked)) continue;
-    // 管線表格只用等長替換供結構解析，實際欄位仍由原文字範圍取得。
-    const records = readImportDelimitedRecords(delimiter === '|' ? masked.replace(/\|/gu, '\t') : masked, delimiter === '|' ? '\t' : delimiter);
+    const records = readImportDelimitedRecords(masked, delimiter);
     if (!records) return { text: masked, safe: false };
     const replacements: Array<{ start: number; end: number; value: string }> = [];
     let privateColumns: number[] = [];
@@ -150,6 +150,24 @@ export function isPersonalImportCloudMaskSafe(text: string, context = ''): boole
     const cells = line.trim().split(/ +/u);
     return cells.length > 1 && cells.some((cell) => privateField.test(cell));
   })) return false;
+  // 明示個資欄名必須有可識別的欄界；未知分隔符或混合欄界一律留在本機。
+  const explicitField = new RegExp(`(?:^|[^\\p{L}\\p{N}_])${privateFieldPattern}(?=$|[^\\p{L}\\p{N}_])`, 'iu');
+  const labeledField = new RegExp(`^${privateFieldPattern}[ \\t]*[:=]`, 'iu');
+  const verticalField = new RegExp(`^${privateFieldPattern}[ \\t]*[:=]?$`, 'iu');
+  for (const line of normalized.split('\n')) {
+    const value = line.trim();
+    if (!explicitField.test(value) || verticalField.test(value)) continue;
+    if (labeledField.test(value)) {
+      const headerFields = value.replace(/[\p{L}\p{N}_]+[ \t]*[:=][ \t]*(?=[0-9])/gu, '')
+        .split(/[^\p{L}\p{N}_]+/u).filter((cell) => tableField.test(cell));
+      if (/[:=]{2}/u.test(value) || headerFields.length >= 2) return false;
+      continue;
+    }
+    if (!privateTableDelimiters.some((delimiter) => {
+      const records = readImportDelimitedRecords(value, delimiter);
+      return records?.length === 1 && records[0].cells.some((cell) => privateField.test(cell.trim()));
+    })) return false;
+  }
   const vertical = maskPrivateVerticalFields(normalized);
   return vertical.safe && maskPrivateTables(vertical.text).safe;
 }
@@ -164,8 +182,8 @@ export function maskPersonalImportText(text: string, knownNames: readonly string
   masked = maskPrivateTables(maskPrivateVerticalFields(masked).text).text;
   masked = masked.split('\n').map((line) => line
       .replace(/((?:電子郵件|電郵|(?:聯絡)?電話|手機(?:號碼)?|e-?mail|phone|mobile)[ \t]*[:=][ \t]*)([^\n\t,;|]+?)(?=\s+(?:學號|身分證|身份證|班級|系所|學分|成績|課程|科目|姓名|教師|電子郵件|電郵|電話|手機|student\s*id|credits?|grade|score|e-?mail|phone)\s*[:=]|$|[\t,;|])/giu, '$1[聯絡資料已遮罩]')
-      .replace(/((?:學生姓名|姓名|(?:授課)?教師|老師|student\s*name|name|teacher(?:\s*name)?)[ \t]*[:=][ \t]*)([^\n\t,;|]+?)(?=\s+(?:學號|身分證|身份證|班級|系所|學分|成績|課程|科目|student\s*id|credits?|grade|score)\s*[:=]|$|[\t,;|])/giu, '$1[姓名已遮罩]')
-      .replace(/((?:學生姓名|姓名|(?:授課)?教師|老師)[ ]+)([^\s,;|:]{2,20})(?![ \t]*[:=])/gu, '$1[姓名已遮罩]')
+      .replace(/((?:學生姓名|姓名|學生|(?:授課)?教師|老師|student\s*name|name|teacher(?:\s*name)?)[ \t]*[:=][ \t]*)([^\n\t,;|]+?)(?=\s+(?:學號|身分證|身份證|班級|系所|學分|成績|課程|科目|student\s*id|credits?|grade|score)\s*[:=]|$|[\t,;|])/giu, '$1[姓名已遮罩]')
+      .replace(/((?:學生姓名|姓名|學生|(?:授課)?教師|老師)[ ]+)([^\s,;|:]{2,20})(?![ \t]*[:=])/gu, '$1[姓名已遮罩]')
       .replace(/((?:學生)?學號|student\s*(?:id|number))([ \t]*[:=]?[ \t]*)[A-Za-z0-9_-]{4,24}/giu, '$1$2[學號已遮罩]')
   ).join('\n');
   return masked

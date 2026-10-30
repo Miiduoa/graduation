@@ -274,3 +274,10 @@ it('clears a cloud teacher mask and warns when the original has no teacher', asy
   expect(result.rows[0].teacher).toBeUndefined();
   expect(result.issues).toContainEqual(expect.objectContaining({ field: 'teacher', rowId: result.rows[0].id }));
 });
+
+it.each([';', '；', '，', '、', '/'])('keeps unreliable private tables separated by %s local', async (delimiter) => {
+  for (const label of ['姓名', '教師']) {
+    await run(`${label}${delimiter}課程名稱${delimiter}學分${delimiter}成績\n王小明${delimiter}微積分${delimiter}3`);
+  }
+  expect(fetcher).not.toHaveBeenCalled();
+});
