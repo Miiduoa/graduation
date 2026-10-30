@@ -1,4 +1,4 @@
-import { act, render, screen, waitFor } from '@testing-library/react';
+import { act, render, screen, waitFor, within } from '@testing-library/react';
 import { renderToString } from 'react-dom/server';
 import { hydrateRoot, type Root } from 'react-dom/client';
 import { beforeEach, expect, it, vi } from 'vitest';
@@ -154,16 +154,20 @@ it('clears visible school account data and ignores an old response after account
   );
   const view = render(<HomePage />);
   await waitFor(() => expect(loadHomeData).toHaveBeenCalledWith('alice'));
+  expect(screen.queryByRole('region', { name: /修習課程/ })).toBeNull();
   state.uid = 'bob';
   view.rerender(<HomePage />);
   await waitFor(() => expect(loadHomeData).toHaveBeenCalledWith('bob'));
   await act(async () => finishAlice(data('Alice private course')));
   expect(screen.queryByText('Alice private course 作業')).toBeNull();
+  expect(screen.queryByRole('heading', { name: 'Alice private course' })).toBeNull();
   await act(async () => finishBob(data('Bob course')));
   expect(screen.getAllByText('Bob course 作業').length).toBeGreaterThan(0);
+  expect(screen.getByRole('heading', { name: 'Bob course' })).toBeTruthy();
   state.uid = null;
   view.rerender(<HomePage />);
   expect(screen.queryByText('Bob course 作業')).toBeNull();
+  expect(screen.queryByRole('region', { name: /修習課程/ })).toBeNull();
   expect(screen.getAllByText(TODAY_COPY.unsigned).length).toBeGreaterThan(0);
 });
 
@@ -174,6 +178,88 @@ it('does not report an empty course list as success after a failed load', async 
   expect(screen.queryByText(TODAY_COPY.emptyDay)).toBeNull();
   expect(screen.queryByText(SENSE_EMPTY_TEXT)).toBeNull();
   expect(screen.queryByRole('heading', { name: SENSE_SECTION_TITLE })).toBeNull();
+  expect(screen.queryByRole('region', { name: /修習課程/ })).toBeNull();
+});
+
+it('keeps every enrolled course reachable when there are no classes or pending tasks today', async () => {
+  vi.mocked(loadHomeData).mockResolvedValue({
+    courses: [
+      { id: '資料 結構', name: '資料結構', role: 'member', unreadCount: 0 },
+      { id: 'database', name: '資料庫系統', role: 'member', unreadCount: 2 },
+    ],
+    tasks: [],
+    unreadCount: 2,
+  });
+  render(<HomePage />);
+  const courses = await screen.findByRole('region', { name: /修習課程 2/ });
+  expect(courses.id).toBe('courses');
+  expect(
+    within(courses)
+      .getByRole('link', { name: /資料結構/ })
+      .getAttribute('href'),
+  ).toBe(`/course/${encodeURIComponent('資料 結構')}`);
+  expect(
+    within(courses)
+      .getByRole('link', { name: /資料庫系統/ })
+      .getAttribute('href'),
+  ).toBe('/course/database');
+  expect(within(courses).getByText('2 則新動態')).toBeTruthy();
+  expect(within(courses).getByRole('link', { name: '查看全部課程 →' }).getAttribute('href')).toBe(
+    '/groups',
+  );
+  expect(screen.getByTestId('student-today')).toBeTruthy();
+  expect(screen.getByText(TODAY_COPY.noTimetable)).toBeTruthy();
+});
+
+it('preserves platform course destinations and offers the archived course directory', async () => {
+  state.uid = null;
+  state.session = { context: 'session-a', platformAccountId: 'student-a' };
+  const coursePath = '/classroom/course/cw_design?view=materials';
+  vi.mocked(loadNuniHomeData).mockResolvedValue({
+    courses: [
+      { id: 'cw_design', name: '視覺設計', role: 'student', unreadCount: 0, href: coursePath },
+    ],
+    tasks: [],
+    unreadCount: 0,
+    archivedCount: 3,
+  });
+  render(<HomePage />);
+  const courses = await screen.findByRole('region', { name: /修習課程 1/ });
+  expect(
+    within(courses)
+      .getByRole('link', { name: /視覺設計/ })
+      .getAttribute('href'),
+  ).toBe(coursePath);
+  expect(within(courses).getByRole('link', { name: '查看全部課程 →' }).getAttribute('href')).toBe(
+    '/classroom',
+  );
+  expect(screen.getByText(/另有 3 門已封存課程/)).toBeTruthy();
+  expect(screen.getByRole('link', { name: '課程空間' }).getAttribute('href')).toBe(
+    '/classroom?courses=archived',
+  );
+  expect(loadHomeData).not.toHaveBeenCalled();
+});
+
+it('shows archived-only courses without presenting them as current enrolments', async () => {
+  state.uid = null;
+  state.session = { context: 'session-a', platformAccountId: 'student-a' };
+  vi.mocked(loadNuniHomeData).mockResolvedValue({
+    courses: [],
+    tasks: [],
+    unreadCount: 0,
+    archivedCount: 2,
+  });
+  render(<HomePage />);
+  expect(await screen.findByText(/另有 2 門已封存課程/)).toBeTruthy();
+  const courses = screen.getByRole('region', { name: /修習課程 0/ });
+  expect(courses.id).toBe('courses');
+  expect(within(courses).getByText('目前沒有修習中的課程。')).toBeTruthy();
+  expect(within(courses).getByRole('link', { name: '查看全部課程 →' }).getAttribute('href')).toBe(
+    '/classroom',
+  );
+  expect(screen.getByRole('link', { name: '課程空間' }).getAttribute('href')).toBe(
+    '/classroom?courses=archived',
+  );
 });
 
 it('uses the Nuni account for home and links directly to pending work', async () => {
@@ -222,7 +308,7 @@ it('uses the same identity lookup copy as the account page when the lookup fails
   expect(screen.getByRole('button', { name: '再試一次' })).toBeTruthy();
 });
 
-it('keeps teaching courses on today and no longer lists studying courses as a grid', async () => {
+it('keeps enrolled courses and teaching courses in their respective sections', async () => {
   state.session = { context: 'session-a', platformAccountId: 'teacher-a' };
   vi.mocked(loadNuniHomeData).mockResolvedValue({
     courses: [
@@ -235,7 +321,12 @@ it('keeps teaching courses on today and no longer lists studying courses as a gr
   render(<HomePage />);
   expect(await screen.findByRole('heading', { name: /授課與協作/ })).toBeTruthy();
   expect(screen.getByText('協同教師')).toBeTruthy();
-  expect(screen.queryByRole('heading', { name: /修習課程/ })).toBeNull();
+  const studying = screen.getByRole('region', { name: /修習課程 1/ });
+  const teaching = screen.getByRole('region', { name: /授課與協作 1/ });
+  expect(within(studying).getByRole('heading', { name: '教育心理學' })).toBeTruthy();
+  expect(within(studying).queryByRole('heading', { name: '教學實習' })).toBeNull();
+  expect(within(teaching).getByRole('heading', { name: '教學實習' })).toBeTruthy();
+  expect(within(teaching).queryByRole('heading', { name: '教育心理學' })).toBeNull();
 });
 
 it('does not tell a teacher they have no homework and opens the teaching course list', async () => {
@@ -251,6 +342,17 @@ it('does not tell a teacher they have no homework and opens the teaching course 
     '#teaching-courses',
   );
   expect(screen.queryByRole('heading', { name: /待繳作業/ })).toBeNull();
+  const courses = screen.getByRole('region', { name: /修習課程 0/ });
+  expect(courses.id).toBe('courses');
+  expect(within(courses).getByText('目前沒有修習中的課程。')).toBeTruthy();
+  expect(within(courses).getByRole('link', { name: '查看全部課程 →' }).getAttribute('href')).toBe(
+    '/classroom',
+  );
+  expect(
+    within(screen.getByRole('region', { name: /授課與協作/ })).getByRole('heading', {
+      name: '教學實習',
+    }),
+  ).toBeTruthy();
 });
 
 it('hides all previous Nuni data immediately during session revalidation and ignores a previous context response', async () => {
@@ -270,6 +372,7 @@ it('hides all previous Nuni data immediately during session revalidation and ign
   state.sessionLoading = true;
   view.rerender(<HomePage />);
   expect(screen.queryByText('Alice private course 作業')).toBeNull();
+  expect(screen.queryByRole('region', { name: /修習課程/ })).toBeNull();
   state.session = { context: 'session-b', platformAccountId: 'student-b' };
   state.sessionLoading = false;
   view.rerender(<HomePage />);
@@ -279,6 +382,7 @@ it('hides all previous Nuni data immediately during session revalidation and ign
   state.pendingLogout = true;
   view.rerender(<HomePage />);
   expect(screen.queryByText('Bob course 作業')).toBeNull();
+  expect(screen.queryByRole('region', { name: /修習課程/ })).toBeNull();
 });
 
 it('removes a loaded overview when refreshing discovers revoked access', async () => {
@@ -294,6 +398,7 @@ it('removes a loaded overview when refreshing discovers revoked access', async (
   });
   expect(await screen.findByRole('alert')).toBeTruthy();
   expect(screen.queryByText('Private course 作業')).toBeNull();
+  expect(screen.queryByRole('region', { name: /修習課程/ })).toBeNull();
   expect(screen.queryByText(SENSE_EMPTY_TEXT)).toBeNull();
   expect(screen.queryByText(TODAY_COPY.emptyDay)).toBeNull();
 });
@@ -337,6 +442,7 @@ it('lets a guest browse before signing in and never loads personal courses', () 
   expect(loadNuniHomeData).not.toHaveBeenCalled();
   expect(screen.queryByText(SENSE_EMPTY_TEXT)).toBeNull();
   expect(screen.queryByRole('heading', { name: SENSE_SECTION_TITLE })).toBeNull();
+  expect(screen.queryByRole('region', { name: /修習課程/ })).toBeNull();
 });
 
 it('keeps all-campuses navigation out of the private personal-storage namespace', () => {
@@ -422,15 +528,33 @@ it('looks up the school role from the selected school instead of always using pu
   expect(state.schoolRoleCalls.some((call) => call[0] === 'alice' && call[1] === 'pu')).toBe(true);
 });
 
-it('shows the LMS-unconnected sentence instead of pretending there is no homework', async () => {
-  vi.mocked(loadHomeData).mockResolvedValue({
-    courses: [],
-    tasks: [],
-    unreadCount: 0,
-  });
+it('keeps the course directory reachable after confirming an empty list without claiming all homework is done', async () => {
+  let finish!: (value: HomeData) => void;
+  vi.mocked(loadHomeData).mockImplementation(
+    () =>
+      new Promise((resolve) => {
+        finish = resolve;
+      }),
+  );
   render(<HomePage />);
+  await waitFor(() => expect(loadHomeData).toHaveBeenCalledWith('alice'));
+  expect(screen.queryByText('目前沒有修習中的課程。')).toBeNull();
+  expect(screen.queryByRole('region', { name: /修習課程/ })).toBeNull();
+  await act(async () =>
+    finish({
+      courses: [],
+      tasks: [],
+      unreadCount: 0,
+    }),
+  );
   expect(await screen.findByText(TODAY_COPY.lmsUnconnected)).toBeTruthy();
   expect(screen.queryByText('目前沒有待繳作業。')).toBeNull();
+  const courses = screen.getByRole('region', { name: /修習課程 0/ });
+  expect(courses.id).toBe('courses');
+  expect(within(courses).getByText('目前沒有修習中的課程。')).toBeTruthy();
+  expect(within(courses).getByRole('link', { name: '查看全部課程 →' }).getAttribute('href')).toBe(
+    '/groups',
+  );
 });
 
 it('does not keep weather, grade summary, recommendation or shortcut grids on today', async () => {

@@ -5,7 +5,9 @@ import { CAMPUS_SERVICES, presentCampusService, searchCampusServices } from './c
 it('keeps announcements and bus, and shows ordering-off copy for /food', () => {
   const services = searchCampusServices('');
   expect(services.some((service) => service.href === '/bus' && service.name === '公車')).toBe(true);
-  expect(services.some((service) => service.href === '/announcements' && service.name === '公告')).toBe(true);
+  expect(
+    services.some((service) => service.href === '/announcements' && service.name === '公告'),
+  ).toBe(true);
   expect(
     services.some((service) => service.href === '/school-info' && service.name === '學校資訊'),
   ).toBe(true);
@@ -20,12 +22,17 @@ it('lists lost-found as a school-account service, not a platform Google task', (
   expect(lostFound?.access).not.toBe('platform');
 });
 
-it.each(['WOW Class', 'TronClass', 'LMS'])('finds the school course service through %s', (query) => {
-  const courseService = searchCampusServices(query).find((service) => service.href === '/school-courses');
-  expect(courseService?.name).toBe('WOW Class 課程');
-  expect(courseService?.access).toBe('school');
-  expect(courseService?.category).toBe('study');
-});
+it.each(['WOW Class', 'TronClass', 'LMS'])(
+  'finds the school course service through %s',
+  (query) => {
+    const courseService = searchCampusServices(query).find(
+      (service) => service.href === '/school-courses',
+    );
+    expect(courseService?.name).toBe('WOW Class 課程');
+    expect(courseService?.access).toBe('school');
+    expect(courseService?.category).toBe('study');
+  },
+);
 
 it('lists the read-only homework surface beside the course list', () => {
   const service = searchCampusServices('玩課雲作業').find((item) => item.href === '/school-lms');
@@ -33,11 +40,35 @@ it('lists the read-only homework surface beside the course list', () => {
   expect(service?.access).toBe('school');
 });
 
-it.each(['總機', '職涯', '實習'])('finds school info through %s without a retired career entry', (query) => {
+it.each(['LMS', 'lms', '學習管理'])('finds both existing course systems through %s', (query) => {
   const services = searchCampusServices(query);
-  expect(services.some((service) => service.href === '/school-info')).toBe(true);
-  expect(services.some((service) => service.href === '/career')).toBe(false);
+  expect(services.find((service) => service.href === '/classroom')).toMatchObject({
+    name: 'LMS 課程',
+    access: 'platform',
+    category: 'study',
+  });
+  expect(services.find((service) => service.href === '/groups')).toMatchObject({
+    name: '課程與群組',
+    access: 'school',
+    category: 'study',
+  });
 });
+
+it.each(['課程空間', 'Campus One', 'nuni', 'classroom'])(
+  'retains the platform LMS alias %s',
+  (query) => {
+    expect(searchCampusServices(query).some((service) => service.href === '/classroom')).toBe(true);
+  },
+);
+
+it.each(['總機', '職涯', '實習'])(
+  'finds school info through %s without a retired career entry',
+  (query) => {
+    const services = searchCampusServices(query);
+    expect(services.some((service) => service.href === '/school-info')).toBe(true);
+    expect(services.some((service) => service.href === '/career')).toBe(false);
+  },
+);
 
 it('exposes a separate public campus-events entry beside clubs', () => {
   const events = searchCampusServices('講座').find((service) => service.href === '/events');
@@ -48,7 +79,9 @@ it('exposes a separate public campus-events entry beside clubs', () => {
 });
 
 it('does not rewrite non-food services when ordering is off', () => {
-  expect(presentCampusService({ href: '/bus', text: '查詢路線與站牌' }).text).toBe('查詢路線與站牌');
+  expect(presentCampusService({ href: '/bus', text: '查詢路線與站牌' }).text).toBe(
+    '查詢路線與站牌',
+  );
   expect(presentCampusService({ href: '/food', text: '選餐點、查訂單、出示取餐憑證' }).text).toBe(
     ONLINE_ORDERING_OFF_TEXT,
   );
@@ -59,7 +92,6 @@ it('lists the local dormitory workspace without implying an official application
   expect(dorm?.access).toBe('device');
   expect(searchCampusServices('報修').some((service) => service.href === '/dormitory')).toBe(true);
 });
-
 
 it('offers school-account leave workflows without presenting them as official leave submission', () => {
   const student = CAMPUS_SERVICES.find((service) => service.href === '/leave');

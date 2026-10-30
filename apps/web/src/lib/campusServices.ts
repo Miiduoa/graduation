@@ -112,15 +112,16 @@ export const CAMPUS_SERVICES = [
     text: '開啟學校帳號的課程與群組，或使用邀請碼加入',
     href: '/groups',
     access: 'school',
-    keywords: '作業 教材 教師 點名 course',
+    keywords: 'LMS 學習管理 修習課程 作業 教材 教師 點名 course',
     category: 'study',
   },
   {
-    name: '課程空間',
+    name: 'LMS 課程',
     text: '閱讀教材、繳交作業、回答測驗，查看老師回饋',
     href: '/classroom',
     access: 'platform',
-    keywords: 'nuni 課程 教材 作業 測驗 繳交 作答 老師 回饋 邀請 classroom',
+    keywords:
+      'LMS Campus One nuni 學習管理 課程空間 課程 教材 作業 測驗 繳交 作答 老師 回饋 邀請 classroom',
     category: 'study',
   },
   {
