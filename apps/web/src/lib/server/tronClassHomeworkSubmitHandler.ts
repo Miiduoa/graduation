@@ -36,6 +36,7 @@ function isOwnReceipt(value: unknown, userId: number, receiptId: string | null, 
   const linkedHomework = item.homework_id ?? item.homework_activity_id ?? item.activity_id;
   if (linkedHomework != null && Number(linkedHomework) !== homeworkId) return false;
   const id = item.id ?? item.submission_id;
+  if (receiptId && (id == null || String(id) !== receiptId)) return false;
   const owner = Number(item.student_id ?? item.user_id ?? NaN);
   if (!hasConfirmedTronClassSubmissionEvidence(item)) return false;
   if (Number.isSafeInteger(owner) && owner > 0) return owner === userId;
