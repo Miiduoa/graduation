@@ -78,7 +78,7 @@ export const CAMPUS_SERVICES = [
   {
     name: '成績',
     text: '查詢學校提供的學期成績',
-    href: '/grades',
+    href: '/grades?tab=semester',
     access: 'school',
     keywords: '分數 學期 grade',
     category: 'study',

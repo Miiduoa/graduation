@@ -323,9 +323,9 @@ export function StudentGradesPage() {
   const nuniContext = hydrated ? nuni.session?.context : undefined;
   const refreshNuni = nuni.refresh;
   const uid = hydrated ? user?.uid : undefined;
-  const signedIn = !!nuniAccount || !!uid;
+  const signedIn = !!nuniAccount && !!nuniContext;
   const sessionLoading = !hydrated || nuni.loading || authLoading;
-  const blocked = nuni.pendingLogout || (!!nuni.error && !nuniAccount && !uid);
+  const blocked = nuni.pendingLogout || (!!nuni.error && !nuniAccount);
 
   const load = useCallback(async () => {
     const request = ++generation.current;
@@ -376,7 +376,7 @@ export function StudentGradesPage() {
       <div className={styles.page}>
         <GradesTabs active="feedback" />
         <p className={styles.notice}>
-          E 校園與 TronClass 的學校來源已停用。<Link href="/classroom">前往 nuni 課程</Link>
+          課程成績與回饋使用 nuni 來源；學校成績請切換至學期成績。<Link href="/classroom">前往 nuni 課程</Link>
         </p>
         <div className={styles.heading}>
           <div>

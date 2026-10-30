@@ -1,5 +1,7 @@
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { beforeEach, expect, it, vi } from 'vitest';
+import GradesPage from '@/app/grades/page';
+vi.mock('@/features/nuni/StudentGrades', () => ({ StudentGradesPage: () => <h1>nuni 成績</h1> }));
 import TimetablePage from '@/app/timetable/page';
 import CreditPlannerPage from '@/app/credit-planner/page';
 import {
@@ -308,4 +310,27 @@ it('hides locally scoped plans while school selection or account state is unreso
   account.loading = false;
   view.rerender(<CreditPlannerPage />);
   expect(await screen.findByLabelText('已確認可採計學分（自行填寫）')).toBeTruthy();
+});
+
+it('loads semester scores, school averages and rankings and filters semesters', async () => {
+  navigation.search += '&tab=semester&from=profile';
+  const snapshot = grades();
+  snapshot.records.summary = {
+    '1151': { semesterAverage: 85, classRanking: '3/40' },
+    '1142': { semesterAverage: 70, departmentRanking: '20/100' },
+  };
+  vi.mocked(loadAcademicRecords).mockResolvedValue(snapshot);
+  render(<GradesPage />);
+  expect(await screen.findByText('真實來源科目')).toBeTruthy();
+  expect(screen.getByText('尚未公布')).toBeTruthy();
+  expect(screen.getByText('3/40')).toBeTruthy();
+  expect(screen.getByText('20/100')).toBeTruthy();
+  expect(screen.getByText('85')).toBeTruthy();
+  fireEvent.change(screen.getByLabelText('學期'), { target: { value: '1151' } });
+  expect(screen.queryByText('前期科目')).toBeNull();
+  expect(screen.queryByText('20/100')).toBeNull();
+  const feedback = new URL(screen.getByRole('link', { name: '課程成績' }).getAttribute('href')!, 'https://test.local');
+  expect(feedback.searchParams.get('tab')).toBe('feedback');
+  expect(feedback.searchParams.get('campus')).toBe('pu');
+  expect(feedback.searchParams.get('from')).toBe('profile');
 });

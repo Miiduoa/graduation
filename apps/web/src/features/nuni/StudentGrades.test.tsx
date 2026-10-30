@@ -252,7 +252,7 @@ it('asks an unsigned visitor to sign in instead of showing a fake gradebook', ()
   expect(screen.getByText(GRADE_COPY.unsigned)).toBeTruthy();
   expect(screen.getByRole('button', { name: '使用 Google 帳號繼續' })).toBeTruthy();
   expect(screen.queryByRole('link', { name: '學校帳號登入' })).toBeNull();
-  expect(screen.getByText(/學校來源已停用/)).toBeTruthy();
+  expect(screen.getByText(/學校成績請切換至學期成績/)).toBeTruthy();
 });
 
 it('says it is loading while the session is still resolving', () => {
@@ -348,4 +348,15 @@ it('retries a failed nuni gradebook instead of presenting it as empty', async ()
   expect(screen.queryByText(GRADE_COPY.emptyCourses)).toBeNull();
   fireEvent.click(screen.getByRole('button', { name: '更新成績' }));
   expect(await screen.findByRole('link', { name: '加入 nuni 課程' })).toBeTruthy();
+});
+
+it('requires nuni sign-in when only a school account is signed in', () => {
+  authState.user = { uid: 'school-only' };
+  render(<StudentGradesPage />);
+  expect(screen.getByText(GRADE_COPY.unsigned)).toBeTruthy();
+  expect(screen.getByRole('button', { name: '使用 Google 帳號繼續' })).toBeTruthy();
+  expect(screen.queryByLabelText('成績摘要')).toBeNull();
+  expect(screen.queryByRole('button', { name: '更新成績' })).toBeNull();
+  expect(loaders.nuni).not.toHaveBeenCalled();
+  expect(loaders.school).not.toHaveBeenCalled();
 });
