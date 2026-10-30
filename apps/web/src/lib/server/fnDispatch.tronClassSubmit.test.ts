@@ -216,6 +216,46 @@ it('does not accept another homework receipt as a duplicate of the selected work
   expect(source.submitHomeworkText).toHaveBeenCalledOnce();
 });
 
+
+it('does not label a school-created draft as a submitted receipt', async () => {
+  const { check, source } = setup();
+  vi.mocked(source.fetchHomeworkSubmissions!).mockReset().mockResolvedValue([{
+    id: 99, homework_id: 20001, student_id: 10,
+    status: 'draft', created_at: new Date().toISOString(),
+  }]);
+  const response = await check();
+  expect(response.status).toBe(200);
+  expect((await response.json()).result.status).toBe('not_submitted');
+  expect(source.submitHomeworkText).not.toHaveBeenCalled();
+});
+
+it('does not post another submission over an unconfirmed school draft', async () => {
+  const { request, source } = setup();
+  vi.mocked(source.fetchHomeworkSubmissions!).mockReset().mockResolvedValue([{
+    id: 99, homework_id: 20001, student_id: 10,
+    status: 'draft', created_at: new Date().toISOString(),
+  }]);
+  const response = await request();
+  expect(response.status).toBe(400);
+  expect((await response.json()).error.message).toMatch(/草稿或狀態未明/);
+  expect(source.submitHomeworkText).not.toHaveBeenCalled();
+});
+
+it('keeps a post pending when school responds with an unfinished record', async () => {
+  const { request, source } = setup();
+  const stamp = new Date().toISOString();
+  vi.mocked(source.fetchHomeworkSubmissions!).mockReset()
+    .mockResolvedValueOnce([])
+    .mockResolvedValueOnce([{
+      id: 99, homework_id: 20001, student_id: 10, status: 'pending',
+      created_at: stamp, submitted_at: stamp,
+    }]);
+  const response = await request();
+  expect(response.status).toBe(200);
+  expect((await response.json()).result.status).toBe('pending');
+  expect(source.submitHomeworkText).toHaveBeenCalledOnce();
+});
+
 it('stops remote writing when the administrator has not enabled the school endpoint', async () => {
   const { source } = setup();
   // Default production mode is fail-closed; this test checks the handler directly.
