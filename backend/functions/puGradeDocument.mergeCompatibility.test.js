@@ -77,3 +77,25 @@ run('keeps official summary values separate from course rows', () => {
   assert.equal(result.grades.length, 1);
   assert.equal(result.summary['1151'].semesterAverage, '88.25');
 });
+
+
+run('does not fabricate a missing explicit semester even inside the same row group', () => {
+  const explicit = '<tr><th>學期別</th><th>課號</th><th>課程名稱</th><th>學分</th><th>成績</th></tr>';
+  const result = parsePuGradeDocument(`<table>${explicit}<tr><td>1151</td><td>001</td><td>已確認</td><td>3</td><td>90</td></tr><tr><td></td><td>002</td><td>學期未提供</td><td>3</td><td>88</td></tr></table>`);
+  assert.deepEqual(result.grades.map((item) => item.courseCode), ['001']);
+  assert.equal(result.coverage.skippedRows, 1);
+});
+
+run('retains a same-group English continuation with a blank semester cell', () => {
+  const explicit = '<tr><th>學期別</th><th>課號</th><th>課程名稱</th><th>學分</th><th>成績</th></tr>';
+  const result = parsePuGradeDocument(`<table>${explicit}<tr><td>1151</td><td>001</td><td>資料庫</td><td>3</td><td>90</td></tr><tr><td></td><td></td><td>DATABASE SYSTEMS</td><td></td><td></td></tr></table>`);
+  assert.equal(result.grades.length, 1);
+  assert.equal(result.grades[0].courseNameEn, 'DATABASE SYSTEMS');
+});
+
+run('does not attach an English-only row across a row-group boundary', () => {
+  const result = parsePuGradeDocument(`<p>115學年度第一學期</p><table><thead>${header}</thead><tbody>${row('001', '資料庫', '3')}</tbody><tbody>${row('', 'DIFFERENT GROUP', '')}</tbody></table>`);
+  assert.equal(result.grades.length, 1);
+  assert.equal(result.grades[0].courseNameEn, '');
+  assert.equal(result.coverage.skippedRows, 1);
+});

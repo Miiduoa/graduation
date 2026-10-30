@@ -94,7 +94,8 @@ function tableRows(table) {
   let previousGroup = null;
   return rows.map(({ cells, group }) => {
     // HTML rowspans do not cross row-group boundaries; zero means the rest of this group.
-    if (previousGroup !== group) spans.clear();
+    const startsRowGroup = previousGroup !== group;
+    if (startsRowGroup) spans.clear();
     previousGroup = group;
     const remainingRows = groupSizes.get(group);
     groupSizes.set(group, remainingRows - 1);
@@ -117,7 +118,7 @@ function tableRows(table) {
       }
       column += colspan;
     }
-    return { values, semesterHeading: tableSemesterHeading(cells) };
+    return { values, semesterHeading: tableSemesterHeading(cells), startsRowGroup };
   });
 }
 
@@ -190,7 +191,8 @@ function readDocument(html) {
     }
     let columns = headerColumns(rows[headerIndex].values);
     let lastRecord = null;
-    for (const { values: cells, semesterHeading } of rows.slice(headerIndex + 1)) {
+    for (const { values: cells, semesterHeading, startsRowGroup } of rows.slice(headerIndex + 1)) {
+      if (startsRowGroup) lastRecord = null;
       if (semesterHeading !== null) {
         semester = rememberSemester(semesterHeading);
         lastRecord = null;
@@ -205,17 +207,21 @@ function readDocument(html) {
       const title = cleanText(cells[columns.title]);
       const semesterText = columns.semester === undefined ? '' : cleanText(cells[columns.semester]);
       const parsedSemester = semesterText ? semesterCell(semesterText) : '';
-      const ownSemester = parsedSemester || (semesterText ? '' : semester);
+      const inheritedSemester = parsedSemester || (semesterText ? '' : semester);
+      // An explicit semester column is evidence: a blank cell is not permission
+      // to borrow a previous row/group. Summary and continuation rows are
+      // handled separately because they may legitimately omit that cell.
+      const ownSemester = columns.semester === undefined ? semester : parsedSemester;
       const score = cleanText(cells[columns.score]);
       const summaryLabel = [title, semesterText].find((label) => label && isSummaryLabel(label));
       if (summaryLabel) {
-        if (ownSemester && score) appendSummary(summary, rememberSemester(ownSemester), summaryLabel, score);
-        if (ownSemester) semester = ownSemester;
+        if (inheritedSemester && score) appendSummary(summary, rememberSemester(inheritedSemester), summaryLabel, score);
+        if (inheritedSemester) semester = inheritedSemester;
         continue;
       }
       if (!title) continue;
       const credits = parseCredits(cells[columns.credits]);
-      if (isLatinTitle(title) && credits === null && lastRecord && ownSemester === lastRecord.semester) {
+      if (isLatinTitle(title) && credits === null && lastRecord && inheritedSemester === lastRecord.semester) {
         if (!lastRecord.courseNameEn) lastRecord.courseNameEn = title;
         continue;
       }
