@@ -4,6 +4,7 @@ import type { AcademicFirestore } from './academicRecordsHandlers';
 import { requireAcademicAccount, schoolSessionCookies, schoolSessionExpiry } from './academicRecordsHandlers';
 import type { LmsReadonlySource } from './tronClassLmsSource';
 import { HttpsError } from './httpsError';
+import { hasConfirmedTronClassSubmissionEvidence } from './tronClassReceiptEvidence';
 
 function positive(value: unknown): number | null {
   return typeof value === 'number' && Number.isSafeInteger(value) && value > 0 ? value : null;
@@ -26,9 +27,9 @@ function receiptForUser(
     const ownerKnown = Number.isSafeInteger(owner) && owner > 0;
     if (ownerKnown ? owner !== userId :
       !expectedReceiptId || id == null || String(id) !== expectedReceiptId) continue;
-    const status = String(item.status ?? item.submission_status ?? '').toLowerCase();
-    const submittedAt = item.submitted_at ?? item.created_at;
-    if (!submittedAt && !['submitted', 'graded', 'finished'].includes(status)) continue;
+    if (!hasConfirmedTronClassSubmissionEvidence(item)) continue;
+    // created_at can describe the creation of an unsubmitted draft.
+    const submittedAt = item.submitted_at;
     return {
       receiptId: id != null && /^[1-9][0-9]{0,19}$/.test(String(id)) ? String(id) : null,
       submittedAt: typeof submittedAt === 'string' && Number.isFinite(Date.parse(submittedAt))
