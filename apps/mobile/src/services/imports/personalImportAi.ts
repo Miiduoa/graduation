@@ -242,7 +242,7 @@ export async function runMobilePersonalImportAi(
       /* The result is retained even if preview rendering fails. */
     }
   };
-  const useRules = (batch: PersonalImportAiTextBatch) => {
+  const applyRules = (batch: PersonalImportAiTextBatch) => {
     mode = 'rules';
     hasUnauditedSource = true;
     const prefix =
@@ -317,7 +317,7 @@ export async function runMobilePersonalImportAi(
           retry: item.retry,
         };
         if (batch.rulesOnly) {
-          useRules(batch);
+          applyRules(batch);
           continue;
         }
         const retrySmaller = (reason: Exclude<RetryReason, null>) => {
@@ -372,7 +372,7 @@ export async function runMobilePersonalImportAi(
           if (settled || signal.aborted) return;
           if (!localReady) {
             fallbackMessage ||= '本機模型尚未就緒或裝置不支援。';
-            useRules(batch);
+            applyRules(batch);
             continue;
           }
           mode = 'local';
@@ -400,7 +400,7 @@ export async function runMobilePersonalImportAi(
             fallbackMessage = '本機 AI 整理逾時。';
             addFailure(batch, '整理逾時');
             // Do not start another native operation until this completion settles.
-            for (const remaining of work.slice(index + 1)) useRules(remaining.batch);
+            for (const remaining of work.slice(index + 1)) applyRules(remaining.batch);
             finish();
           }, GENERATION_TIMEOUT_MS);
           owned = true;
@@ -427,7 +427,7 @@ export async function runMobilePersonalImportAi(
             if (settled || signal.aborted) return;
             localUnavailable = true;
             fallbackMessage = '本機 AI 無法繼續執行。';
-            useRules(batch);
+            applyRules(batch);
             continue;
           } finally {
             owned = false;
