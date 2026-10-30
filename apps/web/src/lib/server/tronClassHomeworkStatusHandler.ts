@@ -24,6 +24,7 @@ function receiptForUser(
     if (linkedHomework != null && Number(linkedHomework) !== homeworkId) continue;
     const owner = Number(item.student_id ?? item.user_id ?? NaN);
     const id = item.id ?? item.submission_id;
+    if (expectedReceiptId && (id == null || String(id) !== expectedReceiptId)) continue;
     const ownerKnown = Number.isSafeInteger(owner) && owner > 0;
     if (ownerKnown ? owner !== userId :
       !expectedReceiptId || id == null || String(id) !== expectedReceiptId) continue;
