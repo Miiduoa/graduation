@@ -29,11 +29,25 @@ const data: CourseHubData = {
 };
 const route = { params: { groupId: 'course-a', groupName: '過時的課名' } };
 beforeEach(() => {
+  // Keep the fixed assignment fixtures in their intended week, before their deadlines.
+  jest.useFakeTimers({
+    now: new Date('2026-10-26T12:00:00Z'),
+    // RNTL's async cleanup and React rendering must still drain real timers.
+    doNotFake: [
+      'setTimeout', 'clearTimeout', 'setInterval', 'clearInterval',
+      'setImmediate', 'clearImmediate', 'queueMicrotask', 'nextTick',
+      'performance', 'hrtime', 'requestAnimationFrame', 'cancelAnimationFrame',
+      'requestIdleCallback', 'cancelIdleCallback',
+    ],
+  });
   jest.clearAllMocks();
   mockUser = { uid: 'alice' };
   mockSchool = { id: 'pu' };
   jest.mocked(loadCourseHub).mockResolvedValue(data);
   jest.mocked(webBrowserOpenWithPuTronClassGate).mockResolvedValue(true);
+});
+afterEach(() => {
+  jest.useRealTimers();
 });
 test('uses real course name with scoped useful actions and no invented outcomes', async () => {
   const navigation = { navigate: jest.fn() };
@@ -231,6 +245,38 @@ test('confirmed submission and published feedback never remain a pending weekly 
     hwTitle: '已完成閱讀心得',
     dueAt: '2026-10-29T15:59:00Z',
   });
+});
+
+test.each([
+  ['2026-10-29T15:59:00.000Z', true],
+  ['2026-10-29T15:59:00.001Z', false],
+] as const)('weekly work respects its exact deadline at %s', async (now, actionable) => {
+  jest.setSystemTime(new Date(now));
+  jest.mocked(loadCourseHub).mockResolvedValue({
+    ...data,
+    assignments: {
+      status: 'ready',
+      items: [{
+        id: 'deadline-1',
+        title: '截止時間測試作業',
+        description: '',
+        dueAt: '2026-10-29T15:59:00Z',
+        closed: false,
+        allowLateSubmission: false,
+        submission: { kind: 'not_submitted' },
+      }],
+    },
+  });
+
+  const view = render(<CourseHub route={route} />);
+  expect(await view.findByText('查看作業：截止時間測試作業')).toBeTruthy();
+  if (actionable) {
+    expect(view.getByText('查看本週作業：截止時間測試作業')).toBeTruthy();
+    expect(view.queryByText('已過截止時間 · 請洽授課教師')).toBeNull();
+  } else {
+    expect(view.queryByText('查看本週作業：截止時間測試作業')).toBeNull();
+    expect(view.getByText('已過截止時間 · 請洽授課教師')).toBeTruthy();
+  }
 });
 
 test('unknown personal receipt status cannot be mistaken for pending coursework', async () => {
