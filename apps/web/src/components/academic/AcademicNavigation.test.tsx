@@ -49,9 +49,15 @@ function destination(label: string) {
 
 it.each([
   ['/timetable', '課表', 'timetable'],
+  ['/classroom', 'LMS 課程', 'timetable'],
+  ['/classroom/course/cw_12345678-1234-1234-1234-123456789abc', 'LMS 課程', 'timetable'],
+  ['/groups', '課程與群組', 'timetable'],
+  ['/groups/course-group', '課程與群組', 'timetable'],
+  ['/course/course-1', '課程與群組', 'timetable'],
+  ['/course/course-1/attendance', '課程與群組', 'timetable'],
   ['/school-courses', 'WOW Class 課程', 'timetable'],
-  ['/school-lms', '作業與教材', 'timetable'],
-  ['/school-lms/homework/10001/20001', '作業與教材', 'timetable'],
+  ['/school-lms', '玩課雲作業與教材', 'timetable'],
+  ['/school-lms/homework/10001/20001', '玩課雲作業與教材', 'timetable'],
   ['/grades', '成績', 'grades'],
   ['/credit-planner', '學分規劃', 'grades'],
   ['/credit-planner/review', '學分規劃', 'grades'],
@@ -66,8 +72,10 @@ it.each([
     const links = within(nav).getAllByRole('link');
     expect(links.map((link) => link.textContent)).toEqual([
       '課表',
+      'LMS 課程',
+      '課程與群組',
       'WOW Class 課程',
-      '作業與教材',
+      '玩課雲作業與教材',
       '成績',
       '學分規劃',
       '行事曆',
@@ -80,6 +88,15 @@ it.each([
     expect(screen.getByText('此頁內容')).toBeTruthy();
   },
 );
+
+it('keeps both existing LMS entries reachable from the main academic landing page', () => {
+  navigation.pathname = '/timetable';
+  renderShell();
+  expect(destination('LMS 課程').pathname).toBe('/classroom');
+  expect(destination('課程與群組').pathname).toBe('/groups');
+  expect(destination('WOW Class 課程').pathname).toBe('/school-courses');
+  expect(destination('玩課雲作業與教材').pathname).toBe('/school-lms');
+});
 
 it('uses the current campus selection and passes only destination-specific context', () => {
   navigation.schoolId = 'nthu';
@@ -127,6 +144,10 @@ it.each([
   '/admin',
   '/teacher',
   '/classroom/grades',
+  '/classroom/login',
+  '/classroom/account',
+  '/classroom-old',
+  '/courses',
   '/timetable/s/shared',
   '/grades-other',
   '/life',

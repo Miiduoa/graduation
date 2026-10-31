@@ -3,6 +3,7 @@ import { ActivityIndicator, Pressable, RefreshControl, ScrollView, Text, TextInp
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import { AIScreen, AIHero, AISection, AICard, AIRow, AIButton, aiTokens } from '../ui/aiFirst';
 import { useAuth } from '../state/auth';
+import { rootNavigateMeScreen } from '../app/rootNavigation';
 import { loadStudentHome } from '../data/studentHome';
 import type { InboxTask } from '../data/types';
 import { safeNavigate } from '../utils/safeNavigate';
@@ -118,6 +119,13 @@ export default function LearnAiFirstScreen() {
         title="課務"
         subtitle="先看自己的課表，再處理這堂課要做的事。"
       />
+      <AISection title="課程空間">
+        <AIRow
+          title="LMS 課程"
+          subtitle="教材、作業與測驗 · Google 帳號"
+          onPress={() => rootNavigateMeScreen('NuniWorkspace', { tab: 'courses' })}
+        />
+      </AISection>
       {workspace ? (
         <View style={{ flexDirection: 'row', marginHorizontal: 16, marginTop: 14, gap: 8 }} accessibilityLabel="課務進度摘要">
           {[

@@ -40,6 +40,16 @@ beforeEach(() => {
     ],
   });
   jest.clearAllMocks();
+  // Keep the October 29 deadlines in the current week and before their cutoff.
+  jest.useFakeTimers({
+    now: new Date('2026-10-27T12:00:00+08:00'),
+    doNotFake: [
+      'nextTick', 'queueMicrotask', 'performance', 'hrtime',
+      'setTimeout', 'clearTimeout', 'setInterval', 'clearInterval',
+      'setImmediate', 'clearImmediate', 'requestAnimationFrame', 'cancelAnimationFrame',
+      'requestIdleCallback', 'cancelIdleCallback',
+    ],
+  });
   mockUser = { uid: 'alice' };
   mockSchool = { id: 'pu' };
   jest.mocked(loadCourseHub).mockResolvedValue(data);

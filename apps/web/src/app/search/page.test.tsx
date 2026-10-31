@@ -103,6 +103,25 @@ it('keeps the existing course directory alongside the added Nuni classroom', () 
   expect(paths).toContain('/calendar');
 });
 
+it('finds the original LMS alongside the school platform when searching LMS', () => {
+  window.history.replaceState({}, '', '/search?q=LMS&schoolId=pu&campus=pu');
+  render(<SearchPage />);
+  const classroom = screen.getByRole('link', { name: /^LMS 課程/ });
+  const groups = screen.getByRole('link', { name: /^課程與群組/ });
+  const school = screen.getByRole('link', { name: /^WOW Class 課程/ });
+  for (const [link, pathname] of [
+    [classroom, '/classroom'],
+    [groups, '/groups'],
+    [school, '/school-courses'],
+  ] as const) {
+    const target = new URL(link.getAttribute('href')!, 'https://campus.example');
+    expect(target.pathname).toBe(pathname);
+    expect(target.searchParams.get('schoolId')).toBe('pu');
+    expect(target.searchParams.get('campus')).toBe('pu');
+    expect(target.searchParams.has('q')).toBe(false);
+  }
+});
+
 it('shows ordering-off copy for /food while keeping bus and announcements', () => {
   render(<SearchPage />);
   expect(screen.getByRole('link', { name: /點餐與取餐/ }).textContent).toContain(
@@ -205,7 +224,7 @@ it.each(['職涯', '實習'])(
 it('finds tasks using separated words and full-width Latin characters', () => {
   render(<SearchPage />);
   fireEvent.change(screen.getByRole('searchbox'), { target: { value: '繳交 作業' } });
-  expect(screen.getByRole('link', { name: /^課程空間/ })).toBeTruthy();
+  expect(screen.getByRole('link', { name: /^LMS 課程/ })).toBeTruthy();
   fireEvent.change(screen.getByRole('searchbox'), { target: { value: 'ＢＵＳ' } });
   expect(screen.getAllByRole('link')).toHaveLength(1);
   expect(screen.getByRole('link', { name: /^公車/ })).toBeTruthy();
@@ -249,12 +268,14 @@ it('retains a search and public destinations when login availability fails, and 
   expect((screen.getByRole('searchbox') as HTMLInputElement).value).toBe('公車');
 });
 
-
 it('recognizes a complex signed-in campus request using AI instead of only keyword results', async () => {
   userState.uid = 'alice';
   vi.mocked(interpretCampusRequest).mockResolvedValue({
-    status: 'understood', source: 'model', summary: '想先確認課表，再找讀書和吃飯的地點。',
-    destinations: ['/timetable', '/library', '/cafeteria'], clarifyingQuestion: null,
+    status: 'understood',
+    source: 'model',
+    summary: '想先確認課表，再找讀書和吃飯的地點。',
+    destinations: ['/timetable', '/library', '/cafeteria'],
+    clarifyingQuestion: null,
   });
   render(<SearchPage />);
   fireEvent.change(screen.getByRole('searchbox'), {

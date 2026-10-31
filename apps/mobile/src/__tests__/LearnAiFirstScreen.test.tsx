@@ -2,9 +2,13 @@ import React from 'react';
 import { fireEvent, render } from '@testing-library/react-native';
 import LearnAiFirstScreen from '../screens/LearnAiFirstScreen';
 import { loadStudentHome } from '../data/studentHome';
+import { rootNavigateMeScreen } from '../app/rootNavigation';
 import type { CourseSpace, InboxTask } from '../data/types';
 
-let mockAuth = {
+let mockAuth: {
+  user: { uid: string } | null;
+  profile: { uid: string; schoolId: string; role: string } | null;
+} = {
   user: { uid: 'student-a' },
   profile: { uid: 'student-a', schoolId: 'school-a', role: 'student' },
 };
@@ -12,6 +16,7 @@ const mockNavigate = jest.fn();
 const mockNavigation = { navigate: mockNavigate };
 jest.mock('../state/auth', () => ({ useAuth: () => mockAuth }));
 jest.mock('../data/studentHome', () => ({ loadStudentHome: jest.fn() }));
+jest.mock('../app/rootNavigation', () => ({ rootNavigateMeScreen: jest.fn() }));
 jest.mock('../components/LearningNextClassCard', () => ({ LearningNextClassCard: () => null }));
 jest.mock('@react-navigation/native', () => ({
   useNavigation: () => mockNavigation,
@@ -52,6 +57,49 @@ beforeEach(() => {
     profile: { uid: 'student-a', schoolId: 'school-a', role: 'student' },
   };
   jest.mocked(loadStudentHome).mockResolvedValue(result());
+});
+
+test('opens the original LMS course list without refreshing school data', async () => {
+  const view = render(<LearnAiFirstScreen />);
+  await view.findByText('迴歸分析作業');
+
+  fireEvent.press(view.getByRole('button', { name: /LMS 課程/ }));
+
+  expect(rootNavigateMeScreen).toHaveBeenCalledTimes(1);
+  expect(rootNavigateMeScreen).toHaveBeenCalledWith('NuniWorkspace', { tab: 'courses' });
+  expect(loadStudentHome).toHaveBeenCalledTimes(1);
+  expect(mockNavigate).not.toHaveBeenCalled();
+});
+
+test('keeps the LMS entry available while school courses are loading', () => {
+  jest.mocked(loadStudentHome).mockReturnValue(new Promise(() => {}));
+  const view = render(<LearnAiFirstScreen />);
+
+  fireEvent.press(view.getByRole('button', { name: /LMS 課程/ }));
+
+  expect(rootNavigateMeScreen).toHaveBeenCalledWith('NuniWorkspace', { tab: 'courses' });
+});
+
+test('keeps the LMS entry available when school courses cannot be read', async () => {
+  jest.mocked(loadStudentHome).mockRejectedValue(new Error('school-unavailable'));
+  const view = render(<LearnAiFirstScreen />);
+  await view.findByText('無法讀取課程與待辦，請確認登入狀態與網路後重試。');
+
+  fireEvent.press(view.getByRole('button', { name: /LMS 課程/ }));
+
+  expect(rootNavigateMeScreen).toHaveBeenCalledWith('NuniWorkspace', { tab: 'courses' });
+  expect(loadStudentHome).toHaveBeenCalledTimes(1);
+});
+
+test('keeps the LMS entry independent of the school session', async () => {
+  mockAuth = { user: null, profile: null };
+  const view = render(<LearnAiFirstScreen />);
+  await view.findByText('無法讀取課程與待辦，請確認登入狀態與網路後重試。');
+
+  fireEvent.press(view.getByRole('button', { name: /LMS 課程/ }));
+
+  expect(rootNavigateMeScreen).toHaveBeenCalledWith('NuniWorkspace', { tab: 'courses' });
+  expect(loadStudentHome).not.toHaveBeenCalled();
 });
 
 test('a course task opens that assignment instead of the class feed', async () => {

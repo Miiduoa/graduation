@@ -187,6 +187,45 @@ export default function HomePage() {
             onRetryTodos={() => void refresh()}
           />
         )}
+        {data ? (
+          <section id="courses" className={styles.section} aria-labelledby="studying-title">
+            <div className={styles.sectionHeading}>
+              <h2 id="studying-title">
+                修習課程 <span>{studying.length}</span>
+              </h2>
+              <Link href={context ? '/classroom' : '/groups'}>查看全部課程 →</Link>
+            </div>
+            {studying.length > 0 ? (
+              <>
+                <p className={styles.sectionNote}>查看教材、繳交作業、作答測驗與老師回饋。</p>
+                <div className={styles.courses}>
+                  {studying.map((course) => (
+                    <Link key={course.id} href={courseHref(course)} className={styles.course}>
+                      <span>學生</span>
+                      <h3>{course.name}</h3>
+                      <p>
+                        {course.unreadCount > 0
+                          ? `${course.unreadCount} 則新動態`
+                          : '教材、作業與測驗'}
+                      </p>
+                      <span className={styles.courseArrow} aria-hidden>
+                        →
+                      </span>
+                    </Link>
+                  ))}
+                </div>
+              </>
+            ) : (
+              <p className={styles.sectionNote}>目前沒有修習中的課程。</p>
+            )}
+          </section>
+        ) : null}
+        {data && context && (data.archivedCount ?? 0) > 0 ? (
+          <p className={styles.sectionNote}>
+            另有 {data.archivedCount} 門已封存課程，可到
+            <Link href="/classroom?courses=archived">課程空間</Link>查看過往紀錄。
+          </p>
+        ) : null}
         {data && teaching.length > 0 ? (
           <section
             id="teaching-courses"

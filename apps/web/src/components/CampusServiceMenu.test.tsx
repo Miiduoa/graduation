@@ -71,7 +71,7 @@ it('retains all existing services and search while adding a separate classroom e
     ).toBe(href);
   }
   expect(screen.getByRole('link', { name: /尋找校園服務/ }).getAttribute('href')).toBe('/search');
-  expect(screen.getByRole('link', { name: '課程空間' }).getAttribute('href')).toBe('/classroom');
+  expect(screen.getByRole('link', { name: 'LMS 課程' }).getAttribute('href')).toBe('/classroom');
   expect(screen.getByRole('link', { name: '課業成績與回饋' }).getAttribute('href')).toBe(
     '/grades?tab=feedback',
   );
@@ -145,7 +145,7 @@ it('marks classroom children as part of the added service without selecting exis
   navigation.pathname = '/classroom/course/cw_11111111-1111-4111-8111-111111111111';
   render(<CampusServiceMenu />);
   fireEvent.click(screen.getByText('所有服務'));
-  expect(screen.getByRole('link', { name: '課程空間' }).getAttribute('aria-current')).toBe('page');
+  expect(screen.getByRole('link', { name: 'LMS 課程' }).getAttribute('aria-current')).toBe('page');
   expect(screen.getByRole('link', { name: '課程與群組' }).getAttribute('aria-current')).toBeNull();
 });
 
@@ -172,7 +172,7 @@ it('keeps the Campus One header and original school login around the complete sh
   fireEvent.click(screen.getByText('所有服務'));
   for (const [, label] of originalServices)
     expect(screen.getByRole('link', { name: label === '成績' ? /^成績$/ : label })).toBeTruthy();
-  expect(screen.getByRole('link', { name: '課程空間' })).toBeTruthy();
+  expect(screen.getByRole('link', { name: 'LMS 課程' })).toBeTruthy();
   expect(screen.getByRole('link', { name: '登入' }).getAttribute('href')).toBe(
     '/login?returnUrl=%2Fmap%3FschoolId%3Dtw-pu',
   );
@@ -301,7 +301,7 @@ it('selects only the specific account service and closes its overview link on th
   const view = render(<CampusServiceMenu />);
   screen.getByText('所有服務').closest('details')!.open = true;
   expect(screen.getByRole('link', { name: '學校資格' }).getAttribute('aria-current')).toBe('page');
-  expect(screen.getByRole('link', { name: '課程空間' }).getAttribute('aria-current')).toBeNull();
+  expect(screen.getByRole('link', { name: 'LMS 課程' }).getAttribute('aria-current')).toBeNull();
   navigation.pathname = '/search';
   view.rerender(<CampusServiceMenu />);
   const menu = screen.getByText('所有服務').closest('details')!;
@@ -409,7 +409,6 @@ it('clears a completed search immediately before a route change can remove the d
   expect((screen.getByRole('searchbox', { name: '搜尋服務' }) as HTMLInputElement).value).toBe('');
   expect(screen.getByRole('link', { name: '課表' })).toBeTruthy();
 });
-
 
 it('opens a keyboard-dismissible voice AI entry without leaving the current service', () => {
   const view = render(<AppHeader />);
