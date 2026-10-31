@@ -13,8 +13,6 @@ type FeatureAvailability = {
   deeplinks: boolean;
 };
 
-const DEFAULT_WIDGET_APP_GROUP_ID = 'group.com.campus.app';
-
 function normalizeAppEnv(value?: string): AppEnvironment {
   if (value === 'production' || value === 'preview') {
     return value;
@@ -101,7 +99,7 @@ export default ({ config }: any) => {
     courses: parseBoolean(process.env.EXPO_PUBLIC_FEATURE_COURSES, !isReleaseLike),
     grades: parseBoolean(process.env.EXPO_PUBLIC_FEATURE_GRADES, !isReleaseLike),
     payments: parseBoolean(process.env.EXPO_PUBLIC_FEATURE_PAYMENTS, !isReleaseLike),
-    widgets: parseBoolean(process.env.EXPO_PUBLIC_FEATURE_WIDGETS, !isReleaseLike),
+    widgets: parseBoolean(process.env.EXPO_PUBLIC_FEATURE_WIDGETS, false),
     deeplinks: parseBoolean(process.env.EXPO_PUBLIC_FEATURE_DEEPLINKS, !isReleaseLike),
   };
   const enableUniversalDevAccounts =
@@ -248,7 +246,7 @@ export default ({ config }: any) => {
         faceIDPermission: '使用 Face ID 進行安全驗證',
       },
     ],
-    ...(featureAvailability.widgets ? ['./src/widgets/expo-widget-plugin.js'] : []),
+    './src/widgets/expo-widget-plugin.js',
   ];
   const configuredAiProvider = process.env.EXPO_PUBLIC_AI_PROVIDER ?? 'gemini';
   const releaseAiProviderOverride = process.env.EXPO_PUBLIC_RELEASE_AI_PROVIDER?.trim();
@@ -309,13 +307,11 @@ export default ({ config }: any) => {
         UIBackgroundModes: ['fetch', 'remote-notification'],
       },
       associatedDomains: deepLinkHost ? [`applinks:${deepLinkHost}`] : undefined,
-      config: mapsApiKey ? { googleMapsApiKey: mapsApiKey } : undefined,
+      config: { ...(config.ios?.config ?? {}), ...(mapsApiKey ? { googleMapsApiKey: mapsApiKey } : {}) },
       entitlements: {
         'com.apple.developer.applesignin': ['Default'],
         'aps-environment': isProduction ? 'production' : 'development',
-        'com.apple.security.application-groups': featureAvailability.widgets
-          ? [DEFAULT_WIDGET_APP_GROUP_ID]
-          : undefined,
+        'com.apple.security.application-groups': [`group.${bundleIdentifier}`],
       },
     },
     android: {
@@ -389,6 +385,10 @@ export default ({ config }: any) => {
       googleAndroidClientId: process.env.EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID ?? '',
       eas: {
         projectId: easProjectId,
+        build: { experimental: { ios: { appExtensions: [{
+          targetName: 'CampusWidgetExtension', bundleIdentifier: `${bundleIdentifier}.widget`,
+          entitlements: { 'com.apple.security.application-groups': [`group.${bundleIdentifier}`] },
+        }] } } },
       },
       release: {
         releasedSchoolIds,
@@ -396,7 +396,7 @@ export default ({ config }: any) => {
         features: featureAvailability,
       },
       widgetConfig: {
-        appGroupId: DEFAULT_WIDGET_APP_GROUP_ID,
+        appGroupId: `group.${bundleIdentifier}`,
         refreshInterval: 15,
       },
     },
@@ -406,7 +406,7 @@ export default ({ config }: any) => {
           url: `https://u.expo.dev/${easProjectId}`,
         }
       : undefined,
-    // A new native Google module needs a new binary/runtime before any OTA update.
-    runtimeVersion: isProduction ? 'campus-one-native-google-1' : { policy: 'sdkVersion' },
+    // Native widgets require a new binary before receiving this runtime.
+    runtimeVersion: isProduction ? 'campus-one-native-widget-2' : { policy: 'sdkVersion' },
   };
 };

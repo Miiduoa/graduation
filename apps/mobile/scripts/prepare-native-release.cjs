@@ -9,7 +9,7 @@ const production = {
   identifier: 'com.nuni.app',
   projectId: '8955b97c-802c-463c-bd1d-d5f02e30a966',
   iosClientId: '1096741064465-b8ue803rbqdpcq75t1g03o5t49vi0s4q.apps.googleusercontent.com',
-  runtimeVersion: 'campus-one-native-google-1',
+  runtimeVersion: 'campus-one-native-widget-2',
 };
 
 function buildPlan(projectRoot) {
@@ -40,10 +40,10 @@ function buildPlan(projectRoot) {
   const project = readFileSync(projectPath, 'utf8');
   const identifiers = [...project.matchAll(/PRODUCT_BUNDLE_IDENTIFIER = ([^;]+);/g)];
   if (
-    identifiers.length !== 2 ||
+    ![2, 4].includes(identifiers.length) ||
     identifiers.some(
       (match) =>
-        !['com.campus.app.dev', production.identifier].includes(
+        !['com.campus.app.dev', production.identifier, 'com.campus.app.dev.widget', `${production.identifier}.widget`].includes(
           match[1].replaceAll('"', '').trim(),
         ),
     )
@@ -54,11 +54,23 @@ function buildPlan(projectRoot) {
     'ios/mobile.xcodeproj/project.pbxproj',
     project.replace(
       /PRODUCT_BUNDLE_IDENTIFIER = [^;]+;/g,
-      `PRODUCT_BUNDLE_IDENTIFIER = ${production.identifier};`,
+      (match) => `PRODUCT_BUNDLE_IDENTIFIER = ${production.identifier}${match.includes('.widget') ? '.widget' : ''};`,
     ),
   );
   const info = plist.parse(readFileSync(resolve(projectRoot, 'ios/mobile/Info.plist'), 'utf8'));
   const configured = googleIosInfoPlist(info, production.iosClientId);
+  if (configured.NextClassAppGroup) configured.NextClassAppGroup = `group.${production.identifier}`;
+  for (const file of ['ios/mobile/mobile.entitlements', 'ios/CampusWidgetExtension/CampusWidgetExtension.entitlements', 'ios/CampusWidgetExtension/Info.plist']) {
+    if (!existsSync(resolve(projectRoot, file))) continue;
+    const value = plist.parse(readFileSync(resolve(projectRoot, file), 'utf8'));
+    if (file.endsWith('/Info.plist')) {
+      value.CFBundleShortVersionString = info.CFBundleShortVersionString;
+      value.CFBundleVersion = info.CFBundleVersion;
+    }
+    if (value.NextClassAppGroup) value.NextClassAppGroup = `group.${production.identifier}`;
+    if (value['com.apple.security.application-groups']) value['com.apple.security.application-groups'] = [`group.${production.identifier}`];
+    add(file, plist.build(value));
+  }
   configured.CFBundleURLTypes = configured.CFBundleURLTypes.map((entry) => ({
     ...entry,
     CFBundleURLSchemes: entry.CFBundleURLSchemes.map((scheme) =>
