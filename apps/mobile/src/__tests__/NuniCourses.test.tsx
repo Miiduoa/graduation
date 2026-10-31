@@ -228,6 +228,7 @@ it('keeps the loaded materials and retries the same cursor after a network failu
   fireEvent.press(view.getByRole('button', { name: '教材 1+' }));
   fireEvent.press(view.getByRole('button', { name: '載入較早教材' }));
   await view.findByRole('button', { name: '重試載入較早教材' });
+  expect(view.getByText(/目前無法連線，連線中斷/)).toBeTruthy();
   expect(view.getByText('第 1 份教材')).toBeTruthy();
   fireEvent.press(view.getByRole('button', { name: '重試載入較早教材' }));
   await view.findByText('第 2 份教材');
@@ -2296,4 +2297,38 @@ it('舊版本缺少影像模組時保留既有附件操作並隱藏轉檔入口'
   } finally {
     availability.mockRestore();
   }
+});
+
+it('shares only the stable material entry through the system sheet', async () => {
+  const { Share } = require('react-native');
+  const share = jest.spyOn(Share, 'share').mockResolvedValue({ action: Share.sharedAction });
+  const target = material(1, '合成分享教材');
+  mockRequest.mockImplementation((path, context, input) => {
+    if (!path.endsWith('/materials/page')) return response(path, context, input);
+    return Promise.resolve({ materials: [target], nextCursor: null });
+  });
+  const view = render(<NuniCourses initialWorkspaceId={courseId} initialMaterialId={target.id} />);
+  await view.findByText('目標教材');
+  fireEvent.press(view.getByRole('button', { name: '分享教材入口' }));
+  expect(share).toHaveBeenCalledWith({ message: expect.stringContaining(`workspaceId=${courseId}&materialId=${target.id}`) });
+  expect(share.mock.calls[0][0].message).not.toContain(target.body);
+  share.mockRestore();
+});
+
+it.each([403, 404])('stops a linked material search and removes course content after %s', async (status) => {
+  mockRequest.mockImplementation((path, context, input, _method, query) => {
+    if (!path.endsWith('/materials/page')) return response(path, context, input);
+    return query
+      ? Promise.reject(new NuniError(status, 'ACCESS_DENIED'))
+      : Promise.resolve({ materials: [material(1)], nextCursor: 'synthetic_older' });
+  });
+  const view = render(<NuniCourses initialWorkspaceId={courseId} initialMaterialId="cwm_missing" />);
+  await waitFor(() => expect(
+    mockRequest.mock.calls.filter(([path]) => path.endsWith('/materials/page')),
+  ).toHaveLength(2));
+  await waitFor(() => expect(view.queryByText('第 1 份教材')).toBeNull());
+  expect(view.queryByText('校園訪談', { includeHiddenElements: true })).toBeNull();
+  expect(view.queryByRole('button', { name: '繼續尋找' })).toBeNull();
+  await act(async () => { await new Promise((resolve) => setTimeout(resolve, 50)); });
+  expect(mockRequest.mock.calls.filter(([path]) => path.endsWith('/materials/page'))).toHaveLength(2);
 });
