@@ -1960,12 +1960,14 @@ function ImportWorkspace({
                         disabled={
                           saving ||
                           busy ||
+                          !selected.has(gridRow.id) ||
                           !nextReviewRow(
                             rows.filter((item) => selected.has(item.id)),
                             gridRow,
                           )
                         }
                         onPress={() => {
+                          if (!selected.has(gridRow.id)) return;
                           const next = nextReviewRow(
                             rows.filter((item) => selected.has(item.id)),
                             gridRow,

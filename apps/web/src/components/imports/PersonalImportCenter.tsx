@@ -2118,12 +2118,14 @@ function ImportWorkspace({
                               disabled={
                                 saving ||
                                 reading ||
+                                excluded.includes(row.id) ||
                                 !nextReviewRow(
                                   rows.filter((item) => !excluded.includes(item.id)),
                                   row,
                                 )
                               }
                               onClick={() => {
+                                if (excluded.includes(row.id)) return;
                                 const next = nextReviewRow(
                                   rows.filter((item) => !excluded.includes(item.id)),
                                   row,

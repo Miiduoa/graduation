@@ -1656,3 +1656,33 @@ test('未知學校在清單與格子拆分均提示並保留手填時間，返�
     });
   });
 });
+
+test('未勾選前節數學時仍保留下一節與英文供正式匯入', async () => {
+  const view = render(<PersonalImportScreen />);
+  await waitFor(() => expect(view.queryByText('正在讀取匯入草稿…')).toBeNull(), { timeout: 10000 });
+  fireEvent.changeText(view.getByLabelText('這批資料的學年度（例如 115）'), '115');
+  fireEvent.changeText(view.getByLabelText('這批資料的學期（例如 1、2、暑期）'), '1');
+  fireEvent.changeText(
+    view.getByLabelText('貼上或修正原始文字'),
+    '課程名稱,星期,開始節次,結束節次,教室\n數學,一,1,1,A101\n數學,一,2,2,A101\n英文,二,3,3,B101',
+  );
+  fireEvent.press(view.getByText('整理成可編輯資料'));
+  await view.findByLabelText('修正星期一第1節 數學');
+  fireEvent.press(view.getAllByLabelText('匯入 數學')[0]);
+  expect(view.queryByLabelText('修正星期一第1節 數學')).toBeNull();
+  fireEvent.press(view.getByLabelText('修正星期一第2節 數學'));
+  expect(
+    view.getByRole('button', { name: '與下一節同名課程合併' }).props.accessibilityState?.disabled,
+  ).toBe(true);
+  fireEvent.press(view.getByText('與下一節同名課程合併'));
+  fireEvent.press(view.getByText('回到週課表核對'));
+  expect((await loadPersonalImports(scope)).records).toHaveLength(0);
+  fireEvent.press(view.getByText('確認新增 2 筆'));
+  await view.findByText(personalImportSavedNotice(2));
+  expect((await loadPersonalImports(scope)).records).toEqual(
+    expect.arrayContaining([
+      expect.objectContaining({ title: '數學', dayOfWeek: 1, startPeriod: 2, endPeriod: 2 }),
+      expect.objectContaining({ title: '英文', dayOfWeek: 2, startPeriod: 3, endPeriod: 3 }),
+    ]),
+  );
+});

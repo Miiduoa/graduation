@@ -1552,3 +1552,27 @@ it('未知學校拆分會說明限制，並保留手填時間供確認匯入', a
     endTime: '10:50',
   });
 });
+
+it('未勾選的前列不能合併已勾選的下一列，確認後仍保留第二節數學', async () => {
+  window.history.replaceState(null, '', '/import?kind=timetable');
+  render(<PersonalImportCenter />);
+  await prepare(
+    '課程名稱,星期,開始節次,結束節次,教室\n數學,一,1,1,A101\n數學,一,2,2,A101\n英文,二,3,3,B101',
+  );
+  fireEvent.click(screen.getByRole('checkbox', { name: /第 1 筆/ }));
+  const merge = screen.getAllByRole('button', { name: '與下一節同名課程合併' })[0];
+  expect(merge).toHaveProperty('disabled', true);
+  fireEvent.click(merge);
+  expect(screen.getByRole('button', { name: '修正星期一第2節 數學' })).toBeTruthy();
+  expect(screen.getByRole('checkbox', { name: /第 1 筆/ })).toHaveProperty('checked', false);
+  expect(screen.getByRole('checkbox', { name: /第 2 筆/ })).toHaveProperty('checked', true);
+  expect(readPersonalImports(context)).toHaveLength(0);
+  fireEvent.click(screen.getByRole('button', { name: '確認匯入 2 筆' }));
+  await waitFor(() => expect(readPersonalImports(context)).toHaveLength(2));
+  expect(readPersonalImports(context)).toEqual(
+    expect.arrayContaining([
+      expect.objectContaining({ title: '數學', dayOfWeek: 1, startPeriod: 2, endPeriod: 2 }),
+      expect.objectContaining({ title: '英文', dayOfWeek: 2, startPeriod: 3, endPeriod: 3 }),
+    ]),
+  );
+});

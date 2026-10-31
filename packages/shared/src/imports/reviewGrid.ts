@@ -67,7 +67,12 @@ export function splitReviewRow(
 
 /** Only adjacent matching classes can be merged, preserving their course metadata. */
 export function nextReviewRow(rows: PersonalImportRow[], row: PersonalImportRow) {
-  if (!row.startPeriod || !row.dayOfWeek || (row.endPeriod ?? row.startPeriod) < row.startPeriod)
+  if (
+    !rows.some((item) => item.id === row.id) ||
+    !row.startPeriod ||
+    !row.dayOfWeek ||
+    (row.endPeriod ?? row.startPeriod) < row.startPeriod
+  )
     return undefined;
   return rows.find(
     (next) =>
