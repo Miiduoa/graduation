@@ -1,6 +1,6 @@
 import { act, fireEvent, render, screen, within } from '@testing-library/react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
-import SchoolLmsPage from './page';
+import SchoolLmsPage from './LmsPageClient';
 import { AcademicConnectionError } from '@/lib/academicClient';
 import { loadTronClassLms, type LmsReadonlySnapshot } from '@/lib/tronClassLms';
 
