@@ -10,6 +10,8 @@ import React, {
   type RefObject,
 } from 'react';
 import { Image, Linking, Pressable, ScrollView, Text, TextInput, View } from 'react-native';
+import { photoPdfAvailable } from './nativePhotoPdf';
+import { NativePhotoPdfEditor } from './NativePhotoPdfEditor';
 import { PublishedFeedbackLink } from '../../components/PublishedFeedbackLink';
 import { revealAssignmentSubmitArea } from './scrollAssignment';
 import {
@@ -35,6 +37,7 @@ import {
   type NuniWorkspace,
 } from '@campus/shared/src/nuni';
 import {
+  MAX_ASSIGNMENT_DOCUMENTS,
   assignmentLateOpenLabel,
   assignmentReceiptStatusLabel,
   assignmentSubmissionLate,
@@ -1761,6 +1764,7 @@ function ActivityCard({
   const kind = assignment ? '作業' : '測驗';
   const [withdrawNotice, setWithdrawNotice] = useState('');
   const [localFiles, setLocalFiles] = useState<LocalNativeFile[]>([]);
+  const [pdfOpen, setPdfOpen] = useState(false);
   const [previewUri, setPreviewUri] = useState<string | null>(null);
   const [progress, setProgress] = useState<NativeUploadProgress | null>(null);
   const lateOpen = assignment
@@ -1788,16 +1792,35 @@ function ActivityCard({
         <View style={{ gap: 8 }}>
           <Button
             label="拍照"
+            disabled={pdfOpen}
             onPress={() => void pickAssignmentCamera(localFiles).then(setLocalFiles)}
           />
           <Button
             label="相簿"
+            disabled={pdfOpen}
             onPress={() => void pickAssignmentAlbum(localFiles).then(setLocalFiles)}
           />
           <Button
             label="檔案"
+            disabled={pdfOpen}
             onPress={() => void pickAssignmentDocuments(localFiles).then(setLocalFiles)}
           />
+          {photoPdfAvailable() ? (
+            <Button
+              label="照片轉 PDF"
+              disabled={localFiles.filter((file) => file.kind === 'file').length >= MAX_ASSIGNMENT_DOCUMENTS}
+              onPress={() => setPdfOpen(true)}
+            />
+          ) : null}
+          {pdfOpen ? (
+            <NativePhotoPdfEditor
+              onCancel={() => setPdfOpen(false)}
+              onConfirm={(file) => {
+                setLocalFiles((current) => [...current, file]);
+                setPdfOpen(false);
+              }}
+            />
+          ) : null}
           {receipt && 'files' in receipt && receipt.files?.length ? (
             <Copy>重新送出會取代這次繳交；沒有選檔就改交純文字。</Copy>
           ) : null}

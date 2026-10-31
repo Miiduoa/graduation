@@ -194,13 +194,16 @@ export function binaryResponse(
   fileName: string,
   download = false,
 ): NextResponse {
-  const safeName = fileName.replace(/["\r\n]/g, '_');
+  const safeName = fileName.replace(/[^\x20-\x7e]|["\\]/g, '_') || 'download';
+  const encodedName = encodeURIComponent(fileName).replace(/[!'()*]/g, (character) =>
+    `%${character.charCodeAt(0).toString(16).toUpperCase()}`,
+  );
   return new NextResponse(Buffer.from(bytes), {
     status: 200,
     headers: {
       'Content-Type': contentType,
       'Content-Length': String(bytes.byteLength),
-      'Content-Disposition': `${download ? 'attachment' : 'inline'}; filename="${safeName}"`,
+      'Content-Disposition': `${download ? 'attachment' : 'inline'}; filename="${safeName}"; filename*=UTF-8''${encodedName}`,
       'Cache-Control': 'no-store, private',
       'X-Content-Type-Options': 'nosniff',
       'Referrer-Policy': 'no-referrer',

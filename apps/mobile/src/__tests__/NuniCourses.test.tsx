@@ -1,3 +1,4 @@
+import * as photoPdf from '../screens/nuni/nativePhotoPdf';
 import React from 'react';
 import { act, fireEvent, render, waitFor, within } from '@testing-library/react-native';
 import { NuniError, type NuniMaterial, type NuniWorkspace } from '@campus/shared/src/nuni';
@@ -1197,6 +1198,7 @@ it('does not show a student pending filter to a course teacher', async () => {
 it('hides camera and file buttons while the assignment file flag is off', async () => {
   const view = await openCourse();
   expect(view.queryByRole('button', { name: '拍照' })).toBeNull();
+  expect(view.queryByRole('button', { name: '照片轉 PDF' })).toBeNull();
   expect(view.getByLabelText('作業內容：校園訪談')).toBeTruthy();
 });
 
@@ -1209,6 +1211,7 @@ it('shows camera, album and file actions when the assignment file flag is on', a
   const view = await openCourse();
   expect(view.getByRole('button', { name: '拍照' })).toBeTruthy();
   expect(view.getByRole('button', { name: '相簿' })).toBeTruthy();
+  expect(view.getByRole('button', { name: '照片轉 PDF' })).toBeTruthy();
   expect(view.getByRole('button', { name: '檔案' })).toBeTruthy();
   expect(view.getByText('已過截止時間，現在送出會標為遲交')).toBeTruthy();
   expect(
@@ -2281,3 +2284,16 @@ it.each(['superseded'])(
     clock.mockRestore();
   },
 );
+
+it('舊版本缺少影像模組時保留既有附件操作並隱藏轉檔入口', async () => {
+  const availability = jest.spyOn(photoPdf, 'photoPdfAvailable').mockReturnValue(false);
+  try {
+    fileSubmitFlag.on = true;
+    const view = await openCourse();
+    expect(view.queryByRole('button', { name: '照片轉 PDF' })).toBeNull();
+    expect(view.getByRole('button', { name: '相簿' })).toBeTruthy();
+    expect(view.getByRole('button', { name: '檔案' })).toBeTruthy();
+  } finally {
+    availability.mockRestore();
+  }
+});

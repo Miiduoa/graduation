@@ -9,7 +9,7 @@ const production = {
   identifier: 'com.nuni.app',
   projectId: '8955b97c-802c-463c-bd1d-d5f02e30a966',
   iosClientId: '1096741064465-b8ue803rbqdpcq75t1g03o5t49vi0s4q.apps.googleusercontent.com',
-  runtimeVersion: 'campus-one-native-widget-2',
+  runtimeVersion: 'campus-one-native-photo-pdf-widget-1',
 };
 
 function buildPlan(projectRoot) {
