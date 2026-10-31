@@ -619,6 +619,7 @@ it('keeps the text-only form when file submit is off', () => {
     />,
   );
   expect(screen.queryByRole('button', { name: '拍照' })).toBeNull();
+  expect(screen.queryByRole('button', { name: '照片轉 PDF' })).toBeNull();
   expect(screen.getByLabelText('作業內容')).toBeTruthy();
 });
 

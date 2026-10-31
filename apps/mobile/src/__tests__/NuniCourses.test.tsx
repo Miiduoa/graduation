@@ -1197,6 +1197,7 @@ it('does not show a student pending filter to a course teacher', async () => {
 it('hides camera and file buttons while the assignment file flag is off', async () => {
   const view = await openCourse();
   expect(view.queryByRole('button', { name: '拍照' })).toBeNull();
+  expect(view.queryByRole('button', { name: '照片轉 PDF' })).toBeNull();
   expect(view.getByLabelText('作業內容：校園訪談')).toBeTruthy();
 });
 
@@ -1209,6 +1210,7 @@ it('shows camera, album and file actions when the assignment file flag is on', a
   const view = await openCourse();
   expect(view.getByRole('button', { name: '拍照' })).toBeTruthy();
   expect(view.getByRole('button', { name: '相簿' })).toBeTruthy();
+  expect(view.getByRole('button', { name: '照片轉 PDF' })).toBeTruthy();
   expect(view.getByRole('button', { name: '檔案' })).toBeTruthy();
   expect(view.getByText('已過截止時間，現在送出會標為遲交')).toBeTruthy();
   expect(
