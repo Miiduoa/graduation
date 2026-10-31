@@ -569,6 +569,11 @@ export function createNuniClasses(
       const value = nuniRecord(await upload(uploadPath, body, contentType));
       return parseNuniSubmissionFile(value);
     },
+    async withdrawAssignment(id: string, assignmentId: string, submittedAt: string, idempotencyKey: string) {
+      return assignment(await transport(`${path(id)}/assignments/${nuniId(assignmentId, 'cwa')}/withdraw-submission`, {
+        submittedAt, idempotencyKey,
+      }), id, assignmentId);
+    },
     async submitFiles(
       id: string,
       assignmentId: string,
@@ -673,6 +678,8 @@ export function nuniErrorMessage(error: unknown): string {
     if (error.code === 'ASSIGNMENT_FILE_REQUIRED') return '請先拍照、選相簿或選檔，再送出。';
     if (error.code === 'ASSIGNMENT_FILE_NAME_INVALID') return '檔名無法使用，請重新命名後再選一次。';
     if (error.code === 'ASSIGNMENT_FILE_SIZE_REJECTED') return '檔案大小不正確，請重新選擇。';
+    if (error.code === 'ASSIGNMENT_REVISION_CLOSED') return '已過截止時間，不能再修改或撤回繳交。';
+    if (error.code === 'ASSIGNMENT_SUBMISSION_CHANGED') return '繳交內容已有更新，請重新整理後再試。';
     if (error.code === 'ASSIGNMENT_CLOSED') return '老師已停止收件，目前不能再繳交。';
     if (error.code === 'ASSIGNMENT_FILE_SUBMIT_DISABLED') return '檔案繳交尚未開放。';
     if (error.code === 'ASSIGNMENT_FILE_UPLOAD_UNAVAILABLE')

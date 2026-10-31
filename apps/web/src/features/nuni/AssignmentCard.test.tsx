@@ -1008,3 +1008,57 @@ it('reveals the next receipt only inside the activity that saved, not a sibling 
   expect(firstScroll).not.toHaveBeenCalled();
 });
 
+
+it('withdraws a submission and keeps the cleared receipt visible after confirmation', async () => {
+  state.fileSubmit = true;
+  const item = { ...assignment, dueAt: '2099-10-31T12:00:00Z', mySubmission: submission };
+  state.request.mockResolvedValue({ ...item, mySubmission: null, submissionCount: 0 });
+  const onConfirmed = vi.fn();
+  render(
+    <AssignmentCard
+      item={item}
+      workspace={{ ...workspace, memberRole: 'student' }}
+      reload={reload}
+      onConfirmed={onConfirmed}
+    />,
+  );
+  fireEvent.click(screen.getByRole('button', { name: '撤回繳交' }));
+  await screen.findByText('已撤回，截止前可以重新繳交。');
+  expect(screen.queryByLabelText('我的繳交紀錄')).toBeNull();
+  expect(onConfirmed).toHaveBeenCalledWith(expect.objectContaining({ mySubmission: null }));
+  expect(state.request).toHaveBeenCalledWith(
+    expect.stringContaining('/withdraw-submission'),
+    state.context,
+    expect.objectContaining({ submittedAt: submission.submittedAt }),
+  );
+});
+
+it('keeps a failed withdrawal available for retry', async () => {
+  state.fileSubmit = true;
+  state.request.mockRejectedValueOnce(new NuniError(503, 'REQUEST_FAILED'));
+  render(
+    <AssignmentCard
+      item={{ ...assignment, dueAt: '2099-10-31T12:00:00Z', mySubmission: submission }}
+      workspace={{ ...workspace, memberRole: 'student' }}
+      reload={reload}
+    />,
+  );
+  fireEvent.click(screen.getByRole('button', { name: '撤回繳交' }));
+  await screen.findByRole('alert');
+  expect(screen.getByLabelText('我的繳交紀錄')).toBeTruthy();
+  expect(screen.getByRole('button', { name: '確認送出結果' })).toBeTruthy();
+});
+
+it('shows the deadline state without revision or withdrawal controls', () => {
+  state.fileSubmit = true;
+  render(
+    <AssignmentCard
+      item={{ ...assignment, mySubmission: submission }}
+      workspace={{ ...workspace, memberRole: 'student' }}
+      reload={reload}
+    />,
+  );
+  expect(screen.getByText('已過截止時間，這份繳交不能再修改或撤回。')).toBeTruthy();
+  expect(screen.queryByRole('button', { name: '撤回繳交' })).toBeNull();
+  expect(screen.queryByRole('button', { name: '更新繳交內容' })).toBeNull();
+});

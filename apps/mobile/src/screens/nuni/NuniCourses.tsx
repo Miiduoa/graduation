@@ -37,6 +37,7 @@ import {
   assignmentLateOpenLabel,
   assignmentReceiptStatusLabel,
   assignmentSubmissionLate,
+  assignmentCanRevise,
 } from '@campus/shared/src/assignmentFiles';
 import { formatTaipeiDateTime, parseTaipeiInstant } from '@campus/shared/src/taipeiTime';
 import { loadNuniStudyAgenda } from '@campus/shared/src/nuniStudyAgenda';
@@ -1705,9 +1706,11 @@ function ActivityCard({
   const prompt = assignment ? item.instructions : item.prompt;
   const student = course.memberRole === 'student';
   const active = course.state === 'active';
-  const canSubmit = student && active && item.state === 'open';
+  const canRevise = !assignment || assignmentCanRevise(item.dueAt);
+  const canSubmit = student && active && item.state === 'open' && (!assignment || !receipt || canRevise);
   const kind = assignment ? '作業' : '測驗';
   const fileSubmit = assignment && assignmentFileSubmitEnabledNative();
+  const [withdrawNotice, setWithdrawNotice] = useState('');
   const [localFiles, setLocalFiles] = useState<LocalNativeFile[]>([]);
   const [previewUri, setPreviewUri] = useState<string | null>(null);
   const [progress, setProgress] = useState<NativeUploadProgress | null>(null);
@@ -1746,6 +1749,9 @@ function ActivityCard({
             label="檔案"
             onPress={() => void pickAssignmentDocuments(localFiles).then(setLocalFiles)}
           />
+          {receipt && 'files' in receipt && receipt.files?.length ? (
+            <Copy>重新送出會取代這次繳交；沒有選檔就改交純文字。</Copy>
+          ) : null}
           <Copy>網路不穩時再送一次，不會重複交。選好的照片可以刪除或調整順序後再送出。</Copy>
           {progress ? (
             <Copy>
@@ -1802,6 +1808,15 @@ function ActivityCard({
           ) : null}
         </View>
       ) : null}
+      {withdrawNotice ? <Copy>{withdrawNotice}</Copy> : null}
+      {assignment && fileSubmit && receipt && student && active && item.state === 'open' && canRevise ? (
+        <MutationForm draftKey={`withdraw:${course.id}:${item.id}:${receipt.submittedAt}`} label="撤回繳交" fields={[]} submit={async (_values, key, stillActive) => {
+          const result = await classes.withdrawAssignment(course.id, item.id, receipt.submittedAt, key);
+          if (stillActive()) { saved(result); setWithdrawNotice('已撤回，截止前可以重新繳交。'); }
+          return '已撤回，截止前可以重新繳交。';
+        }} />
+      ) : null}
+      {assignment && receipt && !canRevise ? <Copy>已過截止時間，這份繳交不能再修改或撤回。</Copy> : null}
       {canSubmit ? (
         <MutationForm
           draftKey={`course:${course.id}:${course.memberRole}:${course.state}:${assignment ? 'assignment' : 'quiz'}:${item.id}:${item.state}`}
@@ -1844,6 +1859,7 @@ function ActivityCard({
                   setLocalFiles([]);
                   setPreviewUri(null);
                   saved(confirmed);
+                  setWithdrawNotice('');
                 }
                 return '已收到伺服器繳交紀錄。';
               } finally {
@@ -1851,9 +1867,11 @@ function ActivityCard({
               }
             }
             const confirmed = assignment
-              ? await classes.submit(course.id, item.id, body, key)
+              ? fileSubmit
+                ? await classes.submitFiles(course.id, item.id, { body, fileIds: [], idempotencyKey: key })
+                : await classes.submit(course.id, item.id, body, key)
               : await classes.submitQuiz(course.id, item.id, body, key);
-            if (stillActive()) saved(confirmed);
+            if (stillActive()) { saved(confirmed); setWithdrawNotice(''); }
             return '已收到伺服器繳交紀錄。';
           }}
         />

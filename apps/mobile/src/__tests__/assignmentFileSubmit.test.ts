@@ -13,12 +13,12 @@ import { NuniError } from '@campus/shared/src/nuni';
 const workspace = 'cw_11111111-1111-4111-8111-111111111111';
 const assignment = 'cwa_22222222-2222-4222-8222-222222222222';
 
-test('keeps text submit on the platform API and sends file traffic to the BFF', () => {
+test('sends assignment submissions and file traffic to the BFF', () => {
   expect(
     usesAssignmentFileBff(`class-workspaces/${workspace}/assignments/${assignment}/submit`, {
       body: '文字',
     }),
-  ).toBe(false);
+  ).toBe(true);
   expect(
     usesAssignmentFileBff(`class-workspaces/${workspace}/assignments/${assignment}/files/intents`, {
       originalName: 'shot.jpg',

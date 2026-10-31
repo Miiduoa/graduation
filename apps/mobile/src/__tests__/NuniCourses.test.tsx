@@ -2101,3 +2101,39 @@ it('limits empty feedback claims when the activity response may omit older recor
   await view.findByText('已載入內容中尚無回饋，較早紀錄可能未包含。');
   expect(view.queryByText('目前還沒有跨課程的老師回饋。')).toBeNull();
 });
+
+it('withdraws the current assignment receipt and returns to the submission form', async () => {
+  fileSubmitFlag.on = true;
+  assignment = { ...assignment, mySubmission: receipt(), submissionCount: 1 };
+  mockRequest.mockImplementation(async (path, context, input) => {
+    if (path.endsWith('/withdraw-submission')) {
+      assignment = { ...assignment, mySubmission: null, submissionCount: 0 };
+      return assignment;
+    }
+    return response(path, context, input);
+  });
+  const view = await openCourse();
+  fireEvent.press(view.getByRole('button', { name: '撤回繳交' }));
+  await waitFor(() => expect(view.getByText('已撤回，截止前可以重新繳交。')).toBeTruthy());
+  expect(view.queryByRole('button', { name: '撤回繳交' })).toBeNull();
+  expect(view.getByRole('button', { name: '繳交作業' })).toBeTruthy();
+  expect(mockRequest).toHaveBeenCalledWith(
+    expect.stringContaining('/withdraw-submission'),
+    mockSession.context,
+    expect.objectContaining({ submittedAt: date }),
+  );
+});
+
+it('shows the assignment deadline state with the existing receipt', async () => {
+  fileSubmitFlag.on = true;
+  assignment = {
+    ...assignment,
+    dueAt: '2020-10-31T12:00:00Z',
+    mySubmission: receipt(),
+    submissionCount: 1,
+  };
+  const view = await openCourse();
+  expect(view.getByText('已過截止時間，這份繳交不能再修改或撤回。')).toBeTruthy();
+  expect(view.queryByRole('button', { name: '撤回繳交' })).toBeNull();
+  expect(view.queryByRole('button', { name: '更新作業繳交' })).toBeNull();
+});

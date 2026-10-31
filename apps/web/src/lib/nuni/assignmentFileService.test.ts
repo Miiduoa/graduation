@@ -569,3 +569,193 @@ describe('assignment file service', () => {
     expect(result.mySubmission?.late).toBe(true);
   });
 });
+
+it.each(['memory', 'sql'] as const)(
+  'withdraws a receipt, blocks its links and accepts a new submission (%s)',
+  async (storage) => {
+    let current = assignment({ dueAt: '2026-10-22T12:00:00.000Z' });
+    let clock = new Date('2026-10-21T10:00:00.000Z');
+    const index =
+      storage === 'sql'
+        ? createSqlIndexStore(createFakeAssignmentFileSql())
+        : createMemoryIndexStore();
+    const api = createAssignmentFileService({
+      stores: { index, blobs: createTtlMemoryBlobStore() },
+      secret,
+      now: () => clock,
+      platform: {
+        workspace: async () => workspace('student'),
+        assignment: async () => current,
+        submitText: async (_actor, _workspace, _assignment, body) => {
+          current = assignment({
+            ...current,
+            submissionCount: 1,
+            mySubmission: {
+              assignmentId,
+              platformAccountId: studentId,
+              displayName: '同學',
+              body,
+              state: 'submitted',
+              submittedAt: clock.toISOString(),
+              teacherFeedback: null,
+              reviewedAt: null,
+            },
+          });
+          return current;
+        },
+      },
+    });
+    const student = actor(studentId);
+    const intent = await api.createIntent(student, workspaceId, assignmentId, {
+      originalName: '報告.jpg',
+      contentType: 'image/jpeg',
+      byteSize: 64,
+      idempotencyKey: 'withdraw-intent-key',
+    });
+    await api.putContent(student, workspaceId, assignmentId, intent.id, jpeg());
+    const submitted = await api.submitFiles(student, workspaceId, assignmentId, {
+      fileIds: [intent.id],
+      idempotencyKey: 'withdraw-submit-key',
+    });
+    const file = submitted.mySubmission!.files![0];
+    const input = {
+      submittedAt: submitted.mySubmission!.submittedAt,
+      idempotencyKey: 'withdraw-receipt-key',
+    };
+    await expect(
+      api.withdrawSubmission(student, workspaceId, assignmentId, {
+        ...input,
+        submittedAt: '2026-10-20T00:00:00.000Z',
+      }),
+    ).rejects.toMatchObject({ code: 'ASSIGNMENT_SUBMISSION_CHANGED' });
+    expect(
+      (await api.withdrawSubmission(student, workspaceId, assignmentId, input)).mySubmission,
+    ).toBeNull();
+    expect(
+      (await api.withdrawSubmission(student, workspaceId, assignmentId, input)).mySubmission,
+    ).toBeNull();
+    expect(
+      await api.hydrateSubmission(
+        student,
+        workspace('student'),
+        current,
+        current.mySubmission,
+        studentId,
+      ),
+    ).toBeNull();
+    expect(
+      await api.hydrateSubmission(
+        actor(teacherId),
+        workspace('co-teacher'),
+        current,
+        current.mySubmission,
+        teacherId,
+      ),
+    ).toBeNull();
+    await expect(
+      api.readContent(workspaceId, assignmentId, file.id, file.downloadExp, file.downloadSig),
+    ).rejects.toMatchObject({ status: 404 });
+    clock = new Date('2026-10-21T11:00:00.000Z');
+    const revised = await api.submitFiles(student, workspaceId, assignmentId, {
+      body: '改交文字說明',
+      fileIds: [],
+      idempotencyKey: 'resubmit-text-key',
+    });
+    expect(revised.mySubmission?.files).toEqual([]);
+    expect(await index.listVisible(assignmentId, studentId)).toEqual([]);
+    expect(
+      (
+        await api.hydrateSubmission(
+          student,
+          workspace('student'),
+          current,
+          current.mySubmission,
+          studentId,
+        )
+      )?.body,
+    ).toBe('改交文字說明');
+    clock = new Date('2026-10-23T00:00:00.000Z');
+    await expect(
+      api.submitFiles(student, workspaceId, assignmentId, {
+        body: '截止後修改',
+        fileIds: [],
+        idempotencyKey: 'late-revision-key',
+      }),
+    ).rejects.toMatchObject({ code: 'ASSIGNMENT_REVISION_CLOSED' });
+    await expect(
+      api.withdrawSubmission(student, workspaceId, assignmentId, {
+        submittedAt: revised.mySubmission!.submittedAt,
+        idempotencyKey: 'late-withdraw-key',
+      }),
+    ).rejects.toMatchObject({ code: 'ASSIGNMENT_REVISION_CLOSED' });
+  },
+);
+
+it('rejects another student reading a receipt and a teacher withdrawing one', async () => {
+  const receipt = (
+    await platform().submitText(actor(studentId), workspaceId, assignmentId, '內容', 'receipt-key')
+  ).mySubmission!;
+  await expect(
+    service().hydrateSubmission(
+      actor(outsiderId),
+      workspace('student'),
+      assignment(),
+      receipt,
+      outsiderId,
+    ),
+  ).rejects.toMatchObject({ status: 403 });
+  await expect(
+    service({ role: 'co-teacher' }).withdrawSubmission(
+      actor(teacherId),
+      workspaceId,
+      assignmentId,
+      { submittedAt: receipt.submittedAt, idempotencyKey: 'teacher-withdraw-key' },
+    ),
+  ).rejects.toMatchObject({ status: 403 });
+});
+
+it('restores the previous file receipt after a failed revision and replaces it on retry', async () => {
+  let current = assignment({ dueAt: '2099-10-31T12:00:00Z' });
+  let fail = false;
+  let tick = 0;
+  const index = createMemoryIndexStore();
+  const api = createAssignmentFileService({
+    secret, stores: { index, blobs: createTtlMemoryBlobStore() },
+    now: () => new Date(Date.parse('2026-10-21T10:00:00Z') + tick),
+    platform: {
+      workspace: async () => workspace('student'), assignment: async () => current,
+      submitText: async (_actor, _workspace, _assignment, body) => {
+        if (fail) throw new NuniError(503, 'REQUEST_FAILED');
+        current = { ...current, submissionCount: 1, mySubmission: {
+          assignmentId, platformAccountId: studentId, displayName: '同學', body,
+          state: 'submitted', submittedAt: new Date(Date.parse('2026-10-21T10:00:00Z') + tick).toISOString(),
+          teacherFeedback: null, reviewedAt: null,
+        } };
+        return current;
+      },
+    },
+  });
+  const student = actor(studentId);
+  async function upload(key: string) {
+    const file = await api.createIntent(student, workspaceId, assignmentId, {
+      originalName: `${key}.jpg`, contentType: 'image/jpeg', byteSize: 64, idempotencyKey: `${key}-intent-key`,
+    });
+    await api.putContent(student, workspaceId, assignmentId, file.id, jpeg());
+    return file.id;
+  }
+  const original = await upload('original');
+  const first = await api.submitFiles(student, workspaceId, assignmentId, { fileIds: [original], idempotencyKey: 'original-submit-key' });
+  tick += 1000;
+  fail = true;
+  await expect(api.submitFiles(student, workspaceId, assignmentId, { fileIds: [original], idempotencyKey: 'revision-failure-key' })).rejects.toMatchObject({ status: 503 });
+  expect((await index.getFile(original))?.submittedAt).toBe(first.mySubmission!.submittedAt);
+  const replacement = await upload('replacement');
+  await expect(api.submitFiles(student, workspaceId, assignmentId, { fileIds: [replacement], idempotencyKey: 'replace-submit-key' })).rejects.toMatchObject({ status: 503 });
+  expect((await index.listVisible(assignmentId, studentId)).map(file => file.id)).toEqual([original]);
+  expect((await index.getFile(replacement))?.submittedAt).toBeNull();
+  fail = false;
+  const revised = await api.submitFiles(student, workspaceId, assignmentId, { fileIds: [replacement], idempotencyKey: 'replace-submit-key' });
+  expect(revised.mySubmission!.files!.map(file => file.id)).toEqual([replacement]);
+  const old = first.mySubmission!.files![0];
+  await expect(api.readContent(workspaceId, assignmentId, old.id, old.downloadExp, old.downloadSig)).rejects.toMatchObject({ status: 404 });
+});

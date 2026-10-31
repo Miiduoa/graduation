@@ -28,6 +28,9 @@ export type FileRecord = {
 export type IdempotencyRow = { hash: string; payload: unknown };
 
 export type AssignmentFileIndexStore = {
+  countWithdrawn(assignmentId: string): Promise<number>;
+  isWithdrawn(assignmentId: string, accountId: string, submittedAt: string): Promise<boolean>;
+  withdraw(assignmentId: string, accountId: string, submittedAt: string): Promise<void>;
   getFile(id: string): Promise<FileRecord | null>;
   putFile(record: FileRecord): Promise<void>;
   listVisible(assignmentId: string, accountId: string): Promise<FileRecord[]>;
@@ -55,6 +58,14 @@ const FILE_COLUMNS = `id, workspace_id, assignment_id, platform_account_id, orig
   byte_size, sha256, kind, storage_key, created_at, uploaded_at, submitted_at, superseded_at, late`;
 
 export const ASSIGNMENT_FILE_SQL = {
+  countWithdrawn: `SELECT count(*)::int AS count FROM class_assignment_submission_withdrawals withdrawal
+    JOIN class_workspace_assignment_submissions submission
+    ON submission.assignment_id = withdrawal.assignment_id AND submission.platform_account_id = withdrawal.platform_account_id
+    AND submission.submitted_at = withdrawal.submitted_at WHERE withdrawal.assignment_id = $1`,
+  isWithdrawn: `SELECT 1 FROM class_assignment_submission_withdrawals
+    WHERE assignment_id = $1 AND platform_account_id = $2 AND submitted_at = $3::timestamptz`,
+  withdraw: `INSERT INTO class_assignment_submission_withdrawals (assignment_id, platform_account_id, submitted_at)
+    VALUES ($1, $2, $3::timestamptz) ON CONFLICT DO NOTHING`,
   getFile: `SELECT ${FILE_COLUMNS} FROM class_assignment_submission_files WHERE id = $1`,
   upsertFile: `INSERT INTO class_assignment_submission_files (
       id, workspace_id, assignment_id, platform_account_id, original_name, content_type,
@@ -118,8 +129,18 @@ function unavailable(code: 'ASSIGNMENT_FILE_STORE_UNAVAILABLE' | 'ASSIGNMENT_FIL
 
 export function createMemoryIndexStore(): AssignmentFileIndexStore {
   const files = new Map<string, FileRecord>();
+  const withdrawals = new Set<string>();
   const idempotency = new Map<string, IdempotencyRow>();
   return {
+    async countWithdrawn(assignmentId) {
+      return [...withdrawals].filter(key => JSON.parse(key)[0] === assignmentId).length;
+    },
+    async isWithdrawn(assignmentId, accountId, submittedAt) {
+      return withdrawals.has(JSON.stringify([assignmentId, accountId, new Date(submittedAt).toISOString()]));
+    },
+    async withdraw(assignmentId, accountId, submittedAt) {
+      withdrawals.add(JSON.stringify([assignmentId, accountId, new Date(submittedAt).toISOString()]));
+    },
     async getFile(id) {
       const row = files.get(id);
       return row ? cloneFile(row) : null;
@@ -162,6 +183,15 @@ export function createMemoryIndexStore(): AssignmentFileIndexStore {
 
 export function createSqlIndexStore(query: SqlQuery): AssignmentFileIndexStore {
   return {
+    async countWithdrawn(assignmentId) {
+      return Number((await query(ASSIGNMENT_FILE_SQL.countWithdrawn, [assignmentId]))[0]?.count ?? 0);
+    },
+    async isWithdrawn(assignmentId, accountId, submittedAt) {
+      return (await query(ASSIGNMENT_FILE_SQL.isWithdrawn, [assignmentId, accountId, submittedAt])).length > 0;
+    },
+    async withdraw(assignmentId, accountId, submittedAt) {
+      await query(ASSIGNMENT_FILE_SQL.withdraw, [assignmentId, accountId, submittedAt]);
+    },
     async getFile(id) {
       const rows = await query(ASSIGNMENT_FILE_SQL.getFile, [id]);
       return rows[0] ? fileFromRow(rows[0]) : null;
@@ -210,8 +240,13 @@ export function createSqlIndexStore(query: SqlQuery): AssignmentFileIndexStore {
 
 export function createFakeAssignmentFileSql(): SqlQuery {
   const files = new Map<string, Record<string, unknown>>();
+  const withdrawals = new Set<string>();
   const idempotency = new Map<string, Record<string, unknown>>();
   return async (sql, params = []) => {
+    if (sql === ASSIGNMENT_FILE_SQL.countWithdrawn) return [{ count: [...withdrawals].filter(key => JSON.parse(key)[0] === params[0]).length }];
+    const withdrawalKey = JSON.stringify(params);
+    if (sql === ASSIGNMENT_FILE_SQL.isWithdrawn) return withdrawals.has(withdrawalKey) ? [{ exists: 1 }] : [];
+    if (sql === ASSIGNMENT_FILE_SQL.withdraw) { withdrawals.add(withdrawalKey); return []; }
     if (sql === ASSIGNMENT_FILE_SQL.getFile) {
       const row = files.get(String(params[0]));
       return row ? [row] : [];
@@ -340,6 +375,9 @@ export function createSupabaseBlobStore(
 function productionIndexUnavailable(): AssignmentFileIndexStore {
   const fail = unavailable('ASSIGNMENT_FILE_STORE_UNAVAILABLE');
   return {
+    countWithdrawn: fail,
+    isWithdrawn: fail,
+    withdraw: fail,
     getFile: fail,
     putFile: fail,
     listVisible: fail,

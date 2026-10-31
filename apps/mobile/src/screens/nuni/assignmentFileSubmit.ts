@@ -230,7 +230,7 @@ export function assignmentFileDownloadUrl(file: NuniSubmissionFile, download = f
 export function usesAssignmentFileBff(path: string, input?: Record<string, unknown>): boolean {
   if (/^class-workspaces\/cw_[0-9a-f-]{36}\/assignments\/cwa_[0-9a-f-]{36}\/files\/intents$/.test(path))
     return true;
-  if (/^class-workspaces\/cw_[0-9a-f-]{36}\/assignments\/cwa_[0-9a-f-]{36}\/submit-files$/.test(path))
+  if (/^class-workspaces\/cw_[0-9a-f-]{36}\/assignments\/cwa_[0-9a-f-]{36}\/(?:submit|submit-files|withdraw-submission)$/.test(path))
     return true;
   if (!input && /^class-workspaces\/cw_[0-9a-f-]{36}\/assignments$/.test(path)) return true;
   if (

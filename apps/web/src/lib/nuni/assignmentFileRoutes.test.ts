@@ -363,3 +363,40 @@ describe('assignment file BFF flag and contracts', () => {
     expect(guessed.status).toBe(404);
   });
 });
+
+it.each(['student', 'co-teacher', 'outsider'])('checks withdrawal permissions for %s', async (role) => {
+  vi.stubEnv('ASSIGNMENT_FILE_SUBMIT_ENABLED', 'true');
+  const mine = {
+    assignmentId, platformAccountId: accountId, displayName: '同學', body: '繳交內容',
+    state: 'submitted', submittedAt: timestamp, teacherFeedback: null, reviewedAt: null,
+  };
+  fetcher.mockImplementation(async (url: string) => {
+    const target = String(url);
+    if (target.endsWith('/sessions/current')) return response(principal);
+    if (target.endsWith(`/class-workspaces/${id}`)) return role === 'outsider'
+      ? response({ error: { code: 'CLASS_WORKSPACE_FORBIDDEN' } }, 403)
+      : response({ ...workspace, memberRole: role });
+    if (target.endsWith('/assignments')) return response({ assignments: [{ ...assignment, dueAt: '2099-10-31T12:00:00Z', mySubmission: mine, submissionCount: 1 }] });
+    return response({ error: { code: 'NOT_FOUND' } }, 404);
+  });
+  const result = await invoke(`assignments/${assignmentId}/withdraw-submission`, {
+    input: { submittedAt: timestamp, idempotencyKey: 'withdraw-route-key' }, cookie: false, platform: true,
+  });
+  expect(result.status).toBe(role === 'student' ? 200 : 403);
+  if (role === 'student') {
+    expect((await result.json()).mySubmission).toBeNull();
+    const listed = await invoke('assignments', { cookie: false, platform: true });
+    const page = await listed.json();
+    expect(page.assignments[0].mySubmission).toBeNull();
+    expect(page.assignments[0].submissionCount).toBe(0);
+  }
+});
+
+it('requires authentication before accepting a withdrawal', async () => {
+  vi.stubEnv('ASSIGNMENT_FILE_SUBMIT_ENABLED', 'true');
+  const result = await invoke(`assignments/${assignmentId}/withdraw-submission`, {
+    input: { submittedAt: timestamp, idempotencyKey: 'withdraw-anonymous-key' }, cookie: false,
+  });
+  expect(result.status).toBe(401);
+  expect(fetcher).not.toHaveBeenCalled();
+});
