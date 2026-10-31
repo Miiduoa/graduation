@@ -1,3 +1,4 @@
+import { checkPhotoBytes, checkPhotoPixels } from './photoPdfBudget';
 import { assertAssignmentFileSize, MAX_ASSIGNMENT_IMAGES } from './assignmentFiles';
 
 export type PdfPhoto = { jpeg: Uint8Array; width: number; height: number };
@@ -38,6 +39,13 @@ function concat(chunks: Uint8Array[]): Uint8Array {
 // A small PDF writer shared by both clients; no original photo file is embedded.
 export function createPhotoPdf(photos: PdfPhoto[]): Uint8Array {
   if (!photos.length || photos.length > MAX_ASSIGNMENT_IMAGES) throw new Error('請選 1–8 張照片。');
+  let pixels = 0;
+  let imageBytes = 0;
+  for (const photo of photos) {
+    pixels = checkPhotoPixels(photo.width, photo.height, pixels);
+    imageBytes += photo.jpeg.length;
+    checkPhotoBytes(imageBytes);
+  }
   const encode = (value: string) => Uint8Array.from(value, (char) => char.charCodeAt(0));
   const chunks: Uint8Array[] = [];
   const offsets = [0];

@@ -65,7 +65,7 @@ test('production resolves with public service configuration and no school accoun
   assert.equal(app.android.package, 'com.nuni.app');
   assert.equal(app.ios.bundleIdentifier, 'com.nuni.app');
   assert.equal(app.extra.eas.projectId, '8955b97c-802c-463c-bd1d-d5f02e30a966');
-  assert.equal(app.runtimeVersion, 'campus-one-native-google-1');
+  assert.equal(app.runtimeVersion, 'campus-one-native-photo-pdf-1');
   assert.equal(app.updates.url, `https://u.expo.dev/${app.extra.eas.projectId}`);
   assert.equal(app.extra.firebase.projectId, 'campus-one-tw');
   assert.equal(app.extra.legalBaseUrl, 'https://nuni.tw');
@@ -151,4 +151,12 @@ test('optional native Maps configuration and Google bundle validation still work
   const result = evaluate({ IOS_BUNDLE_IDENTIFIER: 'com.campus.app.dev' });
   assert.equal(result.status, 1);
   assert.match(result.stderr, /registered production Google iOS client requires com.nuni.app/);
+});
+
+test('預覽與正式版使用獨立且包含影像模組的新執行版本', () => {
+  const preview = config({ APP_ENV: 'preview' });
+  assert.equal(preview.runtimeVersion, 'campus-preview-native-photo-pdf-1');
+  assert.notEqual(preview.runtimeVersion, config().runtimeVersion);
+  const updates = readFileSync(resolve(appRoot, 'ios/mobile/Supporting/Expo.plist'), 'utf8');
+  assert.ok(updates.includes(preview.runtimeVersion));
 });

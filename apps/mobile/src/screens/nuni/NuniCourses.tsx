@@ -10,6 +10,7 @@ import React, {
   type RefObject,
 } from 'react';
 import { Image, Linking, Pressable, ScrollView, Text, TextInput, View } from 'react-native';
+import { photoPdfAvailable } from './nativePhotoPdf';
 import { NativePhotoPdfEditor } from './NativePhotoPdfEditor';
 import { PublishedFeedbackLink } from '../../components/PublishedFeedbackLink';
 import { revealAssignmentSubmitArea } from './scrollAssignment';
@@ -1804,11 +1805,13 @@ function ActivityCard({
             disabled={pdfOpen}
             onPress={() => void pickAssignmentDocuments(localFiles).then(setLocalFiles)}
           />
-          <Button
-            label="照片轉 PDF"
-            disabled={localFiles.filter((file) => file.kind === 'file').length >= MAX_ASSIGNMENT_DOCUMENTS}
-            onPress={() => setPdfOpen(true)}
-          />
+          {photoPdfAvailable() ? (
+            <Button
+              label="照片轉 PDF"
+              disabled={localFiles.filter((file) => file.kind === 'file').length >= MAX_ASSIGNMENT_DOCUMENTS}
+              onPress={() => setPdfOpen(true)}
+            />
+          ) : null}
           {pdfOpen ? (
             <NativePhotoPdfEditor
               onCancel={() => setPdfOpen(false)}

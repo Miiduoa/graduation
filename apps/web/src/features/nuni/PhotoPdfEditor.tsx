@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { formatAssignmentFileSize, moveAssignmentFile } from '@campus/shared/src/assignmentFiles';
-import { buildPhotoPdf, type PhotoPage } from './photoPdf';
+import { buildPhotoPdf, validatePhotoPages, type PhotoPage } from './photoPdf';
 import styles from './PhotoPdfEditor.module.css';
 
 export function PhotoPdfEditor({
@@ -12,21 +12,27 @@ export function PhotoPdfEditor({
   onConfirm: (file: File) => void;
   onCancel: () => void;
 }) {
+  const conversion = useRef<AbortController | null>(null);
   const [pages, setPages] = useState<PhotoPage[]>([]);
   const [preview, setPreview] = useState<{ file: File; url: string } | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
-  const urls = useRef<string[]>([]);
+  const urls = useRef<Set<string>>(new Set());
+  function release(url: string) {
+    if (urls.current.delete(url)) URL.revokeObjectURL(url);
+  }
   const active = useRef(true);
   useEffect(() => {
     active.current = true;
     return () => {
       active.current = false;
-      urls.current.forEach(URL.revokeObjectURL);
+      conversion.current?.abort();
+      urls.current.forEach((url) => URL.revokeObjectURL(url));
+      urls.current.clear();
     };
   }, []);
   function edit(next: PhotoPage[]) {
-    if (preview) URL.revokeObjectURL(preview.url);
+    if (preview) release(preview.url);
     setPreview(null);
     setPages(next);
     setError('');
@@ -34,32 +40,57 @@ export function PhotoPdfEditor({
   return (
     <section className={styles.editor} aria-label="照片轉 PDF">
       <div className={styles.heading}>
-        <strong>把這次作業裝成一本</strong>
-        <button type="button" onClick={onCancel}>
+        <strong>將照片合併成 PDF</strong>
+        <button
+          type="button"
+          onClick={() => {
+            conversion.current?.abort();
+            active.current = false;
+            onCancel();
+          }}
+        >
           取消製作
         </button>
       </div>
-      <p>選 1–8 張照片。由上往下就是 PDF 頁序，先轉正、排好，再看一次。</p>
+      <p>
+        選 1–8 張 JPEG 或 PNG 照片。每張最多 1200 萬像素，合計 3200 萬像素。由上往下就是 PDF
+        頁序，先轉正、排好，再看一次。
+      </p>
       <label className={styles.pick}>
         選照片
         <input
           aria-label="選擇 PDF 照片"
           type="file"
-          accept="image/*"
+          accept="image/jpeg,image/png"
           multiple
           disabled={busy}
-          onChange={(event) => {
+          onChange={async (event) => {
             const files = Array.from(event.target.files ?? []);
+            if (!files.length) return;
             event.target.value = '';
             if (files.length + pages.length > 8) {
               setError('一本最多 8 頁，請減少照片後再選。');
               return;
             }
+            setBusy(true);
+            try {
+              await validatePhotoPages([
+                ...pages,
+                ...files.map((file) => ({ key: '', file, url: '', rotation: 0 })),
+              ]);
+              if (!active.current) return;
+            } catch (cause) {
+              if (active.current)
+                setError(cause instanceof Error ? cause.message : '無法讀取照片。');
+              return;
+            } finally {
+              if (active.current) setBusy(false);
+            }
             edit([
               ...pages,
               ...files.map((file) => {
                 const url = URL.createObjectURL(file);
-                urls.current.push(url);
+                urls.current.add(url);
                 return { key: url, file, url, rotation: 0 };
               }),
             ]);
@@ -109,7 +140,10 @@ export function PhotoPdfEditor({
               <button
                 type="button"
                 disabled={busy}
-                onClick={() => edit(pages.filter((p) => p.key !== page.key))}
+                onClick={() => {
+                  release(page.url);
+                  edit(pages.filter((p) => p.key !== page.key));
+                }}
               >
                 刪頁
               </button>
@@ -124,24 +158,28 @@ export function PhotoPdfEditor({
         onClick={async () => {
           setBusy(true);
           setError('');
+          const controller = new AbortController();
+          conversion.current = controller;
           try {
-            const file = await buildPhotoPdf(pages);
+            const file = await buildPhotoPdf(pages, controller.signal);
             if (!active.current) return;
-            if (preview) URL.revokeObjectURL(preview.url);
+            if (preview) release(preview.url);
             const url = URL.createObjectURL(file);
-            urls.current.push(url);
+            urls.current.add(url);
             setPreview({ file, url });
-          } catch {
+          } catch (cause) {
             if (active.current)
               setError(
-                '無法製作 PDF，可能照片無法讀取或成品超過 20 MiB。請刪減照片再試，不會自動降低畫質。',
+                cause instanceof Error
+                  ? `${cause.message}（成品上限 20 MiB）`
+                  : '無法製作 PDF，可能照片無法讀取或成品超過 20 MiB。請刪減照片再試，不會自動降低畫質。',
               );
           } finally {
             if (active.current) setBusy(false);
           }
         }}
       >
-        {busy ? '正在裝訂…' : '預覽 PDF'}
+        {busy ? '正在製作 PDF…' : '預覽 PDF'}
       </button>
       {preview ? (
         <div className={styles.proof}>

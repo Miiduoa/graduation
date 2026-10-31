@@ -406,7 +406,9 @@ export default ({ config }: any) => {
           url: `https://u.expo.dev/${easProjectId}`,
         }
       : undefined,
-    // A new native Google module needs a new binary/runtime before any OTA update.
-    runtimeVersion: isProduction ? 'campus-one-native-google-1' : { policy: 'sdkVersion' },
+    // 新增原生影像模組後，預覽與正式版都需使用新安裝檔及獨立執行版本。
+    runtimeVersion: isProduction
+      ? 'campus-one-native-photo-pdf-1'
+      : 'campus-preview-native-photo-pdf-1',
   };
 };

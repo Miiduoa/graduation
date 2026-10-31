@@ -2,6 +2,8 @@ import { buildNativePhotoPdf } from '../screens/nuni/nativePhotoPdf';
 import { createPhotoPdf } from '@campus/shared/src/photoPdf';
 import * as ImageManipulator from 'expo-image-manipulator';
 
+let mockWidth = 20;
+let mockHeight = 30;
 const mockWrites = jest.fn();
 const mockDeletes = jest.fn();
 let mockPixels = new Uint8Array([
@@ -12,6 +14,15 @@ jest.mock('expo-file-system', () => ({
   File: class {
     uri: string;
     exists = true;
+    get size() {
+      return this.uri.endsWith('-rendered') || this.uri === 'large' ? mockPixels.length : 100;
+    }
+    slice() {
+      const header = new Uint8Array([255, 216, 255, 192, 0, 8, 8, 0, 30, 0, 20, 3]);
+      new DataView(header.buffer).setUint16(9, mockWidth);
+      new DataView(header.buffer).setUint16(7, mockHeight);
+      return { arrayBuffer: async () => header.buffer };
+    }
     constructor(...paths: string[]) {
       this.uri = paths.join('/');
     }
@@ -89,4 +100,45 @@ test('cleans up and refuses an oversized document', async () => {
   expect(mockWrites).not.toHaveBeenCalled();
   expect(mockDeletes).toHaveBeenCalledWith('large');
   mockPixels = original;
+});
+
+test('cancellation during native conversion cleans the current image and never starts another page', async () => {
+  const controller = new AbortController();
+  jest.mocked(ImageManipulator.manipulateAsync).mockImplementationOnce(async () => {
+    controller.abort();
+    return { uri: 'cancelled-rendered', width: 20, height: 30 };
+  });
+  await expect(
+    buildNativePhotoPdf([page('a', 0), page('b', 0)], controller.signal),
+  ).rejects.toThrow('取消');
+  expect(ImageManipulator.manipulateAsync).toHaveBeenCalledTimes(1);
+  expect(mockDeletes).toHaveBeenCalledWith('cancelled-rendered');
+  expect(mockWrites).not.toHaveBeenCalled();
+});
+
+test('oversized first page never starts the second conversion', async () => {
+  const original = mockPixels;
+  try {
+    mockPixels = new Uint8Array(20 * 1024 * 1024);
+    await expect(buildNativePhotoPdf([page('a', 0), page('b', 0)])).rejects.toThrow();
+    expect(ImageManipulator.manipulateAsync).toHaveBeenCalledTimes(1);
+    expect(mockDeletes).toHaveBeenCalledWith('a-rendered');
+  } finally {
+    mockPixels = original;
+  }
+});
+
+test('來源像素預算在呼叫原生轉檔前拒絕過大的照片與整批工作量', async () => {
+  try {
+    mockWidth = 8064;
+    mockHeight = 6048;
+    await expect(buildNativePhotoPdf([page('a', 0)])).rejects.toThrow('處理預算');
+    mockWidth = 4000;
+    mockHeight = 3000;
+    await expect(buildNativePhotoPdf(Array(3).fill(page('a', 0)))).rejects.toThrow('處理預算');
+    expect(ImageManipulator.manipulateAsync).not.toHaveBeenCalled();
+  } finally {
+    mockWidth = 20;
+    mockHeight = 30;
+  }
 });

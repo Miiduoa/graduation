@@ -1,3 +1,4 @@
+import * as photoPdf from '../screens/nuni/nativePhotoPdf';
 import React from 'react';
 import { act, fireEvent, render, waitFor, within } from '@testing-library/react-native';
 import { NuniError, type NuniMaterial, type NuniWorkspace } from '@campus/shared/src/nuni';
@@ -2283,3 +2284,16 @@ it.each(['superseded'])(
     clock.mockRestore();
   },
 );
+
+it('舊版本缺少影像模組時保留既有附件操作並隱藏轉檔入口', async () => {
+  const availability = jest.spyOn(photoPdf, 'photoPdfAvailable').mockReturnValue(false);
+  try {
+    fileSubmitFlag.on = true;
+    const view = await openCourse();
+    expect(view.queryByRole('button', { name: '照片轉 PDF' })).toBeNull();
+    expect(view.getByRole('button', { name: '相簿' })).toBeTruthy();
+    expect(view.getByRole('button', { name: '檔案' })).toBeTruthy();
+  } finally {
+    availability.mockRestore();
+  }
+});

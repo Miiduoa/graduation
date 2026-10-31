@@ -1,16 +1,38 @@
 import { File, Paths } from 'expo-file-system';
-import * as ImageManipulator from 'expo-image-manipulator';
+import {
+  checkPhotoBytes,
+  checkPhotoCancellation,
+  checkPhotoPixels,
+  photoDimensions,
+  PHOTO_HEADER_BYTES,
+} from '@campus/shared/src/photoPdfBudget';
+
 import { createPhotoPdf, type PdfPhoto } from '@campus/shared/src/photoPdf';
 import type { LocalNativeFile } from './assignmentFileSubmit';
 
+export function photoPdfAvailable() {
+  try {
+    return Boolean(require('expo-image-manipulator').manipulateAsync);
+  } catch {
+    return false;
+  }
+}
+
 export type NativePhotoPage = { file: LocalNativeFile; rotation: number };
 
-export async function buildNativePhotoPdf(pages: NativePhotoPage[]) {
+export async function buildNativePhotoPdf(pages: NativePhotoPage[], signal?: AbortSignal) {
+  checkPhotoCancellation(signal);
+  if (!photoPdfAvailable()) throw new Error('此版本尚未支援照片轉 PDF，請更新應用程式。');
+  const ImageManipulator: typeof import('expo-image-manipulator') = require('expo-image-manipulator');
+  await validateNativePhotoPages(pages, signal);
+  checkPhotoCancellation(signal);
   const temporary: File[] = [];
   try {
     const photos: PdfPhoto[] = [];
     const previews: string[] = [];
+    let bytesSoFar = 0;
     for (const page of pages) {
+      checkPhotoCancellation(signal);
       const image = await ImageManipulator.manipulateAsync(
         page.file.uri,
         [{ rotate: page.rotation }],
@@ -18,9 +40,16 @@ export async function buildNativePhotoPdf(pages: NativePhotoPage[]) {
       );
       const file = new File(image.uri);
       temporary.push(file);
+      checkPhotoCancellation(signal);
+      checkPhotoPixels(image.width, image.height);
+      checkPhotoBytes(file.size + bytesSoFar);
       previews.push(image.uri);
+      const jpeg = new Uint8Array(await file.arrayBuffer());
+      checkPhotoCancellation(signal);
+      bytesSoFar += jpeg.length;
+      checkPhotoBytes(bytesSoFar);
       photos.push({
-        jpeg: new Uint8Array(await file.arrayBuffer()),
+        jpeg,
         width: image.width,
         height: image.height,
       });
@@ -51,5 +80,20 @@ export async function buildNativePhotoPdf(pages: NativePhotoPage[]) {
   } catch (error) {
     for (const file of temporary) if (file.exists) file.delete();
     throw error;
+  }
+}
+
+export async function validateNativePhotoPages(pages: NativePhotoPage[], signal?: AbortSignal) {
+  if (!pages.length || pages.length > 8) throw new Error('請選 1–8 張照片。');
+  let pixels = 0;
+  for (const page of pages) {
+    checkPhotoCancellation(signal);
+    const source = new File(page.file.uri);
+    checkPhotoBytes(source.size);
+    const dimensions = photoDimensions(
+      new Uint8Array(await source.slice(0, PHOTO_HEADER_BYTES).arrayBuffer()),
+    );
+    checkPhotoCancellation(signal);
+    pixels = checkPhotoPixels(dimensions.width, dimensions.height, pixels);
   }
 }
