@@ -1,0 +1,43 @@
+.card {
+  margin-top: 20px;
+  padding: 24px;
+  display: grid;
+  gap: 18px;
+  min-width: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: var(--text);
+  overflow-wrap: anywhere;
+}
+.heading { display: grid; gap: 8px; }
+.eyebrow { color: var(--muted); font-size: 12px; font-weight: 600; letter-spacing: .04em; }
+.heading h4 { margin: 0; font-size: 20px; line-height: 1.5; }
+.heading p, .result p, .warning, .meta, .footnote, .notice { margin: 0; font-size: 13px; line-height: 1.8; }
+.heading p, .meta, .footnote { color: var(--muted); }
+.result { display: grid; gap: 8px; padding: 18px; border-radius: var(--radius-sm); border: 1px solid var(--border); background: var(--panel); }
+.result span { font-size: 13px; line-height: 1.8; }
+.result strong { font-size: 15px; line-height: 1.6; }
+.warning { border-left: 3px solid var(--accent); padding: 10px 14px; background: var(--panel); }
+.primary, .secondary {
+  min-height: 48px;
+  padding: 12px 18px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  font: inherit;
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 1.6;
+  color: var(--text);
+  cursor: pointer;
+}
+.primary { background: var(--accent-soft, var(--panel)); }
+.secondary { background: var(--surface); }
+.primary:disabled, .secondary:disabled { cursor: not-allowed; opacity: .55; }
+.card button:focus-visible, .card input:focus-visible, .heading h4:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+.release { display: grid; gap: 14px; border-top: 1px solid var(--border); padding-top: 18px; }
+.release label { display: flex; align-items: flex-start; gap: 10px; font-size: 13px; line-height: 1.8; min-height: 44px; }
+.release input { margin: 5px 0 0; width: 18px; height: 18px; flex-shrink: 0; accent-color: var(--accent); }
+.footnote { border-top: 1px solid var(--border); padding-top: 16px; font-size: 12px; }
+.notice { padding: 12px; border: 1px solid var(--border); border-radius: var(--radius-sm); }
+@media (max-width: 480px) { .card { padding: 16px; gap: 16px; } .heading h4 { font-size: 18px; } }

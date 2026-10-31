@@ -1,10 +1,16 @@
+import { loadCorrectionReview } from '@/lib/attendanceCorrectionReview';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, expect, it, vi } from 'vitest';
 import { AttendanceCorrectionPanel } from './AttendanceCorrectionPanel';
 import { correctCourseAttendance, loadAttendanceCorrections, loadCourseAttendanceRoster } from '@/lib/courseAttendance';
 import { loadAttendanceRegister } from '@/lib/loadAttendanceRegister';
 
+vi.mock('@/lib/attendanceCorrectionReview', () => ({
+  correctionReviewScope: (course: string, session: string, uid: string) => JSON.stringify([course, session, uid]),
+  loadCorrectionReview: vi.fn(),
+}));
 vi.mock('@/lib/courseAttendance', () => ({
+  attendanceActorUid: () => 'teacher',
   attendanceError: () => '無法核實',
   correctCourseAttendance: vi.fn(), loadAttendanceCorrections: vi.fn(), loadCourseAttendanceRoster: vi.fn(),
 }));
@@ -14,6 +20,11 @@ const students = Array.from({ length: 91 }, (_, index) => ({
 }));
 beforeEach(() => {
   vi.clearAllMocks();
+  vi.mocked(loadCorrectionReview).mockImplementation(async (course, session, uid) => ({
+    scope: JSON.stringify([course, session, uid]), revision: null, active: false,
+    row: { uid, displayName: '核對學生', studentId: uid, status: 'unconfirmed', source: null,
+      checkedInAt: null, correctedAt: null },
+  }));
   vi.mocked(loadCourseAttendanceRoster).mockResolvedValue(students);
   vi.mocked(loadAttendanceCorrections).mockResolvedValue([]);
   vi.mocked(correctCourseAttendance).mockResolvedValue({ success: true, reused: false, status: 'present' });
@@ -33,6 +44,7 @@ it('opens the exact student beyond the old 80-option limit without writing until
   expect(screen.getByRole('option', { name: '學生90（S90）' })).toBeTruthy();
   expect(correctCourseAttendance).not.toHaveBeenCalled();
   fireEvent.change(screen.getByLabelText('更正原因'), { target: { value: '授課教師現場核對出席' } });
+  await waitFor(() => expect(screen.getByRole('button', { name: '確認並保存更正' }).hasAttribute('disabled')).toBe(false));
   fireEvent.click(screen.getByRole('button', { name: '確認並保存更正' }));
   await waitFor(() => expect(correctCourseAttendance).toHaveBeenCalledWith(expect.objectContaining({ studentUid: 's90' })));
   await waitFor(() => expect(loadAttendanceRegister).toHaveBeenCalledTimes(2));
