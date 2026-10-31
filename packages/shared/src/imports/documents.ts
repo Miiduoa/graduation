@@ -1,4 +1,4 @@
-import { parsePersonalImport } from './parser';
+import { parsePersonalImport, personalImportHeaderField } from './parser';
 import {
   PERSONAL_IMPORT_MAX_ROWS,
   PERSONAL_IMPORT_MAX_TEXT_LENGTH,
@@ -173,7 +173,10 @@ export function parsePersonalImportDocument(
     ...options,
     source: { type: 'file', name: `${doc.name} · ${section.label}`.slice(0, 1_000) },
   });
-  if (result.rows.some((row) => row.source.line === 1))
+  if (
+    selected[0].cells.filter((cell) => personalImportHeaderField(cell)).length < 2 ||
+    result.rows.some((row) => row.source.line === 1)
+  )
     throw new PersonalImportDocumentError(
       '這一列沒有可辨識的欄位名稱，請選擇包含課程名稱、學分、成績或日期的標題列。',
       'header',
