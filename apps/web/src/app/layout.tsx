@@ -1,3 +1,5 @@
+import { SchoolLmsReadonlyProvider } from '@/components/SchoolLmsReadonlyProvider';
+import { isSchoolLmsReadonlyEnabled } from '@/lib/server/schoolLmsReadonly';
 import type { Metadata, Viewport } from 'next';
 import { ServiceWorkerRegistration } from '@/components/ServiceWorkerRegistration';
 import { AuthProvider } from '@/components/AuthGuard';
@@ -74,7 +76,9 @@ export default function RootLayout({
         <ServiceWorkerRegistration />
         <AuthProvider>
           <ToastProvider position="top-center">
-            <CampusProviders>{children}</CampusProviders>
+            <SchoolLmsReadonlyProvider enabled={isSchoolLmsReadonlyEnabled()}>
+              <CampusProviders>{children}</CampusProviders>
+            </SchoolLmsReadonlyProvider>
           </ToastProvider>
         </AuthProvider>
       </body>

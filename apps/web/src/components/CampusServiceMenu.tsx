@@ -1,11 +1,13 @@
 'use client';
 
+import { useSchoolLmsReadonlyEnabled } from '@/components/SchoolLmsReadonlyProvider';
+
 import Link from 'next/link';
 import { CampusIcon } from './CampusIcon';
 import { usePathname, useSearchParams } from 'next/navigation';
 import { useEffect, useId, useRef, useState } from 'react';
 import {
-  CAMPUS_SERVICES,
+  visibleCampusServices,
   SERVICE_CATEGORIES,
   searchCampusServices,
   type ServiceCategory,
@@ -27,9 +29,10 @@ const categoryLabels: Record<ServiceCategory, string> = {
 };
 
 export function CampusServiceMenu() {
+  const schoolLmsEnabled = useSchoolLmsReadonlyEnabled();
   const pathname = usePathname();
   const params = useSearchParams();
-  const currentService = CAMPUS_SERVICES.filter((service) =>
+  const currentService = visibleCampusServices(schoolLmsEnabled).filter((service) =>
     campusServiceMatches(service.href, pathname, params),
   ).sort((first, second) => second.href.length - first.href.length)[0]?.href;
   const menu = useRef<HTMLDetailsElement>(null);
@@ -71,7 +74,7 @@ export function CampusServiceMenu() {
       document.removeEventListener('keydown', openSearch);
     };
   }, []);
-  const matches = searchCampusServices(query, category);
+  const matches = searchCampusServices(query, category, schoolLmsEnabled);
   const filtering = !!query.trim() || category !== 'all';
   const context = useCampusNavigationSearch(params);
   const href = (path: string) => campusServiceHref(path, context);

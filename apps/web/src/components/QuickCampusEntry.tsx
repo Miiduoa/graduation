@@ -1,5 +1,7 @@
 'use client';
 
+import { useSchoolLmsReadonlyEnabled } from '@/components/SchoolLmsReadonlyProvider';
+
 import Link from 'next/link';
 import { useEffect, useRef, useState } from 'react';
 import type { CampusSemanticResult } from '@campus/shared/src/campusSemantic';
@@ -9,7 +11,7 @@ import { useOptionalSelectedSchool } from './SelectedSchoolProvider';
 import { VoiceDictationButton } from './VoiceDictationButton';
 import { CampusIcon } from './CampusIcon';
 import { getQuickCampusActions, QUICK_CAMPUS_EXAMPLES } from '@/lib/quickCampusActions';
-import { CAMPUS_SERVICES } from '@/lib/campusServices';
+import { visibleCampusServices } from '@/lib/campusServices';
 import { interpretCampusRequest } from '@/lib/campusIntentClient';
 import styles from './QuickCampusEntry.module.css';
 
@@ -21,6 +23,7 @@ type Analysis = {
 };
 
 export function QuickCampusEntry() {
+  const schoolLmsEnabled = useSchoolLmsReadonlyEnabled();
   const selection = useOptionalSelectedSchool();
   const { user } = useAuth();
   const selected = selection?.selectedSchool;
@@ -44,11 +47,11 @@ export function QuickCampusEntry() {
   const aiResult = active?.state === 'ready' ? active.result : null;
   const semanticActions = aiResult?.status === 'understood'
     ? aiResult.destinations.flatMap((href) => {
-        const service = CAMPUS_SERVICES.find((row) => row.href === href);
+        const service = visibleCampusServices(schoolLmsEnabled).find((row) => row.href === href);
         return service ? [service] : [];
       })
     : null;
-  const actions = semanticActions || getQuickCampusActions(phrase);
+  const actions = semanticActions || getQuickCampusActions(phrase, schoolLmsEnabled);
   const route = (href: string) => campusServiceHref(href, campusSearch);
   const searchHref = route('/search' + (phrase ? '?q=' + encodeURIComponent(phrase.slice(0, 100)) : ''));
   const assistantHref = route('/ai-assistant?q=' + encodeURIComponent(phrase.slice(0, 4000)));

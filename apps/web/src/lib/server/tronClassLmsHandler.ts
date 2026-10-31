@@ -1,3 +1,4 @@
+import { isSchoolLmsReadonlyEnabled } from './schoolLmsReadonly';
 import { LMS_CONNECTING_CODE } from '../schoolLoginTimeouts';
 import type { CallableRequest } from './groupInviteHandlers';
 import { HttpsError } from './httpsError';
@@ -408,6 +409,9 @@ export function createTronClassLmsHandler({
   now?: () => number;
 }) {
   return async (request: CallableRequest): Promise<LmsReadonlySnapshot> => {
+    if (!isSchoolLmsReadonlyEnabled()) {
+      throw new HttpsError('not-found', '玩課雲唯讀功能未啟用。');
+    }
     const uid = request.auth?.uid;
     if (!uid) throw new HttpsError('unauthenticated', '請先登入校園帳號。');
     if (request.auth?.token?.schoolId !== 'pu') {
