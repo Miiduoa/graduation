@@ -1245,3 +1245,31 @@ it.each(['superseded'])(
     clock.mockRestore();
   },
 );
+
+it('採用新同步的撤回結果並保留尚未送出的草稿', async () => {
+  const mine = { ...submission, platformAccountId: 'pa_11111111-1111-4111-8111-111111111111' };
+  state.request.mockResolvedValueOnce({ ...assignment, mySubmission: mine });
+  const studentWorkspace: NuniWorkspace = { ...workspace, memberRole: 'student' };
+  const view = render(
+    <AssignmentCard
+      item={assignment}
+      workspace={studentWorkspace}
+      reload={reload}
+      syncVersion="first"
+    />,
+  );
+  fireEvent.change(screen.getByLabelText('作業內容'), { target: { value: mine.body } });
+  fireEvent.submit(screen.getByLabelText('作業內容').closest('form')!);
+  await screen.findByText('繳交內容已儲存，老師現在可以查看。');
+  fireEvent.change(screen.getByLabelText('作業內容'), { target: { value: '還沒寫完的補充' } });
+  view.rerender(
+    <AssignmentCard
+      item={assignment}
+      workspace={studentWorkspace}
+      reload={reload}
+      syncVersion="second"
+    />,
+  );
+  expect(screen.queryByRole('region', { name: '我的繳交紀錄' })).toBeNull();
+  expect((screen.getByLabelText('作業內容') as HTMLTextAreaElement).value).toBe('還沒寫完的補充');
+});

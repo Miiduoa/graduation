@@ -40,6 +40,7 @@ import styles from './CourseLearning.module.css';
 
 type Props = {
   item: NuniAssignment;
+  syncVersion?: string | null;
   workspace: NuniWorkspace;
   reload: () => void;
   onConfirmed?: (assignment: NuniAssignment) => void;
@@ -100,13 +101,18 @@ export function AssignmentCard(props: Props) {
   );
 }
 
-function Assignment({ item, workspace, onConfirmed }: Props) {
+function Assignment({ item, workspace, onConfirmed, syncVersion }: Props) {
   const { session } = useNuniSession();
   const classes = useClasses();
   const fileSubmit = session?.assignmentFileSubmit === true;
   const [withdrawNotice, setWithdrawNotice] = useState('');
   const [withdrawnAt, setWithdrawnAt] = useState<string | null>(null);
-  const [saved, setSaved] = useState<NuniAssignment | null>(null);
+  const [savedSnapshot, setSavedSnapshot] = useState<{
+    value: NuniAssignment;
+    version: string | null | undefined;
+  } | null>(null);
+  const saved = savedSnapshot?.version === syncVersion ? savedSnapshot?.value ?? null : null;
+  const setSaved = (value: NuniAssignment) => setSavedSnapshot({ value, version: syncVersion });
   const [localFiles, setLocalFiles] = useState<LocalAssignmentFile[]>([]);
   const fileOperation = useRef<AssignmentFileOperation>({});
   const [recovering, setRecovering] = useState(false);
@@ -125,6 +131,33 @@ function Assignment({ item, workspace, onConfirmed }: Props) {
   const request = useRef(0);
   const submissionsRef = useRef<NuniSubmission[] | null>(null);
   const receiptNodes = useRef(new Map<string, HTMLElement | null>());
+  const liveReceiptRead = useRef({ classes, opened: false });
+  useEffect(() => {
+    liveReceiptRead.current = { classes, opened: submissions !== null };
+  });
+  useEffect(() => {
+    if (!syncVersion || !liveReceiptRead.current.opened || workspace.memberRole === 'student')
+      return;
+    let active = true;
+    const run = ++request.current;
+    void liveReceiptRead.current.classes
+      .submissions(workspace.id, item.id)
+      .then((rows) => {
+        if (active && document.visibilityState !== 'hidden' && request.current === run)
+          setSubmissions(rows);
+      })
+      .catch((failure) => {
+        if (!active || request.current !== run) return;
+        if (failure instanceof NuniError && [401, 403, 404].includes(failure.status)) {
+          setSubmissions(null);
+          setAccessDenied(true);
+        }
+        setError(nuniErrorMessage(failure));
+      });
+    return () => {
+      active = false;
+    };
+  }, [syncVersion, workspace.id, workspace.memberRole, item.id]);
   const FEEDBACK_FILTERS: FeedbackQueueFilter[] = ['all', 'needs_feedback', 'reviewed'];
   const orderedSubmissions = submissions === null ? null : sortFeedbackQueue(submissions);
   const visibleCount =

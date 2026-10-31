@@ -1,4 +1,9 @@
 'use client';
+import {
+  startAssignmentLive,
+  assignmentSyncLabel,
+  type AssignmentSync,
+} from '@campus/shared/src/assignmentLive';
 
 import Link from 'next/link';
 import { usePathname, useSearchParams } from 'next/navigation';
@@ -87,12 +92,65 @@ function Workspace({ id }: { id: string }) {
   const hash = useLocationHash();
   const params = useSearchParams();
   const classes = useClasses(beginCourseRequest);
-  const { refresh, session } = useNuniSession();
+  const { refresh, session, pendingLogout } = useNuniSession();
   const [data, setData] = useState<{
     workspace: NuniWorkspace;
     assignments: NuniAssignment[];
   } | null>(null);
   const [error, setError] = useState('');
+  const assignmentRevision = useRef(0);
+  const liveClasses = useRef(classes);
+  useEffect(() => {
+    liveClasses.current = classes;
+  });
+  const [assignmentSync, setAssignmentSync] = useState<AssignmentSync>({
+    state: 'updating',
+    updatedAt: null,
+  });
+  useEffect(() => {
+    if (!session || pendingLogout) {
+      setData(null);
+      return;
+    }
+    let pageHidden = false;
+    return startAssignmentLive({
+      read: () => liveClasses.current.assignments(id),
+      revision: () => assignmentRevision.current,
+      receive: (assignments) =>
+        setData((current) => (current ? { ...current, assignments } : current)),
+      clear: () => {
+        setData(null);
+        setError('目前無法存取這門課程，請重新確認登入與課程權限。');
+      },
+      status: setAssignmentSync,
+      active: () => !pageHidden && document.visibilityState !== 'hidden',
+      online: () => navigator.onLine !== false,
+      subscribe: (changed) => {
+        const hide = () => {
+          pageHidden = true;
+          changed();
+        };
+        const show = () => {
+          pageHidden = false;
+          changed();
+        };
+        window.addEventListener('pagehide', hide);
+        window.addEventListener('pageshow', show);
+        document.addEventListener('visibilitychange', changed);
+        window.addEventListener('online', changed);
+        window.addEventListener('offline', changed);
+        return () => {
+          window.removeEventListener('pagehide', hide);
+          window.removeEventListener('pageshow', show);
+          document.removeEventListener('visibilitychange', changed);
+          window.removeEventListener('online', changed);
+          window.removeEventListener('offline', changed);
+        };
+      },
+    });
+    // 清單服務每次繪製會重建，透過 ref 讀取當前授權實例。
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [id, session?.context, pendingLogout]);
   const [epoch, setEpoch] = useState(0);
   const [code, setCode] = useState(params.get('invite') || '');
   const { panel: requestedTab, navigate: setTab, courseListHref } = useCoursePanel();
@@ -223,6 +281,7 @@ function Workspace({ id }: { id: string }) {
     ? assignmentReferenceTiming(nextAssignment, data.workspace, now)
     : 'none';
   const acceptAssignment = (assignment: NuniAssignment) => {
+    assignmentRevision.current += 1;
     refreshOutline();
     setData((current) =>
       current && current.workspace.id === assignment.workspaceId
@@ -450,13 +509,21 @@ function Workspace({ id }: { id: string }) {
           hidden={tab !== 'assignments'}
         >
           <div className={teacher ? styles.grid : workspaceStyles.studentWork}>
+            <p role="status">
+              {assignmentSyncLabel(assignmentSync)}
+              {assignmentSync.updatedAt
+                ? ` · 最後更新 ${formatTaipeiDateTime(assignmentSync.updatedAt, { seconds: true })}`
+                : ' · 尚未確認最新狀態'}
+            </p>
             <CourseAssignments
               key={`${data.workspace.memberRole}:${data.workspace.state}`}
               assignments={data.assignments}
+              syncVersion={assignmentSync.updatedAt}
               workspace={data.workspace}
               reload={reload}
               onConfirmed={acceptAssignment}
             />
+            <p className={styles.muted}>校方 LMS 等未串接來源不支援即時，請到原系統確認。</p>
             <aside className={!teacher ? workspaceStyles.studentAside : undefined}>
               {teacher && data.workspace.state === 'active' && (
                 <>

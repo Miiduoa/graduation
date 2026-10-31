@@ -1,3 +1,5 @@
+import { startAssignmentLive, assignmentSyncLabel, type AssignmentSync } from '@campus/shared/src/assignmentLive';
+import NetInfo from '@react-native-community/netinfo';
 import React, {
   useCallback,
   useEffect,
@@ -9,7 +11,7 @@ import React, {
   type ReactNode,
   type RefObject,
 } from 'react';
-import { Image, Linking, Pressable, ScrollView, Text, TextInput, View } from 'react-native';
+import { AppState, Image, Linking, Pressable, ScrollView, Text, TextInput, View } from 'react-native';
 import { photoPdfAvailable } from './nativePhotoPdf';
 import { NativePhotoPdfEditor } from './NativePhotoPdfEditor';
 import { PublishedFeedbackLink } from '../../components/PublishedFeedbackLink';
@@ -1103,6 +1105,49 @@ function CourseDetail({
   const [quizQuery, setQuizQuery] = useNuniDraftState(`course:${id}:quiz-search`, '');
   const activityQuery = tab === 'quizzes' ? quizQuery : assignmentQuery;
   const setActivityQuery = tab === 'quizzes' ? setQuizQuery : setAssignmentQuery;
+  const [assignmentSync, setAssignmentSync] = useState<AssignmentSync>({
+    state: 'updating',
+    updatedAt: null,
+  });
+  const assignmentRevision = useRef(0);
+  const assignmentCommit = useRef(result.commit);
+  const assignmentVersion = useRef(result.version);
+  useEffect(() => {
+    assignmentCommit.current = result.commit;
+    assignmentVersion.current = result.version;
+  });
+  const assignmentLiveReady = result.data !== null && !result.loading && !classroomDenied;
+  useEffect(() => {
+    if (!assignmentLiveReady) return;
+    let online = true;
+    return startAssignmentLive({
+      read: () => classes.assignments(id),
+      revision: () => assignmentRevision.current,
+      receive: (assignments) =>
+        assignmentCommit.current(
+          (current) => (current ? { ...current, assignments } : current),
+          assignmentVersion.current,
+        ),
+      clear: () => {
+        setClassroomDenied(true);
+        assignmentCommit.current(() => null, assignmentVersion.current);
+      },
+      status: setAssignmentSync,
+      active: () => AppState.currentState === 'active',
+      online: () => online,
+      subscribe: (changed) => {
+        const app = AppState.addEventListener('change', changed);
+        const network = NetInfo.addEventListener((state) => {
+          online = state.isConnected !== false && state.isInternetReachable !== false;
+          changed();
+        });
+        return () => {
+          app.remove();
+          network();
+        };
+      },
+    });
+  }, [classes, id, assignmentLiveReady]);
   const data = result.data;
   const linkedAssignment =
     !!initialAssignmentId && !!data?.assignments.some((item) => item.id === initialAssignmentId);
@@ -1271,6 +1316,7 @@ function CourseDetail({
     targetSeekCancelled,
   ]);
   const saveActivity = (item: Activity) => {
+    if ('instructions' in item) assignmentRevision.current += 1;
     result.commit(
       (current) =>
         current
@@ -1442,6 +1488,12 @@ function CourseDetail({
             </Copy>
           ) : null}
           <View style={{ display: tab === 'assignments' ? 'flex' : 'none', gap: 16 }}>
+            <Text accessibilityLiveRegion="polite">
+              {assignmentSyncLabel(assignmentSync)}{assignmentSync.updatedAt
+                ? ` · 最後更新 ${formatTaipeiDateTime(assignmentSync.updatedAt, { seconds: true })}`
+                : ' · 尚未確認最新狀態'}
+            </Text>
+            <Copy>校方 LMS 等未串接來源不支援即時，請到原系統確認。</Copy>
             {data.assignments.length === 0 ? (
               <Copy>老師尚未發布作業。</Copy>
             ) : (
@@ -1457,6 +1509,7 @@ function CourseDetail({
                       !matchesActivitySearch(item, assignmentQuery)) &&
                     item.id !== initialAssignmentId
                   }
+                  syncVersion={assignmentSync.updatedAt}
                   compact={data.assignments.length > 8 && index > 0}
                   focused={item.id === initialAssignmentId}
                   scrollRef={scrollRef}
@@ -1727,6 +1780,7 @@ function MaterialCard({
 
 function ActivityCard({
   item,
+  syncVersion,
   course,
   classes,
   saved,
@@ -1737,6 +1791,7 @@ function ActivityCard({
   contentOffsetYRef,
 }: {
   item: Activity;
+  syncVersion?: string | null;
   course: NuniWorkspace;
   classes: Classes;
   saved(item: Activity): void;
@@ -2126,6 +2181,7 @@ function ActivityCard({
               classes={classes}
               course={course}
               item={item}
+              syncVersion={syncVersion}
               scrollRef={scrollRef}
               contentOffsetYRef={contentOffsetYRef}
             />
@@ -2140,12 +2196,14 @@ function TeacherReceipts({
   classes,
   course,
   item,
+  syncVersion,
   scrollRef,
   contentOffsetYRef,
 }: {
   classes: Classes;
   course: NuniWorkspace;
   item: Activity;
+  syncVersion?: string | null;
   scrollRef?: RefObject<ScrollView | null>;
   contentOffsetYRef?: MutableRefObject<number>;
 }) {
@@ -2168,6 +2226,20 @@ function TeacherReceipts({
   );
   const resource = useLoad(load, false);
   const { data: receipts, loading: busy, error } = resource;
+  const liveResource = useRef({ load, resource });
+  useEffect(() => { liveResource.current = { load, resource }; });
+  useEffect(() => {
+    if (!assignment || !syncVersion || liveResource.current.resource.data === null) return;
+    let active = true;
+    const { load: read, resource: current } = liveResource.current;
+    void read().then((rows) => {
+      if (active && AppState.currentState === 'active') current.commit(() => rows, current.version);
+    }).catch((failure) => {
+      if (active && failure instanceof NuniError && [401, 403, 404].includes(failure.status))
+        current.commit(() => null, current.version);
+    });
+    return () => { active = false; };
+  }, [assignment, syncVersion]);
   useEffect(() => {
     receiptsRef.current = receipts;
   }, [receipts]);

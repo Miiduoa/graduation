@@ -27,12 +27,13 @@ type CourseAssignmentFilter = AssignmentFilter | 'overdue' | 'soon';
 
 type Props = {
   assignments: NuniAssignment[];
+  syncVersion?: string | null;
   workspace: NuniWorkspace;
   reload: () => void;
   onConfirmed: (assignment: NuniAssignment) => void;
 };
 
-export function CourseAssignments({ assignments, workspace, reload, onConfirmed }: Props) {
+export function CourseAssignments({ assignments, workspace, reload, onConfirmed, syncVersion }: Props) {
   const [filter, setFilter] = useState<CourseAssignmentFilter>('all');
   const [query, setQuery] = useState('');
   const searchRef = useRef<HTMLInputElement>(null);
@@ -242,6 +243,7 @@ export function CourseAssignments({ assignments, workspace, reload, onConfirmed 
         <div key={item.id} hidden={!visible(item)}>
           <AssignmentCard
             item={item}
+            syncVersion={syncVersion}
             workspace={workspace}
             reload={reload}
             onConfirmed={(assignment) => {
