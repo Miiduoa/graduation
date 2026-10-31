@@ -1,7 +1,7 @@
 import { httpsCallable } from 'firebase/functions';
 import { getAuthInstance, getFunctionsInstance, isFirebaseMockMode } from '../firebase';
 import { parseCampusAssignmentSource, type CampusAssignmentSource } from './campusAssignmentSource';
-import { abortableCampusRead } from './abortableCampusRead';
+import { abortableCampusRead, CAMPUS_SENSE_PAGE_TIMEOUT_MS } from './abortableCampusRead';
 
 export type SenseSourceStatus = 'available' | 'unavailable';
 export type AssignmentCoverageReason = 'complete' | 'legacy-partial' | 'read-budget';
@@ -27,6 +27,7 @@ export const CAMPUS_ASSIGNMENT_PAGE_SIZE = 50;
 // Bound a user-triggered read, respecting the existing 12 requests/5 min limit.
 // Larger lists remain explicitly partial; never silently label a capped read complete.
 export const CAMPUS_ASSIGNMENT_MAX_PAGES = 8;
+export const CAMPUS_SENSE_TOTAL_TIMEOUT_MS = 90_000;
 
 /** Progress contains counts only. Partial assignment rows are never published. */
 export interface CampusSenseProgress {
@@ -164,6 +165,7 @@ export async function refreshCampusSenseSnapshot(input: {
   signal?: AbortSignal;
   onProgress?: (progress: CampusSenseProgress) => void;
 }): Promise<CampusSenseSnapshot> {
+  const startedAt = Date.now();
   const check = () => {
     if (!input.isCurrent() || !input.scope.uid || !input.scope.schoolId ||
         isFirebaseMockMode() || getAuthInstance().currentUser?.uid !== input.scope.uid) {
@@ -181,7 +183,15 @@ export async function refreshCampusSenseSnapshot(input: {
   const callable = httpsCallable<{
     schoolId: string; assignmentPage?: { offset: number; revision: string };
   }, unknown>(getFunctionsInstance(), 'getCampusAssistantSnapshot');
-  const response = await abortableCampusRead(() => callable({ schoolId: input.scope.schoolId }), input.signal);
+  const readPage = (assignmentPage?: { offset: number; revision: string }) => {
+    check();
+    const remaining = CAMPUS_SENSE_TOTAL_TIMEOUT_MS - (Date.now() - startedAt);
+    return abortableCampusRead(() => callable({
+      schoolId: input.scope.schoolId,
+      ...(assignmentPage ? { assignmentPage } : {}),
+    }), input.signal, Math.min(CAMPUS_SENSE_PAGE_TIMEOUT_MS, remaining));
+  };
+  const response = await readPage();
   check();
   const first = parseSnapshot(response.data, input.scope.uid, input.scope.schoolId);
   if (first.snapshot.assignments.status !== 'available') {
@@ -209,9 +219,7 @@ export async function refreshCampusSenseSnapshot(input: {
   while (page && page.nextOffset !== null && pages < CAMPUS_ASSIGNMENT_MAX_PAGES) {
     check();
     const assignmentPage = { offset: page.nextOffset, revision: page.revision };
-    const nextResponse = await abortableCampusRead(() => callable({
-      schoolId: input.scope.schoolId, assignmentPage,
-    }), input.signal);
+    const nextResponse = await readPage(assignmentPage);
     check();
     const next = parseSnapshot(nextResponse.data, input.scope.uid, input.scope.schoolId);
     if (!next.page || next.page.offset !== page.nextOffset ||

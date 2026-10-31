@@ -71,11 +71,14 @@ jobs:
             src/__tests__/services/campusSenseSnapshot.test.ts \
             src/__tests__/services/campusSensePaging.test.ts \
             src/__tests__/services/campusSenseProgress.test.ts \
+            src/__tests__/services/campusSenseControl.test.ts \
+            src/__tests__/services/campusSenseChanges.test.ts \
             src/__tests__/services/offlineCampusTools.test.ts \
             src/__tests__/services/localCampusToolProtocol.test.ts \
             src/__tests__/features/campusAssistant.test.ts \
             src/__tests__/features/campusAssistantSemantic.test.ts \
             src/__tests__/CampusAssistantScreen.test.tsx \
+            src/__tests__/CampusSenseInteraction.test.tsx \
             src/__tests__/CampusAssignmentWorkbench.test.tsx \
             src/__tests__/CampusAssignmentCoverage.test.tsx \
             src/__tests__/CampusAssignmentHandoff.test.tsx \

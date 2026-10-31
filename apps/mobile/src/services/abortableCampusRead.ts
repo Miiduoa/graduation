@@ -1,30 +1,45 @@
 /**
- * Firebase callable promises do not expose a transport abort handle. Cancel the
- * local wait immediately, consume any late rejection, and let the caller stop
- * subsequent pages. This does NOT claim to cancel server-side work already sent.
+ * Firebase callable promises do not expose a transport abort handle. Stop the
+ * local wait, consume any late rejection, and let the caller stop subsequent
+ * pages. Already-sent server work is not recalled by cancellation or timeout.
  */
-export function abortableCampusRead<T>(read: () => Promise<T>, signal?: AbortSignal): Promise<T> {
-  if (signal?.aborted) return Promise.reject(new Error('sense-cancelled'));
-  if (!signal) {
-    try { return read(); } catch (error) { return Promise.reject(error); }
-  }
+export const CAMPUS_SENSE_PAGE_TIMEOUT_MS = 45_000;
+
+export function abortableCampusRead<T>(
+  read: () => Promise<T>,
+  signal?: AbortSignal,
+  timeoutMs = CAMPUS_SENSE_PAGE_TIMEOUT_MS,
+): Promise<T> {
   return new Promise<T>((resolve, reject) => {
     let settled = false;
-    const finish = (success: boolean, value: unknown) => {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const cleanup = () => {
+      if (timer !== undefined) {
+        clearTimeout(timer);
+        timer = undefined;
+      }
+      signal?.removeEventListener('abort', cancel);
+    };
+    const finish = (result: { value: T } | { error: unknown }) => {
       if (settled) return;
       settled = true;
-      signal.removeEventListener('abort', cancel);
-      if (success) resolve(value as T);
-      else reject(value);
+      cleanup();
+      if ('error' in result) reject(result.error);
+      else resolve(result.value);
     };
-    const cancel = () => finish(false, new Error('sense-cancelled'));
-    signal.addEventListener('abort', cancel, { once: true });
-    // Guard a signal that changed between the initial check and listener setup.
-    if (signal.aborted) { cancel(); return; }
+    const cancel = () => finish({ error: new Error('sense-cancelled') });
+    if (signal?.aborted) { cancel(); return; }
+    if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) {
+      finish({ error: new Error('sense-timeout') });
+      return;
+    }
+    signal?.addEventListener('abort', cancel, { once: true });
+    if (signal?.aborted) { cancel(); return; }
+    timer = setTimeout(() => finish({ error: new Error('sense-timeout') }), timeoutMs);
     try {
-      read().then((value) => finish(true, value), (error: unknown) => finish(false, error));
+      read().then((value) => finish({ value }), (error: unknown) => finish({ error }));
     } catch (error) {
-      finish(false, error);
+      finish({ error });
     }
   });
 }
