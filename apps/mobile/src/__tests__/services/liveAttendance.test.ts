@@ -24,7 +24,7 @@ const token = 'A'.repeat(43);
 const expiresAt = Date.parse('2026-10-23T10:10:00Z');
 const snapshot = (data?: Record<string, unknown>, fromCache = false, hasPendingWrites = false) => ({
   exists: () => !!data,
-  data: () => data,
+  data: () => data && ('status' in data && !('role' in data) ? { uid: 'student', groupId: 'course', sessionId: 'session', checkedInAt: '2026-10-07T10:00:00Z', ...data } : data),
   metadata: { fromCache, hasPendingWrites },
 });
 const secretData = (qrToken = token) => ({ qrToken, qrExpiresAt: { toMillis: () => expiresAt } });
@@ -33,6 +33,7 @@ const observer = () => ({
   onToken: jest.fn(),
   onQrExpiresAt: jest.fn(),
   onJoined: jest.fn(),
+  onReceipt: jest.fn(),
   onError: jest.fn(),
 });
 
@@ -278,4 +279,44 @@ test('the expiry reader accepts the existing Firestore and ISO contracts', () =>
   expect(attendanceExpiryMillis(new Date(expiresAt).toISOString())).toBe(expiresAt);
   expect(attendanceExpiryMillis(new Date(expiresAt))).toBe(expiresAt);
   expect(attendanceExpiryMillis(undefined)).toBeNull();
+});
+
+
+test('教師更正立即取代出席收據，快取不能冒充確認', () => {
+  const state = observer();
+  subscribeClassroomAttendance(db, identity, state);
+  listeners[0].next(snapshot({ role: 'member', status: 'active' }));
+  listeners[1].next(snapshot({ status: 'present' }));
+  expect(state.onJoined).toHaveBeenLastCalledWith(true);
+  const correction = { status: 'absent', source: 'manual', correctedAt: '2026-10-23T10:00:00Z' };
+  listeners[1].next(snapshot(correction));
+  expect(state.onJoined).toHaveBeenLastCalledWith(false);
+  expect(state.onReceipt).toHaveBeenLastCalledWith(expect.objectContaining({ ...correction, correctedAt: '2026-10-23T10:00:00.000Z' }));
+  listeners[1].next(snapshot({ ...correction, status: 'late' }));
+  expect(state.onJoined).toHaveBeenLastCalledWith(true);
+  listeners[1].next(snapshot(correction, true));
+  expect(state.onReceipt).toHaveBeenLastCalledWith(null);
+});
+
+test('弱網重送保留相同憑證並取回同一收據，沒有時間的回應不能算成功', async () => {
+  const input = { groupId: 'course', sessionId: 'session', qrToken: token };
+  const call = jest.fn().mockRejectedValueOnce({ code: 'functions/unavailable' })
+    .mockResolvedValueOnce({ data: { success: true, alreadyJoined: true, checkedInAt: '2026-10-07T10:00:00Z' } })
+    .mockResolvedValueOnce({ data: { success: true } });
+  jest.mocked(httpsCallable).mockReturnValue(call);
+  await expect(joinClassroomAttendance(functions, input)).rejects.toEqual({ code: 'functions/unavailable' });
+  await expect(joinClassroomAttendance(functions, input)).resolves.toMatchObject({ alreadyJoined: true });
+  expect(call.mock.calls[0]).toEqual(call.mock.calls[1]);
+  await expect(joinClassroomAttendance(functions, input)).rejects.toThrow('尚未完成');
+});
+
+test('請求卡住十五秒後可安全重送，遲到的回應不能改寫逾時結果', async () => {
+  let finish!: (value: unknown) => void;
+  const call = jest.fn().mockImplementationOnce(() => new Promise((resolve) => { finish = resolve; }));
+  jest.mocked(httpsCallable).mockReturnValue(call);
+  const request = joinClassroomAttendance(functions, { groupId: 'course', sessionId: 'session', qrToken: token });
+  const assertion = expect(request).rejects.toMatchObject({ code: 'unavailable' });
+  await jest.advanceTimersByTimeAsync(15_000);
+  await assertion;
+  finish({ data: { success: true, checkedInAt: '2026-10-23T10:00:00Z' } });
 });
