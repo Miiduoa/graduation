@@ -1,5 +1,6 @@
 import React from 'react';
 import { act, fireEvent, render, waitFor } from '@testing-library/react-native';
+import { LegacyAssignmentReminders } from '../screens/LegacyAssignmentReminders';
 import { CampusAssignmentReminderAction } from '../screens/CampusAssignmentReminderAction';
 import { reconcileSubmittedAssignmentReminders } from '../services/submittedAssignmentReminders';
 import { useSubmittedAssignmentReminders } from '../app/useSubmittedAssignmentReminders';
@@ -14,6 +15,8 @@ type Alarm = {
 };
 const mockStorage = new Map<string, string>();
 const mockAlarms = new Map<string, Alarm>();
+let mockScheduleFailure = false;
+let mockCancelFailure = false;
 const mockReader = { getAssignment: jest.fn(), getSubmission: jest.fn() };
 jest.mock('../firebase', () => ({
   isFirebaseMockMode: () => false,
@@ -44,10 +47,12 @@ jest.mock('expo-notifications', () => ({
   getPermissionsAsync: async () => ({ granted: true }),
   getAllScheduledNotificationsAsync: async () => [...mockAlarms.values()],
   scheduleNotificationAsync: async (alarm: Alarm) => {
+    if (mockScheduleFailure) throw new Error('native failure');
     mockAlarms.set(alarm.identifier, alarm);
     return alarm.identifier;
   },
   cancelScheduledNotificationAsync: async (id: string) => {
+    if (mockCancelFailure) return;
     mockAlarms.delete(id);
   },
 }));
@@ -96,6 +101,8 @@ function Reopened() {
   return null;
 }
 beforeEach(() => {
+  mockScheduleFailure = false;
+  mockCancelFailure = false;
   mockStorage.clear();
   mockAlarms.clear();
   jest.clearAllMocks();
@@ -129,10 +136,12 @@ test('使用者設定提醒，伺服器確認已繳後取消；撤回後恢復�
   await act(async () => reconcileSubmittedAssignmentReminders(scope, current));
   view.unmount();
   view = render(<Reminder />);
-  expect(await view.findByText('設定手機本機截止提醒')).toBeTruthy();
+  expect(await view.findByText('已保留提醒偏好，目前暫停通知')).toBeTruthy();
   expect(mockAlarms.size).toBe(0);
   mockReader.getSubmission.mockResolvedValue(null);
+  const clock = jest.spyOn(Date, 'now').mockReturnValue(Date.now() + 15 * 60_000);
   await act(async () => reconcileSubmittedAssignmentReminders(scope, current));
+  clock.mockRestore();
   view.unmount();
   view = render(<Reminder />);
   expect(await view.findByText('已設定截止前 1 小時提醒')).toBeTruthy();
@@ -155,9 +164,11 @@ test('App 重開時重新核對伺服器；讀不到收據時仍保留已設定�
     status: 'submitted',
     submittedAt: new Date().toISOString(),
   });
+  const clock = jest.spyOn(Date, 'now').mockReturnValue(Date.now() + 3 * 60_000);
   const online = render(<Reopened />);
   await waitFor(() => expect(mockAlarms.size).toBe(0));
   online.unmount();
+  clock.mockRestore();
   jest.restoreAllMocks();
 });
 
@@ -198,4 +209,139 @@ test('已設定提醒後摘要過期，仍能依最後核對的作業 ID 取消�
   expect(mockAlarms.size).toBe(0);
   clock.mockRestore();
   view.unmount();
+});
+
+
+test('保留舊版排程與資料升級後能看到、去重並在確認繳交後全部取消', async () => {
+  const { scheduleCampusAssignmentReminder, getCampusAssignmentReminderStatus } =
+    require('../services/campusAssignmentReminders') as typeof import('../services/campusAssignmentReminders');
+  const previous = snapshot();
+  delete previous.assignments.items[0].source;
+  for (const leadMinutes of [60, 1440] as const)
+    await scheduleCampusAssignmentReminder({ scope, step, snapshot: previous, leadMinutes, isCurrent: current });
+  expect(mockAlarms.size).toBe(2);
+  const view = render(<Reminder />);
+  expect(await view.findByText('已設定截止前 1 小時提醒')).toBeTruthy();
+  await act(async () => scheduleCampusAssignmentReminder({ scope, step, snapshot: snapshot(), leadMinutes: 60, isCurrent: current }));
+  expect(mockAlarms.size).toBe(2);
+  mockReader.getSubmission.mockResolvedValue({
+    id: 'alice', userId: 'alice', groupId: 'course', assignmentId: 'work',
+    status: 'submitted', submittedAt: new Date().toISOString(),
+  });
+  const { reconcileSubmittedAssignmentReceipt } = require('../services/submittedAssignmentReminders');
+  await act(async () => reconcileSubmittedAssignmentReceipt(await mockReader.getSubmission()));
+  expect(mockAlarms.size).toBe(0);
+  expect(await getCampusAssignmentReminderStatus({ scope, step, snapshot: snapshot(), isCurrent: current })).toEqual([60, 1440]);
+  view.unmount();
+});
+
+test('已繳暫停後可從畫面退訂兩種偏好，撤回、延期與重開不會復活', async () => {
+  let view = await optIn();
+  const { scheduleSubmittedAssignmentReminder } = require('../services/submittedAssignmentReminders');
+  await act(async () => scheduleSubmittedAssignmentReminder({ scope, source, leadMinutes: 1440, isCurrent: current }));
+  mockReader.getSubmission.mockResolvedValue({
+    id: 'alice', userId: 'alice', groupId: 'course', assignmentId: 'work',
+    status: 'submitted', submittedAt: new Date().toISOString(),
+  });
+  await act(async () => reconcileSubmittedAssignmentReminders(scope, current));
+  view.unmount();
+  view = render(<Reminder />);
+  expect(await view.findByText('已保留提醒偏好，目前暫停通知')).toBeTruthy();
+  fireEvent.press(view.getByText('取消這項本機提醒'));
+  await view.findByText('已退訂並清除提醒偏好，撤回或延期後也不會自動恢復。');
+  expect([...mockStorage.keys()].filter((key) => key.startsWith('@assignment-due:v2:'))).toEqual([]);
+  mockReader.getSubmission.mockResolvedValue(null);
+  mockReader.getAssignment.mockResolvedValue({ id: 'work', groupId: 'course', dueAt: new Date(Date.parse(dueAt) + 86_400_000).toISOString() });
+  await act(async () => reconcileSubmittedAssignmentReminders(scope, current));
+  view.unmount();
+  view = render(<Reminder />);
+  expect(await view.findByText('設定手機本機截止提醒')).toBeTruthy();
+  expect(mockAlarms.size).toBe(0);
+  view.unmount();
+});
+
+
+test('舊版提醒升級後可直接從畫面取消，個人行事曆不受影響', async () => {
+  const { scheduleCampusAssignmentReminder } = require('../services/campusAssignmentReminders');
+  const previous = snapshot();
+  delete previous.assignments.items[0].source;
+  await scheduleCampusAssignmentReminder({ scope, step, snapshot: previous, leadMinutes: 60, isCurrent: current });
+  mockAlarms.set('calendar', { identifier: 'calendar', content: {}, trigger: { date: new Date() } });
+  const view = render(<Reminder />);
+  expect(await view.findByText('已設定截止前 1 小時提醒')).toBeTruthy();
+  fireEvent.press(view.getByText('取消這項本機提醒'));
+  await view.findByText('已退訂並清除提醒偏好，撤回或延期後也不會自動恢復。');
+  expect([...mockAlarms.keys()]).toEqual(['calendar']);
+  await act(async () => reconcileSubmittedAssignmentReminders(scope, current));
+  expect([...mockAlarms.keys()]).toEqual(['calendar']);
+  view.unmount();
+});
+
+test('改名或改期而無法還原的舊提醒有明確管理入口，清理前阻止重複新增', async () => {
+  const { scheduleCampusAssignmentReminder } = require('../services/campusAssignmentReminders');
+  const previous = snapshot();
+  delete previous.assignments.items[0].source;
+  await scheduleCampusAssignmentReminder({ scope, step, snapshot: previous, leadMinutes: 60, isCurrent: current });
+  const changed = snapshot();
+  changed.assignments.items[0].title = '報告改名';
+  const changedStep = { ...step, title: '報告改名' };
+  await expect(scheduleCampusAssignmentReminder({ scope, step: changedStep, snapshot: changed, leadMinutes: 60, isCurrent: current }))
+    .rejects.toThrow('legacy-cleanup-required');
+  const view = render(<LegacyAssignmentReminders uid="alice" schoolId="pu" snapshot={changed} isCurrent={current} />);
+  expect(await view.findByText(/這台手機有 1 筆尚未辨識/)).toBeTruthy();
+  fireEvent.press(view.getByText('取消所有未辨識的舊版作業提醒'));
+  await waitFor(() => expect(mockAlarms.size).toBe(0));
+  await scheduleCampusAssignmentReminder({ scope, step: changedStep, snapshot: changed, leadMinutes: 60, isCurrent: current });
+  expect(mockAlarms.size).toBe(1);
+  view.unmount();
+});
+
+
+test('舊版轉換的新排程失敗時仍保留原排程與可取消的偏好', async () => {
+  const { scheduleCampusAssignmentReminder, getCampusAssignmentReminderStatus } = require('../services/campusAssignmentReminders');
+  const previous = snapshot();
+  delete previous.assignments.items[0].source;
+  await scheduleCampusAssignmentReminder({ scope, step, snapshot: previous, leadMinutes: 60, isCurrent: current });
+  const oldIds = [...mockAlarms.keys()];
+  mockScheduleFailure = true;
+  await expect(scheduleCampusAssignmentReminder({ scope, step, snapshot: snapshot(), leadMinutes: 60, isCurrent: current }))
+    .rejects.toThrow('native failure');
+  mockScheduleFailure = false;
+  expect([...mockAlarms.keys()]).toEqual(oldIds);
+  expect(await getCampusAssignmentReminderStatus({ scope, step, snapshot: snapshot(), isCurrent: current })).toEqual([60]);
+});
+
+
+test('摘要已不再包含已繳作業時，管理入口仍能退訂所有保留偏好', async () => {
+  const view = await optIn();
+  mockReader.getSubmission.mockResolvedValue({
+    id: 'alice', userId: 'alice', groupId: 'course', assignmentId: 'work',
+    status: 'submitted', submittedAt: new Date().toISOString(),
+  });
+  await act(async () => reconcileSubmittedAssignmentReminders(scope, current));
+  view.unmount();
+  const manager = render(<LegacyAssignmentReminders uid="alice" schoolId="pu" snapshot={null} isCurrent={current} />);
+  const button = await manager.findByText('退訂期末報告的所有提醒');
+  fireEvent.press(button);
+  await waitFor(() => expect(mockStorage.size).toBe(0));
+  expect(mockAlarms.size).toBe(0);
+  manager.unmount();
+});
+
+
+test('原生取消未生效時明確失敗並保留偏好，重試確認後才清除', async () => {
+  const { scheduleCampusAssignmentReminder, cancelCampusAssignmentReminder, getCampusAssignmentReminderStatus } = require('../services/campusAssignmentReminders');
+  const previous = snapshot();
+  delete previous.assignments.items[0].source;
+  await scheduleCampusAssignmentReminder({ scope, step, snapshot: previous, leadMinutes: 60, isCurrent: current });
+  await getCampusAssignmentReminderStatus({ scope, step, snapshot: snapshot(), isCurrent: current });
+  mockCancelFailure = true;
+  await expect(cancelCampusAssignmentReminder({ scope, step, snapshot: snapshot(), leadMinutes: 60, isCurrent: current }))
+    .rejects.toThrow('cancel-unconfirmed');
+  expect(mockAlarms.size).toBe(1);
+  expect(await getCampusAssignmentReminderStatus({ scope, step, snapshot: snapshot(), isCurrent: current })).toEqual([60]);
+  mockCancelFailure = false;
+  await cancelCampusAssignmentReminder({ scope, step, snapshot: snapshot(), leadMinutes: 60, isCurrent: current });
+  expect(mockAlarms.size).toBe(0);
+  expect(mockStorage.size).toBe(0);
 });

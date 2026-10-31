@@ -94,7 +94,8 @@ test('伺服器確認繳交後，手機不再保留這份作業的通知，其�
   ds.getSubmission.mockResolvedValue(receipt);
   await sync();
   expect([...mockAlarms.keys()]).toEqual(['calendar']);
-  expect(await submittedAssignmentReminderStatus(input)).toEqual([]);
+  expect(await submittedAssignmentReminderStatus(input)).toEqual([60]);
+  expect(await submittedAssignmentReminderStatus({ ...input, scheduledOnly: true })).toEqual([]);
   expect(mockStorage.size).toBe(1);
 });
 
@@ -104,7 +105,9 @@ test('撤回後重新確認未繳交，沿用原本選擇的時間排回同一�
   ds.getSubmission.mockResolvedValue(receipt);
   await sync();
   ds.getSubmission.mockResolvedValue(null);
+  const clock = jest.spyOn(Date, 'now').mockReturnValue(Date.now() + 15 * 60_000);
   await sync();
+  clock.mockRestore();
   expect([...mockAlarms.keys()]).toEqual([identifier]);
   expect([...mockAlarms.values()][0].trigger.date.toISOString()).toBe(
     new Date(Date.parse(dueAt) - 3_600_000).toISOString(),
@@ -143,7 +146,9 @@ test('離線與尚未確認的繳交紀錄不取消原提醒', async () => {
   await expect(sync()).rejects.toThrow('offline');
   expect([...mockAlarms.values()]).toEqual([original]);
   ds.getSubmission.mockResolvedValue({ ...receipt, submittedAt: null });
+  const clock = jest.spyOn(Date, 'now').mockReturnValue(Date.now() + 3 * 60_000);
   await expect(sync()).rejects.toThrow('receipt-unconfirmed');
+  clock.mockRestore();
   expect([...mockAlarms.values()]).toEqual([original]);
 });
 
@@ -183,12 +188,14 @@ test('截止前撤回時即使原提醒時間已過，仍排回一次提醒', as
     id: 'work',
     dueAt: new Date(Date.now() + 30 * 60_000).toISOString(),
   });
+  const resumeClock = jest.spyOn(Date, 'now').mockReturnValue(Date.now() + 15 * 60_000);
   await sync();
+  resumeClock.mockRestore();
   expect(mockAlarms.size).toBe(1);
   const alarm = [...mockAlarms.values()][0];
   expect(alarm.trigger.date.getTime()).toBeLessThan(Date.now() + 30 * 60_000);
   mockAlarms.clear();
-  const clock = jest.spyOn(Date, 'now').mockReturnValue(Date.now() + 2 * 60_000);
+  const clock = jest.spyOn(Date, 'now').mockReturnValue(Date.now() + 17 * 60_000);
   await sync();
   expect(mockAlarms.size).toBe(0);
   clock.mockRestore();
@@ -204,4 +211,81 @@ test('已核對的伺服器收據即使隨後斷線，仍直接取消該作業�
   await reconcileSubmittedAssignmentReceipt(receipt);
   expect(mockAlarms.size).toBe(0);
   expect(mockStorage.size).toBe(2);
+});
+
+
+test('兩種提前時間共用作業與收據讀取，已繳偏好在間隔內不再讀取', async () => {
+  await scheduleSubmittedAssignmentReminder(input, ds);
+  await scheduleSubmittedAssignmentReminder({ ...input, leadMinutes: 1440 }, ds);
+  jest.clearAllMocks();
+  ds.getSubmission.mockResolvedValue(receipt);
+  await sync();
+  expect(ds.getAssignment).toHaveBeenCalledTimes(1);
+  expect(ds.getSubmission).toHaveBeenCalledTimes(1);
+  for (let i = 0; i < 10; i++) await sync();
+  expect(ds.getSubmission).toHaveBeenCalledTimes(1);
+});
+
+test('歷史偏好截止七天後清理，不再讀伺服器或重排', async () => {
+  await scheduleSubmittedAssignmentReminder(input, ds);
+  jest.clearAllMocks();
+  const clock = jest.spyOn(Date, 'now').mockReturnValue(Date.parse(dueAt) + 8 * 86_400_000);
+  await sync();
+  await sync();
+  expect(ds.getAssignment).not.toHaveBeenCalled();
+  expect(ds.getSubmission).not.toHaveBeenCalled();
+  expect(mockStorage.size).toBe(0);
+  expect(mockAlarms.size).toBe(0);
+  clock.mockRestore();
+});
+
+test('離線採取退避但不移除已排通知，三十天後清理不再重試', async () => {
+  await scheduleSubmittedAssignmentReminder(input, ds);
+  jest.clearAllMocks();
+  ds.getAssignment.mockRejectedValue(new Error('offline'));
+  await expect(sync()).rejects.toThrow('offline');
+  for (let i = 0; i < 10; i++) await sync();
+  expect(ds.getAssignment).toHaveBeenCalledTimes(1);
+  expect(mockAlarms.size).toBe(1);
+  const clock = jest.spyOn(Date, 'now').mockReturnValue(Date.now() + 31 * 86_400_000);
+  await sync();
+  expect(mockStorage.size).toBe(0);
+  expect(mockAlarms.size).toBe(0);
+  clock.mockRestore();
+});
+
+test('活躍偏好有容量限制，歷史資料每輪最多核對三十二份且輪流處理', async () => {
+  for (let i = 0; i < 32; i++) {
+    const assignmentId = `work-${i}`;
+    ds.getAssignment.mockResolvedValue({ id: assignmentId, groupId: 'course', dueAt });
+    await scheduleSubmittedAssignmentReminder({ ...input, source: { ...source, assignmentId } }, ds);
+  }
+  await expect(scheduleSubmittedAssignmentReminder({ ...input, source: { ...source, assignmentId: 'extra' } }, ds))
+    .rejects.toThrow('device-capacity');
+  ds.getAssignment.mockImplementation(async (id: string) => ({ id, groupId: 'course', dueAt }));
+  jest.clearAllMocks();
+  await sync();
+  expect(ds.getAssignment).toHaveBeenCalledTimes(32);
+});
+
+
+test('保留大量歷史資料升級後，核對集合有界且不讓後面的作業餓死', async () => {
+  for (let i = 0; i < 80; i++) {
+    const assignmentId = `history-${i}`;
+    const digest = require('crypto').createHash('sha256')
+      .update(JSON.stringify([scope.uid, scope.schoolId, source.groupId, assignmentId, 60])).digest('hex');
+    const identifier = `assignment-due.v2.${digest}`;
+    mockStorage.set(`@assignment-due:v2:${identifier}`, JSON.stringify({
+      ...scope, ...source, assignmentId, identifier, leadMinutes: 60,
+      lastDueAt: i < 40 ? Date.now() - 8 * 86_400_000 : Date.parse(dueAt),
+    }));
+  }
+  ds.getAssignment.mockImplementation(async (id: string) => ({ id, groupId: 'course', dueAt }));
+  ds.getSubmission.mockImplementation(async (id: string) => ({ ...receipt, assignmentId: id }));
+  await sync();
+  expect(mockStorage.size).toBe(40);
+  expect(ds.getAssignment).toHaveBeenCalledTimes(32);
+  await sync();
+  expect(ds.getAssignment).toHaveBeenCalledTimes(40);
+  expect(new Set(ds.getAssignment.mock.calls.map(([id]) => id)).size).toBe(40);
 });

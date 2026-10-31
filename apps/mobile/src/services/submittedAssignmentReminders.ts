@@ -10,12 +10,23 @@ import { parseTaipeiInstant } from '@campus/shared/src/taipeiTime';
 
 const prefix = 'assignment-due.v2.';
 const storagePrefix = '@assignment-due:v2:';
+const preferenceLimit = 32;
+const inactiveRecheckMs = 15 * 60_000;
+const inactiveRetentionMs = 30 * 86_400_000;
+const deadlineGraceMs = 7 * 86_400_000;
 type Scope = { uid: string; schoolId: string };
 type Preference = Scope &
   CampusAssignmentSource & {
     leadMinutes: 60 | 1440;
     identifier: string;
     submitted?: boolean;
+    legacyIds?: string[];
+    legacyKeys?: string[];
+    expiresAt?: number;
+    nextCheckAt?: number;
+    failures?: number;
+    checkedAt?: number;
+    title?: string;
     lastDueAt?: number | null;
     triggerAt?: string | null;
   };
@@ -161,10 +172,21 @@ async function reconcile(row: Preference, guard: () => boolean, version: number,
   const remember = async (stamp: string | null) => {
     current(row, guard, version);
     try {
-      await AsyncStorage.setItem(
-        key(row),
-        JSON.stringify({ ...row, submitted, lastDueAt: due, triggerAt: stamp }),
-      );
+      for (const id of row.legacyIds ?? []) {
+        await cancel(id);
+        current(row, guard, version);
+      }
+      for (const oldKey of row.legacyKeys ?? []) await AsyncStorage.removeItem(oldKey);
+      current(row, guard, version);
+      const updated = {
+        ...row, title: assignment?.title ?? row.title, submitted, lastDueAt: due, triggerAt: stamp, legacyIds: [], legacyKeys: [], failures: 0, checkedAt: now,
+        expiresAt: submitted || stamp === null
+          ? Math.min(row.expiresAt ?? Infinity, now + inactiveRetentionMs)
+          : (due ?? now) + deadlineGraceMs,
+        nextCheckAt: submitted || stamp === null ? now + inactiveRecheckMs : 0,
+      };
+      if (JSON.stringify(updated) !== JSON.stringify(row))
+        await AsyncStorage.setItem(key(row), JSON.stringify(updated));
       current(row, guard, version);
     } catch (error) {
       await cancel(row.identifier);
@@ -192,7 +214,8 @@ async function reconcile(row: Preference, guard: () => boolean, version: number,
     await remember(stamp);
     return { outcome: 'already-scheduled' as const, triggerAt: stamp };
   }
-  if (inventory.length - (existing ? 1 : 0) >= 32) throw new ReminderSyncError('device-capacity');
+  const replaced = inventory.filter((item) => row.legacyIds?.includes(item.identifier)).length;
+  if (inventory.length - (existing ? 1 : 0) - replaced >= 32) throw new ReminderSyncError('device-capacity');
   const permission = await Notifications.getPermissionsAsync();
   if (!permission.granted) throw new ReminderSyncError('permission-required');
   current(row, guard, version);
@@ -252,6 +275,8 @@ export function scheduleSubmittedAssignmentReminder(input: Request, ds?: Reader)
       });
     const raw = await AsyncStorage.getItem(key(row));
     const saved = raw ? (JSON.parse(raw) as Preference) : row;
+    const keys = (await AsyncStorage.getAllKeys()).filter((value) => value.startsWith(storagePrefix));
+    if (!raw && keys.length >= preferenceLimit) throw new ReminderSyncError('device-capacity');
     const result = await reconcile({ ...saved, ...row }, input.isCurrent, version, ds ?? reader());
     current(row, input.isCurrent, version);
     return result;
@@ -269,9 +294,29 @@ export function reconcileSubmittedAssignmentReminders(
     const keys = (await AsyncStorage.getAllKeys()).filter((value) =>
       value.startsWith(storagePrefix),
     );
-    for (const storageKey of keys) {
+    const reads = new Map<string, ReturnType<Reader['getAssignment']>>();
+    const receipts = new Map<string, ReturnType<Reader['getSubmission']>>();
+    const original = ds ?? reader();
+    const shared: Reader = {
+      getAssignment: (id, group) => {
+        const k = JSON.stringify([group, id]);
+        if (!reads.has(k)) reads.set(k, original.getAssignment(id, group));
+        return reads.get(k)!;
+      },
+      getSubmission: (id, uid, group) => {
+        const k = JSON.stringify([group, id, uid]);
+        if (!receipts.has(k)) receipts.set(k, original.getSubmission(id, uid, group));
+        return receipts.get(k)!;
+      },
+    };
+    let checked = 0;
+    const errors: unknown[] = [];
+    const stored = await Promise.all(keys.map(async (storageKey) => ({
+      storageKey, row: await readPreference(storageKey),
+    })));
+    stored.sort((a, b) => (a.row?.checkedAt ?? 0) - (b.row?.checkedAt ?? 0));
+    for (const { storageKey, row } of stored) {
       current(scope, guard, version);
-      const row = await readPreference(storageKey);
       if (!row) continue;
       if (row.uid !== scope.uid || row.schoolId !== scope.schoolId) continue;
       const expected = await identity({
@@ -286,18 +331,35 @@ export function reconcileSubmittedAssignmentReminders(
         ![60, 1440].includes(row.leadMinutes)
       )
         continue;
+      const now = Date.now();
+      if ((row.expiresAt !== undefined && row.expiresAt <= now) ||
+          (row.lastDueAt != null && row.lastDueAt + deadlineGraceMs <= now)) {
+        await cancel(row.identifier);
+        for (const id of row.legacyIds ?? []) await cancel(id);
+        for (const oldKey of row.legacyKeys ?? []) await AsyncStorage.removeItem(oldKey);
+        current(scope, guard, version);
+        await AsyncStorage.removeItem(storageKey);
+        continue;
+      }
+      if ((row.nextCheckAt ?? 0) > now || checked >= preferenceLimit) continue;
+      checked += 1;
       try {
-        await reconcile(row, guard, version, ds ?? reader());
+        await reconcile(row, guard, version, shared);
       } catch (error) {
         current(scope, guard, version);
-        // A failed server read leaves this reminder untouched; other courses still reconcile.
-        if (keys.length === 1) throw error;
+        const failures = (row.failures ?? 0) + 1;
+        await AsyncStorage.setItem(storageKey, JSON.stringify({
+          ...row, failures, checkedAt: now, expiresAt: Math.min(row.expiresAt ?? Infinity, now + inactiveRetentionMs),
+          nextCheckAt: now + Math.min(60, 2 ** Math.min(failures, 6)) * 60_000,
+        }));
+        errors.push(error);
       }
     }
+    if (errors.length) throw errors[0];
   });
 }
 
-export async function submittedAssignmentReminderStatus(input: Omit<Request, 'leadMinutes'>) {
+export async function submittedAssignmentReminderStatus(input: Omit<Request, 'leadMinutes'> & { scheduledOnly?: boolean }) {
   const version = epoch;
   const inventory = await Notifications.getAllScheduledNotificationsAsync();
   current(input.scope, input.isCurrent, version);
@@ -305,7 +367,10 @@ export async function submittedAssignmentReminderStatus(input: Omit<Request, 'le
   for (const leadMinutes of [60, 1440] as const) {
     const row = await identity({ ...input, leadMinutes });
     current(input.scope, input.isCurrent, version);
-    if (inventory.some((item) => item.identifier === row.identifier)) result.push(leadMinutes);
+    const saved = await readPreference(key(row));
+    if ((!input.scheduledOnly && saved) || inventory.some((item) =>
+      item.identifier === row.identifier || saved?.legacyIds?.includes(item.identifier)))
+      result.push(leadMinutes);
   }
   return result;
 }
@@ -314,7 +379,10 @@ export function cancelSubmittedAssignmentReminder(input: Request) {
   return serial(async () => {
     const row = await identity(input);
     current(row, input.isCurrent, version);
+    const saved = await readPreference(key(row));
     await cancel(row.identifier);
+    for (const id of saved?.legacyIds ?? []) await cancel(id);
+    for (const oldKey of saved?.legacyKeys ?? []) await AsyncStorage.removeItem(oldKey);
     current(row, input.isCurrent, version);
     await AsyncStorage.removeItem(key(row));
     return true;
@@ -376,12 +444,65 @@ export function reconcileSubmittedAssignmentReceipt(receipt: Submission) {
       });
       if (key(expected) !== storageKey || expected.identifier !== row.identifier) continue;
       await cancel(row.identifier);
+      for (const id of row.legacyIds ?? []) await cancel(id);
+      for (const oldKey of row.legacyKeys ?? []) await AsyncStorage.removeItem(oldKey);
       current(row, guard, version);
       await AsyncStorage.setItem(
         storageKey,
-        JSON.stringify({ ...row, submitted: true, triggerAt: null }),
+        JSON.stringify({ ...row, submitted: true, triggerAt: null, legacyIds: [], legacyKeys: [],
+          expiresAt: Math.min(row.expiresAt ?? Infinity, Date.now() + inactiveRetentionMs),
+          nextCheckAt: Date.now() + inactiveRecheckMs }),
       );
       current(row, guard, version);
     }
   });
+}
+
+export function adoptSubmittedAssignmentReminder(input: Request, old: { identifier: string; triggerAt: string; storageKey: string; title: string }) {
+  const version = epoch;
+  return serial(async () => {
+    current(input.scope, input.isCurrent, version);
+    const row = await identity(input);
+    const inventory = await Notifications.getAllScheduledNotificationsAsync();
+    current(row, input.isCurrent, version);
+    if (!inventory.some((alarm) => alarm.identifier === old.identifier)) return;
+    const saved = await readPreference(key(row));
+    const legacyIds = [...new Set([...(saved?.legacyIds ?? []), old.identifier])];
+    const legacyKeys = [...new Set([...(saved?.legacyKeys ?? []), old.storageKey])];
+    current(row, input.isCurrent, version);
+    await AsyncStorage.setItem(key(row), JSON.stringify({
+      ...row, title: old.title, lastDueAt: Date.parse(old.triggerAt) + row.leadMinutes * 60_000,
+      triggerAt: old.triggerAt, expiresAt: Date.now() + inactiveRetentionMs,
+      ...saved, legacyIds, legacyKeys,
+    }));
+  });
+}
+
+export async function linkedReminderIdentifiers() {
+  const ids = new Set<string>();
+  for (const storageKey of await AsyncStorage.getAllKeys()) {
+    if (!storageKey.startsWith(storagePrefix)) continue;
+    const saved = await readPreference(storageKey);
+    for (const id of saved?.legacyIds ?? []) ids.add(id);
+  }
+  return ids;
+}
+
+export async function savedAssignmentReminderPreferences(scope: Scope, guard: () => boolean) {
+  const version = epoch;
+  current(scope, guard, version);
+  const inventory = await Notifications.getAllScheduledNotificationsAsync();
+  const result: Array<Preference & { scheduled: boolean }> = [];
+  for (const storageKey of await AsyncStorage.getAllKeys()) {
+    if (!storageKey.startsWith(storagePrefix)) continue;
+    const row = await readPreference(storageKey);
+    if (!row || row.uid !== scope.uid || row.schoolId !== scope.schoolId) continue;
+    const expected = await identity({ scope, source: row, leadMinutes: row.leadMinutes, isCurrent: guard });
+    current(scope, guard, version);
+    if (key(expected) !== storageKey || expected.identifier !== row.identifier) continue;
+    result.push({ ...row, scheduled: inventory.some((alarm) =>
+      alarm.identifier === row.identifier || row.legacyIds?.includes(alarm.identifier)) });
+  }
+  current(scope, guard, version);
+  return result;
 }

@@ -46,6 +46,7 @@ jest.mock('../services/campusSenseSnapshot', () => ({
   ...jest.requireActual('../services/campusSenseSnapshot'),
   refreshCampusSenseSnapshot: jest.fn(),
 }));
+jest.mock('../screens/LegacyAssignmentReminders', () => ({ LegacyAssignmentReminders: () => null }));
 jest.mock('../services/campusAssignmentReminders', () => ({
   scheduleCampusAssignmentReminder: jest.fn(),
   cancelCampusAssignmentReminder: jest.fn(),
@@ -634,6 +635,7 @@ test('source-verified assignment requires review and confirmation before a local
   });
   expect(view.getByText('本機提醒已排程成功，這不會提交作業或修改校務資料。')).toBeTruthy();
   expect(confirmCampusAgentWrite).not.toHaveBeenCalled();
+  jest.mocked(getCampusAssignmentReminderStatus).mockResolvedValueOnce([1440]);
   await act(async () => fireEvent.press(view.getByText('取消這項本機提醒')));
   expect(cancelCampusAssignmentReminder).toHaveBeenCalledWith(expect.objectContaining({
     scope: { uid: 'A', schoolId: 'pu' }, leadMinutes: 1440,
@@ -669,7 +671,7 @@ test('an already scheduled local reminder is restored when reopening the assista
       checkedAt, limitations: [], steps: [step],
     },
   });
-  jest.mocked(getCampusAssignmentReminderStatus).mockResolvedValueOnce([60]);
+  jest.mocked(getCampusAssignmentReminderStatus).mockResolvedValue([60]);
   jest.mocked(cancelCampusAssignmentReminder).mockResolvedValueOnce(true);
   const view = render(<CampusAssistantScreen />);
   await act(async () => fireEvent.press(view.getByText('同步我的校園資料')));
@@ -680,7 +682,7 @@ test('an already scheduled local reminder is restored when reopening the assista
   expect(scheduleCampusAssignmentReminder).not.toHaveBeenCalled();
   await act(async () => fireEvent.press(view.getByText('取消這項本機提醒')));
   expect(cancelCampusAssignmentReminder).toHaveBeenCalledTimes(1);
-  expect(view.getByText('已確認手機系統不再保留這筆提醒。')).toBeTruthy();
+  expect(view.getByText('已退訂並清除提醒偏好，撤回或延期後也不會自動恢復。')).toBeTruthy();
 });
 
 test('unverified OS reminder status blocks scheduling until a successful recheck', async () => {
