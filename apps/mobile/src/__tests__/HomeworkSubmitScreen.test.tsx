@@ -500,3 +500,23 @@ test('從提醒開啟但離線時保留重試入口，不把網路錯誤說成�
   expect(view.getByText('重新讀取')).toBeTruthy();
   expect(mockSafeNavigate).not.toHaveBeenCalled();
 });
+
+
+test('提醒警告不影響繳交成功，並提供管理及稍後重試入口', async () => {
+  mockSource.submitAssignment.mockResolvedValueOnce({
+    id: 'alice', assignmentId: 'work', groupId: 'course', userId: 'alice',
+    content: '我的答案', status: 'submitted', submittedAt: '2026-10-19T00:00:00Z',
+    reminderWarning: '未知舊提醒仍可能響鈴，請稍後重試',
+  });
+  const view = render(<HomeworkSubmitScreen route={{ params: { courseId: 'course', hwId: 'work' } }} />);
+  await view.findByText('期末報告');
+  fireEvent.changeText(view.getByLabelText('文字作業內容'), '我的答案');
+  await act(async () => fireEvent.press(view.getByLabelText('繳交作業')));
+  const call = jest.mocked(Alert.alert).mock.calls.find(([title]) => title === '已繳交');
+  expect(call?.[1]).toContain('仍可能響鈴');
+  const manage = call?.[2]?.find((button) => button.text === '管理提醒／稍後重試');
+  expect(manage).toBeDefined();
+  act(() => manage?.onPress?.());
+  expect(mockSafeNavigate).toHaveBeenCalledWith(mockNavigate, 'CampusAssistant');
+  expect(onAssignmentSubmitted).toHaveBeenCalled();
+});

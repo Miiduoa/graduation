@@ -31,11 +31,11 @@ jest.mock('@expo/vector-icons', () => ({ Ionicons: () => null }));
 jest.mock('@react-native-async-storage/async-storage', () => ({
   __esModule: true,
   default: {
-    getAllKeys: async () => [...mockStorage.keys()],
+    getAllKeys: jest.fn(async () => [...mockStorage.keys()]),
     getItem: async (key: string) => mockStorage.get(key) ?? null,
-    setItem: async (key: string, value: string) => {
+    setItem: jest.fn(async (key: string, value: string) => {
       mockStorage.set(key, value);
-    },
+    }),
     removeItem: async (key: string) => {
       mockStorage.delete(key);
     },
@@ -49,7 +49,7 @@ jest.mock('expo-crypto', () => ({
 jest.mock('expo-notifications', () => ({
   SchedulableTriggerInputTypes: { DATE: 'date' },
   getPermissionsAsync: async () => ({ granted: true }),
-  getAllScheduledNotificationsAsync: async () => [...mockAlarms.values()],
+  getAllScheduledNotificationsAsync: jest.fn(async () => [...mockAlarms.values()]),
   scheduleNotificationAsync: async (alarm: Alarm) => {
     if (mockScheduleFailure) throw new Error('native failure');
     mockAlarms.set(alarm.identifier, alarm);
@@ -378,11 +378,72 @@ test('繳交前配對遇到改名或不完整摘要，不猜測取消並提示�
   const partial = mockSnapshot();
   partial.assignments.coverage = { complete: false, reason: 'read-budget', pages: 8 };
   refreshCampusSenseSnapshot.mockResolvedValueOnce(partial);
-  await expect(prepareAssignmentReminderSubmission('alice', async () => 'pu')).rejects.toThrow('舊版作業提醒管理');
+  await expect(prepareAssignmentReminderSubmission('alice', async () => 'pu')).resolves.toContain('舊版作業提醒管理');
   expect([...mockAlarms.keys()]).toEqual(ids);
   const renamed = mockSnapshot();
   renamed.assignments.items[0].title = '已改名';
   refreshCampusSenseSnapshot.mockResolvedValueOnce(renamed);
-  await expect(prepareAssignmentReminderSubmission('alice', async () => 'pu')).rejects.toThrow('舊版作業提醒管理');
+  await expect(prepareAssignmentReminderSubmission('alice', async () => 'pu')).resolves.toContain('舊版作業提醒管理');
   expect([...mockAlarms.keys()]).toEqual(ids);
+});
+
+
+test.each(['native', 'storage'])('空提醒的讀取故障只警告，恢復後可重試：%s', async (kind) => {
+  const { prepareAssignmentReminderSubmission } = require('../services/campusAssignmentReminders');
+  const storage = require('@react-native-async-storage/async-storage').default;
+  const notifications = require('expo-notifications');
+  const read = kind === 'native' ? notifications.getAllScheduledNotificationsAsync : storage.getAllKeys;
+  read.mockRejectedValueOnce(new Error('temporary failure'));
+  await expect(prepareAssignmentReminderSubmission('alice', async () => 'pu')).resolves.toContain('重試');
+  await expect(prepareAssignmentReminderSubmission('alice', async () => 'pu')).resolves.toBeUndefined();
+});
+
+test('摘要服務故障保留未知提醒，稍後可重試配對並依收據取消', async () => {
+  const { scheduleCampusAssignmentReminder, prepareAssignmentReminderSubmission } = require('../services/campusAssignmentReminders');
+  const previous = mockSnapshot();
+  delete previous.assignments.items[0].source;
+  await scheduleCampusAssignmentReminder({ scope, step, snapshot: previous, leadMinutes: 60, isCurrent: current });
+  const ids = [...mockAlarms.keys()];
+  const { refreshCampusSenseSnapshot } = require('../services/campusSenseSnapshot');
+  refreshCampusSenseSnapshot.mockRejectedValueOnce(new Error('unavailable'));
+  await expect(prepareAssignmentReminderSubmission('alice', async () => 'pu')).resolves.toContain('重試');
+  expect([...mockAlarms.keys()]).toEqual(ids);
+  await prepareAssignmentReminderSubmission('alice', async () => 'pu');
+  const { reconcileSubmittedAssignmentReceipt } = require('../services/submittedAssignmentReminders');
+  await reconcileSubmittedAssignmentReceipt({ id: 'alice', userId: 'alice', groupId: 'course', assignmentId: 'work', status: 'submitted', submittedAt: new Date().toISOString() });
+  expect(mockAlarms.size).toBe(0);
+});
+
+
+test('本作業可配對時仍保留另一份未知舊提醒，收據只取消本作業', async () => {
+  const { scheduleCampusAssignmentReminder, prepareAssignmentReminderSubmission } = require('../services/campusAssignmentReminders');
+  const previous = mockSnapshot();
+  delete previous.assignments.items[0].source;
+  const other = { ...step, title: '另一份已改名作業' };
+  const otherSnapshot = mockSnapshot();
+  otherSnapshot.assignments.items = [{ ...previous.assignments.items[0], title: other.title }];
+  await scheduleCampusAssignmentReminder({ scope, step: other, snapshot: otherSnapshot, leadMinutes: 60, isCurrent: current });
+  const otherIds = [...mockAlarms.keys()];
+  for (const leadMinutes of [60, 1440])
+    await scheduleCampusAssignmentReminder({ scope, step, snapshot: previous, leadMinutes, isCurrent: current });
+  await expect(prepareAssignmentReminderSubmission('alice', async () => 'pu')).resolves.toContain('仍可能響鈴');
+  const { reconcileSubmittedAssignmentReceipt } = require('../services/submittedAssignmentReminders');
+  await reconcileSubmittedAssignmentReceipt({ id: 'alice', userId: 'alice', groupId: 'course', assignmentId: 'work', status: 'submitted', submittedAt: new Date().toISOString() });
+  expect([...mockAlarms.keys()]).toEqual(otherIds);
+});
+
+test('舊提醒配對儲存失敗只警告且保留排程，恢復後可重試取消', async () => {
+  const { scheduleCampusAssignmentReminder, prepareAssignmentReminderSubmission } = require('../services/campusAssignmentReminders');
+  const previous = mockSnapshot();
+  delete previous.assignments.items[0].source;
+  await scheduleCampusAssignmentReminder({ scope, step, snapshot: previous, leadMinutes: 60, isCurrent: current });
+  const ids = [...mockAlarms.keys()];
+  const storage = require('@react-native-async-storage/async-storage').default;
+  storage.setItem.mockRejectedValueOnce(new Error('write unavailable'));
+  await expect(prepareAssignmentReminderSubmission('alice', async () => 'pu')).resolves.toContain('重試');
+  expect([...mockAlarms.keys()]).toEqual(ids);
+  await prepareAssignmentReminderSubmission('alice', async () => 'pu');
+  const { reconcileSubmittedAssignmentReceipt } = require('../services/submittedAssignmentReminders');
+  await reconcileSubmittedAssignmentReceipt({ id: 'alice', userId: 'alice', groupId: 'course', assignmentId: 'work', status: 'submitted', submittedAt: new Date().toISOString() });
+  expect(mockAlarms.size).toBe(0);
 });

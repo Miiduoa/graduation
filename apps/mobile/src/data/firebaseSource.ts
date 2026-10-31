@@ -2063,7 +2063,8 @@ export const firebaseSource: DataSource = {
     }
 
     const { prepareAssignmentReminderSubmission } = require('../services/campusAssignmentReminders') as typeof import('../services/campusAssignmentReminders');
-    await prepareAssignmentReminderSubmission(userId, () => resolveUserSchoolId(userId));
+    let reminderWarning = await prepareAssignmentReminderSubmission(userId, () => resolveUserSchoolId(userId))
+      .catch(() => '提醒核對暫時失敗，提醒仍可能響鈴。請稍後到校園助理的舊版作業提醒管理重試。');
     if (getAuthInstance().currentUser?.uid !== userId)
       throw new Error('登入身分已變更，請重新開啟課程。');
 
@@ -2135,8 +2136,10 @@ export const firebaseSource: DataSource = {
       throw new Error('繳交結果尚未確認，請重新讀取紀錄，內容仍會保留。');
     }
     const { reconcileSubmittedAssignmentReceipt } = require('../services/submittedAssignmentReminders') as typeof import('../services/submittedAssignmentReminders');
-    await reconcileSubmittedAssignmentReceipt(receipt).catch(() => undefined);
-    return receipt;
+    await reconcileSubmittedAssignmentReceipt(receipt).catch(() => {
+      reminderWarning = '提醒取消尚未確認，仍可能響鈴。請稍後到校園助理的舊版作業提醒管理重試。';
+    });
+    return { ...receipt, reminderWarning };
   },
 
   async gradeSubmission(

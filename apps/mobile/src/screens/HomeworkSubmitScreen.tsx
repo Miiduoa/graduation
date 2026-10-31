@@ -291,7 +291,10 @@ function HomeworkSubmitContent({ route, uid, scopeKey, activeScope }: RouteProps
       setAnswer(receipt.content);
       setGrade(publishedAssignmentGrade(receipt as unknown as Record<string, unknown>));
       onAssignmentSubmitted({ uid, assignmentId: hwId });
-      Alert.alert('已繳交', '伺服器已確認收到這份作業。', [
+      Alert.alert('已繳交', ['伺服器已確認收到這份作業。', receipt.reminderWarning].filter(Boolean).join('\n\n'), [
+        ...(receipt.reminderWarning ? [{ text: '管理提醒／稍後重試', onPress: () => {
+          if (current()) safeNavigate(navigation, 'CampusAssistant');
+        } }] : []),
         { text: '返回', onPress: () => { if (current()) navigation.goBack(); } },
       ]);
     } catch (e) {

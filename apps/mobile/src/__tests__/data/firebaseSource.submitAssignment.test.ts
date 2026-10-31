@@ -8,7 +8,7 @@ jest.mock('../../services/submittedAssignmentReminders', () => ({
   reconcileSubmittedAssignmentReceipt: jest.fn(async () => undefined),
 }));
 jest.mock('../../services/campusAssignmentReminders', () => ({
-  prepareAssignmentReminderSubmission: jest.fn(async () => undefined),
+  prepareAssignmentReminderSubmission: jest.fn(async (): Promise<string | undefined> => undefined),
 }));
 jest.mock('../../firebase', () => ({
   getDb: () => 'db',
@@ -267,9 +267,20 @@ test.each([{ fromCache: true, hasPendingWrites: false }, { fromCache: false, has
   },
 );
 
-test('繳交交易前先配對舊提醒，無法安全辨識時保留答案並提示管理入口', async () => {
-  jest.mocked(prepareAssignmentReminderSubmission).mockRejectedValueOnce(new Error('請先到舊版作業提醒管理核對'));
-  await expect(firebaseSource.submitAssignment({ assignmentId: 'work', userId: 'alice', groupId: 'course', content: 'Answer' }))
-    .rejects.toThrow('舊版作業提醒管理');
-  expect(runTransaction).not.toHaveBeenCalled();
+test.each(['通知清單失敗', '儲存讀取失敗', '儲存寫入失敗', '摘要服務失敗'])(
+  '提醒維護故障不阻止繳交並回傳稍後重試警告：%s', async (message) => {
+    jest.mocked(prepareAssignmentReminderSubmission).mockRejectedValueOnce(new Error(message));
+    const receipt = await firebaseSource.submitAssignment({ assignmentId: 'work', userId: 'alice', groupId: 'course', content: 'Answer' });
+    expect(transaction.set).toHaveBeenCalled();
+    expect(receipt.status).toBe('submitted');
+    expect(receipt.reminderWarning).toContain('重試');
+    expect(reconcileSubmittedAssignmentReceipt).toHaveBeenCalled();
+  },
+);
+
+test('無關未知提醒只回傳警告，仍可取得本作業收據', async () => {
+  jest.mocked(prepareAssignmentReminderSubmission).mockResolvedValueOnce('未知舊提醒仍可能響鈴');
+  const receipt = await firebaseSource.submitAssignment({ assignmentId: 'work', userId: 'alice', groupId: 'course', content: 'Answer' });
+  expect(receipt.reminderWarning).toContain('仍可能響鈴');
+  expect(transaction.set).toHaveBeenCalled();
 });
