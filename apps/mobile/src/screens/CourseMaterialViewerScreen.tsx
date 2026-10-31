@@ -42,6 +42,8 @@ export default function CourseMaterialViewerScreen(props: RouteProps) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [revision, setRevision] = useState(0);
+  const activeRevision = useRef(0);
+  const loadFailed = useRef(false);
   useEffect(() => {
     if (!loading) return;
     const timer = setTimeout(() => {
@@ -215,13 +217,29 @@ export default function CourseMaterialViewerScreen(props: RouteProps) {
               Alert.alert('LMS（TronClass）已關閉', TRONCLASS_DATA_DISABLED_MESSAGE);
             }
           }}
-          onLoadStart={() => setLoading(true)}
-          onLoadEnd={() => setLoading(false)}
+          onLoadStart={() => {
+            if (revision !== activeRevision.current) return;
+            loadFailed.current = false;
+            setLoading(true);
+          }}
+          onLoad={() => {
+            if (revision !== activeRevision.current || loadFailed.current) return;
+            setError(null);
+            setLoading(false);
+          }}
+          onLoadEnd={() => {
+            if (revision !== activeRevision.current) return;
+            setLoading(false);
+          }}
           onError={(e: { nativeEvent?: { description?: string } }) => {
+            if (revision !== activeRevision.current) return;
+            loadFailed.current = true;
             setError(materialFailureMessage(new TypeError(e?.nativeEvent?.description)));
             setLoading(false);
           }}
           onHttpError={(event: { nativeEvent: { statusCode: number } }) => {
+            if (revision !== activeRevision.current) return;
+            loadFailed.current = true;
             setError(materialFailureMessage({ status: event.nativeEvent.statusCode }));
             setLoading(false);
           }}
@@ -240,7 +258,7 @@ export default function CourseMaterialViewerScreen(props: RouteProps) {
             }}
           >
             <Text style={{ color: '#fff', fontSize: 13 }}>{error}</Text>
-            <Pressable accessibilityRole="button" onPress={() => { setError(null); setLoading(true); setRevision((value) => value + 1); }}>
+            <Pressable accessibilityRole="button" onPress={() => { activeRevision.current += 1; loadFailed.current = false; setError(null); setLoading(true); setRevision(activeRevision.current); }}>
               <Text style={{ color: '#fff', padding: 12 }}>再試一次</Text>
             </Pressable>
             <Pressable accessibilityRole="button" onPress={goLeave}>

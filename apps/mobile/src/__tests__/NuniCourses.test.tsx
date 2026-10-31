@@ -228,6 +228,7 @@ it('keeps the loaded materials and retries the same cursor after a network failu
   fireEvent.press(view.getByRole('button', { name: '教材 1+' }));
   fireEvent.press(view.getByRole('button', { name: '載入較早教材' }));
   await view.findByRole('button', { name: '重試載入較早教材' });
+  expect(view.getByText(/目前無法連線，連線中斷/)).toBeTruthy();
   expect(view.getByText('第 1 份教材')).toBeTruthy();
   fireEvent.press(view.getByRole('button', { name: '重試載入較早教材' }));
   await view.findByText('第 2 份教材');

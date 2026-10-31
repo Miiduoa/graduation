@@ -1,3 +1,4 @@
+import { isNetworkLayerError } from './loadFailureCopy';
 import { NuniError, type NuniWorkspace } from './nuni';
 
 export function materialFailureMessage(failure: unknown, offline = false): string {
@@ -6,7 +7,7 @@ export function materialFailureMessage(failure: unknown, offline = false): strin
   if (failure instanceof NuniError && failure.code === 'CLASS_WORKSPACE_MATERIAL_CURSOR_INVALID') return '教材頁面已失效，請更新教材後再試。';
   if (status === 401 || status === 403) return '你目前沒有查看權限。請回課程首頁確認身分，或請老師協助。';
   if (status === 404 || status === 410) return '這份教材已不存在。請回課程首頁找老師更新後的版本。';
-  if (offline || failure instanceof TypeError) return '目前無法連線，連線中斷。確認網路連線後，再試一次。';
+  if (offline || isNetworkLayerError(failure) || failure instanceof TypeError) return '目前無法連線，連線中斷。確認網路連線後，再試一次。';
   return '教材服務暫時沒有回應。請稍後重試，或先回課程首頁。';
 }
 
