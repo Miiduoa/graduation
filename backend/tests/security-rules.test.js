@@ -3872,3 +3872,58 @@ for (const path of [
     await assertFails(ref.update({ classExceptions: [], classExceptionsRevision: 2 }));
   });
 }
+
+
+for (const basePath of ['users/synthetic/personalTimetable/current', 'users/synthetic/schools/pu/personalTimetable/current']) {
+  test(`separate arrangements survive real legacy full saves and clearing: ${basePath}`, async () => {
+    const db = testEnv.authenticatedContext('synthetic').firestore();
+    const base = { schoolId: 'pu', courses: [], shareWithFriends: false };
+    const ref = db.doc(basePath);
+    const changes = db.doc('users/synthetic/schools/pu/personalTimetable/exceptions');
+    const stop = { id: 'synthetic-stop', kind: 'cancel', originalDate: '2026-11-02' };
+    await assertSucceeds(ref.set({ ...base, classExceptions: [stop], classExceptionsRevision: 1 }));
+    const batch = db.batch();
+    batch.set(changes, { schoolId: 'pu', classExceptions: [stop], classExceptionsRevision: 1 });
+    batch.set(ref, base);
+    await assertSucceeds(batch.commit());
+    await assertSucceeds(ref.set({ ...base, shareWithFriends: true }));
+    assert.deepEqual((await changes.get()).data().classExceptions, [stop]);
+    await assertFails(changes.set({ schoolId: 'pu', classExceptions: [] }));
+    await assertFails(changes.update({ classExceptions: [], classExceptionsRevision: 1 }));
+    await assertFails(changes.delete());
+    await assertFails(testEnv.authenticatedContext('other').firestore().doc(changes.path).update({ classExceptions: [], classExceptionsRevision: 2 }));
+    await assertSucceeds(changes.update({ classExceptions: [], classExceptionsRevision: 2 }));
+    await assertSucceeds(ref.set(base));
+    assert.deepEqual((await changes.get()).data().classExceptions, []);
+    assert.equal((await changes.get()).data().classExceptionsRevision, 2);
+    await assertSucceeds(ref.delete());
+    assert.equal((await changes.get()).exists, true);
+  });
+}
+
+
+for (const current of ['users/alice/personalTimetable/current', 'users/alice/schools/pu/personalTimetable/current']) {
+  test(`separate arrangements follow sharing and accepted school friendships: ${current}`, async () => {
+    const path = 'users/alice/schools/pu/personalTimetable/exceptions';
+    await seedFirestore(async (db) => {
+      for (const uid of ['alice', 'bob', 'carol']) {
+        await db.doc(`users/${uid}`).set({ displayName: uid });
+        await db.doc(`schools/pu/members/${uid}`).set({ status: 'active', role: 'student' });
+      }
+      await db.doc('friendships/req_pu_alice_bob').set({ schoolId: 'pu', fromUid: 'alice', toUid: 'bob', status: 'accepted' });
+      await db.doc(current).set({ schoolId: 'pu', courses: [], shareWithFriends: true });
+      await db.doc(path).set({ schoolId: 'pu', classExceptions: [], classExceptionsRevision: 2 });
+    });
+    const bob = testEnv.authenticatedContext('bob').firestore();
+    const alice = testEnv.authenticatedContext('alice').firestore();
+    await assertSucceeds(bob.doc(path).get());
+    await assertFails(testEnv.authenticatedContext('carol').firestore().doc(path).get());
+    await assertFails(bob.doc(path).update({ classExceptions: [], classExceptionsRevision: 3 }));
+    await assertSucceeds(alice.doc(current).update({ shareWithFriends: false }));
+    await assertFails(bob.doc(path).get());
+    await assertSucceeds(alice.doc(path).get());
+    await assertSucceeds(alice.doc(current).update({ shareWithFriends: true }));
+    await seedFirestore(async (db) => { await db.doc('schools/pu/members/bob').update({ status: 'revoked' }); });
+    await assertFails(bob.doc(path).get());
+  });
+}

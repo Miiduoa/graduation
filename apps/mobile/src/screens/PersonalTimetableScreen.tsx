@@ -49,6 +49,7 @@ import {
   loadFriendTimetable,
   loadPersonalTimetable,
   savePersonalTimetable,
+  loadPersonalTimetableDraft,
   personalTimetableRecords,
   type StoredTimetable,
 } from '../services/personalTimetable';
@@ -187,9 +188,9 @@ function PersonalTimetableWorkspace({ initialTerm, initialCourseId, initialDate 
     );
   }
 
-  const persist = async (next: StoredTimetable, message: string) => {
+  const persist = async (next: StoredTimetable, message: string, editExceptions = false) => {
     try {
-      const saved = await savePersonalTimetable(uid, { ...next, schoolId }, localOwner);
+      const saved = await savePersonalTimetable(uid, { ...next, schoolId }, localOwner, editExceptions);
       setTimetable(saved.stored === 'cloud' ? saved.timetable : { ...next, schoolId });
       setNotice(saved.stored === 'cloud' ? message : `${'cloudPending' in saved ? '已記在這台裝置；雲端暫時未同步。' : '已記在這台裝置。'}${message}`);
       return true;
@@ -254,7 +255,18 @@ function PersonalTimetableWorkspace({ initialTerm, initialCourseId, initialDate 
           exceptions={timetable.classExceptions} schoolId={schoolId} initialDate={initialDate}
           termKey={selectedView === 'legacy' ? manualTerm : activeTerm}
           disabled={loadError || importStatus !== 'ready'}
-          onSave={(classExceptions) => persist({ ...timetable, classExceptions }, '這次安排已儲存。')} />
+          onSave={(classExceptions) => persist({ ...timetable, classExceptions }, '這次安排已儲存。', true)} />
+        {uid && !localOwner ? <Button text="重新讀取雲端課表" onPress={() => void load()} /> : null}
+        {uid && !localOwner ? <Button text="檢視這台裝置未同步草稿" onPress={() => {
+          const requestScope = importScopeKey;
+          const run = loadGeneration.current;
+          void loadPersonalTimetableDraft(uid, schoolId).then((draft) => {
+            if (scopeRef.current !== requestScope || loadGeneration.current !== run) return;
+            if (!draft) { setNotice('這台裝置沒有未同步草稿。'); return; }
+            setTimetable({ ...timetable, classExceptions: draft.classExceptions });
+            setNotice('目前預覽未同步的單次安排；請核對後在上方儲存。重新讀取可回到雲端版本。');
+          }).catch(() => setNotice('草稿暫時讀不到，原始資料仍保留。'));
+        }} /> : null}
         <Text style={{ color: theme.colors.muted }}>每週基準課表；指定日期的安排請查看上方。</Text>
         <PersonalImportSummary kind="timetable" />
         {importStatus === 'error' ? (

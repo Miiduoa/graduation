@@ -1,10 +1,13 @@
-import { classMeetingKey, manualClassRecords, classExceptionsForStorage } from '@campus/shared';
+import { classMeetingKey, manualClassRecords, classExceptionsForStorage, buildPersonalToday } from '@campus/shared';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { getDoc, setDoc, runTransaction } from 'firebase/firestore';
 import {
   createCourseAppeal,
   loadFriendTimetable,
   loadPersonalTimetable,
+  loadPersonalTimetableDraft,
+  loadOfflinePersonalTimetable,
+  personalTimetableRecords,
   savePersonalTimetable,
   type StoredTimetable,
 } from '../services/personalTimetable';
@@ -32,7 +35,9 @@ jest.mock('firebase/firestore', () => ({
       return { exists: () => data !== undefined, data: () => data };
     },
     set: (ref: DocRef, data: Record<string, unknown>) => {
-      mockCloudStore.set(ref.path, { ...mockCloudStore.get(ref.path), ...data });
+      const merged = { ...mockCloudStore.get(ref.path), ...data };
+      for (const key of Object.keys(merged)) if (merged[key] === '__DELETE__') delete merged[key];
+      mockCloudStore.set(ref.path, merged);
     },
   })),
   doc: jest.fn((_db: unknown, ...segments: string[]) => ({ path: segments.join('/') })),
@@ -40,6 +45,7 @@ jest.mock('firebase/firestore', () => ({
     const prev = mockCloudStore.get(ref.path) || {};
     mockCloudStore.set(ref.path, { ...prev, ...data });
   }),
+  deleteField: jest.fn(() => '__DELETE__'),
   serverTimestamp: jest.fn(() => 'SERVER_TIME'),
   collection: jest.fn((_db: unknown, ...segments: string[]) => ({ path: segments.join('/') })),
   updateDoc: jest.fn(),
@@ -61,6 +67,7 @@ const make = (schoolId: string, extras: Partial<StoredTimetable> = {}): StoredTi
 
 const scopedPath = (uid: string, schoolId: string) =>
   `users/${uid}/schools/${schoolId}/personalTimetable/current`;
+const exceptionsPath = (uid: string) => `users/${uid}/schools/pu/personalTimetable/exceptions`;
 const legacyPath = (uid: string) => `users/${uid}/personalTimetable/current`;
 
 beforeEach(async () => {
@@ -137,6 +144,7 @@ test('scoped cloud document wins over a matching legacy document', async () => {
   expect(loaded.courses.map((c) => c.id)).toEqual(['scoped']);
   expect(loaded.schoolId).toBe('pu');
   expect(jest.mocked(getDoc).mock.calls.map((call) => (call[0] as DocRef).path)).toEqual([
+    exceptionsPath('uid-1'),
     scopedPath('uid-1', 'pu'),
   ]);
 });
@@ -161,6 +169,7 @@ test('failed scoped read does not fall back to legacy cloud', async () => {
   const loaded = await loadPersonalTimetable('uid-1', 'pu');
   expect(loaded.courses).toEqual([]);
   expect(jest.mocked(getDoc).mock.calls.map((call) => (call[0] as DocRef).path)).toEqual([
+    exceptionsPath('uid-1'),
     scopedPath('uid-1', 'pu'),
   ]);
 });
@@ -299,19 +308,20 @@ test('additive class exceptions survive old writers and cloud round trips, with 
   await savePersonalTimetable('synthetic-account', { ...timetable, classExceptions: [value] });
   await savePersonalTimetable('synthetic-account', { ...timetable, courses: [] });
   expect((await loadPersonalTimetable('synthetic-account', 'pu')).classExceptions).toEqual(classExceptionsForStorage([value]));
-  expect(mockCloudStore.get(scopedPath('synthetic-account', 'pu'))?.classExceptions).toEqual(classExceptionsForStorage([value]));
+  expect(mockCloudStore.get(exceptionsPath('synthetic-account'))?.classExceptions).toEqual(classExceptionsForStorage([value]));
   await savePersonalTimetable('synthetic-account', { ...await loadPersonalTimetable('synthetic-account', 'pu'), classExceptions: [] });
   expect((await loadPersonalTimetable('synthetic-account', 'pu')).classExceptions).toEqual([]);
 });
 
-test('an offline class exception remains authoritative over an older cloud copy', async () => {
+test('online reload uses cloud arrangements and preserves an offline draft separately', async () => {
   const timetable = make('pu');
   const original = manualClassRecords(timetable)[0];
   const value = { id: 'offline-stop', original, courseKey: classMeetingKey(original), originalDate: '2026-11-02', kind: 'cancel' as const, createdAt: '2026-11-01T00:00:00Z' };
   mockCloudStore.set(scopedPath('synthetic-account', 'pu'), timetable as unknown as Record<string, unknown>);
   jest.mocked(runTransaction).mockRejectedValueOnce(new Error('offline'));
   expect(await savePersonalTimetable('synthetic-account', { ...timetable, classExceptions: [value] })).toEqual({ stored: 'local', cloudPending: true });
-  expect((await loadPersonalTimetable('synthetic-account', 'pu')).classExceptions).toEqual(classExceptionsForStorage([value]));
+  expect((await loadPersonalTimetable('synthetic-account', 'pu')).classExceptions).toBeUndefined();
+  expect(JSON.parse((await AsyncStorage.getItem('campus-one-personal-timetable:synthetic-account:pu:draft'))!).classExceptions).toEqual(classExceptionsForStorage([value]));
 });
 
 
@@ -322,7 +332,7 @@ test('a new device omitting exceptions preserves the current cloud arrangements'
   await savePersonalTimetable('synthetic-account', { ...timetable, classExceptions: [value] });
   await AsyncStorage.clear();
   expect(await savePersonalTimetable('synthetic-account', { ...timetable, shareWithFriends: true })).toMatchObject({ stored: 'cloud' });
-  expect(mockCloudStore.get(scopedPath('synthetic-account', 'pu'))?.classExceptions).toEqual(classExceptionsForStorage([value]));
+  expect(mockCloudStore.get(exceptionsPath('synthetic-account'))?.classExceptions).toEqual(classExceptionsForStorage([value]));
 });
 
 test('stale explicit exception edits cannot overwrite another device and sources stay private', async () => {
@@ -355,5 +365,91 @@ test('successive edits use the returned revision and retain the newest arrangeme
   if (first.stored !== 'cloud') throw new Error('expected cloud');
   const second = await savePersonalTimetable('synthetic-account', { ...first.timetable, classExceptions: [{ ...value, id: 'second', originalDate: '2026-11-09' }] });
   expect(second.stored).toBe('cloud');
-  expect(mockCloudStore.get(scopedPath('synthetic-account', 'pu'))).toMatchObject({ classExceptionsRevision: 2, classExceptions: [expect.objectContaining({ id: 'second' })] });
+  expect(mockCloudStore.get(exceptionsPath('synthetic-account'))).toMatchObject({ classExceptionsRevision: 2, classExceptions: [expect.objectContaining({ id: 'second' })] });
+});
+
+
+test('offline stale revision and a clock ahead recover on reload without losing the draft', async () => {
+  const first = await savePersonalTimetable('synthetic-account', { ...make('pu'), classExceptions: [] });
+  if (first.stored !== 'cloud') throw new Error('expected cloud');
+  mockCloudStore.set(exceptionsPath('synthetic-account'), { schoolId: 'pu', classExceptions: [], classExceptionsRevision: 2 });
+  jest.mocked(runTransaction).mockRejectedValueOnce(new Error('offline'));
+  await savePersonalTimetable('synthetic-account', { ...first.timetable, updatedAt: '2099-01-01' });
+  const localKey = 'campus-one-personal-timetable:synthetic-account:pu';
+  const local = JSON.parse((await AsyncStorage.getItem(localKey))!);
+  await AsyncStorage.setItem(localKey, JSON.stringify({ ...local, updatedAt: '2099-01-01T00:00:00Z' }));
+  const latest = await loadPersonalTimetable('synthetic-account', 'pu');
+  expect((await loadOfflinePersonalTimetable('synthetic-account', 'pu'))?.classExceptionsRevision).toBe(2);
+  expect(latest.classExceptionsRevision).toBe(2);
+  expect(await AsyncStorage.getItem('campus-one-personal-timetable:synthetic-account:pu:draft')).not.toBeNull();
+  expect(await savePersonalTimetable('synthetic-account', latest)).toMatchObject({ stored: 'cloud', timetable: { classExceptionsRevision: 2 } });
+});
+
+test('sharing from a stale screen preserves remote exceptions without advancing their revision', async () => {
+  const first = await savePersonalTimetable('synthetic-account', { ...make('pu'), classExceptions: [] });
+  if (first.stored !== 'cloud') throw new Error('expected cloud');
+  mockCloudStore.set(exceptionsPath('synthetic-account'), { schoolId: 'pu', classExceptions: [], classExceptionsRevision: 2 });
+  expect(await savePersonalTimetable('synthetic-account', { ...first.timetable, shareWithFriends: true }))
+    .toMatchObject({ stored: 'cloud', timetable: { shareWithFriends: true, classExceptionsRevision: 2 } });
+  expect(mockCloudStore.get(scopedPath('synthetic-account', 'pu'))).not.toHaveProperty('classExceptions');
+});
+
+
+test('draft inspection is scoped and explicit save resolves it while ordinary saves retain it', async () => {
+  const timetable = make('pu');
+  const original = manualClassRecords(timetable)[0];
+  const change = { id: 'draft-stop', original, courseKey: classMeetingKey(original), originalDate: '2026-11-02', kind: 'cancel' as const, createdAt: '' };
+  const first = await savePersonalTimetable('synthetic-account', { ...timetable, classExceptions: [] });
+  if (first.stored !== 'cloud') throw new Error('expected cloud');
+  jest.mocked(runTransaction).mockRejectedValueOnce(new Error('offline'));
+  await savePersonalTimetable('synthetic-account', { ...first.timetable, classExceptions: [change] }, undefined, true);
+  const current = await loadPersonalTimetable('synthetic-account', 'pu');
+  expect(current.classExceptions).toEqual([]);
+  const draft = await loadPersonalTimetableDraft('synthetic-account', 'pu');
+  expect(draft?.classExceptions).toEqual(classExceptionsForStorage([change]));
+  expect(await loadPersonalTimetableDraft('other', 'pu')).toBeNull();
+  expect(await loadPersonalTimetableDraft('synthetic-account', 'ntu')).toBeNull();
+  await savePersonalTimetable('synthetic-account', { ...current, shareWithFriends: true }, undefined, false);
+  expect(await loadPersonalTimetableDraft('synthetic-account', 'pu')).not.toBeNull();
+  jest.mocked(runTransaction).mockRejectedValueOnce(new Error('offline'));
+  await savePersonalTimetable('synthetic-account', { ...current, shareWithFriends: false }, undefined, false);
+  expect((await loadPersonalTimetableDraft('synthetic-account', 'pu'))?.classExceptions).toEqual(classExceptionsForStorage([change]));
+  await savePersonalTimetable('synthetic-account', { ...current, classExceptions: draft!.classExceptions }, undefined, true);
+  expect(await loadPersonalTimetableDraft('synthetic-account', 'pu')).toBeNull();
+});
+
+test('saving a different school never copies legacy exceptions across schools', async () => {
+  mockCloudStore.set(legacyPath('synthetic-account'), { ...make('ntu'), classExceptions: [], classExceptionsRevision: 7 });
+  await savePersonalTimetable('synthetic-account', make('pu'), undefined, false);
+  expect(mockCloudStore.get(exceptionsPath('synthetic-account'))).toMatchObject({ classExceptions: [], classExceptionsRevision: 0 });
+  expect(mockCloudStore.get(legacyPath('synthetic-account'))).toHaveProperty('classExceptionsRevision', 7);
+});
+
+
+test('ordinary save separates historical embedded sources with a new revision and preserves the arrangement', async () => {
+  const timetable = make('pu');
+  const original = { ...manualClassRecords(timetable)[0], source: { type: 'file' as const, line: 1, rawText: '合成私密來源', name: '合成檔名.csv' } };
+  const value = { id: 'historical-stop', original, courseKey: classMeetingKey(original), originalDate: '2026-11-02', kind: 'cancel' as const, createdAt: '' };
+  mockCloudStore.set(scopedPath('synthetic-account', 'pu'), { ...timetable, classExceptions: [value], classExceptionsRevision: 4 });
+  const saved = await savePersonalTimetable('synthetic-account', timetable, undefined, false);
+  expect(saved).toMatchObject({ stored: 'cloud', timetable: { classExceptionsRevision: 5, classExceptions: classExceptionsForStorage([value]) } });
+  expect(mockCloudStore.get(scopedPath('synthetic-account', 'pu'))).not.toHaveProperty('classExceptions');
+  expect(JSON.stringify(mockCloudStore.get(exceptionsPath('synthetic-account')))).not.toContain('合成私密來源');
+});
+
+
+test('reloading a remote cancellation replaces a later offline room draft in actual occurrences', async () => {
+  const timetable = make('pu');
+  const original = manualClassRecords(timetable)[0];
+  const stop = { id: 'remote-stop', original, courseKey: classMeetingKey(original), originalDate: '2026-11-02', kind: 'cancel' as const, createdAt: '' };
+  const first = await savePersonalTimetable('synthetic-account', { ...timetable, classExceptions: [] });
+  if (first.stored !== 'cloud') throw new Error('expected cloud');
+  mockCloudStore.set(exceptionsPath('synthetic-account'), { schoolId: 'pu', classExceptions: classExceptionsForStorage([stop]), classExceptionsRevision: 2 });
+  jest.mocked(runTransaction).mockRejectedValueOnce(new Error('offline'));
+  await savePersonalTimetable('synthetic-account', { ...first.timetable, classExceptions: [{ ...stop, id: 'offline-room', kind: 'room', location: '合成教室' }] }, undefined, true);
+  const loaded = await loadPersonalTimetable('synthetic-account', 'pu');
+  expect(buildPersonalToday(personalTimetableRecords(loaded), { schoolId: 'pu', now: new Date('2026-11-02T08:00:00+08:00') }).today).toEqual([]);
+  expect((await loadPersonalTimetableDraft('synthetic-account', 'pu'))?.classExceptions?.[0]?.kind).toBe('room');
+  await savePersonalTimetable('synthetic-account', { ...loaded, shareWithFriends: true }, undefined, false);
+  expect((await loadPersonalTimetable('synthetic-account', 'pu')).classExceptionsRevision).toBe(2);
 });
