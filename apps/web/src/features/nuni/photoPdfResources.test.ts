@@ -1,5 +1,5 @@
 import { afterEach, expect, it, vi } from 'vitest';
-import { buildPhotoPdf, validatePhotoPages, type PhotoPage } from './photoPdf';
+import { buildPhotoPdf, renderPhoto, validatePhotoPages, type PhotoPage } from './photoPdf';
 import { checkPhotoPixels, photoDimensions } from '@campus/shared/src/photoPdfBudget';
 
 function page(width = 100, height = 100): PhotoPage {
@@ -26,13 +26,13 @@ it('rejects excessive single and total pixels before decoding, including unsuppo
   await expect(validatePhotoPages([page(4000, 3000)])).resolves.toBeUndefined();
 });
 
-function renderer(blobSize: number, duringEncode?: () => void) {
+function renderer(blobSize: number, duringEncode?: () => void, width = 100, height = 100) {
   const decode = vi.fn(async () => {});
   vi.stubGlobal(
     'Image',
     class {
-      naturalWidth = 100;
-      naturalHeight = 100;
+      naturalWidth = width;
+      naturalHeight = height;
       src = '';
       decode = decode;
     },
@@ -67,4 +67,14 @@ it('stops after cancellation at an async boundary and releases the canvas', asyn
   await expect(buildPhotoPdf([page(), page()], controller.signal)).rejects.toThrow('取消');
   expect(decode).toHaveBeenCalledTimes(1);
   expect(canvas.width).toBe(0);
+});
+
+it('常見相機照片先縮小再編碼，整批來源預算仍生效', async () => {
+  await expect(validatePhotoPages([page(4032, 3024)])).resolves.toBeUndefined();
+  await expect(validatePhotoPages(Array(3).fill(page(4032, 3024)))).rejects.toThrow('處理預算');
+  renderer(4, undefined, 4032, 3024);
+  const photo = await renderPhoto(page(4032, 3024));
+  expect(photo.width * photo.height).toBeLessThanOrEqual(12_000_000);
+  expect(photo.width).toBeLessThan(4032);
+  expect(photo.width / photo.height).toBeCloseTo(4 / 3, 2);
 });

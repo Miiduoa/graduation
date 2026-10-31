@@ -53,7 +53,7 @@ export function PhotoPdfEditor({
         </button>
       </div>
       <p>
-        選 1–8 張 JPEG 或 PNG 照片。每張最多 1200 萬像素，合計 3200 萬像素。由上往下就是 PDF
+        選 1–8 張 JPEG 或 PNG 照片。來源每張最多 1600 萬像素（較大照片會縮至 1200 萬像素），合計 3200 萬像素。由上往下就是 PDF
         頁序，先轉正、排好，再看一次。
       </p>
       <label className={styles.pick}>

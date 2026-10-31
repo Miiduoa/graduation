@@ -2,7 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { Button, Image, Modal, ScrollView, Text, View } from 'react-native';
 import { useTheme } from '../../state/theme';
 import { formatAssignmentFileSize, moveAssignmentFile } from '@campus/shared/src/assignmentFiles';
-import { pickAssignmentAlbum, type LocalNativeFile } from './assignmentFileSubmit';
+import { pickPhotoPdfFiles, type LocalNativeFile } from './assignmentFileSubmit';
 import {
   buildNativePhotoPdf,
   validateNativePhotoPages,
@@ -58,8 +58,8 @@ export function NativePhotoPdfEditor({
     >
       <Text style={textStyle}>將照片合併成 PDF</Text>
       <Text style={textStyle}>
-        選 1–8 張 JPEG 或 PNG 照片，每張最多 1200 萬像素、合計 3200
-        萬像素。由上往下就是頁序。先轉正、排好，再看一次。
+        選 1–8 張 JPEG 或 PNG 照片，來源每張最多 1600 萬像素（較大照片會縮至 1200 萬像素）、合計 3200
+        萬像素。請從檔案選取原始照片。由上往下就是頁序。先轉正、排好，再看一次。
       </Text>
       <Button
         title="取消製作"
@@ -75,7 +75,7 @@ export function NativePhotoPdfEditor({
         onPress={async () => {
           setBusy(true);
           try {
-            const files = await pickAssignmentAlbum([]);
+            const files = await pickPhotoPdfFiles();
             if (!live.current) return;
             if (files.length + pages.length > 8) {
               setError('一本最多 8 頁，請減少照片後再選。');
@@ -88,7 +88,7 @@ export function NativePhotoPdfEditor({
           } catch {
             if (live.current)
               setError(
-                '無法讀取照片，請確認為 JPEG／PNG，且每張不超過 1200 萬像素、合計不超過 3200 萬像素及每張 20 MiB。',
+                '無法讀取照片，請確認為 JPEG／PNG，且來源每張不超過 1600 萬像素、合計不超過 3200 萬像素及每張 20 MiB。',
               );
           } finally {
             if (live.current) setBusy(false);

@@ -3,6 +3,7 @@ import {
   checkPhotoCancellation,
   checkPhotoPixels,
   photoDimensions,
+  photoRenderSize,
   PHOTO_HEADER_BYTES,
 } from '@campus/shared/src/photoPdfBudget';
 import { createPhotoPdf, type PdfPhoto } from '@campus/shared/src/photoPdf';
@@ -23,8 +24,9 @@ export async function renderPhoto(page: PhotoPage, signal?: AbortSignal): Promis
     const sideways = page.rotation % 180 !== 0;
     checkPhotoCancellation(signal);
     checkPhotoPixels(image.naturalWidth, image.naturalHeight);
-    canvas.width = sideways ? image.naturalHeight : image.naturalWidth;
-    canvas.height = sideways ? image.naturalWidth : image.naturalHeight;
+    const target = photoRenderSize(image.naturalWidth, image.naturalHeight);
+    canvas.width = sideways ? target.height : target.width;
+    canvas.height = sideways ? target.width : target.height;
     if (!canvas.width || !canvas.height) throw new Error('無法讀取照片。');
     const context = canvas.getContext('2d');
     if (!context) throw new Error('這個瀏覽器無法製作 PDF，請換個瀏覽器再試。');
@@ -32,7 +34,7 @@ export async function renderPhoto(page: PhotoPage, signal?: AbortSignal): Promis
     context.fillRect(0, 0, canvas.width, canvas.height);
     context.translate(canvas.width / 2, canvas.height / 2);
     context.rotate((page.rotation * Math.PI) / 180);
-    context.drawImage(image, -image.naturalWidth / 2, -image.naturalHeight / 2);
+    context.drawImage(image, -target.width / 2, -target.height / 2, target.width, target.height);
     const blob = await new Promise<Blob | null>((resolve) =>
       canvas.toBlob(resolve, 'image/jpeg', 0.94),
     );

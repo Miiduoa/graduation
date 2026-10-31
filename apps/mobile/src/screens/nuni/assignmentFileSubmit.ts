@@ -130,6 +130,20 @@ export async function pickAssignmentAlbum(current: LocalNativeFile[]): Promise<L
   return next;
 }
 
+// Copy original bytes without invoking the image picker encoder.
+export async function pickPhotoPdfFiles(): Promise<LocalNativeFile[]> {
+  const result = await DocumentPicker.getDocumentAsync({
+    multiple: true,
+    copyToCacheDirectory: true,
+    type: ['image/jpeg', 'image/png'],
+  });
+  if (result.canceled) return [];
+  if (result.assets.length > 8) throw new Error('一本最多 8 頁。');
+  return Promise.all(result.assets.map((asset) =>
+    fromUri(asset.uri, asset.name, asset.mimeType || 'application/octet-stream', 'image'),
+  ));
+}
+
 export async function pickAssignmentDocuments(current: LocalNativeFile[]): Promise<LocalNativeFile[]> {
   const result = await DocumentPicker.getDocumentAsync({
     multiple: true,

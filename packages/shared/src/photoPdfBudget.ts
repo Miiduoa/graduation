@@ -1,10 +1,11 @@
 import { assertAssignmentFileSize } from './assignmentFiles';
 
 export const PHOTO_HEADER_BYTES = 256 * 1024;
-export const MAX_PHOTO_PIXELS = 12_000_000;
+export const MAX_PHOTO_PIXELS = 16_000_000;
+export const MAX_RENDERED_PHOTO_PIXELS = 12_000_000;
 export const MAX_TOTAL_PHOTO_PIXELS = 32_000_000;
 export const PHOTO_BUDGET_MESSAGE =
-  '照片超過處理預算：每張最多 1200 萬像素、合計 3200 萬像素，每張檔案最多 20 MiB。請自行縮小照片再試。';
+  '照片超過處理預算：來源每張最多 1600 萬像素、合計 3200 萬像素，每張檔案最多 20 MiB。較大照片會縮至 1200 萬像素；超限請刪減照片再試。';
 
 export function checkPhotoCancellation(signal?: AbortSignal) {
   if (signal?.aborted) throw new Error('已取消製作 PDF。');
@@ -58,4 +59,10 @@ export function photoDimensions(bytes: Uint8Array): { width: number; height: num
     }
   }
   throw new Error('請使用可讀取尺寸的 JPEG 或 PNG 照片；其他格式請先另存後再選。');
+}
+
+export function photoRenderSize(width: number, height: number) {
+  checkPhotoPixels(width, height);
+  const scale = Math.min(1, Math.sqrt(MAX_RENDERED_PHOTO_PIXELS / (width * height)));
+  return { width: Math.floor(width * scale), height: Math.floor(height * scale) };
 }

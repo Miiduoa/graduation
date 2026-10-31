@@ -1,10 +1,10 @@
 import React from 'react';
 import { fireEvent, render } from '@testing-library/react-native';
 import { NativePhotoPdfEditor } from '../screens/nuni/NativePhotoPdfEditor';
-import { pickAssignmentAlbum } from '../screens/nuni/assignmentFileSubmit';
+import { pickPhotoPdfFiles } from '../screens/nuni/assignmentFileSubmit';
 import { buildNativePhotoPdf } from '../screens/nuni/nativePhotoPdf';
 jest.mock('../state/theme', () => ({ useTheme: () => require('../ui/theme').theme }));
-jest.mock('../screens/nuni/assignmentFileSubmit', () => ({ pickAssignmentAlbum: jest.fn() }));
+jest.mock('../screens/nuni/assignmentFileSubmit', () => ({ pickPhotoPdfFiles: jest.fn() }));
 jest.mock('../screens/nuni/nativePhotoPdf', () => ({
   buildNativePhotoPdf: jest.fn(),
   validateNativePhotoPages: jest.fn(async () => {}),
@@ -20,7 +20,7 @@ const file = (name: string) => ({
 beforeEach(() => jest.clearAllMocks());
 
 test('edits pages, previews and confirms only the generated file', async () => {
-  jest.mocked(pickAssignmentAlbum).mockResolvedValue([file('a'), file('b'), file('c')]);
+  jest.mocked(pickPhotoPdfFiles).mockResolvedValue([file('a'), file('b'), file('c')]);
   const output = { ...file('作業照片.pdf'), kind: 'file' as const, contentType: 'application/pdf' };
   const dispose = jest.fn();
   jest
@@ -54,7 +54,7 @@ test('edits pages, previews and confirms only the generated file', async () => {
 });
 
 test('cancel never adds a file and oversized generation cannot be confirmed', async () => {
-  jest.mocked(pickAssignmentAlbum).mockResolvedValue([file('a')]);
+  jest.mocked(pickPhotoPdfFiles).mockResolvedValue([file('a')]);
   jest.mocked(buildNativePhotoPdf).mockRejectedValue(new Error('too large'));
   const confirm = jest.fn();
   const cancel = jest.fn();
@@ -70,7 +70,7 @@ test('cancel never adds a file and oversized generation cannot be confirmed', as
 });
 
 test('取消或卸載會通知進行中的轉檔停止', async () => {
-  jest.mocked(pickAssignmentAlbum).mockResolvedValue([file('a')]);
+  jest.mocked(pickPhotoPdfFiles).mockResolvedValue([file('a')]);
   jest.mocked(buildNativePhotoPdf).mockImplementation(() => new Promise(() => {}));
   const view = render(<NativePhotoPdfEditor onConfirm={jest.fn()} onCancel={jest.fn()} />);
   fireEvent.press(view.getByText('選照片'));

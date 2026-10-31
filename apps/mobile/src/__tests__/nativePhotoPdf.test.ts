@@ -1,3 +1,4 @@
+import { Image } from 'react-native';
 import { buildNativePhotoPdf } from '../screens/nuni/nativePhotoPdf';
 import { createPhotoPdf } from '@campus/shared/src/photoPdf';
 import * as ImageManipulator from 'expo-image-manipulator';
@@ -137,6 +138,27 @@ test('來源像素預算在呼叫原生轉檔前拒絕過大的照片與整批�
     mockHeight = 3000;
     await expect(buildNativePhotoPdf(Array(3).fill(page('a', 0)))).rejects.toThrow('處理預算');
     expect(ImageManipulator.manipulateAsync).not.toHaveBeenCalled();
+  } finally {
+    mockWidth = 20;
+    mockHeight = 30;
+  }
+});
+
+test('常見相機照片在旋轉與編碼前縮至安全尺寸', async () => {
+  try {
+    mockWidth = 4032;
+    mockHeight = 3024;
+    const size = jest.spyOn(Image, 'getSize').mockImplementation((_uri, success) => {
+      success(3024, 4032);
+    });
+    const proof = await buildNativePhotoPdf([page('camera', 90)]);
+    size.mockRestore();
+    const actions = jest.mocked(ImageManipulator.manipulateAsync).mock.calls[0][1];
+    const target = (actions[0] as { resize: { width: number; height: number } }).resize;
+    expect(target.width * target.height).toBeLessThanOrEqual(12_000_000);
+    expect(target.width / target.height).toBeCloseTo(3 / 4, 2);
+    expect(actions[1]).toEqual({ rotate: 90 });
+    proof.dispose();
   } finally {
     mockWidth = 20;
     mockHeight = 30;
