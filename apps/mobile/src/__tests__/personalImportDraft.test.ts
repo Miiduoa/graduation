@@ -60,3 +60,37 @@ test.each(['options', 'duplicate', 'source', 'retry'])(
     expect(await loadPersonalImportDraft(scope)).toBeNull();
   },
 );
+
+test.each([{ selection: undefined }, { selection: [] }, { selection: ['kept'] }])(
+  'preserves optional selection %p in saved progress',
+  async ({ selection }) => {
+    const scope = { owner: 'first', schoolId: 'pu' };
+    const parsed = result();
+    parsed.rows[0].id = 'kept';
+    const draft = {
+      text: source,
+      options,
+      ...parsed,
+      selected: selection ? [...selection] : undefined,
+      retryBatches: [],
+    };
+    await savePersonalImportDraft(scope, draft);
+    expect((await loadPersonalImportDraft(scope))?.selected).toEqual(selection);
+  },
+);
+
+test.each([['missing-row'], [123], 'invalid'])(
+  'rejects malformed saved selection %p',
+  async (selected) => {
+    const scope = { owner: 'first', schoolId: 'pu' };
+    const draft = {
+      text: source,
+      options,
+      ...result(),
+      selected: selected as string[],
+      retryBatches: [],
+    };
+    await savePersonalImportDraft(scope, draft);
+    expect(await loadPersonalImportDraft(scope)).toBeNull();
+  },
+);

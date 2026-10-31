@@ -533,7 +533,7 @@ function ImportWorkspace({
         setSource(draft.options.source ?? { type: 'paste' });
         setRows(draft.rows);
         setIssues(draft.issues);
-        setSelected(new Set(draft.rows.map((row) => row.id)));
+        setSelected(new Set(draft.selected ?? draft.rows.map((row) => row.id)));
         setAiReviewed(false);
         setAiRetry(
           draft.retryBatches.length
@@ -569,6 +569,7 @@ function ImportWorkspace({
             text,
             options: { kind, schoolId, academicYear, semester, source, periodProfile: profile },
             rows,
+            selected: [...selected],
             issues,
             retryBatches: aiRetry?.text === text ? aiRetry.batches : [],
           }
@@ -586,6 +587,7 @@ function ImportWorkspace({
     source,
     text,
     rows,
+    selected,
     issues,
     aiRetry,
     aiRunning,
@@ -764,6 +766,11 @@ function ImportWorkspace({
           onProgress: (partial) => {
             if (!current(run) || controller.signal.aborted) return;
             const partialRows = input?.retry ? [...rows, ...partial.rows] : partial.rows;
+            const partialSelected = new Set(
+              input?.retry
+                ? [...selected, ...partial.rows.map((row) => row.id)]
+                : partial.rows.map((row) => row.id),
+            );
             const partialIssues = input?.retry
               ? [
                   ...issues.filter(
@@ -775,7 +782,7 @@ function ImportWorkspace({
             if (partialRows.length) acceptDocumentSource();
             setRows(partialRows);
             setIssues(partialIssues);
-            setSelected(new Set(partialRows.map((row) => row.id)));
+            setSelected(partialSelected);
             setAiRetry(
               partial.retryBatches?.length
                 ? { text: inputText, source: inputSource, batches: partial.retryBatches }
@@ -792,6 +799,7 @@ function ImportWorkspace({
                 periodProfile: profile,
               },
               rows: partialRows,
+              selected: [...partialSelected],
               issues: partialIssues,
               retryBatches: partial.retryBatches ?? [],
             }).catch(() => {

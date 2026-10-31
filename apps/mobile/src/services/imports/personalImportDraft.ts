@@ -8,6 +8,7 @@ export type PersonalImportDraft = {
   text: string;
   options: PersonalImportOptions;
   rows: PersonalImportRow[];
+  selected?: string[];
   issues: ImportIssue[];
   retryBatches: PersonalImportAiTextBatch[];
 };
@@ -74,6 +75,11 @@ export async function loadPersonalImportDraft(
           ['paste', 'file', 'screenshot'].includes(row.source.type) &&
           (row.source.name === undefined || typeof row.source.name === 'string'),
       ) ||
+      (draft.selected !== undefined &&
+        (!Array.isArray(draft.selected) ||
+          !draft.selected.every(
+            (id) => typeof id === 'string' && draft.rows.some((row) => row.id === id),
+          ))) ||
       !Array.isArray(draft.issues) ||
       !draft.issues.every(
         (issue) =>

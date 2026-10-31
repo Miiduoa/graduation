@@ -1888,3 +1888,83 @@ test('未勾選前節數學時仍保留下一節與英文供正式匯入', async
     ]),
   );
 });
+
+test.each(['cancel', 'complete', 'empty', 'zero', 'error', 'restore'] as const)(
+  'retry progress preserves excluded rows and edited grades through %s',
+  async (outcome) => {
+    readyAi();
+    const base = aiResult();
+    const a = base.rows[0];
+    const b = { ...a, id: `${a.id}-b`, title: '英文' };
+    const c = { ...a, id: `${a.id}-c`, title: '統計' };
+    const retryBatches = [{ text: '待處理', startLine: 2 }];
+    let finish!: (value: typeof base) => void;
+    let fail!: (reason: Error) => void;
+    jest
+      .mocked(runMobilePersonalImportAi)
+      .mockResolvedValueOnce({ ...base, rows: [a, b], retryBatches })
+      .mockImplementationOnce(
+        () =>
+          new Promise((resolve, reject) => {
+            finish = resolve;
+            fail = reject;
+          }),
+      );
+    let view = render(<PersonalImportScreen />);
+    await waitFor(() => expect(view.queryByLabelText('讀取匯入紀錄')).toBeNull());
+    prepareAi(view);
+    fireEvent.changeText(view.getByLabelText('貼上或修正原始文字'), `${aiSource}\n待處理`);
+    fireEvent.press(view.getByText(/^用 [A-Z]{2} 整理文字$/));
+    await view.findByText('確認新增 2 筆');
+    fireEvent.press(view.getByLabelText('匯入 英文'));
+    fireEvent.press(view.getAllByText('編輯與連結課班')[0]);
+    fireEvent.changeText(view.getByLabelText('成績'), '90');
+    fireEvent.press(view.getByText('重試未完成段落'));
+    await waitFor(() => expect(runMobilePersonalImportAi).toHaveBeenCalledTimes(2));
+    const request = jest.mocked(runMobilePersonalImportAi).mock.calls[1][3];
+    const partial = { ...base, rows: outcome === 'zero' ? [] : [c], retryBatches };
+    await act(async () => request?.onProgress?.(partial));
+    const check = () => {
+      expect(view.getByLabelText('匯入 資料庫').props.accessibilityState.checked).toBe(true);
+      expect(view.getByLabelText('匯入 英文').props.accessibilityState.checked).toBe(false);
+      if (outcome === 'zero') expect(view.queryByLabelText('匯入 統計')).toBeNull();
+      else expect(view.getByLabelText('匯入 統計').props.accessibilityState.checked).toBe(true);
+      expect(view.getByText(`確認新增 ${outcome === 'zero' ? 1 : 2} 筆`)).toBeTruthy();
+    };
+    check();
+    if (outcome === 'restore') {
+      await waitFor(async () =>
+        expect(await loadPersonalImportDraft(scope)).toMatchObject({
+          selected: [a.id, c.id],
+          rows: [{ grade: '90' }, {}, {}],
+        }),
+      );
+      view.unmount();
+      view = render(<PersonalImportScreen />);
+      await view.findByText('已恢復上次完成的待核對草稿；未完成段落可以重試。');
+    } else if (outcome === 'cancel') {
+      fireEvent.press(view.getByText(/^取消 [A-Z]{2} 整理$/));
+    } else {
+      await act(async () => {
+        if (outcome === 'error') fail(new Error('synthetic failure'));
+        else
+          finish({
+            ...base,
+            rows: outcome === 'empty' || outcome === 'zero' ? [] : [c],
+            retryBatches: [],
+          });
+      });
+    }
+    check();
+    if (outcome === 'cancel' || outcome === 'restore') {
+      await act(async () => {
+        request?.onProgress?.({ ...base, rows: [b], retryBatches: [] });
+        finish({ ...base, rows: [b], retryBatches: [] });
+      });
+      check();
+    }
+    if (!view.queryByLabelText('成績')) fireEvent.press(view.getAllByText('編輯與連結課班')[0]);
+    expect(view.getByLabelText('成績').props.value).toBe('90');
+    expect((await loadPersonalImports(scope)).records).toHaveLength(0);
+  },
+);

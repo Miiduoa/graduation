@@ -1790,3 +1790,58 @@ it('未勾選的前列不能合併已勾選的下一列，確認後仍保留第�
     ]),
   );
 });
+
+it('keeps exclusions through retry progress, cancellation, restoration and late replies', async () => {
+  const completed = aiGradePreview();
+  const b = { ...completed.rows[0], id: 'completed-b', title: '英文' };
+  const c = { ...completed.rows[0], id: 'new-c', title: '統計' };
+  completed.rows.push(b);
+  const partial = { ...completed, rows: [...completed.rows, c] };
+  const retry = {
+    completed,
+    batches: [{ text: '英文,2,90', startLine: 3, columnContext: '課程名稱,學分,成績' }],
+  };
+  let finish!: (value: typeof completed) => void;
+  vi.mocked(runPersonalImportAi)
+    .mockResolvedValueOnce({ ...completed, retry })
+    .mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          finish = resolve;
+        }),
+    );
+  const view = render(<PersonalImportCenter />);
+  chooseAiScreenshot();
+  await screen.findByRole('button', { name: '重試未完成的 1 段' });
+  fireEvent.click(screen.getByRole('checkbox', { name: /第 2 筆/ }));
+  fireEvent.click(screen.getByRole('button', { name: '重試未完成的 1 段' }));
+  await waitFor(() => expect(runPersonalImportAi).toHaveBeenCalledTimes(2));
+  const request = vi.mocked(runPersonalImportAi).mock.calls[1][0];
+  await act(async () => request.onPartial?.({ ...partial, retry }));
+  const check = () => {
+    expect((screen.getByRole('checkbox', { name: /第 1 筆/ }) as HTMLInputElement).checked).toBe(
+      true,
+    );
+    expect((screen.getByRole('checkbox', { name: /第 2 筆/ }) as HTMLInputElement).checked).toBe(
+      false,
+    );
+    expect((screen.getByRole('checkbox', { name: /第 3 筆/ }) as HTMLInputElement).checked).toBe(
+      true,
+    );
+    expect(screen.getByRole('button', { name: '確認匯入 2 筆' })).toBeTruthy();
+  };
+  expect((screen.getByRole('checkbox', { name: /第 2 筆/ }) as HTMLInputElement).checked).toBe(
+    false,
+  );
+  expect(readPersonalImportPartialDraft(context)?.excluded).toEqual([b.id]);
+  fireEvent.click(screen.getByRole('button', { name: '取消讀取' }));
+  await act(async () => {
+    request.onPartial?.(completed);
+    finish(completed);
+  });
+  view.unmount();
+  render(<PersonalImportCenter />);
+  await screen.findByRole('button', { name: '以部分結果取代目前草稿' });
+  fireEvent.click(screen.getByRole('button', { name: '以部分結果取代目前草稿' }));
+  await waitFor(check);
+});
