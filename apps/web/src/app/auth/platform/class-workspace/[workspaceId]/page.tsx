@@ -1,21 +1,13 @@
-import { Suspense } from 'react';
-import type { Metadata } from 'next';
-import { ClassWorkspace } from '@/features/platform/ClassWorkspace';
-
-export const metadata: Metadata = {
-  title: '課班工作台',
-  description: '課班簽到、課程內容、邀請與掛靠。',
-};
+import { redirect } from 'next/navigation';
+import { legacyCourseHref } from '@/features/nuni/studyNavigation';
 
 export default async function ClassWorkspacePage({
   params,
+  searchParams,
 }: {
   params: Promise<{ workspaceId: string }>;
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
-  const { workspaceId } = await params;
-  return (
-    <Suspense fallback={<p role="status">正在打開課班工作台…</p>}>
-      <ClassWorkspace workspaceId={workspaceId} />
-    </Suspense>
-  );
+  const [{ workspaceId }, query] = await Promise.all([params, searchParams]);
+  redirect(legacyCourseHref(workspaceId, query));
 }
