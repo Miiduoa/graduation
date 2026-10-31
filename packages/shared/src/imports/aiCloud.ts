@@ -33,8 +33,9 @@ const privateTableDelimiters = ['\t', ',', '|', ';', '、'] as const;
 const tableField = /^(?:(?:課程|科目|活動)?名稱|課號|科目代碼|課程代碼|學分數?|成績|分數|學年度|學期|(?:授課)?教師|教室|星期|開始節次|結束節次|日期|開始時間|結束時間|地點|班級|系所|序號|編號|course(?: name| code)?|credits?|grade|score|semester|teacher|room|day|date|start|end|title|location)$/iu;
 
 function isAcademicBoundary(value: string): boolean {
-  return /^(?:課程代碼|科目代碼|課號|日期|course code|date)[\t,|;、](?:\d{6,8}|\[課程資料\])$/iu.test(value) || tableField.test(value) || /^【[^【】]+】$/u.test(value) ||
-    value.split(/[\t,|;、]/u).filter((cell) => tableField.test(cell.trim())).length >= 2 ||
+  const cells = value.split(/[\t,|;、]/u).map((cell) => cell.trim());
+  return /^(?:課程代碼|科目代碼|課號|日期|course code|date)[\t,|;、](?:\d{6,8}|\[課程資料\])$/iu.test(value) ||
+    (cells.length >= 2 && cells.every((cell) => tableField.test(cell) || privateField.test(cell))) ||
     // 無表頭的三欄成績列也可形成邊界，避免把課名當成續行姓名。
     /^[^\t,|;、]+([\t,|;、])[ \t]*\d+(?:\.\d+)?\1[ \t]*(?:\d{1,3}(?:\.\d+)?|[A-F][+-]?|通過|及格)$/iu.test(value) ||
     (/學分\s*[:：]?\s*\d/u.test(value) && /(?:成績|分數)\s*[:：]?\s*(?:\d|[A-F])/iu.test(value)) ||
@@ -69,6 +70,8 @@ function maskPrivateVerticalFields(text: string): { text: string; safe: boolean 
       const value = lines[next].trim();
       if (!value) continue;
       if (label.test(value) || inlineLabel.test(value) || isAcademicBoundary(value)) break;
+      // 換頁與單格欄名不能證明私密清單已結束，繼續追蹤後續值。
+      if (/^【[^【】]+】$/u.test(value) || tableField.test(value)) continue;
       if (!/^[\p{L}\p{M}\d .@_+()\-'’·•]+$/u.test(value) && !/^\[(?:姓名|學號|證號|個資|聯絡資料)已遮罩\]$/u.test(value)) {
         safe = false;
         break;
@@ -118,6 +121,13 @@ function maskPrivateTables(text: string): { text: string; safe: boolean } {
         index % 2 === 0 ? privateField.test(cell) || tableField.test(cell)
           : !privateField.test(cell) && !tableField.test(cell));
       let columns: number[] = [];
+      // 已辨識私密表後，含欄名字樣的資料列不能改寫欄位狀態。
+      // 只有與原私密欄位置一致的完整表頭可重複出現，其餘歧義拒送。
+      if (privateColumns.length && named.length &&
+        !(cells.length === width && cells.every((cell) => privateField.test(cell) || tableField.test(cell)) &&
+          named.length === privateColumns.length && named.every((column, index) => column === privateColumns[index]))) {
+        return { text: masked, safe: false };
+      }
       if (keyValue) {
         const next = records.slice(recordIndex + 1).find((item) => item.cells.some((cell) => cell.trim()));
         if (next && next.cells.length === cells.length && !next.cells.some((cell) => privateField.test(cell.trim())) &&
@@ -126,16 +136,18 @@ function maskPrivateTables(text: string): { text: string; safe: boolean } {
         privateColumns = [];
         width = 0;
       } else if (named.length) {
-        if (named.some((index) => index + 1 < cells.length && !privateField.test(cells[index + 1]) && !tableField.test(cells[index + 1])))
+        if (!cells.every((cell) => privateField.test(cell) || tableField.test(cell)))
           return { text: masked, safe: false };
         privateColumns = named;
         width = cells.length;
-        // 多欄表格只有完整表頭才能重設，資料值撞到欄名仍沿用原欄位。
+        // 每個欄位都已驗證，才可建立私密欄追蹤。
       } else if ((academic >= 2 && cells.every((cell) => tableField.test(cell))) ||
-        (width <= 1 && cells.length === 1 && isAcademicBoundary(cells[0])) ||
         (width === 1 && isAcademicBoundary(masked.slice(record.start, record.contentEnd).trim()))) {
         privateColumns = [];
         width = 0;
+      } else if (width === 1 && cells.length === 1 &&
+        (/^【[^【】]+】$/u.test(cells[0]) || tableField.test(cells[0]))) {
+        continue;
       } else if (privateColumns.length) {
         if (cells.length !== width) return { text: masked, safe: false };
         columns = privateColumns;

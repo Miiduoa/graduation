@@ -2447,7 +2447,7 @@ function ImportWorkspace({
                     ) : null}
                     {expanded === row.id ? (
                       <RowEditor
-                        disabled={saving}
+                        disabled={saving || aiRunning}
                         row={row}
                         workspaces={workspaces}
                         periodProfile={profile}

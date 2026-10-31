@@ -1533,6 +1533,7 @@ test('failed-range retry keeps edits made to completed rows', async () => {
     return { ...next, retryBatches: [] };
   });
   const view = render(<PersonalImportScreen />);
+  await waitFor(() => expect(view.queryByLabelText('讀取匯入紀錄')).toBeNull());
   prepareAi(view);
   fireEvent.changeText(view.getByLabelText('貼上或修正原始文字'), `${aiSource}\n${retrySource}`);
   fireEvent.press(view.getByText('用 AI 整理文字'));
@@ -1555,6 +1556,7 @@ test('completed progress is restored after leaving the screen before the next ba
     return new Promise((resolve) => { finish = () => resolve(aiResult()); });
   });
   const view = render(<PersonalImportScreen />);
+  await waitFor(() => expect(view.queryByLabelText('讀取匯入紀錄')).toBeNull());
   prepareAi(view);
   fireEvent.changeText(view.getByLabelText('貼上或修正原始文字'), `${aiSource}\n尚未完成的課程`);
   fireEvent.press(view.getByText('用 AI 整理文字'));
@@ -1690,7 +1692,7 @@ test.each([
 
 test('late AsyncStorage draft recovery cannot replace freshly pasted input', async () => {
   let resolveDraft!: (value: string | null) => void;
-  const getItem = AsyncStorage.getItem.bind(AsyncStorage);
+  const getItem = jest.mocked(AsyncStorage.getItem).getMockImplementation()!;
   const spy = jest.spyOn(AsyncStorage, 'getItem').mockImplementation((key) =>
     key.startsWith('campus.personal-import-draft.v1:')
       ? new Promise((resolve) => { resolveDraft = resolve; })
@@ -1698,6 +1700,7 @@ test('late AsyncStorage draft recovery cannot replace freshly pasted input', asy
   try {
     const view = render(<PersonalImportScreen />);
     await waitFor(() => expect(resolveDraft).toBeDefined());
+    await waitFor(() => expect(view.queryByLabelText('讀取匯入紀錄')).toBeNull());
     fireEvent.changeText(view.getByLabelText('貼上或修正原始文字'), '新貼上的資料');
     await act(async () => resolveDraft(JSON.stringify({
       text: '舊草稿', options: { kind: 'grades', schoolId: 'pu', academicYear: '114', semester: '2' },
@@ -1705,7 +1708,10 @@ test('late AsyncStorage draft recovery cannot replace freshly pasted input', asy
     })));
     expect(view.getByLabelText('貼上或修正原始文字').props.value).toBe('新貼上的資料');
     expect(view.queryByText('已恢復上次完成的待核對草稿；未完成段落可以重試。')).toBeNull();
-  } finally { spy.mockRestore(); }
+  } finally {
+    spy.mockRestore();
+    jest.mocked(AsyncStorage.getItem).mockImplementation(getItem);
+  }
 });
 
 test('screenshot grid edits, split, missing class and deletion survive remount before explicit import', async () => {

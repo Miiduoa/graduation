@@ -125,7 +125,9 @@ describe('personal import cloud client', () => {
     const masked = maskPersonalImportText(text);
     expect(masked).not.toContain('王小明');
     expect(isPersonalImportCloudMaskSafe(masked)).toBe(true);
-    expect(masked).toContain(text.includes('微積分') ? '微積分' : text.includes('資料庫') ? '資料庫' : '程式設計');
+    // 單格課名標籤不足以結束姓名清單，後續文字保守遮罩。
+    if (text.includes('微積分')) expect(masked).not.toContain('微積分');
+    else expect(masked).toContain(text.includes('資料庫') ? '資料庫' : '程式設計');
     expect(masked.split('\n')).toHaveLength(text.split('\n').length);
   });
 

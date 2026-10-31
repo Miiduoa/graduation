@@ -341,3 +341,32 @@ for (const delimiter of [',', '\t', '|', ';', '、']) {
     }
   }
 }
+
+// 所有資料均為合成值；覆蓋欄名碰撞、直排續行與換頁。
+const privacyCases: string[] = [];
+for (const delimiter of [',', '\t', '|', ';', '、']) {
+  for (const label of ['姓名', '學生姓名', '學生', '名字', '學生名字', '學生學號', '學號', '学号', 'studentid', 'studentnumber', '身分證', '身分證字號', '身份證', '身份證字號', '電子郵件', '電郵', '聯絡電話', '電話', '手機', '手機號碼', 'email', 'phone', 'mobile', '教師', '授課教師', '授課老師', '老師', '教授', '教師姓名', 'teacher', 'teachername', 'instructor', 'studentname', 'name']) {
+    for (const row of [`王甲乙,微積分,3,${label}`, `王甲乙,${label},學分,成績`, `王甲乙,${label},3,85`]) {
+      privacyCases.push(`姓名,課程名稱,學分,成績\n${row}`.replaceAll(',', delimiter));
+    }
+    privacyCases.push(`課程名稱,學號,學分,成績\n微積分,A12345,3,${label}`.replaceAll(',', delimiter));
+  }
+}
+privacyCases.push('姓名\n王甲乙\n王丙丁,學分,成績\nB54321\n課程名稱,學分,成績\n微積分,3,85');
+for (const boundary of ['日期', '【第二頁】', '課程名稱', '學分', '成績', '教室', 'date']) {
+  for (const [label, first, second] of [['姓名', '王甲乙', '王丙丁'], ['學號', 'A12345', 'B54321']]) {
+    for (const head of [`${label}\n${first}`, `${label}:${first}`]) {
+      privacyCases.push(`${head}\n${boundary}\n${second}\n課程名稱,學分,成績\n微積分,3,85`);
+    }
+  }
+}
+
+it.each(privacyCases)('首次及重試均不得外送私密續行：%s', async (text) => {
+  fetcher.mockResolvedValue(new Response('{}', { status: 503 }));
+  await run(text);
+  await run(text, { retry: {
+    batches: [{ text: text.split('\n').slice(1).join('\n'), startLine: 2, columnContext: text.split('\n')[0] }],
+    completed: { rows: [], issues: [] }, cloudSafe: true, sourceText: text,
+  } });
+  expect(JSON.stringify(fetcher.mock.calls)).not.toMatch(/王甲乙|王丙丁|A12345|B54321/u);
+});
