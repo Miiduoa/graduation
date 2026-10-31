@@ -22,6 +22,7 @@ const { buildDerivedCreditSummary } = require('./lib/puCreditSummary');
 const { parsePuCourseTime } = require('./lib/puCourseTime');
 const { taipeiDateKey } = require('./lib/taipeiDay');
 const { sendWithCampusFetch, setCampusHttpFetch } = require('./lib/puCampusTransport');
+const { isEcampusFetchPaused, ecampusPausedResult } = require('./lib/ecampusFetchPause');
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -636,6 +637,8 @@ async function puLogin(uid, upassword) {
  * @returns {Promise<{success, courses, studentInfo, semester, totalCredits, error}>}
  */
 async function puFetchCourses(cookies, semester) {
+  // E 校園暫停時不發任何請求（含 mypu SSO 轉接），直接回暫停狀態。
+  if (isEcampusFetchPaused()) return ecampusPausedResult('courses');
   try {
     if (!cookies || !Object.keys(cookies).length) throw new Error('No session cookies');
 
@@ -730,6 +733,8 @@ async function puFetchCourses(cookies, semester) {
  * the same tested parser. No guessed semester codes or synthetic grades.
  */
 async function puFetchGrades(cookies, semester, options = {}) {
+  // E 校園暫停時不發任何請求（含 mypu SSO 轉接），直接回暫停狀態。
+  if (isEcampusFetchPaused()) return ecampusPausedResult('grades');
   const deadlineAt = Date.now() + GRADE_FETCH_BUDGET_MS;
   const hopOpts = { hopRetries: MAX_TRANSIENT_HOP_RETRIES, deadlineAt };
   try {
@@ -915,6 +920,8 @@ function extractAnnouncementsFromHtml(html) {
  * @returns {Promise<{success, announcements, error}>}
  */
 async function puFetchAnnouncements(cookies) {
+  // E 校園暫停時不發任何請求（含 mypu SSO 轉接），直接回暫停狀態。
+  if (isEcampusFetchPaused()) return ecampusPausedResult('announcements');
   try {
     if (!cookies || !Object.keys(cookies).length) throw new Error('No session cookies');
 
@@ -942,6 +949,8 @@ async function puFetchAnnouncements(cookies) {
  * @returns {Promise<{success, absences, error}>}
  */
 async function puFetchAbsence(cookies) {
+  // E 校園暫停時不發任何請求（含 mypu SSO 轉接），直接回暫停狀態。
+  if (isEcampusFetchPaused()) return ecampusPausedResult('absence');
   try {
     if (!cookies || !Object.keys(cookies).length) throw new Error('No session cookies');
 
@@ -1000,6 +1009,8 @@ async function puFetchAbsence(cookies) {
  * @returns {Promise<{success, creditSummary, error}>}
  */
 async function puFetchCreditSummary(cookies) {
+  // E 校園暫停時不發任何請求（含 mypu SSO 轉接），直接回暫停狀態。
+  if (isEcampusFetchPaused()) return ecampusPausedResult('creditSummary');
   try {
     if (!cookies || !Object.keys(cookies).length) throw new Error('No session cookies');
     // A derived grade summary is not a verified graduation credit audit.
@@ -1018,6 +1029,8 @@ async function puFetchCreditSummary(cookies) {
  * @returns {Promise<{success, studentInfo, error}>}
  */
 async function puFetchStudentInfo(cookies) {
+  // E 校園暫停時不發任何請求（含 mypu SSO 轉接），直接回暫停狀態。
+  if (isEcampusFetchPaused()) return ecampusPausedResult('studentInfo');
   try {
     if (!cookies || !Object.keys(cookies).length) throw new Error('No session cookies');
 

@@ -5,6 +5,12 @@ import {
   persistOwnedMypuCookies,
   publicCampusDataResult,
 } from '../../../../../backend/functions/lib/puSessionStore.js';
+import {
+  ECAMPUS_PAUSED_CODE,
+  ECAMPUS_PAUSED_MESSAGE,
+  isEcampusFetchPaused,
+  isEcampusPausedResult,
+} from './ecampusFetchPause';
 
 type RecordData = Record<string, unknown>;
 export type SchoolDataSnapshot = { exists: boolean; data: () => RecordData | undefined };
@@ -86,6 +92,22 @@ function publicResult(kind: keyof AcademicFetchers, result: RecordData): RecordD
   return publicCampusDataResult(kind, result) as RecordData;
 }
 
+/** E 校園暫停時的回應：不是錯誤，前端改顯示「E 校園資料暫停更新中」。 */
+function pausedAcademicRecords(uid: string, dataType: keyof AcademicFetchers): RecordData {
+  return {
+    success: true,
+    paused: true,
+    code: ECAMPUS_PAUSED_CODE,
+    message: ECAMPUS_PAUSED_MESSAGE,
+    ownerUid: uid,
+    schoolId: 'pu',
+    source: 'pu-campus',
+    dataType,
+    fetchedAt: null,
+    result: null,
+  };
+}
+
 export async function requireAcademicAccount(db: AcademicFirestore, uid: string): Promise<void> {
   const [profile, membership] = await Promise.all([
     db.doc(`users/${uid}`).get(),
@@ -103,10 +125,12 @@ export function createAcademicRecordsHandler({
   db,
   fetchers,
   now = Date.now,
+  paused = isEcampusFetchPaused,
 }: {
   db: AcademicFirestore;
   fetchers: AcademicFetchers;
   now?: () => number;
+  paused?: () => boolean;
 }) {
   return async (request: CallableRequest) => {
     const uid = request.auth?.uid;
@@ -123,6 +147,8 @@ export function createAcademicRecordsHandler({
     const dataType = kind as keyof AcademicFetchers;
     try {
       await requireAcademicAccount(db, uid);
+      // E 校園暫停時不讀 session、不打 alcat／mypu，直接回暫停狀態。
+      if (paused()) return pausedAcademicRecords(uid, dataType);
       // 使用登入已建立的本人 session；前端不能指定他人的學號、學校或 session。
       const sessions = await db.collection('_puSessions')
         .where('ownerUid', '==', uid)
@@ -141,6 +167,7 @@ export function createAcademicRecordsHandler({
           ? await fetchers.grades(cookies, '', { mypuCookies: storedMypu })
           : await fetchers.courses(cookies, ''),
       );
+      if (isEcampusPausedResult(result)) return pausedAcademicRecords(uid, dataType);
       if (result.code === 'session-expired') reconnect();
       if (result.success !== true || !Array.isArray(result[dataType])) unavailable();
       const nextMypu = dataType === 'grades' ? schoolSessionCookies(result.mypuCookies) : null;

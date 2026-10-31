@@ -60,6 +60,7 @@ const schoolReaderSources = [
   'backend/functions/lib/taipeiDay.js',
   'backend/functions/lib/puSessionStore.js',
   'backend/functions/lib/puCampusTransport.js',
+  'backend/functions/lib/ecampusFetchPause.js',
 ];
 const schoolReaderDirectories = ['backend/', 'backend/functions/', 'backend/functions/lib/'];
 

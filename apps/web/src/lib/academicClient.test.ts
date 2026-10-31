@@ -177,3 +177,22 @@ it('expires a stalled token request without sending it after the deadline', asyn
   expect(fetchMock).not.toHaveBeenCalled();
   expect(vi.getTimerCount()).toBe(0);
 });
+
+it('E 校園暫停回應轉成 paused 原因，不當成成功資料', async () => {
+  fetchMock.mockImplementation(async () => reply({
+    success: true, paused: true, code: 'ecampus-paused', message: 'E 校園資料暫停更新中',
+    ownerUid: 'student-a', schoolId: 'pu', source: 'pu-campus', dataType: 'grades',
+    fetchedAt: null, result: null,
+  }));
+  await expect(loadAcademicRecords('grades', 'student-a')).rejects.toMatchObject({ reason: 'paused' });
+  expect(fetchMock).toHaveBeenCalledTimes(1);
+});
+
+it('其他帳號的暫停回應不被採用', async () => {
+  fetchMock.mockImplementation(async () => reply({
+    success: true, paused: true, code: 'ecampus-paused', message: 'E 校園資料暫停更新中',
+    ownerUid: 'student-b', schoolId: 'pu', source: 'pu-campus', dataType: 'grades',
+    fetchedAt: null, result: null,
+  }));
+  await expect(loadAcademicRecords('grades', 'student-a')).rejects.not.toMatchObject({ reason: 'paused' });
+});

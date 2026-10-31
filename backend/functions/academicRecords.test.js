@@ -514,3 +514,116 @@ describe('clearPuCampusSessions', () => {
     expect(f.sessions.has('own-session')).toBe(true);
   });
 });
+
+describe('PU_ECAMPUS_FETCH_PAUSED（E 校園資料暫停）', () => {
+  async function invokeHttp(f, dataType = 'grades') {
+    getAuth.mockReturnValue({ verifyIdToken: jest.fn(async () => ({ uid: f.uid })) });
+    const res = {
+      statusCode: 200,
+      body: null,
+      headers: {},
+      status(code) {
+        this.statusCode = code;
+        return this;
+      },
+      json(body) {
+        this.body = body;
+        return this;
+      },
+      set(key, value) {
+        this.headers[key] = value;
+        return this;
+      },
+    };
+    await createPuCampusDataHandler(f.dependencies)(
+      {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', authorization: 'Bearer valid' },
+        body: { sessionId: 'own-session', dataType },
+      },
+      res,
+    );
+    return res;
+  }
+
+  test.each(['grades', 'courses'])('開啟時 getMyAcademicRecords 不呼叫 %s 抓取並回暫停狀態', async (dataType) => {
+    process.env.PU_ECAMPUS_FETCH_PAUSED = 'true';
+    const f = fixture();
+    const result = await createGetMyAcademicRecords(f.dependencies)(f.request({ dataType }));
+    expect(result).toEqual({
+      success: true,
+      paused: true,
+      code: 'ecampus-paused',
+      message: 'E 校園資料暫停更新中',
+      ownerUid: f.uid,
+      schoolId: 'pu',
+      source: 'pu-campus',
+      dataType,
+      fetchedAt: null,
+      result: null,
+    });
+    expect(f.fetchers.grades).not.toHaveBeenCalled();
+    expect(f.fetchers.courses).not.toHaveBeenCalled();
+  });
+
+  test('開啟時仍先檢查身分，不讓其他學校帳號拿到暫停回應', async () => {
+    process.env.PU_ECAMPUS_FETCH_PAUSED = '1';
+    const f = fixture();
+    f.profile.schoolId = 'other';
+    await expect(createGetMyAcademicRecords(f.dependencies)(f.request())).rejects.toMatchObject({
+      code: 'permission-denied',
+    });
+  });
+
+  test.each([undefined, '', '0', 'false', 'yes', 'on'])(
+    '值為 %p 時行為不變，照常抓取',
+    async (value) => {
+      if (value === undefined) delete process.env.PU_ECAMPUS_FETCH_PAUSED;
+      else process.env.PU_ECAMPUS_FETCH_PAUSED = value;
+      const f = fixture();
+      const result = await createGetMyAcademicRecords(f.dependencies)(f.request());
+      expect(result.paused).toBeUndefined();
+      expect(result.success).toBe(true);
+      expect(Number.isFinite(Date.parse(result.fetchedAt))).toBe(true);
+      expect(f.fetchers.grades).toHaveBeenCalledTimes(1);
+    },
+  );
+
+  test('抓取函式回暫停結果時也轉成暫停狀態，不當成錯誤', async () => {
+    const f = fixture();
+    f.fetchers.grades.mockResolvedValue({
+      success: false,
+      paused: true,
+      code: 'ecampus-paused',
+      error: 'E 校園資料暫停更新中',
+      grades: [],
+    });
+    const result = await createGetMyAcademicRecords(f.dependencies)(f.request());
+    expect(result).toMatchObject({ success: true, paused: true, fetchedAt: null, result: null });
+  });
+
+  test.each(['grades', 'courses', 'studentInfo', 'absence', 'creditSummary', 'announcements'])(
+    '開啟時 puFetchCampusData 不呼叫 %s 抓取',
+    async (dataType) => {
+      process.env.PU_ECAMPUS_FETCH_PAUSED = 'TRUE';
+      const f = fixture();
+      const res = await invokeHttp(f, dataType);
+      expect(res.statusCode).toBe(503);
+      expect(res.body).toEqual({ error: 'E 校園資料暫停更新中', code: 'ecampus-paused' });
+      expect(f.fetchers[dataType]).not.toHaveBeenCalled();
+      expect(f.removed).not.toHaveBeenCalled();
+    },
+  );
+
+  test('開啟時 puFetchData 不呼叫抓取並回暫停代碼', async () => {
+    process.env.PU_ECAMPUS_FETCH_PAUSED = '1';
+    const f = fixture();
+    await expect(
+      createPuFetchData(f.dependencies)({
+        auth: { uid: f.uid },
+        data: { sessionId: 'own-session', dataType: 'grades' },
+      }),
+    ).rejects.toMatchObject({ code: 'unavailable', details: { code: 'ecampus-paused' } });
+    expect(f.fetchers.grades).not.toHaveBeenCalled();
+  });
+});

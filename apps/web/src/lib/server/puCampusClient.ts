@@ -5,6 +5,7 @@ import {
   studentLoginHopTimeoutMs,
 } from '../schoolLoginTimeouts';
 import { createPuRelayFetch, normalizeRelayHostname, normalizeRelayTarget } from './puEdgeRelay';
+import { isEcampusFetchPaused } from './ecampusFetchPause';
 
 const ALCAT_ORIGIN = 'https://alcat.pu.edu.tw';
 const TRONCLASS_ORIGIN = 'https://tronclass.pu.edu.tw';
@@ -871,6 +872,8 @@ export function createPuCampusGateway(
     },
 
     async fetchStudentInfo(cookies) {
+      // E 校園暫停時不打 alcat，回空資料（與找不到學生資料相同）。
+      if (isEcampusFetchPaused()) return {};
       try {
         const page = await getFollow(`${portalOrigin}/stu_query/query_course.html`, cookies, 3, {
           route: 'student',

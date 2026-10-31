@@ -8,6 +8,7 @@ import {
 import { isOfficialAcademicSchool } from './academicOfficialSchool';
 import { LMS_CONNECTING_CODE } from './schoolLoginTimeouts';
 import { withSchoolDataDeadline } from './schoolDataRequest';
+import { ECAMPUS_PAUSED_CODE } from './ecampusPause';
 
 export type AcademicKind = 'courses' | 'grades';
 export type AcademicData = { courses: AcademicCourseResponse; grades: AcademicGradeResponse };
@@ -20,7 +21,13 @@ export type AcademicSnapshot<K extends AcademicKind> = {
 
 export class AcademicConnectionError extends Error {
   constructor(
-    public readonly reason: 'reconnect' | 'unavailable' | 'permission' | 'unconfigured' | 'connecting',
+    public readonly reason:
+      | 'reconnect'
+      | 'unavailable'
+      | 'permission'
+      | 'unconfigured'
+      | 'connecting'
+      | 'paused',
     cause?: unknown,
   ) {
     super(reason, cause === undefined ? undefined : { cause });
@@ -103,6 +110,18 @@ export async function loadAcademicRecords<K extends AcademicKind>(
     const data = await readAcademicResponse(kind, uid);
     if (!data || typeof data !== 'object') throw new Error('Invalid academic response');
     const row = data as Record<string, unknown>;
+    if (
+      row.success === true &&
+      row.paused === true &&
+      row.code === ECAMPUS_PAUSED_CODE &&
+      row.ownerUid === uid &&
+      getAuth()?.currentUser?.uid === uid &&
+      row.schoolId === expectedSchool &&
+      row.dataType === kind
+    ) {
+      // E 校園暫停更新：伺服器沒有打學校，不是錯誤，也不重試。
+      throw new AcademicConnectionError('paused');
+    }
     if (
       row.success !== true ||
       row.ownerUid !== uid ||
