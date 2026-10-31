@@ -1,0 +1,24 @@
+appId: ${APP_ID}
+---
+# A hierarchy change after a native header tap does not prove navigation occurred.
+# Retry only this transition, and never tap again once the destination is visible.
+- retry:
+    maxRetries: 2
+    commands:
+      - runFlow:
+          when:
+            notVisible:
+              id: login-landing
+          commands:
+            - assertVisible:
+                id: BackButton
+                enabled: true
+            - waitForAnimationToEnd
+            - tapOn:
+                id: BackButton
+                enabled: true
+                retryTapIfNoChange: true
+      - assertVisible:
+          id: login-landing
+- assertNotVisible:
+    id: BackButton
