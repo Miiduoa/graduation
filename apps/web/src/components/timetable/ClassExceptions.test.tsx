@@ -30,13 +30,13 @@ it('saves one cancellation, exposes provenance, and restores the original arrang
   expect(saved[0]).toMatchObject({
     kind: 'cancel',
     originalDate: '2026-11-02',
-    original: { source: row.source },
+    original: { source: { type: 'paste', line: 1, rawText: '' } },
   });
   view.rerender(
     <ClassExceptions records={[row]} exceptions={saved} schoolId="pu" onSave={onSave} />,
   );
   expect(screen.getByLabelText('當日實際課程').textContent).toBe('');
-  expect(screen.getByText('合成原始資料')).toBeTruthy();
+  expect(screen.queryByText('合成原始資料')).toBeNull();
   fireEvent.click(screen.getByRole('button', { name: '恢復原安排' }));
   await waitFor(() => expect(onSave).toHaveBeenLastCalledWith([]));
 });
@@ -64,5 +64,17 @@ it('previews a makeup overlap before saving', () => {
   fireEvent.change(screen.getByLabelText('查看日期'), { target: { value: '2026-11-02' } });
   fireEvent.change(screen.getByLabelText('這次安排'), { target: { value: 'move' } });
   fireEvent.change(screen.getByLabelText('補課日期'), { target: { value: '2026-11-03' } });
+  expect(screen.getByText('補課時間與其他課程重疊，請核對；仍可儲存。')).toBeTruthy();
+});
+
+
+it('warns before saving an overnight move overlapping only on the following day', () => {
+  render(<ClassExceptions records={[row, { ...row, id: 'early', title: '凌晨課', dayOfWeek: 3, startTime: '00:30', endTime: '01:30' }]} schoolId="pu" onSave={async () => undefined} />);
+  fireEvent.change(screen.getByLabelText('查看日期'), { target: { value: '2026-11-02' } });
+  fireEvent.change(screen.getByLabelText('這次安排'), { target: { value: 'move' } });
+  fireEvent.change(screen.getByLabelText('補課日期'), { target: { value: '2026-11-03' } });
+  fireEvent.change(screen.getByLabelText('開始'), { target: { value: '23:30' } });
+  fireEvent.change(screen.getByLabelText('結束日期'), { target: { value: '2026-11-04' } });
+  fireEvent.change(screen.getByLabelText('結束'), { target: { value: '01:00' } });
   expect(screen.getByText('補課時間與其他課程重疊，請核對；仍可儲存。')).toBeTruthy();
 });

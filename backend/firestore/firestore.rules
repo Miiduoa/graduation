@@ -1190,6 +1190,23 @@ service cloud.firestore {
         allow read, write: if isSelf(uid);
       }
 
+      // Whole-document writes from older clients cannot erase dated arrangements.
+      function validClassExceptionsWrite() {
+        let before = resource == null ? {} : resource.data;
+        let after = request.resource.data;
+        return (
+          (!before.keys().hasAny(['classExceptions']) || after.keys().hasAll(['classExceptions']))
+          && after.get('classExceptions', []) == before.get('classExceptions', [])
+          && after.get('classExceptionsRevision', 0) == before.get('classExceptionsRevision', 0)
+        ) || (
+          after.keys().hasAll(['classExceptions', 'classExceptionsRevision'])
+          && after.classExceptions is list
+          && after.classExceptions.size() <= 200
+          && after.classExceptionsRevision is int
+          && after.classExceptionsRevision == before.get('classExceptionsRevision', 0) + 1
+        );
+      }
+
       match /personalTimetable/{docId} {
         allow read: if isSelf(uid) || (
           docId == 'current'
@@ -1200,8 +1217,9 @@ service cloud.firestore {
         );
         allow create, update: if isSelf(uid)
           && request.resource.data.courses is list
-          && request.resource.data.courses.size() <= 80;
-        allow delete: if isSelf(uid);
+          && request.resource.data.courses.size() <= 80
+            && validClassExceptionsWrite();
+        allow delete: if isSelf(uid) && !resource.data.keys().hasAny(['classExceptions']);
       }
 
       match /schools/{schoolId} {
@@ -1315,8 +1333,9 @@ service cloud.firestore {
           allow create, update: if isSelf(uid)
             && request.resource.data.schoolId == schoolId
             && request.resource.data.courses is list
-            && request.resource.data.courses.size() <= 80;
-          allow delete: if isSelf(uid);
+            && request.resource.data.courses.size() <= 80
+            && validClassExceptionsWrite();
+          allow delete: if isSelf(uid) && !resource.data.keys().hasAny(['classExceptions']);
         }
 
         match /{document=**} {

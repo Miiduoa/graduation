@@ -33,7 +33,7 @@ test('changes the room for a selected date and retains original source', async (
     kind: 'room',
     originalDate: '2026-11-02',
     location: '新教室',
-    original: { source: row.source },
+    original: { source: { type: 'paste', line: 1, rawText: '' } },
   });
   view.rerender(
     <ClassExceptions records={[row]} exceptions={saved} schoolId="pu" onSave={onSave} />,
@@ -55,4 +55,16 @@ test('keeps a makeup draft after a storage failure and tolerates partially typed
   fireEvent.press(view.getByText('儲存這次安排'));
   await waitFor(() => expect(view.getByText('尚未完成儲存，請保留畫面並重試。')).toBeTruthy());
   expect(view.getByLabelText('補課日期').props.value).toBe('2026-11-03');
+});
+
+
+test('previews an overlap only on the overnight ending date', () => {
+  const view = render(<ClassExceptions records={[row, { ...row, id: 'early', title: '凌晨課', dayOfWeek: 3, startTime: '00:30', endTime: '01:30' }]} schoolId="pu" onSave={async () => true} />);
+  fireEvent.changeText(view.getByLabelText('查看日期'), '2026-11-02');
+  fireEvent.press(view.getByText('改期補課'));
+  fireEvent.changeText(view.getByLabelText('補課日期'), '2026-11-03');
+  fireEvent.changeText(view.getByLabelText('開始時間'), '23:30');
+  fireEvent.changeText(view.getByLabelText('結束日期'), '2026-11-04');
+  fireEvent.changeText(view.getByLabelText('結束時間'), '01:00');
+  expect(view.getByText('補課時間與其他課程重疊，請核對；仍可儲存。')).toBeTruthy();
 });

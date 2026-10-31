@@ -40,7 +40,11 @@ export function buildNextClassSnapshot(
         term: plan.termKey,
         schoolId,
       });
-      if (classes.some((item) => item.id === entry.row.id && item.startAt === startAt)) continue;
+      const previous = classes.find((item) => item.id === entry.row.id && item.startAt === startAt);
+      if (previous) {
+        previous.conflict ||= entry.conflict;
+        continue;
+      }
       classes.push({
         id: entry.row.id,
         title: entry.row.title,

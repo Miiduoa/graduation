@@ -48,12 +48,11 @@ export function refreshClassReminders(
           now: new Date(now.getTime() + offset * 86400000),
         }).today,
     ).flat();
-    const unique = plans.filter(
-      (entry, index) =>
-        plans.findIndex(
-          (other) => other.row.id === entry.row.id && other.startAt === entry.startAt,
-        ) === index,
-    );
+    const unique = plans.filter((entry, index) => {
+      const first = plans.findIndex((other) => other.row.id === entry.row.id && other.startAt === entry.startAt);
+      if (first !== index) plans[first].conflict ||= entry.conflict;
+      return first === index;
+    });
     for (const entry of classReminderPlan(unique, now.getTime()).slice(0, 48)) {
       if (!current()) return;
       const identifier = await Notifications.scheduleNotificationAsync({

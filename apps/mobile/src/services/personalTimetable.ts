@@ -6,6 +6,7 @@ import {
   getDoc,
   getDocs,
   query,
+  runTransaction,
   serverTimestamp,
   setDoc,
   updateDoc,
@@ -14,6 +15,8 @@ import {
 import { httpsCallable } from 'firebase/functions';
 import {
   assertClassExceptions,
+  classExceptionsForStorage,
+  assertTimetableStorageSize,
   withClassExceptions,
   MEETUP_DURATION_MINUTES,
   MAX_PERIOD_SLOTS,
@@ -33,6 +36,7 @@ import { isProvidenceSchoolId, toPublicSchoolId } from '../data/schoolIds';
 const KEY = 'campus-one-personal-timetable';
 
 export type StoredTimetable = {
+  classExceptionsRevision?: number;
   classExceptions?: import('@campus/shared').ClassException[];
   courses: PersonalCourse[];
   meta: TimetableMeta;
@@ -219,23 +223,51 @@ export async function savePersonalTimetable(uid: string | null, timetable: Store
     updatedAt: new Date().toISOString(),
   };
   if (next.classExceptions === undefined && previous.classExceptions !== undefined) next.classExceptions = previous.classExceptions;
-  assertClassExceptions(next.classExceptions);
-  await AsyncStorage.setItem(`${KEY}:${localOwner || uid || 'local'}:${canonical}`, JSON.stringify(next));
-  notifyTimetableChanged();
+  if (next.classExceptions !== undefined) next.classExceptions = classExceptionsForStorage(next.classExceptions);
+  assertTimetableStorageSize(next);
+  const store = async (value: StoredTimetable) => {
+    await AsyncStorage.setItem(`${KEY}:${localOwner || uid || 'local'}:${canonical}`, JSON.stringify(value));
+    notifyTimetableChanged();
+  };
   if (!uid || localOwner) {
+    await store(next);
     return { stored: 'local' as const };
   }
+  let conflict = false;
   try {
-    await setDoc(cloudScopedRef(uid, canonical), {
-      ...next,
-      // 送申訴時規則用這兩個清單確認課在自己的課表裡
-      ...timetableIndex(next.courses),
-      updatedAt: serverTimestamp(),
+    const ref = cloudScopedRef(uid, canonical);
+    const saved = await runTransaction(getDb(), async (transaction) => {
+      const snap = await transaction.get(ref);
+      const remote = snap.exists() ? snap.data() as StoredTimetable : undefined;
+      const remoteRevision = remote?.classExceptionsRevision ?? 0;
+      const payload = { ...next };
+      if (timetable.classExceptions !== undefined) {
+        if ((timetable.classExceptionsRevision ?? 0) !== remoteRevision) {
+          conflict = true;
+          throw new Error('課表已在其他裝置更新，請重新載入後再調整。');
+        }
+        payload.classExceptionsRevision = remoteRevision + 1;
+      } else if (remote?.classExceptions !== undefined) {
+        payload.classExceptions = classExceptionsForStorage(remote.classExceptions);
+        payload.classExceptionsRevision = remoteRevision + 1;
+      }
+      if (payload.classExceptions !== undefined && payload.classExceptionsRevision === undefined)
+        payload.classExceptionsRevision = remoteRevision + 1;
+      assertTimetableStorageSize(payload);
+      transaction.set(ref, {
+        ...payload,
+        ...timetableIndex(payload.courses),
+        updatedAt: serverTimestamp(),
+      }, { merge: true });
+      return payload;
     });
-  } catch {
+    await store(saved);
+    return { stored: 'cloud' as const, timetable: saved };
+  } catch (error) {
+    if (conflict) throw error;
+    await store(next);
     return { stored: 'local' as const, cloudPending: true };
   }
-  return { stored: 'cloud' as const };
 }
 
 /** Projection only: the user's saved courses remain in their original storage. */

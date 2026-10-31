@@ -2,6 +2,7 @@ import { todayClassesFromSchedule } from './todayScreen';
 import { describe, expect, it } from 'vitest';
 import {
   buildPersonalToday,
+  assertClassExceptions,
   classMeetingKey,
   classReminderPlan,
   saveClassException,
@@ -172,4 +173,63 @@ describe('dated class exceptions', () => {
     });
     expect(classReminderPlan(resolve([exception()]).today, now.getTime())).toEqual([]);
   });
+});
+
+
+describe('equivalent meeting representations and bounded storage', () => {
+  const clock = { ...row, id: 'import:clock', startPeriod: undefined, endPeriod: undefined, startTime: '09:10', endTime: '12:00', courseCode: 'C101' };
+  const manual = { ...row, id: 'manual:period' };
+  it.each(['cancel', 'room', 'move'] as const)('applies %s to both period and clock rows', (kind) => {
+    const change = exception({ original: clock, courseKey: classMeetingKey(clock), kind,
+      ...(kind === 'room' ? { location: '新教室' } : {}),
+      ...(kind === 'move' ? { date: '2026-11-03', startTime: '18:00', endTime: '20:00', location: '補課室' } : {}) });
+    const changes = saveClassException([], change);
+    const originalDay = resolve(changes, '2026-11-02', [manual, clock]);
+    expect(originalDay.today).toHaveLength(kind === 'room' ? 1 : 0);
+    if (kind === 'room') expect(originalDay.today[0].row.location).toBe('新教室');
+    expect(classReminderPlan(originalDay.today, Date.parse('2026-11-02T08:00:00+08:00'))).toHaveLength(kind === 'room' ? 1 : 0);
+    if (kind === 'move') expect(resolve(changes, '2026-11-03', [manual, clock]).today).toHaveLength(1);
+    expect(resolve([], '2026-11-02', [manual, clock]).today).toHaveLength(1);
+  });
+  it('marks the overnight class on its start date, even when overlap is only tomorrow', () => {
+    const change = exception({ kind: 'move', date: '2026-11-03', endDate: '2026-11-04', startTime: '23:30', endTime: '01:00' });
+    const other = { ...row, id: 'wednesday', title: '凌晨課', dayOfWeek: 3, startTime: '00:30', endTime: '01:30' };
+    const records = withClassExceptions([row, other], [change]);
+    const now = new Date('2026-11-03T08:00:00+08:00');
+    const plan = buildPersonalToday(records, { schoolId: 'pu', now });
+    expect(plan.today).toHaveLength(1);
+    expect(plan.today[0].conflict).toBe(true);
+    expect(classReminderPlan(plan.today, now.getTime())[0].conflict).toBe(true);
+    expect(buildNextClassSnapshot(records, 'pu', now).classes[0].conflict).toBe(true);
+    expect(resolve([change], '2026-11-04', [row, other]).today.every((item) => item.conflict)).toBe(true);
+    expect(resolve([change], '2026-11-03', [row, { ...other, startTime: '01:00' }]).today[0].conflict).toBe(false);
+  });
+  it('drops large source snapshots and rejects excessive UTF-8 storage', () => {
+    const original = { ...row, source: { ...row.source, name: '假姓名.csv', rawText: 'x'.repeat(100000) } };
+    let changes: ClassException[] = [];
+    for (let i = 0; i < 12; i++) changes = saveClassException(changes, exception({ id: String(i), original,
+      originalDate: new Date(Date.parse('2026-11-02T12:00:00Z') + i * 7 * 86400000).toISOString().slice(0, 10) }));
+    expect(JSON.stringify(changes).length).toBeLessThan(20000);
+    expect(JSON.stringify(changes)).not.toContain('假姓名');
+    expect(() => assertClassExceptions(changes)).not.toThrow();
+    expect(() => saveClassException(changes, exception({ kind: 'room', location: '長'.repeat(100000) }))).toThrow('資料過大');
+    expect(original.source.rawText).toHaveLength(100000);
+  });
+});
+
+
+it('replaces an existing adjustment when saved through its equivalent manual row', () => {
+  const imported = { ...row, id: 'import:clock', courseCode: 'C101', startPeriod: undefined, endPeriod: undefined, startTime: '09:10', endTime: '12:00' };
+  const manual = { ...row, id: 'manual:period' };
+  const stopped = saveClassException([], exception({ original: imported, courseKey: classMeetingKey(imported) }));
+  const changed = saveClassException(stopped, exception({ id: 'room', kind: 'room', location: '新教室', original: manual, courseKey: classMeetingKey(manual) }));
+  expect(changed).toHaveLength(1);
+  expect(resolve(changed, '2026-11-02', [manual, imported]).today).toHaveLength(1);
+  expect(resolve(changed, '2026-11-02', [manual, imported]).today[0].row.location).toBe('新教室');
+});
+
+it('reads the earlier period-based key after importing the same meeting as clock times', () => {
+  const oldKey = JSON.stringify(['pu', '115', '1', row.title, '', '', 1, 2, 4]);
+  const imported = { ...row, startPeriod: undefined, endPeriod: undefined, startTime: '09:10', endTime: '12:00' };
+  expect(resolve([exception({ courseKey: oldKey })], '2026-11-02', [imported]).today).toHaveLength(0);
 });

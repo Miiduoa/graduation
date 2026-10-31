@@ -1,4 +1,4 @@
-import { classDate, validateClassException } from '../timetable/classExceptions';
+import { classDate, validateClassException, sameClassMeeting } from '../timetable/classExceptions';
 import type { PersonalImportRecord } from './types';
 import { periodProfileForSchool, periodTimes } from '../timetable/schoolPeriods';
 
@@ -82,13 +82,17 @@ export function buildPersonalToday(
       startDate: string, endDate = startDate) => {
       const startAt = Date.parse(`${startDate}T${startTime}:00+08:00`);
       const endAt = Date.parse(`${endDate}T${endTime}:00+08:00`);
-      if (startAt >= midnight + 86400000 || endAt <= midnight) return;
+      if (startAt >= midnight + 172800000 || endAt <= midnight - 86400000) return;
       today.push({ row, startTime, endTime, startAt, endAt, conflict: false,
         status: options.now.getTime() >= endAt ? 'ended' : options.now.getTime() >= startAt ? 'ongoing' : 'upcoming' });
     };
-    const change = exceptions.find((item) => item.originalDate === date);
-    if (original.dayOfWeek === weekday && (!change || change.kind === 'room')) {
-      append(change ? { ...original, location: change.location } : original, baseStart!, baseEnd!, date);
+    for (const offset of [-1, 0, 1]) {
+      const day = classDate(new Date(midnight + offset * 86400000));
+      const dayOfWeek = new Date(`${day}T12:00:00+08:00`).getUTCDay() || 7;
+      const change = exceptions.find((item) => item.originalDate === day);
+      if (original.dayOfWeek === dayOfWeek && (!change || change.kind === 'room')) {
+        append(change ? { ...original, location: change.location } : original, baseStart!, baseEnd!, day);
+      }
     }
     for (const item of exceptions.filter((value) => value.kind === 'move')) {
       append({ ...original, location: item.location ?? original.location },
@@ -98,16 +102,12 @@ export function buildPersonalToday(
   // A course entered by hand and later imported is one class when its complete
   // displayed details agree. Keep the imported record's provenance; differing
   // teachers or rooms still require the user's conflict review.
-  const sameText = (left?: string, right?: string) =>
-    (left ?? '').trim().normalize('NFKC') === (right ?? '').trim().normalize('NFKC');
   const distinctToday = today.filter((entry) =>
     !entry.row.id.startsWith('manual:') || !today.some((other) =>
       !other.row.id.startsWith('manual:') &&
       entry.startAt === other.startAt &&
       entry.endAt === other.endAt &&
-      sameText(entry.row.title, other.row.title) &&
-      sameText(entry.row.teacher, other.row.teacher) &&
-      sameText(entry.row.location, other.row.location),
+      sameClassMeeting(entry.row, other.row),
     ),
   );
   distinctToday.sort(
@@ -125,9 +125,9 @@ export function buildPersonalToday(
   return {
     terms,
     termKey: activeTerm,
-    today: distinctToday,
+    today: distinctToday.filter((entry) => entry.startAt < midnight + 86400000 && entry.endAt > midnight),
     unplacedCount,
     weekday,
-    nextId: distinctToday.find((entry) => entry.status !== 'ended')?.row.id ?? null,
+    nextId: distinctToday.find((entry) => entry.startAt < midnight + 86400000 && entry.endAt > midnight && entry.status !== 'ended')?.row.id ?? null,
   };
 }

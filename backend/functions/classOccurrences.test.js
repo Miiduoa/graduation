@@ -46,5 +46,6 @@ test('server runtime preserves a dated exception across a reimport without chang
     buildPersonalToday(records, { schoolId: 'pu', now: new Date('2026-11-09T08:00:00+08:00') })
       .today,
   ).toHaveLength(1);
-  expect(exceptions[0].original.source.rawText).toBe('合成來源');
+  expect(exceptions[0].original.source.rawText).toBe('');
+  expect(row.source.rawText).toBe('合成來源');
 });

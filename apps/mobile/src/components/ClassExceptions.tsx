@@ -4,6 +4,8 @@ import {
   buildPersonalToday,
   classDate,
   classMeetingKey,
+  matchesClassException,
+  classExceptionOriginal,
   saveClassException,
   withClassExceptions,
   previewClassException,
@@ -204,8 +206,7 @@ export function ClassExceptions({
         onPress={() => {
           if (!row) return;
           try {
-            const { classExceptions: omitted, ...original } = row;
-            void omitted;
+            const original = classExceptionOriginal(row);
             const value: ClassException = {
               id: `exception-${Date.now()}`,
               courseKey: classMeetingKey(row),
@@ -235,15 +236,14 @@ export function ClassExceptions({
                 ? `換至 ${item.location}`
                 : `補課 ${item.date} ${item.startTime}–${item.endTime} ${item.location || ''}`}
           </Text>
-          {!records.some((record) => classMeetingKey(record) === item.courseKey) && (
+          {!records.some((record) => matchesClassException(record, item.original)) && (
             <Text accessibilityRole="alert">原課程時段已變更，此調整保留待核對，尚未套用。</Text>
           )}
           <Text style={{ color: theme.colors.muted }}>
-            原始來源：{item.original.source.name || item.original.source.type} · 第{' '}
-            {item.original.source.line} 列
+            原會次紀錄：{item.originalDate} · {item.original.startTime || `第 ${item.original.startPeriod} 節`}
           </Text>
           <Text style={{ color: theme.colors.muted }}>
-            {item.original.source.rawText || '手動建立的課程'}
+            {'原始匯入來源請至個人匯入紀錄查看'}
           </Text>
           <Button
             text="恢復原安排"

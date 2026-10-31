@@ -6,6 +6,8 @@ import {
   createCourseId,
   classDate,
   classMeetingKey,
+  matchesClassException,
+  classExceptionOriginal,
   saveClassException,
   withClassExceptions,
   previewClassException,
@@ -121,8 +123,7 @@ export function ClassExceptions({
           event.preventDefault();
           if (!row || disabled || saving) return;
           try {
-            const { classExceptions: omitted, ...original } = row;
-            void omitted;
+            const original = classExceptionOriginal(row);
             const value: ClassException = {
               id: createCourseId(),
               courseKey: classMeetingKey(row),
@@ -237,16 +238,15 @@ export function ClassExceptions({
                   : item.kind === 'room'
                     ? `換至 ${item.location}`
                     : `補課 ${item.date} ${item.startTime}–${item.endTime} ${item.location || ''}`}
-                {!records.some((record) => classMeetingKey(record) === item.courseKey) && (
+                {!records.some((record) => matchesClassException(record, item.original)) && (
                   <p role="status">原課程時段已變更，此調整保留待核對，尚未套用。</p>
                 )}
                 <details>
-                  <summary>原始來源</summary>
+                  <summary>原會次紀錄</summary>
                   <p>
-                    {item.original.source.name || item.original.source.type} · 第{' '}
-                    {item.original.source.line} 列
+                    {item.originalDate} · {item.original.startTime || `第 ${item.original.startPeriod} 節`}
                   </p>
-                  <pre>{item.original.source.rawText || '手動建立的課程'}</pre>
+                  <pre>{'原始匯入來源請至個人匯入紀錄查看'}</pre>
                 </details>
                 <button
                   type="button"

@@ -60,7 +60,7 @@ export type PersonalImportOptions = {
 };
 
 export type PersonalImportRecord = PersonalImportRow & {
-  classExceptions?: import('../timetable/classExceptions').ClassException[];
+  classExceptions?: ClassException[];
   batchId: string;
   importedAt: string;
 };
@@ -80,3 +80,17 @@ export type PersonalImportCatalogCourse = {
 
 export const PERSONAL_IMPORT_MAX_ROWS = 500;
 export const PERSONAL_IMPORT_MAX_TEXT_LENGTH = 200_000;
+
+export type ClassException = {
+  id: string;
+  courseKey: string;
+  originalDate: string;
+  kind: 'cancel' | 'move' | 'room';
+  date?: string;
+  startTime?: string;
+  endTime?: string;
+  endDate?: string;
+  location?: string;
+  createdAt: string;
+  original: PersonalImportRecord;
+};

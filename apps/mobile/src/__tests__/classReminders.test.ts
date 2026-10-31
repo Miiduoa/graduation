@@ -124,3 +124,27 @@ test('an old read cannot create notifications after logout', async () => {
   await Promise.all([old, logout]);
   expect(Notifications.scheduleNotificationAsync).not.toHaveBeenCalled();
 });
+
+
+test.each(['cancel', 'room', 'move'] as const)('%s does not schedule a second period/clock copy', async (kind) => {
+  const imported = { ...row, startTime: '09:10' };
+  const manual = { ...row, id: 'manual:period', startTime: undefined, endTime: undefined, startPeriod: 2, endPeriod: 4 };
+  const records = withClassExceptions([manual, imported], [{ id: 'change', original: imported,
+    courseKey: classMeetingKey(imported), originalDate: '2026-11-02', kind, createdAt: '',
+    ...(kind === 'room' ? { location: '新教室' } : {}),
+    ...(kind === 'move' ? { date: '2026-11-03', startTime: '18:00', endTime: '20:00' } : {}) }]);
+  await setClassRemindersEnabled('synthetic', true);
+  await refreshClassReminders('synthetic', async () => ({ records, schoolId: 'pu' }), now);
+  expect(Notifications.scheduleNotificationAsync).toHaveBeenCalledTimes(kind === 'cancel' ? 0 : 1);
+  if (kind === 'room') expect(Notifications.scheduleNotificationAsync).toHaveBeenCalledWith(expect.objectContaining({ content: expect.objectContaining({ body: '10 分鐘後上課 · 新教室' }) }));
+});
+
+test('an overnight reminder includes conflicts that occur only after midnight', async () => {
+  const records = withClassExceptions([row, { ...row, id: 'wednesday', title: '凌晨課', dayOfWeek: 3, startTime: '00:30', endTime: '01:30' }], [{
+    id: 'overnight', original: row, courseKey: classMeetingKey(row), originalDate: '2026-11-02', kind: 'move', createdAt: '',
+    date: '2026-11-03', endDate: '2026-11-04', startTime: '23:30', endTime: '01:00',
+  }]);
+  await setClassRemindersEnabled('synthetic', true);
+  await refreshClassReminders('synthetic', async () => ({ records, schoolId: 'pu' }), new Date('2026-10-28T08:00:00+08:00'));
+  expect(Notifications.scheduleNotificationAsync).toHaveBeenCalledWith(expect.objectContaining({ content: expect.objectContaining({ title: '合成課程', body: expect.stringContaining('時間重疊') }) }));
+});

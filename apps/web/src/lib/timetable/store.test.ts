@@ -687,7 +687,7 @@ it('surfaces 尚未啟用 when the same-origin share route is not configured', a
 });
 
 it('retains separately saved class exceptions when an older timetable writer omits the field', async () => {
-  const { classMeetingKey, manualClassRecords } = await import('@campus/shared');
+  const { classMeetingKey, manualClassRecords, classExceptionsForStorage } = await import('@campus/shared');
   const timetable = storedTimetable();
   timetable.meta = { school: '', year: '115', semester: '1', className: '', credits: 0, title: '' };
   const original = manualClassRecords(timetable)[0];
@@ -695,7 +695,7 @@ it('retains separately saved class exceptions when an older timetable writer omi
     kind: 'cancel' as const, createdAt: '2026-11-01T00:00:00Z' };
   await savePersonalTimetable(null, { ...timetable, classExceptions: [value] });
   await savePersonalTimetable(null, { ...timetable, courses: [] });
-  expect((await loadPersonalTimetable(null, 'pu')).classExceptions).toEqual([value]);
+  expect((await loadPersonalTimetable(null, 'pu')).classExceptions).toEqual(classExceptionsForStorage([value]));
   await savePersonalTimetable(null, { ...timetable, classExceptions: [] });
   expect((await loadPersonalTimetable(null, 'pu')).classExceptions).toEqual([]);
 });

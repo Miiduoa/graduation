@@ -3849,3 +3849,26 @@ describe('P1 authorization: MapDiff affectedKeys allowlists', () => {
     );
   });
 });
+
+for (const path of [
+  'users/synthetic/personalTimetable/current',
+  'users/synthetic/schools/pu/personalTimetable/current',
+]) {
+  test(`protects dated arrangements from legacy replacements and stale revisions: ${path}`, async () => {
+    const db = testEnv.authenticatedContext('synthetic').firestore();
+    const ref = db.doc(path);
+    const base = { schoolId: 'pu', courses: [], shareWithFriends: false };
+    await assertSucceeds(ref.set(base));
+    const change = { id: 'synthetic-stop', kind: 'cancel', originalDate: '2026-11-02' };
+    await assertSucceeds(ref.set({ ...base, classExceptions: [change], classExceptionsRevision: 1 }));
+    await assertFails(ref.set({ ...base, shareWithFriends: true }));
+    await assertFails(ref.update({ classExceptions: [] }));
+    await assertFails(ref.delete());
+    await assertSucceeds(ref.set({ ...base, shareWithFriends: true }, { merge: true }));
+    await assertFails(ref.update({ classExceptions: [], classExceptionsRevision: 1 }));
+    await assertSucceeds(ref.update({ classExceptions: [], classExceptionsRevision: 2 }));
+    await assertFails(ref.set(base));
+    await assertSucceeds(ref.update({ classExceptions: [change], classExceptionsRevision: 3 }));
+    await assertFails(ref.update({ classExceptions: [], classExceptionsRevision: 2 }));
+  });
+}

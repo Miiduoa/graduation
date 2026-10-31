@@ -15,6 +15,8 @@ import {
 import { httpsCallable } from 'firebase/functions';
 import {
   assertClassExceptions,
+  classExceptionsForStorage,
+  assertTimetableStorageSize,
   MEETUP_DURATION_MINUTES,
   cleanCourses,
   cleanMeta,
@@ -302,7 +304,8 @@ export async function savePersonalTimetable(
   // A failed read, damaged JSON or cross-school scoped record must not be overwritten.
   const previous = readLocal(ownerKey, timetable.schoolId);
   if (next.classExceptions === undefined && previous.classExceptions !== undefined) next.classExceptions = previous.classExceptions;
-  assertClassExceptions(next.classExceptions);
+  if (next.classExceptions !== undefined) next.classExceptions = classExceptionsForStorage(next.classExceptions);
+  assertTimetableStorageSize(next);
   writeLocal(ownerKey, next);
   // 課表匯入與本機整理目前只留在這台裝置，不送到雲端。
   return { stored: 'local' };

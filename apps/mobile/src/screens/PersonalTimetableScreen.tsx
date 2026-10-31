@@ -190,7 +190,7 @@ function PersonalTimetableWorkspace({ initialTerm, initialCourseId, initialDate 
   const persist = async (next: StoredTimetable, message: string) => {
     try {
       const saved = await savePersonalTimetable(uid, { ...next, schoolId }, localOwner);
-      setTimetable({ ...next, schoolId });
+      setTimetable(saved.stored === 'cloud' ? saved.timetable : { ...next, schoolId });
       setNotice(saved.stored === 'cloud' ? message : `${'cloudPending' in saved ? '已記在這台裝置；雲端暫時未同步。' : '已記在這台裝置。'}${message}`);
       return true;
     } catch (error) {

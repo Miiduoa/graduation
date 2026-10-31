@@ -1,18 +1,8 @@
 import type { PersonalImportRecord } from '../imports/types';
 
-export type ClassException = {
-  id: string;
-  courseKey: string;
-  originalDate: string;
-  kind: 'cancel' | 'move' | 'room';
-  date?: string;
-  startTime?: string;
-  endTime?: string;
-  endDate?: string;
-  location?: string;
-  createdAt: string;
-  original: PersonalImportRecord;
-};
+import { periodProfileForSchool, periodTimes } from './schoolPeriods';
+import type { ClassException } from '../imports/types';
+export type { ClassException } from '../imports/types';
 
 export function classDate(now: Date): string {
   return new Date(now.getTime() + 28800000).toISOString().slice(0, 10);
@@ -27,7 +17,7 @@ export function validClassDate(value: string): boolean {
 }
 
 /** Identifies a meeting independently of import batch and generated row identifiers. */
-export function classMeetingKey(row: PersonalImportRecord): string {
+function legacyClassMeetingKey(row: PersonalImportRecord): string {
   return JSON.stringify([
     row.schoolId,
     row.academicYear,
@@ -41,13 +31,85 @@ export function classMeetingKey(row: PersonalImportRecord): string {
   ]);
 }
 
+export function classMeetingKey(row: PersonalImportRecord): string {
+  const parts = JSON.parse(legacyClassMeetingKey(row)) as unknown[];
+  const [start, end] = classMeetingTimes(row);
+  parts[7] = start ?? row.startPeriod ?? row.startTime;
+  parts[8] = end ?? row.endPeriod ?? row.endTime;
+  return JSON.stringify(parts);
+}
+
+const sameText = (left?: string, right?: string) =>
+  (left ?? '').trim().normalize('NFKC') === (right ?? '').trim().normalize('NFKC');
+
+export function classMeetingTimes(row: PersonalImportRecord) {
+  const profile = periodProfileForSchool(row.schoolId);
+  const times = profile ? periodTimes(profile) : [];
+  const explicit = !!(row.startTime || row.endTime);
+  return [
+    explicit ? row.startTime : times[(row.startPeriod ?? 0) - 1]?.[0],
+    explicit ? row.endTime : times[(row.endPeriod ?? 0) - 1]?.[1],
+  ] as const;
+}
+
+/** Same equivalence for exception attachment and manual/import display deduplication. */
+export function sameClassMeeting(left: PersonalImportRecord, right: PersonalImportRecord): boolean {
+  const [start, end] = classMeetingTimes(left);
+  const [otherStart, otherEnd] = classMeetingTimes(right);
+  return !!start && !!end && start === otherStart && end === otherEnd &&
+    left.schoolId === right.schoolId && left.academicYear === right.academicYear &&
+    left.semester === right.semester && left.dayOfWeek === right.dayOfWeek &&
+    sameText(left.title, right.title) && sameText(left.teacher, right.teacher) &&
+    sameText(left.location, right.location);
+}
+
+export function matchesClassException(row: PersonalImportRecord, original: PersonalImportRecord): boolean {
+  return classMeetingKey(row) === classMeetingKey(original) ||
+    ((row.id.startsWith('manual:') || original.id.startsWith('manual:')) && sameClassMeeting(row, original));
+}
+
+/** Only meeting identity and display fields; never copy imported source text or filenames. */
+export function classExceptionOriginal(row: PersonalImportRecord): PersonalImportRecord {
+  const result: PersonalImportRecord = {
+    id: row.id, batchId: '', importedAt: '', kind: 'timetable',
+    schoolId: row.schoolId, academicYear: row.academicYear, semester: row.semester,
+    title: row.title, source: { type: 'paste', line: 1, rawText: '' },
+  };
+  for (const key of ['courseCode', 'teacher', 'className', 'location', 'dayOfWeek',
+    'startPeriod', 'endPeriod', 'startTime', 'endTime'] as const) {
+    if (row[key] !== undefined) Object.assign(result, { [key]: row[key] });
+  }
+  return result;
+}
+
+export function classExceptionsForStorage(values: readonly ClassException[]): ClassException[] {
+  const result = values.map((item) => {
+    const value: ClassException = {
+      id: item.id, courseKey: item.courseKey, originalDate: item.originalDate,
+      kind: item.kind, createdAt: item.createdAt, original: classExceptionOriginal(item.original),
+    };
+    for (const key of ['date', 'startTime', 'endTime', 'endDate', 'location'] as const) {
+      if (item[key] !== undefined) value[key] = item[key];
+    }
+    return value;
+  });
+  assertClassExceptions(result);
+  return result;
+}
+
+export function assertTimetableStorageSize(value: unknown): void {
+  // Leave ample space for Firestore field names, indexes and serialization overhead.
+  const bytes = encodeURIComponent(JSON.stringify(value)).replace(/%[A-F\d]{2}/g, 'x').length;
+  if (bytes > 200_000) throw new Error('課表調整資料過大，請縮短內容或整理紀錄後重試。');
+}
+
 export function validateClassException(value: ClassException): void {
   const clock = (text?: string) => !!text && /^([01]\d|2[0-3]):[0-5]\d$/.test(text);
   if (
     !value.id ||
     !validClassDate(value.originalDate) ||
     !value.original ||
-    value.courseKey !== classMeetingKey(value.original) ||
+    (value.courseKey !== classMeetingKey(value.original) && value.courseKey !== legacyClassMeetingKey(value.original)) ||
     !['cancel', 'move', 'room'].includes(value.kind)
   )
     throw new Error('請確認原上課日期與課程。');
@@ -70,7 +132,7 @@ export function validateClassException(value: ClassException): void {
   }
 }
 
-/** Retains the source snapshot even when reimport changes or removes the matching meeting. */
+/** Retains meeting identity when reimport changes or removes the matching meeting. */
 export function withClassExceptions(
   records: readonly PersonalImportRecord[],
   exceptions: readonly ClassException[] = [],
@@ -79,19 +141,7 @@ export function withClassExceptions(
     ...row,
     classExceptions: exceptions.filter(
       (item) =>
-        item.courseKey === classMeetingKey(row) ||
-        ((row.id.startsWith('manual:') || item.original.id.startsWith('manual:')) &&
-          row.schoolId === item.original.schoolId &&
-          row.academicYear === item.original.academicYear &&
-          row.semester === item.original.semester &&
-          row.title === item.original.title &&
-          (row.teacher || '') === (item.original.teacher || '') &&
-          (row.location || '') === (item.original.location || '') &&
-          row.dayOfWeek === item.original.dayOfWeek &&
-          row.startPeriod === item.original.startPeriod &&
-          row.endPeriod === item.original.endPeriod &&
-          row.startTime === item.original.startTime &&
-          row.endTime === item.original.endTime),
+        matchesClassException(row, item.original),
     ),
   }));
 }
@@ -106,18 +156,18 @@ export function saveClassException(
     !existing.some(
       (item) =>
         item.id === value.id ||
-        (item.courseKey === value.courseKey && item.originalDate === value.originalDate),
+        (matchesClassException(item.original, value.original) && item.originalDate === value.originalDate),
     )
   )
     throw new Error('已達 200 筆調整，請先整理不再需要的紀錄。');
-  return [
+  return classExceptionsForStorage([
     ...existing.filter(
       (item) =>
         item.id !== value.id &&
-        !(item.courseKey === value.courseKey && item.originalDate === value.originalDate),
+        !(matchesClassException(item.original, value.original) && item.originalDate === value.originalDate),
     ),
     value,
-  ];
+  ]);
 }
 
 export function manualClassRecords(timetable: {
@@ -182,6 +232,7 @@ export function previewClassException(
 export function assertClassExceptions(value: unknown): void {
   if (value === undefined) return;
   if (!Array.isArray(value) || value.length > 200) throw new Error('單次調整資料格式異常，請保留原始課表後重試。');
+  assertTimetableStorageSize(value);
   for (const item of value) {
     if (!item || typeof item !== 'object' || !item.original?.source || typeof item.original.id !== 'string')
       throw new Error('單次調整的來源資料不完整，請保留原始課表後重試。');
