@@ -28,6 +28,15 @@ const data: CourseHubData = {
   assignments: { status: 'ready', items: [] },
 };
 const route = { params: { groupId: 'course-a', groupName: '過時的課名' } };
+// Keep weekly actions inside the current Taipei week instead of expiring with a fixed fixture date.
+function currentTaipeiWeekDeadline(): string {
+  const local = new Date(Date.now() + 8 * 60 * 60 * 1000);
+  const day = local.getUTCDay() || 7;
+  return new Date(Date.UTC(
+    local.getUTCFullYear(), local.getUTCMonth(), local.getUTCDate() + (7 - day),
+    15, 59, 59, 999,
+  )).toISOString();
+}
 beforeEach(() => {
   // Keep weekly tasks before the fixed Oct 29 deadline, regardless of the run date or timezone.
   jest.useFakeTimers({
@@ -206,6 +215,7 @@ test('closed assignments remain viewable but never appear among actionable weekl
 });
 
 test('confirmed submission and published feedback never remain a pending weekly task', async () => {
+  const currentDeadline = currentTaipeiWeekDeadline();
   const navigation = { navigate: jest.fn() };
   jest.mocked(loadCourseHub).mockResolvedValue({
     ...data,
@@ -215,7 +225,7 @@ test('confirmed submission and published feedback never remain a pending weekly 
         id: 'done-1',
         title: '已完成閱讀心得',
         description: '',
-        dueAt: '2026-10-29T15:59:00Z',
+        dueAt: currentDeadline,
         closed: false,
         submission: {
           kind: 'submitted',
@@ -226,7 +236,7 @@ test('confirmed submission and published feedback never remain a pending weekly 
         id: 'todo-1',
         title: '還未交的作業',
         description: '',
-        dueAt: '2026-10-29T15:59:00Z',
+        dueAt: currentDeadline,
         closed: false,
         submission: { kind: 'not_submitted' },
       }],
@@ -242,7 +252,7 @@ test('confirmed submission and published feedback never remain a pending weekly 
     courseId: 'course-a',
     hwId: 'done-1',
     hwTitle: '已完成閱讀心得',
-    dueAt: '2026-10-29T15:59:00Z',
+    dueAt: currentDeadline,
   });
 });
 
@@ -345,6 +355,7 @@ test('student filters distinguish confirmed submissions, unfinished work and unk
 });
 
 test('weekly actionable work still surfaces receipt warnings and never claims empty success for unknown receipts', async () => {
+  const currentDeadline = currentTaipeiWeekDeadline();
   jest.mocked(loadCourseHub).mockResolvedValue({
     ...data,
     assignments: {
@@ -353,7 +364,7 @@ test('weekly actionable work still surfaces receipt warnings and never claims em
         id: 'week-open',
         title: '本週待繳報告',
         description: '',
-        dueAt: '2026-10-29T15:59:00Z',
+        dueAt: currentDeadline,
         closed: false,
         submission: { kind: 'not_submitted' },
       }, {
@@ -380,7 +391,7 @@ test('weekly actionable work still surfaces receipt warnings and never claims em
         id: 'only-unconfirmed',
         title: '僅有未確認收據',
         description: '',
-        dueAt: '2026-10-29T15:59:00Z',
+        dueAt: currentDeadline,
         closed: false,
         submission: { kind: 'unconfirmed' },
       }],
