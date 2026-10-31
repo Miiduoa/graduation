@@ -1362,7 +1362,10 @@ it.each(['cancel', 'failure'] as const)(
   async (outcome) => {
     let fail!: (error: Error) => void;
     vi.mocked(runPersonalImportAi).mockImplementation(
-      () => new Promise((_resolve, reject) => { fail = reject; }),
+      () =>
+        new Promise((_resolve, reject) => {
+          fail = reject;
+        }),
     );
     const view = render(<PersonalImportCenter />);
     await prepare();
@@ -1448,7 +1451,11 @@ it.each(['write', 'cleanup'] as const)(
     fireEvent.click(screen.getByRole('button', { name: '取消讀取' }));
     if (failure === 'write') {
       const write = Storage.prototype.setItem;
-      vi.spyOn(Storage.prototype, 'setItem').mockImplementation(function (this: Storage, key, value) {
+      vi.spyOn(Storage.prototype, 'setItem').mockImplementation(function (
+        this: Storage,
+        key,
+        value,
+      ) {
         if (key === personalImportDraftKey(context)) throw new Error('storage full');
         write.call(this, key, value);
       });
@@ -1845,3 +1852,72 @@ it('keeps exclusions through retry progress, cancellation, restoration and late 
   fireEvent.click(screen.getByRole('button', { name: '以部分結果取代目前草稿' }));
   await waitFor(check);
 });
+
+it.each(['replace', 'append', 'empty', 'error'])(
+  'preserves excluded source rows after retry %s and reload',
+  async (mode) => {
+    const first = aiGradePreview('合成課A');
+    const a = first.rows[0];
+    const b = {
+      ...a,
+      id: 'synthetic-b',
+      title: '合成課B',
+      source: { ...a.source, line: a.source.line + 1, rawText: '合成課B,2,90' },
+    };
+    const initial = { ...first, rows: [a, b] };
+    vi.mocked(runPersonalImportAi)
+      .mockResolvedValueOnce({
+        ...initial,
+        retry: {
+          completed: initial,
+          replaceRowIds: [a.id, b.id],
+          batches: [
+            {
+              text: '合成課A,3,85\n合成課B,2,90',
+              startLine: 1,
+              columnContext: '課程名稱,學分,成績',
+            },
+          ],
+        },
+      })
+      .mockImplementationOnce(async () => {
+        if (mode === 'error') throw new Error('合成錯誤');
+        return {
+          ...first,
+          rows:
+            mode === 'empty'
+              ? []
+              : [
+                  { ...a, id: 'replacement-a' },
+                  { ...b, id: 'replacement-b' },
+                  ...(mode === 'append'
+                    ? [
+                        {
+                          ...a,
+                          id: 'new-c',
+                          title: '合成課C',
+                          source: { ...a.source, line: 99, rawText: '合成課C,1,80' },
+                        },
+                      ]
+                    : []),
+                ],
+        };
+      });
+    const view = render(<PersonalImportCenter />);
+    chooseAiScreenshot();
+    await screen.findByRole('button', { name: '重試未完成的 1 段' });
+    fireEvent.click(screen.getByRole('checkbox', { name: /第 2 筆/ }));
+    fireEvent.click(screen.getByRole('button', { name: '重試未完成的 1 段' }));
+    await waitFor(() => expect(runPersonalImportAi).toHaveBeenCalledTimes(2));
+    await waitFor(() =>
+      expect((screen.getByRole('checkbox', { name: /第 2 筆/ }) as HTMLInputElement).checked).toBe(
+        false,
+      ),
+    );
+    view.unmount();
+    render(<PersonalImportCenter />);
+    expect((screen.getByRole('checkbox', { name: /第 2 筆/ }) as HTMLInputElement).checked).toBe(
+      false,
+    );
+  },
+);

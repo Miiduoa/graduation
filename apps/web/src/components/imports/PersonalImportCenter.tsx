@@ -401,8 +401,12 @@ function ImportWorkspace({
   useEffect(() => {
     if (!window.location.hash.startsWith('#record-')) return;
     try {
-      document.getElementById(decodeURIComponent(window.location.hash.slice(1)))?.scrollIntoView?.({ block: 'center' });
-    } catch { /* Ignore malformed record links. */ }
+      document
+        .getElementById(decodeURIComponent(window.location.hash.slice(1)))
+        ?.scrollIntoView?.({ block: 'center' });
+    } catch {
+      /* Ignore malformed record links. */
+    }
   }, [ledger.records]);
   const schoolSelection = useOptionalSelectedSchool();
   const suspended = useRef(paused);
@@ -591,7 +595,8 @@ function ImportWorkspace({
     if (
       !(draftStorageError || partialStorageError) ||
       (!text && !rows.length && !importDocument && !partialDraft)
-    ) return;
+    )
+      return;
     const warnBeforeLeaving = (event: BeforeUnloadEvent) => {
       event.preventDefault();
       event.returnValue = '';
@@ -767,6 +772,25 @@ function ImportWorkspace({
       !suspended.current &&
       !controller.signal.aborted &&
       job.current === controller;
+    const retryExcluded = (nextRows: PersonalImportRow[]) => {
+      const sourceKey = (row: PersonalImportRow) =>
+        JSON.stringify([
+          row.source.type,
+          row.source.name ?? '',
+          row.source.line,
+          row.source.rawText,
+        ]);
+      const excludedSources = new Set(
+        rows
+          .filter(
+            (row) => excluded.includes(row.id) && request.retry?.replaceRowIds?.includes(row.id),
+          )
+          .map(sourceKey),
+      );
+      return nextRows
+        .filter((row) => excluded.includes(row.id) || excludedSources.has(sourceKey(row)))
+        .map((row) => row.id);
+    };
     let preparedPreview = '';
     try {
       if (request.input.image) {
@@ -796,9 +820,7 @@ function ImportWorkspace({
               source: request.source,
               rows: partial.rows,
               parseIssues: partial.issues,
-              excluded: request.retry
-                ? excluded.filter((id) => partial.rows.some((row) => row.id === id))
-                : [],
+              excluded: request.retry ? retryExcluded(partial.rows) : [],
               backup: null,
             };
             setPartialDraft(nextDraft);
@@ -829,9 +851,7 @@ function ImportWorkspace({
             setPreview(preparedPreview);
             preparedPreview = '';
           }
-          setExcluded(
-            request.retry ? excluded.filter((id) => partial.rows.some((row) => row.id === id)) : [],
-          );
+          setExcluded(request.retry ? retryExcluded(partial.rows) : []);
           setReviewPage(0);
           setReviewIssueIds(null);
           if (!draftReadFailed) {
@@ -844,9 +864,7 @@ function ImportWorkspace({
                 source: request.source,
                 rows: partial.rows,
                 parseIssues: partial.issues,
-                excluded: request.retry
-                  ? excluded.filter((id) => partial.rows.some((row) => row.id === id))
-                  : [],
+                excluded: request.retry ? retryExcluded(partial.rows) : [],
                 backup: null,
               });
             } catch (error) {
@@ -894,9 +912,7 @@ function ImportWorkspace({
       setSchoolPage(null);
       setReviewPage(0);
       setReviewIssueIds(null);
-      setExcluded(
-        request.retry ? excluded.filter((id) => result.rows.some((row) => row.id === id)) : [],
-      );
+      setExcluded(request.retry ? retryExcluded(result.rows) : []);
       setAiReviewed(false);
       setText(result.sourceText ?? result.retry?.sourceText ?? request.input.text ?? '');
       setSource(request.source);
