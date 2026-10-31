@@ -2314,3 +2314,21 @@ it('shares only the stable material entry through the system sheet', async () =>
   expect(share.mock.calls[0][0].message).not.toContain(target.body);
   share.mockRestore();
 });
+
+it.each([403, 404])('stops a linked material search and removes course content after %s', async (status) => {
+  mockRequest.mockImplementation((path, context, input, _method, query) => {
+    if (!path.endsWith('/materials/page')) return response(path, context, input);
+    return query
+      ? Promise.reject(new NuniError(status, 'ACCESS_DENIED'))
+      : Promise.resolve({ materials: [material(1)], nextCursor: 'synthetic_older' });
+  });
+  const view = render(<NuniCourses initialWorkspaceId={courseId} initialMaterialId="cwm_missing" />);
+  await waitFor(() => expect(
+    mockRequest.mock.calls.filter(([path]) => path.endsWith('/materials/page')),
+  ).toHaveLength(2));
+  await waitFor(() => expect(view.queryByText('第 1 份教材')).toBeNull());
+  expect(view.queryByText('校園訪談', { includeHiddenElements: true })).toBeNull();
+  expect(view.queryByRole('button', { name: '繼續尋找' })).toBeNull();
+  await act(async () => { await new Promise((resolve) => setTimeout(resolve, 50)); });
+  expect(mockRequest.mock.calls.filter(([path]) => path.endsWith('/materials/page'))).toHaveLength(2);
+});
