@@ -14,6 +14,7 @@ import {
 
 const sdk = vi.hoisted(() => {
   class Tensor {
+    dispose = vi.fn();
     dims: number[];
     data: number[];
     constructor(data: number[]) {
@@ -220,10 +221,59 @@ describe('personal import AI worker', () => {
     );
     expect(await recognize()).toMatchObject({
       type: 'error',
+      code: 'output_limit',
       message: expect.stringContaining('尚未辨識完整'),
     });
     expect(sdk.processor.batch_decode).not.toHaveBeenCalled();
     expect(sdk.model.dispose).toHaveBeenCalledOnce();
+  });
+
+  it('reuses one loaded model for consecutive segments and releases each segment input', async () => {
+    const firstInput = new sdk.Tensor([11, 12]);
+    const secondInput = new sdk.Tensor([11, 12]);
+    sdk.processor
+      .mockResolvedValueOnce({ input_ids: firstInput })
+      .mockResolvedValueOnce({ input_ids: secondInput });
+    expect(await recognize({ keepAlive: true })).toMatchObject({ type: 'result' });
+    expect(firstInput.dispose).toHaveBeenCalledOnce();
+    expect(sdk.model.dispose).not.toHaveBeenCalled();
+    messages.length = 0;
+    expect(await recognize({ keepAlive: true })).toMatchObject({ type: 'result' });
+    expect(secondInput.dispose).toHaveBeenCalledOnce();
+    expect(sdk.AutoProcessor.from_pretrained).toHaveBeenCalledOnce();
+    expect(sdk.Qwen3VLForConditionalGeneration.from_pretrained).toHaveBeenCalledOnce();
+    expect(fetchAsset).toHaveBeenCalledOnce();
+    messages.length = 0;
+    await recognize();
+    expect(sdk.model.dispose).toHaveBeenCalledOnce();
+  });
+
+  it('retries a smaller segment after output truncation without reloading the weights', async () => {
+    sdk.model.generate.mockResolvedValueOnce(
+      new sdk.Tensor([11, 12, ...Array<number>(IMPORT_AI_MAX_OUTPUT_TOKENS).fill(99)]),
+    );
+    expect(await recognize({ keepAlive: true })).toMatchObject({
+      type: 'error',
+      code: 'output_limit',
+    });
+    expect(sdk.processor.batch_decode).not.toHaveBeenCalled();
+    expect(sdk.model.dispose).not.toHaveBeenCalled();
+    messages.length = 0;
+    expect(await recognize({ keepAlive: true })).toMatchObject({ type: 'result' });
+    expect(sdk.Qwen3VLForConditionalGeneration.from_pretrained).toHaveBeenCalledOnce();
+  });
+
+  it('discards a failed GPU model and reports the reason without losing the worker', async () => {
+    sdk.model.generate.mockRejectedValueOnce(new Error('GPU device lost: private input'));
+    const input = new sdk.Tensor([11, 12]);
+    sdk.processor.mockResolvedValueOnce({ input_ids: input });
+    expect(await recognize({ keepAlive: true })).toMatchObject({ type: 'error', code: 'memory' });
+    expect(input.dispose).toHaveBeenCalledOnce();
+    expect(sdk.model.dispose).toHaveBeenCalledOnce();
+    expect(JSON.stringify(messages)).not.toContain('private input');
+    messages.length = 0;
+    expect(await recognize({ keepAlive: true })).toMatchObject({ type: 'result' });
+    expect(sdk.Qwen3VLForConditionalGeneration.from_pretrained).toHaveBeenCalledTimes(2);
   });
 
   it('accepts a complete response whose end token is exactly at the output budget', async () => {
@@ -297,6 +347,7 @@ describe('personal import AI worker', () => {
         type: 'progress',
         id: 7,
         message: '正在下載辨識模型（已接收 2 MB）',
+        phase: 'loading',
       });
     },
   );

@@ -2,8 +2,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   deletePersonalImportAiModelCache,
   getPersonalImportAiAvailability,
-  runPersonalImportAi,
-} from './personalImportAi';
+  runLocalPersonalImportAi as runPersonalImportAi,
+} from './personalImportAiLocal';
 import { IMPORT_AI_CACHE_NAME } from './personalImportAiConfig';
 
 class FakeWorker {
