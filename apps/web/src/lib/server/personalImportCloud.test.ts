@@ -132,6 +132,13 @@ describe('personal import cloud endpoint', () => {
   ])('never forwards OCR personal data from direct API input: %s', async (text, sensitive) => {
     const { dependencies, fetcher } = setup();
     const result = await handlePersonalImportCloud(request({ text, kind: 'grades' }), dependencies);
+    // 多欄私密表後接單格文字無法確認欄界，應在配額與外送前拒絕。
+    if (text.includes(',課程名稱,')) {
+      expect(result.status).toBe(422);
+      expect(dependencies.getQuotaStore).not.toHaveBeenCalled();
+      expect(fetcher).not.toHaveBeenCalled();
+      return;
+    }
     expect(result.status).toBe(200);
     expect(fetcher).toHaveBeenCalledOnce();
     expect(fetcher.mock.calls[0][1].body).not.toContain(sensitive);
@@ -459,7 +466,7 @@ it.each([
     const source = text.replaceAll(',', delimiter);
     const [header, row] = source.split('\n');
     for (const input of [{ text: source }, { text: row, columnContext: header },
-      { text: '課程名稱,學分,成績\n微積分,3,85', columnContext: source }]) {
+      { text: '課程名稱,學分,成績\n微積分,3,85'.replaceAll(',', delimiter), columnContext: source }]) {
       const { dependencies, fetcher } = setup();
       const response = await handlePersonalImportCloud(request({ ...input, kind: 'grades' }), dependencies);
       expect(response.status).toBe(200);
@@ -470,3 +477,21 @@ it.each([
     }
   }
 });
+
+for (const delimiter of [',', '\t', '|', ';', '、']) {
+  for (const boundary of ['日期', '【第二頁】']) {
+    for (const template of ['姓名,課程名稱,學分,成績\nBOUNDARY\n王小明,微積分,3,85',
+    '課程名稱,學號,學分,成績\nBOUNDARY\n微積分,A12345,3,85']) {
+      const source = template.replace('BOUNDARY', boundary).replaceAll(',', delimiter);
+      it(`單格插入在配額與供應商前拒送：${JSON.stringify(source)}`, async () => {
+        for (const input of [{ text: source }, { text: '英文,2,80', columnContext: source }]) {
+          const { dependencies, fetcher } = setup();
+          const response = await handlePersonalImportCloud(request({ ...input, kind: 'grades' }), dependencies);
+          expect(response.status).toBe(422);
+          expect(dependencies.getQuotaStore).not.toHaveBeenCalled();
+          expect(fetcher).not.toHaveBeenCalled();
+        }
+      });
+    }
+  }
+}

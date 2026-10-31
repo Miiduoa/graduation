@@ -11,7 +11,7 @@ require.extensions['.ts'] = (module, filename) => {
   }).outputText;
   module._compile(source, filename);
 };
-const { isPersonalImportCloudMaskSafe, maskPersonalImportCloudBatch, maskPersonalImportText, requestPersonalImportCloud } = require('../src/imports/aiCloud.ts');
+const { isPersonalImportCloudInputMasked, isPersonalImportCloudMaskSafe, maskPersonalImportCloudBatch, maskPersonalImportText, requestPersonalImportCloud } = require('../src/imports/aiCloud.ts');
 const { PERSONAL_IMPORT_NAME_FIELDS } = require('../src/imports/nameFields.ts');
 const { personalImportHeaderField } = require('../src/imports/parser.ts');
 require.extensions['.ts'] = original;
@@ -273,7 +273,7 @@ for (const delimiter of [',', '\t', '|', ';', '、']) {
       assert.equal(maskPersonalImportText(batch.sourceText), batch.sourceText);
       const [header, row] = text.split('\n');
       for (const input of [{ text }, { text: row, columnContext: header },
-        { text: '課程名稱,學分,成績\n微積分,3,85', columnContext: text }]) {
+        { text: '課程名稱,學分,成績\n微積分,3,85'.replaceAll(',', delimiter), columnContext: text }]) {
         let sent;
         const result = await requestPersonalImportCloud({ ...input, kind: 'grades', fetcher: async (_, init) => {
           sent = JSON.parse(init.body);
@@ -286,3 +286,29 @@ for (const delimiter of [',', '\t', '|', ';', '、']) {
     });
   }
 }
+
+for (const delimiter of [',', '\t', '|', ';', '、']) {
+  for (const boundary of ['日期', '【第二頁】']) {
+    for (const template of ['姓名,課程名稱,學分,成績\nBOUNDARY\n王小明,微積分,3,85',
+    '課程名稱,學號,學分,成績\nBOUNDARY\n微積分,A12345,3,85']) {
+      const source = template.replace('BOUNDARY', boundary).replaceAll(',', delimiter);
+      test(`單格插入不解除私密追蹤：${JSON.stringify(source)}`, async () => {
+        assert.equal(isPersonalImportCloudMaskSafe(source), false);
+        assert.equal(isPersonalImportCloudInputMasked(source), false);
+        assert.equal(maskPersonalImportCloudBatch(source, { text: source, startLine: 1 }), null);
+        for (const input of [{ text: source }, { text: '英文,2,80', columnContext: source }]) {
+          let calls = 0;
+          const result = await requestPersonalImportCloud({ ...input, kind: 'grades', fetcher: async () => { calls++; } });
+          assert.equal(result.ok, false);
+          assert.equal(calls, 0);
+        }
+      });
+    }
+  }
+}
+
+test('遮罩完成檢查會拒絕仍含原值的私密欄', () => {
+  const source = '姓名,課程名稱,學分,成績\n王小明,微積分,3,85';
+  assert.equal(isPersonalImportCloudInputMasked(source), false);
+  assert.equal(isPersonalImportCloudInputMasked(maskPersonalImportText(source)), true);
+});

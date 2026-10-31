@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 import type { NextRequest } from 'next/server';
 import { NuniError, parseNuniPrincipal } from '@campus/shared/src/nuni';
 import { buildPersonalImportAiPrompt } from '@campus/shared/src/imports/aiRecognition';
-import { isPersonalImportCloudMaskSafe, maskPersonalImportCloudInput, PERSONAL_IMPORT_CLOUD_MAX_TEXT } from '@campus/shared/src/imports/aiCloud';
+import { isPersonalImportCloudInputMasked, isPersonalImportCloudMaskSafe, maskPersonalImportCloudInput, PERSONAL_IMPORT_CLOUD_MAX_TEXT } from '@campus/shared/src/imports/aiCloud';
 import type { PersonalImportOptions } from '@campus/shared/src/imports/types';
 import { boundedJson, platformRequest, readPlatformAuthorization, requireSameOrigin, requireSession, type PlatformSession } from '../nuni/server';
 import { getFirebaseAdmin } from './firebaseAdmin';
@@ -139,6 +139,7 @@ export async function handlePersonalImportCloud(request: NextRequest, dependenci
       if (input.text.length + context.length > PERSONAL_IMPORT_CLOUD_MAX_TEXT) return response(413, { code: 'invalid-input' });
       if (!isPersonalImportCloudMaskSafe(input.text, context)) return response(422, { code: 'invalid-input', message: '這份表格無法安全遮罩個資，請改用本機整理。' });
       const { sourceText, columnContext } = maskPersonalImportCloudInput(input.text, context);
+      if (!isPersonalImportCloudInputMasked(sourceText, columnContext)) return response(422, { code: 'invalid-input' });
       if (sourceText.length + columnContext.length > PERSONAL_IMPORT_CLOUD_MAX_TEXT) return response(413, { code: 'invalid-input' });
       const db = await (dependencies.getQuotaStore ?? (async () => (await getFirebaseAdmin())?.db as unknown as QuotaStore ?? null))();
       if (!db) return response(503, { code: 'unavailable', message: '雲端整理暫時無法使用。' });

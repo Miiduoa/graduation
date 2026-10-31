@@ -328,3 +328,19 @@ test.each(['Teacher Education', '教師 專業發展', '教師專業發展'])(
     expect(rules.rows[0]).toMatchObject({ title, source: { rawText: evidence } });
   },
 );
+
+for (const delimiter of [',', '\t', '|', ';', '、']) {
+  for (const boundary of ['日期', '【第二頁】']) {
+    for (const template of ['姓名,課程名稱,學分,成績\nBOUNDARY\n王小明,微積分,3,85',
+    '課程名稱,學號,學分,成績\nBOUNDARY\n微積分,A12345,3,85']) {
+      const source = template.replace('BOUNDARY', boundary).replaceAll(',', delimiter);
+      test(`單格插入首次與重試均留在本機：${JSON.stringify(source)}`, async () => {
+        await runMobilePersonalImportAi(source, options, new AbortController().signal, request);
+        await runMobilePersonalImportAi(source, options, new AbortController().signal, {
+          ...request, retryBatches: [{ text: source.split('\n')[2], startLine: 3, columnContext: '' }],
+        });
+        expect(mockFetch).not.toHaveBeenCalled();
+      });
+    }
+  }
+}

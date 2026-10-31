@@ -132,7 +132,7 @@ function maskPrivateTables(text: string): { text: string; safe: boolean } {
         width = cells.length;
         // 多欄表格只有完整表頭才能重設，資料值撞到欄名仍沿用原欄位。
       } else if ((academic >= 2 && cells.every((cell) => tableField.test(cell))) ||
-        (cells.length === 1 && isAcademicBoundary(cells[0])) ||
+        (width <= 1 && cells.length === 1 && isAcademicBoundary(cells[0])) ||
         (width === 1 && isAcademicBoundary(masked.slice(record.start, record.contentEnd).trim()))) {
         privateColumns = [];
         width = 0;
@@ -267,6 +267,15 @@ export function isPersonalImportCloudMaskSafe(text: string, context = ''): boole
   return !/姓名|名字|學號|学号|學生|身分證|身份證|郵件|電郵|電話|手機|student|name|instructor|teacher|教授|教師|老師|email|phone|mobile/iu.test(residual);
 }
 
+/** 送出前確認明示私密欄已遮罩，不能只依賴結構可處理的判定。 */
+export function isPersonalImportCloudInputMasked(text: string, context = ''): boolean {
+  const original = (context ? `${context}\n${text}` : text).normalize('NFKC');
+  const vertical = maskPrivateVerticalFields(original);
+  const table = maskPrivateTables(vertical.text);
+  return vertical.safe && table.safe && vertical.text === original && table.text === original &&
+    maskPersonalImportTextInternal(original, [], false) === original;
+}
+
 /** 遮罩明示姓名欄、已知姓名，以及學號與身分證格式；保留課程數值。 */
 export function maskPersonalImportText(text: string, knownNames: readonly string[] = []): string {
   return maskPersonalImportTextInternal(text, knownNames, true);
@@ -346,7 +355,7 @@ export async function requestPersonalImportCloud(input: {
   if (input.signal?.aborted) throw cancelled();
   if (!isPersonalImportCloudMaskSafe(input.text, input.columnContext)) return failure('invalid-input');
   const { sourceText, columnContext } = maskPersonalImportCloudInput(input.text, input.columnContext, input.knownNames);
-  if (!sourceText.trim() || sourceText.length + columnContext.length > PERSONAL_IMPORT_CLOUD_MAX_TEXT) return failure('invalid-input');
+  if (!isPersonalImportCloudInputMasked(sourceText, columnContext) || !sourceText.trim() || sourceText.length + columnContext.length > PERSONAL_IMPORT_CLOUD_MAX_TEXT) return failure('invalid-input');
   const controller = new AbortController();
   let timedOut = false;
   let timer: ReturnType<typeof setTimeout> | undefined;
