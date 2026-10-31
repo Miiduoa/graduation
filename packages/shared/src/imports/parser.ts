@@ -245,7 +245,7 @@ function readTable(text: string, delimiter: string): SourceTable {
 }
 
 /** OCR text tables can retain column gaps; single spaces inside course names are never delimiters. */
-function readScreenshotTable(text: string): SourceTable {
+function readScreenshotTable(text: string, searchHeader = true): SourceTable {
   const lines = text
     .split('\n')
     .map((rawText, index) => ({
@@ -256,9 +256,9 @@ function readScreenshotTable(text: string): SourceTable {
     .filter((line) => line.rawText.trim());
   // Screenshot titles and OCR noise often precede the table. Only a real,
   // recognizable header permits skipping that prefix; all later lines remain data.
-  const headerIndex = lines.findIndex(
+  const headerIndex = searchHeader ? lines.findIndex(
     (line) => line.cells.filter((cell) => fieldFor(cell)).length >= 2,
-  );
+  ) : 0;
   return {
     lines: headerIndex > 0 ? lines.slice(headerIndex) : lines,
     ...(headerIndex > 0 ? { skippedPrefix: lines.slice(0, headerIndex) } : {}),
@@ -388,10 +388,18 @@ export function parsePersonalImport(
     rows = parsed.rows;
     issues.push(...parsed.issues);
   } else {
-    const tables = ['\t', ',', ';', '|', '、'].map((delimiter) => {
-      const table = readTable(normalized, delimiter);
-      const firstHeaderCount = table.lines[0]?.cells.filter((cell) => fieldFor(cell)).length ?? 0;
-      const headerIndex = firstHeaderCount >= 2 ? 0 : table.lines.findIndex((line) => {
+    const initialTables = ['\t', ',', ';', '|', '、'].map((delimiter) =>
+      readTable(normalized, delimiter),
+    );
+    const firstTables = options.source?.type === 'screenshot'
+      ? [...initialTables, readScreenshotTable(normalized, false)]
+      : initialTables;
+    const firstHeaderTables = firstTables.filter(
+      (table) => (table.lines[0]?.cells.filter((cell) => fieldFor(cell)).length ?? 0) >= 2,
+    );
+    // 先確立所有分隔符的首列表頭，避免後方表格覆蓋有效資料。
+    const tables = firstHeaderTables.length ? firstHeaderTables : initialTables.map((table) => {
+      const headerIndex = table.lines.findIndex((line) => {
         const fields = line.cells.map(fieldFor);
         return fields.includes('title') && fields.filter(Boolean).length >= 2 &&
           new Set(fields.filter(Boolean)).size === fields.filter(Boolean).length;
@@ -402,7 +410,8 @@ export function parsePersonalImport(
         skippedPrefix: table.lines.slice(0, headerIndex),
       } : table;
     });
-    if (options.source?.type === 'screenshot') tables.push(readScreenshotTable(normalized));
+    if (!firstHeaderTables.length && options.source?.type === 'screenshot')
+      tables.push(readScreenshotTable(normalized));
     const candidates = tables.map((table) => ({
       ...table,
       headers: table.lines[0]?.cells.map(fieldFor) ?? [],

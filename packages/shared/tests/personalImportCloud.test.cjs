@@ -13,7 +13,7 @@ require.extensions['.ts'] = (module, filename) => {
 };
 const { isPersonalImportCloudInputMasked, isPersonalImportCloudMaskSafe, maskPersonalImportCloudBatch, maskPersonalImportText, requestPersonalImportCloud } = require('../src/imports/aiCloud.ts');
 const { PERSONAL_IMPORT_NAME_FIELDS } = require('../src/imports/nameFields.ts');
-const { personalImportHeaderField } = require('../src/imports/parser.ts');
+const { personalImportHeaderField, parsePersonalImport } = require('../src/imports/parser.ts');
 require.extensions['.ts'] = original;
 
 
@@ -439,4 +439,32 @@ for (const delimiter of [',', '\t', '|', ';', '、']) {
     } });
     assert.equal(calls, 1);
   });
+}
+
+
+for (const delimiter of [',', '\t', ';', '|', '、', '  ']) {
+  for (const laterDelimiter of [',', '\t', ';', '|', '、', '  ']) {
+    for (const laterFields of [2, 3, 4]) {
+      for (const type of delimiter === '  ' ? ['screenshot'] : ['paste', 'screenshot']) {
+        test(`有效首列表頭優先 ${JSON.stringify(delimiter)} / ${JSON.stringify(laterDelimiter)} / ${laterFields} / ${type}`, () => {
+          const header = ['課程名稱', '學分', '成績'];
+          const laterHeader = ['課程名稱', '學分', '成績', '教師'].slice(0, laterFields);
+          const laterValues = ['英文', '2', '90', '王老師'].slice(0, laterFields);
+          const text = [header.join(delimiter), ['微積分', '3', '85'].join(delimiter),
+            laterHeader.join(laterDelimiter), laterValues.join(laterDelimiter)].join('\n');
+          const result = parsePersonalImport(text, {
+            kind: 'grades', schoolId: 'x', academicYear: '115', semester: '1', source: { type },
+          });
+          assert.equal(result.rows[0].title, '微積分');
+          assert.equal(result.rows[0].credits, 3);
+          assert.equal(String(result.rows[0].grade), '85');
+          assert.equal(result.rows[0].source.line, 2);
+          assert.equal(result.rows[0].source.rawText, ['微積分', '3', '85'].join(delimiter));
+          assert.equal(result.rows.length, 3);
+          assert.equal(result.issues.some((issue) => issue.code.endsWith('prologue-skipped')), false);
+          assert.equal(result.issues.some((issue) => issue.severity === 'error'), true);
+        });
+      }
+    }
+  }
 }
