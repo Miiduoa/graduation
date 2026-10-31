@@ -45,7 +45,7 @@ describe('personal import cloud client', () => {
   });
 
   it('derives cloud batches from the complete masked document while keeping the original scope', () => {
-    const source = '姓名：\n\n王小明\n\n課程名稱,學分,成績\n資料庫,3,85';
+    const source = '姓名：\n\n王小明\n\n學分,成績\n3,85';
     const batch = { text: '王小明\n\n', startLine: 3, columnContext: '' };
     expect(maskPersonalImportCloudBatch(source, batch)).toEqual({ sourceText: '[個資已遮罩]\n\n', columnContext: '' });
     expect(batch.text).toBe('王小明\n\n');
@@ -108,13 +108,12 @@ describe('personal import cloud client', () => {
     expect(isPersonalImportCloudMaskSafe(masked)).toBe(true);
   });
 
-  it('masks a key/value name and resets private columns at a new academic table header', () => {
+  it('自由文字表頭不足以解除私密欄追蹤', async () => {
     const source = '姓名\t王小明\n課程名稱\t學分\t成績\n微積分\t3\t85\n課程名稱\t姓名\t學分\n英文\t林小美\t2\n課程名稱\t學分\t成績\n體育\t0\t90';
-    const masked = maskPersonalImportText(source);
-    expect(masked).not.toContain('王小明');
-    expect(masked).not.toContain('林小美');
-    expect(masked).toContain('微積分\t3\t85');
-    expect(masked).toContain('體育\t0\t90');
+    const fetcher = vi.fn();
+    expect(await requestPersonalImportCloud({ text: source, kind: 'grades', fetcher })).toMatchObject({ ok: false, reason: 'invalid-input' });
+    expect(fetcher).not.toHaveBeenCalled();
+    expect(isPersonalImportCloudMaskSafe(source)).toBe(false);
   });
 
   it.each([
@@ -244,12 +243,12 @@ it('masks inline private field continuations across context and source before se
   const fetcher = vi.fn(async (_url: unknown, init: RequestInit) => {
     const body = JSON.parse(String(init.body));
     expect(JSON.stringify(body)).not.toMatch(/王小明|李小華/);
-    expect(body.text).toContain('課程名稱,學分,成績\n微積分,3,85');
+    expect(body.text).toContain('學分,成績\n3,85');
     return Response.json({ output: '{}', sourceText: body.text, columnContext: body.columnContext });
   });
   for (const input of [
-    { text: '教師：王小明\n李小華\n課程名稱,學分,成績\n微積分,3,85' },
-    { columnContext: '教師：王小明', text: '李小華\n課程名稱,學分,成績\n微積分,3,85' },
+    { text: '教師：王小明\n李小華\n學分,成績\n3,85' },
+    { columnContext: '教師：王小明', text: '李小華\n學分,成績\n3,85' },
   ]) expect(await requestPersonalImportCloud({ ...input, kind: 'grades', fetcher: fetcher as typeof fetch })).toMatchObject({ ok: true });
   expect(fetcher).toHaveBeenCalledTimes(2);
 });

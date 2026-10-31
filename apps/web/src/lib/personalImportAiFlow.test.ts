@@ -103,7 +103,7 @@ it('masks private data before any network call', async () => {
     expect(init.body).not.toMatch(/王小明|s12345678|A123456789/);
     return success(payload.text);
   });
-  await run('姓名：王小明\n學號：s12345678\n身分證：A123456789\n課程名稱,學分,成績\n資料庫,3,85');
+  await run('姓名：王小明\n學號：s12345678\n身分證：A123456789\n學分,成績\n3,85');
   expect(fetcher).toHaveBeenCalledOnce();
 });
 
@@ -361,6 +361,32 @@ for (const boundary of ['日期', '【第二頁】', '課程名稱', '學分', '
   }
 }
 
+const strictPrivacyCases = new Set<string>();
+// 同寬也必須驗證每格值，並驗證合法首列之後的所有續行。
+for (const delimiter of [',', '\t', '|', ';', '、']) {
+  for (const [label, first, second] of [['姓名', '王甲乙', '王丙丁'], ['學號', 'A12345', 'B54321']]) {
+    for (const head of [`${label}\n${first}`, `${label}:${first}`]) {
+      for (const validRow of ['', '20261031,123456\n']) {
+        strictPrivacyCases.add(`${label},學分\n${first},3\n日期,課號\n${validRow}${second},C54321`.replaceAll(',', delimiter));
+        for (const tail of [`${second},C54321`, `20261031,${second}`, ',123456', '20260230,123456',
+          `${second},85`]) {
+          strictPrivacyCases.add(`${head}\n日期,課號\n${validRow}${tail}`.replaceAll(',', delimiter));
+        }
+      }
+      for (const table of [`課程名稱,成績\n${second},85`,
+        '課程代碼,課程名稱,學分,成績\n123456,微積分,3,85',
+        '日期,課程名稱,教室\n20261031,程式設計,A101',
+        '課程名稱,學分,成績\n微積分,3,85',
+        '學分,成績\n3,101', '學分,成績\n姓名,85', '開始時間,成績\n24:00,85',
+        '日期,課號\n20261031,123456\n20261032,123456']) {
+        strictPrivacyCases.add(`${head}\n${table}`.replaceAll(',', delimiter));
+      }
+    }
+  }
+}
+
+privacyCases.push(...strictPrivacyCases);
+
 // 中性資訊與看似學業數值的續行都不能解除已開始的私密追蹤。
 for (const delimiter of [',', '\t', '|', ';', '、']) {
   for (const prefix of ['日期,20261031', '課號,123456', '開始時間,08:30', '教室,A101',
@@ -383,4 +409,11 @@ it.each(privacyCases)('首次及重試均不得外送私密續行：%s', async (
     completed: { rows: [], issues: [] }, cloudSafe: true, sourceText: text,
   } });
   expect(JSON.stringify(fetcher.mock.calls)).not.toMatch(/王甲乙|王丙丁|A12345|B54321/u);
+  if (strictPrivacyCases.has(text)) {
+    await run(text, { retry: {
+      batches: [{ text, startLine: 1, columnContext: '' }], completed: { rows: [], issues: [] }, cloudSafe: true, sourceText: text,
+    } });
+    expect(fetcher).not.toHaveBeenCalled();
+    expect(runLocalPersonalImportAi).toHaveBeenCalledWith(expect.objectContaining({ input: { text } }));
+  }
 });

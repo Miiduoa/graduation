@@ -104,13 +104,13 @@ describe('personal import cloud endpoint', () => {
 
   it('masks personal data again on the server and uses structured JSON output', async () => {
     const { dependencies, fetcher } = setup();
-    const result = await handlePersonalImportCloud(request({ text: '姓名：王小明\n學號：411234567\nA123456789\n課程名稱,學分,成績\n微積分,3,85', kind: 'grades', columnContext: '課程名稱 學分 成績' }), dependencies);
+    const result = await handlePersonalImportCloud(request({ text: '姓名：王小明\n學號：411234567\nA123456789\n學分,成績\n3,85', kind: 'grades', columnContext: '課程名稱 學分 成績' }), dependencies);
     expect(result.status).toBe(200);
     const outbound = JSON.parse(fetcher.mock.calls[0][1].body);
     for (const value of ['王小明', '411234567', 'A123456789']) expect(JSON.stringify(outbound)).not.toContain(value);
     expect(outbound.response_format.type).toBe('json_schema');
     expect(outbound.messages[0].content).toContain('COLUMN_CONTEXT_DATA=');
-    expect(outbound.messages[0].content).toContain('微積分,3,85');
+    expect(outbound.messages[0].content).toContain('3,85');
     expect(outbound.max_tokens).toBe(4096);
   });
 
@@ -410,11 +410,11 @@ it.each(['李小華／陳小美', '李小華,陳小美', '李小華\t陳小美']
 
 it('masks inline private continuations again on the server and preserves course rows', async () => {
   const { dependencies, fetcher } = setup();
-  const response = await handlePersonalImportCloud(request({ text: '教師：王小明\n李小華\n課程名稱,學分,成績\n微積分,3,85', kind: 'grades' }), dependencies);
+  const response = await handlePersonalImportCloud(request({ text: '教師：王小明\n李小華\n學分,成績\n3,85', kind: 'grades' }), dependencies);
   expect(response.status).toBe(200);
   expect(fetcher).toHaveBeenCalledOnce();
   expect(String(fetcher.mock.calls[0][1].body)).not.toMatch(/王小明|李小華/);
-  expect((await response.json()).sourceText).toContain('課程名稱,學分,成績\n微積分,3,85');
+  expect((await response.json()).sourceText).toContain('學分,成績\n3,85');
 });
 
 it.each(['姓\ufe0f名：王小明', '姓\u034f名,課程名稱,學分,成績\n王小明,微積分,3,85',
@@ -438,8 +438,8 @@ it.each(['姓\ufe0f名：王小明', '姓\u034f名,課程名稱,學分,成績\n�
 });
 
 it.each([
-  '課程代碼,課程名稱,學分,成績\n123456,微積分,3,85',
-  '日期,課程名稱,教室\n20261031,程式設計,A101',
+  '課程代碼,學分,成績\n123456,3,85',
+  '日期,開始時間\n20261031,08:30',
 ])('明確學業資料仍可進入供應商且無姓名原值：%s', async (text) => {
   const { dependencies, fetcher } = setup();
   expect((await handlePersonalImportCloud(request({ text: `姓名：王小明\n${text}`, kind: 'grades' }), dependencies)).status).toBe(200);
@@ -452,7 +452,7 @@ it.each([
 
 it('簡體學號原值不進入供應商本文', async () => {
   const { dependencies, fetcher } = setup();
-  expect((await handlePersonalImportCloud(request({ text: '学号：A12345\n課程名稱,學分,成績\n微積分,3,85', kind: 'grades' }), dependencies)).status).toBe(200);
+  expect((await handlePersonalImportCloud(request({ text: '学号：A12345\n學分,成績\n3,85', kind: 'grades' }), dependencies)).status).toBe(200);
   expect(fetcher).toHaveBeenCalledOnce();
   expect(String(fetcher.mock.calls[0][1].body)).not.toContain('A12345');
 });
@@ -466,7 +466,7 @@ it.each([
     const source = text.replaceAll(',', delimiter);
     const [header, row] = source.split('\n');
     for (const input of [{ text: source }, { text: row, columnContext: header },
-      { text: '課程名稱,學分,成績\n微積分,3,85'.replaceAll(',', delimiter), columnContext: source }]) {
+      { text: '學分,成績\n3,85'.replaceAll(',', delimiter), columnContext: source }]) {
       const { dependencies, fetcher } = setup();
       const response = await handlePersonalImportCloud(request({ ...input, kind: 'grades' }), dependencies);
       expect(response.status).toBe(200);
@@ -515,6 +515,32 @@ for (const boundary of ['日期', '【第二頁】', '課程名稱', '學分', '
   }
 }
 
+const strictPrivacyCases = new Set<string>();
+// 同寬也必須驗證每格值，並驗證合法首列之後的所有續行。
+for (const delimiter of [',', '\t', '|', ';', '、']) {
+  for (const [label, first, second] of [['姓名', '王甲乙', '王丙丁'], ['學號', 'A12345', 'B54321']]) {
+    for (const head of [`${label}\n${first}`, `${label}:${first}`]) {
+      for (const validRow of ['', '20261031,123456\n']) {
+        strictPrivacyCases.add(`${label},學分\n${first},3\n日期,課號\n${validRow}${second},C54321`.replaceAll(',', delimiter));
+        for (const tail of [`${second},C54321`, `20261031,${second}`, ',123456', '20260230,123456',
+          `${second},85`]) {
+          strictPrivacyCases.add(`${head}\n日期,課號\n${validRow}${tail}`.replaceAll(',', delimiter));
+        }
+      }
+      for (const table of [`課程名稱,成績\n${second},85`,
+        '課程代碼,課程名稱,學分,成績\n123456,微積分,3,85',
+        '日期,課程名稱,教室\n20261031,程式設計,A101',
+        '課程名稱,學分,成績\n微積分,3,85',
+        '學分,成績\n3,101', '學分,成績\n姓名,85', '開始時間,成績\n24:00,85',
+        '日期,課號\n20261031,123456\n20261032,123456']) {
+        strictPrivacyCases.add(`${head}\n${table}`.replaceAll(',', delimiter));
+      }
+    }
+  }
+}
+
+privacyCases.push(...strictPrivacyCases);
+
 // 中性資訊與看似學業數值的續行都不能解除已開始的私密追蹤。
 for (const delimiter of [',', '\t', '|', ';', '、']) {
   for (const prefix of ['日期,20261031', '課號,123456', '開始時間,08:30', '教室,A101',
@@ -535,6 +561,7 @@ it.each(privacyCases)('伺服器私密狀態不可解除：%s', async (source) =
     const { dependencies, fetcher } = setup();
     const result = await handlePersonalImportCloud(request({ ...input, kind: 'grades' }), dependencies);
     expect([200, 422]).toContain(result.status);
+    if (strictPrivacyCases.has(source)) expect(result.status).toBe(422);
     if (result.status === 422) expect(dependencies.getQuotaStore).not.toHaveBeenCalled();
     expect(JSON.stringify(fetcher.mock.calls)).not.toMatch(/王甲乙|王丙丁|A12345|B54321/u);
     expect(JSON.stringify(await result.json())).not.toMatch(/王甲乙|王丙丁|A12345|B54321/u);

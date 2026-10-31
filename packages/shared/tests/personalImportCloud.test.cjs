@@ -50,7 +50,7 @@ test('分號表格的引號內分隔符與換行仍完整遮罩', () => {
 
 for (const label of ['教師：王小明', '姓名：王小明', 'teacher: Wang']) {
   test(`遮罩 ${label} 的續行並保留學業邊界後的課程`, () => {
-    for (const boundary of ['課程名稱,學分,成績\n微積分,3,85']) {
+    for (const boundary of ['日期,課號\n20261031,123456']) {
       const source = `${label}\n\n李小華\n陳小美\n${boundary}`;
       assert.equal(isPersonalImportCloudMaskSafe(source), true);
       const masked = maskPersonalImportText(source);
@@ -211,8 +211,8 @@ for (const head of ['姓\ufe0f名：王小明', '姓\u034f名,課程名稱,學�
 }
 
 for (const text of [
-  '課程代碼,課程名稱,學分,成績\n123456,微積分,3,85',
-  '日期,課程名稱,教室\n20261031,程式設計,A101',
+  '課程代碼,學分,成績\n123456,3,85',
+  '日期,開始時間\n20261031,08:30',
 ]) {
   test(`明確學業資料可送出且仍遮罩個資：${text}`, async () => {
     const source = `姓名：王小明\n${text}`;
@@ -242,7 +242,7 @@ test('批次欄位上下文有組合字元時整份留在本機', () => {
 });
 
 test('簡體學號也遮罩批次與實際送出本文', async () => {
-  const text = '学号：A12345\n課程名稱,學分,成績\n微積分,3,85';
+  const text = '学号：A12345\n學分,成績\n3,85';
   const batch = maskPersonalImportCloudBatch(text, { text, startLine: 1 });
   assert.ok(batch);
   assert.equal(batch.sourceText.includes('A12345'), false);
@@ -270,7 +270,7 @@ for (const delimiter of [',', '\t', '|', ';', '、']) {
       assert.equal(maskPersonalImportText(batch.sourceText), batch.sourceText);
       const [header, row] = text.split('\n');
       for (const input of [{ text }, { text: row, columnContext: header },
-        { text: '課程名稱,學分,成績\n微積分,3,85'.replaceAll(',', delimiter), columnContext: text }]) {
+        { text: '學分,成績\n3,85'.replaceAll(',', delimiter), columnContext: text }]) {
         let sent;
         const result = await requestPersonalImportCloud({ ...input, kind: 'grades', fetcher: async (_, init) => {
           sent = JSON.parse(init.body);
@@ -329,6 +329,32 @@ for (const boundary of ['日期', '【第二頁】', '課程名稱', '學分', '
   }
 }
 
+const strictPrivacyCases = new Set();
+// 同寬也必須驗證每格值，並驗證合法首列之後的所有續行。
+for (const delimiter of [',', '\t', '|', ';', '、']) {
+  for (const [label, first, second] of [['姓名', '王甲乙', '王丙丁'], ['學號', 'A12345', 'B54321']]) {
+    for (const head of [`${label}\n${first}`, `${label}:${first}`]) {
+      for (const validRow of ['', '20261031,123456\n']) {
+        strictPrivacyCases.add(`${label},學分\n${first},3\n日期,課號\n${validRow}${second},C54321`.replaceAll(',', delimiter));
+        for (const tail of [`${second},C54321`, `20261031,${second}`, ',123456', '20260230,123456',
+          `${second},85`]) {
+          strictPrivacyCases.add(`${head}\n日期,課號\n${validRow}${tail}`.replaceAll(',', delimiter));
+        }
+      }
+      for (const table of [`課程名稱,成績\n${second},85`,
+        '課程代碼,課程名稱,學分,成績\n123456,微積分,3,85',
+        '日期,課程名稱,教室\n20261031,程式設計,A101',
+        '課程名稱,學分,成績\n微積分,3,85',
+        '學分,成績\n3,101', '學分,成績\n姓名,85', '開始時間,成績\n24:00,85',
+        '日期,課號\n20261031,123456\n20261032,123456']) {
+        strictPrivacyCases.add(`${head}\n${table}`.replaceAll(',', delimiter));
+      }
+    }
+  }
+}
+
+privacyCases.push(...strictPrivacyCases);
+
 // 中性資訊與看似學業數值的續行都不能解除已開始的私密追蹤。
 for (const delimiter of [',', '\t', '|', ';', '、']) {
   for (const prefix of ['日期,20261031', '課號,123456', '開始時間,08:30', '教室,A101',
@@ -353,10 +379,34 @@ for (const source of privacyCases) {
     assert.equal(isPersonalImportCloudInputMasked(source), false);
     for (const input of [{ text: source }, { text: '英文,2,80,90', columnContext: source },
       { text: source.split('\n').slice(1).join('\n'), columnContext: source.split('\n')[0] }]) {
-      await requestPersonalImportCloud({ ...input, kind: 'grades', fetcher: async (_, init) => {
+      const result = await requestPersonalImportCloud({ ...input, kind: 'grades', fetcher: async (_, init) => {
+        if (strictPrivacyCases.has(source)) assert.fail('歧義資料不得建立請求');
         assert.doesNotMatch(init.body, /王甲乙|王丙丁|A12345|B54321/u);
         return Response.json({ output: '{}' });
       } });
+      if (strictPrivacyCases.has(source)) assert.equal(result.reason, 'invalid-input');
+    }
+  });
+}
+
+for (const delimiter of [',', '\t', '|', ';', '、']) {
+  test(`可驗證學業欄值可解除追蹤並保留原值：${JSON.stringify(delimiter)}`, async () => {
+    for (const table of ['日期,課號\n20261031,123456\n20261101,654321',
+      '日期,開始時間\n2024/02/29,08:30', '學分,成績\n3,85',
+      '學年度,學期\n115,1', '星期,開始節次,結束節次\n1,2,4']) {
+      const academic = table.replaceAll(',', delimiter);
+      const source = `姓名\n王甲乙\n${academic}`;
+      assert.equal(isPersonalImportCloudMaskSafe(source), true);
+      assert.equal(maskPersonalImportText(source).endsWith(academic), true);
+      let calls = 0;
+      await requestPersonalImportCloud({ text: source, kind: 'grades', fetcher: async (_, init) => {
+        calls++;
+        const body = JSON.parse(init.body);
+        assert.equal(body.text.endsWith(academic), true);
+        assert.doesNotMatch(init.body, /王甲乙/u);
+        return Response.json({ output: '{}' });
+      } });
+      assert.equal(calls, 1);
     }
   });
 }

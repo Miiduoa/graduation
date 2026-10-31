@@ -32,8 +32,32 @@ const privateField = new RegExp(`^${privateFieldPattern}$`, 'iu');
 const privateTableDelimiters = ['\t', ',', '|', ';', '、'] as const;
 const tableField = /^(?:(?:課程|科目|活動)?名稱|課號|科目代碼|課程代碼|學分數?|成績|分數|學年度|學期|(?:授課)?教師|教室|星期|開始節次|結束節次|日期|開始時間|結束時間|地點|班級|系所|序號|編號|course(?: name| code)?|credits?|grade|score|semester|teacher|room|day|date|start|end|title|location)$/iu;
 
-// 完整非私密表頭後必須接同寬資料列；整個後續區段都符合才解除追蹤。
-// 單筆值、數值形狀與後續孤立列都不能證明新表格開始。
+// 解除私密追蹤只接受可驗證的結構值；自由文字無法證明不是姓名或其他個資。
+function isAcademicValue(header: string, value: string): boolean {
+  const field = header.trim().toLowerCase();
+  const cell = value.trim();
+  if (/^(?:日期|date)$/u.test(field)) {
+    const parts = cell.match(/^(\d{4})(?:[-/](\d{2})[-/](\d{2})|(\d{2})(\d{2}))$/u);
+    if (!parts) return false;
+    const year = Number(parts[1]);
+    const month = Number(parts[2] ?? parts[4]);
+    const day = Number(parts[3] ?? parts[5]);
+    const date = new Date(Date.UTC(year, month - 1, day));
+    return year >= 1900 && year <= 2200 && date.getUTCFullYear() === year &&
+      date.getUTCMonth() === month - 1 && date.getUTCDate() === day;
+  }
+  if (/^(?:開始時間|結束時間|start|end)$/u.test(field)) return /^(?:[01]\d|2[0-3]):[0-5]\d$/u.test(cell);
+  if (/^(?:課號|科目代碼|課程代碼|course code)$/u.test(field)) return /^\d{4,8}$/u.test(cell);
+  if (/^(?:學分數?|credits?)$/u.test(field)) return /^(?:[0-9]|[12]\d|30)(?:\.\d)?$/u.test(cell);
+  if (/^(?:成績|分數|grade|score)$/u.test(field)) return /^(?:\d{1,2}(?:\.\d{1,2})?|100(?:\.0{1,2})?)$/u.test(cell);
+  if (field === '學年度') return /^(?:\d{3}|20\d{2})$/u.test(cell);
+  if (/^(?:學期|semester)$/u.test(field)) return /^[123]$/u.test(cell);
+  if (/^(?:星期|day)$/u.test(field)) return /^[1-7]$/u.test(cell);
+  if (/^(?:開始節次|結束節次)$/u.test(field)) return /^(?:[1-9]|1[0-5])$/u.test(cell);
+  return false;
+}
+
+// 所有後續紀錄的每一格都符合欄位格式才解除；缺值、未知欄位與衝突均拒絕。
 function isAcademicBoundary(value: string): boolean {
   return privateTableDelimiters.some((delimiter) => {
     const records = readImportDelimitedRecords(value, delimiter);
@@ -43,7 +67,7 @@ function isAcademicBoundary(value: string): boolean {
     return headers.length >= 2 &&
       headers.every((cell) => tableField.test(cell.trim()) && !privateField.test(cell.trim())) &&
       nonempty.slice(1).every((record) => record.cells.length === headers.length &&
-        record.cells.every((cell) => !privateField.test(cell.trim())));
+        record.cells.every((cell, index) => isAcademicValue(headers[index], cell)));
   });
 }
 
@@ -147,6 +171,8 @@ function maskPrivateTables(text: string): { text: string; safe: boolean } {
       } else if (isAcademicBoundary(masked.slice(record.start))) {
         privateColumns = [];
         width = 0;
+      } else if (privateColumns.length && cells.length >= 2 && cells.every((cell) => tableField.test(cell))) {
+        return { text: masked, safe: false };
       } else if (width === 1 && cells.length === 1 &&
         (/^【[^【】]+】$/u.test(cells[0]) || tableField.test(cells[0]))) {
         continue;
@@ -267,7 +293,8 @@ export function isPersonalImportCloudMaskSafe(text: string, context = ''): boole
       return records?.length === 1 && records[0].cells.some((cell) => privateField.test(cell.trim()));
     })) return false;
   }
-  const vertical = maskPrivateVerticalFields(normalized);
+  // 邊界驗證使用原值，不能用已被替換成課程標記的安全掃描副本。
+  const vertical = maskPrivateVerticalFields(original.normalize('NFKC'));
   if (!vertical.safe || !maskPrivateTables(vertical.text).safe) return false;
   // 已支援的欄名交由上面的欄界與遮罩檢查確認；其餘內容整段壓縮，
   // 才能看見跨行、任意 Unicode 標點或控制字元拆開的未知個資欄名。

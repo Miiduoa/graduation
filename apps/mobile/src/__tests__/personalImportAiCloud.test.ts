@@ -103,7 +103,7 @@ test.each([
 test('cloud input masks identity fields before fetch', async () => {
   mockFetch.mockResolvedValue(response(503, { code: 'disabled' }));
   await runMobilePersonalImportAi(
-    `姓名：王小明\n學號：411123456\n身分證：A123456789\n課程名稱,學分,成績\n資料庫,3,85`,
+    `姓名：王小明\n學號：411123456\n身分證：A123456789\n學分,成績\n3,85`,
     options,
     new AbortController().signal,
     request,
@@ -208,7 +208,7 @@ test('cloud isolates a malformed later segment and recovers it locally', async (
 test('whole-document masking protects a vertical name before paragraph segmentation', async () => {
   mockFetch.mockResolvedValue(response(503, { code: 'disabled' }));
   await runMobilePersonalImportAi(
-    `姓名\n\n王小明\n\n課程名稱,學分,成績\n資料庫,3,85`,
+    `姓名\n\n王小明\n\n學分,成績\n3,85`,
     options,
     new AbortController().signal,
     request,
@@ -220,7 +220,7 @@ test('whole-document masking protects a vertical name before paragraph segmentat
 test('unmasked local retry ranges cannot bypass whole-document identity masking', async () => {
   mockFetch.mockResolvedValue(response(503, { code: 'disabled' }));
   await runMobilePersonalImportAi(
-    `姓名\n\n王小明\n\n課程名稱,學分,成績\n資料庫,3,85`,
+    `姓名\n\n王小明\n\n學分,成績\n3,85`,
     options,
     new AbortController().signal,
     {
@@ -234,7 +234,7 @@ test('unmasked local retry ranges cannot bypass whole-document identity masking'
 
 test('a retry range that cannot be matched to the original document stays on the device', async () => {
   await runMobilePersonalImportAi(
-    `姓名\n\n王小明\n\n課程名稱,學分,成績\n資料庫,3,85`,
+    `姓名\n\n王小明\n\n學分,成績\n3,85`,
     options,
     new AbortController().signal,
     { ...request, retryBatches: [{ text: '王小明\n\n', startLine: 2, columnContext: '' }] },
@@ -364,6 +364,32 @@ for (const boundary of ['日期', '【第二頁】', '課程名稱', '學分', '
   }
 }
 
+const strictPrivacyCases = new Set<string>();
+// 同寬也必須驗證每格值，並驗證合法首列之後的所有續行。
+for (const delimiter of [',', '\t', '|', ';', '、']) {
+  for (const [label, first, second] of [['姓名', '王甲乙', '王丙丁'], ['學號', 'A12345', 'B54321']]) {
+    for (const head of [`${label}\n${first}`, `${label}:${first}`]) {
+      for (const validRow of ['', '20261031,123456\n']) {
+        strictPrivacyCases.add(`${label},學分\n${first},3\n日期,課號\n${validRow}${second},C54321`.replaceAll(',', delimiter));
+        for (const tail of [`${second},C54321`, `20261031,${second}`, ',123456', '20260230,123456',
+          `${second},85`]) {
+          strictPrivacyCases.add(`${head}\n日期,課號\n${validRow}${tail}`.replaceAll(',', delimiter));
+        }
+      }
+      for (const table of [`課程名稱,成績\n${second},85`,
+        '課程代碼,課程名稱,學分,成績\n123456,微積分,3,85',
+        '日期,課程名稱,教室\n20261031,程式設計,A101',
+        '課程名稱,學分,成績\n微積分,3,85',
+        '學分,成績\n3,101', '學分,成績\n姓名,85', '開始時間,成績\n24:00,85',
+        '日期,課號\n20261031,123456\n20261032,123456']) {
+        strictPrivacyCases.add(`${head}\n${table}`.replaceAll(',', delimiter));
+      }
+    }
+  }
+}
+
+privacyCases.push(...strictPrivacyCases);
+
 // 中性資訊與看似學業數值的續行都不能解除已開始的私密追蹤。
 for (const delimiter of [',', '\t', '|', ';', '、']) {
   for (const prefix of ['日期,20261031', '課號,123456', '開始時間,08:30', '教室,A101',
@@ -386,4 +412,19 @@ test.each(privacyCases)('首次及重試均不得外送私密續行：%s', async
     ...request, retryBatches: [{ text: source.split('\n').slice(1).join('\n'), startLine: 2, columnContext: source.split('\n')[0] }],
   });
   expect(JSON.stringify(mockFetch.mock.calls)).not.toMatch(/王甲乙|王丙丁|A12345|B54321/u);
+  if (strictPrivacyCases.has(source)) {
+    await runMobilePersonalImportAi(source, options, new AbortController().signal, {
+      ...request, retryBatches: [{ text: source, startLine: 1 }],
+    });
+    expect(mockFetch).not.toHaveBeenCalled();
+  }
+});
+
+test('欄值衝突時零外送且本機模型收到完整原文', async () => {
+  const source = '姓名\n王甲乙\n日期,課號\n20261031,123456\n王丙丁,C54321';
+  await runMobilePersonalImportAi(source, options, new AbortController().signal, request);
+  expect(mockFetch).not.toHaveBeenCalled();
+  expect(localLLM.generate).toHaveBeenCalledWith(expect.objectContaining({
+    messages: [expect.objectContaining({ content: expect.stringContaining(JSON.stringify(source)) })],
+  }));
 });
