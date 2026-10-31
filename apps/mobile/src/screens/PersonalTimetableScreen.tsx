@@ -1,5 +1,5 @@
 import * as Clipboard from 'expo-clipboard';
-import React, { useCallback, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Pressable,
   ScrollView,
@@ -55,11 +55,13 @@ export default function PersonalTimetableScreen() {
   const { school } = useSchool();
   const scope = usePersonalImportScope();
   const route = useRoute();
-  const term = (route.params as { term?: string } | undefined)?.term;
-  return <PersonalTimetableWorkspace initialTerm={term} key={`${auth.user?.uid || 'guest'}:${school?.id || 'pu'}:${scope?.owner || 'pending'}:${term || ''}`} />;
+  const params = route.params as { term?: string; courseId?: string; schoolId?: string } | undefined;
+  const term = params?.schoolId && params.schoolId !== (school?.id || 'pu') ? undefined : params?.term;
+  const courseId = params?.schoolId === (school?.id || 'pu') ? params.courseId : undefined;
+  return <PersonalTimetableWorkspace initialCourseId={courseId} initialTerm={term} key={`${auth.user?.uid || 'guest'}:${school?.id || 'pu'}:${scope?.owner || 'pending'}:${term || ''}:${courseId || ''}`} />;
 }
 
-function PersonalTimetableWorkspace({ initialTerm }: { initialTerm?: string }) {
+function PersonalTimetableWorkspace({ initialTerm, initialCourseId }: { initialTerm?: string; initialCourseId?: string }) {
   const navigation = useNavigation();
   const auth = useAuth();
   const { school } = useSchool();
@@ -95,6 +97,11 @@ function PersonalTimetableWorkspace({ initialTerm }: { initialTerm?: string }) {
   const selectedView = importTerm === 'legacy' || activeTerm === manualTerm
     ? 'legacy' : activeTerm?.replace('|', '／');
   const displayCourses = useMemo(() => selectPersonalTimetableCourses(timetable, importedRecords, schoolId, selectedView), [timetable, importedRecords, schoolId, selectedView]);
+  const selectedCourse = displayCourses.find((course) => course.id === initialCourseId ||
+    `manual:${course.id}` === initialCourseId || course.id === `import:${initialCourseId}`);
+  useEffect(() => {
+    if (selectedCourse?.day) setDay(selectedCourse.day);
+  }, [selectedCourse?.day]);
   const placedImportIds = useMemo(() => new Set(
     personalImportCourses(importedRecords, schoolId).map((course) => course.id),
   ), [importedRecords, schoolId]);
@@ -232,6 +239,10 @@ function PersonalTimetableWorkspace({ initialTerm }: { initialTerm?: string }) {
   return (
     <Screen title="我的課表" subtitle="查看上課時間與空堂">
       <ScrollView contentContainerStyle={{ padding: 16, gap: 16, paddingBottom: 120 }}>
+        {initialCourseId ? <View style={{ padding: 16, gap: 6 }}>
+          <Text style={{ color: theme.colors.text, fontWeight: '700' }}>{selectedCourse?.name || '這堂課已變更，請核對目前課表'}</Text>
+          {selectedCourse ? <Text style={{ color: theme.colors.muted }}>{selectedCourse.room || '教室未填'}</Text> : null}
+        </View> : null}
         <PersonalImportSummary kind="timetable" />
         {importStatus === 'error' ? (
           <View>

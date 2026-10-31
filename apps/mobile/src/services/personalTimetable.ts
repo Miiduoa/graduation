@@ -1,3 +1,4 @@
+import { notifyTimetableChanged } from '../widgets/timetableChanges';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import {
   collection,
@@ -202,13 +203,17 @@ export async function savePersonalTimetable(uid: string | null, timetable: Store
     updatedAt: new Date().toISOString(),
   };
   await AsyncStorage.setItem(`${KEY}:${localOwner || uid || 'local'}:${canonical}`, JSON.stringify(next));
-  if (!uid || localOwner) return { stored: 'local' as const };
+  if (!uid || localOwner) {
+    notifyTimetableChanged();
+    return { stored: 'local' as const };
+  }
   await setDoc(cloudScopedRef(uid, canonical), {
     ...next,
     // 送申訴時規則用這兩個清單確認課在自己的課表裡
     ...timetableIndex(next.courses),
     updatedAt: serverTimestamp(),
   });
+  notifyTimetableChanged();
   return { stored: 'cloud' as const };
 }
 

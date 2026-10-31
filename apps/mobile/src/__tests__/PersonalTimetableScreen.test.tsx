@@ -6,7 +6,7 @@ import { loadPersonalTimetable } from '../services/personalTimetable';
 import { loadPersonalImports } from '../services/personalImports';
 
 let mockSchool = { id: 'ncku', name: '國立成功大學' };
-let mockRoute: { params?: { term: string } } = {};
+let mockRoute: { params?: { term: string; courseId?: string; schoolId?: string } } = {};
 let mockScope: { owner: string; schoolId: string } | null = {
   owner: 'nuni:account-a',
   schoolId: 'ncku',
@@ -188,4 +188,15 @@ test('a later manual timetable read failure keeps its prior data but blocks free
   expect(view.getByRole('button', { name: '今天空堂' })).toBeDisabled();
   fireEvent.press(view.getByRole('button', { name: '重試課表' }));
   await waitFor(() => expect(view.getByRole('button', { name: '今天空堂' })).not.toBeDisabled());
+});
+
+
+test('widget links locate the saved course and room, while removed courses fall back safely', async () => {
+  mockRoute = { params: { term: '115|1', courseId: 'course-a', schoolId: 'ncku' } };
+  const view = render(<PersonalTimetableScreen />);
+  await waitFor(() => expect(view.getAllByText('成大課程').length).toBeGreaterThan(1));
+  expect(view.getByText('教室 303')).toBeTruthy();
+  mockRoute = { params: { term: '115|1', courseId: 'removed', schoolId: 'ncku' } };
+  view.rerender(<PersonalTimetableScreen />);
+  await view.findByText('這堂課已變更，請核對目前課表');
 });

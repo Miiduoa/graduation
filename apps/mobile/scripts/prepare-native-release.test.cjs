@@ -20,6 +20,9 @@ const files = [
   'ios/mobile.xcodeproj/project.pbxproj',
   'ios/mobile/Info.plist',
   'ios/mobile/Supporting/Expo.plist',
+  'ios/mobile/mobile.entitlements',
+  'ios/CampusWidgetExtension/Info.plist',
+  'ios/CampusWidgetExtension/CampusWidgetExtension.entitlements',
 ];
 function fixture(t, ci = false) {
   const workspace = mkdtempSync(join(tmpdir(), 'campus-native-release-'));
@@ -54,7 +57,7 @@ test('dry check reports missing production synchronization without changing the 
 test('an isolated release has matching bundle, Google callback, channel and a distinct native runtime', (t) => {
   const path = fixture(t);
   const plan = buildPlan(path);
-  assert.equal(plan.length, 3);
+  assert.equal(plan.length, 6);
   main(['--write', path]);
   assert.equal(buildPlan(path).length, 0);
   main(['--check', path]);
@@ -64,6 +67,12 @@ test('an isolated release has matching bundle, Google callback, channel and a di
   const info = readFileSync(join(path, files[2]), 'utf8');
   assert.ok(info.includes(production.iosClientId));
   assert.ok(info.includes(production.iosClientId.split('.').reverse().join('.')));
+  for (const file of files.slice(4)) {
+    const contents = readFileSync(join(path, file), 'utf8');
+    assert.ok(contents.includes('group.com.nuni.app'));
+    assert.ok(!contents.includes('group.com.campus.app.dev'));
+  }
+  assert.equal([...project.matchAll(/PRODUCT_BUNDLE_IDENTIFIER = com.nuni.app.widget;/g)].length, 2);
   const updates = readFileSync(join(path, files[3]), 'utf8');
   assert.ok(updates.includes(production.runtimeVersion));
   assert.ok(updates.includes(`https://u.expo.dev/${production.projectId}`));

@@ -65,7 +65,12 @@ test('production resolves with public service configuration and no school accoun
   assert.equal(app.android.package, 'com.nuni.app');
   assert.equal(app.ios.bundleIdentifier, 'com.nuni.app');
   assert.equal(app.extra.eas.projectId, '8955b97c-802c-463c-bd1d-d5f02e30a966');
-  assert.equal(app.runtimeVersion, 'campus-one-native-google-1');
+  assert.deepEqual(app.extra.eas.build.experimental.ios.appExtensions, [{
+    targetName: 'CampusWidgetExtension', bundleIdentifier: 'com.nuni.app.widget',
+    entitlements: { 'com.apple.security.application-groups': ['group.com.nuni.app'] },
+  }]);
+  assert.ok(app.ios.config && typeof app.ios.config === 'object');
+  assert.equal(app.runtimeVersion, 'campus-one-native-widget-2');
   assert.equal(app.updates.url, `https://u.expo.dev/${app.extra.eas.projectId}`);
   assert.equal(app.extra.firebase.projectId, 'campus-one-tw');
   assert.equal(app.extra.legalBaseUrl, 'https://nuni.tw');
