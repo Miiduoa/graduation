@@ -30,7 +30,7 @@ const originalServices = [
   ['/announcements', '公告'],
   ['/timetable', '課表'],
   ['/appeals', '課程申訴'],
-  ['/grades', '成績'],
+  ['/grades?tab=semester', '成績'],
   ['/credit-planner', '學分規劃'],
   ['/groups', '課程與群組'],
   ['/events', '校園活動'],
@@ -160,9 +160,19 @@ it('marks the feedback tab instead of the general grade service and keeps campus
   const destination = new URL(feedback.getAttribute('href')!, 'https://campus.example');
   expect(destination.searchParams.get('tab')).toBe('feedback');
   expect(destination.searchParams.get('campus')).toBe('nthu');
-  navigation.search = 'campus=nthu';
+  navigation.search = 'tab=semester&campus=nthu';
   view.rerender(<CampusServiceMenu />);
   expect(screen.getByRole('link', { name: /^成績$/ }).getAttribute('aria-current')).toBe('page');
+  expect(feedback.getAttribute('aria-current')).toBeNull();
+  const semester = new URL(
+    screen.getByRole('link', { name: /^成績$/ }).getAttribute('href')!,
+    'https://campus.example',
+  );
+  expect(semester.searchParams.get('tab')).toBe('semester');
+  expect(semester.searchParams.get('campus')).toBe('nthu');
+  navigation.search = 'campus=nthu';
+  view.rerender(<CampusServiceMenu />);
+  expect(screen.getByRole('link', { name: /^成績$/ }).getAttribute('aria-current')).toBeNull();
   expect(feedback.getAttribute('aria-current')).toBeNull();
 });
 

@@ -5,6 +5,7 @@ vi.mock('@/features/nuni/StudentGrades', () => ({ StudentGradesPage: () => <h1>n
 import TimetablePage from '@/app/timetable/page';
 import CreditPlannerPage from '@/app/credit-planner/page';
 import {
+  AcademicConnectionError,
   loadAcademicRecords,
   type AcademicSnapshot,
 } from '@/lib/academicClient';
@@ -334,3 +335,22 @@ it('loads semester scores, school averages and rankings and filters semesters', 
   expect(feedback.searchParams.get('campus')).toBe('pu');
   expect(feedback.searchParams.get('from')).toBe('profile');
 });
+
+it.each(['guest', 'reconnect', 'unavailable'] as const)(
+  'preserves semester and existing query parameters on school login: %s',
+  async (state) => {
+    navigation.search =
+      'tab=semester&from=profile&filter=a&filter=b&school=pu&schoolId=pu&campus=pu';
+    if (state === 'guest') account.user = null;
+    else vi.mocked(loadAcademicRecords).mockRejectedValue(new AcademicConnectionError(state));
+    render(<GradesPage />);
+    const label = state === 'guest'
+      ? '用學校帳號登入'
+      : state === 'reconnect' ? '連線學校帳號' : '重新連線學校帳號';
+    const link = await screen.findByRole('link', { name: label });
+    const login = new URL(link.getAttribute('href')!, 'https://test.local');
+    expect(login.pathname).toBe('/login');
+    expect(login.searchParams.get('returnUrl')).toBe(`/grades?${navigation.search}`);
+    if (state !== 'guest') expect(login.searchParams.get('reconnect')).toBe('school');
+  },
+);

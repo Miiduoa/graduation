@@ -9,7 +9,9 @@ export type QuickCampusAction = Pick<
 /** Show shortcuts for known services only; no submission, payment or update is executed. */
 export function getQuickCampusActions(input: string): QuickCampusAction[] {
   return suggestCampusDestinations(input).flatMap((href) => {
-    const service = CAMPUS_SERVICES.find((item) => item.href === href);
+    // The shared intent keeps the mobile grade destination; Web uses an explicit semester tab.
+    const webHref = href === '/grades' ? '/grades?tab=semester' : href;
+    const service = CAMPUS_SERVICES.find((item) => item.href === webHref);
     return service
       ? [{ name: service.name, text: service.text, href: service.href, access: service.access }]
       : [];
