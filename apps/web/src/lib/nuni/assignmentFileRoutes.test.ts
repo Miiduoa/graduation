@@ -103,7 +103,7 @@ describe('assignment file BFF flag and contracts', () => {
     expect(fetcher).not.toHaveBeenCalled();
   });
 
-  it('keeps flag-off PUT, signed query and Platform classroom session identical to main', async () => {
+  it('keeps file writes and signed downloads disabled but authenticates filtered assignment reads', async () => {
     const jpeg = Uint8Array.from([0xff, 0xd8, 0xff, 0xe0, 1, 2, 3, 4]);
     const guessed = `assignments/${assignmentId}/files/cwf_99999999-9999-4999-8999-999999999999/content`;
     expect(
@@ -121,8 +121,13 @@ describe('assignment file BFF flag and contracts', () => {
         })
       ).status,
     ).toBe(400);
-    expect((await invoke('assignments', { cookie: false, platform: true })).status).toBe(401);
     expect(fetcher).not.toHaveBeenCalled();
+    fetcher.mockImplementation(async (url: string) => {
+      if (String(url).endsWith('/sessions/current')) return response(principal);
+      if (String(url).endsWith('/assignments')) return response({ assignments: [assignment] });
+      return response(workspace);
+    });
+    expect((await invoke('assignments', { cookie: false, platform: true })).status).toBe(200);
   });
 
   it('accepts a late photo, keeps the receipt after reload, and does not fake success', async () => {
@@ -385,10 +390,22 @@ it.each(['student', 'co-teacher', 'outsider'])('checks withdrawal permissions fo
   expect(result.status).toBe(role === 'student' ? 200 : 403);
   if (role === 'student') {
     expect((await result.json()).mySubmission).toBeNull();
+    vi.stubEnv('ASSIGNMENT_FILE_SUBMIT_ENABLED', 'false');
     const listed = await invoke('assignments', { cookie: false, platform: true });
     const page = await listed.json();
     expect(page.assignments[0].mySubmission).toBeNull();
     expect(page.assignments[0].submissionCount).toBe(0);
+    fetcher.mockImplementation(async (url: string) => {
+      const target = String(url);
+      if (target.endsWith('/sessions/current')) return response(principal);
+      if (target.endsWith(`/class-workspaces/${id}`)) return response({ ...workspace, memberRole: 'co-teacher' });
+      if (target.endsWith('/assignments')) return response({ assignments: [{ ...assignment, submissionCount: 1 }] });
+      if (target.endsWith('/submissions')) return response({ submissions: [mine] });
+      return response({ error: { code: 'NOT_FOUND' } }, 404);
+    });
+    const teacherRead = await invoke(`assignments/${assignmentId}/submissions`, { cookie: false, platform: true });
+    expect(teacherRead.status).toBe(200);
+    expect((await teacherRead.json()).submissions).toEqual([]);
   }
 });
 

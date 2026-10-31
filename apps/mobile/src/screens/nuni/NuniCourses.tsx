@@ -51,7 +51,7 @@ import {
   pickAssignmentDocuments,
   removeNativeFile,
   submitNativeAssignmentFiles,
-  usesAssignmentFileBff,
+  assignmentRequest,
   type LocalNativeFile,
   type NativeUploadProgress,
 } from './assignmentFileSubmit';
@@ -634,12 +634,7 @@ function CourseScope({
     () =>
       createNuniClasses(
         (path, input, query) => {
-          const send =
-            assignmentFileSubmitEnabledNative() &&
-            bffRequest &&
-            usesAssignmentFileBff(path, input)
-              ? bffRequest
-              : request;
+          const send = assignmentRequest(path, input, request, bffRequest);
           return query
             ? send(path, session.context, input, undefined, query)
             : send(path, session.context, input);

@@ -218,7 +218,6 @@ export async function hydrateAssignmentFiles(
   workspace: NuniWorkspace,
   assignments: NuniAssignment[],
 ): Promise<NuniAssignment[]> {
-  if (!assignmentFileSubmitEnabled()) return assignments;
   const actor = await actorFor(request);
   const service = serviceFor(actor);
   return Promise.all(
@@ -242,7 +241,6 @@ export async function hydrateSubmissionFiles(
   assignment: NuniAssignment,
   submissions: NuniSubmission[],
 ): Promise<NuniSubmission[]> {
-  if (!assignmentFileSubmitEnabled()) return submissions;
   const actor = await actorFor(request);
   const service = serviceFor(actor);
   const hydrated: NuniSubmission[] = [];

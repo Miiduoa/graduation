@@ -61,7 +61,7 @@ export const ASSIGNMENT_FILE_SQL = {
   countWithdrawn: `SELECT count(*)::int AS count FROM class_assignment_submission_withdrawals withdrawal
     JOIN class_workspace_assignment_submissions submission
     ON submission.assignment_id = withdrawal.assignment_id AND submission.platform_account_id = withdrawal.platform_account_id
-    AND submission.submitted_at = withdrawal.submitted_at WHERE withdrawal.assignment_id = $1`,
+    AND date_trunc('milliseconds', submission.submitted_at) = withdrawal.submitted_at WHERE withdrawal.assignment_id = $1`,
   isWithdrawn: `SELECT 1 FROM class_assignment_submission_withdrawals
     WHERE assignment_id = $1 AND platform_account_id = $2 AND submitted_at = $3::timestamptz`,
   withdraw: `INSERT INTO class_assignment_submission_withdrawals (assignment_id, platform_account_id, submitted_at)

@@ -35,6 +35,7 @@ jest.mock('../state/nuniSession', () => ({
   useNuniSession: () => ({
     session: mockSession,
     request: mockRequest,
+    bffRequest: mockRequest,
     loading: false,
     pendingLogout: false,
   }),

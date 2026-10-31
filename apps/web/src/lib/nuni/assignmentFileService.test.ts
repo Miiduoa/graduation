@@ -759,3 +759,72 @@ it('restores the previous file receipt after a failed revision and replaces it o
   const old = first.mySubmission!.files![0];
   await expect(api.readContent(workspaceId, assignmentId, old.id, old.downloadExp, old.downloadSig)).rejects.toMatchObject({ status: 404 });
 });
+
+it.each(['memory', 'sql'] as const)('recovers confirmed attachment alignment after the deadline across service restarts (%s)', async mode => {
+  const index = mode === 'sql' ? createSqlIndexStore(createFakeAssignmentFileSql()) : createMemoryIndexStore();
+  const stores = { index, blobs: createTtlMemoryBlobStore() };
+  let clock = new Date('2026-10-21T11:59:58.000Z');
+  let current = assignment();
+  const submit = vi.fn(async (_actor, _workspace, _assignment, body: string) => {
+    current = assignment({ submissionCount: 1, mySubmission: {
+      assignmentId, platformAccountId: studentId, displayName: '同學', body,
+      state: 'submitted', submittedAt: '2026-10-21T11:59:59.000Z', teacherFeedback: null, reviewedAt: null,
+    } });
+    return current;
+  });
+  const upstream = { ...platform({ submit }), assignment: async () => current };
+  const make = () => createAssignmentFileService({ secret, stores, platform: upstream, now: () => clock });
+  let api = make();
+  const student = actor(studentId);
+  const intent = await api.createIntent(student, workspaceId, assignmentId, {
+    originalName: 'shot.jpg', contentType: 'image/jpeg', byteSize: 64, idempotencyKey: 'recover-intent',
+  });
+  await api.putContent(student, workspaceId, assignmentId, intent.id, jpeg());
+  const put = index.putFile.bind(index);
+  let unavailable = true;
+  index.putFile = async record => {
+    if (unavailable && record.submittedAt === '2026-10-21T11:59:59.000Z') throw new Error('alignment unavailable');
+    return put(record);
+  };
+  const input = { body: '原操作', fileIds: [intent.id], idempotencyKey: 'recover-submit' };
+  await expect(api.submitFiles(student, workspaceId, assignmentId, input)).rejects.toMatchObject({ status: 503 });
+  await expect(api.hydrateSubmission(student, workspace('student'), current, current.mySubmission, studentId))
+    .rejects.toMatchObject({ status: 503 });
+  clock = new Date('2026-10-21T12:00:00.001Z');
+  unavailable = false;
+  api = make();
+  await expect(api.submitFiles(student, workspaceId, assignmentId, { ...input, body: '修改原操作' }))
+    .rejects.toMatchObject({ code: 'IDEMPOTENCY_CONFLICT' });
+  await expect(api.submitFiles(student, workspaceId, assignmentId, { ...input, idempotencyKey: 'new-operation' }))
+    .rejects.toMatchObject({ code: 'ASSIGNMENT_REVISION_CLOSED' });
+  const receipt = await api.submitFiles(student, workspaceId, assignmentId, input);
+  expect(submit).toHaveBeenCalledTimes(1);
+  expect(receipt.mySubmission?.files?.map(file => file.id)).toEqual([intent.id]);
+  const hydrated = await api.hydrateSubmission(student, workspace('student'), receipt, receipt.mySubmission, studentId);
+  expect(hydrated?.files?.map(file => file.id)).toEqual([intent.id]);
+  expect((await index.getFile(intent.id))?.submittedAt).toBe(receipt.mySubmission?.submittedAt);
+});
+
+it('uses visible counts for successive withdrawals and a submission by another student', async () => {
+  const index = createMemoryIndexStore();
+  const stores = { index, blobs: createTtlMemoryBlobStore() };
+  const submittedAt = '2026-10-21T11:00:00.000Z';
+  const make = (accountId: string) => createAssignmentFileService({ secret, stores,
+    now: () => new Date('2026-10-21T11:30:00.000Z'),
+    platform: platform({ item: assignment({ submissionCount: 2, mySubmission: {
+      assignmentId, platformAccountId: accountId, displayName: '同學', body: '作業', state: 'submitted',
+      submittedAt, teacherFeedback: null, reviewedAt: null,
+    } }), submit: async () => assignment({ submissionCount: 3 }) }),
+  });
+  const first = await make(studentId).withdrawSubmission(actor(studentId), workspaceId, assignmentId,
+    { submittedAt, idempotencyKey: 'count-withdraw-first' });
+  expect(first.submissionCount).toBe(1);
+  const secondApi = make(outsiderId);
+  const second = await secondApi.withdrawSubmission(actor(outsiderId), workspaceId, assignmentId,
+    { submittedAt, idempotencyKey: 'count-withdraw-second' });
+  expect(second.submissionCount).toBe(0);
+  expect(second.submissionCount).toBe(await secondApi.visibleSubmissionCount(assignment({ submissionCount: 2 })));
+  const third = await make(teacherId).submitFiles(actor(teacherId), workspaceId, assignmentId,
+    { body: '新繳交', fileIds: [], idempotencyKey: 'count-submit-third' });
+  expect(third.submissionCount).toBe(1);
+});

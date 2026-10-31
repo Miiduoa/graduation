@@ -1,5 +1,6 @@
 import {
   assignmentFileDownloadUrl,
+  assignmentRequest,
   compressNativeAssignmentImage,
   moveNativeFile,
   removeNativeFile,
@@ -114,4 +115,19 @@ test('batches intents, uploads in parallel, and reports progress', async () => {
   expect(submitFiles).toHaveBeenCalledTimes(1);
   expect(progress[0]).toEqual({ completed: 0, total: 2 });
   expect(progress.at(-1)).toEqual({ completed: 2, total: 2 });
+});
+
+test.each(['', 'false', 'true'])('assignment reads require the filtered BFF with upload flag %s', flag => {
+  process.env.EXPO_PUBLIC_ASSIGNMENT_FILE_SUBMIT_ENABLED = flag;
+  const direct = jest.fn();
+  const bff = jest.fn();
+  for (const path of [
+    `class-workspaces/${workspace}/assignments`,
+    `class-workspaces/${workspace}/assignments/${assignment}/submissions`,
+  ]) {
+    expect(assignmentRequest(path, undefined, direct, bff)).toBe(bff);
+    expect(() => assignmentRequest(path, undefined, direct)).toThrow(NuniError);
+  }
+  expect(direct).not.toHaveBeenCalled();
+  delete process.env.EXPO_PUBLIC_ASSIGNMENT_FILE_SUBMIT_ENABLED;
 });

@@ -240,3 +240,9 @@ export function usesAssignmentFileBff(path: string, input?: Record<string, unkno
     return true;
   return false;
 }
+
+export function assignmentRequest<T>(path: string, input: Record<string, unknown> | undefined, direct: T, bff?: T): T {
+  if (!usesAssignmentFileBff(path, input)) return direct;
+  if (!bff) throw new NuniError(503, 'ASSIGNMENT_FILE_STORE_UNAVAILABLE');
+  return bff;
+}
