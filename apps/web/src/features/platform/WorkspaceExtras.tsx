@@ -1,9 +1,9 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useRef, useState } from 'react';
 import { Button } from '@/components/ui/Button';
 import { Input, Textarea } from '@/components/ui/Input';
-import { asRecords, platformFetch } from './platformFetch';
+import { platformFetch } from './platformFetch';
 import { accountReturnHref, workspacePath } from './constants';
 import styles from './Platform.module.css';
 import { useActiveRequest } from './useActiveRequest';
@@ -21,9 +21,9 @@ export function WorkspaceMembers({
 }) {
   return (
     <section className={styles.panel} aria-labelledby="workspace-members-heading">
-      <h2 id="workspace-members-heading">成員</h2>
+      <h2 id="workspace-members-heading">課程名冊</h2>
       {members.length === 0 ? (
-        <p className={styles.muted}>目前還看不到名單，稍後再試。</p>
+        <p className={styles.muted}>這門課目前沒有成員。</p>
       ) : (
         <ul className={styles.stack}>
           {members.map((member, index) => (
@@ -42,100 +42,6 @@ export function WorkspaceMembers({
           ))}
         </ul>
       )}
-    </section>
-  );
-}
-
-type InviteProps = {
-  workspaceId: string;
-  canInvite: boolean;
-  initialCode: string;
-  context: string;
-  beginRequest?: () => () => void;
-};
-
-export function WorkspaceInvite(props: InviteProps) {
-  if (!props.canInvite) return null;
-  return <WorkspaceInviteContent key={`${props.context}:${props.workspaceId}`} {...props} />;
-}
-
-function WorkspaceInviteContent({
-  workspaceId,
-  canInvite,
-  initialCode,
-  context,
-  beginRequest,
-}: InviteProps) {
-  const [code, setCode] = useState(initialCode);
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState('');
-  const [denied, setDenied] = useState(false);
-  const mutationPending = useRef(false);
-  const captureRequest = useActiveRequest();
-  useEffect(() => {
-    setCode(initialCode);
-  }, [initialCode]);
-  if (!canInvite && !code) return null;
-  return (
-    <section className={styles.panel} aria-labelledby="workspace-invite-heading">
-      <h2 id="workspace-invite-heading">邀請學生</h2>
-      <p className={styles.muted}>把邀請碼交給學生。撤銷與到期之後再補。一組可供 100 人使用。</p>
-      {error ? (
-        <p role="alert" className={styles.alert}>
-          {error}
-        </p>
-      ) : null}
-      {canInvite && !denied ? (
-        <Button
-          type="button"
-          disabled={busy}
-          onClick={() => {
-            const isCurrent = captureRequest();
-            if (!isCurrent() || mutationPending.current || denied) return;
-            const onDenied = beginRequest?.();
-            mutationPending.current = true;
-            setBusy(true);
-            setError('');
-            void platformFetch(
-              `class-workspaces/${workspaceId}/invites`,
-              'POST',
-              { maxUses: 100, idempotencyKey: `web-invite-${crypto.randomUUID()}` },
-              context,
-            )
-              .then((result) => {
-                if (!isCurrent()) return;
-                if (classroomAccessDenied(result)) {
-                  setDenied(true);
-                  setError(CLASSROOM_ACCESS_ERROR);
-                  onDenied?.();
-                }
-                if (result.status === 401) {
-                  window.location.replace(accountReturnHref(workspacePath(workspaceId)));
-                  return;
-                }
-                if (classroomAccessDenied(result)) return;
-                if (!result.ok) throw new Error('邀請碼沒有產生成功，請稍後再試。');
-                setCode(typeof result.body.code === 'string' ? result.body.code : '');
-              })
-              .catch((failure: Error) => {
-                if (isCurrent()) setError(failure.message);
-              })
-              .finally(() => {
-                if (isCurrent()) {
-                  mutationPending.current = false;
-                  setBusy(false);
-                }
-              });
-          }}
-        >
-          {busy ? '產生中…' : code ? '再產生一組邀請碼' : '產生邀請碼'}
-        </Button>
-      ) : null}
-      {code && !denied ? (
-        <p className={styles.code} role="status">
-          {code}
-        </p>
-      ) : null}
     </section>
   );
 }
@@ -300,8 +206,4 @@ function WorkspaceAffiliationContent({
       ) : null}
     </section>
   );
-}
-
-export function parseMembers(value: unknown) {
-  return asRecords(value);
 }

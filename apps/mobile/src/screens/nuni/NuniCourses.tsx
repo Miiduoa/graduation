@@ -85,6 +85,8 @@ import {
   type CourseListFilter,
 } from '../../services/nuniActivityTasks';
 import { StudyAgenda } from './StudyAgenda';
+import { createNuniClassroom } from '@campus/shared/src/nuniClassroom';
+import { NuniAttendance, createAttendanceStore } from './NuniAttendance';
 
 type Classes = ReturnType<typeof createNuniClasses>;
 type Field = {
@@ -649,6 +651,11 @@ function CourseScope({
       ),
     [bffRequest, request, session.context, session.platformAccountId, upload],
   );
+  const classroom = useMemo(
+    () => createNuniClassroom((path, input) => request(path, session.context, input)),
+    [request, session.context],
+  );
+  const [attendanceStore] = useState(createAttendanceStore);
   const scrollRef = useRef<ScrollView>(null);
   const contentOffsetYRef = useRef(0);
   const [selected, setSelected] = useNuniDraftState<string | null>(
@@ -694,9 +701,11 @@ function CourseScope({
     >
       {selected ? (
         <CourseDetail
+          attendanceStore={attendanceStore}
           key={selected}
           id={selected}
           classes={classes}
+          classroom={classroom}
           onBack={() => {
             scrollRef.current?.scrollTo({ y: 0, animated: false });
             contentOffsetYRef.current = 0;
@@ -980,16 +989,20 @@ type CourseData = {
   quizzes: NuniQuiz[];
 };
 function CourseDetail({
+  attendanceStore,
   id,
   classes,
+  classroom,
   onBack,
   initialAssignmentId,
   initialMaterialId,
   scrollRef,
   contentOffsetYRef,
 }: {
+  attendanceStore: ReturnType<typeof createAttendanceStore>;
   id: string;
   classes: Classes;
+  classroom: ReturnType<typeof createNuniClassroom>;
   onBack(): void;
   initialAssignmentId?: string;
   initialMaterialId?: string;
@@ -1005,6 +1018,7 @@ function CourseDetail({
   const [loadingMore, setLoadingMore] = useState(false);
   const [materialsError, setMaterialsError] = useState('');
   const [materialsDenied, setMaterialsDenied] = useState(false);
+  const [classroomDenied, setClassroomDenied] = useState(false);
   const [cursorInvalid, setCursorInvalid] = useState(false);
   const [cursorCycled, setCursorCycled] = useState(false);
   const [materialQuery, setMaterialQuery] = useState('');
@@ -1039,6 +1053,7 @@ function CourseDetail({
     pageGeneration.current += 1;
     const run = pageGeneration.current;
     resetMaterialPaging();
+    setClassroomDenied(false);
     if (initialMaterialId) {
       setTargetSeekCancelled(false);
       setTargetSeekBudget(MATERIAL_TARGET_AUTO_PAGE_BUDGET);
@@ -1070,10 +1085,9 @@ function CourseDetail({
     };
   }, [classes, id, initialMaterialId, resetMaterialPaging]);
   const result = useLoad(load, true, true);
-  const [tab, setTab] = useNuniDraftState<'assignments' | 'materials' | 'quizzes'>(
-    `course:${id}:tab`,
-    'assignments',
-  );
+  const [tab, setTab] = useNuniDraftState<
+    'assignments' | 'materials' | 'quizzes' | 'attendance' | 'members'
+  >(`course:${id}:tab`, 'assignments');
   const [activityFilter, setActivityFilter] = useNuniDraftState<ActivityFilter>(
     `course:${id}:activity-filter`,
     'all',
@@ -1274,6 +1288,9 @@ function CourseDetail({
     setActivityFilter((filter) => (filter === 'pending' ? 'submitted' : filter));
   };
   const teacher = data && data.course.memberRole !== 'student';
+  useEffect(() => {
+    if (data?.course.memberRole === 'student' && tab === 'members') setTab('assignments');
+  }, [data?.course.memberRole, setTab, tab]);
   const currentActivities = data ? (tab === 'quizzes' ? data.quizzes : data.assignments) : [];
   const matchingActivities = data
     ? currentActivities.filter(
@@ -1293,7 +1310,8 @@ function CourseDetail({
       {result.loading ? <Copy>正在讀取課程內容…</Copy> : null}
       {result.error ? <Copy alert>{result.error}</Copy> : null}
       {materialsDenied ? <Copy alert>{materialsError}</Copy> : null}
-      {data ? (
+      {classroomDenied ? <Copy alert>目前無法存取這門課程，請更新內容後確認權限。</Copy> : null}
+      {data && !classroomDenied ? (
         <View style={{ gap: 16, display: result.loading || result.error ? 'none' : 'flex' }}>
           <Copy title>{data.course.title}</Copy>
           <Copy>
@@ -1338,8 +1356,31 @@ function CourseDetail({
               onPress={() => setTab('quizzes')}
               selected={tab === 'quizzes'}
             />
+            <Button
+              label="點名"
+              onPress={() => setTab('attendance')}
+              selected={tab === 'attendance'}
+            />
+            {teacher ? (
+              <Button label="名冊" onPress={() => setTab('members')} selected={tab === 'members'} />
+            ) : null}
           </View>
-          {tab !== 'materials' ? (
+          {(tab === 'attendance' || (tab === 'members' && teacher)) &&
+          !result.loading &&
+          !result.error ? (
+            <NuniAttendance
+              attendanceStore={attendanceStore}
+              classroom={classroom}
+              course={data.course}
+              mode={tab === 'members' ? 'members' : 'attendance'}
+              onAccessDenied={() => {
+                pageGeneration.current += 1;
+                invalidateMaterialLookup();
+                setClassroomDenied(true);
+              }}
+            />
+          ) : null}
+          {tab === 'assignments' || tab === 'quizzes' ? (
             <View style={{ gap: 8 }}>
               <TextInput
                 accessibilityLabel={tab === 'assignments' ? '搜尋這門課的作業' : '搜尋這門課的測驗'}
@@ -1367,7 +1408,7 @@ function CourseDetail({
               ) : null}
             </View>
           ) : null}
-          {!teacher && tab !== 'materials' ? (
+          {!teacher && (tab === 'assignments' || tab === 'quizzes') ? (
             <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
               {(['all', 'pending', 'submitted'] as const).map((filter) => {
                 const items = tab === 'assignments' ? data.assignments : data.quizzes;
@@ -1385,7 +1426,7 @@ function CourseDetail({
               })}
             </View>
           ) : null}
-          {tab !== 'materials' && activityQuery.trim() ? (
+          {(tab === 'assignments' || tab === 'quizzes') && activityQuery.trim() ? (
             <Copy>
               {matchingActivities.length
                 ? `搜尋符合 ${matchingActivities.length} 項。`
@@ -1571,7 +1612,9 @@ function CourseDetail({
               </Copy>
             ) : null}
           </View>
-          {teacher && data.course.state === 'active' ? (
+          {teacher &&
+          data.course.state === 'active' &&
+          (tab === 'assignments' || tab === 'materials' || tab === 'quizzes') ? (
             <CoursePublishing
               key={`${data.course.memberRole}:${data.course.state}`}
               tab={tab}

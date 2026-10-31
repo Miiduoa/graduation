@@ -4,7 +4,7 @@ import { useSyncExternalStore } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { parseCourseWorkHash } from '@/lib/courseWorkLanding';
 
-const PANELS = ['outline', 'materials', 'assignments', 'quizzes'] as const;
+const PANELS = ['outline', 'materials', 'assignments', 'quizzes', 'attendance', 'members'] as const;
 export type CoursePanel = (typeof PANELS)[number];
 const LOCATION_EVENT = 'campus-course-location';
 
