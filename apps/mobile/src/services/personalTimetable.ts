@@ -267,7 +267,9 @@ export async function savePersonalTimetable(uid: string | null, timetable: Store
     draft.pendingExceptions ??= true;
     if (editingExceptions) {
       if (!synced) draft.classExceptions = next.classExceptions;
-      draft.pendingExceptions = !synced;
+      const sameExceptions = JSON.stringify(classExceptionsForStorage(draft.classExceptions ?? [])) ===
+        JSON.stringify(next.classExceptions ?? []);
+      draft.pendingExceptions = synced ? draft.pendingExceptions && !sameExceptions : true;
     } else {
       if (!synced) {
         draft.courses = next.courses;

@@ -521,3 +521,38 @@ test('base and exception drafts advance independently and cloud-only saves do no
   await savePersonalTimetable(uid, restored, undefined, true);
   expect(await loadPersonalTimetableDraft(uid, 'pu')).toBeNull();
 });
+
+
+test.each([false, true])('saving another arrangement retains an unrestored exception draft (pending base: %s)', async (pendingBase) => {
+  const uid = 'synthetic-account';
+  await savePersonalTimetable(uid, { ...make('pu'), classExceptions: [] }, undefined, false);
+  const initial = await loadPersonalTimetable(uid, 'pu');
+  const base = { ...initial, meta: { ...initial.meta, title: '未同步基準' } };
+  if (pendingBase) {
+    jest.mocked(runTransaction).mockRejectedValueOnce(new Error('offline'));
+    await savePersonalTimetable(uid, base, undefined, false);
+  }
+  const original = manualClassRecords(initial)[0];
+  const stop = { id: 'offline-stop', original, courseKey: classMeetingKey(original), originalDate: '2026-11-02', kind: 'cancel' as const, createdAt: '' };
+  jest.mocked(runTransaction).mockRejectedValueOnce(new Error('offline'));
+  await savePersonalTimetable(uid, { ...initial, classExceptions: [stop] }, undefined, true);
+  const cloud = await loadPersonalTimetable(uid, 'pu');
+  expect(cloud.classExceptions).toEqual([]);
+  const other = { ...stop, id: 'other-stop', originalDate: '2026-11-09' };
+  expect(await savePersonalTimetable(uid, { ...cloud, classExceptions: [other] }, undefined, true)).toMatchObject({ stored: 'cloud' });
+  const latest = await loadPersonalTimetable(uid, 'pu');
+  expect(latest.classExceptions).toEqual(classExceptionsForStorage([other]));
+  const draft = (await loadPersonalTimetableDraft(uid, 'pu'))!;
+  expect(draft).toMatchObject({ pendingBase, pendingExceptions: true, classExceptions: classExceptionsForStorage([stop]) });
+  if (pendingBase) {
+    await savePersonalTimetable(uid, { ...latest, ...base, classExceptions: latest.classExceptions }, undefined, false);
+    expect(await loadPersonalTimetableDraft(uid, 'pu')).toMatchObject({ pendingBase: false, pendingExceptions: true });
+  }
+  const current = await loadPersonalTimetable(uid, 'pu');
+  const restored = restorePersonalTimetableDraft(current, (await loadPersonalTimetableDraft(uid, 'pu'))!);
+  expect(restored.classExceptions).toEqual(classExceptionsForStorage([stop]));
+  expect(restored.classExceptionsRevision).toBe(current.classExceptionsRevision);
+  await savePersonalTimetable(uid, restored, undefined, true);
+  expect((await loadPersonalTimetable(uid, 'pu')).classExceptions).toEqual(classExceptionsForStorage([stop]));
+  expect(await loadPersonalTimetableDraft(uid, 'pu')).toBeNull();
+});

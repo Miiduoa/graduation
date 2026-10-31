@@ -134,7 +134,7 @@ export function ClassExceptions({
         accessibilityRole="header"
         style={{ color: theme.colors.text, fontSize: 20, fontWeight: '700' }}
       >
-        這一天，照實際安排走
+        指定日期課程安排
       </Text>
       <Text style={{ color: theme.colors.muted }}>
         週課表保留原排課；這裡只改指定日期。日期格式：2026-11-02。

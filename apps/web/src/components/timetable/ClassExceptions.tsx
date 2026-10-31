@@ -90,7 +90,7 @@ export function ClassExceptions({
   };
   return (
     <section className={styles.panel} aria-label="單次調課與停課">
-      <h2>這一天，照實際安排走</h2>
+      <h2>指定日期課程安排</h2>
       <p>週課表保留原排課；這裡只改指定日期。補課可換日期、時間和教室。</p>
       <label className={styles.field}>
         查看日期
