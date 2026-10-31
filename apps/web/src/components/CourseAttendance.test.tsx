@@ -89,14 +89,14 @@ it('requires a code and confirms a saved receipt only after the server acknowled
   expect(await screen.findByText(/已簽到 ·/)).toBeTruthy();
 });
 
-it('keeps the entered code on failure and never shows a successful check-in', async () => {
+it('clears a rejected code for rescanning and never shows a successful check-in', async () => {
   vi.mocked(joinCourseAttendance).mockRejectedValue({ code: 'functions/permission-denied' });
   render(<CourseAttendance courseId="course" />);
   const input = await screen.findByLabelText('教師提供的簽到碼');
   fireEvent.change(input, { target: { value: 'wrong' } });
   fireEvent.click(screen.getByRole('button', { name: '確認簽到' }));
   expect(await screen.findByRole('alert')).toBeTruthy();
-  expect((input as HTMLInputElement).value).toBe('wrong');
+  expect((input as HTMLInputElement).value).toBe('');
   expect(screen.queryByText(/已簽到 ·/)).toBeNull();
 });
 
@@ -317,3 +317,32 @@ vi.mock('@/lib/watchAttendanceLive', () => ({
     options.onState('live'); return () => {};
   },
 }));
+
+it('保留弱網待確認碼，重送後只採用伺服器原收據', async () => {
+  vi.mocked(joinCourseAttendance)
+    .mockRejectedValueOnce({ code: 'functions/unavailable' })
+    .mockResolvedValueOnce({ success: true, checkedInAt: '2026-10-07T01:01:00Z', alreadyJoined: true });
+  render(<CourseAttendance courseId="course" />);
+  const input = await screen.findByLabelText('教師提供的簽到碼');
+  fireEvent.change(input, { target: { value: 'same-proof' } });
+  fireEvent.click(screen.getByRole('button', { name: '確認簽到' }));
+  const retry = await screen.findByRole('button', { name: '再確認簽到' });
+  expect((input as HTMLInputElement).value).toBe('same-proof');
+  expect(screen.queryByText(/已簽到 ·/)).toBeNull();
+  fireEvent.click(retry);
+  expect(await screen.findByText(/已簽到 ·/)).toBeTruthy();
+  expect(vi.mocked(joinCourseAttendance).mock.calls).toEqual([
+    ['course', 'session', 'same-proof'], ['course', 'session', 'same-proof'],
+  ]);
+});
+
+it('過期碼不顯示成功，清除舊碼後可立刻重掃', async () => {
+  vi.mocked(joinCourseAttendance).mockRejectedValueOnce({ code: 'functions/deadline-exceeded' });
+  render(<CourseAttendance courseId="course" />);
+  const input = await screen.findByLabelText('教師提供的簽到碼');
+  fireEvent.change(input, { target: { value: 'expired-proof' } });
+  fireEvent.click(screen.getByRole('button', { name: '確認簽到' }));
+  expect((await screen.findByRole('alert')).textContent).toContain('已過期');
+  expect((input as HTMLInputElement).value).toBe('');
+  expect(screen.queryByText(/已簽到 ·/)).toBeNull();
+});
