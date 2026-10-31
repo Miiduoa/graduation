@@ -15,6 +15,7 @@ let mockSession = {
   context: 'context-first',
 };
 const mockRequest = jest.fn();
+const mockUpload = jest.fn();
 let mockUuid = 0;
 const fileSubmitFlag = { on: false };
 const mockScrollAssignment = { reveal: jest.fn() };
@@ -36,6 +37,7 @@ jest.mock('../state/nuniSession', () => ({
     session: mockSession,
     request: mockRequest,
     bffRequest: mockRequest,
+    upload: mockUpload,
     loading: false,
     pendingLogout: false,
   }),
@@ -2138,3 +2140,58 @@ it('shows the assignment deadline state with the existing receipt', async () => 
   expect(view.queryByRole('button', { name: '撤回繳交' })).toBeNull();
   expect(view.queryByRole('button', { name: '更新作業繳交' })).toBeNull();
 });
+
+it.each(['alignment', 'lost-response'])(
+  'recovers uploaded revision after deadline and rerender: %s',
+  async (failure) => {
+    fileSubmitFlag.on = true;
+    let now = Date.parse('2026-10-09T11:59:00Z');
+    const clock = jest.spyOn(Date, 'now').mockImplementation(() => now);
+    assignment = { ...assignment, dueAt: '2026-10-09T12:00:00Z', mySubmission: receipt() };
+    const fileId = 'cwf_77777777-7777-4777-8777-777777777777';
+    const metadata = {
+      id: fileId,
+      originalName: 'repair.pdf',
+      contentType: 'application/pdf',
+      byteSize: 12,
+      kind: 'file',
+      downloadPath: `class-workspaces/${courseId}/assignments/${assignmentId}/files/${fileId}/content`,
+      downloadExp: '1',
+      downloadSig: 'sig',
+    };
+    const picker = require('expo-document-picker');
+    picker.getDocumentAsync.mockResolvedValueOnce({
+      canceled: false,
+      assets: [{ uri: 'file:///repair.pdf', name: 'repair.pdf', mimeType: 'application/pdf' }],
+    });
+    mockUpload.mockReset().mockResolvedValue(metadata);
+    const submissions: Record<string, unknown>[] = [];
+    mockRequest.mockImplementation((path, context, input) => {
+      if (path.endsWith('/files/intents'))
+        return { intents: [{ ...metadata, uploadPath: metadata.downloadPath }] };
+      if (path.endsWith('/submit-files')) {
+        submissions.push(input);
+        if (submissions.length === 1)
+          throw failure === 'alignment'
+            ? new NuniError(503, 'ASSIGNMENT_FILE_STORE_UNAVAILABLE')
+            : new TypeError('response lost');
+        return { ...assignment, mySubmission: { ...receipt(), files: [metadata] } };
+      }
+      return response(path, context, input);
+    });
+    const view = await openCourse();
+    fireEvent.press(view.getByRole('button', { name: '檔案' }));
+    await view.findByText('repair.pdf · 12 B');
+    fireEvent.press(view.getByRole('button', { name: '更新作業繳交' }));
+    await view.findByRole('button', { name: '重試確認這次送出' });
+    now = Date.parse('2026-10-09T12:01:00Z');
+    view.rerender(<NuniCourses />);
+    fireEvent.press(view.getByRole('button', { name: '重試確認這次送出' }));
+    await view.findByText('repair.pdf · 檔案');
+    expect(mockUpload).toHaveBeenCalledTimes(1);
+    expect(submissions).toHaveLength(2);
+    expect(submissions[1]).toEqual(submissions[0]);
+    expect(view.queryByRole('button', { name: '更新作業繳交' })).toBeNull();
+    clock.mockRestore();
+  },
+);

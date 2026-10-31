@@ -33,6 +33,7 @@ import {
   uploadAndSubmitFiles,
   type AssignmentUploadProgress,
   type LocalAssignmentFile,
+  type AssignmentFileOperation,
 } from './AssignmentFileFields';
 import shared from './NuniApp.module.css';
 import styles from './CourseLearning.module.css';
@@ -107,6 +108,8 @@ function Assignment({ item, workspace, onConfirmed }: Props) {
   const [withdrawnAt, setWithdrawnAt] = useState<string | null>(null);
   const [saved, setSaved] = useState<NuniAssignment | null>(null);
   const [localFiles, setLocalFiles] = useState<LocalAssignmentFile[]>([]);
+  const fileOperation = useRef<AssignmentFileOperation>({});
+  const [recovering, setRecovering] = useState(false);
   const [progress, setProgress] = useState<AssignmentUploadProgress | null>(null);
   const assignment = latestAssignment(item, saved, withdrawnAt);
   const [submissions, setSubmissions] = useState<NuniSubmission[] | null>(null);
@@ -297,7 +300,7 @@ function Assignment({ item, workspace, onConfirmed }: Props) {
         </MutationForm>
       )}
       {student && assignment.mySubmission && !canRevise && <p>已過截止時間，這份繳交不能再修改或撤回。</p>}
-      {student && active && open && (!fileSubmit || !assignment.mySubmission || canRevise) && (
+      {student && active && (recovering || (open && (!fileSubmit || !assignment.mySubmission || canRevise))) && (
         <details open={!assignment.mySubmission} className={`${shared.compose} ${styles.compose}`}>
           <summary>{assignment.mySubmission ? '修改繳交內容' : '繳交這份作業'}</summary>
           <MutationForm
@@ -305,6 +308,14 @@ function Assignment({ item, workspace, onConfirmed }: Props) {
             success="繳交內容已儲存，老師現在可以查看。"
             submit={async (data, key) => {
               const body = String(data.get('body') ?? '');
+              if (
+                fileSubmit &&
+                !recovering &&
+                assignment.mySubmission &&
+                !assignmentCanRevise(assignment.dueAt)
+              )
+                throw new NuniError(409, 'ASSIGNMENT_REVISION_CLOSED');
+              setRecovering(true);
               try {
                 const result =
                   fileSubmit && localFiles.length
@@ -316,16 +327,33 @@ function Assignment({ item, workspace, onConfirmed }: Props) {
                         localFiles,
                         key,
                         setProgress,
+                        fileOperation.current,
                       )
                     : fileSubmit
-                      ? await classes.submitFiles(workspace.id, item.id, { body, fileIds: [], idempotencyKey: key })
+                      ? await classes.submitFiles(workspace.id, item.id, {
+                          body,
+                          fileIds: [],
+                          idempotencyKey: key,
+                        })
                       : await classes.submit(workspace.id, item.id, body, key);
                 if (!mounted.current) throw new NuniError(409, 'SESSION_CHANGED');
+                setRecovering(false);
+                fileOperation.current = {};
                 setSaved(result);
                 setWithdrawNotice('');
                 setLocalFiles([]);
                 setProgress(null);
                 onConfirmed?.(result);
+              } catch (failure) {
+                if (
+                  mounted.current &&
+                  failure instanceof NuniError &&
+                  failure.status < 500 &&
+                  failure.code !== 'SESSION_CHANGED'
+                ) {
+                  setRecovering(false);
+                }
+                throw failure;
               } finally {
                 if (mounted.current) setProgress(null);
               }
@@ -340,7 +368,7 @@ function Assignment({ item, workspace, onConfirmed }: Props) {
               <p>重新送出會取代這次繳交；沒有選檔就改交純文字。</p>
             ) : null}
             {fileSubmit ? (
-              <AssignmentFilePicker files={localFiles} onChange={setLocalFiles} />
+              <AssignmentFilePicker files={localFiles} onChange={setLocalFiles} disabled={recovering} />
             ) : null}
             <label>
               作業內容

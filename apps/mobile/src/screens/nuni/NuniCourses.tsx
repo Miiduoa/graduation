@@ -51,6 +51,7 @@ import {
   pickAssignmentDocuments,
   removeNativeFile,
   submitNativeAssignmentFiles,
+  type NativeFileOperation,
   assignmentRequest,
   type LocalNativeFile,
   type NativeUploadProgress,
@@ -1745,7 +1746,9 @@ function ActivityCard({
   const student = course.memberRole === 'student';
   const active = course.state === 'active';
   const canRevise = !assignment || assignmentCanRevise(item.dueAt);
-  const canSubmit = student && active && item.state === 'open' && (!assignment || !receipt || canRevise);
+  const [recovering, setRecovering] = useState(false);
+  const fileOperation = useRef<NativeFileOperation>({});
+  const canSubmit = student && active && (recovering || (item.state === 'open' && (!assignment || !receipt || canRevise)));
   const kind = assignment ? '作業' : '測驗';
   const fileSubmit = assignment && assignmentFileSubmitEnabledNative();
   const [withdrawNotice, setWithdrawNotice] = useState('');
@@ -1773,7 +1776,7 @@ function ActivityCard({
   const submitArea = (
     <>
       {focused ? <Text accessibilityLabel={`${landLabel}：${item.title}`}>{landLabel}</Text> : null}
-      {canSubmit && fileSubmit ? (
+      {canSubmit && fileSubmit && !recovering ? (
         <View style={{ gap: 8 }}>
           <Button
             label="拍照"
@@ -1882,6 +1885,15 @@ function ActivityCard({
           ]}
           label={receipt ? `更新${kind}繳交` : `繳交${kind}`}
           submit={async ({ body }, key, stillActive) => {
+            if (
+              fileSubmit &&
+              !recovering &&
+              assignment &&
+              receipt &&
+              !assignmentCanRevise(item.dueAt)
+            )
+              throw new NuniError(409, 'ASSIGNMENT_REVISION_CLOSED');
+            setRecovering(true);
             if (assignment && fileSubmit && localFiles.length) {
               try {
                 const confirmed = await submitNativeAssignmentFiles(
@@ -1892,24 +1904,47 @@ function ActivityCard({
                   localFiles,
                   key,
                   setProgress,
+                  fileOperation.current,
                 );
                 if (stillActive()) {
+                  setRecovering(false);
+                  fileOperation.current = {};
                   setLocalFiles([]);
                   setPreviewUri(null);
                   saved(confirmed);
                   setWithdrawNotice('');
                 }
                 return '已收到伺服器繳交紀錄。';
+              } catch (failure) {
+                if (
+                  stillActive() &&
+                  failure instanceof NuniError &&
+                  failure.status > 0 &&
+                  failure.status < 500 &&
+                  failure.status !== 408 &&
+                  failure.code !== 'SESSION_CHANGED'
+                ) {
+                  setRecovering(false);
+                }
+                throw failure;
               } finally {
                 if (stillActive()) setProgress(null);
               }
             }
             const confirmed = assignment
               ? fileSubmit
-                ? await classes.submitFiles(course.id, item.id, { body, fileIds: [], idempotencyKey: key })
+                ? await classes.submitFiles(course.id, item.id, {
+                    body,
+                    fileIds: [],
+                    idempotencyKey: key,
+                  })
                 : await classes.submit(course.id, item.id, body, key)
               : await classes.submitQuiz(course.id, item.id, body, key);
-            if (stillActive()) { saved(confirmed); setWithdrawNotice(''); }
+            if (stillActive()) {
+              setRecovering(false);
+              saved(confirmed);
+              setWithdrawNotice('');
+            }
             return '已收到伺服器繳交紀錄。';
           }}
         />
