@@ -46,6 +46,17 @@ function configureProject(project, iosRoot, bundleId, group) {
   ) {
     project.addTargetDependency(main.uuid, [targetId]);
   }
+  // Embed before bundle and Pods scripts that process the completed app's Info.plist.
+  const embedPhases = main.firstTarget.buildPhases.filter(({ value }) => {
+    const phase = objects.PBXCopyFilesBuildPhase?.[value];
+    return Number(phase?.dstSubfolderSpec) === 13 && phase.files.some(({ value: file }) =>
+      objects.PBXBuildFile[file]?.fileRef === objects.PBXNativeTarget[targetId].productReference,
+    );
+  });
+  const remaining = main.firstTarget.buildPhases.filter((phase) => !embedPhases.includes(phase));
+  const resources = remaining.findIndex(({ value }) => objects.PBXResourcesBuildPhase?.[value]);
+  remaining.splice(resources + 1, 0, ...embedPhases);
+  main.firstTarget.buildPhases = remaining;
   const target = objects.PBXNativeTarget[targetId];
   if (!target.buildPhases.some(({ value }) => objects.PBXResourcesBuildPhase?.[value])) {
     const phase = project.addBuildPhase(

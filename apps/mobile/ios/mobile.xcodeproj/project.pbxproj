@@ -175,11 +175,11 @@
 				13B07F871A680F5B00A75B9A /* Sources */,
 				13B07F8C1A680F5B00A75B9A /* Frameworks */,
 				13B07F8E1A680F5B00A75B9A /* Resources */,
+				330B0EFC5CEF4437B4EA09C4 /* Copy Files */,
 				00DD1BFF1BD5951E006B06BC /* Bundle React Native code and images */,
 				800E24972A6A228C8D4807E9 /* [CP] Copy Pods Resources */,
 				518B7A98EAE48D2A83EB893C /* [CP] Embed Pods Frameworks */,
 				A0085E81C72F4955F342A168 /* [CP-User] [RNFB] Core Configuration */,
-				330B0EFC5CEF4437B4EA09C4 /* Copy Files */,
 			);
 			buildRules = (
 			);
