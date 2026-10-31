@@ -1,8 +1,9 @@
+import { SchoolLmsReadonlyProvider } from '@/components/SchoolLmsReadonlyProvider';
 import { fireEvent, render, screen, within } from '@testing-library/react';
 import { interpretCampusRequest } from '@/lib/campusIntentClient';
 import { beforeEach, expect, it, vi } from 'vitest';
 import SearchPage from './page';
-import { CAMPUS_SERVICES } from '@/lib/campusServices';
+import { visibleCampusServices } from '@/lib/campusServices';
 
 const selection = vi.hoisted(() => ({
   current: null as null | {
@@ -43,7 +44,7 @@ vi.mock('@/components/SiteShell', () => ({
 
 it('keeps every service discoverable without inventing a school selection', () => {
   render(<SearchPage />);
-  expect(screen.getAllByRole('link')).toHaveLength(CAMPUS_SERVICES.length);
+  expect(screen.getAllByRole('link')).toHaveLength(visibleCampusServices().length);
   expect(screen.getByRole('link', { name: /^學校資訊/ }).getAttribute('href')).toBe('/school-info');
   expect(screen.getByRole('link', { name: /^校園活動/ }).getAttribute('href')).toBe('/events');
   expect(screen.getByRole('link', { name: /^宿舍/ }).getAttribute('href')).toBe('/dormitory');
@@ -69,7 +70,7 @@ it('combines category filters with keyword search and restores all services afte
   expect(screen.getByRole('link', { name: /^圖書館/ })).toBeTruthy();
   expect(screen.getByRole('status').textContent).toBe('找到 1 項服務');
   fireEvent.click(screen.getByRole('button', { name: '清除篩選' }));
-  expect(screen.getAllByRole('link')).toHaveLength(CAMPUS_SERVICES.length);
+  expect(screen.getAllByRole('link')).toHaveLength(visibleCampusServices().length);
   expect((screen.getByRole('searchbox') as HTMLInputElement).value).toBe('');
 });
 
@@ -79,7 +80,7 @@ it('offers a recovery action when a query has no matching service', () => {
   expect(screen.queryAllByRole('link')).toHaveLength(0);
   expect(screen.getByRole('heading', { name: '沒有符合的服務' })).toBeTruthy();
   fireEvent.click(screen.getByRole('button', { name: '查看所有服務' }));
-  expect(screen.getAllByRole('link')).toHaveLength(CAMPUS_SERVICES.length);
+  expect(screen.getAllByRole('link')).toHaveLength(visibleCampusServices().length);
 });
 
 it('matches search aliases without case or surrounding-space sensitivity', () => {
@@ -265,4 +266,11 @@ it('recognizes a complex signed-in campus request using AI instead of only keywo
   expect(await screen.findByText('想先確認課表，再找讀書和吃飯的地點。')).toBeTruthy();
   expect(screen.getByText('AI 建議先開啟')).toBeTruthy();
   expect(interpretCampusRequest).toHaveBeenCalledTimes(1);
+});
+
+it('hides readonly homework by default and restores it when enabled', () => {
+  const view = render(<SearchPage />);
+  expect(screen.queryByRole('link', { name: /玩課雲作業與教材/ })).toBeNull();
+  view.rerender(<SchoolLmsReadonlyProvider enabled={true}><SearchPage /></SchoolLmsReadonlyProvider>);
+  expect(screen.getByRole('link', { name: /玩課雲作業與教材/ }).getAttribute('href')).toContain('/school-lms');
 });

@@ -1,5 +1,7 @@
 'use client';
 
+import { useSchoolLmsReadonlyEnabled } from '@/components/SchoolLmsReadonlyProvider';
+
 import Link from 'next/link';
 import { usePathname, useSearchParams } from 'next/navigation';
 import { useEffect, useMemo, useState } from 'react';
@@ -32,6 +34,7 @@ type CourseReadState = {
 };
 
 function Courses({ uid, schoolId, returnUrl }: { uid: string; schoolId: 'pu'; returnUrl: string }) {
+  const schoolLmsEnabled = useSchoolLmsReadonlyEnabled();
   const options = useSignInOptions();
   const [status, setStatus] = useState<TronClassCourseStatus>('ongoing');
   const [search, setSearch] = useState('');
@@ -178,7 +181,7 @@ function Courses({ uid, schoolId, returnUrl }: { uid: string; schoolId: 'pu'; re
                   <div><dt>學期</dt><dd>{formatSemester(course.semester)}</dd></div>
                 </dl>
                 <div className={courseStyles.cardActions}>
-                  <Link href={`/school-lms?course=${course.id}`}>本課作業與教材</Link>
+                  <Link href={schoolLmsEnabled ? `/school-lms?course=${course.id}` : '/classroom'}>{schoolLmsEnabled ? '本課作業與教材' : 'nuni 課程空間'}</Link>
                   <a href={course.href} target="_blank" rel="noopener noreferrer" aria-label={`前往 ${course.name} 的 WOW Class 課堂`}>開啟課堂 ↗</a>
                 </div>
               </li>)}

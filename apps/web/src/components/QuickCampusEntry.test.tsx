@@ -1,3 +1,4 @@
+import { SchoolLmsReadonlyProvider } from '@/components/SchoolLmsReadonlyProvider';
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, expect, it, vi } from 'vitest';
 import { QuickCampusEntry } from './QuickCampusEntry';
@@ -77,4 +78,16 @@ it('does not claim AI understanding if the provider is unavailable', async () =>
   fireEvent.click(screen.getByText('模擬語音輸入'));
   await waitFor(() => expect(screen.getByText(/AI 暫時無法使用/)).toBeTruthy());
   expect(screen.queryByText('AI 建議先開啟')).toBeNull();
+});
+
+it.each([false, true])('filters readonly destinations from voice results with enabled=%s', async (enabled) => {
+  vi.mocked(interpretCampusRequest).mockResolvedValue(JSON.parse(JSON.stringify({
+    status: 'understood', source: 'model', summary: '查看作業',
+    destinations: ['/school-lms', '/classroom'], clarifyingQuestion: null,
+  })));
+  render(<SchoolLmsReadonlyProvider enabled={enabled}><QuickCampusEntry /></SchoolLmsReadonlyProvider>);
+  fireEvent.click(screen.getByText('模擬語音輸入'));
+  await screen.findByText('查看作業');
+  expect(Boolean(screen.queryByRole('link', { name: /玩課雲作業與教材/ }))).toBe(enabled);
+  expect(screen.getByRole('link', { name: /課程空間/ }).getAttribute('href')).toContain('/classroom');
 });
