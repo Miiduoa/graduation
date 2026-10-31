@@ -3,7 +3,7 @@
 import { useMemo, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { AcademicPage } from '@/components/academic/AcademicPage';
-import { GradesTabs, isGradesFeedbackTab } from '@/components/academic/GradesTabs';
+import { GradesTabs } from '@/components/academic/GradesTabs';
 import { SchoolSemesterSummary } from '@/components/academic/SchoolSemesterSummary';
 import { StudentGradesPage } from '@/features/nuni/StudentGrades';
 import {
@@ -140,7 +140,7 @@ function Grades({ records }: { records: AcademicGradeResponse }) {
 
 export default function GradesPage() {
   const tab = useSearchParams()?.get('tab');
-  if (isGradesFeedbackTab(tab)) {
+  if (tab !== 'semester') {
     return <StudentGradesPage />;
   }
   return (
