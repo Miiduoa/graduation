@@ -36,7 +36,16 @@ class ComposedPrepareTests(unittest.TestCase):
             self.assertEqual(hashlib.sha256((ROOT / item['source']).read_bytes()).hexdigest(), item['sha256'], target)
         for name, checksum in manifest['adapters'].items():
             self.assertEqual(hashlib.sha256((prepare.API / name / 'prepare.py').read_bytes()).hexdigest(), checksum)
-        self.assertEqual(len(manifest['afterOverlayPatches']), 1)
+        self.assertEqual(manifest['afterOverlayPatches'], [
+            {
+                'source': 'deploy/nuni-api/materials-pagination/0001-stable-material-pages.patch',
+                'sha256': '03bd7b3497d39758d52a04fd33603c15abd4cfe9bc606499a7246c70cc0c2a0e',
+            },
+            {
+                'source': 'deploy/nuni-api/assignment-files/0001-authoritative-withdrawal-reads.patch',
+                'sha256': '006e9112ea2ef17b6bc22f083e14b413a9c0ecbd9c5749f40228c5f0f6ad48f6',
+            },
+        ])
         self.assertEqual(
             [str((prepare.API / name).relative_to(ROOT)) for name in prepare.AFTER_OVERLAY_PATCHES],
             [item['source'] for item in manifest['afterOverlayPatches']],

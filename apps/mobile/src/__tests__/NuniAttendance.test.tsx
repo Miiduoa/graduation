@@ -80,6 +80,7 @@ beforeEach(() => {
     shortCode: 'ABC123',
   };
   mockRequest.mockImplementation(response);
+  mockBffRequest.mockImplementation(response);
 });
 
 async function openAttendance() {

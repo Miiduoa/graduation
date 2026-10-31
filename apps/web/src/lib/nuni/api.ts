@@ -141,7 +141,9 @@ export async function handleNuni(request: NextRequest, segments: string[]): Prom
     if (method !== 'GET' && method !== 'POST' && method !== 'PUT')
       throw new NuniError(405, 'METHOD_NOT_ALLOWED');
     const fileEnabled = assignmentFileSubmitEnabled();
-    const fileMutation = fileEnabled && isAssignmentFileMutation(method, segments);
+    const textAssignmentSubmit =
+      method === 'POST' && segments[4] === 'submit' && isAssignmentFileMutation(method, segments);
+    const fileMutation = (fileEnabled || textAssignmentSubmit) && isAssignmentFileMutation(method, segments);
     const fileContent = fileEnabled && isAssignmentFileQuery(segments);
     if (
       method === 'PUT' &&
@@ -350,8 +352,9 @@ export async function handleNuni(request: NextRequest, segments: string[]): Prom
       throw new NuniError(405, 'METHOD_NOT_ALLOWED');
     }
     if (segments[0] !== 'class-workspaces') throw new NuniError(404, 'NOT_FOUND');
+    const filteredAssignmentRead = method === 'GET' && segments[2] === 'assignments';
     const session =
-      (fileEnabled ? readPlatformAuthorization(request) : null) ?? requireSession(request);
+      (fileEnabled || filteredAssignmentRead || textAssignmentSubmit ? readPlatformAuthorization(request) : null) ?? requireSession(request);
     let principal: Promise<string> | undefined;
     const classes = createNuniClasses(
       (resource, input, query) => platformRequest(resource, session, input, query),
@@ -378,7 +381,6 @@ export async function handleNuni(request: NextRequest, segments: string[]): Prom
           return jsonResponse({ materials: await classes.materials(id) });
         if (segments[2] === 'assignments') {
           const items = await classes.assignments(id);
-          if (!assignmentFileSubmitEnabled()) return jsonResponse({ assignments: items });
           const workspace = await classes.get(id);
           return jsonResponse({
             assignments: await hydrateAssignmentFiles(request, workspace, items),
@@ -402,7 +404,6 @@ export async function handleNuni(request: NextRequest, segments: string[]): Prom
         return jsonResponse(await platformRequest(path, session));
       if (segments.length === 5 && isAssignment && segments[4] === 'submissions') {
         const submissions = await classes.submissions(id, activityId);
-        if (!assignmentFileSubmitEnabled()) return jsonResponse({ submissions });
         const [workspace, assignments] = await Promise.all([classes.get(id), classes.assignments(id)]);
         const assignment = assignments.find((item) => item.id === activityId);
         if (!assignment) throw new NuniError(404, 'NOT_FOUND');
