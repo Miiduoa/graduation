@@ -488,3 +488,21 @@ export async function clearUnlinkedLegacyReminders(input: {
       await AsyncStorage.removeItem(storageKey);
   }
 }
+
+/** Pair before submission while the authorized summary still contains pending work. */
+export async function prepareAssignmentReminderSubmission(
+  uid: string,
+  resolveSchool: () => Promise<string>,
+) {
+  if (!supportsLocalNotification() || !(await unlinkedLegacyReminders()).length) return;
+  const schoolId = await resolveSchool();
+  const isCurrent = () => getAuthInstance().currentUser?.uid === uid;
+  const scope = { uid, schoolId };
+  const { refreshCampusSenseSnapshot } = require('./campusSenseSnapshot') as typeof import('./campusSenseSnapshot');
+  const snapshot = await refreshCampusSenseSnapshot({ scope, isCurrent });
+  if (snapshot.assignments.coverage?.complete === false)
+    throw new Error('校園作業資料尚未完整同步，無法安全核對舊版提醒。請先到校園助理的舊版作業提醒管理核對，再回來繳交。');
+  await adoptCampusReminderSnapshot({ scope, snapshot, isCurrent });
+  if ((await unlinkedLegacyReminders()).length)
+    throw new Error('有尚未辨識的舊版作業提醒，仍可能響鈴。請先到校園助理的舊版作業提醒管理核對或取消，再回來繳交。');
+}

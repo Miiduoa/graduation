@@ -16,6 +16,9 @@ const mockStorage = new Map<string, string>();
 const mockAlarms = new Map<string, Alarm>();
 let mockUid = 'student';
 let mockPermission = true;
+let mockWriteFailure = 0;
+let mockScheduleFailure = false;
+let mockScheduleRejectAfterWrite = false;
 jest.mock('../../firebase', () => ({
   isFirebaseMockMode: () => false,
   getAuthInstance: () => ({ currentUser: { uid: mockUid } }),
@@ -27,6 +30,7 @@ jest.mock('@react-native-async-storage/async-storage', () => ({
     getAllKeys: async () => [...mockStorage.keys()],
     getItem: async (key: string) => mockStorage.get(key) ?? null,
     setItem: async (key: string, value: string) => {
+      if (mockWriteFailure > 0 && --mockWriteFailure === 0) throw new Error('storage-failed');
       mockStorage.set(key, value);
     },
     removeItem: async (key: string) => {
@@ -47,7 +51,12 @@ jest.mock('expo-notifications', () => ({
   getPermissionsAsync: async () => ({ granted: mockPermission, canAskAgain: false }),
   getAllScheduledNotificationsAsync: async () => [...mockAlarms.values()],
   scheduleNotificationAsync: async (alarm: Alarm) => {
+    if (mockScheduleFailure) throw new Error('schedule-failed');
     mockAlarms.set(alarm.identifier, alarm);
+    if (mockScheduleRejectAfterWrite) {
+      mockScheduleRejectAfterWrite = false;
+      throw new Error('bridge-failed');
+    }
     return alarm.identifier;
   },
   cancelScheduledNotificationAsync: async (id: string) => {
@@ -78,6 +87,9 @@ beforeEach(() => {
   mockAlarms.clear();
   mockUid = 'student';
   mockPermission = true;
+  mockWriteFailure = 0;
+  mockScheduleFailure = false;
+  mockScheduleRejectAfterWrite = false;
   jest.clearAllMocks();
   dueAt = new Date(Date.now() + 3 * 86_400_000).toISOString();
   ds.getAssignment.mockResolvedValue({ ...source, id: 'work', title: '報告', dueAt });
@@ -288,4 +300,49 @@ test('保留大量歷史資料升級後，核對集合有界且不讓後面的�
   await sync();
   expect(ds.getAssignment).toHaveBeenCalledTimes(40);
   expect(new Set(ds.getAssignment.mock.calls.map(([id]) => id)).size).toBe(40);
+});
+
+test('改期排程失敗保留原本健康通知，退避後能重新排程', async () => {
+  await scheduleSubmittedAssignmentReminder(input, ds);
+  const original = [...mockAlarms.values()][0];
+  const later = new Date(Date.parse(dueAt) + 86_400_000).toISOString();
+  ds.getAssignment.mockResolvedValue({ ...source, id: 'work', dueAt: later });
+  mockScheduleFailure = true;
+  await expect(sync()).rejects.toThrow('schedule-failed');
+  expect([...mockAlarms.values()]).toEqual([original]);
+  mockScheduleFailure = false;
+  const clock = jest.spyOn(Date, 'now').mockReturnValue(Date.now() + 3 * 60_000);
+  try {
+    await sync();
+    expect([...mockAlarms.values()][0].trigger.date.toISOString()).toBe(new Date(Date.parse(later) - 3_600_000).toISOString());
+  } finally { clock.mockRestore(); }
+});
+
+test.each([2, 3])('舊提醒轉換第 %i 次寫入失敗仍保留可用排程與復原連結', async (write) => {
+  const { adoptSubmittedAssignmentReminder } = require('../../services/submittedAssignmentReminders');
+  const oldId = 'old-alarm';
+  mockAlarms.set(oldId, { identifier: oldId, content: {}, trigger: { date: new Date(Date.parse(dueAt) - 3_600_000) } });
+  mockStorage.set('old-key', 'receipt');
+  await adoptSubmittedAssignmentReminder(input, { identifier: oldId, storageKey: 'old-key', title: '報告', triggerAt: new Date(Date.parse(dueAt) - 3_600_000).toISOString() });
+  mockWriteFailure = write;
+  await expect(scheduleSubmittedAssignmentReminder(input, ds)).rejects.toThrow('storage-failed');
+  expect([...mockAlarms.keys()].some((id) => id.startsWith('assignment-due.v2.'))).toBe(true);
+  const saved = JSON.parse([...mockStorage.entries()].find(([k]) => k.startsWith('@assignment-due:v2:'))![1]);
+  expect(saved.legacyIds).toEqual([oldId]);
+  await sync();
+  expect(mockAlarms.size).toBe(1);
+  expect(mockStorage.has('old-key')).toBe(false);
+  const { reconcileSubmittedAssignmentReceipt } = require('../../services/submittedAssignmentReminders');
+  await reconcileSubmittedAssignmentReceipt(receipt);
+  expect(mockAlarms.size).toBe(0);
+});
+
+test('原生已覆寫排程但回傳失敗時，恢復原本已確認的提醒時間', async () => {
+  await scheduleSubmittedAssignmentReminder(input, ds);
+  const original = [...mockAlarms.values()][0];
+  ds.getAssignment.mockResolvedValue({ ...source, id: 'work', dueAt: new Date(Date.parse(dueAt) + 86_400_000).toISOString() });
+  mockScheduleRejectAfterWrite = true;
+  await expect(sync()).rejects.toThrow('bridge-failed');
+  expect([...mockAlarms.values()][0].content).toEqual(original.content);
+  expect([...mockAlarms.values()][0].trigger.date).toEqual(original.trigger.date);
 });

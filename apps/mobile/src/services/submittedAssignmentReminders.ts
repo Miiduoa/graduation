@@ -171,27 +171,26 @@ async function reconcile(row: Preference, guard: () => boolean, version: number,
   }
   const remember = async (stamp: string | null) => {
     current(row, guard, version);
-    try {
-      for (const id of row.legacyIds ?? []) {
-        await cancel(id);
-        current(row, guard, version);
-      }
-      for (const oldKey of row.legacyKeys ?? []) await AsyncStorage.removeItem(oldKey);
+    const updated = {
+      ...row, title: assignment?.title ?? row.title, submitted, lastDueAt: due, triggerAt: stamp,
+      failures: 0, checkedAt: now,
+      expiresAt: submitted || stamp === null
+        ? Math.min(row.expiresAt ?? Infinity, now + inactiveRetentionMs)
+        : (due ?? now) + deadlineGraceMs,
+      nextCheckAt: submitted || stamp === null ? now + inactiveRecheckMs : 0,
+    };
+    // Persist the replacement and recovery links before removing any old alarm.
+    await AsyncStorage.setItem(key(row), JSON.stringify(updated));
+    current(row, guard, version);
+    for (const id of row.legacyIds ?? []) {
+      await cancel(id);
       current(row, guard, version);
-      const updated = {
-        ...row, title: assignment?.title ?? row.title, submitted, lastDueAt: due, triggerAt: stamp, legacyIds: [], legacyKeys: [], failures: 0, checkedAt: now,
-        expiresAt: submitted || stamp === null
-          ? Math.min(row.expiresAt ?? Infinity, now + inactiveRetentionMs)
-          : (due ?? now) + deadlineGraceMs,
-        nextCheckAt: submitted || stamp === null ? now + inactiveRecheckMs : 0,
-      };
-      if (JSON.stringify(updated) !== JSON.stringify(row))
-        await AsyncStorage.setItem(key(row), JSON.stringify(updated));
-      current(row, guard, version);
-    } catch (error) {
-      await cancel(row.identifier);
-      throw error;
     }
+    for (const oldKey of row.legacyKeys ?? []) await AsyncStorage.removeItem(oldKey);
+    current(row, guard, version);
+    if (row.legacyIds?.length || row.legacyKeys?.length)
+      await AsyncStorage.setItem(key(row), JSON.stringify({ ...updated, legacyIds: [], legacyKeys: [] }));
+    current(row, guard, version);
   };
   const inventory = await Notifications.getAllScheduledNotificationsAsync();
   current(row, guard, version);
@@ -219,7 +218,8 @@ async function reconcile(row: Preference, guard: () => boolean, version: number,
   const permission = await Notifications.getPermissionsAsync();
   if (!permission.granted) throw new ReminderSyncError('permission-required');
   current(row, guard, version);
-  if (existing) await cancel(row.identifier);
+  // A durable intent keeps a confirmed alarm discoverable if final persistence fails.
+  await AsyncStorage.setItem(key(row), JSON.stringify(row));
   current(row, guard, version);
   try {
     const id = await Notifications.scheduleNotificationAsync({
@@ -246,14 +246,54 @@ async function reconcile(row: Preference, guard: () => boolean, version: number,
     if (id !== row.identifier) throw new ReminderSyncError('schedule-unconfirmed');
     current(row, guard, version);
     const after = await Notifications.getAllScheduledNotificationsAsync();
-    if (!after.some((item) => item.identifier === row.identifier))
+    if (!after.some((item) => item.identifier === row.identifier && item.content.data?.triggerAt === stamp))
       throw new ReminderSyncError('schedule-unconfirmed');
     current(row, guard, version);
   } catch (error) {
-    await cancel(row.identifier);
+    try {
+      current(row, guard, version);
+    } catch (sessionError) {
+      await cancel(row.identifier);
+      throw sessionError;
+    }
+    const oldStamp = existing?.content.data?.triggerAt;
+    if (existing && typeof oldStamp === 'string' && instant(oldStamp) !== null) {
+      const afterFailure = await Notifications.getAllScheduledNotificationsAsync();
+      current(row, guard, version);
+      if (!afterFailure.some((item) => item.identifier === row.identifier &&
+          item.content.data?.triggerAt === oldStamp)) {
+        await Notifications.scheduleNotificationAsync({
+          identifier: row.identifier,
+          content: existing.content,
+          trigger: {
+            type: Notifications.SchedulableTriggerInputTypes.DATE,
+            date: new Date(oldStamp),
+            ...(Platform.OS === 'android' ? { channelId: 'assignment-reminders' } : {}),
+          },
+        });
+        try {
+          current(row, guard, version);
+        } catch (sessionError) {
+          await cancel(row.identifier);
+          throw sessionError;
+        }
+      }
+    } else {
+      await cancel(row.identifier);
+    }
     throw error;
   }
-  await remember(stamp);
+  try {
+    await remember(stamp);
+  } catch (error) {
+    try {
+      current(row, guard, version);
+    } catch (sessionError) {
+      await cancel(row.identifier);
+      throw sessionError;
+    }
+    throw error;
+  }
   return { outcome: 'scheduled' as const, triggerAt: stamp };
 }
 
@@ -349,7 +389,7 @@ export function reconcileSubmittedAssignmentReminders(
         current(scope, guard, version);
         const failures = (row.failures ?? 0) + 1;
         await AsyncStorage.setItem(storageKey, JSON.stringify({
-          ...row, failures, checkedAt: now, expiresAt: Math.min(row.expiresAt ?? Infinity, now + inactiveRetentionMs),
+          ...(await readPreference(storageKey) ?? row), failures, checkedAt: now, expiresAt: Math.min(row.expiresAt ?? Infinity, now + inactiveRetentionMs),
           nextCheckAt: now + Math.min(60, 2 ** Math.min(failures, 6)) * 60_000,
         }));
         errors.push(error);

@@ -2062,6 +2062,11 @@ export const firebaseSource: DataSource = {
       throw new Error('登入身分已變更，請重新開啟課程。');
     }
 
+    const { prepareAssignmentReminderSubmission } = require('../services/campusAssignmentReminders') as typeof import('../services/campusAssignmentReminders');
+    await prepareAssignmentReminderSubmission(userId, () => resolveUserSchoolId(userId));
+    if (getAuthInstance().currentUser?.uid !== userId)
+      throw new Error('登入身分已變更，請重新開啟課程。');
+
     const db = getDb();
     const assignmentPath = buildGroupCollectionPath(groupId, 'assignments', assignmentId);
     const submissionPath = buildGroupCollectionPath(

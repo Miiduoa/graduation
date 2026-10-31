@@ -1,3 +1,4 @@
+import { prepareAssignmentReminderSubmission } from '../../services/campusAssignmentReminders';
 import { reconcileSubmittedAssignmentReceipt } from '../../services/submittedAssignmentReminders';
 import { getDoc, getDocFromServer, getDocs, runTransaction } from 'firebase/firestore';
 import { getAuthInstance } from '../../firebase';
@@ -5,6 +6,9 @@ import { firebaseSource } from '../../data/firebaseSource';
 
 jest.mock('../../services/submittedAssignmentReminders', () => ({
   reconcileSubmittedAssignmentReceipt: jest.fn(async () => undefined),
+}));
+jest.mock('../../services/campusAssignmentReminders', () => ({
+  prepareAssignmentReminderSubmission: jest.fn(async () => undefined),
 }));
 jest.mock('../../firebase', () => ({
   getDb: () => 'db',
@@ -73,6 +77,8 @@ test('writes canonical text and server timestamps only after reading both docume
     groupId: 'course',
     content: '  Answer  ',
   });
+  expect(jest.mocked(prepareAssignmentReminderSubmission).mock.invocationCallOrder[0])
+    .toBeLessThan(jest.mocked(runTransaction).mock.invocationCallOrder[0]);
   expect(transaction.get.mock.calls.map(([ref]) => ref.path)).toEqual([
     'groups/course/assignments/work',
     'groups/course/assignments/work/submissions/alice',
@@ -260,3 +266,10 @@ test.each([{ fromCache: true, hasPendingWrites: false }, { fromCache: false, has
     expect(reconcileSubmittedAssignmentReceipt).not.toHaveBeenCalled();
   },
 );
+
+test('繳交交易前先配對舊提醒，無法安全辨識時保留答案並提示管理入口', async () => {
+  jest.mocked(prepareAssignmentReminderSubmission).mockRejectedValueOnce(new Error('請先到舊版作業提醒管理核對'));
+  await expect(firebaseSource.submitAssignment({ assignmentId: 'work', userId: 'alice', groupId: 'course', content: 'Answer' }))
+    .rejects.toThrow('舊版作業提醒管理');
+  expect(runTransaction).not.toHaveBeenCalled();
+});
