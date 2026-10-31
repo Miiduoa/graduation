@@ -103,7 +103,7 @@ it('masks private data before any network call', async () => {
     expect(init.body).not.toMatch(/王小明|s12345678|A123456789/);
     return success(payload.text);
   });
-  await run('姓名：王小明 學號：s12345678\n身分證：A123456789\n資料庫,3,85');
+  await run('姓名：王小明\n學號：s12345678\n身分證：A123456789\n資料庫,3,85');
   expect(fetcher).toHaveBeenCalledOnce();
 });
 

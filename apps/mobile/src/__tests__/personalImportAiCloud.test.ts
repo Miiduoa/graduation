@@ -103,7 +103,7 @@ test.each([
 test('cloud input masks identity fields before fetch', async () => {
   mockFetch.mockResolvedValue(response(503, { code: 'disabled' }));
   await runMobilePersonalImportAi(
-    `姓名：王小明 學號：411123456\n身分證：A123456789\n${text}`,
+    `姓名：王小明\n學號：411123456\n身分證：A123456789\n${text}`,
     options,
     new AbortController().signal,
     request,

@@ -97,3 +97,58 @@ for (const label of ['任課教師姓名', 'instructor contact', '家長姓名']
     assert.equal(result.reason, 'invalid-input');
   });
 }
+
+for (const [label, secret] of [
+  ['student_id', 'S123456'], ['學 號', '123456'], ['學生名字', '王小明'],
+  ['ＳＴＵＤＥＮＴ＿ＩＤ', 'S123456'], ['student-number', '123456'],
+  ['學_生_名_字', '王小明'], ['學 生 學 號', '123456'],
+]) {
+  for (const delimiter of [',', '\t', ';', '；', '，', '|', '、']) {
+    test(`個資欄變體 ${label} / ${JSON.stringify(delimiter)} 不洩漏請求本文`, async () => {
+      const header = `${label}${delimiter}課程名稱${delimiter}學分${delimiter}成績`;
+      const row = `${secret}${delimiter}微積分${delimiter}3${delimiter}85`;
+      for (const input of [{ text: `${header}\n${row}` }, { text: row, columnContext: header }]) {
+        let called = false;
+        const result = await requestPersonalImportCloud({ ...input, kind: 'grades', fetcher: async (_url, init) => {
+          called = true;
+          assert.equal(init.body.includes(secret), false);
+          assert.equal(init.body.includes('微積分'), true);
+          return { ok: false, status: 503 };
+        } });
+        if (!called) assert.equal(result.reason, 'invalid-input');
+      }
+      const source = `${header}\n${row}`;
+      const batch = maskPersonalImportCloudBatch(source, { text: `${row}`, startLine: 2, columnContext: header });
+      if (batch) assert.equal(JSON.stringify(batch).includes(secret), false);
+    });
+  }
+  for (const source of [`${label}: ${secret}\n微積分,3,85`, `${label}\n${secret}\n微積分,3,85`]) {
+    test(`行內或直排 ${JSON.stringify(source)} 不洩漏`, async () => {
+      await requestPersonalImportCloud({ text: source, kind: 'grades', fetcher: async (_url, init) => {
+        assert.equal(init.body.includes(secret), false);
+        return { ok: false, status: 503 };
+      } });
+    });
+  }
+}
+for (const label of ['學生識別碼', 'student_identifier', '學生暱稱', '家長名字', '學 號 備 註', 'student/id']) {
+  test(`不明個資欄 ${label} 完全不呼叫雲端`, async () => {
+    let calls = 0;
+    const result = await requestPersonalImportCloud({
+      text: `${label},課程名稱,學分,成績\n王小明,微積分,3,85`, kind: 'grades',
+      fetcher: async () => { calls++; return { ok: false, status: 503 }; },
+    });
+    assert.equal(calls, 0);
+    assert.equal(result.reason, 'invalid-input');
+  });
+}
+
+test('混合姓名與學號標籤無法確定欄界時保留本機', async () => {
+  let calls = 0;
+  const result = await requestPersonalImportCloud({
+    text: '姓名：王小明 學號：s12345678\n身分證：A123456789\n資料庫,3,85', kind: 'grades',
+    fetcher: async () => { calls++; return { ok: false, status: 503 }; },
+  });
+  assert.equal(calls, 0);
+  assert.equal(result.reason, 'invalid-input');
+});
