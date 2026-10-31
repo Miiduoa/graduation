@@ -167,7 +167,7 @@ function RecordContent<K extends AcademicKind>({
             </span>
           </div>
           <p>
-          來源：{sourceLabel} ·{' '}
+          來源：校方正式 · {sourceLabel} ·{' '}
           {new Date(state.snapshot.fetchedAt).toLocaleString('zh-TW', {
             timeZone: 'Asia/Taipei',
             month: 'numeric',

@@ -296,10 +296,12 @@ function rowSummary(row: PersonalImportRow, profile?: PeriodProfileId) {
 function ImportWorkspace({
   scope,
   initialKind,
+  initialRecordId,
   available,
 }: {
   scope: PersonalImportScope;
   initialKind: Kind;
+  initialRecordId?: string;
   available: boolean;
 }) {
   const platform = useNuniSession();
@@ -360,6 +362,8 @@ function ImportWorkspace({
   const [undoOpen, setUndoOpen] = useState(false);
   const [deleting, setDeleting] = useState<PersonalImportRecord | null>(null);
   const [savedQuery, setSavedQuery] = useState('');
+  const [selectedRecordId, setSelectedRecordId] = useState(initialRecordId);
+  const savedScroll = useRef<ScrollView>(null);
   const [visibleSavedCount, setVisibleSavedCount] = useState(40);
   const [savedFeedback, setSavedFeedback] = useState('');
   const [exporting, setExporting] = useState(false);
@@ -1343,6 +1347,7 @@ function ImportWorkspace({
     return ledger.records.filter(
       (row) =>
         row.kind === kind &&
+        (!selectedRecordId || row.id === selectedRecordId) &&
         (!query ||
           [row.title, row.teacher, row.courseCode, row.academicYear, row.location, row.grade].some(
             (value) =>
@@ -1351,7 +1356,7 @@ function ImportWorkspace({
                 .includes(query),
           )),
     );
-  }, [ledger, kind, savedQuery]);
+  }, [ledger, kind, savedQuery, selectedRecordId]);
 
   const deleteRecord = async () => {
     const original = deleting;
@@ -1465,6 +1470,7 @@ function ImportWorkspace({
         </View>
       ) : (
         <ScrollView
+          ref={savedScroll}
           keyboardShouldPersistTaps="handled"
           contentContainerStyle={{ padding: 18, gap: 16, paddingBottom: 120 }}
         >
@@ -2601,9 +2607,14 @@ function ImportWorkspace({
               沒有符合搜尋條件的資料，可修改關鍵字。
             </Text>
           ) : null}
+          {selectedRecordId ? <Button text="查看全部個人紀錄" onPress={() => setSelectedRecordId(undefined)} /> : null}
+          {selectedRecordId && ledger && !savedRecords.length ? <Text style={textStyle}>找不到這筆原始紀錄，可能已刪除或不屬於目前帳號。</Text> : null}
           {savedRecords.slice(0, visibleSavedCount).map((row) => (
             <View
               key={row.id}
+              onLayout={(event) => {
+                if (selectedRecordId === row.id) savedScroll.current?.scrollTo({ y: event.nativeEvent.layout.y, animated: false });
+              }}
               style={{
                 paddingVertical: 12,
                 borderTopWidth: 1,
@@ -2823,7 +2834,7 @@ function ImportWorkspace({
   );
 }
 
-export default function PersonalImportScreen({ route }: { route?: { params?: { kind?: Kind } } }) {
+export default function PersonalImportScreen({ route }: { route?: { params?: { kind?: Kind; recordId?: string } } }) {
   const scope = usePersonalImportScope();
   const platform = useNuniSession();
   const confirmedScope = useRef<PersonalImportScope | null>(null);
@@ -2843,9 +2854,10 @@ export default function PersonalImportScreen({ route }: { route?: { params?: { k
     : 'timetable';
   return (
     <ImportWorkspace
-      key={`${retained.owner}:${retained.schoolId}:${kind}`}
+      key={`${retained.owner}:${retained.schoolId}:${kind}:${route?.params?.recordId || ''}`}
       scope={retained}
       initialKind={kind}
+      initialRecordId={route?.params?.recordId}
       available={!!scope}
     />
   );

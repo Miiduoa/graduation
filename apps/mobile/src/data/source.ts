@@ -258,7 +258,7 @@ export type DataSource = {
   getGPA: (
     userId: string,
     schoolId?: string,
-  ) => Promise<{ gpa: number; totalCredits: number; totalPoints: number }>;
+  ) => Promise<{ gpa: number; totalCredits: number; totalPoints: number } | null>;
 
   // 群組
   listGroups: (userId: string, options?: QueryOptions) => Promise<Group[]>;

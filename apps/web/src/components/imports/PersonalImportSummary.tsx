@@ -36,7 +36,8 @@ export function PersonalImportSummary({ kind }: { kind: PersonalImportKind }) {
               .reverse()
               .map((row) => (
                 <li key={row.id}>
-                  <strong>{row.title}</strong>
+                  <strong><Link href={`/import?kind=${kind}#record-${encodeURIComponent(row.id)}`}>{row.title}</Link></strong>
+                  <span>來源：個人匯入 · 匯入時間：{new Date(row.importedAt).toLocaleString('zh-TW', { timeZone: 'Asia/Taipei' })}</span>
                   <span>
                     {row.kind === 'grades'
                       ? `${row.academicYear}／${row.semester} · ${row.credits} 學分 · ${row.grade}`
