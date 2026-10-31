@@ -69,7 +69,7 @@ it('reads only the current profile from the server and links to authoritative re
   render(<ProfilePage />);
   await screen.findByText('私人資料 A');
   expect(state.read).toHaveBeenCalledWith('users/a');
-  expect(screen.getByRole('link', { name: /成績紀錄/ }).getAttribute('href')).toBe('/grades');
+  expect(screen.getByRole('link', { name: /成績紀錄/ }).getAttribute('href')).toBe('/grades?tab=semester');
   expect(screen.getByRole('link', { name: /圖書館/ }).getAttribute('href')).toBe('/library');
   expect(screen.queryByText(/GPA|已同步課程|借閱中/)).toBeNull();
 });

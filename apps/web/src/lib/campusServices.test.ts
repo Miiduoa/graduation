@@ -72,6 +72,11 @@ it('offers school-account leave workflows without presenting them as official le
   expect(student?.text).not.toContain('正式');
 });
 
+it('routes semester-grade search to school records and feedback to nuni', () => {
+  expect(searchCampusServices('學期成績').some((service) => service.href === '/grades?tab=semester')).toBe(true);
+  expect(CAMPUS_SERVICES.some((service) => service.href === '/grades?tab=feedback')).toBe(true);
+});
+
 it('hides readonly homework from service searches by default', () => {
   expect(searchCampusServices('').some((item) => item.href === '/school-lms')).toBe(false);
   expect(searchCampusServices('玩課雲作業')).toEqual([]);

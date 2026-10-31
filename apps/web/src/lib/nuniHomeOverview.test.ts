@@ -151,15 +151,19 @@ it('sorts recent feedback by instant across accepted Taipei wall and UTC timesta
     })
     .mockResolvedValueOnce({ assignments: rows });
   const result = await loadNuniHomeData(transport, accountId);
-  expect(result.recentFeedback?.map((entry) => entry.title)).toEqual(['作業 3', '作業 2', '作業 1']);
+  expect(result.recentFeedback?.map((entry) => entry.title)).toEqual([
+    '作業 3',
+    '作業 2',
+    '作業 1',
+  ]);
 });
-it('rejects an incomplete overview when any course is no longer accessible', async () => {
+it('marks an incomplete overview when a course is no longer accessible', async () => {
   transport
     .mockResolvedValueOnce({
       workspaces: [{ id: studentId, title: '課程', state: 'active', memberRole: 'student' }],
     })
     .mockRejectedValueOnce(new NuniError(403, 'ACCESS_DENIED'));
-  await expect(loadNuniHomeData(transport, accountId)).rejects.toMatchObject({ status: 403 });
+  expect((await loadNuniHomeData(transport, accountId)).tasksError).toBeTruthy();
 });
 it('does not accept another account submission as proof that this student completed work', async () => {
   const item = assignment('1');
@@ -271,7 +275,7 @@ it('does not present completed work when the quiz request fails', async () => {
     if (path.endsWith('/materials')) return { materials: [] };
     throw new NuniError(503, 'UNAVAILABLE');
   });
-  await expect(loadNuniHomeData(transport, accountId)).rejects.toMatchObject({ status: 503 });
+  expect((await loadNuniHomeData(transport, accountId)).tasksError).toBeTruthy();
 });
 it('rejects quiz completion receipts belonging to another account', async () => {
   const item = quiz('1');
@@ -344,7 +348,10 @@ it('lists recent course materials with a one-click cabinet hash and ignores olde
   ]);
   expect(result.materialsError).toBeNull();
   expect(result.materialSearchSeed?.courseIds).toEqual([studentId]);
-  expect(result.materialSearchSeed?.items.map((item) => item.title)).toEqual(['本週講義', '去年講義']);
+  expect(result.materialSearchSeed?.items.map((item) => item.title)).toEqual([
+    '本週講義',
+    '去年講義',
+  ]);
 });
 it('keeps assignments and published feedback when materials cannot be read', async () => {
   const pending = assignment('1', { dueAt: '2026-10-10T00:00:00Z' });
@@ -465,4 +472,22 @@ it('keeps a legacy-100 home feed but does not seed search as complete for that c
     courseIds: [],
     truncated: true,
   });
+});
+
+it('keeps confirmed assignments and their links when quizzes fail', async () => {
+  transport.mockImplementation(async (path: string) => {
+    if (path === 'class-workspaces')
+      return {
+        workspaces: [{ id: studentId, title: '課程', state: 'active', memberRole: 'student' }],
+      };
+    if (path.endsWith('/assignments')) return { assignments: [assignment('1')] };
+    if (path.endsWith('/materials')) return { materials: [] };
+    throw new NuniError(503, 'UNAVAILABLE');
+  });
+  const result = await loadNuniHomeData(transport, accountId);
+  expect(result.tasksError).toBeTruthy();
+  expect(result.tasks).toHaveLength(1);
+  expect(result.tasks[0].href).toBe(
+    `/classroom/course/${studentId}#assignment-${assignment('1').id}`,
+  );
 });
