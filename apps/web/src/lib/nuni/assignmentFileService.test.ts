@@ -1,5 +1,6 @@
 // @vitest-environment node
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { createRequire } from 'node:module';
+import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { FILE_ONLY_SUBMISSION_BODY } from '@campus/shared/src/assignmentFiles';
 import { NuniError, type NuniAssignment, type NuniWorkspace } from '@campus/shared/src/nuni';
 import {
@@ -15,6 +16,37 @@ import {
   createTtlMemoryBlobStore,
   resolveAssignmentFileStores,
 } from './assignmentFileStore';
+
+const storeModes = ['memory', 'sql', ...(process.env.NUNI_TEST_POSTGRES_PORT ? ['postgres'] : [])];
+const cleanups: (() => Promise<void>)[] = [];
+afterAll(async () => { for (const cleanup of cleanups) await cleanup(); });
+
+async function recoveryIndex(mode: string) {
+  if (mode !== 'postgres') return mode === 'sql'
+    ? createSqlIndexStore(createFakeAssignmentFileSql()) : createMemoryIndexStore();
+  const { Client } = createRequire(import.meta.url)('pg') as { Client: new (config: object) => {
+    connect(): Promise<void>; end(): Promise<void>;
+    query(sql: string, params?: unknown[]): Promise<{ rows: Record<string, unknown>[] }>;
+  } };
+  const connection = new Client({ host: '127.0.0.1', port: Number(process.env.NUNI_TEST_POSTGRES_PORT),
+    user: 'box', database: 'postgres' });
+  await connection.connect();
+  const schema = `attachment_recovery_${process.pid}_${cleanups.length}`;
+  cleanups.push(async () => { await connection.query(`DROP SCHEMA ${schema} CASCADE`); await connection.end(); });
+  await connection.query(`CREATE SCHEMA ${schema}; SET search_path TO ${schema};
+    CREATE TABLE class_assignment_file_idempotency (
+      actor_id text, key text, request_hash text NOT NULL, payload jsonb NOT NULL, PRIMARY KEY (actor_id, key));
+    CREATE TABLE class_assignment_submission_files (
+      id text PRIMARY KEY, workspace_id text, assignment_id text, platform_account_id text,
+      original_name text, content_type text, byte_size integer, sha256 text, kind text,
+      storage_key text, created_at timestamptz, uploaded_at timestamptz, submitted_at timestamptz,
+      superseded_at timestamptz, late boolean);
+    CREATE TABLE class_assignment_submission_withdrawals (
+      assignment_id text, platform_account_id text, submitted_at timestamptz);
+    CREATE TABLE class_workspace_assignment_submissions (
+      assignment_id text, platform_account_id text, submitted_at timestamptz)`);
+  return createSqlIndexStore(async (sql, params) => (await connection.query(sql, params)).rows);
+}
 
 const workspaceId = 'cw_11111111-1111-4111-8111-111111111111';
 const assignmentId = 'cwa_22222222-2222-4222-8222-222222222222';
@@ -760,8 +792,8 @@ it('restores the previous file receipt after a failed revision and replaces it o
   await expect(api.readContent(workspaceId, assignmentId, old.id, old.downloadExp, old.downloadSig)).rejects.toMatchObject({ status: 404 });
 });
 
-it.each(['memory', 'sql'] as const)('recovers confirmed attachment alignment after the deadline across service restarts (%s)', async mode => {
-  const index = mode === 'sql' ? createSqlIndexStore(createFakeAssignmentFileSql()) : createMemoryIndexStore();
+it.each(storeModes)('recovers confirmed attachment alignment after the deadline across service restarts (%s)', async mode => {
+  const index = await recoveryIndex(mode);
   const stores = { index, blobs: createTtlMemoryBlobStore() };
   let clock = new Date('2026-10-21T11:59:58.000Z');
   let current = assignment();
@@ -782,9 +814,9 @@ it.each(['memory', 'sql'] as const)('recovers confirmed attachment alignment aft
   await api.putContent(student, workspaceId, assignmentId, intent.id, jpeg());
   const put = index.putFile.bind(index);
   let unavailable = true;
-  index.putFile = async record => {
+  index.putFile = async (record, version) => {
     if (unavailable && record.submittedAt === '2026-10-21T11:59:59.000Z') throw new Error('alignment unavailable');
-    return put(record);
+    return put(record, version);
   };
   const input = { body: '原操作', fileIds: [intent.id], idempotencyKey: 'recover-submit' };
   await expect(api.submitFiles(student, workspaceId, assignmentId, input)).rejects.toMatchObject({ status: 503 });
@@ -830,7 +862,7 @@ it('uses visible counts for successive withdrawals and a submission by another s
 });
 
 it.each(
-  ['memory', 'sql'].flatMap((mode) =>
+  storeModes.flatMap((mode) =>
     [false, true].flatMap((withFiles) =>
       [false, true].map((afterDeadline) => ({ mode, withFiles, afterDeadline })),
     ),
@@ -838,10 +870,7 @@ it.each(
 )(
   'rejects replaced recovery $mode files=$withFiles deadline=$afterDeadline',
   async ({ mode, withFiles, afterDeadline }) => {
-    const index =
-      mode === 'sql'
-        ? createSqlIndexStore(createFakeAssignmentFileSql())
-        : createMemoryIndexStore();
+    const index = await recoveryIndex(mode);
     const stores = { index, blobs: createTtlMemoryBlobStore() };
     let clock = new Date('2026-10-21T11:59:58.000Z');
     let current = assignment();
@@ -875,10 +904,10 @@ it.each(
     const oldDownload = await api.putContent(student, workspaceId, assignmentId, intent.id, jpeg());
     const put = index.putFile.bind(index);
     let unavailable = true;
-    index.putFile = async (record) => {
+    index.putFile = async (record, version) => {
       if (unavailable && record.submittedAt === '2026-10-21T11:59:58.100Z')
         throw new Error('alignment unavailable');
-      return put(record);
+      return put(record, version);
     };
     const input = { body: '原操作', fileIds: [intent.id], idempotencyKey: 'recover-submit' };
     await expect(api.submitFiles(student, workspaceId, assignmentId, input)).rejects.toMatchObject({
@@ -941,11 +970,22 @@ it.each(
     await expect(api.readContent(workspaceId, assignmentId, intent.id, oldDownload.downloadExp!, oldDownload.downloadSig!))
       .rejects.toMatchObject({ status: 404 });
     expect(receipt.mySubmission?.body).toBe('new B');
+    clock = new Date('2026-10-21T12:00:00.001Z');
+    const replayed = await api.submitFiles(student, workspaceId, assignmentId, {
+      body: 'new B', fileIds: withFiles ? [replacement.id] : [], idempotencyKey: 'new-submit',
+    });
+    expect(replayed.mySubmission?.body).toBe('new B');
+    expect(replayed.mySubmission?.files?.map(file => file.id)).toEqual(withFiles ? [replacement.id] : []);
+    if (withFiles) {
+      const download = replayed.mySubmission!.files![0];
+      await expect(api.readContent(workspaceId, assignmentId, download.id, download.downloadExp, download.downloadSig))
+        .resolves.toMatchObject({ bytes: jpeg() });
+    }
   },
 );
 
-it.each(['memory', 'sql'] as const)('fences stale alignment and rollback writes after a newer version (%s)', async mode => {
-  const index = mode === 'sql' ? createSqlIndexStore(createFakeAssignmentFileSql()) : createMemoryIndexStore();
+it.each(storeModes)('fences stale alignment and rollback writes after a newer version (%s)', async mode => {
+  const index = await recoveryIndex(mode);
   const api = createAssignmentFileService({ secret, stores: { index, blobs: createTtlMemoryBlobStore() }, platform: platform(), now: () => new Date('2026-10-21T11:00:00Z') });
   const intent = await api.createIntent(actor(studentId), workspaceId, assignmentId, {
     originalName: 'old.jpg', contentType: 'image/jpeg', byteSize: 64, idempotencyKey: 'fenced-intent',

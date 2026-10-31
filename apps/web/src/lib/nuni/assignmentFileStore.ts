@@ -237,13 +237,20 @@ export function createSqlIndexStore(query: SqlQuery): AssignmentFileIndexStore {
         accountId,
         `submit-version:${assignmentId}`,
       ]);
-      return rows[0] ? String(rows[0].request_hash) : null;
+      return rows[0] && rows[0].request_hash !== '-infinity'
+        ? String(rows[0].request_hash)
+        : null;
     },
     async putFile(record, version) {
+      // 衝突更新會鎖住最新資料列；首次寫入也不能沿用缺列的敘述快照。
+      // 占位版本不代表提交成功，只有 advanceVersion 才能推進有效版本。
       const sql = version
         ? `WITH current_version AS MATERIALIZED (
-        SELECT request_hash FROM class_assignment_file_idempotency
-        WHERE actor_id = $4 AND key = 'submit-version:' || $3 FOR UPDATE
+        INSERT INTO class_assignment_file_idempotency (actor_id, key, request_hash, payload)
+        VALUES ($4, 'submit-version:' || $3, '-infinity', 'null'::jsonb)
+        ON CONFLICT (actor_id, key) DO UPDATE
+        SET key = EXCLUDED.key
+        RETURNING request_hash
       ) ` +
           ASSIGNMENT_FILE_SQL.upsertFile.replace(
             'VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)',
