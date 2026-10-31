@@ -1,3 +1,4 @@
+import { PERSONAL_IMPORT_NAME_FIELD_PATTERN } from './nameFields';
 import type { PersonalImportOptions } from './types';
 import type { PersonalImportAiResult } from './aiRecognition';
 import { parsePersonalImport } from './parser';
@@ -19,7 +20,7 @@ const messages: Record<PersonalImportCloudFailure, string> = {
   'invalid-input': '這段內容無法交給雲端整理，改用本機整理。',
 };
 
-const privateFieldPattern = '(?:(?:學生)?姓名|學生|(?:學生)?學號|身分證(?:字號)?|身份證(?:字號)?|(?:授課)?教師|老師|電子郵件|電郵|(?:聯絡)?電話|手機(?:號碼)?|(?:student\\s*)?name|student\\s*(?:id|number)|teacher(?:\\s*name)?|e-?mail|phone|mobile)';
+const privateFieldPattern = `(?:${PERSONAL_IMPORT_NAME_FIELD_PATTERN}|(?:學生)?學號|身分證(?:字號)?|身份證(?:字號)?|電子郵件|電郵|(?:聯絡)?電話|手機(?:號碼)?|student\\s*(?:id|number)|e-?mail|phone|mobile)`;
 const privateField = new RegExp(`^${privateFieldPattern}$`, 'iu');
 const privateTableDelimiters = ['\t', ',', '|', ';', '、'] as const;
 const tableField = /^(?:(?:課程|科目|活動)?名稱|課號|科目代碼|課程代碼|學分數?|成績|分數|學年度|學期|(?:授課)?教師|教室|星期|開始節次|結束節次|日期|開始時間|結束時間|地點|班級|系所|序號|編號|course(?: name| code)?|credits?|grade|score|semester|teacher|room|day|date|start|end|title|location)$/iu;
@@ -150,6 +151,12 @@ function maskPrivateTables(text: string): { text: string; safe: boolean } {
 export function isPersonalImportCloudMaskSafe(text: string, context = ''): boolean {
   const normalized = (context ? `${context}\n${text}` : text).normalize('NFKC');
   if (hasAmbiguousPrivateList(normalized)) return false;
+  // 未知的姓名／教師標籤無法可靠對應欄位，整份資料留在裝置。
+  if (normalized.split(/[\n\t,|;、/:=]/u).some((cell) => {
+    const field = cell.replace(/\[(?:姓名|學號|證號|個資|聯絡資料)已遮罩\]/gu, '').trim().replace(/^"|"$/gu, '');
+    return /姓名|教師|老師|教授|instructor|teacher/iu.test(field) &&
+      !privateField.test(field);
+  })) return false;
   // OCR 空白分欄沒有可靠的欄界；不能把相鄰欄名誤當成姓名值遮罩。
   if (normalized.split('\n').some((line) => {
     const cells = line.trim().split(/ +/u);
@@ -187,8 +194,8 @@ export function maskPersonalImportText(text: string, knownNames: readonly string
   masked = maskPrivateTables(maskPrivateVerticalFields(masked).text).text;
   masked = masked.split('\n').map((line) => line
       .replace(/((?:電子郵件|電郵|(?:聯絡)?電話|手機(?:號碼)?|e-?mail|phone|mobile)[ \t]*[:=][ \t]*)([^\n\t,;|]+?)(?=\s+(?:學號|身分證|身份證|班級|系所|學分|成績|課程|科目|姓名|教師|電子郵件|電郵|電話|手機|student\s*id|credits?|grade|score|e-?mail|phone)\s*[:=]|$|[\t,;|])/giu, '$1[聯絡資料已遮罩]')
-      .replace(/((?:學生姓名|姓名|學生|(?:授課)?教師|老師|student\s*name|name|teacher(?:\s*name)?)[ \t]*[:=][ \t]*)([^\n\t,;|]+?)(?=\s+(?:學號|身分證|身份證|班級|系所|學分|成績|課程|科目|student\s*id|credits?|grade|score)\s*[:=]|$|[\t,;|])/giu, '$1[姓名已遮罩]')
-      .replace(/((?:學生姓名|姓名|學生|(?:授課)?教師|老師)[ ]+)([^\s,;|:]{2,20})(?![ \t]*[:=])/gu, '$1[姓名已遮罩]')
+      .replace(new RegExp(`((?:${PERSONAL_IMPORT_NAME_FIELD_PATTERN})[ \\t]*[:=][ \\t]*)([^\\n\\t,;|]+?)(?=\\s+(?:學號|身分證|身份證|班級|系所|學分|成績|課程|科目|student\\s*id|credits?|grade|score)\\s*[:=]|$|[\\t,;|])`, 'giu'), '$1[姓名已遮罩]')
+      .replace(new RegExp(`((?:${PERSONAL_IMPORT_NAME_FIELD_PATTERN})[ ]+)([^\\s,;|:]{2,20})(?![ \\t]*[:=])`, 'giu'), '$1[姓名已遮罩]')
       .replace(/((?:學生)?學號|student\s*(?:id|number))([ \t]*[:=]?[ \t]*)[A-Za-z0-9_-]{4,24}/giu, '$1$2[學號已遮罩]')
   ).join('\n');
   return masked

@@ -281,3 +281,28 @@ it.each([';', '；', '，', '、', '/'])('keeps unreliable private tables separa
   }
   expect(fetcher).not.toHaveBeenCalled();
 });
+
+
+it.each([
+  'not json',
+  JSON.stringify({ complete: true, rows: [] }),
+  JSON.stringify({ complete: true, rows: [{ title: '資料庫', credits: 3, grade: '85', evidence: '不存在的來源' }] }),
+])(
+  'invalid cloud output %s falls back to local and then rules', async (invalid) => {
+    fetcher.mockResolvedValue(success(source, invalid));
+    expect((await run()).rows[0]).toMatchObject({ title: '資料庫', grade: '85' });
+    expect(runLocalPersonalImportAi).toHaveBeenCalledOnce();
+    vi.mocked(runLocalPersonalImportAi).mockRejectedValue(new Error('invalid output'));
+    expect((await run()).rows[0]).toMatchObject({ title: '資料庫', grade: '85' });
+    expect(runLocalPersonalImportAi).toHaveBeenCalledTimes(2);
+  },
+);
+
+it.each(['授課老師', '教授', 'instructor', '教師姓名', 'teacher_name'])(
+  'request body masks names under %s', async (label) => {
+    fetcher.mockResolvedValue(new Response('{"code":"disabled"}', { status: 503 }));
+    await run(`課程名稱,${label},學分,成績\n資料庫,王小明,3,85`);
+    expect(fetcher).toHaveBeenCalledOnce();
+    expect(fetcher.mock.calls[0][1].body).not.toContain('王小明');
+  },
+);

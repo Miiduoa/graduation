@@ -11,7 +11,9 @@ require.extensions['.ts'] = (module, filename) => {
   }).outputText;
   module._compile(source, filename);
 };
-const { isPersonalImportCloudMaskSafe, maskPersonalImportCloudBatch, maskPersonalImportText } = require('../src/imports/aiCloud.ts');
+const { isPersonalImportCloudMaskSafe, maskPersonalImportCloudBatch, maskPersonalImportText, requestPersonalImportCloud } = require('../src/imports/aiCloud.ts');
+const { PERSONAL_IMPORT_NAME_FIELDS } = require('../src/imports/nameFields.ts');
+const { personalImportHeaderField } = require('../src/imports/parser.ts');
 require.extensions['.ts'] = original;
 
 
@@ -63,5 +65,35 @@ for (const label of ['教師：王小明', '姓名：王小明', 'teacher: Wang'
 for (const continuation of ['李小華／陳小美', '李小華,陳小美', '李小華\t陳小美']) {
   test(`拒絕無可靠欄界的行內個資續行 ${continuation}`, () => {
     assert.equal(isPersonalImportCloudMaskSafe(`教師：王小明\n${continuation}\n課程名稱,學分,成績\n微積分,3,85`), false);
+  });
+}
+
+for (const label of PERSONAL_IMPORT_NAME_FIELDS) {
+  test(`共用姓名欄名 ${label} 的請求本文不含姓名`, async () => {
+    const source = `課程名稱,${label},學分,成績\n微積分,王小明,3,85`;
+    let called = false;
+    await requestPersonalImportCloud({
+      text: source, kind: 'grades',
+      fetcher: async (_url, init) => {
+        called = true;
+        assert.equal(init.body.includes('王小明'), false);
+        return { ok: false, status: 503 };
+      },
+    });
+    assert.equal(called, true);
+    assert.equal(maskPersonalImportText(`${label}: 王小明`).includes('王小明'), false);
+    if (!['學生姓名', '姓名', '學生', 'studentname', 'name'].includes(label))
+      assert.equal(personalImportHeaderField(label), 'teacher');
+  });
+}
+for (const label of ['任課教師姓名', 'instructor contact', '家長姓名']) {
+  test(`未知個資欄 ${label} 留在本機`, async () => {
+    const source = `課程名稱,${label},學分,成績\n微積分,王小明,3,85`;
+    assert.equal(isPersonalImportCloudMaskSafe(source), false);
+    const result = await requestPersonalImportCloud({
+      text: source, kind: 'grades', fetcher: async () => { throw new Error('不應送出'); },
+    });
+    assert.equal(result.ok, false);
+    assert.equal(result.reason, 'invalid-input');
   });
 }

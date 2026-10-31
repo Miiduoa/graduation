@@ -185,6 +185,8 @@ export async function runMobilePersonalImportAi(
     batch,
     prompt: batch.rulesOnly ? '' : promptFor(batch),
     retry: null as RetryReason,
+    // 雲端輸出無法核對後，此段只使用本機備援。
+    localOnly: false,
   }));
   const modelId = localLLM.getLoadedModelId();
   let localUnavailable = false;
@@ -328,7 +330,12 @@ export async function runMobilePersonalImportAi(
           work.splice(
             index,
             1,
-            ...smaller.map((part) => ({ batch: part, prompt: promptFor(part), retry: reason })),
+            ...smaller.map((part) => ({
+              batch: part,
+              prompt: promptFor(part),
+              retry: reason,
+              localOnly: item.localOnly,
+            })),
           );
           splits++;
           index--;
@@ -337,12 +344,13 @@ export async function runMobilePersonalImportAi(
         let output: string | undefined;
         let sourceText = batch.text;
         let columnContext = batch.columnContext;
-        const cloudInput = cloudAvailable ? maskPersonalImportCloudBatch(text, batch) : null;
-        if (cloudAvailable && !cloudInput) {
+        const cloudInput =
+          cloudAvailable && !item.localOnly ? maskPersonalImportCloudBatch(text, batch) : null;
+        if (cloudAvailable && !item.localOnly && !cloudInput) {
           cloudAvailable = false;
           fallbackMessage = '這一段無法可靠對照原文並遮蔽個資，資料留在這台手機。';
         }
-        if (cloudAvailable && cloudInput) {
+        if (cloudAvailable && !item.localOnly && cloudInput) {
           mode = 'cloud';
           emit();
           const cloud = await requestPersonalImportCloud({
@@ -360,6 +368,7 @@ export async function runMobilePersonalImportAi(
             columnContext = cloud.columnContext;
           } else {
             cloudAvailable = false;
+            item.localOnly = true;
             fallbackMessage = `${cloud.message}`;
           }
         }
@@ -392,14 +401,16 @@ export async function runMobilePersonalImportAi(
           );
           if (outputTokens < 384) {
             if (retrySmaller('length')) continue;
-            addFailure(batch, '超過本機模型可處理的長度');
+            if (item.localOnly) applyRules(batch);
+            else addFailure(batch, '超過本機模型可處理的長度');
             continue;
           }
           timer = setTimeout(() => {
             if (settled) return;
             if (owned) localLLM.abort();
             fallbackMessage = '本機 AI 整理逾時。';
-            addFailure(batch, '整理逾時');
+            if (item.localOnly) applyRules(batch);
+            else addFailure(batch, '整理逾時');
             // Do not start another native operation until this completion settles.
             for (const remaining of work.slice(index + 1)) applyRules(remaining.batch);
             finish();
@@ -415,12 +426,14 @@ export async function runMobilePersonalImportAi(
             if (settled || signal.aborted) return;
             if (localLLM.getLoadedModelId() !== modelId) {
               localUnavailable = true;
-              addFailure(batch, '處理期間模型已變更');
+              if (item.localOnly) applyRules(batch);
+              else addFailure(batch, '處理期間模型已變更');
               continue;
             }
             if (result.finishReason !== 'stop') {
               if (retrySmaller('length')) continue;
-              addFailure(batch, '輸出未完成');
+              if (item.localOnly) applyRules(batch);
+              else addFailure(batch, '輸出未完成');
               continue;
             }
             output = result.content;
@@ -446,7 +459,12 @@ export async function runMobilePersonalImportAi(
           );
           if (audit.status === 'mismatch') {
             if (retrySmaller('coverage')) continue;
-            addFailure(batch, '核對時發現漏列或欄位錯配');
+            if (mode === 'cloud') {
+              item.localOnly = true;
+              fallbackMessage = '雲端回傳內容無法對照來源，改用本機整理。';
+              index--;
+            } else if (item.localOnly) applyRules(batch);
+            else addFailure(batch, '核對時發現漏列或欄位錯配');
             continue;
           }
           if (audit.status === 'matched') {
@@ -461,7 +479,12 @@ export async function runMobilePersonalImportAi(
           addRows(parsed, batch);
         } catch {
           if (retrySmaller('invalid')) continue;
-          addFailure(batch, '回傳格式或來源核對失敗');
+          if (mode === 'cloud') {
+            item.localOnly = true;
+            fallbackMessage = '雲端回傳格式或來源核對失敗，改用本機整理。';
+            index--;
+          } else if (item.localOnly) applyRules(batch);
+          else addFailure(batch, '回傳格式或來源核對失敗');
         }
       }
       finish();

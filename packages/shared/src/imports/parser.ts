@@ -1,3 +1,4 @@
+import { PERSONAL_IMPORT_TEACHER_FIELDS } from './nameFields';
 import {
   isPeriodProfileId,
   parsePeriodRange,
@@ -43,7 +44,7 @@ const aliases: Record<Field, string[]> = {
   academicYear: ['學年度', '學年', 'academicyear', 'year'],
   semester: ['學期', 'semester', 'term'],
   courseCode: ['課程代碼', '選課代碼', '科目代號', '科目代碼', '課號', 'coursecode', 'code'],
-  teacher: ['授課教師', '授課老師', '教師', '老師', '教授', 'teacher', 'instructor'],
+  teacher: PERSONAL_IMPORT_TEACHER_FIELDS,
   className: ['授課班級', '班級', '課班', 'classname', 'class', 'section'],
   location: ['上課地點', '活動地點', '教室', '地點', 'location', 'room'],
   dayOfWeek: ['星期', '上課日', '週次', 'weekday', 'day', 'dayofweek'],

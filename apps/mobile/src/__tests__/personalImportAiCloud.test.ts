@@ -163,10 +163,10 @@ test('small Qwen model reserves space for the prompt and caps output at 512 toke
   expect(localLLM.generate).toHaveBeenCalledWith(expect.objectContaining({ maxTokens: 512 }));
 });
 
-test('cloud isolates a malformed later segment and retries only its unfinished source range', async () => {
+test('cloud isolates a malformed later segment and recovers it locally', async () => {
   const source =
     '課程名稱,學分,成績\n' + Array.from({ length: 17 }, (_, index) => `課${index},3,85`).join('\n');
-  let failOne = true;
+  const failOne = true;
   const sent: string[] = [];
   mockFetch.mockImplementation(async (_url, init) => {
     const body = JSON.parse(init.body);
@@ -198,19 +198,11 @@ test('cloud isolates a malformed later segment and retries only its unfinished s
     new AbortController().signal,
     request,
   );
-  expect(result.rows).toHaveLength(16);
-  expect(result.rows.map((row) => row.title)).not.toContain('課8');
-  expect(result.retryBatches).toHaveLength(1);
-  expect(result.retryBatches![0].startLine).toBe(10);
+  expect(result.rows).toHaveLength(17);
+  expect(result.rows.map((row) => row.title)).toContain('課8');
+  expect(result.retryBatches ?? []).toHaveLength(0);
   expect(sent.filter((piece) => piece.includes('課0,'))).toHaveLength(1);
-  failOne = false;
-  const retried = await runMobilePersonalImportAi(source, options, new AbortController().signal, {
-    ...request,
-    retryBatches: result.retryBatches,
-  });
-  expect(retried.rows).toHaveLength(1);
-  expect(retried.rows[0]).toMatchObject({ title: '課8', source: { line: 10 } });
-  expect(localLLM.generate).not.toHaveBeenCalled();
+  expect(localLLM.generate).toHaveBeenCalled();
 });
 
 test('whole-document masking protects a vertical name before paragraph segmentation', async () => {
@@ -281,3 +273,40 @@ test.each([';', '；', '，', '、', '/'])('keeps unreliable private tables sepa
   }
   expect(mockFetch).not.toHaveBeenCalled();
 });
+
+test.each([
+  'not json',
+  JSON.stringify({ complete: true, rows: [] }),
+  JSON.stringify({ complete: true, rows: [{ title: '資料庫', credits: 3, grade: '85', evidence: '不存在的來源' }] }),
+])(
+  'invalid cloud output %s falls back to local and then rules', async (invalid) => {
+    const source = '課程名稱,學分,成績\n資料庫,3,85';
+    jest.mocked(localLLM.generate).mockResolvedValue({
+      content: JSON.stringify({ complete: true, rows: [{ title: '資料庫', credits: 3, grade: '85', evidence: '資料庫,3,85' }] }),
+      finishReason: 'stop', tokensGenerated: 50, tokensPerSecond: 5, totalTimeMs: 100,
+    });
+    mockFetch.mockResolvedValue(response(200, { output: invalid, sourceText: source, columnContext: '' }));
+    const local = await runMobilePersonalImportAi(source, options, new AbortController().signal, request);
+    expect(localLLM.generate).toHaveBeenCalledTimes(1);
+    expect(local.rows[0]).toMatchObject({ title: '資料庫', grade: '85' });
+    jest.mocked(localLLM.generate).mockResolvedValue({
+      content: invalid, finishReason: 'stop', tokensGenerated: 5, tokensPerSecond: 5, totalTimeMs: 100,
+    });
+    const rules = await runMobilePersonalImportAi(source, options, new AbortController().signal, request);
+    expect(localLLM.generate).toHaveBeenCalledTimes(2);
+    expect(rules.rows[0]).toMatchObject({ title: '資料庫', grade: '85' });
+    expect(rules.retryBatches ?? []).toHaveLength(0);
+  },
+);
+
+test.each(['授課老師', '教授', 'instructor', '教師姓名', 'teacher_name'])(
+  'request body masks names under %s', async (label) => {
+    jest.mocked(localLLM.getRuntimeAvailability).mockReturnValue({ available: false });
+    mockFetch.mockResolvedValue(response(503, { code: 'disabled' }));
+    const source = `課程名稱,${label},學分,成績\n資料庫,王小明,3,85`;
+    const result = await runMobilePersonalImportAi(source, options, new AbortController().signal, request);
+    expect(mockFetch).toHaveBeenCalledTimes(1);
+    expect(mockFetch.mock.calls[0][1].body).not.toContain('王小明');
+    expect(result.rows).toHaveLength(1);
+  },
+);
