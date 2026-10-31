@@ -17,7 +17,7 @@ export type AcademicSnapshot<K extends AcademicKind> = {
   fetchedAt: string;
   records: AcademicData[K];
 };
-
+class AcademicResponseError extends Error {}
 export class AcademicConnectionError extends Error {
   constructor(
     public readonly reason: 'reconnect' | 'unavailable' | 'permission' | 'unconfigured' | 'connecting',
@@ -25,6 +25,11 @@ export class AcademicConnectionError extends Error {
   ) {
     super(reason, cause === undefined ? undefined : { cause });
     this.name = 'AcademicConnectionError';
+  }
+
+  /** 僅暫時連線失敗可保留有時間標記的前次資料；來源驗證失敗不沿用。 */
+  get canRetainSnapshot(): boolean {
+    return this.reason === 'unavailable' && !(this.cause instanceof AcademicResponseError);
   }
 }
 
@@ -36,7 +41,7 @@ function callableDetailCode(error: unknown): string {
   return typeof code === 'string' ? code : '';
 }
 
-async function readAcademicResponse(kind: AcademicKind, uid: string): Promise<unknown> {
+async function readAcademicResponse(kind: AcademicKind, uid: string, parentSignal?: AbortSignal): Promise<unknown> {
   const user = getAuth()?.currentUser;
   if (!user || user.uid !== uid) throw new AcademicConnectionError('reconnect');
   return withSchoolDataDeadline(async (signal) => {
@@ -51,11 +56,22 @@ async function readAcademicResponse(kind: AcademicKind, uid: string): Promise<un
       cache: 'no-store',
       signal,
     });
-    const payload: unknown = await response.json();
+    if (getAuth()?.currentUser !== user) throw new AcademicConnectionError('reconnect');
+    // 校方或代理服務可能以 HTML 回覆拒絕；不能因 JSON 解析失敗而沿用私有資料。
+    if (response.status === 401) throw new AcademicConnectionError('reconnect');
+    if (response.status === 403) throw new AcademicConnectionError('permission');
+    let payload: unknown;
+    try {
+      payload = await response.json();
+    } catch (error) {
+      if (signal.aborted) throw error;
+      if (!response.ok) throw new AcademicConnectionError('unavailable', error);
+      throw new AcademicResponseError('Invalid academic response');
+    }
     if (getAuth()?.currentUser !== user) throw new AcademicConnectionError('reconnect');
     if (signal.aborted) throw new AcademicConnectionError('unavailable');
     if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
-      throw new Error('Invalid academic response');
+      throw new AcademicResponseError('Invalid academic response');
     }
     const envelope = payload as Record<string, unknown>;
     if (!response.ok || envelope.error) {
@@ -68,10 +84,10 @@ async function readAcademicResponse(kind: AcademicKind, uid: string): Promise<un
       if (callableDetailCode(details) === LMS_CONNECTING_CODE) {
         throw new AcademicConnectionError('connecting', cause);
       }
-      if (status === 'UNAUTHENTICATED' || status === 'FAILED_PRECONDITION' || response.status === 401) {
+      if (status === 'UNAUTHENTICATED' || status === 'FAILED_PRECONDITION') {
         throw new AcademicConnectionError('reconnect', cause);
       }
-      if (status === 'PERMISSION_DENIED' || response.status === 403) {
+      if (status === 'PERMISSION_DENIED') {
         throw new AcademicConnectionError('permission', cause);
       }
       if (/尚未啟用|未設定/.test(message)) {
@@ -80,7 +96,7 @@ async function readAcademicResponse(kind: AcademicKind, uid: string): Promise<un
       throw new AcademicConnectionError('unavailable', cause);
     }
     return envelope.result ?? envelope.data;
-  });
+  }, parentSignal);
 }
 
 /**
@@ -92,16 +108,17 @@ export async function loadAcademicRecords<K extends AcademicKind>(
   kind: K,
   uid: string,
   expectedSchool: string = 'pu',
+  options: { signal?: AbortSignal } = {},
 ): Promise<AcademicSnapshot<K>> {
   if (!isOfficialAcademicSchool(expectedSchool)) {
-    throw new AcademicConnectionError('unavailable');
+    throw new AcademicConnectionError('unavailable', new AcademicResponseError('Invalid school scope'));
   }
   if (!uid || !isFirebaseConfigured() || getAuth()?.currentUser?.uid !== uid) {
-    throw new AcademicConnectionError('unavailable');
+    throw new AcademicConnectionError('unavailable', new AcademicResponseError('Account not ready'));
   }
   try {
-    const data = await readAcademicResponse(kind, uid);
-    if (!data || typeof data !== 'object') throw new Error('Invalid academic response');
+    const data = await readAcademicResponse(kind, uid, options.signal);
+    if (!data || typeof data !== 'object' || Array.isArray(data)) throw new AcademicResponseError('Invalid academic response');
     const row = data as Record<string, unknown>;
     if (
       row.success !== true ||
@@ -113,10 +130,14 @@ export async function loadAcademicRecords<K extends AcademicKind>(
       typeof row.fetchedAt !== 'string' ||
       !Number.isFinite(Date.parse(row.fetchedAt))
     ) {
-      throw new Error('Academic response does not match the current account');
+      throw new AcademicResponseError('Academic response does not match the current account');
     }
-    const records =
-      kind === 'courses' ? normalizeCourseRecords(row.result) : normalizeGradeRecords(row.result);
+    let records: AcademicData[AcademicKind];
+    try {
+      records = kind === 'courses' ? normalizeCourseRecords(row.result) : normalizeGradeRecords(row.result);
+    } catch {
+      throw new AcademicResponseError('Invalid academic records');
+    }
     return {
       ownerUid: uid,
       schoolId: expectedSchool,

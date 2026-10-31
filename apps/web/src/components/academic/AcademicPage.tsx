@@ -76,7 +76,9 @@ function RecordContent<K extends AcademicKind>({
       </div>
     );
   }
-  if (state.status === 'error' || !state.snapshot) {
+  const retained = !!state.snapshot && state.stale === true &&
+    (state.reason === undefined || state.reason === 'unavailable');
+  if ((state.status === 'error' && !retained) || !state.snapshot) {
     const reconnect = state.reason === 'reconnect';
     const permission = state.reason === 'permission';
     const unconfigured = state.reason === 'unconfigured';
@@ -163,7 +165,7 @@ function RecordContent<K extends AcademicKind>({
           <div className={styles.sourceTitle}>
             <h2>{count ? range : gradeRecords ? '這次未取得成績明細' : '這次未取得課程明細'}</h2>
             <span className={styles.sourceBadge}>
-              {state.refreshing ? '更新中' : gradeRecords?.coverage?.status === 'partial' ? '部分讀取' : count ? '已讀取' : '待確認'}
+              {state.refreshing ? '更新中' : retained ? '前次資料' : gradeRecords?.coverage?.status === 'partial' ? '部分讀取' : count ? '已讀取' : '待確認'}
             </span>
           </div>
           <p>
@@ -180,9 +182,16 @@ function RecordContent<K extends AcademicKind>({
           {gradeRecords && <p>顯示本次取得的成績範圍；課堂作業與教材請至 <a href="https://tronclass.pu.edu.tw/" target="_blank" rel="noopener noreferrer">WOW Class ↗</a>。</p>}
         </div>
         <button className="btn" disabled={state.refreshing} onClick={() => void refresh()}>
-          {state.refreshing ? '更新中…' : '更新資料'}
+          {state.refreshing ? '更新中…' : retained ? '重新讀取' : '更新資料'}
         </button>
       </section>
+      {retained && <p className={styles.warning} role={state.refreshing ? 'status' : 'alert'}>
+        {state.refreshing
+          ? '正在重試更新；下方仍是上次成功讀取的資料，讀取時間尚未更新。'
+          : '這次更新未完成。下方保留上次成功讀取的資料與原讀取時間，不代表目前的最新結果。'}
+        {' '}可繼續查看或調整篩選，請重新讀取或至{' '}
+        <a href={OFFICIAL_ACADEMIC_PORTAL_URL} target="_blank" rel="noopener noreferrer">e 校園核對 ↗</a>。
+      </p>}
       {gradeRecords?.coverage?.status === 'partial' && <p className={styles.warning} role="status">
         有 {gradeRecords.coverage.skippedRows} 筆來源資料的學期或學分尚無法確認，未納入下方明細與合計。已辨識的成績仍可查看，請至 e 校園核對缺漏。
       </p>}

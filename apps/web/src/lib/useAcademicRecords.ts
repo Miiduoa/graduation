@@ -21,6 +21,8 @@ export type AcademicRecordState<K extends AcademicKind> = {
   status: 'loading' | 'ready' | 'error';
   snapshot?: AcademicSnapshot<K>;
   refreshing?: boolean;
+  /** 僅供閱讀的前次資料；不是本次更新成功，也不推進差異比對。 */
+  stale?: boolean;
   reason?: 'reconnect' | 'unavailable' | 'permission' | 'unconfigured' | 'connecting';
   error?: unknown;
 };
@@ -46,6 +48,10 @@ export function useAcademicRecords<K extends AcademicKind>(
   useEffect(() => {
     if (!enabled || !supported || !uid || authLoading) return;
     let current = true;
+    let pendingRead: AbortController | null = null;
+    // 快照只屬於這一次帳號／校園／驗證生命週期，不從 React 舊狀態復原。
+    let lastVerified: AcademicSnapshot<K> | undefined;
+    let stale = false;
     const value = createAcademicRefreshController({
       environment: browserAcademicRefreshEnvironment(),
       onStatus(status) {
@@ -53,24 +59,33 @@ export function useAcademicRecords<K extends AcademicKind>(
       },
       async read() {
         if (!current) return 'unavailable';
-        setState((previous) =>
-          previous?.scope === scope && previous.status === 'ready' && previous.snapshot
-            ? { ...previous, refreshing: true }
-            : { scope, status: 'loading' },
-        );
+        const request = new AbortController();
+        pendingRead = request;
+        setState(lastVerified
+          ? { scope, status: 'ready', snapshot: lastVerified, refreshing: true, stale }
+          : { scope, status: 'loading' });
         try {
-          const snapshot = await loadAcademicRecords(kind, uid, expectedSchool);
+          const snapshot = await loadAcademicRecords(kind, uid, expectedSchool, { signal: request.signal });
+          if (!current || request.signal.aborted) return 'unavailable';
           if (snapshot.ownerUid !== uid || snapshot.schoolId !== expectedSchool) {
-            throw new AcademicConnectionError('unavailable');
+            // 來源不符不是暫時網路失敗，不得保留前次私有資料。
+            throw new Error('Academic snapshot scope mismatch');
           }
-          if (current) setState({ scope, status: 'ready', snapshot, refreshing: false });
+          lastVerified = snapshot;
+          stale = false;
+          setState({ scope, status: 'ready', snapshot, refreshing: false });
           return 'ready';
         } catch (error) {
+          if (!current || request.signal.aborted) return 'unavailable';
           const reason = error instanceof AcademicConnectionError ? error.reason : 'unavailable';
-          // 更新失敗時不推進時間戳，也不把舊資料當成新的成功結果。
-          // 終止性錯誤會停止輪詢。
-          if (current) setState({ scope, status: 'error', reason, error });
+          const retain = error instanceof AcademicConnectionError && error.canRetainSnapshot;
+          if (!retain) lastVerified = undefined;
+          stale = !!lastVerified;
+          // 不更新來源時間；只有明確的暫時連線失敗可保留可閱讀的舊快照。
+          setState({ scope, status: 'error', reason, error, snapshot: lastVerified, stale });
           return reason;
+        } finally {
+          if (pendingRead === request) pendingRead = null;
         }
       },
     });
@@ -78,6 +93,9 @@ export function useAcademicRecords<K extends AcademicKind>(
     void value.refresh();
     return () => {
       current = false;
+      pendingRead?.abort();
+      pendingRead = null;
+      lastVerified = undefined;
       value.dispose();
       if (controller.current?.value === value) controller.current = null;
     };

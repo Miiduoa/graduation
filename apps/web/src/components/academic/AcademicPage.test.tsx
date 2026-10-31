@@ -222,20 +222,22 @@ it('preserves unknown grades and a real zero without manufacturing GPA or rank',
   expect(screen.getByText('—')).toBeTruthy();
   expect(screen.getByText(/來源：靜宜大學 e 校園/)).toBeTruthy();
   await waitFor(() =>
-    expect(loadAcademicRecords).toHaveBeenCalledWith('grades', 'one', 'pu'),
+    expect(loadAcademicRecords).toHaveBeenCalledWith('grades', 'one', 'pu', { signal: expect.any(AbortSignal) }),
   );
 });
-it('shows failure and retries without falling back to demo or previously loaded grades', async () => {
+it('labels previous grades after a transient failure and clears the warning only after retry succeeds', async () => {
   render(<GradesPage />);
   await screen.findByText('真實來源科目');
   vi.mocked(loadAcademicRecords).mockRejectedValueOnce(new AcademicConnectionError('unavailable'));
   fireEvent.click(screen.getByRole('button', { name: '更新資料' }));
-  expect(await screen.findByRole('heading', { name: '暫時無法讀取學校成績' })).toBeTruthy();
-  expect(screen.getByText(/暫時讀不到資料，請稍後再試/)).toBeTruthy();
+  expect(await screen.findByText('前次資料')).toBeTruthy();
+  expect(screen.getByRole('alert').textContent).toContain('原讀取時間');
   expect(screen.queryByText(/請確認網路後再試/)).toBeNull();
-  expect(screen.queryByText('真實來源科目')).toBeNull();
+  expect(screen.getByText('真實來源科目')).toBeTruthy();
+  expect(screen.queryByRole('region', { name: '校務更新差異' })).toBeNull();
   fireEvent.click(screen.getByRole('button', { name: '重新讀取' }));
-  await screen.findByText('真實來源科目');
+  await waitFor(() => expect(screen.queryByRole('alert')).toBeNull());
+  expect(screen.getByText('真實來源科目')).toBeTruthy();
 });
 
 it('shows that the school reader is disabled without exposing infrastructure details', async () => {
@@ -328,8 +330,13 @@ it('clears private records synchronously when signing out', async () => {
   account.studentId = false;
   view.rerender(<GradesPage />);
   expect(screen.queryByText('真實來源科目')).toBeNull();
-  expect(screen.getByRole('heading', { name: '這個功能還沒接通' })).toBeTruthy();
+  expect(screen.queryByText('前期科目')).toBeNull();
+  expect(screen.queryByRole('region', { name: '學校資料讀取結果' })).toBeNull();
+  expect(screen.queryByLabelText('搜尋科目')).toBeNull();
+  expect(screen.queryByRole('button', { name: '更新資料' })).toBeNull();
   expect(screen.getByText('成績請先到學校的 e 校園查看。')).toBeTruthy();
+  expect(screen.getByRole('region', { name: '自行匯入的資料' })).toBeTruthy();
+  expect(loadAcademicRecords).toHaveBeenCalledTimes(1);
   expect(screen.queryByRole('link', { name: /學校帳號/ })).toBeNull();
 });
 it('ignores an old account response even after logging out and back into the same UID', async () => {
@@ -344,7 +351,7 @@ it('ignores an old account response even after logging out and back into the sam
   // 控制器會在 microtask 才開始讀取。先讓舊的進行中請求成立，再登出；
   // 若在開始前就釋放，請求會整筆取消。
   await waitFor(() => expect(loadAcademicRecords).toHaveBeenCalledTimes(1));
-  expect(loadAcademicRecords).toHaveBeenLastCalledWith('grades', 'one', 'pu');
+  expect(loadAcademicRecords).toHaveBeenLastCalledWith('grades', 'one', 'pu', { signal: expect.any(AbortSignal) });
   account.user = null;
   view.rerender(<GradesPage />);
   account.user = { uid: 'one' };
@@ -363,7 +370,7 @@ it('removes the previous account transcript before loading the next account', as
   view.rerender(<GradesPage />);
   expect(screen.queryByText('真實來源科目')).toBeNull();
   await waitFor(() =>
-    expect(loadAcademicRecords).toHaveBeenLastCalledWith('grades', 'two', 'pu'),
+    expect(loadAcademicRecords).toHaveBeenLastCalledWith('grades', 'two', 'pu', { signal: expect.any(AbortSignal) }),
   );
 });
 it('offers reconnection without pretending an expired session has an empty transcript', async () => {
@@ -382,8 +389,12 @@ it('does not open a school login form when student ID is unavailable', async () 
   account.studentId = false;
   vi.mocked(loadAcademicRecords).mockRejectedValue(new AcademicConnectionError('reconnect'));
   render(<GradesPage />);
-  expect(await screen.findByRole('heading', { name: '這個功能還沒接通' })).toBeTruthy();
-  expect(screen.getByText('成績請先到學校的 e 校園查看。')).toBeTruthy();
+  expect(await screen.findByText('成績請先到學校的 e 校園查看。')).toBeTruthy();
+  expect(screen.queryByRole('region', { name: '學校資料讀取結果' })).toBeNull();
+  expect(screen.queryByLabelText('搜尋科目')).toBeNull();
+  expect(screen.queryByRole('button', { name: '更新資料' })).toBeNull();
+  expect(screen.getByRole('region', { name: '自行匯入的資料' })).toBeTruthy();
+  expect(loadAcademicRecords).toHaveBeenCalledTimes(1);
   expect(screen.queryByRole('link', { name: /學校帳號/ })).toBeNull();
 });
 it('keeps weekend and unrecognized school courses as drafts until confirm', async () => {
@@ -424,7 +435,9 @@ it('keeps weekend and unrecognized school courses as drafts until confirm', asyn
   });
   render(<TimetablePage />);
   expect(await screen.findByRole('heading', { name: '匯入課表' })).toBeTruthy();
-  await waitFor(() => expect(loadAcademicRecords).toHaveBeenCalledWith('courses', 'one', 'pu'));
+  await waitFor(() => expect(loadAcademicRecords).toHaveBeenCalledWith(
+    'courses', 'one', 'pu', expect.objectContaining({ signal: expect.any(AbortSignal) }),
+  ));
   fireEvent.click(screen.getByRole('button', { name: '從學校課表帶入' }));
   expect(screen.getByText('課表尚未被修改，按確認匯入後才會套用')).toBeTruthy();
   expect(screen.getByText('週末課')).toBeTruthy();

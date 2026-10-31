@@ -617,7 +617,7 @@ async function tcFetchCourses(cookies, { userId, status = 'ongoing' } = {}) {
 
     const conditions = JSON.stringify({ status: [status === 'upcoming' ? 'notStarted' : status] });
     const fields =
-      'id,name,course_code,department(id,name),teachers(id,name,avatar_url),cover_image_url,student_count,status,role';
+      'id,name,course_code,semester,department(id,name),teachers(id,name,avatar_url),cover_image_url,student_count,status,role';
     items = await tcFetchCoursePages(async (page, pageSize) => {
       const query = new URLSearchParams({ conditions, fields, page: String(page), page_size: String(pageSize) });
       return tcFetchJson(`${TC_BASE}/api/users/${resolvedUserId}/courses?${query}`, cookies, courseRequestLimits(deadline));
@@ -644,20 +644,32 @@ async function tcFetchCoursePages(fetchPage) {
   const seen = new Set();
   const pageSize = 50;
   const maxPages = 20;
+  let declaredPages = null;
   for (let page = 1; page <= maxPages; page += 1) {
     const data = await fetchPage(page, pageSize);
     if (!data || typeof data !== 'object' || !Array.isArray(data.courses)) {
       throw invalidCourseResponse('TronClass course response has no course list');
     }
     const courses = data.courses;
-    const pageCount = data.paging?.pages ?? data.pages;
-    const totalPages = pageCount === undefined || pageCount === null ? null : Number(pageCount);
-    if (totalPages !== null && (!Number.isSafeInteger(totalPages) || totalPages < 0 || totalPages > maxPages ||
-      (typeof pageCount !== 'number' && (typeof pageCount !== 'string' || !/^\d+$/.test(pageCount))))) {
-      throw invalidCourseResponse('TronClass course pagination is invalid or exceeds its limit');
+    // 一旦來源宣告總頁數，後續缺少欄位也不能提前結束。
+    // 若總頁數變動，可能正好遇到加退選；整次重讀比回傳混合清單可靠。
+    for (const pageCount of [data.paging?.pages, data.pages]) {
+      if (pageCount === undefined || pageCount === null) continue;
+      const totalPages = Number(pageCount);
+      if (!Number.isSafeInteger(totalPages) || totalPages < 0 || totalPages > maxPages ||
+        (typeof pageCount !== 'number' && (typeof pageCount !== 'string' || !/^\d+$/.test(pageCount)))) {
+        throw invalidCourseResponse('TronClass course pagination is invalid or exceeds its limit');
+      }
+      if (declaredPages !== null && declaredPages !== totalPages) {
+        throw invalidCourseResponse('TronClass course pagination changed during the read');
+      }
+      declaredPages = totalPages;
     }
-    if (courses.length > pageSize || (courses.length === 0 && totalPages !== null && totalPages > page) ||
-      (courses.length > 0 && totalPages === 0)) {
+    if (courses.length > pageSize ||
+      (declaredPages !== null && page > Math.max(1, declaredPages)) ||
+      (courses.length === 0 && declaredPages !== null && declaredPages > 0 &&
+        (page > 1 || declaredPages > 1)) ||
+      (courses.length > 0 && declaredPages === 0)) {
       throw invalidCourseResponse('TronClass course page is incomplete or oversized');
     }
     for (const course of courses) {
@@ -671,7 +683,7 @@ async function tcFetchCoursePages(fetchPage) {
       seen.add(id);
       allCourses.push(course);
     }
-    if (totalPages !== null ? page >= Math.max(1, totalPages) : courses.length < pageSize) return allCourses;
+    if (declaredPages !== null ? page >= Math.max(1, declaredPages) : courses.length < pageSize) return allCourses;
   }
   throw invalidCourseResponse('TronClass course pagination exceeded its limit');
 }

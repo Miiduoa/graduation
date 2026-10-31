@@ -6,22 +6,24 @@ import { AcademicConnectionError, loadAcademicRecords } from '@/lib/academicClie
 import { formatSemester } from '@/lib/academicRecords';
 import {
   reconcileSchoolCourses, schoolCourseHref,
-  type CourseMatchState, type SchoolCourseComparison,
+  type CourseMatchState, type AcademicComparisonSnapshot,
 } from '@/lib/schoolCourseReconciliation';
 import type { SchoolLmsSnapshot } from '@/lib/tronClassCourses';
 import styles from './schoolCourseReconciliation.module.css';
+
+export type SchoolLmsReadStatus = 'loading' | 'refreshing' | 'ready' | 'unavailable';
 
 type Props = {
   uid: string;
   schoolId: 'pu';
   lms: SchoolLmsSnapshot | null;
+  lmsStatus?: SchoolLmsReadStatus;
   returnUrl: string;
   canReconnect: boolean;
 };
 type ReadState = {
-  source: SchoolLmsSnapshot | null;
-  status: 'loading' | 'ready' | 'error';
-  comparison?: SchoolCourseComparison;
+  status: 'loading' | 'ready' | 'error' | 'cancelled';
+  academic?: AcademicComparisonSnapshot;
   error?: unknown;
 };
 const MATCH_LABELS: Record<CourseMatchState, string> = {
@@ -35,23 +37,15 @@ const MATCH_LABELS: Record<CourseMatchState, string> = {
 const PAGE_SIZE = 12;
 function readTime(value: string) {
   return new Date(value).toLocaleString('zh-TW', {
-    timeZone: 'Asia/Taipei', month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit',
+    timeZone: 'Asia/Taipei', year: 'numeric', month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit',
   });
 }
 
 export function SchoolCourseReconciliation(props: Props) {
-  const [identity, setIdentity] = useState(() => ({
-    uid: props.uid, schoolId: props.schoolId, source: props.lms, revision: 0,
-  }));
-  // 新來源即建立新工作區；即使時間戳相同或切回舊來源，也不復用先前結果。
-  if (identity.uid !== props.uid || identity.schoolId !== props.schoolId || identity.source !== props.lms) {
-    setIdentity({ uid: props.uid, schoolId: props.schoolId, source: props.lms, revision: identity.revision + 1 });
-    return null;
-  }
-  return <ReconciliationWorkspace key={identity.revision} {...props} />;
+  return <ReconciliationWorkspace key={`${props.uid}:${props.schoolId}`} {...props} />;
 }
 
-function ReconciliationWorkspace({ uid, schoolId, lms, returnUrl, canReconnect }: Props) {
+function ReconciliationWorkspace({ uid, schoolId, lms, lmsStatus = lms ? 'ready' : 'unavailable', returnUrl, canReconnect }: Props) {
   const [state, setState] = useState<ReadState | null>(null);
   const [search, setSearch] = useState('');
   const [onlyReview, setOnlyReview] = useState(false);
@@ -60,20 +54,47 @@ function ReconciliationWorkspace({ uid, schoolId, lms, returnUrl, canReconnect }
   const generation = useRef(0);
   const busy = useRef(false);
   const lifetime = useRef<AbortController | null>(null);
-  // 每次已提交的來源都有獨立生命週期；切回相同物件也不能復活舊請求。
-  // signal 只控制結果是否可採用，不宣稱取消已送出的校務 HTTP 請求。
+  const pending = useRef<AbortController | null>(null);
+  const readButton = useRef<HTMLButtonElement | null>(null);
+  // 校務讀取只屬於目前帳號與校園，不受 LMS 分頁、狀態或更新影響。
+  // 中止瀏覽器等待與傳輸，不宣稱撤回伺服器已收到的學校請求。
   useLayoutEffect(() => {
     const controller = new AbortController();
     lifetime.current = controller;
     return () => {
       controller.abort();
+      pending.current?.abort();
+      pending.current = null;
       generation.current += 1;
       busy.current = false;
       if (lifetime.current === controller) lifetime.current = null;
     };
-  }, [uid, schoolId, lms]);
-  const visible = state?.source === lms ? state : null;
-  const comparison = visible?.status === 'ready' ? visible.comparison : undefined;
+  }, [uid, schoolId]);
+  useLayoutEffect(() => {
+    if (state?.status === 'cancelled') readButton.current?.focus();
+  }, [state?.status]);
+  const visible = state;
+  const retained = !!state?.academic && state.status !== 'ready';
+  // 前次資料可閱讀，但更新、取消或失敗期間不拿它產生新的課堂配對。
+  const projection = useMemo(() => {
+    if (!state?.academic) return null;
+    const academicOnly = reconcileSchoolCourses(state.academic, null, { uid, schoolId });
+    if (state.status !== 'ready' || lmsStatus !== 'ready' || !lms) {
+      return { comparison: academicOnly, invalidLms: false };
+    }
+    try {
+      return { comparison: reconcileSchoolCourses(state.academic, lms, { uid, schoolId }), invalidLms: false };
+    } catch {
+      return { comparison: academicOnly, invalidLms: true };
+    }
+  }, [state, lms, lmsStatus, uid, schoolId]);
+  const comparison = projection?.comparison;
+  const pendingLms = lmsStatus === 'loading' || lmsStatus === 'refreshing';
+  const lmsNotice = projection?.invalidLms ? 'WOW Class 資料無法核對，已保留校方課表。'
+    : lmsStatus === 'loading' ? 'WOW Class 正在讀取，校方課表可先核對。'
+    : lmsStatus === 'refreshing' ? 'WOW Class 正在更新，校方課表保留，課堂連結待更新完成再核對。'
+    : lmsStatus !== 'ready' || !lms ? 'WOW Class 暫時未連線，仍可先讀取 e 校園的選課學分與上課地點。'
+    : '讀取本人的 e 校園課表，對照目前這份 WOW Class 清單。';
   const query = search.normalize('NFKC').trim().toLocaleLowerCase();
   const rows = useMemo(() => comparison?.rows.filter((row) =>
     (!onlyReview || row.match !== 'matched') && (!query ||
@@ -85,20 +106,37 @@ function ReconciliationWorkspace({ uid, schoolId, lms, returnUrl, canReconnect }
     const controller = lifetime.current;
     if (!controller || controller.signal.aborted || busy.current) return;
     busy.current = true;
+    const readController = new AbortController();
+    pending.current = readController;
     const request = ++generation.current;
-    const active = () => !controller.signal.aborted && request === generation.current;
-    setState({ source: lms, status: 'loading' });
+    const active = () => !controller.signal.aborted && !readController.signal.aborted && request === generation.current;
+    const previous = state?.academic;
+    setState({ status: 'loading', academic: previous });
     try {
-      const academic = await loadAcademicRecords('courses', uid, schoolId);
+      const academic = await loadAcademicRecords('courses', uid, schoolId, { signal: readController.signal });
       if (!active()) return;
-      const result = reconcileSchoolCourses(academic, lms, { uid, schoolId });
-      setSearch(''); setOnlyReview(false); setLimit(PAGE_SIZE); setLmsLimit(PAGE_SIZE);
-      setState({ source: lms, status: 'ready', comparison: result });
+      reconcileSchoolCourses(academic, null, { uid, schoolId });
+      setState({ status: 'ready', academic });
     } catch (error: unknown) {
-      if (active()) setState({ source: lms, status: 'error', error });
+      if (active()) setState({
+        status: 'error', error,
+        academic: error instanceof AcademicConnectionError && error.canRetainSnapshot ? previous : undefined,
+      });
     } finally {
-      if (active()) busy.current = false;
+      if (active()) {
+        busy.current = false;
+        pending.current = null;
+      }
     }
+  }
+
+  function cancelRead() {
+    if (!busy.current) return;
+    generation.current += 1;
+    pending.current?.abort();
+    pending.current = null;
+    busy.current = false;
+    setState((previous) => ({ status: 'cancelled', academic: previous?.academic }));
   }
 
   const needsLogin = visible?.error instanceof AcademicConnectionError &&
@@ -109,29 +147,39 @@ function ReconciliationWorkspace({ uid, schoolId, lms, returnUrl, canReconnect }
         <div>
           <p className={styles.eyebrow}>選課與課堂，分開核對</p>
           <h2>學分、上課地點與課堂入口</h2>
-          <p className={styles.description}>{lms ? '讀取本人的 e 校園課表，對照目前這份 WOW Class 清單。' : 'WOW Class 暫時未連線，仍可先讀取 e 校園的選課學分與上課地點。'}不更動選課，也不計算畢業採計學分。</p>
+          <p className={styles.description}>{lmsNotice}不更動選課，也不計算畢業採計學分。</p>
         </div>
-        <button type="button" className="btn" disabled={visible?.status === 'loading'} onClick={() => void compare()}>
-          {visible?.status === 'loading' ? '正在核對…' : comparison ? '重新核對校方課表' : '核對校方課表'}
-        </button>
+        <div className={styles.actions}>
+          <button ref={readButton} type="button" className="btn" disabled={visible?.status === 'loading'} onClick={() => void compare()}>
+            {visible?.status === 'loading' ? '正在核對…' : comparison ? '重新核對校方課表' : '核對校方課表'}
+          </button>
+          {visible?.status === 'loading' ? <button type="button" className="btn" onClick={cancelRead}>取消讀取</button> : null}
+        </div>
       </header>
-      {visible?.status === 'loading' ? <p className={styles.message} role="status">正在讀取 e 校園的選課學分與上課地點…</p> : null}
+      {visible?.status === 'loading' ? <p className={styles.message} role="status">{retained
+        ? '正在更新 e 校園課表；下方保留前次資料，更新完成前暫不對照課堂。'
+        : '正在讀取 e 校園的選課學分與上課地點…'}</p> : null}
+      {visible?.status === 'cancelled' ? <p className={styles.message} role="status">{retained
+        ? '已取消這次讀取；下方仍是前次資料，尚未更新或重新對照。'
+        : '已取消這次讀取，尚未取得校方課表。可以重新核對。'}</p> : null}
       {visible?.status === 'error' ? <div className={styles.message} role="alert">
-        <h3>{needsLogin ? 'e 校園需要重新連線' : '校方課表暫時無法核對'}</h3>
+        <h3>{needsLogin ? 'e 校園需要重新連線' : retained ? '校方課表更新未完成' : '校方課表暫時無法核對'}</h3>
         <p>{needsLogin ? '正式選課資料需要有效的 e 校園連線；你可以重新連線，或先前往校方網站核對。'
+          : retained ? '目前顯示前次讀取資料，時間沒有更新，也未重新對照課堂。請重試或前往 e 校園確認。'
           : '校方課表尚未取得，不會顯示為零學分。請稍後重試，或前往校方網站核對。'}</p>
         <div className={styles.actions}>
           {needsLogin && canReconnect ? <Link className="btn" href={`/login?reconnect=school&returnUrl=${encodeURIComponent(returnUrl)}`}>重新連線 e 校園</Link> : null}
           <a className="btn" href="https://alcat.pu.edu.tw/" target="_blank" rel="noopener noreferrer">前往 e 校園 ↗</a>
         </div>
       </div> : null}
+      {projection?.invalidLms ? <p className={styles.message} role="alert">課堂來源與目前帳號或資料格式不符，未採用這份 WOW Class 清單。</p> : null}
       {comparison ? <>
         <div className={styles.summary}>
           <div><span>校方選課學期</span><strong>{formatSemester(comparison.semester)}</strong></div>
-          <div><span>校方選課學分小計</span><strong>{comparison.sourceTotalCredits === null ? '校方未提供' : `${comparison.sourceTotalCredits} 學分`}</strong></div>
-          <div><span>已對上課堂</span><strong>{comparison.lmsAvailable ? `${comparison.matchedCount} / ${comparison.rows.length} 門` : '尚未對照'}</strong></div>
+          <div><span>{retained ? '前次校方選課學分小計' : '校方選課學分小計'}</span><strong>{comparison.sourceTotalCredits === null ? '校方未提供' : `${comparison.sourceTotalCredits} 學分`}</strong></div>
+          <div><span>已對上課堂</span><strong>{retained ? '等待重新核對' : comparison.lmsAvailable ? `${comparison.matchedCount} / ${comparison.rows.length} 門` : pendingLms ? '等待課堂資料' : '尚未對照'}</strong></div>
         </div>
-        <p className={styles.source}>e 校園：{readTime(comparison.academicFetchedAt)} 讀取；WOW Class：{comparison.lmsFetchedAt ? `${readTime(comparison.lmsFetchedAt)} 讀取` : '未取得，未進行對照'}。</p>
+        <p className={styles.source}>e 校園：{readTime(comparison.academicFetchedAt)} 讀取；WOW Class：{retained ? '校方課表待更新，未進行對照' : comparison.lmsFetchedAt ? `${readTime(comparison.lmsFetchedAt)} 讀取` : pendingLms ? '讀取中，未進行對照' : '未取得，未進行對照'}。</p>
         <p className={styles.source}>依同學期與完整課號核對，不猜同名課程；未對上可能只是課程狀態不同，並不代表未選課。</p>
         {comparison.rows.length ? <>
           <div className={styles.filters}>
@@ -156,7 +204,7 @@ function ReconciliationWorkspace({ uid, schoolId, lms, returnUrl, canReconnect }
               </dl>
               {row.scheduleIncomplete ? <p className={styles.source}>上課時間尚未完整辨識；以上保留原始內容，不據此推算空堂。</p> : null}
               <footer className={styles.rowFooter}>
-                <span>{MATCH_LABELS[row.match]}</span>
+                <span>{retained ? '校方課表尚未更新，暫不對照課堂' : row.match === 'lms-unavailable' && pendingLms ? '等待 WOW Class 資料，校方選課仍可查看' : MATCH_LABELS[row.match]}</span>
                 {row.lms ? <a href={row.lms.href} target="_blank" rel="noopener noreferrer" aria-label={`前往 ${row.name} 的對應課堂`}>開啟 WOW Class 課堂 ↗</a> : null}
               </footer>
             </li>)}

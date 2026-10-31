@@ -54,12 +54,12 @@ export function AcademicChangeSummary<K extends AcademicChangeKind>({
       seen.current = null;
     }
     if (state.status === 'error') {
-      if (state.reason && RESET_ERRORS.has(state.reason)) baseline.current = null;
+      if (!state.snapshot || (state.reason && RESET_ERRORS.has(state.reason))) baseline.current = null;
       seen.current = null;
       setView(null);
       return;
     }
-    if (state.status !== 'ready' || !state.snapshot || state.refreshing) return;
+    if (state.status !== 'ready' || !state.snapshot || state.refreshing || state.stale) return;
     if (seen.current?.scope === state.scope && seen.current.kind === kind && seen.current.snapshot === state.snapshot) return;
     const report = compareAcademicSnapshots(kind, baseline.current?.snapshot ?? null, state.snapshot);
     const next = { scope: state.scope, kind, snapshot: state.snapshot };
@@ -69,7 +69,7 @@ export function AcademicChangeSummary<K extends AcademicChangeKind>({
   }, [kind, state]);
 
   // 身分或請求狀態一變，在 effect 執行前就同步遮住畫面。
-  if (!state || state.status !== 'ready' || state.refreshing || !view ||
+  if (!state || state.status !== 'ready' || state.refreshing || state.stale || !view ||
     state.scope !== view.scope || state.snapshot !== view.snapshot) return null;
   return <Report key={`${kind}:${view.report.to}`} report={view.report} />;
 }

@@ -21,10 +21,8 @@ vi.mock('@/components/imports/PersonalImportSummary', () => ({ PersonalImportSum
 vi.mock('next/navigation', () => ({
   usePathname: () => '/grades', useSearchParams: () => new URLSearchParams(),
 }));
-vi.mock('@/lib/academicClient', () => ({
-  AcademicConnectionError: class extends Error {
-    constructor(public readonly reason: string) { super(reason); }
-  },
+vi.mock('@/lib/academicClient', async (original) => ({
+  ...(await original<typeof import('@/lib/academicClient')>()),
   loadAcademicRecords: vi.fn(),
 }));
 const flush = async () => { await act(async () => { for (let i = 0; i < 12; i++) await Promise.resolve(); }); };
