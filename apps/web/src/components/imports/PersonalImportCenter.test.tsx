@@ -1437,3 +1437,85 @@ it('provides a selectable bookmark URL when automatic clipboard access is unavai
   expect(field.value).toMatch(/^javascript:/);
   expect(field.closest('details')?.open).toBe(true);
 });
+
+it('corrects screenshot cells, splits periods, adds a missing class and only imports the restored reviewed draft', async () => {
+  window.history.replaceState(null, '', '/import?kind=timetable');
+  vi.mocked(recognizePersonalImportImage).mockResolvedValue(
+    '課程名稱,星期,開始節次,結束節次,教室\n錯字,一,1,2,錯教室\n誤讀,三,3,3,X',
+  );
+  const view = render(<PersonalImportCenter />);
+  fireEvent.change(screen.getByLabelText('這份資料的學年度'), { target: { value: '115' } });
+  fireEvent.change(screen.getByLabelText('學期'), { target: { value: '1' } });
+  fireEvent.change(screen.getByLabelText('選擇截圖或檔案'), {
+    target: { files: [new File(['fixture'], 'timetable.png', { type: 'image/png' })] },
+  });
+  await screen.findByRole('button', { name: '修正星期一第1節 錯字' });
+  expect(screen.getByAltText('你選擇的資料截圖，僅供核對')).toBeTruthy();
+  fireEvent.click(screen.getByRole('button', { name: '修正星期一第1節 錯字' }));
+  fireEvent.change(screen.getAllByLabelText('名稱')[0], { target: { value: '微積分' } });
+  fireEvent.change(screen.getAllByLabelText('教室／地點')[0], { target: { value: 'B101' } });
+  fireEvent.click(screen.getAllByRole('button', { name: '拆成單節課程' })[0]);
+  fireEvent.click(screen.getAllByRole('button', { name: '與下一節同名課程合併' })[0]);
+  expect(screen.getByRole('button', { name: '修正星期一第2節 微積分' })).toBeTruthy();
+  fireEvent.click(screen.getAllByRole('button', { name: '拆成單節課程' })[0]);
+  fireEvent.change(screen.getAllByLabelText('名稱')[1], { target: { value: '英文' } });
+  fireEvent.change(screen.getAllByLabelText('星期')[1], { target: { value: '2' } });
+  fireEvent.change(screen.getAllByLabelText('開始節次')[1], { target: { value: '4' } });
+  fireEvent.change(screen.getAllByLabelText('結束節次')[1], { target: { value: '4' } });
+  fireEvent.click(screen.getAllByRole('button', { name: '刪除此草稿課程' })[2]);
+  fireEvent.click(screen.getByRole('button', { name: '新增星期五第5節' }));
+  fireEvent.change(screen.getAllByLabelText('名稱')[2], { target: { value: '漏課' } });
+  expect(readPersonalImports(context)).toHaveLength(0);
+  view.unmount();
+  render(<PersonalImportCenter />);
+  expect(screen.getByRole('button', { name: '修正星期二第4節 英文' })).toBeTruthy();
+  expect(screen.queryByRole('button', { name: /修正.*誤讀/ })).toBeNull();
+  fireEvent.change(screen.getByLabelText('補上對照截圖（保留草稿）'), {
+    target: { files: [new File(['reference'], 'reference.png', { type: 'image/png' })] },
+  });
+  await screen.findByText('已補上對照截圖，草稿內容沒有變更。');
+  expect(screen.getByRole('button', { name: '修正星期二第4節 英文' })).toBeTruthy();
+  fireEvent.click(screen.getByRole('button', { name: '確認匯入 3 筆' }));
+  await waitFor(() => expect(readPersonalImports(context)).toHaveLength(3));
+  expect(readPersonalImports(context)).toEqual(
+    expect.arrayContaining([
+      expect.objectContaining({
+        title: '微積分',
+        dayOfWeek: 1,
+        startPeriod: 1,
+        endPeriod: 1,
+        location: 'B101',
+      }),
+      expect.objectContaining({ title: '英文', dayOfWeek: 2, startPeriod: 4, endPeriod: 4 }),
+      expect.objectContaining({ title: '漏課', dayOfWeek: 5, startPeriod: 5 }),
+    ]),
+  );
+  fireEvent.click(screen.getByRole('button', { name: '新增星期一第1節' }));
+  fireEvent.click(screen.getByRole('button', { name: '取消這份草稿' }));
+  expect(readPersonalImports(context)).toHaveLength(3);
+}, 30000);
+
+it('finishes a timetable manually when screenshot reading fails and cancelling keeps saved courses', async () => {
+  window.history.replaceState(null, '', '/import?kind=timetable');
+  vi.mocked(recognizePersonalImportImage).mockRejectedValue(new Error('無法讀取截圖'));
+  render(<PersonalImportCenter />);
+  fireEvent.change(screen.getByLabelText('這份資料的學年度'), { target: { value: '115' } });
+  fireEvent.change(screen.getByLabelText('學期'), { target: { value: '1' } });
+  fireEvent.change(screen.getByLabelText('選擇截圖或檔案'), {
+    target: { files: [new File(['fixture'], 'unreadable.png', { type: 'image/png' })] },
+  });
+  await screen.findByText('無法讀取截圖');
+  fireEvent.click(screen.getByRole('button', { name: '新增星期二第3節' }));
+  fireEvent.change(screen.getByLabelText('名稱'), { target: { value: '手動課程' } });
+  expect(readPersonalImports(context)).toHaveLength(0);
+  fireEvent.click(screen.getByRole('button', { name: '確認匯入 1 筆' }));
+  await waitFor(() => expect(readPersonalImports(context)).toHaveLength(1));
+  expect(readPersonalImports(context)[0]).toMatchObject({
+    title: '手動課程',
+    dayOfWeek: 2,
+    startPeriod: 3,
+  });
+  fireEvent.click(screen.getByRole('button', { name: '新增星期五第1節' }));
+  fireEvent.click(screen.getByRole('button', { name: '取消這份草稿' }));
+  expect(readPersonalImports(context)).toHaveLength(1);
+}, 30000);
