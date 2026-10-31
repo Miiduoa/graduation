@@ -1,7 +1,17 @@
+import { SafeAreaView } from 'react-native-safe-area-context';
+import { readImportReviewDraft, writeImportReviewDraft } from '../services/personalImportDrafts';
+import { TimetableReviewGrid } from '../components/TimetableReviewGrid';
+import {
+  nextReviewRow,
+  REVIEW_SPLIT_UNAVAILABLE,
+  splitReviewRow,
+} from '@campus/shared/src/imports/reviewGrid';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Image,
+  KeyboardAvoidingView,
+  Platform,
   Modal,
   Pressable,
   ScrollView,
@@ -37,6 +47,7 @@ import {
   PERSONAL_IMPORT_UNDO_LABEL,
   PERSONAL_IMPORT_UNDO_TITLE,
   PersonalImportDocumentError,
+  periodSlots,
   periodCount,
   periodDisplayLabel,
   periodLabelAt,
@@ -67,6 +78,7 @@ import {
   TimetableOcrError,
 } from '../services/timetableOcr';
 import {
+  personalImportStorageKey,
   loadPersonalImports,
   appendPersonalImports,
   editPersonalImport,
@@ -296,6 +308,7 @@ function ImportWorkspace({
   const [source, setSource] = useState<{ type: 'paste' | 'file' | 'screenshot'; name?: string }>({
     type: 'paste',
   });
+  const [editedIds, setEditedIds] = useState<string[]>([]);
   const [rows, setRows] = useState<PersonalImportRow[]>([]);
   const [backupPreview, setBackupPreview] = useState<
     (Omit<ReturnType<typeof parsePersonalImportBackup>, 'rows'> & { name: string }) | null
@@ -303,6 +316,8 @@ function ImportWorkspace({
   const [visibleRowCount, setVisibleRowCount] = useState(50);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [issues, setIssues] = useState<ImportIssue[]>([]);
+  const [gridEditing, setGridEditing] = useState<string | null>(null);
+  const gridRow = rows.find((row) => row.id === gridEditing);
   const [expanded, setExpanded] = useState<string | null>(null);
   const [ledger, setLedger] = useState<PersonalImportLedger | null>(null);
   const [loadError, setLoadError] = useState('');
@@ -354,6 +369,94 @@ function ImportWorkspace({
   /** Picked PDF URI stays in memory only until confirm, cancel, or unmount / scope remount. */
   const documentSource = useRef<DocumentSource | null>(null);
   const profile = periodProfileForSchool(scope.schoolId);
+  const [draftReady, setDraftReady] = useState(false);
+  const [draftError, setDraftError] = useState('');
+  const draftKey = `${personalImportStorageKey(scope)}:grid-draft:v1`;
+  useEffect(() => {
+    let mounted = true;
+    readImportReviewDraft(draftKey)
+      .then((raw) => {
+        if (!mounted || !raw) return;
+        const draft = JSON.parse(raw);
+        if (
+          draft.version !== 1 ||
+          !['timetable', 'grades', 'events'].includes(draft.kind) ||
+          ![draft.academicYear, draft.semester, draft.text].every(
+            (value) => typeof value === 'string',
+          ) ||
+          !draft.source ||
+          !['paste', 'file', 'screenshot'].includes(draft.source.type) ||
+          !Array.isArray(draft.issues) ||
+          !Array.isArray(draft.rows) ||
+          draft.rows.length > 2000 ||
+          !draft.rows.every(
+            (row: PersonalImportRow) =>
+              row.schoolId === schoolId &&
+              typeof row.id === 'string' &&
+              typeof row.title === 'string',
+          ) ||
+          !Array.isArray(draft.selected) ||
+          !draft.selected.every((id: unknown) => typeof id === 'string')
+        )
+          throw new Error('invalid draft');
+        setKind(draft.kind);
+        setYear(draft.academicYear);
+        setSemester(draft.semester);
+        setText(draft.text);
+        setSource(draft.source);
+        setRows(draft.rows);
+        setEditedIds(
+          Array.isArray(draft.editedIds)
+            ? draft.editedIds.filter((id: unknown) => typeof id === 'string')
+            : [],
+        );
+        setSelected(new Set(draft.selected));
+        setIssues(draft.issues);
+        setBackupPreview(draft.backupPreview);
+      })
+      .catch(() => {
+        if (mounted) setDraftError('草稿讀取失敗，請先離開並重試，避免覆蓋原草稿。');
+      })
+      .finally(() => {
+        if (mounted) setDraftReady(true);
+      });
+    return () => {
+      mounted = false;
+    };
+  }, [draftKey, schoolId]);
+  useEffect(() => {
+    if (!draftReady || draftError) return;
+    const value = JSON.stringify({
+      version: 1,
+      editedIds,
+      kind,
+      academicYear,
+      semester,
+      text,
+      source,
+      rows,
+      selected: [...selected],
+      issues,
+      backupPreview,
+    });
+    writeImportReviewDraft(draftKey, value).catch(() => {
+      if (alive.current) setNotice('草稿未能保存在此裝置，離開前請重試。');
+    });
+  }, [
+    editedIds,
+    draftReady,
+    draftError,
+    draftKey,
+    kind,
+    academicYear,
+    semester,
+    text,
+    source,
+    rows,
+    selected,
+    issues,
+    backupPreview,
+  ]);
   const active = () => alive.current && focused.current && availableRef.current;
   const current = (run: number) => active() && generation.current === run;
   const clearDocumentSource = () => {
@@ -386,6 +489,7 @@ function ImportWorkspace({
       setBusy(false);
       setAiRunning(false);
       setModelManagerOpen(false);
+      setGridEditing(null);
       setSourceImage(null);
       setImageViewerOpen(false);
     }
@@ -495,7 +599,19 @@ function ImportWorkspace({
     (issue) => !['ai-review-required', 'ai-uncertain-field'].includes(issue.code),
   );
   const updateDraft = (before: PersonalImportRow, next: PersonalImportRow) => {
+    if (next.kind === 'timetable' && profile) {
+      const slots = periodSlots(profile);
+      if (next.startPeriod !== before.startPeriod)
+        next = {
+          ...next,
+          startTime: slots[(next.startPeriod ?? 0) - 1]?.start,
+          periodLabel: undefined,
+        };
+      if (next.endPeriod !== before.endPeriod)
+        next = { ...next, endTime: slots[(next.endPeriod ?? 0) - 1]?.end, periodLabel: undefined };
+    }
     setAiReviewed(false);
+    setEditedIds((current) => (current.includes(next.id) ? current : [...current, next.id]));
     setRows((items) => items.map((item) => (item.id === before.id ? next : item)));
     const validation = validatePersonalImportRow(next, { periodProfile: profile });
     setIssues((items) =>
@@ -631,7 +747,7 @@ function ImportWorkspace({
       setNotice(personalImportErrorMessage(error, '無法解析，請檢查內容。'));
     }
   };
-  const pickImage = async () => {
+  const pickImage = async (referenceOnly = false) => {
     cancel();
     const run = generation.current;
     setBusy(true);
@@ -658,6 +774,11 @@ function ImportWorkspace({
         asset.width * asset.height > IMPORT_IMAGE_MAX_PIXELS
       )
         throw new Error('圖片上限 8 MB、2,000 萬像素，請先裁切。');
+      if (referenceOnly) {
+        setSourceImage({ uri: asset.uri, width: asset.width, height: asset.height });
+        setNotice('已補上對照截圖，草稿內容沒有變更。');
+        return;
+      }
       const base64 = await readImageBase64(asset.uri);
       if (!current(run)) return;
       abort.current = new AbortController();
@@ -1150,6 +1271,14 @@ function ImportWorkspace({
     }
   };
 
+  if (!draftReady || draftError)
+    return (
+      <Screen>
+        <Text accessibilityLabel="讀取匯入紀錄" style={textStyle}>
+          {draftError || '正在讀取匯入草稿…'}
+        </Text>
+      </Screen>
+    );
   return (
     <Screen title="匯入我的資料" subtitle="課表、成績、活動，從你手上的資料開始">
       <TimetableOcrHost ref={ocr} />
@@ -1500,7 +1629,11 @@ function ImportWorkspace({
                   <Text style={{ color: theme.colors.muted, lineHeight: 21 }}>
                     讀出文字後，再讓本機 AI 協助整理。
                   </Text>
-                  <Button text="選擇截圖" onPress={pickImage} disabled={busy || saving} />
+                  <Button
+                    text="選擇截圖"
+                    onPress={() => void pickImage()}
+                    disabled={busy || saving}
+                  />
                 </View>
               </View>
               <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
@@ -1698,6 +1831,179 @@ function ImportWorkspace({
               />
             </>
           )}
+          {kind === 'timetable' && rows.length > 0 ? (
+            <Button
+              text="補上對照截圖（保留草稿）"
+              disabled={busy || saving}
+              onPress={() => void pickImage(true)}
+            />
+          ) : null}
+          {kind === 'timetable' && !documentPrep && !backupPreview ? (
+            <TimetableReviewGrid
+              rows={rows.filter((row) => selected.has(row.id))}
+              editedIds={editedIds}
+              profile={profile}
+              disabled={busy || saving}
+              onEdit={(row) => {
+                setReviewFilter('all');
+                setVisibleRowCount(rows.length);
+                setGridEditing(row.id);
+              }}
+              onAdd={(day, period) => {
+                const row: PersonalImportRow = {
+                  id: createPersonalImportId(),
+                  kind: 'timetable',
+                  title: '',
+                  schoolId,
+                  academicYear,
+                  semester,
+                  dayOfWeek: day,
+                  startPeriod: period,
+                  endPeriod: period,
+                  source: { type: 'paste', line: 1, rawText: '' },
+                };
+                setRows((current) => [...current, row]);
+                setSelected((current) => new Set([...current, row.id]));
+                setGridEditing(row.id);
+                setReviewFilter('all');
+                setVisibleRowCount(rows.length + 1);
+                setAiReviewed(false);
+              }}
+            />
+          ) : null}
+          {rows.length ? (
+            <Button
+              text="取消這份草稿"
+              disabled={busy || saving}
+              onPress={() => {
+                setRows([]);
+                setSelected(new Set());
+                setIssues([]);
+                setBackupPreview(null);
+                setGridEditing(null);
+                setAiReviewed(false);
+                setNotice('已取消待確認清單，原有課表沒有變更。');
+              }}
+            />
+          ) : null}
+          <Modal
+            visible={!!gridRow && available}
+            transparent={false}
+            onRequestClose={() => setGridEditing(null)}
+          >
+            <SafeAreaView style={{ flex: 1, backgroundColor: theme.colors.surface }}>
+              <KeyboardAvoidingView
+                style={{ flex: 1 }}
+                behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+              >
+                <ScrollView
+                  keyboardShouldPersistTaps="handled"
+                  contentContainerStyle={{
+                    padding: 20,
+                    gap: 12,
+                    backgroundColor: theme.colors.surface,
+                  }}
+                >
+                  <Text style={{ color: theme.colors.text, fontSize: 20 }}>修正草稿課程</Text>
+                  {notice === REVIEW_SPLIT_UNAVAILABLE ? (
+                    <Text accessibilityRole="alert" style={{ color: theme.colors.text }}>
+                      {notice}
+                    </Text>
+                  ) : null}
+                  {sourceImage ? (
+                    <Image
+                      source={{ uri: sourceImage.uri }}
+                      accessibilityLabel="原始匯入截圖"
+                      resizeMode="contain"
+                      style={{ width: '100%', height: 220 }}
+                    />
+                  ) : null}
+                  {gridRow ? (
+                    <>
+                      <RowEditor
+                        row={gridRow}
+                        workspaces={workspaces}
+                        periodProfile={profile}
+                        disabled={saving || busy}
+                        onChange={(next) => updateDraft(gridRow, next)}
+                      />
+                      <Button
+                        text="拆成單節課程"
+                        disabled={
+                          saving ||
+                          busy ||
+                          !gridRow.startPeriod ||
+                          !gridRow.endPeriod ||
+                          gridRow.endPeriod <= gridRow.startPeriod
+                        }
+                        onPress={() => {
+                          const parts = splitReviewRow(gridRow, profile);
+                          if (parts.length === 1) {
+                            setNotice(REVIEW_SPLIT_UNAVAILABLE);
+                            return;
+                          }
+                          setEditedIds((current) => [
+                            ...new Set([...current, ...parts.map((item) => item.id)]),
+                          ]);
+                          setRows((current) =>
+                            current.flatMap((row) => (row.id === gridRow.id ? parts : [row])),
+                          );
+                          setSelected(
+                            (current) => new Set([...current, ...parts.map((row) => row.id)]),
+                          );
+                          setAiReviewed(false);
+                          setGridEditing(null);
+                        }}
+                      />
+                      <Button
+                        text="與下一節同名課程合併"
+                        disabled={
+                          saving ||
+                          busy ||
+                          !selected.has(gridRow.id) ||
+                          !nextReviewRow(
+                            rows.filter((item) => selected.has(item.id)),
+                            gridRow,
+                          )
+                        }
+                        onPress={() => {
+                          if (!selected.has(gridRow.id)) return;
+                          const next = nextReviewRow(
+                            rows.filter((item) => selected.has(item.id)),
+                            gridRow,
+                          );
+                          if (!next) return;
+                          updateDraft(gridRow, {
+                            ...gridRow,
+                            endPeriod: next.endPeriod ?? next.startPeriod,
+                            endTime: next.endTime,
+                            periodLabel: undefined,
+                          });
+                          setRows((current) => current.filter((item) => item.id !== next.id));
+                          setSelected(
+                            (current) => new Set([...current].filter((id) => id !== next.id)),
+                          );
+                        }}
+                      />
+                      <Button
+                        text="刪除此草稿課程"
+                        disabled={saving || busy}
+                        onPress={() => {
+                          setRows((current) => current.filter((row) => row.id !== gridRow.id));
+                          setSelected(
+                            (current) => new Set([...current].filter((id) => id !== gridRow.id)),
+                          );
+                          setAiReviewed(false);
+                          setGridEditing(null);
+                        }}
+                      />
+                    </>
+                  ) : null}
+                  <Button text="回到週課表核對" onPress={() => setGridEditing(null)} />
+                </ScrollView>
+              </KeyboardAvoidingView>
+            </SafeAreaView>
+          </Modal>
           {sourceImage && !documentPrep && !backupPreview ? (
             <Pressable
               accessibilityRole="button"
@@ -1808,109 +2114,156 @@ function ImportWorkspace({
               ) : null}
               <Text style={textStyle}>{linksStatus}</Text>
               <Button text="重新讀取可連結課班" onPress={loadLinks} disabled={saving} />
-              {reviewRows.slice(0, visibleRowCount).map((row) => (
-                <View
-                  key={row.id}
-                  style={{
-                    borderWidth: 1,
-                    borderColor: theme.colors.border,
-                    borderRadius: 16,
-                    backgroundColor: theme.colors.surface,
-                    padding: 16,
-                    gap: 10,
-                  }}
-                >
-                  <Pressable
-                    disabled={saving}
-                    accessibilityRole="checkbox"
-                    accessibilityLabel={`匯入 ${row.title || '未命名資料'}`}
-                    accessibilityState={{ checked: selected.has(row.id), disabled: saving }}
-                    style={{ minHeight: 44, justifyContent: 'center' }}
-                    onPress={() => {
-                      setAiReviewed(false);
-                      setSelected((value) => {
-                        const next = new Set(value);
-                        if (next.has(row.id)) next.delete(row.id);
-                        else next.add(row.id);
-                        return next;
-                      });
+              {!gridRow &&
+                reviewRows.slice(0, visibleRowCount).map((row) => (
+                  <View
+                    key={row.id}
+                    style={{
+                      borderWidth: 1,
+                      borderColor: theme.colors.border,
+                      borderRadius: 16,
+                      backgroundColor: theme.colors.surface,
+                      padding: 16,
+                      gap: 10,
                     }}
                   >
-                    <Text style={{ ...textStyle, fontWeight: '700' }}>
-                      {selected.has(row.id) ? '☑' : '□'} {rows.indexOf(row) + 1}.{' '}
-                      {backupPreview ? `${names[row.kind]} · ` : ''}
-                      {row.title || '名稱待填'}
-                    </Text>
-                  </Pressable>
-                  <Text style={textStyle}>{rowSummary(row, profile)}</Text>
-                  {isAiPreview && row.source.rawText ? (
-                    <View
-                      style={{
-                        backgroundColor: theme.colors.surfaceMuted,
-                        padding: 12,
-                        borderRadius: 10,
-                        gap: 4,
+                    <Pressable
+                      disabled={saving}
+                      accessibilityRole="checkbox"
+                      accessibilityLabel={`匯入 ${row.title || '未命名資料'}`}
+                      accessibilityState={{ checked: selected.has(row.id), disabled: saving }}
+                      style={{ minHeight: 44, justifyContent: 'center' }}
+                      onPress={() => {
+                        setAiReviewed(false);
+                        setSelected((value) => {
+                          const next = new Set(value);
+                          if (next.has(row.id)) next.delete(row.id);
+                          else next.add(row.id);
+                          return next;
+                        });
                       }}
                     >
-                      <Text style={{ color: theme.colors.muted, fontSize: 12 }}>
-                        來源文字 · 請對照
+                      <Text style={{ ...textStyle, fontWeight: '700' }}>
+                        {selected.has(row.id) ? '☑' : '□'} {rows.indexOf(row) + 1}.{' '}
+                        {backupPreview ? `${names[row.kind]} · ` : ''}
+                        {row.title || '名稱待填'}
                       </Text>
-                      <Text
-                        selectable
-                        style={{ color: theme.colors.textSecondary, lineHeight: 22 }}
+                    </Pressable>
+                    <Text style={textStyle}>{rowSummary(row, profile)}</Text>
+                    {isAiPreview && row.source.rawText ? (
+                      <View
+                        style={{
+                          backgroundColor: theme.colors.surfaceMuted,
+                          padding: 12,
+                          borderRadius: 10,
+                          gap: 4,
+                        }}
                       >
-                        {row.source.rawText}
+                        <Text style={{ color: theme.colors.muted, fontSize: 12 }}>
+                          來源文字 · 請對照
+                        </Text>
+                        <Text
+                          selectable
+                          style={{ color: theme.colors.textSecondary, lineHeight: 22 }}
+                        >
+                          {row.source.rawText}
+                        </Text>
+                      </View>
+                    ) : null}
+                    {backupPreview?.proposedLinks[row.id] ? (
+                      <Text style={{ color: theme.colors.muted }}>
+                        原備份有課班對照：
+                        {workspaces.find((item) => item.id === backupPreview.proposedLinks[row.id])
+                          ?.title || '目前無法確認原課班'}
+                        。需要時請在下方重新選擇。
                       </Text>
-                    </View>
-                  ) : null}
-                  {backupPreview?.proposedLinks[row.id] ? (
-                    <Text style={{ color: theme.colors.muted }}>
-                      原備份有課班對照：
-                      {workspaces.find((item) => item.id === backupPreview.proposedLinks[row.id])
-                        ?.title || '目前無法確認原課班'}
-                      。需要時請在下方重新選擇。
-                    </Text>
-                  ) : null}
-                  {(rowIssues.get(row.id) || []).map((issue, i) => (
-                    <Text
-                      key={i}
-                      style={{
-                        color:
-                          issue.severity === 'error' ? theme.colors.danger : theme.colors.muted,
-                      }}
-                    >
-                      {issue.message}
-                    </Text>
-                  ))}
-                  {issues
-                    .filter(
-                      (issue) => issue.rowId === row.id && issue.code === 'ai-uncertain-field',
-                    )
-                    .map((issue, index) => (
+                    ) : null}
+                    {(rowIssues.get(row.id) || []).map((issue, i) => (
                       <Text
-                        key={`ai-field-${index}`}
-                        style={{ color: theme.colors.muted, lineHeight: 22 }}
+                        key={i}
+                        style={{
+                          color:
+                            issue.severity === 'error' ? theme.colors.danger : theme.colors.muted,
+                        }}
                       >
                         {issue.message}
                       </Text>
                     ))}
-                  <Button
-                    text={expanded === row.id ? '收起欄位' : '編輯與連結課班'}
-                    disabled={saving}
-                    onPress={() => setExpanded(expanded === row.id ? null : row.id)}
-                  />
-                  {expanded === row.id ? (
-                    <RowEditor
+                    {issues
+                      .filter(
+                        (issue) => issue.rowId === row.id && issue.code === 'ai-uncertain-field',
+                      )
+                      .map((issue, index) => (
+                        <Text
+                          key={`ai-field-${index}`}
+                          style={{ color: theme.colors.muted, lineHeight: 22 }}
+                        >
+                          {issue.message}
+                        </Text>
+                      ))}
+                    <Button
+                      text={expanded === row.id ? '收起欄位' : '編輯與連結課班'}
                       disabled={saving}
-                      row={row}
-                      workspaces={workspaces}
-                      periodProfile={profile}
-                      onRefreshWorkspaces={() => void loadLinks()}
-                      onChange={(next) => updateDraft(row, next)}
+                      onPress={() => setExpanded(expanded === row.id ? null : row.id)}
                     />
-                  ) : null}
-                </View>
-              ))}
+                    {row.kind === 'timetable' ? (
+                      <View style={{ gap: 8 }}>
+                        <Button
+                          text="拆成單節課程"
+                          disabled={
+                            saving ||
+                            busy ||
+                            !row.startPeriod ||
+                            !row.endPeriod ||
+                            row.endPeriod <= row.startPeriod
+                          }
+                          onPress={() => {
+                            const parts = splitReviewRow(row, profile);
+                            if (parts.length === 1) {
+                              setNotice(REVIEW_SPLIT_UNAVAILABLE);
+                              return;
+                            }
+                            setEditedIds((current) => [
+                              ...new Set([...current, ...parts.map((item) => item.id)]),
+                            ]);
+                            setRows((current) =>
+                              current.flatMap((item) => (item.id === row.id ? parts : [item])),
+                            );
+                            setSelected(
+                              (current) =>
+                                new Set([
+                                  ...current,
+                                  ...parts.filter(() => current.has(row.id)).map((item) => item.id),
+                                ]),
+                            );
+                            setAiReviewed(false);
+                          }}
+                        />
+                        <Button
+                          text="刪除此草稿課程"
+                          disabled={saving || busy}
+                          onPress={() => {
+                            setRows((current) => current.filter((item) => item.id !== row.id));
+                            setSelected(
+                              (current) => new Set([...current].filter((id) => id !== row.id)),
+                            );
+                            setAiReviewed(false);
+                          }}
+                        />
+                      </View>
+                    ) : null}
+                    {expanded === row.id ? (
+                      <RowEditor
+                        disabled={saving}
+                        row={row}
+                        workspaces={workspaces}
+                        periodProfile={profile}
+                        onRefreshWorkspaces={() => void loadLinks()}
+                        onChange={(next) => updateDraft(row, next)}
+                      />
+                    ) : null}
+                  </View>
+                ))}
               {reviewRows.length > visibleRowCount ? (
                 <>
                   <Text style={{ color: theme.colors.muted }}>
