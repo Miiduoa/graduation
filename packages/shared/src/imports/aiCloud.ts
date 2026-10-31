@@ -27,6 +27,8 @@ const tableField = /^(?:(?:課程|科目|活動)?名稱|課號|科目代碼|課�
 function isAcademicBoundary(value: string): boolean {
   return tableField.test(value) || /^【[^【】]+】$/u.test(value) ||
     value.split(/[\t,|;、]/u).filter((cell) => tableField.test(cell.trim())).length >= 2 ||
+    // 無表頭的三欄成績列也可形成邊界，避免把課名當成續行姓名。
+    /^[^\t,|;、]+([\t,|;、])[ \t]*\d+(?:\.\d+)?\1[ \t]*(?:\d{1,3}(?:\.\d+)?|[A-F][+-]?|通過|及格)$/iu.test(value) ||
     (/學分\s*[:：]?\s*\d/u.test(value) && /(?:成績|分數)\s*[:：]?\s*(?:\d|[A-F])/iu.test(value)) ||
     /\S[ \t]+\d+(?:\.\d+)?[ \t]+(?:\d{1,3}(?:\.\d+)?|[A-F][+-]?|通過|及格)$/iu.test(value);
 }
@@ -50,8 +52,11 @@ function maskPrivateVerticalFields(text: string): { text: string; safe: boolean 
   const inlineLabel = new RegExp(`^${privateFieldPattern}[ \\t]*[:=]`, 'iu');
   let safe = true;
   for (let index = 0; index < lines.length; index++) {
-    if (!label.test(lines[index].trim())) continue;
-    let values = 0;
+    const field = lines[index].trim();
+    const bareLabel = label.test(field);
+    if (!bareLabel && !inlineLabel.test(field)) continue;
+    // 行內已有值仍可能接續多行姓名；直到明確的下一欄或學業資料才停止。
+    let values = bareLabel ? 0 : 1;
     for (let next = index + 1; next < lines.length; next++) {
       const value = lines[next].trim();
       if (!value) continue;

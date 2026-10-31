@@ -363,3 +363,22 @@ it.each([';', '；', '，', '、', '/', '::', '•'])('rejects unreliable privat
   expect(fetcher).not.toHaveBeenCalled();
   expect(getQuotaStore).not.toHaveBeenCalled();
 });
+
+it.each(['李小華／陳小美', '李小華,陳小美', '李小華\t陳小美'])('rejects ambiguous inline private continuations before upstream: %s', async (continuation) => {
+  const { dependencies, fetcher, getQuotaStore } = setup();
+  for (const input of [
+    { text: `教師：王小明\n${continuation}\n課程名稱,學分,成績\n微積分,3,85` },
+    { columnContext: '教師：王小明', text: `${continuation}\n課程名稱,學分,成績\n微積分,3,85` },
+  ]) expect((await handlePersonalImportCloud(request({ ...input, kind: 'grades' }), dependencies)).status).toBe(422);
+  expect(fetcher).not.toHaveBeenCalled();
+  expect(getQuotaStore).not.toHaveBeenCalled();
+});
+
+it('masks inline private continuations again on the server and preserves course rows', async () => {
+  const { dependencies, fetcher } = setup();
+  const response = await handlePersonalImportCloud(request({ text: '教師：王小明\n李小華\n課程名稱,學分,成績\n微積分,3,85', kind: 'grades' }), dependencies);
+  expect(response.status).toBe(200);
+  expect(fetcher).toHaveBeenCalledOnce();
+  expect(String(fetcher.mock.calls[0][1].body)).not.toMatch(/王小明|李小華/);
+  expect((await response.json()).sourceText).toContain('課程名稱,學分,成績\n微積分,3,85');
+});

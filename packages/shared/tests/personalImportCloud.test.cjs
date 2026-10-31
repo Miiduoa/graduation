@@ -45,3 +45,23 @@ test('分號表格的引號內分隔符與換行仍完整遮罩', () => {
   assert.equal(isPersonalImportCloudMaskSafe(source), true);
   assert.equal(maskPersonalImportText(source), '教師;課程名稱;學分\n"[個資已遮罩]\n";微積分;3');
 });
+
+for (const label of ['教師：王小明', '姓名：王小明', 'teacher: Wang']) {
+  test(`遮罩 ${label} 的續行並保留學業邊界後的課程`, () => {
+    for (const boundary of ['課程名稱,學分,成績\n微積分,3,85', '微積分 3 85\n英文 2 80', '微積分,3,85\n英文,2,80']) {
+      const source = `${label}\n\n李小華\n陳小美\n${boundary}`;
+      assert.equal(isPersonalImportCloudMaskSafe(source), true);
+      const masked = maskPersonalImportText(source);
+      assert.equal(/王小明|Wang|李小華|陳小美/u.test(masked), false);
+      assert.equal(masked.endsWith(boundary), true);
+      assert.equal(masked.split('\n').length, source.split('\n').length);
+      assert.equal(maskPersonalImportText(masked), masked);
+      assert.equal(maskPersonalImportCloudBatch(source, { text: '李小華\n', startLine: 3 }).sourceText, '[個資已遮罩]\n');
+    }
+  });
+}
+for (const continuation of ['李小華／陳小美', '李小華,陳小美', '李小華\t陳小美']) {
+  test(`拒絕無可靠欄界的行內個資續行 ${continuation}`, () => {
+    assert.equal(isPersonalImportCloudMaskSafe(`教師：王小明\n${continuation}\n課程名稱,學分,成績\n微積分,3,85`), false);
+  });
+}

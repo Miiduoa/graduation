@@ -237,3 +237,26 @@ it.each([';', '；', '，', '、', '/', '::', '•'])('refuses unreliable privat
     }
   }
 });
+
+it('masks inline private field continuations across context and source before sending', async () => {
+  const fetcher = vi.fn(async (_url: unknown, init: RequestInit) => {
+    const body = JSON.parse(String(init.body));
+    expect(JSON.stringify(body)).not.toMatch(/王小明|李小華/);
+    expect(body.text).toContain('課程名稱,學分,成績\n微積分,3,85');
+    return Response.json({ output: '{}', sourceText: body.text, columnContext: body.columnContext });
+  });
+  for (const input of [
+    { text: '教師：王小明\n李小華\n課程名稱,學分,成績\n微積分,3,85' },
+    { columnContext: '教師：王小明', text: '李小華\n課程名稱,學分,成績\n微積分,3,85' },
+  ]) expect(await requestPersonalImportCloud({ ...input, kind: 'grades', fetcher: fetcher as typeof fetch })).toMatchObject({ ok: true });
+  expect(fetcher).toHaveBeenCalledTimes(2);
+});
+
+it.each(['李小華／陳小美', '李小華,陳小美', '李小華\t陳小美'])('keeps ambiguous inline private continuations local: %s', async (continuation) => {
+  const fetcher = vi.fn();
+  for (const input of [
+    { text: `教師：王小明\n${continuation}\n課程名稱,學分,成績\n微積分,3,85` },
+    { columnContext: '教師：王小明', text: `${continuation}\n課程名稱,學分,成績\n微積分,3,85` },
+  ]) expect(await requestPersonalImportCloud({ ...input, kind: 'grades', fetcher })).toMatchObject({ ok: false, reason: 'invalid-input' });
+  expect(fetcher).not.toHaveBeenCalled();
+});
