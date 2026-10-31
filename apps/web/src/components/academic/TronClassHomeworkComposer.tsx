@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
   checkTronClassHomework,
   submitTronClassHomework,
@@ -28,11 +28,14 @@ export function TronClassHomeworkComposer({
   const [checking, setChecking] = useState(false);
   const [verificationNote, setVerificationNote] = useState('');
   const [copyStatus, setCopyStatus] = useState('');
+  const operationGeneration = useRef(0);
   const key = 'tronclass-draft:' + uid + ':' + courseId + ':' + homeworkId;
   const fileOnly = ['file', 'files', 'upload', 'attachment']
     .includes((submissionType || '').toLowerCase());
 
   useEffect(() => {
+    // Invalidate late replies even when switching away and back to the same account.
+    operationGeneration.current += 1;
     let active = true;
     void Promise.resolve().then(() => {
       if (!active) return;
@@ -43,6 +46,8 @@ export function TronClassHomeworkComposer({
       setUncertain('');
       setVerificationNote('');
       setCopyStatus('');
+      setSending(false);
+      setChecking(false);
     });
     return () => { active = false; };
   }, [key]);
@@ -55,26 +60,32 @@ export function TronClassHomeworkComposer({
 
   async function confirm() {
     if (!text.trim() || sending || uncertain || receipt || fileOnly) return;
+    const generation = operationGeneration.current;
     setSending(true);
     try {
       const result = await submitTronClassHomework(uid, courseId, homeworkId, text);
+      if (operationGeneration.current !== generation) return;
       setReceipt(result);
       if (result.status === 'verified') {
         try { window.sessionStorage.removeItem(key); } catch { /* private browsing */ }
       }
     } catch (error) {
-      setUncertain(error instanceof Error ? error.message : '校方回應不明，請先核對作業。');
+      if (operationGeneration.current === generation) {
+        setUncertain(error instanceof Error ? error.message : '校方回應不明，請先核對作業。');
+      }
     } finally {
-      setSending(false);
+      if (operationGeneration.current === generation) setSending(false);
     }
   }
 
   async function verifyReceipt() {
     if (checking || sending) return;
+    const generation = operationGeneration.current;
     setChecking(true);
     setVerificationNote('');
     try {
       const result = await checkTronClassHomework(uid, courseId, homeworkId);
+      if (operationGeneration.current !== generation) return;
       if (result.status === 'verified') {
         setReceipt({ status: 'verified', receiptId: result.receiptId, submittedAt: result.submittedAt });
         setUncertain('');
@@ -89,10 +100,12 @@ export function TronClassHomeworkComposer({
         setVerificationNote('玩課雲目前沒有回傳這份作業的本人繳交紀錄。');
       }
     } catch (error) {
-      setVerificationNote(error instanceof Error
-        ? error.message : '暫時無法查核校方繳交紀錄。');
+      if (operationGeneration.current === generation) {
+        setVerificationNote(error instanceof Error
+          ? error.message : '暫時無法查核校方繳交紀錄。');
+      }
     } finally {
-      setChecking(false);
+      if (operationGeneration.current === generation) setChecking(false);
     }
   }
 
@@ -166,8 +179,8 @@ export function TronClassHomeworkComposer({
           <h4>{receipt.status === 'verified' ? '已確認繳交' : '已送出，等待校方確認'}</h4>
           <p>{receipt.status === 'verified'
             ? '已從玩課雲讀到你的繳交紀錄。'
-            : '校方已接收寫入請求，但尚未取得可核對的提交紀錄。請在原站確認，勿重複繳交。'}</p>
-          {receipt.receiptId ? <p>收件編號：{receipt.receiptId}</p> : null}
+            : '已送出一次校方寫入請求，但尚未取得可核對的正式繳交回執。可能尚未成功，請先在原站確認，勿重複繳交。'}</p>
+          {receipt.receiptId ? <p>{receipt.status === 'verified' ? '校方繳交回執編號' : '待查核編號'}：{receipt.receiptId}</p> : null}
           {receipt.status === 'pending' ? (
             <button type="button" className="btn primary" onClick={() => void verifyReceipt()} disabled={checking}>
               {checking ? '查核中…' : '重新查核校方回執'}

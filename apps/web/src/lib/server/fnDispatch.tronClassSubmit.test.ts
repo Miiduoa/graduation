@@ -145,7 +145,9 @@ it('keeps a 2xx response unverified until school reports a matching receipt', as
   vi.mocked(source.fetchHomeworkSubmissions!).mockReset().mockResolvedValue([]);
   const response = await request();
   expect(response.status).toBe(200);
-  expect((await response.json()).result.status).toBe('pending');
+  expect((await response.json()).result).toMatchObject({
+    status: 'pending', receiptId: '99', submittedAt: null,
+  });
 });
 
 
@@ -274,6 +276,56 @@ it('does not verify a different receipt id after posting or on recheck', async (
   expect(checkResponse.status).toBe(200);
   expect((await checkResponse.json()).result.status).toBe('pending');
   expect(source.submitHomeworkText).toHaveBeenCalledOnce();
+});
+
+it('does not verify an uncorrelated final row when the POST lacks a receipt ID', async () => {
+  const { request, source } = setup();
+  vi.mocked(source.submitHomeworkText!).mockResolvedValueOnce({
+    accepted: true, receiptId: null, submittedAt: '2026-10-29T10:00:00Z',
+  });
+  vi.mocked(source.fetchHomeworkSubmissions!).mockReset()
+    .mockResolvedValueOnce([])
+    .mockResolvedValueOnce([{
+      id: 99, homework_id: 20001, student_id: 10,
+      status: 'submitted', submitted_at: '2026-10-29T10:00:00Z',
+    }]);
+  const response = await request();
+  expect(response.status).toBe(200);
+  expect((await response.json()).result).toMatchObject({
+    status: 'pending', receiptId: null, submittedAt: null,
+  });
+  expect(source.fetchHomeworkSubmissions).toHaveBeenCalledOnce();
+  expect(source.submitHomeworkText).toHaveBeenCalledOnce();
+});
+
+it('only exposes the matching school receipt timestamp after verification', async () => {
+  const { request, source } = setup();
+  vi.mocked(source.submitHomeworkText!).mockResolvedValueOnce({
+    accepted: true, receiptId: '99', submittedAt: '2020-01-01T00:00:00Z',
+  });
+  vi.mocked(source.fetchHomeworkSubmissions!).mockReset()
+    .mockResolvedValueOnce([])
+    .mockResolvedValueOnce([{
+      id: 99, homework_id: 20001, student_id: 10,
+      status: 'submitted', submitted_at: '2026-10-29T10:00:00Z',
+    }]);
+  const response = await request();
+  expect(response.status).toBe(200);
+  expect((await response.json()).result).toMatchObject({
+    status: 'verified', receiptId: '99', submittedAt: '2026-10-29T10:00:00Z',
+  });
+});
+
+it('rejects an unidentifiable school row as a confirmed manual receipt', async () => {
+  const { check, source } = setup();
+  vi.mocked(source.fetchHomeworkSubmissions!).mockReset().mockResolvedValue([{
+    homework_id: 20001, student_id: 10, status: 'submitted',
+    submitted_at: '2026-10-29T10:00:00Z',
+  }]);
+  const response = await check();
+  expect(response.status).toBe(200);
+  expect((await response.json()).result.status).toBe('not_submitted');
+  expect(source.submitHomeworkText).not.toHaveBeenCalled();
 });
 
 it('stops remote writing when the administrator has not enabled the school endpoint', async () => {

@@ -199,18 +199,30 @@ export function createTronClassHomeworkSubmitHandler({
       throw new HttpsError('unavailable', '校方沒有確認接收，請到玩課雲核對。');
     }
 
-    let verified = false;
-    try {
-      const updated = await source.fetchHomeworkSubmissions(cookies, courseId, homeworkId);
-      verified = updated.some((item) => isOwnReceipt(item, userId, receipt.receiptId, homeworkId));
-    } catch {
-      // 已寫入的請求絕不因確認逾時而再次 POST。
+    let confirmedRow: Row | null = null;
+    // A 2xx without a receipt ID cannot be correlated with a specific POST.
+    // Do not misidentify an older submission as the one just written.
+    if (receipt.receiptId && /^[1-9][0-9]{0,19}$/.test(receipt.receiptId)) {
+      try {
+        const updated = await source.fetchHomeworkSubmissions(cookies, courseId, homeworkId);
+        if (Array.isArray(updated)) {
+          const matching = updated.find((item) =>
+            isOwnReceipt(item, userId, receipt.receiptId, homeworkId));
+          if (matching !== undefined) confirmedRow = row(matching);
+        }
+      } catch {
+        // 已寫入的請求絕不因確認逾時而再次 POST。
+      }
     }
+    const verified = confirmedRow !== null;
+    const evidenceTime = confirmedRow?.submitted_at;
+    const submittedAt = typeof evidenceTime === 'string' && Number.isFinite(Date.parse(evidenceTime))
+      ? evidenceTime : null;
     await lockRef.set?.({ state: verified ? 'verified' : 'pending',
-      receiptId: receipt.receiptId, submittedAt: receipt.submittedAt,
+      receiptId: receipt.receiptId, submittedAt,
       lastCheckedAt: new Date(now()) }, { merge: true });
     await db.doc('_puTronClassLmsCache/' + uid).delete?.().catch(() => undefined);
     return { status: verified ? 'verified' : 'pending',
-      receiptId: receipt.receiptId, submittedAt: receipt.submittedAt };
+      receiptId: receipt.receiptId, submittedAt };
   };
 }

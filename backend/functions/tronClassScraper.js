@@ -1191,7 +1191,8 @@ async function tcSubmitHomeworkText(cookies, courseId, homeworkId, content) {
     const receipt = data.submission && typeof data.submission === 'object'
       ? data.submission : data;
     const id = receipt.id ?? receipt.submission_id ?? null;
-    const rawTime = receipt.submitted_at ?? receipt.created_at ?? null;
+    // created_at may belong to an unsubmitted draft; it is not submission time.
+    const rawTime = receipt.submitted_at ?? null;
     return {
       accepted: true,
       receiptId: (typeof id === 'number' && Number.isSafeInteger(id) && id > 0) ||

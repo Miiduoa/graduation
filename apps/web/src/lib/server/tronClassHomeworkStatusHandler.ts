@@ -24,7 +24,9 @@ function receiptForUser(
     if (linkedHomework != null && Number(linkedHomework) !== homeworkId) continue;
     const owner = Number(item.student_id ?? item.user_id ?? NaN);
     const id = item.id ?? item.submission_id;
-    if (expectedReceiptId && (id == null || String(id) !== expectedReceiptId)) continue;
+    // A status without an identifiable school receipt is not completion evidence.
+    if (id == null || !/^[1-9][0-9]{0,19}$/.test(String(id))) continue;
+    if (expectedReceiptId && String(id) !== expectedReceiptId) continue;
     const ownerKnown = Number.isSafeInteger(owner) && owner > 0;
     if (ownerKnown ? owner !== userId :
       !expectedReceiptId || id == null || String(id) !== expectedReceiptId) continue;
@@ -32,7 +34,7 @@ function receiptForUser(
     // created_at can describe the creation of an unsubmitted draft.
     const submittedAt = item.submitted_at;
     return {
-      receiptId: id != null && /^[1-9][0-9]{0,19}$/.test(String(id)) ? String(id) : null,
+      receiptId: String(id),
       submittedAt: typeof submittedAt === 'string' && Number.isFinite(Date.parse(submittedAt))
         ? submittedAt : null,
     };

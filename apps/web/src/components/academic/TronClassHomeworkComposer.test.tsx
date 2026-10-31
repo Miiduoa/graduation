@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, expect, it, vi } from 'vitest';
 import { TronClassHomeworkComposer } from './TronClassHomeworkComposer';
 import { checkTronClassHomework, submitTronClassHomework } from '@/lib/tronClassLms';
@@ -94,6 +94,8 @@ it('verifies a pending school receipt without submitting the text again', async 
   fireEvent.click(screen.getByRole('button', { name: '預覽並確認繳交' }));
   fireEvent.click(screen.getByRole('button', { name: '確認繳交至玩課雲' }));
   await screen.findByText('已送出，等待校方確認');
+  expect(screen.getByText(/可能尚未成功，請先在原站確認/)).toBeTruthy();
+  expect(screen.getByText('待查核編號：321')).toBeTruthy();
   fireEvent.click(screen.getByRole('button', { name: '重新查核校方回執' }));
   await screen.findByText('已確認繳交');
   expect(submitTronClassHomework).toHaveBeenCalledTimes(1);
@@ -144,4 +146,50 @@ it('keeps an editable local draft while remote submissions are disabled', async 
   expect(window.sessionStorage.getItem('tronclass-draft:pu-student:10001:20001'))
     .toBe('先完成的文字作業');
   expect(submitTronClassHomework).not.toHaveBeenCalled();
+});
+
+it('does not show an in-flight previous-account submission on the new account', async () => {
+  let finish: ((value: { status: 'verified'; receiptId: string; submittedAt: null }) => void) | undefined;
+  vi.mocked(submitTronClassHomework).mockImplementationOnce(() =>
+    new Promise((resolve) => { finish = resolve; }));
+  const { rerender } = render(<TronClassHomeworkComposer {...props} />);
+  fireEvent.change(screen.getByRole('textbox', { name: '繳交內容' }), {
+    target: { value: '只屬於舊帳號的草稿' },
+  });
+  fireEvent.click(screen.getByRole('button', { name: '預覽並確認繳交' }));
+  fireEvent.click(screen.getByRole('button', { name: '確認繳交至玩課雲' }));
+  expect(submitTronClassHomework).toHaveBeenCalledOnce();
+
+  rerender(<TronClassHomeworkComposer {...props} uid="pu-new-student" />);
+  await waitFor(() => {
+    expect((screen.getByRole('textbox', { name: '繳交內容' }) as HTMLTextAreaElement).value).toBe('');
+  });
+  await act(async () => {
+    finish?.({ status: 'verified', receiptId: '987', submittedAt: null });
+  });
+  expect(screen.queryByText('已確認繳交')).toBeNull();
+  expect((screen.getByRole('textbox', { name: '繳交內容' }) as HTMLTextAreaElement).value).toBe('');
+  expect(window.sessionStorage.getItem('tronclass-draft:pu-student:10001:20001'))
+    .toBe('只屬於舊帳號的草稿');
+  expect(submitTronClassHomework).toHaveBeenCalledOnce();
+});
+
+it('does not show an in-flight old-account receipt check after account switching', async () => {
+  let finish: ((value: {
+    status: 'verified'; receiptId: string; submittedAt: null; checkedAt: string;
+  }) => void) | undefined;
+  vi.mocked(checkTronClassHomework).mockImplementationOnce(() =>
+    new Promise((resolve) => { finish = resolve; }));
+  const { rerender } = render(<TronClassHomeworkComposer {...props} />);
+  fireEvent.click(screen.getByRole('button', { name: '查核校方繳交紀錄' }));
+  rerender(<TronClassHomeworkComposer {...props} uid="pu-new-student" />);
+  await waitFor(() => {
+    expect(screen.getByRole('button', { name: '查核校方繳交紀錄' })).toBeTruthy();
+  });
+  await act(async () => {
+    finish?.({ status: 'verified', receiptId: '987', submittedAt: null,
+      checkedAt: '2026-10-29T10:00:00Z' });
+  });
+  expect(screen.queryByText('已確認繳交')).toBeNull();
+  expect(checkTronClassHomework).toHaveBeenCalledOnce();
 });
