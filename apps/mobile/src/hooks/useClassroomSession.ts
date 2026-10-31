@@ -1,3 +1,4 @@
+import type { AttendanceReceipt } from '@campus/shared/src/attendanceReliability';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { AppState } from 'react-native';
 import { doc, onSnapshot, type Firestore } from 'firebase/firestore';
@@ -20,6 +21,7 @@ type ClassroomState = {
   qrToken: string | null;
   qrExpiresAt: number | null;
   joined: boolean;
+  receipt: AttendanceReceipt | null;
   error: string | null;
 };
 const emptyState: ClassroomState = {
@@ -30,6 +32,7 @@ const emptyState: ClassroomState = {
   qrToken: null,
   qrExpiresAt: null,
   joined: false,
+  receipt: null,
   error: null,
 };
 const connectionMessage = '尚未取得即時課堂資料，請確認連線後重新整理。';
@@ -103,6 +106,7 @@ export function useClassroomSession(
           qrToken: null,
           qrExpiresAt: null,
           joined: false,
+          receipt: null,
         });
       };
 
@@ -151,6 +155,9 @@ export function useClassroomSession(
               },
               onQrExpiresAt: (qrExpiresAt) => {
                 if (accessCurrent()) patch({ qrExpiresAt });
+              },
+              onReceipt: (receipt) => {
+                if (accessCurrent()) patch({ receipt, ...(receipt ? { error: null } : {}) });
               },
               onJoined: (joined) => {
                 if (accessCurrent()) patch({ joined });
