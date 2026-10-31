@@ -3,11 +3,12 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import {
   NuniError,
-  nuniErrorMessage,
   type NuniMaterial,
   type NuniUnit,
   type NuniWorkspace,
 } from '@campus/shared/src/nuni';
+import { materialCapabilities, materialFailureMessage, readMaterialWithDeadline } from '@campus/shared/src/materialAccess';
+import { shareCourseMaterial } from '@/lib/shareCourseMaterial';
 import { formatTaipeiDateTime } from '@campus/shared/src/taipeiTime';
 import {
   COURSE_WORK_MISSING_MATERIAL,
@@ -16,6 +17,7 @@ import {
   parseCourseWorkHash,
 } from '@/lib/courseWorkLanding';
 import {
+  courseMaterialHref,
   describeMaterial,
   groupMaterialsByUnit,
   isMaterialNew,
@@ -113,6 +115,7 @@ function Materials({
   const readIds = useMaterialReadIds(accountId);
   const moreRequest = useRef<symbol | null>(null);
   const request = useRef(0);
+  const seenCursors = useRef(new Set<string>());
   const mounted = useRef(true);
   const editable =
     !accessDenied && workspace.state === 'active' && workspace.memberRole !== 'student';
@@ -126,23 +129,24 @@ function Materials({
     setReadingMore(false);
     setMoreError('');
     setNextCursor(null);
+    seenCursors.current.clear();
     setReading(true);
     setError('');
     try {
-      const result = await classes.materialsPage(workspace.id);
+      const result = await readMaterialWithDeadline(classes.materialsPage(workspace.id));
       if (mounted.current && run === request.current) {
         setItems(result.materials);
         setNextCursor(result.nextCursor);
       }
     } catch (failure) {
       if (mounted.current && run === request.current) {
-        if (failure instanceof NuniError && [403, 404].includes(failure.status)) {
+        if (failure instanceof NuniError && [401, 403, 404, 410].includes(failure.status)) {
           setItems(null);
           setNotice('');
           denied.current = true;
           setAccessDenied(true);
         }
-        setError(nuniErrorMessage(failure));
+        setError(materialFailureMessage(failure, !navigator.onLine));
       }
     } finally {
       if (mounted.current && run === request.current) setReading(false);
@@ -157,30 +161,36 @@ function Materials({
     setReadingMore(true);
     setMoreError('');
     try {
-      const result = await classes.materialsPage(workspace.id, nextCursor);
+      const result = await readMaterialWithDeadline(classes.materialsPage(workspace.id, nextCursor));
       if (!mounted.current || run !== request.current || moreRequest.current !== token) return;
       setItems((previous) => {
         const existing = new Set(previous?.map((item) => item.id));
         return [...(previous ?? []), ...result.materials.filter((item) => !existing.has(item.id))];
       });
-      setNextCursor(result.nextCursor);
+      seenCursors.current.add(nextCursor);
+      if (result.nextCursor && seenCursors.current.has(result.nextCursor)) {
+        setNextCursor(null);
+        setMoreError('較早教材未能繼續載入，請更新教材後再試。');
+      } else {
+        setNextCursor(result.nextCursor);
+      }
     } catch (failure) {
       if (!mounted.current || run !== request.current || moreRequest.current !== token) return;
-      if (failure instanceof NuniError && [403, 404].includes(failure.status)) {
+      if (failure instanceof NuniError && [401, 403, 404, 410].includes(failure.status)) {
         denied.current = true;
         setAccessDenied(true);
         setItems(null);
         setNextCursor(null);
         setNotice('');
-        setError(nuniErrorMessage(failure));
+        setError(materialFailureMessage(failure, !navigator.onLine));
       } else if (failure instanceof NuniError && failure.code === 'CLASS_WORKSPACE_MATERIAL_CURSOR_INVALID') {
         ++request.current;
         moreRequest.current = null;
         setReadingMore(false);
         setNextCursor(null);
-        setError(nuniErrorMessage(failure));
+        setError(materialFailureMessage(failure, !navigator.onLine));
       } else {
-        setMoreError(nuniErrorMessage(failure));
+        setMoreError(materialFailureMessage(failure, !navigator.onLine));
       }
     } finally {
       if (mounted.current && run === request.current && moreRequest.current === token) {
@@ -255,8 +265,16 @@ function Materials({
     !reading &&
     !readingMore &&
     !nextCursor &&
+    !moreError &&
+    !error &&
     !!linkedMaterial &&
     !items.some((item) => item.id === linkedMaterial);
+
+  useEffect(() => {
+    if (!linkedMaterial || (!accessDenied && !missingLinked)) return;
+    // Keep the explanation visible while removing the unavailable target from the address.
+    window.history.replaceState(window.history.state, '', window.location.pathname + window.location.search);
+  }, [accessDenied, linkedMaterial, missingLinked]);
 
   return (
     <section className={shared.panel} aria-labelledby={`materials-${workspace.id}`}>
@@ -275,8 +293,10 @@ function Materials({
         </button>
       </div>
       <p className={shared.muted}>
-        依週次或單元整理教材，可搜尋名稱與內容。
+        依週次或單元整理教材，可搜尋名稱與內容。閱讀教材不會算成作業完成。
       </p>
+      <p className={styles.note}>{materialCapabilities(workspace)}</p>
+      <a href={`/classroom/course/${encodeURIComponent(workspace.id)}`}>回課程首頁</a>
       {workspace.state === 'archived' && (
         <p className={styles.note}>課程已封存，教材保留供成員閱讀。</p>
       )}
@@ -344,6 +364,12 @@ function Materials({
                             </div>
                             <h3 id={`material-heading-${item.id}`}>{item.title}</h3>
                             <CourseText text={item.body} />
+                            <a href={courseMaterialHref(workspace.id, item.id)}>這份教材的連結</a>
+                            <button type="button" className={`${shared.button} ${shared.secondary}`}
+                              onClick={() => void shareCourseMaterial(item.title, courseMaterialHref(workspace.id, item.id))
+                                .then(setNotice).catch(() => setNotice('分享沒有完成，請使用這份教材的連結。'))}>
+                              分享／另存連結
+                            </button>
                             {described.open.href ? (
                               <a
                                 className={`${shared.button} ${styles.openAction}`}

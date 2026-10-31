@@ -534,3 +534,31 @@ it('keeps unread badges after a client clock tick without inventing a read', asy
   const card = await screen.findByRole('article', { name: material.title });
   expect(within(card).getByText('未讀')).toBeTruthy();
 });
+
+it.each([403, 404])('offers a safe course return for inaccessible material links (%i)', async (status) => {
+  window.history.replaceState(null, '', `/#material-${material.id}`);
+  state.request.mockRejectedValueOnce(new NuniError(status, 'REQUEST_FAILED'));
+  render(<CourseMaterials workspace={workspace} />);
+  expect(await screen.findByRole('alert')).toBeTruthy();
+  expect(screen.getByRole('link', { name: '回課程首頁' }).getAttribute('href')).toBe(`/classroom/course/${workspace.id}`);
+  expect(screen.queryByRole('article')).toBeNull();
+  expect(window.location.hash).toBe('');
+});
+it('keeps a safe course entry available after a linked material was deleted', async () => {
+  window.history.replaceState(null, '', '/#material-cwm_deleted');
+  render(<CourseMaterials workspace={workspace} />);
+  await screen.findByText(COURSE_WORK_MISSING_MATERIAL);
+  expect(window.location.hash).toBe('');
+  expect(screen.getByRole('link', { name: '回課程首頁' }).getAttribute('href')).not.toContain('#');
+});
+it('stops automatic target lookup on a repeated cursor', async () => {
+  window.history.replaceState(null, '', '/#material-cwm_missing');
+  state.request
+    .mockResolvedValueOnce({ materials: [material], nextCursor: 'page_a' })
+    .mockResolvedValueOnce({ materials: [material], nextCursor: 'page_b' })
+    .mockResolvedValueOnce({ materials: [material], nextCursor: 'page_a' });
+  render(<CourseMaterials workspace={workspace} />);
+  expect((await screen.findByRole('alert')).textContent).toContain('較早教材未能繼續載入');
+  expect(state.request).toHaveBeenCalledTimes(3);
+  expect(screen.queryByText(COURSE_WORK_MISSING_MATERIAL)).toBeNull();
+});
