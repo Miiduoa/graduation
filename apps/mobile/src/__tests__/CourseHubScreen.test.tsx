@@ -28,15 +28,17 @@ const data: CourseHubData = {
   assignments: { status: 'ready', items: [] },
 };
 const route = { params: { groupId: 'course-a', groupName: '過時的課名' } };
-const ActualDate = Date;
-class CourseTestDate extends ActualDate {
-  constructor(...args: unknown[]) {
-    super('2026-10-26T04:00:00Z');
-    return Reflect.construct(ActualDate, args.length ? args : ['2026-10-26T04:00:00Z'], new.target);
-  }
-}
 beforeEach(() => {
-  global.Date = CourseTestDate as DateConstructor;
+  // Keep weekly tasks before the fixed Oct 29 deadline, regardless of the run date or timezone.
+  jest.useFakeTimers({
+    now: new Date('2026-10-27T04:00:00Z'),
+    // Leave async rendering and navigation scheduling on real timers.
+    doNotFake: [
+      'setTimeout', 'clearTimeout', 'setInterval', 'clearInterval',
+      'setImmediate', 'clearImmediate', 'nextTick', 'queueMicrotask',
+      'requestAnimationFrame', 'cancelAnimationFrame', 'performance', 'hrtime',
+    ],
+  });
   jest.clearAllMocks();
   mockUser = { uid: 'alice' };
   mockSchool = { id: 'pu' };
@@ -44,7 +46,7 @@ beforeEach(() => {
   jest.mocked(webBrowserOpenWithPuTronClassGate).mockResolvedValue(true);
 });
 afterEach(() => {
-  global.Date = ActualDate;
+  jest.useRealTimers();
 });
 test('uses real course name with scoped useful actions and no invented outcomes', async () => {
   const navigation = { navigate: jest.fn() };

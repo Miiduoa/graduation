@@ -63,7 +63,7 @@ it('creates a workspace then asks the nuni invite API for 100 uses', async () =>
   fireEvent.submit(screen.getByLabelText('課班名稱').closest('form')!);
   await waitFor(() =>
     expect(mocks.replace).toHaveBeenCalledWith(
-      '/auth/platform/class-workspace/cw_11111111-1111-4111-8111-111111111111?invite=INVITE1',
+      '/classroom/course/cw_11111111-1111-4111-8111-111111111111?invite=INVITE1',
     ),
   );
   expect(mocks.create).toHaveBeenCalledWith('設計專題', expect.stringMatching(/^web-create-/));

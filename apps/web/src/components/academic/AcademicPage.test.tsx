@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { beforeEach, expect, it, vi } from 'vitest';
 import GradesPage from '@/app/grades/page';
 vi.mock('@/features/nuni/StudentGrades', () => ({ StudentGradesPage: () => <h1>nuni 成績</h1> }));
@@ -354,3 +354,187 @@ it.each(['guest', 'reconnect', 'unavailable'] as const)(
     if (state !== 'guest') expect(login.searchParams.get('reconnect')).toBe('school');
   },
 );
+
+it('clears private records synchronously when signing out', async () => {
+  navigation.search += '&tab=semester';
+  const view = render(<GradesPage />);
+  await screen.findByText('真實來源科目');
+  account.user = null;
+  account.studentId = false;
+  view.rerender(<GradesPage />);
+  expect(screen.queryByText('真實來源科目')).toBeNull();
+  expect(screen.getByRole('heading', { name: '這個功能還沒接通' })).toBeTruthy();
+  expect(screen.getByText('成績請先到學校的 e 校園查看。')).toBeTruthy();
+  expect(screen.queryByRole('link', { name: /學校帳號/ })).toBeNull();
+});
+
+it('ignores an old account response even after logging out and back into the same UID', async () => {
+  let finish!: (value: AcademicSnapshot<'grades'>) => void;
+  vi.mocked(loadAcademicRecords).mockImplementationOnce(
+    () =>
+      new Promise((resolve) => {
+        finish = resolve;
+      }),
+  );
+  navigation.search += '&tab=semester';
+  const view = render(<GradesPage />);
+  // 控制器會在 microtask 才開始讀取。先讓舊的進行中請求成立，再登出；
+  // 若在開始前就釋放，請求會整筆取消。
+  await waitFor(() => expect(loadAcademicRecords).toHaveBeenCalledTimes(1));
+  expect(loadAcademicRecords).toHaveBeenLastCalledWith('grades', 'one', 'pu');
+  account.user = null;
+  view.rerender(<GradesPage />);
+  account.user = { uid: 'one' };
+  view.rerender(<GradesPage />);
+  await screen.findByText('真實來源科目');
+  expect(loadAcademicRecords).toHaveBeenCalledTimes(2);
+  await act(async () => finish(grades('one', '舊回應不得出現')));
+  expect(screen.queryByText('舊回應不得出現')).toBeNull();
+  expect(screen.getByText('真實來源科目')).toBeTruthy();
+});
+
+it('removes the previous account transcript before loading the next account', async () => {
+  navigation.search += '&tab=semester';
+  const view = render(<GradesPage />);
+  await screen.findByText('真實來源科目');
+  vi.mocked(loadAcademicRecords).mockReturnValue(new Promise(() => {}));
+  account.user = { uid: 'two' };
+  view.rerender(<GradesPage />);
+  expect(screen.queryByText('真實來源科目')).toBeNull();
+  await waitFor(() =>
+    expect(loadAcademicRecords).toHaveBeenLastCalledWith('grades', 'two', 'pu'),
+  );
+});
+
+it('hides a Providence transcript immediately when switching to NTHU and does not query again', async () => {
+  navigation.search += '&tab=semester';
+  const view = render(<GradesPage />);
+  await screen.findByText('真實來源科目');
+  const callsBefore = vi.mocked(loadAcademicRecords).mock.calls.length;
+  setBrowse('nthu');
+  navigation.search += '&tab=semester';
+  view.rerender(<GradesPage />);
+  expect(screen.queryByText('真實來源科目')).toBeNull();
+  expect(screen.getByRole('heading', { name: '這所學校尚未提供官方成績來源' })).toBeTruthy();
+  expect(screen.getByText(/國立清華大學/)).toBeTruthy();
+  expect(screen.queryByRole('link', { name: /e 校園/ })).toBeNull();
+  expect(screen.queryByRole('link', { name: /連線學校帳號/ })).toBeNull();
+  expect(screen.getByRole('region', { name: '自行匯入的資料' })).toBeTruthy();
+  expect(vi.mocked(loadAcademicRecords).mock.calls.length).toBe(callsBefore);
+});
+
+it('does not query official records on an NTHU first visit and keeps personal import', async () => {
+  setBrowse('nthu');
+  navigation.search += '&tab=semester';
+  render(<GradesPage />);
+  expect(await screen.findByRole('heading', { name: '這所學校尚未提供官方成績來源' })).toBeTruthy();
+  expect(screen.getByRole('region', { name: '自行匯入的資料' })).toBeTruthy();
+  expect(screen.queryByText('真實來源科目')).toBeNull();
+  expect(loadAcademicRecords).not.toHaveBeenCalled();
+});
+
+it('does not query Providence for signed-in unresolved browse scopes', async () => {
+  setBrowse(null, { search: 'campus=all' });
+  navigation.search += '&tab=semester';
+  render(<GradesPage />);
+  expect(await screen.findByRole('heading', { name: '請先選擇一所學校' })).toBeTruthy();
+  expect(loadAcademicRecords).not.toHaveBeenCalled();
+});
+
+it('ignores an in-flight Providence response after leaving and returning to PU', async () => {
+  let finish!: (value: AcademicSnapshot<'grades'>) => void;
+  vi.mocked(loadAcademicRecords).mockImplementationOnce(
+    () =>
+      new Promise((resolve) => {
+        finish = resolve;
+      }),
+  );
+  navigation.search += '&tab=semester';
+  const view = render(<GradesPage />);
+  expect(await screen.findByText('正在向學校讀取資料…')).toBeTruthy();
+  await waitFor(() => expect(loadAcademicRecords).toHaveBeenCalledTimes(1));
+  setBrowse('nthu');
+  navigation.search += '&tab=semester';
+  view.rerender(<GradesPage />);
+  expect(screen.queryByText('真實來源科目')).toBeNull();
+  vi.mocked(loadAcademicRecords).mockResolvedValue(grades('one', '返回後的新資料'));
+  setBrowse('pu');
+  navigation.search += '&tab=semester';
+  view.rerender(<GradesPage />);
+  expect(await screen.findByText('返回後的新資料')).toBeTruthy();
+  await act(async () => finish(grades('one', '切校前的舊回應')));
+  expect(screen.queryByText('切校前的舊回應')).toBeNull();
+  expect(screen.getByText('返回後的新資料')).toBeTruthy();
+});
+
+it('guest NTHU shows school unavailable without school login or official query', async () => {
+  account.user = null;
+  account.studentId = true;
+  setBrowse('nthu');
+  navigation.search += '&tab=semester';
+  render(<GradesPage />);
+  expect(await screen.findByRole('heading', { name: '這所學校尚未提供官方成績來源' })).toBeTruthy();
+  expect(screen.getByText(/國立清華大學/)).toBeTruthy();
+  expect(screen.getByRole('region', { name: '自行匯入的資料' })).toBeTruthy();
+  expect(screen.queryByRole('link', { name: /學校帳號/ })).toBeNull();
+  expect(screen.queryByText('成績請先到學校的 e 校園查看。')).toBeNull();
+  expect(screen.queryByRole('link', { name: /e 校園/ })).toBeNull();
+  expect(screen.queryByRole('link', { name: /alcat/i })).toBeNull();
+  expect(loadAcademicRecords).not.toHaveBeenCalled();
+});
+
+it('never falls back to Providence for a valid unknown school id', async () => {
+  account.user = null;
+  account.studentId = true;
+  setBrowse('new-campus', { schoolName: '新接入校園' });
+  navigation.search += '&tab=semester';
+  render(<GradesPage />);
+  expect(await screen.findByRole('heading', { name: '這所學校尚未提供官方成績來源' })).toBeTruthy();
+  expect(screen.getByText(/新接入校園/)).toBeTruthy();
+  expect(screen.queryByRole('link', { name: /學校帳號/ })).toBeNull();
+  expect(screen.queryByText('成績請先到學校的 e 校園查看。')).toBeNull();
+  expect(loadAcademicRecords).not.toHaveBeenCalled();
+});
+
+it('never falls back to Providence for an invalid school id', async () => {
+  account.user = null;
+  account.studentId = true;
+  // Catalog rejects unknown ids → selectedSchool null → unselected (never PU).
+  setBrowse(null, { search: 'schoolId=not-a-real-school&campus=not-a-real-school' });
+  navigation.search += '&tab=semester';
+  render(<GradesPage />);
+  expect(await screen.findByRole('heading', { name: '請先選擇一所學校' })).toBeTruthy();
+  expect(screen.queryByRole('link', { name: /學校帳號/ })).toBeNull();
+  expect(screen.queryByText('成績請先到學校的 e 校園查看。')).toBeNull();
+  expect(loadAcademicRecords).not.toHaveBeenCalled();
+});
+
+it('keeps the next account grades when the previous account responds late', async () => {
+  navigation.search += '&tab=semester';
+  let finish!: (value: AcademicSnapshot<'grades'>) => void;
+  vi.mocked(loadAcademicRecords).mockImplementationOnce(() => new Promise((resolve) => {
+    finish = resolve;
+  }));
+  const view = render(<GradesPage />);
+  await waitFor(() => expect(loadAcademicRecords).toHaveBeenCalledWith('grades', 'one', 'pu'));
+  account.user = { uid: 'two' };
+  vi.mocked(loadAcademicRecords).mockResolvedValue(grades('two', '新帳號成績'));
+  view.rerender(<GradesPage />);
+  await screen.findByText('新帳號成績');
+  expect(loadAcademicRecords).toHaveBeenLastCalledWith('grades', 'two', 'pu');
+  await act(async () => finish(grades('one', '前帳號延遲成績')));
+  expect(screen.queryByText('前帳號延遲成績')).toBeNull();
+  expect(screen.getByText('新帳號成績')).toBeTruthy();
+});
+
+it.each(['loading', 'error'] as const)('hides semester grades while the campus catalog is %s', async (status) => {
+  navigation.search += '&tab=semester';
+  const view = render(<GradesPage />);
+  await screen.findByText('真實來源科目');
+  setBrowse(null, { catalogStatus: status, loading: status === 'loading', search: '' });
+  navigation.search += 'tab=semester';
+  view.rerender(<GradesPage />);
+  expect(screen.queryByText('真實來源科目')).toBeNull();
+  expect(screen.getByRole('heading', { name: status === 'loading' ? '正在確認所選校園…' : '暫時無法確認所選校園' })).toBeTruthy();
+  expect(loadAcademicRecords).toHaveBeenCalledTimes(1);
+});

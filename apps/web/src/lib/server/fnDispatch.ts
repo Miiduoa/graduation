@@ -1,3 +1,4 @@
+import { isSchoolLmsReadonlyEnabled } from './schoolLmsReadonly';
 import { isHostedWebCallable, isLeaveWebCallable, isSchoolLoginWebCallable } from '@/lib/hostedCallables';
 import { callableErrorBody, HttpsError } from './httpsError';
 import { isLeaveWebApiServerEnabled } from './leaveWebApiEnabled';
@@ -180,6 +181,9 @@ export async function dispatchFnRequest(
   request: Request,
   runtime?: FnRuntime | null,
 ): Promise<Response> {
+  if (name === 'getMyTronClassLms' && !isSchoolLmsReadonlyEnabled()) {
+    return callableResponse(new HttpsError('not-found', '玩課雲唯讀功能未啟用。'), request);
+  }
   const cors = corsHeaders(request);
 
   if (!isHostedWebCallable(name)) {
