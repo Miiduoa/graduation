@@ -154,6 +154,11 @@ function maskPrivateTables(text: string): { text: string; safe: boolean } {
   return { text: masked, safe: true };
 }
 
+/** 欄名比較共用正規化：忽略格式、空白、標點、符號與控制字元。 */
+function normalizePrivateField(value: string): string {
+  return value.normalize('NFKC').replace(/[\s\p{Cf}\p{P}\p{S}\p{Z}\p{Cc}]/gu, '');
+}
+
 /** 格式不完整的姓名欄不送出，保留在裝置上交由本機整理。 */
 export function isPersonalImportCloudMaskSafe(text: string, context = ''): boolean {
   const normalized = (context ? `${context}\n${text}` : text).normalize('NFKC');
@@ -162,7 +167,7 @@ export function isPersonalImportCloudMaskSafe(text: string, context = ''): boole
   if (normalized.split(/[\n\t,|;、/:=]/u).some((cell) => {
     const field = cell.replace(/\[(?:姓名|學號|證號|個資|聯絡資料)已遮罩\]/gu, '').trim().replace(/^"|"$/gu, '');
     if (/^[\p{L}\p{N}._%+-]+@(?:[\p{L}\p{N}-]+\.)+[\p{L}]{2,}$/iu.test(field)) return false;
-    const compact = field.normalize('NFKC').replace(/[\s_()（）:：-]/gu, '');
+    const compact = normalizePrivateField(field);
     return /姓名|名字|學號|學生|身分證|身份證|郵件|電郵|電話|手機|student|name|instructor|teacher|教授|教師|老師|email|phone|mobile/iu.test(compact) &&
       !privateField.test(field);
   })) return false;
@@ -194,15 +199,21 @@ export function isPersonalImportCloudMaskSafe(text: string, context = ''): boole
   // 已支援的欄名交由上面的欄界與遮罩檢查確認；其餘內容整段壓縮，
   // 才能看見跨行、任意 Unicode 標點或控制字元拆開的未知個資欄名。
   // 先移除遮罩標記，避免把標記內的「姓名／學號」當成尚未處理的個資。
-  const residual = maskPersonalImportText(normalized)
+  // 六碼以上的未明示數字串可能是學號；不可依賴一般數字備援遮罩而送出。
+  const masked = maskPersonalImportTextInternal(normalized, [], false);
+  if (/\d{6,}/u.test(masked)) return false;
+  const residual = normalizePrivateField(masked
     .replace(/\[(?:姓名|學號|證號|個資|聯絡資料)已遮罩\]/gu, '')
-    .replace(new RegExp(privateFieldPattern, 'giu'), '')
-    .replace(/[\s\p{P}\p{Z}\p{Cc}]/gu, '');
+    .replace(new RegExp(privateFieldPattern, 'giu'), ''));
   return !/姓名|名字|學號|學生|身分證|身份證|郵件|電郵|電話|手機|student|name|instructor|teacher|教授|教師|老師|email|phone|mobile/iu.test(residual);
 }
 
 /** 遮罩明示姓名欄、已知姓名，以及學號與身分證格式；保留課程數值。 */
 export function maskPersonalImportText(text: string, knownNames: readonly string[] = []): string {
+  return maskPersonalImportTextInternal(text, knownNames, true);
+}
+
+function maskPersonalImportTextInternal(text: string, knownNames: readonly string[], maskNumbers: boolean): string {
   let masked = text.normalize('NFKC');
   for (const name of knownNames) {
     const value = name.normalize('NFKC').trim();
@@ -216,12 +227,12 @@ export function maskPersonalImportText(text: string, knownNames: readonly string
       .replace(new RegExp(`((?:${PERSONAL_IMPORT_NAME_FIELD_PATTERN})[ ]+)([^\\s,;|:]{2,20})(?![ \\t]*[:=])`, 'giu'), '$1[姓名已遮罩]')
       .replace(/((?:學生)?學號|student\s*(?:id|number))([ \t]*[:=]?[ \t]*)[A-Za-z0-9_-]{4,24}/giu, '$1$2[學號已遮罩]')
   ).join('\n');
-  return masked
+  masked = masked
     .replace(/[\p{L}\p{N}._%+-]+@(?:[\p{L}\p{N}-]+\.)+[\p{L}]{2,}/giu, '[聯絡資料已遮罩]')
     .replace(/\(0[2-8]\)[ -]?\d{3,4}[ -]?\d{4}\b/gu, '[聯絡資料已遮罩]')
     .replace(/(?<![A-Za-z0-9])(?:\+?886[ -]?(?:0[ -]?)?|0)(?:9\d{2}[ -]?\d{3}[ -]?\d{3}|[2-8][ -]?\d{3,4}[ -]?\d{4})(?!\d)/gu, '[聯絡資料已遮罩]')
-    .replace(/\b[A-Z][12]\d{8}\b/giu, '[證號已遮罩]')
-    .replace(/\b[A-Z]{0,3}\d{7,12}\b/giu, '[學號已遮罩]');
+    .replace(/\b[A-Z][12]\d{8}\b/giu, '[證號已遮罩]');
+  return maskNumbers ? masked.replace(/\b[A-Z]{0,3}\d{7,12}\b/giu, '[學號已遮罩]') : masked;
 }
 
 /** 雲端片段取自整份文件的遮罩副本，本機與重試仍使用原始文字。 */

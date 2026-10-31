@@ -406,3 +406,16 @@ it('masks inline private continuations again on the server and preserves course 
   expect(String(fetcher.mock.calls[0][1].body)).not.toMatch(/王小明|李小華/);
   expect((await response.json()).sourceText).toContain('課程名稱,學分,成績\n微積分,3,85');
 });
+
+it.each(['姓\u200b名：王小明', '學\u200b號：123456', '教\u200b師：陳大文',
+  '姓\u00ad名：王小明', '學+號：123456', '教⋅師：陳大文',
+  '姓\u2060名：王小明', '教🟢師：陳大文', '編碼,123456', '編碼,１２３４５６７', '編碼,A12345678901234'])('格式符號或疑似學號不進入供應商本文：%s', async (head) => {
+  const { dependencies, fetcher, getQuotaStore } = setup();
+  const text = `${head}\n課程名稱,學分,成績\n微積分,3,85`;
+  for (const input of [{ text }, { text: '微積分,3,85', columnContext: head }]) {
+    expect((await handlePersonalImportCloud(request({ ...input, kind: 'grades' }), dependencies)).status).toBe(422);
+  }
+  expect(fetcher).not.toHaveBeenCalled();
+  expect(getQuotaStore).not.toHaveBeenCalled();
+  expect(JSON.stringify(fetcher.mock.calls)).not.toMatch(/王小明|123456|陳大文/);
+});

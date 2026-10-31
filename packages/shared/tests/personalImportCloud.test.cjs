@@ -181,3 +181,24 @@ for (const text of ['課程名稱,學分,成績\n微積分,3,85', '星期一 第
     assert.equal(sent.text, text);
   });
 }
+
+for (const head of ['姓\u200b名：王小明', '學\u200b號：123456', '教\u200b師：陳大文',
+  '姓\u00ad名：王小明', '學+號：123456', '教⋅師：陳大文',
+  '姓\u2060名：王小明', '教🟢師：陳大文', '編碼,123456', '編碼,１２３４５６７', '編碼,A12345678901234']) {
+  test(`格式符號或疑似學號在批次與實際請求均拒送：${head}`, async () => {
+    const text = `${head}\n課程名稱,學分,成績\n微積分,3,85`;
+    assert.equal(isPersonalImportCloudMaskSafe(text), false);
+    assert.equal(maskPersonalImportCloudBatch(text, { text, startLine: 1 }), null);
+    assert.equal(maskPersonalImportCloudBatch(text, { text: '微積分,3,85', startLine: 3 }), null);
+    for (const input of [{ text }, { text: '微積分,3,85', columnContext: head }]) {
+      const bodies = [];
+      const result = await requestPersonalImportCloud({ ...input, kind: 'grades', fetcher: async (_, init) => {
+        bodies.push(init.body);
+        return { ok: false, status: 503 };
+      } });
+      assert.equal(result.reason, 'invalid-input');
+      assert.deepEqual(bodies, []);
+      assert.equal(/王小明|123456|陳大文/.test(bodies.join('')), false);
+    }
+  });
+}
