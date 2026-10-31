@@ -1049,6 +1049,27 @@ it('keeps a failed withdrawal available for retry', async () => {
   expect(screen.getByRole('button', { name: '確認送出結果' })).toBeTruthy();
 });
 
+it('allows text revision after the deadline without a prohibition notice when file submission is disabled', () => {
+  state.fileSubmit = false;
+  const clock = vi.spyOn(Date, 'now').mockReturnValue(Date.parse('2026-10-10T12:00:00Z'));
+  try {
+    render(
+      <AssignmentCard
+        item={{ ...assignment, mySubmission: submission }}
+        workspace={{ ...workspace, memberRole: 'student' }}
+        reload={reload}
+      />,
+    );
+    expect(screen.getByLabelText('我的繳交紀錄')).toBeTruthy();
+    expect(screen.getByText('修改繳交內容')).toBeTruthy();
+    expect(screen.getByRole('button', { name: '更新繳交內容' })).toBeTruthy();
+    expect(screen.queryByText('已過截止時間，這份繳交不能再修改或撤回。')).toBeNull();
+    expect(screen.queryByRole('button', { name: '撤回繳交' })).toBeNull();
+  } finally {
+    clock.mockRestore();
+  }
+});
+
 it('shows the deadline state without revision or withdrawal controls', () => {
   state.fileSubmit = true;
   render(

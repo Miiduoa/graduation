@@ -299,7 +299,7 @@ function Assignment({ item, workspace, onConfirmed }: Props) {
           <p>撤回後，老師就看不到這份繳交內容。</p>
         </MutationForm>
       )}
-      {student && assignment.mySubmission && !canRevise && <p>已過截止時間，這份繳交不能再修改或撤回。</p>}
+      {student && fileSubmit && assignment.mySubmission && !canRevise && <p>已過截止時間，這份繳交不能再修改或撤回。</p>}
       {student && active && (recovering || (open && (!fileSubmit || !assignment.mySubmission || canRevise))) && (
         <details open={!assignment.mySubmission} className={`${shared.compose} ${styles.compose}`}>
           <summary>{assignment.mySubmission ? '修改繳交內容' : '繳交這份作業'}</summary>
