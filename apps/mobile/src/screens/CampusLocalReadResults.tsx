@@ -6,11 +6,21 @@ import { LOCAL_READ_LIMIT, type LocalCampusReadResult } from '../services/localC
 const SOURCE = {
   'saved-timetable': '手機已保存課表',
   'synced-summary': '先前主動同步摘要',
-  combined: '手機課表與授權摘要',
+  combined: '手機課表／授權摘要',
 };
 const ROUTES: Record<LocalCampusReadResult['route'], string> = {
   '/timetable': '個人課表', '/classroom': '課程與作業', '/announcements': '校園公告',
 };
+
+function evidenceDate(checkedAt?: string | null): string {
+  if (!checkedAt) return '資料時間未提供';
+  const timestamp = Date.parse(checkedAt);
+  if (!Number.isFinite(timestamp)) return '資料時間無法確認';
+  return '資料時間 ' + new Intl.DateTimeFormat('zh-TW', {
+    timeZone: 'Asia/Taipei',
+    month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit',
+  }).format(new Date(timestamp));
+}
 
 export function CampusLocalReadResults({ results, disabled, onOpenRoute }: {
   results: readonly LocalCampusReadResult[];
@@ -42,7 +52,7 @@ export function CampusLocalReadResults({ results, disabled, onOpenRoute }: {
             >
               <Text style={{ color: aiTokens.text, fontWeight: '700', fontSize: 14 }}>{item.label} {open ? '−' : '+'}</Text>
               <Text style={{ color: item.status === 'available' ? aiTokens.muted : aiTokens.warning, fontSize: 12 }}>
-                {item.status === 'available' ? '已核對可用資料' : '資料不足，需確認來源'} · {SOURCE[item.source]}
+                {item.status === 'available' ? '已核對可用資料' : '資料不足，需確認來源'} · {SOURCE[item.source]} · {evidenceDate(item.checkedAt)}
               </Text>
             </TouchableOpacity>
             {open ? (

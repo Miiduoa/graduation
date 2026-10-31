@@ -122,6 +122,23 @@ export const MODEL_REGISTRY: Record<string, LLMConfig> = {
     threads: 4,
     gpuLayers: 99,
   },
+  // Optional 1.7B on-device model; native compatibility must be checked on
+  // a real iOS/Android build before changing the default model.
+  'qwen3-1.7b': {
+    modelId: 'qwen3-1.7b',
+    modelUrl:
+      'https://huggingface.co/ggml-org/Qwen3-1.7B-GGUF/resolve/main/Qwen3-1.7B-Q4_K_M.gguf',
+    modelFileName: 'Qwen3-1.7B-Q4_K_M.gguf',
+    modelSize: 1_280_000_000,
+    contextLength: 4096,
+    maxTokens: 1024,
+    temperature: 0.5,
+    topP: 0.9,
+    topK: 40,
+    repeatPenalty: 1.08,
+    threads: 4,
+    gpuLayers: 99,
+  },
   // ── 進階模型 (~4-5GB) — 7B 參數級 ──
   'qwen2.5-7b': {
     modelId: 'qwen2.5-7b',

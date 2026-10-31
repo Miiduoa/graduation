@@ -175,3 +175,38 @@ test('does not reload or steal another screen\'s model after selection', async (
   expect(mockLoad).not.toHaveBeenCalled();
   expect(mockGenerate).toHaveBeenCalledTimes(1);
 });
+
+test('on-device multi-source trace shows each executed tool only after selection', async () => {
+  const stages: string[] = [];
+  mockGenerate.mockResolvedValueOnce(selected([
+    { tool: 'timetable', day: 'tomorrow' },
+    { tool: 'assignments' },
+  ]));
+  const response = await askCampusAssistant({
+    ...request(), onProgress: (stage) => stages.push(stage),
+  });
+  expect(stages).toEqual([
+    'reading-context', 'checking-sources', 'checking-model',
+    'checking-tools', 'reading-sources', 'reading-sources', 'checking-result',
+  ]);
+  expect(response.localReads?.[0].checkedAt).toBe(mockContext.timetable.updatedAt);
+  expect(response.localReads?.[1].checkedAt).toBe(snapshot().checkedAt);
+  expect(response.localReads?.[0].status).toBe('available');
+  expect(httpsCallable).not.toHaveBeenCalled();
+});
+
+test('cancelled tool selection never announces reads or a verified response', async () => {
+  const controller = new AbortController();
+  const stages: string[] = [];
+  mockGenerate.mockImplementationOnce(async () => {
+    controller.abort();
+    return selected([{ tool: 'assignments' }]);
+  });
+  await expect(askCampusAssistant({
+    ...request(), signal: controller.signal,
+    onProgress: (stage) => stages.push(stage),
+  })).rejects.toMatchObject({ code: 'cancelled' });
+  expect(stages).toContain('checking-tools');
+  expect(stages).not.toContain('reading-sources');
+  expect(stages).not.toContain('checking-result');
+});

@@ -25,6 +25,8 @@ export interface LocalCampusReadResult {
   route: '/timetable' | '/classroom' | '/announcements';
   status: 'available' | 'unavailable';
   source: 'saved-timetable' | 'synced-summary' | 'combined';
+  /** Timestamp from the source record, never the local inference completion time. */
+  checkedAt?: string | null;
 }
 
 function object(value: unknown): value is Record<string, unknown> {

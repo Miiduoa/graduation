@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState, useSyncExternalStore } from 'react';
-import { Linking, Text, TextInput, View } from 'react-native';
+import { AppState, Linking, Text, TextInput, View } from 'react-native';
 import { resolveSchoolPublicServices } from '@campus/shared/src/schoolPublicServices';
 import { AIDetailScreen, AICard, AIButton, aiTokens } from '../ui/aiFirst';
 import { getThemeVersion, subscribeToTheme } from '../ui/theme';
@@ -11,6 +11,7 @@ import {
   OnDeviceAssistantError,
   type CampusAssistantMessage,
   type CampusAssistantMode,
+  type CampusAssistantProgressPhase,
   type OnDeviceAssistantReadiness,
 } from '../features/campusAssistant';
 import type { ServiceScreenProps } from './UnavailableFeatureScreen';
@@ -19,6 +20,7 @@ import { getMobileQuickActions } from '../services/quickCampusActions';
 import type { CampusAgentWriteProposal, CampusAgentWriteTool } from '../features/campusAssistantActions';
 import { CampusAgentActionReview } from './CampusAgentActionReview';
 import { CampusSenseDashboard } from './CampusSenseDashboard';
+import { CampusAttentionCard } from './CampusAttentionCard';
 import { CampusEvidencePlanCard } from './CampusEvidencePlanCard';
 import { CampusLocalReadResults } from './CampusLocalReadResults';
 import type { LocalCampusReadResult } from '../services/localCampusToolProtocol';
@@ -30,6 +32,18 @@ import {
   type CampusSenseSnapshot,
   type CampusSenseProgress,
 } from '../services/campusSenseSnapshot';
+
+const ASSISTANT_PROGRESS_LABELS: Record<CampusAssistantProgressPhase, string> = {
+  'reading-context': '正在讀取手機已保存的課表',
+  'checking-sources': '正在確認校園資料來源與有效時間',
+  'checking-model': '正在檢查手機 AI 模型',
+  'loading-model': '正在載入免費手機模型',
+  'checking-tools': '模型正在選擇可用的本機查詢工具',
+  'reading-sources': '正在讀取已授權的校園資料',
+  composing: '手機模型正在整理回覆',
+  'querying-campus': '正在向已登入的校園服務查詢',
+  'checking-result': '正在核對本次查詢結果',
+};
 
 const SERVICE_AFTER_WRITE: Record<CampusAgentWriteTool, string> = {
   submitLeaveRequest: 'CoursesHome',
@@ -54,6 +68,13 @@ const VERIFIED_SERVICE_ROUTES: Record<string, { route: string; label: string }> 
   '/library': { route: 'Library', label: '圖書館' },
   '/dms': { route: 'Dms', label: '私訊' },
 };
+
+/** Only the currently connected assignment/announcement summary can resolve these requests. */
+function canRefreshMissingCampusEvidence(route: string | undefined, question: string): boolean {
+  if (route === '/announcements') return /公告|通知/.test(question);
+  if (route === '/classroom') return /作業|待交|待繳|繳交期限/.test(question);
+  return false;
+}
 
 function isTransientCampusSyncError(error: unknown): boolean {
   const candidate = error && typeof error === 'object'
@@ -124,6 +145,8 @@ function AssistantConversation({
   const [senseError, setSenseError] = useState('');
   const syncLock = useRef(false);
   const [deviceCheck, setDeviceCheck] = useState(0);
+  const [workbenchOpen, setWorkbenchOpen] = useState(false);
+  const [agentStage, setAgentStage] = useState<CampusAssistantProgressPhase | null>(null);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
   const [linkError, setLinkError] = useState('');
@@ -149,6 +172,16 @@ function AssistantConversation({
       inFlight.current = null;
     };
   }, []);
+  // Native timers can pause while the app is in the background. Revalidate
+  // the 15-minute source window when the student returns to the foreground.
+  useEffect(() => {
+    const subscription = AppState.addEventListener('change', (state) => {
+      if (state === 'active' && mounted.current && isScopeCurrent()) {
+        refreshSenseAge((revision) => revision + 1);
+      }
+    });
+    return () => subscription.remove();
+  }, []);
   const current = () => mounted.current && isScopeCurrent();
   useEffect(() => {
     let active = true;
@@ -163,7 +196,14 @@ function AssistantConversation({
     if (lock.current || syncLock.current || next === mode) return;
     setMode(next);
     setMessages([]);
+    setWorkbenchOpen(false);
+    setAgentStage(null);
     setError('');
+  };
+  const reportAgent = (controller: AbortController) => (phase: CampusAssistantProgressPhase) => {
+    if (current() && !controller.signal.aborted && inFlight.current === controller) {
+      setAgentStage(phase);
+    }
   };
   const progressFor = (controller: AbortController) => (progress: CampusSenseProgress) => {
     if (current() && !controller.signal.aborted && inFlight.current === controller) setSyncProgress(progress);
@@ -178,6 +218,7 @@ function AssistantConversation({
     inFlight.current = controller;
     setSyncBusy(true);
     setSyncProgress(null);
+    setWorkbenchOpen(false);
     setSenseError('');
     try {
       const snapshot = await refreshCampusSenseSnapshot({
@@ -204,12 +245,13 @@ function AssistantConversation({
       }
     }
   };
-  const briefPlan = async (question: string) => {
+  const briefPlan = async (question: string, replaceMissingSourceAnswer = false) => {
     if (!uid || lock.current || syncLock.current || !current()) return;
     lock.current = true;
     syncLock.current = true;
     setBusy(true);
     setSyncBusy(true);
+    setAgentStage(null);
     setSyncProgress(null);
     setError('');
     setSenseError('');
@@ -242,8 +284,16 @@ function AssistantConversation({
       if (!current() || controller.signal.aborted) return;
       setSyncBusy(false);
       setSyncProgress(null);
+      // A source-refresh retry replaces only its own previous unavailable answer.
+      // It must not remove unrelated conversation turns or duplicate the request.
+      const last = messages[messages.length - 1];
+      const previous = messages[messages.length - 2];
+      const replacePrevious = replaceMissingSourceAnswer &&
+        last?.role === 'assistant' && last.tool === 'online-required' &&
+        previous?.role === 'user' && previous.content === question;
       const next: CampusAssistantMessage[] = [
-        ...messages, { role: 'user', content: question },
+        ...(replacePrevious ? messages.slice(0, -2) : messages),
+        { role: 'user', content: question },
       ];
       // Reuse the phone's deterministic read-only tools before asking its GGUF.
       const reply = await askCampusAssistant({
@@ -254,6 +304,7 @@ function AssistantConversation({
         mode: 'device',
         isCurrent: current,
         signal: controller.signal,
+        onProgress: reportAgent(controller),
       });
       if (controller.signal.aborted && current()) {
         setError('已停止這次本地整理，沒有將取消後的回答加入對話。');
@@ -291,6 +342,7 @@ function AssistantConversation({
         setBusy(false);
         setSyncBusy(false);
         setSyncProgress(null);
+        setAgentStage(null);
       }
     }
   };
@@ -300,6 +352,7 @@ function AssistantConversation({
     if ((!uid && mode === 'campus') || !question || lock.current || syncLock.current || !current()) return;
     lock.current = true;
     setBusy(true);
+    setAgentStage(null);
     setError('');
     const controller = new AbortController();
     inFlight.current = controller;
@@ -312,6 +365,7 @@ function AssistantConversation({
         messages: next,
         isCurrent: current,
         mode,
+        onProgress: reportAgent(controller),
         ...(mode === 'device' ? { signal: controller.signal } : {}),
       });
       if (controller.signal.aborted && current()) {
@@ -360,7 +414,10 @@ function AssistantConversation({
     } finally {
       if (inFlight.current === controller) inFlight.current = null;
       lock.current = false;
-      if (current()) setBusy(false);
+      if (current()) {
+        setBusy(false);
+        setAgentStage(null);
+      }
     }
   };
   return (
@@ -422,6 +479,14 @@ function AssistantConversation({
           )}
         </View>
       </AICard>
+      {mode === 'device' && currentSense && !workbenchOpen &&
+        !messages.some((item) => item.role === 'assistant' && (item.plan || item.localReads?.length)) ? (
+        <CampusAttentionCard
+          snapshot={currentSense}
+          context={{ userId: uid, schoolId, isCurrent: current, navigation }}
+          disabled={busy || syncBusy}
+        />
+      ) : null}
       {mode === 'device' ? (
         <CampusSenseDashboard
           snapshot={currentSense}
@@ -437,6 +502,8 @@ function AssistantConversation({
             cancelledSync();
           }}
           assignmentContext={{ userId: uid, schoolId, isCurrent: current, navigation }}
+          workbenchOpen={workbenchOpen}
+          onWorkbenchChange={setWorkbenchOpen}
           onSync={() => void syncCampus()}
           onBrief={() => void briefPlan('今天要先處理什麼？')}
           onWeekBrief={() => void briefPlan('依手機課表與授權作業安排接下來七天的學習計畫')}
@@ -540,6 +607,22 @@ function AssistantConversation({
                   : undefined}
               />
             ))}
+          {message.role === 'assistant' && message.source === 'device' &&
+            message.tool === 'online-required' && uid && index === messages.length - 1 &&
+            messages[index - 1]?.role === 'user' &&
+            canRefreshMissingCampusEvidence(message.route, messages[index - 1].content) ? (
+              <View style={{ marginTop: 12, gap: 6 }}>
+                <AIButton
+                  label="更新授權資料，再由手機回答（需網路）"
+                  variant="ghost"
+                  disabled={busy || syncBusy}
+                  onPress={() => void briefPlan(messages[index - 1].content, true)}
+                />
+                <Text style={{ color: aiTokens.muted, fontSize: 12, lineHeight: 19 }}>
+                  只在你點擊後向校園服務讀取帳號可存取的摘要；問題仍交由手機端處理，不會自動提交作業或申請。
+                </Text>
+              </View>
+            ) : null}
           {message.role === 'assistant' && message.source === 'device' && (
             <Text style={{ color: aiTokens.muted, fontSize: 12, marginTop: 10 }}>
               {message.tool === 'local-agent'
@@ -640,6 +723,29 @@ function AssistantConversation({
                 ))}
                 <Text style={{ color: aiTokens.muted, fontSize: 12 }}>
                   只是開啟頁面，提交或付款仍要自行確認。
+                </Text>
+              </View>
+            ) : null}
+            {busy && agentStage ? (
+              <View
+                accessibilityLiveRegion="polite"
+                style={{
+                  borderWidth: 1,
+                  borderColor: aiTokens.border,
+                  backgroundColor: aiTokens.panel,
+                  borderRadius: 12,
+                  paddingVertical: 12,
+                  paddingHorizontal: 14,
+                  gap: 5,
+                }}
+              >
+                <Text style={{ color: aiTokens.text, fontSize: 14, fontWeight: '600' }}>
+                  {ASSISTANT_PROGRESS_LABELS[agentStage]}
+                </Text>
+                <Text style={{ color: aiTokens.muted, fontSize: 12, lineHeight: 18 }}>
+                  {mode === 'device'
+                    ? '處理會在這台裝置完成；來源不足時會標示，不會假裝已完成服務操作。'
+                    : '連線查詢須通過帳號與服務權限核對；不代表已完成申請或交易。'}
                 </Text>
               </View>
             ) : null}

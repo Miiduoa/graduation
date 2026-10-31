@@ -18,6 +18,8 @@ export async function resolveLocalCampusSemanticReads(input: {
   uid: string;
   schoolId: string;
   assertCurrent: () => void;
+  /** Fired only when an allowed local read is about to run. */
+  onReadStart?: () => void;
   generate: (messages: NonNullable<ReturnType<typeof localCampusReadPrompt>>) => Promise<{
     content: string; finishReason: string;
   }>;
@@ -39,6 +41,8 @@ export async function resolveLocalCampusSemanticReads(input: {
   const results: LocalCampusReadResult[] = [];
   for (const [index, call] of plan.calls.entries()) {
     input.assertCurrent();
+    input.onReadStart?.();
+    input.assertCurrent();
     const now = Date.now();
     // Do not extend snapshot life by starting a long native inference.
     const sense = validCampusSenseSnapshot(input.snapshot, scope, now);
@@ -50,12 +54,18 @@ export async function resolveLocalCampusSemanticReads(input: {
       : call.tool === 'assignments' ? sense?.assignments.status === 'available'
       : call.tool === 'announcements' ? sense?.announcements.status === 'available'
       : context.timetable.source === 'saved-device-copy' || Boolean(sense);
+    const checkedAt = call.tool === 'timetable'
+      ? context.timetable.updatedAt
+      : call.tool === 'study-plan'
+        ? sense?.checkedAt ?? context.timetable.updatedAt
+        : sense?.checkedAt ?? null;
     results.push({
       id: call.tool + ':' + index,
       label: query.label,
       content: answer?.content || '目前沒有足夠且可核對的本機資料，請先在對應服務儲存或同步資料。',
       route: query.route,
       source: query.source,
+      checkedAt,
       status: available && answer && answer.tool !== 'online-required' ? 'available' : 'unavailable',
     });
   }

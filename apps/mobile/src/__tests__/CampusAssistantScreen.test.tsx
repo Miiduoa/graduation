@@ -1,4 +1,5 @@
 import React from 'react';
+import { AppState } from 'react-native';
 import { act, fireEvent, render, waitFor } from '@testing-library/react-native';
 import { AIOverlayHost } from '../components/AIOverlayHost';
 import { CampusAssistantScreen } from '../screens/CampusAssistantScreen';
@@ -754,4 +755,104 @@ test('no real due time means the agent never offers a notification action', asyn
   expect(view.getByText('沒有截止日期的練習')).toBeTruthy();
   expect(view.queryByText('設定手機本機截止提醒')).toBeNull();
   expect(scheduleCampusAssignmentReminder).not.toHaveBeenCalled();
+});
+
+test('shows a real in-flight device stage and clears it after the answer', async () => {
+  const pending = deferred<{ content: string; hasActions: boolean; source: 'device' }>();
+  request.mockImplementationOnce(({ onProgress }: { onProgress: (stage: string) => void }) => {
+    onProgress('reading-context');
+    return pending.promise;
+  });
+  const view = render(<CampusAssistantScreen />);
+  fireEvent.changeText(view.getByLabelText('詢問校園助理'), '幫我整理這週作業');
+  act(() => fireEvent.press(view.getByText('送出問題')));
+  expect(view.getByText('正在讀取手機已保存的課表')).toBeTruthy();
+  await act(async () => {
+    pending.resolve({ content: '已整理可確認的資訊', hasActions: false, source: 'device' });
+  });
+  expect(view.queryByText('正在讀取手機已保存的課表')).toBeNull();
+  expect(view.getByText('已整理可確認的資訊')).toBeTruthy();
+});
+
+test('a user-confirmed refresh replaces the missing-source reply without duplicate questions', async () => {
+  const question = '幫我查最新待交作業';
+  const verified = {
+    userId: 'A', schoolId: 'pu', checkedAt: new Date().toISOString(),
+    schedule: { status: 'unavailable', count: null },
+    assignments: {
+      status: 'available', count: 1,
+      items: [{ title: '已同步的課堂作業', groupName: '程式設計', dueAt: null }],
+    },
+    announcements: { status: 'unavailable', items: [] },
+  };
+  request
+    .mockResolvedValueOnce({
+      content: '需要正式資料來源才能核實', source: 'device',
+      tool: 'online-required', route: '/classroom', hasActions: false,
+    })
+    .mockResolvedValueOnce({
+      content: '已依授權資料整理作業', source: 'device',
+      tool: 'campus-snapshot', hasActions: false,
+    });
+  jest.mocked(refreshCampusSenseSnapshot).mockResolvedValueOnce(verified as never);
+  const view = render(<CampusAssistantScreen />);
+  fireEvent.changeText(view.getByLabelText('詢問校園助理'), question);
+  await act(async () => fireEvent.press(view.getByText('送出問題')));
+  expect(view.getByText('需要正式資料來源才能核實')).toBeTruthy();
+  const refresh = view.getByText('更新授權資料，再由手機回答（需網路）');
+  await act(async () => fireEvent.press(refresh));
+  expect(refreshCampusSenseSnapshot).toHaveBeenCalledTimes(1);
+  expect(jest.mocked(refreshCampusSenseSnapshot).mock.calls[0][0].scope).toEqual({ uid: 'A', schoolId: 'pu' });
+  expect(request.mock.calls[1][0]).toMatchObject({
+    mode: 'device',
+    senseSnapshot: verified,
+    messages: [{ role: 'user', content: question }],
+  });
+  expect(view.getByText('已依授權資料整理作業')).toBeTruthy();
+  expect(view.queryByText('需要正式資料來源才能核實')).toBeNull();
+});
+
+test('does not offer a school-snapshot refresh for unrelated live bus information', async () => {
+  request.mockResolvedValueOnce({
+    content: '公車到站時間需要即時資訊',
+    source: 'device', tool: 'online-required',
+    route: '/bus', hasActions: false,
+  });
+  const view = render(<CampusAssistantScreen />);
+  fireEvent.changeText(view.getByLabelText('詢問校園助理'), '公車還有幾分鐘到站？');
+  await act(async () => fireEvent.press(view.getByText('送出問題')));
+  expect(view.getByText('公車到站時間需要即時資訊')).toBeTruthy();
+  expect(view.queryByText('更新授權資料，再由手機回答（需網路）')).toBeNull();
+  expect(refreshCampusSenseSnapshot).not.toHaveBeenCalled();
+});
+
+test('source cards expire on foreground resume even when native background timers were suspended', async () => {
+  const now = Date.parse('2026-10-29T10:00:00Z');
+  const incoming = {
+    userId: 'A', schoolId: 'pu', checkedAt: new Date(now).toISOString(),
+    schedule: { status: 'unavailable', count: null },
+    assignments: { status: 'available', count: 1, items: [
+      { title: '最近需要核對的作業', groupName: '資料庫', dueAt: new Date(now + 3600_000).toISOString() },
+    ] },
+    announcements: { status: 'unavailable', items: [] },
+  };
+  const handlers: Array<(state: string) => void> = [];
+  jest.spyOn(Date, 'now').mockReturnValue(now);
+  jest.spyOn(AppState, 'addEventListener').mockImplementation((_event, listener) => {
+    handlers.push(listener as (state: string) => void);
+    return { remove: jest.fn() } as never;
+  });
+  jest.mocked(refreshCampusSenseSnapshot).mockResolvedValueOnce(incoming as never);
+  try {
+    const view = render(<CampusAssistantScreen />);
+    await act(async () => fireEvent.press(view.getByText('同步我的校園資料')));
+    expect(view.getByText('先確認這幾件事')).toBeTruthy();
+    expect(view.getByText('最近需要核對的作業')).toBeTruthy();
+    jest.mocked(Date.now).mockReturnValue(now + 16 * 60_000);
+    act(() => handlers.forEach((listener) => listener('active')));
+    expect(view.queryByText('最近需要核對的作業')).toBeNull();
+    expect(view.getByText('校園摘要已過期，請重新同步')).toBeTruthy();
+  } finally {
+    jest.restoreAllMocks();
+  }
 });

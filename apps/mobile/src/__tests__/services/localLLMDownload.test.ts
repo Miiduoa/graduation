@@ -194,3 +194,27 @@ test('generates with the token format of the actually loaded GGUF model', async 
   expect(qwenParams.prompt).toContain('<|im_start|>user\nPlan today');
   expect(qwenParams.stop).toEqual(['<|im_end|>', '<|im_start|>']);
 });
+
+test('Qwen3 1.7B uses the verified free GGUF endpoint and non-thinking local prompt', async () => {
+  const { MODEL_REGISTRY } = require('../../services/localLLMInference');
+  expect(MODEL_REGISTRY['qwen3-1.7b']).toMatchObject({
+    modelFileName: 'Qwen3-1.7B-Q4_K_M.gguf',
+    modelUrl: 'https://huggingface.co/ggml-org/Qwen3-1.7B-GGUF/resolve/main/Qwen3-1.7B-Q4_K_M.gguf',
+    modelSize: 1_280_000_000,
+  });
+  mockGetInfo.mockResolvedValue({ exists: true, size: 1_280_000_000 });
+  await expect(engine.loadModel('qwen3-1.7b')).resolves.toBe(true);
+  await engine.generate({
+    messages: [
+      { role: 'system', content: '請用繁體中文回答' },
+      { role: 'user', content: '幫我整理本週行程' },
+    ],
+  });
+  const params = mockCompletion.mock.calls.at(-1)?.[0];
+  expect(params.prompt).toContain('幫我整理本週行程\n/no_think<|im_end|>');
+  expect(params.stop).toEqual(['<|im_end|>', '<|im_start|>']);
+  expect(mockInitLlama).toHaveBeenCalledWith(expect.objectContaining({
+    n_ctx: 4096,
+    n_gpu_layers: 99,
+  }));
+});

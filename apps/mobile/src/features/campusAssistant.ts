@@ -9,6 +9,18 @@ export type CampusAssistantMessage = { role: 'user' | 'assistant'; content: stri
 export type CampusAssistantScope = { uid: string; schoolId: string };
 export type CampusAssistantMode = 'device' | 'campus';
 
+/** Observable checkpoints, not estimated progress or a model-generated narrative. */
+export type CampusAssistantProgressPhase =
+  | 'reading-context'
+  | 'checking-sources'
+  | 'checking-model'
+  | 'loading-model'
+  | 'checking-tools'
+  | 'reading-sources'
+  | 'composing'
+  | 'querying-campus'
+  | 'checking-result';
+
 export interface OnDeviceAssistantReadiness {
   available: boolean;
   modelId: string;
@@ -65,6 +77,7 @@ export async function askCampusAssistant(input: {
   isCurrent: () => boolean;
   /** Optional per-request native cancellation; never cancels unrelated tasks. */
   signal?: AbortSignal;
+  onProgress?: (phase: CampusAssistantProgressPhase) => void;
   schoolName?: string | null;
   /** Authorized campus reads are only used after an explicit user refresh. */
   senseSnapshot?: CampusSenseSnapshot | null;
@@ -88,6 +101,11 @@ export async function askCampusAssistant(input: {
   };
   assertNotCancelled();
   scopeCheck(input, mode === 'campus');
+  const report = (phase: CampusAssistantProgressPhase) => {
+    scopeCheck(input, mode === 'campus');
+    assertNotCancelled();
+    input.onProgress?.(phase);
+  };
   const messages = input.messages
     .slice(-20)
     .map((message) => ({
@@ -100,6 +118,7 @@ export async function askCampusAssistant(input: {
   }
 
   if (mode === 'device') {
+    report('reading-context');
     const { collectOnDeviceSchoolContext, formatOnDeviceSchoolPrompt } =
       require('../services/onDeviceSchoolContext') as typeof import('../services/onDeviceSchoolContext');
     const { runOfflineCampusTool } =
@@ -117,8 +136,10 @@ export async function askCampusAssistant(input: {
     // Safe read-only tools run even without a GGUF download or a native runtime.
     // They do not query a backend, perform mutations, or invent missing school data.
     const senseSnapshot = validCampusSenseSnapshot(input.senseSnapshot, input.scope);
+    report('checking-sources');
     const localAnswer = runOfflineCampusTool(messages[messages.length - 1].content, snapshot, senseSnapshot, uid);
     if (localAnswer) {
+      report('checking-result');
       return {
         content: localAnswer.content,
         hasActions: false,
@@ -130,6 +151,7 @@ export async function askCampusAssistant(input: {
     }
 
     const { localLLM } = engine();
+    report('checking-model');
     const readiness = await getOnDeviceAssistantReadiness();
     scopeCheck(input, false);
     assertNotCancelled();
@@ -143,6 +165,7 @@ export async function askCampusAssistant(input: {
     }
     if (!readiness.ready) throw new OnDeviceAssistantError('model-required');
     if (state.status !== 'ready' || state.modelId !== readiness.modelId) {
+      report('loading-model');
       const loaded = await localLLM.loadModel(readiness.modelId);
       scopeCheck(input, false);
       assertNotCancelled();
@@ -153,10 +176,12 @@ export async function askCampusAssistant(input: {
     // bounded reads. Facts are still produced by scoped deterministic tools.
     const { resolveLocalCampusSemanticReads } = require('../services/localCampusSemanticReads') as
       typeof import('../services/localCampusSemanticReads');
+    report('checking-tools');
     const selectedReads = await resolveLocalCampusSemanticReads({
       messages, context: snapshot, snapshot: senseSnapshot,
       uid, schoolId: input.scope.schoolId,
       assertCurrent: () => { scopeCheck(input, false); assertNotCancelled(); },
+      onReadStart: () => report('reading-sources'),
       generate: (prompt) => localLLM.generate({
         messages: prompt, maxTokens: 192, temperature: 0,
         signal: input.signal,
@@ -167,6 +192,7 @@ export async function askCampusAssistant(input: {
       throw error;
     });
     if (selectedReads) {
+      report('checking-result');
       return {
         content: selectedReads.content,
         hasActions: false, source: 'device', tool: 'local-agent',
@@ -190,6 +216,7 @@ export async function askCampusAssistant(input: {
       role: message.role,
       content: message.content.slice(0, compact ? 160 : 220),
     }));
+    report('composing');
     const completion = await localLLM.generate({
       messages: [
         { role: 'system', content: formatOnDeviceSchoolPrompt(
@@ -211,6 +238,7 @@ export async function askCampusAssistant(input: {
     assertNotCancelled();
     const answer = completion.content.replace(/<think>[\s\S]*?<\/think>/g, '').trim();
     if (!answer || answer.includes('<think>')) throw new OnDeviceAssistantError('model-failed');
+    report('checking-result');
     return { content: answer, hasActions: false, source: 'device' };
   }
 
@@ -221,6 +249,7 @@ export async function askCampusAssistant(input: {
   const schoolName = typeof input.schoolName === 'string'
     ? input.schoolName.trim().slice(0, 160)
     : '';
+  report('querying-campus');
   const result = await callable({
     messages,
     context: {
@@ -232,6 +261,7 @@ export async function askCampusAssistant(input: {
     },
   });
   scopeCheck(input, true);
+  report('checking-result');
   if (result.data.error ||
       !['completed', 'blocked'].includes(result.data.run?.status ?? '') ||
       typeof result.data.content !== 'string' || !result.data.content.trim()) {
