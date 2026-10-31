@@ -96,6 +96,16 @@ const nextConfig: NextConfig = {
           ...securityHeaders,
         ],
       },
+      ...['/classroom', '/classroom/:path*'].map((source) => ({
+        source,
+        headers: [{
+          key: 'Content-Security-Policy',
+          value: contentSecurityPolicy.replace(
+            "object-src 'none'",
+            "object-src blob:; frame-src 'self' blob:",
+          ),
+        }],
+      })),
       {
         source: '/documents/reader.html',
         headers: [
