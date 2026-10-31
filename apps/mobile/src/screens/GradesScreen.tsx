@@ -1,3 +1,4 @@
+import { formatTaipeiDateTime } from '@campus/shared/src/taipeiTime';
 /* eslint-disable @typescript-eslint/no-unused-vars, react-hooks/exhaustive-deps */
 import React, { useMemo, useState, useEffect, useCallback } from 'react';
 import { ScrollView, Text, View, Pressable, Alert, RefreshControl, Linking } from 'react-native';
@@ -212,7 +213,7 @@ function GradeCard({ course }: { course: Grade }) {
             {course.courseCode} · {course.credits} 學分 · {course.instructor}
           </Text>
           <Text style={{ color: theme.colors.muted, fontSize: 12 }}>
-            來源：{course.gradeSource?.startsWith('school-official') ? '校方正式' : course.gradeSource === 'firebase-course' ? 'nuni 課程' : '未知'} · 公布時間：{course.publishedAt || '未知'} · 點選查看原始紀錄
+            來源：{course.gradeSource?.startsWith('school-official') ? '校方正式' : course.gradeSource === 'firebase-course' ? 'nuni 課程' : '未知'} · 公布時間：{(course.publishedAt ? formatTaipeiDateTime(course.publishedAt) : '') || '未知'} · 點選查看原始紀錄
           </Text>
         </View>
 
@@ -365,7 +366,7 @@ export function GradesScreen(props: Record<string, unknown>) {
     }
 
     for (const sem of semesterMap.values()) {
-      const completedCourses = sem.courses.filter((c) => c.status === 'completed' && typeof c.gpa === 'number' && Number.isFinite(c.gpa));
+      const completedCourses = sem.courses.filter((c) => c.status === 'completed' && typeof c.gpa === 'number' && Number.isFinite(c.gpa) && Number.isFinite(c.credits) && c.credits > 0);
       if (completedCourses.length > 0) {
         const totalPoints = completedCourses.reduce((sum, c) => sum + (c.gpa ?? 0) * c.credits, 0);
         const totalCredits = completedCourses.reduce((sum, c) => sum + c.credits, 0);
@@ -397,8 +398,8 @@ export function GradesScreen(props: Record<string, unknown>) {
   }, [allCourses]);
 
   const overallGPA = useMemo(() => {
-    if (gpaData) return gpaData.gpa;
-    const numericCourses = completedCourses.filter((c) => typeof c.gpa === 'number' && Number.isFinite(c.gpa));
+    if (gpaData && gpaData.totalCredits > 0 && Number.isFinite(gpaData.totalCredits) && Number.isFinite(gpaData.gpa)) return gpaData.gpa;
+    const numericCourses = completedCourses.filter((c) => typeof c.gpa === 'number' && Number.isFinite(c.gpa) && Number.isFinite(c.credits) && c.credits > 0);
     if (numericCourses.length === 0) return null;
     const totalPoints = numericCourses.reduce((sum, c) => sum + (c.gpa ?? 0) * c.credits, 0);
     const totalCredits = numericCourses.reduce((sum, c) => sum + c.credits, 0);

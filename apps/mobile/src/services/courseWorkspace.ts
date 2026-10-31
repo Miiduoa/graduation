@@ -227,8 +227,9 @@ export function toDate(value: unknown): Date | null {
 }
 
 export function formatDateTime(date: Date | null, fallback = '未設定時間') {
-  if (!date) return fallback;
+  if (!date || !Number.isFinite(date.getTime())) return fallback;
   return date.toLocaleString('zh-TW', {
+    timeZone: 'Asia/Taipei',
     month: 'numeric',
     day: 'numeric',
     hour: '2-digit',
@@ -725,13 +726,13 @@ export async function startAttendanceSession(
 export async function listCourseGradebook(db: Firestore, groupId: string) {
   const [groupSnap, assignmentSnap, gradebookSnap, memberSnap] = await Promise.all([
     getDoc(doc(db, 'groups', groupId)),
-    getDocs(collection(db, 'groups', groupId, 'assignments')).catch(() => null),
-    getDocs(collection(db, 'groups', groupId, 'gradebook')).catch(() => null),
-    getDocs(collection(db, 'groups', groupId, 'members')).catch(() => null),
+    getDocs(collection(db, 'groups', groupId, 'assignments')),
+    getDocs(collection(db, 'groups', groupId, 'gradebook')),
+    getDocs(collection(db, 'groups', groupId, 'members')),
   ]);
 
   const assignments = (assignmentSnap?.docs ?? [])
-    .map((docSnap) => ({
+    .map((docSnap): Record<string, unknown> & { id: string } => ({
       id: docSnap.id,
       ...(docSnap.data() as Record<string, unknown>),
     }))
@@ -745,10 +746,10 @@ export async function listCourseGradebook(db: Firestore, groupId: string) {
     assignments.map(async (assignment) => {
       const submissionsSnap = await getDocs(
         collection(db, 'groups', groupId, 'assignments', assignment.id, 'submissions'),
-      ).catch(() => null);
+      );
       return {
         assignmentId: assignment.id,
-        submissions: (submissionsSnap?.docs ?? []).map((docSnap) => ({
+        submissions: (submissionsSnap?.docs ?? []).map((docSnap): Record<string, unknown> & { uid: string } => ({
           uid: docSnap.id,
           ...(docSnap.data() as Record<string, unknown>),
         })),
@@ -765,7 +766,7 @@ export async function listCourseGradebook(db: Firestore, groupId: string) {
   }
 
   const studentMembers = (memberSnap?.docs ?? [])
-    .map((docSnap) => ({
+    .map((docSnap): Record<string, unknown> & { uid: string } => ({
       uid: docSnap.id,
       ...(docSnap.data() as Record<string, unknown>),
     }))

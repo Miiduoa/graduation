@@ -129,6 +129,7 @@ test('grades show source scores and exclude other accounts, schools and unpublis
   ).toBeNull();
   expect(view.queryByText(/GPA|3\.63|61%|15 \/ 89|預測/)).toBeNull();
   expect(firebaseSource.listGrades).toHaveBeenCalledWith('user-a', undefined, 'school-a');
+  expect(view.getByText(/公布時間：2000\/1\/1 上午8:00:00/)).toBeTruthy();
   fireEvent.press(view.getByText('查看課內成績'));
   expect(safeNavigate).toHaveBeenCalledWith(mockNavigation, 'LearnHome');
 });

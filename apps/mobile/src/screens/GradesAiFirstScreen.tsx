@@ -1,3 +1,4 @@
+import { formatTaipeiDateTime } from '@campus/shared/src/taipeiTime';
 import React, { useCallback, useRef, useState, useSyncExternalStore } from 'react';
 import { ActivityIndicator, Linking, Text, View } from 'react-native';
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
@@ -93,7 +94,7 @@ export default function GradesAiFirstScreen() {
               <AIRow
                 key={grade.id}
                 title={grade.courseName || '課程成績'}
-                subtitle={[grade.gradeSource === 'school-official' || grade.gradeSource === 'school-official-offline' ? '來源：校方正式' : '來源：nuni 課程', grade.semester, credits, `公布時間：${grade.publishedAt || '未知'}`].filter(Boolean).join(' · ')}
+                subtitle={[grade.gradeSource === 'school-official' || grade.gradeSource === 'school-official-offline' ? '來源：校方正式' : '來源：nuni 課程', grade.semester, credits, `公布時間：${(grade.publishedAt ? formatTaipeiDateTime(grade.publishedAt) : '') || '未知'}`].filter(Boolean).join(' · ')}
                 onPress={() => grade.gradeSource?.startsWith('school-official') ? void Linking.openURL('https://ecampus.pu.edu.tw/') : safeNavigate(navigation, 'CourseGradebook', { groupId: grade.courseId, groupName: grade.courseName })}
                 tag={result}
               />
