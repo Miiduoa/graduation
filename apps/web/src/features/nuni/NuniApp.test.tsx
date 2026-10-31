@@ -608,3 +608,21 @@ it('withholds learning metrics and receipt time when only the parent assignment 
   fireEvent.click(screen.getByRole('button', { name: '更新內容' }));
   await screen.findByText('已繳交或作答');
 });
+
+it('離開作業分頁停止自動作業讀取，回作業才補讀', async () => {
+  const view = render(<NuniApp />);
+  await screen.findByRole('heading', { name: '設計專題' });
+  fireEvent.click(screen.getByRole('tab', { name: '作業' }));
+  await act(async () => {});
+  vi.useFakeTimers();
+  try {
+    fireEvent.click(screen.getByRole('tab', { name: '教材' }));
+    await act(async () => {});
+    const before = mocks.request.mock.calls.filter(([path]) => path.endsWith('/assignments')).length;
+    await act(async () => { await vi.advanceTimersByTimeAsync(30000); });
+    expect(mocks.request.mock.calls.filter(([path]) => path.endsWith('/assignments'))).toHaveLength(before);
+    await act(async () => { fireEvent.click(screen.getByRole('tab', { name: '作業' })); });
+    expect(mocks.request.mock.calls.filter(([path]) => path.endsWith('/assignments'))).toHaveLength(before + 1);
+    view.unmount();
+  } finally { vi.useRealTimers(); }
+});

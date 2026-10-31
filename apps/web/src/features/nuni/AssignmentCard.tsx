@@ -1,5 +1,7 @@
 'use client';
 
+import { startAssignmentLive, assignmentReader, assignmentSyncLabel, type AssignmentSync } from '@campus/shared/src/assignmentLive';
+import { assignmentLifecycle } from './assignmentLifecycle';
 import { useEffect, useRef, useState } from 'react';
 import {
   NuniError,
@@ -39,6 +41,8 @@ import shared from './NuniApp.module.css';
 import styles from './CourseLearning.module.css';
 
 type Props = {
+  receiptActive?: boolean;
+  onOpenReceipts?: () => void;
   item: NuniAssignment;
   syncVersion?: string | null;
   workspace: NuniWorkspace;
@@ -101,7 +105,7 @@ export function AssignmentCard(props: Props) {
   );
 }
 
-function Assignment({ item, workspace, onConfirmed, syncVersion }: Props) {
+function Assignment({ item, workspace, onConfirmed, syncVersion, receiptActive = true, onOpenReceipts }: Props) {
   const { session } = useNuniSession();
   const classes = useClasses();
   const fileSubmit = session?.assignmentFileSubmit === true;
@@ -129,35 +133,32 @@ function Assignment({ item, workspace, onConfirmed, syncVersion }: Props) {
   const [queueNotice, setQueueNotice] = useState('');
   const mounted = useRef(true);
   const request = useRef(0);
+  const receiptReader = useRef(assignmentReader<NuniSubmission[]>());
   const submissionsRef = useRef<NuniSubmission[] | null>(null);
   const receiptNodes = useRef(new Map<string, HTMLElement | null>());
-  const liveReceiptRead = useRef({ classes, opened: false });
+  const liveReceiptRead = useRef(classes);
+  useEffect(() => { liveReceiptRead.current = classes; });
+  const [receiptSync, setReceiptSync] = useState<AssignmentSync>({ state: 'paused', updatedAt: null });
+  const receiptsOpened = submissions !== null;
   useEffect(() => {
-    liveReceiptRead.current = { classes, opened: submissions !== null };
-  });
-  useEffect(() => {
-    if (!syncVersion || !liveReceiptRead.current.opened || workspace.memberRole === 'student')
-      return;
-    let active = true;
-    const run = ++request.current;
-    void liveReceiptRead.current.classes
-      .submissions(workspace.id, item.id)
-      .then((rows) => {
-        if (active && document.visibilityState !== 'hidden' && request.current === run)
-          setSubmissions(rows);
-      })
-      .catch((failure) => {
-        if (!active || request.current !== run) return;
-        if (failure instanceof NuniError && [401, 403, 404].includes(failure.status)) {
-          setSubmissions(null);
-          setAccessDenied(true);
-        }
-        setError(nuniErrorMessage(failure));
-      });
-    return () => {
-      active = false;
-    };
-  }, [syncVersion, workspace.id, workspace.memberRole, item.id]);
+    if (!receiptsOpened || reading || !receiptActive || accessDenied || workspace.memberRole === 'student') return;
+    let valid = true;
+    const lifecycle = assignmentLifecycle();
+    const stop = startAssignmentLive({
+      ...lifecycle,
+      initialDelay: 2500,
+      read: () => receiptReader.current(() => {
+        if (!valid || !lifecycle.active() || !lifecycle.online())
+          return Promise.reject(new Error('讀取已失效'));
+        return liveReceiptRead.current.submissions(workspace.id, item.id);
+      }),
+      revision: () => request.current,
+      receive: (rows) => { setSubmissions(rows); setError(''); },
+      clear: () => { setSubmissions(null); setAccessDenied(true); },
+      status: setReceiptSync,
+    });
+    return () => { valid = false; stop(); };
+  }, [receiptsOpened, reading, receiptActive, accessDenied, workspace.id, workspace.memberRole, item.id]);
   const FEEDBACK_FILTERS: FeedbackQueueFilter[] = ['all', 'needs_feedback', 'reviewed'];
   const orderedSubmissions = submissions === null ? null : sortFeedbackQueue(submissions);
   const visibleCount =
@@ -190,11 +191,12 @@ function Assignment({ item, workspace, onConfirmed, syncVersion }: Props) {
   const canRevise = assignmentCanRevise(assignment.dueAt);
 
   async function readSubmissions() {
+    onOpenReceipts?.();
     const run = ++request.current;
     setError('');
     setReading(true);
     try {
-      const result = await classes.submissions(workspace.id, item.id);
+      const result = await receiptReader.current(() => classes.submissions(workspace.id, item.id));
       if (mounted.current && run === request.current) {
         setSubmissions(result);
         setFeedbackFilter(
@@ -452,6 +454,7 @@ function Assignment({ item, workspace, onConfirmed, syncVersion }: Props) {
               </button>
             )}
           </div>
+          {submissions !== null && <p>收件：{receiptActive ? assignmentSyncLabel(receiptSync) : '已暫停更新'}{receiptSync.updatedAt ? ` · 最後更新 ${formatTaipeiDateTime(receiptSync.updatedAt, { seconds: true })}` : ''}</p>}
           {error && (
             <p role="alert" className={shared.notice}>
               {error}

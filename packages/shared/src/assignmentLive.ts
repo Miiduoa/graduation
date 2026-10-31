@@ -6,6 +6,7 @@ export type AssignmentSync = {
 /** 自有課程沿用授權清單端點；同時最多一筆請求，離開前景即失效。 */
 export function startAssignmentLive<T>(options: {
   read(): Promise<T>;
+  initialDelay?: number;
   receive(value: T): void;
   revision?(): number;
   clear(): void;
@@ -19,6 +20,7 @@ export function startAssignmentLive<T>(options: {
   let timer: ReturnType<typeof setTimeout> | undefined;
   let updatedAt: string | null = null;
   let denied = false;
+  let failures = 0;
   let reading = false;
   let resume = false;
   let stopEvents: (() => void) | null = null;
@@ -39,11 +41,13 @@ export function startAssignmentLive<T>(options: {
         restart();
         return;
       }
+      failures = 0;
       options.receive(value);
       updatedAt = new Date().toISOString();
       status('synced');
     } catch (error) {
       if (stopped || version !== run) return;
+      failures = Math.min(failures + 1, 5);
       const code = error as { status?: number; code?: string };
       if ([401, 403, 404].includes(code.status ?? 0) || code.code === 'SESSION_CHANGED') {
         denied = true;
@@ -62,7 +66,7 @@ export function startAssignmentLive<T>(options: {
     if (!stopped && version === run && !denied)
       timer = setTimeout(() => {
         void read(run);
-      }, 2500);
+      }, Math.min(60000, 2500 * 2 ** failures));
   }
   function restart() {
     version += 1;
@@ -83,7 +87,9 @@ export function startAssignmentLive<T>(options: {
     void read(version);
   }
   stopEvents = options.subscribe(restart);
-  restart();
+  if (options.initialDelay && !reading && options.active() && options.online())
+    timer = setTimeout(restart, options.initialDelay);
+  else if (!reading) restart();
   return () => {
     stopped = true;
     version += 1;
@@ -100,4 +106,16 @@ export function assignmentSyncLabel(value: AssignmentSync): string {
     error: '暫時無法更新',
     paused: '已暫停更新',
   }[value.state];
+}
+
+/** 跨手動更新、分頁與前景切換，實際讀取仍依序完成。 */
+export function assignmentReader<T>() {
+  let pending: Promise<unknown> | null = null;
+  return (read: () => Promise<T>): Promise<T> => {
+    const next = pending ? pending.then(read, read) : read();
+    pending = next;
+    const done = () => { if (pending === next) pending = null; };
+    void next.then(done, done);
+    return next;
+  };
 }

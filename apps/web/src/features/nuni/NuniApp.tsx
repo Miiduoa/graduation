@@ -1,4 +1,5 @@
 'use client';
+import { assignmentLifecycle } from './assignmentLifecycle';
 import {
   startAssignmentLive,
   assignmentSyncLabel,
@@ -98,6 +99,7 @@ function Workspace({ id }: { id: string }) {
     assignments: NuniAssignment[];
   } | null>(null);
   const [error, setError] = useState('');
+  const { panel: requestedTab, navigate: setTab, courseListHref } = useCoursePanel();
   const assignmentRevision = useRef(0);
   const liveClasses = useRef(classes);
   useEffect(() => {
@@ -112,7 +114,7 @@ function Workspace({ id }: { id: string }) {
       setData(null);
       return;
     }
-    let pageHidden = false;
+    if (requestedTab !== 'assignments') return;
     return startAssignmentLive({
       read: () => liveClasses.current.assignments(id),
       revision: () => assignmentRevision.current,
@@ -123,37 +125,13 @@ function Workspace({ id }: { id: string }) {
         setError('目前無法存取這門課程，請重新確認登入與課程權限。');
       },
       status: setAssignmentSync,
-      active: () => !pageHidden && document.visibilityState !== 'hidden',
-      online: () => navigator.onLine !== false,
-      subscribe: (changed) => {
-        const hide = () => {
-          pageHidden = true;
-          changed();
-        };
-        const show = () => {
-          pageHidden = false;
-          changed();
-        };
-        window.addEventListener('pagehide', hide);
-        window.addEventListener('pageshow', show);
-        document.addEventListener('visibilitychange', changed);
-        window.addEventListener('online', changed);
-        window.addEventListener('offline', changed);
-        return () => {
-          window.removeEventListener('pagehide', hide);
-          window.removeEventListener('pageshow', show);
-          document.removeEventListener('visibilitychange', changed);
-          window.removeEventListener('online', changed);
-          window.removeEventListener('offline', changed);
-        };
-      },
+      ...assignmentLifecycle(),
     });
     // 清單服務每次繪製會重建，透過 ref 讀取當前授權實例。
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [id, session?.context, pendingLogout]);
+  }, [id, session?.context, pendingLogout, requestedTab]);
   const [epoch, setEpoch] = useState(0);
   const [code, setCode] = useState(params.get('invite') || '');
-  const { panel: requestedTab, navigate: setTab, courseListHref } = useCoursePanel();
   const now = useClientNow();
   const [units, setUnits] = useState<NuniUnit[] | null>(null);
   const [unitsError, setUnitsError] = useState('');
@@ -516,6 +494,7 @@ function Workspace({ id }: { id: string }) {
                 : ' · 尚未確認最新狀態'}
             </p>
             <CourseAssignments
+              liveActive={tab === 'assignments'}
               key={`${data.workspace.memberRole}:${data.workspace.state}`}
               assignments={data.assignments}
               syncVersion={assignmentSync.updatedAt}

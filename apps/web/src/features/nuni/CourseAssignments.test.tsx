@@ -395,3 +395,22 @@ it('separates overdue reference dates from still-open future work without blocki
   expect(screen.queryByRole('article', { name: later.title })).toBeNull();
   expect(screen.queryByRole('article', { name: submitted.title })).toBeNull();
 });
+
+it('多份收件已開啟時只自動讀取最後選取的一份', async () => {
+  request.mockResolvedValue({ submissions: [] });
+  const view = render(<CourseAssignments assignments={[task, submitted]} workspace={{ ...workspace, memberRole: 'owner-teacher' }} reload={vi.fn()} onConfirmed={vi.fn()} />);
+  const first = within(screen.getByRole('article', { name: task.title }));
+  const second = within(screen.getByRole('article', { name: submitted.title }));
+  await act(async () => { fireEvent.click(first.getByRole('button', { name: '查看繳交內容' })); });
+  await act(async () => { fireEvent.click(second.getByRole('button', { name: '查看繳交內容' })); });
+  vi.useFakeTimers();
+  try {
+    await act(async () => { window.dispatchEvent(new Event('pageshow')); });
+    const before = request.mock.calls.length;
+    await act(async () => { await vi.advanceTimersByTimeAsync(7500); });
+    expect(request).toHaveBeenCalledTimes(before + 3);
+    expect(request.mock.calls.slice(before).every(([path]) => path.includes(submitted.id))).toBe(true);
+    expect(first.getByText(/收件：已暫停更新/)).toBeTruthy();
+    view.unmount();
+  } finally { vi.useRealTimers(); }
+});

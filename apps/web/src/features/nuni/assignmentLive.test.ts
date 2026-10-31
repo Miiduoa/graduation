@@ -138,3 +138,41 @@ it('本機送出確認後不採用較早開始的清單讀取', async () => {
   expect(receive).toHaveBeenCalledWith('新收據');
   stop();
 });
+
+it('失敗採指數退避，成功後恢復正常間隔', async () => {
+  vi.useFakeTimers();
+  const read = vi.fn().mockRejectedValue({ status: 429 });
+  const status = vi.fn();
+  const stop = startAssignmentLive({ read, receive: vi.fn(), clear: vi.fn(), status,
+    active: () => true, online: () => true, subscribe: () => () => {} });
+  await vi.advanceTimersByTimeAsync(0);
+  for (const wait of [5000, 10000, 20000, 40000, 60000]) {
+    const before = read.mock.calls.length;
+    await vi.advanceTimersByTimeAsync(wait - 1);
+    expect(read).toHaveBeenCalledTimes(before);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(read).toHaveBeenCalledTimes(before + 1);
+  }
+  read.mockResolvedValue([]);
+  await vi.advanceTimersByTimeAsync(60000);
+  expect(status.mock.lastCall?.[0].state).toBe('synced');
+  const before = read.mock.calls.length;
+  await vi.advanceTimersByTimeAsync(2500);
+  expect(read).toHaveBeenCalledTimes(before + 1);
+  stop();
+});
+
+it('一分鐘正常前景流量上限為主清單 25 次及選取的收件 24 次', async () => {
+  vi.useFakeTimers();
+  const main = vi.fn().mockResolvedValue([]);
+  const receipts = vi.fn().mockResolvedValue([]);
+  const options = { receive: vi.fn(), clear: vi.fn(), status: vi.fn(), active: () => true,
+    online: () => true, subscribe: () => () => {} };
+  const stopMain = startAssignmentLive({ ...options, read: main });
+  const stopReceipts = startAssignmentLive({ ...options, read: receipts, initialDelay: 2500 });
+  await vi.advanceTimersByTimeAsync(60000);
+  expect(main).toHaveBeenCalledTimes(25);
+  expect(receipts).toHaveBeenCalledTimes(24);
+  stopMain();
+  stopReceipts();
+});
