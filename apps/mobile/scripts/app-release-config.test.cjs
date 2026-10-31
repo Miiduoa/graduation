@@ -65,7 +65,12 @@ test('production resolves with public service configuration and no school accoun
   assert.equal(app.android.package, 'com.nuni.app');
   assert.equal(app.ios.bundleIdentifier, 'com.nuni.app');
   assert.equal(app.extra.eas.projectId, '8955b97c-802c-463c-bd1d-d5f02e30a966');
-  assert.equal(app.runtimeVersion, 'campus-one-native-photo-pdf-1');
+  assert.deepEqual(app.extra.eas.build.experimental.ios.appExtensions, [{
+    targetName: 'CampusWidgetExtension', bundleIdentifier: 'com.nuni.app.widget',
+    entitlements: { 'com.apple.security.application-groups': ['group.com.nuni.app'] },
+  }]);
+  assert.ok(app.ios.config && typeof app.ios.config === 'object');
+  assert.equal(app.runtimeVersion, 'campus-one-native-photo-pdf-widget-1');
   assert.equal(app.updates.url, `https://u.expo.dev/${app.extra.eas.projectId}`);
   assert.equal(app.extra.firebase.projectId, 'campus-one-tw');
   assert.equal(app.extra.legalBaseUrl, 'https://nuni.tw');
@@ -155,8 +160,17 @@ test('optional native Maps configuration and Google bundle validation still work
 
 test('預覽與正式版使用獨立且包含影像模組的新執行版本', () => {
   const preview = config({ APP_ENV: 'preview' });
-  assert.equal(preview.runtimeVersion, 'campus-preview-native-photo-pdf-1');
+  assert.equal(preview.runtimeVersion, 'campus-preview-native-photo-pdf-widget-1');
   assert.notEqual(preview.runtimeVersion, config().runtimeVersion);
   const updates = readFileSync(resolve(appRoot, 'ios/mobile/Supporting/Expo.plist'), 'utf8');
   assert.ok(updates.includes(preview.runtimeVersion));
+});
+
+test('widgets require explicit opt-in in every environment including absent metadata', () => {
+  for (const environment of [undefined, '', 'development', 'preview', 'production']) {
+    for (const value of [undefined, '', 'false']) {
+      assert.equal(config({ APP_ENV: environment, EXPO_PUBLIC_FEATURE_WIDGETS: value }).extra.release.features.widgets, false);
+    }
+    assert.equal(config({ APP_ENV: environment, EXPO_PUBLIC_FEATURE_WIDGETS: 'true', EXPO_PUBLIC_RELEASED_SCHOOL_IDS: 'synthetic-school' }).extra.release.features.widgets, true);
+  }
 });

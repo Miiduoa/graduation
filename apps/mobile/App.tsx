@@ -1,3 +1,4 @@
+import { useNextClassWidget } from './src/widgets/useNextClassWidget';
 /* eslint-disable */
 import { useSubmittedAssignmentReminders } from './src/app/useSubmittedAssignmentReminders';
 import React, { useEffect, useRef, useState, useMemo, useCallback } from 'react';
@@ -160,6 +161,7 @@ const linkingBase: LinkingOptions<RootTabParamList> = {
           TeachingHub: 'teaching',
           AdminDashboard: 'admin',
           CourseSchedule: 'schedule',
+          PersonalTimetable: 'personal-timetable',
           AddCourse: 'course/new',
           CourseHub: 'course-hub',
           CourseCatalog: 'course-catalog',
@@ -504,6 +506,7 @@ function TokenErrorHandler() {
 }
 
 function AuthAwareStateProviders({ children }: { children: React.ReactNode }) {
+  useNextClassWidget();
   const auth = useAuth();
   const { school } = useSchool();
   const schoolSessionReady = hasReadySchoolSession(auth, school?.id ?? null);

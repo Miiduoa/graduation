@@ -70,12 +70,7 @@ tags:
 - takeScreenshot: platform_account_state
 
 # On iOS the navigation header owns the back action.
-- tapOn:
-    id: BackButton
-- extendedWaitUntil:
-    visible:
-      id: login-landing
-    timeout: 20000
+- runFlow: ../helpers/return-to-landing.yaml
 - scrollUntilVisible:
     element:
       id: school-import-start
@@ -110,12 +105,7 @@ tags:
 - assertNotVisible:
     id: login-landing
 - takeScreenshot: personal_import_entry
-- tapOn:
-    id: BackButton
-- extendedWaitUntil:
-    visible:
-      id: login-landing
-    timeout: 20000
+- runFlow: ../helpers/return-to-landing.yaml
 
 # Retain the public map entry assertion after bringing it into the viewport.
 - scrollUntilVisible:
