@@ -8,10 +8,14 @@ import {
   type CreditScenario, type CreditScenarioPreset,
 } from '@campus/shared/src/creditPlanScenarios';
 import styles from './CreditPlanScenarios.module.css';
+import type { CreditScenarioWriter } from '@campus/shared/src/creditScenarioAdoption';
+import { CreditScenarioAdoptionActions } from './CreditScenarioAdoptionActions';
 
 const number = (value: number | null) => value === null ? '未設定' : formatCredits(value);
 
-export function CreditPlanScenarios({ plan }: { plan: CreditPlan }) {
+export function CreditPlanScenarios({ plan, scenarioWriter, scenarioBlocked }: {
+  plan: CreditPlan; scenarioWriter?: CreditScenarioWriter; scenarioBlocked?: string;
+}) {
   const [scenario, setScenario] = useState<{ source: CreditPlan; value: CreditScenario } | null>(null);
   const [query, setQuery] = useState('');
   const [term, setTerm] = useState<number | null>(null);
@@ -68,6 +72,9 @@ export function CreditPlanScenarios({ plan }: { plan: CreditPlan }) {
     <div className={styles.body}>
       <p className={styles.note}>比較以這裡已加入規劃的課程為準，不包含尚未按「加入規劃」的課程表單。已選課狀態也由你手動標示，所有結果仍是假設通過且可採計。</p>
       {!validPlan ? <p className={styles.warning}>請先修正原規劃的無效欄位，再開始比較。</p> : null}
+        <CreditScenarioAdoptionActions plan={plan} candidate={comparison?.plan ?? null}
+          writer={scenarioWriter} blocked={scenarioBlocked}
+          onApplied={() => { setScenario(null); setNotice(null); }} />
       {!plan.courses.length ? <p className={styles.empty}>先在課程清單加入一門課，就能比較不同修法。</p> : <>
         <div className={styles.actions}>
           <button type="button" disabled={!validPlan} onClick={() => begin('all')}>以全部課程開始比較</button>
@@ -119,7 +126,7 @@ export function CreditPlanScenarios({ plan }: { plan: CreditPlan }) {
           {comparison.afterInsights.possibleRetakes.length ? <p className={styles.warning}>此方案仍有同名課程，可能重複採計。比較沒有把課名相同視為同一門正式課程，請向系辦核對。</p> : null}
           <div className={styles.footer}>
             <strong>原規劃仍完整保留</strong>
-            <p>「不排入」不代表退選，也不刪除校方紀錄。要保留這個比較方案，先匯出 JSON，再由現有匯入流程確認採用；請另外保留原規劃備份。</p>
+            <p>「不排入」不代表退選，也不刪除校方紀錄。可直接預覽並採用；需要跨裝置移轉時，仍可匯出 JSON 備份。請另外保留原規劃備份。</p>
             <button type="button" disabled={!comparison.changed} onClick={exportScenario}>匯出此比較方案 JSON</button>
           </div>
         </> : null}

@@ -4,6 +4,7 @@ import type { CreditPlan } from '@campus/shared/src/creditPlanner';
 import {
   readMobileCreditPlan,
   writeMobileCreditPlan,
+  replaceReviewedCreditPlan,
 } from '../../features/academics/creditPlanRepository';
 import {
   createCreditPlanSession,
@@ -53,6 +54,7 @@ export function useCreditPlanningWorkspace(scopeKey: string) {
     next: CreditPlan,
     notice: string,
     ticket = state.ticket,
+    comparison?: { expected: CreditPlan; isCurrent: () => boolean },
   ): Promise<SavedPlan | null> {
     if (state.phase === 'loading' || !session.isLive(ticket)) return null;
     if (!session.isCurrent(ticket)) {
@@ -62,7 +64,12 @@ export function useCreditPlanningWorkspace(scopeKey: string) {
     if (!session.acquire(ticket)) return null;
     setSaving(true);
     try {
-      await writeMobileCreditPlan(scopeKey, next);
+      if (comparison) {
+        await replaceReviewedCreditPlan(scopeKey, comparison.expected, next,
+          () => session.isCurrent(ticket) && comparison.isCurrent());
+      } else {
+        await writeMobileCreditPlan(scopeKey, next);
+      }
       const savedTicket = session.finish(ticket, true);
       if (!savedTicket) return null;
       setState({ phase: 'ready', plan: next, ticket: savedTicket, notice, error: '' });

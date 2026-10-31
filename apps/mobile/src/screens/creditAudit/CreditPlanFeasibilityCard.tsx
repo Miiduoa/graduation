@@ -6,6 +6,7 @@ import {
 import { formatCredits, type CreditPlan } from '@campus/shared/src/creditPlanner';
 import { theme } from '../../ui/theme';
 import { CreditPlanScenarioCard } from './CreditPlanScenarioCard';
+import type { CreditScenarioWriter } from '@campus/shared/src/creditScenarioAdoption';
 
 function numberOrDash(number: number | null) {
   return number === null ? '—' : formatCredits(number);
@@ -15,7 +16,9 @@ function numberOrDash(number: number | null) {
  * Projection data is deliberately separated from official academic records:
  * planned courses are always conditional, and "extra" credits have no term.
  */
-export function CreditPlanFeasibilityCard({ plan }: { plan: CreditPlan }) {
+export function CreditPlanFeasibilityCard({ plan, scenarioWriter, scenarioBlocked }: {
+  plan: CreditPlan; scenarioWriter?: CreditScenarioWriter; scenarioBlocked?: string;
+}) {
   const report = useMemo(() => analyzeCreditPlan(plan), [plan]);
   const colors = theme.colors;
 
@@ -104,7 +107,7 @@ export function CreditPlanFeasibilityCard({ plan }: { plan: CreditPlan }) {
           是否符合系所必修、抵免及畢業規定，仍須依入學年度與學校正式審查。
         </Text>
       </View>
-      <CreditPlanScenarioCard plan={plan} />
+      <CreditPlanScenarioCard plan={plan} scenarioWriter={scenarioWriter} scenarioBlocked={scenarioBlocked} />
     </View>
   );
 }
