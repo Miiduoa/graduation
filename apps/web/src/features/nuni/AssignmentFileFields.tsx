@@ -31,6 +31,15 @@ export type LocalAssignmentFile = {
   previewUrl?: string;
 };
 
+export type AssignmentFileOperation = {
+  key?: string;
+  prepared?: LocalAssignmentFile[];
+  intents?: { id: string; uploadPath: string; contentType: string }[];
+  uploaded?: string[];
+  submitting?: boolean;
+  body?: string;
+};
+
 export type AssignmentUploadProgress = { completed: number; total: number };
 
 function kindOf(file: File): 'image' | 'file' {
@@ -343,42 +352,73 @@ export async function uploadAndSubmitFiles(
   files: LocalAssignmentFile[],
   key: string,
   onProgress?: (progress: AssignmentUploadProgress) => void,
+  operation: AssignmentFileOperation = {},
 ): Promise<NuniAssignment> {
-  if (!files.length && !body.trim()) throw new NuniError(422, 'ASSIGNMENT_FILE_REQUIRED');
-  const prepared: LocalAssignmentFile[] = [];
-  for (const item of files) {
-    if (item.kind !== 'image') {
-      prepared.push(item);
-      continue;
-    }
-    const compressed = await compressAssignmentImageFile(item.file);
-    prepared.push({ ...item, file: compressed, kind: 'image' });
+  if (operation.key !== key) {
+    Object.assign(operation, {
+      key,
+      prepared: undefined,
+      intents: undefined,
+      uploaded: [],
+      submitting: false,
+      body: body.trim() || undefined,
+    });
   }
-  onProgress?.({ completed: 0, total: prepared.length });
-  const intents = prepared.length
-    ? await classes.createAssignmentFileIntents(workspaceId, assignmentId, {
-        idempotencyKey: `${key}:intents`,
-        files: prepared.map((item, index) => ({
-          originalName: item.file.name,
-          contentType: item.file.type || (item.kind === 'image' ? 'image/jpeg' : 'application/octet-stream'),
-          byteSize: item.file.size,
-          idempotencyKey: `${key}:file:${index}`,
-        })),
-      })
-    : [];
-  let completed = 0;
-  await Promise.all(
+  if (operation.submitting) {
+    return classes.submitFiles(workspaceId, assignmentId, {
+      body: operation.body,
+      fileIds: operation.intents!.map((intent) => intent.id),
+      idempotencyKey: key,
+    });
+  }
+  if (!files.length && !body.trim()) throw new NuniError(422, 'ASSIGNMENT_FILE_REQUIRED');
+  const prepared: LocalAssignmentFile[] = operation.prepared ?? [];
+  if (!operation.prepared) {
+    for (const item of files) {
+      if (item.kind !== 'image') {
+        prepared.push(item);
+        continue;
+      }
+      const compressed = await compressAssignmentImageFile(item.file);
+      prepared.push({ ...item, file: compressed, kind: 'image' });
+    }
+    operation.prepared = prepared;
+  }
+  onProgress?.({ completed: operation.uploaded?.length ?? 0, total: prepared.length });
+  const intents =
+    operation.intents ??
+    (prepared.length
+      ? await classes.createAssignmentFileIntents(workspaceId, assignmentId, {
+          idempotencyKey: `${key}:intents`,
+          files: prepared.map((item, index) => ({
+            originalName: item.file.name,
+            contentType:
+              item.file.type || (item.kind === 'image' ? 'image/jpeg' : 'application/octet-stream'),
+            byteSize: item.file.size,
+            idempotencyKey: `${key}:file:${index}`,
+          })),
+        })
+      : []);
+  operation.intents = intents;
+  let completed = operation.uploaded?.length ?? 0;
+  const uploads = await Promise.allSettled(
     intents.map(async (intent, index) => {
+      if (operation.uploaded?.includes(intent.id)) return;
       const item = prepared[index];
       if (!item) throw new NuniError(502, 'INVALID_RESPONSE');
       const bytes = new Uint8Array(await item.file.arrayBuffer());
       await classes.uploadAssignmentFile(intent.uploadPath, bytes, intent.contentType);
+      operation.uploaded!.push(intent.id);
       completed += 1;
       onProgress?.({ completed, total: prepared.length });
     }),
   );
+  // Wait for every upload before allowing a retry to reuse this operation.
+  const failed = uploads.find((result) => result.status === 'rejected');
+  if (failed?.status === 'rejected') throw failed.reason;
+  operation.submitting = true;
   return classes.submitFiles(workspaceId, assignmentId, {
-    body: body.trim() || undefined,
+    body: operation.body,
     fileIds: intents.map((intent) => intent.id),
     idempotencyKey: key,
   });

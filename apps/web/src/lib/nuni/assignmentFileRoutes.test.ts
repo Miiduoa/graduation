@@ -55,7 +55,7 @@ function invoke(
         ...(options.platform ? { Authorization: `Platform ${session.sessionHandle}` } : {}),
         'X-Campus-Session': sessionContext(session),
         ...(options.input
-          ? { Origin: 'https://nuni.tw', 'Content-Type': 'application/json' }
+          ? { ...(options.origin === false ? {} : { Origin: 'https://nuni.tw' }), 'Content-Type': 'application/json' }
           : {}),
         ...(options.body
           ? {
@@ -87,6 +87,44 @@ afterEach(() => {
 });
 
 describe('assignment file BFF flag and contracts', () => {
+  it.each(['', 'false'])('preserves text submissions with flag %s for Web and Mobile', async (flag) => {
+    vi.stubEnv('ASSIGNMENT_FILE_SUBMIT_ENABLED', flag);
+    fetcher.mockImplementation(async (url: string, init?: RequestInit) => {
+      const target = String(url);
+      if (target.endsWith('/sessions/current')) return response(principal);
+      if (target.endsWith(`/class-workspaces/${id}`)) return response(workspace);
+      if (target.endsWith('/assignments')) return response({ assignments: [assignment] });
+      if (target.endsWith(`/assignments/${assignmentId}/submit`)) {
+        const input = JSON.parse(String(init?.body));
+        return response({ ...assignment, submissionCount: 1, mySubmission: {
+          assignmentId, platformAccountId: accountId, displayName: '同學',
+          body: input.body, state: 'submitted', submittedAt: timestamp,
+          teacherFeedback: null, reviewedAt: null,
+        } });
+      }
+      return response({ error: { code: 'NOT_FOUND' } }, 404);
+    });
+    for (const platform of [false, true]) {
+      const input = { body: '旗標關閉的文字繳交', idempotencyKey: `text-disabled-${platform}` };
+      const result = await invoke(`assignments/${assignmentId}/submit`, {
+        input, cookie: !platform, platform, origin: !platform,
+      });
+      expect(result.status).toBe(200);
+      expect((await result.json()).mySubmission.body).toBe(input.body);
+      expect(fetcher).toHaveBeenCalledWith(
+        expect.stringContaining(`/assignments/${assignmentId}/submit`),
+        expect.objectContaining({ method: 'POST', body: JSON.stringify(input) }),
+      );
+    }
+  });
+
+  it('retains session and same-origin checks for text submissions with attachments off', async () => {
+    const input = { body: '文字內容', idempotencyKey: 'text-disabled-auth' };
+    expect((await invoke(`assignments/${assignmentId}/submit`, { input, cookie: false })).status).toBe(401);
+    expect((await invoke(`assignments/${assignmentId}/submit`, { input, origin: false })).status).toBe(403);
+    expect(fetcher).not.toHaveBeenCalled();
+  });
+
   it('hides file routes while the flag is off', async () => {
     expect(
       (
@@ -103,7 +141,7 @@ describe('assignment file BFF flag and contracts', () => {
     expect(fetcher).not.toHaveBeenCalled();
   });
 
-  it('keeps flag-off PUT, signed query and Platform classroom session identical to main', async () => {
+  it('keeps file writes and signed downloads disabled but authenticates filtered assignment reads', async () => {
     const jpeg = Uint8Array.from([0xff, 0xd8, 0xff, 0xe0, 1, 2, 3, 4]);
     const guessed = `assignments/${assignmentId}/files/cwf_99999999-9999-4999-8999-999999999999/content`;
     expect(
@@ -121,8 +159,13 @@ describe('assignment file BFF flag and contracts', () => {
         })
       ).status,
     ).toBe(400);
-    expect((await invoke('assignments', { cookie: false, platform: true })).status).toBe(401);
     expect(fetcher).not.toHaveBeenCalled();
+    fetcher.mockImplementation(async (url: string) => {
+      if (String(url).endsWith('/sessions/current')) return response(principal);
+      if (String(url).endsWith('/assignments')) return response({ assignments: [assignment] });
+      return response(workspace);
+    });
+    expect((await invoke('assignments', { cookie: false, platform: true })).status).toBe(200);
   });
 
   it('accepts a late photo, keeps the receipt after reload, and does not fake success', async () => {
@@ -362,4 +405,53 @@ describe('assignment file BFF flag and contracts', () => {
     );
     expect(guessed.status).toBe(404);
   });
+});
+
+it.each(['student', 'co-teacher', 'outsider'])('checks withdrawal permissions for %s', async (role) => {
+  vi.stubEnv('ASSIGNMENT_FILE_SUBMIT_ENABLED', 'true');
+  const mine = {
+    assignmentId, platformAccountId: accountId, displayName: '同學', body: '繳交內容',
+    state: 'submitted', submittedAt: timestamp, teacherFeedback: null, reviewedAt: null,
+  };
+  fetcher.mockImplementation(async (url: string) => {
+    const target = String(url);
+    if (target.endsWith('/sessions/current')) return response(principal);
+    if (target.endsWith(`/class-workspaces/${id}`)) return role === 'outsider'
+      ? response({ error: { code: 'CLASS_WORKSPACE_FORBIDDEN' } }, 403)
+      : response({ ...workspace, memberRole: role });
+    if (target.endsWith('/assignments')) return response({ assignments: [{ ...assignment, dueAt: '2099-10-31T12:00:00Z', mySubmission: mine, submissionCount: 1 }] });
+    return response({ error: { code: 'NOT_FOUND' } }, 404);
+  });
+  const result = await invoke(`assignments/${assignmentId}/withdraw-submission`, {
+    input: { submittedAt: timestamp, idempotencyKey: 'withdraw-route-key' }, cookie: false, platform: true,
+  });
+  expect(result.status).toBe(role === 'student' ? 200 : 403);
+  if (role === 'student') {
+    expect((await result.json()).mySubmission).toBeNull();
+    vi.stubEnv('ASSIGNMENT_FILE_SUBMIT_ENABLED', 'false');
+    const listed = await invoke('assignments', { cookie: false, platform: true });
+    const page = await listed.json();
+    expect(page.assignments[0].mySubmission).toBeNull();
+    expect(page.assignments[0].submissionCount).toBe(0);
+    fetcher.mockImplementation(async (url: string) => {
+      const target = String(url);
+      if (target.endsWith('/sessions/current')) return response(principal);
+      if (target.endsWith(`/class-workspaces/${id}`)) return response({ ...workspace, memberRole: 'co-teacher' });
+      if (target.endsWith('/assignments')) return response({ assignments: [{ ...assignment, submissionCount: 1 }] });
+      if (target.endsWith('/submissions')) return response({ submissions: [mine] });
+      return response({ error: { code: 'NOT_FOUND' } }, 404);
+    });
+    const teacherRead = await invoke(`assignments/${assignmentId}/submissions`, { cookie: false, platform: true });
+    expect(teacherRead.status).toBe(200);
+    expect((await teacherRead.json()).submissions).toEqual([]);
+  }
+});
+
+it('requires authentication before accepting a withdrawal', async () => {
+  vi.stubEnv('ASSIGNMENT_FILE_SUBMIT_ENABLED', 'true');
+  const result = await invoke(`assignments/${assignmentId}/withdraw-submission`, {
+    input: { submittedAt: timestamp, idempotencyKey: 'withdraw-anonymous-key' }, cookie: false,
+  });
+  expect(result.status).toBe(401);
+  expect(fetcher).not.toHaveBeenCalled();
 });

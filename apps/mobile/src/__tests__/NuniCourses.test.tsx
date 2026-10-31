@@ -15,6 +15,7 @@ let mockSession = {
   context: 'context-first',
 };
 const mockRequest = jest.fn();
+const mockUpload = jest.fn();
 let mockUuid = 0;
 const fileSubmitFlag = { on: false };
 const mockScrollAssignment = { reveal: jest.fn() };
@@ -35,6 +36,8 @@ jest.mock('../state/nuniSession', () => ({
   useNuniSession: () => ({
     session: mockSession,
     request: mockRequest,
+    bffRequest: mockRequest,
+    upload: mockUpload,
     loading: false,
     pendingLogout: false,
   }),
@@ -2101,3 +2104,180 @@ it('limits empty feedback claims when the activity response may omit older recor
   await view.findByText('已載入內容中尚無回饋，較早紀錄可能未包含。');
   expect(view.queryByText('目前還沒有跨課程的老師回饋。')).toBeNull();
 });
+
+it('withdraws the current assignment receipt and returns to the submission form', async () => {
+  fileSubmitFlag.on = true;
+  assignment = { ...assignment, mySubmission: receipt(), submissionCount: 1 };
+  mockRequest.mockImplementation(async (path, context, input) => {
+    if (path.endsWith('/withdraw-submission')) {
+      assignment = { ...assignment, mySubmission: null, submissionCount: 0 };
+      return assignment;
+    }
+    return response(path, context, input);
+  });
+  const view = await openCourse();
+  fireEvent.press(view.getByRole('button', { name: '撤回繳交' }));
+  await waitFor(() => expect(view.getByText('已撤回，截止前可以重新繳交。')).toBeTruthy());
+  expect(view.queryByRole('button', { name: '撤回繳交' })).toBeNull();
+  expect(view.getByRole('button', { name: '繳交作業' })).toBeTruthy();
+  expect(mockRequest).toHaveBeenCalledWith(
+    expect.stringContaining('/withdraw-submission'),
+    mockSession.context,
+    expect.objectContaining({ submittedAt: date }),
+  );
+});
+
+it.each([false, true])('preserves text submission after deadline with attachments off (existing receipt: %s)', async (existing) => {
+  fileSubmitFlag.on = false;
+  assignment = {
+    ...assignment,
+    dueAt: '2020-10-31T12:00:00Z',
+    mySubmission: existing ? receipt() : null,
+    submissionCount: existing ? 1 : 0,
+  };
+  const view = await openCourse();
+  expect(view.queryByText('已過截止時間，這份繳交不能再修改或撤回。')).toBeNull();
+  fireEvent.changeText(view.getByLabelText('作業內容：校園訪談'), '關閉附件後的文字內容');
+  fireEvent.press(view.getByRole('button', { name: existing ? '更新作業繳交' : '繳交作業' }));
+  await waitFor(() => expect(mockRequest).toHaveBeenCalledWith(
+    `class-workspaces/${courseId}/assignments/${assignmentId}/submit`,
+    mockSession.context,
+    expect.objectContaining({ body: '關閉附件後的文字內容' }),
+  ));
+  await view.findByText('關閉附件後的文字內容');
+});
+
+it('shows the assignment deadline state with the existing receipt', async () => {
+  fileSubmitFlag.on = true;
+  assignment = {
+    ...assignment,
+    dueAt: '2020-10-31T12:00:00Z',
+    mySubmission: receipt(),
+    submissionCount: 1,
+  };
+  const view = await openCourse();
+  expect(view.getByText('已過截止時間，這份繳交不能再修改或撤回。')).toBeTruthy();
+  expect(view.queryByRole('button', { name: '撤回繳交' })).toBeNull();
+  expect(view.queryByRole('button', { name: '更新作業繳交' })).toBeNull();
+});
+
+it.each(['alignment', 'lost-response'])(
+  'recovers uploaded revision after deadline and rerender: %s',
+  async (failure) => {
+    fileSubmitFlag.on = true;
+    let now = Date.parse('2026-10-09T11:59:00Z');
+    const clock = jest.spyOn(Date, 'now').mockImplementation(() => now);
+    assignment = { ...assignment, dueAt: '2026-10-09T12:00:00Z', mySubmission: receipt() };
+    const fileId = 'cwf_77777777-7777-4777-8777-777777777777';
+    const metadata = {
+      id: fileId,
+      originalName: 'repair.pdf',
+      contentType: 'application/pdf',
+      byteSize: 12,
+      kind: 'file',
+      downloadPath: `class-workspaces/${courseId}/assignments/${assignmentId}/files/${fileId}/content`,
+      downloadExp: '1',
+      downloadSig: 'sig',
+    };
+    const picker = require('expo-document-picker');
+    picker.getDocumentAsync.mockResolvedValueOnce({
+      canceled: false,
+      assets: [{ uri: 'file:///repair.pdf', name: 'repair.pdf', mimeType: 'application/pdf' }],
+    });
+    mockUpload.mockReset().mockResolvedValue(metadata);
+    const submissions: Record<string, unknown>[] = [];
+    mockRequest.mockImplementation((path, context, input) => {
+      if (path.endsWith('/files/intents'))
+        return { intents: [{ ...metadata, uploadPath: metadata.downloadPath }] };
+      if (path.endsWith('/submit-files')) {
+        submissions.push(input);
+        if (submissions.length === 1)
+          throw failure === 'alignment'
+            ? new NuniError(503, 'ASSIGNMENT_FILE_STORE_UNAVAILABLE')
+            : new TypeError('response lost');
+        if (submissions.length === 2)
+          throw new NuniError(503, 'ASSIGNMENT_FILE_STORE_UNAVAILABLE');
+        return { ...assignment, mySubmission: { ...receipt(), files: [metadata] } };
+      }
+      return response(path, context, input);
+    });
+    const view = await openCourse();
+    fireEvent.press(view.getByRole('button', { name: '檔案' }));
+    await view.findByText('repair.pdf · 12 B');
+    fireEvent.press(view.getByRole('button', { name: '更新作業繳交' }));
+    await view.findByRole('button', { name: '重試確認這次送出' });
+    now = Date.parse('2026-10-09T12:01:00Z');
+    view.rerender(<NuniCourses />);
+    fireEvent.press(view.getByRole('button', { name: '重試確認這次送出' }));
+    await waitFor(() => expect(submissions).toHaveLength(2));
+    await view.findByRole('button', { name: '重試確認這次送出' });
+    view.rerender(<NuniCourses />);
+    fireEvent.press(view.getByRole('button', { name: '重試確認這次送出' }));
+    await view.findByText('repair.pdf · 檔案');
+    expect(mockUpload).toHaveBeenCalledTimes(1);
+    expect(submissions).toHaveLength(3);
+    expect(submissions[2]).toEqual(submissions[0]);
+    expect(submissions[1]).toEqual(submissions[0]);
+    expect(view.queryByRole('button', { name: '更新作業繳交' })).toBeNull();
+    clock.mockRestore();
+  },
+);
+
+it.each(['superseded'])(
+  'refreshes current receipt after replaced recovery: %s',
+  async (failure) => {
+    fileSubmitFlag.on = true;
+    let now = Date.parse('2026-10-09T11:59:00Z');
+    const clock = jest.spyOn(Date, 'now').mockImplementation(() => now);
+    assignment = { ...assignment, dueAt: '2026-10-09T12:00:00Z', mySubmission: receipt() };
+    const fileId = 'cwf_77777777-7777-4777-8777-777777777777';
+    const metadata = {
+      id: fileId,
+      originalName: 'repair.pdf',
+      contentType: 'application/pdf',
+      byteSize: 12,
+      kind: 'file',
+      downloadPath: `class-workspaces/${courseId}/assignments/${assignmentId}/files/${fileId}/content`,
+      downloadExp: '1',
+      downloadSig: 'sig',
+    };
+    const picker = require('expo-document-picker');
+    picker.getDocumentAsync.mockResolvedValueOnce({
+      canceled: false,
+      assets: [{ uri: 'file:///repair.pdf', name: 'repair.pdf', mimeType: 'application/pdf' }],
+    });
+    mockUpload.mockReset().mockResolvedValue(metadata);
+    const submissions: Record<string, unknown>[] = [];
+    mockRequest.mockImplementation((path, context, input) => {
+      if (path.endsWith('/files/intents'))
+        return { intents: [{ ...metadata, uploadPath: metadata.downloadPath }] };
+      if (path.endsWith('/submit-files')) {
+        submissions.push(input);
+        if (submissions.length === 1)
+          throw failure === 'alignment'
+            ? new NuniError(503, 'ASSIGNMENT_FILE_STORE_UNAVAILABLE')
+            : new TypeError('response lost');
+        if (submissions.length === 2) {
+          assignment = { ...assignment, mySubmission: { ...receipt(), body: 'new B', files: [] } };
+          throw new NuniError(409, 'ASSIGNMENT_SUBMISSION_SUPERSEDED');
+        }
+        return { ...assignment, mySubmission: { ...receipt(), files: [metadata] } };
+      }
+      return response(path, context, input);
+    });
+    const view = await openCourse();
+    fireEvent.press(view.getByRole('button', { name: '檔案' }));
+    await view.findByText('repair.pdf · 12 B');
+    fireEvent.press(view.getByRole('button', { name: '更新作業繳交' }));
+    await view.findByRole('button', { name: '重試確認這次送出' });
+    now = Date.parse('2026-10-09T12:01:00Z');
+    view.rerender(<NuniCourses />);
+    fireEvent.press(view.getByRole('button', { name: '重試確認這次送出' }));
+    await waitFor(() => expect(submissions).toHaveLength(2));
+    await view.findByText('這次繳交已被較新的提交取代，請以目前回執為準。');
+    await view.findByText('new B');
+    expect(view.queryByText('repair.pdf · 檔案')).toBeNull();
+    expect(mockUpload).toHaveBeenCalledTimes(1);
+    clock.mockRestore();
+  },
+);
