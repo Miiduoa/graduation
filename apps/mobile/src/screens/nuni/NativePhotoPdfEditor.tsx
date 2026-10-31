@@ -2,7 +2,11 @@ import React, { useEffect, useRef, useState } from 'react';
 import { Button, Image, Modal, ScrollView, Text, View } from 'react-native';
 import { useTheme } from '../../state/theme';
 import { formatAssignmentFileSize, moveAssignmentFile } from '@campus/shared/src/assignmentFiles';
-import { pickPhotoPdfFiles, type LocalNativeFile } from './assignmentFileSubmit';
+import {
+  pickPhotoPdfFiles,
+  releasePhotoPdfFiles,
+  type LocalNativeFile,
+} from './assignmentFileSubmit';
 import {
   buildNativePhotoPdf,
   validateNativePhotoPages,
@@ -29,18 +33,33 @@ export function NativePhotoPdfEditor({
   const [error, setError] = useState('');
   const live = useRef(true);
   const current = useRef<Proof | null>(null);
+  const selecting = useRef(false);
+  const sources = useRef<LocalNativeFile[]>([]);
+  function releaseSources() {
+    releasePhotoPdfFiles(sources.current);
+    sources.current = [];
+  }
+  function close() {
+    live.current = false;
+    conversion.current?.abort();
+    if (!conversion.current && !selecting.current) releaseSources();
+    current.current?.dispose();
+    current.current = null;
+  }
   useEffect(() => {
     live.current = true;
     return () => {
-      live.current = false;
-      conversion.current?.abort();
-      current.current?.dispose();
+      close();
     };
   }, []);
   function edit(next: NativePhotoPage[]) {
     current.current?.dispose();
     current.current = null;
     setProof(null);
+    releasePhotoPdfFiles(
+      sources.current.filter((file) => !next.some((page) => page.file === file)),
+    );
+    sources.current = next.map((page) => page.file);
     setPages(next);
     setError('');
   }
@@ -58,14 +77,13 @@ export function NativePhotoPdfEditor({
     >
       <Text style={textStyle}>將照片合併成 PDF</Text>
       <Text style={textStyle}>
-        選 1–8 張 JPEG 或 PNG 照片，來源每張最多 1600 萬像素（較大照片會縮至 1200 萬像素）、合計 3200
-        萬像素。請從檔案選取原始照片。由上往下就是頁序。先轉正、排好，再看一次。
+        選 1–8 張 JPEG 或 PNG 照片，來源每張最多 1600 萬像素（較大照片會縮至 1200 萬像素）、合計
+        3200 萬像素。請從檔案選取原始照片。由上往下就是頁序。先轉正、排好，再看一次。
       </Text>
       <Button
         title="取消製作"
         onPress={() => {
-          conversion.current?.abort();
-          live.current = false;
+          close();
           onCancel();
         }}
       />
@@ -74,8 +92,11 @@ export function NativePhotoPdfEditor({
         disabled={busy}
         onPress={async () => {
           setBusy(true);
+          selecting.current = true;
+          let files: LocalNativeFile[] = [];
+          let adopted = false;
           try {
-            const files = await pickPhotoPdfFiles();
+            files = await pickPhotoPdfFiles();
             if (!live.current) return;
             if (files.length + pages.length > 8) {
               setError('一本最多 8 頁，請減少照片後再選。');
@@ -85,12 +106,16 @@ export function NativePhotoPdfEditor({
             await validateNativePhotoPages(next);
             if (!live.current) return;
             edit(next);
+            adopted = true;
           } catch {
             if (live.current)
               setError(
                 '無法讀取照片，請確認為 JPEG／PNG，且來源每張不超過 1600 萬像素、合計不超過 3200 萬像素及每張 20 MiB。',
               );
           } finally {
+            if (!adopted) releasePhotoPdfFiles(files);
+            selecting.current = false;
+            if (!live.current) releaseSources();
             if (live.current) setBusy(false);
           }
         }}
@@ -147,6 +172,9 @@ export function NativePhotoPdfEditor({
         onPress={async () => {
           setBusy(true);
           setError('');
+          current.current?.dispose();
+          current.current = null;
+          setProof(null);
           const controller = new AbortController();
           conversion.current = controller;
           try {
@@ -159,6 +187,8 @@ export function NativePhotoPdfEditor({
             current.current = next;
             setProof(next);
           } catch (cause) {
+            releaseSources();
+            if (live.current) setPages([]);
             if (live.current)
               setError(
                 cause instanceof Error
@@ -166,6 +196,8 @@ export function NativePhotoPdfEditor({
                   : '無法製作 PDF，可能照片無法讀取或成品超過 20 MiB。請刪減照片再試，不會自動降低畫質。',
               );
           } finally {
+            conversion.current = null;
+            if (!live.current) releaseSources();
             if (live.current) setBusy(false);
           }
         }}
@@ -215,9 +247,12 @@ export function NativePhotoPdfEditor({
           </ScrollView>
           <Button
             title="確認，加入待繳附件"
+            disabled={busy}
             onPress={() => {
               proof.dispose(true);
               current.current = null;
+              live.current = false;
+              releaseSources();
               onConfirm(proof.file);
             }}
           />

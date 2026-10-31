@@ -1,6 +1,6 @@
 import Constants from 'expo-constants';
 import * as DocumentPicker from 'expo-document-picker';
-import { File } from 'expo-file-system';
+import { File, Paths } from 'expo-file-system';
 import * as ImagePicker from 'expo-image-picker';
 import {
   MAX_ASSIGNMENT_DOCUMENTS,
@@ -130,6 +130,30 @@ export async function pickAssignmentAlbum(current: LocalNativeFile[]): Promise<L
   return next;
 }
 
+// Only this picker owns these copies; ordinary attachments never enter this registry.
+const photoPdfCopies = new WeakMap<LocalNativeFile, string>();
+
+function deletePhotoPdfCopy(uri: string) {
+  const cache = `${Paths.cache.uri.replace(/\/$/, '')}/DocumentPicker/`;
+  if (!uri.startsWith(cache) || /(?:\.\.|%2e|%2f|%5c)/i.test(uri.slice(cache.length))) return;
+  try {
+    const copy = new File(uri);
+    if (copy.exists) copy.delete();
+  } catch {
+    // Keep cleanup independent of the editor's completion callback.
+  }
+}
+
+export function releasePhotoPdfFiles(files: LocalNativeFile[]) {
+  for (const file of files) {
+    const uri = photoPdfCopies.get(file);
+    if (uri) {
+      deletePhotoPdfCopy(uri);
+      photoPdfCopies.delete(file);
+    }
+  }
+}
+
 // Copy original bytes without invoking the image picker encoder.
 export async function pickPhotoPdfFiles(): Promise<LocalNativeFile[]> {
   const result = await DocumentPicker.getDocumentAsync({
@@ -138,10 +162,17 @@ export async function pickPhotoPdfFiles(): Promise<LocalNativeFile[]> {
     type: ['image/jpeg', 'image/png'],
   });
   if (result.canceled) return [];
-  if (result.assets.length > 8) throw new Error('一本最多 8 頁。');
-  return Promise.all(result.assets.map((asset) =>
-    fromUri(asset.uri, asset.name, asset.mimeType || 'application/octet-stream', 'image'),
-  ));
+  try {
+    if (result.assets.length > 8) throw new Error('一本最多 8 頁。');
+    const files = await Promise.all(result.assets.map((asset) =>
+      fromUri(asset.uri, asset.name, asset.mimeType || 'application/octet-stream', 'image'),
+    ));
+    for (const file of files) photoPdfCopies.set(file, file.uri);
+    return files;
+  } catch (error) {
+    for (const asset of result.assets) deletePhotoPdfCopy(asset.uri);
+    throw error;
+  }
 }
 
 export async function pickAssignmentDocuments(current: LocalNativeFile[]): Promise<LocalNativeFile[]> {
