@@ -14,7 +14,8 @@ HERE = Path(__file__).resolve().parent
 API = HERE.parent
 ROOT = API.parents[1]
 ORDER = ['public-cafeterias', 'course-access', 'personal-import-sync']
-AFTER_OVERLAY_PATCHES = ['materials-pagination/0001-stable-material-pages.patch']
+AFTER_OVERLAY_PATCHES = ['materials-pagination/0001-stable-material-pages.patch',
+                         'assignment-files/0001-authoritative-withdrawal-reads.patch']
 
 
 def sha(value):
@@ -100,7 +101,7 @@ def apply_extension(checkout, refresh=False):
     if git(checkout, 'write-tree') != pinned['candidateTree']:
         raise ValueError('Composed final tree mismatch')
     return {'candidateTree': pinned['candidateTree'], 'baseTree': pinned['baseTree'],
-            'overlays': ORDER, 'migrations': ['278_course_access_review', '279_personal_import_sync'],
+            'overlays': ORDER, 'migrations': ['278_course_access_review', '279_personal_import_sync', '281_assignment_submission_withdrawals'],
             'deploys': False, 'runsMigrations': False, 'enablesService': False}
 
 

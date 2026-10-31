@@ -166,3 +166,12 @@ describe('assignment file domain', () => {
     expect(() => sanitizeAssignmentFileName('foo/../../etc/passwd.jpg')).toThrow(NuniError);
   });
 });
+
+it('allows revisions through the Taipei deadline, with no deadline remaining open', async () => {
+  const { assignmentCanRevise } = await import('@campus/shared/src/assignmentFiles');
+  expect(assignmentCanRevise('2026-10-31T20:00:00', Date.parse('2026-10-31T12:00:00Z'))).toBe(true);
+  expect(assignmentCanRevise('2026-10-31T20:00:00', Date.parse('2026-10-31T12:00:00.001Z'))).toBe(
+    false,
+  );
+  expect(assignmentCanRevise(null)).toBe(true);
+});

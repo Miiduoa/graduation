@@ -1,0 +1,159 @@
+diff --git a/apps/api/src/accounts/class-workspace-service.test.ts b/apps/api/src/accounts/class-workspace-service.test.ts
+index efbe9e1..70933ca 100644
+--- a/apps/api/src/accounts/class-workspace-service.test.ts
++++ b/apps/api/src/accounts/class-workspace-service.test.ts
+@@ -56,6 +56,39 @@ describe("class workspace teacher-led join path", () => {
+     return accounts.resolveSession(`Platform ${completed.sessionHandle}`);
+   }
+
++  it("hides withdrawn submissions on authoritative reads and feedback replays", async () => {
++    const teacher = await loginAs("withdraw-teacher", "withdraw-teacher@gmail.com", "老師");
++    const workspace = await workspaces.create(teacher, { title: "撤回驗證", idempotencyKey: "withdraw-workspace" });
++    const invite = await workspaces.createInvite(teacher, workspace.id, { idempotencyKey: "withdraw-invite" });
++    const student = await loginAs("withdraw-student", "withdraw-student@gmail.com", "學生");
++    await workspaces.join(student, { code: invite.code, idempotencyKey: "withdraw-join" });
++    const assignment = await workspaces.createAssignment(teacher, workspace.id, {
++      title: "撤回作業", instructions: "測試", idempotencyKey: "withdraw-assignment",
++    });
++    const first = await workspaces.submitAssignment(student, workspace.id, assignment.id, {
++      body: "撤回後不可讀取", idempotencyKey: "withdraw-first-submit",
++    });
++    const review = { feedback: "已閱讀", idempotencyKey: "withdraw-first-review" };
++    await workspaces.reviewAssignmentSubmission(teacher, workspace.id, assignment.id, student.platformAccountId, review);
++    await db.query(`UPDATE class_workspace_assignment_submissions
++      SET submitted_at = date_trunc('milliseconds', submitted_at) + interval '123 microseconds'
++      WHERE assignment_id = $1 AND platform_account_id = $2`, [assignment.id, student.platformAccountId]);
++    await db.query(`INSERT INTO class_assignment_submission_withdrawals (assignment_id, platform_account_id, submitted_at)
++      VALUES ($1, $2, $3)`, [assignment.id, student.platformAccountId, first.mySubmission!.submittedAt]);
++    expect((await workspaces.listAssignmentSubmissions(teacher, workspace.id, assignment.id)).submissions).toEqual([]);
++    expect((await workspaces.listAssignments(student, workspace.id)).assignments[0]?.mySubmission).toBeNull();
++    await expect(workspaces.reviewAssignmentSubmission(teacher, workspace.id, assignment.id, student.platformAccountId, review))
++      .rejects.toMatchObject({ code: "CLASS_WORKSPACE_SUBMISSION_NOT_FOUND" });
++    await expect(workspaces.reviewAssignmentSubmission(teacher, workspace.id, assignment.id, student.platformAccountId,
++      { ...review, idempotencyKey: "withdraw-new-review" }))
++      .rejects.toMatchObject({ code: "CLASS_WORKSPACE_SUBMISSION_NOT_FOUND" });
++    const second = await workspaces.submitAssignment(student, workspace.id, assignment.id, {
++      body: "重新繳交可讀取", idempotencyKey: "withdraw-second-submit",
++    });
++    expect(second.mySubmission?.body).toBe("重新繳交可讀取");
++    expect((await workspaces.listAssignmentSubmissions(teacher, workspace.id, assignment.id)).submissions).toHaveLength(1);
++  });
++
+   it("lets a teacher open a class workspace and a student join by invite without campus authority", async () => {
+     const teacher = await loginAs("teacher-subject-a", "teacher@gmail.com", "林老師");
+     const created = await workspaces.create(teacher, {
+diff --git a/apps/api/src/accounts/class-workspace-service.ts b/apps/api/src/accounts/class-workspace-service.ts
+index e632f2d..07040d1 100644
+--- a/apps/api/src/accounts/class-workspace-service.ts
++++ b/apps/api/src/accounts/class-workspace-service.ts
+@@ -1280,6 +1280,10 @@ export class ClassWorkspaceService {
+          LEFT JOIN class_workspace_assignment_submissions my_submission
+            ON my_submission.assignment_id = assignment.id
+           AND my_submission.platform_account_id = $2
++          AND NOT EXISTS (SELECT 1 FROM class_assignment_submission_withdrawals withdrawal
++            WHERE withdrawal.assignment_id = my_submission.assignment_id
++              AND withdrawal.platform_account_id = my_submission.platform_account_id
++              AND withdrawal.submitted_at = date_trunc('milliseconds', my_submission.submitted_at))
+         WHERE assignment.workspace_id = $1
+         ORDER BY assignment.created_at DESC, assignment.id DESC
+         LIMIT 100`,
+@@ -1415,6 +1419,10 @@ export class ClassWorkspaceService {
+            FROM class_workspace_assignment_submissions submission
+            JOIN platform_accounts account ON account.id = submission.platform_account_id
+           WHERE submission.assignment_id = $1
++            AND NOT EXISTS (SELECT 1 FROM class_assignment_submission_withdrawals withdrawal
++            WHERE withdrawal.assignment_id = submission.assignment_id
++              AND withdrawal.platform_account_id = submission.platform_account_id
++              AND withdrawal.submitted_at = date_trunc('milliseconds', submission.submitted_at))
+           ORDER BY submission.submitted_at ASC, submission.platform_account_id ASC`,
+         [assignmentId],
+       );
+@@ -1471,12 +1479,16 @@ export class ClassWorkspaceService {
+       );
+       if (existingIdem.rows.length === 0) {
+         const updated = await tx.query(
+-          `UPDATE class_workspace_assignment_submissions
++          `UPDATE class_workspace_assignment_submissions AS submission
+               SET teacher_feedback = $3,
+                   reviewed_at = now(),
+                   reviewed_by_platform_account_id = $4,
+                   updated_at = now()
+             WHERE assignment_id = $1 AND platform_account_id = $2
++              AND NOT EXISTS (SELECT 1 FROM class_assignment_submission_withdrawals withdrawal
++                WHERE withdrawal.assignment_id = submission.assignment_id
++                  AND withdrawal.platform_account_id = submission.platform_account_id
++                  AND withdrawal.submitted_at = date_trunc('milliseconds', submission.submitted_at))
+             RETURNING assignment_id`,
+           [assignmentId, studentPlatformAccountId, feedback, actor.platformAccountId],
+         );
+@@ -1504,7 +1516,11 @@ export class ClassWorkspaceService {
+                 submission.teacher_feedback, submission.reviewed_at
+            FROM class_workspace_assignment_submissions submission
+            JOIN platform_accounts account ON account.id = submission.platform_account_id
+-          WHERE submission.assignment_id = $1 AND submission.platform_account_id = $2`,
++          WHERE submission.assignment_id = $1 AND submission.platform_account_id = $2
++            AND NOT EXISTS (SELECT 1 FROM class_assignment_submission_withdrawals withdrawal
++            WHERE withdrawal.assignment_id = submission.assignment_id
++              AND withdrawal.platform_account_id = submission.platform_account_id
++              AND withdrawal.submitted_at = date_trunc('milliseconds', submission.submitted_at))`,
+         [assignmentId, studentPlatformAccountId],
+       );
+       const row = rows.rows[0];
+@@ -2255,6 +2271,10 @@ export class ClassWorkspaceService {
+          LEFT JOIN class_workspace_assignment_submissions my_submission
+            ON my_submission.assignment_id = assignment.id
+           AND my_submission.platform_account_id = $2
++          AND NOT EXISTS (SELECT 1 FROM class_assignment_submission_withdrawals withdrawal
++            WHERE withdrawal.assignment_id = my_submission.assignment_id
++              AND withdrawal.platform_account_id = my_submission.platform_account_id
++              AND withdrawal.submitted_at = date_trunc('milliseconds', my_submission.submitted_at))
+         WHERE assignment.id = $1`,
+       [assignmentId, platformAccountId],
+     );
+diff --git a/apps/api/src/accounts/class-workspace-unit-assignments.test.ts b/apps/api/src/accounts/class-workspace-unit-assignments.test.ts
+index a312813..3983cf0 100644
+--- a/apps/api/src/accounts/class-workspace-unit-assignments.test.ts
++++ b/apps/api/src/accounts/class-workspace-unit-assignments.test.ts
+@@ -22,6 +22,11 @@ const teachingPage = readFileSync(
+   "utf8",
+ );
+
++const classroomPanel = readFileSync(
++  new URL("../../../web/src/app/auth/platform/class-workspace/[workspaceId]/classroom-presence-panel.tsx", import.meta.url),
++  "utf8",
++);
++
+ describe("class workspace assignment and quiz units", () => {
+   it("persists unit_id on assignments and quizzes and exposes mobile hang chips", () => {
+     expect(migration).toContain("ALTER TABLE class_workspace_assignments");
+@@ -47,11 +52,12 @@ describe("class workspace assignment and quiz units", () => {
+     expect(teachingPage).toContain("assignmentUnitId");
+     expect(teachingPage).toContain("quizUnitId");
+     expect(teachingPage).toContain("materialUnitId");
+-    expect(teachingPage).toContain("classroomUnitId");
++    expect(teachingPage).toContain("ClassroomPresencePanel");
++    expect(classroomPanel).toContain("classroomUnitId");
+     expect(teachingPage).toContain("...(assignmentUnitId ? { unitId: assignmentUnitId } : {})");
+     expect(teachingPage).toContain("...(quizUnitId ? { unitId: quizUnitId } : {})");
+     expect(teachingPage).toContain("...(materialUnitId ? { unitId: materialUnitId } : {})");
+-    expect(teachingPage).toContain("...(classroomUnitId ? { unitId: classroomUnitId } : {})");
++    expect(classroomPanel).toContain("...(classroomUnitId ? { unitId: classroomUnitId } : {})");
+     expect(teachingPage).toContain("不掛章節");
+   });
+
+diff --git a/apps/api/src/migrations/281_assignment_submission_withdrawals.sql b/apps/api/src/migrations/281_assignment_submission_withdrawals.sql
+new file mode 100644
+index 0000000..8c327e6
+--- /dev/null
++++ b/apps/api/src/migrations/281_assignment_submission_withdrawals.sql
+@@ -0,0 +1,10 @@
++-- 僅新增撤回紀錄，不更動既有文字繳交或檔案資料。
++BEGIN;
++CREATE TABLE IF NOT EXISTS class_assignment_submission_withdrawals (
++  assignment_id text NOT NULL REFERENCES class_workspace_assignments(id),
++  platform_account_id text NOT NULL REFERENCES platform_accounts(id),
++  submitted_at timestamptz NOT NULL,
++  withdrawn_at timestamptz NOT NULL DEFAULT now(),
++  PRIMARY KEY (assignment_id, platform_account_id, submitted_at)
++);
++COMMIT;
