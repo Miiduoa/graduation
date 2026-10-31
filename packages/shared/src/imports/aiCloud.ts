@@ -190,7 +190,15 @@ export function isPersonalImportCloudMaskSafe(text: string, context = ''): boole
     })) return false;
   }
   const vertical = maskPrivateVerticalFields(normalized);
-  return vertical.safe && maskPrivateTables(vertical.text).safe;
+  if (!vertical.safe || !maskPrivateTables(vertical.text).safe) return false;
+  // 已支援的欄名交由上面的欄界與遮罩檢查確認；其餘內容整段壓縮，
+  // 才能看見跨行、任意 Unicode 標點或控制字元拆開的未知個資欄名。
+  // 先移除遮罩標記，避免把標記內的「姓名／學號」當成尚未處理的個資。
+  const residual = maskPersonalImportText(normalized)
+    .replace(/\[(?:姓名|學號|證號|個資|聯絡資料)已遮罩\]/gu, '')
+    .replace(new RegExp(privateFieldPattern, 'giu'), '')
+    .replace(/[\s\p{P}\p{Z}\p{Cc}]/gu, '');
+  return !/姓名|名字|學號|學生|身分證|身份證|郵件|電郵|電話|手機|student|name|instructor|teacher|教授|教師|老師|email|phone|mobile/iu.test(residual);
 }
 
 /** 遮罩明示姓名欄、已知姓名，以及學號與身分證格式；保留課程數值。 */

@@ -152,3 +152,32 @@ test('混合姓名與學號標籤無法確定欄界時保留本機', async () =>
   assert.equal(calls, 0);
   assert.equal(result.reason, 'invalid-input');
 });
+
+for (const head of ['姓\n名\n王小明', '學\n號\n123456', '姓·名：王小明', '學．號：１２３４５６',
+  '姓·名\n王小明', '學．號\n123456', '姓\r\n、名：王小明', '學\t‧\n號：123456',
+  '姓「」名：王小明', '學\u0001號：123456']) {
+  test(`未知個資欄名拒送並保留本機：${JSON.stringify(head)}`, async () => {
+    const text = `${head}\n課程名稱,學分,成績\n微積分,3,85`;
+    for (const input of [{ text }, { text: '微積分,3,85', columnContext: head }]) {
+      let sent = false;
+      const result = await requestPersonalImportCloud({ ...input, kind: 'grades', fetcher: async () => {
+        sent = true;
+        throw new Error('不應送出');
+      } });
+      assert.equal(result.ok, false);
+      assert.equal(result.reason, 'invalid-input');
+      assert.equal(sent, false);
+    }
+  });
+}
+for (const text of ['課程名稱,學分,成績\n微積分,3,85', '星期一 第三節 程式設計 教室 A101']) {
+  test(`正常學業文字仍可送出：${text}`, async () => {
+    let sent;
+    const result = await requestPersonalImportCloud({ text, kind: 'grades', fetcher: async (_, options) => {
+      sent = JSON.parse(options.body);
+      return Response.json({ output: '{}', sourceText: sent.text, columnContext: sent.columnContext });
+    } });
+    assert.equal(result.ok, true);
+    assert.equal(sent.text, text);
+  });
+}

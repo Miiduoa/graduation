@@ -139,6 +139,27 @@ describe('personal import cloud endpoint', () => {
     expect(JSON.stringify(await result.json())).not.toContain(sensitive);
   });
 
+  it.each(['姓\n名\n王小明', '學\n號\n123456', '姓·名：王小明', '學．號：１２３４５６',
+    '姓·名\n王小明', '學．號\n123456', '姓\r\n、名：王小明', '學\t‧\n號：123456',
+    '姓「」名：王小明', '學\u0001號：123456'])('rejects unknown private labels at the server boundary: %s', async (head) => {
+    for (const body of [
+      { text: `${head}\n課程名稱,學分,成績\n微積分,3,85`, kind: 'grades' },
+      { text: '微積分,3,85', columnContext: head, kind: 'grades' },
+    ]) {
+      const { dependencies, fetcher, getQuotaStore } = setup();
+      expect((await handlePersonalImportCloud(request(body), dependencies)).status).toBe(422);
+      expect(fetcher).not.toHaveBeenCalled();
+      expect(getQuotaStore).not.toHaveBeenCalled();
+    }
+  });
+
+  it.each(['課程名稱,學分,成績\n微積分,3,85', '星期一 第三節 程式設計 教室 A101'])('forwards ordinary academic text: %s', async (text) => {
+    const { dependencies, fetcher } = setup();
+    expect((await handlePersonalImportCloud(request({ text, kind: 'grades' }), dependencies)).status).toBe(200);
+    expect(fetcher).toHaveBeenCalledOnce();
+    expect(JSON.parse(fetcher.mock.calls[0][1].body).messages[0].content).toContain(`SOURCE_DATA=${JSON.stringify(text)}`);
+  });
+
   it('rejects an ambiguous name column without spending quota or sending the source', async () => {
     const { dependencies, fetcher, getQuotaStore } = setup();
     const result = await handlePersonalImportCloud(request({ text: '課程名稱,姓名,學分\n"未關閉,王小明,3', kind: 'grades' }), dependencies);
