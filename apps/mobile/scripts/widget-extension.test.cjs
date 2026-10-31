@@ -113,7 +113,7 @@ test('a project without an extension gets a source phase, dependency and embedde
     (value) => value?.name === '"CampusWidgetExtension"',
   );
   assert.ok(
-    target.buildPhases.some(({ value }) => objects.PBXSourcesBuildPhase[value]?.files.length === 1),
+    target.buildPhases.some(({ value }) => objects.PBXSourcesBuildPhase[value]?.files.length === 2),
   );
   assert.equal(project.getFirstTarget().firstTarget.dependencies.length, 1);
   assertEmbedOrder(project);
@@ -162,4 +162,26 @@ test('regeneration repairs embedding appended after Firebase without changing ot
   const first = project.writeSync();
   configureProject(project, directory, 'com.example.sample', 'group.com.example.sample');
   assert.equal(project.writeSync(), first);
+});
+
+test('activity attributes compile only in the extension target and match the local module definition', () => {
+  const project = xcode.project(join(root, 'ios/mobile.xcodeproj/project.pbxproj'));
+  project.parseSync();
+  const objects = project.hash.project.objects;
+  const file = Object.entries(objects.PBXFileReference).find(
+    ([, value]) => value?.path === '"NextClassActivityAttributes.swift"',
+  );
+  assert.ok(file);
+  const owners = Object.values(objects.PBXNativeTarget).filter((target) =>
+    target?.buildPhases?.some(({ value }) => objects.PBXSourcesBuildPhase?.[value]?.files.some(
+      ({ value: build }) => objects.PBXBuildFile[build]?.fileRef === file[0],
+    )),
+  );
+  assert.deepEqual(owners.map((target) => target.name), ['"CampusWidgetExtension"']);
+  assert.equal(
+    readFileSync(join(root, 'ios/CampusWidgetExtension/NextClassActivityAttributes.swift'), 'utf8'),
+    readFileSync(join(root, 'modules/campus-next-class/ios/NextClassActivityAttributes.swift'), 'utf8'),
+  );
+  const info = plist.parse(readFileSync(join(root, 'ios/mobile/Info.plist'), 'utf8'));
+  assert.equal(info.NSSupportsLiveActivities, true);
 });

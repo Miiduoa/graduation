@@ -99,3 +99,37 @@ test('absent feature metadata clears without reading timetable data', async () =
     Constants.expoConfig!.extra = extra;
   }
 });
+
+test('foreground time checks reuse the snapshot and stop when the hook unmounts', async () => {
+  const { AppState } = require('react-native');
+  const { nextClassWriter } = require('../widgets/nextClassBridge');
+  const original = AppState.currentState;
+  const refresh = jest.spyOn(nextClassWriter, 'refreshActivity').mockResolvedValue(undefined);
+  let tick!: () => void;
+  const originalInterval = global.setInterval;
+  const interval = jest.spyOn(global, 'setInterval').mockImplementation((callback, delay, ...args) => {
+    if (delay !== 30_000) return originalInterval(callback, delay, ...args);
+    tick = callback as () => void;
+    return 123 as unknown as ReturnType<typeof setInterval>;
+  });
+  const clear = jest.spyOn(global, 'clearInterval');
+  AppState.currentState = 'active';
+  try {
+    const view = renderHook(useNextClassWidget);
+    await waitFor(() => expect(mockWrite.mock.calls.some(([value]) => value !== null)).toBe(true));
+    const reads = jest.mocked(loadPersonalImports).mock.calls.length;
+    act(() => tick());
+    expect(refresh).toHaveBeenCalledTimes(1);
+    expect(loadPersonalImports).toHaveBeenCalledTimes(reads);
+    AppState.currentState = 'background';
+    act(() => tick());
+    expect(refresh).toHaveBeenCalledTimes(1);
+    view.unmount();
+    expect(clear).toHaveBeenCalledWith(123);
+  } finally {
+    AppState.currentState = original;
+    refresh.mockRestore();
+    interval.mockRestore();
+    clear.mockRestore();
+  }
+});

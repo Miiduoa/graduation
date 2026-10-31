@@ -42,6 +42,10 @@ export function useNextClassWidget() {
       }
     };
     void refresh();
+    const timer = setInterval(() => {
+      if (AppState.currentState === 'active')
+        void nextClassWriter.refreshActivity().catch(() => undefined);
+    }, 30_000);
     const imports = subscribePersonalImports(({ scope: changed }) => {
       if (changed.owner === owner && changed.schoolId === schoolId) void refresh();
     });
@@ -53,6 +57,7 @@ export function useNextClassWidget() {
     });
     return () => {
       active = false;
+      clearInterval(timer);
       imports();
       manual();
       subscription.remove();
