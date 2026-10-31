@@ -480,3 +480,23 @@ test('never accepts a pending acknowledgement after the source switches to demon
   expect(view.queryByText('已繳交 · 等待老師評分')).toBeNull();
   expect(view.getByText('我的答案')).toBeTruthy();
 });
+
+test.each(['removed', 'denied'])('通知中的作業已無法存取時友善返回課程：%s', async (failure) => {
+  if (failure === 'removed') mockSource.getAssignment.mockResolvedValue(null);
+  else mockSource.getAssignment.mockRejectedValue(new Error('permission-denied'));
+  render(<HomeworkSubmitScreen route={{ params: {
+    groupId: 'course', assignmentId: 'work', fromReminder: true,
+  } }} />);
+  await waitFor(() => expect(mockSafeNavigate).toHaveBeenCalledWith(mockNavigate, 'LearnHome'));
+  expect(Alert.alert).toHaveBeenCalledWith('無法開啟作業', expect.stringMatching(/權限|移除/));
+});
+
+test('從提醒開啟但離線時保留重試入口，不把網路錯誤說成作業已移除', async () => {
+  mockSource.getAssignment.mockRejectedValue(new Error('網路連線中斷'));
+  const view = render(<HomeworkSubmitScreen route={{ params: {
+    groupId: 'course', assignmentId: 'work', fromReminder: true,
+  } }} />);
+  expect(await view.findByText('網路連線中斷')).toBeTruthy();
+  expect(view.getByText('重新讀取')).toBeTruthy();
+  expect(mockSafeNavigate).not.toHaveBeenCalled();
+});

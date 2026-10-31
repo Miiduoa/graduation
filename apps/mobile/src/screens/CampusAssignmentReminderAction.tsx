@@ -3,6 +3,7 @@ import { Text, View } from 'react-native';
 import { AIButton, aiTokens } from '../ui/aiFirst';
 import { validCampusSenseSnapshot, type CampusSenseSnapshot } from '../services/campusSenseSnapshot';
 import type { CampusPlanStep } from '../services/offlineCampusPlanner';
+import { resolveCampusAssignmentTarget } from '../services/campusAssignmentTarget';
 import type { CampusReminderLead } from '../services/campusAssignmentReminders';
 
 function deadlineLabel(iso: string) {
@@ -65,7 +66,7 @@ export function CampusAssignmentReminderAction({
   const verified = validCampusSenseSnapshot(snapshot, scope);
   const deadline = step.dueAt ? Date.parse(step.dueAt) : NaN;
   const canUse = Boolean(
-    userId && step.evidence === 'authorized-assignments' && verified &&
+    userId && resolveCampusAssignmentTarget({ assignment: step, snapshot: verified, scope }) && step.evidence === 'authorized-assignments' && verified &&
     Number.isFinite(deadline) && deadline > Date.now() + 61 * 60_000,
   );
   const oneDayAvailable = Number.isFinite(deadline) && deadline > Date.now() + (1441 * 60_000);
@@ -85,7 +86,7 @@ export function CampusAssignmentReminderAction({
     setStatusError('');
     const { getCampusAssignmentReminderStatus } =
       require('../services/campusAssignmentReminders') as typeof import('../services/campusAssignmentReminders');
-    void getCampusAssignmentReminderStatus({ scope, step, isCurrent })
+    void getCampusAssignmentReminderStatus({ scope, step, snapshot: verified, isCurrent })
       .then((leads) => {
         if (active && isCurrent()) setConfirmedLead(leads[0] ?? null);
       })
@@ -114,6 +115,11 @@ export function CampusAssignmentReminderAction({
         isCurrent,
       });
       if (!isCurrent()) return;
+      if (receipt.outcome === 'submitted' || receipt.outcome === 'inactive') {
+        setConfirmedLead(null);
+        setMessage(receipt.outcome === 'submitted' ? '這份作業已繳交，不再提醒。' : '這份作業目前不需提醒。');
+        return;
+      }
       setConfirmedLead(leadChoice);
       setMessage(receipt.outcome === 'scheduled'
         ? '本機提醒已排程成功，這不會提交作業或修改校務資料。'
@@ -134,7 +140,7 @@ export function CampusAssignmentReminderAction({
     try {
       const { cancelCampusAssignmentReminder } = require('../services/campusAssignmentReminders') as typeof import('../services/campusAssignmentReminders');
       await cancelCampusAssignmentReminder({
-        scope, step, leadMinutes: confirmedLead, isCurrent,
+        scope, step, snapshot, leadMinutes: confirmedLead, isCurrent,
       });
       if (!isCurrent()) return;
       setConfirmedLead(null);
@@ -198,7 +204,7 @@ export function CampusAssignmentReminderAction({
             設定一次性作業提醒
           </Text>
           <Text style={{ color: aiTokens.muted, fontSize: 12, lineHeight: 19 }}>
-            已核對的截止時間：{deadlineLabel(step.dueAt)}。提醒只安排在這台手機，不會上傳作業名稱，也不會替你繳交。
+            已核對的截止時間：{deadlineLabel(step.dueAt)}。提醒只安排在這台手機。連線確認已繳交後會取消；離線時無法核對其他裝置的繳交紀錄。
           </Text>
           <View style={{ flexDirection: 'row', gap: 8 }}>
             <AIButton

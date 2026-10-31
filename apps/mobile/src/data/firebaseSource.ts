@@ -465,6 +465,9 @@ async function fetchDocumentAtPath<T extends { id: string }>(
     const ref = docFromSegments(db, pathSegments);
     const docSnap = await (fromServer ? getDocFromServer(ref) : getDoc(ref));
 
+    if (fromServer && (docSnap.metadata?.fromCache || docSnap.metadata?.hasPendingWrites)) {
+      throw new Error('伺服器尚未確認資料，請重新讀取。');
+    }
     if (!docSnap.exists()) {
       return null;
     }
@@ -2123,6 +2126,8 @@ export const firebaseSource: DataSource = {
       || parseTaipeiInstant(receipt.submittedAt) === null) {
       throw new Error('繳交結果尚未確認，請重新讀取紀錄，內容仍會保留。');
     }
+    const { reconcileSubmittedAssignmentReceipt } = require('../services/submittedAssignmentReminders') as typeof import('../services/submittedAssignmentReminders');
+    await reconcileSubmittedAssignmentReceipt(receipt).catch(() => undefined);
     return receipt;
   },
 

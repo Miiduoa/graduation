@@ -587,7 +587,8 @@ test('source-verified assignment requires review and confirmation before a local
     schedule: { status: 'unavailable' as const, count: null },
     assignments: {
       status: 'available' as const, count: 1,
-      items: [{ title: '可信任的期末報告', groupName: '資訊管理', dueAt }],
+      items: [{ title: '可信任的期末報告', groupName: '資訊管理', dueAt,
+        source: { kind: 'group-assignment' as const, groupId: 'course', assignmentId: 'work' } }],
     },
     announcements: { status: 'unavailable' as const, items: [] },
   };
@@ -648,7 +649,8 @@ test('an already scheduled local reminder is restored when reopening the assista
     schedule: { status: 'unavailable' as const, count: null },
     assignments: {
       status: 'available' as const, count: 1,
-      items: [{ title: '可信任的期末報告', groupName: '資訊管理', dueAt }],
+      items: [{ title: '可信任的期末報告', groupName: '資訊管理', dueAt,
+        source: { kind: 'group-assignment' as const, groupId: 'course', assignmentId: 'work' } }],
     },
     announcements: { status: 'unavailable' as const, items: [] },
   };
@@ -689,7 +691,8 @@ test('unverified OS reminder status blocks scheduling until a successful recheck
     schedule: { status: 'unavailable' as const, count: null },
     assignments: {
       status: 'available' as const, count: 1,
-      items: [{ title: '可信任的期末報告', groupName: '資訊管理', dueAt }],
+      items: [{ title: '可信任的期末報告', groupName: '資訊管理', dueAt,
+        source: { kind: 'group-assignment' as const, groupId: 'course', assignmentId: 'work' } }],
     },
     announcements: { status: 'unavailable' as const, items: [] },
   };

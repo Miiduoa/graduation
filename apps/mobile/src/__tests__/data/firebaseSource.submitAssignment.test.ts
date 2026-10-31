@@ -1,7 +1,11 @@
+import { reconcileSubmittedAssignmentReceipt } from '../../services/submittedAssignmentReminders';
 import { getDoc, getDocFromServer, getDocs, runTransaction } from 'firebase/firestore';
 import { getAuthInstance } from '../../firebase';
 import { firebaseSource } from '../../data/firebaseSource';
 
+jest.mock('../../services/submittedAssignmentReminders', () => ({
+  reconcileSubmittedAssignmentReceipt: jest.fn(async () => undefined),
+}));
 jest.mock('../../firebase', () => ({
   getDb: () => 'db',
   getAuthInstance: jest.fn(),
@@ -227,3 +231,32 @@ test('a switched account cannot receive the previous post-write receipt', async 
     assignmentId: 'work', userId: 'alice', groupId: 'course', content: 'Answer',
   })).rejects.toThrow('登入身分已變更');
 });
+
+
+test('只有伺服器收據核對完成才核對本機提醒，離線或送出中不取消', async () => {
+  let finish!: (value: unknown) => void;
+  const receipt = { id: 'alice', exists: () => true, metadata: { fromCache: false, hasPendingWrites: false },
+    data: () => ({ userId: 'alice', groupId: 'course', assignmentId: 'work', content: 'Answer',
+      status: 'submitted', submittedAt: '2026-10-26T09:00:00Z' }) };
+  jest.mocked(getDocFromServer).mockImplementationOnce(() => new Promise((resolve) => { finish = resolve; }) as never);
+  const sending = firebaseSource.submitAssignment({ userId: 'alice', groupId: 'course', assignmentId: 'work', content: 'Answer' });
+  while (!finish) await Promise.resolve();
+  expect(reconcileSubmittedAssignmentReceipt).not.toHaveBeenCalled();
+  finish(receipt);
+  await sending;
+  expect(reconcileSubmittedAssignmentReceipt).toHaveBeenCalledWith(expect.objectContaining({
+    userId: 'alice', groupId: 'course', assignmentId: 'work', status: 'submitted',
+  }));
+});
+
+test.each([{ fromCache: true, hasPendingWrites: false }, { fromCache: false, hasPendingWrites: true }])(
+  '快取或尚未同步的寫入不當作伺服器確認：%j', async (metadata) => {
+    jest.mocked(getDocFromServer).mockResolvedValueOnce({
+      id: 'alice', exists: () => true, metadata,
+      data: () => ({ userId: 'alice', groupId: 'course', assignmentId: 'work', content: 'Answer',
+        status: 'submitted', submittedAt: '2026-10-26T09:00:00Z' }),
+    } as never);
+    await expect(firebaseSource.submitAssignment({ userId: 'alice', groupId: 'course', assignmentId: 'work', content: 'Answer' })).rejects.toThrow();
+    expect(reconcileSubmittedAssignmentReceipt).not.toHaveBeenCalled();
+  },
+);

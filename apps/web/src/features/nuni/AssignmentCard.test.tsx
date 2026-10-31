@@ -1008,3 +1008,30 @@ it('reveals the next receipt only inside the activity that saved, not a sibling 
   expect(firstScroll).not.toHaveBeenCalled();
 });
 
+
+it('送出中與離線不產生已繳收據，收到伺服器回覆後才確認同一份作業', async () => {
+  let resolve!: (result: unknown) => void;
+  let reject!: (error: Error) => void;
+  state.request.mockReturnValueOnce(new Promise((yes, no) => { resolve = yes; reject = no; }));
+  const onConfirmed = vi.fn();
+  render(<AssignmentCard item={{ ...assignment, dueAt: '2099-12-31T00:00:00Z' }}
+    workspace={{ ...workspace, memberRole: 'student' }} reload={reload} onConfirmed={onConfirmed} />);
+  fireEvent.change(screen.getByLabelText('作業內容'), { target: { value: '我的資料表' } });
+  fireEvent.submit(screen.getByLabelText('作業內容').closest('form')!);
+  expect(screen.queryByRole('region', { name: '我的繳交紀錄' })).toBeNull();
+  expect(onConfirmed).not.toHaveBeenCalled();
+  await act(async () => reject(new Error('offline')));
+  expect(screen.queryByRole('region', { name: '我的繳交紀錄' })).toBeNull();
+  expect(onConfirmed).not.toHaveBeenCalled();
+  expect((screen.getByLabelText('作業內容') as HTMLTextAreaElement).value).toBe('我的資料表');
+  state.request.mockReturnValueOnce(new Promise((yes) => { resolve = yes; }));
+  fireEvent.submit(screen.getByLabelText('作業內容').closest('form')!);
+  const confirmed = { ...assignment, mySubmission: { ...submission,
+    platformAccountId: 'pa_11111111-1111-4111-8111-111111111111', body: '我的資料表' } };
+  await act(async () => resolve(confirmed));
+  expect((await screen.findByRole('region', { name: '我的繳交紀錄' })).textContent).toContain('我的資料表');
+  expect(onConfirmed).toHaveBeenCalledWith(expect.objectContaining({
+    id: assignment.id, workspaceId: workspace.id,
+    mySubmission: expect.objectContaining({ assignmentId: assignment.id, state: 'submitted' }),
+  }));
+});
