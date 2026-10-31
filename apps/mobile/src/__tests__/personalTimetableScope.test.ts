@@ -1,3 +1,4 @@
+import { classMeetingKey, manualClassRecords } from '@campus/shared';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { getDoc, setDoc } from 'firebase/firestore';
 import {
@@ -278,4 +279,27 @@ test('appeal index does not enable sharing for new local-only courses', async ()
     courseName: '私人成績', offeringId: '私人成績｜老師未填', title: 't', body: 'b',
   }, 'local-appeal', make('ntu').courses);
   expect(mockCloudStore.get(scopedPath('student-1', 'ntu'))?.shareWithFriends).toBe(false);
+});
+
+test('additive class exceptions survive old writers and cloud round trips, with source intact', async () => {
+  const timetable = make('pu');
+  const original = manualClassRecords(timetable)[0];
+  const value = { id: 'stop', original, courseKey: classMeetingKey(original), originalDate: '2026-11-02',
+    kind: 'cancel' as const, createdAt: '2026-11-01T00:00:00Z' };
+  await savePersonalTimetable('synthetic-account', { ...timetable, classExceptions: [value] });
+  await savePersonalTimetable('synthetic-account', { ...timetable, courses: [] });
+  expect((await loadPersonalTimetable('synthetic-account', 'pu')).classExceptions).toEqual([value]);
+  expect(mockCloudStore.get(scopedPath('synthetic-account', 'pu'))?.classExceptions).toEqual([value]);
+  await savePersonalTimetable('synthetic-account', { ...timetable, classExceptions: [] });
+  expect((await loadPersonalTimetable('synthetic-account', 'pu')).classExceptions).toEqual([]);
+});
+
+test('an offline class exception remains authoritative over an older cloud copy', async () => {
+  const timetable = make('pu');
+  const original = manualClassRecords(timetable)[0];
+  const value = { id: 'offline-stop', original, courseKey: classMeetingKey(original), originalDate: '2026-11-02', kind: 'cancel' as const, createdAt: '2026-11-01T00:00:00Z' };
+  mockCloudStore.set(scopedPath('synthetic-account', 'pu'), timetable as unknown as Record<string, unknown>);
+  jest.mocked(setDoc).mockRejectedValueOnce(new Error('offline'));
+  expect(await savePersonalTimetable('synthetic-account', { ...timetable, classExceptions: [value] })).toEqual({ stored: 'local', cloudPending: true });
+  expect((await loadPersonalTimetable('synthetic-account', 'pu')).classExceptions).toEqual([value]);
 });

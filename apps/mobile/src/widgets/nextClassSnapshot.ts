@@ -1,4 +1,4 @@
-import { buildPersonalToday, type PersonalImportRecord } from '@campus/shared';
+import { classDate, buildPersonalToday, type PersonalImportRecord } from '@campus/shared';
 import { taipeiInstantOnClock } from '@campus/shared/src/pickNextAction';
 
 export type WidgetClass = {
@@ -31,14 +31,16 @@ export function buildNextClassSnapshot(
     const plan = buildPersonalToday(records, { schoolId, now: date });
     incomplete ||= plan.unplacedCount > 0;
     for (const entry of plan.today) {
-      const startAt = taipeiInstantOnClock(date, entry.startTime);
-      const endAt = taipeiInstantOnClock(date, entry.endTime);
+      const startAt = entry.startAt;
+      const endAt = entry.endAt;
       if (startAt === null || endAt === null || endAt <= startAt) continue;
       const params = new URLSearchParams({
         courseId: entry.row.id,
+        date: classDate(new Date(startAt)),
         term: plan.termKey,
         schoolId,
       });
+      if (classes.some((item) => item.id === entry.row.id && item.startAt === startAt)) continue;
       classes.push({
         id: entry.row.id,
         title: entry.row.title,
