@@ -103,7 +103,7 @@ test.each([
 test('cloud input masks identity fields before fetch', async () => {
   mockFetch.mockResolvedValue(response(503, { code: 'disabled' }));
   await runMobilePersonalImportAi(
-    `姓名：王小明\n學號：411123456\n身分證：A123456789\n${text}`,
+    `姓名：王小明\n學號：411123456\n身分證：A123456789\n課程名稱,學分,成績\n資料庫,3,85`,
     options,
     new AbortController().signal,
     request,
@@ -208,7 +208,7 @@ test('cloud isolates a malformed later segment and recovers it locally', async (
 test('whole-document masking protects a vertical name before paragraph segmentation', async () => {
   mockFetch.mockResolvedValue(response(503, { code: 'disabled' }));
   await runMobilePersonalImportAi(
-    `姓名\n\n王小明\n\n${text}`,
+    `姓名\n\n王小明\n\n課程名稱,學分,成績\n資料庫,3,85`,
     options,
     new AbortController().signal,
     request,
@@ -220,7 +220,7 @@ test('whole-document masking protects a vertical name before paragraph segmentat
 test('unmasked local retry ranges cannot bypass whole-document identity masking', async () => {
   mockFetch.mockResolvedValue(response(503, { code: 'disabled' }));
   await runMobilePersonalImportAi(
-    `姓名\n\n王小明\n\n${text}`,
+    `姓名\n\n王小明\n\n課程名稱,學分,成績\n資料庫,3,85`,
     options,
     new AbortController().signal,
     {
@@ -234,7 +234,7 @@ test('unmasked local retry ranges cannot bypass whole-document identity masking'
 
 test('a retry range that cannot be matched to the original document stays on the device', async () => {
   await runMobilePersonalImportAi(
-    `姓名\n\n王小明\n\n${text}`,
+    `姓名\n\n王小明\n\n課程名稱,學分,成績\n資料庫,3,85`,
     options,
     new AbortController().signal,
     { ...request, retryBatches: [{ text: '王小明\n\n', startLine: 2, columnContext: '' }] },
@@ -360,6 +360,20 @@ for (const boundary of ['日期', '【第二頁】', '課程名稱', '學分', '
   for (const [label, first, second] of [['姓名', '王甲乙', '王丙丁'], ['學號', 'A12345', 'B54321']]) {
     for (const head of [`${label}\n${first}`, `${label}:${first}`]) {
       privacyCases.push(`${head}\n${boundary}\n${second}\n課程名稱,學分,成績\n微積分,3,85`);
+    }
+  }
+}
+
+// 中性資訊與看似學業數值的續行都不能解除已開始的私密追蹤。
+for (const delimiter of [',', '\t', '|', ';', '、']) {
+  for (const prefix of ['日期,20261031', '課號,123456', '開始時間,08:30', '教室,A101',
+    '123456', '2026/10/31', '08:30', 'A101', '微積分,3,85', '微積分 3 85',
+    '日期：20261031', '課號：123456', '學分:3 成績:85',
+    '日期,教室\n20261031,A101', '課程名稱,學分,成績\n微積分,3,85']) {
+    for (const [label, first, second] of [['姓名', '王甲乙', '王丙丁'], ['學號', 'A12345', 'B54321']]) {
+      for (const head of [`${label}\n${first}`, `${label}:${first}`]) {
+        privacyCases.push(`${head}\n${prefix}\n${second}\n課程名稱,學分,成績\n微積分,3,85`.replaceAll(',', delimiter));
+      }
     }
   }
 }

@@ -50,7 +50,7 @@ test('分號表格的引號內分隔符與換行仍完整遮罩', () => {
 
 for (const label of ['教師：王小明', '姓名：王小明', 'teacher: Wang']) {
   test(`遮罩 ${label} 的續行並保留學業邊界後的課程`, () => {
-    for (const boundary of ['課程名稱,學分,成績\n微積分,3,85', '微積分 3 85\n英文 2 80', '微積分,3,85\n英文,2,80']) {
+    for (const boundary of ['課程名稱,學分,成績\n微積分,3,85']) {
       const source = `${label}\n\n李小華\n陳小美\n${boundary}`;
       assert.equal(isPersonalImportCloudMaskSafe(source), true);
       const masked = maskPersonalImportText(source);
@@ -213,9 +213,6 @@ for (const head of ['姓\ufe0f名：王小明', '姓\u034f名,課程名稱,學�
 for (const text of [
   '課程代碼,課程名稱,學分,成績\n123456,微積分,3,85',
   '日期,課程名稱,教室\n20261031,程式設計,A101',
-  '課程代碼,123456\n課程名稱,學分,成績\n微積分,3,85',
-  '日期,20261031\n課程名稱,學分,成績\n微積分,3,85',
-  'Smartphone Application Development,3,85\n課程名稱,學分,成績\n微積分,3,85',
 ]) {
   test(`明確學業資料可送出且仍遮罩個資：${text}`, async () => {
     const source = `姓名：王小明\n${text}`;
@@ -328,6 +325,20 @@ for (const boundary of ['日期', '【第二頁】', '課程名稱', '學分', '
   for (const [label, first, second] of [['姓名', '王甲乙', '王丙丁'], ['學號', 'A12345', 'B54321']]) {
     for (const head of [`${label}\n${first}`, `${label}:${first}`]) {
       privacyCases.push(`${head}\n${boundary}\n${second}\n課程名稱,學分,成績\n微積分,3,85`);
+    }
+  }
+}
+
+// 中性資訊與看似學業數值的續行都不能解除已開始的私密追蹤。
+for (const delimiter of [',', '\t', '|', ';', '、']) {
+  for (const prefix of ['日期,20261031', '課號,123456', '開始時間,08:30', '教室,A101',
+    '123456', '2026/10/31', '08:30', 'A101', '微積分,3,85', '微積分 3 85',
+    '日期：20261031', '課號：123456', '學分:3 成績:85',
+    '日期,教室\n20261031,A101', '課程名稱,學分,成績\n微積分,3,85']) {
+    for (const [label, first, second] of [['姓名', '王甲乙', '王丙丁'], ['學號', 'A12345', 'B54321']]) {
+      for (const head of [`${label}\n${first}`, `${label}:${first}`]) {
+        privacyCases.push(`${head}\n${prefix}\n${second}\n課程名稱,學分,成績\n微積分,3,85`.replaceAll(',', delimiter));
+      }
     }
   }
 }

@@ -53,14 +53,14 @@ describe('personal import cloud client', () => {
     expect(maskPersonalImportCloudBatch(source, { ...batch, text: '王小' })).toBeNull();
   });
 
-  it.each(['姓名', '姓名：'])('preserves course records after the vertical label %s', (label) => {
+  it.each(['姓名', '姓名：'])('私密直排後的不確定課程形狀仍遮罩：%s', (label) => {
     const source = `${label}\n王小明\n微積分 3 85\n英文，學分 2，成績 80\n課程名稱,教師,學分,成績\n資料庫,林小美,3,90`;
     const masked = maskPersonalImportText(source);
-    expect(isPersonalImportCloudMaskSafe(source)).toBe(true);
+    expect(isPersonalImportCloudMaskSafe(source)).toBe(false);
     expect(masked).not.toMatch(/王小明|林小美/);
-    expect(masked).toContain('微積分 3 85');
-    expect(masked).toContain('英文,學分 2,成績 80');
-    expect(masked).toContain('資料庫,[個資已遮罩],3,90');
+    expect(masked).not.toContain('微積分 3 85');
+    expect(masked).not.toContain('英文,學分 2,成績 80');
+    expect(masked).not.toContain('資料庫');
     expect(maskPersonalImportText(masked)).toBe(masked);
   });
 
@@ -84,8 +84,8 @@ describe('personal import cloud client', () => {
     const source = '姓名：王小明 學號：411234567\n身份證：Ａ１２３４５６７８９\n陳小華\n課程名稱\t姓名\t學號\t學分\t成績\n微積分\t林小美\t412345678\t3\t85';
     const masked = maskPersonalImportText(source, ['陳小華']);
     for (const sensitive of ['王小明', '411234567', 'A123456789', '陳小華', '林小美', '412345678']) expect(masked).not.toContain(sensitive);
-    expect(masked).toContain('微積分');
-    expect(masked).toContain('\t3\t85');
+    expect(masked).not.toContain('微積分');
+    expect(masked).not.toContain('\t3\t85');
     expect(maskPersonalImportText(masked)).toBe(masked);
   });
 
@@ -144,9 +144,9 @@ describe('personal import cloud client', () => {
     for (const value of ['王小明', '林小美', 'John Doe']) expect(masked).not.toContain(value);
     expect(masked).toContain('教師:');
     expect(masked).toContain('學分:3 成績:85');
-    expect(masked).toContain('課程名稱,授課教師,學分,成績');
-    expect(masked).toContain('微積分,[個資已遮罩],3,85');
-    expect(masked).toContain('English,[個資已遮罩],2,A');
+    expect(masked).not.toContain('課程名稱,授課教師,學分,成績');
+    expect(masked).not.toContain('微積分,[個資已遮罩],3,85');
+    expect(masked).not.toContain('English,[個資已遮罩],2,A');
   });
 
   it.each(['課程名稱,姓名,學分\n"未關閉的課名,王小明,3', '課程名稱,姓名,學分\n程式,設計,王小明,3'])('keeps ambiguously structured private columns off the network', async (text) => {
@@ -165,7 +165,7 @@ describe('personal import cloud client', () => {
       return Response.json({ output: '{"complete":true,"rows":[]}', sourceText: input.text, columnContext: input.columnContext });
     });
     const result = await requestPersonalImportCloud({ text: '姓名：王小明\n微積分 3 85', kind: 'grades', headers: { 'X-Campus-Session': 'view-context' }, fetcher: fetcher as typeof fetch });
-    expect(result).toMatchObject({ ok: true, sourceText: '姓名:[姓名已遮罩]\n微積分 3 85' });
+    expect(result).toMatchObject({ ok: true, sourceText: '姓名:[姓名已遮罩]\n[個資已遮罩]' });
     expect(fetcher).toHaveBeenCalledOnce();
   });
 
