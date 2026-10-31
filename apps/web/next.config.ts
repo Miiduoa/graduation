@@ -96,8 +96,8 @@ const nextConfig: NextConfig = {
           ...securityHeaders,
         ],
       },
-      ...['/classroom', '/classroom/:path*'].map((source) => ({
-        source,
+      {
+        source: '/:section(classroom)/:path*',
         headers: [{
           key: 'Content-Security-Policy',
           value: contentSecurityPolicy.replace(
@@ -105,7 +105,7 @@ const nextConfig: NextConfig = {
             "object-src blob:; frame-src 'self' blob:",
           ),
         }],
-      })),
+      },
       {
         source: '/documents/reader.html',
         headers: [
