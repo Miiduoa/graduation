@@ -1523,6 +1523,17 @@ test('an overlong document selection is preserved and never silently truncated f
   expect((await loadPersonalImports(scope)).records).toHaveLength(0);
 });
 
+test('record links show only the matching personal record and can return to all records', async () => {
+  const first = backupGrade();
+  const second = { ...backupGrade(), id: 'other-grade', title: '另一筆成績' };
+  await AsyncStorage.setItem(personalImportStorageKey(scope), JSON.stringify({ version: 1, records: [first, second], batches: [] }));
+  const view = render(<PersonalImportScreen route={{ params: { kind: 'grades', recordId: first.id } }} />);
+  await view.findByText('備份英文');
+  expect(view.queryByText('另一筆成績')).toBeNull();
+  fireEvent.press(view.getByText('查看全部個人紀錄'));
+  await view.findByText('另一筆成績');
+});
+
 test('screenshot grid edits, split, missing class and deletion survive remount before explicit import', async () => {
   jest.mocked(ImagePicker.launchImageLibraryAsync).mockResolvedValue({
     canceled: false,

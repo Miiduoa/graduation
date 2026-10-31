@@ -422,3 +422,11 @@ it('hides Firebase feedback immediately when the Firebase account changes', asyn
   await act(async () => finish(book([])));
   expect(screen.queryByRole('heading', { name: 'Alice 私人課程' })).toBeNull();
 });
+
+it('labels course provenance and unknown timestamps without inventing a score', async () => {
+  render(<StudentGradesBoard nuni={book([section({ items: [item({ status: 'waiting', feedback: null, publishedAt: null, submittedAt: null })] })])} school={null} ownerId={ownerId} filter="all" onFilter={vi.fn()} onOpen={vi.fn()} />);
+  expect(await screen.findByText(/來源：nuni 課程 · 本次讀取：尚未確認/)).toBeTruthy();
+  expect(screen.getByText('紀錄更新時間：未知')).toBeTruthy();
+  expect(screen.queryByText(/已評分 · 0/)).toBeNull();
+  expect(screen.getByRole('link', { name: /作業一/ }).getAttribute('href')).toContain('#assignment-');
+});

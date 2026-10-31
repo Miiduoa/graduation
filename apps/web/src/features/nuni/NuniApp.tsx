@@ -417,6 +417,8 @@ function Workspace({ id }: { id: string }) {
           <CourseLearningPath
             workspace={data.workspace}
             assignments={data.assignments}
+            assignmentsError={error}
+            assignmentsLoading={refreshing}
             units={units}
             unitsError={unitsError}
             refreshVersion={outlineVersion}

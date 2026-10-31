@@ -1550,12 +1550,15 @@ export const firebaseSource: DataSource = {
     let totalCredits = 0;
 
     for (const grade of grades) {
+      if (!Number.isFinite(grade.gradePoints) || grade.gradePoints == null ||
+          !Number.isFinite(grade.credits) || grade.credits <= 0) continue;
       totalPoints += grade.gradePoints * grade.credits;
       totalCredits += grade.credits;
     }
 
+    if (totalCredits <= 0) return null;
     return {
-      gpa: totalCredits > 0 ? totalPoints / totalCredits : 0,
+      gpa: totalPoints / totalCredits,
       totalCredits,
       totalPoints,
     };

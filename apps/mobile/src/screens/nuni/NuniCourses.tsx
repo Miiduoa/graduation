@@ -10,6 +10,7 @@ import React, {
   type RefObject,
 } from 'react';
 import { Image, Linking, Pressable, ScrollView, Text, TextInput, View } from 'react-native';
+import { PublishedFeedbackLink } from '../../components/PublishedFeedbackLink';
 import { revealAssignmentSubmitArea } from './scrollAssignment';
 import {
   MATERIAL_CURSOR_CYCLE_MESSAGE,
@@ -264,6 +265,8 @@ function RecentTeacherFeedbackRow({
   item: NuniRecentTeacherFeedback;
   open(courseId: string, activityId?: string): void;
 }) {
+  const auth = useNuniSession();
+  const owner = auth.session?.platformAccountId ?? null;
   const kindLabel = item.kind === 'quiz' ? '測驗回饋' : '作業回饋';
   const label = `開啟「${item.title}」完整回饋`;
   return (
@@ -275,8 +278,8 @@ function RecentTeacherFeedbackRow({
       </Copy>
       <Copy>{truncateFeedback(item.feedback)}</Copy>
       {item.stale ? <Copy>這則回饋早於你最近一次繳交，請到作業頁確認是否仍適用。</Copy> : null}
-      {item.reviewedAt ? <Copy>{time(item.reviewedAt)}</Copy> : null}
-      <Button label={label} onPress={() => open(item.courseId, item.id)} />
+      <Copy>來源：nuni 課程 · 回饋更新：{item.reviewedAt ? time(item.reviewedAt) : '未知'}</Copy>
+      <PublishedFeedbackLink owner={owner} record={`${item.courseId}:${item.kind}:${item.id}`} version={item.reviewedAt} label={label} onOpen={() => open(item.courseId, item.id)} />
     </View>
   );
 }
@@ -978,6 +981,7 @@ function CourseList({
 }
 
 type CourseData = {
+  checkedAt: string;
   course: NuniWorkspace;
   materials: NuniMaterial[];
   materialsCursor: string | null;
@@ -1074,6 +1078,7 @@ function CourseDetail({
     if (run === pageGeneration.current) pageProgress.current = snapshot;
     return {
       course,
+      checkedAt: new Date().toISOString(),
       materials: snapshot.items,
       materialsCursor: snapshot.nextCursor,
       assignments,
@@ -1305,11 +1310,14 @@ function CourseDetail({
       </View>
       {result.loading ? <Copy>正在讀取課程內容…</Copy> : null}
       {result.error ? <Copy alert>{result.error}</Copy> : null}
+      {result.error ? <Copy>完整進度未知，未取得的內容不當成已完成。</Copy> : null}
       {materialsDenied ? <Copy alert>{materialsError}</Copy> : null}
       {classroomDenied ? <Copy alert>目前無法存取這門課程，請更新內容後確認權限。</Copy> : null}
       {data && !classroomDenied ? (
         <View style={{ gap: 16, display: result.loading || result.error ? 'none' : 'flex' }}>
           <Copy title>{data.course.title}</Copy>
+          <Copy>來源：nuni 課程 · 本次讀取：{time(data.checkedAt)}</Copy>
+          <Copy>進度依作業繳交與測驗作答紀錄計算，閱讀教材不計完成。待評、缺件與未取得都不換算成零分；清單未齊時完整進度為未知。點選作業或測驗可查看原始紀錄。</Copy>
           <Copy>
             {courseRoleLabels[data.course.memberRole]}
             {data.course.state === 'archived' ? ' · 課程已封存' : ''}
