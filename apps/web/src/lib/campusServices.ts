@@ -331,14 +331,18 @@ export function presentCampusService<T extends { href: string; text: string }>(s
   return service;
 }
 
-export function searchCampusServices(query: string, category: ServiceCategory | 'all' = 'all') {
+export function visibleCampusServices(schoolLmsEnabled = false) {
+  return CAMPUS_SERVICES.filter((service) => schoolLmsEnabled || service.href !== '/school-lms');
+}
+
+export function searchCampusServices(query: string, category: ServiceCategory | 'all' = 'all', schoolLmsEnabled = false) {
   const terms = query
     .normalize('NFKC')
     .trim()
     .toLocaleLowerCase('zh-TW')
     .split(/\s+/)
     .filter(Boolean);
-  return CAMPUS_SERVICES.map(presentCampusService).filter((service) => {
+  return visibleCampusServices(schoolLmsEnabled).map(presentCampusService).filter((service) => {
     const content = `${service.name} ${service.text} ${service.keywords}`
       .normalize('NFKC')
       .toLocaleLowerCase('zh-TW');

@@ -31,12 +31,17 @@ import { courseRoleLabels } from './courseTasks';
 import { CourseMaterials } from './CourseMaterials';
 import { CourseQuizzes } from './CourseQuizzes';
 import { CourseLearningPath } from './CourseLearningPath';
+import { CourseMembers } from './CourseMembers';
+import { ClassroomSessions } from '@/features/platform/ClassroomSessions';
 import { CourseUnitSelect } from './CourseUnitSelect';
 import { selectCourseUnit } from './courseOutline';
 import styles from './NuniApp.module.css';
 import workspaceStyles from './CourseWorkspace.module.css';
-import { useCoursePanel } from './useCoursePanel';
-import { assignmentReferenceTiming, prioritizeCourseAssignments } from './courseAssignmentDiscovery';
+import { useCoursePanel, type CoursePanel } from './useCoursePanel';
+import {
+  assignmentReferenceTiming,
+  prioritizeCourseAssignments,
+} from './courseAssignmentDiscovery';
 
 export function NuniHeader() {
   return <AppHeader />;
@@ -80,16 +85,17 @@ function Login() {
 
 function Workspace({ id }: { id: string }) {
   const hash = useLocationHash();
+  const params = useSearchParams();
   const classes = useClasses(beginCourseRequest);
-  const { refresh } = useNuniSession();
+  const { refresh, session } = useNuniSession();
   const [data, setData] = useState<{
     workspace: NuniWorkspace;
     assignments: NuniAssignment[];
   } | null>(null);
   const [error, setError] = useState('');
   const [epoch, setEpoch] = useState(0);
-  const [code, setCode] = useState('');
-  const { panel: tab, navigate: setTab, courseListHref } = useCoursePanel();
+  const [code, setCode] = useState(params.get('invite') || '');
+  const { panel: requestedTab, navigate: setTab, courseListHref } = useCoursePanel();
   const now = useClientNow();
   const [units, setUnits] = useState<NuniUnit[] | null>(null);
   const [unitsError, setUnitsError] = useState('');
@@ -193,6 +199,15 @@ function Workspace({ id }: { id: string }) {
     );
   if (!data) return <p role="status">正在讀取課程內容…</p>;
   const teacher = data.workspace.memberRole !== 'student';
+  const tab = requestedTab === 'members' && !teacher ? 'assignments' : requestedTab;
+  const tabs: Array<[CoursePanel, string]> = [
+    ['outline', '學習路徑'],
+    ['materials', '教材'],
+    ['assignments', '作業'],
+    ['quizzes', '測驗'],
+    ['attendance', '點名'],
+    ...(teacher ? [['members', '名冊'] as [CoursePanel, string]] : []),
+  ];
   const pending =
     data.workspace.state === 'active'
       ? data.assignments.filter((item) => item.state === 'open' && !item.mySubmission)
@@ -241,7 +256,7 @@ function Workspace({ id }: { id: string }) {
               ? '你負責這門課，可以邀請學生、發布內容與回覆繳交。'
               : data.workspace.memberRole === 'co-teacher'
                 ? '你可以發布內容與回覆繳交；邀請學生由課程負責老師處理。'
-                : '教材、作業和測驗，都在這門課。'}
+                : '教材、作業、測驗與簽到，都在這門課。'}
           </p>
         </div>
         <button
@@ -335,14 +350,7 @@ function Workspace({ id }: { id: string }) {
         role="tablist"
         aria-label="課程內容"
       >
-        {(
-          [
-            ['outline', '學習路徑'],
-            ['materials', '教材'],
-            ['assignments', '作業'],
-            ['quizzes', '測驗'],
-          ] as const
-        ).map(([value, label]) => (
+        {tabs.map(([value, label]) => (
           <button
             key={value}
             type="button"
@@ -353,7 +361,7 @@ function Workspace({ id }: { id: string }) {
             tabIndex={tab === value ? 0 : -1}
             onClick={() => setTab(value)}
             onKeyDown={(event) => {
-              const keys = ['outline', 'materials', 'assignments', 'quizzes'] as const;
+              const keys = tabs.map(([key]) => key);
               const index = keys.indexOf(value);
               const next =
                 event.key === 'ArrowRight'
@@ -377,6 +385,29 @@ function Workspace({ id }: { id: string }) {
         ))}
       </div>
       <CourseAccessBoundary beginRequest={beginCourseRequest}>
+        {tab === 'attendance' && session && (
+          <section role="tabpanel" id="panel-attendance" aria-labelledby="tab-attendance">
+            <ClassroomSessions
+              workspaceId={id}
+              context={session.context}
+              isTeacher={teacher}
+              readOnly={data.workspace.state !== 'active'}
+              units={(units ?? []).map(({ id: unitId, title }) => ({ id: unitId, title }))}
+              beginRequest={beginCourseRequest}
+              refreshVersion={epoch}
+            />
+          </section>
+        )}
+        {tab === 'members' && teacher && session && (
+          <section role="tabpanel" id="panel-members" aria-labelledby="tab-members">
+            <CourseMembers
+              workspace={data.workspace}
+              context={session.context}
+              beginRequest={beginCourseRequest}
+              refreshVersion={epoch}
+            />
+          </section>
+        )}
         <section
           role="tabpanel"
           id="panel-outline"

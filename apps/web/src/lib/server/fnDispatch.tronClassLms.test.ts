@@ -56,7 +56,10 @@ function setup() {
   return { request, store, source, verifyIdToken };
 }
 
-beforeEach(() => resetUidRateLimitForTests());
+beforeEach(() => {
+  vi.stubEnv('SCHOOL_LMS_READONLY_ENABLED', 'true');
+  resetUidRateLimitForTests();
+});
 
 it('hosts the read-only LMS callable next to the course list', () => {
   expect(getCloudFunctionUrl('getMyTronClassLms', { env: {} })).toBe('/api/fn/getMyTronClassLms');

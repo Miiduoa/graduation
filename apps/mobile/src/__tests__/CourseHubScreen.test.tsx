@@ -29,15 +29,14 @@ const data: CourseHubData = {
 };
 const route = { params: { groupId: 'course-a', groupName: '過時的課名' } };
 beforeEach(() => {
-  // Keep weekly deadlines and overdue assertions independent of the execution date.
+  // Keep weekly tasks before the fixed Oct 29 deadline, regardless of the run date or timezone.
   jest.useFakeTimers({
-    now: new Date('2026-10-26T04:00:00Z'),
+    now: new Date('2026-10-27T04:00:00Z'),
+    // Leave async rendering and navigation scheduling on real timers.
     doNotFake: [
-      'hrtime', 'nextTick', 'performance', 'queueMicrotask',
-      'requestAnimationFrame', 'cancelAnimationFrame',
-      'requestIdleCallback', 'cancelIdleCallback',
-      'setImmediate', 'clearImmediate', 'setInterval', 'clearInterval',
-      'setTimeout', 'clearTimeout',
+      'setTimeout', 'clearTimeout', 'setInterval', 'clearInterval',
+      'setImmediate', 'clearImmediate', 'nextTick', 'queueMicrotask',
+      'requestAnimationFrame', 'cancelAnimationFrame', 'performance', 'hrtime',
     ],
   });
   jest.clearAllMocks();

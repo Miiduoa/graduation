@@ -56,10 +56,8 @@ export const APPROVE_SCHOOL_REASON = '資料齊全，先建檔未開放註冊。
 export const REJECT_SCHOOL_REASON = '資料不足，請補件後再申請。';
 export const OPEN_SCHOOL_REASON = '資料已核對，開放給學生找校。';
 
-export const WORKSPACE_ID_PATTERN = /^cw_[0-9a-fA-F-]{36}$/u;
-
 export function workspacePath(id: string): string {
-  return `/auth/platform/class-workspace/${id}`;
+  return `/classroom/course/${encodeURIComponent(id)}`;
 }
 
 export function accountReturnHref(path: string): string {

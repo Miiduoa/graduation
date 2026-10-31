@@ -315,8 +315,8 @@ export function WorkspaceList() {
                           {item.state === 'archived'
                             ? '查看教材與紀錄'
                             : item.memberRole === 'student'
-                              ? '教材、作業與測驗'
-                              : '教材、發布與批閱'}
+                              ? '教材、作業與簽到'
+                              : '教材、作業與點名'}
                           <CampusIcon name="arrow" size={18} />
                         </span>
                       </Link>
