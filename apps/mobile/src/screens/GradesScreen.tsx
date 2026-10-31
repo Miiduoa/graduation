@@ -1,6 +1,6 @@
 /* eslint-disable @typescript-eslint/no-unused-vars, react-hooks/exhaustive-deps */
 import React, { useMemo, useState, useEffect, useCallback } from 'react';
-import { ScrollView, Text, View, Pressable, Alert, RefreshControl } from 'react-native';
+import { ScrollView, Text, View, Pressable, Alert, RefreshControl, Linking } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import {
   Screen,
@@ -38,6 +38,9 @@ type Grade = {
   status: 'completed' | 'in_progress' | 'failed';
   category: 'required' | 'elective' | 'general' | 'english';
   instructor?: string;
+  courseId?: string;
+  gradeSource?: DataGrade['gradeSource'];
+  publishedAt?: string;
 };
 
 type Semester = {
@@ -45,7 +48,7 @@ type Semester = {
   name: string;
   year: number;
   term: number;
-  gpa: number;
+  gpa: number | null;
   credits: number;
   courses: Grade[];
 };
@@ -176,6 +179,8 @@ function GradeCard({ course }: { course: Grade }) {
 
   return (
     <Pressable
+      accessibilityRole="link"
+      onPress={() => void Linking.openURL(course.gradeSource?.startsWith('school-official') ? 'https://ecampus.pu.edu.tw/' : `https://nuni.tw/course/${encodeURIComponent(course.courseId || '')}`)}
       style={{
         padding: 14,
         borderRadius: theme.radius.md,
@@ -205,6 +210,9 @@ function GradeCard({ course }: { course: Grade }) {
           </View>
           <Text style={{ color: theme.colors.muted, fontSize: 12, marginTop: 4 }}>
             {course.courseCode} · {course.credits} 學分 · {course.instructor}
+          </Text>
+          <Text style={{ color: theme.colors.muted, fontSize: 12 }}>
+            來源：{course.gradeSource?.startsWith('school-official') ? '校方正式' : course.gradeSource === 'firebase-course' ? 'nuni 課程' : '未知'} · 公布時間：{course.publishedAt || '未知'} · 點選查看原始紀錄
           </Text>
         </View>
 
@@ -329,7 +337,7 @@ export function GradesScreen(props: Record<string, unknown>) {
           name: `${yearStr}學年度第${termStr}學期`,
           year: parseInt(yearStr),
           term: parseInt(termStr),
-          gpa: 0,
+          gpa: null,
           credits: 0,
           courses: [],
         });
@@ -349,16 +357,19 @@ export function GradesScreen(props: Record<string, unknown>) {
         status: grade.letterGrade ? 'completed' : 'in_progress',
         category: inferCategory(grade.courseCode, grade.courseName),
         instructor: grade.instructor,
+        courseId: grade.courseId,
+        gradeSource: grade.gradeSource,
+        publishedAt: grade.publishedAt,
       });
       sem.credits += grade.credits;
     }
 
     for (const sem of semesterMap.values()) {
-      const completedCourses = sem.courses.filter((c) => c.status === 'completed');
+      const completedCourses = sem.courses.filter((c) => c.status === 'completed' && typeof c.gpa === 'number' && Number.isFinite(c.gpa));
       if (completedCourses.length > 0) {
         const totalPoints = completedCourses.reduce((sum, c) => sum + (c.gpa ?? 0) * c.credits, 0);
         const totalCredits = completedCourses.reduce((sum, c) => sum + c.credits, 0);
-        sem.gpa = totalCredits > 0 ? totalPoints / totalCredits : 0;
+        sem.gpa = totalCredits > 0 ? totalPoints / totalCredits : null;
       }
     }
 
@@ -387,10 +398,11 @@ export function GradesScreen(props: Record<string, unknown>) {
 
   const overallGPA = useMemo(() => {
     if (gpaData) return gpaData.gpa;
-    if (completedCourses.length === 0) return 0;
-    const totalPoints = completedCourses.reduce((sum, c) => sum + (c.gpa ?? 0) * c.credits, 0);
-    const totalCredits = completedCourses.reduce((sum, c) => sum + c.credits, 0);
-    return totalCredits > 0 ? totalPoints / totalCredits : 0;
+    const numericCourses = completedCourses.filter((c) => typeof c.gpa === 'number' && Number.isFinite(c.gpa));
+    if (numericCourses.length === 0) return null;
+    const totalPoints = numericCourses.reduce((sum, c) => sum + (c.gpa ?? 0) * c.credits, 0);
+    const totalCredits = numericCourses.reduce((sum, c) => sum + c.credits, 0);
+    return totalCredits > 0 ? totalPoints / totalCredits : null;
   }, [completedCourses, gpaData]);
 
   const totalCredits = useMemo(() => {
@@ -453,6 +465,7 @@ export function GradesScreen(props: Record<string, unknown>) {
   return (
     <Screen>
       <PersonalImportSummary kind="grades" />
+      <Text style={{ color: theme.colors.muted }}>參考 GPA＝已知績點乘學分的總和 ÷ 有績點的學分總和；待評與未取得不當成零分，無可計算資料顯示未知。</Text>
       <View style={{ flex: 1 }}>
         <SegmentedControl options={TABS} selected={selectedTab} onChange={setSelectedTab} />
 
@@ -476,7 +489,7 @@ export function GradesScreen(props: Record<string, unknown>) {
                     title={currentSemester.name}
                     subtitle={
                       currentSemester.courses.some((c) => c.status === 'completed')
-                        ? `GPA: ${currentSemester.gpa.toFixed(2)}`
+                        ? `GPA: ${currentSemester.gpa?.toFixed(2) ?? '未知'}`
                         : '進行中'
                     }
                   >
@@ -599,13 +612,13 @@ export function GradesScreen(props: Record<string, unknown>) {
 
                 return (
                   <>
-                    <AnimatedCard title={sem.name} subtitle={`GPA: ${sem.gpa.toFixed(2)}`}>
+                    <AnimatedCard title={sem.name} subtitle={`GPA: ${sem.gpa?.toFixed(2) ?? '未知'}`}>
                       <View style={{ flexDirection: 'row', gap: 16 }}>
                         <View style={{ flex: 1, alignItems: 'center' }}>
                           <Text
                             style={{ color: theme.colors.accent, fontWeight: '700', fontSize: 28 }}
                           >
-                            {sem.gpa.toFixed(2)}
+                            {sem.gpa?.toFixed(2) ?? '未知'}
                           </Text>
                           <Text style={{ color: theme.colors.muted, fontSize: 12 }}>學期 GPA</Text>
                         </View>
@@ -642,7 +655,7 @@ export function GradesScreen(props: Record<string, unknown>) {
               <AnimatedCard title="成績總覽" subtitle="累積表現">
                 <View style={{ flexDirection: 'row', alignItems: 'center', gap: 20 }}>
                   <ProgressRing
-                    progress={Math.min(1, overallGPA / 4.0)}
+                    progress={Math.min(1, (overallGPA ?? 0) / 4.0)}
                     size={100}
                     strokeWidth={10}
                     color={theme.colors.accent}
@@ -650,7 +663,7 @@ export function GradesScreen(props: Record<string, unknown>) {
                   <View style={{ flex: 1 }}>
                     <Text style={{ color: theme.colors.muted, fontSize: 12 }}>累積 GPA</Text>
                     <Text style={{ color: theme.colors.accent, fontWeight: '700', fontSize: 36 }}>
-                      {overallGPA.toFixed(2)}
+                      {overallGPA?.toFixed(2) ?? '未知'}
                     </Text>
                     <Text style={{ color: theme.colors.muted, fontSize: 12, marginTop: 4 }}>
                       滿分 4.0
@@ -843,7 +856,7 @@ export function GradesScreen(props: Record<string, unknown>) {
                           <Text
                             style={{ color: theme.colors.accent, fontWeight: '700', fontSize: 16 }}
                           >
-                            {sem.gpa.toFixed(2)}
+                            {sem.gpa?.toFixed(2) ?? '未知'}
                           </Text>
                         </View>
                       </View>

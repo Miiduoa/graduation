@@ -47,6 +47,7 @@ export function CourseLearningPath({
   );
   const [quizzes, setQuizzes] = useState<NuniQuiz[] | null>(null);
   const [error, setError] = useState('');
+  const [checkedAt, setCheckedAt] = useState<string | null>(null);
   const [reading, setReading] = useState(true);
   const [loadingMoreMaterials, setLoadingMoreMaterials] = useState(false);
   const [epoch, setEpoch] = useState(0);
@@ -65,7 +66,7 @@ export function CourseLearningPath({
   const complete = units !== null && materials !== null && quizzes !== null && !materialsDenied;
   const groups = buildCourseOutline(units ?? [], materials ?? [], assignments, quizzes ?? []);
   const overall = courseTaskTotals(assignments, quizzes ?? [], now);
-  const canClaimTaskMetrics = complete && !quizzesLimited;
+  const canClaimTaskMetrics = complete && !materialsIncomplete && !quizzesLimited && assignments.length < 100 && !unitsError && !error && !reading;
 
   useEffect(() => {
     courseApi.current = classes;
@@ -84,6 +85,7 @@ export function CourseLearningPath({
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setReading(true);
     setError('');
+    setCheckedAt(null);
     setMaterials(null);
     setMaterialsProgress(null);
     setQuizzes(null);
@@ -113,6 +115,7 @@ export function CourseLearningPath({
         quizzesResult.status === 'rejected' ? `測驗：${nuniErrorMessage(quizzesResult.reason)}` : '',
       ].filter(Boolean);
       setError(messages.join(' '));
+      setCheckedAt(new Date().toISOString());
       setReading(false);
     });
     return () => {
@@ -183,6 +186,8 @@ export function CourseLearningPath({
           {reading ? '整理中…' : '更新章節內容'}
         </button>
       </div>
+      <p className={styles.context}>來源：nuni 課程 · 本次讀取：{checkedAt ? formatTaipeiDateTime(checkedAt, { seconds: false }) : '尚未確認'}。作業或測驗未取得時，完整進度為未知；待評與缺件不換算成零分。</p>
+      {!canClaimTaskMetrics && !reading && <p className={styles.context}>進度未知：清單未齊或部分讀取失敗，請更新後確認。</p>}
       {!teacher && canClaimTaskMetrics && (
         <div className={styles.summary} role="status">
           <div><strong>{overall.pending}</strong><span>可處理的待辦</span></div>
@@ -200,7 +205,7 @@ export function CourseLearningPath({
           {unitsError && <button type="button" className={`${shared.button} ${shared.secondary}`} onClick={reloadUnits}>重試章節清單</button>}
         </div>
       )}
-      {error && <p className={shared.notice} role="alert">{error} 可再次更新，尚未取得的內容不計入進度。</p>}
+      {error && <p className={shared.notice} role="alert">{error} 可再次更新；完整進度未知，尚未取得的內容不當成已完成。</p>}
       {reading && <p role="status">正在核對教材與測驗…</p>}
       {!complete && !reading && <p className={styles.context}>部分內容尚未載入，暫時無法顯示完整進度。</p>}
       {quizzesLimited && (

@@ -1,11 +1,12 @@
 import React, { useCallback, useRef, useState, useSyncExternalStore } from 'react';
-import { ActivityIndicator, Text, View } from 'react-native';
+import { ActivityIndicator, Linking, Text, View } from 'react-native';
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import { AIDetailScreen, AISection, AIRow, AIButton, aiTokens } from '../ui/aiFirst';
 import { useAuth } from '../state/auth';
 import { getThemeVersion, subscribeToTheme } from '../ui/theme';
 import { firebaseSource } from '../data/firebaseSource';
 import type { Grade } from '../data/types';
+import { PersonalImportSummary } from '../components/PersonalImportSummary';
 import { safeNavigate } from '../utils/safeNavigate';
 import { loadFailureOrLoginCopy } from '../utils/loadFailureCopy';
 
@@ -22,6 +23,7 @@ export default function GradesAiFirstScreen() {
   const [state, setState] = useState<{
     scope: string;
     rows: Grade[];
+    checkedAt?: string;
     loading: boolean;
     error: unknown | null;
   } | null>(null);
@@ -40,7 +42,7 @@ export default function GradesAiFirstScreen() {
           Date.parse(grade.publishedAt) <= Date.now(),
       );
       if (currentScope.current === scope && generation.current === request) {
-        setState({ scope, rows, loading: false, error: null });
+        setState({ scope, rows, checkedAt: new Date().toISOString(), loading: false, error: null });
       }
     } catch (error) {
       if (currentScope.current === scope && generation.current === request) {
@@ -63,6 +65,7 @@ export default function GradesAiFirstScreen() {
       subtitle="查看目前帳號已同步的成績紀錄"
       onBack={() => navigation.goBack()}
     >
+      <Text style={{ color: aiTokens.muted, padding: 16 }}>本次讀取：{visible?.checkedAt ? new Date(visible.checkedAt).toLocaleString('zh-TW', { timeZone: 'Asia/Taipei' }) : '尚未確認'}。未取得與待評顯示未知，不換算成零分。點選成績可回到原始紀錄。</Text>
       <AISection title="成績紀錄">
         {!visible || visible.loading ? (
           <ActivityIndicator accessibilityLabel="讀取成績" color={aiTokens.ai} />
@@ -88,10 +91,10 @@ export default function GradesAiFirstScreen() {
                 : null;
             return (
               <AIRow
-                static
                 key={grade.id}
                 title={grade.courseName || '課程成績'}
-                subtitle={[grade.semester, credits, grade.letterGrade].filter(Boolean).join(' · ')}
+                subtitle={[grade.gradeSource === 'school-official' || grade.gradeSource === 'school-official-offline' ? '來源：校方正式' : '來源：nuni 課程', grade.semester, credits, `公布時間：${grade.publishedAt || '未知'}`].filter(Boolean).join(' · ')}
+                onPress={() => grade.gradeSource?.startsWith('school-official') ? void Linking.openURL('https://ecampus.pu.edu.tw/') : safeNavigate(navigation, 'CourseGradebook', { groupId: grade.courseId, groupName: grade.courseName })}
                 tag={result}
               />
             );
@@ -102,6 +105,7 @@ export default function GradesAiFirstScreen() {
           </Text>
         )}
       </AISection>
+      <PersonalImportSummary kind="grades" />
       <AISection title="課程資料">
         <AIRow
           title="查看課內成績"

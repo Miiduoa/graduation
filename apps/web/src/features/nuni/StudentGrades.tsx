@@ -217,7 +217,7 @@ function CourseSection({
         <div>
           <h2 id={`course-${course.source}-${course.courseId}`}>{course.courseName}</h2>
           <p className={styles.muted}>
-            {course.source === 'nuni' ? '課程空間' : '學校課程'}
+            來源：nuni 課程{course.source === 'school' ? '（學校課程空間）' : ''} · 本次讀取：{course.checkedAt ? formatTaipeiDateTime(course.checkedAt, { seconds: false }) : '尚未確認'}
             {course.archived ? ' · 已封存' : ''}
           </p>
         </div>
@@ -296,9 +296,10 @@ function GradeRow({
             <span className={styles.preview}>還沒看到你的繳交紀錄。</span>
           ) : null}
           {item.feedback ? <span className={styles.preview}>老師評語：{item.feedback}</span> : null}
+          {!when && <span className={styles.meta}>紀錄更新時間：未知</span>}
           {when && hydrated ? (
             <span className={styles.meta}>
-              <time dateTime={when}>{formatTaipeiDateTime(when, { seconds: false })}</time>
+              {item.publishedAt ? '回饋公布：' : '最近繳交：'}<time dateTime={when}>{formatTaipeiDateTime(when, { seconds: false })}</time>
             </span>
           ) : null}
         </span>

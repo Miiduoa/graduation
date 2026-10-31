@@ -14,6 +14,7 @@ let mockAuth = {
   profile: { uid: 'user-a', schoolId: 'school-a', role: 'student' },
 };
 jest.mock('../state/auth', () => ({ useAuth: () => mockAuth }));
+jest.mock('../state/personalImportScope', () => ({ usePersonalImportScope: () => null }));
 jest.mock('../hooks/usePermissions', () => ({ usePermissions: () => ({ isStudent: true }) }));
 jest.mock('../data/studentHome', () => ({ loadStudentHome: jest.fn() }));
 jest.mock('../data/firebaseSource', () => ({
@@ -120,6 +121,9 @@ test('grades show source scores and exclude other accounts, schools and unpublis
   const view = render(<GradesAiFirstScreen />);
   await view.findByText('已發布的課程');
   expect(view.getByText('87 分')).toBeTruthy();
+  expect(view.getByText(/來源：nuni 課程/)).toBeTruthy();
+  fireEvent.press(view.getByText('已發布的課程'));
+  expect(safeNavigate).toHaveBeenCalledWith(mockNavigation, 'CourseGradebook', { groupId: 'course-1', groupName: '已發布的課程' });
   expect(
     view.queryByText(/其他人的成績|其他學校成績|學校不明的成績|尚未發布的成績|未來發布成績/),
   ).toBeNull();
@@ -307,3 +311,13 @@ test.each([
     await view.findByText(restored);
   },
 );
+
+test('official grades identify the source and keep absent scores unknown', async () => {
+  jest.mocked(firebaseSource.listGrades).mockResolvedValue([grade({ gradeSource: 'school-official', score: undefined, finalScore: undefined, grade: undefined })]);
+  const view = render(<GradesAiFirstScreen />);
+  await view.findByText('已發布的課程');
+  expect(view.getByText(/來源：校方正式/)).toBeTruthy();
+  expect(view.getByText('未提供分數')).toBeTruthy();
+  expect(view.queryByText('0 分')).toBeNull();
+  expect(view.getByText(/本次讀取：/)).toBeTruthy();
+});

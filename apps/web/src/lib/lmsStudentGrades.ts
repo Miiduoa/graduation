@@ -42,6 +42,7 @@ export type CourseGradeSection = {
   courseId: string;
   courseName: string;
   href: string;
+  checkedAt?: string;
   archived: boolean;
   status: CourseGradeLoadStatus;
   error: string | null;
@@ -73,7 +74,7 @@ export const GRADE_COPY = {
   missingClosed: '缺交 · 已停止收件',
   feedbackOnly: '已公布回饋 · 沒有分數欄位',
   unread: '未讀',
-  note: '只顯示已公布的分數或回饋。還沒公布的分數不會出現。正式學期成績仍以學校紀錄為準。',
+  note: '只顯示已公布的分數或回饋。還沒公布的分數不會出現。待評、缺交與未取得都不換算成零分，也不混入平均。正式學期成績仍以學校紀錄為準。',
 } as const;
 
 const FILTER_LABELS: Record<GradeFilter, string> = {
