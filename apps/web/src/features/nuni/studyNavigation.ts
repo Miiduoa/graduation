@@ -53,6 +53,30 @@ export function classroomCourseHref(
   return `/classroom/course/${encodeURIComponent(id)}${query ? `?${query}` : ''}${activity ? `#${activity.kind}-${encodeURIComponent(activity.id)}` : ''}`;
 }
 
+export function legacyCourseHref(
+  id: string,
+  query: Record<string, string | string[] | undefined>,
+): string {
+  const params = new URLSearchParams();
+  for (const [key, value] of Object.entries(query)) {
+    for (const item of Array.isArray(value) ? value : value === undefined ? [] : [value]) {
+      params.append(key, item);
+    }
+  }
+  if (!params.has('view')) {
+    const previous = params.get('tab');
+    params.set(
+      'view',
+      previous === 'course'
+        ? 'outline'
+        : previous === 'members' || previous === 'affiliation'
+          ? 'members'
+          : 'attendance',
+    );
+  }
+  return `/classroom/course/${encodeURIComponent(id)}?${params.toString()}`;
+}
+
 export function replaceStudyQuery(
   key: 'q' | 'courses' | 'task' | 'taskCourse',
   value: string,

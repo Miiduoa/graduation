@@ -10,11 +10,13 @@ import { NuniApp } from './NuniApp';
 
 const mocks = vi.hoisted(() => ({
   request: vi.fn(),
+  platformFetch: vi.fn(),
   refresh: vi.fn(),
   signedIn: true,
   loading: false,
   pathname: '/classroom/course/cw_11111111-1111-4111-8111-111111111111',
   search: '',
+  context: 'a'.repeat(43),
 }));
 const workspaceId = 'cw_11111111-1111-4111-8111-111111111111';
 const principalId = 'pa_11111111-1111-4111-8111-111111111111';
@@ -31,7 +33,7 @@ vi.mock('./Session', () => ({
   NuniSessionProvider: ({ children }: { children: unknown }) => children,
   useNuniSession: () => ({
     session: mocks.signedIn
-      ? { platformAccountId: principalId, context: 'a'.repeat(43), isPlatformOperator: false }
+      ? { platformAccountId: principalId, context: mocks.context, isPlatformOperator: false }
       : null,
     loading: mocks.loading,
     error: '',
@@ -40,6 +42,10 @@ vi.mock('./Session', () => ({
     logout: vi.fn(),
   }),
   browserRequest: (...args: unknown[]) => mocks.request(...args),
+}));
+vi.mock('@/features/platform/platformFetch', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/features/platform/platformFetch')>()),
+  platformFetch: (...args: unknown[]) => mocks.platformFetch(...args),
 }));
 vi.mock('./CourseMaterials', async () => {
   const { useClasses } = await import('./CourseUI');
@@ -71,8 +77,24 @@ beforeEach(() => {
   mocks.loading = false;
   mocks.pathname = `/classroom/course/${workspaceId}`;
   mocks.search = '';
+  mocks.context = 'a'.repeat(43);
   window.history.replaceState({}, '', mocks.pathname);
   mocks.refresh.mockReset();
+  mocks.platformFetch.mockReset().mockImplementation(async (path: string) => ({
+    ok: true,
+    status: 200,
+    body: path.endsWith('/members')
+      ? {
+          members: [
+            { platformAccountId: 'student-1', displayName: '陳同學', memberRole: 'student' },
+          ],
+        }
+      : path.endsWith('/classroom-sessions')
+        ? {
+            sessions: [{ id: 'session-1', title: '設計討論', state: 'open', checkedInByMe: false }],
+          }
+        : { affiliation: null, applications: [], present: [], absent: [], late: [] },
+  }));
   mocks.request.mockReset().mockImplementation(async (path: string) => {
     if (failure) throw failure;
     if (path === 'sign-in-options') return { google: true };
@@ -141,9 +163,9 @@ it('keeps a draft while moving between course panels with mouse and keyboard', a
   fireEvent.click(screen.getByRole('tab', { name: '教材' }));
   fireEvent.change(screen.getByLabelText('教材草稿'), { target: { value: '尚未發布的內容' } });
   fireEvent.keyDown(screen.getByRole('tab', { name: '教材' }), { key: 'End' });
-  expect(screen.getByRole('tab', { name: '測驗' }).getAttribute('aria-selected')).toBe('true');
-  expect(document.activeElement).toBe(screen.getByRole('tab', { name: '測驗' }));
-  fireEvent.keyDown(screen.getByRole('tab', { name: '測驗' }), { key: 'Home' });
+  expect(screen.getByRole('tab', { name: '名冊' }).getAttribute('aria-selected')).toBe('true');
+  expect(document.activeElement).toBe(screen.getByRole('tab', { name: '名冊' }));
+  fireEvent.keyDown(screen.getByRole('tab', { name: '名冊' }), { key: 'Home' });
   expect((screen.getByLabelText('教材草稿') as HTMLInputElement).value).toBe('尚未發布的內容');
 });
 
@@ -373,20 +395,22 @@ it('opens the correct course panel when following an activity from the chapter o
       return { id: workspaceId, title: '設計專題', state: 'active', memberRole: 'student' };
     if (path.endsWith('/assignments'))
       return {
-        assignments: [{
-          id: taskId,
-          workspaceId,
-          title: '介面設計練習',
-          instructions: '完成畫面練習',
-          state: 'open',
-          createdAt: '2026-10-20T00:00:00Z',
-          dueAt: '2026-10-30T12:00:00+08:00',
-          closedAt: null,
-          unitId: null,
-          unitTitle: null,
-          submissionCount: 0,
-          mySubmission: null,
-        }],
+        assignments: [
+          {
+            id: taskId,
+            workspaceId,
+            title: '介面設計練習',
+            instructions: '完成畫面練習',
+            state: 'open',
+            createdAt: '2026-10-20T00:00:00Z',
+            dueAt: '2026-10-30T12:00:00+08:00',
+            closedAt: null,
+            unitId: null,
+            unitTitle: null,
+            submissionCount: 0,
+            mySubmission: null,
+          },
+        ],
       };
     if (path.endsWith('/units')) return { units: [] };
     if (path.endsWith('/materials/page')) return { materials: [], nextCursor: null };
@@ -395,8 +419,163 @@ it('opens the correct course panel when following an activity from the chapter o
     throw new Error(`Unexpected request: ${path}`);
   });
   render(<NuniApp />);
-  const outlineLink = await within(await screen.findByRole('tabpanel', { name: '學習路徑' })).findByRole('link', { name: /介面設計練習/ });
+  const outlineLink = await within(
+    await screen.findByRole('tabpanel', { name: '學習路徑' }),
+  ).findByRole('link', { name: /介面設計練習/ });
   expect(screen.getByRole('tab', { name: '學習路徑' }).getAttribute('aria-selected')).toBe('true');
   fireEvent.click(outlineLink);
   expect(screen.getByRole('tab', { name: '作業' }).getAttribute('aria-selected')).toBe('true');
+});
+
+it('never displays or reads a roster for a student, including a teacher-only panel URL', async () => {
+  memberRole = 'student';
+  window.history.replaceState({}, '', `${mocks.pathname}?view=members`);
+  render(<NuniApp />);
+  await screen.findByRole('heading', { name: '設計專題' });
+  expect(screen.queryByRole('tab', { name: '名冊' })).toBeNull();
+  expect(screen.getByRole('tab', { name: '作業' }).getAttribute('aria-selected')).toBe('true');
+  expect(mocks.platformFetch).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole('tab', { name: '點名' }));
+  await screen.findByRole('button', { name: '簽到' });
+  expect(mocks.platformFetch.mock.calls.some(([path]) => /\/(members|roster)$/.test(path))).toBe(
+    false,
+  );
+});
+
+it.each(['owner-teacher', 'co-teacher'])('shows the course roster for %s', async (role) => {
+  memberRole = role;
+  render(<NuniApp />);
+  fireEvent.click(await screen.findByRole('tab', { name: '名冊' }));
+  await screen.findByText('陳同學');
+  expect(mocks.platformFetch).toHaveBeenCalledWith(
+    `class-workspaces/${workspaceId}/members`,
+    'GET',
+    undefined,
+    mocks.context,
+  );
+  fireEvent.click(screen.getByRole('tab', { name: '點名' }));
+  await waitFor(() =>
+    expect(mocks.platformFetch).toHaveBeenCalledWith(
+      `class-workspaces/${workspaceId}/classroom-sessions/session-1/roster`,
+      'GET',
+      undefined,
+      mocks.context,
+    ),
+  );
+});
+
+it('removes the roster when refreshed membership becomes student', async () => {
+  render(<NuniApp />);
+  fireEvent.click(await screen.findByRole('tab', { name: '名冊' }));
+  await screen.findByText('陳同學');
+  memberRole = 'student';
+  fireEvent.click(screen.getByRole('button', { name: '更新內容' }));
+  await waitFor(() => expect(screen.queryByRole('tab', { name: '名冊' })).toBeNull());
+  expect(screen.queryByText('陳同學')).toBeNull();
+  expect(screen.getByRole('tab', { name: '作業' }).getAttribute('aria-selected')).toBe('true');
+});
+
+it('clears the course immediately after the roster endpoint denies access', async () => {
+  mocks.platformFetch.mockResolvedValue({
+    ok: false,
+    status: 403,
+    body: { error: 'ACCESS_DENIED' },
+  });
+  render(<NuniApp />);
+  fireEvent.click(await screen.findByRole('tab', { name: '名冊' }));
+  await screen.findByRole('alert');
+  expect(screen.queryByRole('heading', { name: '設計專題' })).toBeNull();
+  expect(screen.queryByRole('tab', { name: '名冊' })).toBeNull();
+});
+
+it('ignores a previous account roster response after the account context changes', async () => {
+  let finish!: (value: unknown) => void;
+  mocks.platformFetch.mockImplementation((path: string) =>
+    path.endsWith('/members')
+      ? new Promise((resolve) => {
+          finish = resolve;
+        })
+      : Promise.resolve({ ok: true, status: 200, body: { affiliation: null, applications: [] } }),
+  );
+  const view = render(<NuniApp />);
+  fireEvent.click(await screen.findByRole('tab', { name: '名冊' }));
+  await screen.findByText('正在讀取課程名冊…');
+  mocks.context = 'b'.repeat(43);
+  memberRole = 'student';
+  view.rerender(<NuniApp />);
+  await waitFor(() => expect(screen.queryByRole('tab', { name: '名冊' })).toBeNull());
+  await act(async () =>
+    finish({
+      ok: true,
+      status: 200,
+      body: {
+        members: [{ platformAccountId: 'old-person', displayName: '上一個帳號的學生' }],
+      },
+    }),
+  );
+  expect(screen.queryByText('上一個帳號的學生')).toBeNull();
+});
+
+it('retains a newly-created course invite code in the unified course page', async () => {
+  mocks.search = 'invite=JOIN123';
+  window.history.replaceState({}, '', `${mocks.pathname}?${mocks.search}`);
+  render(<NuniApp />);
+  fireEvent.click(await screen.findByRole('tab', { name: '作業' }));
+  expect(screen.getByText('JOIN123')).toBeTruthy();
+});
+
+it.each(['affiliation', 'affiliation-applications'])(
+  'clears the course as soon as %s reports a changed session while other reads remain pending',
+  async (resource) => {
+    mocks.platformFetch.mockImplementation((path: string) =>
+      path.endsWith(`/${resource}`)
+        ? Promise.resolve({ ok: false, status: 409, body: { error: 'SESSION_CHANGED' } })
+        : new Promise(() => {}),
+    );
+    render(<NuniApp />);
+    fireEvent.click(await screen.findByRole('tab', { name: '名冊' }));
+    await screen.findByRole('alert');
+    expect(screen.queryByRole('heading', { name: '設計專題' })).toBeNull();
+    expect(screen.queryByRole('tab', { name: '名冊' })).toBeNull();
+  },
+);
+
+it.each(['success', 'failure'] as const)(
+  'ignores an old account invite %s after switching accounts',
+  async (outcome) => {
+    const original = mocks.request.getMockImplementation()!;
+    let resolveInvite!: (value: unknown) => void;
+    let rejectInvite!: (failure: unknown) => void;
+    mocks.request.mockImplementation((path: string, ...args: unknown[]) =>
+      path.endsWith('/invites')
+        ? new Promise((resolve, reject) => {
+            resolveInvite = resolve;
+            rejectInvite = reject;
+          })
+        : original(path, ...args),
+    );
+    const view = render(<NuniApp />);
+    fireEvent.click(await screen.findByRole('tab', { name: '作業' }));
+    fireEvent.click(screen.getByRole('button', { name: '產生邀請碼' }));
+    mocks.context = 'b'.repeat(43);
+    view.rerender(<NuniApp />);
+    await screen.findByRole('heading', { name: '設計專題' });
+    await act(async () => {
+      if (outcome === 'success') resolveInvite({ code: 'PRIVATE1' });
+      else rejectInvite(new NuniError(503, 'UPSTREAM_UNAVAILABLE'));
+    });
+    expect(screen.queryByText('PRIVATE1')).toBeNull();
+    expect(screen.queryByRole('alert')).toBeNull();
+  },
+);
+
+it('hides the previous invite code when the owner role is removed', async () => {
+  mocks.search = 'invite=PRIVATE1';
+  window.history.replaceState({}, '', `${mocks.pathname}?${mocks.search}&view=assignments`);
+  render(<NuniApp />);
+  await screen.findByText('PRIVATE1');
+  memberRole = 'co-teacher';
+  fireEvent.click(screen.getByRole('button', { name: '更新內容' }));
+  await waitFor(() => expect(screen.queryByText('PRIVATE1')).toBeNull());
+  expect(screen.queryByRole('button', { name: '產生邀請碼' })).toBeNull();
 });
