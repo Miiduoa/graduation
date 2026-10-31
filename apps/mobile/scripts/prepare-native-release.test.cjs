@@ -149,3 +149,18 @@ test('the production workflow synchronizes native identity before the existing r
       ios.indexOf('prepare-eas-build.mjs --prepare .'),
   );
 });
+
+test('release synchronization repairs both extension version fields', (t) => {
+  const path = fixture(t);
+  const plist = require('@expo/plist').default;
+  const infoPath = join(path, 'ios/mobile/Info.plist');
+  const info = plist.parse(readFileSync(infoPath, 'utf8'));
+  info.CFBundleShortVersionString = '3.2.1';
+  info.CFBundleVersion = '42';
+  writeFileSync(infoPath, plist.build(info));
+  main(['--write', path]);
+  const extension = plist.parse(readFileSync(join(path, 'ios/CampusWidgetExtension/Info.plist'), 'utf8'));
+  assert.equal(extension.CFBundleShortVersionString, '3.2.1');
+  assert.equal(extension.CFBundleVersion, '42');
+  assert.equal(buildPlan(path).length, 0);
+});

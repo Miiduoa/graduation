@@ -87,3 +87,11 @@ test('logout clears after an in-flight native write, and rejects late previous-a
   await writer.write(buildNextClassSnapshot([], 'pu', now), next);
   expect(JSON.parse(bridge.setSnapshot.mock.calls[2][0]).classes).toEqual([]);
 });
+
+test('a noon refresh expires before the uncovered eighth Taipei calendar day', () => {
+  const snapshot = buildNextClassSnapshot([row], 'pu', new Date('2026-10-19T04:00:00Z'));
+  expect(snapshot.expiresAt).toBe(Date.parse('2026-10-25T16:00:00Z'));
+  expect(nextClassState(snapshot, Date.parse('2026-10-26T00:30:00Z')).status).toBe('stale');
+  expect(nextClassState(snapshot, snapshot.expiresAt - 1).status).toBe('empty');
+  expect(nextClassState(snapshot, snapshot.expiresAt).status).toBe('stale');
+});

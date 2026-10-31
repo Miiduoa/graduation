@@ -12,6 +12,8 @@ function configureProject(project, iosRoot, bundleId, group) {
     path.join(directory, 'CampusWidget.swift'),
   );
   const main = project.getFirstTarget();
+  const infoPath = path.join(iosRoot, 'mobile/Info.plist');
+  const appInfo = fs.existsSync(infoPath) ? plist.parse(fs.readFileSync(infoPath, 'utf8')) : {};
   const objects = project.hash.project.objects;
   objects.PBXTargetDependency ||= {};
   objects.PBXContainerItemProxy ||= {};
@@ -112,8 +114,8 @@ function configureProject(project, iosRoot, bundleId, group) {
       CFBundleIdentifier: '$(PRODUCT_BUNDLE_IDENTIFIER)',
       CFBundleName: '$(PRODUCT_NAME)',
       CFBundlePackageType: 'XPC!',
-      CFBundleShortVersionString: '$(MARKETING_VERSION)',
-      CFBundleVersion: '$(CURRENT_PROJECT_VERSION)',
+      CFBundleShortVersionString: appInfo.CFBundleShortVersionString || '$(MARKETING_VERSION)',
+      CFBundleVersion: appInfo.CFBundleVersion || '$(CURRENT_PROJECT_VERSION)',
       NextClassAppGroup: group,
       NSExtension: { NSExtensionPointIdentifier: 'com.apple.widgetkit-extension' },
     }),

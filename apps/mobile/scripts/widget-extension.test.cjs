@@ -1,6 +1,6 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
-const { readFileSync, mkdtempSync, rmSync, existsSync } = require('node:fs');
+const { readFileSync, mkdtempSync, rmSync, existsSync, mkdirSync, writeFileSync } = require('node:fs');
 const { join, resolve } = require('node:path');
 const { tmpdir } = require('node:os');
 const xcode = require('xcode');
@@ -83,4 +83,22 @@ test('a project without an extension gets a source phase, dependency and embedde
     target.buildPhases.some(({ value }) => objects.PBXSourcesBuildPhase[value]?.files.length === 1),
   );
   assert.equal(project.getFirstTarget().firstTarget.dependencies.length, 1);
+});
+
+test('extension follows the app plist version rather than stale build settings', (t) => {
+  const directory = mkdtempSync(join(tmpdir(), 'next-class-version-'));
+  t.after(() => rmSync(directory, { recursive: true, force: true }));
+  mkdirSync(join(directory, 'mobile'));
+  const versions = { CFBundleShortVersionString: '2.3.4', CFBundleVersion: '56' };
+  writeFileSync(join(directory, 'mobile/Info.plist'), plist.build(versions));
+  const project = xcode.project(join(root, 'ios/mobile.xcodeproj/project.pbxproj'));
+  project.parseSync();
+  configureProject(project, directory, 'com.example.sample', 'group.com.example.sample');
+  const info = plist.parse(readFileSync(join(directory, 'CampusWidgetExtension/Info.plist'), 'utf8'));
+  for (const key of Object.keys(versions)) assert.equal(info[key], versions[key]);
+});
+test('checked-in app and extension versions match', () => {
+  const app = plist.parse(readFileSync(join(root, 'ios/mobile/Info.plist'), 'utf8'));
+  const extension = plist.parse(readFileSync(join(root, 'ios/CampusWidgetExtension/Info.plist'), 'utf8'));
+  for (const key of ['CFBundleShortVersionString', 'CFBundleVersion']) assert.equal(extension[key], app[key]);
 });

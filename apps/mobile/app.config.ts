@@ -99,7 +99,7 @@ export default ({ config }: any) => {
     courses: parseBoolean(process.env.EXPO_PUBLIC_FEATURE_COURSES, !isReleaseLike),
     grades: parseBoolean(process.env.EXPO_PUBLIC_FEATURE_GRADES, !isReleaseLike),
     payments: parseBoolean(process.env.EXPO_PUBLIC_FEATURE_PAYMENTS, !isReleaseLike),
-    widgets: parseBoolean(process.env.EXPO_PUBLIC_FEATURE_WIDGETS, !isReleaseLike),
+    widgets: parseBoolean(process.env.EXPO_PUBLIC_FEATURE_WIDGETS, false),
     deeplinks: parseBoolean(process.env.EXPO_PUBLIC_FEATURE_DEEPLINKS, !isReleaseLike),
   };
   const enableUniversalDevAccounts =

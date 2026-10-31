@@ -53,7 +53,7 @@ export function buildNextClassSnapshot(
   return {
     version: 1,
     updatedAt: now.getTime(),
-    expiresAt: now.getTime() + 7 * DAY,
+    expiresAt: taipeiInstantOnClock(new Date(now.getTime() + 7 * DAY), '00:00')!,
     classes: classes.sort((a, b) => a.startAt - b.startAt || a.id.localeCompare(b.id)),
     incomplete,
   };

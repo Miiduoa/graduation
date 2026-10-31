@@ -12,17 +12,12 @@ export function useNextClassWidget() {
   const scope = usePersonalImportScope();
   const owner = scope?.owner;
   const schoolId = scope?.schoolId;
+  const enabled = Constants.expoConfig?.extra?.release?.features?.widgets === true;
   useEffect(() => {
     if (Platform.OS !== 'ios') return;
     let active = true;
     void nextClassWriter.clear().catch(() => undefined);
-    if (
-      !owner ||
-      !schoolId ||
-      owner === 'guest:device' ||
-      Constants.expoConfig?.extra?.release?.features?.widgets === false
-    )
-      return;
+    if (!owner || !schoolId || owner === 'guest:device' || !enabled) return;
     const refresh = async () => {
       const revision = nextClassWriter.begin();
       try {
@@ -63,5 +58,5 @@ export function useNextClassWidget() {
       subscription.remove();
       void nextClassWriter.clear().catch(() => undefined);
     };
-  }, [owner, schoolId]);
+  }, [owner, schoolId, enabled]);
 }

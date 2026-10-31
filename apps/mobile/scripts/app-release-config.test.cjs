@@ -157,3 +157,12 @@ test('optional native Maps configuration and Google bundle validation still work
   assert.equal(result.status, 1);
   assert.match(result.stderr, /registered production Google iOS client requires com.nuni.app/);
 });
+
+test('widgets require explicit opt-in in every environment including absent metadata', () => {
+  for (const environment of [undefined, '', 'development', 'preview', 'production']) {
+    for (const value of [undefined, '', 'false']) {
+      assert.equal(config({ APP_ENV: environment, EXPO_PUBLIC_FEATURE_WIDGETS: value }).extra.release.features.widgets, false);
+    }
+    assert.equal(config({ APP_ENV: environment, EXPO_PUBLIC_FEATURE_WIDGETS: 'true', EXPO_PUBLIC_RELEASED_SCHOOL_IDS: 'synthetic-school' }).extra.release.features.widgets, true);
+  }
+});

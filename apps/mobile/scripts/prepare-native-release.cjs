@@ -63,6 +63,10 @@ function buildPlan(projectRoot) {
   for (const file of ['ios/mobile/mobile.entitlements', 'ios/CampusWidgetExtension/CampusWidgetExtension.entitlements', 'ios/CampusWidgetExtension/Info.plist']) {
     if (!existsSync(resolve(projectRoot, file))) continue;
     const value = plist.parse(readFileSync(resolve(projectRoot, file), 'utf8'));
+    if (file.endsWith('/Info.plist')) {
+      value.CFBundleShortVersionString = info.CFBundleShortVersionString;
+      value.CFBundleVersion = info.CFBundleVersion;
+    }
     if (value.NextClassAppGroup) value.NextClassAppGroup = `group.${production.identifier}`;
     if (value['com.apple.security.application-groups']) value['com.apple.security.application-groups'] = [`group.${production.identifier}`];
     add(file, plist.build(value));

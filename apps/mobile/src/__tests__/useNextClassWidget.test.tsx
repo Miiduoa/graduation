@@ -1,3 +1,5 @@
+import Constants from 'expo-constants';
+import { loadPersonalTimetable } from '../services/personalTimetable';
 import { act, renderHook, waitFor } from '@testing-library/react-native';
 import { useNextClassWidget } from '../widgets/useNextClassWidget';
 import { loadPersonalImports } from '../services/personalImports';
@@ -29,7 +31,9 @@ jest.mock('../services/personalTimetable', () => ({
 const ledger = { version: 1 as const, records: [], batches: [] };
 beforeEach(() => {
   mockScope = { owner: 'nuni:test-a', schoolId: 'pu' };
+  Constants.expoConfig!.extra!.release.features.widgets = true;
   mockWrite.mockClear();
+  jest.mocked(loadPersonalTimetable).mockClear();
   jest.mocked(loadPersonalImports).mockReset().mockResolvedValue(ledger);
 });
 test('mount, manual timetable changes, account switch and logout update or clear the native snapshot', async () => {
@@ -62,4 +66,36 @@ test('an unresolved previous account load cannot repopulate a cleared snapshot',
   view.rerender(undefined);
   await act(async () => resolve(ledger));
   expect(mockWrite.mock.calls.every(([value]) => value === null)).toBe(true);
+});
+
+test.each([false, undefined, 'true', 1])('only explicit true shares a snapshot: %s', async (value) => {
+  Constants.expoConfig!.extra!.release.features.widgets = value;
+  renderHook(useNextClassWidget);
+  await waitFor(() => expect(mockWrite).toHaveBeenCalledWith(null));
+  expect(loadPersonalImports).not.toHaveBeenCalled();
+  expect(loadPersonalTimetable).not.toHaveBeenCalled();
+  expect(mockWrite.mock.calls.every(([snapshot]) => snapshot === null)).toBe(true);
+});
+test('disabling sharing clears the snapshot for the same account', async () => {
+  const view = renderHook(useNextClassWidget);
+  await waitFor(() => expect(mockWrite.mock.calls.some(([value]) => value !== null)).toBe(true));
+  Constants.expoConfig!.extra!.release.features.widgets = false;
+  view.rerender(undefined);
+  await waitFor(() => expect(mockWrite).toHaveBeenLastCalledWith(null));
+  const count = jest.mocked(loadPersonalImports).mock.calls.length;
+  act(() => notifyTimetableChanged());
+  expect(loadPersonalImports).toHaveBeenCalledTimes(count);
+});
+
+test('absent feature metadata clears without reading timetable data', async () => {
+  const extra = Constants.expoConfig!.extra;
+  Constants.expoConfig!.extra = undefined;
+  try {
+    renderHook(useNextClassWidget);
+    await waitFor(() => expect(mockWrite).toHaveBeenCalledWith(null));
+    expect(loadPersonalImports).not.toHaveBeenCalled();
+    expect(loadPersonalTimetable).not.toHaveBeenCalled();
+  } finally {
+    Constants.expoConfig!.extra = extra;
+  }
 });
