@@ -55,7 +55,7 @@ function invoke(
         ...(options.platform ? { Authorization: `Platform ${session.sessionHandle}` } : {}),
         'X-Campus-Session': sessionContext(session),
         ...(options.input
-          ? { Origin: 'https://nuni.tw', 'Content-Type': 'application/json' }
+          ? { ...(options.origin === false ? {} : { Origin: 'https://nuni.tw' }), 'Content-Type': 'application/json' }
           : {}),
         ...(options.body
           ? {
@@ -87,6 +87,44 @@ afterEach(() => {
 });
 
 describe('assignment file BFF flag and contracts', () => {
+  it.each(['', 'false'])('preserves text submissions with flag %s for Web and Mobile', async (flag) => {
+    vi.stubEnv('ASSIGNMENT_FILE_SUBMIT_ENABLED', flag);
+    fetcher.mockImplementation(async (url: string, init?: RequestInit) => {
+      const target = String(url);
+      if (target.endsWith('/sessions/current')) return response(principal);
+      if (target.endsWith(`/class-workspaces/${id}`)) return response(workspace);
+      if (target.endsWith('/assignments')) return response({ assignments: [assignment] });
+      if (target.endsWith(`/assignments/${assignmentId}/submit`)) {
+        const input = JSON.parse(String(init?.body));
+        return response({ ...assignment, submissionCount: 1, mySubmission: {
+          assignmentId, platformAccountId: accountId, displayName: '同學',
+          body: input.body, state: 'submitted', submittedAt: timestamp,
+          teacherFeedback: null, reviewedAt: null,
+        } });
+      }
+      return response({ error: { code: 'NOT_FOUND' } }, 404);
+    });
+    for (const platform of [false, true]) {
+      const input = { body: '旗標關閉的文字繳交', idempotencyKey: `text-disabled-${platform}` };
+      const result = await invoke(`assignments/${assignmentId}/submit`, {
+        input, cookie: !platform, platform, origin: !platform,
+      });
+      expect(result.status).toBe(200);
+      expect((await result.json()).mySubmission.body).toBe(input.body);
+      expect(fetcher).toHaveBeenCalledWith(
+        expect.stringContaining(`/assignments/${assignmentId}/submit`),
+        expect.objectContaining({ method: 'POST', body: JSON.stringify(input) }),
+      );
+    }
+  });
+
+  it('retains session and same-origin checks for text submissions with attachments off', async () => {
+    const input = { body: '文字內容', idempotencyKey: 'text-disabled-auth' };
+    expect((await invoke(`assignments/${assignmentId}/submit`, { input, cookie: false })).status).toBe(401);
+    expect((await invoke(`assignments/${assignmentId}/submit`, { input, origin: false })).status).toBe(403);
+    expect(fetcher).not.toHaveBeenCalled();
+  });
+
   it('hides file routes while the flag is off', async () => {
     expect(
       (

@@ -1748,9 +1748,9 @@ function ActivityCard({
   const canRevise = !assignment || assignmentCanRevise(item.dueAt);
   const [recovering, setRecovering] = useState(false);
   const fileOperation = useRef<NativeFileOperation>({});
-  const canSubmit = student && active && (recovering || (item.state === 'open' && (!assignment || !receipt || canRevise)));
-  const kind = assignment ? '作業' : '測驗';
   const fileSubmit = assignment && assignmentFileSubmitEnabledNative();
+  const canSubmit = student && active && (recovering || (item.state === 'open' && (!fileSubmit || !receipt || canRevise)));
+  const kind = assignment ? '作業' : '測驗';
   const [withdrawNotice, setWithdrawNotice] = useState('');
   const [localFiles, setLocalFiles] = useState<LocalNativeFile[]>([]);
   const [previewUri, setPreviewUri] = useState<string | null>(null);
@@ -1857,7 +1857,7 @@ function ActivityCard({
           return '已撤回，截止前可以重新繳交。';
         }} />
       ) : null}
-      {assignment && receipt && !canRevise ? <Copy>已過截止時間，這份繳交不能再修改或撤回。</Copy> : null}
+      {fileSubmit && receipt && !canRevise ? <Copy>已過截止時間，這份繳交不能再修改或撤回。</Copy> : null}
       {canSubmit ? (
         <MutationForm
           draftKey={`course:${course.id}:${course.memberRole}:${course.state}:${assignment ? 'assignment' : 'quiz'}:${item.id}:${item.state}`}

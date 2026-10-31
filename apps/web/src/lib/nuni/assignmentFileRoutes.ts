@@ -101,7 +101,11 @@ export async function handleAssignmentFileRequest(
   const fileQuery = isAssignmentFileQuery(segments);
   const mutating = isAssignmentFileMutation(request.method, segments);
   if (!fileQuery && !mutating) return null;
-  if (!assignmentFileSubmitEnabled()) throw new NuniError(404, 'NOT_FOUND');
+  if (!assignmentFileSubmitEnabled()) {
+    // Preserve the existing text submission path when attachments are disabled.
+    if (mutating && request.method === 'POST' && segments[4] === 'submit') return null;
+    throw new NuniError(404, 'NOT_FOUND');
+  }
   if (mutating && !readPlatformAuthorization(request)) requireSameOrigin(request);
   if (request.method === 'GET' && fileQuery) {
     const keys = Array.from(request.nextUrl.searchParams.keys());

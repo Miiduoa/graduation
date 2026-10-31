@@ -2127,6 +2127,26 @@ it('withdraws the current assignment receipt and returns to the submission form'
   );
 });
 
+it.each([false, true])('preserves text submission after deadline with attachments off (existing receipt: %s)', async (existing) => {
+  fileSubmitFlag.on = false;
+  assignment = {
+    ...assignment,
+    dueAt: '2020-10-31T12:00:00Z',
+    mySubmission: existing ? receipt() : null,
+    submissionCount: existing ? 1 : 0,
+  };
+  const view = await openCourse();
+  expect(view.queryByText('已過截止時間，這份繳交不能再修改或撤回。')).toBeNull();
+  fireEvent.changeText(view.getByLabelText('作業內容：校園訪談'), '關閉附件後的文字內容');
+  fireEvent.press(view.getByRole('button', { name: existing ? '更新作業繳交' : '繳交作業' }));
+  await waitFor(() => expect(mockRequest).toHaveBeenCalledWith(
+    `class-workspaces/${courseId}/assignments/${assignmentId}/submit`,
+    mockSession.context,
+    expect.objectContaining({ body: '關閉附件後的文字內容' }),
+  ));
+  await view.findByText('關閉附件後的文字內容');
+});
+
 it('shows the assignment deadline state with the existing receipt', async () => {
   fileSubmitFlag.on = true;
   assignment = {
