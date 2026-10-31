@@ -22,7 +22,7 @@ import {
   taipeiParts,
   taipeiWallTimeToIso,
 } from '@campus/shared/src/taipeiTime';
-import { landOnCourseWork } from '@/lib/courseWorkLanding';
+import { landOnCourseWork, parseCourseWorkHash } from '@/lib/courseWorkLanding';
 import { AppHeader } from '@/components/AppHeader';
 import { NuniSignIn } from '@/components/NuniSignIn';
 import { SiteShell } from '@/components/SiteShell';
@@ -159,6 +159,13 @@ function Workspace({ id }: { id: string }) {
     return () => {
       if (generation.current !== started) return;
       ++generation.current;
+      if (parseCourseWorkHash(window.location.hash)?.kind === 'material') {
+        window.history.replaceState(
+          window.history.state,
+          '',
+          window.location.pathname + window.location.search,
+        );
+      }
       setData(null);
       setCode('');
       setRefreshing(false);

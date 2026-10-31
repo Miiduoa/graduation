@@ -4,8 +4,8 @@
  * 目標：把所有「請到 TronClass 查看」的跳出行為，改成在 APP 內直接看。
  * 使用 `PuWebView`（react-native-webview）載入；內含 LMS／玩課雲請求過濾。
  */
-import React, { useCallback, useMemo, useRef, useState } from 'react';
-import { Alert, View, Text, ActivityIndicator, Pressable, Share } from 'react-native';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Alert, View, Text, ActivityIndicator, Pressable } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -15,6 +15,7 @@ import {
   isTronClassPuHostedUrl,
   isTronClassDataFetchEnabled,
 } from '../services/tronClassDataEnabled';
+import { materialFailureMessage } from '@campus/shared/src/materialAccess';
 import { PuWebView } from '../ui/PuWebView';
 
 type RouteProps = {
@@ -40,6 +41,17 @@ export default function CourseMaterialViewerScreen(props: RouteProps) {
   const courseName = props.route?.params?.courseName;
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [revision, setRevision] = useState(0);
+  const activeRevision = useRef(0);
+  const loadFailed = useRef(false);
+  useEffect(() => {
+    if (!loading) return;
+    const timer = setTimeout(() => {
+      setError('載入等得有點久。請確認網路後重試，或返回課程。');
+      setLoading(false);
+    }, 30000);
+    return () => clearTimeout(timer);
+  }, [loading, revision]);
   const tronClassNavBlockedAlerted = useRef(false);
 
   const kindIcon = useMemo(() => {
@@ -57,12 +69,7 @@ export default function CourseMaterialViewerScreen(props: RouteProps) {
   }, [kind]);
 
   const handleShare = async () => {
-    if (!url) return;
-    try {
-      await Share.share({ message: `${title}\n${url}` });
-    } catch {
-      /* swallow */
-    }
+    Alert.alert('請從課程分享教材', '為了保護課程檔案，這裡不分享可能含有存取憑證的網址。請回教材清單分享教材入口；需要另存時，請使用校方系統的下載功能。');
   };
 
   const goLeave = useCallback(() => {
@@ -179,6 +186,9 @@ export default function CourseMaterialViewerScreen(props: RouteProps) {
         </Pressable>
       </View>
 
+      <Text style={{ padding: 12, color: '#3C3C43' }}>
+        校方教材預覽：這裡可以閱讀；作業繳交與正式紀錄請到校方系統完成。閱讀不算作業完成。
+      </Text>
       {/* 主內容（PuWebView 內建 LMS／玩課雲請求過濾） */}
       <View style={{ flex: 1 }}>
         {loading && (
@@ -197,6 +207,7 @@ export default function CourseMaterialViewerScreen(props: RouteProps) {
           </View>
         )}
         <PuWebView
+          key={revision}
           source={{ uri: url }}
           originWhitelist={['*']}
           sharedCookiesEnabled
@@ -206,10 +217,30 @@ export default function CourseMaterialViewerScreen(props: RouteProps) {
               Alert.alert('LMS（TronClass）已關閉', TRONCLASS_DATA_DISABLED_MESSAGE);
             }
           }}
-          onLoadStart={() => setLoading(true)}
-          onLoadEnd={() => setLoading(false)}
+          onLoadStart={() => {
+            if (revision !== activeRevision.current) return;
+            loadFailed.current = false;
+            setLoading(true);
+          }}
+          onLoad={() => {
+            if (revision !== activeRevision.current || loadFailed.current) return;
+            setError(null);
+            setLoading(false);
+          }}
+          onLoadEnd={() => {
+            if (revision !== activeRevision.current) return;
+            setLoading(false);
+          }}
           onError={(e: { nativeEvent?: { description?: string } }) => {
-            setError(e?.nativeEvent?.description ?? '載入失敗');
+            if (revision !== activeRevision.current) return;
+            loadFailed.current = true;
+            setError(materialFailureMessage(new TypeError(e?.nativeEvent?.description)));
+            setLoading(false);
+          }}
+          onHttpError={(event: { nativeEvent: { statusCode: number } }) => {
+            if (revision !== activeRevision.current) return;
+            loadFailed.current = true;
+            setError(materialFailureMessage({ status: event.nativeEvent.statusCode }));
             setLoading(false);
           }}
           style={{ flex: 1 }}
@@ -227,6 +258,12 @@ export default function CourseMaterialViewerScreen(props: RouteProps) {
             }}
           >
             <Text style={{ color: '#fff', fontSize: 13 }}>{error}</Text>
+            <Pressable accessibilityRole="button" onPress={() => { activeRevision.current += 1; loadFailed.current = false; setError(null); setLoading(true); setRevision(activeRevision.current); }}>
+              <Text style={{ color: '#fff', padding: 12 }}>再試一次</Text>
+            </Pressable>
+            <Pressable accessibilityRole="button" onPress={goLeave}>
+              <Text style={{ color: '#fff', padding: 12 }}>返回課程</Text>
+            </Pressable>
           </View>
         )}
       </View>

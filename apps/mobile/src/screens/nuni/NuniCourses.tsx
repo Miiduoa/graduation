@@ -11,7 +11,8 @@ import React, {
   type ReactNode,
   type RefObject,
 } from 'react';
-import { AppState, Image, Linking, Pressable, ScrollView, Text, TextInput, View } from 'react-native';
+import { AppState, Image, Linking, Share, Alert, Pressable, ScrollView, Text, TextInput, View } from 'react-native';
+import { materialCapabilities, materialFailureMessage, readMaterialWithDeadline } from '@campus/shared/src/materialAccess';
 import { photoPdfAvailable } from './nativePhotoPdf';
 import { NativePhotoPdfEditor } from './NativePhotoPdfEditor';
 import { PublishedFeedbackLink } from '../../components/PublishedFeedbackLink';
@@ -1070,7 +1071,7 @@ function CourseDetail({
     }
     const course = await classes.get(id);
     const [page, assignments, quizzes] = await Promise.all([
-      classes.materialsPage(id),
+      readMaterialWithDeadline(classes.materialsPage(id)),
       classes.assignments(id),
       classes.quizzes(id),
     ]);
@@ -1234,7 +1235,7 @@ function CourseDetail({
     setLoadingMore(true);
     setMaterialsError('');
     try {
-      const page = await classes.materialsPage(id, requestedCursor);
+      const page = await readMaterialWithDeadline(classes.materialsPage(id, requestedCursor));
       if (run !== pageGeneration.current) return;
       if (lookupRun !== lookupGeneration.current) return;
       const merged = appendMaterialPage(pageProgress.current, page, requestedCursor);
@@ -1260,8 +1261,8 @@ function CourseDetail({
     } catch (failure) {
       if (run !== pageGeneration.current) return;
       if (lookupRun !== lookupGeneration.current) return;
-      setMaterialsError(nuniErrorMessage(failure));
-      if (failure instanceof NuniError && (failure.status === 403 || failure.status === 404)) {
+      setMaterialsError(materialFailureMessage(failure));
+      if (failure instanceof NuniError && [401, 403, 404, 410].includes(failure.status)) {
         pageGeneration.current += 1;
         invalidateMaterialLookup();
         setMaterialsDenied(true);
@@ -1367,6 +1368,7 @@ function CourseDetail({
         <View style={{ gap: 16, display: result.loading || result.error ? 'none' : 'flex' }}>
           <Copy title>{data.course.title}</Copy>
           <Copy>來源：nuni 課程 · 本次讀取：{time(data.checkedAt)}</Copy>
+          <Copy>{materialCapabilities(data.course)}</Copy>
           <Copy>進度依作業繳交與測驗作答紀錄計算，閱讀教材不計完成。待評、缺件與未取得都不換算成零分；清單未齊時完整進度為未知。點選作業或測驗可查看原始紀錄。</Copy>
           <Copy>
             {courseRoleLabels[data.course.memberRole]}
@@ -1767,7 +1769,7 @@ function MaterialCard({
         ref={cardRef}
         testID={`material-${material.id}`}
         onLayout={revealTarget}
-        style={{ gap: 12 }}
+        style={{ gap: 12, ...(focused ? { borderWidth: 2, borderColor: '#2769A8', backgroundColor: '#EAF3FC', borderRadius: 12, padding: 12 } : {}) }}
       >
         {focused ? (
           <Text accessibilityLabel={`目標教材：${material.title}`}>目標教材</Text>
@@ -1775,6 +1777,11 @@ function MaterialCard({
         <Copy title>{material.title}</Copy>
         {material.unitTitle ? <Copy>{material.unitTitle}</Copy> : null}
         <Copy>{material.body}</Copy>
+        <Button label="分享教材入口" onPress={() => {
+          const link = `campus://campus-one?tab=courses&workspaceId=${encodeURIComponent(material.workspaceId)}&materialId=${encodeURIComponent(material.id)}`;
+          void Share.share({ message: `${material.title}\n${link}\n開啟後需登入並有這門課的權限。` })
+            .catch(() => Alert.alert('分享沒有完成', '請稍後再試一次。'));
+        }} />
       </View>
     </Section>
   );
