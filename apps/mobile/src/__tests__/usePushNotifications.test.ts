@@ -174,3 +174,27 @@ test('personal event reminder payloads are ignored before dedup navigation and c
   expect(mockRootNavigateNested).not.toHaveBeenCalled();
   expect(clearLastNotificationResponseAsync).not.toHaveBeenCalled();
 });
+
+test('前景與冷啟動點本機提醒均直達作業，跨帳號只回課程頁', async () => {
+  const real = jest.requireActual('../utils/notificationDestination') as typeof import('../utils/notificationDestination');
+  mockResolve.mockImplementation(real.resolveNotificationDestination);
+  const notices = require('../services/notifications') as typeof import('../services/notifications');
+  const payload = { type: 'local_assignment_due_v2', uid: 'alice', schoolId: 'pu', groupId: 'course', assignmentId: 'work' };
+  const response = { notification: { request: { identifier: 'local-work', content: { data: payload } } } };
+  jest.mocked(notices.getLastNotificationResponseAsync).mockResolvedValueOnce(response as never);
+  const view = renderHook(() => usePushNotifications({ current: null }, 'alice', 'student', 'pu'));
+  await waitFor(() => expect(mockApply).toHaveBeenCalledWith(expect.objectContaining({
+    screen: 'HomeworkSubmit', params: { groupId: 'course', assignmentId: 'work', fromReminder: true },
+  }), { role: 'student' }));
+  expect(notices.clearLastNotificationResponseAsync).toHaveBeenCalled();
+  mockApply.mockClear();
+  await act(async () => listeners[listeners.length - 1]!({
+    notification: { request: { identifier: 'local-work-next', content: { data: payload } } },
+  }));
+  expect(mockApply).toHaveBeenCalledWith(expect.objectContaining({ screen: 'HomeworkSubmit' }), { role: 'student' });
+  view.unmount();
+  const other = renderHook(() => usePushNotifications({ current: null }, 'bob', 'student', 'pu'));
+  await act(async () => listeners[listeners.length - 1]!(response));
+  expect(mockApply).toHaveBeenLastCalledWith(expect.objectContaining({ screen: 'LearnHome' }), { role: 'student' });
+  other.unmount();
+});
