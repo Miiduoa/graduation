@@ -20,6 +20,7 @@ import {
   type NuniSubmission,
   type NuniSubmissionFile,
 } from '@campus/shared/src/nuni';
+import { PhotoPdfEditor } from './PhotoPdfEditor';
 import { useClasses } from './CourseUI';
 import shared from './NuniApp.module.css';
 import styles from './CourseLearning.module.css';
@@ -277,6 +278,7 @@ export function AssignmentFilePicker({
   onChange: (files: LocalAssignmentFile[]) => void;
   disabled?: boolean;
 }) {
+  const [pdfOpen, setPdfOpen] = useState(false);
   const camera = useRef<HTMLInputElement>(null);
   const album = useRef<HTMLInputElement>(null);
   const docs = useRef<HTMLInputElement>(null);
@@ -299,7 +301,7 @@ export function AssignmentFilePicker({
         accept="image/*"
         capture="environment"
         hidden
-        disabled={disabled}
+        disabled={disabled || pdfOpen}
         onChange={(event) => {
           add(event.target.files);
           event.target.value = '';
@@ -311,7 +313,7 @@ export function AssignmentFilePicker({
         accept="image/*"
         multiple
         hidden
-        disabled={disabled}
+        disabled={disabled || pdfOpen}
         onChange={(event) => {
           add(event.target.files);
           event.target.value = '';
@@ -323,21 +325,38 @@ export function AssignmentFilePicker({
         accept=".pdf,.doc,.docx,.txt,.zip,application/pdf,text/plain,application/zip"
         multiple
         hidden
-        disabled={disabled}
+        disabled={disabled || pdfOpen}
         onChange={(event) => {
           add(event.target.files);
           event.target.value = '';
         }}
       />
-      <button type="button" className={`${shared.button} ${shared.secondary}`} disabled={disabled} onClick={() => camera.current?.click()}>
+      <button type="button" className={`${shared.button} ${shared.secondary}`} disabled={disabled || pdfOpen} onClick={() => camera.current?.click()}>
         拍照
       </button>
-      <button type="button" className={`${shared.button} ${shared.secondary}`} disabled={disabled} onClick={() => album.current?.click()}>
+      <button type="button" className={`${shared.button} ${shared.secondary}`} disabled={disabled || pdfOpen} onClick={() => album.current?.click()}>
         相簿
       </button>
-      <button type="button" className={`${shared.button} ${shared.secondary}`} disabled={disabled} onClick={() => docs.current?.click()}>
+      <button type="button" className={`${shared.button} ${shared.secondary}`} disabled={disabled || pdfOpen} onClick={() => docs.current?.click()}>
         檔案
       </button>
+      <button
+        type="button"
+        className={`${shared.button} ${shared.secondary}`}
+        disabled={disabled || files.filter((file) => file.kind === 'file').length >= MAX_ASSIGNMENT_DOCUMENTS}
+        onClick={() => setPdfOpen(true)}
+      >
+        照片轉 PDF
+      </button>
+      {pdfOpen && !disabled ? (
+        <PhotoPdfEditor
+          onCancel={() => setPdfOpen(false)}
+          onConfirm={(file) => {
+            onChange(collectLocalFiles(files, [file]));
+            setPdfOpen(false);
+          }}
+        />
+      ) : null}
       <p className={styles.note}>網路不穩時再送一次，不會重複交。選好的照片可以刪除或調整順序後再送出。</p>
       <AssignmentFilePreview files={files} onChange={onChange} disabled={disabled} />
     </div>

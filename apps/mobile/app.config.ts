@@ -406,7 +406,9 @@ export default ({ config }: any) => {
           url: `https://u.expo.dev/${easProjectId}`,
         }
       : undefined,
-    // Native widgets require a new binary before receiving this runtime.
-    runtimeVersion: isProduction ? 'campus-one-native-widget-2' : { policy: 'sdkVersion' },
+    // 新增原生影像模組與課表小工具後，預覽與正式版都需使用新安裝檔及獨立執行版本。
+    runtimeVersion: isProduction
+      ? 'campus-one-native-photo-pdf-widget-1'
+      : 'campus-preview-native-photo-pdf-widget-1',
   };
 };
