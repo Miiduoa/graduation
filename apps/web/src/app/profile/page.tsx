@@ -121,7 +121,7 @@ function PersonalProfile({ user }: { user: User }) {
 
 const services = [
   { href: '/timetable', label: '我的課表', description: '查看學校提供的上課時間與教室。' },
-  { href: '/grades', label: '成績紀錄', description: '查詢學期成績與原始紀錄。' },
+  { href: '/grades?tab=semester', label: '成績紀錄', description: '查詢學期成績與原始紀錄。' },
   { href: '/credit-planner', label: '學分規劃', description: '整理修課紀錄與接下來的計畫。' },
   { href: '/library', label: '圖書館', description: '查找館藏，前往學校借閱帳號。' },
 ];

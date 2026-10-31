@@ -245,7 +245,9 @@ export function AcademicPage<K extends AcademicKind>(props: Props<K>) {
     campus: searchParams.get('campus') ?? undefined,
   });
   const schoolSearch = browse.schoolSearch;
-  const returnUrl = `${path}${schoolSearch}`;
+  const returnSearch = new URLSearchParams(searchParams.toString());
+  new URLSearchParams(schoolSearch).forEach((value, key) => returnSearch.set(key, value));
+  const returnUrl = `${path}${returnSearch.size ? `?${returnSearch}` : ''}`;
   const readyOfficial =
     browse.status === 'ready' && isOfficialAcademicSchool(browse.schoolId);
   const schoolKey =
