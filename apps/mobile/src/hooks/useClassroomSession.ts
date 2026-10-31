@@ -23,6 +23,7 @@ type ClassroomState = {
   joined: boolean;
   receipt: AttendanceReceipt | null;
   error: string | null;
+  receiptStatus: string | null;
 };
 const emptyState: ClassroomState = {
   session: null,
@@ -34,6 +35,7 @@ const emptyState: ClassroomState = {
   joined: false,
   receipt: null,
   error: null,
+  receiptStatus: null,
 };
 const connectionMessage = '尚未取得即時課堂資料，請確認連線後重新整理。';
 
@@ -107,6 +109,7 @@ export function useClassroomSession(
           qrExpiresAt: null,
           joined: false,
           receipt: null,
+          receiptStatus: null,
         });
       };
 
@@ -157,10 +160,13 @@ export function useClassroomSession(
                 if (accessCurrent()) patch({ qrExpiresAt });
               },
               onReceipt: (receipt) => {
-                if (accessCurrent()) patch({ receipt, ...(receipt ? { error: null } : {}) });
+                if (accessCurrent()) patch({ receipt });
               },
               onJoined: (joined) => {
                 if (accessCurrent()) patch({ joined });
+              },
+              onReceiptStatus: (receiptStatus) => {
+                if (accessCurrent()) patch({ receiptStatus });
               },
               onError: (error) => {
                 if (!accessCurrent()) return;
@@ -202,6 +208,7 @@ export function useClassroomSession(
   const value = state.key === key && state.authSession === authSession ? state.value : emptyState;
   return {
     ...value,
+    error: value.error ?? value.receiptStatus,
     qrToken: value.qrExpiresAt !== null && value.qrExpiresAt > Date.now() ? value.qrToken : null,
     refresh,
   };

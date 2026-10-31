@@ -32,18 +32,15 @@ import { useAuth } from '../state/auth';
 import { getDb, getFunctionsInstance, isFirebaseMockMode } from '../firebase';
 import { httpsCallable } from 'firebase/functions';
 import { joinClassroomAttendance, readAttendanceQr } from '../services/liveAttendance';
+import { useClassroomFeed } from '../hooks/useClassroomFeed';
 import { useClassroomSession, type LiveClassroomSession } from '../hooks/useClassroomSession';
 import {
   doc,
   collection,
-  onSnapshot,
   addDoc,
   updateDoc,
   serverTimestamp,
   increment,
-  query,
-  orderBy,
-  limit,
 } from 'firebase/firestore';
 
 type AnonQuestion = {
@@ -281,7 +278,7 @@ export function ClassroomScreen(props: any) {
     qrExpiresAt,
     joined,
     receipt,
-    error: accessError,
+    error: sessionError,
     refresh,
   } = useClassroomSession(
     db,
@@ -304,8 +301,11 @@ export function ClassroomScreen(props: any) {
   const identityKey = JSON.stringify([auth.user?.uid, auth.profile?.schoolId, groupId, sessionId]);
   const identityRef = useRef({ key: identityKey, user: auth.user });
   identityRef.current = { key: identityKey, user: auth.user };
-  const [questions, setQuestions] = useState<AnonQuestion[]>([]);
-  const [polls, setPolls] = useState<Poll[]>([]);
+  const feedIdentity = { groupId, sessionId, userId: auth.user?.uid, schoolId: auth.profile?.schoolId };
+  const feedEnabled = focused && !isFirebaseMockMode() && !auth.loading && !auth.tokenExpired && !auth.tokenError;
+  const { items: questions, error: questionError } = useClassroomFeed<AnonQuestion>(db, feedIdentity, auth.user, feedEnabled, 'questions');
+  const { items: polls, error: pollError } = useClassroomFeed<Poll>(db, feedIdentity, auth.user, feedEnabled, 'polls');
+  const accessError = sessionError ?? questionError ?? pollError;
   const [newQuestion, setNewQuestion] = useState('');
   const [submittingQ, setSubmittingQ] = useState(false);
   const [userReaction, setUserReaction] = useState<ReactionKey | null>(null);
@@ -335,6 +335,9 @@ export function ClassroomScreen(props: any) {
   const quizTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   useEffect(() => {
+    setMyPollAnswers({});
+    setNewQuestion('');
+    setUserReaction(null);
     setPending(false);
     setAttendanceError(null);
     setAttendanceCode('');
@@ -357,29 +360,6 @@ export function ClassroomScreen(props: any) {
   useEffect(() => {
     if (!focused) setShowQRScanner(false);
   }, [focused]);
-
-  // 訂閱問答
-  useEffect(() => {
-    if (isFirebaseMockMode()) return;
-    if (!groupId || !sessionId) return;
-    const ref = collection(db, 'groups', groupId, 'liveSessions', sessionId, 'questions');
-    const q = query(ref, orderBy('upvotes', 'desc'), limit(30));
-    const unsub = onSnapshot(q, (snap) => {
-      setQuestions(snap.docs.map((d) => ({ id: d.id, ...(d.data() as any) })) as AnonQuestion[]);
-    });
-    return () => unsub();
-  }, [groupId, sessionId]);
-
-  // 訂閱投票
-  useEffect(() => {
-    if (isFirebaseMockMode()) return;
-    if (!groupId || !sessionId) return;
-    const ref = collection(db, 'groups', groupId, 'liveSessions', sessionId, 'polls');
-    const unsub = onSnapshot(query(ref, orderBy('createdAt', 'desc')), (snap) => {
-      setPolls(snap.docs.map((d) => ({ id: d.id, ...(d.data() as any) })) as Poll[]);
-    });
-    return () => unsub();
-  }, [groupId, sessionId]);
 
   // 清理計時器
   useEffect(() => {
@@ -768,7 +748,7 @@ export function ClassroomScreen(props: any) {
                   }}
                 />
                 <Button
-                  text={joining ? '正在確認…' : pending ? '重送並查詢收據' : '確認簽到'}
+                  text={joining ? '正在確認…' : pending ? '再確認簽到' : '確認簽到'}
                   kind="ghost"
                   onPress={() => handleJoin(attendanceCode)}
                   disabled={joining || !attendanceCode.trim()}

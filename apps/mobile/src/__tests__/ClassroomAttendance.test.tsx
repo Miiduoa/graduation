@@ -68,7 +68,7 @@ test('弱網保留掃碼待送，重送仍用同一憑證，回應前不顯示�
   await act(async () => fireEvent.press(view.getByText('確認簽到')));
   expect(view.getByLabelText('簽到碼').props.value).toBe('same-proof');
   expect(view.queryByText('已完成簽到')).toBeNull();
-  await act(async () => fireEvent.press(view.getByText('重送並查詢收據')));
+  await act(async () => fireEvent.press(view.getByText('再確認簽到')));
   const calls = jest.mocked(joinClassroomAttendance).mock.calls;
   expect(calls[0]).toEqual(calls[1]);
   // 畫面以伺服器訂閱的收據為準。

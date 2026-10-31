@@ -255,7 +255,7 @@ function Session({
               disabled={busy}
             />
             <Button type="submit" variant="primary" disabled={busy || !token.trim()}>
-              {busy ? '確認中…' : pending ? '重送並查詢收據' : '確認簽到'}
+              {busy ? '確認中…' : pending ? '再確認簽到' : '確認簽到'}
             </Button>
           </form>
         ) : (

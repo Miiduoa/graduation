@@ -326,7 +326,7 @@ it('保留弱網待確認碼，重送後只採用伺服器原收據', async () =
   const input = await screen.findByLabelText('教師提供的簽到碼');
   fireEvent.change(input, { target: { value: 'same-proof' } });
   fireEvent.click(screen.getByRole('button', { name: '確認簽到' }));
-  const retry = await screen.findByRole('button', { name: '重送並查詢收據' });
+  const retry = await screen.findByRole('button', { name: '再確認簽到' });
   expect((input as HTMLInputElement).value).toBe('same-proof');
   expect(screen.queryByText(/已簽到 ·/)).toBeNull();
   fireEvent.click(retry);

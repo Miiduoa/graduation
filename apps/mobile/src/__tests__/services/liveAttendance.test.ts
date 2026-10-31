@@ -34,6 +34,7 @@ const observer = () => ({
   onQrExpiresAt: jest.fn(),
   onJoined: jest.fn(),
   onReceipt: jest.fn(),
+  onReceiptStatus: jest.fn(),
   onError: jest.fn(),
 });
 
@@ -269,8 +270,11 @@ test('cached or locally pending attendance does not become server-confirmed atte
   expect(state.onJoined).toHaveBeenLastCalledWith(false);
   listeners[1].next(snapshot({ status: 'present' }, false, true));
   expect(state.onJoined).toHaveBeenLastCalledWith(false);
+  expect(state.onReceiptStatus).toHaveBeenLastCalledWith(expect.stringContaining('尚待伺服器確認'));
+  expect(state.onError).not.toHaveBeenCalled();
   listeners[1].next(snapshot({ status: 'present' }));
   expect(state.onJoined).toHaveBeenLastCalledWith(true);
+  expect(state.onReceiptStatus).toHaveBeenLastCalledWith(null);
 });
 
 test('the expiry reader accepts the existing Firestore and ISO contracts', () => {

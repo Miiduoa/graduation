@@ -1,5 +1,10 @@
 import { parseAttendanceQr } from '@campus/shared/src/attendanceQr';
-import { attendanceReceiptTime, awaitAttendanceReceipt, readAttendanceReceipt, type AttendanceReceipt } from '@campus/shared/src/attendanceReliability';
+import {
+  attendanceReceiptTime,
+  awaitAttendanceReceipt,
+  readAttendanceReceipt,
+  type AttendanceReceipt,
+} from '@campus/shared/src/attendanceReliability';
 import { doc, onSnapshot, type Firestore, type Unsubscribe } from 'firebase/firestore';
 import { httpsCallable, type Functions } from 'firebase/functions';
 
@@ -11,6 +16,7 @@ type AttendanceAccess = {
   onQrExpiresAt?: (value: number | null) => void;
   onJoined: (value: boolean) => void;
   onReceipt?: (value: AttendanceReceipt | null) => void;
+  onReceiptStatus?: (message: string | null) => void;
   onError: (message: string) => void;
 };
 
@@ -128,12 +134,19 @@ export function subscribeClassroomAttendance(
         (record) => {
           if (!current() || recordFailed) return;
           const confirmed = !record.metadata.fromCache && !record.metadata.hasPendingWrites;
-          const receipt = confirmed && record.exists()
-            ? readAttendanceReceipt(record.data() ?? {}, identity) : null;
+          const receipt =
+            confirmed && record.exists()
+              ? readAttendanceReceipt(record.data() ?? {}, identity)
+              : null;
           observer.onReceipt?.(receipt);
           observer.onJoined(receipt?.status === 'present' || receipt?.status === 'late');
-          if (!confirmed) observer.onError('尚未取得伺服器確認，請確認連線後重新整理簽到紀錄。');
-          else if (record.exists() && !receipt) observer.onError('簽到紀錄待核實，請重新整理或聯絡老師。');
+          observer.onReceiptStatus?.(
+            !confirmed
+              ? '簽到紀錄尚待伺服器確認，連線恢復後會自動更新。'
+              : record.exists() && !receipt
+                ? '簽到紀錄待核實，請重新整理或聯絡老師。'
+                : null,
+          );
         },
         () => {
           if (!current()) return;
@@ -179,6 +192,7 @@ export async function joinClassroomAttendance(
     { success: boolean; alreadyJoined?: boolean; checkedInAt?: string }
   >(functions, 'joinLiveSession');
   const result = await awaitAttendanceReceipt(join({ ...input, qrToken: token }));
-  if (result.data.success !== true || !attendanceReceiptTime(result.data.checkedInAt)) throw new Error('簽到尚未完成，請確認簽到碼後重試。');
+  if (result.data.success !== true || !attendanceReceiptTime(result.data.checkedInAt))
+    throw new Error('簽到尚未完成，請確認簽到碼後重試。');
   return result.data;
 }
