@@ -48,7 +48,7 @@ it('scans into the actual course form, requires confirmation, and waits for the 
   await act(async () => resolve({ success: true, checkedInAt: '2026-10-27T01:02:00Z', alreadyJoined: false }));
   expect(await screen.findByText(/已簽到 ·/)).toBeTruthy();
 });
-it('keeps a scanned token retryable when the server does not confirm attendance', async () => {
+it('clears a rejected scan so the student can immediately scan again', async () => {
   vi.mocked(joinCourseAttendance).mockRejectedValueOnce({ code: 'functions/permission-denied' });
   render(<CourseAttendance courseId="course" />);
   fireEvent.click(await screen.findByRole('button', { name: '開啟相機掃碼' }));
@@ -56,7 +56,8 @@ it('keeps a scanned token retryable when the server does not confirm attendance'
   fireEvent.click(screen.getByRole('button', { name: '確認簽到' }));
   expect(await screen.findByRole('alert')).toBeTruthy();
   expect(screen.queryByText(/已簽到 ·/)).toBeNull();
-  expect((screen.getByLabelText('教師提供的簽到碼') as HTMLInputElement).value).toBe('camera-token');
+  expect((screen.getByLabelText('教師提供的簽到碼') as HTMLInputElement).value).toBe('');
+  expect(screen.getByRole('button', { name: '開啟相機掃碼' }).hasAttribute('disabled')).toBe(false);
 });
 it('releases the active camera when course membership is revoked', async () => {
   let change!: Parameters<typeof watchCourseMembership>[2];

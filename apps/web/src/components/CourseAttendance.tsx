@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
+import { attendanceSubmissionIssue } from '@campus/shared/src/attendanceReliability';
 import QRCode from 'qrcode';
 import { useAuth } from './AuthGuard';
 import { SchoolAccountRequired } from './SchoolAccountRequired';
@@ -59,6 +60,7 @@ function Session({
   reload: () => Promise<void>;
 }) {
   const [token, setToken] = useState('');
+  const [pending, setPending] = useState(false);
   const [teacherCode, setTeacherCode] = useState('');
   const [qr, setQr] = useState('');
   const [records, setRecords] = useState<AttendanceRecord[] | null>(null);
@@ -212,26 +214,39 @@ function Session({
             onSubmit={(event) => {
               event.preventDefault();
               void run(async () => {
-                const result = await joinCourseAttendance(courseId, session.id, token);
+                let result;
+                setPending(true);
+                try {
+                  result = await joinCourseAttendance(courseId, session.id, token);
+                } catch (reason) {
+                  if (!live.current) return;
+                  const issue = attendanceSubmissionIssue(reason);
+                  setPending(issue.pending);
+                  if (issue.rescan) setToken('');
+                  setError(issue.message);
+                  return;
+                }
                 if (!live.current) return;
+                setPending(false);
                 setConfirmedAt(result.checkedInAt);
                 setToken('');
                 await reload();
               });
             }}
           >
+            {pending && <p role="status" className={styles.detail}>待確認 · 尚未收到簽到收據</p>}
             <AttendanceQrScanner
               groupId={courseId}
               sessionId={session.id}
               disabled={busy || expired}
-              onToken={setToken}
+              onToken={(value) => { setToken(value); setPending(false); setError(''); }}
             />
             <Input
               id={`code-${session.id}`}
               label="教師提供的簽到碼"
               hint="可掃描 QR Code 自動帶入，也可直接輸入老師提供的簽到碼。"
               value={token}
-              onChange={(event) => setToken(event.target.value)}
+              onChange={(event) => { setToken(event.target.value); setPending(false); }}
               required
               autoComplete="off"
               autoCapitalize="none"
@@ -240,7 +255,7 @@ function Session({
               disabled={busy}
             />
             <Button type="submit" variant="primary" disabled={busy || !token.trim()}>
-              {busy ? '確認中…' : '確認簽到'}
+              {busy ? '確認中…' : pending ? '再確認簽到' : '確認簽到'}
             </Button>
           </form>
         ) : (
