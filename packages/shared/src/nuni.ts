@@ -679,6 +679,7 @@ export function nuniErrorMessage(error: unknown): string {
     if (error.code === 'ASSIGNMENT_FILE_NAME_INVALID') return '檔名無法使用，請重新命名後再選一次。';
     if (error.code === 'ASSIGNMENT_FILE_SIZE_REJECTED') return '檔案大小不正確，請重新選擇。';
     if (error.code === 'ASSIGNMENT_REVISION_CLOSED') return '已過截止時間，不能再修改或撤回繳交。';
+    if (error.code === 'ASSIGNMENT_SUBMISSION_SUPERSEDED') return '這次繳交已被較新的提交取代，請以目前回執為準。';
     if (error.code === 'ASSIGNMENT_SUBMISSION_CHANGED') return '繳交內容已有更新，請重新整理後再試。';
     if (error.code === 'ASSIGNMENT_CLOSED') return '老師已停止收件，目前不能再繳交。';
     if (error.code === 'ASSIGNMENT_FILE_SUBMIT_DISABLED') return '檔案繳交尚未開放。';

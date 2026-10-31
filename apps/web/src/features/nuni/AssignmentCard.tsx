@@ -346,6 +346,21 @@ function Assignment({ item, workspace, onConfirmed }: Props) {
                 onConfirmed?.(result);
               } catch (failure) {
                 if (
+                  failure instanceof NuniError &&
+                  failure.code === 'ASSIGNMENT_SUBMISSION_SUPERSEDED'
+                ) {
+                  const fresh = (await classes.assignments(workspace.id)).find(
+                    (entry) => entry.id === item.id,
+                  );
+                  if (mounted.current && fresh) {
+                    setWithdrawNotice(nuniErrorMessage(failure));
+                    setSaved(fresh);
+                    onConfirmed?.(fresh);
+                    fileOperation.current = {};
+                    setLocalFiles([]);
+                  }
+                }
+                if (
                   mounted.current &&
                   failure instanceof NuniError &&
                   failure.status < 500 &&

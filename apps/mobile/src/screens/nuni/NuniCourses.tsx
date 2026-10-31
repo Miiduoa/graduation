@@ -1885,67 +1885,87 @@ function ActivityCard({
           ]}
           label={receipt ? `更新${kind}繳交` : `繳交${kind}`}
           submit={async ({ body }, key, stillActive) => {
-            if (
-              fileSubmit &&
-              !recovering &&
-              assignment &&
-              receipt &&
-              !assignmentCanRevise(item.dueAt)
-            )
-              throw new NuniError(409, 'ASSIGNMENT_REVISION_CLOSED');
-            setRecovering(true);
-            if (assignment && fileSubmit && localFiles.length) {
-              try {
-                const confirmed = await submitNativeAssignmentFiles(
-                  classes,
-                  course.id,
-                  item.id,
-                  body,
-                  localFiles,
-                  key,
-                  setProgress,
-                  fileOperation.current,
+            try {
+              if (
+                fileSubmit &&
+                !recovering &&
+                assignment &&
+                receipt &&
+                !assignmentCanRevise(item.dueAt)
+              )
+                throw new NuniError(409, 'ASSIGNMENT_REVISION_CLOSED');
+              setRecovering(true);
+              if (assignment && fileSubmit && localFiles.length) {
+                try {
+                  const confirmed = await submitNativeAssignmentFiles(
+                    classes,
+                    course.id,
+                    item.id,
+                    body,
+                    localFiles,
+                    key,
+                    setProgress,
+                    fileOperation.current,
+                  );
+                  if (stillActive()) {
+                    setRecovering(false);
+                    fileOperation.current = {};
+                    setLocalFiles([]);
+                    setPreviewUri(null);
+                    saved(confirmed);
+                    setWithdrawNotice('');
+                  }
+                  return '已收到伺服器繳交紀錄。';
+                } catch (failure) {
+                  if (
+                    stillActive() &&
+                    failure instanceof NuniError &&
+                    failure.status > 0 &&
+                    failure.status < 500 &&
+                    failure.status !== 408 &&
+                    failure.code !== 'SESSION_CHANGED'
+                  ) {
+                    setRecovering(false);
+                  }
+                  throw failure;
+                } finally {
+                  if (stillActive()) setProgress(null);
+                }
+              }
+              const confirmed = assignment
+                ? fileSubmit
+                  ? await classes.submitFiles(course.id, item.id, {
+                      body,
+                      fileIds: [],
+                      idempotencyKey: key,
+                    })
+                  : await classes.submit(course.id, item.id, body, key)
+                : await classes.submitQuiz(course.id, item.id, body, key);
+              if (stillActive()) {
+                setRecovering(false);
+                saved(confirmed);
+                setWithdrawNotice('');
+              }
+              return '已收到伺服器繳交紀錄。';
+            } catch (failure) {
+              if (
+                failure instanceof NuniError &&
+                failure.code === 'ASSIGNMENT_SUBMISSION_SUPERSEDED'
+              ) {
+                const fresh = (await classes.assignments(course.id)).find(
+                  (entry) => entry.id === item.id,
                 );
-                if (stillActive()) {
+                if (stillActive() && fresh) {
+                  setWithdrawNotice(nuniErrorMessage(failure));
+                  saved(fresh);
                   setRecovering(false);
                   fileOperation.current = {};
                   setLocalFiles([]);
                   setPreviewUri(null);
-                  saved(confirmed);
-                  setWithdrawNotice('');
                 }
-                return '已收到伺服器繳交紀錄。';
-              } catch (failure) {
-                if (
-                  stillActive() &&
-                  failure instanceof NuniError &&
-                  failure.status > 0 &&
-                  failure.status < 500 &&
-                  failure.status !== 408 &&
-                  failure.code !== 'SESSION_CHANGED'
-                ) {
-                  setRecovering(false);
-                }
-                throw failure;
-              } finally {
-                if (stillActive()) setProgress(null);
               }
+              throw failure;
             }
-            const confirmed = assignment
-              ? fileSubmit
-                ? await classes.submitFiles(course.id, item.id, {
-                    body,
-                    fileIds: [],
-                    idempotencyKey: key,
-                  })
-                : await classes.submit(course.id, item.id, body, key)
-              : await classes.submitQuiz(course.id, item.id, body, key);
-            if (stillActive()) {
-              setRecovering(false);
-              saved(confirmed);
-              setWithdrawNotice('');
-            }
-            return '已收到伺服器繳交紀錄。';
           }}
         />
       ) : null}

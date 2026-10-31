@@ -1153,3 +1153,68 @@ it.each(['alignment', 'lost-response'])(
     clock.mockRestore();
   },
 );
+
+it.each(['superseded'])(
+  'refreshes current receipt after replaced recovery: %s',
+  async (failure) => {
+    state.fileSubmit = true;
+    let now = Date.parse('2026-10-09T11:59:00Z');
+    const clock = vi.spyOn(Date, 'now').mockImplementation(() => now);
+    const fileId = 'cwf_77777777-7777-4777-8777-777777777777';
+    const metadata = {
+      id: fileId,
+      originalName: 'repair.pdf',
+      contentType: 'application/pdf',
+      byteSize: 4,
+      kind: 'file',
+      downloadPath: `class-workspaces/${workspace.id}/assignments/${assignment.id}/files/${fileId}/content`,
+      downloadExp: '1',
+      downloadSig: 'sig',
+    };
+    const original = { ...assignment, mySubmission: submission };
+    const confirmed = {
+      ...original,
+      mySubmission: {
+        ...submission,
+        platformAccountId: 'pa_11111111-1111-4111-8111-111111111111',
+        files: [metadata],
+      },
+    };
+    state.request
+      .mockResolvedValueOnce({ intents: [{ ...metadata, uploadPath: metadata.downloadPath }] })
+      .mockRejectedValueOnce(
+        failure === 'alignment'
+          ? new NuniError(503, 'ASSIGNMENT_FILE_STORE_UNAVAILABLE')
+          : new TypeError('response lost'),
+      )
+      .mockRejectedValueOnce(new NuniError(409, 'ASSIGNMENT_SUBMISSION_SUPERSEDED'))
+      .mockResolvedValueOnce({
+        assignments: [
+          { ...confirmed, mySubmission: { ...confirmed.mySubmission, body: 'new B', files: [] } },
+        ],
+      });
+    state.upload.mockResolvedValue(metadata);
+    const props = {
+      item: original,
+      workspace: { ...workspace, memberRole: 'student' as const },
+      reload,
+    };
+    const view = render(<AssignmentCard {...props} />);
+    fireEvent.change(document.querySelector('input[accept^=".pdf"]')!, {
+      target: { files: [new File(['test'], 'repair.pdf', { type: 'application/pdf' })] },
+    });
+    fireEvent.submit(screen.getByLabelText('作業內容').closest('form')!);
+    await screen.findByRole('button', { name: '確認送出結果' });
+    expect(state.upload).toHaveBeenCalledTimes(1);
+    expect(state.request).toHaveBeenCalledTimes(2);
+    now = Date.parse('2026-10-09T12:01:00Z');
+    view.rerender(<AssignmentCard {...props} />);
+    fireEvent.submit(screen.getByRole('button', { name: '確認送出結果' }).closest('form')!);
+    await waitFor(() => expect(state.request).toHaveBeenCalledTimes(3));
+    await screen.findByText('這次繳交已被較新的提交取代，請以目前回執為準。');
+    expect(screen.getByRole('region', { name: '我的繳交紀錄' }).textContent).toContain('new B');
+    expect(screen.queryByText('repair.pdf · 檔案')).toBeNull();
+    expect(state.upload).toHaveBeenCalledTimes(1);
+    clock.mockRestore();
+  },
+);

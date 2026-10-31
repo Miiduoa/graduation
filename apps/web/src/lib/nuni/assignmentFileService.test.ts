@@ -828,3 +828,171 @@ it('uses visible counts for successive withdrawals and a submission by another s
     { body: '新繳交', fileIds: [], idempotencyKey: 'count-submit-third' });
   expect(third.submissionCount).toBe(1);
 });
+
+it.each(
+  ['memory', 'sql'].flatMap((mode) =>
+    [false, true].flatMap((withFiles) =>
+      [false, true].map((afterDeadline) => ({ mode, withFiles, afterDeadline })),
+    ),
+  ),
+)(
+  'rejects replaced recovery $mode files=$withFiles deadline=$afterDeadline',
+  async ({ mode, withFiles, afterDeadline }) => {
+    const index =
+      mode === 'sql'
+        ? createSqlIndexStore(createFakeAssignmentFileSql())
+        : createMemoryIndexStore();
+    const stores = { index, blobs: createTtlMemoryBlobStore() };
+    let clock = new Date('2026-10-21T11:59:58.000Z');
+    let current = assignment();
+    const submit = vi.fn(async (_actor, _workspace, _assignment, body: string) => {
+      current = assignment({
+        submissionCount: 1,
+        mySubmission: {
+          assignmentId,
+          platformAccountId: studentId,
+          displayName: '同學',
+          body,
+          state: 'submitted',
+          submittedAt: new Date(clock.getTime() + 100).toISOString(),
+          teacherFeedback: null,
+          reviewedAt: null,
+        },
+      });
+      return current;
+    });
+    const upstream = { ...platform({ submit }), assignment: async () => current };
+    const make = () =>
+      createAssignmentFileService({ secret, stores, platform: upstream, now: () => clock });
+    let api = make();
+    const student = actor(studentId);
+    const intent = await api.createIntent(student, workspaceId, assignmentId, {
+      originalName: 'shot.jpg',
+      contentType: 'image/jpeg',
+      byteSize: 64,
+      idempotencyKey: 'recover-intent',
+    });
+    const oldDownload = await api.putContent(student, workspaceId, assignmentId, intent.id, jpeg());
+    const put = index.putFile.bind(index);
+    let unavailable = true;
+    index.putFile = async (record) => {
+      if (unavailable && record.submittedAt === '2026-10-21T11:59:58.100Z')
+        throw new Error('alignment unavailable');
+      return put(record);
+    };
+    const input = { body: '原操作', fileIds: [intent.id], idempotencyKey: 'recover-submit' };
+    await expect(api.submitFiles(student, workspaceId, assignmentId, input)).rejects.toMatchObject({
+      status: 503,
+    });
+    await expect(
+      api.hydrateSubmission(
+        student,
+        workspace('student'),
+        current,
+        current.mySubmission,
+        studentId,
+      ),
+    ).rejects.toMatchObject({ status: 503 });
+    unavailable = false;
+    clock = new Date('2026-10-21T11:59:59.000Z');
+    const replacement = await api.createIntent(student, workspaceId, assignmentId, {
+      originalName: 'new.jpg',
+      contentType: 'image/jpeg',
+      byteSize: 64,
+      idempotencyKey: 'new-intent',
+    });
+    await api.putContent(student, workspaceId, assignmentId, replacement.id, jpeg());
+    const receipt = await api.submitFiles(student, workspaceId, assignmentId, {
+      body: 'new B',
+      fileIds: withFiles ? [replacement.id] : [],
+      idempotencyKey: 'new-submit',
+    });
+    const before = await index.getFile(intent.id);
+    const newerBefore = await index.getFile(replacement.id);
+    if (afterDeadline) clock = new Date('2026-10-21T12:00:00.001Z');
+    api = make();
+    await expect(api.submitFiles(student, workspaceId, assignmentId, input)).rejects.toMatchObject({
+      status: 409,
+      code: 'ASSIGNMENT_SUBMISSION_SUPERSEDED',
+    });
+    expect(await index.getFile(intent.id)).toEqual(before);
+    expect(await index.getFile(replacement.id)).toEqual(newerBefore);
+    expect(current.mySubmission?.body).toBe('new B');
+    expect(submit).toHaveBeenCalledTimes(2);
+    const hydrated = await api.hydrateSubmission(
+      student,
+      workspace('student'),
+      current,
+      current.mySubmission,
+      studentId,
+    );
+    expect(hydrated?.files?.map((file) => file.id)).toEqual(withFiles ? [replacement.id] : []);
+    await expect(
+      api.readContent(
+        workspaceId,
+        assignmentId,
+        intent.id,
+        oldDownload.downloadExp!,
+        oldDownload.downloadSig!,
+      ),
+    ).rejects.toMatchObject({ status: 404 });
+    // A stale index row must not make a replaced version downloadable.
+    await index.putFile({ ...before!, supersededAt: null });
+    await expect(api.readContent(workspaceId, assignmentId, intent.id, oldDownload.downloadExp!, oldDownload.downloadSig!))
+      .rejects.toMatchObject({ status: 404 });
+    expect(receipt.mySubmission?.body).toBe('new B');
+  },
+);
+
+it.each(['memory', 'sql'] as const)('fences stale alignment and rollback writes after a newer version (%s)', async mode => {
+  const index = mode === 'sql' ? createSqlIndexStore(createFakeAssignmentFileSql()) : createMemoryIndexStore();
+  const api = createAssignmentFileService({ secret, stores: { index, blobs: createTtlMemoryBlobStore() }, platform: platform(), now: () => new Date('2026-10-21T11:00:00Z') });
+  const intent = await api.createIntent(actor(studentId), workspaceId, assignmentId, {
+    originalName: 'old.jpg', contentType: 'image/jpeg', byteSize: 64, idempotencyKey: 'fenced-intent',
+  });
+  const original = (await index.getFile(intent.id))!;
+  const oldVersion = '2026-10-21T11:00:01.000Z';
+  const newVersion = '2026-10-21T11:00:02.000Z';
+  await index.advanceVersion(assignmentId, studentId, oldVersion);
+  await index.advanceVersion(assignmentId, studentId, newVersion);
+  await index.advanceVersion(assignmentId, studentId, oldVersion);
+  expect(await index.currentVersion(assignmentId, studentId)).toBe(newVersion);
+  await expect(index.putFile({ ...original, submittedAt: oldVersion, supersededAt: null }, oldVersion))
+    .rejects.toMatchObject({ code: 'ASSIGNMENT_SUBMISSION_SUPERSEDED' });
+  await expect(index.putFile(original, oldVersion)).rejects.toMatchObject({ code: 'ASSIGNMENT_SUBMISSION_SUPERSEDED' });
+  expect(await index.getFile(intent.id)).toEqual(original);
+});
+
+it('recovers an upstream confirmation whose first persistence failed', async () => {
+  const index = createMemoryIndexStore();
+  let current = assignment();
+  let written = false;
+  const submit = vi.fn(async (_actor, _workspace, _assignment, body: string) => {
+    if (!written) {
+      written = true;
+      current = assignment({ submissionCount: 1, mySubmission: {
+        assignmentId, platformAccountId: studentId, displayName: '同學', body,
+        state: 'submitted', submittedAt: '2026-10-21T11:00:01.000Z', teacherFeedback: null, reviewedAt: null,
+      } });
+    }
+    return current;
+  });
+  const remember = index.putIdempotency.bind(index);
+  let fail = true;
+  index.putIdempotency = async (actorId, key, row) => {
+    if (key.startsWith('submit-confirmation:') && fail) {
+      fail = false;
+      throw new NuniError(503, 'ASSIGNMENT_FILE_STORE_UNAVAILABLE');
+    }
+    return remember(actorId, key, row);
+  };
+  let clock = new Date('2026-10-21T11:00:00Z');
+  const api = createAssignmentFileService({ secret, stores: { index, blobs: createTtlMemoryBlobStore() },
+    platform: { ...platform({ submit }), assignment: async () => current }, now: () => clock });
+  const input = { body: '原操作', fileIds: [], idempotencyKey: 'confirmation-persist-retry' };
+  await expect(api.submitFiles(actor(studentId), workspaceId, assignmentId, input)).rejects.toMatchObject({ status: 503 });
+  clock = new Date('2026-10-21T12:01:00Z');
+  const result = await api.submitFiles(actor(studentId), workspaceId, assignmentId, input);
+  expect(result.mySubmission?.body).toBe('原操作');
+  expect(submit).toHaveBeenNthCalledWith(2, expect.anything(), workspaceId, assignmentId, '原操作', 'confirmation-persist-retry:text');
+});

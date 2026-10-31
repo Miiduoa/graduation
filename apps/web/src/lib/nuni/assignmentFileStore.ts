@@ -32,7 +32,9 @@ export type AssignmentFileIndexStore = {
   isWithdrawn(assignmentId: string, accountId: string, submittedAt: string): Promise<boolean>;
   withdraw(assignmentId: string, accountId: string, submittedAt: string): Promise<void>;
   getFile(id: string): Promise<FileRecord | null>;
-  putFile(record: FileRecord): Promise<void>;
+  putFile(record: FileRecord, version?: string): Promise<void>;
+  advanceVersion(assignmentId: string, accountId: string, version: string): Promise<void>;
+  currentVersion(assignmentId: string, accountId: string): Promise<string | null>;
   listVisible(assignmentId: string, accountId: string): Promise<FileRecord[]>;
   listStaged(assignmentId: string, accountId: string): Promise<FileRecord[]>;
   getIdempotency(actorId: string, key: string): Promise<IdempotencyRow | null>;
@@ -49,10 +51,7 @@ export type AssignmentFileRuntimeStores = {
   blobs: AssignmentBlobStore;
 };
 
-export type SqlQuery = (
-  text: string,
-  params?: unknown[],
-) => Promise<Record<string, unknown>[]>;
+export type SqlQuery = (text: string, params?: unknown[]) => Promise<Record<string, unknown>[]>;
 
 const FILE_COLUMNS = `id, workspace_id, assignment_id, platform_account_id, original_name, content_type,
   byte_size, sha256, kind, storage_key, created_at, uploaded_at, submitted_at, superseded_at, late`;
@@ -66,6 +65,10 @@ export const ASSIGNMENT_FILE_SQL = {
     WHERE assignment_id = $1 AND platform_account_id = $2 AND submitted_at = $3::timestamptz`,
   withdraw: `INSERT INTO class_assignment_submission_withdrawals (assignment_id, platform_account_id, submitted_at)
     VALUES ($1, $2, $3::timestamptz) ON CONFLICT DO NOTHING`,
+  advanceVersion: `INSERT INTO class_assignment_file_idempotency (actor_id, key, request_hash, payload)
+    VALUES ($1, $2, $3, to_jsonb($3::text)) ON CONFLICT (actor_id, key) DO UPDATE
+    SET request_hash = EXCLUDED.request_hash, payload = EXCLUDED.payload
+    WHERE class_assignment_file_idempotency.request_hash::timestamptz < EXCLUDED.request_hash::timestamptz`,
   getFile: `SELECT ${FILE_COLUMNS} FROM class_assignment_submission_files WHERE id = $1`,
   upsertFile: `INSERT INTO class_assignment_submission_files (
       id, workspace_id, assignment_id, platform_account_id, original_name, content_type,
@@ -121,7 +124,9 @@ function fileFromRow(row: Record<string, unknown>): FileRecord {
   };
 }
 
-function unavailable(code: 'ASSIGNMENT_FILE_STORE_UNAVAILABLE' | 'ASSIGNMENT_FILE_UPLOAD_UNAVAILABLE') {
+function unavailable(
+  code: 'ASSIGNMENT_FILE_STORE_UNAVAILABLE' | 'ASSIGNMENT_FILE_UPLOAD_UNAVAILABLE',
+) {
   return async () => {
     throw new NuniError(503, code);
   };
@@ -129,23 +134,42 @@ function unavailable(code: 'ASSIGNMENT_FILE_STORE_UNAVAILABLE' | 'ASSIGNMENT_FIL
 
 export function createMemoryIndexStore(): AssignmentFileIndexStore {
   const files = new Map<string, FileRecord>();
+  const versions = new Map<string, string>();
   const withdrawals = new Set<string>();
   const idempotency = new Map<string, IdempotencyRow>();
   return {
     async countWithdrawn(assignmentId) {
-      return [...withdrawals].filter(key => JSON.parse(key)[0] === assignmentId).length;
+      return [...withdrawals].filter((key) => JSON.parse(key)[0] === assignmentId).length;
     },
     async isWithdrawn(assignmentId, accountId, submittedAt) {
-      return withdrawals.has(JSON.stringify([assignmentId, accountId, new Date(submittedAt).toISOString()]));
+      return withdrawals.has(
+        JSON.stringify([assignmentId, accountId, new Date(submittedAt).toISOString()]),
+      );
     },
     async withdraw(assignmentId, accountId, submittedAt) {
-      withdrawals.add(JSON.stringify([assignmentId, accountId, new Date(submittedAt).toISOString()]));
+      withdrawals.add(
+        JSON.stringify([assignmentId, accountId, new Date(submittedAt).toISOString()]),
+      );
     },
     async getFile(id) {
       const row = files.get(id);
       return row ? cloneFile(row) : null;
     },
-    async putFile(record) {
+    async advanceVersion(assignmentId, accountId, version) {
+      const key = `${assignmentId}:${accountId}`;
+      if (!versions.has(key) || Date.parse(versions.get(key)!) < Date.parse(version))
+        versions.set(key, version);
+    },
+    async currentVersion(assignmentId, accountId) {
+      return versions.get(`${assignmentId}:${accountId}`) ?? null;
+    },
+    async putFile(record, version) {
+      if (
+        version &&
+        Date.parse(versions.get(`${record.assignmentId}:${record.platformAccountId}`) ?? version) >
+          Date.parse(version)
+      )
+        throw new NuniError(409, 'ASSIGNMENT_SUBMISSION_SUPERSEDED');
       files.set(record.id, cloneFile(record));
     },
     async listVisible(assignmentId, accountId) {
@@ -184,10 +208,15 @@ export function createMemoryIndexStore(): AssignmentFileIndexStore {
 export function createSqlIndexStore(query: SqlQuery): AssignmentFileIndexStore {
   return {
     async countWithdrawn(assignmentId) {
-      return Number((await query(ASSIGNMENT_FILE_SQL.countWithdrawn, [assignmentId]))[0]?.count ?? 0);
+      return Number(
+        (await query(ASSIGNMENT_FILE_SQL.countWithdrawn, [assignmentId]))[0]?.count ?? 0,
+      );
     },
     async isWithdrawn(assignmentId, accountId, submittedAt) {
-      return (await query(ASSIGNMENT_FILE_SQL.isWithdrawn, [assignmentId, accountId, submittedAt])).length > 0;
+      return (
+        (await query(ASSIGNMENT_FILE_SQL.isWithdrawn, [assignmentId, accountId, submittedAt]))
+          .length > 0
+      );
     },
     async withdraw(assignmentId, accountId, submittedAt) {
       await query(ASSIGNMENT_FILE_SQL.withdraw, [assignmentId, accountId, submittedAt]);
@@ -196,8 +225,34 @@ export function createSqlIndexStore(query: SqlQuery): AssignmentFileIndexStore {
       const rows = await query(ASSIGNMENT_FILE_SQL.getFile, [id]);
       return rows[0] ? fileFromRow(rows[0]) : null;
     },
-    async putFile(record) {
-      await query(ASSIGNMENT_FILE_SQL.upsertFile, [
+    async advanceVersion(assignmentId, accountId, version) {
+      await query(ASSIGNMENT_FILE_SQL.advanceVersion, [
+        accountId,
+        `submit-version:${assignmentId}`,
+        version,
+      ]);
+    },
+    async currentVersion(assignmentId, accountId) {
+      const rows = await query(ASSIGNMENT_FILE_SQL.getIdempotency, [
+        accountId,
+        `submit-version:${assignmentId}`,
+      ]);
+      return rows[0] ? String(rows[0].request_hash) : null;
+    },
+    async putFile(record, version) {
+      const sql = version
+        ? `WITH current_version AS MATERIALIZED (
+        SELECT request_hash FROM class_assignment_file_idempotency
+        WHERE actor_id = $4 AND key = 'submit-version:' || $3 FOR UPDATE
+      ) ` +
+          ASSIGNMENT_FILE_SQL.upsertFile.replace(
+            'VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)',
+            `SELECT $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15
+        WHERE NOT EXISTS (SELECT 1 FROM current_version WHERE request_hash::timestamptz > $16::timestamptz)`,
+          ) +
+          ` WHERE NOT EXISTS (SELECT 1 FROM current_version WHERE request_hash::timestamptz > $16::timestamptz) RETURNING id`
+        : ASSIGNMENT_FILE_SQL.upsertFile;
+      const rows = await query(sql, [
         record.id,
         record.workspaceId,
         record.assignmentId,
@@ -213,13 +268,19 @@ export function createSqlIndexStore(query: SqlQuery): AssignmentFileIndexStore {
         record.submittedAt,
         record.supersededAt,
         record.late,
+        ...(version ? [version] : []),
       ]);
+      if (version && !rows.length) throw new NuniError(409, 'ASSIGNMENT_SUBMISSION_SUPERSEDED');
     },
     async listVisible(assignmentId, accountId) {
-      return (await query(ASSIGNMENT_FILE_SQL.listVisible, [assignmentId, accountId])).map(fileFromRow);
+      return (await query(ASSIGNMENT_FILE_SQL.listVisible, [assignmentId, accountId])).map(
+        fileFromRow,
+      );
     },
     async listStaged(assignmentId, accountId) {
-      return (await query(ASSIGNMENT_FILE_SQL.listStaged, [assignmentId, accountId])).map(fileFromRow);
+      return (await query(ASSIGNMENT_FILE_SQL.listStaged, [assignmentId, accountId])).map(
+        fileFromRow,
+      );
     },
     async getIdempotency(actorId, key) {
       const rows = await query(ASSIGNMENT_FILE_SQL.getIdempotency, [actorId, key]);
@@ -243,7 +304,8 @@ export function createFakeAssignmentFileSql(): SqlQuery {
   const withdrawals = new Set<string>();
   const idempotency = new Map<string, Record<string, unknown>>();
   return async (sql, params = []) => {
-    if (sql === ASSIGNMENT_FILE_SQL.countWithdrawn) return [{ count: [...withdrawals].filter(key => JSON.parse(key)[0] === params[0]).length }];
+    if (sql === ASSIGNMENT_FILE_SQL.countWithdrawn)
+      return [{ count: [...withdrawals].filter((key) => JSON.parse(key)[0] === params[0]).length }];
     const withdrawalKey = JSON.stringify(params);
     if (sql === ASSIGNMENT_FILE_SQL.isWithdrawn) return withdrawals.has(withdrawalKey) ? [{ exists: 1 }] : [];
     if (sql === ASSIGNMENT_FILE_SQL.withdraw) { withdrawals.add(withdrawalKey); return []; }
@@ -251,7 +313,23 @@ export function createFakeAssignmentFileSql(): SqlQuery {
       const row = files.get(String(params[0]));
       return row ? [row] : [];
     }
-    if (sql === ASSIGNMENT_FILE_SQL.upsertFile) {
+    if (sql === ASSIGNMENT_FILE_SQL.advanceVersion) {
+      const key = `${params[0]}:${params[1]}`;
+      const previous = idempotency.get(key);
+      if (!previous || Date.parse(String(previous.request_hash)) < Date.parse(String(params[2])))
+        idempotency.set(key, { request_hash: params[2], payload: params[2] });
+      return [];
+    }
+    if (sql === ASSIGNMENT_FILE_SQL.upsertFile || sql.includes('RETURNING id')) {
+      if (
+        params.length === 16 &&
+        Date.parse(
+          String(
+            idempotency.get(`${params[3]}:submit-version:${params[2]}`)?.request_hash ?? params[15],
+          ),
+        ) > Date.parse(String(params[15]))
+      )
+        return [];
       const row = {
         id: params[0],
         workspace_id: params[1],
@@ -270,7 +348,7 @@ export function createFakeAssignmentFileSql(): SqlQuery {
         late: params[14],
       };
       files.set(String(row.id), row);
-      return [];
+      return params.length === 16 ? [{ id: row.id }] : [];
     }
     if (sql === ASSIGNMENT_FILE_SQL.listVisible || sql === ASSIGNMENT_FILE_SQL.listStaged) {
       const assignmentId = params[0];
@@ -375,6 +453,8 @@ export function createSupabaseBlobStore(
 function productionIndexUnavailable(): AssignmentFileIndexStore {
   const fail = unavailable('ASSIGNMENT_FILE_STORE_UNAVAILABLE');
   return {
+    advanceVersion: fail,
+    currentVersion: fail,
     countWithdrawn: fail,
     isWithdrawn: fail,
     withdraw: fail,
@@ -392,7 +472,9 @@ function productionBlobUnavailable(): AssignmentBlobStore {
   return { put: fail, get: fail };
 }
 
-type Pool = { query: (text: string, params?: unknown[]) => Promise<{ rows: Record<string, unknown>[] }> };
+type Pool = {
+  query: (text: string, params?: unknown[]) => Promise<{ rows: Record<string, unknown>[] }>;
+};
 export type AssignmentFilePoolFactory = (connectionString: string) => Pool;
 
 const pools = new Map<string, Pool>();
@@ -411,7 +493,9 @@ export function cachedAssignmentFilePoolCount() {
 function defaultPool(connectionString: string): Pool {
   try {
     const required = createRequire(import.meta.url);
-    const pg = required('pg') as { Pool: new (config: { connectionString: string; max: number }) => Pool };
+    const pg = required('pg') as {
+      Pool: new (config: { connectionString: string; max: number }) => Pool;
+    };
     return new pg.Pool({ connectionString, max: 4 });
   } catch {
     throw new NuniError(503, 'ASSIGNMENT_FILE_STORE_UNAVAILABLE');
