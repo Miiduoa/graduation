@@ -5,7 +5,7 @@ index efbe9e1..70933ca 100644
 @@ -56,6 +56,39 @@ describe("class workspace teacher-led join path", () => {
      return accounts.resolveSession(`Platform ${completed.sessionHandle}`);
    }
- 
+
 +  it("hides withdrawn submissions on authoritative reads and feedback replays", async () => {
 +    const teacher = await loginAs("withdraw-teacher", "withdraw-teacher@gmail.com", "老師");
 +    const workspace = await workspaces.create(teacher, { title: "撤回驗證", idempotencyKey: "withdraw-workspace" });
@@ -117,7 +117,7 @@ index a312813..3983cf0 100644
 @@ -22,6 +22,11 @@ const teachingPage = readFileSync(
    "utf8",
  );
- 
+
 +const classroomPanel = readFileSync(
 +  new URL("../../../web/src/app/auth/platform/class-workspace/[workspaceId]/classroom-presence-panel.tsx", import.meta.url),
 +  "utf8",
@@ -140,7 +140,7 @@ index a312813..3983cf0 100644
 +    expect(classroomPanel).toContain("...(classroomUnitId ? { unitId: classroomUnitId } : {})");
      expect(teachingPage).toContain("不掛章節");
    });
- 
+
 diff --git a/apps/api/src/migrations/281_assignment_submission_withdrawals.sql b/apps/api/src/migrations/281_assignment_submission_withdrawals.sql
 new file mode 100644
 index 0000000..8c327e6
