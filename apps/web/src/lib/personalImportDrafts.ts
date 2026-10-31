@@ -19,6 +19,7 @@ export type PersonalImportDraft = {
   source: Pick<PersonalImportSource, 'type' | 'name'>;
   rows: PersonalImportRow[];
   excluded: string[];
+  editedIds?: string[];
   parseIssues: ImportIssue[];
   backup: Omit<PersonalImportBackupPreview, 'rows'> | null;
   document?: PersonalImportDocument | null;
@@ -45,6 +46,8 @@ function validDraft(value: unknown, schoolId: string): value is PersonalImportDr
     !object(value.source) ||
     !['paste', 'file', 'screenshot'].includes(String(value.source.type)) ||
     !optionalString(value.source.name) ||
+    (value.editedIds !== undefined &&
+      (!Array.isArray(value.editedIds) || !value.editedIds.every(string))) ||
     !Array.isArray(value.rows) ||
     value.rows.length > 2000 ||
     !Array.isArray(value.excluded) ||
@@ -143,7 +146,8 @@ function validDraft(value: unknown, schoolId: string): value is PersonalImportDr
         !selection.selected.every(string) ||
         new Set(selection.selected).size !== selection.selected.length ||
         !object(selection.headers)
-      ) return false;
+      )
+        return false;
       const headers = selection.headers;
       for (const id of selection.selected) {
         const section = document.sections.find((item) => item.id === id);
@@ -151,8 +155,11 @@ function validDraft(value: unknown, schoolId: string): value is PersonalImportDr
       }
       for (const [id, line] of Object.entries(headers)) {
         const section = document.sections.find((item) => item.id === id);
-        if (!section || !Number.isSafeInteger(line) ||
-          (section.rows.length ? !section.rows.some((row) => row.line === line) : line !== 1))
+        if (
+          !section ||
+          !Number.isSafeInteger(line) ||
+          (section.rows.length ? !section.rows.some((row) => row.line === line) : line !== 1)
+        )
           return false;
       }
       if (!selection.selected.every((id) => id in headers)) return false;

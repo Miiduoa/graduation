@@ -65,6 +65,12 @@ import {
   runPersonalImportAi,
 } from '@/lib/personalImportAi';
 import styles from './PersonalImport.module.css';
+import { TimetableReviewGrid } from './TimetableReviewGrid';
+import {
+  nextReviewRow,
+  REVIEW_SPLIT_UNAVAILABLE,
+  splitReviewRow,
+} from '@campus/shared/src/imports/reviewGrid';
 import { CourseAccessPanel } from './CourseAccessPanel';
 import { DocumentSelection } from './DocumentSelection';
 import { PersonalImportSyncPanel } from './PersonalImportSync';
@@ -407,6 +413,7 @@ function ImportWorkspace({
   const [source, setSource] = useState<Pick<PersonalImportSource, 'type' | 'name'>>({
     type: 'paste',
   });
+  const [editedIds, setEditedIds] = useState<string[]>([]);
   const [rows, setRows] = useState<PersonalImportRow[]>([]);
   const [backup, setBackup] = useState<Omit<PersonalImportBackupPreview, 'rows'> | null>(null);
   const [importDocument, setDocument] = useState<PersonalImportDocument | null>(null);
@@ -498,6 +505,7 @@ function ImportWorkspace({
         setText(draft.text);
         setSource(draft.source);
         setRows(draft.rows);
+        setEditedIds(draft.editedIds ?? []);
         setExcluded(draft.excluded);
         setParseIssues(draft.parseIssues);
         setBackup(draft.backup);
@@ -537,6 +545,7 @@ function ImportWorkspace({
         source,
         rows,
         excluded,
+        editedIds,
         parseIssues,
         backup,
         document: importDocument,
@@ -547,6 +556,7 @@ function ImportWorkspace({
       setDraftStorageError(errorMessage(error));
     }
   }, [
+    editedIds,
     draftReady,
     draftReadFailed,
     paused,
@@ -655,7 +665,19 @@ function ImportWorkspace({
     );
   };
   const updateDraft = (before: PersonalImportRow, next: PersonalImportRow) => {
+    if (next.kind === 'timetable' && periodProfile) {
+      const slots = periodSlots(periodProfile);
+      if (next.startPeriod !== before.startPeriod)
+        next = {
+          ...next,
+          startTime: slots[(next.startPeriod ?? 0) - 1]?.start,
+          periodLabel: undefined,
+        };
+      if (next.endPeriod !== before.endPeriod)
+        next = { ...next, endTime: slots[(next.endPeriod ?? 0) - 1]?.end, periodLabel: undefined };
+    }
     setAiReviewed(false);
+    setEditedIds((current) => (current.includes(next.id) ? current : [...current, next.id]));
     setRows((current) => current.map((item) => (item.id === next.id ? next : item)));
     setParseIssues((current) =>
       current.filter(
@@ -1112,6 +1134,45 @@ function ImportWorkspace({
       `${row.title} ${row.teacher || ''} ${row.courseCode || ''} ${row.academicYear}`.includes(
         search,
       ),
+  );
+  const timetableGrid = kind === 'timetable' && !importDocument && (
+    <TimetableReviewGrid
+      rows={rows.filter((row) => !excluded.includes(row.id))}
+      editedIds={editedIds}
+      profile={periodProfile}
+      disabled={saving || reading}
+      onEdit={(row) => {
+        setReviewIssueIds(null);
+        setReviewPage(Math.floor(rows.indexOf(row) / REVIEW_PAGE_SIZE));
+        requestAnimationFrame(() => {
+          const element = reviewRows.current.get(row.id);
+          element?.scrollIntoView({ block: 'center' });
+          element?.focus();
+        });
+      }}
+      onAdd={(day, period) => {
+        const row: PersonalImportRow = {
+          id: createPersonalImportId(),
+          kind: 'timetable',
+          title: '',
+          schoolId: scope.schoolId,
+          academicYear: year,
+          semester,
+          dayOfWeek: day,
+          startPeriod: period,
+          endPeriod: period,
+          source: { type: 'paste', line: 1, rawText: '' },
+        };
+        setRows((current) => [...current, row]);
+        setReviewIssueIds(null);
+        setReviewPage(Math.floor(rows.length / REVIEW_PAGE_SIZE));
+        requestAnimationFrame(() => {
+          const element = reviewRows.current.get(row.id);
+          element?.scrollIntoView({ block: 'center' });
+          element?.querySelector<HTMLInputElement>('input[type="text"]')?.focus();
+        });
+      }}
+    />
   );
   return (
     <div className={styles.root}>
@@ -1760,6 +1821,33 @@ function ImportWorkspace({
             手動加一筆
           </button>
         </div>
+        {kind === 'timetable' && rows.length > 0 && (
+          <label className={styles.field}>
+            補上對照截圖（保留草稿）
+            <input
+              type="file"
+              accept="image/png,image/jpeg,image/webp"
+              disabled={reading || saving}
+              onChange={async (event) => {
+                const file = event.target.files?.[0];
+                event.target.value = '';
+                if (!file) return;
+                try {
+                  const image = await createPersonalImportImagePreview(
+                    file,
+                    new AbortController().signal,
+                  );
+                  if (!active.current) return;
+                  setPreview(URL.createObjectURL(image));
+                  setNotice('已補上對照截圖，草稿內容沒有變更。');
+                } catch (error) {
+                  if (active.current) setNotice(errorMessage(error));
+                }
+              }}
+            />
+          </label>
+        )}
+        {!rows.length && timetableGrid}
         {parseIssues.some((issue) => issue.severity === 'error') && (
           <div role="alert" className={styles.error}>
             <p>
@@ -1926,6 +2014,7 @@ function ImportWorkspace({
                 </aside>
               )}
               <div className={styles.reviewContent}>
+                {timetableGrid}
                 {!filteredRows.length && (
                   <p className={styles.empty}>目前沒有需要修正的項目。切換「全部」繼續核對。</p>
                 )}
@@ -1995,6 +2084,84 @@ function ImportWorkspace({
                           onRefreshWorkspaces={() => setLinkRefreshVersion((v) => v + 1)}
                           onChange={(next) => updateDraft(row, next)}
                         />
+                        {row.kind === 'timetable' && (
+                          <div className={styles.actions}>
+                            <button
+                              type="button"
+                              className="btn"
+                              disabled={
+                                saving ||
+                                reading ||
+                                !row.startPeriod ||
+                                !row.endPeriod ||
+                                row.endPeriod <= row.startPeriod
+                              }
+                              onClick={() => {
+                                setAiReviewed(false);
+                                const parts = splitReviewRow(row, periodProfile);
+                                if (parts.length === 1) {
+                                  setNotice(REVIEW_SPLIT_UNAVAILABLE);
+                                  return;
+                                }
+                                setExcluded((current) =>
+                                  current.includes(row.id)
+                                    ? [...new Set([...current, ...parts.map((item) => item.id)])]
+                                    : current,
+                                );
+                                setEditedIds((current) => [
+                                  ...new Set([...current, ...parts.map((item) => item.id)]),
+                                ]);
+                                setRows((current) =>
+                                  current.flatMap((item) => (item.id === row.id ? parts : [item])),
+                                );
+                              }}
+                            >
+                              拆成單節課程
+                            </button>
+                            <button
+                              type="button"
+                              className="btn"
+                              disabled={
+                                saving ||
+                                reading ||
+                                excluded.includes(row.id) ||
+                                !nextReviewRow(
+                                  rows.filter((item) => !excluded.includes(item.id)),
+                                  row,
+                                )
+                              }
+                              onClick={() => {
+                                if (excluded.includes(row.id)) return;
+                                const next = nextReviewRow(
+                                  rows.filter((item) => !excluded.includes(item.id)),
+                                  row,
+                                );
+                                if (!next) return;
+                                updateDraft(row, {
+                                  ...row,
+                                  endPeriod: next.endPeriod ?? next.startPeriod,
+                                  endTime: next.endTime,
+                                  periodLabel: undefined,
+                                });
+                                setRows((current) => current.filter((item) => item.id !== next.id));
+                              }}
+                            >
+                              與下一節同名課程合併
+                            </button>
+                            <button
+                              type="button"
+                              className="btn"
+                              disabled={saving || reading}
+                              onClick={() => {
+                                setAiReviewed(false);
+                                setRows((current) => current.filter((item) => item.id !== row.id));
+                                setExcluded((current) => current.filter((id) => id !== row.id));
+                              }}
+                            >
+                              刪除此草稿課程
+                            </button>
+                          </div>
+                        )}
                         {parseIssues.some(
                           (issue) =>
                             issue.rowId === row.id &&
