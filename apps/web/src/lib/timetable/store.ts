@@ -14,6 +14,7 @@ import {
 } from 'firebase/firestore';
 import { httpsCallable } from 'firebase/functions';
 import {
+  assertClassExceptions,
   MEETUP_DURATION_MINUTES,
   cleanCourses,
   cleanMeta,
@@ -36,6 +37,7 @@ import { areFunctionsConfigured, FunctionsUnconfiguredError } from '@/lib/functi
 const LOCAL_KEY = 'campus-one-personal-timetable';
 
 export type StoredTimetable = {
+  classExceptions?: import('@campus/shared').ClassException[];
   courses: PersonalCourse[];
   meta: TimetableMeta;
   shareWithFriends: boolean;
@@ -76,6 +78,7 @@ type LocalTimetableRead = {
 function hasTimetableContent(value: unknown): boolean {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
   const data = value as Partial<StoredTimetable>;
+  try { assertClassExceptions(data.classExceptions); } catch { return false; }
   return (
     Array.isArray(data.courses) &&
     data.courses.length <= 80 &&
@@ -297,7 +300,9 @@ export async function savePersonalTimetable(
   };
   const ownerKey = localOwner === 'guest' ? 'local' : localOwner || uid || 'local';
   // A failed read, damaged JSON or cross-school scoped record must not be overwritten.
-  readLocal(ownerKey, timetable.schoolId);
+  const previous = readLocal(ownerKey, timetable.schoolId);
+  if (next.classExceptions === undefined && previous.classExceptions !== undefined) next.classExceptions = previous.classExceptions;
+  assertClassExceptions(next.classExceptions);
   writeLocal(ownerKey, next);
   // 課表匯入與本機整理目前只留在這台裝置，不送到雲端。
   return { stored: 'local' };

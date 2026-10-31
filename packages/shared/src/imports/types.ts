@@ -60,6 +60,7 @@ export type PersonalImportOptions = {
 };
 
 export type PersonalImportRecord = PersonalImportRow & {
+  classExceptions?: import('../timetable/classExceptions').ClassException[];
   batchId: string;
   importedAt: string;
 };

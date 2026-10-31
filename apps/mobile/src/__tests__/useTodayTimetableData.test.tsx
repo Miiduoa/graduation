@@ -1,3 +1,4 @@
+import { classMeetingKey } from '@campus/shared';
 import { act, renderHook, waitFor } from '@testing-library/react-native';
 import type { PersonalImportRecord } from '@campus/shared';
 import { useTodayTimetableData } from '../hooks/useTodayTimetableData';
@@ -9,7 +10,7 @@ jest.mock('../state/personalImportScope', () => ({ usePersonalImportScope: () =>
 jest.mock('../services/personalImports', () => ({ loadPersonalImports: jest.fn() }));
 jest.mock('../services/personalTimetable', () => ({
   loadPersonalTimetable: jest.fn(),
-  personalTimetableRecords: () => [],
+  personalTimetableRecords: (timetable: { classExceptions?: unknown[] }, imported: PersonalImportRecord[] = []) => require('@campus/shared').withClassExceptions(imported, timetable.classExceptions),
 }));
 jest.mock('@react-navigation/native', () => ({
   useFocusEffect: (callback: () => void) => require('react').useEffect(callback, [callback]),
@@ -98,4 +99,16 @@ test('a refresh failure reports unavailable data rather than an empty day', asyn
   await act(async () => view.result.current.retry());
   expect(view.result.current.status).toBe('error');
   expect(view.result.current.classes).toEqual([]);
+});
+
+
+test('the today hook consumes a dated room change from the same timetable as the widget', async () => {
+  const timetable = await jest.mocked(loadPersonalTimetable)(null, 'pu', 'nuni:account-a');
+  jest.mocked(loadPersonalTimetable).mockResolvedValue({ ...timetable, classExceptions: [{
+    id: 'room', courseKey: classMeetingKey(record), originalDate: '2026-10-19', kind: 'room',
+    location: '單次教室', createdAt: '', original: record,
+  }] });
+  const view = renderHook(() => useTodayTimetableData(now));
+  await waitFor(() => expect(view.result.current.classes[0]?.location).toBe('單次教室'));
+  expect(view.result.current.classes[0].startAt).toBe(Date.parse('2026-10-19T09:00:00+08:00'));
 });

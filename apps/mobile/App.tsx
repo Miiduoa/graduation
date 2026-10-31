@@ -1,3 +1,4 @@
+import { useClassReminders } from './src/hooks/useClassReminders';
 import { useNextClassWidget } from './src/widgets/useNextClassWidget';
 /* eslint-disable */
 import { useSubmittedAssignmentReminders } from './src/app/useSubmittedAssignmentReminders';
@@ -507,6 +508,7 @@ function TokenErrorHandler() {
 
 function AuthAwareStateProviders({ children }: { children: React.ReactNode }) {
   useNextClassWidget();
+  useClassReminders();
   const auth = useAuth();
   const { school } = useSchool();
   const schoolSessionReady = hasReadySchoolSession(auth, school?.id ?? null);

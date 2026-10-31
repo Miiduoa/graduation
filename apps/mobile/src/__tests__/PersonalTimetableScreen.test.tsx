@@ -1,3 +1,4 @@
+import { classMeetingKey } from '@campus/shared';
 import React from 'react';
 import { fireEvent, render, waitFor } from '@testing-library/react-native';
 import type { PersonalImportRecord } from '@campus/shared';
@@ -6,7 +7,7 @@ import { loadPersonalTimetable } from '../services/personalTimetable';
 import { loadPersonalImports } from '../services/personalImports';
 
 let mockSchool = { id: 'ncku', name: '國立成功大學' };
-let mockRoute: { params?: { term: string; courseId?: string; schoolId?: string } } = {};
+let mockRoute: { params?: { term: string; courseId?: string; schoolId?: string; date?: string } } = {};
 let mockScope: { owner: string; schoolId: string } | null = {
   owner: 'nuni:account-a',
   schoolId: 'ncku',
@@ -199,4 +200,18 @@ test('widget links locate the saved course and room, while removed courses fall 
   mockRoute = { params: { term: '115|1', courseId: 'removed', schoolId: 'ncku' } };
   view.rerender(<PersonalTimetableScreen />);
   await view.findByText('這堂課已變更，請核對目前課表');
+});
+
+test('a dated widget link shows the makeup room and date rather than the weekly room', async () => {
+  const original = record();
+  const timetable = await jest.mocked(loadPersonalTimetable)(null, 'ncku', 'nuni:account-a');
+  jest.mocked(loadPersonalTimetable).mockResolvedValue({ ...timetable, classExceptions: [{
+    id: 'move', courseKey: classMeetingKey(original), originalDate: '2026-11-02', kind: 'move',
+    date: '2026-11-03', endDate: '2026-11-04', startTime: '23:30', endTime: '01:00',
+    location: '補課教室', createdAt: '', original,
+  }] });
+  mockRoute = { params: { term: '115|1', courseId: original.id, schoolId: 'ncku', date: '2026-11-03' } };
+  const view = render(<PersonalTimetableScreen />);
+  await view.findByText('2026-11-03 · 23:30–01:00 · 補課教室');
+  expect(view.getByLabelText('查看日期').props.value).toBe('2026-11-03');
 });
