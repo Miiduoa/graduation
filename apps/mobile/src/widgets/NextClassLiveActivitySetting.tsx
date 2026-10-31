@@ -44,6 +44,7 @@ export function NextClassLiveActivitySetting() {
   }, []);
   if (Platform.OS !== 'ios' || !status?.supported) return null;
   const change = async (enabled: boolean) => {
+    if (busy || (enabled && !status.allowed)) return;
     setBusy(true);
     setError(false);
     try {
@@ -65,7 +66,7 @@ export function NextClassLiveActivitySetting() {
       <Switch
         accessibilityLabel="下一堂課即時動態"
         value={status.enabled}
-        disabled={busy || !status.allowed}
+        disabled={busy || (!status.allowed && !status.enabled)}
         onValueChange={(value) => void change(value)}
       />
       {!status.allowed ? (

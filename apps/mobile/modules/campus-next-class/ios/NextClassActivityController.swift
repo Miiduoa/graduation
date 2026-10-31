@@ -8,6 +8,16 @@ actor NextClassActivityController {
     private var expiry: Task<Void, Never>?
     private var revision = 0
 
+    func endExpired() async {
+        let enabled = UserDefaults.standard.bool(forKey: "nextClassLiveEnabled")
+        let permitted = ActivityAuthorizationInfo().areActivitiesEnabled
+        for activity in Activity<NextClassActivityAttributes>.activities {
+            if !enabled || !permitted || activity.content.state.end <= Date() {
+                await activity.end(nil, dismissalPolicy: .immediate)
+            }
+        }
+    }
+
     func sync(_ value: NextClassActivityAttributes.ContentState?) async throws {
         revision += 1
         let expected = revision

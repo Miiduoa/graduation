@@ -53,7 +53,10 @@ export function useNextClassWidget() {
       void refresh();
     });
     const subscription = AppState.addEventListener('change', (state) => {
-      if (state === 'active') void refresh();
+      if (state === 'active') {
+        void nextClassWriter.refreshActivity().catch(() => undefined);
+        void refresh();
+      }
     });
     return () => {
       active = false;

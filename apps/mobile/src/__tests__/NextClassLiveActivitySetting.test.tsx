@@ -33,7 +33,7 @@ test('denied permission offers in-app timetable fallback and system settings', a
   const open = jest.spyOn(Linking, 'openSettings').mockResolvedValue();
   const view = render(<NextClassLiveActivitySetting />);
   await waitFor(() => expect(view.getByText(/下一堂課還是可以在 App 的課表裡查看/)).toBeTruthy());
-  expect(view.getByLabelText('下一堂課即時動態').props.disabled).toBe(true);
+  expect(view.getByLabelText('下一堂課即時動態').props.disabled).toBe(false);
   fireEvent.press(view.getByText('前往系統設定'));
   expect(open).toHaveBeenCalled();
   open.mockRestore();
@@ -83,4 +83,18 @@ test('returning from settings rechecks revoked permission', async () => {
   onChange('active');
   await waitFor(() => expect(view.getByText('前往系統設定')).toBeTruthy());
   listener.mockRestore();
+});
+
+test('系統禁止時仍可關閉偏好，關閉後禁止重新開啟', async () => {
+  mockStatus.mockResolvedValue({ supported: true, allowed: false, enabled: true });
+  const view = render(<NextClassLiveActivitySetting />);
+  await waitFor(() => expect(view.getByLabelText('下一堂課即時動態')).toBeTruthy());
+  mockStatus.mockResolvedValue({ supported: true, allowed: false, enabled: false });
+  fireEvent(view.getByLabelText('下一堂課即時動態'), 'valueChange', false);
+  await waitFor(() => expect(view.getByLabelText('下一堂課即時動態').props.value).toBe(false));
+  expect(mockEnable).toHaveBeenCalledWith(false);
+  expect(mockRefresh).toHaveBeenCalledTimes(1);
+  expect(view.getByLabelText('下一堂課即時動態').props.disabled).toBe(true);
+  fireEvent(view.getByLabelText('下一堂課即時動態'), 'valueChange', true);
+  expect(mockEnable).toHaveBeenCalledTimes(1);
 });

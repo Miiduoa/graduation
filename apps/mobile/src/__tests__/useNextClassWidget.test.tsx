@@ -133,3 +133,23 @@ test('foreground time checks reuse the snapshot and stop when the hook unmounts'
     clear.mockRestore();
   }
 });
+
+test('回前景先核對既有動態，不等待未完成的課表讀取', async () => {
+  const { AppState } = require('react-native');
+  const { nextClassWriter } = require('../widgets/nextClassBridge');
+  let foreground!: (state: string) => void;
+  const listener = jest.spyOn(AppState, 'addEventListener').mockImplementation((_event, callback) => {
+    foreground = callback as (state: string) => void;
+    return { remove: jest.fn() };
+  });
+  const refresh = jest.spyOn(nextClassWriter, 'refreshActivity').mockResolvedValue(undefined);
+  const view = renderHook(useNextClassWidget);
+  await waitFor(() => expect(mockWrite.mock.calls.some(([value]) => value !== null)).toBe(true));
+  jest.mocked(loadPersonalImports).mockImplementationOnce(() => new Promise(() => undefined));
+  act(() => foreground('active'));
+  expect(refresh).toHaveBeenCalledTimes(1);
+  expect(loadPersonalImports).toHaveBeenCalledTimes(2);
+  view.unmount();
+  refresh.mockRestore();
+  listener.mockRestore();
+});

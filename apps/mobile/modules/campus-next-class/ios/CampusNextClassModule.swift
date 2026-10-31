@@ -5,6 +5,16 @@ import ActivityKit
 public class CampusNextClassModule: Module {
   public func definition() -> ModuleDefinition {
     Name("CampusNextClass")
+    OnCreate {
+      if #available(iOS 16.2, *) {
+        Task { await NextClassActivityController.shared.endExpired() }
+      }
+    }
+    OnAppEntersForeground {
+      if #available(iOS 16.2, *) {
+        Task { await NextClassActivityController.shared.endExpired() }
+      }
+    }
     AsyncFunction("liveActivityStatus") { () -> [String: Bool] in
       if #available(iOS 16.2, *) {
         return ["supported": true, "allowed": ActivityAuthorizationInfo().areActivitiesEnabled,
