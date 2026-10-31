@@ -393,6 +393,12 @@ function ImportWorkspace({
   paused: boolean;
 }) {
   const ledger = usePersonalImports(scope);
+  useEffect(() => {
+    if (!window.location.hash.startsWith('#record-')) return;
+    try {
+      document.getElementById(decodeURIComponent(window.location.hash.slice(1)))?.scrollIntoView?.({ block: 'center' });
+    } catch { /* Ignore malformed record links. */ }
+  }, [ledger.records]);
   const schoolSelection = useOptionalSelectedSchool();
   const suspended = useRef(paused);
   useLayoutEffect(() => {
@@ -2323,7 +2329,7 @@ function ImportWorkspace({
         ) : (
           <ul className={styles.saved}>
             {saved.map((row) => (
-              <li key={row.id}>
+              <li key={row.id} id={`record-${row.id}`}>
                 <div>
                   <strong>{row.title}</strong>
                   <p>{rowSummary(row, periodProfile)}</p>

@@ -579,3 +579,32 @@ it('hides the previous invite code when the owner role is removed', async () => 
   await waitFor(() => expect(screen.queryByText('PRIVATE1')).toBeNull());
   expect(screen.queryByRole('button', { name: '產生邀請碼' })).toBeNull();
 });
+
+it('withholds learning metrics and receipt time when only the parent assignment refresh fails', async () => {
+  memberRole = 'student';
+  let assignmentsFailed = false;
+  mocks.request.mockImplementation(async (path: string) => {
+    if (path === `class-workspaces/${workspaceId}`) return { id: workspaceId, title: '設計專題', state: 'active', memberRole };
+    if (path.endsWith('/assignments')) {
+      if (assignmentsFailed) throw new NuniError(500, 'TEMPORARY');
+      return { assignments: [] };
+    }
+    if (path.endsWith('/units')) return { units: [] };
+    if (path.endsWith('/materials/page')) return { materials: [], nextCursor: null };
+    if (path.endsWith('/quizzes')) return { quizzes: [] };
+    return {};
+  });
+  render(<NuniApp />);
+  await screen.findByRole('heading', { name: '設計專題' });
+  fireEvent.click(screen.getByRole('tab', { name: '學習路徑' }));
+  await screen.findByText('已繳交或作答');
+  assignmentsFailed = true;
+  fireEvent.click(screen.getByRole('button', { name: '更新內容' }));
+  await screen.findByText(/已保留目前內容/);
+  await screen.findByText(/進度未知：清單未齊/);
+  expect(screen.queryByText('已繳交或作答')).toBeNull();
+  expect(screen.getByText(/來源：nuni 課程 · 本次讀取：尚未確認/)).toBeTruthy();
+  assignmentsFailed = false;
+  fireEvent.click(screen.getByRole('button', { name: '更新內容' }));
+  await screen.findByText('已繳交或作答');
+});
