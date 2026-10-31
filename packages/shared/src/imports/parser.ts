@@ -388,7 +388,20 @@ export function parsePersonalImport(
     rows = parsed.rows;
     issues.push(...parsed.issues);
   } else {
-    const tables = ['\t', ',', ';', '|'].map((delimiter) => readTable(normalized, delimiter));
+    const tables = ['\t', ',', ';', '|', '、'].map((delimiter) => {
+      const table = readTable(normalized, delimiter);
+      const firstHeaderCount = table.lines[0]?.cells.filter((cell) => fieldFor(cell)).length ?? 0;
+      const headerIndex = firstHeaderCount >= 2 ? 0 : table.lines.findIndex((line) => {
+        const fields = line.cells.map(fieldFor);
+        return fields.includes('title') && fields.filter(Boolean).length >= 2 &&
+          new Set(fields.filter(Boolean)).size === fields.filter(Boolean).length;
+      });
+      return headerIndex > 0 ? {
+        ...table,
+        lines: table.lines.slice(headerIndex),
+        skippedPrefix: table.lines.slice(0, headerIndex),
+      } : table;
+    });
     if (options.source?.type === 'screenshot') tables.push(readScreenshotTable(normalized));
     const candidates = tables.map((table) => ({
       ...table,
@@ -406,9 +419,9 @@ export function parsePersonalImport(
           .join('／')
           .slice(0, 160);
         issues.push({
-          code: 'screenshot-prologue-skipped',
+          code: options.source?.type === 'screenshot' ? 'screenshot-prologue-skipped' : 'table-prologue-skipped',
           severity: 'warning',
-          message: `已略過截圖表頭前第 ${firstLine} 至 ${lastLine} 行文字：${preview}。請核對原文，確認這些不是要匯入的資料。`,
+          message: `已略過${options.source?.type === 'screenshot' ? '截圖' : ''}表頭前第 ${firstLine} 至 ${lastLine} 行文字：${preview}。請核對原文，確認這些不是要匯入的資料。`,
         });
       }
       if (table.malformed)

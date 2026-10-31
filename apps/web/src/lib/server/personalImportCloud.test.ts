@@ -539,6 +539,19 @@ for (const delimiter of [',', '\t', '|', ';', '、']) {
   }
 }
 
+// 鍵值列也必須驗證表頭後的全部資料，不能因下一列看似表頭就停止追蹤。
+for (const delimiter of [',', '\t', '|', ';', '、']) {
+  for (const [label, first, second] of [['姓名', '王甲乙', '王丙丁'], ['學號', 'A12345', 'B54321']]) {
+    for (const validRow of ['', '20261031,123456\n']) {
+      for (const head of [`${label},${first}`, `${label},${first},學分,3`]) {
+        for (const tail of [`${second},C54321`, `20261031,${second}`, '20260230,123456', ',123456']) {
+          strictPrivacyCases.add(`${head}\n日期,課號\n${validRow}${tail}`.replaceAll(',', delimiter));
+        }
+      }
+    }
+  }
+}
+
 privacyCases.push(...strictPrivacyCases);
 
 // 中性資訊與看似學業數值的續行都不能解除已開始的私密追蹤。
@@ -561,7 +574,10 @@ it.each(privacyCases)('伺服器私密狀態不可解除：%s', async (source) =
     const { dependencies, fetcher } = setup();
     const result = await handlePersonalImportCloud(request({ ...input, kind: 'grades' }), dependencies);
     expect([200, 422]).toContain(result.status);
-    if (strictPrivacyCases.has(source)) expect(result.status).toBe(422);
+    if (strictPrivacyCases.has(source)) {
+      expect(result.status).toBe(422);
+      expect(fetcher).not.toHaveBeenCalled();
+    }
     if (result.status === 422) expect(dependencies.getQuotaStore).not.toHaveBeenCalled();
     expect(JSON.stringify(fetcher.mock.calls)).not.toMatch(/王甲乙|王丙丁|A12345|B54321/u);
     expect(JSON.stringify(await result.json())).not.toMatch(/王甲乙|王丙丁|A12345|B54321/u);

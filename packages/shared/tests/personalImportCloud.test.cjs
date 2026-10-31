@@ -353,6 +353,19 @@ for (const delimiter of [',', '\t', '|', ';', '、']) {
   }
 }
 
+// 鍵值列也必須驗證表頭後的全部資料，不能因下一列看似表頭就停止追蹤。
+for (const delimiter of [',', '\t', '|', ';', '、']) {
+  for (const [label, first, second] of [['姓名', '王甲乙', '王丙丁'], ['學號', 'A12345', 'B54321']]) {
+    for (const validRow of ['', '20261031,123456\n']) {
+      for (const head of [`${label},${first}`, `${label},${first},學分,3`]) {
+        for (const tail of [`${second},C54321`, `20261031,${second}`, '20260230,123456', ',123456']) {
+          strictPrivacyCases.add(`${head}\n日期,課號\n${validRow}${tail}`.replaceAll(',', delimiter));
+        }
+      }
+    }
+  }
+}
+
 privacyCases.push(...strictPrivacyCases);
 
 // 中性資訊與看似學業數值的續行都不能解除已開始的私密追蹤。
@@ -408,5 +421,22 @@ for (const delimiter of [',', '\t', '|', ';', '、']) {
       } });
       assert.equal(calls, 1);
     }
+  });
+}
+
+for (const delimiter of [',', '\t', '|', ';', '、']) {
+  test(`鍵值列僅能在全部學業值符合格式後解除追蹤：${JSON.stringify(delimiter)}`, async () => {
+    const academic = ['日期,課號', '20261031,123456', '20261101,654321'].join('\n').replaceAll(',', delimiter);
+    const text = `姓名${delimiter}王甲乙\n${academic}`;
+    assert.equal(isPersonalImportCloudMaskSafe(text), true);
+    assert.equal(maskPersonalImportText(text).endsWith(academic), true);
+    let calls = 0;
+    await requestPersonalImportCloud({ text, kind: 'grades', fetcher: async (_, init) => {
+      calls++;
+      assert.doesNotMatch(init.body, /王甲乙/u);
+      assert.equal(JSON.parse(init.body).text.endsWith(academic), true);
+      return Response.json({ output: '{}' });
+    } });
+    assert.equal(calls, 1);
   });
 }

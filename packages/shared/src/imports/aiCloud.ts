@@ -58,7 +58,7 @@ function isAcademicValue(header: string, value: string): boolean {
 }
 
 // 所有後續紀錄的每一格都符合欄位格式才解除；缺值、未知欄位與衝突均拒絕。
-function isAcademicBoundary(value: string): boolean {
+function canReleasePrivateTracking(value: string): boolean {
   return privateTableDelimiters.some((delimiter) => {
     const records = readImportDelimitedRecords(value, delimiter);
     const nonempty = records?.filter((record) => record.cells.some((cell) => cell.trim()));
@@ -98,7 +98,7 @@ function maskPrivateVerticalFields(text: string): { text: string; safe: boolean 
     for (let next = index + 1; next < lines.length; next++) {
       const value = lines[next].trim();
       if (!value) continue;
-      if (label.test(value) || inlineLabel.test(value) || isAcademicBoundary(lines.slice(next).join('\n'))) break;
+      if (label.test(value) || inlineLabel.test(value) || canReleasePrivateTracking(lines.slice(next).join('\n'))) break;
       // 換頁與單格欄名不能證明私密清單已結束，繼續追蹤後續值。
       if (/^【[^【】]+】$/u.test(value) || tableField.test(value)) continue;
       if (!/^[\p{L}\p{M}\d .@_+()\-'’·•]+$/u.test(value) && !/^\[(?:姓名|學號|證號|個資|聯絡資料)已遮罩\]$/u.test(value)) {
@@ -140,7 +140,8 @@ function maskPrivateTables(text: string): { text: string; safe: boolean } {
     const replacements: Array<{ start: number; end: number; value: string }> = [];
     let privateColumns: number[] = [];
     let width = 0;
-    for (const [recordIndex, record] of records.entries()) {
+    let privateKeyValue = false;
+    for (const record of records) {
       const cells = record.cells.map((cell) => cell.trim());
       if (cells.every((cell) => !cell)) continue;
       const named = cells.flatMap((cell, index) => privateField.test(cell) ? [index] : []);
@@ -148,6 +149,14 @@ function maskPrivateTables(text: string): { text: string; safe: boolean } {
         index % 2 === 0 ? privateField.test(cell) || tableField.test(cell)
           : !privateField.test(cell) && !tableField.test(cell));
       let columns: number[] = [];
+      // 直排、私密表格與鍵值列共用完整後續欄值驗證，表頭本身不能解除追蹤。
+      if ((privateColumns.length || privateKeyValue) && canReleasePrivateTracking(masked.slice(record.start))) {
+        privateColumns = [];
+        width = 0;
+        privateKeyValue = false;
+      } else if (privateKeyValue && !keyValue) {
+        return { text: masked, safe: false };
+      }
       // 已辨識私密表後，含欄名字樣的資料列不能改寫欄位狀態。
       // 只有與原私密欄位置一致的完整表頭可重複出現，其餘歧義拒送。
       if (privateColumns.length && named.length &&
@@ -156,21 +165,14 @@ function maskPrivateTables(text: string): { text: string; safe: boolean } {
         return { text: masked, safe: false };
       }
       if (keyValue) {
-        const next = records.slice(recordIndex + 1).find((item) => item.cells.some((cell) => cell.trim()));
-        if (next && next.cells.length === cells.length && !next.cells.some((cell) => privateField.test(cell.trim())) &&
-          next.cells.filter((cell) => tableField.test(cell.trim())).length < 2) return { text: masked, safe: false };
         columns = named.map((index) => index + 1);
-        privateColumns = [];
-        width = 0;
+        privateKeyValue = true;
       } else if (named.length) {
         if (!cells.every((cell) => privateField.test(cell) || tableField.test(cell)))
           return { text: masked, safe: false };
         privateColumns = named;
         width = cells.length;
         // 每個欄位都已驗證，才可建立私密欄追蹤。
-      } else if (isAcademicBoundary(masked.slice(record.start))) {
-        privateColumns = [];
-        width = 0;
       } else if (privateColumns.length && cells.length >= 2 && cells.every((cell) => tableField.test(cell))) {
         return { text: masked, safe: false };
       } else if (width === 1 && cells.length === 1 &&

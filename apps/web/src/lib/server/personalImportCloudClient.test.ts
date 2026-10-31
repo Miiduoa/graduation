@@ -116,8 +116,15 @@ describe('personal import cloud client', () => {
     expect(isPersonalImportCloudMaskSafe(source)).toBe(false);
   });
 
+  it('鍵值私密前綴後的自由文字課表留在本機', async () => {
+    const text = '姓名\t王小明\t班級\t資工一\n課程名稱\t學分\n資料庫\t3';
+    const fetcher = vi.fn();
+    expect(isPersonalImportCloudMaskSafe(text)).toBe(false);
+    expect(await requestPersonalImportCloud({ text, kind: 'grades', fetcher })).toMatchObject({ ok: false, reason: 'invalid-input' });
+    expect(fetcher).not.toHaveBeenCalled();
+  });
+
   it.each([
-    '姓名\t王小明\t班級\t資工一\n課程名稱\t學分\n資料庫\t3',
     '姓名\n王小明\n課程名稱\n微積分',
     '課程名稱,姓名,學分\n\n程式設計,王小明,3',
   ])('masks mixed metadata and vertical OCR names: %s', async (text) => {

@@ -388,6 +388,19 @@ for (const delimiter of [',', '\t', '|', ';', '、']) {
   }
 }
 
+// 鍵值列也必須驗證表頭後的全部資料，不能因下一列看似表頭就停止追蹤。
+for (const delimiter of [',', '\t', '|', ';', '、']) {
+  for (const [label, first, second] of [['姓名', '王甲乙', '王丙丁'], ['學號', 'A12345', 'B54321']]) {
+    for (const validRow of ['', '20261031,123456\n']) {
+      for (const head of [`${label},${first}`, `${label},${first},學分,3`]) {
+        for (const tail of [`${second},C54321`, `20261031,${second}`, '20260230,123456', ',123456']) {
+          strictPrivacyCases.add(`${head}\n日期,課號\n${validRow}${tail}`.replaceAll(',', delimiter));
+        }
+      }
+    }
+  }
+}
+
 privacyCases.push(...strictPrivacyCases);
 
 // 中性資訊與看似學業數值的續行都不能解除已開始的私密追蹤。
@@ -428,3 +441,30 @@ test('欄值衝突時零外送且本機模型收到完整原文', async () => {
     messages: [expect.objectContaining({ content: expect.stringContaining(JSON.stringify(source)) })],
   }));
 });
+
+for (const delimiter of [',', '\t', '|', ';', '、']) {
+  for (const kind of ['grades', 'timetable'] as const) {
+    for (const prefix of ['姓名\n王甲乙', '姓名:王甲乙', `姓名${delimiter}王甲乙`]) {
+      for (const available of [false, true]) {
+        test(`私密前綴正常表格留在本機並產生可用草稿：${kind}/${JSON.stringify(delimiter)}/${prefix}/${available}`, async () => {
+          const headers = kind === 'grades' ? '課程名稱,學分,成績,教師' : '課程名稱,星期,開始節次,結束節次,教師,教室';
+          const data = (kind === 'grades' ? '微積分,3,85,王戊己' : '微積分,星期一,2,3,王戊己,A101').replaceAll(',', delimiter);
+          const source = `${prefix}\n${headers.replaceAll(',', delimiter)}\n${data}`;
+          const expected = kind === 'grades'
+            ? { title: '微積分', credits: 3, grade: '85', teacher: '王戊己' }
+            : { title: '微積分', dayOfWeek: 1, startPeriod: 2, endPeriod: 3, teacher: '王戊己', location: 'A101' };
+          const output = JSON.stringify({ complete: true, rows: [{ ...expected, evidence: data }] });
+          jest.mocked(localLLM.getRuntimeAvailability).mockReturnValue({ available });
+          jest.mocked(localLLM.generate).mockResolvedValue({
+            content: output, finishReason: 'stop', tokensGenerated: 50, tokensPerSecond: 5, totalTimeMs: 100,
+          });
+          const result = await runMobilePersonalImportAi(source, { ...options, kind }, new AbortController().signal, request);
+          expect(mockFetch).not.toHaveBeenCalled();
+          expect(result.rows).toHaveLength(1);
+          expect(result.rows[0]).toMatchObject({ ...expected, source: { rawText: data } });
+          expect(result.rows[0].title).not.toMatch(/姓名|王甲乙/u);
+        });
+      }
+    }
+  }
+}
