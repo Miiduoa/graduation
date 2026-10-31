@@ -1,5 +1,5 @@
 /* eslint-disable @typescript-eslint/no-require-imports */
-/* global require */
+/* global require, Response */
 const assert = require('node:assert/strict');
 const { test } = require('node:test');
 const fs = require('node:fs');
@@ -182,7 +182,9 @@ for (const text of ['課程名稱,學分,成績\n微積分,3,85', '星期一 第
   });
 }
 
-for (const head of ['姓\u200b名：王小明', '學\u200b號：123456', '教\u200b師：陳大文',
+for (const head of ['姓\ufe0f名：王小明', '姓\u034f名,課程名稱,學分,成績\n王小明,微積分,3,85',
+  '課程名稱,學分,成績\n姓·名王小明,3,85', '課程名稱,學分,成績\n123456,3,85', '教\u034f師：陳大文', '學\ufe0f號：A12345',
+  '姓\u20dd名：王小明', '課程名\u034f稱,學分,成績', '姓\u200b名：王小明', '學\u200b號：123456', '教\u200b師：陳大文',
   '姓\u00ad名：王小明', '學+號：123456', '教⋅師：陳大文',
   '姓\u2060名：王小明', '教🟢師：陳大文', '編碼,123456', '編碼,１２３４５６７', '編碼,A12345678901234']) {
   test(`格式符號或疑似學號在批次與實際請求均拒送：${head}`, async () => {
@@ -198,7 +200,56 @@ for (const head of ['姓\u200b名：王小明', '學\u200b號：123456', '教\u2
       } });
       assert.equal(result.reason, 'invalid-input');
       assert.deepEqual(bodies, []);
-      assert.equal(/王小明|123456|陳大文/.test(bodies.join('')), false);
+      assert.equal(/王小明|A12345|123456|陳大文/.test(bodies.join('')), false);
     }
   });
 }
+
+for (const text of [
+  '課程代碼,課程名稱,學分,成績\n123456,微積分,3,85',
+  '日期,課程名稱,教室\n20261031,程式設計,A101',
+  '課程代碼,123456\n課程名稱,學分,成績\n微積分,3,85',
+  '日期,20261031\n課程名稱,學分,成績\n微積分,3,85',
+  '教師專業發展,2,90\n課程名稱,學分,成績\n微積分,3,85',
+  'Smartphone Application Development,3,85\n課程名稱,學分,成績\n微積分,3,85',
+]) {
+  test(`明確學業資料可送出且仍遮罩個資：${text}`, async () => {
+    const source = `姓名：王小明\n${text}`;
+    assert.equal(isPersonalImportCloudMaskSafe(source), true);
+    const batch = maskPersonalImportCloudBatch(source, { text: source, startLine: 1 });
+    assert.ok(batch);
+    assert.equal(batch.sourceText.includes('王小明'), false);
+    for (const value of ['123456', '20261031', '教師專業發展', 'Smartphone Application Development']) {
+      if (text.includes(value)) assert.ok(batch.sourceText.includes(value));
+    }
+    const bodies = [];
+    await requestPersonalImportCloud({ text: source, kind: 'grades', fetcher: async (_, init) => {
+      bodies.push(init.body);
+      return { ok: false, status: 503 };
+    } });
+    assert.equal(bodies.length, 1);
+    assert.equal(bodies[0].includes('王小明'), false);
+    for (const value of ['123456', '20261031', '教師專業發展', 'Smartphone Application Development']) {
+      if (text.includes(value)) assert.ok(bodies[0].includes(value));
+    }
+  });
+}
+
+test('批次欄位上下文有組合字元時整份留在本機', () => {
+  const text = '微積分,3,85';
+  assert.equal(maskPersonalImportCloudBatch(text, { text, startLine: 1, columnContext: '學\ufe0f號：A12345' }), null);
+});
+
+test('簡體學號也遮罩批次與實際送出本文', async () => {
+  const text = '学号：A12345\n課程名稱,學分,成績\n微積分,3,85';
+  const batch = maskPersonalImportCloudBatch(text, { text, startLine: 1 });
+  assert.ok(batch);
+  assert.equal(batch.sourceText.includes('A12345'), false);
+  const bodies = [];
+  await requestPersonalImportCloud({ text, kind: 'grades', fetcher: async (_, init) => {
+    bodies.push(init.body);
+    return { ok: false, status: 503 };
+  } });
+  assert.equal(bodies.length, 1);
+  assert.equal(bodies[0].includes('A12345'), false);
+});

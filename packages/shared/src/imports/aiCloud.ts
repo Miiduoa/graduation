@@ -22,7 +22,7 @@ const messages: Record<PersonalImportCloudFailure, string> = {
 
 // 所有個資欄共用字間正規化，避免表格、直排與行內標籤各自漏掉變體。
 const privateLabelPattern = [
-  '學生名字', '名字', '學生學號', '學號', 'studentid', 'studentnumber',
+  '學生名字', '名字', '學生學號', '學號', '学号', 'studentid', 'studentnumber',
   '身分證', '身分證字號', '身份證', '身份證字號',
   '電子郵件', '電郵', '聯絡電話', '電話', '手機', '手機號碼',
   'email', 'phone', 'mobile',
@@ -33,7 +33,7 @@ const privateTableDelimiters = ['\t', ',', '|', ';', '、'] as const;
 const tableField = /^(?:(?:課程|科目|活動)?名稱|課號|科目代碼|課程代碼|學分數?|成績|分數|學年度|學期|(?:授課)?教師|教室|星期|開始節次|結束節次|日期|開始時間|結束時間|地點|班級|系所|序號|編號|course(?: name| code)?|credits?|grade|score|semester|teacher|room|day|date|start|end|title|location)$/iu;
 
 function isAcademicBoundary(value: string): boolean {
-  return tableField.test(value) || /^【[^【】]+】$/u.test(value) ||
+  return /^(?:課程代碼|科目代碼|課號|日期|course code|date)[\t,|;、](?:\d{6,8}|\[課程資料\])$/iu.test(value) || tableField.test(value) || /^【[^【】]+】$/u.test(value) ||
     value.split(/[\t,|;、]/u).filter((cell) => tableField.test(cell.trim())).length >= 2 ||
     // 無表頭的三欄成績列也可形成邊界，避免把課名當成續行姓名。
     /^[^\t,|;、]+([\t,|;、])[ \t]*\d+(?:\.\d+)?\1[ \t]*(?:\d{1,3}(?:\.\d+)?|[A-F][+-]?|通過|及格)$/iu.test(value) ||
@@ -154,21 +154,78 @@ function maskPrivateTables(text: string): { text: string; safe: boolean } {
   return { text: masked, safe: true };
 }
 
-/** 欄名比較共用正規化：忽略格式、空白、標點、符號與控制字元。 */
+/** 欄名比較共用正規化：只保留字母與數字，所有其他類別一律移除。 */
 function normalizePrivateField(value: string): string {
-  return value.normalize('NFKC').replace(/[\s\p{Cf}\p{P}\p{S}\p{Z}\p{Cc}]/gu, '');
+  return value.normalize('NFKC').replace(/[^\p{L}\p{N}]/gu, '');
+}
+
+/** 只有明確學業欄位的值可免於個資關鍵字猜測；欄名與其他欄仍完整檢查。 */
+function academicSafetyText(text: string, numericSpans?: Array<[number, number]>): string {
+  let result = text;
+  const replacements: Array<[number, number]> = [];
+  for (const delimiter of privateTableDelimiters) {
+    const records = readImportDelimitedRecords(text, delimiter);
+    if (!records) continue;
+    let headers: string[] = [];
+    for (const record of records) {
+      const cells = record.cells.map((cell) => cell.trim());
+      if (cells.filter((cell) => tableField.test(cell)).length >= 2) {
+        headers = cells;
+        continue;
+      }
+      const rowHeaders = cells.length === 3 && /^\d(?:\.\d+)?$/u.test(cells[1]) &&
+        /^(?:\d{1,3}(?:\.\d+)?|[A-F][+-]?)$/iu.test(cells[2]) && !headers.length
+        ? ['課程名稱', '學分', '成績'] : headers;
+      const spans = rawCellSpans(text, record, delimiter);
+      for (const [index, cell] of cells.entries()) {
+        const header = rowHeaders.length === cells.length ? rowHeaders[index] :
+          cells.length === 2 && index === 1 ? cells[0] : '';
+        const numeric = /^(?:課程代碼|科目代碼|課號|日期|course code|date)$/iu.test(header) && /^\d{6,8}$/u.test(cell);
+        const title = /^(?:(?:課程|科目)名稱|course name|title)$/iu.test(header) &&
+          !privateField.test(cell) && !/[\p{M}\p{Cf}\p{P}\p{S}]/u.test(cell) &&
+          !/姓名|名字|學號|学号|學生|身分證|身份證|郵件|電郵|電話|手機|student|name|email|mobile|\d{6,}/iu.test(normalizePrivateField(cell)) &&
+          // 課名必須有同列學分與成績，不能僅靠單一欄名宣告。
+          rowHeaders.includes('學分') && rowHeaders.includes('成績') &&
+          /^\d(?:\.\d+)?$/u.test(cells[rowHeaders.indexOf('學分')] ?? '') &&
+          /^(?:\d{1,3}(?:\.\d+)?|[A-F][+-]?)$/iu.test(cells[rowHeaders.indexOf('成績')] ?? '');
+        if (numeric) numericSpans?.push(spans[index]);
+        if (numeric || title) replacements.push(spans[index]);
+      }
+    }
+  }
+  let boundary = text.length;
+  for (const [start, end] of replacements.sort((a, b) => b[0] - a[0])) {
+    if (end > boundary) continue;
+    result = result.slice(0, start) + '[課程資料]' + result.slice(end);
+    boundary = start;
+  }
+  return result;
 }
 
 /** 格式不完整的姓名欄不送出，保留在裝置上交由本機整理。 */
 export function isPersonalImportCloudMaskSafe(text: string, context = ''): boolean {
-  const normalized = (context ? `${context}\n${text}` : text).normalize('NFKC');
+  const original = context ? `${context}\n${text}` : text;
+  // 在正規化之前檢查，避免組合後消失的標記掩蓋可疑欄名。
+  if (original.split('\n').some((line) => {
+    const cells = line.split(/[\t,|;、]/u);
+    const header = cells.some((cell) => tableField.test(normalizePrivateField(cell)));
+    return cells.some((cell) => /[\p{Mn}\p{Me}\p{Cf}]/u.test(cell) &&
+      (header || /^[^:=：]*[\p{Mn}\p{Me}\p{Cf}][^:=：]*[:=：]/u.test(cell)));
+  })) return false;
+  if (original.split(/[\n\t,|;、/:=：]/u).some((cell) => {
+    if (!/[\p{Mn}\p{Me}\p{Cf}]/u.test(cell)) return false;
+    const field = normalizePrivateField(cell.trim().replace(/^"|"$/gu, ''));
+    return privateField.test(field) || tableField.test(field) ||
+      /姓名|名字|學號|学号|學生|教師|老師|教授|student|name|teacher|instructor|email|phone|mobile/iu.test(field);
+  })) return false;
+  const normalized = academicSafetyText(original.normalize('NFKC'));
   if (hasAmbiguousPrivateList(normalized)) return false;
   // 未知的個資標籤無法可靠對應欄位，整份資料留在裝置。
   if (normalized.split(/[\n\t,|;、/:=]/u).some((cell) => {
     const field = cell.replace(/\[(?:姓名|學號|證號|個資|聯絡資料)已遮罩\]/gu, '').trim().replace(/^"|"$/gu, '');
     if (/^[\p{L}\p{N}._%+-]+@(?:[\p{L}\p{N}-]+\.)+[\p{L}]{2,}$/iu.test(field)) return false;
     const compact = normalizePrivateField(field);
-    return /姓名|名字|學號|學生|身分證|身份證|郵件|電郵|電話|手機|student|name|instructor|teacher|教授|教師|老師|email|phone|mobile/iu.test(compact) &&
+    return /姓名|名字|學號|学号|學生|身分證|身份證|郵件|電郵|電話|手機|student|name|instructor|teacher|教授|教師|老師|email|phone|mobile/iu.test(compact) &&
       !privateField.test(field);
   })) return false;
   // OCR 空白分欄沒有可靠的欄界；不能把相鄰欄名誤當成姓名值遮罩。
@@ -205,7 +262,7 @@ export function isPersonalImportCloudMaskSafe(text: string, context = ''): boole
   const residual = normalizePrivateField(masked
     .replace(/\[(?:姓名|學號|證號|個資|聯絡資料)已遮罩\]/gu, '')
     .replace(new RegExp(privateFieldPattern, 'giu'), ''));
-  return !/姓名|名字|學號|學生|身分證|身份證|郵件|電郵|電話|手機|student|name|instructor|teacher|教授|教師|老師|email|phone|mobile/iu.test(residual);
+  return !/姓名|名字|學號|学号|學生|身分證|身份證|郵件|電郵|電話|手機|student|name|instructor|teacher|教授|教師|老師|email|phone|mobile/iu.test(residual);
 }
 
 /** 遮罩明示姓名欄、已知姓名，以及學號與身分證格式；保留課程數值。 */
@@ -232,7 +289,11 @@ function maskPersonalImportTextInternal(text: string, knownNames: readonly strin
     .replace(/\(0[2-8]\)[ -]?\d{3,4}[ -]?\d{4}\b/gu, '[聯絡資料已遮罩]')
     .replace(/(?<![A-Za-z0-9])(?:\+?886[ -]?(?:0[ -]?)?|0)(?:9\d{2}[ -]?\d{3}[ -]?\d{3}|[2-8][ -]?\d{3,4}[ -]?\d{4})(?!\d)/gu, '[聯絡資料已遮罩]')
     .replace(/\b[A-Z][12]\d{8}\b/giu, '[證號已遮罩]');
-  return maskNumbers ? masked.replace(/\b[A-Z]{0,3}\d{7,12}\b/giu, '[學號已遮罩]') : masked;
+  if (!maskNumbers) return masked;
+  const academicNumbers: Array<[number, number]> = [];
+  academicSafetyText(masked, academicNumbers);
+  return masked.replace(/\b[A-Z]{0,3}\d{7,12}\b/giu, (value: string, offset: number) =>
+    academicNumbers.some(([start, end]) => offset >= start && offset + value.length <= end) ? value : '[學號已遮罩]');
 }
 
 /** 雲端片段取自整份文件的遮罩副本，本機與重試仍使用原始文字。 */
@@ -241,7 +302,7 @@ export function maskPersonalImportCloudBatch(
   batch: { text: string; startLine: number; columnContext?: string },
   knownNames: readonly string[] = [],
 ): { sourceText: string; columnContext: string } | null {
-  if (!Number.isSafeInteger(batch.startLine) || batch.startLine < 1 || !isPersonalImportCloudMaskSafe(source)) return null;
+  if (!Number.isSafeInteger(batch.startLine) || batch.startLine < 1 || !isPersonalImportCloudMaskSafe(source, batch.columnContext)) return null;
   const lines = source.split('\n');
   const start = batch.startLine - 1;
   if (start >= lines.length) return null;

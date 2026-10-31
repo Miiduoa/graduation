@@ -407,7 +407,9 @@ it('masks inline private continuations again on the server and preserves course 
   expect((await response.json()).sourceText).toContain('課程名稱,學分,成績\n微積分,3,85');
 });
 
-it.each(['姓\u200b名：王小明', '學\u200b號：123456', '教\u200b師：陳大文',
+it.each(['姓\ufe0f名：王小明', '姓\u034f名,課程名稱,學分,成績\n王小明,微積分,3,85',
+  '課程名稱,學分,成績\n姓·名王小明,3,85', '課程名稱,學分,成績\n123456,3,85', '教\u034f師：陳大文', '學\ufe0f號：A12345',
+  '姓\u20dd名：王小明', '課程名\u034f稱,學分,成績', '姓\u200b名：王小明', '學\u200b號：123456', '教\u200b師：陳大文',
   '姓\u00ad名：王小明', '學+號：123456', '教⋅師：陳大文',
   '姓\u2060名：王小明', '教🟢師：陳大文', '編碼,123456', '編碼,１２３４５６７', '編碼,A12345678901234'])('格式符號或疑似學號不進入供應商本文：%s', async (head) => {
   const { dependencies, fetcher, getQuotaStore } = setup();
@@ -417,5 +419,29 @@ it.each(['姓\u200b名：王小明', '學\u200b號：123456', '教\u200b師：�
   }
   expect(fetcher).not.toHaveBeenCalled();
   expect(getQuotaStore).not.toHaveBeenCalled();
-  expect(JSON.stringify(fetcher.mock.calls)).not.toMatch(/王小明|123456|陳大文/);
+  expect(JSON.stringify(fetcher.mock.calls)).not.toMatch(/王小明|A12345|123456|陳大文/);
+});
+
+it.each([
+  '課程代碼,課程名稱,學分,成績\n123456,微積分,3,85',
+  '日期,課程名稱,教室\n20261031,程式設計,A101',
+  '課程代碼,123456\n課程名稱,學分,成績\n微積分,3,85',
+  '日期,20261031\n課程名稱,學分,成績\n微積分,3,85',
+  '教師專業發展,2,90\n課程名稱,學分,成績\n微積分,3,85',
+  'Smartphone Application Development,3,85\n課程名稱,學分,成績\n微積分,3,85',
+])('明確學業資料仍可進入供應商且無姓名原值：%s', async (text) => {
+  const { dependencies, fetcher } = setup();
+  expect((await handlePersonalImportCloud(request({ text: `姓名：王小明\n${text}`, kind: 'grades' }), dependencies)).status).toBe(200);
+  expect(fetcher).toHaveBeenCalledOnce();
+  expect(String(fetcher.mock.calls[0][1].body)).not.toContain('王小明');
+  for (const value of ['123456', '20261031', '教師專業發展', 'Smartphone Application Development']) {
+    if (text.includes(value)) expect(String(fetcher.mock.calls[0][1].body)).toContain(value);
+  }
+});
+
+it('簡體學號原值不進入供應商本文', async () => {
+  const { dependencies, fetcher } = setup();
+  expect((await handlePersonalImportCloud(request({ text: '学号：A12345\n課程名稱,學分,成績\n微積分,3,85', kind: 'grades' }), dependencies)).status).toBe(200);
+  expect(fetcher).toHaveBeenCalledOnce();
+  expect(String(fetcher.mock.calls[0][1].body)).not.toContain('A12345');
 });
