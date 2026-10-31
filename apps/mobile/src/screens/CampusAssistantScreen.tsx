@@ -1,3 +1,4 @@
+import { LegacyAssignmentReminders } from './LegacyAssignmentReminders';
 import React, { useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { Linking, Text, TextInput, View } from 'react-native';
 import { resolveSchoolPublicServices } from '@campus/shared/src/schoolPublicServices';
@@ -422,6 +423,7 @@ function AssistantConversation({
           )}
         </View>
       </AICard>
+      <LegacyAssignmentReminders key={`${uid}:${schoolId}`} uid={uid} schoolId={schoolId} snapshot={sense} isCurrent={current} />
       {mode === 'device' ? (
         <CampusSenseDashboard
           snapshot={currentSense}

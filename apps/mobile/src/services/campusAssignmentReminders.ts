@@ -12,8 +12,16 @@ import { getAuthInstance, isFirebaseMockMode } from '../firebase';
 import { validCampusSenseSnapshot, type CampusSenseSnapshot } from './campusSenseSnapshot';
 import type { CampusPlanStep } from './offlineCampusPlanner';
 
+import { resolveCampusAssignmentTarget } from './campusAssignmentTarget';
+import { parseCampusAssignmentSource } from './campusAssignmentSource';
+import {
+  adoptSubmittedAssignmentReminder, linkedReminderIdentifiers,
+  scheduleSubmittedAssignmentReminder, submittedAssignmentReminderStatus,
+  cancelSubmittedAssignmentReminder, clearSubmittedAssignmentReminders, resumeSubmittedAssignmentReminders,
+} from './submittedAssignmentReminders';
+
 export type CampusReminderLead = 60 | 1440;
-export type CampusReminderOutcome = 'scheduled' | 'already-scheduled';
+export type CampusReminderOutcome = 'scheduled' | 'already-scheduled' | 'submitted' | 'inactive';
 
 export interface CampusReminderScope {
   uid: string;
@@ -44,7 +52,8 @@ export class CampusReminderError extends Error {
   constructor(
     public readonly code:
       | 'session-changed' | 'invalid-source' | 'expired-source' | 'deadline-too-close'
-      | 'unsupported' | 'permission-required' | 'device-capacity' | 'busy' | 'native-failed',
+      | 'unsupported' | 'permission-required' | 'device-capacity' | 'busy' | 'native-failed'
+      | 'legacy-cleanup-required',
   ) {
     super(code);
     this.name = 'CampusReminderError';
@@ -98,6 +107,19 @@ function validateAssignment(
     title: normalizeTitle(item.title),
     groupName: item.groupName || '',
   };
+}
+
+// Reading or cancelling an owned alarm may use its last known source even after the preview expires.
+function knownReminderSource(input: {
+  scope: CampusReminderScope; step: CampusPlanStep; snapshot?: CampusSenseSnapshot | null;
+}) {
+  const snapshot = input.snapshot;
+  if (!snapshot || snapshot.userId !== input.scope.uid || snapshot.schoolId !== input.scope.schoolId ||
+      snapshot.assignments.status !== 'available') return null;
+  const matches = snapshot.assignments.items.filter((row) =>
+    normalizeTitle(row.title) === input.step.title && row.dueAt === input.step.dueAt &&
+    (row.groupName || '') === (input.step.groupName || ''));
+  return matches.length === 1 ? parseCampusAssignmentSource(matches[0].source) : null;
 }
 
 function supportsLocalNotification() {
@@ -165,6 +187,15 @@ function busyKey(input: Pick<CampusReminderRequest, 'scope' | 'step' | 'leadMinu
 export async function scheduleCampusAssignmentReminder(
   input: CampusReminderRequest,
 ): Promise<CampusReminderReceipt> {
+  const target = resolveCampusAssignmentTarget({ assignment: input.step, snapshot: input.snapshot, scope: input.scope });
+  if (target) {
+    validateAssignment(input, Date.now());
+    await adoptCampusReminderSnapshot(input);
+    if ((await unlinkedLegacyReminders()).length) throw new CampusReminderError('legacy-cleanup-required');
+    return scheduleSubmittedAssignmentReminder({ ...input,
+      source: { kind: 'group-assignment', ...target.params },
+    });
+  }
   const lock = busyKey(input);
   if (pending.has(lock)) throw new CampusReminderError('busy');
   pending.add(lock);
@@ -271,8 +302,15 @@ export async function scheduleCampusAssignmentReminder(
 export async function getCampusAssignmentReminderStatus(input: {
   scope: CampusReminderScope;
   step: CampusPlanStep;
+  snapshot?: CampusSenseSnapshot | null;
   isCurrent: () => boolean;
+  scheduledOnly?: boolean;
 }): Promise<CampusReminderLead[]> {
+  const source = knownReminderSource(input);
+  if (source) {
+    await adoptCampusReminderSnapshot(input);
+    return submittedAssignmentReminderStatus({ ...input, source });
+  }
   const epoch = reminderEpoch;
   checkAccount(input.scope, input.isCurrent, epoch);
   if (!input.step.dueAt || !input.step.title ||
@@ -295,9 +333,11 @@ export async function getCampusAssignmentReminderStatus(input: {
  * The epoch fences pending schedule/cancel work, which then self-rollback.
  */
 export function beginCampusAssignmentReminderSignOutCleanup(): Promise<number> {
+  const submittedCleanup = clearSubmittedAssignmentReminders(true);
   reminderTeardownActive = true;
   reminderEpoch += 1;
   return (async () => {
+    await submittedCleanup;
     if (!supportsLocalNotification()) return 0;
     const initial = await scheduledInventory();
     const ours = initial.filter((item) =>
@@ -328,6 +368,7 @@ export function beginCampusAssignmentReminderSignOutCleanup(): Promise<number> {
 
 /** Release the fence only after the sign-out handler finishes (or fails). */
 export function endCampusAssignmentReminderSignOutCleanup(): void {
+  resumeSubmittedAssignmentReminders();
   reminderEpoch += 1;
   reminderTeardownActive = false;
 }
@@ -336,9 +377,15 @@ export function endCampusAssignmentReminderSignOutCleanup(): void {
 export async function cancelCampusAssignmentReminder(input: {
   scope: CampusReminderScope;
   step: CampusPlanStep;
+  snapshot?: CampusSenseSnapshot | null;
   leadMinutes: CampusReminderLead;
   isCurrent: () => boolean;
 }): Promise<boolean> {
+  const source = knownReminderSource(input);
+  if (source) {
+    await adoptCampusReminderSnapshot(input);
+    return cancelSubmittedAssignmentReminder({ ...input, source });
+  }
   const epoch = reminderEpoch;
   checkAccount(input.scope, input.isCurrent, epoch);
   if (input.step.evidence !== 'authorized-assignments' || !input.step.dueAt) {
@@ -371,5 +418,95 @@ export async function cancelCampusAssignmentReminder(input: {
     throw new CampusReminderError('native-failed');
   } finally {
     pending.delete(lock);
+  }
+}
+
+export async function adoptCampusReminderSnapshot(input: {
+  scope: CampusReminderScope; snapshot?: CampusSenseSnapshot | null; isCurrent: () => boolean;
+}) {
+  const version = reminderEpoch;
+  checkAccount(input.scope, input.isCurrent, version);
+  const snapshot = input.snapshot;
+  if (!snapshot || snapshot.userId !== input.scope.uid || snapshot.schoolId !== input.scope.schoolId ||
+      snapshot.assignments.status !== 'available') return;
+  const inventory = await scheduledInventory();
+  const sample = await reminderKey(input.scope, { title: '', dueAt: '' }, 60);
+  const linked = await linkedReminderIdentifiers();
+  const unresolved = new Set(inventory.filter((alarm) =>
+    alarm.identifier.startsWith(sample.identifier.slice(0, -32)) && !linked.has(alarm.identifier))
+    .map((alarm) => alarm.identifier));
+  if (!unresolved.size) return;
+  for (const item of snapshot.assignments.items) {
+    const source = parseCampusAssignmentSource(item.source);
+    if (!source || !item.dueAt) continue;
+    const matches = snapshot.assignments.items.filter((other) =>
+      normalizeTitle(other.title) === normalizeTitle(item.title) &&
+      other.dueAt === item.dueAt && other.groupName === item.groupName);
+    if (matches.length !== 1) continue;
+    for (const leadMinutes of [60, 1440] as const) {
+      const old = await reminderKey(input.scope, { ...item, title: normalizeTitle(item.title) }, leadMinutes);
+      checkAccount(input.scope, input.isCurrent, version);
+      if (!unresolved.has(old.identifier)) continue;
+      await adoptSubmittedAssignmentReminder({ ...input, source, leadMinutes }, {
+        identifier: old.identifier, storageKey: old.storageKey, title: item.title,
+        triggerAt: new Date(Date.parse(item.dueAt) - leadMinutes * 60_000).toISOString(),
+      });
+      unresolved.delete(old.identifier);
+    }
+    if (!unresolved.size) break;
+  }
+}
+
+export async function unlinkedLegacyReminders() {
+  const linked = await linkedReminderIdentifiers();
+  const sample = await reminderKey({ uid: '', schoolId: '' }, { title: '', dueAt: '' }, 60);
+  const namespace = sample.identifier.slice(0, -32);
+  return (await scheduledInventory()).filter((row) =>
+    row.identifier.startsWith(namespace) && !linked.has(row.identifier));
+}
+
+export async function clearUnlinkedLegacyReminders(input: {
+  scope: CampusReminderScope; isCurrent: () => boolean;
+}) {
+  const version = reminderEpoch;
+  checkAccount(input.scope, input.isCurrent, version);
+  const rows = await unlinkedLegacyReminders();
+  for (const row of rows) {
+    checkAccount(input.scope, input.isCurrent, version);
+    await Notifications.cancelScheduledNotificationAsync(row.identifier);
+  }
+  const remaining = await scheduledInventory();
+  if (rows.some((row) => remaining.some((other) => row.identifier === other.identifier)))
+    throw new CampusReminderError('native-failed');
+  checkAccount(input.scope, input.isCurrent, version);
+  const sample = await reminderKey(input.scope, { title: '', dueAt: '' }, 60);
+  for (const storageKey of await AsyncStorage.getAllKeys()) {
+    if (!storageKey.startsWith(sample.storageKey.slice(0, -64))) continue;
+    const record = await readRecord(storageKey);
+    checkAccount(input.scope, input.isCurrent, version);
+    if (record && rows.some((row) => row.identifier === record.identifier))
+      await AsyncStorage.removeItem(storageKey);
+  }
+}
+
+/** Pair before submission while the authorized summary still contains pending work. */
+export async function prepareAssignmentReminderSubmission(
+  uid: string,
+  resolveSchool: () => Promise<string>,
+) {
+  try {
+    if (!supportsLocalNotification() || !(await unlinkedLegacyReminders()).length) return;
+    const schoolId = await resolveSchool();
+    const isCurrent = () => getAuthInstance().currentUser?.uid === uid;
+    const scope = { uid, schoolId };
+    const { refreshCampusSenseSnapshot } = require('./campusSenseSnapshot') as typeof import('./campusSenseSnapshot');
+    const snapshot = await refreshCampusSenseSnapshot({ scope, isCurrent });
+    if (snapshot.assignments.coverage?.complete === false)
+      return '校園作業資料尚未完整同步，舊版提醒仍可能響鈴。可稍後到校園助理的舊版作業提醒管理重試核對，無須取消其他作業提醒。';
+    await adoptCampusReminderSnapshot({ scope, snapshot, isCurrent });
+    if ((await unlinkedLegacyReminders()).length)
+      return '有尚未辨識的舊版作業提醒，仍可能響鈴。可到校園助理的舊版作業提醒管理核對，無須取消其他作業提醒。';
+  } catch {
+    return '提醒核對暫時失敗，提醒仍可能響鈴。可稍後到校園助理的舊版作業提醒管理重試。';
   }
 }

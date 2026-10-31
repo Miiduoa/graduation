@@ -423,6 +423,8 @@ export type Assignment = {
 export type AssignmentType = 'homework' | 'quiz' | 'exam' | 'project' | 'presentation' | 'report';
 
 export type Submission = {
+  /** Local reminder maintenance warning; never persisted with the submission. */
+  reminderWarning?: string;
   id: string;
   assignmentId: string;
   userId: string;
