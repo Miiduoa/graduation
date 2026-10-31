@@ -160,3 +160,15 @@ test('valid published Firebase and fresh school-adapter rows still accepted toge
   const accepted = filterScopedGrades([...firebaseRows, ...schoolRows], 'user-a', 'tw-pu');
   expect(accepted.map((g) => g.courseName).sort()).toEqual(['Firebase 已發布', '校務即時課'].sort());
 });
+
+ test.each([undefined, null, NaN, Infinity])('GPA excludes unavailable points: %s', async (gradePoints) => {
+  jest.mocked(getDocs).mockResolvedValue(docsSnap([
+    { id: 'known', data: { userId: 'u', credits: 3, gradePoints: 3 } },
+    { id: 'unknown', data: { userId: 'u', credits: 3, gradePoints } },
+  ]) as never);
+  expect(await firebaseSource.getGPA('u', 'pu')).toEqual({ gpa: 3, totalCredits: 3, totalPoints: 9 });
+});
+test.each([[[]], [[{ id: 'unknown', data: { credits: 3 } }]], [[{ id: 'zero', data: { credits: 0, gradePoints: 3 } }]]])('GPA is unknown without usable credits', async (...args) => {
+  jest.mocked(getDocs).mockResolvedValue(docsSnap(args[0] as never) as never);
+  expect(await firebaseSource.getGPA('u', 'pu')).toBeNull();
+});
