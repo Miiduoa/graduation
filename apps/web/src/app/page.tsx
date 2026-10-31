@@ -9,7 +9,7 @@ import { SiteFooter } from '@/components/SiteFooter';
 import { useAuth } from '@/components/AuthGuard';
 import { AccountIdentity } from '@/components/AccountIdentity';
 import { browserRequest, useNuniSession } from '@/features/nuni/Session';
-import type { HomeCourse, HomeData } from '@/lib/homeOverview';
+import { loadHomeData, type HomeCourse, type HomeData } from '@/lib/homeOverview';
 import { loadNuniHomeData } from '@/lib/nuniHomeOverview';
 import { useClientHydrated } from '@/lib/useClientHydrated';
 import { useOptionalSelectedSchool } from '@/components/SelectedSchoolProvider';
@@ -33,7 +33,11 @@ export default function HomePage() {
   const school = useOptionalSelectedSchool();
   const role = useSchoolRole(uid, school?.selectedSchoolId || 'pu');
   const owner =
-    context && accountId ? `nuni:${context}:${accountId}` : uid ? `school:${uid}` : null;
+    context && accountId
+      ? `nuni:${context}:${accountId}:school:${uid ?? ''}`
+      : uid
+        ? `school:${uid}`
+        : null;
   const sessionLoading = !hydrated || authLoading || nuni.loading;
   const blocked = nuni.pendingLogout || (!!nuni.error && !uid);
   const [result, setResult] = useState<{
@@ -61,10 +65,38 @@ export default function HomePage() {
     setResult((current) => (current?.owner === owner ? current : null));
     setLoading(true);
     try {
-      const next =
-        context && accountId
-          ? await loadNuniHomeData((path, input) => browserRequest(path, context, input), accountId)
-          : { courses: [], tasks: [], unreadCount: 0 };
+      const sources = await Promise.allSettled([
+        ...(context && accountId
+          ? [loadNuniHomeData((path, input) => browserRequest(path, context, input), accountId)]
+          : []),
+        ...(uid ? [loadHomeData(uid)] : []),
+      ]);
+      const nuniSource = context && accountId ? sources[0] : null;
+      if (request !== generation.current) return;
+      const books = sources.flatMap((source) =>
+        source.status === 'fulfilled' ? [source.value] : [],
+      );
+      if (!books.length) throw (sources[0] as PromiseRejectedResult).reason;
+      if (
+        nuniSource?.status === 'rejected' &&
+        nuniSource.reason instanceof NuniError &&
+        (nuniSource.reason.status === 401 || nuniSource.reason.code === 'SESSION_CHANGED')
+      ) {
+        void refreshSession();
+      }
+      const next: HomeData = {
+        ...books[0],
+        courses: books.flatMap((book) => book.courses),
+        tasks: books.flatMap((book) => book.tasks),
+        recentFeedback: books.flatMap((book) => book.recentFeedback ?? []),
+        unreadCount: books.reduce((sum, book) => sum + book.unreadCount, 0),
+        tasksError: sources.some((source) => source.status === 'rejected')
+          ? '部分課程資料尚未讀到，請重試。'
+          : books
+              .map((book) => book.tasksError)
+              .filter(Boolean)
+              .join('；'),
+      };
       if (request === generation.current) {
         setResult({ owner, data: next, updatedAt: new Date() });
       }
@@ -85,7 +117,7 @@ export default function HomePage() {
     } finally {
       if (request === generation.current) setLoading(false);
     }
-  }, [owner, context, accountId, sessionLoading, blocked, refreshSession]);
+  }, [owner, context, accountId, uid, sessionLoading, blocked, refreshSession]);
   useEffect(() => {
     void refresh();
     return () => {
@@ -192,6 +224,20 @@ export default function HomePage() {
             onRetryTodos={() => void refresh()}
           />
         )}
+        {data?.recentFeedback?.length ? (
+          <section className={styles.section} aria-labelledby="feedback-title">
+            <h2 id="feedback-title">最近公布的成績與回饋</h2>
+            {data.recentFeedback.map((item) => (
+              <Link key={item.href} href={item.href} className={styles.course}>
+                <span>
+                  {item.courseName} · {item.title}
+                </span>
+                {item.score !== null ? <span>成績：{item.score}</span> : null}
+                {item.feedback ? <span>老師評語：{item.feedback}</span> : null}
+              </Link>
+            ))}
+          </section>
+        ) : null}
         {data && teaching.length > 0 ? (
           <section
             id="teaching-courses"

@@ -28,6 +28,7 @@ import {
   subscribeGradeRead,
 } from '@/lib/lmsStudentGrades';
 import { isNuniSessionError, loadNuniStudentGrades } from '@/lib/nuniStudentGrades';
+import { loadSchoolStudentGrades } from '@/lib/schoolStudentGrades';
 import styles from './StudentGrades.module.css';
 import shared from './NuniApp.module.css';
 
@@ -316,19 +317,54 @@ export function StudentGradesPage() {
   const { user, loading: authLoading } = useAuth();
   const online = useOnline();
   const [filter, setFilter] = useState<GradeFilter>('all');
-  const [nuniBook, setNuniBook] = useState<StudentGradebook | null>(null);
+  const [nuniResult, setNuniResult] = useState<{ owner: string; book: StudentGradebook } | null>(
+    null,
+  );
+  const [schoolResult, setSchoolResult] = useState<{
+    owner: string;
+    book: StudentGradebook;
+  } | null>(null);
+  const [schoolLoading, setSchoolLoading] = useState(false);
   const [nuniLoading, setNuniLoading] = useState(false);
   const generation = useRef(0);
   const nuniAccount = hydrated ? nuni.session?.platformAccountId : undefined;
   const nuniContext = hydrated ? nuni.session?.context : undefined;
   const refreshNuni = nuni.refresh;
   const uid = hydrated ? user?.uid : undefined;
-  const signedIn = !!nuniAccount && !!nuniContext;
+  const owner = `${nuniContext ?? ''}:${nuniAccount ?? ''}:${uid ?? ''}`;
+  const nuniBook = nuniResult?.owner === owner ? nuniResult.book : null;
+  const schoolBook = schoolResult?.owner === owner ? schoolResult.book : null;
+  const signedIn = (!!nuniAccount && !!nuniContext) || !!uid;
   const sessionLoading = !hydrated || nuni.loading || authLoading;
-  const blocked = nuni.pendingLogout || (!!nuni.error && !nuniAccount);
+  const blocked = nuni.pendingLogout || (!!nuni.error && !nuniAccount && !uid);
 
   const load = useCallback(async () => {
     const request = ++generation.current;
+    const schoolLoad = async () => {
+      if (!uid) {
+        setSchoolResult(null);
+        setSchoolLoading(false);
+        return;
+      }
+      setSchoolLoading(true);
+      try {
+        const book = await loadSchoolStudentGrades(uid, { online });
+        if (request === generation.current) setSchoolResult({ owner, book });
+      } catch {
+        if (request === generation.current)
+          setSchoolResult({
+            owner,
+            book: {
+              teachingCount: 0,
+              courses: [],
+              listError: GRADE_COPY.offline,
+            },
+          });
+      } finally {
+        if (request === generation.current) setSchoolLoading(false);
+      }
+    };
+    const schoolRequest = schoolLoad();
     if (nuniAccount && nuniContext) {
       setNuniLoading(true);
       try {
@@ -337,23 +373,27 @@ export function StudentGradesPage() {
           nuniAccount,
           { online },
         );
-        if (request === generation.current) setNuniBook(next);
+        if (request === generation.current) setNuniResult({ owner, book: next });
       } catch (error) {
         if (request !== generation.current) return;
         if (isNuniSessionError(error)) void refreshNuni();
-        setNuniBook({
-          teachingCount: 0,
-          courses: [],
-          listError: error instanceof NuniError ? GRADE_COPY.denied : GRADE_COPY.offline,
+        setNuniResult({
+          owner,
+          book: {
+            teachingCount: 0,
+            courses: [],
+            listError: error instanceof NuniError ? GRADE_COPY.denied : GRADE_COPY.offline,
+          },
         });
       } finally {
         if (request === generation.current) setNuniLoading(false);
       }
     } else {
-      setNuniBook(null);
+      setNuniResult(null);
       setNuniLoading(false);
     }
-  }, [nuniAccount, nuniContext, online, refreshNuni]);
+    await schoolRequest;
+  }, [nuniAccount, nuniContext, online, refreshNuni, uid, owner]);
 
   useEffect(() => {
     if (sessionLoading || blocked) return;
@@ -363,9 +403,13 @@ export function StudentGradesPage() {
     };
   }, [load, sessionLoading, blocked]);
 
-  const busy = sessionLoading || nuniLoading;
+  const busy = sessionLoading || nuniLoading || schoolLoading;
   const teachingOnly =
-    signedIn && !busy && (nuniBook?.teachingCount ?? 0) > 0 && !nuniBook?.courses.length;
+    signedIn &&
+    !busy &&
+    (nuniBook?.teachingCount ?? 0) + (schoolBook?.teachingCount ?? 0) > 0 &&
+    !nuniBook?.courses.length &&
+    !schoolBook?.courses.length;
 
   const openItem = useCallback((item: GradeItem, itemOwner: string) => {
     if (itemOwner) markPublishedGradeRead(itemOwner, item);
@@ -376,7 +420,8 @@ export function StudentGradesPage() {
       <div className={styles.page}>
         <GradesTabs active="feedback" />
         <p className={styles.notice}>
-          課程成績與回饋使用 nuni 來源；學校成績請切換至學期成績。<Link href="/classroom">前往 nuni 課程</Link>
+          課程成績與回饋優先顯示 nuni，並保留既有課程資料；學校成績請切換至學期成績。
+          <Link href="/classroom">前往 nuni 課程</Link>
         </p>
         <div className={styles.heading}>
           <div>
@@ -419,7 +464,7 @@ export function StudentGradesPage() {
             <p className={styles.muted}>{GRADE_COPY.unsigned}</p>
             <NuniSignIn returnUrl={LMS_GRADES_HREF} />
           </section>
-        ) : busy && !nuniBook ? (
+        ) : busy && !nuniBook && !schoolBook ? (
           <div aria-busy="true">
             <p role="status">{GRADE_COPY.loading}</p>
             <div className={styles.skeleton} aria-hidden="true">
@@ -435,7 +480,7 @@ export function StudentGradesPage() {
         ) : (
           <StudentGradesBoard
             nuni={nuniBook}
-            school={null}
+            school={schoolBook}
             nuniAccountId={nuniAccount}
             schoolUid={uid}
             filter={filter}

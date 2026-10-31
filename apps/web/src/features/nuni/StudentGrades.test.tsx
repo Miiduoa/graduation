@@ -350,13 +350,75 @@ it('retries a failed nuni gradebook instead of presenting it as empty', async ()
   expect(await screen.findByRole('link', { name: '加入 nuni 課程' })).toBeTruthy();
 });
 
-it('requires nuni sign-in when only a school account is signed in', () => {
-  authState.user = { uid: 'school-only' };
-  render(<StudentGradesPage />);
-  expect(screen.getByText(GRADE_COPY.unsigned)).toBeTruthy();
-  expect(screen.getByRole('button', { name: '使用 Google 帳號繼續' })).toBeTruthy();
-  expect(screen.queryByLabelText('成績摘要')).toBeNull();
-  expect(screen.queryByRole('button', { name: '更新成績' })).toBeNull();
-  expect(loaders.nuni).not.toHaveBeenCalled();
-  expect(loaders.school).not.toHaveBeenCalled();
+it.each([false, true])(
+  'shows Firebase published feedback with nuni signed in: %s',
+  async (withNuni) => {
+    authState.user = { uid: 'school-only' };
+    if (withNuni) {
+      sessionState.session = { context: 'session-a', platformAccountId: 'student-a' };
+      loaders.nuni.mockResolvedValue(book([section()]));
+    }
+    loaders.school.mockResolvedValue(
+      book([
+        section({
+          source: 'school',
+          courseId: 'firebase',
+          courseName: 'Firebase 課程',
+          href: '/course/firebase',
+          items: [
+            item({
+              source: 'school',
+              courseId: 'firebase',
+              title: 'Firebase 作業',
+              feedback: '分析完整',
+              href: '/course/firebase#assignment-reviewed',
+            }),
+          ],
+        }),
+      ]),
+    );
+    render(<StudentGradesPage />);
+    expect(await screen.findByRole('heading', { name: 'Firebase 課程' })).toBeTruthy();
+    expect(screen.getByText('老師評語：分析完整')).toBeTruthy();
+    expect(screen.getByRole('link', { name: /Firebase 作業/ }).getAttribute('href')).toBe(
+      '/course/firebase#assignment-reviewed',
+    );
+    expect(loaders.school).toHaveBeenCalledWith('school-only', { online: true });
+    if (withNuni) {
+      const headings = screen.getAllByRole('heading', { level: 2 });
+      expect(headings.map((heading) => heading.textContent)).toEqual(['資料庫', 'Firebase 課程']);
+    } else {
+      expect(loaders.nuni).not.toHaveBeenCalled();
+    }
+  },
+);
+
+it('hides Firebase feedback immediately when the Firebase account changes', async () => {
+  authState.user = { uid: 'alice' };
+  let finish!: (value: StudentGradebook) => void;
+  loaders.school
+    .mockResolvedValueOnce(
+      book([
+        section({
+          source: 'school',
+          courseId: 'firebase',
+          courseName: 'Alice 私人課程',
+          items: [item({ source: 'school', feedback: 'Alice 私人評語' })],
+        }),
+      ]),
+    )
+    .mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          finish = resolve;
+        }),
+    );
+  const view = render(<StudentGradesPage />);
+  expect(await screen.findByText('老師評語：Alice 私人評語')).toBeTruthy();
+  authState.user = { uid: 'bob' };
+  view.rerender(<StudentGradesPage />);
+  expect(screen.queryByText('老師評語：Alice 私人評語')).toBeNull();
+  await waitFor(() => expect(loaders.school).toHaveBeenLastCalledWith('bob', { online: true }));
+  await act(async () => finish(book([])));
+  expect(screen.queryByRole('heading', { name: 'Alice 私人課程' })).toBeNull();
 });

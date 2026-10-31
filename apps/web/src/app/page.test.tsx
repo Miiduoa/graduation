@@ -110,7 +110,7 @@ const data = (name: string, extra: Partial<HomeData> = {}): HomeData => ({
 
 beforeEach(() => {
   vi.clearAllMocks();
-  vi.mocked(loadHomeData).mockReset();
+  vi.mocked(loadHomeData).mockReset().mockResolvedValue({ courses: [], tasks: [], unreadCount: 0 });
   vi.mocked(loadNuniHomeData).mockReset();
   window.scrollTo = vi.fn();
   state.uid = 'alice';
@@ -142,10 +142,31 @@ beforeEach(() => {
   });
 });
 
-it('does not read the retired school source and offers nuni courses', async () => {
+it('keeps Firebase tasks and published feedback available alongside the nuni entry', async () => {
+  vi.mocked(loadHomeData).mockResolvedValue(
+    data('Firebase 課程', {
+      recentFeedback: [
+        {
+          kind: 'assignment',
+          id: 'reviewed',
+          courseId: 'firebase',
+          courseName: 'Firebase 課程',
+          title: '已批改作業',
+          feedback: '分析完整',
+          score: 92,
+          reviewedAt: '2026-10-01T00:00:00Z',
+          href: '/course/firebase#assignment-reviewed',
+        },
+      ],
+    }),
+  );
   render(<HomePage />);
+  expect((await screen.findAllByText('Firebase 課程 作業')).length).toBeGreaterThan(0);
+  expect(screen.getByRole('link', { name: /分析完整/ }).getAttribute('href')).toBe(
+    '/course/firebase#assignment-reviewed',
+  );
   expect(await screen.findByText(/E 校園與 TronClass 的學校來源已停用/)).toBeTruthy();
-  expect(loadHomeData).not.toHaveBeenCalled();
+  expect(loadHomeData).toHaveBeenCalledWith('alice');
   expect(screen.getByRole('link', { name: '前往 nuni 課程' }).getAttribute('href')).toBe(
     '/classroom',
   );
@@ -494,4 +515,29 @@ it('offers course joining for a verified empty nuni account', async () => {
   expect(await screen.findByText(/還沒有 nuni 課程資料/)).toBeTruthy();
   expect(screen.getByRole('link', { name: '加入課程' }).getAttribute('href')).toBe('/classroom');
   expect(screen.queryByRole('alert')).toBeNull();
+});
+
+it('keeps Firebase work when nuni is also signed in and hides it on Firebase account change', async () => {
+  state.session = { context: 'session-a', platformAccountId: 'student-a' };
+  vi.mocked(loadNuniHomeData).mockResolvedValue(data('nuni 課程'));
+  vi.mocked(loadHomeData)
+    .mockResolvedValueOnce(data('Firebase 私人課程'))
+    .mockImplementationOnce(() => new Promise(() => {}));
+  const view = render(<HomePage />);
+  expect((await screen.findAllByText('Firebase 私人課程 作業')).length).toBeGreaterThan(0);
+  expect(screen.getAllByText('nuni 課程 作業').length).toBeGreaterThan(0);
+  state.uid = 'bob';
+  view.rerender(<HomePage />);
+  expect(screen.queryByText('Firebase 私人課程 作業')).toBeNull();
+  await waitFor(() => expect(loadHomeData).toHaveBeenLastCalledWith('bob'));
+});
+
+it('retains Firebase tasks and revalidates an expired nuni session', async () => {
+  state.session = { context: 'session-a', platformAccountId: 'student-a' };
+  vi.mocked(loadNuniHomeData).mockRejectedValue(new NuniError(401, 'SESSION_CHANGED'));
+  vi.mocked(loadHomeData).mockResolvedValue(data('Firebase 課程'));
+  render(<HomePage />);
+  expect((await screen.findAllByText('Firebase 課程 作業')).length).toBeGreaterThan(0);
+  expect(state.refresh).toHaveBeenCalledTimes(1);
+  expect(screen.getByText('部分課程資料尚未讀到，請重試。')).toBeTruthy();
 });
