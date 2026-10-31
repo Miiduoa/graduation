@@ -179,6 +179,7 @@ function Courses({ uid, schoolId, returnUrl }: { uid: string; schoolId: 'pu'; re
                 <dl>
                   <div><dt>授課教師</dt><dd>{course.teachers.length ? course.teachers.join('、') : '未提供'}</dd></div>
                   <div><dt>學期</dt><dd>{formatSemester(course.semester)}</dd></div>
+                  <div><dt>WOW Class 標示學分</dt><dd>{typeof course.credit === 'number' ? `${course.credit} 學分` : '未提供'}</dd></div>
                 </dl>
                 <div className={courseStyles.cardActions}>
                   <Link href={schoolLmsEnabled ? `/school-lms?course=${course.id}` : '/classroom'}>{schoolLmsEnabled ? '本課作業與教材' : 'nuni 課程空間'}</Link>
@@ -197,7 +198,7 @@ function Courses({ uid, schoolId, returnUrl }: { uid: string; schoolId: 'pu'; re
         uid={uid} schoolId={schoolId} lms={null} returnUrl={returnUrl}
         canReconnect={Boolean(!options.loading && options.studentId)}
       /> : null}
-      <p className={styles.note}>這裡顯示 WOW Class 課堂清單。跨課程作業、公告與教材請到「作業與教材」。正式選課、歷年成績及畢業採計學分請分別查看「我的課表」、「成績紀錄」與「學分規劃」。</p>
+      <p className={styles.note}>這裡顯示 WOW Class 課堂清單。跨課程作業、公告與教材請到「作業與教材」。學分為 WOW Class 原列資料，不代表已修得或畢業採計；未提供表示來源沒有標示。正式選課、歷年成績及畢業採計學分請分別查看「我的課表」、「成績紀錄」與「學分規劃」。</p>
     </>
   );
 }

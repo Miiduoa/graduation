@@ -276,9 +276,24 @@ jobs:
         run: pnpm test:documents
 
       - name: Run web tests
+        id: web_tests
         # vitest 4 不接受 --ci flag（vitest run 已預設 CI-friendly）；
         # --coverage 需要 @vitest/coverage-v8（已在 devDeps）。
-        run: pnpm --filter web exec vitest run --coverage
+        shell: bash
+        run: |
+          set -o pipefail
+          pnpm --filter web exec vitest run --coverage --reporter=default --reporter=json --outputFile=web-vitest-results.json 2>&1 | tee web-vitest.log
+
+      - name: Preserve Web test results
+        if: always() && steps.web_tests.outcome != 'skipped'
+        uses: actions/upload-artifact@v4
+        with:
+          name: web-vitest-results
+          path: |
+            apps/web/web-vitest-results.json
+            web-vitest.log
+          if-no-files-found: error
+          retention-days: 7
 
   test-functions:
     name: Functions Tests

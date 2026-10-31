@@ -76,7 +76,7 @@ function ReconciliationWorkspace({ uid, schoolId, lms, returnUrl, canReconnect }
   const comparison = visible?.status === 'ready' ? visible.comparison : undefined;
   const query = search.normalize('NFKC').trim().toLocaleLowerCase();
   const rows = useMemo(() => comparison?.rows.filter((row) =>
-    (!onlyReview || row.match !== 'matched') && (!query ||
+    (!onlyReview || row.match !== 'matched' || row.creditDifference) && (!query ||
       [row.name, row.code, row.classOffered, ...row.teachers].some((text) =>
         text.normalize('NFKC').toLocaleLowerCase().includes(query))),
   ) ?? [], [comparison, onlyReview, query]);
@@ -155,8 +155,11 @@ function ReconciliationWorkspace({ uid, schoolId, lms, returnUrl, canReconnect }
                 <div><dt>修別</dt><dd>{row.courseType || '校方未提供'}</dd></div>
               </dl>
               {row.scheduleIncomplete ? <p className={styles.source}>上課時間尚未完整辨識；以上保留原始內容，不據此推算空堂。</p> : null}
+              {row.creditDifference ? <p className={styles.source}>
+                學分標示不同：e 校園 {row.creditDifference.academic} 學分，WOW Class {row.creditDifference.lms} 學分。保留校方選課學分，請核對兩邊原始資料。
+              </p> : null}
               <footer className={styles.rowFooter}>
-                <span>{MATCH_LABELS[row.match]}</span>
+                <span>{row.creditDifference ? '課堂已對上，學分標示不同' : MATCH_LABELS[row.match]}</span>
                 {row.lms ? <a href={row.lms.href} target="_blank" rel="noopener noreferrer" aria-label={`前往 ${row.name} 的對應課堂`}>開啟 WOW Class 課堂 ↗</a> : null}
               </footer>
             </li>)}

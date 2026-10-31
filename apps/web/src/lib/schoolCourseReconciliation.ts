@@ -22,6 +22,8 @@ export type AcademicComparisonSnapshot = {
   };
 };
 export type LmsComparisonCourse = {
+  /** 來源未提供時保持未知，不以 0 或校務學分補值。 */
+  credit?: number | null;
   id: number;
   code: string;
   name: string;
@@ -48,6 +50,7 @@ export type ReconciledSchoolCourse = {
   schedule: string[];
   scheduleIncomplete: boolean;
   match: CourseMatchState;
+  creditDifference?: { academic: number; lms: number };
   lms: { id: number; name: string; href: string } | null;
 };
 export type SchoolCourseComparison = {
@@ -146,6 +149,11 @@ export function reconcileSchoolCourses(
       : candidates.length === 1 ? 'matched' : 'not-in-list';
     const selected = match === 'matched' ? candidates[0] : null;
     if (selected) matchedIds.add(selected.id);
+    // 課堂身分已唯一對上，才比較兩邊原列學分；差異不更動校方數字或課堂連結。
+    const lmsCredit = selected?.credit;
+    const creditDifference = typeof lmsCredit === 'number' && Number.isFinite(lmsCredit) &&
+      lmsCredit >= 0 && lmsCredit !== first.credits
+      ? { academic: first.credits, lms: lmsCredit } : undefined;
     rows.push({
       key, code: first.code, name: first.name, semester: first.semester,
       classOffered: first.classOffered, courseType: first.courseType,
@@ -155,6 +163,7 @@ export function reconcileSchoolCourses(
         .filter(Boolean).join(' · ')).filter(Boolean))],
       scheduleIncomplete: entries.some((entry) => !!entry.scheduleWarning),
       match,
+      ...(creditDifference ? { creditDifference } : {}),
       lms: selected ? { id: selected.id, name: selected.name, href: schoolCourseHref(selected.id) } : null,
     });
   }
@@ -162,7 +171,7 @@ export function reconcileSchoolCourses(
     rows,
     unmatchedLms: (lms?.courses || []).filter((course) => !matchedIds.has(course.id)),
     matchedCount: rows.filter((row) => row.match === 'matched').length,
-    needsReviewCount: rows.filter((row) => row.match !== 'matched').length,
+    needsReviewCount: rows.filter((row) => row.match !== 'matched' || row.creditDifference).length,
     semester: academic.records.semester,
     sourceTotalCredits: total,
     academicFetchedAt: academic.fetchedAt,

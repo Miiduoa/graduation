@@ -8,6 +8,8 @@ export type SchoolLmsCourse = {
   id: number;
   name: string;
   code: string;
+  /** WOW Class 原列學分，非已取得或畢業採計；舊回應可能沒有這個欄位。 */
+  credit?: number | null;
   teachers: string[];
   semester: string | null;
   status: string;
@@ -77,6 +79,10 @@ export async function loadTronClassCourses(
       const courses = row.courses.map((value: unknown): SchoolLmsCourse => {
         if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('Invalid course');
         const course = value as Record<string, unknown>;
+        const credit = course.credit === undefined ? null : course.credit;
+        if (credit !== null && (typeof credit !== 'number' || !Number.isFinite(credit) || credit < 0)) {
+          throw new Error('Invalid course credit');
+        }
         if (typeof course.id !== 'number' || !Number.isSafeInteger(course.id) || course.id <= 0 || seen.has(course.id) ||
           typeof course.name !== 'string' || !course.name.trim() || course.name.length > 300 ||
           typeof course.code !== 'string' || typeof course.status !== 'string' ||
@@ -86,7 +92,7 @@ export async function loadTronClassCourses(
         }
         seen.add(course.id);
         // 課程連結由可信 ID 組成，不採用來源回應中的任意外部網址。
-        return { id: course.id, name: course.name, code: course.code,
+        return { id: course.id, name: course.name, code: course.code, credit,
           teachers: course.teachers as string[], semester: course.semester as string | null,
           status: course.status, href: `https://tronclass.pu.edu.tw/course/${course.id}/content` };
       });

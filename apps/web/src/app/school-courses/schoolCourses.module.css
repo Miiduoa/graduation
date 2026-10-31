@@ -71,13 +71,14 @@
 }
 .courses dl > div {
   display: grid;
-  grid-template-columns: 58px minmax(0, 1fr);
+  grid-template-columns: minmax(0, min(9.5em, 45%)) minmax(0, 1fr);
   gap: 12px;
   font-size: 13px;
   line-height: 1.6;
 }
 .courses dt {
   color: var(--muted);
+  overflow-wrap: anywhere;
 }
 .courses dd {
   margin: 0;
