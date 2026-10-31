@@ -173,12 +173,26 @@ export async function loadOfflinePersonalTimetable(
   return hasScopedCopy ? readLocalTimetable(uid, schoolId, false) : null;
 }
 
-export async function loadPersonalTimetableDraft(uid: string, schoolId: string): Promise<StoredTimetable | null> {
+export type TimetableDraft = StoredTimetable & { pendingBase?: boolean; pendingExceptions?: boolean };
+
+export function restorePersonalTimetableDraft(current: StoredTimetable, draft: TimetableDraft): StoredTimetable {
+  const base = draft.pendingBase !== false ? draft : current;
+  return {
+    ...current,
+    courses: base.courses,
+    meta: base.meta,
+    shareWithFriends: base.shareWithFriends,
+    classExceptions: draft.pendingExceptions !== false ? draft.classExceptions : current.classExceptions,
+    classExceptionsRevision: current.classExceptionsRevision,
+  };
+}
+
+export async function loadPersonalTimetableDraft(uid: string, schoolId: string): Promise<TimetableDraft | null> {
   const raw = await AsyncStorage.getItem(`${KEY}:${uid}:${canonicalSchoolId(schoolId)}:draft`);
   if (!raw) return null;
-  const draft = JSON.parse(raw) as StoredTimetable;
+  const draft = JSON.parse(raw) as TimetableDraft;
   if (!sameSchool(draft.schoolId, schoolId)) return null;
-  return asStored(draft, schoolId);
+  return { ...asStored(draft, schoolId), pendingBase: draft.pendingBase, pendingExceptions: draft.pendingExceptions };
 }
 
 export async function loadPersonalTimetable(
@@ -244,6 +258,29 @@ export async function savePersonalTimetable(uid: string | null, timetable: Store
     await store(next);
     return { stored: 'local' as const };
   }
+  const draftKey = `${KEY}:${uid}:${canonical}:draft`;
+  const updateDraft = async (synced: boolean) => {
+    const old = await loadPersonalTimetableDraft(uid, canonical);
+    const draft: TimetableDraft = old ?? { ...next, pendingBase: false, pendingExceptions: false };
+    // Historical drafts may contain both kinds of changes; preserve both until saved.
+    draft.pendingBase ??= true;
+    draft.pendingExceptions ??= true;
+    if (editingExceptions) {
+      if (!synced) draft.classExceptions = next.classExceptions;
+      draft.pendingExceptions = !synced;
+    } else {
+      if (!synced) {
+        draft.courses = next.courses;
+        draft.meta = next.meta;
+        draft.shareWithFriends = next.shareWithFriends;
+      }
+      const sameBase = JSON.stringify([draft.courses, draft.meta, draft.shareWithFriends]) ===
+        JSON.stringify([next.courses, next.meta, next.shareWithFriends]);
+      draft.pendingBase = synced ? draft.pendingBase && !sameBase : true;
+    }
+    if (draft.pendingBase || draft.pendingExceptions) await AsyncStorage.setItem(draftKey, JSON.stringify(draft));
+    else await AsyncStorage.removeItem(draftKey);
+  };
   let conflict = false;
   try {
     const ref = cloudScopedRef(uid, canonical);
@@ -258,7 +295,13 @@ export async function savePersonalTimetable(uid: string | null, timetable: Store
         (legacy && sameSchool(legacy.schoolId, canonical) ? legacy : undefined);
       const remoteExceptions = exceptionSnap.exists() ? exceptionSnap.data() as StoredTimetable : embedded;
       const remoteRevision = remoteExceptions?.classExceptionsRevision ?? 0;
-      const payload = { ...next };
+      const priorBase = remote ?? (legacy && sameSchool(legacy.schoolId, canonical) ? legacy : undefined);
+      const payload = editingExceptions ? {
+        ...next,
+        courses: priorBase?.courses ?? [],
+        meta: priorBase?.meta ?? cleanMeta({}),
+        shareWithFriends: priorBase?.shareWithFriends ?? false,
+      } : { ...next };
       if (editingExceptions) {
         if ((timetable.classExceptionsRevision ?? 0) !== remoteRevision) {
           conflict = true;
@@ -293,13 +336,10 @@ export async function savePersonalTimetable(uid: string | null, timetable: Store
       return payload;
     });
     await store(saved);
-    if (editingExceptions) await AsyncStorage.removeItem(`${KEY}:${uid}:${canonical}:draft`);
+    await updateDraft(true);
     return { stored: 'cloud' as const, timetable: saved };
   } catch (error) {
-    const draftKey = `${KEY}:${uid}:${canonical}:draft`;
-    if (editingExceptions || !(await AsyncStorage.getItem(draftKey))) {
-      await AsyncStorage.setItem(draftKey, JSON.stringify(next));
-    }
+    await updateDraft(false);
     if (conflict) throw error;
     await store(next);
     return { stored: 'local' as const, cloudPending: true };

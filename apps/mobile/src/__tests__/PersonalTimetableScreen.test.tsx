@@ -225,13 +225,16 @@ test('cloud reload and draft preview are explicit and sharing does not edit exce
   mockScope = { owner: 'firebase:synthetic', schoolId: 'ncku' };
   const base = await jest.mocked(loadPersonalTimetable)(null, 'ncku');
   jest.mocked(loadPersonalTimetable).mockResolvedValue({ ...base, classExceptions: [], classExceptionsRevision: 2 });
-  jest.mocked(loadPersonalTimetableDraft).mockResolvedValue({ ...base, classExceptions: [], classExceptionsRevision: 1 });
+  jest.mocked(loadPersonalTimetableDraft).mockResolvedValue({ ...base, courses: [{ id: 'offline', name: '離線新增課', teacher: '', room: '', day: 1, start: 1, end: 2, color: 'blue' }], meta: { ...base.meta, title: '離線標題' }, shareWithFriends: true, pendingBase: true, pendingExceptions: false, classExceptions: [], classExceptionsRevision: 1 });
   jest.mocked(savePersonalTimetable).mockResolvedValue({ stored: 'cloud', timetable: { ...base, classExceptionsRevision: 2 } });
   const view = render(<PersonalTimetableScreen />);
   await view.findByText('成大課程');
   fireEvent.press(view.getByText('檢視這台裝置未同步草稿'));
-  await view.findByText('目前預覽未同步的單次安排；請核對後在上方儲存。重新讀取可回到雲端版本。');
+  await view.findByText('目前預覽未同步課表；請核對每週基準與單次安排，分別儲存。重新讀取可回到雲端版本。');
   expect(loadPersonalTimetableDraft).toHaveBeenCalledWith('synthetic', 'ncku');
+  await view.findByText('離線新增課');
+  fireEvent.press(view.getByText('儲存每週基準課表'));
+  await waitFor(() => expect(savePersonalTimetable).toHaveBeenCalledWith('synthetic', expect.objectContaining({ courses: [expect.objectContaining({ id: 'offline' })], meta: expect.objectContaining({ title: '離線標題' }), shareWithFriends: true, classExceptionsRevision: 2 }), undefined, false));
   fireEvent.press(view.getByText('重新讀取雲端課表'));
   await waitFor(() => expect(loadPersonalTimetable).toHaveBeenLastCalledWith('synthetic', 'ncku', undefined));
   fireEvent.press(view.getByText('目前好友看不到這份課表（點一下開放）'));

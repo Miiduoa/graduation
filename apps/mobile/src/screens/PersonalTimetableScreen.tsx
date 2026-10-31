@@ -50,6 +50,7 @@ import {
   loadPersonalTimetable,
   savePersonalTimetable,
   loadPersonalTimetableDraft,
+  restorePersonalTimetableDraft,
   personalTimetableRecords,
   type StoredTimetable,
 } from '../services/personalTimetable';
@@ -263,10 +264,12 @@ function PersonalTimetableWorkspace({ initialTerm, initialCourseId, initialDate 
           void loadPersonalTimetableDraft(uid, schoolId).then((draft) => {
             if (scopeRef.current !== requestScope || loadGeneration.current !== run) return;
             if (!draft) { setNotice('這台裝置沒有未同步草稿。'); return; }
-            setTimetable({ ...timetable, classExceptions: draft.classExceptions });
-            setNotice('目前預覽未同步的單次安排；請核對後在上方儲存。重新讀取可回到雲端版本。');
+            setTimetable(restorePersonalTimetableDraft(timetable, draft));
+            if (draft.pendingBase !== false) setImportTerm('legacy');
+            setNotice('目前預覽未同步課表；請核對每週基準與單次安排，分別儲存。重新讀取可回到雲端版本。');
           }).catch(() => setNotice('草稿暫時讀不到，原始資料仍保留。'));
         }} /> : null}
+        <Button text="儲存每週基準課表" disabled={loadError} onPress={() => void persist(timetable, '每週基準課表已儲存。')} />
         <Text style={{ color: theme.colors.muted }}>每週基準課表；指定日期的安排請查看上方。</Text>
         <PersonalImportSummary kind="timetable" />
         {importStatus === 'error' ? (

@@ -14,7 +14,6 @@ import {
   planPortalReimport,
   resolvePortalReimport,
 } from '@campus/shared/src/imports/portalReimport';
-import { buildNextClassSnapshot } from '../../../mobile/src/widgets/nextClassSnapshot';
 
 const row: PersonalImportRecord = {
   id: 'first-import',
@@ -135,7 +134,7 @@ describe('dated class exceptions', () => {
       resolve([stop], '2026-11-02', [imported, { ...row, id: 'manual:course' }]).today,
     ).toEqual([]);
   });
-  it('uses the same instants and room for timetable, today, widget and reminders', () => {
+  it('uses the same instants and room for timetable, today and reminders', () => {
     const change = exception({
       kind: 'move',
       date: '2026-11-03',
@@ -148,7 +147,6 @@ describe('dated class exceptions', () => {
     const now = new Date('2026-11-03T08:00:00+08:00');
     const timetable = buildPersonalToday(records, { schoolId: 'pu', now });
     const today = buildPersonalToday(records, { schoolId: 'pu', now });
-    const widget = buildNextClassSnapshot(records, 'pu', now);
     const reminders = classReminderPlan(today.today, now.getTime());
     expect(timetable.today).toEqual(today.today);
     expect(todayClassesFromSchedule(today.today, now)[0]).toMatchObject({
@@ -157,19 +155,11 @@ describe('dated class exceptions', () => {
     const afterMidnight = buildPersonalToday(records, { schoolId: 'pu', now: new Date('2026-11-04T00:30:00+08:00') });
     expect(afterMidnight.today[0].status).toBe('ongoing');
     expect(todayClassesFromSchedule(afterMidnight.today, now)[0].startAt).toBe(today.today[0].startAt);
-    expect(
-      widget.classes.filter((entry) => entry.startAt === timetable.today[0].startAt),
-    ).toHaveLength(1);
-    expect(widget.classes[0]).toMatchObject({
+    expect(reminders[0]).toMatchObject({
       startAt: today.today[0].startAt,
       endAt: today.today[0].endAt,
       location: '補課教室',
-    });
-    expect(reminders[0]).toMatchObject({
-      startAt: widget.classes[0].startAt,
-      endAt: widget.classes[0].endAt,
-      location: '補課教室',
-      remindAt: widget.classes[0].startAt - 600000,
+      remindAt: today.today[0].startAt - 600000,
     });
     expect(classReminderPlan(resolve([exception()]).today, now.getTime())).toEqual([]);
   });
@@ -200,7 +190,6 @@ describe('equivalent meeting representations and bounded storage', () => {
     expect(plan.today).toHaveLength(1);
     expect(plan.today[0].conflict).toBe(true);
     expect(classReminderPlan(plan.today, now.getTime())[0].conflict).toBe(true);
-    expect(buildNextClassSnapshot(records, 'pu', now).classes[0].conflict).toBe(true);
     expect(resolve([change], '2026-11-04', [row, other]).today.every((item) => item.conflict)).toBe(true);
     expect(resolve([change], '2026-11-03', [row, { ...other, startTime: '01:00' }]).today[0].conflict).toBe(false);
   });
