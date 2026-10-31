@@ -2297,3 +2297,19 @@ it('舊版本缺少影像模組時保留既有附件操作並隱藏轉檔入口'
     availability.mockRestore();
   }
 });
+
+it('shares only the stable material entry through the system sheet', async () => {
+  const { Share } = require('react-native');
+  const share = jest.spyOn(Share, 'share').mockResolvedValue({ action: Share.sharedAction });
+  const target = material(1, '合成分享教材');
+  mockRequest.mockImplementation((path, context, input) => {
+    if (!path.endsWith('/materials/page')) return response(path, context, input);
+    return Promise.resolve({ materials: [target], nextCursor: null });
+  });
+  const view = render(<NuniCourses initialWorkspaceId={courseId} initialMaterialId={target.id} />);
+  await view.findByText('目標教材');
+  fireEvent.press(view.getByRole('button', { name: '分享教材入口' }));
+  expect(share).toHaveBeenCalledWith({ message: expect.stringContaining(`workspaceId=${courseId}&materialId=${target.id}`) });
+  expect(share.mock.calls[0][0].message).not.toContain(target.body);
+  share.mockRestore();
+});

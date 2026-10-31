@@ -2,7 +2,7 @@
 
 import { useEffect, useId, useRef, useState } from 'react';
 import Link from 'next/link';
-import { nuniErrorMessage } from '@campus/shared/src/nuni';
+import { materialFailureMessage } from '@campus/shared/src/materialAccess';
 import { formatTaipeiDateTime } from '@campus/shared/src/taipeiTime';
 import {
   continueSearchableMaterials,
@@ -108,7 +108,7 @@ function Search({
       .catch((failure) => {
         if (fence.cancelled()) return;
         loadStarted.current = false;
-        setError(nuniErrorMessage(failure));
+        setError(materialFailureMessage(failure, !navigator.onLine));
       })
       .finally(() => {
         if (mounted.current && run === request.current) setReading(false);
@@ -138,7 +138,7 @@ function Search({
       if (fence.cancelled()) return;
       setCatalog({
         ...current,
-        partialError: nuniErrorMessage(failure),
+        partialError: materialFailureMessage(failure, !navigator.onLine),
       });
     } finally {
       if (mounted.current && run === continueRequest.current) setContinuing(false);
@@ -167,7 +167,7 @@ function Search({
         if (fence.cancelled()) return;
         setCatalog({
           ...current,
-          partialError: nuniErrorMessage(failure),
+          partialError: materialFailureMessage(failure, !navigator.onLine),
         });
       } finally {
         if (mounted.current && run === restartRequest.current) setRestarting(false);
