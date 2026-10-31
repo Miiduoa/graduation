@@ -123,7 +123,7 @@ test('grades show source scores and exclude other accounts, schools and unpublis
   expect(view.getByText('87 分')).toBeTruthy();
   expect(view.getByText(/來源：nuni 課程/)).toBeTruthy();
   fireEvent.press(view.getByText('已發布的課程'));
-  expect(safeNavigate).toHaveBeenCalledWith(mockNavigation, 'CourseGradebook', { groupId: 'course-1', groupName: '已發布的課程' });
+  expect(safeNavigate).toHaveBeenCalledWith(mockNavigation, 'CourseGradebook', { groupId: 'course-1', groupName: '已發布的課程', sourceSystem: 'workspace' });
   expect(
     view.queryByText(/其他人的成績|其他學校成績|學校不明的成績|尚未發布的成績|未來發布成績/),
   ).toBeNull();

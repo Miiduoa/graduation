@@ -9,6 +9,7 @@ import { MapStack } from '../screens/MapStack';
 import { MessagesStack } from '../screens/MessagesStack';
 import { ensureLmsV2DemoSignIn } from '../services/lmsV2DemoSignIn';
 import { askCampusAssistant } from '../features/campusAssistant';
+jest.mock('@react-navigation/native', () => jest.requireActual('@react-navigation/native'));
 let mockAuth: any;
 const mockAuthContext = React.createContext<any>(null);
 let mockSchool = 'pu';
@@ -296,7 +297,7 @@ jest.mock('../screens/CourseGradebookScreen', () => {
   const { Text } = require('react-native');
   return {
     __esModule: true,
-    CourseGradebookScreen: () => React.createElement(Text, null, 'CourseGradebookScreen'),
+    CourseGradebookScreen: ({ route }: any) => React.createElement(Text, null, `CourseGradebookScreen:${route.params.groupId}`),
   };
 });
 jest.mock('../screens/CourseHubAiFirstScreen', () => {
@@ -432,14 +433,6 @@ jest.mock('../screens/GoogleMapsLikeScreen', () => {
   return {
     __esModule: true,
     GoogleMapsLikeScreen: () => React.createElement(Text, null, 'GoogleMapsLikeScreen'),
-  };
-});
-jest.mock('../screens/GradesAiFirstScreen', () => {
-  const React = require('react');
-  const { Text } = require('react-native');
-  return {
-    __esModule: true,
-    default: () => React.createElement(Text, null, 'GradesAiFirstScreen'),
   };
 });
 jest.mock('../screens/GroupAssignmentsScreen', () => {
@@ -1168,3 +1161,18 @@ test.each([MeStack, LearnStack])(
     expect(view.getByText('AdminDashboardScreen')).toBeTruthy();
   },
 );
+
+jest.mock('../state/personalImportScope', () => ({ usePersonalImportScope: () => null }));
+jest.mock('../data/firebaseSource', () => ({ firebaseSource: { listGrades: jest.fn(async () => [{
+  id: 'g1', userId: 'u1', schoolId: 'pu', courseId: 'course-1', courseName: '測試課程',
+  gradeSource: 'firebase-course', score: 80, publishedAt: '2026-01-01T00:00:00Z',
+}]) } }));
+test('student grade row reaches its workspace gradebook through the navigator', async () => {
+  const { view, navigation } = await mount(LearnStack);
+  await act(async () => { navigation.navigate('Grades'); });
+  await view.findByText('測試課程');
+  fireEvent.press(view.getByText('測試課程'));
+  await view.findByText('CourseGradebookScreen:course-1');
+  expect(navigation.getCurrentRoute()?.name).toBe('CourseGradebook');
+  expect(navigation.getCurrentRoute()?.params).toMatchObject({ groupId: 'course-1', sourceSystem: 'workspace' });
+});

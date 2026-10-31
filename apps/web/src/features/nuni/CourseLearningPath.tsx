@@ -25,6 +25,8 @@ type Props = {
   assignments: NuniAssignment[];
   units: NuniUnit[] | null;
   unitsError: string;
+  assignmentsError?: string;
+  assignmentsLoading?: boolean;
   refreshVersion?: number;
   reloadUnits: () => void;
   onUnitCreated: (unit: NuniUnit) => void;
@@ -37,7 +39,7 @@ function suggestedTime(value: string | null) {
 }
 
 export function CourseLearningPath({
-  workspace, assignments, units, unitsError, refreshVersion = 0, reloadUnits, onUnitCreated, onNavigate,
+  workspace, assignments, units, unitsError, assignmentsError = '', assignmentsLoading = false, refreshVersion = 0, reloadUnits, onUnitCreated, onNavigate,
 }: Props) {
   const classes = useClasses();
   const courseApi = useRef(classes);
@@ -66,7 +68,7 @@ export function CourseLearningPath({
   const complete = units !== null && materials !== null && quizzes !== null && !materialsDenied;
   const groups = buildCourseOutline(units ?? [], materials ?? [], assignments, quizzes ?? []);
   const overall = courseTaskTotals(assignments, quizzes ?? [], now);
-  const canClaimTaskMetrics = complete && !materialsIncomplete && !quizzesLimited && assignments.length < 100 && !unitsError && !error && !reading;
+  const canClaimTaskMetrics = complete && !materialsIncomplete && !quizzesLimited && assignments.length < 100 && !unitsError && !error && !reading && !assignmentsError && !assignmentsLoading;
 
   useEffect(() => {
     courseApi.current = classes;
@@ -115,13 +117,16 @@ export function CourseLearningPath({
         quizzesResult.status === 'rejected' ? `測驗：${nuniErrorMessage(quizzesResult.reason)}` : '',
       ].filter(Boolean);
       setError(messages.join(' '));
-      setCheckedAt(new Date().toISOString());
       setReading(false);
     });
     return () => {
       active = false;
     };
   }, [workspace.id, epoch, refreshVersion]);
+
+  useEffect(() => {
+    if (canClaimTaskMetrics) setCheckedAt(new Date().toISOString());
+  }, [canClaimTaskMetrics]);
 
   async function loadMoreMaterials() {
     const current = materialsProgress;
@@ -186,7 +191,7 @@ export function CourseLearningPath({
           {reading ? '整理中…' : '更新章節內容'}
         </button>
       </div>
-      <p className={styles.context}>來源：nuni 課程 · 本次讀取：{checkedAt ? formatTaipeiDateTime(checkedAt, { seconds: false }) : '尚未確認'}。作業或測驗未取得時，完整進度為未知；待評與缺件不換算成零分。</p>
+      <p className={styles.context}>來源：nuni 課程 · 本次讀取：{canClaimTaskMetrics && checkedAt ? formatTaipeiDateTime(checkedAt, { seconds: false }) : '尚未確認'}。作業或測驗未取得時，完整進度為未知；待評與缺件不換算成零分。</p>
       {!canClaimTaskMetrics && !reading && <p className={styles.context}>進度未知：清單未齊或部分讀取失敗，請更新後確認。</p>}
       {!teacher && canClaimTaskMetrics && (
         <div className={styles.summary} role="status">

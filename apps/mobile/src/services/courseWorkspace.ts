@@ -723,12 +723,24 @@ export async function startAttendanceSession(
   return result.data;
 }
 
-export async function listCourseGradebook(db: Firestore, groupId: string) {
+export async function listCourseGradebook(db: Firestore, groupId: string, uid: string) {
+  const ownMember = await getDoc(doc(db, 'groups', groupId, 'members', uid));
+  const teacher = ownMember.exists() &&
+    (canManageCourse(ownMember.data().role) || ownMember.data().role === 'admin');
+  // 學生僅讀本人文件；整批查詢不會由規則自動篩選為本人資料。
+  const ownSnapshot = async (parts: [string, ...string[]]) => {
+    const row = await getDoc(doc(db, ...parts, uid));
+    return { docs: row.exists() ? [{ id: uid, data: () => row.data() }] : [] };
+  };
   const [groupSnap, assignmentSnap, gradebookSnap, memberSnap] = await Promise.all([
     getDoc(doc(db, 'groups', groupId)),
     getDocs(collection(db, 'groups', groupId, 'assignments')),
-    getDocs(collection(db, 'groups', groupId, 'gradebook')),
-    getDocs(collection(db, 'groups', groupId, 'members')),
+    teacher
+      ? getDocs(collection(db, 'groups', groupId, 'gradebook'))
+      : ownSnapshot(['groups', groupId, 'gradebook']),
+    teacher
+      ? getDocs(collection(db, 'groups', groupId, 'members'))
+      : ownSnapshot(['groups', groupId, 'members']),
   ]);
 
   const assignments = (assignmentSnap?.docs ?? [])
@@ -744,9 +756,9 @@ export async function listCourseGradebook(db: Firestore, groupId: string) {
 
   const submissionGroups = await Promise.all(
     assignments.map(async (assignment) => {
-      const submissionsSnap = await getDocs(
-        collection(db, 'groups', groupId, 'assignments', assignment.id, 'submissions'),
-      );
+      const submissionsSnap = await (teacher
+        ? getDocs(collection(db, 'groups', groupId, 'assignments', assignment.id, 'submissions'))
+        : ownSnapshot(['groups', groupId, 'assignments', assignment.id, 'submissions']));
       return {
         assignmentId: assignment.id,
         submissions: (submissionsSnap?.docs ?? []).map((docSnap): Record<string, unknown> & { uid: string } => ({
@@ -807,7 +819,7 @@ export async function listCourseGradebook(db: Firestore, groupId: string) {
       dueAt: toDate(assignment.dueAt),
       gradesPublished: Boolean(assignment.gradesPublished),
       averageScore:
-        grades.length > 0
+        teacher && grades.length > 0
           ? Math.round((grades.reduce((sum, grade) => sum + grade, 0) / grades.length) * 10) / 10
           : null,
     } satisfies CourseGradebookAssignment;

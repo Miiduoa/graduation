@@ -37,7 +37,7 @@ test('published final scores remain visible while individual work is pending', (
   const view = render(<CourseGradebookScreen route={{ params: { groupId: 'course-1' } }} />);
   expect(view.getByText('總分 80')).toBeTruthy();
   expect(view.getByText('通過')).toBeTruthy();
-  expect(view.getByText('班平均 80')).toBeTruthy();
+  expect(view.queryByText(/班平均/)).toBeNull();
   expect(view.getByText('評分進度 1/2')).toBeTruthy();
   mockPublished = false;
 });

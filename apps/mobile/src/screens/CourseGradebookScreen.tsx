@@ -144,7 +144,7 @@ export function CourseGradebookScreen(props: any) {
     ((gradebook.finalScoresPublished && row.published) || (row.totalAssignments > 0 && row.gradedAssignments >= row.totalAssignments));
   const gradedRows = gradebook.rows.filter(hasFinalScore);
   const classAverage =
-    gradedRows.length > 0
+    isTeacher && gradedRows.length > 0
       ? Math.round(
           (gradedRows.reduce((sum, row) => sum + (row.finalScore ?? 0), 0) / gradedRows.length) *
             10,
