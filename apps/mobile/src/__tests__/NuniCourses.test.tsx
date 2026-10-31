@@ -2175,6 +2175,8 @@ it.each(['alignment', 'lost-response'])(
           throw failure === 'alignment'
             ? new NuniError(503, 'ASSIGNMENT_FILE_STORE_UNAVAILABLE')
             : new TypeError('response lost');
+        if (submissions.length === 2)
+          throw new NuniError(503, 'ASSIGNMENT_FILE_STORE_UNAVAILABLE');
         return { ...assignment, mySubmission: { ...receipt(), files: [metadata] } };
       }
       return response(path, context, input);
@@ -2187,9 +2189,14 @@ it.each(['alignment', 'lost-response'])(
     now = Date.parse('2026-10-09T12:01:00Z');
     view.rerender(<NuniCourses />);
     fireEvent.press(view.getByRole('button', { name: '重試確認這次送出' }));
+    await waitFor(() => expect(submissions).toHaveLength(2));
+    await view.findByRole('button', { name: '重試確認這次送出' });
+    view.rerender(<NuniCourses />);
+    fireEvent.press(view.getByRole('button', { name: '重試確認這次送出' }));
     await view.findByText('repair.pdf · 檔案');
     expect(mockUpload).toHaveBeenCalledTimes(1);
-    expect(submissions).toHaveLength(2);
+    expect(submissions).toHaveLength(3);
+    expect(submissions[2]).toEqual(submissions[0]);
     expect(submissions[1]).toEqual(submissions[0]);
     expect(view.queryByRole('button', { name: '更新作業繳交' })).toBeNull();
     clock.mockRestore();

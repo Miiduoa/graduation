@@ -1096,6 +1096,7 @@ it.each(['alignment', 'lost-response'])(
           ? new NuniError(503, 'ASSIGNMENT_FILE_STORE_UNAVAILABLE')
           : new TypeError('response lost'),
       )
+      .mockRejectedValueOnce(new NuniError(503, 'ASSIGNMENT_FILE_STORE_UNAVAILABLE'))
       .mockResolvedValueOnce(confirmed);
     state.upload.mockResolvedValue(metadata);
     const props = {
@@ -1114,13 +1115,18 @@ it.each(['alignment', 'lost-response'])(
     now = Date.parse('2026-10-09T12:01:00Z');
     view.rerender(<AssignmentCard {...props} />);
     fireEvent.submit(screen.getByRole('button', { name: '確認送出結果' }).closest('form')!);
+    await waitFor(() => expect(state.request).toHaveBeenCalledTimes(3));
+    await screen.findByRole('button', { name: '確認送出結果' });
+    view.rerender(<AssignmentCard {...props} />);
+    fireEvent.submit(screen.getByRole('button', { name: '確認送出結果' }).closest('form')!);
     await waitFor(() =>
       expect(screen.getByRole('region', { name: '我的繳交紀錄' }).textContent).toContain(
         'repair.pdf',
       ),
     );
     expect(state.upload).toHaveBeenCalledTimes(1);
-    expect(state.request).toHaveBeenCalledTimes(3);
+    expect(state.request).toHaveBeenCalledTimes(4);
+    expect(state.request.mock.calls[3][2]).toEqual(state.request.mock.calls[1][2]);
     expect(state.request.mock.calls[2][2]).toEqual(state.request.mock.calls[1][2]);
     expect(screen.queryByRole('button', { name: '更新繳交內容' })).toBeNull();
     clock.mockRestore();
