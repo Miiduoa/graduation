@@ -186,7 +186,12 @@ for (const head of ['姓\ufe0f名：王小明', '姓\u034f名,課程名稱,學�
   '課程名稱,學分,成績\n姓·名王小明,3,85', '課程名稱,學分,成績\n123456,3,85', '教\u034f師：陳大文', '學\ufe0f號：A12345',
   '姓\u20dd名：王小明', '課程名\u034f稱,學分,成績', '姓\u200b名：王小明', '學\u200b號：123456', '教\u200b師：陳大文',
   '姓\u00ad名：王小明', '學+號：123456', '教⋅師：陳大文',
-  '姓\u2060名：王小明', '教🟢師：陳大文', '編碼,123456', '編碼,１２３４５６７', '編碼,A12345678901234']) {
+  '姓\u2060名：王小明', '教🟢師：陳大文', '編碼,123456', '編碼,１２３４５６７', '編碼,A12345678901234',
+  '教師陳大文,3,85', '教師\u2028陳大文,3,85', '教師\u0001陳大文,3,85',
+  'teacher陳大文,3,85', '老師陳大文,3,85', '教授陳大文,3,85', 'instructor陳大文,3,85',
+  '課程名稱,學分,成績\n教師陳大文,3,85',
+  '課程名稱,學分,成績\nTeacher Education,3,85', '課程名稱,學分,成績\n教師 專業發展,2,90',
+  '教師專業發展,2,90']) {
   test(`格式符號或疑似學號在批次與實際請求均拒送：${head}`, async () => {
     const text = `${head}\n課程名稱,學分,成績\n微積分,3,85`;
     assert.equal(isPersonalImportCloudMaskSafe(text), false);
@@ -210,7 +215,6 @@ for (const text of [
   '日期,課程名稱,教室\n20261031,程式設計,A101',
   '課程代碼,123456\n課程名稱,學分,成績\n微積分,3,85',
   '日期,20261031\n課程名稱,學分,成績\n微積分,3,85',
-  '教師專業發展,2,90\n課程名稱,學分,成績\n微積分,3,85',
   'Smartphone Application Development,3,85\n課程名稱,學分,成績\n微積分,3,85',
 ]) {
   test(`明確學業資料可送出且仍遮罩個資：${text}`, async () => {
@@ -253,3 +257,32 @@ test('簡體學號也遮罩批次與實際送出本文', async () => {
   assert.equal(bodies.length, 1);
   assert.equal(bodies[0].includes('A12345'), false);
 });
+
+for (const delimiter of [',', '\t', '|', ';', '、']) {
+  for (const source of [
+    '姓名,課程名稱,學分,成績\n王小明,日期,3,成績',
+    '課程名稱,姓名,班級,教室,學分,成績\n微積分,王小明,班級,教室,3,85',
+    '課程名稱,學號,班級,教室,學分,成績\n微積分,A12345,班級,教室,3,85',
+  ]) {
+    const text = source.replaceAll(',', delimiter);
+    test(`資料值撞到欄名仍遮罩私密欄：${JSON.stringify(text)}`, async () => {
+      assert.equal(isPersonalImportCloudMaskSafe(text), true);
+      const batch = maskPersonalImportCloudBatch(text, { text, startLine: 1 });
+      assert.ok(batch);
+      assert.doesNotMatch(batch.sourceText, /王小明|A12345/u);
+      assert.equal(maskPersonalImportText(batch.sourceText), batch.sourceText);
+      const [header, row] = text.split('\n');
+      for (const input of [{ text }, { text: row, columnContext: header },
+        { text: '課程名稱,學分,成績\n微積分,3,85', columnContext: text }]) {
+        let sent;
+        const result = await requestPersonalImportCloud({ ...input, kind: 'grades', fetcher: async (_, init) => {
+          sent = JSON.parse(init.body);
+          return Response.json({ output: '{}', sourceText: sent.text, columnContext: sent.columnContext });
+        } });
+        assert.equal(result.ok, true);
+        assert.doesNotMatch(JSON.stringify(sent), /王小明|A12345/u);
+        assert.match(JSON.stringify(sent), /個資已遮罩/u);
+      }
+    });
+  }
+}

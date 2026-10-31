@@ -130,7 +130,9 @@ function maskPrivateTables(text: string): { text: string; safe: boolean } {
           return { text: masked, safe: false };
         privateColumns = named;
         width = cells.length;
-      } else if (academic >= 2 || (cells.length === 1 && isAcademicBoundary(cells[0])) ||
+        // 多欄表格只有完整表頭才能重設，資料值撞到欄名仍沿用原欄位。
+      } else if ((academic >= 2 && cells.every((cell) => tableField.test(cell))) ||
+        (cells.length === 1 && isAcademicBoundary(cells[0])) ||
         (width === 1 && isAcademicBoundary(masked.slice(record.start, record.contentEnd).trim()))) {
         privateColumns = [];
         width = 0;
@@ -183,7 +185,7 @@ function academicSafetyText(text: string, numericSpans?: Array<[number, number]>
         const numeric = /^(?:課程代碼|科目代碼|課號|日期|course code|date)$/iu.test(header) && /^\d{6,8}$/u.test(cell);
         const title = /^(?:(?:課程|科目)名稱|course name|title)$/iu.test(header) &&
           !privateField.test(cell) && !/[\p{M}\p{Cf}\p{P}\p{S}]/u.test(cell) &&
-          !/姓名|名字|學號|学号|學生|身分證|身份證|郵件|電郵|電話|手機|student|name|email|mobile|\d{6,}/iu.test(normalizePrivateField(cell)) &&
+          !/姓名|名字|學號|学号|學生|身分證|身份證|郵件|電郵|電話|手機|教師|老師|教授|teacher|instructor|student|name|email|mobile|\d{6,}/iu.test(normalizePrivateField(cell)) &&
           // 課名必須有同列學分與成績，不能僅靠單一欄名宣告。
           rowHeaders.includes('學分') && rowHeaders.includes('成績') &&
           /^\d(?:\.\d+)?$/u.test(cells[rowHeaders.indexOf('學分')] ?? '') &&

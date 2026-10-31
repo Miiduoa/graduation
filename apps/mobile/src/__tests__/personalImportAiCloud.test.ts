@@ -310,3 +310,21 @@ test.each(['授課老師', '教授', 'instructor', '教師姓名', 'teacher_name
     expect(result.rows).toHaveLength(1);
   },
 );
+
+test.each(['Teacher Education', '教師 專業發展', '教師專業發展'])(
+  '有教師字樣的課名保留本機原文：%s', async (title) => {
+    const evidence = `${title},3,85`;
+    const source = `課程名稱,學分,成績\n${evidence}`;
+    jest.mocked(localLLM.generate).mockResolvedValue({
+      content: JSON.stringify({ complete: true, rows: [{ title, credits: 3, grade: '85', evidence }] }),
+      finishReason: 'stop', tokensGenerated: 50, tokensPerSecond: 5, totalTimeMs: 100,
+    });
+    const result = await runMobilePersonalImportAi(source, options, new AbortController().signal, request);
+    expect(mockFetch).not.toHaveBeenCalled();
+    expect(result.rows[0]).toMatchObject({ title, source: { rawText: evidence } });
+    jest.mocked(localLLM.getRuntimeAvailability).mockReturnValue({ available: false });
+    const rules = await runMobilePersonalImportAi(source, options, new AbortController().signal, request);
+    expect(mockFetch).not.toHaveBeenCalled();
+    expect(rules.rows[0]).toMatchObject({ title, source: { rawText: evidence } });
+  },
+);

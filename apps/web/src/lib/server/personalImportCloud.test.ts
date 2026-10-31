@@ -411,7 +411,12 @@ it.each(['姓\ufe0f名：王小明', '姓\u034f名,課程名稱,學分,成績\n�
   '課程名稱,學分,成績\n姓·名王小明,3,85', '課程名稱,學分,成績\n123456,3,85', '教\u034f師：陳大文', '學\ufe0f號：A12345',
   '姓\u20dd名：王小明', '課程名\u034f稱,學分,成績', '姓\u200b名：王小明', '學\u200b號：123456', '教\u200b師：陳大文',
   '姓\u00ad名：王小明', '學+號：123456', '教⋅師：陳大文',
-  '姓\u2060名：王小明', '教🟢師：陳大文', '編碼,123456', '編碼,１２３４５６７', '編碼,A12345678901234'])('格式符號或疑似學號不進入供應商本文：%s', async (head) => {
+  '姓\u2060名：王小明', '教🟢師：陳大文', '編碼,123456', '編碼,１２３４５６７', '編碼,A12345678901234',
+  '教師陳大文,3,85', '教師\u2028陳大文,3,85', '教師\u0001陳大文,3,85',
+  'teacher陳大文,3,85', '老師陳大文,3,85', '教授陳大文,3,85', 'instructor陳大文,3,85',
+  '課程名稱,學分,成績\n教師陳大文,3,85',
+  '課程名稱,學分,成績\nTeacher Education,3,85', '課程名稱,學分,成績\n教師 專業發展,2,90',
+  '教師專業發展,2,90'])('格式符號或疑似學號不進入供應商本文：%s', async (head) => {
   const { dependencies, fetcher, getQuotaStore } = setup();
   const text = `${head}\n課程名稱,學分,成績\n微積分,3,85`;
   for (const input of [{ text }, { text: '微積分,3,85', columnContext: head }]) {
@@ -427,7 +432,6 @@ it.each([
   '日期,課程名稱,教室\n20261031,程式設計,A101',
   '課程代碼,123456\n課程名稱,學分,成績\n微積分,3,85',
   '日期,20261031\n課程名稱,學分,成績\n微積分,3,85',
-  '教師專業發展,2,90\n課程名稱,學分,成績\n微積分,3,85',
   'Smartphone Application Development,3,85\n課程名稱,學分,成績\n微積分,3,85',
 ])('明確學業資料仍可進入供應商且無姓名原值：%s', async (text) => {
   const { dependencies, fetcher } = setup();
@@ -444,4 +448,25 @@ it('簡體學號原值不進入供應商本文', async () => {
   expect((await handlePersonalImportCloud(request({ text: '学号：A12345\n課程名稱,學分,成績\n微積分,3,85', kind: 'grades' }), dependencies)).status).toBe(200);
   expect(fetcher).toHaveBeenCalledOnce();
   expect(String(fetcher.mock.calls[0][1].body)).not.toContain('A12345');
+});
+
+it.each([
+  '姓名,課程名稱,學分,成績\n王小明,日期,3,成績',
+  '課程名稱,姓名,班級,教室,學分,成績\n微積分,王小明,班級,教室,3,85',
+  '課程名稱,學號,班級,教室,學分,成績\n微積分,A12345,班級,教室,3,85',
+])('資料值撞到欄名仍在供應商前遮罩私密欄：%s', async (text) => {
+  for (const delimiter of [',', '\t', '|', ';', '、']) {
+    const source = text.replaceAll(',', delimiter);
+    const [header, row] = source.split('\n');
+    for (const input of [{ text: source }, { text: row, columnContext: header },
+      { text: '課程名稱,學分,成績\n微積分,3,85', columnContext: source }]) {
+      const { dependencies, fetcher } = setup();
+      const response = await handlePersonalImportCloud(request({ ...input, kind: 'grades' }), dependencies);
+      expect(response.status).toBe(200);
+      expect(fetcher).toHaveBeenCalledOnce();
+      expect(String(fetcher.mock.calls[0][1].body)).not.toMatch(/王小明|A12345/u);
+      expect(String(fetcher.mock.calls[0][1].body)).toContain('個資已遮罩');
+      expect(JSON.stringify(await response.json())).not.toMatch(/王小明|A12345/u);
+    }
+  }
 });

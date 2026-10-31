@@ -306,3 +306,21 @@ it.each(['授課老師', '教授', 'instructor', '教師姓名', 'teacher_name']
     expect(fetcher.mock.calls[0][1].body).not.toContain('王小明');
   },
 );
+
+it.each(['Teacher Education', '教師 專業發展', '教師專業發展'])(
+  '有教師字樣的課名保留本機原文：%s', async (title) => {
+    const evidence = `${title},3,85`;
+    const text = `課程名稱,學分,成績\n${evidence}`;
+    const output = JSON.stringify({ complete: true, rows: [{ title, credits: 3, grade: '85', evidence }] });
+    vi.mocked(runLocalPersonalImportAi).mockImplementation(async ({ input }) =>
+      parsePersonalImportAiResponse(output, input.text!, options));
+    const result = await run(text);
+    expect(fetcher).not.toHaveBeenCalled();
+    expect(runLocalPersonalImportAi).toHaveBeenCalledWith(expect.objectContaining({ input: { text } }));
+    expect(result.rows[0]).toMatchObject({ title, source: { rawText: evidence } });
+    vi.mocked(localAvailability).mockReturnValue({ available: false, downloadLabel: '' });
+    const rules = await run(text);
+    expect(fetcher).not.toHaveBeenCalled();
+    expect(rules.rows[0]).toMatchObject({ title, source: { rawText: evidence } });
+  },
+);
