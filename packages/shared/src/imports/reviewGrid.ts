@@ -2,6 +2,9 @@ import type { PersonalImportRow } from './types';
 import { periodSlots, type PeriodProfileId } from '../timetable/schoolPeriods';
 import { createPersonalImportId } from './records';
 
+export const REVIEW_SPLIT_UNAVAILABLE =
+  '此學校尚未設定節次時間表，無法可靠拆分；已保留原課程與手填時間，請逐筆新增單節課程並核對時間。';
+
 export const REVIEW_DAYS = ['一', '二', '三', '四', '五', '六', '日'];
 
 export function reviewPeriods(rows: PersonalImportRow[], profile?: PeriodProfileId) {
@@ -33,12 +36,18 @@ export function splitReviewRow(
   const start = row.startPeriod;
   const end = row.endPeriod;
   if (
+    !profile ||
     !start ||
+    start < 1 ||
     !end ||
     !Number.isSafeInteger(start) ||
     !Number.isSafeInteger(end) ||
     end <= start ||
-    end > 99
+    end > 99 ||
+    !periodSlots(profile)
+      .slice(start - 1, end)
+      .every((slot) => slot?.start && slot?.end) ||
+    end > periodSlots(profile).length
   )
     return [row];
   return Array.from({ length: end - start + 1 }, (_, offset) => {

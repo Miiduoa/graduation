@@ -66,7 +66,11 @@ import {
 } from '@/lib/personalImportAi';
 import styles from './PersonalImport.module.css';
 import { TimetableReviewGrid } from './TimetableReviewGrid';
-import { nextReviewRow, splitReviewRow } from '@campus/shared/src/imports/reviewGrid';
+import {
+  nextReviewRow,
+  REVIEW_SPLIT_UNAVAILABLE,
+  splitReviewRow,
+} from '@campus/shared/src/imports/reviewGrid';
 import { CourseAccessPanel } from './CourseAccessPanel';
 import { DocumentSelection } from './DocumentSelection';
 import { PersonalImportSyncPanel } from './PersonalImportSync';
@@ -2089,6 +2093,15 @@ function ImportWorkspace({
                               onClick={() => {
                                 setAiReviewed(false);
                                 const parts = splitReviewRow(row, periodProfile);
+                                if (parts.length === 1) {
+                                  setNotice(REVIEW_SPLIT_UNAVAILABLE);
+                                  return;
+                                }
+                                setExcluded((current) =>
+                                  current.includes(row.id)
+                                    ? [...new Set([...current, ...parts.map((item) => item.id)])]
+                                    : current,
+                                );
                                 setEditedIds((current) => [
                                   ...new Set([...current, ...parts.map((item) => item.id)]),
                                 ]);

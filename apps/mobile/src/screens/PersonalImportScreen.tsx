@@ -1,10 +1,17 @@
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { readImportReviewDraft, writeImportReviewDraft } from '../services/personalImportDrafts';
 import { TimetableReviewGrid } from '../components/TimetableReviewGrid';
-import { nextReviewRow, splitReviewRow } from '@campus/shared/src/imports/reviewGrid';
+import {
+  nextReviewRow,
+  REVIEW_SPLIT_UNAVAILABLE,
+  splitReviewRow,
+} from '@campus/shared/src/imports/reviewGrid';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Image,
+  KeyboardAvoidingView,
+  Platform,
   Modal,
   Pressable,
   ScrollView,
@@ -1884,99 +1891,116 @@ function ImportWorkspace({
             transparent={false}
             onRequestClose={() => setGridEditing(null)}
           >
-            <ScrollView
-              contentContainerStyle={{
-                padding: 20,
-                gap: 12,
-                backgroundColor: theme.colors.surface,
-              }}
-            >
-              <Text style={{ color: theme.colors.text, fontSize: 20 }}>修正草稿課程</Text>
-              {sourceImage ? (
-                <Image
-                  source={{ uri: sourceImage.uri }}
-                  accessibilityLabel="原始匯入截圖"
-                  resizeMode="contain"
-                  style={{ width: '100%', height: 220 }}
-                />
-              ) : null}
-              {gridRow ? (
-                <>
-                  <RowEditor
-                    row={gridRow}
-                    workspaces={workspaces}
-                    periodProfile={profile}
-                    disabled={saving || busy}
-                    onChange={(next) => updateDraft(gridRow, next)}
-                  />
-                  <Button
-                    text="拆成單節課程"
-                    disabled={
-                      saving ||
-                      busy ||
-                      !gridRow.startPeriod ||
-                      !gridRow.endPeriod ||
-                      gridRow.endPeriod <= gridRow.startPeriod
-                    }
-                    onPress={() => {
-                      const parts = splitReviewRow(gridRow, profile);
-                      setEditedIds((current) => [
-                        ...new Set([...current, ...parts.map((item) => item.id)]),
-                      ]);
-                      setRows((current) =>
-                        current.flatMap((row) => (row.id === gridRow.id ? parts : [row])),
-                      );
-                      setSelected(
-                        (current) => new Set([...current, ...parts.map((row) => row.id)]),
-                      );
-                      setAiReviewed(false);
-                      setGridEditing(null);
-                    }}
-                  />
-                  <Button
-                    text="與下一節同名課程合併"
-                    disabled={
-                      saving ||
-                      busy ||
-                      !nextReviewRow(
-                        rows.filter((item) => selected.has(item.id)),
-                        gridRow,
-                      )
-                    }
-                    onPress={() => {
-                      const next = nextReviewRow(
-                        rows.filter((item) => selected.has(item.id)),
-                        gridRow,
-                      );
-                      if (!next) return;
-                      updateDraft(gridRow, {
-                        ...gridRow,
-                        endPeriod: next.endPeriod ?? next.startPeriod,
-                        endTime: next.endTime,
-                        periodLabel: undefined,
-                      });
-                      setRows((current) => current.filter((item) => item.id !== next.id));
-                      setSelected(
-                        (current) => new Set([...current].filter((id) => id !== next.id)),
-                      );
-                    }}
-                  />
-                  <Button
-                    text="刪除此草稿課程"
-                    disabled={saving || busy}
-                    onPress={() => {
-                      setRows((current) => current.filter((row) => row.id !== gridRow.id));
-                      setSelected(
-                        (current) => new Set([...current].filter((id) => id !== gridRow.id)),
-                      );
-                      setAiReviewed(false);
-                      setGridEditing(null);
-                    }}
-                  />
-                </>
-              ) : null}
-              <Button text="回到週課表核對" onPress={() => setGridEditing(null)} />
-            </ScrollView>
+            <SafeAreaView style={{ flex: 1, backgroundColor: theme.colors.surface }}>
+              <KeyboardAvoidingView
+                style={{ flex: 1 }}
+                behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+              >
+                <ScrollView
+                  keyboardShouldPersistTaps="handled"
+                  contentContainerStyle={{
+                    padding: 20,
+                    gap: 12,
+                    backgroundColor: theme.colors.surface,
+                  }}
+                >
+                  <Text style={{ color: theme.colors.text, fontSize: 20 }}>修正草稿課程</Text>
+                  {notice === REVIEW_SPLIT_UNAVAILABLE ? (
+                    <Text accessibilityRole="alert" style={{ color: theme.colors.text }}>
+                      {notice}
+                    </Text>
+                  ) : null}
+                  {sourceImage ? (
+                    <Image
+                      source={{ uri: sourceImage.uri }}
+                      accessibilityLabel="原始匯入截圖"
+                      resizeMode="contain"
+                      style={{ width: '100%', height: 220 }}
+                    />
+                  ) : null}
+                  {gridRow ? (
+                    <>
+                      <RowEditor
+                        row={gridRow}
+                        workspaces={workspaces}
+                        periodProfile={profile}
+                        disabled={saving || busy}
+                        onChange={(next) => updateDraft(gridRow, next)}
+                      />
+                      <Button
+                        text="拆成單節課程"
+                        disabled={
+                          saving ||
+                          busy ||
+                          !gridRow.startPeriod ||
+                          !gridRow.endPeriod ||
+                          gridRow.endPeriod <= gridRow.startPeriod
+                        }
+                        onPress={() => {
+                          const parts = splitReviewRow(gridRow, profile);
+                          if (parts.length === 1) {
+                            setNotice(REVIEW_SPLIT_UNAVAILABLE);
+                            return;
+                          }
+                          setEditedIds((current) => [
+                            ...new Set([...current, ...parts.map((item) => item.id)]),
+                          ]);
+                          setRows((current) =>
+                            current.flatMap((row) => (row.id === gridRow.id ? parts : [row])),
+                          );
+                          setSelected(
+                            (current) => new Set([...current, ...parts.map((row) => row.id)]),
+                          );
+                          setAiReviewed(false);
+                          setGridEditing(null);
+                        }}
+                      />
+                      <Button
+                        text="與下一節同名課程合併"
+                        disabled={
+                          saving ||
+                          busy ||
+                          !nextReviewRow(
+                            rows.filter((item) => selected.has(item.id)),
+                            gridRow,
+                          )
+                        }
+                        onPress={() => {
+                          const next = nextReviewRow(
+                            rows.filter((item) => selected.has(item.id)),
+                            gridRow,
+                          );
+                          if (!next) return;
+                          updateDraft(gridRow, {
+                            ...gridRow,
+                            endPeriod: next.endPeriod ?? next.startPeriod,
+                            endTime: next.endTime,
+                            periodLabel: undefined,
+                          });
+                          setRows((current) => current.filter((item) => item.id !== next.id));
+                          setSelected(
+                            (current) => new Set([...current].filter((id) => id !== next.id)),
+                          );
+                        }}
+                      />
+                      <Button
+                        text="刪除此草稿課程"
+                        disabled={saving || busy}
+                        onPress={() => {
+                          setRows((current) => current.filter((row) => row.id !== gridRow.id));
+                          setSelected(
+                            (current) => new Set([...current].filter((id) => id !== gridRow.id)),
+                          );
+                          setAiReviewed(false);
+                          setGridEditing(null);
+                        }}
+                      />
+                    </>
+                  ) : null}
+                  <Button text="回到週課表核對" onPress={() => setGridEditing(null)} />
+                </ScrollView>
+              </KeyboardAvoidingView>
+            </SafeAreaView>
           </Modal>
           {sourceImage && !documentPrep && !backupPreview ? (
             <Pressable
@@ -2193,6 +2217,10 @@ function ImportWorkspace({
                           }
                           onPress={() => {
                             const parts = splitReviewRow(row, profile);
+                            if (parts.length === 1) {
+                              setNotice(REVIEW_SPLIT_UNAVAILABLE);
+                              return;
+                            }
                             setEditedIds((current) => [
                               ...new Set([...current, ...parts.map((item) => item.id)]),
                             ]);

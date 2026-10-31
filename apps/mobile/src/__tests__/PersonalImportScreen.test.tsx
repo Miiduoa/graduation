@@ -1617,3 +1617,42 @@ test('failed screenshot reading can be completed entirely by manual grid input',
     startPeriod: 3,
   });
 });
+
+test('未知學校在清單與格子拆分均提示並保留手填時間，返回後可確認原課程', async () => {
+  mockScope = { owner: scope.owner, schoolId: 'unknown-school' };
+  const view = render(<PersonalImportScreen />);
+  await waitFor(() => expect(view.queryByText('正在讀取匯入草稿…')).toBeNull(), { timeout: 10000 });
+  await waitFor(() => expect(view.queryByLabelText('讀取匯入紀錄')).toBeNull());
+  fireEvent.changeText(view.getByLabelText('這批資料的學年度（例如 115）'), '115');
+  fireEvent.changeText(view.getByLabelText('這批資料的學期（例如 1、2、暑期）'), '1');
+  fireEvent.changeText(
+    view.getByLabelText('貼上或修正原始文字'),
+    '課程名稱,星期,開始節次,結束節次,開始時間,結束時間\n手填課程,一,1,2,09:00,10:50',
+  );
+  fireEvent.press(view.getByText('整理成可編輯資料'));
+  await view.findByLabelText('修正星期一第1節 手填課程');
+  fireEvent.press(view.getByText('拆成單節課程'));
+  expect(view.getByText(/無法可靠拆分；已保留原課程與手填時間/)).toBeTruthy();
+  fireEvent.press(view.getByLabelText('修正星期一第1節 手填課程'));
+  expect(view.getByLabelText('開始時間 HH:mm').props.value).toBe('09:00');
+  fireEvent.press(view.getByText('拆成單節課程'));
+  expect(view.getAllByText(/無法可靠拆分；已保留原課程與手填時間/).length).toBeGreaterThan(0);
+  expect(view.getByLabelText('結束時間 HH:mm').props.value).toBe('10:50');
+  fireEvent.changeText(view.getByLabelText('結束時間 HH:mm'), '11:00');
+  fireEvent.press(view.getByText('回到週課表核對'));
+  fireEvent.press(view.getByLabelText('修正星期一第1節 手填課程'));
+  expect(view.getByLabelText('結束時間 HH:mm').props.value).toBe('11:00');
+  fireEvent.changeText(view.getByLabelText('結束時間 HH:mm'), '10:50');
+  fireEvent.press(view.getByText('回到週課表核對'));
+  fireEvent.press(view.getByText('確認新增 1 筆'));
+  await waitFor(async () => {
+    const records = (await loadPersonalImports(mockScope!)).records;
+    expect(records).toHaveLength(1);
+    expect(records[0]).toMatchObject({
+      startPeriod: 1,
+      endPeriod: 2,
+      startTime: '09:00',
+      endTime: '10:50',
+    });
+  });
+});
