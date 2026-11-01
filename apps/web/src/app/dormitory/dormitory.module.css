@@ -510,6 +510,10 @@
   outline-offset: 3px;
 }
 
+.stack .tabs button:focus-visible {
+  outline-offset: -4px;
+}
+
 @media (max-width: 1060px) {
   .hero { flex-direction: column; }
   .heroStats {
