@@ -3,9 +3,11 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import {
   collection,
   doc,
+  deleteField,
   getDoc,
   getDocs,
   query,
+  runTransaction,
   serverTimestamp,
   setDoc,
   updateDoc,
@@ -13,6 +15,10 @@ import {
 } from 'firebase/firestore';
 import { httpsCallable } from 'firebase/functions';
 import {
+  assertClassExceptions,
+  classExceptionsForStorage,
+  assertTimetableStorageSize,
+  withClassExceptions,
   MEETUP_DURATION_MINUTES,
   MAX_PERIOD_SLOTS,
   cleanCourses,
@@ -31,6 +37,8 @@ import { isProvidenceSchoolId, toPublicSchoolId } from '../data/schoolIds';
 const KEY = 'campus-one-personal-timetable';
 
 export type StoredTimetable = {
+  classExceptionsRevision?: number;
+  classExceptions?: import('@campus/shared').ClassException[];
   courses: PersonalCourse[];
   meta: TimetableMeta;
   shareWithFriends: boolean;
@@ -68,6 +76,10 @@ function cloudScopedRef(uid: string, schoolId: string) {
   );
 }
 
+function cloudExceptionsRef(uid: string, schoolId: string) {
+  return doc(getDb(), 'users', uid, 'schools', canonicalSchoolId(schoolId), 'personalTimetable', 'exceptions');
+}
+
 function cloudLegacyRef(uid: string) {
   return doc(getDb(), 'users', uid, 'personalTimetable', 'current');
 }
@@ -83,6 +95,7 @@ function empty(schoolId: string): StoredTimetable {
 }
 
 function asStored(data: StoredTimetable, schoolId: string): StoredTimetable {
+  assertClassExceptions(data.classExceptions);
   const canonical = canonicalSchoolId(schoolId);
   return {
     ...empty(canonical),
@@ -108,6 +121,7 @@ async function readLocalTimetable(owner: string, schoolId: string, allowLegacy: 
   const invalid = () => new Error('儲存的課表無法讀取，已保留原始資料。請稍後重試，或先備份再處理。');
   let parsed: StoredTimetable;
   try { parsed = JSON.parse(raw) as StoredTimetable; } catch { throw invalid(); }
+  assertClassExceptions(parsed?.classExceptions);
   // Only an explicitly different-school legacy record may be ignored.
   if (scoped === null && typeof parsed?.schoolId === 'string' && !sameSchool(parsed.schoolId, schoolId)) {
     return empty(canonical);
@@ -159,6 +173,28 @@ export async function loadOfflinePersonalTimetable(
   return hasScopedCopy ? readLocalTimetable(uid, schoolId, false) : null;
 }
 
+export type TimetableDraft = StoredTimetable & { pendingBase?: boolean; pendingExceptions?: boolean };
+
+export function restorePersonalTimetableDraft(current: StoredTimetable, draft: TimetableDraft): StoredTimetable {
+  const base = draft.pendingBase !== false ? draft : current;
+  return {
+    ...current,
+    courses: base.courses,
+    meta: base.meta,
+    shareWithFriends: base.shareWithFriends,
+    classExceptions: draft.pendingExceptions !== false ? draft.classExceptions : current.classExceptions,
+    classExceptionsRevision: current.classExceptionsRevision,
+  };
+}
+
+export async function loadPersonalTimetableDraft(uid: string, schoolId: string): Promise<TimetableDraft | null> {
+  const raw = await AsyncStorage.getItem(`${KEY}:${uid}:${canonicalSchoolId(schoolId)}:draft`);
+  if (!raw) return null;
+  const draft = JSON.parse(raw) as TimetableDraft;
+  if (!sameSchool(draft.schoolId, schoolId)) return null;
+  return { ...asStored(draft, schoolId), pendingBase: draft.pendingBase, pendingExceptions: draft.pendingExceptions };
+}
+
 export async function loadPersonalTimetable(
   uid: string | null,
   schoolId: string,
@@ -169,7 +205,10 @@ export async function loadPersonalTimetable(
   const fallback = await readLocalTimetable(owner, schoolId, !localOwner);
   if (!uid || localOwner) return withLocalFallback(canonical, fallback);
   let scopedSnap;
+  let arrangements: Partial<StoredTimetable> = {};
   try {
+    const exceptionSnap = await getDoc(cloudExceptionsRef(uid, canonical));
+    if (exceptionSnap.exists()) arrangements = exceptionSnap.data() as Partial<StoredTimetable>;
     scopedSnap = await getDoc(cloudScopedRef(uid, canonical));
   } catch {
     // Failed scoped read must not trigger legacy fallback.
@@ -178,23 +217,27 @@ export async function loadPersonalTimetable(
   if (scopedSnap.exists()) {
     const data = scopedSnap.data() as StoredTimetable;
     if (!sameSchool(data.schoolId, canonical)) return withLocalFallback(canonical, fallback);
-    return asStored(data, canonical);
+    const latest = asStored({ ...data, ...arrangements }, canonical);
+    await AsyncStorage.setItem(`${KEY}:${owner}:${canonical}`, JSON.stringify(latest));
+    return latest;
   }
   try {
     const legacySnap = await getDoc(cloudLegacyRef(uid));
-    if (!legacySnap.exists()) return withLocalFallback(canonical, fallback);
+    if (!legacySnap.exists()) return withLocalFallback(canonical, { ...fallback, ...arrangements });
     const data = legacySnap.data() as StoredTimetable;
     if (!sameSchool(data.schoolId, canonical)) return withLocalFallback(canonical, fallback);
-    return asStored(data, canonical);
+    const latest = asStored({ ...data, ...arrangements }, canonical);
+    await AsyncStorage.setItem(`${KEY}:${owner}:${canonical}`, JSON.stringify(latest));
+    return latest;
   } catch {
     return withLocalFallback(canonical, fallback);
   }
 }
 
-export async function savePersonalTimetable(uid: string | null, timetable: StoredTimetable, localOwner?: string) {
+export async function savePersonalTimetable(uid: string | null, timetable: StoredTimetable, localOwner?: string, editExceptions?: boolean) {
   const canonical = canonicalSchoolId(timetable.schoolId);
   // A failed read must not be replaced by a newly created empty timetable.
-  await readLocalTimetable(localOwner || uid || 'local', timetable.schoolId, !localOwner);
+  const previous = await readLocalTimetable(localOwner || uid || 'local', timetable.schoolId, !localOwner);
   const next = {
     ...timetable,
     schoolId: canonical,
@@ -202,24 +245,112 @@ export async function savePersonalTimetable(uid: string | null, timetable: Store
     meta: cleanMeta(timetable.meta),
     updatedAt: new Date().toISOString(),
   };
-  await AsyncStorage.setItem(`${KEY}:${localOwner || uid || 'local'}:${canonical}`, JSON.stringify(next));
-  if (!uid || localOwner) {
+  if (next.classExceptions === undefined && previous.classExceptions !== undefined) next.classExceptions = previous.classExceptions;
+  if (next.classExceptions !== undefined) next.classExceptions = classExceptionsForStorage(next.classExceptions);
+  assertTimetableStorageSize(next);
+  const editingExceptions = timetable.classExceptions !== undefined && (editExceptions ??
+    JSON.stringify(next.classExceptions) !== JSON.stringify(previous.classExceptions));
+  const store = async (value: StoredTimetable) => {
+    await AsyncStorage.setItem(`${KEY}:${localOwner || uid || 'local'}:${canonical}`, JSON.stringify(value));
     notifyTimetableChanged();
+  };
+  if (!uid || localOwner) {
+    await store(next);
     return { stored: 'local' as const };
   }
-  await setDoc(cloudScopedRef(uid, canonical), {
-    ...next,
-    // 送申訴時規則用這兩個清單確認課在自己的課表裡
-    ...timetableIndex(next.courses),
-    updatedAt: serverTimestamp(),
-  });
-  notifyTimetableChanged();
-  return { stored: 'cloud' as const };
+  const draftKey = `${KEY}:${uid}:${canonical}:draft`;
+  const updateDraft = async (synced: boolean) => {
+    const old = await loadPersonalTimetableDraft(uid, canonical);
+    const draft: TimetableDraft = old ?? { ...next, pendingBase: false, pendingExceptions: false };
+    // Historical drafts may contain both kinds of changes; preserve both until saved.
+    draft.pendingBase ??= true;
+    draft.pendingExceptions ??= true;
+    if (editingExceptions) {
+      if (!synced) draft.classExceptions = next.classExceptions;
+      const sameExceptions = JSON.stringify(classExceptionsForStorage(draft.classExceptions ?? [])) ===
+        JSON.stringify(next.classExceptions ?? []);
+      draft.pendingExceptions = synced ? draft.pendingExceptions && !sameExceptions : true;
+    } else {
+      if (!synced) {
+        draft.courses = next.courses;
+        draft.meta = next.meta;
+        draft.shareWithFriends = next.shareWithFriends;
+      }
+      const sameBase = JSON.stringify([draft.courses, draft.meta, draft.shareWithFriends]) ===
+        JSON.stringify([next.courses, next.meta, next.shareWithFriends]);
+      draft.pendingBase = synced ? draft.pendingBase && !sameBase : true;
+    }
+    if (draft.pendingBase || draft.pendingExceptions) await AsyncStorage.setItem(draftKey, JSON.stringify(draft));
+    else await AsyncStorage.removeItem(draftKey);
+  };
+  let conflict = false;
+  try {
+    const ref = cloudScopedRef(uid, canonical);
+    const saved = await runTransaction(getDb(), async (transaction) => {
+      const snap = await transaction.get(ref);
+      const remote = snap.exists() ? snap.data() as StoredTimetable : undefined;
+      const exceptionRef = cloudExceptionsRef(uid, canonical);
+      const exceptionSnap = await transaction.get(exceptionRef);
+      const legacySnap = await transaction.get(cloudLegacyRef(uid));
+      const legacy = legacySnap.exists() ? legacySnap.data() as StoredTimetable : undefined;
+      const embedded = remote?.classExceptions !== undefined ? remote :
+        (legacy && sameSchool(legacy.schoolId, canonical) ? legacy : undefined);
+      const remoteExceptions = exceptionSnap.exists() ? exceptionSnap.data() as StoredTimetable : embedded;
+      const remoteRevision = remoteExceptions?.classExceptionsRevision ?? 0;
+      const priorBase = remote ?? (legacy && sameSchool(legacy.schoolId, canonical) ? legacy : undefined);
+      const payload = editingExceptions ? {
+        ...next,
+        courses: priorBase?.courses ?? [],
+        meta: priorBase?.meta ?? cleanMeta({}),
+        shareWithFriends: priorBase?.shareWithFriends ?? false,
+      } : { ...next };
+      if (editingExceptions) {
+        if ((timetable.classExceptionsRevision ?? 0) !== remoteRevision) {
+          conflict = true;
+          throw new Error('課表已在其他裝置更新，請重新載入後再調整。');
+        }
+        payload.classExceptionsRevision = remoteRevision + 1;
+      } else {
+        payload.classExceptions = classExceptionsForStorage(remoteExceptions?.classExceptions ?? []);
+        payload.classExceptionsRevision = remoteRevision + (
+          remoteExceptions?.classExceptions !== undefined &&
+          JSON.stringify(payload.classExceptions) !== JSON.stringify(remoteExceptions.classExceptions) ? 1 : 0
+        );
+      }
+      if (legacySnap.exists() && sameSchool((legacySnap.data() as StoredTimetable).schoolId, canonical) && legacySnap.data().classExceptions !== undefined) {
+        transaction.set(cloudLegacyRef(uid), { classExceptions: deleteField(), classExceptionsRevision: deleteField() }, { merge: true });
+      }
+      transaction.set(exceptionRef, {
+        schoolId: canonical,
+        classExceptions: payload.classExceptions ?? [],
+        classExceptionsRevision: payload.classExceptionsRevision ?? remoteRevision,
+      });
+      assertTimetableStorageSize(payload);
+      const base = { ...payload };
+      delete base.classExceptions;
+      delete base.classExceptionsRevision;
+      transaction.set(ref, {
+        ...base,
+        ...(remote?.classExceptions !== undefined ? { classExceptions: deleteField(), classExceptionsRevision: deleteField() } : {}),
+        ...timetableIndex(payload.courses),
+        updatedAt: serverTimestamp(),
+      }, { merge: true });
+      return payload;
+    });
+    await store(saved);
+    await updateDraft(true);
+    return { stored: 'cloud' as const, timetable: saved };
+  } catch (error) {
+    await updateDraft(false);
+    if (conflict) throw error;
+    await store(next);
+    return { stored: 'local' as const, cloudPending: true };
+  }
 }
 
 /** Projection only: the user's saved courses remain in their original storage. */
-export function personalTimetableRecords(timetable: StoredTimetable): PersonalImportRecord[] {
-  return timetable.courses.map((course) => ({
+export function personalTimetableRecords(timetable: StoredTimetable, imported: PersonalImportRecord[] = []): PersonalImportRecord[] {
+  const manual: PersonalImportRecord[] = timetable.courses.map((course) => ({
     id: `manual:${course.id}`, batchId: 'manual-timetable', importedAt: timetable.updatedAt,
     kind: 'timetable', schoolId: timetable.schoolId,
     academicYear: timetable.meta.year || '未填', semester: timetable.meta.semester || '未填',
@@ -227,6 +358,7 @@ export function personalTimetableRecords(timetable: StoredTimetable): PersonalIm
     dayOfWeek: course.day, startPeriod: course.start, endPeriod: course.end,
     source: { type: 'paste', line: 1, rawText: '' },
   }));
+  return withClassExceptions([...manual, ...imported], timetable.classExceptions);
 }
 
 export async function loadFriendTimetable(friendUid: string, schoolId: string) {
@@ -245,7 +377,8 @@ export async function loadFriendTimetable(friendUid: string, schoolId: string) {
     const data = scopedSnap.data() as StoredTimetable;
     if (data.shareWithFriends !== true) return null;
     if (!sameSchool(data.schoolId, canonical)) return null;
-    return asStored(data, canonical);
+    const exceptionSnap = await getDoc(cloudExceptionsRef(friendUid, canonical));
+    return asStored({ ...data, ...(exceptionSnap.exists() ? exceptionSnap.data() : {}) }, canonical);
   }
   try {
     const legacySnap = await getDoc(cloudLegacyRef(friendUid));
@@ -253,7 +386,8 @@ export async function loadFriendTimetable(friendUid: string, schoolId: string) {
     const data = legacySnap.data() as StoredTimetable;
     if (data.shareWithFriends !== true) return null;
     if (!sameSchool(data.schoolId, canonical)) return null;
-    return asStored(data, canonical);
+    const exceptionSnap = await getDoc(cloudExceptionsRef(friendUid, canonical));
+    return asStored({ ...data, ...(exceptionSnap.exists() ? exceptionSnap.data() : {}) }, canonical);
   } catch {
     return null;
   }

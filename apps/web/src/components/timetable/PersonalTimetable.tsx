@@ -1,5 +1,8 @@
 'use client';
 
+import { ClassExceptions } from './ClassExceptions';
+import { manualClassRecords } from '@campus/shared';
+
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
@@ -810,6 +813,12 @@ function TimetableWorkspace({ schoolId }: { schoolId: string }) {
           </ul>
         </section>
       )}
+      <ClassExceptions records={[...manualClassRecords(timetable), ...imported.records]}
+        exceptions={timetable.classExceptions} schoolId={schoolId}
+        termKey={activeTerm === 'manual' ? `${timetable.meta.year || '未填'}|${timetable.meta.semester || '未填'}` : activeTerm}
+        disabled={busy || imported.loading || !!imported.error}
+        onSave={async (classExceptions) => { if (!await persist({ ...timetable, classExceptions }, '這次安排已儲存。')) throw new Error('尚未完成儲存，請重試。'); }} />
+      <p className={styles.notice}>每週基準課表；指定日期的安排請查看上方。</p>
       <p className={styles.notice}>{TIMETABLE_DEVICE_ONLY_STORED_COPY}</p>
       {uid ? (
         <label className={styles.field}>

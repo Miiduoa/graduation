@@ -51,7 +51,7 @@ export function TodayTimetablePanel({ onOpenImport, onOpenTimetable, refreshKey 
         setSnapshot({
           scope: scopeKey,
           status: 'ready',
-          records: [...personalTimetableRecords(timetable), ...ledger.records],
+          records: personalTimetableRecords(timetable, ledger.records),
         });
     } catch {
       if (run === generation.current && currentScope.current === scopeKey)
