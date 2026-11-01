@@ -383,6 +383,11 @@ function FoodMenu({
     },
   );
   useEffect(() => {
+    // A failed verification read may follow a successful save. Keep the time
+    // fixed until storage recovery or a confirmed result unlocks the operation.
+    if (!mutation.locked) setSubmittingPickupAt(undefined);
+  }, [mutation.locked]);
+  useEffect(() => {
     const timer = setInterval(() => setNow(Date.now()), 1000);
     const subscription = AppState.addEventListener('change', (state) => {
       if (state === 'active') setNow(Date.now());
@@ -507,7 +512,6 @@ function FoodMenu({
       setSubmittingPickupAt(requestedPickupAt);
       void mutation.send({ kind: 'quote', input }).finally(() => {
         preparingQuote.current = false;
-        setSubmittingPickupAt(undefined);
       });
     } catch (failure) {
       setLineErrors(nextErrors);

@@ -736,6 +736,100 @@ describe('手機取餐時間', () => {
     expect(writes()[0][2].requestedPickupAt).toBe('2026-11-01T16:15:00.000Z');
   });
 
+  test('取餐操作已保存但回讀失敗時不漂移，恢復後沿用原時間與完整內容重試', async () => {
+    const view = render(ui());
+    await openBasket(view);
+    const getItem = SecureStore.getItemAsync as jest.Mock;
+    const originalRead = getItem.getMockImplementation()!;
+    let failedVerification = false;
+    getItem.mockImplementation(async (key: string) => {
+      const value = await originalRead(key);
+      if (!failedVerification && key.includes('food-pending.v1.') && value !== null) {
+        failedVerification = true;
+        throw new Error('verification read interrupted');
+      }
+      return value;
+    });
+    try {
+      fireEvent.press(view.getByRole('button', { name: '確認餐點與金額' }));
+      await view.findByText('目前無法安全保存這次訂餐操作，請稍後再試。');
+      expect(failedVerification).toBe(true);
+      const saved = await loadFoodPending('pa-a', 'food:school-one:location-one:intent');
+      expect(saved).toMatchObject({
+        kind: 'quote',
+        input: { requestedPickupAt: '2026-11-01T16:15:00.000Z' },
+      });
+      now.mockReturnValue(beforeMidnight + 2 * 60_000);
+      await act(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 1100));
+      });
+      expect(view.getByText('這次取餐時間 2026/11/02 00:15（台灣時間）')).toBeTruthy();
+      expect(view.queryByText(/^預計取餐 2026/)).toBeNull();
+      expect(view.getByRole('button', { name: '確認餐點與金額' })).toBeDisabled();
+      for (const minutes of ['15', '30', '60']) {
+        expect(view.getByRole('button', { name: `${minutes} 分鐘後` })).toBeDisabled();
+      }
+      expect(view.getByLabelText('幾分鐘後取餐').props.editable).toBe(false);
+      expect(writes()).toHaveLength(0);
+
+      getItem.mockRejectedValueOnce(new Error('recovery read interrupted'));
+      fireEvent.press(view.getByRole('button', { name: '重新確認裝置儲存' }));
+      await view.findByText('目前無法安全保存這次訂餐操作，請稍後再試。');
+      expect(view.getByText('這次取餐時間 2026/11/02 00:15（台灣時間）')).toBeTruthy();
+      expect(view.queryByText(/^預計取餐 2026/)).toBeNull();
+      expect(view.getByRole('button', { name: '確認餐點與金額' })).toBeDisabled();
+      expect(writes()).toHaveLength(0);
+
+      fireEvent.press(view.getByRole('button', { name: '重新確認裝置儲存' }));
+      await waitFor(() =>
+        expect(view.getByRole('button', { name: '重試確認這次送出' })).toBeEnabled(),
+      );
+      expect(view.getByText('這次取餐時間 2026/11/02 00:15（台灣時間）')).toBeTruthy();
+      expect(view.queryByText(/^預計取餐 2026/)).toBeNull();
+      expect(writes()).toHaveLength(0);
+      fireEvent.press(view.getByRole('button', { name: '重試確認這次送出' }));
+      await view.findByText('應付總額 180 元');
+      expect(writes()).toHaveLength(1);
+      expect(saved).toEqual({ kind: 'quote', input: writes()[0][2] });
+      expect(view.getByText('預計取餐 2026/11/02 00:15（台灣時間）')).toBeTruthy();
+      fireEvent.press(view.getByRole('button', { name: '返回修改餐點與取餐時間' }));
+      expect(view.getByText('預計取餐 2026/11/02 00:17（台灣時間）')).toBeTruthy();
+      expect(view.getByRole('button', { name: '確認餐點與金額' })).toBeEnabled();
+    } finally {
+      getItem.mockImplementation(originalRead);
+    }
+  });
+
+  test('取餐操作未寫入時仍固定時間，恢復確認無待處理內容才重新計算預覽', async () => {
+    const view = render(ui());
+    await openBasket(view);
+    (SecureStore.setItemAsync as jest.Mock).mockRejectedValueOnce(new Error('storage locked'));
+    fireEvent.press(view.getByRole('button', { name: '確認餐點與金額' }));
+    await view.findByText('目前無法安全保存這次訂餐操作，請稍後再試。');
+    now.mockReturnValue(beforeMidnight + 2 * 60_000);
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 1100));
+    });
+    expect(view.getByText('這次取餐時間 2026/11/02 00:15（台灣時間）')).toBeTruthy();
+    expect(view.queryByText(/^預計取餐 2026/)).toBeNull();
+    expect(view.getByRole('button', { name: '確認餐點與金額' })).toBeDisabled();
+    expect(writes()).toHaveLength(0);
+    expect(await loadFoodPending('pa-a', 'food:school-one:location-one:intent')).toBeNull();
+
+    fireEvent.press(view.getByRole('button', { name: '重新確認裝置儲存' }));
+    await waitFor(() => expect(view.getByRole('button', { name: '確認餐點與金額' })).toBeEnabled());
+    expect(view.getByText('預計取餐 2026/11/02 00:17（台灣時間）')).toBeTruthy();
+    expect(view.queryByText(/^這次取餐時間/)).toBeNull();
+    expect(view.getByLabelText('幾分鐘後取餐').props.editable).toBe(true);
+    expect(writes()).toHaveLength(0);
+    fireEvent.press(view.getByRole('button', { name: '15 分鐘後' }));
+    expect(view.getByText('預計取餐 2026/11/02 00:02（台灣時間）')).toBeTruthy();
+    fireEvent.press(view.getByRole('button', { name: '確認餐點與金額' }));
+    await view.findByText('應付總額 180 元');
+    expect(writes()).toHaveLength(1);
+    expect(writes()[0][2].requestedPickupAt).toBe('2026-11-01T16:02:00.000Z');
+  });
+
   test('報價回應遺失後鎖定時間，返回門市再進入仍顯示原時間並沿用原內容重試', async () => {
     let lostResponse = false;
     mockRequest.mockImplementation(async (path, context, input) => {
