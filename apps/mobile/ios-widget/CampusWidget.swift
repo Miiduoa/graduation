@@ -191,7 +191,8 @@ struct NextClassLiveWidget: Widget {
         } dynamicIsland: { context in
             DynamicIsland {
                 DynamicIslandExpandedRegion(.leading) {
-                    Text(context.isStale ? "已下課" : context.state.title).lineLimit(1)
+                    if context.isStale { Text("本堂已結束") }
+                    else { Text(context.state.title).lineLimit(1).privacySensitive() }
                 }
                 DynamicIslandExpandedRegion(.trailing) {
                     if !context.isStale { Text(context.state.start, style: .time) }
@@ -202,17 +203,17 @@ struct NextClassLiveWidget: Widget {
                         HStack {
                             Link("查看課程", destination: URL(string: context.state.url)!)
                             Spacer()
-                            Link(context.state.location, destination: URL(string: context.state.mapURL)!)
+                            Link(context.state.location, destination: URL(string: context.state.mapURL)!).privacySensitive()
                         }
                     }
                 }
             } compactLeading: {
-                Image(systemName: context.isStale ? "checkmark" : "book.closed")
+                Image(systemName: context.isStale ? "checkmark" : "book.closed").privacySensitive()
             } compactTrailing: {
                 if context.isStale { Text("下課") }
-                else { Text(context.state.start, style: .time) }
+                else { Text(context.state.start, style: .time).privacySensitive() }
             } minimal: {
-                Image(systemName: context.isStale ? "checkmark" : "book.closed")
+                Image(systemName: context.isStale ? "checkmark" : "book.closed").privacySensitive()
             }
             .widgetURL(URL(string: context.isStale ? "campus://personal-timetable" : context.state.url))
         }

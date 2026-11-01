@@ -185,3 +185,67 @@ test('activity attributes compile only in the extension target and match the loc
   const info = plist.parse(readFileSync(join(root, 'ios/mobile/Info.plist'), 'utf8'));
   assert.equal(info.NSSupportsLiveActivities, true);
 });
+
+test('live activity source and checked-in extension stay identical', () => {
+  assert.equal(
+    readFileSync(join(root, 'ios/CampusWidgetExtension/CampusWidget.swift'), 'utf8'),
+    readFileSync(join(root, 'ios-widget/CampusWidget.swift'), 'utf8'),
+  );
+});
+
+function blockAt(source, opening) {
+  let depth = 1;
+  let end = opening + 1;
+  while (depth && end < source.length) {
+    if (source[end] === '{') depth++;
+    if (source[end] === '}') depth--;
+    end++;
+  }
+  assert.equal(depth, 0, 'Swift block must be balanced');
+  return { body: source.slice(opening + 1, end - 1), end };
+}
+
+function staleContent(source) {
+  const condition = /if (!?)context\.isStale\s*\{/;
+  let match;
+  while ((match = condition.exec(source))) {
+    const active = blockAt(source, match.index + match[0].length - 1);
+    const alternate = /^\s*else\s*\{/.exec(source.slice(active.end));
+    const fallback = alternate
+      ? blockAt(source, active.end + alternate[0].length - 1)
+      : { body: '', end: active.end };
+    source = source.slice(0, match.index)
+      + (match[1] ? fallback.body : active.body) + source.slice(fallback.end);
+  }
+  return source
+    .replace(/context\.isStale \? "checkmark" : "book.closed"/g, '"checkmark"')
+    .replace(/context\.isStale \? "campus:\/\/personal-timetable" : context\.state\.url/g,
+      '"campus://personal-timetable"');
+}
+
+test('stale lock screen and every island region omit course data and classroom links', () => {
+  const source = readFileSync(join(root, 'ios-widget/CampusWidget.swift'), 'utf8');
+  const live = source.slice(source.indexOf('struct NextClassLiveWidget:'));
+  const stale = staleContent(live);
+  assert.doesNotMatch(stale, /context\.state|Link\(|找教室|查看課程/);
+  assert.match(stale, /這堂課已結束/);
+  assert.match(stale, /本堂已結束/);
+  assert.match(stale, /Text\("下課"\)/);
+  assert.match(stale, /開啟 nuni 看接下來的安排/);
+});
+
+test('live course views and all island presentations carry privacy markings', () => {
+  const source = readFileSync(join(root, 'ios-widget/CampusWidget.swift'), 'utf8');
+  const live = source.slice(source.indexOf('struct NextClassLiveWidget:'));
+  assert.match(live, /\}\s*\.padding\(\)\.privacySensitive\(\)/);
+  assert.match(live, /Text\(context\.state\.title\)\.lineLimit\(1\)\.privacySensitive\(\)/);
+  assert.match(live, /Link\(context\.state\.location,[^\n]+\.privacySensitive\(\)/);
+  for (const region of ['compactLeading', 'compactTrailing', 'minimal']) {
+    const start = live.indexOf(`} ${region}:`);
+    assert.ok(start >= 0, `${region} must exist`);
+    const opening = live.indexOf('{', start);
+    const { body } = blockAt(live, opening);
+    assert.match(body, /\.privacySensitive\(\)/, `${region} must mark its content`);
+    assert.doesNotMatch(body, /context\.state\.(title|location|mapURL)/);
+  }
+});
