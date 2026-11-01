@@ -1,6 +1,6 @@
 # 手機站牌詳情驗證紀錄
 
-2026-11-01，基準 main `c93b4ac3851df68f76d607af29b086030735dc55`。產品元件 `apps/mobile/src/components/PublicTransitExplorer.tsx` 的 Git blob 為 `6360e60e06033de6f75b0471ac8ee7bf3a80d641`；正式提交 SHA 與 CI 結果以 PR 為準。
+2026-11-01，基準 main `c93b4ac3851df68f76d607af29b086030735dc55`。產品元件 `apps/mobile/src/components/PublicTransitExplorer.tsx` 的 Git blob 為 `41398522b76905508924ed0fbc1e549d651e2d70`（對應分支 head，含焦點防護與清單外開重試）；第一提交 `4fd6cc3a` 當下 blob 為 `6360e60e06033de6f75b0471ac8ee7bf3a80d641`。正式提交 SHA 與 CI 結果以 PR 為準。瀏覽器畫面與 `browser-results.json` 以第一提交產品樹為基準；第二提交的 Web 焦點防護與清單外開重試另以 Jest 覆蓋。
 
 ## 使用者行為
 
@@ -10,7 +10,7 @@
 
 - Node 22.23.4、pnpm 10.28.2；以 `pnpm install --frozen-lockfile --offline` 使用既有 store。執行命令皆設 `EXPO_NO_DOTENV=1`、`DOTENV_CONFIG_PATH=/dev/null`。
 - 完整 `pnpm typecheck` 與 `pnpm lint` 通過。Lint 共 695 項既有 warnings，0 errors；修改的產品元件及測試沒有 lint 警告。焦點修正後另跑 Mobile typecheck 與修改檔 lint。
-- 四組 Mobile Jest（`PublicTransitExplorer`、`publicTransit`、`CampusBusScreen`、`BusStopDetailScreen`）49 項通過。包括真實 React Native Web 元件的 Modal 開啟與 DOM 焦點回歸測試；未更改既有測試門檻或共用 UI。
+- 四組 Mobile Jest（`PublicTransitExplorer`、`publicTransit`、`CampusBusScreen`、`BusStopDetailScreen`）51 項通過。包括真實 React Native Web 元件的 Modal 開啟與 DOM 焦點回歸測試，以及 Web 焦點防護、清單外開忙碌／重試與讀屏關閉掛點對齊；未更改既有測試門檻或共用 UI。
 - [瀏覽器結果](browser-results.json)：36 項檢查通過，0 runtime errors。使用實際產品元件、既有 `aiFirst.tsx` 與 theme，透過 React Native Web 轉譯；網路、定位、外部應用開啟與原生安全區為固定測試替身，不連正式服務。
 - 首次瀏覽器檢查發現原生 `findNodeHandle` 在 Web 拋錯；修正版改成平台分流，Web 聚焦 DOM 並保留捲動位置，Native 維持原生焦點 API。新增測試後重新執行瀏覽器全流程；未忽略該錯誤。
 - 兩輪獨立程式審查：首輪上述問題已修正，第二輪未發現新增或未解決的確定問題。這不是 GitHub required review approval。
