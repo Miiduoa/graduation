@@ -7,6 +7,7 @@ const mockAuth = {
   user: { uid: 'alice' } as { uid: string } | null,
   profile: { role: 'student' as const, schoolId: 'pu', uid: 'alice' },
 };
+let mockBlur: (() => void) | undefined;
 const mockNavigate = { navigate: jest.fn(), goBack: jest.fn() };
 const mockNotifs = {
   notifications: [] as Array<Record<string, unknown>>,
@@ -33,6 +34,13 @@ jest.mock('../utils/applyNotificationDestination', () => ({
 }));
 jest.mock('@react-navigation/native', () => ({
   useNavigation: () => mockNavigate,
+  useFocusEffect: (callback: () => () => void) => {
+    const React = require('react');
+    React.useEffect(() => {
+      mockBlur = callback();
+      return mockBlur;
+    }, [callback]);
+  },
 }));
 
 function deferred<T>() {
@@ -53,6 +61,7 @@ beforeEach(() => {
   mockNotifs.loading = false;
   mockNotifs.error = null;
   mockNotifs.markAsRead.mockResolvedValue(true);
+  jest.mocked(applyNotificationDestination).mockReturnValue(true);
 });
 
 test('does not render hardcoded sample notifications when the inbox is empty', () => {
@@ -116,7 +125,7 @@ test('opens message / event / announcement without inventing destinations', asyn
   );
 });
 
-test('markAsRead false keeps unread and does not navigate', async () => {
+test('markAsRead false keeps unread and opens content with retry', async () => {
   mockNotifs.markAsRead.mockResolvedValue(false);
   mockNotifs.notifications = [
     {
@@ -131,8 +140,12 @@ test('markAsRead false keeps unread and does not navigate', async () => {
   mockNotifs.unreadCount = 1;
   const view = render(<NotificationsAiFirstScreen />);
   fireEvent.press(view.getByText('讀取會失敗'));
-  await waitFor(() => expect(view.getByText(/標為已讀失敗/)).toBeTruthy());
-  expect(applyNotificationDestination).not.toHaveBeenCalled();
+  await waitFor(() => expect(view.getByText(/已讀還沒同步/)).toBeTruthy());
+  expect(view.getByText('未讀')).toBeTruthy();
+  expect(applyNotificationDestination).toHaveBeenCalledTimes(1);
+  fireEvent.press(view.getByText('重試已讀同步'));
+  await waitFor(() => expect(mockNotifs.markAsRead).toHaveBeenCalledTimes(2));
+  expect(applyNotificationDestination).toHaveBeenCalledTimes(1);
 });
 
 test('manual mark-read failure preserves explanation and unread notice', async () => {
@@ -157,29 +170,33 @@ test('manual mark-read failure preserves explanation and unread notice', async (
   expect(view.getByText('標成已讀')).toBeTruthy();
 });
 
-test('deferred mark-read after account switch does not navigate with old role', async () => {
-  const pending = deferred<boolean>();
-  mockNotifs.markAsRead.mockReturnValueOnce(pending.promise);
-  mockNotifs.notifications = [
-    {
-      id: 'm1',
-      type: 'message',
-      title: '跨帳號通知',
-      body: '',
-      read: false,
-      data: { peerId: 'peer-9' },
-    },
-  ];
-  mockNotifs.unreadCount = 1;
-  const view = render(<NotificationsAiFirstScreen />);
-  fireEvent.press(view.getByText('跨帳號通知'));
-  mockAuth.user = { uid: 'bob' };
-  mockAuth.profile = { role: 'teacher', schoolId: 'nthu', uid: 'bob' };
-  view.rerender(<NotificationsAiFirstScreen />);
-  await act(async () => pending.resolve(true));
-  await waitFor(() => expect(mockNotifs.markAsRead).toHaveBeenCalledWith('m1'));
-  expect(applyNotificationDestination).not.toHaveBeenCalled();
-});
+test.each([true, false])(
+  'deferred mark-read %s after account switch ignores the old result',
+  async (result) => {
+    const pending = deferred<boolean>();
+    mockNotifs.markAsRead.mockReturnValueOnce(pending.promise);
+    mockNotifs.notifications = [
+      {
+        id: 'm1',
+        type: 'message',
+        title: '跨帳號通知',
+        body: '',
+        read: false,
+        data: { peerId: 'peer-9' },
+      },
+    ];
+    mockNotifs.unreadCount = 1;
+    const view = render(<NotificationsAiFirstScreen />);
+    fireEvent.press(view.getByText('跨帳號通知'));
+    mockAuth.user = { uid: 'bob' };
+    mockAuth.profile = { role: 'teacher', schoolId: 'nthu', uid: 'bob' };
+    view.rerender(<NotificationsAiFirstScreen />);
+    await act(async () => pending.resolve(result));
+    expect(view.queryByText(/已讀還沒同步/)).toBeNull();
+    await waitFor(() => expect(mockNotifs.markAsRead).toHaveBeenCalledWith('m1'));
+    expect(applyNotificationDestination).not.toHaveBeenCalled();
+  },
+);
 
 test('school mismatch on grade notice keeps unread without opening homework', async () => {
   mockNotifs.notifications = [
@@ -237,4 +254,85 @@ test('loads earlier pages when hasMore and surfaces loaded unread scope', async 
   expect(view.getByText('1 則已載入')).toBeTruthy();
   fireEvent.press(view.getByText('載入更早的通知'));
   await waitFor(() => expect(mockNotifs.loadMore).toHaveBeenCalled());
+});
+
+for (const outcome of ['false', 'throw'] as const) {
+  test(`navigation ${outcome} reports failure without claiming unread sync succeeded`, async () => {
+    mockNotifs.notifications = [
+      { id: 'm1', type: 'message', title: '內容通知', read: false, data: { peerId: 'peer-1' } },
+    ];
+    mockNotifs.markAsRead.mockResolvedValue(false);
+    jest.mocked(applyNotificationDestination).mockImplementation(() => {
+      if (outcome === 'throw') throw new Error('navigation unavailable');
+      return false;
+    });
+    const view = render(<NotificationsAiFirstScreen />);
+    fireEvent.press(view.getByText('內容通知'));
+    await waitFor(() => expect(view.getByText(/內容暫時打不開，已讀也還沒同步/)).toBeTruthy());
+    expect(view.getByText('未讀')).toBeTruthy();
+    expect(view.getByText('重試已讀同步')).toBeTruthy();
+  });
+}
+
+test('completion after leaving the screen does not open content', async () => {
+  const pending = deferred<boolean>();
+  mockNotifs.markAsRead.mockReturnValueOnce(pending.promise);
+  mockNotifs.notifications = [
+    { id: 'm1', type: 'message', title: '稍後完成', read: false, data: { peerId: 'peer-1' } },
+  ];
+  const view = render(<NotificationsAiFirstScreen />);
+  fireEvent.press(view.getByText('稍後完成'));
+  view.unmount();
+  await act(async () => pending.resolve(false));
+  expect(applyNotificationDestination).not.toHaveBeenCalled();
+});
+
+test('blur while still mounted ignores a late read failure', async () => {
+  const pending = deferred<boolean>();
+  mockNotifs.markAsRead.mockReturnValueOnce(pending.promise);
+  mockNotifs.notifications = [
+    { id: 'm1', type: 'message', title: '離開清單', read: false, data: { peerId: 'peer-1' } },
+  ];
+  const view = render(<NotificationsAiFirstScreen />);
+  fireEvent.press(view.getByText('離開清單'));
+  act(() => mockBlur?.());
+  await act(async () => pending.resolve(false));
+  expect(applyNotificationDestination).not.toHaveBeenCalled();
+  expect(view.queryByText(/已讀還沒同步/)).toBeNull();
+});
+
+test('pending optimistic read stays unread and ignores duplicate presses until confirmed', async () => {
+  const pending = deferred<boolean>();
+  mockNotifs.markAsRead.mockReturnValueOnce(pending.promise);
+  mockNotifs.notifications = [
+    { id: 'm1', type: 'message', title: '等待確認', read: false, data: { peerId: 'peer-1' } },
+  ];
+  mockNotifs.unreadCount = 1;
+  const view = render(<NotificationsAiFirstScreen />);
+  fireEvent.press(view.getByText('等待確認'));
+  mockNotifs.notifications = [{ ...mockNotifs.notifications[0], read: true }];
+  mockNotifs.unreadCount = 0;
+  view.rerender(<NotificationsAiFirstScreen />);
+  expect(view.getByText('未讀')).toBeTruthy();
+  expect(view.getByText(/1 則未讀/)).toBeTruthy();
+  fireEvent.press(view.getByText('等待確認'));
+  expect(mockNotifs.markAsRead).toHaveBeenCalledTimes(1);
+  await act(async () => pending.resolve(true));
+  expect(view.queryByText('未讀')).toBeNull();
+  expect(applyNotificationDestination).toHaveBeenCalledTimes(1);
+});
+
+test('rejected read sync still opens content and lets the user retry', async () => {
+  mockNotifs.markAsRead.mockRejectedValueOnce(new Error('offline'));
+  mockNotifs.notifications = [
+    { id: 'm1', type: 'message', title: '離線通知', read: false, data: { peerId: 'peer-1' } },
+  ];
+  const view = render(<NotificationsAiFirstScreen />);
+  fireEvent.press(view.getByText('離線通知'));
+  await waitFor(() => expect(view.getByText('重試已讀同步')).toBeTruthy());
+  expect(view.getByText('未讀')).toBeTruthy();
+  expect(applyNotificationDestination).toHaveBeenCalledTimes(1);
+  fireEvent.press(view.getByText('重試已讀同步'));
+  await waitFor(() => expect(view.queryByText('重試已讀同步')).toBeNull());
+  expect(applyNotificationDestination).toHaveBeenCalledTimes(1);
 });

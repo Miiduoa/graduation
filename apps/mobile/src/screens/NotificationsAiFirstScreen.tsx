@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, Text, View } from 'react-native';
-import { useNavigation } from '@react-navigation/native';
+import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import { AIButton, AIDetailScreen, AIEmptyState, AIRow, AISection, aiTokens } from '../ui/aiFirst';
 import { useAuth } from '../state/auth';
 import { useNotifications } from '../state/notifications';
@@ -39,17 +39,31 @@ export default function NotificationsAiFirstScreen() {
   } = useNotifications();
   const [blockedNotice, setBlockedNotice] = useState<{ id: string; reason: string } | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
+  const [retryReadId, setRetryReadId] = useState<string | null>(null);
+  const [unconfirmedReads, setUnconfirmedReads] = useState<Set<string>>(new Set());
+  const visibleUnreadCount =
+    unreadCount + notifications.filter((row) => row.read && unconfirmedReads.has(row.id)).length;
   const mounted = useRef(false);
   const sessionGeneration = useRef(0);
+  const pendingReads = useRef(new Set<string>());
 
   useEffect(() => {
-    mounted.current = true;
-    sessionGeneration.current += 1;
-    return () => {
-      mounted.current = false;
+    setActionError(null);
+    setBlockedNotice(null);
+    setRetryReadId(null);
+    setUnconfirmedReads(new Set());
+  }, [uid, schoolId, auth.profile?.role]);
+
+  useFocusEffect(
+    useCallback(() => {
+      mounted.current = true;
       sessionGeneration.current += 1;
-    };
-  }, [uid, schoolId]);
+      return () => {
+        mounted.current = false;
+        sessionGeneration.current += 1;
+      };
+    }, [uid, schoolId, auth.profile?.role]),
+  );
 
   const openNotification = useCallback(
     async (id: string) => {
@@ -59,6 +73,8 @@ export default function NotificationsAiFirstScreen() {
       const openSchool = schoolId;
       const openRole = auth.profile?.role;
       const openGen = sessionGeneration.current;
+      const requestKey = `${openGen}:${id}`;
+      if (pendingReads.current.has(requestKey)) return;
       const stillHere = () =>
         mounted.current &&
         sessionGeneration.current === openGen &&
@@ -78,23 +94,54 @@ export default function NotificationsAiFirstScreen() {
       if (!stillHere()) return;
       setBlockedNotice(null);
 
-      const marked = await markAsRead(id);
+      setRetryReadId(null);
+      if (!notifications.find((item) => item.id === id)?.read) {
+        setUnconfirmedReads((previous) => new Set(previous).add(id));
+      }
+      pendingReads.current.add(requestKey);
+      const marked = await markAsRead(id).catch(() => false);
+      pendingReads.current.delete(requestKey);
       if (!stillHere()) return;
+      if (marked) {
+        setUnconfirmedReads((previous) => {
+          const next = new Set(previous);
+          next.delete(id);
+          return next;
+        });
+      }
       if (!marked) {
-        setActionError('標為已讀失敗，通知仍保持未讀。請檢查連線後再試，或稍後重開。');
-        return;
+        setRetryReadId(id);
+        setActionError('已讀還沒同步，這則先保留未讀。可以再試一次。');
       }
 
-      const opened = applyNotificationDestination(destination, {
-        navigation,
-        role: openRole,
-      });
+      let opened = false;
+      try {
+        opened = applyNotificationDestination(destination, {
+          navigation,
+          role: openRole,
+        });
+      } catch {
+        opened = false;
+      }
       if (!stillHere()) return;
       if (!opened) {
-        setActionError('暫時無法開啟這則通知，請稍後再試。未讀狀態以伺服器結果為準。');
+        setActionError(
+          marked
+            ? '內容暫時打不開，請稍後再試。已讀已同步。'
+            : '內容暫時打不開，已讀也還沒同步。這則先保留未讀，可以再試一次。',
+        );
       }
     },
-    [auth.profile?.role, auth.profile?.schoolId, auth.user?.uid, markAsRead, navigation, notifications, schoolId, uid],
+    [
+      auth.profile?.role,
+      auth.profile?.schoolId,
+      auth.user?.uid,
+      markAsRead,
+      navigation,
+      notifications,
+      schoolId,
+      uid,
+    ],
   );
 
   const markOneExplicit = useCallback(
@@ -102,6 +149,8 @@ export default function NotificationsAiFirstScreen() {
       const openUid = uid;
       const openSchool = schoolId;
       const openGen = sessionGeneration.current;
+      const requestKey = `${openGen}:${id}`;
+      if (pendingReads.current.has(requestKey)) return;
       const stillHere = () =>
         mounted.current &&
         sessionGeneration.current === openGen &&
@@ -110,31 +159,57 @@ export default function NotificationsAiFirstScreen() {
       const previousBlocked = blockedNotice;
 
       setActionError(null);
-      const marked = await markAsRead(id);
+      if (!notifications.find((item) => item.id === id)?.read) {
+        setUnconfirmedReads((previous) => new Set(previous).add(id));
+      }
+      pendingReads.current.add(requestKey);
+      const marked = await markAsRead(id).catch(() => false);
+      pendingReads.current.delete(requestKey);
       if (!stillHere()) return;
+      if (marked) {
+        setUnconfirmedReads((previous) => {
+          const next = new Set(previous);
+          next.delete(id);
+          return next;
+        });
+      }
       if (!marked) {
         // 保留說明與未讀；不關閉 blockedNotice。
         if (previousBlocked) setBlockedNotice(previousBlocked);
         setActionError('標為已讀失敗，請檢查連線後再試。說明與未讀狀態已保留。');
         return;
       }
+      setRetryReadId(null);
       if (blockedNotice?.id === id) setBlockedNotice(null);
     },
-    [auth.profile?.schoolId, auth.user?.uid, blockedNotice, markAsRead, schoolId, uid],
+    [
+      auth.profile?.schoolId,
+      auth.user?.uid,
+      blockedNotice,
+      markAsRead,
+      notifications,
+      schoolId,
+      uid,
+    ],
   );
 
   return (
     <AIDetailScreen
       title="通知"
       subtitle={
-        unreadCount > 0
-          ? `${unreadCount} 則未讀（${unreadScope === 'loaded' ? '已載入範圍' : '目前清單'}）`
+        visibleUnreadCount > 0
+          ? `${visibleUnreadCount} 則未讀（${unreadScope === 'loaded' ? '已載入範圍' : '目前清單'}）`
           : `顯示這組帳號已載入的通知`
       }
       onBack={() => navigation?.goBack?.()}
       rightAction={
-        unreadCount > 0 ? (
-          <AIButton label="全部已讀" variant="ghost" size="sm" onPress={() => void markAllAsRead()} />
+        visibleUnreadCount > 0 ? (
+          <AIButton
+            label="全部已讀"
+            variant="ghost"
+            size="sm"
+            onPress={() => void markAllAsRead()}
+          />
         ) : undefined
       }
     >
@@ -156,12 +231,24 @@ export default function NotificationsAiFirstScreen() {
           {actionError ? (
             <View accessibilityRole="alert" style={{ paddingHorizontal: 16, paddingBottom: 8 }}>
               <Text style={{ color: aiTokens.text, lineHeight: 22 }}>{actionError}</Text>
+              {retryReadId ? (
+                <AIButton
+                  label="重試已讀同步"
+                  size="sm"
+                  onPress={() => void markOneExplicit(retryReadId)}
+                />
+              ) : null}
             </View>
           ) : null}
           {blockedNotice ? (
             <View
               accessibilityRole="alert"
-              style={{ padding: 16, gap: 12, borderBottomWidth: 1, borderBottomColor: aiTokens.border }}
+              style={{
+                padding: 16,
+                gap: 12,
+                borderBottomWidth: 1,
+                borderBottomColor: aiTokens.border,
+              }}
             >
               <Text style={{ color: aiTokens.text, lineHeight: 22 }}>{blockedNotice.reason}</Text>
               <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
@@ -170,7 +257,12 @@ export default function NotificationsAiFirstScreen() {
                   size="sm"
                   onPress={() => void markOneExplicit(blockedNotice.id)}
                 />
-                <AIButton label="關閉說明" variant="ghost" size="sm" onPress={() => setBlockedNotice(null)} />
+                <AIButton
+                  label="關閉說明"
+                  variant="ghost"
+                  size="sm"
+                  onPress={() => setBlockedNotice(null)}
+                />
               </View>
             </View>
           ) : null}
@@ -181,7 +273,7 @@ export default function NotificationsAiFirstScreen() {
                 key={row.id}
                 title={row.title || '通知'}
                 subtitle={[row.body, when].filter(Boolean).join(' · ')}
-                tag={row.read ? undefined : '未讀'}
+                tag={row.read && !unconfirmedReads.has(row.id) ? undefined : '未讀'}
                 onPress={() => void openNotification(row.id)}
               />
             );
