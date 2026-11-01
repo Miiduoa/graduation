@@ -20,6 +20,7 @@ import {
   type NuniSubmission,
   type NuniSubmissionFile,
 } from '@campus/shared/src/nuni';
+import { PhotoPdfEditor } from './PhotoPdfEditor';
 import { useClasses } from './CourseUI';
 import shared from './NuniApp.module.css';
 import styles from './CourseLearning.module.css';
@@ -29,6 +30,15 @@ export type LocalAssignmentFile = {
   file: File;
   kind: 'image' | 'file';
   previewUrl?: string;
+};
+
+export type AssignmentFileOperation = {
+  key?: string;
+  prepared?: LocalAssignmentFile[];
+  intents?: { id: string; uploadPath: string; contentType: string }[];
+  uploaded?: string[];
+  submitting?: boolean;
+  body?: string;
 };
 
 export type AssignmentUploadProgress = { completed: number; total: number };
@@ -268,6 +278,7 @@ export function AssignmentFilePicker({
   onChange: (files: LocalAssignmentFile[]) => void;
   disabled?: boolean;
 }) {
+  const [pdfOpen, setPdfOpen] = useState(false);
   const camera = useRef<HTMLInputElement>(null);
   const album = useRef<HTMLInputElement>(null);
   const docs = useRef<HTMLInputElement>(null);
@@ -290,7 +301,7 @@ export function AssignmentFilePicker({
         accept="image/*"
         capture="environment"
         hidden
-        disabled={disabled}
+        disabled={disabled || pdfOpen}
         onChange={(event) => {
           add(event.target.files);
           event.target.value = '';
@@ -302,7 +313,7 @@ export function AssignmentFilePicker({
         accept="image/*"
         multiple
         hidden
-        disabled={disabled}
+        disabled={disabled || pdfOpen}
         onChange={(event) => {
           add(event.target.files);
           event.target.value = '';
@@ -314,21 +325,38 @@ export function AssignmentFilePicker({
         accept=".pdf,.doc,.docx,.txt,.zip,application/pdf,text/plain,application/zip"
         multiple
         hidden
-        disabled={disabled}
+        disabled={disabled || pdfOpen}
         onChange={(event) => {
           add(event.target.files);
           event.target.value = '';
         }}
       />
-      <button type="button" className={`${shared.button} ${shared.secondary}`} disabled={disabled} onClick={() => camera.current?.click()}>
+      <button type="button" className={`${shared.button} ${shared.secondary}`} disabled={disabled || pdfOpen} onClick={() => camera.current?.click()}>
         拍照
       </button>
-      <button type="button" className={`${shared.button} ${shared.secondary}`} disabled={disabled} onClick={() => album.current?.click()}>
+      <button type="button" className={`${shared.button} ${shared.secondary}`} disabled={disabled || pdfOpen} onClick={() => album.current?.click()}>
         相簿
       </button>
-      <button type="button" className={`${shared.button} ${shared.secondary}`} disabled={disabled} onClick={() => docs.current?.click()}>
+      <button type="button" className={`${shared.button} ${shared.secondary}`} disabled={disabled || pdfOpen} onClick={() => docs.current?.click()}>
         檔案
       </button>
+      <button
+        type="button"
+        className={`${shared.button} ${shared.secondary}`}
+        disabled={disabled || files.filter((file) => file.kind === 'file').length >= MAX_ASSIGNMENT_DOCUMENTS}
+        onClick={() => setPdfOpen(true)}
+      >
+        照片轉 PDF
+      </button>
+      {pdfOpen && !disabled ? (
+        <PhotoPdfEditor
+          onCancel={() => setPdfOpen(false)}
+          onConfirm={(file) => {
+            onChange(collectLocalFiles(files, [file]));
+            setPdfOpen(false);
+          }}
+        />
+      ) : null}
       <p className={styles.note}>網路不穩時再送一次，不會重複交。選好的照片可以刪除或調整順序後再送出。</p>
       <AssignmentFilePreview files={files} onChange={onChange} disabled={disabled} />
     </div>
@@ -343,42 +371,73 @@ export async function uploadAndSubmitFiles(
   files: LocalAssignmentFile[],
   key: string,
   onProgress?: (progress: AssignmentUploadProgress) => void,
+  operation: AssignmentFileOperation = {},
 ): Promise<NuniAssignment> {
-  if (!files.length && !body.trim()) throw new NuniError(422, 'ASSIGNMENT_FILE_REQUIRED');
-  const prepared: LocalAssignmentFile[] = [];
-  for (const item of files) {
-    if (item.kind !== 'image') {
-      prepared.push(item);
-      continue;
-    }
-    const compressed = await compressAssignmentImageFile(item.file);
-    prepared.push({ ...item, file: compressed, kind: 'image' });
+  if (operation.key !== key) {
+    Object.assign(operation, {
+      key,
+      prepared: undefined,
+      intents: undefined,
+      uploaded: [],
+      submitting: false,
+      body: body.trim() || undefined,
+    });
   }
-  onProgress?.({ completed: 0, total: prepared.length });
-  const intents = prepared.length
-    ? await classes.createAssignmentFileIntents(workspaceId, assignmentId, {
-        idempotencyKey: `${key}:intents`,
-        files: prepared.map((item, index) => ({
-          originalName: item.file.name,
-          contentType: item.file.type || (item.kind === 'image' ? 'image/jpeg' : 'application/octet-stream'),
-          byteSize: item.file.size,
-          idempotencyKey: `${key}:file:${index}`,
-        })),
-      })
-    : [];
-  let completed = 0;
-  await Promise.all(
+  if (operation.submitting) {
+    return classes.submitFiles(workspaceId, assignmentId, {
+      body: operation.body,
+      fileIds: operation.intents!.map((intent) => intent.id),
+      idempotencyKey: key,
+    });
+  }
+  if (!files.length && !body.trim()) throw new NuniError(422, 'ASSIGNMENT_FILE_REQUIRED');
+  const prepared: LocalAssignmentFile[] = operation.prepared ?? [];
+  if (!operation.prepared) {
+    for (const item of files) {
+      if (item.kind !== 'image') {
+        prepared.push(item);
+        continue;
+      }
+      const compressed = await compressAssignmentImageFile(item.file);
+      prepared.push({ ...item, file: compressed, kind: 'image' });
+    }
+    operation.prepared = prepared;
+  }
+  onProgress?.({ completed: operation.uploaded?.length ?? 0, total: prepared.length });
+  const intents =
+    operation.intents ??
+    (prepared.length
+      ? await classes.createAssignmentFileIntents(workspaceId, assignmentId, {
+          idempotencyKey: `${key}:intents`,
+          files: prepared.map((item, index) => ({
+            originalName: item.file.name,
+            contentType:
+              item.file.type || (item.kind === 'image' ? 'image/jpeg' : 'application/octet-stream'),
+            byteSize: item.file.size,
+            idempotencyKey: `${key}:file:${index}`,
+          })),
+        })
+      : []);
+  operation.intents = intents;
+  let completed = operation.uploaded?.length ?? 0;
+  const uploads = await Promise.allSettled(
     intents.map(async (intent, index) => {
+      if (operation.uploaded?.includes(intent.id)) return;
       const item = prepared[index];
       if (!item) throw new NuniError(502, 'INVALID_RESPONSE');
       const bytes = new Uint8Array(await item.file.arrayBuffer());
       await classes.uploadAssignmentFile(intent.uploadPath, bytes, intent.contentType);
+      operation.uploaded!.push(intent.id);
       completed += 1;
       onProgress?.({ completed, total: prepared.length });
     }),
   );
+  // Wait for every upload before allowing a retry to reuse this operation.
+  const failed = uploads.find((result) => result.status === 'rejected');
+  if (failed?.status === 'rejected') throw failed.reason;
+  operation.submitting = true;
   return classes.submitFiles(workspaceId, assignmentId, {
-    body: body.trim() || undefined,
+    body: operation.body,
     fileIds: intents.map((intent) => intent.id),
     idempotencyKey: key,
   });

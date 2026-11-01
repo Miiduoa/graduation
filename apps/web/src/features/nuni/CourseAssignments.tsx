@@ -26,15 +26,18 @@ import {
 type CourseAssignmentFilter = AssignmentFilter | 'overdue' | 'soon';
 
 type Props = {
+  liveActive?: boolean;
   assignments: NuniAssignment[];
+  syncVersion?: string | null;
   workspace: NuniWorkspace;
   reload: () => void;
   onConfirmed: (assignment: NuniAssignment) => void;
 };
 
-export function CourseAssignments({ assignments, workspace, reload, onConfirmed }: Props) {
+export function CourseAssignments({ assignments, workspace, reload, onConfirmed, syncVersion, liveActive = true }: Props) {
   const [filter, setFilter] = useState<CourseAssignmentFilter>('all');
   const [query, setQuery] = useState('');
+  const [receiptId, setReceiptId] = useState<string | null>(null);
   const searchRef = useRef<HTMLInputElement>(null);
   const hash = useLocationHash();
   const now = useClientNow();
@@ -241,7 +244,10 @@ export function CourseAssignments({ assignments, workspace, reload, onConfirmed 
         // Keep each form mounted so switching filters cannot discard a student's draft.
         <div key={item.id} hidden={!visible(item)}>
           <AssignmentCard
+            receiptActive={liveActive && visible(item) && receiptId === item.id}
+            onOpenReceipts={() => setReceiptId(item.id)}
             item={item}
+            syncVersion={syncVersion}
             workspace={workspace}
             reload={reload}
             onConfirmed={(assignment) => {

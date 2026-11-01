@@ -81,12 +81,14 @@ it('retries only the truncated range and never parses its partial output', async
   unsubscribe();
 });
 
-it('stops at a single indivisible record and rejects the whole operation', async () => {
+it('skips each irrecoverable record without aborting the whole operation', async () => {
   jest.mocked(localLLM.generate).mockImplementation(async (request) => ({
     ...resultFor(request.messages[0].content), finishReason: 'length',
   }));
-  await expect(runMobilePersonalImportAi(sourceFor(8), options, new AbortController().signal)).rejects.toThrow('部分結果');
-  expect(localLLM.generate).toHaveBeenCalledTimes(4);
+  const result = await runMobilePersonalImportAi(sourceFor(8), options, new AbortController().signal);
+  expect(result.rows).toEqual([]);
+  expect(result.retryBatches).toHaveLength(8);
+  expect(localLLM.generate).toHaveBeenCalledTimes(15);
   await flush();
   expect(getMobileImportAiAvailability().status).toBe('ready');
 });
@@ -97,8 +99,10 @@ it('limits automatic subdivisions across the whole operation rather than retryin
     const rows = JSON.parse(result.content).rows as unknown[];
     return { ...result, finishReason: rows.length > 1 ? 'length' : 'stop' };
   });
-  await expect(runMobilePersonalImportAi(sourceFor(24), options, new AbortController().signal)).rejects.toThrow('部分結果');
-  expect(localLLM.generate).toHaveBeenCalledTimes(17);
+  const result = await runMobilePersonalImportAi(sourceFor(24), options, new AbortController().signal);
+  expect(result.rows.length).toBeGreaterThan(0);
+  expect(result.retryBatches!.length).toBeGreaterThan(0);
+  expect(localLLM.generate).toHaveBeenCalledTimes(19);
 });
 
 it('holds ownership when cancellation interrupts a retry, then discards late native results', async () => {
@@ -138,10 +142,11 @@ it('times out a retry without accepting either the truncated parent or a late ch
     return new Promise((resolve) => { finish = resolve; });
   });
   const running = runMobilePersonalImportAi(sourceFor(8), options, new AbortController().signal);
-  const rejection = expect(running).rejects.toThrow('逾時');
+  const completion = running;
   await flush();
   jest.advanceTimersByTime(120_000);
-  await rejection;
+  const result = await completion;
+  expect(result.issues.some((issue) => issue.message.includes('逾時'))).toBe(true);
   expect(getMobileImportAiAvailability().status).toBe('busy');
   finish(late);
   await flush();
@@ -149,12 +154,13 @@ it('times out a retry without accepting either the truncated parent or a late ch
   expect(localLLM.generate).toHaveBeenCalledTimes(2);
 });
 
-it('does not retry an invalid source citation just because the input is splittable', async () => {
+it('retries invalid citations within a bounded range and never publishes invented rows', async () => {
   jest.mocked(localLLM.generate).mockResolvedValue({ ...resultFor('SOURCE_DATA=' + JSON.stringify(sourceFor(8))),
     content: JSON.stringify({ complete: true, rows: [{ title: '不存在', evidence: '不存在', grade: '99' }] }),
   });
-  await expect(runMobilePersonalImportAi(sourceFor(8), options, new AbortController().signal)).rejects.toThrow('可核對');
-  expect(localLLM.generate).toHaveBeenCalledTimes(1);
+  const result = await runMobilePersonalImportAi(sourceFor(8), options, new AbortController().signal);
+  expect(result.rows).toEqual([]);
+  expect(localLLM.generate).toHaveBeenCalledTimes(15);
 });
 
 it('does not start retry generation after the loaded model changes', async () => {
@@ -162,6 +168,7 @@ it('does not start retry generation after the loaded model changes', async () =>
     jest.mocked(localLLM.getLoadedModelId).mockReturnValue('qwen2.5-7b');
     return { ...resultFor(request.messages[0].content), finishReason: 'length' };
   });
-  await expect(runMobilePersonalImportAi(sourceFor(8), options, new AbortController().signal)).rejects.toThrow('可核對');
+  const result = await runMobilePersonalImportAi(sourceFor(8), options, new AbortController().signal);
+  expect(result.rows).toEqual([]);
   expect(localLLM.generate).toHaveBeenCalledTimes(1);
 });

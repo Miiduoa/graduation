@@ -93,10 +93,12 @@ function DormitoryWorkspace({ scope, schoolId, schoolName, guest }: {
   const [laundryMinutes, setLaundryMinutes] = useState(45);
   const [now, setNow] = useState(() => Date.now());
   const savedRaw = useRef<string | null>(null);
+  const tabsRef = useRef<HTMLElement>(null);
+  const [reloadVersion, setReloadVersion] = useState(0);
   const official = resolveSchoolPublicServices(schoolId)?.services.dormitory ?? null;
   const guide = resolveDormitoryPublicGuide(schoolId);
 
-  const reload = () => {
+  const reload = (requested = false) => {
     try {
       const raw = localStorage.getItem(scope);
       const data = normalizeDormWorkspace(raw ? JSON.parse(raw) : emptyDormWorkspace());
@@ -106,16 +108,34 @@ function DormitoryWorkspace({ scope, schoolId, schoolName, guest }: {
       setEditorOpen(false);
       setEditingId(null);
       setPendingId(null);
+      setDeleteId(null);
+      setRepairDraft({ ...EMPTY_REPAIR });
       setMilestoneEditorOpen(false);
       setEditingMilestoneId(null);
       setPendingMilestoneId(null);
+      setDeleteMilestoneId(null);
+      setMilestoneDraft({ title: '', dueDate: '' });
+      setParcelEditorOpen(false);
+      setEditingParcelId(null);
+      setPendingParcelId(null);
+      setDeleteParcelId(null);
+      setParcelDraft({ ...EMPTY_PARCEL });
       setConflict(false);
       setSaveError('');
-      setNotice('');
+      setNotice(requested ? '已重新讀取最新紀錄。請依更新後的內容重新編輯或確認刪除。' : '');
+      if (requested) setReloadVersion((version) => version + 1);
     } catch {
       setStorage({ status: 'error', message: '無法讀取這台裝置的宿舍紀錄。請檢查瀏覽器的儲存權限。' });
     }
   };
+
+  useEffect(() => {
+    if (reloadVersion > 0) {
+      const activeTab = tabsRef.current?.querySelector<HTMLButtonElement>('button[aria-pressed="true"]');
+      activeTab?.scrollIntoView?.({ block: 'nearest', inline: 'nearest', behavior: 'instant' });
+      activeTab?.focus({ preventScroll: true });
+    }
+  }, [reloadVersion]);
 
   useEffect(() => {
     // Read after hydration. The keyed workspace prevents cross-school/account reuse.
@@ -305,7 +325,7 @@ function DormitoryWorkspace({ scope, schoolId, schoolName, guest }: {
       <SiteShell title="宿舍" subtitle={schoolName}>
         <section className={styles.panel} role={storage.status === 'error' ? 'alert' : 'status'}>
           <h2>{storage.status === 'loading' ? '正在開啟你的住宿工作區…' : '宿舍紀錄暫時無法載入'}</h2>
-          {storage.status === 'error' && <><p>{storage.message}</p><button type="button" onClick={reload}>重新讀取</button></>}
+          {storage.status === 'error' && <><p>{storage.message}</p><button type="button" onClick={() => reload(true)}>重新讀取</button></>}
         </section>
       </SiteShell>
     );
@@ -353,7 +373,7 @@ function DormitoryWorkspace({ scope, schoolId, schoolName, guest }: {
           </div>
         </section>
 
-        <nav className={styles.tabs} aria-label="宿舍功能">
+        <nav ref={tabsRef} className={styles.tabs} aria-label="宿舍功能">
           {VIEWS.map((item) => (
             <button key={item.id} type="button" aria-pressed={view === item.id}
               onClick={() => { setView(item.id); setNotice(''); setSaveError(''); }}>
@@ -371,8 +391,8 @@ function DormitoryWorkspace({ scope, schoolId, schoolName, guest }: {
         {conflict && (
           <section className={styles.warning} role="alert">
             <strong>有另一處修改了這份紀錄</strong>
-            <p>目前的表單文字仍在畫面上，但不會覆蓋另一分頁的內容。先複製未儲存的文字，再重新讀取。</p>
-            <button type="button" onClick={reload}>重新讀取最新紀錄</button>
+            <p>目前的表單文字仍在畫面上，但不會覆蓋另一分頁的內容。重新讀取會關閉未儲存的紀錄表單並取消刪除確認，需要的文字請先複製。</p>
+            <button type="button" onClick={() => reload(true)}>重新讀取最新紀錄</button>
           </section>
         )}
         {saveError && <p role="alert" className={styles.error}>{saveError}</p>}

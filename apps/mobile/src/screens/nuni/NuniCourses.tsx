@@ -1,3 +1,5 @@
+import { startAssignmentLive, assignmentReader, assignmentSyncLabel, type AssignmentSync } from '@campus/shared/src/assignmentLive';
+import NetInfo from '@react-native-community/netinfo';
 import React, {
   useCallback,
   useEffect,
@@ -9,7 +11,11 @@ import React, {
   type ReactNode,
   type RefObject,
 } from 'react';
-import { Image, Linking, Pressable, ScrollView, Text, TextInput, View } from 'react-native';
+import { AppState, Image, Linking, Share, Alert, Pressable, ScrollView, Text, TextInput, View } from 'react-native';
+import { materialCapabilities, materialFailureMessage, readMaterialWithDeadline } from '@campus/shared/src/materialAccess';
+import { photoPdfAvailable } from './nativePhotoPdf';
+import { NativePhotoPdfEditor } from './NativePhotoPdfEditor';
+import { PublishedFeedbackLink } from '../../components/PublishedFeedbackLink';
 import { revealAssignmentSubmitArea } from './scrollAssignment';
 import {
   MATERIAL_CURSOR_CYCLE_MESSAGE,
@@ -34,9 +40,11 @@ import {
   type NuniWorkspace,
 } from '@campus/shared/src/nuni';
 import {
+  MAX_ASSIGNMENT_DOCUMENTS,
   assignmentLateOpenLabel,
   assignmentReceiptStatusLabel,
   assignmentSubmissionLate,
+  assignmentCanRevise,
 } from '@campus/shared/src/assignmentFiles';
 import { formatTaipeiDateTime, parseTaipeiInstant } from '@campus/shared/src/taipeiTime';
 import { loadNuniStudyAgenda } from '@campus/shared/src/nuniStudyAgenda';
@@ -50,7 +58,8 @@ import {
   pickAssignmentDocuments,
   removeNativeFile,
   submitNativeAssignmentFiles,
-  usesAssignmentFileBff,
+  type NativeFileOperation,
+  assignmentRequest,
   type LocalNativeFile,
   type NativeUploadProgress,
 } from './assignmentFileSubmit';
@@ -84,6 +93,10 @@ import {
   type CourseListFilter,
 } from '../../services/nuniActivityTasks';
 import { StudyAgenda } from './StudyAgenda';
+import { NavigationContext } from '@react-navigation/native';
+import { CrossCourseMaterialSearch, useCourseSearchState } from './CrossCourseMaterialSearch';
+import { createNuniClassroom } from '@campus/shared/src/nuniClassroom';
+import { NuniAttendance, createAttendanceStore } from './NuniAttendance';
 
 type Classes = ReturnType<typeof createNuniClasses>;
 type Field = {
@@ -260,6 +273,8 @@ function RecentTeacherFeedbackRow({
   item: NuniRecentTeacherFeedback;
   open(courseId: string, activityId?: string): void;
 }) {
+  const auth = useNuniSession();
+  const owner = auth.session?.platformAccountId ?? null;
   const kindLabel = item.kind === 'quiz' ? '測驗回饋' : '作業回饋';
   const label = `開啟「${item.title}」完整回饋`;
   return (
@@ -271,8 +286,8 @@ function RecentTeacherFeedbackRow({
       </Copy>
       <Copy>{truncateFeedback(item.feedback)}</Copy>
       {item.stale ? <Copy>這則回饋早於你最近一次繳交，請到作業頁確認是否仍適用。</Copy> : null}
-      {item.reviewedAt ? <Copy>{time(item.reviewedAt)}</Copy> : null}
-      <Button label={label} onPress={() => open(item.courseId, item.id)} />
+      <Copy>來源：nuni 課程 · 回饋更新：{item.reviewedAt ? time(item.reviewedAt) : '未知'}</Copy>
+      <PublishedFeedbackLink owner={owner} record={`${item.courseId}:${item.kind}:${item.id}`} version={item.reviewedAt} label={label} onOpen={() => open(item.courseId, item.id)} />
     </View>
   );
 }
@@ -586,10 +601,12 @@ function useLoad<T>(
 }
 
 export function NuniCourses({
+  active = true,
   initialWorkspaceId,
   initialAssignmentId,
   initialMaterialId,
 }: {
+  active?: boolean;
   initialWorkspaceId?: string;
   initialAssignmentId?: string;
   initialMaterialId?: string;
@@ -599,6 +616,7 @@ export function NuniCourses({
   return (
     <CourseScope
       key={auth.session.context}
+      active={active}
       session={auth.session}
       request={auth.request}
       upload={auth.upload}
@@ -610,6 +628,7 @@ export function NuniCourses({
   );
 }
 function CourseScope({
+  active,
   session,
   request,
   upload,
@@ -618,6 +637,7 @@ function CourseScope({
   initialAssignmentId,
   initialMaterialId,
 }: {
+  active: boolean;
   session: NativeNuniSession;
   request: ReturnType<typeof useNuniSession>['request'];
   upload?: ReturnType<typeof useNuniSession>['upload'];
@@ -627,16 +647,23 @@ function CourseScope({
   initialMaterialId?: string;
 }) {
   const theme = useTheme();
+  const navigation = React.useContext(NavigationContext);
+  const [focused, setFocused] = useState(() => navigation?.isFocused() ?? true);
+  useEffect(() => {
+    if (!navigation) return;
+    const focus = navigation.addListener('focus', () => setFocused(true));
+    const blur = navigation.addListener('blur', () => setFocused(false));
+    return () => { focus(); blur(); };
+  }, [navigation]);
+  const searchState = useCourseSearchState();
+  const searchOffset = useRef<number | null>(null);
+  const pendingSearchReturn = useRef<number | null>(null);
+  const [joinRequested, setJoinRequested] = useState(0);
   const classes = useMemo(
     () =>
       createNuniClasses(
         (path, input, query) => {
-          const send =
-            assignmentFileSubmitEnabledNative() &&
-            bffRequest &&
-            usesAssignmentFileBff(path, input)
-              ? bffRequest
-              : request;
+          const send = assignmentRequest(path, input, request, bffRequest);
           return query
             ? send(path, session.context, input, undefined, query)
             : send(path, session.context, input);
@@ -648,6 +675,11 @@ function CourseScope({
       ),
     [bffRequest, request, session.context, session.platformAccountId, upload],
   );
+  const classroom = useMemo(
+    () => createNuniClassroom((path, input) => request(path, session.context, input)),
+    [request, session.context],
+  );
+  const [attendanceStore] = useState(createAttendanceStore);
   const scrollRef = useRef<ScrollView>(null);
   const contentOffsetYRef = useRef(0);
   const [selected, setSelected] = useNuniDraftState<string | null>(
@@ -658,6 +690,8 @@ function CourseScope({
   const [focusMaterialId, setFocusMaterialId] = useState<string | undefined>(initialMaterialId);
   useEffect(() => {
     if (initialWorkspaceId) {
+      searchOffset.current = null;
+      pendingSearchReturn.current = null;
       scrollRef.current?.scrollTo({ y: 0, animated: false });
       contentOffsetYRef.current = 0;
       setSelected(initialWorkspaceId);
@@ -671,6 +705,8 @@ function CourseScope({
   }, [initialMaterialId]);
   const openCourse = useCallback(
     (id: string, activityId?: string) => {
+      searchOffset.current = null;
+      pendingSearchReturn.current = null;
       scrollRef.current?.scrollTo({ y: 0, animated: false });
       contentOffsetYRef.current = 0;
       setFocusActivityId(activityId);
@@ -682,7 +718,15 @@ function CourseScope({
   return (
     <ScrollView
       ref={scrollRef}
+      key={selected ? "detail" : "list"}
       testID="nuni-courses-scroll"
+      onContentSizeChange={selected ? undefined : () => {
+        const offset = pendingSearchReturn.current;
+        if (offset === null) return;
+        pendingSearchReturn.current = null;
+        scrollRef.current?.scrollTo({ y: offset, animated: false });
+        contentOffsetYRef.current = offset;
+      }}
       keyboardShouldPersistTaps="handled"
       scrollEventThrottle={16}
       onScroll={(event) => {
@@ -693,12 +737,14 @@ function CourseScope({
     >
       {selected ? (
         <CourseDetail
+          attendanceStore={attendanceStore}
           key={selected}
           id={selected}
           classes={classes}
+          classroom={classroom}
           onBack={() => {
-            scrollRef.current?.scrollTo({ y: 0, animated: false });
-            contentOffsetYRef.current = 0;
+            pendingSearchReturn.current = searchOffset.current;
+            searchOffset.current = null;
             setFocusActivityId(undefined);
             setFocusMaterialId(undefined);
             setSelected(null);
@@ -709,16 +755,29 @@ function CourseScope({
           contentOffsetYRef={contentOffsetYRef}
         />
       ) : (
-        <CourseList classes={classes} open={openCourse} />
+        <>
+          <CrossCourseMaterialSearch state={searchState} active={active && focused} join={() => setJoinRequested((value) => value + 1)} classes={classes} open={(courseId, materialId) => {
+            pendingSearchReturn.current = null;
+            searchOffset.current = contentOffsetYRef.current;
+            scrollRef.current?.scrollTo({ y: 0, animated: false });
+            contentOffsetYRef.current = 0;
+            setFocusActivityId(undefined);
+            setFocusMaterialId(materialId);
+            setSelected(courseId);
+          }} />
+          <CourseList classes={classes} open={openCourse} joinRequested={joinRequested} />
+        </>
       )}
     </ScrollView>
   );
 }
 
 function CourseList({
+  joinRequested = 0,
   classes,
   open,
 }: {
+  joinRequested?: number;
   classes: Classes;
   open(id: string, activityId?: string): void;
 }) {
@@ -772,6 +831,9 @@ function CourseList({
     };
   }, [agendaData]);
   const [action, setAction] = useNuniDraftState<'join' | 'create' | null>('courses:entry', null);
+  useEffect(() => {
+    if (joinRequested) setAction('join');
+  }, [joinRequested, setAction]);
   const [query, setQuery] = useNuniDraftState('courses:search', '');
   const [filter, setFilter] = useNuniDraftState<CourseListFilter>('courses:filter', 'all');
   const courses = result.data ?? [];
@@ -972,6 +1034,7 @@ function CourseList({
 }
 
 type CourseData = {
+  checkedAt: string;
   course: NuniWorkspace;
   materials: NuniMaterial[];
   materialsCursor: string | null;
@@ -979,16 +1042,20 @@ type CourseData = {
   quizzes: NuniQuiz[];
 };
 function CourseDetail({
+  attendanceStore,
   id,
   classes,
+  classroom,
   onBack,
   initialAssignmentId,
   initialMaterialId,
   scrollRef,
   contentOffsetYRef,
 }: {
+  attendanceStore: ReturnType<typeof createAttendanceStore>;
   id: string;
   classes: Classes;
+  classroom: ReturnType<typeof createNuniClassroom>;
   onBack(): void;
   initialAssignmentId?: string;
   initialMaterialId?: string;
@@ -1004,6 +1071,7 @@ function CourseDetail({
   const [loadingMore, setLoadingMore] = useState(false);
   const [materialsError, setMaterialsError] = useState('');
   const [materialsDenied, setMaterialsDenied] = useState(false);
+  const [classroomDenied, setClassroomDenied] = useState(false);
   const [cursorInvalid, setCursorInvalid] = useState(false);
   const [cursorCycled, setCursorCycled] = useState(false);
   const [materialQuery, setMaterialQuery] = useState('');
@@ -1038,6 +1106,7 @@ function CourseDetail({
     pageGeneration.current += 1;
     const run = pageGeneration.current;
     resetMaterialPaging();
+    setClassroomDenied(false);
     if (initialMaterialId) {
       setTargetSeekCancelled(false);
       setTargetSeekBudget(MATERIAL_TARGET_AUTO_PAGE_BUDGET);
@@ -1049,7 +1118,7 @@ function CourseDetail({
     }
     const course = await classes.get(id);
     const [page, assignments, quizzes] = await Promise.all([
-      classes.materialsPage(id),
+      readMaterialWithDeadline(classes.materialsPage(id)),
       classes.assignments(id),
       classes.quizzes(id),
     ]);
@@ -1062,6 +1131,7 @@ function CourseDetail({
     if (run === pageGeneration.current) pageProgress.current = snapshot;
     return {
       course,
+      checkedAt: new Date().toISOString(),
       materials: snapshot.items,
       materialsCursor: snapshot.nextCursor,
       assignments,
@@ -1069,10 +1139,9 @@ function CourseDetail({
     };
   }, [classes, id, initialMaterialId, resetMaterialPaging]);
   const result = useLoad(load, true, true);
-  const [tab, setTab] = useNuniDraftState<'assignments' | 'materials' | 'quizzes'>(
-    `course:${id}:tab`,
-    'assignments',
-  );
+  const [tab, setTab] = useNuniDraftState<
+    'assignments' | 'materials' | 'quizzes' | 'attendance' | 'members'
+  >(`course:${id}:tab`, 'assignments');
   const [activityFilter, setActivityFilter] = useNuniDraftState<ActivityFilter>(
     `course:${id}:activity-filter`,
     'all',
@@ -1084,6 +1153,50 @@ function CourseDetail({
   const [quizQuery, setQuizQuery] = useNuniDraftState(`course:${id}:quiz-search`, '');
   const activityQuery = tab === 'quizzes' ? quizQuery : assignmentQuery;
   const setActivityQuery = tab === 'quizzes' ? setQuizQuery : setAssignmentQuery;
+  const [assignmentSync, setAssignmentSync] = useState<AssignmentSync>({
+    state: 'updating',
+    updatedAt: null,
+  });
+  const [receiptId, setReceiptId] = useState<string | null>(null);
+  const assignmentRevision = useRef(0);
+  const assignmentCommit = useRef(result.commit);
+  const assignmentVersion = useRef(result.version);
+  useEffect(() => {
+    assignmentCommit.current = result.commit;
+    assignmentVersion.current = result.version;
+  });
+  const assignmentLiveReady = result.data !== null && !result.loading && !classroomDenied;
+  useEffect(() => {
+    if (!assignmentLiveReady || tab !== 'assignments') return;
+    let online = true;
+    return startAssignmentLive({
+      read: () => classes.assignments(id),
+      revision: () => assignmentRevision.current,
+      receive: (assignments) =>
+        assignmentCommit.current(
+          (current) => (current ? { ...current, assignments } : current),
+          assignmentVersion.current,
+        ),
+      clear: () => {
+        setClassroomDenied(true);
+        assignmentCommit.current(() => null, assignmentVersion.current);
+      },
+      status: setAssignmentSync,
+      active: () => AppState.currentState === 'active',
+      online: () => online,
+      subscribe: (changed) => {
+        const app = AppState.addEventListener('change', changed);
+        const network = NetInfo.addEventListener((state) => {
+          online = state.isConnected !== false && state.isInternetReachable !== false;
+          changed();
+        });
+        return () => {
+          app.remove();
+          network();
+        };
+      },
+    });
+  }, [classes, id, assignmentLiveReady, tab]);
   const data = result.data;
   const linkedAssignment =
     !!initialAssignmentId && !!data?.assignments.some((item) => item.id === initialAssignmentId);
@@ -1169,7 +1282,7 @@ function CourseDetail({
     setLoadingMore(true);
     setMaterialsError('');
     try {
-      const page = await classes.materialsPage(id, requestedCursor);
+      const page = await readMaterialWithDeadline(classes.materialsPage(id, requestedCursor));
       if (run !== pageGeneration.current) return;
       if (lookupRun !== lookupGeneration.current) return;
       const merged = appendMaterialPage(pageProgress.current, page, requestedCursor);
@@ -1195,8 +1308,8 @@ function CourseDetail({
     } catch (failure) {
       if (run !== pageGeneration.current) return;
       if (lookupRun !== lookupGeneration.current) return;
-      setMaterialsError(nuniErrorMessage(failure));
-      if (failure instanceof NuniError && (failure.status === 403 || failure.status === 404)) {
+      setMaterialsError(materialFailureMessage(failure));
+      if (failure instanceof NuniError && [401, 403, 404, 410].includes(failure.status)) {
         pageGeneration.current += 1;
         invalidateMaterialLookup();
         setMaterialsDenied(true);
@@ -1252,6 +1365,7 @@ function CourseDetail({
     targetSeekCancelled,
   ]);
   const saveActivity = (item: Activity) => {
+    if ('instructions' in item) assignmentRevision.current += 1;
     result.commit(
       (current) =>
         current
@@ -1273,6 +1387,9 @@ function CourseDetail({
     setActivityFilter((filter) => (filter === 'pending' ? 'submitted' : filter));
   };
   const teacher = data && data.course.memberRole !== 'student';
+  useEffect(() => {
+    if (data?.course.memberRole === 'student' && tab === 'members') setTab('assignments');
+  }, [data?.course.memberRole, setTab, tab]);
   const currentActivities = data ? (tab === 'quizzes' ? data.quizzes : data.assignments) : [];
   const matchingActivities = data
     ? currentActivities.filter(
@@ -1291,10 +1408,15 @@ function CourseDetail({
       </View>
       {result.loading ? <Copy>正在讀取課程內容…</Copy> : null}
       {result.error ? <Copy alert>{result.error}</Copy> : null}
+      {result.error ? <Copy>完整進度未知，未取得的內容不當成已完成。</Copy> : null}
       {materialsDenied ? <Copy alert>{materialsError}</Copy> : null}
-      {data ? (
+      {classroomDenied ? <Copy alert>目前無法存取這門課程，請更新內容後確認權限。</Copy> : null}
+      {data && !classroomDenied ? (
         <View style={{ gap: 16, display: result.loading || result.error ? 'none' : 'flex' }}>
           <Copy title>{data.course.title}</Copy>
+          <Copy>來源：nuni 課程 · 本次讀取：{time(data.checkedAt)}</Copy>
+          <Copy>{materialCapabilities(data.course)}</Copy>
+          <Copy>進度依作業繳交與測驗作答紀錄計算，閱讀教材不計完成。待評、缺件與未取得都不換算成零分；清單未齊時完整進度為未知。點選作業或測驗可查看原始紀錄。</Copy>
           <Copy>
             {courseRoleLabels[data.course.memberRole]}
             {data.course.state === 'archived' ? ' · 課程已封存' : ''}
@@ -1337,8 +1459,31 @@ function CourseDetail({
               onPress={() => setTab('quizzes')}
               selected={tab === 'quizzes'}
             />
+            <Button
+              label="點名"
+              onPress={() => setTab('attendance')}
+              selected={tab === 'attendance'}
+            />
+            {teacher ? (
+              <Button label="名冊" onPress={() => setTab('members')} selected={tab === 'members'} />
+            ) : null}
           </View>
-          {tab !== 'materials' ? (
+          {(tab === 'attendance' || (tab === 'members' && teacher)) &&
+          !result.loading &&
+          !result.error ? (
+            <NuniAttendance
+              attendanceStore={attendanceStore}
+              classroom={classroom}
+              course={data.course}
+              mode={tab === 'members' ? 'members' : 'attendance'}
+              onAccessDenied={() => {
+                pageGeneration.current += 1;
+                invalidateMaterialLookup();
+                setClassroomDenied(true);
+              }}
+            />
+          ) : null}
+          {tab === 'assignments' || tab === 'quizzes' ? (
             <View style={{ gap: 8 }}>
               <TextInput
                 accessibilityLabel={tab === 'assignments' ? '搜尋這門課的作業' : '搜尋這門課的測驗'}
@@ -1366,7 +1511,7 @@ function CourseDetail({
               ) : null}
             </View>
           ) : null}
-          {!teacher && tab !== 'materials' ? (
+          {!teacher && (tab === 'assignments' || tab === 'quizzes') ? (
             <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
               {(['all', 'pending', 'submitted'] as const).map((filter) => {
                 const items = tab === 'assignments' ? data.assignments : data.quizzes;
@@ -1384,7 +1529,7 @@ function CourseDetail({
               })}
             </View>
           ) : null}
-          {tab !== 'materials' && activityQuery.trim() ? (
+          {(tab === 'assignments' || tab === 'quizzes') && activityQuery.trim() ? (
             <Copy>
               {matchingActivities.length
                 ? `搜尋符合 ${matchingActivities.length} 項。`
@@ -1393,6 +1538,12 @@ function CourseDetail({
             </Copy>
           ) : null}
           <View style={{ display: tab === 'assignments' ? 'flex' : 'none', gap: 16 }}>
+            <Text accessibilityLiveRegion="polite">
+              {assignmentSyncLabel(assignmentSync)}{assignmentSync.updatedAt
+                ? ` · 最後更新 ${formatTaipeiDateTime(assignmentSync.updatedAt, { seconds: true })}`
+                : ' · 尚未確認最新狀態'}
+            </Text>
+            <Copy>作業約每分鐘自動更新；回到畫面、切回分頁、網路恢復、自己送出或重新整理時立即更新。校方 LMS 等未串接來源請到原系統確認。</Copy>
             {data.assignments.length === 0 ? (
               <Copy>老師尚未發布作業。</Copy>
             ) : (
@@ -1408,6 +1559,8 @@ function CourseDetail({
                       !matchesActivitySearch(item, assignmentQuery)) &&
                     item.id !== initialAssignmentId
                   }
+                  receiptActive={tab === 'assignments' && receiptId === item.id}
+                  onOpenReceipts={() => setReceiptId(item.id)}
                   compact={data.assignments.length > 8 && index > 0}
                   focused={item.id === initialAssignmentId}
                   scrollRef={scrollRef}
@@ -1570,7 +1723,9 @@ function CourseDetail({
               </Copy>
             ) : null}
           </View>
-          {teacher && data.course.state === 'active' ? (
+          {teacher &&
+          data.course.state === 'active' &&
+          (tab === 'assignments' || tab === 'materials' || tab === 'quizzes') ? (
             <CoursePublishing
               key={`${data.course.memberRole}:${data.course.state}`}
               tab={tab}
@@ -1661,7 +1816,7 @@ function MaterialCard({
         ref={cardRef}
         testID={`material-${material.id}`}
         onLayout={revealTarget}
-        style={{ gap: 12 }}
+        style={{ gap: 12, ...(focused ? { borderWidth: 2, borderColor: '#2769A8', backgroundColor: '#EAF3FC', borderRadius: 12, padding: 12 } : {}) }}
       >
         {focused ? (
           <Text accessibilityLabel={`目標教材：${material.title}`}>目標教材</Text>
@@ -1669,12 +1824,19 @@ function MaterialCard({
         <Copy title>{material.title}</Copy>
         {material.unitTitle ? <Copy>{material.unitTitle}</Copy> : null}
         <Copy>{material.body}</Copy>
+        <Button label="分享教材入口" onPress={() => {
+          const link = `campus://campus-one?tab=courses&workspaceId=${encodeURIComponent(material.workspaceId)}&materialId=${encodeURIComponent(material.id)}`;
+          void Share.share({ message: `${material.title}\n${link}\n開啟後需登入並有這門課的權限。` })
+            .catch(() => Alert.alert('分享沒有完成', '請稍後再試一次。'));
+        }} />
       </View>
     </Section>
   );
 }
 
 function ActivityCard({
+  receiptActive = true,
+  onOpenReceipts,
   item,
   course,
   classes,
@@ -1685,6 +1847,8 @@ function ActivityCard({
   scrollRef,
   contentOffsetYRef,
 }: {
+  receiptActive?: boolean;
+  onOpenReceipts?: () => void;
   item: Activity;
   course: NuniWorkspace;
   classes: Classes;
@@ -1705,10 +1869,15 @@ function ActivityCard({
   const prompt = assignment ? item.instructions : item.prompt;
   const student = course.memberRole === 'student';
   const active = course.state === 'active';
-  const canSubmit = student && active && item.state === 'open';
-  const kind = assignment ? '作業' : '測驗';
+  const canRevise = !assignment || assignmentCanRevise(item.dueAt);
+  const [recovering, setRecovering] = useState(false);
+  const fileOperation = useRef<NativeFileOperation>({});
   const fileSubmit = assignment && assignmentFileSubmitEnabledNative();
+  const canSubmit = student && active && (recovering || (item.state === 'open' && (!fileSubmit || !receipt || canRevise)));
+  const kind = assignment ? '作業' : '測驗';
+  const [withdrawNotice, setWithdrawNotice] = useState('');
   const [localFiles, setLocalFiles] = useState<LocalNativeFile[]>([]);
+  const [pdfOpen, setPdfOpen] = useState(false);
   const [previewUri, setPreviewUri] = useState<string | null>(null);
   const [progress, setProgress] = useState<NativeUploadProgress | null>(null);
   const lateOpen = assignment
@@ -1732,20 +1901,42 @@ function ActivityCard({
   const submitArea = (
     <>
       {focused ? <Text accessibilityLabel={`${landLabel}：${item.title}`}>{landLabel}</Text> : null}
-      {canSubmit && fileSubmit ? (
+      {canSubmit && fileSubmit && !recovering ? (
         <View style={{ gap: 8 }}>
           <Button
             label="拍照"
+            disabled={pdfOpen}
             onPress={() => void pickAssignmentCamera(localFiles).then(setLocalFiles)}
           />
           <Button
             label="相簿"
+            disabled={pdfOpen}
             onPress={() => void pickAssignmentAlbum(localFiles).then(setLocalFiles)}
           />
           <Button
             label="檔案"
+            disabled={pdfOpen}
             onPress={() => void pickAssignmentDocuments(localFiles).then(setLocalFiles)}
           />
+          {photoPdfAvailable() ? (
+            <Button
+              label="照片轉 PDF"
+              disabled={localFiles.filter((file) => file.kind === 'file').length >= MAX_ASSIGNMENT_DOCUMENTS}
+              onPress={() => setPdfOpen(true)}
+            />
+          ) : null}
+          {pdfOpen ? (
+            <NativePhotoPdfEditor
+              onCancel={() => setPdfOpen(false)}
+              onConfirm={(file) => {
+                setLocalFiles((current) => [...current, file]);
+                setPdfOpen(false);
+              }}
+            />
+          ) : null}
+          {receipt && 'files' in receipt && receipt.files?.length ? (
+            <Copy>重新送出會取代這次繳交；沒有選檔就改交純文字。</Copy>
+          ) : null}
           <Copy>網路不穩時再送一次，不會重複交。選好的照片可以刪除或調整順序後再送出。</Copy>
           {progress ? (
             <Copy>
@@ -1802,6 +1993,15 @@ function ActivityCard({
           ) : null}
         </View>
       ) : null}
+      {withdrawNotice ? <Copy>{withdrawNotice}</Copy> : null}
+      {assignment && fileSubmit && receipt && student && active && item.state === 'open' && canRevise ? (
+        <MutationForm draftKey={`withdraw:${course.id}:${item.id}:${receipt.submittedAt}`} label="撤回繳交" fields={[]} submit={async (_values, key, stillActive) => {
+          const result = await classes.withdrawAssignment(course.id, item.id, receipt.submittedAt, key);
+          if (stillActive()) { saved(result); setWithdrawNotice('已撤回，截止前可以重新繳交。'); }
+          return '已撤回，截止前可以重新繳交。';
+        }} />
+      ) : null}
+      {fileSubmit && receipt && !canRevise ? <Copy>已過截止時間，這份繳交不能再修改或撤回。</Copy> : null}
       {canSubmit ? (
         <MutationForm
           draftKey={`course:${course.id}:${course.memberRole}:${course.state}:${assignment ? 'assignment' : 'quiz'}:${item.id}:${item.state}`}
@@ -1829,32 +2029,87 @@ function ActivityCard({
           ]}
           label={receipt ? `更新${kind}繳交` : `繳交${kind}`}
           submit={async ({ body }, key, stillActive) => {
-            if (assignment && fileSubmit && localFiles.length) {
-              try {
-                const confirmed = await submitNativeAssignmentFiles(
-                  classes,
-                  course.id,
-                  item.id,
-                  body,
-                  localFiles,
-                  key,
-                  setProgress,
+            try {
+              if (
+                fileSubmit &&
+                !recovering &&
+                assignment &&
+                receipt &&
+                !assignmentCanRevise(item.dueAt)
+              )
+                throw new NuniError(409, 'ASSIGNMENT_REVISION_CLOSED');
+              setRecovering(true);
+              if (assignment && fileSubmit && localFiles.length) {
+                try {
+                  const confirmed = await submitNativeAssignmentFiles(
+                    classes,
+                    course.id,
+                    item.id,
+                    body,
+                    localFiles,
+                    key,
+                    setProgress,
+                    fileOperation.current,
+                  );
+                  if (stillActive()) {
+                    setRecovering(false);
+                    fileOperation.current = {};
+                    setLocalFiles([]);
+                    setPreviewUri(null);
+                    saved(confirmed);
+                    setWithdrawNotice('');
+                  }
+                  return '已收到伺服器繳交紀錄。';
+                } catch (failure) {
+                  if (
+                    stillActive() &&
+                    failure instanceof NuniError &&
+                    failure.status > 0 &&
+                    failure.status < 500 &&
+                    failure.status !== 408 &&
+                    failure.code !== 'SESSION_CHANGED'
+                  ) {
+                    setRecovering(false);
+                  }
+                  throw failure;
+                } finally {
+                  if (stillActive()) setProgress(null);
+                }
+              }
+              const confirmed = assignment
+                ? fileSubmit
+                  ? await classes.submitFiles(course.id, item.id, {
+                      body,
+                      fileIds: [],
+                      idempotencyKey: key,
+                    })
+                  : await classes.submit(course.id, item.id, body, key)
+                : await classes.submitQuiz(course.id, item.id, body, key);
+              if (stillActive()) {
+                setRecovering(false);
+                saved(confirmed);
+                setWithdrawNotice('');
+              }
+              return '已收到伺服器繳交紀錄。';
+            } catch (failure) {
+              if (
+                failure instanceof NuniError &&
+                failure.code === 'ASSIGNMENT_SUBMISSION_SUPERSEDED'
+              ) {
+                const fresh = (await classes.assignments(course.id)).find(
+                  (entry) => entry.id === item.id,
                 );
-                if (stillActive()) {
+                if (stillActive() && fresh) {
+                  setWithdrawNotice(nuniErrorMessage(failure));
+                  saved(fresh);
+                  setRecovering(false);
+                  fileOperation.current = {};
                   setLocalFiles([]);
                   setPreviewUri(null);
-                  saved(confirmed);
                 }
-                return '已收到伺服器繳交紀錄。';
-              } finally {
-                if (stillActive()) setProgress(null);
               }
+              throw failure;
             }
-            const confirmed = assignment
-              ? await classes.submit(course.id, item.id, body, key)
-              : await classes.submitQuiz(course.id, item.id, body, key);
-            if (stillActive()) saved(confirmed);
-            return '已收到伺服器繳交紀錄。';
           }}
         />
       ) : null}
@@ -1984,6 +2239,8 @@ function ActivityCard({
               classes={classes}
               course={course}
               item={item}
+              receiptActive={receiptActive && !hidden && expanded}
+              onOpenReceipts={onOpenReceipts}
               scrollRef={scrollRef}
               contentOffsetYRef={contentOffsetYRef}
             />
@@ -1995,12 +2252,16 @@ function ActivityCard({
 }
 
 function TeacherReceipts({
+  receiptActive = true,
+  onOpenReceipts,
   classes,
   course,
   item,
   scrollRef,
   contentOffsetYRef,
 }: {
+  receiptActive?: boolean;
+  onOpenReceipts?: () => void;
   classes: Classes;
   course: NuniWorkspace;
   item: Activity;
@@ -2017,15 +2278,53 @@ function TeacherReceipts({
   const pendingRevealId = useRef<string | null>(null);
   const revealGeneration = useRef(0);
   const mountedRef = useRef(true);
+  const receiptReader = useRef(assignmentReader<Receipt[]>());
   const load = useCallback(
-    async (): Promise<Receipt[]> =>
-      assignment
+    async (context?: { cancelled(): boolean }): Promise<Receipt[]> => receiptReader.current(() => {
+      if (context?.cancelled()) return Promise.reject(new Error('讀取已失效'));
+      return assignment
         ? classes.submissions(course.id, item.id)
-        : classes.quizResponses(course.id, item.id),
+        : classes.quizResponses(course.id, item.id);
+    }),
     [assignment, classes, course.id, item.id],
   );
   const resource = useLoad(load, false);
   const { data: receipts, loading: busy, error } = resource;
+  const mutationRevision = useRef(0);
+  const liveResource = useRef({ load, resource });
+  useEffect(() => { liveResource.current = { load, resource }; });
+  const [receiptSync, setReceiptSync] = useState<AssignmentSync>({ state: 'paused', updatedAt: null });
+  const receiptsOpened = receipts !== null;
+  useEffect(() => {
+    if (!assignment || !receiptsOpened || !receiptActive || busy) return;
+    let online = true;
+    let valid = true;
+    const stop = startAssignmentLive({
+      initialDelay: 60000,
+      read: () => liveResource.current.load({ cancelled: () => !valid || !online || AppState.currentState !== 'active' }),
+      revision: () => mutationRevision.current,
+      receive: (rows) => {
+        const current = liveResource.current.resource;
+        current.commit(() => rows, current.version);
+      },
+      clear: () => {
+        const current = liveResource.current.resource;
+        current.commit(() => null, current.version);
+      },
+      status: setReceiptSync,
+      active: () => AppState.currentState === 'active',
+      online: () => online,
+      subscribe: (changed) => {
+        const app = AppState.addEventListener('change', changed);
+        const network = NetInfo.addEventListener((state) => {
+          online = state.isConnected !== false && state.isInternetReachable !== false;
+          changed();
+        });
+        return () => { app.remove(); network(); };
+      },
+    });
+    return () => { valid = false; stop(); };
+  }, [assignment, receiptsOpened, receiptActive, busy]);
   useEffect(() => {
     receiptsRef.current = receipts;
   }, [receipts]);
@@ -2124,8 +2423,9 @@ function TeacherReceipts({
       <Button
         label={`查看收件：${item.title}`}
         disabled={busy}
-        onPress={() => void resource.refresh()}
+        onPress={() => { mutationRevision.current += 1; onOpenReceipts?.(); void resource.refresh(); }}
       />
+      {receiptsOpened && assignment ? <Copy>收件：{receiptActive ? assignmentSyncLabel(receiptSync) : '已暫停更新'}{receiptSync.updatedAt ? ` · 最後更新 ${formatTaipeiDateTime(receiptSync.updatedAt, { seconds: true })}` : ''}</Copy> : null}
       {error ? <Copy alert>{error}</Copy> : null}
       {!busy && !error && receipts?.length === 0 ? <Copy>還沒有收到繳交內容。</Copy> : null}
       <View style={{ display: busy || error || !receipts?.length ? 'none' : 'flex', gap: 14 }}>
@@ -2275,6 +2575,7 @@ function TeacherReceipts({
                       entry.platformAccountId === result.platformAccountId ? result : entry,
                     );
                   const nextList = latest.length ? latest : [result];
+                  mutationRevision.current += 1;
                   resource.commit(() => nextList, resource.version);
                   receiptsRef.current = nextList;
                   const matched = (result.teacherFeedback ?? '').trim() === feedback.trim();

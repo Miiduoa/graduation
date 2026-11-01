@@ -1,10 +1,11 @@
 {
   "schema": "campus.nuni-import-compatible-rollback/v1",
-  "baseImage": "registry.fly.io/nuni-api@sha256:b626c6db86b9c3c00da28239bc777be7e7f77551aaa78f2444fc00acc8c949ef",
-  "baseRevision": "a195cfcaa6f89881a267c032bad34f1e1f27637c",
+  "baseImage": "registry.fly.io/nuni-api@sha256:be815455fbb2ccce844b69f004e416e44465e3421f9da654d0cd5db8379c3dc2",
+  "baseRevision": "b0a10ac814cd03fbfb45132566035acce8339f17",
   "migrations": {
     "deploy/nuni-api/course-access/278_course_access_review.sql": "c382b69b63e10dff4cbe1a8f1b34b0980ed9a85b2d0aea402cb25bc81b91e103",
-    "deploy/nuni-api/personal-import-sync/279_personal_import_sync.sql": "0d825aa890c240ae4a0f496116d4507b3e014878402642bd54bed2046a44118c"
+    "deploy/nuni-api/personal-import-sync/279_personal_import_sync.sql": "0d825aa890c240ae4a0f496116d4507b3e014878402642bd54bed2046a44118c",
+    "deploy/nuni-api/assignment-files/281_assignment_submission_withdrawals.sql": "ddc7e73ecb944075fc2f0a75846e91661a2b9489a8a32cad91c95a99cc25f198"
   },
-  "behavior": "Preserve the current production image exactly; append additive SQL manifest files only. Never roll back user data."
+  "behavior": "緊急相容回滾；保留正式 API 與 278/279，加入相同 281 manifest；不倒退 DB。已撤回的本人繳交可能重新對其授課老師顯示，負責人已接受此風險。"
 }

@@ -1,5 +1,7 @@
 'use client';
 
+import { useSchoolLmsReadonlyEnabled } from '@/components/SchoolLmsReadonlyProvider';
+
 import { Suspense, useEffect, useRef, useState } from 'react';
 import type { CampusSemanticResult } from '@campus/shared/src/campusSemantic';
 import { useSearchParams } from 'next/navigation';
@@ -16,7 +18,7 @@ import {
   serviceAccessLabel,
   SERVICE_CATEGORIES,
   searchCampusServices,
-  CAMPUS_SERVICES,
+  visibleCampusServices,
   type ServiceCategory,
 } from '@/lib/campusServices';
 
@@ -31,6 +33,7 @@ function readFilters(params: URLSearchParams) {
 }
 
 function ServiceDirectory() {
+  const schoolLmsEnabled = useSchoolLmsReadonlyEnabled();
   const params = useSearchParams();
   const { user } = useAuth();
   const uid = user?.uid || '';
@@ -58,13 +61,13 @@ function ServiceDirectory() {
   } | null>(null);
   const active = analysis?.scope === semanticScope && analysis.term === term ? analysis : null;
   const semantic = active?.status === 'ready' ? active.result : undefined;
-  const matches = searchCampusServices(query, category);
+  const matches = searchCampusServices(query, category, schoolLmsEnabled);
   const suggested = semantic?.status === 'understood'
     ? semantic.destinations.flatMap((href) => {
-        const service = CAMPUS_SERVICES.find((row) => row.href === href);
+        const service = visibleCampusServices(schoolLmsEnabled).find((row) => row.href === href);
         return service ? [service] : [];
       })
-    : getQuickCampusActions(query).filter(
+    : getQuickCampusActions(query, schoolLmsEnabled).filter(
         (action) => !matches.some((match) => match.href === action.href),
       );
 

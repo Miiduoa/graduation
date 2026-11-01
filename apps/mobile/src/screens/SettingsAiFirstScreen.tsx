@@ -1,3 +1,4 @@
+import { NextClassLiveActivitySetting } from '../widgets/NextClassLiveActivitySetting';
 import React, { useEffect, useRef, useState } from 'react';
 import { Alert, Linking, Text, View } from 'react-native';
 import Constants from 'expo-constants';
@@ -96,6 +97,10 @@ export default function SettingsAiFirstScreen({ navigation }: { navigation?: Nav
           )}
         </View>
       </AICard>
+
+      {uid && Constants.expoConfig?.extra?.release?.features?.widgets === true ? (
+        <NextClassLiveActivitySetting />
+      ) : null}
 
       <AISection title="校園">
         <SchoolBrowsingControl />

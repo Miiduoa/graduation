@@ -94,6 +94,7 @@ export async function loadSchoolStudentGrades(
         href: `/course/${encodeURIComponent(course.id)}`,
         archived: false,
         status: 'ready' as const,
+      checkedAt: new Date().toISOString(),
         error: null,
         assignmentError: null,
         quizError: null,

@@ -1,7 +1,15 @@
+import { prepareAssignmentReminderSubmission } from '../../services/campusAssignmentReminders';
+import { reconcileSubmittedAssignmentReceipt } from '../../services/submittedAssignmentReminders';
 import { getDoc, getDocFromServer, getDocs, runTransaction } from 'firebase/firestore';
 import { getAuthInstance } from '../../firebase';
 import { firebaseSource } from '../../data/firebaseSource';
 
+jest.mock('../../services/submittedAssignmentReminders', () => ({
+  reconcileSubmittedAssignmentReceipt: jest.fn(async () => undefined),
+}));
+jest.mock('../../services/campusAssignmentReminders', () => ({
+  prepareAssignmentReminderSubmission: jest.fn(async (): Promise<string | undefined> => undefined),
+}));
 jest.mock('../../firebase', () => ({
   getDb: () => 'db',
   getAuthInstance: jest.fn(),
@@ -69,6 +77,8 @@ test('writes canonical text and server timestamps only after reading both docume
     groupId: 'course',
     content: '  Answer  ',
   });
+  expect(jest.mocked(prepareAssignmentReminderSubmission).mock.invocationCallOrder[0])
+    .toBeLessThan(jest.mocked(runTransaction).mock.invocationCallOrder[0]);
   expect(transaction.get.mock.calls.map(([ref]) => ref.path)).toEqual([
     'groups/course/assignments/work',
     'groups/course/assignments/work/submissions/alice',
@@ -226,4 +236,51 @@ test('a switched account cannot receive the previous post-write receipt', async 
   await expect(firebaseSource.submitAssignment({
     assignmentId: 'work', userId: 'alice', groupId: 'course', content: 'Answer',
   })).rejects.toThrow('登入身分已變更');
+});
+
+
+test('只有伺服器收據核對完成才核對本機提醒，離線或送出中不取消', async () => {
+  let finish!: (value: unknown) => void;
+  const receipt = { id: 'alice', exists: () => true, metadata: { fromCache: false, hasPendingWrites: false },
+    data: () => ({ userId: 'alice', groupId: 'course', assignmentId: 'work', content: 'Answer',
+      status: 'submitted', submittedAt: '2026-10-26T09:00:00Z' }) };
+  jest.mocked(getDocFromServer).mockImplementationOnce(() => new Promise((resolve) => { finish = resolve; }) as never);
+  const sending = firebaseSource.submitAssignment({ userId: 'alice', groupId: 'course', assignmentId: 'work', content: 'Answer' });
+  while (!finish) await Promise.resolve();
+  expect(reconcileSubmittedAssignmentReceipt).not.toHaveBeenCalled();
+  finish(receipt);
+  await sending;
+  expect(reconcileSubmittedAssignmentReceipt).toHaveBeenCalledWith(expect.objectContaining({
+    userId: 'alice', groupId: 'course', assignmentId: 'work', status: 'submitted',
+  }));
+});
+
+test.each([{ fromCache: true, hasPendingWrites: false }, { fromCache: false, hasPendingWrites: true }])(
+  '快取或尚未同步的寫入不當作伺服器確認：%j', async (metadata) => {
+    jest.mocked(getDocFromServer).mockResolvedValueOnce({
+      id: 'alice', exists: () => true, metadata,
+      data: () => ({ userId: 'alice', groupId: 'course', assignmentId: 'work', content: 'Answer',
+        status: 'submitted', submittedAt: '2026-10-26T09:00:00Z' }),
+    } as never);
+    await expect(firebaseSource.submitAssignment({ userId: 'alice', groupId: 'course', assignmentId: 'work', content: 'Answer' })).rejects.toThrow();
+    expect(reconcileSubmittedAssignmentReceipt).not.toHaveBeenCalled();
+  },
+);
+
+test.each(['通知清單失敗', '儲存讀取失敗', '儲存寫入失敗', '摘要服務失敗'])(
+  '提醒維護故障不阻止繳交並回傳稍後重試警告：%s', async (message) => {
+    jest.mocked(prepareAssignmentReminderSubmission).mockRejectedValueOnce(new Error(message));
+    const receipt = await firebaseSource.submitAssignment({ assignmentId: 'work', userId: 'alice', groupId: 'course', content: 'Answer' });
+    expect(transaction.set).toHaveBeenCalled();
+    expect(receipt.status).toBe('submitted');
+    expect(receipt.reminderWarning).toContain('重試');
+    expect(reconcileSubmittedAssignmentReceipt).toHaveBeenCalled();
+  },
+);
+
+test('無關未知提醒只回傳警告，仍可取得本作業收據', async () => {
+  jest.mocked(prepareAssignmentReminderSubmission).mockResolvedValueOnce('未知舊提醒仍可能響鈴');
+  const receipt = await firebaseSource.submitAssignment({ assignmentId: 'work', userId: 'alice', groupId: 'course', content: 'Answer' });
+  expect(receipt.reminderWarning).toContain('仍可能響鈴');
+  expect(transaction.set).toHaveBeenCalled();
 });

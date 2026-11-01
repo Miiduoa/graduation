@@ -1,6 +1,6 @@
 import Constants from 'expo-constants';
 import * as DocumentPicker from 'expo-document-picker';
-import { File } from 'expo-file-system';
+import { File, Paths } from 'expo-file-system';
 import * as ImagePicker from 'expo-image-picker';
 import {
   MAX_ASSIGNMENT_DOCUMENTS,
@@ -130,6 +130,51 @@ export async function pickAssignmentAlbum(current: LocalNativeFile[]): Promise<L
   return next;
 }
 
+// Only this picker owns these copies; ordinary attachments never enter this registry.
+const photoPdfCopies = new WeakMap<LocalNativeFile, string>();
+
+function deletePhotoPdfCopy(uri: string) {
+  const cache = `${Paths.cache.uri.replace(/\/$/, '')}/DocumentPicker/`;
+  if (!uri.startsWith(cache) || /(?:\.\.|%2e|%2f|%5c)/i.test(uri.slice(cache.length))) return;
+  try {
+    const copy = new File(uri);
+    if (copy.exists) copy.delete();
+  } catch {
+    // Keep cleanup independent of the editor's completion callback.
+  }
+}
+
+export function releasePhotoPdfFiles(files: LocalNativeFile[]) {
+  for (const file of files) {
+    const uri = photoPdfCopies.get(file);
+    if (uri) {
+      deletePhotoPdfCopy(uri);
+      photoPdfCopies.delete(file);
+    }
+  }
+}
+
+// Copy original bytes without invoking the image picker encoder.
+export async function pickPhotoPdfFiles(): Promise<LocalNativeFile[]> {
+  const result = await DocumentPicker.getDocumentAsync({
+    multiple: true,
+    copyToCacheDirectory: true,
+    type: ['image/jpeg', 'image/png'],
+  });
+  if (result.canceled) return [];
+  try {
+    if (result.assets.length > 8) throw new Error('一本最多 8 頁。');
+    const files = await Promise.all(result.assets.map((asset) =>
+      fromUri(asset.uri, asset.name, asset.mimeType || 'application/octet-stream', 'image'),
+    ));
+    for (const file of files) photoPdfCopies.set(file, file.uri);
+    return files;
+  } catch (error) {
+    for (const asset of result.assets) deletePhotoPdfCopy(asset.uri);
+    throw error;
+  }
+}
+
 export async function pickAssignmentDocuments(current: LocalNativeFile[]): Promise<LocalNativeFile[]> {
   const result = await DocumentPicker.getDocumentAsync({
     multiple: true,
@@ -165,6 +210,15 @@ export function requireAssignmentPayload(body: string, files: LocalNativeFile[])
   if (!body.trim() && !files.length) throw new NuniError(422, 'ASSIGNMENT_FILE_REQUIRED');
 }
 
+export type NativeFileOperation = {
+  key?: string;
+  prepared?: LocalNativeFile[];
+  intents?: { id: string; uploadPath: string; contentType: string }[];
+  uploaded?: string[];
+  submitting?: boolean;
+  body?: string;
+};
+
 export type NativeUploadProgress = { completed: number; total: number };
 
 export async function submitNativeAssignmentFiles<T>(
@@ -173,11 +227,20 @@ export async function submitNativeAssignmentFiles<T>(
       workspaceId: string,
       assignmentId: string,
       input: {
-        files: { originalName: string; contentType: string; byteSize: number; idempotencyKey?: string }[];
+        files: {
+          originalName: string;
+          contentType: string;
+          byteSize: number;
+          idempotencyKey?: string;
+        }[];
         idempotencyKey: string;
       },
     ): Promise<{ id: string; uploadPath: string; contentType: string }[]>;
-    uploadAssignmentFile(uploadPath: string, body: Uint8Array, contentType: string): Promise<unknown>;
+    uploadAssignmentFile(
+      uploadPath: string,
+      body: Uint8Array,
+      contentType: string,
+    ): Promise<unknown>;
     submitFiles(
       workspaceId: string,
       assignmentId: string,
@@ -190,34 +253,68 @@ export async function submitNativeAssignmentFiles<T>(
   files: LocalNativeFile[],
   key: string,
   onProgress?: (progress: NativeUploadProgress) => void,
+  operation: NativeFileOperation = {},
 ) {
+  if (operation.key !== key) {
+    Object.assign(operation, {
+      key,
+      prepared: undefined,
+      intents: undefined,
+      uploaded: [],
+      submitting: false,
+      body: body.trim() || undefined,
+    });
+  }
+  if (operation.submitting) {
+    return classes.submitFiles(workspaceId, assignmentId, {
+      body: operation.body,
+      fileIds: operation.intents!.map((intent) => intent.id),
+      idempotencyKey: key,
+    });
+  }
   requireAssignmentPayload(body, files);
-  const prepared: LocalNativeFile[] = [];
-  for (const file of files) prepared.push(await compressNativeAssignmentImage(file));
-  onProgress?.({ completed: 0, total: prepared.length });
-  const intents = prepared.length
-    ? await classes.createAssignmentFileIntents(workspaceId, assignmentId, {
-        idempotencyKey: `${key}:intents`,
-        files: prepared.map((file, index) => ({
-          originalName: file.name,
-          contentType: file.contentType,
-          byteSize: file.byteSize,
-          idempotencyKey: `${key}:file:${index}`,
-        })),
-      })
-    : [];
-  let completed = 0;
-  await Promise.all(
+  const prepared: LocalNativeFile[] = operation.prepared ?? [];
+  if (!operation.prepared) {
+    for (const file of files) prepared.push(await compressNativeAssignmentImage(file));
+    operation.prepared = prepared;
+  }
+  onProgress?.({ completed: operation.uploaded?.length ?? 0, total: prepared.length });
+  const intents =
+    operation.intents ??
+    (prepared.length
+      ? await classes.createAssignmentFileIntents(workspaceId, assignmentId, {
+          idempotencyKey: `${key}:intents`,
+          files: prepared.map((file, index) => ({
+            originalName: file.name,
+            contentType: file.contentType,
+            byteSize: file.byteSize,
+            idempotencyKey: `${key}:file:${index}`,
+          })),
+        })
+      : []);
+  operation.intents = intents;
+  let completed = operation.uploaded?.length ?? 0;
+  const uploads = await Promise.allSettled(
     intents.map(async (intent, index) => {
+      if (operation.uploaded?.includes(intent.id)) return;
       const file = prepared[index];
       if (!file) throw new NuniError(502, 'INVALID_RESPONSE');
-      await classes.uploadAssignmentFile(intent.uploadPath, await nativeFileBytes(file), intent.contentType);
+      await classes.uploadAssignmentFile(
+        intent.uploadPath,
+        await nativeFileBytes(file),
+        intent.contentType,
+      );
+      operation.uploaded!.push(intent.id);
       completed += 1;
       onProgress?.({ completed, total: prepared.length });
     }),
   );
+  // Wait for every upload before allowing a retry to reuse this operation.
+  const failed = uploads.find((result) => result.status === 'rejected');
+  if (failed?.status === 'rejected') throw failed.reason;
+  operation.submitting = true;
   return classes.submitFiles(workspaceId, assignmentId, {
-    body: body.trim() || undefined,
+    body: operation.body,
     fileIds: intents.map((intent) => intent.id),
     idempotencyKey: key,
   });
@@ -230,7 +327,7 @@ export function assignmentFileDownloadUrl(file: NuniSubmissionFile, download = f
 export function usesAssignmentFileBff(path: string, input?: Record<string, unknown>): boolean {
   if (/^class-workspaces\/cw_[0-9a-f-]{36}\/assignments\/cwa_[0-9a-f-]{36}\/files\/intents$/.test(path))
     return true;
-  if (/^class-workspaces\/cw_[0-9a-f-]{36}\/assignments\/cwa_[0-9a-f-]{36}\/submit-files$/.test(path))
+  if (/^class-workspaces\/cw_[0-9a-f-]{36}\/assignments\/cwa_[0-9a-f-]{36}\/(?:submit|submit-files|withdraw-submission)$/.test(path))
     return true;
   if (!input && /^class-workspaces\/cw_[0-9a-f-]{36}\/assignments$/.test(path)) return true;
   if (
@@ -239,4 +336,10 @@ export function usesAssignmentFileBff(path: string, input?: Record<string, unkno
   )
     return true;
   return false;
+}
+
+export function assignmentRequest<T>(path: string, input: Record<string, unknown> | undefined, direct: T, bff?: T): T {
+  if (!usesAssignmentFileBff(path, input)) return direct;
+  if (!bff) throw new NuniError(503, 'ASSIGNMENT_FILE_STORE_UNAVAILABLE');
+  return bff;
 }
