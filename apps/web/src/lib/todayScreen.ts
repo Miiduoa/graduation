@@ -1,6 +1,5 @@
 import { parseTaipeiInstant } from '@campus/shared/src/taipeiTime';
 import {
-  taipeiInstantOnClock,
   type TodayClass,
   type TodayTodo,
 } from '@campus/shared/src/pickNextAction';
@@ -11,17 +10,11 @@ import { sanitizeInternalPath } from './navigation';
 
 export function todayClassesFromSchedule(
   entries: readonly PersonalTodayEntry[],
-  now: Date,
+  _now: Date,
   courses: readonly HomeCourse[] = [],
 ): TodayClass[] {
   return entries.flatMap((entry) => {
-    const startAt = taipeiInstantOnClock(now, entry.startTime);
-    let endAt = taipeiInstantOnClock(now, entry.endTime);
-    if (startAt === null || endAt === null) return [];
-    if (endAt <= startAt) {
-      const nextDay = taipeiInstantOnClock(now, entry.endTime, 1);
-      if (nextDay !== null) endAt = nextDay;
-    }
+    const { startAt, endAt } = entry;
     const linked = entry.row.linkedCourseId?.trim();
     const matched = courses.find((course) => course.name.trim() === entry.row.title.trim());
     return [
