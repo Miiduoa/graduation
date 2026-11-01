@@ -55,6 +55,65 @@ node apps/api/dist/migrate.js
 
 這是正式 runner 的完整 manifest 比對／補缺流程，不是裸跑單檔；已登記的 278／279 只核對，不重跑，本次應只補 281。281 的 DDL 與 manifest INSERT 在同一交易內，由 runner 提交；SQL 本身不得含 BEGIN／COMMIT。依下列步驟在一次性工作程序注入並驗證 timeout。超時或 checksum 不符即停止，不強制解鎖、不手改 manifest。確認 runner 成功退出、281 ID/checksum 一致，API 有 SELECT、BFF 有 SELECT／INSERT。不要更動 serving 機器的啟動命令來跑 migration。
 
+### Fly 一次性 machine 入口（執行者 Miiduoa）
+
+唯一發布路徑是固定候選內建 `migrate.js` runner 套 281；psql 僅供 DBA 保存、設定及還原專用 role timeout，不用於手動套 281。
+
+以下為待正式窗口執行的樣板，本輪未建立 Fly machine。前置條件：既有 `nuni-api` app 安全環境已注入獨立 migrator 的 `MIGRATION_DATABASE_URL`，且有既有安全網路與 TLS 設定；不能沿用 API 共用身分。若缺少此既有注入，停止並記錄，不執行 `fly secrets set`。Miiduoa 先準備 `/tmp/nuniapifix/migration-machine.json`，由既有審查過的非敏感設定填入 TLS／受信任網路等必要 env；不得複製含 secret 的 config dump。最小設定如下，正式 TLS 值須照既有安全環境補齊，不能套用本機 disable 設定：
+
+```json
+{
+  "init": { "cmd": ["node", "/opt/release/fly-migrate.mjs"] },
+  "services": [],
+  "mounts": [],
+  "restart": { "policy": "no" },
+  "env": {
+    "EXPO_NO_DOTENV": "1",
+    "NODE_ENV": "production",
+    "DATABASE_APPLICATION_NAME": "nuni-281-migrate",
+    "DATABASE_POOL_MAX": "1",
+    "DATABASE_CONNECTION_TIMEOUT_MS": "5000",
+    "DATABASE_STATEMENT_TIMEOUT_MS": "60000",
+    "DATABASE_QUERY_TIMEOUT_MS": "70000",
+    "DATABASE_IDLE_IN_TRANSACTION_TIMEOUT_MS": "90000"
+  }
+}
+```
+
+同 app／nrt machine 使用該 app 的私網與既有 secret 注入；仍須確認 migrator DB 主機可達且 TLS 驗證配置完整，否則停止。不得設定公開 port、service、volume、schedule 或 autostart；不 clone serving，也不變更既有機器的 CMD。兩個受審查檔以 Fly file injection 放入專用 machine，必須對映像非 root 使用者唯讀；wrapper 啟動前會驗證檢查器不可寫，失敗退出 1，不會跑 DDL。無 `.env` 掛載。
+
+```sh
+export EXPO_NO_DOTENV=1
+RECORD=/workspace/nuni-api-release-records/2026-11-01-281
+mkdir -p "$RECORD"
+sha256sum deploy/nuni-api/composed/fly-migrate.mjs deploy/nuni-api/composed/verify-migration-session.mjs > "$RECORD/runner-files.sha256"
+date -u +%FT%TZ > "$RECORD/migration-start.txt"
+fly machine run registry.fly.io/nuni-api@sha256:962722f3ca6f6ca69f5bef3ccad456fb8c32446c96701e653a9a8022f661c26e \
+  -a nuni-api --region nrt \
+  --name nuni-281-migrate-20261101 --restart no --autostart=false \
+  --skip-dns-registration --detach \
+  --machine-config /tmp/nuniapifix/migration-machine.json \
+  --file-local /opt/release/fly-migrate.mjs=deploy/nuni-api/composed/fly-migrate.mjs \
+  --file-local /opt/release/verify-migration-session.mjs=deploy/nuni-api/composed/verify-migration-session.mjs \
+  > "$RECORD/machine-create.txt" 2>&1
+# 從建立回應填入本次 ID；不可填 serving 或 stopped 台 ID。
+MIGRATION_ID='<本次一次性 machine ID>'
+fly machine wait "$MIGRATION_ID" -a nuni-api --state stopped --wait-timeout 60s
+fly machine status "$MIGRATION_ID" -a nuni-api > "$RECORD/machine-status.txt"
+fly logs -a nuni-api --machine "$MIGRATION_ID" --no-tail > "$RECORD/migration.log"
+date -u +%FT%TZ > "$RECORD/migration-end.txt"
+```
+
+wait 只表示狀態，不能當 runner 退出碼。以 stopped machine 的 exit event 及 `migration.job.exit` 的 code 核對真正退出碼；兩者均須為 0，且有 `migration.session_timeouts_verified`、`database.migrate.completed`（count=278、latest=281）。缺事件、非零、超過 60 秒未 stopped、TLS／ACL／checksum／timeout 不符都停止切換；若仍運行，僅停止本次 ID，保存事件後清理，不能以 wait 成功冒充 migration 成功。Miiduoa 在既有安全核對入口確認 manifest 281 精確 checksum 及 API SELECT／BFF SELECT、INSERT，記錄結果但不輸出連線字串。沒有完成核對不得切換。
+
+保存日誌、退出碼、281 checksum、PR head、兩 digest、操作者與時間於 `$RECORD`，並在 PR #365 連結發布收據。DBA 還原 role timeout 後，核對 ID 確為本次工作程序再清理：
+
+```sh
+fly machine destroy "$MIGRATION_ID" -a nuni-api --force
+```
+
+只清本次 machine 及其注入檔；不刪既有 secrets、不改 serving 啟動命令。此 Fly 樣板已對本機工具 help 核對旗標，尚未於 Fly 執行；正式窗口必須保存實際事件，不能沿用本機容器結果作為正式 migration 收據。
+
 ### 一次性 timeout 注入與 runner session 核驗
 
 runner 的 production 設定拒絕 `PGOPTIONS`、URL query 與 caller pool options；沒有 `DATABASE_LOCK_TIMEOUT_MS`。`DATABASE_QUERY_TIMEOUT_MS` 必須嚴格大於 statement timeout。以下命令在核驗映像的 `/app` 工作目錄執行，由工作程序管理器沿用既有安全注入的 DATABASE_URL／TLS，不在命令列放入憑證：
@@ -124,9 +183,19 @@ fly image show -a nuni-api
 - `GET /v1/public/schools/pu/cafeterias` 正常，核對文案，點餐保持既有關閉。以授權合成帳號抽查 course-access match／requests 與 personal-imports/read，確認既有路由無退化。
 - 最後才發布依賴撤回過濾的 Web／App／BFF，驗附件上傳下載、撤回、重繳、截止邊界與失敗重試；不可只靠附件開關推定平台 API 讀取受保護。
 
+### 切換後 15 分鐘觀察與回滾觸發
+
+Miiduoa 切換前保存相同 API 路由範圍最近 15 分鐘的請求數、5xx 比例及 p95 延遲作基線；切換後連續觀察至少 15 分鐘，每分鐘保存累積與最近 5 分鐘視窗的數字至上述 `$RECORD/observation.csv`，包含 UTC、digest、總請求、5xx、比例、p95 毫秒及 ready 結果。排除 health 流量，分母為相同 API 路由的全部請求；由既有監控查詢，不改 serving 設定。
+
+- 每 30 秒探測 live／ready。連續兩次非 200、DB verify／manifest 或 ACL 錯誤、程序反覆退出，立即停止後續發布並切相容回滾。
+- 最近 5 分鐘至少 100 請求時，5xx 比例超過 1% 且高於基線 0.5 個百分點，連續兩次每分鐘取樣即回滾；任意 1 分鐘達 5 筆 5xx，立即回滾。
+- 最近 5 分鐘 p95 超過 1000ms 且超過基線 2 倍，連續三次每分鐘取樣即回滾；任意 1 分鐘 p95 超過 3000ms 即回滾。基線為零或無樣本時以 1000ms 絕對門檻處理。
+- 真實登入／舊 session 失敗、撤回讀取失敗，立即停止後續發布並回滾；跨學生／非成員越權立即限制受影響入口並停止發布，使用相容映像後仍須重驗隔離，不能只靠回滾當成修復。
+- 流量不足 100 筆／5分鐘時，15 分鐘內每 30 秒補一次授權合成帳號唯讀抽查，要求全部成功、p95 ≤1000ms；既有監控不可用、無法取得路由基線或無合成帳號，就不放行後續前端發布，保留窗口並記缺口。達到回滾條件即執行，不等待滿 15 分鐘。
+
 ## 5. 緊急相容回滾：DB 不倒退
 
-負責人已接受此緊急風險：舊 API 不理解撤回，已撤回的**本人繳交版本可能重新對其授課老師（含共同授課者）顯示，也可能再次被回饋**。此接受僅限上述關係；不接受其他學生／非成員存取。向驗收與支援人員記錄風險及回退時段，優先另備保留過濾的修復版。
+風險紀錄：維護者 Miiduoa 於 2026-11-01 決定接受此緊急風險：舊 API 不理解撤回，已撤回的**本人繳交版本可能重新對其授課老師（含共同授課者）顯示，也可能再次被回饋**。此接受僅限上述關係；不接受其他學生／非成員存取。向驗收與支援人員記錄風險及回退時段，優先另備保留過濾的修復版。
 
 281 已登記後，使用事前核驗的「be815455＋同 checksum 281 SQL」相容映像，禁止直接回原 be815455 或用 release v24：
 
@@ -138,10 +207,10 @@ fly machines list -a nuni-api
 fly image show -a nuni-api
 ```
 
-重做 live／ready、登入、授權邊界與既有功能驗收，確認 stopped 台仍未啟動。保留 DB 新表、撤回紀錄、附件及冪等資料；不執行 280／281 rollback SQL、不刪 schema_migrations、不移除 278／279 triggers。兩個映像已完成只建置、推送與 registry 檔案核驗；尚未以相容回滾映像啟動連接隔離 PostgreSQL 驗證 HTTP 授權，不得當成完整回滾驗收通過。
+重做 live／ready、登入、授權邊界與既有功能驗收，確認 stopped 台仍未啟動。保留 DB 新表、撤回紀錄、附件及冪等資料；不執行 280／281 rollback SQL、不刪 schema_migrations、不移除 278／279 triggers。2026-11-01 已以兩個固定 digest、原始 CMD、獨立非超級使用者及隔離 PostgreSQL 完成 live／ready、預建 session、跨學生／非成員 HTTP 與候選→相容回滾演練，見 [CONTAINER-ACCEPTANCE.md](CONTAINER-ACCEPTANCE.md)。真實 Google 登入、正式 ACL 與正式觀察仍未驗，不能當成正式發布完成。
 
 發布記錄及必要證據移出暫存後，只清理本次 `/tmp/nuniapifix`；不要清其他工作目錄、停止別人的程序。磁碟低於 3GB 即停止並記錄進度。
 
 ## 6. 安全依賴另案追蹤
 
-既有 P1 尚未技術性解除；本 PR 不升級依賴、不修改 lockfile 或 Dockerfile。追蹤基準為 `docs/security/2026-10-24-remediation.md` 及 `deploy/nuni-api/security/source.json`，由 Miiduoa 在後續安全修補 PR 引用本 PR #365，列出各套件／Node 基底的修正版本、固定來源與 digest、掃描結果、完整 API 回歸及 281 manifest／撤回過濾的整合證據。後續 PR 連結、負責人、預計日期與未修風險處置必須登錄於 #365 發布紀錄；未有連結／日期不得宣稱追蹤或修補已結案。發布前由負責人明確記錄先發布本候選的風險決定；本機驗證通過不代表安全 P1 已關閉。
+既有 P1 尚未技術性解除；本 PR 不升級依賴、不修改 lockfile 或 Dockerfile。追蹤基準為 `docs/security/2026-10-24-remediation.md` 及 `deploy/nuni-api/security/source.json`，追蹤 issue 為 [nuni-api 依賴安全更新 #370](https://github.com/Miiduoa/graduation/issues/370)，負責人 Miiduoa，期限 2026-11-08。暫時措施：此候選不新增暴露面，僅沿用正式映像既有依賴。維護者 Miiduoa 於 2026-11-01 決定：「維護者接受此候選沿用既有依賴上線，期限內另案升級」。13 個 GHSA／18 條 high 的套件清單與連結已列於 issue（Fastify、Zod、fast-uri 兩版、@grpc/grpc-js、brace-expansion）。由 Miiduoa 在後續安全修補 PR 引用該 issue 及本 PR #365，列出各套件／Node 基底的修正版本、固定來源與 digest、掃描結果、完整 API 回歸及 281 manifest／撤回過濾的整合證據。追蹤 issue、負責人、期限及候選風險決定已登錄；後續修補 PR 與驗收仍須回填 issue／#365，未修復不得宣稱安全修補已結案。本機驗證通過不代表安全 P1 已關閉。

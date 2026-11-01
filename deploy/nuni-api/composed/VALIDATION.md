@@ -153,3 +153,6 @@ runner 退出 1，`database.migrate.failed.errorCode=P0365`。
 套用上述選定重跑結果到這306項的逐項對照，得到188項兩邊通過、118項兩邊失敗、0項單邊失敗；這是來源比對結果，不是再跑一次全套，也不覆寫預設timeout下的原始數字。
 逐檔數量及全部135個失敗名稱見 [FAILURE-COMPARISON.md](FAILURE-COMPARISON.md)；原始JSON、日誌、命令、退出碼與分類工具保留於 `/workspace/nuni-api-fix3-evidence/`。
 本輪兩個指定缺口已補齊，完整suite既有失敗、安全依賴P1、相容回滾容器HTTP／授權與正式ACL／Google登入驗收仍未解除，不構成發布放行。
+
+
+2026-11-01 補驗：兩個既有固定 digest 原始 CMD／隔離 PostgreSQL／最小 API role／HTTP 隔離及候選→相容回滾已完成，詳 [容器驗收](CONTAINER-ACCEPTANCE.md)。此新增證據取代上述「尚未容器驗收」的歷史限制；正向真實 OAuth、正式 ACL／監控仍待驗。安全追蹤為 [#370](https://github.com/Miiduoa/graduation/issues/370)，Miiduoa 負責，期限 2026-11-08。
