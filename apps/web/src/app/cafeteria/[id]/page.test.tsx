@@ -194,7 +194,7 @@ it('hides unsafe website and ordering URLs instead of rendering them as links', 
     );
     expect(await screen.findByText('紙感小店')).toBeTruthy();
     expect(screen.queryByRole('link', { name: '到店家網站訂餐' })).toBeNull();
-    expect(screen.queryByRole('link', { name: '店家網站' })).toBeNull();
+    expect(screen.queryByRole('link', { name: '店家網站 ↗' })).toBeNull();
     view.unmount();
   }
 });
@@ -216,7 +216,7 @@ it('shows the outbound button for uppercase HTTPS the same as lowercase', async 
     );
   });
   expect(await screen.findByRole('link', { name: '到店家網站訂餐' })).toBeTruthy();
-  expect(screen.getByRole('link', { name: '店家網站' }).getAttribute('href')).toBe(
+  expect(screen.getByRole('link', { name: '店家網站 ↗' }).getAttribute('href')).toBe(
     'HTTPS://shop.example',
   );
 });
@@ -233,7 +233,7 @@ it('adds noopener noreferrer on a safe website link', async () => {
       </Suspense>,
     );
   });
-  const link = await screen.findByRole('link', { name: '店家網站' });
+  const link = await screen.findByRole('link', { name: '店家網站 ↗' });
   expect(link.getAttribute('href')).toBe('https://shop.example');
   expect(link.getAttribute('rel')).toBe('noopener noreferrer');
 });
@@ -601,4 +601,26 @@ it('keeps unsent comment drafts while retrying follow status and refreshing post
   expect((screen.getByRole('textbox', { name: '留言' }) as HTMLTextAreaElement).value).toBe(
     '還沒送出的留言',
   );
+});
+
+it('餐廳未知時間不套用學校名錄快照，並提供官方備援', async () => {
+  state.shop = { ...showcaseShop, websiteUrl: 'https://shop.example/' };
+  await act(async () => {
+    render(
+      <Suspense fallback={<p>載入</p>}>
+        <StorefrontPage
+          params={Promise.resolve({ id: 'stall' })}
+          searchParams={Promise.resolve({ schoolId: 'pu' })}
+        />
+      </Suspense>,
+    );
+  });
+  expect(await screen.findByText('最後確認（菜單同步）')).toBeTruthy();
+  const notice = screen.getByRole('region', { name: '資料來源與新鮮度' });
+  expect(within(notice).getByText('未提供')).toBeTruthy();
+  expect(within(notice).queryByText(/2026-10-24/)).toBeNull();
+  expect(within(notice).getByRole('link', { name: '店家網站 ↗' }).getAttribute('href')).toBe(
+    'https://shop.example/',
+  );
+  expect(within(notice).getByText(/菜單同步時間不代表/)).toBeTruthy();
 });
