@@ -51,6 +51,7 @@ export default function HomePage() {
   const previousTodos = useRef<string[]>([]);
   const generation = useRef(0);
   const attempts = useRef({ nuni: 0, school: 0 });
+  const inFlight = useRef<Partial<Record<Source, number>>>({});
   const rows = useMemo(
     () => (!sessionLoading && !blocked && sections?.owner === owner ? sections.rows : {}),
     [sessionLoading, blocked, sections, owner],
@@ -78,6 +79,8 @@ export default function HomePage() {
   const readSource = useCallback(
     async (source: Source, request: number) => {
       if (!owner || sessionLoading || blocked) return;
+      if (inFlight.current[source] === request) return;
+      inFlight.current[source] = request;
       const attempt = ++attempts.current[source];
       const update = (change: Partial<Section>, initial = false) => {
         if (request !== generation.current || attempt !== attempts.current[source]) return;
@@ -120,12 +123,14 @@ export default function HomePage() {
           (failure.status === 401 || failure.code === 'SESSION_CHANGED')
         )
           void refreshSession();
+      } finally {
+        if (inFlight.current[source] === request) delete inFlight.current[source];
       }
     },
     [owner, sessionLoading, blocked, context, accountId, uid, refreshSession],
   );
   const refresh = useCallback(async () => {
-    const request = ++generation.current;
+    const request = generation.current;
     if (!owner || sessionLoading || blocked) {
       setSections(null);
       return;
@@ -136,6 +141,7 @@ export default function HomePage() {
     ]);
   }, [owner, sessionLoading, blocked, context, accountId, uid, readSource]);
   useEffect(() => {
+    generation.current += 1;
     void refresh();
     return () => {
       generation.current += 1;
@@ -195,32 +201,48 @@ export default function HomePage() {
             <Link href="/teacher">老師工作台 →</Link> 看學生送來的課程申訴。
           </p>
         )}
-        {Object.entries(rows).map(([source, row]) =>
-          row.loading || row.error ? (
-            <section
-              key={source}
-              className={styles.sourceStatus}
-              aria-label={source === 'nuni' ? 'nuni 課程讀取狀態' : '校園課程讀取狀態'}
-            >
-              {row.loading ? (
-                <>
-                  <p>{source === 'nuni' ? 'nuni' : '校園'}課程還在讀取，其他內容可以先看。</p>
-                  {!row.data ? <div className={styles.sourceSkeleton} aria-hidden="true" /> : null}
-                </>
-              ) : (
-                <>
-                  <p>{row.error}</p>
-                  <button
-                    type="button"
-                    onClick={() => void readSource(source as Source, generation.current)}
+        {signedIn ? (
+          <div className={styles.sourceStatuses} aria-label="課程來源狀態">
+            {(['nuni', 'school'] as const)
+              .filter((source) => (source === 'nuni' ? context && accountId : uid))
+              .map((source) => {
+                const row = rows[source];
+                return (
+                  <section
+                    key={source}
+                    className={styles.sourceStatus}
+                    aria-label={source === 'nuni' ? 'nuni 課程讀取狀態' : '校園課程讀取狀態'}
+                    aria-busy={row?.loading ?? true}
                   >
-                    重試{source === 'nuni' ? ' nuni' : '校園'}課程
-                  </button>
-                </>
-              )}
-            </section>
-          ) : null,
-        )}
+                    <div aria-live="polite">
+                      {!row || row.loading ? (
+                        <>
+                          <p>
+                            {source === 'nuni' ? 'nuni' : '校園'}課程還在讀取，其他內容可以先看。
+                          </p>
+                          {!row?.data ? (
+                            <div className={styles.sourceSkeleton} aria-hidden="true" />
+                          ) : null}
+                        </>
+                      ) : row.error ? (
+                        <>
+                          <p>{row.error}</p>
+                          <button
+                            type="button"
+                            onClick={() => void readSource(source, generation.current)}
+                          >
+                            重試{source === 'nuni' ? ' nuni ' : '校園'}課程
+                          </button>
+                        </>
+                      ) : (
+                        <p>{source === 'nuni' ? 'nuni' : '校園'}課程已讀取。</p>
+                      )}
+                    </div>
+                  </section>
+                );
+              })}
+          </div>
+        ) : null}
         {blocked ? (
           <section className={styles.focus} aria-labelledby="session-title">
             <h2 id="session-title">
@@ -262,22 +284,16 @@ export default function HomePage() {
             refreshing={loading && !!data}
             todos={todos}
             courses={data?.courses ?? []}
-            todosError={
-              error ||
-              data?.tasksError ||
-              (loading && data ? '還有課程正在讀取，先看看已讀到的待辦。' : '')
-            }
+            todosError={error || data?.tasksError || ''}
             lmsUnconnected={lmsUnconnected}
             leavingTodoIds={leavingTodoIds}
             onRetryTodos={() => {
               const incomplete = Object.entries(rows).filter(
-                ([, row]) => row.error || row.data?.tasksError,
+                ([, row]) => !row.loading && (row.error || row.data?.tasksError),
               );
-              if (!incomplete.length) void refresh();
-              else
-                incomplete.forEach(
-                  ([source]) => void readSource(source as Source, generation.current),
-                );
+              incomplete.forEach(
+                ([source]) => void readSource(source as Source, generation.current),
+              );
             }}
           />
         )}

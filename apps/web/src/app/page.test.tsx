@@ -567,6 +567,8 @@ it('budgets first available work at 100ms with a 2000ms second source and two ov
     await act(async () => vi.advanceTimersByTimeAsync(100));
     expect(screen.getAllByText('快速來源 作業').length).toBeGreaterThan(0);
     expect(screen.queryByText('慢速來源 作業')).toBeNull();
+    expect(screen.queryByRole('button', { name: TODAY_COPY.retry })).toBeNull();
+    expect(screen.queryByRole('alert')).toBeNull();
     expect(loadNuniHomeSections).toHaveBeenCalledTimes(1);
     expect(loadHomeData).toHaveBeenCalledTimes(1);
     expect(screen.queryByText(TODAY_COPY.emptyDay)).toBeNull();
@@ -597,7 +599,7 @@ it('offers separate retries when both sources fail', async () => {
   vi.mocked(loadNuniHomeSections).mockRejectedValue(new Error('offline'));
   vi.mocked(loadHomeData).mockRejectedValue(new Error('offline'));
   render(<HomePage />);
-  expect(await screen.findByRole('button', { name: '重試 nuni課程' })).toBeTruthy();
+  expect(await screen.findByRole('button', { name: '重試 nuni 課程' })).toBeTruthy();
   expect(await screen.findByRole('button', { name: '重試校園課程' })).toBeTruthy();
   expect(screen.queryByText(TODAY_COPY.emptyDay)).toBeNull();
 });
@@ -648,4 +650,97 @@ it('ignores late data and course callbacks after switching accounts', async () =
   });
   expect(screen.queryByText('舊帳號 作業')).toBeNull();
   expect(screen.getAllByText('新帳號 作業').length).toBeGreaterThan(0);
+});
+
+it('keeps source containers and main order through delayed loads and background refresh', async () => {
+  state.session = { context: 'test', platformAccountId: 'student' };
+  let finishNuni!: (value: HomeData) => void;
+  let finishSchool!: (value: HomeData) => void;
+  vi.mocked(loadNuniHomeSections).mockImplementation(
+    () =>
+      new Promise((resolve) => {
+        finishNuni = resolve;
+      }),
+  );
+  vi.mocked(loadHomeData).mockImplementation(
+    () =>
+      new Promise((resolve) => {
+        finishSchool = resolve;
+      }),
+  );
+  const view = render(<HomePage />);
+  const main = view.container.querySelector('main')!;
+  const children = Array.from(main.children);
+  const slots = screen.getAllByRole('region', { name: /課程讀取狀態/ });
+  const verify = () => {
+    expect(main.children).toHaveLength(children.length);
+    children.forEach((child, index) => expect(main.children[index]).toBe(child));
+    const currentSlots = screen.getAllByRole('region', { name: /課程讀取狀態/ });
+    expect(currentSlots).toHaveLength(slots.length);
+    slots.forEach((slot, index) => expect(currentSlots[index]).toBe(slot));
+  };
+  await act(async () => finishNuni(data('快速來源')));
+  verify();
+  await act(async () => finishSchool(data('慢速來源')));
+  verify();
+  await act(async () => window.dispatchEvent(new Event('pageshow')));
+  verify();
+  await act(async () => window.dispatchEvent(new Event('pageshow')));
+  expect(loadNuniHomeSections).toHaveBeenCalledTimes(2);
+  expect(loadHomeData).toHaveBeenCalledTimes(2);
+  await act(async () => {
+    finishNuni(data('快速來源'));
+    finishSchool(data('慢速來源'));
+  });
+  verify();
+});
+
+it.each(['failed', 'incomplete'])(
+  'deduplicates repeated todo retries for a %s source',
+  async (kind) => {
+    state.session = { context: 'test', platformAccountId: 'student' };
+    vi.mocked(loadHomeData).mockResolvedValue(data('成功來源'));
+    let finish!: (value: HomeData) => void;
+    if (kind === 'failed')
+      vi.mocked(loadNuniHomeSections).mockRejectedValueOnce(new Error('offline'));
+    else
+      vi.mocked(loadNuniHomeSections).mockResolvedValueOnce(
+        data('部分來源', { tasksError: '測驗讀取失敗' }),
+      );
+    vi.mocked(loadNuniHomeSections).mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          finish = resolve;
+        }),
+    );
+    render(<HomePage />);
+    const retry = await screen.findByRole('button', { name: TODAY_COPY.retry });
+    await act(async () => {
+      retry.click();
+      retry.click();
+      retry.click();
+    });
+    expect(loadNuniHomeSections).toHaveBeenCalledTimes(2);
+    expect(loadHomeData).toHaveBeenCalledTimes(1);
+    await act(async () => finish(data('恢復來源')));
+    expect(screen.queryByRole('button', { name: TODAY_COPY.retry })).toBeNull();
+  },
+);
+
+it('does not offer error retry while course callbacks have arrived but work is pending', async () => {
+  state.session = { context: 'test', platformAccountId: 'student' };
+  let finish!: (value: HomeData) => void;
+  vi.mocked(loadNuniHomeSections).mockImplementation((_transport, _account, onCourses) => {
+    onCourses(data('先到課程', { tasks: [] }));
+    return new Promise((resolve) => {
+      finish = resolve;
+    });
+  });
+  vi.mocked(loadHomeData).mockImplementation(() => new Promise(() => {}));
+  render(<HomePage />);
+  expect(await screen.findByText(/nuni課程還在讀取/)).toBeTruthy();
+  expect(screen.queryByRole('alert')).toBeNull();
+  expect(screen.queryByRole('button', { name: /再試一次|重試.*課程/ })).toBeNull();
+  await act(async () => finish(data('先到課程')));
+  expect(screen.queryByRole('button', { name: /再試一次|重試.*課程/ })).toBeNull();
 });
