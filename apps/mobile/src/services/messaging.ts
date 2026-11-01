@@ -1,4 +1,3 @@
-/* eslint-disable @typescript-eslint/no-explicit-any */
 import {
   collection,
   addDoc,
@@ -6,6 +5,7 @@ import {
   getDoc,
   runTransaction,
   serverTimestamp,
+  setDoc,
   updateDoc,
 } from 'firebase/firestore';
 import { getDb } from '../firebase';
@@ -28,6 +28,59 @@ export async function appendChatMessage(
     updatedAt: serverTimestamp(),
     lastMessageText: String(payload.content ?? '').slice(0, 140),
   });
+}
+
+/** 與 Web `newPrivateMessageId` 相同：先取文件 id，重試可沿用而不另建一則。 */
+export function newChatMessageId(conversationId: string): string {
+  return doc(collection(getDb(), 'conversations', conversationId, 'messages')).id;
+}
+
+/**
+ * 以固定 messageId 寫入（create-only）。若同 sender／content 已存在則視為成功重放，
+ * 不另建文件，避免人工重試產生不明重複。不改 schema／rules。
+ */
+export async function sendChatMessageIdempotent(input: {
+  conversationId: string;
+  messageId: string;
+  senderId: string;
+  content: string;
+  type?: string;
+}): Promise<{ id: string; replayed: boolean }> {
+  const body = input.content.trim();
+  if (!body) throw new Error('訊息內容不可空白');
+  const db = getDb();
+  const messageRef = doc(db, 'conversations', input.conversationId, 'messages', input.messageId);
+  const existing = await getDoc(messageRef);
+  if (existing.exists()) {
+    const data = existing.data() as { senderId?: string; content?: string };
+    if (data.senderId === input.senderId && data.content === body) {
+      return { id: input.messageId, replayed: true };
+    }
+    throw Object.assign(new Error('此訊息編號已被其他內容使用'), {
+      code: 'failed-precondition',
+    });
+  }
+
+  await setDoc(messageRef, {
+    conversationId: input.conversationId,
+    senderId: input.senderId,
+    content: body,
+    type: input.type ?? 'text',
+    readBy: [input.senderId],
+    createdAt: serverTimestamp(),
+  });
+
+  await updateDoc(doc(db, 'conversations', input.conversationId), {
+    lastMessageText: body.slice(0, 50),
+    lastMessageAt: serverTimestamp(),
+    lastMessageSenderId: input.senderId,
+    updatedAt: serverTimestamp(),
+    [`typingUsers.${input.senderId}`]: null,
+  }).catch(() => {
+    // 訊息本體已寫入；對話摘要更新失敗不改為未送出，由列表訂閱稍後補齊。
+  });
+
+  return { id: input.messageId, replayed: false };
 }
 
 export async function toggleMessageReaction(
