@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { renderToString } from 'react-dom/server';
 import { hydrateRoot, type Root } from 'react-dom/client';
 import { beforeEach, expect, it, vi } from 'vitest';
@@ -407,10 +407,14 @@ it('keeps historical orders available after all public locations pause and only 
   expect(screen.queryByLabelText('一次性取餐憑證')).toBeNull();
   fireEvent.click(button('出示取餐憑證'));
   expect(screen.getByLabelText('一次性取餐憑證').textContent).toBe('t'.repeat(43));
+  const paper = screen.getByRole('region', { name: '訂單紙本明細' });
+  expect(paper.textContent).not.toContain('t'.repeat(43));
+  expect(within(paper).queryByLabelText('一次性取餐憑證')).toBeNull();
   mocks.request.mockRejectedValueOnce(new NuniError(403, 'FORBIDDEN'));
   fireEvent.click(button('更新這筆訂單'));
   await screen.findByText(/目前無法確認使用權限/);
   expect(screen.queryByLabelText('一次性取餐憑證')).toBeNull();
+  expect(screen.queryByRole('region', { name: '訂單紙本明細' })).toBeNull();
   expect(mocks.request).toHaveBeenCalledWith(
     'food-order-realms',
     'context-a',
@@ -500,6 +504,11 @@ it('does not invite a second payment while authorization is still settling', asy
   };
   render(<FoodWorkspace initialTenant="campus-one" initialOrder="order-1" />);
   await screen.findByText('付款確認中，請稍候或更新這筆訂單。');
+  expect(screen.getByText('付款進度：等待入帳')).toBeTruthy();
+  expect(screen.queryByText('付款進度：已入帳')).toBeNull();
+  expect(screen.getByRole('region', { name: '訂單紙本明細' }).textContent).not.toMatch(
+    /已付款|已入帳/,
+  );
   expect(screen.queryByRole('button', { name: '信用卡結帳' })).toBeNull();
   expect(screen.queryByRole('link', { name: '前往安全付款頁面' })).toBeNull();
   expect(screen.queryByText(/請選擇付款方式/)).toBeNull();
@@ -704,5 +713,20 @@ it.each([
       await act(async () => root?.unmount());
       container.remove();
     }
+  },
+);
+
+it.each(['accepted', 'preparing', 'ready', 'fulfilled'] as const)(
+  'shows the paper order detail without inventing payment confirmation for %s',
+  async (state) => {
+    order = { ...readyOrder(), state };
+    render(<FoodWorkspace initialTenant="campus-one" initialOrder="order-1" />);
+    const paper = await screen.findByRole('region', { name: '訂單紙本明細' });
+    expect(within(paper).getByText('非統一發票')).toBeTruthy();
+    expect(paper.textContent).toContain('NT$120');
+    expect(paper.textContent).not.toMatch(/已付款|已入帳|付款成功/);
+    expect(paper.textContent).not.toContain(order.pickup.credential!.token);
+    expect(paper.querySelector('img, canvas, svg')).toBeNull();
+    expect(screen.queryByText('付款進度：已入帳')).toBeNull();
   },
 );
