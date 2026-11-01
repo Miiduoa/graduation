@@ -1,5 +1,7 @@
+import { ClassReminderToggle } from '../components/ClassReminderToggle';
+import { ClassExceptions } from '../components/ClassExceptions';
 import * as Clipboard from 'expo-clipboard';
-import React, { useCallback, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Pressable,
   ScrollView,
@@ -10,6 +12,8 @@ import {
 } from 'react-native';
 import { useFocusEffect, useNavigation, useRoute } from '@react-navigation/native';
 import {
+  buildPersonalToday,
+  validClassDate,
   periodProfileForSchool,
   periodTimes,
   periodSlots,
@@ -45,6 +49,8 @@ import {
   loadFriendTimetable,
   loadPersonalTimetable,
   savePersonalTimetable,
+  loadPersonalTimetableDraft,
+  restorePersonalTimetableDraft,
   personalTimetableRecords,
   type StoredTimetable,
 } from '../services/personalTimetable';
@@ -55,11 +61,14 @@ export default function PersonalTimetableScreen() {
   const { school } = useSchool();
   const scope = usePersonalImportScope();
   const route = useRoute();
-  const term = (route.params as { term?: string } | undefined)?.term;
-  return <PersonalTimetableWorkspace initialTerm={term} key={`${auth.user?.uid || 'guest'}:${school?.id || 'pu'}:${scope?.owner || 'pending'}:${term || ''}`} />;
+  const params = route.params as { term?: string; courseId?: string; schoolId?: string; date?: string } | undefined;
+  const term = params?.schoolId && params.schoolId !== (school?.id || 'pu') ? undefined : params?.term;
+  const courseId = params?.schoolId === (school?.id || 'pu') ? params.courseId : undefined;
+  const date = params?.schoolId === (school?.id || 'pu') && params.date && validClassDate(params.date) ? params.date : undefined;
+  return <PersonalTimetableWorkspace initialDate={date} initialCourseId={courseId} initialTerm={term} key={`${auth.user?.uid || 'guest'}:${school?.id || 'pu'}:${scope?.owner || 'pending'}:${term || ''}:${courseId || ''}:${date || ''}`} />;
 }
 
-function PersonalTimetableWorkspace({ initialTerm }: { initialTerm?: string }) {
+function PersonalTimetableWorkspace({ initialTerm, initialCourseId, initialDate }: { initialTerm?: string; initialCourseId?: string; initialDate?: string }) {
   const navigation = useNavigation();
   const auth = useAuth();
   const { school } = useSchool();
@@ -95,6 +104,12 @@ function PersonalTimetableWorkspace({ initialTerm }: { initialTerm?: string }) {
   const selectedView = importTerm === 'legacy' || activeTerm === manualTerm
     ? 'legacy' : activeTerm?.replace('|', '／');
   const displayCourses = useMemo(() => selectPersonalTimetableCourses(timetable, importedRecords, schoolId, selectedView), [timetable, importedRecords, schoolId, selectedView]);
+  const datedCourse = initialDate && timetable ? buildPersonalToday(personalTimetableRecords(timetable, importedRecords), { schoolId, termKey: activeTerm, now: new Date(`${initialDate}T12:00:00+08:00`) }).today.find((entry) => entry.row.id === initialCourseId) : undefined;
+  const selectedCourse = displayCourses.find((course) => course.id === initialCourseId ||
+    `manual:${course.id}` === initialCourseId || course.id === `import:${initialCourseId}`);
+  useEffect(() => {
+    if (selectedCourse?.day) setDay(selectedCourse.day);
+  }, [selectedCourse?.day]);
   const placedImportIds = useMemo(() => new Set(
     personalImportCourses(importedRecords, schoolId).map((course) => course.id),
   ), [importedRecords, schoolId]);
@@ -174,11 +189,11 @@ function PersonalTimetableWorkspace({ initialTerm }: { initialTerm?: string }) {
     );
   }
 
-  const persist = async (next: StoredTimetable, message: string) => {
+  const persist = async (next: StoredTimetable, message: string, editExceptions = false) => {
     try {
-      const saved = await savePersonalTimetable(uid, { ...next, schoolId }, localOwner);
-      setTimetable({ ...next, schoolId });
-      setNotice(saved.stored === 'cloud' ? message : `已記在這台裝置。${message}`);
+      const saved = await savePersonalTimetable(uid, { ...next, schoolId }, localOwner, editExceptions);
+      setTimetable(saved.stored === 'cloud' ? saved.timetable : { ...next, schoolId });
+      setNotice(saved.stored === 'cloud' ? message : `${'cloudPending' in saved ? '已記在這台裝置；雲端暫時未同步。' : '已記在這台裝置。'}${message}`);
       return true;
     } catch (error) {
       setNotice(error instanceof Error ? error.message : '未完成儲存，請稍後重試。');
@@ -232,6 +247,30 @@ function PersonalTimetableWorkspace({ initialTerm }: { initialTerm?: string }) {
   return (
     <Screen title="我的課表" subtitle="查看上課時間與空堂">
       <ScrollView contentContainerStyle={{ padding: 16, gap: 16, paddingBottom: 120 }}>
+        {initialCourseId ? <View style={{ padding: 16, gap: 6 }}>
+          <Text style={{ color: theme.colors.text, fontWeight: '700' }}>{selectedCourse?.name || '這堂課已變更，請核對目前課表'}</Text>
+          {initialDate ? <Text style={{ color: theme.colors.muted }}>{datedCourse ? `${initialDate} · ${datedCourse.startTime}–${datedCourse.endTime} · ${datedCourse.row.location || '教室未填'}` : '這堂課在指定日期沒有排課，請查看調整紀錄。'}</Text> : selectedCourse ? <Text style={{ color: theme.colors.muted }}>{selectedCourse.room || '教室未填'}</Text> : null}
+        </View> : null}
+        {importScopeKey && <ClassReminderToggle key={`reminders:${importScopeKey}`} scope={importScopeKey} />}
+        <ClassExceptions key={`exceptions:${importScopeKey}`} records={personalTimetableRecords(timetable, importedRecords)}
+          exceptions={timetable.classExceptions} schoolId={schoolId} initialDate={initialDate}
+          termKey={selectedView === 'legacy' ? manualTerm : activeTerm}
+          disabled={loadError || importStatus !== 'ready'}
+          onSave={(classExceptions) => persist({ ...timetable, classExceptions }, '這次安排已儲存。', true)} />
+        {uid && !localOwner ? <Button text="重新讀取雲端課表" onPress={() => void load()} /> : null}
+        {uid && !localOwner ? <Button text="檢視這台裝置未同步草稿" onPress={() => {
+          const requestScope = importScopeKey;
+          const run = loadGeneration.current;
+          void loadPersonalTimetableDraft(uid, schoolId).then((draft) => {
+            if (scopeRef.current !== requestScope || loadGeneration.current !== run) return;
+            if (!draft) { setNotice('這台裝置沒有未同步草稿。'); return; }
+            setTimetable(restorePersonalTimetableDraft(timetable, draft));
+            if (draft.pendingBase !== false) setImportTerm('legacy');
+            setNotice('目前預覽未同步課表；請核對每週基準與單次安排，分別儲存。重新讀取可回到雲端版本。');
+          }).catch(() => setNotice('草稿暫時讀不到，原始資料仍保留。'));
+        }} /> : null}
+        <Button text="儲存每週基準課表" disabled={loadError} onPress={() => void persist(timetable, '每週基準課表已儲存。')} />
+        <Text style={{ color: theme.colors.muted }}>每週基準課表；指定日期的安排請查看上方。</Text>
         <PersonalImportSummary kind="timetable" />
         {importStatus === 'error' ? (
           <View>

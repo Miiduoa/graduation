@@ -43,10 +43,12 @@ export function navigateFromNotificationData(
   rawData: unknown,
   profileRole?: UserRole | null,
   schoolId?: string | null,
+  uid?: string,
 ) {
   const destination = resolveNotificationDestination(
     { data: rawData },
-    { role: profileRole, schoolId },
+    { role: profileRole, schoolId, ...(typeof rawData === 'object' && rawData !== null &&
+      'type' in rawData && rawData.type === 'local_assignment_due_v2' ? { uid } : {}) },
   );
   if (!destination.ok) {
     rootNavigateNested('我的', 'Notifications');
@@ -123,7 +125,7 @@ export function usePushNotifications(
 
       lastHandledResponseKeyRef.current = responseKey;
       // 使用當下 ref 的學校範圍，拒絕跨校成績等通知目的地。
-      navigateFromNotificationData(rawPayload, roleRef.current, schoolRef.current);
+      navigateFromNotificationData(rawPayload, roleRef.current, schoolRef.current, uid);
 
       if (options?.clearLastResponse) {
         await clearLastNotificationResponseAsync().catch((error) => {

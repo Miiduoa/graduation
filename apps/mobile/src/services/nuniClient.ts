@@ -85,7 +85,12 @@ export const nuniPlatformRequest: NuniTransport = async (
         throw new NuniError(0, signal?.aborted ? 'REQUEST_CANCELLED' : 'NETWORK_ERROR');
       }
     },
-    { timeoutMs: Math.max(12000, WAKE_REQUEST_TIMEOUT_MS), externalSignal: signal },
+    {
+      timeoutMs: Math.max(12000, WAKE_REQUEST_TIMEOUT_MS),
+      externalSignal: signal,
+      // Check-in has no idempotency contract; the caller must read sessions after an uncertain result.
+      retry: !path.endsWith('/check-in'),
+    },
   );
 };
 

@@ -10,6 +10,7 @@ export type PersonalImportAiTextBatch = {
 };
 
 type Limits = { maxBatchCharacters: number; maxTotalCharacters: number; maxBatches: number };
+export type ResilientPersonalImportAiTextBatch = PersonalImportAiTextBatch & { rulesOnly?: boolean };
 type Unit = { start: number; end: number; context: string };
 const headerNames = new Set([
   '課程名稱', '科目名稱', '名稱', '課號', '科目代碼', '課程代碼', '學分', '學分數', '成績',
@@ -53,14 +54,38 @@ function tableUnits(text: string, from: number, to: number): Unit[] | null {
   return candidates.length === 1 ? candidates[0] : null;
 }
 
-/** Split complete delimited records or blank-line-separated paragraphs; never cut a cell. */
-export function planPersonalImportAiTextBatches(
+function standaloneLineUnits(text: string, from: number, to: number): Unit[] | null {
+  const paragraph = text.slice(from, to);
+  // A delimited or quoted cell may span lines. Only explicitly labeled prose
+  // records can introduce additional boundaries outside the strict table parser.
+  if (/[\t,"]/u.test(paragraph)) return null;
+  const lines = [...paragraph.matchAll(/[^\n]+(?:\n|$)/gu)];
+  if (lines.length < 2 || lines.some(({ 0: line }) => {
+    if (!line.trim()) return false;
+    const grade = /(?:學分\s*[:：]?\s*\d|\d+(?:\.\d+)?\s*學分)/u.test(line) &&
+      /(?:成績|分數)\s*[:：]?\s*(?:\d|[A-F][+-]?|通過|及格)/u.test(line);
+    const timetable = /(?:星期|週|周)[一二三四五六日天1-7]/u.test(line) &&
+      /(?:\d{1,2}:\d{2}|(?:第\s*)?\d+\s*(?:[-~～至到]\s*\d+\s*)?節)/u.test(line);
+    return !grade && !timetable;
+  })) return null;
+  let cursor = from;
+  return lines.map((line, index) => {
+    const end = index === lines.length - 1 ? to : from + line.index! + line[0].length;
+    const unit = { start: cursor, end, context: '' };
+    cursor = end;
+    return unit;
+  });
+}
+
+function planTextBatches(
   text: string,
   { maxBatchCharacters, maxTotalCharacters, maxBatches }: Limits,
-): PersonalImportAiTextBatch[] {
+  resilient: boolean,
+): ResilientPersonalImportAiTextBatch[] {
   if (
     ![maxBatchCharacters, maxTotalCharacters, maxBatches].every((n) => Number.isSafeInteger(n) && n > 0) ||
-    maxBatchCharacters > maxTotalCharacters || maxTotalCharacters > 8_000 || maxBatches > 80
+    maxBatchCharacters > maxTotalCharacters || maxBatchCharacters > 8_000 ||
+    maxTotalCharacters > (resilient ? 40_000 : 8_000) || maxBatches > 80
   ) throw new Error('AI 分段範圍設定不正確。');
   if (typeof text !== 'string' || !text.trim()) throw new Error('請先放入要整理的文字。');
   if (text.length > maxTotalCharacters)
@@ -99,7 +124,7 @@ export function planPersonalImportAiTextBatches(
       else leadingWhitespace ??= from;
       continue;
     }
-    const table = tableUnits(text, from, to);
+    const table = tableUnits(text, from, to) ?? (resilient ? standaloneLineUnits(text, from, to) : null);
     const next = table ?? [{ start: from, end: to, context: '' }];
     if (leadingWhitespace !== undefined) {
       next[0].start = leadingWhitespace;
@@ -122,7 +147,7 @@ export function planPersonalImportAiTextBatches(
     }];
   }
 
-  const batches: PersonalImportAiTextBatch[] = [];
+  const batches: ResilientPersonalImportAiTextBatch[] = [];
   let group: Unit[] = [];
   const flush = () => {
     if (!group.length) return;
@@ -137,6 +162,16 @@ export function planPersonalImportAiTextBatches(
   };
   for (const unit of units) {
     if (unit.end - unit.start + unit.context.length > maxBatchCharacters) {
+      if (resilient) {
+        flush();
+        batches.push({
+          text: text.slice(unit.start, unit.end),
+          startLine: text.slice(0, unit.start).split('\n').length,
+          columnContext: unit.context,
+          rulesOnly: true,
+        });
+        continue;
+      }
       throw new Error(
         `有一筆資料或段落超過 ${maxBatchCharacters.toLocaleString('en')} 字元，無法安全拆開。請用空白行分隔完整紀錄，或改匯入原始表格；原文不會被截斷。`,
       );
@@ -146,9 +181,38 @@ export function planPersonalImportAiTextBatches(
     group.push(unit);
   }
   flush();
+  if (batches.length > maxBatches && resilient) {
+    const remainder = batches.splice(maxBatches - 1);
+    batches.push({
+      text: remainder.map((batch) => batch.text).join(''),
+      startLine: remainder[0].startLine,
+      columnContext: remainder[0].columnContext,
+      rulesOnly: true,
+    });
+  }
   if (batches.length > maxBatches)
     throw new Error(`資料需要超過 ${maxBatches} 段才能安全整理，請減少頁面或分批匯入。`);
   return batches;
+}
+
+/** Split complete delimited records or blank-line-separated paragraphs; never cut a cell. */
+export function planPersonalImportAiTextBatches(text: string, limits: Limits): PersonalImportAiTextBatch[] {
+  return planTextBatches(text, limits, false);
+}
+
+/** Keep oversized records available for rule parsing while processing the other segments. */
+export function planResilientPersonalImportBatches(
+  text: string,
+  limits: Limits,
+): { batches: ResilientPersonalImportAiTextBatch[]; issues: string[] } {
+  const batches = planTextBatches(text, limits, true);
+  const rulesOnly = batches.filter((batch) => batch.rulesOnly).length;
+  return {
+    batches,
+    issues: rulesOnly
+      ? [`有 ${rulesOnly} 段內容無法安全縮小，已保留原文並改用規則解析；其他段落會繼續整理。`]
+      : [],
+  };
 }
 
 /** Retry only at boundaries found by the planner. Neither half gains source text. */

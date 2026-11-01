@@ -1,3 +1,4 @@
+import { SchoolLmsReadonlyProvider } from '@/components/SchoolLmsReadonlyProvider';
 import { render, screen, within } from '@testing-library/react';
 import { beforeEach, expect, it, vi } from 'vitest';
 import { SiteShell } from '@/components/SiteShell';
@@ -33,9 +34,9 @@ beforeEach(() => {
 
 function renderShell() {
   return render(
-    <SiteShell title="目前頁面">
+    <SchoolLmsReadonlyProvider enabled={true}><SiteShell title="目前頁面">
       <p>此頁內容</p>
-    </SiteShell>,
+    </SiteShell></SchoolLmsReadonlyProvider>,
   );
 }
 
@@ -136,4 +137,10 @@ it.each([
   renderShell();
   expect(screen.queryByRole('navigation', { name: '課務導覽' })).toBeNull();
   expect(screen.getByText('此頁內容')).toBeTruthy();
+});
+
+it('hides the readonly navigation by default', () => {
+  render(<SiteShell title="目前頁面"><p>此頁內容</p></SiteShell>);
+  expect(screen.queryByRole('link', { name: '作業與教材' })).toBeNull();
+  expect(destination('課表').pathname).toBe('/timetable');
 });

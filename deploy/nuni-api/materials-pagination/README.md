@@ -6,7 +6,9 @@
 
 `0001-stable-material-pages.patch` 在 `composed/prepare.py` 完成三個既有 overlay 後套用。manifest 的 `overlayTree`、`appSha256` 表示套用前組裝結果，`patchedAppSha256`、`candidateTree` 表示最後候選；patch SHA 也必須一致。一般重建不會改寫 manifest，漂移會停止。
 
-## 與既有正式來源的差異
+## 歷史來源差異（2026-10-20）
+
+2026-11-01 審查確認：教材分頁已在正式 be815455／tree b0a10ac，本次 281 發布不把分頁算成新增。下列為歷史紀錄，操作以 [281 runbook](../composed/RUNBOOK.md) 為準。
 
 2026-10-20 核對的原正式組裝 tree 是 `fb8ff281facd3d9167db0750c51c9936d1511463`。主線 `0a7d752` 已把個人匯入的共用文案來源與檔案雜湊更新，卻保留舊的候選 tree；依主線來源實際重建三個 overlay 得到 `c9746b456b56aee6b6d1ff067a6627fa281890fc`。
 

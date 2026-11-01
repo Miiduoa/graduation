@@ -1,8 +1,9 @@
+import { SchoolLmsReadonlyProvider } from '@/components/SchoolLmsReadonlyProvider';
 import { act, fireEvent, render, screen } from '@testing-library/react';
 import { beforeEach, expect, it, vi } from 'vitest';
 import { CampusServiceMenu } from './CampusServiceMenu';
 import { AppHeader } from './AppHeader';
-import { CAMPUS_SERVICES } from '@/lib/campusServices';
+import { visibleCampusServices } from '@/lib/campusServices';
 
 const navigation = vi.hoisted(() => ({ pathname: '/map', search: '' }));
 const auth = vi.hoisted(() => ({
@@ -30,7 +31,7 @@ const originalServices = [
   ['/announcements', '公告'],
   ['/timetable', '課表'],
   ['/appeals', '課程申訴'],
-  ['/grades', '成績'],
+  ['/grades?tab=semester', '成績'],
   ['/credit-planner', '學分規劃'],
   ['/groups', '課程與群組'],
   ['/events', '校園活動'],
@@ -85,7 +86,7 @@ it('retains all existing services and search while adding a separate classroom e
   const routes = screen.getAllByRole('link').map((link) => link.getAttribute('href'));
   expect(routes).toContain('/leave');
   expect(routes).toContain('/leave/review');
-  expect(screen.getAllByRole('link')).toHaveLength(CAMPUS_SERVICES.length + 1);
+  expect(screen.getAllByRole('link')).toHaveLength(visibleCampusServices().length + 1);
 });
 
 it('preserves school context without copying unrelated session or return parameters', () => {
@@ -160,9 +161,19 @@ it('marks the feedback tab instead of the general grade service and keeps campus
   const destination = new URL(feedback.getAttribute('href')!, 'https://campus.example');
   expect(destination.searchParams.get('tab')).toBe('feedback');
   expect(destination.searchParams.get('campus')).toBe('nthu');
-  navigation.search = 'campus=nthu';
+  navigation.search = 'tab=semester&campus=nthu';
   view.rerender(<CampusServiceMenu />);
   expect(screen.getByRole('link', { name: /^成績$/ }).getAttribute('aria-current')).toBe('page');
+  expect(feedback.getAttribute('aria-current')).toBeNull();
+  const semester = new URL(
+    screen.getByRole('link', { name: /^成績$/ }).getAttribute('href')!,
+    'https://campus.example',
+  );
+  expect(semester.searchParams.get('tab')).toBe('semester');
+  expect(semester.searchParams.get('campus')).toBe('nthu');
+  navigation.search = 'campus=nthu';
+  view.rerender(<CampusServiceMenu />);
+  expect(screen.getByRole('link', { name: /^成績$/ }).getAttribute('aria-current')).toBeNull();
   expect(feedback.getAttribute('aria-current')).toBeNull();
 });
 
@@ -419,4 +430,11 @@ it('opens a keyboard-dismissible voice AI entry without leaving the current serv
   expect(view.getByRole('heading', { name: '說出想做的事，直接找到入口。' })).toBeTruthy();
   fireEvent.keyDown(dialog, { key: 'Escape' });
   expect(view.queryByRole('dialog')).toBeNull();
+});
+
+it('hides readonly homework by default and restores it when enabled', () => {
+  const view = render(<CampusServiceMenu />);
+  expect(screen.queryByRole('link', { name: /玩課雲作業與教材/ })).toBeNull();
+  view.rerender(<SchoolLmsReadonlyProvider enabled={true}><CampusServiceMenu /></SchoolLmsReadonlyProvider>);
+  expect(screen.getByRole('link', { name: /玩課雲作業與教材/ }).getAttribute('href')).toContain('/school-lms');
 });

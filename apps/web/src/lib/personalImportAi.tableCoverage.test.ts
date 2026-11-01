@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
-import { runPersonalImportAi } from './personalImportAi';
+import { runLocalPersonalImportAi as runPersonalImportAi } from './personalImportAiLocal';
 
 class FakeWorker {
   static current: FakeWorker;

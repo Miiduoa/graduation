@@ -9,7 +9,7 @@ export type ImportDelimitedRecord = {
 /** Strict field quoting: embedded delimiters/newlines and doubled quotes stay in one cell. */
 export function readImportDelimitedRecords(
   text: string,
-  delimiter: ',' | '\t',
+  delimiter: ',' | '\t' | '|' | ';' | '、',
 ): ImportDelimitedRecord[] | null {
   const records: ImportDelimitedRecord[] = [];
   let start = 0;

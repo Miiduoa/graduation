@@ -503,7 +503,7 @@ describe('selected document text for AI', () => {
       personalImportDocumentAiSource(
         document,
         { selected: ['page1'], headers: { page1: 1 } },
-        20_000,
+        40_001,
       ),
     ).toThrow('設定不正確');
   });

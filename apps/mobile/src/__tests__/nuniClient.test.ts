@@ -1,3 +1,4 @@
+import { createNuniClassroom } from '@campus/shared/src/nuniClassroom';
 import {
   nuniBffFilePut,
   nuniBffRequest,
@@ -272,4 +273,30 @@ it('sends assignment file JSON and bytes only to the nuni.tw BFF', async () => {
   await expect(nuniBffRequest('https://foreign.invalid', handle)).rejects.toMatchObject({
     code: 'INVALID_REQUEST',
   });
+});
+
+it.each([
+  ['lost response', undefined, { status: 0, code: 'NETWORK_ERROR' }],
+  ...[500, 502, 503, 504].map((status) => [
+    `HTTP ${status}`,
+    { ok: false, status, text: async () => '{"code":"REQUEST_FAILED"}' },
+    { status, code: 'REQUEST_FAILED' },
+  ]),
+])('does not resend check-in after %s', async (_label, response, failure) => {
+  const fetchMock = jest.fn();
+  if (response) fetchMock.mockResolvedValueOnce(response);
+  else fetchMock.mockRejectedValueOnce(new TypeError('Response lost after server accepted check-in'));
+  fetchMock.mockResolvedValue({ ok: true, text: async () => '{}' });
+  global.fetch = fetchMock as unknown as typeof fetch;
+  const classroom = createNuniClassroom((path, input) => nuniPlatformRequest(path, handle, input));
+  const workspaceId = 'cw_11111111-1111-4111-8111-111111111111';
+  const sessionId = 'cws_22222222-2222-4222-8222-222222222222';
+
+  await expect(classroom.checkIn(workspaceId, sessionId)).rejects.toMatchObject(failure);
+
+  expect(fetchMock).toHaveBeenCalledTimes(1);
+  expect(fetchMock).toHaveBeenCalledWith(
+    `https://api.nuni.tw/v1/auth/platform/class-workspaces/${workspaceId}/classroom-sessions/${sessionId}/check-in`,
+    expect.objectContaining({ method: 'POST', body: '{}' }),
+  );
 });

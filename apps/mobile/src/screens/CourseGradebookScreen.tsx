@@ -31,6 +31,7 @@ export function CourseGradebookScreen(props: any) {
     items: memberships,
     loading: membershipsLoading,
     error: membershipsError,
+    reload: reloadMemberships,
   } = useAsyncList<CourseSpace>(async () => {
     if (!auth.user) return [];
     if (workspaceSource) return listCourseSpaces(auth.user.uid, schoolId);
@@ -86,7 +87,7 @@ export function CourseGradebookScreen(props: any) {
         subtitle="讀取成績簿失敗"
         hint={combinedError}
         actionText="重試"
-        onAction={reloadGradebook}
+        onAction={() => { reloadMemberships(); reloadGradebook(); }}
       />
     );
   }
@@ -102,7 +103,7 @@ export function CourseGradebookScreen(props: any) {
             paddingBottom: TAB_BAR_CONTENT_BOTTOM_PADDING,
           }}
         >
-          <Card title="課內成績簿" subtitle="每門課一份正式 gradebook">
+          <Card title="課內成績簿" subtitle="每門課一份課內成績簿">
             <Text style={{ color: theme.colors.muted, lineHeight: 22 }}>
               從這裡進入特定課程的成績簿，查看各作業評分、期末總分與發布狀態。
             </Text>
@@ -125,7 +126,7 @@ export function CourseGradebookScreen(props: any) {
                   text={canManageCourse(membership.role) ? '教師視角' : '學生視角'}
                   kind="accent"
                 />
-                <Pill text="正式 gradebook" kind="success" />
+                <Pill text="來源：nuni 課程" kind="success" />
               </View>
             </Card>
           ))}
@@ -138,9 +139,12 @@ export function CourseGradebookScreen(props: any) {
     return <ErrorState title="課內成績簿" subtitle="找不到課程成績資料" />;
   }
 
-  const gradedRows = gradebook.rows.filter((row) => row.finalScore !== null);
+  const hasFinalScore = (row: CourseGradebookData['rows'][number]) =>
+    row.finalScore !== null && Number.isFinite(row.finalScore) &&
+    ((gradebook.finalScoresPublished && row.published) || (row.totalAssignments > 0 && row.gradedAssignments >= row.totalAssignments));
+  const gradedRows = gradebook.rows.filter(hasFinalScore);
   const classAverage =
-    gradedRows.length > 0
+    isTeacher && gradedRows.length > 0
       ? Math.round(
           (gradedRows.reduce((sum, row) => sum + (row.finalScore ?? 0), 0) / gradedRows.length) *
             10,
@@ -161,6 +165,7 @@ export function CourseGradebookScreen(props: any) {
           title={`${selectedCourseName} 成績簿`}
           subtitle={isTeacher ? '教師可查看整班成績與各作業分解' : '查看這門課的評分進度與期末總分'}
         >
+          <Text style={{ color: theme.colors.muted }}>來源：nuni 課程 · 更新時間：未知 · 期末公布：{formatDateTime(gradebook.finalScoresPublishedAt, '未知（尚未發布）')}。待評與未取得的分數不算零分。已公布的總分另列，評分進度顯示已評／全部項目。</Text>
           <View style={{ flexDirection: 'row', gap: 8, flexWrap: 'wrap' }}>
             <Pill text={`${gradebook.assignments.length} 項評分項目`} kind="accent" />
             <Pill
@@ -257,8 +262,8 @@ export function CourseGradebookScreen(props: any) {
           >
             <View style={{ flexDirection: 'row', gap: 8, flexWrap: 'wrap' }}>
               <Pill
-                text={`總分 ${row.finalScore ?? '-'}`}
-                kind={row.finalScore !== null ? 'accent' : 'muted'}
+                text={`總分 ${hasFinalScore(row) ? row.finalScore : row.gradedAssignments < row.totalAssignments ? '未知（仍有待評項目）' : '未知'}`}
+                kind={hasFinalScore(row) ? 'accent' : 'muted'}
               />
               <Pill
                 text={`評分進度 ${row.gradedAssignments}/${row.totalAssignments}`}
@@ -266,12 +271,12 @@ export function CourseGradebookScreen(props: any) {
               />
               <Pill
                 text={
-                  row.result === 'passed' ? '通過' : row.result === 'failed' ? '未通過' : '尚未完成'
+                  !hasFinalScore(row) ? (row.gradedAssignments < row.totalAssignments ? '尚有待評項目' : '尚未完成') : row.result === 'passed' ? '通過' : row.result === 'failed' ? '未通過' : '尚未完成'
                 }
                 kind={
-                  row.result === 'passed'
+                  hasFinalScore(row) && row.result === 'passed'
                     ? 'success'
-                    : row.result === 'failed'
+                    : hasFinalScore(row) && row.result === 'failed'
                       ? 'danger'
                       : 'warning'
                 }
@@ -314,6 +319,8 @@ export function CourseGradebookScreen(props: any) {
                     />
                     {entry.isLate ? <Pill text="遲交" kind="warning" /> : null}
                   </View>
+                  <Text style={{ color: theme.colors.muted }}>{entry.grade === null ? entry.submittedAt ? '待評 · 尚無分數' : '缺件 · 尚未繳交' : '已評分'}</Text>
+                  <Button text="查看原始作業／測驗紀錄" onPress={() => nav?.navigate?.('HomeworkSubmit', { courseId: routeGroupId, hwId: entry.assignmentId, hwTitle: entry.title })} />
                   {entry.feedback ? (
                     <Text style={{ color: theme.colors.muted, lineHeight: 20 }}>
                       回饋：{entry.feedback}

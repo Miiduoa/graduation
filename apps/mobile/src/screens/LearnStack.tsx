@@ -621,6 +621,11 @@ export function LearnStack() {
         options={{ title: '🍅 番茄專注' }}
       />
       <Stack.Screen
+        name="CampusAssistant"
+        component={CampusAssistantScreen}
+        options={{ title: '校園助理', headerShown: false }}
+      />
+      <Stack.Screen
         name="AIAgentObservatory"
         component={CampusAssistantScreen}
         options={{ title: '校園助理', headerShown: false }}

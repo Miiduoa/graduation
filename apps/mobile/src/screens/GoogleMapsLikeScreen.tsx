@@ -57,6 +57,8 @@ type MapNavigation = {
   getParent?: () => unknown;
 };
 type MapParams = {
+  query?: string;
+  schoolId?: string;
   poiId?: string;
   focusPoiId?: string;
   toPoiId?: string;
@@ -70,14 +72,14 @@ export function GoogleMapsLikeScreen() {
   const { school } = useSchool();
   const { user } = useAuth();
   const params = (route.params ?? {}) as MapParams;
-  const signature = JSON.stringify([params.poiId, params.focusPoiId, params.toPoiId, params.fromPoiId]);
+  const signature = JSON.stringify([params.poiId, params.focusPoiId, params.toPoiId, params.fromPoiId, params.query, params.schoolId]);
   const linkedSchool = useRef({ id: school.id, signature, invalidated: false });
   if (linkedSchool.current.signature !== signature) {
     linkedSchool.current = { id: school.id, signature, invalidated: false };
   } else if (linkedSchool.current.id !== school.id) {
     linkedSchool.current.invalidated = true;
   }
-  const schoolScopedParams = linkedSchool.current.invalidated ? {} : params;
+  const schoolScopedParams = linkedSchool.current.invalidated || (params.schoolId && params.schoolId !== school.id) ? {} : params;
   return (
     <CampusMapContent
       key={JSON.stringify([user?.uid, school.id, school.name])}
@@ -111,6 +113,7 @@ function CampusMapContent({
   const schoolIdRef = useRef(schoolId);
   schoolIdRef.current = schoolId;
   const [query, setQuery] = useState('');
+  useEffect(() => { setQuery(params.query?.slice(0, 120) || ''); }, [params.query]);
   const [placeState, setPlaceState] = useState<PlaceState>(() => ({
     status: bundled ? 'ready' : 'loading',
     source: 'loading',
