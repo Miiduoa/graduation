@@ -12,6 +12,7 @@ import {
   saveFoodPending,
 } from '../state/foodPersistence';
 import { NuniError } from '@campus/shared/src/nuni';
+import type { NuniFoodLocationSummary } from '@campus/shared/src/nuniFoodTypes';
 
 const mockSecureRecords = new Map<string, string>();
 const mockSecureKey = (key: string) => {
@@ -69,6 +70,7 @@ let hasOrder: boolean;
 let paused: boolean;
 let shiftOpen: boolean;
 let expiresAt: string;
+let locationDetails: Partial<NuniFoodLocationSummary>;
 const location = () => ({
   id: 'location-one',
   campusId: 'main',
@@ -81,6 +83,7 @@ const location = () => ({
   sourceLabel: '店家',
   sourceUpdatedAt: null,
   allowedActions: ['view-menu'],
+  ...locationDetails,
 });
 const lines = () => [
   {
@@ -355,6 +358,7 @@ beforeEach(async () => {
   paused = false;
   shiftOpen = false;
   expiresAt = future();
+  locationDetails = {};
   mockSequence = 0;
   mockCameraGranted = true;
   mockScan = undefined;
@@ -545,6 +549,270 @@ test('expired quote cannot create an order', async () => {
   expect(view.getByRole('button', { name: '確認送出訂單，到店付款' })).toBeDisabled();
   expect(view.getByText(/這次報價已過期/)).toBeTruthy();
   expect(writes()).toHaveLength(1);
+});
+describe('手機取餐時間', () => {
+  const beforeMidnight = Date.parse('2026-11-01T15:45:00.000Z');
+  let now: jest.SpyInstance;
+  beforeEach(() => {
+    now = jest.spyOn(Date, 'now').mockReturnValue(beforeMidnight);
+    expiresAt = future();
+  });
+  afterEach(() => now.mockRestore());
+  async function openBasket(view: ReturnType<typeof render>) {
+    await openMenu(view);
+    await customizeRice(view);
+    fireEvent.press(view.getByRole('button', { name: '查看購物籃，已選 2 份' }));
+  }
+
+  test('三個快捷立即顯示跨午夜的台灣日期時間，並說明仍須確認門市能否接單', async () => {
+    const view = render(ui());
+    await openBasket(view);
+    expect(view.getByText('預計取餐 2026/11/02 00:15（台灣時間）')).toBeTruthy();
+    expect(view.getByRole('button', { name: '30 分鐘後' })).toHaveAccessibilityState({
+      selected: true,
+    });
+    for (const [minutes, time] of [
+      ['15', '00:00'],
+      ['30', '00:15'],
+      ['60', '00:45'],
+    ]) {
+      fireEvent.press(view.getByRole('button', { name: `${minutes} 分鐘後` }));
+      expect(view.getByLabelText('幾分鐘後取餐').props.value).toBe(minutes);
+      expect(view.getByText(`預計取餐 2026/11/02 ${time}（台灣時間）`)).toBeTruthy();
+      for (const option of ['15', '30', '60']) {
+        expect(view.getByRole('button', { name: `${option} 分鐘後` })).toHaveAccessibilityState({
+          selected: option === minutes,
+        });
+      }
+    }
+    expect(view.getByText(/快捷選項只幫你填入時間，並非門市保留的時段/)).toBeTruthy();
+    expect(view.getByText(/門市尚未提供取餐時間範圍.*查看是否能接單/)).toBeTruthy();
+    expect(writes()).toHaveLength(0);
+  });
+
+  test('自訂分鐘保留即時預覽，空值與無效輸入可用快捷恢復', async () => {
+    const view = render(ui());
+    await openBasket(view);
+    fireEvent.changeText(view.getByLabelText('幾分鐘後取餐'), '45');
+    expect(view.getByText('預計取餐 2026/11/02 00:30（台灣時間）')).toBeTruthy();
+    for (const minutes of ['15', '30', '60']) {
+      expect(view.getByRole('button', { name: `${minutes} 分鐘後` })).toHaveAccessibilityState({
+        selected: false,
+      });
+    }
+    for (const invalid of ['', '0', '1441', '1.5', '15x']) {
+      fireEvent.changeText(view.getByLabelText('幾分鐘後取餐'), invalid);
+      expect(view.queryByText(/^預計取餐 2026/)).toBeNull();
+      expect(
+        view.getByText(
+          invalid === ''
+            ? '請選上方的時間，或輸入 1–1,440 分鐘後取餐。'
+            : '請輸入 1–1,440 的整數分鐘，或選上方的時間。',
+        ),
+      ).toBeTruthy();
+      fireEvent.press(view.getByRole('button', { name: '確認餐點與金額' }));
+      expect(writes()).toHaveLength(0);
+    }
+    now.mockReturnValue(beforeMidnight + 2 * 60_000);
+    fireEvent.press(view.getByRole('button', { name: '15 分鐘後' }));
+    expect(view.getByText('預計取餐 2026/11/02 00:02（台灣時間）')).toBeTruthy();
+    fireEvent.press(view.getByRole('button', { name: '確認餐點與金額' }));
+    await view.findByText('應付總額 180 元');
+    expect(writes()[0][2].requestedPickupAt).toBe('2026-11-01T16:02:00.000Z');
+  });
+
+  test('停留時更新預覽，確認時依按下當下的時間送出', async () => {
+    const view = render(ui());
+    await openBasket(view);
+    now.mockReturnValue(beforeMidnight + 60_000);
+    await waitFor(
+      () => expect(view.getByText('預計取餐 2026/11/02 00:16（台灣時間）')).toBeTruthy(),
+      { timeout: 1500 },
+    );
+    now.mockReturnValue(beforeMidnight + 90_000);
+    fireEvent.press(view.getByRole('button', { name: '確認餐點與金額' }));
+    await view.findByText('應付總額 180 元');
+    expect(writes()[0][2].requestedPickupAt).toBe('2026-11-01T16:16:30.000Z');
+  });
+
+  test('門市時間範圍提示早於或晚於邊界，報價仍交由伺服器判定', async () => {
+    locationDetails = {
+      earliestPickupAt: '2026-11-01T16:05:00.000Z',
+      latestPickupAt: '2026-11-01T16:30:00.000Z',
+    };
+    const view = render(ui());
+    await openBasket(view);
+    expect(
+      view.getByText('門市提供的取餐範圍：2026/11/02 00:05 至 2026/11/02 00:30（台灣時間）。'),
+    ).toBeTruthy();
+    fireEvent.press(view.getByRole('button', { name: '15 分鐘後' }));
+    expect(view.getByText(/早於門市提供的最早取餐時間.*增加分鐘數/)).toBeTruthy();
+    fireEvent.press(view.getByRole('button', { name: '30 分鐘後' }));
+    expect(view.queryByText(/早於門市提供的最早取餐時間/)).toBeNull();
+    fireEvent.press(view.getByRole('button', { name: '60 分鐘後' }));
+    expect(view.getByText(/晚於門市提供的最晚取餐時間.*減少分鐘數/)).toBeTruthy();
+    expect(view.getByRole('button', { name: '確認餐點與金額' })).toBeEnabled();
+    fireEvent.press(view.getByRole('button', { name: '確認餐點與金額' }));
+    await view.findByText('應付總額 180 元');
+    expect(writes()[0][2].requestedPickupAt).toBe('2026-11-01T16:45:00.000Z');
+  });
+
+  test.each([
+    ['closed', /門市目前已關店.*返回選擇其他門市.*重新讀取餐點/],
+    ['paused', /門市目前暫停接單.*重新讀取餐點.*返回選擇其他門市/],
+  ] as const)('門市變為 %s 後提示重新讀取或返回選擇其他門市', async (nextState, warning) => {
+    const view = render(ui());
+    await openBasket(view);
+    locationDetails = { state: nextState };
+    fireEvent.press(view.getByRole('button', { name: '重新讀取' }));
+    expect(await view.findByText(warning)).toBeTruthy();
+    expect(view.getByRole('button', { name: '重新讀取' })).toBeEnabled();
+    expect(view.getByRole('button', { name: '確認餐點與金額' })).toBeEnabled();
+    expect(writes()).toHaveLength(0);
+    fireEvent.press(view.getByRole('button', { name: '返回門市列表' }));
+    expect(await view.findByRole('button', { name: '選餐：餐坊' })).toBeTruthy();
+  });
+
+  test('伺服器拒絕時間後可重新讀取、改選時間並取得新報價', async () => {
+    let rejected = false;
+    mockRequest.mockImplementation(async (path, context, input) => {
+      if (path === `${realm}/quotes` && !rejected) {
+        rejected = true;
+        throw new NuniError(422, 'PICKUP_TIME_UNAVAILABLE');
+      }
+      return respond(path, context, input);
+    });
+    const view = render(ui());
+    await openBasket(view);
+    fireEvent.press(view.getByRole('button', { name: '60 分鐘後' }));
+    fireEvent.press(view.getByRole('button', { name: '確認餐點與金額' }));
+    await view.findByText('這次操作未被接受。請重新讀取最新狀態後再確認。');
+    expect(view.queryByRole('button', { name: '重試確認這次送出' })).toBeNull();
+    expect(view.getByRole('button', { name: '15 分鐘後' })).toBeEnabled();
+    expect(view.getByLabelText('幾分鐘後取餐').props.editable).toBe(true);
+    fireEvent.press(view.getByRole('button', { name: '重新讀取' }));
+    await waitFor(() => expect(view.getByRole('button', { name: '確認餐點與金額' })).toBeEnabled());
+    fireEvent.press(view.getByRole('button', { name: '15 分鐘後' }));
+    fireEvent.press(view.getByRole('button', { name: '確認餐點與金額' }));
+    await view.findByText('應付總額 180 元');
+    expect(writes()).toHaveLength(2);
+    expect(writes()[1][2].requestedPickupAt).toBe('2026-11-01T16:00:00.000Z');
+    expect(writes()[1][2].idempotencyKey).not.toBe(writes()[0][2].idempotencyKey);
+  });
+
+  test('保存報價操作時就固定取餐時間，跨過分鐘仍與稍後送出的內容一致', async () => {
+    const view = render(ui());
+    await openBasket(view);
+    let releaseStorage!: () => void;
+    const saving = new Promise<void>((resolve) => {
+      releaseStorage = resolve;
+    });
+    const storageStarted = jest.fn();
+    (SecureStore.setItemAsync as jest.Mock).mockImplementationOnce(
+      async (key: string, value: string) => {
+        storageStarted();
+        await saving;
+        mockSecureRecords.set(mockSecureKey(key), value);
+      },
+    );
+    fireEvent.press(view.getByRole('button', { name: '確認餐點與金額' }));
+    try {
+      await waitFor(() => expect(storageStarted).toHaveBeenCalledTimes(1));
+      expect(view.getByText('這次取餐時間 2026/11/02 00:15（台灣時間）')).toBeTruthy();
+      expect(view.getByRole('button', { name: '確認餐點與金額' })).toBeDisabled();
+      expect(view.getByLabelText('幾分鐘後取餐').props.editable).toBe(false);
+      now.mockReturnValue(beforeMidnight + 2 * 60_000);
+      await act(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 1100));
+      });
+      expect(view.getByText('這次取餐時間 2026/11/02 00:15（台灣時間）')).toBeTruthy();
+      expect(view.queryByText('預計取餐 2026/11/02 00:17（台灣時間）')).toBeNull();
+      expect(writes()).toHaveLength(0);
+    } finally {
+      await act(async () => releaseStorage());
+    }
+    await view.findByText('應付總額 180 元');
+    expect(writes()).toHaveLength(1);
+    expect(writes()[0][2].requestedPickupAt).toBe('2026-11-01T16:15:00.000Z');
+  });
+
+  test('報價回應遺失後鎖定時間，返回門市再進入仍顯示原時間並沿用原內容重試', async () => {
+    let lostResponse = false;
+    mockRequest.mockImplementation(async (path, context, input) => {
+      if (path === `${realm}/quotes` && !lostResponse) {
+        lostResponse = true;
+        throw new Error('response lost');
+      }
+      return respond(path, context, input);
+    });
+    const view = render(ui());
+    await openBasket(view);
+    fireEvent.press(view.getByRole('button', { name: '確認餐點與金額' }));
+    await view.findByText(/尚未確認是否成功/);
+    const sent = writes()[0][2];
+    expect(view.getByText('這次取餐時間 2026/11/02 00:15（台灣時間）')).toBeTruthy();
+    for (const minutes of ['15', '30', '60']) {
+      expect(view.getByRole('button', { name: `${minutes} 分鐘後` })).toBeDisabled();
+    }
+    expect(view.getByLabelText('幾分鐘後取餐').props.editable).toBe(false);
+    now.mockReturnValue(beforeMidnight + 20 * 60_000);
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 1100));
+    });
+    fireEvent.press(view.getByRole('button', { name: '60 分鐘後' }));
+    expect(view.getByLabelText('幾分鐘後取餐').props.value).toBe('30');
+    expect(view.getByText('這次取餐時間 2026/11/02 00:15（台灣時間）')).toBeTruthy();
+    fireEvent.press(view.getByRole('button', { name: '返回門市列表' }));
+    now.mockReturnValue(beforeMidnight + 25 * 60_000);
+    fireEvent.press(await view.findByRole('button', { name: '選餐：餐坊' }));
+    await view.findByText('這次取餐時間 2026/11/02 00:15（台灣時間）');
+    expect(view.getAllByText('這次取餐時間 2026/11/02 00:15（台灣時間）')).toHaveLength(1);
+    expect(view.queryByText(/^預計取餐 2026/)).toBeNull();
+    await waitFor(() =>
+      expect(view.getByRole('button', { name: '重試確認這次送出' })).toBeEnabled(),
+    );
+    fireEvent.press(view.getByRole('button', { name: '重試確認這次送出' }));
+    await view.findByText('應付總額 180 元');
+    expect(writes()).toHaveLength(2);
+    expect(writes()[1][2]).toEqual(sent);
+  });
+
+  test('伺服器已將報價標為過期時，即使期限未到仍提示返回調整時間', async () => {
+    mockRequest.mockImplementation(async (path, context, input) => {
+      const result = await respond(path, context, input);
+      return path === `${realm}/quotes` ? { ...result, state: 'expired' } : result;
+    });
+    const view = render(ui());
+    await fillQuote(view);
+    expect(Date.parse(expiresAt)).toBeGreaterThan(Date.now());
+    expect(view.getByText('這次報價已過期，請返回調整取餐時間，再重新確認金額。')).toBeTruthy();
+    expect(view.getByRole('button', { name: '確認送出訂單，到店付款' })).toBeDisabled();
+    fireEvent.press(view.getByRole('button', { name: '返回修改餐點與取餐時間' }));
+    expect(view.getByRole('button', { name: '15 分鐘後' })).toBeEnabled();
+    expect(writes()).toHaveLength(1);
+  });
+
+  test('報價在按下送出前過期時立即擋下，返回重選時間後使用新的報價內容', async () => {
+    expiresAt = new Date(beforeMidnight + 10_000).toISOString();
+    const view = render(ui());
+    await fillQuote(view);
+    const firstInput = writes()[0][2];
+    now.mockReturnValue(beforeMidnight + 60_000);
+    fireEvent.press(view.getByRole('button', { name: '確認送出訂單，到店付款' }));
+    expect(view.getByText('這次報價已過期，請返回調整取餐時間，再重新確認金額。')).toBeTruthy();
+    expect(view.getByRole('button', { name: '確認送出訂單，到店付款' })).toBeDisabled();
+    expect(writes()).toHaveLength(1);
+    fireEvent.press(view.getByRole('button', { name: '返回修改餐點與取餐時間' }));
+    fireEvent.press(view.getByRole('button', { name: '15 分鐘後' }));
+    expect(view.getByText('預計取餐 2026/11/02 00:01（台灣時間）')).toBeTruthy();
+    expiresAt = future();
+    fireEvent.press(view.getByRole('button', { name: '確認餐點與金額' }));
+    await view.findByText('應付總額 180 元');
+    expect(writes()).toHaveLength(2);
+    expect(writes()[1][2].requestedPickupAt).toBe('2026-11-01T16:01:00.000Z');
+    expect(writes()[1][2].idempotencyKey).not.toBe(firstInput.idempotencyKey);
+    expect(view.getByRole('button', { name: '確認送出訂單，到店付款' })).toBeEnabled();
+  });
 });
 test('unknown order write survives back and same-account revalidation with the exact key and payload', async () => {
   let failed = false;

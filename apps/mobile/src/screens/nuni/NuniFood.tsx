@@ -1,5 +1,5 @@
-import React, { useCallback, useEffect, useState } from 'react';
-import { ScrollView, Text, View } from 'react-native';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
+import { AppState, ScrollView, Text, View } from 'react-native';
 import * as Crypto from 'expo-crypto';
 import QRCode from 'react-native-qrcode-svg';
 import type {
@@ -35,6 +35,8 @@ import { foodPageIntro } from '@campus/shared/src/foodPageCopy';
 import { isMobileOnlineOrderingEnabled } from '../../utils/onlineOrdering';
 
 import { foodCustomerNextStep } from './foodOrderGuidance';
+import { PickupTimePicker } from './PickupTimePicker';
+import { formatPickupTime, pickupTimeFromMinutes } from './foodPickupTime';
 
 const page = { padding: 20, paddingBottom: 48, gap: 16 };
 const key = () => `food-${Crypto.randomUUID()}`;
@@ -350,6 +352,8 @@ function FoodMenu({
   const [cart, setCart] = useNuniDraftState<Record<string, CartLine>>(`${scope}:cart`, {});
   const [minutes, setMinutes] = useNuniDraftState(`${scope}:minutes`, '30');
   const [quote, setQuote] = useState<NuniFoodQuoteProjection | null>(null);
+  const [submittingPickupAt, setSubmittingPickupAt] = useState<string>();
+  const preparingQuote = useRef(false);
   const [stage, setStage] = useState<MenuStage>('menu');
   const [focusId, setFocusId] = useState<string | null>(null);
   const [error, setError] = useState('');
@@ -380,7 +384,13 @@ function FoodMenu({
   );
   useEffect(() => {
     const timer = setInterval(() => setNow(Date.now()), 1000);
-    return () => clearInterval(timer);
+    const subscription = AppState.addEventListener('change', (state) => {
+      if (state === 'active') setNow(Date.now());
+    });
+    return () => {
+      clearInterval(timer);
+      subscription.remove();
+    };
   }, []);
   const locked = mutation.locked || !!quote;
   const catalog = resource.data?.sections.flatMap((section) => section.items) ?? [];
@@ -453,12 +463,15 @@ function FoodMenu({
     }
   };
   const prepareQuote = () => {
-    if (locked || !resource.data || resource.loading || resource.error) return;
+    if (locked || preparingQuote.current || !resource.data || resource.loading || resource.error)
+      return;
     setError('');
     const nextErrors: Record<string, string> = {};
     try {
-      const minutesNumber = Number(minutes);
-      if (!/^\d+$/.test(minutes) || minutesNumber < 1 || minutesNumber > 1440) {
+      const requestedAt = Date.now();
+      setNow(requestedAt);
+      const requestedPickupAt = pickupTimeFromMinutes(minutes, requestedAt);
+      if (!requestedPickupAt) {
         setError('預計取餐時間需為 1–1,440 分鐘後。');
         return;
       }
@@ -472,7 +485,7 @@ function FoodMenu({
       }
       const input: NuniFoodQuoteInput = {
         locationId,
-        requestedPickupAt: new Date(Date.now() + minutesNumber * 60_000).toISOString(),
+        requestedPickupAt,
         idempotencyKey: key(),
         items: selected.map(([id, value]) => {
           const item = catalog.find((candidate) => candidate.id === id);
@@ -490,7 +503,12 @@ function FoodMenu({
         }),
       };
       setLineErrors({});
-      void mutation.send({ kind: 'quote', input });
+      preparingQuote.current = true;
+      setSubmittingPickupAt(requestedPickupAt);
+      void mutation.send({ kind: 'quote', input }).finally(() => {
+        preparingQuote.current = false;
+        setSubmittingPickupAt(undefined);
+      });
     } catch (failure) {
       setLineErrors(nextErrors);
       const first = Object.values(nextErrors)[0];
@@ -696,13 +714,22 @@ function FoodMenu({
               />
             ))
         : null}
-      <FoodField
-        label="幾分鐘後取餐"
-        numeric
-        max={4}
+      <PickupTimePicker
         disabled={locked}
         value={minutes}
-        onChange={setMinutes}
+        now={now}
+        location={resource.data!.location}
+        pendingPickupAt={
+          mutation.pending?.kind === 'quote'
+            ? mutation.pending.input.requestedPickupAt
+            : submittingPickupAt
+        }
+        onChange={(value) => {
+          if (locked) return;
+          setMinutes(value);
+          setNow(Date.now());
+          setError('');
+        }}
       />
       <FoodButton
         variant="primary"
@@ -739,6 +766,11 @@ function FoodMenu({
       {mutation.pending ? (
         <>
           <FoodText>這次送出內容已保留。返回後仍會使用同一次操作確認。</FoodText>
+          {mutation.pending.kind === 'quote' && stage !== 'basket' ? (
+            <FoodText
+              status
+            >{`這次取餐時間 ${formatPickupTime(mutation.pending.input.requestedPickupAt)}（台灣時間）`}</FoodText>
+          ) : null}
           <FoodButton
             variant="primary"
             disabled={
@@ -764,11 +796,13 @@ function FoodMenu({
             <FoodText key={fee.code}>{`${fee.label}：${money(fee.amount)}`}</FoodText>
           ))}
           <FoodText>{`應付總額 ${money(quote.total)}`}</FoodText>
-          <FoodText status>{`預計取餐 ${foodTime(quote.requestedPickupAt)}`}</FoodText>
+          <FoodText
+            status
+          >{`預計取餐 ${formatPickupTime(quote.requestedPickupAt)}（台灣時間）`}</FoodText>
           <FoodText subdued>{`金額與庫存保留至 ${foodTime(quote.expiresAt)}`}</FoodText>
           <FoodText>送出後請到店付款。這個步驟不會線上扣款。</FoodText>
-          {Date.parse(quote.expiresAt) <= now ? (
-            <FoodText alert>這次報價已過期，請重新確認金額。</FoodText>
+          {quote.state === 'expired' || Date.parse(quote.expiresAt) <= now ? (
+            <FoodText alert>這次報價已過期，請返回調整取餐時間，再重新確認金額。</FoodText>
           ) : null}
           <FoodButton
             variant="primary"
@@ -780,12 +814,16 @@ function FoodMenu({
               quote.state !== 'active' ||
               !quote.allowedActions.includes('create-order')
             }
-            onPress={() =>
+            onPress={() => {
+              if (Date.parse(quote.expiresAt) <= Date.now()) {
+                setNow(Date.now());
+                return;
+              }
               void mutation.send({
                 kind: 'order',
                 input: { quoteId: quote.id, idempotencyKey: key() },
-              })
-            }
+              });
+            }}
           >
             確認送出訂單，到店付款
           </FoodButton>
@@ -793,10 +831,11 @@ function FoodMenu({
             disabled={mutation.locked}
             onPress={() => {
               setQuote(null);
+              setNow(Date.now());
               setStage('basket');
             }}
           >
-            返回修改餐點
+            返回修改餐點與取餐時間
           </FoodButton>
         </FoodCard>
       ) : resource.data ? (
