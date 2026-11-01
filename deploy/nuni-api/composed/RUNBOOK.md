@@ -98,13 +98,15 @@ fly machine run registry.fly.io/nuni-api@sha256:962722f3ca6f6ca69f5bef3ccad456fb
   > "$RECORD/machine-create.txt" 2>&1
 # 從建立回應填入本次 ID；不可填 serving 或 stopped 台 ID。
 MIGRATION_ID='<本次一次性 machine ID>'
-fly machine wait "$MIGRATION_ID" -a nuni-api --state stopped --wait-timeout 60s
+fly machine wait "$MIGRATION_ID" -a nuni-api --state stopped --wait-timeout 300s
 fly machine status "$MIGRATION_ID" -a nuni-api > "$RECORD/machine-status.txt"
 fly logs -a nuni-api --machine "$MIGRATION_ID" --no-tail > "$RECORD/migration.log"
 date -u +%FT%TZ > "$RECORD/migration-end.txt"
 ```
 
-wait 只表示狀態，不能當 runner 退出碼。以 stopped machine 的 exit event 及 `migration.job.exit` 的 code 核對真正退出碼；兩者均須為 0，且有 `migration.session_timeouts_verified`、`database.migrate.completed`（count=278、latest=281）。缺事件、非零、超過 60 秒未 stopped、TLS／ACL／checksum／timeout 不符都停止切換；若仍運行，僅停止本次 ID，保存事件後清理，不能以 wait 成功冒充 migration 成功。Miiduoa 在既有安全核對入口確認 manifest 281 精確 checksum 及 API SELECT／BFF SELECT、INSERT，記錄結果但不輸出連線字串。沒有完成核對不得切換。
+工作程序整體上限為 **300 秒**（含啟動、完整既有 manifest 核對及 281）；依據與唯讀量測收據見 [DURATION-MEASUREMENT.md](DURATION-MEASUREMENT.md)。原 60 秒是本手冊操作上限，並非 wrapper／runner 的整體計時器；不可與每條 SQL 的 `statement_timeout=60000ms` 混淆。保留 lock=5000ms、statement=60000ms、query=70000ms、idle-in-transaction=90000ms 及原 verifier 的全部檢查，不因工作總時間較長而放寬單條 SQL 限制。
+
+wait 只表示狀態，不能當 runner 退出碼。以 stopped machine 的 exit event 及 `migration.job.exit` 的 code 核對真正退出碼；兩者均須為 0，且有 `migration.session_timeouts_verified`、`database.migrate.completed`（count=278、latest=281）。缺事件、非零、超過 300 秒未 stopped、TLS／ACL／checksum／timeout 不符都停止切換；若仍運行，僅停止本次 ID，保存事件後清理，不能以 wait 成功冒充 migration 成功。Miiduoa 在既有安全核對入口確認 manifest 281 精確 checksum 及 API SELECT／BFF SELECT、INSERT，記錄結果但不輸出連線字串。沒有完成核對不得切換。
 
 保存日誌、退出碼、281 checksum、PR head、兩 digest、操作者與時間於 `$RECORD`，並在 PR #365 連結發布收據。DBA 還原 role timeout 後，核對 ID 確為本次工作程序再清理：
 

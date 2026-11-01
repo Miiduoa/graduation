@@ -1,3 +1,4 @@
+import { StudyDeadlineExport } from './StudyDeadlineExport';
 import React, { useEffect, useState } from 'react';
 import { Pressable, ScrollView, Text, View } from 'react-native';
 import {
@@ -128,6 +129,14 @@ export function StudyAgenda({
             重新讀取待辦
           </Text>
         </Pressable>
+      ) : null}
+      {data && !loading && !error ? (
+        <StudyDeadlineExport
+          key={selectedCourse}
+          tasks={scopedTasks}
+          partial={partial}
+          retry={retry}
+        />
       ) : null}
       {data ? (
         <>

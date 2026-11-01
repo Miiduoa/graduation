@@ -249,3 +249,16 @@ it('guides an empty account to join a course', () => {
     view.getByText('還沒加入 nuni 課程。請到下方課程區輸入邀請碼，加入後就能看到作業與測驗。'),
   ).toBeTruthy();
 });
+
+it('clears export selection while refreshing data and excludes confirmed submissions', () => {
+  const props = { data: agenda([task('one', { dueAt: '2026-11-02T00:30:00+08:00' })]), loading: false, error: '', retry: jest.fn(), open: jest.fn() };
+  const view = render(<StudyAgenda {...props} />);
+  fireEvent.press(view.getByRole('button', { name: '匯出未繳期限 ICS' }));
+  fireEvent.press(view.getByRole('checkbox'));
+  fireEvent.press(view.getByRole('button', { name: '預覽已選 1 項' }));
+  view.rerender(<StudyAgenda {...props} loading />);
+  expect(view.queryByRole('checkbox')).toBeNull();
+  view.rerender(<StudyAgenda {...props} />);
+  fireEvent.press(view.getByRole('button', { name: '匯出未繳期限 ICS' }));
+  expect(view.getByRole('button', { name: '預覽已選 0 項' }).props.accessibilityState.disabled).toBe(true);
+});
