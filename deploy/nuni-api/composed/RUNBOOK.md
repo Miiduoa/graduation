@@ -41,7 +41,50 @@ fly deploy /tmp/nuniapifix/rollback -a nuni-api --config /tmp/nuniapifix/build.f
 node apps/api/dist/migrate.js
 ```
 
-這是正式 runner 的完整 manifest 比對／補缺流程，不是裸跑單檔；已登記的 278／279 只核對，不重跑，本次應只補 281。281 的 DDL 與 manifest INSERT 在同一交易內，由 runner 提交；SQL 本身不得含 BEGIN／COMMIT。為工作程序預先設定有界 lock timeout／statement timeout（例如 session `lock_timeout=5s`、`statement_timeout=60s`，由安全連線設定注入），超時或 checksum 不符即停止，不強制解鎖、不手改 manifest。確認 runner 成功退出、281 ID/checksum 一致，API 有 SELECT、BFF 有 SELECT／INSERT。不要更動 serving 機器的啟動命令來跑 migration。
+這是正式 runner 的完整 manifest 比對／補缺流程，不是裸跑單檔；已登記的 278／279 只核對，不重跑，本次應只補 281。281 的 DDL 與 manifest INSERT 在同一交易內，由 runner 提交；SQL 本身不得含 BEGIN／COMMIT。依下列步驟在一次性工作程序注入並驗證 timeout。超時或 checksum 不符即停止，不強制解鎖、不手改 manifest。確認 runner 成功退出、281 ID/checksum 一致，API 有 SELECT、BFF 有 SELECT／INSERT。不要更動 serving 機器的啟動命令來跑 migration。
+
+### 一次性 timeout 注入與 runner session 核驗
+
+runner 的 production 設定拒絕 `PGOPTIONS`、URL query 與 caller pool options；沒有 `DATABASE_LOCK_TIMEOUT_MS`。`DATABASE_QUERY_TIMEOUT_MS` 必須嚴格大於 statement timeout。以下命令在核驗映像的 `/app` 工作目錄執行，由工作程序管理器沿用既有安全注入的 DATABASE_URL／TLS，不在命令列放入憑證：
+
+```sh
+EXPO_NO_DOTENV=1 NODE_ENV=production \
+DATABASE_APPLICATION_NAME=nuni-281-migrate \
+DATABASE_POOL_MAX=1 \
+DATABASE_CONNECTION_TIMEOUT_MS=5000 \
+DATABASE_STATEMENT_TIMEOUT_MS=60000 \
+DATABASE_QUERY_TIMEOUT_MS=70000 \
+DATABASE_IDLE_IN_TRANSACTION_TIMEOUT_MS=90000 \
+node --import /opt/release/verify-migration-session.mjs apps/api/dist/migrate.js
+# 工作程序管理器須保存真正的退出碼；非 0 不切 API。
+```
+
+此 runner 仍會嘗試載入 `/app/.env`；`EXPO_NO_DOTENV=1` 不會關閉它的 dotenv 呼叫。核驗映像本身不帶 `.env`，工作程序也不得掛入或複製 `.env`，只使用既有安全環境注入。
+
+`verify-migration-session.mjs` 使用本目錄受審查檔案，唯讀掛入工作程序的 `/opt/release/`；它從 `/app/apps/api/dist/migrate.js` 解析映像固定的 pg 套件。在 runner 同一個 client 的 BEGIN 之後、DDL 之前查 `pg_settings`，要求 lock=5000ms、statement=60000ms、idle-in-transaction=90000ms；不符會拋錯並由 runner ROLLBACK。保存 `migration.session_timeouts_verified` 與 `database.migrate.completed`，缺少核驗事件也不得放行。這個檢查器只供上述固定 timeout 演練／發布工作程序使用，不掛入 API。
+
+lock timeout 使用**未與 API 共用的專用 migrator 登入角色**，由 DBA 在啟動工作程序前設定 role/database default。以下 `nuni_migrator`／`nuni_database` 是需替換的識別字，操作走既有安全管理連線：
+
+```sql
+-- 先保存原始 setconfig（只保存 lock_timeout 項，勿輸出其他可能敏感的設定）。
+SELECT option FROM pg_db_role_setting s
+JOIN pg_roles r ON r.oid = s.setrole
+JOIN pg_database d ON d.oid = s.setdatabase
+CROSS JOIN LATERAL unnest(s.setconfig) AS option
+WHERE r.rolname = 'nuni_migrator' AND d.datname = 'nuni_database'
+  AND option LIKE 'lock_timeout=%';
+ALTER ROLE nuni_migrator IN DATABASE nuni_database SET lock_timeout = '5s';
+```
+
+先確認角色沒有其他使用者／工作程序，並記錄原值與還原 SQL。設定只在**新連線**生效，所以之後才建立一次性 runner；不要在另一個 psql session 執行 SET 期待 runner 繼承。runner 的實際 session 核驗事件才是生效證據。不得改 API 共用角色或整個 database default；若無獨立角色，先由維運準備所需最小 migration 權限，未準備好就停止。
+
+不論工作程序成功或失敗，在它完全退出、連線關閉後還原：原先沒有該 role/database lock_timeout 項時執行下面 RESET；有原值時改用保存的 `ALTER ROLE ... SET lock_timeout = '<原值>'`。再查同一筆 catalog 確認與原值相同。移除本次工作程序及唯讀掛載，保存退出碼和安全日誌；不移除既有安全設定或停止 serving 程序。
+
+```sql
+ALTER ROLE nuni_migrator IN DATABASE nuni_database RESET lock_timeout;
+```
+
+本機演練可透過獨立 PostgreSQL role/database 重現以上設定；本機 loopback 無 TLS 僅搭配 `DATABASE_TLS_MODE=disable DATABASE_TRUSTED_SIDECAR=true`，不可抄成正式遠端 DB 設定。詳細結果見本目錄 [VALIDATION.md](VALIDATION.md)，完整 suite 合併數量見 PR #365 發布驗證紀錄。
 
 281 登記後舊 API 重啟會因精確 manifest 不符而失敗；安排單 serving 切換窗口，migration 成功後立即切換，失敗時使用已驗證的相容回滾包。不要先啟動停機台，也不要套歷史 release migration hook。
 
@@ -83,3 +126,7 @@ fly image show -a nuni-api
 重做 live／ready、登入、授權邊界與既有功能驗收，確認 stopped 台仍未啟動。保留 DB 新表、撤回紀錄、附件及冪等資料；不執行 280／281 rollback SQL、不刪 schema_migrations、不移除 278／279 triggers。兩個映像目前尚未建置，沒有可填寫的已驗證 digest。
 
 發布記錄及必要證據移出暫存後，只清理本次 `/tmp/nuniapifix`；不要清其他工作目錄、停止別人的程序。磁碟低於 3GB 即停止並記錄進度。
+
+## 6. 安全依賴另案追蹤
+
+既有 P1 尚未技術性解除；本 PR 不升級依賴、不修改 lockfile 或 Dockerfile。追蹤基準為 `docs/security/2026-10-24-remediation.md` 及 `deploy/nuni-api/security/source.json`，由 Miiduoa 在後續安全修補 PR 引用本 PR #365，列出各套件／Node 基底的修正版本、固定來源與 digest、掃描結果、完整 API 回歸及 281 manifest／撤回過濾的整合證據。後續 PR 連結、負責人、預計日期與未修風險處置必須登錄於 #365 發布紀錄；未有連結／日期不得宣稱追蹤或修補已結案。發布前由負責人明確記錄先發布本候選的風險決定；本機驗證通過不代表安全 P1 已關閉。
