@@ -28,27 +28,30 @@ export function ClubBoard({
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
   const current = useRef(false);
+  const requestId = useRef(0);
   const lock = useRef(false);
   const creationId = useRef<string | null>(null);
   const form = useRef<HTMLFormElement>(null);
   useEffect(() => {
-    let active = true;
     current.current = true;
+    const id = ++requestId.current;
     loadClubView(uid, schoolId, groupId).then(
       (data) => {
-        if (active) setView(data);
+        if (current.current && id === requestId.current) setView(data);
       },
       (reason: Error) => {
-        if (active) setError(reason.message);
+        if (current.current && id === requestId.current) setError(reason.message);
       },
     );
     return () => {
-      active = false;
+      ++requestId.current;
       current.current = false;
     };
   }, [uid, schoolId, groupId]);
   async function perform(input: Record<string, unknown>, exported = false) {
     if (lock.current) return;
+    const id = ++requestId.current;
+    const isLatest = () => current.current && id === requestId.current;
     lock.current = true;
     setBusy(true);
     setError('');
@@ -58,7 +61,7 @@ export function ClubBoard({
         input.action === 'read'
           ? ((await loadClubView(uid, schoolId, groupId)) as ClubView & { csv?: string })
           : await callClub<ClubView & { csv?: string }>(uid, schoolId, groupId, input);
-      if (!current.current) return;
+      if (!isLatest()) return;
       if (exported && result.csv) {
         const url = URL.createObjectURL(new Blob([result.csv], { type: 'text/csv;charset=utf-8' }));
         const anchor = document.createElement('a');
@@ -71,18 +74,20 @@ export function ClubBoard({
         input.action === 'read' || exported
           ? result
           : await callClub<ClubView>(uid, schoolId, groupId);
-      if (current.current) {
+      if (isLatest()) {
         setView(data);
         setNotice(data.rosterOnly ? '已重新讀取社員名單' : '已由伺服器確認');
       }
     } catch (reason) {
-      if (current.current) {
+      if (isLatest()) {
         setView(null);
         setError(reason instanceof Error ? reason.message : '尚未確認，請重新整理');
       }
     } finally {
-      lock.current = false;
-      if (current.current) setBusy(false);
+      if (isLatest()) {
+        lock.current = false;
+        setBusy(false);
+      }
     }
   }
   function create(event: FormEvent<HTMLFormElement>) {
