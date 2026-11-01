@@ -327,3 +327,18 @@ it('marks a partially loaded recommendation as incomplete rather than a full stu
   const focus = await screen.findByRole('region', { name: '今日優先課業' });
   expect(focus.textContent).toContain('部分課程資料尚未完整');
 });
+
+it('exports loaded tasks beyond the visible list and clears export choices after refreshing', async () => {
+  state.load.mockResolvedValue(agenda(Array.from({ length: 9 }, (_, index) => task(index + 1))));
+  render(<Harness />);
+  fireEvent.click(await screen.findByRole('button', { name: '匯出未繳期限 ICS' }));
+  expect(screen.getAllByRole('checkbox')).toHaveLength(9);
+  fireEvent.click(screen.getAllByRole('checkbox')[8]);
+  fireEvent.click(screen.getByRole('button', { name: '預覽已選 1 項' }));
+  expect(screen.getByLabelText('期限匯出預覽').textContent).toContain('學習任務 9');
+  fireEvent.click(screen.getByRole('button', { name: '更新待辦資料' }));
+  await waitFor(() => expect(state.load).toHaveBeenCalledTimes(2));
+  fireEvent.click(await screen.findByRole('button', { name: '匯出未繳期限 ICS' }));
+  expect(screen.getByRole('button', { name: '預覽已選 0 項' }).hasAttribute('disabled')).toBe(true);
+  expect(screen.queryByRole('button', { name: '下載 ICS' })).toBeNull();
+});
