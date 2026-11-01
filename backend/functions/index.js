@@ -5786,3 +5786,7 @@ exports.onCafeteriaStorefrontPostCreated = onDocumentCreated(
 );
 
 console.log('Firebase Cloud Functions loaded successfully');
+
+exports.clubAdmin = onCall({ region: REGION }, require('./clubAdmin').createClubAdmin({ db }));
+
+exports.clubRoster = onCall({ region: REGION }, require('./clubRoster').createClubRoster({ db }));
