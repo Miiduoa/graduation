@@ -3243,6 +3243,16 @@ async function callCampusAssistant(
       ...(runIdFromEnvelope ? { campusAssistantRunId: runIdFromEnvelope } : {}),
     };
   } catch (e: any) {
+    if (
+      e?.code === 'functions/failed-precondition' &&
+      e?.details?.reason === 'cloud-consent-required'
+    ) {
+      return {
+        content: '',
+        error:
+          '請先在網頁校園助理確認這次要傳送的公開地點資料；手機版目前尚未提供此確認流程。',
+      };
+    }
     console.warn('[AI] askCampusAssistant failed, falling back:', e?.code ?? e?.message ?? e);
     return null;
   }
