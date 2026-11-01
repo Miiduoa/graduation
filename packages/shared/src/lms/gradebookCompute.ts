@@ -5,7 +5,7 @@
  *  - 純函式，無 I/O 依賴
  *  - 支援多項作業 / 測驗 / 期中 / 期末加權
  *  - weight 自動正規化到 100%（若教師輸入總和 ≠ 100，依比例縮放，不報錯）
- *  - 未繳交 / 0 分缺考視為 0 分但計入計算
+ *  - 待評與未取得保留未知；明確給定的 0 分才計入計算
  *  - 教師可以選擇「免修」（excused）→ 排除該項，重新計算其他加權
  *  - 通過門檻可設（預設 60）
  *  - 回傳每個學生的 finalScore、是否通過、是否發布
@@ -65,7 +65,7 @@ export interface StudentGradebookRow {
     weight: number;
     normalizedWeight: number;
     score: number | null;
-    contribution: number;
+    contribution: number | null;
     excused: boolean;
     isLate: boolean;
   }>;
@@ -116,7 +116,6 @@ export function computeGradebook(
   const publishedAt = published ? options.publishedAt ?? new Date().toISOString() : null;
 
   const normalizedItems = normalizeItemWeights(items);
-  const itemById = new Map(normalizedItems.map((it) => [it.id, it]));
 
   const rows: StudentGradebookRow[] = students.map((stu) => {
     // 過濾出該學生未 excused 的項目，重新分配剩餘權重
@@ -129,18 +128,22 @@ export function computeGradebook(
 
     let earnedTotal = 0;
     let gradedCount = 0;
+    let complete = nonExcusedItems.some((it) => it.normalizedWeight > 0);
     const breakdown = normalizedItems.map((it) => {
       const s = stu.scores.find((x) => x.gradeItemId === it.id);
       const excused = !!s?.excused;
       const isLate = !!s?.isLate;
       const maxScore = it.maxScore ?? 100;
-      const score = s?.score ?? null;
+      const score = typeof s?.score === 'number' && Number.isFinite(s.score) ? s.score : null;
       const normalizedWeight = excused ? 0 : it.normalizedWeight * scale;
       let contribution = 0;
-      if (!excused && score !== null && Number.isFinite(score) && maxScore > 0) {
+      if (!excused && score !== null && Number.isFinite(score) && Number.isFinite(maxScore) && maxScore > 0) {
         contribution = (clamp(score, 0, maxScore) / maxScore) * normalizedWeight;
         earnedTotal += contribution;
         gradedCount += 1;
+      }
+      if (normalizedWeight > 0 && (score === null || !Number.isFinite(maxScore) || maxScore <= 0)) {
+        complete = false;
       }
       return {
         gradeItemId: it.id,
@@ -148,13 +151,14 @@ export function computeGradebook(
         weight: it.weight,
         normalizedWeight: Math.round(normalizedWeight * 100) / 100,
         score,
-        contribution: Math.round(contribution * 100) / 100,
+        contribution: !excused && (score === null || !Number.isFinite(maxScore) || maxScore <= 0)
+          ? null : Math.round(contribution * 100) / 100,
         excused,
         isLate,
       };
     });
 
-    const finalScore = gradedCount > 0 ? Math.round(earnedTotal * 100) / 100 : null;
+    const finalScore = complete ? Math.round(earnedTotal * 100) / 100 : null;
     const passed = finalScore !== null && finalScore >= passingScore;
     return {
       uid: stu.uid,
@@ -175,7 +179,7 @@ export function computeGradebook(
   const classAverage =
     scored.length > 0 ? Math.round((scored.reduce((a, b) => a + b, 0) / scored.length) * 100) / 100 : null;
   const passCount = rows.filter((r) => r.passed).length;
-  const passRate = rows.length > 0 ? Math.round((passCount / rows.length) * 10000) / 100 : null;
+  const passRate = scored.length > 0 ? Math.round((passCount / scored.length) * 10000) / 100 : null;
 
   return {
     items: normalizedItems.map((it) => ({
@@ -198,9 +202,9 @@ export function quizAttemptToStudentScore(
 ): StudentScore {
   // 將 quiz 得分換算成 100 分制
   const score =
-    attempt.totalPoints > 0
+    Number.isFinite(attempt.totalPoints) && Number.isFinite(attempt.earnedPoints) && attempt.totalPoints > 0
       ? Math.round((attempt.earnedPoints / attempt.totalPoints) * 10000) / 100
-      : 0;
+      : null;
   return {
     gradeItemId,
     score,

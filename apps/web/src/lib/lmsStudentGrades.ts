@@ -104,8 +104,6 @@ export function gradeOwnerForSource(
 ): string {
   if (source === 'nuni' && nuniAccountId) return gradeReadOwner('nuni', nuniAccountId);
   if (source === 'school' && schoolUid) return gradeReadOwner('school', schoolUid);
-  if (nuniAccountId) return gradeReadOwner('nuni', nuniAccountId);
-  if (schoolUid) return gradeReadOwner('school', schoolUid);
   return '';
 }
 
