@@ -72,9 +72,6 @@ export function CreditPlanScenarios({ plan, scenarioWriter, scenarioBlocked }: {
     <div className={styles.body}>
       <p className={styles.note}>比較以這裡已加入規劃的課程為準，不包含尚未按「加入規劃」的課程表單。已選課狀態也由你手動標示，所有結果仍是假設通過且可採計。</p>
       {!validPlan ? <p className={styles.warning}>請先修正原規劃的無效欄位，再開始比較。</p> : null}
-        <CreditScenarioAdoptionActions plan={plan} candidate={comparison?.plan ?? null}
-          writer={scenarioWriter} blocked={scenarioBlocked}
-          onApplied={() => { setScenario(null); setNotice(null); }} />
       {!plan.courses.length ? <p className={styles.empty}>先在課程清單加入一門課，就能比較不同修法。</p> : <>
         <div className={styles.actions}>
           <button type="button" disabled={!validPlan} onClick={() => begin('all')}>以全部課程開始比較</button>
@@ -107,6 +104,12 @@ export function CreditPlanScenarios({ plan, scenarioWriter, scenarioBlocked }: {
             </section>
           </div>
           <p className={styles.note}>表格單位為學分。達標學期只計已排入學期的課程，不把「其他預計學分」放進某學期。25 學分只是負擔提醒，不是學校上限；總量達標不代表畢業。</p>
+        </> : null}
+      </>}
+      <CreditScenarioAdoptionActions plan={plan} candidate={comparison?.plan ?? null}
+        writer={scenarioWriter} blocked={scenarioBlocked}
+        onApplied={() => { setScenario(null); setNotice(null); }} />
+      {comparison ? <>
           <div className={styles.filters}>
             <label>搜尋比較課程<input type="search" value={query} maxLength={80} onChange={(event) => { setQuery(event.target.value); setLimit(12); }} placeholder="輸入課程名稱" /></label>
             <label>原安排學期<select value={term ?? 'all'} onChange={(event) => { setTerm(event.target.value === 'all' ? null : Number(event.target.value)); setLimit(12); }}>
@@ -130,7 +133,6 @@ export function CreditPlanScenarios({ plan, scenarioWriter, scenarioBlocked }: {
             <button type="button" disabled={!comparison.changed} onClick={exportScenario}>匯出此比較方案 JSON</button>
           </div>
         </> : null}
-      </>}
       {notice?.source === plan ? <p className={styles.note} aria-live="polite">{notice.text}</p> : null}
     </div>
   </details>;

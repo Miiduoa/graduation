@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { Pressable, Text, View } from 'react-native';
 import type { CreditPlan } from '@campus/shared/src/creditPlanner';
 import {
@@ -31,7 +31,7 @@ export function CreditScenarioAdoptionActions({ plan, candidate, writer, blocked
   const lock = useRef(false);
   const live = useRef(true);
   const latest = useRef({ plan, candidate, blocked, writer });
-  latest.current = { plan, candidate, blocked, writer };
+  useLayoutEffect(() => { latest.current = { plan, candidate, blocked, writer }; }, [plan, candidate, blocked, writer]);
   useEffect(() => { live.current = true; return () => { live.current = false; }; }, []);
   useEffect(() => {
     if (receipt && plan !== receipt.applied) setReceipt(null);

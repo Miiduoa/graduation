@@ -73,13 +73,13 @@ test('cancel keeps the original and pending course input blocks the next adoptio
 test('CAS refuses another screen update between preview and confirmation', async () => {
   const view = await setup(); preview(view); const newer = { ...sample(), target: '140' }; mockData.set(key(), JSON.stringify(newer));
   fireEvent.press(view.getByLabelText('確認採用到個人規劃'));
-  await view.findByText('尚未完成儲存，請確認輸入與本機狀態後重試。');
+  await view.findByText('原規劃已變更或無法讀取，請重新讀取並核對；沒有覆寫現有資料。');
   expect(set).not.toHaveBeenCalled(); expect(JSON.parse(mockData.get(key())!)).toEqual(newer);
 });
 test('disk failure preserves the preview and retry works without duplicating courses', async () => {
   const view = await setup(); preview(view); set.mockRejectedValueOnce(new Error('disk full'));
   fireEvent.press(view.getByLabelText('確認採用到個人規劃'));
-  await view.findByText('尚未完成儲存，請確認輸入與本機狀態後重試。');
+  await view.findByText('disk full');
   expect(JSON.parse(mockData.get(key())!)).toEqual(sample());
   fireEvent.press(view.getByLabelText('確認採用到個人規劃')); await view.findByText('已採用到這台裝置的個人規劃。');
   expect(JSON.parse(mockData.get(key())!).courses).toHaveLength(1);
@@ -126,6 +126,6 @@ test('a late native input received while waiting for storage prevents adopting o
   await waitFor(() => expect(get).toHaveBeenCalledTimes(2));
   act(() => onChange('晚到的輸入'));
   await act(async () => pending.resolve(JSON.stringify(sample())));
-  await view.findByText('尚未完成儲存，請確認輸入與本機狀態後重試。');
+  await view.findByText('這次核對已失效，未更新規劃。');
   expect(set).not.toHaveBeenCalled(); expect(view.getByLabelText('課程名稱').props.value).toBe('晚到的輸入');
 });

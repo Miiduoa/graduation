@@ -450,7 +450,9 @@ function Workspace({ scopeKey, schoolName, guest, navigation }: {
       </View>
       <CreditPlanFeasibilityCard plan={plan} scenarioWriter={commitScenario}
         scenarioBlocked={busy ? '正在儲存或處理備份，請完成後再採用方案。'
-          : dirtySections.length ? '請先儲存或取消尚未儲存的輸入，再採用或復原方案。' : undefined} />
+          : dirtySections.length
+            ? `請先儲存或取消尚未儲存的輸入（${dirtySections.join('、')}），再採用或復原方案。`
+            : undefined} />
       <Heading title="設定學分目標" subtitle="只填學校已確認採計的學分；未來課程請安排在下方。" />
       <Card>
         <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 12 }}>

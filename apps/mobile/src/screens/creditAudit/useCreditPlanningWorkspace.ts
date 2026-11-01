@@ -75,9 +75,12 @@ export function useCreditPlanningWorkspace(scopeKey: string) {
       setState({ phase: 'ready', plan: next, ticket: savedTicket, notice, error: '' });
       return { plan: next, ticket: savedTicket };
     } catch (error) {
+      const message = error instanceof Error ? error.message : '無法存到這台裝置，原規劃沒有被取代。';
       if (session.finish(ticket, false)) {
-        Alert.alert('規劃未儲存', error instanceof Error ? error.message : '無法存到這台裝置，原規劃沒有被取代。');
+        Alert.alert('規劃未儲存', message);
       }
+      // 方案採用需把具體原因交回同頁文案，避免只剩泛用重試句。
+      if (comparison) throw error instanceof Error ? error : new Error(message);
       return null;
     } finally {
       if (session.isLive(ticket)) setSaving(false);

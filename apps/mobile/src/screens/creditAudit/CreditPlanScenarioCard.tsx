@@ -97,9 +97,6 @@ export function CreditPlanScenarioCard({ plan, scenarioWriter, scenarioBlocked }
       <Text style={{ color: c.text, fontSize: 18, fontWeight: '700' }}>換個修法，先看差多少 {expanded ? '−' : '＋'}</Text>
       <Text style={{ color: c.muted, fontSize: 12, lineHeight: 19 }}>不修、延後或只修已選課；先比較，不直接更動原規劃。</Text>
     </Pressable>
-        <CreditScenarioAdoptionActions plan={plan} candidate={comparison?.plan ?? null}
-          writer={scenarioWriter} visible={expanded} blocked={exporting ? '請先完成分享，再採用方案。' : scenarioBlocked}
-          onApplied={() => { setDraft(null); setEditing(null); }} />
     {expanded ? <View style={{ paddingHorizontal: 16, paddingBottom: 18, gap: 14 }}>
       <Text style={{ color: c.muted, fontSize: 12, lineHeight: 19 }}>只比較已儲存的課程，不含表單未儲存的輸入。已選課狀態由你手動設定，仍假設未來通過且可採計。</Text>
       {!validPlan ? <Text style={{ color: c.text }}>請先修正原規劃的無效欄位，再開始比較。</Text> : null}
@@ -136,41 +133,49 @@ export function CreditPlanScenarioCard({ plan, scenarioWriter, scenarioBlocked }
             <Text style={{ color: c.muted }}>{row.label}</Text><Text style={{ color: c.text }}>{number(row.before)} → {number(row.after)}</Text>
           </View>)}
           <Text style={{ color: c.muted, fontSize: 11, lineHeight: 19 }}>達標學期只計已排入學期的課程，不把其他預計學分放進某學期。總量達標不等於畢業，也不保證實際開課與先修條件。</Text>
-          <TextInput accessibilityLabel="搜尋比較課程" placeholder="搜尋課程名稱" placeholderTextColor={c.muted}
-            value={query} maxLength={80} onChangeText={(value) => { setQuery(value); setLimit(12); }}
-            style={{ minHeight: 44, borderWidth: 1, borderColor: c.border, borderRadius: 10, paddingHorizontal: 12, color: c.text }} />
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 6 }}>
-            <Action title="全部原安排學期" selected={term === null} onPress={() => { setTerm(null); setLimit(12); }} />
-            {comparison.before.perTerm.map((row) => <Action key={row.term} title={`原第 ${row.term} 學期`} selected={term === row.term}
-              onPress={() => { setTerm(row.term); setLimit(12); }} />)}
-          </ScrollView>
-          <Text style={{ color: c.muted, fontSize: 11 }}>顯示 {Math.min(limit, rows.length)}／{rows.length} 門；篩選不影響整份方案計算。</Text>
-          {rows.slice(0, limit).map((course) => {
-            const choice = draft!.value.choices.find((item) => item.courseId === course.id)!;
-            return <View key={course.id} style={{ borderWidth: 1, borderColor: c.border, borderRadius: 12, padding: 12, gap: 9 }}>
-              <Text style={{ color: c.text, fontWeight: '700' }}>{course.name}</Text>
-              <Text style={{ color: c.muted, fontSize: 12 }}>原第 {course.term} 學期 · {formatCredits(course.credits)} 學分 · {course.status === 'registered' ? '已選課（未取得）' : '候選'}</Text>
-              <Text style={{ color: c.text, fontSize: 12 }}>比較安排：{choice.term === null ? '此方案不排入' : `第 ${choice.term} 學期`}</Text>
-              <Action title={`調整${course.name}（原第 ${course.term} 學期）`} disabled={exporting} selected={editing === course.id}
-                onPress={() => setEditing((id) => id === course.id ? null : course.id)} />
-              {editing === course.id ? <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6 }}>
-                <Action title="此方案不排入" selected={choice.term === null} disabled={exporting} onPress={() => choose(course.id, null)} />
-                {Array.from({ length: 8 }, (_, index) => index + 1).map((value) => <Action key={value}
-                  title={`改排第 ${value} 學期`} selected={choice.term === value} disabled={exporting} onPress={() => choose(course.id, value)} />)}
-              </View> : null}
-            </View>;
-          })}
-          {!rows.length ? <Text style={{ color: c.muted }}>沒有符合篩選的課程；比較仍包含整份方案。</Text> : null}
-          {rows.length > limit ? <Action title="顯示更多比較課程" onPress={() => setLimit((value) => value + 12)} /> : null}
-          {comparison.afterInsights.possibleRetakes.length ? <Text style={{ color: c.text, lineHeight: 20 }}>此方案有同名課程，可能重複採計，請向系辦核對。</Text> : null}
-          {comparison.afterInsights.workloadCautions.length ? <Text style={{ color: c.text, lineHeight: 20 }}>部分學期超過 25 學分，請核對個人負擔與學校上限；25 只是提醒，不是正式規定。</Text> : null}
-          <View style={{ backgroundColor: c.surface2, borderRadius: 12, padding: 14, gap: 10 }}>
-            <Text style={{ color: c.text, fontWeight: '700' }}>原規劃仍完整保留</Text>
-            <Text style={{ color: c.muted, fontSize: 12, lineHeight: 20 }}>比較不會退選或修改校方紀錄。可直接預覽並採用；跨裝置移轉仍可分享 JSON。請另外保留原規劃備份。分享完成後仍需自行核對是否確實保存。</Text>
-            <Action title={exporting ? '正在處理比較備份…' : '匯出此比較方案 JSON'} disabled={!comparison.changed || exporting} onPress={() => void exportScenario()} />
-          </View>
         </> : null}
       </>}
+    </View> : null}
+    {/* 維持掛載以保留收合後的復原收據；視覺上放在比較摘要之後。 */}
+    <View style={expanded ? { paddingHorizontal: 16, paddingBottom: comparison ? 0 : 18, gap: 14 } : undefined}>
+      <CreditScenarioAdoptionActions plan={plan} candidate={comparison?.plan ?? null}
+        writer={scenarioWriter} visible={expanded} blocked={exporting ? '請先完成分享，再採用方案。' : scenarioBlocked}
+        onApplied={() => { setDraft(null); setEditing(null); }} />
+    </View>
+    {expanded && comparison ? <View style={{ paddingHorizontal: 16, paddingBottom: 18, gap: 14 }}>
+      <TextInput accessibilityLabel="搜尋比較課程" placeholder="搜尋課程名稱" placeholderTextColor={c.muted}
+        value={query} maxLength={80} onChangeText={(value) => { setQuery(value); setLimit(12); }}
+        style={{ minHeight: 44, borderWidth: 1, borderColor: c.border, borderRadius: 10, paddingHorizontal: 12, color: c.text }} />
+      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 6 }}>
+        <Action title="全部原安排學期" selected={term === null} onPress={() => { setTerm(null); setLimit(12); }} />
+        {comparison.before.perTerm.map((row) => <Action key={row.term} title={`原第 ${row.term} 學期`} selected={term === row.term}
+          onPress={() => { setTerm(row.term); setLimit(12); }} />)}
+      </ScrollView>
+      <Text style={{ color: c.muted, fontSize: 11 }}>顯示 {Math.min(limit, rows.length)}／{rows.length} 門；篩選不影響整份方案計算。</Text>
+      {rows.slice(0, limit).map((course) => {
+        const choice = draft!.value.choices.find((item) => item.courseId === course.id)!;
+        return <View key={course.id} style={{ borderWidth: 1, borderColor: c.border, borderRadius: 12, padding: 12, gap: 9 }}>
+          <Text style={{ color: c.text, fontWeight: '700' }}>{course.name}</Text>
+          <Text style={{ color: c.muted, fontSize: 12 }}>原第 {course.term} 學期 · {formatCredits(course.credits)} 學分 · {course.status === 'registered' ? '已選課（未取得）' : '候選'}</Text>
+          <Text style={{ color: c.text, fontSize: 12 }}>比較安排：{choice.term === null ? '此方案不排入' : `第 ${choice.term} 學期`}</Text>
+          <Action title={`調整${course.name}（原第 ${course.term} 學期）`} disabled={exporting} selected={editing === course.id}
+            onPress={() => setEditing((id) => id === course.id ? null : course.id)} />
+          {editing === course.id ? <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6 }}>
+            <Action title="此方案不排入" selected={choice.term === null} disabled={exporting} onPress={() => choose(course.id, null)} />
+            {Array.from({ length: 8 }, (_, index) => index + 1).map((value) => <Action key={value}
+              title={`改排第 ${value} 學期`} selected={choice.term === value} disabled={exporting} onPress={() => choose(course.id, value)} />)}
+          </View> : null}
+        </View>;
+      })}
+      {!rows.length ? <Text style={{ color: c.muted }}>沒有符合篩選的課程；比較仍包含整份方案。</Text> : null}
+      {rows.length > limit ? <Action title="顯示更多比較課程" onPress={() => setLimit((value) => value + 12)} /> : null}
+      {comparison.afterInsights.possibleRetakes.length ? <Text style={{ color: c.text, lineHeight: 20 }}>此方案有同名課程，可能重複採計，請向系辦核對。</Text> : null}
+      {comparison.afterInsights.workloadCautions.length ? <Text style={{ color: c.text, lineHeight: 20 }}>部分學期超過 25 學分，請核對個人負擔與學校上限；25 只是提醒，不是正式規定。</Text> : null}
+      <View style={{ backgroundColor: c.surface2, borderRadius: 12, padding: 14, gap: 10 }}>
+        <Text style={{ color: c.text, fontWeight: '700' }}>原規劃仍完整保留</Text>
+        <Text style={{ color: c.muted, fontSize: 12, lineHeight: 20 }}>比較不會退選或修改校方紀錄。可直接預覽並採用；跨裝置移轉仍可分享 JSON。請另外保留原規劃備份。分享完成後仍需自行核對是否確實保存。</Text>
+        <Action title={exporting ? '正在處理比較備份…' : '匯出此比較方案 JSON'} disabled={!comparison.changed || exporting} onPress={() => void exportScenario()} />
+      </View>
     </View> : null}
   </View>;
 }
