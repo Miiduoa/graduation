@@ -36,6 +36,7 @@ function ClubSummaryContent({
   const [error, setError] = useState('');
   const [revision, setRevision] = useState(0);
   const [busy, setBusy] = useState(false);
+  const [uncertain, setUncertain] = useState(false);
   useEffect(() => {
     let active = true;
     setData(null);
@@ -54,7 +55,7 @@ function ClubSummaryContent({
   }, [uid, schoolId, groupId, revision]);
   if (!clubSummaryEnabled()) return null;
   return (
-    <Card title="社團後台" subtitle="可在這裡報名或取消；簽到與管理請使用網頁版">
+    <Card title="社團活動" subtitle="可在這裡報名或取消；簽到與管理請使用網頁版">
       {error ? (
         <Text accessibilityRole="alert">{error}</Text>
       ) : !data ? (
@@ -79,6 +80,11 @@ function ClubSummaryContent({
               schoolId={schoolId}
               groupId={groupId}
               onBusy={setBusy}
+              onUncertain={() => setUncertain(true)}
+              onDenied={() => {
+                setData(null);
+                setError('社團資格已失效或登入已過期，請返回上一頁確認資格後再開啟。');
+              }}
               busy={busy}
             />
           ))}
@@ -86,7 +92,7 @@ function ClubSummaryContent({
       )}
       <Button
         text="重新整理社團資料"
-        disabled={busy}
+        disabled={busy || uncertain}
         onPress={() => setRevision((value) => value + 1)}
       />
     </Card>
@@ -99,16 +105,23 @@ function ClubEvent({
   schoolId,
   groupId,
   onBusy,
+  onUncertain,
+  onDenied,
   busy,
 }: Scope & {
   event: ClubSummaryData['events'][number];
   onBusy: (busy: boolean) => void;
+  onUncertain: () => void;
+  onDenied: () => void;
   busy: boolean;
 }) {
   const [current, setCurrent] = useState(event);
-  const [stage, setStage] = useState<'idle' | 'confirm' | 'busy' | 'unknown' | 'done'>('idle');
+  const [stage, setStage] = useState<'idle' | 'confirm' | 'busy' | 'unknown' | 'rejected' | 'done'>(
+    'idle',
+  );
   const [message, setMessage] = useState('');
   const lock = useRef(false);
+  const writeConfirmed = useRef(false);
   const alive = useRef(true);
   useEffect(() => {
     alive.current = true;
@@ -129,7 +142,8 @@ function ClubEvent({
     setStage('busy');
     setMessage('');
     try {
-      if (!readOnly)
+      if (!readOnly) {
+        writeConfirmed.current = false;
         await callClubRegistration(
           uid,
           schoolId,
@@ -137,15 +151,43 @@ function ClubEvent({
           current.mine ? 'cancel' : 'register',
           event.id,
         );
+        writeConfirmed.current = true;
+      }
       const result = await callClubRegistration(uid, schoolId, groupId, 'read');
       const fresh = result.events.find((row) => row.id === event.id);
       if (!fresh || typeof fresh.mine !== 'boolean') throw new Error('活動狀態無法確認');
       if (!alive.current) return;
       setCurrent(fresh);
-      setMessage(fresh.mine ? '已報名，活動資訊就在下方。' : '目前未報名此活動。');
-      setStage('done');
-    } catch {
+      if (writeConfirmed.current) {
+        setMessage(fresh.mine ? '已報名，活動資訊就在下方。' : '目前未報名此活動。');
+        setStage('done');
+      } else {
+        setMessage(
+          `伺服器當下查詢：${fresh.mine ? '已報名' : '未報名'}。原操作可能仍在處理，結果尚未確定；請稍後再讀取確認，暫不開放再次操作。`,
+        );
+        setStage('unknown');
+      }
+    } catch (error) {
       if (alive.current) {
+        const code = (error as { code?: string }).code?.replace(/^functions\//, '');
+        if (code === 'permission-denied' || code === 'unauthenticated') {
+          onDenied();
+          return;
+        }
+        if (
+          !readOnly &&
+          !writeConfirmed.current &&
+          (code === 'not-found' || code === 'failed-precondition')
+        ) {
+          setMessage(
+            code === 'not-found'
+              ? '活動或社員資格已不存在，請返回上一頁確認。'
+              : '活動已開始、已簽到或目前不允許變更報名，請返回上一頁確認活動資訊。',
+          );
+          setStage('rejected');
+          return;
+        }
+        if (!writeConfirmed.current) onUncertain();
         setMessage(
           '還無法確認報名結果。請連線後重新讀取，確認前先不要重送。若社團資格已異動，請洽幹部。',
         );
@@ -187,6 +229,8 @@ function ClubEvent({
         </>
       ) : stage === 'unknown' ? (
         <Button text="重新讀取報名狀態" disabled={busy} onPress={() => run(true)} />
+      ) : stage === 'rejected' ? (
+        <Text>本次操作已被伺服器拒絕。</Text>
       ) : stage === 'busy' ? (
         <Button text="正在確認報名狀態…" loading disabled />
       ) : stage === 'done' ? (
