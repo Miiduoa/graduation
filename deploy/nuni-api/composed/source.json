@@ -97,11 +97,11 @@
     },
     {
       "source": "deploy/nuni-api/assignment-files/0001-authoritative-withdrawal-reads.patch",
-      "sha256": "006e9112ea2ef17b6bc22f083e14b413a9c0ecbd9c5749f40228c5f0f6ad48f6"
+      "sha256": "b1b7b72c863236b327997921380c4d99ca6c48d8990da43a29714fca110a7648"
     }
   ],
   "overlayTree": "cf8babcbbb5551446999944817f56c08cefc5caa",
   "patchedAppSha256": "ebab4626e20f64204db95528e2cd2819c6270c0d2f0efa6f440aaac9f71a5636",
   "runtimeInventoryScope": "Pinned base analysis only; not a composed API grant receipt",
-  "candidateTree": "ca7fc93bc5aab76696b1371c8da3aefe2f18533b"
+  "candidateTree": "4c7919d6cff32789acb06e2b9f4edb180cdad3a1"
 }

@@ -43,7 +43,7 @@ class ComposedPrepareTests(unittest.TestCase):
             },
             {
                 'source': 'deploy/nuni-api/assignment-files/0001-authoritative-withdrawal-reads.patch',
-                'sha256': '006e9112ea2ef17b6bc22f083e14b413a9c0ecbd9c5749f40228c5f0f6ad48f6',
+                'sha256': 'b1b7b72c863236b327997921380c4d99ca6c48d8990da43a29714fca110a7648',
             },
         ])
         self.assertEqual(
@@ -66,13 +66,31 @@ class ComposedPrepareTests(unittest.TestCase):
             self.assertEqual(list(Path(directory).iterdir()), [])
             command.assert_not_called()
 
+    def test_281_patch_and_rollback_share_runner_owned_transaction_sql(self):
+        source = 'deploy/nuni-api/assignment-files/281_assignment_submission_withdrawals.sql'
+        sql = (ROOT / source).read_text()
+        patch_text = (prepare.API / 'assignment-files/0001-authoritative-withdrawal-reads.patch').read_text()
+        section = patch_text.split('+++ b/apps/api/src/migrations/281_assignment_submission_withdrawals.sql\n', 1)[1]
+        patch_sql = ''.join(line[1:] + '\n' for line in section.splitlines() if line.startswith('+'))
+        self.assertEqual(sql, patch_sql)
+        for line in sql.splitlines():
+            self.assertNotIn(line.strip().upper(), ['BEGIN;', 'COMMIT;', 'ROLLBACK;'])
+        rollback = json.loads((prepare.HERE / 'rollback-source.json').read_text())
+        self.assertEqual(hashlib.sha256(sql.encode()).hexdigest(), rollback['migrations'][source])
+        # Existing registered SQL is immutable across this release.
+        self.assertEqual(rollback['migrations']['deploy/nuni-api/course-access/278_course_access_review.sql'],
+                         'c382b69b63e10dff4cbe1a8f1b34b0980ed9a85b2d0aea402cb25bc81b91e103')
+        self.assertEqual(rollback['migrations']['deploy/nuni-api/personal-import-sync/279_personal_import_sync.sql'],
+                         '0d825aa890c240ae4a0f496116d4507b3e014878402642bd54bed2046a44118c')
+
     def test_rollback_preserves_immutable_production_image_and_only_adds_sql(self):
         manifest = json.loads((prepare.HERE / 'rollback-source.json').read_text())
         text = (prepare.HERE / 'Dockerfile.rollback').read_text()
-        self.assertIn('@sha256:', manifest['baseImage'])
+        self.assertEqual(manifest['baseImage'], 'registry.fly.io/nuni-api@sha256:be815455fbb2ccce844b69f004e416e44465e3421f9da654d0cd5db8379c3dc2')
+        self.assertEqual(manifest['baseRevision'], 'b0a10ac814cd03fbfb45132566035acce8339f17')
         self.assertIn('FROM ' + manifest['baseImage'] + '\n', text)
         self.assertNotIn('RUN ', text)
-        self.assertEqual(len(manifest['migrations']), 2)
+        self.assertEqual(len(manifest['migrations']), 3)
         for source, checksum in manifest['migrations'].items():
             self.assertEqual(hashlib.sha256((ROOT / source).read_bytes()).hexdigest(), checksum)
             self.assertIn(f'COPY {source} /app/apps/api/dist/migrations/{Path(source).name}', text)
