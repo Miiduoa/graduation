@@ -1,6 +1,11 @@
 import React, { useEffect, useState } from 'react';
 import { Text } from 'react-native';
-import { loadClubSummary, clubSummaryEnabled, type ClubSummaryData } from '../services/clubSummary';
+import {
+  loadClubSummary,
+  clubSummaryEnabled,
+  clubRoleLabel,
+  type ClubSummaryData,
+} from '../services/clubSummary';
 import { Button, Card } from '../ui/components';
 export { clubSummaryEnabled } from '../services/clubSummary';
 export function ClubSummary({
@@ -41,14 +46,15 @@ export function ClubSummary({
       ) : (
         <>
           <Text>
-            社員 {data.members.length} 位 · 活動 {data.events.length} 場
+            社員 {data.members.length} 位{!data.rosterOnly && ` · 活動 ${data.events.length} 場`}
           </Text>
           {data.members.map((m) => (
             <Text key={m.id}>
-              {m.name} · {m.role}
+              {m.name} · {clubRoleLabel(m.role)}
             </Text>
           ))}
-          {data.events.length === 0 && <Text>尚無活動</Text>}
+          {data.rosterOnly && <Text>活動資料暫時無法取得</Text>}
+          {!data.rosterOnly && data.events.length === 0 && <Text>尚無活動</Text>}
           {data.events.map((e) => (
             <Text key={e.id}>
               {e.title} · {new Date(e.startsAt).toLocaleString('zh-TW')} · 報名 {e.registered} 人 ·

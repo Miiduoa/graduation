@@ -97,3 +97,8 @@ export async function loadClubView(
     return { success: true, rosterOnly: true, role: 'member', members, events: [] };
   }
 }
+
+export const clubRoleLabel = (role: string) =>
+  ({ owner: '會長', admin: '幹部', member: '社員', instructor: '指導老師', moderator: '協管員' })[
+    role
+  ] ?? (['會長', '幹部', '社員', '指導老師', '協管員'].includes(role) ? role : '社員');

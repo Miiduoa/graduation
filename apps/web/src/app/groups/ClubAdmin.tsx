@@ -1,4 +1,5 @@
 'use client';
+import { clubRoleLabel } from './clubService';
 import { use, useEffect, useRef, useState, type FormEvent } from 'react';
 import Link from 'next/link';
 import { SiteShell } from '@/components/SiteShell';
@@ -144,7 +145,7 @@ export function ClubBoard({
                   {view.members.map((m) => (
                     <tr key={m.id}>
                       <td>{m.name}</td>
-                      <td>{m.role}</td>
+                      <td>{clubRoleLabel(m.role)}</td>
                       {officer && (
                         <>
                           <td>{m.studentId || '未提供'}</td>

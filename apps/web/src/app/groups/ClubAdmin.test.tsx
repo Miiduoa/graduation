@@ -2,7 +2,8 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, expect, test, vi } from 'vitest';
 import { ClubBoard } from './ClubAdmin';
 import { callClub } from './clubService';
-vi.mock('./clubService', () => ({
+vi.mock('./clubService', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('./clubService')>()),
   callClub: vi.fn(),
   loadClubView: (...args: unknown[]) => callClub(...(args as Parameters<typeof callClub>)),
   clubEnabled: () => true,
@@ -75,4 +76,18 @@ test('後端不可用時保留名單，活動不可冒充空資料或提供操�
   expect(screen.getByText('活動後台暫時無法使用，社員名單仍可查閱。')).toBeTruthy();
   expect(screen.queryByText('尚無活動')).toBeNull();
   expect(screen.queryByText('建立活動')).toBeNull();
+});
+
+test('備援名單的會長與幹部角色以中文呈現', async () => {
+  vi.mocked(callClub).mockResolvedValue({
+    ...view,
+    rosterOnly: true,
+    members: [
+      { id: 'one', name: '甲', role: 'owner' },
+      { id: 'two', name: '乙', role: 'admin' },
+    ],
+  });
+  render(<ClubBoard uid="one" schoolId="school" groupId="club" />);
+  expect(await screen.findByText('會長')).toBeTruthy();
+  expect(screen.getByText('幹部')).toBeTruthy();
 });
