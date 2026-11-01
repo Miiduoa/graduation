@@ -83,6 +83,15 @@ function CourseGradesContent({
     return loadCourseGrades(courseId);
   });
 
+  const completeScores = !!loadable.data?.items.length && loadable.data.items.every((item) =>
+    item.grade_scores?.length === 1 &&
+    typeof item.grade_scores[0].score === 'number' &&
+    Number.isFinite(item.grade_scores[0].score),
+  );
+  const total = completeScores && Number.isFinite(loadable.data?.rollup?.weighted_percent)
+    ? loadable.data?.rollup?.weighted_percent
+    : null;
+
   const selectedItem = loadable.data?.items.find((item) => item.id === recordId);
   const record = selectedItem
     ? {
@@ -98,15 +107,15 @@ function CourseGradesContent({
       <CourseV2Header title="成績" subtitle={courseName} />
       <Text style={styles.meta}>
         來源：nuni 課程 ·
-        更新時間：依各筆紀錄；未取得顯示未知，待評不算零分。總分依課程設定的權重計算。
+        更新時間：依各筆紀錄；未取得顯示未知，待評不算零分。總分依課程權重加總；任一項待評或未取得時，總分為未知。
       </Text>
       {!loadable.loading && !loadable.error && loadable.data?.rollup ? (
         <View style={styles.summary}>
           <Text style={styles.summaryLabel}>學期加權總分</Text>
-          <Text style={styles.summaryValue}>
-            {loadable.data.rollup.weighted_percent == null
+          <Text style={styles.summaryValue} accessibilityLabel={`學期加權總分：${total ?? '未知'}`}>
+            {total == null
               ? '未知'
-              : Math.round(loadable.data.rollup.weighted_percent * 100) / 100}
+              : Math.round(total * 100) / 100}
             <Text style={styles.max}> / 100</Text>
           </Text>
         </View>

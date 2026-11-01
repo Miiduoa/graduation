@@ -6,6 +6,7 @@ import CourseGradesV2Screen, { loadCourseGrades } from '../screens/lmsV2/CourseG
 let mockCourseId = 'course-1';
 let mockUid = 'student-a';
 let mockFailure = false;
+let mockRollup: number | null = null;
 let mockItems: { id: string; title: string; max_points: number | null; grade_scores: { score: number | null; updated_at?: string }[] }[] = [{ id: 'grade-item-1', title: '期末報告', max_points: null, grade_scores: [] }];
 const mockEq = jest.fn();
 const mockSelect = jest.fn();
@@ -25,7 +26,7 @@ const mockFrom = jest.fn((table: string) => {
       mockOrder(field);
       return query;
     },
-    maybeSingle: async () => ({ data: { weighted_percent: null }, error: null }),
+    maybeSingle: async () => ({ data: { weighted_percent: mockRollup }, error: null }),
     range: async (start: number, end: number) => {
       mockRange(start, end);
       return mockFailure
@@ -51,6 +52,7 @@ beforeEach(() => {
   mockCourseId = 'course-1';
   mockUid = 'student-a';
   mockFailure = false;
+  mockRollup = null;
   mockItems = [{ id: 'grade-item-1', title: '期末報告', max_points: null, grade_scores: [] }];
 });
 test('executes the loader through categories and scopes scores to the current student', async () => {
@@ -123,4 +125,23 @@ test('refresh failure hides the previous summary and record; retry displays the 
   fireEvent.press(view.getByText('重試'));
   await view.findByText('分數：80');
   expect(view.queryByText('分數：0')).toBeNull();
+});
+
+test('a supplied rollup stays unknown when one score is pending', async () => {
+  mockRollup = 50;
+  mockItems = [
+    { id: 'scored', title: '已評項目', max_points: 100, grade_scores: [{ score: 100 }] },
+    { id: 'pending', title: '待評項目', max_points: 100, grade_scores: [] },
+  ];
+  const view = render(<CourseGradesV2Screen />);
+  await view.findByText('待評項目');
+  expect(view.getByLabelText('學期加權總分：未知')).toBeTruthy();
+  expect(view.queryByLabelText('學期加權總分：50')).toBeNull();
+});
+
+test('explicit zero remains a known total when every score is present', async () => {
+  mockRollup = 0;
+  mockItems[0].grade_scores = [{ score: 0 }];
+  const view = render(<CourseGradesV2Screen />);
+  expect(await view.findByLabelText('學期加權總分：0')).toBeTruthy();
 });
