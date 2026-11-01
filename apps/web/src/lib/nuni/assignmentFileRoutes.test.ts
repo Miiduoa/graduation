@@ -286,9 +286,12 @@ describe('assignment file BFF flag and contracts', () => {
     ).toBe(422);
   });
 
-  it('creates a batch of intents, serves inline content, and attaches download=1', async () => {
+  it.each([
+    ['ordinary.txt', 'text/plain', 'synthetic text'],
+    ['作業照片.pdf', 'application/pdf', '%PDF-1.4\nsynthetic PDF'],
+  ])('uploads, submits and downloads %s through a real response', async (name, contentType, content) => {
     vi.stubEnv('ASSIGNMENT_FILE_SUBMIT_ENABLED', 'true');
-    const jpeg = Uint8Array.from([0xff, 0xd8, 0xff, 0xe0, 1, 2, 3, 4]);
+    const bytes = new TextEncoder().encode(content);
     let mine: unknown = null;
     fetcher.mockImplementation(async (url: string, init?: RequestInit) => {
       const target = String(url);
@@ -319,9 +322,9 @@ describe('assignment file BFF flag and contracts', () => {
         idempotencyKey: 'batch-intents-ok',
         files: [
           {
-            originalName: 'shot.jpg',
-            contentType: 'image/jpeg',
-            byteSize: jpeg.byteLength,
+            originalName: name,
+            contentType,
+            byteSize: bytes.byteLength,
             idempotencyKey: 'batch-file-aaaa',
           },
         ],
@@ -334,8 +337,8 @@ describe('assignment file BFF flag and contracts', () => {
     expect(payload.intents).toHaveLength(1);
     const uploaded = await invoke(payload.intents[0]!.uploadPath.replace(`class-workspaces/${id}/`, ''), {
       method: 'PUT',
-      body: jpeg,
-      contentType: 'image/jpeg',
+      body: bytes,
+      contentType,
     });
     expect(uploaded.status).toBe(200);
     const submitted = await invoke(`assignments/${assignmentId}/submit-files`, {
@@ -364,6 +367,9 @@ describe('assignment file BFF flag and contracts', () => {
     });
     expect(download.status).toBe(200);
     expect(download.headers.get('Content-Disposition')).toMatch(/^attachment;/);
+    expect(download.headers.get('Content-Disposition')).toContain(`filename*=UTF-8''${encodeURIComponent(name)}`);
+    expect(new Uint8Array(await download.arrayBuffer())).toEqual(bytes);
+    expect(new Uint8Array(await inline.arrayBuffer())).toEqual(bytes);
     expect(
       (
         await invoke(suffix, {

@@ -1,4 +1,6 @@
 // @vitest-environment node
+import sharp from 'sharp';
+import { createPhotoPdf } from '@campus/shared/src/photoPdf';
 import { createRequire } from 'node:module';
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { FILE_ONLY_SUBMISSION_BODY } from '@campus/shared/src/assignmentFiles';
@@ -132,6 +134,23 @@ afterEach(() => {
 });
 
 describe('assignment file service', () => {
+  it('returns the exact generated PDF bytes from the server receipt', async () => {
+    const jpeg = new Uint8Array(await sharp({ create: { width: 30, height: 20, channels: 3, background: '#254c38' } }).jpeg().toBuffer());
+    const bytes = createPhotoPdf([{ jpeg, width: 30, height: 20 }]);
+    const api = service();
+    const student = actor(studentId);
+    const intent = await api.createIntent(student, workspaceId, assignmentId, {
+      originalName: '作業照片.pdf', contentType: 'application/pdf', byteSize: bytes.length, idempotencyKey: 'photo-pdf-intent',
+    });
+    await api.putContent(student, workspaceId, assignmentId, intent.id, bytes);
+    const result = await api.submitFiles(student, workspaceId, assignmentId, { fileIds: [intent.id], idempotencyKey: 'photo-pdf-submit' });
+    const receipt = result.mySubmission!.files![0];
+    const downloaded = await api.readContent(workspaceId, assignmentId, receipt.id, receipt.downloadExp, receipt.downloadSig);
+    expect(downloaded.contentType).toBe('application/pdf');
+    expect(downloaded.bytes).toEqual(bytes);
+    expect(receipt.byteSize).toBe(bytes.length);
+  });
+
   it('rejects non-students, closed assignments, bad types, and oversize files', async () => {
     const teacher = service({ role: 'owner-teacher' });
     await expect(

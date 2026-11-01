@@ -1,4 +1,7 @@
+import { useClassReminders } from './src/hooks/useClassReminders';
+import { useNextClassWidget } from './src/widgets/useNextClassWidget';
 /* eslint-disable */
+import { useSubmittedAssignmentReminders } from './src/app/useSubmittedAssignmentReminders';
 import React, { useEffect, useRef, useState, useMemo, useCallback } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import {
@@ -159,6 +162,7 @@ const linkingBase: LinkingOptions<RootTabParamList> = {
           TeachingHub: 'teaching',
           AdminDashboard: 'admin',
           CourseSchedule: 'schedule',
+          PersonalTimetable: 'personal-timetable',
           AddCourse: 'course/new',
           CourseHub: 'course-hub',
           CourseCatalog: 'course-catalog',
@@ -503,6 +507,8 @@ function TokenErrorHandler() {
 }
 
 function AuthAwareStateProviders({ children }: { children: React.ReactNode }) {
+  useNextClassWidget();
+  useClassReminders();
   const auth = useAuth();
   const { school } = useSchool();
   const schoolSessionReady = hasReadySchoolSession(auth, school?.id ?? null);
@@ -786,6 +792,7 @@ function PublicNavigation() {
 }
 
 function SchoolNavigation() {
+  const { school } = useSchool();
   const auth = useAuth();
   const pendingMessagingDeepLinkRef = useRef<string | null>(null);
   const authRoleRef = useRef(auth.profile?.role);
@@ -793,11 +800,12 @@ function SchoolNavigation() {
   authRoleRef.current = auth.profile?.role;
   authTeachingRef.current = isTeachingRole(auth.profile?.role);
 
+  useSubmittedAssignmentReminders(auth.user?.uid, school.id);
   usePushNotifications(
     rootNavigationRef,
     auth.user?.uid,
     auth.profile?.role,
-    auth.profile?.schoolId,
+    school.id,
   );
   useAIAmbientAwareness();
   useAIBrainLifecycle();

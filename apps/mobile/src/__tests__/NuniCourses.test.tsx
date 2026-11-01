@@ -1,6 +1,8 @@
+import * as photoPdf from '../screens/nuni/nativePhotoPdf';
 import React from 'react';
+import { AppState, ScrollView, type AppStateStatus } from 'react-native';
 import { act, fireEvent, render, waitFor, within } from '@testing-library/react-native';
-import { NuniError, type NuniMaterial, type NuniWorkspace } from '@campus/shared/src/nuni';
+import { createNuniClasses, NuniError, type NuniMaterial, type NuniWorkspace } from '@campus/shared/src/nuni';
 import { NuniCourses } from '../screens/nuni/NuniCourses';
 import { NuniDraftProvider } from '../state/nuniDrafts';
 
@@ -227,6 +229,7 @@ it('keeps the loaded materials and retries the same cursor after a network failu
   fireEvent.press(view.getByRole('button', { name: '教材 1+' }));
   fireEvent.press(view.getByRole('button', { name: '載入較早教材' }));
   await view.findByRole('button', { name: '重試載入較早教材' });
+  expect(view.getByText(/目前無法連線，連線中斷/)).toBeTruthy();
   expect(view.getByText('第 1 份教材')).toBeTruthy();
   fireEvent.press(view.getByRole('button', { name: '重試載入較早教材' }));
   await view.findByText('第 2 份教材');
@@ -1197,6 +1200,7 @@ it('does not show a student pending filter to a course teacher', async () => {
 it('hides camera and file buttons while the assignment file flag is off', async () => {
   const view = await openCourse();
   expect(view.queryByRole('button', { name: '拍照' })).toBeNull();
+  expect(view.queryByRole('button', { name: '照片轉 PDF' })).toBeNull();
   expect(view.getByLabelText('作業內容：校園訪談')).toBeTruthy();
 });
 
@@ -1209,6 +1213,7 @@ it('shows camera, album and file actions when the assignment file flag is on', a
   const view = await openCourse();
   expect(view.getByRole('button', { name: '拍照' })).toBeTruthy();
   expect(view.getByRole('button', { name: '相簿' })).toBeTruthy();
+  expect(view.getByRole('button', { name: '照片轉 PDF' })).toBeTruthy();
   expect(view.getByRole('button', { name: '檔案' })).toBeTruthy();
   expect(view.getByText('已過截止時間，現在送出會標為遲交')).toBeTruthy();
   expect(
@@ -2281,3 +2286,213 @@ it.each(['superseded'])(
     clock.mockRestore();
   },
 );
+
+it('舊版本缺少影像模組時保留既有附件操作並隱藏轉檔入口', async () => {
+  const availability = jest.spyOn(photoPdf, 'photoPdfAvailable').mockReturnValue(false);
+  try {
+    fileSubmitFlag.on = true;
+    const view = await openCourse();
+    expect(view.queryByRole('button', { name: '照片轉 PDF' })).toBeNull();
+    expect(view.getByRole('button', { name: '相簿' })).toBeTruthy();
+    expect(view.getByRole('button', { name: '檔案' })).toBeTruthy();
+  } finally {
+    availability.mockRestore();
+  }
+});
+
+it('自動收件晚到不覆蓋教師剛儲存的回饋，慢讀取不重疊', async () => {
+  AppState.currentState = 'active';
+  course = { ...course, memberRole: 'owner-teacher' };
+  const view = await openCourse();
+  jest.useFakeTimers();
+  try {
+    await act(async () => { fireEvent.press(view.getByRole('button', { name: '查看收件：校園訪談' })); });
+    const older = deferred<unknown>();
+    const fresh = { ...receipt(), teacherFeedback: '新的教師回饋', reviewedAt: date };
+    mockRequest.mockImplementation((path, context, input) => {
+      if (path.endsWith('/submissions')) return older.promise;
+      return response(path, context, input);
+    });
+    const count = () => mockRequest.mock.calls.filter(([path]) => path.endsWith('/submissions')).length;
+    await act(async () => { jest.advanceTimersByTime(60000); });
+    const started = count();
+    expect(started).toBe(2);
+    await act(async () => { jest.advanceTimersByTime(10000); });
+    expect(count()).toBe(started);
+    fireEvent.changeText(view.getByLabelText('給 測試學生 的回饋'), '新的教師回饋');
+    await act(async () => { fireEvent.press(view.getByRole('button', { name: '儲存老師回饋' })); });
+    expect(view.getByText('已回饋：新的教師回饋')).toBeTruthy();
+    const newer = deferred<unknown>();
+    mockRequest.mockImplementation((path, context, input) => path.endsWith('/submissions') ? newer.promise : response(path, context, input));
+    await act(async () => { older.resolve({ submissions: [receipt()] }); });
+    expect(view.getByText('已回饋：新的教師回饋')).toBeTruthy();
+    await act(async () => { newer.resolve({ submissions: [fresh] }); });
+    expect(view.getByText('已回饋：新的教師回饋')).toBeTruthy();
+    view.unmount();
+  } finally { jest.useRealTimers(); }
+});
+
+
+it('背景回前景後丟棄較早收件，切換教材停止兩份自動清單', async () => {
+  AppState.currentState = 'active';
+  course = { ...course, memberRole: 'owner-teacher' };
+  const listeners = new Set<(state: AppStateStatus) => void>();
+  const spy = jest.spyOn(AppState, 'addEventListener').mockImplementation((_event, listener) => {
+    listeners.add(listener);
+    return { remove: () => { listeners.delete(listener); } };
+  });
+  const view = await openCourse();
+  jest.useFakeTimers();
+  try {
+    await act(async () => { fireEvent.press(view.getByRole('button', { name: '查看收件：校園訪談' })); });
+    const older = deferred<unknown>();
+    const newer = deferred<unknown>();
+    let reads = 0;
+    mockRequest.mockImplementation((path, context, input) => {
+      if (path.endsWith('/submissions')) return ++reads === 1 ? older.promise : newer.promise;
+      return response(path, context, input);
+    });
+    await act(async () => { jest.advanceTimersByTime(60000); });
+    expect(reads).toBe(1);
+    await act(async () => {
+      AppState.currentState = 'background';
+      listeners.forEach((listener) => listener('background'));
+      AppState.currentState = 'active';
+      listeners.forEach((listener) => listener('active'));
+    });
+    await act(async () => { older.resolve({ submissions: [{ ...receipt(), body: '背景前快照' }] }); });
+    expect(view.queryByText('背景前快照')).toBeNull();
+    expect(reads).toBe(2);
+    await act(async () => { newer.resolve({ submissions: [{ ...receipt(), body: '前景新快照' }] }); });
+    expect(view.getByText('前景新快照')).toBeTruthy();
+    fireEvent.press(view.getByRole('button', { name: '教材 0' }));
+    const before = mockRequest.mock.calls.length;
+    await act(async () => { jest.advanceTimersByTime(30000); });
+    expect(mockRequest).toHaveBeenCalledTimes(before);
+    view.unmount();
+  } finally { jest.useRealTimers(); spy.mockRestore(); }
+});
+
+it('shares only the stable material entry through the system sheet', async () => {
+  const { Share } = require('react-native');
+  const share = jest.spyOn(Share, 'share').mockResolvedValue({ action: Share.sharedAction });
+  const target = material(1, '合成分享教材');
+  mockRequest.mockImplementation((path, context, input) => {
+    if (!path.endsWith('/materials/page')) return response(path, context, input);
+    return Promise.resolve({ materials: [target], nextCursor: null });
+  });
+  const view = render(<NuniCourses initialWorkspaceId={courseId} initialMaterialId={target.id} />);
+  await view.findByText('目標教材');
+  fireEvent.press(view.getByRole('button', { name: '分享教材入口' }));
+  expect(share).toHaveBeenCalledWith({ message: expect.stringContaining(`workspaceId=${courseId}&materialId=${target.id}`) });
+  expect(share.mock.calls[0][0].message).not.toContain(target.body);
+  share.mockRestore();
+});
+
+it.each([403, 404])('stops a linked material search and removes course content after %s', async (status) => {
+  mockRequest.mockImplementation((path, context, input, _method, query) => {
+    if (!path.endsWith('/materials/page')) return response(path, context, input);
+    return query
+      ? Promise.reject(new NuniError(status, 'ACCESS_DENIED'))
+      : Promise.resolve({ materials: [material(1)], nextCursor: 'synthetic_older' });
+  });
+  const view = render(<NuniCourses initialWorkspaceId={courseId} initialMaterialId="cwm_missing" />);
+  await waitFor(() => expect(
+    mockRequest.mock.calls.filter(([path]) => path.endsWith('/materials/page')),
+  ).toHaveLength(2));
+  await waitFor(() => expect(view.queryByText('第 1 份教材')).toBeNull());
+  expect(view.queryByText('校園訪談', { includeHiddenElements: true })).toBeNull();
+  expect(view.queryByRole('button', { name: '繼續尋找' })).toBeNull();
+  await act(async () => { await new Promise((resolve) => setTimeout(resolve, 50)); });
+  expect(mockRequest.mock.calls.filter(([path]) => path.endsWith('/materials/page'))).toHaveLength(2);
+});
+
+it('合成發布經共用寫入與輪詢後約一分鐘內出現在學生畫面', async () => {
+  AppState.currentState = 'active';
+  const subscription = jest.spyOn(AppState, 'addEventListener').mockReturnValue({ remove: jest.fn() });
+  const view = await openCourse();
+  jest.useFakeTimers();
+  try {
+    fireEvent.press(view.getByRole('button', { name: '教材 0' }));
+    mockRequest.mockImplementation(async (path, context, input) => {
+      if (!path.endsWith('/assignments')) return response(path, context, input);
+      await new Promise((resolve) => setTimeout(resolve, input ? 200 : 300));
+      if (!input) return { assignments: [assignment] };
+      assignment = { ...assignment, title: input.title, instructions: input.instructions };
+      return assignment;
+    });
+    fireEvent.press(view.getByRole('button', { name: '作業 1' }));
+    await act(async () => { await jest.advanceTimersByTimeAsync(301); });
+    const teacher = createNuniClasses((path, input) => mockRequest(path, 'teacher', input), accountId);
+    const started = Date.now();
+    const write = teacher.createAssignment(courseId, { title: '跨端新發布作業', instructions: '合成內容',
+      dueAt: null, idempotencyKey: 'synthetic-publication' });
+    for (let elapsed = 0; elapsed < 61000 && !view.queryByText('跨端新發布作業'); elapsed += 50)
+      await act(async () => { await jest.advanceTimersByTimeAsync(50); });
+    await write;
+    expect(view.getByText('跨端新發布作業')).toBeTruthy();
+    expect(Date.now() - started).toBeLessThanOrEqual(61000);
+    expect(Date.now() - started).toBe(60300);
+  } finally { view.unmount(); jest.useRealTimers(); subscription.mockRestore(); }
+});
+
+it('跨課搜尋進教材後返回保留關鍵字與結果並重新驗權', async () => {
+  const target = material(1, '返回保留教材');
+  mockRequest.mockImplementation((path, context, input) => {
+    if (path.endsWith('/materials/page')) return Promise.resolve({ materials: [target], nextCursor: null });
+    return response(path, context, input);
+  });
+  const view = render(<NuniCourses />);
+  fireEvent.changeText(view.getByLabelText('跨課教材關鍵字'), '返回保留');
+  fireEvent.press(view.getByText('搜尋教材'));
+  await view.findByText('返回保留教材');
+  fireEvent.press(view.getByText('返回保留教材'));
+  await view.findByText('目標教材');
+  const reads = mockRequest.mock.calls.filter(([path]) => path.endsWith('/materials/page')).length;
+  fireEvent.press(view.getByText('返回我的課程'));
+  await waitFor(() => expect(mockRequest.mock.calls.filter(([path]) => path.endsWith('/materials/page')).length).toBeGreaterThan(reads));
+  expect(view.getByLabelText('跨課教材關鍵字').props.value).toBe('返回保留');
+  expect(view.getByText('返回保留教材')).toBeTruthy();
+  expect(view.getByText('目前搜尋：返回保留')).toBeTruthy();
+});
+
+
+it('長搜尋清單返回時等清單尺寸更新才還原保存位置，且一般課程不沿用', async () => {
+  const targets = Array.from({ length: 40 }, (_, index) => material(index + 1, `長清單教材 ${index + 1}`));
+  mockRequest.mockImplementation((path, context, input) => {
+    if (path.endsWith('/materials/page')) return Promise.resolve({ materials: targets, nextCursor: null });
+    return response(path, context, input);
+  });
+  const subscription = jest.spyOn(AppState, 'addEventListener').mockReturnValue({ remove: jest.fn() });
+  const scroll = jest.spyOn(ScrollView.prototype, 'scrollTo');
+  try {
+    const view = render(<NuniCourses />);
+    fireEvent.changeText(view.getByLabelText('跨課教材關鍵字'), '長清單教材');
+    fireEvent.press(view.getByText('搜尋教材'));
+    await view.findByText('長清單教材 35');
+    fireEvent.scroll(view.getByTestId('nuni-courses-scroll'), {
+      nativeEvent: { contentOffset: { y: 2400 } },
+    });
+    fireEvent.press(view.getByText('長清單教材 35'));
+    await view.findByText('目標教材');
+    fireEvent(view.getByTestId('nuni-courses-scroll'), 'contentSizeChange', 390, 600);
+    scroll.mockClear();
+    fireEvent.press(view.getByText('返回我的課程'));
+    await view.findByText('長清單教材 35');
+    expect(scroll).not.toHaveBeenCalled();
+    fireEvent(view.getByTestId('nuni-courses-scroll'), 'contentSizeChange', 390, 3600);
+    expect(scroll).toHaveBeenCalledTimes(1);
+    expect(scroll).toHaveBeenLastCalledWith({ y: 2400, animated: false });
+    fireEvent(view.getByTestId('nuni-courses-scroll'), 'contentSizeChange', 390, 3700);
+    expect(scroll).toHaveBeenCalledTimes(1);
+
+    fireEvent.press(await view.findByRole('button', { name: '服務設計課程' }));
+    await view.findByText('返回我的課程');
+    scroll.mockClear();
+    fireEvent.press(view.getByText('返回我的課程'));
+    await view.findByText('長清單教材 35');
+    fireEvent(view.getByTestId('nuni-courses-scroll'), 'contentSizeChange', 390, 3600);
+    expect(scroll).not.toHaveBeenCalled();
+    view.unmount();
+  } finally { scroll.mockRestore(); subscription.mockRestore(); }
+});

@@ -50,7 +50,7 @@
     },
     "apps/api/src/personal-import-sync/imports/types.ts": {
       "source": "packages/shared/src/imports/types.ts",
-      "sha256": "4ba6a60495660c788e54b6f016cc6dd860811dedad2b9571902188cfcd23bb29"
+      "sha256": "522d73763171a1bfe0a8e6717bd33244ea48ad7ab6df5217d874e887bf7a3edd"
     },
     "apps/api/src/personal-import-sync/imports/validation.ts": {
       "source": "packages/shared/src/imports/validation.ts",
@@ -97,11 +97,11 @@
     },
     {
       "source": "deploy/nuni-api/assignment-files/0001-authoritative-withdrawal-reads.patch",
-      "sha256": "006e9112ea2ef17b6bc22f083e14b413a9c0ecbd9c5749f40228c5f0f6ad48f6"
+      "sha256": "b1b7b72c863236b327997921380c4d99ca6c48d8990da43a29714fca110a7648"
     }
   ],
-  "overlayTree": "14c1ec316f8b553fc4d94217635ebc5884f28ed6",
+  "overlayTree": "cf8babcbbb5551446999944817f56c08cefc5caa",
   "patchedAppSha256": "ebab4626e20f64204db95528e2cd2819c6270c0d2f0efa6f440aaac9f71a5636",
   "runtimeInventoryScope": "Pinned base analysis only; not a composed API grant receipt",
-  "candidateTree": "9ba362a43a61b33de9dc36d8d66224c8a8274b7d"
+  "candidateTree": "4c7919d6cff32789acb06e2b9f4edb180cdad3a1"
 }

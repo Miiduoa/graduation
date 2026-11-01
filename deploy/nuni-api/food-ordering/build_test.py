@@ -4,6 +4,7 @@ import io
 import json
 from itertools import combinations
 import unittest
+import tempfile
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
@@ -109,6 +110,43 @@ class BuildTests(unittest.TestCase):
             with self.assertRaisesRegex(SystemExit, 'Rollback migration checksum mismatch'):
                 build.build(build.parse_args(['--imports-compatible-rollback']))
         run.assert_not_called()
+
+    def test_prepare_only_rollback_writes_a_minimal_context_without_commands(self):
+        with tempfile.TemporaryDirectory() as scratch, patch.object(build.subprocess, 'run') as run:
+            output = Path(scratch) / 'rollback'
+            build.build(build.parse_args(['--imports-compatible-rollback', '--prepare-only', '--output-dir', str(output)]))
+            manifest = json.loads((output / 'release-source.json').read_text())
+            for name in manifest['migrations']:
+                self.assertEqual((output / name).read_bytes(), (ROOT.parents[1] / name).read_bytes())
+            self.assertEqual((output / 'Dockerfile').read_bytes(), (ROOT / 'composed/Dockerfile.rollback').read_bytes())
+            run.assert_not_called()
+
+    def test_prepare_only_candidate_verifies_composition_without_building(self):
+        manifest = json.loads((ROOT / 'source.json').read_text())
+        extension = SimpleNamespace(apply_extension=Mock(return_value={'candidateTree': 'f' * 40}))
+        extension_spec = SimpleNamespace(loader=SimpleNamespace(exec_module=Mock()))
+        with tempfile.TemporaryDirectory() as scratch, contextlib.redirect_stdout(io.StringIO()), \
+                patch.object(build.subprocess, 'run') as run, \
+                patch.object(build.subprocess, 'check_output', return_value=manifest['candidateTree']), \
+                patch.object(build.importlib.util, 'spec_from_file_location', return_value=extension_spec), \
+                patch.object(build.importlib.util, 'module_from_spec', return_value=extension):
+            output = Path(scratch) / 'candidate'
+            build.build(build.parse_args(['--imports-candidate', '--prepare-only', '--output-dir', str(output)]))
+            extension.apply_extension.assert_called_once_with(output)
+            self.assertFalse(any(call.args[0][0] in ['docker', 'fly'] for call in run.call_args_list))
+
+    def test_prepare_only_rejects_existing_output_before_commands(self):
+        with tempfile.TemporaryDirectory() as scratch, patch.object(build.subprocess, 'run') as run:
+            with self.assertRaisesRegex(SystemExit, 'must not exist'):
+                build.build(build.parse_args(['--imports-candidate', '--prepare-only', '--output-dir', scratch]))
+            run.assert_not_called()
+
+    def test_prepare_options_must_be_paired_and_explicitly_scoped(self):
+        for flags in [['--prepare-only'], ['--output-dir', '/unused'],
+                      ['--security-candidate', '--prepare-only', '--output-dir', '/unused']]:
+            with self.subTest(flags=flags), contextlib.redirect_stderr(io.StringIO()):
+                with self.assertRaises(SystemExit):
+                    build.parse_args(flags)
 
     def test_all_candidate_combinations_fail_before_git_or_docker(self):
         flags = ['--course-access-candidate', '--public-cafeterias-candidate', '--food-ordering-candidate',

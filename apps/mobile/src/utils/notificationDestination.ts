@@ -15,6 +15,7 @@ export type NotificationDestinationFailureCode =
   | 'role_denied';
 
 export type NotificationDestinationContext = {
+  uid?: string | null;
   schoolId?: string | null;
   role?: UserRole | null;
 };
@@ -117,6 +118,19 @@ export function resolveNotificationDestination(
       code: 'empty_payload',
       reason: '這則通知沒有可用的目的地資料，已保留未讀。',
     };
+  }
+
+  if (type === 'local_assignment_due_v2') {
+    if (!context.uid || data.uid !== context.uid || !context.schoolId || data.schoolId !== context.schoolId) {
+      return { ok: true, mode: 'nested', tab: '學習', screen: 'LearnHome', summary: '返回課程' };
+    }
+    const group = requireId(data.groupId, '課程編號');
+    if (group.ok === false) return group.destination;
+    const assignment = requireId(data.assignmentId, '作業編號');
+    if (assignment.ok === false) return assignment.destination;
+    return { ok: true, mode: 'nested', tab: '學習', screen: 'HomeworkSubmit',
+      params: { groupId: group.id, assignmentId: assignment.id, fromReminder: true },
+      summary: '開啟作業' };
   }
 
   switch (type) {

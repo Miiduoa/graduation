@@ -1,5 +1,7 @@
 # nuni-api runtime dependency + JSON parser security candidate
 
+2026-11-01 發布決策：本目錄的安全依賴更新另案發布，不併入 composed 281／撤回過濾這次發布；兩個候選互斥，任何一個都不能宣稱為「main 全部 API 修正」。281 操作見 [runbook](../composed/RUNBOOK.md)。
+
 Opt-in rebuild of the **currently deployed** API source tree with patched compatible dependency pins and a bounded Fastify malformed/empty JSON → HTTP 400 fix. This directory does **not** change default `source.json` / composed / food-ordering candidates.
 
 ## Production bind

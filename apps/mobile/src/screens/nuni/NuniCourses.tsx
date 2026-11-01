@@ -1,3 +1,5 @@
+import { startAssignmentLive, assignmentReader, assignmentSyncLabel, type AssignmentSync } from '@campus/shared/src/assignmentLive';
+import NetInfo from '@react-native-community/netinfo';
 import React, {
   useCallback,
   useEffect,
@@ -9,7 +11,10 @@ import React, {
   type ReactNode,
   type RefObject,
 } from 'react';
-import { Image, Linking, Pressable, ScrollView, Text, TextInput, View } from 'react-native';
+import { AppState, Image, Linking, Share, Alert, Pressable, ScrollView, Text, TextInput, View } from 'react-native';
+import { materialCapabilities, materialFailureMessage, readMaterialWithDeadline } from '@campus/shared/src/materialAccess';
+import { photoPdfAvailable } from './nativePhotoPdf';
+import { NativePhotoPdfEditor } from './NativePhotoPdfEditor';
 import { PublishedFeedbackLink } from '../../components/PublishedFeedbackLink';
 import { revealAssignmentSubmitArea } from './scrollAssignment';
 import {
@@ -35,6 +40,7 @@ import {
   type NuniWorkspace,
 } from '@campus/shared/src/nuni';
 import {
+  MAX_ASSIGNMENT_DOCUMENTS,
   assignmentLateOpenLabel,
   assignmentReceiptStatusLabel,
   assignmentSubmissionLate,
@@ -87,6 +93,8 @@ import {
   type CourseListFilter,
 } from '../../services/nuniActivityTasks';
 import { StudyAgenda } from './StudyAgenda';
+import { NavigationContext } from '@react-navigation/native';
+import { CrossCourseMaterialSearch, useCourseSearchState } from './CrossCourseMaterialSearch';
 import { createNuniClassroom } from '@campus/shared/src/nuniClassroom';
 import { NuniAttendance, createAttendanceStore } from './NuniAttendance';
 
@@ -593,10 +601,12 @@ function useLoad<T>(
 }
 
 export function NuniCourses({
+  active = true,
   initialWorkspaceId,
   initialAssignmentId,
   initialMaterialId,
 }: {
+  active?: boolean;
   initialWorkspaceId?: string;
   initialAssignmentId?: string;
   initialMaterialId?: string;
@@ -606,6 +616,7 @@ export function NuniCourses({
   return (
     <CourseScope
       key={auth.session.context}
+      active={active}
       session={auth.session}
       request={auth.request}
       upload={auth.upload}
@@ -617,6 +628,7 @@ export function NuniCourses({
   );
 }
 function CourseScope({
+  active,
   session,
   request,
   upload,
@@ -625,6 +637,7 @@ function CourseScope({
   initialAssignmentId,
   initialMaterialId,
 }: {
+  active: boolean;
   session: NativeNuniSession;
   request: ReturnType<typeof useNuniSession>['request'];
   upload?: ReturnType<typeof useNuniSession>['upload'];
@@ -634,6 +647,18 @@ function CourseScope({
   initialMaterialId?: string;
 }) {
   const theme = useTheme();
+  const navigation = React.useContext(NavigationContext);
+  const [focused, setFocused] = useState(() => navigation?.isFocused() ?? true);
+  useEffect(() => {
+    if (!navigation) return;
+    const focus = navigation.addListener('focus', () => setFocused(true));
+    const blur = navigation.addListener('blur', () => setFocused(false));
+    return () => { focus(); blur(); };
+  }, [navigation]);
+  const searchState = useCourseSearchState();
+  const searchOffset = useRef<number | null>(null);
+  const pendingSearchReturn = useRef<number | null>(null);
+  const [joinRequested, setJoinRequested] = useState(0);
   const classes = useMemo(
     () =>
       createNuniClasses(
@@ -665,6 +690,8 @@ function CourseScope({
   const [focusMaterialId, setFocusMaterialId] = useState<string | undefined>(initialMaterialId);
   useEffect(() => {
     if (initialWorkspaceId) {
+      searchOffset.current = null;
+      pendingSearchReturn.current = null;
       scrollRef.current?.scrollTo({ y: 0, animated: false });
       contentOffsetYRef.current = 0;
       setSelected(initialWorkspaceId);
@@ -678,6 +705,8 @@ function CourseScope({
   }, [initialMaterialId]);
   const openCourse = useCallback(
     (id: string, activityId?: string) => {
+      searchOffset.current = null;
+      pendingSearchReturn.current = null;
       scrollRef.current?.scrollTo({ y: 0, animated: false });
       contentOffsetYRef.current = 0;
       setFocusActivityId(activityId);
@@ -689,7 +718,15 @@ function CourseScope({
   return (
     <ScrollView
       ref={scrollRef}
+      key={selected ? "detail" : "list"}
       testID="nuni-courses-scroll"
+      onContentSizeChange={selected ? undefined : () => {
+        const offset = pendingSearchReturn.current;
+        if (offset === null) return;
+        pendingSearchReturn.current = null;
+        scrollRef.current?.scrollTo({ y: offset, animated: false });
+        contentOffsetYRef.current = offset;
+      }}
       keyboardShouldPersistTaps="handled"
       scrollEventThrottle={16}
       onScroll={(event) => {
@@ -706,8 +743,8 @@ function CourseScope({
           classes={classes}
           classroom={classroom}
           onBack={() => {
-            scrollRef.current?.scrollTo({ y: 0, animated: false });
-            contentOffsetYRef.current = 0;
+            pendingSearchReturn.current = searchOffset.current;
+            searchOffset.current = null;
             setFocusActivityId(undefined);
             setFocusMaterialId(undefined);
             setSelected(null);
@@ -718,16 +755,29 @@ function CourseScope({
           contentOffsetYRef={contentOffsetYRef}
         />
       ) : (
-        <CourseList classes={classes} open={openCourse} />
+        <>
+          <CrossCourseMaterialSearch state={searchState} active={active && focused} join={() => setJoinRequested((value) => value + 1)} classes={classes} open={(courseId, materialId) => {
+            pendingSearchReturn.current = null;
+            searchOffset.current = contentOffsetYRef.current;
+            scrollRef.current?.scrollTo({ y: 0, animated: false });
+            contentOffsetYRef.current = 0;
+            setFocusActivityId(undefined);
+            setFocusMaterialId(materialId);
+            setSelected(courseId);
+          }} />
+          <CourseList classes={classes} open={openCourse} joinRequested={joinRequested} />
+        </>
       )}
     </ScrollView>
   );
 }
 
 function CourseList({
+  joinRequested = 0,
   classes,
   open,
 }: {
+  joinRequested?: number;
   classes: Classes;
   open(id: string, activityId?: string): void;
 }) {
@@ -781,6 +831,9 @@ function CourseList({
     };
   }, [agendaData]);
   const [action, setAction] = useNuniDraftState<'join' | 'create' | null>('courses:entry', null);
+  useEffect(() => {
+    if (joinRequested) setAction('join');
+  }, [joinRequested, setAction]);
   const [query, setQuery] = useNuniDraftState('courses:search', '');
   const [filter, setFilter] = useNuniDraftState<CourseListFilter>('courses:filter', 'all');
   const courses = result.data ?? [];
@@ -1065,7 +1118,7 @@ function CourseDetail({
     }
     const course = await classes.get(id);
     const [page, assignments, quizzes] = await Promise.all([
-      classes.materialsPage(id),
+      readMaterialWithDeadline(classes.materialsPage(id)),
       classes.assignments(id),
       classes.quizzes(id),
     ]);
@@ -1100,6 +1153,50 @@ function CourseDetail({
   const [quizQuery, setQuizQuery] = useNuniDraftState(`course:${id}:quiz-search`, '');
   const activityQuery = tab === 'quizzes' ? quizQuery : assignmentQuery;
   const setActivityQuery = tab === 'quizzes' ? setQuizQuery : setAssignmentQuery;
+  const [assignmentSync, setAssignmentSync] = useState<AssignmentSync>({
+    state: 'updating',
+    updatedAt: null,
+  });
+  const [receiptId, setReceiptId] = useState<string | null>(null);
+  const assignmentRevision = useRef(0);
+  const assignmentCommit = useRef(result.commit);
+  const assignmentVersion = useRef(result.version);
+  useEffect(() => {
+    assignmentCommit.current = result.commit;
+    assignmentVersion.current = result.version;
+  });
+  const assignmentLiveReady = result.data !== null && !result.loading && !classroomDenied;
+  useEffect(() => {
+    if (!assignmentLiveReady || tab !== 'assignments') return;
+    let online = true;
+    return startAssignmentLive({
+      read: () => classes.assignments(id),
+      revision: () => assignmentRevision.current,
+      receive: (assignments) =>
+        assignmentCommit.current(
+          (current) => (current ? { ...current, assignments } : current),
+          assignmentVersion.current,
+        ),
+      clear: () => {
+        setClassroomDenied(true);
+        assignmentCommit.current(() => null, assignmentVersion.current);
+      },
+      status: setAssignmentSync,
+      active: () => AppState.currentState === 'active',
+      online: () => online,
+      subscribe: (changed) => {
+        const app = AppState.addEventListener('change', changed);
+        const network = NetInfo.addEventListener((state) => {
+          online = state.isConnected !== false && state.isInternetReachable !== false;
+          changed();
+        });
+        return () => {
+          app.remove();
+          network();
+        };
+      },
+    });
+  }, [classes, id, assignmentLiveReady, tab]);
   const data = result.data;
   const linkedAssignment =
     !!initialAssignmentId && !!data?.assignments.some((item) => item.id === initialAssignmentId);
@@ -1185,7 +1282,7 @@ function CourseDetail({
     setLoadingMore(true);
     setMaterialsError('');
     try {
-      const page = await classes.materialsPage(id, requestedCursor);
+      const page = await readMaterialWithDeadline(classes.materialsPage(id, requestedCursor));
       if (run !== pageGeneration.current) return;
       if (lookupRun !== lookupGeneration.current) return;
       const merged = appendMaterialPage(pageProgress.current, page, requestedCursor);
@@ -1211,8 +1308,8 @@ function CourseDetail({
     } catch (failure) {
       if (run !== pageGeneration.current) return;
       if (lookupRun !== lookupGeneration.current) return;
-      setMaterialsError(nuniErrorMessage(failure));
-      if (failure instanceof NuniError && (failure.status === 403 || failure.status === 404)) {
+      setMaterialsError(materialFailureMessage(failure));
+      if (failure instanceof NuniError && [401, 403, 404, 410].includes(failure.status)) {
         pageGeneration.current += 1;
         invalidateMaterialLookup();
         setMaterialsDenied(true);
@@ -1268,6 +1365,7 @@ function CourseDetail({
     targetSeekCancelled,
   ]);
   const saveActivity = (item: Activity) => {
+    if ('instructions' in item) assignmentRevision.current += 1;
     result.commit(
       (current) =>
         current
@@ -1317,6 +1415,7 @@ function CourseDetail({
         <View style={{ gap: 16, display: result.loading || result.error ? 'none' : 'flex' }}>
           <Copy title>{data.course.title}</Copy>
           <Copy>來源：nuni 課程 · 本次讀取：{time(data.checkedAt)}</Copy>
+          <Copy>{materialCapabilities(data.course)}</Copy>
           <Copy>進度依作業繳交與測驗作答紀錄計算，閱讀教材不計完成。待評、缺件與未取得都不換算成零分；清單未齊時完整進度為未知。點選作業或測驗可查看原始紀錄。</Copy>
           <Copy>
             {courseRoleLabels[data.course.memberRole]}
@@ -1439,6 +1538,12 @@ function CourseDetail({
             </Copy>
           ) : null}
           <View style={{ display: tab === 'assignments' ? 'flex' : 'none', gap: 16 }}>
+            <Text accessibilityLiveRegion="polite">
+              {assignmentSyncLabel(assignmentSync)}{assignmentSync.updatedAt
+                ? ` · 最後更新 ${formatTaipeiDateTime(assignmentSync.updatedAt, { seconds: true })}`
+                : ' · 尚未確認最新狀態'}
+            </Text>
+            <Copy>作業約每分鐘自動更新；回到畫面、切回分頁、網路恢復、自己送出或重新整理時立即更新。校方 LMS 等未串接來源請到原系統確認。</Copy>
             {data.assignments.length === 0 ? (
               <Copy>老師尚未發布作業。</Copy>
             ) : (
@@ -1454,6 +1559,8 @@ function CourseDetail({
                       !matchesActivitySearch(item, assignmentQuery)) &&
                     item.id !== initialAssignmentId
                   }
+                  receiptActive={tab === 'assignments' && receiptId === item.id}
+                  onOpenReceipts={() => setReceiptId(item.id)}
                   compact={data.assignments.length > 8 && index > 0}
                   focused={item.id === initialAssignmentId}
                   scrollRef={scrollRef}
@@ -1709,7 +1816,7 @@ function MaterialCard({
         ref={cardRef}
         testID={`material-${material.id}`}
         onLayout={revealTarget}
-        style={{ gap: 12 }}
+        style={{ gap: 12, ...(focused ? { borderWidth: 2, borderColor: '#2769A8', backgroundColor: '#EAF3FC', borderRadius: 12, padding: 12 } : {}) }}
       >
         {focused ? (
           <Text accessibilityLabel={`目標教材：${material.title}`}>目標教材</Text>
@@ -1717,12 +1824,19 @@ function MaterialCard({
         <Copy title>{material.title}</Copy>
         {material.unitTitle ? <Copy>{material.unitTitle}</Copy> : null}
         <Copy>{material.body}</Copy>
+        <Button label="分享教材入口" onPress={() => {
+          const link = `campus://campus-one?tab=courses&workspaceId=${encodeURIComponent(material.workspaceId)}&materialId=${encodeURIComponent(material.id)}`;
+          void Share.share({ message: `${material.title}\n${link}\n開啟後需登入並有這門課的權限。` })
+            .catch(() => Alert.alert('分享沒有完成', '請稍後再試一次。'));
+        }} />
       </View>
     </Section>
   );
 }
 
 function ActivityCard({
+  receiptActive = true,
+  onOpenReceipts,
   item,
   course,
   classes,
@@ -1733,6 +1847,8 @@ function ActivityCard({
   scrollRef,
   contentOffsetYRef,
 }: {
+  receiptActive?: boolean;
+  onOpenReceipts?: () => void;
   item: Activity;
   course: NuniWorkspace;
   classes: Classes;
@@ -1761,6 +1877,7 @@ function ActivityCard({
   const kind = assignment ? '作業' : '測驗';
   const [withdrawNotice, setWithdrawNotice] = useState('');
   const [localFiles, setLocalFiles] = useState<LocalNativeFile[]>([]);
+  const [pdfOpen, setPdfOpen] = useState(false);
   const [previewUri, setPreviewUri] = useState<string | null>(null);
   const [progress, setProgress] = useState<NativeUploadProgress | null>(null);
   const lateOpen = assignment
@@ -1788,16 +1905,35 @@ function ActivityCard({
         <View style={{ gap: 8 }}>
           <Button
             label="拍照"
+            disabled={pdfOpen}
             onPress={() => void pickAssignmentCamera(localFiles).then(setLocalFiles)}
           />
           <Button
             label="相簿"
+            disabled={pdfOpen}
             onPress={() => void pickAssignmentAlbum(localFiles).then(setLocalFiles)}
           />
           <Button
             label="檔案"
+            disabled={pdfOpen}
             onPress={() => void pickAssignmentDocuments(localFiles).then(setLocalFiles)}
           />
+          {photoPdfAvailable() ? (
+            <Button
+              label="照片轉 PDF"
+              disabled={localFiles.filter((file) => file.kind === 'file').length >= MAX_ASSIGNMENT_DOCUMENTS}
+              onPress={() => setPdfOpen(true)}
+            />
+          ) : null}
+          {pdfOpen ? (
+            <NativePhotoPdfEditor
+              onCancel={() => setPdfOpen(false)}
+              onConfirm={(file) => {
+                setLocalFiles((current) => [...current, file]);
+                setPdfOpen(false);
+              }}
+            />
+          ) : null}
           {receipt && 'files' in receipt && receipt.files?.length ? (
             <Copy>重新送出會取代這次繳交；沒有選檔就改交純文字。</Copy>
           ) : null}
@@ -2103,6 +2239,8 @@ function ActivityCard({
               classes={classes}
               course={course}
               item={item}
+              receiptActive={receiptActive && !hidden && expanded}
+              onOpenReceipts={onOpenReceipts}
               scrollRef={scrollRef}
               contentOffsetYRef={contentOffsetYRef}
             />
@@ -2114,12 +2252,16 @@ function ActivityCard({
 }
 
 function TeacherReceipts({
+  receiptActive = true,
+  onOpenReceipts,
   classes,
   course,
   item,
   scrollRef,
   contentOffsetYRef,
 }: {
+  receiptActive?: boolean;
+  onOpenReceipts?: () => void;
   classes: Classes;
   course: NuniWorkspace;
   item: Activity;
@@ -2136,15 +2278,53 @@ function TeacherReceipts({
   const pendingRevealId = useRef<string | null>(null);
   const revealGeneration = useRef(0);
   const mountedRef = useRef(true);
+  const receiptReader = useRef(assignmentReader<Receipt[]>());
   const load = useCallback(
-    async (): Promise<Receipt[]> =>
-      assignment
+    async (context?: { cancelled(): boolean }): Promise<Receipt[]> => receiptReader.current(() => {
+      if (context?.cancelled()) return Promise.reject(new Error('讀取已失效'));
+      return assignment
         ? classes.submissions(course.id, item.id)
-        : classes.quizResponses(course.id, item.id),
+        : classes.quizResponses(course.id, item.id);
+    }),
     [assignment, classes, course.id, item.id],
   );
   const resource = useLoad(load, false);
   const { data: receipts, loading: busy, error } = resource;
+  const mutationRevision = useRef(0);
+  const liveResource = useRef({ load, resource });
+  useEffect(() => { liveResource.current = { load, resource }; });
+  const [receiptSync, setReceiptSync] = useState<AssignmentSync>({ state: 'paused', updatedAt: null });
+  const receiptsOpened = receipts !== null;
+  useEffect(() => {
+    if (!assignment || !receiptsOpened || !receiptActive || busy) return;
+    let online = true;
+    let valid = true;
+    const stop = startAssignmentLive({
+      initialDelay: 60000,
+      read: () => liveResource.current.load({ cancelled: () => !valid || !online || AppState.currentState !== 'active' }),
+      revision: () => mutationRevision.current,
+      receive: (rows) => {
+        const current = liveResource.current.resource;
+        current.commit(() => rows, current.version);
+      },
+      clear: () => {
+        const current = liveResource.current.resource;
+        current.commit(() => null, current.version);
+      },
+      status: setReceiptSync,
+      active: () => AppState.currentState === 'active',
+      online: () => online,
+      subscribe: (changed) => {
+        const app = AppState.addEventListener('change', changed);
+        const network = NetInfo.addEventListener((state) => {
+          online = state.isConnected !== false && state.isInternetReachable !== false;
+          changed();
+        });
+        return () => { app.remove(); network(); };
+      },
+    });
+    return () => { valid = false; stop(); };
+  }, [assignment, receiptsOpened, receiptActive, busy]);
   useEffect(() => {
     receiptsRef.current = receipts;
   }, [receipts]);
@@ -2243,8 +2423,9 @@ function TeacherReceipts({
       <Button
         label={`查看收件：${item.title}`}
         disabled={busy}
-        onPress={() => void resource.refresh()}
+        onPress={() => { mutationRevision.current += 1; onOpenReceipts?.(); void resource.refresh(); }}
       />
+      {receiptsOpened && assignment ? <Copy>收件：{receiptActive ? assignmentSyncLabel(receiptSync) : '已暫停更新'}{receiptSync.updatedAt ? ` · 最後更新 ${formatTaipeiDateTime(receiptSync.updatedAt, { seconds: true })}` : ''}</Copy> : null}
       {error ? <Copy alert>{error}</Copy> : null}
       {!busy && !error && receipts?.length === 0 ? <Copy>還沒有收到繳交內容。</Copy> : null}
       <View style={{ display: busy || error || !receipts?.length ? 'none' : 'flex', gap: 14 }}>
@@ -2394,6 +2575,7 @@ function TeacherReceipts({
                       entry.platformAccountId === result.platformAccountId ? result : entry,
                     );
                   const nextList = latest.length ? latest : [result];
+                  mutationRevision.current += 1;
                   resource.commit(() => nextList, resource.version);
                   receiptsRef.current = nextList;
                   const matched = (result.teacherFeedback ?? '').trim() === feedback.trim();

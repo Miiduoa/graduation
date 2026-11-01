@@ -14,6 +14,10 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { CommunityAccess } from '../../_components/CommunityAccess';
+import {
+  ReportPostDialog,
+  type ReportPostSubmitPayload,
+} from '../../_components/ReportPostDialog';
 import { SiteShell } from '@/components/SiteShell';
 import { SchoolScopePlaceholder } from '@/components/SchoolScopePlaceholder';
 import { useAuth } from '@/components/AuthGuard';
@@ -75,6 +79,7 @@ function PostDetailInner({ schoolId }: { schoolId: string }) {
   const [sendingReply, setSendingReply] = useState(false);
   const [likeBusy, setLikeBusy] = useState(false);
   const [editOpen, setEditOpen] = useState(false);
+  const [reportOpen, setReportOpen] = useState(false);
   const [bookmarkState, setBookmarkState] = useState<{ scope: string; saved: boolean } | null>(null);
   const [bookmarkBusy, setBookmarkBusy] = useState(false);
   const [bookmarkError, setBookmarkError] = useState('');
@@ -252,22 +257,19 @@ function PostDetailInner({ schoolId }: { schoolId: string }) {
 
   const onReport = () => {
     if (!user?.uid || !schoolId || !postId) return;
-    const reason = prompt('檢舉原因（騷擾、垃圾訊息或其他）：', '其他違規');
-    if (!reason) return;
-    void (async () => {
-      try {
-        await submitCampusReport({
-          schoolId,
-          reporterUid: user.uid,
-          targetType: 'post',
-          targetId: postId,
-          reason,
-        });
-        alert('已送出檢舉');
-      } catch {
-        alert('這次未能檢舉，請稍後再試。');
-      }
-    })();
+    setReportOpen(true);
+  };
+
+  const submitReport = async (payload: ReportPostSubmitPayload) => {
+    if (!user?.uid || !schoolId || !postId) throw new Error('missing report context');
+    await submitCampusReport({
+      schoolId,
+      reporterUid: user.uid,
+      targetType: 'post',
+      targetId: postId,
+      reason: payload.reason,
+      ...(payload.detail ? { detail: payload.detail } : {}),
+    });
   };
 
   const onDeleteReply = (r: CampusReply) => {
@@ -666,6 +668,12 @@ function PostDetailInner({ schoolId }: { schoolId: string }) {
           }}
         />
       )}
+
+      <ReportPostDialog
+        isOpen={reportOpen}
+        onClose={() => setReportOpen(false)}
+        onSubmit={submitReport}
+      />
     </div>
   );
 }

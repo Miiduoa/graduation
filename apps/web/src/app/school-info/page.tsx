@@ -12,6 +12,7 @@ import {
   getPublicSchoolTelHref,
   getSafePublicSchoolWebsiteUrl,
 } from '@campus/shared/src/publicSchoolInfo';
+import { PublicSourceNotice } from '@/components/PublicSourceNotice';
 import { SiteShell } from '@/components/SiteShell';
 import { useCampusBrowseContext, type CampusBrowseContext } from '@/lib/useCampusBrowseContext';
 
@@ -54,9 +55,7 @@ function SchoolInfoContent({ schoolId, schoolName, status }: CampusBrowseContext
       <SiteShell title="學校資訊">
         <section className="card">
           <h2>目前沒有這所學校的公開聯絡資料</h2>
-          <p>
-            名錄資訊尚待確認，請先從頁首重新選擇學校。
-          </p>
+          <p>名錄資訊尚待確認，請先從頁首重新選擇學校。</p>
         </section>
       </SiteShell>
     );
@@ -106,9 +105,7 @@ function SchoolInfoContent({ schoolId, schoolName, status }: CampusBrowseContext
 
         <section className="card">
           <h2>聯絡方式</h2>
-          <p style={{ color: 'var(--muted)', lineHeight: 1.8 }}>
-            學校總機：{info.telephone}
-          </p>
+          <p style={{ color: 'var(--muted)', lineHeight: 1.8 }}>學校總機：{info.telephone}</p>
           <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
             {telHref ? (
               <a className="btn" href={telHref}>
@@ -119,11 +116,6 @@ function SchoolInfoContent({ schoolId, schoolName, status }: CampusBrowseContext
                 複製學校總機
               </button>
             )}
-            {websiteUrl ? (
-              <a className="btn primary" href={websiteUrl} target="_blank" rel="noopener noreferrer">
-                官方網站 ↗
-              </a>
-            ) : null}
             <a className="btn" href={mapsUrl} target="_blank" rel="noopener noreferrer">
               用地圖搜尋校名與地址 ↗
             </a>
@@ -132,7 +124,10 @@ function SchoolInfoContent({ schoolId, schoolName, status }: CampusBrowseContext
             <p style={{ color: 'var(--muted)', lineHeight: 1.7, marginBottom: 0 }}>{copyMessage}</p>
           ) : null}
           {copyError ? (
-            <p role="alert" style={{ color: 'var(--danger, #b42318)', lineHeight: 1.7, marginBottom: 0 }}>
+            <p
+              role="alert"
+              style={{ color: 'var(--danger, #b42318)', lineHeight: 1.7, marginBottom: 0 }}
+            >
               {copyError}
             </p>
           ) : null}
@@ -157,18 +152,24 @@ function SchoolInfoContent({ schoolId, schoolName, status }: CampusBrowseContext
           <h2>資料來源</h2>
           <p style={{ color: 'var(--muted)', lineHeight: 1.8 }}>
             資料來自教育部統計處大專校院名錄（{info.academicYear} 學年度），快照日期{' '}
-            {PUBLIC_SCHOOL_INFO_SNAPSHOT_DATE}。此頁提供公開聯絡方式；校務服務依學校目前開放項目使用。
+            {PUBLIC_SCHOOL_INFO_SNAPSHOT_DATE}
+            。此頁提供公開聯絡方式；校務服務依學校目前開放項目使用。
           </p>
-          <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
-            <a
-              className="btn"
-              href={PUBLIC_SCHOOL_INFO_CATALOG_URL}
-              target="_blank"
-              rel="noopener noreferrer"
-            >
-              政府資料開放平台名錄 ↗
-            </a>
-          </div>
+          <PublicSourceNotice
+            sourceLabel={`教育部統計處大專校院名錄（${info.academicYear} 學年度）`}
+            confirmedAt={PUBLIC_SCHOOL_INFO_SNAPSHOT_DATE}
+            timeLabel="最後確認（名錄快照）"
+            officialUrl={websiteUrl}
+            officialLabel="官方網站"
+          />
+          <a
+            className="btn"
+            href={PUBLIC_SCHOOL_INFO_CATALOG_URL}
+            target="_blank"
+            rel="noopener noreferrer"
+          >
+            政府資料開放平台名錄 ↗
+          </a>
         </section>
       </div>
     </SiteShell>

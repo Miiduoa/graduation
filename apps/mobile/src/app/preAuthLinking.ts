@@ -19,6 +19,7 @@ export const preAuthLinking: LinkingOptions<PreAuthStackParamList> = {
       公告詳情: 'announcement/:id',
       NuniWorkspace: 'campus-one',
       SSOLogin: 'sso-login',
+      PersonalTimetable: 'personal-timetable',
       PersonalCalendar: {
         path: 'personal-calendar/:eventId?',
         parse: {

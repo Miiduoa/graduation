@@ -608,3 +608,66 @@ it('withholds learning metrics and receipt time when only the parent assignment 
   fireEvent.click(screen.getByRole('button', { name: '更新內容' }));
   await screen.findByText('已繳交或作答');
 });
+
+it('離開作業分頁停止自動作業讀取，回作業才補讀', async () => {
+  const view = render(<NuniApp />);
+  await screen.findByRole('heading', { name: '設計專題' });
+  fireEvent.click(screen.getByRole('tab', { name: '作業' }));
+  await act(async () => {});
+  vi.useFakeTimers();
+  try {
+    fireEvent.click(screen.getByRole('tab', { name: '教材' }));
+    await act(async () => {});
+    const before = mocks.request.mock.calls.filter(([path]) => path.endsWith('/assignments')).length;
+    await act(async () => { await vi.advanceTimersByTimeAsync(30000); });
+    expect(mocks.request.mock.calls.filter(([path]) => path.endsWith('/assignments'))).toHaveLength(before);
+    await act(async () => { fireEvent.click(screen.getByRole('tab', { name: '作業' })); });
+    expect(mocks.request.mock.calls.filter(([path]) => path.endsWith('/assignments'))).toHaveLength(before + 1);
+    view.unmount();
+  } finally { vi.useRealTimers(); }
+});
+
+it('合成發布經共用寫入與輪詢後約一分鐘內出現在學生畫面', async () => {
+  memberRole = 'student';
+  const original = mocks.request.getMockImplementation()!;
+  let assignments: unknown[] = [];
+  mocks.request.mockImplementation(async (path: string, context: string, input?: Record<string, unknown>) => {
+    if (!path.endsWith('/assignments')) return original(path, context, input);
+    await new Promise((resolve) => setTimeout(resolve, input ? 200 : 300));
+    if (!input) return { assignments };
+    const item = { ...input, id: 'cwa_22222222-2222-4222-8222-222222222222', workspaceId,
+      state: 'open', createdAt: '2026-01-01T00:00:00.000Z', closedAt: null,
+      unitId: null, unitTitle: null, submissionCount: 0, mySubmission: null };
+    assignments = [item];
+    return item;
+  });
+  const view = render(<NuniApp />);
+  await screen.findByRole('heading', { name: '設計專題' });
+  vi.useFakeTimers();
+  try {
+    fireEvent.click(screen.getByRole('tab', { name: '作業' }));
+    await act(async () => { await vi.advanceTimersByTimeAsync(300); });
+    const { createNuniClasses } = await import('@campus/shared/src/nuni');
+    const teacher = createNuniClasses((path, input) => mocks.request(path, 'teacher', input), principalId);
+    const started = Date.now();
+    const write = teacher.createAssignment(workspaceId, { title: '跨端新發布作業', instructions: '合成內容',
+      dueAt: null, idempotencyKey: 'synthetic-publication' });
+    const assignmentReads = () => mocks.request.mock.calls.filter(
+      ([path, , input]) => path.endsWith('/assignments') && !input,
+    ).length;
+    const beforePoll = assignmentReads();
+    await act(async () => { await vi.advanceTimersByTimeAsync(200); await write; });
+    expect(screen.queryAllByRole('link', { name: /跨端新發布作業/ })).toHaveLength(0);
+    // 成功讀取後等候 60 秒才輪詢；直接驗證邊界，避免逐小步推進的執行成本。
+    await act(async () => { await vi.advanceTimersByTimeAsync(59799); });
+    expect(assignmentReads()).toBe(beforePoll);
+    await act(async () => { await vi.advanceTimersByTimeAsync(1); });
+    expect(assignmentReads()).toBe(beforePoll + 1);
+    await act(async () => { await vi.advanceTimersByTimeAsync(299); });
+    expect(screen.queryAllByRole('link', { name: /跨端新發布作業/ })).toHaveLength(0);
+    await act(async () => { await vi.advanceTimersByTimeAsync(1); });
+    expect(within(screen.getByRole('navigation', { name: '跳到作業' })).getByRole('link', { name: /跨端新發布作業/ })).toBeTruthy();
+    expect(Date.now() - started).toBeLessThanOrEqual(61000);
+    expect(Date.now() - started).toBe(60300);
+  } finally { view.unmount(); vi.useRealTimers(); }
+});

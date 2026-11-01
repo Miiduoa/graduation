@@ -110,7 +110,7 @@ describe('computeGradebook', () => {
     expect(r.publishedAt).toBeTruthy();
   });
 
-  test('未繳交（score=null）視為 0 但仍計入分母', () => {
+  test('待評與未取得使總分保持未知', () => {
     const stu: StudentGradeInput[] = [
       {
         uid: 'u',
@@ -123,9 +123,11 @@ describe('computeGradebook', () => {
       },
     ];
     const r = computeGradebook(ITEMS, stu);
-    // 只有 hw1 給分：finalScore 只反映 hw1 的貢獻 = 100 * 30% = 30
-    expect(r.rows[0].finalScore).toBe(30);
+    expect(r.rows[0].finalScore).toBeNull();
+    expect(r.classAverage).toBeNull();
+    expect(r.passRate).toBeNull();
     expect(r.rows[0].gradedItemCount).toBe(1);
+    expect(r.rows[0].breakdown[1].contribution).toBeNull();
   });
 });
 
@@ -137,11 +139,70 @@ describe('quizAttemptToStudentScore', () => {
 
   test('滿分為 0 時不會除零', () => {
     const s = quizAttemptToStudentScore('q1', { earnedPoints: 0, totalPoints: 0 });
-    expect(s.score).toBe(0);
+    expect(s.score).toBeNull();
   });
 
   test('保留 isLate 旗標', () => {
     const s = quizAttemptToStudentScore('q1', { earnedPoints: 10, totalPoints: 10 }, { isLate: true });
     expect(s.isLate).toBe(true);
   });
+});
+
+test.each([null, undefined, Number.NaN, Number.POSITIVE_INFINITY])('未取得分數 %s 不成為零分或班級統計', (score) => {
+  const result = computeGradebook(ITEMS, [
+    ...STUDENTS,
+    { uid: 'unknown', displayName: '待確認', scores: [
+      { gradeItemId: 'hw1', score: 100 },
+      ...(score === undefined ? [] : [{ gradeItemId: 'mid', score }]),
+      { gradeItemId: 'fin', score: 100 },
+    ] },
+  ]);
+  expect(result.rows[2].finalScore).toBeNull();
+  expect(result.classAverage).toBe(65.25);
+  expect(result.passRate).toBe(50);
+});
+
+test('明確零分仍可計算，帳號之間不共用分數', () => {
+  const result = computeGradebook([{ id: 'q', title: '測驗', weight: 100 }], [
+    { uid: 'student-a', displayName: '甲', scores: [{ gradeItemId: 'q', score: 0 }] },
+    { uid: 'student-b', displayName: '乙', scores: [] },
+  ]);
+  expect(result.rows.map((row) => row.finalScore)).toEqual([0, null]);
+});
+
+test.each([undefined, null, 0, 75])('零權重練習分數 %s 不影響 90/90/100', (score) => {
+  const result = computeGradebook([
+    { id: 'final', title: '期末', weight: 100 },
+    { id: 'practice', title: '練習', weight: 0 },
+  ], [{ uid: 'u', displayName: '學生', scores: [
+    { gradeItemId: 'final', score: 90 },
+    ...(score === undefined ? [] : [{ gradeItemId: 'practice', score }]),
+  ] }]);
+  expect(result.rows[0].finalScore).toBe(90);
+  expect(result.classAverage).toBe(90);
+  expect(result.passRate).toBe(100);
+});
+
+test('全零權重平均分配後，缺分仍為未知、免修仍重分權重', () => {
+  const items = [
+    { id: 'a', title: 'A', weight: 0 },
+    { id: 'b', title: 'B', weight: 0 },
+  ];
+  const result = computeGradebook(items, [
+    { uid: 'pending', displayName: '待評', scores: [{ gradeItemId: 'a', score: 90 }] },
+    { uid: 'excused', displayName: '免修', scores: [{ gradeItemId: 'a', score: 90 }, { gradeItemId: 'b', score: null, excused: true }] },
+  ]);
+  expect(result.rows.map((row) => row.finalScore)).toEqual([null, 90]);
+});
+
+test('正權重免修後，零權重未評項目不影響剩餘有效成績', () => {
+  const result = computeGradebook([
+    { id: 'a', title: 'A', weight: 50 },
+    { id: 'b', title: 'B', weight: 50 },
+    { id: 'practice', title: '練習', weight: 0 },
+  ], [{ uid: 'u', displayName: '學生', scores: [
+    { gradeItemId: 'a', score: 90 },
+    { gradeItemId: 'b', score: null, excused: true },
+  ] }]);
+  expect(result.rows[0].finalScore).toBe(90);
 });
