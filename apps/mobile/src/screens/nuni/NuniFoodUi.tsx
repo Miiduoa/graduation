@@ -363,13 +363,14 @@ export function useFoodLoad<T>(
           dataRef.current = null;
           setData(null);
           setError(readErrorMessage(failure));
-          setErrorKind(
-            failure instanceof NuniError &&
-              (failure.code === 'SESSION_CHANGED' ||
-                !([408, 429].includes(failure.status) || failure.status >= 500))
-              ? 'unavailable'
-              : 'retryable',
-          );
+          const retryable =
+            failure instanceof NuniError
+              ? failure.code !== 'SESSION_CHANGED' &&
+                ([408, 429].includes(failure.status) ||
+                  failure.status >= 500 ||
+                  (failure.status === 0 && failure.code === 'NETWORK_ERROR'))
+              : failure instanceof Error && failure.name === 'TimeoutError';
+          setErrorKind(retryable ? 'retryable' : 'unavailable');
           if (
             failure instanceof NuniError &&
             (failure.status === 401 || failure.code === 'SESSION_CHANGED')
