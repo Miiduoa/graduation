@@ -1,12 +1,13 @@
 # 281 部署與相容回滾操作手冊
 
-這是待維運執行的流程，本文未代表已建映像或部署。本次僅發布 composed `--imports-candidate` 六檔差異（撤回過濾＋281＋型別＋餐廳文案及回歸測試），**不含安全依賴更新**；security candidate 另次發布，不是「main 全部 API 修正」。278、279、教材分頁已在正式，不重跑、不修改。保留所有既有環境設定與旗標，不需新增 secret。
+這是待維運執行的部署流程。2026-11-01 已完成兩個映像的遠端只建置及推送，未部署；映像檔案驗證見 [VALIDATION.md](VALIDATION.md)。本次僅發布 composed `--imports-candidate` 六檔差異（撤回過濾＋281＋型別＋餐廳文案及回歸測試），**不含安全依賴更新**；security candidate 另次發布，不是「main 全部 API 修正」。278、279、教材分頁已在正式，不重跑、不修改。保留所有既有環境設定與旗標，不需新增 secret。
 
 ## 1. 核對與建置兩個映像
 
-先核對機器實際 image 與狀態，不能從 release v24 推定回滾來源。目前審查基線：`857656ef1e7798` started，`d897e35f345428` stopped；正式 digest 為 `be815455fbb2ccce844b69f004e416e44465e3421f9da654d0cd5db8379c3dc2`，OCI revision 是 tree `b0a10ac814cd03fbfb45132566035acce8339f17`。若來源或拓撲變動先重新審查，勿覆蓋別人的發布。
+所有 shell 指令均先設 `export EXPO_NO_DOTENV=1`；不得讀取或攜入 `.env`。先核對機器實際 image 與狀態，不能從 release v24 推定回滾來源。目前審查基線：`857656ef1e7798` started，`d897e35f345428` stopped；正式 digest 為 `be815455fbb2ccce844b69f004e416e44465e3421f9da654d0cd5db8379c3dc2`，OCI revision 是 tree `b0a10ac814cd03fbfb45132566035acce8339f17`。若來源或拓撲變動先重新審查，勿覆蓋別人的發布。
 
 ```sh
+export EXPO_NO_DOTENV=1
 fly image show -a nuni-api
 fly machines list -a nuni-api
 mkdir -p /tmp/nuniapifix
@@ -19,15 +20,25 @@ TMPDIR=/tmp/nuniapifix python3 deploy/nuni-api/build.py --imports-compatible-rol
 使用獨立的最小 build-only 設定，避免沿用 archived fly.toml 的 release hook 或拓撲。以下只在發布時執行，遠端建置並推送兩個映像，不部署：
 
 ```sh
+export EXPO_NO_DOTENV=1
 cat > /tmp/nuniapifix/build.fly.toml <<'TOML'
 app = "nuni-api"
 primary_region = "nrt"
 TOML
-fly deploy /tmp/nuniapifix/candidate -a nuni-api --config /tmp/nuniapifix/build.fly.toml --dockerfile apps/api/Dockerfile --remote-only --build-only --push --image-label imports-281-candidate --label org.opencontainers.image.revision=4c7919d6cff32789acb06e2b9f4edb180cdad3a1
-fly deploy /tmp/nuniapifix/rollback -a nuni-api --config /tmp/nuniapifix/build.fly.toml --dockerfile Dockerfile --remote-only --build-only --push --image-label imports-281-compatible-rollback --label org.opencontainers.image.base.digest=sha256:be815455fbb2ccce844b69f004e416e44465e3421f9da654d0cd5db8379c3dc2
+fly deploy /tmp/nuniapifix/candidate -a nuni-api --config /tmp/nuniapifix/build.fly.toml --dockerfile apps/api/Dockerfile --remote-only --build-only --push --depot=false --image-label imports-281-candidate-fix3 --label org.opencontainers.image.revision=4c7919d6cff32789acb06e2b9f4edb180cdad3a1
+fly deploy /tmp/nuniapifix/rollback -a nuni-api --config /tmp/nuniapifix/build.fly.toml --dockerfile Dockerfile --remote-only --build-only --push --depot=false --image-label imports-281-compatible-rollback-fix3 --label org.opencontainers.image.base.digest=sha256:be815455fbb2ccce844b69f004e416e44465e3421f9da654d0cd5db8379c3dc2
 ```
 
+本輪固定映像（2026-11-01，只建置並推送，未部署）：
+
+- 候選：`registry.fly.io/nuni-api@sha256:962722f3ca6f6ca69f5bef3ccad456fb8c32446c96701e653a9a8022f661c26e`。
+- 相容回滾：`registry.fly.io/nuni-api@sha256:b27d87ab9b2736edddd8a40e3d46f1f575e373fcfbddae121439f42e4ecf21e8`。
+
+本輪沿用既有 `fly-builder-hidden-pond-9109`／`891263c6067008`，未新增 app、機器或 volume；明確停用 Depot。重建前必須確認既有 builder 有效；此版本工具對無效 builder 可能自動重建，不可在禁止新增資源時盲目重試。標籤可移動，部署只用上述核驗 digest。
+
 保存兩次 builder 回傳的 immutable `registry.fly.io/nuni-api@sha256:...`，並用 registry manifest 查證 digest／平台及 OCI label；不要把 tag 當 digest。回滾包的程式 revision 沿用 base tree，另記 281 checksum，不能標成候選程式 revision。把 PR head、兩個 digest、tree、SQL checksum、建置時間及驗收證據寫入發布紀錄。浮動 `node:24-alpine` 仍屬本次既有來源限制，tree 相同不代表 runtime bytes 相同。
+
+本輪30檔來源比對結論為原135項中118項既有、17項逾時因素、0項候選獨有回歸；逐檔與重跑證據見 [VALIDATION.md](VALIDATION.md) 及 [FAILURE-COMPARISON.md](FAILURE-COMPARISON.md)。分類完成不等於全套通過。
 
 發布前在隔離環境完成完整 typecheck／build／API suite、PostgreSQL migration 成功與失敗原子性、相容回滾啟動及授權邊界驗收。不能以 Python／聚焦單元測試取代。映像或證據任一缺少就不進下一步。
 
@@ -38,6 +49,7 @@ fly deploy /tmp/nuniapifix/rollback -a nuni-api --config /tmp/nuniapifix/build.f
 使用上節已核驗候選 digest 啟動一次性 migration 工作程序，沿用既有安全注入的正式 migrator 身分及網路／TLS 設定。入口在映像 `/app` 下為：
 
 ```sh
+export EXPO_NO_DOTENV=1
 node apps/api/dist/migrate.js
 ```
 
@@ -48,6 +60,7 @@ node apps/api/dist/migrate.js
 runner 的 production 設定拒絕 `PGOPTIONS`、URL query 與 caller pool options；沒有 `DATABASE_LOCK_TIMEOUT_MS`。`DATABASE_QUERY_TIMEOUT_MS` 必須嚴格大於 statement timeout。以下命令在核驗映像的 `/app` 工作目錄執行，由工作程序管理器沿用既有安全注入的 DATABASE_URL／TLS，不在命令列放入憑證：
 
 ```sh
+export EXPO_NO_DOTENV=1
 EXPO_NO_DOTENV=1 NODE_ENV=production \
 DATABASE_APPLICATION_NAME=nuni-281-migrate \
 DATABASE_POOL_MAX=1 \
@@ -90,11 +103,12 @@ ALTER ROLE nuni_migrator IN DATABASE nuni_database RESET lock_timeout;
 
 ## 3. 更新兩台既有機器
 
-將下列 placeholder 換成已核驗並保存的完整 registry digest；不改 env、services、resources、旗標或 secrets。單 serving 台更新可能短暫不可用。
+下列使用本輪已核驗的完整 registry digest；不改 env、services、resources、旗標或 secrets。單 serving 台更新可能短暫不可用。
 
 ```sh
-fly machine update 857656ef1e7798 -a nuni-api --image registry.fly.io/nuni-api@sha256:<VERIFIED_CANDIDATE_DIGEST> --yes
-fly machine update d897e35f345428 -a nuni-api --image registry.fly.io/nuni-api@sha256:<VERIFIED_CANDIDATE_DIGEST> --skip-start --yes
+export EXPO_NO_DOTENV=1
+fly machine update 857656ef1e7798 -a nuni-api --image registry.fly.io/nuni-api@sha256:962722f3ca6f6ca69f5bef3ccad456fb8c32446c96701e653a9a8022f661c26e --yes
+fly machine update d897e35f345428 -a nuni-api --image registry.fly.io/nuni-api@sha256:962722f3ca6f6ca69f5bef3ccad456fb8c32446c96701e653a9a8022f661c26e --skip-start --yes
 fly machines list -a nuni-api
 fly image show -a nuni-api
 ```
@@ -117,13 +131,14 @@ fly image show -a nuni-api
 281 已登記後，使用事前核驗的「be815455＋同 checksum 281 SQL」相容映像，禁止直接回原 be815455 或用 release v24：
 
 ```sh
-fly machine update 857656ef1e7798 -a nuni-api --image registry.fly.io/nuni-api@sha256:<VERIFIED_COMPATIBLE_ROLLBACK_DIGEST> --yes
-fly machine update d897e35f345428 -a nuni-api --image registry.fly.io/nuni-api@sha256:<VERIFIED_COMPATIBLE_ROLLBACK_DIGEST> --skip-start --yes
+export EXPO_NO_DOTENV=1
+fly machine update 857656ef1e7798 -a nuni-api --image registry.fly.io/nuni-api@sha256:b27d87ab9b2736edddd8a40e3d46f1f575e373fcfbddae121439f42e4ecf21e8 --yes
+fly machine update d897e35f345428 -a nuni-api --image registry.fly.io/nuni-api@sha256:b27d87ab9b2736edddd8a40e3d46f1f575e373fcfbddae121439f42e4ecf21e8 --skip-start --yes
 fly machines list -a nuni-api
 fly image show -a nuni-api
 ```
 
-重做 live／ready、登入、授權邊界與既有功能驗收，確認 stopped 台仍未啟動。保留 DB 新表、撤回紀錄、附件及冪等資料；不執行 280／281 rollback SQL、不刪 schema_migrations、不移除 278／279 triggers。兩個映像目前尚未建置，沒有可填寫的已驗證 digest。
+重做 live／ready、登入、授權邊界與既有功能驗收，確認 stopped 台仍未啟動。保留 DB 新表、撤回紀錄、附件及冪等資料；不執行 280／281 rollback SQL、不刪 schema_migrations、不移除 278／279 triggers。兩個映像已完成只建置、推送與 registry 檔案核驗；尚未以相容回滾映像啟動連接隔離 PostgreSQL 驗證 HTTP 授權，不得當成完整回滾驗收通過。
 
 發布記錄及必要證據移出暫存後，只清理本次 `/tmp/nuniapifix`；不要清其他工作目錄、停止別人的程序。磁碟低於 3GB 即停止並記錄進度。
 
