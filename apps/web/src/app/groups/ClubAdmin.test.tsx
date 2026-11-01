@@ -145,7 +145,7 @@ test('匯出使用最新快照，初次載入晚回不可覆蓋匯出結果', as
     .mockReturnValueOnce(initial.promise)
     .mockResolvedValueOnce(privateView)
     .mockResolvedValueOnce(exported);
-  const createURL = vi.fn((_blob: Blob) => 'blob:roster');
+  const createURL = vi.fn<(blob: Blob) => string>().mockReturnValue('blob:roster');
   vi.stubGlobal('URL', { createObjectURL: createURL, revokeObjectURL: vi.fn() });
   const click = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {});
   try {

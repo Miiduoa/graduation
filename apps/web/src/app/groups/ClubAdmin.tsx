@@ -44,7 +44,6 @@ export function ClubBoard({
       },
     );
     return () => {
-      ++requestId.current;
       current.current = false;
     };
   }, [uid, schoolId, groupId]);
