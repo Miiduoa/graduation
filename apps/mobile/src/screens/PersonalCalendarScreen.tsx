@@ -12,6 +12,8 @@ import {
 import { useFocusEffect, useNavigation, useRoute } from '@react-navigation/native';
 import {
   buildPersonalEventsCalendar,
+  personalEventsOnDate,
+  shiftCalendarMonth,
   draftFromPersonalEvent,
   emptyPersonalEventDraft,
   filterPersonalEvents,
@@ -25,6 +27,7 @@ import {
   type PersonalEventDraft,
   type PersonalImportRecord,
 } from '@campus/shared';
+import { PersonalMonthCalendar } from './PersonalMonthCalendar';
 import { Screen, Button } from '../ui/components';
 import { theme } from '../ui/theme';
 import { usePersonalImportScope } from '../state/personalImportScope';
@@ -110,7 +113,18 @@ function PersonalCalendarWorkspace({
   const scopeSnapshot = useRef(scopeKey);
   scopeSnapshot.current = scopeKey;
   const [load, setLoad] = useState<LoadState>({ status: 'loading' });
-  const [month, setMonth] = useState('');
+  const [month, setMonth] = useState(() => emptyPersonalEventDraft().date.slice(0, 7));
+  const [calendarView, setCalendarView] = useState<'month' | 'list'>('month');
+  const [selectedDate, setSelectedDate] = useState('');
+  const changeMonth = (value: string) => {
+    setMonth(value);
+    setSelectedDate('');
+  };
+  const goToday = () => {
+    const today = emptyPersonalEventDraft().date;
+    setMonth(today.slice(0, 7));
+    setSelectedDate(today);
+  };
   const [mode, setMode] = useState<'idle' | 'create' | 'edit'>('idle');
   const [draft, setDraft] = useState<PersonalEventDraft>(() => emptyPersonalEventDraft());
   const [baseline, setBaseline] = useState<PersonalImportRecord | null>(null);
@@ -203,11 +217,7 @@ function PersonalCalendarWorkspace({
       // Runtime failure publication is not a reconcile trigger — UI only.
       const unsubRuntime = subscribePersonalEventReminderRuntimeFailure((failure) => {
         if (!active.current || personalImportStorageKey(scope) !== scopeSnapshot.current) return;
-        if (
-          failure &&
-          failure.owner === scope.owner &&
-          failure.schoolId === scope.schoolId
-        ) {
+        if (failure && failure.owner === scope.owner && failure.schoolId === scope.schoolId) {
           setReminderBlocked(failure.message);
         } else {
           setReminderBlocked(null);
@@ -221,10 +231,12 @@ function PersonalCalendarWorkspace({
     }, [refresh, refreshReminders, scope]),
   );
 
-  const events = useMemo(
+  const monthEvents = useMemo(
     () => (load.status === 'ready' ? filterPersonalEvents(load.records, month) : []),
     [load, month],
   );
+  const events = selectedDate ? personalEventsOnDate(monthEvents, selectedDate) : monthEvents;
+
   const draftRow = personalEventRowFromDraft(
     draft,
     scope?.schoolId || 'personal',
@@ -306,10 +318,13 @@ function PersonalCalendarWorkspace({
   const saveCreate = () => {
     if (!scope) return;
     const scoped = { ...scope };
-    void runSave(async () => {
-      const row = personalEventRowFromDraft(draft, scoped.schoolId, null);
-      await appendPersonalImports(scoped, [row], () => isActiveScope());
-    }, personalImportSavedNotice(1, load.status === 'ready' && load.syncEnabled));
+    void runSave(
+      async () => {
+        const row = personalEventRowFromDraft(draft, scoped.schoolId, null);
+        await appendPersonalImports(scoped, [row], () => isActiveScope());
+      },
+      personalImportSavedNotice(1, load.status === 'ready' && load.syncEnabled),
+    );
   };
 
   const saveEdit = () => {
@@ -357,10 +372,7 @@ function PersonalCalendarWorkspace({
     ]);
   };
 
-  const exportRecords = async (
-    target: PersonalImportRecord[],
-    filename: string,
-  ) => {
+  const exportRecords = async (target: PersonalImportRecord[], filename: string) => {
     if (load.status !== 'ready' || !scope) return;
     const scopedKey = personalImportStorageKey(scope);
     try {
@@ -371,7 +383,11 @@ function PersonalCalendarWorkspace({
         setNotice('目前沒有可匯出的行程。');
         return;
       }
-      await shareICalContent(result.content, filename, () => isActiveScope() && scopeSnapshot.current === scopedKey);
+      await shareICalContent(
+        result.content,
+        filename,
+        () => isActiveScope() && scopeSnapshot.current === scopedKey,
+      );
       if (!isActiveScope() || scopeSnapshot.current !== scopedKey) return;
       setNotice(personalEventExportNotice(result.eventCount));
     } catch (error) {
@@ -397,7 +413,10 @@ function PersonalCalendarWorkspace({
 
   const applyReminder = async (
     record: PersonalImportRecord,
-    action: () => Promise<{ entry: PersonalEventReminderEntry; permission: { granted: boolean; canAskAgain: boolean; unsupported: boolean } }>,
+    action: () => Promise<{
+      entry: PersonalEventReminderEntry;
+      permission: { granted: boolean; canAskAgain: boolean; unsupported: boolean };
+    }>,
   ) => {
     if (!scope || reminderBusyId) return;
     setReminderBusyId(record.id);
@@ -422,10 +441,14 @@ function PersonalCalendarWorkspace({
       ) {
         setNotice(statusNote);
         if (!result.permission.canAskAgain) {
-          Alert.alert('此裝置通知已關閉', '提醒設定仍保留在此裝置。可到系統設定開啟通知後再重試。', [
-            { text: '稍後', style: 'cancel' },
-            { text: '前往設定', onPress: openPersonalReminderSettings },
-          ]);
+          Alert.alert(
+            '此裝置通知已關閉',
+            '提醒設定仍保留在此裝置。可到系統設定開啟通知後再重試。',
+            [
+              { text: '稍後', style: 'cancel' },
+              { text: '前往設定', onPress: openPersonalReminderSettings },
+            ],
+          );
         }
       } else {
         setNotice(statusNote);
@@ -433,9 +456,7 @@ function PersonalCalendarWorkspace({
       await refreshReminders();
     } catch (error) {
       if (!isActiveScope()) return;
-      setFormError(
-        error instanceof Error ? error.message : '提醒設定沒有完成，行程本身不受影響。',
-      );
+      setFormError(error instanceof Error ? error.message : '提醒設定沒有完成，行程本身不受影響。');
     } finally {
       if (active.current) setReminderBusyId(null);
     }
@@ -547,8 +568,7 @@ function PersonalCalendarWorkspace({
                 entry?.preference.enabled &&
                 entry.preference.mode === 'timed' &&
                 entry.preference.leadMinutes === lead;
-              const label =
-                lead === 0 ? '開始時' : `提前 ${lead} 分`;
+              const label = lead === 0 ? '開始時' : `提前 ${lead} 分`;
               return (
                 <Button
                   key={lead}
@@ -595,7 +615,11 @@ function PersonalCalendarWorkspace({
               }}
             />
             {Platform.OS !== 'web' ? (
-              <Button text="開啟系統通知設定" disabled={busy} onPress={openPersonalReminderSettings} />
+              <Button
+                text="開啟系統通知設定"
+                disabled={busy}
+                onPress={openPersonalReminderSettings}
+              />
             ) : null}
           </View>
         ) : null}
@@ -623,7 +647,7 @@ function PersonalCalendarWorkspace({
               safeNavigate(navigation, 'PersonalImport', { kind: 'events' });
             }}
           />
-          <Button text="匯出目前列表" disabled={!ready} onPress={exportCurrentList} />
+          <Button text="匯出所選月份" disabled={!ready} onPress={exportCurrentList} />
           {load.status === 'error' ? (
             <Button
               text="重試讀取"
@@ -633,7 +657,43 @@ function PersonalCalendarWorkspace({
             />
           ) : null}
         </View>
-        {field('查看月份（YYYY-MM，可留空）', month, setMonth, { placeholder: '2026-10' })}
+        <Text style={{ color: theme.colors.text, fontSize: 18 }}>{month}</Text>
+        <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
+          <Button text="上一月" onPress={() => changeMonth(shiftCalendarMonth(month, -1))} />
+          <Button text="回今天" onPress={goToday} />
+          <Button text="下一月" onPress={() => changeMonth(shiftCalendarMonth(month, 1))} />
+          <Button text="月格" onPress={() => setCalendarView('month')} />
+          <Button
+            text="列表"
+            onPress={() => {
+              setCalendarView('list');
+              setSelectedDate('');
+            }}
+          />
+        </View>
+        {ready && calendarView === 'month' ? (
+          <PersonalMonthCalendar
+            key={month}
+            records={monthEvents}
+            month={month}
+            selectedDate={selectedDate}
+            onDate={setSelectedDate}
+            onEdit={openEdit}
+            disabled={!canMutate}
+          />
+        ) : null}
+        {selectedDate ? (
+          <View>
+            <Text style={{ color: theme.colors.text }}>{selectedDate} 的行程</Text>
+            <Button
+              text="查看整月列表"
+              onPress={() => {
+                setSelectedDate('');
+                setCalendarView('list');
+              }}
+            />
+          </View>
+        ) : null}
         {!scope ? <Text style={{ color: theme.colors.muted }}>正在確認帳號…</Text> : null}
         {load.status === 'loading' ? (
           <Text style={{ color: theme.colors.muted }}>正在讀取行程…</Text>
@@ -667,7 +727,13 @@ function PersonalCalendarWorkspace({
               draft.endDate,
               (endDate) => setDraft({ ...draft, endDate }),
             )}
-            <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+            <View
+              style={{
+                flexDirection: 'row',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+              }}
+            >
               <Text style={{ color: theme.colors.text }}>全天</Text>
               <Switch
                 value={draft.allDay}
@@ -725,10 +791,11 @@ function PersonalCalendarWorkspace({
 
         {ready && !events.length ? (
           <Text style={{ color: theme.colors.muted }}>
-            這裡還沒有行程。按「新增行程」直接建立，或從截圖／檔案匯入。
+            {selectedDate ? '這一天還沒有行程。' : '這個月還沒有行程。'}
+            按「新增行程」直接建立，或從截圖／檔案匯入。
           </Text>
         ) : null}
-        {events.map((event) => (
+        {(calendarView === 'list' || selectedDate ? events : []).map((event) => (
           <Pressable
             key={event.id}
             accessibilityRole="button"
@@ -739,8 +806,7 @@ function PersonalCalendarWorkspace({
               padding: 14,
               borderRadius: 12,
               borderWidth: 1,
-              borderColor:
-                baseline?.id === event.id ? theme.colors.accent : theme.colors.border,
+              borderColor: baseline?.id === event.id ? theme.colors.accent : theme.colors.border,
               backgroundColor: theme.colors.surface,
             }}
           >

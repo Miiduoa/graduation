@@ -1,8 +1,13 @@
 'use client';
 
+import { MonthCalendar } from './MonthCalendar';
+
 import { useEffect, useRef, useState } from 'react';
 import {
   buildPersonalEventsCalendar,
+  personalEventsOnDate,
+  shiftCalendarMonth,
+  isCalendarMonth,
   draftFromPersonalEvent,
   emptyPersonalEventDraft,
   filterPersonalEvents,
@@ -136,7 +141,18 @@ function PersonalCalendarWorkspace() {
   const scope = context.scope;
   const scopeKey = context.scopeKey;
   const ledger = usePersonalImports(scope, !context.loading);
-  const [month, setMonth] = useState('');
+  const [month, setMonth] = useState(() => emptyPersonalEventDraft().date.slice(0, 7));
+  const [calendarView, setCalendarView] = useState<'month' | 'list'>('month');
+  const [selectedDate, setSelectedDate] = useState('');
+  const changeMonth = (value: string) => {
+    setMonth(value);
+    setSelectedDate('');
+  };
+  const goToday = () => {
+    const today = emptyPersonalEventDraft().date;
+    setMonth(today.slice(0, 7));
+    setSelectedDate(today);
+  };
   const [mode, setMode] = useState<'idle' | 'create' | 'edit'>('idle');
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [draft, setDraft] = useState<PersonalEventDraft>(() => emptyPersonalEventDraft());
@@ -155,8 +171,13 @@ function PersonalCalendarWorkspace() {
     };
   }, []);
 
-  const events = filterPersonalEvents(ledger.records, month);
-  const draftRow = personalEventRowFromDraft(draft, scope.schoolId, mode === 'edit' ? baseline : null);
+  const monthEvents = filterPersonalEvents(ledger.records, month);
+  const events = selectedDate ? personalEventsOnDate(monthEvents, selectedDate) : monthEvents;
+  const draftRow = personalEventRowFromDraft(
+    draft,
+    scope.schoolId,
+    mode === 'edit' ? baseline : null,
+  );
   const draftIssues = personalEventDraftIssues(draftRow);
   const canMutate = !context.loading && ledger.ready && !saving;
 
@@ -216,10 +237,13 @@ function PersonalCalendarWorkspace() {
 
   const saveCreate = () => {
     const scoped = { ...scope };
-    void runSave(async () => {
-      const row = personalEventRowFromDraft(draft, scoped.schoolId, null);
-      await savePersonalImportBatch(scoped, [row], () => isActiveScope(scoped));
-    }, personalImportSavedNotice(1, ledger.syncEnabled));
+    void runSave(
+      async () => {
+        const row = personalEventRowFromDraft(draft, scoped.schoolId, null);
+        await savePersonalImportBatch(scoped, [row], () => isActiveScope(scoped));
+      },
+      personalImportSavedNotice(1, ledger.syncEnabled),
+    );
   };
 
   const saveEdit = () => {
@@ -309,7 +333,7 @@ function PersonalCalendarWorkspace() {
               disabled={!ledger.ready}
               onClick={exportCurrentList}
             >
-              匯出目前列表
+              匯出所選月份
             </button>
           </div>
         </div>
@@ -326,8 +350,78 @@ function PersonalCalendarWorkspace() {
         {exportNotice && <p role="status">{exportNotice}</p>}
         <label className={styles.field}>
           查看月份
-          <input type="month" value={month} onChange={(event) => setMonth(event.target.value)} />
+          <input
+            type="month"
+            value={month}
+            onChange={(event) => {
+              if (isCalendarMonth(event.target.value)) changeMonth(event.target.value);
+            }}
+          />
         </label>
+        <div className={styles.actions}>
+          <button
+            type="button"
+            className="btn"
+            onClick={() => changeMonth(shiftCalendarMonth(month, -1))}
+          >
+            上一月
+          </button>
+          <button type="button" className="btn" onClick={goToday}>
+            回今天
+          </button>
+          <button
+            type="button"
+            className="btn"
+            onClick={() => changeMonth(shiftCalendarMonth(month, 1))}
+          >
+            下一月
+          </button>
+          <button
+            type="button"
+            className="btn"
+            aria-pressed={calendarView === 'month'}
+            onClick={() => setCalendarView('month')}
+          >
+            月格
+          </button>
+          <button
+            type="button"
+            className="btn"
+            aria-pressed={calendarView === 'list'}
+            onClick={() => {
+              setCalendarView('list');
+              setSelectedDate('');
+            }}
+          >
+            列表
+          </button>
+        </div>
+        {!context.loading && ledger.ready && !ledger.error && calendarView === 'month' && (
+          <MonthCalendar
+            key={month}
+            records={monthEvents}
+            month={month}
+            selectedDate={selectedDate}
+            onDate={setSelectedDate}
+            onEdit={openEdit}
+            disabled={!canMutate}
+          />
+        )}
+        {selectedDate && (
+          <div className={styles.actions}>
+            <h3>{selectedDate} 的行程</h3>
+            <button
+              type="button"
+              className="btn"
+              onClick={() => {
+                setSelectedDate('');
+                setCalendarView('list');
+              }}
+            >
+              查看整月列表
+            </button>
+          </div>
+        )}
         {ledger.error && (
           <p role="alert">
             {ledger.error} 讀取失敗時不會清空或覆寫現有資料；請稍後重試，暫時無法新增或刪除。
@@ -396,9 +490,10 @@ function PersonalCalendarWorkspace() {
           <p role="status">正在讀取行程…</p>
         ) : ledger.error ? null : !events.length ? (
           <p className={styles.empty}>
-            這裡還沒有行程。按「新增行程」直接建立，或從上方「從截圖或檔案匯入」。
+            {selectedDate ? '這一天還沒有行程。' : '這個月還沒有行程。'}
+            按「新增行程」直接建立，或從上方「從截圖或檔案匯入」。
           </p>
-        ) : (
+        ) : calendarView === 'list' || selectedDate ? (
           <ul className={styles.saved}>
             {events.map((event) => (
               <li key={event.id}>
@@ -428,7 +523,7 @@ function PersonalCalendarWorkspace() {
               </li>
             ))}
           </ul>
-        )}
+        ) : null}
       </section>
     </div>
   );
