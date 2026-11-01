@@ -26,6 +26,7 @@ import {
   type FoodDraftCache,
 } from './foodState';
 import { foodCustomerNextStep, isFoodOrderInProgress } from './foodOrderGuidance';
+import { FoodOrderReceipt } from './FoodOrderReceipt';
 import styles from './Food.module.css';
 
 export function FoodOrders({
@@ -345,21 +346,7 @@ export function FoodOrderDetail({
               預計取餐 {foodTime(receipt.requestedPickupAt)} · 取餐號碼 {receipt.pickup.displayCode}
             </p>
           </div>
-          <div>
-            {receipt.lines.map((line, index) => (
-              <p key={index}>
-                {[
-                  `${line.nameSnapshot} × ${line.quantity}`,
-                  line.selectedOptions.map((option) => option.nameSnapshot).join('、'),
-                  foodMoney(line.lineTotal),
-                  line.customerNote,
-                ]
-                  .filter(Boolean)
-                  .join(' · ')}
-              </p>
-            ))}
-            <p className={styles.amount}>應付 {foodMoney(receipt.total)}</p>
-          </div>
+          <p className={styles.amount}>訂單總額 {foodMoney(receipt.total)}</p>
           {receipt.state === 'payment-pending' &&
             !(
               payment &&
@@ -511,6 +498,17 @@ export function FoodOrderDetail({
               </Button>
             </div>
           )}
+          <FoodOrderReceipt
+            expandLines={inProgress}
+            order={{
+              id: receipt.id,
+              locationName: receipt.locationName,
+              lines: receipt.lines,
+              total: receipt.total,
+              createdAt: receipt.createdAt,
+              updatedAt: receipt.updatedAt,
+            }}
+          />
         </div>
       )}
     </section>
