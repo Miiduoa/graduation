@@ -2,7 +2,7 @@ import * as photoPdf from '../screens/nuni/nativePhotoPdf';
 import React from 'react';
 import { AppState, type AppStateStatus } from 'react-native';
 import { act, fireEvent, render, waitFor, within } from '@testing-library/react-native';
-import { NuniError, type NuniMaterial, type NuniWorkspace } from '@campus/shared/src/nuni';
+import { createNuniClasses, NuniError, type NuniMaterial, type NuniWorkspace } from '@campus/shared/src/nuni';
 import { NuniCourses } from '../screens/nuni/NuniCourses';
 import { NuniDraftProvider } from '../state/nuniDrafts';
 
@@ -2405,4 +2405,33 @@ it.each([403, 404])('stops a linked material search and removes course content a
   expect(view.queryByRole('button', { name: '繼續尋找' })).toBeNull();
   await act(async () => { await new Promise((resolve) => setTimeout(resolve, 50)); });
   expect(mockRequest.mock.calls.filter(([path]) => path.endsWith('/materials/page'))).toHaveLength(2);
+});
+
+it('合成發布經共用寫入與輪詢後五秒內出現在學生畫面', async () => {
+  AppState.currentState = 'active';
+  const subscription = jest.spyOn(AppState, 'addEventListener').mockReturnValue({ remove: jest.fn() });
+  const view = await openCourse();
+  jest.useFakeTimers();
+  try {
+    fireEvent.press(view.getByRole('button', { name: '教材 0' }));
+    mockRequest.mockImplementation(async (path, context, input) => {
+      if (!path.endsWith('/assignments')) return response(path, context, input);
+      await new Promise((resolve) => setTimeout(resolve, input ? 200 : 300));
+      if (!input) return { assignments: [assignment] };
+      assignment = { ...assignment, title: input.title, instructions: input.instructions };
+      return assignment;
+    });
+    fireEvent.press(view.getByRole('button', { name: '作業 1' }));
+    await act(async () => { await jest.advanceTimersByTimeAsync(301); });
+    const teacher = createNuniClasses((path, input) => mockRequest(path, 'teacher', input), accountId);
+    const started = Date.now();
+    const write = teacher.createAssignment(courseId, { title: '跨端新發布作業', instructions: '合成內容',
+      dueAt: null, idempotencyKey: 'synthetic-publication' });
+    for (let elapsed = 0; elapsed < 5000 && !view.queryByText('跨端新發布作業'); elapsed += 50)
+      await act(async () => { await jest.advanceTimersByTimeAsync(50); });
+    await write;
+    expect(view.getByText('跨端新發布作業')).toBeTruthy();
+    expect(Date.now() - started).toBeLessThanOrEqual(5000);
+    expect(Date.now() - started).toBe(2800);
+  } finally { view.unmount(); jest.useRealTimers(); subscription.mockRestore(); }
 });
