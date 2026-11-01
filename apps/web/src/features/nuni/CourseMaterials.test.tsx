@@ -542,13 +542,15 @@ it.each([403, 404])('offers a safe course return for inaccessible material links
   expect(await screen.findByRole('alert')).toBeTruthy();
   expect(screen.getByRole('link', { name: '回課程首頁' }).getAttribute('href')).toBe(`/classroom/course/${workspace.id}`);
   expect(screen.queryByRole('article')).toBeNull();
-  expect(window.location.hash).toBe('');
+  // 提示文字先提交到畫面，清除 hash 的 effect 可能稍後才執行。
+  await waitFor(() => expect(window.location.hash).toBe(''));
 });
 it('keeps a safe course entry available after a linked material was deleted', async () => {
   window.history.replaceState(null, '', '/#material-cwm_deleted');
   render(<CourseMaterials workspace={workspace} />);
   await screen.findByText(COURSE_WORK_MISSING_MATERIAL);
-  expect(window.location.hash).toBe('');
+  // 提示文字先提交到畫面，清除 hash 的 effect 可能稍後才執行。
+  await waitFor(() => expect(window.location.hash).toBe(''));
   expect(screen.getByRole('link', { name: '回課程首頁' }).getAttribute('href')).not.toContain('#');
 });
 it('stops automatic target lookup on a repeated cursor', async () => {
