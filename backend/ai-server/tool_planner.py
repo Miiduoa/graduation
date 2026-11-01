@@ -204,7 +204,13 @@ def _format_generic_failure(
         "createDormRepairRequest": "宿舍報修",
         "createFoodOrder": "餐廳訂單",
         "listMyDormRepairs": "查詢宿舍報修",
-    }.get(tool_name, tool_name)
+        "createReminder": "建立提醒",
+        "navigateToScreen": "開啟功能頁",
+        "getPendingAssignments": "查詢待繳作業",
+        "getTodaySchedule": "查詢課表",
+        "getMyGrades": "查詢成績",
+        "getLatestAnnouncements": "查詢公告",
+    }.get(tool_name, "這項操作")
     hint = ""
     if tool_name == "createDormRepairRequest":
         hint = "\n建議你直接到「校園 → 宿舍 → 我要報修」手動填寫。"
