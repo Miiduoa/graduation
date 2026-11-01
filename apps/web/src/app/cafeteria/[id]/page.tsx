@@ -2,6 +2,7 @@
 
 import { use, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
+import { PublicSourceNotice } from '@/components/PublicSourceNotice';
 import { SiteShell } from '@/components/SiteShell';
 import { CampusIcon } from '@/components/CampusIcon';
 import { SchoolScopePlaceholder } from '@/components/SchoolScopePlaceholder';
@@ -175,17 +176,16 @@ function StorefrontContent({
                     <dd>{shop.openingHours || '請向店家確認營業時間'}</dd>
                   </div>
                 </dl>
-                {websiteUrl ? (
-                  <a
-                    className={styles.websiteLink}
-                    href={websiteUrl}
-                    rel="noopener noreferrer"
-                    target="_blank"
-                  >
-                    店家網站
-                    <CampusIcon name="arrow" size={17} />
-                  </a>
-                ) : null}
+                <PublicSourceNotice
+                  sourceLabel={shop.sourceLabel}
+                  confirmedAt={shop.menuSyncedAt}
+                  timeLabel="最後確認（菜單同步）"
+                  expired={isMenuStale(shop.menuSyncedAt)}
+                  officialUrl={websiteUrl}
+                  officialLabel="店家網站"
+                >
+                  <p>菜單同步時間不代表位置、營業時間或價格已經店家核對；出發前請再確認。</p>
+                </PublicSourceNotice>
                 {action.kind === 'showcase' ? (
                   <p className={styles.caption}>{SHOWCASE_ORDER_CAPTION}</p>
                 ) : (

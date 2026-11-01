@@ -12,7 +12,17 @@ export const clubSummaryEnabled = () => process.env.EXPO_PUBLIC_CLUB_ADMIN_ENABL
 export type ClubSummaryData = {
   rosterOnly?: boolean;
   members: { id: string; name: string; role: string }[];
-  events: { id: string; title: string; startsAt: number; registered: number; checkedIn: number }[];
+  events: {
+    id: string;
+    title: string;
+    location: string;
+    startsAt: number;
+    endsAt: number;
+    registered: number;
+    checkedIn: number;
+    mine: boolean;
+    myCheckIn: boolean;
+  }[];
 };
 export async function loadClubSummary(
   uid: string,
