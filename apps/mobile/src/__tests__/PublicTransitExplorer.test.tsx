@@ -2,8 +2,9 @@ import React from 'react';
 import { act, fireEvent, render, waitFor } from '@testing-library/react-native';
 import * as Location from 'expo-location';
 import { AppState, Keyboard, Linking, View } from 'react-native';
-import { PublicTransitExplorer } from '../components/PublicTransitExplorer';
+import { focusForScreenReader, PublicTransitExplorer } from '../components/PublicTransitExplorer';
 import {
+  PUBLIC_BUS_OFFICIAL_FALLBACK,
   queryPublicTransit,
   TAICHUNG_BUS_CATALOG_SOURCE,
   TAICHUNG_BUS_OFFICIAL,
@@ -335,7 +336,7 @@ test.each(['button', 'android', 'screen-reader'] as const)('closing detail with 
   const signal = jest.mocked(queryPublicTransit).mock.calls[1][1]!;
   if (method === 'button') fireEvent.press(view.getByText('返回站牌清單'));
   else if (method === 'android') fireEvent(view.getByTestId('public-transit-stop-details'), 'requestClose');
-  else fireEvent(view.getByText('返回站牌清單'), 'accessibilityEscape');
+  else fireEvent(view.getByTestId('public-transit-stop-details-panel'), 'accessibilityEscape');
   expect(signal.aborted).toBe(true);
   await act(async () => arrivals.resolve({ status: 'ready', kind: 'arrivals', fetchedAt: fetchedAt(), arrivals: [
     { id: 'late', route: '晚到回應', direction: 0, destination: '', status: 0, seconds: 60, updatedAt: fetchedAt() },
@@ -397,6 +398,45 @@ test('detail can recover from unavailable arrivals and retains the existing stal
   expect(view.getByText('83 往 火車站 · 資料待更新')).toBeTruthy();
   expect(view.getByTestId('public-transit-stop-details')).toBeTruthy();
   view.unmount();
+});
+
+test('list official-site openings share the busy lock and retry the same URL after failure', async () => {
+  const opening = deferred<void>();
+  const openURL = jest.spyOn(Linking, 'openURL').mockReturnValueOnce(opening.promise).mockResolvedValue(undefined);
+  const view = render(<PublicTransitExplorer schoolId="nthu" />);
+  try {
+    const official = view.getByText('公路客運官方網站');
+    act(() => { fireEvent.press(official); fireEvent.press(official); });
+    expect(view.getByText('正在開啟連結…')).toBeTruthy();
+    expect(openURL).toHaveBeenCalledTimes(1);
+    expect(openURL).toHaveBeenCalledWith(PUBLIC_BUS_OFFICIAL_FALLBACK);
+    await act(async () => opening.reject(new Error('no browser')));
+    expect(view.getByText('無法開啟連結，請確認裝置可開啟瀏覽器或地圖後再試。')).toBeTruthy();
+    await act(async () => fireEvent.press(view.getByText('再試開啟連結')));
+    expect(openURL).toHaveBeenCalledTimes(2);
+    expect(openURL).toHaveBeenLastCalledWith(PUBLIC_BUS_OFFICIAL_FALLBACK);
+    expect(view.queryByText(/無法開啟連結/)).toBeNull();
+  } finally {
+    view.unmount();
+    openURL.mockRestore();
+  }
+});
+
+test('web screen-reader focus helper skips missing focus APIs without throwing', () => {
+  const platform = require('react-native').Platform as { OS: string };
+  const previous = platform.OS;
+  platform.OS = 'web';
+  try {
+    expect(() => focusForScreenReader({} as never)).not.toThrow();
+    expect(() => focusForScreenReader({
+      focus: () => { throw new Error('focus rejected'); },
+    } as never)).not.toThrow();
+    const focus = jest.fn();
+    focusForScreenReader({ focus } as never);
+    expect(focus).toHaveBeenCalledWith({ preventScroll: true });
+  } finally {
+    platform.OS = previous;
+  }
 });
 
 test('external navigation failures remain visible in detail and retry the same link without duplicate openings', async () => {

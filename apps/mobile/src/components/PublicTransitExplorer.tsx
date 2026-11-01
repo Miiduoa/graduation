@@ -21,11 +21,17 @@ import {
 const RADII = [300, 600, 1000] as const;
 const wrappingButton: ViewStyle = { maxWidth: '100%', flexDirection: 'column', alignItems: 'stretch' };
 
-function focusForScreenReader(target: View | null) {
+export function focusForScreenReader(target: View | null) {
   if (!target) return;
   if (Platform.OS === 'web') {
     // React Native Web refs are DOM nodes; findNodeHandle is unsupported there.
-    (target as unknown as { focus: (options: { preventScroll: boolean }) => void }).focus({ preventScroll: true });
+    const node = target as unknown as { focus?: (options: { preventScroll: boolean }) => void };
+    if (typeof node.focus !== 'function') return;
+    try {
+      node.focus({ preventScroll: true });
+    } catch {
+      // Non-focusable nodes must not break opening or returning from stop details.
+    }
     return;
   }
   const handle = findNodeHandle(target);
@@ -187,6 +193,7 @@ function StopDetails({ stop, onClose, onDismiss }: {
       onShow={() => focusForScreenReader(title.current)}
     >
       <SafeAreaView
+        testID="public-transit-stop-details-panel"
         accessibilityViewIsModal
         onAccessibilityEscape={onClose}
         style={{ flex: 1, backgroundColor: theme.colors.bg }}
@@ -247,12 +254,15 @@ export function PublicTransitExplorer({
   const [selected, setSelected] = useState<PublicBusStop | null>(null);
   const [status, setStatus] = useState<'idle' | 'loading' | 'ready' | 'unavailable'>('idle');
   const [message, setMessage] = useState('');
+  const [linkBusy, setLinkBusy] = useState(false);
+  const [failedLink, setFailedLink] = useState<string | null>(null);
   const [accuracyNotice, setAccuracyNotice] = useState('');
   const [locating, setLocating] = useState(false);
   const request = useRef<AbortController | null>(null);
   const positionRevision = useRef(0);
   const positionTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const mounted = useRef(true);
+  const linkOpening = useRef(false);
   const stopButtons = useRef(new Map<string, View>());
   const returnTarget = useRef<View | null>(null);
   const detailsOpen = useRef(false);
@@ -294,6 +304,7 @@ export function PublicTransitExplorer({
     setSelected(null);
     setStatus('idle');
     setMessage('');
+    setFailedLink(null);
     setAccuracyNotice('');
   };
 
@@ -306,6 +317,7 @@ export function PublicTransitExplorer({
     detailsOpen.current = false;
     setSelected(null);
     setMessage('');
+    setFailedLink(null);
     const result = await queryPublicTransit(query, controller.signal);
     if (controller.signal.aborted || !mounted.current) return;
     if (result.status === 'ready' && result.kind === 'stops') {
@@ -382,10 +394,20 @@ export function PublicTransitExplorer({
     }
   };
 
-  const openLink = (url: string) => {
-    void Linking.openURL(url).catch(() => {
-      if (mounted.current) setMessage('無法開啟連結，請確認網路連線後再試。');
-    });
+  const openLink = async (url: string) => {
+    if (linkOpening.current || !mounted.current) return;
+    linkOpening.current = true;
+    setLinkBusy(true);
+    setFailedLink(null);
+    setMessage('');
+    try {
+      await Linking.openURL(url);
+    } catch {
+      if (mounted.current) setFailedLink(url);
+    } finally {
+      linkOpening.current = false;
+      if (mounted.current) setLinkBusy(false);
+    }
   };
 
   const body = { ...theme.typography.bodySmall, color: theme.colors.muted };
@@ -516,8 +538,14 @@ export function PublicTransitExplorer({
           style={wrappingButton}
           label={city === 'Taichung' ? '臺中公車官方網站' : '公路客運官方網站'}
           variant="ghost"
-          onPress={() => openLink(city === 'Taichung' ? TAICHUNG_BUS_OFFICIAL : PUBLIC_BUS_OFFICIAL_FALLBACK)}
+          disabled={linkBusy}
+          onPress={() => void openLink(city === 'Taichung' ? TAICHUNG_BUS_OFFICIAL : PUBLIC_BUS_OFFICIAL_FALLBACK)}
         />
+        {linkBusy && <Text accessibilityLiveRegion="polite" style={body}>正在開啟連結…</Text>}
+        {failedLink && <View style={{ gap: theme.space.sm }}>
+          <Text accessibilityRole="alert" style={body}>無法開啟連結，請確認裝置可開啟瀏覽器或地圖後再試。</Text>
+          <AIButton label="再試開啟連結" variant="ghost" style={wrappingButton} onPress={() => void openLink(failedLink)} />
+        </View>}
       </View>
     </AICard>
   );
