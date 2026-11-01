@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """Rebuild the deployed Nuni API from its pinned source and reviewed patches."""
 import argparse
+import contextlib
+import shutil
 import importlib.util
 import hashlib
 import json
@@ -20,10 +22,21 @@ def parse_args(argv=None):
     extensions.add_argument('--public-cafeterias-candidate', action='store_true', help='Build the public read-only cafeteria catalog; never deploy or migrate')
     extensions.add_argument('--food-ordering-candidate', action='store_true', help='Build the six-patch ordering candidate; never deploy, migrate or combine other candidates')
     extensions.add_argument('--security-candidate', action='store_true', help='Build the production-bound runtime dependency security image (deploy/nuni-api/security); never deploy, migrate, or alter default overlays')
-    return parser.parse_args(argv)
+    parser.add_argument('--prepare-only', action='store_true', help='Write verified build context without building, pushing, deploying or migrating')
+    parser.add_argument('--output-dir', type=Path, help='New directory for --prepare-only build context')
+    args = parser.parse_args(argv)
+    if args.prepare_only != bool(args.output_dir):
+        parser.error('--prepare-only and --output-dir must be used together')
+    if args.prepare_only and not (args.imports_candidate or args.imports_compatible_rollback):
+        parser.error('--prepare-only requires an imports candidate or compatible rollback')
+    return args
 
 
 def build(args):
+    if args.prepare_only:
+        args.output_dir = args.output_dir.resolve()
+        if args.output_dir.exists():
+            raise SystemExit('Output directory must not exist')
     if args.security_candidate:
         spec = importlib.util.spec_from_file_location('nuni_api_security_prepare', root / 'security' / 'prepare.py')
         extension = importlib.util.module_from_spec(spec)
@@ -38,14 +51,24 @@ def build(args):
         dockerfile = root / 'composed/Dockerfile.rollback'
         if ('FROM ' + rollback['baseImage'] + '\n') not in dockerfile.read_text():
             raise SystemExit('Rollback image base mismatch')
+        if args.prepare_only:
+            args.output_dir.mkdir(parents=True)
+            for name in rollback['migrations']:
+                destination = args.output_dir / name
+                destination.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copyfile(project / name, destination)
+            shutil.copyfile(dockerfile, args.output_dir / 'Dockerfile')
+            (args.output_dir / 'release-source.json').write_text(json.dumps(rollback, indent=2) + '\n')
+            return
         subprocess.run(['docker', 'build', '--platform', 'linux/amd64', '-f', str(dockerfile),
                         '--label', 'org.opencontainers.image.base.digest=' + rollback['baseImage'].split('@')[1],
                         '-t', 'nuni-api:imports-compatible-rollback', str(project)], check=True)
         return
     manifest_path = root / ('food-ordering/source.json' if args.food_ordering_candidate else 'source.json')
     manifest = json.loads(manifest_path.read_text())
-    with tempfile.TemporaryDirectory(prefix='campus-nuni-api-') as scratch:
-        checkout = Path(scratch) / 'source'
+    context = contextlib.nullcontext(None) if args.prepare_only else tempfile.TemporaryDirectory(prefix='campus-nuni-api-')
+    with context as scratch:
+        checkout = args.output_dir if args.prepare_only else Path(scratch) / 'source'
         subprocess.run(['git', 'clone', '--quiet', manifest['repository'], str(checkout)], check=True)
         subprocess.run(['git', 'checkout', '--quiet', '--detach', manifest['baseCommit']], cwd=checkout, check=True)
         for patch in manifest['patches']:
@@ -82,6 +105,11 @@ def build(args):
             print(json.dumps(plan, ensure_ascii=False, indent=2))
             image = 'nuni-api:public-cafeterias-candidate'
             revision = plan['candidateTree']
+        if args.prepare_only:
+            # Keep the verified Git tree unchanged; remote builder receives the
+            # revision label through its image label, recorded in the runbook.
+            print(json.dumps({'context': str(checkout), 'revision': revision, 'buildsImage': False}))
+            return
         subprocess.run(['docker', 'build', '--platform', 'linux/amd64', '-f', 'apps/api/Dockerfile',
                         '--label', 'org.opencontainers.image.revision=' + revision,
                         '-t', image, '.'], cwd=checkout, check=True)
