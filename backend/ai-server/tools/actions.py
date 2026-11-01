@@ -497,6 +497,7 @@ def register_default_tools() -> None:
             "additionalProperties": False,
         },
         handler=_list_my_dorm_repairs,
+        requires_confirmation=False,
     )
 
     register_tool(
@@ -559,30 +560,35 @@ def register_default_tools() -> None:
         description=NAVIGATE_TOOL_SPEC["function"]["description"],
         parameters=NAVIGATE_TOOL_SPEC["function"]["parameters"],
         handler=navigate_to_screen,
+        requires_confirmation=False,
     )
     register_tool(
         name=GET_PENDING_ASSIGNMENTS_SPEC["function"]["name"],
         description=GET_PENDING_ASSIGNMENTS_SPEC["function"]["description"],
         parameters=GET_PENDING_ASSIGNMENTS_SPEC["function"]["parameters"],
         handler=get_pending_assignments,
+        requires_confirmation=False,
     )
     register_tool(
         name=GET_TODAY_SCHEDULE_SPEC["function"]["name"],
         description=GET_TODAY_SCHEDULE_SPEC["function"]["description"],
         parameters=GET_TODAY_SCHEDULE_SPEC["function"]["parameters"],
         handler=get_today_schedule,
+        requires_confirmation=False,
     )
     register_tool(
         name=GET_GRADES_SPEC["function"]["name"],
         description=GET_GRADES_SPEC["function"]["description"],
         parameters=GET_GRADES_SPEC["function"]["parameters"],
         handler=get_my_grades,
+        requires_confirmation=False,
     )
     register_tool(
         name=GET_ANNOUNCEMENTS_SPEC["function"]["name"],
         description=GET_ANNOUNCEMENTS_SPEC["function"]["description"],
         parameters=GET_ANNOUNCEMENTS_SPEC["function"]["parameters"],
         handler=get_latest_announcements,
+        requires_confirmation=False,
     )
     register_tool(
         name="createReminder",

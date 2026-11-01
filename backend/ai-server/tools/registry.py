@@ -43,7 +43,7 @@ class ToolDefinition:
     description: str
     parameters: dict[str, Any]
     handler: ToolHandler
-    requires_confirmation: bool = False
+    requires_confirmation: bool = True
 
 
 class ToolExecutionError(Exception):
@@ -68,7 +68,7 @@ def register_tool(
     description: str,
     parameters: dict[str, Any],
     handler: ToolHandler,
-    requires_confirmation: bool = False,
+    requires_confirmation: bool = True,
 ) -> None:
     if name in _REGISTRY:
         raise ValueError(f"Tool already registered: {name}")
@@ -90,7 +90,7 @@ def tool_names() -> list[str]:
 
 
 def list_openai_tools() -> list[dict[str, Any]]:
-    """Build the `tools` array for OpenAI-compatible chat completions."""
+    """Expose only tools that explicitly allow execution without confirmation."""
     return [
         {
             "type": "function",
@@ -101,6 +101,7 @@ def list_openai_tools() -> list[dict[str, Any]]:
             },
         }
         for tool in _REGISTRY.values()
+        if tool.requires_confirmation is False
     ]
 
 
@@ -122,6 +123,15 @@ async def execute_tool(
             "errorMessage": f"Unknown tool: {name}",
         }
 
+    # A model argument or client context is not evidence of user confirmation.
+    # This runtime has no verified confirmation endpoint, so these tools stay closed.
+    if tool.requires_confirmation is not False:
+        return {
+            "success": False,
+            "errorCode": "confirmation_required",
+            "errorMessage": "這項操作尚未提供本人確認流程，因此沒有執行。請至對應功能頁處理。",
+        }
+
     safe_args = args if isinstance(args, dict) else {}
     try:
         result = tool.handler(ctx, safe_args)
@@ -140,6 +150,12 @@ async def execute_tool(
                 "errorCode": "tool_missing_success_flag",
                 "errorMessage": f"Tool {name} did not return a `success` boolean.",
                 "rawOutput": result,
+            }
+        if type(result["success"]) is not bool:
+            return {
+                "success": False,
+                "errorCode": "tool_invalid_success_flag",
+                "errorMessage": "工具回覆無法確認是否成功，請至對應功能頁核對。",
             }
         return result
     except ToolExecutionError as exc:
