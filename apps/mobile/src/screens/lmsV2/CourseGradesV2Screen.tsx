@@ -11,6 +11,7 @@ type GradeItem = {
   id: string;
   title: string;
   max_points: number | null;
+  grade_categories: { weight: number };
   grade_scores: { score: number | null; updated_at?: string | null }[];
 };
 
@@ -40,7 +41,7 @@ export async function loadCourseGrades(courseId: string): Promise<CourseGrades> 
     const { data, error } = await sb
       .from('grade_items')
       .select(
-        'id, title, max_points, grade_categories!inner(course_id), grade_scores(score, updated_at)',
+        'id, title, max_points, grade_categories!inner(course_id, weight), grade_scores(score, updated_at)',
       )
       .eq('grade_categories.course_id', courseId)
       .eq('grade_scores.student_id', studentId)
@@ -83,7 +84,8 @@ function CourseGradesContent({
     return loadCourseGrades(courseId);
   });
 
-  const completeScores = !!loadable.data?.items.length && loadable.data.items.every((item) =>
+  const contributingItems = loadable.data?.items.filter((item) => item.grade_categories.weight > 0) ?? [];
+  const completeScores = contributingItems.length > 0 && contributingItems.every((item) =>
     item.grade_scores?.length === 1 &&
     typeof item.grade_scores[0].score === 'number' &&
     Number.isFinite(item.grade_scores[0].score),
@@ -107,7 +109,7 @@ function CourseGradesContent({
       <CourseV2Header title="成績" subtitle={courseName} />
       <Text style={styles.meta}>
         來源：nuni 課程 ·
-        更新時間：依各筆紀錄；未取得顯示未知，待評不算零分。總分依課程權重加總；任一項待評或未取得時，總分為未知。
+        更新時間：依各筆紀錄；未取得顯示未知，待評不算零分。總分依課程權重加總；應計項目待評或未取得時，總分為未知。
       </Text>
       {!loadable.loading && !loadable.error && loadable.data?.rollup ? (
         <View style={styles.summary}>

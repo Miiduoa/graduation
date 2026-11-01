@@ -169,3 +169,40 @@ test('明確零分仍可計算，帳號之間不共用分數', () => {
   ]);
   expect(result.rows.map((row) => row.finalScore)).toEqual([0, null]);
 });
+
+test.each([undefined, null, 0, 75])('零權重練習分數 %s 不影響 90/90/100', (score) => {
+  const result = computeGradebook([
+    { id: 'final', title: '期末', weight: 100 },
+    { id: 'practice', title: '練習', weight: 0 },
+  ], [{ uid: 'u', displayName: '學生', scores: [
+    { gradeItemId: 'final', score: 90 },
+    ...(score === undefined ? [] : [{ gradeItemId: 'practice', score }]),
+  ] }]);
+  expect(result.rows[0].finalScore).toBe(90);
+  expect(result.classAverage).toBe(90);
+  expect(result.passRate).toBe(100);
+});
+
+test('全零權重平均分配後，缺分仍為未知、免修仍重分權重', () => {
+  const items = [
+    { id: 'a', title: 'A', weight: 0 },
+    { id: 'b', title: 'B', weight: 0 },
+  ];
+  const result = computeGradebook(items, [
+    { uid: 'pending', displayName: '待評', scores: [{ gradeItemId: 'a', score: 90 }] },
+    { uid: 'excused', displayName: '免修', scores: [{ gradeItemId: 'a', score: 90 }, { gradeItemId: 'b', score: null, excused: true }] },
+  ]);
+  expect(result.rows.map((row) => row.finalScore)).toEqual([null, 90]);
+});
+
+test('正權重免修後，零權重未評項目不影響剩餘有效成績', () => {
+  const result = computeGradebook([
+    { id: 'a', title: 'A', weight: 50 },
+    { id: 'b', title: 'B', weight: 50 },
+    { id: 'practice', title: '練習', weight: 0 },
+  ], [{ uid: 'u', displayName: '學生', scores: [
+    { gradeItemId: 'a', score: 90 },
+    { gradeItemId: 'b', score: null, excused: true },
+  ] }]);
+  expect(result.rows[0].finalScore).toBe(90);
+});

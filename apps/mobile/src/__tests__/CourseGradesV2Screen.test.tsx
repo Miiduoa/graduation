@@ -7,7 +7,7 @@ let mockCourseId = 'course-1';
 let mockUid = 'student-a';
 let mockFailure = false;
 let mockRollup: number | null = null;
-let mockItems: { id: string; title: string; max_points: number | null; grade_scores: { score: number | null; updated_at?: string }[] }[] = [{ id: 'grade-item-1', title: '期末報告', max_points: null, grade_scores: [] }];
+let mockItems: { id: string; title: string; max_points: number | null; grade_categories: { weight: number }; grade_scores: { score: number | null; updated_at?: string }[] }[] = [{ id: 'grade-item-1', title: '期末報告', max_points: null, grade_categories: { weight: 100 }, grade_scores: [] }];
 const mockEq = jest.fn();
 const mockSelect = jest.fn();
 const mockRange = jest.fn();
@@ -53,14 +53,14 @@ beforeEach(() => {
   mockUid = 'student-a';
   mockFailure = false;
   mockRollup = null;
-  mockItems = [{ id: 'grade-item-1', title: '期末報告', max_points: null, grade_scores: [] }];
+  mockItems = [{ id: 'grade-item-1', title: '期末報告', max_points: null, grade_categories: { weight: 100 }, grade_scores: [] }];
 });
 test('executes the loader through categories and scopes scores to the current student', async () => {
   const view = render(<CourseGradesV2Screen />);
   await view.findByText('查看原始評分紀錄');
   expect(mockSelect).toHaveBeenCalledWith(
     'grade_items',
-    expect.stringContaining('grade_categories!inner(course_id)'),
+    expect.stringContaining('grade_categories!inner(course_id, weight)'),
   );
   expect(mockEq).toHaveBeenCalledWith('grade_items', 'grade_categories.course_id', 'course-1');
   expect(mockEq).not.toHaveBeenCalledWith('grade_items', 'course_id', expect.anything());
@@ -77,6 +77,7 @@ test.each([100, 101, 205])('loads all %s items in stable pages', async (count) =
     id: String(i),
     title: `項目${i}`,
     max_points: null,
+    grade_categories: { weight: 100 },
     grade_scores: [],
   }));
   expect((await loadCourseGrades('course-1')).items).toHaveLength(count);
@@ -130,8 +131,8 @@ test('refresh failure hides the previous summary and record; retry displays the 
 test('a supplied rollup stays unknown when one score is pending', async () => {
   mockRollup = 50;
   mockItems = [
-    { id: 'scored', title: '已評項目', max_points: 100, grade_scores: [{ score: 100 }] },
-    { id: 'pending', title: '待評項目', max_points: 100, grade_scores: [] },
+    { id: 'scored', title: '已評項目', max_points: 100, grade_categories: { weight: 100 }, grade_scores: [{ score: 100 }] },
+    { id: 'pending', title: '待評項目', max_points: 100, grade_categories: { weight: 100 }, grade_scores: [] },
   ];
   const view = render(<CourseGradesV2Screen />);
   await view.findByText('待評項目');
@@ -144,4 +145,24 @@ test('explicit zero remains a known total when every score is present', async ()
   mockItems[0].grade_scores = [{ score: 0 }];
   const view = render(<CourseGradesV2Screen />);
   expect(await view.findByLabelText('學期加權總分：0')).toBeTruthy();
+});
+
+
+test('零權重練習未評不遮蔽有效總分', async () => {
+  mockRollup = 90;
+  mockItems = [
+    { id: 'final', title: '期末', max_points: 100, grade_categories: { weight: 100 }, grade_scores: [{ score: 90 }] },
+    { id: 'practice', title: '練習', max_points: 100, grade_categories: { weight: 0 }, grade_scores: [] },
+  ];
+  const view = render(<CourseGradesV2Screen />);
+  expect(await view.findByLabelText('學期加權總分：90')).toBeTruthy();
+  expect(view.getByText('練習')).toBeTruthy();
+});
+
+test('沒有正權重類別時不採用總分', async () => {
+  mockRollup = 90;
+  mockItems[0].grade_categories.weight = 0;
+  mockItems[0].grade_scores = [{ score: 90 }];
+  const view = render(<CourseGradesV2Screen />);
+  expect(await view.findByLabelText('學期加權總分：未知')).toBeTruthy();
 });

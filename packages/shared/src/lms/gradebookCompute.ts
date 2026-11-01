@@ -128,6 +128,7 @@ export function computeGradebook(
 
     let earnedTotal = 0;
     let gradedCount = 0;
+    let complete = nonExcusedItems.some((it) => it.normalizedWeight > 0);
     const breakdown = normalizedItems.map((it) => {
       const s = stu.scores.find((x) => x.gradeItemId === it.id);
       const excused = !!s?.excused;
@@ -140,6 +141,9 @@ export function computeGradebook(
         contribution = (clamp(score, 0, maxScore) / maxScore) * normalizedWeight;
         earnedTotal += contribution;
         gradedCount += 1;
+      }
+      if (normalizedWeight > 0 && (score === null || !Number.isFinite(maxScore) || maxScore <= 0)) {
+        complete = false;
       }
       return {
         gradeItemId: it.id,
@@ -154,7 +158,6 @@ export function computeGradebook(
       };
     });
 
-    const complete = nonExcusedItems.length > 0 && gradedCount === nonExcusedItems.length;
     const finalScore = complete ? Math.round(earnedTotal * 100) / 100 : null;
     const passed = finalScore !== null && finalScore >= passingScore;
     return {
