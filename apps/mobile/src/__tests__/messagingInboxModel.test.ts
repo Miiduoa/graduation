@@ -133,7 +133,7 @@ describe('dm send status transitions and retry', () => {
         createdAtMs: 2,
       },
     ];
-    const server = [{ id: 'local-2', content: '已確認' }];
+    const server = [{ id: 'local-2', content: '已確認', createdAt: { seconds: 2 } }];
     // 尚未 prune 前，即使 server 已有同 id，仍顯示 outbound 狀態（不標已送達）。
     const mergedWhilePending = mergeOutboundWithServerMessages(server, outbound, 'dm_pu_alice_bob');
     expect(mergedWhilePending.map((item) => item.id)).toEqual(['local-1', 'local-2']);
@@ -141,8 +141,28 @@ describe('dm send status transitions and retry', () => {
     const pruned = pruneConfirmedOutbound(outbound, new Set(['local-2']));
     expect(pruned.map((item) => item.id)).toEqual(['local-1']);
     const mergedAfterConfirm = mergeOutboundWithServerMessages(server, pruned, 'dm_pu_alice_bob');
-    expect(mergedAfterConfirm.map((item) => item.id)).toEqual(['local-2', 'local-1']);
-    expect(mergedAfterConfirm[0]).toEqual(server[0]);
+    expect(mergedAfterConfirm.map((item) => item.id)).toEqual(['local-1', 'local-2']);
+    expect(mergedAfterConfirm[1]).toEqual(server[0]);
+  });
+
+  it('orders merged rows by time so old failed drafts stay before newer server messages', () => {
+    const outbound: DmOutboundDraft[] = [
+      {
+        id: 'old-fail',
+        conversationId: 'dm_pu_alice_bob',
+        senderId: alice,
+        content: '舊失敗',
+        status: 'failed',
+        createdAtMs: 1_000,
+      },
+    ];
+    const server = [
+      { id: 'newer', content: '較新', createdAt: { seconds: 5 } },
+      { id: 'newest', content: '最新', createdAt: { seconds: 9 } },
+    ];
+    expect(
+      mergeOutboundWithServerMessages(server, outbound, 'dm_pu_alice_bob').map((item) => item.id),
+    ).toEqual(['old-fail', 'newer', 'newest']);
   });
 
   it('does not treat hasPendingWrites snapshots as confirmed delivery', () => {

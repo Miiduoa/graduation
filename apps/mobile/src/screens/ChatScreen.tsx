@@ -175,11 +175,20 @@ export function ChatScreen(props: any) {
   const sendLockRef = useRef(false);
   const retryLockRef = useRef<Set<string>>(new Set());
   const scopeRef = useRef<string>('');
+  /** 畫面仍掛載時才更新 UI；失敗狀態落盤不依賴此旗標。 */
+  const screenAliveRef = useRef(true);
   /**
    * 跨對話切換的隔離鍵：每次 convoKey 變化都記錄目前生效的對話，
    * 防止上一個對話遲到回來的 snapshot 把訊息塞回 state，導致看到別人的對話。
    */
   const activeConvoKeyRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    screenAliveRef.current = true;
+    return () => {
+      screenAliveRef.current = false;
+    };
+  }, []);
 
   const myUid = auth.user?.uid;
 
@@ -615,10 +624,23 @@ export function ChatScreen(props: any) {
   const dispatchOutbound = useCallback(
     async (draft: DmOutboundDraft) => {
       const scopeAtStart = `${myUid ?? ''}:${school.id ?? ''}:${draft.conversationId}`;
-      const stillHere = () => scopeRef.current === scopeAtStart;
+      const stillHere = () => screenAliveRef.current && scopeRef.current === scopeAtStart;
       try {
         if (isFirebaseMockMode() || isDemoPersonaUid(myUid)) {
           // Demo／mock：沿用固定 draft.id，重試不另建；不走會自產新 id 的 ds.sendMessage。
+          const existing = readOutboundDrafts(draft.conversationId, draft.senderId);
+          const next = existing.filter((row) => row.id !== draft.id);
+          writeOutboundDrafts(draft.conversationId, next);
+          const mine = latestOutboundDraft(next, draft.conversationId);
+          if (mine) {
+            setOutboundPreview(draft.conversationId, {
+              uid: draft.senderId,
+              status: mine.status,
+              text: mine.content,
+            });
+          } else {
+            clearOutboundPreview(draft.conversationId, draft.senderId);
+          }
           if (!stillHere()) return;
           setMessages((prev) =>
             prev.some((row) => row.id === draft.id)
@@ -635,11 +657,7 @@ export function ChatScreen(props: any) {
                   },
                 ],
           );
-          setOutbound((prev) => {
-            const next = prev.filter((row) => row.id !== draft.id);
-            persistOutbound(next);
-            return next;
-          });
+          setOutbound(next);
         } else {
           await sendChatMessageIdempotent({
             conversationId: draft.conversationId,
@@ -682,17 +700,24 @@ export function ChatScreen(props: any) {
           }
         })();
       } catch (e: any) {
-        if (!stillHere()) return;
         const kind = classifyDmSendFailure(e);
         const status = nextDmSendStatus(draft.status, kind === 'failed' ? 'known_failure' : 'uncertain');
         if (!status || status === 'delivered') return;
+        // 先依 conversationId 落盤，避免送出中離房後失敗回呼無法 setState、草稿停在 sending。
+        const existing = readOutboundDrafts(draft.conversationId, draft.senderId);
+        const next = existing.some((row) => row.id === draft.id)
+          ? existing.map((row) => (row.id === draft.id ? { ...row, status } : row))
+          : [...existing, { ...draft, status }];
+        writeOutboundDrafts(draft.conversationId, next);
+        setOutboundPreview(draft.conversationId, {
+          uid: draft.senderId,
+          status,
+          text: draft.content,
+        });
+        if (!stillHere()) return;
         // 對齊網頁：失敗／未確認時把原文放回輸入框，保留同一則可重試。
         setText(draft.content);
-        setOutbound((prev) => {
-          const next = prev.map((row) => (row.id === draft.id ? { ...row, status } : row));
-          persistOutbound(next);
-          return next;
-        });
+        setOutbound(next);
         try {
           const { aiBrain } = await import('../services/aiBrain');
           aiBrain.reportToolOutcome(
@@ -706,49 +731,8 @@ export function ChatScreen(props: any) {
         }
       }
     },
-    [myUid, peerId, persistOutbound, school.id],
+    [myUid, peerId, school.id],
   );
-
-  // ── 發送訊息 ──
-  const onSend = async () => {
-    if (!myUid || !convoKey || !text.trim()) return;
-    if (!conversationIdParam && !peerId) return;
-    if (sendLockRef.current || sending) return;
-    const draftText = text.trim();
-    if (draftText.length > DM_SEND_CONTENT_MAX) {
-      Alert.alert('無法送出', `訊息不可超過 ${DM_SEND_CONTENT_MAX} 字`);
-      return;
-    }
-    sendLockRef.current = true;
-    setSending(true);
-    const messageContent = refPostId ? `${draftText}\n\n📎 引用貼文：${refPostId}` : draftText;
-    // Demo／mock 也固定 draft.id 供重試重放；真實路徑用 Firestore 預產 id。
-    const messageId =
-      isFirebaseMockMode() || isDemoPersonaUid(myUid)
-        ? `local-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
-        : newChatMessageId(convoKey);
-    const draft: DmOutboundDraft = {
-      id: messageId,
-      conversationId: convoKey,
-      senderId: myUid,
-      content: messageContent,
-      status: 'sending',
-      createdAtMs: Date.now(),
-    };
-    setText('');
-    setOutbound((prev) => {
-      const next = [...prev, draft];
-      persistOutbound(next);
-      return next;
-    });
-    try {
-      await ensureConversation();
-      await dispatchOutbound(draft);
-    } finally {
-      sendLockRef.current = false;
-      if (scopeRef.current.endsWith(`:${convoKey}`)) setSending(false);
-    }
-  };
 
   const onRetryOutbound = useCallback(
     async (messageId: string) => {
@@ -777,6 +761,59 @@ export function ChatScreen(props: any) {
     },
     [convoKey, dispatchOutbound, myUid, outbound, persistOutbound],
   );
+
+  // ── 發送訊息 ──
+  const onSend = async () => {
+    if (!myUid || !convoKey || !text.trim()) return;
+    if (!conversationIdParam && !peerId) return;
+    if (sendLockRef.current || sending) return;
+    const draftText = text.trim();
+    const messageContent = refPostId ? `${draftText}\n\n📎 引用貼文：${refPostId}` : draftText;
+    if (messageContent.length > DM_SEND_CONTENT_MAX) {
+      Alert.alert('無法送出', `訊息不可超過 ${DM_SEND_CONTENT_MAX} 字`);
+      return;
+    }
+    // 可重試 outbound 且內容相同時，主傳送改走既有 draft id，避免另建一則雙發。
+    const retryable = outbound.find(
+      (row) =>
+        row.conversationId === convoKey &&
+        canRetryDmSend(row.status) &&
+        row.content === messageContent,
+    );
+    if (retryable) {
+      setText('');
+      await onRetryOutbound(retryable.id);
+      return;
+    }
+    sendLockRef.current = true;
+    setSending(true);
+    // Demo／mock 也固定 draft.id 供重試重放；真實路徑用 Firestore 預產 id。
+    const messageId =
+      isFirebaseMockMode() || isDemoPersonaUid(myUid)
+        ? `local-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+        : newChatMessageId(convoKey);
+    const draft: DmOutboundDraft = {
+      id: messageId,
+      conversationId: convoKey,
+      senderId: myUid,
+      content: messageContent,
+      status: 'sending',
+      createdAtMs: Date.now(),
+    };
+    setText('');
+    setOutbound((prev) => {
+      const next = [...prev, draft];
+      persistOutbound(next);
+      return next;
+    });
+    try {
+      await ensureConversation();
+      await dispatchOutbound(draft);
+    } finally {
+      sendLockRef.current = false;
+      if (screenAliveRef.current && scopeRef.current.endsWith(`:${convoKey}`)) setSending(false);
+    }
+  };
 
   // ── 搜尋過濾 ──
   const filteredMessages = useMemo(() => {

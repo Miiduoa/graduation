@@ -294,11 +294,23 @@ export function confirmedServerMessageIds(
   return confirmed;
 }
 
+function messageTimeMs(row: { createdAtMs?: number; createdAt?: unknown }): number {
+  if (typeof row.createdAtMs === 'number') return row.createdAtMs;
+  const createdAt = row.createdAt;
+  if (createdAt && typeof createdAt === 'object' && 'seconds' in createdAt) {
+    const seconds = Number((createdAt as { seconds: unknown }).seconds);
+    return Number.isFinite(seconds) ? seconds * 1000 : 0;
+  }
+  if (typeof createdAt === 'number') return createdAt;
+  return 0;
+}
+
 /**
  * outbound 未 prune 前一律以本地狀態為準（含 snapshot 仍 hasPendingWrites）。
  * 僅在 `pruneConfirmedOutbound`（!hasPendingWrites）後才顯示為已送達。
+ * 合併後依時間排序，避免舊失敗草稿排在較新 server 訊息之後。
  */
-export function mergeOutboundWithServerMessages<T extends { id: string }>(
+export function mergeOutboundWithServerMessages<T extends { id: string; createdAt?: unknown }>(
   server: T[],
   outbound: DmOutboundDraft[],
   conversationId: string,
@@ -308,7 +320,7 @@ export function mergeOutboundWithServerMessages<T extends { id: string }>(
     .map((row) => ({ ...row, local: true as const }));
   const pendingIds = new Set(pending.map((row) => row.id));
   const visibleServer = server.filter((row) => !pendingIds.has(row.id));
-  return [...visibleServer, ...pending];
+  return [...visibleServer, ...pending].sort((a, b) => messageTimeMs(a) - messageTimeMs(b));
 }
 
 export function pruneConfirmedOutbound(
