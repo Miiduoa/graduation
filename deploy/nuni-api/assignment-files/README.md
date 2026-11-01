@@ -18,21 +18,14 @@ Web 與 App 的文字重繳也經同一個 BFF，避免保留舊附件。改交�
 
 `0001-authoritative-withdrawal-reads.patch` 接在教材分頁 patch 後，納入既有 `281` 撤回表 migration、平台 API 過濾及資料庫回歸測試。`composed/source.json` 已重新產生候選 tree 與 patch checksum。需先發布含此過濾的 API，再開放撤回；舊 App 直連平台 API 也會套用同一撤回表。API 的原始 submissionCount 保留既有總數語意，BFF 的列表及送出／撤回回應統一由 `visibleSubmissionCount()` 扣除目前有效版本的撤回數，避免重複扣除。
 
-本次未新增 migration 編號、資料表或欄位，沒有修改 `280`；操作恢復沿用其既有冪等表。`281` SQL 及 rollback 也維持原內容，只把相同 SQL 納入 API migration manifest。執行帳號不同時，API 亦需對撤回表有 SELECT 權限。
+281 尚未在正式套用；本次移除 SQL 內的 BEGIN／COMMIT，由正式 migrator 在同一交易建表並登記 checksum。沒有修改 280、278／279 或其他已登記 migration。API 需對撤回表有 SELECT 權限。發布範圍與操作以 [281 runbook](../composed/RUNBOOK.md) 為準；安全依賴更新另案發布。
 
 ## 上線 migration
 
 本分支只提交程式與 SQL，不直接部署或連正式資料庫。由維運使用既有安全連線環境執行，勿把連線字串或憑證寫入文件、命令紀錄或版本庫。
 
 1. 確認既有 `ASSIGNMENT_FILE_DATABASE_URL` 指向 **nuni-api PostgreSQL**，其中已有 `class_workspaces`、`class_workspace_assignments`、`class_workspace_assignment_submissions` 與 `platform_accounts`；Supabase 僅存 blob。
-2. 使用已設定連線的 `psql` 執行：
-
-   ```sh
-   psql -X --set ON_ERROR_STOP=1 --file deploy/nuni-api/assignment-files/280_assignment_submission_files.sql
-   psql -X --set ON_ERROR_STOP=1 --file deploy/nuni-api/assignment-files/281_assignment_submission_withdrawals.sql
-   ```
-
-   `280` 已套用可重跑或略過；`281` 使用 `CREATE TABLE IF NOT EXISTS`，交易包覆，可重複執行。兩份 migration 都只新增資料表／索引，不更新或刪除既有資料。使用執行帳號建立表後，若執行帳號與 BFF 帳號不同，需依既有權限管理授予 BFF 對新表的 SELECT、INSERT 權限。
+2. 280 已是正式既有表，不重跑。本次僅由核驗候選映像的 `node apps/api/dist/migrate.js` 補缺少的 281 並在同一交易登記 checksum，不能裸跑 281 SQL。核對既有 manifest 與 ACL；API 需 SELECT，BFF 需 SELECT／INSERT。詳細順序、timeout 與相容回滾見 runbook。
 3. 沿用既有私有 bucket、`SUPABASE_URL`、`SUPABASE_SERVICE_ROLE_KEY`、`ASSIGNMENT_FILE_SIGNING_SECRET`（或至少 32 字的既有 `BFF_SESSION_SECRET`）。不新增儲存服務。
 4. 保持既有 `ASSIGNMENT_FILE_SUBMIT_ENABLED=true`，重建並部署 Web。此開關也會影響建置時的相機 Permissions-Policy。
 5. 以 `EXPO_PUBLIC_ASSIGNMENT_FILE_SUBMIT_ENABLED=true` 重建 App。驗收學生多檔／重繳／撤回、另一位學生被拒絕、老師清單與下載、截止邊界、失敗重試。
@@ -41,12 +34,6 @@ Web 與 App 的文字重繳也經同一個 BFF，避免保留舊附件。改交�
 
 ## 回滾
 
-優先只回退 Web／App，**保留權威 API 過濾、新增表及撤回紀錄**。若連 API 一起回退，必須先封鎖所有相關繳交／查閱及回饋入口，避免舊客戶端重新讀到撤回內容。未完成的操作需保留冪等紀錄並以原鍵修復；勿清空冪等表。
+優先只回退 Web／App，保留權威 API 過濾、新表及撤回紀錄。緊急 API 回滾使用事前核驗的 be815455＋相同 281 checksum 相容包；負責人已接受已撤回的本人繳交可能重新對其授課老師顯示及被回饋的風險，不包含其他學生或非成員。完整指令見 [runbook](../composed/RUNBOOK.md)。
 
-確定可移除新功能且已匯出撤回紀錄後才執行：
-
-```sh
-psql -X --set ON_ERROR_STOP=1 --file deploy/nuni-api/assignment-files/281_assignment_submission_withdrawals.rollback.sql
-```
-
-只移除本次新增表，不改文字繳交與檔案。`280_assignment_submission_files.rollback.sql` 會移除整個既有附件索引，**本次回退不要執行**，以免遺失先前正式站的附件索引。Storage blob 不由回滾 SQL 刪除。
+DB 不倒退：不執行 280／281 rollback SQL、不刪撤回表、不清附件索引或冪等紀錄。未完成操作沿用原鍵修復。

@@ -4,7 +4,9 @@ Campus One uses the existing `api.nuni.tw` database and API. The running API's s
 
 This directory preserves the exact base and reviewed changes used by Campus One, without changing the archived repository or replacing the rewrite. `source.json` binds the base commit, patch checksums, final Git tree, and runtime implementation commit. The second patch updates the derived runtime grant inventory. The third adds a scoped installer for the 30 built-in social event contracts, with enforce-mode regression coverage. The fourth preserves existing account-to-person mappings and serializes first-time persona creation, so legacy accounts can publish and read their public posts without creating a second identity.
 
-預設 `source.json` 保留線上 v20 的 0001–0004，目標 tree 為 `6776b19a7cea998728469c3091c0ea7c264f6aa3`。只有明確選擇下方點餐候選才套用第五、第六份補丁；預設建置與線上來源不因候選封裝而改變。
+目前正式為 be815455（tree b0a10ac），已含 278／279 與教材分頁。本次發布只使用 [composed 281 runbook](composed/RUNBOOK.md)，不含安全依賴更新，security candidate 另案發布；不得宣稱是「main 全部 API 修正」。
+
+預設 `source.json` 保留歷史 v20 的 0001–0004，目標 tree 為 `6776b19a7cea998728469c3091c0ea7c264f6aa3`。只有明確選擇下方點餐候選才套用第五、第六份補丁；預設建置不因候選封裝而改變，不能用來升級目前正式 API。
 
 Build from the repository root:
 
