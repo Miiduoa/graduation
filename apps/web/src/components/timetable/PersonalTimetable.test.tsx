@@ -167,6 +167,13 @@ function existingCourseButton() {
 }
 
 describe('personal timetable data retention', () => {
+  it('previews the personal weekly timetable for the selected export period', async () => {
+    await ready();
+    fireEvent.change(screen.getByLabelText('匯出開始日期'), { target: { value: '2026-11-02' } });
+    fireEvent.change(screen.getByLabelText('匯出結束日期'), { target: { value: '2026-11-08' } });
+    expect(screen.getByText('將匯出 1 堂課；略過 0 門時間未確認的課程。')).toBeTruthy();
+    expect((screen.getByText('下載課表 ICS') as HTMLButtonElement).disabled).toBe(false);
+  });
   it('shows official school courses on the grid without waiting for a local import', async () => {
     mocks.load.mockResolvedValue({ ...timetable(), courses: [] });
     await ready();
