@@ -60,8 +60,9 @@ export async function loadSavedCorrectionReceipt(bookmark: CorrectionBookmark): 
         record.requestId !== requestId || typeof record.studentUid !== 'string' ||
         !/^[A-Za-z0-9_-]{1,128}$/.test(record.studentUid) ||
         typeof record.nextStatus !== 'string' || !statuses.includes(record.nextStatus) || !savedAt ||
-        (record.nextRevision !== undefined && (typeof record.nextRevision !== 'number' ||
-          !Number.isSafeInteger(record.nextRevision) || record.nextRevision < 1))) {
+        // Audit writes `revision` (not `nextRevision`); match both JS and TS handlers.
+        (record.revision !== undefined && (typeof record.revision !== 'number' ||
+          !Number.isSafeInteger(record.revision) || record.revision < 1))) {
       throw failure('failed-precondition');
     }
     let current: CorrectionReview | null = null;
@@ -70,8 +71,8 @@ export async function loadSavedCorrectionReceipt(bookmark: CorrectionBookmark): 
     assertCurrent();
     return {
       kind: 'saved', status: record.nextStatus as AttendanceCorrectionStatus, savedAt, current,
-      changedSinceSave: current === null ? null : typeof record.nextRevision === 'number'
-        ? current.revision !== record.nextRevision : current.row.status !== record.nextStatus,
+      changedSinceSave: current === null ? null : typeof record.revision === 'number'
+        ? current.revision !== record.revision : current.row.status !== record.nextStatus,
     };
   };
   try {

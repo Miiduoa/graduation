@@ -18,21 +18,30 @@ function mount() { return render(<AttendanceCorrectionResume scope={scope} curre
 it('does not interrupt an editor without a prior unresolved operation', () => {
   mount(); expect(screen.getByText('開啟新的更正')).toBeTruthy(); expect(loadSavedCorrectionReceipt).not.toHaveBeenCalled();
 });
-it('restores only a reminder, never auto-submits or auto-loads a private student record', () => {
+it('keeps the roster visible beside a pending reminder and never auto-submits', () => {
   rememberCorrectionBookmark(scope, 'request'); mount();
   expect(screen.getByRole('button', { name: '查核原更正收據' })).toBeTruthy();
-  expect(screen.queryByText('開啟新的更正')).toBeNull();
+  expect(screen.getByText('開啟新的更正')).toBeTruthy();
   expect(screen.queryByText(/學生甲/)).toBeNull();
   expect(loadSavedCorrectionReceipt).not.toHaveBeenCalled();
 });
-it('distinguishes the saved decision from the current one, then explicitly releases the editor', async () => {
+it('keeps the roster visible for an invalid reminder that still asks for register verification', () => {
+  rememberCorrectionBookmark(scope, 'r'); sessionStorage.setItem(sessionStorage.key(0)!, 'invalid'); mount();
+  expect(screen.getByRole('alert')).toBeTruthy();
+  expect(screen.getByText('開啟新的更正')).toBeTruthy();
+  expect(screen.getByText(/我已另行核對名冊與更正歷程/)).toBeTruthy();
+  expect(loadSavedCorrectionReceipt).not.toHaveBeenCalled();
+});
+it('distinguishes the saved decision from the current one, then explicitly releases the reminder', async () => {
   rememberCorrectionBookmark(scope, 'request'); mount();
+  expect(screen.getByText('開啟新的更正')).toBeTruthy();
   fireEvent.click(screen.getByRole('button', { name: '查核原更正收據' }));
   expect(await screen.findByText('原操作已保存：遲到')).toBeTruthy();
   expect(screen.getByText('目前課堂狀態：請假')).toBeTruthy();
-  expect(screen.queryByText('開啟新的更正')).toBeNull();
-  fireEvent.click(screen.getByRole('button', { name: '已確認，返回名冊' }));
   expect(screen.getByText('開啟新的更正')).toBeTruthy();
+  fireEvent.click(screen.getByRole('button', { name: '已確認，關閉提醒' }));
+  expect(screen.getByText('開啟新的更正')).toBeTruthy();
+  expect(screen.queryByRole('region', { name: '恢復更正結果查核' })).toBeNull();
   expect(readCorrectionBookmark(scope)).toEqual({ kind: 'empty' });
   expect(loadSavedCorrectionReceipt).toHaveBeenCalledTimes(1);
 });
@@ -40,11 +49,13 @@ it('keeps an unproven result and requires acknowledgement before removing only t
   rememberCorrectionBookmark(scope, 'request'); vi.mocked(loadSavedCorrectionReceipt).mockResolvedValue({ kind: 'not-found' }); mount();
   fireEvent.click(screen.getByRole('button', { name: '查核原更正收據' }));
   expect(await screen.findByText(/目前尚未找到這筆收據，不代表操作失敗/)).toBeTruthy();
-  expect(screen.getByRole('button', { name: '移除本頁提醒，返回名冊' }).hasAttribute('disabled')).toBe(true);
+  expect(screen.getByText('開啟新的更正')).toBeTruthy();
+  expect(screen.getByRole('button', { name: '移除本頁提醒' }).hasAttribute('disabled')).toBe(true);
   expect(readCorrectionBookmark(scope).kind).toBe('pending');
   fireEvent.click(screen.getByRole('checkbox'));
-  fireEvent.click(screen.getByRole('button', { name: '移除本頁提醒，返回名冊' }));
+  fireEvent.click(screen.getByRole('button', { name: '移除本頁提醒' }));
   expect(screen.getByText('開啟新的更正')).toBeTruthy();
+  expect(screen.queryByRole('region', { name: '恢復更正結果查核' })).toBeNull();
 });
 it('does not reveal or consume another account\'s pending reminder', () => {
   rememberCorrectionBookmark({ ...scope, actorUid: 'other' }, 'request'); mount();
@@ -55,7 +66,7 @@ it('keeps the pointer on permission/read failure without fabricating success', a
   rememberCorrectionBookmark(scope, 'request'); vi.mocked(loadSavedCorrectionReceipt).mockRejectedValue(new Error('denied')); mount();
   fireEvent.click(screen.getByRole('button', { name: '查核原更正收據' }));
   expect(await screen.findByRole('alert')).toBeTruthy();
-  expect(screen.queryByText('開啟新的更正')).toBeNull(); expect(readCorrectionBookmark(scope).kind).toBe('pending');
+  expect(screen.getByText('開啟新的更正')).toBeTruthy(); expect(readCorrectionBookmark(scope).kind).toBe('pending');
 });
 it('ignores a late result after changing the course', async () => {
   let finish!: (result: CorrectionReceiptResult) => void;
@@ -79,13 +90,16 @@ it('cannot erase a newer pointer when acknowledging an older receipt', async () 
   rememberCorrectionBookmark(scope, 'old'); mount();
   fireEvent.click(screen.getByRole('button', { name: '查核原更正收據' })); await screen.findByText('原操作已保存：遲到');
   sessionStorage.clear(); rememberCorrectionBookmark(scope, 'new');
-  fireEvent.click(screen.getByRole('button', { name: '已確認，返回名冊' }));
+  fireEvent.click(screen.getByRole('button', { name: '已確認，關閉提醒' }));
   expect(screen.getByRole('alert')).toBeTruthy(); expect(readCorrectionBookmark(scope)).toMatchObject({ bookmark: { requestId: 'new' } });
-  expect(screen.queryByText('開啟新的更正')).toBeNull();
+  expect(screen.getByText('開啟新的更正')).toBeTruthy();
+  expect(screen.getByRole('region', { name: '恢復更正結果查核' })).toBeTruthy();
 });
 it('does not load malformed metadata and requires manual acknowledgement', () => {
   rememberCorrectionBookmark(scope, 'r'); sessionStorage.setItem(sessionStorage.key(0)!, 'invalid'); mount();
   expect(screen.getByRole('alert')).toBeTruthy(); expect(loadSavedCorrectionReceipt).not.toHaveBeenCalled();
-  fireEvent.click(screen.getByRole('checkbox')); fireEvent.click(screen.getByRole('button', { name: '移除本頁提醒，返回名冊' }));
   expect(screen.getByText('開啟新的更正')).toBeTruthy();
+  fireEvent.click(screen.getByRole('checkbox')); fireEvent.click(screen.getByRole('button', { name: '移除本頁提醒' }));
+  expect(screen.getByText('開啟新的更正')).toBeTruthy();
+  expect(screen.queryByRole('region', { name: '恢復更正結果查核' })).toBeNull();
 });

@@ -18,8 +18,9 @@ const snapshot = (data: Record<string, unknown> | null, cached = false) => ({
   exists: () => data !== null, data: () => data,
   metadata: { fromCache: cached, hasPendingWrites: false },
 });
+// Matches the audit field written by attendanceSessions.js / attendanceSessionHandlers.ts.
 const audit = { teacherUid: 'teacher', groupId: 'course', sessionId: 'session', studentUid: 'student',
-  requestId: 'request', nextStatus: 'late', nextRevision: 2, correctedAt: '2026-10-28T01:00:00Z' };
+  requestId: 'request', nextStatus: 'late', revision: 2, correctedAt: '2026-10-28T01:00:00Z' };
 function seed(data: Record<string, unknown> | null = audit) {
   vi.mocked(getDocFromServer)
     .mockResolvedValueOnce(snapshot({ role: 'instructor', status: 'active' }) as never)
@@ -52,6 +53,27 @@ it('a newer teacher decision is shown as current instead of overwritten by the o
     kind: 'saved', status: 'late', changedSinceSave: true, current: { row: { status: 'excused' } },
   });
 });
+it('detects a later correction via audit.revision even when status text matches', async () => {
+  seed();
+  const current = await vi.mocked(loadCorrectionReview).getMockImplementation()?.('course', 'session', 'student');
+  expect(current).toBeTruthy();
+  vi.mocked(loadCorrectionReview).mockResolvedValueOnce({ ...current!, revision: 4,
+    row: { ...current!.row, status: 'late' } });
+  expect(await loadSavedCorrectionReceipt(bookmark)).toMatchObject({
+    kind: 'saved', status: 'late', changedSinceSave: true,
+  });
+});
+it('ignores a stale nextRevision alias and falls back to status when revision is absent', async () => {
+  const { revision: _ignored, ...withoutRevision } = audit;
+  seed({ ...withoutRevision, nextRevision: 2 });
+  const current = await vi.mocked(loadCorrectionReview).getMockImplementation()?.('course', 'session', 'student');
+  expect(current).toBeTruthy();
+  vi.mocked(loadCorrectionReview).mockResolvedValueOnce({ ...current!, revision: 9,
+    row: { ...current!.row, status: 'late' } });
+  expect(await loadSavedCorrectionReceipt(bookmark)).toMatchObject({
+    kind: 'saved', status: 'late', changedSinceSave: false,
+  });
+});
 it('absence of a receipt is not a failed mutation and never writes or retries', async () => {
   seed(null);
   expect(await loadSavedCorrectionReceipt(bookmark)).toEqual({ kind: 'not-found' });
@@ -64,7 +86,7 @@ it('keeps a proven saved receipt separate from an unavailable current record', a
 it.each([
   { teacherUid: 'other' }, { groupId: 'other' }, { sessionId: 'other' }, { requestId: 'other' },
   { studentUid: '../student' }, { nextStatus: ['late'] }, { correctedAt: 'invalid' },
-  { nextRevision: '2' }, { nextRevision: -1 }, { nextRevision: null },
+  { revision: '2' }, { revision: -1 }, { revision: null },
 ])('rejects receipt identity or structural mismatch: %j', async (changes) => {
   seed({ ...audit, ...changes });
   await expect(loadSavedCorrectionReceipt(bookmark)).rejects.toMatchObject({ code: 'functions/failed-precondition' });

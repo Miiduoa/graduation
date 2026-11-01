@@ -77,46 +77,51 @@ function ResumeEntry({ scope, currentActor, children }: Props) {
     <p role="status" className={styles.notice}>此瀏覽器未開放分頁儲存；結果待確認時請先留在本頁處理。</p>
     {children}
   </>;
-  return <section className={styles.card} aria-label="恢復更正結果查核" aria-busy={busy}>
-    <div className={styles.heading}>
-      <span className={styles.eyebrow}>出席更正 · 結果查核</span>
-      <h4 ref={resultHeading} tabIndex={-1}>
-        {result?.kind === 'saved' ? '已找到原更正收據' : '先確認上次的更正結果'}
-      </h4>
-      <p>重新整理不代表操作失敗。這裡只讀取伺服器收據，不重新送出更正。</p>
-    </div>
-    {entry.kind === 'invalid' ? <p role="alert" className={styles.warning}>
-      此分頁的提醒格式不完整，無法指定原收據。請先核對名冊與更正歷程，這不是保存成功或失敗的證明。
-    </p> : <>
-      <p className={styles.meta}>此分頁記錄於 {new Date(entry.bookmark.createdAt).toLocaleString('zh-TW', { timeZone: 'Asia/Taipei' })}</p>
-      <button type="button" className={styles.primary} disabled={busy} onClick={() => void check()}>
-        {busy ? '正在唯讀查核…' : result ? '重新查核收據' : '查核原更正收據'}
-      </button>
-    </>}
-    {result?.kind === 'saved' && <div className={styles.result} role="status">
-      <strong>原操作已保存：{LABELS[result.status]}</strong>
-      <span>核定時間 {new Date(result.savedAt).toLocaleString('zh-TW', { timeZone: 'Asia/Taipei' })}</span>
-      {result.current ? <>
-        <span>{result.current.row.displayName} · {result.current.row.studentId || '未提供學號'}</span>
-        <strong>目前課堂狀態：{LABELS[result.current.row.status]}</strong>
-        {result.changedSinceSave && <p>之後已有其他更正，以目前課堂狀態為準；本次查核沒有覆寫任何紀錄。</p>}
-      </> : <p>原操作已保存，但目前出席狀態無法核實。請回到名冊重新確認。</p>}
-    </div>}
-    {result?.kind === 'not-found' && <p role="status" className={styles.warning}>
-      目前尚未找到這筆收據，不代表操作失敗。原請求可能仍在處理，請再查核或確認名冊與更正歷程。
-    </p>}
-    {error && <p role="alert" className={styles.warning}>{error}</p>}
-    {result?.kind === 'saved' ? <button type="button" className={styles.secondary} disabled={busy} onClick={dismiss}>
-      已確認，返回名冊
-    </button> : (result?.kind === 'not-found' || entry.kind === 'invalid') && <div className={styles.release}>
-      <label><input type="checkbox" checked={acknowledged} disabled={busy}
-        onChange={(event) => setAcknowledged(event.target.checked)} />
-        我已另行核對名冊與更正歷程，了解移除提醒不會取消或回復原操作。
-      </label>
-      <button type="button" className={styles.secondary} disabled={busy || !acknowledged} onClick={dismiss}>
-        移除本頁提醒，返回名冊
-      </button>
-    </div>}
-    <p className={styles.footnote}>只保留操作識別碼與時間，不保留學生姓名、學號、原因或登入憑證。提醒限此瀏覽器分頁，不是離線佇列或跨裝置備份。</p>
-  </section>;
+  // Keep the roster/editor visible while the reminder is open so teachers can
+  // verify the register instead of acknowledging blindly.
+  return <>
+    <section className={styles.card} aria-label="恢復更正結果查核" aria-busy={busy}>
+      <div className={styles.heading}>
+        <span className={styles.eyebrow}>出席更正 · 結果查核</span>
+        <h4 ref={resultHeading} tabIndex={-1}>
+          {result?.kind === 'saved' ? '已找到原更正收據' : '先確認上次的更正結果'}
+        </h4>
+        <p>重新整理不代表操作失敗。這裡只讀取伺服器收據，不重新送出更正。</p>
+      </div>
+      {entry.kind === 'invalid' ? <p role="alert" className={styles.warning}>
+        此分頁的提醒格式不完整，無法指定原收據。請先核對名冊與更正歷程，這不是保存成功或失敗的證明。
+      </p> : <>
+        <p className={styles.meta}>此分頁記錄於 {new Date(entry.bookmark.createdAt).toLocaleString('zh-TW', { timeZone: 'Asia/Taipei' })}</p>
+        <button type="button" className={styles.primary} disabled={busy} onClick={() => void check()}>
+          {busy ? '正在唯讀查核…' : result ? '重新查核收據' : '查核原更正收據'}
+        </button>
+      </>}
+      {result?.kind === 'saved' && <div className={styles.result} role="status">
+        <strong>原操作已保存：{LABELS[result.status]}</strong>
+        <span>核定時間 {new Date(result.savedAt).toLocaleString('zh-TW', { timeZone: 'Asia/Taipei' })}</span>
+        {result.current ? <>
+          <span>{result.current.row.displayName} · {result.current.row.studentId || '未提供學號'}</span>
+          <strong>目前課堂狀態：{LABELS[result.current.row.status]}</strong>
+          {result.changedSinceSave && <p>之後已有其他更正，以目前課堂狀態為準；本次查核沒有覆寫任何紀錄。</p>}
+        </> : <p>原操作已保存，但目前出席狀態無法核實。請回到名冊重新確認。</p>}
+      </div>}
+      {result?.kind === 'not-found' && <p role="status" className={styles.warning}>
+        目前尚未找到這筆收據，不代表操作失敗。原請求可能仍在處理，請再查核或確認名冊與更正歷程。
+      </p>}
+      {error && <p role="alert" className={styles.warning}>{error}</p>}
+      {result?.kind === 'saved' ? <button type="button" className={styles.secondary} disabled={busy} onClick={dismiss}>
+        已確認，關閉提醒
+      </button> : (result?.kind === 'not-found' || entry.kind === 'invalid') && <div className={styles.release}>
+        <label><input type="checkbox" checked={acknowledged} disabled={busy}
+          onChange={(event) => setAcknowledged(event.target.checked)} />
+          我已另行核對名冊與更正歷程，了解移除提醒不會取消或回復原操作。
+        </label>
+        <button type="button" className={styles.secondary} disabled={busy || !acknowledged} onClick={dismiss}>
+          移除本頁提醒
+        </button>
+      </div>}
+      <p className={styles.footnote}>只保留操作識別碼與時間，不保留學生姓名、學號、原因或登入憑證。提醒限此瀏覽器分頁，不是離線佇列或跨裝置備份。</p>
+    </section>
+    {children}
+  </>;
 }
