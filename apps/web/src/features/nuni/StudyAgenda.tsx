@@ -1,6 +1,7 @@
 'use client';
 
 import Link from 'next/link';
+import { StudyDeadlineExport } from './StudyDeadlineExport';
 import { useSearchParams } from 'next/navigation';
 import { useEffect, useRef, useState } from 'react';
 import { NuniError, nuniErrorMessage, type NuniWorkspace } from '@campus/shared/src/nuni';
@@ -390,6 +391,14 @@ export function StudyAgenda({
           有 {limitedCourseIds.length}{' '}
           門課達到目前的顯示上限；數量只計入已載入項目，較早的紀錄可能未列出。
         </p>
+      )}
+      {!reading && !error && data && (
+        <StudyDeadlineExport
+          key={`${membershipKey}:${selectedCourse}:${epoch}`}
+          tasks={scopedTasks}
+          partial={partial}
+          retry={() => setEpoch((value) => value + 1)}
+        />
       )}
       {!reading && data && shown.length === 0 && (
         <div className={styles.empty} role="status">
