@@ -5,6 +5,8 @@ import { act, fireEvent, render, waitFor, within } from '@testing-library/react-
 import { createNuniClasses, NuniError, type NuniMaterial, type NuniWorkspace } from '@campus/shared/src/nuni';
 import { NuniCourses } from '../screens/nuni/NuniCourses';
 import { NuniDraftProvider } from '../state/nuniDrafts';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { materialBookmarkStorageKey } from '@campus/shared/src/materialBookmarks';
 
 const courseId = 'cw_11111111-1111-4111-8111-111111111111';
 const assignmentId = 'cwa_22222222-2222-4222-8222-222222222222';
@@ -2387,6 +2389,39 @@ it('shares only the stable material entry through the system sheet', async () =>
   expect(share).toHaveBeenCalledWith({ message: expect.stringContaining(`workspaceId=${courseId}&materialId=${target.id}`) });
   expect(share.mock.calls[0][0].message).not.toContain(target.body);
   share.mockRestore();
+});
+
+it('從教材卡收藏後可在獨立清單找回，重新驗權並返回原教材', async () => {
+  const subscription = jest.spyOn(AppState, 'addEventListener').mockReturnValue({ remove: jest.fn() });
+  AppState.currentState = 'active';
+  mockSession = { ...mockSession, platformAccountId: 'pa_bookmark-flow', context: 'bookmark-flow' };
+  const target = material(1, '收藏流程教材');
+  mockRequest.mockImplementation((path, context, input) => {
+    if (path.endsWith('/materials/page')) return Promise.resolve({ materials: [target], nextCursor: null });
+    return response(path, context, input);
+  });
+  const view = render(<NuniCourses initialWorkspaceId={courseId} initialMaterialId={target.id} />);
+  try {
+    const save = await view.findByRole('button', { name: '收藏到此裝置：收藏流程教材' });
+    await waitFor(() => expect(save).toBeEnabled());
+    fireEvent.press(save);
+    await view.findByText('已收藏在此裝置。');
+    const stored = JSON.parse((await AsyncStorage.getItem(materialBookmarkStorageKey('pa_bookmark-flow')))!);
+    expect(stored.items).toEqual([{ courseId, materialId: target.id, savedAt: expect.any(String) }]);
+    fireEvent.press(view.getByText('返回我的課程'));
+    fireEvent.press(await view.findByRole('button', { name: '此裝置收藏 · 1' }));
+    expect(view.queryByLabelText('跨課教材關鍵字')).toBeNull();
+    const original = await view.findByRole('button', { name: '回到原教材：收藏流程教材' });
+    const before = mockRequest.mock.calls.filter(([path]) => path.endsWith('/materials/page')).length;
+    fireEvent.press(original);
+    await view.findByLabelText('目標教材：收藏流程教材');
+    expect(mockRequest.mock.calls.filter(([path]) => path.endsWith('/materials/page')).length).toBeGreaterThan(before);
+    fireEvent.press(view.getByRole('button', { name: '返回此裝置收藏' }));
+    await view.findByRole('button', { name: '回到原教材：收藏流程教材' });
+  } finally {
+    view.unmount();
+    subscription.mockRestore();
+  }
 });
 
 it.each([403, 404])('stops a linked material search and removes course content after %s', async (status) => {
