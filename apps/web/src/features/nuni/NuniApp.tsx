@@ -509,7 +509,7 @@ function Workspace({ id }: { id: string }) {
               reload={reload}
               onConfirmed={acceptAssignment}
             />
-            <p className={styles.muted}>校方 LMS 等未串接來源不支援即時，請到原系統確認。</p>
+            <p className={styles.muted}>作業約每分鐘自動更新；回到畫面、切回分頁、網路恢復、自己送出或重新整理時立即更新。校方 LMS 等未串接來源請到原系統確認。</p>
             <aside className={!teacher ? workspaceStyles.studentAside : undefined}>
               {teacher && data.workspace.state === 'active' && (
                 <>

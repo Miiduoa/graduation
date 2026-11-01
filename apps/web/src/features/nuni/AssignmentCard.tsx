@@ -146,7 +146,7 @@ function Assignment({ item, workspace, onConfirmed, syncVersion, receiptActive =
     const lifecycle = assignmentLifecycle();
     const stop = startAssignmentLive({
       ...lifecycle,
-      initialDelay: 2500,
+      initialDelay: 60000,
       read: () => receiptReader.current(() => {
         if (!valid || !lifecycle.active() || !lifecycle.online())
           return Promise.reject(new Error('讀取已失效'));

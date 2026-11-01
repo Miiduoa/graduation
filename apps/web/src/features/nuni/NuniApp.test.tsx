@@ -627,7 +627,7 @@ it('離開作業分頁停止自動作業讀取，回作業才補讀', async () =
   } finally { vi.useRealTimers(); }
 });
 
-it('合成發布經共用寫入與輪詢後五秒內出現在學生畫面', async () => {
+it('合成發布經共用寫入與輪詢後約一分鐘內出現在學生畫面', async () => {
   memberRole = 'student';
   const original = mocks.request.getMockImplementation()!;
   let assignments: unknown[] = [];
@@ -652,11 +652,11 @@ it('合成發布經共用寫入與輪詢後五秒內出現在學生畫面', asyn
     const started = Date.now();
     const write = teacher.createAssignment(workspaceId, { title: '跨端新發布作業', instructions: '合成內容',
       dueAt: null, idempotencyKey: 'synthetic-publication' });
-    for (let elapsed = 0; elapsed < 5000 && screen.queryAllByRole('link', { name: /跨端新發布作業/ }).length === 0; elapsed += 50)
+    for (let elapsed = 0; elapsed < 61000 && screen.queryAllByRole('link', { name: /跨端新發布作業/ }).length === 0; elapsed += 50)
       await act(async () => { await vi.advanceTimersByTimeAsync(50); });
     await write;
     expect(within(screen.getByRole('navigation', { name: '跳到作業' })).getByRole('link', { name: /跨端新發布作業/ })).toBeTruthy();
-    expect(Date.now() - started).toBeLessThanOrEqual(5000);
-    expect(Date.now() - started).toBe(2800);
+    expect(Date.now() - started).toBeLessThanOrEqual(61000);
+    expect(Date.now() - started).toBe(60300);
   } finally { view.unmount(); vi.useRealTimers(); }
 });

@@ -1496,7 +1496,7 @@ function CourseDetail({
                 ? ` · 最後更新 ${formatTaipeiDateTime(assignmentSync.updatedAt, { seconds: true })}`
                 : ' · 尚未確認最新狀態'}
             </Text>
-            <Copy>校方 LMS 等未串接來源不支援即時，請到原系統確認。</Copy>
+            <Copy>作業約每分鐘自動更新；回到畫面、切回分頁、網路恢復、自己送出或重新整理時立即更新。校方 LMS 等未串接來源請到原系統確認。</Copy>
             {data.assignments.length === 0 ? (
               <Copy>老師尚未發布作業。</Copy>
             ) : (
@@ -2253,7 +2253,7 @@ function TeacherReceipts({
     let online = true;
     let valid = true;
     const stop = startAssignmentLive({
-      initialDelay: 2500,
+      initialDelay: 60000,
       read: () => liveResource.current.load({ cancelled: () => !valid || !online || AppState.currentState !== 'active' }),
       revision: () => mutationRevision.current,
       receive: (rows) => {

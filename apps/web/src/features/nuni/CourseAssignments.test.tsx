@@ -407,7 +407,7 @@ it('多份收件已開啟時只自動讀取最後選取的一份', async () => {
   try {
     await act(async () => { window.dispatchEvent(new Event('pageshow')); });
     const before = request.mock.calls.length;
-    await act(async () => { await vi.advanceTimersByTimeAsync(7500); });
+    await act(async () => { await vi.advanceTimersByTimeAsync(180000); });
     expect(request).toHaveBeenCalledTimes(before + 3);
     expect(request.mock.calls.slice(before).every(([path]) => path.includes(submitted.id))).toBe(true);
     expect(first.getByText(/收件：已暫停更新/)).toBeTruthy();

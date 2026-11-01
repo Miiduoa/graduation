@@ -2314,7 +2314,7 @@ it('自動收件晚到不覆蓋教師剛儲存的回饋，慢讀取不重疊', a
       return response(path, context, input);
     });
     const count = () => mockRequest.mock.calls.filter(([path]) => path.endsWith('/submissions')).length;
-    await act(async () => { jest.advanceTimersByTime(2500); });
+    await act(async () => { jest.advanceTimersByTime(60000); });
     const started = count();
     expect(started).toBe(2);
     await act(async () => { jest.advanceTimersByTime(10000); });
@@ -2352,7 +2352,7 @@ it('背景回前景後丟棄較早收件，切換教材停止兩份自動清單'
       if (path.endsWith('/submissions')) return ++reads === 1 ? older.promise : newer.promise;
       return response(path, context, input);
     });
-    await act(async () => { jest.advanceTimersByTime(2500); });
+    await act(async () => { jest.advanceTimersByTime(60000); });
     expect(reads).toBe(1);
     await act(async () => {
       AppState.currentState = 'background';
@@ -2407,7 +2407,7 @@ it.each([403, 404])('stops a linked material search and removes course content a
   expect(mockRequest.mock.calls.filter(([path]) => path.endsWith('/materials/page'))).toHaveLength(2);
 });
 
-it('合成發布經共用寫入與輪詢後五秒內出現在學生畫面', async () => {
+it('合成發布經共用寫入與輪詢後約一分鐘內出現在學生畫面', async () => {
   AppState.currentState = 'active';
   const subscription = jest.spyOn(AppState, 'addEventListener').mockReturnValue({ remove: jest.fn() });
   const view = await openCourse();
@@ -2427,11 +2427,11 @@ it('合成發布經共用寫入與輪詢後五秒內出現在學生畫面', asyn
     const started = Date.now();
     const write = teacher.createAssignment(courseId, { title: '跨端新發布作業', instructions: '合成內容',
       dueAt: null, idempotencyKey: 'synthetic-publication' });
-    for (let elapsed = 0; elapsed < 5000 && !view.queryByText('跨端新發布作業'); elapsed += 50)
+    for (let elapsed = 0; elapsed < 61000 && !view.queryByText('跨端新發布作業'); elapsed += 50)
       await act(async () => { await jest.advanceTimersByTimeAsync(50); });
     await write;
     expect(view.getByText('跨端新發布作業')).toBeTruthy();
-    expect(Date.now() - started).toBeLessThanOrEqual(5000);
-    expect(Date.now() - started).toBe(2800);
+    expect(Date.now() - started).toBeLessThanOrEqual(61000);
+    expect(Date.now() - started).toBe(60300);
   } finally { view.unmount(); jest.useRealTimers(); subscription.mockRestore(); }
 });

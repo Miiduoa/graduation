@@ -89,8 +89,8 @@ it('以完整授權路由驗收十個學生十分鐘合成負載與發布延遲'
     });
   });
   try {
-    for (let index = 0; index < 40; index += 1) {
-      await vi.advanceTimersByTimeAsync(index === 0 ? 1000 : 14000);
+    for (let index = 0; index < 9; index += 1) {
+      await vi.advanceTimersByTimeAsync(index === 0 ? 1000 : 64000);
       const title = `發布 ${index}`;
       published.set(title, Date.now());
       const writing = classes.createAssignment(workspaceId, {
@@ -99,21 +99,21 @@ it('以完整授權路由驗收十個學生十分鐘合成負載與發布延遲'
       await vi.advanceTimersByTimeAsync(1000);
       await writing;
     }
-    await vi.advanceTimersByTimeAsync(13000);
+    await vi.advanceTimersByTimeAsync(78000);
     stops.forEach((stop) => stop());
     latencies.sort((a, b) => a - b);
     const p95 = latencies[Math.ceil(latencies.length * 0.95) - 1]!;
-    expect(latencies).toHaveLength(400);
-    expect(p95).toBeLessThanOrEqual(5000);
+    expect(latencies).toHaveLength(90);
+    expect(p95).toBeLessThanOrEqual(61000);
     expect(counts.every((count) => count === counts[0])).toBe(true);
-    expect(counts.every((count) => count <= 241)).toBe(true);
-    expect(upstreamReads).toBeLessThanOrEqual(7230);
+    expect(counts.every((count) => count <= 10)).toBe(true);
+    expect(upstreamReads).toBeLessThanOrEqual(300);
     process.stdout.write(JSON.stringify({ clients: 10, durationMs: 600000, counts, upstreamReads,
       bytes, samples: latencies.length, p95, max: latencies.at(-1) }) + '\n');
   } finally { stops.forEach((stop) => stop()); }
 }, 60000);
 
-it('發布請求、合成儲存、授權路由、排程與真實學生元件的全鏈路不超過五秒', async () => {
+it('發布請求、合成儲存、授權路由、排程與真實學生元件的全鏈路約一分鐘內可見', async () => {
   vi.useFakeTimers();
   vi.stubEnv('NUNI_CLASSROOM_ENABLED', 'true');
   vi.stubEnv('NUNI_API_BASE_URL', 'https://synthetic.invalid');
@@ -171,7 +171,7 @@ it('發布請求、合成儲存、授權路由、排程與真實學生元件的�
       const started = Date.now();
       const publishing = classes.createAssignment(workspaceId, { title, instructions: '合成內容',
         dueAt: null, idempotencyKey: `synthetic-full-publication-${index}` });
-      for (let elapsed = 0; elapsed < 5000 && !screen.queryByRole('article', { name: title }); elapsed += 50)
+      for (let elapsed = 0; elapsed < 61000 && !screen.queryByRole('article', { name: title }); elapsed += 50)
         await act(async () => { await vi.advanceTimersByTimeAsync(50); });
       await publishing;
       expect(screen.getByRole('article', { name: title })).toBeTruthy();
@@ -179,8 +179,8 @@ it('發布請求、合成儲存、授權路由、排程與真實學生元件的�
     }
     visibleLatencies.sort((a, b) => a - b);
     expect(visibleLatencies).toHaveLength(40);
-    expect(visibleLatencies[37]).toBeLessThanOrEqual(5000);
+    expect(visibleLatencies[37]).toBeLessThanOrEqual(61000);
     process.stdout.write(JSON.stringify({ visibleSamples: visibleLatencies.length,
       visibleP95: visibleLatencies[37], visibleMax: visibleLatencies.at(-1) }) + '\n');
   } finally { view.unmount(); }
-});
+}, 60000);

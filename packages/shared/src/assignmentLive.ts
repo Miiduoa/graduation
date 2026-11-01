@@ -66,7 +66,7 @@ export function startAssignmentLive<T>(options: {
     if (!stopped && version === run && !denied)
       timer = setTimeout(() => {
         void read(run);
-      }, Math.min(60000, 2500 * 2 ** failures));
+      }, failures ? Math.min(60000, 2500 * 2 ** failures) : 60000);
   }
   function restart() {
     version += 1;

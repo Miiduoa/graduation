@@ -26,7 +26,9 @@ describe('作業同步', () => {
     expect(receive).not.toHaveBeenCalled();
     await vi.advanceTimersByTimeAsync(0);
     expect(status.mock.lastCall?.[0].state).toBe('synced');
-    await vi.advanceTimersByTimeAsync(2500);
+    await vi.advanceTimersByTimeAsync(59999);
+    expect(read).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(1);
     expect(read).toHaveBeenCalledTimes(2);
     active = false;
     changed();
@@ -68,7 +70,7 @@ describe('作業同步', () => {
     stop();
   });
 });
-it('兩個客戶端在五秒內讀到另一端確認的批改狀態', async () => {
+it('兩個客戶端在約一分鐘內讀到另一端確認的批改狀態', async () => {
   vi.useFakeTimers();
   let server = '待批改';
   const receive = vi.fn();
@@ -86,7 +88,7 @@ it('兩個客戶端在五秒內讀到另一端確認的批改狀態', async () =
   const stopB = startAssignmentLive({ ...options, receive: other });
   await vi.advanceTimersByTimeAsync(0);
   server = '已退回';
-  await vi.advanceTimersByTimeAsync(2500);
+  await vi.advanceTimersByTimeAsync(60000);
   expect(other.mock.lastCall?.[0]).toBe('已退回');
   stopA();
   stopB();
@@ -157,22 +159,22 @@ it('失敗採指數退避，成功後恢復正常間隔', async () => {
   await vi.advanceTimersByTimeAsync(60000);
   expect(status.mock.lastCall?.[0].state).toBe('synced');
   const before = read.mock.calls.length;
-  await vi.advanceTimersByTimeAsync(2500);
+  await vi.advanceTimersByTimeAsync(60000);
   expect(read).toHaveBeenCalledTimes(before + 1);
   stop();
 });
 
-it('一分鐘正常前景流量上限為主清單 25 次及選取的收件 24 次', async () => {
+it('一分鐘正常前景流量上限為主清單 2 次及選取的收件 1 次', async () => {
   vi.useFakeTimers();
   const main = vi.fn().mockResolvedValue([]);
   const receipts = vi.fn().mockResolvedValue([]);
   const options = { receive: vi.fn(), clear: vi.fn(), status: vi.fn(), active: () => true,
     online: () => true, subscribe: () => () => {} };
   const stopMain = startAssignmentLive({ ...options, read: main });
-  const stopReceipts = startAssignmentLive({ ...options, read: receipts, initialDelay: 2500 });
+  const stopReceipts = startAssignmentLive({ ...options, read: receipts, initialDelay: 60000 });
   await vi.advanceTimersByTimeAsync(60000);
-  expect(main).toHaveBeenCalledTimes(25);
-  expect(receipts).toHaveBeenCalledTimes(24);
+  expect(main).toHaveBeenCalledTimes(2);
+  expect(receipts).toHaveBeenCalledTimes(1);
   stopMain();
   stopReceipts();
 });

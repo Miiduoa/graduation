@@ -1324,7 +1324,7 @@ it('主清單頻繁更新不作廢慢收件，隱藏卡片停止自動讀取', a
     const before = state.request.mock.calls.length;
     for (let i = 0; i < 4; i++) {
       view.rerender(<AssignmentCard item={assignment} workspace={workspace} reload={reload} syncVersion={`next-${i}`} />);
-      await act(async () => { await vi.advanceTimersByTimeAsync(2500); });
+      await act(async () => { await vi.advanceTimersByTimeAsync(60000); });
     }
     expect(state.request).toHaveBeenCalledTimes(before);
     await act(async () => { finish({ submissions: [{ ...submission, body: '慢讀取的新內容' }] }); });
