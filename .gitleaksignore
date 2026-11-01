@@ -39,3 +39,27 @@ e70fa5b8f19a94be2d4e548c887cc6823cf4ef31:apps/mobile/ios/Podfile.lock:generic-ap
 # food-api.test.ts 測試假值
 a64aa736debbbbddd00cc6ff5485a432e3ff1806:apps/web/src/lib/nuni/food-api.test.ts:generic-api-key:42
 
+# Exact aliases for byte-identical files under the observed historical commit IDs.
+# Paired with the original reviews; validated by scripts/security/verify-gitleaks-history.mjs.
+1dfa558db862986b1a7e268854bc32ea1b42cf7c:scripts/verify-nuni-materials-api.mjs:generic-api-key:164
+1dfa558db862986b1a7e268854bc32ea1b42cf7c:scripts/verify-nuni-materials-api.mjs:generic-api-key:166
+1dfa558db862986b1a7e268854bc32ea1b42cf7c:scripts/verify-nuni-materials-api.mjs:generic-api-key:195
+4c20efb2ca72b4e4ad5aee64f6376862f9628aec:deploy/nuni-api/composed/source.json:generic-api-key:11
+4c20efb2ca72b4e4ad5aee64f6376862f9628aec:deploy/nuni-api/composed/rollback-source.json:generic-api-key:6
+e54f4ca2f99fb7c41548221f794347ce9fe294c1:scripts/test-env/seed.cjs:generic-api-key:20
+024b356723d1ec9d4ec87de28d36033ab9ee5fda:apps/mobile/eas.json:gcp-api-key:55
+29bdb8dd5eb3bde59bd88f607299fd05f5aadbd6:apps/web/src/lib/nuni/merchant.test.ts:generic-api-key:17
+29bdb8dd5eb3bde59bd88f607299fd05f5aadbd6:apps/mobile/ios/Podfile.lock:generic-api-key:2490
+29bdb8dd5eb3bde59bd88f607299fd05f5aadbd6:apps/mobile/ios/Podfile.lock:generic-api-key:2492
+29bdb8dd5eb3bde59bd88f607299fd05f5aadbd6:apps/mobile/ios/Podfile.lock:generic-api-key:2514
+29bdb8dd5eb3bde59bd88f607299fd05f5aadbd6:apps/mobile/ios/Podfile.lock:generic-api-key:2534
+01d04d9d357ad59f9638768bab6875085d40d6eb:apps/mobile/ios/Podfile.lock:generic-api-key:2407
+6e95d0972f2ec3fda29f6a540f119cf09e54feb9:apps/mobile/src/features/engagement/repository.ts:generic-api-key:19
+cedf63f6269ed4361eaed57ff54ce2ef8fbe313c:docs/API.md:generic-api-key:145
+c6b0c412503fb27e13ee31ec72b25291d6fa6d9d:apps/mobile/src/screens/AchievementsScreen.tsx:generic-api-key:76
+c6b0c412503fb27e13ee31ec72b25291d6fa6d9d:apps/mobile/src/screens/ProfileScreen.tsx:generic-api-key:22
+c6b0c412503fb27e13ee31ec72b25291d6fa6d9d:apps/mobile/src/screens/TodayScreen.tsx:generic-api-key:335
+593330cf36c5e7ab4d87e91eed6e563d230bff4d:apps/mobile/src/screens/AchievementsScreen.tsx:generic-api-key:75
+593330cf36c5e7ab4d87e91eed6e563d230bff4d:apps/mobile/src/screens/ProfileScreen.tsx:generic-api-key:21
+593330cf36c5e7ab4d87e91eed6e563d230bff4d:apps/mobile/src/screens/TodayScreen.tsx:generic-api-key:320
+d8628868502fe68b12e47bd26207042701ad29d0:docs/API.md:generic-api-key:115
