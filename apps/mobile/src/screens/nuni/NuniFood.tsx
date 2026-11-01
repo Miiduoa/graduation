@@ -888,9 +888,12 @@ function FoodOrder({
   }, []);
   const [lastOrder, setLastOrder] = useState<NuniFoodCustomerOrderDetail | null>(null);
   useEffect(() => {
-    if (resource.data) setLastOrder(resource.data);
-  }, [resource.data]);
-  const order = resource.data ?? lastOrder;
+    if (resource.errorKind === 'unavailable') {
+      setLastOrder(null);
+      setShowOrderNumber(false);
+    } else if (resource.data) setLastOrder(resource.data);
+  }, [resource.data, resource.errorKind]);
+  const order = resource.errorKind === 'unavailable' ? null : (resource.data ?? lastOrder);
   const current = !!resource.data && !resource.error && !resource.loading;
   const token = order?.pickup.credential;
   const canShowToken =
@@ -908,7 +911,7 @@ function FoodOrder({
       {resource.error ? (
         <FoodText
           alert
-        >{`${resource.error} 這次沒能更新狀態，畫面保留上次讀到的資料。請再試一次。`}</FoodText>
+        >{`${resource.error} 這次沒能更新狀態。${order ? '畫面保留上次讀到的資料。' : ''}請再試一次。`}</FoodText>
       ) : null}
       <FoodButton disabled={resource.loading} onPress={() => void resource.load()}>
         更新狀態
@@ -934,11 +937,15 @@ function FoodOrder({
         <>
           <FoodText title>{order.locationName}</FoodText>
           <FoodText>{orderState[order.state]}</FoodText>
-          <FoodText>{`現在該做什麼：${foodCustomerNextStep({
-            ...order,
-            payment: order.paymentSession,
-            now,
-          })}`}</FoodText>
+          <FoodText>{`現在該做什麼：${
+            !current
+              ? '請先更新訂單，再確認付款或取餐'
+              : foodCustomerNextStep({
+                  ...order,
+                  payment: order.paymentSession,
+                  now,
+                })
+          }`}</FoodText>
           <FoodText>{`最後更新時間 ${foodTime(order.updatedAt)}（訂單資料時間）`}</FoodText>
           {!current ? <FoodText>目前顯示上次讀到的狀態，更新後再確認付款或取餐。</FoodText> : null}
           <FoodButton

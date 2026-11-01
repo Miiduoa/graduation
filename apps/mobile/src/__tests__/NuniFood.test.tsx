@@ -601,19 +601,41 @@ test('only a ready, authorized and unexpired pickup credential is displayed', as
   await waitFor(() => expect(view.queryByLabelText('一次性取餐憑證')).toBeNull());
   expect(view.getByText(/取餐號碼不能代替憑證核銷/)).toBeTruthy();
 });
-test('revoked order access hides the old pickup token immediately while reloading', async () => {
+test.each([
+  [401, 'UNAUTHORIZED'],
+  [403, 'FORBIDDEN'],
+  [404, 'NOT_FOUND'],
+  [409, 'SESSION_CHANGED'],
+  [400, 'INVALID_REQUEST'],
+])('訂單讀取失效 %s %s 後清除已展開的詳情', async (status, code) => {
   hasOrder = true;
   state = 'ready';
   const view = render(ui());
   await openOrder(view);
+  fireEvent.press(view.getByRole('button', { name: '訂單編號' }));
+  expect(view.getByText('訂單 order-one')).toBeTruthy();
+  expect(view.getByText('取餐號碼 A001')).toBeTruthy();
   mockRequest.mockImplementation(async (path, context, input) => {
-    if (path === `${realm}/orders/order-one`) throw new NuniError(403, 'FORBIDDEN');
+    if (path === `${realm}/orders/order-one`) throw new NuniError(status, code);
     return respond(path, context, input);
   });
   fireEvent.press(view.getByRole('button', { name: '更新狀態' }));
-  await view.findByText(/目前無法取得這份資料/);
+  await view.findByText(/這次沒能更新狀態/);
   expect(view.queryByLabelText('一次性取餐憑證')).toBeNull();
   expect(view.queryByText('訂單 order-one')).toBeNull();
+  expect(view.queryByText('取餐號碼 A001')).toBeNull();
+  expect(view.queryByText(/應付總額/)).toBeNull();
+  expect(view.queryByText(/雞腿飯/)).toBeNull();
+  expect(view.queryByText('餐坊')).toBeNull();
+  expect(view.queryByRole('button', { name: '訂單編號' })).toBeNull();
+  expect(view.queryByText(/畫面保留上次讀到的資料/)).toBeNull();
+  mockRequest.mockImplementation(async (path, context, input) => {
+    if (path === `${realm}/orders/order-one`) throw new Error('offline');
+    return respond(path, context, input);
+  });
+  fireEvent.press(view.getByRole('button', { name: '更新狀態' }));
+  await view.findByText(/這次沒能更新狀態/);
+  expect(view.queryByText('取餐號碼 A001')).toBeNull();
 });
 test('merchant performs real confirmation steps from shift to cash, preparation, pickup and handover', async () => {
   const view = render(staffUi());
@@ -1087,18 +1109,21 @@ test.each([
   if (nextState !== 'ready') expect(view.queryByText(/餐點好了/)).toBeNull();
 });
 
-test('更新失敗保留訂單與資料時間，重試成功才換新狀態', async () => {
+test.each([null, 408, 429, 503])('暫時失敗 %s 保留訂單，成功才顯示正常下一步', async (status) => {
   hasOrder = true;
   state = 'ready';
   const view = render(ui());
   await openOrder(view);
   const timestamp = view.getByText(/最後更新時間/).props.children;
   mockRequest.mockImplementation(async (path, context, input) => {
-    if (path === `${realm}/orders/order-one`) throw new Error('offline');
+    if (path === `${realm}/orders/order-one`)
+      throw status === null ? new Error('offline') : new NuniError(status, 'TEMPORARY');
     return respond(path, context, input);
   });
   fireEvent.press(view.getByRole('button', { name: '更新狀態' }));
   await view.findByText(/這次沒能更新狀態/);
+  expect(view.getByText('現在該做什麼：請先更新訂單，再確認付款或取餐')).toBeTruthy();
+  expect(view.queryByText(/請到店出示取餐憑證/)).toBeNull();
   expect(view.getByText('取餐號碼 A001')).toBeTruthy();
   expect(view.getByText(timestamp)).toBeTruthy();
   expect(view.queryByLabelText('一次性取餐憑證')).toBeNull();
@@ -1108,3 +1133,31 @@ test('更新失敗保留訂單與資料時間，重試成功才換新狀態', as
   await view.findByText('現在該做什麼：這筆訂單已取餐完成。');
   expect(view.queryByText(/這次沒能更新狀態/)).toBeNull();
 });
+
+test.each(['ready', 'payment-pending'] as const)(
+  '更新中 %s 優先提示更新，成功後恢復下一步',
+  async (nextState) => {
+    hasOrder = true;
+    state = nextState;
+    const view = render(ui());
+    await openOrder(view);
+    const guidance = view.getByText(/現在該做什麼：/).props.children;
+    let finish!: (value: unknown) => void;
+    mockRequest.mockImplementation((path, context, input) => {
+      if (path === `${realm}/orders/order-one`)
+        return new Promise((resolve) => {
+          finish = resolve;
+        });
+      return respond(path, context, input);
+    });
+    fireEvent.press(view.getByRole('button', { name: '更新狀態' }));
+    await view.findByText('正在更新訂單…');
+    expect(view.getByText('現在該做什麼：請先更新訂單，再確認付款或取餐')).toBeTruthy();
+    expect(view.queryByText(guidance)).toBeNull();
+    expect(view.queryByLabelText('一次性取餐憑證')).toBeNull();
+    await act(async () => {
+      finish(await respond(`${realm}/orders/order-one`));
+    });
+    await view.findByText(guidance);
+  },
+);
