@@ -299,7 +299,7 @@ function GradeRow({
           {!when && <span className={styles.meta}>紀錄更新時間：未知</span>}
           {when && hydrated ? (
             <span className={styles.meta}>
-              {item.publishedAt ? '回饋公布：' : '最近繳交：'}<time dateTime={when}>{formatTaipeiDateTime(when, { seconds: false })}</time>
+              紀錄更新時間：<time dateTime={when}>{formatTaipeiDateTime(when, { seconds: false })}</time>
             </span>
           ) : null}
         </span>
