@@ -430,3 +430,10 @@ it('labels course provenance and unknown timestamps without inventing a score', 
   expect(screen.queryByText(/已評分 · 0/)).toBeNull();
   expect(screen.getByRole('link', { name: /作業一/ }).getAttribute('href')).toContain('#assignment-');
 });
+
+it.each(['publishedAt', 'submittedAt'] as const)('uses one record timestamp label for %s', async (field) => {
+  render(<StudentGradesBoard nuni={book([section({ items: [item({ publishedAt: null, submittedAt: null, [field]: '2026-10-31T01:05:00Z' })] })])} school={null} ownerId={ownerId} filter="all" onFilter={vi.fn()} onOpen={vi.fn()} />);
+  const timestamp = await screen.findByText('2026/10/31 上午9:05');
+  expect(timestamp.parentElement?.textContent).toBe('紀錄更新時間：2026/10/31 上午9:05');
+  expect(screen.queryByText(/回饋公布：|最近繳交：/)).toBeNull();
+});

@@ -168,3 +168,23 @@ test('a mounted post keeps its comment draft and accessible send state when the 
   expect(view.getByPlaceholderText('輸入留言...').props.value).toBe('想確認右旋的順序');
   expect(view.getByRole('button', { name: '送出留言' })).not.toBeDisabled();
 });
+
+test('非試辦社團關閉後台開關時仍保留安全社員名單入口', async () => {
+  const originalType = mockGroup.type;
+  const originalFlag = process.env.EXPO_PUBLIC_CLUB_ADMIN_ENABLED;
+  mockGroup.type = 'club';
+  process.env.EXPO_PUBLIC_CLUB_ADMIN_ENABLED = 'false';
+  try {
+    const navigation = { navigate: jest.fn() };
+    const view = render(
+      <GroupDetailScreen navigation={navigation} route={{ params: { groupId: 'course-actual' } }} />,
+    );
+    fireEvent.press(await view.findByRole('button', { name: '社員名單' }));
+    expect(navigation.navigate).toHaveBeenCalledWith('GroupMembers', { groupId: 'course-actual' });
+    expect(view.queryByText('社團後台')).toBeNull();
+  } finally {
+    mockGroup.type = originalType;
+    if (originalFlag === undefined) delete process.env.EXPO_PUBLIC_CLUB_ADMIN_ENABLED;
+    else process.env.EXPO_PUBLIC_CLUB_ADMIN_ENABLED = originalFlag;
+  }
+});

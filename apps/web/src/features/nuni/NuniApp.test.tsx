@@ -646,15 +646,26 @@ it('合成發布經共用寫入與輪詢後約一分鐘內出現在學生畫面'
   vi.useFakeTimers();
   try {
     fireEvent.click(screen.getByRole('tab', { name: '作業' }));
-    await act(async () => { await vi.advanceTimersByTimeAsync(301); });
+    await act(async () => { await vi.advanceTimersByTimeAsync(300); });
     const { createNuniClasses } = await import('@campus/shared/src/nuni');
     const teacher = createNuniClasses((path, input) => mocks.request(path, 'teacher', input), principalId);
     const started = Date.now();
     const write = teacher.createAssignment(workspaceId, { title: '跨端新發布作業', instructions: '合成內容',
       dueAt: null, idempotencyKey: 'synthetic-publication' });
-    for (let elapsed = 0; elapsed < 61000 && screen.queryAllByRole('link', { name: /跨端新發布作業/ }).length === 0; elapsed += 50)
-      await act(async () => { await vi.advanceTimersByTimeAsync(50); });
-    await write;
+    const assignmentReads = () => mocks.request.mock.calls.filter(
+      ([path, , input]) => path.endsWith('/assignments') && !input,
+    ).length;
+    const beforePoll = assignmentReads();
+    await act(async () => { await vi.advanceTimersByTimeAsync(200); await write; });
+    expect(screen.queryAllByRole('link', { name: /跨端新發布作業/ })).toHaveLength(0);
+    // 成功讀取後等候 60 秒才輪詢；直接驗證邊界，避免逐小步推進的執行成本。
+    await act(async () => { await vi.advanceTimersByTimeAsync(59799); });
+    expect(assignmentReads()).toBe(beforePoll);
+    await act(async () => { await vi.advanceTimersByTimeAsync(1); });
+    expect(assignmentReads()).toBe(beforePoll + 1);
+    await act(async () => { await vi.advanceTimersByTimeAsync(299); });
+    expect(screen.queryAllByRole('link', { name: /跨端新發布作業/ })).toHaveLength(0);
+    await act(async () => { await vi.advanceTimersByTimeAsync(1); });
     expect(within(screen.getByRole('navigation', { name: '跳到作業' })).getByRole('link', { name: /跨端新發布作業/ })).toBeTruthy();
     expect(Date.now() - started).toBeLessThanOrEqual(61000);
     expect(Date.now() - started).toBe(60300);

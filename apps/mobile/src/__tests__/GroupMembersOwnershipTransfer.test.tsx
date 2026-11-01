@@ -5,7 +5,7 @@
 import React from 'react';
 import { Alert } from 'react-native';
 import { act, fireEvent, render, waitFor, type RenderAPI } from '@testing-library/react-native';
-import { getDoc } from 'firebase/firestore';
+import { getDoc, getDocs } from 'firebase/firestore';
 import { GroupMembersScreen } from '../screens/GroupMembersScreen';
 
 const authState = {
@@ -21,6 +21,11 @@ const membershipState = {
 };
 
 const mockTransfer = jest.fn();
+let mockGroupType = 'study';
+const mockRoster = jest.fn();
+jest.mock('../services/clubRoster', () => ({
+  loadClubRoster: (...args: unknown[]) => mockRoster(...args),
+}));
 const alertSpy = jest.spyOn(Alert, 'alert');
 
 jest.mock('../state/auth', () => ({ useAuth: () => authState }));
@@ -72,7 +77,7 @@ jest.mock('firebase/firestore', () => ({
       return {
         exists: () => true,
         id: 'g1',
-        data: () => ({ name: '讀書會', type: 'study', createdBy: 'alice' }),
+        data: () => ({ name: '讀書會', type: mockGroupType, createdBy: 'alice' }),
       };
     }
     if (ref.path === 'groups/g1/members/alice') {
@@ -130,6 +135,7 @@ function confirmTransfer() {
 
 beforeEach(() => {
   jest.clearAllMocks();
+  mockGroupType = 'study';
   authState.user = { uid: 'alice' };
   authState.loading = false;
   authState.profileLoading = false;
@@ -311,3 +317,33 @@ test('scope switch during pending transfer re-enables actions for the new scope'
   });
   expect(alertSpy.mock.calls.some((call) => call[0] === '已轉讓擁有權')).toBe(false);
 });
+
+test('既有非試辦社團在開關關閉時從安全 API 顯示名單，不查私人集合或開啟私訊', async () => {
+  process.env.EXPO_PUBLIC_CLUB_ADMIN_ENABLED = 'false';
+  mockGroupType = 'club';
+  membershipState.aliceRole = 'member';
+  mockRoster.mockResolvedValue([{ name: '公開姓名', role: 'member' }]);
+  const navigate = jest.fn();
+  const view = render(
+    <GroupMembersScreen route={{ params: { groupId: 'g1' } }} navigation={{ navigate }} />,
+  );
+  await waitFor(() => expect(view.getByText('公開姓名')).toBeTruthy());
+  expect(mockRoster).toHaveBeenCalledWith('alice', 'pu', 'g1');
+  expect(getDocs).not.toHaveBeenCalled();
+  expect(view.queryByText('public-0')).toBeNull();
+  fireEvent.press(view.getByText('公開姓名'));
+  expect(navigate).not.toHaveBeenCalled();
+  expect(view.queryByText('私訊')).toBeNull();
+});
+
+test.each(['functions/not-found', 'functions/unavailable', 'functions/permission-denied'])(
+  'callable %s 時沿用既有查詢顯示社員名單',
+  async (code) => {
+    mockGroupType = 'club';
+    membershipState.aliceRole = 'member';
+    mockRoster.mockRejectedValue(Object.assign(new Error(code), { code }));
+    const view = render(<GroupMembersScreen route={{ params: { groupId: 'g1' } }} />);
+    await waitFor(() => expect(view.getByText('王小明')).toBeTruthy());
+    expect(getDocs).toHaveBeenCalled();
+  },
+);
