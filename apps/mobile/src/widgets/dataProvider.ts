@@ -92,7 +92,7 @@ async function readTimetableRecords(userId: string, schoolId: string) {
     loadPersonalTimetable(owner.startsWith('nuni:') ? null : userId, schoolId,
       owner.startsWith('nuni:') ? owner : undefined),
   ]);
-  return [...personalTimetableRecords(timetable), ...ledger.records];
+  return personalTimetableRecords(timetable, ledger.records);
 }
 export async function getTodayScheduleData(userId: string, schoolId: string): Promise<TodayScheduleWidgetData> {
   const now = new Date();

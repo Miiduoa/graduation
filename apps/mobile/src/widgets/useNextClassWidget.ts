@@ -32,7 +32,7 @@ export function useNextClassWidget() {
         if (active)
           await nextClassWriter.write(
             buildNextClassSnapshot(
-              [...personalTimetableRecords(timetable), ...ledger.records],
+              personalTimetableRecords(timetable, ledger.records),
               schoolId,
             ),
             revision,

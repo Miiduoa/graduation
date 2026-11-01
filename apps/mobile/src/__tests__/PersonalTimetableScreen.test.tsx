@@ -1,18 +1,20 @@
+import { classMeetingKey } from '@campus/shared';
 import React from 'react';
 import { fireEvent, render, waitFor } from '@testing-library/react-native';
 import type { PersonalImportRecord } from '@campus/shared';
 import PersonalTimetableScreen from '../screens/PersonalTimetableScreen';
-import { loadPersonalTimetable } from '../services/personalTimetable';
+import { loadPersonalTimetable, loadPersonalTimetableDraft, savePersonalTimetable } from '../services/personalTimetable';
 import { loadPersonalImports } from '../services/personalImports';
 
+let mockUser: { uid: string } | null = null;
 let mockSchool = { id: 'ncku', name: '國立成功大學' };
-let mockRoute: { params?: { term: string; courseId?: string; schoolId?: string } } = {};
+let mockRoute: { params?: { term: string; courseId?: string; schoolId?: string; date?: string } } = {};
 let mockScope: { owner: string; schoolId: string } | null = {
   owner: 'nuni:account-a',
   schoolId: 'ncku',
 };
 const mockNavigation = { navigate: jest.fn(), goBack: jest.fn(), canGoBack: () => false };
-jest.mock('../state/auth', () => ({ useAuth: () => ({ user: null }) }));
+jest.mock('../state/auth', () => ({ useAuth: () => ({ user: mockUser }) }));
 jest.mock('../state/school', () => ({ useSchool: () => ({ school: mockSchool }) }));
 jest.mock('../state/personalImportScope', () => ({ usePersonalImportScope: () => mockScope }));
 jest.mock('../services/personalImports', () => ({
@@ -23,11 +25,12 @@ jest.mock('../firebase', () => ({ getDb: jest.fn(), getFunctionsInstance: jest.f
 jest.mock('../services/personalTimetable', () => ({
   ...jest.requireActual('../services/personalTimetable'),
   loadPersonalTimetable: jest.fn(),
+  loadPersonalTimetableDraft: jest.fn(),
   savePersonalTimetable: jest.fn(),
 }));
 jest.mock('../components/PersonalImportSummary', () => ({ PersonalImportSummary: () => null }));
 jest.mock('../services/friends', () => ({
-  listAcceptedFriends: jest.fn(),
+  listAcceptedFriends: jest.fn(async () => []),
   opponentUidFromFriendship: jest.fn(),
 }));
 jest.mock('@react-navigation/native', () => ({
@@ -54,6 +57,7 @@ const record = (overrides: Partial<PersonalImportRecord> = {}): PersonalImportRe
 });
 beforeEach(() => {
   jest.clearAllMocks();
+  mockUser = null;
   mockSchool = { id: 'ncku', name: '國立成功大學' };
   mockScope = { owner: 'nuni:account-a', schoolId: 'ncku' };
   mockRoute = {};
@@ -199,4 +203,40 @@ test('widget links locate the saved course and room, while removed courses fall 
   mockRoute = { params: { term: '115|1', courseId: 'removed', schoolId: 'ncku' } };
   view.rerender(<PersonalTimetableScreen />);
   await view.findByText('這堂課已變更，請核對目前課表');
+});
+
+test('a dated widget link shows the makeup room and date rather than the weekly room', async () => {
+  const original = record();
+  const timetable = await jest.mocked(loadPersonalTimetable)(null, 'ncku', 'nuni:account-a');
+  jest.mocked(loadPersonalTimetable).mockResolvedValue({ ...timetable, classExceptions: [{
+    id: 'move', courseKey: classMeetingKey(original), originalDate: '2026-11-02', kind: 'move',
+    date: '2026-11-03', endDate: '2026-11-04', startTime: '23:30', endTime: '01:00',
+    location: '補課教室', createdAt: '', original,
+  }] });
+  mockRoute = { params: { term: '115|1', courseId: original.id, schoolId: 'ncku', date: '2026-11-03' } };
+  const view = render(<PersonalTimetableScreen />);
+  await view.findByText('2026-11-03 · 23:30–01:00 · 補課教室');
+  expect(view.getByLabelText('查看日期').props.value).toBe('2026-11-03');
+});
+
+
+test('cloud reload and draft preview are explicit and sharing does not edit exceptions', async () => {
+  mockUser = { uid: 'synthetic' };
+  mockScope = { owner: 'firebase:synthetic', schoolId: 'ncku' };
+  const base = await jest.mocked(loadPersonalTimetable)(null, 'ncku');
+  jest.mocked(loadPersonalTimetable).mockResolvedValue({ ...base, classExceptions: [], classExceptionsRevision: 2 });
+  jest.mocked(loadPersonalTimetableDraft).mockResolvedValue({ ...base, courses: [{ id: 'offline', name: '離線新增課', teacher: '', room: '', day: 1, start: 1, end: 2, color: 'blue' }], meta: { ...base.meta, title: '離線標題' }, shareWithFriends: true, pendingBase: true, pendingExceptions: false, classExceptions: [], classExceptionsRevision: 1 });
+  jest.mocked(savePersonalTimetable).mockResolvedValue({ stored: 'cloud', timetable: { ...base, classExceptionsRevision: 2 } });
+  const view = render(<PersonalTimetableScreen />);
+  await view.findByText('成大課程');
+  fireEvent.press(view.getByText('檢視這台裝置未同步草稿'));
+  await view.findByText('目前預覽未同步課表；請核對每週基準與單次安排，分別儲存。重新讀取可回到雲端版本。');
+  expect(loadPersonalTimetableDraft).toHaveBeenCalledWith('synthetic', 'ncku');
+  await view.findByText('離線新增課');
+  fireEvent.press(view.getByText('儲存每週基準課表'));
+  await waitFor(() => expect(savePersonalTimetable).toHaveBeenCalledWith('synthetic', expect.objectContaining({ courses: [expect.objectContaining({ id: 'offline' })], meta: expect.objectContaining({ title: '離線標題' }), shareWithFriends: true, classExceptionsRevision: 2 }), undefined, false));
+  fireEvent.press(view.getByText('重新讀取雲端課表'));
+  await waitFor(() => expect(loadPersonalTimetable).toHaveBeenLastCalledWith('synthetic', 'ncku', undefined));
+  fireEvent.press(view.getByText('目前好友看不到這份課表（點一下開放）'));
+  await waitFor(() => expect(savePersonalTimetable).toHaveBeenCalledWith('synthetic', expect.objectContaining({ shareWithFriends: true, classExceptionsRevision: 2 }), undefined, false));
 });

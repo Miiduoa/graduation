@@ -95,3 +95,19 @@ test('a noon refresh expires before the uncovered eighth Taipei calendar day', (
   expect(nextClassState(snapshot, snapshot.expiresAt - 1).status).toBe('empty');
   expect(nextClassState(snapshot, snapshot.expiresAt).status).toBe('stale');
 });
+
+
+test('overnight exceptions match actual instants, reminders and next-day conflicts without duplicates', () => {
+  const { classMeetingKey, withClassExceptions, buildPersonalToday, classReminderPlan } = require('@campus/shared');
+  const original = { ...row, dayOfWeek: 1 };
+  const change = { id: 'overnight', original, courseKey: classMeetingKey(original), originalDate: '2026-11-02',
+    kind: 'move', date: '2026-11-03', endDate: '2026-11-04', startTime: '23:30', endTime: '01:00', location: '補課教室', createdAt: '' };
+  const other = { ...row, id: 'night', title: '凌晨課', dayOfWeek: 3, startTime: '00:30', endTime: '01:30' };
+  const records = withClassExceptions([original, other], [change]);
+  const time = new Date('2026-11-03T08:00:00+08:00');
+  const today = buildPersonalToday(records, { schoolId: 'pu', now: time });
+  const widget = buildNextClassSnapshot(records, 'pu', time);
+  expect(widget.classes.filter((entry) => entry.startAt === today.today[0].startAt)).toHaveLength(1);
+  expect(widget.classes[0]).toMatchObject({ startAt: today.today[0].startAt, endAt: today.today[0].endAt, location: '補課教室', conflict: true });
+  expect(classReminderPlan(today.today, time.getTime())[0]).toMatchObject({ startAt: widget.classes[0].startAt, endAt: widget.classes[0].endAt, location: '補課教室', remindAt: widget.classes[0].startAt - 600000 });
+});
