@@ -597,7 +597,7 @@ test('only a ready, authorized and unexpired pickup credential is displayed', as
   await openOrder(view);
   expect(view.getByLabelText('一次性取餐憑證')).toHaveTextContent(token);
   expiresAt = new Date(Date.now() - 1000).toISOString();
-  fireEvent.press(view.getByRole('button', { name: '重新讀取' }));
+  fireEvent.press(view.getByRole('button', { name: '更新狀態' }));
   await waitFor(() => expect(view.queryByLabelText('一次性取餐憑證')).toBeNull());
   expect(view.getByText(/取餐號碼不能代替憑證核銷/)).toBeTruthy();
 });
@@ -610,7 +610,7 @@ test('revoked order access hides the old pickup token immediately while reloadin
     if (path === `${realm}/orders/order-one`) throw new NuniError(403, 'FORBIDDEN');
     return respond(path, context, input);
   });
-  fireEvent.press(view.getByRole('button', { name: '重新讀取' }));
+  fireEvent.press(view.getByRole('button', { name: '更新狀態' }));
   await view.findByText(/目前無法取得這份資料/);
   expect(view.queryByLabelText('一次性取餐憑證')).toBeNull();
   expect(view.queryByText('訂單 order-one')).toBeNull();
@@ -1015,6 +1015,7 @@ test('order detail skips background polls, keeps cancel confirm on quiet refresh
   Object.defineProperty(AppState, 'currentState', { configurable: true, value: 'active' });
   const view = render(ui());
   await openOrder(view);
+  const dataTime = view.getByText(/最後更新時間/).props.children;
   fireEvent.press(view.getByRole('button', { name: '檢查取消訂單' }));
   expect(view.getByRole('button', { name: '確認取消這張訂單' })).toBeTruthy();
   Object.defineProperty(AppState, 'currentState', { configurable: true, value: 'background' });
@@ -1028,11 +1029,13 @@ test('order detail skips background polls, keeps cancel confirm on quiet refresh
   expect(
     mockRequest.mock.calls.filter((call) => call[0].endsWith('/orders/order-one')).length,
   ).toBe(before);
+  expect(view.getByText(dataTime)).toBeTruthy();
   Object.defineProperty(AppState, 'currentState', { configurable: true, value: 'active' });
   await act(async () => {
     appListener?.('active');
   });
   await waitFor(() => expect(view.getByRole('button', { name: '確認取消這張訂單' })).toBeTruthy());
+  expect(view.getByText(/最後更新時間.*訂單資料時間/)).toBeTruthy();
   state = 'ready';
   await act(async () => {
     await jest.advanceTimersByTimeAsync(10_000);
@@ -1046,4 +1049,62 @@ test('order detail skips background polls, keeps cancel confirm on quiet refresh
   expect(view.getByText('已取餐')).toBeTruthy();
   subscription.mockRestore();
   jest.useRealTimers();
+});
+
+test.each([
+  ['payment-pending', 'awaiting-offline-payment', '請到櫃檯向店員完成付款'],
+  ['payment-pending', 'authorized-awaiting-settlement', '付款確認中'],
+  ['cancellation-pending-refund', 'refunding', '退款處理中'],
+  ['ready', undefined, '餐點好了。請到店出示取餐憑證。'],
+])('訂單 %s／%s 顯示下一步與來源時間', async (nextState, progress, copy) => {
+  hasOrder = true;
+  state = nextState;
+  mockRequest.mockImplementation(async (path, context, input) => {
+    if (path === `${realm}/orders/order-one`)
+      return {
+        ...detail(),
+        updatedAt: '2026-10-31T04:15:00.000Z',
+        ...(progress
+          ? {
+              paymentSession: {
+                id: 'session-one',
+                orderId: 'order-one',
+                method: 'credit-card',
+                checkoutUrl: 'https://example.com/checkout',
+                progress,
+                allowedActions: [],
+                expiresAt: future(),
+              },
+            }
+          : {}),
+      };
+    return respond(path, context, input);
+  });
+  const view = render(ui());
+  await openOrder(view);
+  expect(view.getByText(new RegExp(`現在該做什麼：.*${copy}`))).toBeTruthy();
+  expect(view.getByText(/最後更新時間.*10\/31.*12:15.*訂單資料時間/)).toBeTruthy();
+  if (nextState !== 'ready') expect(view.queryByText(/餐點好了/)).toBeNull();
+});
+
+test('更新失敗保留訂單與資料時間，重試成功才換新狀態', async () => {
+  hasOrder = true;
+  state = 'ready';
+  const view = render(ui());
+  await openOrder(view);
+  const timestamp = view.getByText(/最後更新時間/).props.children;
+  mockRequest.mockImplementation(async (path, context, input) => {
+    if (path === `${realm}/orders/order-one`) throw new Error('offline');
+    return respond(path, context, input);
+  });
+  fireEvent.press(view.getByRole('button', { name: '更新狀態' }));
+  await view.findByText(/這次沒能更新狀態/);
+  expect(view.getByText('取餐號碼 A001')).toBeTruthy();
+  expect(view.getByText(timestamp)).toBeTruthy();
+  expect(view.queryByLabelText('一次性取餐憑證')).toBeNull();
+  state = 'fulfilled';
+  mockRequest.mockImplementation(respond);
+  fireEvent.press(view.getByRole('button', { name: '更新狀態' }));
+  await view.findByText('現在該做什麼：這筆訂單已取餐完成。');
+  expect(view.queryByText(/這次沒能更新狀態/)).toBeNull();
 });
