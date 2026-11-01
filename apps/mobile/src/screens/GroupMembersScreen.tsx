@@ -32,6 +32,7 @@ import {
   serverTimestamp,
 } from 'firebase/firestore';
 import { useAsyncList } from '../hooks/useAsyncList';
+import { loadClubRoster } from '../services/clubRoster';
 import { fetchSchoolDirectoryProfiles } from '../services/memberDirectory';
 import {
   createGroupOwnershipOrigin,
@@ -41,10 +42,11 @@ import {
   type GroupOwnershipOrigin,
 } from '../services/groupOwnership';
 
-type MemberRole = 'owner' | 'instructor' | 'moderator' | 'member';
+type MemberRole = 'admin' | 'owner' | 'instructor' | 'moderator' | 'member';
 
 type Member = {
   uid: string;
+  publicName?: string;
   role?: MemberRole;
   status?: string;
   joinedAt?: any;
@@ -70,6 +72,7 @@ function getRoleLabel(role?: string): string {
       return '擁有者';
     case 'instructor':
       return '教師';
+    case 'admin':
     case 'moderator':
       return '管理員';
     case 'member':
@@ -84,6 +87,7 @@ function getRoleIcon(role?: string): string {
       return 'star';
     case 'instructor':
       return 'school';
+    case 'admin':
     case 'moderator':
       return 'shield-checkmark';
     case 'member':
@@ -125,18 +129,25 @@ export function GroupMembersScreen(props: any) {
     const snap = await getDoc(doc(db, 'groups', groupId));
     if (!snap.exists()) return [];
     return [{ id: snap.id, ...(snap.data() as any) }];
-  }, [db, groupId]);
+  }, [db, groupId, auth.user?.uid, school.id]);
 
   const group = groupMeta[0];
 
   const { items, loading, error, reload } = useAsyncList<Member>(async () => {
     if (isFirebaseMockMode()) return [];
-    if (!groupId) return [];
+    if (!groupId || !group || !auth.user) return [];
+    if (group.type === 'club') {
+      const mine = await getDoc(doc(db, 'groups', groupId, 'members', auth.user.uid));
+      if (!['owner', 'admin', 'instructor', 'moderator'].includes(mine.data()?.role)) {
+        const roster = await loadClubRoster(auth.user.uid, school.id, groupId);
+        return roster.map((m, i) => ({ uid: `public-${i}`, role: m.role, publicName: m.name }));
+      }
+    }
     const ref = collection(db, 'groups', groupId, 'members');
     const qy = query(ref, where('status', '==', 'active'));
     const snap = await getDocs(qy);
     return snap.docs.map((d) => ({ uid: d.id, ...(d.data() as any) }));
-  }, [db, groupId]);
+  }, [db, groupId, group?.type, auth.user?.uid, school.id]);
 
   const { items: myMemberRows, reload: reloadMyMembership } = useAsyncList<{
     role?: MemberRole;
@@ -147,14 +158,15 @@ export function GroupMembersScreen(props: any) {
     const snap = await getDoc(doc(db, 'groups', groupId, 'members', auth.user.uid));
     if (!snap.exists()) return [];
     return [snap.data() as any];
-  }, [db, groupId, auth.user?.uid]);
+  }, [db, groupId, auth.user?.uid, school.id]);
 
   const myRole = myMemberRows[0]?.role;
-  const canManageMembers = myRole === 'owner' || myRole === 'instructor' || myRole === 'moderator';
+  const canManageMembers =
+    myRole === 'owner' || myRole === 'admin' || myRole === 'instructor' || myRole === 'moderator';
 
   const { items: userProfiles } = useAsyncList<UserProfile>(async () => {
     if (isFirebaseMockMode()) return [];
-    if (items.length === 0) return [];
+    if (items.length === 0 || items[0]?.publicName !== undefined) return [];
     return fetchSchoolDirectoryProfiles(
       school.id,
       items.map((member) => member.uid),
@@ -187,7 +199,7 @@ export function GroupMembersScreen(props: any) {
       list = list.filter((m) => {
         const profile = profilesById[m.uid];
         const searchStr =
-          `${profile?.displayName ?? ''} ${profile?.department ?? ''} ${m.uid}`.toLowerCase();
+          `${m.publicName ?? profile?.displayName ?? ''} ${profile?.department ?? ''} ${m.uid}`.toLowerCase();
         return searchStr.includes(q);
       });
     }
@@ -514,8 +526,11 @@ export function GroupMembersScreen(props: any) {
           {rows.map((m, idx) => {
             const isMe = m.uid === auth.user?.uid;
             const profile = profilesById[m.uid];
-            const displayName = profile?.displayName || `${m.uid.slice(0, 8)}…`;
-            const subtitle = [profile?.department, m.uid.slice(0, 8)].filter(Boolean).join('｜');
+            const displayName = m.publicName ?? profile?.displayName ?? `${m.uid.slice(0, 8)}…`;
+            const subtitle =
+              m.publicName !== undefined
+                ? ''
+                : [profile?.department, m.uid.slice(0, 8)].filter(Boolean).join('｜');
             const isManaging = managingMember === m.uid;
 
             return (
@@ -525,7 +540,7 @@ export function GroupMembersScreen(props: any) {
                     if (!auth.user) return;
                     if (canManageMembers && !isMe) {
                       setManagingMember(isManaging ? null : m.uid);
-                    } else if (!isMe) {
+                    } else if (!isMe && m.publicName === undefined) {
                       nav?.navigate?.('Chat', { kind: 'dm', peerId: m.uid });
                     }
                   }}
@@ -674,7 +689,11 @@ export function GroupMembersScreen(props: any) {
                                 : '轉讓擁有權'
                             }
                             kind="outline"
-                            disabled={transferringOwnership || Boolean(auth.loading) || Boolean(auth.profileLoading)}
+                            disabled={
+                              transferringOwnership ||
+                              Boolean(auth.loading) ||
+                              Boolean(auth.profileLoading)
+                            }
                             onPress={() => promptTransferOwnership(m)}
                           />
                           <Text style={{ color: theme.colors.muted, fontSize: 12, marginTop: 6 }}>
@@ -712,17 +731,21 @@ export function GroupMembersScreen(props: any) {
                     </View>
                   )}
 
-                  {!isManaging && !isMe && auth.user && !canManageMembers && (
-                    <View
-                      style={{ marginTop: 12, flexDirection: 'row', gap: 10, flexWrap: 'wrap' }}
-                    >
-                      <Button
-                        text="私訊"
-                        kind="primary"
-                        onPress={() => nav?.navigate?.('Chat', { kind: 'dm', peerId: m.uid })}
-                      />
-                    </View>
-                  )}
+                  {!isManaging &&
+                    !isMe &&
+                    auth.user &&
+                    !canManageMembers &&
+                    m.publicName === undefined && (
+                      <View
+                        style={{ marginTop: 12, flexDirection: 'row', gap: 10, flexWrap: 'wrap' }}
+                      >
+                        <Button
+                          text="私訊"
+                          kind="primary"
+                          onPress={() => nav?.navigate?.('Chat', { kind: 'dm', peerId: m.uid })}
+                        />
+                      </View>
+                    )}
                 </Pressable>
               </AnimatedCard>
             );

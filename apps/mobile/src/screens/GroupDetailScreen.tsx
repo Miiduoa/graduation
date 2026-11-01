@@ -678,7 +678,7 @@ export function GroupDetailScreen(props: any) {
 
           <View style={{ marginTop: 10, flexDirection: 'row', gap: 10, flexWrap: 'wrap' }}>
             <Button
-              text="成員"
+              text={group?.type === 'club' ? '社員名單' : '成員'}
               kind="primary"
               onPress={() => nav?.navigate?.('GroupMembers', { groupId })}
             />

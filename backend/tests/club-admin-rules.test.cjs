@@ -23,6 +23,7 @@ before(async () => {
       ['officer', 'admin'],
       ['student', 'member'],
       ['moderator', 'moderator'],
+      ['instructor', 'instructor'],
     ]) {
       await db.doc(`schools/school/members/${uid}`).set({ status: 'active' });
       await db
@@ -38,12 +39,12 @@ before(async () => {
 after(async () => {
   await env?.cleanup();
 });
-test('社員及協作者無法直接取得其他社員的私人欄位，幹部與會長可讀', async () => {
-  for (const uid of ['president', 'officer'])
+test('社員無法直接取得其他社員的私人欄位，既有管理角色保留讀權', async () => {
+  for (const uid of ['president', 'officer', 'moderator', 'instructor'])
     await assertSucceeds(
       env.authenticatedContext(uid).firestore().doc('groups/club/members/student').get(),
     );
-  for (const uid of ['student', 'moderator', 'outsider'])
+  for (const uid of ['student', 'outsider'])
     await assertFails(
       env.authenticatedContext(uid).firestore().doc('groups/club/members/officer').get(),
     );
@@ -54,10 +55,13 @@ test('社員及協作者無法直接取得其他社員的私人欄位，幹部�
     env.authenticatedContext('student').firestore().collection('groups/club/members').get(),
   );
 });
-test('協作者不可修改社團私人欄位或刪除社員', async () => {
-  const db = env.authenticatedContext('moderator').firestore();
-  await assertFails(db.doc('groups/club/members/student').update({ phone: '0911111111' }));
-  await assertFails(db.doc('groups/club/members/student').delete());
+test('既有教師與管理員保留管理權，但不能直接調整角色', async () => {
+  for (const uid of ['moderator', 'instructor']) {
+    const db = env.authenticatedContext(uid).firestore();
+    await assertSucceeds(db.doc('groups/club/members/student').update({ phone: '0911111111' }));
+    await assertFails(db.doc('groups/club/members/student').update({ role: 'owner' }));
+    await assertSucceeds(db.doc('groups/club/members/removable').delete());
+  }
 });
 
 test('所有客戶端均不可繞過伺服器讀寫活動、報名及簽到', async () => {
@@ -126,6 +130,56 @@ test('真實交易重送後重讀仍只計一次報名與簽到', async () => {
     assert.equal(view.events.find((event) => event.id === 'persisted').registered, 1);
     assert.equal(view.events.find((event) => event.id === 'persisted').checkedIn, 1);
     assert.ok((await call('president', { action: 'export' })).csv.includes('"1","1"'));
+  } finally {
+    await db.terminate();
+  }
+});
+
+test('所有既有社團在試辦關閉時仍可取得安全名單，拒絕跨校、離社及未登入', async () => {
+  const assert = require('node:assert/strict');
+  const { Firestore } = require('@google-cloud/firestore');
+  const { createClubRoster } = require('../functions/clubRoster');
+  const db = new Firestore({
+    projectId: 'demo-nuni-club',
+    host: process.env.FIRESTORE_EMULATOR_HOST,
+    ssl: false,
+  });
+  try {
+    const run = createClubRoster({ db });
+    for (const groupId of ['club', 'existing-club']) {
+      if (groupId !== 'club') {
+        await db.doc(`groups/${groupId}`).set({ type: 'club', schoolId: 'school' });
+        await db
+          .doc(`groups/${groupId}/members/student`)
+          .set({
+            status: 'active',
+            role: 'member',
+            displayName: '社員姓名',
+            phone: 'secret',
+            studentId: 'secret',
+          });
+      }
+      const view = await run({ auth: { uid: 'student' }, data: { groupId, schoolId: 'school' } });
+      assert.ok(view.members.length > 0);
+      for (const member of view.members)
+        assert.deepEqual(Object.keys(member).sort(), ['name', 'role']);
+      if (groupId !== 'club') assert.equal(view.members[0].name, '社員姓名');
+    }
+    for (const request of [
+      { data: { groupId: 'club', schoolId: 'school' } },
+      { auth: { uid: 'outsider' }, data: { groupId: 'club', schoolId: 'school' } },
+      { auth: { uid: 'student' }, data: { groupId: 'club', schoolId: 'other' } },
+    ])
+      await assert.rejects(run(request));
+    await db.doc('groups/existing-club/members/student').update({ status: 'left' });
+    await assert.rejects(
+      run({ auth: { uid: 'student' }, data: { groupId: 'existing-club', schoolId: 'school' } }),
+    );
+    await db.doc('schools/school/members/student').update({ status: 'inactive' });
+    await assert.rejects(
+      run({ auth: { uid: 'student' }, data: { groupId: 'club', schoolId: 'school' } }),
+    );
+    await db.doc('schools/school/members/student').update({ status: 'active' });
   } finally {
     await db.terminate();
   }
