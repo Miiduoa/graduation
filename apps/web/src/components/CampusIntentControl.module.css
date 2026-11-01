@@ -1,0 +1,109 @@
+.control {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+}
+.control button {
+  justify-self: start;
+  min-height: 44px;
+  max-width: 100%;
+  padding: 10px 14px;
+  border-radius: 10px;
+  font: inherit;
+  font-size: 14px;
+  line-height: 1.5;
+  cursor: pointer;
+  overflow-wrap: anywhere;
+}
+.control button:disabled {
+  cursor: default;
+  opacity: 0.55;
+}
+.secondary {
+  border: 1px solid var(--border-strong);
+  color: var(--text);
+  background: var(--surface);
+}
+.primary {
+  border: 1px solid var(--brand);
+  color: var(--on-brand);
+  background: var(--brand);
+}
+.disclosure {
+  min-width: 0;
+  padding: 16px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--panel);
+  color: var(--text);
+}
+.disclosure h3 {
+  margin: 0 0 14px;
+  font-size: 16px;
+  line-height: 1.5;
+}
+.disclosure dl {
+  display: grid;
+  gap: 12px;
+  margin: 0;
+}
+.disclosure dt {
+  font-size: 12px;
+  color: var(--muted);
+  line-height: 1.5;
+}
+.disclosure dd {
+  margin: 3px 0 0;
+  font-size: 14px;
+  line-height: 1.65;
+  overflow-wrap: anywhere;
+}
+.utterance {
+  white-space: pre-wrap;
+}
+.disclosure p,
+.hint {
+  margin: 10px 0 0;
+  font-size: 12px;
+  line-height: 1.7;
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+.consent {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  min-height: 44px;
+  margin-top: 14px;
+  padding: 10px 0;
+  font-size: 14px;
+  line-height: 1.65;
+  cursor: pointer;
+  overflow-wrap: anywhere;
+}
+.consent input {
+  flex: 0 0 auto;
+  width: 20px;
+  height: 20px;
+  margin: 2px 0 0;
+  accent-color: var(--brand);
+}
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 10px;
+}
+.control :is(button, input):focus-visible,
+.disclosure h3:focus-visible {
+  outline: 3px solid var(--focus-ring);
+  outline-offset: 3px;
+}
+@media (max-width: 420px) {
+  .disclosure {
+    padding: 12px;
+  }
+  .actions {
+    display: grid;
+  }
+}
