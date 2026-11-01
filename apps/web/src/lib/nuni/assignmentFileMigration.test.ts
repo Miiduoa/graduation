@@ -20,3 +20,13 @@ it('numbers the overlay SQL after personal-import-sync and keeps CREATE rerunnab
   expect(rollback).toContain('DROP TABLE IF EXISTS class_assignment_file_idempotency');
   expect(rollback).toContain('DROP TABLE IF EXISTS class_assignment_submission_files');
 });
+
+it('adds a rerunnable withdrawal ledger and limits rollback to that table', () => {
+  const sql = readFileSync(path.join(dir, '281_assignment_submission_withdrawals.sql'), 'utf8');
+  const rollback = readFileSync(path.join(dir, '281_assignment_submission_withdrawals.rollback.sql'), 'utf8');
+  expect(sql).toContain('CREATE TABLE IF NOT EXISTS class_assignment_submission_withdrawals');
+  expect(sql).toContain('PRIMARY KEY (assignment_id, platform_account_id, submitted_at)');
+  expect(sql).not.toMatch(/\b(?:UPDATE|DELETE|DROP|ALTER)\b/i);
+  expect(rollback).toContain('DROP TABLE IF EXISTS class_assignment_submission_withdrawals');
+  expect(rollback).not.toContain('DROP TABLE IF EXISTS class_assignment_submission_files');
+});

@@ -77,8 +77,8 @@ export function PersonalImportSummary({ kind }: { kind: PersonalImportKind }) {
             .slice(-3)
             .reverse()
             .map((row) => (
-              <Text key={row.id} style={{ color: theme.colors.text }}>
-                {row.title} ·{' '}
+              <Text key={row.id} accessibilityRole="link" onPress={() => safeNavigate(navigation, 'PersonalImport', { kind, recordId: row.id })} style={{ color: theme.colors.text }}>
+                {row.title} · 來源：個人匯入 · 匯入時間：{new Date(row.importedAt).toLocaleString('zh-TW', { timeZone: 'Asia/Taipei' })} ·{' '}
                 {kind === 'grades'
                   ? `${row.credits} 學分／${row.grade}（${row.academicYear}／${row.semester}）`
                   : `${row.date} ${row.allDay ? '全天' : row.startTime || ''}`}

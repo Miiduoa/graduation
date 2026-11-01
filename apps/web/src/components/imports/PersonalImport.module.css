@@ -868,3 +868,36 @@
   font-size: 11px;
   font-family: ui-monospace, monospace;
 }
+
+.weekGrid {
+  overflow: auto;
+  max-height: 36rem;
+  margin-bottom: 1rem;
+}
+.weekGrid table {
+  border-collapse: collapse;
+  width: 100%;
+  min-width: 760px;
+}
+.weekGrid th,
+.weekGrid td {
+  border: 1px solid var(--border);
+  padding: 4px;
+  vertical-align: top;
+}
+.weekGrid th {
+  position: sticky;
+  top: 0;
+  background: var(--surface);
+}
+.weekGrid td {
+  min-width: 96px;
+}
+.weekGrid button {
+  width: 100%;
+  min-height: 44px;
+  text-align: left;
+}
+.weekGrid small {
+  display: block;
+}

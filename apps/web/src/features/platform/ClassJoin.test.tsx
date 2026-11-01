@@ -77,7 +77,7 @@ it('joins with the existing class-workspace API and opens the new workspace page
   fireEvent.submit(screen.getByLabelText('邀請碼').closest('form')!);
   await waitFor(() =>
     expect(mocks.replace).toHaveBeenCalledWith(
-      '/auth/platform/class-workspace/cw_11111111-1111-4111-8111-111111111111',
+      '/classroom/course/cw_11111111-1111-4111-8111-111111111111',
     ),
   );
   expect(mocks.join).toHaveBeenCalledWith('ABC123', expect.stringMatching(/^web-join-/));

@@ -1,4 +1,5 @@
 /* eslint-disable */
+import { ClubSummary, clubSummaryEnabled } from './ClubSummary';
 import React, { useMemo, useState, useSyncExternalStore } from 'react';
 import { ScrollView, Text, TextInput, View, Pressable, Alert } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
@@ -639,6 +640,14 @@ export function GroupDetailScreen(props: any) {
         style={{ flex: 1 }}
         contentContainerStyle={{ gap: 12, paddingBottom: TAB_BAR_CONTENT_BOTTOM_PADDING }}
       >
+        {group?.type === 'club' && group.schoolId === school.id && groupId && auth.user?.uid && clubSummaryEnabled() && (
+          <ClubSummary
+            key={`${auth.user.uid}:${school.id}:${groupId}`}
+            uid={auth.user.uid}
+            schoolId={school.id}
+            groupId={groupId}
+          />
+        )}
         <Card
           title="群組資訊"
           subtitle={`${group?.type === 'course' ? '課程' : group?.type === 'club' ? '社團' : '群組'} · ${group?.name ?? ''}`}
@@ -669,7 +678,7 @@ export function GroupDetailScreen(props: any) {
 
           <View style={{ marginTop: 10, flexDirection: 'row', gap: 10, flexWrap: 'wrap' }}>
             <Button
-              text="成員"
+              text={group?.type === 'club' ? '社員名單' : '成員'}
               kind="primary"
               onPress={() => nav?.navigate?.('GroupMembers', { groupId })}
             />

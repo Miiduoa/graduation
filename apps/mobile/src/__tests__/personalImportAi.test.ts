@@ -84,9 +84,8 @@ test.each(['uninitialized', 'loading', 'downloading', 'generating', 'error'] as 
   'does not load, download, or generate when the runtime is %s',
   async (status) => {
     jest.mocked(localLLM.getState).mockReturnValue({ status });
-    await expect(
-      runMobilePersonalImportAi(source, options, new AbortController().signal),
-    ).rejects.toThrow();
+    const result = await runMobilePersonalImportAi(source, options, new AbortController().signal);
+    expect(result.issues).toContainEqual(expect.objectContaining({ code: 'ai-processing-mode', message: expect.stringContaining('一般規則') }));
     expect(localLLM.generate).not.toHaveBeenCalled();
     expect(localLLM.ensureReady).not.toHaveBeenCalled();
   },
@@ -99,18 +98,16 @@ test('unsupported native builds and incompatible loaded prompt templates stay un
   jest.mocked(localLLM.getState).mockReturnValue({ status: 'ready', modelId: 'mistral-7b-v0.3' });
   jest.mocked(localLLM.getLoadedModelId).mockReturnValue('mistral-7b-v0.3');
   expect(getMobileImportAiAvailability().title).toContain('Qwen2.5');
-  await expect(
-    runMobilePersonalImportAi(source, options, new AbortController().signal),
-  ).rejects.toThrow('Qwen2.5');
+  const result = await runMobilePersonalImportAi(source, options, new AbortController().signal);
+  expect(result.issues).toContainEqual(expect.objectContaining({ code: 'ai-processing-mode', message: expect.stringContaining('一般規則') }));
   expect(localLLM.generate).not.toHaveBeenCalled();
 });
 
 test('a changed model preference cannot authorize a different context still in memory', async () => {
   jest.mocked(localLLM.getState).mockReturnValue({ status: 'ready', modelId: 'qwen2.5-7b' });
   jest.mocked(localLLM.getLoadedModelId).mockReturnValue('phi-3.5-mini');
-  await expect(
-    runMobilePersonalImportAi(source, options, new AbortController().signal),
-  ).rejects.toThrow('Qwen2.5');
+  const result = await runMobilePersonalImportAi(source, options, new AbortController().signal);
+  expect(result.issues).toContainEqual(expect.objectContaining({ code: 'ai-processing-mode', message: expect.stringContaining('一般規則') }));
   expect(localLLM.generate).not.toHaveBeenCalled();
 });
 
@@ -125,7 +122,7 @@ test('a replaced native context invalidates the result instead of labelling it a
   const result = runMobilePersonalImportAi(source, options, new AbortController().signal);
   jest.mocked(localLLM.getLoadedModelId).mockReturnValue('qwen2.5-7b');
   finish(response());
-  await expect(result).rejects.toThrow('AI 未能整理出可核對的資料');
+  expect((await result).rows).toEqual([]);
 });
 
 test('caller mutations cannot reassign a pending result to another school, term, or source', async () => {
@@ -163,16 +160,16 @@ test('rejects an oversize source before inference instead of silently cutting of
 
 test('rejects truncated generation even when the JSON prefix looks complete', async () => {
   jest.mocked(localLLM.generate).mockResolvedValue({ ...response(), finishReason: 'length' });
-  await expect(
-    runMobilePersonalImportAi(source, options, new AbortController().signal),
-  ).rejects.toThrow('部分結果');
+  const result = await runMobilePersonalImportAi(source, options, new AbortController().signal);
+  expect(result.rows).toEqual([]);
+  expect(result.retryBatches).toHaveLength(1);
 });
 
 test('invented evidence never becomes an editable import result', async () => {
   jest.mocked(localLLM.generate).mockResolvedValue(response({ evidence: '不存在的課程 99 分' }));
-  await expect(
-    runMobilePersonalImportAi(source, options, new AbortController().signal),
-  ).rejects.toThrow('可核對');
+  const result = await runMobilePersonalImportAi(source, options, new AbortController().signal);
+  expect(result.rows).toEqual([]);
+  expect(result.issues).toContainEqual(expect.objectContaining({ code: 'ai-batch-failed' }));
 });
 
 test('cancellation rejects promptly but holds exclusivity until late native work settles', async () => {
@@ -238,9 +235,11 @@ test('a timeout never accepts a late result or claims that native execution has 
       }),
   );
   const result = runMobilePersonalImportAi(source, options, new AbortController().signal);
-  const rejection = expect(result).rejects.toThrow('逾時');
+  const completion = result;
   jest.advanceTimersByTime(120_000);
-  await rejection;
+  const timedOut = await completion;
+  expect(timedOut.rows).toEqual([]);
+  expect(timedOut.issues).toContainEqual(expect.objectContaining({ message: expect.stringContaining('逾時') }));
   expect(getMobileImportAiAvailability().status).toBe('busy');
   finish(response());
   await flush();
@@ -249,7 +248,7 @@ test('a timeout never accepts a late result or claims that native execution has 
 
 test('native exception text containing source data is not displayed', async () => {
   jest.mocked(localLLM.generate).mockRejectedValue(new Error('private-source: ' + source));
-  await expect(
-    runMobilePersonalImportAi(source, options, new AbortController().signal),
-  ).rejects.toThrow('AI 未能整理出可核對的資料');
+  const result = await runMobilePersonalImportAi(source, options, new AbortController().signal);
+  expect(result.issues.some((issue) => issue.message.includes('private-source'))).toBe(false);
+  expect(result.issues).toContainEqual(expect.objectContaining({ code: 'ai-processing-mode', message: expect.stringContaining('一般規則') }));
 });

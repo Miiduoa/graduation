@@ -75,16 +75,18 @@ it.each(['missing', 'duplicate', 'columns'] as const)(
   },
 );
 
-it('rejects a still-wrong single record and releases the lock without a partial draft', async () => {
+it('skips still-wrong records and releases the lock with explicit retry ranges', async () => {
   jest.mocked(localLLM.generate).mockImplementation(async (request) => {
     const result = responseFor(request.messages[0].content);
     const data = JSON.parse(result.content);
     data.rows[0].credits = 3; data.rows[0].grade = '2';
     return { ...result, content: JSON.stringify(data) };
   });
-  await expect(runMobilePersonalImportAi(source(2), options, new AbortController().signal)).rejects.toThrow('部分結果');
+  const result = await runMobilePersonalImportAi(source(2), options, new AbortController().signal);
+  expect(result.rows).toEqual([]);
+  expect(result.retryBatches).toHaveLength(2);
   await flush();
-  expect(localLLM.generate).toHaveBeenCalledTimes(2);
+  expect(localLLM.generate).toHaveBeenCalledTimes(3);
   expect(getMobileImportAiAvailability().status).toBe('ready');
 });
 
@@ -118,7 +120,9 @@ it('shares the eight-split budget between truncation and silent omissions', asyn
     }
     return { ...result, content: JSON.stringify(data) };
   });
-  await expect(runMobilePersonalImportAi(source(64), options, new AbortController().signal)).rejects.toThrow('部分結果');
+  const result = await runMobilePersonalImportAi(source(64), options, new AbortController().signal);
+  expect(result.rows.length).toBeGreaterThan(0);
+  expect(result.retryBatches!.length).toBeGreaterThan(0);
   expect(calls).toBeLessThanOrEqual(24); // Eight initial ranges plus at most sixteen extra calls.
 });
 

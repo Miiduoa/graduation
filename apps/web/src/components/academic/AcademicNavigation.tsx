@@ -1,5 +1,7 @@
 'use client';
 
+import { useSchoolLmsReadonlyEnabled } from '@/components/SchoolLmsReadonlyProvider';
+
 import Link from 'next/link';
 import { usePathname, useSearchParams } from 'next/navigation';
 import { campusServiceHref, useCampusNavigationSearch } from '@/lib/campusNavigation';
@@ -16,6 +18,7 @@ const SECTIONS = [
 ] as const;
 
 function AcademicLinks({ pathname }: { pathname: string }) {
+  const enabled = useSchoolLmsReadonlyEnabled();
   const params = useSearchParams();
   const campusSearch = useCampusNavigationSearch(params);
   const term = params?.get('term');
@@ -35,7 +38,7 @@ function AcademicLinks({ pathname }: { pathname: string }) {
   return (
     <nav className={styles.navigation} aria-label="課務導覽">
       <ul className={styles.sections}>
-        {SECTIONS.map(({ path, label }) => (
+        {SECTIONS.filter(({ path }) => enabled || path !== '/school-lms').map(({ path, label }) => (
           <li key={path}>
             <Link
               href={campusServiceHref(path === '/timetable' ? timetablePath : path, campusSearch)}

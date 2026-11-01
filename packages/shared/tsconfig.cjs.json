@@ -14,6 +14,8 @@
     "src/postLoginRoles.ts",
     "src/lms/**/*.ts",
     "src/companion/**/*.ts",
-    "src/timetable/schoolPeriods.ts"
+    "src/timetable/schoolPeriods.ts",
+    "src/imports/today.ts",
+    "src/timetable/classExceptions.ts"
   ]
 }

@@ -1,3 +1,4 @@
+import { PERSONAL_IMPORT_TEACHER_FIELDS } from './nameFields';
 import {
   isPeriodProfileId,
   parsePeriodRange,
@@ -43,7 +44,7 @@ const aliases: Record<Field, string[]> = {
   academicYear: ['學年度', '學年', 'academicyear', 'year'],
   semester: ['學期', 'semester', 'term'],
   courseCode: ['課程代碼', '選課代碼', '科目代號', '科目代碼', '課號', 'coursecode', 'code'],
-  teacher: ['授課教師', '授課老師', '教師', '老師', '教授', 'teacher', 'instructor'],
+  teacher: PERSONAL_IMPORT_TEACHER_FIELDS,
   className: ['授課班級', '班級', '課班', 'classname', 'class', 'section'],
   location: ['上課地點', '活動地點', '教室', '地點', 'location', 'room'],
   dayOfWeek: ['星期', '上課日', '週次', 'weekday', 'day', 'dayofweek'],
@@ -244,7 +245,7 @@ function readTable(text: string, delimiter: string): SourceTable {
 }
 
 /** OCR text tables can retain column gaps; single spaces inside course names are never delimiters. */
-function readScreenshotTable(text: string): SourceTable {
+function readScreenshotTable(text: string, searchHeader = true): SourceTable {
   const lines = text
     .split('\n')
     .map((rawText, index) => ({
@@ -255,9 +256,9 @@ function readScreenshotTable(text: string): SourceTable {
     .filter((line) => line.rawText.trim());
   // Screenshot titles and OCR noise often precede the table. Only a real,
   // recognizable header permits skipping that prefix; all later lines remain data.
-  const headerIndex = lines.findIndex(
+  const headerIndex = searchHeader ? lines.findIndex(
     (line) => line.cells.filter((cell) => fieldFor(cell)).length >= 2,
-  );
+  ) : 0;
   return {
     lines: headerIndex > 0 ? lines.slice(headerIndex) : lines,
     ...(headerIndex > 0 ? { skippedPrefix: lines.slice(0, headerIndex) } : {}),
@@ -387,8 +388,30 @@ export function parsePersonalImport(
     rows = parsed.rows;
     issues.push(...parsed.issues);
   } else {
-    const tables = ['\t', ',', ';', '|'].map((delimiter) => readTable(normalized, delimiter));
-    if (options.source?.type === 'screenshot') tables.push(readScreenshotTable(normalized));
+    const initialTables = ['\t', ',', ';', '|', '、'].map((delimiter) =>
+      readTable(normalized, delimiter),
+    );
+    const firstTables = options.source?.type === 'screenshot'
+      ? [...initialTables, readScreenshotTable(normalized, false)]
+      : initialTables;
+    const firstHeaderTables = firstTables.filter(
+      (table) => (table.lines[0]?.cells.filter((cell) => fieldFor(cell)).length ?? 0) >= 2,
+    );
+    // 先確立所有分隔符的首列表頭，避免後方表格覆蓋有效資料。
+    const tables = firstHeaderTables.length ? firstHeaderTables : initialTables.map((table) => {
+      const headerIndex = table.lines.findIndex((line) => {
+        const fields = line.cells.map(fieldFor);
+        return fields.includes('title') && fields.filter(Boolean).length >= 2 &&
+          new Set(fields.filter(Boolean)).size === fields.filter(Boolean).length;
+      });
+      return headerIndex > 0 ? {
+        ...table,
+        lines: table.lines.slice(headerIndex),
+        skippedPrefix: table.lines.slice(0, headerIndex),
+      } : table;
+    });
+    if (!firstHeaderTables.length && options.source?.type === 'screenshot')
+      tables.push(readScreenshotTable(normalized));
     const candidates = tables.map((table) => ({
       ...table,
       headers: table.lines[0]?.cells.map(fieldFor) ?? [],
@@ -405,9 +428,9 @@ export function parsePersonalImport(
           .join('／')
           .slice(0, 160);
         issues.push({
-          code: 'screenshot-prologue-skipped',
+          code: options.source?.type === 'screenshot' ? 'screenshot-prologue-skipped' : 'table-prologue-skipped',
           severity: 'warning',
-          message: `已略過截圖表頭前第 ${firstLine} 至 ${lastLine} 行文字：${preview}。請核對原文，確認這些不是要匯入的資料。`,
+          message: `已略過${options.source?.type === 'screenshot' ? '截圖' : ''}表頭前第 ${firstLine} 至 ${lastLine} 行文字：${preview}。請核對原文，確認這些不是要匯入的資料。`,
         });
       }
       if (table.malformed)

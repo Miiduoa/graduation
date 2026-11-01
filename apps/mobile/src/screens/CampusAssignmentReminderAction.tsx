@@ -3,6 +3,7 @@ import { Text, View } from 'react-native';
 import { AIButton, aiTokens } from '../ui/aiFirst';
 import { validCampusSenseSnapshot, type CampusSenseSnapshot } from '../services/campusSenseSnapshot';
 import type { CampusPlanStep } from '../services/offlineCampusPlanner';
+import { resolveCampusAssignmentTarget } from '../services/campusAssignmentTarget';
 import type { CampusReminderLead } from '../services/campusAssignmentReminders';
 
 function deadlineLabel(iso: string) {
@@ -28,6 +29,8 @@ function reminderErrorMessage(error: unknown): string {
       return '裝置待處理通知較多，無法安全新增；請先整理既有提醒。';
     case 'session-changed':
       return '帳號或學校已切換，本次提醒沒有成立。';
+    case 'legacy-cleanup-required':
+      return '請先到作業提醒管理區同步並整理未辨識的舊版提醒，再重新設定。';
     case 'busy':
       return '正在處理這項提醒，請避免重複操作。';
     case 'unsupported':
@@ -56,6 +59,7 @@ export function CampusAssignmentReminderAction({
   const [lead, setLead] = useState<CampusReminderLead>(60);
   const [saving, setSaving] = useState(false);
   const [confirmedLead, setConfirmedLead] = useState<CampusReminderLead | null>(null);
+  const [paused, setPaused] = useState(false);
   const [statusLoading, setStatusLoading] = useState(false);
   const [statusError, setStatusError] = useState('');
   const [statusRefresh, setStatusRefresh] = useState(0);
@@ -65,7 +69,7 @@ export function CampusAssignmentReminderAction({
   const verified = validCampusSenseSnapshot(snapshot, scope);
   const deadline = step.dueAt ? Date.parse(step.dueAt) : NaN;
   const canUse = Boolean(
-    userId && step.evidence === 'authorized-assignments' && verified &&
+    userId && resolveCampusAssignmentTarget({ assignment: step, snapshot: verified, scope }) && step.evidence === 'authorized-assignments' && verified &&
     Number.isFinite(deadline) && deadline > Date.now() + 61 * 60_000,
   );
   const oneDayAvailable = Number.isFinite(deadline) && deadline > Date.now() + (1441 * 60_000);
@@ -76,7 +80,7 @@ export function CampusAssignmentReminderAction({
   useEffect(() => {
     let active = true;
     if (!userId || !schoolId || !step.dueAt ||
-        step.evidence !== 'authorized-assignments' || !verified) {
+        step.evidence !== 'authorized-assignments' || !snapshot) {
       setConfirmedLead(null);
       setStatusError('');
       return () => { active = false; };
@@ -85,9 +89,14 @@ export function CampusAssignmentReminderAction({
     setStatusError('');
     const { getCampusAssignmentReminderStatus } =
       require('../services/campusAssignmentReminders') as typeof import('../services/campusAssignmentReminders');
-    void getCampusAssignmentReminderStatus({ scope, step, isCurrent })
-      .then((leads) => {
-        if (active && isCurrent()) setConfirmedLead(leads[0] ?? null);
+    void Promise.all([
+      getCampusAssignmentReminderStatus({ scope, step, snapshot, isCurrent }),
+      getCampusAssignmentReminderStatus({ scope, step, snapshot, isCurrent, scheduledOnly: true }),
+    ]).then(([leads, scheduled]) => {
+        if (active && isCurrent()) {
+          setConfirmedLead(leads[0] ?? null);
+          setPaused(leads.length > 0 && scheduled.length === 0);
+        }
       })
       .catch(() => {
         if (active && isCurrent()) setStatusError('無法確認裝置提醒狀態，暫不新增以免重複。');
@@ -96,7 +105,7 @@ export function CampusAssignmentReminderAction({
         if (active && isCurrent()) setStatusLoading(false);
       });
     return () => { active = false; };
-  }, [userId, schoolId, step.title, step.groupName, step.dueAt, verified?.checkedAt, statusRefresh]);
+  }, [userId, schoolId, step.title, step.groupName, step.dueAt, snapshot?.checkedAt, statusRefresh]);
 
   const schedule = async () => {
     if (lock.current || statusLoading || statusError || disabled || !canUse ||
@@ -114,7 +123,14 @@ export function CampusAssignmentReminderAction({
         isCurrent,
       });
       if (!isCurrent()) return;
+      if (receipt.outcome === 'submitted' || receipt.outcome === 'inactive') {
+        setConfirmedLead(leadChoice);
+        setPaused(true);
+        setMessage(receipt.outcome === 'submitted' ? '這份作業已繳交，不再提醒。' : '這份作業目前不需提醒。');
+        return;
+      }
       setConfirmedLead(leadChoice);
+      setPaused(false);
       setMessage(receipt.outcome === 'scheduled'
         ? '本機提醒已排程成功，這不會提交作業或修改校務資料。'
         : '這項本機提醒已存在，沒有重複建立。');
@@ -132,13 +148,14 @@ export function CampusAssignmentReminderAction({
     setSaving(true);
     setMessage('');
     try {
-      const { cancelCampusAssignmentReminder } = require('../services/campusAssignmentReminders') as typeof import('../services/campusAssignmentReminders');
-      await cancelCampusAssignmentReminder({
-        scope, step, leadMinutes: confirmedLead, isCurrent,
-      });
+      const { cancelCampusAssignmentReminder, getCampusAssignmentReminderStatus } = require('../services/campusAssignmentReminders') as typeof import('../services/campusAssignmentReminders');
+      const leads = await getCampusAssignmentReminderStatus({ scope, step, snapshot, isCurrent });
+      for (const leadMinutes of leads)
+        await cancelCampusAssignmentReminder({ scope, step, snapshot, leadMinutes, isCurrent });
       if (!isCurrent()) return;
       setConfirmedLead(null);
-      setMessage('已確認手機系統不再保留這筆提醒。');
+      setMessage('已退訂並清除提醒偏好，撤回或延期後也不會自動恢復。');
+      setStatusRefresh((value) => value + 1);
       setExpanded(false);
     } catch (error) {
       if (isCurrent()) setMessage(reminderErrorMessage(error));
@@ -174,7 +191,7 @@ export function CampusAssignmentReminderAction({
       ) : confirmedLead !== null ? (
         <>
           <Text style={{ color: aiTokens.text, fontSize: 12, fontWeight: '700' }}>
-            已設定截止前 {confirmedLead === 60 ? '1 小時' : '1 天'}提醒
+            {paused ? '已保留提醒偏好，目前暫停通知' : `已設定截止前 ${confirmedLead === 60 ? '1 小時' : '1 天'}提醒`}
           </Text>
           <AIButton
             label={saving ? '正在確認取消…' : '取消這項本機提醒'}
@@ -198,7 +215,7 @@ export function CampusAssignmentReminderAction({
             設定一次性作業提醒
           </Text>
           <Text style={{ color: aiTokens.muted, fontSize: 12, lineHeight: 19 }}>
-            已核對的截止時間：{deadlineLabel(step.dueAt)}。提醒只安排在這台手機，不會上傳作業名稱，也不會替你繳交。
+            已核對的截止時間：{deadlineLabel(step.dueAt)}。提醒只安排在這台手機。連線確認已繳交後會取消；離線時無法核對其他裝置的繳交紀錄。
           </Text>
           <View style={{ flexDirection: 'row', gap: 8 }}>
             <AIButton
@@ -234,6 +251,7 @@ export function CampusAssignmentReminderAction({
           />
         </>
       )}
+      {confirmedLead !== null ? <Text>暫停時每 15 分鐘核對撤回或延期；截止後保留 7 天，暫停偏好最多保留 30 天。退訂後不會自動重排。</Text> : null}
       {message ? (
         <Text accessibilityRole="alert" style={{ color: aiTokens.muted, fontSize: 12, lineHeight: 20 }}>
           {message}
