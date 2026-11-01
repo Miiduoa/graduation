@@ -93,6 +93,7 @@ import {
   type CourseListFilter,
 } from '../../services/nuniActivityTasks';
 import { StudyAgenda } from './StudyAgenda';
+import { CrossCourseMaterialSearch } from './CrossCourseMaterialSearch';
 import { createNuniClassroom } from '@campus/shared/src/nuniClassroom';
 import { NuniAttendance, createAttendanceStore } from './NuniAttendance';
 
@@ -724,7 +725,16 @@ function CourseScope({
           contentOffsetYRef={contentOffsetYRef}
         />
       ) : (
-        <CourseList classes={classes} open={openCourse} />
+        <>
+          <CrossCourseMaterialSearch classes={classes} open={(courseId, materialId) => {
+            scrollRef.current?.scrollTo({ y: 0, animated: false });
+            contentOffsetYRef.current = 0;
+            setFocusActivityId(undefined);
+            setFocusMaterialId(materialId);
+            setSelected(courseId);
+          }} />
+          <CourseList classes={classes} open={openCourse} />
+        </>
       )}
     </ScrollView>
   );
