@@ -22,7 +22,8 @@ export function downloadStudyCalendar(content: string) {
     link.click();
   } finally {
     link.remove();
-    URL.revokeObjectURL(url);
+    // Give the browser time to start the user-requested download before releasing the blob.
+    window.setTimeout(() => URL.revokeObjectURL(url), 1_000);
   }
 }
 
@@ -39,6 +40,7 @@ export function StudyDeadlineExport({
   const [selected, setSelected] = useState<string[]>([]);
   const [preview, setPreview] = useState(false);
   const [message, setMessage] = useState('');
+  const [busy, setBusy] = useState(false);
   const candidates = studyCalendarCandidates(tasks);
   const chosen = candidates.filter((task) => selected.includes(studyCalendarKey(task)));
   return (
@@ -61,6 +63,7 @@ export function StudyDeadlineExport({
               <input
                 type="checkbox"
                 checked={selected.includes(studyCalendarKey(task))}
+                disabled={busy}
                 onChange={(event) => {
                   const key = studyCalendarKey(task);
                   setSelected(
@@ -79,12 +82,12 @@ export function StudyDeadlineExport({
               </span>
             </label>
           ))}
-          <button type="button" onClick={retry}>
+          <button type="button" disabled={busy} onClick={retry}>
             更新待辦資料
           </button>
           <button
             type="button"
-            disabled={!chosen.length}
+            disabled={!chosen.length || busy}
             onClick={() => {
               setPreview(true);
               setMessage('');
@@ -103,16 +106,22 @@ export function StudyDeadlineExport({
               ))}
               <button
                 type="button"
+                disabled={busy}
                 onClick={() => {
+                  if (busy) return;
+                  setBusy(true);
+                  setMessage('');
                   try {
                     downloadStudyCalendar(buildStudyCalendar(tasks, selected));
                     setMessage('已交給瀏覽器下載；請在下載項目中確認 ICS，再匯入行事曆。');
                   } catch {
                     setMessage('下載未能開始，已保留勾選項目，請再按一次下載 ICS。');
+                  } finally {
+                    window.setTimeout(() => setBusy(false), 1_000);
                   }
                 }}
               >
-                下載 ICS
+                {busy ? '正在下載…' : '下載 ICS'}
               </button>
             </div>
           )}

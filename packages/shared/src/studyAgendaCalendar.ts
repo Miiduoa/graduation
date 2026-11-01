@@ -64,11 +64,14 @@ export function buildStudyCalendar(
     'X-WR-TIMEZONE:Asia/Taipei',
   ];
   for (const task of chosen) {
+    const stamp = utcIcsStamp(new Date(studyDeadline(task)!));
     lines.push(
       'BEGIN:VEVENT',
       `UID:study-${studyCalendarKey(task)}@nuni.tw`,
       `DTSTAMP:${utcIcsStamp(now)}`,
-      `DTSTART:${utcIcsStamp(new Date(studyDeadline(task)!))}`,
+      `DTSTART:${stamp}`,
+      // Point-in-time deadline: DTEND matches DTSTART so clients that require an end stay stable.
+      `DTEND:${stamp}`,
       `SUMMARY:${escapeIcsText(`[${task.kind === 'assignment' ? '作業' : '測驗'}] ${task.title}`)}`,
       `DESCRIPTION:${escapeIcsText(`課程：${task.courseTitle}\n參考期限，以老師收件狀態為準。\n${studyCalendarNotice}`)}`,
       `URL:${studyCalendarTaskUrl(task)}`,

@@ -56,6 +56,7 @@ describe('未繳期限快照', () => {
     );
     expect(content.match(/BEGIN:VEVENT/g)).toHaveLength(2);
     expect(content).toContain('DTSTART:20261101T163000Z');
+    expect(content).toContain('DTEND:20261101T163000Z');
     expect(content).toContain('UID:study-c:assignment:a@nuni.tw');
     expect(content).toContain('UID:study-c:quiz:a@nuni.tw');
     expect(content).toContain('URL:https://nuni.tw/classroom/course/c?view=quizzes#quiz-a');

@@ -45,6 +45,7 @@ it('previews selected tasks, retains selection for retry, and does not claim a s
   fireEvent.press(view.getByRole('button', { name: '分享 ICS' }));
   await waitFor(() => expect(view.getByText(/是否儲存或匯入/)).toBeTruthy());
   expect(share.mock.calls[1][0]).toContain('DTSTART:20261101T163000Z');
+  expect(share.mock.calls[1][0]).toContain('DTEND:20261101T163000Z');
   fireEvent.press(view.getByRole('button', { name: '更新待辦資料' }));
   expect(retry).toHaveBeenCalledTimes(1);
 });
