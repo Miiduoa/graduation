@@ -5,6 +5,7 @@ import { beforeEach, expect, it, vi } from 'vitest';
 import HomePage from './page';
 import { loadHomeData, type HomeData } from '@/lib/homeOverview';
 import { loadNuniHomeSections } from '@/lib/nuniHomeOverview';
+import { FirebaseError } from 'firebase/app';
 import { NuniError } from '@campus/shared/src/nuni';
 import * as nuniMessages from '@campus/shared/src/nuni';
 import { IDENTITY_LOOKUP_FAILED_COPY, IDENTITY_LOOKUP_FAILED_HINT } from '@/lib/accountIdentity';
@@ -842,7 +843,7 @@ it.each(['teacher', 'student'])(
         : data('保留修課');
     vi.mocked(loadHomeData)
       .mockResolvedValueOnce(previous)
-      .mockRejectedValueOnce(new Error('offline'));
+      .mockRejectedValueOnce(new FirebaseError('unavailable', 'offline'));
     render(<HomePage />);
     if (mode === 'teacher') await screen.findByRole('link', { name: /查看授課課程/ });
     else await screen.findAllByText('保留修課 作業');
@@ -879,3 +880,54 @@ it('keeps the teacher mode until both background sources finish, including cours
   expect(screen.getByTestId('student-today')).toBeTruthy();
   expect(screen.getAllByText('新增修課 作業').length).toBeGreaterThan(0);
 });
+
+it.each([
+  ['permission-denied', false],
+  ['permission-denied', true],
+  ['unauthenticated', true],
+  ['invalid-argument', true],
+])(
+  'clears school data after %s (FirebaseError: %s) without hiding the other source',
+  async (code, firebase) => {
+    state.session = { context: 'test', platformAccountId: 'student' };
+    vi.mocked(loadNuniHomeSections).mockResolvedValue(data('可用來源'));
+    vi.mocked(loadHomeData)
+      .mockResolvedValueOnce(
+        data('已撤權課程', {
+          recentFeedback: [
+            {
+              kind: 'assignment',
+              id: 'reviewed',
+              courseId: 'revoked',
+              courseName: '已撤權課程',
+              title: '撤權成績',
+              feedback: '撤權評語',
+              score: 92,
+              reviewedAt: '2026-10-01T00:00:00Z',
+              href: '/course/revoked',
+            },
+          ],
+        }),
+      )
+      .mockRejectedValueOnce(
+        firebase
+          ? new FirebaseError(code, 'school read failed')
+          : Object.assign(new Error('permission-denied'), { code }),
+      );
+    render(<HomePage />);
+    expect((await screen.findAllByText('已撤權課程 作業')).length).toBeGreaterThan(0);
+    expect(screen.getByText('成績：92')).toBeTruthy();
+    expect(screen.getByText('老師評語：撤權評語')).toBeTruthy();
+    await act(async () => window.dispatchEvent(new Event('pageshow')));
+    await screen.findByRole('button', { name: '重試校園課程' });
+    expect(screen.queryByText('已撤權課程 作業')).toBeNull();
+    expect(screen.queryByText('已撤權課程')).toBeNull();
+    expect(screen.queryByText('成績：92')).toBeNull();
+    expect(screen.queryByText('老師評語：撤權評語')).toBeNull();
+    expect(screen.getAllByText('可用來源 作業').length).toBeGreaterThan(0);
+    if (code === 'permission-denied')
+      expect(screen.getByText(/校園課程存取權限已失效/)).toBeTruthy();
+    if (code === 'unauthenticated') expect(screen.getByText(/校園登入驗證已失效/)).toBeTruthy();
+    expect(state.refresh).not.toHaveBeenCalled();
+  },
+);

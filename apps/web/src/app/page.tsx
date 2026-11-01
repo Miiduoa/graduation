@@ -111,12 +111,39 @@ export default function HomePage() {
             : await loadHomeData(uid!);
         update({ data: next, updatedAt: new Date(), error: undefined });
       } catch (failure) {
+        const schoolCode =
+          source === 'school' && failure && typeof failure === 'object' && 'code' in failure
+            ? failure.code
+            : undefined;
         const accessRevoked =
-          failure instanceof NuniError &&
-          (failure.status === 401 || failure.status === 403 || failure.code === 'SESSION_CHANGED');
+          source === 'nuni'
+            ? failure instanceof NuniError &&
+              (failure.status === 401 ||
+                failure.status === 403 ||
+                failure.code === 'SESSION_CHANGED')
+            : schoolCode === 'permission-denied' || schoolCode === 'unauthenticated';
+        const recoverable =
+          source === 'school'
+            ? [
+                'unavailable',
+                'deadline-exceeded',
+                'aborted',
+                'resource-exhausted',
+                'internal',
+                'unknown',
+              ].includes(String(schoolCode))
+            : failure instanceof NuniError &&
+              (failure.status >= 500 || failure.code === 'NETWORK_ERROR');
         update({
-          ...(accessRevoked ? { data: undefined } : {}),
-          error: source === 'nuni' ? nuniErrorMessage(failure) : '課程暫時讀不到，請再試一次。',
+          ...(accessRevoked || !recoverable ? { data: undefined, updatedAt: undefined } : {}),
+          error:
+            source === 'nuni'
+              ? nuniErrorMessage(failure)
+              : schoolCode === 'permission-denied'
+                ? '校園課程存取權限已失效，請確認課程權限後重試。'
+                : schoolCode === 'unauthenticated'
+                  ? '校園登入驗證已失效，請重新登入後重試。'
+                  : '課程暫時讀不到，請再試一次。',
         });
         if (
           request === generation.current &&
