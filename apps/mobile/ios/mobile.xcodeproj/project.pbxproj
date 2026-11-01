@@ -19,6 +19,7 @@
 		9D9E9E099D4E4A8EA49B578E /* CampusWidgetExtension.appex in Copy Files */ = {isa = PBXBuildFile; fileRef = 2870FDAEB3A04F0BBCF2198D /* CampusWidgetExtension.appex */; };
 		773671D8B55449CD9ECAF6B7 /* CampusWidget.swift in Sources */ = {isa = PBXBuildFile; fileRef = 40A701032D40402EB50C9172 /* CampusWidget.swift */; };
 		ADB1A636AA5F451795DAC05D /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = 22EBE40183D74594A2B9381A /* PrivacyInfo.xcprivacy */; };
+		D989F93E40A84AC8B70D178C /* NextClassActivityAttributes.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7168C9B9BFD2479CBDE747BA /* NextClassActivityAttributes.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -40,6 +41,7 @@
 		2870FDAEB3A04F0BBCF2198D /* CampusWidgetExtension.appex */ = {isa = PBXFileReference; name = "CampusWidgetExtension.appex"; path = "CampusWidgetExtension.appex"; sourceTree = BUILT_PRODUCTS_DIR; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; };
 		40A701032D40402EB50C9172 /* CampusWidget.swift */ = {isa = PBXFileReference; name = "CampusWidget.swift"; path = "CampusWidget.swift"; sourceTree = "<group>"; fileEncoding = 4; lastKnownFileType = sourcecode.swift; includeInIndex = 0; };
 		22EBE40183D74594A2B9381A /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; name = "PrivacyInfo.xcprivacy"; path = "PrivacyInfo.xcprivacy"; sourceTree = "<group>"; lastKnownFileType = text.xml; includeInIndex = 0; };
+		7168C9B9BFD2479CBDE747BA /* NextClassActivityAttributes.swift */ = {isa = PBXFileReference; name = "NextClassActivityAttributes.swift"; path = "NextClassActivityAttributes.swift"; sourceTree = "<group>"; fileEncoding = 4; lastKnownFileType = sourcecode.swift; includeInIndex = 0; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -158,6 +160,7 @@
 			children = (
 				40A701032D40402EB50C9172 /* CampusWidget.swift */,
 				22EBE40183D74594A2B9381A /* PrivacyInfo.xcprivacy */,
+				7168C9B9BFD2479CBDE747BA /* NextClassActivityAttributes.swift */,
 			);
 			name = CampusWidgetExtension;
 			path = CampusWidgetExtension;
@@ -444,6 +447,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				773671D8B55449CD9ECAF6B7 /* CampusWidget.swift in Sources */,
+				D989F93E40A84AC8B70D178C /* NextClassActivityAttributes.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

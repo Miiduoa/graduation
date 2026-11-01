@@ -35,8 +35,40 @@ function configureProject(project, iosRoot, bundleId, group) {
     for (const reference of Object.values(objects.PBXFileReference)) {
       if (reference && typeof reference === 'object') {
         for (const key of Object.keys(reference))
-          if (reference[key] === undefined) delete reference[key];
+          if (reference[key] === undefined || reference[key] === 'undefined') delete reference[key];
       }
+    }
+  }
+  const attributes = 'NextClassActivityAttributes.swift';
+  fs.copyFileSync(
+    path.join(__dirname, '../../modules/campus-next-class/ios', attributes),
+    path.join(directory, attributes),
+  );
+  const sourceGroup = Object.keys(objects.PBXGroup).find(
+    (key) => objects.PBXGroup[key]?.name === NAME,
+  );
+  const existing = Object.entries(objects.PBXFileReference).find(
+    ([, ref]) => ref?.path === `"${attributes}"`,
+  );
+  if (!existing) {
+    const source = project.addSourceFile(`${NAME}/${attributes}`, { target: targetId }, sourceGroup);
+    objects.PBXFileReference[source.fileRef].path = `"${attributes}"`;
+  } else {
+    const phaseRef = objects.PBXNativeTarget[targetId].buildPhases.find(
+      ({ value }) => objects.PBXSourcesBuildPhase?.[value],
+    );
+    const phase = objects.PBXSourcesBuildPhase[phaseRef.value];
+    if (!phase.files.some(({ value }) => objects.PBXBuildFile[value]?.fileRef === existing[0])) {
+      const id = project.generateUuid();
+      objects.PBXBuildFile[id] = { isa: 'PBXBuildFile', fileRef: existing[0], fileRef_comment: attributes };
+      objects.PBXBuildFile[`${id}_comment`] = `${attributes} in Sources`;
+      phase.files.push({ value: id, comment: `${attributes} in Sources` });
+    }
+  }
+  for (const reference of Object.values(objects.PBXFileReference)) {
+    if (reference && typeof reference === 'object') {
+      for (const key of Object.keys(reference))
+        if (reference[key] === undefined || reference[key] === 'undefined') delete reference[key];
     }
   }
   if (
@@ -149,6 +181,7 @@ function withWidgetExtension(config) {
   });
   config = withInfoPlist(config, (mod) => {
     mod.modResults.NextClassAppGroup = group;
+    mod.modResults.NSSupportsLiveActivities = true;
     return mod;
   });
   return withXcodeProject(config, (mod) => {
