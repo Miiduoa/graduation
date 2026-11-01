@@ -73,3 +73,23 @@ it('returns the matching catalog payload', async () => {
     expect.objectContaining({ id: 'toast', cafeteriaId: 'stall', schoolId: 'cgu', price: 60 }),
   ]);
 });
+
+it('保留餐廳本身的來源與菜單時間，不借用其他快照', async () => {
+  fetcher.mockResolvedValueOnce(
+    json({
+      schoolId: 'pu',
+      cafeteria: {
+        id: 'stall',
+        name: '校內咖啡店',
+        sourceLabel: '校方餐飲名錄',
+        menuSyncedAt: '2026-10-01T00:00:00Z',
+      },
+      menus: [],
+    }),
+  );
+  const result = await fetchCafeteriaDetail('pu', 'stall');
+  expect(result.cafeteria).toMatchObject({
+    sourceLabel: '校方餐飲名錄',
+    menuSyncedAt: '2026-10-01T00:00:00Z',
+  });
+});
