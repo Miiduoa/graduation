@@ -1,8 +1,9 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useRef, useState, useMemo } from 'react';
 import { Text, TextInput, View } from 'react-native';
 import { classDate, type PersonalImportRecord } from '@campus/shared';
 import {
   calendarRangeEnd,
+  personalCalendarEventLabel,
   personalCalendarSnapshotCopy,
   previewPersonalCalendar,
   serializePersonalCalendar,
@@ -33,13 +34,17 @@ export function PersonalCalendarExport({
       mounted.current = false;
     };
   }, []);
-  let preview: ReturnType<typeof previewPersonalCalendar> | undefined;
-  let error = '';
-  try {
-    preview = previewPersonalCalendar(records, { schoolId, termKey, start, end });
-  } catch (cause) {
-    error = (cause as Error).message;
-  }
+  const [showDetails, setShowDetails] = useState(false);
+  const { preview, error } = useMemo(() => {
+    try {
+      return {
+        preview: previewPersonalCalendar(records, { schoolId, termKey, start, end }),
+        error: '',
+      };
+    } catch (cause) {
+      return { preview: undefined, error: (cause as Error).message };
+    }
+  }, [records, schoolId, termKey, start, end]);
   return (
     <View style={{ gap: 8 }} accessibilityLabel="匯出課表快照">
       <Text style={{ color: theme.colors.text, fontWeight: '700' }}>帶到我的行事曆</Text>
@@ -72,6 +77,16 @@ export function PersonalCalendarExport({
               將匯出 {preview.events.length} 堂課；略過 {preview.skipped.length}{' '}
               門時間未確認的課程。
             </Text>
+            <Button
+              text={showDetails ? '收起逐堂明細' : '查看逐堂明細'}
+              onPress={() => setShowDetails(!showDetails)}
+            />
+            {showDetails &&
+              preview.events.map((event) => (
+                <Text key={event.uid} style={{ color: theme.colors.text }}>
+                  {personalCalendarEventLabel(event)}
+                </Text>
+              ))}
             {preview.skipped.map((row) => (
               <Text key={row.id} style={{ color: theme.colors.muted }}>
                 {row.title}：星期或時間未確認

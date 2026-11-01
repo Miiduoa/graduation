@@ -31,6 +31,10 @@ it('previews the chosen period and skipped names before downloading, blocks inva
   fireEvent.change(screen.getByLabelText('匯出結束日期'), { target: { value: '2026-11-08' } });
   expect(screen.getByText('將匯出 1 堂課；略過 1 門時間未確認的課程。')).toBeTruthy();
   expect(screen.getByText('待確認：星期或時間未確認')).toBeTruthy();
+  fireEvent.click(screen.getByText('查看逐堂明細'));
+  expect(screen.getByText('2026-11-02 09:00 ～ 2026-11-02 10:00 有時間｜未填教室')).toBeTruthy();
+  fireEvent.click(screen.getByText('收起逐堂明細'));
+  expect(screen.queryByText('2026-11-02 09:00 ～ 2026-11-02 10:00 有時間｜未填教室')).toBeNull();
   expect(screen.getByText(/重複匯入可能/)).toBeTruthy();
   fireEvent.click(screen.getByText('下載課表 ICS'));
   expect(create).toHaveBeenCalledTimes(1);

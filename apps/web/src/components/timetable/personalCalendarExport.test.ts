@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
 import type { PersonalImportRecord, ClassException } from '@campus/shared';
 import { classMeetingKey, withClassExceptions } from '@campus/shared';
@@ -91,4 +92,54 @@ describe('個人課表快照純函式', () => {
       8,
     );
   });
+});
+
+for (const dates of [['2026-11-02'], ['2026-11-02', '2026-11-16']]) {
+  it(`preserves every occurrence and untouched UIDs when ${dates.length} makeup meetings collide`, () => {
+    const range = { ...options, end: '2026-11-30' };
+    const before = previewPersonalCalendar([row], range);
+    const changes: ClassException[] = dates.map((originalDate) => ({
+      id: originalDate,
+      kind: 'move',
+      courseKey: classMeetingKey(row),
+      original: row,
+      originalDate,
+      createdAt: '',
+      date: '2026-11-09',
+      startTime: '09:00',
+      endTime: '10:00',
+    }));
+    const after = previewPersonalCalendar(withClassExceptions([row], changes), range);
+    expect(after.events).toHaveLength(5);
+    expect(new Set(after.events.map((event) => event.uid))).toEqual(
+      new Set(before.events.map((event) => event.uid)),
+    );
+    expect(
+      after.events.filter((event) => event.startAt === Date.parse('2026-11-09T09:00:00+08:00')),
+    ).toHaveLength(dates.length + 1);
+    for (const event of before.events.filter((event) => !dates.includes(event.originalDate))) {
+      expect(after.events.find((other) => other.originalDate === event.originalDate)).toMatchObject(
+        { uid: event.uid, startAt: event.startAt },
+      );
+    }
+  });
+}
+it('uses a stable SHA-256 digest rather than reversible teacher and class encoding', () => {
+  const privateRow = { ...row, teacher: '測試教師', className: '測試班' };
+  const event = previewPersonalCalendar([privateRow], options).events[0];
+  const digest = createHash('sha256')
+    .update(JSON.stringify([classMeetingKey(privateRow), '2026-11-02']))
+    .digest('hex');
+  expect(event.uid).toBe(`personal-${digest}@nuni.tw`);
+  expect(previewPersonalCalendar([{ ...privateRow, id: 'reimport' }], options).events[0].uid).toBe(
+    event.uid,
+  );
+  const decoded = Buffer.from(digest, 'hex').toString('utf8');
+  for (const value of [privateRow.teacher, privateRow.className]) {
+    expect(event.uid).not.toContain(value);
+    expect(decoded).not.toContain(value);
+    expect(serializePersonalCalendar(previewPersonalCalendar([privateRow], options))).not.toContain(
+      value,
+    );
+  }
 });

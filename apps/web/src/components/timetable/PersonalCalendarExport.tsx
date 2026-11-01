@@ -1,8 +1,9 @@
 'use client';
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import { classDate, type PersonalImportRecord } from '@campus/shared';
 import {
   calendarRangeEnd,
+  personalCalendarEventLabel,
   personalCalendarSnapshotCopy,
   previewPersonalCalendar,
   serializePersonalCalendar,
@@ -21,13 +22,17 @@ export function PersonalCalendarExport({
 }) {
   const [start, setStart] = useState(() => classDate(new Date()));
   const [end, setEnd] = useState(() => calendarRangeEnd(classDate(new Date())));
-  let preview: ReturnType<typeof previewPersonalCalendar> | undefined;
-  let error = '';
-  try {
-    preview = previewPersonalCalendar(records, { schoolId, termKey, start, end });
-  } catch (cause) {
-    error = (cause as Error).message;
-  }
+  const [showDetails, setShowDetails] = useState(false);
+  const { preview, error } = useMemo(() => {
+    try {
+      return {
+        preview: previewPersonalCalendar(records, { schoolId, termKey, start, end }),
+        error: '',
+      };
+    } catch (cause) {
+      return { preview: undefined, error: (cause as Error).message };
+    }
+  }, [records, schoolId, termKey, start, end]);
   return (
     <section aria-label="匯出課表快照">
       <h2>帶到我的行事曆</h2>
@@ -60,6 +65,20 @@ export function PersonalCalendarExport({
               將匯出 {preview.events.length} 堂課；略過 {preview.skipped.length}{' '}
               門時間未確認的課程。
             </p>
+            <button
+              type="button"
+              aria-expanded={showDetails}
+              onClick={() => setShowDetails(!showDetails)}
+            >
+              {showDetails ? '收起逐堂明細' : '查看逐堂明細'}
+            </button>
+            {showDetails && (
+              <ul>
+                {preview.events.map((event) => (
+                  <li key={event.uid}>{personalCalendarEventLabel(event)}</li>
+                ))}
+              </ul>
+            )}
             <ul>
               {preview.skipped.map((row) => (
                 <li key={row.id}>{row.title}：星期或時間未確認</li>

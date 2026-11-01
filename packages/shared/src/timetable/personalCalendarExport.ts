@@ -1,13 +1,8 @@
+import { sha256 } from 'js-sha256';
 import type { PersonalImportRecord } from '../imports/types';
 import { buildPersonalToday } from '../imports/today';
 import { escapeIcsText, foldIcsLine, utcIcsStamp } from '../imports/icalendarSerialization';
-import {
-  classDate,
-  classMeetingKey,
-  classMeetingTimes,
-  validateClassException,
-  validClassDate,
-} from './classExceptions';
+import { classDate, classMeetingKey, classMeetingTimes, validClassDate } from './classExceptions';
 
 export const personalCalendarSnapshotCopy =
   '這是目前課表的快照，不會自動更新。課表調整後請重新匯出；重複匯入可能產生重複行程。';
@@ -63,35 +58,23 @@ export function previewPersonalCalendar(
     }).today) {
       if (entry.startAt < from || entry.startAt >= until) continue;
       // Meeting identity excludes generated import ids, file names and import time.
-      const identity = JSON.stringify([classMeetingKey(entry.row), entry.startAt, entry.endAt]);
+      const identity = JSON.stringify([
+        classMeetingKey(entry.row),
+        entry.originalDate,
+        entry.startAt,
+        entry.endAt,
+      ]);
       entries.set(identity, entry);
     }
   }
   const events = [...entries]
     .sort((a, b) => a[1].startAt - b[1].startAt)
     .map(([, entry]) => {
-      const move = entry.row.classExceptions?.find((item) => {
-        try {
-          validateClassException(item);
-        } catch {
-          return false;
-        }
-        return (
-          item.kind === 'move' &&
-          Date.parse(`${item.date}T${item.startTime}:00+08:00`) === entry.startAt &&
-          Date.parse(`${item.endDate || item.date}T${item.endTime}:00+08:00`) === entry.endAt
-        );
-      });
       // Retain the original meeting date when a single occurrence is rescheduled.
-      const identity = JSON.stringify([
-        classMeetingKey(entry.row),
-        move?.originalDate || classDate(new Date(entry.startAt)),
-      ]);
+      const identity = JSON.stringify([classMeetingKey(entry.row), entry.originalDate]);
       return {
         ...entry,
-        uid: `personal-${Array.from(identity)
-          .map((c) => c.codePointAt(0)!.toString(16))
-          .join('-')}@nuni.tw`,
+        uid: `personal-${sha256(identity)}@nuni.tw`,
       };
     });
   return { events, skipped };
@@ -122,4 +105,13 @@ export function serializePersonalCalendar(
     );
   }
   return [...lines, 'END:VCALENDAR'].map(foldIcsLine).join('\r\n') + '\r\n';
+}
+
+/** Explicit Taiwan dates, including the end date for overnight meetings. */
+export function personalCalendarEventLabel(
+  event: ReturnType<typeof previewPersonalCalendar>['events'][number],
+): string {
+  const stamp = (time: number) =>
+    new Date(time + 28800000).toISOString().slice(0, 16).replace('T', ' ');
+  return `${stamp(event.startAt)} ～ ${stamp(event.endAt)} ${event.row.title}｜${event.row.location || '未填教室'}${event.conflict ? '（時段重疊，仍保留此堂）' : ''}`;
 }

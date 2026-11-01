@@ -29,6 +29,10 @@ test('previews and shares the selected snapshot, reports failures and fences unm
   fireEvent.changeText(view.getByLabelText('匯出結束日期'), '2026-11-08');
   expect(view.getByText('將匯出 1 堂課；略過 1 門時間未確認的課程。')).toBeTruthy();
   expect(view.getByText('待確認：星期或時間未確認')).toBeTruthy();
+  fireEvent.press(view.getByText('查看逐堂明細'));
+  expect(view.getByText('2026-11-02 09:00 ～ 2026-11-02 10:00 有時間｜未填教室')).toBeTruthy();
+  fireEvent.press(view.getByText('收起逐堂明細'));
+  expect(view.queryByText('2026-11-02 09:00 ～ 2026-11-02 10:00 有時間｜未填教室')).toBeNull();
   fireEvent.press(view.getByText('分享課表 ICS'));
   await waitFor(() => expect(shareICalContent).toHaveBeenCalledTimes(1));
   expect(jest.mocked(shareICalContent).mock.calls[0][0]).toContain('DTSTART:20261102T010000Z');
