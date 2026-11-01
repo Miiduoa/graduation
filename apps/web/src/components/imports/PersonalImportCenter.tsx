@@ -53,8 +53,11 @@ import {
 import { usePersonalImportScope, usePersonalImports } from '@/lib/usePersonalImports';
 import {
   clearPersonalImportDraft,
+  clearPersonalImportPartialDraft,
   readPersonalImportDraft,
+  readPersonalImportPartialDraft,
   writePersonalImportDraft,
+  writePersonalImportPartialDraft,
   type PersonalImportDraft,
 } from '@/lib/personalImportDrafts';
 import { recognizePersonalImportImage } from '@/lib/personalImportOcr';
@@ -63,8 +66,15 @@ import {
   deletePersonalImportAiModelCache,
   getPersonalImportAiAvailability,
   runPersonalImportAi,
+  type PersonalImportAiRetry,
 } from '@/lib/personalImportAi';
 import styles from './PersonalImport.module.css';
+import { TimetableReviewGrid } from './TimetableReviewGrid';
+import {
+  nextReviewRow,
+  REVIEW_SPLIT_UNAVAILABLE,
+  splitReviewRow,
+} from '@campus/shared/src/imports/reviewGrid';
 import { CourseAccessPanel } from './CourseAccessPanel';
 import { DocumentSelection } from './DocumentSelection';
 import { PersonalImportSyncPanel } from './PersonalImportSync';
@@ -87,6 +97,7 @@ type AiImportRequest = {
   input: { text?: string; image?: File };
   source: Pick<PersonalImportSource, 'type' | 'name'>;
   fromDocument?: boolean;
+  retry?: PersonalImportAiRetry;
 };
 function errorMessage(error: unknown, fallback = '這次沒有完成，草稿仍保留，請再試一次。') {
   return personalImportErrorMessage(error, fallback);
@@ -387,6 +398,16 @@ function ImportWorkspace({
   paused: boolean;
 }) {
   const ledger = usePersonalImports(scope);
+  useEffect(() => {
+    if (!window.location.hash.startsWith('#record-')) return;
+    try {
+      document
+        .getElementById(decodeURIComponent(window.location.hash.slice(1)))
+        ?.scrollIntoView?.({ block: 'center' });
+    } catch {
+      /* Ignore malformed record links. */
+    }
+  }, [ledger.records]);
   const schoolSelection = useOptionalSelectedSchool();
   const suspended = useRef(paused);
   useLayoutEffect(() => {
@@ -401,6 +422,7 @@ function ImportWorkspace({
   const [source, setSource] = useState<Pick<PersonalImportSource, 'type' | 'name'>>({
     type: 'paste',
   });
+  const [editedIds, setEditedIds] = useState<string[]>([]);
   const [rows, setRows] = useState<PersonalImportRow[]>([]);
   const [backup, setBackup] = useState<Omit<PersonalImportBackupPreview, 'rows'> | null>(null);
   const [importDocument, setDocument] = useState<PersonalImportDocument | null>(null);
@@ -420,6 +442,10 @@ function ImportWorkspace({
   const [captureManualCopy, setCaptureManualCopy] = useState(false);
   const [aiReviewed, setAiReviewed] = useState(false);
   const [pendingAi, setPendingAi] = useState<AiImportRequest | null>(null);
+  const [retryAi, setRetryAi] = useState<AiImportRequest | null>(null);
+  const [partialDraft, setPartialDraft] = useState<PersonalImportDraft | null>(null);
+  const [partialRequest, setPartialRequest] = useState<AiImportRequest | null>(null);
+  const [partialStorageError, setPartialStorageError] = useState('');
   const [removingAiModel, setRemovingAiModel] = useState(false);
   const clientReady = useSyncExternalStore(
     subscribeClient,
@@ -492,6 +518,7 @@ function ImportWorkspace({
         setText(draft.text);
         setSource(draft.source);
         setRows(draft.rows);
+        setEditedIds(draft.editedIds ?? []);
         setExcluded(draft.excluded);
         setParseIssues(draft.parseIssues);
         setBackup(draft.backup);
@@ -509,6 +536,11 @@ function ImportWorkspace({
     } catch (error) {
       setDraftReadFailed(true);
       setDraftStorageError(errorMessage(error));
+    }
+    try {
+      setPartialDraft(readPersonalImportPartialDraft(scope));
+    } catch {
+      setNotice('上次整理的部分結果無法還原，目前草稿仍保留。');
     }
     setDraftReady(true);
     active.current = true;
@@ -531,6 +563,7 @@ function ImportWorkspace({
         source,
         rows,
         excluded,
+        editedIds,
         parseIssues,
         backup,
         document: importDocument,
@@ -541,6 +574,7 @@ function ImportWorkspace({
       setDraftStorageError(errorMessage(error));
     }
   }, [
+    editedIds,
     draftReady,
     draftReadFailed,
     paused,
@@ -558,14 +592,18 @@ function ImportWorkspace({
     documentSelection,
   ]);
   useEffect(() => {
-    if (!draftStorageError || (!text && !rows.length && !importDocument)) return;
+    if (
+      !(draftStorageError || partialStorageError) ||
+      (!text && !rows.length && !importDocument && !partialDraft)
+    )
+      return;
     const warnBeforeLeaving = (event: BeforeUnloadEvent) => {
       event.preventDefault();
       event.returnValue = '';
     };
     window.addEventListener('beforeunload', warnBeforeLeaving);
     return () => window.removeEventListener('beforeunload', warnBeforeLeaving);
-  }, [draftStorageError, text, rows.length, importDocument]);
+  }, [draftStorageError, partialStorageError, text, rows.length, importDocument, partialDraft]);
   useEffect(
     () => () => {
       if (previewUrl.current) URL.revokeObjectURL(previewUrl.current);
@@ -618,6 +656,7 @@ function ImportWorkspace({
     inputSource = source,
     term?: { academicYear: string; semester: string },
   ) => {
+    setRetryAi(null);
     setSchoolPage(null);
     setReviewIssueIds(null);
     setAiReviewed(false);
@@ -649,7 +688,19 @@ function ImportWorkspace({
     );
   };
   const updateDraft = (before: PersonalImportRow, next: PersonalImportRow) => {
+    if (next.kind === 'timetable' && periodProfile) {
+      const slots = periodSlots(periodProfile);
+      if (next.startPeriod !== before.startPeriod)
+        next = {
+          ...next,
+          startTime: slots[(next.startPeriod ?? 0) - 1]?.start,
+          periodLabel: undefined,
+        };
+      if (next.endPeriod !== before.endPeriod)
+        next = { ...next, endTime: slots[(next.endPeriod ?? 0) - 1]?.end, periodLabel: undefined };
+    }
     setAiReviewed(false);
+    setEditedIds((current) => (current.includes(next.id) ? current : [...current, next.id]));
     setRows((current) => current.map((item) => (item.id === next.id ? next : item)));
     setParseIssues((current) =>
       current.filter(
@@ -706,18 +757,40 @@ function ImportWorkspace({
     )
       return;
     if (!request.input.image && !request.input.text?.trim()) return;
+    // Keep the reviewed draft unchanged until the replacement has completed.
+    const preserveDraft = rows.length > 0 || !!importDocument;
+    if (!preserveDraft) setRetryAi(null);
     const controller = new AbortController();
     job.current?.abort();
     job.current = controller;
     setPendingAi(null);
     setReading(true);
-    setProgress('正在準備免費裝置端 AI…');
+    setProgress('正在準備雲端整理；無法使用時會自動切換本機或規則解析。');
     setNotice('');
     const currentRead = () =>
       active.current &&
       !suspended.current &&
       !controller.signal.aborted &&
       job.current === controller;
+    const retryExcluded = (nextRows: PersonalImportRow[]) => {
+      const sourceKey = (row: PersonalImportRow) =>
+        JSON.stringify([
+          row.source.type,
+          row.source.name ?? '',
+          row.source.line,
+          row.source.rawText,
+        ]);
+      const excludedSources = new Set(
+        rows
+          .filter(
+            (row) => excluded.includes(row.id) && request.retry?.replaceRowIds?.includes(row.id),
+          )
+          .map(sourceKey),
+      );
+      return nextRows
+        .filter((row) => excluded.includes(row.id) || excludedSources.has(sourceKey(row)))
+        .map((row) => row.id);
+    };
     let preparedPreview = '';
     try {
       if (request.input.image) {
@@ -729,6 +802,76 @@ function ImportWorkspace({
         input: request.input,
         options: { ...options, source: request.source },
         signal: controller.signal,
+        cloudHeaders: nuni?.session?.context
+          ? { 'X-Campus-Session': nuni.session.context }
+          : undefined,
+        retry: request.retry,
+        onPartial: (partial) => {
+          if (!currentRead()) return;
+          if (!preserveDraft)
+            setRetryAi(partial.retry ? { ...request, retry: partial.retry } : null);
+          if (!partial.rows.length) return;
+          if (preserveDraft) {
+            const nextDraft: PersonalImportDraft = {
+              kind,
+              year,
+              semester,
+              text: partial.sourceText ?? partial.retry?.sourceText ?? request.input.text ?? '',
+              source: request.source,
+              rows: partial.rows,
+              parseIssues: partial.issues,
+              excluded: request.retry ? retryExcluded(partial.rows) : [],
+              backup: null,
+            };
+            setPartialDraft(nextDraft);
+            setPartialRequest(partial.retry ? { ...request, retry: partial.retry } : null);
+            try {
+              writePersonalImportPartialDraft(scope, nextDraft);
+              setPartialStorageError('');
+            } catch (error) {
+              setPartialStorageError(errorMessage(error));
+            }
+            return;
+          }
+          setRows(partial.rows);
+          setParseIssues(partial.issues);
+          setAiReviewed(false);
+          setText(partial.sourceText ?? partial.retry?.sourceText ?? request.input.text ?? '');
+          setSource(request.source);
+          setBackup(null);
+          setSchoolPage(null);
+          if (request.fromDocument) {
+            documentFile.current = null;
+            setHasDocumentFile(false);
+            setDocument(null);
+            setDocumentSelection(null);
+          }
+          if (request.input.image && preparedPreview) {
+            setSourceImage(request.input.image);
+            setPreview(preparedPreview);
+            preparedPreview = '';
+          }
+          setExcluded(request.retry ? retryExcluded(partial.rows) : []);
+          setReviewPage(0);
+          setReviewIssueIds(null);
+          if (!draftReadFailed) {
+            try {
+              writePersonalImportDraft(scope, {
+                kind,
+                year,
+                semester,
+                text: partial.sourceText ?? partial.retry?.sourceText ?? request.input.text ?? '',
+                source: request.source,
+                rows: partial.rows,
+                parseIssues: partial.issues,
+                excluded: request.retry ? retryExcluded(partial.rows) : [],
+                backup: null,
+              });
+            } catch (error) {
+              setDraftStorageError(errorMessage(error));
+            }
+          }
+        },
         onProgress: (message) => {
           if (currentRead()) setProgress(message);
         },
@@ -736,9 +879,19 @@ function ImportWorkspace({
       if (!currentRead()) return;
       if (!result.rows.length) {
         setNotice(
-          'AI 沒有整理出可核對的資料，原本的草稿仍保留。請試著裁切到表格，或貼上學校的表格文字。',
+          result.issues.map((issue) => issue.message).join(' ') ||
+            '沒有整理出可核對的資料，原本的草稿仍保留。請重試或貼上學校的表格文字。',
         );
         return;
+      }
+      setRetryAi(result.retry ? { ...request, retry: result.retry } : null);
+      setPartialDraft(null);
+      setPartialRequest(null);
+      try {
+        clearPersonalImportPartialDraft(scope);
+        setPartialStorageError('');
+      } catch (error) {
+        setPartialStorageError(errorMessage(error));
       }
       setRows(result.rows);
       setParseIssues(
@@ -759,9 +912,9 @@ function ImportWorkspace({
       setSchoolPage(null);
       setReviewPage(0);
       setReviewIssueIds(null);
-      setExcluded([]);
+      setExcluded(request.retry ? retryExcluded(result.rows) : []);
       setAiReviewed(false);
-      setText(request.input.text ?? '');
+      setText(result.sourceText ?? result.retry?.sourceText ?? request.input.text ?? '');
       setSource(request.source);
       if (request.fromDocument) {
         documentFile.current = null;
@@ -771,13 +924,13 @@ function ImportWorkspace({
         setSourceImage(null);
         setPreview('');
       }
-      if (request.input.image) {
+      if (request.input.image && preparedPreview) {
         setSourceImage(request.input.image);
         setPreview(preparedPreview);
         preparedPreview = '';
       }
       setNotice(
-        `AI 已整理 ${result.rows.length} 筆草稿。請對照來源，核對課名、日期、時間及數字，再確認匯入。`,
+        `${result.issues.find((issue) => issue.code === 'import-provider')?.message ?? ''}已整理 ${result.rows.length} 筆草稿。${result.retry ? `另有 ${result.retry.batches.length} 段未完成模型整理，可只重試這些段落。` : ''}請對照來源，核對課名、日期、時間及數字，再確認匯入。`,
       );
       requestAnimationFrame(() =>
         review.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }),
@@ -800,8 +953,49 @@ function ImportWorkspace({
     if (rows.length) setPendingAi(request);
     else void processAi(request);
   };
+  const adoptPartialDraft = () => {
+    if (!partialDraft || reading || saving || suspended.current) return;
+    // Persist the explicit replacement before removing its recovery copy.
+    try {
+      if (draftReadFailed) throw new Error('請先清除無法還原的暫存，再採用部分結果。');
+      writePersonalImportDraft(scope, partialDraft);
+    } catch (error) {
+      setDraftStorageError(errorMessage(error));
+      return;
+    }
+    try {
+      clearPersonalImportPartialDraft(scope);
+      setPartialStorageError('');
+    } catch (error) {
+      setPartialStorageError(errorMessage(error));
+    }
+    setKind(partialDraft.kind);
+    setYear(partialDraft.year);
+    setSemester(partialDraft.semester);
+    setRows(partialDraft.rows);
+    setParseIssues(partialDraft.parseIssues);
+    setExcluded(partialDraft.excluded);
+    setText(partialDraft.text);
+    setSource(partialDraft.source);
+    setBackup(null);
+    setDocument(null);
+    setDocumentSelection(null);
+    documentFile.current = null;
+    setHasDocumentFile(false);
+    setSchoolPage(null);
+    setSourceImage(null);
+    setPreview('');
+    setReviewPage(0);
+    setReviewIssueIds(null);
+    setAiReviewed(false);
+    setRetryAi(partialRequest);
+    setPartialDraft(null);
+    setPartialRequest(null);
+    setNotice('已採用這次整理的部分結果，請逐筆核對後再匯入。');
+  };
   const readFile = async (file?: File, pdfMode?: 'ocr') => {
     if (!file || suspended.current || reading || saving || rows.length) return;
+    setRetryAi(null);
     const controller = new AbortController();
     job.current?.abort();
     job.current = controller;
@@ -936,6 +1130,10 @@ function ImportWorkspace({
       setReviewIssueIds(null);
       setAiReviewed(false);
       setPendingAi(null);
+      setRetryAi(null);
+      setPartialDraft(null);
+      setPartialRequest(null);
+      setPartialStorageError('');
       setRows([]);
       setText('');
       setSource({ type: 'paste' });
@@ -1037,6 +1235,9 @@ function ImportWorkspace({
         personalImportSavedNotice(result.added, readPersonalImportSyncState(scope).enabled),
       );
       if (result.added) setLastBatch(result.batchId);
+      setRetryAi(null);
+      setPartialDraft(null);
+      setPartialRequest(null);
       setRows([]);
       setBackup(null);
       setReviewPage(0);
@@ -1107,6 +1308,45 @@ function ImportWorkspace({
         search,
       ),
   );
+  const timetableGrid = kind === 'timetable' && !importDocument && (
+    <TimetableReviewGrid
+      rows={rows.filter((row) => !excluded.includes(row.id))}
+      editedIds={editedIds}
+      profile={periodProfile}
+      disabled={saving || reading}
+      onEdit={(row) => {
+        setReviewIssueIds(null);
+        setReviewPage(Math.floor(rows.indexOf(row) / REVIEW_PAGE_SIZE));
+        requestAnimationFrame(() => {
+          const element = reviewRows.current.get(row.id);
+          element?.scrollIntoView({ block: 'center' });
+          element?.focus();
+        });
+      }}
+      onAdd={(day, period) => {
+        const row: PersonalImportRow = {
+          id: createPersonalImportId(),
+          kind: 'timetable',
+          title: '',
+          schoolId: scope.schoolId,
+          academicYear: year,
+          semester,
+          dayOfWeek: day,
+          startPeriod: period,
+          endPeriod: period,
+          source: { type: 'paste', line: 1, rawText: '' },
+        };
+        setRows((current) => [...current, row]);
+        setReviewIssueIds(null);
+        setReviewPage(Math.floor(rows.length / REVIEW_PAGE_SIZE));
+        requestAnimationFrame(() => {
+          const element = reviewRows.current.get(row.id);
+          element?.scrollIntoView({ block: 'center' });
+          element?.querySelector<HTMLInputElement>('input[type="text"]')?.focus();
+        });
+      }}
+    />
+  );
   return (
     <div className={styles.root}>
       <section className={styles.intro}>
@@ -1162,6 +1402,7 @@ function ImportWorkspace({
               setSchoolPage(null);
               setSourceImage(null);
               setPendingAi(null);
+              setRetryAi(null);
               setReviewIssueIds(null);
               setAiReviewed(false);
             }}
@@ -1255,8 +1496,8 @@ function ImportWorkspace({
           >
             <span className={styles.sourceNumber}>02</span>
             <strong>AI 讀取截圖</strong>
-            <span>讓本機視覺模型讀取課表、成績或活動圖片。</span>
-            <small>免費 · 首次需下載模型</small>
+            <span>先在裝置讀取文字，再整理課表、成績或活動。</span>
+            <small>雲端優先 · 本機備援</small>
           </button>
           <button
             type="button"
@@ -1272,7 +1513,7 @@ function ImportWorkspace({
         </div>
         <p id="import-ai-download-note" className={styles.note}>
           {aiAvailability.available
-            ? `AI 在這台裝置執行，不需 API 金鑰。首次下載${aiAvailability.downloadLabel}；圖片與文字不送到雲端辨識。`
+            ? `優先使用雲端整理，送出文字前會遮罩可辨識的姓名、學號與證號；原圖不會上傳。雲端無法使用時改用本機模型（首次下載${aiAvailability.downloadLabel}）或規則解析。`
             : aiAvailability.reason ||
               '目前瀏覽器無法使用裝置端 AI，可使用學校表格、檔案或一般圖片讀取。'}
         </p>
@@ -1382,7 +1623,10 @@ function ImportWorkspace({
                 這份資料的學年度
                 <input
                   value={year}
-                  onChange={(event) => setYear(event.target.value)}
+                  onChange={(event) => {
+                    setRetryAi(null);
+                    setYear(event.target.value);
+                  }}
                   placeholder="例如 115 或 2026"
                   inputMode="numeric"
                 />
@@ -1391,7 +1635,10 @@ function ImportWorkspace({
                 學期
                 <input
                   value={semester}
-                  onChange={(event) => setSemester(event.target.value)}
+                  onChange={(event) => {
+                    setRetryAi(null);
+                    setSemester(event.target.value);
+                  }}
                   placeholder="例如 1、2 或暑期"
                 />
               </label>
@@ -1456,6 +1703,7 @@ function ImportWorkspace({
                 }}
                 onChange={(event) => {
                   setSchoolPage(null);
+                  setRetryAi(null);
                   setText(event.target.value);
                   // Keep screenshot provenance so corrected OCR table spacing is still parsed.
                   if (!event.target.value || source.type !== 'screenshot')
@@ -1535,7 +1783,7 @@ function ImportWorkspace({
           <div className={styles.aiTools}>
             <div>
               <strong>欄位沒有對上？</strong>
-              <p>可用免費 AI 重新整理目前來源，完成後再核對一次。</p>
+              <p>可用 AI 分段重新整理目前來源，完成後再核對一次。</p>
             </div>
             <div className={styles.actions}>
               {sourceImage && (
@@ -1562,6 +1810,68 @@ function ImportWorkspace({
               )}
             </div>
           </div>
+        )}
+        {partialStorageError && <p role="alert">部分結果：{partialStorageError}</p>}
+        {partialDraft && (
+          <section className={styles.notice} aria-label="另存的部分整理結果">
+            <p>
+              已另外保留 {partialDraft.rows.length} 筆部分結果，目前草稿與手動修改仍保留。
+              採用部分結果會取代目前草稿；原始圖片請另行開啟對照。
+            </p>
+            <div className={styles.actions}>
+              <button
+                type="button"
+                className="btn"
+                disabled={reading || saving}
+                onClick={adoptPartialDraft}
+              >
+                以部分結果取代目前草稿
+              </button>
+              <button
+                type="button"
+                className="btn"
+                disabled={reading || saving}
+                onClick={() => {
+                  try {
+                    clearPersonalImportPartialDraft(scope);
+                    setPartialDraft(null);
+                    setPartialRequest(null);
+                    setPartialStorageError('');
+                  } catch (error) {
+                    setPartialStorageError(errorMessage(error));
+                  }
+                }}
+              >
+                捨棄部分結果
+              </button>
+            </div>
+          </section>
+        )}
+        {retryAi?.retry && !reading && (
+          <button
+            type="button"
+            className="btn"
+            disabled={saving || removingAiModel}
+            onClick={() => {
+              const retry = retryAi.retry!;
+              const replacedIds = new Set(retry.replaceRowIds ?? []);
+              const ids = new Set(
+                rows.filter((row) => !replacedIds.has(row.id)).map((row) => row.id),
+              );
+              void processAi({
+                ...retryAi,
+                retry: {
+                  ...retry,
+                  completed: {
+                    rows: rows.filter((row) => ids.has(row.id)),
+                    issues: parseIssues.filter((issue) => issue.rowId && ids.has(issue.rowId)),
+                  },
+                },
+              });
+            }}
+          >
+            重試未完成的 {retryAi.retry.batches.length} 段
+          </button>
         )}
         {pendingAi && (
           <div
@@ -1605,7 +1915,7 @@ function ImportWorkspace({
                 job.current?.abort();
                 setReading(false);
                 setProgress('');
-                setNotice('已取消，原有資料與草稿沒有改變。');
+                setNotice('已停止整理，原文與已完成的草稿仍保留。');
               }}
             >
               取消讀取
@@ -1613,8 +1923,7 @@ function ImportWorkspace({
           </div>
         )}
         <p className={styles.note}>
-          一般圖片讀取使用裝置端文字辨識；AI
-          讀圖另使用需下載的視覺模型。兩種方式都會先產生草稿，無法確認的欄位留待核對。
+          圖片先在裝置上讀取文字，再依序使用雲端、本機模型或規則解析。每段完成就保留草稿，無法確認的欄位留待核對。
         </p>
         {kind === 'timetable' && (
           <p className={styles.note}>
@@ -1670,7 +1979,7 @@ function ImportWorkspace({
             aiDisabled={reading || saving || removingAiModel || !aiAvailability.available}
             aiNote={
               aiAvailability.available
-                ? `免費在這台裝置整理文字，不需 API 金鑰。首次下載${aiAvailability.downloadLabel}；文件內容不送到雲端辨識。`
+                ? '選取的文字會先遮罩可辨識的姓名、學號與證號，再交由雲端整理；無法使用時自動切換本機或規則解析。'
                 : aiAvailability.reason || '目前瀏覽器無法使用裝置端 AI，仍可使用一般整理。'
             }
             onAi={(selection) => {
@@ -1754,6 +2063,33 @@ function ImportWorkspace({
             手動加一筆
           </button>
         </div>
+        {kind === 'timetable' && rows.length > 0 && (
+          <label className={styles.field}>
+            補上對照截圖（保留草稿）
+            <input
+              type="file"
+              accept="image/png,image/jpeg,image/webp"
+              disabled={reading || saving}
+              onChange={async (event) => {
+                const file = event.target.files?.[0];
+                event.target.value = '';
+                if (!file) return;
+                try {
+                  const image = await createPersonalImportImagePreview(
+                    file,
+                    new AbortController().signal,
+                  );
+                  if (!active.current) return;
+                  setPreview(URL.createObjectURL(image));
+                  setNotice('已補上對照截圖，草稿內容沒有變更。');
+                } catch (error) {
+                  if (active.current) setNotice(errorMessage(error));
+                }
+              }}
+            />
+          </label>
+        )}
+        {!rows.length && timetableGrid}
         {parseIssues.some((issue) => issue.severity === 'error') && (
           <div role="alert" className={styles.error}>
             <p>
@@ -1832,6 +2168,7 @@ function ImportWorkspace({
                   setParseIssues([]);
                   setAiReviewed(false);
                   setPendingAi(null);
+                  setRetryAi(null);
                   setReviewIssueIds(null);
                   setNotice('已取消待確認清單，原始文字仍保留，可修改後重新整理。');
                 }}
@@ -1920,6 +2257,7 @@ function ImportWorkspace({
                 </aside>
               )}
               <div className={styles.reviewContent}>
+                {timetableGrid}
                 {!filteredRows.length && (
                   <p className={styles.empty}>目前沒有需要修正的項目。切換「全部」繼續核對。</p>
                 )}
@@ -1989,6 +2327,84 @@ function ImportWorkspace({
                           onRefreshWorkspaces={() => setLinkRefreshVersion((v) => v + 1)}
                           onChange={(next) => updateDraft(row, next)}
                         />
+                        {row.kind === 'timetable' && (
+                          <div className={styles.actions}>
+                            <button
+                              type="button"
+                              className="btn"
+                              disabled={
+                                saving ||
+                                reading ||
+                                !row.startPeriod ||
+                                !row.endPeriod ||
+                                row.endPeriod <= row.startPeriod
+                              }
+                              onClick={() => {
+                                setAiReviewed(false);
+                                const parts = splitReviewRow(row, periodProfile);
+                                if (parts.length === 1) {
+                                  setNotice(REVIEW_SPLIT_UNAVAILABLE);
+                                  return;
+                                }
+                                setExcluded((current) =>
+                                  current.includes(row.id)
+                                    ? [...new Set([...current, ...parts.map((item) => item.id)])]
+                                    : current,
+                                );
+                                setEditedIds((current) => [
+                                  ...new Set([...current, ...parts.map((item) => item.id)]),
+                                ]);
+                                setRows((current) =>
+                                  current.flatMap((item) => (item.id === row.id ? parts : [item])),
+                                );
+                              }}
+                            >
+                              拆成單節課程
+                            </button>
+                            <button
+                              type="button"
+                              className="btn"
+                              disabled={
+                                saving ||
+                                reading ||
+                                excluded.includes(row.id) ||
+                                !nextReviewRow(
+                                  rows.filter((item) => !excluded.includes(item.id)),
+                                  row,
+                                )
+                              }
+                              onClick={() => {
+                                if (excluded.includes(row.id)) return;
+                                const next = nextReviewRow(
+                                  rows.filter((item) => !excluded.includes(item.id)),
+                                  row,
+                                );
+                                if (!next) return;
+                                updateDraft(row, {
+                                  ...row,
+                                  endPeriod: next.endPeriod ?? next.startPeriod,
+                                  endTime: next.endTime,
+                                  periodLabel: undefined,
+                                });
+                                setRows((current) => current.filter((item) => item.id !== next.id));
+                              }}
+                            >
+                              與下一節同名課程合併
+                            </button>
+                            <button
+                              type="button"
+                              className="btn"
+                              disabled={saving || reading}
+                              onClick={() => {
+                                setAiReviewed(false);
+                                setRows((current) => current.filter((item) => item.id !== row.id));
+                                setExcluded((current) => current.filter((id) => id !== row.id));
+                              }}
+                            >
+                              刪除此草稿課程
+                            </button>
+                          </div>
+                        )}
                         {parseIssues.some(
                           (issue) =>
                             issue.rowId === row.id &&
@@ -2156,7 +2572,7 @@ function ImportWorkspace({
         ) : (
           <ul className={styles.saved}>
             {saved.map((row) => (
-              <li key={row.id}>
+              <li key={row.id} id={`record-${row.id}`}>
                 <div>
                   <strong>{row.title}</strong>
                   <p>{rowSummary(row, periodProfile)}</p>

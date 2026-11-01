@@ -173,3 +173,17 @@ describe('resolveNotificationDestination', () => {
     });
   });
 });
+
+test('本機作業提醒直接開啟指定作業，不以名稱或截止時間找作業', () => {
+  const data = { type: 'local_assignment_due_v2', uid: 'alice', schoolId: 'pu',
+    groupId: 'course', assignmentId: 'work' };
+  expect(resolveNotificationDestination({ data }, { uid: 'alice', schoolId: 'pu' })).toMatchObject({
+    ok: true, mode: 'nested', tab: '學習', screen: 'HomeworkSubmit',
+    params: { groupId: 'course', assignmentId: 'work', fromReminder: true },
+  });
+  for (const context of [{ uid: 'bob', schoolId: 'pu' }, { uid: 'alice', schoolId: 'other' }]) {
+    expect(resolveNotificationDestination({ data }, context)).toMatchObject({
+      ok: true, mode: 'nested', tab: '學習', screen: 'LearnHome',
+    });
+  }
+});

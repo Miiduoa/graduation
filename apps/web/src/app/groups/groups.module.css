@@ -212,3 +212,21 @@
     width: 100%;
   }
 }
+
+.roster {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 20px 0 28px;
+  text-align: left;
+}
+.roster th,
+.roster td {
+  padding: 12px;
+  border-bottom: 1px solid var(--border);
+  overflow-wrap: anywhere;
+}
+.roster th {
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 500;
+}

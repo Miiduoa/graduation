@@ -320,9 +320,9 @@ function NextActionBody({
     if (lmsUnconnected) {
       return (
         <>
-          <p className={styles.headline}>課程待辦還沒連上</p>
-          <p className={styles.meta}>先確認已加入的課程，再查看作業與測驗。</p>
-          <Link className={styles.action} href="/groups">
+          <p className={styles.headline}>先加入 nuni 課程</p>
+          <p className={styles.meta}>加入課程後，這裡就會顯示作業與測驗。</p>
+          <Link className={styles.action} href="/classroom">
             查看我的課程
           </Link>
         </>
@@ -543,9 +543,12 @@ function TodoList({
             {TODAY_COPY.retry}
           </button>
         </>
-      ) : lmsUnconnected && todos.length === 0 ? (
-        <p className={styles.empty}>{TODAY_COPY.lmsUnconnected}</p>
-      ) : todos.length === 0 ? null : (
+      ) : null}
+      {!unsigned && lmsUnconnected && todos.length === 0 ? (
+        <p className={styles.empty}>
+          還沒有 nuni 課程資料。<Link href="/classroom">加入課程</Link>
+        </p>
+      ) : unsigned || todos.length === 0 ? null : (
         <ul id="today-work-items" className={styles.list} data-testid="today-work-list">
           {visible.map((item) => {
             const overdue = isTodoOverdue(item, now);

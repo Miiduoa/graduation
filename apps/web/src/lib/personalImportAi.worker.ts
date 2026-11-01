@@ -1,4 +1,9 @@
-import type { PreTrainedModel, RawImage } from '@huggingface/transformers';
+import type {
+  AutoProcessor as ProcessorLoader,
+  PreTrainedModel,
+  RawImage,
+  Tensor as ModelTensor,
+} from '@huggingface/transformers';
 import {
   IMPORT_AI_CACHE_NAME,
   IMPORT_AI_MAX_IMAGE_BYTES,
@@ -11,6 +16,7 @@ import {
   isImportAiAssetUrl,
   type PersonalImportAiWorkerRequest,
   type PersonalImportAiWorkerResponse,
+  type PersonalImportAiWorkerErrorCode,
 } from './personalImportAiConfig';
 
 type WorkerScope = {
@@ -29,8 +35,29 @@ type WorkerScope = {
 
 const scope = self as unknown as WorkerScope;
 let busy = false;
+let environmentConfigured = false;
+let runtimeReady = false;
+let retainedModel: PreTrainedModel | undefined;
+let retainedProcessor: Awaited<ReturnType<typeof ProcessorLoader.from_pretrained>> | undefined;
 
-class ImportRecognitionError extends Error {}
+class ImportRecognitionError extends Error {
+  constructor(
+    message: string,
+    readonly code: PersonalImportAiWorkerErrorCode = 'invalid_response',
+  ) {
+    super(message);
+  }
+}
+
+function errorCode(error: unknown): PersonalImportAiWorkerErrorCode {
+  if (error instanceof ImportRecognitionError) return error.code;
+  const message = error instanceof Error ? error.message : '';
+  if (/out of memory|memory allocation|allocation failed|buffer.*size|device.*lost/i.test(message))
+    return 'memory';
+  if (/fetch|network|download|failed to load|connection|load failed/i.test(message))
+    return 'download';
+  return 'runtime';
+}
 
 function tokenId(value: unknown): number {
   if (typeof value !== 'number' && typeof value !== 'bigint') return -1;
@@ -38,8 +65,8 @@ function tokenId(value: unknown): number {
   return Number.isSafeInteger(token) && token >= 0 ? token : -1;
 }
 
-function progress(id: number, message: string): void {
-  scope.postMessage({ type: 'progress', id, message });
+function progress(id: number, message: string, phase: 'loading' | 'generating' = 'loading'): void {
+  scope.postMessage({ type: 'progress', id, message, phase });
 }
 
 function userMessage(error: unknown): string {
@@ -63,6 +90,7 @@ async function ensureDeviceSupport(): Promise<void> {
   if (!adapter?.features.has('shader-f16')) {
     throw new ImportRecognitionError(
       '目前瀏覽器無法執行這個 AI 辨識模型。請改用支援 WebGPU 的較新瀏覽器或電腦。',
+      'unsupported',
     );
   }
   if (
@@ -71,6 +99,7 @@ async function ensureDeviceSupport(): Promise<void> {
   ) {
     throw new ImportRecognitionError(
       '這台裝置的圖形記憶體限制不足以執行 AI 辨識，請改用電腦開啟。',
+      'unsupported',
     );
   }
 }
@@ -137,7 +166,7 @@ async function decodeImage(file: File, RawImageClass: typeof RawImage): Promise<
 async function recognize(request: PersonalImportAiWorkerRequest): Promise<string> {
   await ensureDeviceSupport();
   if (!request.prompt.trim() || request.prompt.length > 32_000) {
-    throw new ImportRecognitionError('這次的資料過長或沒有可辨識內容，請分批匯入。');
+    throw new ImportRecognitionError('這次的資料過長或沒有可辨識內容，請分批匯入。', 'input_limit');
   }
   if (request.image) await validateImage(request.image);
 
@@ -151,39 +180,42 @@ async function recognize(request: PersonalImportAiWorkerRequest): Promise<string
   } = await import('@huggingface/transformers');
 
   // This worker owns its environment; no main-thread model settings are changed.
-  const fetchAsset = env.fetch;
-  env.fetch = (input: string | URL, init?: RequestInit) => {
-    if (
-      (init?.method ?? 'GET').toUpperCase() !== 'GET' ||
-      init?.body != null ||
-      !isImportAiAssetUrl(input, scope.location.origin)
-    ) {
-      return Promise.reject(
-        new ImportRecognitionError('AI 辨識資源設定不正確，請重新整理頁面後再試。'),
-      );
-    }
-    return fetchAsset(input, {
-      ...init,
-      method: 'GET',
-      credentials: 'omit',
-      referrerPolicy: 'no-referrer',
-    });
-  };
-  env.allowLocalModels = false;
-  env.allowRemoteModels = true;
-  env.remoteHost = 'https://huggingface.co/';
-  // The SDK's tokenizer metadata probe does not forward the revision option.
-  // Pin the path template too so every probe and download uses the same snapshot.
-  env.remotePathTemplate = `{model}/resolve/${IMPORT_AI_MODEL_REVISION}/`;
-  env.useFS = false;
-  env.useFSCache = false;
-  env.useCustomCache = false;
-  env.experimental_useCrossOriginStorage = false;
-  env.cacheKey = IMPORT_AI_CACHE_NAME;
-  env.useBrowserCache = typeof caches !== 'undefined';
-  // A self-hosted module keeps script-src limited to this origin. The default
-  // WASM cache loads a blob script and the default runtime URL is a third-party CDN.
-  env.useWasmCache = false;
+  if (!environmentConfigured) {
+    const fetchAsset = env.fetch;
+    env.fetch = (input: string | URL, init?: RequestInit) => {
+      if (
+        (init?.method ?? 'GET').toUpperCase() !== 'GET' ||
+        init?.body != null ||
+        !isImportAiAssetUrl(input, scope.location.origin)
+      ) {
+        return Promise.reject(
+          new ImportRecognitionError('AI 辨識資源設定不正確，請重新整理頁面後再試。'),
+        );
+      }
+      return fetchAsset(input, {
+        ...init,
+        method: 'GET',
+        credentials: 'omit',
+        referrerPolicy: 'no-referrer',
+      });
+    };
+    env.allowLocalModels = false;
+    env.allowRemoteModels = true;
+    env.remoteHost = 'https://huggingface.co/';
+    // The SDK's tokenizer metadata probe does not forward the revision option.
+    // Pin the path template too so every probe and download uses the same snapshot.
+    env.remotePathTemplate = `{model}/resolve/${IMPORT_AI_MODEL_REVISION}/`;
+    env.useFS = false;
+    env.useFSCache = false;
+    env.useCustomCache = false;
+    env.experimental_useCrossOriginStorage = false;
+    env.cacheKey = IMPORT_AI_CACHE_NAME;
+    env.useBrowserCache = typeof caches !== 'undefined';
+    // A self-hosted module keeps script-src limited to this origin. The default
+    // WASM cache loads a blob script and the default runtime URL is a third-party CDN.
+    env.useWasmCache = false;
+    environmentConfigured = true;
+  }
   const wasm = env.backends.onnx.wasm;
   if (!wasm) throw new ImportRecognitionError('AI 辨識引擎無法啟動，請重新開啟頁面後再試。');
   wasm.numThreads = 1;
@@ -200,17 +232,25 @@ async function recognize(request: PersonalImportAiWorkerRequest): Promise<string
 
   // Check the small runtime before starting a large model download. File bytes and
   // prompt text never enter a network request; only fixed model assets are fetched.
-  const runtimeResponse = await env.fetch(wasmUrl);
-  if (
-    !runtimeResponse.ok ||
-    !runtimeResponse.headers.get('content-type')?.includes('application/wasm')
-  ) {
-    throw new ImportRecognitionError('網站尚未備妥 AI 辨識引擎，請稍後重試。');
+  if (!runtimeReady) {
+    const runtimeResponse = await env.fetch(wasmUrl);
+    if (
+      !runtimeResponse.ok ||
+      !runtimeResponse.headers.get('content-type')?.includes('application/wasm')
+    ) {
+      throw new ImportRecognitionError('網站尚未備妥 AI 辨識引擎，請稍後重試。', 'runtime');
+    }
+    wasm.wasmBinary = await runtimeResponse.arrayBuffer();
+    runtimeReady = true;
   }
-  wasm.wasmBinary = await runtimeResponse.arrayBuffer();
 
-  let model: PreTrainedModel | undefined;
+  let model = retainedModel;
+  let modelHealthy = true;
   let image: RawImage | undefined;
+  const tensors = new Map<unknown, ModelTensor>();
+  const retainTensor = (value: unknown) => {
+    if (value instanceof Tensor) tensors.set(value.ort_tensor ?? value, value);
+  };
   try {
     if (request.image) image = await decodeImage(request.image, RawImageClass);
     progress(request.id, '正在檢查資料範圍；這一步只需要前處理資源，尚未載入完整模型');
@@ -235,10 +275,13 @@ async function recognize(request: PersonalImportAiWorkerRequest): Promise<string
       lastProgressAt = Date.now();
       progress(request.id, `正在下載辨識模型（已接收 ${Math.round(downloaded / 1_000_000)} MB）`);
     };
-    const processor = await AutoProcessor.from_pretrained(IMPORT_AI_MODEL_ID, {
-      revision: IMPORT_AI_MODEL_REVISION,
-      progress_callback: onProgress,
-    });
+    const processor =
+      retainedProcessor ??
+      (await AutoProcessor.from_pretrained(IMPORT_AI_MODEL_ID, {
+        revision: IMPORT_AI_MODEL_REVISION,
+        progress_callback: onProgress,
+      }));
+    if (request.keepAlive === true) retainedProcessor = processor;
     const content = image
       ? [{ type: 'image' }, { type: 'text', text: request.prompt }]
       : [{ type: 'text', text: request.prompt }];
@@ -247,6 +290,7 @@ async function recognize(request: PersonalImportAiWorkerRequest): Promise<string
       tokenize: false,
     });
     const inputs = await processor(text, image);
+    Object.values(inputs).forEach(retainTensor);
     const inputIds: unknown = inputs.input_ids;
     if (
       !(inputIds instanceof Tensor) ||
@@ -257,7 +301,10 @@ async function recognize(request: PersonalImportAiWorkerRequest): Promise<string
       inputIds.dims[1] > IMPORT_AI_MAX_INPUT_TOKENS ||
       inputIds.data.length !== inputIds.dims[1]
     ) {
-      throw new ImportRecognitionError('這次的資料超出單次辨識範圍，請分成較小的圖片或文字段落。');
+      throw new ImportRecognitionError(
+        '這次的資料超出單次辨識範圍，請分成較小的圖片或文字段落。',
+        'input_limit',
+      );
     }
     // Snapshot before awaiting model code: a runtime may reuse or mutate the
     // input tensor during generation. Never read its live length to slice output.
@@ -270,26 +317,32 @@ async function recognize(request: PersonalImportAiWorkerRequest): Promise<string
     // Tokenization includes the image tokens. Reject an oversized or malformed
     // request before allocating GPU sessions or downloading the model weights.
     progress(request.id, '資料範圍檢查完成，正在載入辨識模型；已下載的檔案會使用裝置快取');
-    model = await Qwen3VLForConditionalGeneration.from_pretrained(IMPORT_AI_MODEL_ID, {
-      revision: IMPORT_AI_MODEL_REVISION,
-      device: 'webgpu',
-      dtype: {
-        embed_tokens: 'q4f16',
-        vision_encoder: 'fp16',
-        decoder_model_merged: 'q4f16',
-      },
-      progress_callback: onProgress,
-    });
+    model =
+      model ??
+      (await Qwen3VLForConditionalGeneration.from_pretrained(IMPORT_AI_MODEL_ID, {
+        revision: IMPORT_AI_MODEL_REVISION,
+        device: 'webgpu',
+        dtype: {
+          embed_tokens: 'q4f16',
+          vision_encoder: 'fp16',
+          decoder_model_merged: 'q4f16',
+        },
+        progress_callback: onProgress,
+      }));
     progress(
       request.id,
       image ? 'AI 正在對照圖片中的欄位、日期與內容' : 'AI 正在整理欄位、日期與內容',
+      'generating',
     );
+    modelHealthy = false;
     const output: unknown = await model.generate({
       ...inputs,
       max_new_tokens: IMPORT_AI_MAX_OUTPUT_TOKENS,
       do_sample: false,
       return_dict_in_generate: false,
     });
+    modelHealthy = true;
+    retainTensor(output);
     if (
       !(output instanceof Tensor) ||
       output.dims.length !== 2 ||
@@ -310,12 +363,14 @@ async function recognize(request: PersonalImportAiWorkerRequest): Promise<string
         throw new ImportRecognitionError('AI 回傳結果與這次來源不一致，草稿仍保留，請重試。');
     }
     const generated = output.slice(null, [inputLength, output.dims[1]]);
+    retainTensor(generated);
     const eosConfig = model.generation_config?.eos_token_id ?? [151645, 151643];
     const eos = Array.isArray(eosConfig) ? eosConfig : [eosConfig];
     const lastToken = Number(generated.data[generated.data.length - 1]);
     if (generated.dims[1] >= IMPORT_AI_MAX_OUTPUT_TOKENS && !eos.includes(lastToken)) {
       throw new ImportRecognitionError(
-        '資料太多，AI 尚未辨識完整。請把圖片分成兩張或分批匯入；這次沒有儲存任何資料。',
+        '這一段資料太多，AI 尚未辨識完整。請縮小範圍重試；其他已完成的段落仍會保留。',
+        'output_limit',
       );
     }
     const raw = processor.batch_decode(generated, { skip_special_tokens: true })[0]?.trim();
@@ -324,7 +379,20 @@ async function recognize(request: PersonalImportAiWorkerRequest): Promise<string
     return raw;
   } finally {
     image?.data.fill(0);
-    await model?.dispose().catch(() => undefined);
+    for (const tensor of tensors.values()) {
+      try {
+        tensor.dispose();
+      } catch {
+        /* The runtime may already have released the tensor. */
+      }
+    }
+    if (request.keepAlive === true && modelHealthy) {
+      retainedModel = model;
+    } else {
+      retainedModel = undefined;
+      retainedProcessor = undefined;
+      await model?.dispose().catch(() => undefined);
+    }
   }
 }
 
@@ -337,6 +405,7 @@ scope.onmessage = (event) => {
       type: 'error',
       id,
       message: busy ? 'AI 正在處理上一份資料，請稍候。' : '匯入內容不完整，請重新選擇資料。',
+      code: busy ? 'busy' : 'invalid_response',
     });
     return;
   }
@@ -344,7 +413,7 @@ scope.onmessage = (event) => {
   void recognize(request as PersonalImportAiWorkerRequest)
     .then((raw) => scope.postMessage({ type: 'result', id, raw }))
     .catch((error: unknown) =>
-      scope.postMessage({ type: 'error', id, message: userMessage(error) }),
+      scope.postMessage({ type: 'error', id, message: userMessage(error), code: errorCode(error) }),
     )
     .finally(() => {
       busy = false;

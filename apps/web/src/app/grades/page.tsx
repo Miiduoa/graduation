@@ -3,7 +3,7 @@
 import { useMemo, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { AcademicPage } from '@/components/academic/AcademicPage';
-import { GradesTabs, isGradesFeedbackTab } from '@/components/academic/GradesTabs';
+import { GradesTabs } from '@/components/academic/GradesTabs';
 import { SchoolSemesterSummary } from '@/components/academic/SchoolSemesterSummary';
 import { StudentGradesPage } from '@/features/nuni/StudentGrades';
 import {
@@ -113,6 +113,7 @@ function Grades({ records }: { records: AcademicGradeResponse }) {
                   {grade.credits} 學分
                 </p>
                 {grade.class && <p>{grade.class}</p>}
+                <a href="https://ecampus.pu.edu.tw/" target="_blank" rel="noopener noreferrer">查看校方原始紀錄</a>
               </div>
               <div
                 className={`${styles.score} ${typeof grade.score === 'string' && grade.score.length > 3 ? styles.scoreText : ''}`}
@@ -132,7 +133,7 @@ function Grades({ records }: { records: AcademicGradeResponse }) {
       )}
       <p className={styles.note}>
         成績按學校回傳內容顯示。「通過」、未定成績與其他文字結果保留原文，不換算成零分或
-        GPA。平均分數僅供查看紀錄，正式平均、排名與畢業資格請以學校公告為準。
+        GPA。平均＝數字成績乘學分的總和 ÷ 有數字成績的學分總和；沒有可計算學分時顯示「—」。平均分數僅供查看紀錄，正式平均、排名與畢業資格請以學校公告為準。
       </p>
     </>
   );
@@ -140,7 +141,7 @@ function Grades({ records }: { records: AcademicGradeResponse }) {
 
 export default function GradesPage() {
   const tab = useSearchParams()?.get('tab');
-  if (isGradesFeedbackTab(tab)) {
+  if (tab !== 'semester') {
     return <StudentGradesPage />;
   }
   return (

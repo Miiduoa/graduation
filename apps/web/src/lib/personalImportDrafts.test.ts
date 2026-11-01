@@ -1,8 +1,13 @@
 import { beforeEach, expect, it } from 'vitest';
 import {
   personalImportDraftKey,
+  personalImportPartialDraftKey,
+  clearPersonalImportDraft,
+  clearPersonalImportPartialDraft,
   readPersonalImportDraft,
+  readPersonalImportPartialDraft,
   writePersonalImportDraft,
+  writePersonalImportPartialDraft,
   type PersonalImportDraft,
 } from './personalImportDrafts';
 
@@ -35,6 +40,40 @@ it('retains an incomplete manual row so required fields can be completed after r
   const input = draft();
   writePersonalImportDraft(scope, input);
   expect(readPersonalImportDraft(scope)).toEqual(input);
+});
+
+it('stores partial replacements separately and isolates their recovery by account and school', () => {
+  const original = draft();
+  original.rows[0].grade = '88';
+  const partial = draft();
+  partial.rows[0].grade = '85';
+  writePersonalImportDraft(scope, original);
+  writePersonalImportPartialDraft(scope, partial);
+  expect(readPersonalImportDraft(scope)).toEqual(original);
+  expect(readPersonalImportPartialDraft(scope)).toEqual(partial);
+  expect(readPersonalImportPartialDraft({ ...scope, owner: 'platform:two' })).toBeNull();
+  expect(readPersonalImportPartialDraft({ ...scope, schoolId: 'ntu' })).toBeNull();
+  clearPersonalImportPartialDraft(scope);
+  expect(readPersonalImportDraft(scope)).toEqual(original);
+  expect(readPersonalImportPartialDraft(scope)).toBeNull();
+  writePersonalImportPartialDraft(scope, partial);
+  clearPersonalImportDraft(scope);
+  expect(readPersonalImportDraft(scope)).toBeNull();
+  expect(readPersonalImportPartialDraft(scope)).toBeNull();
+});
+
+it('rejects damaged partial results without changing the edited original', () => {
+  const original = draft();
+  original.rows[0].grade = '88';
+  writePersonalImportDraft(scope, original);
+  const partial = draft();
+  partial.rows[0].schoolId = 'ntu';
+  const key = personalImportPartialDraftKey(scope);
+  const raw = JSON.stringify({ version: 1, draft: partial });
+  sessionStorage.setItem(key, raw);
+  expect(() => readPersonalImportPartialDraft(scope)).toThrow('上次的暫存草稿無法還原');
+  expect(sessionStorage.getItem(key)).toBe(raw);
+  expect(readPersonalImportDraft(scope)).toEqual(original);
 });
 
 it('counts multibyte text toward the 8 MiB limit and preserves the previous draft on failure', () => {

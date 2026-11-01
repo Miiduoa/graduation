@@ -1,5 +1,6 @@
 import {
   assignmentFileDownloadUrl,
+  assignmentRequest,
   compressNativeAssignmentImage,
   moveNativeFile,
   removeNativeFile,
@@ -13,12 +14,12 @@ import { NuniError } from '@campus/shared/src/nuni';
 const workspace = 'cw_11111111-1111-4111-8111-111111111111';
 const assignment = 'cwa_22222222-2222-4222-8222-222222222222';
 
-test('keeps text submit on the platform API and sends file traffic to the BFF', () => {
+test('sends assignment submissions and file traffic to the BFF', () => {
   expect(
     usesAssignmentFileBff(`class-workspaces/${workspace}/assignments/${assignment}/submit`, {
       body: '文字',
     }),
-  ).toBe(false);
+  ).toBe(true);
   expect(
     usesAssignmentFileBff(`class-workspaces/${workspace}/assignments/${assignment}/files/intents`, {
       originalName: 'shot.jpg',
@@ -114,4 +115,39 @@ test('batches intents, uploads in parallel, and reports progress', async () => {
   expect(submitFiles).toHaveBeenCalledTimes(1);
   expect(progress[0]).toEqual({ completed: 0, total: 2 });
   expect(progress.at(-1)).toEqual({ completed: 2, total: 2 });
+});
+
+test.each(['', 'false', 'true'])('assignment reads require the filtered BFF with upload flag %s', flag => {
+  process.env.EXPO_PUBLIC_ASSIGNMENT_FILE_SUBMIT_ENABLED = flag;
+  const direct = jest.fn();
+  const bff = jest.fn();
+  for (const path of [
+    `class-workspaces/${workspace}/assignments`,
+    `class-workspaces/${workspace}/assignments/${assignment}/submissions`,
+  ]) {
+    expect(assignmentRequest(path, undefined, direct, bff)).toBe(bff);
+    expect(() => assignmentRequest(path, undefined, direct)).toThrow(NuniError);
+  }
+  expect(direct).not.toHaveBeenCalled();
+  delete process.env.EXPO_PUBLIC_ASSIGNMENT_FILE_SUBMIT_ENABLED;
+});
+
+test('resumes only unfinished uploads with original intents and prepared files', async () => {
+  const operation: import('../screens/nuni/assignmentFileSubmit').NativeFileOperation = {};
+  const createAssignmentFileIntents = jest.fn(async () => [
+    { id: 'first', uploadPath: 'first', contentType: 'image/jpeg' },
+    { id: 'second', uploadPath: 'second', contentType: 'image/jpeg' },
+  ]);
+  let failed = false;
+  const uploadAssignmentFile = jest.fn(async (path: string) => {
+    if (path === 'second' && !failed) { failed = true; throw new TypeError('upload interrupted'); }
+  });
+  const submitFiles = jest.fn(async () => ({}));
+  const classes = { createAssignmentFileIntents, uploadAssignmentFile, submitFiles };
+  await expect(submitNativeAssignmentFiles(classes, workspace, assignment, 'original', [photo('a.jpg'), photo('b.jpg')], 'key', undefined, operation)).rejects.toThrow('upload interrupted');
+  expect(submitFiles).not.toHaveBeenCalled();
+  await submitNativeAssignmentFiles(classes, workspace, assignment, 'changed', [], 'key', undefined, operation);
+  expect(createAssignmentFileIntents).toHaveBeenCalledTimes(1);
+  expect(uploadAssignmentFile.mock.calls.map(([path]) => path)).toEqual(['first', 'second', 'second']);
+  expect(submitFiles).toHaveBeenCalledWith(workspace, assignment, { body: 'original', fileIds: ['first', 'second'], idempotencyKey: 'key' });
 });

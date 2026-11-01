@@ -70,7 +70,7 @@ function createTimeoutSignal(ms: number): { signal: AbortSignal; cancel(): void 
 
 export async function withWakeRetry<T>(
   run: (signal: AbortSignal) => Promise<T>,
-  options: { timeoutMs?: number; externalSignal?: AbortSignal } = {},
+  options: { timeoutMs?: number; externalSignal?: AbortSignal; retry?: boolean } = {},
 ): Promise<T> {
   const timeoutMs = Math.max(options.timeoutMs ?? WAKE_REQUEST_TIMEOUT_MS, WAKE_REQUEST_TIMEOUT_MS);
   const attempt = async () => {
@@ -89,7 +89,8 @@ export async function withWakeRetry<T>(
   try {
     return await attempt();
   } catch (error) {
-    if (options.externalSignal?.aborted || !isWakeRetryableFailure(error)) throw error;
+    if (options.retry === false || options.externalSignal?.aborted || !isWakeRetryableFailure(error))
+      throw error;
     return await attempt();
   }
 }

@@ -136,7 +136,7 @@ it('keeps a known task actionable while timetable data is still loading', () => 
 it('does not declare there are no assignments when the course platform is unconnected', () => {
   view({ timetableStatus: 'ready', lmsUnconnected: true });
   expect(screen.queryByText(TODAY_COPY.emptyDay)).toBeNull();
-  expect(screen.getByRole('link', { name: '查看我的課程' }).getAttribute('href')).toBe('/groups');
+  expect(screen.getByRole('link', { name: '查看我的課程' }).getAttribute('href')).toBe('/classroom');
 });
 
 it('shows upcoming work due after 24 hours as the next assignment, not due today', () => {
@@ -198,7 +198,7 @@ it('keeps other blocks when the timetable cannot be read', () => {
 
 it('does not pretend LMS is empty when it is not connected', () => {
   view({ lmsUnconnected: true, todos: [] });
-  expect(screen.getByText(TODAY_COPY.lmsUnconnected)).toBeTruthy();
+  expect(screen.getByText(/還沒有 nuni 課程資料/)).toBeTruthy();
 });
 
 it('shows skeleton bones instead of a spinner', () => {

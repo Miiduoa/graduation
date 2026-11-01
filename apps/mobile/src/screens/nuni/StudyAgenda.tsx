@@ -1,3 +1,4 @@
+import { StudyDeadlineExport } from './StudyDeadlineExport';
 import React, { useEffect, useState } from 'react';
 import { Pressable, ScrollView, Text, View } from 'react-native';
 import {
@@ -29,9 +30,7 @@ const belongs = (task: NuniStudyTask, filter: Filter, now: number) => {
   if (filter === 'soon' || filter === 'overdue') {
     if (status !== 'pending') return false;
     const timing = studyTaskTiming(task, now);
-    return filter === 'soon'
-      ? timing === 'today' || timing === 'week'
-      : timing === 'overdue';
+    return filter === 'soon' ? timing === 'today' || timing === 'week' : timing === 'overdue';
   }
   return status === filter;
 };
@@ -131,13 +130,19 @@ export function StudyAgenda({
           </Text>
         </Pressable>
       ) : null}
+      {data && !loading && !error ? (
+        <StudyDeadlineExport
+          key={selectedCourse}
+          tasks={scopedTasks}
+          partial={partial}
+          retry={retry}
+        />
+      ) : null}
       {data ? (
         <>
           {studentCourses.length > 1 ? (
             <View style={{ gap: 7 }}>
-              <Text style={{ ...copy, color: theme.colors.muted, fontSize: 13 }}>
-                依課程查看
-              </Text>
+              <Text style={{ ...copy, color: theme.colors.muted, fontSize: 13 }}>依課程查看</Text>
               <ScrollView
                 horizontal
                 showsHorizontalScrollIndicator={false}
@@ -165,11 +170,14 @@ export function StudyAgenda({
                         selectedCourse === course.id ? theme.colors.accentSoft : theme.colors.bg,
                     }}
                   >
-                    <Text style={{
-                      ...copy,
-                      fontSize: 14,
-                      color: selectedCourse === course.id ? theme.colors.accent : theme.colors.muted,
-                    }}>
+                    <Text
+                      style={{
+                        ...copy,
+                        fontSize: 14,
+                        color:
+                          selectedCourse === course.id ? theme.colors.accent : theme.colors.muted,
+                      }}
+                    >
                       {course.title}
                     </Text>
                   </Pressable>
@@ -178,9 +186,7 @@ export function StudyAgenda({
             </View>
           ) : null}
           <View style={{ gap: 7 }}>
-            <Text style={{ ...copy, color: theme.colors.muted, fontSize: 13 }}>
-              依進度篩選
-            </Text>
+            <Text style={{ ...copy, color: theme.colors.muted, fontSize: 13 }}>依進度篩選</Text>
             <ScrollView
               horizontal
               showsHorizontalScrollIndicator={false}
@@ -205,11 +211,13 @@ export function StudyAgenda({
                     backgroundColor: filter === value ? theme.colors.accentSoft : theme.colors.bg,
                   }}
                 >
-                  <Text style={{
-                    ...copy,
-                    fontSize: 14,
-                    color: filter === value ? theme.colors.accent : theme.colors.muted,
-                  }}>
+                  <Text
+                    style={{
+                      ...copy,
+                      fontSize: 14,
+                      color: filter === value ? theme.colors.accent : theme.colors.muted,
+                    }}
+                  >
                     {label} {scopedTasks.filter((task) => belongs(task, value, now)).length}
                     {partial ? '+' : ''}
                   </Text>
@@ -291,21 +299,23 @@ export function StudyAgenda({
             })
           ) : (
             <Text style={{ ...copy, color: theme.colors.muted }}>
-              {partial
-                ? '已載入的內容中沒有這類項目，其他課程仍待確認。'
-                : filter === 'pending'
-                  ? '目前沒有待完成項目。可以從下方課程繼續閱讀教材。'
-                  : filter === 'soon'
-                    ? '未來七天內沒有待完成的項目。'
-                    : filter === 'overdue'
-                    ? '目前沒有已過建議時間且尚未完成的項目。'
-                    : filter === 'feedback'
-                      ? '目前沒有新的老師回饋。'
-                      : filter === 'closed'
-                        ? '目前沒有已停止收件且尚未繳交的項目。'
-                        : filter === 'submitted'
-                          ? '目前還沒有繳交紀錄。'
-                          : '目前沒有課業活動。'}
+              {!partial && data.studiedCourseCount === 0
+                ? '還沒加入 nuni 課程。請到下方課程區輸入邀請碼，加入後就能看到作業與測驗。'
+                : partial
+                  ? '已載入的內容中沒有這類項目，其他課程仍待確認。'
+                  : filter === 'pending'
+                    ? '目前沒有待完成項目。可以從下方課程繼續閱讀教材。'
+                    : filter === 'soon'
+                      ? '未來七天內沒有待完成的項目。'
+                      : filter === 'overdue'
+                        ? '目前沒有已過建議時間且尚未完成的項目。'
+                        : filter === 'feedback'
+                          ? '目前沒有新的老師回饋。'
+                          : filter === 'closed'
+                            ? '目前沒有已停止收件且尚未繳交的項目。'
+                            : filter === 'submitted'
+                              ? '目前還沒有繳交紀錄。'
+                              : '目前沒有課業活動。'}
             </Text>
           )}
           {visible.length > limit ? (

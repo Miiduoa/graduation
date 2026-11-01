@@ -8,6 +8,7 @@ import { useBrowsingSchoolPageContext } from '@/lib/useBrowsingSchoolPageContext
 import { SchoolScopePlaceholder } from '@/components/SchoolScopePlaceholder';
 import { isFunctionsUnconfiguredError } from '@/lib/functionsUrl';
 import { joinByCode, leaveMemberGroup, loadMyGroups, type MemberGroup } from './groupService';
+import { clubEnabled } from './clubService';
 import { GroupOwnershipTransfer } from './GroupOwnershipTransfer';
 import styles from './groups.module.css';
 
@@ -241,6 +242,7 @@ function MemberDirectory({ uid, schoolId, mode }: { uid: string; schoolId: strin
               </h2>
               {group.description && <p className={styles.description}>{group.description}</p>}
               <div className={styles.actions}>
+                {group.type === 'club' && clubEnabled() && <Link className="btn" href={`/groups/${encodeURIComponent(group.id)}/club?schoolId=${encodeURIComponent(schoolId)}`}>社團後台</Link>}
                 {group.type === 'course' ? (
                   <Link
                     className="btn"

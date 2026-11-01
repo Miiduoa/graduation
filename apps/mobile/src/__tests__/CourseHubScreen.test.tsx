@@ -38,11 +38,24 @@ function currentTaipeiWeekDeadline(): string {
   )).toISOString();
 }
 beforeEach(() => {
+  // Keep weekly tasks before the fixed Oct 29 deadline, regardless of the run date or timezone.
+  jest.useFakeTimers({
+    now: new Date('2026-10-27T04:00:00Z'),
+    // Leave async rendering and navigation scheduling on real timers.
+    doNotFake: [
+      'setTimeout', 'clearTimeout', 'setInterval', 'clearInterval',
+      'setImmediate', 'clearImmediate', 'nextTick', 'queueMicrotask',
+      'requestAnimationFrame', 'cancelAnimationFrame', 'performance', 'hrtime',
+    ],
+  });
   jest.clearAllMocks();
   mockUser = { uid: 'alice' };
   mockSchool = { id: 'pu' };
   jest.mocked(loadCourseHub).mockResolvedValue(data);
   jest.mocked(webBrowserOpenWithPuTronClassGate).mockResolvedValue(true);
+});
+afterEach(() => {
+  jest.useRealTimers();
 });
 test('uses real course name with scoped useful actions and no invented outcomes', async () => {
   const navigation = { navigate: jest.fn() };

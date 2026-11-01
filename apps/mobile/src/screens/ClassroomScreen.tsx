@@ -1,3 +1,4 @@
+import { attendanceSubmissionIssue } from '@campus/shared/src/attendanceReliability';
 /* eslint-disable @typescript-eslint/no-explicit-any, react-hooks/exhaustive-deps */
 import React, { useEffect, useState, useCallback, useRef } from 'react';
 import {
@@ -9,7 +10,10 @@ import {
   Alert,
   RefreshControl,
   Modal,
+  Linking,
+  AppState,
 } from 'react-native';
+import { useIsFocused } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import QRCodeSvg from 'react-native-qrcode-svg';
@@ -28,18 +32,15 @@ import { useAuth } from '../state/auth';
 import { getDb, getFunctionsInstance, isFirebaseMockMode } from '../firebase';
 import { httpsCallable } from 'firebase/functions';
 import { joinClassroomAttendance, readAttendanceQr } from '../services/liveAttendance';
+import { useClassroomFeed } from '../hooks/useClassroomFeed';
 import { useClassroomSession, type LiveClassroomSession } from '../hooks/useClassroomSession';
 import {
   doc,
   collection,
-  onSnapshot,
   addDoc,
   updateDoc,
   serverTimestamp,
   increment,
-  query,
-  orderBy,
-  limit,
 } from 'firebase/firestore';
 
 type AnonQuestion = {
@@ -260,6 +261,7 @@ function PollCard({
 
 export function ClassroomScreen(props: any) {
   const nav = props?.navigation;
+  const focused = useIsFocused();
   const groupId: string | undefined = props?.route?.params?.groupId;
   const sessionId: string | undefined = props?.route?.params?.sessionId;
 
@@ -275,7 +277,8 @@ export function ClassroomScreen(props: any) {
     qrToken,
     qrExpiresAt,
     joined,
-    error: accessError,
+    receipt,
+    error: sessionError,
     refresh,
   } = useClassroomSession(
     db,
@@ -286,16 +289,23 @@ export function ClassroomScreen(props: any) {
       schoolId: auth.profile?.schoolId,
     },
     auth.user,
-    !isFirebaseMockMode() && !auth.loading && !auth.tokenExpired && !auth.tokenError,
+    focused && !isFirebaseMockMode() && !auth.loading && !auth.tokenExpired && !auth.tokenError,
   );
+  const receiptRef = useRef(receipt);
+  receiptRef.current = receipt;
   const [attendanceCode, setAttendanceCode] = useState('');
   const [joining, setJoining] = useState(false);
+  const joinLock = useRef(false);
+  const [pending, setPending] = useState(false);
   const [attendanceError, setAttendanceError] = useState<string | null>(null);
   const identityKey = JSON.stringify([auth.user?.uid, auth.profile?.schoolId, groupId, sessionId]);
   const identityRef = useRef({ key: identityKey, user: auth.user });
   identityRef.current = { key: identityKey, user: auth.user };
-  const [questions, setQuestions] = useState<AnonQuestion[]>([]);
-  const [polls, setPolls] = useState<Poll[]>([]);
+  const feedIdentity = { groupId, sessionId, userId: auth.user?.uid, schoolId: auth.profile?.schoolId };
+  const feedEnabled = focused && !isFirebaseMockMode() && !auth.loading && !auth.tokenExpired && !auth.tokenError;
+  const { items: questions, error: questionError } = useClassroomFeed<AnonQuestion>(db, feedIdentity, auth.user, feedEnabled, 'questions');
+  const { items: polls, error: pollError } = useClassroomFeed<Poll>(db, feedIdentity, auth.user, feedEnabled, 'polls');
+  const accessError = sessionError ?? questionError ?? pollError;
   const [newQuestion, setNewQuestion] = useState('');
   const [submittingQ, setSubmittingQ] = useState(false);
   const [userReaction, setUserReaction] = useState<ReactionKey | null>(null);
@@ -325,6 +335,10 @@ export function ClassroomScreen(props: any) {
   const quizTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   useEffect(() => {
+    setMyPollAnswers({});
+    setNewQuestion('');
+    setUserReaction(null);
+    setPending(false);
     setAttendanceError(null);
     setAttendanceCode('');
     setJoining(false);
@@ -332,28 +346,20 @@ export function ClassroomScreen(props: any) {
     scanLockRef.current = false;
   }, [identityKey, auth.user]);
 
-  // 訂閱問答
   useEffect(() => {
-    if (isFirebaseMockMode()) return;
-    if (!groupId || !sessionId) return;
-    const ref = collection(db, 'groups', groupId, 'liveSessions', sessionId, 'questions');
-    const q = query(ref, orderBy('upvotes', 'desc'), limit(30));
-    const unsub = onSnapshot(q, (snap) => {
-      setQuestions(snap.docs.map((d) => ({ id: d.id, ...(d.data() as any) })) as AnonQuestion[]);
-    });
-    return () => unsub();
-  }, [groupId, sessionId]);
+    if (receipt) { setPending(false); setAttendanceCode(''); setAttendanceError(null); }
+  }, [receipt]);
 
-  // 訂閱投票
   useEffect(() => {
-    if (isFirebaseMockMode()) return;
-    if (!groupId || !sessionId) return;
-    const ref = collection(db, 'groups', groupId, 'liveSessions', sessionId, 'polls');
-    const unsub = onSnapshot(query(ref, orderBy('createdAt', 'desc')), (snap) => {
-      setPolls(snap.docs.map((d) => ({ id: d.id, ...(d.data() as any) })) as Poll[]);
+    const listener = AppState.addEventListener('change', (state) => {
+      if (state !== 'active') setShowQRScanner(false);
     });
-    return () => unsub();
-  }, [groupId, sessionId]);
+    return () => listener.remove();
+  }, []);
+
+  useEffect(() => {
+    if (!focused) setShowQRScanner(false);
+  }, [focused]);
 
   // 清理計時器
   useEffect(() => {
@@ -365,7 +371,10 @@ export function ClassroomScreen(props: any) {
 
   const handleJoin = useCallback(
     async (token: string) => {
-      if (!groupId || !sessionId || !auth.user || !session?.active || !canAttend || joining) return;
+      if (!groupId || !sessionId || !auth.user || !session?.active || !canAttend || joinLock.current) return;
+      joinLock.current = true;
+      setAttendanceCode(token);
+      setPending(true);
       const requestIdentity = identityRef.current;
       setJoining(true);
       setAttendanceError(null);
@@ -376,14 +385,19 @@ export function ClassroomScreen(props: any) {
           identityRef.current.user !== requestIdentity.user
         )
           return;
-        setAttendanceCode('');
       } catch (e: any) {
+        if (receiptRef.current) return;
         if (
           identityRef.current.key === requestIdentity.key &&
           identityRef.current.user === requestIdentity.user
-        )
-          setAttendanceError(e.message ?? '無法完成簽到，請稍後再試。');
+        ) {
+          const issue = attendanceSubmissionIssue(e);
+          setAttendanceError(issue.message);
+          setPending(issue.pending);
+          if (issue.rescan) setAttendanceCode('');
+        }
       } finally {
+        joinLock.current = false;
         if (
           identityRef.current.key === requestIdentity.key &&
           identityRef.current.user === requestIdentity.user
@@ -399,7 +413,10 @@ export function ClassroomScreen(props: any) {
     if (!cameraPermission?.granted) {
       const result = await requestCameraPermission();
       if (!result.granted) {
-        Alert.alert('需要相機權限', '請在設定中允許相機存取，才能掃描 QR Code 簽到');
+        Alert.alert('相機還沒開放', '可以到設定允許相機，回來後再掃一次；也可以直接輸入老師提供的簽到碼。', [
+          { text: '輸入簽到碼', style: 'cancel' },
+          { text: '開啟設定', onPress: () => { void Linking.openSettings(); } },
+        ]);
         return;
       }
     }
@@ -693,11 +710,21 @@ export function ClassroomScreen(props: any) {
               {attendanceError || accessError}
             </Text>
           )}
-          {!isTeacher && joined && <Pill text="已完成簽到" kind="success" />}
+          {!isTeacher && joined && <Pill text={receipt?.status === 'late' ? '已記錄遲到' : '已完成簽到'} kind="success" />}
+          {!isTeacher && receipt && (
+            <Text selectable style={{ color: theme.colors.muted }}>
+              {receipt.source === 'manual' ? '教師已核定' : '簽到收據'} ·
+              {({ present: '出席', late: '遲到', absent: '缺席', excused: '請假' })[receipt.status]} ·
+              {receipt.correctedAt || receipt.checkedInAt
+                ? new Date((receipt.correctedAt ?? receipt.checkedInAt)!).toLocaleString('zh-TW', { timeZone: 'Asia/Taipei' })
+                : '時間尚未確認'}
+            </Text>
+          )}
           {/* 學生：尚未加入時顯示加入按鈕 */}
-          {!isTeacher && canAttend && !joined && session.active && (
+          {!isTeacher && canAttend && !joined && !receipt && session.active && (
             <Card title="課堂簽到" subtitle="掃描老師顯示的 QR Code，或輸入簽到碼。">
               <View style={{ gap: 10 }}>
+                {pending && <Text accessibilityRole="alert">待確認 · 尚未收到簽到收據</Text>}
                 <Button
                   text="掃描 QR Code"
                   kind="primary"
@@ -707,7 +734,7 @@ export function ClassroomScreen(props: any) {
                 />
                 <TextInput
                   value={attendanceCode}
-                  onChangeText={setAttendanceCode}
+                  onChangeText={(value) => { setAttendanceCode(value); setPending(false); }}
                   placeholder="老師提供的簽到碼"
                   accessibilityLabel="簽到碼"
                   autoCapitalize="none"
@@ -721,7 +748,7 @@ export function ClassroomScreen(props: any) {
                   }}
                 />
                 <Button
-                  text={joining ? '正在確認…' : '確認簽到'}
+                  text={joining ? '正在確認…' : pending ? '再確認簽到' : '確認簽到'}
                   kind="ghost"
                   onPress={() => handleJoin(attendanceCode)}
                   disabled={joining || !attendanceCode.trim()}
