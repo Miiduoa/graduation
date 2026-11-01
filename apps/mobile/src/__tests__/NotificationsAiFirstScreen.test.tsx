@@ -7,6 +7,7 @@ const mockAuth = {
   user: { uid: 'alice' } as { uid: string } | null,
   profile: { role: 'student' as const, schoolId: 'pu', uid: 'alice' },
 };
+let mockFocus: (() => void) | undefined;
 let mockBlur: (() => void) | undefined;
 const mockNavigate = { navigate: jest.fn(), goBack: jest.fn() };
 const mockNotifs = {
@@ -37,7 +38,10 @@ jest.mock('@react-navigation/native', () => ({
   useFocusEffect: (callback: () => () => void) => {
     const React = require('react');
     React.useEffect(() => {
-      mockBlur = callback();
+      mockFocus = () => {
+        mockBlur = callback();
+      };
+      mockFocus();
       return mockBlur;
     }, [callback]);
   },
@@ -61,6 +65,7 @@ beforeEach(() => {
   mockNotifs.loading = false;
   mockNotifs.error = null;
   mockNotifs.markAsRead.mockResolvedValue(true);
+  mockNotifs.markAllAsRead.mockResolvedValue(true);
   jest.mocked(applyNotificationDestination).mockReturnValue(true);
 });
 
@@ -143,7 +148,7 @@ test('markAsRead false keeps unread and opens content with retry', async () => {
   await waitFor(() => expect(view.getByText(/已讀還沒同步/)).toBeTruthy());
   expect(view.getByText('未讀')).toBeTruthy();
   expect(applyNotificationDestination).toHaveBeenCalledTimes(1);
-  fireEvent.press(view.getByText('重試已讀同步'));
+  fireEvent.press(view.getByText(/^重試已讀同步：/));
   await waitFor(() => expect(mockNotifs.markAsRead).toHaveBeenCalledTimes(2));
   expect(applyNotificationDestination).toHaveBeenCalledTimes(1);
 });
@@ -270,7 +275,7 @@ for (const outcome of ['false', 'throw'] as const) {
     fireEvent.press(view.getByText('內容通知'));
     await waitFor(() => expect(view.getByText(/內容暫時打不開，已讀也還沒同步/)).toBeTruthy());
     expect(view.getByText('未讀')).toBeTruthy();
-    expect(view.getByText('重試已讀同步')).toBeTruthy();
+    expect(view.getByText(/^重試已讀同步：/)).toBeTruthy();
   });
 }
 
@@ -329,10 +334,104 @@ test('rejected read sync still opens content and lets the user retry', async () 
   ];
   const view = render(<NotificationsAiFirstScreen />);
   fireEvent.press(view.getByText('離線通知'));
-  await waitFor(() => expect(view.getByText('重試已讀同步')).toBeTruthy());
+  await waitFor(() => expect(view.getByText(/^重試已讀同步：/)).toBeTruthy());
   expect(view.getByText('未讀')).toBeTruthy();
   expect(applyNotificationDestination).toHaveBeenCalledTimes(1);
-  fireEvent.press(view.getByText('重試已讀同步'));
-  await waitFor(() => expect(view.queryByText('重試已讀同步')).toBeNull());
+  fireEvent.press(view.getByText(/^重試已讀同步：/));
+  await waitFor(() => expect(view.queryByText(/^重試已讀同步：/)).toBeNull());
   expect(applyNotificationDestination).toHaveBeenCalledTimes(1);
+});
+
+function setupRows() {
+  mockNotifs.notifications = ['A', 'B'].map((id) => ({
+    id,
+    title: `通知${id}`,
+    type: 'message',
+    read: false,
+    data: { peerId: id },
+  }));
+  mockNotifs.unreadCount = 2;
+}
+
+test('blur then successful sync then refocus clears optimistic unread without navigation', async () => {
+  setupRows();
+  const pending = deferred<boolean>();
+  mockNotifs.markAsRead.mockReturnValueOnce(pending.promise);
+  const view = render(<NotificationsAiFirstScreen />);
+  fireEvent.press(view.getByText('通知A'));
+  mockNotifs.notifications[0] = { ...mockNotifs.notifications[0], read: true };
+  mockNotifs.unreadCount = 1;
+  view.rerender(<NotificationsAiFirstScreen />);
+  expect(view.getByLabelText('正在同步已讀：通知A').props.accessibilityState).toEqual({
+    busy: true,
+    disabled: true,
+  });
+  expect(view.getAllByText('未讀')).toHaveLength(2);
+  act(() => mockBlur?.());
+  await act(async () => pending.resolve(true));
+  act(() => mockFocus?.());
+  expect(view.getAllByText('未讀')).toHaveLength(1);
+  expect(view.queryByLabelText('正在同步已讀：通知A')).toBeNull();
+  expect(applyNotificationDestination).not.toHaveBeenCalled();
+});
+
+test('refocus and press while optimistic write waits preserves original failure and retry', async () => {
+  setupRows();
+  const pending = deferred<boolean>();
+  mockNotifs.markAsRead.mockReturnValueOnce(pending.promise);
+  const view = render(<NotificationsAiFirstScreen />);
+  fireEvent.press(view.getByText('通知A'));
+  mockNotifs.notifications[0] = { ...mockNotifs.notifications[0], read: true };
+  mockNotifs.unreadCount = 1;
+  view.rerender(<NotificationsAiFirstScreen />);
+  act(() => mockBlur?.());
+  act(() => mockFocus?.());
+  fireEvent.press(view.getByText('通知A'));
+  expect(mockNotifs.markAsRead).toHaveBeenCalledTimes(1);
+  expect(view.getAllByText('未讀')).toHaveLength(2);
+  mockNotifs.notifications[0] = { ...mockNotifs.notifications[0], read: false };
+  mockNotifs.unreadCount = 2;
+  await act(async () => pending.resolve(false));
+  expect(view.getByText('重試已讀同步：通知A')).toBeTruthy();
+  expect(applyNotificationDestination).not.toHaveBeenCalled();
+  fireEvent.press(view.getByText('重試已讀同步：通知A'));
+  await waitFor(() => expect(view.queryByText('重試已讀同步：通知A')).toBeNull());
+  expect(mockNotifs.markAsRead).toHaveBeenCalledTimes(2);
+});
+
+test('single failure then all-read success clears that batch errors and unread masks', async () => {
+  setupRows();
+  mockNotifs.markAsRead.mockResolvedValueOnce(false);
+  const batch = deferred<boolean>();
+  mockNotifs.markAllAsRead.mockReturnValueOnce(batch.promise);
+  const view = render(<NotificationsAiFirstScreen />);
+  fireEvent.press(view.getByText('通知A'));
+  await waitFor(() => expect(view.getByText('重試已讀同步：通知A')).toBeTruthy());
+  fireEvent.press(view.getByText('全部已讀'));
+  mockNotifs.notifications = mockNotifs.notifications.map((row) => ({ ...row, read: true }));
+  mockNotifs.unreadCount = 0;
+  view.rerender(<NotificationsAiFirstScreen />);
+  expect(view.getAllByText('未讀')).toHaveLength(2);
+  await act(async () => batch.resolve(true));
+  expect(view.queryByText('未讀')).toBeNull();
+  expect(view.queryByText(/重試已讀同步/)).toBeNull();
+  expect(view.queryByText(/已讀還沒同步/)).toBeNull();
+});
+
+test('interleaved row completion keeps the other row failure and retry', async () => {
+  setupRows();
+  mockNotifs.markAsRead.mockResolvedValueOnce(false);
+  const view = render(<NotificationsAiFirstScreen />);
+  fireEvent.press(view.getByText('通知A'));
+  await waitFor(() => expect(view.getByText('重試已讀同步：通知A')).toBeTruthy());
+  const retry = deferred<boolean>();
+  const other = deferred<boolean>();
+  mockNotifs.markAsRead.mockReturnValueOnce(retry.promise).mockReturnValueOnce(other.promise);
+  fireEvent.press(view.getByText('重試已讀同步：通知A'));
+  fireEvent.press(view.getByText('通知B'));
+  await act(async () => other.resolve(false));
+  await act(async () => retry.resolve(true));
+  expect(view.queryByText('重試已讀同步：通知A')).toBeNull();
+  expect(view.getByText('重試已讀同步：通知B')).toBeTruthy();
+  expect(view.getByText(/已讀還沒同步/)).toBeTruthy();
 });

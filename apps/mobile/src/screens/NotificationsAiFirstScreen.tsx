@@ -38,160 +38,125 @@ export default function NotificationsAiFirstScreen() {
     reload,
   } = useNotifications();
   const [blockedNotice, setBlockedNotice] = useState<{ id: string; reason: string } | null>(null);
-  const [actionError, setActionError] = useState<string | null>(null);
-  const [retryReadId, setRetryReadId] = useState<string | null>(null);
-  const [unconfirmedReads, setUnconfirmedReads] = useState<Set<string>>(new Set());
-  const visibleUnreadCount =
-    unreadCount + notifications.filter((row) => row.read && unconfirmedReads.has(row.id)).length;
+  type ReadResult = { pending: boolean; unconfirmed: boolean; error?: string };
+  const ownerKey = JSON.stringify([uid, schoolId, auth.profile?.role]);
+  const owners = useRef(new Map<string, Map<string, ReadResult>>());
+  if (!owners.current.has(ownerKey)) owners.current.set(ownerKey, new Map());
+  const reads = owners.current.get(ownerKey)!;
+  const currentOwner = useRef(ownerKey);
+  currentOwner.current = ownerKey;
+  const [, refresh] = useState(0);
+  const [focused, setFocused] = useState(false);
+  const batchLocks = useRef(new Set<string>());
+  const batchPending = batchLocks.current.has(ownerKey);
   const mounted = useRef(false);
   const sessionGeneration = useRef(0);
-  const pendingReads = useRef(new Set<string>());
+  const visibleUnreadCount =
+    unreadCount + notifications.filter((row) => row.read && reads.get(row.id)?.unconfirmed).length;
+  const update = useCallback((owner: string) => {
+    if (mounted.current && currentOwner.current === owner) refresh((value) => value + 1);
+  }, []);
 
   useEffect(() => {
-    setActionError(null);
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+    };
+  }, []);
+  useEffect(() => {
     setBlockedNotice(null);
-    setRetryReadId(null);
-    setUnconfirmedReads(new Set());
-  }, [uid, schoolId, auth.profile?.role]);
-
+  }, [ownerKey]);
   useFocusEffect(
     useCallback(() => {
-      mounted.current = true;
+      setFocused(true);
       sessionGeneration.current += 1;
       return () => {
-        mounted.current = false;
+        if (currentOwner.current === ownerKey) setFocused(false);
         sessionGeneration.current += 1;
       };
-    }, [uid, schoolId, auth.profile?.role]),
+    }, [ownerKey]),
   );
 
-  const openNotification = useCallback(
-    async (id: string) => {
-      const row = notifications.find((item) => item.id === id);
-      if (!row) return;
-      const openUid = uid;
-      const openSchool = schoolId;
-      const openRole = auth.profile?.role;
-      const openGen = sessionGeneration.current;
-      const requestKey = `${openGen}:${id}`;
-      if (pendingReads.current.has(requestKey)) return;
-      const stillHere = () =>
-        mounted.current &&
-        sessionGeneration.current === openGen &&
-        (auth.user?.uid ?? null) === openUid &&
-        (auth.profile?.schoolId ?? null) === openSchool;
+  const syncRead = async (id: string, explicit: boolean) => {
+    if (reads.get(id)?.pending || batchLocks.current.has(ownerKey)) return undefined;
+    const row = notifications.find((item) => item.id === id);
+    if (!row) return undefined;
+    const result: ReadResult = {
+      pending: true,
+      unconfirmed: !row.read || !!reads.get(id)?.unconfirmed,
+    };
+    reads.set(id, result);
+    update(ownerKey);
+    const marked = await markAsRead(id).catch(() => false);
+    result.pending = false;
+    result.unconfirmed = !marked;
+    result.error = marked
+      ? undefined
+      : explicit
+        ? '標為已讀失敗，請檢查連線後再試。說明與未讀狀態已保留。'
+        : '已讀還沒同步，這則先保留未讀。可以再試一次。';
+    update(ownerKey);
+    return marked;
+  };
 
-      setActionError(null);
-      const destination = resolveNotificationRow(row, {
-        schoolId: openSchool,
-        role: openRole,
-      });
-      if (destination.ok === false) {
-        if (!stillHere()) return;
-        setBlockedNotice({ id, reason: destination.reason });
-        return;
-      }
-      if (!stillHere()) return;
-      setBlockedNotice(null);
+  const openNotification = async (id: string) => {
+    if (reads.get(id)?.pending || batchLocks.current.has(ownerKey)) return;
+    const row = notifications.find((item) => item.id === id);
+    if (!row) return;
+    const generation = sessionGeneration.current;
+    const stillHere = () =>
+      mounted.current &&
+      currentOwner.current === ownerKey &&
+      sessionGeneration.current === generation;
+    const destination = resolveNotificationRow(row, { schoolId, role: auth.profile?.role });
+    if (destination.ok === false) {
+      setBlockedNotice({ id, reason: destination.reason });
+      return;
+    }
+    setBlockedNotice(null);
+    const marked = await syncRead(id, false);
+    if (marked === undefined || !stillHere()) return;
+    let opened = false;
+    try {
+      opened = applyNotificationDestination(destination, { navigation, role: auth.profile?.role });
+    } catch {
+      opened = false;
+    }
+    if (!opened && stillHere()) {
+      reads.get(id)!.error = marked
+        ? '內容暫時打不開，請稍後再試。已讀已同步。'
+        : '內容暫時打不開，已讀也還沒同步。這則先保留未讀，可以再試一次。';
+      update(ownerKey);
+    }
+  };
 
-      setRetryReadId(null);
-      if (!notifications.find((item) => item.id === id)?.read) {
-        setUnconfirmedReads((previous) => new Set(previous).add(id));
-      }
-      pendingReads.current.add(requestKey);
-      const marked = await markAsRead(id).catch(() => false);
-      pendingReads.current.delete(requestKey);
-      if (!stillHere()) return;
-      if (marked) {
-        setUnconfirmedReads((previous) => {
-          const next = new Set(previous);
-          next.delete(id);
-          return next;
-        });
-      }
-      if (!marked) {
-        setRetryReadId(id);
-        setActionError('已讀還沒同步，這則先保留未讀。可以再試一次。');
-      }
+  const markOneExplicit = async (id: string) => {
+    const marked = await syncRead(id, true);
+    if (marked && mounted.current && currentOwner.current === ownerKey) {
+      setBlockedNotice((previous) => (previous?.id === id ? null : previous));
+    }
+  };
 
-      let opened = false;
-      try {
-        opened = applyNotificationDestination(destination, {
-          navigation,
-          role: openRole,
-        });
-      } catch {
-        opened = false;
-      }
-      if (!stillHere()) return;
-      if (!opened) {
-        setActionError(
-          marked
-            ? '內容暫時打不開，請稍後再試。已讀已同步。'
-            : '內容暫時打不開，已讀也還沒同步。這則先保留未讀，可以再試一次。',
-        );
-      }
-    },
-    [
-      auth.profile?.role,
-      auth.profile?.schoolId,
-      auth.user?.uid,
-      markAsRead,
-      navigation,
-      notifications,
-      schoolId,
-      uid,
-    ],
-  );
-
-  const markOneExplicit = useCallback(
-    async (id: string) => {
-      const openUid = uid;
-      const openSchool = schoolId;
-      const openGen = sessionGeneration.current;
-      const requestKey = `${openGen}:${id}`;
-      if (pendingReads.current.has(requestKey)) return;
-      const stillHere = () =>
-        mounted.current &&
-        sessionGeneration.current === openGen &&
-        (auth.user?.uid ?? null) === openUid &&
-        (auth.profile?.schoolId ?? null) === openSchool;
-      const previousBlocked = blockedNotice;
-
-      setActionError(null);
-      if (!notifications.find((item) => item.id === id)?.read) {
-        setUnconfirmedReads((previous) => new Set(previous).add(id));
-      }
-      pendingReads.current.add(requestKey);
-      const marked = await markAsRead(id).catch(() => false);
-      pendingReads.current.delete(requestKey);
-      if (!stillHere()) return;
-      if (marked) {
-        setUnconfirmedReads((previous) => {
-          const next = new Set(previous);
-          next.delete(id);
-          return next;
-        });
-      }
-      if (!marked) {
-        // 保留說明與未讀；不關閉 blockedNotice。
-        if (previousBlocked) setBlockedNotice(previousBlocked);
-        setActionError('標為已讀失敗，請檢查連線後再試。說明與未讀狀態已保留。');
-        return;
-      }
-      setRetryReadId(null);
-      if (blockedNotice?.id === id) setBlockedNotice(null);
-    },
-    [
-      auth.profile?.schoolId,
-      auth.user?.uid,
-      blockedNotice,
-      markAsRead,
-      notifications,
-      schoolId,
-      uid,
-    ],
-  );
+  const markAllExplicit = async () => {
+    if (batchLocks.current.has(ownerKey) || [...reads.values()].some((result) => result.pending))
+      return;
+    const ids = notifications.filter((row) => !row.read).map((row) => row.id);
+    batchLocks.current.add(ownerKey);
+    const results = ids.map((id) => {
+      const result: ReadResult = { pending: true, unconfirmed: true };
+      reads.set(id, result);
+      return [id, result] as const;
+    });
+    update(ownerKey);
+    const marked = await markAllAsRead().catch(() => false);
+    for (const [, result] of results) {
+      result.pending = false;
+      result.unconfirmed = !marked;
+      result.error = marked ? undefined : '全部已讀同步失敗，請再試一次。';
+    }
+    batchLocks.current.delete(ownerKey);
+    update(ownerKey);
+  };
 
   return (
     <AIDetailScreen
@@ -208,7 +173,8 @@ export default function NotificationsAiFirstScreen() {
             label="全部已讀"
             variant="ghost"
             size="sm"
-            onPress={() => void markAllAsRead()}
+            disabled={batchPending || [...reads.values()].some((result) => result.pending)}
+            onPress={() => void markAllExplicit()}
           />
         ) : undefined
       }
@@ -228,18 +194,6 @@ export default function NotificationsAiFirstScreen() {
         <AIEmptyState title="目前沒有通知" subtitle="有新的作業、成績或系統訊息時會顯示在這裡。" />
       ) : (
         <AISection title="全部" subtitle={`${notifications.length} 則已載入`}>
-          {actionError ? (
-            <View accessibilityRole="alert" style={{ paddingHorizontal: 16, paddingBottom: 8 }}>
-              <Text style={{ color: aiTokens.text, lineHeight: 22 }}>{actionError}</Text>
-              {retryReadId ? (
-                <AIButton
-                  label="重試已讀同步"
-                  size="sm"
-                  onPress={() => void markOneExplicit(retryReadId)}
-                />
-              ) : null}
-            </View>
-          ) : null}
           {blockedNotice ? (
             <View
               accessibilityRole="alert"
@@ -254,6 +208,7 @@ export default function NotificationsAiFirstScreen() {
               <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
                 <AIButton
                   label="標成已讀"
+                  disabled={!!reads.get(blockedNotice.id)?.pending || batchPending}
                   size="sm"
                   onPress={() => void markOneExplicit(blockedNotice.id)}
                 />
@@ -268,14 +223,40 @@ export default function NotificationsAiFirstScreen() {
           ) : null}
           {notifications.map((row) => {
             const when = createdLabel(row.createdAt);
+            const result = reads.get(row.id);
+            const pending = !!result?.pending;
             return (
-              <AIRow
+              <View
                 key={row.id}
-                title={row.title || '通知'}
-                subtitle={[row.body, when].filter(Boolean).join(' · ')}
-                tag={row.read && !unconfirmedReads.has(row.id) ? undefined : '未讀'}
-                onPress={() => void openNotification(row.id)}
-              />
+                accessibilityState={{ busy: pending, disabled: pending || batchPending }}
+              >
+                <AIRow
+                  title={row.title || '通知'}
+                  subtitle={[row.body, when].filter(Boolean).join(' · ')}
+                  tag={row.read && !result?.unconfirmed ? undefined : '未讀'}
+                  disabled={pending || batchPending}
+                  onPress={() => void openNotification(row.id)}
+                />
+                {pending ? (
+                  <ActivityIndicator
+                    accessibilityLabel={`正在同步已讀：${row.title || row.id}`}
+                    accessibilityState={{ busy: true, disabled: true }}
+                    color={aiTokens.ai}
+                  />
+                ) : null}
+                {focused && result?.error ? (
+                  <View accessibilityRole="alert" style={{ padding: 16, gap: 8 }}>
+                    <Text style={{ color: aiTokens.text }}>{result.error}</Text>
+                    {result.unconfirmed ? (
+                      <AIButton
+                        label={`重試已讀同步：${row.title || row.id}`}
+                        disabled={pending || batchPending}
+                        onPress={() => void markOneExplicit(row.id)}
+                      />
+                    ) : null}
+                  </View>
+                ) : null}
+              </View>
             );
           })}
           {hasMore ? (
