@@ -4,6 +4,7 @@ import * as Crypto from 'expo-crypto';
 import QRCode from 'react-native-qrcode-svg';
 import type {
   NuniFoodCancelInput,
+  NuniFoodCustomerOrderDetail,
   NuniFoodCreateOrderInput,
   NuniFoodMenuItem,
   NuniFoodOrderCommandResult,
@@ -32,6 +33,8 @@ import {
 } from './NuniFoodUi';
 import { foodPageIntro } from '@campus/shared/src/foodPageCopy';
 import { isMobileOnlineOrderingEnabled } from '../../utils/onlineOrdering';
+
+import { foodCustomerNextStep } from './foodOrderGuidance';
 
 const page = { padding: 20, paddingBottom: 48, gap: 16 };
 const key = () => `food-${Crypto.randomUUID()}`;
@@ -883,9 +886,18 @@ function FoodOrder({
     const timer = setInterval(() => setNow(Date.now()), 1000);
     return () => clearInterval(timer);
   }, []);
-  const order = resource.data;
+  const [lastOrder, setLastOrder] = useState<NuniFoodCustomerOrderDetail | null>(null);
+  useEffect(() => {
+    if (resource.errorKind === 'unavailable') {
+      setLastOrder(null);
+      setShowOrderNumber(false);
+    } else if (resource.data) setLastOrder(resource.data);
+  }, [resource.data, resource.errorKind]);
+  const order = resource.errorKind === 'unavailable' ? null : (resource.data ?? lastOrder);
+  const current = !!resource.data && !resource.error && !resource.loading;
   const token = order?.pickup.credential;
   const canShowToken =
+    current &&
     order?.state === 'ready' &&
     order.allowedActions.includes('show-pickup-credential') &&
     order.pickup.allowedActions.includes('present-one-time-token') &&
@@ -895,7 +907,15 @@ function FoodOrder({
     <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={page}>
       <FoodButton onPress={onBack}>返回訂單紀錄</FoodButton>
       <FoodText title>訂單進度</FoodText>
-      <FoodReadState resource={resource} />
+      {resource.loading ? <FoodText status>正在更新訂單…</FoodText> : null}
+      {resource.error ? (
+        <FoodText
+          alert
+        >{`${resource.error} 這次沒能更新狀態。${order ? '畫面保留上次讀到的資料。' : ''}請再試一次。`}</FoodText>
+      ) : null}
+      <FoodButton disabled={resource.loading} onPress={() => void resource.load()}>
+        更新狀態
+      </FoodButton>
       {notice ? <FoodText>{notice}</FoodText> : null}
       {mutation.error ? <FoodText alert>{mutation.error}</FoodText> : null}
       <FoodStorageRecovery mutation={mutation} />
@@ -917,6 +937,17 @@ function FoodOrder({
         <>
           <FoodText title>{order.locationName}</FoodText>
           <FoodText>{orderState[order.state]}</FoodText>
+          <FoodText>{`現在該做什麼：${
+            !current
+              ? '請先更新訂單，再確認付款或取餐'
+              : foodCustomerNextStep({
+                  ...order,
+                  payment: order.paymentSession,
+                  now,
+                })
+          }`}</FoodText>
+          <FoodText>{`最後更新時間 ${foodTime(order.updatedAt)}（訂單資料時間）`}</FoodText>
+          {!current ? <FoodText>目前顯示上次讀到的狀態，更新後再確認付款或取餐。</FoodText> : null}
           <FoodButton
             expanded={showOrderNumber}
             onPress={() => setShowOrderNumber((visible) => !visible)}
@@ -928,9 +959,6 @@ function FoodOrder({
           <FoodText>{`預計取餐 ${foodTime(order.requestedPickupAt)}`}</FoodText>
           <OrderLines lines={order.lines} />
           <FoodText>{`應付總額 ${money(order.total)}`}</FoodText>
-          {order.state === 'payment-pending' ? (
-            <FoodText>請到店付款，由店家確認實際收款。付款完成後再重新讀取進度。</FoodText>
-          ) : null}
           {order.refund ? (
             <FoodText>
               {order.refund.state === 'completed' ? '退款已完成。' : '退款仍在處理，尚未完成。'}
@@ -954,7 +982,7 @@ function FoodOrder({
           ) : order.state === 'ready' ? (
             <FoodText>請重新讀取有效取餐憑證。取餐號碼不能代替憑證核銷。</FoodText>
           ) : null}
-          {order.allowedActions.includes('cancel') ? (
+          {current && order.allowedActions.includes('cancel') ? (
             <FoodCard>
               <FoodText title>取消訂單</FoodText>
               {(
