@@ -5,7 +5,7 @@ import { SiteShell } from '@/components/SiteShell';
 import { useAuth } from '@/components/AuthGuard';
 import { useBrowsingSchoolPageContext } from '@/lib/useBrowsingSchoolPageContext';
 import { SchoolScopePlaceholder } from '@/components/SchoolScopePlaceholder';
-import { callClub, clubEnabled, type ClubView } from './clubService';
+import { callClub, loadClubView, clubEnabled, type ClubView } from './clubService';
 import styles from './groups.module.css';
 
 export function ClubBoard({
@@ -33,7 +33,7 @@ export function ClubBoard({
   useEffect(() => {
     let active = true;
     current.current = true;
-    callClub<ClubView>(uid, schoolId, groupId).then(
+    loadClubView(uid, schoolId, groupId).then(
       (data) => {
         if (active) setView(data);
       },
@@ -53,7 +53,10 @@ export function ClubBoard({
     setError('');
     setNotice('');
     try {
-      const result = await callClub<ClubView & { csv?: string }>(uid, schoolId, groupId, input);
+      const result =
+        input.action === 'read'
+          ? ((await loadClubView(uid, schoolId, groupId)) as ClubView & { csv?: string })
+          : await callClub<ClubView & { csv?: string }>(uid, schoolId, groupId, input);
       if (!current.current) return;
       if (exported && result.csv) {
         const url = URL.createObjectURL(new Blob([result.csv], { type: 'text/csv;charset=utf-8' }));
@@ -69,7 +72,7 @@ export function ClubBoard({
           : await callClub<ClubView>(uid, schoolId, groupId);
       if (current.current) {
         setView(data);
-        setNotice('已由伺服器確認');
+        setNotice(data.rosterOnly ? '已重新讀取社員名單' : '已由伺服器確認');
       }
     } catch (reason) {
       if (current.current) {
@@ -107,7 +110,7 @@ export function ClubBoard({
         <>
           <p>
             身分：{view.role === 'owner' ? '會長' : officer ? '幹部' : '社員'} · 社員{' '}
-            {view.members.length} 位 · 活動 {view.events.length} 場
+            {view.members.length} 位{!view.rosterOnly && <> · 活動 {view.events.length} 場</>}
           </p>
           {officer && (
             <button
@@ -209,54 +212,62 @@ export function ClubBoard({
               </button>
             </form>
           )}
-          <h2>活動與報名</h2>
-          <p>活動開始前可報名或取消；活動期間由幹部核對本人後簽到。人數僅計有效社員。</p>
-          {view.events.length === 0 && <p>尚無活動</p>}
-          {view.events.map((e) => (
-            <article className={styles.group} key={e.id}>
-              <h3>{e.title}</h3>
-              <p>
-                {new Date(e.startsAt).toLocaleString('zh-TW')} —{' '}
-                {new Date(e.endsAt).toLocaleString('zh-TW')} · {e.location || '未指定地點'}
-              </p>
-              <p>
-                報名 {e.registered} 人 · 簽到 {e.checkedIn} 人 · 簽到率{' '}
-                {e.registered ? `${Math.round((e.checkedIn / e.registered) * 100)}%` : '尚無報名'}
-              </p>
-              <p>我的狀態：{e.myCheckIn ? '已簽到' : e.mine ? '已報名' : '未報名'}</p>
-              <button
-                className="btn"
-                disabled={busy || clock >= e.startsAt}
-                onClick={() =>
-                  void perform({ action: e.mine ? 'cancel' : 'register', eventId: e.id })
-                }
-              >
-                {e.mine ? '取消報名' : '報名'}
-              </button>
-              {officer && (
-                <ul>
-                  {e.registrations?.map((r) => (
-                    <li key={r.uid}>
-                      {view.members.find((m) => m.id === r.uid)?.name} ·{' '}
-                      {r.checkedIn ? (
-                        '已簽到'
-                      ) : (
-                        <button
-                          className="btn"
-                          disabled={busy || clock < e.startsAt || clock > e.endsAt}
-                          onClick={() =>
-                            void perform({ action: 'checkIn', eventId: e.id, targetUid: r.uid })
-                          }
-                        >
-                          確認簽到
-                        </button>
-                      )}
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </article>
-          ))}
+          {view.rosterOnly ? (
+            <p>活動後台暫時無法使用，社員名單仍可查閱。</p>
+          ) : (
+            <>
+              <h2>活動與報名</h2>
+              <p>活動開始前可報名或取消；活動期間由幹部核對本人後簽到。人數僅計有效社員。</p>
+              {view.events.length === 0 && <p>尚無活動</p>}
+              {view.events.map((e) => (
+                <article className={styles.group} key={e.id}>
+                  <h3>{e.title}</h3>
+                  <p>
+                    {new Date(e.startsAt).toLocaleString('zh-TW')} —{' '}
+                    {new Date(e.endsAt).toLocaleString('zh-TW')} · {e.location || '未指定地點'}
+                  </p>
+                  <p>
+                    報名 {e.registered} 人 · 簽到 {e.checkedIn} 人 · 簽到率{' '}
+                    {e.registered
+                      ? `${Math.round((e.checkedIn / e.registered) * 100)}%`
+                      : '尚無報名'}
+                  </p>
+                  <p>我的狀態：{e.myCheckIn ? '已簽到' : e.mine ? '已報名' : '未報名'}</p>
+                  <button
+                    className="btn"
+                    disabled={busy || clock >= e.startsAt}
+                    onClick={() =>
+                      void perform({ action: e.mine ? 'cancel' : 'register', eventId: e.id })
+                    }
+                  >
+                    {e.mine ? '取消報名' : '報名'}
+                  </button>
+                  {officer && (
+                    <ul>
+                      {e.registrations?.map((r) => (
+                        <li key={r.uid}>
+                          {view.members.find((m) => m.id === r.uid)?.name} ·{' '}
+                          {r.checkedIn ? (
+                            '已簽到'
+                          ) : (
+                            <button
+                              className="btn"
+                              disabled={busy || clock < e.startsAt || clock > e.endsAt}
+                              onClick={() =>
+                                void perform({ action: 'checkIn', eventId: e.id, targetUid: r.uid })
+                              }
+                            >
+                              確認簽到
+                            </button>
+                          )}
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </article>
+              ))}
+            </>
+          )}
         </>
       )}
     </div>

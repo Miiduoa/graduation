@@ -39,20 +39,28 @@ before(async () => {
 after(async () => {
   await env?.cleanup();
 });
-test('社員無法直接取得其他社員的私人欄位，既有管理角色保留讀權', async () => {
-  for (const uid of ['president', 'officer', 'moderator', 'instructor'])
+test('維持既有社員讀權，舊版及 callable 失敗後的直接查詢可用', async () => {
+  for (const uid of ['president', 'officer', 'moderator', 'instructor', 'student'])
     await assertSucceeds(
       env.authenticatedContext(uid).firestore().doc('groups/club/members/student').get(),
     );
-  for (const uid of ['student', 'outsider'])
+  for (const uid of ['outsider'])
     await assertFails(
       env.authenticatedContext(uid).firestore().doc('groups/club/members/officer').get(),
     );
   await assertSucceeds(
     env.authenticatedContext('student').firestore().doc('groups/club/members/student').get(),
   );
+  await assertSucceeds(
+    env
+      .authenticatedContext('student')
+      .firestore()
+      .collection('groups/club/members')
+      .where('status', '==', 'active')
+      .get(),
+  );
   await assertFails(
-    env.authenticatedContext('student').firestore().collection('groups/club/members').get(),
+    env.unauthenticatedContext().firestore().collection('groups/club/members').get(),
   );
 });
 test('既有教師與管理員保留管理權，但不能直接調整角色', async () => {
@@ -149,15 +157,13 @@ test('所有既有社團在試辦關閉時仍可取得安全名單，拒絕跨�
     for (const groupId of ['club', 'existing-club']) {
       if (groupId !== 'club') {
         await db.doc(`groups/${groupId}`).set({ type: 'club', schoolId: 'school' });
-        await db
-          .doc(`groups/${groupId}/members/student`)
-          .set({
-            status: 'active',
-            role: 'member',
-            displayName: '社員姓名',
-            phone: 'secret',
-            studentId: 'secret',
-          });
+        await db.doc(`groups/${groupId}/members/student`).set({
+          status: 'active',
+          role: 'member',
+          displayName: '社員姓名',
+          phone: 'secret',
+          studentId: 'secret',
+        });
       }
       const view = await run({ auth: { uid: 'student' }, data: { groupId, schoolId: 'school' } });
       assert.ok(view.members.length > 0);

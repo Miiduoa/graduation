@@ -1,8 +1,17 @@
-import { getAuth, getCloudFunctionUrl } from '@/lib/firebase';
+import {
+  collection,
+  doc,
+  getDocFromServer,
+  getDocsFromServer,
+  query,
+  where,
+} from 'firebase/firestore';
+import { getAuth, getCloudFunctionUrl, getDb } from '@/lib/firebase';
 
 export const clubEnabled = () => process.env.NEXT_PUBLIC_CLUB_ADMIN_ENABLED === 'true';
 export type ClubView = {
   success: true;
+  rosterOnly?: boolean;
   role: string;
   members: { id: string; name: string; role: string; studentId?: string; phone?: string }[];
   events: {
@@ -43,4 +52,48 @@ export async function callClub<T>(
   const result = payload.result ?? payload.data;
   if (!result || result.success !== true) throw new Error('伺服器尚未確認，請重新整理');
   return result as T;
+}
+
+// 後台讀取失敗時僅恢復名單；寫入與活動資料仍須由後端確認。
+export async function loadClubView(
+  uid: string,
+  schoolId: string,
+  groupId: string,
+): Promise<ClubView> {
+  const user = getAuth()?.currentUser;
+  if (!user || user.uid !== uid) throw new Error('請重新登入');
+  try {
+    return await callClub<ClubView>(uid, schoolId, groupId);
+  } catch {
+    if (getAuth()?.currentUser !== user) throw new Error('帳號已變更');
+    const db = getDb();
+    const [group, mine] = await Promise.all([
+      getDocFromServer(doc(db, 'groups', groupId)),
+      getDocFromServer(doc(db, 'groups', groupId, 'members', uid)),
+    ]);
+    if (
+      group.data()?.type !== 'club' ||
+      group.data()?.schoolId !== schoolId ||
+      mine.data()?.status !== 'active'
+    )
+      throw new Error('社團身分失效');
+    const snapshot = await getDocsFromServer(
+      query(collection(db, 'groups', groupId, 'members'), where('status', '==', 'active')),
+    );
+    const members = await Promise.all(
+      snapshot.docs.map(async (member, index) => {
+        const data = member.data();
+        const profile = await getDocFromServer(
+          doc(db, 'schools', schoolId, 'directory', member.id),
+        ).catch(() => null);
+        return {
+          id: `public-${index}`,
+          name: profile?.data()?.displayName || data.displayName || '未提供姓名',
+          role: typeof data.role === 'string' ? data.role : 'member',
+        };
+      }),
+    );
+    if (getAuth()?.currentUser !== user) throw new Error('帳號已變更');
+    return { success: true, rosterOnly: true, role: 'member', members, events: [] };
+  }
 }

@@ -139,8 +139,12 @@ export function GroupMembersScreen(props: any) {
     if (group.type === 'club') {
       const mine = await getDoc(doc(db, 'groups', groupId, 'members', auth.user.uid));
       if (!['owner', 'admin', 'instructor', 'moderator'].includes(mine.data()?.role)) {
-        const roster = await loadClubRoster(auth.user.uid, school.id, groupId);
-        return roster.map((m, i) => ({ uid: `public-${i}`, role: m.role, publicName: m.name }));
+        try {
+          const roster = await loadClubRoster(auth.user.uid, school.id, groupId);
+          return roster.map((m, i) => ({ uid: `public-${i}`, role: m.role, publicName: m.name }));
+        } catch {
+          // Spark 未部署 callable 時沿用既有社員查詢，由規則核對讀權。
+        }
       }
     }
     const ref = collection(db, 'groups', groupId, 'members');

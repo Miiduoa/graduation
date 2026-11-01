@@ -2,7 +2,11 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, expect, test, vi } from 'vitest';
 import { ClubBoard } from './ClubAdmin';
 import { callClub } from './clubService';
-vi.mock('./clubService', () => ({ callClub: vi.fn(), clubEnabled: () => true }));
+vi.mock('./clubService', () => ({
+  callClub: vi.fn(),
+  loadClubView: (...args: unknown[]) => callClub(...(args as Parameters<typeof callClub>)),
+  clubEnabled: () => true,
+}));
 vi.mock('@/components/SiteShell', () => ({
   SiteShell: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
 }));
@@ -62,4 +66,13 @@ test('撤權後清除舊名單並顯示錯誤', async () => {
   fireEvent.click(screen.getByRole('button', { name: '重新整理' }));
   await screen.findByRole('alert');
   expect(screen.queryByText('測試社員')).toBeNull();
+});
+
+test('後端不可用時保留名單，活動不可冒充空資料或提供操作', async () => {
+  vi.mocked(callClub).mockResolvedValue({ ...view, rosterOnly: true });
+  render(<ClubBoard uid="one" schoolId="school" groupId="club" />);
+  await screen.findByText('測試社員');
+  expect(screen.getByText('活動後台暫時無法使用，社員名單仍可查閱。')).toBeTruthy();
+  expect(screen.queryByText('尚無活動')).toBeNull();
+  expect(screen.queryByText('建立活動')).toBeNull();
 });
