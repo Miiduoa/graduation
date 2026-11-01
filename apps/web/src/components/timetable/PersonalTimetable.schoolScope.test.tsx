@@ -155,7 +155,9 @@ it('does not show a manual and imported copy of the same class as conflicting co
   render(<PersonalTimetable />);
   await screen.findAllByText('同一門課');
   fireEvent.click(screen.getByRole('button', { name: '一週' }));
-  expect(screen.getAllByText('同一門課')).toHaveLength(1);
+  // The date-specific schedule correctly repeats a title already in the weekly baseline.
+  // Its <strong> is not a second weekly course; count only the weekly <h4> cards.
+  expect(screen.getAllByRole('heading', { name: '同一門課', level: 4 })).toHaveLength(1);
   expect(screen.queryByRole('region', { name: '衝堂' })).toBeNull();
 });
 

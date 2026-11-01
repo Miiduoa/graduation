@@ -1,6 +1,6 @@
 import { classMeetingKey } from '@campus/shared';
 import React from 'react';
-import { fireEvent, render, waitFor } from '@testing-library/react-native';
+import { fireEvent, render, waitFor, within } from '@testing-library/react-native';
 import type { PersonalImportRecord } from '@campus/shared';
 import PersonalTimetableScreen from '../screens/PersonalTimetableScreen';
 import { loadPersonalTimetable, loadPersonalTimetableDraft, savePersonalTimetable } from '../services/personalTimetable';
@@ -79,7 +79,7 @@ beforeEach(() => {
 
 test('the full timetable and editor use NCKU period labels and times, without inheriting a guest timetable', async () => {
   const view = render(<PersonalTimetableScreen />);
-  await view.findByText('成大課程');
+  await view.findAllByText('成大課程');
   expect(view.getByText('星期一 · 08:00–09:50')).toBeTruthy();
   expect(view.queryByText(/09:10–11:00/)).toBeNull();
   expect(loadPersonalTimetable).toHaveBeenCalledWith(null, 'ncku', 'nuni:account-a');
@@ -105,7 +105,7 @@ test('the term selected on Today remains selected in the complete timetable', as
       batches: [],
     });
   const view = render(<PersonalTimetableScreen />);
-  await view.findByText('前學期課程');
+  await view.findAllByText('前學期課程');
   expect(view.queryByText('成大課程')).toBeNull();
 });
 
@@ -130,7 +130,7 @@ test('unknown school clock times remain readable without borrowing another schoo
       batches: [],
     });
   const view = render(<PersonalTimetableScreen />);
-  await view.findByText('週末課程');
+  await view.findAllByText('週末課程');
   expect(view.getByText(/週六 · 09:00–10:00/)).toBeTruthy();
   expect(view.getByRole('button', { name: '格子' })).toBeDisabled();
   expect(view.getByRole('button', { name: '今天空堂' })).toBeDisabled();
@@ -152,7 +152,7 @@ test('a manual course without a semester opens the same manual timetable from To
     meta: { year: '', semester: '', school: '', className: '', credits: 0, title: '' },
   });
   const view = render(<PersonalTimetableScreen />);
-  await view.findByText('手排課程');
+  await view.findAllByText('手排課程');
   expect(view.queryByText('成大課程')).toBeNull();
   expect(view.getByText('星期一 · 08:00–09:50')).toBeTruthy();
 });
@@ -164,7 +164,7 @@ test('a failed import read cannot be treated as free time and can be retried in 
   expect(view.getByRole('button', { name: '今天空堂' })).toBeDisabled();
   expect(view.getByRole('button', { name: '排讀書時間' })).toBeDisabled();
   fireEvent.press(view.getByRole('button', { name: '重試匯入課表' }));
-  await view.findByText('成大課程');
+  await view.findAllByText('成大課程');
   expect(view.getByRole('button', { name: '今天空堂' })).not.toBeDisabled();
   expect(view.queryByText('匯入課表暫時讀不到，目前不能確認空堂，請重新讀取。')).toBeNull();
 });
@@ -176,8 +176,12 @@ test('a matching manual and imported class appears once and does not disable fre
     meta: { year: '115', semester: '1', school: '', className: '', credits: 0, title: '' },
   });
   const view = render(<PersonalTimetableScreen />);
-  await view.findByText('成大課程');
-  expect(view.getAllByText('成大課程')).toHaveLength(1);
+  await view.findAllByText('成大課程');
+  // The date-specific exception editor also names this class; count the weekly card only.
+  // If manual and imported records both render in the weekly baseline, the time lookup becomes ambiguous.
+  const weeklyCard = view.getByText('星期一 · 08:00–09:50').parent;
+  expect(weeklyCard).not.toBeNull();
+  expect(within(weeklyCard!).getAllByText('成大課程')).toHaveLength(1);
   expect(view.getByRole('button', { name: '今天空堂' })).not.toBeDisabled();
   expect(view.queryByText(/部分課程無法對應節次/)).toBeNull();
 });
@@ -228,11 +232,11 @@ test('cloud reload and draft preview are explicit and sharing does not edit exce
   jest.mocked(loadPersonalTimetableDraft).mockResolvedValue({ ...base, courses: [{ id: 'offline', name: '離線新增課', teacher: '', room: '', day: 1, start: 1, end: 2, color: 'blue' }], meta: { ...base.meta, title: '離線標題' }, shareWithFriends: true, pendingBase: true, pendingExceptions: false, classExceptions: [], classExceptionsRevision: 1 });
   jest.mocked(savePersonalTimetable).mockResolvedValue({ stored: 'cloud', timetable: { ...base, classExceptionsRevision: 2 } });
   const view = render(<PersonalTimetableScreen />);
-  await view.findByText('成大課程');
+  await view.findAllByText('成大課程');
   fireEvent.press(view.getByText('檢視這台裝置未同步草稿'));
   await view.findByText('目前預覽未同步課表；請核對每週基準與單次安排，分別儲存。重新讀取可回到雲端版本。');
   expect(loadPersonalTimetableDraft).toHaveBeenCalledWith('synthetic', 'ncku');
-  await view.findByText('離線新增課');
+  await view.findAllByText('離線新增課');
   fireEvent.press(view.getByText('儲存每週基準課表'));
   await waitFor(() => expect(savePersonalTimetable).toHaveBeenCalledWith('synthetic', expect.objectContaining({ courses: [expect.objectContaining({ id: 'offline' })], meta: expect.objectContaining({ title: '離線標題' }), shareWithFriends: true, classExceptionsRevision: 2 }), undefined, false));
   fireEvent.press(view.getByText('重新讀取雲端課表'));
