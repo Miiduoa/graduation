@@ -435,3 +435,66 @@ test('interleaved row completion keeps the other row failure and retry', async (
   expect(view.getByText('重試已讀同步：通知B')).toBeTruthy();
   expect(view.getByText(/已讀還沒同步/)).toBeTruthy();
 });
+
+for (const operation of ['single', 'batch'] as const) {
+  test.each([true, false])(
+    `${operation} completion %s from a previous login preserves confirmed reads after returning`,
+    async (result) => {
+      setupRows();
+      const pending = deferred<boolean>();
+      const write = operation === 'single' ? mockNotifs.markAsRead : mockNotifs.markAllAsRead;
+      write.mockReturnValueOnce(pending.promise);
+      const view = render(<NotificationsAiFirstScreen />);
+      fireEvent.press(view.getByText(operation === 'single' ? '通知A' : '全部已讀'));
+      mockAuth.user = { uid: 'bob' };
+      view.rerender(<NotificationsAiFirstScreen />);
+      mockAuth.user = { uid: 'alice' };
+      mockNotifs.notifications = mockNotifs.notifications.map((row) => ({ ...row, read: true }));
+      mockNotifs.unreadCount = 0;
+      view.rerender(<NotificationsAiFirstScreen />);
+      expect(view.queryByText('未讀')).toBeNull();
+      expect(view.queryByLabelText('正在同步已讀：通知A')).toBeNull();
+      await act(async () => pending.resolve(result));
+      expect(view.queryByText('未讀')).toBeNull();
+      expect(view.queryByText(/則未讀/)).toBeNull();
+      expect(view.queryByText(/同步失敗|還沒同步|重試已讀同步/)).toBeNull();
+      expect(applyNotificationDestination).not.toHaveBeenCalled();
+    },
+  );
+
+  for (const nextOperation of ['single', 'batch'] as const) {
+    test.each([true, false])(
+      `${operation} old completion %s cannot block or release a new ${nextOperation} operation`,
+      async (result) => {
+        setupRows();
+        const oldPending = deferred<boolean>();
+        const newPending = deferred<boolean>();
+        const oldWrite = operation === 'single' ? mockNotifs.markAsRead : mockNotifs.markAllAsRead;
+        const newWrite =
+          nextOperation === 'single' ? mockNotifs.markAsRead : mockNotifs.markAllAsRead;
+        oldWrite.mockReturnValueOnce(oldPending.promise);
+        const view = render(<NotificationsAiFirstScreen />);
+        fireEvent.press(view.getByText(operation === 'single' ? '通知A' : '全部已讀'));
+        mockAuth.user = { uid: 'bob' };
+        view.rerender(<NotificationsAiFirstScreen />);
+        mockAuth.user = { uid: 'alice' };
+        view.rerender(<NotificationsAiFirstScreen />);
+        newWrite.mockReturnValueOnce(newPending.promise);
+        const callsBefore = newWrite.mock.calls.length;
+        fireEvent.press(view.getByText(nextOperation === 'single' ? '通知A' : '全部已讀'));
+        expect(newWrite).toHaveBeenCalledTimes(callsBefore + 1);
+        await act(async () => oldPending.resolve(result));
+        expect(view.getByLabelText('正在同步已讀：通知A')).toBeTruthy();
+        fireEvent.press(view.getByText('通知A'));
+        fireEvent.press(view.getByText('全部已讀'));
+        expect(newWrite).toHaveBeenCalledTimes(callsBefore + 1);
+        expect(view.queryByText(/同步失敗|還沒同步|重試已讀同步/)).toBeNull();
+        expect(applyNotificationDestination).not.toHaveBeenCalled();
+        mockNotifs.notifications = mockNotifs.notifications.map((row) => ({ ...row, read: true }));
+        mockNotifs.unreadCount = 0;
+        await act(async () => newPending.resolve(true));
+        expect(view.queryByText('未讀')).toBeNull();
+      },
+    );
+  }
+}

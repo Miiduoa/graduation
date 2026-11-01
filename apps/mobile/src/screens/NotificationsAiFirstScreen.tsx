@@ -40,21 +40,32 @@ export default function NotificationsAiFirstScreen() {
   const [blockedNotice, setBlockedNotice] = useState<{ id: string; reason: string } | null>(null);
   type ReadResult = { pending: boolean; unconfirmed: boolean; error?: string };
   const ownerKey = JSON.stringify([uid, schoolId, auth.profile?.role]);
-  const owners = useRef(new Map<string, Map<string, ReadResult>>());
-  if (!owners.current.has(ownerKey)) owners.current.set(ownerKey, new Map());
-  const reads = owners.current.get(ownerKey)!;
-  const currentOwner = useRef(ownerKey);
-  currentOwner.current = ownerKey;
+  const currentSession = useRef({
+    ownerKey,
+    generation: 0,
+    reads: new Map<string, ReadResult>(),
+    batchPending: false,
+  });
+  if (currentSession.current.ownerKey !== ownerKey) {
+    currentSession.current = {
+      ownerKey,
+      generation: currentSession.current.generation + 1,
+      reads: new Map(),
+      batchPending: false,
+    };
+  }
+  const session = currentSession.current;
+  const { reads } = session;
   const [, refresh] = useState(0);
   const [focused, setFocused] = useState(false);
-  const batchLocks = useRef(new Set<string>());
-  const batchPending = batchLocks.current.has(ownerKey);
+  const batchPending = session.batchPending;
   const mounted = useRef(false);
-  const sessionGeneration = useRef(0);
+  const focusGeneration = useRef(0);
   const visibleUnreadCount =
     unreadCount + notifications.filter((row) => row.read && reads.get(row.id)?.unconfirmed).length;
-  const update = useCallback((owner: string) => {
-    if (mounted.current && currentOwner.current === owner) refresh((value) => value + 1);
+  const update = useCallback((generation: number) => {
+    if (mounted.current && currentSession.current.generation === generation)
+      refresh((value) => value + 1);
   }, []);
 
   useEffect(() => {
@@ -69,16 +80,16 @@ export default function NotificationsAiFirstScreen() {
   useFocusEffect(
     useCallback(() => {
       setFocused(true);
-      sessionGeneration.current += 1;
+      focusGeneration.current += 1;
       return () => {
-        if (currentOwner.current === ownerKey) setFocused(false);
-        sessionGeneration.current += 1;
+        if (currentSession.current === session) setFocused(false);
+        focusGeneration.current += 1;
       };
-    }, [ownerKey]),
+    }, [session]),
   );
 
   const syncRead = async (id: string, explicit: boolean) => {
-    if (reads.get(id)?.pending || batchLocks.current.has(ownerKey)) return undefined;
+    if (reads.get(id)?.pending || session.batchPending) return undefined;
     const row = notifications.find((item) => item.id === id);
     if (!row) return undefined;
     const result: ReadResult = {
@@ -86,8 +97,9 @@ export default function NotificationsAiFirstScreen() {
       unconfirmed: !row.read || !!reads.get(id)?.unconfirmed,
     };
     reads.set(id, result);
-    update(ownerKey);
+    update(session.generation);
     const marked = await markAsRead(id).catch(() => false);
+    if (currentSession.current !== session) return undefined;
     result.pending = false;
     result.unconfirmed = !marked;
     result.error = marked
@@ -95,19 +107,19 @@ export default function NotificationsAiFirstScreen() {
       : explicit
         ? '標為已讀失敗，請檢查連線後再試。說明與未讀狀態已保留。'
         : '已讀還沒同步，這則先保留未讀。可以再試一次。';
-    update(ownerKey);
+    update(session.generation);
     return marked;
   };
 
   const openNotification = async (id: string) => {
-    if (reads.get(id)?.pending || batchLocks.current.has(ownerKey)) return;
+    if (reads.get(id)?.pending || session.batchPending) return;
     const row = notifications.find((item) => item.id === id);
     if (!row) return;
-    const generation = sessionGeneration.current;
+    const generation = focusGeneration.current;
     const stillHere = () =>
       mounted.current &&
-      currentOwner.current === ownerKey &&
-      sessionGeneration.current === generation;
+      currentSession.current === session &&
+      focusGeneration.current === generation;
     const destination = resolveNotificationRow(row, { schoolId, role: auth.profile?.role });
     if (destination.ok === false) {
       setBlockedNotice({ id, reason: destination.reason });
@@ -126,36 +138,36 @@ export default function NotificationsAiFirstScreen() {
       reads.get(id)!.error = marked
         ? '內容暫時打不開，請稍後再試。已讀已同步。'
         : '內容暫時打不開，已讀也還沒同步。這則先保留未讀，可以再試一次。';
-      update(ownerKey);
+      update(session.generation);
     }
   };
 
   const markOneExplicit = async (id: string) => {
     const marked = await syncRead(id, true);
-    if (marked && mounted.current && currentOwner.current === ownerKey) {
+    if (marked && mounted.current && currentSession.current === session) {
       setBlockedNotice((previous) => (previous?.id === id ? null : previous));
     }
   };
 
   const markAllExplicit = async () => {
-    if (batchLocks.current.has(ownerKey) || [...reads.values()].some((result) => result.pending))
-      return;
+    if (session.batchPending || [...reads.values()].some((result) => result.pending)) return;
     const ids = notifications.filter((row) => !row.read).map((row) => row.id);
-    batchLocks.current.add(ownerKey);
+    session.batchPending = true;
     const results = ids.map((id) => {
       const result: ReadResult = { pending: true, unconfirmed: true };
       reads.set(id, result);
       return [id, result] as const;
     });
-    update(ownerKey);
+    update(session.generation);
     const marked = await markAllAsRead().catch(() => false);
+    if (currentSession.current !== session) return;
     for (const [, result] of results) {
       result.pending = false;
       result.unconfirmed = !marked;
       result.error = marked ? undefined : '全部已讀同步失敗，請再試一次。';
     }
-    batchLocks.current.delete(ownerKey);
-    update(ownerKey);
+    session.batchPending = false;
+    update(session.generation);
   };
 
   return (
