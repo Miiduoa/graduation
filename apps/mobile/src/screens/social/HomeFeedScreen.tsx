@@ -528,12 +528,13 @@ function HomeFeedContent() {
   };
 
   const clearDiscoveryFilters = () => {
+    // 只清分類篩選，保留關鍵字，讓使用者可在「全部」裡繼續搜同一詞。
     setFilter('all');
-    setSearch('');
   };
 
   const openCommunityTab = (tab: 'boards' | 'realtime') => {
-    nav?.setParams?.({ initialTab: tab });
+    // 與 openStoryGroup 一致用 navigate，避免同值 setParams 不重觸 CommunityScreen effect。
+    nav?.navigate?.('CampusSocialScreen' as never, { initialTab: tab } as never);
   };
 
   const runSearchRecovery = (action: MobileFeedRecoveryActionId) => {
@@ -549,7 +550,7 @@ function HomeFeedContent() {
       openCommunityTab('boards');
       return;
     }
-    if (action === 'open-topics') {
+    if (action === 'open-realtime') {
       openCommunityTab('realtime');
     }
   };
@@ -675,15 +676,6 @@ function HomeFeedContent() {
                   </Pressable>
                 )}
               </View>
-              {!discoveryUnavailable && (
-                <Text
-                  accessibilityRole="text"
-                  accessibilityLabel={searchScopeLabel}
-                  style={{ color: theme.colors.textSecondary, fontSize: 12, fontWeight: '600' }}
-                >
-                  {searchScopeLabel}
-                </Text>
-              )}
               {isOffline && !!search.trim() && !discoveryUnavailable && (
                 <Text
                   accessibilityRole="text"
@@ -693,12 +685,22 @@ function HomeFeedContent() {
                 </Text>
               )}
               <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
-                {!discoveryUnavailable && <Text style={{ color: theme.colors.textSecondary, fontSize: 12 }}>
+                {!discoveryUnavailable && <Text
+                  accessibilityRole="text"
+                  accessibilityLabel={
+                    !savedView && !followingView && !!search.trim()
+                      ? `${searchScopeLabel}，顯示 ${visiblePosts.length} 則`
+                      : undefined
+                  }
+                  style={{ color: theme.colors.textSecondary, fontSize: 12, flexShrink: 1, paddingRight: 8 }}
+                >
                   {savedView
                     ? `顯示 ${visiblePosts.length} 則收藏`
                     : followingView
                       ? `追蹤作者的貼文 ${visiblePosts.length} 則`
-                      : `已載入 ${posts.length} 則 · 顯示 ${visiblePosts.length} 則`}
+                      : search.trim()
+                        ? `${searchScopeLabel} · 顯示 ${visiblePosts.length} 則`
+                        : `已載入 ${posts.length} 則 · 顯示 ${visiblePosts.length} 則`}
                 </Text>}
                 <View style={{ flexDirection: 'row', gap: 6 }}>
                   {([
@@ -727,7 +729,7 @@ function HomeFeedContent() {
                   ))}
                 </View>
               </View>
-              {!discoveryUnavailable && <Text style={{ color: theme.colors.textSecondary, fontSize: 11, lineHeight: 16 }}>
+              {!discoveryUnavailable && !search.trim() && <Text style={{ color: theme.colors.textSecondary, fontSize: 11, lineHeight: 16 }}>
                 {savedView
                   ? '顯示本校最近最多 40 筆私人收藏，可跨裝置同步'
                   : followingView

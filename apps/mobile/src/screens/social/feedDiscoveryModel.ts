@@ -75,7 +75,7 @@ export type MobileFeedRecoveryActionId =
   | 'load-more'
   | 'clear-filters'
   | 'open-boards'
-  | 'open-topics';
+  | 'open-realtime';
 
 export type MobileFeedRecoveryAction = {
   id: MobileFeedRecoveryActionId;
@@ -109,7 +109,7 @@ export function describeMobileFeedSearchRecovery(input: {
   if (input.offline) {
     if (hasActiveFilter) actions.push({ id: 'clear-filters', label: '清除篩選' });
     actions.push({ id: 'open-boards', label: '前往看板' });
-    actions.push({ id: 'open-topics', label: '前往話題' });
+    actions.push({ id: 'open-realtime', label: '前往即時' });
     return {
       title: '離線中，找不到符合的貼文',
       subtitle:
@@ -126,13 +126,13 @@ export function describeMobileFeedSearchRecovery(input: {
     actions.push({ id: 'clear-filters', label: '清除篩選' });
   }
   actions.push({ id: 'open-boards', label: '前往看板' });
-  actions.push({ id: 'open-topics', label: '前往話題' });
+  actions.push({ id: 'open-realtime', label: '前往即時' });
 
   return {
     title: '找不到符合的貼文',
     subtitle: input.hasMore
       ? `搜尋範圍是已載入的 ${input.loadedCount} 篇貼文，還可以載入更多後繼續找。`
-      : `已在目前載入的 ${input.loadedCount} 篇貼文中找過，可清除篩選或改去看板／話題看看。`,
+      : `已在目前載入的 ${input.loadedCount} 篇貼文中找過，可清除篩選或改去看板／即時看看。`,
     keepSearch: true,
     actions,
   };

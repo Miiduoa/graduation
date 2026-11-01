@@ -111,9 +111,10 @@ describe('mobile school-scoped feed discovery', () => {
     expect(recovery?.actions.map((item) => item.id)).toEqual([
       'load-more',
       'open-boards',
-      'open-topics',
+      'open-realtime',
     ]);
     expect(recovery?.actions[0]?.label).toBe('再載入更多後繼續找');
+    expect(recovery?.actions.find((item) => item.id === 'open-realtime')?.label).toBe('前往即時');
   });
 
   it('offers clear-filters when a filter is active and keeps search offline', () => {
@@ -128,9 +129,10 @@ describe('mobile school-scoped feed discovery', () => {
     expect(online?.actions.map((item) => item.id)).toEqual([
       'clear-filters',
       'open-boards',
-      'open-topics',
+      'open-realtime',
     ]);
     expect(online?.actions.find((item) => item.id === 'clear-filters')?.label).toBe('清除篩選');
+    expect(online?.subtitle).toMatch(/看板／即時/);
 
     const offline = describeMobileFeedSearchRecovery({
       search: '期末',
@@ -145,7 +147,7 @@ describe('mobile school-scoped feed discovery', () => {
     expect(offline?.actions.map((item) => item.id)).toEqual([
       'clear-filters',
       'open-boards',
-      'open-topics',
+      'open-realtime',
     ]);
     expect(offline?.actions.some((item) => item.id === 'load-more')).toBe(false);
     expect(offline?.subtitle).toMatch(/關鍵字已保留/);
