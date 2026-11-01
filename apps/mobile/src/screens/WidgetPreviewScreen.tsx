@@ -1,4 +1,5 @@
 /* eslint-disable */
+import { NextClassLiveActivitySetting } from '../widgets/NextClassLiveActivitySetting';
 import React, { useMemo, useState } from 'react';
 import { View, Text, Pressable, ScrollView, Alert, Dimensions, Platform } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
@@ -657,6 +658,7 @@ export function WidgetPreviewScreen() {
         />
 
         <ScrollView style={{ flex: 1, marginTop: 12 }} showsVerticalScrollIndicator={false}>
+          <NextClassLiveActivitySetting />
           {selectedTab === 0 ? (
             <View style={{ gap: 12, paddingBottom: TAB_BAR_CONTENT_BOTTOM_PADDING }}>
               <AnimatedCard title="小工具尺寸">

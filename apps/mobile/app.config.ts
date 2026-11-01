@@ -408,7 +408,7 @@ export default ({ config }: any) => {
       : undefined,
     // 新增原生影像模組與課表小工具後，預覽與正式版都需使用新安裝檔及獨立執行版本。
     runtimeVersion: isProduction
-      ? 'campus-one-native-photo-pdf-widget-1'
-      : 'campus-preview-native-photo-pdf-widget-1',
+      ? 'campus-one-native-photo-pdf-widget-live-2'
+      : 'campus-preview-native-photo-pdf-widget-live-2',
   };
 };
