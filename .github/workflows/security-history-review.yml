@@ -1,0 +1,58 @@
+name: Security history verification
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.gitleaksignore'
+      - 'scripts/security/**'
+      - '.github/workflows/security-history-review.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify-history:
+    name: Verify reviewed fingerprints and full history
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
+        with:
+          node-version: '22.23.4'
+      - name: Test exact-fingerprint validation and failure cases
+        run: node --test scripts/security/verify-gitleaks-history.test.mjs
+      - name: Verify complete historical file identities against the original reviews
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: node scripts/security/verify-gitleaks-history.mjs verify
+      - name: Install scanner and retain the ordinary event scan
+        uses: gitleaks/gitleaks-action@v3
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          GITLEAKS_ENABLE_COMMENTS: 'false'
+          GITLEAKS_ENABLE_UPLOAD_ARTIFACT: 'false'
+      - name: Verify a new marker at the same path and line is still rejected
+        run: node scripts/security/verify-gitleaks-history.mjs positive-control
+      - name: Scan the exact head and all of its ancestors
+        run: |
+          set +e
+          gitleaks git --redact --no-banner --log-opts=HEAD --exit-code=1 --report-format=json --report-path="$RUNNER_TEMP/security-history.json"
+          scan_status=$?
+          set -e
+          node scripts/security/verify-gitleaks-history.mjs summarize "$RUNNER_TEMP/security-history.json" > security-evidence/history-scan.json
+          exit "$scan_status"
+      - name: Keep only non-secret verification metadata
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: security-history-evidence
+          path: security-evidence/*.json
+          retention-days: 14
+          if-no-files-found: warn
