@@ -2,7 +2,7 @@
 
 import { MonthCalendar } from './MonthCalendar';
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   buildPersonalEventsCalendar,
   personalEventsOnDate,
@@ -171,7 +171,10 @@ function PersonalCalendarWorkspace() {
     };
   }, []);
 
-  const monthEvents = filterPersonalEvents(ledger.records, month);
+  const monthEvents = useMemo(
+    () => filterPersonalEvents(ledger.records, month),
+    [ledger.records, month],
+  );
   const events = selectedDate ? personalEventsOnDate(monthEvents, selectedDate) : monthEvents;
   const draftRow = personalEventRowFromDraft(
     draft,

@@ -18,6 +18,9 @@
   padding: 4px;
 }
 .grid button {
+  min-width: 24px;
+  min-height: 24px;
+  box-sizing: border-box;
   font: inherit;
   color: var(--text);
   background: transparent;
@@ -55,6 +58,12 @@
   .grid .event {
     font-size: 12px;
     padding: 3px 2px;
+  }
+  .eventTitle {
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+    overflow: hidden;
   }
   .grid .more {
     padding: 2px;

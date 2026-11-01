@@ -47,3 +47,24 @@ test('全天跨月不依環境時區轉日，也不改起訖', () => {
     row,
   );
 });
+
+test('排序後直接分桶與逐日查詢一致，保留順序與事件物件', () => {
+  const rows = [
+    { id: 'late', date: '2024-03-12', startTime: '18:00' },
+    { id: 'all-day', date: '2024-02-28', endDate: '2024-03-03', allDay: true },
+    { id: 'midnight', date: '2024-02-29', endDate: '2024-03-02', endTime: '00:00' },
+    { id: 'timed', date: '2024-03-01', endDate: '2024-03-04', endTime: '10:00' },
+    { id: 'early', date: '2024-03-12', startTime: '08:00' },
+    { id: 'next-month', date: '2024-03-30', endDate: '2024-04-02', allDay: true },
+    { id: 'invalid', date: '2024-02-30' },
+    { id: 'same-day', date: '2024-03-05', endDate: '2024-03-05', allDay: true },
+  ].map((row) => Object.freeze({ kind: 'events', title: row.id, ...row }));
+  const records = Object.freeze(rows);
+  for (const month of ['2024-02', '2024-03', '2024-04']) {
+    for (const day of buildMonthCalendar(records, month).filter(Boolean)) {
+      const expected = personalEventsOnDate(records, day.date);
+      assert.deepEqual(day.events, expected);
+      day.events.forEach((event, i) => assert.equal(event, expected[i]));
+    }
+  }
+});

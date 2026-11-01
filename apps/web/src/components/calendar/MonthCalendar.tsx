@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { buildMonthCalendar, MONTH_WEEKDAYS, type PersonalImportRecord } from '@campus/shared';
 import styles from './MonthCalendar.module.css';
 
@@ -18,7 +18,7 @@ export function MonthCalendar({
   disabled: boolean;
 }) {
   const [expanded, setExpanded] = useState<string[]>([]);
-  const days = buildMonthCalendar(records, month);
+  const days = useMemo(() => buildMonthCalendar(records, month), [records, month]);
   return (
     <div className={styles.grid} aria-label={`${month} 月格，週日起始`}>
       {MONTH_WEEKDAYS.map((day) => (
@@ -42,11 +42,12 @@ export function MonthCalendar({
               <button
                 type="button"
                 className={styles.event}
+                aria-label={event.title}
                 key={event.id}
                 disabled={disabled}
                 onClick={() => onEdit(event)}
               >
-                {event.title}
+                <span className={styles.eventTitle}>{event.title}</span>
               </button>
             ))}
             {day.events.length > 2 && (

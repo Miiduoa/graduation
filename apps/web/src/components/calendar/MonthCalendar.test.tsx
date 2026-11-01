@@ -7,7 +7,7 @@ it('顯示每日名稱、展開更多、選日期及沿用事件物件', () => {
   const records: PersonalImportRecord[] = Array.from({ length: 3 }, (_, i) => ({
     id: String(i),
     kind: 'events',
-    title: `合成${i}`,
+    title: i === 0 ? '跨月活動的完整長名稱應可透過輔助科技閱讀' : `合成${i}`,
     schoolId: 'pu',
     academicYear: '',
     semester: '',
@@ -30,6 +30,7 @@ it('顯示每日名稱、展開更多、選日期及沿用事件物件', () => {
       disabled={false}
     />,
   );
+  expect(screen.getByRole('button', { name: records[0].title })).toBeTruthy();
   expect(screen.queryByText('合成2')).toBeNull();
   fireEvent.click(screen.getByText('還有 1 筆'));
   fireEvent.click(screen.getByText('合成2'));

@@ -44,7 +44,24 @@ export function buildMonthCalendar(
   const events = filterPersonalEvents(records, month);
   for (let day = 1; day <= last.getUTCDate(); day += 1) {
     const date = `${month}-${String(day).padStart(2, '0')}`;
-    cells.push({ date, events: personalEventsOnDate(events, date) });
+    cells.push({ date, events: [] });
+  }
+  const days = cells.filter((day): day is MonthCalendarDay => day !== null);
+  const monthEnd = days[days.length - 1].date;
+  for (const event of events) {
+    if (!event.date || !isPersonalImportDate(event.date)) continue;
+    const start = event.date < days[0].date ? days[0].date : event.date;
+    const end = event.endDate || event.date;
+    const exclusiveEnd =
+      (event.allDay && !!event.endDate) || (end > event.date && event.endTime === '00:00');
+    const lastDate = end < monthEnd ? end : monthEnd;
+    const startDay = Number(start.slice(-2));
+    for (let day = startDay; day <= Number(lastDate.slice(-2)); day += 1) {
+      const bucket = days[day - 1];
+      if (bucket.date < start || bucket.date > lastDate) continue;
+      if (exclusiveEnd && bucket.date === end) continue;
+      bucket.events.push(event);
+    }
   }
   while (cells.length % 7) cells.push(null);
   return cells;
