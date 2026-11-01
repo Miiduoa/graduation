@@ -218,7 +218,7 @@ export function ClubBoard({
             </form>
           )}
           {view.rosterOnly ? (
-            <p>活動後台暫時無法使用，社員名單仍可查閱。</p>
+            <p>活動管理與 CSV 匯出暫時無法使用，社員名單仍可查閱。</p>
           ) : (
             <>
               <h2>活動與報名</h2>

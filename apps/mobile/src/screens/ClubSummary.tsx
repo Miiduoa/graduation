@@ -53,7 +53,7 @@ export function ClubSummary({
               {m.name} · {clubRoleLabel(m.role)}
             </Text>
           ))}
-          {data.rosterOnly && <Text>活動資料暫時無法取得</Text>}
+          {data.rosterOnly && <Text>活動管理與 CSV 匯出暫時無法使用，社員名單仍可查閱。</Text>}
           {!data.rosterOnly && data.events.length === 0 && <Text>尚無活動</Text>}
           {data.events.map((e) => (
             <Text key={e.id}>

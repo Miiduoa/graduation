@@ -69,11 +69,12 @@ test('撤權後清除舊名單並顯示錯誤', async () => {
   expect(screen.queryByText('測試社員')).toBeNull();
 });
 
-test('後端不可用時保留名單，活動不可冒充空資料或提供操作', async () => {
+test('後端不可用時保留名單並說明活動管理與 CSV 匯出不可用', async () => {
   vi.mocked(callClub).mockResolvedValue({ ...view, rosterOnly: true });
   render(<ClubBoard uid="one" schoolId="school" groupId="club" />);
   await screen.findByText('測試社員');
-  expect(screen.getByText('活動後台暫時無法使用，社員名單仍可查閱。')).toBeTruthy();
+  expect(screen.getByText('活動管理與 CSV 匯出暫時無法使用，社員名單仍可查閱。')).toBeTruthy();
+  expect(screen.queryByRole('button', { name: '匯出社員與活動 CSV' })).toBeNull();
   expect(screen.queryByText('尚無活動')).toBeNull();
   expect(screen.queryByText('建立活動')).toBeNull();
 });

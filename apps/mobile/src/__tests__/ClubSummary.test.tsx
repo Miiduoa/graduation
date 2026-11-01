@@ -77,13 +77,15 @@ test('拒絕讀取顯示錯誤', async () => {
 });
 
 test.each(['functions/not-found', 'functions/unavailable', 'network-request-failed'])(
-  '%s 時備援僅呈現姓名與中文角色',
+  '%s 時保留備援名單並說明活動管理與 CSV 匯出不可用',
   async (code) => {
     mockCall.mockRejectedValue(Object.assign(new Error(code), { code }));
     render(<ClubSummary uid="one" schoolId="school" groupId="club" />);
     expect(await screen.findByText('備援社員 · 會長')).toBeTruthy();
-    expect(screen.getByText('活動資料暫時無法取得')).toBeTruthy();
+    expect(screen.getByText('活動管理與 CSV 匯出暫時無法使用，社員名單仍可查閱。')).toBeTruthy();
     expect(screen.queryByText(/活動 0 場|尚無活動|0900000000/)).toBeNull();
+    expect(screen.queryByText('建立活動')).toBeNull();
+    expect(screen.queryByText('匯出社員與活動 CSV')).toBeNull();
   },
 );
 test('備援讀取途中切帳號不回傳舊名單', async () => {
