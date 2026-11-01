@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { AppState, Linking, Modal, Pressable, ScrollView, Text, TextInput, View } from 'react-native';
+import { AccessibilityInfo, AppState, findNodeHandle, Keyboard, Linking, Modal, Platform, Pressable, ScrollView, Text, TextInput, View, type ViewStyle } from 'react-native';
 import * as Location from 'expo-location';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useTheme } from '../state/theme';
@@ -19,6 +19,18 @@ import {
 } from '../features/publicTransit';
 
 const RADII = [300, 600, 1000] as const;
+const wrappingButton: ViewStyle = { maxWidth: '100%', flexDirection: 'column', alignItems: 'stretch' };
+
+function focusForScreenReader(target: View | null) {
+  if (!target) return;
+  if (Platform.OS === 'web') {
+    // React Native Web refs are DOM nodes; findNodeHandle is unsupported there.
+    (target as unknown as { focus: (options: { preventScroll: boolean }) => void }).focus({ preventScroll: true });
+    return;
+  }
+  const handle = findNodeHandle(target);
+  if (handle != null) AccessibilityInfo.setAccessibilityFocus(handle);
+}
 const catalogDirection = (direction: string) => direction === '去' ? '去程' : direction === '返' ? '返程' : direction || '方向未提供';
 
 function catalogSummary(stop: PublicBusStop): string {
@@ -28,7 +40,7 @@ function catalogSummary(stop: PublicBusStop): string {
   return names.slice(0, 3).join('、') + (names.length > 3 ? ' 等路線' : ' 路線') + ' · ' + directions.join('／');
 }
 
-function CatalogStop({ stop, openLink }: { stop: PublicBusStop; openLink: (url: string) => void }) {
+function CatalogStop({ stop, openLink, linkBusy }: { stop: PublicBusStop; openLink: (url: string) => void; linkBusy: boolean }) {
   const theme = useTheme();
   const body = { ...theme.typography.bodySmall, color: theme.colors.muted };
   return (
@@ -46,8 +58,8 @@ function CatalogStop({ stop, openLink }: { stop: PublicBusStop; openLink: (url: 
             {route.name} · {catalogDirection(route.direction)} · {route.destination ? '往 ' + route.destination : '目的地未提供'}
           </Text>
         )) : <Text style={body}>這個站牌的路線資料尚未提供。</Text>}
-        <AIButton label="到臺中公車網站查即時動態" variant="ghost" onPress={() => openLink(TAICHUNG_BUS_OFFICIAL)} />
-        <AIButton label="查看站牌資料來源" variant="ghost" onPress={() => openLink(TAICHUNG_BUS_CATALOG_SOURCE)} />
+        <AIButton style={wrappingButton} disabled={linkBusy} label="到臺中公車網站查即時動態" variant="ghost" onPress={() => openLink(TAICHUNG_BUS_OFFICIAL)} />
+        <AIButton style={wrappingButton} disabled={linkBusy} label="查看站牌資料來源" variant="ghost" onPress={() => openLink(TAICHUNG_BUS_CATALOG_SOURCE)} />
       </View>
     </AICard>
   );
@@ -122,6 +134,7 @@ function Arrivals({ stop }: { stop: PublicBusStop }) {
           </>
         )}
         <AIButton
+          style={wrappingButton}
           label={loading ? '更新中…' : '更新此站到站時間'}
           variant="ghost"
           disabled={loading}
@@ -129,6 +142,91 @@ function Arrivals({ stop }: { stop: PublicBusStop }) {
         />
       </View>
     </AICard>
+  );
+}
+
+function StopDetails({ stop, onClose, onDismiss }: {
+  stop: PublicBusStop;
+  onClose: () => void;
+  onDismiss: () => void;
+}) {
+  const theme = useTheme();
+  const title = useRef<View>(null);
+  const active = useRef(true);
+  const opening = useRef(false);
+  const [linkBusy, setLinkBusy] = useState(false);
+  const [failedLink, setFailedLink] = useState<string | null>(null);
+  useEffect(() => {
+    active.current = true;
+    return () => { active.current = false; };
+  }, []);
+
+  const openLink = async (url: string) => {
+    if (opening.current || !active.current) return;
+    opening.current = true;
+    setLinkBusy(true);
+    setFailedLink(null);
+    try {
+      await Linking.openURL(url);
+    } catch {
+      if (active.current) setFailedLink(url);
+    } finally {
+      opening.current = false;
+      if (active.current) setLinkBusy(false);
+    }
+  };
+  const body = { ...theme.typography.bodySmall, color: theme.colors.muted };
+  return (
+    <Modal
+      visible
+      testID="public-transit-stop-details"
+      animationType="none"
+      presentationStyle="fullScreen"
+      onRequestClose={onClose}
+      onDismiss={onDismiss}
+      onShow={() => focusForScreenReader(title.current)}
+    >
+      <SafeAreaView
+        accessibilityViewIsModal
+        onAccessibilityEscape={onClose}
+        style={{ flex: 1, backgroundColor: theme.colors.bg }}
+      >
+        <View style={{ paddingHorizontal: theme.space.md, paddingVertical: theme.space.sm, borderBottomWidth: 1, borderColor: theme.colors.border }}>
+          <AIButton label="返回站牌清單" variant="ghost" onPress={onClose} style={wrappingButton} />
+        </View>
+        <ScrollView contentContainerStyle={{ padding: theme.space.md, gap: theme.space.md }}>
+          <View ref={title} accessible accessibilityRole="header" tabIndex={Platform.OS === 'web' ? -1 : undefined}>
+            <Text style={{ ...theme.typography.h2, color: theme.colors.text }}>{stop.name}</Text>
+          </View>
+          <Text style={body}>{BUS_CITIES[stop.city]} · {stop.distance !== null ? '約 ' + Math.round(stop.distance) + ' 公尺（直線距離）' : '公車站牌'}</Text>
+          <Text style={body}>同名站牌可能位於道路兩側。上車前請核對車頭方向與現場站牌。</Text>
+          {stop.source === 'taichung-open-data'
+            ? <CatalogStop stop={stop} openLink={(url) => void openLink(url)} linkBusy={linkBusy} />
+            : <Arrivals stop={stop} />}
+          <AIButton
+            label="步行前往此站牌"
+            variant="ghost"
+            style={wrappingButton}
+            disabled={linkBusy}
+            onPress={() => void openLink('https://www.google.com/maps/dir/?api=1&destination=' +
+              encodeURIComponent(stop.lat + ',' + stop.lon) + '&travelmode=walking')}
+          />
+          {stop.source !== 'taichung-open-data' && <AIButton
+            label={stop.city === 'Taichung' ? '臺中公車官方網站' : '公路客運官方網站'}
+            variant="ghost"
+            style={wrappingButton}
+            disabled={linkBusy}
+            onPress={() => void openLink(stop.city === 'Taichung' ? TAICHUNG_BUS_OFFICIAL : PUBLIC_BUS_OFFICIAL_FALLBACK)}
+          />}
+          <Text style={body}>導航與官方網站會另開應用程式；返回後可繼續查看此站牌。</Text>
+          {linkBusy && <Text accessibilityLiveRegion="polite" style={body}>正在開啟連結…</Text>}
+          {failedLink && <View style={{ gap: theme.space.sm }}>
+            <Text accessibilityRole="alert" style={body}>無法開啟連結，請確認裝置可開啟瀏覽器或地圖後再試。</Text>
+            <AIButton label="再試開啟連結" variant="ghost" style={wrappingButton} onPress={() => void openLink(failedLink)} />
+          </View>}
+        </ScrollView>
+      </SafeAreaView>
+    </Modal>
   );
 }
 
@@ -155,16 +253,31 @@ export function PublicTransitExplorer({
   const positionRevision = useRef(0);
   const positionTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const mounted = useRef(true);
+  const stopButtons = useRef(new Map<string, View>());
+  const returnTarget = useRef<View | null>(null);
+  const detailsOpen = useRef(false);
+  const focusFrame = useRef<ReturnType<typeof requestAnimationFrame> | null>(null);
 
   useEffect(() => {
     mounted.current = true;
     return () => {
       mounted.current = false;
+      if (focusFrame.current != null) cancelAnimationFrame(focusFrame.current);
       request.current?.abort();
       positionRevision.current += 1;
       if (positionTimer.current) clearTimeout(positionTimer.current);
     };
   }, []);
+
+  const restoreStopFocus = () => {
+    if (mounted.current && !detailsOpen.current) focusForScreenReader(returnTarget.current);
+  };
+  const closeDetails = () => {
+    detailsOpen.current = false;
+    setSelected(null);
+    if (focusFrame.current != null) cancelAnimationFrame(focusFrame.current);
+    focusFrame.current = requestAnimationFrame(restoreStopFocus);
+  };
 
   const cancelPosition = () => {
     positionRevision.current += 1;
@@ -177,6 +290,7 @@ export function PublicTransitExplorer({
     request.current?.abort();
     cancelPosition();
     setStops([]);
+    detailsOpen.current = false;
     setSelected(null);
     setStatus('idle');
     setMessage('');
@@ -189,6 +303,7 @@ export function PublicTransitExplorer({
     request.current = controller;
     setStatus('loading');
     setStops([]);
+    detailsOpen.current = false;
     setSelected(null);
     setMessage('');
     const result = await queryPublicTransit(query, controller.signal);
@@ -281,6 +396,7 @@ export function PublicTransitExplorer({
           {schoolName ? schoolName + ' · ' : ''}依目前選擇縣市查詢官方站牌資料。跨縣市校區可自行更換縣市；不需登入學校帳號。
         </Text>
         <AIButton
+          style={wrappingButton}
           label={city ? '查詢縣市：' + BUS_CITIES[city] : '選擇查詢縣市'}
           variant="ghost"
           onPress={() => setChooser(true)}
@@ -327,7 +443,7 @@ export function PublicTransitExplorer({
             borderColor: theme.colors.border, color: theme.colors.text, paddingHorizontal: 14,
           }}
         />
-        <AIButton label="搜尋官方站牌" onPress={search} disabled={status === 'loading'} />
+        <AIButton style={wrappingButton} label="搜尋官方站牌" onPress={search} disabled={status === 'loading'} />
         <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
           {RADII.map((value) => (
             <AIChip
@@ -339,6 +455,7 @@ export function PublicTransitExplorer({
           ))}
         </View>
         <AIButton
+          style={wrappingButton}
           label={locating ? '正在確認位置…' : '用我的位置找附近站牌'}
           variant="ghost"
           disabled={locating || status === 'loading'}
@@ -346,6 +463,7 @@ export function PublicTransitExplorer({
         />
         {locating && (
           <AIButton
+            style={wrappingButton}
             label="取消定位"
             variant="ghost"
             onPress={() => {
@@ -357,33 +475,45 @@ export function PublicTransitExplorer({
         {status === 'loading' && <Text accessibilityRole="progressbar" style={body}>正在查詢官方站牌…</Text>}
         {message ? <Text accessibilityRole="alert" style={body}>{message}</Text> : null}
         {accuracyNotice ? <Text style={body}>{accuracyNotice}</Text> : null}
-        {stops.map((stop) => (
-          <AIButton
-            key={stop.city + ':' + stop.id}
-            label={stop.name + (stop.source === 'taichung-open-data' ? ' · ' + catalogSummary(stop) : '（' + stop.id + '）') +
-              (stop.distance !== null ? ' · 約 ' + Math.round(stop.distance) + ' 公尺' : '') +
-              (stop.source === 'taichung-open-data' ? ' · 無即時到站' : '')}
-            variant={selected?.id === stop.id ? 'primary' : 'ghost'}
-            onPress={() => setSelected(stop)}
-          />
-        ))}
-        {selected && (
-          <>
-            {selected.source === 'taichung-open-data'
-              ? <CatalogStop stop={selected} openLink={openLink} />
-              : <Arrivals key={selected.city + ':' + selected.id} stop={selected} />}
-            <AIButton
-              label="步行前往此站牌"
-              variant="ghost"
-              onPress={() => openLink('https://www.google.com/maps/dir/?api=1&destination=' +
-                encodeURIComponent(selected.lat + ',' + selected.lon) + '&travelmode=walking')}
-            />
-          </>
-        )}
+        {stops.map((stop) => {
+          const key = stop.city + ':' + stop.id;
+          const label = stop.name + (stop.source === 'taichung-open-data' ? ' · ' + catalogSummary(stop) : '（' + stop.id + '）') +
+            (stop.distance !== null ? ' · 約 ' + Math.round(stop.distance) + ' 公尺' : '') +
+            (stop.source === 'taichung-open-data' ? ' · 無即時到站' : '');
+          return <Pressable
+            key={key}
+            ref={(node) => { if (node) stopButtons.current.set(key, node); else stopButtons.current.delete(key); }}
+            accessibilityRole="button"
+            accessibilityLabel={label}
+            accessibilityHint="開啟站牌詳情，可返回目前的搜尋清單"
+            onPress={() => {
+              if (detailsOpen.current) return;
+              detailsOpen.current = true;
+              if (focusFrame.current != null) cancelAnimationFrame(focusFrame.current);
+              Keyboard.dismiss();
+              returnTarget.current = stopButtons.current.get(key) ?? null;
+              setSelected(stop);
+            }}
+            style={({ pressed }) => ({
+              minHeight: 44, paddingHorizontal: theme.space.md, paddingVertical: theme.space.sm,
+              borderWidth: 1, borderRadius: 12, borderColor: theme.colors.border,
+              backgroundColor: theme.colors.card, opacity: pressed ? 0.8 : 1,
+            })}
+          >
+            <Text style={{ ...theme.typography.body, color: theme.colors.text, flexShrink: 1 }}>{label}</Text>
+          </Pressable>;
+        })}
+        {selected && <StopDetails
+          key={selected.city + ':' + selected.id}
+          stop={selected}
+          onClose={closeDetails}
+          onDismiss={restoreStopFocus}
+        />}
         <Text style={body}>
           請核對站牌方向與現場營運公告。有提供到站時間時，預估值仍可能隨車況變動。
         </Text>
         <AIButton
+          style={wrappingButton}
           label={city === 'Taichung' ? '臺中公車官方網站' : '公路客運官方網站'}
           variant="ghost"
           onPress={() => openLink(city === 'Taichung' ? TAICHUNG_BUS_OFFICIAL : PUBLIC_BUS_OFFICIAL_FALLBACK)}
