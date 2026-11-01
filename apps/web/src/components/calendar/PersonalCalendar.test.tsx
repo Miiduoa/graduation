@@ -1,6 +1,7 @@
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { beforeEach, expect, it, vi } from 'vitest';
 import {
+  emptyPersonalEventDraft,
   personalImportSavedNotice,
   type PersonalImportRecord,
 } from '@campus/shared';
@@ -52,7 +53,7 @@ beforeEach(() => {
 });
 
 async function createTimedEvent(title = '期中考') {
-  const view = render(<PersonalCalendar />);
+  const view = renderCalendar();
   await screen.findByRole('button', { name: '新增行程' });
   fireEvent.click(screen.getByRole('button', { name: '新增行程' }));
   fireEvent.change(screen.getByLabelText('標題'), { target: { value: title } });
@@ -107,7 +108,7 @@ it('creates, edits and deletes personal events through the storage contract', as
 });
 
 it('keeps the draft when validation or persistence fails and does not overwrite on load errors', async () => {
-  const view = render(<PersonalCalendar />);
+  const view = renderCalendar();
   await screen.findByRole('button', { name: '新增行程' });
   fireEvent.click(screen.getByRole('button', { name: '新增行程' }));
   fireEvent.change(screen.getByLabelText('標題'), { target: { value: '結束太早' } });
@@ -135,7 +136,7 @@ it('keeps the draft when validation or persistence fails and does not overwrite 
 
   const key = personalImportsStorageKey({ owner: context.owner, schoolId: context.schoolId });
   localStorage.setItem(key, '{damaged');
-  const broken = render(<PersonalCalendar />);
+  const broken = renderCalendar();
   await waitFor(() => expect(screen.getByText(/原始資料仍保留/)).toBeTruthy());
   expect((screen.getByRole('button', { name: '新增行程' }) as HTMLButtonElement).disabled).toBe(
     true,
@@ -175,14 +176,14 @@ it('isolates accounts and schools, and preserves other records plus import prove
   view.unmount();
 
   context.owner = 'platform:two';
-  const other = render(<PersonalCalendar />);
+  const other = renderCalendar();
   await screen.findByText(/還沒有行程/);
   expect(readPersonalImports({ owner: 'platform:two', schoolId: 'pu' })).toEqual([]);
   other.unmount();
 
   context.owner = 'platform:one';
   context.schoolId = 'ntu';
-  const otherSchool = render(<PersonalCalendar />);
+  const otherSchool = renderCalendar();
   await screen.findByText(/還沒有行程/);
   otherSchool.unmount();
 });
@@ -205,7 +206,7 @@ it('blocks stale saves after an account switch and supports retry after a failed
 
   const key = personalImportsStorageKey(scope);
   localStorage.setItem(key, '{damaged');
-  const broken = render(<PersonalCalendar />);
+  const broken = renderCalendar();
   await screen.findByText(/原始資料仍保留/);
   broken.unmount();
 
@@ -213,7 +214,7 @@ it('blocks stale saves after an account switch and supports retry after a failed
     key,
     JSON.stringify({ version: 1, records: [original], sync: { enabled: false, base: null } }),
   );
-  const recovered = render(<PersonalCalendar />);
+  const recovered = renderCalendar();
   await screen.findByText('切換前');
   expect((screen.getByRole('button', { name: '新增行程' }) as HTMLButtonElement).disabled).toBe(
     false,
@@ -229,11 +230,16 @@ it('exports the current personal events as ICS without claiming RSVP', async () 
     download: '',
   } as unknown as HTMLAnchorElement;
   const realCreate = document.createElement.bind(document);
-  vi.spyOn(document, 'createElement').mockImplementation(((tag: string, options?: ElementCreationOptions) => {
+  vi.spyOn(document, 'createElement').mockImplementation(((
+    tag: string,
+    options?: ElementCreationOptions,
+  ) => {
     if (tag === 'a') return anchor;
     return realCreate(tag, options);
   }) as typeof document.createElement);
-  fireEvent.click(screen.getByRole('button', { name: '匯出目前列表' }));
+  fireEvent.click(screen.getByRole('button', { name: '月格' }));
+  fireEvent.click(screen.getByRole('button', { name: '2026-10-20' }));
+  fireEvent.click(screen.getByRole('button', { name: '匯出所選月份' }));
   await waitFor(() => expect(anchor.click).toHaveBeenCalled());
   expect(await screen.findByText(/已匯出 1 筆個人行程快照/)).toBeTruthy();
   expect(screen.getByText(/不會代你報名或設定提醒/)).toBeTruthy();
@@ -268,16 +274,23 @@ it('clears edit selection on cancel so list export includes every visible row', 
       source: { type: 'paste', name: '手動新增', line: 1, rawText: '行程乙' },
     },
   ]);
-  const view = render(<PersonalCalendar />);
+  const view = renderCalendar();
   await screen.findByText('行程甲');
-  fireEvent.click(within(screen.getByText('行程甲').closest('li') as HTMLElement).getByRole('button', { name: '編輯' }));
+  fireEvent.click(
+    within(screen.getByText('行程甲').closest('li') as HTMLElement).getByRole('button', {
+      name: '編輯',
+    }),
+  );
   expect(screen.getByRole('button', { name: '匯出這筆' })).toBeTruthy();
   fireEvent.click(screen.getByRole('button', { name: '取消' }));
   expect(screen.queryByRole('button', { name: '匯出這筆' })).toBeNull();
 
   const downloads: string[] = [];
   const realCreate = document.createElement.bind(document);
-  vi.spyOn(document, 'createElement').mockImplementation(((tag: string, options?: ElementCreationOptions) => {
+  vi.spyOn(document, 'createElement').mockImplementation(((
+    tag: string,
+    options?: ElementCreationOptions,
+  ) => {
     if (tag === 'a') {
       return {
         click: vi.fn(),
@@ -303,7 +316,9 @@ it('clears edit selection on cancel so list export includes every visible row', 
   });
   URL.createObjectURL = createObjectURL as unknown as typeof URL.createObjectURL;
 
-  fireEvent.click(screen.getByRole('button', { name: '匯出目前列表' }));
+  fireEvent.click(screen.getByRole('button', { name: '月格' }));
+  fireEvent.click(screen.getByRole('button', { name: '2026-10-20' }));
+  fireEvent.click(screen.getByRole('button', { name: '匯出所選月份' }));
   await waitFor(() => expect(downloads[0]).toBe('campus-one-personal-events.ics'));
   await waitFor(async () => {
     const blob = createObjectURL.mock.calls[0][0] as Blob;
@@ -345,7 +360,7 @@ it('preserves imported course metadata when only location is edited', async () =
     source: { type: 'paste' as const, name: '手動新增', line: 1, rawText: '另一筆' },
   };
   await savePersonalImportBatch(scope, [imported, other]);
-  const view = render(<PersonalCalendar />);
+  const view = renderCalendar();
   await screen.findByText('專題發表');
   fireEvent.click(
     within(screen.getByText('專題發表').closest('li') as HTMLElement).getByRole('button', {
@@ -366,5 +381,32 @@ it('preserves imported course metadata when only location is edited', async () =
     source: imported.source,
   });
   expect(rows.find((row) => row.id === 'other-keep')?.title).toBe('另一筆');
+  view.unmount();
+});
+
+function renderCalendar() {
+  const view = render(<PersonalCalendar />);
+  fireEvent.change(view.getByLabelText('查看月份'), { target: { value: '2026-10' } });
+  fireEvent.click(view.getByRole('button', { name: '列表' }));
+  return view;
+}
+
+it('月格切月、選日期、編輯及回今天沿用同一份資料', async () => {
+  const view = await createTimedEvent('合成安排');
+  fireEvent.click(screen.getByRole('button', { name: '月格' }));
+  fireEvent.click(screen.getByRole('button', { name: '2026-10-20' }));
+  expect(screen.getByText('2026-10-20 的行程')).toBeTruthy();
+  fireEvent.click(screen.getByRole('button', { name: '編輯' }));
+  expect((screen.getByLabelText('標題') as HTMLInputElement).value).toBe('合成安排');
+  fireEvent.click(screen.getByRole('button', { name: '取消' }));
+  fireEvent.click(screen.getByRole('button', { name: '下一月' }));
+  expect((screen.getByLabelText('查看月份') as HTMLInputElement).value).toBe('2026-11');
+  expect(screen.queryByText('2026-10-20 的行程')).toBeNull();
+  fireEvent.click(screen.getByRole('button', { name: '上一月' }));
+  expect(screen.getByRole('button', { name: '合成安排' })).toBeTruthy();
+  fireEvent.click(screen.getByRole('button', { name: '回今天' }));
+  expect((screen.getByLabelText('查看月份') as HTMLInputElement).value).toBe(
+    emptyPersonalEventDraft().date.slice(0, 7),
+  );
   view.unmount();
 });
