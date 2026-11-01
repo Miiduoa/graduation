@@ -111,8 +111,11 @@ export default function HomePage() {
             : await loadHomeData(uid!);
         update({ data: next, updatedAt: new Date(), error: undefined });
       } catch (failure) {
+        const accessRevoked =
+          failure instanceof NuniError &&
+          (failure.status === 401 || failure.status === 403 || failure.code === 'SESSION_CHANGED');
         update({
-          data: undefined,
+          ...(accessRevoked ? { data: undefined } : {}),
           error: source === 'nuni' ? nuniErrorMessage(failure) : '課程暫時讀不到，請再試一次。',
         });
         if (
@@ -179,11 +182,14 @@ export default function HomePage() {
   ];
   if (!owner || sessionLoading || blocked || !sources.length) {
     if (presentation) setPresentation(null);
-  } else if (
-    !presentationReady &&
-    sources.every((source) => rows[source] && !rows[source]?.loading)
-  ) {
-    setPresentation({ owner, teacherOnly: !failed && !!teaching.length && !studying.length });
+  } else if (sources.every((source) => rows[source] && !rows[source]?.loading)) {
+    const nextTeacherOnly =
+      !!teaching.length &&
+      !studying.length &&
+      !data?.tasks.length &&
+      (!failed || presentationReady);
+    if (!presentationReady || presentation.teacherOnly !== nextTeacherOnly)
+      setPresentation({ owner, teacherOnly: nextTeacherOnly });
   }
   const teacherOnly = presentationReady && presentation.teacherOnly;
   const todos = useMemo(() => todayTodosFromHomeTasks(data?.tasks ?? []), [data]);

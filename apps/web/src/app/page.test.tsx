@@ -747,7 +747,7 @@ it('does not offer error retry while course callbacks have arrived but work is p
 });
 
 it.each(['nuni', 'school'])(
-  'waits for both roles when %s arrives first and keeps the mode during refresh',
+  'waits for both sources when %s arrives first and recalculates after refresh',
   async (first) => {
     state.session = { context: 'test', platformAccountId: 'teacher' };
     let finishSchool!: (value: HomeData) => void;
@@ -771,9 +771,10 @@ it.each(['nuni', 'school'])(
     const today = screen.getByTestId('student-today');
     expect(screen.queryByRole('link', { name: /查看授課課程/ })).toBeNull();
     await act(async () => window.dispatchEvent(new Event('pageshow')));
-    await act(async () => finishSchool({ courses: [], tasks: [], unreadCount: 0 }));
     expect(screen.getByTestId('student-today')).toBe(today);
-    expect(screen.queryByRole('link', { name: /查看授課課程/ })).toBeNull();
+    await act(async () => finishSchool({ courses: [], tasks: [], unreadCount: 0 }));
+    expect(screen.queryByTestId('student-today')).toBeNull();
+    expect(screen.getByRole('link', { name: /查看授課課程/ })).toBeTruthy();
   },
 );
 
@@ -792,4 +793,89 @@ it('places long source messages and reachable retry controls after the primary c
   expect(retry.closest('section')?.textContent).toContain(message);
   formatMessage.mockRestore();
   expect(statuses.querySelector('[aria-hidden]')).toBeNull();
+});
+
+it.each(['dual', 'student', 'empty'])(
+  'recalculates a teacher home after a completed %s background refresh',
+  async (mode) => {
+    const teaching = { id: 'teach', name: '原授課', role: 'owner-teacher', unreadCount: 0 };
+    let finish!: (value: HomeData) => void;
+    vi.mocked(loadHomeData)
+      .mockResolvedValueOnce(data('原授課', { courses: [teaching], tasks: [] }))
+      .mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            finish = resolve;
+          }),
+      );
+    render(<HomePage />);
+    await screen.findByRole('link', { name: /查看授課課程/ });
+    await act(async () => window.dispatchEvent(new Event('pageshow')));
+    expect(screen.getByRole('link', { name: /查看授課課程/ })).toBeTruthy();
+    const next =
+      mode === 'empty'
+        ? { courses: [], tasks: [], unreadCount: 0 }
+        : data('新增修課', {
+            courses: [
+              ...(mode === 'dual' ? [teaching] : []),
+              { id: 'study', name: '新增修課', role: 'student', unreadCount: 0 },
+            ],
+          });
+    await act(async () => finish(next));
+    expect(loadHomeData).toHaveBeenCalledTimes(2);
+    expect(screen.getByTestId('student-today')).toBeTruthy();
+    expect(screen.queryByRole('link', { name: /查看授課課程/ })).toBeNull();
+    expect(screen.queryByText('0 門課正在進行')).toBeNull();
+    if (mode !== 'empty') expect(screen.getAllByText('新增修課 作業').length).toBeGreaterThan(0);
+  },
+);
+
+it.each(['teacher', 'student'])(
+  'retains previous %s data and mode when a background source fails',
+  async (mode) => {
+    const previous =
+      mode === 'teacher'
+        ? data('保留授課', {
+            courses: [{ id: 'teach', name: '保留授課', role: 'owner-teacher', unreadCount: 0 }],
+            tasks: [],
+          })
+        : data('保留修課');
+    vi.mocked(loadHomeData)
+      .mockResolvedValueOnce(previous)
+      .mockRejectedValueOnce(new Error('offline'));
+    render(<HomePage />);
+    if (mode === 'teacher') await screen.findByRole('link', { name: /查看授課課程/ });
+    else await screen.findAllByText('保留修課 作業');
+    await act(async () => window.dispatchEvent(new Event('pageshow')));
+    expect(await screen.findByRole('button', { name: '重試校園課程' })).toBeTruthy();
+    if (mode === 'teacher') {
+      expect(screen.getByRole('heading', { name: '1 門課正在進行' })).toBeTruthy();
+      expect(document.getElementById('teaching-courses')).toBeTruthy();
+    } else expect(screen.getAllByText('保留修課 作業').length).toBeGreaterThan(0);
+  },
+);
+
+it('keeps the teacher mode until both background sources finish, including course callbacks', async () => {
+  state.session = { context: 'test', platformAccountId: 'teacher' };
+  const teaching = data('授課', {
+    courses: [{ id: 'teach', name: '授課', role: 'owner-teacher', unreadCount: 0 }],
+    tasks: [],
+  });
+  let finish!: (value: HomeData) => void;
+  vi.mocked(loadHomeData).mockResolvedValueOnce(teaching).mockResolvedValueOnce(data('新增修課'));
+  vi.mocked(loadNuniHomeSections)
+    .mockResolvedValueOnce({ courses: [], tasks: [], unreadCount: 0 })
+    .mockImplementationOnce((_transport, _account, onCourses) => {
+      onCourses(data('分批課程', { tasks: [] }));
+      return new Promise((resolve) => {
+        finish = resolve;
+      });
+    });
+  render(<HomePage />);
+  await screen.findByRole('link', { name: /查看授課課程/ });
+  await act(async () => window.dispatchEvent(new Event('pageshow')));
+  expect(screen.getByRole('link', { name: /查看授課課程/ })).toBeTruthy();
+  await act(async () => finish({ courses: [], tasks: [], unreadCount: 0 }));
+  expect(screen.getByTestId('student-today')).toBeTruthy();
+  expect(screen.getAllByText('新增修課 作業').length).toBeGreaterThan(0);
 });
