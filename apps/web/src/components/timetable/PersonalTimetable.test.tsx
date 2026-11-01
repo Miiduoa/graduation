@@ -259,7 +259,9 @@ describe('personal timetable data retention', () => {
     expect(screen.getAllByRole('button', { name: /編輯 剛新增的統計學/ }).length).toBeGreaterThan(
       0,
     );
-    expect(screen.getByRole('status').textContent).toContain('已切換至手動課表');
+    const savedNotice = screen.getByText(/已切換至手動課表/);
+    expect(savedNotice.getAttribute('role')).toBe('status');
+    expect(savedNotice.textContent).toContain('課程已更新。');
   });
 
   it('keeps an unsuccessful edit, freezes its fields while saving, and allows retry', async () => {
