@@ -263,15 +263,25 @@ export function PublicTransitExplorer({
   const positionTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const mounted = useRef(true);
   const linkOpening = useRef(false);
+  const linkRevision = useRef(0);
   const stopButtons = useRef(new Map<string, View>());
   const returnTarget = useRef<View | null>(null);
   const detailsOpen = useRef(false);
   const focusFrame = useRef<ReturnType<typeof requestAnimationFrame> | null>(null);
 
+  const resetLink = useCallback(() => {
+    linkRevision.current += 1;
+    linkOpening.current = false;
+    setLinkBusy(false);
+    setFailedLink(null);
+  }, []);
+
   useEffect(() => {
     mounted.current = true;
     return () => {
       mounted.current = false;
+      linkRevision.current += 1;
+      linkOpening.current = false;
       if (focusFrame.current != null) cancelAnimationFrame(focusFrame.current);
       request.current?.abort();
       positionRevision.current += 1;
@@ -298,18 +308,19 @@ export function PublicTransitExplorer({
 
   const reset = () => {
     request.current?.abort();
+    resetLink();
     cancelPosition();
     setStops([]);
     detailsOpen.current = false;
     setSelected(null);
     setStatus('idle');
     setMessage('');
-    setFailedLink(null);
     setAccuracyNotice('');
   };
 
   const lookup = useCallback(async (query: PublicTransitQuery) => {
     request.current?.abort();
+    resetLink();
     const controller = new AbortController();
     request.current = controller;
     setStatus('loading');
@@ -317,7 +328,6 @@ export function PublicTransitExplorer({
     detailsOpen.current = false;
     setSelected(null);
     setMessage('');
-    setFailedLink(null);
     const result = await queryPublicTransit(query, controller.signal);
     if (controller.signal.aborted || !mounted.current) return;
     if (result.status === 'ready' && result.kind === 'stops') {
@@ -333,7 +343,7 @@ export function PublicTransitExplorer({
           : '目前無法取得公車站牌，請確認網路、縣市或稍後再試。',
       );
     }
-  }, []);
+  }, [resetLink]);
 
   const search = () => {
     cancelPosition();
@@ -396,6 +406,7 @@ export function PublicTransitExplorer({
 
   const openLink = async (url: string) => {
     if (linkOpening.current || !mounted.current) return;
+    const run = ++linkRevision.current;
     linkOpening.current = true;
     setLinkBusy(true);
     setFailedLink(null);
@@ -403,10 +414,12 @@ export function PublicTransitExplorer({
     try {
       await Linking.openURL(url);
     } catch {
-      if (mounted.current) setFailedLink(url);
+      if (mounted.current && run === linkRevision.current) setFailedLink(url);
     } finally {
-      linkOpening.current = false;
-      if (mounted.current) setLinkBusy(false);
+      if (mounted.current && run === linkRevision.current) {
+        linkOpening.current = false;
+        setLinkBusy(false);
+      }
     }
   };
 
