@@ -6,7 +6,10 @@ import {
   type CafeteriaReviewStatus,
 } from '@campus/shared/src/cafeteriaCatalog';
 
-export type CatalogCafeteria = Cafeteria & { reviewStatus?: CafeteriaReviewStatus };
+export type CatalogCafeteria = Cafeteria & {
+  sourceLabel?: string | undefined;
+  reviewStatus?: CafeteriaReviewStatus;
+};
 
 function toCafeteria(row: CafeteriaCatalogRecord): CatalogCafeteria {
   return {
@@ -20,6 +23,7 @@ function toCafeteria(row: CafeteriaCatalogRecord): CatalogCafeteria {
     orderingUrl: row.orderingUrl,
     merchantMode: row.merchantMode,
     menuSyncedAt: row.menuSyncedAt,
+    sourceLabel: row.sourceLabel,
     reviewStatus: row.reviewStatus,
   };
 }
