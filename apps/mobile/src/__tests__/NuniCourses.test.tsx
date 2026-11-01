@@ -1,6 +1,6 @@
 import * as photoPdf from '../screens/nuni/nativePhotoPdf';
 import React from 'react';
-import { AppState, type AppStateStatus } from 'react-native';
+import { AppState, ScrollView, type AppStateStatus } from 'react-native';
 import { act, fireEvent, render, waitFor, within } from '@testing-library/react-native';
 import { createNuniClasses, NuniError, type NuniMaterial, type NuniWorkspace } from '@campus/shared/src/nuni';
 import { NuniCourses } from '../screens/nuni/NuniCourses';
@@ -2454,4 +2454,45 @@ it('跨課搜尋進教材後返回保留關鍵字與結果並重新驗權', asyn
   expect(view.getByLabelText('跨課教材關鍵字').props.value).toBe('返回保留');
   expect(view.getByText('返回保留教材')).toBeTruthy();
   expect(view.getByText('目前搜尋：返回保留')).toBeTruthy();
+});
+
+
+it('長搜尋清單返回時等清單尺寸更新才還原保存位置，且一般課程不沿用', async () => {
+  const targets = Array.from({ length: 40 }, (_, index) => material(index + 1, `長清單教材 ${index + 1}`));
+  mockRequest.mockImplementation((path, context, input) => {
+    if (path.endsWith('/materials/page')) return Promise.resolve({ materials: targets, nextCursor: null });
+    return response(path, context, input);
+  });
+  const subscription = jest.spyOn(AppState, 'addEventListener').mockReturnValue({ remove: jest.fn() });
+  const scroll = jest.spyOn(ScrollView.prototype, 'scrollTo');
+  try {
+    const view = render(<NuniCourses />);
+    fireEvent.changeText(view.getByLabelText('跨課教材關鍵字'), '長清單教材');
+    fireEvent.press(view.getByText('搜尋教材'));
+    await view.findByText('長清單教材 35');
+    fireEvent.scroll(view.getByTestId('nuni-courses-scroll'), {
+      nativeEvent: { contentOffset: { y: 2400 } },
+    });
+    fireEvent.press(view.getByText('長清單教材 35'));
+    await view.findByText('目標教材');
+    fireEvent(view.getByTestId('nuni-courses-scroll'), 'contentSizeChange', 390, 600);
+    scroll.mockClear();
+    fireEvent.press(view.getByText('返回我的課程'));
+    await view.findByText('長清單教材 35');
+    expect(scroll).not.toHaveBeenCalled();
+    fireEvent(view.getByTestId('nuni-courses-scroll'), 'contentSizeChange', 390, 3600);
+    expect(scroll).toHaveBeenCalledTimes(1);
+    expect(scroll).toHaveBeenLastCalledWith({ y: 2400, animated: false });
+    fireEvent(view.getByTestId('nuni-courses-scroll'), 'contentSizeChange', 390, 3700);
+    expect(scroll).toHaveBeenCalledTimes(1);
+
+    fireEvent.press(await view.findByRole('button', { name: '服務設計課程' }));
+    await view.findByText('返回我的課程');
+    scroll.mockClear();
+    fireEvent.press(view.getByText('返回我的課程'));
+    await view.findByText('長清單教材 35');
+    fireEvent(view.getByTestId('nuni-courses-scroll'), 'contentSizeChange', 390, 3600);
+    expect(scroll).not.toHaveBeenCalled();
+    view.unmount();
+  } finally { scroll.mockRestore(); subscription.mockRestore(); }
 });

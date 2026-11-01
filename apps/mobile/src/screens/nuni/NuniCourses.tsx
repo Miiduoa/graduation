@@ -656,7 +656,8 @@ function CourseScope({
     return () => { focus(); blur(); };
   }, [navigation]);
   const searchState = useCourseSearchState();
-  const searchOffset = useRef(0);
+  const searchOffset = useRef<number | null>(null);
+  const pendingSearchReturn = useRef<number | null>(null);
   const [joinRequested, setJoinRequested] = useState(0);
   const classes = useMemo(
     () =>
@@ -689,6 +690,8 @@ function CourseScope({
   const [focusMaterialId, setFocusMaterialId] = useState<string | undefined>(initialMaterialId);
   useEffect(() => {
     if (initialWorkspaceId) {
+      searchOffset.current = null;
+      pendingSearchReturn.current = null;
       scrollRef.current?.scrollTo({ y: 0, animated: false });
       contentOffsetYRef.current = 0;
       setSelected(initialWorkspaceId);
@@ -702,6 +705,8 @@ function CourseScope({
   }, [initialMaterialId]);
   const openCourse = useCallback(
     (id: string, activityId?: string) => {
+      searchOffset.current = null;
+      pendingSearchReturn.current = null;
       scrollRef.current?.scrollTo({ y: 0, animated: false });
       contentOffsetYRef.current = 0;
       setFocusActivityId(activityId);
@@ -713,7 +718,15 @@ function CourseScope({
   return (
     <ScrollView
       ref={scrollRef}
+      key={selected ? "detail" : "list"}
       testID="nuni-courses-scroll"
+      onContentSizeChange={selected ? undefined : () => {
+        const offset = pendingSearchReturn.current;
+        if (offset === null) return;
+        pendingSearchReturn.current = null;
+        scrollRef.current?.scrollTo({ y: offset, animated: false });
+        contentOffsetYRef.current = offset;
+      }}
       keyboardShouldPersistTaps="handled"
       scrollEventThrottle={16}
       onScroll={(event) => {
@@ -730,8 +743,8 @@ function CourseScope({
           classes={classes}
           classroom={classroom}
           onBack={() => {
-            scrollRef.current?.scrollTo({ y: searchOffset.current, animated: false });
-            contentOffsetYRef.current = searchOffset.current;
+            pendingSearchReturn.current = searchOffset.current;
+            searchOffset.current = null;
             setFocusActivityId(undefined);
             setFocusMaterialId(undefined);
             setSelected(null);
@@ -744,6 +757,7 @@ function CourseScope({
       ) : (
         <>
           <CrossCourseMaterialSearch state={searchState} active={active && focused} join={() => setJoinRequested((value) => value + 1)} classes={classes} open={(courseId, materialId) => {
+            pendingSearchReturn.current = null;
             searchOffset.current = contentOffsetYRef.current;
             scrollRef.current?.scrollTo({ y: 0, animated: false });
             contentOffsetYRef.current = 0;
