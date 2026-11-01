@@ -1,3 +1,7 @@
+import { buildPersonalToday } from '@campus/shared';
+import { loadPersonalImports } from '../services/personalImports';
+import { loadPersonalTimetable, personalTimetableRecords } from '../services/personalTimetable';
+import { buildNextClassSnapshot, nextClassState } from './nextClassSnapshot';
 /* eslint-disable */
 /**
  * Widget 資料提供者
@@ -76,113 +80,46 @@ function makeWidgetCacheKey(
   });
 }
 
-function getDayOfWeek(date: Date): string {
-  const days = ['日', '一', '二', '三', '四', '五', '六'];
-  return `週${days[date.getDay()]}`;
-}
-
 function formatTime(date: Date): string {
   return date.toLocaleTimeString('zh-TW', { hour: '2-digit', minute: '2-digit' });
 }
 
-function getMinutesUntil(targetTime: string): number {
-  const now = new Date();
-  const [hours, minutes] = targetTime.split(':').map(Number);
-  const target = new Date(now);
-  target.setHours(hours, minutes, 0, 0);
-  return Math.max(0, Math.floor((target.getTime() - now.getTime()) / 60000));
+async function readTimetableRecords(userId: string, schoolId: string) {
+  if (!userId.trim()) return [];
+  const owner = userId.startsWith('nuni:') ? userId : `firebase:${userId}`;
+  const [ledger, timetable] = await Promise.all([
+    loadPersonalImports({ owner, schoolId }),
+    loadPersonalTimetable(owner.startsWith('nuni:') ? null : userId, schoolId,
+      owner.startsWith('nuni:') ? owner : undefined),
+  ]);
+  return personalTimetableRecords(timetable, ledger.records);
 }
-
-export async function getTodayScheduleData(
-  userId: string,
-  schoolId: string,
-): Promise<TodayScheduleWidgetData> {
-  const cacheKey = makeWidgetCacheKey('todaySchedule', { userId, schoolId });
-  const cached = await getCache<TodayScheduleWidgetData>(cacheKey);
-  if (cached) return cached;
-
+export async function getTodayScheduleData(userId: string, schoolId: string): Promise<TodayScheduleWidgetData> {
   const now = new Date();
-  const dayOfWeek = now.getDay();
-
-  // 模擬課表資料（實際應從 Firebase 取得）
-  const mockCourses = [
-    { id: '1', name: '微積分', time: '08:10-10:00', location: '理學院 101', color: '#4F46E5' },
-    { id: '2', name: '程式設計', time: '10:20-12:10', location: '資工系 302', color: '#34C759' },
-    { id: '3', name: '資料結構', time: '14:10-16:00', location: '資工系 201', color: '#D70015' },
-  ].filter(() => dayOfWeek >= 1 && dayOfWeek <= 5); // 只有平日有課
-
-  const data: TodayScheduleWidgetData = {
-    type: 'todaySchedule',
-    timestamp: now.toISOString(),
-    data: {
-      date: now.toLocaleDateString('zh-TW'),
-      dayOfWeek: getDayOfWeek(now),
-      courses: dayOfWeek >= 1 && dayOfWeek <= 5 ? mockCourses : [],
-      totalClasses: dayOfWeek >= 1 && dayOfWeek <= 5 ? mockCourses.length : 0,
-    },
-  };
-
-  await setCache(cacheKey, data);
-  return data;
+  const plan = buildPersonalToday(await readTimetableRecords(userId, schoolId), { schoolId, now });
+  return { type: 'todaySchedule', timestamp: now.toISOString(), data: {
+    date: now.toLocaleDateString('zh-TW', { timeZone: 'Asia/Taipei' }),
+    dayOfWeek: `週${'日一二三四五六日'[plan.weekday]}`,
+    courses: plan.today.map((entry) => ({ id: entry.row.id, name: entry.row.title,
+      time: `${entry.startTime}-${entry.endTime}`, location: entry.row.location || '教室未填' })),
+    totalClasses: plan.today.length,
+  } };
 }
-
-export async function getNextClassData(
-  userId: string,
-  schoolId: string,
-): Promise<NextClassWidgetData> {
-  const cacheKey = makeWidgetCacheKey('nextClass', { userId, schoolId });
-  const cached = await getCache<NextClassWidgetData>(cacheKey);
-  if (cached) return cached;
-
+export async function getNextClassData(userId: string, schoolId: string): Promise<NextClassWidgetData> {
   const now = new Date();
-  const currentHour = now.getHours();
-  const dayOfWeek = now.getDay();
-
-  // 模擬下一堂課資料
-  let data: NextClassWidgetData;
-
-  if (dayOfWeek === 0 || dayOfWeek === 6) {
-    data = {
-      type: 'nextClass',
-      timestamp: now.toISOString(),
-      data: {
-        hasNextClass: false,
-        message: '今天沒有課程，好好休息！',
-      },
-    };
-  } else if (currentHour >= 18) {
-    data = {
-      type: 'nextClass',
-      timestamp: now.toISOString(),
-      data: {
-        hasNextClass: false,
-        message: '今天的課程已結束',
-      },
-    };
-  } else {
-    const nextStartTime =
-      currentHour < 8 ? '08:10' : currentHour < 10 ? '10:20' : currentHour < 14 ? '14:10' : '16:20';
-
-    data = {
-      type: 'nextClass',
-      timestamp: now.toISOString(),
-      data: {
-        hasNextClass: true,
-        course: {
-          id: '1',
-          name: currentHour < 8 ? '微積分' : currentHour < 10 ? '程式設計' : '資料結構',
-          startTime: nextStartTime,
-          endTime: currentHour < 8 ? '10:00' : currentHour < 10 ? '12:10' : '16:00',
-          location: currentHour < 8 ? '理學院 101' : currentHour < 10 ? '資工系 302' : '資工系 201',
-          instructor: '王教授',
-          minutesUntilStart: getMinutesUntil(nextStartTime),
-        },
-      },
-    };
-  }
-
-  await setCache(cacheKey, data);
-  return data;
+  const snapshot = buildNextClassSnapshot(await readTimetableRecords(userId, schoolId), schoolId, now);
+  const state = nextClassState(snapshot, now.getTime());
+  const course = 'course' in state ? state.course : undefined;
+  const clock = (instant: number) => new Date(instant).toLocaleTimeString('zh-TW', {
+    timeZone: 'Asia/Taipei', hour: '2-digit', minute: '2-digit', hour12: false,
+  });
+  return { type: 'nextClass', timestamp: now.toISOString(), data: {
+    hasNextClass: !!course,
+    ...(course ? { course: { id: course.id, name: course.title, location: course.location,
+      startTime: clock(course.startAt), endTime: clock(course.endAt),
+      minutesUntilStart: Math.max(0, Math.ceil((course.startAt - now.getTime()) / 60000)),
+    } } : { message: snapshot.incomplete ? '有課程尚未排定時間' : '今天沒有課程' }),
+  } };
 }
 
 export async function getCafeteriaMenuData(

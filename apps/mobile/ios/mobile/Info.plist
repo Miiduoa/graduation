@@ -127,5 +127,9 @@
     <string>Automatic</string>
     <key>UIViewControllerBasedStatusBarAppearance</key>
     <false/>
+    <key>NSSupportsLiveActivities</key>
+    <true/>
+    <key>NextClassAppGroup</key>
+    <string>group.com.campus.app.dev</string>
   </dict>
 </plist>

@@ -22,6 +22,10 @@ import {
   type MobileImportAiAvailability,
 } from '../services/imports/personalImportAi';
 import { parsePersonalImportAiResponse } from '@campus/shared/src/imports/aiRecognition';
+import { loadPersonalImportDraft } from '../services/imports/personalImportDraft';
+
+// Full screenshot review includes several native renders and an on-device draft round trip.
+jest.setTimeout(60000);
 
 let mockScope: { owner: string; schoolId: string } | null;
 const mockRequest = jest.fn();
@@ -232,6 +236,9 @@ test.each([
   '%s preview requires confirmation and saves a visible personal record',
   async (kind, content) => {
     const view = render(<PersonalImportScreen />);
+    await waitFor(() => expect(view.queryByText('正在讀取匯入草稿…')).toBeNull(), {
+      timeout: 10000,
+    });
     await waitFor(() => expect(view.queryByLabelText('讀取匯入紀錄')).toBeNull());
     fill(view, kind, content);
     expect(view.getByText(personalImportPreviewNotice(1))).toBeTruthy();
@@ -253,6 +260,7 @@ test('with sync enabled, saving only reports the local add', async () => {
     JSON.stringify({ version: 1, records: [], batches: [], sync: { enabled: true, base: null } }),
   );
   const view = render(<PersonalImportScreen />);
+  await waitFor(() => expect(view.queryByText('正在讀取匯入草稿…')).toBeNull(), { timeout: 10000 });
   await waitFor(() => expect(view.queryByLabelText('讀取匯入紀錄')).toBeNull());
   fill(view, 'grades', '課程名稱,學分,成績\n微積分,3,A-');
   fireEvent.press(view.getByText('確認新增 1 筆'));
@@ -263,6 +271,7 @@ test('with sync enabled, saving only reports the local add', async () => {
 
 test('unknown columns and incomplete CSV cannot silently bypass preview errors', async () => {
   const view = render(<PersonalImportScreen />);
+  await waitFor(() => expect(view.queryByText('正在讀取匯入草稿…')).toBeNull(), { timeout: 10000 });
   await waitFor(() => expect(view.queryByLabelText('讀取匯入紀錄')).toBeNull());
   fill(view, 'grades', '課程名稱,學分,成績\n微積分,3,90,未對應資料');
   expect(view.getByText('確認新增 1 筆')).toBeTruthy();
@@ -275,6 +284,7 @@ test('unknown columns and incomplete CSV cannot silently bypass preview errors',
 
 test('account refresh hides drafts and restores them only for the same account', async () => {
   const view = render(<PersonalImportScreen />);
+  await waitFor(() => expect(view.queryByText('正在讀取匯入草稿…')).toBeNull(), { timeout: 10000 });
   fireEvent.changeText(view.getByLabelText('貼上或修正原始文字'), '自己的課表文字');
   mockScope = null;
   mockPlatform = { ...mockPlatform, loading: true };
@@ -303,6 +313,7 @@ test('an OCR response arriving after cancellation cannot replace typed input', a
       }),
   );
   const view = render(<PersonalImportScreen />);
+  await waitFor(() => expect(view.queryByText('正在讀取匯入草稿…')).toBeNull(), { timeout: 10000 });
   fireEvent.press(view.getByText('選擇截圖'));
   await waitFor(() => expect(mockRecognize).toHaveBeenCalled());
   fireEvent.press(view.getByText('取消讀取'));
@@ -316,6 +327,7 @@ test('an OCR response arriving after cancellation cannot replace typed input', a
 
 test('recurring ICS stays blocked even when its first event has valid editable fields', async () => {
   const view = render(<PersonalImportScreen />);
+  await waitFor(() => expect(view.queryByText('正在讀取匯入草稿…')).toBeNull(), { timeout: 10000 });
   await waitFor(() => expect(view.queryByLabelText('讀取匯入紀錄')).toBeNull());
   fill(
     view,
@@ -357,6 +369,7 @@ test('class link is explicitly selected from the accessible workspace list witho
   };
   mockRequest.mockResolvedValue({ workspaces: [workspace] });
   const view = render(<PersonalImportScreen />);
+  await waitFor(() => expect(view.queryByText('正在讀取匯入草稿…')).toBeNull(), { timeout: 10000 });
   fill(view, 'grades', '課程名稱,學分,成績\n微積分,3,A-');
   await waitFor(() => expect(view.getByText('微積分甲班（學生）')).toBeTruthy());
   fireEvent.press(view.getByText('微積分甲班（學生）'));
@@ -377,6 +390,7 @@ test('correcting screenshot text preserves space-delimited table parsing', async
   });
   mockRecognize.mockResolvedValue('課程名稱  學分  成績\n微積分  3  85');
   const view = render(<PersonalImportScreen />);
+  await waitFor(() => expect(view.queryByText('正在讀取匯入草稿…')).toBeNull(), { timeout: 10000 });
   fireEvent.press(view.getByText('成績與學分'));
   fireEvent.changeText(view.getByLabelText('這批資料的學年度（例如 115）'), '115');
   fireEvent.changeText(view.getByLabelText('這批資料的學期（例如 1、2、暑期）'), '1');
@@ -414,6 +428,7 @@ test('starts new pasted data without inheriting the previous screenshot source',
   });
   mockRecognize.mockResolvedValue('課程名稱,學分,成績\n資料庫,3,85');
   const view = render(<PersonalImportScreen />);
+  await waitFor(() => expect(view.queryByText('正在讀取匯入草稿…')).toBeNull(), { timeout: 10000 });
   await waitFor(() => expect(view.queryByLabelText('讀取匯入紀錄')).toBeNull());
   fireEvent.press(view.getByText('成績與學分'));
   fireEvent.changeText(view.getByLabelText('這批資料的學年度（例如 115）'), '115');
@@ -437,6 +452,7 @@ test('starts new pasted data without inheriting the previous screenshot source',
 
 test('asks before undoing and keeps records when the person chooses not to', async () => {
   const view = render(<PersonalImportScreen />);
+  await waitFor(() => expect(view.queryByText('正在讀取匯入草稿…')).toBeNull(), { timeout: 10000 });
   await waitFor(() => expect(view.queryByLabelText('讀取匯入紀錄')).toBeNull());
   fill(view, 'grades', '課程名稱,學分,成績\n微積分,3,A-');
   fireEvent.press(view.getByText('確認新增 1 筆'));
@@ -456,6 +472,7 @@ test('shows a Chinese notice when the screenshot file cannot be opened', async (
   });
   mockRecognize.mockRejectedValue(new Error('The source image could not be decoded.'));
   const view = render(<PersonalImportScreen />);
+  await waitFor(() => expect(view.queryByText('正在讀取匯入草稿…')).toBeNull(), { timeout: 10000 });
   fireEvent.press(view.getByText('選擇截圖'));
   await waitFor(() => expect(view.getByText(PERSONAL_IMPORT_IMAGE_UNREADABLE)).toBeTruthy());
   expect(view.queryByText(/could not be decoded/i)).toBeNull();
@@ -519,6 +536,7 @@ test('backup restores mixed kinds and terms only after review without activating
     },
   ]);
   const view = render(<PersonalImportScreen />);
+  await waitFor(() => expect(view.queryByText('正在讀取匯入草稿…')).toBeNull(), { timeout: 10000 });
   fireEvent.press(view.getByText('從備份檔還原'));
   await waitFor(() => expect(view.getByText('確認新增 3 筆')).toBeTruthy());
   expect((await loadPersonalImports(scope)).records).toHaveLength(0);
@@ -539,6 +557,7 @@ test('backup restores mixed kinds and terms only after review without activating
 test('wrong-school backup is rejected without changing the current ledger', async () => {
   chooseBackup([{ ...backupGrade(), schoolId: 'ntu' }]);
   const view = render(<PersonalImportScreen />);
+  await waitFor(() => expect(view.queryByText('正在讀取匯入草稿…')).toBeNull(), { timeout: 10000 });
   fireEvent.press(view.getByText('從備份檔還原'));
   await waitFor(() => expect(view.getByText(/與目前學校不同/)).toBeTruthy());
   expect(view.queryByText('確認新增 1 筆')).toBeNull();
@@ -554,6 +573,7 @@ test('late backup file result cannot populate another account preview', async ()
     }),
   );
   const view = render(<PersonalImportScreen />);
+  await waitFor(() => expect(view.queryByText('正在讀取匯入草稿…')).toBeNull(), { timeout: 10000 });
   fireEvent.press(view.getByText('從備份檔還原'));
   await waitFor(() => expect(mockFileText).toHaveBeenCalled());
   mockScope = { ...scope, owner: 'nuni:pa-b' };
@@ -568,6 +588,7 @@ test('late backup file result cannot populate another account preview', async ()
 test('backup sharing failure is shown without claiming that a file was saved', async () => {
   chooseBackup();
   const view = render(<PersonalImportScreen />);
+  await waitFor(() => expect(view.queryByText('正在讀取匯入草稿…')).toBeNull(), { timeout: 10000 });
   fireEvent.press(view.getByText('從備份檔還原'));
   await waitFor(() => expect(view.getByText('確認新增 1 筆')).toBeTruthy());
   fireEvent.press(view.getByText('確認新增 1 筆'));
@@ -582,6 +603,7 @@ test('backup sharing failure is shown without claiming that a file was saved', a
 test('record deletion requires confirmation naming that record', async () => {
   chooseBackup();
   const view = render(<PersonalImportScreen route={{ params: { kind: 'grades' } }} />);
+  await waitFor(() => expect(view.queryByText('正在讀取匯入草稿…')).toBeNull(), { timeout: 10000 });
   fireEvent.press(view.getByText('從備份檔還原'));
   await waitFor(() => expect(view.getByText('確認新增 1 筆')).toBeTruthy());
   fireEvent.press(view.getByText('確認新增 1 筆'));
@@ -599,6 +621,7 @@ test('record deletion requires confirmation naming that record', async () => {
 test('file picker accepts PDF, XLSX and TSV types without reading binary via text()', async () => {
   chooseDocument(sampleWorkbook());
   const view = render(<PersonalImportScreen />);
+  await waitFor(() => expect(view.queryByText('正在讀取匯入草稿…')).toBeNull(), { timeout: 10000 });
   await waitFor(() => expect(view.queryByLabelText('讀取匯入紀錄')).toBeNull());
   fireEvent.press(view.getByText('選擇檔案'));
   await waitFor(() => expect(mockDocumentRead).toHaveBeenCalled());
@@ -623,6 +646,7 @@ test('file picker accepts PDF, XLSX and TSV types without reading binary via tex
 test('mixed sheet selection with distinct header rows builds a draft only after confirm', async () => {
   chooseDocument(sampleWorkbook());
   const view = render(<PersonalImportScreen />);
+  await waitFor(() => expect(view.queryByText('正在讀取匯入草稿…')).toBeNull(), { timeout: 10000 });
   await waitFor(() => expect(view.queryByLabelText('讀取匯入紀錄')).toBeNull());
   fireEvent.press(view.getByText('成績與學分'));
   fireEvent.changeText(view.getByLabelText('這批資料的學年度（例如 115）'), '115');
@@ -653,6 +677,7 @@ test('mixed sheet selection with distinct header rows builds a draft only after 
 test('cancelling document preparation keeps the prior editable draft', async () => {
   chooseDocument(sampleWorkbook());
   const view = render(<PersonalImportScreen />);
+  await waitFor(() => expect(view.queryByText('正在讀取匯入草稿…')).toBeNull(), { timeout: 10000 });
   await waitFor(() => expect(view.queryByLabelText('讀取匯入紀錄')).toBeNull());
   fireEvent.press(view.getByText('成績與學分'));
   fireEvent.changeText(view.getByLabelText('這批資料的學年度（例如 115）'), '115');
@@ -693,6 +718,7 @@ test('late document read after account switch cannot leave a stale prep draft', 
     ],
   });
   const view = render(<PersonalImportScreen />);
+  await waitFor(() => expect(view.queryByText('正在讀取匯入草稿…')).toBeNull(), { timeout: 10000 });
   fireEvent.press(view.getByText('選擇檔案'));
   await waitFor(() => expect(mockDocumentRead).toHaveBeenCalled());
   mockScope = { ...scope, owner: 'nuni:pa-b' };
@@ -718,6 +744,7 @@ test('document errors stay Chinese and scan pages are not treated as readable te
     ],
   });
   const view = render(<PersonalImportScreen />);
+  await waitFor(() => expect(view.queryByText('正在讀取匯入草稿…')).toBeNull(), { timeout: 10000 });
   fireEvent.press(view.getByText('選擇檔案'));
   await waitFor(() => expect(view.getByText('此 PDF 已加密，請先解除密碼保護。')).toBeTruthy());
   expect(view.queryByText('準備讀取：locked.pdf')).toBeNull();
@@ -758,6 +785,7 @@ test('oversize PDF is rejected before the native document host runs', async () =
     ],
   });
   const view = render(<PersonalImportScreen />);
+  await waitFor(() => expect(view.queryByText('正在讀取匯入草稿…')).toBeNull(), { timeout: 10000 });
   fireEvent.press(view.getByText('選擇檔案'));
   await waitFor(() =>
     expect(view.getByText('PDF／Excel 上限 8 MiB，請拆成較小的檔案。')).toBeTruthy(),
@@ -790,6 +818,7 @@ test('total rows across all chosen sections are capped; nothing is imported or t
     sections: [gradeSection('a', '上學期', 300), gradeSection('b', '下學期', 300)],
   });
   const view = render(<PersonalImportScreen />);
+  await waitFor(() => expect(view.queryByText('正在讀取匯入草稿…')).toBeNull(), { timeout: 10000 });
   await waitFor(() => expect(view.queryByLabelText('讀取匯入紀錄')).toBeNull());
   fireEvent.press(view.getByText('成績與學分'));
   fireEvent.changeText(view.getByLabelText('這批資料的學年度（例如 115）'), '115');
@@ -840,6 +869,7 @@ test('PDF full-page reread wires pdfMode ocr and keeps preview on cancel or fail
   };
   chooseDocument(autoDoc, { name: 'hybrid.pdf', size: 4096, mimeType: 'application/pdf' });
   const view = render(<PersonalImportScreen />);
+  await waitFor(() => expect(view.queryByText('正在讀取匯入草稿…')).toBeNull(), { timeout: 10000 });
   fireEvent.press(view.getByText('成績與學分'));
   fireEvent.changeText(view.getByLabelText('這批資料的學年度（例如 115）'), '115');
   fireEvent.changeText(view.getByLabelText('這批資料的學期（例如 1、2、暑期）'), '1');
@@ -908,6 +938,7 @@ test('late PDF reread after account switch cannot replace the scoped document pr
   };
   chooseDocument(autoDoc, { name: 'scoped.pdf', size: 2048, mimeType: 'application/pdf' });
   const view = render(<PersonalImportScreen />);
+  await waitFor(() => expect(view.queryByText('正在讀取匯入草稿…')).toBeNull(), { timeout: 10000 });
   fireEvent.press(view.getByText('選擇檔案'));
   await waitFor(() => expect(view.getByText('準備讀取：scoped.pdf')).toBeTruthy());
   let resolveOcr!: (value: PersonalImportDocument) => void;
@@ -953,6 +984,9 @@ test.each([
   async (schoolId, banner) => {
     mockScope = { owner: scope.owner, schoolId };
     const view = render(<PersonalImportScreen />);
+    await waitFor(() => expect(view.queryByText('正在讀取匯入草稿…')).toBeNull(), {
+      timeout: 10000,
+    });
     await waitFor(() => expect(view.queryByLabelText('讀取匯入紀錄')).toBeNull());
     expect(view.getByText(new RegExp(banner))).toBeTruthy();
     expect(view.queryByText(/自動加入|自動註冊|已完成教師核對/)).toBeNull();
@@ -963,6 +997,7 @@ test.each([
 test('unknown school keeps raw times and still does not contact course access', async () => {
   mockScope = { owner: scope.owner, schoolId: 'unknown-school' };
   const view = render(<PersonalImportScreen />);
+  await waitFor(() => expect(view.queryByText('正在讀取匯入草稿…')).toBeNull(), { timeout: 10000 });
   await waitFor(() => expect(view.queryByLabelText('讀取匯入紀錄')).toBeNull());
   expect(view.getByText(/這所學校尚未設定課表格線，請保留原始時間/)).toBeTruthy();
   expect(view.queryByText(/目前使用/)).toBeNull();
@@ -981,6 +1016,7 @@ test('native saved school HTML tables enter editable review rather than saving i
     ],
   });
   const view = render(<PersonalImportScreen />);
+  await waitFor(() => expect(view.queryByText('正在讀取匯入草稿…')).toBeNull(), { timeout: 10000 });
   await waitFor(() => expect(view.queryByLabelText('讀取匯入紀錄')).toBeNull());
   fireEvent.press(view.getByText('成績與學分'));
   fireEvent.changeText(view.getByLabelText('這批資料的學年度（例如 115）'), '115');
@@ -1024,10 +1060,11 @@ test('AI results remain drafts until source review and explicit save', async () 
   readyAi();
   jest.mocked(runMobilePersonalImportAi).mockResolvedValue(aiResult());
   const view = render(<PersonalImportScreen />);
+  await waitFor(() => expect(view.queryByText('正在讀取匯入草稿…')).toBeNull(), { timeout: 10000 });
   await waitFor(() => expect(view.queryByLabelText('讀取匯入紀錄')).toBeNull());
   prepareAi(view);
   expect(runMobilePersonalImportAi).not.toHaveBeenCalled();
-  fireEvent.press(view.getByText('讓本機 AI 整理'));
+  fireEvent.press(view.getByText('用 AI 整理文字'));
   await view.findByLabelText('已逐筆核對 AI 結果');
   expect(view.getByText(aiSource)).toBeTruthy();
   expect(jest.mocked(runMobilePersonalImportAi).mock.calls[0][1]).toMatchObject({
@@ -1047,9 +1084,10 @@ test('editing an AI field or changing selection requires a new acknowledgement',
   readyAi();
   jest.mocked(runMobilePersonalImportAi).mockResolvedValue(aiResult());
   const view = render(<PersonalImportScreen />);
+  await waitFor(() => expect(view.queryByText('正在讀取匯入草稿…')).toBeNull(), { timeout: 10000 });
   await waitFor(() => expect(view.queryByLabelText('讀取匯入紀錄')).toBeNull());
   prepareAi(view);
-  fireEvent.press(view.getByText('讓本機 AI 整理'));
+  fireEvent.press(view.getByText('用 AI 整理文字'));
   await view.findByLabelText('已逐筆核對 AI 結果');
   fireEvent.press(view.getByLabelText('已逐筆核對 AI 結果'));
   fireEvent.press(view.getByText('編輯與連結課班'));
@@ -1069,8 +1107,9 @@ test('an AI failure preserves the original text and offers the existing parser',
     .mocked(runMobilePersonalImportAi)
     .mockRejectedValue(new Error('native error contains private source'));
   const view = render(<PersonalImportScreen />);
+  await waitFor(() => expect(view.queryByText('正在讀取匯入草稿…')).toBeNull(), { timeout: 10000 });
   prepareAi(view);
-  fireEvent.press(view.getByText('讓本機 AI 整理'));
+  fireEvent.press(view.getByText('用 AI 整理文字'));
   await view.findByText(/AI 未能完成這次整理/);
   expect(view.getByLabelText('貼上或修正原始文字').props.value).toBe(aiSource);
   expect(view.queryByText(/native error/)).toBeNull();
@@ -1088,8 +1127,9 @@ test('cancelled AI output cannot replace subsequently typed text', async () => {
       }),
   );
   const view = render(<PersonalImportScreen />);
+  await waitFor(() => expect(view.queryByText('正在讀取匯入草稿…')).toBeNull(), { timeout: 10000 });
   prepareAi(view);
-  fireEvent.press(view.getByText('讓本機 AI 整理'));
+  fireEvent.press(view.getByText('用 AI 整理文字'));
   fireEvent.press(view.getByText('取消 AI 整理'));
   expect(jest.mocked(runMobilePersonalImportAi).mock.calls[0][2].aborted).toBe(true);
   fireEvent.changeText(view.getByLabelText('貼上或修正原始文字'), '新的內容');
@@ -1110,8 +1150,11 @@ test.each(['學年度', '學期'])(
         }),
     );
     const view = render(<PersonalImportScreen />);
+    await waitFor(() => expect(view.queryByText('正在讀取匯入草稿…')).toBeNull(), {
+      timeout: 10000,
+    });
     prepareAi(view);
-    fireEvent.press(view.getByText('讓本機 AI 整理'));
+    fireEvent.press(view.getByText('用 AI 整理文字'));
     fireEvent.changeText(
       view.getByLabelText(
         field === '學年度' ? '這批資料的學年度（例如 115）' : '這批資料的學期（例如 1、2、暑期）',
@@ -1134,8 +1177,9 @@ test('an authentication refresh cancels AI work even if the same account returns
       }),
   );
   const view = render(<PersonalImportScreen />);
+  await waitFor(() => expect(view.queryByText('正在讀取匯入草稿…')).toBeNull(), { timeout: 10000 });
   prepareAi(view);
-  fireEvent.press(view.getByText('讓本機 AI 整理'));
+  fireEvent.press(view.getByText('用 AI 整理文字'));
   mockScope = null;
   view.rerender(<PersonalImportScreen />);
   expect(jest.mocked(runMobilePersonalImportAi).mock.calls[0][2].aborted).toBe(true);
@@ -1148,6 +1192,7 @@ test('an authentication refresh cancels AI work even if the same account returns
 
 test('model management mounts only after a deliberate tap and preserves the import text', async () => {
   const view = render(<PersonalImportScreen />);
+  await waitFor(() => expect(view.queryByText('正在讀取匯入草稿…')).toBeNull(), { timeout: 10000 });
   prepareAi(view);
   expect(view.queryByText('本機模型管理內容')).toBeNull();
   fireEvent.press(view.getByText('管理本機模型'));
@@ -1162,9 +1207,10 @@ test('model management mounts only after a deliberate tap and preserves the impo
 test('oversize AI sources remain intact and do not start generation', async () => {
   readyAi();
   const view = render(<PersonalImportScreen />);
+  await waitFor(() => expect(view.queryByText('正在讀取匯入草稿…')).toBeNull(), { timeout: 10000 });
   const longText = '文'.repeat(1001);
   fireEvent.changeText(view.getByLabelText('貼上或修正原始文字'), longText);
-  fireEvent.press(view.getByText('讓本機 AI 整理'));
+  fireEvent.press(view.getByText('用 AI 整理文字'));
   expect(runMobilePersonalImportAi).not.toHaveBeenCalled();
   expect(view.getByLabelText('貼上或修正原始文字').props.value).toBe(longText);
   await act(async () => {});
@@ -1177,6 +1223,7 @@ test('model management stays closed while the native engine is still working', a
     detail: '請等候這次運算結束。',
   };
   const view = render(<PersonalImportScreen />);
+  await waitFor(() => expect(view.queryByText('正在讀取匯入草稿…')).toBeNull(), { timeout: 10000 });
   const manage = view.getByRole('button', { name: '管理本機模型' });
   expect(manage).toBeDisabled();
   fireEvent.press(manage);
@@ -1186,6 +1233,7 @@ test('model management stays closed while the native engine is still working', a
 
 test('review filter exposes invalid rows without changing which records will be imported', async () => {
   const view = render(<PersonalImportScreen />);
+  await waitFor(() => expect(view.queryByText('正在讀取匯入草稿…')).toBeNull(), { timeout: 10000 });
   await waitFor(() => expect(view.queryByLabelText('讀取匯入紀錄')).toBeNull());
   fill(view, 'grades', '課程名稱,學分,成績\n資料庫,3,85\n英文,,90');
   fireEvent.press(view.getByText('只看待修正（1）'));
@@ -1198,6 +1246,7 @@ test('review filter exposes invalid rows without changing which records will be 
 
 test('an issue-filtered editor stays mounted while a corrected grade is still being typed', async () => {
   const view = render(<PersonalImportScreen />);
+  await waitFor(() => expect(view.queryByText('正在讀取匯入草稿…')).toBeNull(), { timeout: 10000 });
   await waitFor(() => expect(view.queryByLabelText('讀取匯入紀錄')).toBeNull());
   fill(view, 'grades', '課程名稱,學分,成績\n資料庫,3,');
   fireEvent.press(view.getByText('只看待修正（1）'));
@@ -1228,10 +1277,11 @@ test('correcting the exclusive end of an AI multi-day event clears that field er
   ).toBe(true);
   jest.mocked(runMobilePersonalImportAi).mockResolvedValue(result);
   const view = render(<PersonalImportScreen />);
+  await waitFor(() => expect(view.queryByText('正在讀取匯入草稿…')).toBeNull(), { timeout: 10000 });
   await waitFor(() => expect(view.queryByLabelText('讀取匯入紀錄')).toBeNull());
   fireEvent.press(view.getByText('行事曆'));
   fireEvent.changeText(view.getByLabelText('貼上或修正原始文字'), source);
-  fireEvent.press(view.getByText('讓本機 AI 整理'));
+  fireEvent.press(view.getByText('用 AI 整理文字'));
   await view.findByLabelText('已逐筆核對 AI 結果');
   fireEvent.press(view.getByLabelText('已逐筆核對 AI 結果'));
   fireEvent.press(view.getByText('確認新增 1 筆'));
@@ -1269,12 +1319,13 @@ test('original screenshot remains available after AI failure and is not saved wi
   prepareScreenshot();
   jest.mocked(runMobilePersonalImportAi).mockRejectedValue(new Error('generation failed'));
   const view = render(<PersonalImportScreen />);
+  await waitFor(() => expect(view.queryByText('正在讀取匯入草稿…')).toBeNull(), { timeout: 10000 });
   await waitFor(() => expect(view.queryByLabelText('讀取匯入紀錄')).toBeNull());
   prepareAi(view);
   fireEvent.press(view.getByText('選擇截圖'));
   const original = await view.findByLabelText('原始匯入截圖');
   expect(original.props.source).toEqual({ uri: 'file:///my-grades.png' });
-  fireEvent.press(view.getByText('讓本機 AI 整理'));
+  fireEvent.press(view.getByText('用 AI 整理文字'));
   await view.findByText(/AI 未能完成這次整理/);
   expect(view.getByLabelText('原始匯入截圖').props.source).toEqual({
     uri: 'file:///my-grades.png',
@@ -1295,6 +1346,7 @@ test('original screenshot remains available after AI failure and is not saved wi
 test('accepting a different file or starting fresh pasted text clears the old screenshot', async () => {
   prepareScreenshot();
   const view = render(<PersonalImportScreen />);
+  await waitFor(() => expect(view.queryByText('正在讀取匯入草稿…')).toBeNull(), { timeout: 10000 });
   fireEvent.press(view.getByText('選擇截圖'));
   await view.findByLabelText('原始匯入截圖');
   mockFileText.mockResolvedValue('課程名稱,學分,成績\n英文,2,90');
@@ -1314,6 +1366,7 @@ test('accepting a different file or starting fresh pasted text clears the old sc
 test('an open screenshot viewer cannot survive an account switch or restore a stale URI', async () => {
   prepareScreenshot();
   const view = render(<PersonalImportScreen />);
+  await waitFor(() => expect(view.queryByText('正在讀取匯入草稿…')).toBeNull(), { timeout: 10000 });
   fireEvent.press(view.getByText('選擇截圖'));
   await view.findByLabelText('原始匯入截圖');
   fireEvent.press(view.getByLabelText('放大核對原始截圖'));
@@ -1382,6 +1435,9 @@ test.each(['pdf', 'xlsx'] as const)(
       .mocked(runMobilePersonalImportAi)
       .mockImplementation(async (text, options) => recognizeSelectedDocument(text, options));
     const view = render(<PersonalImportScreen />);
+    await waitFor(() => expect(view.queryByText('正在讀取匯入草稿…')).toBeNull(), {
+      timeout: 10000,
+    });
     await waitFor(() => expect(view.queryByLabelText('讀取匯入紀錄')).toBeNull());
     await selectNonstandardDocument(view, format);
     fireEvent.press(view.getByText('用 AI 整理選取內容'));
@@ -1415,6 +1471,7 @@ test('failed document AI keeps the selected sections and starting rows for a ret
     .mockRejectedValueOnce(new Error('failed'))
     .mockImplementationOnce(async (text, options) => recognizeSelectedDocument(text, options));
   const view = render(<PersonalImportScreen />);
+  await waitFor(() => expect(view.queryByText('正在讀取匯入草稿…')).toBeNull(), { timeout: 10000 });
   await selectNonstandardDocument(view);
   fireEvent.press(view.getByText('用 AI 整理選取內容'));
   await view.findByText(/AI 未能完成這次整理/);
@@ -1437,6 +1494,7 @@ test('cancelled document AI cannot replace the retained document selection when 
       }),
   );
   const view = render(<PersonalImportScreen />);
+  await waitFor(() => expect(view.queryByText('正在讀取匯入草稿…')).toBeNull(), { timeout: 10000 });
   await selectNonstandardDocument(view, 'pdf');
   fireEvent.press(view.getByText('用 AI 整理選取內容'));
   fireEvent.press(view.getByText('取消 AI 整理'));
@@ -1454,6 +1512,7 @@ test('an overlong document selection is preserved and never silently truncated f
   document.sections[0].rows.push({ line: 4, cells: ['文'.repeat(1001)] });
   chooseDocument(document);
   const view = render(<PersonalImportScreen />);
+  await waitFor(() => expect(view.queryByText('正在讀取匯入草稿…')).toBeNull(), { timeout: 10000 });
   prepareAi(view);
   fireEvent.press(view.getByText('選擇檔案'));
   await view.findByText('準備讀取：nonstandard.xlsx');
@@ -1464,3 +1523,448 @@ test('an overlong document selection is preserved and never silently truncated f
   expect(view.getByText('☑ 修課紀錄')).toBeTruthy();
   expect((await loadPersonalImports(scope)).records).toHaveLength(0);
 });
+
+test('failed-range retry keeps edits made to completed rows', async () => {
+  readyAi();
+  const retrySource = '統計，學分 2，成績 91';
+  const first = { ...aiResult(), retryBatches: [{ text: retrySource, startLine: 2 }] };
+  jest.mocked(runMobilePersonalImportAi).mockResolvedValueOnce(first).mockImplementationOnce(async (_text, options) => {
+    const next = parsePersonalImportAiResponse(JSON.stringify({ complete: true, rows: [{ title: '統計', credits: 2, grade: '91', evidence: retrySource }] }), retrySource, options);
+    return { ...next, retryBatches: [] };
+  });
+  const view = render(<PersonalImportScreen />);
+  await waitFor(() => expect(view.queryByLabelText('讀取匯入紀錄')).toBeNull());
+  prepareAi(view);
+  fireEvent.changeText(view.getByLabelText('貼上或修正原始文字'), `${aiSource}\n${retrySource}`);
+  fireEvent.press(view.getByText('用 AI 整理文字'));
+  await view.findByLabelText('已逐筆核對 AI 結果');
+  fireEvent.press(view.getByText('編輯與連結課班'));
+  fireEvent.changeText(view.getByLabelText('成績'), '90');
+  fireEvent.press(view.getByText('重試未完成段落'));
+  await waitFor(() => expect(runMobilePersonalImportAi).toHaveBeenCalledTimes(2));
+  await view.findByText('確認新增 2 筆');
+  expect(jest.mocked(runMobilePersonalImportAi).mock.calls[1][3]?.retryBatches).toEqual(first.retryBatches);
+  fireEvent.press(view.getAllByText('編輯與連結課班')[0]);
+  expect(view.getByLabelText('成績').props.value).toBe('90');
+});
+
+test('completed progress is restored after leaving the screen before the next batch finishes', async () => {
+  readyAi();
+  let finish!: () => void;
+  jest.mocked(runMobilePersonalImportAi).mockImplementation((_text, _options, _signal, request) => {
+    request?.onProgress?.({ ...aiResult(), retryBatches: [{ text: '尚未完成的課程', startLine: 2 }] });
+    return new Promise((resolve) => { finish = () => resolve(aiResult()); });
+  });
+  const view = render(<PersonalImportScreen />);
+  await waitFor(() => expect(view.queryByLabelText('讀取匯入紀錄')).toBeNull());
+  prepareAi(view);
+  fireEvent.changeText(view.getByLabelText('貼上或修正原始文字'), `${aiSource}\n尚未完成的課程`);
+  fireEvent.press(view.getByText('用 AI 整理文字'));
+  await view.findByLabelText('已逐筆核對 AI 結果');
+  view.unmount();
+  const restored = render(<PersonalImportScreen />);
+  await restored.findByText('已恢復上次完成的待核對草稿；未完成段落可以重試。');
+  expect(restored.getByLabelText('貼上或修正原始文字').props.value).toBe(`${aiSource}\n尚未完成的課程`);
+  expect(restored.getByText('重試未完成段落')).toBeTruthy();
+  expect(restored.getByText('確認新增 1 筆')).toBeTruthy();
+  await act(async () => finish());
+  expect(restored.getByText('確認新增 1 筆')).toBeTruthy();
+});
+
+async function startDocumentProgress(view: ReturnType<typeof render>, previousText = '') {
+  let finish!: () => void;
+  const pending = jest.mocked(runMobilePersonalImportAi);
+  pending.mockImplementation(
+    (text, options) =>
+      new Promise((resolve) => {
+        finish = () => resolve(recognizeSelectedDocument(text, options));
+      }),
+  );
+  const document = nonstandardDocument();
+  document.sections[0].rows.push({ line: 4, cells: ['統計', '2', '91'] });
+  chooseDocument(document);
+  prepareAi(view);
+  fireEvent.changeText(view.getByLabelText('貼上或修正原始文字'), previousText);
+  fireEvent.press(view.getByText('選擇檔案'));
+  await view.findByText('準備讀取：nonstandard.xlsx');
+  fireEvent.press(view.getByText('□ 修課紀錄'));
+  fireEvent.press(view.getByText('第 2 列'));
+  fireEvent.press(view.getByText('用 AI 整理選取內容'));
+  const [text, options, signal, request] = pending.mock.calls[0];
+  const lines = text.split('\n');
+  const retryLine = lines.findIndex((line) => line.includes('統計'));
+  const retryBatches = [{ text: lines[retryLine], startLine: retryLine + 1 }];
+  const partial = { ...recognizeSelectedDocument(text, options), retryBatches };
+  await act(async () => request?.onProgress?.(partial));
+  await waitFor(async () =>
+    expect(await loadPersonalImportDraft(scope)).toMatchObject({
+      text,
+      options: { source: options.source },
+      retryBatches,
+    }),
+  );
+  return { text, options, signal, request, partial, retryBatches, finish };
+}
+
+test.each(['', '先前貼上的其他內容'])(
+  'cancelled document progress keeps the full source and retry range instead of %p through autosave and remount',
+  async (previousText) => {
+    readyAi();
+    const view = render(<PersonalImportScreen />);
+    await waitFor(() => expect(view.queryByLabelText('讀取匯入紀錄')).toBeNull());
+    const progress = await startDocumentProgress(view, previousText);
+    fireEvent.press(view.getByText('取消 AI 整理'));
+    expect(progress.signal.aborted).toBe(true);
+    await waitFor(async () =>
+      expect(await loadPersonalImportDraft(scope)).toMatchObject({
+        text: progress.text,
+        options: { source: progress.options.source },
+        retryBatches: progress.retryBatches,
+      }),
+    );
+    expect(view.getByLabelText('貼上或修正原始文字').props.value).toBe(progress.text);
+    expect(view.getByText('重試未完成段落')).toBeTruthy();
+    fireEvent.press(view.getByText('編輯與連結課班'));
+    fireEvent.changeText(view.getByLabelText('成績'), '88');
+    await waitFor(async () =>
+      expect(await loadPersonalImportDraft(scope)).toMatchObject({
+        text: progress.text,
+        options: { source: progress.options.source },
+        rows: [{ grade: '88', source: { type: 'file' } }],
+        retryBatches: progress.retryBatches,
+      }),
+    );
+    await act(async () => {
+      progress.request?.onProgress?.({ ...progress.partial, retryBatches: [] });
+      progress.finish();
+    });
+    expect(view.getByLabelText('成績').props.value).toBe('88');
+    expect((await loadPersonalImportDraft(scope))?.retryBatches).toHaveLength(1);
+    view.unmount();
+    const restored = render(<PersonalImportScreen />);
+    await restored.findByText('已恢復上次完成的待核對草稿；未完成段落可以重試。');
+    expect(restored.getByLabelText('貼上或修正原始文字').props.value).toBe(progress.text);
+    expect(restored.getByText('重試未完成段落')).toBeTruthy();
+    fireEvent.press(restored.getByText('編輯與連結課班'));
+    expect(restored.getByLabelText('成績').props.value).toBe('88');
+    expect(await loadPersonalImportDraft(scope)).toMatchObject({
+      text: progress.text,
+      options: { source: progress.options.source },
+      retryBatches: progress.retryBatches,
+    });
+    expect((await loadPersonalImports(scope)).records).toHaveLength(0);
+  },
+);
+
+test.each([
+  ['account', { ...scope, owner: 'nuni:pa-b' }],
+  ['school', { ...scope, schoolId: 'other-school' }],
+] as const)(
+  'late document progress cannot write after a %s switch or alter the saved retry range',
+  async (_label, nextScope) => {
+    readyAi();
+    const view = render(<PersonalImportScreen />);
+    await waitFor(() => expect(view.queryByLabelText('讀取匯入紀錄')).toBeNull());
+    const progress = await startDocumentProgress(view);
+    mockScope = nextScope;
+    view.rerender(<PersonalImportScreen />);
+    await waitFor(() => expect(view.queryByLabelText('讀取匯入紀錄')).toBeNull());
+    expect(progress.signal.aborted).toBe(true);
+    await act(async () => {
+      progress.request?.onProgress?.({ ...progress.partial, retryBatches: [] });
+      progress.finish();
+    });
+    expect(view.getByLabelText('貼上或修正原始文字').props.value).toBe('');
+    expect(view.queryByText('確認新增 1 筆')).toBeNull();
+    expect(await loadPersonalImportDraft(nextScope)).toBeNull();
+    expect(await loadPersonalImportDraft(scope)).toMatchObject({
+      text: progress.text,
+      options: { source: progress.options.source },
+      retryBatches: progress.retryBatches,
+    });
+    mockScope = { ...scope };
+    view.rerender(<PersonalImportScreen />);
+    await view.findByText('已恢復上次完成的待核對草稿；未完成段落可以重試。');
+    expect(view.getByLabelText('貼上或修正原始文字').props.value).toBe(progress.text);
+    expect(view.getByText('重試未完成段落')).toBeTruthy();
+  },
+);
+
+test('late AsyncStorage draft recovery cannot replace freshly pasted input', async () => {
+  let resolveDraft!: (value: string | null) => void;
+  const getItem = jest.mocked(AsyncStorage.getItem).getMockImplementation()!;
+  const spy = jest.spyOn(AsyncStorage, 'getItem').mockImplementation((key) =>
+    key.startsWith('campus.personal-import-draft.v1:')
+      ? new Promise((resolve) => { resolveDraft = resolve; })
+      : getItem(key));
+  try {
+    const view = render(<PersonalImportScreen />);
+    await waitFor(() => expect(resolveDraft).toBeDefined());
+    await waitFor(() => expect(view.queryByLabelText('讀取匯入紀錄')).toBeNull());
+    fireEvent.changeText(view.getByLabelText('貼上或修正原始文字'), '新貼上的資料');
+    await act(async () => resolveDraft(JSON.stringify({
+      text: '舊草稿', options: { kind: 'grades', schoolId: 'pu', academicYear: '114', semester: '2' },
+      rows: [], issues: [], retryBatches: [],
+    })));
+    expect(view.getByLabelText('貼上或修正原始文字').props.value).toBe('新貼上的資料');
+    expect(view.queryByText('已恢復上次完成的待核對草稿；未完成段落可以重試。')).toBeNull();
+  } finally {
+    spy.mockRestore();
+    jest.mocked(AsyncStorage.getItem).mockImplementation(getItem);
+  }
+});
+
+test('record links show only the matching personal record and can return to all records', async () => {
+  const first = backupGrade();
+  const second = { ...backupGrade(), id: 'other-grade', title: '另一筆成績' };
+  await AsyncStorage.setItem(personalImportStorageKey(scope), JSON.stringify({ version: 1, records: [first, second], batches: [] }));
+  const view = render(<PersonalImportScreen route={{ params: { kind: 'grades', recordId: first.id } }} />);
+  await view.findByText('備份英文');
+  expect(view.queryByText('另一筆成績')).toBeNull();
+  fireEvent.press(view.getByText('查看全部個人紀錄'));
+  await view.findByText('另一筆成績');
+});
+
+test('screenshot grid edits, split, missing class and deletion survive remount before explicit import', async () => {
+  jest.mocked(ImagePicker.launchImageLibraryAsync).mockResolvedValue({
+    canceled: false,
+    assets: [{ uri: 'file:///timetable.png', width: 100, height: 100, mimeType: 'image/png' }],
+  });
+  mockRecognize.mockResolvedValue(
+    '課程名稱,星期,開始節次,結束節次,教室\n錯字,一,1,2,錯教室\n誤讀,三,3,3,X',
+  );
+  let view = render(<PersonalImportScreen />);
+  await waitFor(() => expect(view.queryByText('正在讀取匯入草稿…')).toBeNull(), { timeout: 10000 });
+  fireEvent.changeText(view.getByLabelText('這批資料的學年度（例如 115）'), '115');
+  fireEvent.changeText(view.getByLabelText('這批資料的學期（例如 1、2、暑期）'), '1');
+  fireEvent.press(view.getByText('選擇截圖'));
+  await waitFor(() =>
+    expect(
+      view.getByDisplayValue(
+        '課程名稱,星期,開始節次,結束節次,教室\n錯字,一,1,2,錯教室\n誤讀,三,3,3,X',
+      ),
+    ).toBeTruthy(),
+  );
+  fireEvent.press(view.getByText('整理成可編輯資料'));
+  await waitFor(() => expect(view.getByLabelText('修正星期一第1節 錯字')).toBeTruthy());
+  fireEvent.press(view.getByLabelText('修正星期一第1節 錯字'));
+  fireEvent.changeText(view.getByLabelText('名稱'), '微積分');
+  fireEvent.changeText(view.getByLabelText('教室（選填）'), 'B101');
+  fireEvent.press(view.getByText('拆成單節課程'));
+  fireEvent.press(view.getByLabelText('修正星期一第1節 微積分'));
+  fireEvent.press(view.getByText('與下一節同名課程合併'));
+  fireEvent.press(view.getByText('拆成單節課程'));
+  fireEvent.press(view.getByLabelText('修正星期一第2節 微積分'));
+  fireEvent.changeText(view.getByLabelText('名稱'), '英文');
+  fireEvent.changeText(view.getByLabelText('星期（1–7）'), '2');
+  fireEvent.changeText(view.getByLabelText('開始節次'), '4');
+  fireEvent.changeText(view.getByLabelText('結束節次'), '4');
+  fireEvent.press(view.getByText('回到週課表核對'));
+  fireEvent.press(view.getByLabelText('修正星期三第3節 誤讀'));
+  fireEvent.press(view.getByText('刪除此草稿課程'));
+  fireEvent.press(view.getByLabelText('新增星期五第5節'));
+  fireEvent.changeText(view.getByLabelText('名稱'), '漏課');
+  fireEvent.press(view.getByText('回到週課表核對'));
+  expect((await loadPersonalImports(scope)).records).toHaveLength(0);
+  await act(async () => {});
+  view.unmount();
+  view = render(<PersonalImportScreen />);
+  await waitFor(() => expect(view.getByLabelText('修正星期二第4節 英文')).toBeTruthy());
+  expect(view.queryByLabelText('修正星期三第3節 誤讀')).toBeNull();
+  fireEvent.press(view.getByText('補上對照截圖（保留草稿）'));
+  await view.findByText('已補上對照截圖，草稿內容沒有變更。');
+  expect(view.getByLabelText('修正星期二第4節 英文')).toBeTruthy();
+  fireEvent.press(view.getByText('確認新增 3 筆'));
+  await waitFor(() => expect(view.getByText(personalImportSavedNotice(3))).toBeTruthy());
+  expect((await loadPersonalImports(scope)).records).toEqual(
+    expect.arrayContaining([
+      expect.objectContaining({
+        title: '微積分',
+        dayOfWeek: 1,
+        startPeriod: 1,
+        endPeriod: 1,
+        location: 'B101',
+      }),
+      expect.objectContaining({ title: '英文', dayOfWeek: 2, startPeriod: 4, endPeriod: 4 }),
+      expect.objectContaining({ title: '漏課', dayOfWeek: 5, startPeriod: 5 }),
+    ]),
+  );
+  fireEvent.press(view.getByLabelText('新增星期一第1節'));
+  fireEvent.press(view.getByText('回到週課表核對'));
+  fireEvent.press(view.getByText('取消這份草稿'));
+  expect((await loadPersonalImports(scope)).records).toHaveLength(3);
+});
+
+test('failed screenshot reading can be completed entirely by manual grid input', async () => {
+  jest.mocked(ImagePicker.launchImageLibraryAsync).mockResolvedValue({
+    canceled: false,
+    assets: [{ uri: 'file:///unreadable.png', width: 100, height: 100, mimeType: 'image/png' }],
+  });
+  mockRecognize.mockRejectedValue(new Error('無法讀取截圖'));
+  const view = render(<PersonalImportScreen />);
+  await waitFor(() => expect(view.queryByText('正在讀取匯入草稿…')).toBeNull(), { timeout: 10000 });
+  fireEvent.changeText(view.getByLabelText('這批資料的學年度（例如 115）'), '115');
+  fireEvent.changeText(view.getByLabelText('這批資料的學期（例如 1、2、暑期）'), '1');
+  fireEvent.press(view.getByText('選擇截圖'));
+  await view.findByText('無法讀取截圖');
+  fireEvent.press(view.getByLabelText('新增星期二第3節'));
+  fireEvent.changeText(view.getByLabelText('名稱'), '手動課程');
+  fireEvent.press(view.getByText('回到週課表核對'));
+  expect((await loadPersonalImports(scope)).records).toHaveLength(0);
+  fireEvent.press(view.getByText('確認新增 1 筆'));
+  await view.findByText(personalImportSavedNotice(1));
+  expect((await loadPersonalImports(scope)).records[0]).toMatchObject({
+    title: '手動課程',
+    dayOfWeek: 2,
+    startPeriod: 3,
+  });
+});
+
+test('未知學校在清單與格子拆分均提示並保留手填時間，返回後可確認原課程', async () => {
+  mockScope = { owner: scope.owner, schoolId: 'unknown-school' };
+  const view = render(<PersonalImportScreen />);
+  await waitFor(() => expect(view.queryByText('正在讀取匯入草稿…')).toBeNull(), { timeout: 10000 });
+  await waitFor(() => expect(view.queryByLabelText('讀取匯入紀錄')).toBeNull());
+  fireEvent.changeText(view.getByLabelText('這批資料的學年度（例如 115）'), '115');
+  fireEvent.changeText(view.getByLabelText('這批資料的學期（例如 1、2、暑期）'), '1');
+  fireEvent.changeText(
+    view.getByLabelText('貼上或修正原始文字'),
+    '課程名稱,星期,開始節次,結束節次,開始時間,結束時間\n手填課程,一,1,2,09:00,10:50',
+  );
+  fireEvent.press(view.getByText('整理成可編輯資料'));
+  await view.findByLabelText('修正星期一第1節 手填課程');
+  fireEvent.press(view.getByText('拆成單節課程'));
+  expect(view.getByText(/無法可靠拆分；已保留原課程與手填時間/)).toBeTruthy();
+  fireEvent.press(view.getByLabelText('修正星期一第1節 手填課程'));
+  expect(view.getByLabelText('開始時間 HH:mm').props.value).toBe('09:00');
+  fireEvent.press(view.getByText('拆成單節課程'));
+  expect(view.getAllByText(/無法可靠拆分；已保留原課程與手填時間/).length).toBeGreaterThan(0);
+  expect(view.getByLabelText('結束時間 HH:mm').props.value).toBe('10:50');
+  fireEvent.changeText(view.getByLabelText('結束時間 HH:mm'), '11:00');
+  fireEvent.press(view.getByText('回到週課表核對'));
+  fireEvent.press(view.getByLabelText('修正星期一第1節 手填課程'));
+  expect(view.getByLabelText('結束時間 HH:mm').props.value).toBe('11:00');
+  fireEvent.changeText(view.getByLabelText('結束時間 HH:mm'), '10:50');
+  fireEvent.press(view.getByText('回到週課表核對'));
+  fireEvent.press(view.getByText('確認新增 1 筆'));
+  await waitFor(async () => {
+    const records = (await loadPersonalImports(mockScope!)).records;
+    expect(records).toHaveLength(1);
+    expect(records[0]).toMatchObject({
+      startPeriod: 1,
+      endPeriod: 2,
+      startTime: '09:00',
+      endTime: '10:50',
+    });
+  });
+});
+
+test('未勾選前節數學時仍保留下一節與英文供正式匯入', async () => {
+  const view = render(<PersonalImportScreen />);
+  await waitFor(() => expect(view.queryByText('正在讀取匯入草稿…')).toBeNull(), { timeout: 10000 });
+  fireEvent.changeText(view.getByLabelText('這批資料的學年度（例如 115）'), '115');
+  fireEvent.changeText(view.getByLabelText('這批資料的學期（例如 1、2、暑期）'), '1');
+  fireEvent.changeText(
+    view.getByLabelText('貼上或修正原始文字'),
+    '課程名稱,星期,開始節次,結束節次,教室\n數學,一,1,1,A101\n數學,一,2,2,A101\n英文,二,3,3,B101',
+  );
+  fireEvent.press(view.getByText('整理成可編輯資料'));
+  await view.findByLabelText('修正星期一第1節 數學');
+  fireEvent.press(view.getAllByLabelText('匯入 數學')[0]);
+  expect(view.queryByLabelText('修正星期一第1節 數學')).toBeNull();
+  fireEvent.press(view.getByLabelText('修正星期一第2節 數學'));
+  expect(
+    view.getByRole('button', { name: '與下一節同名課程合併' }).props.accessibilityState?.disabled,
+  ).toBe(true);
+  fireEvent.press(view.getByText('與下一節同名課程合併'));
+  fireEvent.press(view.getByText('回到週課表核對'));
+  expect((await loadPersonalImports(scope)).records).toHaveLength(0);
+  fireEvent.press(view.getByText('確認新增 2 筆'));
+  await view.findByText(personalImportSavedNotice(2));
+  expect((await loadPersonalImports(scope)).records).toEqual(
+    expect.arrayContaining([
+      expect.objectContaining({ title: '數學', dayOfWeek: 1, startPeriod: 2, endPeriod: 2 }),
+      expect.objectContaining({ title: '英文', dayOfWeek: 2, startPeriod: 3, endPeriod: 3 }),
+    ]),
+  );
+});
+
+test.each(['cancel', 'complete', 'empty', 'zero', 'error', 'restore'] as const)(
+  'retry progress preserves excluded rows and edited grades through %s',
+  async (outcome) => {
+    readyAi();
+    const base = aiResult();
+    const a = base.rows[0];
+    const b = { ...a, id: `${a.id}-b`, title: '英文' };
+    const c = { ...a, id: `${a.id}-c`, title: '統計' };
+    const retryBatches = [{ text: '待處理', startLine: 2 }];
+    let finish!: (value: typeof base) => void;
+    let fail!: (reason: Error) => void;
+    jest
+      .mocked(runMobilePersonalImportAi)
+      .mockResolvedValueOnce({ ...base, rows: [a, b], retryBatches })
+      .mockImplementationOnce(
+        () =>
+          new Promise((resolve, reject) => {
+            finish = resolve;
+            fail = reject;
+          }),
+      );
+    let view = render(<PersonalImportScreen />);
+    await waitFor(() => expect(view.queryByLabelText('讀取匯入紀錄')).toBeNull());
+    prepareAi(view);
+    fireEvent.changeText(view.getByLabelText('貼上或修正原始文字'), `${aiSource}\n待處理`);
+    fireEvent.press(view.getByText(/^用 [A-Z]{2} 整理文字$/));
+    await view.findByText('確認新增 2 筆');
+    fireEvent.press(view.getByLabelText('匯入 英文'));
+    fireEvent.press(view.getAllByText('編輯與連結課班')[0]);
+    fireEvent.changeText(view.getByLabelText('成績'), '90');
+    fireEvent.press(view.getByText('重試未完成段落'));
+    await waitFor(() => expect(runMobilePersonalImportAi).toHaveBeenCalledTimes(2));
+    const request = jest.mocked(runMobilePersonalImportAi).mock.calls[1][3];
+    const partial = { ...base, rows: outcome === 'zero' ? [] : [c], retryBatches };
+    await act(async () => request?.onProgress?.(partial));
+    const check = () => {
+      expect(view.getByLabelText('匯入 資料庫').props.accessibilityState.checked).toBe(true);
+      expect(view.getByLabelText('匯入 英文').props.accessibilityState.checked).toBe(false);
+      if (outcome === 'zero') expect(view.queryByLabelText('匯入 統計')).toBeNull();
+      else expect(view.getByLabelText('匯入 統計').props.accessibilityState.checked).toBe(true);
+      expect(view.getByText(`確認新增 ${outcome === 'zero' ? 1 : 2} 筆`)).toBeTruthy();
+    };
+    check();
+    if (outcome === 'restore') {
+      await waitFor(async () =>
+        expect(await loadPersonalImportDraft(scope)).toMatchObject({
+          selected: [a.id, c.id],
+          rows: [{ grade: '90' }, {}, {}],
+        }),
+      );
+      view.unmount();
+      view = render(<PersonalImportScreen />);
+      await view.findByText('已恢復上次完成的待核對草稿；未完成段落可以重試。');
+    } else if (outcome === 'cancel') {
+      fireEvent.press(view.getByText(/^取消 [A-Z]{2} 整理$/));
+    } else {
+      await act(async () => {
+        if (outcome === 'error') fail(new Error('synthetic failure'));
+        else
+          finish({
+            ...base,
+            rows: outcome === 'empty' || outcome === 'zero' ? [] : [c],
+            retryBatches: [],
+          });
+      });
+    }
+    check();
+    if (outcome === 'cancel' || outcome === 'restore') {
+      await act(async () => {
+        request?.onProgress?.({ ...base, rows: [b], retryBatches: [] });
+        finish({ ...base, rows: [b], retryBatches: [] });
+      });
+      check();
+    }
+    if (!view.queryByLabelText('成績')) fireEvent.press(view.getAllByText('編輯與連結課班')[0]);
+    expect(view.getByLabelText('成績').props.value).toBe('90');
+    expect((await loadPersonalImports(scope)).records).toHaveLength(0);
+  },
+);

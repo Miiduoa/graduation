@@ -9,6 +9,7 @@ import {
   assignmentFileIntentCountsTowardQuota,
   assignmentFileSubmitEnabled,
   assignmentSubmissionLate,
+  assignmentCanRevise,
   classifyAssignmentFile,
   sanitizeAssignmentFileName,
 } from '@campus/shared/src/assignmentFiles';
@@ -48,7 +49,11 @@ export type AssignmentFileIntent = {
 
 export type AssignmentFilePlatform = {
   workspace(actor: AssignmentFileActor, workspaceId: string): Promise<NuniWorkspace>;
-  assignment(actor: AssignmentFileActor, workspaceId: string, assignmentId: string): Promise<NuniAssignment>;
+  assignment(
+    actor: AssignmentFileActor,
+    workspaceId: string,
+    assignmentId: string,
+  ): Promise<NuniAssignment>;
   submitText(
     actor: AssignmentFileActor,
     workspaceId: string,
@@ -84,11 +89,7 @@ function equal(left: string, right: string) {
   return a.length === b.length && timingSafeEqual(a, b);
 }
 
-function downloadDescriptor(
-  file: FileRecord,
-  secret: string,
-  now: () => Date,
-): NuniSubmissionFile {
+function downloadDescriptor(file: FileRecord, secret: string, now: () => Date): NuniSubmissionFile {
   const exp = String(now().getTime() + ASSIGNMENT_FILE_URL_TTL_MS);
   const downloadPath = `class-workspaces/${file.workspaceId}/assignments/${file.assignmentId}/files/${file.id}/content`;
   return {
@@ -119,6 +120,10 @@ function withFiles(
   };
 }
 
+function receiptKey(workspaceId: string, assignmentId: string, submittedAt: string) {
+  return `submit-receipt:${sha256(Buffer.from(JSON.stringify([workspaceId, assignmentId, new Date(submittedAt).toISOString()])))}`;
+}
+
 function teacherRole(role: NuniRole) {
   return role === 'owner-teacher' || role === 'co-teacher';
 }
@@ -144,7 +149,11 @@ export function createAssignmentFileService(options?: {
   const secret = options.secret;
   const platform = options.platform;
 
-  async function requireStudent(actor: AssignmentFileActor, workspaceId: string, assignmentId: string) {
+  async function requireStudent(
+    actor: AssignmentFileActor,
+    workspaceId: string,
+    assignmentId: string,
+  ) {
     const [workspace, assignment] = await Promise.all([
       platform.workspace(actor, workspaceId),
       platform.assignment(actor, workspaceId, assignmentId),
@@ -170,12 +179,24 @@ export function createAssignmentFileService(options?: {
     return stored.payload;
   }
 
+  async function visibleSubmissionCount(assignment: NuniAssignment) {
+    return Math.max(
+      0,
+      assignment.submissionCount - (await stores.index.countWithdrawn(assignment.id)),
+    );
+  }
+
   return {
     async createIntent(
       actor: AssignmentFileActor,
       workspaceId: string,
       assignmentId: string,
-      input: { originalName: string; contentType: string; byteSize: number; idempotencyKey: string },
+      input: {
+        originalName: string;
+        contentType: string;
+        byteSize: number;
+        idempotencyKey: string;
+      },
     ): Promise<AssignmentFileIntent> {
       const { assignment } = await requireStudent(actor, workspaceId, assignmentId);
       const originalName = sanitizeAssignmentFileName(input.originalName);
@@ -194,9 +215,9 @@ export function createAssignmentFileService(options?: {
       );
       const existing = await replay(actor, input.idempotencyKey, hash);
       if (existing) return existing as AssignmentFileIntent;
-      const current = (await stores.index.listStaged(assignment.id, actor.platformAccountId)).filter(
-        (file) => assignmentFileIntentCountsTowardQuota(file, now().getTime()),
-      );
+      const current = (
+        await stores.index.listStaged(assignment.id, actor.platformAccountId)
+      ).filter((file) => assignmentFileIntentCountsTowardQuota(file, now().getTime()));
       const nextImages =
         current.filter((file) => file.kind === 'image').length + (classified.kind === 'image' ? 1 : 0);
       const nextDocs =
@@ -235,7 +256,12 @@ export function createAssignmentFileService(options?: {
       actor: AssignmentFileActor,
       workspaceId: string,
       assignmentId: string,
-      files: { originalName: string; contentType: string; byteSize: number; idempotencyKey: string }[],
+      files: {
+        originalName: string;
+        contentType: string;
+        byteSize: number;
+        idempotencyKey: string;
+      }[],
     ): Promise<AssignmentFileIntent[]> {
       if (files.length < 1 || files.length > 10) throw new NuniError(422, 'INVALID_INPUT');
       const intents: AssignmentFileIntent[] = [];
@@ -282,9 +308,49 @@ export function createAssignmentFileService(options?: {
     ): Promise<NuniAssignment> {
       const { assignment } = await requireStudent(actor, workspaceId, assignmentId);
       const fileIds = [...new Set(input.fileIds.map((value) => nuniId(value, 'cwf')))];
-      const hash = sha256(Buffer.from(JSON.stringify({ body: input.body ?? '', fileIds })));
+      const hash = sha256(
+        Buffer.from(JSON.stringify({ workspaceId, assignmentId, body: input.body ?? '', fileIds })),
+      );
       const existing = await replay(actor, input.idempotencyKey, hash);
-      if (existing) return existing as NuniAssignment;
+      if (existing) {
+        const receipt = (existing as NuniAssignment).mySubmission;
+        if (receipt) await assertCurrent(receipt.submittedAt);
+        return existing as NuniAssignment;
+      }
+      async function assertCurrent(version: string) {
+        const latest = await platform.assignment(actor, workspaceId, assignmentId);
+        const receipt = latest.mySubmission;
+        const indexed = await stores.index.currentVersion(assignmentId, actor.platformAccountId);
+        if (
+          (receipt && Date.parse(receipt.submittedAt) > Date.parse(version)) ||
+          (indexed && Date.parse(indexed) > Date.parse(version)) ||
+          (await stores.index.isWithdrawn(assignmentId, actor.platformAccountId, version))
+        )
+          throw new NuniError(409, 'ASSIGNMENT_SUBMISSION_SUPERSEDED');
+      }
+      const operationKey = `submit-operation:${sha256(Buffer.from(input.idempotencyKey))}`;
+      const confirmationKey = `submit-confirmation:${sha256(Buffer.from(input.idempotencyKey))}`;
+      type Operation = {
+        assignment: NuniAssignment;
+        previous: FileRecord[];
+        originals: FileRecord[];
+        pending: FileRecord[];
+        text: string;
+        submittedAt: string;
+      };
+      const saved = (await replay(actor, operationKey, hash)) as Operation | null;
+      // A saved operation was authorized before its deadline; only new operations need the revision check.
+      if (saved) return finish(saved);
+      if (
+        assignment.mySubmission &&
+        !(await stores.index.isWithdrawn(
+          assignmentId,
+          actor.platformAccountId,
+          assignment.mySubmission.submittedAt,
+        )) &&
+        !assignmentCanRevise(assignment.dueAt, now().getTime())
+      )
+        throw new NuniError(409, 'ASSIGNMENT_REVISION_CLOSED');
       const records = [];
       for (const value of fileIds) {
         const record = await stores.index.getFile(value);
@@ -293,7 +359,7 @@ export function createAssignmentFileService(options?: {
           record.workspaceId !== workspaceId ||
           record.assignmentId !== assignmentId ||
           record.platformAccountId !== actor.platformAccountId ||
-          !record.uploadedAt
+          !record.uploadedAt || record.supersededAt !== null
         )
           throw new NuniError(422, 'ASSIGNMENT_FILE_REQUIRED');
         records.push(record);
@@ -304,79 +370,126 @@ export function createAssignmentFileService(options?: {
       if (!records.length && !body) throw new NuniError(422, 'ASSIGNMENT_FILE_REQUIRED');
       if (records.length) assertAssignmentFileCounts(images, documents);
       const submittedAt = nowIso(now);
-      const late = assignmentSubmissionLate(assignment.dueAt, submittedAt);
       const text = body || (records.length ? FILE_ONLY_SUBMISSION_BODY : '');
-      const previous = records.length
-        ? await stores.index.listVisible(assignmentId, actor.platformAccountId)
-        : [];
+      const previous = await stores.index.listVisible(assignmentId, actor.platformAccountId);
+      const snapshots = new Map(
+        [...previous, ...records].map((record) => [record.id, { ...record }]),
+      );
       const pending = records.map((record) => ({
         ...record,
         submittedAt,
         late: assignmentSubmissionLate(assignment.dueAt, submittedAt),
         supersededAt: null,
       }));
-      try {
-        for (const record of previous) {
-          record.supersededAt = submittedAt;
-          await stores.index.putFile(record);
+      const operation: Operation = {
+        assignment,
+        previous,
+        originals: [...snapshots.values()],
+        pending,
+        text,
+        submittedAt,
+      };
+      await remember(actor, operationKey, hash, operation);
+      return finish(operation);
+
+      async function finish(operation: Operation): Promise<NuniAssignment> {
+        const { assignment, previous, originals, pending, text, submittedAt } = operation;
+        let confirmed = (await replay(actor, confirmationKey, hash)) as NuniAssignment | null;
+        if (!confirmed) {
+          const version = await stores.index.currentVersion(assignmentId, actor.platformAccountId);
+          if (version && Date.parse(version) > Date.parse(submittedAt))
+            throw new NuniError(409, 'ASSIGNMENT_SUBMISSION_SUPERSEDED');
+          try {
+            for (const record of previous)
+              await stores.index.putFile({ ...record, supersededAt: submittedAt }, submittedAt);
+            for (const record of pending) await stores.index.putFile(record, submittedAt);
+            const indexed = await stores.index.listVisible(assignmentId, actor.platformAccountId);
+            if (pending.some((record) => !indexed.some((file) => file.id === record.id)))
+              throw new NuniError(503, 'ASSIGNMENT_FILE_STORE_UNAVAILABLE');
+          } catch {
+            for (const record of originals) await stores.index.putFile(record, submittedAt);
+            throw new NuniError(503, 'ASSIGNMENT_FILE_STORE_UNAVAILABLE');
+          }
+          try {
+            confirmed = await platform.submitText(
+              actor,
+              workspaceId,
+              assignmentId,
+              text,
+              `${input.idempotencyKey}:text`,
+            );
+          } catch (error) {
+            for (const record of originals) await stores.index.putFile(record, submittedAt);
+            throw error;
+          }
         }
-        for (const record of pending) await stores.index.putFile(record);
-      } catch {
-        throw new NuniError(503, 'ASSIGNMENT_FILE_STORE_UNAVAILABLE');
-      }
-      const indexed = records.length
-        ? await stores.index.listVisible(assignmentId, actor.platformAccountId)
-        : [];
-      if (records.length && indexed.length < records.length)
-        throw new NuniError(503, 'ASSIGNMENT_FILE_STORE_UNAVAILABLE');
-      let confirmed: NuniAssignment;
-      try {
-        confirmed = await platform.submitText(
+        await remember(actor, confirmationKey, hash, confirmed);
+        const confirmedAt = confirmed.mySubmission?.submittedAt ?? submittedAt;
+        await assertCurrent(confirmedAt);
+        await stores.index.advanceVersion(assignmentId, actor.platformAccountId, confirmedAt);
+        // Persist the expected receipt before alignment so reads fail closed during an incomplete repair.
+        await remember(
           actor,
-          workspaceId,
-          assignmentId,
-          text,
-          `${input.idempotencyKey}:text`,
+          receiptKey(workspaceId, assignmentId, confirmedAt),
+          hash,
+          pending.map((record) => record.id),
         );
-      } catch (error) {
-        for (const record of previous) {
-          record.supersededAt = null;
-          await stores.index.putFile(record);
+        try {
+          for (const record of previous)
+            await stores.index.putFile({ ...record, supersededAt: confirmedAt }, confirmedAt);
+          for (const record of pending)
+            await stores.index.putFile(
+              {
+                ...record,
+                submittedAt: confirmedAt,
+                late: assignmentSubmissionLate(assignment.dueAt, confirmedAt),
+                supersededAt: null,
+              },
+              confirmedAt,
+            );
+        } catch (error) {
+          if (error instanceof NuniError && error.code === 'ASSIGNMENT_SUBMISSION_SUPERSEDED')
+            throw error;
+          throw new NuniError(503, 'ASSIGNMENT_FILE_STORE_UNAVAILABLE');
         }
-        for (const record of records) {
-          record.submittedAt = null;
-          record.late = false;
-          record.supersededAt = null;
-          await stores.index.putFile(record);
-        }
-        throw error;
+        await assertCurrent(confirmedAt);
+        const visible = await stores.index.listVisible(assignmentId, actor.platformAccountId);
+        const files = visible
+          .filter((file) => pending.some((record) => record.id === file.id))
+          .map((file) => downloadDescriptor(file, secret, now));
+        const payload = withFiles(
+          { ...confirmed, submissionCount: await visibleSubmissionCount(confirmed) },
+          files,
+          assignmentSubmissionLate(assignment.dueAt, confirmedAt),
+        );
+        if (pending.length && (!payload.mySubmission || files.length !== pending.length))
+          throw new NuniError(503, 'ASSIGNMENT_FILE_STORE_UNAVAILABLE');
+        return (await remember(actor, input.idempotencyKey, hash, payload)) as NuniAssignment;
       }
-      const confirmedAt = confirmed.mySubmission?.submittedAt ?? submittedAt;
-      try {
-        for (const record of previous) {
-          record.supersededAt = confirmedAt;
-          await stores.index.putFile(record);
-        }
-        for (const record of pending) {
-          record.submittedAt = confirmedAt;
-          record.late = assignmentSubmissionLate(assignment.dueAt, record.submittedAt);
-          record.supersededAt = null;
-          await stores.index.putFile(record);
-        }
-      } catch {
-        // 文字已寫入且檔案索引已先落地；時間戳對齊失敗仍可回執，重試同一冪等鍵可補齊。
-      }
-      const visible = records.length
-        ? await stores.index.listVisible(assignmentId, actor.platformAccountId)
-        : indexed;
-      const files = visible.map((file) => downloadDescriptor(file, secret, now));
-      const payload = withFiles(
-        confirmed,
-        files,
-        late || visible.some((file) => file.late),
+    },
+
+    visibleSubmissionCount,
+
+    async withdrawSubmission(
+      actor: AssignmentFileActor, workspaceId: string, assignmentId: string,
+      input: { submittedAt: string; idempotencyKey: string },
+    ): Promise<NuniAssignment> {
+      const { assignment } = await requireStudent(actor, workspaceId, assignmentId);
+      const hash = sha256(
+        Buffer.from(JSON.stringify({ workspaceId, assignmentId, withdraw: input.submittedAt })),
       );
-      if (records.length && (!payload.mySubmission || !files.length))
-        throw new NuniError(503, 'ASSIGNMENT_FILE_STORE_UNAVAILABLE');
+      const existing = await replay(actor, input.idempotencyKey, hash);
+      if (existing) return existing as NuniAssignment;
+      if (!assignmentCanRevise(assignment.dueAt, now().getTime())) throw new NuniError(409, 'ASSIGNMENT_REVISION_CLOSED');
+      const receipt = assignment.mySubmission;
+      if (!receipt || receipt.platformAccountId !== actor.platformAccountId || receipt.submittedAt !== input.submittedAt)
+        throw new NuniError(409, 'ASSIGNMENT_SUBMISSION_CHANGED');
+      await stores.index.withdraw(assignmentId, actor.platformAccountId, receipt.submittedAt);
+      const payload = {
+        ...assignment,
+        mySubmission: null,
+        submissionCount: await visibleSubmissionCount(assignment),
+      };
       return (await remember(actor, input.idempotencyKey, hash, payload)) as NuniAssignment;
     },
 
@@ -390,9 +503,33 @@ export function createAssignmentFileService(options?: {
       if (!submission) return submission;
       const canRead =
         submission.platformAccountId === viewerAccountId || teacherRole(workspace.memberRole);
-      if (!canRead) throw new NuniError(403, 'CLASS_WORKSPACE_FORBIDDEN');
+      if (!canRead || viewerAccountId !== actor.platformAccountId)
+        throw new NuniError(403, 'CLASS_WORKSPACE_FORBIDDEN');
+      if (
+        await stores.index.isWithdrawn(
+          assignment.id,
+          submission.platformAccountId,
+          submission.submittedAt,
+        )
+      )
+        return null;
       const stored = await stores.index.listVisible(assignment.id, submission.platformAccountId);
-      const files = stored.map((file) => downloadDescriptor(file, secret, now));
+      const files = stored
+        .filter(
+          (file) =>
+            file.submittedAt !== null &&
+            Date.parse(file.submittedAt) === Date.parse(submission.submittedAt),
+        )
+        .map((file) => downloadDescriptor(file, secret, now));
+      const expected = await stores.index.getIdempotency(
+        submission.platformAccountId,
+        receiptKey(assignment.workspaceId, assignment.id, submission.submittedAt),
+      );
+      if (
+        expected &&
+        (expected.payload as string[]).some((fileId) => !files.some((file) => file.id === fileId))
+      )
+        throw new NuniError(503, 'ASSIGNMENT_FILE_STORE_UNAVAILABLE');
       const computedLate =
         assignmentSubmissionLate(assignment.dueAt, submission.submittedAt) ||
         stored.some((file) => file.late);
@@ -412,7 +549,24 @@ export function createAssignmentFileService(options?: {
         !record ||
         record.workspaceId !== workspaceId ||
         record.assignmentId !== assignmentId ||
-        !record.uploadedAt
+        !record.uploadedAt ||
+        record.supersededAt !== null ||
+        (record.submittedAt !== null &&
+          (await stores.index.isWithdrawn(
+            assignmentId,
+            record.platformAccountId,
+            record.submittedAt,
+          )))
+      )
+        throw new NuniError(404, 'NOT_FOUND');
+      const currentVersion = await stores.index.currentVersion(
+        assignmentId,
+        record.platformAccountId,
+      );
+      if (
+        record.submittedAt &&
+        currentVersion &&
+        Date.parse(record.submittedAt) < Date.parse(currentVersion)
       )
         throw new NuniError(404, 'NOT_FOUND');
       const downloadPath = `class-workspaces/${workspaceId}/assignments/${assignmentId}/files/${fileRecordId}/content`;

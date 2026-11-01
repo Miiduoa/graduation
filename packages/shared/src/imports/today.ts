@@ -1,3 +1,4 @@
+import { classDate, validateClassException, sameClassMeeting } from '../timetable/classExceptions';
 import type { PersonalImportRecord } from './types';
 import { periodProfileForSchool, periodTimes } from '../timetable/schoolPeriods';
 
@@ -7,6 +8,8 @@ export type PersonalTodayEntry = {
   endTime: string;
   status: 'ongoing' | 'upcoming' | 'ended';
   conflict: boolean;
+  startAt: number;
+  endAt: number;
 };
 
 function minutes(clock: string | undefined): number | null {
@@ -49,7 +52,6 @@ export function buildPersonalToday(
   // Taiwan has no DST. UTC accessors keep this independent of the device timezone.
   const taipei = new Date(options.now.getTime() + 8 * 60 * 60 * 1000);
   const weekday = taipei.getUTCDay() || 7;
-  const currentMinute = taipei.getUTCHours() * 60 + taipei.getUTCMinutes();
   const rows = records.filter(
     (row) => row.kind === 'timetable' && row.schoolId === options.schoolId,
   );
@@ -61,66 +63,71 @@ export function buildPersonalToday(
   const times = profile ? periodTimes(profile) : [];
   const today: PersonalTodayEntry[] = [];
   let unplacedCount = 0;
-  for (const row of rows.filter((row) => termKey(row) === activeTerm)) {
-    // Never fill half an explicit range from a possibly different period table.
-    const explicit = !!(row.startTime || row.endTime);
-    const startTime = explicit ? row.startTime : times[(row.startPeriod ?? 0) - 1]?.[0];
-    const endTime = explicit ? row.endTime : times[(row.endPeriod ?? 0) - 1]?.[1];
-    const start = minutes(startTime);
-    const end = minutes(endTime);
-    if (
-      !Number.isInteger(row.dayOfWeek) ||
-      row.dayOfWeek! < 1 ||
-      row.dayOfWeek! > 7 ||
-      start === null ||
-      end === null ||
-      start >= end
-    ) {
+  const date = classDate(options.now);
+  const midnight = Date.parse(`${date}T00:00:00+08:00`);
+  for (const original of rows.filter((row) => termKey(row) === activeTerm)) {
+    const explicit = !!(original.startTime || original.endTime);
+    const baseStart = explicit ? original.startTime : times[(original.startPeriod ?? 0) - 1]?.[0];
+    const baseEnd = explicit ? original.endTime : times[(original.endPeriod ?? 0) - 1]?.[1];
+    const start = minutes(baseStart), end = minutes(baseEnd);
+    if (!Number.isInteger(original.dayOfWeek) || original.dayOfWeek! < 1 ||
+      original.dayOfWeek! > 7 || start === null || end === null || start >= end) {
       unplacedCount++;
       continue;
     }
-    if (row.dayOfWeek !== weekday) continue;
-    today.push({
-      row,
-      startTime: startTime!,
-      endTime: endTime!,
-      conflict: false,
-      status: currentMinute >= end ? 'ended' : currentMinute >= start ? 'ongoing' : 'upcoming',
+    const exceptions = (original.classExceptions || []).filter((item) => {
+      try { validateClassException(item); return true; } catch { return false; }
     });
+    const append = (row: PersonalImportRecord, startTime: string, endTime: string,
+      startDate: string, endDate = startDate) => {
+      const startAt = Date.parse(`${startDate}T${startTime}:00+08:00`);
+      const endAt = Date.parse(`${endDate}T${endTime}:00+08:00`);
+      if (startAt >= midnight + 172800000 || endAt <= midnight - 86400000) return;
+      today.push({ row, startTime, endTime, startAt, endAt, conflict: false,
+        status: options.now.getTime() >= endAt ? 'ended' : options.now.getTime() >= startAt ? 'ongoing' : 'upcoming' });
+    };
+    for (const offset of [-1, 0, 1]) {
+      const day = classDate(new Date(midnight + offset * 86400000));
+      const dayOfWeek = new Date(`${day}T12:00:00+08:00`).getUTCDay() || 7;
+      const change = exceptions.find((item) => item.originalDate === day);
+      if (original.dayOfWeek === dayOfWeek && (!change || change.kind === 'room')) {
+        append(change ? { ...original, location: change.location } : original, baseStart!, baseEnd!, day);
+      }
+    }
+    for (const item of exceptions.filter((value) => value.kind === 'move')) {
+      append({ ...original, location: item.location ?? original.location },
+        item.startTime!, item.endTime!, item.date!, item.endDate || item.date!);
+    }
   }
   // A course entered by hand and later imported is one class when its complete
   // displayed details agree. Keep the imported record's provenance; differing
   // teachers or rooms still require the user's conflict review.
-  const sameText = (left?: string, right?: string) =>
-    (left ?? '').trim().normalize('NFKC') === (right ?? '').trim().normalize('NFKC');
   const distinctToday = today.filter((entry) =>
     !entry.row.id.startsWith('manual:') || !today.some((other) =>
       !other.row.id.startsWith('manual:') &&
-      entry.startTime === other.startTime &&
-      entry.endTime === other.endTime &&
-      sameText(entry.row.title, other.row.title) &&
-      sameText(entry.row.teacher, other.row.teacher) &&
-      sameText(entry.row.location, other.row.location),
+      entry.startAt === other.startAt &&
+      entry.endAt === other.endAt &&
+      sameClassMeeting(entry.row, other.row),
     ),
   );
   distinctToday.sort(
     (a, b) =>
-      a.startTime.localeCompare(b.startTime) ||
-      a.endTime.localeCompare(b.endTime) ||
+      a.startAt - b.startAt ||
+      a.endAt - b.endAt ||
       a.row.id.localeCompare(b.row.id),
   );
   for (const entry of distinctToday) {
     entry.conflict = distinctToday.some(
       (other) =>
-        other !== entry && entry.startTime < other.endTime && other.startTime < entry.endTime,
+        other !== entry && entry.startAt < other.endAt && other.startAt < entry.endAt,
     );
   }
   return {
     terms,
     termKey: activeTerm,
-    today: distinctToday,
+    today: distinctToday.filter((entry) => entry.startAt < midnight + 86400000 && entry.endAt > midnight),
     unplacedCount,
     weekday,
-    nextId: distinctToday.find((entry) => entry.status !== 'ended')?.row.id ?? null,
+    nextId: distinctToday.find((entry) => entry.startAt < midnight + 86400000 && entry.endAt > midnight && entry.status !== 'ended')?.row.id ?? null,
   };
 }

@@ -28,7 +28,7 @@ it.each(['WOW Class', 'TronClass', 'LMS'])('finds the school course service thro
 });
 
 it('lists the read-only homework surface beside the course list', () => {
-  const service = searchCampusServices('玩課雲作業').find((item) => item.href === '/school-lms');
+  const service = searchCampusServices('玩課雲作業', 'all', true).find((item) => item.href === '/school-lms');
   expect(service?.name).toBe('玩課雲作業與教材');
   expect(service?.access).toBe('school');
 });
@@ -70,4 +70,15 @@ it('offers school-account leave workflows without presenting them as official le
   expect(searchCampusServices('請假').map((service) => service.href)).toContain('/leave');
   expect(searchCampusServices('核閱').map((service) => service.href)).toContain('/leave/review');
   expect(student?.text).not.toContain('正式');
+});
+
+it('routes semester-grade search to school records and feedback to nuni', () => {
+  expect(searchCampusServices('學期成績').some((service) => service.href === '/grades?tab=semester')).toBe(true);
+  expect(CAMPUS_SERVICES.some((service) => service.href === '/grades?tab=feedback')).toBe(true);
+});
+
+it('hides readonly homework from service searches by default', () => {
+  expect(searchCampusServices('').some((item) => item.href === '/school-lms')).toBe(false);
+  expect(searchCampusServices('玩課雲作業')).toEqual([]);
+  expect(searchCampusServices('', 'all', true).some((item) => item.href === '/school-lms')).toBe(true);
 });

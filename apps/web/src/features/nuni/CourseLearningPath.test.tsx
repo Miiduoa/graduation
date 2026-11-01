@@ -388,3 +388,24 @@ it('ignores a pending later materials page after refresh', async () => {
   await act(async () => finishOlder({ materials: [olderMaterial], nextCursor: 'stale-next' }));
   expect(screen.queryByRole('link', { name: /更早的課前閱讀/ })).toBeNull();
 });
+
+it('keeps full progress unknown while earlier materials have not loaded', async () => {
+  state.request.mockImplementation(async (path: string) => {
+    if (path.endsWith('/materials/page')) return { materials: [material], nextCursor: 'older' };
+    if (path.endsWith('/quizzes')) return { quizzes: [] };
+    throw new Error('unexpected');
+  });
+  render(<CourseLearningPath workspace={workspace} assignments={[]} units={[unit]} unitsError="" reloadUnits={vi.fn()} onUnitCreated={vi.fn()} />);
+  expect(await screen.findByText(/進度未知：清單未齊/)).toBeTruthy();
+  expect(screen.queryByText('已繳交或作答')).toBeNull();
+  expect(screen.getByText(/來源：nuni 課程/).textContent).toContain('本次讀取');
+  expect(screen.getByRole('link', { name: /第一週課前閱讀/ }).getAttribute('href')).toBe(`#material-${material.id}`);
+});
+
+it.each(['作業讀取失敗', ''])('keeps progress unknown when assignments failed or are loading: %s', async (failure) => {
+  render(<CourseLearningPath workspace={workspace} assignments={[]} assignmentsError={failure}
+    assignmentsLoading={!failure} units={[unit]} unitsError="" reloadUnits={vi.fn()} onUnitCreated={vi.fn()} />);
+  await screen.findByRole('link', { name: /第一週課前閱讀/ });
+  expect(screen.getByText(/進度未知：清單未齊/)).toBeTruthy();
+  expect(screen.queryByText('已繳交或作答')).toBeNull();
+});

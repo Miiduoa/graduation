@@ -66,6 +66,7 @@ export function feedbackPredatesSubmission(
   return reviewed !== null && submitted !== null && reviewed < submitted;
 }
 export interface HomeData {
+  tasksError?: string | null;
   courses: HomeCourse[];
   tasks: HomeTask[];
   /** Newest published teacher feedback across enrolled courses (student view). */

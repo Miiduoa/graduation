@@ -19,6 +19,7 @@ export type PersonalImportDraft = {
   source: Pick<PersonalImportSource, 'type' | 'name'>;
   rows: PersonalImportRow[];
   excluded: string[];
+  editedIds?: string[];
   parseIssues: ImportIssue[];
   backup: Omit<PersonalImportBackupPreview, 'rows'> | null;
   document?: PersonalImportDocument | null;
@@ -36,6 +37,8 @@ const optionalString = (value: unknown) => value === undefined || string(value);
 
 export const personalImportDraftKey = (scope: PersonalImportScope) =>
   `${personalImportsStorageKey(scope)}:draft`;
+export const personalImportPartialDraftKey = (scope: PersonalImportScope) =>
+  `${personalImportDraftKey(scope)}:partial`;
 
 function validDraft(value: unknown, schoolId: string): value is PersonalImportDraft {
   if (
@@ -45,6 +48,8 @@ function validDraft(value: unknown, schoolId: string): value is PersonalImportDr
     !object(value.source) ||
     !['paste', 'file', 'screenshot'].includes(String(value.source.type)) ||
     !optionalString(value.source.name) ||
+    (value.editedIds !== undefined &&
+      (!Array.isArray(value.editedIds) || !value.editedIds.every(string))) ||
     !Array.isArray(value.rows) ||
     value.rows.length > 2000 ||
     !Array.isArray(value.excluded) ||
@@ -143,7 +148,8 @@ function validDraft(value: unknown, schoolId: string): value is PersonalImportDr
         !selection.selected.every(string) ||
         new Set(selection.selected).size !== selection.selected.length ||
         !object(selection.headers)
-      ) return false;
+      )
+        return false;
       const headers = selection.headers;
       for (const id of selection.selected) {
         const section = document.sections.find((item) => item.id === id);
@@ -151,8 +157,11 @@ function validDraft(value: unknown, schoolId: string): value is PersonalImportDr
       }
       for (const [id, line] of Object.entries(headers)) {
         const section = document.sections.find((item) => item.id === id);
-        if (!section || !Number.isSafeInteger(line) ||
-          (section.rows.length ? !section.rows.some((row) => row.line === line) : line !== 1))
+        if (
+          !section ||
+          !Number.isSafeInteger(line) ||
+          (section.rows.length ? !section.rows.some((row) => row.line === line) : line !== 1)
+        )
           return false;
       }
       if (!selection.selected.every((id) => id in headers)) return false;
@@ -163,10 +172,10 @@ function validDraft(value: unknown, schoolId: string): value is PersonalImportDr
   return true;
 }
 
-export function readPersonalImportDraft(scope: PersonalImportScope): PersonalImportDraft | null {
+function readDraft(scope: PersonalImportScope, key: string): PersonalImportDraft | null {
   let raw: string | null;
   try {
-    raw = sessionStorage.getItem(personalImportDraftKey(scope));
+    raw = sessionStorage.getItem(key);
   } catch {
     throw new Error('瀏覽器無法讀取暫存草稿。這次輸入請先留在本頁，離開前另存原始文字。');
   }
@@ -184,23 +193,48 @@ export function readPersonalImportDraft(scope: PersonalImportScope): PersonalImp
   }
 }
 
-export function writePersonalImportDraft(scope: PersonalImportScope, draft: PersonalImportDraft) {
+export function readPersonalImportDraft(scope: PersonalImportScope): PersonalImportDraft | null {
+  return readDraft(scope, personalImportDraftKey(scope));
+}
+
+export function readPersonalImportPartialDraft(scope: PersonalImportScope): PersonalImportDraft | null {
+  return readDraft(scope, personalImportPartialDraftKey(scope));
+}
+
+function writeDraft(key: string, draft: PersonalImportDraft) {
   try {
     if (!draft.text && !draft.rows.length && !draft.document) {
-      sessionStorage.removeItem(personalImportDraftKey(scope));
+      sessionStorage.removeItem(key);
       return;
     }
     const content = JSON.stringify({ version: 1, draft });
     if (tooLarge(content)) throw new Error();
-    sessionStorage.setItem(personalImportDraftKey(scope), content);
+    sessionStorage.setItem(key, content);
   } catch {
     throw new Error('草稿暫存沒有成功。內容仍在本頁，請完成匯入或另存原始文字後再離開。');
+  }
+}
+
+export function writePersonalImportDraft(scope: PersonalImportScope, draft: PersonalImportDraft) {
+  writeDraft(personalImportDraftKey(scope), draft);
+}
+
+export function writePersonalImportPartialDraft(scope: PersonalImportScope, draft: PersonalImportDraft) {
+  writeDraft(personalImportPartialDraftKey(scope), draft);
+}
+
+export function clearPersonalImportPartialDraft(scope: PersonalImportScope) {
+  try {
+    sessionStorage.removeItem(personalImportPartialDraftKey(scope));
+  } catch {
+    throw new Error('無法清除部分結果的暫存，請保留本頁並稍後重試。');
   }
 }
 
 export function clearPersonalImportDraft(scope: PersonalImportScope) {
   try {
     sessionStorage.removeItem(personalImportDraftKey(scope));
+    sessionStorage.removeItem(personalImportPartialDraftKey(scope));
   } catch {
     throw new Error('無法清除暫存草稿，請保留本頁並稍後重試。');
   }

@@ -7,7 +7,7 @@ export type ScoreRowForPrediction = {
   score: number | null;
   totalScore: number | null;
   weight: number | null;
-  status: 'graded' | 'pending' | 'missing';
+  status: 'graded' | 'pending' | 'missing' | 'unknown';
 };
 
 /**

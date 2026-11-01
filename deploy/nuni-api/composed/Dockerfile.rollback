@@ -1,4 +1,5 @@
 # Additive schema compatible rollback. Do not replace the immutable base with a tag.
-FROM registry.fly.io/nuni-api@sha256:b626c6db86b9c3c00da28239bc777be7e7f77551aaa78f2444fc00acc8c949ef
+FROM registry.fly.io/nuni-api@sha256:be815455fbb2ccce844b69f004e416e44465e3421f9da654d0cd5db8379c3dc2
 COPY deploy/nuni-api/course-access/278_course_access_review.sql /app/apps/api/dist/migrations/278_course_access_review.sql
 COPY deploy/nuni-api/personal-import-sync/279_personal_import_sync.sql /app/apps/api/dist/migrations/279_personal_import_sync.sql
+COPY deploy/nuni-api/assignment-files/281_assignment_submission_withdrawals.sql /app/apps/api/dist/migrations/281_assignment_submission_withdrawals.sql

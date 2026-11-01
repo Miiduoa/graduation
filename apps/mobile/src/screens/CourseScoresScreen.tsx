@@ -11,18 +11,23 @@ import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import {
   View,
   Text,
+  Pressable,
   ScrollView,
   RefreshControl,
 } from 'react-native';
 
 import { predictCurrent, commonTargets } from '@campus/shared';
 import {
+  tcBuildScoreUrl,
+  tcBuildExamViewUrl,
+  tcBuildFileViewUrl,
   tcFetchSelfScore,
   tcFetchScoreItems,
   tcFetchCourseExams,
   tcFetchExamSubmissions,
   tcFetchHomeworkActivities,
 } from '../services/tronClassClient';
+import { webBrowserOpenWithPuTronClassGate } from '../services/tronClassWebUiGate';
 import { scoreRowsToPredictorItems } from '../services/gradePredictionFromScoreRows';
 import {
   isDemoCourseId,
@@ -59,7 +64,7 @@ interface ScoreRow {
   score: number | null;
   totalScore: number | null;
   weight: number | null;
-  status: 'graded' | 'pending' | 'missing';
+  status: 'graded' | 'pending' | 'missing' | 'unknown';
 }
 
 export default function CourseScoresScreen(props: RouteProps) {
@@ -67,6 +72,7 @@ export default function CourseScoresScreen(props: RouteProps) {
   const groupIdStr = props.route?.params?.groupId ?? props.route?.params?.courseSpaceId ?? '';
   const courseId = Number(groupIdStr.replace(/^tc:/, '')) || 0;
 
+  const [checkedAt, setCheckedAt] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -75,6 +81,7 @@ export default function CourseScoresScreen(props: RouteProps) {
 
   const load = useCallback(async () => {
     setError(null);
+    setCheckedAt(null);
     if (!courseId) {
       setError('沒有提供課程 ID');
       setLoading(false);
@@ -83,6 +90,7 @@ export default function CourseScoresScreen(props: RouteProps) {
     }
 
     try {
+      const failures: string[] = [];
       const useDemo = isDemoCourseId(courseId);
       const [self, items, exams, homeworks] = useDemo
         ? [
@@ -92,10 +100,10 @@ export default function CourseScoresScreen(props: RouteProps) {
             demoFetchHomeworkActivities(courseId),
           ]
         : await Promise.all([
-            tcFetchSelfScore(courseId).catch(() => null),
-            tcFetchScoreItems(courseId).catch(() => []),
-            tcFetchCourseExams(courseId).catch(() => []),
-            tcFetchHomeworkActivities(courseId).catch(() => []),
+            tcFetchSelfScore(courseId).catch(() => { failures.push('總成績'); return null; }),
+            tcFetchScoreItems(courseId).catch(() => { failures.push('評分項目'); return []; }),
+            tcFetchCourseExams(courseId).catch(() => { failures.push('測驗'); return []; }),
+            tcFetchHomeworkActivities(courseId).catch(() => { failures.push('作業'); return []; }),
           ]);
 
       setSelfScore(self);
@@ -118,9 +126,10 @@ export default function CourseScoresScreen(props: RouteProps) {
 
       // 測驗分數
       for (const e of exams) {
+        let unavailable = false;
         const sub = useDemo
           ? demoFetchExamSubmissions(e.id)
-          : await tcFetchExamSubmissions(e.id).catch(() => null);
+          : await tcFetchExamSubmissions(e.id).catch(() => { unavailable = true; failures.push(e.title); return null; });
         const score = sub?.exam_final_score ?? sub?.exam_score ?? null;
         out.push({
           id: `exam-${e.id}`,
@@ -129,7 +138,7 @@ export default function CourseScoresScreen(props: RouteProps) {
           score,
           totalScore: e.total_score,
           weight: null,
-          status: score !== null ? 'graded' : e.submitted_times > 0 ? 'pending' : 'missing',
+          status: unavailable ? 'unknown' : score !== null ? 'graded' : e.submitted_times > 0 ? 'pending' : 'missing',
         });
       }
 
@@ -151,6 +160,8 @@ export default function CourseScoresScreen(props: RouteProps) {
       }
 
       setRows(out);
+      setCheckedAt(new Date().toISOString());
+      if (failures.length) setError(`${failures.join('、')}尚未取得；完整進度未知，請重新整理。`);
     } catch (e) {
       setSelfScore(null);
       setRows([]);
@@ -167,14 +178,14 @@ export default function CourseScoresScreen(props: RouteProps) {
 
   const stats = useMemo(() => {
     const graded = rows.filter((r) => r.status === 'graded' && r.score !== null && r.totalScore);
-    if (graded.length === 0) return { count: rows.length, gradedCount: 0, avgPct: null };
+    if (error || graded.length === 0) return { count: rows.length, gradedCount: graded.length, avgPct: null };
     const totalPct = graded.reduce((acc, r) => acc + (r.score! / r.totalScore!) * 100, 0);
     return {
       count: rows.length,
       gradedCount: graded.length,
       avgPct: Math.round((totalPct / graded.length) * 10) / 10,
     };
-  }, [rows]);
+  }, [rows, error]);
 
   const gradeOutlook = useMemo(() => {
     if (rows.length === 0 || error) return null;
@@ -196,7 +207,7 @@ export default function CourseScoresScreen(props: RouteProps) {
   }
 
   const weightedSelf =
-    selfScore &&
+    !error && selfScore &&
     typeof selfScore === 'object' &&
     selfScore !== null &&
     typeof (selfScore as { final_score?: unknown }).final_score === 'number'
@@ -237,6 +248,7 @@ export default function CourseScoresScreen(props: RouteProps) {
         }
       />
 
+      <Text style={{ color: theme.colors.muted }}>來源：{isDemoCourseId(courseId) ? '示範資料' : '校方正式（TronClass）'} · 本次讀取：{checkedAt ? new Date(checkedAt).toLocaleString('zh-TW', { timeZone: 'Asia/Taipei' }) : '尚未確認'}。平均＝各已批改項目的得分百分比總和 ÷ 已批改項目數；待評與未取得不換算成零分，項目平均不等於學期總分。</Text>
       {/* 頂部統計 */}
       <View
         style={{
@@ -260,7 +272,7 @@ export default function CourseScoresScreen(props: RouteProps) {
           </View>
           <View style={{ alignItems: 'flex-end' }}>
             <Text style={{ color: theme.colors.onAccent, fontSize: 24, fontWeight: '700' }}>
-              {stats.gradedCount} / {stats.count}
+              {error ? '未知' : `${stats.gradedCount} / ${stats.count}`}
             </Text>
             <Text style={{ color: theme.colors.onAccent, fontSize: 11, opacity: 0.88 }}>
               已批改 / 總項
@@ -411,11 +423,16 @@ export default function CourseScoresScreen(props: RouteProps) {
                     </>
                   ) : (
                     <Text style={{ fontSize: 12, color: theme.colors.muted }}>
-                      {r.status === 'pending' ? '待批改' : '未繳交'}
+                      {r.status === 'unknown' ? '未知（尚未取得）' : r.status === 'pending' ? '待批改' : '未繳交'}
                     </Text>
                   )}
                 </View>
               </View>
+              <Pressable accessibilityRole="link" onPress={() => {
+                const id = Number(r.id.replace(/^(hw|exam|item)-/, ''));
+                const url = r.category === 'homework' ? tcBuildFileViewUrl(courseId, id) : r.category === 'exam' || r.category === 'quiz' ? tcBuildExamViewUrl(courseId, id) : tcBuildScoreUrl(courseId);
+                void webBrowserOpenWithPuTronClassGate(url);
+              }}><Text style={{ color: theme.colors.primary }}>查看原始紀錄 · 更新時間：未知</Text></Pressable>
               {pct !== null && (
                 <View
                   style={{

@@ -49,7 +49,7 @@ export function isAssignmentFileMutation(method: string, segments: string[]) {
   if (segments[0] !== 'class-workspaces' || !WORKSPACE.test(segments[1] || '')) return false;
   if (method === 'POST' && segments.length === 6 && segments[2] === 'assignments' && ASSIGNMENT.test(segments[3] || '') && segments[4] === 'files' && segments[5] === 'intents')
     return true;
-  if (method === 'POST' && segments.length === 5 && segments[2] === 'assignments' && ASSIGNMENT.test(segments[3] || '') && segments[4] === 'submit-files')
+  if (method === 'POST' && segments.length === 5 && segments[2] === 'assignments' && ASSIGNMENT.test(segments[3] || '') && ['submit', 'submit-files', 'withdraw-submission'].includes(segments[4]))
     return true;
   if (method === 'PUT' && isAssignmentFileQuery(segments)) return true;
   return false;
@@ -101,7 +101,11 @@ export async function handleAssignmentFileRequest(
   const fileQuery = isAssignmentFileQuery(segments);
   const mutating = isAssignmentFileMutation(request.method, segments);
   if (!fileQuery && !mutating) return null;
-  if (!assignmentFileSubmitEnabled()) throw new NuniError(404, 'NOT_FOUND');
+  if (!assignmentFileSubmitEnabled()) {
+    // Preserve the existing text submission path when attachments are disabled.
+    if (mutating && request.method === 'POST' && segments[4] === 'submit') return null;
+    throw new NuniError(404, 'NOT_FOUND');
+  }
   if (mutating && !readPlatformAuthorization(request)) requireSameOrigin(request);
   if (request.method === 'GET' && fileQuery) {
     const keys = Array.from(request.nextUrl.searchParams.keys());
@@ -154,6 +158,11 @@ export async function handleAssignmentFileRequest(
     throw new NuniError(400, 'INVALID_INPUT');
   }
   const idempotencyKey = field(input, 'idempotencyKey', 8, 100);
+  if (segments[4] === 'withdraw-submission') {
+    return jsonResponse(await service.withdrawSubmission(actor, segments[1], segments[3], {
+      submittedAt: field(input, 'submittedAt', 1, 50), idempotencyKey,
+    }));
+  }
   if (segments[5] === 'intents') {
     if (Array.isArray(input.files)) {
       if (input.files.length < 1 || input.files.length > 10) throw new NuniError(422, 'INVALID_INPUT');
@@ -185,7 +194,8 @@ export async function handleAssignmentFileRequest(
       201,
     );
   }
-  if (segments[4] === 'submit-files') {
+  if (segments[4] === 'submit-files' || segments[4] === 'submit') {
+    if (segments[4] === 'submit') input.fileIds = [];
     if (!Array.isArray(input.fileIds) || input.fileIds.length > 10)
       throw new NuniError(422, 'INVALID_INPUT');
     const fileIds = input.fileIds.map((value) => {
@@ -212,12 +222,12 @@ export async function hydrateAssignmentFiles(
   workspace: NuniWorkspace,
   assignments: NuniAssignment[],
 ): Promise<NuniAssignment[]> {
-  if (!assignmentFileSubmitEnabled()) return assignments;
   const actor = await actorFor(request);
   const service = serviceFor(actor);
   return Promise.all(
     assignments.map(async (item) => ({
       ...item,
+      submissionCount: await service.visibleSubmissionCount(item),
       mySubmission: await service.hydrateSubmission(
         actor,
         workspace,
@@ -235,7 +245,6 @@ export async function hydrateSubmissionFiles(
   assignment: NuniAssignment,
   submissions: NuniSubmission[],
 ): Promise<NuniSubmission[]> {
-  if (!assignmentFileSubmitEnabled()) return submissions;
   const actor = await actorFor(request);
   const service = serviceFor(actor);
   const hydrated: NuniSubmission[] = [];

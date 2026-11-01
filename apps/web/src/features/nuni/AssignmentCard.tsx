@@ -1,5 +1,7 @@
 'use client';
 
+import { startAssignmentLive, assignmentReader, assignmentSyncLabel, type AssignmentSync } from '@campus/shared/src/assignmentLive';
+import { assignmentLifecycle } from './assignmentLifecycle';
 import { useEffect, useRef, useState } from 'react';
 import {
   NuniError,
@@ -11,6 +13,7 @@ import {
 import {
   assignmentReceiptStatusLabel,
   assignmentSubmissionLate,
+  assignmentCanRevise,
 } from '@campus/shared/src/assignmentFiles';
 import {
   awaitingFeedbackPosition,
@@ -32,12 +35,16 @@ import {
   uploadAndSubmitFiles,
   type AssignmentUploadProgress,
   type LocalAssignmentFile,
+  type AssignmentFileOperation,
 } from './AssignmentFileFields';
 import shared from './NuniApp.module.css';
 import styles from './CourseLearning.module.css';
 
 type Props = {
+  receiptActive?: boolean;
+  onOpenReceipts?: () => void;
   item: NuniAssignment;
+  syncVersion?: string | null;
   workspace: NuniWorkspace;
   reload: () => void;
   onConfirmed?: (assignment: NuniAssignment) => void;
@@ -59,8 +66,16 @@ function feedbackMatchesSubmitted(
   return (receipt.teacherFeedback ?? '').trim() === submitted.trim();
 }
 
-function latestAssignment(item: NuniAssignment, saved: NuniAssignment | null): NuniAssignment {
+function latestAssignment(
+  item: NuniAssignment,
+  saved: NuniAssignment | null,
+  withdrawnAt: string | null,
+): NuniAssignment {
   if (!saved) return item;
+  if (!saved.mySubmission && withdrawnAt !== null) {
+    if (item.mySubmission && item.mySubmission.submittedAt !== withdrawnAt) return item;
+    return { ...item, mySubmission: null, submissionCount: saved.submissionCount };
+  }
   const incoming = item.mySubmission;
   const confirmed = saved.mySubmission;
   const keepSubmission =
@@ -90,14 +105,23 @@ export function AssignmentCard(props: Props) {
   );
 }
 
-function Assignment({ item, workspace, onConfirmed }: Props) {
+function Assignment({ item, workspace, onConfirmed, syncVersion, receiptActive = true, onOpenReceipts }: Props) {
   const { session } = useNuniSession();
   const classes = useClasses();
   const fileSubmit = session?.assignmentFileSubmit === true;
-  const [saved, setSaved] = useState<NuniAssignment | null>(null);
+  const [withdrawNotice, setWithdrawNotice] = useState('');
+  const [withdrawnAt, setWithdrawnAt] = useState<string | null>(null);
+  const [savedSnapshot, setSavedSnapshot] = useState<{
+    value: NuniAssignment;
+    version: string | null | undefined;
+  } | null>(null);
+  const saved = savedSnapshot?.version === syncVersion ? savedSnapshot?.value ?? null : null;
+  const setSaved = (value: NuniAssignment) => setSavedSnapshot({ value, version: syncVersion });
   const [localFiles, setLocalFiles] = useState<LocalAssignmentFile[]>([]);
+  const fileOperation = useRef<AssignmentFileOperation>({});
+  const [recovering, setRecovering] = useState(false);
   const [progress, setProgress] = useState<AssignmentUploadProgress | null>(null);
-  const assignment = latestAssignment(item, saved);
+  const assignment = latestAssignment(item, saved, withdrawnAt);
   const [submissions, setSubmissions] = useState<NuniSubmission[] | null>(null);
   const [error, setError] = useState('');
   const [reading, setReading] = useState(false);
@@ -109,8 +133,32 @@ function Assignment({ item, workspace, onConfirmed }: Props) {
   const [queueNotice, setQueueNotice] = useState('');
   const mounted = useRef(true);
   const request = useRef(0);
+  const receiptReader = useRef(assignmentReader<NuniSubmission[]>());
   const submissionsRef = useRef<NuniSubmission[] | null>(null);
   const receiptNodes = useRef(new Map<string, HTMLElement | null>());
+  const liveReceiptRead = useRef(classes);
+  useEffect(() => { liveReceiptRead.current = classes; });
+  const [receiptSync, setReceiptSync] = useState<AssignmentSync>({ state: 'paused', updatedAt: null });
+  const receiptsOpened = submissions !== null;
+  useEffect(() => {
+    if (!receiptsOpened || reading || !receiptActive || accessDenied || workspace.memberRole === 'student') return;
+    let valid = true;
+    const lifecycle = assignmentLifecycle();
+    const stop = startAssignmentLive({
+      ...lifecycle,
+      initialDelay: 60000,
+      read: () => receiptReader.current(() => {
+        if (!valid || !lifecycle.active() || !lifecycle.online())
+          return Promise.reject(new Error('讀取已失效'));
+        return liveReceiptRead.current.submissions(workspace.id, item.id);
+      }),
+      revision: () => request.current,
+      receive: (rows) => { setSubmissions(rows); setError(''); },
+      clear: () => { setSubmissions(null); setAccessDenied(true); },
+      status: setReceiptSync,
+    });
+    return () => { valid = false; stop(); };
+  }, [receiptsOpened, reading, receiptActive, accessDenied, workspace.id, workspace.memberRole, item.id]);
   const FEEDBACK_FILTERS: FeedbackQueueFilter[] = ['all', 'needs_feedback', 'reviewed'];
   const orderedSubmissions = submissions === null ? null : sortFeedbackQueue(submissions);
   const visibleCount =
@@ -140,13 +188,15 @@ function Assignment({ item, workspace, onConfirmed }: Props) {
   const student = workspace.memberRole === 'student';
   const active = workspace.state === 'active';
   const open = assignment.state === 'open';
+  const canRevise = assignmentCanRevise(assignment.dueAt);
 
   async function readSubmissions() {
+    onOpenReceipts?.();
     const run = ++request.current;
     setError('');
     setReading(true);
     try {
-      const result = await classes.submissions(workspace.id, item.id);
+      const result = await receiptReader.current(() => classes.submissions(workspace.id, item.id));
       if (mounted.current && run === request.current) {
         setSubmissions(result);
         setFeedbackFilter(
@@ -271,7 +321,21 @@ function Assignment({ item, workspace, onConfirmed }: Props) {
           )}
         </section>
       )}
-      {student && active && open && (
+      {withdrawNotice && <p role="status">{withdrawNotice}</p>}
+      {student && fileSubmit && assignment.mySubmission && active && open && canRevise && (
+        <MutationForm label="撤回繳交" success="已撤回，截止前可以重新繳交。" submit={async (_data, key) => {
+          const result = await classes.withdrawAssignment(workspace.id, item.id, assignment.mySubmission!.submittedAt, key);
+          if (!mounted.current) throw new NuniError(409, 'SESSION_CHANGED');
+          setWithdrawnAt(assignment.mySubmission!.submittedAt);
+          setSaved(result);
+          setWithdrawNotice('已撤回，截止前可以重新繳交。');
+          onConfirmed?.(result);
+        }}>
+          <p>撤回後，老師就看不到這份繳交內容。</p>
+        </MutationForm>
+      )}
+      {student && fileSubmit && assignment.mySubmission && !canRevise && <p>已過截止時間，這份繳交不能再修改或撤回。</p>}
+      {student && active && (recovering || (open && (!fileSubmit || !assignment.mySubmission || canRevise))) && (
         <details open={!assignment.mySubmission} className={`${shared.compose} ${styles.compose}`}>
           <summary>{assignment.mySubmission ? '修改繳交內容' : '繳交這份作業'}</summary>
           <MutationForm
@@ -279,6 +343,14 @@ function Assignment({ item, workspace, onConfirmed }: Props) {
             success="繳交內容已儲存，老師現在可以查看。"
             submit={async (data, key) => {
               const body = String(data.get('body') ?? '');
+              if (
+                fileSubmit &&
+                !recovering &&
+                assignment.mySubmission &&
+                !assignmentCanRevise(assignment.dueAt)
+              )
+                throw new NuniError(409, 'ASSIGNMENT_REVISION_CLOSED');
+              setRecovering(true);
               try {
                 const result =
                   fileSubmit && localFiles.length
@@ -290,13 +362,48 @@ function Assignment({ item, workspace, onConfirmed }: Props) {
                         localFiles,
                         key,
                         setProgress,
+                        fileOperation.current,
                       )
-                    : await classes.submit(workspace.id, item.id, body, key);
+                    : fileSubmit
+                      ? await classes.submitFiles(workspace.id, item.id, {
+                          body,
+                          fileIds: [],
+                          idempotencyKey: key,
+                        })
+                      : await classes.submit(workspace.id, item.id, body, key);
                 if (!mounted.current) throw new NuniError(409, 'SESSION_CHANGED');
+                setRecovering(false);
+                fileOperation.current = {};
                 setSaved(result);
+                setWithdrawNotice('');
                 setLocalFiles([]);
                 setProgress(null);
                 onConfirmed?.(result);
+              } catch (failure) {
+                if (
+                  failure instanceof NuniError &&
+                  failure.code === 'ASSIGNMENT_SUBMISSION_SUPERSEDED'
+                ) {
+                  const fresh = (await classes.assignments(workspace.id)).find(
+                    (entry) => entry.id === item.id,
+                  );
+                  if (mounted.current && fresh) {
+                    setWithdrawNotice(nuniErrorMessage(failure));
+                    setSaved(fresh);
+                    onConfirmed?.(fresh);
+                    fileOperation.current = {};
+                    setLocalFiles([]);
+                  }
+                }
+                if (
+                  mounted.current &&
+                  failure instanceof NuniError &&
+                  failure.status < 500 &&
+                  failure.code !== 'SESSION_CHANGED'
+                ) {
+                  setRecovering(false);
+                }
+                throw failure;
               } finally {
                 if (mounted.current) setProgress(null);
               }
@@ -307,8 +414,11 @@ function Assignment({ item, workspace, onConfirmed }: Props) {
                 上傳中 {progress.completed}/{progress.total}，請保持網路連線。
               </p>
             ) : null}
+            {fileSubmit && assignment.mySubmission?.files?.length ? (
+              <p>重新送出會取代這次繳交；沒有選檔就改交純文字。</p>
+            ) : null}
             {fileSubmit ? (
-              <AssignmentFilePicker files={localFiles} onChange={setLocalFiles} />
+              <AssignmentFilePicker files={localFiles} onChange={setLocalFiles} disabled={recovering} />
             ) : null}
             <label>
               作業內容
@@ -344,6 +454,7 @@ function Assignment({ item, workspace, onConfirmed }: Props) {
               </button>
             )}
           </div>
+          {submissions !== null && <p>收件：{receiptActive ? assignmentSyncLabel(receiptSync) : '已暫停更新'}{receiptSync.updatedAt ? ` · 最後更新 ${formatTaipeiDateTime(receiptSync.updatedAt, { seconds: true })}` : ''}</p>}
           {error && (
             <p role="alert" className={shared.notice}>
               {error}

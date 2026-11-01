@@ -326,6 +326,7 @@ function SignedInWorkspace({
         importantForAccessibility={tab === 'courses' ? 'auto' : 'no-hide-descendants'}
       >
         <NuniCourses
+          active={tab === 'courses'}
           initialWorkspaceId={initialWorkspaceId}
           initialAssignmentId={initialAssignmentId}
           initialMaterialId={initialMaterialId}

@@ -167,7 +167,7 @@ function RecordContent<K extends AcademicKind>({
             </span>
           </div>
           <p>
-          來源：{sourceLabel} ·{' '}
+          來源：校方正式 · {sourceLabel} ·{' '}
           {new Date(state.snapshot.fetchedAt).toLocaleString('zh-TW', {
             timeZone: 'Asia/Taipei',
             month: 'numeric',
@@ -245,7 +245,9 @@ export function AcademicPage<K extends AcademicKind>(props: Props<K>) {
     campus: searchParams.get('campus') ?? undefined,
   });
   const schoolSearch = browse.schoolSearch;
-  const returnUrl = `${path}${schoolSearch}`;
+  const returnSearch = new URLSearchParams(searchParams.toString());
+  new URLSearchParams(schoolSearch).forEach((value, key) => returnSearch.set(key, value));
+  const returnUrl = `${path}${returnSearch.size ? `?${returnSearch}` : ''}`;
   const readyOfficial =
     browse.status === 'ready' && isOfficialAcademicSchool(browse.schoolId);
   const schoolKey =

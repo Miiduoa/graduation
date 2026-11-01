@@ -1,3 +1,4 @@
+import { SchoolLmsReadonlyProvider } from '@/components/SchoolLmsReadonlyProvider';
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import SchoolCoursesPage from './page';
@@ -61,7 +62,8 @@ it('reads real course records for the selected account and searches locally', as
   expect(await screen.findByRole('heading', { name: '資料庫管理' })).toBeTruthy();
   expect(loadTronClassCourses).toHaveBeenCalledWith('one', 'ongoing', 'pu');
   expect(screen.getByText('進行中 · 已讀取 1 門課程')).toBeTruthy();
-  expect(screen.getByRole('link', { name: '本課作業與教材' }).getAttribute('href')).toBe('/school-lms?course=100');
+  expect(screen.queryByRole('link', { name: '本課作業與教材' })).toBeNull();
+  expect(screen.getByRole('link', { name: 'nuni 課程空間' }).getAttribute('href')).toBe('/classroom');
   expect(screen.getByRole('link', { name: '前往 資料庫管理 的 WOW Class 課堂' }).getAttribute('href')).toBe('https://tronclass.pu.edu.tw/course/100/content');
   fireEvent.change(screen.getByLabelText('搜尋課程、代碼或老師'), { target: { value: '王老師' } });
   expect(screen.getByText('找到 1 門課程')).toBeTruthy();
@@ -196,4 +198,10 @@ it('does not expose a response for another account even if a loader misbehaves',
   const alert = within(await screen.findByRole('alert'));
   expect(alert.getByRole('heading', { name: '暫時無法讀取 WOW Class 課程' })).toBeTruthy();
   expect(screen.queryByRole('heading', { name: '資料庫管理' })).toBeNull();
+});
+
+it('keeps the readonly course link when enabled', async () => {
+  render(<SchoolLmsReadonlyProvider enabled={true}><SchoolCoursesPage /></SchoolLmsReadonlyProvider>);
+  await screen.findByRole('heading', { name: '資料庫管理' });
+  expect(screen.getByRole('link', { name: '本課作業與教材' }).getAttribute('href')).toBe('/school-lms?course=100');
 });

@@ -300,6 +300,7 @@ export function useFoodLoad<T>(
 ) {
   const [data, setData] = useState<T | null>(null);
   const [error, setError] = useState('');
+  const [errorKind, setErrorKind] = useState<'retryable' | 'unavailable' | null>(null);
   const [loading, setLoading] = useState(true);
   const { refresh } = useNuniSession();
   const refreshRef = useRef(refresh);
@@ -328,6 +329,7 @@ export function useFoodLoad<T>(
       dataRef.current = null;
       setData(null);
       setError('');
+      setErrorKind(null);
       setLoading(true);
       scope.queued = scope.inFlight.then(() => {
         scope.queued = null;
@@ -341,6 +343,7 @@ export function useFoodLoad<T>(
       dataRef.current = null;
       setData(null);
       setError('');
+      setErrorKind(null);
       setLoading(true);
     }
     const current = () => scope.active && scopeRef.current === scope && revision === scope.revision;
@@ -352,6 +355,7 @@ export function useFoodLoad<T>(
           dataRef.current = next;
           setData(next);
           setError('');
+          setErrorKind(null);
         },
         (failure: unknown) => {
           if (!current()) return;
@@ -359,6 +363,14 @@ export function useFoodLoad<T>(
           dataRef.current = null;
           setData(null);
           setError(readErrorMessage(failure));
+          const retryable =
+            failure instanceof NuniError
+              ? failure.code !== 'SESSION_CHANGED' &&
+                ([408, 429].includes(failure.status) ||
+                  failure.status >= 500 ||
+                  (failure.status === 0 && failure.code === 'NETWORK_ERROR'))
+              : failure instanceof Error && failure.name === 'TimeoutError';
+          setErrorKind(retryable ? 'retryable' : 'unavailable');
           if (
             failure instanceof NuniError &&
             (failure.status === 401 || failure.code === 'SESSION_CHANGED')
@@ -427,7 +439,7 @@ export function useFoodLoad<T>(
     };
   }, [pollMs, quietLoad, loader]);
 
-  return { data, error, loading, load, quietLoad };
+  return { data, error, errorKind, loading, load, quietLoad };
 }
 
 /** Draft cache holds an immutable retry intent, never order data or permissions. */

@@ -16,6 +16,10 @@
 		E7A100062D0520000044C2C1 /* SceneDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = E7A100052D0520000044C2C1 /* SceneDelegate.swift */; };
 		F11748422D0307B40044C1D9 /* AppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = F11748412D0307B40044C1D9 /* AppDelegate.swift */; };
 		FAEDEF93891245019610C378 /* notification.wav in Resources */ = {isa = PBXBuildFile; fileRef = 6605728EF8A7494BBC185D61 /* notification.wav */; };
+		9D9E9E099D4E4A8EA49B578E /* CampusWidgetExtension.appex in Copy Files */ = {isa = PBXBuildFile; fileRef = 2870FDAEB3A04F0BBCF2198D /* CampusWidgetExtension.appex */; };
+		773671D8B55449CD9ECAF6B7 /* CampusWidget.swift in Sources */ = {isa = PBXBuildFile; fileRef = 40A701032D40402EB50C9172 /* CampusWidget.swift */; };
+		ADB1A636AA5F451795DAC05D /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = 22EBE40183D74594A2B9381A /* PrivacyInfo.xcprivacy */; };
+		D989F93E40A84AC8B70D178C /* NextClassActivityAttributes.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7168C9B9BFD2479CBDE747BA /* NextClassActivityAttributes.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -23,7 +27,7 @@
 		13B07FB51A68108700A75B9A /* Images.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; name = Images.xcassets; path = mobile/Images.xcassets; sourceTree = "<group>"; };
 		13B07FB61A68108700A75B9A /* Info.plist */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = text.plist.xml; name = Info.plist; path = mobile/Info.plist; sourceTree = "<group>"; };
 		2B616F837C591CE898442A40 /* Pods_mobile.framework */ = {isa = PBXFileReference; explicitFileType = wrapper.framework; includeInIndex = 0; path = Pods_mobile.framework; sourceTree = BUILT_PRODUCTS_DIR; };
-		6605728EF8A7494BBC185D61 /* notification.wav */ = {isa = PBXFileReference; explicitFileType = undefined; fileEncoding = undefined; includeInIndex = 0; lastKnownFileType = unknown; name = notification.wav; path = mobile/notification.wav; sourceTree = "<group>"; };
+		6605728EF8A7494BBC185D61 /* notification.wav */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = unknown; name = notification.wav; path = mobile/notification.wav; sourceTree = "<group>"; };
 		AA286B85B6C04FC6940260E9 /* SplashScreen.storyboard */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = file.storyboard; name = SplashScreen.storyboard; path = mobile/SplashScreen.storyboard; sourceTree = "<group>"; };
 		B027F976A8FB2F2732BC32B3 /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; includeInIndex = 1; name = PrivacyInfo.xcprivacy; path = mobile/PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
 		BB2F792C24A3F905000567C9 /* Expo.plist */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = text.plist.xml; path = Expo.plist; sourceTree = "<group>"; };
@@ -34,6 +38,10 @@
 		EE6C0594694B03B2C16ACE79 /* Pods-mobile.debug.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-mobile.debug.xcconfig"; path = "Target Support Files/Pods-mobile/Pods-mobile.debug.xcconfig"; sourceTree = "<group>"; };
 		F11748412D0307B40044C1D9 /* AppDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = AppDelegate.swift; path = mobile/AppDelegate.swift; sourceTree = "<group>"; };
 		F11748442D0722820044C1D9 /* mobile-Bridging-Header.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; name = "mobile-Bridging-Header.h"; path = "mobile/mobile-Bridging-Header.h"; sourceTree = "<group>"; };
+		2870FDAEB3A04F0BBCF2198D /* CampusWidgetExtension.appex */ = {isa = PBXFileReference; name = "CampusWidgetExtension.appex"; path = "CampusWidgetExtension.appex"; sourceTree = BUILT_PRODUCTS_DIR; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; };
+		40A701032D40402EB50C9172 /* CampusWidget.swift */ = {isa = PBXFileReference; name = "CampusWidget.swift"; path = "CampusWidget.swift"; sourceTree = "<group>"; fileEncoding = 4; lastKnownFileType = sourcecode.swift; includeInIndex = 0; };
+		22EBE40183D74594A2B9381A /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; name = "PrivacyInfo.xcprivacy"; path = "PrivacyInfo.xcprivacy"; sourceTree = "<group>"; lastKnownFileType = text.xml; includeInIndex = 0; };
+		7168C9B9BFD2479CBDE747BA /* NextClassActivityAttributes.swift */ = {isa = PBXFileReference; name = "NextClassActivityAttributes.swift"; path = "NextClassActivityAttributes.swift"; sourceTree = "<group>"; fileEncoding = 4; lastKnownFileType = sourcecode.swift; includeInIndex = 0; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -42,6 +50,13 @@
 			buildActionMask = 2147483647;
 			files = (
 				1C829D54B22C8F1C19D83146 /* Pods_mobile.framework in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		F75D13922E1A46C8A97D61E8 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -97,6 +112,7 @@
 				2D16E6871FA4F8E400B85C8A /* Frameworks */,
 				E6F01BABB0F27B67AC008626 /* Pods */,
 				698BA48171F162615A794725 /* ExpoModulesProviders */,
+				EE6632033753405990EF33DF /* CampusWidgetExtension */,
 			);
 			indentWidth = 2;
 			sourceTree = "<group>";
@@ -107,6 +123,7 @@
 			isa = PBXGroup;
 			children = (
 				13B07F961A680F5B00A75B9A /* mobile.app */,
+				2870FDAEB3A04F0BBCF2198D /* CampusWidgetExtension.appex */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -138,6 +155,17 @@
 			path = Pods;
 			sourceTree = "<group>";
 		};
+		EE6632033753405990EF33DF /* CampusWidgetExtension */ = {
+			isa = PBXGroup;
+			children = (
+				40A701032D40402EB50C9172 /* CampusWidget.swift */,
+				22EBE40183D74594A2B9381A /* PrivacyInfo.xcprivacy */,
+				7168C9B9BFD2479CBDE747BA /* NextClassActivityAttributes.swift */,
+			);
+			name = CampusWidgetExtension;
+			path = CampusWidgetExtension;
+			sourceTree = "<group>";
+		};
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
@@ -150,6 +178,7 @@
 				13B07F871A680F5B00A75B9A /* Sources */,
 				13B07F8C1A680F5B00A75B9A /* Frameworks */,
 				13B07F8E1A680F5B00A75B9A /* Resources */,
+				330B0EFC5CEF4437B4EA09C4 /* Copy Files */,
 				00DD1BFF1BD5951E006B06BC /* Bundle React Native code and images */,
 				800E24972A6A228C8D4807E9 /* [CP] Copy Pods Resources */,
 				518B7A98EAE48D2A83EB893C /* [CP] Embed Pods Frameworks */,
@@ -158,11 +187,29 @@
 			buildRules = (
 			);
 			dependencies = (
+				0639A65413C6429CBBE9104D /* PBXTargetDependency */,
 			);
 			name = mobile;
 			productName = mobile;
 			productReference = 13B07F961A680F5B00A75B9A /* mobile.app */;
 			productType = "com.apple.product-type.application";
+		};
+		49A7AAAAAB8D446CAD4D290A /* "CampusWidgetExtension" */ = {
+			isa = PBXNativeTarget;
+			name = "CampusWidgetExtension";
+			productName = "CampusWidgetExtension";
+			productReference = 2870FDAEB3A04F0BBCF2198D;
+			productType = "com.apple.product-type.app-extension";
+			buildConfigurationList = 2186C0C825B54E13921855D6;
+			buildPhases = (
+				DDB13D4FA3FC4A70956E93FE /* Sources */,
+				F75D13922E1A46C8A97D61E8 /* Frameworks */,
+				2BD1054FBC63463E99CAB6AA /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
 		};
 /* End PBXNativeTarget section */
 
@@ -191,6 +238,7 @@
 			projectRoot = "";
 			targets = (
 				13B07F861A680F5B00A75B9A /* mobile */,
+				49A7AAAAAB8D446CAD4D290A /* "CampusWidgetExtension" */,
 			);
 		};
 /* End PBXProject section */
@@ -205,6 +253,14 @@
 				3E461D99554A48A4959DE609 /* SplashScreen.storyboard in Resources */,
 				FAEDEF93891245019610C378 /* notification.wav in Resources */,
 				43AC0A44E6B525C02FD117A2 /* PrivacyInfo.xcprivacy in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		2BD1054FBC63463E99CAB6AA /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				ADB1A636AA5F451795DAC05D /* PrivacyInfo.xcprivacy in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -383,6 +439,15 @@
 				F11748422D0307B40044C1D9 /* AppDelegate.swift in Sources */,
 				E7A100062D0520000044C2C1 /* SceneDelegate.swift in Sources */,
 				3525124ECAC3B54D4DC333CA /* ExpoModulesProvider.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		DDB13D4FA3FC4A70956E93FE /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				773671D8B55449CD9ECAF6B7 /* CampusWidget.swift in Sources */,
+				D989F93E40A84AC8B70D178C /* NextClassActivityAttributes.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -599,6 +664,50 @@
 			};
 			name = Release;
 		};
+		218402FFCD6F49C88A9972A7 /* Debug */ = {
+			name = Debug;
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"DEBUG=1",
+					"$(inherited)",
+				);
+				INFOPLIST_FILE = "CampusWidgetExtension/Info.plist";
+				LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/Frameworks @executable_path/../../Frameworks";
+				PRODUCT_NAME = "CampusWidgetExtension";
+				SKIP_INSTALL = YES;
+				PRODUCT_BUNDLE_IDENTIFIER = "com.campus.app.dev.widget";
+				CODE_SIGN_ENTITLEMENTS = "CampusWidgetExtension/CampusWidgetExtension.entitlements";
+				SWIFT_VERSION = 5.0;
+				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				APPLICATION_EXTENSION_API_ONLY = YES;
+				GENERATE_INFOPLIST_FILE = NO;
+				CURRENT_PROJECT_VERSION = 1;
+				MARKETING_VERSION = 1.0;
+				CODE_SIGN_STYLE = Automatic;
+			};
+		};
+		625A0F98D6874E329CFD64E0 /* Release */ = {
+			name = Release;
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				INFOPLIST_FILE = "CampusWidgetExtension/Info.plist";
+				LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/Frameworks @executable_path/../../Frameworks";
+				PRODUCT_NAME = "CampusWidgetExtension";
+				SKIP_INSTALL = YES;
+				PRODUCT_BUNDLE_IDENTIFIER = "com.campus.app.dev.widget";
+				CODE_SIGN_ENTITLEMENTS = "CampusWidgetExtension/CampusWidgetExtension.entitlements";
+				SWIFT_VERSION = 5.0;
+				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				APPLICATION_EXTENSION_API_ONLY = YES;
+				GENERATE_INFOPLIST_FILE = NO;
+				CURRENT_PROJECT_VERSION = 1;
+				MARKETING_VERSION = 1.0;
+				CODE_SIGN_STYLE = Automatic;
+			};
+		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
@@ -620,7 +729,48 @@
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
 		};
+		2186C0C825B54E13921855D6 /* Build configuration list for PBXNativeTarget "CampusWidgetExtension" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				218402FFCD6F49C88A9972A7 /* Debug */,
+				625A0F98D6874E329CFD64E0 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
 /* End XCConfigurationList section */
+
+/* Begin PBXCopyFilesBuildPhase section */
+		330B0EFC5CEF4437B4EA09C4 /* Copy Files */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				9D9E9E099D4E4A8EA49B578E /* CampusWidgetExtension.appex in Copy Files */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			name = "Copy Files";
+			dstPath = "";
+			dstSubfolderSpec = 13;
+		};
+/* End PBXCopyFilesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		0639A65413C6429CBBE9104D /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 49A7AAAAAB8D446CAD4D290A /* "CampusWidgetExtension" */;
+			targetProxy = 104CBC3181A6429EA9C8871D /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
+
+/* Begin PBXContainerItemProxy section */
+		104CBC3181A6429EA9C8871D /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 83CBB9F71A601CBA00E9B192 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 49A7AAAAAB8D446CAD4D290A;
+			remoteInfo = "CampusWidgetExtension";
+		};
+/* End PBXContainerItemProxy section */
 	};
 	rootObject = 83CBB9F71A601CBA00E9B192 /* Project object */;
 }

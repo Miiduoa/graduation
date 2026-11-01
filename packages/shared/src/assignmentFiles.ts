@@ -295,3 +295,9 @@ export function formatAssignmentFileSize(byteSize: number): string {
   if (byteSize < 1024 * 1024) return `${(byteSize / 1024).toFixed(1)} KB`;
   return `${(byteSize / (1024 * 1024)).toFixed(1)} MB`;
 }
+
+export function assignmentCanRevise(dueAt: string | null | undefined, now = Date.now()): boolean {
+  if (!dueAt) return true;
+  const due = parseTaipeiInstant(dueAt);
+  return due !== null && now <= due;
+}
