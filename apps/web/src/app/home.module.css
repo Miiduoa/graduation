@@ -1390,3 +1390,19 @@
     word-break: break-word;
   }
 }
+
+.sourceStatuses {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+}
+
+.sourceStatus {
+  min-width: 0;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+}
+
+.sourceStatus p {
+  margin: 4px 0;
+}

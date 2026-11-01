@@ -142,6 +142,23 @@ export async function loadNuniHomeData(
   transport: NuniTransport,
   platformAccountId: string,
 ): Promise<HomeData> {
+  return readNuniHomeData(transport, platformAccountId);
+}
+
+/** Homepage does not display materials; publish course navigation before pending work. */
+export async function loadNuniHomeSections(
+  transport: NuniTransport,
+  platformAccountId: string,
+  onCourses: (data: HomeData) => void,
+): Promise<HomeData> {
+  return readNuniHomeData(transport, platformAccountId, onCourses);
+}
+
+async function readNuniHomeData(
+  transport: NuniTransport,
+  platformAccountId: string,
+  onCourses?: (data: HomeData) => void,
+): Promise<HomeData> {
   const classes = createNuniClasses(transport, platformAccountId);
   const memberships = await classes.list();
   const active = memberships.filter((course) => course.state === 'active');
@@ -152,6 +169,7 @@ export async function loadNuniHomeData(
     unreadCount: 0,
     href: `/classroom/course/${encodeURIComponent(course.id)}`,
   }));
+  onCourses?.({ courses, tasks: [], unreadCount: 0 });
   const tasks: HomeTask[] = [];
   let tasksError: string | null = null;
   const recentFeedback: HomeFeedback[] = [];
@@ -186,7 +204,7 @@ export async function loadNuniHomeData(
             tasksError = '部分測驗還沒讀到，請重新讀取；已讀到的項目仍可查看。';
             return [];
           }),
-          readCourseMaterials(classes, course),
+          onCourses ? Promise.resolve(emptyMaterialRead) : readCourseMaterials(classes, course),
         ]);
         const assignmentTasks: HomeTask[] = [];
         for (const assignment of assignments) {

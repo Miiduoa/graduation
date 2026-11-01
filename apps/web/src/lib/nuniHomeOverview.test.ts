@@ -1,6 +1,6 @@
 import { beforeEach, expect, it, vi } from 'vitest';
 import { NuniError } from '@campus/shared/src/nuni';
-import { loadNuniHomeData, loadNuniHomeMaterials } from './nuniHomeOverview';
+import { loadNuniHomeData, loadNuniHomeMaterials, loadNuniHomeSections } from './nuniHomeOverview';
 
 const accountId = 'pa_00000000-0000-0000-0000-000000000001';
 const studentId = 'cw_00000000-0000-0000-0000-000000000001';
@@ -490,4 +490,52 @@ it('keeps confirmed assignments and their links when quizzes fail', async () => 
   expect(result.tasks[0].href).toBe(
     `/classroom/course/${studentId}#assignment-${assignment('1').id}`,
   );
+});
+
+it('budgets a one-course homepage at three requests and 100ms of synthetic work latency', async () => {
+  vi.useFakeTimers();
+  const measurements: Array<{ requests: number; readyAt: number; coursesAt?: number }> = [];
+  try {
+    for (const sectioned of [false, true]) {
+      const start = Date.now();
+      let readyAt = -1;
+      let coursesAt: number | undefined;
+      const request = vi.fn(async (path: string) => {
+        if (path === 'class-workspaces')
+          return {
+            workspaces: [
+              { id: studentId, title: '合成課程', state: 'active', memberRole: 'student' },
+            ],
+          };
+        if (path.endsWith('/materials')) {
+          await new Promise((resolve) => setTimeout(resolve, 2000));
+          return { materials: [] };
+        }
+        await new Promise((resolve) => setTimeout(resolve, 100));
+        if (path.endsWith('/assignments')) return { assignments: [assignment('1')] };
+        return { quizzes: [] };
+      });
+      const result = sectioned
+        ? loadNuniHomeSections(request, accountId, (book) => {
+            expect(book.courses).toHaveLength(1);
+            coursesAt = Date.now() - start;
+          })
+        : loadNuniHomeData(request, accountId);
+      const done = result.then((book) => {
+        expect(book.tasks).toHaveLength(1);
+        readyAt = Date.now() - start;
+      });
+      await vi.advanceTimersByTimeAsync(100);
+      expect(readyAt).toBe(sectioned ? 100 : -1);
+      await vi.advanceTimersByTimeAsync(1900);
+      await done;
+      measurements.push({ requests: request.mock.calls.length, readyAt, coursesAt });
+    }
+    expect(measurements).toEqual([
+      { requests: 4, readyAt: 2000, coursesAt: undefined },
+      { requests: 3, readyAt: 100, coursesAt: 0 },
+    ]);
+  } finally {
+    vi.useRealTimers();
+  }
 });
