@@ -1,0 +1,71 @@
+.grid {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  margin-top: 16px;
+  border-block: 1px solid var(--border);
+}
+.weekday {
+  text-align: center;
+  color: var(--muted);
+  padding: 10px 0;
+  font-size: 12px;
+}
+.day {
+  min-width: 0;
+  min-height: 140px;
+  border-top: 1px solid var(--border);
+  border-right: 1px solid var(--border);
+  padding: 4px;
+}
+.grid button {
+  min-width: 24px;
+  min-height: 24px;
+  box-sizing: border-box;
+  font: inherit;
+  color: var(--text);
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+  padding: 4px;
+}
+.grid .date {
+  width: 100%;
+  text-align: left;
+}
+.date[aria-pressed='true'] {
+  outline: 2px solid var(--brand);
+  outline-offset: -2px;
+}
+.grid .event {
+  display: block;
+  width: 100%;
+  text-align: left;
+  overflow-wrap: anywhere;
+  font-size: 13px;
+  border-left: 2px solid var(--brand);
+  margin-bottom: 4px;
+  background: var(--bg);
+}
+.grid .more {
+  font-size: 12px;
+  color: var(--brand);
+}
+@media (max-width: 540px) {
+  .day {
+    padding: 2px;
+    min-height: 120px;
+  }
+  .grid .event {
+    font-size: 12px;
+    padding: 3px 2px;
+  }
+  .eventTitle {
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+    overflow: hidden;
+  }
+  .grid .more {
+    padding: 2px;
+  }
+}
