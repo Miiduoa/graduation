@@ -44,13 +44,22 @@ import {
 import { fetchSchoolDirectoryProfiles } from '../../services/memberDirectory';
 import { toDate } from '../../utils/format';
 import { useCampusSocialStackNav } from './CampusSocialNavContext';
-import { selectMobileFeedPosts, type MobileFeedOrder } from './feedDiscoveryModel';
+import {
+  describeMobileFeedSearchRecovery,
+  mobileFeedHasMorePages,
+  mobileFeedSearchScopeLabel,
+  MOBILE_FEED_PAGE_SIZE,
+  selectMobileFeedPosts,
+  type MobileFeedOrder,
+  type MobileFeedRecoveryActionId,
+} from './feedDiscoveryModel';
 import {
   listCampusPostBookmarkIds,
   loadCampusPostBookmarks,
   saveCampusPostBookmark,
   removeCampusPostBookmark,
 } from '../../services/campusPostBookmarks';
+import { useNetworkStatus } from '../../hooks/useNetworkStatus';
 
 type FilterKey = 'all' | 'following' | 'subscribed' | 'media' | 'saved';
 const EMPTY_SAVED_POSTS: CampusPostDoc[] = [];
@@ -134,10 +143,14 @@ function HomeFeedContent() {
   const [filter, setFilter] = useState<FilterKey>('all');
   const [order, setOrder] = useState<MobileFeedOrder>('recommended');
   const [search, setSearch] = useState('');
+  const [pageLimit, setPageLimit] = useState(MOBILE_FEED_PAGE_SIZE);
+  const [hasMore, setHasMore] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [loadError, setLoadError] = useState('');
   const [accessDenied, setAccessDenied] = useState(false);
+  const { isOffline } = useNetworkStatus();
   const likeFlightsRef = useRef<Set<string>>(new Set());
   const [pendingLikes, setPendingLikes] = useState<ReadonlySet<string>>(new Set());
   const [bookmarkScope, setBookmarkScope] = useState('');
@@ -168,7 +181,7 @@ function HomeFeedContent() {
   const followedIds = validFollowing ? followingIds : EMPTY_FOLLOWING_IDS;
   const loadVersion = useRef(0);
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (limit: number = MOBILE_FEED_PAGE_SIZE) => {
     const version = ++loadVersion.current;
     setLoadError('');
     try {
@@ -177,17 +190,21 @@ function HomeFeedContent() {
         setBoards([]);
         setSubscribedBoardIds(new Set());
         setStories([]);
+        setHasMore(false);
+        setPageLimit(MOBILE_FEED_PAGE_SIZE);
         return;
       }
       const [rows, boardList, subs, storyRows] = await Promise.all([
-        fetchRecentCampusPosts(school.id, undefined, 60),
+        fetchRecentCampusPosts(school.id, undefined, limit),
         listBoards(school.id, 80),
         listSubscribedBoardIds(auth.user.uid, school.id, { throwOnError: true }),
         listActiveStoriesForSchool(school.id, 80, { throwOnError: true }),
       ]);
       if (loadVersion.current !== version) return;
       setAccessDenied(false);
-      setPosts(rankFeedPosts(rows, 80));
+      setPageLimit(limit);
+      setHasMore(mobileFeedHasMorePages(rows.length, MOBILE_FEED_PAGE_SIZE) && rows.length >= limit);
+      setPosts(rankFeedPosts(rows, Math.max(80, limit)));
       setBoards(boardList);
       setSubscribedBoardIds(new Set(subs));
       setStories(groupStoriesByAuthor(storyRows, auth.user.uid));
@@ -201,12 +218,14 @@ function HomeFeedContent() {
         setStories([]);
         setNameByUid({});
         setAvatarByUid({});
+        setHasMore(false);
       }
       setLoadError('暫時無法更新校園動態。請確認網路與登入狀態，再試一次。');
     } finally {
       if (loadVersion.current === version) {
         setLoading(false);
         setRefreshing(false);
+        setLoadingMore(false);
       }
     }
   }, [school?.id, auth.user?.uid]);
@@ -215,8 +234,14 @@ function HomeFeedContent() {
     setRefreshing(true);
     setBookmarkRevision((prev) => prev + 1);
     setFollowingRevision((prev) => prev + 1);
-    await load();
+    await load(MOBILE_FEED_PAGE_SIZE);
   }, [load]);
+
+  const onLoadMoreForSearch = useCallback(async () => {
+    if (loadingMore || refreshing || loading || isOffline) return;
+    setLoadingMore(true);
+    await load(pageLimit + MOBILE_FEED_PAGE_SIZE);
+  }, [isOffline, load, loading, loadingMore, pageLimit, refreshing]);
 
   React.useEffect(() => {
     const uid = auth.user?.uid;
@@ -468,8 +493,9 @@ function HomeFeedContent() {
     return m;
   }, [boards]);
 
+  const sourcePosts = savedView ? savedPosts : posts;
   const visiblePosts = useMemo(
-    () => selectMobileFeedPosts(savedView ? savedPosts : posts, {
+    () => selectMobileFeedPosts(sourcePosts, {
       filter: filter === 'saved' ? 'all' : filter,
       order,
       search,
@@ -478,15 +504,54 @@ function HomeFeedContent() {
       boards: boardNameById,
       authors: nameByUid,
     }),
-    [posts, savedPosts, savedView, filter, order, search, subscribedBoardIds, followedIds, boardNameById, nameByUid],
+    [sourcePosts, filter, order, search, subscribedBoardIds, followedIds, boardNameById, nameByUid],
   );
   const savedUnavailable = savedView && (bookmarksLoading || !validBookmarks || !!bookmarksError);
   const followingUnavailable = followingView && (followingLoading || !validFollowing || !!followingError);
   const discoveryUnavailable = accessDenied || savedUnavailable || followingUnavailable;
+  const searchScopeLabel = mobileFeedSearchScopeLabel(sourcePosts.length);
+  const searchRecovery = useMemo(
+    () => describeMobileFeedSearchRecovery({
+      search,
+      filter,
+      matchCount: visiblePosts.length,
+      loadedCount: sourcePosts.length,
+      hasMore: !savedView && hasMore,
+      offline: isOffline,
+    }),
+    [filter, hasMore, isOffline, savedView, search, sourcePosts.length, visiblePosts.length],
+  );
 
   const selectFilter = (next: FilterKey) => {
     if (next === 'saved' && !savedView) setBookmarksLoading(true);
     setFilter(next);
+  };
+
+  const clearDiscoveryFilters = () => {
+    setFilter('all');
+    setSearch('');
+  };
+
+  const openCommunityTab = (tab: 'boards' | 'realtime') => {
+    nav?.setParams?.({ initialTab: tab });
+  };
+
+  const runSearchRecovery = (action: MobileFeedRecoveryActionId) => {
+    if (action === 'load-more') {
+      void onLoadMoreForSearch();
+      return;
+    }
+    if (action === 'clear-filters') {
+      clearDiscoveryFilters();
+      return;
+    }
+    if (action === 'open-boards') {
+      openCommunityTab('boards');
+      return;
+    }
+    if (action === 'open-topics') {
+      openCommunityTab('realtime');
+    }
   };
 
   const authorLine = (p: CampusPostDoc) => {
@@ -610,6 +675,23 @@ function HomeFeedContent() {
                   </Pressable>
                 )}
               </View>
+              {!discoveryUnavailable && (
+                <Text
+                  accessibilityRole="text"
+                  accessibilityLabel={searchScopeLabel}
+                  style={{ color: theme.colors.textSecondary, fontSize: 12, fontWeight: '600' }}
+                >
+                  {searchScopeLabel}
+                </Text>
+              )}
+              {isOffline && !!search.trim() && !discoveryUnavailable && (
+                <Text
+                  accessibilityRole="text"
+                  style={{ color: theme.colors.warning, fontSize: 11, lineHeight: 16 }}
+                >
+                  目前離線，僅能搜尋已載入的貼文；輸入的關鍵字會保留。
+                </Text>
+              )}
               <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
                 {!discoveryUnavailable && <Text style={{ color: theme.colors.textSecondary, fontSize: 12 }}>
                   {savedView
@@ -650,7 +732,7 @@ function HomeFeedContent() {
                   ? '顯示本校最近最多 40 筆私人收藏，可跨裝置同步'
                   : followingView
                     ? '只顯示目前載入的本校貼文中追蹤的作者'
-                    : '搜尋與排序僅適用於本次載入的本校貼文'}
+                    : '搜尋與排序僅適用於本次載入的本校貼文，不是全站搜尋'}
               </Text>}
             </View>
             </>
@@ -665,24 +747,66 @@ function HomeFeedContent() {
                     {followingView ? '正在讀取追蹤動態…' : '正在讀取收藏…'}
                   </Text>
                 </View>
+              ) : searchRecovery ? (
+                <View style={{ paddingHorizontal: 14, paddingVertical: 20, gap: 12 }}>
+                  <EmptyState
+                    variant="search"
+                    title={searchRecovery.title}
+                    subtitle={searchRecovery.subtitle}
+                  />
+                  {loadingMore ? (
+                    <View style={{ alignItems: 'center', paddingVertical: 8 }}>
+                      <ActivityIndicator color={theme.colors.accent} />
+                    </View>
+                  ) : null}
+                  <View style={{ gap: 8 }}>
+                    {searchRecovery.actions.map((action) => (
+                      <Pressable
+                        key={action.id}
+                        accessibilityRole="button"
+                        accessibilityLabel={action.label}
+                        disabled={action.id === 'load-more' && (loadingMore || isOffline)}
+                        onPress={() => runSearchRecovery(action.id)}
+                        style={{
+                          minHeight: 44,
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          borderRadius: theme.radius.md,
+                          borderWidth: StyleSheet.hairlineWidth,
+                          borderColor: theme.colors.border,
+                          backgroundColor:
+                            action.id === 'load-more' ? theme.colors.accent : theme.colors.surface,
+                          opacity: action.id === 'load-more' && (loadingMore || isOffline) ? 0.55 : 1,
+                        }}
+                      >
+                        <Text style={{
+                          color: action.id === 'load-more'
+                            ? theme.colors.onAccent
+                            : theme.colors.text,
+                          fontWeight: '700',
+                          fontSize: 14,
+                        }}>
+                          {action.label}
+                        </Text>
+                      </Pressable>
+                    ))}
+                  </View>
+                </View>
               ) : <EmptyState
                 showCalmHero
-                title={search.trim()
-                  ? '找不到符合的貼文'
-                  : filter === 'following' ? '追蹤的作者尚未發文'
+                title={
+                  filter === 'following' ? '追蹤的作者尚未發文'
                     : filter === 'saved' ? '還沒有收藏貼文'
                     : filter === 'subscribed' ? '尚無已訂閱看板的新貼文'
                     : '尚無校園貼文'}
                 subtitle={
-                  search.trim()
-                    ? '請縮短關鍵字或清除搜尋，目前僅搜尋已載入的貼文。'
-                    : filter === 'following'
-                      ? '先到「全部」動態追蹤感興趣的作者；目前只篩選已載入貼文。'
-                      : filter === 'saved'
-                        ? '到校園動態收藏有用的內容，之後可跨裝置找回。'
-                    : filter === 'subscribed'
-                      ? '到「看板」訂閱你想追的版面，或點右下角發第一篇。'
-                      : '點右下角的鉛筆，發出你的第一篇貼文。'
+                  filter === 'following'
+                    ? '先到「全部」動態追蹤感興趣的作者；目前只篩選已載入貼文。'
+                    : filter === 'saved'
+                      ? '到校園動態收藏有用的內容，之後可跨裝置找回。'
+                  : filter === 'subscribed'
+                    ? '到「看板」訂閱你想追的版面，或點右下角發第一篇。'
+                    : '點右下角的鉛筆，發出你的第一篇貼文。'
                 }
               />
             )

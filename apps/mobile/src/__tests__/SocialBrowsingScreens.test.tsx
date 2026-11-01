@@ -19,16 +19,25 @@ let savedBookmarks = new Set<string>();
 let mockUser = { uid: 'alice' };
 let mockSchoolId = 'pu';
 let mockAuthLoading = false;
+let mockOffline = false;
 const alertSpy = jest.spyOn(Alert, 'alert').mockImplementation(() => {});
 jest.mock('../state/auth', () => ({ useAuth: () => ({ user: mockUser, loading: mockAuthLoading }) }));
 jest.mock('../state/school', () => ({ useSchool: () => ({ school: { id: mockSchoolId } }) }));
 jest.mock('../firebase', () => ({ isFirebaseMockMode: () => false, getDb: () => ({}) }));
 jest.mock('@expo/vector-icons', () => ({ Ionicons: () => null }));
 jest.mock('../ui/components', () => ({
-  EmptyState: ({ title }: { title: string }) => {
-    const { Text } = require('react-native');
-    return <Text>{title}</Text>;
+  EmptyState: ({ title, subtitle }: { title: string; subtitle?: string }) => {
+    const { Text, View } = require('react-native');
+    return (
+      <View>
+        <Text>{title}</Text>
+        {subtitle ? <Text>{subtitle}</Text> : null}
+      </View>
+    );
   },
+}));
+jest.mock('../hooks/useNetworkStatus', () => ({
+  useNetworkStatus: () => ({ isOffline: mockOffline }),
 }));
 jest.mock('../services/feed', () => ({
   fetchRecentCampusPosts: jest.fn(),
@@ -97,6 +106,7 @@ const screens = [
 ];
 
 beforeEach(() => {
+  mockOffline = false;
   jest.clearAllMocks();
   mockSchoolId = 'pu';
   mockUser = { uid: 'alice' };
@@ -254,6 +264,7 @@ test('the mobile feed switches to latest and searches only loaded school posts',
   const view = render(<HomeFeedScreen />);
   expect(await view.findByText('期中考討論')).toBeTruthy();
   expect(view.getByText('系上活動')).toBeTruthy();
+  expect(view.getByText('搜尋範圍：已載入的 2 篇貼文')).toBeTruthy();
 
   fireEvent.press(view.getByText('最新'));
   const list = view.UNSAFE_getByType(FlatList);
@@ -264,6 +275,46 @@ test('the mobile feed switches to latest and searches only loaded school posts',
   expect(view.queryByText('期中考討論')).toBeNull();
   fireEvent.press(view.getByLabelText('清除搜尋'));
   expect(view.getByText('期中考討論')).toBeTruthy();
+});
+
+test('empty search results offer load-more, clear-filters and board or topic recovery', async () => {
+  const rows = Array.from({ length: 60 }, (_, index) => ({
+    ...post,
+    id: `post-${index}`,
+    title: `校園動態 ${index}`,
+    content: '一般內容',
+  }));
+  jest.mocked(fetchRecentCampusPosts).mockResolvedValue(rows);
+  const view = render(<HomeFeedScreen />);
+  expect(await view.findByText('搜尋範圍：已載入的 60 篇貼文')).toBeTruthy();
+
+  fireEvent.changeText(view.getByLabelText('搜尋本校貼文'), '完全找不到');
+  expect(await view.findByText('找不到符合的貼文')).toBeTruthy();
+  expect(view.getByLabelText('再載入更多後繼續找')).toBeTruthy();
+  expect(view.getByLabelText('前往看板')).toBeTruthy();
+  expect(view.getByLabelText('前往話題')).toBeTruthy();
+  expect(view.getByLabelText('搜尋本校貼文').props.value).toBe('完全找不到');
+
+  fireEvent.press(view.getByLabelText('我訂閱分類'));
+  expect(await view.findByLabelText('清除篩選')).toBeTruthy();
+  await act(async () => {
+    fireEvent.press(view.getByLabelText('清除篩選'));
+  });
+  expect(view.getByLabelText('搜尋本校貼文').props.value).toBe('');
+  expect(view.queryByText('找不到符合的貼文')).toBeNull();
+});
+
+test('offline empty search keeps the query and hides load-more', async () => {
+  mockOffline = true;
+  jest.mocked(fetchRecentCampusPosts).mockResolvedValue([post]);
+  const view = render(<HomeFeedScreen />);
+  expect(await view.findByText(post.title)).toBeTruthy();
+  fireEvent.changeText(view.getByLabelText('搜尋本校貼文'), '離線找不到');
+  expect(await view.findByText('離線中，找不到符合的貼文')).toBeTruthy();
+  expect(view.getByText(/關鍵字已保留/)).toBeTruthy();
+  expect(view.getByLabelText('搜尋本校貼文').props.value).toBe('離線找不到');
+  expect(view.queryByLabelText('再載入更多後繼續找')).toBeNull();
+  expect(view.getByLabelText('前往看板')).toBeTruthy();
 });
 
 test('the saved filter loads older bookmarked posts outside the latest feed', async () => {
