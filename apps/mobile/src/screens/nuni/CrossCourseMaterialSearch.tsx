@@ -11,17 +11,29 @@ import {
   type SearchCourse,
 } from './crossCourseMaterials';
 
+export function useCourseSearchState() {
+  const [query, setQuery] = useState('');
+  const [submitted, setSubmitted] = useState('');
+  const [courses, setCourses] = useState<SearchCourse[] | null>(null);
+  return { query, setQuery, submitted, setSubmitted, courses, setCourses };
+}
+
 export function CrossCourseMaterialSearch({
   classes,
   open,
+  active = true,
+  state,
+  join,
 }: {
+  active?: boolean;
+  state?: ReturnType<typeof useCourseSearchState>;
+  join?(): void;
   classes: MaterialSearchClient;
   open(courseId: string, materialId: string): void;
 }) {
   const theme = useTheme();
-  const [query, setQuery] = useState('');
-  const [submitted, setSubmitted] = useState('');
-  const [courses, setCourses] = useState<SearchCourse[] | null>(null);
+  const localState = useCourseSearchState();
+  const { query, setQuery, submitted, setSubmitted, courses, setCourses } = state ?? localState;
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const epoch = useRef(0);
@@ -32,11 +44,26 @@ export function CrossCourseMaterialSearch({
     },
     [],
   );
-  async function search(more = false) {
-    if (locked.current || (!more && !query.trim())) return;
+  const latest = useRef(courses);
+  latest.current = courses;
+  useEffect(() => {
+    if (active && latest.current) void search(true, undefined, true);
+    return () => {
+      epoch.current += 1;
+      locked.current = false;
+      setBusy(false);
+    };
+    // 搜尋恢復時重新驗權，輸入與進度變動不重啟請求。
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [active]);
+  async function search(more = false, onlyCourseId?: string, validateOnly = false) {
+    if (!active || locked.current || (!more && !query.trim())) return;
     locked.current = true;
     const run = ++epoch.current;
     const cancelled = () => run !== epoch.current;
+    const publish = (next: SearchCourse[]) => {
+      if (!cancelled()) setCourses(next);
+    };
     setBusy(true);
     setError('');
     if (!more) {
@@ -46,8 +73,8 @@ export function CrossCourseMaterialSearch({
     try {
       const result =
         more && courses
-          ? await readSearchRound(classes, courses, cancelled)
-          : await startMaterialSearch(classes, cancelled);
+          ? await readSearchRound(classes, courses, cancelled, publish, onlyCourseId, validateOnly)
+          : await startMaterialSearch(classes, cancelled, publish);
       if (!cancelled()) setCourses(result);
     } catch (failure) {
       if (!cancelled()) setError(materialFailureMessage(failure));
@@ -100,6 +127,7 @@ export function CrossCourseMaterialSearch({
         }}
       />
       {button('搜尋教材', () => void search())}
+      {submitted ? <Text style={copy}>目前搜尋：{submitted}</Text> : null}
       {busy ? (
         <Text accessibilityLiveRegion="polite" style={copy}>
           正在搜尋，結果還沒搜完…
@@ -113,14 +141,21 @@ export function CrossCourseMaterialSearch({
       {courses ? (
         <>
           <Text accessibilityLiveRegion="polite" style={copy}>
+            完成課數：{courses.filter((course) => course.complete).length}／{courses.length}
+          </Text>
+          <Text accessibilityLiveRegion="polite" style={copy}>
             {crossCourseSearchCopy(courses, hits.length)}
           </Text>
+          {!courses.length && join ? button('加入課程', join) : null}
           {courses
             .filter((course) => course.error)
             .map((course) => (
-              <Text key={course.id} accessibilityRole="alert" style={copy}>
-                {course.title}：尚未搜完。{course.error}
-              </Text>
+              <View key={course.id}>
+                <Text accessibilityRole="alert" style={copy}>
+                  {course.title}：尚未搜完。{course.error}
+                </Text>
+                {button(`重試${course.title}`, () => void search(true, course.id))}
+              </View>
             ))}
           {hits.map(({ course, item }) => (
             <Pressable

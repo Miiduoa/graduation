@@ -2435,3 +2435,23 @@ it('合成發布經共用寫入與輪詢後約一分鐘內出現在學生畫面'
     expect(Date.now() - started).toBe(60300);
   } finally { view.unmount(); jest.useRealTimers(); subscription.mockRestore(); }
 });
+
+it('跨課搜尋進教材後返回保留關鍵字與結果並重新驗權', async () => {
+  const target = material(1, '返回保留教材');
+  mockRequest.mockImplementation((path, context, input) => {
+    if (path.endsWith('/materials/page')) return Promise.resolve({ materials: [target], nextCursor: null });
+    return response(path, context, input);
+  });
+  const view = render(<NuniCourses />);
+  fireEvent.changeText(view.getByLabelText('跨課教材關鍵字'), '返回保留');
+  fireEvent.press(view.getByText('搜尋教材'));
+  await view.findByText('返回保留教材');
+  fireEvent.press(view.getByText('返回保留教材'));
+  await view.findByText('目標教材');
+  const reads = mockRequest.mock.calls.filter(([path]) => path.endsWith('/materials/page')).length;
+  fireEvent.press(view.getByText('返回我的課程'));
+  await waitFor(() => expect(mockRequest.mock.calls.filter(([path]) => path.endsWith('/materials/page')).length).toBeGreaterThan(reads));
+  expect(view.getByLabelText('跨課教材關鍵字').props.value).toBe('返回保留');
+  expect(view.getByText('返回保留教材')).toBeTruthy();
+  expect(view.getByText('目前搜尋：返回保留')).toBeTruthy();
+});

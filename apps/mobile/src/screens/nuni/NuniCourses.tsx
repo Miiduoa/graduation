@@ -93,7 +93,8 @@ import {
   type CourseListFilter,
 } from '../../services/nuniActivityTasks';
 import { StudyAgenda } from './StudyAgenda';
-import { CrossCourseMaterialSearch } from './CrossCourseMaterialSearch';
+import { NavigationContext } from '@react-navigation/native';
+import { CrossCourseMaterialSearch, useCourseSearchState } from './CrossCourseMaterialSearch';
 import { createNuniClassroom } from '@campus/shared/src/nuniClassroom';
 import { NuniAttendance, createAttendanceStore } from './NuniAttendance';
 
@@ -600,10 +601,12 @@ function useLoad<T>(
 }
 
 export function NuniCourses({
+  active = true,
   initialWorkspaceId,
   initialAssignmentId,
   initialMaterialId,
 }: {
+  active?: boolean;
   initialWorkspaceId?: string;
   initialAssignmentId?: string;
   initialMaterialId?: string;
@@ -613,6 +616,7 @@ export function NuniCourses({
   return (
     <CourseScope
       key={auth.session.context}
+      active={active}
       session={auth.session}
       request={auth.request}
       upload={auth.upload}
@@ -624,6 +628,7 @@ export function NuniCourses({
   );
 }
 function CourseScope({
+  active,
   session,
   request,
   upload,
@@ -632,6 +637,7 @@ function CourseScope({
   initialAssignmentId,
   initialMaterialId,
 }: {
+  active: boolean;
   session: NativeNuniSession;
   request: ReturnType<typeof useNuniSession>['request'];
   upload?: ReturnType<typeof useNuniSession>['upload'];
@@ -641,6 +647,17 @@ function CourseScope({
   initialMaterialId?: string;
 }) {
   const theme = useTheme();
+  const navigation = React.useContext(NavigationContext);
+  const [focused, setFocused] = useState(() => navigation?.isFocused() ?? true);
+  useEffect(() => {
+    if (!navigation) return;
+    const focus = navigation.addListener('focus', () => setFocused(true));
+    const blur = navigation.addListener('blur', () => setFocused(false));
+    return () => { focus(); blur(); };
+  }, [navigation]);
+  const searchState = useCourseSearchState();
+  const searchOffset = useRef(0);
+  const [joinRequested, setJoinRequested] = useState(0);
   const classes = useMemo(
     () =>
       createNuniClasses(
@@ -713,8 +730,8 @@ function CourseScope({
           classes={classes}
           classroom={classroom}
           onBack={() => {
-            scrollRef.current?.scrollTo({ y: 0, animated: false });
-            contentOffsetYRef.current = 0;
+            scrollRef.current?.scrollTo({ y: searchOffset.current, animated: false });
+            contentOffsetYRef.current = searchOffset.current;
             setFocusActivityId(undefined);
             setFocusMaterialId(undefined);
             setSelected(null);
@@ -726,14 +743,15 @@ function CourseScope({
         />
       ) : (
         <>
-          <CrossCourseMaterialSearch classes={classes} open={(courseId, materialId) => {
+          <CrossCourseMaterialSearch state={searchState} active={active && focused} join={() => setJoinRequested((value) => value + 1)} classes={classes} open={(courseId, materialId) => {
+            searchOffset.current = contentOffsetYRef.current;
             scrollRef.current?.scrollTo({ y: 0, animated: false });
             contentOffsetYRef.current = 0;
             setFocusActivityId(undefined);
             setFocusMaterialId(materialId);
             setSelected(courseId);
           }} />
-          <CourseList classes={classes} open={openCourse} />
+          <CourseList classes={classes} open={openCourse} joinRequested={joinRequested} />
         </>
       )}
     </ScrollView>
@@ -741,9 +759,11 @@ function CourseScope({
 }
 
 function CourseList({
+  joinRequested = 0,
   classes,
   open,
 }: {
+  joinRequested?: number;
   classes: Classes;
   open(id: string, activityId?: string): void;
 }) {
@@ -797,6 +817,9 @@ function CourseList({
     };
   }, [agendaData]);
   const [action, setAction] = useNuniDraftState<'join' | 'create' | null>('courses:entry', null);
+  useEffect(() => {
+    if (joinRequested) setAction('join');
+  }, [joinRequested, setAction]);
   const [query, setQuery] = useNuniDraftState('courses:search', '');
   const [filter, setFilter] = useNuniDraftState<CourseListFilter>('courses:filter', 'all');
   const courses = result.data ?? [];
