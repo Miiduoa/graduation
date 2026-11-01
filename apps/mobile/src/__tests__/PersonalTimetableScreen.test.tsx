@@ -1,6 +1,6 @@
 import { classMeetingKey } from '@campus/shared';
 import React from 'react';
-import { fireEvent, render, waitFor, within } from '@testing-library/react-native';
+import { fireEvent, render, waitFor } from '@testing-library/react-native';
 import type { PersonalImportRecord } from '@campus/shared';
 import PersonalTimetableScreen from '../screens/PersonalTimetableScreen';
 import { loadPersonalTimetable, loadPersonalTimetableDraft, savePersonalTimetable } from '../services/personalTimetable';
@@ -177,11 +177,10 @@ test('a matching manual and imported class appears once and does not disable fre
   });
   const view = render(<PersonalTimetableScreen />);
   await view.findAllByText('成大課程');
-  // The date-specific exception editor also names this class; count the weekly card only.
-  // If manual and imported records both render in the weekly baseline, the time lookup becomes ambiguous.
-  const weeklyCard = view.getByText('星期一 · 08:00–09:50').parent;
-  expect(weeklyCard).not.toBeNull();
-  expect(within(weeklyCard!).getAllByText('成大課程')).toHaveLength(1);
+  // This fixture has one class occupying Monday 08:00–09:50. A duplicate manual/imported
+  // weekly row would repeat the period label, even though the dated editor may repeat
+  // the course name in its separate controls. Keep checking the original dedup behavior.
+  expect(view.getAllByText('星期一 · 08:00–09:50')).toHaveLength(1);
   expect(view.getByRole('button', { name: '今天空堂' })).not.toBeDisabled();
   expect(view.queryByText(/部分課程無法對應節次/)).toBeNull();
 });
