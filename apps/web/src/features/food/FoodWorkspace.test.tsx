@@ -476,6 +476,11 @@ it('keeps placed orders visible and does not invite a new order while online ord
   expect(screen.queryByRole('button', { name: '查看菜單：米飯店' })).toBeNull();
   expect(screen.queryByText('先看菜單與金額，確認後才送出訂單。')).toBeNull();
   await screen.findByText('米飯店 · 待付款');
+  const paper = screen.getByRole('region', { name: '訂單紙本明細' });
+  expect(within(paper).getByText('非統一發票')).toBeTruthy();
+  expect(paper.textContent).not.toMatch(/已付款|已入帳|付款成功/);
+  expect(within(paper).queryByLabelText('一次性取餐憑證')).toBeNull();
+  expect(paper.querySelector('img, canvas, svg')).toBeNull();
   expect(screen.getByRole('link', { name: 'App 餐廳訂單' }).getAttribute('href')).toBe('/orders');
   expect(screen.queryByRole('button', { name: '我的訂單與取餐' })).toBeNull();
   expect(screen.getByRole('button', { name: '重新整理' })).toBeTruthy();
@@ -730,3 +735,33 @@ it.each(['accepted', 'preparing', 'ready', 'fulfilled'] as const)(
     expect(screen.queryByText('付款進度：已入帳')).toBeNull();
   },
 );
+
+it('expands paper line items by default for in-progress orders and keeps finished orders collapsed', async () => {
+  order = readyOrder();
+  const view = render(<FoodWorkspace initialTenant="campus-one" initialOrder="order-1" />);
+  const activePaper = await screen.findByRole('region', { name: '訂單紙本明細' });
+  const activeDetails = activePaper.querySelector('details');
+  expect(activeDetails?.open).toBe(true);
+  expect(within(activePaper).getByText('數量 1')).toBeTruthy();
+  expect(within(activePaper).getByRole('heading', { name: '蔬菜便當' })).toBeTruthy();
+
+  order = {
+    ...readyOrder(),
+    state: 'fulfilled',
+    allowedActions: [],
+    pickup: {
+      state: 'fulfilled',
+      displayCode: 'A101',
+      readyAt: future,
+      calls: [],
+      callCount: 0,
+      allowedActions: [],
+    },
+  };
+  view.unmount();
+  render(<FoodWorkspace initialTenant="campus-one" initialOrder="order-1" />);
+  const donePaper = await screen.findByRole('region', { name: '訂單紙本明細' });
+  expect(donePaper.querySelector('details')?.open).toBe(false);
+  expect(within(donePaper).getByText('品項明細 · 1 項')).toBeTruthy();
+  expect(within(donePaper).getByText('NT$120').closest('details')).toBeNull();
+});

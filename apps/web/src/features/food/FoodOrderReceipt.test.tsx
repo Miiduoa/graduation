@@ -130,6 +130,32 @@ describe('FoodOrderReceipt', () => {
     expect(details.open).toBe(false);
   });
 
+  it('opens line items by default when expandLines is set for an in-progress order', () => {
+    const order = receipt();
+    const view = render(<FoodOrderReceipt order={order} expandLines />);
+    const details = view.container.querySelector('details')!;
+    expect(details.open).toBe(true);
+    expect(screen.getByText('數量 2')).toBeTruthy();
+    expect(screen.getByRole('heading', { name: '蔬菜便當' })).toBeTruthy();
+    fireEvent.click(screen.getByText('品項明細 · 1 項'));
+    expect(details.open).toBe(false);
+    view.rerender(
+      <FoodOrderReceipt
+        order={{ ...order, updatedAt: '2026-11-01T03:09:00.000Z' }}
+        expandLines
+      />,
+    );
+    expect(details.open).toBe(false);
+  });
+
+  it('keeps line items collapsed when expandLines is omitted for a finished order', () => {
+    const view = render(<FoodOrderReceipt order={receipt()} expandLines={false} />);
+    const details = view.container.querySelector('details')!;
+    expect(details.open).toBe(false);
+    expect(screen.getByText('品項明細 · 1 項')).toBeTruthy();
+    expect(screen.getByText('NT$1,234').closest('details')).toBeNull();
+  });
+
   it('explains missing line data without inventing products or replacing the server total', () => {
     const order = { ...receipt(), lines: [] };
     const view = render(<FoodOrderReceipt order={order} />);

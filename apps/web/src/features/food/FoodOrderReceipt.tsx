@@ -1,5 +1,6 @@
 'use client';
 
+import { useState } from 'react';
 import type { NuniFoodCustomerOrderDetail } from '@campus/shared/src/nuniFood';
 import { foodMoney, foodTime } from './foodState';
 import styles from './FoodOrderReceipt.module.css';
@@ -12,7 +13,15 @@ export type FoodOrderReceiptData = Pick<
 const receiptTime = (value: string) =>
   `${new Date(value).toLocaleDateString('zh-TW', { timeZone: 'Asia/Taipei', year: 'numeric' })} ${foodTime(value)}`;
 
-export function FoodOrderReceipt({ order }: { order: FoodOrderReceiptData }) {
+export function FoodOrderReceipt({
+  order,
+  expandLines = false,
+}: {
+  order: FoodOrderReceiptData;
+  /** 進行中訂單預設展開品項；已結束維持收合。僅影響初次展開，之後保留讀者選擇。 */
+  expandLines?: boolean;
+}) {
+  const [linesOpen, setLinesOpen] = useState(expandLines);
   return (
     <section className={styles.receipt} aria-label="訂單紙本明細">
       <header className={styles.header}>
@@ -42,7 +51,11 @@ export function FoodOrderReceipt({ order }: { order: FoodOrderReceiptData }) {
       <p className={styles.timezone}>時間皆為臺灣時間（UTC+8）</p>
 
       {order.lines.length ? (
-        <details className={styles.details}>
+        <details
+          className={styles.details}
+          open={linesOpen}
+          onToggle={(event) => setLinesOpen(event.currentTarget.open)}
+        >
           <summary>品項明細 · {order.lines.length} 項</summary>
           <ul className={styles.lines}>
             {order.lines.map((line, index) => (

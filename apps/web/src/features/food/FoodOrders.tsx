@@ -499,6 +499,7 @@ export function FoodOrderDetail({
             </div>
           )}
           <FoodOrderReceipt
+            expandLines={inProgress}
             order={{
               id: receipt.id,
               locationName: receipt.locationName,
