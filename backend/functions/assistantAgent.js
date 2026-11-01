@@ -1012,6 +1012,7 @@ async function callAssistantModelWithTools({
 }) {
   const { tools, runTool } = require('./agent/tools/registry');
   const toolDefs = buildToolDefinitions(tools.filter((t) => !t.requiresConfirmation));
+  const allowedToolNames = new Set(toolDefs.map((tool) => tool.function.name));
   const { buildCardsFromToolTrace } = require('./agent/cardBuilders');
 
   const toolsInvoked = [];
@@ -1056,6 +1057,16 @@ async function callAssistantModelWithTools({
     const toolResults = await Promise.all(
       scheduledCalls.map(async (call) => {
         const name = call?.function?.name;
+        // Model output cannot grant access to tools omitted from this request.
+        if (!allowedToolNames.has(name)) {
+          const errOut = {
+            success: false,
+            error: 'tool not available in this model request',
+            errorCode: 'tool_not_allowed',
+          };
+          recordToolCall(typeof name === 'string' ? name.slice(0, 80) : '', {}, errOut);
+          return { role: 'tool', tool_call_id: call?.id, content: JSON.stringify(errOut) };
+        }
         recordToolName(name);
         const raw = call?.function?.arguments;
         const rawStr = raw == null ? '' : String(raw);
