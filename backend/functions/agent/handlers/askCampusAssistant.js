@@ -6,7 +6,7 @@ const onCall = createAccountGuardedOnCall({
   onCall: firebaseOnCall,
   getDb: () => require('firebase-admin/firestore').getFirestore(),
 });
-const { runCampusAssistantWithAgentRuntime } = require('../runtime');
+const { handleCloudNavigationTask } = require('../cloudNavigationTask');
 const { assertToolInputBounds } = require('../inputLimits');
 
 const REGION = 'asia-east1';
@@ -23,5 +23,14 @@ module.exports = onCall(
       assertToolInputBounds(request.data);
     },
   },
-  async (request) => runCampusAssistantWithAgentRuntime(request),
+  async (request) => {
+    if (request.data?.task !== 'public-campus-navigation') {
+      throw new HttpsError(
+        'failed-precondition',
+        '請先預覽並確認要傳送的公開地點資料。',
+        { reason: 'cloud-consent-required' },
+      );
+    }
+    return handleCloudNavigationTask(request);
+  },
 );

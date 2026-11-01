@@ -14,15 +14,20 @@ jest.mock('firebase-admin/firestore', () => ({
 jest.mock('../runtime', () => ({
   runCampusAssistantWithAgentRuntime: jest.fn(async () => ({ ok: true })),
 }));
+jest.mock('../cloudNavigationTask', () => ({
+  handleCloudNavigationTask: jest.fn(async () => ({ phase: 'preview' })),
+}));
 
 const askCampusAssistant = require('./askCampusAssistant');
 const { runCampusAssistantWithAgentRuntime } = require('../runtime');
+const { handleCloudNavigationTask } = require('../cloudNavigationTask');
 
 describe('askCampusAssistant Fly HTTP admission', () => {
   beforeEach(() => {
     mockGet.mockReset().mockResolvedValue({ exists: false, data: () => ({}) });
     mockCollection.mockClear();
     runCampusAssistantWithAgentRuntime.mockClear();
+    handleCloudNavigationTask.mockClear();
   });
 
   test('rejects unauthenticated callers before the runtime', async () => {
@@ -31,6 +36,7 @@ describe('askCampusAssistant Fly HTTP admission', () => {
     });
     expect(mockCollection).not.toHaveBeenCalled();
     expect(runCampusAssistantWithAgentRuntime).not.toHaveBeenCalled();
+    expect(handleCloudNavigationTask).not.toHaveBeenCalled();
   });
 
   test('rejects oversized messages before any account read or runtime call', async () => {
@@ -43,6 +49,7 @@ describe('askCampusAssistant Fly HTTP admission', () => {
     ).rejects.toMatchObject({ code: 'resource-exhausted' });
     expect(mockCollection).not.toHaveBeenCalled();
     expect(runCampusAssistantWithAgentRuntime).not.toHaveBeenCalled();
+    expect(handleCloudNavigationTask).not.toHaveBeenCalled();
   });
 
   test('authenticates before checking oversized messages', async () => {
@@ -52,6 +59,7 @@ describe('askCampusAssistant Fly HTTP admission', () => {
     ).rejects.toMatchObject({ code: 'unauthenticated' });
     expect(mockCollection).not.toHaveBeenCalled();
     expect(runCampusAssistantWithAgentRuntime).not.toHaveBeenCalled();
+    expect(handleCloudNavigationTask).not.toHaveBeenCalled();
   });
 
   test('still rejects closing accounts after valid input', async () => {
@@ -60,19 +68,56 @@ describe('askCampusAssistant Fly HTTP admission', () => {
       data: () => ({ accountDeletionInProgress: true }),
     });
     await expect(
-      askCampusAssistant({ auth: { uid: 'alice' }, data: { messages: [] } }),
+      askCampusAssistant({
+        auth: { uid: 'alice' },
+        data: { task: 'public-campus-navigation', phase: 'preview' },
+      }),
     ).rejects.toMatchObject({
       code: 'failed-precondition',
       details: { reason: 'account-deletion' },
     });
     expect(mockGet).toHaveBeenCalledTimes(1);
     expect(runCampusAssistantWithAgentRuntime).not.toHaveBeenCalled();
+    expect(handleCloudNavigationTask).not.toHaveBeenCalled();
   });
 
-  test('runs valid requests after checking the account', async () => {
-    const request = { auth: { uid: 'alice' }, data: { messages: [] } };
-    await expect(askCampusAssistant(request)).resolves.toEqual({ ok: true });
+  test.each(['preview', 'execute'])('delegates %s requests after checking the account', async (phase) => {
+    const request = {
+      auth: { uid: 'alice' },
+      data: { task: 'public-campus-navigation', phase },
+    };
+    await expect(askCampusAssistant(request)).resolves.toEqual({ phase: 'preview' });
     expect(mockGet).toHaveBeenCalledTimes(1);
-    expect(runCampusAssistantWithAgentRuntime).toHaveBeenCalledWith(request);
+    expect(handleCloudNavigationTask).toHaveBeenCalledTimes(1);
+    expect(handleCloudNavigationTask).toHaveBeenCalledWith(request);
+    expect(runCampusAssistantWithAgentRuntime).not.toHaveBeenCalled();
+  });
+
+  test.each([
+    undefined,
+    { messages: [{ role: 'user', content: '查課表' }] },
+    { messages: [], consent: true },
+    { task: 'public-campus-navigation ', phase: 'preview' },
+    { task: 'other-task', phase: 'execute' },
+  ])('rejects legacy or unknown requests before any task or runtime executes: %p', async (data) => {
+    await expect(askCampusAssistant({ auth: { uid: 'alice' }, data })).rejects.toMatchObject({
+      code: 'failed-precondition',
+      message: '請先預覽並確認要傳送的公開地點資料。',
+      details: { reason: 'cloud-consent-required' },
+    });
+    expect(mockGet).toHaveBeenCalledTimes(1);
+    expect(runCampusAssistantWithAgentRuntime).not.toHaveBeenCalled();
+    expect(handleCloudNavigationTask).not.toHaveBeenCalled();
+  });
+
+  test('preserves the task service rejection without falling back to the legacy runtime', async () => {
+    const { HttpsError } = require('firebase-functions/v2/https');
+    const failure = new HttpsError('failed-precondition', '請先確認這份預覽。');
+    handleCloudNavigationTask.mockRejectedValueOnce(failure);
+    await expect(askCampusAssistant({
+      auth: { uid: 'alice' },
+      data: { task: 'public-campus-navigation', phase: 'execute' },
+    })).rejects.toBe(failure);
+    expect(runCampusAssistantWithAgentRuntime).not.toHaveBeenCalled();
   });
 });

@@ -261,10 +261,10 @@ export const CAMPUS_SERVICES = [
   },
   {
     name: '校園助理',
-    text: '查詢課務與校園服務；排課請用課表裡的幫我安排',
+    text: '預覽公開地點資料，確認後規劃校園步行路線',
     href: '/ai-assistant',
     access: 'school',
-    keywords: '問答 安排 課表 assistant',
+    keywords: '導航 地點 步行 路線 assistant',
     category: 'account',
   },
   {

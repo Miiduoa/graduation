@@ -1,22 +1,10 @@
 import { createRequire } from 'node:module';
-import { fireEvent, render, screen } from '@testing-library/react';
-import type { ReactNode } from 'react';
-import { beforeEach, expect, it, vi } from 'vitest';
-import AssistantPage from './page';
+import { render, screen } from '@testing-library/react';
+import { expect, it } from 'vitest';
 import { AgentCardList } from './AgentCards';
-import { callCampusAssistant } from '@/lib/campusAssistantClient';
 import { readOnlyAssistantCards } from '@/lib/assistantPresentation';
 
 const { buildCardsFromToolTrace } = createRequire(import.meta.url)('../../../../../backend/functions/agent/cardBuilders.js');
-vi.mock('next/navigation', () => ({ useSearchParams: () => new URLSearchParams() }));
-vi.mock('@/components/AuthGuard', () => ({ useAuth: () => ({ user: { uid: 'alice' }, loading: false, error: null }) }));
-vi.mock('@/components/SiteShell', () => ({ SiteShell: ({ children }: { children: ReactNode }) => <main>{children}</main> }));
-vi.mock('@/lib/campusAssistantClient', async original => ({ ...await original<typeof import('@/lib/campusAssistantClient')>(), callCampusAssistant: vi.fn() }));
-vi.mock('@/lib/functionsUrl', async (original) => ({
-  ...(await original<typeof import('@/lib/functionsUrl')>()),
-  areFunctionsConfigured: () => true,
-}));
-
 const navigationUrl = 'https://www.google.com/maps/dir/?api=1&origin=24.1%2C120.1&destination=24.2%2C120.2&travelmode=walking';
 const output = {
   success: true, schoolId: 'pu',
@@ -25,13 +13,9 @@ const output = {
   navigationUrl,
 };
 const card = (patch = {}) => buildCardsFromToolTrace([{ name: 'planCampusRoute', output: { ...output, ...patch } }]);
-beforeEach(() => { vi.clearAllMocks(); });
 
-it('renders the actual backend card through the conversation adapter as a clickable verified Google walking link', async () => {
-  vi.mocked(callCampusAssistant).mockResolvedValue({ content: '請開啟地圖查看步行路線。', cards: card(), run: { status: 'completed' } });
-  render(<AssistantPage />);
-  fireEvent.change(screen.getByLabelText('你的問題'), { target: { value: '從校門走到圖書館' } });
-  fireEvent.submit(screen.getByRole('form', { name: '傳送問題' }));
+it('renders the backend card through the retained card adapter as a verified Google walking link', async () => {
+  render(<AgentCardList cards={readOnlyAssistantCards(card(), 'pu')} schoolId="pu" />);
   const link = await screen.findByRole('link', { name: '開啟 Google 步行導航 ↗' });
   expect(link.getAttribute('href')).toBe(navigationUrl);
   expect(link.getAttribute('rel')).toBe('noopener noreferrer');
