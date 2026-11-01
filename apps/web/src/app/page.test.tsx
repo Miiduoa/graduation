@@ -6,6 +6,7 @@ import HomePage from './page';
 import { loadHomeData, type HomeData } from '@/lib/homeOverview';
 import { loadNuniHomeSections } from '@/lib/nuniHomeOverview';
 import { NuniError } from '@campus/shared/src/nuni';
+import * as nuniMessages from '@campus/shared/src/nuni';
 import { IDENTITY_LOOKUP_FAILED_COPY, IDENTITY_LOOKUP_FAILED_HINT } from '@/lib/accountIdentity';
 import { TODAY_COPY } from '@campus/shared/src/pickNextAction';
 import { SENSE_EMPTY_TEXT, SENSE_SECTION_TITLE } from '@campus/shared/src/todaySense';
@@ -743,4 +744,52 @@ it('does not offer error retry while course callbacks have arrived but work is p
   expect(screen.queryByRole('button', { name: /再試一次|重試.*課程/ })).toBeNull();
   await act(async () => finish(data('先到課程')));
   expect(screen.queryByRole('button', { name: /再試一次|重試.*課程/ })).toBeNull();
+});
+
+it.each(['nuni', 'school'])(
+  'waits for both roles when %s arrives first and keeps the mode during refresh',
+  async (first) => {
+    state.session = { context: 'test', platformAccountId: 'teacher' };
+    let finishSchool!: (value: HomeData) => void;
+    const teachingData = data('授課來源', {
+      courses: [{ id: 'teach', name: '授課來源', role: 'owner-teacher', unreadCount: 0 }],
+      tasks: [],
+    });
+    const fast = first === 'nuni' ? loadNuniHomeSections : loadHomeData;
+    const slow = first === 'nuni' ? loadHomeData : loadNuniHomeSections;
+    vi.mocked(fast).mockResolvedValue(teachingData);
+    vi.mocked(slow).mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          finishSchool = resolve;
+        }),
+    );
+    render(<HomePage />);
+    await screen.findByRole('heading', { name: /授課與協作/ });
+    expect(screen.queryByRole('link', { name: /查看授課課程/ })).toBeNull();
+    await act(async () => finishSchool(data('學生來源')));
+    const today = screen.getByTestId('student-today');
+    expect(screen.queryByRole('link', { name: /查看授課課程/ })).toBeNull();
+    await act(async () => window.dispatchEvent(new Event('pageshow')));
+    await act(async () => finishSchool({ courses: [], tasks: [], unreadCount: 0 }));
+    expect(screen.getByTestId('student-today')).toBe(today);
+    expect(screen.queryByRole('link', { name: /查看授課課程/ })).toBeNull();
+  },
+);
+
+it('places long source messages and reachable retry controls after the primary content', async () => {
+  state.session = { context: 'test', platformAccountId: 'student' };
+  const message = 'LongUnbrokenError'.repeat(200);
+  const formatMessage = vi.spyOn(nuniMessages, 'nuniErrorMessage').mockReturnValueOnce(message);
+  vi.mocked(loadNuniHomeSections).mockRejectedValue(new NuniError(503, 'NETWORK_ERROR'));
+  render(<HomePage />);
+  const retry = await screen.findByRole('button', { name: /重試 nuni 課程/ });
+  const statuses = screen.getByLabelText('課程來源狀態');
+  expect(
+    screen.getByTestId('student-today').compareDocumentPosition(statuses) &
+      Node.DOCUMENT_POSITION_FOLLOWING,
+  ).toBeTruthy();
+  expect(retry.closest('section')?.textContent).toContain(message);
+  formatMessage.mockRestore();
+  expect(statuses.querySelector('[aria-hidden]')).toBeNull();
 });

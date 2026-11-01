@@ -169,7 +169,23 @@ export default function HomePage() {
   const studying = data?.courses.filter((course) => !teachingRoles.includes(course.role)) ?? [];
   const signedIn = !!owner && !blocked;
   const busy = sessionLoading || (!!owner && !data && !error);
-  const teacherOnly = !!teaching.length && !studying.length;
+  const [presentation, setPresentation] = useState<{ owner: string; teacherOnly: boolean } | null>(
+    null,
+  );
+  const presentationReady = presentation?.owner === owner;
+  const sources: Source[] = [
+    ...(context && accountId ? ['nuni' as const] : []),
+    ...(uid ? ['school' as const] : []),
+  ];
+  if (!owner || sessionLoading || blocked || !sources.length) {
+    if (presentation) setPresentation(null);
+  } else if (
+    !presentationReady &&
+    sources.every((source) => rows[source] && !rows[source]?.loading)
+  ) {
+    setPresentation({ owner, teacherOnly: !failed && !!teaching.length && !studying.length });
+  }
+  const teacherOnly = presentationReady && presentation.teacherOnly;
   const todos = useMemo(() => todayTodosFromHomeTasks(data?.tasks ?? []), [data]);
   useEffect(() => {
     const current = todos.map((item) => item.id);
@@ -201,48 +217,6 @@ export default function HomePage() {
             <Link href="/teacher">老師工作台 →</Link> 看學生送來的課程申訴。
           </p>
         )}
-        {signedIn ? (
-          <div className={styles.sourceStatuses} aria-label="課程來源狀態">
-            {(['nuni', 'school'] as const)
-              .filter((source) => (source === 'nuni' ? context && accountId : uid))
-              .map((source) => {
-                const row = rows[source];
-                return (
-                  <section
-                    key={source}
-                    className={styles.sourceStatus}
-                    aria-label={source === 'nuni' ? 'nuni 課程讀取狀態' : '校園課程讀取狀態'}
-                    aria-busy={row?.loading ?? true}
-                  >
-                    <div aria-live="polite">
-                      {!row || row.loading ? (
-                        <>
-                          <p>
-                            {source === 'nuni' ? 'nuni' : '校園'}課程還在讀取，其他內容可以先看。
-                          </p>
-                          {!row?.data ? (
-                            <div className={styles.sourceSkeleton} aria-hidden="true" />
-                          ) : null}
-                        </>
-                      ) : row.error ? (
-                        <>
-                          <p>{row.error}</p>
-                          <button
-                            type="button"
-                            onClick={() => void readSource(source, generation.current)}
-                          >
-                            重試{source === 'nuni' ? ' nuni ' : '校園'}課程
-                          </button>
-                        </>
-                      ) : (
-                        <p>{source === 'nuni' ? 'nuni' : '校園'}課程已讀取。</p>
-                      )}
-                    </div>
-                  </section>
-                );
-              })}
-          </div>
-        ) : null}
         {blocked ? (
           <section className={styles.focus} aria-labelledby="session-title">
             <h2 id="session-title">
@@ -297,6 +271,45 @@ export default function HomePage() {
             }}
           />
         )}
+        {signedIn ? (
+          <div className={styles.sourceStatuses} aria-label="課程來源狀態">
+            {(['nuni', 'school'] as const)
+              .filter((source) => (source === 'nuni' ? context && accountId : uid))
+              .map((source) => {
+                const row = rows[source];
+                return (
+                  <section
+                    key={source}
+                    className={styles.sourceStatus}
+                    aria-label={source === 'nuni' ? 'nuni 課程讀取狀態' : '校園課程讀取狀態'}
+                    aria-busy={row?.loading ?? true}
+                  >
+                    <div aria-live="polite">
+                      {!row || row.loading ? (
+                        <>
+                          <p>
+                            {source === 'nuni' ? 'nuni' : '校園'}課程還在讀取，其他內容可以先看。
+                          </p>
+                        </>
+                      ) : row.error ? (
+                        <>
+                          <p>{row.error}</p>
+                          <button
+                            type="button"
+                            onClick={() => void readSource(source, generation.current)}
+                          >
+                            重試{source === 'nuni' ? ' nuni ' : '校園'}課程
+                          </button>
+                        </>
+                      ) : (
+                        <p>{source === 'nuni' ? 'nuni' : '校園'}課程已讀取。</p>
+                      )}
+                    </div>
+                  </section>
+                );
+              })}
+          </div>
+        ) : null}
         {data?.recentFeedback?.length ? (
           <section className={styles.section} aria-labelledby="feedback-title">
             <h2 id="feedback-title">最近公布的成績與回饋</h2>
