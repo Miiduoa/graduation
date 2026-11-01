@@ -4,7 +4,7 @@ import { hydrateRoot, type Root } from 'react-dom/client';
 import { beforeEach, expect, it, vi } from 'vitest';
 import HomePage from './page';
 import { loadHomeData, type HomeData } from '@/lib/homeOverview';
-import { loadNuniHomeData } from '@/lib/nuniHomeOverview';
+import { loadNuniHomeSections } from '@/lib/nuniHomeOverview';
 import { NuniError } from '@campus/shared/src/nuni';
 import { IDENTITY_LOOKUP_FAILED_COPY, IDENTITY_LOOKUP_FAILED_HINT } from '@/lib/accountIdentity';
 import { TODAY_COPY } from '@campus/shared/src/pickNextAction';
@@ -90,7 +90,7 @@ vi.mock('@/lib/homeOverview', async (original) => {
 });
 vi.mock('@/lib/nuniHomeOverview', async (original) => {
   const actual = await original<typeof import('@/lib/nuniHomeOverview')>();
-  return { ...actual, loadNuniHomeData: vi.fn(), loadNuniHomeMaterials: vi.fn() };
+  return { ...actual, loadNuniHomeSections: vi.fn(), loadNuniHomeMaterials: vi.fn() };
 });
 
 const data = (name: string, extra: Partial<HomeData> = {}): HomeData => ({
@@ -111,7 +111,7 @@ const data = (name: string, extra: Partial<HomeData> = {}): HomeData => ({
 beforeEach(() => {
   vi.clearAllMocks();
   vi.mocked(loadHomeData).mockReset().mockResolvedValue({ courses: [], tasks: [], unreadCount: 0 });
-  vi.mocked(loadNuniHomeData).mockReset();
+  vi.mocked(loadNuniHomeSections).mockReset();
   window.scrollTo = vi.fn();
   state.uid = 'alice';
   state.selectedSchoolId = 'pu';
@@ -174,7 +174,7 @@ it('keeps Firebase tasks and published feedback available alongside the nuni ent
 
 it('does not report an empty course list as success after a failed load', async () => {
   state.session = { context: 'test', platformAccountId: 'student' };
-  vi.mocked(loadNuniHomeData).mockRejectedValue(new Error('permission-denied'));
+  vi.mocked(loadNuniHomeSections).mockRejectedValue(new Error('permission-denied'));
   render(<HomePage />);
   expect(await screen.findByRole('alert')).toBeTruthy();
   expect(screen.queryByText(TODAY_COPY.emptyDay)).toBeNull();
@@ -185,7 +185,7 @@ it('does not report an empty course list as success after a failed load', async 
 it('uses the Nuni account for home and links directly to pending work', async () => {
   state.uid = null;
   state.session = { context: 'session-a', platformAccountId: 'student-a' };
-  vi.mocked(loadNuniHomeData).mockResolvedValue({
+  vi.mocked(loadNuniHomeSections).mockResolvedValue({
     ...data('視覺設計'),
     tasks: [
       {
@@ -214,7 +214,7 @@ it('uses the Nuni account for home and links directly to pending work', async ()
 it('uses the same identity lookup copy as the account page when the lookup fails', async () => {
   state.uid = null;
   state.session = { context: 'session-a', platformAccountId: 'student-a' };
-  vi.mocked(loadNuniHomeData).mockResolvedValue({
+  vi.mocked(loadNuniHomeSections).mockResolvedValue({
     courses: [],
     tasks: [],
     unreadCount: 0,
@@ -230,7 +230,7 @@ it('uses the same identity lookup copy as the account page when the lookup fails
 
 it('keeps teaching courses on today and no longer lists studying courses as a grid', async () => {
   state.session = { context: 'session-a', platformAccountId: 'teacher-a' };
-  vi.mocked(loadNuniHomeData).mockResolvedValue({
+  vi.mocked(loadNuniHomeSections).mockResolvedValue({
     courses: [
       { id: 'teach', name: '教學實習', role: 'co-teacher', unreadCount: 0 },
       { id: 'learn', name: '教育心理學', role: 'student', unreadCount: 0 },
@@ -246,7 +246,7 @@ it('keeps teaching courses on today and no longer lists studying courses as a gr
 
 it('does not tell a teacher they have no homework and opens the teaching course list', async () => {
   state.session = { context: 'session-a', platformAccountId: 'teacher-a' };
-  vi.mocked(loadNuniHomeData).mockResolvedValue({
+  vi.mocked(loadNuniHomeSections).mockResolvedValue({
     courses: [{ id: 'teach', name: '教學實習', role: 'owner-teacher', unreadCount: 0 }],
     tasks: [],
     unreadCount: 0,
@@ -263,7 +263,7 @@ it('hides all previous Nuni data immediately during session revalidation and ign
   state.uid = null;
   state.session = { context: 'session-a', platformAccountId: 'student-a' };
   let finishNew!: (value: HomeData) => void;
-  vi.mocked(loadNuniHomeData)
+  vi.mocked(loadNuniHomeSections)
     .mockResolvedValueOnce(data('Alice private course'))
     .mockImplementationOnce(
       () =>
@@ -279,7 +279,7 @@ it('hides all previous Nuni data immediately during session revalidation and ign
   state.session = { context: 'session-b', platformAccountId: 'student-b' };
   state.sessionLoading = false;
   view.rerender(<HomePage />);
-  await waitFor(() => expect(loadNuniHomeData).toHaveBeenCalledTimes(2));
+  await waitFor(() => expect(loadNuniHomeSections).toHaveBeenCalledTimes(2));
   await act(async () => finishNew(data('Bob course')));
   expect(screen.getAllByText('Bob course 作業').length).toBeGreaterThan(0);
   state.pendingLogout = true;
@@ -290,7 +290,7 @@ it('hides all previous Nuni data immediately during session revalidation and ign
 it('removes a loaded overview when refreshing discovers revoked access', async () => {
   state.uid = null;
   state.session = { context: 'session-a', platformAccountId: 'student-a' };
-  vi.mocked(loadNuniHomeData)
+  vi.mocked(loadNuniHomeSections)
     .mockResolvedValueOnce(data('Private course'))
     .mockRejectedValueOnce(new NuniError(403, 'ACCESS_DENIED'));
   render(<HomePage />);
@@ -307,7 +307,7 @@ it('removes a loaded overview when refreshing discovers revoked access', async (
 it('keeps confirmed work visible while the same account refreshes in the background', async () => {
   let finishRefresh!: (value: HomeData) => void;
   state.session = { context: 'test', platformAccountId: 'student' };
-  vi.mocked(loadNuniHomeData)
+  vi.mocked(loadNuniHomeSections)
     .mockResolvedValueOnce(data('資料結構'))
     .mockImplementationOnce(
       () =>
@@ -318,7 +318,7 @@ it('keeps confirmed work visible while the same account refreshes in the backgro
   render(<HomePage />);
   expect((await screen.findAllByText('資料結構 作業')).length).toBeGreaterThan(0);
   await act(async () => window.dispatchEvent(new Event('pageshow')));
-  expect(loadNuniHomeData).toHaveBeenCalledTimes(2);
+  expect(loadNuniHomeSections).toHaveBeenCalledTimes(2);
   expect(screen.getAllByText('資料結構 作業').length).toBeGreaterThan(0);
   expect(screen.queryByTestId('today-skeleton')).toBeNull();
   expect(screen.getByRole('status').textContent).toBe('正在更新課程待辦…');
@@ -341,7 +341,7 @@ it('lets a guest browse before signing in and never loads personal courses', () 
   render(<HomePage />);
   expect(screen.getAllByText(TODAY_COPY.unsigned).length).toBeGreaterThan(0);
   expect(loadHomeData).not.toHaveBeenCalled();
-  expect(loadNuniHomeData).not.toHaveBeenCalled();
+  expect(loadNuniHomeSections).not.toHaveBeenCalled();
   expect(screen.queryByText(SENSE_EMPTY_TEXT)).toBeNull();
   expect(screen.queryByRole('heading', { name: SENSE_SECTION_TITLE })).toBeNull();
 });
@@ -397,14 +397,18 @@ it.each([
 it('revalidates an expired course session before retrying with the new account context', async () => {
   state.uid = null;
   state.session = { context: 'expired', platformAccountId: 'student-a' };
-  vi.mocked(loadNuniHomeData).mockRejectedValueOnce(new NuniError(409, 'SESSION_CHANGED'));
+  vi.mocked(loadNuniHomeSections).mockRejectedValueOnce(new NuniError(409, 'SESSION_CHANGED'));
   const view = render(<HomePage />);
   await waitFor(() => expect(state.refresh).toHaveBeenCalledOnce());
-  vi.mocked(loadNuniHomeData).mockResolvedValueOnce(data('New account course'));
+  vi.mocked(loadNuniHomeSections).mockResolvedValueOnce(data('New account course'));
   state.session = { context: 'renewed', platformAccountId: 'student-b' };
   view.rerender(<HomePage />);
   await screen.findAllByText('New account course 作業');
-  expect(loadNuniHomeData).toHaveBeenLastCalledWith(expect.any(Function), 'student-b');
+  expect(loadNuniHomeSections).toHaveBeenLastCalledWith(
+    expect.any(Function),
+    'student-b',
+    expect.any(Function),
+  );
   expect(screen.queryByRole('alert')).toBeNull();
 });
 
@@ -455,7 +459,7 @@ it('hydrates the signed-in home page against the server loading markup', async (
   state.session = null;
   state.sessionLoading = true;
   const courseId = 'cw_11111111-1111-4111-8111-111111111111';
-  vi.mocked(loadNuniHomeData).mockResolvedValue({
+  vi.mocked(loadNuniHomeSections).mockResolvedValue({
     ...data('資料庫系統'),
     courses: [
       {
@@ -499,7 +503,7 @@ it('hydrates the signed-in home page against the server loading markup', async (
 
 it('shows confirmed work and retry together when another source failed', async () => {
   state.session = { context: 'test', platformAccountId: 'student' };
-  vi.mocked(loadNuniHomeData).mockResolvedValue(
+  vi.mocked(loadNuniHomeSections).mockResolvedValue(
     data('已載入課程', { tasksError: '部分測驗還沒讀到' }),
   );
   render(<HomePage />);
@@ -510,7 +514,7 @@ it('shows confirmed work and retry together when another source failed', async (
 
 it('offers course joining for a verified empty nuni account', async () => {
   state.session = { context: 'test', platformAccountId: 'student' };
-  vi.mocked(loadNuniHomeData).mockResolvedValue({ courses: [], tasks: [], unreadCount: 0 });
+  vi.mocked(loadNuniHomeSections).mockResolvedValue({ courses: [], tasks: [], unreadCount: 0 });
   render(<HomePage />);
   expect(await screen.findByText(/還沒有 nuni 課程資料/)).toBeTruthy();
   expect(screen.getByRole('link', { name: '加入課程' }).getAttribute('href')).toBe('/classroom');
@@ -519,7 +523,7 @@ it('offers course joining for a verified empty nuni account', async () => {
 
 it('keeps Firebase work when nuni is also signed in and hides it on Firebase account change', async () => {
   state.session = { context: 'session-a', platformAccountId: 'student-a' };
-  vi.mocked(loadNuniHomeData).mockResolvedValue(data('nuni 課程'));
+  vi.mocked(loadNuniHomeSections).mockResolvedValue(data('nuni 課程'));
   vi.mocked(loadHomeData)
     .mockResolvedValueOnce(data('Firebase 私人課程'))
     .mockImplementationOnce(() => new Promise(() => {}));
@@ -534,10 +538,114 @@ it('keeps Firebase work when nuni is also signed in and hides it on Firebase acc
 
 it('retains Firebase tasks and revalidates an expired nuni session', async () => {
   state.session = { context: 'session-a', platformAccountId: 'student-a' };
-  vi.mocked(loadNuniHomeData).mockRejectedValue(new NuniError(401, 'SESSION_CHANGED'));
+  vi.mocked(loadNuniHomeSections).mockRejectedValue(new NuniError(401, 'SESSION_CHANGED'));
   vi.mocked(loadHomeData).mockResolvedValue(data('Firebase 課程'));
   render(<HomePage />);
   expect((await screen.findAllByText('Firebase 課程 作業')).length).toBeGreaterThan(0);
   expect(state.refresh).toHaveBeenCalledTimes(1);
   expect(screen.getByText('部分課程資料尚未讀到，請重試。')).toBeTruthy();
+});
+
+it('budgets first available work at 100ms with a 2000ms second source and two overview loads', async () => {
+  state.session = { context: 'test', platformAccountId: 'student' };
+  vi.useFakeTimers();
+  vi.mocked(loadNuniHomeSections).mockImplementation(
+    () =>
+      new Promise((resolve) => {
+        setTimeout(() => resolve(data('快速來源')), 100);
+      }),
+  );
+  vi.mocked(loadHomeData).mockImplementation(
+    () =>
+      new Promise((resolve) => {
+        setTimeout(() => resolve(data('慢速來源')), 2000);
+      }),
+  );
+  try {
+    render(<HomePage />);
+    expect(screen.getAllByRole('link').length).toBeGreaterThan(0);
+    await act(async () => vi.advanceTimersByTimeAsync(100));
+    expect(screen.getAllByText('快速來源 作業').length).toBeGreaterThan(0);
+    expect(screen.queryByText('慢速來源 作業')).toBeNull();
+    expect(loadNuniHomeSections).toHaveBeenCalledTimes(1);
+    expect(loadHomeData).toHaveBeenCalledTimes(1);
+    expect(screen.queryByText(TODAY_COPY.emptyDay)).toBeNull();
+    await act(async () => vi.advanceTimersByTimeAsync(1900));
+    expect(screen.getAllByText('慢速來源 作業').length).toBeGreaterThan(0);
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+it('retries only the failed source while keeping successful work visible', async () => {
+  state.session = { context: 'test', platformAccountId: 'student' };
+  vi.mocked(loadNuniHomeSections).mockResolvedValue(data('保留的課程'));
+  vi.mocked(loadHomeData)
+    .mockRejectedValueOnce(new Error('offline'))
+    .mockResolvedValueOnce(data('重試課程'));
+  render(<HomePage />);
+  const retry = await screen.findByRole('button', { name: '重試校園課程' });
+  await act(async () => retry.click());
+  expect((await screen.findAllByText('重試課程 作業')).length).toBeGreaterThan(0);
+  expect(screen.getAllByText('保留的課程 作業').length).toBeGreaterThan(0);
+  expect(loadNuniHomeSections).toHaveBeenCalledTimes(1);
+  expect(loadHomeData).toHaveBeenCalledTimes(2);
+});
+
+it('offers separate retries when both sources fail', async () => {
+  state.session = { context: 'test', platformAccountId: 'student' };
+  vi.mocked(loadNuniHomeSections).mockRejectedValue(new Error('offline'));
+  vi.mocked(loadHomeData).mockRejectedValue(new Error('offline'));
+  render(<HomePage />);
+  expect(await screen.findByRole('button', { name: '重試 nuni課程' })).toBeTruthy();
+  expect(await screen.findByRole('button', { name: '重試校園課程' })).toBeTruthy();
+  expect(screen.queryByText(TODAY_COPY.emptyDay)).toBeNull();
+});
+
+it('publishes teaching navigation before work finishes and keeps the previous work during refresh', async () => {
+  state.uid = null;
+  state.session = { context: 'test', platformAccountId: 'teacher' };
+  let finish!: (value: HomeData) => void;
+  vi.mocked(loadNuniHomeSections).mockImplementation((_transport, _account, onCourses) => {
+    onCourses({
+      courses: [{ id: 'teach', name: '先到的授課', role: 'co-teacher', unreadCount: 0 }],
+      tasks: [],
+      unreadCount: 0,
+    });
+    return new Promise((resolve) => {
+      finish = resolve;
+    });
+  });
+  render(<HomePage />);
+  expect(await screen.findByRole('heading', { name: '先到的授課' })).toBeTruthy();
+  expect(screen.getByText(/課程還在讀取/)).toBeTruthy();
+  await act(async () => finish(data('完成來源')));
+  expect(screen.getAllByText('完成來源 作業').length).toBeGreaterThan(0);
+  await act(async () => window.dispatchEvent(new Event('pageshow')));
+  expect(screen.getAllByText('完成來源 作業').length).toBeGreaterThan(0);
+});
+
+it('ignores late data and course callbacks after switching accounts', async () => {
+  state.uid = null;
+  state.session = { context: 'old', platformAccountId: 'old' };
+  let finish!: (value: HomeData) => void;
+  let publish!: (value: HomeData) => void;
+  vi.mocked(loadNuniHomeSections)
+    .mockImplementationOnce((_transport, _account, onCourses) => {
+      publish = onCourses;
+      return new Promise((resolve) => {
+        finish = resolve;
+      });
+    })
+    .mockResolvedValueOnce(data('新帳號'));
+  const view = render(<HomePage />);
+  state.session = { context: 'new', platformAccountId: 'new' };
+  view.rerender(<HomePage />);
+  await screen.findAllByText('新帳號 作業');
+  await act(async () => {
+    publish(data('舊帳號'));
+    finish(data('舊帳號'));
+  });
+  expect(screen.queryByText('舊帳號 作業')).toBeNull();
+  expect(screen.getAllByText('新帳號 作業').length).toBeGreaterThan(0);
 });

@@ -10,7 +10,7 @@ import { useAuth } from '@/components/AuthGuard';
 import { AccountIdentity } from '@/components/AccountIdentity';
 import { browserRequest, useNuniSession } from '@/features/nuni/Session';
 import { loadHomeData, type HomeCourse, type HomeData } from '@/lib/homeOverview';
-import { loadNuniHomeData } from '@/lib/nuniHomeOverview';
+import { loadNuniHomeSections } from '@/lib/nuniHomeOverview';
 import { useClientHydrated } from '@/lib/useClientHydrated';
 import { useOptionalSelectedSchool } from '@/components/SelectedSchoolProvider';
 import { isTeacherRole, useSchoolRole } from '@/lib/useSchoolRole';
@@ -40,84 +40,101 @@ export default function HomePage() {
         : null;
   const sessionLoading = !hydrated || authLoading || nuni.loading;
   const blocked = nuni.pendingLogout || (!!nuni.error && !uid);
-  const [result, setResult] = useState<{
+  type Source = 'nuni' | 'school';
+  type Section = { data?: HomeData; error?: string; loading: boolean; updatedAt?: Date };
+  const [sections, setSections] = useState<{
     owner: string;
-    data: HomeData;
-    updatedAt: Date;
+    rows: Partial<Record<Source, Section>>;
   } | null>(null);
-  const [loading, setLoading] = useState(false);
-  const [failure, setFailure] = useState<{ owner: string; message: string } | null>(null);
   const [now, setNow] = useState<Date | null>(null);
   const [leavingTodoIds, setLeavingTodoIds] = useState<string[]>([]);
   const previousTodos = useRef<string[]>([]);
   const generation = useRef(0);
-  const data = !sessionLoading && !blocked && result?.owner === owner ? result?.data : null;
-  const updatedAt = data ? result!.updatedAt : null;
-  const error = failure?.owner === owner ? (failure?.message ?? '') : '';
-  const refresh = useCallback(async () => {
-    const request = ++generation.current;
-    setFailure(null);
-    if (!owner || sessionLoading || blocked) {
-      setResult(null);
-      setLoading(false);
-      return;
-    }
-    setResult((current) => (current?.owner === owner ? current : null));
-    setLoading(true);
-    try {
-      const sources = await Promise.allSettled([
-        ...(context && accountId
-          ? [loadNuniHomeData((path, input) => browserRequest(path, context, input), accountId)]
-          : []),
-        ...(uid ? [loadHomeData(uid)] : []),
-      ]);
-      const nuniSource = context && accountId ? sources[0] : null;
-      if (request !== generation.current) return;
-      const books = sources.flatMap((source) =>
-        source.status === 'fulfilled' ? [source.value] : [],
-      );
-      if (!books.length) throw (sources[0] as PromiseRejectedResult).reason;
-      if (
-        nuniSource?.status === 'rejected' &&
-        nuniSource.reason instanceof NuniError &&
-        (nuniSource.reason.status === 401 || nuniSource.reason.code === 'SESSION_CHANGED')
-      ) {
-        void refreshSession();
-      }
-      const next: HomeData = {
-        ...books[0],
-        courses: books.flatMap((book) => book.courses),
-        tasks: books.flatMap((book) => book.tasks),
-        recentFeedback: books.flatMap((book) => book.recentFeedback ?? []),
-        unreadCount: books.reduce((sum, book) => sum + book.unreadCount, 0),
-        tasksError: sources.some((source) => source.status === 'rejected')
-          ? '部分課程資料尚未讀到，請重試。'
-          : books
-              .map((book) => book.tasksError)
-              .filter(Boolean)
-              .join('；'),
-      };
-      if (request === generation.current) {
-        setResult({ owner, data: next, updatedAt: new Date() });
-      }
-    } catch (failure) {
-      if (request === generation.current) {
-        setResult(null);
-        setFailure({
+  const attempts = useRef({ nuni: 0, school: 0 });
+  const rows = useMemo(
+    () => (!sessionLoading && !blocked && sections?.owner === owner ? sections.rows : {}),
+    [sessionLoading, blocked, sections, owner],
+  );
+  const data = useMemo<HomeData | null>(() => {
+    const books = Object.values(rows).flatMap((row) => (row.data ? [row.data] : []));
+    return books.length
+      ? {
+          ...books[0],
+          courses: books.flatMap((book) => book.courses),
+          tasks: books.flatMap((book) => book.tasks),
+          recentFeedback: books.flatMap((book) => book.recentFeedback ?? []),
+          unreadCount: books.reduce((sum, book) => sum + book.unreadCount, 0),
+          tasksError: books
+            .map((book) => book.tasksError)
+            .filter(Boolean)
+            .join('；'),
+        }
+      : null;
+  }, [rows]);
+  const loading = Object.values(rows).some((row) => row.loading);
+  const failed = Object.values(rows).some((row) => row.error);
+  const error = failed ? '部分課程資料尚未讀到，請重試。' : '';
+  const updatedAt = Object.values(rows).find((row) => row.updatedAt)?.updatedAt ?? null;
+  const readSource = useCallback(
+    async (source: Source, request: number) => {
+      if (!owner || sessionLoading || blocked) return;
+      const attempt = ++attempts.current[source];
+      const update = (change: Partial<Section>, initial = false) => {
+        if (request !== generation.current || attempt !== attempts.current[source]) return;
+        setSections((current) => ({
           owner,
-          message: context ? nuniErrorMessage(failure) : '無法讀取課程資料，請確認連線後重試。',
+          rows: {
+            ...(current?.owner === owner ? current.rows : {}),
+            [source]: {
+              ...(current?.owner === owner ? current.rows[source] : {}),
+              loading: false,
+              ...change,
+              ...(initial && current?.owner === owner && current.rows[source]?.data
+                ? { data: current.rows[source]?.data }
+                : {}),
+            },
+          },
+        }));
+      };
+      update({ loading: true, error: undefined });
+      try {
+        const next =
+          source === 'nuni'
+            ? await loadNuniHomeSections(
+                (path, input) => browserRequest(path, context!, input),
+                accountId!,
+                (courses) => update({ data: courses, loading: true }, true),
+              )
+            : await loadHomeData(uid!);
+        update({ data: next, updatedAt: new Date(), error: undefined });
+      } catch (failure) {
+        update({
+          data: undefined,
+          error: source === 'nuni' ? nuniErrorMessage(failure) : '課程暫時讀不到，請再試一次。',
         });
         if (
-          context &&
+          request === generation.current &&
+          attempt === attempts.current[source] &&
+          source === 'nuni' &&
           failure instanceof NuniError &&
           (failure.status === 401 || failure.code === 'SESSION_CHANGED')
         )
           void refreshSession();
       }
-    } finally {
-      if (request === generation.current) setLoading(false);
+    },
+    [owner, sessionLoading, blocked, context, accountId, uid, refreshSession],
+  );
+  const refresh = useCallback(async () => {
+    const request = ++generation.current;
+    if (!owner || sessionLoading || blocked) {
+      setSections(null);
+      return;
     }
-  }, [owner, context, accountId, uid, sessionLoading, blocked, refreshSession]);
+    await Promise.all([
+      ...(context && accountId ? [readSource('nuni', request)] : []),
+      ...(uid ? [readSource('school', request)] : []),
+    ]);
+  }, [owner, sessionLoading, blocked, context, accountId, uid, readSource]);
   useEffect(() => {
     void refresh();
     return () => {
@@ -147,7 +164,7 @@ export default function HomePage() {
   const signedIn = !!owner && !blocked;
   const busy = sessionLoading || (!!owner && !data && !error);
   const teacherOnly = !!teaching.length && !studying.length;
-  const todos = useMemo(() => (data ? todayTodosFromHomeTasks(data.tasks) : []), [data]);
+  const todos = useMemo(() => todayTodosFromHomeTasks(data?.tasks ?? []), [data]);
   useEffect(() => {
     const current = todos.map((item) => item.id);
     const gone = previousTodos.current.filter((id) => !current.includes(id));
@@ -157,7 +174,8 @@ export default function HomePage() {
     const timer = window.setTimeout(() => setLeavingTodoIds([]), 200);
     return () => window.clearTimeout(timer);
   }, [todos]);
-  const lmsUnconnected = signedIn && !!data && !error && data.courses.length === 0;
+  const lmsUnconnected =
+    signedIn && !!data && !error && !loading && !failed && data.courses.length === 0;
 
   return (
     <div className={styles.page}>
@@ -176,6 +194,32 @@ export default function HomePage() {
           <p className={styles.notice}>
             <Link href="/teacher">老師工作台 →</Link> 看學生送來的課程申訴。
           </p>
+        )}
+        {Object.entries(rows).map(([source, row]) =>
+          row.loading || row.error ? (
+            <section
+              key={source}
+              className={styles.sourceStatus}
+              aria-label={source === 'nuni' ? 'nuni 課程讀取狀態' : '校園課程讀取狀態'}
+            >
+              {row.loading ? (
+                <>
+                  <p>{source === 'nuni' ? 'nuni' : '校園'}課程還在讀取，其他內容可以先看。</p>
+                  {!row.data ? <div className={styles.sourceSkeleton} aria-hidden="true" /> : null}
+                </>
+              ) : (
+                <>
+                  <p>{row.error}</p>
+                  <button
+                    type="button"
+                    onClick={() => void readSource(source as Source, generation.current)}
+                  >
+                    重試{source === 'nuni' ? ' nuni' : '校園'}課程
+                  </button>
+                </>
+              )}
+            </section>
+          ) : null,
         )}
         {blocked ? (
           <section className={styles.focus} aria-labelledby="session-title">
@@ -218,10 +262,23 @@ export default function HomePage() {
             refreshing={loading && !!data}
             todos={todos}
             courses={data?.courses ?? []}
-            todosError={error || data?.tasksError || ''}
+            todosError={
+              error ||
+              data?.tasksError ||
+              (loading && data ? '還有課程正在讀取，先看看已讀到的待辦。' : '')
+            }
             lmsUnconnected={lmsUnconnected}
             leavingTodoIds={leavingTodoIds}
-            onRetryTodos={() => void refresh()}
+            onRetryTodos={() => {
+              const incomplete = Object.entries(rows).filter(
+                ([, row]) => row.error || row.data?.tasksError,
+              );
+              if (!incomplete.length) void refresh();
+              else
+                incomplete.forEach(
+                  ([source]) => void readSource(source as Source, generation.current),
+                );
+            }}
           />
         )}
         {data?.recentFeedback?.length ? (

@@ -1390,3 +1390,17 @@
     word-break: break-word;
   }
 }
+
+.sourceStatus {
+  padding: 16px;
+  border: 1px solid var(--border, #e2e8f0);
+  border-radius: 12px;
+  min-height: 88px;
+}
+
+.sourceSkeleton {
+  height: 32px;
+  margin-top: 12px;
+  border-radius: 8px;
+  background: var(--surface-muted, #f1f5f9);
+}
