@@ -9,6 +9,7 @@ import { MapStack } from '../screens/MapStack';
 import { MessagesStack } from '../screens/MessagesStack';
 import { ensureLmsV2DemoSignIn } from '../services/lmsV2DemoSignIn';
 import { askCampusAssistant } from '../features/campusAssistant';
+import { getCloudNavigationPreview, runCloudNavigationTask, type CloudNavigationPreview, type CloudNavigationResult } from '../features/cloudNavigation';
 jest.mock('@react-navigation/native', () => jest.requireActual('@react-navigation/native'));
 let mockAuth: any;
 const mockAuthContext = React.createContext<any>(null);
@@ -45,6 +46,11 @@ jest.mock('../features/campusAssistant', () => ({
     available: true, ready: false, modelId: 'qwen2.5-0.5b',
     reason: '尚未下載免費模型',
   })),
+}));
+jest.mock('../features/cloudNavigation', () => ({
+  getCloudNavigationPreview: jest.fn(),
+  runCloudNavigationTask: jest.fn(),
+  createCloudNavigationRequestId: () => 'release-navigation-request',
 }));
 jest.mock('@expo/vector-icons', () => ({ Ionicons: () => null }));
 jest.mock('../screens/AdminDashboardScreen', () => {
@@ -920,6 +926,25 @@ jest.mock('../screens/social/StoryComposeScreen', () => {
   };
 });
 
+const navigationPreview: CloudNavigationPreview = {
+  status: 'preview', provider: 'groq', model: 'openai/gpt-oss-120b', schoolId: 'pu',
+  query: '從圖書館到活動中心', checkedAt: '2026-11-01T15:00:00.000Z', sourceUpdatedAt: null,
+  fingerprint: 'a'.repeat(64), cloudReady: true,
+  places: [
+    { ref: 'p0', name: '圖書館', category: '', aliases: [] },
+    { ref: 'p1', name: '活動中心', category: '', aliases: [] },
+  ],
+};
+const navigationReceipt: CloudNavigationResult = {
+  status: 'completed', provider: 'groq', model: 'openai/gpt-oss-120b', schoolId: 'pu',
+  checkedAt: '2026-11-01T15:00:01.000Z', sourceUpdatedAt: null,
+  route: {
+    from: { id: 'library', name: '圖書館', schoolId: 'pu', lat: 24, lng: 120 },
+    to: { id: 'hall', name: '活動中心', schoolId: 'pu', lat: 24.1, lng: 120.1 },
+    navigationUrl: 'https://www.google.com/maps/dir/?api=1&origin=24%2C120&destination=24.1%2C120.1&travelmode=walking',
+  },
+};
+
 beforeEach(() => {
   jest.clearAllMocks();
   mockSchool = 'pu';
@@ -932,6 +957,8 @@ beforeEach(() => {
   Object.assign(Constants.expoConfig!, {
     extra: { appEnv: 'production', enableUniversalDevAccounts: true },
   });
+  jest.mocked(getCloudNavigationPreview).mockResolvedValue(navigationPreview);
+  jest.mocked(runCloudNavigationTask).mockResolvedValue(navigationReceipt);
   (askCampusAssistant as jest.Mock).mockResolvedValue({
     content: '這是伺服器核實的回答。',
     hasActions: false,
@@ -1058,24 +1085,45 @@ test('role comes from the current authenticated profile, never a UID prefix or a
   expect(view.getByText(/目前無法確認帳號身分/)).toBeTruthy();
 });
 test.each(['AIChat', 'AIAgentConsole'])(
-  'Home %s sends through the callable chat UI and displays only its reply',
+  'Home %s opens the consented navigation task without the retired generic chat',
   async (route) => {
     const { view, navigation } = await mount(HomeStack);
     act(() => navigation.navigate(route));
-    fireEvent.press(view.getByText('校園即時 · 需網路'));
-    fireEvent.changeText(view.getByLabelText('詢問校園助理'), '本週有哪些活動？');
-    await act(async () => fireEvent.press(view.getByText('送出問題')));
-    expect(askCampusAssistant).toHaveBeenCalledTimes(1);
-    expect(view.getByText('這是伺服器核實的回答。')).toBeTruthy();
+    expect(view.queryByText('校園即時 · 需網路')).toBeNull();
+    expect(getCloudNavigationPreview).not.toHaveBeenCalled();
+    expect(runCloudNavigationTask).not.toHaveBeenCalled();
+    fireEvent.changeText(view.getByLabelText('出發地與目的地'), navigationPreview.query);
+    await act(async () => fireEvent.press(view.getByText('預覽傳送內容')));
+    expect(getCloudNavigationPreview).toHaveBeenCalledWith(expect.objectContaining({
+      scope: { uid: 'u1', schoolId: 'pu' }, query: navigationPreview.query, isCurrent: expect.any(Function),
+    }), expect.any(AbortSignal));
+    expect(view.getByText('雲端服務：Groq')).toBeTruthy();
+    expect(view.getByText('不會附加座標、帳號識別碼、課表、作業或對話紀錄。')).toBeTruthy();
+    fireEvent.press(view.getByText('確認規劃'));
+    expect(runCloudNavigationTask).not.toHaveBeenCalled();
+    fireEvent.press(view.getByLabelText('我同意將上述內容傳送至 Groq，進行這次規劃。'));
+    await act(async () => fireEvent.press(view.getByText('確認規劃')));
+    expect(runCloudNavigationTask).toHaveBeenCalledTimes(1);
+    expect(runCloudNavigationTask).toHaveBeenCalledWith(expect.objectContaining({
+      scope: { uid: 'u1', schoolId: 'pu' }, query: navigationPreview.query,
+      consent: { provider: 'groq', version: 1, schoolId: 'pu', query: navigationPreview.query, fingerprint: navigationPreview.fingerprint },
+    }), expect.any(AbortSignal));
+    expect(view.getByText('開啟校園地圖')).toBeTruthy();
+    expect(askCampusAssistant).not.toHaveBeenCalled();
+    expect(view.queryByText('這是伺服器核實的回答。')).toBeNull();
   },
 );
 test.each(['AIAgentConsole', 'AIAgentObservatory'])(
-  'Learn %s uses the same real assistant entry',
+  'Learn %s uses the same consented navigation entry',
   async (route) => {
     const { view, navigation } = await mount(LearnStack);
     act(() => navigation.navigate(route));
-    expect(view.getByLabelText('詢問校園助理')).toBeTruthy();
+    expect(view.getByLabelText('出發地與目的地')).toBeTruthy();
+    expect(view.getByText('預覽傳送內容')).toBeTruthy();
     expect(view.queryByText('AIAgentConsoleScreen')).toBeNull();
+    expect(askCampusAssistant).not.toHaveBeenCalled();
+    expect(getCloudNavigationPreview).not.toHaveBeenCalled();
+    expect(runCloudNavigationTask).not.toHaveBeenCalled();
   },
 );
 test.each(['Clubs', 'DormitoryScreen', 'Career'])(

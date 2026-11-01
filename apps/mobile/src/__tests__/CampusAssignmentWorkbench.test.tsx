@@ -121,6 +121,7 @@ test('the assistant exposes search without another sync or model request and cle
   jest.mocked(refreshCampusSenseSnapshot).mockResolvedValueOnce(snapshot(137));
   const navigate = jest.fn();
   const view = render(<CampusAssistantScreen navigation={{ navigate }} />);
+  fireEvent.press(view.getByText('已存資料'));
   await act(async () => fireEvent.press(view.getByText('同步我的校園資料')));
   expect(view.queryByLabelText('搜尋已同步作業')).toBeNull();
   fireEvent.press(view.getByText('查看與篩選已同步作業'));
@@ -146,11 +147,13 @@ test('manual sync reports progress, blocks concurrent send/mode changes, and rel
     return new Promise((_, reject) => signal.addEventListener('abort', () => reject(new Error('sense-cancelled')), { once: true }));
   });
   const view = render(<CampusAssistantScreen />);
+  fireEvent.press(view.getByText('已存資料'));
   fireEvent.changeText(view.getByLabelText('詢問校園助理'), '保留這個問題');
   await act(async () => fireEvent.press(view.getByText('同步我的校園資料')));
   expect(view.getByText('正在核對作業：50 / 137 筆')).toBeTruthy();
   fireEvent.press(view.getByText('送出問題'));
-  fireEvent.press(view.getByText('校園即時 · 需網路'));
+  fireEvent.press(view.getByText('校園導航'));
+  expect(view.getByText('✓ 已存資料')).toBeTruthy();
   expect(askCampusAssistant).not.toHaveBeenCalled();
   await act(async () => fireEvent.press(view.getByText('取消這次同步')));
   expect(signal.aborted).toBe(true);
@@ -169,6 +172,7 @@ test('cancelling one-tap planning during sync never starts local generation', as
     signal!.addEventListener('abort', () => reject(new Error('sense-cancelled')), { once: true });
   }));
   const view = render(<CampusAssistantScreen />);
+  fireEvent.press(view.getByText('已存資料'));
   await act(async () => fireEvent.press(view.getByText('今日重點')));
   await act(async () => fireEvent.press(view.getByText('取消這次同步')));
   expect(askCampusAssistant).not.toHaveBeenCalled();
