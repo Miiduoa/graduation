@@ -1,6 +1,8 @@
 import { liveClassContent } from '../widgets/nextClassLiveActivity';
 import { createSnapshotWriter } from '../widgets/nextClassBridge';
 import type { NextClassSnapshot } from '../widgets/nextClassSnapshot';
+import { buildNextClassSnapshot } from '../widgets/nextClassSnapshot';
+import { classMeetingKey, withClassExceptions, type PersonalImportRecord, type ClassException } from '@campus/shared';
 jest.mock('expo', () => ({ requireOptionalNativeModule: () => null }));
 const now = 1800000000000;
 const course = {
@@ -20,6 +22,38 @@ const snapshot: NextClassSnapshot = {
   classes: [course],
 };
 afterEach(() => jest.useRealTimers());
+test('即時動態遵守單次停課、補課與換教室，下一週仍保留原課程', () => {
+  const time = new Date('2026-10-19T08:50:00+08:00');
+  const row: PersonalImportRecord = {
+    id: 'course', batchId: '', importedAt: '', kind: 'timetable', schoolId: 'pu',
+    academicYear: '115', semester: '1', title: '測試課程', dayOfWeek: 1,
+    startTime: '09:00', endTime: '10:00', location: '原教室',
+    source: { type: 'paste', line: 1, rawText: '' },
+  };
+  const change: ClassException = {
+    id: 'change', courseKey: classMeetingKey(row), original: row,
+    originalDate: '2026-10-19', kind: 'cancel', createdAt: '',
+  };
+  const snapshot = (exception: ClassException, date = time) =>
+    buildNextClassSnapshot(withClassExceptions([row], [exception]), 'pu', date);
+  expect(liveClassContent(snapshot(change), time.getTime())).toBeNull();
+  const room = liveClassContent(snapshot({ ...change, kind: 'room', location: '新教室' }), time.getTime());
+  expect(room).toMatchObject({ location: '新教室', startAt: Date.parse('2026-10-19T01:00:00Z') });
+  expect(room?.mapURL).toContain(encodeURIComponent('新教室'));
+  const moved: ClassException = {
+    ...change, kind: 'move', date: '2026-10-20', startTime: '11:00', endTime: '12:00', location: '補課教室',
+  };
+  expect(liveClassContent(snapshot(moved), time.getTime())).toBeNull();
+  const makeup = Date.parse('2026-10-20T10:50:00+08:00');
+  expect(liveClassContent(snapshot(moved), makeup)).toMatchObject({
+    location: '補課教室', startAt: Date.parse('2026-10-20T03:00:00Z'),
+    endAt: Date.parse('2026-10-20T04:00:00Z'),
+  });
+  const following = new Date('2026-10-26T08:50:00+08:00');
+  for (const exception of [change, { ...change, kind: 'room' as const, location: '新教室' }, moved]) {
+    expect(liveClassContent(snapshot(exception, following), following.getTime())).toMatchObject({ location: '原教室' });
+  }
+});
 test('uses the confirmed snapshot for countdown, course and school-scoped room search', () => {
   const { id: _id, ...expected } = course;
   expect(liveClassContent(snapshot, now)).toEqual({
