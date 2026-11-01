@@ -1,5 +1,6 @@
 import SwiftUI
 import WidgetKit
+import ActivityKit
 
 struct SavedClass: Decodable {
     let id: String
@@ -152,12 +153,77 @@ struct WidgetPaper: ViewModifier {
         } else { content }
     }
 }
-@main
 struct CampusWidgets: Widget {
     var body: some WidgetConfiguration {
         StaticConfiguration(kind: "NextClassWidget", provider: ClassProvider()) { ClassView(entry: $0) }
             .configurationDisplayName("下一堂課")
             .description("課名、時間與教室，離線也能查看最近確認的週課表。")
             .supportedFamilies([.systemSmall, .systemMedium, .accessoryInline, .accessoryCircular, .accessoryRectangular])
+    }
+}
+
+@available(iOS 16.2, *)
+struct NextClassLiveWidget: Widget {
+    var body: some WidgetConfiguration {
+        ActivityConfiguration(for: NextClassActivityAttributes.self) { context in
+            if context.isStale {
+                Text("這堂課已結束 · 開啟 nuni 看接下來的安排").padding()
+                    .widgetURL(URL(string: "campus://personal-timetable"))
+            } else {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("下一堂課 · nuni").font(.caption)
+                    Text(context.state.title).font(.headline).lineLimit(2)
+                    HStack {
+                        Text(context.state.location).lineLimit(1)
+                        Spacer()
+                        Text(timerInterval: min(Date(), context.state.start)...context.state.start,
+                             countsDown: true).monospacedDigit().frame(maxWidth: 90)
+                    }
+                    HStack {
+                        Link("查看課程", destination: URL(string: context.state.url)!)
+                        Spacer()
+                        Link("找教室", destination: URL(string: context.state.mapURL)!)
+                    }
+                    if context.state.conflict { Text("時段有重疊，出發前確認一下課表").font(.caption) }
+                }.padding().privacySensitive()
+                    .widgetURL(URL(string: context.state.url))
+            }
+        } dynamicIsland: { context in
+            DynamicIsland {
+                DynamicIslandExpandedRegion(.leading) {
+                    if context.isStale { Text("本堂已結束") }
+                    else { Text(context.state.title).lineLimit(1).privacySensitive() }
+                }
+                DynamicIslandExpandedRegion(.trailing) {
+                    if !context.isStale { Text(context.state.start, style: .time) }
+                }
+                DynamicIslandExpandedRegion(.bottom) {
+                    if context.isStale { Text("開啟 nuni 看接下來的安排") }
+                    else {
+                        HStack {
+                            Link("查看課程", destination: URL(string: context.state.url)!)
+                            Spacer()
+                            Link(context.state.location, destination: URL(string: context.state.mapURL)!).privacySensitive()
+                        }
+                    }
+                }
+            } compactLeading: {
+                Image(systemName: context.isStale ? "checkmark" : "book.closed").privacySensitive()
+            } compactTrailing: {
+                if context.isStale { Text("下課") }
+                else { Text(context.state.start, style: .time).privacySensitive() }
+            } minimal: {
+                Image(systemName: context.isStale ? "checkmark" : "book.closed").privacySensitive()
+            }
+            .widgetURL(URL(string: context.isStale ? "campus://personal-timetable" : context.state.url))
+        }
+    }
+}
+
+@main
+struct CampusWidgetBundle: WidgetBundle {
+    var body: some Widget {
+        CampusWidgets()
+        if #available(iOS 16.2, *) { NextClassLiveWidget() }
     }
 }
