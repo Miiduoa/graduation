@@ -660,7 +660,7 @@ function CourseScope({
   const searchState = useCourseSearchState();
   const bookmarks = useMaterialBookmarks(session.platformAccountId);
   const bookmarkScope = `${session.platformAccountId}:${session.context}`;
-  const [showBookmarks, setShowBookmarks] = useState(false);
+  const [showBookmarks, setShowBookmarks] = useNuniDraftState('courses:bookmarks', false);
   const searchOffset = useRef<number | null>(null);
   const pendingSearchReturn = useRef<number | null>(null);
   const [joinRequested, setJoinRequested] = useState(0);
@@ -692,7 +692,9 @@ function CourseScope({
     initialWorkspaceId ?? null,
   );
   const [focusActivityId, setFocusActivityId] = useState<string | undefined>(initialAssignmentId);
-  const [focusMaterialId, setFocusMaterialId] = useState<string | undefined>(initialMaterialId);
+  const [focusMaterialId, setFocusMaterialId] = useNuniDraftState<string | undefined>(
+    'courses:focused-material', initialMaterialId,
+  );
   useEffect(() => {
     if (initialWorkspaceId) {
       searchOffset.current = null;
@@ -707,7 +709,7 @@ function CourseScope({
   }, [initialAssignmentId]);
   useEffect(() => {
     if (initialMaterialId) setFocusMaterialId(initialMaterialId);
-  }, [initialMaterialId]);
+  }, [initialMaterialId, setFocusMaterialId]);
   const openCourse = useCallback(
     (id: string, activityId?: string) => {
       searchOffset.current = null;
@@ -718,7 +720,7 @@ function CourseScope({
       setFocusMaterialId(undefined);
       setSelected(id);
     },
-    [setSelected],
+    [setSelected, setFocusMaterialId],
   );
   return (
     <ScrollView

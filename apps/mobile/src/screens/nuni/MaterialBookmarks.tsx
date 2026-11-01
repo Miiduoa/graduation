@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { AppState, Pressable, Text, View } from 'react-native';
 import {
+  createMaterialBookmarkBatchResolver,
   materialBookmarkId,
   resolveMaterialBookmark,
   type MaterialBookmark,
@@ -210,11 +211,12 @@ export function MaterialBookmarks({
     setSnapshot({ key: viewKey, rows: {}, openingId: null });
     if (!active || !foreground || !store.ready) return;
     const entries: MaterialBookmark[] = JSON.parse(entriesKey);
+    const resolve = createMaterialBookmarkBatchResolver(classes);
     let index = 0;
     async function readNext() {
       while (index < entries.length && !cancelled()) {
         const entry = entries[index++];
-        const result = await resolveMaterialBookmark(classes, entry, cancelled);
+        const result = await resolve(entry, cancelled);
         if (cancelled() || result.status === 'cancelled') return;
         setSnapshot((previous) => ({
           ...previous,

@@ -336,3 +336,19 @@ it('provides recovery for unreadable storage and an actionable empty list', asyn
   fireEvent.press(view.getByRole('button', { name: '回我的課程找教材' }));
   expect(browse).toHaveBeenCalled();
 });
+
+it.each([50, 100, 500])('同課程 %s 份收藏每頁只讀一次，更新清單重新讀取', async (count) => {
+  const materials = Array.from({ length: count }, (_, index) => ({ ...material, id: `saved-${index}`, title: `教材 ${index}` }));
+  const items = materials.map((item) => ({ ...entry, materialId: item.id }));
+  const classes = { materialsPage: jest.fn(async (_courseId: string, cursor?: string) => {
+    const offset = Number(cursor ?? 0);
+    return { materials: materials.slice(offset, offset + 50), nextCursor: offset + 50 < count ? String(offset + 50) : null };
+  }) };
+  const view = render(<Scope store={createMaterialBookmarkStore(storageFixture('first', items))} list classes={classes} />);
+  await view.findByRole('button', { name: `回到原教材：教材 ${count - 1}` }, { timeout: 20000 });
+  expect(view.getAllByRole('button', { name: /^回到原教材：/ })).toHaveLength(count);
+  expect(classes.materialsPage).toHaveBeenCalledTimes(count / 50);
+  fireEvent.press(view.getByRole('button', { name: '重新確認教材' }));
+  await view.findByRole('button', { name: `回到原教材：教材 ${count - 1}` }, { timeout: 20000 });
+  expect(classes.materialsPage).toHaveBeenCalledTimes(count / 50 * 2);
+}, 60000);

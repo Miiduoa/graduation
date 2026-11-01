@@ -180,17 +180,49 @@ export type MaterialBookmarkResolution =
   | { status: 'unavailable' | 'error'; message: string }
   | { status: 'cancelled' };
 
-export async function resolveMaterialBookmark(
-  classes: { materialsPage(courseId: string, pageToken?: string): Promise<NuniMaterialPage> },
+type MaterialPages = {
+  materialsPage(courseId: string, pageToken?: string): Promise<NuniMaterialPage>;
+};
+
+/** One list validation batch only. Never reuse this reader to authorize opening a material. */
+export function createMaterialBookmarkBatchResolver(classes: MaterialPages) {
+  const pages = new Map<string, Promise<NuniMaterialPage>>();
+  const readPage: MaterialPages['materialsPage'] = (courseId, pageToken) => {
+    const key = JSON.stringify([courseId, pageToken ?? null]);
+    let page = pages.get(key);
+    if (!page) {
+      // Share pending reads and their failures too; one cancelled row must not cancel its peers.
+      page = Promise.resolve().then(() => readMaterialWithDeadline(classes.materialsPage(courseId, pageToken)));
+      pages.set(key, page);
+    }
+    return page;
+  };
+  return (bookmark: MaterialIdentity, cancelled: () => boolean = () => false) =>
+    resolveBookmark(readPage, bookmark, cancelled);
+}
+
+export function resolveMaterialBookmark(
+  classes: MaterialPages,
   bookmark: MaterialIdentity,
   cancelled: () => boolean = () => false,
+): Promise<MaterialBookmarkResolution> {
+  return resolveBookmark(
+    (courseId, pageToken) => readMaterialWithDeadline(classes.materialsPage(courseId, pageToken)),
+    bookmark, cancelled,
+  );
+}
+
+async function resolveBookmark(
+  readPage: MaterialPages['materialsPage'],
+  bookmark: MaterialIdentity,
+  cancelled: () => boolean,
 ): Promise<MaterialBookmarkResolution> {
   const seen = new Set<string>();
   let pageToken: string | undefined;
   try {
     for (let pageNumber = 0; pageNumber < 100; pageNumber += 1) {
       if (cancelled()) return { status: 'cancelled' };
-      const page = await readMaterialWithDeadline(classes.materialsPage(bookmark.courseId, pageToken));
+      const page = await readPage(bookmark.courseId, pageToken);
       if (cancelled()) return { status: 'cancelled' };
       const material = page.materials.find((item) => item.id === bookmark.materialId && item.workspaceId === bookmark.courseId);
       if (material) return { status: 'available', material };

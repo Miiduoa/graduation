@@ -239,7 +239,7 @@ it('cancels an old session open and only shows material resolved in the new sess
 });
 
 it('limits simultaneous validations and skips removed queued bookmarks', async () => {
-  const items = Array.from({ length: 7 }, (_, index) => ({ ...bookmark, materialId: `saved-${index}` }));
+  const items = Array.from({ length: 7 }, (_, index) => ({ ...bookmark, courseId: `cw_11111111-1111-4111-8111-${String(index).padStart(12, '0')}`, materialId: `saved-${index}` }));
   persist(items);
   const finish: Array<(value: unknown) => void> = [];
   state.request.mockImplementation(() => new Promise((resolve) => { finish.push(resolve); }));
@@ -254,3 +254,19 @@ it('limits simultaneous validations and skips removed queued bookmarks', async (
   await act(async () => { finish.slice(1).forEach((resolve) => resolve(page([]))); });
   expect(state.request).toHaveBeenCalledTimes(4);
 });
+
+it.each([50, 100, 500])('同課程 %s 份收藏每頁只讀一次，更新清單重新讀取', async (count) => {
+  const materials = Array.from({ length: count }, (_, index) => ({ ...material, id: `cwm_11111111-1111-4111-8111-${String(index).padStart(12, '0')}`, title: `教材 ${index}` }));
+  persist(materials.map((item) => ({ ...bookmark, materialId: item.id })));
+  state.request.mockImplementation(async (_path, _context, _input, _method, query) => {
+    const offset = Number(query?.cursor ?? 0);
+    return { materials: materials.slice(offset, offset + 50), nextCursor: offset + 50 < count ? String(offset + 50) : null };
+  });
+  render(<MaterialBookmarks />);
+  await screen.findByText(`教材 ${count - 1}`, {}, { timeout: 20000 });
+  expect(document.querySelectorAll('button[aria-label^="開啟「教材"]')).toHaveLength(count);
+  expect(state.request).toHaveBeenCalledTimes(count / 50);
+  fireEvent.click(screen.getByRole('button', { name: '更新收藏' }));
+  await screen.findByText(`教材 ${count - 1}`, {}, { timeout: 20000 });
+  expect(state.request).toHaveBeenCalledTimes(count / 50 * 2);
+}, 60000);

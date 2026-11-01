@@ -2,8 +2,9 @@
 
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
+  createMaterialBookmarkBatchResolver,
   materialBookmarkId,
   resolveMaterialBookmark,
   type MaterialBookmark,
@@ -19,10 +20,10 @@ import styles from './CourseLearning.module.css';
 type Resolution = Awaited<ReturnType<typeof resolveMaterialBookmark>>;
 type ResolveBookmark = (bookmark: MaterialBookmark, cancelled: () => boolean, urgent?: boolean) => Promise<Resolution>;
 
-function limitMaterialReads(resolve: ResolveBookmark): ResolveBookmark {
+function limitMaterialReads() {
   let reading = 0;
   const waiting: Array<{
-    bookmark: MaterialBookmark;
+    read: () => Promise<Resolution>;
     cancelled: () => boolean;
     finish: (result: Resolution) => void;
   }> = [];
@@ -34,7 +35,7 @@ function limitMaterialReads(resolve: ResolveBookmark): ResolveBookmark {
         continue;
       }
       reading += 1;
-      void resolve(work.bookmark, work.cancelled)
+      void work.read()
         .then(work.finish, () => work.finish({ status: 'error', message: '目前無法確認教材，請稍後重試。' }))
         .finally(() => {
           reading -= 1;
@@ -42,8 +43,8 @@ function limitMaterialReads(resolve: ResolveBookmark): ResolveBookmark {
         });
     }
   };
-  return (bookmark, cancelled, urgent = false) => new Promise((finish) => {
-    const work = { bookmark, cancelled, finish };
+  return (read: () => Promise<Resolution>, cancelled: () => boolean, urgent: boolean) => new Promise<Resolution>((finish) => {
+    const work = { read, cancelled, finish };
     if (urgent) waiting.unshift(work);
     else waiting.push(work);
     next();
@@ -62,11 +63,20 @@ export function MaterialBookmarks() {
 }
 
 function Bookmarks({ accountId }: { accountId: string }) {
-  const classes = useClasses();
-  const [resolve] = useState(() => limitMaterialReads((bookmark, cancelled) =>
-    resolveMaterialBookmark(classes, bookmark, cancelled)));
+  const currentClasses = useClasses();
+  // Bookmarks remounts for every account or session context replacement.
+  const [classes] = useState(() => currentClasses);
+  const [schedule] = useState(limitMaterialReads);
   const bookmarks = useMaterialBookmarks(accountId);
   const [revision, setRevision] = useState(0);
+  // A refresh discards authorized pages. Explicit retries and opens always read fresh pages.
+  const validation = useMemo(() => {
+    const resolveBatch = createMaterialBookmarkBatchResolver(classes);
+    const resolve: ResolveBookmark = (bookmark, cancelled, urgent = false) => schedule(() => urgent
+      ? resolveMaterialBookmark(classes, bookmark, cancelled)
+      : resolveBatch(bookmark, cancelled), cancelled, urgent);
+    return { revision, resolve };
+  }, [classes, revision, schedule]);
   const [notice, setNotice] = useState('');
   const reload = useRef(bookmarks.reload);
   const active = useRef(true);
@@ -142,9 +152,9 @@ function Bookmarks({ accountId }: { accountId: string }) {
             const id = materialBookmarkId(bookmark);
             return (
               <BookmarkEntry
-                key={`${id}:${revision}`}
+                key={`${id}:${validation.revision}`}
                 bookmark={bookmark}
-                resolve={resolve}
+                resolve={validation.resolve}
                 removing={bookmarks.pending.includes(id)}
                 remove={async () => {
                   setNotice('');

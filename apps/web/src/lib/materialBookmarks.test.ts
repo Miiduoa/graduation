@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { NuniError, type NuniMaterial, type NuniMaterialPage } from '@campus/shared/src/nuni';
 import {
+  createMaterialBookmarkBatchResolver,
   createMaterialBookmarkStore,
   materialBookmarkId,
   materialBookmarkStorageKey,
@@ -415,5 +416,79 @@ describe('收藏教材重新驗證', () => {
     cancelled = true;
     response.reject(new NuniError(403, 'FORBIDDEN'));
     expect(await resolving).toEqual({ status: 'cancelled' });
+  });
+});
+
+
+describe('收藏清單批次共用分頁', () => {
+  it('同課程同頁共用尚未完成的請求，取消一列不會取消其他列', async () => {
+    const pending = deferred<NuniMaterialPage>();
+    const materialsPage = vi.fn(() => pending.promise);
+    const resolve = createMaterialBookmarkBatchResolver({ materialsPage });
+    let cancelled = false;
+    const one = resolve(first, () => cancelled);
+    const two = resolve({ ...first, materialId: 'second' });
+    await Promise.resolve();
+    expect(materialsPage).toHaveBeenCalledTimes(1);
+    cancelled = true;
+    pending.resolve({ materials: [material(), material({ id: 'second' })], nextCursor: null });
+    expect(await one).toEqual({ status: 'cancelled' });
+    expect(await two).toMatchObject({ status: 'available', material: { id: 'second' } });
+  });
+
+  it('不同課程的相同頁碼與教材編號不共用結果', async () => {
+    const materialsPage = vi.fn(async (courseId: string) => ({
+      materials: [material({ workspaceId: courseId })], nextCursor: null,
+    }));
+    const resolve = createMaterialBookmarkBatchResolver({ materialsPage });
+    const results = await Promise.all([resolve(first), resolve({ ...first, courseId: second.courseId })]);
+    expect(materialsPage).toHaveBeenCalledTimes(2);
+    expect(results).toEqual([
+      { status: 'available', material: material() },
+      { status: 'available', material: material({ workspaceId: second.courseId }) },
+    ]);
+  });
+
+  it('一頁失敗只讀一次，新批次與開啟教材仍各自重新驗權', async () => {
+    const materialsPage = vi.fn().mockRejectedValueOnce(new NuniError(403, 'FORBIDDEN'))
+      .mockResolvedValueOnce({ materials: [material()], nextCursor: null })
+      .mockRejectedValueOnce(new NuniError(403, 'FORBIDDEN'));
+    const resolve = createMaterialBookmarkBatchResolver({ materialsPage });
+    const results = await Promise.all([resolve(first), resolve({ ...first, materialId: 'second' })]);
+    expect(results.every((result) => result.status === 'unavailable')).toBe(true);
+    expect(materialsPage).toHaveBeenCalledTimes(1);
+    expect(await createMaterialBookmarkBatchResolver({ materialsPage })(first)).toMatchObject({ status: 'available' });
+    expect(await resolveMaterialBookmark({ materialsPage }, first)).toMatchObject({ status: 'unavailable' });
+    expect(materialsPage).toHaveBeenCalledTimes(3);
+  });
+
+  it('共用逾時結果且忽略遲到回應，新批次可以恢復', async () => {
+    vi.useFakeTimers();
+    const pending = deferred<NuniMaterialPage>();
+    const materialsPage = vi.fn().mockReturnValueOnce(pending.promise)
+      .mockResolvedValue({ materials: [material()], nextCursor: null });
+    const resolve = createMaterialBookmarkBatchResolver({ materialsPage });
+    const reads = Promise.all([resolve(first), resolve({ ...first, materialId: 'second' })]);
+    await vi.advanceTimersByTimeAsync(30001);
+    expect((await reads).every((result) => result.status === 'error')).toBe(true);
+    pending.resolve({ materials: [material()], nextCursor: null });
+    expect(await resolve(first)).toMatchObject({ status: 'error' });
+    expect(materialsPage).toHaveBeenCalledTimes(1);
+    expect(await createMaterialBookmarkBatchResolver({ materialsPage })(first)).toMatchObject({ status: 'available' });
+  });
+
+  it('取消的批次不讀下一頁，也不把舊批次結果帶入替換的 session', async () => {
+    const pending = deferred<NuniMaterialPage>();
+    const oldPages = vi.fn(() => pending.promise);
+    let cancelled = false;
+    const oldRead = createMaterialBookmarkBatchResolver({ materialsPage: oldPages })(first, () => cancelled);
+    await Promise.resolve();
+    cancelled = true;
+    const newPages = vi.fn().mockRejectedValue(new NuniError(403, 'FORBIDDEN'));
+    expect(await createMaterialBookmarkBatchResolver({ materialsPage: newPages })(first)).toMatchObject({ status: 'unavailable' });
+    pending.resolve({ materials: [], nextCursor: 'older' });
+    expect(await oldRead).toEqual({ status: 'cancelled' });
+    expect(oldPages).toHaveBeenCalledTimes(1);
+    expect(newPages).toHaveBeenCalledTimes(1);
   });
 });
