@@ -119,7 +119,7 @@ export function CreditPlanScenarios({ plan }: { plan: CreditPlan }) {
               </tbody></table>
             </section>
           </div>
-          <p className={styles.note}>表格單位為學分。達標學期只計已排入學期的課程，不把「其他預計學分」放進某學期。25 學分只是負擔提醒，不是學校上限；總量達標不代表畢業。</p>
+          <p className={styles.note}>表格單位為學分。達標學期只計已排入學期的課程，不把「其他預計學分」放進某學期。完整方案比較固定以 25 學分提醒，與上方個人每學期負擔提醒無關；25 不是學校上限。總量達標不代表畢業。</p>
           {comparison.afterInsights.possibleRetakes.length ? <p className={styles.warning}>此方案仍有同名課程，可能重複採計。比較沒有把課名相同視為同一門正式課程，請向系辦核對。</p> : null}
           <div className={styles.footer}>
             <strong>原規劃仍完整保留</strong>

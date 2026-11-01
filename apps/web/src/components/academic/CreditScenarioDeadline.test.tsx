@@ -51,9 +51,16 @@ describe('deadline comparison', () => {
   });
   it('unassigned credits and unknown categories are never claimed as completed', () => {
     const plan = { ...sample(), extra: '20' }; render(<CreditScenarioDeadline before={plan} after={moved(plan)} />); deadline('2');
-    expect(screen.getByRole('status').textContent).toContain('仍差 10');
+    expect(screen.getByRole('status').textContent).toContain('含尚未排入學期的其他預計學分後，全部修完總量可達標，但第 2 學期末仍差 10');
+    expect(screen.getByRole('status').textContent).not.toContain('全部修完總量足夠');
     expect(screen.getByText(/其他預計學分 20 尚未排入學期/)).toBeTruthy();
     expect(screen.getByText(/1 項個人非學分條件未勾選，3 類門檻未填完整/)).toBeTruthy();
+  });
+  it('does not claim full-plan sufficiency when only unscheduled extra closes the total', () => {
+    const plan = { ...sample(), recognized: '120', target: '128', extra: '8', courses: [] };
+    render(<CreditScenarioDeadline before={plan} after={plan} />);
+    expect(screen.getByRole('status').textContent).toContain('含尚未排入學期的其他預計學分後，全部修完總量可達標，但第 3 學期末仍差 8');
+    expect(screen.getByRole('status').textContent).not.toContain('全部修完總量足夠');
   });
   it('does not fabricate a zero gap when goals are missing', () => {
     const plan = { ...sample(), target: '' }; render(<CreditScenarioDeadline before={plan} after={plan} />);

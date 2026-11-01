@@ -134,7 +134,7 @@ try {
     await screenshot(`${prefix}-baseline.png`);
     await set('[aria-label="統計學（原第 2 學期）的比較安排"]', '3');
     await until(() => has('第 2 學期末仍差 10'), 'deferred gap');
-    await check(`${prefix}: deferred six credits preserve final sufficiency`, () => has('全部修完總量足夠，但第 2 學期末仍差 10'));
+    await check(`${prefix}: deferred six credits note unscheduled extra before claiming sufficiency`, () => has('含尚未排入學期的其他預計學分後，全部修完總量可達標，但第 2 學期末仍差 10'));
     await check(`${prefix}: unassigned credits excluded`, () => has('其他預計學分 20 尚未排入學期'));
     await check(`${prefix}: future courses excluded`, () => has('2 門排在期限後'));
     await screenshot(`${prefix}-deadline.png`);

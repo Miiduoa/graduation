@@ -30,6 +30,16 @@ test('額外學分不擅自排入期限', () => {
   const before = { ...sample(), extra: '20' }; const result = report(before, moved(before));
   assert.equal(result.after.remaining, 10); assert.equal(result.after.remainingAfterAll, 0);
   assert.equal(result.unallocated, 20); assert.match(result.warnings.join(' '), /不計入這個期限/);
+  assert.match(creditDeadlineConclusion(result), /含尚未排入學期的其他預計學分後.*可達標.*仍差 10/);
+  assert.doesNotMatch(creditDeadlineConclusion(result), /全部修完總量足夠/);
+});
+test('沒有課程、只靠未排程 extra 湊總量時不宣稱全部修完足夠', () => {
+  const before = { ...sample(), recognized: '120', target: '128', extra: '8', courses: [] };
+  const result = report(before);
+  assert.equal(result.after.remaining, 8); assert.equal(result.after.remainingAfterAll, 0);
+  assert.equal(result.unallocated, 8); assert.equal(result.after.scheduled, 0);
+  assert.match(creditDeadlineConclusion(result), /含尚未排入學期的其他預計學分後.*可達標.*仍差 8/);
+  assert.doesNotMatch(creditDeadlineConclusion(result), /全部修完總量足夠/);
 });
 test('到第3學期末才包含延期課程', () => {
   const before = sample(); const result = report(before, moved(before), { ...options, targetTerm: 3 });

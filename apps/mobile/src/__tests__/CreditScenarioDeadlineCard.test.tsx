@@ -34,20 +34,38 @@ test('native deadline is bounded to eight terms with accessible disabled buttons
 });
 test('invalid input removes stale totals and valid decimal input restores them', () => {
   const plan = sample(); const view = render(<CreditScenarioDeadlineCard before={plan} after={plan} />);
+  expect(view.getByLabelText('個人每學期負擔提醒').props.accessibilityState.invalid).toBe(false);
   fireEvent.changeText(view.getByLabelText('個人每學期負擔提醒'), '1e2');
   expect(view.getByRole('alert').props.children).toContain('1～40');
+  expect(view.getByLabelText('個人每學期負擔提醒').props.accessibilityState.invalid).toBe(true);
   expect(view.queryByLabelText('比較方案期限缺口')).toBeNull();
   fireEvent.changeText(view.getByLabelText('個人每學期負擔提醒'), '18.5');
+  expect(view.getByLabelText('個人每學期負擔提醒').props.accessibilityState.invalid).toBe(false);
   expect(view.getByLabelText('比較方案期限缺口')).toBeTruthy();
 });
 test('native detailed view explains capacity, unknown classifications and future-only courses', () => {
   const plan = sample(); const view = render(<CreditScenarioDeadlineCard before={plan} after={moved(plan)} />);
   fireEvent.press(view.getByLabelText('提前一學期比較'));
   fireEvent.changeText(view.getByLabelText('個人每學期負擔提醒'), '5');
+  expect(view.getByLabelText('2 門排在期限後，不計入期限內學分')).toBeTruthy();
   fireEvent.press(view.getByLabelText('核對期限內分類與每學期負擔'));
   expect(view.getByText(/單看學分量仍放不下 5 學分/)).toBeTruthy();
-  expect(view.getByText('2 門排在期限後，不計入期限內學分')).toBeTruthy();
   expect(view.getByText(/1 項個人非學分條件未勾選，3 類門檻未填完整/)).toBeTruthy();
+});
+test('later-course summary stays visible without expanding the category breakdown', () => {
+  const plan = sample(); const view = render(<CreditScenarioDeadlineCard before={plan} after={moved(plan)} />);
+  fireEvent.press(view.getByLabelText('提前一學期比較'));
+  expect(view.getByLabelText('2 門排在期限後，不計入期限內學分')).toBeTruthy();
+  expect(view.queryByText('統計學')).toBeNull();
+  fireEvent.press(view.getByLabelText('2 門排在期限後，不計入期限內學分'));
+  expect(view.getByText('統計學')).toBeTruthy();
+  expect(view.getByText('藝術')).toBeTruthy();
+});
+test('extra-only totals do not claim unqualified full-plan sufficiency', () => {
+  const plan = { ...sample(), recognized: '120', target: '128', extra: '8', courses: [] };
+  const view = render(<CreditScenarioDeadlineCard before={plan} after={plan} />);
+  expect(view.getByText(/含尚未排入學期的其他預計學分後，全部修完總量可達標，但第 3 學期末仍差 8/)).toBeTruthy();
+  expect(view.queryByText(/全部修完總量足夠/)).toBeNull();
 });
 test('extra credits do not enter the deadline and blanks do not become zero', () => {
   const plan = { ...sample(), extra: '20', recognized: '' };

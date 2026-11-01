@@ -132,6 +132,10 @@ export function compareCreditScenarioDeadline(
 export function creditDeadlineConclusion(report: CreditDeadlineReport): string {
   if (report.after.remaining === null) return '目標尚未設定完整，暫時不能判斷期限缺口。';
   if (report.after.remaining > 0 && report.after.remainingAfterAll === 0) {
+    // Extra is counted in remainingAfterAll but never in the deadline; do not claim unqualified sufficiency.
+    if (report.unallocated > 0) {
+      return `含尚未排入學期的其他預計學分後，全部修完總量可達標，但第 ${report.targetTerm} 學期末仍差 ${formatCredits(report.after.remaining)} 學分。`;
+    }
     return `全部修完總量足夠，但第 ${report.targetTerm} 學期末仍差 ${formatCredits(report.after.remaining)} 學分。`;
   }
   if (report.after.remaining > 0) return `第 ${report.targetTerm} 學期末，這個方案仍差 ${formatCredits(report.after.remaining)} 學分。`;

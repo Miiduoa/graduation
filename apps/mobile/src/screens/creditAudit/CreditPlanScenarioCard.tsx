@@ -158,9 +158,9 @@ export function CreditPlanScenarioCard({ plan }: { plan: CreditPlan }) {
           {comparison.categories.map((row) => <View key={row.key} style={{ flexDirection: 'row', justifyContent: 'space-between', gap: 8, minHeight: 36 }}>
             <Text style={{ color: c.muted }}>{row.label}</Text><Text style={{ color: c.text }}>{number(row.before)} → {number(row.after)}</Text>
           </View>)}
-          <Text style={{ color: c.muted, fontSize: 11, lineHeight: 19 }}>達標學期只計已排入學期的課程，不把其他預計學分放進某學期。總量達標不等於畢業，也不保證實際開課與先修條件。</Text>
+          <Text style={{ color: c.muted, fontSize: 11, lineHeight: 19 }}>達標學期只計已排入學期的課程，不把其他預計學分放進某學期。完整方案比較固定以 25 學分提醒，與上方個人每學期負擔提醒無關。總量達標不等於畢業，也不保證實際開課與先修條件。</Text>
           {comparison.afterInsights.possibleRetakes.length ? <Text style={{ color: c.text, lineHeight: 20 }}>此方案有同名課程，可能重複採計，請向系辦核對。</Text> : null}
-          {comparison.afterInsights.workloadCautions.length ? <Text style={{ color: c.text, lineHeight: 20 }}>部分學期超過 25 學分，請核對個人負擔與學校上限；25 只是提醒，不是正式規定。</Text> : null}
+          {comparison.afterInsights.workloadCautions.length ? <Text style={{ color: c.text, lineHeight: 20 }}>部分學期超過 25 學分（完整方案比較固定以 25 提醒，與上方個人負擔無關）；25 不是正式規定。</Text> : null}
           <View style={{ backgroundColor: c.surface2, borderRadius: 12, padding: 14, gap: 10 }}>
             <Text style={{ color: c.text, fontWeight: '700' }}>原規劃仍完整保留</Text>
             <Text style={{ color: c.muted, fontSize: 12, lineHeight: 20 }}>比較不會退選或修改校方紀錄。可分享此方案的 JSON 備份，再由現有匯入流程確認採用；請另外保留原規劃備份。分享完成後仍需自行核對是否確實保存。</Text>
