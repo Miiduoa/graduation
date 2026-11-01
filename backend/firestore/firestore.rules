@@ -895,12 +895,19 @@ service cloud.firestore {
       allow delete: if canManageGroup(groupId);
 
       match /members/{uid} {
-        allow read: if isActiveGroupMember(groupId);
+        allow read: if isActiveGroupMember(groupId)
+          && (get(/databases/$(database)/documents/groups/$(groupId)).data.type != 'club'
+            || request.auth.uid == uid
+            || get(/databases/$(database)/documents/groups/$(groupId)/members/$(request.auth.uid)).data.role in ['owner', 'admin']);
         allow create: if false;
         // Client may not change role (including promoting to owner). Ownership transfer is server-only.
         allow update: if canManageGroup(groupId)
+          && (get(/databases/$(database)/documents/groups/$(groupId)).data.type != 'club'
+            || get(/databases/$(database)/documents/groups/$(groupId)/members/$(request.auth.uid)).data.role in ['owner', 'admin'])
           && !request.resource.data.diff(resource.data).affectedKeys().hasAny(['uid', 'role', 'joinedAt']);
-        allow delete: if canManageGroup(groupId);
+        allow delete: if canManageGroup(groupId)
+          && (get(/databases/$(database)/documents/groups/$(groupId)).data.type != 'club'
+            || get(/databases/$(database)/documents/groups/$(groupId)/members/$(request.auth.uid)).data.role in ['owner', 'admin']);
       }
 
       // Private transfer receipts; Admin SDK / privileged callables only.
