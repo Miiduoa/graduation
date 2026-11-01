@@ -1,18 +1,23 @@
 import {
   canRetryDmSend,
   classifyDmSendFailure,
+  clearOutboundDraftsForUser,
   clearOutboundPreview,
   clearOutboundPreviewsForUser,
+  confirmedServerMessageIds,
   conversationListPreview,
   dmSendStatusLabel,
   filterInbox,
   inboxPreviewForOutbound,
+  latestOutboundDraft,
   mergeOutboundWithServerMessages,
   nextDmSendStatus,
   pruneConfirmedOutbound,
+  readOutboundDrafts,
   readOutboundPreview,
   schoolConversations,
   setOutboundPreview,
+  writeOutboundDrafts,
   unreadConversation,
   type DmOutboundDraft,
   type InboxConversation,
@@ -129,11 +134,82 @@ describe('dm send status transitions and retry', () => {
       },
     ];
     const server = [{ id: 'local-2', content: '已確認' }];
-    const merged = mergeOutboundWithServerMessages(server, outbound, 'dm_pu_alice_bob');
-    expect(merged.map((item) => item.id)).toEqual(['local-2', 'local-1']);
-    expect(pruneConfirmedOutbound(outbound, new Set(['local-2'])).map((item) => item.id)).toEqual([
-      'local-1',
-    ]);
+    // 尚未 prune 前，即使 server 已有同 id，仍顯示 outbound 狀態（不標已送達）。
+    const mergedWhilePending = mergeOutboundWithServerMessages(server, outbound, 'dm_pu_alice_bob');
+    expect(mergedWhilePending.map((item) => item.id)).toEqual(['local-1', 'local-2']);
+    expect(mergedWhilePending.every((item) => 'local' in item && item.local)).toBe(true);
+    const pruned = pruneConfirmedOutbound(outbound, new Set(['local-2']));
+    expect(pruned.map((item) => item.id)).toEqual(['local-1']);
+    const mergedAfterConfirm = mergeOutboundWithServerMessages(server, pruned, 'dm_pu_alice_bob');
+    expect(mergedAfterConfirm.map((item) => item.id)).toEqual(['local-2', 'local-1']);
+    expect(mergedAfterConfirm[0]).toEqual(server[0]);
+  });
+
+  it('does not treat hasPendingWrites snapshots as confirmed delivery', () => {
+    const outbound: DmOutboundDraft[] = [
+      {
+        id: 'pending-1',
+        conversationId: 'dm_pu_alice_bob',
+        senderId: alice,
+        content: '飛行模式送出',
+        status: 'sending',
+        createdAtMs: 10,
+      },
+    ];
+    const docs = [
+      { id: 'pending-1', metadata: { hasPendingWrites: true } },
+      { id: 'older', metadata: { hasPendingWrites: false } },
+    ];
+    const confirmed = confirmedServerMessageIds(docs);
+    expect(confirmed.has('pending-1')).toBe(false);
+    expect(confirmed.has('older')).toBe(true);
+    expect(pruneConfirmedOutbound(outbound, confirmed)).toEqual(outbound);
+    const merged = mergeOutboundWithServerMessages(
+      [{ id: 'pending-1', content: '飛行模式送出' }],
+      outbound,
+      'dm_pu_alice_bob',
+    );
+    expect(merged).toHaveLength(1);
+    expect(merged[0]).toMatchObject({ id: 'pending-1', local: true, status: 'sending' });
+  });
+
+  it('restores outbound drafts by conversation after leaving the chat', () => {
+    clearOutboundDraftsForUser(null);
+    const draft: DmOutboundDraft = {
+      id: 'retry-1',
+      conversationId: 'dm_pu_alice_bob',
+      senderId: alice,
+      content: '回來還能重試',
+      status: 'unconfirmed',
+      createdAtMs: 5,
+    };
+    writeOutboundDrafts('dm_pu_alice_bob', [draft]);
+    expect(readOutboundDrafts('dm_pu_alice_bob', alice)).toEqual([draft]);
+    expect(readOutboundDrafts('dm_pu_alice_bob', 'bob')).toEqual([]);
+    clearOutboundDraftsForUser(alice);
+    expect(readOutboundDrafts('dm_pu_alice_bob', alice)).toEqual([]);
+  });
+
+  it('picks the newest outbound draft for inbox preview', () => {
+    const rows: DmOutboundDraft[] = [
+      {
+        id: 'a',
+        conversationId: 'dm_1',
+        senderId: alice,
+        content: '舊',
+        status: 'failed',
+        createdAtMs: 1,
+      },
+      {
+        id: 'b',
+        conversationId: 'dm_1',
+        senderId: alice,
+        content: '新',
+        status: 'unconfirmed',
+        createdAtMs: 9,
+      },
+    ];
+    expect(latestOutboundDraft(rows, 'dm_1')?.content).toBe('新');
   });
 
   it('surfaces outbound preview on the inbox without claiming delivery', () => {

@@ -53,6 +53,12 @@ type PreviewEntry = {
 /** 進程內預覽（非持久離線佇列）：對話列表對齊聊天室未確認狀態。 */
 const outboundPreviews = new Map<string, PreviewEntry>();
 
+/** 進程內 outbound 草稿：離開聊天室再進入仍可還原狀態與重試（非持久佇列）。 */
+const outboundDrafts = new Map<string, DmOutboundDraft[]>();
+
+/** 與網頁／`CHAT_MESSAGE_CONTENT_MAX` 對齊。 */
+export const DM_SEND_CONTENT_MAX = 4000;
+
 export function schoolConversations<T extends InboxConversation>(
   rows: T[],
   uid: string | null | undefined,
@@ -217,6 +223,53 @@ export function readOutboundPreview(
   return entry;
 }
 
+export function writeOutboundDrafts(conversationId: string, drafts: DmOutboundDraft[]): void {
+  if (!conversationId) return;
+  const mine = drafts
+    .filter((row) => row.conversationId === conversationId)
+    .slice()
+    .sort((a, b) => a.createdAtMs - b.createdAtMs);
+  if (mine.length === 0) {
+    outboundDrafts.delete(conversationId);
+    return;
+  }
+  outboundDrafts.set(conversationId, mine);
+}
+
+export function readOutboundDrafts(
+  conversationId: string,
+  uid: string | null | undefined,
+): DmOutboundDraft[] {
+  if (!conversationId || !uid) return [];
+  const rows = outboundDrafts.get(conversationId) ?? [];
+  return rows.filter((row) => row.senderId === uid).map((row) => ({ ...row }));
+}
+
+export function clearOutboundDraftsForUser(uid: string | null | undefined): void {
+  if (!uid) {
+    outboundDrafts.clear();
+    return;
+  }
+  for (const [id, rows] of outboundDrafts) {
+    const next = rows.filter((row) => row.senderId !== uid);
+    if (next.length === 0) outboundDrafts.delete(id);
+    else outboundDrafts.set(id, next);
+  }
+}
+
+/** 多則未完成時取最新一則作為列表預覽來源。 */
+export function latestOutboundDraft(
+  rows: DmOutboundDraft[],
+  conversationId: string,
+): DmOutboundDraft | null {
+  let latest: DmOutboundDraft | null = null;
+  for (const row of rows) {
+    if (row.conversationId !== conversationId) continue;
+    if (!latest || row.createdAtMs >= latest.createdAtMs) latest = row;
+  }
+  return latest;
+}
+
 export function conversationListPreview(
   row: InboxConversation,
   uid: string | null | undefined,
@@ -226,21 +279,41 @@ export function conversationListPreview(
   return row.lastMessageText ?? row.lastMessage?.content ?? '(尚無訊息)';
 }
 
+/**
+ * 僅把「伺服器已確認」（無 pending writes）的 id 視為可 prune／可顯示已送達。
+ * Firestore 本地 pending 反射進 listener 時不得當成成功。
+ */
+export function confirmedServerMessageIds(
+  docs: ReadonlyArray<{ id: string; metadata?: { hasPendingWrites?: boolean } }>,
+): Set<string> {
+  const confirmed = new Set<string>();
+  for (const docSnap of docs) {
+    if (docSnap.metadata?.hasPendingWrites) continue;
+    confirmed.add(docSnap.id);
+  }
+  return confirmed;
+}
+
+/**
+ * outbound 未 prune 前一律以本地狀態為準（含 snapshot 仍 hasPendingWrites）。
+ * 僅在 `pruneConfirmedOutbound`（!hasPendingWrites）後才顯示為已送達。
+ */
 export function mergeOutboundWithServerMessages<T extends { id: string }>(
   server: T[],
   outbound: DmOutboundDraft[],
   conversationId: string,
 ): Array<T | (DmOutboundDraft & { local: true })> {
-  const confirmed = new Set(server.map((row) => row.id));
   const pending = outbound
-    .filter((row) => row.conversationId === conversationId && !confirmed.has(row.id))
+    .filter((row) => row.conversationId === conversationId)
     .map((row) => ({ ...row, local: true as const }));
-  return [...server, ...pending];
+  const pendingIds = new Set(pending.map((row) => row.id));
+  const visibleServer = server.filter((row) => !pendingIds.has(row.id));
+  return [...visibleServer, ...pending];
 }
 
 export function pruneConfirmedOutbound(
   outbound: DmOutboundDraft[],
-  serverIds: ReadonlySet<string>,
+  confirmedIds: ReadonlySet<string>,
 ): DmOutboundDraft[] {
-  return outbound.filter((row) => !serverIds.has(row.id));
+  return outbound.filter((row) => !confirmedIds.has(row.id));
 }

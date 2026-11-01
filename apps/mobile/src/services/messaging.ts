@@ -5,10 +5,12 @@ import {
   getDoc,
   runTransaction,
   serverTimestamp,
-  setDoc,
   updateDoc,
 } from 'firebase/firestore';
 import { getDb } from '../firebase';
+
+/** 與網頁私訊相同的內容長度上限。 */
+export const CHAT_MESSAGE_CONTENT_MAX = 4000;
 
 export async function appendChatMessage(
   conversationId: string,
@@ -36,8 +38,8 @@ export function newChatMessageId(conversationId: string): string {
 }
 
 /**
- * 以固定 messageId 寫入（create-only）。若同 sender／content 已存在則視為成功重放，
- * 不另建文件，避免人工重試產生不明重複。不改 schema／rules。
+ * 以固定 messageId 交易寫入（create-only，對齊網頁 `sendPrivateMessage`）。
+ * 同 sender／content 已存在則視為成功重放；摘要含巢狀 lastMessage。不改 schema／rules。
  */
 export async function sendChatMessageIdempotent(input: {
   conversationId: string;
@@ -48,39 +50,51 @@ export async function sendChatMessageIdempotent(input: {
 }): Promise<{ id: string; replayed: boolean }> {
   const body = input.content.trim();
   if (!body) throw new Error('訊息內容不可空白');
-  const db = getDb();
-  const messageRef = doc(db, 'conversations', input.conversationId, 'messages', input.messageId);
-  const existing = await getDoc(messageRef);
-  if (existing.exists()) {
-    const data = existing.data() as { senderId?: string; content?: string };
-    if (data.senderId === input.senderId && data.content === body) {
-      return { id: input.messageId, replayed: true };
-    }
-    throw Object.assign(new Error('此訊息編號已被其他內容使用'), {
-      code: 'failed-precondition',
+  if (body.length > CHAT_MESSAGE_CONTENT_MAX) {
+    throw Object.assign(new Error(`訊息不可超過 ${CHAT_MESSAGE_CONTENT_MAX} 字`), {
+      code: 'invalid-argument',
     });
   }
 
-  await setDoc(messageRef, {
-    conversationId: input.conversationId,
-    senderId: input.senderId,
-    content: body,
-    type: input.type ?? 'text',
-    readBy: [input.senderId],
-    createdAt: serverTimestamp(),
+  const db = getDb();
+  const conversationRef = doc(db, 'conversations', input.conversationId);
+  const messageRef = doc(db, 'conversations', input.conversationId, 'messages', input.messageId);
+  let replayed = false;
+
+  await runTransaction(db, async (tx) => {
+    const existing = await tx.get(messageRef);
+    if (existing.exists()) {
+      const data = existing.data() as { senderId?: string; content?: string };
+      if (data.senderId === input.senderId && data.content === body) {
+        replayed = true;
+        return;
+      }
+      throw Object.assign(new Error('此訊息編號已被其他內容使用'), {
+        code: 'failed-precondition',
+      });
+    }
+
+    const stamp = serverTimestamp();
+    const message = {
+      conversationId: input.conversationId,
+      senderId: input.senderId,
+      content: body,
+      type: input.type ?? 'text',
+      readBy: [input.senderId],
+      createdAt: stamp,
+    };
+    tx.set(messageRef, message);
+    tx.update(conversationRef, {
+      lastMessage: { id: input.messageId, ...message },
+      lastMessageText: body.slice(0, 50),
+      lastMessageAt: stamp,
+      lastMessageSenderId: input.senderId,
+      updatedAt: stamp,
+      [`typingUsers.${input.senderId}`]: null,
+    });
   });
 
-  await updateDoc(doc(db, 'conversations', input.conversationId), {
-    lastMessageText: body.slice(0, 50),
-    lastMessageAt: serverTimestamp(),
-    lastMessageSenderId: input.senderId,
-    updatedAt: serverTimestamp(),
-    [`typingUsers.${input.senderId}`]: null,
-  }).catch(() => {
-    // 訊息本體已寫入；對話摘要更新失敗不改為未送出，由列表訂閱稍後補齊。
-  });
-
-  return { id: input.messageId, replayed: false };
+  return { id: input.messageId, replayed };
 }
 
 export async function toggleMessageReaction(
