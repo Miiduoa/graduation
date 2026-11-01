@@ -18,6 +18,17 @@ it('以台灣日期顯示並保留過期警示', () => {
   });
   expect(publicSourceStatus('2026-10-24', false, now).message).toContain('資料快照');
 });
+it('台灣凌晨仍接受當天只有日期的快照', () => {
+  // 2026-11-01 01:00 Asia/Taipei；若把 '2026-11-01' 當 UTC 午夜會誤判為未來。
+  const taipeiEarlyMorning = Date.parse('2026-10-31T17:00:00Z');
+  expect(publicSourceStatus('2026-11-01', false, taipeiEarlyMorning)).toEqual({
+    date: '2026/11/01',
+    message: '這是資料快照，實際內容仍以官方最新資訊為準。',
+  });
+  expect(publicSourceStatus('2026-11-02', false, taipeiEarlyMorning).date).toContain(
+    '日期無法確認',
+  );
+});
 it.each(['javascript:alert(1)', 'https://user:secret@example.com', '/relative', undefined])(
   '不提供不安全的入口：%s',
   (url) => {
