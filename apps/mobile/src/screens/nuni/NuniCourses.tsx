@@ -1,3 +1,5 @@
+import { startAssignmentLive, assignmentReader, assignmentSyncLabel, type AssignmentSync } from '@campus/shared/src/assignmentLive';
+import NetInfo from '@react-native-community/netinfo';
 import React, {
   useCallback,
   useEffect,
@@ -9,7 +11,7 @@ import React, {
   type ReactNode,
   type RefObject,
 } from 'react';
-import { Image, Linking, Share, Alert, Pressable, ScrollView, Text, TextInput, View } from 'react-native';
+import { AppState, Image, Linking, Share, Alert, Pressable, ScrollView, Text, TextInput, View } from 'react-native';
 import { materialCapabilities, materialFailureMessage, readMaterialWithDeadline } from '@campus/shared/src/materialAccess';
 import { photoPdfAvailable } from './nativePhotoPdf';
 import { NativePhotoPdfEditor } from './NativePhotoPdfEditor';
@@ -1104,6 +1106,50 @@ function CourseDetail({
   const [quizQuery, setQuizQuery] = useNuniDraftState(`course:${id}:quiz-search`, '');
   const activityQuery = tab === 'quizzes' ? quizQuery : assignmentQuery;
   const setActivityQuery = tab === 'quizzes' ? setQuizQuery : setAssignmentQuery;
+  const [assignmentSync, setAssignmentSync] = useState<AssignmentSync>({
+    state: 'updating',
+    updatedAt: null,
+  });
+  const [receiptId, setReceiptId] = useState<string | null>(null);
+  const assignmentRevision = useRef(0);
+  const assignmentCommit = useRef(result.commit);
+  const assignmentVersion = useRef(result.version);
+  useEffect(() => {
+    assignmentCommit.current = result.commit;
+    assignmentVersion.current = result.version;
+  });
+  const assignmentLiveReady = result.data !== null && !result.loading && !classroomDenied;
+  useEffect(() => {
+    if (!assignmentLiveReady || tab !== 'assignments') return;
+    let online = true;
+    return startAssignmentLive({
+      read: () => classes.assignments(id),
+      revision: () => assignmentRevision.current,
+      receive: (assignments) =>
+        assignmentCommit.current(
+          (current) => (current ? { ...current, assignments } : current),
+          assignmentVersion.current,
+        ),
+      clear: () => {
+        setClassroomDenied(true);
+        assignmentCommit.current(() => null, assignmentVersion.current);
+      },
+      status: setAssignmentSync,
+      active: () => AppState.currentState === 'active',
+      online: () => online,
+      subscribe: (changed) => {
+        const app = AppState.addEventListener('change', changed);
+        const network = NetInfo.addEventListener((state) => {
+          online = state.isConnected !== false && state.isInternetReachable !== false;
+          changed();
+        });
+        return () => {
+          app.remove();
+          network();
+        };
+      },
+    });
+  }, [classes, id, assignmentLiveReady, tab]);
   const data = result.data;
   const linkedAssignment =
     !!initialAssignmentId && !!data?.assignments.some((item) => item.id === initialAssignmentId);
@@ -1272,6 +1318,7 @@ function CourseDetail({
     targetSeekCancelled,
   ]);
   const saveActivity = (item: Activity) => {
+    if ('instructions' in item) assignmentRevision.current += 1;
     result.commit(
       (current) =>
         current
@@ -1444,6 +1491,12 @@ function CourseDetail({
             </Copy>
           ) : null}
           <View style={{ display: tab === 'assignments' ? 'flex' : 'none', gap: 16 }}>
+            <Text accessibilityLiveRegion="polite">
+              {assignmentSyncLabel(assignmentSync)}{assignmentSync.updatedAt
+                ? ` · 最後更新 ${formatTaipeiDateTime(assignmentSync.updatedAt, { seconds: true })}`
+                : ' · 尚未確認最新狀態'}
+            </Text>
+            <Copy>作業約每分鐘自動更新；回到畫面、切回分頁、網路恢復、自己送出或重新整理時立即更新。校方 LMS 等未串接來源請到原系統確認。</Copy>
             {data.assignments.length === 0 ? (
               <Copy>老師尚未發布作業。</Copy>
             ) : (
@@ -1459,6 +1512,8 @@ function CourseDetail({
                       !matchesActivitySearch(item, assignmentQuery)) &&
                     item.id !== initialAssignmentId
                   }
+                  receiptActive={tab === 'assignments' && receiptId === item.id}
+                  onOpenReceipts={() => setReceiptId(item.id)}
                   compact={data.assignments.length > 8 && index > 0}
                   focused={item.id === initialAssignmentId}
                   scrollRef={scrollRef}
@@ -1733,6 +1788,8 @@ function MaterialCard({
 }
 
 function ActivityCard({
+  receiptActive = true,
+  onOpenReceipts,
   item,
   course,
   classes,
@@ -1743,6 +1800,8 @@ function ActivityCard({
   scrollRef,
   contentOffsetYRef,
 }: {
+  receiptActive?: boolean;
+  onOpenReceipts?: () => void;
   item: Activity;
   course: NuniWorkspace;
   classes: Classes;
@@ -2133,6 +2192,8 @@ function ActivityCard({
               classes={classes}
               course={course}
               item={item}
+              receiptActive={receiptActive && !hidden && expanded}
+              onOpenReceipts={onOpenReceipts}
               scrollRef={scrollRef}
               contentOffsetYRef={contentOffsetYRef}
             />
@@ -2144,12 +2205,16 @@ function ActivityCard({
 }
 
 function TeacherReceipts({
+  receiptActive = true,
+  onOpenReceipts,
   classes,
   course,
   item,
   scrollRef,
   contentOffsetYRef,
 }: {
+  receiptActive?: boolean;
+  onOpenReceipts?: () => void;
   classes: Classes;
   course: NuniWorkspace;
   item: Activity;
@@ -2166,15 +2231,53 @@ function TeacherReceipts({
   const pendingRevealId = useRef<string | null>(null);
   const revealGeneration = useRef(0);
   const mountedRef = useRef(true);
+  const receiptReader = useRef(assignmentReader<Receipt[]>());
   const load = useCallback(
-    async (): Promise<Receipt[]> =>
-      assignment
+    async (context?: { cancelled(): boolean }): Promise<Receipt[]> => receiptReader.current(() => {
+      if (context?.cancelled()) return Promise.reject(new Error('讀取已失效'));
+      return assignment
         ? classes.submissions(course.id, item.id)
-        : classes.quizResponses(course.id, item.id),
+        : classes.quizResponses(course.id, item.id);
+    }),
     [assignment, classes, course.id, item.id],
   );
   const resource = useLoad(load, false);
   const { data: receipts, loading: busy, error } = resource;
+  const mutationRevision = useRef(0);
+  const liveResource = useRef({ load, resource });
+  useEffect(() => { liveResource.current = { load, resource }; });
+  const [receiptSync, setReceiptSync] = useState<AssignmentSync>({ state: 'paused', updatedAt: null });
+  const receiptsOpened = receipts !== null;
+  useEffect(() => {
+    if (!assignment || !receiptsOpened || !receiptActive || busy) return;
+    let online = true;
+    let valid = true;
+    const stop = startAssignmentLive({
+      initialDelay: 60000,
+      read: () => liveResource.current.load({ cancelled: () => !valid || !online || AppState.currentState !== 'active' }),
+      revision: () => mutationRevision.current,
+      receive: (rows) => {
+        const current = liveResource.current.resource;
+        current.commit(() => rows, current.version);
+      },
+      clear: () => {
+        const current = liveResource.current.resource;
+        current.commit(() => null, current.version);
+      },
+      status: setReceiptSync,
+      active: () => AppState.currentState === 'active',
+      online: () => online,
+      subscribe: (changed) => {
+        const app = AppState.addEventListener('change', changed);
+        const network = NetInfo.addEventListener((state) => {
+          online = state.isConnected !== false && state.isInternetReachable !== false;
+          changed();
+        });
+        return () => { app.remove(); network(); };
+      },
+    });
+    return () => { valid = false; stop(); };
+  }, [assignment, receiptsOpened, receiptActive, busy]);
   useEffect(() => {
     receiptsRef.current = receipts;
   }, [receipts]);
@@ -2273,8 +2376,9 @@ function TeacherReceipts({
       <Button
         label={`查看收件：${item.title}`}
         disabled={busy}
-        onPress={() => void resource.refresh()}
+        onPress={() => { mutationRevision.current += 1; onOpenReceipts?.(); void resource.refresh(); }}
       />
+      {receiptsOpened && assignment ? <Copy>收件：{receiptActive ? assignmentSyncLabel(receiptSync) : '已暫停更新'}{receiptSync.updatedAt ? ` · 最後更新 ${formatTaipeiDateTime(receiptSync.updatedAt, { seconds: true })}` : ''}</Copy> : null}
       {error ? <Copy alert>{error}</Copy> : null}
       {!busy && !error && receipts?.length === 0 ? <Copy>還沒有收到繳交內容。</Copy> : null}
       <View style={{ display: busy || error || !receipts?.length ? 'none' : 'flex', gap: 14 }}>
@@ -2424,6 +2528,7 @@ function TeacherReceipts({
                       entry.platformAccountId === result.platformAccountId ? result : entry,
                     );
                   const nextList = latest.length ? latest : [result];
+                  mutationRevision.current += 1;
                   resource.commit(() => nextList, resource.version);
                   receiptsRef.current = nextList;
                   const matched = (result.teacherFeedback ?? '').trim() === feedback.trim();
