@@ -4,9 +4,12 @@ import { fireEvent, render, waitFor } from '@testing-library/react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import {
   personalImportSavedNotice,
+  emptyPersonalEventDraft,
   type PersonalImportRecord,
 } from '@campus/shared';
 import PersonalCalendarScreen from '../screens/PersonalCalendarScreen';
+import { shareICalContent } from '../services/ical';
+jest.mock('../services/ical', () => ({ shareICalContent: jest.fn(async () => undefined) }));
 import {
   appendPersonalImports,
   loadPersonalImports,
@@ -105,7 +108,9 @@ beforeEach(async () => {
   mockOpenReminderSettings.mockReset();
   await AsyncStorage.clear();
   jest.spyOn(Alert, 'alert').mockImplementation((_title, _message, buttons) => {
-    const confirm = buttons?.find((button) => button.style === 'destructive' || button.text === '刪除');
+    const confirm = buttons?.find(
+      (button) => button.style === 'destructive' || button.text === '刪除',
+    );
     confirm?.onPress?.();
   });
 });
@@ -118,7 +123,7 @@ async function waitUntilEditable(view: ReturnType<typeof render>) {
 }
 
 async function fillAndSave(title: string) {
-  const view = render(<PersonalCalendarScreen />);
+  const view = renderCalendar();
   await waitUntilEditable(view);
   fireEvent.press(view.getByRole('button', { name: '新增行程' }));
   await waitFor(() => expect(view.getByLabelText('標題')).toBeTruthy());
@@ -161,7 +166,7 @@ it('creates edits and deletes personal events on the public/platform scope', asy
 });
 
 it('keeps draft on validation failure and refuses destructive overwrite when load fails', async () => {
-  const view = render(<PersonalCalendarScreen />);
+  const view = renderCalendar();
   await waitUntilEditable(view);
   fireEvent.press(view.getByRole('button', { name: '新增行程' }));
   await waitFor(() => expect(view.getByLabelText('標題')).toBeTruthy());
@@ -174,7 +179,7 @@ it('keeps draft on validation failure and refuses destructive overwrite when loa
 
   const key = personalImportStorageKey(mockScope!);
   await AsyncStorage.setItem(key, '{damaged');
-  const broken = render(<PersonalCalendarScreen />);
+  const broken = renderCalendar();
   await waitFor(() => expect(broken.getByText(/無法讀取|稍後重試/)).toBeTruthy());
   expect(broken.getByRole('button', { name: '新增行程' }).props.accessibilityState?.disabled).toBe(
     true,
@@ -211,21 +216,19 @@ it('preserves imported provenance and isolates account/school switches', async (
   view.unmount();
 
   mockScope = { owner: 'nuni:pa_22222222-2222-4222-8222-222222222222', schoolId: 'pu' };
-  const other = render(<PersonalCalendarScreen />);
+  const other = renderCalendar();
   await waitFor(() => expect(other.getByText(/還沒有行程/)).toBeTruthy());
   other.unmount();
 
   mockScope = { owner: scope.owner, schoolId: 'ntu' };
-  const otherSchool = render(<PersonalCalendarScreen />);
+  const otherSchool = renderCalendar();
   await waitFor(() => expect(otherSchool.getByText(/還沒有行程/)).toBeTruthy());
   otherSchool.unmount();
 });
 
 it('wires import navigation without enabling the old Firebase calendar demo', async () => {
-  const view = render(<PersonalCalendarScreen />);
-  await waitFor(() =>
-    expect(view.getByRole('button', { name: '從截圖或檔案匯入' })).toBeTruthy(),
-  );
+  const view = renderCalendar();
+  await waitFor(() => expect(view.getByRole('button', { name: '從截圖或檔案匯入' })).toBeTruthy());
   fireEvent.press(view.getByRole('button', { name: '從截圖或檔案匯入' }));
   expect(mockNavigate).toHaveBeenCalledWith('PersonalImport', { kind: 'events' });
 });
@@ -264,7 +267,7 @@ it('preserves imported course metadata when only location is edited', async () =
     source: { type: 'paste', name: '手動新增', line: 1, rawText: '另一筆' },
   };
   await appendPersonalImports(scope, [imported, other]);
-  const view = render(<PersonalCalendarScreen />);
+  const view = renderCalendar();
   await waitUntilEditable(view);
   fireEvent.press(view.getByText('專題發表'));
   fireEvent.changeText(view.getByLabelText('地點（選填）'), '新教室');
@@ -327,4 +330,91 @@ it('deliberate reminder enable and refusal recovery leave saved events intact', 
   fireEvent.press(view.getByRole('button', { name: '提前 30 分' }));
   await waitFor(() => expect(view.getByText('injected reminder failure')).toBeTruthy());
   expect((await loadPersonalImports(scope)).records[0]?.title).toBe('提醒測試');
+});
+
+function renderCalendar() {
+  const view = render(<PersonalCalendarScreen />);
+  const today = emptyPersonalEventDraft().date;
+  const offset = (Number(today.slice(0, 4)) - 2026) * 12 + Number(today.slice(5, 7)) - 10;
+  for (let i = 0; i < Math.abs(offset); i += 1)
+    fireEvent.press(view.getByText(offset > 0 ? '上一月' : '下一月'));
+  fireEvent.press(view.getByText('列表'));
+  return view;
+}
+
+it('月格選日期看列表、切月清除選取並回到今天', async () => {
+  const view = await fillAndSave('合成安排');
+  fireEvent.press(view.getByText('月格'));
+  fireEvent.press(view.getByLabelText('2026-10-20'));
+  expect(view.getByText('2026-10-20 的行程')).toBeTruthy();
+  fireEvent.press(view.getAllByRole('button', { name: '合成安排' })[0]);
+  expect(view.getByDisplayValue('合成安排')).toBeTruthy();
+  fireEvent.press(view.getByText('取消'));
+  fireEvent.press(view.getByText('下一月'));
+  expect(view.getByText('2026-11')).toBeTruthy();
+  expect(view.queryByText('2026-10-20 的行程')).toBeNull();
+  fireEvent.press(view.getByText('上一月'));
+  expect(view.getByRole('button', { name: '合成安排' })).toBeTruthy();
+  fireEvent.press(view.getByText('回今天'));
+  expect(view.getByText(`${emptyPersonalEventDraft().date} 的行程`)).toBeTruthy();
+});
+
+it('選取單日後仍匯出所選整月，包含跨月活動並保留原始起訖', async () => {
+  const rows: PersonalImportRecord[] = [
+    {
+      id: 'cross',
+      kind: 'events',
+      title: '跨月合成',
+      schoolId: 'pu',
+      academicYear: '',
+      semester: '',
+      date: '2026-09-30',
+      endDate: '2026-10-02',
+      allDay: true,
+      batchId: 'test',
+      importedAt: '2026-09-01T00:00:00Z',
+      source: { type: 'paste', line: 1, rawText: '' },
+    },
+    {
+      id: 'inside',
+      kind: 'events',
+      title: '月內合成',
+      schoolId: 'pu',
+      academicYear: '',
+      semester: '',
+      date: '2026-10-20',
+      allDay: true,
+      batchId: 'test2',
+      importedAt: '2026-09-01T00:00:00Z',
+      source: { type: 'paste', line: 1, rawText: '' },
+    },
+    {
+      id: 'outside',
+      kind: 'events',
+      title: '其他月份',
+      schoolId: 'pu',
+      academicYear: '',
+      semester: '',
+      date: '2026-11-01',
+      allDay: true,
+      batchId: 'test3',
+      importedAt: '2026-09-01T00:00:00Z',
+      source: { type: 'paste', line: 1, rawText: '' },
+    },
+  ];
+  await appendPersonalImports(mockScope!, rows);
+  const view = renderCalendar();
+  await waitUntilEditable(view);
+  fireEvent.press(view.getByText('月格'));
+  fireEvent.press(view.getByLabelText('2026-10-20'));
+  jest.mocked(shareICalContent).mockClear();
+  fireEvent.press(view.getByText('匯出所選月份'));
+  await waitFor(() => expect(shareICalContent).toHaveBeenCalled());
+  const content = jest.mocked(shareICalContent).mock.calls[0][0];
+  expect(content.match(/BEGIN:VEVENT/g)).toHaveLength(2);
+  expect(content).toContain('SUMMARY:跨月合成');
+  expect(content).toContain('DTSTART;VALUE=DATE:20260930');
+  expect(content).toContain('DTEND;VALUE=DATE:20261002');
+  expect(content).toContain('SUMMARY:月內合成');
+  expect(content).not.toContain('SUMMARY:其他月份');
 });

@@ -16,6 +16,7 @@ import type {
 } from './types';
 
 export const PERSONAL_IMPORT_AI_MAX_TEXT = 8_000;
+export const PERSONAL_IMPORT_AI_MAX_SOURCE_TEXT = 40_000;
 export const PERSONAL_IMPORT_AI_MAX_ROWS = 80;
 export const PERSONAL_IMPORT_AI_REVIEW_CODE = 'ai-review-required';
 export type PersonalImportAiMode = 'text' | 'image';
@@ -25,13 +26,13 @@ export type PersonalImportAiResult = { rows: PersonalImportRow[]; issues: Import
 export function personalImportDocumentAiSource(
   document: PersonalImportDocument,
   selection: { selected: string[]; headers: Record<string, number> },
-  maxCharacters = PERSONAL_IMPORT_AI_MAX_TEXT,
+  maxCharacters = PERSONAL_IMPORT_AI_MAX_SOURCE_TEXT,
 ): { text: string; source: Pick<PersonalImportSource, 'type' | 'name'> } {
   const doc = validatePersonalImportDocument(document);
   if (
     !Number.isSafeInteger(maxCharacters) ||
     maxCharacters < 1 ||
-    maxCharacters > PERSONAL_IMPORT_AI_MAX_TEXT
+    maxCharacters > PERSONAL_IMPORT_AI_MAX_SOURCE_TEXT
   )
     throw new Error('AI 文字範圍設定不正確。');
   if (

@@ -22,8 +22,8 @@ function sortFeedback(rows: HomeFeedback[]): HomeFeedback[] {
   return rows
     .sort(
       (a, b) =>
-        (b.reviewedAt ? parseTaipeiInstant(b.reviewedAt) ?? 0 : 0) -
-        (a.reviewedAt ? parseTaipeiInstant(a.reviewedAt) ?? 0 : 0),
+        (b.reviewedAt ? (parseTaipeiInstant(b.reviewedAt) ?? 0) : 0) -
+        (a.reviewedAt ? (parseTaipeiInstant(a.reviewedAt) ?? 0) : 0),
     )
     .slice(0, FEEDBACK_LIMIT);
 }
@@ -129,7 +129,9 @@ export async function loadNuniHomeMaterials(
   for (let start = 0; start < studying.length; start += batchSize) {
     rows.push(
       ...(await Promise.all(
-        studying.slice(start, start + batchSize).map((course) => readCourseMaterials(classes, course)),
+        studying
+          .slice(start, start + batchSize)
+          .map((course) => readCourseMaterials(classes, course)),
       )),
     );
   }
@@ -139,6 +141,23 @@ export async function loadNuniHomeMaterials(
 export async function loadNuniHomeData(
   transport: NuniTransport,
   platformAccountId: string,
+): Promise<HomeData> {
+  return readNuniHomeData(transport, platformAccountId);
+}
+
+/** Homepage does not display materials; publish course navigation before pending work. */
+export async function loadNuniHomeSections(
+  transport: NuniTransport,
+  platformAccountId: string,
+  onCourses: (data: HomeData) => void,
+): Promise<HomeData> {
+  return readNuniHomeData(transport, platformAccountId, onCourses);
+}
+
+async function readNuniHomeData(
+  transport: NuniTransport,
+  platformAccountId: string,
+  onCourses?: (data: HomeData) => void,
 ): Promise<HomeData> {
   const classes = createNuniClasses(transport, platformAccountId);
   const memberships = await classes.list();
@@ -150,22 +169,42 @@ export async function loadNuniHomeData(
     unreadCount: 0,
     href: `/classroom/course/${encodeURIComponent(course.id)}`,
   }));
+  onCourses?.({ courses, tasks: [], unreadCount: 0 });
   const tasks: HomeTask[] = [];
+  let tasksError: string | null = null;
   const recentFeedback: HomeFeedback[] = [];
   const materialRows: MaterialRead[] = [];
-  // Bound requests when an account belongs to many courses. A failed course read
-  // of assignments or quizzes rejects the overview so an incomplete list never
-  // claims all work is done. Materials are isolated: a failed materials read
-  // must not hide pending work or published feedback.
+  // Bound requests and retain successful sources. An incomplete read carries
+  // an error so the overview cannot claim all work is done.
   const studying = courses.filter((course) => course.role === 'student');
   const batchSize = 4;
   for (let start = 0; start < studying.length; start += batchSize) {
     const batch = await Promise.all(
       studying.slice(start, start + batchSize).map(async (course) => {
         const [assignments, quizzes, materials] = await Promise.all([
-          classes.assignments(course.id),
-          classes.quizzes(course.id),
-          readCourseMaterials(classes, course),
+          classes.assignments(course.id).catch((error) => {
+            if (
+              error instanceof NuniError &&
+              (error.status === 401 ||
+                error.code === 'SESSION_CHANGED' ||
+                error.code === 'INVALID_RESPONSE')
+            )
+              throw error;
+            tasksError = '部分作業還沒讀到，請重新讀取；已讀到的項目仍可查看。';
+            return [];
+          }),
+          classes.quizzes(course.id).catch((error) => {
+            if (
+              error instanceof NuniError &&
+              (error.status === 401 ||
+                error.code === 'SESSION_CHANGED' ||
+                error.code === 'INVALID_RESPONSE')
+            )
+              throw error;
+            tasksError = '部分測驗還沒讀到，請重新讀取；已讀到的項目仍可查看。';
+            return [];
+          }),
+          onCourses ? Promise.resolve(emptyMaterialRead) : readCourseMaterials(classes, course),
         ]);
         const assignmentTasks: HomeTask[] = [];
         for (const assignment of assignments) {
@@ -242,6 +281,7 @@ export async function loadNuniHomeData(
   return {
     courses,
     tasks,
+    ...(tasksError ? { tasksError } : {}),
     ...loaded,
     recentFeedback: sortFeedback(recentFeedback),
     unreadCount: 0,

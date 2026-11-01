@@ -252,3 +252,14 @@ it('keeps a denied course from looking like an empty gradebook', () => {
   });
   expect(courseGradeFailure(new Error('offline'), { online: false }).status).toBe('offline');
 });
+
+it('does not borrow another source account for read markers', () => {
+  expect(gradeOwnerForSource('nuni', null, 'student-b')).toBe('');
+  expect(gradeOwnerForSource('school', 'student-a', null)).toBe('');
+  const item = { source: 'nuni' as const, courseId: 'synthetic-course', kind: 'quiz' as const,
+    id: 'synthetic-quiz', status: 'graded' as const, publishedAt: '2026-10-31T00:00:00Z' };
+  markPublishedGradeRead(gradeReadOwner('nuni', 'student-a'), item);
+  expect(isPublishedGradeUnread(gradeReadOwner('nuni', 'student-a'), item)).toBe(false);
+  expect(isPublishedGradeUnread(gradeReadOwner('nuni', 'student-b'), item)).toBe(true);
+  expect(isPublishedGradeUnread(gradeReadOwner('school', 'student-a'), item)).toBe(true);
+});

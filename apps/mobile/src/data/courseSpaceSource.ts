@@ -792,9 +792,11 @@ export async function getCourseGradebook(
   courseSpaceId: string,
 ): Promise<CourseGradebookData | null> {
   const db = getDb();
-  const groupSnap = await getDoc(doc(db, 'groups', courseSpaceId)).catch(() => null);
+  const groupSnap = await getDoc(doc(db, 'groups', courseSpaceId));
   if (!groupSnap?.exists()) {
     return null;
   }
-  return listCourseGradebook(db, courseSpaceId);
+  const uid = getAuthInstance().currentUser?.uid;
+  if (!uid) throw new Error('請先登入');
+  return listCourseGradebook(db, courseSpaceId, uid);
 }

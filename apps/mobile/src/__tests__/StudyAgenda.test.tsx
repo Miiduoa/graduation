@@ -122,7 +122,6 @@ it('identifies feedback from a previous submission instead of calling the revisi
   expect(view.getByText('已繳交 · 有較早版本的回饋')).toBeTruthy();
 });
 
-
 it('filters upcoming deadlines, overdue work, and teacher feedback without opening every course', () => {
   const now = Date.now();
   const view = render(
@@ -163,10 +162,13 @@ it('scopes partial counts and warnings to a selected course', () => {
   ] as NuniStudyAgenda['workspaces'];
   const view = render(
     <StudyAgenda
-      data={agenda([
-        task('a', { courseId: 'first' }),
-        task('b', { courseId: 'second', courseTitle: '網路通訊' }),
-      ], { workspaces, studiedCourseCount: 2, failedCourseIds: ['first'] })}
+      data={agenda(
+        [
+          task('a', { courseId: 'first' }),
+          task('b', { courseId: 'second', courseTitle: '網路通訊' }),
+        ],
+        { workspaces, studiedCourseCount: 2, failedCourseIds: ['first'] },
+      )}
       loading={false}
       error=""
       retry={jest.fn()}
@@ -196,7 +198,6 @@ it('distinguishes closed unanswered quizzes from unsubmitted assignments', () =>
   fireEvent.press(view.getByRole('button', { name: '已停止收件 1' }));
   expect(view.getByText('已結束 · 未作答')).toBeTruthy();
 });
-
 
 it('preserves the selected agenda filter when navigating away and returning', () => {
   const cache = new Map<string, unknown>();
@@ -232,4 +233,32 @@ it('does not call an overdue but still open quiz a submission', () => {
     />,
   );
   expect(view.getByText('參考期限已過 · 仍可作答')).toBeTruthy();
+});
+
+it('guides an empty account to join a course', () => {
+  const view = render(
+    <StudyAgenda
+      data={agenda([], { studiedCourseCount: 0 })}
+      loading={false}
+      error=""
+      retry={jest.fn()}
+      open={jest.fn()}
+    />,
+  );
+  expect(
+    view.getByText('還沒加入 nuni 課程。請到下方課程區輸入邀請碼，加入後就能看到作業與測驗。'),
+  ).toBeTruthy();
+});
+
+it('clears export selection while refreshing data and excludes confirmed submissions', () => {
+  const props = { data: agenda([task('one', { dueAt: '2026-11-02T00:30:00+08:00' })]), loading: false, error: '', retry: jest.fn(), open: jest.fn() };
+  const view = render(<StudyAgenda {...props} />);
+  fireEvent.press(view.getByRole('button', { name: '匯出未繳期限 ICS' }));
+  fireEvent.press(view.getByRole('checkbox'));
+  fireEvent.press(view.getByRole('button', { name: '預覽已選 1 項' }));
+  view.rerender(<StudyAgenda {...props} loading />);
+  expect(view.queryByRole('checkbox')).toBeNull();
+  view.rerender(<StudyAgenda {...props} />);
+  fireEvent.press(view.getByRole('button', { name: '匯出未繳期限 ICS' }));
+  expect(view.getByRole('button', { name: '預覽已選 0 項' }).props.accessibilityState.disabled).toBe(true);
 });

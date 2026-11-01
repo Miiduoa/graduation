@@ -13,11 +13,13 @@ tags:
     timeout: 90000
 
 # Keep the tap target clear of the development warning banner at the screen edge.
+# A cold iOS accessibility swipe can exceed 20s; allow subsequent swipes to run.
 - scrollUntilVisible:
     element:
       id: public-Map
     direction: DOWN
     centerElement: true
+    timeout: 60000
 - assertVisible:
     id: public-Map
 

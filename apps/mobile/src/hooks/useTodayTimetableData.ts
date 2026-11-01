@@ -2,7 +2,7 @@ import { useCallback, useMemo, useRef, useState } from 'react';
 import { AppState } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 import { buildPersonalToday, type PersonalImportRecord } from '@campus/shared';
-import { taipeiInstantOnClock, type TodayClass } from '@campus/shared/src/pickNextAction';
+import { type TodayClass } from '@campus/shared/src/pickNextAction';
 import { usePersonalImportScope } from '../state/personalImportScope';
 import { loadPersonalImports } from '../services/personalImports';
 import { loadPersonalTimetable, personalTimetableRecords } from '../services/personalTimetable';
@@ -45,7 +45,7 @@ export function useTodayTimetableData(now: Date) {
         setSnapshot({
           scope: scopeKey,
           status: 'ready',
-          records: [...personalTimetableRecords(timetable), ...ledger.records],
+          records: personalTimetableRecords(timetable, ledger.records),
         });
     } catch {
       if (run === generation.current && currentScope.current === scopeKey)
@@ -75,13 +75,7 @@ export function useTodayTimetableData(now: Date) {
   const classes: TodayClass[] = useMemo(
     () =>
       plan.today.flatMap((entry) => {
-        const startAt = taipeiInstantOnClock(now, entry.startTime);
-        let endAt = taipeiInstantOnClock(now, entry.endTime);
-        if (startAt === null || endAt === null) return [];
-        if (endAt <= startAt) {
-          const next = taipeiInstantOnClock(now, entry.endTime, 1);
-          if (next !== null) endAt = next;
-        }
+        const { startAt, endAt } = entry;
         return [
           {
             id: entry.row.id,

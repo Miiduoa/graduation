@@ -9,6 +9,7 @@ import {
   LOGIN_COOKIE,
   SESSION_COOKIE,
   boundedJson,
+  binaryResponse,
   fetchJson,
   openCookie,
   nuniEnabled,
@@ -640,4 +641,24 @@ describe('Nuni coursework contracts', () => {
       { body: '答案', idempotencyKey: 'retry-stable-key' },
     );
   });
+});
+
+describe('binary attachment responses', () => {
+  it.each(['ordinary.txt', '作業照片.pdf', 'quote"\\name\r\n.pdf', "a!b'c(d)*.pdf"])(
+    'serves unchanged bytes with a safe filename: %s',
+    async (name) => {
+      const bytes = new TextEncoder().encode('synthetic attachment');
+      for (const download of [false, true]) {
+        const result = binaryResponse(bytes, 'application/octet-stream', name, download);
+        expect(result.status).toBe(200);
+        expect(new Uint8Array(await result.arrayBuffer())).toEqual(bytes);
+        const disposition = result.headers.get('Content-Disposition')!;
+        expect(disposition).toMatch(download ? /^attachment;/ : /^inline;/);
+        expect(disposition).toMatch(/^[\x20-\x7e]+$/);
+        expect(disposition).toMatch(/filename="[^"\\]*"; filename\*=UTF-8''/);
+        expect(decodeURIComponent(disposition.split("filename*=UTF-8''")[1])).toBe(name);
+        if (name === 'ordinary.txt') expect(disposition).toContain('filename="ordinary.txt"');
+      }
+    },
+  );
 });

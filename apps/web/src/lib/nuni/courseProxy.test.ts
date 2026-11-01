@@ -168,12 +168,27 @@ describe('Nuni course proxy allowlist', () => {
     expect((await invoke('materials/page')).status).toBe(502);
   });
 
+  it('hydrates teacher submissions through the withdrawal filter even when uploads are disabled', async () => {
+    fetcher.mockImplementation(async (url: string) => {
+      if (url.endsWith('/sessions/current')) return response(principal);
+      if (url.endsWith('/submissions')) return response({ submissions: [submission] });
+      if (url.endsWith('/assignments')) return response({ assignments: [assignment] });
+      return response({ id, title: '課程', state: 'active', memberRole: 'owner-teacher' });
+    });
+    const result = await invoke(`assignments/${assignmentId}/submissions`);
+    expect(result.status).toBe(200);
+    expect(await result.json()).toEqual({ submissions: [{ ...submission, late: false, files: [] }] });
+    expect(fetcher).toHaveBeenCalledWith(
+      `https://api.nuni.tw/v1/auth/platform/class-workspaces/${id}/assignments/${assignmentId}/submissions`,
+      expect.objectContaining({ method: 'GET', cache: 'no-store', redirect: 'error' }),
+    );
+  });
+
   it.each([
     ['units', { units: [unit] }],
     ['materials', { materials: [material] }],
     ['quizzes', { quizzes: [quiz] }],
     [`quizzes/${quizId}/responses`, { responses: [answer] }],
-    [`assignments/${assignmentId}/submissions`, { submissions: [submission] }],
   ])('reads the exact %s endpoint using the sealed session', async (suffix, payload) => {
     reply(payload);
     const result = await invoke(suffix);

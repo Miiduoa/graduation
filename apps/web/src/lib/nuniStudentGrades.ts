@@ -80,6 +80,7 @@ export async function loadNuniStudentGrades(
       href: `/classroom/course/${encodeURIComponent(course.id)}`,
       archived: course.state !== 'active',
       status: 'ready' as const,
+      checkedAt: new Date().toISOString(),
       error: null,
       assignmentError: assignmentError ? GRADE_COPY.assignmentsFailed : null,
       quizError: quizError ? GRADE_COPY.quizzesFailed : null,

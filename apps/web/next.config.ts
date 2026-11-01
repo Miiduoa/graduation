@@ -97,6 +97,16 @@ const nextConfig: NextConfig = {
         ],
       },
       {
+        source: '/:section(classroom)/:path*',
+        headers: [{
+          key: 'Content-Security-Policy',
+          value: contentSecurityPolicy.replace(
+            "object-src 'none'",
+            "object-src blob:; frame-src 'self' blob:",
+          ),
+        }],
+      },
+      {
         source: '/documents/reader.html',
         headers: [
           {

@@ -98,6 +98,7 @@ function CourseContent({
   const generation = useRef(0);
   const pending = useRef(false);
   const [data, setData] = useState<CourseHubData | null>(null);
+  const [checkedAt, setCheckedAt] = useState<string | null>(null);
   const [loading, setLoading] = useState(Boolean(target && uid));
   const [error, setError] = useState('');
   const [linkError, setLinkError] = useState('');
@@ -115,13 +116,17 @@ function CourseContent({
     setLoading(true);
     setError('');
     setData(null);
+    setCheckedAt(null);
     setLinkError('');
     try {
       const result = await loadCourseHub(
         { uid, schoolId, target: currentTarget } satisfies CourseHubScope,
         () => isCurrent() && request === generation.current,
       );
-      if (isCurrent() && request === generation.current) setData(result);
+      if (isCurrent() && request === generation.current) {
+        setData(result);
+        setCheckedAt(new Date().toISOString());
+      }
     } catch (reason) {
       if (isCurrent() && request === generation.current)
         setError(reason instanceof Error ? reason.message : '目前無法讀取課程。');
@@ -216,6 +221,7 @@ function CourseContent({
       onBack={() => navigation?.goBack?.()}
       scrollRef={scrollRef}
     >
+      <Text style={body}>來源：{target?.source === 'tronclass' ? '校方正式（TronClass）' : 'nuni 課程'} · 本次讀取：{checkedAt ? new Date(checkedAt).toLocaleString('zh-TW', { timeZone: 'Asia/Taipei' }) : '尚未確認'}。進度按已確認的繳交紀錄計數；部分讀取失敗或紀錄待確認時，完整進度為未知。待評與未取得不當成零分。</Text>
       {!target || !uid ? (
         <AICard title={!uid ? '登入後查看課程' : '請先選擇課程'}>
           <View style={gap}>

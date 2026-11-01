@@ -90,6 +90,49 @@ describe('classroom session lifecycle', () => {
     expect(result.current.error).toBeNull();
   });
 
+  test.each([true, false])(
+    'teacher receipt cache recovers automatically with secret first: %s',
+    (secretFirst) => {
+      const { result } = renderHook(() => useClassroomSession(db, identity, user));
+      act(() => {
+        listeners[0].next(snapshot(session));
+        listeners[1].next(snapshot(membership));
+        if (secretFirst) listeners[2].next(snapshot(secret));
+        listeners[3].next(snapshot(undefined, true));
+        if (!secretFirst) listeners[2].next(snapshot(secret));
+      });
+      expect(result.current.qrToken).toBe(token);
+      expect(result.current.error).toContain('尚待伺服器確認');
+      act(() => listeners[3].next(snapshot()));
+      expect(result.current.qrToken).toBe(token);
+      expect(result.current.error).toBeNull();
+      act(() => {
+        listeners[3].next(snapshot(undefined, true));
+        listeners[2].next(snapshot(secret, true));
+      });
+      expect(result.current.qrToken).toBeNull();
+      act(() => {
+        listeners[3].next(snapshot());
+        listeners[2].next(snapshot(secret));
+      });
+      expect(result.current.qrToken).toBe(token);
+      expect(result.current.error).toBeNull();
+    },
+  );
+
+  test('terminal receipt errors remain separate from cache recovery', () => {
+    const { result } = renderHook(() => useClassroomSession(db, identity, user));
+    confirmTeacher();
+    act(() => listeners[3].error());
+    expect(result.current.qrToken).toBeNull();
+    act(() => {
+      listeners[3].next(snapshot());
+      listeners[2].next(snapshot(secret));
+    });
+    expect(result.current.qrToken).toBeNull();
+    expect(result.current.error).toContain('無法確認');
+  });
+
   test('the timer removes a displayed QR at the exact expiry boundary', () => {
     const { result } = renderHook(() => useClassroomSession(db, identity, user));
     confirmTeacher();

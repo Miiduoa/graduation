@@ -29,6 +29,7 @@ type Props = {
   workspaceId: string;
   context: string;
   isTeacher: boolean;
+  readOnly?: boolean;
   units: Array<{ id: string; title: string }>;
   beginRequest?: () => () => void;
   refreshVersion?: number;
@@ -62,7 +63,7 @@ export function ClassroomSessions(props: Props) {
   // this panel's private roster and any outstanding mutation callbacks.
   return (
     <ClassroomSessionScope
-      key={`${props.context}:${props.workspaceId}:${props.isTeacher}`}
+      key={`${props.context}:${props.workspaceId}:${props.isTeacher}:${props.readOnly}`}
       {...props}
     />
   );
@@ -72,6 +73,7 @@ function ClassroomSessionScope({
   workspaceId,
   context,
   isTeacher,
+  readOnly = false,
   units,
   beginRequest,
   refreshVersion = 0,
@@ -189,7 +191,7 @@ function ClassroomSessionScope({
 
   async function run(action: (send: Send) => Promise<void>, fallback: string) {
     const scope = requestScope();
-    if (!scope.current() || mutationPending.current || loading) return;
+    if (!scope.current() || mutationPending.current || loading || readOnly) return;
     mutationPending.current = true;
     setBusy(true);
     setError('');
@@ -238,7 +240,8 @@ function ClassroomSessionScope({
             更新簽到
           </Button>
           {loading ? <p role="status">正在讀取課堂簽到…</p> : null}
-          {isTeacher ? (
+          {readOnly ? <p className={styles.muted}>課程已封存，可以查看點名紀錄。</p> : null}
+          {isTeacher && !readOnly ? (
             <form
               className={styles.form}
               onSubmit={(event) => {
@@ -292,7 +295,7 @@ function ClassroomSessionScope({
                   {live.shortCode}
                 </p>
               ) : null}
-              {!isTeacher && !live.checkedInByMe ? (
+              {!isTeacher && !live.checkedInByMe && !readOnly ? (
                 <form
                   className={styles.form}
                   onSubmit={(event) => {
@@ -324,9 +327,9 @@ function ClassroomSessionScope({
                     簽到
                   </Button>
                 </form>
-              ) : !isTeacher ? (
+              ) : !isTeacher && live.checkedInByMe ? (
                 <p>你已簽到。這不會寫進正式出席系統。</p>
-              ) : (
+              ) : isTeacher && !readOnly ? (
                 <Button
                   type="button"
                   disabled={busy || loading}
@@ -347,12 +350,15 @@ function ClassroomSessionScope({
                 >
                   結束課堂
                 </Button>
-              )}
+              ) : null}
             </div>
           ) : !loading ? (
             <p className={styles.muted}>目前沒有進行中的課堂。</p>
           ) : null}
-          {!isTeacher && reviewSession?.state === 'closed' && !reviewSession.checkedInByMe ? (
+          {!isTeacher &&
+          !readOnly &&
+          reviewSession?.state === 'closed' &&
+          !reviewSession.checkedInByMe ? (
             <div className={styles.stack}>
               <p>課堂已結束：{reviewSession.title}</p>
               {reviewSession.makeupRequestState === 'pending' ? (
@@ -400,7 +406,8 @@ function ClassroomSessionScope({
                             {person.displayName}
                             {person.punctuality === 'makeup' ? ' · 補簽' : ''}
                           </span>
-                          {group === 'absent' &&
+                          {!readOnly &&
+                          group === 'absent' &&
                           reviewSession.state === 'closed' &&
                           person.makeupRequestState === 'pending' ? (
                             <div className={styles.actions}>

@@ -303,7 +303,7 @@ it('sends a current 401 back to account login without using legacy transport', a
   );
   await waitFor(() =>
     expect(replace).toHaveBeenCalledWith(
-      `/auth/account?returnUrl=${encodeURIComponent(`/auth/platform/class-workspace/${workspaceId}`)}`,
+      `/auth/account?returnUrl=${encodeURIComponent(`/classroom/course/${workspaceId}`)}`,
     ),
   );
   expect(fetcher.mock.calls[0][0]).toBe(base);
@@ -311,3 +311,66 @@ it('sends a current 401 back to account login without using legacy transport', a
     false,
   );
 });
+
+it.each([true, false])('keeps archived attendance read-only for teacher=%s', async (isTeacher) => {
+  fetcher.mockImplementation(async (input: RequestInfo | URL) => {
+    const url = String(input);
+    if (url.endsWith('/roster')) return ok({ present: [], absent: [], late: [] });
+    return ok({
+      sessions: [{ id: 'session-1', title: '封存課堂', state: 'open', checkedInByMe: false }],
+    });
+  });
+  render(
+    <ClassroomSessions
+      workspaceId={workspaceId}
+      context={context}
+      isTeacher={isTeacher}
+      readOnly
+      units={[]}
+    />,
+  );
+  await screen.findByText('封存課堂');
+  expect(screen.queryByRole('button', { name: '開始課堂' })).toBeNull();
+  expect(screen.queryByRole('button', { name: '結束課堂' })).toBeNull();
+  expect(screen.queryByRole('button', { name: '簽到' })).toBeNull();
+  expect(screen.queryByRole('button', { name: '請老師補簽' })).toBeNull();
+  expect(screen.queryByText('你已簽到。這不會寫進正式出席系統。')).toBeNull();
+});
+
+it.each([400, 503])(
+  'keeps check-in retryable without a success message after HTTP %s',
+  async (status) => {
+    let rejected = true;
+    fetcher.mockImplementation(async (path: string, init?: RequestInit) => {
+      if (path === base) return ok({ sessions: [session({ checkedInByMe: !rejected })] });
+      if (path.endsWith('/check-in') && init?.method === 'POST') {
+        return rejected ? ok({ error: 'CHECK_IN_FAILED' }, status) : ok({});
+      }
+      throw new Error(`Unexpected endpoint ${path}`);
+    });
+    render(
+      <ClassroomSessions
+        workspaceId={workspaceId}
+        context={context}
+        isTeacher={false}
+        units={[]}
+      />,
+    );
+    const codeInput = await screen.findByLabelText('簽到碼（若老師有提供）');
+    fireEvent.change(codeInput, { target: { value: 'ABCD12' } });
+    fireEvent.click(screen.getByRole('button', { name: '簽到' }));
+    expect((await screen.findByRole('alert')).textContent).toContain('簽到沒有成功');
+    expect(screen.queryByText('你已簽到。這不會寫進正式出席系統。')).toBeNull();
+    expect((codeInput as HTMLInputElement).value).toBe('ABCD12');
+    await waitFor(() =>
+      expect((screen.getByRole('button', { name: '簽到' }) as HTMLButtonElement).disabled).toBe(
+        false,
+      ),
+    );
+    rejected = false;
+    fireEvent.click(screen.getByRole('button', { name: '簽到' }));
+    await waitFor(() => expect(screen.queryByRole('button', { name: '簽到' })).toBeNull());
+    expect(screen.queryByRole('alert')).toBeNull();
+    expect(screen.getAllByText('你已簽到。這不會寫進正式出席系統。').length).toBeGreaterThan(0);
+  },
+);

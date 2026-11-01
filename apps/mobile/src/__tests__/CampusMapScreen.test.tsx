@@ -609,3 +609,17 @@ test('keeps a route starting-point marker visible when the start is filtered out
     script.includes('places') && script.includes('校園正門') && script.includes('學校發布的圖書館')
   )).toBe(true);
 });
+
+test('room deep links search only within the current school and clear after switching school', async () => {
+  mockParams = { query: '圖書館', schoolId: 'school-a' };
+  const view = await openMap();
+  expect(view.getByLabelText('搜尋校園地點').props.value).toBe('圖書館');
+  mockSchool = { id: 'school-b' };
+  view.rerender(<GoogleMapsLikeScreen />);
+  expect((await view.findByLabelText('搜尋校園地點')).props.value).toBe('');
+});
+test('a room link for another school cannot set the current map search', async () => {
+  mockParams = { query: '別校教室', schoolId: 'school-b' };
+  const view = await openMap();
+  expect(view.getByLabelText('搜尋校園地點').props.value).toBe('');
+});

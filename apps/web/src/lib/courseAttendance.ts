@@ -1,3 +1,4 @@
+import { attendanceReceiptTime, awaitAttendanceReceipt } from '@campus/shared/src/attendanceReliability';
 import {
   collection,
   doc,
@@ -239,12 +240,14 @@ export function startCourseAttendance(groupId: string, requestId: string) {
 export function endCourseAttendance(groupId: string, sessionId: string) {
   return call('endLiveSession', { groupId, sessionId });
 }
-export function joinCourseAttendance(groupId: string, sessionId: string, qrToken: string) {
+export async function joinCourseAttendance(groupId: string, sessionId: string, qrToken: string) {
   if (!qrToken.trim()) return Promise.reject(new Error('請輸入教師提供的簽到碼。'));
-  return call<{ success: boolean; checkedInAt: string; alreadyJoined: boolean }>(
+  const result = await awaitAttendanceReceipt(call<{ success: boolean; checkedInAt: string; alreadyJoined: boolean }>(
     'joinLiveSession',
     { groupId, sessionId, qrToken: qrToken.trim() },
-  );
+  ));
+  if (!attendanceReceiptTime(result.checkedInAt)) throw new Error('尚未取得有效收據時間');
+  return result;
 }
 
 async function requireInstructor(courseId: string) {

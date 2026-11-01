@@ -5,8 +5,9 @@ export const IMPORT_AI_DOWNLOAD_LABEL = '約 1.9 GB，建議使用 Wi-Fi';
 export const IMPORT_AI_ORT_VERSION = '1.31.0-dev.20260914-8d85527a0';
 export const IMPORT_AI_CACHE_NAME = 'campus-personal-import-ai-v1';
 export const IMPORT_AI_WASM_ROOT = `/ai/onnxruntime/${IMPORT_AI_ORT_VERSION}/`;
-export const IMPORT_AI_MAX_OUTPUT_TOKENS = 4096;
-export const IMPORT_AI_MAX_INPUT_TOKENS = 8192;
+// Bounded segments keep the attention cache within a smaller device memory budget.
+export const IMPORT_AI_MAX_OUTPUT_TOKENS = 2048;
+export const IMPORT_AI_MAX_INPUT_TOKENS = 4096;
 export const IMPORT_AI_MAX_IMAGE_BYTES = 10 * 1024 * 1024;
 
 export type PersonalImportAiWorkerRequest = {
@@ -14,12 +15,24 @@ export type PersonalImportAiWorkerRequest = {
   id: number;
   prompt: string;
   image?: File;
+  /** Reuse loaded weights for the next segment; the caller terminates the worker when done. */
+  keepAlive?: boolean;
 };
 
+export type PersonalImportAiWorkerErrorCode =
+  | 'unsupported'
+  | 'input_limit'
+  | 'output_limit'
+  | 'memory'
+  | 'download'
+  | 'runtime'
+  | 'invalid_response'
+  | 'busy';
+
 export type PersonalImportAiWorkerResponse =
-  | { type: 'progress'; id: number; message: string }
+  | { type: 'progress'; id: number; message: string; phase?: 'loading' | 'generating' }
   | { type: 'result'; id: number; raw: string }
-  | { type: 'error'; id: number; message: string };
+  | { type: 'error'; id: number; message: string; code?: PersonalImportAiWorkerErrorCode };
 
 const modelAssetNames = new Set([
   'config.json',

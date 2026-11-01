@@ -465,6 +465,9 @@ async function fetchDocumentAtPath<T extends { id: string }>(
     const ref = docFromSegments(db, pathSegments);
     const docSnap = await (fromServer ? getDocFromServer(ref) : getDoc(ref));
 
+    if (fromServer && (docSnap.metadata?.fromCache || docSnap.metadata?.hasPendingWrites)) {
+      throw new Error('伺服器尚未確認資料，請重新讀取。');
+    }
     if (!docSnap.exists()) {
       return null;
     }
@@ -1547,12 +1550,15 @@ export const firebaseSource: DataSource = {
     let totalCredits = 0;
 
     for (const grade of grades) {
+      if (!Number.isFinite(grade.gradePoints) || grade.gradePoints == null ||
+          !Number.isFinite(grade.credits) || grade.credits <= 0) continue;
       totalPoints += grade.gradePoints * grade.credits;
       totalCredits += grade.credits;
     }
 
+    if (totalCredits <= 0) return null;
     return {
-      gpa: totalCredits > 0 ? totalPoints / totalCredits : 0,
+      gpa: totalPoints / totalCredits,
       totalCredits,
       totalPoints,
     };
@@ -2056,6 +2062,12 @@ export const firebaseSource: DataSource = {
       throw new Error('登入身分已變更，請重新開啟課程。');
     }
 
+    const { prepareAssignmentReminderSubmission } = require('../services/campusAssignmentReminders') as typeof import('../services/campusAssignmentReminders');
+    let reminderWarning = await prepareAssignmentReminderSubmission(userId, () => resolveUserSchoolId(userId))
+      .catch(() => '提醒核對暫時失敗，提醒仍可能響鈴。請稍後到校園助理的舊版作業提醒管理重試。');
+    if (getAuthInstance().currentUser?.uid !== userId)
+      throw new Error('登入身分已變更，請重新開啟課程。');
+
     const db = getDb();
     const assignmentPath = buildGroupCollectionPath(groupId, 'assignments', assignmentId);
     const submissionPath = buildGroupCollectionPath(
@@ -2123,7 +2135,11 @@ export const firebaseSource: DataSource = {
       || parseTaipeiInstant(receipt.submittedAt) === null) {
       throw new Error('繳交結果尚未確認，請重新讀取紀錄，內容仍會保留。');
     }
-    return receipt;
+    const { reconcileSubmittedAssignmentReceipt } = require('../services/submittedAssignmentReminders') as typeof import('../services/submittedAssignmentReminders');
+    await reconcileSubmittedAssignmentReceipt(receipt).catch(() => {
+      reminderWarning = '提醒取消尚未確認，仍可能響鈴。請稍後到校園助理的舊版作業提醒管理重試。';
+    });
+    return { ...receipt, reminderWarning };
   },
 
   async gradeSubmission(

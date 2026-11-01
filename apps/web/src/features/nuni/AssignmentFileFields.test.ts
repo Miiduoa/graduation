@@ -147,3 +147,24 @@ describe('assignmentFileHref', () => {
     expect(assignmentFileHref(fileMeta, true)).toContain('download=1');
   });
 });
+
+it('resumes only unfinished uploads with the original intents and prepared files', async () => {
+  const operation: import('./AssignmentFileFields').AssignmentFileOperation = {};
+  const createAssignmentFileIntents = vi.fn(async () => [
+    { id: 'first', uploadPath: 'first', contentType: 'application/pdf' },
+    { id: 'second', uploadPath: 'second', contentType: 'application/pdf' },
+  ]);
+  let failed = false;
+  const uploadAssignmentFile = vi.fn(async (path: string) => {
+    if (path === 'second' && !failed) { failed = true; throw new TypeError('upload interrupted'); }
+  });
+  const submitFiles = vi.fn(async () => ({}));
+  const classes = { createAssignmentFileIntents, uploadAssignmentFile, submitFiles } as never;
+  const files = collectLocalFiles([], [file('a.pdf', 'application/pdf'), file('b.pdf', 'application/pdf')]);
+  await expect(uploadAndSubmitFiles(classes, 'workspace', 'assignment', 'original', files, 'key', undefined, operation)).rejects.toThrow('upload interrupted');
+  expect(submitFiles).not.toHaveBeenCalled();
+  await uploadAndSubmitFiles(classes, 'workspace', 'assignment', 'changed', [], 'key', undefined, operation);
+  expect(createAssignmentFileIntents).toHaveBeenCalledTimes(1);
+  expect(uploadAssignmentFile.mock.calls.map(([path]) => path)).toEqual(['first', 'second', 'second']);
+  expect(submitFiles).toHaveBeenCalledWith('workspace', 'assignment', { body: 'original', fileIds: ['first', 'second'], idempotencyKey: 'key' });
+});

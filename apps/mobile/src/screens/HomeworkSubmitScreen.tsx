@@ -37,6 +37,7 @@ type RouteParams = {
   dueAt?: string;
   description?: string;
   scrollToSubmit?: boolean;
+  fromReminder?: boolean;
 };
 
 type RouteProps = {
@@ -150,8 +151,14 @@ function HomeworkSubmitContent({ route, uid, scopeKey, activeScope }: RouteProps
       ]);
       if (!current()) return;
       if (usesDemoData()) throw new Error(DEMO_SUBMISSION_MESSAGE);
-      if (!assignment || assignment.id !== hwId || assignment.groupId !== courseId)
+      if (!assignment || assignment.id !== hwId || assignment.groupId !== courseId) {
+        if (params.fromReminder) {
+          Alert.alert('無法開啟作業', '作業已移除，或你目前沒有這門課的權限。');
+          safeNavigate(navigation, 'LearnHome');
+          return;
+        }
         throw new Error('找不到這份作業，或你尚未加入這門課。');
+      }
       if (submission && !matchesReceipt(submission))
         throw new Error('繳交紀錄與這份作業不符，請重新讀取確認。');
       const status = asText(assignment.status);
@@ -178,11 +185,17 @@ function HomeworkSubmitContent({ route, uid, scopeKey, activeScope }: RouteProps
       // Keep local edits, including an intentionally empty answer, when refreshing a draft.
       if (already || (serverDraft && !answerEdited.current)) setAnswer(asText(submission?.content));
     } catch (e) {
-      if (current()) setError(String((e as Error)?.message ?? e));
+      if (current()) {
+        const message = String((e as Error)?.message ?? e);
+        if (params.fromReminder && /permission|denied|權限|尚未加入/i.test(message)) {
+          Alert.alert('無法開啟作業', '你目前沒有這份作業的權限，請從課程頁重新確認。');
+          safeNavigate(navigation, 'LearnHome');
+        } else setError(message);
+      }
     } finally {
       if (current()) setLoading(false);
     }
-  }, [courseId, ds, hwId, isCurrent, matchesReceipt, uid]);
+  }, [courseId, ds, hwId, isCurrent, matchesReceipt, navigation, params.fromReminder, uid]);
 
   const fileSubmit =
     process.env.EXPO_PUBLIC_ASSIGNMENT_FILE_SUBMIT_ENABLED === 'true';
@@ -278,7 +291,10 @@ function HomeworkSubmitContent({ route, uid, scopeKey, activeScope }: RouteProps
       setAnswer(receipt.content);
       setGrade(publishedAssignmentGrade(receipt as unknown as Record<string, unknown>));
       onAssignmentSubmitted({ uid, assignmentId: hwId });
-      Alert.alert('已繳交', '伺服器已確認收到這份作業。', [
+      Alert.alert('已繳交', ['伺服器已確認收到這份作業。', receipt.reminderWarning].filter(Boolean).join('\n\n'), [
+        ...(receipt.reminderWarning ? [{ text: '管理提醒／稍後重試', onPress: () => {
+          if (current()) safeNavigate(navigation, 'CampusAssistant');
+        } }] : []),
         { text: '返回', onPress: () => { if (current()) navigation.goBack(); } },
       ]);
     } catch (e) {
@@ -361,6 +377,9 @@ function HomeworkSubmitContent({ route, uid, scopeKey, activeScope }: RouteProps
         ) : error ? (
           <View style={{ marginTop: 16, backgroundColor: theme.colors.surface, borderRadius: 12, padding: 16 }}>
             <Text style={{ color: theme.colors.danger, lineHeight: 22 }}>{error}</Text>
+            <Pressable accessibilityRole="button" onPress={() => safeNavigate(navigation, 'LearnHome')}>
+              <Text style={{ color: theme.colors.accent, marginTop: 12 }}>返回課程</Text>
+            </Pressable>
             <Pressable
               onPress={() => void load()}
               style={{ marginTop: 12, alignItems: 'center', padding: 12 }}
