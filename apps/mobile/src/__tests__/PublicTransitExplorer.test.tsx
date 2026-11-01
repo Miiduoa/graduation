@@ -422,6 +422,122 @@ test('list official-site openings share the busy lock and retry the same URL aft
   }
 });
 
+test.each([
+  ['city', 'resolved'], ['city', 'rejected'],
+  ['search', 'resolved'], ['search', 'rejected'],
+] as const)('a late %s scope link %s cannot change a newer opening or retry', async (scope, outcome) => {
+  const previous = deferred<void>();
+  const current = deferred<void>();
+  const openURL = jest.spyOn(Linking, 'openURL')
+    .mockReturnValueOnce(previous.promise).mockReturnValueOnce(current.promise).mockResolvedValue(undefined);
+  const view = render(<PublicTransitExplorer schoolId="pu" />);
+  try {
+    fireEvent.press(view.getByText('臺中公車官方網站'));
+    if (scope === 'city') {
+      fireEvent.press(view.getByText('查詢縣市：臺中市'));
+      fireEvent.press(view.getByLabelText('選擇臺北市'));
+    } else {
+      fireEvent.changeText(view.getByLabelText('搜尋公車站名'), '清華大學');
+      await act(async () => fireEvent.press(view.getByText('搜尋官方站牌')));
+    }
+    expect(view.queryByText('正在開啟連結…')).toBeNull();
+    const label = scope === 'city' ? '公路客運官方網站' : '臺中公車官方網站';
+    const url = scope === 'city' ? PUBLIC_BUS_OFFICIAL_FALLBACK : TAICHUNG_BUS_OFFICIAL;
+    fireEvent.press(view.getByText(label));
+    expect(openURL).toHaveBeenCalledTimes(2);
+    expect(openURL).toHaveBeenLastCalledWith(url);
+    await act(async () => {
+      if (outcome === 'resolved') previous.resolve();
+      else previous.reject(new Error('previous browser failed'));
+    });
+    expect(view.getByText('正在開啟連結…')).toBeTruthy();
+    expect(view.queryByText('再試開啟連結')).toBeNull();
+    fireEvent.press(view.getByText(label));
+    expect(openURL).toHaveBeenCalledTimes(2);
+    await act(async () => current.reject(new Error('current browser failed')));
+    expect(view.queryByText('正在開啟連結…')).toBeNull();
+    await act(async () => fireEvent.press(view.getByText('再試開啟連結')));
+    expect(openURL).toHaveBeenCalledTimes(3);
+    expect(openURL).toHaveBeenLastCalledWith(url);
+    expect(view.queryByText('再試開啟連結')).toBeNull();
+  } finally {
+    view.unmount();
+    openURL.mockRestore();
+  }
+});
+
+test.each(['city', 'radius', 'nearby'] as const)('%s reset discards a pending list link failure without leaving a retry', async (scope) => {
+  const opening = deferred<void>();
+  const openURL = jest.spyOn(Linking, 'openURL').mockReturnValueOnce(opening.promise).mockResolvedValue(undefined);
+  jest.mocked(Location.requestForegroundPermissionsAsync).mockResolvedValueOnce({
+    status: 'denied',
+  } as Location.LocationPermissionResponse);
+  const view = render(<PublicTransitExplorer schoolId="pu" />);
+  try {
+    fireEvent.press(view.getByText('臺中公車官方網站'));
+    if (scope === 'city') {
+      fireEvent.press(view.getByText('查詢縣市：臺中市'));
+      fireEvent.press(view.getByLabelText('選擇臺北市'));
+    } else if (scope === 'radius') {
+      fireEvent.press(view.getByText('1 公里'));
+    } else {
+      await act(async () => fireEvent.press(view.getByText('用我的位置找附近站牌')));
+    }
+    expect(view.queryByText('正在開啟連結…')).toBeNull();
+    await act(async () => opening.reject(new Error('previous browser failed')));
+    expect(view.queryByText('再試開啟連結')).toBeNull();
+    expect(view.queryByText(/無法開啟連結/)).toBeNull();
+    await act(async () => fireEvent.press(view.getByText(scope === 'city' ? '公路客運官方網站' : '臺中公車官方網站')));
+    expect(openURL).toHaveBeenCalledTimes(2);
+  } finally {
+    view.unmount();
+    openURL.mockRestore();
+  }
+});
+
+test('a previous city failure cannot replace the current city retry URL', async () => {
+  const previous = deferred<void>();
+  const current = deferred<void>();
+  const openURL = jest.spyOn(Linking, 'openURL')
+    .mockReturnValueOnce(previous.promise).mockReturnValueOnce(current.promise).mockResolvedValue(undefined);
+  const view = render(<PublicTransitExplorer schoolId="pu" />);
+  try {
+    fireEvent.press(view.getByText('臺中公車官方網站'));
+    fireEvent.press(view.getByText('查詢縣市：臺中市'));
+    fireEvent.press(view.getByLabelText('選擇臺北市'));
+    fireEvent.press(view.getByText('公路客運官方網站'));
+    await act(async () => current.reject(new Error('current browser failed')));
+    expect(view.getByText('再試開啟連結')).toBeTruthy();
+    await act(async () => previous.reject(new Error('previous browser failed')));
+    await act(async () => fireEvent.press(view.getByText('再試開啟連結')));
+    expect(openURL).toHaveBeenCalledTimes(3);
+    expect(openURL).toHaveBeenLastCalledWith(PUBLIC_BUS_OFFICIAL_FALLBACK);
+    expect(view.queryByText('再試開啟連結')).toBeNull();
+  } finally {
+    view.unmount();
+    openURL.mockRestore();
+  }
+});
+
+test('switching the keyed school ignores a previous list opening completion', async () => {
+  const opening = deferred<void>();
+  const openURL = jest.spyOn(Linking, 'openURL').mockReturnValueOnce(opening.promise).mockResolvedValue(undefined);
+  const view = render(<View><PublicTransitExplorer key="pu" schoolId="pu" /></View>);
+  try {
+    fireEvent.press(view.getByText('臺中公車官方網站'));
+    view.rerender(<View><PublicTransitExplorer key="nthu" schoolId="nthu" /></View>);
+    await act(async () => opening.reject(new Error('previous browser failed')));
+    expect(view.getByText('查詢縣市：新竹市')).toBeTruthy();
+    expect(view.queryByText('正在開啟連結…')).toBeNull();
+    expect(view.queryByText('再試開啟連結')).toBeNull();
+    await act(async () => fireEvent.press(view.getByText('公路客運官方網站')));
+    expect(openURL).toHaveBeenLastCalledWith(PUBLIC_BUS_OFFICIAL_FALLBACK);
+  } finally {
+    view.unmount();
+    openURL.mockRestore();
+  }
+});
+
 test('web screen-reader focus helper skips missing focus APIs without throwing', () => {
   const platform = require('react-native').Platform as { OS: string };
   const previous = platform.OS;
