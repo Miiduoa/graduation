@@ -1,0 +1,241 @@
+.task {
+  width: 100%;
+  max-width: 48rem;
+  min-width: 0;
+  margin-inline: auto;
+  color: var(--text);
+  overflow-wrap: anywhere;
+  line-height: 1.6;
+}
+
+.task *,
+.task *::before,
+.task *::after {
+  box-sizing: border-box;
+}
+
+.header h2,
+.preview h3,
+.route h3,
+.record h3 {
+  margin: 0 0 0.6rem;
+  line-height: 1.4;
+}
+
+.header p,
+.muted,
+.inputMeta {
+  color: var(--muted);
+}
+
+.composer,
+.preview,
+.route {
+  min-width: 0;
+  margin-block: 1.25rem;
+  padding: clamp(1rem, 3vw, 1.5rem);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+}
+
+.preview {
+  background: var(--panel);
+}
+
+.composer > label {
+  display: block;
+  margin-bottom: 0.5rem;
+  font-weight: 650;
+}
+
+.composer textarea {
+  display: block;
+  width: 100%;
+  max-width: 100%;
+  min-height: 7rem;
+  resize: vertical;
+  padding: 0.75rem;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  color: var(--text);
+  background: var(--surface);
+  font: inherit;
+  line-height: 1.6;
+}
+
+.inputMeta,
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem 1rem;
+  margin-block: 0.75rem;
+}
+
+.inputMeta {
+  justify-content: space-between;
+}
+
+.inputMeta p {
+  flex: 1 1 16rem;
+  margin: 0;
+}
+
+.facts {
+  margin: 1rem 0;
+}
+
+.facts > div {
+  display: grid;
+  grid-template-columns: minmax(5rem, 1fr) minmax(0, 3fr);
+  gap: 0.4rem 1rem;
+  padding-block: 0.6rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.facts dt {
+  color: var(--muted);
+}
+
+.facts dd {
+  min-width: 0;
+  margin: 0;
+  font-weight: 600;
+}
+
+.query {
+  white-space: pre-wrap;
+}
+
+.places {
+  border-block: 1px solid var(--border-strong);
+  margin-block: 1rem;
+}
+
+.places summary {
+  min-height: 44px;
+  padding-block: 0.75rem;
+  cursor: pointer;
+  font-weight: 600;
+}
+
+.places ul {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 15rem), 1fr));
+  gap: 1rem;
+  margin: 0 0 1rem;
+  padding-left: 1.25rem;
+}
+
+.places li {
+  min-width: 0;
+}
+
+.places span {
+  display: block;
+  color: var(--muted);
+}
+
+.consent {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.75rem;
+  min-height: 44px;
+  margin-block: 1rem;
+  padding-block: 0.5rem;
+  cursor: pointer;
+}
+
+.consent input {
+  flex: 0 0 auto;
+  width: 1.25rem;
+  height: 1.25rem;
+  margin-top: 0.2rem;
+  accent-color: var(--brand);
+}
+
+.primary,
+.secondary,
+.mapLink {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 44px;
+  max-width: 100%;
+  padding: 0.7rem 1rem;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  font: inherit;
+  font-weight: 600;
+  line-height: 1.5;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  text-align: center;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.task .primary {
+  background: var(--brand);
+  color: var(--on-brand);
+  border-color: var(--brand);
+}
+
+.secondary {
+  background: var(--surface);
+  color: var(--text);
+}
+
+.task button:disabled {
+  cursor: default;
+  opacity: 0.55;
+}
+
+.task :is(button, a, input, textarea, summary):focus-visible,
+.preview h3:focus-visible {
+  outline: 3px solid var(--focus-ring);
+  outline-offset: 3px;
+}
+
+.error,
+.notice {
+  margin-block: 1rem;
+  padding: 1rem;
+  border-left: 3px solid var(--border-strong);
+  background: var(--panel);
+}
+
+.error {
+  border-left-color: var(--danger);
+  color: var(--danger);
+}
+
+.error p,
+.record li {
+  margin-block: 0.4rem;
+}
+
+.record {
+  margin-block: 1.5rem;
+}
+
+.record ol {
+  padding-left: 1.5rem;
+  color: var(--muted);
+}
+
+.task .mapLink {
+  color: var(--text);
+  background: var(--surface);
+}
+
+@media (max-width: 480px) {
+  .facts > div {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .actions > * {
+    width: 100%;
+  }
+}

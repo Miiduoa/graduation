@@ -69,26 +69,29 @@ test('presentation is bounded to the same three-result budget as the executor', 
   expect(view.queryByLabelText('結果3查詢結果')).toBeNull();
 });
 
-test('assistant retains the structured receipts and labels the model/tool division honestly', async () => {
+test('stored-data mode retains structured receipts and identifies read-only tools', async () => {
   jest.mocked(askCampusAssistant).mockResolvedValueOnce({
     source: 'device', tool: 'local-agent', hasActions: false,
     content: 'aggregate fallback not duplicated in the UI', localReads: results,
   });
   const view = render(<CampusAssistantScreen />);
+  fireEvent.press(view.getByText('已存資料'));
   fireEvent.changeText(view.getByLabelText('詢問校園助理'), '那隔天呢？');
   await act(async () => fireEvent.press(view.getByText('送出問題')));
   expect(view.getByText('手機工具查詢')).toBeTruthy();
   expect(view.getByText('第 2–3 節｜資料庫')).toBeTruthy();
-  expect(view.getByText(/手機模型理解需求/)).toBeTruthy();
+  expect(view.getByText('已存資料工具 · 僅執行唯讀查詢')).toBeTruthy();
+  expect(askCampusAssistant).toHaveBeenCalledWith(expect.objectContaining({ mode: 'device', onDevicePolicy: 'tools-only' }));
   expect(view.queryByText('aggregate fallback not duplicated in the UI')).toBeNull();
 });
 
-test('account switching drops model-selected receipts along with the old conversation', async () => {
+test('account switching drops stored-data receipts along with the old conversation', async () => {
   jest.mocked(askCampusAssistant).mockResolvedValueOnce({
     source: 'device', tool: 'local-agent', hasActions: false,
     content: 'A private timetable', localReads: results,
   });
   const view = render(<CampusAssistantScreen />);
+  fireEvent.press(view.getByText('已存資料'));
   fireEvent.changeText(view.getByLabelText('詢問校園助理'), '那隔天呢？');
   await act(async () => fireEvent.press(view.getByText('送出問題')));
   expect(view.getByText('第 2–3 節｜資料庫')).toBeTruthy();

@@ -6,14 +6,15 @@ import {
 let mockUid: string | null = 'A';
 let mockFake = false;
 const mockCallable = jest.fn();
+const mockEngineAccess = jest.fn();
 jest.mock('firebase/functions', () => ({ httpsCallable: jest.fn(() => mockCallable) }));
 jest.mock('../../firebase', () => ({
   getAuthInstance: () => ({ currentUser: mockUid ? { uid: mockUid } : null }),
   getFunctionsInstance: () => ({}),
   isFirebaseMockMode: () => mockFake,
 }));
-jest.mock('../../services/localLLMInference', () => ({
-  localLLM: {
+jest.mock('../../services/localLLMInference', () => {
+  const localLLM = {
     getRuntimeAvailability: jest.fn(() => ({ available: true })),
     getSavedModelId: jest.fn(async () => null),
     isModelDownloaded: jest.fn(async () => true),
@@ -21,9 +22,15 @@ jest.mock('../../services/localLLMInference', () => ({
     getState: jest.fn(() => ({ status: 'ready', modelId: 'qwen2.5-0.5b' })),
     loadModel: jest.fn(async () => true),
     generate: jest.fn(async () => ({ content: ' 已依照本機資訊整理建議 ', tokensGenerated: 15 })),
-  },
-  getDefaultLocalLlmModelId: () => 'qwen2.5-0.5b',
-}));
+  };
+  return {
+    get localLLM() {
+      mockEngineAccess();
+      return localLLM;
+    },
+    getDefaultLocalLlmModelId: () => 'qwen2.5-0.5b',
+  };
+});
 jest.mock('../../services/onDeviceSchoolContext', () => ({
   collectOnDeviceSchoolContext: jest.fn(async ({ schoolId }: { schoolId: string }) => ({
     checkedAt: new Date().toISOString(),
@@ -55,67 +62,105 @@ beforeEach(() => {
     data: { content: ' 有新公告 ', run: { status: 'completed' }, actions: [] },
   });
 });
-test('uses the verified callable contract and returns only display content and proposal presence', async () => {
+function expectNoInferenceOrCloud() {
+  expect(mockEngineAccess).not.toHaveBeenCalled();
+  for (const method of Object.values(localLLM)) expect(method).not.toHaveBeenCalled();
+  expect(httpsCallable).not.toHaveBeenCalled();
+  expect(mockCallable).not.toHaveBeenCalled();
+}
+
+test('closes legacy campus chat before creating a callable or decoding proposals', async () => {
+  const { collectOnDeviceSchoolContext } = require('../../services/onDeviceSchoolContext');
   mockCallable.mockResolvedValue({
-    data: { content: ' 草稿 ', run: { status: 'blocked' }, actions: [{ tool: 'write' }] },
+    data: { content: '已完成', run: { status: 'completed' }, actions: [{ tool: 'write' }] },
   });
-  await expect(askCampusAssistant(input())).resolves.toEqual({ content: '草稿', hasActions: true, source: 'campus' });
-  expect(httpsCallable).toHaveBeenCalledTimes(1);
-  expect(httpsCallable).toHaveBeenCalledWith({}, 'askCampusAssistant');
-  expect(mockCallable).toHaveBeenCalledWith({
-    messages: [{ role: 'user', content: '查公告' }],
-    context: {
-      schoolId: 'pu',
-      screen: 'campus-assistant',
-      locale: 'zh-TW',
-      timezone: 'Asia/Taipei',
-    },
+  await expect(askCampusAssistant(input())).rejects.toMatchObject({
+    name: 'CampusAssistantConsentError', code: 'cloud-consent-required',
   });
+  expect(collectOnDeviceSchoolContext).not.toHaveBeenCalled();
+  expectNoInferenceOrCloud();
 });
-test('forwards selected school name without treating browsing as authorization', async () => {
-  await askCampusAssistant({ ...input(), schoolName: '靜宜大學' });
-  expect(mockCallable).toHaveBeenCalledWith({
-    messages: [{ role: 'user', content: '查公告' }],
-    context: {
-      schoolId: 'pu',
-      schoolName: '靜宜大學',
-      screen: 'campus-assistant',
-      locale: 'zh-TW',
-      timezone: 'Asia/Taipei',
-    },
+
+test('legacy campus mode refuses before reading message history or private snapshots', async () => {
+  const { collectOnDeviceSchoolContext } = require('../../services/onDeviceSchoolContext');
+  const readPrivateInput = jest.fn(() => { throw new Error('Private input must not be read'); });
+  const args = input();
+  Object.defineProperties(args, {
+    messages: { get: readPrivateInput },
+    schoolName: { get: readPrivateInput },
+    senseSnapshot: { get: readPrivateInput },
   });
+  await expect(askCampusAssistant(args)).rejects.toMatchObject({
+    name: 'CampusAssistantConsentError', code: 'cloud-consent-required',
+  });
+  expect(readPrivateInput).not.toHaveBeenCalled();
+  expect(collectOnDeviceSchoolContext).not.toHaveBeenCalled();
+  expectNoInferenceOrCloud();
 });
-test.each([
-  {},
-  { content: 'fallback', run: { status: 'failed' } },
-  { content: ' ', run: { status: 'completed' } },
-  { content: 7, run: { status: 'completed' } },
-  { content: 'error', error: 'oops', run: { status: 'completed' } },
-])('rejects malformed or failed response %p', async (data) => {
-  mockCallable.mockResolvedValue({ data });
-  await expect(askCampusAssistant(input())).rejects.toThrow();
-});
-test.each(['uid', 'fake', 'scope'])('does not call the server for invalid %s', async (kind) => {
+
+test.each(['uid', 'guest', 'fake', 'scope'])('legacy campus mode stays closed for %s', async (kind) => {
   const args = input();
   if (kind === 'uid') mockUid = 'B';
+  if (kind === 'guest') { mockUid = null; args.scope.uid = ''; }
   if (kind === 'fake') mockFake = true;
   if (kind === 'scope') args.isCurrent = () => false;
-  await expect(askCampusAssistant(args)).rejects.toThrow();
-  expect(mockCallable).not.toHaveBeenCalled();
+  await expect(askCampusAssistant(args)).rejects.toMatchObject({ code: 'cloud-consent-required' });
+  expectNoInferenceOrCloud();
 });
-test.each(['uid', 'scope'])('rejects a completed result after %s changes', async (kind) => {
+
+test('tools-only rejects an unmatched request before loading any model engine or readiness', async () => {
+  await expect(askCampusAssistant({
+    ...input(), mode: 'device', onDevicePolicy: 'tools-only',
+    messages: [{ role: 'user', content: '幫我整理我的閱讀計畫' }],
+  })).rejects.toMatchObject({ name: 'OnDeviceAssistantError', code: 'unsupported-request' });
+  expectNoInferenceOrCloud();
+});
+
+test('tools-only keeps a grounded saved timetable read available without inference', async () => {
+  const { collectOnDeviceSchoolContext } = require('../../services/onDeviceSchoolContext');
+  jest.mocked(collectOnDeviceSchoolContext).mockResolvedValueOnce({
+    checkedAt: '2026-10-26T01:00:00Z', schoolId: 'pu', schoolName: '靜宜大學',
+    timetable: { source: 'saved-device-copy', updatedAt: '2026-10-25T10:00:00Z',
+      courses: [{ name: '資料庫', day: 1, start: 2, end: 3 }] },
+  });
+  const result = await askCampusAssistant({
+    ...input(), mode: 'device', onDevicePolicy: 'tools-only',
+    messages: [{ role: 'user', content: '今天有哪些課' }],
+  });
+  expect(result).toMatchObject({ source: 'device', tool: 'saved-timetable', hasActions: false, route: '/timetable' });
+  expect(result.content).toContain('資料庫');
+  expectNoInferenceOrCloud();
+});
+
+test.each(['uid', 'scope'])('tools-only rejects a saved context returned after %s changes', async (kind) => {
+  const { collectOnDeviceSchoolContext } = require('../../services/onDeviceSchoolContext');
   let current = true;
   let resolve!: (value: unknown) => void;
-  mockCallable.mockReturnValue(
-    new Promise((yes) => {
-      resolve = yes;
-    }),
-  );
-  const pending = askCampusAssistant({ ...input(), isCurrent: () => current });
+  jest.mocked(collectOnDeviceSchoolContext).mockReturnValueOnce(new Promise((yes) => { resolve = yes; }));
+  const pending = askCampusAssistant({
+    ...input(), mode: 'device', onDevicePolicy: 'tools-only', isCurrent: () => current,
+    messages: [{ role: 'user', content: '今天有哪些課' }],
+  });
   if (kind === 'uid') mockUid = 'B';
   else current = false;
-  resolve({ data: { content: 'A私訊', run: { status: 'completed' } } });
-  await expect(pending).rejects.toThrow('session changed');
+  resolve({ schoolId: 'pu', timetable: { courses: [{ name: '前一帳號的課程' }] } });
+  await expect(pending).rejects.toMatchObject({ code: 'session-changed' });
+  expectNoInferenceOrCloud();
+});
+
+test('tools-only discards saved context after cancellation without starting inference', async () => {
+  const { collectOnDeviceSchoolContext } = require('../../services/onDeviceSchoolContext');
+  const controller = new AbortController();
+  let resolve!: (value: unknown) => void;
+  jest.mocked(collectOnDeviceSchoolContext).mockReturnValueOnce(new Promise((yes) => { resolve = yes; }));
+  const pending = askCampusAssistant({
+    ...input(), mode: 'device', onDevicePolicy: 'tools-only', signal: controller.signal,
+    messages: [{ role: 'user', content: '今天有哪些課' }],
+  });
+  controller.abort();
+  resolve({ schoolId: 'pu', timetable: { courses: [{ name: '取消後的課程' }] } });
+  await expect(pending).rejects.toMatchObject({ code: 'cancelled' });
+  expectNoInferenceOrCloud();
 });
 
 test('uses local GGUF by default without calling Firebase Functions or downloading anything', async () => {

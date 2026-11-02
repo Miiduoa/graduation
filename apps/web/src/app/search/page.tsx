@@ -8,7 +8,8 @@ import { useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { SiteShell } from '@/components/SiteShell';
 import { useAuth } from '@/components/AuthGuard';
-import { interpretCampusRequest } from '@/lib/campusIntentClient';
+import { CampusIntentControl, useCampusIntentCooldown } from '@/components/CampusIntentControl';
+import { useOptionalSelectedSchool } from '@/components/SelectedSchoolProvider';
 import { campusServiceHref, useCampusNavigationSearch } from '@/lib/campusNavigation';
 import { useSignInOptions } from '@/lib/signInOptions';
 import { VoiceDictationButton } from '@/components/VoiceDictationButton';
@@ -38,63 +39,91 @@ function ServiceDirectory() {
   const { user } = useAuth();
   const uid = user?.uid || '';
   const searchInput = useRef<HTMLInputElement>(null);
-  const requestSequence = useRef(0);
-  useEffect(() => () => { requestSequence.current += 1; }, []);
   const schoolSearch = useCampusNavigationSearch(params);
+  const selection = useOptionalSelectedSchool();
+  const schoolId =
+    selection && !selection.loading && selection.catalogStatus === 'ready'
+      ? selection.selectedSchool?.id || ''
+      : '';
+  const selectionReady = Boolean(
+    selection && !selection.loading && selection.catalogStatus === 'ready',
+  );
+  const draftSchoolId =
+    selection?.selectedSchool?.id ||
+    (selectionReady ? '' : params.get('campus') || params.get('schoolId') || '');
+  const draftScope = JSON.stringify([uid, draftSchoolId]);
+  const cooldown = useCampusIntentCooldown(draftScope);
+  const semanticScope = JSON.stringify([
+    draftScope,
+    schoolSearch,
+    schoolId,
+    selection?.loading,
+    selection?.catalogStatus,
+  ]);
+  const previousDraftScope = useRef(draftScope);
   const options = useSignInOptions();
   const queryString = params.toString();
-  const [{ query, category }, setFilters] = useState(() =>
-    readFilters(new URLSearchParams(queryString)),
-  );
-  useEffect(() => {
-    // Restore the URL state on history navigation or an external link to this directory.
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    setFilters(readFilters(new URLSearchParams(queryString)));
-  }, [queryString]);
-  const term = query.trim();
-  const semanticScope = JSON.stringify([uid, schoolSearch]);
+  const [draft, setDraft] = useState(() => ({
+    scope: draftScope,
+    ...readFilters(new URLSearchParams(queryString)),
+  }));
+  const [draftRevision, setDraftRevision] = useState(0);
+  const [voiceRevision, setVoiceRevision] = useState(0);
   const [analysis, setAnalysis] = useState<{
     scope: string;
     term: string;
-    status: 'pending' | 'ready' | 'error';
-    result?: CampusSemanticResult;
+    revision: number;
+    result: CampusSemanticResult;
   } | null>(null);
-  const active = analysis?.scope === semanticScope && analysis.term === term ? analysis : null;
-  const semantic = active?.status === 'ready' ? active.result : undefined;
-  const matches = searchCampusServices(query, category, schoolLmsEnabled);
-  const suggested = semantic?.status === 'understood'
-    ? semantic.destinations.flatMap((href) => {
-        const service = visibleCampusServices(schoolLmsEnabled).find((row) => row.href === href);
-        return service ? [service] : [];
-      })
-    : getQuickCampusActions(query, schoolLmsEnabled).filter(
-        (action) => !matches.some((match) => match.href === action.href),
-      );
-
-  async function analyze(text: string) {
-    const utterance = text.trim().slice(0, 100);
-    if (!uid || !utterance) return;
-    const request = ++requestSequence.current;
-    const scope = semanticScope;
-    setAnalysis({ scope, term: utterance, status: 'pending' });
-    try {
-      const result = await interpretCampusRequest({
-        uid, schoolId: new URLSearchParams(schoolSearch).get('schoolId') || '',
-        utterance,
-      });
-      if (request === requestSequence.current) {
-        setAnalysis({ scope, term: utterance, status: 'ready', result });
-      }
-    } catch {
-      if (request === requestSequence.current) {
-        setAnalysis({ scope, term: utterance, status: 'error' });
-      }
+  useEffect(() => {
+    const scopeChanged = previousDraftScope.current !== draftScope;
+    previousDraftScope.current = draftScope;
+    // A different account or campus starts a new draft, including on a return to an earlier scope.
+    const filters = scopeChanged
+      ? { query: '', category: 'all' as const }
+      : readFilters(new URLSearchParams(queryString));
+    if (scopeChanged) {
+      const url = new URL(window.location.href);
+      url.searchParams.delete('q');
+      url.searchParams.delete('category');
+      window.history.replaceState(null, '', `${url.pathname}${url.search}${url.hash}`);
     }
+    setDraft({ scope: draftScope, ...filters });
+    setAnalysis(null);
+    setDraftRevision((value) => value + 1);
+    setVoiceRevision((value) => value + 1);
+  }, [queryString, draftScope, semanticScope]);
+  const query = draft.scope === draftScope ? draft.query : '';
+  const category = draft.scope === draftScope ? draft.category : 'all';
+  const term = query.trim();
+  const semantic =
+    analysis?.scope === semanticScope &&
+    analysis.term === term &&
+    analysis.revision === draftRevision
+      ? analysis.result
+      : undefined;
+  const matches = searchCampusServices(query, category, schoolLmsEnabled);
+  const suggested =
+    semantic?.status === 'understood'
+      ? semantic.destinations.flatMap((href) => {
+          const service = visibleCampusServices(schoolLmsEnabled).find((row) => row.href === href);
+          return service ? [service] : [];
+        })
+      : getQuickCampusActions(query, schoolLmsEnabled).filter(
+          (action) => !matches.some((match) => match.href === action.href),
+        );
+
+  function stopVoice() {
+    setVoiceRevision((value) => value + 1);
+  }
+  function clearAnalysis() {
+    setAnalysis(null);
+    stopVoice();
   }
   function updateFilters(next: { query: string; category: ServiceCategory | 'all' }) {
-    requestSequence.current += 1;
-    setAnalysis(null);
-    setFilters(next);
+    clearAnalysis();
+    setDraftRevision((value) => value + 1);
+    setDraft({ scope: draftScope, ...next });
     const url = new URL(window.location.href);
     if (next.query) url.searchParams.set('q', next.query);
     else url.searchParams.delete('q');
@@ -140,25 +169,34 @@ function ServiceDirectory() {
               }}
             />
             <VoiceDictationButton
+              key={`${semanticScope}:${voiceRevision}`}
               onTranscript={(text) => {
                 const next = text.slice(0, 100);
                 updateFilters({ query: next, category: 'all' });
-                if (uid) void analyze(next);
               }}
             />
           </div>
           <p className={styles.voiceHelp}>
-            語音轉寫完成後，登入者會自動使用 AI 理解。文字可先修改再送出，任何服務操作都要自行確認。
+            語音只會填入文字，可先修改。需要雲端建議時，先核對傳送內容，再由你確認。語音辨識可能由瀏覽器供應商處理。
           </p>
-          {term && uid && (
-            <button
-              type="button"
-              className={styles.aiButton}
-              disabled={active?.status === 'pending'}
-              onClick={() => void analyze(term)}
-            >
-              {active?.status === 'pending' ? 'AI 正在理解…' : '用 AI 理解需求'}
-            </button>
+          {term && (
+            <CampusIntentControl
+              key={`${semanticScope}:${draftRevision}`}
+              uid={uid}
+              schoolId={schoolId}
+              utterance={term}
+              cooldown={cooldown}
+              onReview={stopVoice}
+              onReset={clearAnalysis}
+              onResult={(result) =>
+                setAnalysis({
+                  scope: semanticScope,
+                  term,
+                  revision: draftRevision,
+                  result,
+                })
+              }
+            />
           )}
           <div className={styles.filters} role="group" aria-label="服務分類">
             {[{ id: 'all', label: '全部' }, ...SERVICE_CATEGORIES].map((item) => (
@@ -182,11 +220,6 @@ function ServiceDirectory() {
             {semantic.clarifyingQuestion && <p>{semantic.clarifyingQuestion}</p>}
           </section>
         )}
-        {(active?.status === 'error' || semantic?.status === 'unavailable') && (
-          <p role="status" className={styles.voiceHelp}>
-            AI 暫時無法理解，目前只顯示基本關鍵字搜尋結果。
-          </p>
-        )}
         {term && suggested.length > 0 && (
           <section className={styles.smartResults} aria-label="根據需求推薦的服務">
             <h2>{semantic?.status === 'understood' ? 'AI 建議先開啟' : '你可能想做'}</h2>
@@ -199,16 +232,6 @@ function ServiceDirectory() {
                 >
                   <strong>{action.name}</strong>
                   <small>{action.text}</small>
-                  {semantic?.previews?.filter((preview) => preview.destination === action.href).map((preview) => (
-                    <span className={styles.preview} key={preview.destination}>
-                      <span>{preview.source === 'campus-platform' ? 'Campus One 資料' : '接通狀態'}：{preview.message}</span>
-                      {preview.items.map((item, index) => (
-                        <span key={index} className={styles.previewItem}>
-                          {item.title}{item.detail ? ' · ' + item.detail : ''}
-                        </span>
-                      ))}
-                    </span>
-                  ))}
                   <span aria-hidden="true">→</span>
                 </Link>
               ))}
@@ -272,9 +295,11 @@ function ServiceDirectory() {
         ) : (
           <section className={styles.empty}>
             <h2>{suggested.length ? '沒有完全相符的服務' : '沒有符合的服務'}</h2>
-            <p>{suggested.length
-              ? '你可以先使用上方推薦的入口，或調整關鍵字繼續找。'
-              : '試試「課表」或「公車」等關鍵字，也可以清除篩選，查看所有服務。'}</p>
+            <p>
+              {suggested.length
+                ? '你可以先使用上方推薦的入口，或調整關鍵字繼續找。'
+                : '試試「課表」或「公車」等關鍵字，也可以清除篩選，查看所有服務。'}
+            </p>
             <button type="button" className="btn primary" onClick={resetFilters}>
               查看所有服務
             </button>
