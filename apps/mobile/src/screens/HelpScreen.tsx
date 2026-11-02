@@ -159,7 +159,7 @@ export function HelpScreen({ navigation }: Props) {
           <AIButton label="前往意見回饋" onPress={() => navigation?.navigate?.('Feedback')} />
         </View>
       </AICard>
-      <AISection title="關於 Campus One">
+      <AISection title="關於 nuni">
         {version ? <AIRow title="版本" subtitle={version} static /> : null}
         {(['privacy', 'terms'] as const).map((type) => (
           <AIRow

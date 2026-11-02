@@ -234,6 +234,19 @@ def _build_cards(traces: list[ToolCallTrace]) -> list[ResponseCard]:
                 )
             )
             continue
+        # 僅草稿、未寫入：不要渲染「已送出」卡。
+        if trace.output.get("draftOnly") is True:
+            cards.append(
+                ResponseCard(
+                    kind="tool_draft",
+                    payload={
+                        "tool": trace.name,
+                        "message": trace.output.get("message"),
+                        "draft": trace.output.get("draft") or {},
+                    },
+                )
+            )
+            continue
         if trace.name == "createDormRepairRequest":
             cards.append(
                 ResponseCard(
@@ -348,6 +361,14 @@ def _build_final_text(traces: list[ToolCallTrace], llm_content: str) -> str:
         if not trace.success:
             pieces.append(
                 _format_generic_failure(trace.name, trace.errorCode, trace.errorMessage)
+            )
+            continue
+        if trace.output.get("draftOnly") is True:
+            pieces.append(
+                str(
+                    trace.output.get("message")
+                    or "已整理草稿，但尚未送出。請到對應頁面手動確認。"
+                )
             )
             continue
         if trace.name == "createDormRepairRequest":

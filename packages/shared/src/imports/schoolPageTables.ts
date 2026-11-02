@@ -4,7 +4,7 @@ import { PERSONAL_IMPORT_MAX_ROWS, type PersonalImportKind } from './types';
 
 /**
  * Reads user-saved school portal tables locally. This does not fetch a school URL,
- * execute HTML, submit a form, or send credentials to Campus One.
+ * execute HTML, submit a form, or send credentials to nuni.
  */
 export type SchoolPageTable = {
   id: string;

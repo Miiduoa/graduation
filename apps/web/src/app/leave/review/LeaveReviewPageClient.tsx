@@ -150,7 +150,7 @@ function ReviewWorkspace({ uid, schoolId, schoolName, leaveApiEnabled }: {
           </div>
           <div className={styles.official}>
             <span>操作範圍</span>
-            <strong>Campus One 站內課程核閱</strong>
+            <strong>nuni 站內課程核閱</strong>
             <Link href="/leave">返回學生請假頁 ↗</Link>
           </div>
         </section>

@@ -14,6 +14,7 @@ import { AttendanceCorrectionPanel } from './AttendanceCorrectionPanel';
 import { AttendanceSyncStatus } from './AttendanceSyncStatus';
 import { watchAttendanceLive, type AttendanceLiveState } from '@/lib/watchAttendanceLive';
 import { resolveSchoolPageContext, type SchoolSearchParams } from '@/lib/pageContext';
+import { useCourseTodayMeeting } from '@/lib/useCourseTodayMeeting';
 import {
   attendanceCsv,
   attendanceError,
@@ -31,6 +32,7 @@ import {
   type AttendanceSession,
   type CourseAttendance as AttendanceData,
 } from '@/lib/courseAttendance';
+import { AttendanceMissingNotices } from './AttendanceMissingNotices';
 import service from '@/app/servicePages.module.css';
 import styles from './course-attendance.module.css';
 
@@ -259,7 +261,9 @@ function Session({
             </Button>
           </form>
         ) : (
-          <p className={styles.detail}>沒有你的簽到紀錄。如需更正，請聯絡授課教師。</p>
+          <p className={styles.detail}>
+            沒有簽到紀錄。若有出席請向老師確認或申請更正。
+          </p>
         ))}
       <div className={styles.actions}>
         {canStart && session.active && (
@@ -523,6 +527,8 @@ function Workspace({ courseId, uid }: { courseId: string; uid: string }) {
       (historyFilter === 'all' ||
         (historyFilter === 'active' ? session.active : !session.active)),
   ) ?? [];
+  const meeting = useCourseTodayMeeting(courseId, data?.courseName ?? '');
+  const viewerRole = data?.canStart ? 'teacher' : 'student';
   return (
     <>
       <div className={styles.workspaceHeading}>
@@ -558,6 +564,13 @@ function Workspace({ courseId, uid }: { courseId: string; uid: string }) {
       {data && <AttendanceSyncStatus state={liveState} teacher={data.canReadRoster} />}
       {data && liveState === 'live' && (
         <>
+          <AttendanceMissingNotices
+            courseId={courseId}
+            courseName={data.courseName}
+            viewerRole={viewerRole}
+            sessions={data.sessions}
+            meeting={meeting}
+          />
           <section className={styles.overview} aria-label="課堂點名概況">
             <div>
               <span>已保存的點名</span>

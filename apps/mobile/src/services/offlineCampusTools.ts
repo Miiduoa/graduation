@@ -105,7 +105,7 @@ function syncedCampusAnswer(
 
   const lines: string[] = [
     '上次主動同步：' + syncedTime(snapshot.checkedAt) + '（非即時查詢）。',
-    '資料只包含 Campus One 已接通並獲授權的來源，並非完整的校方 LMS。',
+    '資料只包含 nuni 已接通並獲授權的來源，並非完整的校方 LMS。',
   ];
   let matched = false;
   if (askingAssignments || askingPriority) {

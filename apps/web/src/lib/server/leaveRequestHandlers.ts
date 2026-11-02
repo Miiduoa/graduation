@@ -288,7 +288,7 @@ function createWithdrawLeaveHandler({ db, clock }: { db: LeaveFirestore; clock: 
       ]);
       activeMember(member, account);
       if (data.source !== 'campus-one') {
-        fail('failed-precondition', '此紀錄屬於其他請假系統，不能在 Campus One 撤回。');
+        fail('failed-precondition', '此紀錄屬於其他請假系統，不能在 nuni 撤回。');
       }
       if (data.status === 'withdrawn') return { id, status: 'withdrawn' };
       if (data.status !== 'pending') {
@@ -324,7 +324,7 @@ function createReviewLeaveHandler({ db, clock }: { db: LeaveFirestore; clock: ()
       if (!snap.exists) fail('not-found', '找不到這筆申請。');
       const data = snap.data();
       if (data.source !== 'campus-one' || !Array.isArray(data.courses)) {
-        fail('failed-precondition', '此紀錄不屬於 Campus One 站內請假流程。');
+        fail('failed-precondition', '此紀錄不屬於 nuni 站內請假流程。');
       }
       if (data.status === 'withdrawn') fail('failed-precondition', '這筆請假已撤回。');
       const course = data.courses.find((item) => asRecord(item).courseId === courseId);

@@ -2,7 +2,11 @@ import React, { useRef, useState } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, Alert, ActivityIndicator } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import { httpsCallable } from 'firebase/functions';
-import { getFunctionsInstance } from '../firebase';
+import {
+  assistantWritePermissionDeniedMessage,
+  isAssistantWriteToolAllowed,
+} from '@campus/shared/src/assistantPermissions';
+import { getAuthInstance, getFunctionsInstance } from '../firebase';
 import { safeNavigate } from '../utils/safeNavigate';
 import { resolveDeprecatedRouteRedirect } from '../app/deprecatedRouteRedirect';
 import { describePickupNumber, formatShortOrderCode } from '@campus/shared/src/ordering/pickupNumber';
@@ -12,6 +16,7 @@ import {
   resolveUnknownOrderOutcome,
   type PlacedOrder,
 } from '../services/orderLookup';
+import { loadAssistantWritePermissionsState } from '../services/assistantPermissions';
 
 function PlacedOrderLines({ order }: { order: PlacedOrder }) {
   const pickup = describePickupNumber(order);
@@ -206,7 +211,13 @@ function OrderDraftCard({ payload }: { payload: any }) {
   const [paymentMethod, setPaymentMethod] = useState<string>(payload.paymentMethod || 'campus_card');
   const [submitting, setSubmitting] = useState(false);
   const [result, setResult] = useState<
-    { ok: boolean; order?: PlacedOrder; message?: string; checking?: boolean } | null
+    {
+      ok: boolean;
+      order?: PlacedOrder;
+      message?: string;
+      checking?: boolean;
+      permissionDenied?: boolean;
+    } | null
   >(null);
   const nav = useNavigation<any>();
   // 同一張草稿「再試一次」沿用同一個送出編號，伺服器不會建出第二筆
@@ -227,13 +238,28 @@ function OrderDraftCard({ payload }: { payload: any }) {
     inFlightRef.current = true;
     setSubmitting(true);
     setResult(null);
-    requestIdRef.current ??=
-      typeof globalThis.crypto?.randomUUID === 'function'
-        ? `app-${globalThis.crypto.randomUUID()}`
-        : `app-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 12)}`;
     const schoolId = payload.confirmAction?.input?.schoolId || 'pu';
-    const requestId = requestIdRef.current;
     try {
+      // 助理來源確認卡：先查「餐廳下單」開關，不影響學餐頁一般下單。
+      const uid = getAuthInstance().currentUser?.uid;
+      if (!uid) {
+        setResult({ ok: false, message: '請先登入後再確認下單。' });
+        return;
+      }
+      const permissionState = await loadAssistantWritePermissionsState(uid);
+      if (!isAssistantWriteToolAllowed(permissionState.permissions, 'createOrder')) {
+        setResult({
+          ok: false,
+          message: assistantWritePermissionDeniedMessage('createOrder'),
+          permissionDenied: true,
+        });
+        return;
+      }
+      requestIdRef.current ??=
+        typeof globalThis.crypto?.randomUUID === 'function'
+          ? `app-${globalThis.crypto.randomUUID()}`
+          : `app-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 12)}`;
+      const requestId = requestIdRef.current;
       const callable = httpsCallable(getFunctionsInstance(), 'createOrder');
       const res = await callable({
         requestId,
@@ -267,6 +293,11 @@ function OrderDraftCard({ payload }: { payload: any }) {
         setResult({ ok: false, message: e?.message || ORDER_NOT_SENT_TEXT });
       } else {
         // 結果不明：先用同一個編號查一次，查到就顯示那張單；確定沒有才請學生再試；查不出結果就請學生看我的訂單
+        const requestId = requestIdRef.current;
+        if (!requestId) {
+          setResult({ ok: false, message: ORDER_NOT_SENT_TEXT });
+          return;
+        }
         const outcome = await resolveUnknownOrderOutcome(schoolId, requestId);
         setResult(
           outcome.kind === 'found'
@@ -337,6 +368,13 @@ function OrderDraftCard({ payload }: { payload: any }) {
       {result?.ok ? (
         <TouchableOpacity style={styles.actionButton} onPress={() => safeNavigate(nav, 'StudentOrders')}>
           <Text style={styles.actionButtonText}>我的訂單</Text>
+        </TouchableOpacity>
+      ) : result?.permissionDenied ? (
+        <TouchableOpacity
+          style={styles.actionButton}
+          onPress={() => safeNavigate(nav, 'AssistantPermissions')}
+        >
+          <Text style={styles.actionButtonText}>前往設定</Text>
         </TouchableOpacity>
       ) : result && !result.ok && result.checking ? (
         <TouchableOpacity style={styles.actionButton} onPress={() => safeNavigate(nav, 'StudentOrders')}>

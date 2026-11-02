@@ -54,7 +54,7 @@ export function parsePortableCreditPlan(text: string): CreditPlan {
     throw new Error('備份檔案超過 90 KB，未匯入任何資料。');
   }
   const restored = restoreCreditPlan(text.replace(/^\ufeff/, ''));
-  if (!restored) throw new Error('備份格式不正確，必須是 Campus One 的學分規劃 JSON。');
+  if (!restored) throw new Error('備份格式不正確，必須是 nuni 的學分規劃 JSON。');
   return restored;
 }
 
