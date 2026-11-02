@@ -136,6 +136,11 @@ const {
   createGroupQuestionAssistantReplyTrigger,
   createGradePublishedNotificationHandler,
 } = require('./firestoreTriggerHandlers');
+const {
+  createAssignmentPublishedNotifyHandler,
+  createSubmissionNotifyHandler,
+  createSchoolAnnouncementNotifyHandler,
+} = require('./lib/coherenceNotify');
 
 // TDX API 金鑰（透過 firebase functions:secrets:set 設定）
 const TDX_CLIENT_ID = defineSecret('TDX_CLIENT_ID');
@@ -4393,6 +4398,31 @@ exports.gradePublishedNotification = onDocumentCreated(
     region: REGION,
   },
   createGradePublishedNotificationHandler({ sendPushToUser }),
+);
+
+// 連貫感切片 C：作業／繳交／成績／公告觸達（對齊實際寫入路徑，含冪等 claim）
+exports.onTeacherAssignmentPublished = onDocumentCreated(
+  {
+    document: 'groups/{groupId}/assignments/{assignmentId}',
+    region: REGION,
+  },
+  createAssignmentPublishedNotifyHandler({ db, sendPushToUser }),
+);
+
+exports.onAssignmentSubmissionWritten = onDocumentWritten(
+  {
+    document: 'groups/{groupId}/assignments/{assignmentId}/submissions/{studentUid}',
+    region: REGION,
+  },
+  createSubmissionNotifyHandler({ db, sendPushToUser }),
+);
+
+exports.onSchoolAnnouncementCreated = onDocumentCreated(
+  {
+    document: 'schools/{schoolId}/announcements/{announcementId}',
+    region: REGION,
+  },
+  createSchoolAnnouncementNotifyHandler({ db, sendPushToUser }),
 );
 
 // =====================================================
