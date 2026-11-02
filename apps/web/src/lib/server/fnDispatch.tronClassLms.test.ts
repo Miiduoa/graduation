@@ -336,6 +336,29 @@ it('does not expose an otherwise fresh cache when its LMS session changes owner'
   expect(source.fetchHomeworkPage).not.toHaveBeenCalled();
 });
 
+it('rejects an in-flight course read when its linked session changes before completion', async () => {
+  const { request, source, store } = setup();
+  expect((await request()).status).toBe(200);
+  let release!: () => void;
+  vi.mocked(source.fetchActivities).mockImplementationOnce(() => new Promise((resolve) => {
+    release = () => resolve({ ok: true, value: [LMS_FIXTURE_MATERIAL] });
+  }));
+  const pending = request({ courseId: 10001 });
+  await vi.waitFor(() => expect(source.fetchActivities).toHaveBeenCalledTimes(1));
+
+  const nextId = 'd'.repeat(32);
+  Object.assign(store.docs.get(PORTAL)!, { tronClassSessionId: nextId });
+  store.docs.set(`_puTronClassSessions/${nextId}`, {
+    ownerUid: UID, cookies: { session: 'new-lms-session' }, userId: 11,
+    expiresAt: new Date(Date.now() + 60_000),
+  });
+  release();
+  const response = await pending;
+  expect((await response.json()).error.status).toBe('FAILED_PRECONDITION');
+  expect(store.docs.get(CACHE)?.sessionId).toBe(LMS_ID);
+  expect(store.docs.get(CACHE)?.extras).toEqual({});
+});
+
 it('makes no LMS calls when the read-only feature flag is disabled', async () => {
   const { request, source } = setup();
   vi.stubEnv('SCHOOL_LMS_READONLY_ENABLED', 'false');
