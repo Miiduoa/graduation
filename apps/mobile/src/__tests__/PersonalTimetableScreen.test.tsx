@@ -56,6 +56,24 @@ const record = (overrides: Partial<PersonalImportRecord> = {}): PersonalImportRe
   ...overrides,
 });
 beforeEach(() => {
+  // Pin to a Sunday so ClassExceptions "today" does not also list Monday fixtures.
+  jest.useFakeTimers({
+    now: new Date('2026-10-25T04:00:00.000Z'),
+    doNotFake: [
+      'setTimeout',
+      'clearTimeout',
+      'setInterval',
+      'clearInterval',
+      'setImmediate',
+      'clearImmediate',
+      'nextTick',
+      'queueMicrotask',
+      'requestAnimationFrame',
+      'cancelAnimationFrame',
+      'performance',
+      'hrtime',
+    ],
+  });
   jest.clearAllMocks();
   mockUser = null;
   mockSchool = { id: 'ncku', name: '國立成功大學' };
@@ -75,6 +93,9 @@ beforeEach(() => {
     .mocked(loadPersonalImports)
     .mockReset()
     .mockResolvedValue({ version: 1, records: [record()], batches: [] });
+});
+afterEach(() => {
+  jest.useRealTimers();
 });
 
 test('the full timetable and editor use NCKU period labels and times, without inheriting a guest timetable', async () => {
