@@ -423,3 +423,108 @@ it('does not take focus back when the user has left recovery before a late rejec
   expect(screen.getByRole('button', { name: '重新確認權限' })).toBeTruthy();
   expect(scrollIntoView).not.toHaveBeenCalled();
 });
+
+async function startUnconfirmedReview() {
+  allow();
+  mocks.create.mockRejectedValue(new Error('unknown outcome'));
+  const view = render(<BoardsTab schoolId="pu" schoolSearch="?schoolId=pu" />);
+  const dialog = await openCreate();
+  fireEvent.click(within(dialog).getByRole('button', { name: '建立' }));
+  await within(dialog).findByText(/尚未確認是否建立/);
+  fireEvent(dialog, new Event('cancel', { bubbles: true, cancelable: true }));
+  return view;
+}
+
+it('keeps focus on a visible status while a recovery list read is pending', async () => {
+  await startUnconfirmedReview();
+  mocks.list.mockReturnValueOnce(new Promise(() => {}));
+  fireEvent.click(screen.getByRole('button', { name: '重新讀取並檢視清單' }));
+  expect(document.activeElement).toBe(screen.getByRole('region', { name: '看板建立狀態' }));
+  expect(screen.getByRole('button', { name: '正在讀取看板…' })).toHaveProperty('disabled', true);
+});
+
+it.each(['success', 'failure'] as const)('keeps recovery focus when a list review finishes with %s', async (outcome) => {
+  await startUnconfirmedReview();
+  const read = deferred<unknown[]>();
+  mocks.list.mockReturnValueOnce(read.promise);
+  fireEvent.click(screen.getByRole('button', { name: '重新讀取並檢視清單' }));
+  const area = screen.getByRole('region', { name: '看板建立狀態' });
+  area.focus();
+  await act(async () => outcome === 'success' ? read.resolve([]) : read.reject(new Error('unavailable')));
+  expect(document.activeElement).toBe(outcome === 'success' ? area : screen.getByRole('button', { name: '重新讀取並檢視清單' }));
+  if (outcome === 'success') expect(area.textContent).toContain('已重新讀取清單');
+  else expect(screen.getByRole('button', { name: /建立看板/ })).toHaveProperty('disabled', true);
+});
+
+it('does not restore recovery focus after the user moves elsewhere during a list review', async () => {
+  await startUnconfirmedReview();
+  const read = deferred<unknown[]>();
+  mocks.list.mockReturnValueOnce(read.promise);
+  fireEvent.click(screen.getByRole('button', { name: '重新讀取並檢視清單' }));
+  const search = screen.getByRole('searchbox');
+  search.focus();
+  scrollIntoView.mockClear();
+  await act(async () => read.resolve([]));
+  expect(document.activeElement).toBe(search);
+  expect(scrollIntoView).not.toHaveBeenCalled();
+});
+
+it.each(['stay', 'leave'] as const)('preserves permission retry focus without stealing it when users %s', async (position) => {
+  allow();
+  mocks.create.mockRejectedValue({ code: 'permission-denied' });
+  const view = render(<BoardsTab schoolId="pu" schoolSearch="?schoolId=pu" />);
+  const dialog = await openCreate();
+  fireEvent.click(within(dialog).getByRole('button', { name: '建立' }));
+  await within(dialog).findByText(/這次建立未獲允許/);
+  fireEvent(dialog, new Event('cancel', { bubbles: true, cancelable: true }));
+  mocks.access.retry.mockImplementation(() => { mocks.access.status = 'loading'; mocks.access.authorizationEpoch += 1; });
+  fireEvent.click(screen.getByRole('button', { name: '重新確認權限' }));
+  view.rerender(<BoardsTab schoolId="pu" schoolSearch="?schoolId=pu" />);
+  const area = screen.getByRole('region', { name: '看板建立狀態' });
+  expect(document.activeElement).toBe(area);
+  const search = screen.getByRole('searchbox');
+  if (position === 'leave') search.focus();
+  scrollIntoView.mockClear();
+  allow();
+  view.rerender(<BoardsTab schoolId="pu" schoolSearch="?schoolId=pu" />);
+  expect(screen.getByText('已重新確認管理權限，可以繼續建立看板。')).toBeTruthy();
+  expect(document.activeElement).toBe(position === 'stay' ? area : search);
+  if (position === 'leave') expect(scrollIntoView).not.toHaveBeenCalled();
+});
+
+it('keeps error-panel retry focus within recovery through its next delayed read', async () => {
+  await startUnconfirmedReview();
+  mocks.list.mockRejectedValueOnce(new Error('offline'));
+  fireEvent.click(screen.getByRole('button', { name: '重新讀取並檢視清單' }));
+  const errorRetry = await screen.findByRole('button', { name: /^重新讀取$/ });
+  const read = deferred<unknown[]>();
+  mocks.list.mockReturnValueOnce(read.promise);
+  errorRetry.focus();
+  fireEvent.click(errorRetry);
+  const area = screen.getByRole('region', { name: '看板建立狀態' });
+  expect(document.activeElement).toBe(area);
+  await act(async () => read.resolve([{ id: 'created', name: '讀書討論', type: 'topic' }]));
+  expect(document.activeElement).toBe(area);
+  expect(area.textContent).toContain('已重新讀取清單');
+  expect(screen.getByRole('button', { name: /建立看板/ })).toHaveProperty('disabled', false);
+});
+
+it.each(['denied', 'error'] as const)('keeps an understandable focused recovery state after permission retry is %s', async (status) => {
+  allow();
+  mocks.create.mockRejectedValue({ code: 'permission-denied' });
+  const view = render(<BoardsTab schoolId="pu" schoolSearch="?schoolId=pu" />);
+  const dialog = await openCreate();
+  fireEvent.click(within(dialog).getByRole('button', { name: '建立' }));
+  await within(dialog).findByText(/這次建立未獲允許/);
+  fireEvent(dialog, new Event('cancel', { bubbles: true, cancelable: true }));
+  mocks.access.retry.mockImplementation(() => { mocks.access.status = 'loading'; mocks.access.authorizationEpoch += 1; });
+  fireEvent.click(screen.getByRole('button', { name: '重新確認權限' }));
+  view.rerender(<BoardsTab schoolId="pu" schoolSearch="?schoolId=pu" />);
+  const area = screen.getByRole('region', { name: '看板建立狀態' });
+  mocks.access.status = status;
+  mocks.access.authorizationEpoch += 1;
+  view.rerender(<BoardsTab schoolId="pu" schoolSearch="?schoolId=pu" />);
+  expect(document.activeElement).toBe(status === 'denied' ? area : screen.getByRole('button', { name: '重新確認權限' }));
+  if (status === 'denied') expect(area.textContent).toContain('你目前沒有這所學校的看板管理權限');
+  expect(screen.queryByRole('button', { name: /建立看板/ })).toBeNull();
+});

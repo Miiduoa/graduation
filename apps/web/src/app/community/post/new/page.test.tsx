@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import type { ReactNode } from 'react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { PROVIDENCE_UNIVERSITY_SCHOOL_ID } from '@campus/shared/src';
@@ -206,4 +206,96 @@ it('keeps a draft in state while an empty board result hides the form, then rest
   await screen.findByRole('combobox', { name: '發布看板' });
   expect((screen.getByPlaceholderText('一句話描述你的貼文') as HTMLInputElement).value).toBe('先保留的草稿');
   expect(mocks.publish).not.toHaveBeenCalled();
+});
+
+it('keeps the confirmed empty section and focused retry button through loading and failure', async () => {
+  let rejectRetry!: (error: Error) => void;
+  mocks.list.mockResolvedValueOnce([]).mockReturnValueOnce(new Promise((_resolve, reject) => {
+    rejectRetry = reject;
+  }));
+  render(<PostComposePage />);
+  const heading = await screen.findByRole('heading', { name: '目前沒有可發布的看板' });
+  const section = heading.closest('section');
+  const retry = screen.getByRole('button', { name: '重新讀取看板' });
+  retry.focus();
+  fireEvent.click(retry);
+
+  expect(screen.getByRole('heading', { name: '目前沒有可發布的看板' })).toBe(heading);
+  expect(heading.closest('section')).toBe(section);
+  expect(screen.getByRole('button', { name: '重新讀取看板' })).toBe(retry);
+  expect(retry.getAttribute('aria-disabled')).toBe('true');
+  expect(document.activeElement).toBe(retry);
+  expect(screen.queryByPlaceholderText('一句話描述你的貼文')).toBeNull();
+  expect(screen.getByRole('link', { name: '回校園交流' }).getAttribute('href')).toBe('/community?schoolId=ncku');
+  fireEvent.click(retry);
+  expect(mocks.list).toHaveBeenCalledTimes(2);
+
+  await act(async () => rejectRetry(new Error('offline')));
+  expect(await screen.findByRole('alert')).toHaveProperty('textContent', expect.stringContaining('暫時無法讀取看板'));
+  expect(screen.getByRole('button', { name: '重新讀取看板' })).toBe(retry);
+  expect(document.activeElement).toBe(retry);
+  expect(retry.getAttribute('aria-disabled')).toBe('false');
+  expect(screen.queryByPlaceholderText('一句話描述你的貼文')).toBeNull();
+
+  mocks.list.mockResolvedValueOnce([]);
+  fireEvent.click(retry);
+  await waitFor(() => expect(screen.queryByRole('alert')).toBeNull());
+  expect(screen.getByRole('button', { name: '重新讀取看板' })).toBe(retry);
+  expect(document.activeElement).toBe(retry);
+  expect(mocks.publish).not.toHaveBeenCalled();
+});
+
+it('moves the empty retry focus to the restored board picker and preserves the draft', async () => {
+  let finishInitial!: (rows: unknown[]) => void;
+  let finishRetry!: (rows: unknown[]) => void;
+  mocks.list
+    .mockReturnValueOnce(new Promise((resolve) => { finishInitial = resolve; }))
+    .mockReturnValueOnce(new Promise((resolve) => { finishRetry = resolve; }));
+  render(<PostComposePage />);
+  fireEvent.change(screen.getByPlaceholderText('一句話描述你的貼文'), { target: { value: '保留標題' } });
+  fireEvent.change(screen.getByPlaceholderText('想分享什麼？'), { target: { value: '保留內文' } });
+  await waitFor(() => expect(mocks.list).toHaveBeenCalledOnce());
+  await act(async () => finishInitial([]));
+  const retry = screen.getByRole('button', { name: '重新讀取看板' });
+  retry.focus();
+  fireEvent.click(retry);
+  await act(async () => finishRetry([{ id: 'science', name: '科學討論', type: 'topic' }]));
+
+  const picker = await screen.findByRole('combobox', { name: '發布看板' });
+  expect(document.activeElement).toBe(picker);
+  expect((screen.getByPlaceholderText('一句話描述你的貼文') as HTMLInputElement).value).toBe('保留標題');
+  expect((screen.getByPlaceholderText('想分享什麼？') as HTMLTextAreaElement).value).toBe('保留內文');
+  expect(screen.queryByRole('heading', { name: '目前沒有可發布的看板' })).toBeNull();
+  expect(mocks.publish).not.toHaveBeenCalled();
+});
+
+it('does not steal focus after the user leaves an empty retry for another control', async () => {
+  let finishRetry!: (rows: unknown[]) => void;
+  mocks.list.mockResolvedValueOnce([]).mockReturnValueOnce(new Promise((resolve) => { finishRetry = resolve; }));
+  render(<><button type="button">外部操作</button><PostComposePage /></>);
+  await screen.findByRole('heading', { name: '目前沒有可發布的看板' });
+  const retry = screen.getByRole('button', { name: '重新讀取看板' });
+  retry.focus();
+  fireEvent.click(retry);
+  const external = screen.getByRole('button', { name: '外部操作' });
+  external.focus();
+  await act(async () => finishRetry([{ id: 'science', name: '科學討論', type: 'topic' }]));
+
+  await screen.findByRole('combobox', { name: '發布看板' });
+  expect(document.activeElement).toBe(external);
+});
+
+it('moves to the title after retry restores a fixed board whose picker is disabled', async () => {
+  let finishRetry!: (rows: unknown[]) => void;
+  mocks.search = new URLSearchParams('schoolId=ncku&boardId=science');
+  mocks.list.mockResolvedValueOnce([]).mockReturnValueOnce(new Promise((resolve) => { finishRetry = resolve; }));
+  render(<PostComposePage />);
+  await screen.findByRole('heading', { name: '目前沒有可發布的看板' });
+  const retry = screen.getByRole('button', { name: '重新讀取看板' });
+  retry.focus();
+  fireEvent.click(retry);
+  await act(async () => finishRetry([{ id: 'science', name: '科學討論', type: 'topic' }]));
+
+  expect((await screen.findByRole('combobox', { name: '發布看板' }) as HTMLSelectElement).disabled).toBe(true);
+  expect(document.activeElement).toBe(screen.getByPlaceholderText('一句話描述你的貼文'));
 });

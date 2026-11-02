@@ -30,6 +30,12 @@ import {
 
 type CreationFailure = 'permission' | 'unconfirmed';
 
+function focusRecoveryControl(area: HTMLElement) {
+  const target = area.querySelector<HTMLButtonElement>('button:not(:disabled)') ?? area;
+  target.focus({ preventScroll: true });
+  target.scrollIntoView?.({ block: 'center', behavior: 'auto' });
+}
+
 const TYPE_ICON: Record<CampusBoardType, string> = {
   department: '🏛',
   course: '📘',
@@ -63,6 +69,7 @@ function BoardsContent(props: {
   const [focusRecovery, setFocusRecovery] = useState(0);
   const focusedRecovery = useRef(0);
   const recoveryArea = useRef<HTMLElement>(null);
+  const recoveryReadError = useRef<HTMLDivElement>(null);
   const reviewLock = useRef(false);
   const mounted = useRef(false);
   useEffect(() => {
@@ -89,8 +96,10 @@ function BoardsContent(props: {
     '暫時無法讀取看板，請確認連線後重試。',
   );
 
-  const permissionRechecked = recovery === 'permission' && permissionRetryEpoch !== null
-    && access.status === 'allowed' && access.authorizationEpoch !== permissionRetryEpoch;
+  const permissionRetryFinished = permissionRetryEpoch !== null
+    && access.authorizationEpoch !== permissionRetryEpoch
+    && (access.status === 'allowed' || access.status === 'denied');
+  const permissionRechecked = recovery === 'permission' && permissionRetryFinished && access.status === 'allowed';
   const needsRecovery = recovery !== null && !permissionRechecked;
   const creationBlocked = createPending || needsRecovery || reviewing || loading || !!error;
   const composeVisible = access.status === 'allowed' && composeEpoch === access.authorizationEpoch && !!user;
@@ -99,32 +108,49 @@ function BoardsContent(props: {
     if (!focusRecovery || focusedRecovery.current === focusRecovery || composeVisible) return;
     const area = recoveryArea.current;
     if (!area) return;
-    const target = area.querySelector<HTMLButtonElement>('button:not(:disabled)') ?? area;
-    target.focus({ preventScroll: true });
-    target.scrollIntoView?.({ block: 'center', behavior: 'auto' });
+    focusRecoveryControl(area);
     focusedRecovery.current = focusRecovery;
   }, [focusRecovery, composeVisible]);
 
+  useEffect(() => {
+    if (permissionRetryEpoch === null || access.status === 'loading' || composeVisible) return;
+    const area = recoveryArea.current;
+    if (area?.contains(area.ownerDocument.activeElement)) focusRecoveryControl(area);
+  }, [permissionRetryEpoch, access.status, access.authorizationEpoch, composeVisible]);
+
+  function keepRecoveryFocus() {
+    const area = recoveryArea.current;
+    const focused = area?.ownerDocument.activeElement;
+    if (focused && (area?.contains(focused) || recoveryReadError.current?.contains(focused))) {
+      setFocusRecovery((current) => current + 1);
+    }
+  }
+
   function retryPermission() {
+    keepRecoveryFocus();
     setPermissionRetryEpoch(access.authorizationEpoch);
     access.retry();
   }
 
-  async function reviewBoards() {
-    if (reviewLock.current || createPending) return;
+  async function reviewBoards(confirmResult = true) {
+    if (reviewLock.current || (confirmResult && createPending)) return;
+    keepRecoveryFocus();
     reviewLock.current = true;
     setReviewing(true);
     const authorized = access.isAuthorized;
     try {
       const loaded = await refresh();
-      if (mounted.current && loaded && authorized()) {
+      if (confirmResult && mounted.current && loaded && authorized()) {
         setRecovery((current) => current === 'unconfirmed' ? null : current);
         setClosedPending(false);
         setNotice('已重新讀取清單。請先檢查是否已有剛才的看板，再決定是否建立。');
       }
     } finally {
       reviewLock.current = false;
-      if (mounted.current) setReviewing(false);
+      if (mounted.current) {
+        if (authorized()) keepRecoveryFocus();
+        setReviewing(false);
+      }
     }
   }
 
@@ -208,10 +234,13 @@ function BoardsContent(props: {
       </div>
 
       <section ref={recoveryArea} tabIndex={-1} aria-label="看板建立狀態"
-        hidden={!notice && !closedPending && !needsRecovery && access.status !== 'loading' && access.status !== 'error'}>
+        hidden={!notice && !closedPending && !needsRecovery && !permissionRetryFinished && access.status !== 'loading' && access.status !== 'error'}>
       <BoardCreationStatus access={{ ...access, retry: retryPermission }} />
       {notice && <p role="status">{notice}</p>}
-      {closedPending && !needsRecovery && <button type="button" className="btn" disabled={loading} onClick={() => void refresh()}>重新讀取看板</button>}
+      {permissionRetryFinished && <p role="status">{access.status === 'allowed'
+        ? '已重新確認管理權限，可以繼續建立看板。'
+        : '你目前沒有這所學校的看板管理權限。'}</p>}
+      {closedPending && !needsRecovery && <button type="button" className="btn" disabled={loading} onClick={() => void reviewBoards(false)}>重新讀取看板</button>}
       {needsRecovery && !composeVisible && access.status === 'allowed' && (
         <div>
           <p role="alert">{recovery === 'permission'
@@ -227,7 +256,9 @@ function BoardsContent(props: {
       </section>
 
       {error ? (
-        <CommunityLoadError message={error} retry={recovery === 'unconfirmed' ? reviewBoards : refresh} />
+        <div ref={recoveryReadError}>
+          <CommunityLoadError message={error} retry={recovery === 'unconfirmed' ? reviewBoards : closedPending ? () => reviewBoards(false) : refresh} />
+        </div>
       ) : loading ? (
         <div className="card" style={{ padding: 24, textAlign: 'center', color: 'var(--muted)' }}>
           載入中…
@@ -380,10 +411,7 @@ function BoardsContent(props: {
           onPendingChange={(pending) => { if (mounted.current) setCreatePending(pending); }}
           onFailure={(kind) => {
             if (!mounted.current) return;
-            const area = recoveryArea.current;
-            if (area?.contains(area.ownerDocument.activeElement)) {
-              setFocusRecovery((current) => current + 1);
-            }
+            keepRecoveryFocus();
             setRecovery(kind);
             setPermissionRetryEpoch(null);
             setClosedPending(false);
