@@ -22,25 +22,43 @@ type Result =
 /** The parent remounts this reader whenever the account or session context changes. */
 export function AccountMemberships({
   context,
+  paused = false,
   refreshAccount,
 }: {
   context: string;
+  paused?: boolean;
   refreshAccount: () => Promise<void>;
 }) {
-  return <MembershipScope key={context} context={context} refreshAccount={refreshAccount} />;
+  return (
+    <MembershipScope key={context} context={context} paused={paused} refreshAccount={refreshAccount} />
+  );
 }
 
 function MembershipScope({
   context,
+  paused,
   refreshAccount,
 }: {
   context: string;
+  paused: boolean;
   refreshAccount: () => Promise<void>;
 }) {
   const [result, setResult] = useState<Result>({ status: 'loading' });
   const [attempt, setAttempt] = useState(0);
   const [notice, setNotice] = useState('');
+  const [submissionPending, setSubmissionPending] = useState(false);
+  const [accountCheck, setAccountCheck] = useState<'idle' | 'pending' | 'error'>('idle');
+  const submissionLocked = useRef(false);
+  const accountCheckLocked = useRef(false);
+  const active = useRef(true);
   useEffect(() => {
+    active.current = true;
+    return () => {
+      active.current = false;
+    };
+  }, []);
+  useEffect(() => {
+    if (paused || result.status !== 'loading') return;
     let active = true;
     void browserRequest('memberships', context)
       .then((value) => {
@@ -60,17 +78,40 @@ function MembershipScope({
     return () => {
       active = false;
     };
-  }, [context, attempt]);
-  function reload() {
+  }, [context, attempt, paused, result.status]);
+  function markSubmissionPending(pending: boolean) {
+    submissionLocked.current = pending;
+    setSubmissionPending(pending);
+  }
+  function requestReload() {
     setResult({ status: 'loading' });
     setAttempt((value) => value + 1);
+  }
+  function reload() {
+    if (paused || submissionLocked.current) return;
+    requestReload();
+  }
+  async function confirmAccount() {
+    if (paused || accountCheckLocked.current || !active.current) return;
+    accountCheckLocked.current = true;
+    setAccountCheck('pending');
+    let failed = false;
+    try {
+      await refreshAccount();
+      if (active.current) requestReload();
+    } catch {
+      failed = true;
+    } finally {
+      accountCheckLocked.current = false;
+      if (active.current) setAccountCheck(failed ? 'error' : 'idle');
+    }
   }
   return (
     <section className={styles.memberships} aria-labelledby="account-schools-title">
       <div className={styles.membershipHeading}>
         <h3 id="account-schools-title">學校資格</h3>
         {result.status === 'ready' && (
-          <button className="btn" onClick={reload}>
+          <button className="btn" onClick={reload} disabled={paused || submissionPending}>
             更新學校資格
           </button>
         )}
@@ -85,14 +126,19 @@ function MembershipScope({
       ) : result.status === 'expired' ? (
         <div role="alert">
           <p>登入已失效或帳號已變更，學校資格已隱藏。</p>
-          <button className="btn" onClick={() => void refreshAccount()}>
-            重新確認帳號
+          {accountCheck === 'error' && <p>目前無法重新確認帳號，請稍後再試。</p>}
+          <button
+            className="btn"
+            onClick={() => void confirmAccount()}
+            disabled={paused || accountCheck === 'pending'}
+          >
+            {accountCheck === 'pending' ? '正在確認帳號…' : '重新確認帳號'}
           </button>
         </div>
       ) : result.status === 'error' ? (
         <div role="alert">
           <p>目前無法讀取學校資格，請稍後再試。</p>
-          <button className="btn" onClick={reload}>
+          <button className="btn" onClick={reload} disabled={paused}>
             重新讀取學校資格
           </button>
         </div>
@@ -112,14 +158,21 @@ function MembershipScope({
         <MembershipRequestForm
           key={context}
           context={context}
-          onStarted={() => setNotice('')}
+          paused={paused}
+          onStarted={() => {
+            markSubmissionPending(true);
+            setNotice('');
+          }}
+          onRejected={() => markSubmissionPending(false)}
           onExpired={() => {
+            markSubmissionPending(false);
             setNotice('');
             setResult({ status: 'expired' });
           }}
           onSubmitted={(message) => {
+            markSubmissionPending(false);
             setNotice(message);
-            reload();
+            requestReload();
           }}
         />
       ) : null}
@@ -129,12 +182,16 @@ function MembershipScope({
 
 function MembershipRequestForm({
   context,
+  paused,
   onStarted,
+  onRejected,
   onSubmitted,
   onExpired,
 }: {
   context: string;
+  paused: boolean;
   onStarted(): void;
+  onRejected(): void;
   onSubmitted(message: string): void;
   onExpired(): void;
 }) {
@@ -154,7 +211,7 @@ function MembershipRequestForm({
   }, []);
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (locked.current || !active.current) return;
+    if (paused || locked.current || !active.current) return;
     try {
       if (!uncertain || !pending.current)
         pending.current = validateMembershipRequestInput({ claimedEmail: email });
@@ -183,6 +240,7 @@ function MembershipRequestForm({
       const unknown =
         !(failure instanceof NuniError) || failure.status === 0 || failure.status >= 500;
       setUncertain(unknown);
+      if (!unknown) onRejected();
       if (unknown) {
         setError('尚未確認申請結果。信箱已保留，請重試確認同一筆申請。');
       } else if (failure instanceof NuniError && failure.code === 'MEMBERSHIP_CLAIM_INVALID') {
@@ -214,13 +272,13 @@ function MembershipRequestForm({
         inputMode="email"
         value={email}
         maxLength={254}
-        disabled={busy || uncertain}
+        disabled={paused || busy || uncertain}
         onChange={(event) => {
-          if (!busy && !uncertain) setEmail(event.target.value);
+          if (!paused && !busy && !uncertain) setEmail(event.target.value);
         }}
       />
       {error ? <p role="alert">{error}</p> : null}
-      <button type="submit" className="btn" disabled={busy}>
+      <button type="submit" className="btn" disabled={paused || busy}>
         {busy ? '正在確認申請…' : uncertain ? '重試確認申請' : '送出資格申請'}
       </button>
     </form>

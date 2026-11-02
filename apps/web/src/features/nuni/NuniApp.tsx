@@ -24,6 +24,7 @@ import {
 } from '@campus/shared/src/taipeiTime';
 import { landOnCourseWork, parseCourseWorkHash } from '@/lib/courseWorkLanding';
 import { AppHeader } from '@/components/AppHeader';
+import { AccountMemberships } from '@/components/AccountMemberships';
 import { NuniSignIn } from '@/components/NuniSignIn';
 import { SiteShell } from '@/components/SiteShell';
 import { useClientHydrated } from '@/lib/useClientHydrated';
@@ -583,6 +584,22 @@ function Workspace({ id }: { id: string }) {
   );
 }
 
+function AccountMembershipEntry({
+  context,
+  paused,
+  refreshAccount,
+}: {
+  context: string;
+  paused: boolean;
+  refreshAccount: () => Promise<void>;
+}) {
+  const [confirmed, setConfirmed] = useState(!paused);
+  if (!paused && !confirmed) setConfirmed(true);
+  return confirmed ? (
+    <AccountMemberships context={context} paused={paused} refreshAccount={refreshAccount} />
+  ) : null;
+}
+
 function NuniContent() {
   const pathname = usePathname() || '/';
   const hydrated = useClientHydrated();
@@ -593,13 +610,21 @@ function NuniContent() {
   else if (pathname === '/classroom/account')
     content = (
       <section className={styles.panel}>
-        <h1>Google 帳號</h1>
-        <p className={styles.muted}>你目前使用 Google 帳號登入課程空間。</p>
-        <p>校園個人資料與設定仍可從「所有服務」開啟，可在帳號設定查看各項登入狀態。</p>
-        <p>課程身分由各課程管理；學校權限由學校核發。</p>
+        <h1>我的帳號</h1>
+        <p className={styles.muted}>
+          查看各校資格，或用學校配發的信箱提出申請。課程身分仍由各課程管理。
+        </p>
         <Link className={styles.button} href="/classroom">
           前往我的課程
         </Link>
+        {!error && !pendingLogout && (
+          <AccountMembershipEntry
+            key={`${session.platformAccountId}:${session.context}`}
+            context={session.context}
+            paused={loading}
+            refreshAccount={refresh}
+          />
+        )}
       </section>
     );
   else if (pathname === '/classroom') content = <WorkspaceList key={session.context} />;
