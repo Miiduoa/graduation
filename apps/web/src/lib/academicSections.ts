@@ -1,11 +1,13 @@
-/** 課務次級導覽：主 Tab／AcademicNav／服務目錄共用同一套名稱。 */
-export const ACADEMIC_SECTIONS = [
-  { path: '/timetable', label: '課表' },
-  { path: '/classroom', label: '課程與作業' },
-  { path: '/grades', label: '成績' },
-  { path: '/credit-planner', label: '學分規劃' },
-  { path: '/calendar', label: '行事曆' },
-] as const;
+import { STUDENT_ACADEMIC_SECTIONS } from '@campus/shared/src/academicSections';
+
+/** 課務次級導覽：主 Tab／AcademicNav／服務目錄共用同一套名稱（來源：packages/shared）。 */
+export const ACADEMIC_SECTIONS = STUDENT_ACADEMIC_SECTIONS.map((section) => ({
+  path: section.webPath,
+  label: section.label,
+})) as ReadonlyArray<{
+  readonly path: (typeof STUDENT_ACADEMIC_SECTIONS)[number]['webPath'];
+  readonly label: (typeof STUDENT_ACADEMIC_SECTIONS)[number]['label'];
+}>;
 
 /** 玩課雲（WOW Class／TronClass）唯讀入口；名稱統一為「玩課雲」。 */
 export const ACADEMIC_LMS_SECTIONS = [
