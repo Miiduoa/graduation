@@ -47,6 +47,47 @@
 .cabinetCard {
   display: grid;
   gap: 12px;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.bookmarkCard,
+.bookmarkEmpty {
+  display: grid;
+  gap: 12px;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.bookmarkEmpty {
+  padding: 28px 0 8px;
+}
+.bookmarkCard :is(h2, p),
+.bookmarkEmpty :is(h2, p) {
+  margin: 0;
+}
+.bookmarkButton {
+  max-width: 100%;
+  min-width: 0;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  line-height: 1.6;
+  text-align: center;
+  font-size: 1rem;
+}
+.bookmarkCard h2,
+.bookmarkEmpty h2 {
+  font-size: 1.125rem;
+  line-height: 1.5;
+}
+.bookmarkCard .metadata,
+.bookmarkCard .note {
+  font-size: 0.875rem;
+}
+.bookmarkActions > button {
+  flex: 1 1 160px;
+}
+.bookmarkButton:focus-visible {
+  outline: 2px solid var(--brand);
+  outline-offset: 3px;
 }
 .cabinetSearch {
   display: grid;

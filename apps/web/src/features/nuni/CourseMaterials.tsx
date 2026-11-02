@@ -8,6 +8,8 @@ import {
   type NuniWorkspace,
 } from '@campus/shared/src/nuni';
 import { materialCapabilities, materialFailureMessage, readMaterialWithDeadline } from '@campus/shared/src/materialAccess';
+import { materialBookmarkId } from '@campus/shared/src/materialBookmarks';
+import { useMaterialBookmarks } from '@/lib/materialBookmarks';
 import { shareCourseMaterial } from '@/lib/shareCourseMaterial';
 import { formatTaipeiDateTime } from '@campus/shared/src/taipeiTime';
 import {
@@ -78,7 +80,7 @@ export function CourseMaterials({ workspace, units, onChanged }: { workspace: Nu
   if (!session || pendingLogout) return null;
   return (
     <Materials
-      key={`${session.context}:${workspace.id}:${workspace.memberRole}:${workspace.state}`}
+      key={`${session.platformAccountId}:${session.context}:${workspace.id}:${workspace.memberRole}:${workspace.state}`}
       workspace={workspace}
       units={units}
       onChanged={onChanged}
@@ -113,6 +115,8 @@ function Materials({
   const [query, setQuery] = useState('');
   const now = useClientNow();
   const readIds = useMaterialReadIds(accountId);
+  const bookmarks = useMaterialBookmarks(accountId);
+  const savedIds = new Set(bookmarks.items.map(materialBookmarkId));
   const moreRequest = useRef<symbol | null>(null);
   const request = useRef(0);
   const seenCursors = useRef(new Set<string>());
@@ -296,7 +300,20 @@ function Materials({
         依週次或單元整理教材，可搜尋名稱與內容。閱讀教材不會算成作業完成。
       </p>
       <p className={styles.note}>{materialCapabilities(workspace)}</p>
-      <a href={`/classroom/course/${encodeURIComponent(workspace.id)}`}>回課程首頁</a>
+      <div className={shared.actions}>
+        <a href={`/classroom/course/${encodeURIComponent(workspace.id)}`}>回課程首頁</a>
+        <a href="/classroom/material-bookmarks">此裝置收藏</a>
+      </div>
+      <p className={styles.note}>收藏只記在此瀏覽器的目前帳號，換裝置不會同步；閱讀與收藏分開記錄。</p>
+      {bookmarks.error && (
+        <div role="alert" className={shared.notice}>
+          <p>{bookmarks.error}</p>
+          <button type="button" className={`${shared.button} ${shared.secondary}`}
+            disabled={bookmarks.loading} onClick={() => void bookmarks.reload()}>
+            {bookmarks.loading ? '讀取收藏中…' : '重新讀取收藏'}
+          </button>
+        </div>
+      )}
       {workspace.state === 'archived' && (
         <p className={styles.note}>課程已封存，教材保留供成員閱讀。</p>
       )}
@@ -344,6 +361,9 @@ function Materials({
                       const described = describeMaterial(item);
                       const unread = readIds != null && !readIds.has(item.id);
                       const fresh = now != null && isMaterialNew(item.createdAt, now);
+                      const bookmarkKey = materialBookmarkId({ courseId: workspace.id, materialId: item.id });
+                      const saved = savedIds.has(bookmarkKey);
+                      const saving = bookmarks.pending.includes(bookmarkKey);
                       return (
                         <li key={item.id}>
                           <article
@@ -364,6 +384,22 @@ function Materials({
                             </div>
                             <h3 id={`material-heading-${item.id}`}>{item.title}</h3>
                             <CourseText text={item.body} />
+                            <button
+                              type="button"
+                              className={`${shared.button} ${shared.secondary} ${styles.bookmarkButton}`}
+                              aria-label={`${saved ? '移除' : '加入'}「${item.title}」的此裝置收藏`}
+                              aria-pressed={saved}
+                              aria-busy={saving}
+                              disabled={!bookmarks.ready || saving}
+                              onClick={async () => {
+                                setNotice('');
+                                const changed = await bookmarks.setBookmark(workspace.id, item.id, !saved);
+                                if (changed && mounted.current && !denied.current)
+                                  setNotice(saved ? '已移除此裝置收藏。' : '已加入此裝置收藏，可從收藏清單再開啟。');
+                              }}
+                            >
+                              {saving ? (saved ? '移除中…' : '收藏中…') : saved ? '已加入此裝置收藏' : '加入此裝置收藏'}
+                            </button>
                             <a href={courseMaterialHref(workspace.id, item.id)}>這份教材的連結</a>
                             <button type="button" className={`${shared.button} ${shared.secondary}`}
                               onClick={() => void shareCourseMaterial(item.title, courseMaterialHref(workspace.id, item.id))
