@@ -95,6 +95,29 @@ it('stops without accepting a delayed final transcript or waiting for onend', ()
   expect(screen.getByRole('button', { name: '使用語音輸入' })).toBeTruthy();
 });
 
+it('rejects final speech after stop even when the browser has not delivered onend', () => {
+  const { recognition, lateResult, onTranscript } = startCapture();
+  recognition.stop.mockImplementation(() => undefined);
+  fireEvent.click(screen.getByRole('button', { name: '停止語音輸入' }));
+  act(() => lateResult(finalResult('停止後才送達的轉寫')));
+  expect(onTranscript).not.toHaveBeenCalled();
+  expect(screen.getByRole('button', { name: '使用語音輸入' })).toBeTruthy();
+});
+
+it('starts a fresh capture after natural end and ignores the previous final event', () => {
+  const { recognition, lateResult, onTranscript } = startCapture();
+  act(() => recognition.onend?.());
+  expect(recognition.abort).not.toHaveBeenCalled();
+  expect(screen.queryByRole('status')).toBeNull();
+  fireEvent.click(screen.getByRole('button', { name: '使用語音輸入' }));
+  const next = FakeSpeechRecognition.last;
+  expect(next).not.toBe(recognition);
+  act(() => lateResult(finalResult('已結束的舊轉寫')));
+  expect(onTranscript).not.toHaveBeenCalled();
+  act(() => next.onresult?.(finalResult('重新開始的轉寫')));
+  expect(onTranscript).toHaveBeenCalledExactlyOnceWith('重新開始的轉寫');
+});
+
 it('invalidates the capture immediately when disabled and allows a fresh capture later', () => {
   const { view, recognition, lateResult, onTranscript } = startCapture();
   view.rerender(<VoiceDictationButton onTranscript={onTranscript} disabled />);
