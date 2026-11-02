@@ -2,8 +2,10 @@
 
 const {
   FANOUT_BATCH_SIZE,
+  DEFAULT_LEASE_TTL_MS,
   hashEventKey,
   claimNotificationEvent,
+  completeNotificationClaim,
   releaseNotificationClaim,
   createAssignmentPublishedNotifyHandler,
   createSubmissionNotifyHandler,
@@ -12,6 +14,7 @@ const {
 
 function memoryDb(seed = {}) {
   const docs = new Map(Object.entries(seed));
+  let txChain = Promise.resolve();
   const api = {
     docs,
     collection(name) {
@@ -21,6 +24,50 @@ function memoryDb(seed = {}) {
           return makeRef(api, path);
         },
       };
+    },
+    async runTransaction(callback) {
+      // 序列化交易，模擬 Firestore 對同一文件的互斥，供併發測試使用
+      const run = txChain.then(async () => {
+        const base = new Map(docs);
+        const writes = [];
+        const tx = {
+          get: async (ref) => {
+            const path = ref.path;
+            if (!base.has(path)) return { exists: false, data: () => undefined, id: ref.id };
+            return { exists: true, data: () => ({ ...base.get(path) }), id: ref.id };
+          },
+          create: (ref, data) => writes.push({ type: 'create', path: ref.path, data }),
+          set: (ref, data, opts = {}) =>
+            writes.push({ type: 'set', path: ref.path, data, merge: !!opts.merge }),
+          update: (ref, data) => writes.push({ type: 'update', path: ref.path, data }),
+          delete: (ref) => writes.push({ type: 'delete', path: ref.path }),
+        };
+        const result = await callback(tx);
+        for (const write of writes) {
+          if (write.type === 'create') {
+            if (docs.has(write.path)) {
+              const error = new Error('ALREADY_EXISTS');
+              error.code = 6;
+              throw error;
+            }
+            docs.set(write.path, { ...write.data });
+          } else if (write.type === 'set') {
+            const prev = write.merge ? docs.get(write.path) || {} : {};
+            docs.set(write.path, { ...prev, ...write.data });
+          } else if (write.type === 'update') {
+            if (!docs.has(write.path)) throw new Error('missing document');
+            docs.set(write.path, { ...docs.get(write.path), ...write.data });
+          } else if (write.type === 'delete') {
+            docs.delete(write.path);
+          }
+        }
+        return result;
+      });
+      txChain = run.then(
+        () => undefined,
+        () => undefined,
+      );
+      return run;
     },
   };
   return api;
@@ -73,9 +120,14 @@ function makeRef(db, path) {
       }
       db.docs.set(path, { ...data });
     },
-    async set(data) {
-      const prev = db.docs.get(path) || {};
+    async set(data, opts = {}) {
+      const prev = opts.merge ? db.docs.get(path) || {} : db.docs.get(path) || {};
+      // merge:true 與預設皆合併既有欄位，與既有測試／inbox merge 行為一致
       db.docs.set(path, { ...prev, ...data });
+    },
+    async update(data) {
+      if (!db.docs.has(path)) throw new Error('missing document');
+      db.docs.set(path, { ...db.docs.get(path), ...data });
     },
     async delete() {
       db.docs.delete(path);
@@ -84,13 +136,19 @@ function makeRef(db, path) {
 }
 
 describe('claimNotificationEvent', () => {
-  test('first claim wins; retry is duplicate; stores original eventKey under sha256 id', async () => {
+  test('first claim wins; active lease is duplicate; stores original eventKey under sha256 id', async () => {
     const db = memoryDb();
-    expect(await claimNotificationEvent(db, 'evt_1', { kind: 't' })).toBe(true);
-    expect(await claimNotificationEvent(db, 'evt_1', { kind: 't' })).toBe(false);
+    const t0 = 1_700_000_000_000;
+    expect(
+      await claimNotificationEvent(db, 'evt_1', { kind: 't' }, { nowMs: t0, leaseTtlMs: 60_000 }),
+    ).toBe(true);
+    expect(
+      await claimNotificationEvent(db, 'evt_1', { kind: 't' }, { nowMs: t0 + 1000, leaseTtlMs: 60_000 }),
+    ).toBe(false);
     const docId = hashEventKey('evt_1');
     expect(db.docs.has(`notificationClaims/${docId}`)).toBe(true);
     expect(db.docs.get(`notificationClaims/${docId}`).eventKey).toBe('evt_1');
+    expect(db.docs.get(`notificationClaims/${docId}`).status).toBe('processing');
   });
 
   test('long eventKey is claimed via sha256 instead of silent duplicate', async () => {
@@ -108,11 +166,37 @@ describe('claimNotificationEvent', () => {
     expect(db.docs.get(`notificationClaims/${docId}`).eventKey).toBe(longKey);
   });
 
-  test('release allows reclaim after failure', async () => {
+  test('release allows reclaim after failure; completed blocks reclaim', async () => {
     const db = memoryDb();
     expect(await claimNotificationEvent(db, 'evt_rel', {})).toBe(true);
     await releaseNotificationClaim(db, 'evt_rel');
     expect(await claimNotificationEvent(db, 'evt_rel', {})).toBe(true);
+    await completeNotificationClaim(db, 'evt_rel');
+    expect(await claimNotificationEvent(db, 'evt_rel', {})).toBe(false);
+    await releaseNotificationClaim(db, 'evt_rel');
+    expect(db.docs.get(`notificationClaims/${hashEventKey('evt_rel')}`).status).toBe('completed');
+  });
+
+  test('expired lease can be taken over; legacy claim without status is treated completed', async () => {
+    const db = memoryDb();
+    const t0 = 1_700_000_000_000;
+    const leaseTtlMs = 10_000;
+    expect(
+      await claimNotificationEvent(db, 'evt_lease', {}, { nowMs: t0, leaseTtlMs }),
+    ).toBe(true);
+    expect(
+      await claimNotificationEvent(db, 'evt_lease', {}, { nowMs: t0 + leaseTtlMs - 1, leaseTtlMs }),
+    ).toBe(false);
+    expect(
+      await claimNotificationEvent(db, 'evt_lease', {}, { nowMs: t0 + leaseTtlMs + 1, leaseTtlMs }),
+    ).toBe(true);
+
+    const legacyKey = 'evt_legacy';
+    db.docs.set(`notificationClaims/${hashEventKey(legacyKey)}`, {
+      eventKey: legacyKey,
+      claimedAt: { sentinel: true },
+    });
+    expect(await claimNotificationEvent(db, legacyKey, {}, { nowMs: t0, leaseTtlMs })).toBe(false);
   });
 });
 
@@ -155,6 +239,10 @@ describe('assignment published notify', () => {
     });
     const inboxId = hashEventKey('assignment_published__c1__a1');
     expect(db.docs.has(`users/stu1/notifications/${inboxId}`)).toBe(true);
+    const claimStu1 = db.docs.get(
+      `notificationClaims/${hashEventKey('assignment_published__c1__a1__uid__stu1')}`,
+    );
+    expect(claimStu1.status).toBe('completed');
   });
 
   test('partial push failure releases unfinished claims; retry only fills gaps', async () => {
@@ -189,10 +277,171 @@ describe('assignment published notify', () => {
 
     await expect(handler(event)).rejects.toThrow(/push unavailable/);
     attempt = 1;
-    // stu1 已送達應保留 claim；stu2／stu3 應可補送
+    // stu1 已送達應保留 completed；stu2／stu3 應可補送
     expect(await handler(event)).toMatchObject({ status: 'sent', recipients: 2 });
     expect(pushes.map((row) => row.uid).sort()).toEqual(['stu1', 'stu2', 'stu3']);
     expect(await handler(event)).toMatchObject({ status: 'duplicate' });
+  });
+
+  test('process kill mid-fanout without release: retry after lease expiry fills gaps only', async () => {
+    const db = memoryDb({
+      'groups/c1/members/stu1': { status: 'active', role: 'student' },
+      'groups/c1/members/stu2': { status: 'active', role: 'student' },
+      'groups/c1/members/stu3': { status: 'active', role: 'student' },
+    });
+    let clock = 1_700_000_000_000;
+    const leaseTtlMs = 30_000;
+    const pushes = [];
+    let simulateKill = true;
+    const event = {
+      params: { groupId: 'c1', assignmentId: 'a-kill' },
+      data: {
+        data: () => ({
+          title: '中斷測試',
+          type: 'assignment',
+          published: true,
+          createdBy: 'teach',
+          schoolId: 'pu',
+        }),
+      },
+    };
+    const makeHandler = (releaseClaim) =>
+      createAssignmentPublishedNotifyHandler({
+        db,
+        now: () => clock,
+        leaseTtlMs,
+        releaseClaim,
+        sendPushToUser: async (uid, note, data) => {
+          pushes.push({ uid, note, data });
+          // stu1 已成功返回後才輪到 stu2；在此拋錯模擬進程被殺
+          if (simulateKill && uid === 'stu2') {
+            throw new Error('PROCESS_KILLED');
+          }
+        },
+      });
+
+    // release 為 no-op：模擬逾時／被殺來不及跑 release
+    // stu2 在 throw 前記錄一次（未 complete）；真正送達成功的只有 stu1
+    await expect(makeHandler(async () => undefined)(event)).rejects.toThrow(/PROCESS_KILLED/);
+    expect(pushes.map((row) => row.uid)).toEqual(['stu1', 'stu2']);
+    expect(
+      db.docs.get(
+        `notificationClaims/${hashEventKey('assignment_published__c1__a-kill__uid__stu1')}`,
+      ).status,
+    ).toBe('completed');
+    expect(
+      db.docs.get(
+        `notificationClaims/${hashEventKey('assignment_published__c1__a-kill__uid__stu2')}`,
+      ).status,
+    ).toBe('processing');
+    expect(
+      db.docs.get(
+        `notificationClaims/${hashEventKey('assignment_published__c1__a-kill__uid__stu3')}`,
+      ).status,
+    ).toBe('processing');
+
+    simulateKill = false;
+    const retryHandler = makeHandler(releaseNotificationClaim);
+    // lease 未過期：略過 processing，不重送 completed
+    expect(await retryHandler(event)).toMatchObject({ status: 'duplicate', recipients: 0 });
+    expect(pushes.map((row) => row.uid)).toEqual(['stu1', 'stu2']);
+
+    // lease 過期後接手補送 stu2／stu3，不重發 stu1
+    clock += leaseTtlMs + 1;
+    expect(await retryHandler(event)).toMatchObject({ status: 'sent', recipients: 2 });
+    expect(pushes.map((row) => row.uid).sort()).toEqual(['stu1', 'stu2', 'stu2', 'stu3']);
+    expect(pushes.filter((row) => row.uid === 'stu1')).toHaveLength(1);
+    expect(pushes.filter((row) => row.uid === 'stu2')).toHaveLength(2); // 中斷一次 + 補送一次
+    expect(pushes.filter((row) => row.uid === 'stu3')).toHaveLength(1);
+    expect(await retryHandler(event)).toMatchObject({ status: 'duplicate' });
+  });
+
+  test('expired lease takeover delivers remaining recipient', async () => {
+    const db = memoryDb({
+      'groups/c1/members/stu1': { status: 'active', role: 'student' },
+    });
+    const leaseTtlMs = 5_000;
+    let clock = 1_000_000;
+    const eventKey = 'assignment_published__c1__a-expire';
+    await claimNotificationEvent(
+      db,
+      `${eventKey}__uid__stu1`,
+      { uid: 'stu1' },
+      { nowMs: clock, leaseTtlMs },
+    );
+    const pushes = [];
+    const handler = createAssignmentPublishedNotifyHandler({
+      db,
+      now: () => clock,
+      leaseTtlMs,
+      sendPushToUser: async (uid) => {
+        pushes.push(uid);
+      },
+    });
+    const event = {
+      params: { groupId: 'c1', assignmentId: 'a-expire' },
+      data: {
+        data: () => ({
+          title: '過期接手',
+          type: 'assignment',
+          published: true,
+          createdBy: 'teach',
+          schoolId: 'pu',
+        }),
+      },
+    };
+    expect(await handler(event)).toMatchObject({ status: 'duplicate' });
+    clock += leaseTtlMs + 1;
+    expect(await handler(event)).toMatchObject({ status: 'sent', recipients: 1 });
+    expect(pushes).toEqual(['stu1']);
+  });
+
+  test('concurrent fanout executions do not double-send', async () => {
+    const db = memoryDb({
+      'groups/c1/members/stu1': { status: 'active', role: 'student' },
+      'groups/c1/members/stu2': { status: 'active', role: 'student' },
+    });
+    const pushes = [];
+    let gate = null;
+    let releaseGate = null;
+    const handler = createAssignmentPublishedNotifyHandler({
+      db,
+      sendPushToUser: async (uid, note, data) => {
+        if (uid === 'stu1' && !gate) {
+          gate = new Promise((resolve) => {
+            releaseGate = resolve;
+          });
+          await gate;
+        }
+        pushes.push({ uid, note, data });
+      },
+    });
+    const event = {
+      params: { groupId: 'c1', assignmentId: 'a-conc' },
+      data: {
+        data: () => ({
+          title: '併發',
+          type: 'assignment',
+          published: true,
+          createdBy: 'teach',
+          schoolId: 'pu',
+        }),
+      },
+    };
+
+    const runA = handler(event);
+    // 等 A 取得 lease 並卡在 stu1 push
+    for (let i = 0; i < 50 && !releaseGate; i += 1) {
+      await new Promise((r) => setImmediate(r));
+    }
+    expect(typeof releaseGate).toBe('function');
+    const runB = handler(event);
+    releaseGate();
+    const [resultA, resultB] = await Promise.all([runA, runB]);
+    const statuses = [resultA.status, resultB.status].sort();
+    expect(statuses).toEqual(['duplicate', 'sent']);
+    expect(pushes.map((row) => row.uid).sort()).toEqual(['stu1', 'stu2']);
+    expect(pushes).toHaveLength(2);
   });
 });
 
@@ -306,6 +555,7 @@ describe('submission notify', () => {
     expect(pushes).toHaveLength(1);
     expect(pushes[0].uid).toBe('teach');
     expect(db.docs.has(`notificationClaims/${hashEventKey(eventKey)}`)).toBe(true);
+    expect(db.docs.get(`notificationClaims/${hashEventKey(eventKey)}`).status).toBe('completed');
   });
 });
 
@@ -423,7 +673,7 @@ describe('school announcement notify', () => {
     const pushes = [];
     const handler = createSchoolAnnouncementNotifyHandler({
       db,
-      sendPushToUser: async (uid, note, data) => {
+      sendPushToUser: async (uid) => {
         if (attempt === 0 && uid === 'stu2') {
           throw new Error('transient push error');
         }
@@ -446,5 +696,11 @@ describe('school announcement notify', () => {
     expect(await handler(event)).toMatchObject({ status: 'sent', recipients: 2 });
     expect([...pushes].sort()).toEqual(['stu1', 'stu2', 'stu3']);
     expect(await handler(event)).toMatchObject({ status: 'duplicate' });
+  });
+});
+
+describe('lease defaults', () => {
+  test('DEFAULT_LEASE_TTL_MS is positive', () => {
+    expect(DEFAULT_LEASE_TTL_MS).toBeGreaterThan(0);
   });
 });

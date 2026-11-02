@@ -1,10 +1,12 @@
 'use strict';
 
-const crypto = require('crypto');
+const { createHash } = require('node:crypto');
 const { FieldValue } = require('firebase-admin/firestore');
 
 const CLAIM_COLLECTION = 'notificationClaims';
 const FANOUT_BATCH_SIZE = 1000;
+/** 處理中 lease 預設 5 分鐘；逾時／進程被殺後可被重試接手。 */
+const DEFAULT_LEASE_TTL_MS = 5 * 60 * 1000;
 const TEACHING_ROLES = new Set(['instructor', 'owner', 'teacher', 'ta']);
 /** 校園公告受眾：明確 allowlist；空 role 不推。含既有教職員代表角色。 */
 const CAMPUS_AUDIENCE_ROLES = new Set(['student', 'teacher', 'admin', 'staff', 'editor']);
@@ -26,42 +28,124 @@ function text(value, fallback = '') {
 
 /** claim／inbox 文件 id：sha256(eventKey)，避免複合鍵超長被 safeId 靜默拒絕。 */
 function hashEventKey(eventKey) {
-  return crypto.createHash('sha256').update(String(eventKey), 'utf8').digest('hex');
+  return createHash('sha256').update(String(eventKey), 'utf8').digest('hex');
 }
 
 function recipientEventKey(eventKey, uid) {
   return `${eventKey}__uid__${uid}`;
 }
 
+function isLeaseActive(data, nowMs, leaseTtlMs) {
+  if (!data || data.status !== 'processing') return false;
+  const processingAt = Number(data.processingAt);
+  if (!Number.isFinite(processingAt)) return false;
+  return processingAt + leaseTtlMs > nowMs;
+}
+
 /**
- * 以 create-only claim 做到同一事件（或同一收件人）不重複推送。
- * 文件 id 為 eventKey 的 sha256；原文存在 eventKey 欄位。
- * 回傳 true 表示本呼叫取得發送權；false 表示已處理過或鍵無效。
+ * 取得發送權：新建 processing lease，或接手已過期 lease。
+ * 跳過 completed、未過期 lease、以及舊版無 status 的 create-only claim（視為已完成）。
+ * 回傳 true 表示本呼叫取得發送權；false 表示應略過。
  */
-async function claimNotificationEvent(db, eventKey, meta = {}) {
+async function claimNotificationEvent(db, eventKey, meta = {}, opts = {}) {
   if (typeof eventKey !== 'string' || !eventKey) return false;
   const docId = hashEventKey(eventKey);
   const ref = db.collection(CLAIM_COLLECTION).doc(docId);
-  try {
-    await ref.create({
-      eventKey,
-      ...meta,
-      claimedAt: FieldValue.serverTimestamp(),
+  const nowMs = opts.nowMs ?? Date.now();
+  const leaseTtlMs = opts.leaseTtlMs ?? DEFAULT_LEASE_TTL_MS;
+  const leasePayload = {
+    eventKey,
+    ...meta,
+    status: 'processing',
+    processingAt: nowMs,
+    claimedAt: FieldValue.serverTimestamp(),
+  };
+
+  const decide = (snap) => {
+    if (!snap.exists) return { action: 'create' };
+    const data = typeof snap.data === 'function' ? snap.data() : snap.data;
+    const row = data || {};
+    if (row.status === 'completed') return { action: 'skip' };
+    // 舊版僅 create、無 status／processingAt → 視為已送達，避免重送
+    if (row.status == null) return { action: 'skip' };
+    if (isLeaseActive(row, nowMs, leaseTtlMs)) return { action: 'skip' };
+    return { action: 'takeover' };
+  };
+
+  if (typeof db.runTransaction === 'function') {
+    return db.runTransaction(async (tx) => {
+      const snap = await tx.get(ref);
+      const decision = decide(snap);
+      if (decision.action === 'skip') return false;
+      if (decision.action === 'create') {
+        if (typeof tx.create === 'function') {
+          tx.create(ref, leasePayload);
+        } else {
+          tx.set(ref, leasePayload);
+        }
+        return true;
+      }
+      if (typeof tx.set === 'function') {
+        tx.set(ref, leasePayload);
+      } else {
+        tx.update(ref, leasePayload);
+      }
+      return true;
     });
-    return true;
-  } catch (error) {
-    if (error?.code === 6 || error?.code === 'already-exists' || /ALREADY_EXISTS/i.test(String(error))) {
-      return false;
+  }
+
+  const snap = await ref.get();
+  const decision = decide(snap);
+  if (decision.action === 'skip') return false;
+  if (decision.action === 'create') {
+    try {
+      await ref.create(leasePayload);
+      return true;
+    } catch (error) {
+      if (error?.code === 6 || error?.code === 'already-exists' || /ALREADY_EXISTS/i.test(String(error))) {
+        return false;
+      }
+      throw error;
     }
-    throw error;
+  }
+  if (typeof ref.set === 'function') {
+    await ref.set(leasePayload);
+  } else {
+    await ref.update(leasePayload);
+  }
+  return true;
+}
+
+/** 送達成功後標記 completed；重試會跳過。 */
+async function completeNotificationClaim(db, eventKey) {
+  if (typeof eventKey !== 'string' || !eventKey) return;
+  const docId = hashEventKey(eventKey);
+  const ref = db.collection(CLAIM_COLLECTION).doc(docId);
+  const payload = {
+    status: 'completed',
+    completedAt: FieldValue.serverTimestamp(),
+    processingAt: null,
+  };
+  if (typeof ref.set === 'function') {
+    await ref.set(payload, { merge: true });
+  } else {
+    await ref.update(payload);
   }
 }
 
-/** 發送失敗時釋放 claim，讓觸發器重試可補送該收件人。 */
+/**
+ * 明確失敗時釋放 processing lease，讓觸發器可立即重試。
+ * 已 completed 者不刪，避免誤清成功紀錄。
+ */
 async function releaseNotificationClaim(db, eventKey) {
   if (typeof eventKey !== 'string' || !eventKey) return;
   const docId = hashEventKey(eventKey);
-  await db.collection(CLAIM_COLLECTION).doc(docId).delete();
+  const ref = db.collection(CLAIM_COLLECTION).doc(docId);
+  const snap = await ref.get();
+  if (!snap.exists) return;
+  const data = snap.data() || {};
+  if (data.status === 'completed') return;
+  await ref.delete();
 }
 
 async function writeInboxNotification(db, uid, notificationId, payload) {
@@ -123,13 +207,14 @@ async function deliverToUser({
 }
 
 /**
- * 單收件人：claim → 送達；失敗釋放 claim 並丟錯以便重試。
+ * 單收件人：lease → 送達 → completed；失敗釋放 lease 並丟錯以便重試。
  */
 async function claimAndDeliverToUser({
   db,
   sendPushToUser,
   claim,
   releaseClaim,
+  completeClaim,
   eventKey,
   claimMeta,
   uid,
@@ -139,9 +224,10 @@ async function claimAndDeliverToUser({
   schoolId,
   data,
   category,
+  claimOpts = {},
   log = console,
 }) {
-  if (!(await claim(db, eventKey, claimMeta))) {
+  if (!(await claim(db, eventKey, claimMeta, claimOpts))) {
     return { status: 'duplicate' };
   }
   try {
@@ -158,6 +244,7 @@ async function claimAndDeliverToUser({
       category,
       log,
     });
+    await completeClaim(db, eventKey);
   } catch (error) {
     await releaseClaim(db, eventKey);
     throw error;
@@ -166,8 +253,9 @@ async function claimAndDeliverToUser({
 }
 
 /**
- * 多人扇出：每位收件人獨立 claim；每批 ≤1000；優先 sendPushToMultipleUsers。
- * 任一 inbox／硬推送失敗則釋放未完成者的 claim 並丟錯；重試只補未 claim 成功者。
+ * 多人扇出：每位收件人獨立 lease；每批 ≤1000；優先 sendPushToMultipleUsers。
+ * 成功後才 completed；明確失敗釋放未完成者；逾時未 release 則靠 lease 過期接手。
+ * 任一 inbox／硬推送失敗則丟錯；重試只補未完成者。
  */
 async function fanoutToRecipients({
   db,
@@ -175,6 +263,7 @@ async function fanoutToRecipients({
   sendPushToMultipleUsers,
   claim,
   releaseClaim,
+  completeClaim,
   eventKey,
   claimMeta,
   recipients,
@@ -184,6 +273,7 @@ async function fanoutToRecipients({
   schoolId,
   data,
   category,
+  claimOpts = {},
   log = console,
 }) {
   if (!recipients.length) {
@@ -201,7 +291,7 @@ async function fanoutToRecipients({
 
     for (const uid of batch) {
       const key = recipientEventKey(eventKey, uid);
-      if (await claim(db, key, { ...claimMeta, uid })) {
+      if (await claim(db, key, { ...claimMeta, uid }, claimOpts)) {
         pending.push(uid);
       } else {
         skipped += 1;
@@ -209,6 +299,17 @@ async function fanoutToRecipients({
     }
 
     if (!pending.length) continue;
+
+    const releasePending = async (uids) => {
+      await Promise.all(
+        uids.map((id) => releaseClaim(db, recipientEventKey(eventKey, id))),
+      );
+    };
+    const completePending = async (uids) => {
+      await Promise.all(
+        uids.map((id) => completeClaim(db, recipientEventKey(eventKey, id))),
+      );
+    };
 
     for (let i = 0; i < pending.length; i += 1) {
       const uid = pending[i];
@@ -226,10 +327,8 @@ async function fanoutToRecipients({
           inboxId,
           error: String(error),
         });
-        // 釋放本批全部 claim（含已寫 inbox 尚未推播者），重試可完整補送
-        await Promise.all(
-          pending.map((id) => releaseClaim(db, recipientEventKey(eventKey, id))),
-        );
+        // 本批尚無 completed；釋放全部 pending，重試可完整補送
+        await releasePending(pending);
         throw error;
       }
     }
@@ -249,20 +348,21 @@ async function fanoutToRecipients({
           pending: pending.length,
           error: String(error),
         });
-        await Promise.all(
-          pending.map((uid) => releaseClaim(db, recipientEventKey(eventKey, uid))),
-        );
+        await releasePending(pending);
         throw error;
       }
-      const hardFails = (Array.isArray(results) ? results : []).filter(
-        (row) => row && row.reason === 'recipient_unavailable',
+      const hardFailUids = new Set(
+        (Array.isArray(results) ? results : [])
+          .filter((row) => row && row.reason === 'recipient_unavailable')
+          .map((row) => row.uid),
       );
-      if (hardFails.length) {
-        await Promise.all(
-          hardFails.map((row) => releaseClaim(db, recipientEventKey(eventKey, row.uid))),
-        );
+      const succeeded = pending.filter((uid) => !hardFailUids.has(uid));
+      await completePending(succeeded);
+      delivered += succeeded.length;
+      if (hardFailUids.size) {
+        await releasePending([...hardFailUids]);
         throw new Error(
-          `[coherenceNotify] push failed for ${hardFails.length} recipient(s)`,
+          `[coherenceNotify] push failed for ${hardFailUids.size} recipient(s)`,
         );
       }
     } else {
@@ -270,20 +370,16 @@ async function fanoutToRecipients({
         const uid = pending[i];
         try {
           await sendPushToUser(uid, { title, body }, pushData, category);
+          await completeClaim(db, recipientEventKey(eventKey, uid));
+          delivered += 1;
         } catch (error) {
           log.error('[coherenceNotify] push failed', { uid, type, error: String(error) });
           await releaseClaim(db, recipientEventKey(eventKey, uid));
-          await Promise.all(
-            pending
-              .slice(i + 1)
-              .map((id) => releaseClaim(db, recipientEventKey(eventKey, id))),
-          );
+          await releasePending(pending.slice(i + 1));
           throw error;
         }
       }
     }
-
-    delivered += pending.length;
   }
 
   if (delivered === 0 && skipped > 0) {
@@ -329,6 +425,9 @@ function createAssignmentPublishedNotifyHandler({
   sendPushToMultipleUsers,
   claim = claimNotificationEvent,
   releaseClaim = releaseNotificationClaim,
+  completeClaim = completeNotificationClaim,
+  now = () => Date.now(),
+  leaseTtlMs = DEFAULT_LEASE_TTL_MS,
   log = console,
 }) {
   return async function onAssignmentPublished(event) {
@@ -361,6 +460,7 @@ function createAssignmentPublishedNotifyHandler({
       sendPushToMultipleUsers,
       claim,
       releaseClaim,
+      completeClaim,
       eventKey,
       claimMeta: { kind: 'assignment_published', groupId, assignmentId },
       recipients,
@@ -370,6 +470,7 @@ function createAssignmentPublishedNotifyHandler({
       schoolId,
       data,
       category: 'assignments',
+      claimOpts: { nowMs: now(), leaseTtlMs },
       log,
     });
   };
@@ -380,6 +481,9 @@ function createSubmissionNotifyHandler({
   sendPushToUser,
   claim = claimNotificationEvent,
   releaseClaim = releaseNotificationClaim,
+  completeClaim = completeNotificationClaim,
+  now = () => Date.now(),
+  leaseTtlMs = DEFAULT_LEASE_TTL_MS,
   log = console,
 }) {
   return async function onAssignmentSubmissionWritten(event) {
@@ -395,6 +499,7 @@ function createSubmissionNotifyHandler({
     if (!row) return { status: 'ignored' };
 
     const results = [];
+    const claimOpts = { nowMs: now(), leaseTtlMs };
 
     const submittedNow = !!row.submittedAt && !before?.submittedAt;
     if (submittedNow) {
@@ -415,6 +520,7 @@ function createSubmissionNotifyHandler({
           sendPushToUser,
           claim,
           releaseClaim,
+          completeClaim,
           eventKey,
           claimMeta: { kind: 'assignment_submission', groupId, assignmentId, studentUid },
           uid: teacherUid,
@@ -430,6 +536,7 @@ function createSubmissionNotifyHandler({
             channel: 'assignments',
           },
           category: 'assignments',
+          claimOpts,
           log,
         });
         results.push(outcome.status === 'duplicate' ? 'submission-duplicate' : 'submission');
@@ -457,6 +564,7 @@ function createSubmissionNotifyHandler({
         sendPushToUser,
         claim,
         releaseClaim,
+        completeClaim,
         eventKey,
         claimMeta: { kind: 'assignment_grade', groupId, assignmentId, studentUid },
         uid: studentUid,
@@ -473,6 +581,7 @@ function createSubmissionNotifyHandler({
           channel: 'grades',
         },
         category: 'grades',
+        claimOpts,
         log,
       });
       results.push(outcome.status === 'duplicate' ? 'grade-duplicate' : 'grade');
@@ -488,6 +597,9 @@ function createSchoolAnnouncementNotifyHandler({
   sendPushToMultipleUsers,
   claim = claimNotificationEvent,
   releaseClaim = releaseNotificationClaim,
+  completeClaim = completeNotificationClaim,
+  now = () => Date.now(),
+  leaseTtlMs = DEFAULT_LEASE_TTL_MS,
   log = console,
 }) {
   return async function onSchoolAnnouncementCreated(event) {
@@ -514,6 +626,7 @@ function createSchoolAnnouncementNotifyHandler({
       sendPushToMultipleUsers,
       claim,
       releaseClaim,
+      completeClaim,
       eventKey,
       claimMeta: { kind: 'school_announcement', schoolId, announcementId },
       recipients: targets,
@@ -523,6 +636,7 @@ function createSchoolAnnouncementNotifyHandler({
       schoolId,
       data,
       category: 'announcements',
+      claimOpts: { nowMs: now(), leaseTtlMs },
       log,
     });
   };
@@ -531,9 +645,11 @@ function createSchoolAnnouncementNotifyHandler({
 module.exports = {
   CLAIM_COLLECTION,
   FANOUT_BATCH_SIZE,
+  DEFAULT_LEASE_TTL_MS,
   CAMPUS_AUDIENCE_ROLES,
   hashEventKey,
   claimNotificationEvent,
+  completeNotificationClaim,
   releaseNotificationClaim,
   writeInboxNotification,
   createAssignmentPublishedNotifyHandler,
