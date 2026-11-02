@@ -56,6 +56,29 @@ beforeEach(() => {
     });
 });
 
+test('exposes classroom search navigation when the timetable course has no linkedCourseId', async () => {
+  const view = renderHook(() => useTodayTimetableData(now));
+  await waitFor(() => expect(view.result.current.classes[0]?.title).toBe('資料結構'));
+  expect(view.result.current.classes[0]?.courseWorkNav).toEqual({
+    kind: 'search',
+    screen: 'Classroom',
+    params: { q: '資料結構' },
+  });
+});
+
+test('opens CourseHub navigation when the timetable course has linkedCourseId', async () => {
+  jest.mocked(loadPersonalImports).mockResolvedValue(
+    ledger([{ ...record, linkedCourseId: 'cw_linked', courseCode: 'CS101' }]),
+  );
+  const view = renderHook(() => useTodayTimetableData(now));
+  await waitFor(() => expect(view.result.current.classes[0]?.courseId).toBe('cw_linked'));
+  expect(view.result.current.classes[0]?.courseWorkNav).toEqual({
+    kind: 'linked',
+    screen: 'CourseHub',
+    params: { courseId: 'cw_linked' },
+  });
+});
+
 test('refreshing the same timetable keeps the current classes visible until the next result arrives', async () => {
   const view = renderHook(() => useTodayTimetableData(now));
   await waitFor(() => expect(view.result.current.classes[0]?.title).toBe('資料結構'));

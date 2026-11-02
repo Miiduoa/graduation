@@ -19,6 +19,10 @@ import {
   type CourseDirectoryFilter,
   type StudyAgendaFilter,
 } from './studyNavigation';
+import {
+  classroomQueryMatchKind,
+  filterCoursesByClassroomQuery,
+} from '@/components/timetable/timetableCourseWorkHref';
 import shared from './NuniApp.module.css';
 import styles from './StudyWorkspace.module.css';
 
@@ -119,12 +123,9 @@ export function WorkspaceList() {
     .map((item) => `${item.id}:${item.memberRole}:${item.state}:${item.title}`)
     .sort()
     .join('|');
-  const normalizedQuery = courseSearchKey(query);
-  const shown = (items ?? []).filter(
-    (item) =>
-      inDirectory(item, filter) &&
-      (!normalizedQuery || courseSearchKey(item.title).includes(normalizedQuery)),
-  );
+  const inScope = (items ?? []).filter((item) => inDirectory(item, filter));
+  const shown = filterCoursesByClassroomQuery(inScope, query);
+  const matchKind = classroomQueryMatchKind(shown.length, Boolean(courseSearchKey(query)));
   const changeFilter = (value: CourseDirectoryFilter) => {
     setFilter(value);
     replaceStudyQuery('courses', value, 'all');
@@ -269,35 +270,57 @@ export function WorkspaceList() {
                 </button>
               </div>
             ) : items && !shown.length ? (
-              <div className={styles.empty} role="status">
+              <div className={styles.empty} role="status" data-testid="classroom-query-none">
                 <CampusIcon name="search" size={26} />
                 <h3>{query ? `找不到「${query}」` : '這個分類目前沒有課程'}</h3>
                 <p>
                   {query
-                    ? '換個課程關鍵字，或清除篩選再找一次。'
+                    ? '課表上的這門課尚未對應到課程空間。可查看全部課程，或用邀請碼加入課程。'
                     : filter === 'archived'
                       ? '課程封存後，原有教材和繳交紀錄會整理在這裡。'
                       : '可以切換其他分類，或使用老師提供的邀請碼加入課程。'}
                 </p>
                 {(query || filter !== 'all') && (
                   <button type="button" className={styles.textButton} onClick={resetDirectory}>
-                    查看所有進行中課程
+                    全部課程
                   </button>
                 )}
+                {query ? (
+                  <button
+                    type="button"
+                    className={shared.button}
+                    onClick={() => {
+                      setAction('join');
+                      document.getElementById('course-entry')?.scrollIntoView({ block: 'nearest' });
+                    }}
+                  >
+                    加入課程
+                  </button>
+                ) : null}
               </div>
             ) : items ? (
               <>
-                <p className={styles.directoryStatus} role="status">
-                  {query
-                    ? `「${query}」找到 ${shown.length} 門課程`
-                    : `${directoryFilters.find(([value]) => value === filter)?.[1]} · ${shown.length} 門`}
+                <p
+                  className={styles.directoryStatus}
+                  role="status"
+                  data-testid={`classroom-query-status-${matchKind}`}
+                >
+                  {matchKind === 'unique'
+                    ? `剛好找到「${query}」這門課`
+                    : query
+                      ? `「${query}」找到 ${shown.length} 門課程`
+                      : `${directoryFilters.find(([value]) => value === filter)?.[1]} · ${shown.length} 門`}
                 </p>
                 <ul className={styles.courseGrid}>
                   {shown.map((item) => (
                     <li key={item.id}>
                       <Link
-                        className={styles.courseCard}
+                        className={`${styles.courseCard}${matchKind === 'unique' ? ` ${styles.courseCardHighlight}` : ''}`}
                         href={classroomCourseHref(item.id, context)}
+                        data-testid={
+                          matchKind === 'unique' ? 'classroom-query-unique' : undefined
+                        }
+                        aria-current={matchKind === 'unique' ? 'page' : undefined}
                       >
                         <span className={styles.courseIdentity}>
                           <CampusIcon
@@ -308,6 +331,7 @@ export function WorkspaceList() {
                             {item.state === 'archived'
                               ? '已封存'
                               : courseRoleLabels[item.memberRole]}
+                            {matchKind === 'unique' ? ' · 課表對應' : ''}
                           </span>
                         </span>
                         <h3>{item.title}</h3>
