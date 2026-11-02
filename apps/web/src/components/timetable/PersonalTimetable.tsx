@@ -1,5 +1,7 @@
 'use client';
 
+import { PersonalCalendarExport } from './PersonalCalendarExport';
+import { withClassExceptions } from '@campus/shared';
 import { ClassExceptions } from './ClassExceptions';
 import { manualClassRecords } from '@campus/shared';
 
@@ -813,6 +815,9 @@ function TimetableWorkspace({ schoolId }: { schoolId: string }) {
           </ul>
         </section>
       )}
+      <PersonalCalendarExport key={`calendar:${schoolId}:${uid}:${activeTerm}`} records={withClassExceptions([...manualClassRecords(timetable), ...imported.records], timetable.classExceptions)} schoolId={schoolId}
+        termKey={!terms.length || activeTerm === 'manual' ? `${timetable.meta.year || '未填'}|${timetable.meta.semester || '未填'}` : activeTerm}
+        disabled={busy || imported.loading || !!imported.error} />
       <ClassExceptions records={[...manualClassRecords(timetable), ...imported.records]}
         exceptions={timetable.classExceptions} schoolId={schoolId}
         termKey={activeTerm === 'manual' ? `${timetable.meta.year || '未填'}|${timetable.meta.semester || '未填'}` : activeTerm}

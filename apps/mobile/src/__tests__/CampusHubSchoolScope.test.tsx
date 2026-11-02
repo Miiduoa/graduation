@@ -30,6 +30,26 @@ beforeEach(() => {
   mockPaymentsEnabled = false;
 });
 
+test('行事曆入口先說明校園事件，並保留個人行程與課表的去向', () => {
+  const navigation = { navigate: jest.fn() };
+  const view = render(<CampusHubScreen navigation={navigation} />);
+  const entry = view.getByRole('button', {
+    name: '校園行事曆，校園活動與作業截止；個人行程、課表另開',
+  });
+  expect(view.queryByText('課程與自己的安排')).toBeNull();
+  expect(view.getByText('校園活動')).toBeTruthy();
+  fireEvent.press(entry);
+  expect(safeNavigate).toHaveBeenCalledWith(navigation, 'SmartCalendarScreen', undefined, {
+    fallbackMessage: '「校園行事曆」目前無法開啟。',
+  });
+});
+
+test.each(['個人行程', '課表', '行事曆'])('搜尋 %s 仍找得到分流入口', (keyword) => {
+  const view = render(<CampusHubScreen />);
+  fireEvent.changeText(view.getByPlaceholderText('搜尋地點或服務'), keyword);
+  expect(view.getByText('校園行事曆')).toBeTruthy();
+});
+
 test.each(['住宿', '宿舍', '職涯', '實習', '入住', '就業'])(
   'campus home reaches current school information when looking for %s',
   (keyword) => {
