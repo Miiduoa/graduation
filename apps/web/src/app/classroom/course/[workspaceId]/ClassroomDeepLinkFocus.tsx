@@ -3,26 +3,31 @@
 import { useEffect, useRef, useState } from 'react';
 import { useParams } from 'next/navigation';
 import {
+  CLASSROOM_ASSIGNMENT_LOADING,
   CLASSROOM_ASSIGNMENT_MISSING,
   classroomAssignmentHash,
+  classroomAssignmentsPanelReady,
   ensureTeacherSubmissionLinks,
   openClassroomSubmissionButton,
   parseClassroomDeepLink,
 } from '../../classroomDeepLink';
 
+type FocusStatus = 'idle' | 'loading' | 'missing';
+
 /**
  * 讀取通知／老師入口留下的 assignmentId、submissions 參數：
  * - 同步 hash 讓既有作業卡捲動展開
- * - 老師畫面在「查看繳交內容」旁掛直達繳交列表連結（不改角色判斷）
- * - submissions=1 時自動點開既有繳交列表
- * - 找不到作業時給友善提示，不壞頁
+ * - 老師畫面在「查看／更新繳交內容」旁掛直達繳交列表連結（不改角色判斷）
+ * - submissions=1 時等作業卡掛載後再自動點開既有繳交列表
+ * - 作業資料仍在載入時顯示載入中；載入完成後找不到才提示
  */
 export function ClassroomDeepLinkFocus() {
   const params = useParams<{ workspaceId?: string }>();
   const workspaceId =
     typeof params?.workspaceId === 'string' ? params.workspaceId : '';
-  const [missing, setMissing] = useState(false);
+  const [status, setStatus] = useState<FocusStatus>('idle');
   const opened = useRef('');
+  const debounceTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
@@ -33,7 +38,7 @@ export function ClassroomDeepLinkFocus() {
         ensureTeacherSubmissionLinks(document, workspaceId, window.location.search);
       }
       if (!assignmentId) {
-        setMissing(false);
+        setStatus('idle');
         return;
       }
       const expectedHash = classroomAssignmentHash(assignmentId);
@@ -44,29 +49,50 @@ export function ClassroomDeepLinkFocus() {
         window.dispatchEvent(new HashChangeEvent('hashchange'));
       }
       const card = document.getElementById(`assignment-${assignmentId}`);
-      if (!card) {
-        setMissing(true);
+      if (card) {
+        setStatus('idle');
+        if (openSubmissions && opened.current !== assignmentId) {
+          if (openClassroomSubmissionButton(document, assignmentId)) {
+            opened.current = assignmentId;
+          }
+        }
         return;
       }
-      setMissing(false);
-      if (openSubmissions && opened.current !== assignmentId) {
-        if (openClassroomSubmissionButton(document, assignmentId)) {
-          opened.current = assignmentId;
-        }
+      if (classroomAssignmentsPanelReady(document)) {
+        setStatus('missing');
+        return;
       }
+      setStatus('loading');
+    };
+
+    const scheduleApply = () => {
+      if (debounceTimer.current) clearTimeout(debounceTimer.current);
+      debounceTimer.current = setTimeout(() => {
+        debounceTimer.current = null;
+        apply();
+      }, 50);
     };
 
     apply();
-    const observer = new MutationObserver(apply);
-    observer.observe(document.body, { childList: true, subtree: true });
-    window.addEventListener('popstate', apply);
+    const panel = document.getElementById('panel-assignments');
+    const observer = new MutationObserver(scheduleApply);
+    observer.observe(panel ?? document.body, { childList: true, subtree: true });
+    window.addEventListener('popstate', scheduleApply);
     return () => {
+      if (debounceTimer.current) clearTimeout(debounceTimer.current);
       observer.disconnect();
-      window.removeEventListener('popstate', apply);
+      window.removeEventListener('popstate', scheduleApply);
     };
   }, [workspaceId]);
 
-  if (!missing) return null;
+  if (status === 'idle') return null;
+  if (status === 'loading') {
+    return (
+      <p role="status" style={{ margin: '12px 16px', color: 'var(--muted)' }}>
+        {CLASSROOM_ASSIGNMENT_LOADING}
+      </p>
+    );
+  }
   return (
     <p role="status" style={{ margin: '12px 16px', color: 'var(--muted)' }}>
       {CLASSROOM_ASSIGNMENT_MISSING}

@@ -46,8 +46,11 @@ export function classroomTeacherSubmissionHref(
 export function resolveAssignmentFocus(
   assignmentIds: readonly string[],
   focusId: string | null,
+  options?: { ready?: boolean },
 ): { found: boolean; missing: boolean } {
   if (!focusId) return { found: false, missing: false };
+  // 資料尚未就緒時不提示找不到，避免作業卡掛載前誤報。
+  if (options?.ready === false) return { found: false, missing: false };
   return assignmentIds.includes(focusId)
     ? { found: true, missing: false }
     : { found: false, missing: true };

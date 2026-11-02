@@ -8,7 +8,16 @@ import {
 export const CLASSROOM_ASSIGNMENT_MISSING =
   '找不到這份作業。可能已被老師刪除，或你沒有查看權限。請從作業列表選擇其他作業。';
 
+export const CLASSROOM_ASSIGNMENT_LOADING = '正在載入作業…';
+
 export const CLASSROOM_TEACHER_SUBMISSION_LINK_LABEL = '開啟繳交列表';
+
+/** 作業列表區塊已掛載（含空清單），才能判定找不到。 */
+export function classroomAssignmentsPanelReady(root: ParentNode = document): boolean {
+  if (root.querySelector('section[aria-label="課程作業"]')) return true;
+  if (root.querySelector('[id^="assignment-"]')) return true;
+  return false;
+}
 
 export function parseClassroomDeepLink(search: string): {
   assignmentId: string | null;
@@ -42,9 +51,10 @@ export function ensureTeacherSubmissionLinks(
   for (const card of cards) {
     const assignmentId = card.id.slice('assignment-'.length);
     if (!parseAssignmentFocusId(assignmentId)) continue;
-    const openButton = Array.from(card.querySelectorAll('button')).find((button) =>
-      (button.textContent ?? '').includes('查看繳交內容'),
-    );
+    const openButton = Array.from(card.querySelectorAll('button')).find((button) => {
+      const label = button.textContent ?? '';
+      return label.includes('查看繳交內容') || label.includes('更新繳交內容');
+    });
     if (!openButton) continue;
     const host = openButton.parentElement;
     if (!host) continue;

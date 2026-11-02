@@ -41,5 +41,9 @@ it('builds classroom teacher submission deep link with view and hash', () => {
 it('resolves found versus missing assignment focus', () => {
   expect(resolveAssignmentFocus(['hw-1'], 'hw-1')).toEqual({ found: true, missing: false });
   expect(resolveAssignmentFocus(['hw-1'], 'hw-9')).toEqual({ found: false, missing: true });
+  expect(resolveAssignmentFocus([], 'hw-9', { ready: false })).toEqual({
+    found: false,
+    missing: false,
+  });
   expect(ASSIGNMENT_FOCUS_MISSING).toContain('找不到這份作業');
 });

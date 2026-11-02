@@ -1,8 +1,10 @@
 import { afterEach, expect, it, vi } from 'vitest';
 import {
+  CLASSROOM_ASSIGNMENT_LOADING,
   CLASSROOM_ASSIGNMENT_MISSING,
   CLASSROOM_TEACHER_SUBMISSION_LINK_LABEL,
   classroomAssignmentHash,
+  classroomAssignmentsPanelReady,
   ensureTeacherSubmissionLinks,
   openClassroomSubmissionButton,
   parseClassroomDeepLink,
@@ -28,9 +30,11 @@ it('parses classroom assignment and submissions query params', () => {
   });
   expect(classroomAssignmentHash('hw-1')).toBe('#assignment-hw-1');
   expect(CLASSROOM_ASSIGNMENT_MISSING).toContain('找不到這份作業');
+  expect(CLASSROOM_ASSIGNMENT_LOADING).toContain('載入');
+  expect(classroomAssignmentsPanelReady(document.body)).toBe(false);
 });
 
-it('adds a teacher submission list link only beside existing teacher open buttons', () => {
+it('adds a teacher submission list link beside 查看或更新繳交內容 buttons', () => {
   document.body.innerHTML = `
     <article id="assignment-hw-1">
       <div class="toolbar">
@@ -40,18 +44,26 @@ it('adds a teacher submission list link only beside existing teacher open button
     <article id="assignment-hw-2">
       <div class="toolbar"><span>學生畫面</span></div>
     </article>
+    <article id="assignment-hw-3">
+      <div class="toolbar">
+        <button type="button">更新繳交內容</button>
+      </div>
+    </article>
   `;
   const added = ensureTeacherSubmissionLinks(
     document.body,
     'cw_11111111-1111-4111-8111-111111111111',
     '?campus=pu',
   );
-  expect(added).toBe(1);
-  const link = document.querySelector('[data-teacher-submission-link="true"]');
+  expect(added).toBe(2);
+  const link = document.querySelector('#assignment-hw-1 [data-teacher-submission-link="true"]');
   expect(link?.textContent).toBe(CLASSROOM_TEACHER_SUBMISSION_LINK_LABEL);
   expect(link?.getAttribute('href')).toContain('assignmentId=hw-1');
   expect(link?.getAttribute('href')).toContain('submissions=1');
   expect(document.querySelector('#assignment-hw-2 [data-teacher-submission-link]')).toBeNull();
+  expect(
+    document.querySelector('#assignment-hw-3 [data-teacher-submission-link="true"]'),
+  ).toBeTruthy();
   expect(
     ensureTeacherSubmissionLinks(
       document.body,
@@ -59,6 +71,7 @@ it('adds a teacher submission list link only beside existing teacher open button
       '?campus=pu',
     ),
   ).toBe(0);
+  expect(classroomAssignmentsPanelReady(document.body)).toBe(true);
 });
 
 it('clicks the existing teacher submissions button for deep link open', () => {

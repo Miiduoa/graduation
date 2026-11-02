@@ -1,5 +1,5 @@
 /* eslint-disable */
-import React, { useMemo } from 'react';
+import React, { useEffect, useMemo, useRef } from 'react';
 import { Pressable, ScrollView, Text, View } from 'react-native';
 
 import type { CourseGradebookData, CourseSpace } from '../data';
@@ -32,6 +32,8 @@ export function CourseGradebookScreen(props: any) {
   const ds = useDataSource();
   const workspaceSource = props?.route?.params?.sourceSystem === 'workspace';
   const schoolId = auth.profile?.schoolId ?? school.id;
+  const scrollRef = useRef<ScrollView>(null);
+  const didScrollFocus = useRef<string | null>(null);
 
   const {
     items: memberships,
@@ -77,7 +79,85 @@ export function CourseGradebookScreen(props: any) {
     }
     return [...ids];
   }, [gradebook?.assignments, visibleRows]);
-  const assignmentFocus = resolveAssignmentFocus(assignmentIds, focusAssignmentId);
+
+  const inGradebook = Boolean(focusAssignmentId && assignmentIds.includes(focusAssignmentId));
+  const canProbeAssignment = typeof ds.getAssignment === 'function';
+  const shouldProbeAssignment = Boolean(
+    focusAssignmentId &&
+      routeGroupId &&
+      gradebook &&
+      !gradebookLoading &&
+      !inGradebook,
+  );
+
+  const {
+    items: probedAssignments,
+    loading: probeLoading,
+  } = useAsyncList<{ id: string }>(async () => {
+    if (!shouldProbeAssignment || !focusAssignmentId || !routeGroupId || !canProbeAssignment) {
+      return [];
+    }
+    const row = await ds.getAssignment(focusAssignmentId, routeGroupId);
+    return row?.id ? [{ id: String(row.id) }] : [];
+  }, [
+    shouldProbeAssignment,
+    focusAssignmentId,
+    routeGroupId,
+    canProbeAssignment,
+    ds,
+    'assignment-focus-probe',
+  ]);
+
+  const focusIds = useMemo(() => {
+    const ids = new Set(assignmentIds);
+    for (const row of probedAssignments) ids.add(row.id);
+    return [...ids];
+  }, [assignmentIds, probedAssignments]);
+
+  const focusReady =
+    !focusAssignmentId ||
+    (!gradebookLoading &&
+      !!gradebook &&
+      (focusIds.includes(focusAssignmentId) ||
+        (canProbeAssignment
+          ? shouldProbeAssignment && !probeLoading
+          : // 無作業清單探查時：成績簿已有其他項目才可判定找不到；空清單不誤報。
+            assignmentIds.length > 0)));
+
+  const assignmentFocus = resolveAssignmentFocus(focusIds, focusAssignmentId, {
+    ready: focusReady,
+  });
+
+  useEffect(() => {
+    didScrollFocus.current = null;
+  }, [focusAssignmentId, routeGroupId]);
+
+  const scrollFocusedAssignmentIntoView = (target: View | null) => {
+    if (!target || !focusAssignmentId || !assignmentFocus.found) return;
+    if (didScrollFocus.current === focusAssignmentId) return;
+    const scroll = scrollRef.current as
+      | (ScrollView & { getInnerViewNode?: () => unknown })
+      | null;
+    if (!scroll) return;
+    const inner = typeof scroll.getInnerViewNode === 'function' ? scroll.getInnerViewNode() : scroll;
+    // measureLayout 在部分測試環境可能不存在，失敗時略過捲動即可。
+    const measurable = target as View & {
+      measureLayout?: (
+        relativeTo: unknown,
+        onSuccess: (x: number, y: number) => void,
+        onFail: () => void,
+      ) => void;
+    };
+    if (typeof measurable.measureLayout !== 'function') return;
+    measurable.measureLayout(
+      inner,
+      (_x, y) => {
+        didScrollFocus.current = focusAssignmentId;
+        scroll.scrollTo({ y: Math.max(0, y - 24), animated: true });
+      },
+      () => {},
+    );
+  };
 
   if (shouldBlockForNoLogin({ uid: auth.user?.uid ?? null, hasUser: !!auth.user })) {
     return (
@@ -170,6 +250,7 @@ export function CourseGradebookScreen(props: any) {
   return (
     <Screen noPadding>
       <ScrollView
+        ref={scrollRef}
         style={{ flex: 1 }}
         contentContainerStyle={{
           gap: 14,
@@ -237,6 +318,11 @@ export function CourseGradebookScreen(props: any) {
               gradebook.assignments.map((assignment) => (
                 <View
                   key={assignment.id}
+                  ref={
+                    assignment.id === focusAssignmentId
+                      ? (node) => scrollFocusedAssignmentIntoView(node)
+                      : undefined
+                  }
                   style={{
                     padding: 12,
                     borderRadius: theme.radius.md,
@@ -248,6 +334,11 @@ export function CourseGradebookScreen(props: any) {
                   }}
                   accessibilityState={
                     assignment.id === focusAssignmentId ? { selected: true } : undefined
+                  }
+                  accessibilityLabel={
+                    assignment.id === focusAssignmentId
+                      ? `${assignment.title}（通知定位）`
+                      : undefined
                   }
                 >
                   <View
@@ -315,6 +406,11 @@ export function CourseGradebookScreen(props: any) {
               {row.assignmentBreakdown.map((entry) => (
                 <View
                   key={`${row.uid}-${entry.assignmentId}`}
+                  ref={
+                    entry.assignmentId === focusAssignmentId
+                      ? (node) => scrollFocusedAssignmentIntoView(node)
+                      : undefined
+                  }
                   style={{
                     padding: 12,
                     borderRadius: theme.radius.md,
@@ -328,6 +424,11 @@ export function CourseGradebookScreen(props: any) {
                   }}
                   accessibilityState={
                     entry.assignmentId === focusAssignmentId ? { selected: true } : undefined
+                  }
+                  accessibilityLabel={
+                    entry.assignmentId === focusAssignmentId
+                      ? `${entry.title}（通知定位）`
+                      : undefined
                   }
                 >
                   <View

@@ -55,7 +55,7 @@ interface AttendanceLiveScreenProps {
   route: {
     params: {
       sessionId: string;
-      isTeacher: boolean;
+      isTeacher?: boolean | string;
     };
   };
   navigation: any;
@@ -198,7 +198,9 @@ export default function AttendanceLiveScreen({ route, navigation }: AttendanceLi
   const insets = useSafeAreaInsets();
   const auth = useAuth();
   const sessionId = parseSessionFocusId(route.params?.sessionId) ?? '';
-  const isTeacher = route.params?.isTeacher === true;
+  // 導向參數偶爾會把布林序列化成字串 "true"
+  const rawIsTeacher = route.params?.isTeacher as unknown;
+  const isTeacher = rawIsTeacher === true || rawIsTeacher === 'true';
   const invalidSessionLink = !sessionId;
   const [cameraPermission, requestCameraPermission] = useCameraPermissions();
   const [scanning, setScanning] = useState(false);

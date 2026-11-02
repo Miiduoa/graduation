@@ -732,7 +732,7 @@ export function CourseAttendance({
     ? (searchParams as { sessionId?: string | string[] }).sessionId
     : null;
   const focusSessionId =
-    parseSessionFocusId(query.get('sessionId')) ||
+    parseSessionFocusId(query?.get('sessionId')) ||
     parseSessionFocusId(Array.isArray(fromProps) ? fromProps[0] : fromProps);
   const { schoolSearch } = resolveSchoolPageContext(searchParams);
   const path = `${audience === 'teacher' ? '/teacher' : ''}/course/${encodeURIComponent(courseId)}`;
