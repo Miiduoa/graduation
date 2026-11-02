@@ -24,7 +24,7 @@ import {
   sortFeedbackQueue,
   type FeedbackQueueFilter,
 } from '@campus/shared/src/lmsReviewQueue';
-import { formatTaipeiDateTime } from '@campus/shared/src/taipeiTime';
+import { formatTaipeiDateTime, parseTaipeiInstant } from '@campus/shared/src/taipeiTime';
 import { MutationForm, useClasses, type MutationFormIntent } from './CourseUI';
 import { CourseText } from './CourseMaterials';
 import { useNuniSession } from './Session';
@@ -33,6 +33,7 @@ import {
   AssignmentLateBanner,
   SubmittedFileList,
   uploadAndSubmitFiles,
+  useAssignmentFilePreviews,
   type AssignmentUploadProgress,
   type LocalAssignmentFile,
   type AssignmentFileOperation,
@@ -64,6 +65,14 @@ function feedbackMatchesSubmitted(
   submitted: string,
 ): boolean {
   return (receipt.teacherFeedback ?? '').trim() === submitted.trim();
+}
+
+function submissionVersion(submission: NuniSubmission | null): string {
+  return JSON.stringify(submission && [
+    parseTaipeiInstant(submission.submittedAt) ?? submission.submittedAt,
+    submission.body,
+    submission.files?.map((file) => file.id) ?? [],
+  ]);
 }
 
 function latestAssignment(
@@ -118,10 +127,27 @@ function Assignment({ item, workspace, onConfirmed, syncVersion, receiptActive =
   const saved = savedSnapshot?.version === syncVersion ? savedSnapshot?.value ?? null : null;
   const setSaved = (value: NuniAssignment) => setSavedSnapshot({ value, version: syncVersion });
   const [localFiles, setLocalFiles] = useState<LocalAssignmentFile[]>([]);
+  useAssignmentFilePreviews(localFiles);
   const fileOperation = useRef<AssignmentFileOperation>({});
   const [recovering, setRecovering] = useState(false);
   const [progress, setProgress] = useState<AssignmentUploadProgress | null>(null);
   const assignment = latestAssignment(item, saved, withdrawnAt);
+  const latestSnapshot = useRef({ assignment, syncVersion });
+  useEffect(() => { latestSnapshot.current = { assignment, syncVersion }; });
+  const currentBody = assignment.mySubmission?.body ?? '';
+  const bodyVersion = submissionVersion(assignment.mySubmission);
+  const [bodyEditor, setBodyEditor] = useState({
+    version: bodyVersion,
+    original: currentBody,
+    text: currentBody,
+  });
+  const bodyPristine = bodyEditor.text === bodyEditor.original && !localFiles.length && !recovering;
+  const bodyDraft = bodyPristine ? currentBody : bodyEditor.text;
+  const bodyChanged = !bodyPristine && bodyEditor.version !== bodyVersion;
+  const bodyDispatched = useRef<string | null>(null);
+  const bodyInput = useRef<HTMLTextAreaElement>(null);
+  const [bodyExpanded, setBodyExpanded] = useState(false);
+  const [submissionNotice, setSubmissionNotice] = useState('繳交內容已儲存，老師現在可以查看。');
   const [submissions, setSubmissions] = useState<NuniSubmission[] | null>(null);
   const [error, setError] = useState('');
   const [reading, setReading] = useState(false);
@@ -336,12 +362,14 @@ function Assignment({ item, workspace, onConfirmed, syncVersion, receiptActive =
       )}
       {student && fileSubmit && assignment.mySubmission && !canRevise && <p>已過截止時間，這份繳交不能再修改或撤回。</p>}
       {student && active && (recovering || (open && (!fileSubmit || !assignment.mySubmission || canRevise))) && (
-        <details open={!assignment.mySubmission} className={`${shared.compose} ${styles.compose}`}>
+        <details open={!assignment.mySubmission || !bodyPristine || bodyExpanded} className={`${shared.compose} ${styles.compose}`}>
           <summary>{assignment.mySubmission ? '修改繳交內容' : '繳交這份作業'}</summary>
           <MutationForm
             label={assignment.mySubmission ? '更新繳交內容' : '繳交作業'}
-            success="繳交內容已儲存，老師現在可以查看。"
+            success={submissionNotice}
             submit={async (data, key) => {
+              if (bodyChanged && bodyDispatched.current !== key)
+                throw new NuniError(409, 'ASSIGNMENT_SUBMISSION_CHANGED');
               const body = String(data.get('body') ?? '');
               if (
                 fileSubmit &&
@@ -350,6 +378,10 @@ function Assignment({ item, workspace, onConfirmed, syncVersion, receiptActive =
                 !assignmentCanRevise(assignment.dueAt)
               )
                 throw new NuniError(409, 'ASSIGNMENT_REVISION_CLOSED');
+              if (bodyDispatched.current !== key) {
+                bodyDispatched.current = key;
+                setBodyEditor({ version: bodyVersion, original: currentBody, text: body });
+              }
               setRecovering(true);
               try {
                 const result =
@@ -372,13 +404,27 @@ function Assignment({ item, workspace, onConfirmed, syncVersion, receiptActive =
                         })
                       : await classes.submit(workspace.id, item.id, body, key);
                 if (!mounted.current) throw new NuniError(409, 'SESSION_CHANGED');
+                // A response can finish after a newer receipt was already synchronized.
+                const confirmed = latestAssignment(latestSnapshot.current.assignment, result, withdrawnAt);
+                const confirmedBody = confirmed.mySubmission?.body ?? '';
+                setBodyEditor({
+                  version: submissionVersion(confirmed.mySubmission),
+                  original: confirmedBody,
+                  text: confirmedBody,
+                });
+                setSubmissionNotice(
+                  confirmedBody.trim() === body.trim()
+                    ? '繳交內容已儲存，老師現在可以查看。'
+                    : '已確認送出結果，上方顯示目前儲存的繳交內容。',
+                );
+                setBodyExpanded(false);
                 setRecovering(false);
                 fileOperation.current = {};
-                setSaved(result);
+                setSavedSnapshot({ value: confirmed, version: latestSnapshot.current.syncVersion });
                 setWithdrawNotice('');
                 setLocalFiles([]);
                 setProgress(null);
-                onConfirmed?.(result);
+                onConfirmed?.(confirmed);
               } catch (failure) {
                 if (
                   failure instanceof NuniError &&
@@ -409,6 +455,40 @@ function Assignment({ item, workspace, onConfirmed, syncVersion, receiptActive =
               }
             }}
           >
+            {bodyChanged && !recovering && (
+              <section className={styles.confirmation} aria-label="繳交內容已更新">
+                <p role="alert">
+                  這份作業的繳交紀錄已有更新。你的草稿和選檔仍保留，請先核對上方紀錄，再決定要使用哪份內容。
+                </p>
+                <div className={styles.toolbar}>
+                  <button
+                    type="button"
+                    className={`${shared.button} ${shared.secondary}`}
+                    onClick={() => {
+                      setBodyEditor({ version: bodyVersion, original: currentBody, text: currentBody });
+                      setLocalFiles([]);
+                      fileOperation.current = {};
+                      setBodyExpanded(true);
+                      bodyInput.current?.focus();
+                    }}
+                  >
+                    載入最新內容
+                  </button>
+                  <button
+                    type="button"
+                    className={`${shared.button} ${shared.secondary}`}
+                    onClick={() => {
+                      setBodyEditor({ version: bodyVersion, original: currentBody, text: bodyDraft });
+                      setBodyExpanded(true);
+                      bodyInput.current?.focus();
+                    }}
+                  >
+                    保留草稿，送出時取代
+                  </button>
+                </div>
+                {localFiles.length > 0 && <p className={styles.note}>載入最新內容會清除這次尚未送出的選檔。</p>}
+              </section>
+            )}
             {progress ? (
               <p role="status">
                 上傳中 {progress.completed}/{progress.total}，請保持網路連線。
@@ -418,15 +498,31 @@ function Assignment({ item, workspace, onConfirmed, syncVersion, receiptActive =
               <p>重新送出會取代這次繳交；沒有選檔就改交純文字。</p>
             ) : null}
             {fileSubmit ? (
-              <AssignmentFilePicker files={localFiles} onChange={setLocalFiles} disabled={recovering} />
+              <AssignmentFilePicker
+                files={localFiles}
+                onChange={(files) => {
+                  if (bodyPristine)
+                    setBodyEditor({ version: bodyVersion, original: currentBody, text: currentBody });
+                  setLocalFiles(files);
+                }}
+                disabled={recovering}
+              />
             ) : null}
             <label>
               作業內容
               <textarea
+                ref={bodyInput}
                 name="body"
                 required={!fileSubmit || localFiles.length === 0}
                 maxLength={8000}
-                defaultValue={assignment.mySubmission?.body ?? ''}
+                value={bodyDraft}
+                onChange={(event) => {
+                  setBodyEditor({
+                    version: bodyPristine ? bodyVersion : bodyEditor.version,
+                    original: bodyPristine ? currentBody : bodyEditor.original,
+                    text: event.target.value,
+                  });
+                }}
                 placeholder={
                   fileSubmit
                     ? '可寫說明；或直接拍照／選檔後送出。'
