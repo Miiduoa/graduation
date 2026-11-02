@@ -21,7 +21,6 @@ import {
 } from '@campus/shared/src/pickNextAction';
 import { usePersonalImportScope } from '@/lib/usePersonalImports';
 import { usePersonalTodayRecords } from '@/lib/usePersonalTodayRecords';
-import type { HomeCourse } from '@/lib/homeOverview';
 import {
   TODAY_FLOW_CLASS_TITLE,
   TODAY_FLOW_WORK_TITLE,
@@ -66,7 +65,6 @@ type BoundProps = {
   skeleton: boolean;
   refreshing?: boolean;
   todos: TodayTodo[];
-  courses: readonly HomeCourse[];
   todosError: string;
   lmsUnconnected: boolean;
   leavingTodoIds?: readonly string[];
@@ -627,7 +625,7 @@ export function StudentTodayPage(props: BoundProps) {
     schoolId,
     now,
   });
-  const classes = todayClassesFromSchedule(schedule.today, now, props.courses);
+  const classes = todayClassesFromSchedule(schedule.today, now);
   return (
     <StudentToday
       scopeKey={records.scopeKey}

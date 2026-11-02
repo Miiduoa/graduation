@@ -1,6 +1,7 @@
 'use client';
 
 import Link from 'next/link';
+import { buildPersonalToday } from '@campus/shared';
 import {
   formatClassMeta,
   formatTodoDueLine,
@@ -10,6 +11,8 @@ import {
   type TodayTodo,
 } from '@campus/shared/src/pickNextAction';
 import type { HomeCourse } from '@/lib/homeOverview';
+import { usePersonalImportScope } from '@/lib/usePersonalImports';
+import { usePersonalTodayRecords } from '@/lib/usePersonalTodayRecords';
 import {
   TEACHER_TODAY_DUE_TITLE,
   TEACHER_TODAY_EMPTY_GRADING,
@@ -17,7 +20,7 @@ import {
   TEACHER_TODAY_UNSIGNED,
   TODAY_FLOW_CLASS_TITLE,
 } from '@/lib/todayCourseWork';
-import { assignmentHref, courseWeekHref } from '@/lib/todayScreen';
+import { assignmentHref, courseWeekHref, todayClassesFromSchedule } from '@/lib/todayScreen';
 import styles from './StudentToday.module.css';
 
 const TEACHING_ROLES = new Set([
@@ -150,5 +153,42 @@ export function TeacherToday({
         </div>
       )}
     </div>
+  );
+}
+
+type BoundProps = {
+  now: Date | null;
+  unsigned: boolean;
+  teachingCourses: readonly HomeCourse[];
+  upcomingTodos: TodayTodo[];
+};
+
+/** Bound teacher today stream using the same personal timetable sources as StudentTodayPage. */
+export function TeacherTodayPage(props: BoundProps) {
+  const scope = usePersonalImportScope();
+  const records = usePersonalTodayRecords();
+  const now = props.now ?? new Date();
+  const schoolId = records.schoolId || scope.scope.schoolId || 'personal';
+  const campusId = schoolId === 'personal' ? 'all' : schoolId;
+  const importHref = `/import?kind=timetable&campus=${encodeURIComponent(campusId)}`;
+  const timetableHref = `/timetable?campus=${encodeURIComponent(campusId)}`;
+  const timetableRecords = [...records.imported.records, ...(records.manual ?? [])].filter(
+    (row) => row.kind === 'timetable' && row.schoolId === schoolId,
+  );
+  const schedule = buildPersonalToday(timetableRecords, {
+    schoolId,
+    now,
+  });
+  const classes = todayClassesFromSchedule(schedule.today, now);
+  return (
+    <TeacherToday
+      now={now}
+      unsigned={props.unsigned}
+      classes={classes}
+      teachingCourses={props.teachingCourses}
+      upcomingTodos={props.upcomingTodos}
+      timetableHref={timetableHref}
+      importHref={importHref}
+    />
   );
 }

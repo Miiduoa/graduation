@@ -1054,29 +1054,6 @@ function TimetableWorkspace({ schoolId }: { schoolId: string }) {
           </div>
         </Modal>
       )}
-      {editing && editing.name.trim() ? (
-        <div
-          data-testid="timetable-course-work-exit"
-          style={{
-            position: 'fixed',
-            top: 16,
-            right: 16,
-            zIndex: 2147483000,
-            display: 'flex',
-            flexDirection: 'column',
-            gap: 8,
-            alignItems: 'flex-end',
-            maxWidth: 'min(280px, calc(100vw - 32px))',
-          }}
-        >
-          <Link className="btn primary" href={courseWorkHrefFor(editing)}>
-            {TIMETABLE_COURSE_WORK_LABEL}
-          </Link>
-          <p className={styles.notice} style={{ margin: 0, textAlign: 'right' }}>
-            除了編輯格位，也可開啟這門課的作業與教材。
-          </p>
-        </div>
-      ) : null}
       {editing && (
         <EditableCourseDialog
           key={editing.id}
@@ -1092,6 +1069,7 @@ function TimetableWorkspace({ schoolId }: { schoolId: string }) {
             if (!savingRef.current) setEditing(null);
           }}
           periodProfile={periodProfile}
+          courseWorkHref={editing.name.trim() ? courseWorkHrefFor(editing) : undefined}
         />
       )}
 

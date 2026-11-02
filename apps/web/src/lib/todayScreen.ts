@@ -14,13 +14,12 @@ export const TIMETABLE_COURSE_WORK_FALLBACK = '/classroom';
 
 export function todayClassesFromSchedule(
   entries: readonly PersonalTodayEntry[],
-  _now: Date,
-  courses: readonly HomeCourse[] = [],
+  now: Date,
 ): TodayClass[] {
+  void now;
   return entries.flatMap((entry) => {
     const { startAt, endAt } = entry;
     const linked = entry.row.linkedCourseId?.trim();
-    const matched = courses.find((course) => course.name.trim() === entry.row.title.trim());
     return [
       {
         id: entry.row.id,
@@ -28,7 +27,8 @@ export function todayClassesFromSchedule(
         location: entry.row.location?.trim() || '',
         startAt,
         endAt,
-        courseId: linked || matched?.id,
+        // Only trust explicit linkedCourseId; never guess by course title.
+        courseId: linked || undefined,
       },
     ];
   });
@@ -64,7 +64,7 @@ export function courseWeekHref(courseId: string | undefined, fallbackHref?: stri
 
 /**
  * Resolve a timetable row into the course work shell.
- * Prefer explicit linkedCourseId, then name match against enrolled courses.
+ * Only trust explicit linkedCourseId; otherwise fall back to the classroom list.
  */
 export function resolveTimetableCourseWorkHref(input: {
   linkedCourseId?: string | null;
@@ -76,13 +76,6 @@ export function resolveTimetableCourseWorkHref(input: {
   if (linked) {
     const href = courseHrefFromData({ courseId: linked });
     if (href) return href;
-  }
-  const matched = (input.courses ?? []).find(
-    (course) => course.name.trim() === input.courseName.trim(),
-  );
-  if (matched) {
-    const href = courseHrefFromData({ courseId: matched.id }) || courseWeekHref(matched.id);
-    return href.replace(/#week$/, '') || href;
   }
   const fallback = sanitizeInternalPath(input.fallbackHref ?? '', '');
   return fallback || TIMETABLE_COURSE_WORK_FALLBACK;

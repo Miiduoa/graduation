@@ -42,7 +42,7 @@ describe('today task destinations', () => {
     expect(courseWeekHref(undefined)).toBe('/timetable');
   });
 
-  it('resolves timetable course-work exits from linked ids or course name matches', () => {
+  it('resolves timetable course-work exits only from linked ids, never by course name', () => {
     expect(
       resolveTimetableCourseWorkHref({
         linkedCourseId: 'cs-db',
@@ -54,7 +54,7 @@ describe('today task destinations', () => {
         courseName: '資料庫系統',
         courses: [{ id: 'cw_12345678-1234-1234-1234-123456789abc', name: '資料庫系統' }],
       }),
-    ).toBe('/classroom/course/cw_12345678-1234-1234-1234-123456789abc');
+    ).toBe(TIMETABLE_COURSE_WORK_FALLBACK);
     expect(
       resolveTimetableCourseWorkHref({
         courseName: '未連結課程',
