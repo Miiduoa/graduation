@@ -40,6 +40,15 @@ const ITEMS: LifeService[] = [
     keywords: '搭車 交通 車站 車班 時刻表 巴士 bus transit',
   },
   {
+    href: '/food',
+    title: '點餐與取餐',
+    text: '選餐點、查訂單、出示取餐憑證。',
+    action: '看餐飲',
+    icon: 'cafeteria',
+    group: 'public',
+    keywords: '吃飯 午餐 晚餐 食堂 飲食 美食 點餐 取餐 menu food restaurant order pickup',
+  },
+  {
     href: '/cafeteria',
     title: '餐廳',
     text: '查看餐廳提供的菜單與營業資訊。',
@@ -130,6 +139,15 @@ const ITEMS: LifeService[] = [
     keywords: '宿舍 住宿 寢室 房間 報修 維修 洗衣 入住 退宿 床位 dorm housing laundry repair',
   },
   {
+    href: '/classroom',
+    title: '課程與作業',
+    text: '閱讀教材、繳交作業與查看老師回饋；課表與成績可從課務次級導覽切換。',
+    action: '進課務',
+    icon: 'course',
+    group: 'personal',
+    keywords: '課務 課程 作業 教材 測驗 classroom study',
+  },
+  {
     href: '/timetable',
     title: '共同空堂',
     text: '好友開放課表分享後，找兩個人都有空的時段。需要學校帳號。',
@@ -182,7 +200,15 @@ function LifeDirectory() {
     selection?.selectedSchool,
     Boolean(selection && !selection.loading && selection.catalogStatus === 'ready'),
   );
-  const items = ITEMS.filter((item) => item.href !== '/orders' || isWebOnlineOrderingEnabled());
+  const orderingEnabled = isWebOnlineOrderingEnabled();
+  const items = ITEMS.filter((item) => item.href !== '/orders' || orderingEnabled).map((item) =>
+    item.href === '/food' && !orderingEnabled
+      ? {
+          ...item,
+          text: '餐飲入口；線上點餐開放前可先看餐廳菜單。',
+        }
+      : item,
+  );
   const terms = normalizeSearch(query).split(/\s+/).filter(Boolean);
   const filtered = terms.length > 0 || category !== 'all';
   const matches = items.filter((item) => {
@@ -199,7 +225,7 @@ function LifeDirectory() {
   };
 
   return (
-    <SiteShell title="生活" subtitle="找教室、搭公車、查館藏，先選你要做的事。">
+    <SiteShell title="生活" subtitle="找教室、搭公車、查館藏，也能接上餐飲與課務。">
       <div className={styles.finder}>
         <form role="search" aria-label="校園服務搜尋" onSubmit={(event) => event.preventDefault()}>
           <label className={styles.searchLabel} htmlFor="life-service-search">
@@ -351,7 +377,7 @@ function LifeDirectory() {
 
 function LifeLoadingFallback() {
   return (
-    <SiteShell title="生活" subtitle="找教室、搭公車、查館藏，先選你要做的事。">
+    <SiteShell title="生活" subtitle="找教室、搭公車、查館藏，也能接上餐飲與課務。">
       <p role="status">正在載入生活服務…</p>
     </SiteShell>
   );
