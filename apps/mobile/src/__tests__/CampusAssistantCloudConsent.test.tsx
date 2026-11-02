@@ -1,9 +1,11 @@
 import React from 'react';
+import { Alert } from 'react-native';
 import { act, fireEvent, render } from '@testing-library/react-native';
 import { CampusAssistantScreen } from '../screens/CampusAssistantScreen';
 import { AIOverlayHost } from '../components/AIOverlayHost';
 import { askCampusAssistant, getOnDeviceAssistantReadiness } from '../features/campusAssistant';
 import { confirmCampusAgentWrite } from '../features/campusAssistantActions';
+import { safeNavigate } from '../utils/safeNavigate';
 import {
   getCloudNavigationPreview,
   runCloudNavigationTask,
@@ -381,4 +383,99 @@ test('navigation blur cancels pending work and focus never restores its prompt o
   expect(runRequest).toHaveBeenCalledTimes(1);
   expect(oldRequest).not.toHaveBeenCalled();
   expect(confirmCampusAgentWrite).not.toHaveBeenCalled();
+});
+
+test.each(['campus', 'device'])(
+  '%s opens the existing assistant permission screen without sending data or granting a write',
+  (mode) => {
+    const navigate = jest.fn();
+    const view = render(<CampusAssistantScreen navigation={{ navigate }} />);
+    if (mode === 'device') fireEvent.press(view.getByText('已存資料'));
+    fireEvent.press(view.getByText('助理權限'));
+    expect(navigate).toHaveBeenCalledWith('我的', { screen: 'AssistantPermissions', params: undefined });
+    expect(previewRequest).not.toHaveBeenCalled();
+    expect(runRequest).not.toHaveBeenCalled();
+    expect(oldRequest).not.toHaveBeenCalled();
+    expect(confirmCampusAgentWrite).not.toHaveBeenCalled();
+  },
+);
+
+test.each(['guest', 'loading', 'expired'])(
+  '%s does not offer an authenticated permission shortcut',
+  (state) => {
+    if (state === 'guest') mockUid = null;
+    else if (state === 'loading') mockLoading = true;
+    else mockTokenExpired = true;
+    const navigate = jest.fn();
+    const view = render(<CampusAssistantScreen navigation={{ navigate }} />);
+    expect(view.queryByText('助理權限')).toBeNull();
+    expect(navigate).not.toHaveBeenCalled();
+    expect(confirmCampusAgentWrite).not.toHaveBeenCalled();
+  },
+);
+
+test.each(['pending', 'quota'])(
+  'opening permissions clears %s navigation consent and cannot revive it on return',
+  async (state) => {
+    const late = deferred<CloudNavigationResult>();
+    if (state === 'pending') runRequest.mockReturnValueOnce(late.promise);
+    else runRequest.mockResolvedValueOnce({
+      status: 'unavailable', reason: 'rate_limited', provider: 'groq',
+      schoolId: 'pu', checkedAt: preview.checkedAt,
+    });
+    const listeners = new Map<string, () => void>();
+    const navigation = {
+      navigate: jest.fn(),
+      isFocused: () => true,
+      addListener: jest.fn((event: 'blur' | 'focus', listener: () => void) => {
+        listeners.set(event, listener);
+        return () => { listeners.delete(event); };
+      }),
+    };
+    const view = render(
+      <CampusAssistantScreen navigation={navigation} route={{ params: { prompt: query } }} />,
+    );
+    await consentAndRun(view);
+    const signal = runRequest.mock.calls[0][1];
+    fireEvent.press(view.getByText('助理權限'));
+    expect(navigation.navigate).toHaveBeenCalledWith('我的', { screen: 'AssistantPermissions', params: undefined });
+    if (state === 'pending') expect(signal?.aborted).toBe(true);
+    expect(view.getByRole('checkbox').props.accessibilityState.checked).toBe(false);
+    const blur = listeners.get('blur');
+    const focus = listeners.get('focus');
+    act(() => blur?.());
+    if (state === 'pending') await act(async () => late.resolve(completed));
+    act(() => focus?.());
+    expect(view.queryByText('導航建議已備妥')).toBeNull();
+    expect(view.queryByText('重試規劃')).toBeNull();
+    expect(view.queryByRole('checkbox')).toBeNull();
+    expect(view.getByLabelText('出發地與目的地').props.value).toBe('');
+    fireEvent.changeText(view.getByLabelText('出發地與目的地'), query);
+    await act(async () => fireEvent.press(view.getByText('預覽傳送內容')));
+    fireEvent.press(view.getByText('確認規劃'));
+    expect(view.getByRole('checkbox').props.accessibilityState.checked).toBe(false);
+    expect(runRequest).toHaveBeenCalledTimes(1);
+    expect(confirmCampusAgentWrite).not.toHaveBeenCalled();
+    expect(oldRequest).not.toHaveBeenCalled();
+  },
+);
+
+test('the shared navigator reaches permissions from the campus stack', () => {
+  const alert = jest.spyOn(Alert, 'alert').mockImplementation(() => {});
+  const navigation = {
+    navigate: jest.fn(),
+    getState: () => ({ routeNames: ['CampusAssistant', 'MapV2'] }),
+    getParent: () => ({
+      getState: () => ({ routeNames: ['Today', '學習', '校園', '訊息', '我的'] }),
+    }),
+  };
+  try {
+    expect(safeNavigate(navigation, 'AssistantPermissions')).toBe(true);
+    expect(navigation.navigate).toHaveBeenCalledWith('我的', {
+      screen: 'AssistantPermissions', params: undefined,
+    });
+    expect(alert).not.toHaveBeenCalled();
+  } finally {
+    alert.mockRestore();
+  }
 });

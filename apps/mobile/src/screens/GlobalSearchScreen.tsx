@@ -951,7 +951,7 @@ function SearchWorkspace({
                               borderTopWidth: 1, borderTopColor: theme.colors.border, gap: 3,
                             }}>
                               <Text style={{ ...theme.typography.caption, color: theme.colors.muted }}>
-                                {preview.source === 'campus-platform' ? 'Campus One 資料' : '接通狀態'}：{preview.message}
+                                {preview.source === 'campus-platform' ? 'nuni 資料' : '接通狀態'}：{preview.message}
                               </Text>
                               {preview.items.map((item, index) => (
                                 <Text key={index} style={{ ...theme.typography.caption, color: theme.colors.text }}>

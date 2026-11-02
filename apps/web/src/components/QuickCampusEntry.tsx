@@ -167,7 +167,7 @@ function QuickCampusEntrySession({
                           <span key={preview.destination} className={styles.serviceSnapshot}>
                             <span>
                               {preview.source === 'campus-platform'
-                                ? 'Campus One 資料'
+                                ? 'nuni 資料'
                                 : '接通狀態'}
                               ：{preview.message}
                             </span>

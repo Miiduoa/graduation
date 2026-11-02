@@ -561,7 +561,7 @@ test('event actions share real content and export valid calendar data without cl
       }),
     ],
     'campus-event.ics',
-    'Campus One 活動',
+    'nuni 活動',
   );
   expect(view.queryByText(/已加入行事曆|立即報名|已報名|朋友 2 人/)).toBeNull();
 });

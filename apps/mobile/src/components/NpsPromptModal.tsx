@@ -47,7 +47,7 @@ export function NpsPromptModal(props: {
         title: '[NPS] 推薦意願',
         description:
           comment.trim() ||
-          `使用者評分 NPS ${score}/10（標準題：您有多大可能推薦 Campus One？）`,
+          `使用者評分 NPS ${score}/10（標準題：您有多大可能推薦 nuni？）`,
         score,
         rating: score,
         context: 'nps_dashboard',

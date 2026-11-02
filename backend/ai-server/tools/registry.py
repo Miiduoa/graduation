@@ -104,6 +104,21 @@ def list_openai_tools() -> list[dict[str, Any]]:
     ]
 
 
+def _draft_only_response(name: str, args: dict[str, Any]) -> dict[str, Any]:
+    """無已驗證 uid／無法讀設定時：只回草稿、不執行寫入。"""
+    return {
+        "success": True,
+        "draftOnly": True,
+        "requiresUserConfirmation": True,
+        "tool": name,
+        "draft": dict(args),
+        "message": (
+            "已整理草稿，但此路徑無法確認你的助理寫入權限，因此不會直接送出。"
+            "請到 App 對應頁面手動確認，或到設定 → 助理權限開啟後再試。"
+        ),
+    }
+
+
 async def execute_tool(
     name: str,
     args: dict[str, Any] | None,
@@ -123,6 +138,38 @@ async def execute_tool(
         }
 
     safe_args = args if isinstance(args, dict) else {}
+
+    # 需確認寫入工具：執行前讀同一份使用者設定；讀不到則只回草稿。
+    if tool.requires_confirmation and name in {
+        "createDormRepairRequest",
+        "createFoodOrder",
+        "createReminder",
+    }:
+        from .assistant_permissions import (
+            is_write_tool_allowed,
+            load_permissions_for_uid,
+            permission_denied_message,
+        )
+
+        def _firestore_factory():
+            # 延遲載入，避免循環依賴；與 actions._firestore_client 行為一致。
+            from .actions import _firestore_client
+
+            return _firestore_client()
+
+        if not ctx.uid:
+            return _draft_only_response(name, safe_args)
+
+        permissions = load_permissions_for_uid(ctx.uid, _firestore_factory)
+        if permissions is None:
+            return _draft_only_response(name, safe_args)
+        if not is_write_tool_allowed(permissions, name):
+            return {
+                "success": False,
+                "errorCode": "assistant_write_permission_denied",
+                "errorMessage": permission_denied_message(name),
+            }
+
     try:
         result = tool.handler(ctx, safe_args)
         if inspect.isawaitable(result):

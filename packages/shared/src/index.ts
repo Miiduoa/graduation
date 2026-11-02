@@ -60,6 +60,7 @@ export * from './auth';
 export * from './schoolLogin';
 export * from './devUniversalAccounts';
 export * from './notifications';
+export * from './assistantPermissions';
 export * from './schools';
 export * from './campusGeo';
 export * from './release';

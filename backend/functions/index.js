@@ -1479,6 +1479,27 @@ exports.enqueueAssistantAction = onCall(
     }
     if (isOrderAssistantAction(request.data)) assertOnlineOrderingEnabled();
 
+    // 拆待辦／設提醒寫入本人待辦佇列前，依「建立個人待辦與提醒」開關檢查（預設關）。
+    const personalQueueActions = new Set([
+      'schedule_reminder',
+      'create_reminder_draft',
+      'split_assignment',
+    ]);
+    if (personalQueueActions.has(action)) {
+      const {
+        assistantWritePermissionDeniedMessage,
+        isAssistantWriteToolAllowed,
+        loadAssistantWritePermissions,
+      } = require('./lib/assistantWritePermissions');
+      const writePermissions = await loadAssistantWritePermissions(db, uid);
+      if (!isAssistantWriteToolAllowed(writePermissions, 'createPersonalTodoReminder')) {
+        throw new HttpsError(
+          'permission-denied',
+          assistantWritePermissionDeniedMessage('createPersonalTodoReminder'),
+        );
+      }
+    }
+
     const sensitiveActions = new Set([
       'submit_draft',
       'reserve_draft',

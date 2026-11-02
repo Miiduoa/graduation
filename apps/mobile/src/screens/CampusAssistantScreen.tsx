@@ -387,6 +387,18 @@ function AssistantConversation({
             ? '先核對這次輸入與公開地點，再決定是否交給 Groq 辨識。'
             : '用確定性工具查詢已儲存的資料，不呼叫本機或雲端模型。'}
         </Text>
+        {!!uid && typeof navigation?.navigate === 'function' && (
+          <AIButton
+            label="助理權限"
+            variant="ghost"
+            disabled={busy || syncBusy}
+            onPress={() => {
+              if (!current()) return;
+              cloudCancel.current?.();
+              safeNavigate(navigation, 'AssistantPermissions');
+            }}
+          />
+        )}
       </View>
     </AICard>
   );

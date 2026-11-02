@@ -291,7 +291,7 @@ test('reads OS-backed status after remount and never mistakes a stale receipt fo
     scope, step: item.step, isCurrent: () => true,
   });
   expect(status).toEqual([60]);
-  mockScheduled.clear(); // Simulates OS delivery or cancellation outside Campus One.
+  mockScheduled.clear(); // Simulates OS delivery or cancellation outside nuni.
   expect(await getCampusAssignmentReminderStatus({
     scope, step: item.step, isCurrent: () => true,
   })).toEqual([]);

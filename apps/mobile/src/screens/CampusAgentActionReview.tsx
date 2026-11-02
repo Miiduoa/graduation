@@ -33,23 +33,37 @@ function readableFields(input: Record<string, unknown>) {
     }));
 }
 
+function isPermissionDeniedError(error: unknown): boolean {
+  const code = (error as { code?: string } | null)?.code;
+  return code === 'functions/permission-denied' || code === 'permission-denied';
+}
+
+function permissionDeniedMessage(error: unknown): string {
+  const message = String((error as { message?: string } | null)?.message || '').trim();
+  if (message && !/^Firebase:\s*Error/i.test(message)) return message;
+  return '你在設定關閉了此助理寫入動作，可到設定頁開啟。';
+}
+
 export function CampusAgentActionReview({
   proposal,
   userId,
   schoolId,
   isCurrent,
   onOpenService,
+  onOpenSettings,
 }: {
   proposal: CampusAgentWriteProposal;
   userId: string;
   schoolId: string;
   isCurrent: () => boolean;
   onOpenService?: () => void;
+  onOpenSettings?: () => void;
 }) {
   const [expanded, setExpanded] = useState(false);
   const [attempted, setAttempted] = useState(false);
   const [receipt, setReceipt] = useState<CampusAgentWriteReceipt | null>(null);
   const [uncertain, setUncertain] = useState(false);
+  const [permissionDenied, setPermissionDenied] = useState<string | null>(null);
   const locked = useRef(false);
   const fields = readableFields(proposal.input);
 
@@ -57,6 +71,7 @@ export function CampusAgentActionReview({
     if (locked.current || attempted || !expanded || !isCurrent()) return;
     locked.current = true;
     setAttempted(true);
+    setPermissionDenied(null);
     try {
       const value = await confirmCampusAgentWrite({
         proposal,
@@ -65,8 +80,12 @@ export function CampusAgentActionReview({
         isCurrent,
       });
       if (isCurrent()) setReceipt(value);
-    } catch {
-      // Network timeouts are not evidence of a failed server-side write.
+    } catch (error) {
+      if (isPermissionDeniedError(error)) {
+        if (isCurrent()) setPermissionDenied(permissionDeniedMessage(error));
+        return;
+      }
+      // 逾時無法證明後端未寫入。
       if (isCurrent()) setUncertain(true);
     }
   }
@@ -85,7 +104,13 @@ export function CampusAgentActionReview({
       gap: 10,
     }}>
       <Text style={{ color: aiTokens.muted, fontSize: 12, fontWeight: '700' }}>
-        {success ? '伺服器已確認完成' : attempted ? '已送出確認，請核對結果' : '需要本人確認 · 尚未執行'}
+        {success
+          ? '伺服器已確認完成'
+          : permissionDenied
+            ? '設定已關閉此寫入動作'
+            : attempted
+              ? '已送出確認，請核對結果'
+              : '需要本人確認 · 尚未執行'}
       </Text>
       <Text style={{ color: aiTokens.text, fontSize: 16, fontWeight: '700' }}>
         {proposal.label}
@@ -122,6 +147,15 @@ export function CampusAgentActionReview({
                 請到對應服務頁面核對完整紀錄。
               </Text>
             </View>
+          ) : permissionDenied ? (
+            <View style={{ gap: 5 }}>
+              <Text accessibilityRole="alert" style={{ color: aiTokens.danger }}>
+                設定已關閉此寫入動作
+              </Text>
+              <Text selectable style={{ color: aiTokens.muted, fontSize: 12, lineHeight: 20 }}>
+                {permissionDenied}
+              </Text>
+            </View>
           ) : (
             <View style={{ gap: 5 }}>
               <Text accessibilityRole="alert" style={{ color: aiTokens.danger }}>
@@ -132,9 +166,12 @@ export function CampusAgentActionReview({
               </Text>
             </View>
           )}
-          {attempted && onOpenService && (
+          {attempted && permissionDenied && onOpenSettings ? (
+            <AIButton label="前往設定" variant="ghost" onPress={onOpenSettings} />
+          ) : null}
+          {attempted && !permissionDenied && onOpenService ? (
             <AIButton label="開啟服務頁核對紀錄" variant="ghost" onPress={onOpenService} />
-          )}
+          ) : null}
         </View>
       )}
     </View>

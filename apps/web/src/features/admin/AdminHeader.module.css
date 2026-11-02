@@ -29,13 +29,18 @@
 .brandMark {
   display: grid;
   place-items: center;
-  width: 34px;
-  height: 36px;
+  width: 28px;
+  height: 28px;
   flex-shrink: 0;
-  border-radius: 8px;
-  color: var(--on-brand);
-  background: var(--brand);
-  font-size: 25px;
+  overflow: hidden;
+  border-radius: 6px;
+  line-height: 0;
+}
+
+.brandMark img {
+  display: block;
+  width: 28px;
+  height: 28px;
 }
 
 .headerContext {
