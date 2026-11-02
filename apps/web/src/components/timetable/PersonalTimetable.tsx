@@ -59,13 +59,11 @@ import { listAcceptedFriends } from '@/lib/timetable/friends';
 import { useAcademicRecords } from '@/lib/useAcademicRecords';
 import type { AcademicCourse } from '@/lib/academicRecords';
 import { Modal } from '@/components/ui/Modal';
-import {
-  resolveTimetableCourseWorkHref,
-  TIMETABLE_COURSE_WORK_LABEL,
-} from '@/lib/todayScreen';
+import { TIMETABLE_COURSE_WORK_LABEL } from '@/lib/todayScreen';
 import { CourseEditor as EditableCourseDialog } from './CourseEditor';
 import { TimetableGrid, UnscheduledCourses } from './TimetableGrid';
 import { validateCourseDraft } from './courseEditorModel';
+import { resolveTimetableCourseWorkExit } from './timetableCourseWorkHref';
 import { planningReadiness } from './timetableMovement';
 import movement from './timetableMovement.module.css';
 
@@ -365,12 +363,13 @@ function TimetableWorkspace({ schoolId }: { schoolId: string }) {
   const planning = planningReadiness(planningCourses, periodTotal, WEEKDAY_LABELS.length);
   const courseWorkHrefFor = (course: PersonalCourse) => {
     const importId = course.id.startsWith('import:') ? course.id.slice('import:'.length) : '';
-    const linked = importId
-      ? imported.records.find((row) => row.id === importId)?.linkedCourseId
+    const importedRow = importId
+      ? imported.records.find((row) => row.id === importId)
       : undefined;
-    return resolveTimetableCourseWorkHref({
-      linkedCourseId: linked,
+    return resolveTimetableCourseWorkExit({
+      linkedCourseId: importedRow?.linkedCourseId,
       courseName: course.name,
+      courseCode: importedRow?.courseCode,
     });
   };
   const openCourse = (course: PersonalCourse) => {
