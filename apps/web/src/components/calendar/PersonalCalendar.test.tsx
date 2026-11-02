@@ -1,5 +1,5 @@
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
-import { beforeEach, expect, it, vi } from 'vitest';
+import { beforeEach, expect, it, vi, type Mock } from 'vitest';
 import {
   emptyPersonalEventDraft,
   personalImportSavedNotice,
@@ -22,6 +22,11 @@ const context = vi.hoisted(() => {
     dueAt: string | null;
     href?: string;
   };
+  type HomeDataRow = {
+    courses: { id: string; name: string; role: string; unreadCount: number }[];
+    tasks: HomeTaskRow[];
+    unreadCount: number;
+  };
   type DeadlineRow = {
     id: string;
     title: string;
@@ -41,12 +46,14 @@ const context = vi.hoisted(() => {
       session: { context: string; platformAccountId: string };
       loading: boolean;
     } | null,
-    loadHomeData: vi.fn(async () => ({
-      courses: [] as { id: string; name: string; role: string; unreadCount: number }[],
-      tasks: [] as HomeTaskRow[],
-      unreadCount: 0,
-    })),
-    loadNuniCalendarDeadlines: vi.fn(async () => [] as DeadlineRow[]),
+    loadHomeData: vi.fn() as Mock<(uid: string) => Promise<HomeDataRow>>,
+    loadNuniCalendarDeadlines: vi.fn() as Mock<
+      (
+        transport: unknown,
+        platformAccountId: string,
+        fence?: { cancelled(): boolean },
+      ) => Promise<DeadlineRow[]>
+    >,
   };
 });
 
@@ -499,6 +506,63 @@ it('未登入時作業截止區保持說明，不因缺少課程而壞頁', asyn
   expect(screen.queryByTestId('calendar-due-list')).toBeNull();
   expect(context.loadHomeData).not.toHaveBeenCalled();
   expect(context.loadNuniCalendarDeadlines).not.toHaveBeenCalled();
+});
+
+it('LMS 失敗時仍顯示 nuni 作業截止', async () => {
+  const courseId = 'cw_11111111-1111-4111-8111-111111111111';
+  const assignmentId = 'cwa_22222222-2222-4222-8222-222222222222';
+  context.user = { uid: 'alice' };
+  context.nuni = {
+    session: { context: 'ctx', platformAccountId: 'pa_1' },
+    loading: false,
+  };
+  context.loadHomeData.mockRejectedValue(new Error('lms down'));
+  context.loadNuniCalendarDeadlines.mockResolvedValue([
+    {
+      id: `${courseId}:${assignmentId}`,
+      title: '專題一',
+      courseName: '資料庫',
+      courseId,
+      dueDate: '2026-10-22',
+      href: `/classroom/course/${courseId}?view=assignments#assignment-${assignmentId}`,
+      source: 'nuni',
+      sourceLabel: 'nuni 課程',
+    },
+  ]);
+  renderCalendar();
+  const due = await screen.findByTestId('calendar-due-list');
+  expect(within(due).getByText('專題一')).toBeTruthy();
+  expect(within(due).getByText(/nuni 課程/)).toBeTruthy();
+  expect(screen.queryByRole('alert')).toBeNull();
+});
+
+it('nuni 失敗時仍顯示 LMS 作業截止', async () => {
+  const courseId = 'cw_11111111-1111-4111-8111-111111111111';
+  context.user = { uid: 'alice' };
+  context.nuni = {
+    session: { context: 'ctx', platformAccountId: 'pa_1' },
+    loading: false,
+  };
+  context.loadHomeData.mockResolvedValue({
+    courses: [],
+    tasks: [
+      {
+        id: 'lms-only',
+        courseId,
+        courseName: '作業系統',
+        title: '期中報告',
+        dueAt: '2026-10-25T02:00:00.000Z',
+        href: `/course/${courseId}`,
+      },
+    ],
+    unreadCount: 0,
+  });
+  context.loadNuniCalendarDeadlines.mockRejectedValue(new Error('nuni down'));
+  renderCalendar();
+  const due = await screen.findByTestId('calendar-due-list');
+  expect(within(due).getByText('期中報告')).toBeTruthy();
+  expect(within(due).getByText(/校園 LMS／匯入/)).toBeTruthy();
+  expect(screen.queryByRole('alert')).toBeNull();
 });
 
 it('月格切月、選日期、編輯及回今天沿用同一份資料', async () => {
