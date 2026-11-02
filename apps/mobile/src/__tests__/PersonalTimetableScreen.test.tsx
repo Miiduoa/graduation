@@ -56,6 +56,24 @@ const record = (overrides: Partial<PersonalImportRecord> = {}): PersonalImportRe
   ...overrides,
 });
 beforeEach(() => {
+  // Pin to a Sunday so ClassExceptions "today" does not also list Monday fixtures.
+  jest.useFakeTimers({
+    now: new Date('2026-10-25T04:00:00.000Z'),
+    doNotFake: [
+      'setTimeout',
+      'clearTimeout',
+      'setInterval',
+      'clearInterval',
+      'setImmediate',
+      'clearImmediate',
+      'nextTick',
+      'queueMicrotask',
+      'requestAnimationFrame',
+      'cancelAnimationFrame',
+      'performance',
+      'hrtime',
+    ],
+  });
   jest.clearAllMocks();
   mockUser = null;
   mockSchool = { id: 'ncku', name: '國立成功大學' };
@@ -76,10 +94,16 @@ beforeEach(() => {
     .mockReset()
     .mockResolvedValue({ version: 1, records: [record()], batches: [] });
 });
+afterEach(() => {
+  jest.useRealTimers();
+});
 
 test('the full timetable and editor use NCKU period labels and times, without inheriting a guest timetable', async () => {
   const view = render(<PersonalTimetableScreen />);
   await view.findByText('成大課程');
+  fireEvent.changeText(view.getByLabelText('匯出開始日期'), '2026-11-02');
+  fireEvent.changeText(view.getByLabelText('匯出結束日期'), '2026-11-08');
+  expect(view.getByText('將匯出 1 堂課；略過 0 門時間未確認的課程。')).toBeTruthy();
   expect(view.getByText('星期一 · 08:00–09:50')).toBeTruthy();
   expect(view.queryByText(/09:10–11:00/)).toBeNull();
   expect(loadPersonalTimetable).toHaveBeenCalledWith(null, 'ncku', 'nuni:account-a');
