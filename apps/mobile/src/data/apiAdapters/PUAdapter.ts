@@ -1,4 +1,8 @@
 import { PROVIDENCE_UNIVERSITY_SCHOOL_ID, type PuCreditAuditPayload } from '@campus/shared/src';
+import {
+  assertPuEcampusDataFetchEnabled,
+  isPuEcampusDataFetchEnabled,
+} from '@campus/shared/src/puEcampusDataPolicy';
 import { BaseApiAdapter } from './BaseAdapter';
 import type { AdapterCapabilities, AuthCredentials } from './types';
 import type {
@@ -162,6 +166,7 @@ export class PUAdapter extends BaseApiAdapter {
   // ---------------------------------------------------------------------------
 
   async authenticate(username: string, password: string): Promise<AuthCredentials> {
+    assertPuEcampusDataFetchEnabled();
     // ── Direct mode: 直接連靜宜伺服器 ──
     if (this.useDirectMode) {
       const result = await puLogin(username, password);
@@ -362,6 +367,7 @@ export class PUAdapter extends BaseApiAdapter {
     dataType: string,
     extra: Record<string, unknown> = {},
   ): Promise<T | null> {
+    if (!isPuEcampusDataFetchEnabled()) return null;
     if (!this.sessionId) {
       console.warn(`[PUAdapter] No session for ${dataType}`);
       return null;
@@ -961,6 +967,7 @@ export class PUAdapter extends BaseApiAdapter {
   // ---------------------------------------------------------------------------
 
   async isHealthy(): Promise<boolean> {
+    if (!isPuEcampusDataFetchEnabled()) return false;
     if (this.useDirectMode) {
       // Direct mode: test connection to alcat.pu.edu.tw
       try {

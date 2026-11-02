@@ -6,6 +6,7 @@
  */
 
 import Constants from 'expo-constants';
+import { assertPuEcampusDataFetchEnabled } from '@campus/shared/src/puEcampusDataPolicy';
 import {
   STUDENT_LOGIN_CLIENT_TIMEOUT_MS,
   TEACHER_LMS_UNAVAILABLE_COPY,
@@ -480,6 +481,7 @@ export async function signInWithStudentId(params: {
   }
   assertBeforeExchange();
 
+  assertPuEcampusDataFetchEnabled();
   progress('authenticating', '驗證靜宜帳密');
 
   // ── 策略 A: 嘗試後端統一登入 ──

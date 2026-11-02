@@ -3,12 +3,12 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "node ../../scripts/import-ai/prepare-assets.mjs && next dev",
-    "build": "node ../../scripts/import-ai/prepare-assets.mjs && next build",
+    "dev": "node ../../scripts/build-functions-shared.cjs && node ../../scripts/import-ai/prepare-assets.mjs && next dev",
+    "build": "node ../../scripts/build-functions-shared.cjs && node ../../scripts/import-ai/prepare-assets.mjs && next build",
     "start": "next start",
     "lint": "eslint .",
-    "test": "vitest run",
-    "typecheck": "tsc -p tsconfig.json --noEmit"
+    "test": "node ../../scripts/build-functions-shared.cjs && vitest run",
+    "typecheck": "node ../../scripts/build-functions-shared.cjs && tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
     "@campus/shared": "workspace:*",

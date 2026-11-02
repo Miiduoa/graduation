@@ -17,6 +17,8 @@ RUN pnpm install --frozen-lockfile --filter web... --ignore-scripts
 COPY tsconfig.json ./
 COPY apps/web/ ./apps/web/
 COPY packages/shared/ ./packages/shared/
+COPY scripts/build-functions-shared.cjs ./scripts/build-functions-shared.cjs
+RUN node scripts/build-functions-shared.cjs
 COPY scripts/import-ai/ ./scripts/import-ai/
 COPY backend/functions/puScraper.js backend/functions/tronClassScraper.js ./backend/functions/
 COPY backend/functions/lib/puGradeDocument.js backend/functions/lib/puCreditSummary.js backend/functions/lib/puCourseTime.js backend/functions/lib/taipeiDay.js backend/functions/lib/puSessionStore.js backend/functions/lib/puCampusTransport.js ./backend/functions/lib/

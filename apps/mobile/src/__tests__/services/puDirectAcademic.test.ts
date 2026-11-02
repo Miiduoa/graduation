@@ -1,3 +1,10 @@
+// Exercise the enabled parsing/ownership contract independently of the release pause.
+jest.mock('@campus/shared/src/puEcampusDataPolicy', () => ({
+  ...jest.requireActual('@campus/shared/src/puEcampusDataPolicy'),
+  isPuEcampusDataFetchEnabled: () => true,
+  assertPuEcampusDataFetchEnabled: () => {},
+}));
+
 import { puFetchCourses, puFetchCreditAudit, puFetchGrades } from '../../services/puDirectScraper';
 
 const session = { loggedIn: true as const, studentName: '測試同學' };
