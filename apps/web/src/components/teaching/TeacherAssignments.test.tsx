@@ -13,6 +13,13 @@ import {
   publishTeacherAssignment,
 } from '@/lib/teacherAssignments';
 
+const navigation = vi.hoisted(() => ({ search: '' }));
+vi.mock('next/navigation', () => ({
+  usePathname: () => '/teacher/course/course',
+  useRouter: () => ({ push: vi.fn(), replace: vi.fn(), prefetch: vi.fn() }),
+  useSearchParams: () => new URLSearchParams(navigation.search),
+  useParams: () => ({ courseId: 'course' }),
+}));
 vi.mock('@/components/AuthGuard', () => ({
   useAuth: () => ({ user: { uid: 'teacher' } }),
 }));
@@ -39,6 +46,7 @@ const props = {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  navigation.search = '';
   vi.mocked(loadTeacherSubmissions).mockResolvedValue({
     title: '練習一',
     points: 100,
@@ -252,4 +260,27 @@ it('preserves the original Taipei deadline when a teacher edits only the title',
       dueAt: '2026-10-08T09:30', allowLateSubmission: false,
     },
   ));
+});
+
+it('老師入口提供開啟繳交列表連結，且 assignmentId 深連會打開該份繳交', async () => {
+  navigation.search = 'assignmentId=work';
+  render(<TeacherAssignments {...props} />);
+  const link = screen.getByRole('link', { name: '開啟繳交列表' });
+  expect(link.getAttribute('href')).toBe('/teacher/course/course?assignmentId=work');
+  await waitFor(() => expect(loadTeacherSubmissions).toHaveBeenCalledWith(
+    { uid: 'teacher', schoolId: 'pu', courseId: 'course' },
+    'work',
+  ));
+  expect(await screen.findByText('樹的遍歷')).toBeTruthy();
+  expect(document.getElementById('teacher-assignment-work')?.getAttribute('data-assignment-focused')).toBe(
+    'true',
+  );
+});
+
+it('assignmentId 無效時給友善提示且不壞頁', () => {
+  navigation.search = 'assignmentId=missing-work';
+  render(<TeacherAssignments {...props} />);
+  expect(screen.getByText(/找不到這份作業的繳交列表/)).toBeTruthy();
+  expect(screen.getByText('練習一')).toBeTruthy();
+  expect(loadTeacherSubmissions).not.toHaveBeenCalled();
 });

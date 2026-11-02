@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
+import { useSearchParams } from 'next/navigation';
 import { SiteShell } from '@/components/SiteShell';
 import { SchoolScopePlaceholder } from '@/components/SchoolScopePlaceholder';
 import { useAuth } from '@/components/AuthGuard';
@@ -14,6 +15,13 @@ import {
 import { isWebOnlineOrderingEnabled, ONLINE_ORDERING_OFF_TEXT } from '@/lib/onlineOrdering';
 import home from '../home.module.css';
 import styles from './orders.module.css';
+import {
+  ORDER_FOCUS_MISSING,
+  landOnOrder,
+  orderFocusElementId,
+  parseOrderFocusId,
+  resolveOrderFocus,
+} from './orderDeepLink';
 
 const ORDER_STATUS_LABELS: Record<string, string> = {
   pending: '等店家接單',
@@ -39,13 +47,17 @@ function legacyOrderNextStep(order: MyOrder): string {
   return order.status === 'pending' ? '等待店家接單。' : '訂單進度尚待確認。';
 }
 
-function OrderCard({ order }: { order: MyOrder }) {
+function OrderCard({ order, focused = false }: { order: MyOrder; focused?: boolean }) {
   const pickup = describePickupNumber(order);
   const active = !FINISHED_STATUSES.has(order.status);
   return (
     <article
+      id={orderFocusElementId(order.id)}
+      tabIndex={focused ? -1 : undefined}
       className={styles.card}
       data-tone={active ? 'active' : 'done'}
+      data-order-focused={focused ? 'true' : undefined}
+      aria-current={focused ? 'true' : undefined}
       aria-label={formatShortOrderCode(order.id)}
     >
       <p className={styles.status}>
@@ -74,7 +86,15 @@ function OrderCard({ order }: { order: MyOrder }) {
   );
 }
 
-function OrdersList({ uid, schoolId }: { uid: string; schoolId: string }) {
+function OrdersList({
+  uid,
+  schoolId,
+  focusOrderId,
+}: {
+  uid: string;
+  schoolId: string;
+  focusOrderId: string | null;
+}) {
   const [orders, setOrders] = useState<MyOrder[] | null>(null);
   const [failed, setFailed] = useState(false);
   useEffect(() => {
@@ -108,46 +128,64 @@ function OrdersList({ uid, schoolId }: { uid: string; schoolId: string }) {
     };
   }, [orders]);
 
+  const focus = resolveOrderFocus(
+    (orders ?? []).map((order) => order.id),
+    focusOrderId,
+  );
+
+  useEffect(() => {
+    if (!focus.found || !focusOrderId) return;
+    const frame = window.requestAnimationFrame(() => {
+      landOnOrder(focusOrderId);
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [focus.found, focusOrderId, orders]);
+
   if (failed) return <p role="alert">目前讀不到訂單，請確認連線後重新整理。</p>;
   if (orders === null) return <p role="status">正在讀取訂單…</p>;
   if (orders.length === 0) {
-    if (!isWebOnlineOrderingEnabled()) {
-      return (
-        <div className={styles.empty}>
-          <h2>{ONLINE_ORDERING_OFF_TEXT}</h2>
-        </div>
-      );
-    }
     return (
       <div className={styles.empty}>
-        <h2>還沒有訂單</h2>
-        <p>
-          這裡顯示 nuni App「餐廳」下的訂單與取餐號碼。網頁站內點餐與取餐請到「點餐與取餐」。
-        </p>
-        <div className={styles.actions}>
-          <Link className={home.primary} href="/food">
-            前往點餐與取餐
-          </Link>
-          <Link
-            className={home.secondary}
-            href={`/cafeteria?schoolId=${encodeURIComponent(schoolId)}`}
-          >
-            查看餐廳資訊
-          </Link>
-        </div>
+        {focus.missing ? <p role="status">{ORDER_FOCUS_MISSING}</p> : null}
+        {!isWebOnlineOrderingEnabled() ? (
+          <h2>{ONLINE_ORDERING_OFF_TEXT}</h2>
+        ) : (
+          <>
+            <h2>還沒有訂單</h2>
+            <p>
+              這裡顯示 nuni App「餐廳」下的訂單與取餐號碼。網頁站內點餐與取餐請到「點餐與取餐」。
+            </p>
+            <div className={styles.actions}>
+              <Link className={home.primary} href="/food">
+                前往點餐與取餐
+              </Link>
+              <Link
+                className={home.secondary}
+                href={`/cafeteria?schoolId=${encodeURIComponent(schoolId)}`}
+              >
+                查看餐廳資訊
+              </Link>
+            </div>
+          </>
+        )}
       </div>
     );
   }
 
   return (
     <section className={styles.list} aria-label="訂單列表">
+      {focus.missing ? (
+        <p role="status" className={styles.routeNote}>
+          {ORDER_FOCUS_MISSING}
+        </p>
+      ) : null}
       {grouped.active.length > 0 && (
         <div className={styles.group}>
           <h2 className={styles.groupTitle}>
             進行中 <span>{grouped.active.length}</span>
           </h2>
           {grouped.active.map((order) => (
-            <OrderCard key={order.id} order={order} />
+            <OrderCard key={order.id} order={order} focused={order.id === focusOrderId} />
           ))}
         </div>
       )}
@@ -157,7 +195,7 @@ function OrdersList({ uid, schoolId }: { uid: string; schoolId: string }) {
             已結束 <span>{grouped.done.length}</span>
           </h2>
           {grouped.done.map((order) => (
-            <OrderCard key={order.id} order={order} />
+            <OrderCard key={order.id} order={order} focused={order.id === focusOrderId} />
           ))}
         </div>
       )}
@@ -165,7 +203,13 @@ function OrdersList({ uid, schoolId }: { uid: string; schoolId: string }) {
   );
 }
 
-function OrdersRoute({ schoolId }: { schoolId: string }) {
+function OrdersRoute({
+  schoolId,
+  focusOrderId,
+}: {
+  schoolId: string;
+  focusOrderId: string | null;
+}) {
   const { user, loading, error } = useAuth();
   if (loading) return <p role="status">正在確認登入狀態…</p>;
   if (error) return <p role="alert">無法確認登入狀態，請重新整理後再試。</p>;
@@ -173,6 +217,7 @@ function OrdersRoute({ schoolId }: { schoolId: string }) {
     if (!isWebOnlineOrderingEnabled()) {
       return (
         <div className={styles.empty}>
+          {focusOrderId ? <p role="status">{ORDER_FOCUS_MISSING}</p> : null}
           <h2>{ONLINE_ORDERING_OFF_TEXT}</h2>
         </div>
       );
@@ -183,19 +228,28 @@ function OrdersRoute({ schoolId }: { schoolId: string }) {
         <p>這裡是 App 餐廳訂單。登入後可查看取餐號碼與狀態。</p>
         <Link
           className={home.primary}
-          href={`/login?returnUrl=${encodeURIComponent(`/orders?campus=${encodeURIComponent(schoolId)}`)}`}
+          href={`/login?returnUrl=${encodeURIComponent(`/orders?campus=${encodeURIComponent(schoolId)}${focusOrderId ? `&orderId=${encodeURIComponent(focusOrderId)}` : ''}`)}`}
         >
           登入
         </Link>
       </div>
     );
   }
-  return <OrdersList key={`${user.uid}:${schoolId}`} uid={user.uid} schoolId={schoolId} />;
+  return (
+    <OrdersList
+      key={`${user.uid}:${schoolId}:${focusOrderId ?? ''}`}
+      uid={user.uid}
+      schoolId={schoolId}
+      focusOrderId={focusOrderId}
+    />
+  );
 }
 
 export default function OrdersPage() {
   const orderingOn = isWebOnlineOrderingEnabled();
   const campus = useCampusBrowseContext();
+  const searchParams = useSearchParams();
+  const focusOrderId = parseOrderFocusId(searchParams.get('orderId'));
   const ready = campus.status === 'ready' && !!campus.schoolId;
   return (
     <SiteShell
@@ -235,7 +289,11 @@ export default function OrdersPage() {
             </div>
           )
         ) : (
-          <OrdersRoute key={campus.schoolId!} schoolId={campus.schoolId!} />
+          <OrdersRoute
+            key={campus.schoolId!}
+            schoolId={campus.schoolId!}
+            focusOrderId={focusOrderId}
+          />
         )}
       </div>
     </SiteShell>
