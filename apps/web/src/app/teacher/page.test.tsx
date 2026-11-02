@@ -237,6 +237,15 @@ it('null selected school does not call stores with pu', async () => {
   expect(store.listTeacherAppeals).not.toHaveBeenCalled();
 });
 
+it('uses the appeal-review title and keeps a visible classroom entry', async () => {
+  render(<TeacherDeskPage />);
+  await screen.findByText(/學生甲.*期中成績A/);
+  expect(screen.getByRole('heading', { name: '課務申訴審核' })).toBeTruthy();
+  expect(screen.getByRole('link', { name: /前往授課課程/ }).getAttribute('href')).toBe(
+    '/classroom',
+  );
+});
+
 it('rejected decision isolates notice/busy from a later school', async () => {
   const pendingDecide = deferred<void>();
   store.decideCourseAppeal.mockReturnValue(pendingDecide.promise);

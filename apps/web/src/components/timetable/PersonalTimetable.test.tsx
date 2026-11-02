@@ -169,6 +169,9 @@ function addCourse(name = '不能消失的草稿') {
 function existingCourseButton() {
   return screen.getAllByRole('button', { name: /編輯 原本課程/ })[0];
 }
+function chooseImportEdit() {
+  fireEvent.click(screen.getByRole('button', { name: '回到匯入編輯' }));
+}
 
 describe('personal timetable data retention', () => {
   it('previews the personal weekly timetable for the selected export period', async () => {
@@ -203,7 +206,17 @@ describe('personal timetable data retention', () => {
     ];
     await ready();
     fireEvent.click(screen.getAllByRole('button', { name: /檢視匯入紀錄 匯入課程/ })[0]);
+    expect(screen.getByRole('link', { name: '作業與教材' })).toBeTruthy();
+    chooseImportEdit();
     expect(mocks.push).toHaveBeenCalledWith('/import?kind=timetable&campus=pu');
+  });
+
+  it('offers a course-work exit beside timetable editing for a placed course', async () => {
+    await ready();
+    fireEvent.click(existingCourseButton());
+    expect(screen.getByRole('region', { name: '編輯課程' })).toBeTruthy();
+    const exit = within(screen.getByTestId('timetable-course-work-exit'));
+    expect(exit.getByRole('link', { name: '作業與教材' }).getAttribute('href')).toBe('/classroom');
   });
 
   it('starts with readable weekly courses on mobile and keeps an explicitly selected view', async () => {

@@ -157,7 +157,7 @@ it('ignores delayed interpretation after a draft edit', async () => {
   await act(async () => resolve(result));
   expect(screen.queryByText(result.summary)).toBeNull();
   expect(screen.queryByRole('checkbox')).toBeNull();
-  expect(screen.getByRole('link', { name: /課程空間/ })).toBeTruthy();
+  expect(screen.getByRole('link', { name: /^課程與作業/ })).toBeTruthy();
 });
 
 it.each(['signed-out', 'no-school', 'loading'] as const)(
@@ -195,10 +195,19 @@ it.each([false, true])('retains school service visibility with enabled=%s', asyn
   fireEvent.click(screen.getByText('模擬語音輸入'));
   confirm();
   await screen.findByText('查看作業');
-  expect(Boolean(screen.queryByRole('link', { name: /玩課雲作業與教材/ }))).toBe(enabled);
-  expect(screen.getByRole('link', { name: /課程空間/ }).getAttribute('href')).toContain(
-    '/classroom',
+  const homework = screen.queryByRole('link', { name: /^玩課雲作業/ });
+  expect(Boolean(homework)).toBe(enabled);
+  if (homework) {
+    const destination = new URL(homework.getAttribute('href')!, 'https://campus.example');
+    expect(destination.pathname).toBe('/school-lms');
+    expect(destination.searchParams.get('schoolId')).toBe('pu');
+  }
+  const classroom = new URL(
+    screen.getByRole('link', { name: /^課程與作業/ }).getAttribute('href')!,
+    'https://campus.example',
   );
+  expect(classroom.pathname).toBe('/classroom');
+  expect(classroom.searchParams.get('schoolId')).toBe('pu');
 });
 
 it('keeps quota cooldown across quick-entry draft remounts until a new consented manual retry', async () => {

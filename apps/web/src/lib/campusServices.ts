@@ -1,3 +1,4 @@
+import { ACADEMIC_LMS_SECTIONS, ACADEMIC_SECTIONS } from './academicSections';
 import { isWebOnlineOrderingEnabled, ONLINE_ORDERING_OFF_TEXT } from './onlineOrdering';
 
 export const SERVICE_CATEGORIES = [
@@ -18,13 +19,19 @@ export const SERVICE_ACCESS = {
   operator: '需平台管理權限',
 } as const;
 
+const academicLabel = (path: (typeof ACADEMIC_SECTIONS)[number]['path']) =>
+  ACADEMIC_SECTIONS.find((section) => section.path === path)!.label;
+
+const lmsLabel = (path: (typeof ACADEMIC_LMS_SECTIONS)[number]['path']) =>
+  ACADEMIC_LMS_SECTIONS.find((section) => section.path === path)!.label;
+
 export const CAMPUS_SERVICES = [
   {
-    name: '個人行事曆',
+    name: academicLabel('/calendar'),
     text: '新增、編輯與查看自己的活動、考試與行程',
     href: '/calendar',
     access: 'device',
-    keywords: '行事曆 活動 考試 日期 calendar',
+    keywords: '行事曆 活動 考試 日期 calendar 個人行事曆',
     category: 'study',
   },
   {
@@ -36,11 +43,11 @@ export const CAMPUS_SERVICES = [
     category: 'study',
   },
   {
-    name: '課表',
+    name: academicLabel('/timetable'),
     text: '查看、編輯與匯入本學期課表',
     href: '/timetable',
     access: 'public',
-    keywords: '上課 行事曆 schedule 空堂',
+    keywords: '上課 行事曆 schedule 空堂 課務',
     category: 'study',
   },
   {
@@ -68,39 +75,58 @@ export const CAMPUS_SERVICES = [
     category: 'study',
   },
   {
-    name: '老師工作台',
-    text: '老師看自己課的學生申訴，核准或不核准',
+    name: '課務申訴審核',
+    text: '老師看自己課的學生申訴，核准或不核准；授課請到課程與作業',
     href: '/teacher',
     access: 'school',
-    keywords: '老師 教師 申訴 核准 teacher',
+    keywords: '老師 教師 申訴 核准 teacher 老師工作台 課務申訴審核',
     category: 'study',
   },
   {
-    name: '成績',
-    text: '查詢學校提供的學期成績',
+    name: academicLabel('/grades'),
+    text: '查詢學校提供的學期成績；課堂評分回饋見次級入口',
     href: '/grades?tab=semester',
     access: 'school',
     keywords: '分數 學期 grade',
     category: 'study',
   },
   {
-    name: 'WOW Class 課程',
-    text: '讀取學習平臺的課堂清單，前往教材、作業與公告',
+    name: '成績回饋',
+    text: '一頁看各門課已評分、等待公布與缺交，點進去看老師評語和自己交的內容',
+    href: '/grades?tab=feedback',
+    access: 'platform',
+    keywords: '成績 回饋 分數 評分 缺交 作業 測驗 評語 grade feedback 課業成績與回饋',
+    category: 'study',
+    parentHref: '/grades?tab=semester',
+  },
+  {
+    name: academicLabel('/classroom'),
+    text: '閱讀教材、繳交作業、回答測驗，查看老師回饋；玩課雲與課程群組見次級入口',
+    href: '/classroom',
+    access: 'platform',
+    keywords: 'nuni 課程 教材 作業 測驗 繳交 作答 老師 回饋 邀請 classroom 課程空間 課務',
+    category: 'study',
+  },
+  {
+    name: lmsLabel('/school-courses'),
+    text: '讀取玩課雲（WOW Class）課堂清單，前往教材、作業與公告',
     href: '/school-courses',
     access: 'school',
-    keywords: 'WOW Class TronClass LMS 課程 教材 作業 老師',
+    keywords: 'WOW Class TronClass LMS 玩課雲 課程 教材 作業 老師',
     category: 'study',
+    parentHref: '/classroom',
   },
   {
-    name: '玩課雲作業與教材',
-    text: '跨課程查看截止、已交狀態、公告與可下載教材',
+    name: lmsLabel('/school-lms'),
+    text: '跨課程查看玩課雲截止、已交狀態、公告與可下載教材（未啟用時請用課程與作業）',
     href: '/school-lms',
     access: 'school',
-    keywords: '玩課雲 作業 截止 教材 公告 WOW Class TronClass',
+    keywords: '玩課雲 作業 截止 教材 公告 WOW Class TronClass 作業與教材',
     category: 'study',
+    parentHref: '/classroom',
   },
   {
-    name: '學分規劃',
+    name: academicLabel('/credit-planner'),
     text: '依修課紀錄與自訂目標整理學分',
     href: '/credit-planner',
     access: 'school',
@@ -112,24 +138,9 @@ export const CAMPUS_SERVICES = [
     text: '開啟學校帳號的課程與群組，或使用邀請碼加入',
     href: '/groups',
     access: 'school',
-    keywords: '作業 教材 教師 點名 course',
+    keywords: '作業 教材 教師 點名 course 群組',
     category: 'study',
-  },
-  {
-    name: '課程空間',
-    text: '閱讀教材、繳交作業、回答測驗，查看老師回饋',
-    href: '/classroom',
-    access: 'platform',
-    keywords: 'nuni 課程 教材 作業 測驗 繳交 作答 老師 回饋 邀請 classroom',
-    category: 'study',
-  },
-  {
-    name: '課業成績與回饋',
-    text: '一頁看各門課已評分、等待公布與缺交，點進去看老師評語和自己交的內容',
-    href: '/grades?tab=feedback',
-    access: 'platform',
-    keywords: '成績 回饋 分數 評分 缺交 作業 測驗 評語 grade feedback',
-    category: 'study',
+    parentHref: '/classroom',
   },
   {
     name: '公告',
@@ -204,12 +215,21 @@ export const CAMPUS_SERVICES = [
     category: 'campus',
   },
   {
+    name: '點餐與取餐',
+    text: '選餐點、查訂單、出示取餐憑證；餐廳菜單見次級入口',
+    href: '/food',
+    access: 'platform',
+    keywords: '點餐 訂單 取餐 外帶 food order pickup 餐廳 午餐 晚餐 餐點',
+    category: 'campus',
+  },
+  {
     name: '餐廳',
     text: '查看餐廳與菜單資料',
     href: '/cafeteria',
     access: 'public',
-    keywords: '午餐 晚餐 餐點 food',
+    keywords: '午餐 晚餐 餐點 food 食堂',
     category: 'campus',
+    parentHref: '/food',
   },
   {
     name: '宿舍',
@@ -225,14 +245,6 @@ export const CAMPUS_SERVICES = [
     href: '/lost-found',
     access: 'school',
     keywords: '失物 招領 遺失 拾獲 lost found',
-    category: 'campus',
-  },
-  {
-    name: '點餐與取餐',
-    text: '選餐點、查訂單、出示取餐憑證',
-    href: '/food',
-    access: 'platform',
-    keywords: '點餐 訂單 取餐 外帶 food order pickup',
     category: 'campus',
   },
   {
@@ -322,28 +334,67 @@ export const CAMPUS_SERVICES = [
   keywords: string;
   category: ServiceCategory;
   access: keyof typeof SERVICE_ACCESS;
+  parentHref?: string;
 }[];
 
-export function presentCampusService<T extends { href: string; text: string }>(service: T): T {
+export type CampusService = (typeof CAMPUS_SERVICES)[number];
+
+function isSecondary(service: CampusService) {
+  return typeof service.parentHref === 'string' && service.parentHref.length > 0;
+}
+
+/** 含主入口與次級選項（供路由判斷、快捷意圖查找）。 */
+export function flattenCampusServices(schoolLmsEnabled = false) {
+  return CAMPUS_SERVICES.filter((service) => schoolLmsEnabled || service.href !== '/school-lms');
+}
+
+export function presentCampusService<T extends { href: string; text: string; name?: string }>(
+  service: T,
+): T & { note?: string } {
   if (service.href === '/food' && !isWebOnlineOrderingEnabled()) {
-    return { ...service, text: ONLINE_ORDERING_OFF_TEXT };
+    // name 維持「點餐與取餐」；關閉狀態只進次要說明（text／note），不縫進標籤。
+    return { ...service, text: ONLINE_ORDERING_OFF_TEXT, note: ONLINE_ORDERING_OFF_TEXT };
   }
   return service;
 }
 
 export function visibleCampusServices(schoolLmsEnabled = false) {
-  return CAMPUS_SERVICES.filter((service) => schoolLmsEnabled || service.href !== '/school-lms');
+  return flattenCampusServices(schoolLmsEnabled);
 }
 
-export function searchCampusServices(query: string, category: ServiceCategory | 'all' = 'all', schoolLmsEnabled = false) {
+/** 目錄預設只列主入口；有搜尋詞時才展開命中的次級選項。 */
+export function directoryCampusServices(schoolLmsEnabled = false) {
+  return flattenCampusServices(schoolLmsEnabled).filter((service) => !isSecondary(service));
+}
+
+/** 主入口底下的次級服務（瀏覽目錄時展開用）。 */
+export function secondaryCampusServices(parentHref: string, schoolLmsEnabled = false) {
+  return flattenCampusServices(schoolLmsEnabled)
+    .filter((service) => isSecondary(service) && service.parentHref === parentHref)
+    .map(presentCampusService);
+}
+
+export function searchCampusServices(
+  query: string,
+  category: ServiceCategory | 'all' = 'all',
+  schoolLmsEnabled = false,
+) {
   const terms = query
     .normalize('NFKC')
     .trim()
     .toLocaleLowerCase('zh-TW')
     .split(/\s+/)
     .filter(Boolean);
-  return visibleCampusServices(schoolLmsEnabled).map(presentCampusService).filter((service) => {
-    const content = `${service.name} ${service.text} ${service.keywords}`
+  const all = flattenCampusServices(schoolLmsEnabled);
+  const pool = terms.length ? all : directoryCampusServices(schoolLmsEnabled);
+  return pool.map(presentCampusService).filter((service) => {
+    const childText = terms.length
+      ? ''
+      : all
+          .filter((item) => 'parentHref' in item && item.parentHref === service.href)
+          .map((item) => `${item.name} ${item.text} ${item.keywords}`)
+          .join(' ');
+    const content = `${service.name} ${service.text} ${service.keywords} ${childText} ${'note' in service && service.note ? service.note : ''}`
       .normalize('NFKC')
       .toLocaleLowerCase('zh-TW');
     return (
