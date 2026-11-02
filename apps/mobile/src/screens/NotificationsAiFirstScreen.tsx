@@ -1,7 +1,14 @@
+import {
+  notificationListFilter,
+  notificationTypeLabel,
+  notificationCampusLabel,
+  type NotificationListMode,
+} from '@campus/shared/src/notificationListFilter';
+import { toPublicSchoolId } from '@campus/shared/src/schoolIds';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { ActivityIndicator, Text, View } from 'react-native';
+import { ActivityIndicator, Text, View, Pressable, ScrollView } from 'react-native';
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
-import { AIButton, AIDetailScreen, AIEmptyState, AIRow, AISection, aiTokens } from '../ui/aiFirst';
+import { AIButton, AIDetailScreen, AIEmptyState, AISection, aiTokens } from '../ui/aiFirst';
 import { useAuth } from '../state/auth';
 import { useNotifications } from '../state/notifications';
 import { applyNotificationDestination } from '../utils/applyNotificationDestination';
@@ -37,6 +44,9 @@ export default function NotificationsAiFirstScreen() {
     loadMore,
     reload,
   } = useNotifications();
+  const scrollRef = useRef<ScrollView>(null);
+  const scrollPositions = useRef({ all: 0, unread: 0 });
+  const [filter, setFilter] = useState<NotificationListMode>('all');
   const [blockedNotice, setBlockedNotice] = useState<{ id: string; reason: string } | null>(null);
   type ReadResult = { pending: boolean; unconfirmed: boolean; error?: string };
   const ownerKey = JSON.stringify([uid, schoolId, auth.profile?.role]);
@@ -63,6 +73,11 @@ export default function NotificationsAiFirstScreen() {
   const focusGeneration = useRef(0);
   const visibleUnreadCount =
     unreadCount + notifications.filter((row) => row.read && reads.get(row.id)?.unconfirmed).length;
+  const filteredRows = notificationListFilter(
+    notifications,
+    filter,
+    (row) => !!reads.get(row.id)?.unconfirmed,
+  );
   const update = useCallback((generation: number) => {
     if (mounted.current && currentSession.current.generation === generation)
       refresh((value) => value + 1);
@@ -76,6 +91,9 @@ export default function NotificationsAiFirstScreen() {
   }, []);
   useEffect(() => {
     setBlockedNotice(null);
+    setFilter('all');
+    scrollPositions.current = { all: 0, unread: 0 };
+    scrollRef.current?.scrollTo({ y: 0, animated: false });
   }, [ownerKey]);
   useFocusEffect(
     useCallback(() => {
@@ -87,6 +105,17 @@ export default function NotificationsAiFirstScreen() {
       };
     }, [session]),
   );
+
+  const selectFilter = (mode: NotificationListMode) => {
+    if (mode === filter) return;
+    const y = scrollPositions.current[mode];
+    setFilter(mode);
+    requestAnimationFrame(() => {
+      if (mounted.current && currentSession.current === session) {
+        scrollRef.current?.scrollTo({ y, animated: false });
+      }
+    });
+  };
 
   const syncRead = async (id: string, explicit: boolean) => {
     if (reads.get(id)?.pending || session.batchPending) return undefined;
@@ -120,6 +149,18 @@ export default function NotificationsAiFirstScreen() {
       mounted.current &&
       currentSession.current === session &&
       focusGeneration.current === generation;
+    const sourceSchool = row.data?.schoolId;
+    if (
+      typeof sourceSchool === 'string' &&
+      sourceSchool.trim() &&
+      toPublicSchoolId(sourceSchool.trim()) !== toPublicSchoolId(schoolId)
+    ) {
+      setBlockedNotice({
+        id,
+        reason: '這則通知屬於其他學校，請切換到對應學校後再開啟。未讀狀態已保留。',
+      });
+      return;
+    }
     const destination = resolveNotificationRow(row, { schoolId, role: auth.profile?.role });
     if (destination.ok === false) {
       setBlockedNotice({ id, reason: destination.reason });
@@ -172,6 +213,10 @@ export default function NotificationsAiFirstScreen() {
 
   return (
     <AIDetailScreen
+      scrollRef={scrollRef}
+      onScroll={(event) => {
+        scrollPositions.current[filter] = event.nativeEvent.contentOffset.y;
+      }}
       title="通知"
       subtitle={
         visibleUnreadCount > 0
@@ -179,8 +224,34 @@ export default function NotificationsAiFirstScreen() {
           : `顯示這組帳號已載入的通知`
       }
       onBack={() => navigation?.goBack?.()}
-      rightAction={
-        visibleUnreadCount > 0 ? (
+    >
+      <View
+        accessibilityRole="radiogroup"
+        accessibilityLabel="通知篩選"
+        style={{ padding: 16, flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}
+      >
+        {(['all', 'unread'] as const).map((mode) => (
+          <Pressable
+            key={mode}
+            accessibilityRole="radio"
+            accessibilityState={{ checked: filter === mode }}
+            accessibilityLabel={mode === 'all' ? '顯示全部通知' : '顯示未讀通知'}
+            onPress={() => selectFilter(mode)}
+            style={{
+              minHeight: 48,
+              padding: 12,
+              borderWidth: 1,
+              borderColor: aiTokens.border,
+              borderRadius: 12,
+              backgroundColor: filter === mode ? aiTokens.aiSoft : aiTokens.panel,
+            }}
+          >
+            <Text style={{ color: aiTokens.text }}>
+              {mode === 'all' ? '全部' : `未讀（${visibleUnreadCount}）`}
+            </Text>
+          </Pressable>
+        ))}
+        {visibleUnreadCount > 0 ? (
           <AIButton
             label="全部已讀"
             variant="ghost"
@@ -188,9 +259,13 @@ export default function NotificationsAiFirstScreen() {
             disabled={batchPending || [...reads.values()].some((result) => result.pending)}
             onPress={() => void markAllExplicit()}
           />
-        ) : undefined
-      }
-    >
+        ) : undefined}
+      </View>
+      {hasMore ? (
+        <Text style={{ paddingHorizontal: 16, color: aiTokens.text }}>
+          只含已載入的通知，可繼續載入更早的通知。
+        </Text>
+      ) : null}
       {loading ? (
         <View style={{ padding: 24, alignItems: 'center' }}>
           <ActivityIndicator color={aiTokens.ai} accessibilityLabel="讀取通知" />
@@ -203,9 +278,18 @@ export default function NotificationsAiFirstScreen() {
           </View>
         </AISection>
       ) : notifications.length === 0 ? (
-        <AIEmptyState title="目前沒有通知" subtitle="有新的作業、成績或系統訊息時會顯示在這裡。" />
+        <View>
+          <AIEmptyState
+            title="目前沒有通知"
+            subtitle="有新的作業、成績或系統訊息時會顯示在這裡。"
+          />
+          <AIButton label="重新讀取通知" onPress={reload} />
+        </View>
       ) : (
-        <AISection title="全部" subtitle={`${notifications.length} 則已載入`}>
+        <AISection
+          title={filter === 'all' ? '全部' : '未讀通知'}
+          subtitle={`${notifications.length} 則已載入`}
+        >
           {blockedNotice ? (
             <View
               accessibilityRole="alert"
@@ -233,7 +317,15 @@ export default function NotificationsAiFirstScreen() {
               </View>
             </View>
           ) : null}
-          {notifications.map((row) => {
+          {filteredRows.length === 0 ? (
+            <View style={{ padding: 16, gap: 12 }}>
+              <Text style={{ color: aiTokens.text }}>
+                {hasMore ? '已載入的通知都已讀，較早的通知尚未載入。' : '目前沒有未讀通知。'}
+              </Text>
+              <AIButton label="查看全部通知" onPress={() => selectFilter('all')} />
+            </View>
+          ) : null}
+          {filteredRows.map((row) => {
             const when = createdLabel(row.createdAt);
             const result = reads.get(row.id);
             const pending = !!result?.pending;
@@ -242,13 +334,38 @@ export default function NotificationsAiFirstScreen() {
                 key={row.id}
                 accessibilityState={{ busy: pending, disabled: pending || batchPending }}
               >
-                <AIRow
-                  title={row.title || '通知'}
-                  subtitle={[row.body, when].filter(Boolean).join(' · ')}
-                  tag={row.read && !result?.unconfirmed ? undefined : '未讀'}
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel={[
+                    row.title || '通知',
+                    notificationTypeLabel(row.type),
+                    notificationCampusLabel(row.data),
+                    row.body,
+                    when,
+                    row.read && !result?.unconfirmed ? '已讀' : '未讀',
+                  ]
+                    .filter(Boolean)
+                    .join('，')}
+                  accessibilityState={{ disabled: pending || batchPending }}
                   disabled={pending || batchPending}
                   onPress={() => void openNotification(row.id)}
-                />
+                  style={{ padding: 16, gap: 8, minHeight: 48 }}
+                >
+                  <Text style={{ color: aiTokens.text, fontSize: 17 }}>{row.title || '通知'}</Text>
+                  <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
+                    <Text style={{ color: aiTokens.text, maxWidth: '100%' }}>
+                      {notificationTypeLabel(row.type)}
+                    </Text>
+                    <Text style={{ color: aiTokens.text, maxWidth: '100%' }}>
+                      {notificationCampusLabel(row.data)}
+                    </Text>
+                    {row.read && !result?.unconfirmed ? null : (
+                      <Text style={{ color: aiTokens.text }}>未讀</Text>
+                    )}
+                  </View>
+                  {row.body ? <Text style={{ color: aiTokens.text }}>{row.body}</Text> : null}
+                  {when ? <Text style={{ color: aiTokens.text }}>{when}</Text> : null}
+                </Pressable>
                 {pending ? (
                   <ActivityIndicator
                     accessibilityLabel={`正在同步已讀：${row.title || row.id}`}
