@@ -200,3 +200,74 @@ it.each([false, true])('retains school service visibility with enabled=%s', asyn
     '/classroom',
   );
 });
+
+it('keeps quota cooldown across quick-entry draft remounts until a new consented manual retry', async () => {
+  vi.useFakeTimers();
+  try {
+    vi.mocked(interpretCampusRequest).mockResolvedValueOnce({
+      ...result, status: 'unavailable', source: 'fallback', destinations: [],
+      reason: 'rate_limited', retryAfterSeconds: 2,
+    });
+    render(<QuickCampusEntry />);
+    fireEvent.change(screen.getByRole('searchbox'), { target: { value: '我要借書' } });
+    confirm();
+    await act(async () => { await Promise.resolve(); });
+    expect(interpretCampusRequest).toHaveBeenCalledTimes(1);
+    const firstId = vi.mocked(interpretCampusRequest).mock.calls[0][0].requestId;
+    fireEvent.change(screen.getByRole('searchbox'), { target: { value: '我要找公車' } });
+    fireEvent.click(screen.getByRole('button', { name: '查看傳送內容' }));
+    const consent = screen.getByRole('checkbox') as HTMLInputElement;
+    expect(consent.checked).toBe(false);
+    fireEvent.click(consent);
+    const submit = screen.getByRole('button', { name: '確認並找入口' }) as HTMLButtonElement;
+    expect(submit.disabled).toBe(true);
+    fireEvent.click(submit);
+    expect(interpretCampusRequest).toHaveBeenCalledTimes(1);
+    await act(async () => vi.advanceTimersByTime(1000));
+    expect(submit.disabled).toBe(true);
+    await act(async () => vi.advanceTimersByTime(1000));
+    expect(submit.disabled).toBe(false);
+    expect(interpretCampusRequest).toHaveBeenCalledTimes(1);
+    await act(async () => fireEvent.click(submit));
+    expect(interpretCampusRequest).toHaveBeenCalledTimes(2);
+    expect(vi.mocked(interpretCampusRequest).mock.calls[1][0]).toMatchObject({
+      utterance: '我要找公車', consent: { utterance: '我要找公車' },
+    });
+    expect(vi.mocked(interpretCampusRequest).mock.calls[1][0].requestId).not.toBe(firstId);
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+it('does not retain quota cooldown, drafts or consent across campus A-B-A', async () => {
+  vi.useFakeTimers();
+  try {
+    vi.mocked(interpretCampusRequest).mockResolvedValueOnce({
+      ...result, status: 'unavailable', source: 'fallback', destinations: [],
+      reason: 'rate_limited', retryAfterSeconds: 60,
+    });
+    const view = render(<QuickCampusEntry />);
+    fireEvent.change(screen.getByRole('searchbox'), { target: { value: '我要借書' } });
+    confirm();
+    await act(async () => { await Promise.resolve(); });
+    state.schoolId = 'nthu';
+    view.rerender(<QuickCampusEntry />);
+    expect((screen.getByRole('searchbox') as HTMLInputElement).value).toBe('');
+    expect(screen.queryByRole('checkbox')).toBeNull();
+    state.schoolId = 'pu';
+    view.rerender(<QuickCampusEntry />);
+    expect((screen.getByRole('searchbox') as HTMLInputElement).value).toBe('');
+    fireEvent.change(screen.getByRole('searchbox'), { target: { value: '新的借閱查詢' } });
+    fireEvent.click(screen.getByRole('button', { name: '查看傳送內容' }));
+    expect((screen.getByRole('checkbox') as HTMLInputElement).checked).toBe(false);
+    const submit = screen.getByRole('button', { name: '確認並找入口' }) as HTMLButtonElement;
+    expect(submit.disabled).toBe(true);
+    fireEvent.click(screen.getByRole('checkbox'));
+    expect(submit.disabled).toBe(false);
+    expect(interpretCampusRequest).toHaveBeenCalledTimes(1);
+    await act(async () => fireEvent.click(submit));
+    expect(interpretCampusRequest).toHaveBeenCalledTimes(2);
+  } finally {
+    vi.useRealTimers();
+  }
+});

@@ -12,7 +12,7 @@ import { VoiceDictationButton } from './VoiceDictationButton';
 import { CampusIcon } from './CampusIcon';
 import { getQuickCampusActions, QUICK_CAMPUS_EXAMPLES } from '@/lib/quickCampusActions';
 import { visibleCampusServices } from '@/lib/campusServices';
-import { CampusIntentControl } from './CampusIntentControl';
+import { CampusIntentControl, useCampusIntentCooldown, type CampusIntentCooldown } from './CampusIntentControl';
 import styles from './QuickCampusEntry.module.css';
 
 export function QuickCampusEntry() {
@@ -21,6 +21,7 @@ export function QuickCampusEntry() {
   const { user } = useAuth();
   const selected = selection?.selectedSchool;
   const uid = user?.uid || '';
+  const cooldown = useCampusIntentCooldown(JSON.stringify([uid, selected?.id || '']));
   const selectionReady = Boolean(
     selection && !selection.loading && selection.catalogStatus === 'ready',
   );
@@ -38,6 +39,7 @@ export function QuickCampusEntry() {
       schoolId={selectedSchoolId}
       campusSearch={campusSearch}
       schoolLmsEnabled={schoolLmsEnabled}
+      cooldown={cooldown}
     />
   );
 }
@@ -47,11 +49,13 @@ function QuickCampusEntrySession({
   schoolId,
   campusSearch,
   schoolLmsEnabled,
+  cooldown,
 }: {
   uid: string;
   schoolId: string;
   campusSearch: string;
   schoolLmsEnabled: boolean;
+  cooldown: CampusIntentCooldown;
 }) {
   const [query, setQuery] = useState('');
   const [aiResult, setAiResult] = useState<CampusSemanticResult | null>(null);
@@ -118,6 +122,7 @@ function QuickCampusEntrySession({
           uid={uid}
           schoolId={schoolId}
           utterance={query}
+          cooldown={cooldown}
           onResult={setAiResult}
           onReset={resetAnalysis}
           onReview={resetAnalysis}

@@ -213,6 +213,36 @@ it('keeps a manual quota retry on the same ID and never retries automatically', 
   expect(vi.mocked(interpretCampusRequest).mock.calls[1][0].requestId).toBe(id);
   expect(p.onResult).toHaveBeenCalledTimes(1);
 });
+
+it.each(['review', 'cancel'] as const)('keeps the quota cooldown after %s without silently resending', async (action) => {
+  vi.useFakeTimers();
+  vi.mocked(interpretCampusRequest).mockResolvedValueOnce({
+    ...result, status: 'unavailable', source: 'fallback', destinations: [],
+    reason: 'rate_limited', retryAfterSeconds: 2,
+  });
+  render(<CampusIntentControl {...props()} />);
+  review();
+  await act(async () => confirm());
+  if (action === 'cancel') {
+    fireEvent.click(screen.getByRole('button', { name: '取消' }));
+    review();
+  } else {
+    fireEvent.click(screen.getByRole('button', { name: '重新確認內容' }));
+  }
+  expect((screen.getByRole('checkbox') as HTMLInputElement).checked).toBe(false);
+  fireEvent.click(screen.getByRole('checkbox'));
+  const submit = screen.getByRole('button', { name: '確認並找入口' }) as HTMLButtonElement;
+  expect(submit.disabled).toBe(true);
+  fireEvent.click(submit);
+  expect(interpretCampusRequest).toHaveBeenCalledTimes(1);
+  await act(async () => vi.advanceTimersByTime(1000));
+  expect(submit.disabled).toBe(true);
+  await act(async () => vi.advanceTimersByTime(1000));
+  expect(submit.disabled).toBe(false);
+  expect(interpretCampusRequest).toHaveBeenCalledTimes(1);
+  await act(async () => fireEvent.click(submit));
+  expect(interpretCampusRequest).toHaveBeenCalledTimes(2);
+});
 it.each(['not_configured', 'timeout', 'invalid_response', 'provider_error'] as const)(
   'shows %s failure without declaring success',
   async (reason) => {

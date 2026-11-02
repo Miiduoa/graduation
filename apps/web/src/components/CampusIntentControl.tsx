@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { CampusSemanticResult } from '@campus/shared/src/campusSemantic';
 import {
   interpretCampusRequest,
@@ -9,6 +9,29 @@ import {
 } from '@/lib/campusIntentClient';
 import styles from './CampusIntentControl.module.css';
 
+export type CampusIntentCooldown = {
+  retryReadyAt: number;
+  onRetryAfter: (seconds: number) => void;
+};
+
+export function useCampusIntentCooldown(scope: string): CampusIntentCooldown {
+  const owner = useMemo(() => ({ scope }), [scope]);
+  const [cooldown, setCooldown] = useState({ owner, retryReadyAt: 0 });
+  if (cooldown.owner !== owner) setCooldown({ owner, retryReadyAt: 0 });
+  const onRetryAfter = useCallback((seconds: number) => {
+    if (!Number.isInteger(seconds) || seconds < 1 || seconds > 60) return;
+    const retryReadyAt = Date.now() + seconds * 1000;
+    setCooldown((current) => current.owner === owner
+      ? { owner, retryReadyAt: Math.max(current.retryReadyAt, retryReadyAt) }
+      : current);
+  }, [owner]);
+  return { retryReadyAt: cooldown.owner === owner ? cooldown.retryReadyAt : 0, onRetryAfter };
+}
+
+function remainingSeconds(retryReadyAt: number): number {
+  return Math.max(0, Math.ceil((retryReadyAt - Date.now()) / 1000));
+}
+
 type Props = {
   uid: string;
   schoolId: string;
@@ -16,6 +39,7 @@ type Props = {
   onResult: (result: CampusSemanticResult) => void;
   onReset: () => void;
   onReview?: () => void;
+  cooldown?: CampusIntentCooldown;
 };
 const failureText: Record<CampusIntentReason, string> = {
   not_configured: '免費雲端服務尚未設定，可先使用基本捷徑。',
@@ -36,21 +60,23 @@ function requestId(): string {
 }
 
 export function CampusIntentControl(props: Props) {
+  const ownCooldown = useCampusIntentCooldown(JSON.stringify([props.uid, props.schoolId]));
   return (
     <IntentConfirmation
       key={JSON.stringify([props.uid, props.schoolId, props.utterance])}
       {...props}
+      cooldown={props.cooldown ?? ownCooldown}
     />
   );
 }
 
-function IntentConfirmation({ uid, schoolId, utterance, onResult, onReset, onReview }: Props) {
+function IntentConfirmation({ uid, schoolId, utterance, onResult, onReset, onReview, cooldown }: Props & { cooldown: CampusIntentCooldown }) {
   const text = utterance.trim();
   const [phase, setPhase] = useState<'draft' | 'review' | 'pending' | 'complete'>('draft');
   const [accepted, setAccepted] = useState(false);
   const [message, setMessage] = useState('');
   const [failed, setFailed] = useState(false);
-  const [remaining, setRemaining] = useState(0);
+  const [remaining, setRemaining] = useState(() => remainingSeconds(cooldown.retryReadyAt));
   const [checkedAt, setCheckedAt] = useState('');
   const active = useRef<AbortController | null>(null);
   const sequence = useRef(0);
@@ -82,11 +108,18 @@ function IntentConfirmation({ uid, schoolId, utterance, onResult, onReset, onRev
       previewButton.current?.focus();
     }
   }, [phase]);
-  useEffect(() => {
-    if (remaining <= 0) return;
-    const timer = window.setTimeout(() => setRemaining((value) => Math.max(0, value - 1)), 1000);
+  useLayoutEffect(() => {
+    let timer: number | undefined;
+    const update = () => {
+      const next = remainingSeconds(cooldown.retryReadyAt);
+      setRemaining(next);
+      if (next > 0) {
+        timer = window.setTimeout(update, Math.min(1000, cooldown.retryReadyAt - Date.now()));
+      }
+    };
+    update();
     return () => window.clearTimeout(timer);
-  }, [remaining]);
+  }, [cooldown.retryReadyAt]);
 
   function review() {
     if (!usable) return;
@@ -96,7 +129,6 @@ function IntentConfirmation({ uid, schoolId, utterance, onResult, onReset, onRev
     setMessage('');
     setFailed(false);
     setCheckedAt('');
-    setRemaining(0);
     setPhase('review');
   }
   function cancel() {
@@ -109,7 +141,6 @@ function IntentConfirmation({ uid, schoolId, utterance, onResult, onReset, onRev
     setPhase('draft');
     setAccepted(false);
     setFailed(false);
-    setRemaining(0);
     setCheckedAt('');
     setMessage(
       wasPending
@@ -119,7 +150,8 @@ function IntentConfirmation({ uid, schoolId, utterance, onResult, onReset, onRev
     onReset();
   }
   async function submit() {
-    if (!usable || !accepted || phase !== 'review' || active.current || remaining > 0) return;
+    if (!usable || !accepted || phase !== 'review' || active.current || remaining > 0 ||
+      Date.now() < cooldown.retryReadyAt) return;
     const controller = new AbortController();
     const operation = ++sequence.current;
     active.current = controller;
@@ -148,7 +180,9 @@ function IntentConfirmation({ uid, schoolId, utterance, onResult, onReset, onRev
       if (result.status === 'unavailable') {
         const reason = result.reason || 'invalid_response';
         setMessage(failureText[reason]);
-        setRemaining(result.retryAfterSeconds || 0);
+        if (reason === 'rate_limited' && result.retryAfterSeconds) {
+          cooldown.onRetryAfter(result.retryAfterSeconds);
+        }
         setFailed(true);
         setPhase('review');
         if (reason === 'permission_changed' || reason === 'account_changed') {

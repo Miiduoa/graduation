@@ -8,7 +8,7 @@ import { useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { SiteShell } from '@/components/SiteShell';
 import { useAuth } from '@/components/AuthGuard';
-import { CampusIntentControl } from '@/components/CampusIntentControl';
+import { CampusIntentControl, useCampusIntentCooldown } from '@/components/CampusIntentControl';
 import { useOptionalSelectedSchool } from '@/components/SelectedSchoolProvider';
 import { campusServiceHref, useCampusNavigationSearch } from '@/lib/campusNavigation';
 import { useSignInOptions } from '@/lib/signInOptions';
@@ -52,6 +52,7 @@ function ServiceDirectory() {
     selection?.selectedSchool?.id ||
     (selectionReady ? '' : params.get('campus') || params.get('schoolId') || '');
   const draftScope = JSON.stringify([uid, draftSchoolId]);
+  const cooldown = useCampusIntentCooldown(draftScope);
   const semanticScope = JSON.stringify([
     draftScope,
     schoolSearch,
@@ -184,6 +185,7 @@ function ServiceDirectory() {
               uid={uid}
               schoolId={schoolId}
               utterance={term}
+              cooldown={cooldown}
               onReview={stopVoice}
               onReset={clearAnalysis}
               onResult={(result) =>
