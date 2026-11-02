@@ -363,6 +363,9 @@ it('a failed notification read update preserves its unread status until the serv
   await screen.findByText('成績已公布');
   fireEvent.click(screen.getAllByRole('button', { name: '標記已讀' })[0]);
   await screen.findByText('未能更新已讀狀態，請稍後再試。');
+  fireEvent.click(screen.getByRole('checkbox', { name: '只看未讀' }));
+  expect(screen.getByText('成績已公布')).toBeTruthy();
+  expect(screen.getByText('2 則未讀（只含已載入）')).toBeTruthy();
   expect(screen.getAllByText('未讀')).toHaveLength(2);
 });
 it('logout removes notifications and old subscription errors cannot restore them', async () => {
@@ -577,4 +580,18 @@ it('does not send Cmd+Enter while an IME composition is active', async () => {
   fireEvent.keyDown(field, { key: 'Enter', metaKey: true, isComposing: true });
   expect(sendPrivateMessage).not.toHaveBeenCalled();
   expect((field as HTMLTextAreaElement).value).toBe('中文組字中');
+});
+
+it('shows source labels and limited coverage without inferring a campus', async () => {
+  vi.mocked(watchAccountNotifications).mockImplementation((_session, receive) => {
+    const feed = notifications();
+    feed.notifications[0].data = { schoolId: 'pu' };
+    receive(feed);
+    return vi.fn();
+  });
+  render(<MessagesPage />);
+  await screen.findByText('成績已公布');
+  expect(screen.getByText(/每個來源最多 50 則/)).toBeTruthy();
+  expect(screen.getByText(/成績 · 靜宜大學/)).toBeTruthy();
+  expect(screen.getByText('其他通知 · 未標示校園')).toBeTruthy();
 });
