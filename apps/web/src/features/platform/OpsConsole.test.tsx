@@ -1,4 +1,5 @@
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { StrictMode } from 'react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { OpsConsole } from './OpsConsole';
 import { adminLoginHref, opsTabHref, readOpsSchool, readOpsSchoolId, readOpsTab } from './constants';
@@ -318,6 +319,46 @@ async function startProxyRetry() {
   await waitFor(() => expect(proxyReads).toBe(2));
   return { view, input, retry, pending };
 }
+
+it('preserves retry focus through strict ref reattachment and hands it over only after recovery', async () => {
+  setupPeople();
+  const fallback = fetcher.getMockImplementation()!;
+  const pending = deferredResponse();
+  let recover = false;
+  fetcher.mockImplementation((url: string, options?: RequestInit) => {
+    if (url.endsWith('/proxy'))
+      return recover ? pending.promise : Promise.resolve(ok({}, 503));
+    return fallback(url, options);
+  });
+  render(
+    <StrictMode>
+      <OpsConsole />
+    </StrictMode>,
+  );
+  const input = await selectSchool('school-a', false);
+  const form = within(input.closest('form')!);
+  const retry = await form.findByRole('button', { name: '重新確認校方授權' });
+  retry.focus();
+  fireEvent.click(retry);
+  await form.findByRole('alert');
+  expect(document.activeElement).toBe(retry);
+  recover = true;
+  fireEvent.click(retry);
+  expect(document.activeElement).toBe(retry);
+  expect(retry.getAttribute('aria-disabled')).toBe('true');
+  await act(async () =>
+    pending.resolve(ok({
+      tenantId: 'school-a',
+      expiresAt: new Date(Date.now() + 60000).toISOString(),
+      extended: false,
+      ended: false,
+    })),
+  );
+  await waitFor(() => expect(document.activeElement).toBe(input));
+  expect(input).toHaveProperty('disabled', false);
+  expect(form.queryByRole('button', { name: '重新確認校方授權' })).toBeNull();
+  expect(fetcher.mock.calls.some(([, options]) => options?.method === 'POST')).toBe(false);
+});
 
 it.each([401, 403, 503])(
   'keeps failed authorization retry (%s) blocked and retryable',

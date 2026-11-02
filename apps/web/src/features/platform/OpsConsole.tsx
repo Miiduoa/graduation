@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { SiteShell } from '@/components/SiteShell';
 import { Button } from '@/components/ui/Button';
 import { Input, Select, Textarea } from '@/components/ui/Input';
@@ -323,11 +323,17 @@ function PeopleAddForm({
   const [notice, setNotice] = useState('');
   const captureRequest = useActiveRequest();
   const mutationPending = useRef(false);
-  const [retryingAuthorization, setRetryingAuthorization] = useState(false);
+  const [hasRetriedAuthorization, setHasRetriedAuthorization] = useState(false);
   const authorizationRetryPending = useRef(false);
   const authorizationRetryButton = useRef<HTMLButtonElement>(null);
+  const authorizationFocusPending = useRef(false);
   const accountInput = useRef<HTMLInputElement>(null);
   const addPersonForm = useRef<HTMLFormElement>(null);
+  const attachAuthorizationRetryButton = useCallback((button: HTMLButtonElement | null) => {
+    authorizationFocusPending.current =
+      !button && authorizationRetryButton.current === document.activeElement;
+    authorizationRetryButton.current = button;
+  }, []);
   useEffect(() => {
     if (!requiresProxy || !proxy.value || proxy.value.ended) return;
     const timer = window.setInterval(() => setNow(Date.now()), 1000);
@@ -344,15 +350,17 @@ function PeopleAddForm({
     (!requiresProxy || (!proxy.loading && !proxy.error && proxyActive));
   const authorizationLoading = people.loading || (requiresProxy && proxy.loading);
   const authorizationError = people.error || (requiresProxy ? proxy.error : undefined);
-  useEffect(() => {
-    if (!retryingAuthorization || authorizationLoading) return;
+  useLayoutEffect(() => {
+    if (authorizationLoading) return;
     authorizationRetryPending.current = false;
-    if (!authorizationError && document.activeElement === authorizationRetryButton.current) {
-      if (ready) accountInput.current?.focus();
-      else addPersonForm.current?.focus();
+    const restoreFocus = authorizationFocusPending.current;
+    authorizationFocusPending.current = false;
+    const isCurrent = captureRequest();
+    if (!authorizationError && restoreFocus && isCurrent()) {
+      const target = ready ? accountInput.current : addPersonForm.current;
+      if (target?.isConnected && document.activeElement === document.body) target.focus();
     }
-    setRetryingAuthorization(false);
-  }, [authorizationError, authorizationLoading, ready, retryingAuthorization]);
+  }, [authorizationError, authorizationLoading, captureRequest, ready]);
   return (
     <form
       ref={addPersonForm}
@@ -419,9 +427,9 @@ function PeopleAddForm({
           {authorizationError}
         </p>
       ) : null}
-      {authorizationError || retryingAuthorization ? (
+      {authorizationError || (hasRetriedAuthorization && authorizationLoading) ? (
         <Button
-          ref={authorizationRetryButton}
+          ref={attachAuthorizationRetryButton}
           type="button"
           aria-disabled={authorizationLoading || busy}
           onClick={() => {
@@ -429,7 +437,7 @@ function PeopleAddForm({
             if (!isCurrent() || authorizationRetryPending.current || authorizationLoading || busy)
               return;
             authorizationRetryPending.current = true;
-            setRetryingAuthorization(true);
+            setHasRetriedAuthorization(true);
             if (people.error) people.reload();
             if (requiresProxy && proxy.error) proxy.reload();
           }}
