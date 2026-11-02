@@ -2,6 +2,7 @@ import { SchoolLmsReadonlyProvider } from '@/components/SchoolLmsReadonlyProvide
 import { render, screen, within } from '@testing-library/react';
 import { beforeEach, expect, it, vi } from 'vitest';
 import { SiteShell } from '@/components/SiteShell';
+import { ACADEMIC_LMS_SECTIONS, ACADEMIC_SECTIONS } from '@/lib/academicSections';
 
 const navigation = vi.hoisted(() => ({
   pathname: '/grades' as string | null,
@@ -32,11 +33,13 @@ beforeEach(() => {
   navigation.schoolId = 'pu';
 });
 
-function renderShell() {
+function renderShell(enabled = true) {
   return render(
-    <SchoolLmsReadonlyProvider enabled={true}><SiteShell title="目前頁面">
-      <p>此頁內容</p>
-    </SiteShell></SchoolLmsReadonlyProvider>,
+    <SchoolLmsReadonlyProvider enabled={enabled}>
+      <SiteShell title="目前頁面">
+        <p>此頁內容</p>
+      </SiteShell>
+    </SchoolLmsReadonlyProvider>,
   );
 }
 
@@ -48,11 +51,25 @@ function destination(label: string) {
   );
 }
 
+const enabledLabels = [
+  ...ACADEMIC_SECTIONS.map((section) => section.label),
+  ...ACADEMIC_LMS_SECTIONS.map((section) => section.label),
+  '匯入資料',
+];
+
+const defaultLabels = [
+  ...ACADEMIC_SECTIONS.map((section) => section.label),
+  ACADEMIC_LMS_SECTIONS[0].label,
+  '匯入資料',
+];
+
 it.each([
   ['/timetable', '課表', 'timetable'],
-  ['/school-courses', 'WOW Class 課程', 'timetable'],
-  ['/school-lms', '作業與教材', 'timetable'],
-  ['/school-lms/homework/10001/20001', '作業與教材', 'timetable'],
+  ['/classroom', '課程與作業', 'timetable'],
+  ['/classroom/course/cs101', '課程與作業', 'timetable'],
+  ['/school-courses', '玩課雲課程', 'timetable'],
+  ['/school-lms', '玩課雲作業', 'timetable'],
+  ['/school-lms/homework/10001/20001', '玩課雲作業', 'timetable'],
   ['/grades', '成績', 'grades'],
   ['/credit-planner', '學分規劃', 'grades'],
   ['/credit-planner/review', '學分規劃', 'grades'],
@@ -62,18 +79,10 @@ it.each([
   'adds one shared academic navigation on %s with the current page identified',
   (pathname, label, kind) => {
     navigation.pathname = pathname;
-    renderShell();
+    renderShell(true);
     const nav = screen.getByRole('navigation', { name: '課務導覽' });
     const links = within(nav).getAllByRole('link');
-    expect(links.map((link) => link.textContent)).toEqual([
-      '課表',
-      'WOW Class 課程',
-      '作業與教材',
-      '成績',
-      '學分規劃',
-      '行事曆',
-      '匯入資料',
-    ]);
+    expect(links.map((link) => link.textContent)).toEqual(enabledLabels);
     expect(links.filter((link) => link.getAttribute('aria-current') === 'page')).toEqual([
       within(nav).getByRole('link', { name: label }),
     ]);
@@ -86,7 +95,7 @@ it('uses the current campus selection and passes only destination-specific conte
   navigation.schoolId = 'nthu';
   navigation.search =
     'school=PU&schoolId=pu&campus=pu&term=115%7C2&tab=feedback&token=private&year=115&semester=2';
-  renderShell();
+  renderShell(true);
   const nav = screen.getByRole('navigation', { name: '課務導覽' });
   for (const link of within(nav).getAllByRole('link')) {
     const url = new URL(link.getAttribute('href')!, 'https://campus.local');
@@ -106,7 +115,7 @@ it('retains the requested import kind and respects all-campuses selection', () =
   navigation.pathname = '/import';
   navigation.schoolId = null;
   navigation.search = 'kind=events&schoolId=pu&campus=pu';
-  renderShell();
+  renderShell(true);
   expect(destination('匯入資料').searchParams.get('kind')).toBe('events');
   expect(destination('匯入資料').searchParams.get('campus')).toBe('all');
   expect(destination('課表').searchParams.has('schoolId')).toBe(false);
@@ -114,13 +123,13 @@ it('retains the requested import kind and respects all-campuses selection', () =
 
 it.each(['115|2', '2026|暑修', 'manual'])('retains the established timetable term %s', (term) => {
   navigation.search = new URLSearchParams({ term }).toString();
-  renderShell();
+  renderShell(true);
   expect(destination('課表').searchParams.get('term')).toBe(term);
 });
 
 it.each(['invalid', '115|', '115|1|2'])('does not forward an invalid timetable term %s', (term) => {
   navigation.search = new URLSearchParams({ term }).toString();
-  renderShell();
+  renderShell(true);
   expect(destination('課表').searchParams.has('term')).toBe(false);
 });
 
@@ -128,19 +137,25 @@ it.each([
   '/admin',
   '/teacher',
   '/classroom/grades',
+  '/classroom/account',
   '/timetable/s/shared',
   '/grades-other',
   '/life',
   null,
 ])('does not add academic navigation on %s', (pathname) => {
   navigation.pathname = pathname;
-  renderShell();
+  renderShell(true);
   expect(screen.queryByRole('navigation', { name: '課務導覽' })).toBeNull();
   expect(screen.getByText('此頁內容')).toBeTruthy();
 });
 
-it('hides the readonly navigation by default', () => {
-  render(<SiteShell title="目前頁面"><p>此頁內容</p></SiteShell>);
+it('hides readonly homework navigation by default and keeps shared labels', () => {
+  renderShell(false);
+  expect(screen.queryByRole('link', { name: '玩課雲作業' })).toBeNull();
   expect(screen.queryByRole('link', { name: '作業與教材' })).toBeNull();
+  const nav = screen.getByRole('navigation', { name: '課務導覽' });
+  expect(within(nav).getAllByRole('link').map((link) => link.textContent)).toEqual(defaultLabels);
   expect(destination('課表').pathname).toBe('/timetable');
+  expect(destination('課程與作業').pathname).toBe('/classroom');
+  expect(destination('玩課雲課程').pathname).toBe('/school-courses');
 });

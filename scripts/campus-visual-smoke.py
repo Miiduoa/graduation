@@ -450,8 +450,11 @@ async def main():
             await expect(search).to_be_focused()
             await expect(page.get_by_role('heading', name='常用查詢', exact=True)).to_be_visible()
             await page.get_by_role('button', name='個人安排', exact=True).click()
-            await expect(page.locator('#life-service-results a')).to_have_count(2)
+            # 點餐關閉時不含訂單：宿舍、課程與作業、共同空堂
+            await expect(page.locator('#life-service-results a')).to_have_count(3)
             await expect(page.locator('#life-service-results a[href^="/dormitory"]')).to_be_visible()
+            await expect(page.locator('#life-service-results a[href^="/classroom"]')).to_be_visible()
+            await expect(page.locator('#life-service-results a[href^="/timetable"]')).to_be_visible()
             await page.get_by_role('button', name='全部', exact=True).click()
             await search.fill('報修')
             await expect(page.locator('#life-service-results a')).to_have_count(1)
