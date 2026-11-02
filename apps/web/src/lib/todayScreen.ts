@@ -30,10 +30,21 @@ export function todayClassesFromSchedule(
   });
 }
 
-export function todayTodosFromHomeTasks(tasks: readonly HomeTask[]): TodayTodo[] {
+export function todayTodosFromHomeTasks(
+  tasks: readonly HomeTask[],
+  now?: Date | null,
+): TodayTodo[] {
+  const nowMs = now?.getTime() ?? NaN;
   return tasks.flatMap((task) => {
     const dueAt = task.dueAt ? parseTaipeiInstant(task.dueAt) : null;
     if (task.dueAt && dueAt === null) return [];
+    if (
+      task.acceptsLate === false &&
+      dueAt !== null &&
+      Number.isFinite(nowMs) &&
+      dueAt < nowMs
+    )
+      return [];
     return [
       {
         id: `${task.courseId}:${task.id}`,

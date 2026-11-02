@@ -166,15 +166,22 @@ export async function loadHomeData(uid: string): Promise<HomeData> {
             }
             if (row.submittedAt) return;
           }
+          const dueAt = dateString(assignment.dueAt);
+          const acceptsLate = assignment.allowLateSubmission === true;
+          if (
+            assignment.status === 'closed' ||
+            (dueAt && Date.parse(dueAt) < Date.now() && !acceptsLate)
+          )
+            return;
           tasks.push({
             kind,
             id: entry.id,
             courseId: course.id,
             courseName: course.name,
             title,
-            dueAt: dateString(assignment.dueAt),
+            dueAt,
             href,
-            acceptsLate: assignment.allowLateSubmission === true,
+            acceptsLate,
           });
         }),
       );

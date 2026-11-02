@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   formatTodayHeaderDate,
+  formatTodoDeadlineLabel,
   formatTodoDueLine,
   formatUpcomingDueLine,
   pickNextAction,
@@ -45,7 +46,7 @@ describe('pickNextAction', () => {
     expect(action).toEqual({ type: 'class', class: klass() });
   });
 
-  it('24 小時內有未交作業截止時選今天截止', () => {
+  it('24 小時內有未交作業截止時優先顯示待辦', () => {
     const current = new Date('2026-10-25T08:00:00+08:00');
     const laterClass = klass({ startAt: Date.parse('2026-10-25T16:10:00+08:00'), endAt: Date.parse('2026-10-25T18:00:00+08:00') });
     const action = pickNextAction([laterClass], [todo()], current);
@@ -94,7 +95,7 @@ describe('pickNextAction', () => {
       dueAt: Date.parse('2026-10-23T23:59:00+08:00'),
     });
     expect(pickNextAction([], [laterOverdue, overdue], now)).toEqual({ type: 'overdue', todo: overdue });
-    expect(formatTodoDueLine(overdue, now)).toBe(TODAY_COPY.overdueDays(2));
+    expect(formatTodoDueLine(overdue, now)).toBe(TODAY_COPY.overdueDays(1));
   });
 
   it('正在上的課也算 30 分鐘內有課', () => {
@@ -133,6 +134,97 @@ describe('pickNextAction', () => {
       todo: laterHomework,
     });
     expect(pickNextAction([ended], [], current)).toEqual({ type: 'allDone', todo: null });
+  });
+});
+
+describe('deadline dates and remaining time', () => {
+  const reference = new Date('2026-11-02T23:50:00+08:00');
+
+  it.each([
+    ['2026-11-02T23:55:00+08:00', '今天截止', '今天 23:55 截止・還剩 5 分鐘'],
+    ['2026-11-03T00:10:00+08:00', '明天截止', '明天 00:10 截止・還剩 20 分鐘'],
+    ['2026-11-04T01:50:00+08:00', '11/4 截止', '11/4 01:50 截止・還剩 1 天 2 小時'],
+  ])('shows the Taipei deadline date for %s', (dueAt, label, line) => {
+    const work = todo({ dueAt: Date.parse(dueAt) });
+    expect(formatTodoDeadlineLabel(work, reference)).toBe(label);
+    expect(formatTodoDueLine(work, reference)).toBe(line);
+  });
+
+  it.each([
+    ['2026-11-30T23:50:00+08:00', '2026-12-01T00:10:00+08:00'],
+    ['2026-12-31T23:50:00+08:00', '2027-01-01T00:10:00+08:00'],
+    ['2028-02-29T23:50:00+08:00', '2028-03-01T00:10:00+08:00'],
+  ])('keeps the next-calendar-day label across month and year boundaries', (current, due) => {
+    const work = todo({ dueAt: Date.parse(due) });
+    expect(formatTodoDeadlineLabel(work, new Date(current))).toBe('明天截止');
+    expect(formatTodoDueLine(work, new Date(current))).toBe('明天 00:10 截止・還剩 20 分鐘');
+    expect(pickNextAction([], [work], new Date(current))).toEqual({ type: 'assignment', todo: work });
+  });
+
+  it('includes the year for an absolute deadline in another year', () => {
+    const current = new Date('2026-12-30T12:00:00+08:00');
+    const work = todo({ dueAt: Date.parse('2027-01-02T12:00:00+08:00') });
+    expect(formatTodoDeadlineLabel(work, current)).toBe('2027/1/2 截止');
+    expect(formatTodoDueLine(work, current)).toBe('2027/1/2 12:00 截止・還剩 3 天');
+    expect(formatUpcomingDueLine(work, current)).toBe('2027/1/2 週六 12:00 截止');
+  });
+
+  it.each([
+    [0, '不到 1 分鐘'],
+    [30_000, '不到 1 分鐘'],
+    [59_999, '不到 1 分鐘'],
+    [60_000, '還剩 1 分鐘'],
+    [59 * 60_000, '還剩 59 分鐘'],
+    [59 * 60_000 + 30_000, '還剩 60 分鐘'],
+    [60 * 60_000, '還剩 1 小時'],
+    [60 * 60_000 + 1, '還剩 1 小時 1 分鐘'],
+    [119 * 60_000 + 30_000, '還剩 2 小時'],
+    [24 * 60 * 60_000, '還剩 1 天'],
+    [25 * 60 * 60_000, '還剩 1 天 1 小時'],
+    [47.5 * 60 * 60_000, '還剩 1 天 23 小時'],
+  ])('shows a meaningful countdown at %i milliseconds remaining', (remaining, text) => {
+    const work = todo({ dueAt: reference.getTime() + remaining });
+    expect(formatTodoDueLine(work, reference)).toContain(`截止・${text}`);
+    expect(formatTodoDeadlineLabel(work, reference)).not.toBe('已逾期');
+  });
+
+  it('counts overdue days by elapsed time instead of midnight crossings', () => {
+    const due = Date.parse('2026-11-02T23:59:00+08:00');
+    const work = todo({ dueAt: due });
+    expect(formatTodoDueLine(work, new Date('2026-11-03T00:01:00+08:00'))).toBe('已逾期');
+    expect(formatTodoDueLine(work, new Date(due + 24 * 60 * 60_000 - 1))).toBe('已逾期');
+    expect(formatTodoDueLine(work, new Date(due + 24 * 60 * 60_000))).toBe('已逾期 1 天');
+    expect(formatTodoDeadlineLabel(work, new Date(due + 1))).toBe('已逾期');
+  });
+
+  it.each([NaN, Infinity, -Infinity, 9e15])('does not invent a deadline for invalid timestamp %s', (dueAt) => {
+    const work = todo({ dueAt });
+    expect(formatTodoDeadlineLabel(work, reference)).toBe('截止時間待確認');
+    expect(formatTodoDueLine(work, reference)).toBe('截止時間待確認');
+    expect(formatUpcomingDueLine(work, reference)).toBe('截止時間待確認');
+  });
+
+  it('separates a missing deadline from an invalid reference clock', () => {
+    const undated = todo({ dueAt: null });
+    expect(formatTodoDeadlineLabel(undated, reference)).toBe('未設截止時間');
+    expect(formatTodoDueLine(undated, reference)).toBe('未設截止時間');
+    const invalidNow = new Date(NaN);
+    expect(formatTodoDeadlineLabel(todo(), invalidNow)).toBe('截止時間待確認');
+    expect(formatTodoDueLine(todo(), invalidNow)).toBe('截止時間待確認');
+    expect(formatUpcomingDueLine(todo(), invalidNow)).toBe('截止時間待確認');
+  });
+
+  it.each(['UTC', 'America/Los_Angeles', 'Asia/Tokyo'])('uses Taipei dates with host timezone %s', (zone) => {
+    const previous = process.env.TZ;
+    try {
+      process.env.TZ = zone;
+      const work = todo({ dueAt: Date.parse('2026-11-02T16:10:00Z') });
+      expect(formatTodoDeadlineLabel(work, reference)).toBe('明天截止');
+      expect(formatTodoDueLine(work, reference)).toBe('明天 00:10 截止・還剩 20 分鐘');
+    } finally {
+      if (previous === undefined) delete process.env.TZ;
+      else process.env.TZ = previous;
+    }
   });
 });
 
