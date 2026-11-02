@@ -422,14 +422,14 @@ it('looks up the school role from the selected school instead of always using pu
   expect(state.schoolRoleCalls.some((call) => call[0] === 'alice' && call[1] === 'nthu')).toBe(
     true,
   );
-  expect(await screen.findByRole('link', { name: /老師工作台/ })).toBeTruthy();
+  expect(await screen.findByRole('link', { name: /課務申訴審核/ })).toBeTruthy();
   state.selectedSchoolId = 'ncku';
   state.schoolRole = null;
   view.rerender(<HomePage />);
   expect(state.schoolRoleCalls.some((call) => call[0] === 'alice' && call[1] === 'ncku')).toBe(
     true,
   );
-  expect(screen.queryByRole('link', { name: /老師工作台/ })).toBeNull();
+  expect(screen.queryByRole('link', { name: /課務申訴審核/ })).toBeNull();
   state.selectedSchoolId = null;
   view.rerender(<HomePage />);
   expect(state.schoolRoleCalls.some((call) => call[0] === 'alice' && call[1] === 'pu')).toBe(true);
