@@ -1,6 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import type { HomeTask } from './homeOverview';
-import { assignmentSubmitHref, todayTodosFromHomeTasks } from './todayScreen';
+import {
+  assignmentSubmitHref,
+  courseWeekHref,
+  resolveTimetableCourseWorkHref,
+  TIMETABLE_COURSE_WORK_FALLBACK,
+  todayTodosFromHomeTasks,
+} from './todayScreen';
 
 const task: HomeTask = {
   id: 'work', courseId: 'course', courseName: '資料庫', title: '期末報告', dueAt: null,
@@ -26,5 +32,33 @@ describe('today task destinations', () => {
       const href = `/classroom/course/cw_123#${kind}-work`;
       expect(assignmentSubmitHref({ ...row, href })).toBe(href);
     }
+  });
+
+  it('routes course shells with the same courseWorkLanding path rules', () => {
+    expect(courseWeekHref('cs-db')).toBe('/course/cs-db#week');
+    expect(
+      courseWeekHref('cw_12345678-1234-1234-1234-123456789abc'),
+    ).toBe('/classroom/course/cw_12345678-1234-1234-1234-123456789abc#week');
+    expect(courseWeekHref(undefined)).toBe('/timetable');
+  });
+
+  it('resolves timetable course-work exits from linked ids or course name matches', () => {
+    expect(
+      resolveTimetableCourseWorkHref({
+        linkedCourseId: 'cs-db',
+        courseName: '資料庫',
+      }),
+    ).toBe('/course/cs-db');
+    expect(
+      resolveTimetableCourseWorkHref({
+        courseName: '資料庫系統',
+        courses: [{ id: 'cw_12345678-1234-1234-1234-123456789abc', name: '資料庫系統' }],
+      }),
+    ).toBe('/classroom/course/cw_12345678-1234-1234-1234-123456789abc');
+    expect(
+      resolveTimetableCourseWorkHref({
+        courseName: '未連結課程',
+      }),
+    ).toBe(TIMETABLE_COURSE_WORK_FALLBACK);
   });
 });

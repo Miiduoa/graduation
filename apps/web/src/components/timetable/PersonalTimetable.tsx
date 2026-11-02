@@ -58,6 +58,11 @@ import { useSignInOptions } from '@/lib/signInOptions';
 import { listAcceptedFriends } from '@/lib/timetable/friends';
 import { useAcademicRecords } from '@/lib/useAcademicRecords';
 import type { AcademicCourse } from '@/lib/academicRecords';
+import { Modal } from '@/components/ui/Modal';
+import {
+  resolveTimetableCourseWorkHref,
+  TIMETABLE_COURSE_WORK_LABEL,
+} from '@/lib/todayScreen';
 import { CourseEditor as EditableCourseDialog } from './CourseEditor';
 import { TimetableGrid, UnscheduledCourses } from './TimetableGrid';
 import { validateCourseDraft } from './courseEditorModel';
@@ -221,6 +226,7 @@ function TimetableWorkspace({ schoolId }: { schoolId: string }) {
     return today >= 1 && today <= 5 ? today : 1;
   });
   const [editing, setEditing] = useState<PersonalCourse | null>(null);
+  const [courseAction, setCourseAction] = useState<PersonalCourse | null>(null);
   const [busy, setBusy] = useState(false);
   const savingRef = useRef(false);
   const activeRef = useRef(false);
@@ -357,13 +363,31 @@ function TimetableWorkspace({ schoolId }: { schoolId: string }) {
     ),
   ];
   const planning = planningReadiness(planningCourses, periodTotal, WEEKDAY_LABELS.length);
+  const courseWorkHrefFor = (course: PersonalCourse) => {
+    const importId = course.id.startsWith('import:') ? course.id.slice('import:'.length) : '';
+    const linked = importId
+      ? imported.records.find((row) => row.id === importId)?.linkedCourseId
+      : undefined;
+    return resolveTimetableCourseWorkHref({
+      linkedCourseId: linked,
+      courseName: course.name,
+    });
+  };
   const openCourse = (course: PersonalCourse) => {
     if (busy || savingRef.current) return;
-    if (course.id.startsWith('import:')) router.push(importHref);
-    else {
+    // Imported rows: choose between import editor and the course-work shell.
+    if (course.id.startsWith('import:')) {
       setNotice('');
-      setEditing({ ...course });
+      setCourseAction({ ...course });
+      return;
     }
+    setCourseAction(null);
+    setNotice('');
+    setEditing({ ...course });
+  };
+  const beginImportEdit = () => {
+    setCourseAction(null);
+    router.push(importHref);
   };
   const planner = periodProfile
     ? new SchedulePlanner(visibleCourses, friends, selectedFriend, periodProfile)
@@ -1008,6 +1032,51 @@ function TimetableWorkspace({ schoolId }: { schoolId: string }) {
         periodProfile={periodProfile}
       />
       {!uid && <ShareNeedsSchoolAccountNotice schoolId={schoolId} />}
+      {courseAction && (
+        <Modal
+          isOpen
+          title={courseAction.name}
+          description="這門課來自匯入紀錄。可以回到匯入頁修改格位，或開啟作業與教材。"
+          onClose={() => setCourseAction(null)}
+          size="sm"
+        >
+          <div className={styles.toolbar} role="group" aria-label={`${courseAction.name} 的下一步`}>
+            <button type="button" className="btn" onClick={beginImportEdit}>
+              回到匯入編輯
+            </button>
+            <Link
+              className="btn primary"
+              href={courseWorkHrefFor(courseAction)}
+              onClick={() => setCourseAction(null)}
+            >
+              {TIMETABLE_COURSE_WORK_LABEL}
+            </Link>
+          </div>
+        </Modal>
+      )}
+      {editing && editing.name.trim() ? (
+        <div
+          data-testid="timetable-course-work-exit"
+          style={{
+            position: 'fixed',
+            top: 16,
+            right: 16,
+            zIndex: 2147483000,
+            display: 'flex',
+            flexDirection: 'column',
+            gap: 8,
+            alignItems: 'flex-end',
+            maxWidth: 'min(280px, calc(100vw - 32px))',
+          }}
+        >
+          <Link className="btn primary" href={courseWorkHrefFor(editing)}>
+            {TIMETABLE_COURSE_WORK_LABEL}
+          </Link>
+          <p className={styles.notice} style={{ margin: 0, textAlign: 'right' }}>
+            除了編輯格位，也可開啟這門課的作業與教材。
+          </p>
+        </div>
+      ) : null}
       {editing && (
         <EditableCourseDialog
           key={editing.id}

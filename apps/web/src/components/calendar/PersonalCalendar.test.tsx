@@ -27,6 +27,14 @@ vi.mock('next/link', () => ({
   ),
 }));
 
+vi.mock('@/components/AuthGuard', () => ({
+  useAuth: () => ({ user: null, loading: false }),
+}));
+
+vi.mock('@/lib/homeOverview', () => ({
+  loadHomeData: vi.fn(async () => ({ courses: [], tasks: [], unreadCount: 0 })),
+}));
+
 vi.mock('@/lib/usePersonalImports', async (actual) => ({
   ...(await actual<typeof import('@/lib/usePersonalImports')>()),
   usePersonalImportScope: () => ({
