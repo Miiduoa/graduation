@@ -67,6 +67,21 @@ it('keeps the device bookmark list reachable even with no current courses', asyn
   await waitFor(() => expect(state.request).toHaveBeenCalledTimes(1));
 });
 
+it('carries the current course search and filters into device bookmarks without unrelated parameters', async () => {
+  window.history.replaceState({}, '', '/classroom?campus=tw-pu&q=Data&courses=studying&task=feedback&taskCourse=course-a&view=members&returnTo=https%3A%2F%2Fexample.test');
+  render(<WorkspaceList />);
+  await screen.findByRole('link', { name: /Data 資料庫系統/ });
+  fireEvent.change(screen.getByRole('searchbox', { name: '搜尋課程名稱' }), {
+    target: { value: '資料庫' },
+  });
+  const href = screen.getByRole('link', { name: '查看收藏的教材' }).getAttribute('href')!;
+  const destination = new URL(href, window.location.origin);
+  expect(destination.pathname).toBe('/classroom/material-bookmarks');
+  expect(Object.fromEntries(destination.searchParams)).toEqual({
+    campus: 'tw-pu', q: '資料庫', courses: 'studying', task: 'feedback', taskCourse: 'course-a',
+  });
+});
+
 it('combines role, archive and normalized name search, then clears an empty result back to active courses', async () => {
   render(<WorkspaceList />);
   await screen.findByRole('link', { name: /Data 資料庫系統/ });

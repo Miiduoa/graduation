@@ -12,6 +12,7 @@ import { CourseMaterialSearch } from './CourseMaterialSearch';
 import { StudyAgenda } from './StudyAgenda';
 import {
   classroomCourseHref,
+  classroomDirectoryHref,
   courseDirectoryFilter,
   courseSearchKey,
   replaceStudyQuery,
@@ -334,7 +335,7 @@ export function WorkspaceList() {
               <h2>此裝置收藏</h2>
             </div>
             <p>收藏過的教材放在這裡，方便下次接著看。只保留在此瀏覽器的目前帳號。</p>
-            <Link className={`${shared.button} ${shared.secondary}`} href="/classroom/material-bookmarks">
+            <Link className={`${shared.button} ${shared.secondary}`} href={classroomDirectoryHref(context, 'bookmarks')}>
               查看收藏的教材
             </Link>
           </section>

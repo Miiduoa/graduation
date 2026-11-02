@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { useSearchParams } from 'next/navigation';
 import {
   NuniError,
   type NuniMaterial,
@@ -36,6 +37,7 @@ import { CourseUnitSelect } from './CourseUnitSelect';
 import { selectCourseUnit } from './courseOutline';
 import { useLocationHash } from '@/lib/useLocationHash';
 import { useNuniSession } from './Session';
+import { classroomCourseHref, classroomDirectoryHref } from './studyNavigation';
 import shared from './NuniApp.module.css';
 import styles from './CourseLearning.module.css';
 
@@ -101,6 +103,8 @@ function Materials({
   accountId: string;
 }) {
   const classes = useClasses();
+  const params = useSearchParams();
+  const context = params?.toString() ?? '';
   const [items, setItems] = useState<NuniMaterial[] | null>(null);
   const hash = useLocationHash();
   const revealed = useRef('');
@@ -301,8 +305,8 @@ function Materials({
       </p>
       <p className={styles.note}>{materialCapabilities(workspace)}</p>
       <div className={shared.actions}>
-        <a href={`/classroom/course/${encodeURIComponent(workspace.id)}`}>回課程首頁</a>
-        <a href="/classroom/material-bookmarks">此裝置收藏</a>
+        <a href={classroomCourseHref(workspace.id, context)}>回課程首頁</a>
+        <a href={classroomDirectoryHref(context, 'bookmarks')}>此裝置收藏</a>
       </div>
       <p className={styles.note}>收藏只記在此瀏覽器的目前帳號，換裝置不會同步；閱讀與收藏分開記錄。</p>
       {bookmarks.error && (
