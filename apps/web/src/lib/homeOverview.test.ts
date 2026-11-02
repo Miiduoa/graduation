@@ -1,4 +1,4 @@
-import { beforeEach, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { feedbackPredatesSubmission, loadHomeData } from './homeOverview';
 import { getDoc, getDocs } from 'firebase/firestore';
 import { isFirebaseConfigured } from './firebase';
@@ -13,7 +13,12 @@ vi.mock('firebase/firestore', () => ({
 const entry = (id: string, data: Record<string, unknown>) => ({ id, data: () => data });
 beforeEach(() => {
   vi.clearAllMocks();
+  vi.useFakeTimers({ toFake: ['Date'] });
+  vi.setSystemTime(new Date('2026-11-02T02:00:00Z'));
   vi.mocked(isFirebaseConfigured).mockReturnValue(true);
+});
+afterEach(() => {
+  vi.useRealTimers();
 });
 it('compares feedback and resubmissions using the accepted Taipei wall-time contract', () => {
   expect(feedbackPredatesSubmission('2026-10-11T10:00:00', '2026-10-11T03:00:00Z')).toBe(true);
@@ -50,6 +55,7 @@ it('uses only active course memberships and excludes submitted work and drafts',
         entry('a1', { title: 'Pending', dueAt: '2026-10-10T12:00:00Z', allowLateSubmission: true }),
         entry('a2', { title: 'Submitted' }),
         entry('a3', { title: 'Draft', published: false }),
+        entry('a4', { title: 'Draft status', status: 'draft' }),
       ],
     } as never);
   vi.mocked(getDoc).mockImplementation(
@@ -76,7 +82,114 @@ it('uses only active course memberships and excludes submitted work and drafts',
   ]);
   expect(home.recentFeedback).toEqual([]);
   expect(home.unreadCount).toBe(2);
+  expect(vi.mocked(getDocs).mock.calls.map(([path]) => path)).toEqual([
+    'users/alice/groups',
+    'groups/c1/assignments',
+  ]);
   expect(getDoc).toHaveBeenCalledWith('groups/c1/assignments/a1/submissions/alice');
+  expect(getDoc).toHaveBeenCalledTimes(2);
+});
+it.each([
+  { name: 'closed assignment without a deadline', assignment: { status: 'closed' }, actionable: false },
+  {
+    name: 'closed assignment even when late submissions are allowed',
+    assignment: { status: 'closed', allowLateSubmission: true, dueAt: '2026-11-03T02:00:00Z' },
+    actionable: false,
+  },
+  {
+    name: 'past deadline without late submission permission',
+    assignment: { dueAt: '2026-11-02T01:59:59Z' },
+    actionable: false,
+  },
+  {
+    name: 'past deadline with late submissions explicitly disabled',
+    assignment: { dueAt: '2026-11-02T01:59:59Z', allowLateSubmission: false },
+    actionable: false,
+  },
+  {
+    name: 'past deadline with late submissions allowed',
+    assignment: { dueAt: '2026-11-02T01:59:59Z', allowLateSubmission: true },
+    actionable: true,
+  },
+  {
+    name: 'future deadline',
+    assignment: { dueAt: '2026-11-02T02:00:01Z', allowLateSubmission: false },
+    actionable: true,
+  },
+  {
+    name: 'exact deadline, matching the course submission boundary',
+    assignment: { dueAt: '2026-11-02T02:00:00Z', allowLateSubmission: false },
+    actionable: true,
+  },
+  { name: 'no deadline', assignment: {}, actionable: true },
+  {
+    name: 'expired Firestore timestamp',
+    assignment: { dueAt: { toDate: () => new Date('2026-11-02T01:59:59Z') } },
+    actionable: false,
+  },
+  {
+    name: 'closed quiz',
+    assignment: { type: 'quiz', status: 'closed' },
+    actionable: false,
+  },
+  {
+    name: 'expired exam that does not allow late submissions',
+    assignment: { type: 'exam', dueAt: '2026-11-02T01:59:59Z', allowLateSubmission: false },
+    actionable: false,
+  },
+])('only recommends actionable work: $name', async ({ assignment, actionable }) => {
+  vi.mocked(getDocs)
+    .mockResolvedValueOnce({
+      docs: [entry('c1', { type: 'course', status: 'active', name: 'Course' })],
+    } as never)
+    .mockResolvedValueOnce({ docs: [entry('work', { title: '報告', ...assignment })] } as never);
+  vi.mocked(getDoc).mockResolvedValue({ exists: () => false } as never);
+
+  const home = await loadHomeData('alice');
+
+  expect(home.tasks.map((task) => task.id)).toEqual(actionable ? ['work'] : []);
+  expect(home.courses.map((course) => course.id)).toEqual(['c1']);
+  expect(home.recentFeedback).toEqual([]);
+});
+it.each(['owner', 'instructor', 'moderator'])(
+  'does not read student work for a teaching membership (%s)',
+  async (role) => {
+    vi.mocked(getDocs).mockResolvedValueOnce({
+      docs: [entry('teaching', { type: 'course', status: 'active', role })],
+    } as never);
+
+    const home = await loadHomeData('alice');
+
+    expect(home.tasks).toEqual([]);
+    expect(getDocs).toHaveBeenCalledTimes(1);
+    expect(getDoc).not.toHaveBeenCalled();
+  },
+);
+it('retains published feedback for closed work without recommending it again', async () => {
+  vi.mocked(getDocs)
+    .mockResolvedValueOnce({
+      docs: [entry('c1', { type: 'course', status: 'active', name: 'Course' })],
+    } as never)
+    .mockResolvedValueOnce({
+      docs: [entry('closed', { title: '已結束的報告', status: 'closed' })],
+    } as never);
+  vi.mocked(getDoc).mockResolvedValue({
+    exists: () => true,
+    data: () => ({
+      submittedAt: '2026-11-01T01:00:00Z',
+      gradePublished: true,
+      gradeScore: 88,
+      gradeFeedback: '已評閱',
+      gradePublishedAt: '2026-11-01T02:00:00Z',
+    }),
+  } as never);
+
+  const home = await loadHomeData('alice');
+
+  expect(home.tasks).toEqual([]);
+  expect(home.recentFeedback).toEqual([
+    expect.objectContaining({ id: 'closed', score: 88, feedback: '已評閱' }),
+  ]);
 });
 it('surfaces published grades as recent feedback with deep links', async () => {
   vi.mocked(getDocs)
@@ -210,5 +323,15 @@ it('excludes unpublished grades and whitespace-only feedback without a score', a
 });
 it('does not turn a permission failure into a successful empty page', async () => {
   vi.mocked(getDocs).mockRejectedValue(new Error('permission-denied'));
+  await expect(loadHomeData('alice')).rejects.toThrow('permission-denied');
+});
+it('does not return pending work when its submission read is denied', async () => {
+  vi.mocked(getDocs)
+    .mockResolvedValueOnce({
+      docs: [entry('c1', { type: 'course', status: 'active', name: 'Course' })],
+    } as never)
+    .mockResolvedValueOnce({ docs: [entry('work', { title: '報告' })] } as never);
+  vi.mocked(getDoc).mockRejectedValueOnce(new Error('permission-denied'));
+
   await expect(loadHomeData('alice')).rejects.toThrow('permission-denied');
 });

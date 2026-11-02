@@ -1,6 +1,6 @@
 import React from 'react';
 import { act, fireEvent, render } from '@testing-library/react-native';
-import { RefreshControl } from 'react-native';
+import { AppState, RefreshControl, type AppStateStatus } from 'react-native';
 import StudentTodayScreen from '../screens/StudentTodayScreen';
 import { loadStudentHome } from '../data/studentHome';
 import type { CourseSpace, InboxTask } from '../data/types';
@@ -20,6 +20,7 @@ let mockAuth = {
 };
 const mockNavigate = jest.fn();
 const mockNavigation = { navigate: mockNavigate };
+let mockFocusEpoch = 0;
 const mockTimetable = {
   status: 'ready' as 'loading' | 'ready' | 'error' | 'empty',
   classes: [] as TodayClass[],
@@ -39,7 +40,7 @@ jest.mock('../hooks/useTodayTimetableData', () => ({
 }));
 jest.mock('@react-navigation/native', () => ({
   useNavigation: () => mockNavigation,
-  useFocusEffect: (callback: () => void) => require('react').useEffect(callback, [callback]),
+  useFocusEffect: (callback: () => void) => require('react').useEffect(callback, [callback, mockFocusEpoch]),
 }));
 
 function result(name = '資料結構'): Awaited<ReturnType<typeof loadStudentHome>> {
@@ -79,7 +80,9 @@ function deferred<T>() {
 
 beforeEach(() => {
   jest.clearAllMocks();
+  jest.spyOn(AppState, 'addEventListener').mockReturnValue({ remove: jest.fn() });
   mockAuth = { user: { uid: 'student-a' }, profile: { schoolId: 'school-a', role: 'student' } };
+  mockFocusEpoch = 0;
   mockTimetable.status = 'ready';
   mockTimetable.classes = [];
   mockTimetable.termKey = '115-1';
@@ -92,6 +95,7 @@ beforeEach(() => {
 
 afterEach(() => {
   act(() => applyTheme('light'));
+  jest.restoreAllMocks();
 });
 
 test('opens timetable import from the empty timetable state', async () => {
@@ -100,6 +104,92 @@ test('opens timetable import from the empty timetable state', async () => {
   await view.findByText(TODAY_COPY.noTimetable);
   fireEvent.press(view.getByText(TODAY_COPY.importTimetable));
   expect(rootNavigateNested).toHaveBeenCalledWith('學習', 'PersonalImport', { kind: 'timetable' });
+});
+
+test('labels a next-day deadline as tomorrow and counts remaining minutes', async () => {
+  jest.useFakeTimers();
+  jest.setSystemTime(new Date('2026-12-31T23:50:00+08:00'));
+  let view: ReturnType<typeof render> | undefined;
+  try {
+    const data = result();
+    data.tasks[0].dueAt = new Date('2027-01-01T00:10:00+08:00');
+    jest.mocked(loadStudentHome).mockResolvedValue(data);
+    view = render(<StudentTodayScreen />);
+    await act(async () => {});
+    expect(view!.getByText('明天截止')).toBeTruthy();
+    expect(view!.getByText('明天 00:10 截止・還剩 20 分鐘')).toBeTruthy();
+    expect(view!.queryByText(TODAY_COPY.dueToday)).toBeNull();
+  } finally {
+    view?.unmount();
+    jest.useRealTimers();
+  }
+});
+
+test('refreshes the clock on return from the background before any new data arrives', async () => {
+  jest.useFakeTimers();
+  jest.setSystemTime(new Date('2026-12-31T23:59:20+08:00'));
+  const listeners = new Set<(state: AppStateStatus) => void>();
+  const remove = jest.fn();
+  const subscription = jest.spyOn(AppState, 'addEventListener').mockImplementation((_, listener) => {
+    listeners.add(listener);
+    return { remove: () => { listeners.delete(listener); remove(); } };
+  });
+  let view: ReturnType<typeof render> | undefined;
+  try {
+    view = render(<StudentTodayScreen />);
+    await act(async () => {});
+    expect(view!.getByText('12月31日 週四')).toBeTruthy();
+    await act(async () => { listeners.forEach((listener) => listener('background')); });
+    jest.mocked(loadStudentHome).mockReturnValue(new Promise(() => {}));
+    jest.setSystemTime(new Date('2027-01-01T00:00:05+08:00'));
+    await act(async () => { listeners.forEach((listener) => listener('active')); });
+    expect(view!.getByText('1月1日 週五')).toBeTruthy();
+    expect(view!.queryByText('12月31日 週四')).toBeNull();
+    view!.unmount();
+    view = undefined;
+    expect(remove).toHaveBeenCalled();
+    expect(listeners.size).toBe(0);
+  } finally {
+    view?.unmount();
+    subscription.mockRestore();
+    jest.useRealTimers();
+  }
+});
+
+test('changes the day at midnight instead of one minute after mounting', async () => {
+  jest.useFakeTimers();
+  jest.setSystemTime(new Date('2026-12-31T23:59:50+08:00'));
+  let view: ReturnType<typeof render> | undefined;
+  try {
+    view = render(<StudentTodayScreen />);
+    await act(async () => {});
+    expect(view!.getByText('12月31日 週四')).toBeTruthy();
+    await act(async () => { jest.advanceTimersByTime(10_000); });
+    expect(view!.getByText('1月1日 週五')).toBeTruthy();
+  } finally {
+    view?.unmount();
+    jest.useRealTimers();
+  }
+});
+
+test('refreshes the date immediately when returning to the Today tab', async () => {
+  jest.useFakeTimers();
+  jest.setSystemTime(new Date('2026-12-31T23:59:20+08:00'));
+  let view: ReturnType<typeof render> | undefined;
+  try {
+    view = render(<StudentTodayScreen />);
+    await act(async () => {});
+    expect(view.getByText('12月31日 週四')).toBeTruthy();
+    jest.mocked(loadStudentHome).mockReturnValue(new Promise(() => {}));
+    jest.setSystemTime(new Date('2027-01-01T00:00:05+08:00'));
+    mockFocusEpoch += 1;
+    view.rerender(<StudentTodayScreen />);
+    expect(view.getByText('1月1日 週五')).toBeTruthy();
+    expect(view.queryByText('12月31日 週四')).toBeNull();
+  } finally {
+    view?.unmount();
+    jest.useRealTimers();
+  }
 });
 
 test('opens the assignment submit screen from a todo row', async () => {

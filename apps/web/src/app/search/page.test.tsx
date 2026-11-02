@@ -1,5 +1,7 @@
 import { SchoolLmsReadonlyProvider } from '@/components/SchoolLmsReadonlyProvider';
-import { fireEvent, render, screen, within } from '@testing-library/react';
+import { act, fireEvent, render, screen, within } from '@testing-library/react';
+import type { CampusSemanticResult } from '@campus/shared/src/campusSemantic';
+import { Profiler } from 'react';
 import { interpretCampusRequest } from '@/lib/campusIntentClient';
 import { beforeEach, expect, it, vi } from 'vitest';
 import SearchPage from './page';
@@ -273,4 +275,170 @@ it('hides readonly homework by default and restores it when enabled', () => {
   expect(screen.queryByRole('link', { name: /玩課雲作業與教材/ })).toBeNull();
   view.rerender(<SchoolLmsReadonlyProvider enabled={true}><SearchPage /></SchoolLmsReadonlyProvider>);
   expect(screen.getByRole('link', { name: /玩課雲作業與教材/ }).getAttribute('href')).toContain('/school-lms');
+});
+
+type ScopeChange = 'account' | 'school' | 'sign-out';
+
+function selectSearchScope(change: ScopeChange, original: boolean) {
+  userState.uid = original || change === 'school' ? 'alice' : change === 'sign-out' ? null : 'bob';
+  selection.current = {
+    selectedSchool: { id: !original && change === 'school' ? 'nthu' : 'pu' },
+    loading: false,
+    catalogStatus: 'ready',
+  };
+}
+
+function semanticResult(summary: string): CampusSemanticResult {
+  return {
+    status: 'understood',
+    source: 'model',
+    summary,
+    destinations: ['/classroom'],
+    clarifyingQuestion: null,
+    previews: [{
+      destination: '/classroom',
+      status: 'available',
+      source: 'campus-platform',
+      message: '已載入的課程內容',
+      items: [{ title: `${summary}的個人作業`, detail: '資料庫期末報告' }],
+    }],
+  };
+}
+
+function deferredAnalysis() {
+  let resolve!: (value: CampusSemanticResult) => void;
+  let reject!: (reason: Error) => void;
+  const promise = new Promise<CampusSemanticResult>((accept, fail) => {
+    resolve = accept;
+    reject = fail;
+  });
+  return { promise, resolve, reject };
+}
+
+it.each<ScopeChange>(['account', 'school', 'sign-out'])(
+  'discards a ready analysis after a %s change and requires a new request when returning',
+  async (change) => {
+    selectSearchScope(change, true);
+    window.history.replaceState({}, '', '/search?q=報告&category=study');
+    vi.mocked(interpretCampusRequest).mockResolvedValueOnce(semanticResult('舊範圍摘要'));
+    const view = render(<SearchPage />);
+    fireEvent.click(screen.getByRole('button', { name: '用 AI 理解需求' }));
+    expect(await screen.findByText('舊範圍摘要的個人作業 · 資料庫期末報告')).toBeTruthy();
+
+    selectSearchScope(change, false);
+    view.rerender(<SearchPage />);
+    expect(screen.queryByText('舊範圍摘要')).toBeNull();
+    expect(screen.queryByText('舊範圍摘要的個人作業 · 資料庫期末報告')).toBeNull();
+    selectSearchScope(change, true);
+    view.rerender(<SearchPage />);
+    expect(screen.queryByText('舊範圍摘要')).toBeNull();
+    expect(screen.queryByText('舊範圍摘要的個人作業 · 資料庫期末報告')).toBeNull();
+    expect(interpretCampusRequest).toHaveBeenCalledTimes(1);
+    expect((screen.getByRole('searchbox') as HTMLInputElement).value).toBe('報告');
+    expect(screen.getByRole('button', { name: '學習與課務' }).getAttribute('aria-pressed')).toBe('true');
+
+    vi.mocked(interpretCampusRequest).mockResolvedValueOnce(semanticResult('重新確認的摘要'));
+    fireEvent.click(screen.getByRole('button', { name: '用 AI 理解需求' }));
+    expect(await screen.findByText('重新確認的摘要')).toBeTruthy();
+    expect(interpretCampusRequest).toHaveBeenLastCalledWith({ uid: 'alice', schoolId: 'pu', utterance: '報告' });
+    expect(interpretCampusRequest).toHaveBeenCalledTimes(2);
+  },
+);
+
+it.each([
+  ['account', 'away'],
+  ['account', 'returned'],
+  ['school', 'away'],
+  ['school', 'returned'],
+] as const)('ignores a pending response after a %s change when it resolves %s', async (change, timing) => {
+  selectSearchScope(change, true);
+  window.history.replaceState({}, '', '/search?q=報告');
+  const pending = deferredAnalysis();
+  vi.mocked(interpretCampusRequest).mockReturnValueOnce(pending.promise);
+  const view = render(<SearchPage />);
+  fireEvent.click(screen.getByRole('button', { name: '用 AI 理解需求' }));
+  expect((screen.getByRole('button', { name: 'AI 正在理解…' }) as HTMLButtonElement).disabled).toBe(true);
+
+  selectSearchScope(change, false);
+  view.rerender(<SearchPage />);
+  if (timing === 'returned') {
+    selectSearchScope(change, true);
+    view.rerender(<SearchPage />);
+  }
+  await act(async () => pending.resolve(semanticResult('晚到的舊摘要')));
+  if (timing === 'away') {
+    selectSearchScope(change, true);
+    view.rerender(<SearchPage />);
+  }
+
+  expect(screen.queryByText('晚到的舊摘要')).toBeNull();
+  expect(screen.queryByText('晚到的舊摘要的個人作業 · 資料庫期末報告')).toBeNull();
+  expect((screen.getByRole('button', { name: '用 AI 理解需求' }) as HTMLButtonElement).disabled).toBe(false);
+  expect(interpretCampusRequest).toHaveBeenCalledTimes(1);
+});
+
+it('does not restore an old error after switching away and back', async () => {
+  selectSearchScope('account', true);
+  window.history.replaceState({}, '', '/search?q=報告');
+  const pending = deferredAnalysis();
+  vi.mocked(interpretCampusRequest).mockReturnValueOnce(pending.promise);
+  const view = render(<SearchPage />);
+  fireEvent.click(screen.getByRole('button', { name: '用 AI 理解需求' }));
+  selectSearchScope('account', false);
+  view.rerender(<SearchPage />);
+  await act(async () => pending.reject(new Error('semantic-session-changed')));
+  selectSearchScope('account', true);
+  view.rerender(<SearchPage />);
+  expect(screen.queryByText('AI 暫時無法理解，目前只顯示基本關鍵字搜尋結果。')).toBeNull();
+  expect((screen.getByRole('button', { name: '用 AI 理解需求' }) as HTMLButtonElement).disabled).toBe(false);
+  expect(interpretCampusRequest).toHaveBeenCalledTimes(1);
+});
+
+it('continues to discard a pending result after changing the query or leaving the page', async () => {
+  selectSearchScope('account', true);
+  window.history.replaceState({}, '', '/search?q=報告');
+  const changedQuery = deferredAnalysis();
+  const leftPage = deferredAnalysis();
+  vi.mocked(interpretCampusRequest)
+    .mockReturnValueOnce(changedQuery.promise)
+    .mockReturnValueOnce(leftPage.promise);
+  const view = render(<SearchPage />);
+  fireEvent.click(screen.getByRole('button', { name: '用 AI 理解需求' }));
+  fireEvent.change(screen.getByRole('searchbox'), { target: { value: '圖書館' } });
+  fireEvent.change(screen.getByRole('searchbox'), { target: { value: '報告' } });
+  await act(async () => changedQuery.resolve(semanticResult('舊文字結果')));
+  expect(screen.queryByText('舊文字結果')).toBeNull();
+
+  fireEvent.click(screen.getByRole('button', { name: '用 AI 理解需求' }));
+  view.unmount();
+  render(<SearchPage />);
+  await act(async () => leftPage.resolve(semanticResult('已離頁的結果')));
+  expect(screen.queryByText('已離頁的結果')).toBeNull();
+  expect((screen.getByRole('button', { name: '用 AI 理解需求' }) as HTMLButtonElement).disabled).toBe(false);
+  expect(interpretCampusRequest).toHaveBeenCalledTimes(2);
+});
+
+it('never commits an old preview while changing scopes before passive effects run', async () => {
+  selectSearchScope('account', true);
+  window.history.replaceState({}, '', '/search?q=報告');
+  vi.mocked(interpretCampusRequest).mockResolvedValue(semanticResult('不可復活的摘要'));
+  const commits: string[] = [];
+  const recordCommit = () => commits.push(document.body.textContent ?? '');
+  const page = () => (
+    <Profiler id="service-search" onRender={recordCommit}>
+      <SearchPage />
+    </Profiler>
+  );
+  const view = render(page());
+  fireEvent.click(screen.getByRole('button', { name: '用 AI 理解需求' }));
+  expect(await screen.findByText('不可復活的摘要')).toBeTruthy();
+  commits.length = 0;
+
+  selectSearchScope('account', false);
+  view.rerender(page());
+  selectSearchScope('account', true);
+  view.rerender(page());
+  expect(commits.length).toBeGreaterThan(0);
+  expect(commits.every((content) => !content.includes('不可復活的摘要'))).toBe(true);
+  expect(interpretCampusRequest).toHaveBeenCalledTimes(1);
 });

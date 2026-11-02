@@ -189,10 +189,32 @@ export default function HomePage() {
     };
   }, [refresh]);
   useEffect(() => {
-    const tick = () => setNow(new Date());
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const stop = () => clearTimeout(timer);
+    const tick = () => {
+      stop();
+      const instant = new Date();
+      setNow(instant);
+      if (document.visibilityState === 'visible') {
+        timer = setTimeout(tick, 60_000 - (instant.getTime() % 60_000));
+      }
+    };
+    const resume = () => {
+      if (document.visibilityState === 'visible') tick();
+      else stop();
+    };
     tick();
-    const timer = setInterval(tick, 60_000);
-    return () => clearInterval(timer);
+    window.addEventListener('pageshow', resume);
+    window.addEventListener('focus', resume);
+    window.addEventListener('pagehide', stop);
+    document.addEventListener('visibilitychange', resume);
+    return () => {
+      stop();
+      window.removeEventListener('pageshow', resume);
+      window.removeEventListener('focus', resume);
+      window.removeEventListener('pagehide', stop);
+      document.removeEventListener('visibilitychange', resume);
+    };
   }, []);
 
   const teaching = data?.courses.filter((course) => teachingRoles.includes(course.role)) ?? [];
@@ -219,7 +241,7 @@ export default function HomePage() {
       setPresentation({ owner, teacherOnly: nextTeacherOnly });
   }
   const teacherOnly = presentationReady && presentation.teacherOnly;
-  const todos = useMemo(() => todayTodosFromHomeTasks(data?.tasks ?? []), [data]);
+  const todos = useMemo(() => todayTodosFromHomeTasks(data?.tasks ?? [], now), [data, now]);
   useEffect(() => {
     const current = todos.map((item) => item.id);
     const gone = previousTodos.current.filter((id) => !current.includes(id));

@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Animated,
+  AppState,
   Pressable,
   RefreshControl,
   ScrollView,
@@ -27,6 +28,7 @@ import {
   formatClassMeta,
   formatClock,
   formatTodayHeaderDate,
+  formatTodoDeadlineLabel,
   formatTodoDueLine,
   formatUpcomingDueLine,
   formatUpdatedAt,
@@ -138,24 +140,35 @@ export default function StudentTodayScreen() {
 
   useFocusEffect(
     useCallback(() => {
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      let active = AppState.currentState !== 'background' && AppState.currentState !== 'inactive';
+      const stopClock = () => clearTimeout(timer);
+      const tick = () => {
+        stopClock();
+        const instant = new Date();
+        setNow(instant);
+        if (active) timer = setTimeout(tick, 60_000 - (instant.getTime() % 60_000));
+      };
+      tick();
+      const subscription = AppState.addEventListener('change', (state) => {
+        active = state === 'active';
+        if (active) tick();
+        else stopClock();
+      });
       const y = scrollY.current;
       const frame = requestAnimationFrame(() => {
         scrollRef.current?.scrollTo({ y, animated: false });
       });
       void load(true);
       return () => {
+        stopClock();
+        subscription.remove();
         cancelAnimationFrame(frame);
         generation.current += 1;
         refreshGeneration.current += 1;
       };
     }, [load]),
   );
-  useEffect(() => {
-    const tick = () => setNow(new Date());
-    tick();
-    const timer = setInterval(tick, 60_000);
-    return () => clearInterval(timer);
-  }, []);
 
   const todos = useMemo(() => todosFromInbox(data?.tasks ?? []), [data?.tasks]);
   useEffect(() => {
@@ -216,6 +229,7 @@ export default function StudentTodayScreen() {
     safeNavigate(navigation, quick.route);
   };
   const refresh = async () => {
+    setNow(new Date());
     const request = ++refreshGeneration.current;
     setRefreshState({ scope, request });
     await Promise.allSettled([load(true), retryTimetable()]);
@@ -445,9 +459,9 @@ function NextActionCard({
     ? TODAY_COPY.overdue
     : action.type === 'upcoming'
       ? TODAY_COPY.nextAssignment
-      : TODAY_COPY.dueToday;
+      : formatTodoDeadlineLabel(todo, now);
   const meta =
-    action.type === 'upcoming' ? formatUpcomingDueLine(todo) : formatTodoDueLine(todo, now);
+    action.type === 'upcoming' ? formatUpcomingDueLine(todo, now) : formatTodoDueLine(todo, now);
   return (
     <Pressable
       accessibilityRole="button"

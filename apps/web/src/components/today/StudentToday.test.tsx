@@ -90,6 +90,29 @@ it('uses the assignment card when the next class is later and work is due within
   );
 });
 
+it('names tomorrow when a deadline is within 24 hours but after Taipei midnight', () => {
+  view({
+    now: new Date('2026-12-31T23:50:00+08:00'),
+    todos: [todo({ dueAt: Date.parse('2027-01-01T00:10:00+08:00') })],
+  });
+  const card = screen.getByTestId('next-action');
+  expect(card.textContent).toContain('明天截止');
+  expect(card.textContent).toContain('明天 00:10 截止・還剩 20 分鐘');
+  expect(card.textContent).not.toContain(TODAY_COPY.dueToday);
+  expect(within(card).getByRole('link', { name: TODAY_COPY.goSubmit }).getAttribute('href')).toBe(
+    '/course/cs-db#assignment-hw-3-submit',
+  );
+});
+
+it('keeps the remaining minutes visible for an imminent deadline', () => {
+  view({
+    now: new Date('2026-11-02T23:58:30+08:00'),
+    todos: [todo({ dueAt: Date.parse('2026-11-02T23:59:00+08:00') })],
+  });
+  expect(screen.getByTestId('next-action').textContent).toContain('不到 1 分鐘');
+  expect(screen.getByTestId('next-action').textContent).not.toContain('還剩 1 小時');
+});
+
 it('shows the unsigned sentence when the student is not signed in', () => {
   view({ unsigned: true, timetableStatus: 'empty' });
   expect(screen.getAllByText(TODAY_COPY.unsigned).length).toBeGreaterThan(0);
@@ -170,7 +193,7 @@ it('puts the earliest overdue item on the main card instead of the empty-day sen
   const card = screen.getByTestId('next-action');
   expect(card.textContent).toContain(TODAY_COPY.overdue);
   expect(card.textContent).toContain('作業三 繳交');
-  expect(card.textContent).toContain(TODAY_COPY.overdueDays(2));
+  expect(card.textContent).toContain(TODAY_COPY.overdueDays(1));
   expect(card.querySelector(`.${styles.metaDanger}`)).toBeTruthy();
   expect(screen.queryByText(TODAY_COPY.emptyDay)).toBeNull();
   expect(screen.getByRole('link', { name: TODAY_COPY.goSubmit }).getAttribute('href')).toBe(
@@ -273,7 +296,7 @@ it('updates a changed task payload without waiting for its identifier to change'
   const card = screen.getByTestId('next-action');
   expect(card.textContent).toContain('修正版作業');
   expect(card.textContent).not.toContain('作業三 繳交');
-  expect(card.textContent).toContain('10:30 截止・還剩 1 小時');
+  expect(card.textContent).toContain('今天 10:30 截止・還剩 40 分鐘');
   expect(within(card).getByRole('link', { name: TODAY_COPY.goSubmit }).getAttribute('href')).toBe(
     '/classroom/course/cw_123#assignment-revised',
   );

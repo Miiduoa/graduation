@@ -6,6 +6,7 @@ import { buildPersonalToday } from '@campus/shared';
 import {
   formatClassMeta,
   formatTodayHeaderDate,
+  formatTodoDeadlineLabel,
   formatTodoDueLine,
   formatUpcomingDueLine,
   formatUpdatedAt,
@@ -384,12 +385,12 @@ function NextActionBody({
             ? TODAY_COPY.overdue
             : action.type === 'upcoming'
               ? TODAY_COPY.nextAssignment
-              : TODAY_COPY.dueToday}
+              : formatTodoDeadlineLabel(action.todo, now)}
         </p>
         <p className={styles.headline}>{action.todo.title}</p>
         <p className={`${styles.meta} ${action.type === 'overdue' ? styles.metaDanger : ''}`}>
           {action.type === 'upcoming'
-            ? formatUpcomingDueLine(action.todo)
+            ? formatUpcomingDueLine(action.todo, now)
             : formatTodoDueLine(action.todo, now)}
         </p>
       </Link>
