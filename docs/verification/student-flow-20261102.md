@@ -2,7 +2,8 @@
 
 2026-11-02。基底 main：`6d190c0202c5a7e64a313124d1df0432ec0bc749`。
 產品程式提交：`463c75556d051e064871a4bab9ed3be190b26b38`、`64c5471a0e6ea30c077c89b44d01550a616367fb`。
-這是候選修改與驗證紀錄，尚未合併或部署。遠端 CI 及指定審查須以 PR 的最終 head 為準。
+候選分支另以一般雙親合併納入 [PR #402](https://github.com/Miiduoa/graduation/pull/402) 的原始提交 `c4036a3825a873d352bde8b6afcaebb474c80105`，修正既有課表測試依賴執行當天日期的問題。
+這是候選修改與驗證紀錄，尚未合入 main 或部署。遠端 CI 及指定審查須以 PR 的最終 head 為準。
 
 ## 使用者會看到的變化
 
@@ -17,6 +18,8 @@
 ## 驗證
 
 使用鎖定依賴與 Node 22.23.4。Web、Mobile、shared 的 TypeScript 檢查另以 Node 22 直接執行 `tsc`，均通過。變更檔 ESLint 沒有錯誤；Web 原有兩處 effect 警告仍在，沒有修改規則或排除檔案。
+
+下表保留納入 #402 之前的實際測試結果；整合後完整 CI 以 [PR #403 的 Checks](https://github.com/Miiduoa/graduation/pull/403/checks) 為準。
 
 | 檢查 | 結果與範圍 |
 | --- | --- |
@@ -35,6 +38,12 @@
 完整 App 執行另有 `decodeUriComponentQueryStringCompat.test.ts` 的循環 Error JSON 序列化錯誤。候選與原始 main 均重現，底層是執行 Node 子程序時被本機 sandbox 回覆 `EPERM`，Jest 再序列化該錯誤才產生 circular JSON。允許子程序後，候選完整重跑 4 項全通過、0 略過，測試與設定皆未變更。這個獨立重跑不會把先前完整套件的結果改寫成成功。
 
 Web 建置初次在受限環境得到空白的 TypeScript `--showConfig` 子程序輸出；同一份程式在允許子程序後完成正式版建置。沒有關閉 TypeScript 檢查或變更專案設定。
+
+### 整合既有課表測試修正
+
+後續 [PR #402 的完整 CI](https://github.com/Miiduoa/graduation/actions/runs/41368644543) 已在精確提交 `c4036a38…` 通過：Web 8,926 項通過、36 略過，App 6,359 項通過、1 略過。該提交只讓三個課表測試檔固定台北週日的 Date，測試結束後還原，避免星期一的當日課程區塊與每週列表同時出現相同文字；保留原斷言，沒有 skip。
+
+候選分支透過雙親合併 `b0d5b11d5d628df3a89ac7ed0d3aa08d1771604f` 納入該原始提交，合併樹已與 `git merge-tree` 的結果逐一吻合。三個測試檔與本輪 24 個檔案沒有重疊，產品程式與既有瀏覽器證據來源保持一致。#402 原分支的綠燈是整合依據，不能替代合併後候選版本的 CI 或 main 所要求的核可。
 
 ### 先重現，再修正
 
