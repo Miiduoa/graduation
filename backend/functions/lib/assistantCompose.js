@@ -125,15 +125,29 @@ async function buildModelBackedAssistantResponse({
   toolCtx,
   uid = null,
   sessionId = null,
+  writePermissions = null,
 }) {
+  const {
+    isAssistantWriteToolAllowed,
+  } = require('./assistantWritePermissions');
+
   const toolsForLlm = tools.filter((t) => !t.requiresConfirmation);
   const toolPromptSection = toolsForLlm.map((t) => `- ${t.name}：${t.description || t.name}`).join('\n');
 
-  const writeDeferred = tools.filter((t) => t.requiresConfirmation === true);
+  // 規劃階段：未允許的寫入工具不出現在 few-shot／可用清單（執行前 executeAgentWrite 仍會再擋一次）。
+  const writeDeferred = tools.filter(
+    (t) =>
+      t.requiresConfirmation === true && isAssistantWriteToolAllowed(writePermissions, t.name),
+  );
   const writeToolNames = writeDeferred.map((t) => `${t.name}（${t.description || ''}）`).join('\n');
-  const fewShots = Array.isArray(agentCases.writeToolFewShots) ? agentCases.writeToolFewShots : [];
+  const fewShots = (Array.isArray(agentCases.writeToolFewShots) ? agentCases.writeToolFewShots : []).filter(
+    (row) => {
+      const name = row?.toolName || row?.tool || row?.name;
+      return typeof name === 'string' && isAssistantWriteToolAllowed(writePermissions, name);
+    },
+  );
   const writeFewShotBlock =
-    fewShots.length > 0
+    writeDeferred.length > 0
       ? [
           '',
           '以下為「須使用者確認後才執行」的寫入工具名稱（不可透過 function calling 直接呼叫；由介面 queue_action 確認後由 executeAgentWrite 執行）：',
@@ -142,7 +156,10 @@ async function buildModelBackedAssistantResponse({
           '寫入意圖與欄位範例（few-shot，僅供理解使用者句子 → 正確 tool 與 input 形狀）：',
           ...fewShots.map((row) => JSON.stringify(row, null, 0)),
         ].join('\n')
-      : '';
+      : [
+          '',
+          '目前使用者未開放任何寫入類助理動作；若使用者要求請假、借書、訂餐、報修等寫入，請告知可到設定 → 助理權限開啟對應開關。',
+        ].join('\n');
 
   const systemPrompt = buildAgentSystemPrompt({
     schoolId,

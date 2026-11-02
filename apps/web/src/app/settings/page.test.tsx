@@ -26,6 +26,7 @@ const state = vi.hoisted(() => ({
   read: vi.fn(),
   saveProfile: vi.fn(),
   saveNotifications: vi.fn(),
+  saveAssistantPermissions: vi.fn(),
   signOut: vi.fn(),
   success: vi.fn(),
   error: vi.fn(),
@@ -74,6 +75,7 @@ vi.mock('@/lib/firebase', () => ({
   getDb: () => ({}),
   isFirebaseConfigured: () => true,
   saveNotificationPreferences: state.saveNotifications,
+  saveAssistantWritePermissions: state.saveAssistantPermissions,
   updateUserProfile: state.saveProfile,
   signOut: state.signOut,
 }));
@@ -199,7 +201,7 @@ it('clears old profile fields immediately on account switch and waits for the ne
   expect((screen.getByLabelText('姓名') as HTMLInputElement).value).toBe('A private name');
   let finish!: (value: unknown) => void;
   state.read.mockImplementation((path: string) =>
-    path.endsWith('/notifications')
+    path.endsWith('/notifications') || path.endsWith('/assistantPermissions')
       ? Promise.resolve({ exists: () => false })
       : new Promise((resolve) => {
           finish = resolve;
@@ -286,6 +288,37 @@ it('requires reloading after an unconfirmed notification save and then verifies 
   fireEvent.click(save);
   await waitFor(() => expect(state.success).toHaveBeenCalledWith('通知設定已同步'));
 });
+it('shows assistant write permissions defaulting off and can save an enabled toggle', async () => {
+  render(<SettingsPage />);
+  fireEvent.click(screen.getByRole('button', { name: '助理權限' }));
+  expect(screen.getByRole('heading', { name: '助理權限' })).toBeTruthy();
+  expect(screen.getByRole('heading', { name: '預設關閉' })).toBeTruthy();
+  const leaveToggle = (await screen.findByRole('switch', {
+    name: '送出請假申請',
+  })) as HTMLButtonElement;
+  await waitFor(() => expect(leaveToggle.disabled).toBe(false));
+  expect(leaveToggle.getAttribute('aria-checked')).toBe('false');
+  fireEvent.click(leaveToggle);
+  expect(leaveToggle.getAttribute('aria-checked')).toBe('true');
+  let preferences: unknown;
+  state.saveAssistantPermissions.mockImplementation(async (_uid: string, value: unknown) => {
+    preferences = value;
+  });
+  state.read.mockImplementation(async (path: string) => ({
+    exists: () => true,
+    data: () =>
+      path.endsWith('/assistantPermissions')
+        ? preferences
+        : path.endsWith('/notifications')
+          ? undefined
+          : state.profiles.a,
+  }));
+  fireEvent.click(screen.getByRole('button', { name: '儲存助理權限' }));
+  await waitFor(() => expect(state.success).toHaveBeenCalledWith('助理權限已同步'));
+  expect(state.saveAssistantPermissions).toHaveBeenCalled();
+  expect((preferences as { submitLeaveRequest: boolean }).submitLeaveRequest).toBe(true);
+});
+
 it('does not offer ineffective privacy or background-sync switches', async () => {
   render(<SettingsPage />);
   expect(screen.queryByText('自動同步')).toBeNull();
