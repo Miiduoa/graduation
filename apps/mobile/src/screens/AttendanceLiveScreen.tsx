@@ -45,6 +45,7 @@ import {
   getStatusColor,
   getStatusLabel,
 } from '../services/smartAttendanceEngine';
+import { SESSION_FOCUS_MISSING, parseSessionFocusId } from './sessionDeepLink';
 
 // ============================================================================
 // TYPES
@@ -54,7 +55,7 @@ interface AttendanceLiveScreenProps {
   route: {
     params: {
       sessionId: string;
-      isTeacher: boolean;
+      isTeacher?: boolean | string;
     };
   };
   navigation: any;
@@ -196,7 +197,11 @@ export default function AttendanceLiveScreen({ route, navigation }: AttendanceLi
   const s = useThemeStyleSheet(createStyles);
   const insets = useSafeAreaInsets();
   const auth = useAuth();
-  const { sessionId, isTeacher } = route.params;
+  const sessionId = parseSessionFocusId(route.params?.sessionId) ?? '';
+  // 導向參數偶爾會把布林序列化成字串 "true"
+  const rawIsTeacher = route.params?.isTeacher as unknown;
+  const isTeacher = rawIsTeacher === true || rawIsTeacher === 'true';
+  const invalidSessionLink = !sessionId;
   const [cameraPermission, requestCameraPermission] = useCameraPermissions();
   const [scanning, setScanning] = useState(false);
   const scanHandled = useRef(false);
@@ -244,6 +249,12 @@ export default function AttendanceLiveScreen({ route, navigation }: AttendanceLi
     setLoadError(false);
     setSession(null);
     setScanning(false);
+    if (!sessionId) {
+      setLoading(false);
+      return () => {
+        active = false;
+      };
+    }
     getSessionById(sessionId).then((sess) => {
       if (active && !receivedUpdate) applySession(sess);
     }).catch(() => {
@@ -389,16 +400,23 @@ export default function AttendanceLiveScreen({ route, navigation }: AttendanceLi
     return `${m.toString().padStart(2, '0')}:${sec.toString().padStart(2, '0')}`;
   };
 
-  // ─── Loading ──────────────────────────────────────────────
+  // ─── Loading / missing deep link ───────────────────────────
   if (!session) {
+    const missingMessage = invalidSessionLink || (!loading && !loadError)
+      ? SESSION_FOCUS_MISSING
+      : loadError
+        ? '無法載入點名資料'
+        : '載入點名資料...';
     return (
       <View style={[s.container, { paddingTop: insets.top }]}>
         <View style={s.loadingContainer}>
           <Ionicons name={'hourglass-outline' as any} size={48} color={theme.colors.muted} />
-          <Text style={s.loadingText}>
-            {loading ? '載入點名資料...' : loadError ? '無法載入點名資料' : '找不到此點名場次'}
+          <Text style={s.loadingText} accessibilityRole="text">
+            {loading && !invalidSessionLink ? '載入點名資料...' : missingMessage}
           </Text>
-          {!loading && <TouchableOpacity onPress={loadSession}><Text>重試</Text></TouchableOpacity>}
+          {!loading && !invalidSessionLink ? (
+            <TouchableOpacity onPress={loadSession}><Text>重試</Text></TouchableOpacity>
+          ) : null}
           <TouchableOpacity onPress={() => navigation.goBack()}><Text>返回</Text></TouchableOpacity>
         </View>
       </View>
