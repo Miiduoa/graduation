@@ -91,10 +91,18 @@ function SchoolPreferences({ children }: { children: ReactNode }) {
       ++generation.current;
     };
   }, [refresh]);
-  const owner =
-    auth.user || nuni.session
-      ? `${auth.user?.uid || ''}|${nuni.session?.platformAccountId || ''}`
-      : null;
+  const [identity, setIdentity] = useState<{ firebase: string | null; nuni: string | null }>({
+    firebase: null,
+    nuni: null,
+  });
+  // A background check temporarily hides its principal. Retain only that known owner;
+  // any newly observed principal or a settled sign-out immediately replaces it.
+  const firebase = auth.loading && !auth.user ? identity.firebase : (auth.user?.uid ?? null);
+  const platform =
+    nuni.loading && !nuni.session ? identity.nuni : (nuni.session?.platformAccountId ?? null);
+  if (identity.firebase !== firebase || identity.nuni !== platform)
+    setIdentity({ firebase, nuni: platform });
+  const owner = firebase || platform ? `${firebase || ''}|${platform || ''}` : null;
   return (
     <SelectedSchoolProvider
       ownerKey={owner}

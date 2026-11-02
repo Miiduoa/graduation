@@ -6,27 +6,40 @@ import Link from 'next/link';
 import { useState } from 'react';
 import type { CampusSemanticResult } from '@campus/shared/src/campusSemantic';
 import { useAuth } from './AuthGuard';
+import { useAgentDraft } from './AgentDraftProvider';
 import { buildCampusNavigationSearch, campusServiceHref } from '@/lib/campusNavigation';
 import { useOptionalSelectedSchool } from './SelectedSchoolProvider';
 import { VoiceDictationButton } from './VoiceDictationButton';
 import { CampusIcon } from './CampusIcon';
 import { getQuickCampusActions, QUICK_CAMPUS_EXAMPLES } from '@/lib/quickCampusActions';
 import { visibleCampusServices } from '@/lib/campusServices';
-import { CampusIntentControl, useCampusIntentCooldown, type CampusIntentCooldown } from './CampusIntentControl';
+import { CampusIntentControl, type CampusIntentCooldown } from './CampusIntentControl';
 import styles from './QuickCampusEntry.module.css';
 
 export function QuickCampusEntry() {
   const schoolLmsEnabled = useSchoolLmsReadonlyEnabled();
   const selection = useOptionalSelectedSchool();
-  const { user } = useAuth();
+  const { user, loading } = useAuth();
   const selected = selection?.selectedSchool;
   const uid = user?.uid || '';
-  const cooldown = useCampusIntentCooldown(JSON.stringify([uid, selected?.id || '']));
   const selectionReady = Boolean(
     selection && !selection.loading && selection.catalogStatus === 'ready',
   );
   const selectedSchoolId = selectionReady ? selected?.id || '' : '';
-  const scope = JSON.stringify([uid, selectedSchoolId, selectionReady]);
+  const draft = useAgentDraft('quick', {
+    uid,
+    schoolId: selected?.id || '',
+    ready: selectionReady && !loading,
+    editable: !loading,
+    initialDraft: { text: '' },
+  });
+  const cooldown: CampusIntentCooldown = {
+    retryReadyAt: draft.quotaUntil ?? 0,
+    onRetryAfter: (seconds) => {
+      if (Number.isInteger(seconds) && seconds > 0 && seconds <= 60)
+        draft.retainQuotaUntil(Date.now() + seconds * 1000);
+    },
+  };
   const campusSearch = buildCampusNavigationSearch(
     null,
     selected ? { id: selected.id, code: selected.code } : null,
@@ -34,12 +47,13 @@ export function QuickCampusEntry() {
   );
   return (
     <QuickCampusEntrySession
-      key={scope}
-      uid={uid}
-      schoolId={selectedSchoolId}
+      key={`${draft.scopeKey}:${draft.activityEpoch}`}
+      uid={draft.ready ? uid : ''}
+      schoolId={draft.ready ? selectedSchoolId : ''}
       campusSearch={campusSearch}
       schoolLmsEnabled={schoolLmsEnabled}
       cooldown={cooldown}
+      draftState={draft}
     />
   );
 }
@@ -50,15 +64,18 @@ function QuickCampusEntrySession({
   campusSearch,
   schoolLmsEnabled,
   cooldown,
+  draftState,
 }: {
   uid: string;
   schoolId: string;
   campusSearch: string;
   schoolLmsEnabled: boolean;
   cooldown: CampusIntentCooldown;
+  draftState: ReturnType<typeof useAgentDraft>;
 }) {
-  const [query, setQuery] = useState('');
-  const [aiResult, setAiResult] = useState<CampusSemanticResult | null>(null);
+  const query = draftState.draft.text;
+  const [analysis, setAnalysis] = useState<{ revision: number; result: CampusSemanticResult } | null>(null);
+  const aiResult = analysis?.revision === draftState.draftRevision ? analysis.result : null;
   const [voiceSession, setVoiceSession] = useState(0);
 
   const phrase = query.trim();
@@ -77,13 +94,13 @@ function QuickCampusEntrySession({
   const assistantHref = route('/ai-assistant?q=' + encodeURIComponent(phrase.slice(0, 4000)));
 
   function resetAnalysis() {
-    setAiResult(null);
+    setAnalysis(null);
     setVoiceSession((value) => value + 1);
   }
 
   function updateQuery(value: string) {
     resetAnalysis();
-    setQuery(value.slice(0, 160));
+    draftState.setDraft({ text: value.slice(0, 160) });
   }
 
   return (
@@ -110,11 +127,12 @@ function QuickCampusEntrySession({
           type="search"
           autoComplete="off"
           maxLength={160}
+          disabled={!draftState.editable}
           value={query}
           onChange={(event) => updateQuery(event.target.value)}
           placeholder="例如：明天沒課，想讀書再吃飯"
         />
-        <VoiceDictationButton key={voiceSession} onTranscript={updateQuery} />
+        <VoiceDictationButton key={voiceSession} onTranscript={updateQuery} disabled={!draftState.editable} />
       </div>
       {phrase && uid ? (
         <CampusIntentControl
@@ -123,9 +141,10 @@ function QuickCampusEntrySession({
           schoolId={schoolId}
           utterance={query}
           cooldown={cooldown}
-          onResult={setAiResult}
+          onResult={(result) => setAnalysis({ revision: draftState.draftRevision, result })}
           onReset={resetAnalysis}
           onReview={resetAnalysis}
+          onPendingChange={draftState.setPending}
         />
       ) : null}
       {!phrase ? (
@@ -189,8 +208,8 @@ function QuickCampusEntrySession({
             <p className={styles.noMatch}>沒有找到明確入口，可以補充需求或詢問校園助理。</p>
           ) : null}
           <div className={styles.footerLinks}>
-            <Link href={searchHref}>搜尋更多服務</Link>
-            <Link href={assistantHref}>詢問校園助理</Link>
+            <Link href={searchHref} onClick={() => draftState.handoff('search', { text: phrase.slice(0, 100), category: 'all' })}>搜尋更多服務</Link>
+            <Link href={assistantHref} onClick={() => draftState.handoff('navigation', { text: phrase.slice(0, 240) })}>詢問校園助理</Link>
             <button type="button" onClick={() => updateQuery('')}>
               重新輸入
             </button>

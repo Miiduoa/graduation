@@ -13,6 +13,8 @@ import {
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { findSchoolById, findSchoolsByCode, normalizeSchoolCode } from '@campus/shared/src/schools';
 import { defaultBrowseSchoolId } from '@/lib/defaultBrowseSchool';
+import { AgentDraftProvider, type AgentDraftActivity } from './AgentDraftProvider';
+import { ConfirmModal } from './ui/Modal';
 
 export type BrowseSchool = {
   id: string;
@@ -98,7 +100,10 @@ function storedSelection(value: string | null): { present: boolean; schoolId: st
   try {
     const stored: unknown = JSON.parse(value);
     if (stored && typeof stored === 'object' && 'schoolId' in stored) {
-      return { present: true, schoolId: typeof stored.schoolId === 'string' ? stored.schoolId : null };
+      return {
+        present: true,
+        schoolId: typeof stored.schoolId === 'string' ? stored.schoolId : null,
+      };
     }
   } catch {
     // Invalid or old browser preferences do not establish a school selection.
@@ -192,12 +197,42 @@ export function SelectedSchoolProvider({
     savedSchoolId,
   );
   const ready = !loading && hydrated && catalogStatus === 'ready';
+  const [activity] = useState(() => {
+    let current: AgentDraftActivity = { hasActivity: false };
+    return {
+      read: () => current,
+      set: (next: AgentDraftActivity) => {
+        current = next;
+      },
+    };
+  });
+  const observed = `${pathname}?${params?.toString() ?? ''}|${savedSchoolId}|${stored}`;
+  type Accepted = { storageKey: string; id: string | null; observed: string; href: string };
+  type Candidate = { storageKey: string; id: string | null; external: boolean; from: Accepted };
+  const [accepted, setAccepted] = useState<Accepted | null>(null);
+  const [candidate, setCandidate] = useState<Candidate | null>(null);
+  if (candidate && candidate.storageKey !== storageKey) setCandidate(null);
+  const ownAccepted = accepted?.storageKey === storageKey ? accepted : null;
+  let currentAccepted = ownAccepted;
+  if (ready && (!ownAccepted || ownAccepted.observed !== observed)) {
+    const href = `${pathname}${params?.toString() ? `?${params.toString()}` : ''}${typeof window === 'undefined' ? '' : window.location.hash}`;
+    if (ownAccepted && ownAccepted.id !== requestedId && activity.read().hasActivity) {
+      currentAccepted = { ...ownAccepted, observed };
+      setAccepted(currentAccepted);
+      setCandidate({ storageKey, id: requestedId, external: true, from: ownAccepted });
+    } else {
+      currentAccepted = { storageKey, id: requestedId, observed, href };
+      setAccepted(currentAccepted);
+    }
+  }
+  const acceptedId = currentAccepted ? currentAccepted.id : requestedId;
   const selectedSchool = ready
-    ? (catalog.find((school) => school.id === requestedId) ?? null)
+    ? (catalog.find((school) => school.id === acceptedId) ?? null)
     : null;
-  const unavailable = ready && requestedId !== null && selectedSchool === null;
+  const unavailable = ready && acceptedId !== null && selectedSchool === null;
+  const currentCandidate = candidate?.storageKey === storageKey && ready ? candidate : null;
 
-  function selectSchool(id: string | null) {
+  function commitSchool(id: string | null) {
     if (
       activeScope.current !== scope ||
       !ready ||
@@ -210,11 +245,16 @@ export function SelectedSchoolProvider({
     } catch {
       storageError = '此瀏覽器無法儲存校園偏好，仍可使用網址切換校園。';
     }
-    setPreference({ scope, schoolId: id, stored: true, storageError });
     const next = new URLSearchParams(params?.toString());
-    if (pathname === '/map' && selectedSchool?.id !== id) {
-      next.delete('route');
-      next.delete('focus');
+    if (acceptedId !== id) {
+      if (pathname === '/search' || pathname === '/ai-assistant') {
+        next.delete('q');
+        next.delete('category');
+      }
+      if (pathname === '/map') {
+        next.delete('route');
+        next.delete('focus');
+      }
     }
     if (id) {
       next.set('schoolId', id);
@@ -227,7 +267,41 @@ export function SelectedSchoolProvider({
       next.delete('school');
       next.set('campus', 'all');
     }
-    router.replace(`${pathname}?${next.toString()}${window.location.hash}`, { scroll: false });
+    const href = `${pathname}?${next.toString()}${window.location.hash}`;
+    // Keep accepted scope authoritative while Next publishes the replacement URL.
+    setAccepted({
+      storageKey,
+      id,
+      observed: `${pathname}?${params?.toString() ?? ''}|${id}|true`,
+      href,
+    });
+    setPreference({ scope, schoolId: id, stored: true, storageError });
+    setCandidate(null);
+    router.replace(href, { scroll: false });
+  }
+  function selectSchool(id: string | null) {
+    if (
+      activeScope.current !== scope ||
+      !ready ||
+      (id !== null && !catalog.some((school) => school.id === id))
+    )
+      return;
+    if (id === acceptedId) return;
+    if (activity.read().hasActivity && currentAccepted) {
+      setCandidate({ storageKey, id, external: false, from: currentAccepted });
+      return;
+    }
+    commitSchool(id);
+  }
+  function cancelSchool() {
+    if (!currentCandidate) return;
+    setCandidate(null);
+    if (currentCandidate.external) {
+      setPreference({ scope, schoolId: currentCandidate.from.id, stored: true, storageError });
+      // popstate has already changed the address; never publish its campus before consent.
+      window.history.replaceState(window.history.state, '', currentCandidate.from.href);
+      router.replace(currentCandidate.from.href, { scroll: false });
+    }
   }
 
   return (
@@ -245,7 +319,34 @@ export function SelectedSchoolProvider({
         requestedUnavailable: unavailable,
       }}
     >
-      {children}
+      <AgentDraftProvider
+        ownerKey={ownerKey}
+        schoolId={currentAccepted ? currentAccepted.id : requestedId}
+        ready={ready && !unavailable}
+        editable={!loading && hydrated}
+        onActivityChange={activity.set}
+      >
+        {children}
+      </AgentDraftProvider>
+      <ConfirmModal
+        isOpen={!!currentCandidate}
+        onClose={cancelSchool}
+        onConfirm={() => {
+          if (
+            currentCandidate &&
+            currentAccepted?.id === currentCandidate.from.id &&
+            (currentCandidate.id === null ||
+              catalog.some((school) => school.id === currentCandidate.id))
+          )
+            commitSchool(currentCandidate.id);
+          else setCandidate(null);
+        }}
+        title="切換校園？"
+        message="切換後會清除助理尚未送出的草稿，並停止目前的助理任務。你可以取消並繼續編輯。"
+        confirmText="清除草稿並切換"
+        cancelText="繼續編輯"
+        variant="warning"
+      />
     </SelectedSchoolContext.Provider>
   );
 }

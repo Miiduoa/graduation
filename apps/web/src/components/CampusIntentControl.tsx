@@ -40,6 +40,7 @@ type Props = {
   onReset: () => void;
   onReview?: () => void;
   cooldown?: CampusIntentCooldown;
+  onPendingChange?: (pending: boolean) => void;
 };
 const failureText: Record<CampusIntentReason, string> = {
   not_configured: '免費雲端服務尚未設定，可先使用基本捷徑。',
@@ -70,7 +71,7 @@ export function CampusIntentControl(props: Props) {
   );
 }
 
-function IntentConfirmation({ uid, schoolId, utterance, onResult, onReset, onReview, cooldown }: Props & { cooldown: CampusIntentCooldown }) {
+function IntentConfirmation({ uid, schoolId, utterance, onResult, onReset, onReview, cooldown, onPendingChange }: Props & { cooldown: CampusIntentCooldown }) {
   const text = utterance.trim();
   const [phase, setPhase] = useState<'draft' | 'review' | 'pending' | 'complete'>('draft');
   const [accepted, setAccepted] = useState(false);
@@ -90,6 +91,11 @@ function IntentConfirmation({ uid, schoolId, utterance, onResult, onReset, onRev
     text.length > 400 ||
     Array.from(text).some((char) => char.charCodeAt(0) < 32 || char.charCodeAt(0) === 127);
   const usable = Boolean(uid && /^[A-Za-z0-9_-]{2,40}$/.test(schoolId) && text && !invalidText);
+
+  useEffect(() => {
+    onPendingChange?.(phase === 'pending');
+    return () => onPendingChange?.(false);
+  }, [phase, onPendingChange]);
 
   useEffect(
     () => () => {

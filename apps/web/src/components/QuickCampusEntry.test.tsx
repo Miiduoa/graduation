@@ -1,7 +1,8 @@
 import { SchoolLmsReadonlyProvider } from '@/components/SchoolLmsReadonlyProvider';
-import { act, fireEvent, render, screen } from '@testing-library/react';
+import { act, fireEvent, render, screen, within } from '@testing-library/react';
 import { beforeEach, expect, it, vi } from 'vitest';
 import { QuickCampusEntry } from './QuickCampusEntry';
+import { AgentDraftProvider } from './AgentDraftProvider';
 import { interpretCampusRequest } from '@/lib/campusIntentClient';
 
 const state = vi.hoisted(() => ({
@@ -111,7 +112,7 @@ it('canceling a preview preserves editable draft but clears consent', () => {
 });
 
 it.each(['account', 'school', 'loading'] as const)(
-  'clears draft and ignores delayed results across %s A-B-A',
+  'isolates account and school drafts while preserving same-scope loading drafts across %s A-B-A',
   async (kind) => {
     let resolve!: (value: typeof result) => void;
     vi.mocked(interpretCampusRequest).mockReturnValue(
@@ -127,7 +128,9 @@ it.each(['account', 'school', 'loading'] as const)(
     if (kind === 'school') state.schoolId = 'nthu';
     if (kind === 'loading') state.loading = true;
     view.rerender(<QuickCampusEntry />);
-    expect((screen.getByRole('searchbox') as HTMLInputElement).value).toBe('');
+    expect((screen.getByRole('searchbox') as HTMLInputElement).value).toBe(
+      kind === 'loading' ? '明天沒課，我想讀書再吃飯' : '',
+    );
     state.uid = 'alice';
     state.schoolId = 'pu';
     state.loading = false;
@@ -136,7 +139,9 @@ it.each(['account', 'school', 'loading'] as const)(
       oldVoice('舊帳號的語音');
       resolve(result);
     });
-    expect((screen.getByRole('searchbox') as HTMLInputElement).value).toBe('');
+    expect((screen.getByRole('searchbox') as HTMLInputElement).value).toBe(
+      kind === 'loading' ? '明天沒課，我想讀書再吃飯' : '',
+    );
     expect(screen.queryByText(result.summary)).toBeNull();
     expect(screen.queryByRole('checkbox')).toBeNull();
     expect(interpretCampusRequest).toHaveBeenCalledTimes(1);
@@ -279,4 +284,29 @@ it('does not retain quota cooldown, drafts or consent across campus A-B-A', asyn
   } finally {
     vi.useRealTimers();
   }
+});
+
+
+it('invalidates a summary when another same-scope quick entry edits the shared draft, including ABA', async () => {
+  render(
+    <AgentDraftProvider ownerKey="alice" schoolId="pu" ready>
+      <section aria-label="首頁入口"><QuickCampusEntry /></section>
+      <section aria-label="頁首入口"><QuickCampusEntry /></section>
+    </AgentDraftProvider>,
+  );
+  const main = within(screen.getByRole('region', { name: '首頁入口' }));
+  const header = within(screen.getByRole('region', { name: '頁首入口' }));
+  const original = '圖書館怎麼走';
+  fireEvent.change(main.getByRole('searchbox'), { target: { value: original } });
+  fireEvent.click(main.getByRole('button', { name: '查看傳送內容' }));
+  fireEvent.click(main.getByRole('checkbox'));
+  fireEvent.click(main.getByRole('button', { name: '確認並找入口' }));
+  await main.findByText(result.summary);
+  fireEvent.change(header.getByRole('searchbox'), { target: { value: '我要搭公車' } });
+  expect((main.getByRole('searchbox') as HTMLInputElement).value).toBe('我要搭公車');
+  expect(main.queryByText(result.summary)).toBeNull();
+  expect(main.queryByText('AI 建議先開啟')).toBeNull();
+  fireEvent.change(header.getByRole('searchbox'), { target: { value: original } });
+  expect(main.queryByText(result.summary)).toBeNull();
+  expect(interpretCampusRequest).toHaveBeenCalledTimes(1);
 });

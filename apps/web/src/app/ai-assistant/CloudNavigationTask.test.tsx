@@ -1,11 +1,13 @@
 import { act, fireEvent, render, screen, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { getCloudNavigationPreview, runCloudNavigationTask, type CloudNavigationPreviewResult, type CloudNavigationResult } from '@/lib/cloudNavigationClient';
+import { AgentDraftProvider, useAgentDraft } from '@/components/AgentDraftProvider';
 import { CloudNavigationTask } from './CloudNavigationTask';
 
 vi.mock('@/lib/cloudNavigationClient', () => ({ getCloudNavigationPreview: vi.fn(), runCloudNavigationTask: vi.fn() }));
 
 const QUERY = '從圖書館走到活動中心';
+const HANDOFF_QUERY = '從活動中心走到圖書館';
 const NAVIGATION_URL = 'https://www.google.com/maps/dir/?api=1&origin=24.226282%2C120.581377&destination=24.227%2C120.582&travelmode=walking';
 
 
@@ -61,7 +63,27 @@ function consentAndRun() {
   fireEvent.click(screen.getByRole('button', { name: /^(確認規劃|重試規劃)$/ }));
 }
 
+function SamePageQuickHandoff() {
+  const draft = useAgentDraft('quick', { uid: 'alice', schoolId: 'pu', ready: true });
+  return (
+    <button type="button" onClick={() => draft.handoff('navigation', { text: HANDOFF_QUERY })}>
+      從快速入口帶入新導航需求
+    </button>
+  );
+}
+
+function renderWithSamePageHandoff() {
+  window.history.replaceState({}, '', '/ai-assistant');
+  return render(
+    <AgentDraftProvider ownerKey="alice" schoolId="pu" ready>
+      <SamePageQuickHandoff />
+      <CloudNavigationTask userId="alice" schoolId="pu" initialDraft={QUERY} />
+    </AgentDraftProvider>,
+  );
+}
+
 beforeEach(() => {
+  window.history.replaceState({}, '', '/ai-assistant');
   vi.mocked(runCloudNavigationTask).mockReset();
   vi.mocked(getCloudNavigationPreview).mockReset().mockImplementation(async ({ schoolId, query }) => previewResult(schoolId, query));
 });
@@ -69,6 +91,77 @@ beforeEach(() => {
 afterEach(() => vi.useRealTimers());
 
 describe('CloudNavigationTask', () => {
+  it('invalidates an accepted preview when a same-page shared draft handoff replaces its query', async () => {
+    vi.mocked(runCloudNavigationTask).mockResolvedValue(completed());
+    renderWithSamePageHandoff();
+    await preview();
+    fireEvent.click(screen.getByRole('checkbox'));
+    expect((screen.getByRole('checkbox') as HTMLInputElement).checked).toBe(true);
+
+    fireEvent.click(screen.getByRole('button', { name: '從快速入口帶入新導航需求' }));
+    expect((screen.getByLabelText('出發地與目的地') as HTMLTextAreaElement).value).toBe(HANDOFF_QUERY);
+    expect(screen.queryByRole('region', { name: '雲端查詢預覽' })).toBeNull();
+    expect(screen.queryByRole('checkbox')).toBeNull();
+    expect(runCloudNavigationTask).not.toHaveBeenCalled();
+
+    fireEvent.submit(screen.getByRole('form', { name: '預覽導航查詢' }));
+    const panel = await screen.findByRole('region', { name: '雲端查詢預覽' });
+    expect(within(panel).getByText(HANDOFF_QUERY)).toBeTruthy();
+    expect((screen.getByRole('checkbox') as HTMLInputElement).checked).toBe(false);
+    consentAndRun();
+    await screen.findByRole('region', { name: '導航建議' });
+    expect(vi.mocked(runCloudNavigationTask).mock.calls[0][0]).toMatchObject({
+      query: HANDOFF_QUERY,
+      consent: { query: HANDOFF_QUERY },
+    });
+  });
+
+  it('removes a completed route and receipt when a same-page shared draft handoff replaces its query', async () => {
+    vi.mocked(runCloudNavigationTask).mockResolvedValue(completed());
+    renderWithSamePageHandoff();
+    await preview();
+    consentAndRun();
+    await screen.findByRole('region', { name: '導航建議' });
+    expect(screen.getByRole('region', { name: '本頁任務紀錄' })).toBeTruthy();
+
+    fireEvent.click(screen.getByRole('button', { name: '從快速入口帶入新導航需求' }));
+    expect((screen.getByLabelText('出發地與目的地') as HTMLTextAreaElement).value).toBe(HANDOFF_QUERY);
+    expect(screen.queryByRole('region', { name: '導航建議' })).toBeNull();
+    expect(screen.queryByRole('region', { name: '本頁任務紀錄' })).toBeNull();
+    expect(screen.queryByRole('checkbox')).toBeNull();
+    expect(runCloudNavigationTask).toHaveBeenCalledTimes(1);
+
+    fireEvent.submit(screen.getByRole('form', { name: '預覽導航查詢' }));
+    await screen.findByRole('region', { name: '雲端查詢預覽' });
+    expect((screen.getByRole('checkbox') as HTMLInputElement).checked).toBe(false);
+    expect(runCloudNavigationTask).toHaveBeenCalledTimes(1);
+  });
+
+  it('aborts a pending request and ignores its late receipt after a same-page shared draft handoff', async () => {
+    const request = deferred();
+    vi.mocked(runCloudNavigationTask).mockReturnValue(request.promise);
+    renderWithSamePageHandoff();
+    await preview();
+    consentAndRun();
+    const signal = vi.mocked(runCloudNavigationTask).mock.calls[0][1];
+    expect(signal?.aborted).toBe(false);
+
+    fireEvent.click(screen.getByRole('button', { name: '從快速入口帶入新導航需求' }));
+    expect((screen.getByLabelText('出發地與目的地') as HTMLTextAreaElement).value).toBe(HANDOFF_QUERY);
+    expect.soft(signal?.aborted).toBe(true);
+    expect.soft(screen.queryByRole('region', { name: '本頁任務紀錄' })).toBeNull();
+    expect.soft(screen.queryByRole('checkbox')).toBeNull();
+    await act(async () => request.resolve(completed()));
+    expect(screen.queryByRole('region', { name: '導航建議' })).toBeNull();
+    expect(screen.queryByRole('region', { name: '本頁任務紀錄' })).toBeNull();
+    expect(runCloudNavigationTask).toHaveBeenCalledTimes(1);
+
+    fireEvent.submit(screen.getByRole('form', { name: '預覽導航查詢' }));
+    await screen.findByRole('region', { name: '雲端查詢預覽' });
+    expect((screen.getByRole('checkbox') as HTMLInputElement).checked).toBe(false);
+    expect(runCloudNavigationTask).toHaveBeenCalledTimes(1);
+  });
+
   it('never submits an initial draft or preview without explicit consent and confirmation', async () => {
     vi.mocked(runCloudNavigationTask).mockResolvedValue(completed());
     render(<CloudNavigationTask userId="alice" schoolId="pu" initialDraft={QUERY} />);
@@ -100,7 +193,9 @@ describe('CloudNavigationTask', () => {
     expect(screen.getByRole('alert').textContent).toContain('請先輸入出發地與目的地');
     expect(document.activeElement).toBe(screen.getByLabelText('出發地與目的地'));
     const longQuery = '館'.repeat(241);
-    view.rerender(<CloudNavigationTask userId="bob" schoolId="pu" initialDraft={longQuery} />);
+    view.unmount();
+    window.history.replaceState({}, '', '/ai-assistant');
+    render(<CloudNavigationTask userId="bob" schoolId="pu" initialDraft={longQuery} />);
     fireEvent.submit(screen.getByRole('form', { name: '預覽導航查詢' }));
     expect(screen.getByRole('alert').textContent).toContain('240 字以內');
     expect((screen.getByLabelText('出發地與目的地') as HTMLTextAreaElement).value).toBe(longQuery);
@@ -166,6 +261,8 @@ describe('CloudNavigationTask', () => {
     expect(screen.queryByRole('region', { name: '本頁任務紀錄' })).toBeNull();
     await act(async () => request.resolve(completed()));
     expect(screen.queryByRole('region', { name: '導航建議' })).toBeNull();
+    expect((screen.getByLabelText('出發地與目的地') as HTMLTextAreaElement).value).toBe('');
+    fireEvent.change(screen.getByLabelText('出發地與目的地'), { target: { value: QUERY } });
     fireEvent.submit(screen.getByRole('form', { name: '預覽導航查詢' }));
     await screen.findByRole('region', { name: '雲端查詢預覽' });
     expect((screen.getByRole('checkbox') as HTMLInputElement).checked).toBe(false);

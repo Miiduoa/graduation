@@ -230,11 +230,19 @@ it('makes management and school qualifications discoverable without implying aut
     '/classroom/account',
   );
 });
-it('restores filters after navigation and ignores unsupported categories', () => {
+it('keeps the edited draft when an older search URL is restored', () => {
   const view = render(<SearchPage />);
   fireEvent.change(screen.getByRole('searchbox'), { target: { value: '公車' } });
   window.history.replaceState({}, '', '/search?q=%E5%80%9F%E6%9B%B8&category=missing');
   view.rerender(<SearchPage />);
+  expect((screen.getByRole('searchbox') as HTMLInputElement).value).toBe('公車');
+  expect(screen.getByRole('link', { name: /^公車/ })).toBeTruthy();
+  expect(new URL(window.location.href).searchParams.get('q')).toBe('公車');
+});
+
+it('ignores unsupported categories on an initial search URL', () => {
+  window.history.replaceState({}, '', '/search?q=%E5%80%9F%E6%9B%B8&category=missing');
+  render(<SearchPage />);
   expect((screen.getByRole('searchbox') as HTMLInputElement).value).toBe('借書');
   expect(screen.getByRole('button', { name: '全部' }).getAttribute('aria-pressed')).toBe('true');
   expect(screen.getByRole('link', { name: /^圖書館/ })).toBeTruthy();

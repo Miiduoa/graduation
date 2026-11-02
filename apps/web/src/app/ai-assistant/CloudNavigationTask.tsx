@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useId, useRef, useState, type FormEvent } from 'react';
+import { useAgentDraft } from '@/components/AgentDraftProvider';
 import {
   getCloudNavigationPreview, runCloudNavigationTask,
   type CloudNavigationPreviewResult, type CloudNavigationResult,
@@ -50,13 +51,20 @@ function taiwanTime(value: string): string {
 }
 
 export function CloudNavigationTask(props: Props) {
-  // A different account or campus must never inherit consent, results, or pending work.
-  return <NavigationSession key={JSON.stringify([props.userId, props.schoolId])} {...props} />;
+  const draft = useAgentDraft('navigation', {
+    uid: props.userId,
+    schoolId: props.schoolId,
+    ready: true,
+    initialDraft: { text: props.initialDraft ?? '' },
+  });
+  return <NavigationSession key={`${draft.scopeKey}:${draft.activityEpoch}`} {...props} draftState={draft} />;
 }
 
-function NavigationSession({ userId, schoolId, initialDraft = '' }: Props) {
+function NavigationSession({ userId, schoolId, draftState }: Props & {
+  draftState: ReturnType<typeof useAgentDraft>;
+}) {
   const id = useId();
-  const [draft, setDraft] = useState(initialDraft);
+  const draft = draftState.draft.text;
   const [plan, setPlan] = useState<Plan | null>(null);
   const [consented, setConsented] = useState(false);
   const [previewing, setPreviewing] = useState(false);
@@ -65,7 +73,8 @@ function NavigationSession({ userId, schoolId, initialDraft = '' }: Props) {
   const [result, setResult] = useState<CloudNavigationResult | null>(null);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
-  const [retryReadyAt, setRetryReadyAt] = useState<number | null>(null);
+  const [, refreshRetryTime] = useState(0);
+  const retryReadyAt = draftState.quotaUntil !== null && draftState.quotaUntil > Date.now() ? draftState.quotaUntil : null;
   const request = useRef<AbortController | null>(null);
   const composer = useRef<HTMLTextAreaElement>(null);
   const previewHeading = useRef<HTMLHeadingElement>(null);
@@ -76,8 +85,13 @@ function NavigationSession({ userId, schoolId, initialDraft = '' }: Props) {
   }, []);
 
   useEffect(() => {
+    draftState.setPending(previewing || pending);
+    return () => draftState.setPending(false);
+  }, [previewing, pending, draftState.setPending]);
+
+  useEffect(() => {
     if (retryReadyAt === null) return;
-    const timer = window.setTimeout(() => setRetryReadyAt(null), Math.max(0, retryReadyAt - Date.now()));
+    const timer = window.setTimeout(() => refreshRetryTime((value) => value + 1), Math.max(0, retryReadyAt - Date.now()));
     return () => window.clearTimeout(timer);
   }, [retryReadyAt]);
 
@@ -95,7 +109,7 @@ function NavigationSession({ userId, schoolId, initialDraft = '' }: Props) {
   function changeDraft(value: string) {
     const wasPending = pending;
     stopWaiting();
-    setDraft(value);
+    draftState.setDraft({ text: value });
     setPlan(null);
     setConsented(false);
     setResult(null);
@@ -106,7 +120,7 @@ function NavigationSession({ userId, schoolId, initialDraft = '' }: Props) {
 
   async function preview(event: FormEvent) {
     event.preventDefault();
-    if (request.current) return;
+    if (request.current || !draftState.ready) return;
     const query = draft.trim();
     if (!query || query.length > 240) {
       setError(!query ? '請先輸入出發地與目的地。' : '請將輸入縮短至 240 字以內。');
@@ -156,7 +170,7 @@ function NavigationSession({ userId, schoolId, initialDraft = '' }: Props) {
   }
 
   async function run() {
-    if (!plan || !plan.cloudReady || !consented || request.current || retryReadyAt !== null) return;
+    if (!draftState.ready || !plan || !plan.cloudReady || !consented || request.current || retryReadyAt !== null) return;
     const controller = new AbortController();
     request.current = controller;
     setPending(true);
@@ -182,7 +196,7 @@ function NavigationSession({ userId, schoolId, initialDraft = '' }: Props) {
           setConsented(false);
         }
         if (response.reason === 'rate_limited' && response.retryAfterSeconds && response.retryAfterSeconds > 0) {
-          setRetryReadyAt(Date.now() + response.retryAfterSeconds * 1000);
+          draftState.retainQuotaUntil(Date.now() + response.retryAfterSeconds * 1000);
         }
       }
     } catch (failure) {
@@ -230,6 +244,7 @@ function NavigationSession({ userId, schoolId, initialDraft = '' }: Props) {
         <textarea
           ref={composer} id={`${id}-query`} value={draft} maxLength={240} rows={3}
           placeholder="例如：從圖書館走到活動中心"
+          disabled={!draftState.ready}
           aria-describedby={`${id}-input-note ${id}-count`}
           onChange={(event) => changeDraft(event.target.value)}
         />
@@ -238,7 +253,7 @@ function NavigationSession({ userId, schoolId, initialDraft = '' }: Props) {
           <span id={`${id}-count`}>{draft.length}／240 字</span>
         </div>
         <div className={styles.actions}>
-          <button type="submit" className={styles.secondary} disabled={pending || previewing}>
+          <button type="submit" className={styles.secondary} disabled={!draftState.ready || pending || previewing}>
             {previewing ? '讀取公開地點…' : '預覽傳送內容'}
           </button>
           {previewing && <button type="button" className={styles.secondary} onClick={cancel}>取消讀取</button>}

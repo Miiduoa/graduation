@@ -8,7 +8,8 @@ import { useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { SiteShell } from '@/components/SiteShell';
 import { useAuth } from '@/components/AuthGuard';
-import { CampusIntentControl, useCampusIntentCooldown } from '@/components/CampusIntentControl';
+import { CampusIntentControl } from '@/components/CampusIntentControl';
+import { useAgentDraft } from '@/components/AgentDraftProvider';
 import { useOptionalSelectedSchool } from '@/components/SelectedSchoolProvider';
 import { campusServiceHref, useCampusNavigationSearch } from '@/lib/campusNavigation';
 import { useSignInOptions } from '@/lib/signInOptions';
@@ -37,7 +38,7 @@ function readFilters(params: URLSearchParams) {
 function ServiceDirectory() {
   const schoolLmsEnabled = useSchoolLmsReadonlyEnabled();
   const params = useSearchParams();
-  const { user } = useAuth();
+  const { user, loading } = useAuth();
   const uid = user?.uid || '';
   const searchInput = useRef<HTMLInputElement>(null);
   const schoolSearch = useCampusNavigationSearch(params);
@@ -52,22 +53,26 @@ function ServiceDirectory() {
   const draftSchoolId =
     selection?.selectedSchool?.id ||
     (selectionReady ? '' : params.get('campus') || params.get('schoolId') || '');
-  const draftScope = JSON.stringify([uid, draftSchoolId]);
-  const cooldown = useCampusIntentCooldown(draftScope);
-  const semanticScope = JSON.stringify([
-    draftScope,
-    schoolSearch,
-    schoolId,
-    selection?.loading,
-    selection?.catalogStatus,
-  ]);
-  const previousDraftScope = useRef(draftScope);
-  const options = useSignInOptions();
   const queryString = params.toString();
-  const [draft, setDraft] = useState(() => ({
-    scope: draftScope,
-    ...readFilters(new URLSearchParams(queryString)),
-  }));
+  const initialFilters = readFilters(new URLSearchParams(queryString));
+  const draftState = useAgentDraft('search', {
+    uid,
+    schoolId: draftSchoolId,
+    ready: !loading && (!selection || selectionReady),
+    editable: !loading,
+    initialDraft: { text: initialFilters.query, category: initialFilters.category },
+  });
+  const cooldown = {
+    retryReadyAt: draftState.quotaUntil ?? 0,
+    onRetryAfter: (seconds: number) => {
+      if (Number.isInteger(seconds) && seconds > 0 && seconds <= 60)
+        draftState.retainQuotaUntil(Date.now() + seconds * 1000);
+    },
+  };
+  const semanticScope = JSON.stringify([
+    draftState.scopeKey, draftState.activityEpoch, draftState.draftRevision, schoolSearch, schoolId, draftState.ready,
+  ]);
+  const options = useSignInOptions();
   const [draftRevision, setDraftRevision] = useState(0);
   const [voiceRevision, setVoiceRevision] = useState(0);
   const [analysis, setAnalysis] = useState<{
@@ -76,26 +81,25 @@ function ServiceDirectory() {
     revision: number;
     result: CampusSemanticResult;
   } | null>(null);
+  const query = draftState.draft.text;
+  const category = SERVICE_CATEGORIES.some((item) => item.id === draftState.draft.category)
+    ? draftState.draft.category as ServiceCategory
+    : 'all';
   useEffect(() => {
-    const scopeChanged = previousDraftScope.current !== draftScope;
-    previousDraftScope.current = draftScope;
-    // A different account or campus starts a new draft, including on a return to an earlier scope.
-    const filters = scopeChanged
-      ? { query: '', category: 'all' as const }
-      : readFilters(new URLSearchParams(queryString));
-    if (scopeChanged) {
-      const url = new URL(window.location.href);
-      url.searchParams.delete('q');
-      url.searchParams.delete('category');
-      window.history.replaceState(null, '', `${url.pathname}${url.search}${url.hash}`);
-    }
-    setDraft({ scope: draftScope, ...filters });
+    // History can revisit an old URL, but it cannot restore old consent or replace a newer draft.
+    const restored = draftState.readUrlDraft(new URLSearchParams(queryString));
+    const url = new URL(window.location.href);
+    const text = restored?.text ?? query;
+    const filter = restored?.category ?? category;
+    if (text) url.searchParams.set('q', text);
+    else url.searchParams.delete('q');
+    if (filter !== 'all') url.searchParams.set('category', filter);
+    else url.searchParams.delete('category');
+    draftState.writeUrlDraft(url);
     setAnalysis(null);
     setDraftRevision((value) => value + 1);
     setVoiceRevision((value) => value + 1);
-  }, [queryString, draftScope, semanticScope]);
-  const query = draft.scope === draftScope ? draft.query : '';
-  const category = draft.scope === draftScope ? draft.category : 'all';
+  }, [queryString, semanticScope, query, category, draftState.readUrlDraft, draftState.writeUrlDraft]);
   const term = query.trim();
   const semantic =
     analysis?.scope === semanticScope &&
@@ -132,14 +136,14 @@ function ServiceDirectory() {
   function updateFilters(next: { query: string; category: ServiceCategory | 'all' }) {
     clearAnalysis();
     setDraftRevision((value) => value + 1);
-    setDraft({ scope: draftScope, ...next });
+    draftState.setDraft({ text: next.query, category: next.category });
     const url = new URL(window.location.href);
     if (next.query) url.searchParams.set('q', next.query);
     else url.searchParams.delete('q');
     if (next.category !== 'all') url.searchParams.set('category', next.category);
     else url.searchParams.delete('category');
     // Next.js observes native history changes without a server request per keystroke.
-    window.history.replaceState(null, '', `${url.pathname}${url.search}${url.hash}`);
+    draftState.writeUrlDraft(url);
   }
   function resetFilters() {
     updateFilters({ query: '', category: 'all' });
@@ -166,6 +170,7 @@ function ServiceDirectory() {
               type="search"
               value={query}
               maxLength={100}
+              disabled={!draftState.editable}
               autoComplete="off"
               enterKeyHint="search"
               placeholder="說出需求，例如：圖書館怎麼走？"
@@ -179,6 +184,7 @@ function ServiceDirectory() {
             />
             <VoiceDictationButton
               key={`${semanticScope}:${voiceRevision}`}
+              disabled={!draftState.editable}
               onTranscript={(text) => {
                 const next = text.slice(0, 100);
                 updateFilters({ query: next, category: 'all' });
@@ -191,11 +197,12 @@ function ServiceDirectory() {
           {term && (
             <CampusIntentControl
               key={`${semanticScope}:${draftRevision}`}
-              uid={uid}
+              uid={draftState.ready ? uid : ''}
               schoolId={schoolId}
               utterance={term}
               cooldown={cooldown}
               onReview={stopVoice}
+              onPendingChange={draftState.setPending}
               onReset={clearAnalysis}
               onResult={(result) =>
                 setAnalysis({

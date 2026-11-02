@@ -42,7 +42,7 @@ function AssistantRoute() {
   return (
     <>
       <CloudNavigationTask
-        key={JSON.stringify([user.uid, campus.schoolId, initialDraft])}
+        key={JSON.stringify([user.uid, campus.schoolId])}
         userId={user.uid}
         initialDraft={initialDraft}
         schoolId={campus.schoolId}
