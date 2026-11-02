@@ -143,6 +143,7 @@ export const ROUTE_TO_TAB: Record<string, TabName> = {
   NuniWorkspace: '我的',
   ProfileEdit: '我的',
   Settings: '我的',
+  AssistantPermissions: '我的',
   Notifications: '我的',
   NotificationSettings: '我的',
   LanguageSettings: '我的',
