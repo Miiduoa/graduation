@@ -101,7 +101,6 @@ function NavigationSession({ userId, schoolId, initialDraft = '' }: Props) {
     setResult(null);
     setSent(false);
     setError('');
-    setRetryReadyAt(null);
     setNotice(wasPending ? '已停止等待上一筆查詢。已送出的雲端查詢不一定能立即中止。' : '');
   }
 

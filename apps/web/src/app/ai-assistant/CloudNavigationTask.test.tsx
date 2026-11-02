@@ -264,6 +264,29 @@ describe('CloudNavigationTask', () => {
     expect(runCloudNavigationTask).toHaveBeenCalledTimes(1);
   });
 
+  it('keeps the quota cooldown when editing and previewing another query', async () => {
+    vi.mocked(runCloudNavigationTask).mockResolvedValue({ ...incomplete('rate_limited'), retryAfterSeconds: 30 } as CloudNavigationResult);
+    render(<CloudNavigationTask userId="alice" schoolId="pu" />);
+    await preview();
+    vi.useFakeTimers();
+    await act(async () => consentAndRun());
+    fireEvent.change(screen.getByLabelText('出發地與目的地'), { target: { value: '從活動中心走到圖書館' } });
+    await act(async () => fireEvent.submit(screen.getByRole('form', { name: '預覽導航查詢' })));
+    expect((screen.getByRole('checkbox') as HTMLInputElement).checked).toBe(false);
+    fireEvent.click(screen.getByRole('checkbox'));
+    const confirm = screen.getByRole('button', { name: '確認規劃' }) as HTMLButtonElement;
+    expect(confirm.disabled).toBe(true);
+    fireEvent.click(confirm);
+    expect(runCloudNavigationTask).toHaveBeenCalledTimes(1);
+    await act(async () => vi.advanceTimersByTime(29_999));
+    expect(confirm.disabled).toBe(true);
+    await act(async () => vi.advanceTimersByTime(1));
+    expect(confirm.disabled).toBe(false);
+    expect(runCloudNavigationTask).toHaveBeenCalledTimes(1);
+    await act(async () => fireEvent.click(confirm));
+    expect(runCloudNavigationTask).toHaveBeenCalledTimes(2);
+  });
+
   it.each([
     ['invalid_response', '未通過檢查'], ['no_places', '沒有可用的公開地點資料'],
     ['ambiguous_places', '補上完整地點名稱'], ['not_configured', '雲端導航尚未啟用'],
