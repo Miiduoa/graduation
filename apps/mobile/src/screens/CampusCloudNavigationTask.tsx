@@ -17,6 +17,8 @@ type Props = {
   schoolId: string;
   schoolName: string;
   initialPrompt?: string;
+  draft?: string;
+  onDraftChange?: (value: string) => void;
   initialRetryReadyAt?: number | null;
   onRateLimited?: (readyAt: number) => void;
   isScopeCurrent: () => boolean;
@@ -97,6 +99,8 @@ function NavigationSession({
   schoolId,
   schoolName,
   initialPrompt = '',
+  draft: controlledDraft,
+  onDraftChange,
   initialRetryReadyAt,
   onRateLimited,
   isScopeCurrent,
@@ -104,7 +108,8 @@ function NavigationSession({
   cancelRef,
 }: Props) {
   useSyncExternalStore(subscribeToTheme, getThemeVersion, getThemeVersion);
-  const [draft, setDraft] = useState(initialPrompt);
+  const [localDraft, setDraft] = useState(initialPrompt);
+  const draft = controlledDraft ?? localDraft;
   const [plan, updatePlan] = useState<Plan | null>(null);
   const [consented, updateConsented] = useState(false);
   const [phase, setPhase] = useState<'preview' | 'execute' | null>(null);
@@ -189,6 +194,7 @@ function NavigationSession({
     const wasExecuting = phase === 'execute';
     stopWaiting();
     setDraft(value);
+    onDraftChange?.(value);
     setPlan(null);
     setConsented(false);
     setResult(null);

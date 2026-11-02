@@ -1,6 +1,7 @@
 import React from 'react';
 import { Alert } from 'react-native';
 import { act, fireEvent, render } from '@testing-library/react-native';
+import { AgentDraftProvider } from '../state/AgentDraftProvider';
 import { CampusAssistantScreen } from '../screens/CampusAssistantScreen';
 import { CampusCloudNavigationTask } from '../screens/CampusCloudNavigationTask';
 import { AIOverlayHost } from '../components/AIOverlayHost';
@@ -247,7 +248,7 @@ test('quota failure keeps the same confirmed request for retry without a fallbac
 });
 
 test.each(['account', 'school', 'account-back', 'loading', 'expired', 'logout'])(
-  '%s changes cancel an in-flight navigation and never revive the route prompt',
+  '%s changes cancel in-flight navigation while retaining same-owner text',
   async (change) => {
     const late = deferred<CloudNavigationResult>();
     runRequest.mockReturnValueOnce(late.promise);
@@ -270,7 +271,7 @@ test.each(['account', 'school', 'account-back', 'loading', 'expired', 'logout'])
       mockLoading = false;
       mockTokenExpired = false;
       view.rerender(<CampusAssistantScreen route={route} />);
-      expect(view.getByLabelText('出發地與目的地').props.value).toBe('');
+      expect(view.getByLabelText('出發地與目的地').props.value).toBe(change === 'account-back' ? '' : query);
       expect(input.isCurrent()).toBe(false);
     }
     await act(async () => late.resolve(completed));
@@ -349,7 +350,7 @@ test('switching to saved data cancels cloud work and returning requires fresh co
   expect(oldRequest).not.toHaveBeenCalled();
 });
 
-test('navigation blur cancels pending work and focus never restores its prompt or consent', async () => {
+test('navigation blur cancels pending work and focus restores only the scoped draft', async () => {
   const late = deferred<CloudNavigationResult>();
   runRequest.mockReturnValueOnce(late.promise);
   const listeners = new Map<string, () => void>();
@@ -377,7 +378,7 @@ test('navigation blur cancels pending work and focus never restores its prompt o
   expect(input.isCurrent()).toBe(false);
   await act(async () => late.resolve(completed));
   act(() => focus?.());
-  expect(view.getByLabelText('出發地與目的地').props.value).toBe('');
+  expect(view.getByLabelText('出發地與目的地').props.value).toBe(query);
   expect(view.queryByRole('checkbox')).toBeNull();
   expect(view.queryByText('導航建議已備妥')).toBeNull();
   expect(previewRequest).toHaveBeenCalledTimes(1);
@@ -450,7 +451,7 @@ test.each(['pending', 'quota'])(
     expect(view.queryByText('導航建議已備妥')).toBeNull();
     expect(view.queryByText('重試規劃')).toBeNull();
     expect(view.queryByRole('checkbox')).toBeNull();
-    expect(view.getByLabelText('出發地與目的地').props.value).toBe('');
+    expect(view.getByLabelText('出發地與目的地').props.value).toBe(query);
     fireEvent.changeText(view.getByLabelText('出發地與目的地'), query);
     await act(async () => fireEvent.press(view.getByText('預覽傳送內容')));
     fireEvent.press(view.getByText('確認規劃'));
@@ -640,4 +641,89 @@ test('an old cooldown callback cannot write a deadline after an owner ABA change
   await consentAndRun(view);
   expect(runRequest).toHaveBeenCalledTimes(1);
   expect(view.getByText('導航建議已備妥')).toBeTruthy();
+});
+
+ test('returning from another screen keeps edited navigation text but discards consent', async () => {
+  const listeners = new Map<string, () => void>();
+  const navigation = {
+    isFocused: () => true,
+    addListener: (event: 'blur' | 'focus', listener: () => void) => {
+      listeners.set(event, listener); return () => { listeners.delete(event); };
+    },
+  };
+  const view = render(<CampusAssistantScreen navigation={navigation} />);
+  fireEvent.changeText(view.getByLabelText('出發地與目的地'), query);
+  await act(async () => fireEvent.press(view.getByText('預覽傳送內容')));
+  fireEvent.press(view.getByRole('checkbox'));
+  act(() => listeners.get('blur')?.());
+  act(() => listeners.get('focus')?.());
+  expect(view.getByLabelText('出發地與目的地').props.value).toBe(query);
+  expect(view.queryByRole('checkbox')).toBeNull();
+  expect(runRequest).not.toHaveBeenCalled();
+});
+
+test('mode round trip keeps separate navigation and saved-data drafts', () => {
+  const view = render(<CampusAssistantScreen />);
+  fireEvent.changeText(view.getByLabelText('出發地與目的地'), query);
+  fireEvent.press(view.getByText('已存資料'));
+  fireEvent.changeText(view.getByLabelText('詢問校園助理'), '我今天有哪些課');
+  fireEvent.press(view.getByText('校園導航'));
+  expect(view.getByLabelText('出發地與目的地').props.value).toBe(query);
+  fireEvent.press(view.getByText('已存資料'));
+  expect(view.getByLabelText('詢問校園助理').props.value).toBe('我今天有哪些課');
+});
+
+ test('root-scoped text and quota survive an actual screen unmount without restoring a plan', async () => {
+  jest.useFakeTimers();
+  jest.setSystemTime(new Date('2026-11-02T15:00:00.000Z'));
+  const page = (visible: boolean) => <AgentDraftProvider>{visible ? <CampusAssistantScreen /> : null}</AgentDraftProvider>;
+  let view: ReturnType<typeof render> | undefined;
+  try {
+    runRequest.mockResolvedValueOnce({ status: 'unavailable', reason: 'rate_limited', provider: 'groq', schoolId: 'pu', checkedAt: preview.checkedAt, retryAfterSeconds: 30 });
+    view = render(page(true));
+    fireEvent.changeText(view.getByLabelText('出發地與目的地'), query);
+    await consentAndRun(view);
+    view.rerender(page(false));
+    view.rerender(page(true));
+    expect(view.getByLabelText('出發地與目的地').props.value).toBe(query);
+    expect(view.queryByRole('checkbox')).toBeNull();
+    await consentAndRun(view);
+    expect(runRequest).toHaveBeenCalledTimes(1);
+    act(() => jest.advanceTimersByTime(30_000));
+    await act(async () => fireEvent.press(view!.getByText('確認規劃')));
+    expect(runRequest).toHaveBeenCalledTimes(2);
+  } finally { view?.unmount(); jest.useRealTimers(); }
+});
+
+test('a back-stack route prompt cannot reappear after an account ABA and actual remount', () => {
+  const route = { key: 'assistant-route-A', params: { prompt: query } };
+  const setParams = jest.fn();
+  const page = (visible: boolean) => <AgentDraftProvider>{visible ? <CampusAssistantScreen route={route} navigation={{ setParams } as React.ComponentProps<typeof CampusAssistantScreen>['navigation']} /> : null}</AgentDraftProvider>;
+  const view = render(page(true));
+  expect(view.getByLabelText('出發地與目的地').props.value).toBe(query);
+  expect(setParams).toHaveBeenCalledWith({ prompt: undefined });
+  fireEvent.changeText(view.getByLabelText('出發地與目的地'), '較新的草稿');
+  view.rerender(page(false));
+  view.rerender(page(true));
+  expect(view.getByLabelText('出發地與目的地').props.value).toBe('較新的草稿');
+  view.rerender(page(false));
+  mockUid = 'B'; view.rerender(page(false));
+  mockUid = 'A'; view.rerender(page(false));
+  view.rerender(page(true));
+  expect(view.getByLabelText('出發地與目的地').props.value).toBe('');
+  expect(runRequest).not.toHaveBeenCalled();
+});
+
+test('a first route prompt waits for the same owner background check instead of being consumed and lost', () => {
+  const route = { key: 'pending-route-A', params: { prompt: query } };
+  const page = (visible: boolean) => <AgentDraftProvider>{visible ? <CampusAssistantScreen route={route} /> : null}</AgentDraftProvider>;
+  const view = render(page(false));
+  mockLoading = true;
+  view.rerender(page(true));
+  expect(view.getByLabelText('出發地與目的地').props.value).toBe('');
+  mockLoading = false;
+  view.rerender(page(true));
+  expect(view.getByLabelText('出發地與目的地').props.value).toBe(query);
+  expect(previewRequest).not.toHaveBeenCalled();
+  expect(runRequest).not.toHaveBeenCalled();
 });

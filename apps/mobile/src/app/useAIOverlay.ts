@@ -13,6 +13,8 @@ export interface AIOverlayState {
   visible: boolean;
   mode: AIOverlayMode;
   initialPrompt?: string;
+  entryId?: string;
+  scopeOwner?: string;
   /** 推播「AI 主動」等：對應 AIChatScreen route.params.proactiveReportId */
   proactiveReportId?: string;
   /** 開啟原因（埋點用） */
@@ -30,6 +32,8 @@ const state: AIOverlayState = {
 };
 
 const listeners = new Set<Listener>();
+let scopeOwner = '';
+let entryGeneration = 0;
 
 function notify() {
   for (const l of listeners) {
@@ -42,6 +46,10 @@ function notify() {
 }
 
 export const aiOverlay = {
+  bindScope(owner: string) { scopeOwner = owner; },
+  closeStale(owner: string) {
+    if (state.visible && state.scopeOwner !== owner) this.close();
+  },
   open(opts?: {
     mode?: AIOverlayMode;
     prompt?: string;
@@ -49,6 +57,8 @@ export const aiOverlay = {
     proactiveReportId?: string;
   }) {
     state.visible = true;
+    state.entryId = `assistant-overlay-${++entryGeneration}`;
+    state.scopeOwner = scopeOwner;
     state.mode = opts?.mode ?? 'chat';
     state.initialPrompt = opts?.prompt;
     state.proactiveReportId = opts?.proactiveReportId;
@@ -58,6 +68,8 @@ export const aiOverlay = {
   close() {
     state.visible = false;
     state.initialPrompt = undefined;
+    state.entryId = undefined;
+    state.scopeOwner = undefined;
     state.proactiveReportId = undefined;
     state.source = undefined;
     notify();

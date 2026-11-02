@@ -6,6 +6,7 @@ import { AIDetailScreen, AICard, AIButton, aiTokens } from '../ui/aiFirst';
 import { getThemeVersion, subscribeToTheme } from '../ui/theme';
 import { useAuth } from '../state/auth';
 import { useSchool } from '../state/school';
+import { AgentDraftProvider, useOptionalAgentDrafts, type AgentDraftContextValue } from '../state/AgentDraftProvider';
 import {
   askCampusAssistant,
   OnDeviceAssistantError,
@@ -55,29 +56,24 @@ function isTransientCampusSyncError(error: unknown): boolean {
   return /network|offline|unavailable|deadline-exceeded|timeout|timed out|connection/.test(code + ' ' + message);
 }
 
-export function CampusAssistantScreen({ navigation, route }: ServiceScreenProps) {
+export function CampusAssistantScreen(props: ServiceScreenProps) {
+  const drafts = useOptionalAgentDrafts();
+  // Standalone previews also get isolation; the app mounts this provider above navigation.
+  return drafts ? <ScopedAssistantScreen {...props} drafts={drafts} /> : (
+    <AgentDraftProvider><CampusAssistantScreen {...props} /></AgentDraftProvider>
+  );
+}
+
+function ScopedAssistantScreen({ navigation, route, drafts }: ServiceScreenProps & { drafts: AgentDraftContextValue }) {
   useSyncExternalStore(subscribeToTheme, getThemeVersion, getThemeVersion);
   const { user, loading, tokenExpired } = useAuth();
   const { school } = useSchool();
   const [pageActive, setPageActive] = useState(true);
   const [pageGeneration, setPageGeneration] = useState(0);
-  const quotaOwner = JSON.stringify([user?.uid ?? '', school.id]);
-  const [quota, setQuota] = useState<{ owner: string; generation: number; readyAt: number | null }>({
-    owner: quotaOwner, generation: 0, readyAt: null,
-  });
-  if (quota.owner !== quotaOwner) {
-    setQuota({ owner: quotaOwner, generation: quota.generation + 1, readyAt: null });
-  }
-  const authReady = !loading && !tokenExpired;
-  const scope = JSON.stringify([user?.uid, school.id, authReady, pageActive, pageGeneration]);
+  const authReady = !loading && !tokenExpired && drafts.ready;
+  const scope = JSON.stringify([user?.uid, school.id, authReady, pageActive, pageGeneration, drafts.epoch]);
   const active = useRef(scope);
   active.current = scope;
-  const retainQuotaDeadline = useCallback((readyAt: number) => {
-    if (active.current !== scope) return;
-    setQuota((previous) => previous.owner === quotaOwner && previous.generation === quota.generation
-      ? { ...previous, readyAt: Math.max(previous.readyAt ?? 0, readyAt) }
-      : previous);
-  }, [scope, quotaOwner, quota.generation]);
   useEffect(() => {
     const lifecycle = navigation as (ServiceScreenProps['navigation'] & {
       addListener?: (event: 'blur' | 'focus', listener: () => void) => () => void;
@@ -94,21 +90,27 @@ export function CampusAssistantScreen({ navigation, route }: ServiceScreenProps)
     const offFocus = lifecycle.addListener('focus', () => setPageActive(true));
     return () => { offBlur(); offFocus(); };
   }, [navigation]);
-  const initialScope = useRef(scope);
-  const promptRevoked = useRef(false);
-  useLayoutEffect(() => {
-    if (scope !== initialScope.current) promptRevoked.current = true;
-  }, [scope]);
-  const isScopeCurrent = useCallback(() => active.current === scope, [scope]);
+  const { consumePrompt, retainQuota, isCurrent: isDraftScopeCurrent } = drafts;
+  const entry = useRef<string | object>((route as { key?: string } | undefined)?.key ?? {});
   const prompt = typeof route?.params?.prompt === 'string' ? route.params.prompt : '';
+  useLayoutEffect(() => {
+    consumePrompt(entry.current, prompt);
+    if (prompt) {
+      (navigation as { setParams?: (params: { prompt: undefined }) => void } | undefined)?.setParams?.({ prompt: undefined });
+    }
+  }, [consumePrompt, navigation, prompt]);
+  const isScopeCurrent = useCallback(() => active.current === scope && pageActive && authReady && isDraftScopeCurrent(), [scope, pageActive, authReady, isDraftScopeCurrent]);
+  const retainQuotaDeadline = useCallback((readyAt: number) => {
+    if (isScopeCurrent()) retainQuota(readyAt);
+  }, [isScopeCurrent, retainQuota]);
   return (
     <AssistantConversation
       key={scope}
       uid={authReady && pageActive ? user?.uid ?? '' : ''}
       schoolId={school.id}
       schoolName={school.name}
-      initialPrompt={!promptRevoked.current && initialScope.current === scope ? prompt : ''}
-      retryReadyAt={quota.owner === quotaOwner ? quota.readyAt : null}
+      drafts={drafts}
+      retryReadyAt={drafts.retryReadyAt}
       onRateLimited={retainQuotaDeadline}
       isScopeCurrent={isScopeCurrent}
       navigation={navigation}
@@ -119,7 +121,7 @@ function AssistantConversation({
   uid,
   schoolId,
   schoolName,
-  initialPrompt,
+  drafts,
   retryReadyAt,
   onRateLimited,
   isScopeCurrent,
@@ -128,7 +130,7 @@ function AssistantConversation({
   uid: string;
   schoolId: string;
   schoolName: string;
-  initialPrompt: string;
+  drafts: AgentDraftContextValue;
   retryReadyAt: number | null;
   onRateLimited: (readyAt: number) => void;
   isScopeCurrent: () => boolean;
@@ -144,7 +146,8 @@ function AssistantConversation({
       route?: string;
     }>
   >([]);
-  const [draft, setDraft] = useState(initialPrompt.slice(0, 1600));
+  const draft = drafts.saved;
+  const setDraft = (value: string) => { if (isScopeCurrent()) drafts.setDraft('saved', value); };
   const [mode, setMode] = useState<CampusAssistantMode>('campus');
   const cloudCancel = useRef<(() => void) | null>(null);
   const [sense, setSense] = useState<CampusSenseSnapshot | null>(null);
@@ -429,7 +432,8 @@ function AssistantConversation({
           uid={uid}
           schoolId={schoolId}
           schoolName={schoolName}
-          initialPrompt={initialPrompt}
+          draft={drafts.navigation}
+          onDraftChange={(value) => { if (current()) drafts.setDraft('navigation', value); }}
           initialRetryReadyAt={retryReadyAt}
           onRateLimited={onRateLimited}
           isScopeCurrent={current}
