@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useId, useRef, useState, type FormEvent } from 'react';
+import Link from 'next/link';
 import {
   WEEKDAY_LABELS,
   courseTimeLabel,
@@ -11,6 +12,7 @@ import {
   type PersonalCourse,
 } from '@campus/shared';
 import { ConfirmModal, Modal } from '@/components/ui/Modal';
+import { TIMETABLE_COURSE_WORK_LABEL } from '@/lib/todayScreen';
 import { draftConflicts, hasCourseChanges, validateCourseDraft, type CourseIssues } from './courseEditorModel';
 import styles from './timetable.module.css';
 
@@ -25,9 +27,22 @@ type CourseEditorProps = {
   onRemove: () => void;
   onCancel: () => void;
   periodProfile?: PeriodProfileId;
+  courseWorkHref?: string;
 };
 
-export function CourseEditor({ course, courses, existing, busy, feedback, onChange, onSave, onRemove, onCancel, periodProfile = 'pu' }: CourseEditorProps) {
+export function CourseEditor({
+  course,
+  courses,
+  existing,
+  busy,
+  feedback,
+  onChange,
+  onSave,
+  onRemove,
+  onCancel,
+  periodProfile = 'pu',
+  courseWorkHref,
+}: CourseEditorProps) {
   const [initial] = useState(() => courses.find((item) => item.id === course.id) || course);
   const [submitted, setSubmitted] = useState(false);
   const [confirmation, setConfirmation] = useState<'delete' | 'discard' | null>(null);
@@ -84,6 +99,19 @@ export function CourseEditor({ course, courses, existing, busy, feedback, onChan
       >
         <section aria-label="編輯課程">
           <form ref={formRef} onSubmit={submit} noValidate className={styles.editor}>
+            {courseWorkHref ? (
+              <div
+                className={styles.courseWorkExit}
+                data-testid="timetable-course-work-exit"
+                role="group"
+                aria-label={`${course.name || '這門課'}的作業與教材`}
+              >
+                <Link className="btn" href={courseWorkHref}>
+                  {TIMETABLE_COURSE_WORK_LABEL}
+                </Link>
+                <p className={styles.hint}>除了編輯格位，也可開啟這門課的作業與教材。</p>
+              </div>
+            ) : null}
             {moved && <p className={styles.feedback}>時間變更：{courseTimeLabel(initial, periodProfile)} → {courseTimeLabel(course, periodProfile)}。儲存後才會更新個人課表。</p>}
             <fieldset disabled={busy} className={styles.fields}>
               <legend className={styles.srOnly}>課程資料</legend>
