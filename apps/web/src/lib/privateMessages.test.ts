@@ -472,3 +472,12 @@ it('refuses reactions on messages outside the current school and on recalled mes
     .rejects.toThrow();
   expect(tx.update).not.toHaveBeenCalled();
 });
+
+ it('retains the verified campus in presentation data even when stored at the top level', () => {
+  expect(parseNotification('n-1', notification(), 'user', session)).toEqual(
+    expect.objectContaining({ data: expect.objectContaining({ schoolId: session.schoolId }) }),
+  );
+  expect(parseNotification('n-1', notification({ data: { schoolId: 'wrong-campus' } }), 'user', session)).toEqual(
+    expect.objectContaining({ data: expect.objectContaining({ schoolId: session.schoolId }) }),
+  );
+});

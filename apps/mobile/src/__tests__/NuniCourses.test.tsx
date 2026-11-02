@@ -5,6 +5,8 @@ import { act, fireEvent, render, waitFor, within } from '@testing-library/react-
 import { createNuniClasses, NuniError, type NuniMaterial, type NuniWorkspace } from '@campus/shared/src/nuni';
 import { NuniCourses } from '../screens/nuni/NuniCourses';
 import { NuniDraftProvider } from '../state/nuniDrafts';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { materialBookmarkStorageKey } from '@campus/shared/src/materialBookmarks';
 
 const courseId = 'cw_11111111-1111-4111-8111-111111111111';
 const assignmentId = 'cwa_22222222-2222-4222-8222-222222222222';
@@ -16,6 +18,7 @@ let mockSession = {
   isPlatformOperator: false,
   context: 'context-first',
 };
+let mockLoading = false;
 const mockRequest = jest.fn();
 const mockUpload = jest.fn();
 let mockUuid = 0;
@@ -36,11 +39,11 @@ jest.mock('../screens/nuni/assignmentFileSubmit', () => {
 });
 jest.mock('../state/nuniSession', () => ({
   useNuniSession: () => ({
-    session: mockSession,
+    session: mockLoading ? null : mockSession,
     request: mockRequest,
     bffRequest: mockRequest,
     upload: mockUpload,
-    loading: false,
+    loading: mockLoading,
     pendingLogout: false,
   }),
 }));
@@ -122,6 +125,7 @@ async function response(
   throw new Error(`Unhandled fixture path: ${path}`);
 }
 beforeEach(() => {
+  mockLoading = false;
   mockUuid = 0;
   fileSubmitFlag.on = false;
   mockScrollAssignment.reveal.mockReset();
@@ -2389,6 +2393,39 @@ it('shares only the stable material entry through the system sheet', async () =>
   share.mockRestore();
 });
 
+it('從教材卡收藏後可在獨立清單找回，重新驗權並返回原教材', async () => {
+  const subscription = jest.spyOn(AppState, 'addEventListener').mockReturnValue({ remove: jest.fn() });
+  AppState.currentState = 'active';
+  mockSession = { ...mockSession, platformAccountId: 'pa_bookmark-flow', context: 'bookmark-flow' };
+  const target = material(1, '收藏流程教材');
+  mockRequest.mockImplementation((path, context, input) => {
+    if (path.endsWith('/materials/page')) return Promise.resolve({ materials: [target], nextCursor: null });
+    return response(path, context, input);
+  });
+  const view = render(<NuniCourses initialWorkspaceId={courseId} initialMaterialId={target.id} />);
+  try {
+    const save = await view.findByRole('button', { name: '收藏到此裝置：收藏流程教材' });
+    await waitFor(() => expect(save).toBeEnabled());
+    fireEvent.press(save);
+    await view.findByText('已收藏在此裝置。');
+    const stored = JSON.parse((await AsyncStorage.getItem(materialBookmarkStorageKey('pa_bookmark-flow')))!);
+    expect(stored.items).toEqual([{ courseId, materialId: target.id, savedAt: expect.any(String) }]);
+    fireEvent.press(view.getByText('返回我的課程'));
+    fireEvent.press(await view.findByRole('button', { name: '此裝置收藏 · 1' }));
+    expect(view.queryByLabelText('跨課教材關鍵字')).toBeNull();
+    const original = await view.findByRole('button', { name: '回到原教材：收藏流程教材' });
+    const before = mockRequest.mock.calls.filter(([path]) => path.endsWith('/materials/page')).length;
+    fireEvent.press(original);
+    await view.findByLabelText('目標教材：收藏流程教材');
+    expect(mockRequest.mock.calls.filter(([path]) => path.endsWith('/materials/page')).length).toBeGreaterThan(before);
+    fireEvent.press(view.getByRole('button', { name: '返回此裝置收藏' }));
+    await view.findByRole('button', { name: '回到原教材：收藏流程教材' });
+  } finally {
+    view.unmount();
+    subscription.mockRestore();
+  }
+});
+
 it.each([403, 404])('stops a linked material search and removes course content after %s', async (status) => {
   mockRequest.mockImplementation((path, context, input, _method, query) => {
     if (!path.endsWith('/materials/page')) return response(path, context, input);
@@ -2495,4 +2532,87 @@ it('長搜尋清單返回時等清單尺寸更新才還原保存位置，且一�
     expect(scroll).not.toHaveBeenCalled();
     view.unmount();
   } finally { scroll.mockRestore(); subscription.mockRestore(); }
+});
+
+
+it.each([false, true])('同帳號回前景刷新後保留收藏清單與教材返回來源（已開啟教材：%s）', async (opened) => {
+  AppState.currentState = 'active';
+  const subscription = jest.spyOn(AppState, 'addEventListener').mockReturnValue({ remove: jest.fn() });
+  mockSession = { ...mockSession, platformAccountId: `pa_bookmark-resume-${opened}` };
+  const target = material(2, '回前景後接著讀');
+  await AsyncStorage.setItem(materialBookmarkStorageKey(mockSession.platformAccountId), JSON.stringify({
+    version: 1, items: [{ courseId, materialId: target.id, savedAt: date }],
+  }));
+  mockRequest.mockImplementation((path, context, input, _method, query) => {
+    if (path.endsWith('/materials/page')) return Promise.resolve(query
+      ? { materials: [target], nextCursor: null }
+      : { materials: [material(1)], nextCursor: 'older' });
+    return response(path, context, input);
+  });
+  const cache = new Map<string, unknown>();
+  const tree = () => <NuniDraftProvider cache={cache}><NuniCourses /></NuniDraftProvider>;
+  const view = render(tree());
+  try {
+    fireEvent.press(await view.findByRole('button', { name: '此裝置收藏 · 1' }));
+    const original = await view.findByRole('button', { name: '回到原教材：回前景後接著讀' });
+    if (opened) {
+      fireEvent.press(original);
+      await view.findByLabelText('目標教材：回前景後接著讀');
+    }
+    // Foreground validation unmounts CourseScope before replacing the request context.
+    mockLoading = true;
+    view.rerender(tree());
+    expect(view.queryByText('回前景後接著讀')).toBeNull();
+    mockRequest.mockClear();
+    mockLoading = false;
+    mockSession = { ...mockSession, context: 'context-after-foreground' };
+    view.rerender(tree());
+    if (opened) {
+      await view.findByLabelText('目標教材：回前景後接著讀');
+      fireEvent.press(view.getByRole('button', { name: '返回此裝置收藏' }));
+    }
+    await view.findByRole('button', { name: '回到原教材：回前景後接著讀' });
+    expect(view.queryByLabelText('跨課教材關鍵字')).toBeNull();
+    const reads = mockRequest.mock.calls.filter(([path]) => path.endsWith('/materials/page'));
+    expect(reads.length).toBeGreaterThan(0);
+    expect(reads.every(([, context]) => context === 'context-after-foreground')).toBe(true);
+  } finally {
+    view.unmount();
+    subscription.mockRestore();
+  }
+});
+
+
+it('保留收藏頁後仍重新驗權，刷新遭撤權時不顯示舊教材', async () => {
+  AppState.currentState = 'active';
+  const subscription = jest.spyOn(AppState, 'addEventListener').mockReturnValue({ remove: jest.fn() });
+  mockSession = { ...mockSession, platformAccountId: 'pa_bookmark-revoked-refresh' };
+  const target = material(1, '刷新前的教材');
+  await AsyncStorage.setItem(materialBookmarkStorageKey(mockSession.platformAccountId), JSON.stringify({
+    version: 1, items: [{ courseId, materialId: target.id, savedAt: date }],
+  }));
+  mockRequest.mockImplementation((path, context, input) => {
+    if (path.endsWith('/materials/page')) return Promise.resolve({ materials: [target], nextCursor: null });
+    return response(path, context, input);
+  });
+  const cache = new Map<string, unknown>();
+  const tree = () => <NuniDraftProvider cache={cache}><NuniCourses /></NuniDraftProvider>;
+  const view = render(tree());
+  try {
+    fireEvent.press(await view.findByRole('button', { name: '此裝置收藏 · 1' }));
+    await view.findByRole('button', { name: '回到原教材：刷新前的教材' });
+    mockLoading = true;
+    view.rerender(tree());
+    mockRequest.mockRejectedValue(new NuniError(403, 'FORBIDDEN'));
+    mockLoading = false;
+    mockSession = { ...mockSession, context: 'revoked-after-refresh' };
+    view.rerender(tree());
+    await view.findByText('目前無法開啟的教材');
+    expect(view.queryByText('刷新前的教材')).toBeNull();
+    expect(view.getByRole('button', { name: /^移除此裝置收藏：/ })).toBeEnabled();
+    expect(view.queryByLabelText('跨課教材關鍵字')).toBeNull();
+  } finally {
+    view.unmount();
+    subscription.mockRestore();
+  }
 });

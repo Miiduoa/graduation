@@ -750,6 +750,7 @@ export function AIDetailScreen({
   children,
   bottomPadding,
   scrollRef,
+  onScroll,
   keyboardShouldPersistTaps,
   keyboardDismissMode,
 }: {
@@ -760,6 +761,7 @@ export function AIDetailScreen({
   children: React.ReactNode;
   bottomPadding?: number;
   scrollRef?: React.Ref<ScrollView>;
+  onScroll?: ScrollViewProps['onScroll'];
   keyboardShouldPersistTaps?: ScrollViewProps['keyboardShouldPersistTaps'];
   keyboardDismissMode?: ScrollViewProps['keyboardDismissMode'];
 }) {
@@ -770,6 +772,8 @@ export function AIDetailScreen({
       <AIDetailHeader title={title} subtitle={subtitle} onBack={onBack} rightAction={rightAction} />
       <ScrollView
         ref={scrollRef}
+        onScroll={onScroll}
+        scrollEventThrottle={onScroll ? 16 : undefined}
         style={{ flex: 1 }}
         contentContainerStyle={{ paddingBottom: bottomPadding ?? defaultPadding }}
         showsVerticalScrollIndicator={false}

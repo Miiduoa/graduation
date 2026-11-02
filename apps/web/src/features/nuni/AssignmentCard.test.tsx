@@ -1331,33 +1331,35 @@ it('背景再回前景先丟棄舊收件，不等待主清單更新', async () =
 });
 
 it('主清單頻繁更新不作廢慢收件，隱藏卡片停止自動讀取', async () => {
-  vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('visible');
-  vi.spyOn(navigator, 'onLine', 'get').mockReturnValue(true);
   const view = render(<AssignmentCard item={assignment} workspace={workspace} reload={reload} syncVersion="first" />);
   await openSubmissions();
-  // 等收件即時同步 effect 註冊 pageshow 後再切 fake timers，避免 CI 上監聽尚未掛上時
-  // pageshow 空跑、initialDelay 反而在迴圈中才觸發第二次請求。
-  await act(async () => { await Promise.resolve(); });
+  await screen.findByRole('button', { name: '更新繳交內容' });
   vi.useFakeTimers();
   try {
-    let finish!: (value: unknown) => void;
+    // 停掉真實時鐘上的 initialDelay，改在假時鐘下重新訂閱，避免 pageshow／計時器競態
+    view.rerender(
+      <AssignmentCard item={assignment} workspace={workspace} reload={reload} syncVersion="first" receiptActive={false} />,
+    );
+    await act(async () => {});
+    view.rerender(
+      <AssignmentCard item={assignment} workspace={workspace} reload={reload} syncVersion="first" receiptActive={true} />,
+    );
+    await act(async () => {});
+    let finish: ((value: unknown) => void) | undefined;
     state.request.mockImplementationOnce(() => new Promise((resolve) => { finish = resolve; }));
-    await act(async () => { window.dispatchEvent(new Event('pageshow')); });
-    expect(typeof finish).toBe('function');
+    await act(async () => { await vi.advanceTimersByTimeAsync(60000); });
+    expect(finish).toEqual(expect.any(Function));
     const before = state.request.mock.calls.length;
     for (let i = 0; i < 4; i++) {
       view.rerender(<AssignmentCard item={assignment} workspace={workspace} reload={reload} syncVersion={`next-${i}`} />);
       await act(async () => { await vi.advanceTimersByTimeAsync(60000); });
     }
     expect(state.request).toHaveBeenCalledTimes(before);
-    await act(async () => { finish({ submissions: [{ ...submission, body: '慢讀取的新內容' }] }); });
+    await act(async () => { finish!({ submissions: [{ ...submission, body: '慢讀取的新內容' }] }); });
     expect(screen.getByText('慢讀取的新內容')).toBeTruthy();
     view.rerender(<AssignmentCard item={assignment} workspace={workspace} reload={reload} receiptActive={false} />);
     await act(async () => { await vi.advanceTimersByTimeAsync(30000); });
     expect(state.request).toHaveBeenCalledTimes(before);
     view.unmount();
-  } finally {
-    vi.useRealTimers();
-    vi.restoreAllMocks();
-  }
+  } finally { vi.useRealTimers(); }
 });
