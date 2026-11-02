@@ -1,0 +1,67 @@
+.export {
+  margin: 20px 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  min-width: 0;
+}
+.export summary {
+  padding: 16px;
+  min-height: 44px;
+  cursor: pointer;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+.export summary span {
+  margin-inline-start: 8px;
+  color: var(--muted);
+  font-size: var(--font-body-sm-size);
+  font-weight: 400;
+}
+.export summary:focus-visible,
+.export button:focus-visible,
+.export input:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 3px;
+}
+.content {
+  padding: 0 16px 20px;
+  min-width: 0;
+}
+.content p {
+  font-size: var(--font-body-sm-size);
+  line-height: 1.7;
+  overflow-wrap: anywhere;
+}
+.dates {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+  margin: 20px 0;
+}
+.dates label {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+  font-size: var(--font-body-sm-size);
+}
+.dates input {
+  display: block;
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+  min-height: 44px;
+  box-sizing: border-box;
+  padding: 10px 12px;
+  font: inherit;
+  font-size: 16px;
+  color: var(--text);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+}
+.content button { min-height: 44px; }
+.content ul { padding-inline-start: 24px; overflow-wrap: anywhere; }
+@media (max-width: 600px) {
+  .dates { grid-template-columns: minmax(0, 1fr); }
+}
