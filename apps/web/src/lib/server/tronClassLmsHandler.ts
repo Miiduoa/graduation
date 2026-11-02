@@ -294,6 +294,18 @@ async function loadCourseContents(
     announcements = announcementResult.value
       .map((item) => parseAnnouncement(item, 'course', course))
       .filter((item): item is LmsAnnouncementItem => Boolean(item));
+    // The general activities feed can carry announcements absent from the dedicated
+    // endpoint, even when that endpoint succeeds. Preserve both without duplicating
+    // identical course/activity records. Do not merge differing content by title alone.
+    const key = (item: LmsAnnouncementItem) =>
+      JSON.stringify([item.courseId, item.id.split(':').pop(), item.title, item.content]);
+    const seen = new Set(announcements.map(key));
+    for (const item of activityAnnouncements) {
+      const signature = key(item);
+      if (seen.has(signature)) continue;
+      seen.add(signature);
+      announcements.push(item);
+    }
   } else if (activitiesResult.ok) {
     announcements = activityAnnouncements;
     if (announcementResult.status !== 404) {
