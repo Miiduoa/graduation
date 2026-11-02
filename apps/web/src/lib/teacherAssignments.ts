@@ -14,7 +14,7 @@ import {
   type TeacherScope,
 } from './teacherCourse';
 
-// Campus One deadlines follow the school calendar (Asia/Taipei), not the browser timezone.
+// nuni deadlines follow the school calendar (Asia/Taipei), not the browser timezone.
 const TAIPEI_OFFSET_MS = 8 * 60 * 60 * 1000;
 
 export function toTaipeiDateTimeInput(iso: string): string {

@@ -146,7 +146,7 @@ export function WorkspaceList() {
     <div className={styles.workspace}>
       <header className={styles.pageHeading}>
         <div>
-          <p className={styles.kicker}>Campus One · 課程空間</p>
+          <p className={styles.kicker}>nuni · 課程空間</p>
           <h1>我的課程</h1>
           <p>先處理待辦，再回到每門課的教材與學習紀錄。</p>
         </div>
@@ -425,7 +425,7 @@ export function WorkspaceList() {
             </div>
           </section>
           <p className={styles.scopeNote}>
-            這裡是你在 Campus One
+            這裡是你在 nuni
             加入的課程，與瀏覽中的學校分開管理；校方正式課程與成績仍以學校系統為準。
           </p>
         </aside>

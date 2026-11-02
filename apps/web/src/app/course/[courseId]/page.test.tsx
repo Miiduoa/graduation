@@ -21,7 +21,7 @@ const auth = vi.hoisted(() => ({
 const school = vi.hoisted(() => ({ selectedSchoolId: 'school-a', loading: false }));
 vi.mock('@/components/AuthGuard', () => ({ useAuth: () => auth }));
 vi.mock('@/components/SelectedSchoolProvider', () => ({ useOptionalSelectedSchool: () => school }));
-vi.mock('@/components/AppHeader', () => ({ AppHeader: () => <header>Campus One</header> }));
+vi.mock('@/components/AppHeader', () => ({ AppHeader: () => <header>nuni</header> }));
 vi.mock('@/components/PWAInstallBanner', () => ({ PWAInstallBanner: () => null }));
 vi.mock('@/lib/courseWork', () => ({ loadCourseWork: vi.fn(), submitCourseText: vi.fn() }));
 

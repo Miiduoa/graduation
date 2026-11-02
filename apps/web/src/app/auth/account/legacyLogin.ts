@@ -299,7 +299,7 @@ function isLegacyAccountPath(pathname: string): boolean {
     pathname === '/privacy/deletion-status';
 }
 
-/** Keep Campus One task context out of legacy callbacks that discard it. */
+/** Keep nuni task context out of legacy callbacks that discard it. */
 export function campusOneLoginHref(search: ReturnSearch): string | null {
   const params = returnSearchParams(search);
   const destination = allowedReturnPath(params.get('returnUrl') ?? params.get('next'));

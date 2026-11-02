@@ -4,17 +4,17 @@
   "apple": {
     "info": {
       "zh-Hant": {
-        "title": "Campus One",
+        "title": "nuni",
         "subtitle": "課表、課務與校園生活",
-        "description": "Campus One 把每天會用到的課表、校園資訊與服務入口放在一起。\n\n先查看接下來的課程，再依需要開啟課程內容、校園地圖或圖書館查詢。介面支援淺色與深色模式。\n\n需要學校授權的資料，須使用已開放學校的帳號登入。可用的校務資料與服務依學校串接狀態及帳號權限而定；登入其他帳號不會自動取得學籍或校務資料。",
+        "description": "nuni 把每天會用到的課表、校園資訊與服務入口放在一起。\n\n先查看接下來的課程，再依需要開啟課程內容、校園地圖或圖書館查詢。介面支援淺色與深色模式。\n\n需要學校授權的資料，須使用已開放學校的帳號登入。可用的校務資料與服務依學校串接狀態及帳號權限而定；登入其他帳號不會自動取得學籍或校務資料。",
         "keywords": "校園,大學,課表,課程,地圖,圖書館,學生",
         "promotionalText": "從下一堂課開始，安排今天的校園生活。",
         "whatsNew": "統一課程與登入介面，改善深色模式、窄螢幕排版與登入狀態處理。"
       },
       "en-US": {
-        "title": "Campus One",
+        "title": "nuni",
         "subtitle": "Your classes and campus",
-        "description": "Campus One brings your timetable, campus information and service links together.\n\nCheck your upcoming classes, then open course content, the campus map or the library search when you need them. Light and dark appearances are available.\n\nSchool-provided records require an account from a supported school. Available records and services depend on the school integration and your account permissions. Signing in with another account does not grant access to school records.",
+        "description": "nuni brings your timetable, campus information and service links together.\n\nCheck your upcoming classes, then open course content, the campus map or the library search when you need them. Light and dark appearances are available.\n\nSchool-provided records require an account from a supported school. Available records and services depend on the school integration and your account permissions. Signing in with another account does not grant access to school records.",
         "keywords": "campus,university,timetable,courses,map,library,student",
         "promotionalText": "Start with your next class and plan your campus day.",
         "whatsNew": "Consistent course and sign-in screens, with improvements to dark appearance, narrow layouts and sign-in state handling."
@@ -27,14 +27,14 @@
   "android": {
     "info": {
       "zh-TW": {
-        "title": "Campus One",
+        "title": "nuni",
         "shortDescription": "從課表開始，整理課務與校園生活",
-        "fullDescription": "Campus One 把每天會用到的課表、校園資訊與服務入口放在一起。\n\n先查看接下來的課程，再依需要開啟課程內容、校園地圖或圖書館查詢。介面支援淺色與深色模式。\n\n需要學校授權的資料，須使用已開放學校的帳號登入。可用的校務資料與服務依學校串接狀態及帳號權限而定；登入其他帳號不會自動取得學籍或校務資料。"
+        "fullDescription": "nuni 把每天會用到的課表、校園資訊與服務入口放在一起。\n\n先查看接下來的課程，再依需要開啟課程內容、校園地圖或圖書館查詢。介面支援淺色與深色模式。\n\n需要學校授權的資料，須使用已開放學校的帳號登入。可用的校務資料與服務依學校串接狀態及帳號權限而定；登入其他帳號不會自動取得學籍或校務資料。"
       },
       "en-US": {
-        "title": "Campus One",
+        "title": "nuni",
         "shortDescription": "Your timetable, classes and campus in one place",
-        "fullDescription": "Campus One brings your timetable, campus information and service links together.\n\nCheck your upcoming classes, then open course content, the campus map or the library search when you need them. Light and dark appearances are available.\n\nSchool-provided records require an account from a supported school. Available records and services depend on the school integration and your account permissions. Signing in with another account does not grant access to school records."
+        "fullDescription": "nuni brings your timetable, campus information and service links together.\n\nCheck your upcoming classes, then open course content, the campus map or the library search when you need them. Light and dark appearances are available.\n\nSchool-provided records require an account from a supported school. Available records and services depend on the school integration and your account permissions. Signing in with another account does not grant access to school records."
       }
     },
     "category": "EDUCATION"

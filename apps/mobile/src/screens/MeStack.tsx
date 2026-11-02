@@ -176,7 +176,7 @@ export function MeStack() {
       <Stack.Screen
         name="NuniWorkspace"
         component={NuniWorkspaceScreen}
-        options={{ title: 'Campus One' }}
+        options={{ title: 'nuni' }}
       />
       <Stack.Screen
         name="Notifications"
