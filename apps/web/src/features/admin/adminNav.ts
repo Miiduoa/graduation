@@ -2,6 +2,7 @@ export type AdminSection =
   | 'overview'
   | 'schools'
   | 'people'
+  | 'announcements'
   | 'merchants'
   | 'boards'
   | 'reports'
@@ -46,6 +47,11 @@ export const sectionMeta: Record<
     label: '校方與權責',
     heading: '校方與權責',
     purpose: '確認各校負責人與已核發授權，釐清校務、承辦與學生本人的管理範圍。',
+  },
+  announcements: {
+    label: '校園公告',
+    heading: '校園公告',
+    purpose: '校管可在網頁列出、建立與編輯本校公告；發佈入口與手機校管台共用同一後端。',
   },
   merchants: {
     label: '店家服務',
@@ -134,7 +140,10 @@ export function parseAdminHash(hash: string): AdminLocation {
   const selected = segments[1] || null;
   return {
     section,
-    schoolId: section === 'schools' || section === 'people' ? selected : null,
+    schoolId:
+      section === 'schools' || section === 'people' || section === 'announcements'
+        ? selected
+        : null,
     reportId: section === 'reports' ? selected : null,
     reportState,
     schoolQuery: section === 'schools' ? readParam(params, 'q') : '',
@@ -147,7 +156,11 @@ export function parseAdminHash(hash: string): AdminLocation {
 export function serializeAdminHash(location: AdminLocation): string {
   const params = new URLSearchParams();
   let path = location.section;
-  if (location.section === 'schools' || location.section === 'people') {
+  if (
+    location.section === 'schools' ||
+    location.section === 'people' ||
+    location.section === 'announcements'
+  ) {
     if (location.schoolId) path += `/${encodeURIComponent(location.schoolId)}`;
     if (location.section === 'schools') {
       if (location.schoolQuery) params.set('q', location.schoolQuery);
