@@ -1,0 +1,810 @@
+{
+  "checksumFormat": "sha256:<lowercase-hex>",
+  "generatedAt": "2026-11-02T00:31:28.562Z",
+  "sourceHead": "6d190c0202c5a7e64a313124d1df0432ec0bc749",
+  "scriptHash": "sha256:2ea156598abfd75adb27d612eb10dbcf3352e12fc883242fc0c0cfb7b254dc27",
+  "sourceFiles": {
+    "apps/web/src/components/today/StudentToday.tsx": "sha256:73bc939dd28d4e63b9fe9c8cad50e9ebaedefecc987e3257c4d9779507585ff5",
+    "apps/web/src/app/globals.css": "sha256:b6e8ec5c0a927ac7266ac3716e0f59eab55eb41319b0f7fa876de7aed362f15d",
+    "apps/web/src/components/today/TodayWelcome.tsx": "sha256:4b8ebfaef1fa0f86a944f8aca437b9def1b6f5cebc900872129ec1d7ed130abc",
+    "packages/shared/src/index.ts": "sha256:f4aaf76d40bdbeb492267c121dc74fd69abbe82396d8efb49f0eccaf8c1498b8",
+    "packages/shared/src/pickNextAction.ts": "sha256:81e85801d6cc6f3530d173a8b316aae83c532bcd5460e6f6cafc13e24e722206",
+    "apps/web/src/components/today/StudentToday.module.css": "sha256:548960e5ff5b6decf8aefae796db6d057b5f7b1432d14890b280ab3bd00b523c",
+    "apps/web/src/lib/todayScreen.ts": "sha256:396e2e2894a76a4e0bbab0c888056ce4d093858582a945b03ea3674ebbab818c",
+    "packages/shared/src/notifications.ts": "sha256:d496fe58a05835b7615d20d55d37d74bafb3b3823ff1607e4f8c455688b9f0d5",
+    "packages/shared/src/schoolLogin.ts": "sha256:2af761f32854aa9727d64bd32144893211d15fe133cb12a81e356a1695f98251",
+    "packages/shared/src/auth.ts": "sha256:920ce4dfc7f50715ec05135219c477b92ab35831383075985b1f603f92ae05a9",
+    "packages/shared/src/lms/socraticCoach.ts": "sha256:a66b5cffd21943256794bf61197161d10df0d69b23094ff8cbc016190283cabe",
+    "packages/shared/src/schools.ts": "sha256:d3a66fabf58a3d8e2733e44dc2f4c0c14b844f6c367a431e27f487a9f610d1c2",
+    "packages/shared/src/campusGeo.ts": "sha256:7cae58606a2c6adaf32e6b469e35e55b113046273c949af3effde3e987d114e3",
+    "packages/shared/src/release.ts": "sha256:4aa32d2f35c325eceac12e289d18f6ca6b8d021a49ef2091a41a0811ba99b729",
+    "packages/shared/src/devUniversalAccounts.ts": "sha256:84e9d118c3fd88d669d8fcc5c316ecf5a4e405e35279114117c2b8e0104c47c5",
+    "packages/shared/src/publicDiningCatalog.ts": "sha256:84639a8745c29aeed3dc60ca0d307e2adbb86bff8cd325b5c4b3024eba11ee35",
+    "packages/shared/src/creditAudit.ts": "sha256:8023f4f0d7f3f4c4ec05ad90776a14a74c8c4211f1db17287aa9128659bb0893",
+    "packages/shared/src/lms/feedbackDrafter.ts": "sha256:27c82b0d0503b54eeaba4686b588a6848d5eb5fc51e3f05bb7f512b05abde550",
+    "packages/shared/src/lmsReviewQueue.ts": "sha256:abd7ddb9b78cef2cfe9f9101d9e0ace05ec3d7372f62f97c8cb1e7194fbef0fd",
+    "packages/shared/src/tenant.ts": "sha256:2405da9da7126320de7232812a00d0374cc2a22b4c9eb139e7f3403d5a37bb4c",
+    "packages/shared/src/puGradRequirements.ts": "sha256:13458990476966d5c4ea222471146413927dc5861c7d67384e0ea50c238ec77e",
+    "packages/shared/src/companion/spriteEngine.ts": "sha256:ccb956289c825963bd5cbcd4c9cc76b1ed024405931c352775860dd49e7cf9f5",
+    "apps/web/src/lib/todayCourseWork.ts": "sha256:6d37492f4412488a773eebf2d989bb3133fa384a2e69e028444538d9454570d0",
+    "packages/shared/src/puAuth.ts": "sha256:7ec65c247887c76cbb890d2a3f6f9d0e1a6f29c00fff3dab117b6bf19888bbcd",
+    "packages/shared/src/schoolIds.ts": "sha256:93a79f00640c4b14d69c33815ee79ecd96a3ecd2b190504945f65b41c320a8c7",
+    "packages/shared/src/courseCatalogCapability.ts": "sha256:3515015e19cc2e84e9fd95743dd12e9e4e3d4f5a9712c393001cc3ef1912b7f3",
+    "packages/shared/src/campusAnnouncements.ts": "sha256:51ccbac17d8ef41c0eaff81e4c71abd4609a251ae2f429f3f2db0961ef930c45",
+    "packages/shared/src/todaySense.ts": "sha256:cc017369a9af9197c5529d000734ddb2489fc03ba422fdf5e5126fb0041aba55",
+    "apps/web/src/lib/navigation.ts": "sha256:34ff11a70bd26aec22ede05344e65f795606540411de9269751e3d63fc7f871b",
+    "packages/shared/src/loadFailureCopy.ts": "sha256:e1af67573f206f7b383fcbe81a2073419de16ac84f17ca0ede84a07e46a47267",
+    "apps/web/src/lib/campusNavigation.ts": "sha256:be04ece4871fa2686db23e498f6451652da41865ac12fd2aa1d2eb000d420264",
+    "packages/shared/src/schoolAssistantIdentity.ts": "sha256:46e8400cac9343b277dd0b49262fcf3f1848a686f5fde681559e2fe3238426af",
+    "apps/web/src/components/today/TodayWelcome.module.css": "sha256:8ff2806d831c8baa98a7abbaa30b39e387f7a541bfda13ffb3b516ba7aa0f7fb",
+    "packages/shared/src/schoolPublicServices.ts": "sha256:836c9f1e9ba47c7f22af7816a33ab45dab90ff88f494dd96d0e44d1fcbda1cec",
+    "packages/shared/src/officialLibraries.ts": "sha256:0832efbd3e21f94a61475c45cb060a32a26803c218d17671b032a79cf6ec3e00",
+    "packages/shared/src/postLoginRoles.ts": "sha256:60a8d55ca5b505c3511e530cf4e7fd81bfb4904db51aedf8d72ab3d2e83052b6",
+    "packages/shared/src/roles.ts": "sha256:e21400a320be92b1fa7475e632d7415b1d2caf6c07bd9e8548eff7d91fd142c1",
+    "packages/shared/src/lms/gradePredictor.ts": "sha256:73869dc5da0ce628a90fc6890f253b546d8cc80ebcc17ba369f47480d4e32777",
+    "packages/shared/src/lms/quizScoring.ts": "sha256:774dd74f983305cf13a07d11e5f5d96705aeb84a731dc8bc8fbe0c8d3fcbcc72",
+    "packages/shared/src/lms/gradebookCompute.ts": "sha256:d990b5002ac3fe5831ac580f69103296279836392603e72b36c7c633c9ac2ccd",
+    "packages/shared/src/lms/mistakeRepertoire.ts": "sha256:5a70f332d971953498502f274b2fa8367751a2dddd3784bbbdadf4ed018785cd",
+    "packages/shared/src/lms/notificationPlanner.ts": "sha256:c39d0c62c2b0a1c24d454c4e2823f79dcfed883abee8ec9e213ad37590b048ad",
+    "packages/shared/src/wakeAwareRequest.ts": "sha256:71529577fe4466fcf8ffd38f9c3c003eeabe7a752b6e0c456dfef7655478aeb8",
+    "packages/shared/src/lms/questionBank.ts": "sha256:dc55d322d9c608f520f76ddf976b1e861378540e044223867ec6284f1845e2a4",
+    "packages/shared/src/companion/achievements.ts": "sha256:d9c26c78937d8305070c8a04f3e2154df81851b52dfcf8d622458584d6e615a0",
+    "packages/shared/src/imports/index.ts": "sha256:94772c5cda46e98b9d11e83fbb2a2a3b24617d082758612c7a53c8e998525bf5",
+    "packages/shared/src/puLmsReadonly.ts": "sha256:651fe16dcb6291cd35ac6d7457ad589e198a47293f3f98a58a75391a7f7dd4de",
+    "packages/shared/src/lms/actionGraph.ts": "sha256:3dce3a8cd4f00e0a2b9f273e62f5c642e08899c81c93fdc627afe71a1e1523f1",
+    "packages/shared/src/providenceCampus.ts": "sha256:fe4ad4c36b7498d33dc80da5e9ab43188f793d28a210c92389e08c839f5ca36b",
+    "packages/shared/src/lms/riskRadar.ts": "sha256:c55016ed631c3a9d9f055269719aeff547d5cf0ee1fa04507317fd59f7a687c7",
+    "packages/shared/src/taipeiTime.ts": "sha256:ca42a0d67f7a0d4e8db7ee5632055df9b50e3ae2f0d8b3a61ff7abca6d2fee76",
+    "packages/shared/src/lms/attendanceEngine.ts": "sha256:cbbb6f6f7671b0e6b23d6fa4e70e9b1580932bc73f8a6ae5e462b1c0022514c6",
+    "packages/shared/src/lms/rubricScoring.ts": "sha256:e2bbfc1ba4c4f634b6f92a95e3a9c12a06a9d72854bf53c9df3d622439c17093",
+    "packages/shared/src/lms/tronclassAdapter.ts": "sha256:ccd21e4afb03f044fcf2423d00d2d4be1b9f3185e5bf41e13145777687a9c6d0",
+    "packages/shared/src/lms/discussionEngine.ts": "sha256:885aab8ef77b8fe244d7e7e60b6c32a79ab3bbd85a27717f8c0bfaeccc58a9e0",
+    "packages/shared/src/merchantMode.ts": "sha256:99328337753fc0f922a987b770f5050186cbcf2628873e53463c01d3fde9714b",
+    "packages/shared/src/todaySenseAgent.ts": "sha256:6d63d3ac38b50c15b0e21b646fa7a1b991d8d749a479f2ca3022722c5795c325",
+    "packages/shared/src/signedInSocialReads.ts": "sha256:913317691538a694aca290b4396096138cc0967a59805050b3ad401b602d39e5",
+    "packages/shared/src/cafeteriaCatalog.ts": "sha256:dc4227149729515884d417c443a4df71615ac93d95b7cc0d3deee2f90f26dcba",
+    "packages/shared/src/companion/gardenEngine.ts": "sha256:834fc0232030163107c96cbf2d0c27ad4d068fa11da97b0e2b6806a53eb2a380",
+    "packages/shared/src/lms/studyPlanner.ts": "sha256:1d3e0ea7ff6cc0e78fe072ad2beb490fc0f3a42a575b0ee4805bb78049094371",
+    "packages/shared/src/timetable/index.ts": "sha256:ab3f8bf0bc2e20606e7ad89f1a52222cf952366826940b20151f96d7bc2c8420",
+    "packages/shared/src/companion/signalAggregator.ts": "sha256:e0251e4733b9ad56e120310d0a92e347501f73f81b19b81854b894c638440e83",
+    "apps/web/src/components/CampusIcon.tsx": "sha256:ca64c48c50d34177e82ac95c200552f3cf392e9b576d60add394b587b6d58842",
+    "packages/shared/src/foodPageCopy.ts": "sha256:f89ffae9ac8337565d160be72d2cd91a33309b94616818175d033b56fbd34914",
+    "packages/shared/src/campusAnnouncementQuality.ts": "sha256:078e0d6a92235ce7d50e1f32ece8ca38360c8a9f69a1b830111c74d164e032c7",
+    "apps/web/src/components/SelectedSchoolProvider.tsx": "sha256:cdfb7abc14d8f4983f0c851790108705b4d7363d52556331ca4b79b2e12b6c19",
+    "packages/shared/src/imports/validation.ts": "sha256:6a317a5022574e0b4a29101bb1f77fa419e5dadc5d5195c9fa6b9ffce276fbac",
+    "packages/shared/src/imports/types.ts": "sha256:522d73763171a1bfe0a8e6717bd33244ea48ad7ab6df5217d874e887bf7a3edd",
+    "packages/shared/src/campusAnnouncementCatalog.ts": "sha256:640ed66d7139a195453546d89ae05778416b2bed3c0f2db2ffa51bbff23c6bc2",
+    "packages/shared/src/imports/parser.ts": "sha256:0e957c4d521040dee4ec8b0aeff54feb700b16142685f94d72187f60cfe2351c",
+    "packages/shared/src/imports/records.ts": "sha256:cfdf52eedddcac89a30e9576a450b320a611b10afcda9042fc6cefbb9b3a48a7",
+    "packages/shared/src/imports/csv.ts": "sha256:9a809a067c6e81a5e8853d70c66ae89ba788785683e48711f514eb74253eae8b",
+    "packages/shared/src/imports/copy.ts": "sha256:f6a4d299ddff0abea25d453c7f1385810afbb8f04c83641009eee8a0bbff6e9b",
+    "packages/shared/src/imports/backup.ts": "sha256:3e651bc0f71ae0d07713b71b69e274ba990281dc71c1ec52747668595adf1287",
+    "packages/shared/src/imports/documents.ts": "sha256:f2aeb8e331fe9c985e6850da75f0e778739f586f9d14ed2ee4c3a2e1c324bef9",
+    "packages/shared/src/imports/today.ts": "sha256:9021afb4061da301b84757aa8956744dc518387578ae1675b5a60c389b7e1f1c",
+    "packages/shared/src/imports/eventCalendar.ts": "sha256:4b0694d24c40d2cc3d5ef91d668768c19ca24817a7db5b9b49dea06b1f9b3376",
+    "packages/shared/src/imports/schoolPageTables.ts": "sha256:7510493ca797c7385be9559ca8b2e363b29a5e8b231d6a49bf98d7856d7cbe4b",
+    "packages/shared/src/imports/eventDraft.ts": "sha256:806b96cdd32bc661683a4c827e272f1c996d977482045cf900bcd373dbfd555e",
+    "packages/shared/src/imports/aiRecognition.ts": "sha256:2bbfbb3ff279e56c9a36a00e243eb20b71254a1d651638acc99e521e36360b3e",
+    "packages/shared/src/imports/monthCalendar.ts": "sha256:b08c30b6b1844d6ca7070d3e5c9b08b264943e1ab0a4757ac4fcacddb4d941c8",
+    "packages/shared/src/timetable/periods.ts": "sha256:58b5dc858c0b7172687c2b2635720f06852dbd3a281f5345c14b6a67cb1dc833",
+    "packages/shared/src/timetable/course.ts": "sha256:c127a63728add6e6c75687cc94d66f3b9ad36725c6053a5c0bf0f052e21fd64d",
+    "packages/shared/src/timetable/importDraft.ts": "sha256:55077c381714cc5aaa538e54160df04ca565ef3fc99c00788801097bcbc8e39f",
+    "packages/shared/src/timetable/planner.ts": "sha256:26ffae3ad617fc732cb7aef22ee5eef7160bb003c7d55d5575b949e8142dd0f3",
+    "packages/shared/src/timetable/shareCodec.ts": "sha256:ee62921af159a5626c67d208b446a436d2002a2448fd8c7a21962b022ba463c0",
+    "packages/shared/src/timetable/textImport.ts": "sha256:a84e1ecb2b48d01bd9d613e0093c9dc60573aaacfdf492a8c3df42e50a67c509",
+    "packages/shared/src/timetable/appeals.ts": "sha256:31512e2b151bd910e2f0dd02086b1b91b3537a1f10a6b40dc3ec3ae997969347",
+    "packages/shared/src/timetable/friendResend.ts": "sha256:68e3b04d2554f099c5669ba2b3fcc18977daaf881012a4354f769363582b3498",
+    "packages/shared/src/timetable/shareCopy.ts": "sha256:2c3233873661ea9a33516a39ce80fed82f5e77d9abc5f4a7b03d4ae7def908bb",
+    "packages/shared/src/timetable/meetup.ts": "sha256:a048217e859eedfce0797b97eeeaaef82dd85e4814291e3d0273701dd38874ef",
+    "packages/shared/src/timetable/classExceptions.ts": "sha256:bddb76bd1c247b8ff4e1e77babd61db394abe2d31a2fe2eb0ffe5a35b5f065b8",
+    "packages/shared/src/timetable/schoolPeriods.ts": "sha256:f37202b6ccbc2eafa915a8e1b8debade6186a61d1878a49b91bdfd243ca017f3",
+    "packages/shared/src/imports/icalendarSerialization.ts": "sha256:7c75ee8a4d62c3ba80262be2d03bda80f91ed8c173ef5fa9c13f3b0a0caee725",
+    "apps/web/src/lib/defaultBrowseSchool.ts": "sha256:6898522937a026c6a06b5f521956a3a22ef68e3d226dc6b09f622fef040e0282",
+    "packages/shared/src/imports/nameFields.ts": "sha256:8e1f201df1fbbd3ced25822b4875988b51c042c5cfa24e072ea92cd505b77b29",
+    "packages/shared/src/imports/icalendar.ts": "sha256:37b62fa2c45b7b575a88042eca6fd62b6c12251f2752068590d578ec07378f86",
+    "packages/shared/src/imports/numericEvidence.ts": "sha256:9a94c344f6b1ce72d4bcdcbe8ccc7d2a63f600269df3f00a5e0bf1e1d93fd7f3"
+  },
+  "checks": [
+    {
+      "name": "320-light-100%: no horizontal overflow with long course and task names",
+      "passed": true,
+      "details": {
+        "viewport": 320,
+        "scrollWidth": 320,
+        "textSize": "16px",
+        "theme": "light",
+        "overflow": []
+      }
+    },
+    {
+      "name": "320-light-100%: tomorrow is not labelled today",
+      "passed": true
+    },
+    {
+      "name": "320-light-100%: actionable targets are at least 44px high",
+      "passed": true,
+      "details": [
+        {
+          "text": "明天截止資訊管理專題成果與跨校課程資料整合：AccessibilityAndCrossCampusDeadlineReview2027明天 00:10 截止・還剩 20 分鐘",
+          "height": 152.375
+        },
+        {
+          "text": "去繳交",
+          "height": 44
+        },
+        {
+          "text": "08:10資訊倫理與資料視覺化：跨校整合專題成果工作坊管理大樓 M302",
+          "height": 80.96875
+        },
+        {
+          "text": "資料庫系統作業：等待補交確認資訊管理專題：跨校資料整合、資訊倫理與應用實作 · 已逾期",
+          "height": 76.765625
+        },
+        {
+          "text": "資訊管理專題成果與跨校課程資料整合：AccessibilityAndCrossCampusDeadlineReview2027資訊管理專題：跨校資料整合、資訊倫理與應用實作 · 明天 00:10 截止・還剩 20 分鐘",
+          "height": 144.9375
+        },
+        {
+          "text": "跨年後的學期報告資訊管理專題：跨校資料整合、資訊倫理與應用實作 · 2027/1/3 18:30 截止・還剩 2 天 18 小時",
+          "height": 95.953125
+        },
+        {
+          "text": "還有 1 件",
+          "height": 44
+        }
+      ]
+    },
+    {
+      "name": "320-light-200%: no horizontal overflow with long course and task names",
+      "passed": true,
+      "details": {
+        "viewport": 320,
+        "scrollWidth": 320,
+        "textSize": "32px",
+        "theme": "light",
+        "overflow": []
+      }
+    },
+    {
+      "name": "320-light-200%: tomorrow is not labelled today",
+      "passed": true
+    },
+    {
+      "name": "320-light-200%: actionable targets are at least 44px high",
+      "passed": true,
+      "details": [
+        {
+          "text": "明天截止資訊管理專題成果與跨校課程資料整合：AccessibilityAndCrossCampusDeadlineReview2027明天 00:10 截止・還剩 20 分鐘",
+          "height": 485.171875
+        },
+        {
+          "text": "去繳交",
+          "height": 62
+        },
+        {
+          "text": "08:10資訊倫理與資料視覺化：跨校整合專題成果工作坊管理大樓 M302",
+          "height": 359.5625
+        },
+        {
+          "text": "資料庫系統作業：等待補交確認資訊管理專題：跨校資料整合、資訊倫理與應用實作 · 已逾期",
+          "height": 216.765625
+        },
+        {
+          "text": "資訊管理專題成果與跨校課程資料整合：AccessibilityAndCrossCampusDeadlineReview2027資訊管理專題：跨校資料整合、資訊倫理與應用實作 · 明天 00:10 截止・還剩 20 分鐘",
+          "height": 514.53125
+        },
+        {
+          "text": "跨年後的學期報告資訊管理專題：跨校資料整合、資訊倫理與應用實作 · 2027/1/3 18:30 截止・還剩 2 天 18 小時",
+          "height": 245.75
+        },
+        {
+          "text": "還有 1 件",
+          "height": 53.390625
+        }
+      ]
+    },
+    {
+      "name": "320-dark-100%: no horizontal overflow with long course and task names",
+      "passed": true,
+      "details": {
+        "viewport": 320,
+        "scrollWidth": 320,
+        "textSize": "16px",
+        "theme": "dark",
+        "overflow": []
+      }
+    },
+    {
+      "name": "320-dark-100%: tomorrow is not labelled today",
+      "passed": true
+    },
+    {
+      "name": "320-dark-100%: actionable targets are at least 44px high",
+      "passed": true,
+      "details": [
+        {
+          "text": "明天截止資訊管理專題成果與跨校課程資料整合：AccessibilityAndCrossCampusDeadlineReview2027明天 00:10 截止・還剩 20 分鐘",
+          "height": 152.375
+        },
+        {
+          "text": "去繳交",
+          "height": 44
+        },
+        {
+          "text": "08:10資訊倫理與資料視覺化：跨校整合專題成果工作坊管理大樓 M302",
+          "height": 80.96875
+        },
+        {
+          "text": "資料庫系統作業：等待補交確認資訊管理專題：跨校資料整合、資訊倫理與應用實作 · 已逾期",
+          "height": 76.765625
+        },
+        {
+          "text": "資訊管理專題成果與跨校課程資料整合：AccessibilityAndCrossCampusDeadlineReview2027資訊管理專題：跨校資料整合、資訊倫理與應用實作 · 明天 00:10 截止・還剩 20 分鐘",
+          "height": 144.9375
+        },
+        {
+          "text": "跨年後的學期報告資訊管理專題：跨校資料整合、資訊倫理與應用實作 · 2027/1/3 18:30 截止・還剩 2 天 18 小時",
+          "height": 95.953125
+        },
+        {
+          "text": "還有 1 件",
+          "height": 44
+        }
+      ]
+    },
+    {
+      "name": "320-dark-200%: no horizontal overflow with long course and task names",
+      "passed": true,
+      "details": {
+        "viewport": 320,
+        "scrollWidth": 320,
+        "textSize": "32px",
+        "theme": "dark",
+        "overflow": []
+      }
+    },
+    {
+      "name": "320-dark-200%: tomorrow is not labelled today",
+      "passed": true
+    },
+    {
+      "name": "320-dark-200%: actionable targets are at least 44px high",
+      "passed": true,
+      "details": [
+        {
+          "text": "明天截止資訊管理專題成果與跨校課程資料整合：AccessibilityAndCrossCampusDeadlineReview2027明天 00:10 截止・還剩 20 分鐘",
+          "height": 485.171875
+        },
+        {
+          "text": "去繳交",
+          "height": 62
+        },
+        {
+          "text": "08:10資訊倫理與資料視覺化：跨校整合專題成果工作坊管理大樓 M302",
+          "height": 359.5625
+        },
+        {
+          "text": "資料庫系統作業：等待補交確認資訊管理專題：跨校資料整合、資訊倫理與應用實作 · 已逾期",
+          "height": 216.765625
+        },
+        {
+          "text": "資訊管理專題成果與跨校課程資料整合：AccessibilityAndCrossCampusDeadlineReview2027資訊管理專題：跨校資料整合、資訊倫理與應用實作 · 明天 00:10 截止・還剩 20 分鐘",
+          "height": 514.53125
+        },
+        {
+          "text": "跨年後的學期報告資訊管理專題：跨校資料整合、資訊倫理與應用實作 · 2027/1/3 18:30 截止・還剩 2 天 18 小時",
+          "height": 245.75
+        },
+        {
+          "text": "還有 1 件",
+          "height": 53.390625
+        }
+      ]
+    },
+    {
+      "name": "390-light-100%: no horizontal overflow with long course and task names",
+      "passed": true,
+      "details": {
+        "viewport": 390,
+        "scrollWidth": 390,
+        "textSize": "16px",
+        "theme": "light",
+        "overflow": []
+      }
+    },
+    {
+      "name": "390-light-100%: tomorrow is not labelled today",
+      "passed": true
+    },
+    {
+      "name": "390-light-100%: actionable targets are at least 44px high",
+      "passed": true,
+      "details": [
+        {
+          "text": "明天截止資訊管理專題成果與跨校課程資料整合：AccessibilityAndCrossCampusDeadlineReview2027明天 00:10 截止・還剩 20 分鐘",
+          "height": 152.375
+        },
+        {
+          "text": "去繳交",
+          "height": 44
+        },
+        {
+          "text": "08:10資訊倫理與資料視覺化：跨校整合專題成果工作坊管理大樓 M302",
+          "height": 80.96875
+        },
+        {
+          "text": "資料庫系統作業：等待補交確認資訊管理專題：跨校資料整合、資訊倫理與應用實作 · 已逾期",
+          "height": 76.765625
+        },
+        {
+          "text": "資訊管理專題成果與跨校課程資料整合：AccessibilityAndCrossCampusDeadlineReview2027資訊管理專題：跨校資料整合、資訊倫理與應用實作 · 明天 00:10 截止・還剩 20 分鐘",
+          "height": 122.546875
+        },
+        {
+          "text": "跨年後的學期報告資訊管理專題：跨校資料整合、資訊倫理與應用實作 · 2027/1/3 18:30 截止・還剩 2 天 18 小時",
+          "height": 77.765625
+        },
+        {
+          "text": "還有 1 件",
+          "height": 44
+        }
+      ]
+    },
+    {
+      "name": "390-light-200%: no horizontal overflow with long course and task names",
+      "passed": true,
+      "details": {
+        "viewport": 390,
+        "scrollWidth": 390,
+        "textSize": "32px",
+        "theme": "light",
+        "overflow": []
+      }
+    },
+    {
+      "name": "390-light-200%: tomorrow is not labelled today",
+      "passed": true
+    },
+    {
+      "name": "390-light-200%: actionable targets are at least 44px high",
+      "passed": true,
+      "details": [
+        {
+          "text": "明天截止資訊管理專題成果與跨校課程資料整合：AccessibilityAndCrossCampusDeadlineReview2027明天 00:10 截止・還剩 20 分鐘",
+          "height": 485.171875
+        },
+        {
+          "text": "去繳交",
+          "height": 62
+        },
+        {
+          "text": "08:10資訊倫理與資料視覺化：跨校整合專題成果工作坊管理大樓 M302",
+          "height": 233.578125
+        },
+        {
+          "text": "資料庫系統作業：等待補交確認資訊管理專題：跨校資料整合、資訊倫理與應用實作 · 已逾期",
+          "height": 216.765625
+        },
+        {
+          "text": "資訊管理專題成果與跨校課程資料整合：AccessibilityAndCrossCampusDeadlineReview2027資訊管理專題：跨校資料整合、資訊倫理與應用實作 · 明天 00:10 截止・還剩 20 分鐘",
+          "height": 388.546875
+        },
+        {
+          "text": "跨年後的學期報告資訊管理專題：跨校資料整合、資訊倫理與應用實作 · 2027/1/3 18:30 截止・還剩 2 天 18 小時",
+          "height": 209.359375
+        },
+        {
+          "text": "還有 1 件",
+          "height": 53.390625
+        }
+      ]
+    },
+    {
+      "name": "390-dark-100%: no horizontal overflow with long course and task names",
+      "passed": true,
+      "details": {
+        "viewport": 390,
+        "scrollWidth": 390,
+        "textSize": "16px",
+        "theme": "dark",
+        "overflow": []
+      }
+    },
+    {
+      "name": "390-dark-100%: tomorrow is not labelled today",
+      "passed": true
+    },
+    {
+      "name": "390-dark-100%: actionable targets are at least 44px high",
+      "passed": true,
+      "details": [
+        {
+          "text": "明天截止資訊管理專題成果與跨校課程資料整合：AccessibilityAndCrossCampusDeadlineReview2027明天 00:10 截止・還剩 20 分鐘",
+          "height": 152.375
+        },
+        {
+          "text": "去繳交",
+          "height": 44
+        },
+        {
+          "text": "08:10資訊倫理與資料視覺化：跨校整合專題成果工作坊管理大樓 M302",
+          "height": 80.96875
+        },
+        {
+          "text": "資料庫系統作業：等待補交確認資訊管理專題：跨校資料整合、資訊倫理與應用實作 · 已逾期",
+          "height": 76.765625
+        },
+        {
+          "text": "資訊管理專題成果與跨校課程資料整合：AccessibilityAndCrossCampusDeadlineReview2027資訊管理專題：跨校資料整合、資訊倫理與應用實作 · 明天 00:10 截止・還剩 20 分鐘",
+          "height": 122.546875
+        },
+        {
+          "text": "跨年後的學期報告資訊管理專題：跨校資料整合、資訊倫理與應用實作 · 2027/1/3 18:30 截止・還剩 2 天 18 小時",
+          "height": 77.765625
+        },
+        {
+          "text": "還有 1 件",
+          "height": 44
+        }
+      ]
+    },
+    {
+      "name": "390-dark-200%: no horizontal overflow with long course and task names",
+      "passed": true,
+      "details": {
+        "viewport": 390,
+        "scrollWidth": 390,
+        "textSize": "32px",
+        "theme": "dark",
+        "overflow": []
+      }
+    },
+    {
+      "name": "390-dark-200%: tomorrow is not labelled today",
+      "passed": true
+    },
+    {
+      "name": "390-dark-200%: actionable targets are at least 44px high",
+      "passed": true,
+      "details": [
+        {
+          "text": "明天截止資訊管理專題成果與跨校課程資料整合：AccessibilityAndCrossCampusDeadlineReview2027明天 00:10 截止・還剩 20 分鐘",
+          "height": 485.171875
+        },
+        {
+          "text": "去繳交",
+          "height": 62
+        },
+        {
+          "text": "08:10資訊倫理與資料視覺化：跨校整合專題成果工作坊管理大樓 M302",
+          "height": 233.578125
+        },
+        {
+          "text": "資料庫系統作業：等待補交確認資訊管理專題：跨校資料整合、資訊倫理與應用實作 · 已逾期",
+          "height": 216.765625
+        },
+        {
+          "text": "資訊管理專題成果與跨校課程資料整合：AccessibilityAndCrossCampusDeadlineReview2027資訊管理專題：跨校資料整合、資訊倫理與應用實作 · 明天 00:10 截止・還剩 20 分鐘",
+          "height": 388.546875
+        },
+        {
+          "text": "跨年後的學期報告資訊管理專題：跨校資料整合、資訊倫理與應用實作 · 2027/1/3 18:30 截止・還剩 2 天 18 小時",
+          "height": 209.359375
+        },
+        {
+          "text": "還有 1 件",
+          "height": 53.390625
+        }
+      ]
+    },
+    {
+      "name": "1440-light-100%: no horizontal overflow with long course and task names",
+      "passed": true,
+      "details": {
+        "viewport": 1440,
+        "scrollWidth": 1440,
+        "textSize": "16px",
+        "theme": "light",
+        "overflow": []
+      }
+    },
+    {
+      "name": "1440-light-100%: tomorrow is not labelled today",
+      "passed": true
+    },
+    {
+      "name": "1440-light-100%: actionable targets are at least 44px high",
+      "passed": true,
+      "details": [
+        {
+          "text": "明天截止資訊管理專題成果與跨校課程資料整合：AccessibilityAndCrossCampusDeadlineReview2027明天 00:10 截止・還剩 20 分鐘",
+          "height": 74.375
+        },
+        {
+          "text": "去繳交",
+          "height": 44
+        },
+        {
+          "text": "08:10資訊倫理與資料視覺化：跨校整合專題成果工作坊管理大樓 M302",
+          "height": 58.578125
+        },
+        {
+          "text": "資料庫系統作業：等待補交確認資訊管理專題：跨校資料整合、資訊倫理與應用實作 · 已逾期",
+          "height": 58.578125
+        },
+        {
+          "text": "資訊管理專題成果與跨校課程資料整合：AccessibilityAndCrossCampusDeadlineReview2027資訊管理專題：跨校資料整合、資訊倫理與應用實作 · 明天 00:10 截止・還剩 20 分鐘",
+          "height": 100.15625
+        },
+        {
+          "text": "跨年後的學期報告資訊管理專題：跨校資料整合、資訊倫理與應用實作 · 2027/1/3 18:30 截止・還剩 2 天 18 小時",
+          "height": 77.765625
+        },
+        {
+          "text": "還有 1 件",
+          "height": 44
+        }
+      ]
+    },
+    {
+      "name": "1440-light-200%: no horizontal overflow with long course and task names",
+      "passed": true,
+      "details": {
+        "viewport": 1440,
+        "scrollWidth": 1440,
+        "textSize": "32px",
+        "theme": "light",
+        "overflow": []
+      }
+    },
+    {
+      "name": "1440-light-200%: tomorrow is not labelled today",
+      "passed": true
+    },
+    {
+      "name": "1440-light-200%: actionable targets are at least 44px high",
+      "passed": true,
+      "details": [
+        {
+          "text": "明天截止資訊管理專題成果與跨校課程資料整合：AccessibilityAndCrossCampusDeadlineReview2027明天 00:10 截止・還剩 20 分鐘",
+          "height": 188.78125
+        },
+        {
+          "text": "去繳交",
+          "height": 62
+        },
+        {
+          "text": "08:10資訊倫理與資料視覺化：跨校整合專題成果工作坊管理大樓 M302",
+          "height": 143.984375
+        },
+        {
+          "text": "資料庫系統作業：等待補交確認資訊管理專題：跨校資料整合、資訊倫理與應用實作 · 已逾期",
+          "height": 135.578125
+        },
+        {
+          "text": "資訊管理專題成果與跨校課程資料整合：AccessibilityAndCrossCampusDeadlineReview2027資訊管理專題：跨校資料整合、資訊倫理與應用實作 · 明天 00:10 截止・還剩 20 分鐘",
+          "height": 307.359375
+        },
+        {
+          "text": "跨年後的學期報告資訊管理專題：跨校資料整合、資訊倫理與應用實作 · 2027/1/3 18:30 截止・還剩 2 天 18 小時",
+          "height": 172.96875
+        },
+        {
+          "text": "還有 1 件",
+          "height": 53.390625
+        }
+      ]
+    },
+    {
+      "name": "1440-dark-100%: no horizontal overflow with long course and task names",
+      "passed": true,
+      "details": {
+        "viewport": 1440,
+        "scrollWidth": 1440,
+        "textSize": "16px",
+        "theme": "dark",
+        "overflow": []
+      }
+    },
+    {
+      "name": "1440-dark-100%: tomorrow is not labelled today",
+      "passed": true
+    },
+    {
+      "name": "1440-dark-100%: actionable targets are at least 44px high",
+      "passed": true,
+      "details": [
+        {
+          "text": "明天截止資訊管理專題成果與跨校課程資料整合：AccessibilityAndCrossCampusDeadlineReview2027明天 00:10 截止・還剩 20 分鐘",
+          "height": 74.375
+        },
+        {
+          "text": "去繳交",
+          "height": 44
+        },
+        {
+          "text": "08:10資訊倫理與資料視覺化：跨校整合專題成果工作坊管理大樓 M302",
+          "height": 58.578125
+        },
+        {
+          "text": "資料庫系統作業：等待補交確認資訊管理專題：跨校資料整合、資訊倫理與應用實作 · 已逾期",
+          "height": 58.578125
+        },
+        {
+          "text": "資訊管理專題成果與跨校課程資料整合：AccessibilityAndCrossCampusDeadlineReview2027資訊管理專題：跨校資料整合、資訊倫理與應用實作 · 明天 00:10 截止・還剩 20 分鐘",
+          "height": 100.15625
+        },
+        {
+          "text": "跨年後的學期報告資訊管理專題：跨校資料整合、資訊倫理與應用實作 · 2027/1/3 18:30 截止・還剩 2 天 18 小時",
+          "height": 77.765625
+        },
+        {
+          "text": "還有 1 件",
+          "height": 44
+        }
+      ]
+    },
+    {
+      "name": "1440-dark-200%: no horizontal overflow with long course and task names",
+      "passed": true,
+      "details": {
+        "viewport": 1440,
+        "scrollWidth": 1440,
+        "textSize": "32px",
+        "theme": "dark",
+        "overflow": []
+      }
+    },
+    {
+      "name": "1440-dark-200%: tomorrow is not labelled today",
+      "passed": true
+    },
+    {
+      "name": "1440-dark-200%: actionable targets are at least 44px high",
+      "passed": true,
+      "details": [
+        {
+          "text": "明天截止資訊管理專題成果與跨校課程資料整合：AccessibilityAndCrossCampusDeadlineReview2027明天 00:10 截止・還剩 20 分鐘",
+          "height": 188.78125
+        },
+        {
+          "text": "去繳交",
+          "height": 62
+        },
+        {
+          "text": "08:10資訊倫理與資料視覺化：跨校整合專題成果工作坊管理大樓 M302",
+          "height": 143.984375
+        },
+        {
+          "text": "資料庫系統作業：等待補交確認資訊管理專題：跨校資料整合、資訊倫理與應用實作 · 已逾期",
+          "height": 135.578125
+        },
+        {
+          "text": "資訊管理專題成果與跨校課程資料整合：AccessibilityAndCrossCampusDeadlineReview2027資訊管理專題：跨校資料整合、資訊倫理與應用實作 · 明天 00:10 截止・還剩 20 分鐘",
+          "height": 307.359375
+        },
+        {
+          "text": "跨年後的學期報告資訊管理專題：跨校資料整合、資訊倫理與應用實作 · 2027/1/3 18:30 截止・還剩 2 天 18 小時",
+          "height": 172.96875
+        },
+        {
+          "text": "還有 1 件",
+          "height": 53.390625
+        }
+      ]
+    },
+    {
+      "name": "keyboard Tab reaches an action with a visible focus indicator",
+      "passed": true,
+      "details": {
+        "tag": "A",
+        "focusVisible": true,
+        "outlineStyle": "solid",
+        "outlineWidth": "3px",
+        "shadow": "none"
+      }
+    },
+    {
+      "name": "keyboard can reach the additional tasks control",
+      "passed": true
+    },
+    {
+      "name": "Enter expands tasks and updates aria-expanded",
+      "passed": true
+    },
+    {
+      "name": "scope change immediately removes prior account content and resets expanded state",
+      "passed": true,
+      "details": {
+        "text": "12月31日 週四今天23:50 更新明天截止乙同學專屬作業 1明天 00:11 截止・還剩 21 分鐘去繳交今天課表今天沒有排課。待處理乙同學專屬作業 1乙同學的課程 · 明天 00:11 截止・還剩 21 分鐘乙同學專屬作業 2乙同學的課程 · 明天 00:12 截止・還剩 22 分鐘乙同學專屬作業 3乙同學的課程 · 明天 00:13 截止・還剩 23 分鐘還有 1 件",
+        "items": 3,
+        "expanded": "false"
+      }
+    },
+    {
+      "name": "year-crossing midnight deadline includes tomorrow and 20 remaining minutes",
+      "passed": true
+    },
+    {
+      "name": "school task submission retains the original assignment anchor",
+      "passed": true
+    },
+    {
+      "name": "same task updates at Taipei midnight without remounting the page",
+      "passed": true
+    },
+    {
+      "name": "sub-minute deadline is not rounded up to one hour",
+      "passed": true
+    },
+    {
+      "name": "hours and remaining minutes are preserved",
+      "passed": true
+    },
+    {
+      "name": "future deadline includes its cross-year date and weekday",
+      "passed": true
+    },
+    {
+      "name": "past deadline is labelled overdue without a future countdown",
+      "passed": true
+    },
+    {
+      "name": "overdue duration remains explicit for older assignments",
+      "passed": true
+    },
+    {
+      "name": "platform assignment retains its original detail and submission href",
+      "passed": true
+    },
+    {
+      "name": "reduced motion reduces the task-card fade to at most 1ms",
+      "passed": true,
+      "details": {
+        "duration": "1e-05s",
+        "opacity": "1"
+      }
+    },
+    {
+      "name": "no external HTTP or WebSocket request was attempted",
+      "passed": true,
+      "details": []
+    },
+    {
+      "name": "no uncaught browser error or console error",
+      "passed": true,
+      "details": []
+    },
+    {
+      "name": "tested source files did not change during verification",
+      "passed": true,
+      "details": []
+    }
+  ],
+  "screenshots": [
+    "320-dark-200pct.png",
+    "390-light-100pct.png"
+  ],
+  "errors": [],
+  "blockedRequests": [],
+  "limitations": [
+    "Actual StudentToday component, production CSS, and shared date/navigation helpers; synthetic props only.",
+    "Next Link is an anchor stub. Unused personal-import hooks throw if called.",
+    "Clock updates are delivered through the real component props; the app foreground timer and live authentication require separate integration coverage.",
+    "200% text means a 200% root font size. Chromium is covered; native mobile screens and Safari are not."
+  ],
+  "fixtureFontStylesheet": {
+    "path": "/tmp/today-font-runtime/node_modules/@fontsource/noto-sans-tc/400.css",
+    "sha256": "sha256:5c849a4a6c058e862ea9f946c67ab81c295863d31217458b6155b4aaea4ec4a5"
+  },
+  "bundleHashes": {
+    "js": "sha256:dbd32de47988ee2bb4aa6ef0c3060e99dcaf2f8fb319156f1a9d35ca3ab3f952",
+    "css": "sha256:86e73458f26e2845d64ab9a4c2095bce7de4c4047e2b5e971690acc6eb817369"
+  },
+  "browserVersion": "153.0.8010.0",
+  "summary": {
+    "passed": 53,
+    "failed": 0,
+    "errors": 0
+  }
+}
