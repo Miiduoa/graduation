@@ -17,10 +17,15 @@ import { loadTeacherHome, type TeacherHomeData } from '../data/teacherHome';
 import { startAttendanceSession } from '../data/courseSpaceSource';
 import { createTeacherLiveSessionStarter } from '../services/teacherLiveSessionStarter';
 import type { InboxTask } from '../data/types';
+import { TEACHER_ACADEMIC_SECTIONS } from '@campus/shared/src/academicSections';
 import { safeNavigate } from '../utils/safeNavigate';
 import { useTabBarContentBottomPadding } from '../ui/navigationTheme';
 import { theme } from '../ui/theme';
 import { useThemeStyleSheet } from '../ui/useThemeStyleSheet';
+
+const TEACHER_TODAY_LABEL = TEACHER_ACADEMIC_SECTIONS[0].label;
+const TEACHER_COURSES_LABEL = TEACHER_ACADEMIC_SECTIONS[1].label;
+const TEACHER_GRADING_LABEL = TEACHER_ACADEMIC_SECTIONS[2].label;
 
 type HomeState =
   | { scope: string; status: 'loading' | 'error' }
@@ -144,7 +149,7 @@ export default function TeacherTodayScreen() {
       >
         <Text style={s.brand}>CAMPUS ONE</Text>
         <Text accessibilityRole="header" style={s.heading}>
-          今天的教學工作
+          {TEACHER_TODAY_LABEL}
         </Text>
         <Text style={s.caption}>查看課程動態、學生繳交與課堂點名。</Text>
 
@@ -166,7 +171,7 @@ export default function TeacherTodayScreen() {
         {data ? (
           <>
             <View style={s.focus}>
-              <Text style={s.label}>我的授課</Text>
+              <Text style={s.label}>{TEACHER_TODAY_LABEL}</Text>
               <Text style={s.focusTitle}>
                 {data.courses.length ? `${data.courses.length} 門課程` : '尚未加入授課課程'}
               </Text>
@@ -180,38 +185,7 @@ export default function TeacherTodayScreen() {
             {data.courses.length ? (
               <>
                 <Text accessibilityRole="header" style={s.sectionTitle}>
-                  近期教學待辦
-                </Text>
-                {data.tasks.length ? (
-                  data.tasks.map((task) => (
-                    <Pressable
-                      key={task.id}
-                      accessibilityRole="button"
-                      style={s.task}
-                      onPress={() => openTask(task)}
-                    >
-                      <View style={{ flex: 1 }}>
-                        <Text style={s.taskTitle}>{task.title}</Text>
-                        <Text style={s.meta}>{task.groupName}</Text>
-                        <Text style={s.taskAction}>
-                          {task.kind === 'live'
-                            ? '進入課堂'
-                            : task.kind === 'group'
-                              ? '查看課程動態'
-                              : '查看成績簿'}
-                        </Text>
-                      </View>
-                      <Text accessibilityElementsHidden style={s.arrow}>
-                        ↗
-                      </Text>
-                    </Pressable>
-                  ))
-                ) : (
-                  <Text style={s.empty}>可從下方課程查看點名與評分狀態。</Text>
-                )}
-
-                <Text accessibilityRole="header" style={s.sectionTitle}>
-                  授課課程
+                  {TEACHER_COURSES_LABEL}
                 </Text>
                 {data.courses.map((course) => {
                   const activeSession = data.tasks.find(
@@ -258,6 +232,37 @@ export default function TeacherTodayScreen() {
                     </View>
                   );
                 })}
+
+                <Text accessibilityRole="header" style={s.sectionTitle}>
+                  {TEACHER_GRADING_LABEL}
+                </Text>
+                {data.tasks.length ? (
+                  data.tasks.map((task) => (
+                    <Pressable
+                      key={task.id}
+                      accessibilityRole="button"
+                      style={s.task}
+                      onPress={() => openTask(task)}
+                    >
+                      <View style={{ flex: 1 }}>
+                        <Text style={s.taskTitle}>{task.title}</Text>
+                        <Text style={s.meta}>{task.groupName}</Text>
+                        <Text style={s.taskAction}>
+                          {task.kind === 'live'
+                            ? '進入課堂'
+                            : task.kind === 'group'
+                              ? '查看課程動態'
+                              : '查看成績簿'}
+                        </Text>
+                      </View>
+                      <Text accessibilityElementsHidden style={s.arrow}>
+                        ↗
+                      </Text>
+                    </Pressable>
+                  ))
+                ) : (
+                  <Text style={s.empty}>可從上方課程查看點名與評分狀態。</Text>
+                )}
               </>
             ) : null}
           </>
