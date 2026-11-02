@@ -1,13 +1,7 @@
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { OpsConsole } from './OpsConsole';
-import {
-  adminLoginHref,
-  opsTabHref,
-  readOpsSchool,
-  readOpsSchoolId,
-  readOpsTab,
-} from './constants';
+import { adminLoginHref, opsTabHref, readOpsSchool, readOpsSchoolId, readOpsTab } from './constants';
 
 const mocks = vi.hoisted(() => ({
   session: null as null | {
@@ -74,14 +68,11 @@ it.each([
   ['/admin/ops#affiliation', '/admin/login?returnUrl=%2Fadmin%2Fops%23affiliation#'],
   ['/admin/ops#affiliation#affiliation', '/admin/login?returnUrl=%2Fadmin%2Fops%23affiliation#'],
   ['/admin/ops', '/admin/login?returnUrl=%2Fadmin%2Fops'],
-])(
-  'carries the current ops path %s into admin login without leaving the page hash',
-  (location, href) => {
-    window.history.replaceState(null, '', location);
-    render(<OpsConsole />);
-    expect(screen.getByRole('link', { name: '前往管理員登入' }).getAttribute('href')).toBe(href);
-  },
-);
+])('carries the current ops path %s into admin login without leaving the page hash', (location, href) => {
+  window.history.replaceState(null, '', location);
+  render(<OpsConsole />);
+  expect(screen.getByRole('link', { name: '前往管理員登入' }).getAttribute('href')).toBe(href);
+});
 
 it('clears the current ops hash when building the admin login href', () => {
   expect(adminLoginHref('/admin/ops#affiliation')).toBe(
@@ -698,9 +689,7 @@ async function submitReview(button: string, reason = REVIEW_REASON) {
   fireEvent.change(await screen.findByRole('textbox', { name: '審核理由' }), {
     target: { value: reason },
   });
-  fireEvent.click(
-    screen.getByRole('button', { name: button === '拒絕' ? '確認拒絕' : '確認核准' }),
-  );
+  fireEvent.click(screen.getByRole('button', { name: button === '拒絕' ? '確認拒絕' : '確認核准' }));
 }
 
 const extraOperations = [
@@ -878,11 +867,9 @@ it.each(['approve', 'reject'] as const)(
     fireEvent.change(within(article).getByRole('textbox', { name: '審核理由' }), {
       target: { value: REVIEW_REASON },
     });
-    fireEvent.click(
-      within(article).getByRole('button', {
-        name: decision === 'approve' ? '確認核准' : '確認拒絕',
-      }),
-    );
+    fireEvent.click(within(article).getByRole('button', {
+      name: decision === 'approve' ? '確認核准' : '確認拒絕',
+    }));
     await waitFor(() =>
       expect(fetcher.mock.calls.some(([, options]) => options?.method === 'POST')).toBe(true),
     );
@@ -912,11 +899,9 @@ it.each(['approve', 'reject'] as const)(
     fireEvent.change(within(article).getByRole('textbox', { name: '審核理由' }), {
       target: { value: REVIEW_REASON },
     });
-    fireEvent.click(
-      within(article).getByRole('button', {
-        name: decision === 'approve' ? '確認核准' : '確認拒絕',
-      }),
-    );
+    fireEvent.click(within(article).getByRole('button', {
+      name: decision === 'approve' ? '確認核准' : '確認拒絕',
+    }));
     await waitFor(() =>
       expect(fetcher.mock.calls.some(([, options]) => options?.method === 'POST')).toBe(true),
     );
@@ -1032,10 +1017,7 @@ it('requires a specific review reason and permits cancelling before submission',
   expect(fetcher.mock.calls.some(([, options]) => options?.method === 'POST')).toBe(false);
   const reason = within(article).getByRole('textbox', { name: '審核理由' });
   fireEvent.change(reason, { target: { value: '短' } });
-  expect(within(article).getByRole('button', { name: '確認拒絕' })).toHaveProperty(
-    'disabled',
-    true,
-  );
+  expect(within(article).getByRole('button', { name: '確認拒絕' })).toHaveProperty('disabled', true);
   fireEvent.change(reason, { target: { value: REVIEW_REASON } });
   fireEvent.click(within(article).getByRole('button', { name: '取消' }));
   expect(fetcher.mock.calls.some(([, options]) => options?.method === 'POST')).toBe(false);
@@ -1065,12 +1047,10 @@ it('keeps different affiliation review reasons isolated', async () => {
   setupExtraOperation('affiliation');
   fetcher.mockImplementation(async (url: string) =>
     url.endsWith('/class-workspace-affiliation-applications')
-      ? ok({
-          applications: [
-            { id: 'affiliation-1', workspaceTitle: '課班一' },
-            { id: 'affiliation-2', workspaceTitle: '課班二' },
-          ],
-        })
+      ? ok({ applications: [
+          { id: 'affiliation-1', workspaceTitle: '課班一' },
+          { id: 'affiliation-2', workspaceTitle: '課班二' },
+        ] })
       : ok({}, 404),
   );
   render(<OpsConsole />);
@@ -1082,10 +1062,7 @@ it('keeps different affiliation review reasons isolated', async () => {
   });
   fireEvent.click(within(second).getByRole('button', { name: '拒絕' }));
   expect(within(second).getByRole('textbox', { name: '審核理由' })).toHaveProperty('value', '');
-  expect(within(first).getByRole('textbox', { name: '審核理由' })).toHaveProperty(
-    'value',
-    REVIEW_REASON,
-  );
+  expect(within(first).getByRole('textbox', { name: '審核理由' })).toHaveProperty('value', REVIEW_REASON);
 });
 
 it('keeps a school selected in a deep link while moving between school settings and people', async () => {
@@ -1094,24 +1071,22 @@ it('keeps a school selected in a deep link while moving between school settings 
   fetcher.mockImplementation(async (url: string) => {
     if (url.includes('/people?tenantId=')) return ok(peopleStatus('school-a'));
     return ok({
-      schools: [
-        {
-          kind: 'tenant',
-          applicationId: null,
-          tenantId: 'school-a',
-          displayName: '學校 A',
-          emailDomain: 'a.edu.tw',
-          lifecycle: 'provisioned',
-          description: '',
-          modules: { leave: true, identity: true, food: false },
-          peopleCount: 1,
-          merchantCount: 0,
-        },
-      ],
+      schools: [{
+        kind: 'tenant',
+        applicationId: null,
+        tenantId: 'school-a',
+        displayName: '學校 A',
+        emailDomain: 'a.edu.tw',
+        lifecycle: 'provisioned',
+        description: '',
+        modules: { leave: true, identity: true, food: false },
+        peopleCount: 1,
+        merchantCount: 0,
+      }],
     });
   });
   render(<OpsConsole />);
-  expect(((await screen.findByLabelText('選擇學校')) as HTMLSelectElement).value).toBe('school-a');
+  expect((await screen.findByLabelText('選擇學校') as HTMLSelectElement).value).toBe('school-a');
   expect(await screen.findByRole('heading', { name: '加人' })).toBeTruthy();
   fireEvent.click(screen.getByRole('tab', { name: '學校' }));
   expect(window.location.search).toBe('?tab=schools&school=school-a');
