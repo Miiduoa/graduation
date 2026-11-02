@@ -4,6 +4,7 @@ import type { CreditPlan } from '@campus/shared/src/creditPlanner';
 import {
   readMobileCreditPlan,
   writeMobileCreditPlan,
+  replaceReviewedCreditPlan,
 } from '../../features/academics/creditPlanRepository';
 import {
   createCreditPlanSession,
@@ -53,6 +54,7 @@ export function useCreditPlanningWorkspace(scopeKey: string) {
     next: CreditPlan,
     notice: string,
     ticket = state.ticket,
+    comparison?: { expected: CreditPlan; isCurrent: () => boolean },
   ): Promise<SavedPlan | null> {
     if (state.phase === 'loading' || !session.isLive(ticket)) return null;
     if (!session.isCurrent(ticket)) {
@@ -62,15 +64,23 @@ export function useCreditPlanningWorkspace(scopeKey: string) {
     if (!session.acquire(ticket)) return null;
     setSaving(true);
     try {
-      await writeMobileCreditPlan(scopeKey, next);
+      if (comparison) {
+        await replaceReviewedCreditPlan(scopeKey, comparison.expected, next,
+          () => session.isCurrent(ticket) && comparison.isCurrent());
+      } else {
+        await writeMobileCreditPlan(scopeKey, next);
+      }
       const savedTicket = session.finish(ticket, true);
       if (!savedTicket) return null;
       setState({ phase: 'ready', plan: next, ticket: savedTicket, notice, error: '' });
       return { plan: next, ticket: savedTicket };
     } catch (error) {
+      const message = error instanceof Error ? error.message : '無法存到這台裝置，原規劃沒有被取代。';
       if (session.finish(ticket, false)) {
-        Alert.alert('規劃未儲存', error instanceof Error ? error.message : '無法存到這台裝置，原規劃沒有被取代。');
+        Alert.alert('規劃未儲存', message);
       }
+      // 方案採用需把具體原因交回同頁文案，避免只剩泛用重試句。
+      if (comparison) throw error instanceof Error ? error : new Error(message);
       return null;
     } finally {
       if (session.isLive(ticket)) setSaving(false);

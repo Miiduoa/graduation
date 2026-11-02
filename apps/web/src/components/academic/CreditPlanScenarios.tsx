@@ -9,10 +9,14 @@ import {
 } from '@campus/shared/src/creditPlanScenarios';
 import styles from './CreditPlanScenarios.module.css';
 import { CreditScenarioDeadline } from './CreditScenarioDeadline';
+import type { CreditScenarioWriter } from '@campus/shared/src/creditScenarioAdoption';
+import { CreditScenarioAdoptionActions } from './CreditScenarioAdoptionActions';
 
 const number = (value: number | null) => value === null ? '未設定' : formatCredits(value);
 
-export function CreditPlanScenarios({ plan }: { plan: CreditPlan }) {
+export function CreditPlanScenarios({ plan, scenarioWriter, scenarioBlocked }: {
+  plan: CreditPlan; scenarioWriter?: CreditScenarioWriter; scenarioBlocked?: string;
+}) {
   const [scenario, setScenario] = useState<{ source: CreditPlan; value: CreditScenario } | null>(null);
   const [query, setQuery] = useState('');
   const [term, setTerm] = useState<number | null>(null);
@@ -120,14 +124,19 @@ export function CreditPlanScenarios({ plan }: { plan: CreditPlan }) {
             </section>
           </div>
           <p className={styles.note}>表格單位為學分。達標學期只計已排入學期的課程，不把「其他預計學分」放進某學期。完整方案比較固定以 25 學分提醒，與上方個人每學期負擔提醒無關；25 不是學校上限。總量達標不代表畢業。</p>
+        </> : null}
+      </>}
+      <CreditScenarioAdoptionActions plan={plan} candidate={comparison?.plan ?? null}
+        writer={scenarioWriter} blocked={scenarioBlocked}
+        onApplied={() => { setScenario(null); setNotice(null); }} />
+      {comparison ? <>
           {comparison.afterInsights.possibleRetakes.length ? <p className={styles.warning}>此方案仍有同名課程，可能重複採計。比較沒有把課名相同視為同一門正式課程，請向系辦核對。</p> : null}
           <div className={styles.footer}>
             <strong>原規劃仍完整保留</strong>
-            <p>「不排入」不代表退選，也不刪除校方紀錄。要保留這個比較方案，先匯出 JSON，再由現有匯入流程確認採用；請另外保留原規劃備份。</p>
+            <p>「不排入」不代表退選，也不刪除校方紀錄。可直接預覽並採用；需要跨裝置移轉時，仍可匯出 JSON 備份。請另外保留原規劃備份。</p>
             <button type="button" disabled={!comparison.changed} onClick={exportScenario}>匯出此比較方案 JSON</button>
           </div>
         </> : null}
-      </>}
       {notice?.source === plan ? <p className={styles.note} aria-live="polite">{notice.text}</p> : null}
     </div>
   </details>;
