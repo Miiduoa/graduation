@@ -87,6 +87,9 @@ const record = (schoolId: string, id: string, title: string) => ({
 });
 
 beforeEach(() => {
+  // Pin calendar day so ClassExceptions "today" does not collide with Monday
+  // fixtures when the real weekday changes.
+  vi.useFakeTimers({ now: new Date('2026-10-25T04:00:00.000Z'), toFake: ['Date'] });
   vi.clearAllMocks();
   window.history.replaceState({}, '', '/timetable');
   context.schoolId = 'nthu';
@@ -103,7 +106,10 @@ beforeEach(() => {
     updatedAt: '2026-10-14T00:00:00Z',
   }));
 });
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  vi.useRealTimers();
+});
 
 it('shows only imported courses belonging to the selected university', async () => {
   context.records = [
