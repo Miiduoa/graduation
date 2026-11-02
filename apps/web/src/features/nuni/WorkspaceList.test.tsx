@@ -59,6 +59,14 @@ beforeEach(() => {
   });
 });
 
+it('keeps the device bookmark list reachable even with no current courses', async () => {
+  state.request.mockResolvedValue({ workspaces: [] });
+  render(<WorkspaceList />);
+  expect(screen.getByRole('link', { name: '查看收藏的教材' }).getAttribute('href'))
+    .toBe('/classroom/material-bookmarks');
+  await waitFor(() => expect(state.request).toHaveBeenCalledTimes(1));
+});
+
 it('combines role, archive and normalized name search, then clears an empty result back to active courses', async () => {
   render(<WorkspaceList />);
   await screen.findByRole('link', { name: /Data 資料庫系統/ });

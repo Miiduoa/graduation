@@ -101,6 +101,9 @@ afterEach(() => {
 test('the full timetable and editor use NCKU period labels and times, without inheriting a guest timetable', async () => {
   const view = render(<PersonalTimetableScreen />);
   await view.findByText('成大課程');
+  fireEvent.changeText(view.getByLabelText('匯出開始日期'), '2026-11-02');
+  fireEvent.changeText(view.getByLabelText('匯出結束日期'), '2026-11-08');
+  expect(view.getByText('將匯出 1 堂課；略過 0 門時間未確認的課程。')).toBeTruthy();
   expect(view.getByText('星期一 · 08:00–09:50')).toBeTruthy();
   expect(view.queryByText(/09:10–11:00/)).toBeNull();
   expect(loadPersonalTimetable).toHaveBeenCalledWith(null, 'ncku', 'nuni:account-a');

@@ -22,6 +22,7 @@ import { formatDateTime } from '../../utils/format';
 import { navigateFromInboxTask } from '../../services/inboxActions';
 import { linkingOpenWithPuTronClassGate } from '../../services/tronClassWebUiGate';
 import { isTeachingRole } from '../../utils/campusOs';
+import { safeNavigate } from '../../utils/safeNavigate';
 import type { InboxTask } from '../../data/types';
 import {
   pickAndParseICalFile,
@@ -241,7 +242,7 @@ function SubscribeButton({ icon, label, description, subscribeUrl }: SubscribeBu
   );
 }
 
-export function CalendarPanel(props: any) {
+export function CalendarPanel(props: { navigation?: any; header?: React.ReactNode }) {
   const nav = props?.navigation;
   const { school } = useSchool();
   const auth = useAuth();
@@ -256,12 +257,22 @@ export function CalendarPanel(props: any) {
   const [importedCalendarName, setImportedCalendarName] = useState<string | null>(null);
   const [exporting, setExporting] = useState(false);
 
-  const { items: events, loading: eventsLoading } = useAsyncList<any>(
+  const {
+    items: events,
+    loading: eventsLoading,
+    error: eventsError,
+    reload: reloadEvents,
+  } = useAsyncList<any>(
     () => ds.listEvents(school.id),
     [ds, school.id],
   );
 
-  const { items: assignments, loading: assignmentsLoading } = useAsyncList<any>(async () => {
+  const {
+    items: assignments,
+    loading: assignmentsLoading,
+    error: assignmentsError,
+    reload: reloadAssignments,
+  } = useAsyncList<any>(async () => {
     if (!auth.user) return [];
     const groups = await ds.listGroups(auth.user.uid, {
       pageSize: 10,
@@ -461,14 +472,20 @@ export function CalendarPanel(props: any) {
   };
 
   const isLoading = eventsLoading || assignmentsLoading;
+  const hasLoadError = !!eventsError || !!assignmentsError;
+  const openCampusEvents = () => {
+    safeNavigate(nav, '活動總覽');
+  };
 
   return (
     <Screen>
       <ScrollView
+        testID="campus-calendar-scroll"
         style={{ flex: 1 }}
         contentContainerStyle={{ gap: 14, paddingBottom: TAB_BAR_CONTENT_BOTTOM_PADDING }}
       >
-        <Card title="行事曆" subtitle={formatMonthYear(currentMonth)}>
+        {props.header}
+        <Card title="校園行事曆" subtitle={formatMonthYear(currentMonth)}>
           <View
             style={{
               flexDirection: 'row',
@@ -478,9 +495,15 @@ export function CalendarPanel(props: any) {
             }}
           >
             <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="上一個月"
               onPress={goToPrevMonth}
               style={({ pressed }) => ({
                 padding: 8,
+                minWidth: 44,
+                minHeight: 44,
+                alignItems: 'center',
+                justifyContent: 'center',
                 borderRadius: theme.radius.sm,
                 backgroundColor: pressed ? theme.colors.accentSoft : 'transparent',
                 transform: [{ scale: pressed ? 0.985 : 1 }],
@@ -489,10 +512,14 @@ export function CalendarPanel(props: any) {
               <Ionicons name="chevron-back" size={22} color={theme.colors.text} />
             </Pressable>
             <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="回到今天"
               onPress={goToToday}
               style={({ pressed }) => ({
                 paddingHorizontal: 16,
                 paddingVertical: 6,
+                minHeight: 44,
+                justifyContent: 'center',
                 borderRadius: theme.radius.full,
                 backgroundColor: pressed ? theme.colors.accentSoft : 'transparent',
                 transform: [{ scale: pressed ? 0.985 : 1 }],
@@ -503,9 +530,15 @@ export function CalendarPanel(props: any) {
               </Text>
             </Pressable>
             <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="下一個月"
               onPress={goToNextMonth}
               style={({ pressed }) => ({
                 padding: 8,
+                minWidth: 44,
+                minHeight: 44,
+                alignItems: 'center',
+                justifyContent: 'center',
                 borderRadius: theme.radius.sm,
                 backgroundColor: pressed ? theme.colors.accentSoft : 'transparent',
                 transform: [{ scale: pressed ? 0.985 : 1 }],
@@ -537,18 +570,22 @@ export function CalendarPanel(props: any) {
               return (
                 <Pressable
                   key={idx}
+                  accessibilityRole="button"
+                  accessibilityLabel={`${date.getFullYear()} 年 ${date.getMonth() + 1} 月 ${date.getDate()} 日${hasCampusEvent ? '，有活動' : ''}${hasAssignment ? '，有作業截止' : ''}`}
+                  accessibilityState={{ selected: !!isSelected }}
                   onPress={() => setSelectedDate(date)}
                   style={{
                     width: '14.28%',
-                    aspectRatio: 1,
+                    minHeight: 44,
                     alignItems: 'center',
                     justifyContent: 'center',
                   }}
                 >
                   <View
                     style={{
-                      width: 38,
-                      height: 38,
+                      width: '100%',
+                      minHeight: 44,
+                      paddingVertical: 6,
                       borderRadius: theme.radius.full,
                       alignItems: 'center',
                       justifyContent: 'center',
@@ -567,7 +604,7 @@ export function CalendarPanel(props: any) {
                             ? theme.colors.text
                             : theme.colors.muted,
                         fontWeight: isToday || isSelected ? '700' : '400',
-                        fontSize: 14,
+                        fontSize: 13,
                       }}
                     >
                       {date.getDate()}
@@ -604,7 +641,7 @@ export function CalendarPanel(props: any) {
             })}
           </View>
 
-          <View style={{ flexDirection: 'row', gap: 16, marginTop: 14 }}>
+          <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 16, marginTop: 14 }}>
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
               <View
                 style={{
@@ -630,7 +667,28 @@ export function CalendarPanel(props: any) {
           </View>
         </Card>
 
-        {isLoading ? (
+        {eventsError ? (
+          <ErrorState
+            title="校園活動載入失敗"
+            subtitle="目前無法確認有哪些校園活動。"
+            hint="可以重試載入；已載入的其他事件仍會保留。"
+            actionText="重試活動"
+            onAction={reloadEvents}
+          />
+        ) : null}
+        {assignmentsError ? (
+          <ErrorState
+            title="作業截止載入失敗"
+            subtitle="目前無法確認已加入課程的作業截止日期。"
+            hint="可以重試載入；已載入的其他事件仍會保留。"
+            actionText="重試作業"
+            onAction={reloadAssignments}
+          />
+        ) : null}
+        {isLoading && calendarEvents.length > 0 ? (
+          <LoadingState title="更新事件" subtitle="已載入的事件仍可查看" rows={1} />
+        ) : null}
+        {isLoading && calendarEvents.length === 0 ? (
           <LoadingState title="事件" subtitle="載入中..." rows={2} />
         ) : (
           <Card
@@ -639,20 +697,34 @@ export function CalendarPanel(props: any) {
                 ? `${selectedDate.getMonth() + 1}/${selectedDate.getDate()} 的事件`
                 : '選擇日期'
             }
-            subtitle={`共 ${eventsOnSelectedDate.length} 個事件`}
+            subtitle={`${hasLoadError || isLoading ? '已載入' : '共'} ${eventsOnSelectedDate.length} 個事件`}
           >
             {eventsOnSelectedDate.length === 0 ? (
               <View style={{ alignItems: 'center', paddingVertical: 20 }}>
                 <Ionicons name="calendar-outline" size={32} color={theme.colors.muted} />
                 <Text style={{ color: theme.colors.textSecondary, marginTop: 8, fontSize: 14 }}>
-                  這天沒有事件。
+                  {isLoading
+                    ? '其他事件仍在載入中。'
+                    : hasLoadError
+                      ? '事件尚未載入完整，請先重試。'
+                      : '這天沒有校園活動或作業截止。'}
                 </Text>
+                {!isLoading && !hasLoadError ? (
+                  <Button
+                    text="瀏覽校園活動"
+                    onPress={openCampusEvents}
+                    fullWidth
+                    style={{ marginTop: 12 }}
+                  />
+                ) : null}
               </View>
             ) : (
               <View style={{ gap: 10 }}>
                 {eventsOnSelectedDate.map((e) => (
                   <Pressable
                     key={e.id}
+                    accessibilityRole="button"
+                    accessibilityLabel={`${e.type === 'event' ? '查看活動' : '查看作業'}：${e.title}`}
                     onPress={() => openCalendarEvent(e)}
                     style={({ pressed }) => ({
                       padding: 14,
@@ -715,8 +787,20 @@ export function CalendarPanel(props: any) {
               return (
                 <View style={{ alignItems: 'center', paddingVertical: 16 }}>
                   <Text style={{ color: theme.colors.textSecondary, fontSize: 14 }}>
-                    未來 7 天沒有事件。
+                    {isLoading
+                      ? '正在載入未來 7 天的事件。'
+                      : hasLoadError
+                        ? '事件尚未載入完整，請先重試。'
+                        : '未來 7 天沒有校園活動或作業截止。'}
                   </Text>
+                  {!isLoading && !hasLoadError ? (
+                    <Button
+                      text="瀏覽更多活動"
+                      onPress={openCampusEvents}
+                      fullWidth
+                      style={{ marginTop: 12 }}
+                    />
+                  ) : null}
                 </View>
               );
             }
@@ -725,6 +809,8 @@ export function CalendarPanel(props: any) {
                 {upcoming.slice(0, 5).map((e) => (
                   <Pressable
                     key={e.id}
+                    accessibilityRole="button"
+                    accessibilityLabel={`${e.type === 'event' ? '查看活動' : '查看作業'}：${e.title}`}
                     onPress={() => openCalendarEvent(e)}
                     style={({ pressed }) => ({
                       flexDirection: 'row',
@@ -746,10 +832,7 @@ export function CalendarPanel(props: any) {
                           e.type === 'event' ? theme.colors.accent : theme.colors.warning,
                       }}
                     />
-                    <Text
-                      style={{ color: theme.colors.text, flex: 1, fontSize: 14 }}
-                      numberOfLines={1}
-                    >
+                    <Text style={{ color: theme.colors.text, flex: 1, fontSize: 14 }}>
                       {e.title}
                     </Text>
                     <Pill
