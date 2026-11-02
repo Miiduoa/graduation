@@ -3,11 +3,38 @@
  *
  * 對 packages/shared/src/lms/notificationPlanner.ts 完整單元測試。
  */
-import { planNotifications, type NotificationContext } from '@campus/shared';
+import {
+  attendanceNoticeTextIsSafe,
+  planAttendanceSituationNotices,
+  planNotifications,
+  resolveAttendanceScheduleStatus,
+  type NotificationContext,
+  type TodayAttendanceSituation,
+} from '@campus/shared';
 
 const NOW = '2026-05-15T10:00:00+08:00';
 
 const baseCtx: NotificationContext = { now: NOW };
+
+function situation(
+  partial: Partial<TodayAttendanceSituation> &
+    Pick<TodayAttendanceSituation, 'scheduleStatus' | 'session'>,
+): TodayAttendanceSituation {
+  return {
+    courseId: 'c1',
+    courseName: 'ML',
+    viewerRole: 'student',
+    classStartAt: '2026-05-15T09:00:00+08:00',
+    classEndAt: '2026-05-15T12:00:00+08:00',
+    ...partial,
+  };
+}
+
+function assertNoAbsenceWording(texts: string[]) {
+  for (const text of texts) {
+    expect(attendanceNoticeTextIsSafe(text)).toBe(true);
+  }
+}
 
 describe('planNotifications', () => {
   it('下堂課 30 分鐘內 → class_soon', () => {
@@ -270,5 +297,211 @@ describe('planNotifications', () => {
       ],
     });
     expect(r.find((n) => n.kind === 'peer_review_due')).toBeDefined();
+  });
+});
+
+describe('點名狀態表：規則 1–6（無紀錄不等於缺席）', () => {
+  it('規則1：今天沒有這門課或還沒到上課時間 → 不通知', () => {
+    const before = planNotifications({
+      ...baseCtx,
+      todayAttendanceSituations: [
+        situation({
+          scheduleStatus: 'before_class',
+          session: { kind: 'none' },
+        }),
+      ],
+    });
+    const noneToday = planNotifications({
+      ...baseCtx,
+      todayAttendanceSituations: [
+        situation({
+          scheduleStatus: 'no_class_today',
+          classStartAt: null,
+          classEndAt: null,
+          session: { kind: 'none' },
+        }),
+      ],
+    });
+    expect(before.filter((n) => n.kind.startsWith('attendance_'))).toHaveLength(0);
+    expect(noneToday.filter((n) => n.kind.startsWith('attendance_'))).toHaveLength(0);
+  });
+
+  it('規則2：上課中或已下課且無場次 → 老師「本堂尚未點名」、學生中性「不會記為缺席」', () => {
+    const teacher = planNotifications({
+      ...baseCtx,
+      todayAttendanceSituations: [
+        situation({
+          viewerRole: 'teacher',
+          scheduleStatus: 'ok',
+          session: { kind: 'none' },
+        }),
+      ],
+    });
+    const student = planNotifications({
+      ...baseCtx,
+      todayAttendanceSituations: [
+        situation({
+          viewerRole: 'student',
+          scheduleStatus: 'ok',
+          session: { kind: 'none' },
+        }),
+      ],
+    });
+    const teacherItem = teacher.find((n) => n.kind === 'attendance_session_missing_teacher');
+    const studentItem = student.find((n) => n.kind === 'attendance_session_missing_student');
+    expect(teacherItem?.title).toContain('本堂尚未點名');
+    expect(teacherItem?.body).toContain('本堂尚未點名');
+    expect(attendanceNoticeTextIsSafe(`${teacherItem?.title}${teacherItem?.body}`)).toBe(true);
+    expect(studentItem?.body).toBe('老師本堂尚未點名，不會記為缺席。');
+  });
+
+  it('規則2：老師本堂尚未點名有 cooldown（一堂一次）', () => {
+    const key = 'c1::2026-05-15T09:00:00+08:00';
+    const r = planNotifications(
+      {
+        ...baseCtx,
+        todayAttendanceSituations: [
+          situation({
+            viewerRole: 'teacher',
+            scheduleStatus: 'ok',
+            session: { kind: 'none' },
+          }),
+        ],
+      },
+      {
+        recentlySent: [
+          {
+            kind: 'attendance_session_missing_teacher',
+            key,
+            at: '2026-05-15T09:30:00+08:00',
+          },
+        ],
+        cooldownHours: 4,
+      },
+    );
+    expect(r.find((n) => n.kind === 'attendance_session_missing_teacher')).toBeUndefined();
+  });
+
+  it('規則3：點名場次開放中、學生尚未簽到 → 沿用「點名進行中，請簽到」', () => {
+    const r = planNotifications({
+      ...baseCtx,
+      todayAttendanceSituations: [
+        situation({
+          scheduleStatus: 'unlinked',
+          session: { kind: 'active', id: 's-open', studentCheckedIn: false },
+        }),
+      ],
+    });
+    const item = r.find((n) => n.kind === 'attendance_active');
+    expect(item?.body).toBe('點名進行中，請簽到');
+    expect(item?.severity).toBe('critical');
+  });
+
+  it('規則4：場次已結束且無簽到紀錄 →「沒有簽到紀錄」，輸出不含缺席／曠課', () => {
+    const r = planNotifications({
+      ...baseCtx,
+      todayAttendanceSituations: [
+        situation({
+          scheduleStatus: 'unlinked',
+          session: {
+            kind: 'ended',
+            id: 's-ended',
+            studentCheckedIn: false,
+            studentMarkedAbsent: false,
+            studentMarkedExcused: false,
+          },
+        }),
+      ],
+    });
+    const item = r.find((n) => n.kind === 'attendance_no_checkin_record');
+    expect(item).toBeDefined();
+    expect(item?.title).toContain('沒有簽到紀錄');
+    expect(item?.body).toContain('若有出席請向老師確認或申請更正');
+    assertNoAbsenceWording([item!.title, item!.body]);
+  });
+
+  it('規則5：資料讀取失敗或課表未連結 → 無場次時不通知、不推論', () => {
+    for (const scheduleStatus of ['error', 'unlinked'] as const) {
+      const r = planNotifications({
+        ...baseCtx,
+        todayAttendanceSituations: [
+          situation({
+            scheduleStatus,
+            session: { kind: 'none' },
+          }),
+        ],
+      });
+      expect(r.filter((n) => n.kind.startsWith('attendance_'))).toHaveLength(0);
+    }
+  });
+
+  it('規則6：老師明確標記缺席 → planner 不新增推播（沿用既有流程）', () => {
+    const r = planNotifications({
+      ...baseCtx,
+      todayAttendanceSituations: [
+        situation({
+          scheduleStatus: 'ok',
+          session: {
+            kind: 'ended',
+            id: 's-absent',
+            studentCheckedIn: false,
+            studentMarkedAbsent: true,
+            studentMarkedExcused: false,
+          },
+        }),
+      ],
+    });
+    expect(r.find((n) => n.kind === 'attendance_no_checkin_record')).toBeUndefined();
+    expect(r.find((n) => n.kind === 'attendance_active')).toBeUndefined();
+    expect(r.filter((n) => n.kind.startsWith('attendance_'))).toHaveLength(0);
+  });
+
+  it('resolveAttendanceScheduleStatus：純函式對應課表狀態', () => {
+    expect(
+      resolveAttendanceScheduleStatus({
+        now: NOW,
+        hasScheduleLink: false,
+      }),
+    ).toBe('unlinked');
+    expect(
+      resolveAttendanceScheduleStatus({
+        now: NOW,
+        hasScheduleLink: true,
+        scheduleLoadError: true,
+      }),
+    ).toBe('error');
+    expect(
+      resolveAttendanceScheduleStatus({
+        now: NOW,
+        hasScheduleLink: true,
+        classStartAt: '2026-05-15T11:00:00+08:00',
+        classEndAt: '2026-05-15T13:00:00+08:00',
+      }),
+    ).toBe('before_class');
+    expect(
+      resolveAttendanceScheduleStatus({
+        now: NOW,
+        hasScheduleLink: true,
+        classStartAt: '2026-05-15T09:00:00+08:00',
+        classEndAt: '2026-05-15T12:00:00+08:00',
+      }),
+    ).toBe('ok');
+  });
+
+  it('planAttendanceSituationNotices：無簽到紀錄文案永不含缺席／曠課／扣分', () => {
+    const items = planAttendanceSituationNotices(
+      situation({
+        session: {
+          kind: 'ended',
+          id: 's1',
+          studentCheckedIn: false,
+          studentMarkedAbsent: false,
+          studentMarkedExcused: false,
+        },
+        scheduleStatus: 'ok',
+      }),
+      NOW,
+    );
+    assertNoAbsenceWording(items.flatMap((item) => [item.title, item.body]));
   });
 });

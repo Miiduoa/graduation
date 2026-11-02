@@ -59,6 +59,16 @@ describe('buildFullAIContext', () => {
     }
   });
 
+  it('attendanceNotices 欄位存在且無簽到紀錄類文案不含缺席／曠課', async () => {
+    const ctx = await buildFullAIContext({ uid: 'u1', now: NOW });
+    expect(Array.isArray(ctx.attendanceNotices)).toBe(true);
+    for (const n of ctx.attendanceNotices) {
+      if (n.kind === 'attendance_no_checkin_record') {
+        expect(n.title + n.body).not.toMatch(/缺席|曠課|扣分/);
+      }
+    }
+  });
+
   it('atRiskCourses 列出 likelyScore < 70 的課', async () => {
     const ctx = await buildFullAIContext({ uid: 'u1', now: NOW });
     for (const r of ctx.atRiskCourses) {
