@@ -88,7 +88,7 @@ it('combines role, archive and normalized name search, then clears an empty resu
     target: { value: '不存在的課程' },
   });
   expect(screen.getByRole('heading', { name: '找不到「不存在的課程」' })).toBeTruthy();
-  fireEvent.click(screen.getByRole('button', { name: '查看所有進行中課程' }));
+  fireEvent.click(screen.getByRole('button', { name: '全部課程' }));
   expect((screen.getByRole('searchbox') as HTMLInputElement).value).toBe('');
   expect(screen.getByRole('link', { name: /Data 資料庫系統/ })).toBeTruthy();
   expect(screen.getByRole('link', { name: /互動設計/ })).toBeTruthy();
@@ -97,6 +97,109 @@ it('combines role, archive and normalized name search, then clears an empty resu
   expect(new URLSearchParams(window.location.search).has('courses')).toBe(false);
   expect(new URLSearchParams(window.location.search).has('q')).toBe(false);
   expect(state.request).toHaveBeenCalledTimes(1);
+});
+
+it('prefilters from /classroom?q=&from=timetable with unique, multi and zero match states', async () => {
+  window.history.replaceState(
+    {},
+    '',
+    '/classroom?q=%E4%BA%92%E5%8B%95%E8%A8%AD%E8%A8%88&from=timetable',
+  );
+  const unique = render(<WorkspaceList />);
+  expect((await screen.findByTestId('classroom-query-status-unique')).textContent).toBe(
+    '剛好找到「互動設計」這門課',
+  );
+  expect(screen.getByTestId('classroom-query-unique').getAttribute('aria-current')).toBe('page');
+  expect(screen.getByText(/· 課表對應/)).toBeTruthy();
+  expect(screen.queryByRole('link', { name: /Data 資料庫系統/ })).toBeNull();
+  unique.unmount();
+
+  state.request.mockResolvedValue({
+    workspaces: [
+      ...memberships,
+      {
+        id: 'cw_55555555-5555-4555-8555-555555555555',
+        title: '進階資料庫',
+        state: 'active',
+        memberRole: 'student',
+      },
+    ],
+  });
+  window.history.replaceState(
+    {},
+    '',
+    '/classroom?q=%E8%B3%87%E6%96%99%E5%BA%AB&from=timetable',
+  );
+  const multi = render(<WorkspaceList />);
+  expect((await screen.findByTestId('classroom-query-status-multi')).textContent).toBe(
+    '「資料庫」找到 2 門課程',
+  );
+  expect(screen.getByRole('link', { name: /Data 資料庫系統/ })).toBeTruthy();
+  expect(screen.getByRole('link', { name: /進階資料庫/ })).toBeTruthy();
+  expect(screen.queryByRole('link', { name: /互動設計/ })).toBeNull();
+  multi.unmount();
+
+  window.history.replaceState(
+    {},
+    '',
+    '/classroom?q=%E4%B8%8D%E5%AD%98%E5%9C%A8&from=timetable',
+  );
+  render(<WorkspaceList />);
+  const empty = await screen.findByTestId('classroom-query-none');
+  expect(within(empty).getByRole('heading', { name: '找不到「不存在」' })).toBeTruthy();
+  expect(
+    within(empty).getByText(/課表上的這門課尚未對應到課程空間/),
+  ).toBeTruthy();
+  expect(within(empty).getByRole('button', { name: '全部課程' })).toBeTruthy();
+  expect(within(empty).getByRole('button', { name: '加入課程' })).toBeTruthy();
+});
+
+it('keeps manual search as substring and omits timetable attribution copy', async () => {
+  render(<WorkspaceList />);
+  await screen.findByRole('link', { name: /Data 資料庫系統/ });
+  fireEvent.change(screen.getByRole('searchbox', { name: '搜尋課程名稱' }), {
+    target: { value: 'Data 資料' },
+  });
+  expect(screen.getByRole('link', { name: /Data 資料庫系統/ })).toBeTruthy();
+  expect(screen.queryByText(/· 課表對應/)).toBeNull();
+  expect(screen.queryByText(/剛好找到/)).toBeNull();
+
+  fireEvent.change(screen.getByRole('searchbox', { name: '搜尋課程名稱' }), {
+    target: { value: '不存在的課程' },
+  });
+  const empty = await screen.findByTestId('classroom-query-none');
+  expect(within(empty).getByText('換個課程關鍵字，或清除篩選再找一次。')).toBeTruthy();
+  expect(within(empty).queryByText(/課表上的這門課/)).toBeNull();
+  expect(within(empty).queryByRole('button', { name: '加入課程' })).toBeNull();
+});
+
+it('hits a unique course when timetable q carries name plus course code', async () => {
+  state.request.mockResolvedValue({
+    workspaces: [
+      {
+        id: 'cw_55555555-5555-4555-8555-555555555555',
+        title: '資料庫系統',
+        state: 'active',
+        memberRole: 'student',
+      },
+      {
+        id: 'cw_66666666-6666-4666-8666-666666666666',
+        title: '互動設計',
+        state: 'active',
+        memberRole: 'student',
+      },
+    ],
+  });
+  window.history.replaceState(
+    {},
+    '',
+    '/classroom?q=%E8%B3%87%E6%96%99%E5%BA%AB%E7%B3%BB%E7%B5%B1%20CS301&from=timetable&code=CS301',
+  );
+  render(<WorkspaceList />);
+  expect(await screen.findByTestId('classroom-query-unique')).toBeTruthy();
+  expect(screen.getByRole('link', { name: /資料庫系統/ })).toBeTruthy();
+  expect(screen.queryByRole('link', { name: /互動設計/ })).toBeNull();
+  expect(screen.getByText(/· 課表對應/)).toBeTruthy();
 });
 
 it('restores URL filters and keeps campus, search and task context in course navigation', async () => {
