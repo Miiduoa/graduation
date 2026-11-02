@@ -1227,7 +1227,7 @@ function ImportWorkspace({
       if (!current(run) || result.canceled) return;
       const asset = result.assets[0];
       if (!asset || !/\.json$/i.test(asset.name))
-        throw new Error('請選擇 Campus One 匯出的 JSON 備份檔。');
+        throw new Error('請選擇 nuni 匯出的 JSON 備份檔。');
       const file = new File(asset.uri);
       if ((asset.size || file.size) > PERSONAL_IMPORT_BACKUP_MAX_BYTES)
         throw new Error('備份檔超過 8 MB，請確認檔案。');

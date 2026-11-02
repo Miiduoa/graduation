@@ -987,7 +987,7 @@ function SettingsContent({
             </div>
             <div className={styles.preview}>
               <span className={styles.previewLabel}>色彩預覽</span>
-              <strong>Campus One</strong>
+              <strong>nuni</strong>
               <p>色彩會依明暗模式調整，讓文字保持清楚。</p>
               <span className={styles.previewAccent}>你的校園日常</span>
             </div>

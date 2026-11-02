@@ -12,6 +12,9 @@ vi.mock('./SiteShell', () => ({ SiteShell: ({ children }: { children: ReactNode 
 vi.mock('./SchoolAccountRequired', () => ({ SchoolAccountRequired: () => null }));
 vi.mock('./AttendanceCorrectionPanel', () => ({ AttendanceCorrectionPanel: () => <div>教師更正表單</div> }));
 vi.mock('@/lib/pageContext', () => ({ resolveSchoolPageContext: () => ({ schoolSearch: '' }) }));
+vi.mock('@/lib/useCourseTodayMeeting', () => ({
+  useCourseTodayMeeting: () => ({ status: 'unlinked' }),
+}));
 vi.mock('@/lib/watchAttendanceLive', () => ({ watchAttendanceLive: vi.fn() }));
 vi.mock('@/lib/attendanceCamera', () => ({ startAttendanceCamera: vi.fn() }));
 vi.mock('@/lib/courseAttendance', async (original) => ({

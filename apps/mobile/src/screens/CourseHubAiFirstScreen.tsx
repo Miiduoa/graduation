@@ -217,7 +217,7 @@ function CourseContent({
   return (
     <AIDetailScreen
       title={data?.name ?? '課程總覽'}
-      subtitle={target?.source === 'tronclass' ? '校方 TronClass 課程' : 'Campus One 課程'}
+      subtitle={target?.source === 'tronclass' ? '校方 TronClass 課程' : 'nuni 課程'}
       onBack={() => navigation?.goBack?.()}
       scrollRef={scrollRef}
     >

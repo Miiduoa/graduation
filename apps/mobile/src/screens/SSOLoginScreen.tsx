@@ -254,7 +254,7 @@ function SchoolLoginContent(
         keyboardDismissMode="on-drag"
       >
         <View style={styles.intro}>
-          <Text style={styles.eyebrow}>Campus One · {schoolName}</Text>
+          <Text style={styles.eyebrow}>nuni · {schoolName}</Text>
           <Text accessibilityRole="header" style={styles.heading}>
             從你的課程開始。
           </Text>

@@ -23,7 +23,7 @@ vi.mock('next/navigation', () => ({
 vi.mock('@/components/SiteShell', () => ({
   SiteShell: ({ children }: { children: React.ReactNode }) => <main>{children}</main>,
 }));
-vi.mock('@/components/AppHeader', () => ({ AppHeader: () => <header>Campus One</header> }));
+vi.mock('@/components/AppHeader', () => ({ AppHeader: () => <header>nuni</header> }));
 vi.mock('@/features/nuni/Session', () => ({
   useNuniSession: () => ({
     session: mocks.session,

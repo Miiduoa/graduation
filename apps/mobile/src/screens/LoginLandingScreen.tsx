@@ -40,11 +40,9 @@ export default function LoginLandingScreen() {
             accessibilityElementsHidden
             importantForAccessibility="no-hide-descendants"
           >
-            <Text style={s.brandLetter}>
-              C<Text style={s.brandNumber}>1</Text>
-            </Text>
+            <Text style={s.brandLetter}>n</Text>
           </View>
-          <Text style={s.brand}>Campus One</Text>
+          <Text style={s.brand}>nuni</Text>
           <Pressable
             testID="platform-workspace-start"
             accessibilityRole="button"
@@ -61,18 +59,18 @@ export default function LoginLandingScreen() {
             把自己的校園資料，整理在一起
           </Text>
           <Text style={s.body}>
-            選擇學校後，可以連線支援的校務系統，或直接匯入自己下載的課表、成績與活動資料。校園地圖、公車與公開資訊仍然不必登入。
+            選擇學校後，可自行匯入課表、成績與活動；需要平台交流或課班服務時，請使用 Google 帳號登入。校園地圖、公車與公開資訊仍然不必登入。
           </Text>
         </View>
         <SchoolBrowsingControl />
         <View style={s.schoolPanel}>
           <Text accessibilityRole="header" style={s.title}>
-            {schoolEntry ? '從學校帳號取得資料' : '從學校資料開始'}
+            {schoolEntry ? '學校帳號（尚未開放）' : '從學校資料開始'}
           </Text>
           <Text style={s.body} testID={schoolEntry ? undefined : 'school-login-hint'}>
             {schoolEntry
-              ? '靜宜大學目前可直接使用 e 校園帳號讀取個人校務資料，不需要重新手動建立課表。'
-              : '這間學校尚未開放學號直接連線；你仍可匯入自己從校務系統取得的資料。'}
+              ? '尚未開放學號直接登入；你仍可匯入自己取得的課表、成績與活動，或以 Google 帳號使用平台交流與課班服務。'
+              : '尚未開放學號直接登入；你仍可匯入自己從校務系統取得的資料。'}
           </Text>
           {schoolEntry ? (
             <Pressable
@@ -81,7 +79,7 @@ export default function LoginLandingScreen() {
               style={({ pressed }) => [s.schoolButton, pressed && s.rowPressed]}
               onPress={() => safeNavigate(navigation, 'SSOLogin')}
             >
-              <Text style={s.schoolButtonText}>使用學號連線</Text>
+              <Text style={s.schoolButtonText}>學號登入（尚未開放）</Text>
             </Pressable>
           ) : null}
           <SchoolPortalImportEntry
@@ -116,7 +114,7 @@ export default function LoginLandingScreen() {
           >
             <Text style={s.buttonText}>
               {auth.session && !auth.loading && !auth.error && !auth.pendingLogout
-                ? '回到我的 Campus One'
+                ? '回到我的 nuni'
                 : auth.loading
                   ? '確認 Google 帳號'
                   : auth.pendingLogout
@@ -192,7 +190,7 @@ export default function LoginLandingScreen() {
           <Text style={s.publicTitle}>個人行事曆</Text>
           <Text style={s.publicDetail}>新增、編輯自己的活動與考試；不必學校帳號。</Text>
         </Pressable>
-        <Text style={s.footer}>Campus One · 課程與校園生活</Text>
+        <Text style={s.footer}>nuni · 課程與校園生活</Text>
       </ScrollView>
     </SafeAreaView>
   );
@@ -218,7 +216,6 @@ const createStyles = () =>
       backgroundColor: theme.colors.accent,
     },
     brandLetter: { color: theme.colors.onAccent, fontSize: 23, fontWeight: '600' },
-    brandNumber: { fontSize: 13 },
     brand: {
       color: theme.colors.text,
       letterSpacing: -0.4,

@@ -27,7 +27,7 @@ vi.mock('@/components/SelectedSchoolProvider', () => ({ useSelectedSchool: () =>
 vi.mock('@/components/SchoolScopePlaceholder', () => ({
   SchoolScopePlaceholder: () => <p role="status">選擇校園</p>,
 }));
-vi.mock('@/components/AppHeader', () => ({ AppHeader: () => <header>Campus One</header> }));
+vi.mock('@/components/AppHeader', () => ({ AppHeader: () => <header>nuni</header> }));
 vi.mock('@/components/PWAInstallBanner', () => ({ PWAInstallBanner: () => null }));
 
 const courseA = {

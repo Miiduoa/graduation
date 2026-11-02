@@ -170,7 +170,7 @@ export default function SettingsAiFirstScreen({ navigation }: { navigation?: Nav
         </>
       ) : null}
 
-      <AISection title="關於 Campus One">
+      <AISection title="關於 nuni">
         {version ? <AIRow title="版本" subtitle={version} static /> : null}
         <AIRow
           title="服務條款"
