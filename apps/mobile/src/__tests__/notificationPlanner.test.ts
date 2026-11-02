@@ -326,7 +326,7 @@ describe('點名狀態表：規則 1–6（無紀錄不等於缺席）', () => {
     expect(noneToday.filter((n) => n.kind.startsWith('attendance_'))).toHaveLength(0);
   });
 
-  it('規則2：上課中或已下課且無場次 → 老師「本堂尚未點名」、學生中性「不會記為缺席」', () => {
+  it('規則2：上課中或已下課且無場次 → 老師「本堂尚未點名」、學生「不會自動登記出席結果」', () => {
     const teacher = planNotifications({
       ...baseCtx,
       todayAttendanceSituations: [
@@ -352,7 +352,53 @@ describe('點名狀態表：規則 1–6（無紀錄不等於缺席）', () => {
     expect(teacherItem?.title).toContain('本堂尚未點名');
     expect(teacherItem?.body).toContain('本堂尚未點名');
     expect(attendanceNoticeTextIsSafe(`${teacherItem?.title}${teacherItem?.body}`)).toBe(true);
-    expect(studentItem?.body).toBe('老師本堂尚未點名，不會記為缺席。');
+    expect(studentItem?.body).toBe('老師本堂尚未建立點名，系統不會自動登記出席結果。');
+    expect(attendanceNoticeTextIsSafe(`${studentItem?.title}${studentItem?.body}`)).toBe(true);
+  });
+
+  it('規則2／3／4 新文案全部通過 attendanceNoticeTextIsSafe', () => {
+    const teacher = planAttendanceSituationNotices(
+      situation({
+        viewerRole: 'teacher',
+        scheduleStatus: 'ok',
+        session: { kind: 'none' },
+      }),
+      NOW,
+    );
+    const studentMissing = planAttendanceSituationNotices(
+      situation({
+        viewerRole: 'student',
+        scheduleStatus: 'ok',
+        session: { kind: 'none' },
+      }),
+      NOW,
+    );
+    const active = planAttendanceSituationNotices(
+      situation({
+        scheduleStatus: 'ok',
+        session: { kind: 'active', id: 's-open', studentCheckedIn: false },
+      }),
+      NOW,
+    );
+    const noCheckin = planAttendanceSituationNotices(
+      situation({
+        session: {
+          kind: 'ended',
+          id: 's1',
+          studentCheckedIn: false,
+          studentMarkedAbsent: false,
+          studentMarkedExcused: false,
+        },
+        scheduleStatus: 'ok',
+      }),
+      NOW,
+    );
+    assertNoAbsenceWording(
+      [...teacher, ...studentMissing, ...active, ...noCheckin].flatMap((item) => [
+        item.title,
+        item.body,
+      ]),
+    );
   });
 
   it('規則2：老師本堂尚未點名有 cooldown（一堂一次）', () => {

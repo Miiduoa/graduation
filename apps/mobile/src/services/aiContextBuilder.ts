@@ -234,6 +234,8 @@ export async function buildFullAIContext(
       submitted: e.submitted,
     })),
   );
+  // 點名情境目前僅接 DEMO_COURSES／getDemoAttendanceByCourse（demo 資料），
+  // 尚未串真實個人課表或 Firestore 場次；正式學生情境以網頁點名頁為準。
   const todayAttendanceSituations: TodayAttendanceSituation[] = DEMO_COURSES.map((c) => {
     const att = getDemoAttendanceByCourse(c.id);
     const active = att.find((row) => row.active);

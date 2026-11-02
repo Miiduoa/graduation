@@ -15,6 +15,10 @@ export const ATTENDANCE_IN_APP_KINDS: readonly NotificationKind[] = [
   'attendance_no_checkin_record',
 ] as const;
 
+/** 課表未連結時的中性提示（非規則 2；不得暗示已缺席或本堂尚未點名） */
+export const ATTENDANCE_SCHEDULE_LINK_HINT =
+  '連結課表後才能提醒是否尚未點名';
+
 export type CourseMeetingInput =
   | { status: 'loading' }
   | { status: 'error' }
@@ -22,19 +26,6 @@ export type CourseMeetingInput =
   | { status: 'ready'; startAt: string; endAt: string };
 
 const COOLDOWN_STORAGE_KEY = 'nuni.attendanceMissingNotice.recent';
-
-function taipeiDayWindow(nowIso: string): { startAt: string; endAt: string } | null {
-  const ms = new Date(nowIso).getTime();
-  if (!Number.isFinite(ms)) return null;
-  const taipei = new Date(ms + 8 * 60 * 60 * 1000);
-  const y = taipei.getUTCFullYear();
-  const m = String(taipei.getUTCMonth() + 1).padStart(2, '0');
-  const d = String(taipei.getUTCDate()).padStart(2, '0');
-  return {
-    startAt: `${y}-${m}-${d}T00:00:00+08:00`,
-    endAt: `${y}-${m}-${d}T23:59:59.999+08:00`,
-  };
-}
 
 function isSameTaipeiDay(iso: string | null, nowIso: string): boolean {
   if (!iso) return false;
@@ -90,8 +81,8 @@ function sessionStatus(
 
 /**
  * 將課程點名頁既有資料編成 TodayAttendanceSituation。
- * 老師端課表未連結時，若今日尚無場次，可用當日課日窗作為規則 2 後備（明示傳入，非隱性狀態）。
- * 學生端不啟用此後備，避免未連結課表時誤提示。
+ * 規則 2 僅在 meeting.status === 'ready' 且已對到本堂、已到上課時間時成立；
+ * 課表未連結／讀取失敗不得偽造成本堂尚未點名（不再使用台北整天後備窗）。
  */
 export function buildCourseAttendanceSituation(input: {
   now: string;
@@ -100,8 +91,6 @@ export function buildCourseAttendanceSituation(input: {
   viewerRole: 'student' | 'teacher';
   sessions: readonly AttendanceSession[];
   meeting: CourseMeetingInput;
-  /** 老師點名頁：課表未連結時是否以當日 00:00–23:59 作為本堂後備窗 */
-  teacherDayWindowFallback?: boolean;
 }): TodayAttendanceSituation | null {
   if (input.meeting.status === 'loading') return null;
 
@@ -121,24 +110,6 @@ export function buildCourseAttendanceSituation(input: {
       classStartAt,
       classEndAt,
     });
-  } else if (
-    input.viewerRole === 'teacher' &&
-    input.teacherDayWindowFallback !== false &&
-    !picked
-  ) {
-    const window = taipeiDayWindow(input.now);
-    if (window) {
-      classStartAt = window.startAt;
-      classEndAt = window.endAt;
-      scheduleStatus = resolveAttendanceScheduleStatus({
-        now: input.now,
-        hasScheduleLink: true,
-        classStartAt,
-        classEndAt,
-      });
-    } else {
-      scheduleStatus = 'error';
-    }
   } else {
     scheduleStatus = 'unlinked';
   }
@@ -154,21 +125,54 @@ export function buildCourseAttendanceSituation(input: {
   };
 }
 
-export function readAttendanceNoticeCooldown(): Array<{
+export type AttendanceNoticeCooldownRow = {
   kind: NotificationKind;
   key: string;
   at: string;
-}> {
-  if (typeof sessionStorage === 'undefined') return [];
+};
+
+const EMPTY_COOLDOWN: AttendanceNoticeCooldownRow[] = [];
+
+let cooldownSnapshotCacheKey = '';
+let cooldownSnapshotCache: AttendanceNoticeCooldownRow[] = EMPTY_COOLDOWN;
+
+export function readAttendanceNoticeCooldown(): AttendanceNoticeCooldownRow[] {
+  if (typeof sessionStorage === 'undefined') return EMPTY_COOLDOWN;
   try {
     const raw = sessionStorage.getItem(COOLDOWN_STORAGE_KEY);
-    if (!raw) return [];
-    const parsed = JSON.parse(raw) as Array<{ kind: NotificationKind; key: string; at: string }>;
-    if (!Array.isArray(parsed)) return [];
+    if (!raw) return EMPTY_COOLDOWN;
+    const parsed = JSON.parse(raw) as AttendanceNoticeCooldownRow[];
+    if (!Array.isArray(parsed)) return EMPTY_COOLDOWN;
     return parsed.filter((row) => typeof row?.kind === 'string' && typeof row?.key === 'string');
   } catch {
-    return [];
+    return EMPTY_COOLDOWN;
   }
+}
+
+/** useSyncExternalStore：client getSnapshot（結果須可快取，避免無限重繪） */
+export function getAttendanceNoticeCooldownSnapshot(): AttendanceNoticeCooldownRow[] {
+  const rows = readAttendanceNoticeCooldown();
+  const key = JSON.stringify(rows);
+  if (key === cooldownSnapshotCacheKey) return cooldownSnapshotCache;
+  cooldownSnapshotCacheKey = key;
+  cooldownSnapshotCache = rows.length ? rows : EMPTY_COOLDOWN;
+  return cooldownSnapshotCache;
+}
+
+/** useSyncExternalStore：SSR／hydrate 一律空 cooldown，避免與 client 首畫不一致 */
+export function getAttendanceNoticeCooldownServerSnapshot(): AttendanceNoticeCooldownRow[] {
+  return EMPTY_COOLDOWN;
+}
+
+/** 同頁寫入 cooldown 不依賴 storage 事件；跨分頁可選訂閱 */
+export function subscribeAttendanceNoticeCooldown(onStoreChange: () => void): () => void {
+  if (typeof window === 'undefined') return () => {};
+  const handler = () => {
+    cooldownSnapshotCacheKey = '';
+    onStoreChange();
+  };
+  window.addEventListener('storage', handler);
+  return () => window.removeEventListener('storage', handler);
 }
 
 export function rememberAttendanceNoticeCooldown(items: readonly NotificationItem[], at: string) {
@@ -186,11 +190,16 @@ export function rememberAttendanceNoticeCooldown(items: readonly NotificationIte
       ...previous,
     ].slice(0, 40);
     sessionStorage.setItem(COOLDOWN_STORAGE_KEY, JSON.stringify(next));
+    cooldownSnapshotCacheKey = '';
   } catch {
     // cooldown 僅降低打擾，寫入失敗時仍顯示本次提示。
   }
 }
 
+/**
+ * 規劃點名站內提示。呼叫端必須自行傳入 recentlySent；
+ * 預設空陣列，避免 render／SSR 路徑讀取 sessionStorage。
+ */
 export function planCourseAttendanceInAppNotices(input: {
   now: string;
   situation: TodayAttendanceSituation;
@@ -200,7 +209,7 @@ export function planCourseAttendanceInAppNotices(input: {
   const planned = planNotifications(
     { now: input.now, todayAttendanceSituations: [input.situation] },
     {
-      recentlySent: input.recentlySent ?? readAttendanceNoticeCooldown(),
+      recentlySent: input.recentlySent ?? [],
       cooldownHours: input.cooldownHours ?? 12,
     },
   );

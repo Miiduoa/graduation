@@ -17,15 +17,18 @@
  * | # | 條件 | 對象 | 輸出 kind | 文案要點 | 禁止 |
  * |---|------|------|-----------|----------|------|
  * | 1 | 今天沒有這門課，或還沒到上課時間 | 全員 | （不通知） | — | 不得推論缺席 |
- * | 2 | 上課中或已下課，且老師尚未建立點名場次 | 老師 | attendance_session_missing_teacher | 「本堂尚未點名」（一堂一次＋cooldown） | 不得寫缺席／曠課／扣分 |
- * | 2 | 同上 | 學生 | attendance_session_missing_student | 「老師本堂尚未點名，不會記為缺席」 | 不得暗示已記缺席 |
+ * | 2 | 已對到課表本堂、已到上課時間，且老師尚未建立點名場次 | 老師 | attendance_session_missing_teacher | 「本堂尚未點名」（一堂一次＋cooldown） | 不得寫缺席／曠課／扣分；不得用整天後備窗 |
+ * | 2 | 同上 | 學生 | attendance_session_missing_student | 「老師本堂尚未建立點名，系統不會自動登記出席結果」 | 不得寫缺席／曠課／扣分 |
  * | 3 | 點名場次開放中、學生尚未簽到 | 學生 | attendance_active | 「點名進行中，請簽到」 | — |
  * | 4 | 點名場次已結束、學生沒有簽到紀錄、且老師未標記缺席 | 學生 | attendance_no_checkin_record | 狀態名「沒有簽到紀錄」；提醒向老師確認或申請更正 | 不得稱缺席／曠課 |
- * | 5 | 資料讀取失敗，或課表未連結／無法對應本堂 | 全員 | （不通知） | — | 不得推論 |
+ * | 5 | 資料讀取失敗，或課表未連結／無法對應本堂 | 全員 | （不通知） | 點名頁可另顯示中性「連結課表後才能提醒是否尚未點名」 | 不得推論；不得提示「本堂尚未點名」 |
  * | 6 | 老師在伺服器明確標記缺席 | 學生 | （不新增推播；沿用既有畫面） | 既有「教師已登記本次缺席」 | planner 不另產推播 |
  *
- * 學生端規則 2 選擇「顯示」中性訊息：口試評審要求釐清「沒點名≠缺席」，
- * 明示可降低學生誤以為已被記缺席的焦慮。
+ * 學生端規則 2：明示「尚未建立點名／不會自動登記出席結果」，避免「缺席」字樣觸發安全檢查，
+ * 同時釐清「沒點名≠缺席」。課表未連結時不走規則 2（無整天後備窗）。
+ *
+ * 手機助理資料來源（目前）：apps/mobile aiContextBuilder 以 DEMO_COURSES／
+ * getDemoAttendanceByCourse 組 todayAttendanceSituations（demo 情境），尚未接真實課表／場次。
  */
 
 // ─────────────────────────────────────────────────────────
@@ -42,7 +45,7 @@ export type NotificationKind =
   | 'unread_material' // 教材 3 天沒翻
   | 'attendance_active' // 老師現在開點名
   | 'attendance_session_missing_teacher' // 本堂尚未點名（老師）
-  | 'attendance_session_missing_student' // 老師本堂尚未點名，不會記為缺席（學生）
+  | 'attendance_session_missing_student' // 老師本堂尚未建立點名，系統不會自動登記出席結果（學生）
   | 'attendance_no_checkin_record' // 沒有簽到紀錄（≠缺席）
   | 'attendance_pattern_risk' // 連續缺席偵測
   | 'grade_published' // 新成績發布
@@ -192,7 +195,11 @@ export interface PlanNotificationsOptions {
   cooldownHours?: number;
 }
 
-/** 點名相關輸出禁止出現的字樣（缺席標記本身除外，且規則 6 不經 planner 產推播） */
+/**
+ * 點名相關輸出禁止出現的字樣。
+ * 規則 2／3／4 與點名頁中性連結提示皆須通過；規則 6 不經 planner 產推播。
+ * 否定句亦不得含「缺席」——改以「不會自動登記出席結果」等中性表述。
+ */
 export const ATTENDANCE_NOTICE_FORBIDDEN_TERMS = ['缺席', '曠課', '扣分'] as const;
 
 export function attendanceNoticeTextIsSafe(text: string): boolean {
@@ -324,8 +331,8 @@ export function planAttendanceSituationNotices(
       key: meetingKey(courseId, classStartAt),
       severity: 'medium',
       emoji: 'ℹ️',
-      title: `${courseName} 老師本堂尚未點名`,
-      body: '老師本堂尚未點名，不會記為缺席。',
+      title: `${courseName} 老師本堂尚未建立點名`,
+      body: '老師本堂尚未建立點名，系統不會自動登記出席結果。',
       scheduledAt: null,
       deepLink: deepLinkBase,
     },
