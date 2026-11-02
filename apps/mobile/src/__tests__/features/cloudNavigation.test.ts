@@ -212,7 +212,9 @@ it.each([
   completed.route.navigationUrl.replace('www.google.com', 'www.google.com:443'),
   completed.route.navigationUrl.replace('www.google.com', 'alice@www.google.com'),
   completed.route.navigationUrl.replace('https:', 'http:'),
-  completed.route.navigationUrl.replace('%2C', ','),
+  'https://www.google.com/maps/dir/?api=1&origin=24,120&destination=24.1%2C120.1&travelmode=walking',
+  'https://www.google.com/maps/dir/?api=1&origin=24%2C120&destination=24.1,120.1&travelmode=walking',
+  'https://www.google.com/maps/dir/?api=1&origin=24,120&destination=24.1,120.1&travelmode=walking',
   completed.route.navigationUrl.replace('api=1&origin=24%2C120', 'origin=24%2C120&api=1'),
   completed.route.navigationUrl.replace('walking', 'driving'),
 ])('rejects every noncanonical external navigation URL %#', async (navigationUrl) => {
