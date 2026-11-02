@@ -122,7 +122,7 @@ function OrdersList({ uid, schoolId }: { uid: string; schoolId: string }) {
       <div className={styles.empty}>
         <h2>還沒有訂單</h2>
         <p>
-          這裡顯示 Campus One App「餐廳」下的訂單與取餐號碼。網頁站內點餐與取餐請到「點餐與取餐」。
+          這裡顯示 nuni App「餐廳」下的訂單與取餐號碼。網頁站內點餐與取餐請到「點餐與取餐」。
         </p>
         <div className={styles.actions}>
           <Link className={home.primary} href="/food">

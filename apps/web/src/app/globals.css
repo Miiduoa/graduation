@@ -6,7 +6,7 @@ textarea::placeholder {
   opacity: 1;
 }
 
-/* Campus One shared theme. */
+/* nuni shared theme. */
 
 :root {
   color-scheme: light;
@@ -3273,7 +3273,7 @@ select.input option {
    Leaflet Map
    ============================ */
 
-/* Assistant components use the same palette as the rest of Campus One. */
+/* Assistant components use the same palette as the rest of nuni. */
 :root {
   --ai: var(--brand);
   --ai-strong: var(--brand2);
