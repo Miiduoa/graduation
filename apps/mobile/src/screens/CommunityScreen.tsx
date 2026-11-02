@@ -53,8 +53,10 @@ export function CommunityScreen(props: Record<string, unknown>) {
   useEffect(() => {
     if (initialTab && TABS.some((t) => t.key === initialTab)) {
       setActiveTab(initialTab);
+      // 用過即清，讓之後同 tab 的 navigate／CTA 能再次觸發切換。
+      stackNav?.setParams?.({ initialTab: undefined });
     }
-  }, [initialTab]);
+  }, [initialTab, stackNav]);
 
   return (
     <View style={{ flex: 1, backgroundColor: theme.colors.bg }}>
@@ -100,7 +102,10 @@ export function CommunityScreen(props: Record<string, unknown>) {
             return (
               <Pressable
                 key={tab.key}
-                onPress={() => setActiveTab(tab.key)}
+                onPress={() => {
+                  setActiveTab(tab.key);
+                  if (rawInitial) stackNav?.setParams?.({ initialTab: undefined });
+                }}
                 accessibilityRole="tab"
                 accessibilityLabel={tab.label}
                 accessibilityState={{ selected: active }}

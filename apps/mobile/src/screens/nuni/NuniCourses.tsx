@@ -97,6 +97,8 @@ import { NavigationContext } from '@react-navigation/native';
 import { CrossCourseMaterialSearch, useCourseSearchState } from './CrossCourseMaterialSearch';
 import { createNuniClassroom } from '@campus/shared/src/nuniClassroom';
 import { NuniAttendance, createAttendanceStore } from './NuniAttendance';
+import { useMaterialBookmarks } from '../../state/materialBookmarks';
+import { MaterialBookmarkButton, MaterialBookmarks } from './MaterialBookmarks';
 
 type Classes = ReturnType<typeof createNuniClasses>;
 type Field = {
@@ -615,7 +617,7 @@ export function NuniCourses({
   if (!auth.session || auth.loading || auth.pendingLogout) return null;
   return (
     <CourseScope
-      key={auth.session.context}
+      key={`${auth.session.platformAccountId}:${auth.session.context}`}
       active={active}
       session={auth.session}
       request={auth.request}
@@ -656,6 +658,9 @@ function CourseScope({
     return () => { focus(); blur(); };
   }, [navigation]);
   const searchState = useCourseSearchState();
+  const bookmarks = useMaterialBookmarks(session.platformAccountId);
+  const bookmarkScope = `${session.platformAccountId}:${session.context}`;
+  const [showBookmarks, setShowBookmarks] = useNuniDraftState('courses:bookmarks', false);
   const searchOffset = useRef<number | null>(null);
   const pendingSearchReturn = useRef<number | null>(null);
   const [joinRequested, setJoinRequested] = useState(0);
@@ -687,7 +692,9 @@ function CourseScope({
     initialWorkspaceId ?? null,
   );
   const [focusActivityId, setFocusActivityId] = useState<string | undefined>(initialAssignmentId);
-  const [focusMaterialId, setFocusMaterialId] = useState<string | undefined>(initialMaterialId);
+  const [focusMaterialId, setFocusMaterialId] = useNuniDraftState<string | undefined>(
+    'courses:focused-material', initialMaterialId,
+  );
   useEffect(() => {
     if (initialWorkspaceId) {
       searchOffset.current = null;
@@ -702,7 +709,7 @@ function CourseScope({
   }, [initialAssignmentId]);
   useEffect(() => {
     if (initialMaterialId) setFocusMaterialId(initialMaterialId);
-  }, [initialMaterialId]);
+  }, [initialMaterialId, setFocusMaterialId]);
   const openCourse = useCallback(
     (id: string, activityId?: string) => {
       searchOffset.current = null;
@@ -713,7 +720,7 @@ function CourseScope({
       setFocusMaterialId(undefined);
       setSelected(id);
     },
-    [setSelected],
+    [setSelected, setFocusMaterialId],
   );
   return (
     <ScrollView
@@ -737,6 +744,10 @@ function CourseScope({
     >
       {selected ? (
         <CourseDetail
+          bookmarks={bookmarks}
+          bookmarkScope={bookmarkScope}
+          active={active && focused}
+          backLabel={showBookmarks ? '返回此裝置收藏' : '返回我的課程'}
           attendanceStore={attendanceStore}
           key={selected}
           id={selected}
@@ -754,8 +765,33 @@ function CourseScope({
           scrollRef={scrollRef}
           contentOffsetYRef={contentOffsetYRef}
         />
+      ) : showBookmarks ? (
+        <MaterialBookmarks
+          classes={classes}
+          store={bookmarks}
+          scopeKey={bookmarkScope}
+          active={active && focused}
+          onBrowse={() => setShowBookmarks(false)}
+          open={(courseId, materialId) => {
+            scrollRef.current?.scrollTo({ y: 0, animated: false });
+            contentOffsetYRef.current = 0;
+            setFocusActivityId(undefined);
+            setFocusMaterialId(materialId);
+            setSelected(courseId);
+          }}
+        />
       ) : (
         <>
+          <Button
+            label={`此裝置收藏${bookmarks.ready ? ` · ${bookmarks.items.length}` : ''}`}
+            onPress={() => {
+              searchOffset.current = null;
+              pendingSearchReturn.current = null;
+              scrollRef.current?.scrollTo({ y: 0, animated: false });
+              contentOffsetYRef.current = 0;
+              setShowBookmarks(true);
+            }}
+          />
           <CrossCourseMaterialSearch state={searchState} active={active && focused} join={() => setJoinRequested((value) => value + 1)} classes={classes} open={(courseId, materialId) => {
             pendingSearchReturn.current = null;
             searchOffset.current = contentOffsetYRef.current;
@@ -1042,6 +1078,10 @@ type CourseData = {
   quizzes: NuniQuiz[];
 };
 function CourseDetail({
+  bookmarks,
+  bookmarkScope,
+  active,
+  backLabel,
   attendanceStore,
   id,
   classes,
@@ -1052,6 +1092,10 @@ function CourseDetail({
   scrollRef,
   contentOffsetYRef,
 }: {
+  bookmarks: ReturnType<typeof useMaterialBookmarks>;
+  bookmarkScope: string;
+  active: boolean;
+  backLabel: string;
   attendanceStore: ReturnType<typeof createAttendanceStore>;
   id: string;
   classes: Classes;
@@ -1403,7 +1447,7 @@ function CourseDetail({
       <View
         style={{ flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between', gap: 8 }}
       >
-        <Button label="返回我的課程" onPress={onBack} />
+        <Button label={backLabel} onPress={onBack} />
         <Button label="更新內容" onPress={() => void result.refresh()} disabled={result.loading} />
       </View>
       {result.loading ? <Copy>正在讀取課程內容…</Copy> : null}
@@ -1660,6 +1704,9 @@ function CourseDetail({
                     visible.map((material) => (
                       <MaterialCard
                         key={material.id}
+                        bookmarks={bookmarks}
+                        bookmarkScope={bookmarkScope}
+                        active={active}
                         material={material}
                         focused={material.id === initialMaterialId && !targetSeekCancelled}
                         lookupGeneration={lookupGeneration}
@@ -1778,12 +1825,18 @@ function CourseDetail({
 }
 
 function MaterialCard({
+  bookmarks,
+  bookmarkScope,
+  active,
   material,
   focused = false,
   lookupGeneration,
   scrollRef,
   contentOffsetYRef,
 }: {
+  bookmarks: ReturnType<typeof useMaterialBookmarks>;
+  bookmarkScope: string;
+  active: boolean;
   material: NuniMaterial;
   focused?: boolean;
   lookupGeneration?: MutableRefObject<number>;
@@ -1824,6 +1877,14 @@ function MaterialCard({
         <Copy title>{material.title}</Copy>
         {material.unitTitle ? <Copy>{material.unitTitle}</Copy> : null}
         <Copy>{material.body}</Copy>
+        <MaterialBookmarkButton
+          courseId={material.workspaceId}
+          materialId={material.id}
+          title={material.title}
+          store={bookmarks}
+          scopeKey={bookmarkScope}
+          active={active}
+        />
         <Button label="分享教材入口" onPress={() => {
           const link = `campus://campus-one?tab=courses&workspaceId=${encodeURIComponent(material.workspaceId)}&materialId=${encodeURIComponent(material.id)}`;
           void Share.share({ message: `${material.title}\n${link}\n開啟後需登入並有這門課的權限。` })
