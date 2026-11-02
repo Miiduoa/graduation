@@ -364,10 +364,10 @@ it('notification destinations only use supported local tasks and never arbitrary
   });
   expect(
     notificationDestination({ ...notice, type: 'leave', data: { url: '/fake-approve' } }),
-  ).toBeNull();
+  ).toEqual({ href: '/messages', label: '開啟通知中心' });
   expect(
     notificationDestination({ ...notice, type: 'message', data: { conversationId: '../other' } }),
-  ).toBeNull();
+  ).toEqual({ href: '/messages', label: '開啟通知中心' });
   expect(
     notificationDestination({
       ...notice,
@@ -401,7 +401,7 @@ it('notification destinations only use supported local tasks and never arbitrary
       type: 'assignment',
       data: { courseId: '../other', assignmentId: 'hw-1' },
     }),
-  ).toBeNull();
+  ).toEqual({ href: '/messages', label: '開啟通知中心' });
   expect(
     notificationDestination({
       ...notice,
@@ -431,6 +431,43 @@ it('notification destinations only use supported local tasks and never arbitrary
   ).toEqual({
     href: '/classroom/course/cw_11111111-1111-4111-8111-111111111111#material-cwm_33333333-3333-4333-8333-333333333333',
     label: '開啟這份教材',
+  });
+  expect(
+    notificationDestination({
+      ...notice,
+      type: 'announcement',
+      data: { announcementId: 'ann-9', schoolId: 'pu' },
+    }),
+  ).toEqual({ href: '/announcements/ann-9', label: '查看公告' });
+  expect(
+    notificationDestination({
+      ...notice,
+      type: 'order',
+      data: { orderId: 'ord-1', schoolId: 'pu' },
+    }),
+  ).toEqual({
+    href: '/orders?campus=pu&schoolId=pu&orderId=ord-1',
+    label: '查看訂單／取餐',
+  });
+  expect(
+    notificationDestination({
+      ...notice,
+      type: 'live_session',
+      data: { groupId: 'cs101', sessionId: 'sess-1' },
+    }),
+  ).toEqual({
+    href: '/course/cs101/attendance?sessionId=sess-1',
+    label: '開啟點名',
+  });
+  expect(
+    notificationDestination({
+      ...notice,
+      type: 'assignment_submission',
+      data: { groupId: 'cs101', assignmentId: 'hw-1' },
+    }),
+  ).toEqual({
+    href: '/teacher/course/cs101?assignmentId=hw-1',
+    label: '查看待批改繳交',
   });
 });
 
