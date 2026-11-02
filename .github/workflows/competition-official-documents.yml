@@ -75,7 +75,7 @@ jobs:
           PY
       - name: Preserve sources and page renders
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: campus-one-competition-official-documents
           path: official-documents/

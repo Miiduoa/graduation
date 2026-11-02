@@ -258,7 +258,7 @@ jobs:
         run: node deploy/web/release-check.mjs rollback release-evidence/before.json
       - name: Preserve sanitized release evidence
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: web-release-${{ github.sha }}-${{ github.run_attempt }}
           path: release-evidence/*.json

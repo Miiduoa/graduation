@@ -46,7 +46,7 @@ jobs:
           export COURSE_TEST_DEPS="$RUNNER_TEMP/course-tools/node_modules"
           node scripts/test-course-access.mjs | tee course-access-results.tap
           python3 -m unittest discover -s scripts/course-access -p '*_test.py' -v
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: always()
         with:
           name: course-access-results

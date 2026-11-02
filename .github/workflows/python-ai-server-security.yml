@@ -70,7 +70,7 @@ jobs:
 
       - name: Upload pip-audit report
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: python-ai-server-cloud-pip-audit
           path: ${{ runner.temp }}/python-ai-server-audit/
