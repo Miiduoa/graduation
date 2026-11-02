@@ -109,7 +109,9 @@ export function OpsConsole() {
             <nav className={styles.links} aria-label="營運作業">
               <Link href="/admin">管理總覽</Link>
               <Link href={SCHOOL_REVIEW_PATH}>接入審核</Link>
-              <Link href={OPS_PATH} aria-current="page">營運作業</Link>
+              <Link href={OPS_PATH} aria-current="page">
+                營運作業
+              </Link>
             </nav>
           </header>
           <div className={styles.tabs} role="tablist" aria-label="營運管理項目">
@@ -154,50 +156,50 @@ export function OpsConsole() {
             aria-labelledby={'ops-tab-' + tab}
             tabIndex={0}
           >
-          {tab === 'schools' ? (
-            <AdminSchools
-              context={auth.session!.context}
-              suspended={suspended}
-              selectedId={schoolId}
-              search={schoolQuery}
-              lifecycle={schoolLifecycle}
-              onSelect={selectSchool}
-              onSearch={setSchoolQuery}
-              onLifecycle={setSchoolLifecycle}
-            />
-          ) : null}
-          {tab === 'people' ? (
-            <PeopleTab
-              key={sessionKey}
-              context={auth.session!.context}
-              suspended={suspended}
-              selectedSchool={schoolId}
-              onSchool={selectSchool}
-              onManageSchool={() => go('schools')}
-            />
-          ) : null}
-          {tab === 'merchants' ? (
-            suspended ? (
-              <p role="status">正在確認管理權限…</p>
-            ) : (
-              <MerchantsTab key={sessionKey} context={auth.session!.context} />
-            )
-          ) : null}
-          {tab === 'affiliation' ? (
-            suspended ? (
-              <p role="status">正在確認管理權限…</p>
-            ) : (
-              <AffiliationTab key={sessionKey} context={auth.session!.context} />
-            )
-          ) : null}
-          {tab === 'audit' ? (
-            <AdminAudit
-              context={auth.session!.context}
-              suspended={suspended}
-              query={auditQuery}
-              onQuery={setAuditQuery}
-            />
-          ) : null}
+            {tab === 'schools' ? (
+              <AdminSchools
+                context={auth.session!.context}
+                suspended={suspended}
+                selectedId={schoolId}
+                search={schoolQuery}
+                lifecycle={schoolLifecycle}
+                onSelect={selectSchool}
+                onSearch={setSchoolQuery}
+                onLifecycle={setSchoolLifecycle}
+              />
+            ) : null}
+            {tab === 'people' ? (
+              <PeopleTab
+                key={sessionKey}
+                context={auth.session!.context}
+                suspended={suspended}
+                selectedSchool={schoolId}
+                onSchool={selectSchool}
+                onManageSchool={() => go('schools')}
+              />
+            ) : null}
+            {tab === 'merchants' ? (
+              suspended ? (
+                <p role="status">正在確認管理權限…</p>
+              ) : (
+                <MerchantsTab key={sessionKey} context={auth.session!.context} />
+              )
+            ) : null}
+            {tab === 'affiliation' ? (
+              suspended ? (
+                <p role="status">正在確認管理權限…</p>
+              ) : (
+                <AffiliationTab key={sessionKey} context={auth.session!.context} />
+              )
+            ) : null}
+            {tab === 'audit' ? (
+              <AdminAudit
+                context={auth.session!.context}
+                suspended={suspended}
+                query={auditQuery}
+                onQuery={setAuditQuery}
+              />
+            ) : null}
           </div>
         </div>
       ) : auth.loading ? (
@@ -323,6 +325,11 @@ function PeopleAddForm({
   const [notice, setNotice] = useState('');
   const captureRequest = useActiveRequest();
   const mutationPending = useRef(false);
+  const [retryingAuthorization, setRetryingAuthorization] = useState(false);
+  const authorizationRetryPending = useRef(false);
+  const authorizationRetryButton = useRef<HTMLButtonElement>(null);
+  const accountInput = useRef<HTMLInputElement>(null);
+  const addPersonForm = useRef<HTMLFormElement>(null);
   useEffect(() => {
     if (!requiresProxy || !proxy.value || proxy.value.ended) return;
     const timer = window.setInterval(() => setNow(Date.now()), 1000);
@@ -337,8 +344,22 @@ function PeopleAddForm({
     !!people.value &&
     tenantId !== 'campus-demo' &&
     (!requiresProxy || (!proxy.loading && !proxy.error && proxyActive));
+  const authorizationLoading = people.loading || (requiresProxy && proxy.loading);
+  const authorizationError = people.error || (requiresProxy ? proxy.error : undefined);
+  useEffect(() => {
+    if (!retryingAuthorization || authorizationLoading) return;
+    authorizationRetryPending.current = false;
+    if (!authorizationError && document.activeElement === authorizationRetryButton.current) {
+      if (ready) accountInput.current?.focus();
+      else addPersonForm.current?.focus();
+    }
+    setRetryingAuthorization(false);
+  }, [authorizationError, authorizationLoading, ready, retryingAuthorization]);
   return (
     <form
+      ref={addPersonForm}
+      aria-label="加人"
+      tabIndex={-1}
       className={styles.form}
       onSubmit={(event) => {
         event.preventDefault();
@@ -394,13 +415,29 @@ function PeopleAddForm({
           });
       }}
     >
-      {people.loading || (requiresProxy && proxy.loading) ? (
-        <p role="status">正在確認校方授權…</p>
-      ) : null}
-      {people.error || (requiresProxy && proxy.error) ? (
+      {authorizationLoading ? <p role="status">正在確認校方授權…</p> : null}
+      {authorizationError ? (
         <p role="alert" className={styles.alert}>
-          {people.error || proxy.error}
+          {authorizationError}
         </p>
+      ) : null}
+      {authorizationError || retryingAuthorization ? (
+        <Button
+          ref={authorizationRetryButton}
+          type="button"
+          aria-disabled={authorizationLoading || busy}
+          onClick={() => {
+            const isCurrent = captureRequest();
+            if (!isCurrent() || authorizationRetryPending.current || authorizationLoading || busy)
+              return;
+            authorizationRetryPending.current = true;
+            setRetryingAuthorization(true);
+            if (people.error) people.reload();
+            if (requiresProxy && proxy.error) proxy.reload();
+          }}
+        >
+          重新確認校方授權
+        </Button>
       ) : null}
       {tenantId === 'campus-demo' ? (
         <p className={styles.notice}>示範學校不開放調整校方授權。</p>
@@ -414,6 +451,7 @@ function PeopleAddForm({
         </div>
       ) : null}
       <Input
+        ref={accountInput}
         label="Google 登入信箱或人員代號"
         value={account}
         onChange={(event) => setAccount(event.target.value)}
@@ -466,7 +504,13 @@ function MerchantsTab({ context }: { context: string }) {
     expectedVersion?: number,
   ): Promise<boolean> {
     const isCurrent = captureRequest();
-    if (!isCurrent() || mutationPending.current || !id || reason.trim().length < 5 || reason.length > 500)
+    if (
+      !isCurrent() ||
+      mutationPending.current ||
+      !id ||
+      reason.trim().length < 5 ||
+      reason.length > 500
+    )
       return false;
     mutationPending.current = true;
     setBusyId(id);
@@ -519,8 +563,16 @@ function MerchantsTab({ context }: { context: string }) {
         先確認申請對象、學校與聯絡資料，再填寫實際審核理由。核准店家意向或進件，
         不代表已開放線上點餐或公開營業。
       </p>
-      {error ? <p role="alert" className={styles.alert}>{error}</p> : null}
-      {notice ? <p role="status" className={styles.notice}>{notice}</p> : null}
+      {error ? (
+        <p role="alert" className={styles.alert}>
+          {error}
+        </p>
+      ) : null}
+      {notice ? (
+        <p role="status" className={styles.notice}>
+          {notice}
+        </p>
+      ) : null}
       <MerchantDecisions
         key={'decisions-' + revision}
         context={context}
@@ -571,7 +623,9 @@ function MerchantDecisions({
       .finally(() => {
         if (active) setLoading(false);
       });
-    return () => { active = false; };
+    return () => {
+      active = false;
+    };
   }, [context]);
 
   return (
@@ -581,65 +635,93 @@ function MerchantDecisions({
           <h2 id="merchant-review-heading">待審店家</h2>
           <p className={styles.muted}>僅顯示本次已載入的待審意向與進件。</p>
         </div>
-        <Button type="button" disabled={loading || busyId !== null} onClick={onRetry}>更新清單</Button>
+        <Button type="button" disabled={loading || busyId !== null} onClick={onRetry}>
+          更新清單
+        </Button>
       </div>
       {loading ? <p role="status">正在讀取待審店家…</p> : null}
       {error ? (
         <div className={styles.stack}>
-          <p role="alert" className={styles.alert}>{error}</p>
-          <Button type="button" onClick={onRetry}>重試讀取</Button>
+          <p role="alert" className={styles.alert}>
+            {error}
+          </p>
+          <Button type="button" onClick={onRetry}>
+            重試讀取
+          </Button>
         </div>
       ) : null}
       {!loading && !error && !interest.length && !applications.length ? (
         <p className={styles.emptyState}>目前沒有待審店家申請。</p>
       ) : null}
-      {!error && interest.map((row) => {
-        const id = String(row.id || '');
-        return (
-          <article key={'interest-' + id} className={styles.item}>
-            <div className={styles.reviewIdentity}>
-              <strong>{String(row.brandName || '意向')} · {String(row.schoolName || '')}</strong>
-              <span className={styles.reviewType}>合作意向</span>
-            </div>
-            <p className={styles.muted}>聯絡：{row.contactName} · {row.contactEmail}</p>
-            {row.note ? <p className={styles.muted}>補充：{row.note}</p> : null}
-            <ReviewControls
-              subject={row.brandName + '／' + row.schoolName}
-              approveLabel="核准意向"
-              disabled={busyId !== null || !id}
-              busy={busyId === id}
-              onDecide={(decision, reason) =>
-                onDecide('merchants/interest/' + encodeURIComponent(id) + '/decision', id, decision, reason)
-              }
-            />
-          </article>
-        );
-      })}
-      {!error && applications.map((row) => {
-        const id = row.applicationId;
-        return (
-          <article key={'application-' + row.tenantId + '-' + id} className={styles.item}>
-            <div className={styles.reviewIdentity}>
-              <strong>{String(row.brandName || '進件')}／{String(row.locationName || '')}</strong>
-              <span className={styles.reviewType}>店家進件</span>
-            </div>
-            <p className={styles.muted}>{row.tenantName} · 聯絡：{row.contactName} · {row.contactEmail}</p>
-            <p className={styles.muted}>申請版本：{row.version}</p>
-            <ReviewControls
-              subject={row.brandName + '／' + row.locationName + '（' + row.tenantName + '）'}
-              approveLabel="核准進件"
-              disabled={busyId !== null || !id}
-              busy={busyId === id}
-              onDecide={(decision, reason) =>
-                onDecide(
-                  'merchants/applications/' + encodeURIComponent(row.tenantId) + '/' + encodeURIComponent(id) + '/decision',
-                  id, decision, reason, row.version,
-                )
-              }
-            />
-          </article>
-        );
-      })}
+      {!error &&
+        interest.map((row) => {
+          const id = String(row.id || '');
+          return (
+            <article key={'interest-' + id} className={styles.item}>
+              <div className={styles.reviewIdentity}>
+                <strong>
+                  {String(row.brandName || '意向')} · {String(row.schoolName || '')}
+                </strong>
+                <span className={styles.reviewType}>合作意向</span>
+              </div>
+              <p className={styles.muted}>
+                聯絡：{row.contactName} · {row.contactEmail}
+              </p>
+              {row.note ? <p className={styles.muted}>補充：{row.note}</p> : null}
+              <ReviewControls
+                subject={row.brandName + '／' + row.schoolName}
+                approveLabel="核准意向"
+                disabled={busyId !== null || !id}
+                busy={busyId === id}
+                onDecide={(decision, reason) =>
+                  onDecide(
+                    'merchants/interest/' + encodeURIComponent(id) + '/decision',
+                    id,
+                    decision,
+                    reason,
+                  )
+                }
+              />
+            </article>
+          );
+        })}
+      {!error &&
+        applications.map((row) => {
+          const id = row.applicationId;
+          return (
+            <article key={'application-' + row.tenantId + '-' + id} className={styles.item}>
+              <div className={styles.reviewIdentity}>
+                <strong>
+                  {String(row.brandName || '進件')}／{String(row.locationName || '')}
+                </strong>
+                <span className={styles.reviewType}>店家進件</span>
+              </div>
+              <p className={styles.muted}>
+                {row.tenantName} · 聯絡：{row.contactName} · {row.contactEmail}
+              </p>
+              <p className={styles.muted}>申請版本：{row.version}</p>
+              <ReviewControls
+                subject={row.brandName + '／' + row.locationName + '（' + row.tenantName + '）'}
+                approveLabel="核准進件"
+                disabled={busyId !== null || !id}
+                busy={busyId === id}
+                onDecide={(decision, reason) =>
+                  onDecide(
+                    'merchants/applications/' +
+                      encodeURIComponent(row.tenantId) +
+                      '/' +
+                      encodeURIComponent(id) +
+                      '/decision',
+                    id,
+                    decision,
+                    reason,
+                    row.version,
+                  )
+                }
+              />
+            </article>
+          );
+        })}
     </section>
   );
 }
@@ -658,7 +740,12 @@ function AffiliationTab({ context }: { context: string }) {
     async (isCurrent: () => boolean) => {
       setLoading(true);
       try {
-        const result = await adminFetch('class-workspace-affiliation-applications', 'GET', undefined, context);
+        const result = await adminFetch(
+          'class-workspace-affiliation-applications',
+          'GET',
+          undefined,
+          context,
+        );
         if (!isCurrent()) return;
         if (result.status === 401) {
           window.location.replace(accountReturnHref(OPS_PATH + '?tab=affiliation'));
@@ -670,7 +757,9 @@ function AffiliationTab({ context }: { context: string }) {
           return;
         }
         if (!result.ok) throw new Error('目前讀不到掛靠申請。');
-        setRows(asRecords(result.body.applications ?? result.body.items ?? result.body.affiliations));
+        setRows(
+          asRecords(result.body.applications ?? result.body.items ?? result.body.affiliations),
+        );
         setError('');
       } finally {
         if (isCurrent()) setLoading(false);
@@ -688,7 +777,13 @@ function AffiliationTab({ context }: { context: string }) {
 
   async function decide(id: string, decision: ReviewDecision, reason: string): Promise<boolean> {
     const isCurrent = captureRequest();
-    if (!isCurrent() || mutationPending.current || !id || reason.trim().length < 5 || reason.length > 500)
+    if (
+      !isCurrent() ||
+      mutationPending.current ||
+      !id ||
+      reason.trim().length < 5 ||
+      reason.length > 500
+    )
       return false;
     mutationPending.current = true;
     setBusyId(id);
@@ -736,7 +831,9 @@ function AffiliationTab({ context }: { context: string }) {
         <div className={styles.reviewHeading}>
           <div>
             <h2 id="affiliation-review-heading">課班掛靠</h2>
-            <p className={styles.muted}>核准只會建立課班與學校的掛靠關係，不會更改正式選課或學籍。</p>
+            <p className={styles.muted}>
+              核准只會建立課班與學校的掛靠關係，不會更改正式選課或學籍。
+            </p>
           </div>
           <Button
             type="button"
@@ -747,40 +844,55 @@ function AffiliationTab({ context }: { context: string }) {
                 if (isCurrent()) setError(failure.message);
               });
             }}
-          >更新清單</Button>
+          >
+            更新清單
+          </Button>
         </div>
         {loading ? <p role="status">正在讀取掛靠申請…</p> : null}
-        {error ? <p role="alert" className={styles.alert}>{error}</p> : null}
-        {notice ? <p role="status" className={styles.notice}>{notice}</p> : null}
+        {error ? (
+          <p role="alert" className={styles.alert}>
+            {error}
+          </p>
+        ) : null}
+        {notice ? (
+          <p role="status" className={styles.notice}>
+            {notice}
+          </p>
+        ) : null}
         {!loading && !error && rows.length === 0 ? (
           <p className={styles.emptyState}>目前沒有待處理的掛靠申請。</p>
         ) : null}
-        {!error && rows.map((row, index) => {
-          const id = String(row.id || row.applicationId || '');
-          const title = String(row.workspaceTitle || row.workspaceId || '課班');
-          const tenant = String(row.tenantName || row.tenantId || '未指定學校');
-          const status = String(row.state || '待處理');
-          const finalized = ['approved', 'rejected', 'cancelled', 'withdrawn'].includes(status);
-          return (
-            <article key={id || String(row.workspaceId || 'affiliation-' + index)} className={styles.item}>
-              <div className={styles.reviewIdentity}>
-                <strong>{title}</strong>
-                <span className={styles.reviewType}>{status}</span>
-              </div>
-              <p className={styles.muted}>
-                {tenant}{row.sectionId ? ' · 班次 ' + String(row.sectionId) : ''}
-              </p>
-              {row.justification ? <p>{String(row.justification)}</p> : null}
-              <ReviewControls
-                subject={title + '／' + tenant}
-                approveLabel="核准掛靠"
-                disabled={busyId !== null || !id || finalized || loading || !!error}
-                busy={busyId === id}
-                onDecide={(decision, reason) => decide(id, decision, reason)}
-              />
-            </article>
-          );
-        })}
+        {!error &&
+          rows.map((row, index) => {
+            const id = String(row.id || row.applicationId || '');
+            const title = String(row.workspaceTitle || row.workspaceId || '課班');
+            const tenant = String(row.tenantName || row.tenantId || '未指定學校');
+            const status = String(row.state || '待處理');
+            const finalized = ['approved', 'rejected', 'cancelled', 'withdrawn'].includes(status);
+            return (
+              <article
+                key={id || String(row.workspaceId || 'affiliation-' + index)}
+                className={styles.item}
+              >
+                <div className={styles.reviewIdentity}>
+                  <strong>{title}</strong>
+                  <span className={styles.reviewType}>{status}</span>
+                </div>
+                <p className={styles.muted}>
+                  {tenant}
+                  {row.sectionId ? ' · 班次 ' + String(row.sectionId) : ''}
+                </p>
+                {row.justification ? <p>{String(row.justification)}</p> : null}
+                <ReviewControls
+                  subject={title + '／' + tenant}
+                  approveLabel="核准掛靠"
+                  disabled={busyId !== null || !id || finalized || loading || !!error}
+                  busy={busyId === id}
+                  onDecide={(decision, reason) => decide(id, decision, reason)}
+                />
+              </article>
+            );
+          })}
       </div>
     </section>
   );

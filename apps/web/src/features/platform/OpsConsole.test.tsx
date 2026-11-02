@@ -1,7 +1,13 @@
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { OpsConsole } from './OpsConsole';
-import { adminLoginHref, opsTabHref, readOpsSchool, readOpsSchoolId, readOpsTab } from './constants';
+import {
+  adminLoginHref,
+  opsTabHref,
+  readOpsSchool,
+  readOpsSchoolId,
+  readOpsTab,
+} from './constants';
 
 const mocks = vi.hoisted(() => ({
   session: null as null | {
@@ -68,11 +74,14 @@ it.each([
   ['/admin/ops#affiliation', '/admin/login?returnUrl=%2Fadmin%2Fops%23affiliation#'],
   ['/admin/ops#affiliation#affiliation', '/admin/login?returnUrl=%2Fadmin%2Fops%23affiliation#'],
   ['/admin/ops', '/admin/login?returnUrl=%2Fadmin%2Fops'],
-])('carries the current ops path %s into admin login without leaving the page hash', (location, href) => {
-  window.history.replaceState(null, '', location);
-  render(<OpsConsole />);
-  expect(screen.getByRole('link', { name: '前往管理員登入' }).getAttribute('href')).toBe(href);
-});
+])(
+  'carries the current ops path %s into admin login without leaving the page hash',
+  (location, href) => {
+    window.history.replaceState(null, '', location);
+    render(<OpsConsole />);
+    expect(screen.getByRole('link', { name: '前往管理員登入' }).getAttribute('href')).toBe(href);
+  },
+);
 
 it('clears the current ops hash when building the admin login href', () => {
   expect(adminLoginHref('/admin/ops#affiliation')).toBe(
@@ -225,6 +234,233 @@ async function selectSchool(tenantId: string, waitUntilReady = true) {
   if (waitUntilReady) await waitFor(() => expect(input).toHaveProperty('disabled', false));
   return input;
 }
+
+it('recovers the first administrator form after the separate overview has already recovered', async () => {
+  setupPeople({ lifecycle: 'provisioned', hasRoleAdmin: false });
+  const fallback = fetcher.getMockImplementation()!;
+  let unavailable = true;
+  fetcher.mockImplementation((url: string, options?: RequestInit) =>
+    url.startsWith('/api/platform-admin/people?') && unavailable
+      ? Promise.resolve(ok({}, 503))
+      : fallback(url, options),
+  );
+  render(<OpsConsole />);
+  const input = await selectSchool('school-a', false);
+  const form = within(input.closest('form')!);
+  await form.findByRole('alert');
+  unavailable = false;
+  fireEvent.click(screen.getByRole('button', { name: '重新讀取授權名單' }));
+  await waitFor(() =>
+    expect(screen.queryByRole('button', { name: '重新讀取授權名單' })).toBeNull(),
+  );
+  expect(input).toHaveProperty('disabled', true);
+  const retry = form.getByRole('button', { name: '重新確認校方授權' });
+  retry.focus();
+  fireEvent.click(retry);
+  await waitFor(() => expect(input).toHaveProperty('disabled', false));
+  await waitFor(() => expect(document.activeElement).toBe(input));
+  expect(form.getByRole('combobox', { name: '角色' })).toHaveProperty('value', 'school_admin');
+  expect(form.queryByRole('option', { name: '學校職員' })).toBeNull();
+  expect(fetcher.mock.calls.some(([url]) => url.endsWith('/proxy'))).toBe(false);
+  expect(fetcher.mock.calls.some(([, options]) => options?.method === 'POST')).toBe(false);
+});
+
+it('retries failed proxy confirmation without retrying successful people reads or submitting', async () => {
+  setupPeople();
+  const fallback = fetcher.getMockImplementation()!;
+  const pending = deferredResponse();
+  let proxyReads = 0;
+  fetcher.mockImplementation((url: string, options?: RequestInit) => {
+    if (url === '/api/platform-admin/schools/school-a/proxy') {
+      proxyReads += 1;
+      return proxyReads === 1 ? Promise.resolve(ok({}, 503)) : pending.promise;
+    }
+    return fallback(url, options);
+  });
+  render(<OpsConsole />);
+  const input = await selectSchool('school-a', false);
+  const form = within(input.closest('form')!);
+  const retry = await form.findByRole('button', { name: '重新確認校方授權' });
+  const peopleReads = fetcher.mock.calls.filter(([url]) => url.includes('/people?')).length;
+  retry.focus();
+  fireEvent.click(retry);
+  fireEvent.click(retry);
+  expect(input).toHaveProperty('disabled', true);
+  expect(retry.getAttribute('aria-disabled')).toBe('true');
+  expect(document.activeElement).toBe(retry);
+  await waitFor(() => expect(proxyReads).toBe(2));
+  await act(async () =>
+    pending.resolve(
+      ok({
+        tenantId: 'school-a',
+        expiresAt: new Date(Date.now() + 60000).toISOString(),
+        extended: false,
+        ended: false,
+      }),
+    ),
+  );
+  await waitFor(() => expect(input).toHaveProperty('disabled', false));
+  expect(fetcher.mock.calls.filter(([url]) => url.includes('/people?'))).toHaveLength(peopleReads);
+  expect(fetcher.mock.calls.some(([, options]) => options?.method === 'POST')).toBe(false);
+});
+
+async function startProxyRetry() {
+  setupPeople();
+  const fallback = fetcher.getMockImplementation()!;
+  const pending = deferredResponse();
+  let proxyReads = 0;
+  fetcher.mockImplementation((url: string, options?: RequestInit) => {
+    if (url === '/api/platform-admin/schools/school-a/proxy') {
+      proxyReads += 1;
+      if (proxyReads === 1) return Promise.resolve(ok({}, 503));
+      if (proxyReads === 2) return pending.promise;
+    }
+    return fallback(url, options);
+  });
+  const view = render(<OpsConsole />);
+  const input = await selectSchool('school-a', false);
+  const retry = await within(input.closest('form')!).findByRole('button', {
+    name: '重新確認校方授權',
+  });
+  retry.focus();
+  fireEvent.click(retry);
+  await waitFor(() => expect(proxyReads).toBe(2));
+  return { view, input, retry, pending };
+}
+
+it.each([401, 403, 503])(
+  'keeps failed authorization retry (%s) blocked and retryable',
+  async (status) => {
+    const { input, retry, pending } = await startProxyRetry();
+    await act(async () => pending.resolve(ok({}, status)));
+    const form = within(input.closest('form')!);
+    await form.findByRole('alert');
+    expect(input).toHaveProperty('disabled', true);
+    expect(document.activeElement).toBe(retry);
+    expect(retry.getAttribute('aria-disabled')).toBe('false');
+    fireEvent.click(retry);
+    await waitFor(() => expect(input).toHaveProperty('disabled', false));
+    expect(fetcher.mock.calls.some(([, options]) => options?.method === 'POST')).toBe(false);
+  },
+);
+
+it('keeps an expired proxy blocked after recovery and provides the existing next step', async () => {
+  const { input, pending } = await startProxyRetry();
+  await act(async () =>
+    pending.resolve(
+      ok({
+        tenantId: 'school-a',
+        expiresAt: new Date(0).toISOString(),
+        extended: false,
+        ended: false,
+      }),
+    ),
+  );
+  const form = within(input.closest('form')!);
+  const manage = await form.findByRole('button', { name: '前往學校分頁啟用代操作' });
+  expect(input).toHaveProperty('disabled', true);
+  await waitFor(() => expect(document.activeElement).toBe(input.closest('form')));
+  fireEvent.click(manage);
+  expect(screen.getByRole('tab', { name: '學校' }).getAttribute('aria-selected')).toBe('true');
+  expect(window.location.search).toContain('school=school-a');
+  expect(fetcher.mock.calls.some(([, options]) => options?.method === 'POST')).toBe(false);
+});
+
+it('does not steal focus when the operator moves elsewhere while authorization retries', async () => {
+  const { input, pending } = await startProxyRetry();
+  const schools = screen.getByRole('combobox', { name: '選擇學校' });
+  schools.focus();
+  await act(async () =>
+    pending.resolve(
+      ok({
+        tenantId: 'school-a',
+        expiresAt: new Date(Date.now() + 60000).toISOString(),
+        extended: false,
+        ended: false,
+      }),
+    ),
+  );
+  await waitFor(() => expect(input).toHaveProperty('disabled', false));
+  expect(document.activeElement).toBe(schools);
+});
+
+it.each(['school', 'context', 'platformAccountId'] as const)(
+  'isolates an authorization retry when %s changes',
+  async (change) => {
+    const { view, pending } = await startProxyRetry();
+    if (change === 'school') {
+      await selectSchool('school-b');
+    } else {
+      mocks.session = { ...principal, [change]: change === 'context' ? 'b'.repeat(43) : 'pa_2' };
+      view.rerender(<OpsConsole />);
+    }
+    const input = await screen.findByRole('textbox', { name: 'Google 登入信箱或人員代號' });
+    await waitFor(() => expect(input).toHaveProperty('disabled', false));
+    fireEvent.change(input, { target: { value: 'new@example.test' } });
+    input.focus();
+    await act(async () => pending.resolve(ok({}, 403)));
+    expect(input).toHaveProperty('value', 'new@example.test');
+    expect(input).toHaveProperty('disabled', false);
+    expect(document.activeElement).toBe(input);
+    expect(within(input.closest('form')!).queryByRole('alert')).toBeNull();
+    expect(fetcher.mock.calls.some(([, options]) => options?.method === 'POST')).toBe(false);
+  },
+);
+
+it.each(['logout', 'revoked', 'tab'] as const)(
+  'ignores authorization recovery after leaving through %s',
+  async (change) => {
+    const { view, pending } = await startProxyRetry();
+    if (change === 'tab') fireEvent.click(screen.getByRole('tab', { name: '學校' }));
+    else {
+      mocks.session = change === 'logout' ? null : { ...principal, isPlatformOperator: false };
+      view.rerender(<OpsConsole />);
+    }
+    await act(async () =>
+      pending.resolve(
+        ok({
+          tenantId: 'school-a',
+          expiresAt: new Date(Date.now() + 60000).toISOString(),
+          extended: false,
+          ended: false,
+        }),
+      ),
+    );
+    expect(screen.queryByRole('textbox', { name: 'Google 登入信箱或人員代號' })).toBeNull();
+    expect(screen.queryByRole('button', { name: '重新確認校方授權' })).toBeNull();
+    expect(fetcher.mock.calls.some(([, options]) => options?.method === 'POST')).toBe(false);
+  },
+);
+
+it('waits for both failed authorization reads and never enables an unconfirmed form', async () => {
+  setupPeople();
+  const fallback = fetcher.getMockImplementation()!;
+  const proxy = deferredResponse();
+  let failed = true;
+  fetcher.mockImplementation((url: string, options?: RequestInit) => {
+    if (url.includes('/people?') || url.endsWith('/proxy')) {
+      if (failed) return Promise.resolve(ok({}, 503));
+      if (url.endsWith('/proxy')) return proxy.promise;
+    }
+    return fallback(url, options);
+  });
+  render(<OpsConsole />);
+  const input = await selectSchool('school-a', false);
+  const form = within(input.closest('form')!);
+  const retry = await form.findByRole('button', { name: '重新確認校方授權' });
+  await waitFor(() => expect(retry.getAttribute('aria-disabled')).toBe('false'));
+  failed = false;
+  fireEvent.click(retry);
+  await waitFor(() =>
+    expect(fetcher.mock.calls.filter(([url]) => url.includes('/people?'))).toHaveLength(3),
+  );
+  expect(input).toHaveProperty('disabled', true);
+  fireEvent.submit(input.closest('form')!);
+  await act(async () => proxy.resolve(ok({}, 403)));
+  await form.findByRole('alert');
+  expect(input).toHaveProperty('disabled', true);
+  expect(fetcher.mock.calls.some(([, options]) => options?.method === 'POST')).toBe(false);
+});
 
 it('starts a new add-person draft when switching schools', async () => {
   setupPeople();
@@ -462,7 +698,9 @@ async function submitReview(button: string, reason = REVIEW_REASON) {
   fireEvent.change(await screen.findByRole('textbox', { name: '審核理由' }), {
     target: { value: reason },
   });
-  fireEvent.click(screen.getByRole('button', { name: button === '拒絕' ? '確認拒絕' : '確認核准' }));
+  fireEvent.click(
+    screen.getByRole('button', { name: button === '拒絕' ? '確認拒絕' : '確認核准' }),
+  );
 }
 
 const extraOperations = [
@@ -640,9 +878,11 @@ it.each(['approve', 'reject'] as const)(
     fireEvent.change(within(article).getByRole('textbox', { name: '審核理由' }), {
       target: { value: REVIEW_REASON },
     });
-    fireEvent.click(within(article).getByRole('button', {
-      name: decision === 'approve' ? '確認核准' : '確認拒絕',
-    }));
+    fireEvent.click(
+      within(article).getByRole('button', {
+        name: decision === 'approve' ? '確認核准' : '確認拒絕',
+      }),
+    );
     await waitFor(() =>
       expect(fetcher.mock.calls.some(([, options]) => options?.method === 'POST')).toBe(true),
     );
@@ -672,9 +912,11 @@ it.each(['approve', 'reject'] as const)(
     fireEvent.change(within(article).getByRole('textbox', { name: '審核理由' }), {
       target: { value: REVIEW_REASON },
     });
-    fireEvent.click(within(article).getByRole('button', {
-      name: decision === 'approve' ? '確認核准' : '確認拒絕',
-    }));
+    fireEvent.click(
+      within(article).getByRole('button', {
+        name: decision === 'approve' ? '確認核准' : '確認拒絕',
+      }),
+    );
     await waitFor(() =>
       expect(fetcher.mock.calls.some(([, options]) => options?.method === 'POST')).toBe(true),
     );
@@ -790,7 +1032,10 @@ it('requires a specific review reason and permits cancelling before submission',
   expect(fetcher.mock.calls.some(([, options]) => options?.method === 'POST')).toBe(false);
   const reason = within(article).getByRole('textbox', { name: '審核理由' });
   fireEvent.change(reason, { target: { value: '短' } });
-  expect(within(article).getByRole('button', { name: '確認拒絕' })).toHaveProperty('disabled', true);
+  expect(within(article).getByRole('button', { name: '確認拒絕' })).toHaveProperty(
+    'disabled',
+    true,
+  );
   fireEvent.change(reason, { target: { value: REVIEW_REASON } });
   fireEvent.click(within(article).getByRole('button', { name: '取消' }));
   expect(fetcher.mock.calls.some(([, options]) => options?.method === 'POST')).toBe(false);
@@ -820,10 +1065,12 @@ it('keeps different affiliation review reasons isolated', async () => {
   setupExtraOperation('affiliation');
   fetcher.mockImplementation(async (url: string) =>
     url.endsWith('/class-workspace-affiliation-applications')
-      ? ok({ applications: [
-          { id: 'affiliation-1', workspaceTitle: '課班一' },
-          { id: 'affiliation-2', workspaceTitle: '課班二' },
-        ] })
+      ? ok({
+          applications: [
+            { id: 'affiliation-1', workspaceTitle: '課班一' },
+            { id: 'affiliation-2', workspaceTitle: '課班二' },
+          ],
+        })
       : ok({}, 404),
   );
   render(<OpsConsole />);
@@ -835,7 +1082,10 @@ it('keeps different affiliation review reasons isolated', async () => {
   });
   fireEvent.click(within(second).getByRole('button', { name: '拒絕' }));
   expect(within(second).getByRole('textbox', { name: '審核理由' })).toHaveProperty('value', '');
-  expect(within(first).getByRole('textbox', { name: '審核理由' })).toHaveProperty('value', REVIEW_REASON);
+  expect(within(first).getByRole('textbox', { name: '審核理由' })).toHaveProperty(
+    'value',
+    REVIEW_REASON,
+  );
 });
 
 it('keeps a school selected in a deep link while moving between school settings and people', async () => {
@@ -844,22 +1094,24 @@ it('keeps a school selected in a deep link while moving between school settings 
   fetcher.mockImplementation(async (url: string) => {
     if (url.includes('/people?tenantId=')) return ok(peopleStatus('school-a'));
     return ok({
-      schools: [{
-        kind: 'tenant',
-        applicationId: null,
-        tenantId: 'school-a',
-        displayName: '學校 A',
-        emailDomain: 'a.edu.tw',
-        lifecycle: 'provisioned',
-        description: '',
-        modules: { leave: true, identity: true, food: false },
-        peopleCount: 1,
-        merchantCount: 0,
-      }],
+      schools: [
+        {
+          kind: 'tenant',
+          applicationId: null,
+          tenantId: 'school-a',
+          displayName: '學校 A',
+          emailDomain: 'a.edu.tw',
+          lifecycle: 'provisioned',
+          description: '',
+          modules: { leave: true, identity: true, food: false },
+          peopleCount: 1,
+          merchantCount: 0,
+        },
+      ],
     });
   });
   render(<OpsConsole />);
-  expect((await screen.findByLabelText('選擇學校') as HTMLSelectElement).value).toBe('school-a');
+  expect(((await screen.findByLabelText('選擇學校')) as HTMLSelectElement).value).toBe('school-a');
   expect(await screen.findByRole('heading', { name: '加人' })).toBeTruthy();
   fireEvent.click(screen.getByRole('tab', { name: '學校' }));
   expect(window.location.search).toBe('?tab=schools&school=school-a');
