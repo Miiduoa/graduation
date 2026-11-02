@@ -7,7 +7,7 @@ The flow:
                 BUILD THE FINAL TEXT DETERMINISTICALLY from the tool's return
                 value.  We never let the LLM write "已提交" — that decision is
                 owned by the server.
-       If no:   pass the message through as the final reply.
+       If no:   return a fixed receipt saying that no operation ran.
 
 The output envelope is the same shape regardless of whether a tool ran, so the
 caller (server.py) can write it into Firestore (`agentRuns`) and return it to
@@ -90,13 +90,13 @@ _TOOL_SYSTEM_PROMPT = (
     "你是「校園 AI 代理」。\n"
     "你的工作流程：\n"
     "1. 仔細讀使用者最後一句話，判斷他是『閒聊／查資料』還是『叫你動手做一件事』。\n"
-    "2. 如果是要動手做一件事（例如報修、訂餐、查我的報修紀錄），你**必須**呼叫對應的工具，"
-    "把參數依照工具的 JSON Schema 填好。\n"
+    "2. 只能呼叫本輪提供的查詢與導航工具，參數必須符合該工具的 JSON Schema。"
+    "報修、訂餐、建立提醒等寫入尚未提供本人確認流程，不可執行或聲稱已完成；"
+    "請使用者到對應功能頁處理。\n"
     "3. 永遠不要自己寫『已提交』、『已成功』、『申請編號是 #1234』之類的字串。"
     "成功訊息會由系統根據工具回傳值自動產生。\n"
-    "4. 如果使用者沒提供必要欄位（例如報修缺地點），你**不要呼叫工具**，"
-    "改用一兩句自然的中文問清楚再說。\n"
-    "5. 如果只是普通對話、查 APP 功能，就不要呼叫任何工具，直接回答即可。\n"
+    "4. 如果使用者沒提供查詢工具的必要欄位，就不要呼叫工具。\n"
+    "5. 如果沒有適用的工具，就不要呼叫任何工具。系統會明確告知這次沒有執行操作。\n"
     "6. 工具錯誤訊息（success=False / errorCode）由系統處理，你不需要解釋。\n"
 )
 
@@ -204,7 +204,13 @@ def _format_generic_failure(
         "createDormRepairRequest": "宿舍報修",
         "createFoodOrder": "餐廳訂單",
         "listMyDormRepairs": "查詢宿舍報修",
-    }.get(tool_name, tool_name)
+        "createReminder": "建立提醒",
+        "navigateToScreen": "開啟功能頁",
+        "getPendingAssignments": "查詢待繳作業",
+        "getTodaySchedule": "查詢課表",
+        "getMyGrades": "查詢成績",
+        "getLatestAnnouncements": "查詢公告",
+    }.get(tool_name, "這項操作")
     hint = ""
     if tool_name == "createDormRepairRequest":
         hint = "\n建議你直接到「校園 → 宿舍 → 我要報修」手動填寫。"
@@ -340,9 +346,9 @@ def _build_cards(traces: list[ToolCallTrace]) -> list[ResponseCard]:
     return cards
 
 
-def _build_final_text(traces: list[ToolCallTrace], llm_content: str) -> str:
+def _build_final_text(traces: list[ToolCallTrace]) -> str:
     if not traces:
-        return llm_content.strip() or "我幫不上忙時通常會建議去 APP 對應的頁面手動處理。"
+        return "這次沒有執行任何操作。你可以補充要查詢的內容，或到對應功能頁處理。"
     pieces: list[str] = []
     for trace in traces:
         if not trace.success:
@@ -434,6 +440,7 @@ async def run_agent_turn(
     """
     run_id = f"py_agent_{int(time.time() * 1000)}_{uuid.uuid4().hex[:6]}"
     tools_spec = list_openai_tools()
+    allowed_tool_names = frozenset(tool["function"]["name"] for tool in tools_spec)
     logger.info(
         "run_agent_turn start | uid=%s | msg=%r | tools=%s",
         ctx.uid,
@@ -471,13 +478,24 @@ async def run_agent_turn(
     calls_to_run = plan.tool_calls[:max_tool_calls]
     for call in calls_to_run:
         started = time.monotonic()
-        output = await execute_tool(call.name, call.arguments, ctx)
+        if call.name not in allowed_tool_names:
+            output = {
+                "success": False,
+                "errorCode": "tool_not_allowed",
+                "errorMessage": "本次沒有開放這項操作，因此沒有執行。請至對應功能頁處理。",
+            }
+            accepted_args = {}
+        else:
+            output = await execute_tool(call.name, call.arguments, ctx)
+            accepted_args = (
+                {} if output.get("errorCode") == "confirmation_required" else call.arguments
+            )
         duration_ms = int((time.monotonic() - started) * 1000)
-        success = bool(output.get("success", False))
+        success = output.get("success") is True
         traces.append(
             ToolCallTrace(
                 name=call.name,
-                args=call.arguments,
+                args=accepted_args,
                 output=output,
                 success=success,
                 durationMs=duration_ms,
@@ -487,7 +505,7 @@ async def run_agent_turn(
             )
         )
 
-    final_text = _build_final_text(traces, plan.content)
+    final_text = _build_final_text(traces)
     cards = _build_cards(traces)
 
     return AgentTurn(
