@@ -7,7 +7,9 @@ const CLAIM_COLLECTION = 'notificationClaims';
 const FANOUT_BATCH_SIZE = 1000;
 /** 處理中 lease 預設 5 分鐘；逾時／進程被殺後可被重試接手。 */
 const DEFAULT_LEASE_TTL_MS = 5 * 60 * 1000;
-const TEACHING_ROLES = new Set(['instructor', 'owner', 'teacher', 'ta']);
+const TEACHING_ROLES = new Set(['instructor', 'owner', 'teacher', 'ta', 'assistant']);
+/** 課程群組成員文件上既有的助教角色值（role）；不新增欄位。 */
+const ASSISTANT_ROLES = new Set(['ta', 'assistant']);
 /** 校園公告受眾：明確 allowlist；空 role 不推。含既有教職員代表角色。 */
 const CAMPUS_AUDIENCE_ROLES = new Set(['student', 'teacher', 'admin', 'staff', 'editor']);
 
@@ -404,6 +406,38 @@ async function listActiveGroupStudentUids(db, groupId, excludeUid) {
     .map((doc) => doc.id);
 }
 
+/** 課程群組 active 助教 uid（members.role 為 ta／assistant）。 */
+async function listActiveGroupAssistantUids(db, groupId) {
+  const snap = await db
+    .collection('groups')
+    .doc(groupId)
+    .collection('members')
+    .where('status', '==', 'active')
+    .get();
+  return snap.docs
+    .filter((doc) => {
+      const data = doc.data() || {};
+      if (data.status != null && data.status !== 'active') return false;
+      const role = String(data.role || '').toLowerCase();
+      return ASSISTANT_ROLES.has(role);
+    })
+    .map((doc) => doc.id);
+}
+
+/**
+ * 繳交通知收件人：作業 createdBy ＋群組助教；去重；排除繳交者。
+ */
+function buildSubmissionNotifyRecipients(teacherUid, assistantUids, studentUid) {
+  const seen = new Set();
+  const recipients = [];
+  for (const uid of [teacherUid, ...(assistantUids || [])]) {
+    if (!uid || uid === studentUid || seen.has(uid)) continue;
+    seen.add(uid);
+    recipients.push(uid);
+  }
+  return recipients;
+}
+
 async function listSchoolAudienceUids(db, schoolId) {
   const snap = await db
     .collection('schools')
@@ -479,6 +513,7 @@ function createAssignmentPublishedNotifyHandler({
 function createSubmissionNotifyHandler({
   db,
   sendPushToUser,
+  sendPushToMultipleUsers,
   claim = claimNotificationEvent,
   releaseClaim = releaseNotificationClaim,
   completeClaim = completeNotificationClaim,
@@ -513,17 +548,24 @@ function createSubmissionNotifyHandler({
       const assignment = assignmentSnap.exists ? assignmentSnap.data() : {};
       const teacherUid = safeId(assignment.createdBy);
       const schoolId = safeId(assignment.schoolId) || safeId(row.schoolId) || null;
-      if (teacherUid && teacherUid !== studentUid) {
+      const assistantUids = await listActiveGroupAssistantUids(db, groupId);
+      const recipients = buildSubmissionNotifyRecipients(
+        teacherUid,
+        assistantUids,
+        studentUid,
+      );
+      if (recipients.length) {
         const title = text(assignment.title, '作業');
-        const outcome = await claimAndDeliverToUser({
+        const outcome = await fanoutToRecipients({
           db,
           sendPushToUser,
+          sendPushToMultipleUsers,
           claim,
           releaseClaim,
           completeClaim,
           eventKey,
           claimMeta: { kind: 'assignment_submission', groupId, assignmentId, studentUid },
-          uid: teacherUid,
+          recipients,
           title: '📝 待批改作業',
           body: `有學生繳交了「${title}」，請前往批改。`,
           type: 'assignment_submission',
@@ -647,11 +689,14 @@ module.exports = {
   FANOUT_BATCH_SIZE,
   DEFAULT_LEASE_TTL_MS,
   CAMPUS_AUDIENCE_ROLES,
+  ASSISTANT_ROLES,
   hashEventKey,
   claimNotificationEvent,
   completeNotificationClaim,
   releaseNotificationClaim,
   writeInboxNotification,
+  listActiveGroupAssistantUids,
+  buildSubmissionNotifyRecipients,
   createAssignmentPublishedNotifyHandler,
   createSubmissionNotifyHandler,
   createSchoolAnnouncementNotifyHandler,

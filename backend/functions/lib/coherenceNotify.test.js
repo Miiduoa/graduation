@@ -82,15 +82,23 @@ function makeRef(db, path) {
         doc(id) {
           return makeRef(db, `${path}/${sub}/${id}`);
         },
-        where() {
+        where(field, op, value) {
           return {
             async get() {
               const memberPrefix = `${path}/members/`;
               const memberRows = [...db.docs.entries()]
-                .filter(
-                  ([key]) =>
-                    key.startsWith(memberPrefix) && !key.slice(memberPrefix.length).includes('/'),
-                )
+                .filter(([key, data]) => {
+                  if (
+                    !key.startsWith(memberPrefix) ||
+                    key.slice(memberPrefix.length).includes('/')
+                  ) {
+                    return false;
+                  }
+                  if (field && op === '==') {
+                    return data?.[field] === value;
+                  }
+                  return true;
+                })
                 .map(([key, data]) => ({
                   id: key.slice(memberPrefix.length),
                   data: () => data,
@@ -554,8 +562,221 @@ describe('submission notify', () => {
     });
     expect(pushes).toHaveLength(1);
     expect(pushes[0].uid).toBe('teach');
-    expect(db.docs.has(`notificationClaims/${hashEventKey(eventKey)}`)).toBe(true);
-    expect(db.docs.get(`notificationClaims/${hashEventKey(eventKey)}`).status).toBe('completed');
+    const claimKey = `${eventKey}__uid__teach`;
+    expect(db.docs.has(`notificationClaims/${hashEventKey(claimKey)}`)).toBe(true);
+    expect(db.docs.get(`notificationClaims/${hashEventKey(claimKey)}`).status).toBe('completed');
+  });
+
+  test('teacher only when group has no assistants', async () => {
+    const db = memoryDb({
+      'groups/c1/assignments/a1': {
+        title: '作業一',
+        createdBy: 'teach',
+        schoolId: 'pu',
+      },
+      'groups/c1/members/teach': { status: 'active', role: 'instructor' },
+      'groups/c1/members/stu1': { status: 'active', role: 'student' },
+    });
+    const pushes = [];
+    const batchCalls = [];
+    const handler = createSubmissionNotifyHandler({
+      db,
+      sendPushToUser: async (uid, note, data) => {
+        pushes.push({ uid, note, data });
+      },
+      sendPushToMultipleUsers: async (uids, note, data) => {
+        batchCalls.push(uids.slice());
+        uids.forEach((uid) => pushes.push({ uid, note, data }));
+        return uids.map((uid) => ({ uid, ok: true }));
+      },
+    });
+
+    await handler({
+      params: { groupId: 'c1', assignmentId: 'a1', studentUid: 'stu1' },
+      data: {
+        before: { data: () => ({}) },
+        after: { data: () => ({ userId: 'stu1', submittedAt: { seconds: 1 } }) },
+      },
+    });
+    expect(pushes.map((row) => row.uid)).toEqual(['teach']);
+    expect(batchCalls).toEqual([['teach']]);
+  });
+
+  test('notifies teacher and active assistants; batches via sendPushToMultipleUsers', async () => {
+    const db = memoryDb({
+      'groups/c1/assignments/a1': {
+        title: '作業一',
+        createdBy: 'teach',
+        schoolId: 'pu',
+      },
+      'groups/c1/members/teach': { status: 'active', role: 'instructor' },
+      'groups/c1/members/ta1': { status: 'active', role: 'ta' },
+      'groups/c1/members/ta2': { status: 'active', role: 'assistant' },
+      'groups/c1/members/stu1': { status: 'active', role: 'student' },
+    });
+    const pushes = [];
+    const batchCalls = [];
+    const handler = createSubmissionNotifyHandler({
+      db,
+      sendPushToUser: async () => {
+        throw new Error('should use batch path');
+      },
+      sendPushToMultipleUsers: async (uids, note, data) => {
+        batchCalls.push(uids.slice());
+        uids.forEach((uid) => pushes.push({ uid, note, data }));
+        return uids.map((uid) => ({ uid, ok: true }));
+      },
+    });
+
+    const result = await handler({
+      params: { groupId: 'c1', assignmentId: 'a1', studentUid: 'stu1' },
+      data: {
+        before: { data: () => ({}) },
+        after: { data: () => ({ userId: 'stu1', submittedAt: { seconds: 1 } }) },
+      },
+    });
+    expect(result).toMatchObject({ status: 'sent', results: ['submission'] });
+    expect(pushes.map((row) => row.uid).sort()).toEqual(['ta1', 'ta2', 'teach']);
+    expect(batchCalls).toHaveLength(1);
+    expect(batchCalls[0].sort()).toEqual(['ta1', 'ta2', 'teach']);
+    expect(batchCalls[0].length).toBeLessThanOrEqual(FANOUT_BATCH_SIZE);
+  });
+
+  test('dedupes when teacher is also listed as assistant', async () => {
+    const db = memoryDb({
+      'groups/c1/assignments/a1': {
+        title: '作業一',
+        createdBy: 'teach',
+        schoolId: 'pu',
+      },
+      'groups/c1/members/teach': { status: 'active', role: 'ta' },
+      'groups/c1/members/stu1': { status: 'active', role: 'student' },
+    });
+    const pushes = [];
+    const handler = createSubmissionNotifyHandler({
+      db,
+      sendPushToUser: async (uid, note, data) => {
+        pushes.push({ uid, note, data });
+      },
+      sendPushToMultipleUsers: async (uids, note, data) => {
+        uids.forEach((uid) => pushes.push({ uid, note, data }));
+        return uids.map((uid) => ({ uid, ok: true }));
+      },
+    });
+
+    await handler({
+      params: { groupId: 'c1', assignmentId: 'a1', studentUid: 'stu1' },
+      data: {
+        before: { data: () => ({}) },
+        after: { data: () => ({ userId: 'stu1', submittedAt: { seconds: 1 } }) },
+      },
+    });
+    expect(pushes.map((row) => row.uid)).toEqual(['teach']);
+  });
+
+  test('excludes inactive assistants', async () => {
+    const db = memoryDb({
+      'groups/c1/assignments/a1': {
+        title: '作業一',
+        createdBy: 'teach',
+        schoolId: 'pu',
+      },
+      'groups/c1/members/teach': { status: 'active', role: 'instructor' },
+      'groups/c1/members/ta-active': { status: 'active', role: 'ta' },
+      'groups/c1/members/ta-left': { status: 'inactive', role: 'ta' },
+      'groups/c1/members/stu1': { status: 'active', role: 'student' },
+    });
+    const pushes = [];
+    const handler = createSubmissionNotifyHandler({
+      db,
+      sendPushToUser: async (uid, note, data) => {
+        pushes.push({ uid, note, data });
+      },
+      sendPushToMultipleUsers: async (uids, note, data) => {
+        uids.forEach((uid) => pushes.push({ uid, note, data }));
+        return uids.map((uid) => ({ uid, ok: true }));
+      },
+    });
+
+    await handler({
+      params: { groupId: 'c1', assignmentId: 'a1', studentUid: 'stu1' },
+      data: {
+        before: { data: () => ({}) },
+        after: { data: () => ({ userId: 'stu1', submittedAt: { seconds: 1 } }) },
+      },
+    });
+    expect(pushes.map((row) => row.uid).sort()).toEqual(['ta-active', 'teach']);
+  });
+
+  test('excludes submitter when submitter is an assistant', async () => {
+    const db = memoryDb({
+      'groups/c1/assignments/a1': {
+        title: '作業一',
+        createdBy: 'teach',
+        schoolId: 'pu',
+      },
+      'groups/c1/members/teach': { status: 'active', role: 'instructor' },
+      'groups/c1/members/ta-stu': { status: 'active', role: 'ta' },
+    });
+    const pushes = [];
+    const handler = createSubmissionNotifyHandler({
+      db,
+      sendPushToUser: async (uid, note, data) => {
+        pushes.push({ uid, note, data });
+      },
+      sendPushToMultipleUsers: async (uids, note, data) => {
+        uids.forEach((uid) => pushes.push({ uid, note, data }));
+        return uids.map((uid) => ({ uid, ok: true }));
+      },
+    });
+
+    await handler({
+      params: { groupId: 'c1', assignmentId: 'a1', studentUid: 'ta-stu' },
+      data: {
+        before: { data: () => ({}) },
+        after: { data: () => ({ userId: 'ta-stu', submittedAt: { seconds: 1 } }) },
+      },
+    });
+    expect(pushes.map((row) => row.uid)).toEqual(['teach']);
+  });
+
+  test('retry does not re-send submission notify to teacher or assistants', async () => {
+    const db = memoryDb({
+      'groups/c1/assignments/a1': {
+        title: '作業一',
+        createdBy: 'teach',
+        schoolId: 'pu',
+      },
+      'groups/c1/members/teach': { status: 'active', role: 'instructor' },
+      'groups/c1/members/ta1': { status: 'active', role: 'ta' },
+      'groups/c1/members/stu1': { status: 'active', role: 'student' },
+    });
+    const pushes = [];
+    const handler = createSubmissionNotifyHandler({
+      db,
+      sendPushToUser: async (uid, note, data) => {
+        pushes.push({ uid, note, data });
+      },
+      sendPushToMultipleUsers: async (uids, note, data) => {
+        uids.forEach((uid) => pushes.push({ uid, note, data }));
+        return uids.map((uid) => ({ uid, ok: true }));
+      },
+    });
+    const event = {
+      params: { groupId: 'c1', assignmentId: 'a1', studentUid: 'stu1' },
+      data: {
+        before: { data: () => ({}) },
+        after: { data: () => ({ userId: 'stu1', submittedAt: { seconds: 1 } }) },
+      },
+    };
+
+    expect(await handler(event)).toMatchObject({ status: 'sent', results: ['submission'] });
+    expect(pushes.map((row) => row.uid).sort()).toEqual(['ta1', 'teach']);
+    expect(await handler(event)).toMatchObject({
+      status: 'sent',
+      results: ['submission-duplicate'],
+    });
+    expect(pushes).toHaveLength(2);
   });
 });
 
