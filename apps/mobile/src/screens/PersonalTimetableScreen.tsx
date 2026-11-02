@@ -1,3 +1,4 @@
+import { PersonalCalendarExport } from '../components/PersonalCalendarExport';
 import { ClassReminderToggle } from '../components/ClassReminderToggle';
 import { ClassExceptions } from '../components/ClassExceptions';
 import * as Clipboard from 'expo-clipboard';
@@ -252,6 +253,9 @@ function PersonalTimetableWorkspace({ initialTerm, initialCourseId, initialDate 
           {initialDate ? <Text style={{ color: theme.colors.muted }}>{datedCourse ? `${initialDate} · ${datedCourse.startTime}–${datedCourse.endTime} · ${datedCourse.row.location || '教室未填'}` : '這堂課在指定日期沒有排課，請查看調整紀錄。'}</Text> : selectedCourse ? <Text style={{ color: theme.colors.muted }}>{selectedCourse.room || '教室未填'}</Text> : null}
         </View> : null}
         {importScopeKey && <ClassReminderToggle key={`reminders:${importScopeKey}`} scope={importScopeKey} />}
+        <PersonalCalendarExport key={`calendar:${importScopeKey}:${selectedView === 'legacy' ? manualTerm : activeTerm}`} records={personalTimetableRecords(timetable, importedRecords)} schoolId={schoolId}
+          termKey={selectedView === 'legacy' ? manualTerm : activeTerm}
+          disabled={loadError || importStatus !== 'ready'} />
         <ClassExceptions key={`exceptions:${importScopeKey}`} records={personalTimetableRecords(timetable, importedRecords)}
           exceptions={timetable.classExceptions} schoolId={schoolId} initialDate={initialDate}
           termKey={selectedView === 'legacy' ? manualTerm : activeTerm}
