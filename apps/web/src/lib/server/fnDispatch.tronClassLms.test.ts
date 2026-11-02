@@ -287,6 +287,66 @@ it('does not reuse an expired cache document and overwrites it', async () => {
     .not.toBe('2026-01-01T00:00:00.000Z');
 });
 
+it('does not serve another linked TronClass session\'s cached courses after reconnect', async () => {
+  const { request, source, store } = setup();
+  expect((await request()).status).toBe(200);
+  expect(store.docs.get(CACHE)?.sessionId).toBe(LMS_ID);
+
+  const nextId = 'c'.repeat(32);
+  Object.assign(store.docs.get(PORTAL)!, { tronClassSessionId: nextId });
+  store.docs.set(`_puTronClassSessions/${nextId}`, {
+    ownerUid: UID, cookies: { session: 'new-lms-session' }, userId: 11,
+    expiresAt: new Date(Date.now() + 60_000),
+  });
+  vi.mocked(source.fetchCourses).mockClear();
+  vi.mocked(source.fetchHomeworkPage).mockClear();
+
+  const response = await request();
+  expect(response.status).toBe(200);
+  expect((await response.json()).result.cache.hit).toBe(false);
+  expect(source.fetchCourses).toHaveBeenCalledWith(
+    { session: 'new-lms-session' }, { userId: 11, status: 'ongoing' },
+  );
+  expect(source.fetchHomeworkPage).toHaveBeenCalledTimes(1);
+  expect(store.docs.get(CACHE)?.sessionId).toBe(nextId);
+});
+
+it('invalidates legacy cache entries without a verified session binding', async () => {
+  const { request, source, store } = setup();
+  expect((await request()).status).toBe(200);
+  const cached = store.docs.get(CACHE);
+  expect(cached?.sessionId).toBe(LMS_ID);
+  delete cached!.sessionId;
+  vi.mocked(source.fetchHomeworkPage).mockClear();
+
+  const body = await (await request()).json();
+  expect(body.result.cache.hit).toBe(false);
+  expect(source.fetchHomeworkPage).toHaveBeenCalledTimes(1);
+  expect(store.docs.get(CACHE)?.sessionId).toBe(LMS_ID);
+});
+
+it('does not expose an otherwise fresh cache when its LMS session changes owner', async () => {
+  const { request, source, store } = setup();
+  expect((await request()).status).toBe(200);
+  Object.assign(store.docs.get(LMS)!, { ownerUid: 'another-owner' });
+  vi.mocked(source.fetchHomeworkPage).mockClear();
+
+  const response = await request();
+  expect((await response.json()).error.status).toBe('FAILED_PRECONDITION');
+  expect(source.fetchHomeworkPage).not.toHaveBeenCalled();
+});
+
+it('makes no LMS calls when the read-only feature flag is disabled', async () => {
+  const { request, source } = setup();
+  vi.stubEnv('SCHOOL_LMS_READONLY_ENABLED', 'false');
+  const response = await request({ courseId: 10001 });
+  expect(response.status).toBe(404);
+  expect(source.fetchCourses).not.toHaveBeenCalled();
+  expect(source.fetchHomeworkPage).not.toHaveBeenCalled();
+  expect(source.fetchActivities).not.toHaveBeenCalled();
+  expect(source.fetchCourseAnnouncements).not.toHaveBeenCalled();
+});
+
 it.each([{ refresh: 'yes' }, { sessionId: LMS_ID }, { status: 'ongoing' }, { courseId: '10001' }, []])('rejects malformed bodies %j', async (data) => {
   const { request, source } = setup();
   expect((await request(data)).status).toBe(400);
