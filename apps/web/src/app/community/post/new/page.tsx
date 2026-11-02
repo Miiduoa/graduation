@@ -12,6 +12,8 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { CommunityLoadError, useCommunityLoad } from '../../_components/useCommunityLoad';
 import { CommunityAccess } from '../../_components/CommunityAccess';
+import { useBoardCreationAccess } from '../../_components/useBoardCreationAccess';
+import { BoardCreationStatus } from '../../_components/BoardCreationStatus';
 import { SiteShell } from '@/components/SiteShell';
 import { SchoolScopePlaceholder } from '@/components/SchoolScopePlaceholder';
 import { useAuth } from '@/components/AuthGuard';
@@ -49,6 +51,9 @@ export default function PostComposePage() {
 
 function PostComposeInner({ schoolId }: { schoolId: string }) {
   const router = useRouter();
+  const boardAccess = useBoardCreationAccess(schoolId);
+  const communityHref = `/community?schoolId=${encodeURIComponent(schoolId)}`;
+  const boardsHref = `${communityHref}&tab=boards`;
   const { user, loading: authLoading } = useAuth();
   const searchParams = useSearchParams();
   const routeBoardId = searchParams?.get('boardId') ?? '';
@@ -185,6 +190,26 @@ function PostComposeInner({ schoolId }: { schoolId: string }) {
     );
   }
 
+  if (!boardsLoading && !boardsError && boards.length === 0) {
+    return (
+      <section className="card" style={{ padding: 18, maxWidth: 720 }}>
+        <h2>目前沒有可發布的看板</h2>
+        <BoardCreationStatus access={boardAccess} />
+        <p>{boardAccess.status === 'allowed'
+          ? '建立看板後，就能回到這裡發文。'
+          : '看板由學校管理者建立，開放後就能發文。'}</p>
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 12 }}>
+          {boardAccess.status === 'allowed' ? (
+            <Link className="btn primary" href={boardsHref}>前往建立看板</Link>
+          ) : (
+            <Link className="btn primary" href={communityHref}>回校園交流</Link>
+          )}
+          <button type="button" className="btn" onClick={() => void refreshBoards()}>重新讀取看板</button>
+        </div>
+      </section>
+    );
+  }
+
   return (
     <div className="card" style={{ padding: 18, maxWidth: 720 }}>
       <label htmlFor="post-board" style={{ display: 'block', marginBottom: 8, fontWeight: 700 }}>
@@ -194,10 +219,6 @@ function PostComposeInner({ schoolId }: { schoolId: string }) {
         <CommunityLoadError message={boardsError} retry={refreshBoards} />
       ) : boardsLoading ? (
         <p role="status">正在讀取看板…</p>
-      ) : boards.length === 0 ? (
-        <p>
-          目前沒有可發布的看板。<Link href="/community?tab=boards">前往建立看板</Link>
-        </p>
       ) : (
         <select
           id="post-board"
@@ -217,7 +238,7 @@ function PostComposeInner({ schoolId }: { schoolId: string }) {
       )}
       {!boardsLoading && !boardsError && routeBoardId && !selectedBoard && (
         <p role="alert">
-          這個看板已不存在或無法使用。<Link href="/community?tab=boards">選擇其他看板</Link>
+          這個看板已不存在或無法使用。<Link href={boardsHref}>選擇其他看板</Link>
         </p>
       )}
       {selectedBoard && (

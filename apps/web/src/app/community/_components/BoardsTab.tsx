@@ -9,8 +9,11 @@
  *  - 建立看板 Modal
  */
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
+import { Modal } from '@/components/ui/Modal';
+import { useBoardCreationAccess } from './useBoardCreationAccess';
+import { BoardCreationStatus } from './BoardCreationStatus';
 import { CommunityLoadError, useCommunityLoad } from './useCommunityLoad';
 import { useAuth } from '@/components/AuthGuard';
 import {
@@ -25,6 +28,8 @@ import {
   type CampusBoardType,
 } from '@/lib/community/firestore';
 
+type CreationFailure = 'permission' | 'unconfirmed';
+
 const TYPE_ICON: Record<CampusBoardType, string> = {
   department: '🏛',
   course: '📘',
@@ -33,12 +38,37 @@ const TYPE_ICON: Record<CampusBoardType, string> = {
 };
 
 export function BoardsTab(props: { schoolId: string; schoolSearch: string }) {
-  const { schoolId } = props;
+  const { user, loading } = useAuth();
+  const access = useBoardCreationAccess(props.schoolId);
+  return <BoardsContent key={JSON.stringify([user?.uid, loading, props.schoolId])} {...props} access={access} />;
+}
+
+function BoardsContent(props: {
+  schoolId: string;
+  schoolSearch: string;
+  access: ReturnType<typeof useBoardCreationAccess>;
+}) {
+  const { schoolId, access } = props;
   const { user } = useAuth();
   const [boards, setBoards] = useState<CampusBoard[]>([]);
   const [subscribed, setSubscribed] = useState<Set<string>>(new Set());
   const [filter, setFilter] = useState('');
-  const [composeOpen, setComposeOpen] = useState(false);
+  const [composeEpoch, setComposeEpoch] = useState<number | null>(null);
+  const [notice, setNotice] = useState('');
+  const [createPending, setCreatePending] = useState(false);
+  const [closedPending, setClosedPending] = useState(false);
+  const [recovery, setRecovery] = useState<CreationFailure | null>(null);
+  const [permissionRetryEpoch, setPermissionRetryEpoch] = useState<number | null>(null);
+  const [reviewing, setReviewing] = useState(false);
+  const [focusRecovery, setFocusRecovery] = useState(0);
+  const focusedRecovery = useRef(0);
+  const recoveryArea = useRef<HTMLElement>(null);
+  const reviewLock = useRef(false);
+  const mounted = useRef(false);
+  useEffect(() => {
+    mounted.current = true;
+    return () => { mounted.current = false; };
+  }, []);
 
   const load = useCallback(async () => {
     if (!schoolId) {
@@ -58,6 +88,45 @@ export function BoardsTab(props: { schoolId: string; schoolSearch: string }) {
     load,
     '暫時無法讀取看板，請確認連線後重試。',
   );
+
+  const permissionRechecked = recovery === 'permission' && permissionRetryEpoch !== null
+    && access.status === 'allowed' && access.authorizationEpoch !== permissionRetryEpoch;
+  const needsRecovery = recovery !== null && !permissionRechecked;
+  const creationBlocked = createPending || needsRecovery || reviewing || loading || !!error;
+  const composeVisible = access.status === 'allowed' && composeEpoch === access.authorizationEpoch && !!user;
+
+  useEffect(() => {
+    if (!focusRecovery || focusedRecovery.current === focusRecovery || composeVisible) return;
+    const area = recoveryArea.current;
+    if (!area) return;
+    const target = area.querySelector<HTMLButtonElement>('button:not(:disabled)') ?? area;
+    target.focus({ preventScroll: true });
+    target.scrollIntoView?.({ block: 'center', behavior: 'auto' });
+    focusedRecovery.current = focusRecovery;
+  }, [focusRecovery, composeVisible]);
+
+  function retryPermission() {
+    setPermissionRetryEpoch(access.authorizationEpoch);
+    access.retry();
+  }
+
+  async function reviewBoards() {
+    if (reviewLock.current || createPending) return;
+    reviewLock.current = true;
+    setReviewing(true);
+    const authorized = access.isAuthorized;
+    try {
+      const loaded = await refresh();
+      if (mounted.current && loaded && authorized()) {
+        setRecovery((current) => current === 'unconfirmed' ? null : current);
+        setClosedPending(false);
+        setNotice('已重新讀取清單。請先檢查是否已有剛才的看板，再決定是否建立。');
+      }
+    } finally {
+      reviewLock.current = false;
+      if (mounted.current) setReviewing(false);
+    }
+  }
 
   const q = filter.trim().toLowerCase();
   const filtered = useMemo(
@@ -98,8 +167,6 @@ export function BoardsTab(props: { schoolId: string; schoolSearch: string }) {
     }
   };
 
-  if (error) return <CommunityLoadError message={error} retry={refresh} />;
-
   return (
     <div>
       <div
@@ -119,17 +186,49 @@ export function BoardsTab(props: { schoolId: string; schoolSearch: string }) {
           onChange={(e) => setFilter(e.target.value)}
           style={{ flex: '1 1 160px', minWidth: 0, maxWidth: 420 }}
         />
-        <button
-          type="button"
-          className="btn primary"
-          onClick={() => setComposeOpen(true)}
-          style={{ fontSize: 13, padding: '8px 16px' }}
-        >
-          ＋ 建立看板
-        </button>
+        {access.status === 'allowed' && (
+          <button
+            type="button"
+            className="btn primary"
+            disabled={creationBlocked}
+            onClick={() => {
+              if (!creationBlocked && access.isAuthorized()) {
+                setNotice('');
+                setClosedPending(false);
+                setRecovery(null);
+                setPermissionRetryEpoch(null);
+                setComposeEpoch(access.authorizationEpoch);
+              }
+            }}
+            style={{ fontSize: 13, padding: '8px 16px' }}
+          >
+            ＋ 建立看板
+          </button>
+        )}
       </div>
 
-      {loading ? (
+      <section ref={recoveryArea} tabIndex={-1} aria-label="看板建立狀態"
+        hidden={!notice && !closedPending && !needsRecovery && access.status !== 'loading' && access.status !== 'error'}>
+      <BoardCreationStatus access={{ ...access, retry: retryPermission }} />
+      {notice && <p role="status">{notice}</p>}
+      {closedPending && !needsRecovery && <button type="button" className="btn" disabled={loading} onClick={() => void refresh()}>重新讀取看板</button>}
+      {needsRecovery && !composeVisible && access.status === 'allowed' && (
+        <div>
+          <p role="alert">{recovery === 'permission'
+            ? '這次建立未獲允許，請重新確認這所學校的管理權限。'
+            : '尚未確認是否建立。請重新讀取並檢視看板清單，再決定下一步。'}</p>
+          <button type="button" className="btn" disabled={reviewing || createPending}
+            onClick={() => recovery === 'permission' ? retryPermission() : void reviewBoards()}>
+            {recovery === 'permission' ? '重新確認權限' : reviewing ? '正在讀取看板…' : '重新讀取並檢視清單'}
+          </button>
+        </div>
+      )}
+
+      </section>
+
+      {error ? (
+        <CommunityLoadError message={error} retry={recovery === 'unconfirmed' ? reviewBoards : refresh} />
+      ) : loading ? (
         <div className="card" style={{ padding: 24, textAlign: 'center', color: 'var(--muted)' }}>
           載入中…
         </div>
@@ -137,7 +236,12 @@ export function BoardsTab(props: { schoolId: string; schoolSearch: string }) {
         <div className="card" style={{ padding: 32, textAlign: 'center', color: 'var(--muted)' }}>
           <div style={{ fontSize: 32, marginBottom: 8 }}>🗂</div>
           <div style={{ fontWeight: 700, color: 'var(--text)' }}>尚無任何看板</div>
-          <div style={{ marginTop: 6, fontSize: 12 }}>建立看板，開始一個校園話題。</div>
+          <div style={{ marginTop: 6, fontSize: 12 }}>
+            {access.status === 'allowed'
+              ? '建立看板，開始一個校園話題。'
+              : '看板由學校管理者建立，開放後就能在這裡參與討論。'}
+          </div>
+          {access.status !== 'allowed' && <p><Link className="btn" href={`/community?schoolId=${encodeURIComponent(schoolId)}`}>看校園動態</Link></p>}
         </div>
       ) : (
         (['department', 'course', 'topic', 'anon'] as CampusBoardType[]).map((t) => {
@@ -267,13 +371,44 @@ export function BoardsTab(props: { schoolId: string; schoolSearch: string }) {
         })
       )}
 
-      {composeOpen && (
+      {composeVisible && user && (
         <CreateBoardModal
+          key={composeEpoch}
           schoolId={schoolId}
-          onClose={() => setComposeOpen(false)}
-          onCreated={async () => {
-            setComposeOpen(false);
-            await refresh();
+          uid={user.uid}
+          isAuthorized={access.isAuthorized}
+          onPendingChange={(pending) => { if (mounted.current) setCreatePending(pending); }}
+          onFailure={(kind) => {
+            if (!mounted.current) return;
+            const area = recoveryArea.current;
+            if (area?.contains(area.ownerDocument.activeElement)) {
+              setFocusRecovery((current) => current + 1);
+            }
+            setRecovery(kind);
+            setPermissionRetryEpoch(null);
+            setClosedPending(false);
+            setNotice('');
+          }}
+          onClose={(pending) => {
+            setComposeEpoch(null);
+            if (pending || recovery) setFocusRecovery((current) => current + 1);
+            if (pending) {
+              setClosedPending(true);
+              setNotice('已關閉視窗，沒有撤回建立要求。請重新讀取看板確認結果。');
+            }
+          }}
+          onRecover={(permissionDenied) => {
+            setComposeEpoch(null);
+            setFocusRecovery((current) => current + 1);
+            if (permissionDenied) retryPermission();
+            else void reviewBoards();
+          }}
+          onCreated={(name) => {
+            if (!access.isAuthorized()) return;
+            setComposeEpoch(null);
+            setNotice(`已建立「${name}」看板。`);
+            setFocusRecovery((current) => current + 1);
+            void refresh();
           }}
         />
       )}
@@ -281,191 +416,139 @@ export function BoardsTab(props: { schoolId: string; schoolSearch: string }) {
   );
 }
 
-function CreateBoardModal(props: { schoolId: string; onClose: () => void; onCreated: () => void }) {
-  const { user } = useAuth();
+function CreateBoardModal(props: {
+  schoolId: string;
+  uid: string;
+  isAuthorized: () => boolean;
+  onClose: (pending: boolean) => void;
+  onPendingChange: (pending: boolean) => void;
+  onFailure: (kind: CreationFailure) => void;
+  onCreated: (name: string) => void;
+  onRecover: (permissionDenied: boolean) => void;
+}) {
   const [name, setName] = useState('');
   const [type, setType] = useState<CampusBoardType>('topic');
   const [rules, setRules] = useState('');
   const [anon, setAnon] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [failure, setFailure] = useState<CreationFailure | null>(null);
+  const [validation, setValidation] = useState('');
+  const inFlight = useRef(false);
+  const active = useRef(false);
+  const nameRef = useRef<HTMLInputElement>(null);
+  const id = useId();
 
   useEffect(() => {
-    setAnon(type === 'anon');
-  }, [type]);
+    active.current = true;
+    return () => { active.current = false; };
+  }, []);
+
+  function requestClose() {
+    props.onClose(inFlight.current);
+  }
 
   const submit = async () => {
-    if (!user?.uid) {
-      alert('請先登入');
+    if (inFlight.current || failure || !active.current || !props.isAuthorized()) return;
+    const boardName = name.trim();
+    if (boardName.length < 2) {
+      setValidation('看板名稱至少 2 個字。');
+      nameRef.current?.focus();
       return;
     }
-    if (name.trim().length < 2) {
-      alert('看板名稱至少 2 個字');
-      return;
-    }
+    inFlight.current = true;
+    props.onPendingChange(true);
     setBusy(true);
+    setValidation('');
     try {
       await createBoard({
         schoolId: props.schoolId,
-        name: name.trim(),
+        name: boardName,
         type,
         rules: rules.trim(),
         defaultAnonymous: anon,
-        createdBy: user.uid,
+        createdBy: props.uid,
       });
-      props.onCreated();
-    } catch {
-      alert('這次未能建立，請稍後再試。');
+      if (active.current && props.isAuthorized()) props.onCreated(boardName);
+    } catch (error) {
+      const code = error && typeof error === 'object' && 'code' in error ? error.code : null;
+      const kind = code === 'permission-denied' || code === 'firestore/permission-denied' ? 'permission' : 'unconfirmed';
+      props.onFailure(kind);
+      if (active.current && props.isAuthorized()) setFailure(kind);
     } finally {
-      setBusy(false);
+      inFlight.current = false;
+      props.onPendingChange(false);
+      if (active.current && props.isAuthorized()) setBusy(false);
     }
   };
 
   return (
-    <div
-      role="dialog"
-      aria-modal
-      style={{
-        position: 'fixed',
-        inset: 0,
-        zIndex: 999,
-        background: 'rgba(0,0,0,0.4)',
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        padding: 24,
-      }}
-      onClick={props.onClose}
-    >
-      <div
-        className="card"
-        style={{ padding: 24, width: '100%', maxWidth: 480 }}
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-          <h2 style={{ margin: 0, fontSize: 18, fontWeight: 800 }}>建立看板</h2>
-          <button
-            type="button"
-            onClick={props.onClose}
-            style={{
-              background: 'transparent',
-              border: 'none',
-              cursor: 'pointer',
-              fontSize: 18,
-              color: 'var(--muted)',
-            }}
-          >
-            ×
-          </button>
-        </div>
-
-        <label
-          style={{
-            display: 'block',
-            fontSize: 13,
-            fontWeight: 700,
-            marginTop: 16,
-            marginBottom: 6,
-          }}
-        >
-          看板名稱
-        </label>
-        <input
-          className="input"
-          value={name}
-          onChange={(e) => setName(e.target.value)}
-          placeholder="例：資工系 / 程式甘苦談 / 校隊招新"
-          maxLength={32}
-          style={{ width: '100%', boxSizing: 'border-box' }}
-        />
-
-        <label
-          style={{
-            display: 'block',
-            fontSize: 13,
-            fontWeight: 700,
-            marginTop: 14,
-            marginBottom: 6,
-          }}
-        >
-          類型
-        </label>
-        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-          {(['department', 'course', 'topic', 'anon'] as CampusBoardType[]).map((k) => {
-            const on = type === k;
-            return (
-              <button
-                key={k}
-                type="button"
-                onClick={() => setType(k)}
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: 4,
-                  padding: '6px 12px',
-                  borderRadius: 999,
-                  border: on ? '1px solid var(--brand)' : '1px solid var(--border)',
-                  background: on ? 'var(--brand)' : 'var(--surface)',
-                  color: on ? 'var(--on-brand)' : 'var(--text)',
-                  cursor: 'pointer',
-                  fontSize: 12,
-                  fontWeight: 700,
-                }}
-              >
-                {TYPE_ICON[k]} {CAMPUS_BOARD_TYPE_LABEL[k]}
-              </button>
-            );
-          })}
-        </div>
-
-        <label
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: 6,
-            fontSize: 13,
-            marginTop: 14,
-            cursor: 'pointer',
-          }}
-        >
-          <input type="checkbox" checked={anon} onChange={(e) => setAnon(e.target.checked)} />
-          預設匿名發文
-        </label>
-
-        <label
-          style={{
-            display: 'block',
-            fontSize: 13,
-            fontWeight: 700,
-            marginTop: 14,
-            marginBottom: 6,
-          }}
-        >
-          看板規則（選填）
-        </label>
-        <textarea
-          className="input"
-          value={rules}
-          onChange={(e) => setRules(e.target.value)}
-          rows={4}
-          placeholder="例：請以友善與尊重為原則，請勿張貼商業廣告。"
-          maxLength={400}
-          style={{
-            width: '100%',
-            boxSizing: 'border-box',
-            resize: 'vertical',
-            fontFamily: 'inherit',
-          }}
-        />
-
-        <div style={{ display: 'flex', gap: 8, marginTop: 20, justifyContent: 'flex-end' }}>
-          <button type="button" className="btn" onClick={props.onClose}>
-            取消
-          </button>
-          <button type="button" className="btn primary" disabled={busy} onClick={submit}>
+    <Modal
+      isOpen
+      title="建立看板"
+      onClose={requestClose}
+      initialFocusRef={nameRef}
+      footer={failure ? (
+        <button type="button" className="btn primary" onClick={() => props.onRecover(failure === 'permission')}>
+          {failure === 'permission' ? '重新確認權限' : '回看板清單確認'}
+        </button>
+      ) : (
+        <>
+          <button type="button" className="btn" onClick={requestClose}>{busy ? '關閉視窗' : '取消'}</button>
+          <button type="button" className="btn primary" disabled={busy} onClick={() => void submit()}>
             {busy ? '建立中…' : '建立'}
           </button>
+        </>
+      )}
+    >
+      <label htmlFor={`${id}-name`} style={{ display: 'block', fontWeight: 700, marginBottom: 6 }}>看板名稱</label>
+      <input
+        ref={nameRef}
+        id={`${id}-name`}
+        className="input"
+        value={name}
+        disabled={busy || !!failure}
+        onChange={(e) => setName(e.target.value)}
+        placeholder="例：資工系 / 程式甘苦談 / 校隊招新"
+        maxLength={32}
+        style={{ width: '100%', boxSizing: 'border-box' }}
+      />
+      <fieldset disabled={busy || !!failure} style={{ border: 0, padding: 0, margin: '16px 0' }}>
+        <legend style={{ fontWeight: 700, marginBottom: 6 }}>類型</legend>
+        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+          {(['department', 'course', 'topic', 'anon'] as CampusBoardType[]).map((kind) => (
+            <button
+              key={kind}
+              type="button"
+              className="btn"
+              aria-pressed={type === kind}
+              onClick={() => { setType(kind); setAnon(kind === 'anon'); }}
+            >
+              {TYPE_ICON[kind]} {CAMPUS_BOARD_TYPE_LABEL[kind]}
+            </button>
+          ))}
         </div>
-      </div>
-    </div>
+      </fieldset>
+      <label style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 16 }}>
+        <input type="checkbox" checked={anon} disabled={busy || !!failure} onChange={(e) => setAnon(e.target.checked)} />
+        預設匿名發文
+      </label>
+      <label htmlFor={`${id}-rules`} style={{ display: 'block', fontWeight: 700, marginBottom: 6 }}>看板規則（選填）</label>
+      <textarea
+        id={`${id}-rules`}
+        className="input"
+        value={rules}
+        disabled={busy || !!failure}
+        onChange={(e) => setRules(e.target.value)}
+        rows={4}
+        maxLength={400}
+        placeholder="例：請以友善與尊重為原則，請勿張貼商業廣告。"
+        style={{ width: '100%', boxSizing: 'border-box', resize: 'vertical', fontFamily: 'inherit' }}
+      />
+      {busy && <p role="status">正在建立看板，請勿重複送出。關閉視窗不會撤回建立要求。</p>}
+      {validation && <p role="alert">{validation}</p>}
+      {failure && <p role="alert">{failure === 'permission'
+        ? '這次建立未獲允許，請重新確認這所學校的管理權限。'
+        : '尚未確認是否建立。請回到看板清單重新讀取，確認結果後再操作。'}</p>}
+    </Modal>
   );
 }

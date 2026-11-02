@@ -7,14 +7,17 @@ import PostComposePage from './page';
 const mocks = vi.hoisted(() => ({
   auth: { user: { uid: 'student' } as { uid: string } | null, loading: false, error: null },
   search: new URLSearchParams(),
+  school: { id: 'ncku', name: '國立成功大學' },
   list: vi.fn(),
   getBoard: vi.fn(),
   publish: vi.fn(),
   push: vi.fn(),
+  access: { status: 'denied' as 'loading' | 'allowed' | 'denied' | 'error', authorizationEpoch: 1, isAuthorized: vi.fn(), retry: vi.fn() },
 }));
 vi.mock('@/components/AuthGuard', () => ({ useAuth: () => mocks.auth }));
+vi.mock('../../_components/useBoardCreationAccess', () => ({ useBoardCreationAccess: () => mocks.access }));
 vi.mock('@/components/SelectedSchoolProvider', () => ({
-  useOptionalSelectedSchool: () => ({ selectedSchool: { id: 'ncku', name: '國立成功大學' } }),
+  useOptionalSelectedSchool: () => ({ selectedSchool: mocks.school }),
 }));
 vi.mock('@/components/SiteShell', async () => {
   const { SchoolDataScope } = await import('@/components/SchoolDataScope');
@@ -42,7 +45,9 @@ vi.mock('@/lib/community/firestore', () => ({
 }));
 beforeEach(() => {
   mocks.auth.user = { uid: 'student' };
+  mocks.access = { status: 'denied', authorizationEpoch: 1, isAuthorized: vi.fn(() => false), retry: vi.fn() };
   mocks.search = new URLSearchParams();
+  mocks.school = { id: 'ncku', name: '國立成功大學' };
   mocks.list.mockReset();
   mocks.getBoard.mockReset().mockResolvedValue(null);
   mocks.publish.mockReset();
@@ -137,5 +142,68 @@ it('keeps a visitor with school and author query values outside the private comp
   expect(screen.getByRole('link', { name: '登入帳號' })).toBeTruthy();
   expect(screen.queryByRole('button', { name: '發布' })).toBeNull();
   expect(mocks.list).not.toHaveBeenCalled();
+  expect(mocks.publish).not.toHaveBeenCalled();
+});
+
+it('does not direct an ordinary member with no boards to create a board', async () => {
+  mocks.list.mockResolvedValue([]);
+  render(<PostComposePage />);
+  await screen.findByText(/目前沒有可發布的看板/);
+  expect(screen.queryByRole('link', { name: '前往建立看板' })).toBeNull();
+});
+
+it('offers verified managers a board creation link for the selected school', async () => {
+  mocks.access.status = 'allowed';
+  mocks.search = new URLSearchParams('schoolId=nthu');
+  mocks.school = { id: 'nthu', name: '國立清華大學' };
+  mocks.list.mockResolvedValue([]);
+  render(<PostComposePage />);
+  expect((await screen.findByRole('link', { name: '前往建立看板' })).getAttribute('href')).toBe('/community?schoolId=nthu&tab=boards');
+});
+
+it('keeps a member in the selected school when returning from an empty composer', async () => {
+  mocks.search = new URLSearchParams('schoolId=ncku');
+  mocks.list.mockResolvedValue([]);
+  render(<PostComposePage />);
+  expect((await screen.findByRole('link', { name: '回校園交流' })).getAttribute('href')).toBe('/community?schoolId=ncku');
+  expect(mocks.publish).not.toHaveBeenCalled();
+});
+
+it('does not offer creation while permission is pending or unavailable, and allows rechecking', async () => {
+  mocks.access.status = 'loading';
+  mocks.list.mockResolvedValue([]);
+  const view = render(<PostComposePage />);
+  await screen.findByText('正在確認看板管理權限…');
+  expect(screen.queryByRole('link', { name: '前往建立看板' })).toBeNull();
+  mocks.access.status = 'error';
+  view.rerender(<PostComposePage />);
+  fireEvent.click(screen.getByRole('button', { name: '重新確認權限' }));
+  expect(mocks.access.retry).toHaveBeenCalledOnce();
+  expect(screen.queryByRole('button', { name: '發布' })).toBeNull();
+});
+
+it('does not ask members to fill an unusable post form when there are no boards', async () => {
+  mocks.list.mockResolvedValue([]);
+  render(<PostComposePage />);
+  await screen.findByRole('heading', { name: '目前沒有可發布的看板' });
+  expect(screen.queryByPlaceholderText('一句話描述你的貼文')).toBeNull();
+  expect(screen.queryByPlaceholderText('想分享什麼？')).toBeNull();
+  expect(screen.queryByRole('button', { name: '發布' })).toBeNull();
+  expect(screen.getByRole('button', { name: '重新讀取看板' })).toBeTruthy();
+  expect(mocks.publish).not.toHaveBeenCalled();
+});
+
+it('keeps a draft in state while an empty board result hides the form, then restores it on retry', async () => {
+  let finish!: (rows: unknown[]) => void;
+  mocks.list.mockReturnValueOnce(new Promise((resolve) => { finish = resolve; }));
+  render(<PostComposePage />);
+  fireEvent.change(screen.getByPlaceholderText('一句話描述你的貼文'), { target: { value: '先保留的草稿' } });
+  finish([]);
+  await screen.findByRole('heading', { name: '目前沒有可發布的看板' });
+  expect(screen.queryByPlaceholderText('一句話描述你的貼文')).toBeNull();
+  mocks.list.mockResolvedValueOnce([{ id: 'science', name: '科學討論', type: 'topic' }]);
+  fireEvent.click(screen.getByRole('button', { name: '重新讀取看板' }));
+  await screen.findByRole('combobox', { name: '發布看板' });
+  expect((screen.getByPlaceholderText('一句話描述你的貼文') as HTMLInputElement).value).toBe('先保留的草稿');
   expect(mocks.publish).not.toHaveBeenCalled();
 });
