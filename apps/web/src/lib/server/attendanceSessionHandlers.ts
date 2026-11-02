@@ -462,8 +462,11 @@ export function createLiveSessionHandlers({
       .update(JSON.stringify([groupId, sessionId, teacherUid, requestId]))
       .digest('hex')}`;
     const correction = attendance.collection('attendanceCorrections').doc(correctionId);
+    // 舊請求保留原本的識別方式；新版把核對過的版本一併納入重送識別。
     const requestHash = createHash('sha256')
-      .update(JSON.stringify([studentUid, status, reason]))
+      .update(JSON.stringify(data.expectedRevision === undefined
+        ? [studentUid, status, reason]
+        : [studentUid, status, reason, data.expectedRevision]))
       .digest('hex');
 
     return db.runTransaction(async (transaction: SessionTransaction) => {
@@ -541,13 +544,36 @@ export function createLiveSessionHandlers({
         (previous.uid !== studentUid ||
           previous.groupId !== groupId ||
           previous.sessionId !== sessionId ||
-          !['present', 'late', 'absent', 'excused'].includes(String(previous.status)))
+          typeof previous.status !== 'string' ||
+          !['present', 'late', 'absent', 'excused'].includes(previous.status))
       ) {
         throw new HttpsError(
           'failed-precondition',
           'Attendance record requires administrator repair',
         );
       }
+      // 簽到憑證尚未建立與既有第 0 版必須區分，避免把剛完成的掃碼覆寫。
+      const previousRevision = previous
+        ? (previous.revision === undefined ? 0 : previous.revision)
+        : null;
+      if ((previous !== null && previousRevision === null) || (previousRevision !== null && (
+        typeof previousRevision !== 'number' || !Number.isSafeInteger(previousRevision) ||
+        previousRevision < 0 || previousRevision >= Number.MAX_SAFE_INTEGER
+      ))) {
+        throw new HttpsError('failed-precondition', 'Attendance revision requires administrator repair');
+      }
+      const expectedRevision = data.expectedRevision;
+      if (expectedRevision !== undefined) {
+        if (expectedRevision !== null && (
+          typeof expectedRevision !== 'number' || !Number.isSafeInteger(expectedRevision) || expectedRevision < 0
+        )) {
+          throw new HttpsError('invalid-argument', 'Invalid attendance revision');
+        }
+        if (expectedRevision !== previousRevision) {
+          throw new HttpsError('aborted', 'Attendance changed after review; reload before confirming');
+        }
+      }
+      const nextRevision = (previousRevision ?? 0) + 1;
       const previousStatus = previous ? String(previous.status) : null;
       const wasPresent = previousStatus === 'present' || previousStatus === 'late';
       const isPresent = status === 'present' || status === 'late';
@@ -578,6 +604,7 @@ export function createLiveSessionHandlers({
         checkedInAt,
         correctedBy: teacherUid,
         correctedAt,
+        revision: nextRevision,
         ...profileFields(membership),
       };
       if (recordSnap.exists) transaction.update(record, updatedRecord);
@@ -595,6 +622,8 @@ export function createLiveSessionHandlers({
         sessionId,
         studentUid,
         teacherUid,
+        previousRevision,
+        revision: nextRevision,
         previousStatus,
         nextStatus: status,
         reason,

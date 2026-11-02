@@ -101,6 +101,7 @@ it('sends caller identity for start retries and does not accept false success', 
       data: { groupId: 'class', requestId: 'same-attempt', qrExpiryMinutes: 10 },
     }),
     cache: 'no-store',
+    signal: expect.any(AbortSignal),
   });
 });
 it('rejects blank tokens without calling the backend', async () => {
@@ -288,4 +289,25 @@ it('distinguishes a teacher-attested late arrival from a QR check-in when export
   expect(csv).toContain('"遲到"');
   expect(csv).toContain('"教師補登"');
   expect(csv).toContain('"2026-10-27T04:00:00.000Z"');
+});
+
+
+it('keeps the reviewed revision on the wire but never trusts a client actor field as authentication', async () => {
+  fetchMock.mockResolvedValue({ ok: true, status: 200,
+    json: async () => ({ result: { success: true, reused: true, status: 'late' } }),
+  });
+  const command = { groupId: 'class', sessionId: 'session', studentUid: 'student', status: 'late' as const,
+    reason: '授課教師已確認遲到時間', requestId: 'original-attempt', expectedRevision: 4, actorUid: 'alice' };
+  await correctCourseAttendance(command);
+  const sent = JSON.parse(fetchMock.mock.calls[0][1].body).data;
+  expect(sent.expectedRevision).toBe(4);
+  expect(sent.requestId).toBe('original-attempt');
+  expect(sent).not.toHaveProperty('actorUid');
+  auth.currentUser = { uid: 'bob', getIdToken: async () => 'other-token' };
+  await expect(correctCourseAttendance(command)).rejects.toMatchObject({ code: 'functions/unauthenticated' });
+  expect(fetchMock).toHaveBeenCalledTimes(1);
+});
+it('does not describe an unconfirmed network result as QR expiry', () => {
+  expect(attendanceError({ code: 'attendance/result-unknown' })).toContain('伺服器可能已保存');
+  expect(attendanceError({ code: 'attendance/result-unknown' })).not.toContain('簽到碼已過期');
 });

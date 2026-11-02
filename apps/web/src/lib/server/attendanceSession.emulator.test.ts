@@ -252,4 +252,75 @@ describeEmulator('attendance session handlers against the Firestore emulator', (
     expect((await attendanceRef(session.sessionId).collection('attendanceRecords').get()).size).toBe(0);
     expect((await attendanceRef(session.sessionId).collection('attendanceCorrections').get()).size).toBe(0);
   }, 20_000);
+
+  function reviewedCorrection(sessionId: string, requestId: string, expectedRevision: number | null,
+    status: 'present' | 'late' | 'absent' | 'excused' = 'present', uid = 'teacher') {
+    return handlers.correctAttendanceRecord({ auth: { uid }, data: {
+      groupId: 'class-1', sessionId, studentUid: 'student', requestId, expectedRevision,
+      status, reason: '授課教師核對目前版本後確認',
+    } });
+  }
+
+  it('allows only one of two different reviewed corrections to win against a missing receipt', async () => {
+    await db.doc('groups/class-1/members/second').set({ role: 'instructor', status: 'active' });
+    await db.doc('schools/school-1/members/second').set({ status: 'active' });
+    const session = await startSession();
+    const results = await Promise.allSettled([
+      reviewedCorrection(session.sessionId, 'one', null, 'present'),
+      reviewedCorrection(session.sessionId, 'two', null, 'late', 'second'),
+    ]);
+    expect(results.filter((result) => result.status === 'fulfilled')).toHaveLength(1);
+    const rejected = results.find((result) => result.status === 'rejected');
+    expect(rejected?.status === 'rejected' ? rejected.reason : null).toMatchObject({ code: 'aborted' });
+    await expectCounters(session.sessionId, 1);
+    const reference = attendanceRef(session.sessionId);
+    expect((await reference.collection('attendanceRecords').doc('student').get()).data()?.revision).toBe(1);
+    expect((await reference.collection('attendanceCorrections').get()).size).toBe(1);
+  }, 20_000);
+
+  it('retains idempotency for simultaneous requests carrying the same reviewed revision', async () => {
+    const session = await startSession();
+    const results = await Promise.all([
+      reviewedCorrection(session.sessionId, 'same-reviewed', null),
+      reviewedCorrection(session.sessionId, 'same-reviewed', null),
+    ]);
+    expect(results.filter((result) => result.reused)).toHaveLength(1);
+    await expectCounters(session.sessionId, 1);
+    const reference = attendanceRef(session.sessionId);
+    expect((await reference.collection('attendanceRecords').doc('student').get()).data()?.revision).toBe(1);
+    expect((await reference.collection('attendanceCorrections').get()).size).toBe(1);
+  }, 20_000);
+
+  it('does not overwrite a QR receipt created after a teacher reviewed the empty state', async () => {
+    const session = await startSession();
+    const joined = await handlers.joinLiveSession({ auth: { uid: 'student' }, data: {
+      groupId: 'class-1', sessionId: session.sessionId, qrToken: session.qrToken,
+    } });
+    await expect(reviewedCorrection(session.sessionId, 'stale-empty', null, 'late'))
+      .rejects.toMatchObject({ code: 'aborted' });
+    expect((await attendanceRef(session.sessionId).collection('attendanceCorrections').get()).size).toBe(0);
+    await reviewedCorrection(session.sessionId, 'review-qr', 0, 'late');
+    const receipt = (await attendanceRef(session.sessionId).collection('attendanceRecords').doc('student').get()).data();
+    expect(receipt?.checkedInAt.toDate().toISOString()).toBe(joined.checkedInAt);
+    expect(receipt).toMatchObject({ revision: 1, status: 'late' });
+    await expectCounters(session.sessionId, 1);
+  }, 20_000);
+
+  it('requires explicit re-review before replacing a newer excused decision', async () => {
+    const session = await startSession();
+    await handlers.endLiveSession({ auth: { uid: 'teacher' }, data: { groupId: 'class-1', sessionId: session.sessionId } });
+    await reviewedCorrection(session.sessionId, 'approved-leave', null, 'excused');
+    await expect(reviewedCorrection(session.sessionId, 'old-screen', null, 'absent'))
+      .rejects.toMatchObject({ code: 'aborted' });
+    const reference = attendanceRef(session.sessionId);
+    expect((await reference.collection('attendanceRecords').doc('student').get()).data()?.status).toBe('excused');
+    await reviewedCorrection(session.sessionId, 'reviewed-screen', 1, 'absent');
+    expect((await reference.collection('attendanceRecords').doc('student').get()).data()).toMatchObject({ status: 'absent', revision: 2 });
+    const audit = await reference.collection('attendanceCorrections').get();
+    expect(audit.size).toBe(2);
+    expect(audit.docs.map((entry) => entry.data())).toEqual(expect.arrayContaining([
+      expect.objectContaining({ previousRevision: 1, revision: 2, previousStatus: 'excused', nextStatus: 'absent' }),
+    ]));
+    await expectCounters(session.sessionId, 0);
+  }, 20_000);
 });
