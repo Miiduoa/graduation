@@ -1,7 +1,8 @@
 'use strict';
 
 const { z } = require('zod');
-const { getFirestore, Timestamp } = require('firebase-admin/firestore');
+const { getFirestore } = require('firebase-admin/firestore');
+const { toJsDate } = require('../../lib/assistantFormat');
 
 const inputSchema = z.object({
   onlyOverdue: z.boolean().optional(),
@@ -16,22 +17,20 @@ function loanPath(uid, schoolId) {
     .collection('libraryLoans');
 }
 
-function parseDueMs(row) {
-  const raw = row.dueAt ?? row.dueDate;
-  if (raw == null) return null;
-  if (typeof raw === 'string') {
-    const t = Date.parse(raw);
-    return Number.isNaN(t) ? null : t;
-  }
-  if (raw instanceof Timestamp) return raw.toMillis();
-  if (typeof raw.toMillis === 'function') {
-    try {
-      return raw.toMillis();
-    } catch {
-      return null;
+function parseLoanDate(raw) {
+  try {
+    let date;
+    if (raw && typeof raw.toMillis === 'function') {
+      const milliseconds = raw.toMillis();
+      if (typeof milliseconds !== 'number' || !Number.isFinite(milliseconds)) return null;
+      date = new Date(milliseconds);
+    } else {
+      date = toJsDate(raw);
     }
+    return date && Number.isFinite(date.getTime()) ? date : null;
+  } catch {
+    return null;
   }
-  return null;
 }
 
 function isActiveLoan(row) {
@@ -58,17 +57,17 @@ async function execute(ctx, rawInput) {
   for (const doc of snap.docs) {
     const row = { id: doc.id, ...doc.data() };
     if (!isActiveLoan(row)) continue;
-    const dueMs = parseDueMs(row);
+    const dueDate = parseLoanDate(row.dueAt ?? row.dueDate);
     const overdueByStatus = String(row.status || '').toLowerCase() === 'overdue';
-    const overdueByDate = dueMs != null && dueMs < now;
+    const overdueByDate = dueDate != null && dueDate.getTime() < now;
     if (input.onlyOverdue && !overdueByStatus && !overdueByDate) continue;
 
     loans.push({
       id: doc.id,
       bookId: row.bookId != null ? String(row.bookId) : undefined,
       bookTitle: row.bookTitle != null ? String(row.bookTitle) : row.title != null ? String(row.title) : undefined,
-      borrowedAt: row.borrowedAt != null ? String(row.borrowedAt) : undefined,
-      dueAt: row.dueAt != null ? String(row.dueAt) : row.dueDate != null ? String(row.dueDate) : undefined,
+      borrowedAt: parseLoanDate(row.borrowedAt)?.toISOString(),
+      dueAt: dueDate?.toISOString(),
       status: row.status != null ? String(row.status) : 'borrowed',
       renewCount: typeof row.renewCount === 'number' ? row.renewCount : 0,
     });
