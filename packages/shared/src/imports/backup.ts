@@ -98,7 +98,7 @@ function objectWithFields(
   for (const key of Reflect.ownKeys(descriptors)) {
     if (typeof key !== 'string' || !allowed.includes(key)) {
       if (allowExtraFields) continue;
-      invalid('備份含有不支援的欄位，請使用 nuni 匯出的原始備份。');
+      invalid('備份含有不支援的欄位，請使用 Campus One 匯出的原始備份。');
     }
     const descriptor = descriptors[key];
     if (!descriptor || !('value' in descriptor)) invalid();
@@ -272,8 +272,8 @@ export function parsePersonalImportBackup(text: string): PersonalImportBackupPre
     invalid('這個檔案不是有效的 JSON 備份，沒有還原任何資料。');
   }
   const envelope = objectWithFields(value, ENVELOPE_FIELDS);
-  if (envelope.format !== FORMAT) invalid('這不是 nuni 個人資料備份。');
-  if (envelope.version !== 1) invalid('尚未支援這個備份版本，請更新 nuni 後再試。');
+  if (envelope.format !== FORMAT) invalid('這不是 Campus One 個人資料備份。');
+  if (envelope.version !== 1) invalid('尚未支援這個備份版本，請更新 Campus One 後再試。');
   if (!validSchoolId(envelope.schoolId) || !validTimestamp(envelope.exportedAt)) invalid();
   const records = validatedRecords(envelope.records, envelope.schoolId);
   const ids = new Set(records.map((record) => record.id));

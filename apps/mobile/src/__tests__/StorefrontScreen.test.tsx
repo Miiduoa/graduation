@@ -32,7 +32,7 @@ jest.mock('../services/storefront', () => ({
   toggleStorefrontLike: jest.fn(),
 }));
 
-const caption = '會開啟店家自己的網站，訂單和付款由店家處理，nuni 查不到這筆訂單';
+const caption = '會開啟店家自己的網站，訂單和付款由店家處理，Campus One 查不到這筆訂單';
 
 beforeEach(() => {
   jest.clearAllMocks();
