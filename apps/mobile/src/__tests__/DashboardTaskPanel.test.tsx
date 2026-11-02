@@ -60,5 +60,5 @@ test('opens the exact loaded task and keeps platform course work distinct from a
   fireEvent.press(view.getByRole('button', { name: task.title }));
   expect(actions.onOpenTask).toHaveBeenCalledWith(task);
   view.rerender(<DashboardTaskPanel {...actions} status="ready" tasks={[]} />);
-  expect(view.getByText(/Campus One 作業與測驗請到「課程與作業」查看/)).toBeTruthy();
+  expect(view.getByText(/nuni 作業與測驗請到「課程與作業」查看/)).toBeTruthy();
 });

@@ -201,7 +201,7 @@ function ServiceDirectory() {
                   <small>{action.text}</small>
                   {semantic?.previews?.filter((preview) => preview.destination === action.href).map((preview) => (
                     <span className={styles.preview} key={preview.destination}>
-                      <span>{preview.source === 'campus-platform' ? 'Campus One 資料' : '接通狀態'}：{preview.message}</span>
+                      <span>{preview.source === 'campus-platform' ? 'nuni 資料' : '接通狀態'}：{preview.message}</span>
                       {preview.items.map((item, index) => (
                         <span key={index} className={styles.previewItem}>
                           {item.title}{item.detail ? ' · ' + item.detail : ''}

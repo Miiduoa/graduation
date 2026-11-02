@@ -45,11 +45,12 @@ function Header() {
   return (
     <>
       <header className={headerStyles.header} data-campus-navigation="true">
-        <Link href={href('/')} className={headerStyles.brand} aria-label="Campus One">
+        <Link href={href('/')} className={headerStyles.brand} aria-label="nuni">
           <span className={headerStyles.mark} aria-hidden>
-            C<span>1</span>
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src="/icons/mark.svg" alt="" width={28} height={28} />
           </span>
-          <span className={headerStyles.wordmark}>Campus One</span>
+          <span className={headerStyles.wordmark}>nuni</span>
         </Link>
         <div className={headerStyles.campus}>
           {pathname !== '/bus' && !pathname?.startsWith('/bus/') ? (
@@ -194,11 +195,12 @@ export function AppHeader() {
     <Suspense
       fallback={
         <header className={headerStyles.header} data-campus-navigation="true">
-          <Link href="/" className={headerStyles.brand} aria-label="Campus One">
+          <Link href="/" className={headerStyles.brand} aria-label="nuni">
             <span className={headerStyles.mark} aria-hidden="true">
-              C<span>1</span>
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src="/icons/mark.svg" alt="" width={28} height={28} />
             </span>
-            <span className={headerStyles.wordmark}>Campus One</span>
+            <span className={headerStyles.wordmark}>nuni</span>
           </Link>
         </header>
       }
