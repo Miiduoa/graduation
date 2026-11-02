@@ -111,6 +111,9 @@ const dialogDescriptors = ['showModal', 'close'].map(
   (name) => [name, Object.getOwnPropertyDescriptor(HTMLDialogElement.prototype, name)] as const,
 );
 beforeEach(() => {
+  // Keep ClassExceptions / weekday defaults off Monday fixtures so the suite
+  // does not flip when CI runs on a weekday that matches course dayOfWeek.
+  vi.useFakeTimers({ now: new Date('2026-10-25T04:00:00.000Z'), toFake: ['Date'] });
   vi.clearAllMocks();
   mocks.auth.user = { uid: 'alice' };
   mocks.auth.loading = false;
@@ -150,6 +153,7 @@ afterEach(() => {
   }
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
+  vi.useRealTimers();
 });
 async function ready() {
   const view = render(<PersonalTimetable />);
