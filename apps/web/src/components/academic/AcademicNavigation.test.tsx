@@ -50,6 +50,8 @@ function destination(label: string) {
 
 it.each([
   ['/timetable', '課表', 'timetable'],
+  ['/classroom', '課程空間', 'timetable'],
+  ['/classroom/course/cw_11111111-1111-4111-8111-111111111111', '課程空間', 'timetable'],
   ['/school-courses', 'WOW Class 課程', 'timetable'],
   ['/school-lms', '作業與教材', 'timetable'],
   ['/school-lms/homework/10001/20001', '作業與教材', 'timetable'],
@@ -67,6 +69,7 @@ it.each([
     const links = within(nav).getAllByRole('link');
     expect(links.map((link) => link.textContent)).toEqual([
       '課表',
+      '課程空間',
       'WOW Class 課程',
       '作業與教材',
       '成績',
@@ -127,6 +130,8 @@ it.each(['invalid', '115|', '115|1|2'])('does not forward an invalid timetable t
 it.each([
   '/admin',
   '/teacher',
+  '/classroom/login',
+  '/classroom/account',
   '/classroom/grades',
   '/timetable/s/shared',
   '/grades-other',
@@ -139,8 +144,9 @@ it.each([
   expect(screen.getByText('此頁內容')).toBeTruthy();
 });
 
-it('hides the readonly navigation by default', () => {
+it('keeps the classroom accessible while school LMS reading is disabled', () => {
   render(<SiteShell title="目前頁面"><p>此頁內容</p></SiteShell>);
   expect(screen.queryByRole('link', { name: '作業與教材' })).toBeNull();
   expect(destination('課表').pathname).toBe('/timetable');
+  expect(destination('課程空間').pathname).toBe('/classroom');
 });

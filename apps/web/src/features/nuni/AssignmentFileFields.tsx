@@ -79,6 +79,27 @@ export function revokeUnusedAssignmentPreviews(
   }
 }
 
+export function useAssignmentFilePreviews(files: LocalAssignmentFile[]) {
+  const previews = useRef<LocalAssignmentFile[]>([]);
+  const mounted = useRef(false);
+  useEffect(() => {
+    revokeUnusedAssignmentPreviews(previews.current, files);
+    previews.current = files;
+  }, [files]);
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+      // Strict Mode replays effects while the same previews remain visible.
+      queueMicrotask(() => {
+        if (mounted.current) return;
+        revokeUnusedAssignmentPreviews(previews.current, []);
+        previews.current = [];
+      });
+    };
+  }, []);
+}
+
 export async function compressAssignmentImageFile(file: File): Promise<File> {
   if (!file.type.startsWith('image/') || /heic|heif/i.test(file.type) || typeof document === 'undefined')
     return file;
@@ -145,7 +166,8 @@ export function AssignmentFilePreview({
   onChange?: (files: LocalAssignmentFile[]) => void;
   disabled?: boolean;
 }) {
-  const [opened, setOpened] = useState<LocalAssignmentFile | null>(null);
+  const [openedKey, setOpenedKey] = useState<string | null>(null);
+  const opened = files.find((item) => item.key === openedKey);
   if (!files.length) return null;
   return (
     <>
@@ -156,7 +178,7 @@ export function AssignmentFilePreview({
               <button
                 type="button"
                 className={styles.fileThumb}
-                onClick={() => setOpened(item)}
+                onClick={() => setOpenedKey(item.key)}
                 aria-label={`放大預覽 ${item.file.name}`}
               >
                 {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -191,7 +213,6 @@ export function AssignmentFilePreview({
                     disabled={disabled}
                     onClick={() => {
                       const next = files.filter((_, current) => current !== index);
-                      revokeUnusedAssignmentPreviews(files, next);
                       onChange(next);
                     }}
                   >
@@ -205,7 +226,7 @@ export function AssignmentFilePreview({
       </ul>
       {opened?.previewUrl ? (
         <div className={styles.lightbox} role="dialog" aria-modal="true" aria-label={opened.file.name}>
-          <button type="button" onClick={() => setOpened(null)}>
+          <button type="button" onClick={() => setOpenedKey(null)}>
             關閉
           </button>
           {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -282,13 +303,6 @@ export function AssignmentFilePicker({
   const camera = useRef<HTMLInputElement>(null);
   const album = useRef<HTMLInputElement>(null);
   const docs = useRef<HTMLInputElement>(null);
-  useEffect(() => {
-    return () => {
-      for (const item of files) if (item.previewUrl) URL.revokeObjectURL(item.previewUrl);
-    };
-    // Only revoke leftover object URLs when the picker unmounts.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
   function add(list: FileList | null) {
     if (!list?.length) return;
     onChange(collectLocalFiles(files, list));

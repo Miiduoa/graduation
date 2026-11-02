@@ -46,6 +46,14 @@ import { isHomeworkSubmitted, isMaterialActivityType, isMobileUploadDownloadable
 
 const TC_BASE = 'https://tronclass.pu.edu.tw';
 const TC_BACKEND_SESSION_KEY = '@pu_cache:tc_backend_session';
+const TC_SESSION_CHANGED_MESSAGE = '課程連線已變更，請重新讀取課程。';
+
+class TCSessionChangedError extends Error {
+  constructor() {
+    super(TC_SESSION_CHANGED_MESSAGE);
+    this.name = 'TCSessionChangedError';
+  }
+}
 
 const COMMON_HEADERS: Record<string, string> = {
   'User-Agent':
@@ -58,6 +66,9 @@ const COMMON_HEADERS: Record<string, string> = {
 let _tcUserId: number | null = null;
 let _tcBackendSessionId: string | null = null;
 let _tcBackendSessionLoaded = false;
+let _tcBackendSessionLoading: Promise<void> | null = null;
+let _tcBackendSessionRevision = 0;
+let _tcBackendSessionStorage = Promise.resolve();
 
 /**
  * TronClass X-SESSION-ID — 原生 API 登入後取得的 session token。
@@ -356,38 +367,57 @@ export type TCCourseFullData = {
   learningActivities: TCActivity[];
 };
 
+function updateBackendSessionStorage(revision: number, update: () => Promise<void>): Promise<void> {
+  // Keychain writes may finish out of order. A later logout or login must be the final write.
+  const pending = _tcBackendSessionStorage.then(async () => {
+    if (revision === _tcBackendSessionRevision) await update();
+  });
+  _tcBackendSessionStorage = pending.catch(() => undefined);
+  return _tcBackendSessionStorage;
+}
+
 async function ensureBackendSessionLoaded(): Promise<void> {
   if (_tcBackendSessionLoaded) return;
-  _tcBackendSessionLoaded = true;
+  if (_tcBackendSessionLoading) return _tcBackendSessionLoading;
+  const revision = _tcBackendSessionRevision;
 
-  try {
-    // 優先從 secureStorage 讀取，fallback 到 AsyncStorage（遷移期間）
-    let raw = await secureGetItem(TC_BACKEND_SESSION_KEY);
-    if (!raw) {
-      // 遷移：從舊的 AsyncStorage 讀取
-      raw = await AsyncStorage.getItem(TC_BACKEND_SESSION_KEY).catch(() => null);
-      if (raw) {
-        // 寫入 secureStorage 並清理舊資料
-        await secureSetItem(TC_BACKEND_SESSION_KEY, raw).catch(() => undefined);
-        await AsyncStorage.removeItem(TC_BACKEND_SESSION_KEY).catch(() => undefined);
+  const loading = (async () => {
+    try {
+      let raw = await secureGetItem(TC_BACKEND_SESSION_KEY);
+      if (revision !== _tcBackendSessionRevision) return;
+      let migrate = false;
+      if (!raw) {
+        raw = await AsyncStorage.getItem(TC_BACKEND_SESSION_KEY);
+        if (revision !== _tcBackendSessionRevision) return;
+        migrate = !!raw;
       }
-    }
-    if (!raw) return;
 
-    const parsed = JSON.parse(raw) as {
-      sessionId?: string;
-      userId?: number | null;
-    };
-
-    if (typeof parsed.sessionId === 'string' && parsed.sessionId.trim()) {
-      _tcBackendSessionId = parsed.sessionId.trim();
+      if (raw) {
+        const parsed = JSON.parse(raw) as { sessionId?: string; userId?: number | null };
+        if (typeof parsed.sessionId === 'string' && parsed.sessionId.trim()) {
+          _tcBackendSessionId = parsed.sessionId.trim();
+          _tcUserId = typeof parsed.userId === 'number' && Number.isFinite(parsed.userId)
+            ? parsed.userId : null;
+          if (migrate) {
+            const payload = raw;
+            await updateBackendSessionStorage(revision, async () => {
+              await secureSetItem(TC_BACKEND_SESSION_KEY, payload);
+              // Retain the legacy copy if the secure write fails.
+              await AsyncStorage.removeItem(TC_BACKEND_SESSION_KEY);
+            });
+          }
+        }
+      }
+      if (revision === _tcBackendSessionRevision) _tcBackendSessionLoaded = true;
+    } catch (error) {
+      console.warn('[TronClass] Failed to restore backend session:', error);
     }
-
-    if (typeof parsed.userId === 'number' && Number.isFinite(parsed.userId)) {
-      _tcUserId = parsed.userId;
-    }
-  } catch (error) {
-    console.warn('[TronClass] Failed to restore backend session:', error);
+  })();
+  _tcBackendSessionLoading = loading;
+  try {
+    await loading;
+  } finally {
+    if (_tcBackendSessionLoading === loading) _tcBackendSessionLoading = null;
   }
 }
 
@@ -404,23 +434,28 @@ export async function setTCBackendSession(
     throw new Error('Invalid TronClass backend session');
   }
 
+  const revision = ++_tcBackendSessionRevision;
   _tcBackendSessionId = normalized;
   _tcBackendSessionLoaded = true;
-  _tcUserId = typeof userId === 'number' && Number.isFinite(userId) ? userId : _tcUserId;
+  _tcUserId = typeof userId === 'number' && Number.isFinite(userId) ? userId : null;
 
   const payload = JSON.stringify({ sessionId: normalized, userId: _tcUserId });
-  // 寫入 secureStorage，然後清理舊的 AsyncStorage
-  await secureSetItem(TC_BACKEND_SESSION_KEY, payload).catch(() => undefined);
-  await AsyncStorage.removeItem(TC_BACKEND_SESSION_KEY).catch(() => undefined);
+  await updateBackendSessionStorage(revision, async () => {
+    await secureSetItem(TC_BACKEND_SESSION_KEY, payload);
+    await AsyncStorage.removeItem(TC_BACKEND_SESSION_KEY);
+  });
 }
 
 export async function clearTCSession(): Promise<void> {
+  const revision = ++_tcBackendSessionRevision;
   _tcUserId = null;
   _tcXSessionId = null;
   _tcBackendSessionId = null;
   _tcBackendSessionLoaded = true;
-  await secureDeleteItem(TC_BACKEND_SESSION_KEY).catch(() => undefined);
-  await AsyncStorage.removeItem(TC_BACKEND_SESSION_KEY).catch(() => undefined);
+  await updateBackendSessionStorage(revision, async () => {
+    await secureDeleteItem(TC_BACKEND_SESSION_KEY).catch(() => undefined);
+    await AsyncStorage.removeItem(TC_BACKEND_SESSION_KEY).catch(() => undefined);
+  });
   // 注意：不清除 credentials — 讓使用者登出時才清除
 }
 
@@ -565,7 +600,9 @@ export async function validateTCSession(): Promise<boolean> {
 export async function refreshTCBackendSession(
   studentId: string,
   password: string,
-): Promise<{ success: boolean; error?: string }> {
+): Promise<{ success: boolean; error?: string; cancelled?: boolean }> {
+  let revision = _tcBackendSessionRevision;
+  const cancelled = { success: false, error: TC_SESSION_CHANGED_MESSAGE, cancelled: true };
   try {
     if (!isTronClassDataFetchEnabled()) {
       return { success: false, error: TRONCLASS_DATA_DISABLED_MESSAGE };
@@ -575,9 +612,11 @@ export async function refreshTCBackendSession(
 
     let response: Response;
     try {
+      const authHeaders = await getFirebaseAuthHeaders();
+      if (revision !== _tcBackendSessionRevision) return cancelled;
       response = await fetch(getCloudFunctionUrl('puRefreshTronClassSession'), {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', ...(await getFirebaseAuthHeaders()) },
+        headers: { 'Content-Type': 'application/json', ...authHeaders },
         body: JSON.stringify({ studentId, password }),
         signal: controller.signal,
       });
@@ -586,6 +625,7 @@ export async function refreshTCBackendSession(
     }
 
     const text = await response.text();
+    if (revision !== _tcBackendSessionRevision) return cancelled;
     let data: {
       success?: boolean;
       tronClassSessionId?: string;
@@ -604,9 +644,13 @@ export async function refreshTCBackendSession(
       return { success: false, error: data?.error || 'TronClass session 刷新失敗' };
     }
 
-    await setTCBackendSession(data.tronClassSessionId, data.tronClassUserId ?? null);
+    const saving = setTCBackendSession(data.tronClassSessionId, data.tronClassUserId ?? null);
+    revision = _tcBackendSessionRevision;
+    await saving;
+    if (revision !== _tcBackendSessionRevision) return cancelled;
     return { success: true };
   } catch (error) {
+    if (revision !== _tcBackendSessionRevision) return cancelled;
     const msg = error instanceof Error ? error.message : '連線失敗';
     return { success: false, error: msg };
   }
@@ -662,30 +706,49 @@ async function fetchTronClassBackend<T>(
   if (!shouldUseBackendSession()) {
     throw new Error('No TronClass backend session');
   }
+  const revision = _tcBackendSessionRevision;
+  const sessionId = _tcBackendSessionId;
+  const assertCurrentSession = () => {
+    if (revision !== _tcBackendSessionRevision || sessionId !== _tcBackendSessionId) {
+      throw new TCSessionChangedError();
+    }
+  };
 
   const controller = new AbortController();
   const abortTimer = setTimeout(() => controller.abort(), 20000); // 20 秒逾時（含 cold-start）
 
   let response: Response;
   try {
+    const authHeaders = await getFirebaseAuthHeaders();
+    assertCurrentSession();
     response = await fetch(getCloudFunctionUrl('puFetchTronClassData'), {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        ...(await getFirebaseAuthHeaders()),
+        ...authHeaders,
       },
       body: JSON.stringify({
-        sessionId: _tcBackendSessionId,
+        sessionId,
         dataType,
         ...extra,
       }),
       signal: controller.signal,
     });
+  } catch (error) {
+    assertCurrentSession();
+    throw error;
   } finally {
     clearTimeout(abortTimer);
   }
 
-  const text = await response.text();
+  let text: string;
+  try {
+    text = await response.text();
+  } catch (error) {
+    assertCurrentSession();
+    throw error;
+  }
+  assertCurrentSession();
   let data: { success?: boolean; result?: T; error?: string; userId?: number | null } | null = null;
 
   if (text.trim()) {
@@ -730,7 +793,7 @@ async function fetchTronClassBackend<T>(
         ? 'TronClass session 已失效，請重新登入'
         : `TronClass 代理請求失敗（HTTP ${response.status}）`);
 
-    if (isSessionExpired) {
+    if (isSessionExpired && revision === _tcBackendSessionRevision) {
       await clearTCSession().catch(() => undefined);
     }
 
@@ -739,13 +802,9 @@ async function fetchTronClassBackend<T>(
 
   if (typeof data.userId === 'number' && Number.isFinite(data.userId)) {
     _tcUserId = data.userId;
-    await secureSetItem(
-      TC_BACKEND_SESSION_KEY,
-      JSON.stringify({
-        sessionId: _tcBackendSessionId,
-        userId: _tcUserId,
-      }),
-    ).catch(() => undefined);
+    const payload = JSON.stringify({ sessionId, userId: _tcUserId });
+    await updateBackendSessionStorage(revision, () => secureSetItem(TC_BACKEND_SESSION_KEY, payload));
+    assertCurrentSession();
   }
 
   console.log(`[TronClass] fetchTronClassBackend(${dataType}) success`);
@@ -934,6 +993,9 @@ export async function tcLogin(
   try {
     console.log('[TronClass] Trying backend proxy login…');
     const backendResult = await refreshTCBackendSession(uid, password);
+    if (backendResult.cancelled) {
+      return { success: false, session: null, error: backendResult.error };
+    }
     if (backendResult.success) {
       console.log('[TronClass] Backend proxy login succeeded!');
       // 驗證 session 有效性
@@ -953,6 +1015,9 @@ export async function tcLogin(
     }
     console.warn('[TronClass] Backend proxy failed:', backendResult.error);
   } catch (err) {
+    if (err instanceof TCSessionChangedError) {
+      return { success: false, session: null, error: err.message };
+    }
     console.warn('[TronClass] Backend proxy error:', err);
   }
 
