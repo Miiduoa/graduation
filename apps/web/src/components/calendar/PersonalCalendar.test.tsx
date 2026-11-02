@@ -13,11 +13,42 @@ import {
   savePersonalImportBatch,
 } from '@/lib/personalImports';
 
-const context = vi.hoisted(() => ({
-  owner: 'platform:one',
-  schoolId: 'pu',
-  loading: false,
-}));
+const context = vi.hoisted(() => {
+  type HomeTaskRow = {
+    id: string;
+    courseId: string;
+    courseName: string;
+    title: string;
+    dueAt: string | null;
+    href?: string;
+  };
+  type DeadlineRow = {
+    id: string;
+    title: string;
+    courseName: string;
+    courseId: string;
+    dueDate: string;
+    href: string;
+    source: 'nuni' | 'lms';
+    sourceLabel: string;
+  };
+  return {
+    owner: 'platform:one',
+    schoolId: 'pu',
+    loading: false,
+    user: null as { uid: string } | null,
+    nuni: null as {
+      session: { context: string; platformAccountId: string };
+      loading: boolean;
+    } | null,
+    loadHomeData: vi.fn(async () => ({
+      courses: [] as { id: string; name: string; role: string; unreadCount: number }[],
+      tasks: [] as HomeTaskRow[],
+      unreadCount: 0,
+    })),
+    loadNuniCalendarDeadlines: vi.fn(async () => [] as DeadlineRow[]),
+  };
+});
 
 vi.mock('next/link', () => ({
   default: ({ href, children, ...props }: { href: string; children: React.ReactNode }) => (
@@ -28,11 +59,25 @@ vi.mock('next/link', () => ({
 }));
 
 vi.mock('@/components/AuthGuard', () => ({
-  useAuth: () => ({ user: null, loading: false }),
+  useAuth: () => ({ user: context.user, loading: false }),
+}));
+
+vi.mock('@/features/nuni/Session', () => ({
+  useOptionalNuniSession: () => context.nuni,
+  browserRequest: vi.fn(),
 }));
 
 vi.mock('@/lib/homeOverview', () => ({
-  loadHomeData: vi.fn(async () => ({ courses: [], tasks: [], unreadCount: 0 })),
+  loadHomeData: (uid: string) => context.loadHomeData(uid),
+}));
+
+vi.mock('@/lib/calendarCourseDeadlines', async (actual) => ({
+  ...(await actual<typeof import('@/lib/calendarCourseDeadlines')>()),
+  loadNuniCalendarDeadlines: (
+    transport: unknown,
+    platformAccountId: string,
+    fence?: { cancelled(): boolean },
+  ) => context.loadNuniCalendarDeadlines(transport, platformAccountId, fence),
 }));
 
 vi.mock('@/lib/usePersonalImports', async (actual) => ({
@@ -51,6 +96,10 @@ beforeEach(() => {
   context.owner = 'platform:one';
   context.schoolId = 'pu';
   context.loading = false;
+  context.user = null;
+  context.nuni = null;
+  context.loadHomeData.mockReset().mockResolvedValue({ courses: [], tasks: [], unreadCount: 0 });
+  context.loadNuniCalendarDeadlines.mockReset().mockResolvedValue([]);
   Object.defineProperty(navigator, 'locks', {
     configurable: true,
     value: { request: (_key: string, fn: () => unknown) => Promise.resolve().then(fn) },
@@ -398,6 +447,59 @@ function renderCalendar() {
   fireEvent.click(view.getByRole('button', { name: '列表' }));
   return view;
 }
+
+it('顯示 nuni 課程作業截止，標示來源並連到 classroom 作業', async () => {
+  const courseId = 'cw_11111111-1111-4111-8111-111111111111';
+  const assignmentId = 'cwa_22222222-2222-4222-8222-222222222222';
+  context.user = { uid: 'alice' };
+  context.nuni = {
+    session: { context: 'ctx', platformAccountId: 'pa_1' },
+    loading: false,
+  };
+  context.loadHomeData.mockResolvedValue({
+    courses: [],
+    tasks: [
+      {
+        id: 'dup',
+        courseId,
+        courseName: '資料庫',
+        title: '專題一',
+        dueAt: '2026-10-22T10:00:00.000Z',
+        href: `/course/${courseId}#assignment-${assignmentId}`,
+      },
+    ],
+    unreadCount: 0,
+  });
+  context.loadNuniCalendarDeadlines.mockResolvedValue([
+    {
+      id: `${courseId}:${assignmentId}`,
+      title: '專題一',
+      courseName: '資料庫',
+      courseId,
+      dueDate: '2026-10-22',
+      href: `/classroom/course/${courseId}?view=assignments#assignment-${assignmentId}`,
+      source: 'nuni',
+      sourceLabel: 'nuni 課程',
+    },
+  ]);
+  renderCalendar();
+  const due = await screen.findByTestId('calendar-due-list');
+  expect(within(due).getByText('專題一')).toBeTruthy();
+  expect(within(due).getByText(/nuni 課程/)).toBeTruthy();
+  expect(within(due).getByRole('link', { name: '查看作業' }).getAttribute('href')).toBe(
+    `/classroom/course/${courseId}?view=assignments#assignment-${assignmentId}`,
+  );
+  expect(context.loadNuniCalendarDeadlines).toHaveBeenCalled();
+});
+
+it('未登入時作業截止區保持說明，不因缺少課程而壞頁', async () => {
+  renderCalendar();
+  const due = await screen.findByTestId('calendar-due');
+  expect(due.textContent).toContain('登入後');
+  expect(screen.queryByTestId('calendar-due-list')).toBeNull();
+  expect(context.loadHomeData).not.toHaveBeenCalled();
+  expect(context.loadNuniCalendarDeadlines).not.toHaveBeenCalled();
+});
 
 it('月格切月、選日期、編輯及回今天沿用同一份資料', async () => {
   const view = await createTimedEvent('合成安排');

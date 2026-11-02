@@ -27,8 +27,18 @@ vi.mock('@/components/AuthGuard', () => ({
   useAuth: () => ({ user: context.user, loading: false }),
 }));
 
+vi.mock('@/features/nuni/Session', () => ({
+  useOptionalNuniSession: () => null,
+  browserRequest: vi.fn(),
+}));
+
 vi.mock('@/lib/homeOverview', () => ({
   loadHomeData: vi.fn(async () => ({ courses: [], tasks: [], unreadCount: 0 })),
+}));
+
+vi.mock('@/lib/calendarCourseDeadlines', async (actual) => ({
+  ...(await actual<typeof import('@/lib/calendarCourseDeadlines')>()),
+  loadNuniCalendarDeadlines: vi.fn(async () => []),
 }));
 
 vi.mock('@/components/SiteShell', () => ({
