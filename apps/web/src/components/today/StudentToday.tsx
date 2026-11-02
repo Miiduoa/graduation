@@ -21,7 +21,10 @@ import {
 } from '@campus/shared/src/pickNextAction';
 import { usePersonalImportScope } from '@/lib/usePersonalImports';
 import { usePersonalTodayRecords } from '@/lib/usePersonalTodayRecords';
-import type { HomeCourse } from '@/lib/homeOverview';
+import {
+  TODAY_FLOW_CLASS_TITLE,
+  TODAY_FLOW_WORK_TITLE,
+} from '@/lib/todayCourseWork';
 import {
   assignmentHref,
   assignmentSubmitHref,
@@ -29,6 +32,7 @@ import {
   todayClassesFromSchedule,
 } from '@/lib/todayScreen';
 import styles from './StudentToday.module.css';
+import { TodayUnreadNotifications } from './TodayUnreadNotifications';
 import { TodayWelcome } from './TodayWelcome';
 
 export type TimetableStatus = 'loading' | 'ready' | 'error' | 'empty' | 'unsigned-scope';
@@ -61,7 +65,6 @@ type BoundProps = {
   skeleton: boolean;
   refreshing?: boolean;
   todos: TodayTodo[];
-  courses: readonly HomeCourse[];
   todosError: string;
   lmsUnconnected: boolean;
   leavingTodoIds?: readonly string[];
@@ -138,7 +141,7 @@ export function StudentToday(props: Props) {
               weekHref={props.weekHref}
             />
           )}
-          <div className={styles.columns}>
+          <div className={styles.flow} data-testid="today-unified-flow">
             <TodayClassList
               classes={visibleClasses}
               extra={extraClasses}
@@ -158,6 +161,7 @@ export function StudentToday(props: Props) {
               now={now}
               onRetry={props.onRetryTodos}
             />
+            <TodayUnreadNotifications unsigned={props.unsigned} />
           </div>
         </>
       )}
@@ -438,9 +442,9 @@ function TodayClassList({
   timetableHref: string;
 }) {
   return (
-    <section className={styles.section} aria-labelledby="today-class-title">
+    <section className={styles.section} aria-labelledby="today-class-title" data-testid="today-classes">
       <h2 id="today-class-title" className={styles.sectionTitle}>
-        今天課表
+        {TODAY_FLOW_CLASS_TITLE}
       </h2>
       {status === 'loading' ? (
         <div className={styles.skeleton} aria-busy="true">
@@ -530,10 +534,12 @@ function TodoList({
   return (
     <section className={styles.section} aria-labelledby="today-todo-title" data-testid="today-work">
       <h2 id="today-todo-title" className={styles.sectionTitle}>
-        待處理
+        {TODAY_FLOW_WORK_TITLE}
       </h2>
       {unsigned ? (
-        <p className={styles.empty}>{TODAY_COPY.unsigned}</p>
+        <p className={styles.empty}>
+          {TODAY_COPY.unsigned} <Link href="/calendar">也可先查看行事曆與期限</Link>
+        </p>
       ) : error ? (
         <>
           <p className={styles.empty} role="alert">
@@ -547,6 +553,11 @@ function TodoList({
       {!unsigned && lmsUnconnected && todos.length === 0 ? (
         <p className={styles.empty}>
           還沒有 nuni 課程資料。<Link href="/classroom">加入課程</Link>
+          ，加入後作業期限會出現在這裡與行事曆。
+        </p>
+      ) : !unsigned && !error && !lmsUnconnected && todos.length === 0 ? (
+        <p className={styles.empty}>
+          目前沒有今日或即將到期的作業。<Link href="/calendar">查看行事曆</Link>
         </p>
       ) : unsigned || todos.length === 0 ? null : (
         <ul id="today-work-items" className={styles.list} data-testid="today-work-list">
@@ -614,7 +625,7 @@ export function StudentTodayPage(props: BoundProps) {
     schoolId,
     now,
   });
-  const classes = todayClassesFromSchedule(schedule.today, now, props.courses);
+  const classes = todayClassesFromSchedule(schedule.today, now);
   return (
     <StudentToday
       scopeKey={records.scopeKey}
