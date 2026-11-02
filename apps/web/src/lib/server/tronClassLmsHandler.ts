@@ -574,6 +574,19 @@ export function createTronClassLmsHandler({
         }
       }
 
+      // Content requests may still be in flight when the user reconnects or signs out.
+      // Never return or persist results fetched under a superseded LMS session.
+      if (fetchedFromSchool) {
+        await requireAcademicAccount(db, uid);
+        const [latestPortal, latestSession] = await Promise.all([portalSnapshot.ref.get(), sessionRef.get()]);
+        if (!latestPortal.exists || latestPortal.data()?.ownerUid !== uid ||
+          latestPortal.data()?.tronClassSessionId !== linkedId ||
+          !(schoolSessionExpiry(latestPortal.data()?.expiresAt) > now()) ||
+          !latestSession.exists || latestSession.data()?.ownerUid !== uid ||
+          !(schoolSessionExpiry(latestSession.data()?.expiresAt) > now()) ||
+          !schoolSessionCookies(latestSession.data()?.cookies)) reconnect();
+      }
+
       const merged = mergeExtras(homeworkOnlySnapshot(snapshot), extras);
       merged.cache = { hit: !fetchedFromSchool && !refresh, expiresAt: snapshot.cache.expiresAt };
       try {
