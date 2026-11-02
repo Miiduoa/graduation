@@ -73,8 +73,9 @@ function NavigationSession({ userId, schoolId, draftState }: Props & {
   const [result, setResult] = useState<CloudNavigationResult | null>(null);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
-  const [, refreshRetryTime] = useState(0);
-  const retryReadyAt = draftState.quotaUntil !== null && draftState.quotaUntil > Date.now() ? draftState.quotaUntil : null;
+  const [retryClock, setRetryClock] = useState(() => Date.now());
+  const { setPending: reportPending } = draftState;
+  const retryReadyAt = draftState.quotaUntil !== null && draftState.quotaUntil > retryClock ? draftState.quotaUntil : null;
   const request = useRef<AbortController | null>(null);
   const composer = useRef<HTMLTextAreaElement>(null);
   const previewHeading = useRef<HTMLHeadingElement>(null);
@@ -85,13 +86,13 @@ function NavigationSession({ userId, schoolId, draftState }: Props & {
   }, []);
 
   useEffect(() => {
-    draftState.setPending(previewing || pending);
-    return () => draftState.setPending(false);
-  }, [previewing, pending, draftState.setPending]);
+    reportPending(previewing || pending);
+    return () => reportPending(false);
+  }, [previewing, pending, reportPending]);
 
   useEffect(() => {
     if (retryReadyAt === null) return;
-    const timer = window.setTimeout(() => refreshRetryTime((value) => value + 1), Math.max(0, retryReadyAt - Date.now()));
+    const timer = window.setTimeout(() => setRetryClock(Date.now()), Math.max(0, retryReadyAt - Date.now()));
     return () => window.clearTimeout(timer);
   }, [retryReadyAt]);
 

@@ -390,6 +390,13 @@ function DraftView(props: Partial<Omit<SelectedSchoolProviderProps, 'children'>>
     </SelectedSchoolProvider>
   );
 }
+function observeStorageWrites() {
+  // jsdom exposes native Storage methods on the prototype; the test polyfill owns its methods.
+  const owner = Object.prototype.hasOwnProperty.call(localStorage, 'setItem')
+    ? localStorage
+    : Object.getPrototypeOf(localStorage);
+  return vi.spyOn(owner, 'setItem');
+}
 it('holds the accepted school and draft until confirmation, with cancellation committing nothing', () => {
   localStorage.setItem(
     schoolPreferenceKey(defaults.ownerKey),
@@ -397,7 +404,7 @@ it('holds the accepted school and draft until confirmation, with cancellation co
   );
   render(<DraftView />);
   fireEvent.change(screen.getByLabelText('助理草稿'), { target: { value: '甲校未送文字' } });
-  const writes = vi.spyOn(localStorage, 'setItem');
+  const writes = observeStorageWrites();
   fireEvent.change(screen.getByLabelText('瀏覽校園'), { target: { value: 'school-b' } });
   expect(screen.getByRole('dialog')).toBeTruthy();
   expect(screen.getByTestId('selected-school').textContent).toBe('甲校');
@@ -408,11 +415,21 @@ it('holds the accepted school and draft until confirmation, with cancellation co
   expect((screen.getByLabelText('助理草稿') as HTMLInputElement).value).toBe('甲校未送文字');
   expect(navigation.replace).not.toHaveBeenCalled();
   expect(writes).not.toHaveBeenCalled();
+  expect(localStorage.getItem(schoolPreferenceKey(defaults.ownerKey))).toBe(
+    JSON.stringify({ schoolId: 'school-a' }),
+  );
   fireEvent.change(screen.getByLabelText('瀏覽校園'), { target: { value: 'school-b' } });
   fireEvent.click(screen.getByRole('button', { name: '清除草稿並切換' }));
   expect(screen.getByTestId('selected-school').textContent).toBe('乙校');
   expect((screen.getByLabelText('助理草稿') as HTMLInputElement).value).toBe('');
   expect(writes).toHaveBeenCalledTimes(1);
+  expect(writes).toHaveBeenCalledWith(
+    schoolPreferenceKey(defaults.ownerKey),
+    JSON.stringify({ schoolId: 'school-b' }),
+  );
+  expect(localStorage.getItem(schoolPreferenceKey(defaults.ownerKey))).toBe(
+    JSON.stringify({ schoolId: 'school-b' }),
+  );
   expect(navigation.replace).toHaveBeenCalledTimes(1);
 });
 it('holds an externally requested school without a B commit and restores the accepted URL on cancel', () => {
@@ -473,7 +490,7 @@ it('holds cross-tab school preferences until confirmation and cancellation never
   );
   const view = render(<DraftView />);
   fireEvent.change(screen.getByLabelText('助理草稿'), { target: { value: '甲校草稿' } });
-  const writes = vi.spyOn(localStorage, 'setItem');
+  const writes = observeStorageWrites();
   act(() =>
     window.dispatchEvent(
       new StorageEvent('storage', {

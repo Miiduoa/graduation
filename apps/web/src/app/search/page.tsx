@@ -85,9 +85,10 @@ function ServiceDirectory() {
   const category = SERVICE_CATEGORIES.some((item) => item.id === draftState.draft.category)
     ? draftState.draft.category as ServiceCategory
     : 'all';
+  const { readUrlDraft, writeUrlDraft } = draftState;
   useEffect(() => {
     // History can revisit an old URL, but it cannot restore old consent or replace a newer draft.
-    const restored = draftState.readUrlDraft(new URLSearchParams(queryString));
+    const restored = readUrlDraft(new URLSearchParams(queryString));
     const url = new URL(window.location.href);
     const text = restored?.text ?? query;
     const filter = restored?.category ?? category;
@@ -95,11 +96,11 @@ function ServiceDirectory() {
     else url.searchParams.delete('q');
     if (filter !== 'all') url.searchParams.set('category', filter);
     else url.searchParams.delete('category');
-    draftState.writeUrlDraft(url);
+    writeUrlDraft(url);
     setAnalysis(null);
     setDraftRevision((value) => value + 1);
     setVoiceRevision((value) => value + 1);
-  }, [queryString, semanticScope, query, category, draftState.readUrlDraft, draftState.writeUrlDraft]);
+  }, [queryString, semanticScope, query, category, readUrlDraft, writeUrlDraft]);
   const term = query.trim();
   const semantic =
     analysis?.scope === semanticScope &&

@@ -157,6 +157,12 @@ function submit(entry: Entry) {
 function selectSchool(id: string) {
   fireEvent.change(within(screen.getByRole('region', { name: '旅程選校' })).getByRole('combobox', { name: '瀏覽校園' }), { target: { value: id } });
 }
+function observeStorageWrites() {
+  const owner = Object.prototype.hasOwnProperty.call(localStorage, 'setItem')
+    ? localStorage
+    : Object.getPrototypeOf(localStorage);
+  return vi.spyOn(owner, 'setItem');
+}
 function expectFreshConfirmation(entry: Entry) {
   expect(screen.queryByRole('checkbox', { name: /我同意將/ })).toBeNull();
   expect(screen.queryByText(SUMMARY)).toBeNull();
@@ -313,7 +319,7 @@ describe('Agent drafts across real entry components', () => {
     write(entry);
     await review(entry);
     submit(entry);
-    const storage = vi.spyOn(window.localStorage, 'setItem');
+    const storage = observeStorageWrites();
     const oldUrl = window.location.href;
     navigation.push.mockClear();
     navigation.replace.mockClear();
@@ -340,13 +346,14 @@ describe('Agent drafts across real entry components', () => {
     write(entry);
     await review(entry);
     submit(entry);
-    const storage = vi.spyOn(window.localStorage, 'setItem');
+    const storage = observeStorageWrites();
     selectSchool('nthu');
     expect(storage).not.toHaveBeenCalled();
     fireEvent.click(within(screen.getByRole('dialog', { name: '切換校園？' })).getByRole('button', { name: '清除草稿並切換' }));
     await waitFor(() => expect(screen.getByTestId('journey-school').getAttribute('data-school')).toBe('nthu'));
     expect(composer(entry).value).toBe('');
     expect(storage).toHaveBeenCalledWith(schoolPreferenceKey('firebase:alice'), JSON.stringify({ schoolId: 'nthu' }));
+    expect(localStorage.getItem(schoolPreferenceKey('firebase:alice'))).toBe(JSON.stringify({ schoolId: 'nthu' }));
     expect(pending.signal()?.aborted).toBe(true);
     commits.length = 0;
     selectSchool('pu');
