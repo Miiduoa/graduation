@@ -144,6 +144,77 @@ beforeEach(() => {
   });
 });
 
+it.each(['pageshow', 'focus', 'visibilitychange'])(
+  'updates the Taipei date immediately on %s, without waiting for data or the minute timer',
+  async (eventName) => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date('2026-12-31T23:59:20+08:00'));
+    const visibility = vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('visible');
+    const page = render(<HomePage />);
+    try {
+      await screen.findByText('12月31日 週四');
+      vi.mocked(loadHomeData).mockReturnValue(new Promise(() => {}));
+      vi.setSystemTime(new Date('2027-01-01T00:00:05+08:00'));
+      await act(async () => {
+        (eventName === 'visibilitychange' ? document : window).dispatchEvent(new Event(eventName));
+      });
+      expect(screen.getByText('1月1日 週五')).toBeTruthy();
+      expect(screen.queryByText('12月31日 週四')).toBeNull();
+    } finally {
+      page.unmount();
+      visibility.mockRestore();
+      vi.useRealTimers();
+    }
+  },
+);
+
+it('updates at Taipei midnight even when the page mounted partway through a minute', async () => {
+  vi.useFakeTimers();
+  vi.setSystemTime(new Date('2026-12-31T23:59:50+08:00'));
+  const visibility = vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('visible');
+  let page: ReturnType<typeof render> | undefined;
+  try {
+    await act(async () => { page = render(<HomePage />); });
+    expect(screen.getByText('12月31日 週四')).toBeTruthy();
+    await act(async () => { await vi.advanceTimersByTimeAsync(10_000); });
+    expect(screen.getByText('1月1日 週五')).toBeTruthy();
+  } finally {
+    page?.unmount();
+    visibility.mockRestore();
+    vi.useRealTimers();
+  }
+});
+
+it('removes a task when its no-late deadline passes without hiding work that allows late submissions', async () => {
+  vi.useFakeTimers();
+  vi.setSystemTime(new Date('2026-11-02T09:59:50+08:00'));
+  const visibility = vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('visible');
+  const tasks = ['不可補交作業', '允許補交作業', '補交規則未知'].map((title, index) => ({
+    id: `deadline-${index}`,
+    courseId: 'deadline-course',
+    courseName: '資料庫',
+    title,
+    dueAt: '2026-11-02T10:00:00+08:00',
+    acceptsLate: index === 0 ? false : index === 1 ? true : undefined,
+  }));
+  vi.mocked(loadHomeData).mockResolvedValue(data('資料庫', { tasks }));
+  let page: ReturnType<typeof render> | undefined;
+  try {
+    await act(async () => { page = render(<HomePage />); });
+    expect(screen.getAllByText('不可補交作業').length).toBeGreaterThan(0);
+    await act(async () => { await vi.advanceTimersByTimeAsync(70_000); });
+    await act(async () => { await vi.advanceTimersByTimeAsync(300); });
+    expect(screen.queryByText('不可補交作業')).toBeNull();
+    expect(screen.getAllByText('允許補交作業').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('補交規則未知').length).toBeGreaterThan(0);
+    expect(loadHomeData).toHaveBeenCalledTimes(1);
+  } finally {
+    page?.unmount();
+    visibility.mockRestore();
+    vi.useRealTimers();
+  }
+});
+
 it('keeps Firebase tasks and published feedback available alongside the nuni entry', async () => {
   vi.mocked(loadHomeData).mockResolvedValue(
     data('Firebase 課程', {

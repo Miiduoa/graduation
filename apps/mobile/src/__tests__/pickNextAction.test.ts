@@ -1,5 +1,6 @@
 import {
   formatTodayHeaderDate,
+  formatTodoDeadlineLabel,
   formatTodoDueLine,
   formatUpcomingDueLine,
   pickNextAction,
@@ -38,7 +39,7 @@ test('30 分鐘內有課時選下一堂課', () => {
   expect(pickNextAction([klass()], [todo()], current)).toEqual({ type: 'class', class: klass() });
 });
 
-test('24 小時內有未交作業截止時選今天截止', () => {
+test('24 小時內有未交作業截止時優先顯示待辦', () => {
   const current = new Date('2026-10-25T08:00:00+08:00');
   const laterClass = klass({
     startAt: Date.parse('2026-10-25T16:10:00+08:00'),
@@ -82,7 +83,7 @@ test('只有逾期未交、今天沒課時選最早逾期的那筆，不當成�
   });
   const overdue = todo({ dueAt: Date.parse('2026-10-23T23:59:00+08:00') });
   expect(pickNextAction([], [laterOverdue, overdue], now)).toEqual({ type: 'overdue', todo: overdue });
-  expect(formatTodoDueLine(overdue, now)).toBe(TODAY_COPY.overdueDays(2));
+  expect(formatTodoDueLine(overdue, now)).toBe(TODAY_COPY.overdueDays(1));
   expect(formatTodayHeaderDate(now)).toBe('10月25日 週日');
 });
 
@@ -99,4 +100,28 @@ test('今天沒課且超過 24 小時才截止的未交是下一件作業，不�
   expect(formatUpcomingDueLine(laterDue)).toBe('10/28 週三 23:59 截止');
   expect(TODAY_COPY.nextAssignment).toBe('下一件作業');
   expect(pickNextAction([], [], now)).toEqual({ type: 'empty' });
+});
+
+test('明天凌晨到期保留優先級並顯示正確日期和分鐘', () => {
+  const current = new Date('2026-12-31T23:50:00+08:00');
+  const work = todo({ dueAt: Date.parse('2027-01-01T00:10:00+08:00') });
+  expect(pickNextAction([], [work], current)).toEqual({ type: 'assignment', todo: work });
+  expect(formatTodoDeadlineLabel(work, current)).toBe('明天截止');
+  expect(formatTodoDueLine(work, current)).toBe('明天 00:10 截止・還剩 20 分鐘');
+});
+
+test('不足一分鐘不顯示還有一小時，午夜剛過不算逾期一天', () => {
+  const current = new Date('2026-11-02T23:59:30+08:00');
+  expect(formatTodoDueLine(todo({ dueAt: current.getTime() + 30_000 }), current))
+    .toBe('明天 00:00 截止・不到 1 分鐘');
+  expect(formatTodoDueLine(
+    todo({ dueAt: Date.parse('2026-11-02T23:59:00+08:00') }),
+    new Date('2026-11-03T00:01:00+08:00'),
+  )).toBe('已逾期');
+});
+
+test('無效時間不顯示 NaN，沒有截止時間保留未知狀態', () => {
+  expect(formatTodoDeadlineLabel(todo({ dueAt: NaN }), now)).toBe('截止時間待確認');
+  expect(formatTodoDueLine(todo(), new Date(NaN))).toBe('截止時間待確認');
+  expect(formatTodoDeadlineLabel(todo({ dueAt: null }), now)).toBe('未設截止時間');
 });
