@@ -243,7 +243,7 @@ function NavigationSession({ userId, schoolId, initialDraft = '' }: Props) {
           </button>
           {previewing && <button type="button" className={styles.secondary} onClick={cancel}>取消讀取</button>}
         </div>
-        {previewing && <p role="status">正在讀取 Campus One 的公開地點資料，尚未傳送至 Groq。</p>}
+        {previewing && <p role="status">正在讀取 nuni 的公開地點資料，尚未傳送至 Groq。</p>}
       </form>
 
       {notice && <p role="status" className={styles.notice}>{notice}</p>}

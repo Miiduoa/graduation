@@ -198,7 +198,7 @@ function QuickCampusEntrySession({
         </div>
       )}
       <p className={styles.privacy}>
-        語音只填入可修改的文字，不會自動交給雲端助理。語音辨識本身可能由瀏覽器供應商處理；Campus One
+        語音只填入可修改的文字，不會自動交給雲端助理。語音辨識本身可能由瀏覽器供應商處理；nuni
         不會另行上傳錄音檔。服務入口仍由你開啟，不會自行繳交、付款或更改資料。
       </p>
     </section>
