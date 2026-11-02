@@ -206,6 +206,60 @@ async function proposal(overrides = {}) {
   } };
 }
 
+test('an Agent return with a whitespace-only saved book title confirms its receipt and cannot replenish twice', async () => {
+  const blankTitle = ' \t\n ';
+  const bookRef = db.doc('schools/pu/libraryBooks/B1');
+  await bookRef.update({ title: blankTitle });
+  const loan = await borrow.execute(scope(), { bookId: 'B1' });
+  const loanRef = db.doc(`schools/pu/libraryLoans/${loan.loanId}`);
+  const mirrorRef = db.doc(`users/alice/schools/pu/libraryLoans/${loan.loanId}`);
+  const borrowed = (await loanRef.get()).data();
+  assert.equal(borrowed.bookTitle, blankTitle);
+  assert.equal(borrowed.status, 'borrowed');
+  assert.deepEqual((await mirrorRef.get()).data(), borrowed);
+  assert.equal((await bookRef.get()).data().availableCopies, 0);
+  assert.equal((await bookRef.get()).data().available, 0);
+
+  const input = { loanId: loan.loanId };
+  const action = await proposal({ actionProposals: [{ toolName: 'returnBook', input }] });
+  action.data.toolName = 'returnBook';
+  action.data.input = input;
+  const receipt = await executeAgentWrite.run(action);
+  const runRef = db.doc(`users/alice/agentRuns/${action.data.agentRunId}`);
+  const guardRef = db.doc('users/alice/schools/pu/serviceWriteGuards/library');
+  const watched = [loanRef, mirrorRef, bookRef, runRef, guardRef];
+  const afterReturn = await db.getAll(...watched);
+  const [canonical, mirror, book, savedRun] = afterReturn.map((snapshot) => snapshot.data());
+  assert.equal(canonical.status, 'returned');
+  assert.equal(canonical.bookId, 'B1');
+  assert.equal(canonical.bookTitle, blankTitle);
+  assert.ok(canonical.returnedAt instanceof Timestamp);
+  assert.deepEqual(mirror, canonical);
+  assert.equal(book.availableCopies, 1);
+  assert.equal(book.available, 1);
+
+  await assert.rejects(executeAgentWrite.run(action), { code: 'already-exists' });
+  const afterReplay = await db.getAll(...watched);
+  afterReplay.forEach((snapshot, index) => {
+    assert.deepEqual(snapshot.data(), afterReturn[index].data());
+    assert.equal(snapshot.updateTime.isEqual(afterReturn[index].updateTime), true,
+      `replaying the proposal must not rewrite ${snapshot.ref.path}`);
+  });
+
+  assert.equal(receipt.success, true, 'the committed return must produce a verified success receipt');
+  assert.equal(receipt.toolName, 'returnBook');
+  assert.equal(receipt.bookTitle, 'B1');
+  assert.equal(savedRun.actionClaims['0'].status, 'completed');
+  assert.ok(savedRun.actionClaims['0'].startedAt instanceof Timestamp);
+  assert.ok(savedRun.actionClaims['0'].updatedAt instanceof Timestamp);
+  assert.equal(savedRun.steps.length, 1);
+  assert.deepEqual(savedRun.toolCalls, savedRun.steps);
+  assert.equal(savedRun.steps[0].phase, 'executeAgentWrite');
+  assert.equal(savedRun.steps[0].tool, 'returnBook');
+  assert.deepEqual(savedRun.steps[0].input, input);
+  assert.deepEqual(savedRun.steps[0].output, receipt);
+});
+
 test('one Agent proposal can be claimed once and never accepts a client group override', async () => {
   const action = await proposal();
   const results = await Promise.allSettled([executeAgentWrite.run(action), executeAgentWrite.run(action)]);
