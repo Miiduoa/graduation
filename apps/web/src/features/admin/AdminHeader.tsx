@@ -24,7 +24,8 @@ export function AdminHeader() {
     <header className={styles.adminHeader}>
       <Link className={styles.adminBrand} href="/" aria-label="nuni 首頁">
         <span className={styles.brandMark} aria-hidden="true">
-          n
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src="/icons/mark.svg" alt="" width={28} height={28} />
         </span>
         <span>nuni</span>
         <span className={styles.headerContext}>平台管理</span>

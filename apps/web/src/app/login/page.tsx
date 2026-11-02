@@ -188,7 +188,7 @@ function LoginForm({
       <section className={styles.connectionIntro} aria-label="校務連線方式">
         <div>
           <p className={styles.connectionKicker}>校園資料，一次整理</p>
-          <h2>用熟悉的學校帳號，接上自己的課表</h2>
+          <h2>用匯入與 Google 帳號，整理自己的課表</h2>
           <p>尚未開放學號直接登入。你可以自行匯入課表、成績與活動；需要平台交流或課班服務時，請使用 Google 帳號登入。兩種方法分開顯示，避免把「可瀏覽校園」誤認為「已取得校務權限」。</p>
         </div>
         <div className={styles.connectionFacts}>
@@ -203,7 +203,7 @@ function LoginForm({
               <span className={styles.methodEyebrow}>學校帳號 · 本人授權</span>
               <h2>學校帳號</h2>
             </div>
-            <span className={styles.methodStatus}>{schoolAvailable ? '可連線' : '依校園提供'}</span>
+            <span className={styles.methodStatus}>{schoolAvailable ? '尚未開放' : '依校園提供'}</span>
           </div>
           {(selection?.schools?.length ?? 0) > 0 && (
             <label className={styles.schoolPicker} htmlFor="login-school">
@@ -244,7 +244,7 @@ function LoginForm({
                 </p>
               )}
               <form className={styles.loginForm} onSubmit={login} aria-busy={busy}>
-                <p className={styles.formIntro}>使用學校的既有帳號連線，不需要另外申請 nuni 學號。</p>
+                <p className={styles.formIntro}>學號直接登入尚未開放；開通前請先匯入課表與成績，或以 Google 帳號登入平台服務。</p>
                 <Input
                   id="student-id"
                   name="studentId"

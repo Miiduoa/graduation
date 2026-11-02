@@ -50,7 +50,15 @@ it('shows nuni brand mark and wordmark in the header without Campus One', () => 
   expect(brand).toBeTruthy();
   expect(brand.textContent).toContain('nuni');
   expect(container.textContent).not.toMatch(/Campus One|CampusOne/);
-  expect(brand.querySelector('[aria-hidden]')?.textContent?.trim()).toBe('n');
+  const mark = brand.querySelector('img');
+  expect(mark?.getAttribute('src')).toBe('/icons/mark.svg');
+});
+
+it('shows nuni mark and wordmark in the site footer', () => {
+  const { container } = render(<SiteFooter />);
+  expect(screen.getByText('nuni')).toBeTruthy();
+  expect(container.querySelector('img')?.getAttribute('src')).toBe('/icons/mark.svg');
+  expect(container.textContent).not.toMatch(/Agent/);
 });
 
 it('publishes nuni in web app manifest name fields', () => {

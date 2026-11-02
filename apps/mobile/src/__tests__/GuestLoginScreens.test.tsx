@@ -460,6 +460,8 @@ test('a release without school SSO keeps public and platform entries, but does n
 test('the guest school-login entry always follows the selected university', () => {
   const view = render(<LoginLandingScreen />);
   expect(view.getByTestId('school-login-start')).toBeTruthy();
+  expect(view.getByText('學校帳號（尚未開放）')).toBeTruthy();
+  expect(view.getByText('學號登入（尚未開放）')).toBeTruthy();
   expect(
     view.getByText(
       '尚未開放學號直接登入；你仍可匯入自己取得的課表、成績與活動，或以 Google 帳號使用平台交流與課班服務。',
@@ -467,6 +469,9 @@ test('the guest school-login entry always follows the selected university', () =
   ).toBeTruthy();
   expect(view.queryByText(/可直接使用 e 校園帳號/)).toBeNull();
   expect(view.queryByText(/提供學號直接連線/)).toBeNull();
+  expect(view.queryByText('可連線')).toBeNull();
+  expect(view.queryByText('使用學號連線')).toBeNull();
+  expect(view.queryByText(/可以連線支援的校務系統/)).toBeNull();
   mockSchool = { id: 'nthu', name: '國立清華大學', shortName: '清大' };
   view.rerender(<LoginLandingScreen />);
   expect(view.queryByTestId('school-login-start')).toBeNull();
@@ -477,6 +482,9 @@ test('the guest school-login entry always follows the selected university', () =
   mockSchool = { id: 'pu', name: '靜宜大學', shortName: '靜宜' };
   view.rerender(<LoginLandingScreen />);
   expect(view.getByTestId('school-login-start')).toBeTruthy();
+  expect(view.queryByText('可連線')).toBeNull();
+  expect(view.queryByText('使用學號連線')).toBeNull();
+  expect(view.queryByText(/提供學號直接連線/)).toBeNull();
 });
 
 test('a direct school login route cannot show Providence credentials while browsing NTHU', () => {

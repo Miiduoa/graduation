@@ -47,7 +47,8 @@ function Header() {
       <header className={headerStyles.header} data-campus-navigation="true">
         <Link href={href('/')} className={headerStyles.brand} aria-label="nuni">
           <span className={headerStyles.mark} aria-hidden>
-            n
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src="/icons/mark.svg" alt="" width={28} height={28} />
           </span>
           <span className={headerStyles.wordmark}>nuni</span>
         </Link>
@@ -195,7 +196,8 @@ export function AppHeader() {
         <header className={headerStyles.header} data-campus-navigation="true">
           <Link href="/" className={headerStyles.brand} aria-label="nuni">
             <span className={headerStyles.mark} aria-hidden="true">
-              n
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src="/icons/mark.svg" alt="" width={28} height={28} />
             </span>
             <span className={headerStyles.wordmark}>nuni</span>
           </Link>

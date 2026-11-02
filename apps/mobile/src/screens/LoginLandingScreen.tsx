@@ -59,13 +59,13 @@ export default function LoginLandingScreen() {
             把自己的校園資料，整理在一起
           </Text>
           <Text style={s.body}>
-            選擇學校後，可以連線支援的校務系統，或直接匯入自己下載的課表、成績與活動資料。校園地圖、公車與公開資訊仍然不必登入。
+            選擇學校後，可自行匯入課表、成績與活動；需要平台交流或課班服務時，請使用 Google 帳號登入。校園地圖、公車與公開資訊仍然不必登入。
           </Text>
         </View>
         <SchoolBrowsingControl />
         <View style={s.schoolPanel}>
           <Text accessibilityRole="header" style={s.title}>
-            {schoolEntry ? '從學校帳號取得資料' : '從學校資料開始'}
+            {schoolEntry ? '學校帳號（尚未開放）' : '從學校資料開始'}
           </Text>
           <Text style={s.body} testID={schoolEntry ? undefined : 'school-login-hint'}>
             {schoolEntry
@@ -79,7 +79,7 @@ export default function LoginLandingScreen() {
               style={({ pressed }) => [s.schoolButton, pressed && s.rowPressed]}
               onPress={() => safeNavigate(navigation, 'SSOLogin')}
             >
-              <Text style={s.schoolButtonText}>使用學號連線</Text>
+              <Text style={s.schoolButtonText}>學號登入（尚未開放）</Text>
             </Pressable>
           ) : null}
           <SchoolPortalImportEntry

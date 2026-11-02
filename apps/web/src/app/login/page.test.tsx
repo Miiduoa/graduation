@@ -100,6 +100,19 @@ it('states student-id login is not open and never claims direct school-id connec
   expect(screen.getByText('可自行匯入課表、成績與活動')).toBeTruthy();
   expect(container.textContent).not.toContain('提供學號直接連線');
   expect(container.textContent).not.toContain('直接連線：靜宜大學');
+  expect(container.textContent).not.toContain('可連線');
+  expect(container.textContent).not.toContain('使用學號連線');
+});
+it('keeps unavailable school-login wording even when student-id option reports available', () => {
+  state.user = null;
+  state.studentId = true;
+  const { container } = render(<LoginPage />);
+  expect(screen.getAllByText('尚未開放').length).toBeGreaterThan(0);
+  expect(container.textContent).toContain('學號直接登入尚未開放');
+  expect(container.textContent).not.toContain('可連線');
+  expect(container.textContent).not.toContain('使用學號連線');
+  expect(container.textContent).not.toContain('提供學號直接連線');
+  expect(container.textContent).not.toContain('使用學校的既有帳號連線');
 });
 it('keeps a school return destination during an availability failure instead of offering the wrong account', () => {
   state.user = null;

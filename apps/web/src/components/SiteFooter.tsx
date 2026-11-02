@@ -4,7 +4,11 @@ import styles from '@/app/home.module.css';
 export function SiteFooter() {
   return (
     <footer className={styles.footer}>
-      <span>nuni</span>
+      <span className={styles.footerBrand}>
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img src="/icons/mark.svg" alt="" width={20} height={20} />
+        nuni
+      </span>
       <nav aria-label="網站資訊">
         <Link href="/terms">服務條款</Link>
         <Link href="/privacy">隱私政策</Link>
