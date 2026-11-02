@@ -17,6 +17,8 @@ type Props = {
   schoolId: string;
   schoolName: string;
   initialPrompt?: string;
+  initialRetryReadyAt?: number | null;
+  onRateLimited?: (readyAt: number) => void;
   isScopeCurrent: () => boolean;
   navigation?: Parameters<typeof safeNavigate>[0];
   cancelRef?: React.MutableRefObject<(() => void) | null>;
@@ -95,6 +97,8 @@ function NavigationSession({
   schoolId,
   schoolName,
   initialPrompt = '',
+  initialRetryReadyAt,
+  onRateLimited,
   isScopeCurrent,
   navigation,
   cancelRef,
@@ -108,14 +112,17 @@ function NavigationSession({
   const [result, updateResult] = useState<CloudNavigationResult | null>(null);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
-  const [retryReadyAt, updateRetryReadyAt] = useState<number | null>(null);
+  const [retryReadyAt, updateRetryReadyAt] = useState<number | null>(() =>
+    typeof initialRetryReadyAt === 'number' && Number.isFinite(initialRetryReadyAt) && initialRetryReadyAt > Date.now()
+      ? initialRetryReadyAt : null,
+  );
   const request = useRef<AbortController | null>(null);
   const composer = useRef<TextInput>(null);
   const mounted = useRef(true);
   const currentPlan = useRef<Plan | null>(null);
   const currentConsent = useRef(false);
   const currentResult = useRef<CloudNavigationResult | null>(null);
-  const currentRetryReadyAt = useRef<number | null>(null);
+  const currentRetryReadyAt = useRef<number | null>(retryReadyAt);
   const currentScope = useRef(isScopeCurrent);
   currentScope.current = isScopeCurrent;
   const cancelAction = useRef<() => void>(() => {});
@@ -301,7 +308,9 @@ function NavigationSession({
           setConsented(false);
         }
         if (response.reason === 'rate_limited' && response.retryAfterSeconds) {
-          setRetryReadyAt(Date.now() + response.retryAfterSeconds * 1000);
+          const readyAt = Date.now() + response.retryAfterSeconds * 1000;
+          setRetryReadyAt(readyAt);
+          onRateLimited?.(readyAt);
         }
       }
     } catch (failure) {
@@ -401,7 +410,7 @@ function NavigationSession({
       {phase === 'preview' && (
         <>
           <Text accessibilityLiveRegion="polite" style={mutedStyle}>
-            正在讀取 Campus One 的公開地點，尚未傳送至 Groq。
+            正在讀取 nuni 的公開地點，尚未傳送至 Groq。
           </Text>
           <AIButton label="取消讀取" variant="ghost" style={buttonStyle} onPress={cancel} />
         </>

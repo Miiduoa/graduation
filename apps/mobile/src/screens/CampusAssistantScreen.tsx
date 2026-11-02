@@ -61,10 +61,23 @@ export function CampusAssistantScreen({ navigation, route }: ServiceScreenProps)
   const { school } = useSchool();
   const [pageActive, setPageActive] = useState(true);
   const [pageGeneration, setPageGeneration] = useState(0);
+  const quotaOwner = JSON.stringify([user?.uid ?? '', school.id]);
+  const [quota, setQuota] = useState<{ owner: string; generation: number; readyAt: number | null }>({
+    owner: quotaOwner, generation: 0, readyAt: null,
+  });
+  if (quota.owner !== quotaOwner) {
+    setQuota({ owner: quotaOwner, generation: quota.generation + 1, readyAt: null });
+  }
   const authReady = !loading && !tokenExpired;
   const scope = JSON.stringify([user?.uid, school.id, authReady, pageActive, pageGeneration]);
   const active = useRef(scope);
   active.current = scope;
+  const retainQuotaDeadline = useCallback((readyAt: number) => {
+    if (active.current !== scope) return;
+    setQuota((previous) => previous.owner === quotaOwner && previous.generation === quota.generation
+      ? { ...previous, readyAt: Math.max(previous.readyAt ?? 0, readyAt) }
+      : previous);
+  }, [scope, quotaOwner, quota.generation]);
   useEffect(() => {
     const lifecycle = navigation as (ServiceScreenProps['navigation'] & {
       addListener?: (event: 'blur' | 'focus', listener: () => void) => () => void;
@@ -95,6 +108,8 @@ export function CampusAssistantScreen({ navigation, route }: ServiceScreenProps)
       schoolId={school.id}
       schoolName={school.name}
       initialPrompt={!promptRevoked.current && initialScope.current === scope ? prompt : ''}
+      retryReadyAt={quota.owner === quotaOwner ? quota.readyAt : null}
+      onRateLimited={retainQuotaDeadline}
       isScopeCurrent={isScopeCurrent}
       navigation={navigation}
     />
@@ -105,6 +120,8 @@ function AssistantConversation({
   schoolId,
   schoolName,
   initialPrompt,
+  retryReadyAt,
+  onRateLimited,
   isScopeCurrent,
   navigation,
 }: {
@@ -112,6 +129,8 @@ function AssistantConversation({
   schoolId: string;
   schoolName: string;
   initialPrompt: string;
+  retryReadyAt: number | null;
+  onRateLimited: (readyAt: number) => void;
   isScopeCurrent: () => boolean;
   navigation: ServiceScreenProps['navigation'];
 }) {
@@ -411,6 +430,8 @@ function AssistantConversation({
           schoolId={schoolId}
           schoolName={schoolName}
           initialPrompt={initialPrompt}
+          initialRetryReadyAt={retryReadyAt}
+          onRateLimited={onRateLimited}
           isScopeCurrent={current}
           navigation={navigation}
           cancelRef={cloudCancel}

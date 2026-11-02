@@ -2,6 +2,7 @@ import React from 'react';
 import { Alert } from 'react-native';
 import { act, fireEvent, render } from '@testing-library/react-native';
 import { CampusAssistantScreen } from '../screens/CampusAssistantScreen';
+import { CampusCloudNavigationTask } from '../screens/CampusCloudNavigationTask';
 import { AIOverlayHost } from '../components/AIOverlayHost';
 import { askCampusAssistant, getOnDeviceAssistantReadiness } from '../features/campusAssistant';
 import { confirmCampusAgentWrite } from '../features/campusAssistantActions';
@@ -478,4 +479,165 @@ test('the shared navigator reaches permissions from the campus stack', () => {
   } finally {
     alert.mockRestore();
   }
+});
+
+test.each(['permissions', 'mode', 'loading'])(
+  'keeps the quota deadline across %s return even after fresh preview and consent',
+  async (transition) => {
+    jest.useFakeTimers();
+    jest.setSystemTime(new Date('2026-11-02T15:00:00.000Z'));
+    let view: ReturnType<typeof render> | undefined;
+    try {
+      runRequest.mockResolvedValueOnce({
+        status: 'unavailable', reason: 'rate_limited', provider: 'groq',
+        schoolId: 'pu', checkedAt: preview.checkedAt, retryAfterSeconds: 30,
+      });
+      const listeners = new Map<string, () => void>();
+      const navigation = {
+        navigate: jest.fn(),
+        getState: () => ({ routeNames: ['CampusAssistant', 'AssistantPermissions'] }),
+        isFocused: () => true,
+        addListener: (event: 'blur' | 'focus', listener: () => void) => {
+          listeners.set(event, listener);
+          return () => { listeners.delete(event); };
+        },
+      };
+      view = render(<CampusAssistantScreen navigation={navigation} route={{ params: { prompt: query } }} />);
+      await consentAndRun(view);
+      expect(view.getByText(/後重試。/)).toBeTruthy();
+      if (transition === 'permissions') {
+        fireEvent.press(view.getByText('助理權限'));
+        expect(navigation.navigate).toHaveBeenCalledWith('AssistantPermissions', undefined);
+        const blur = listeners.get('blur');
+        const focus = listeners.get('focus');
+        act(() => blur?.());
+        act(() => focus?.());
+      } else if (transition === 'mode') {
+        fireEvent.press(view.getByText('已存資料'));
+        fireEvent.press(view.getByText('校園導航'));
+      } else {
+        mockLoading = true;
+        view.rerender(<CampusAssistantScreen navigation={navigation} route={{ params: { prompt: query } }} />);
+        await act(async () => fireEvent.press(view!.getByText('預覽傳送內容')));
+        expect(runRequest).toHaveBeenCalledTimes(1);
+        expect(previewRequest).toHaveBeenCalledTimes(1);
+        mockLoading = false;
+        view.rerender(<CampusAssistantScreen navigation={navigation} route={{ params: { prompt: query } }} />);
+      }
+      fireEvent.changeText(view.getByLabelText('出發地與目的地'), query);
+      await act(async () => fireEvent.press(view!.getByText('預覽傳送內容')));
+      fireEvent.press(view.getByRole('checkbox'));
+      await act(async () => fireEvent.press(view!.getByText('確認規劃')));
+      expect(runRequest).toHaveBeenCalledTimes(1);
+      act(() => jest.advanceTimersByTime(29_999));
+      await act(async () => fireEvent.press(view!.getByText('確認規劃')));
+      expect(runRequest).toHaveBeenCalledTimes(1);
+      act(() => jest.advanceTimersByTime(1));
+      await act(async () => fireEvent.press(view!.getByText('確認規劃')));
+      expect(runRequest).toHaveBeenCalledTimes(2);
+      expect(confirmCampusAgentWrite).not.toHaveBeenCalled();
+    } finally {
+      view?.unmount();
+      jest.useRealTimers();
+    }
+  },
+);
+
+test.each(['account', 'school', 'account-back'])(
+  'clears quota ownership after %s changes without restoring old consent',
+  async (change) => {
+    jest.useFakeTimers();
+    let view: ReturnType<typeof render> | undefined;
+    try {
+      runRequest.mockResolvedValueOnce({
+        status: 'unavailable', reason: 'rate_limited', provider: 'groq',
+        schoolId: 'pu', checkedAt: preview.checkedAt, retryAfterSeconds: 30,
+      });
+      view = render(<CampusAssistantScreen route={{ params: { prompt: query } }} />);
+      await consentAndRun(view);
+      if (change === 'school') mockSchool = 'other';
+      else mockUid = 'B';
+      view.rerender(<CampusAssistantScreen />);
+      if (change === 'account-back') {
+        mockUid = 'A';
+        view.rerender(<CampusAssistantScreen />);
+      }
+      expect(view.queryByRole('checkbox')).toBeNull();
+      expect(view.getByLabelText('出發地與目的地').props.value).toBe('');
+      previewRequest.mockResolvedValue({ ...preview, schoolId: mockSchool });
+      runRequest.mockResolvedValue({ ...completed, schoolId: mockSchool });
+      fireEvent.changeText(view.getByLabelText('出發地與目的地'), query);
+      await consentAndRun(view);
+      expect(runRequest).toHaveBeenCalledTimes(2);
+      expect(view.getByText('導航建議已備妥')).toBeTruthy();
+      expect(confirmCampusAgentWrite).not.toHaveBeenCalled();
+    } finally {
+      view?.unmount();
+      jest.useRealTimers();
+    }
+  },
+);
+
+test('a late quota result from a previous owner cannot delay the returned account', async () => {
+  const late = deferred<CloudNavigationResult>();
+  runRequest.mockReturnValueOnce(late.promise);
+  const view = render(<CampusAssistantScreen route={{ params: { prompt: query } }} />);
+  await consentAndRun(view);
+  mockUid = 'B';
+  view.rerender(<CampusAssistantScreen />);
+  mockUid = 'A';
+  view.rerender(<CampusAssistantScreen />);
+  await act(async () => late.resolve({
+    status: 'unavailable', reason: 'rate_limited', provider: 'groq',
+    schoolId: 'pu', checkedAt: preview.checkedAt, retryAfterSeconds: 30,
+  }));
+  fireEvent.changeText(view.getByLabelText('出發地與目的地'), query);
+  await consentAndRun(view);
+  expect(runRequest).toHaveBeenCalledTimes(2);
+  expect(view.getByText('導航建議已備妥')).toBeTruthy();
+  expect(view.queryByText(/後重試。/)).toBeNull();
+});
+
+test('a shorter same-owner cooldown report cannot advance the retained deadline', async () => {
+  jest.useFakeTimers();
+  jest.setSystemTime(new Date('2026-11-02T15:00:00.000Z'));
+  let view: ReturnType<typeof render> | undefined;
+  try {
+    view = render(<CampusAssistantScreen />);
+    const report = view.UNSAFE_getByType(CampusCloudNavigationTask).props.onRateLimited;
+    act(() => {
+      report(Date.now() + 30_000);
+      report(Date.now() + 10_000);
+    });
+    fireEvent.press(view.getByText('已存資料'));
+    fireEvent.press(view.getByText('校園導航'));
+    fireEvent.changeText(view.getByLabelText('出發地與目的地'), query);
+    await consentAndRun(view);
+    expect(runRequest).not.toHaveBeenCalled();
+    act(() => jest.advanceTimersByTime(10_000));
+    await act(async () => fireEvent.press(view!.getByText('確認規劃')));
+    expect(runRequest).not.toHaveBeenCalled();
+    act(() => jest.advanceTimersByTime(20_000));
+    await act(async () => fireEvent.press(view!.getByText('確認規劃')));
+    expect(runRequest).toHaveBeenCalledTimes(1);
+  } finally {
+    view?.unmount();
+    jest.useRealTimers();
+  }
+});
+
+test('an old cooldown callback cannot write a deadline after an owner ABA change', async () => {
+  const view = render(<CampusAssistantScreen />);
+  const oldReport = view.UNSAFE_getByType(CampusCloudNavigationTask).props.onRateLimited;
+  mockUid = 'B';
+  view.rerender(<CampusAssistantScreen />);
+  mockUid = 'A';
+  view.rerender(<CampusAssistantScreen />);
+  act(() => oldReport(Date.now() + 30_000));
+  fireEvent.press(view.getByText('已存資料'));
+  fireEvent.press(view.getByText('校園導航'));
+  fireEvent.changeText(view.getByLabelText('出發地與目的地'), query);
+  await consentAndRun(view);
+  expect(runRequest).toHaveBeenCalledTimes(1);
+  expect(view.getByText('導航建議已備妥')).toBeTruthy();
 });
