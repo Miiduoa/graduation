@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useLayoutEffect, useRef, useState } from 'react';
+import Link from 'next/link';
 import { APPEAL_STATUS_COPY, type AppealStatus } from '@campus/shared';
 import { SiteShell } from '@/components/SiteShell';
 import { SchoolAccountRequired } from '@/components/SchoolAccountRequired';
@@ -14,6 +15,17 @@ import {
   type TeacherAppealRow,
 } from '@/lib/timetable/store';
 import styles from '@/components/academic/academic.module.css';
+
+const PAGE_TITLE = '課務申訴審核';
+const PAGE_SUBTITLE = '看學生的課程申訴，核准或不核准。';
+
+function ClassroomEntry() {
+  return (
+    <p className={styles.note}>
+      <Link href="/classroom">前往授課課程（課程與作業）→</Link>
+    </p>
+  );
+}
 
 /** 「測試學生甲（S0000001）· 資料庫 · 期中考成績」 */
 function appealHeading(item: TeacherAppealRow) {
@@ -47,7 +59,7 @@ export default function TeacherDeskPage() {
 
   if (authLoading) {
     return (
-      <SiteShell title="老師工作台" subtitle="看學生的課程申訴，核准或不核准。">
+      <SiteShell title={PAGE_TITLE} subtitle={PAGE_SUBTITLE}>
         <p role="status">正在確認登入狀態…</p>
       </SiteShell>
     );
@@ -55,7 +67,7 @@ export default function TeacherDeskPage() {
 
   if (school.loading || !schoolId) {
     return (
-      <SiteShell title="老師工作台" subtitle="看學生的課程申訴，核准或不核准。">
+      <SiteShell title={PAGE_TITLE} subtitle={PAGE_SUBTITLE}>
         <SchoolScopePlaceholder />
       </SiteShell>
     );
@@ -63,10 +75,11 @@ export default function TeacherDeskPage() {
 
   if (!user) {
     return (
-      <SiteShell title="老師工作台" subtitle="看學生的課程申訴，核准或不核准。">
+      <SiteShell title={PAGE_TITLE} subtitle={PAGE_SUBTITLE}>
+        <ClassroomEntry />
         <SchoolAccountRequired
           returnUrl="/teacher"
-          alternative="授課請先到課程空間，從你負責的那門課進去。"
+          alternative="授課請先到課程與作業，從你負責的那門課進去。"
         />
       </SiteShell>
     );
@@ -147,7 +160,8 @@ function TeacherDeskContent({ schoolId }: { schoolId: string }) {
 
   if (denied) {
     return (
-      <SiteShell title="老師工作台" subtitle="看學生的課程申訴，核准或不核准。">
+      <SiteShell title={PAGE_TITLE} subtitle={PAGE_SUBTITLE}>
+        <ClassroomEntry />
         <p className={styles.notice}>這頁給老師用。你的帳號在這所學校不是老師身分。</p>
       </SiteShell>
     );
@@ -161,7 +175,8 @@ function TeacherDeskContent({ schoolId }: { schoolId: string }) {
   );
 
   return (
-    <SiteShell title="老師工作台" subtitle="看學生的課程申訴，核准或不核准。">
+    <SiteShell title={PAGE_TITLE} subtitle={PAGE_SUBTITLE}>
+      <ClassroomEntry />
       {notice && (
         <p className={styles.note} role="status">
           {notice}

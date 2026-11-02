@@ -137,6 +137,7 @@ function Header() {
           <Link
             href={href('/timetable')}
             aria-current={activeSection === 'study' ? 'page' : undefined}
+            title="課務：課表、課程與作業、成績"
           >
             <CampusIcon name="library" size={17} />
             課務
