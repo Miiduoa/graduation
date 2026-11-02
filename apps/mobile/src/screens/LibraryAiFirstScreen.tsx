@@ -122,7 +122,7 @@ function LibraryContent({
                   ? '依書名、作者或 ISBN 查詢學校館藏。'
                   : verifiedSearch
                     ? '輸入關鍵字即可直接開啟這所學校的官方館藏結果；是否可借請以館方系統為準。'
-                    : '已連結這所學校的官方圖書館。不同學校有各自的館藏系統，請在官網確認館藏及可借狀態。'}
+                    : '這個入口不會自動帶入關鍵字。開啟後請將關鍵字貼到館藏網站的搜尋欄位；是否可借請以館方系統為準。'}
               </Text>
               <TextInput
                 accessibilityLabel="館藏關鍵字"
@@ -147,17 +147,25 @@ function LibraryContent({
               ) : null}
               <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
                 <AIButton
-                  label="查詢館藏"
+                  label={library.catalogSearch === 'pu-webpac'
+                    ? '查詢館藏'
+                    : verifiedSearch
+                      ? '開啟官方館藏結果'
+                      : '複製關鍵字並開啟館藏網站'}
+                  style={{ maxWidth: '100%', flexDirection: 'column', alignItems: 'stretch' }}
                   disabled={!keyword.trim()}
                   onPress={() => void searchOfficialCatalog()}
                 />
                 {library.catalogSearch === 'pu-webpac' || !verifiedSearch ? (
                   <AIButton
-                    label="在圖書館網站搜尋"
+                    label={library.catalogSearch === 'pu-webpac' ? '開啟官方館藏結果' : '開啟館藏網站'}
                     variant="ghost"
-                    disabled={!keyword.trim()}
+                    style={{ maxWidth: '100%', flexDirection: 'column', alignItems: 'stretch' }}
+                    disabled={library.catalogSearch === 'pu-webpac' && !keyword.trim()}
                     onPress={() => {
-                      const url = buildOfficialLibraryCatalogUrl(schoolId, keyword, 'FullText', schoolName);
+                      const url = library.catalogSearch === 'pu-webpac'
+                        ? buildOfficialLibraryCatalogUrl(schoolId, keyword, 'FullText', schoolName)
+                        : library.catalogUrl;
                       if (url) void open(url);
                     }}
                   />
