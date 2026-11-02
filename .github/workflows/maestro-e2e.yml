@@ -104,52 +104,28 @@ jobs:
           # A clean prebuild discards those settings, so install its declared Pods directly.
           pod install --project-directory=ios
           test -d ios/mobile.xcworkspace
+          # The CI simulator must run a self-contained JS bundle. A Debug build
+          # skips bundling, and a successful Metro /status or curl download does
+          # not set the native RCTBundleURLProvider URL on a fresh simulator.
+          # The iOS screenshot for #398 showed a redbox even in the first flow.
+          # Release builds embed main.jsbundle using the existing Xcode phase;
+          # no app functionality or Maestro guest/map assertion is bypassed.
           xcodebuild -workspace ios/mobile.xcworkspace \
             -scheme mobile \
-            -configuration Debug \
+            -configuration Release \
             -destination "platform=iOS Simulator,id=$SIMULATOR_UDID" \
             -derivedDataPath "$RUNNER_TEMP/campus-ios-build" \
             CODE_SIGNING_ALLOWED=NO \
             build
-          APP_PATH="$RUNNER_TEMP/campus-ios-build/Build/Products/Debug-iphonesimulator/mobile.app"
+          APP_PATH="$RUNNER_TEMP/campus-ios-build/Build/Products/Release-iphonesimulator/mobile.app"
           test -d "$APP_PATH"
+          # Fail before Maestro if the native app still has no bundled JS.
+          test -s "$APP_PATH/main.jsbundle"
+          echo "Verified embedded iOS JS bundle inside Release simulator app."
           APP_ID=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$APP_PATH/Info.plist")
           echo "APP_ID=$APP_ID" >> "$GITHUB_ENV"
           xcrun simctl install "$SIMULATOR_UDID" "$APP_PATH"
           xcrun simctl get_app_container "$SIMULATOR_UDID" "$APP_ID" app
-
-      - name: Start Metro Bundler
-        working-directory: apps/mobile
-        run: |
-          set -euo pipefail
-          nohup pnpm exec expo start --localhost --port 8081 > "$RUNNER_TEMP/campus-metro.log" 2>&1 &
-          echo "METRO_PID=$!" >> "$GITHUB_ENV"
-          for attempt in $(seq 1 60); do
-            if curl --fail --silent http://127.0.0.1:8081/status | grep -q 'packager-status:running'; then
-              exit 0
-            fi
-            sleep 2
-          done
-          cat "$RUNNER_TEMP/campus-metro.log"
-          exit 1
-
-      - name: Prepare iOS JavaScript Bundle
-        run: |
-          set -euo pipefail
-          # Match AppDelegate's virtual entry and RCTBundleURLProvider's Debug options.
-          # /status only confirms Metro is listening; a cold bundle can outlast the UI assertion.
-          BUNDLE_URL="http://localhost:8081/.expo/.virtual-metro-entry.bundle?platform=ios&dev=true&lazy=true&minify=false&inlineSourceMap=false&modulesOnly=false&runModule=true&excludeSource=true&sourcePaths=url-server&app=$APP_ID"
-          if ! curl --fail --show-error --silent --connect-timeout 10 --max-time 600 \
-            --dump-header "$RUNNER_TEMP/campus-metro-bundle.headers" \
-            --output "$RUNNER_TEMP/campus-metro-ios.bundle" \
-            --write-out 'http_code=%{http_code}\nsize_download=%{size_download}\ntime_total=%{time_total}\n' \
-            "$BUNDLE_URL" > "$RUNNER_TEMP/campus-metro-bundle.txt"; then
-            tail -n 80 "$RUNNER_TEMP/campus-metro.log"
-            exit 1
-          fi
-          test -s "$RUNNER_TEMP/campus-metro-ios.bundle"
-          grep -qi '^content-type: application/javascript' "$RUNNER_TEMP/campus-metro-bundle.headers"
-          cat "$RUNNER_TEMP/campus-metro-bundle.txt"
 
       - name: Run Smoke Tests
         if: github.event.inputs.test_suite == 'smoke' || github.event.inputs.test_suite == ''
@@ -216,11 +192,6 @@ jobs:
       - name: Cleanup
         if: always()
         run: |
-          # Kill Metro bundler
-          if [ -n "$METRO_PID" ]; then
-            kill $METRO_PID || true
-          fi
-
           # Shutdown simulator
           if [ -n "$SIMULATOR_UDID" ]; then
             xcrun simctl shutdown "$SIMULATOR_UDID" || true
@@ -234,9 +205,6 @@ jobs:
           path: |
             apps/mobile/.maestro/results/
             apps/mobile/.maestro/screenshots/
-            ${{ runner.temp }}/campus-metro.log
-            ${{ runner.temp }}/campus-metro-bundle.headers
-            ${{ runner.temp }}/campus-metro-bundle.txt
           retention-days: 30
 
       - name: Upload Test Screenshots
