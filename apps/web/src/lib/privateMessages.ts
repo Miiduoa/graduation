@@ -521,7 +521,7 @@ export function parseNotification(
     type: text(row.type) || text(row.category) || 'system',
     read: row.read === true || row.isRead === true,
     createdAt: messageTime(row.createdAt),
-    data,
+    data: { ...data, schoolId },
   };
 }
 export function watchAccountNotifications(
