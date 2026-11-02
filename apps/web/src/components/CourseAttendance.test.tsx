@@ -24,6 +24,9 @@ vi.mock('@/lib/signInOptions', () => ({
 vi.mock('./AuthGuard', () => ({
   useAuth: () => ({ user: auth.uid ? { uid: auth.uid } : null, loading: false }),
 }));
+vi.mock('@/lib/useCourseTodayMeeting', () => ({
+  useCourseTodayMeeting: () => ({ status: 'unlinked' }),
+}));
 vi.mock('./PWAInstallBanner', () => ({ PWAInstallBanner: () => null }));
 vi.mock('qrcode', () => ({
   default: { toDataURL: vi.fn().mockResolvedValue('data:image/png;base64,a') },
