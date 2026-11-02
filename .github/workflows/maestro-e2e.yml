@@ -227,7 +227,7 @@ jobs:
           fi
 
       - name: Upload Test Results
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         if: always()
         with:
           name: maestro-results-${{ matrix.platform }}
@@ -240,7 +240,7 @@ jobs:
           retention-days: 30
 
       - name: Upload Test Screenshots
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         if: always()
         with:
           name: maestro-screenshots-${{ matrix.platform }}

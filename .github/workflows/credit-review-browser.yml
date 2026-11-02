@@ -45,7 +45,7 @@ jobs:
         run: node scripts/qa/credit-review-browser.mjs
       - name: Preserve browser results and screenshots
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: credit-review-browser
           path: artifacts/credit-review-browser/

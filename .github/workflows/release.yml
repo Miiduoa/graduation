@@ -170,7 +170,7 @@ jobs:
 
       - name: Preserve iOS build receipt
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: eas-build-ios
           path: ${{ runner.temp }}/eas-build-ios.json
@@ -252,7 +252,7 @@ jobs:
 
       - name: Preserve Android build receipt
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: eas-build-android
           path: ${{ runner.temp }}/eas-build-android.json
