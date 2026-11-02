@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen, within } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { getCloudNavigationPreview, runCloudNavigationTask, type CloudNavigationPreviewResult, type CloudNavigationResult } from '@/lib/cloudNavigationClient';
 import { AgentDraftProvider, useAgentDraft } from '@/components/AgentDraftProvider';
@@ -172,7 +172,8 @@ describe('CloudNavigationTask', () => {
     expect(within(panel).getByText('pu')).toBeTruthy();
     expect(within(panel).getByText('Groq（openai/gpt-oss-120b）')).toBeTruthy();
     expect(within(panel).getByText(/不會附加座標、帳號識別碼、課表、作業或對話紀錄/)).toBeTruthy();
-    expect(document.activeElement).toBe(within(panel).getByRole('heading'));
+    const previewHeading = within(panel).getByRole('heading');
+    await waitFor(() => expect(document.activeElement).toBe(previewHeading));
     expect((screen.getByRole('button', { name: '確認規劃' }) as HTMLButtonElement).disabled).toBe(true);
     fireEvent.click(screen.getByRole('button', { name: '確認規劃' }));
     expect(runCloudNavigationTask).not.toHaveBeenCalled();
