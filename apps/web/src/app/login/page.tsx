@@ -189,11 +189,11 @@ function LoginForm({
         <div>
           <p className={styles.connectionKicker}>校園資料，一次整理</p>
           <h2>用熟悉的學校帳號，接上自己的課表</h2>
-          <p>靜宜大學目前提供學號直接連線；其他學校可以從學校下載或截取資料後自行匯入。兩種方法分開顯示，避免把「可瀏覽校園」誤認為「已取得校務權限」。</p>
+          <p>尚未開放學號直接登入。你可以自行匯入課表、成績與活動；需要平台交流或課班服務時，請使用 Google 帳號登入。兩種方法分開顯示，避免把「可瀏覽校園」誤認為「已取得校務權限」。</p>
         </div>
         <div className={styles.connectionFacts}>
-          <span>直接連線：靜宜大學</span>
-          <span>檔案匯入：跨校適用</span>
+          <span>尚未開放學號直接登入</span>
+          <span>可自行匯入課表、成績與活動</span>
         </div>
       </section>
       <div className={styles.loginLayout}>
@@ -234,7 +234,7 @@ function LoginForm({
           ) : schoolAvailable ? (
             <>
               <p>
-                目前支援靜宜大學 e 校園學號登入，用於讀取本人的課表、成績與校務紀錄。學校帳號驗證不會自動取得教師、課班或平台管理權限。
+                學號直接登入目前尚未開放；開通後可用於讀取本人的課表、成績與校務紀錄。學校帳號驗證不會自動取得教師、課班或平台管理權限。
               </p>
               {schoolRequired && (
                 <p>
@@ -244,7 +244,7 @@ function LoginForm({
                 </p>
               )}
               <form className={styles.loginForm} onSubmit={login} aria-busy={busy}>
-                <p className={styles.formIntro}>使用學校的既有帳號連線，不需要另外申請 Campus One 學號。</p>
+                <p className={styles.formIntro}>使用學校的既有帳號連線，不需要另外申請 nuni 學號。</p>
                 <Input
                   id="student-id"
                   name="studentId"
@@ -295,7 +295,7 @@ function LoginForm({
               </form>
               <details className={styles.connectionDetails}>
                 <summary>連線後能看到哪些資料？</summary>
-                <p>靜宜大學目前可使用校務系統連線取得個人課表與成績，其他資料依學校系統當次回應為準。學校帳號驗證不等於取得平台的教師或管理權限。</p>
+                <p>學號直接登入目前尚未開放；開通後可依學校系統當次回應取得個人課表與成績。學校帳號驗證不等於取得平台的教師或管理權限。</p>
                 <p>密碼會透過加密連線送至驗證服務使用；不會存成個人匯入草稿。忘記密碼請前往學校原本的帳號服務處理。</p>
               </details>
             </>

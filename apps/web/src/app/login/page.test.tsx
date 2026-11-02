@@ -29,7 +29,7 @@ vi.mock('next/navigation', () => ({
   useRouter: () => ({ replace }),
   useSearchParams: () => state.params,
 }));
-vi.mock('@/components/AppHeader', () => ({ AppHeader: () => <header>Campus One</header> }));
+vi.mock('@/components/AppHeader', () => ({ AppHeader: () => <header>nuni</header> }));
 vi.mock('@/components/NuniSignIn', () => ({
   NuniSignIn: ({
     returnUrl,
@@ -91,6 +91,15 @@ beforeEach(() => {
 afterEach(() => {
   vi.unstubAllGlobals();
   vi.useRealTimers();
+});
+it('states student-id login is not open and never claims direct school-id connection', () => {
+  state.user = null;
+  state.studentId = false;
+  const { container } = render(<LoginPage />);
+  expect(screen.getByText('尚未開放學號直接登入')).toBeTruthy();
+  expect(screen.getByText('可自行匯入課表、成績與活動')).toBeTruthy();
+  expect(container.textContent).not.toContain('提供學號直接連線');
+  expect(container.textContent).not.toContain('直接連線：靜宜大學');
 });
 it('keeps a school return destination during an availability failure instead of offering the wrong account', () => {
   state.user = null;

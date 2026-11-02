@@ -43,11 +43,11 @@ export function buildPersonalEventsCalendar(
   const lines = [
     'BEGIN:VCALENDAR',
     'VERSION:2.0',
-    'PRODID:-//Campus One//Personal Events//ZH-TW',
+    'PRODID:-//nuni//Personal Events//ZH-TW',
     'CALSCALE:GREGORIAN',
     'METHOD:PUBLISH',
     'X-WR-TIMEZONE:' + TAIPEI,
-    'X-WR-CALNAME:' + escapeIcsText(options.calendarName || 'Campus One 個人行程'),
+    'X-WR-CALNAME:' + escapeIcsText(options.calendarName || 'nuni 個人行程'),
   ];
   let eventCount = 0;
   let skipped = 0;
@@ -89,7 +89,7 @@ export function buildPersonalEventsCalendar(
     eventLines.push(
       'DESCRIPTION:' +
         escapeIcsText(
-          'Campus One 個人行程快照。匯出不是報名或 RSVP，也不會自動設定提醒。',
+          'nuni 個人行程快照。匯出不是報名或 RSVP，也不會自動設定提醒。',
         ),
       'END:VEVENT',
     );

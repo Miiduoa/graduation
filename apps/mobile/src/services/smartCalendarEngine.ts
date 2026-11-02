@@ -2,7 +2,7 @@
 /**
  * 📅 智慧行事曆引擎 — Smart Calendar Engine
  *
- * 靜宜大學 Campus One 獨家功能：
+ * 靜宜大學 nuni 獨家功能：
  * 不只是行事曆，而是 AI 時間管理助手。
  *
  * 核心功能：

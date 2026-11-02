@@ -31,7 +31,7 @@ describe('FoodOrderReceipt', () => {
   it('labels the record and formats integer TWD totals without recomputing fees or options', () => {
     render(<FoodOrderReceipt order={receipt()} />);
     const paper = screen.getByRole('region', { name: '訂單紙本明細' });
-    expect(within(paper).getByRole('heading', { name: 'Campus One 訂單明細' })).toBeTruthy();
+    expect(within(paper).getByRole('heading', { name: 'nuni 訂單明細' })).toBeTruthy();
     expect(within(paper).getByText('非統一發票')).toBeTruthy();
     expect(within(paper).getByText('訂單總額')).toBeTruthy();
     expect(within(paper).getByText('NT$1,234').closest('details')).toBeNull();
