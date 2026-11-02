@@ -20,6 +20,16 @@ const mocks = vi.hoisted(() => ({
 }));
 const workspaceId = 'cw_11111111-1111-4111-8111-111111111111';
 const principalId = 'pa_11111111-1111-4111-8111-111111111111';
+
+it('opens the independent device bookmark route inside the signed-in course shell', async () => {
+  mocks.pathname = '/classroom/material-bookmarks';
+  render(<NuniApp />);
+  expect(await screen.findByRole('heading', { name: '此裝置收藏', level: 1 })).toBeTruthy();
+  expect(await screen.findByRole('heading', { name: '還沒有收藏的教材' })).toBeTruthy();
+  expect(screen.getByRole('link', { name: '回我的課程' }).getAttribute('href')).toBe('/classroom');
+  expect(screen.queryByText('找不到這個課程空間')).toBeNull();
+});
+
 vi.mock('next/navigation', () => ({
   usePathname: () => mocks.pathname,
   useRouter: () => ({ push: vi.fn() }),

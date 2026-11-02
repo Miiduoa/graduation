@@ -35,6 +35,7 @@ import { CourseAssignments } from './CourseAssignments';
 import { WorkspaceList } from './WorkspaceList';
 import { courseRoleLabels } from './courseTasks';
 import { CourseMaterials } from './CourseMaterials';
+import { MaterialBookmarks } from './MaterialBookmarks';
 import { CourseQuizzes } from './CourseQuizzes';
 import { CourseLearningPath } from './CourseLearningPath';
 import { CourseMembers } from './CourseMembers';
@@ -602,6 +603,7 @@ function NuniContent() {
       </section>
     );
   else if (pathname === '/classroom') content = <WorkspaceList key={session.context} />;
+  else if (pathname === '/classroom/material-bookmarks') content = <MaterialBookmarks />;
   else if (/^\/classroom\/course\/cw_[0-9a-f-]{36}$/.test(pathname))
     content = <Workspace key={`${session.context}:${pathname}`} id={pathname.split('/')[3]} />;
   else
