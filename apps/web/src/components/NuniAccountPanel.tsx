@@ -7,6 +7,14 @@ import { AccountIdentity } from './AccountIdentity';
 import { AccountMemberships } from './AccountMemberships';
 import styles from './NuniAccountPanel.module.css';
 
+type MembershipRecovery = {
+  promise: Promise<void>;
+  resolve: () => void;
+  reject: (failure: unknown) => void;
+  targetVersion: number;
+  failure?: unknown;
+};
+
 /** Account-level information only. Teaching roles belong to individual courses. */
 export function NuniAccountPanel() {
   const account = useNuniSession();
@@ -61,37 +69,67 @@ function ConfirmedAccountPanel({
   const [confirmed, setConfirmed] = useState(!loading);
   const [readerVersion, setReaderVersion] = useState(0);
   const [recovery, setRecovery] = useState<'idle' | 'pending' | 'settled' | 'error'>('idle');
+  const [readerSuppressed, setReaderSuppressed] = useState(false);
   const mounted = useRef(true);
-  const recoveryLocked = useRef(false);
+  const recoveryOperation = useRef<MembershipRecovery | null>(null);
   useEffect(() => {
     mounted.current = true;
     return () => {
       mounted.current = false;
+      const operation = recoveryOperation.current;
+      recoveryOperation.current = null;
+      operation?.reject(new Error('Account scope changed during membership recovery'));
     };
   }, []);
+  useEffect(() => {
+    const operation = recoveryOperation.current;
+    if (!operation) return;
+    if (recovery === 'error') {
+      recoveryOperation.current = null;
+      operation.reject(operation.failure);
+    } else if (!loading && recovery === 'idle' && readerVersion === operation.targetVersion) {
+      recoveryOperation.current = null;
+      // Complete after the previous reader's cleanup, so it cannot start another read.
+      operation.resolve();
+    }
+  }, [loading, readerVersion, recovery]);
   if (!loading && !confirmed) setConfirmed(true);
   if (!loading && recovery === 'settled') {
     setRecovery('idle');
+    setReaderSuppressed(false);
     setReaderVersion((value) => value + 1);
   }
   function recoverMemberships() {
-    if (loading || recoveryLocked.current || !mounted.current) return Promise.resolve();
-    recoveryLocked.current = true;
+    if (recoveryOperation.current) return recoveryOperation.current.promise;
+    if (loading || !mounted.current) {
+      const unavailable = Promise.reject(new Error('Account verification is not ready'));
+      void unavailable.catch(() => {});
+      return unavailable;
+    }
+    let resolve!: () => void;
+    let reject!: (failure: unknown) => void;
+    const promise = new Promise<void>((yes, no) => {
+      resolve = yes;
+      reject = no;
+    });
+    const operation = { promise, resolve, reject, targetVersion: readerVersion + 1 };
+    recoveryOperation.current = operation;
+    // The legacy membership button does not await the returned promise.
+    void promise.catch(() => {});
     setRecovery('pending');
-    const operation = (async () => {
+    void (async () => {
       try {
         await refreshAccount();
-        if (mounted.current) setRecovery('settled');
+        if (mounted.current && recoveryOperation.current === operation) setRecovery('settled');
       } catch (failure) {
-        if (mounted.current) setRecovery('error');
-        throw failure;
-      } finally {
-        recoveryLocked.current = false;
+        if (mounted.current && recoveryOperation.current === operation) {
+          recoveryOperation.current.failure = failure;
+          setReaderSuppressed(true);
+          setRecovery('error');
+        }
       }
     })();
-    // The legacy membership button does not await the returned promise.
-    void operation.catch(() => {});
-    return operation;
+    return promise;
   }
   function blockHiddenAction(event: SyntheticEvent) {
     if (!loading) return;
@@ -138,12 +176,21 @@ function ConfirmedAccountPanel({
             <AccountIdentity context={session.context} accountId={session.platformAccountId} />
           )}
           {recovery === 'pending' && <p role="status">正在重新確認帳號…</p>}
-          {recovery === 'error' && <p role="alert">目前無法重新確認帳號，請稍後再試。</p>}
-          <AccountMemberships
-            key={readerVersion}
-            context={session.context}
-            refreshAccount={recoverMemberships}
-          />
+          {recovery === 'error' && (
+            <div>
+              <p role="alert">目前無法重新確認帳號，請稍後再試。</p>
+              <button className="btn" onClick={() => void recoverMemberships()}>
+                重新確認帳號
+              </button>
+            </div>
+          )}
+          {!readerSuppressed && (
+            <AccountMemberships
+              key={readerVersion}
+              context={session.context}
+              refreshAccount={recoverMemberships}
+            />
+          )}
           {!loading && session.isPlatformOperator && (
             <div className={styles.permission}>
               <p>此帳號另有平台管理權限。</p>

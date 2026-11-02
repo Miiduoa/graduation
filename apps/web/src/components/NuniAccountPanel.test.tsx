@@ -1,4 +1,5 @@
 import { act, fireEvent, render, screen } from '@testing-library/react';
+import { StrictMode } from 'react';
 import { beforeEach, expect, it, vi } from 'vitest';
 import { NuniError } from '@campus/shared/src/nuni';
 import { NuniAccountPanel } from './NuniAccountPanel';
@@ -455,13 +456,75 @@ it('keeps explicit recovery retryable after a rejected refresh without claiming 
   render(<NuniAccountPanel />);
   fireEvent.click(await screen.findByRole('button', { name: '重新確認帳號' }));
   await screen.findByText('目前無法重新確認帳號，請稍後再試。');
+  expect(screen.getAllByText('目前無法重新確認帳號，請稍後再試。')).toHaveLength(1);
+  expect(screen.getAllByRole('button', { name: '重新確認帳號' })).toHaveLength(1);
   expect(screen.queryByRole('form')).toBeNull();
   expect(reads()).toHaveLength(1);
+  const retry = deferred();
+  mocks.account.refresh.mockReturnValueOnce(retry.promise);
   mocks.request.mockImplementation(async (path: string) => nuniPayload(path));
   fireEvent.click(screen.getByRole('button', { name: '重新確認帳號' }));
+  expect(screen.queryByRole('form')).toBeNull();
+  expect(reads()).toHaveLength(1);
+  await act(async () => retry.resolve());
   await screen.findByRole('form', { name: '申請學校資格' });
   expect(reads()).toHaveLength(2);
 });
+
+it('does not let a late recovery settle a new operation after an account leaves and returns', async () => {
+  mocks.request.mockImplementation(async (path: string) => {
+    if (path === 'memberships') throw new NuniError(409, 'SESSION_CHANGED');
+    return nuniPayload(path);
+  });
+  const previous = deferred();
+  const current = deferred();
+  mocks.account.refresh.mockReturnValueOnce(previous.promise).mockReturnValueOnce(current.promise);
+  const view = render(<NuniAccountPanel />);
+  fireEvent.click(await screen.findByRole('button', { name: '重新確認帳號' }));
+  const original = { ...mocks.account.session! };
+  mocks.account.session = null;
+  view.rerender(<NuniAccountPanel />);
+  mocks.account.session = original;
+  view.rerender(<NuniAccountPanel />);
+  fireEvent.click(await screen.findByRole('button', { name: '重新確認帳號' }));
+  expect(mocks.account.refresh).toHaveBeenCalledTimes(2);
+  const before = reads().length;
+  mocks.request.mockImplementation(async (path: string) => nuniPayload(path));
+  await act(async () => previous.resolve());
+  expect(reads()).toHaveLength(before);
+  expect(screen.queryByRole('form')).toBeNull();
+  await act(async () => current.resolve());
+  await screen.findByRole('form', { name: '申請學校資格' });
+  expect(reads()).toHaveLength(before + 1);
+  expect(writes()).toHaveLength(0);
+});
+
+it.each([false, true])(
+  'discards an unmounted recovery without an unhandled late rejection (StrictMode: %s)',
+  async (strict) => {
+    mocks.request.mockImplementation(async (path: string) => {
+      if (path === 'memberships') throw new NuniError(409, 'SESSION_CHANGED');
+      return nuniPayload(path);
+    });
+    const pending = deferred();
+    mocks.account.refresh.mockReturnValueOnce(pending.promise);
+    const view = render(
+      strict ? (
+        <StrictMode>
+          <NuniAccountPanel />
+        </StrictMode>
+      ) : (
+        <NuniAccountPanel />
+      ),
+    );
+    fireEvent.click(await screen.findByRole('button', { name: '重新確認帳號' }));
+    const before = reads().length;
+    view.unmount();
+    await act(async () => pending.reject(new Error('late synthetic failure')));
+    expect(reads()).toHaveLength(before);
+    expect(writes()).toHaveLength(0);
+  },
+);
 
 it.each(['error', 'logout', 'null', 'account-aba'])(
   'does not treat a resolved recovery as authorization after %s',
