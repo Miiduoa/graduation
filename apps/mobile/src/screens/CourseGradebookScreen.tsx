@@ -14,6 +14,11 @@ import { useDataSource } from '../hooks/useDataSource';
 import { listCourseSpaces, getCourseGradebook } from '../data/courseSpaceSource';
 import { canManageCourse, formatDateTime } from '../services/courseWorkspace';
 import { navigateToCourseScreen } from '../utils/courseNavigation';
+import {
+  ASSIGNMENT_FOCUS_MISSING,
+  parseAssignmentFocusId,
+  resolveAssignmentFocus,
+} from './assignmentDeepLink';
 
 export function CourseGradebookScreen(props: any) {
   const nav = props?.navigation;
@@ -21,6 +26,7 @@ export function CourseGradebookScreen(props: any) {
     | string
     | undefined;
   const routeGroupName = props?.route?.params?.groupName as string | undefined;
+  const focusAssignmentId = parseAssignmentFocusId(props?.route?.params?.assignmentId);
   const auth = useAuth();
   const { school } = useSchool();
   const ds = useDataSource();
@@ -62,6 +68,16 @@ export function CourseGradebookScreen(props: any) {
     if (isTeacher) return gradebook.rows;
     return gradebook.rows.filter((row) => row.uid === auth.user?.uid);
   }, [auth.user?.uid, gradebook, isTeacher]);
+
+  const assignmentIds = useMemo(() => {
+    const ids = new Set<string>();
+    for (const assignment of gradebook?.assignments ?? []) ids.add(assignment.id);
+    for (const row of visibleRows) {
+      for (const entry of row.assignmentBreakdown) ids.add(entry.assignmentId);
+    }
+    return [...ids];
+  }, [gradebook?.assignments, visibleRows]);
+  const assignmentFocus = resolveAssignmentFocus(assignmentIds, focusAssignmentId);
 
   if (shouldBlockForNoLogin({ uid: auth.user?.uid ?? null, hasUser: !!auth.user })) {
     return (
@@ -200,6 +216,14 @@ export function CourseGradebookScreen(props: any) {
           </Card>
         ) : null}
 
+        {assignmentFocus.missing ? (
+          <Card title="通知作業">
+            <Text accessibilityRole="text" style={{ color: theme.colors.muted, lineHeight: 22 }}>
+              {ASSIGNMENT_FOCUS_MISSING}
+            </Text>
+          </Card>
+        ) : null}
+
         <Card
           title="評分項目"
           subtitle={`最後發布：${formatDateTime(gradebook.finalScoresPublishedAt, '尚未發布')}`}
@@ -217,10 +241,14 @@ export function CourseGradebookScreen(props: any) {
                     padding: 12,
                     borderRadius: theme.radius.md,
                     backgroundColor: theme.colors.surface2,
-                    borderWidth: 1,
-                    borderColor: theme.colors.border,
+                    borderWidth: assignment.id === focusAssignmentId ? 2 : 1,
+                    borderColor:
+                      assignment.id === focusAssignmentId ? theme.colors.accent : theme.colors.border,
                     gap: 6,
                   }}
+                  accessibilityState={
+                    assignment.id === focusAssignmentId ? { selected: true } : undefined
+                  }
                 >
                   <View
                     style={{
@@ -291,10 +319,16 @@ export function CourseGradebookScreen(props: any) {
                     padding: 12,
                     borderRadius: theme.radius.md,
                     backgroundColor: theme.colors.surface2,
-                    borderWidth: 1,
-                    borderColor: theme.colors.border,
+                    borderWidth: entry.assignmentId === focusAssignmentId ? 2 : 1,
+                    borderColor:
+                      entry.assignmentId === focusAssignmentId
+                        ? theme.colors.accent
+                        : theme.colors.border,
                     gap: 6,
                   }}
+                  accessibilityState={
+                    entry.assignmentId === focusAssignmentId ? { selected: true } : undefined
+                  }
                 >
                   <View
                     style={{

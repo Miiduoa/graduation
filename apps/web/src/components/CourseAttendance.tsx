@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
+import { useSearchParams } from 'next/navigation';
 import { attendanceSubmissionIssue } from '@campus/shared/src/attendanceReliability';
 import QRCode from 'qrcode';
 import { useAuth } from './AuthGuard';
@@ -15,6 +16,13 @@ import { AttendanceSyncStatus } from './AttendanceSyncStatus';
 import { watchAttendanceLive, type AttendanceLiveState } from '@/lib/watchAttendanceLive';
 import { resolveSchoolPageContext, type SchoolSearchParams } from '@/lib/pageContext';
 import { useCourseTodayMeeting } from '@/lib/useCourseTodayMeeting';
+import {
+  SESSION_FOCUS_MISSING,
+  landOnSession,
+  parseSessionFocusId,
+  resolveSessionFocus,
+  sessionFocusElementId,
+} from './classroom/sessionDeepLink';
 import {
   attendanceCsv,
   attendanceError,
@@ -51,6 +59,7 @@ function Session({
   canStart,
   checkInEnabled,
   reload,
+  focused = false,
 }: {
   session: AttendanceSession;
   courseId: string;
@@ -60,6 +69,7 @@ function Session({
   canStart: boolean;
   checkInEnabled: boolean;
   reload: () => Promise<void>;
+  focused?: boolean;
 }) {
   const [token, setToken] = useState('');
   const [pending, setPending] = useState(false);
@@ -171,7 +181,13 @@ function Session({
     setTimeout(() => URL.revokeObjectURL(url), 1000);
   }
   return (
-    <article className={styles.session}>
+    <article
+      id={sessionFocusElementId(session.id)}
+      className={styles.session}
+      data-session-focused={focused ? 'true' : undefined}
+      tabIndex={focused ? -1 : undefined}
+      aria-current={focused ? 'true' : undefined}
+    >
       <div className={styles.sessionHeading}>
         <div>
           <p className={styles.label}>{studentAttendanceHeading(courseName, session.active)}</p>
@@ -412,7 +428,15 @@ function Session({
   );
 }
 
-function Workspace({ courseId, uid }: { courseId: string; uid: string }) {
+function Workspace({
+  courseId,
+  uid,
+  focusSessionId,
+}: {
+  courseId: string;
+  uid: string;
+  focusSessionId: string | null;
+}) {
   const [data, setData] = useState<AttendanceData | null>(null);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(true);
@@ -429,6 +453,7 @@ function Workspace({ courseId, uid }: { courseId: string; uid: string }) {
   const [historyFilter, setHistoryFilter] = useState<'all' | 'active' | 'ended'>('all');
   const permission = useRef<string | null>(null);
   const permissionVersion = useRef(0);
+  const focusedOnce = useRef('');
   const reload = useCallback(async () => {
     if (!permission.current) return;
     const request = ++generation.current;
@@ -519,13 +544,30 @@ function Workspace({ courseId, uid }: { courseId: string; uid: string }) {
       if (mounted.current) setStarting(false);
     }
   }
+  const sessionFocus = resolveSessionFocus(
+    (data?.sessions ?? []).map((session) => session.id),
+    focusSessionId,
+  );
+  const effectiveHistoryFilter =
+    focusSessionId && sessionFocus.found ? 'all' : historyFilter;
+  useEffect(() => {
+    if (!focusSessionId || !sessionFocus.found) return;
+    if (focusedOnce.current === focusSessionId) return;
+    const frame = window.requestAnimationFrame(() => {
+      if (landOnSession(focusSessionId)) focusedOnce.current = focusSessionId;
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [focusSessionId, sessionFocus.found, data?.sessions]);
   const visibleSessions = data?.sessions.filter(
     (session) =>
       (data.canReadRoster ||
         !session.active ||
         session.id === studentCheckInSession(data.sessions)?.id) &&
-      (historyFilter === 'all' ||
-        (historyFilter === 'active' ? session.active : !session.active)),
+      (effectiveHistoryFilter === 'all' ||
+        (effectiveHistoryFilter === 'active' ? session.active : !session.active)) &&
+      (!focusSessionId ||
+        session.id === focusSessionId ||
+        !data.sessions.some((row) => row.id === focusSessionId)),
   ) ?? [];
   const meeting = useCourseTodayMeeting(courseId, data?.courseName ?? '');
   const viewerRole = data?.canStart ? 'teacher' : 'student';
@@ -562,6 +604,11 @@ function Workspace({ courseId, uid }: { courseId: string; uid: string }) {
         </p>
       )}
       {data && <AttendanceSyncStatus state={liveState} teacher={data.canReadRoster} />}
+      {data && !loading && sessionFocus.missing ? (
+        <p role="status" className={service.errorNotice}>
+          {SESSION_FOCUS_MISSING}
+        </p>
+      ) : null}
       {data && liveState === 'live' && (
         <>
           <AttendanceMissingNotices
@@ -630,7 +677,7 @@ function Workspace({ courseId, uid }: { courseId: string; uid: string }) {
                 <button
                   key={value}
                   type="button"
-                  aria-pressed={historyFilter === value}
+                  aria-pressed={effectiveHistoryFilter === value}
                   onClick={() => setHistoryFilter(value)}
                 >
                   {label}
@@ -650,6 +697,7 @@ function Workspace({ courseId, uid }: { courseId: string; uid: string }) {
                 canReadRoster={data.canReadRoster}
                 checkInEnabled={studentCheckInSession(data.sessions)?.id === session.id}
                 reload={reload}
+                focused={session.id === focusSessionId}
               />
             ))
           ) : (
@@ -679,8 +727,23 @@ export function CourseAttendance({
   searchParams?: SchoolSearchParams;
 }) {
   const { user, loading } = useAuth();
+  const query = useSearchParams();
+  const fromProps = searchParams && typeof searchParams === 'object' && 'sessionId' in searchParams
+    ? (searchParams as { sessionId?: string | string[] }).sessionId
+    : null;
+  const focusSessionId =
+    parseSessionFocusId(query.get('sessionId')) ||
+    parseSessionFocusId(Array.isArray(fromProps) ? fromProps[0] : fromProps);
   const { schoolSearch } = resolveSchoolPageContext(searchParams);
   const path = `${audience === 'teacher' ? '/teacher' : ''}/course/${encodeURIComponent(courseId)}`;
+  const attendanceQuery = (() => {
+    const params = new URLSearchParams(
+      schoolSearch.startsWith('?') ? schoolSearch.slice(1) : schoolSearch,
+    );
+    if (focusSessionId) params.set('sessionId', focusSessionId);
+    const text = params.toString();
+    return text ? `?${text}` : '';
+  })();
   return (
     <SiteShell title="點名" subtitle="查看課堂簽到與已保存的出席紀錄。">
       <nav className={styles.navigation} aria-label="課程導覽">
@@ -695,10 +758,15 @@ export function CourseAttendance({
             確認登入狀態…
           </p>
         ) : user ? (
-          <Workspace key={`${user.uid}:${courseId}`} uid={user.uid} courseId={courseId} />
+          <Workspace
+            key={`${user.uid}:${courseId}:${focusSessionId ?? ''}`}
+            uid={user.uid}
+            courseId={courseId}
+            focusSessionId={focusSessionId}
+          />
         ) : (
           <SchoolAccountRequired
-            returnUrl={`${path}/attendance${schoolSearch}`}
+            returnUrl={`${path}/attendance${attendanceQuery}`}
             alternative="出缺席請先在課堂上向老師確認。"
           />
         )}

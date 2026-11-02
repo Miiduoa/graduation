@@ -11,6 +11,7 @@ import { Button, Card, LoadingState } from '../ui/components';
 import { courseChipScrollContentStyle } from '../ui/courseChipShell';
 import { theme } from '../ui/theme';
 import { safeNavigate } from '../utils/safeNavigate';
+import { SESSION_FOCUS_MISSING, parseSessionFocusId } from './sessionDeepLink';
 
 type RouteProps = {
   route?: {
@@ -28,7 +29,10 @@ export default function AttendanceMultiMethodScreen(props: RouteProps) {
   const { school } = useSchool();
   const params = props.route?.params;
   const courseId = params?.courseId ?? params?.sessionConfig?.courseId ?? '';
-  const sessionId = params?.sessionId ?? params?.sessionConfig?.sessionId ?? '';
+  const sessionId =
+    parseSessionFocusId(params?.sessionId) ??
+    parseSessionFocusId(params?.sessionConfig?.sessionId) ??
+    '';
   const userId = auth.user?.uid ?? '';
   const schoolId = school.id ?? auth.profile?.schoolId;
   const supportedCourse =
@@ -148,7 +152,7 @@ export default function AttendanceMultiMethodScreen(props: RouteProps) {
                 : !supportedCourse
                   ? '此入口尚未開放正式簽到。請回到課程，使用老師提供的點名入口。'
                   : sessionId
-                    ? '這場點名可能已結束，或尚未開放給目前帳號。請回到課程確認最新場次。'
+                    ? SESSION_FOCUS_MISSING
                     : '請等老師開始點名後重新整理，或從課程開啟目前進行中的課堂。'
             }
           >
