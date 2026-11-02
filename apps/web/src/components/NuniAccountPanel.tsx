@@ -1,6 +1,7 @@
 'use client';
 
 import Link from 'next/link';
+import { useEffect, useRef, useState, type SyntheticEvent } from 'react';
 import { useNuniSession } from '@/features/nuni/Session';
 import { AccountIdentity } from './AccountIdentity';
 import { AccountMemberships } from './AccountMemberships';
@@ -21,7 +22,7 @@ export function NuniAccountPanel() {
         )}
       </section>
     );
-  if (account.loading)
+  if (account.loading && (!account.session || account.error))
     return (
       <section className={styles.panel} aria-label="Google 帳號" role="status">
         <h2>正在確認 Google 帳號…</h2>
@@ -39,38 +40,118 @@ export function NuniAccountPanel() {
     );
   if (!account.session) return null;
   return (
-    <section className={styles.panel} aria-label="Google 帳號">
-      <p className={styles.label}>我的帳號</p>
-      <h2>Google 帳號已登入</h2>
-      <p>你可以開啟已加入的課程。老師、協同教師或學生身分依各課程的成員資格決定。</p>
-      <p>學校資格、課程成員與店家權限分別確認。校務課表與正式成績還沒接通。</p>
-      <div className={styles.actions}>
-        <Link className="btn primary" href="/classroom">
-          查看我的課程
-        </Link>
-        <Link className="btn" href="/classroom/account">
-          學校資格
-        </Link>
-        <Link className="btn" href="/merchant">
-          店家合作
-        </Link>
-      </div>
-      <AccountIdentity
-        key={`identity:${account.session.platformAccountId}:${account.session.context}`}
-        context={account.session.context}
-        accountId={account.session.platformAccountId}
-      />
-      <AccountMemberships
-        key={`${account.session.platformAccountId}:${account.session.context}`}
-        context={account.session.context}
-        refreshAccount={account.refresh}
-      />
-      {account.session.isPlatformOperator && (
-        <div className={styles.permission}>
-          <p>此帳號另有平台管理權限。</p>
-          <Link href="/admin">前往平台管理 →</Link>
-        </div>
+    <ConfirmedAccountPanel
+      key={JSON.stringify([account.session.platformAccountId, account.session.context])}
+      session={account.session}
+      loading={account.loading}
+      refreshAccount={account.refresh}
+    />
+  );
+}
+
+function ConfirmedAccountPanel({
+  session,
+  loading,
+  refreshAccount,
+}: {
+  session: NonNullable<ReturnType<typeof useNuniSession>['session']>;
+  loading: boolean;
+  refreshAccount: () => Promise<void>;
+}) {
+  const [confirmed, setConfirmed] = useState(!loading);
+  const [readerVersion, setReaderVersion] = useState(0);
+  const [recovery, setRecovery] = useState<'idle' | 'pending' | 'settled' | 'error'>('idle');
+  const mounted = useRef(true);
+  const recoveryLocked = useRef(false);
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+    };
+  }, []);
+  if (!loading && !confirmed) setConfirmed(true);
+  if (!loading && recovery === 'settled') {
+    setRecovery('idle');
+    setReaderVersion((value) => value + 1);
+  }
+  function recoverMemberships() {
+    if (loading || recoveryLocked.current || !mounted.current) return Promise.resolve();
+    recoveryLocked.current = true;
+    setRecovery('pending');
+    const operation = (async () => {
+      try {
+        await refreshAccount();
+        if (mounted.current) setRecovery('settled');
+      } catch (failure) {
+        if (mounted.current) setRecovery('error');
+        throw failure;
+      } finally {
+        recoveryLocked.current = false;
+      }
+    })();
+    // The legacy membership button does not await the returned promise.
+    void operation.catch(() => {});
+    return operation;
+  }
+  function blockHiddenAction(event: SyntheticEvent) {
+    if (!loading) return;
+    event.preventDefault();
+    event.stopPropagation();
+  }
+  return (
+    <>
+      {loading && (
+        <section className={styles.panel} aria-label="Google 帳號" role="status">
+          <h2>正在確認 Google 帳號…</h2>
+        </section>
       )}
-    </section>
+      {confirmed && (
+        <section
+          className={styles.panel}
+          aria-label="Google 帳號"
+          hidden={loading}
+          inert={loading}
+          style={loading ? { display: 'none' } : undefined}
+          onSubmitCapture={blockHiddenAction}
+          onClickCapture={blockHiddenAction}
+        >
+          {!loading && (
+            <>
+              <p className={styles.label}>我的帳號</p>
+              <h2>Google 帳號已登入</h2>
+              <p>你可以開啟已加入的課程。老師、協同教師或學生身分依各課程的成員資格決定。</p>
+              <p>學校資格、課程成員與店家權限分別確認。校務課表與正式成績還沒接通。</p>
+              <div className={styles.actions}>
+                <Link className="btn primary" href="/classroom">
+                  查看我的課程
+                </Link>
+                <Link className="btn" href="/classroom/account">
+                  學校資格
+                </Link>
+                <Link className="btn" href="/merchant">
+                  店家合作
+                </Link>
+              </div>
+            </>
+          )}
+          {!loading && (
+            <AccountIdentity context={session.context} accountId={session.platformAccountId} />
+          )}
+          {recovery === 'pending' && <p role="status">正在重新確認帳號…</p>}
+          {recovery === 'error' && <p role="alert">目前無法重新確認帳號，請稍後再試。</p>}
+          <AccountMemberships
+            key={readerVersion}
+            context={session.context}
+            refreshAccount={recoverMemberships}
+          />
+          {!loading && session.isPlatformOperator && (
+            <div className={styles.permission}>
+              <p>此帳號另有平台管理權限。</p>
+              <Link href="/admin">前往平台管理 →</Link>
+            </div>
+          )}
+        </section>
+      )}
+    </>
   );
 }

@@ -1,5 +1,6 @@
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, expect, it, vi } from 'vitest';
+import { browserRequest } from '@/features/nuni/Session';
 import ProfilePage from './page';
 
 const state = vi.hoisted(() => ({
@@ -157,6 +158,35 @@ it('keeps mixed account records separate from course membership', async () => {
   expect(screen.getByText(/老師、協同教師或學生身分依各課程的成員資格決定/)).toBeTruthy();
   expect(state.read).toHaveBeenCalledWith('users/a');
 });
+
+it.each(['Google-only', 'Google+Firebase'])(
+  'preserves the embedded qualification draft during same-scope refresh for %s',
+  async (accountMode) => {
+    if (accountMode === 'Google-only') state.user = null;
+    state.nuni.session = { platformAccountId: 'pa_a', context: 'a', isPlatformOperator: false };
+    const { rerender } = render(<ProfilePage />);
+    const email = await screen.findByRole('textbox', { name: '學校配發的電子郵件' });
+    fireEvent.change(email, { target: { value: 'draft-a@example.test' } });
+    expect((email as HTMLInputElement).value).toBe('draft-a@example.test');
+
+    state.nuni.loading = true;
+    rerender(<ProfilePage />);
+    expect(screen.queryByRole('form', { name: '申請學校資格' })).toBeNull();
+    expect(screen.queryByRole('textbox', { name: '學校配發的電子郵件' })).toBeNull();
+    expect(screen.queryByRole('button', { name: '送出資格申請' })).toBeNull();
+
+    state.nuni.loading = false;
+    rerender(<ProfilePage />);
+    const restored = await screen.findByRole('textbox', { name: '學校配發的電子郵件' });
+    expect((restored as HTMLInputElement).value).toBe('draft-a@example.test');
+    expect((restored as HTMLInputElement).disabled).toBe(false);
+    expect(vi.mocked(browserRequest).mock.calls.filter((call) => call[2] !== undefined)).toEqual(
+      [],
+    );
+    if (accountMode === 'Google-only') expect(state.read).not.toHaveBeenCalled();
+    else expect(state.read).toHaveBeenCalledWith('users/a');
+  },
+);
 
 it('hides course permissions synchronously during refresh, logout, and account switching', () => {
   state.user = null;
