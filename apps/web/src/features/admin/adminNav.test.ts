@@ -35,3 +35,21 @@ it('ignores ordinary content anchors used by skip links', () => {
     schoolId: 'school-one',
   });
 });
+
+it('round-trips the campus announcements section in the hash', () => {
+  expect(serializeAdminHash({ ...defaultAdminLocation(), section: 'announcements' })).toBe(
+    '#announcements',
+  );
+  expect(
+    serializeAdminHash({
+      ...defaultAdminLocation(),
+      section: 'announcements',
+      schoolId: 'pu',
+    }),
+  ).toBe('#announcements/pu');
+  expect(parseAdminHash('#announcements/pu')).toMatchObject({
+    section: 'announcements',
+    schoolId: 'pu',
+  });
+  expect(isAdminWorkbenchHash('#announcements')).toBe(true);
+});
