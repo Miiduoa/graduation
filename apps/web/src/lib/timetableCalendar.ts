@@ -134,10 +134,10 @@ export function buildUpcomingTimetableCalendar(
   const lines = [
     'BEGIN:VCALENDAR',
     'VERSION:2.0',
-    'PRODID:-//Campus One//Timetable//ZH-TW',
+    'PRODID:-//nuni//Timetable//ZH-TW',
     'CALSCALE:GREGORIAN',
     'METHOD:PUBLISH',
-    'X-WR-CALNAME:' + escapeIcsText('Campus One 課表（未來四週）'),
+    'X-WR-CALNAME:' + escapeIcsText('nuni 課表（未來四週）'),
   ];
   let eventCount = 0;
 

@@ -268,7 +268,7 @@ export function applyWebAppearancePreferences(
   root.setAttribute('data-density', appearance.compactMode ? 'compact' : 'comfortable');
   root.setAttribute('data-reduced-motion', appearance.animations ? 'false' : 'true');
   if (themeColor === defaultThemeColor) {
-    // Let the shared light/dark stylesheet own the Campus One palette.
+    // Let the shared light/dark stylesheet own the nuni palette.
     for (const token of ['--brand', '--brand2', '--on-brand']) root.style.removeProperty(token);
   } else {
     const palette = resolveAccentPalette(themeColor, dark);

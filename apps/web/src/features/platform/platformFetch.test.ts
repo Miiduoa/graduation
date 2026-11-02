@@ -5,7 +5,7 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-it('sends an explicit POST with JSON to Campus One nuni BFF', async () => {
+it('sends an explicit POST with JSON to nuni nuni BFF', async () => {
   const fetcher = vi.fn().mockResolvedValue(
     new Response(JSON.stringify({ ok: true }), {
       status: 200,

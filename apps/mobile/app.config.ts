@@ -279,7 +279,7 @@ export default ({ config }: any) => {
 
   return {
     ...config,
-    name: config.name ?? 'Campus One',
+    name: config.name ?? 'nuni',
     slug: config.slug ?? 'campus-app',
     version: config.version ?? '1.0.0',
     orientation: 'portrait',

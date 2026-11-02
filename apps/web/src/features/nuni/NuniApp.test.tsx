@@ -1,6 +1,6 @@
 vi.mock('@/components/SchoolSelector', () => ({ SchoolSelector: () => null }));
 vi.mock('@/components/PWAInstallBanner', () => ({ PWAInstallBanner: () => null }));
-vi.mock('@/components/AppHeader', () => ({ AppHeader: () => <header>Campus One</header> }));
+vi.mock('@/components/AppHeader', () => ({ AppHeader: () => <header>nuni</header> }));
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { renderToString } from 'react-dom/server';
 import { hydrateRoot, type Root } from 'react-dom/client';

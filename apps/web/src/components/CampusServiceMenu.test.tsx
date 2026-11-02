@@ -177,7 +177,7 @@ it('marks the feedback tab instead of the general grade service and keeps campus
   expect(feedback.getAttribute('aria-current')).toBeNull();
 });
 
-it('keeps the Campus One header and original school login around the complete shared menu', () => {
+it('keeps the nuni header and original school login around the complete shared menu', () => {
   navigation.search = 'schoolId=tw-pu';
   render(<AppHeader />);
   fireEvent.click(screen.getByText('所有服務'));
