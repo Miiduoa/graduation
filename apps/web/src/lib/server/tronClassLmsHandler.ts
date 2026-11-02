@@ -460,7 +460,8 @@ export function createTronClassLmsHandler({
       const cached = await cacheRef.get();
       const cacheData = cached.data();
       if (cached.exists) {
-        if (cacheData?.ownerUid !== uid || !cacheStillFresh(cacheData.expiresAt, now()) ||
+        if (cacheData?.ownerUid !== uid || cacheData?.sessionId !== linkedId ||
+          !cacheStillFresh(cacheData.expiresAt, now()) ||
           !publicSnapshot(cacheData.snapshot, uid)) {
           await cacheRef.delete?.();
         } else {
@@ -471,6 +472,7 @@ export function createTronClassLmsHandler({
             try {
               await cacheRef.set?.({
                 ownerUid: uid,
+                sessionId: linkedId,
                 fetchedAt: cacheData.fetchedAt,
                 expiresAt: cacheData.expiresAt,
                 snapshot: homeworkOnlySnapshot(publicSnapshot(cacheData.snapshot, uid)!),
@@ -577,6 +579,7 @@ export function createTronClassLmsHandler({
       try {
         await cacheRef.set?.({
           ownerUid: uid,
+          sessionId: linkedId,
           fetchedAt: snapshot.fetchedAt,
           expiresAt: new Date(Date.parse(snapshot.cache.expiresAt)),
           snapshot: homeworkOnlySnapshot(snapshot),
