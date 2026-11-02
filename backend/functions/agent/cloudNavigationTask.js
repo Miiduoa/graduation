@@ -202,7 +202,7 @@ function canonicalPlace(actual, expected) {
 }
 
 function routePlace({ id, name, schoolId, lat, lng }) {
-  return { id, name, schoolId, lat, lng };
+  return { id, name: text(name, 80), schoolId, lat, lng };
 }
 
 function createCloudNavigationTask(deps = {}) {
