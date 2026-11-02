@@ -43,6 +43,8 @@ test('lists write permission toggles defaulting off and saves changes', async ()
   const view = render(<AssistantPermissionsScreen navigation={navigation} />);
   await waitFor(() => expect(view.getByText('送出請假申請')).toBeTruthy());
   expect(view.getByText(/預設全部關閉/)).toBeTruthy();
+  expect(view.getByText(/拆待辦／設提醒/)).toBeTruthy();
+  expect(view.getByText('建立個人待辦與提醒')).toBeTruthy();
   expect(view.getByLabelText('送出請假申請').props.value).toBe(false);
 
   await act(async () => {

@@ -3,13 +3,22 @@
 const mockDocuments = new Map();
 
 function mockRef(path) {
+  const query = {
+    where: () => query,
+    orderBy: () => query,
+    limit: () => query,
+    get: async () => ({ docs: [], empty: true, size: 0 }),
+  };
   return {
     collection: (name) => mockRef(`${path}/${name}`),
     doc: (id) => mockRef(`${path}/${id}`),
+    where: () => query,
+    orderBy: () => query,
+    limit: () => query,
     get: async () => {
       const data = mockDocuments.get(path);
       if (data instanceof Error) throw data;
-      return { exists: data !== undefined, data: () => data };
+      return { exists: data !== undefined, data: () => data, docs: [], empty: true, size: 0 };
     },
     set: async () => {},
   };
@@ -71,5 +80,37 @@ describe('executeCampusAssistantCore write permission gate', () => {
     mockDocuments.set('users/alice/settings/assistantPermissions', new Error('unavailable'));
     const result = await runReserveSeat();
     expect(result.debug.route).toBe('write_permission_denied');
+  });
+
+  test('closed personal todo permission omits split/reminder actions', async () => {
+    mockDocuments.set('users/alice/settings/assistantPermissions', {
+      createPersonalTodoReminder: false,
+    });
+    const result = await executeCampusAssistantCore({
+      request: {
+        auth: { uid: 'alice', token: { name: 'Alice', role: 'student' } },
+        data: {
+          messages: [{ role: 'user', content: '幫我把作業拆成待辦' }],
+          context: { schoolId: 'pu' },
+        },
+      },
+      runId: 'write-perm-todo',
+      startedAt: Date.now(),
+      routingIntent: 'assignment_planning',
+      prefetched: {
+        scope: { uid: 'alice', schoolId: 'pu' },
+        assignments: [
+          {
+            id: 'a1',
+            title: '報告',
+            groupId: 'g1',
+            groupName: '資料庫',
+            dueAt: new Date('2030-01-02T00:00:00Z'),
+          },
+        ],
+      },
+    });
+    expect(result.actions || []).toEqual([]);
+    expect(result.content).toMatch(/建立個人待辦與提醒/);
   });
 });

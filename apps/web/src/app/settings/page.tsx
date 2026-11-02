@@ -820,7 +820,7 @@ function SettingsContent({
     return (
       <div className={styles.stack}>
         <SectionHeading title="助理權限">
-          控制助理可以代你執行哪些寫入動作。預設全部關閉；開啟後仍需每次確認才會生效。
+          控制助理可以代你執行哪些寫入動作。預設全部關閉；開啟後仍需每次確認才會生效。涵蓋需確認的服務寫入、助理餐廳草稿下單，以及拆待辦／設提醒等個人待辦佇列。
         </SectionHeading>
         {!user && (
           <div className={styles.notice}>
@@ -840,7 +840,7 @@ function SettingsContent({
         <div className={styles.notice} role="note">
           <h3>預設關閉</h3>
           <p>
-            若你尚未設定過，或後端讀取失敗，一律視為不允許寫入。關閉中的動作不會出現確認卡，也無法被客戶端繞過執行。
+            若你尚未設定過，或後端讀取失敗，一律視為不允許寫入。規劃與執行階段都會檢查；關閉後助理不會提出對應確認卡，直接呼叫也會被擋下。學餐頁一般下單不受「餐廳下單」開關影響。若仍看到舊確認卡，送出時會顯示權限說明並引導至此頁。
           </p>
         </div>
         <section aria-labelledby="assistant-write-permissions">

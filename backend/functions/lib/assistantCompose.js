@@ -131,7 +131,14 @@ async function buildModelBackedAssistantResponse({
     isAssistantWriteToolAllowed,
   } = require('./assistantWritePermissions');
 
-  const toolsForLlm = tools.filter((t) => !t.requiresConfirmation);
+  // 需確認寫入工具不給模型直接呼叫；草稿下單工具另依「餐廳下單」開關過濾。
+  const toolsForLlm = tools.filter((t) => {
+    if (t.requiresConfirmation) return false;
+    if (t.name === 'proposeOrder' && !isAssistantWriteToolAllowed(writePermissions, 'createOrder')) {
+      return false;
+    }
+    return true;
+  });
   const toolPromptSection = toolsForLlm.map((t) => `- ${t.name}：${t.description || t.name}`).join('\n');
 
   // 規劃階段：未允許的寫入工具不出現在 few-shot／可用清單（執行前 executeAgentWrite 仍會再擋一次）。

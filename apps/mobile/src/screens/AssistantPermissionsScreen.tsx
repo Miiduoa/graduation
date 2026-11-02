@@ -130,7 +130,7 @@ function AssistantPermissionsEditor({
     <AIDetailScreen title="助理權限" onBack={() => navigation?.goBack?.()}>
       <AICard title="寫入動作">
         <Text style={{ color: aiTokens.muted, lineHeight: 22, marginBottom: 8 }}>
-          預設全部關閉。開啟後，助理仍須每次請你確認才會執行。網頁與手機共用同一份設定。
+          預設全部關閉。開啟後，助理仍須每次請你確認才會執行。涵蓋服務寫入、助理餐廳草稿下單，以及拆待辦／設提醒等個人待辦佇列；學餐頁一般下單不受「餐廳下單」開關影響。網頁與手機共用同一份設定。
         </Text>
         <View style={{ gap: 4 }}>
           {ASSISTANT_WRITE_PERMISSION_DEFINITIONS.map((row) => (

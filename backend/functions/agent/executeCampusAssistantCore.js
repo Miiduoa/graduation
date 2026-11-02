@@ -318,6 +318,18 @@ async function executeCampusAssistantCore({
     return replyWritePermissionDenied(toolName);
   };
 
+  /** 拆待辦／設提醒等寫入本人待辦佇列的動作；未開開關時不附確認動作。 */
+  const personalQueueAllowed = isAssistantWriteToolAllowed(
+    writePermissions,
+    'createPersonalTodoReminder',
+  );
+  const withPersonalQueueActions = (actions) => {
+    if (personalQueueAllowed) return actions;
+    return [];
+  };
+  const personalQueueClosedHint =
+    '若要拆待辦或設定提醒，請到設定 → 助理權限開啟「建立個人待辦與提醒」。';
+
   // 寫入意圖在進 LLM／結構化草稿前就擋下，避免未授權工具進規劃。
   // createOrder 若線上點餐關閉，交給 food_order 區塊回既有「不能線上點餐」文案。
   {
@@ -985,9 +997,12 @@ async function executeCampusAssistantCore({
       '4. 截止前預留 20 分鐘檢查格式與附件。',
       '',
       `截止時間：${formatAssistantDate(target.dueAt) || '未設定'}`,
+      ...(personalQueueAllowed ? [] : ['', personalQueueClosedHint]),
     ].join('\n');
-    response.suggestions = ['設定提醒', '更細拆步驟', '查看作業'];
-    response.actions = [
+    response.suggestions = personalQueueAllowed
+      ? ['設定提醒', '更細拆步驟', '查看作業']
+      : ['更細拆步驟', '查看作業', '開啟助理權限設定'];
+    response.actions = withPersonalQueueActions([
       assistantAction({
         label: '拆成待辦',
         action: 'split_assignment',
@@ -1007,7 +1022,7 @@ async function executeCampusAssistantCore({
         sensitivity: 'medium',
         evidenceRefs: [{ type: 'assignment', id: target.id, label: target.title ?? '作業' }],
       }),
-    ];
+    ]);
     response.citations = [{ type: 'assignment', id: target.id, label: target.title ?? '作業' }];
     return await finalizeResponse();
   }
@@ -1064,8 +1079,10 @@ async function executeCampusAssistantCore({
       ]
         .filter(Boolean)
         .join('\n');
-      response.suggestions = ['設定提醒', '今日摘要', '今日公告'];
-      response.actions = [
+      response.suggestions = personalQueueAllowed
+        ? ['設定提醒', '今日摘要', '今日公告']
+        : ['今日摘要', '今日公告', '開啟助理權限設定'];
+      response.actions = withPersonalQueueActions([
         assistantAction({
           label: '設定提醒',
           action: 'schedule_reminder',
@@ -1079,7 +1096,10 @@ async function executeCampusAssistantCore({
             { type: 'assignment', id: earliest.id, label: earliest.title ?? '作業' },
           ],
         }),
-      ];
+      ]);
+      if (!personalQueueAllowed) {
+        response.content = `${response.content}\n\n${personalQueueClosedHint}`;
+      }
       response.citations = pendingAssignments.slice(0, 3).map((assignment) => ({
         type: 'assignment',
         id: assignment.id,
@@ -1117,9 +1137,11 @@ async function executeCampusAssistantCore({
     }
 
     response.content = lines.join('\n');
-    response.suggestions = ['設定提醒', '今日公告', '近期活動'];
+    response.suggestions = personalQueueAllowed
+      ? ['設定提醒', '今日公告', '近期活動']
+      : ['今日公告', '近期活動', '開啟助理權限設定'];
     if (pendingAssignments[0]) {
-      response.actions = [
+      response.actions = withPersonalQueueActions([
         assistantAction({
           label: '設定提醒',
           action: 'schedule_reminder',
@@ -1137,7 +1159,10 @@ async function executeCampusAssistantCore({
             },
           ],
         }),
-      ];
+      ]);
+      if (!personalQueueAllowed) {
+        response.content = `${response.content}\n\n${personalQueueClosedHint}`;
+      }
     }
     return await finalizeResponse();
   }

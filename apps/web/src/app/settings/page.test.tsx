@@ -293,6 +293,8 @@ it('shows assistant write permissions defaulting off and can save an enabled tog
   fireEvent.click(screen.getByRole('button', { name: '助理權限' }));
   expect(screen.getByRole('heading', { name: '助理權限' })).toBeTruthy();
   expect(screen.getByRole('heading', { name: '預設關閉' })).toBeTruthy();
+  expect(screen.getByText(/拆待辦／設提醒/)).toBeTruthy();
+  expect(screen.getByRole('switch', { name: '建立個人待辦與提醒' })).toBeTruthy();
   const leaveToggle = (await screen.findByRole('switch', {
     name: '送出請假申請',
   })) as HTMLButtonElement;

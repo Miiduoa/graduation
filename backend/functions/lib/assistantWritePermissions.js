@@ -10,11 +10,13 @@ const {
   ASSISTANT_PERMISSIONS_SETTINGS_HREF,
   ASSISTANT_WRITE_PERMISSION_DEFINITIONS,
   ASSISTANT_WRITE_PERMISSION_KEYS,
+  ASSISTANT_WRITE_TOOL_ALIASES,
   assistantWritePermissionDeniedMessage,
   createDefaultAssistantWritePermissions,
   getAssistantWritePermissionLabel,
   isAssistantWriteToolAllowed,
   normalizeAssistantWritePermissions,
+  resolveAssistantWritePermissionKey,
   serializeAssistantWritePermissions,
 } = require('../generated/shared/assistantPermissions');
 
@@ -56,12 +58,14 @@ module.exports = {
   ASSISTANT_PERMISSIONS_SETTINGS_HREF,
   ASSISTANT_WRITE_PERMISSION_DEFINITIONS,
   ASSISTANT_WRITE_PERMISSION_KEYS,
+  ASSISTANT_WRITE_TOOL_ALIASES,
   assistantWritePermissionDeniedMessage,
   createDefaultAssistantWritePermissions,
   getAssistantWritePermissionLabel,
   isAssistantWriteToolAllowed,
   loadAssistantWritePermissions,
   normalizeAssistantWritePermissions,
+  resolveAssistantWritePermissionKey,
   resolveAssistantWritePermissions,
   serializeAssistantWritePermissions,
 };

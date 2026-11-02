@@ -69,7 +69,11 @@ describe('assistantWritePermissions helpers', () => {
             doc: () => ({
               get: async () => ({
                 exists: true,
-                data: () => ({ createOrder: true, cancelOrder: false }),
+                data: () => ({
+                  createOrder: true,
+                  cancelOrder: false,
+                  createPersonalTodoReminder: true,
+                }),
               }),
             }),
           }),
@@ -78,7 +82,9 @@ describe('assistantWritePermissions helpers', () => {
     };
     const perms = await loadAssistantWritePermissions(db, 'alice');
     expect(isAssistantWriteToolAllowed(perms, 'createOrder')).toBe(true);
+    expect(isAssistantWriteToolAllowed(perms, 'proposeOrder')).toBe(true);
     expect(isAssistantWriteToolAllowed(perms, 'cancelOrder')).toBe(false);
     expect(isAssistantWriteToolAllowed(perms, 'borrowBook')).toBe(false);
+    expect(isAssistantWriteToolAllowed(perms, 'schedule_reminder')).toBe(true);
   });
 });

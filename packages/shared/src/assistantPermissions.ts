@@ -1,5 +1,5 @@
 /**
- * 助理寫入類動作權限清單（與 agent tools 的 requiresConfirmation: true 對齊）。
+ * 助理寫入類動作權限清單（與需確認後才寫入的工具對齊）。
  * 預設全部關閉；讀不到或格式錯誤時由 normalize 視為全部關閉（fail closed）。
  */
 
@@ -15,6 +15,7 @@ export const ASSISTANT_WRITE_PERMISSION_KEYS = [
   'cancelOrder',
   'submitQuizAttempt',
   'verifyAttendanceClaim',
+  'createPersonalTodoReminder',
 ] as const;
 
 export type AssistantWritePermissionKey = (typeof ASSISTANT_WRITE_PERMISSION_KEYS)[number];
@@ -65,7 +66,8 @@ export const ASSISTANT_WRITE_PERMISSION_DEFINITIONS: readonly AssistantWritePerm
   {
     key: 'createOrder',
     label: '餐廳下單',
-    description: '整理訂餐草稿，確認後送出餐廳訂單（仍受線上點餐開關約束）。',
+    description:
+      '涵蓋助理整理訂餐草稿與確認下單卡；關閉後助理不會提出草稿，確認卡也無法送出。學餐頁一般下單不受此開關影響（仍受線上點餐開關約束）。',
   },
   {
     key: 'cancelOrder',
@@ -82,6 +84,12 @@ export const ASSISTANT_WRITE_PERMISSION_DEFINITIONS: readonly AssistantWritePerm
     label: '驗證點名簽到',
     description: '驗證 QR／數字／定位等點名憑證，確認後才會寫入出席紀錄。',
   },
+  {
+    key: 'createPersonalTodoReminder',
+    label: '建立個人待辦與提醒',
+    description:
+      '涵蓋拆作業待辦、設定提醒等寫入本人待辦佇列的動作；確認後才會建立。不含讀取課表或作業清單。',
+  },
 ] as const;
 
 export type AssistantWritePermissions = Record<AssistantWritePermissionKey, boolean>;
@@ -93,6 +101,19 @@ export const ASSISTANT_PERMISSIONS_DOC_ID = 'assistantPermissions';
 export const ASSISTANT_PERMISSIONS_SETTINGS_SECTION = 'assistant';
 
 export const ASSISTANT_PERMISSIONS_SETTINGS_HREF = `/settings?section=${ASSISTANT_PERMISSIONS_SETTINGS_SECTION}`;
+
+/**
+ * 工具別名 → 權限 key。
+ * 例如助理草稿下單工具對應「餐廳下單」；拆待辦／設提醒對應「建立個人待辦與提醒」。
+ */
+export const ASSISTANT_WRITE_TOOL_ALIASES: Readonly<Record<string, AssistantWritePermissionKey>> = {
+  proposeOrder: 'createOrder',
+  createFoodOrder: 'createOrder',
+  createReminder: 'createPersonalTodoReminder',
+  split_assignment: 'createPersonalTodoReminder',
+  schedule_reminder: 'createPersonalTodoReminder',
+  create_reminder_draft: 'createPersonalTodoReminder',
+};
 
 const KEY_SET = new Set<string>(ASSISTANT_WRITE_PERMISSION_KEYS);
 
@@ -125,20 +146,30 @@ export function isAssistantWritePermissionKey(value: string): value is Assistant
   return KEY_SET.has(value);
 }
 
+/** 將工具名／結構化動作名對應到權限 key；無法對應則回 null。 */
+export function resolveAssistantWritePermissionKey(
+  toolName: string,
+): AssistantWritePermissionKey | null {
+  if (isAssistantWritePermissionKey(toolName)) return toolName;
+  return ASSISTANT_WRITE_TOOL_ALIASES[toolName] ?? null;
+}
+
 /** 僅當明確為 true 才允許；未知工具一律拒絕。 */
 export function isAssistantWriteToolAllowed(
   permissions: AssistantWritePermissions | null | undefined,
   toolName: string,
 ): boolean {
-  if (!permissions || !isAssistantWritePermissionKey(toolName)) return false;
-  return permissions[toolName] === true;
+  const key = resolveAssistantWritePermissionKey(toolName);
+  if (!permissions || !key) return false;
+  return permissions[key] === true;
 }
 
 export function getAssistantWritePermissionDefinition(
   toolName: string,
 ): AssistantWritePermissionDefinition | null {
-  if (!isAssistantWritePermissionKey(toolName)) return null;
-  return ASSISTANT_WRITE_PERMISSION_DEFINITIONS.find((row) => row.key === toolName) ?? null;
+  const key = resolveAssistantWritePermissionKey(toolName);
+  if (!key) return null;
+  return ASSISTANT_WRITE_PERMISSION_DEFINITIONS.find((row) => row.key === key) ?? null;
 }
 
 export function getAssistantWritePermissionLabel(toolName: string): string {
