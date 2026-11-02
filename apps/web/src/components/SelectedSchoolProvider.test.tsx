@@ -1,7 +1,8 @@
-import { act, fireEvent, render, screen } from '@testing-library/react';
-import { useEffect } from 'react';
+import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { Profiler, useEffect } from 'react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { SchoolSelector } from './SchoolSelector';
+import { useAgentDraft } from './AgentDraftProvider';
 import {
   SelectedSchoolProvider,
   schoolPreferenceKey,
@@ -42,7 +43,21 @@ function View(props: Partial<Omit<SelectedSchoolProviderProps, 'children'>> = {}
     </SelectedSchoolProvider>
   );
 }
+const originalShowModal = Object.getOwnPropertyDescriptor(HTMLDialogElement.prototype, 'showModal');
+const originalDialogClose = Object.getOwnPropertyDescriptor(HTMLDialogElement.prototype, 'close');
 beforeEach(() => {
+  Object.defineProperty(HTMLDialogElement.prototype, 'showModal', {
+    configurable: true,
+    value: function (this: HTMLDialogElement) {
+      this.setAttribute('open', '');
+    },
+  });
+  Object.defineProperty(HTMLDialogElement.prototype, 'close', {
+    configurable: true,
+    value: function (this: HTMLDialogElement) {
+      this.removeAttribute('open');
+    },
+  });
   vi.clearAllMocks();
   navigation.pathname = '/community';
   navigation.search = '';
@@ -52,8 +67,15 @@ beforeEach(() => {
   window.history.replaceState({}, '', '/');
 });
 afterEach(() => {
+  cleanup();
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
+  if (originalShowModal)
+    Object.defineProperty(HTMLDialogElement.prototype, 'showModal', originalShowModal);
+  else Reflect.deleteProperty(HTMLDialogElement.prototype, 'showModal');
+  if (originalDialogClose)
+    Object.defineProperty(HTMLDialogElement.prototype, 'close', originalDialogClose);
+  else Reflect.deleteProperty(HTMLDialogElement.prototype, 'close');
 });
 
 it('uses only the supplied directory, searches it, and treats selection as browsing preference', () => {
@@ -230,11 +252,16 @@ it('keeps an explicit all-campus choice instead of forcing Providence', () => {
 });
 
 it('uses an explicit schoolId deep link ahead of a saved browsing preference', () => {
-  localStorage.setItem(schoolPreferenceKey(defaults.ownerKey), JSON.stringify({ schoolId: 'school-a' }));
+  localStorage.setItem(
+    schoolPreferenceKey(defaults.ownerKey),
+    JSON.stringify({ schoolId: 'school-a' }),
+  );
   navigation.search = '?schoolId=school-b';
   render(<View />);
   expect(screen.getByTestId('selected-school').textContent).toBe('乙校');
-  expect(JSON.parse(localStorage.getItem(schoolPreferenceKey(defaults.ownerKey))!)).toEqual({ schoolId: 'school-a' });
+  expect(JSON.parse(localStorage.getItem(schoolPreferenceKey(defaults.ownerKey))!)).toEqual({
+    schoolId: 'school-a',
+  });
 });
 
 it('resolves a unique legacy school code against the live catalog ahead of preference', () => {
@@ -256,14 +283,7 @@ it('maps a unique bundled school code then requires live catalog membership', ()
     JSON.stringify({ schoolId: 'school-a' }),
   );
   navigation.search = '?school=NTHU';
-  render(
-    <View
-      schools={[
-        ...schools,
-        { id: 'nthu', name: '國立清華大學', code: 'NTHU' },
-      ]}
-    />,
-  );
+  render(<View schools={[...schools, { id: 'nthu', name: '國立清華大學', code: 'NTHU' }]} />);
   expect(screen.getByTestId('selected-school').textContent).toBe('國立清華大學');
 });
 
@@ -295,9 +315,7 @@ it('does not silently choose Providence for an ambiguous or invalid school code'
   expect(capturedSelection.selectedSchoolId).toBeNull();
 
   navigation.search = '?school=NOT-A-REAL-CODE';
-  render(
-    <View schools={[{ id: 'pu', name: '靜宜大學', code: 'PU' }, ...schools]} />,
-  );
+  render(<View schools={[{ id: 'pu', name: '靜宜大學', code: 'PU' }, ...schools]} />);
   expect(screen.getAllByTestId('selected-school').at(-1)?.textContent).toBe('不限校園');
 });
 
@@ -326,7 +344,8 @@ it('clears an old code when changing to a school listed only by the live directo
 
 it('clears map deep links when changing campuses while preserving unrelated map search filters', () => {
   navigation.pathname = '/map';
-  navigation.search = '?schoolId=school-a&campus=school-a&route=library,gate&focus=library&q=%E8%87%AA%E7%BF%92';
+  navigation.search =
+    '?schoolId=school-a&campus=school-a&route=library,gate&focus=library&q=%E8%87%AA%E7%BF%92';
   render(<View />);
   expect(screen.getByTestId('selected-school').textContent).toBe('甲校');
   fireEvent.change(screen.getByLabelText('瀏覽校園'), { target: { value: 'school-b' } });
@@ -346,4 +365,202 @@ it('keeps a current-school map link intact when choosing the same campus again',
   const next = new URLSearchParams(navigation.search);
   expect(next.get('route')).toBe('library,gate');
   expect(next.get('focus')).toBe('library');
+});
+
+function DraftProbe() {
+  const selection = useSelectedSchool();
+  const draft = useAgentDraft('search', { ready: !selection.loading });
+  return (
+    <>
+      <input
+        aria-label="助理草稿"
+        value={draft.draft.text}
+        onChange={(event) => draft.setDraft({ text: event.target.value })}
+      />
+      <button onClick={() => draft.setPending(true)}>模擬待執行任務</button>
+    </>
+  );
+}
+function DraftView(props: Partial<Omit<SelectedSchoolProviderProps, 'children'>> = {}) {
+  return (
+    <SelectedSchoolProvider {...defaults} {...props}>
+      <Probe />
+      <SchoolSelector />
+      <DraftProbe />
+    </SelectedSchoolProvider>
+  );
+}
+function observeStorageWrites() {
+  // jsdom exposes native Storage methods on the prototype; the test polyfill owns its methods.
+  const owner = Object.prototype.hasOwnProperty.call(localStorage, 'setItem')
+    ? localStorage
+    : Object.getPrototypeOf(localStorage);
+  return vi.spyOn(owner, 'setItem');
+}
+it('holds the accepted school and draft until confirmation, with cancellation committing nothing', () => {
+  localStorage.setItem(
+    schoolPreferenceKey(defaults.ownerKey),
+    JSON.stringify({ schoolId: 'school-a' }),
+  );
+  render(<DraftView />);
+  fireEvent.change(screen.getByLabelText('助理草稿'), { target: { value: '甲校未送文字' } });
+  const writes = observeStorageWrites();
+  fireEvent.change(screen.getByLabelText('瀏覽校園'), { target: { value: 'school-b' } });
+  expect(screen.getByRole('dialog')).toBeTruthy();
+  expect(screen.getByTestId('selected-school').textContent).toBe('甲校');
+  expect(navigation.replace).not.toHaveBeenCalled();
+  expect(writes).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole('button', { name: '繼續編輯' }));
+  expect(screen.queryByRole('dialog')).toBeNull();
+  expect((screen.getByLabelText('助理草稿') as HTMLInputElement).value).toBe('甲校未送文字');
+  expect(navigation.replace).not.toHaveBeenCalled();
+  expect(writes).not.toHaveBeenCalled();
+  expect(localStorage.getItem(schoolPreferenceKey(defaults.ownerKey))).toBe(
+    JSON.stringify({ schoolId: 'school-a' }),
+  );
+  fireEvent.change(screen.getByLabelText('瀏覽校園'), { target: { value: 'school-b' } });
+  fireEvent.click(screen.getByRole('button', { name: '清除草稿並切換' }));
+  expect(screen.getByTestId('selected-school').textContent).toBe('乙校');
+  expect((screen.getByLabelText('助理草稿') as HTMLInputElement).value).toBe('');
+  expect(writes).toHaveBeenCalledTimes(1);
+  expect(writes).toHaveBeenCalledWith(
+    schoolPreferenceKey(defaults.ownerKey),
+    JSON.stringify({ schoolId: 'school-b' }),
+  );
+  expect(localStorage.getItem(schoolPreferenceKey(defaults.ownerKey))).toBe(
+    JSON.stringify({ schoolId: 'school-b' }),
+  );
+  expect(navigation.replace).toHaveBeenCalledTimes(1);
+});
+it('holds an externally requested school without a B commit and restores the accepted URL on cancel', () => {
+  navigation.pathname = '/search';
+  navigation.search = 'campus=school-a&q=原稿';
+  window.history.replaceState(
+    { __NA: true, nextTree: 'preserved' },
+    '',
+    '/search?campus=school-a&q=原稿',
+  );
+  const view = render(<DraftView />);
+  fireEvent.change(screen.getByLabelText('助理草稿'), { target: { value: '較新的手改稿' } });
+  navigation.search = 'campus=school-b&q=另一校';
+  window.history.pushState(window.history.state, '', '/search?campus=school-b&q=另一校');
+  view.rerender(<DraftView />);
+  expect(screen.getByTestId('selected-school').textContent).toBe('甲校');
+  expect((screen.getByLabelText('助理草稿') as HTMLInputElement).value).toBe('較新的手改稿');
+  fireEvent.click(screen.getByRole('button', { name: '繼續編輯' }));
+  expect(window.history.state.nextTree).toBe('preserved');
+  expect(new URLSearchParams(window.location.search).get('campus')).toBe('school-a');
+  expect((screen.getByLabelText('助理草稿') as HTMLInputElement).value).toBe('較新的手改稿');
+});
+it('requires confirmation for pending work even when the draft is empty', () => {
+  localStorage.setItem(
+    schoolPreferenceKey(defaults.ownerKey),
+    JSON.stringify({ schoolId: 'school-a' }),
+  );
+  render(<DraftView />);
+  fireEvent.click(screen.getByRole('button', { name: '模擬待執行任務' }));
+  fireEvent.change(screen.getByLabelText('瀏覽校園'), { target: { value: 'school-b' } });
+  expect(screen.getByRole('dialog')).toBeTruthy();
+  expect(screen.getByTestId('selected-school').textContent).toBe('甲校');
+  expect(navigation.replace).not.toHaveBeenCalled();
+});
+it('keeps same-owner draft through background loading and invalidates a pending switch on account change', () => {
+  localStorage.setItem(
+    schoolPreferenceKey(defaults.ownerKey),
+    JSON.stringify({ schoolId: 'school-a' }),
+  );
+  const view = render(<DraftView />);
+  fireEvent.change(screen.getByLabelText('助理草稿'), { target: { value: '保留文字' } });
+  view.rerender(<DraftView loading />);
+  expect((screen.getByLabelText('助理草稿') as HTMLInputElement).value).toBe('保留文字');
+  view.rerender(<DraftView />);
+  expect((screen.getByLabelText('助理草稿') as HTMLInputElement).value).toBe('保留文字');
+  fireEvent.change(screen.getByLabelText('瀏覽校園'), { target: { value: 'school-b' } });
+  view.rerender(<DraftView ownerKey="other-owner" />);
+  expect(screen.queryByRole('dialog')).toBeNull();
+  expect((screen.getByLabelText('助理草稿') as HTMLInputElement).value).toBe('');
+  view.rerender(<DraftView />);
+  expect(screen.queryByRole('dialog')).toBeNull();
+  expect((screen.getByLabelText('助理草稿') as HTMLInputElement).value).toBe('');
+});
+it('holds cross-tab school preferences until confirmation and cancellation never writes storage', () => {
+  localStorage.setItem(
+    schoolPreferenceKey(defaults.ownerKey),
+    JSON.stringify({ schoolId: 'school-a' }),
+  );
+  const view = render(<DraftView />);
+  fireEvent.change(screen.getByLabelText('助理草稿'), { target: { value: '甲校草稿' } });
+  const writes = observeStorageWrites();
+  act(() =>
+    window.dispatchEvent(
+      new StorageEvent('storage', {
+        key: schoolPreferenceKey(defaults.ownerKey),
+        newValue: JSON.stringify({ schoolId: 'school-b' }),
+      }),
+    ),
+  );
+  expect(screen.getByTestId('selected-school').textContent).toBe('甲校');
+  expect(screen.getByRole('dialog')).toBeTruthy();
+  expect(writes).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole('button', { name: '繼續編輯' }));
+  navigation.search = 'tab=latest';
+  view.rerender(<DraftView />);
+  expect(screen.queryByRole('dialog')).toBeNull();
+  expect(screen.getByTestId('selected-school').textContent).toBe('甲校');
+  expect((screen.getByLabelText('助理草稿') as HTMLInputElement).value).toBe('甲校草稿');
+  expect(writes).not.toHaveBeenCalled();
+});
+it('revalidates the catalog before accepting a pending school change', () => {
+  localStorage.setItem(
+    schoolPreferenceKey(defaults.ownerKey),
+    JSON.stringify({ schoolId: 'school-a' }),
+  );
+  const view = render(<DraftView />);
+  fireEvent.change(screen.getByLabelText('助理草稿'), { target: { value: '甲校草稿' } });
+  fireEvent.change(screen.getByLabelText('瀏覽校園'), { target: { value: 'school-b' } });
+  view.rerender(<DraftView schools={[schools[0]]} />);
+  fireEvent.click(screen.getByRole('button', { name: '清除草稿並切換' }));
+  expect(screen.queryByRole('dialog')).toBeNull();
+  expect(screen.getByTestId('selected-school').textContent).toBe('甲校');
+  expect((screen.getByLabelText('助理草稿') as HTMLInputElement).value).toBe('甲校草稿');
+  expect(navigation.replace).not.toHaveBeenCalled();
+});
+it('holds the explicit all-campus scope while an external school URL awaits confirmation', () => {
+  localStorage.setItem(schoolPreferenceKey(defaults.ownerKey), JSON.stringify({ schoolId: null }));
+  const commits: string[] = [];
+  const frame = () => (
+    <Profiler
+      id="all-campus"
+      onRender={() => {
+        const value = screen.queryByTestId('selected-school')?.textContent;
+        if (value) commits.push(value);
+      }}
+    >
+      <DraftView />
+    </Profiler>
+  );
+  const view = render(frame());
+  expect(screen.getByTestId('selected-school').textContent).toBe('不限校園');
+  fireEvent.change(screen.getByLabelText('助理草稿'), { target: { value: '不限校園的草稿' } });
+  commits.length = 0;
+  navigation.search = 'campus=school-b';
+  view.rerender(frame());
+  expect(commits.length).toBeGreaterThan(0);
+  expect(commits.every((value) => value === '不限校園')).toBe(true);
+  expect(screen.getByTestId('selected-school').textContent).toBe('不限校園');
+  expect((screen.getByLabelText('助理草稿') as HTMLInputElement).value).toBe('不限校園的草稿');
+  expect(screen.getByRole('dialog')).toBeTruthy();
+  fireEvent.click(screen.getByRole('button', { name: '繼續編輯' }));
+  expect(screen.getByTestId('selected-school').textContent).toBe('不限校園');
+});
+it('publishes a confirmed all-campus selection even before Next publishes its replacement URL', () => {
+  navigation.search = 'campus=school-a';
+  navigation.replace.mockImplementation(() => undefined);
+  render(<DraftView />);
+  fireEvent.change(screen.getByLabelText('助理草稿'), { target: { value: '甲校草稿' } });
+  fireEvent.change(screen.getByLabelText('瀏覽校園'), { target: { value: '' } });
+  expect(screen.getByTestId('selected-school').textContent).toBe('甲校');
+  fireEvent.click(screen.getByRole('button', { name: '清除草稿並切換' }));
+  expect(screen.getByTestId('selected-school').textContent).toBe('不限校園');
+  expect((screen.getByLabelText('助理草稿') as HTMLInputElement).value).toBe('');
 });

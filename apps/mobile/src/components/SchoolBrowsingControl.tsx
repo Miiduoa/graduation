@@ -198,8 +198,8 @@ export function SchoolBrowsingControl({ compact = false }: { compact?: boolean }
                       accessibilityRole="button"
                       accessibilityLabel={`選擇${entry.name}`}
                       accessibilityState={{ selected: entry.id === school.id }}
-                      onPress={() => {
-                        setSelection({
+                      onPress={async () => {
+                        const changed = await setSelection({
                           schoolId: entry.id,
                           code: entry.code,
                           schoolName: entry.name,
@@ -207,7 +207,7 @@ export function SchoolBrowsingControl({ compact = false }: { compact?: boolean }
                           themeColor: entry.themeColor ?? null,
                           domains: entry.domains ?? null,
                         });
-                        closePicker();
+                        if (changed) closePicker();
                       }}
                       style={({ pressed }) => [
                         s.schoolRow,

@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useEffect, useMemo, useRef, useState } from 'react';
+import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import {
   PROVIDENCE_UNIVERSITY_SCHOOL_CODE,
@@ -21,7 +21,11 @@ export type SchoolSelection = {
 
 export type SchoolContextValue = {
   selection: SchoolSelection;
-  setSelection: (next: Partial<SchoolSelection>) => void;
+  setSelection: (next: Partial<SchoolSelection>) => Promise<boolean>;
+  registerSelectionGuard: (
+    guard: (next: SchoolSelection) => boolean | Promise<boolean>,
+    onCommit?: () => void,
+  ) => () => void;
   school: ReturnType<typeof resolveSchool>;
   schoolId: string | null;
 };
@@ -105,6 +109,18 @@ export function SchoolProvider(props: {
   const [loaded, setLoaded] = useState(false);
   // Any user-initiated selection takes priority over an earlier pending storage read.
   const selectionRevision = useRef(0);
+  const selectionRef = useRef(selection);
+  selectionRef.current = selection;
+  const guards = useRef(new Map<(next: SchoolSelection) => boolean | Promise<boolean>, (() => void) | undefined>());
+  const selectionRequest = useRef(0);
+  const pendingSelection = useRef<{ key: string; promise: Promise<boolean> } | null>(null);
+  const registerSelectionGuard = useCallback((
+    guard: (next: SchoolSelection) => boolean | Promise<boolean>,
+    onCommit?: () => void,
+  ) => {
+    guards.current.set(guard, onCommit);
+    return () => { guards.current.delete(guard); };
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -141,45 +157,71 @@ export function SchoolProvider(props: {
 
   const previousSchoolRef = useRef<string | null>(null);
 
-  const setSelection = (next: Partial<SchoolSelection>) => {
-    // Never let the initialization read overwrite a campus chosen while it was pending.
-    selectionRevision.current += 1;
-    setSelectionState((prev) => {
-      const identityChanged = next.code !== undefined || next.schoolId !== undefined;
-      const code = next.code != null ? normalizeSchoolCode(next.code) : prev.code;
-      const schoolId = next.schoolId === undefined
-        ? next.code === undefined
-          ? prev.schoolId
-          : null
-        : next.schoolId;
-      const schoolName =
-        next.schoolName === undefined
-          ? identityChanged
-            ? null
-            : (prev.schoolName ?? null)
-          : next.schoolName;
-      const shortName =
-        next.shortName === undefined
-          ? identityChanged
-            ? null
-            : (prev.shortName ?? null)
-          : next.shortName;
-      const themeColor =
-        next.themeColor === undefined
-          ? identityChanged
-            ? null
-            : (prev.themeColor ?? null)
-          : next.themeColor;
-      const domains =
-        next.domains === undefined
-          ? identityChanged
-            ? null
-            : (prev.domains ?? null)
-          : next.domains;
+  const setSelection = useCallback((next: Partial<SchoolSelection>): Promise<boolean> => {
+    const prev = selectionRef.current;
+    const identityChanged = next.code !== undefined || next.schoolId !== undefined;
+    const code = next.code != null ? normalizeSchoolCode(next.code) : prev.code;
+    const schoolId = next.schoolId === undefined
+      ? next.code === undefined
+        ? prev.schoolId
+        : null
+      : next.schoolId;
+    const schoolName =
+      next.schoolName === undefined
+        ? identityChanged
+          ? null
+          : (prev.schoolName ?? null)
+        : next.schoolName;
+    const shortName =
+      next.shortName === undefined
+        ? identityChanged
+          ? null
+          : (prev.shortName ?? null)
+        : next.shortName;
+    const themeColor =
+      next.themeColor === undefined
+        ? identityChanged
+          ? null
+          : (prev.themeColor ?? null)
+        : next.themeColor;
+    const domains =
+      next.domains === undefined
+        ? identityChanged
+          ? null
+          : (prev.domains ?? null)
+        : next.domains;
 
-      return normalizeSelection({ code, schoolId, schoolName, shortName, themeColor, domains });
+    const normalized = normalizeSelection({ code, schoolId, schoolName, shortName, themeColor, domains });
+    const targetKey = JSON.stringify(normalized);
+    if (pendingSelection.current?.key === targetKey) return pendingSelection.current.promise;
+    const request = ++selectionRequest.current;
+    const revision = selectionRevision.current;
+    const schoolChanged = schoolFromSelection(prev).id !== schoolFromSelection(normalized).id;
+    const registered = schoolChanged ? [...guards.current.entries()] : [];
+    const commit = () => {
+      if (selectionRequest.current !== request || selectionRevision.current !== revision) return false;
+      // Guard callbacks run before any school state, cache, theme or storage changes.
+      for (const [guard, onCommit] of registered) {
+        if (!guards.current.has(guard)) return false;
+        onCommit?.();
+      }
+      selectionRevision.current += 1;
+      selectionRef.current = normalized;
+      setSelectionState(normalized);
+      return true;
+    };
+    if (!registered.length) return Promise.resolve(commit());
+    const promise = (async () => {
+      for (const [guard] of registered) {
+        if (selectionRequest.current !== request || !(await guard(normalized))) return false;
+      }
+      return commit();
+    })().catch(() => false).finally(() => {
+      if (pendingSelection.current?.promise === promise) pendingSelection.current = null;
     });
-  };
+    pendingSelection.current = { key: targetKey, promise };
+    return promise;
+  }, []);
 
   useEffect(() => {
     if (!loaded) return;
@@ -221,10 +263,11 @@ export function SchoolProvider(props: {
     () => ({
       selection: normalizedSelection,
       setSelection,
+      registerSelectionGuard,
       school,
       schoolId: normalizedSelection.schoolId ?? school?.id ?? null,
     }),
-    [normalizedSelection, school],
+    [normalizedSelection, school, setSelection, registerSelectionGuard],
   );
 
   return <SchoolContext.Provider value={value}>{props.children}</SchoolContext.Provider>;

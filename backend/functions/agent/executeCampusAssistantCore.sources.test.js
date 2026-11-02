@@ -31,6 +31,7 @@ function mockRef(path, constraints = []) {
 const mockDb = { collection: (name) => mockRef(name) };
 const mockModel = jest.fn();
 const mockWebSearch = jest.fn(async () => null);
+const mockCloudNavigationTask = jest.fn();
 
 jest.mock('firebase-admin/firestore', () => ({
   getFirestore: () => mockDb,
@@ -44,10 +45,15 @@ jest.mock('../assistantAgent', () => ({
   }),
   answerWithServerWebSearch: (...args) => mockWebSearch(...args),
 }));
+jest.mock('./cloudNavigationTask', () => ({
+  handleCloudNavigationTask: (...args) => mockCloudNavigationTask(...args),
+}));
 
-// Only external model/search calls and Firestore are replaced. The callable, runtime,
-// core, compose, formatter, tool registry, authorization and source readers stay real.
+// Legacy behavior remains tested directly below the public callable boundary.
+// The callable must reject legacy requests before entering any of these readers.
 const { executeCampusAssistantCore } = require('./executeCampusAssistantCore');
+const legacyRuntime = require('./runtime');
+const runLegacy = jest.spyOn(legacyRuntime, 'runCampusAssistantWithAgentRuntime');
 const askCampusAssistant = require('./handlers/askCampusAssistant');
 const row = (id, data) => ({ id, data });
 
@@ -71,6 +77,7 @@ beforeEach(() => {
   mockWrites.length = 0;
   mockReadHook = undefined;
   mockModel.mockReset().mockResolvedValue({ provider: 'none', errors: [], content: '' });
+  mockCloudNavigationTask.mockReset().mockResolvedValue({ phase: 'preview' });
   mockDocuments.set('schools/pu/announcements', [
     row('notice', {
       title: '校方發布的公告',
@@ -92,6 +99,42 @@ beforeEach(() => {
   mockDocuments.set('schools/pu/pois', [
     row('poi', { name: '校園地點', schoolId: 'pu', lat: 24.2, lng: 120.5 }),
   ]);
+});
+
+test.each([
+  ['conversation and session', {
+    messages: [{ role: 'user', content: '查公告' }],
+    context: { schoolId: 'pu', sessionId: 'private-session' },
+  }],
+  ['assignment request with client data', {
+    messages: [{ role: 'user', content: '查作業' }],
+    context: { schoolId: 'pu', pendingAssignments: [{ title: '私人作業' }] },
+  }],
+  ['old question field', { question: '今天有什麼課', context: { schoolId: 'pu' } }],
+  ['unbound consent flag', { messages: [{ role: 'user', content: '查課表' }], consent: true }],
+  ['unknown task', { task: 'private-schedule', phase: 'execute' }],
+  ['4000-character message', { messages: [{ role: 'user', content: '問'.repeat(4000) }] }],
+  ['old ordering request', { messages: [{ role: 'user', content: '幫我點一份雞腿飯' }] }],
+])('the public callable rejects %s before legacy readers, runtime, storage or models', async (_label, data) => {
+  mockDocuments.set('users/alice', { schoolId: 'pu', role: 'student' });
+  mockDocuments.set('schools/pu/members/alice', { status: 'active' });
+  mockDocuments.set('users/alice/schools/pu/dailyBriefs', [
+    row('today', { schoolId: 'pu', content: '不應讀取的私人摘要' }),
+  ]);
+  await expect(askCampusAssistant.run({
+    auth: { uid: 'alice', token: { role: 'student' } },
+    data,
+  })).rejects.toMatchObject({
+    code: 'failed-precondition',
+    message: '請先預覽並確認要傳送的公開地點資料。',
+    details: { reason: 'cloud-consent-required' },
+  });
+  expect(mockReads.map(({ path }) => path)).toEqual(['users/alice']);
+  expect(mockWrites).toEqual([]);
+  expect(runLegacy).not.toHaveBeenCalled();
+  expect(mockModel).not.toHaveBeenCalled();
+  expect(mockWebSearch).not.toHaveBeenCalled();
+  expect(mockCloudNavigationTask).not.toHaveBeenCalled();
 });
 
 test.each([
@@ -190,7 +233,7 @@ test('the existing study summary branch calls the scoped weekly reader with the 
   });
 });
 
-test('the actual callable completes a model reply with real compose, tools, scoped daily data and conversation storage', async () => {
+test('the internal legacy runtime completes a model reply with real compose, tools, scoped daily data and conversation storage', async () => {
   mockDocuments.set('users/alice', { primarySchoolId: 'pu', role: 'student' });
   mockDocuments.set('schools/pu/members/alice', { status: 'active' });
   mockDocuments.set('users/alice/schools/pu/dailyBriefs', [
@@ -209,7 +252,7 @@ test('the actual callable completes a model reply with real compose, tools, scop
     ],
   });
 
-  const result = await askCampusAssistant.run({
+  const result = await runLegacy({
     auth: { uid: 'alice', token: { role: 'student' } },
     data: {
       messages: [{ role: 'user', content: '  查公告  ' }],
@@ -266,7 +309,7 @@ test('the actual guest callable is unauthenticated before it can use client-supp
   ).rejects.toMatchObject({ code: 'unauthenticated' });
 });
 
-test('the actual assignment callable returns own pending work and ignores fabricated client work', async () => {
+test('the internal legacy runtime returns own pending work and ignores fabricated client work', async () => {
   mockDocuments.set('users/alice', { schoolId: 'pu', role: 'student' });
   mockDocuments.set('schools/pu/members/alice', { status: 'active' });
   mockDocuments.set('users/alice/groups', [
@@ -277,7 +320,7 @@ test('the actual assignment callable returns own pending work and ignores fabric
   mockDocuments.set('groups/course/assignments', [
     row('real', { title: '正式待繳作業', dueAt: new Date('2099-10-10') }),
   ]);
-  const result = await askCampusAssistant.run({
+  const result = await runLegacy({
     auth: { uid: 'alice', token: { role: 'student' } },
     data: {
       messages: [{ role: 'user', content: '查作業' }],
@@ -298,7 +341,7 @@ test('a private source failure cannot fall back to client homework or claim that
   mockDocuments.set('schools/pu/members/alice', { status: 'active' });
   mockDocuments.set('users/alice/groups', new Error('membership source offline'));
   await expect(
-    askCampusAssistant.run({
+    runLegacy({
       auth: { uid: 'alice', token: { role: 'student' } },
       data: {
         messages: [{ role: 'user', content: '查作業' }],
@@ -311,10 +354,10 @@ test('a private source failure cannot fall back to client homework or claim that
   expect(systemPrompt).toContain('不能據此判定沒有作業');
 });
 
-test('the actual timetable question reports unavailable even when no model answer is returned', async () => {
+test('the internal legacy timetable path reports unavailable even when no model answer is returned', async () => {
   mockDocuments.set('users/alice', { schoolId: 'pu', role: 'student' });
   mockDocuments.set('schools/pu/members/alice', { status: 'active' });
-  const result = await askCampusAssistant.run({
+  const result = await runLegacy({
     auth: { uid: 'alice', token: { role: 'student' } },
     data: { messages: [{ role: 'user', content: '今天有什麼課' }], context: { schoolId: 'pu' } },
   });
@@ -324,9 +367,9 @@ test('the actual timetable question reports unavailable even when no model answe
   expect(result.content).not.toContain('最值得先關注');
 });
 
-describe('校園助理（/ai-assistant）沒有模型可用時照實說沒辦法回答', () => {
+describe('舊 runtime 的內部回覆行為（公開 callable 不再委派）', () => {
   const ask = (content) =>
-    askCampusAssistant.run({
+    runLegacy({
       auth: { uid: 'alice', token: { role: 'student', name: '測試學生甲' } },
       data: { messages: [{ role: 'user', content }], context: { schoolId: 'pu' } },
     });
@@ -569,7 +612,7 @@ test('a profile school change during an assistant run never overrides the select
       mockDocuments.set('users/alice', { schoolId: 'nthu', role: 'student' });
     }
   };
-  const result = await askCampusAssistant.run({
+  const result = await runLegacy({
     auth: { uid: 'alice', token: { role: 'student' } },
     data: { messages: [{ role: 'user', content: '查公告' }], context: { schoolId: 'pu' } },
   });
@@ -595,13 +638,13 @@ test('an active member can select their other campus without fetching default-ca
   expect(mockReads.some(({ path }) => path === 'schools/pu/announcements')).toBe(false);
 });
 
-test('the actual callable accepts the 4000-character Web question and preserves its tail for the model', async () => {
+test('the internal legacy runtime preserves the tail of a 4000-character question for the model', async () => {
   mockDocuments.set('users/alice', { schoolId: 'pu', role: 'student' });
   mockDocuments.set('schools/pu/members/alice', { status: 'active' });
   const suffix = '最後條件：請依公告原文回答。';
   const content = ('請查詢校園公告。' + '以下是補充背景。'.repeat(600)).slice(0, 4000 - suffix.length) + suffix;
   mockModel.mockResolvedValue({ provider: 'test-model', content: '已根據公告資料整理回覆。', errors: [], cards: [] });
-  const result = await askCampusAssistant.run({
+  const result = await runLegacy({
     auth: { uid: 'alice', token: { role: 'student' } },
     data: { messages: [{ role: 'user', content }], context: { schoolId: 'pu' } },
     rawRequest: { ip: 'long-question-test' },
@@ -612,7 +655,7 @@ test('the actual callable accepts the 4000-character Web question and preserves 
   expect(mockWebSearch).toHaveBeenCalledWith(content.slice(0, 500), { schoolId: 'pu' });
 });
 
-describe('線上點餐關著時，助理不會留下訂單或下單按鈕', () => {
+describe('舊 runtime 的線上點餐停用保護（直接內部測試）', () => {
   const saved = process.env.ONLINE_ORDERING_ENABLED;
   beforeEach(() => {
     process.env.ONLINE_ORDERING_ENABLED = 'false';
@@ -629,7 +672,7 @@ describe('線上點餐關著時，助理不會留下訂單或下單按鈕', () =
     mockDocuments.set('schools/pu/cafeterias', [row('cafe', { name: '學生餐廳', schoolId: 'pu', orderingEnabled: true })]);
     mockDocuments.set('schools/pu/menus', [row('rice', { name: '雞腿飯', schoolId: 'pu', cafeteriaId: 'cafe', price: 100 })]);
 
-    const result = await askCampusAssistant.run({
+    const result = await runLegacy({
       auth: { uid: 'alice', token: { role: 'student' } },
       data: { messages: [{ role: 'user', content: '幫我點一份雞腿飯' }], context: { schoolId: 'pu' } },
     });

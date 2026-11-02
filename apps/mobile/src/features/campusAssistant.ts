@@ -1,6 +1,4 @@
-import { httpsCallable } from 'firebase/functions';
-import { getAuthInstance, getFunctionsInstance, isFirebaseMockMode } from '../firebase';
-import { campusAgentWriteProposals, type CampusAgentWriteProposal } from './campusAssistantActions';
+import { getAuthInstance, isFirebaseMockMode } from '../firebase';
 import { validCampusSenseSnapshot, type CampusSenseSnapshot } from '../services/campusSenseSnapshot';
 import type { CampusEvidencePlan } from '../services/offlineCampusPlanner';
 import type { LocalCampusReadResult } from '../services/localCampusToolProtocol';
@@ -17,9 +15,18 @@ export interface OnDeviceAssistantReadiness {
 }
 
 export class OnDeviceAssistantError extends Error {
-  constructor(public readonly code: 'native-unavailable' | 'model-required' | 'model-failed' | 'model-busy' | 'cancelled' | 'session-changed') {
+  constructor(public readonly code: 'native-unavailable' | 'model-required' | 'model-failed' | 'model-busy' | 'cancelled' | 'session-changed' | 'unsupported-request') {
     super(code === 'session-changed' ? 'Assistant session changed' : code);
     this.name = 'OnDeviceAssistantError';
+  }
+}
+
+export class CampusAssistantConsentError extends Error {
+  readonly code = 'cloud-consent-required';
+
+  constructor() {
+    super('請先預覽並確認要傳送至 Groq 的公開地點資料。');
+    this.name = 'CampusAssistantConsentError';
   }
 }
 
@@ -68,8 +75,10 @@ export async function askCampusAssistant(input: {
   schoolName?: string | null;
   /** Authorized campus reads are only used after an explicit user refresh. */
   senseSnapshot?: CampusSenseSnapshot | null;
-  /** Offline by default. Campus mode is explicit and requires an authenticated backend. */
+  /** Legacy campus chat is closed; cloud navigation has its own preview and consent flow. */
   mode?: CampusAssistantMode;
+  /** Keep saved-data workspaces on deterministic tools without loading an inference engine. */
+  onDevicePolicy?: 'tools-only';
 }): Promise<{
   content: string;
   hasActions: boolean;
@@ -78,16 +87,16 @@ export async function askCampusAssistant(input: {
   plan?: CampusEvidencePlan;
   localReads?: LocalCampusReadResult[];
   route?: string;
-  proposals?: CampusAgentWriteProposal[];
 }> {
   const mode = input.mode ?? 'device';
+  if (mode === 'campus') throw new CampusAssistantConsentError();
   const assertNotCancelled = () => {
     if (mode === 'device' && input.signal?.aborted) {
       throw new OnDeviceAssistantError('cancelled');
     }
   };
   assertNotCancelled();
-  scopeCheck(input, mode === 'campus');
+  scopeCheck(input, false);
   const messages = input.messages
     .slice(-20)
     .map((message) => ({
@@ -127,6 +136,9 @@ export async function askCampusAssistant(input: {
         route: localAnswer.route,
         ...(localAnswer.plan ? { plan: localAnswer.plan } : {}),
       };
+    }
+    if (input.onDevicePolicy === 'tools-only') {
+      throw new OnDeviceAssistantError('unsupported-request');
     }
 
     const { localLLM } = engine();
@@ -214,37 +226,5 @@ export async function askCampusAssistant(input: {
     return { content: answer, hasActions: false, source: 'device' };
   }
 
-  const callable = httpsCallable<
-    unknown,
-    { content?: string; error?: unknown; actions?: unknown[]; run?: { status?: string; runId?: string } }
-  >(getFunctionsInstance(), 'askCampusAssistant');
-  const schoolName = typeof input.schoolName === 'string'
-    ? input.schoolName.trim().slice(0, 160)
-    : '';
-  const result = await callable({
-    messages,
-    context: {
-      schoolId: input.scope.schoolId,
-      ...(schoolName ? { schoolName } : {}),
-      screen: 'campus-assistant',
-      locale: 'zh-TW',
-      timezone: 'Asia/Taipei',
-    },
-  });
-  scopeCheck(input, true);
-  if (result.data.error ||
-      !['completed', 'blocked'].includes(result.data.run?.status ?? '') ||
-      typeof result.data.content !== 'string' || !result.data.content.trim()) {
-    throw new Error('Assistant reply not confirmed');
-  }
-  const proposals = campusAgentWriteProposals({
-    run: result.data.run,
-    actions: result.data.actions,
-  });
-  return {
-    content: result.data.content.trim(),
-    hasActions: Array.isArray(result.data.actions) && result.data.actions.length > 0,
-    source: 'campus',
-    ...(proposals.length ? { proposals } : {}),
-  };
+  throw new OnDeviceAssistantError('unsupported-request');
 }

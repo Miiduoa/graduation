@@ -128,14 +128,16 @@ test('daily and undated task entries retain exact assignment navigation', () => 
   });
 });
 
-test('the full assistant wires sync, local plan and exact homework handoff', async () => {
+test('stored-data mode wires sync, deterministic planning and exact homework handoff', async () => {
   jest.mocked(refreshCampusSenseSnapshot).mockResolvedValueOnce(snapshot());
   jest.mocked(askCampusAssistant).mockResolvedValueOnce({
     source: 'device', tool: 'campus-plan', content: '本機規劃', hasActions: false, plan: plan(),
   });
   const navigate = jest.fn();
   const view = render(<CampusAssistantScreen navigation={{ navigate }} />);
+  fireEvent.press(view.getByText('已存資料'));
   await act(async () => fireEvent.press(view.getByText('今日重點')));
+  expect(askCampusAssistant).toHaveBeenCalledWith(expect.objectContaining({ mode: 'device', onDevicePolicy: 'tools-only' }));
   fireEvent.press(view.getByText('查看這份作業'));
   expect(navigate).toHaveBeenCalledWith('學習', {
     screen: 'HomeworkSubmit', params: { groupId: 'course_1', assignmentId: 'work_1' },

@@ -3,9 +3,11 @@ import { beforeEach, expect, it, vi } from 'vitest';
 import { CampusProviders } from './CampusProviders';
 import { SchoolSelector } from './SchoolSelector';
 import { useSelectedSchool } from './SelectedSchoolProvider';
-const user = vi.hoisted(() => ({ uid: 'alice' as string | null }));
+import { useAgentDraft } from './AgentDraftProvider';
+import { useNuniSession } from '@/features/nuni/Session';
+const user = vi.hoisted(() => ({ uid: 'alice' as string | null, loading: false }));
 vi.mock('./AuthGuard', () => ({
-  useAuth: () => ({ user: user.uid ? { uid: user.uid } : null, loading: false }),
+  useAuth: () => ({ user: user.uid ? { uid: user.uid } : null, loading: user.loading }),
 }));
 vi.mock('next/navigation', () => ({
   usePathname: () => '/',
@@ -17,6 +19,8 @@ const response = (value: unknown, status = 200) =>
   new Response(JSON.stringify(value), { status, headers: { 'Content-Type': 'application/json' } });
 beforeEach(() => {
   user.uid = 'alice';
+  user.loading = false;
+  window.history.replaceState({}, '', '/');
   localStorage.clear();
   vi.stubGlobal('fetch', fetcher.mockReset());
 });
@@ -73,9 +77,7 @@ it('retries a 429 school catalog once and becomes ready', async () => {
         }),
       );
     }
-    return Promise.resolve(
-      response({ schools: [{ id: 'pu', name: '靜宜大學', status: 'open' }] }),
-    );
+    return Promise.resolve(response({ schools: [{ id: 'pu', name: '靜宜大學', status: 'open' }] }));
   });
   function Status() {
     const school = useSelectedSchool();
@@ -121,4 +123,113 @@ it('uses real directory state and does not transfer an account school choice to 
     </CampusProviders>,
   );
   await waitFor(() => expect(screen.getByRole('status').textContent).toBe('pu'));
+});
+
+function DraftJourney() {
+  const draft = useAgentDraft('search');
+  const session = useNuniSession();
+  return (
+    <>
+      <input
+        aria-label="助理未送文字"
+        value={draft.draft.text}
+        onChange={(event) => draft.setDraft({ text: event.target.value })}
+      />
+      <output aria-label="助理可執行">{String(draft.ready)}</output>
+      <button onClick={() => void session.refresh()}>確認登入</button>
+    </>
+  );
+}
+it('keeps same combined owner through a real Nuni background check but clears on a settled account change', async () => {
+  const first = 'pa_11111111-1111-4111-8111-111111111111';
+  const second = 'pa_22222222-2222-4222-8222-222222222222';
+  const principal = (platformAccountId: string) => ({
+    authenticated: true,
+    platformAccountId,
+    isPlatformOperator: false,
+    context: 'a'.repeat(43),
+  });
+  fetcher.mockImplementation((url: string) =>
+    Promise.resolve(
+      response(
+        url === '/api/nuni/session'
+          ? principal(first)
+          : { schools: [{ id: 'pu', name: '靜宜大學' }] },
+      ),
+    ),
+  );
+  render(
+    <CampusProviders>
+      <DraftJourney />
+    </CampusProviders>,
+  );
+  await waitFor(() => expect(screen.getByLabelText('助理可執行').textContent).toBe('true'));
+  fireEvent.change(screen.getByLabelText('助理未送文字'), { target: { value: '同帳號未送草稿' } });
+  let resume!: (value: Response) => void;
+  fetcher.mockImplementation((url: string) =>
+    url === '/api/nuni/session'
+      ? new Promise<Response>((resolve) => {
+          resume = resolve;
+        })
+      : Promise.resolve(response({ schools: [{ id: 'pu', name: '靜宜大學' }] })),
+  );
+  fireEvent.click(screen.getByRole('button', { name: '確認登入' }));
+  expect(screen.getByLabelText('助理可執行').textContent).toBe('false');
+  expect((screen.getByLabelText('助理未送文字') as HTMLInputElement).value).toBe('同帳號未送草稿');
+  await act(async () => {
+    resume(response(principal(first)));
+  });
+  expect((screen.getByLabelText('助理未送文字') as HTMLInputElement).value).toBe('同帳號未送草稿');
+  fireEvent.click(screen.getByRole('button', { name: '確認登入' }));
+  await act(async () => {
+    resume(response(principal(second)));
+  });
+  expect((screen.getByLabelText('助理未送文字') as HTMLInputElement).value).toBe('');
+  fireEvent.click(screen.getByRole('button', { name: '確認登入' }));
+  await act(async () => {
+    resume(response(principal(first)));
+  });
+  expect((screen.getByLabelText('助理未送文字') as HTMLInputElement).value).toBe('');
+});
+it('retains a known Firebase owner during a temporary identity check, then clears after confirmed sign-out', async () => {
+  fetcher.mockImplementation((url: string) =>
+    Promise.resolve(
+      response(
+        url === '/api/nuni/session'
+          ? { authenticated: false }
+          : { schools: [{ id: 'pu', name: '靜宜大學' }] },
+      ),
+    ),
+  );
+  const view = render(
+    <CampusProviders>
+      <DraftJourney />
+    </CampusProviders>,
+  );
+  await waitFor(() => expect(screen.getByLabelText('助理可執行').textContent).toBe('true'));
+  fireEvent.change(screen.getByLabelText('助理未送文字'), { target: { value: '暫停但保留' } });
+  user.uid = null;
+  user.loading = true;
+  view.rerender(
+    <CampusProviders>
+      <DraftJourney />
+    </CampusProviders>,
+  );
+  expect((screen.getByLabelText('助理未送文字') as HTMLInputElement).value).toBe('暫停但保留');
+  expect(screen.getByLabelText('助理可執行').textContent).toBe('false');
+  user.uid = 'alice';
+  user.loading = false;
+  view.rerender(
+    <CampusProviders>
+      <DraftJourney />
+    </CampusProviders>,
+  );
+  expect((screen.getByLabelText('助理未送文字') as HTMLInputElement).value).toBe('暫停但保留');
+  user.uid = null;
+  view.rerender(
+    <CampusProviders>
+      <DraftJourney />
+    </CampusProviders>,
+  );
+  expect((screen.getByLabelText('助理未送文字') as HTMLInputElement).value).toBe('');
 });

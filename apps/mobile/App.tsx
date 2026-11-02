@@ -41,6 +41,7 @@ import {
   publicNavigationRef,
 } from './src/app/publicNavigation';
 import { NuniSessionProvider } from './src/state/nuniSession';
+import { AgentDraftProvider } from './src/state/AgentDraftProvider';
 import { ThemeProvider, useThemeMode } from './src/state/theme';
 import { NotificationsProvider } from './src/state/notifications';
 import { SearchHistoryProvider } from './src/state/searchHistory';
@@ -1098,21 +1099,23 @@ function AppInner() {
     <SchoolProvider>
       <NuniSessionProvider>
         <AuthProvider>
-          <PersonalImportSyncBridge />
-          <PersonalEventReminderBridge />
-          <NotificationsProvider>
-            <ToastProvider>
-              <AuthAwareStateProviders>
-                <DemoProvider>
-                  <DemoRoleProvider>
-                    <DemoStoreProvider>
-                      <AppNavigation />
-                    </DemoStoreProvider>
-                  </DemoRoleProvider>
-                </DemoProvider>
-              </AuthAwareStateProviders>
-            </ToastProvider>
-          </NotificationsProvider>
+          <AgentDraftProvider>
+            <PersonalImportSyncBridge />
+            <PersonalEventReminderBridge />
+            <NotificationsProvider>
+              <ToastProvider>
+                <AuthAwareStateProviders>
+                  <DemoProvider>
+                    <DemoRoleProvider>
+                      <DemoStoreProvider>
+                        <AppNavigation />
+                      </DemoStoreProvider>
+                    </DemoRoleProvider>
+                  </DemoProvider>
+                </AuthAwareStateProviders>
+              </ToastProvider>
+            </NotificationsProvider>
+          </AgentDraftProvider>
         </AuthProvider>
       </NuniSessionProvider>
     </SchoolProvider>

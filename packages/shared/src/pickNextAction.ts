@@ -1,6 +1,8 @@
 import { parseTaipeiInstant, taipeiParts, TAIPEI_TIME_ZONE } from './taipeiTime';
 
 const THIRTY_MIN_MS = 30 * 60 * 1000;
+const MINUTE_MS = 60 * 1000;
+const HOUR_MS = 60 * MINUTE_MS;
 const DAY_MS = 24 * 60 * 60 * 1000;
 const WEEKDAYS = ['週日', '週一', '週二', '週三', '週四', '週五', '週六'] as const;
 
@@ -225,32 +227,69 @@ export function formatClassMeta(item: TodayClass): string {
   return place ? `${time}・${place}` : time;
 }
 
-function remainingHoursText(dueAt: number, nowMs: number): string {
-  const hours = Math.max(1, Math.round((dueAt - nowMs) / (60 * 60 * 1000)));
-  if (hours < 24) return `還剩 ${hours} 小時`;
-  const days = Math.round(hours / 24);
-  return `還剩 ${days} 天`;
+function validTaipeiParts(value: number) {
+  const parts = taipeiParts(value);
+  return parts && Number.isFinite(parts.year) && Number.isFinite(parts.hour24) ? parts : null;
+}
+
+function deadlineDate(dueAt: number, nowMs: number): string | null {
+  const due = validTaipeiParts(dueAt);
+  const current = validTaipeiParts(nowMs);
+  if (!due || !current) return null;
+  const dayDifference = taipeiCalendarDayDiff(nowMs, dueAt);
+  if (dayDifference === 0) return '今天';
+  if (dayDifference === 1) return '明天';
+  const year = due.year !== current.year ? `${due.year}/` : '';
+  return `${year}${due.month}/${due.day}`;
+}
+
+/** Calendar labels describe the date; the 24-hour priority window stays unchanged. */
+export function formatTodoDeadlineLabel(todo: TodayTodo, now: Date): string {
+  if (todo.dueAt === null) return '未設截止時間';
+  const nowMs = now.getTime();
+  const date = hasDeadline(todo) ? deadlineDate(todo.dueAt, nowMs) : null;
+  if (date === null) return '截止時間待確認';
+  if (todo.dueAt < nowMs) return TODAY_COPY.overdue;
+  return `${date}${date === '今天' || date === '明天' ? '' : ' '}截止`;
+}
+
+function remainingTimeText(dueAt: number, nowMs: number): string {
+  const remaining = dueAt - nowMs;
+  if (remaining < MINUTE_MS) return '不到 1 分鐘';
+  const totalMinutes = Math.ceil(remaining / MINUTE_MS);
+  if (remaining < HOUR_MS) return `還剩 ${totalMinutes} 分鐘`;
+  if (remaining < DAY_MS) {
+    const hours = Math.floor(totalMinutes / 60);
+    const minutes = totalMinutes % 60;
+    return `還剩 ${hours} 小時${minutes ? ` ${minutes} 分鐘` : ''}`;
+  }
+  const totalHours = Math.floor(remaining / HOUR_MS);
+  const days = Math.floor(totalHours / 24);
+  const hours = totalHours % 24;
+  return `還剩 ${days} 天${hours ? ` ${hours} 小時` : ''}`;
 }
 
 export function formatTodoDueLine(todo: TodayTodo, now: Date): string {
   const nowMs = now.getTime();
   if (todo.dueAt === null) return '未設截止時間';
-  if (!hasDeadline(todo)) return '';
+  const date = hasDeadline(todo) ? deadlineDate(todo.dueAt, nowMs) : null;
+  if (date === null) return '截止時間待確認';
   if (todo.dueAt < nowMs) {
-    const days = taipeiCalendarDayDiff(todo.dueAt, nowMs);
-    if (days === null) return TODAY_COPY.overdue;
+    const days = Math.floor((nowMs - todo.dueAt) / DAY_MS);
     return days >= 1 ? TODAY_COPY.overdueDays(days) : TODAY_COPY.overdue;
   }
-  return `${formatClock(todo.dueAt)} 截止・${remainingHoursText(todo.dueAt, nowMs)}`;
+  return `${date} ${formatClock(todo.dueAt)} 截止・${remainingTimeText(todo.dueAt, nowMs)}`;
 }
 
-export function formatUpcomingDueLine(todo: TodayTodo): string {
+export function formatUpcomingDueLine(todo: TodayTodo, now?: Date): string {
   if (todo.dueAt === null) return '未設截止時間';
-  if (!hasDeadline(todo)) return '';
-  const parts = taipeiParts(todo.dueAt);
+  if (!hasDeadline(todo)) return '截止時間待確認';
+  const parts = validTaipeiParts(todo.dueAt);
+  const current = now ? validTaipeiParts(now.getTime()) : undefined;
   const weekday = taipeiWeekdayIndex(new Date(todo.dueAt));
-  if (!parts || weekday === null || !Number.isFinite(todo.dueAt)) return '';
-  return `${parts.month}/${parts.day} ${WEEKDAYS[weekday]} ${pad(parts.hour24)}:${pad(parts.minute)} 截止`;
+  if (!parts || weekday === null || (now && !current)) return '截止時間待確認';
+  const year = current && parts.year !== current.year ? `${parts.year}/` : '';
+  return `${year}${parts.month}/${parts.day} ${WEEKDAYS[weekday]} ${pad(parts.hour24)}:${pad(parts.minute)} 截止`;
 }
 
 export function isDueWithinHours(todo: TodayTodo, now: Date, hours: number): boolean {

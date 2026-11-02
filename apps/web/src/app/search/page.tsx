@@ -8,7 +8,9 @@ import { useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { SiteShell } from '@/components/SiteShell';
 import { useAuth } from '@/components/AuthGuard';
-import { interpretCampusRequest } from '@/lib/campusIntentClient';
+import { CampusIntentControl } from '@/components/CampusIntentControl';
+import { useAgentDraft } from '@/components/AgentDraftProvider';
+import { useOptionalSelectedSchool } from '@/components/SelectedSchoolProvider';
 import { campusServiceHref, useCampusNavigationSearch } from '@/lib/campusNavigation';
 import { useSignInOptions } from '@/lib/signInOptions';
 import { VoiceDictationButton } from '@/components/VoiceDictationButton';
@@ -36,32 +38,76 @@ function readFilters(params: URLSearchParams) {
 function ServiceDirectory() {
   const schoolLmsEnabled = useSchoolLmsReadonlyEnabled();
   const params = useSearchParams();
-  const { user } = useAuth();
+  const { user, loading } = useAuth();
   const uid = user?.uid || '';
   const searchInput = useRef<HTMLInputElement>(null);
-  const requestSequence = useRef(0);
-  useEffect(() => () => { requestSequence.current += 1; }, []);
   const schoolSearch = useCampusNavigationSearch(params);
-  const options = useSignInOptions();
-  const queryString = params.toString();
-  const [{ query, category }, setFilters] = useState(() =>
-    readFilters(new URLSearchParams(queryString)),
+  const selection = useOptionalSelectedSchool();
+  const schoolId =
+    selection && !selection.loading && selection.catalogStatus === 'ready'
+      ? selection.selectedSchool?.id || ''
+      : '';
+  const selectionReady = Boolean(
+    selection && !selection.loading && selection.catalogStatus === 'ready',
   );
-  useEffect(() => {
-    // Restore the URL state on history navigation or an external link to this directory.
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    setFilters(readFilters(new URLSearchParams(queryString)));
-  }, [queryString]);
-  const term = query.trim();
-  const semanticScope = JSON.stringify([uid, schoolSearch]);
+  const draftSchoolId =
+    selection?.selectedSchool?.id ||
+    (selectionReady ? '' : params.get('campus') || params.get('schoolId') || '');
+  const queryString = params.toString();
+  const initialFilters = readFilters(new URLSearchParams(queryString));
+  const draftState = useAgentDraft('search', {
+    uid,
+    schoolId: draftSchoolId,
+    ready: !loading && (!selection || selectionReady),
+    editable: !loading,
+    initialDraft: { text: initialFilters.query, category: initialFilters.category },
+  });
+  const cooldown = {
+    retryReadyAt: draftState.quotaUntil ?? 0,
+    onRetryAfter: (seconds: number) => {
+      if (Number.isInteger(seconds) && seconds > 0 && seconds <= 60)
+        draftState.retainQuotaUntil(Date.now() + seconds * 1000);
+    },
+  };
+  const semanticScope = JSON.stringify([
+    draftState.scopeKey, draftState.activityEpoch, draftState.draftRevision, schoolSearch, schoolId, draftState.ready,
+  ]);
+  const options = useSignInOptions();
+  const [draftRevision, setDraftRevision] = useState(0);
+  const [voiceRevision, setVoiceRevision] = useState(0);
   const [analysis, setAnalysis] = useState<{
     scope: string;
     term: string;
-    status: 'pending' | 'ready' | 'error';
-    result?: CampusSemanticResult;
+    revision: number;
+    result: CampusSemanticResult;
   } | null>(null);
-  const active = analysis?.scope === semanticScope && analysis.term === term ? analysis : null;
-  const semantic = active?.status === 'ready' ? active.result : undefined;
+  const query = draftState.draft.text;
+  const category = SERVICE_CATEGORIES.some((item) => item.id === draftState.draft.category)
+    ? draftState.draft.category as ServiceCategory
+    : 'all';
+  const { readUrlDraft, writeUrlDraft } = draftState;
+  useEffect(() => {
+    // History can revisit an old URL, but it cannot restore old consent or replace a newer draft.
+    const restored = readUrlDraft(new URLSearchParams(queryString));
+    const url = new URL(window.location.href);
+    const text = restored?.text ?? query;
+    const filter = restored?.category ?? category;
+    if (text) url.searchParams.set('q', text);
+    else url.searchParams.delete('q');
+    if (filter !== 'all') url.searchParams.set('category', filter);
+    else url.searchParams.delete('category');
+    writeUrlDraft(url);
+    setAnalysis(null);
+    setDraftRevision((value) => value + 1);
+    setVoiceRevision((value) => value + 1);
+  }, [queryString, semanticScope, query, category, readUrlDraft, writeUrlDraft]);
+  const term = query.trim();
+  const semantic =
+    analysis?.scope === semanticScope &&
+    analysis.term === term &&
+    analysis.revision === draftRevision
+      ? analysis.result
+      : undefined;
   const matches = searchCampusServices(query, category, schoolLmsEnabled);
   const browsing = !term;
   const directoryCount = browsing
@@ -71,46 +117,34 @@ function ServiceDirectory() {
         0,
       )
     : matches.length;
-  const suggested = semantic?.status === 'understood'
-    ? semantic.destinations.flatMap((href) => {
-        const service = visibleCampusServices(schoolLmsEnabled).find((row) => row.href === href);
-        return service ? [service] : [];
-      })
-    : getQuickCampusActions(query, schoolLmsEnabled).filter(
-        (action) => !matches.some((match) => match.href === action.href),
-      );
+  const suggested =
+    semantic?.status === 'understood'
+      ? semantic.destinations.flatMap((href) => {
+          const service = visibleCampusServices(schoolLmsEnabled).find((row) => row.href === href);
+          return service ? [service] : [];
+        })
+      : getQuickCampusActions(query, schoolLmsEnabled).filter(
+          (action) => !matches.some((match) => match.href === action.href),
+        );
 
-  async function analyze(text: string) {
-    const utterance = text.trim().slice(0, 100);
-    if (!uid || !utterance) return;
-    const request = ++requestSequence.current;
-    const scope = semanticScope;
-    setAnalysis({ scope, term: utterance, status: 'pending' });
-    try {
-      const result = await interpretCampusRequest({
-        uid, schoolId: new URLSearchParams(schoolSearch).get('schoolId') || '',
-        utterance,
-      });
-      if (request === requestSequence.current) {
-        setAnalysis({ scope, term: utterance, status: 'ready', result });
-      }
-    } catch {
-      if (request === requestSequence.current) {
-        setAnalysis({ scope, term: utterance, status: 'error' });
-      }
-    }
+  function stopVoice() {
+    setVoiceRevision((value) => value + 1);
+  }
+  function clearAnalysis() {
+    setAnalysis(null);
+    stopVoice();
   }
   function updateFilters(next: { query: string; category: ServiceCategory | 'all' }) {
-    requestSequence.current += 1;
-    setAnalysis(null);
-    setFilters(next);
+    clearAnalysis();
+    setDraftRevision((value) => value + 1);
+    draftState.setDraft({ text: next.query, category: next.category });
     const url = new URL(window.location.href);
     if (next.query) url.searchParams.set('q', next.query);
     else url.searchParams.delete('q');
     if (next.category !== 'all') url.searchParams.set('category', next.category);
     else url.searchParams.delete('category');
     // Next.js observes native history changes without a server request per keystroke.
-    window.history.replaceState(null, '', `${url.pathname}${url.search}${url.hash}`);
+    draftState.writeUrlDraft(url);
   }
   function resetFilters() {
     updateFilters({ query: '', category: 'all' });
@@ -137,6 +171,7 @@ function ServiceDirectory() {
               type="search"
               value={query}
               maxLength={100}
+              disabled={!draftState.editable}
               autoComplete="off"
               enterKeyHint="search"
               placeholder="說出需求，例如：圖書館怎麼走？"
@@ -149,25 +184,36 @@ function ServiceDirectory() {
               }}
             />
             <VoiceDictationButton
+              key={`${semanticScope}:${voiceRevision}`}
+              disabled={!draftState.editable}
               onTranscript={(text) => {
                 const next = text.slice(0, 100);
                 updateFilters({ query: next, category: 'all' });
-                if (uid) void analyze(next);
               }}
             />
           </div>
           <p className={styles.voiceHelp}>
-            語音轉寫完成後，登入者會自動使用 AI 理解。文字可先修改再送出，任何服務操作都要自行確認。
+            語音只會填入文字，可先修改。需要雲端建議時，先核對傳送內容，再由你確認。語音辨識可能由瀏覽器供應商處理。
           </p>
-          {term && uid && (
-            <button
-              type="button"
-              className={styles.aiButton}
-              disabled={active?.status === 'pending'}
-              onClick={() => void analyze(term)}
-            >
-              {active?.status === 'pending' ? 'AI 正在理解…' : '用 AI 理解需求'}
-            </button>
+          {term && (
+            <CampusIntentControl
+              key={`${semanticScope}:${draftRevision}`}
+              uid={draftState.ready ? uid : ''}
+              schoolId={schoolId}
+              utterance={term}
+              cooldown={cooldown}
+              onReview={stopVoice}
+              onPendingChange={draftState.setPending}
+              onReset={clearAnalysis}
+              onResult={(result) =>
+                setAnalysis({
+                  scope: semanticScope,
+                  term,
+                  revision: draftRevision,
+                  result,
+                })
+              }
+            />
           )}
           <div className={styles.filters} role="group" aria-label="服務分類">
             {[{ id: 'all', label: '全部' }, ...SERVICE_CATEGORIES].map((item) => (
@@ -191,11 +237,6 @@ function ServiceDirectory() {
             {semantic.clarifyingQuestion && <p>{semantic.clarifyingQuestion}</p>}
           </section>
         )}
-        {(active?.status === 'error' || semantic?.status === 'unavailable') && (
-          <p role="status" className={styles.voiceHelp}>
-            AI 暫時無法理解，目前只顯示基本關鍵字搜尋結果。
-          </p>
-        )}
         {term && suggested.length > 0 && (
           <section className={styles.smartResults} aria-label="根據需求推薦的服務">
             <h2>{semantic?.status === 'understood' ? 'AI 建議先開啟' : '你可能想做'}</h2>
@@ -208,16 +249,6 @@ function ServiceDirectory() {
                 >
                   <strong>{action.name}</strong>
                   <small>{action.text}</small>
-                  {semantic?.previews?.filter((preview) => preview.destination === action.href).map((preview) => (
-                    <span className={styles.preview} key={preview.destination}>
-                      <span>{preview.source === 'campus-platform' ? 'nuni 資料' : '接通狀態'}：{preview.message}</span>
-                      {preview.items.map((item, index) => (
-                        <span key={index} className={styles.previewItem}>
-                          {item.title}{item.detail ? ' · ' + item.detail : ''}
-                        </span>
-                      ))}
-                    </span>
-                  ))}
                   <span aria-hidden="true">→</span>
                 </Link>
               ))}
@@ -303,9 +334,11 @@ function ServiceDirectory() {
         ) : (
           <section className={styles.empty}>
             <h2>{suggested.length ? '沒有完全相符的服務' : '沒有符合的服務'}</h2>
-            <p>{suggested.length
-              ? '你可以先使用上方推薦的入口，或調整關鍵字繼續找。'
-              : '試試「課表」或「公車」等關鍵字，也可以清除篩選，查看所有服務。'}</p>
+            <p>
+              {suggested.length
+                ? '你可以先使用上方推薦的入口，或調整關鍵字繼續找。'
+                : '試試「課表」或「公車」等關鍵字，也可以清除篩選，查看所有服務。'}
+            </p>
             <button type="button" className="btn primary" onClick={resetFilters}>
               查看所有服務
             </button>
