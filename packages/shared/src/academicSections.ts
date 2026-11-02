@@ -1,5 +1,6 @@
 /**
- * 課務次級分區：與 Web `apps/web/src/lib/academicSections.ts` 用語／順序對齊。
+ * 課務次級分區用語／順序的單一來源。
+ * Web `apps/web/src/lib/academicSections.ts` 的學生標籤由此衍生；
  * Mobile 用 id／mobileScreen 對應既有 LearnStack 路由；不刪功能、不改角色判斷。
  */
 
@@ -36,10 +37,14 @@ export const STUDENT_ACADEMIC_SECTIONS = [
   },
 ] as const;
 
-/** 老師課務首頁分區：名稱與順序固定。 */
+/**
+ * 老師課務首頁分區：名稱與順序固定。
+ * teaching_todos＝點名／課程動態；grading＝批改類（作業、測驗等）。
+ */
 export const TEACHER_ACADEMIC_SECTIONS = [
   { id: 'today', label: '今天的課' },
   { id: 'courses', label: '授課課程' },
+  { id: 'teaching_todos', label: '教學待辦' },
   { id: 'grading', label: '待批改' },
 ] as const;
 

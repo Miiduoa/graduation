@@ -25,7 +25,12 @@ import { useThemeStyleSheet } from '../ui/useThemeStyleSheet';
 
 const TEACHER_TODAY_LABEL = TEACHER_ACADEMIC_SECTIONS[0].label;
 const TEACHER_COURSES_LABEL = TEACHER_ACADEMIC_SECTIONS[1].label;
-const TEACHER_GRADING_LABEL = TEACHER_ACADEMIC_SECTIONS[2].label;
+const TEACHER_TEACHING_TODOS_LABEL = TEACHER_ACADEMIC_SECTIONS[2].label;
+const TEACHER_GRADING_LABEL = TEACHER_ACADEMIC_SECTIONS[3].label;
+
+function isTeachingTodoKind(kind: InboxTask['kind']): boolean {
+  return kind === 'live' || kind === 'group';
+}
 
 type HomeState =
   | { scope: string; status: 'loading' | 'error' }
@@ -68,6 +73,8 @@ export default function TeacherTodayScreen() {
   const current = state.scope === scope ? state : null;
   const data = current?.status === 'ready' ? current.data : null;
   const loading = !current || current.status === 'loading';
+  const teachingTodos = data?.tasks.filter((task) => isTeachingTodoKind(task.kind)) ?? [];
+  const gradingTasks = data?.tasks.filter((task) => !isTeachingTodoKind(task.kind)) ?? [];
 
   const load = useCallback(async () => {
     const request = ++generation.current;
@@ -234,10 +241,10 @@ export default function TeacherTodayScreen() {
                 })}
 
                 <Text accessibilityRole="header" style={s.sectionTitle}>
-                  {TEACHER_GRADING_LABEL}
+                  {TEACHER_TEACHING_TODOS_LABEL}
                 </Text>
-                {data.tasks.length ? (
-                  data.tasks.map((task) => (
+                {teachingTodos.length ? (
+                  teachingTodos.map((task) => (
                     <Pressable
                       key={task.id}
                       accessibilityRole="button"
@@ -248,11 +255,7 @@ export default function TeacherTodayScreen() {
                         <Text style={s.taskTitle}>{task.title}</Text>
                         <Text style={s.meta}>{task.groupName}</Text>
                         <Text style={s.taskAction}>
-                          {task.kind === 'live'
-                            ? '進入課堂'
-                            : task.kind === 'group'
-                              ? '查看課程動態'
-                              : '查看成績簿'}
+                          {task.kind === 'live' ? '進入課堂' : '查看課程動態'}
                         </Text>
                       </View>
                       <Text accessibilityElementsHidden style={s.arrow}>
@@ -261,7 +264,31 @@ export default function TeacherTodayScreen() {
                     </Pressable>
                   ))
                 ) : (
-                  <Text style={s.empty}>可從上方課程查看點名與評分狀態。</Text>
+                  <Text style={s.empty}>目前沒有點名或課程動態待辦。</Text>
+                )}
+                <Text accessibilityRole="header" style={s.sectionTitle}>
+                  {TEACHER_GRADING_LABEL}
+                </Text>
+                {gradingTasks.length ? (
+                  gradingTasks.map((task) => (
+                    <Pressable
+                      key={task.id}
+                      accessibilityRole="button"
+                      style={s.task}
+                      onPress={() => openTask(task)}
+                    >
+                      <View style={{ flex: 1 }}>
+                        <Text style={s.taskTitle}>{task.title}</Text>
+                        <Text style={s.meta}>{task.groupName}</Text>
+                        <Text style={s.taskAction}>查看成績簿</Text>
+                      </View>
+                      <Text accessibilityElementsHidden style={s.arrow}>
+                        ↗
+                      </Text>
+                    </Pressable>
+                  ))
+                ) : (
+                  <Text style={s.empty}>目前沒有待批改項目。</Text>
                 )}
               </>
             ) : null}

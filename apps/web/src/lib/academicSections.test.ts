@@ -1,5 +1,9 @@
 import { expect, it } from 'vitest';
 import {
+  STUDENT_ACADEMIC_SECTIONS,
+  studentAcademicSectionLabels,
+} from '@campus/shared/src/academicSections';
+import {
   ACADEMIC_LMS_SECTIONS,
   ACADEMIC_SECTIONS,
   academicNavigationPath,
@@ -17,6 +21,13 @@ it('keeps a stable academic secondary-nav vocabulary', () => {
     '玩課雲課程',
     '玩課雲作業',
   ]);
+});
+
+it('derives student section labels and order from shared academicSections', () => {
+  expect(ACADEMIC_SECTIONS.map((section) => section.label)).toEqual(studentAcademicSectionLabels());
+  expect(ACADEMIC_SECTIONS.map((section) => section.path)).toEqual(
+    STUDENT_ACADEMIC_SECTIONS.map((section) => section.webPath),
+  );
 });
 
 it.each([

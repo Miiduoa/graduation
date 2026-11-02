@@ -26,10 +26,16 @@ describe('shared academic / messaging nav vocabulary', () => {
   });
 
   it('keeps teacher section labels in product order', () => {
-    expect(teacherAcademicSectionLabels()).toEqual(['今天的課', '授課課程', '待批改']);
+    expect(teacherAcademicSectionLabels()).toEqual([
+      '今天的課',
+      '授課課程',
+      '教學待辦',
+      '待批改',
+    ]);
     expect(TEACHER_ACADEMIC_SECTIONS.map((section) => section.id)).toEqual([
       'today',
       'courses',
+      'teaching_todos',
       'grading',
     ]);
   });
