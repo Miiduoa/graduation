@@ -62,7 +62,7 @@ test('exposes classroom search navigation when the timetable course has no linke
   expect(view.result.current.classes[0]?.courseWorkNav).toEqual({
     kind: 'search',
     screen: 'Classroom',
-    params: { q: '資料結構' },
+    params: { q: '資料結構', from: 'timetable' },
   });
 });
 

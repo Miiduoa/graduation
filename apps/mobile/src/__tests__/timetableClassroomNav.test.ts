@@ -19,7 +19,7 @@ describe('timetable classroom navigation', () => {
     });
   });
 
-  it('carries course name/code as Classroom q when unlinked', () => {
+  it('carries course name as Classroom q with from=timetable when unlinked', () => {
     expect(
       resolveTimetableClassroomNav({
         courseName: '資料庫系統',
@@ -28,9 +28,17 @@ describe('timetable classroom navigation', () => {
     ).toEqual({
       kind: 'search',
       screen: 'Classroom',
-      params: { q: '資料庫系統 CS301' },
+      params: { q: '資料庫系統', from: 'timetable', code: 'CS301' },
     });
     expect(timetableCourseSearchQuery({ courseName: '  ', courseCode: '' })).toBe('');
+  });
+
+  it('opens Classroom home without empty q when course name is blank', () => {
+    expect(resolveTimetableClassroomNav({ courseName: '   ' })).toEqual({
+      kind: 'search',
+      screen: 'Classroom',
+      params: {},
+    });
   });
 });
 
@@ -53,5 +61,23 @@ describe('mobile classroom q filter', () => {
     const none = filterCoursesByClassroomQuery(courses, '不存在的課程');
     expect(none).toEqual([]);
     expect(classroomQueryMatchKind(none.length, true)).toBe('none');
+  });
+
+  it('manual search keeps whole-string substring (not token AND)', () => {
+    expect(filterCoursesByClassroomQuery(courses, 'Data 資料')).toEqual([courses[0]]);
+    expect(filterCoursesByClassroomQuery(courses, '資料庫系統 CS301')).toEqual([]);
+  });
+
+  it('timetable name+code q hits a title that only has the course name', () => {
+    const onlyName = [{ id: 'db', title: '資料庫系統' }];
+    expect(
+      filterCoursesByClassroomQuery(onlyName, '資料庫系統 CS301', {
+        fromTimetable: true,
+        courseCode: 'CS301',
+      }),
+    ).toEqual(onlyName);
+    expect(
+      filterCoursesByClassroomQuery(onlyName, '資料庫系統 CS301', { fromTimetable: true }),
+    ).toEqual(onlyName);
   });
 });

@@ -13,6 +13,7 @@ import {
 
 type Props = {
   query: string;
+  courseCode?: string;
   navigation: { navigate?: (name: string, params?: unknown) => void };
 };
 
@@ -20,12 +21,13 @@ type Props = {
  * Timetable fallback when a course has no linkedCourseId:
  * land on Classroom with q and prefilter the nuni course list (no auto-link writes).
  */
-export function ClassroomCourseSearch({ query, navigation }: Props) {
+export function ClassroomCourseSearch({ query, courseCode, navigation }: Props) {
   const auth = useNuniSession();
   const [rows, setRows] = useState<NuniWorkspace[] | null>(null);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(true);
   const [activeQuery, setActiveQuery] = useState(query.trim().slice(0, 120));
+  const codeKey = (courseCode ?? '').trim().slice(0, 40);
   const generation = useRef(0);
 
   const load = useCallback(async () => {
@@ -65,8 +67,12 @@ export function ClassroomCourseSearch({ query, navigation }: Props) {
   }, [load]);
 
   const matched = useMemo(
-    () => filterCoursesByClassroomQuery(rows ?? [], activeQuery),
-    [rows, activeQuery],
+    () =>
+      filterCoursesByClassroomQuery(rows ?? [], activeQuery, {
+        fromTimetable: true,
+        courseCode: codeKey || undefined,
+      }),
+    [rows, activeQuery, codeKey],
   );
   const matchKind = classroomQueryMatchKind(matched.length, Boolean(courseSearchKey(activeQuery)));
 

@@ -61,6 +61,8 @@ export function WorkspaceList() {
   const queryFromUrl = params.get('q') ?? '';
   const filterFromUrl = params.get('courses');
   const taskFromUrl = params.get('task');
+  const fromTimetable = params.get('from') === 'timetable';
+  const courseCodeFromUrl = (params.get('code') ?? '').trim().slice(0, 40);
 
   useLayoutEffect(() => {
     active.current = true;
@@ -124,8 +126,22 @@ export function WorkspaceList() {
     .sort()
     .join('|');
   const inScope = (items ?? []).filter((item) => inDirectory(item, filter));
-  const shown = filterCoursesByClassroomQuery(inScope, query);
+  const shown = filterCoursesByClassroomQuery(inScope, query, {
+    fromTimetable,
+    courseCode: courseCodeFromUrl || undefined,
+  });
   const matchKind = classroomQueryMatchKind(shown.length, Boolean(courseSearchKey(query)));
+  const clearTimetableAttribution = () => {
+    const url = new URL(window.location.href);
+    if (!url.searchParams.has('from') && !url.searchParams.has('code')) return;
+    url.searchParams.delete('from');
+    url.searchParams.delete('code');
+    window.history.replaceState(
+      window.history.state,
+      '',
+      `${url.pathname}${url.search}${url.hash}`,
+    );
+  };
   const changeFilter = (value: CourseDirectoryFilter) => {
     setFilter(value);
     replaceStudyQuery('courses', value, 'all');
@@ -133,6 +149,7 @@ export function WorkspaceList() {
   const changeQuery = (value: string) => {
     setQuery(value);
     replaceStudyQuery('q', value);
+    clearTimetableAttribution();
   };
   const changeTaskFilter = (value: StudyAgendaFilter) => {
     setTaskFilter(value);
@@ -275,7 +292,9 @@ export function WorkspaceList() {
                 <h3>{query ? `找不到「${query}」` : '這個分類目前沒有課程'}</h3>
                 <p>
                   {query
-                    ? '課表上的這門課尚未對應到課程空間。可查看全部課程，或用邀請碼加入課程。'
+                    ? fromTimetable
+                      ? '課表上的這門課尚未對應到課程空間。可查看全部課程，或用邀請碼加入課程。'
+                      : '換個課程關鍵字，或清除篩選再找一次。'
                     : filter === 'archived'
                       ? '課程封存後，原有教材和繳交紀錄會整理在這裡。'
                       : '可以切換其他分類，或使用老師提供的邀請碼加入課程。'}
@@ -285,7 +304,7 @@ export function WorkspaceList() {
                     全部課程
                   </button>
                 )}
-                {query ? (
+                {query && fromTimetable ? (
                   <button
                     type="button"
                     className={shared.button}
@@ -305,7 +324,7 @@ export function WorkspaceList() {
                   role="status"
                   data-testid={`classroom-query-status-${matchKind}`}
                 >
-                  {matchKind === 'unique'
+                  {fromTimetable && matchKind === 'unique'
                     ? `剛好找到「${query}」這門課`
                     : query
                       ? `「${query}」找到 ${shown.length} 門課程`
@@ -315,12 +334,16 @@ export function WorkspaceList() {
                   {shown.map((item) => (
                     <li key={item.id}>
                       <Link
-                        className={`${styles.courseCard}${matchKind === 'unique' ? ` ${styles.courseCardHighlight}` : ''}`}
+                        className={`${styles.courseCard}${fromTimetable && matchKind === 'unique' ? ` ${styles.courseCardHighlight}` : ''}`}
                         href={classroomCourseHref(item.id, context)}
                         data-testid={
-                          matchKind === 'unique' ? 'classroom-query-unique' : undefined
+                          fromTimetable && matchKind === 'unique'
+                            ? 'classroom-query-unique'
+                            : undefined
                         }
-                        aria-current={matchKind === 'unique' ? 'page' : undefined}
+                        aria-current={
+                          fromTimetable && matchKind === 'unique' ? 'page' : undefined
+                        }
                       >
                         <span className={styles.courseIdentity}>
                           <CampusIcon
@@ -331,7 +354,7 @@ export function WorkspaceList() {
                             {item.state === 'archived'
                               ? '已封存'
                               : courseRoleLabels[item.memberRole]}
-                            {matchKind === 'unique' ? ' · 課表對應' : ''}
+                            {fromTimetable && matchKind === 'unique' ? ' · 課表對應' : ''}
                           </span>
                         </span>
                         <h3>{item.title}</h3>

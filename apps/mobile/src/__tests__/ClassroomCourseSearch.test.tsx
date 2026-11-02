@@ -93,7 +93,7 @@ test('ClassroomScreen with q prefilters unique, multi and zero matches', async (
   const unique = render(
     <ClassroomScreen
       navigation={{ navigate: mockNavigate }}
-      route={{ params: { q: '互動設計' } }}
+      route={{ params: { q: '互動設計', from: 'timetable' } }}
     />,
   );
   await waitFor(() => expect(unique.getByTestId('classroom-query-unique')).toBeTruthy());
@@ -119,4 +119,31 @@ test('ClassroomScreen with q prefilters unique, multi and zero matches', async (
     fireEvent.press(none.getByText('全部課程'));
   });
   await waitFor(() => expect(none.getByText('Data 資料庫系統')).toBeTruthy());
+});
+
+test('timetable name+code q uniquely hits a title with only the course name', async () => {
+  mockList.mockResolvedValue([
+    {
+      id: 'cw_db',
+      title: '資料庫系統',
+      state: 'active' as const,
+      memberRole: 'student' as const,
+    },
+    {
+      id: 'cw_other',
+      title: '互動設計',
+      state: 'active' as const,
+      memberRole: 'student' as const,
+    },
+  ]);
+  const view = render(
+    <ClassroomCourseSearch
+      query="資料庫系統 CS301"
+      courseCode="CS301"
+      navigation={{ navigate: mockNavigate }}
+    />,
+  );
+  await waitFor(() => expect(view.getByTestId('classroom-query-unique')).toBeTruthy());
+  expect(view.getByLabelText('資料庫系統')).toBeTruthy();
+  expect(view.queryByLabelText('互動設計')).toBeNull();
 });

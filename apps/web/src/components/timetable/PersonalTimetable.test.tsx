@@ -217,7 +217,7 @@ describe('personal timetable data retention', () => {
     expect(screen.getByRole('region', { name: '編輯課程' })).toBeTruthy();
     const exit = within(screen.getByTestId('timetable-course-work-exit'));
     expect(exit.getByRole('link', { name: '作業與教材' }).getAttribute('href')).toBe(
-      '/classroom?q=%E5%8E%9F%E6%9C%AC%E8%AA%B2%E7%A8%8B',
+      '/classroom?q=%E5%8E%9F%E6%9C%AC%E8%AA%B2%E7%A8%8B&from=timetable',
     );
   });
 
@@ -268,7 +268,7 @@ describe('personal timetable data retention', () => {
     await ready();
     fireEvent.click(screen.getAllByRole('button', { name: /檢視匯入紀錄 匯入課程/ })[0]);
     expect(screen.getByRole('link', { name: '作業與教材' }).getAttribute('href')).toBe(
-      '/classroom?q=%E5%8C%AF%E5%85%A5%E8%AA%B2%E7%A8%8B%20CS301',
+      '/classroom?q=%E5%8C%AF%E5%85%A5%E8%AA%B2%E7%A8%8B&from=timetable&code=CS301',
     );
   });
 
