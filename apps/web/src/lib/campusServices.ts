@@ -75,11 +75,11 @@ export const CAMPUS_SERVICES = [
     category: 'study',
   },
   {
-    name: '老師工作台',
-    text: '老師看自己課的學生申訴，核准或不核准',
+    name: '課務申訴審核',
+    text: '老師看自己課的學生申訴，核准或不核准；授課請到課程與作業',
     href: '/teacher',
     access: 'school',
-    keywords: '老師 教師 申訴 核准 teacher',
+    keywords: '老師 教師 申訴 核准 teacher 老師工作台 課務申訴審核',
     category: 'study',
   },
   {
@@ -365,6 +365,13 @@ export function visibleCampusServices(schoolLmsEnabled = false) {
 /** 目錄預設只列主入口；有搜尋詞時才展開命中的次級選項。 */
 export function directoryCampusServices(schoolLmsEnabled = false) {
   return flattenCampusServices(schoolLmsEnabled).filter((service) => !isSecondary(service));
+}
+
+/** 主入口底下的次級服務（瀏覽目錄時展開用）。 */
+export function secondaryCampusServices(parentHref: string, schoolLmsEnabled = false) {
+  return flattenCampusServices(schoolLmsEnabled)
+    .filter((service) => isSecondary(service) && service.parentHref === parentHref)
+    .map(presentCampusService);
 }
 
 export function searchCampusServices(

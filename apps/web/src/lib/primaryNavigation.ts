@@ -12,7 +12,7 @@ export function primaryNavigationSection(
   pathname: string | null | undefined,
 ): PrimaryNavigationSection | null {
   if (!pathname) return null;
-  // /today、/hub 無對應 page：只當區塊別名，導覽不可把它們當連結目標。
+  // /today、/hub 有轉址 page 進首頁；區塊別名仍對應 today／life。
   if (pathname === '/' || pathname === '/today' || pathname === '/today-v2') return 'today';
   if (pathname === '/life' || pathname === '/hub') return 'life';
   if (includesRoute(pathname, '/orders') || includesRoute(pathname, '/food') || pathname === '/shops')

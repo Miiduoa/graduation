@@ -247,7 +247,7 @@ export default function HomePage() {
         ) : null}
         {isTeacherRole(role) && (
           <p className={styles.notice}>
-            <Link href="/teacher">老師工作台 →</Link> 看學生送來的課程申訴。
+            <Link href="/teacher">課務申訴審核 →</Link> 看學生送來的課程申訴。
           </p>
         )}
         {blocked ? (
