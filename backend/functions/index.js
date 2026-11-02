@@ -4427,7 +4427,7 @@ exports.onTeacherAssignmentPublished = onDocumentCreated(
     document: 'groups/{groupId}/assignments/{assignmentId}',
     region: REGION,
   },
-  createAssignmentPublishedNotifyHandler({ db, sendPushToUser }),
+  createAssignmentPublishedNotifyHandler({ db, sendPushToUser, sendPushToMultipleUsers }),
 );
 
 exports.onAssignmentSubmissionWritten = onDocumentWritten(
@@ -4443,7 +4443,7 @@ exports.onSchoolAnnouncementCreated = onDocumentCreated(
     document: 'schools/{schoolId}/announcements/{announcementId}',
     region: REGION,
   },
-  createSchoolAnnouncementNotifyHandler({ db, sendPushToUser }),
+  createSchoolAnnouncementNotifyHandler({ db, sendPushToUser, sendPushToMultipleUsers }),
 );
 
 // =====================================================
