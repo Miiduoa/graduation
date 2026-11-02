@@ -4435,7 +4435,7 @@ exports.onAssignmentSubmissionWritten = onDocumentWritten(
     document: 'groups/{groupId}/assignments/{assignmentId}/submissions/{studentUid}',
     region: REGION,
   },
-  createSubmissionNotifyHandler({ db, sendPushToUser }),
+  createSubmissionNotifyHandler({ db, sendPushToUser, sendPushToMultipleUsers }),
 );
 
 exports.onSchoolAnnouncementCreated = onDocumentCreated(
