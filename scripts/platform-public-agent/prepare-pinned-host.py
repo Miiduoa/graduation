@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Prepare a disposable b0a10ac checkout for host integration tests, never a release."""
+"""Prepare an explicitly pinned disposable checkout for host tests, never a release."""
 import hashlib
 import json
 import pathlib
@@ -11,10 +11,13 @@ root = pathlib.Path(__file__).resolve().parents[2]
 if len(sys.argv) != 2:
     raise SystemExit('usage: prepare-pinned-host.py <disposable-checkout>')
 source = pathlib.Path(sys.argv[1]).resolve(strict=True)
-expected = 'b0a10ac814cd03fbfb45132566035acce8339f17'
+allowed = {
+    'b0a10ac814cd03fbfb45132566035acce8339f17',
+    'add9614a93c65b4587ca5649a83803614c786f28',
+}
 tree = subprocess.check_output(['git', '-C', str(source), 'write-tree'], text=True).strip()
-if tree != expected or subprocess.run(['git', '-C', str(source), 'diff-files', '--quiet']).returncode:
-    raise SystemExit('source tree differs from pinned b0a10ac')
+if tree not in allowed or subprocess.run(['git', '-C', str(source), 'diff-files', '--quiet']).returncode:
+    raise SystemExit('source tree differs from the pinned baseline or security candidate')
 if not source.is_relative_to(root / 'output'):
     raise SystemExit('source must be inside this worktree output directory')
 host = source / 'apps/api/src'
@@ -50,7 +53,7 @@ if migration.exists():
     raise SystemExit('test-only migration collision')
 shutil.copyfile(root / 'deploy/nuni-api/platform-public-agent/schema.candidate.sql', migration)
 files = [app, migration, *sorted(destination.glob('*.ts'))]
-manifest = {'kind': 'local-test-only', 'baseTree': expected,
+manifest = {'kind': 'local-test-only', 'baseTree': tree,
             'files': {str(p.relative_to(source)): hashlib.sha256(p.read_bytes()).hexdigest() for p in files},
             'migration': '999_public_agent_isolated_test_only'}
 (source / 'public-agent-test-manifest.json').write_text(json.dumps(manifest, indent=2) + '\n')

@@ -16,6 +16,8 @@ import {
 import { createHash } from 'node:crypto';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import process from 'node:process';
+import console from 'node:console';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 if (process.argv.length !== 4 || process.argv[2] !== '--prepared')
@@ -26,10 +28,16 @@ if (!source.startsWith(`${root}/output/`))
 const manifest = JSON.parse(readFileSync(join(source, 'public-agent-test-manifest.json'), 'utf8'));
 if (
   manifest.kind !== 'local-test-only' ||
-  manifest.baseTree !== 'b0a10ac814cd03fbfb45132566035acce8339f17' ||
+  ![
+    'b0a10ac814cd03fbfb45132566035acce8339f17',
+    'add9614a93c65b4587ca5649a83803614c786f28',
+  ].includes(manifest.baseTree) ||
   manifest.migration !== '999_public_agent_isolated_test_only'
 )
   throw Error('Unexpected test manifest');
+const indexedTree = spawnSync('git', ['-C', source, 'write-tree'], { encoding: 'utf8' });
+if (indexedTree.status !== 0 || indexedTree.stdout.trim() !== manifest.baseTree)
+  throw Error('Pinned test checkout index has changed');
 for (const [path, checksum] of Object.entries(manifest.files)) {
   if (path.startsWith('/') || path.split('/').includes('..')) throw Error('Invalid manifest path');
   if (

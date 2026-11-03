@@ -1,0 +1,9 @@
+{
+  "purpose": "review-only source overlay; no production migration or runtime enablement",
+  "baseTree": "add9614a93c65b4587ca5649a83803614c786f28",
+  "resultTree": "27abfb6b986c5ceab7461d919573d94bb3b1ced0",
+  "patch": "production-source-security.patch",
+  "sha256": "0890c8a79c509aee06e63b7f22220b9ac749446a54eda480f82cef810a363b31",
+  "migration": null,
+  "providerWired": false
+}
