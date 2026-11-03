@@ -1,17 +1,20 @@
 'use client';
 
 import Link from 'next/link';
+import { useSearchParams } from 'next/navigation';
 import { SiteShell } from '@/components/SiteShell';
 import { PersonalTimetable } from '@/components/timetable/PersonalTimetable';
-import styles from '@/components/academic/academic.module.css';
+import { campusServiceHref, useCampusNavigationSearch } from '@/lib/campusNavigation';
 
 export default function TimetablePage() {
+  const params = useSearchParams();
+  const campusSearch = useCampusNavigationSearch(params);
   return (
-    <SiteShell title="我的課表" subtitle="先看這週去哪上課。截圖或學校課表都要確認後才會寫入。">
-      <p className={styles.notice}>
-        老師在 Nuni 開的課、教材和作業在這裡：<Link href="/classroom">Nuni 課程 →</Link>
-      </p>
+    <SiteShell title="我的課表" compactHeading>
       <PersonalTimetable />
+      <Link className="btn" href={campusServiceHref('/classroom', campusSearch)}>
+        課程教材與作業
+      </Link>
     </SiteShell>
   );
 }
