@@ -22,11 +22,12 @@ export function AdminHeader() {
 
   return (
     <header className={styles.adminHeader}>
-      <Link className={styles.adminBrand} href="/" aria-label="Campus One 首頁">
+      <Link className={styles.adminBrand} href="/" aria-label="nuni 首頁">
         <span className={styles.brandMark} aria-hidden="true">
-          C₁
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src="/icons/mark.svg" alt="" width={28} height={28} />
         </span>
-        <span>Campus One</span>
+        <span>nuni</span>
         <span className={styles.headerContext}>平台管理</span>
       </Link>
       <div className={styles.headerActions}>

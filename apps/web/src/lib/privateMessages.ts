@@ -521,7 +521,7 @@ export function parseNotification(
     type: text(row.type) || text(row.category) || 'system',
     read: row.read === true || row.isRead === true,
     createdAt: messageTime(row.createdAt),
-    data,
+    data: { ...data, schoolId },
   };
 }
 export function watchAccountNotifications(
@@ -612,10 +612,65 @@ export async function markAccountNotificationRead(
   });
   assertUser(session.uid);
 }
+function safeNoticeId(value: unknown): string | null {
+  return typeof value === 'string' &&
+    value.length > 0 &&
+    value.length <= 128 &&
+    !value.includes('/') &&
+    value !== '.' &&
+    value !== '..'
+    ? value
+    : null;
+}
+
+/** 通知中心／推播共用深連；未知類型落到通知列表，不臆造業務頁。 */
 export function notificationDestination(
   notification: AccountNotification,
 ): { href: string; label: string } | null {
-  if (notification.type === 'announcement') return { href: '/announcements', label: '查看公告' };
+  const data = notification.data ?? {};
+  if (notification.type === 'announcement') {
+    const announcementId = safeNoticeId(data.announcementId);
+    return announcementId
+      ? {
+          href: `/announcements/${encodeURIComponent(announcementId)}`,
+          label: '查看公告',
+        }
+      : { href: '/announcements', label: '查看公告' };
+  }
+  if (notification.type === 'order') {
+    const orderId = safeNoticeId(data.orderId);
+    const schoolId = safeNoticeId(data.schoolId);
+    const params = new URLSearchParams();
+    if (schoolId) {
+      params.set('campus', schoolId);
+      params.set('schoolId', schoolId);
+    }
+    if (orderId) params.set('orderId', orderId);
+    const query = params.toString();
+    return {
+      href: query ? `/orders?${query}` : '/orders',
+      label: '查看訂單／取餐',
+    };
+  }
+  if (notification.type === 'live_session') {
+    const groupId = safeNoticeId(data.groupId) || safeNoticeId(data.courseId);
+    if (!groupId) return { href: '/messages', label: '開啟通知中心' };
+    const sessionId = safeNoticeId(data.sessionId);
+    const base = `/course/${encodeURIComponent(groupId)}/attendance`;
+    return {
+      href: sessionId ? `${base}?sessionId=${encodeURIComponent(sessionId)}` : base,
+      label: '開啟點名',
+    };
+  }
+  if (notification.type === 'assignment_submission') {
+    const courseId = safeNoticeId(data.groupId) || safeNoticeId(data.courseId);
+    if (!courseId) return { href: '/messages', label: '開啟通知中心' };
+    const assignmentId = safeNoticeId(data.assignmentId);
+    const href = assignmentId
+      ? `/teacher/course/${encodeURIComponent(courseId)}?assignmentId=${encodeURIComponent(assignmentId)}`
+      : `/teacher/course/${encodeURIComponent(courseId)}`;
+    return { href, label: '查看待批改繳交' };
+  }
   if (notification.type === 'grade' || notification.type === 'feedback') {
     const work = courseWorkHrefFromData(
       notification.data,
@@ -640,7 +695,7 @@ export function notificationDestination(
     const href =
       courseWorkHrefFromData(notification.data, notification.type) ||
       courseHrefFromData(notification.data);
-    return href ? { href, label: courseWorkOpenLabel(href) } : null;
+    if (href) return { href, label: courseWorkOpenLabel(href) };
   }
-  return null;
+  return { href: '/messages', label: '開啟通知中心' };
 }

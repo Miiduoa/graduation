@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
+import { useSearchParams } from 'next/navigation';
 import { attendanceSubmissionIssue } from '@campus/shared/src/attendanceReliability';
 import QRCode from 'qrcode';
 import { useAuth } from './AuthGuard';
@@ -10,10 +11,19 @@ import { SiteShell } from './SiteShell';
 import { Button } from './ui/Button';
 import { Input } from './ui/Input';
 import { AttendanceQrScanner } from './AttendanceQrScanner';
+import { AttendanceQrPresentation } from './AttendanceQrPresentation';
 import { AttendanceCorrectionPanel } from './AttendanceCorrectionPanel';
 import { AttendanceSyncStatus } from './AttendanceSyncStatus';
 import { watchAttendanceLive, type AttendanceLiveState } from '@/lib/watchAttendanceLive';
 import { resolveSchoolPageContext, type SchoolSearchParams } from '@/lib/pageContext';
+import { useCourseTodayMeeting } from '@/lib/useCourseTodayMeeting';
+import {
+  SESSION_FOCUS_MISSING,
+  landOnSession,
+  parseSessionFocusId,
+  resolveSessionFocus,
+  sessionFocusElementId,
+} from './classroom/sessionDeepLink';
 import {
   attendanceCsv,
   attendanceError,
@@ -31,6 +41,7 @@ import {
   type AttendanceSession,
   type CourseAttendance as AttendanceData,
 } from '@/lib/courseAttendance';
+import { AttendanceMissingNotices } from './AttendanceMissingNotices';
 import service from '@/app/servicePages.module.css';
 import styles from './course-attendance.module.css';
 
@@ -49,6 +60,7 @@ function Session({
   canStart,
   checkInEnabled,
   reload,
+  focused = false,
 }: {
   session: AttendanceSession;
   courseId: string;
@@ -58,11 +70,18 @@ function Session({
   canStart: boolean;
   checkInEnabled: boolean;
   reload: () => Promise<void>;
+  focused?: boolean;
 }) {
   const [token, setToken] = useState('');
   const [pending, setPending] = useState(false);
   const [teacherCode, setTeacherCode] = useState('');
   const [qr, setQr] = useState('');
+  const qrGeneration = useRef(0);
+  const hideCode = useCallback(() => {
+    qrGeneration.current += 1;
+    setTeacherCode('');
+    setQr('');
+  }, []);
   const [records, setRecords] = useState<AttendanceRecord[] | null>(null);
   const [rosterQuery, setRosterQuery] = useState('');
   const [error, setError] = useState('');
@@ -106,22 +125,25 @@ function Session({
   }, [session.active, canStart, checkInEnabled]);
 
   useEffect(() => {
-    if (!teacherCode) return;
-    const hideSecret = () => {
-      setTeacherCode('');
-      setQr('');
-    };
-    const hideOnBackground = () => {
-      if (document.visibilityState !== 'visible') hideSecret();
-    };
-    document.addEventListener('visibilitychange', hideOnBackground);
-    const ttl = Number.isFinite(deadline) ? Math.max(0, deadline - Date.now()) : 0;
-    const timer = window.setTimeout(hideSecret, ttl);
+    // Invalidate pending reads too: returning from the background must not reveal a late QR.
+    const visibility = () => { if (document.visibilityState !== 'visible') hideCode(); };
+    document.addEventListener('visibilitychange', visibility);
+    window.addEventListener('pagehide', hideCode);
+    window.addEventListener('offline', hideCode);
     return () => {
-      document.removeEventListener('visibilitychange', hideOnBackground);
-      window.clearTimeout(timer);
+      qrGeneration.current += 1;
+      document.removeEventListener('visibilitychange', visibility);
+      window.removeEventListener('pagehide', hideCode);
+      window.removeEventListener('offline', hideCode);
     };
-  }, [teacherCode, deadline]);
+  }, [hideCode, session.active, canStart]);
+
+  useEffect(() => {
+    if (!teacherCode) return;
+    const ttl = Number.isFinite(deadline) ? Math.max(0, deadline - Date.now()) : 0;
+    const timer = window.setTimeout(hideCode, ttl);
+    return () => window.clearTimeout(timer);
+  }, [teacherCode, deadline, hideCode]);
 
   async function run(action: () => Promise<void>) {
     if (lock.current) return;
@@ -144,15 +166,18 @@ function Session({
     }
   }
   async function showCode() {
+    const request = ++qrGeneration.current;
     const code = await loadAttendanceCode(courseId, session.id);
     if (!Number.isFinite(deadline) || deadline <= Date.now()) {
       throw Object.assign(new Error('簽到期限已結束'), { code: 'functions/deadline-exceeded' });
     }
+    if (!live.current || request !== qrGeneration.current || navigator.onLine === false) return;
     const image = await QRCode.toDataURL(
       JSON.stringify({ groupId: courseId, sessionId: session.id, qrToken: code }),
-      { width: 260, margin: 2 },
+      { width: 768, margin: 4, errorCorrectionLevel: 'M' },
     );
-    if (live.current && document.visibilityState === 'visible' && Date.now() < deadline) {
+    if (live.current && request === qrGeneration.current && Boolean(navigator.onLine) &&
+        document.visibilityState === 'visible' && Date.now() < deadline) {
       setTeacherCode(code);
       setQr(image);
     }
@@ -169,7 +194,13 @@ function Session({
     setTimeout(() => URL.revokeObjectURL(url), 1000);
   }
   return (
-    <article className={styles.session}>
+    <article
+      id={sessionFocusElementId(session.id)}
+      className={styles.session}
+      data-session-focused={focused ? 'true' : undefined}
+      tabIndex={focused ? -1 : undefined}
+      aria-current={focused ? 'true' : undefined}
+    >
       <div className={styles.sessionHeading}>
         <div>
           <p className={styles.label}>{studentAttendanceHeading(courseName, session.active)}</p>
@@ -259,7 +290,9 @@ function Session({
             </Button>
           </form>
         ) : (
-          <p className={styles.detail}>沒有你的簽到紀錄。如需更正，請聯絡授課教師。</p>
+          <p className={styles.detail}>
+            沒有簽到紀錄。若有出席請向老師確認或申請更正。
+          </p>
         ))}
       <div className={styles.actions}>
         {canStart && session.active && (
@@ -332,6 +365,12 @@ function Session({
             >
               複製簽到碼
             </Button>
+            <AttendanceQrPresentation
+              image={qr} courseName={courseName} expiresAt={session.qrExpiresAt}
+              remainingSeconds={remainingSeconds} attendeeCount={session.attendeeCount}
+              onHideCode={hideCode}
+            />
+            <Button type="button" variant="outline" onClick={hideCode}>隱藏簽到碼</Button>
             <p className={styles.detail}>簽到碼過期後，請結束本次點名，再開啟新的點名。</p>
           </div>
         </div>
@@ -408,7 +447,15 @@ function Session({
   );
 }
 
-function Workspace({ courseId, uid }: { courseId: string; uid: string }) {
+function Workspace({
+  courseId,
+  uid,
+  focusSessionId,
+}: {
+  courseId: string;
+  uid: string;
+  focusSessionId: string | null;
+}) {
   const [data, setData] = useState<AttendanceData | null>(null);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(true);
@@ -425,6 +472,7 @@ function Workspace({ courseId, uid }: { courseId: string; uid: string }) {
   const [historyFilter, setHistoryFilter] = useState<'all' | 'active' | 'ended'>('all');
   const permission = useRef<string | null>(null);
   const permissionVersion = useRef(0);
+  const focusedOnce = useRef('');
   const reload = useCallback(async () => {
     if (!permission.current) return;
     const request = ++generation.current;
@@ -515,14 +563,33 @@ function Workspace({ courseId, uid }: { courseId: string; uid: string }) {
       if (mounted.current) setStarting(false);
     }
   }
+  const sessionFocus = resolveSessionFocus(
+    (data?.sessions ?? []).map((session) => session.id),
+    focusSessionId,
+  );
+  const effectiveHistoryFilter =
+    focusSessionId && sessionFocus.found ? 'all' : historyFilter;
+  useEffect(() => {
+    if (!focusSessionId || !sessionFocus.found) return;
+    if (focusedOnce.current === focusSessionId) return;
+    const frame = window.requestAnimationFrame(() => {
+      if (landOnSession(focusSessionId)) focusedOnce.current = focusSessionId;
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [focusSessionId, sessionFocus.found, data?.sessions]);
   const visibleSessions = data?.sessions.filter(
     (session) =>
       (data.canReadRoster ||
         !session.active ||
         session.id === studentCheckInSession(data.sessions)?.id) &&
-      (historyFilter === 'all' ||
-        (historyFilter === 'active' ? session.active : !session.active)),
+      (effectiveHistoryFilter === 'all' ||
+        (effectiveHistoryFilter === 'active' ? session.active : !session.active)) &&
+      (!focusSessionId ||
+        session.id === focusSessionId ||
+        !data.sessions.some((row) => row.id === focusSessionId)),
   ) ?? [];
+  const meeting = useCourseTodayMeeting(courseId, data?.courseName ?? '');
+  const viewerRole = data?.canStart ? 'teacher' : 'student';
   return (
     <>
       <div className={styles.workspaceHeading}>
@@ -556,8 +623,20 @@ function Workspace({ courseId, uid }: { courseId: string; uid: string }) {
         </p>
       )}
       {data && <AttendanceSyncStatus state={liveState} teacher={data.canReadRoster} />}
+      {data && !loading && sessionFocus.missing ? (
+        <p role="status" className={service.errorNotice}>
+          {SESSION_FOCUS_MISSING}
+        </p>
+      ) : null}
       {data && liveState === 'live' && (
         <>
+          <AttendanceMissingNotices
+            courseId={courseId}
+            courseName={data.courseName}
+            viewerRole={viewerRole}
+            sessions={data.sessions}
+            meeting={meeting}
+          />
           <section className={styles.overview} aria-label="課堂點名概況">
             <div>
               <span>已保存的點名</span>
@@ -617,7 +696,7 @@ function Workspace({ courseId, uid }: { courseId: string; uid: string }) {
                 <button
                   key={value}
                   type="button"
-                  aria-pressed={historyFilter === value}
+                  aria-pressed={effectiveHistoryFilter === value}
                   onClick={() => setHistoryFilter(value)}
                 >
                   {label}
@@ -637,6 +716,7 @@ function Workspace({ courseId, uid }: { courseId: string; uid: string }) {
                 canReadRoster={data.canReadRoster}
                 checkInEnabled={studentCheckInSession(data.sessions)?.id === session.id}
                 reload={reload}
+                focused={session.id === focusSessionId}
               />
             ))
           ) : (
@@ -666,8 +746,23 @@ export function CourseAttendance({
   searchParams?: SchoolSearchParams;
 }) {
   const { user, loading } = useAuth();
+  const query = useSearchParams();
+  const fromProps = searchParams && typeof searchParams === 'object' && 'sessionId' in searchParams
+    ? (searchParams as { sessionId?: string | string[] }).sessionId
+    : null;
+  const focusSessionId =
+    parseSessionFocusId(query?.get('sessionId')) ||
+    parseSessionFocusId(Array.isArray(fromProps) ? fromProps[0] : fromProps);
   const { schoolSearch } = resolveSchoolPageContext(searchParams);
   const path = `${audience === 'teacher' ? '/teacher' : ''}/course/${encodeURIComponent(courseId)}`;
+  const attendanceQuery = (() => {
+    const params = new URLSearchParams(
+      schoolSearch.startsWith('?') ? schoolSearch.slice(1) : schoolSearch,
+    );
+    if (focusSessionId) params.set('sessionId', focusSessionId);
+    const text = params.toString();
+    return text ? `?${text}` : '';
+  })();
   return (
     <SiteShell title="點名" subtitle="查看課堂簽到與已保存的出席紀錄。">
       <nav className={styles.navigation} aria-label="課程導覽">
@@ -682,10 +777,15 @@ export function CourseAttendance({
             確認登入狀態…
           </p>
         ) : user ? (
-          <Workspace key={`${user.uid}:${courseId}`} uid={user.uid} courseId={courseId} />
+          <Workspace
+            key={`${user.uid}:${courseId}:${focusSessionId ?? ''}`}
+            uid={user.uid}
+            courseId={courseId}
+            focusSessionId={focusSessionId}
+          />
         ) : (
           <SchoolAccountRequired
-            returnUrl={`${path}/attendance${schoolSearch}`}
+            returnUrl={`${path}/attendance${attendanceQuery}`}
             alternative="出缺席請先在課堂上向老師確認。"
           />
         )}

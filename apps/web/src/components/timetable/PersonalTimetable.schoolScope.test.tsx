@@ -87,6 +87,9 @@ const record = (schoolId: string, id: string, title: string) => ({
 });
 
 beforeEach(() => {
+  // Pin calendar day so ClassExceptions "today" does not collide with Monday
+  // fixtures when the real weekday changes.
+  vi.useFakeTimers({ now: new Date('2026-10-25T04:00:00.000Z'), toFake: ['Date'] });
   vi.clearAllMocks();
   window.history.replaceState({}, '', '/timetable');
   context.schoolId = 'nthu';
@@ -103,7 +106,10 @@ beforeEach(() => {
     updatedAt: '2026-10-14T00:00:00Z',
   }));
 });
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  vi.useRealTimers();
+});
 
 it('shows only imported courses belonging to the selected university', async () => {
   context.records = [
@@ -155,7 +161,9 @@ it('does not show a manual and imported copy of the same class as conflicting co
   render(<PersonalTimetable />);
   await screen.findAllByText('同一門課');
   fireEvent.click(screen.getByRole('button', { name: '一週' }));
-  expect(screen.getAllByText('同一門課')).toHaveLength(1);
+  // The date-specific schedule correctly repeats a title already in the weekly baseline.
+  // Its <strong> is not a second weekly course; count only the weekly <h4> cards.
+  expect(screen.getAllByRole('heading', { name: '同一門課', level: 4 })).toHaveLength(1);
   expect(screen.queryByRole('region', { name: '衝堂' })).toBeNull();
 });
 

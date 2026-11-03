@@ -1,5 +1,5 @@
 /**
- * Public bus-stop discovery through the Campus One transit gateway.
+ * Public bus-stop discovery through the nuni transit gateway.
  * No transport credentials are stored on the device.
  */
 export const BUS_CITIES = {

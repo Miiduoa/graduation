@@ -194,7 +194,7 @@ async function connectOne(destination, input, readers) {
       }
       const rows = data.loans.slice(0, MAX_ITEMS).map(x=>item(x.bookTitle, safeDate(x.dueAt) ? '到期 ' + safeDate(x.dueAt) : text(x.status)));
       return summary(destination, rows.some(Boolean) ? 'available' : 'empty',
-        rows.length ? '已讀取 Campus One 保存的借閱資料；仍需到官方圖書館帳戶查核。'
+        rows.length ? '已讀取 nuni 保存的借閱資料；仍需到官方圖書館帳戶查核。'
           : '平台沒有讀到借閱紀錄；不能據此判定官方圖書館沒有借閱。',
         rows);
     }
@@ -224,7 +224,7 @@ async function connectOne(destination, input, readers) {
           [x.status, Number.isSafeInteger(x.queueNumber) && x.queueNumber > 0 ? '取餐號 ' + x.queueNumber : '']
             .filter(Boolean).join(' · ')));
       return summary(destination, rows.some(Boolean) ? 'available' : 'empty',
-        rows.length ? '已讀取本人 Campus One 訂單副本，實際取餐與取消仍以商家最新狀態為準。'
+        rows.length ? '已讀取本人 nuni 訂單副本，實際取餐與取消仍以商家最新狀態為準。'
           : '平台尚未讀到本人的訂單，不能推定其他店家網站沒有訂單。',
         rows);
     }

@@ -70,6 +70,8 @@ test('settings shows real account and version without fabricated permissions, de
   ).toBeNull();
   fireEvent.press(view.getByText('通知設定'));
   expect(navigation.navigate).toHaveBeenCalledWith('NotificationSettings');
+  fireEvent.press(view.getByText('助理權限'));
+  expect(navigation.navigate).toHaveBeenCalledWith('AssistantPermissions');
   fireEvent.press(view.getByText('深色'));
   expect(mockSetMode).toHaveBeenCalledWith('dark');
   mockMode = 'dark';

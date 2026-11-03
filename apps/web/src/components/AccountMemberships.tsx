@@ -76,7 +76,7 @@ function MembershipScope({
         )}
       </div>
       <p>
-        一個 Campus One
+        一個 nuni
         帳號可以有多所學校的資格，各校分別驗證。切換瀏覽校園不會加入該校，也不會取得學生、教師或管理權限。
       </p>
       {notice ? <p role="status">{notice}</p> : null}

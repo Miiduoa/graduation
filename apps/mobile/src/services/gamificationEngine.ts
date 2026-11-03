@@ -1,7 +1,7 @@
 /**
  * 🎮 學習遊戲化引擎 — Gamification Engine
  *
- * 靜宜大學 Campus One 獨家功能：
+ * 靜宜大學 nuni 獨家功能：
  * 將校園學習體驗遊戲化，透過行為心理學驅動學習動機。
  *
  * 核心系統：
@@ -322,7 +322,7 @@ const ALL_ACHIEVEMENTS: Omit<Achievement, 'unlockedAt' | 'progress'>[] = [
   {
     id: 'first_login',
     title: '初來乍到',
-    description: '首次登入 Campus One',
+    description: '首次登入 nuni',
     icon: 'hand-right-outline',
     category: 'academic',
     xpReward: 100,

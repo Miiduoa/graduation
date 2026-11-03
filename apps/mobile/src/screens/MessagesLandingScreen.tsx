@@ -2,10 +2,15 @@ import React, { useSyncExternalStore } from 'react';
 import { Pressable, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { MESSAGING_NAV_SECTIONS } from '@campus/shared/src/academicSections';
 import { DmsScreen } from './DmsScreen';
 import { getThemeVersion, subscribeToTheme, theme } from '../ui/theme';
 import { safeNavigate } from '../utils/safeNavigate';
+import { rootNavigateNested } from '../app/rootNavigation';
 import type { ServiceScreenProps } from './UnavailableFeatureScreen';
+
+const NOTIFY_SECTION = MESSAGING_NAV_SECTIONS[0];
+const DM_SECTION = MESSAGING_NAV_SECTIONS[1];
 
 export function MessagesLandingScreen({ navigation }: ServiceScreenProps) {
   useSyncExternalStore(subscribeToTheme, getThemeVersion, getThemeVersion);
@@ -22,12 +27,37 @@ export function MessagesLandingScreen({ navigation }: ServiceScreenProps) {
         }}
       >
         <Text style={{ fontSize: 28, fontWeight: '800', letterSpacing: -0.6, color: theme.colors.text }}>
-          訊息
+          {DM_SECTION.label}
         </Text>
         <Text style={{ color: theme.colors.textSecondary, marginTop: 6, lineHeight: 20, fontSize: 13 }}>
-          本校對話即時更新。從這裡接續私訊，或和群組成員討論。
+          本校對話即時更新。這裡是私訊；服務通知請走「{NOTIFY_SECTION.label}」。
         </Text>
         <View style={{ flexDirection: 'row', gap: 10, marginTop: 18 }}>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={`前往${NOTIFY_SECTION.label}`}
+            onPress={() =>
+              rootNavigateNested(NOTIFY_SECTION.mobileTab, NOTIFY_SECTION.mobileScreen)
+            }
+            style={({ pressed }) => ({
+              flex: 1,
+              minHeight: 58,
+              borderRadius: 14,
+              paddingHorizontal: 14,
+              flexDirection: 'row',
+              alignItems: 'center',
+              gap: 10,
+              borderWidth: 1,
+              borderColor: theme.colors.border,
+              backgroundColor: theme.colors.surface,
+              opacity: pressed ? 0.75 : 1,
+            })}
+          >
+            <Ionicons name="notifications-outline" size={22} color={theme.colors.accent} />
+            <Text style={{ color: theme.colors.text, fontWeight: '700', fontSize: 14 }}>
+              {NOTIFY_SECTION.label}
+            </Text>
+          </Pressable>
           <Pressable
             accessibilityRole="button"
             accessibilityLabel="前往我的群組"

@@ -41,10 +41,10 @@ export function AccountDeletionScreen({ navigation }: Props) {
   if (completed && (!auth.user || auth.user.uid === completed.uid)) {
     return (
       <AIDetailScreen title="刪除帳號">
-        <AICard title="Campus One 資料已刪除">
+        <AICard title="nuni 資料已刪除">
           <View style={{ gap: 16 }}>
             <Text style={{ color: aiTokens.muted, lineHeight: 23 }}>
-              伺服器已確認刪除你在 Campus One 的資料。學校帳號和 Google 帳號本身不受影響。
+              伺服器已確認刪除你在 nuni 的資料。學校帳號和 Google 帳號本身不受影響。
             </Text>
             {completed.logoutError ? (
               <>
@@ -150,7 +150,7 @@ function DeletionEditor({
       }
       await user.getIdToken(true);
       if (!current()) return;
-      setProgress('正在刪除 Campus One 資料…');
+      setProgress('正在刪除 nuni 資料…');
       const response = await deleteUserAccount({
         expectedUserId: uid,
         confirmation: 'DELETE_MY_ACCOUNT',
@@ -211,13 +211,13 @@ function DeletionEditor({
       subtitle="先了解影響，再決定是否繼續。"
       onBack={busy ? undefined : () => navigation?.goBack?.()}
     >
-      <AICard title="刪除 Campus One 資料">
+      <AICard title="刪除 nuni 資料">
         <View style={{ gap: 12 }}>
           <Text style={{ color: aiTokens.text, fontSize: 16, fontWeight: '600' }}>
             {email || '目前登入的帳號'}
           </Text>
           <Text style={{ color: aiTokens.muted, lineHeight: 23 }}>
-            刪除後，將無法再使用這個 Campus One
+            刪除後，將無法再使用這個 nuni
             帳號，相關個人資料將依隱私政策處理。這項操作無法復原。
           </Text>
           <Text style={{ color: aiTokens.muted, lineHeight: 23 }}>
