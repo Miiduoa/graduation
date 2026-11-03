@@ -1,6 +1,8 @@
 #!/usr/bin/env node
 // Self-owned temporary cluster only; never accepts a database URL or external host.
 import { spawnSync } from 'node:child_process';
+import console from 'node:console';
+import process from 'node:process';
 import {
   chmodSync,
   copyFileSync,
@@ -91,6 +93,8 @@ try {
     env: { ...env, C1_HOST_PG_FOLDER: realpathSync(folder) },
   });
   if (
+    result.stdout.includes('synthetic-groq-credential-do-not-use') ||
+    result.stderr.includes('synthetic-groq-credential-do-not-use') ||
     result.stdout.includes('SYNTHETIC_LOG_CANARY_8cd2') ||
     result.stderr.includes('SYNTHETIC_LOG_CANARY_8cd2') ||
     result.stdout.includes(`ps_${'A'.repeat(43)}`) ||

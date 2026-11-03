@@ -12,7 +12,12 @@ export type PublicPlan = { fromId: string; toId: string };
 export type PublicPlanInput = { schoolId: string; query: string; fingerprint: string };
 type Options = {
   enabled?: boolean;
-  fetch: typeof fetch;
+  fetch?: typeof fetch;
+  transport?: (
+    url: string,
+    init: RequestInit,
+    beforeSend: () => Promise<void>,
+  ) => Promise<Response>;
   readPublicCatalog: PublicCatalogReader;
   timeoutMs?: number;
 };
@@ -158,7 +163,7 @@ async function boundedResponse(response: Response, signal: AbortSignal): Promise
 export function createGroqNavigationPlanner(options: Options) {
   if (
     options?.enabled !== true ||
-    typeof options?.fetch !== 'function' ||
+    (typeof options?.fetch !== 'function' && typeof options?.transport !== 'function') ||
     typeof options?.readPublicCatalog !== 'function' ||
     !Number.isSafeInteger(options.timeoutMs ?? 10_000) ||
     (options.timeoutMs ?? 10_000) < 1 ||
@@ -214,10 +219,20 @@ export function createGroqNavigationPlanner(options: Options) {
       const projected = projectSource(input, await readSource());
       // The trusted host revalidates this request's account/session after the
       // last source read, immediately before the external request is permitted.
-      await step(() => beforeSend(controller.signal));
+      let sessionFailed = false;
+      let sessionError: unknown;
+      const revalidateSession = async () => {
+        try {
+          await beforeSend(controller.signal);
+        } catch (error) {
+          sessionFailed = true;
+          sessionError = error;
+          throw error;
+        }
+      };
       const response = await step(async () => {
         try {
-          return await options.fetch(GROQ_ENDPOINT, {
+          const request: RequestInit = {
             method: 'POST',
             redirect: 'error',
             cache: 'no-store',
@@ -254,8 +269,13 @@ export function createGroqNavigationPlanner(options: Options) {
                 { role: 'user', content: JSON.stringify(projected) },
               ],
             }),
-          });
-        } catch {
+          };
+          if (options.transport)
+            return await options.transport(GROQ_ENDPOINT, request, revalidateSession);
+          await revalidateSession();
+          return await options.fetch!(GROQ_ENDPOINT, request);
+        } catch (error) {
+          if (sessionFailed && error === sessionError) throw error;
           throw new PublicAgentError('PUBLIC_AGENT_PROVIDER_UNAVAILABLE', 503);
         }
       });
