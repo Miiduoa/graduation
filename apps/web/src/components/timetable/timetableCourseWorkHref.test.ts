@@ -6,6 +6,11 @@ import {
   resolveTimetableCourseWorkExit,
   timetableCourseSearchQuery,
 } from './timetableCourseWorkHref';
+import {
+  filterCoursesByClassroomQuery as sharedFilter,
+  timetableClassroomSearchParams,
+  timetableCourseSearchQuery as sharedSearchQuery,
+} from '@campus/shared/src/timetable/classroomCourseQuery';
 
 describe('timetable course-work exit', () => {
   it('opens the linked course shell when linkedCourseId is present', () => {
@@ -88,16 +93,45 @@ describe('classroom q filter', () => {
 
   it('timetable name+code q hits a title that only has the course name', () => {
     const onlyName = [{ id: 'db', title: '資料庫系統' }];
-    const matched = filterCoursesByClassroomQuery(onlyName, '資料庫系統 CS301', {
+    const matched = filterCoursesByClassroomQuery(onlyName, '資料庫系統', {
       fromTimetable: true,
       courseCode: 'CS301',
     });
     expect(matched).toEqual(onlyName);
     expect(classroomQueryMatchKind(matched.length, true)).toBe('unique');
+  });
 
-    const embedded = filterCoursesByClassroomQuery(onlyName, '資料庫系統 CS301', {
+  it('does not treat the last token of a multi-word name as a course code without code param', () => {
+    const multiWord = [
+      { id: 'ds', title: '資料 結構' },
+      { id: 'other', title: '程式 結構' },
+    ];
+    const matched = filterCoursesByClassroomQuery(multiWord, '資料 結構', {
       fromTimetable: true,
     });
-    expect(embedded).toEqual(onlyName);
+    expect(matched).toEqual([multiWord[0]]);
+    expect(classroomQueryMatchKind(matched.length, true)).toBe('unique');
+
+    const english = [
+      { id: 'ml', title: 'Machine Learning' },
+      { id: 'dl', title: 'Deep Learning' },
+    ];
+    expect(
+      filterCoursesByClassroomQuery(english, 'Machine Learning', { fromTimetable: true }),
+    ).toEqual([english[0]]);
+  });
+
+  it('stays aligned with the shared classroomCourseQuery module', () => {
+    const sample = [{ id: 'x', title: '資料 結構' }];
+    const input = { courseName: '資料庫系統', courseCode: 'CS301' };
+    expect(timetableCourseSearchQuery(input)).toBe(sharedSearchQuery(input));
+    expect(timetableClassroomSearchParams(input)).toEqual({
+      q: '資料庫系統',
+      from: 'timetable',
+      code: 'CS301',
+    });
+    expect(
+      filterCoursesByClassroomQuery(sample, '資料 結構', { fromTimetable: true }),
+    ).toEqual(sharedFilter(sample, '資料 結構', { fromTimetable: true }));
   });
 });

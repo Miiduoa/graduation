@@ -1,9 +1,9 @@
 import React, { useCallback, useState } from 'react';
 import { Text, View } from 'react-native';
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
-import { formatClock, type TodayClass } from '@campus/shared/src/pickNextAction';
+import { formatClock, TODAY_COPY, type TodayClass } from '@campus/shared/src/pickNextAction';
 import {
-  resolveTimetableClassroomNav,
+  courseWorkNavForClass,
   todayCourseWorkNavigateTarget,
   type TimetableClassroomDestination,
 } from '../hooks/timetableClassroomNav';
@@ -32,19 +32,6 @@ type Props = {
   onImportTimetable: () => void;
 };
 
-function courseWorkNavForClass(
-  item: TodayClass & { courseWorkNav?: TimetableClassroomDestination; courseCode?: string },
-): TimetableClassroomDestination {
-  return (
-    item.courseWorkNav ??
-    resolveTimetableClassroomNav({
-      linkedCourseId: item.courseId,
-      courseName: item.title,
-      courseCode: item.courseCode,
-    })
-  );
-}
-
 export function LearningNextClassCard({ onOpenTimetable, onImportTimetable }: Props) {
   const navigation = useNavigation();
   const [now, setNow] = useState(() => new Date());
@@ -58,6 +45,7 @@ export function LearningNextClassCard({ onOpenTimetable, onImportTimetable }: Pr
   );
   const next = status === 'ready' ? nextLearningClass(classes as TodayTimetableClass[], now) : null;
   const current = next && next.startAt <= now.getTime();
+  const courseWorkLabel = next?.courseId ? '作業與教材' : TODAY_COPY.findCourse;
   const body = { color: aiTokens.textSecondary, fontSize: 13, lineHeight: 20 } as const;
   const muted = { color: aiTokens.muted, fontSize: 12, lineHeight: 18 } as const;
   const openCourseWork = () => {
@@ -95,7 +83,7 @@ export function LearningNextClassCard({ onOpenTimetable, onImportTimetable }: Pr
               {' · '}
               依你自行編輯或匯入的課表顯示
             </Text>
-            <AIButton label="作業與教材" onPress={openCourseWork} />
+            <AIButton label={courseWorkLabel} onPress={openCourseWork} />
             <AIButton label="開啟我的課表" variant="ghost" onPress={onOpenTimetable} />
           </>
         ) : (
