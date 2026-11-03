@@ -45,3 +45,5 @@ UI 確認前不執行，取消回輸入並恢復焦點；換帳校會卸載舊�
 - 正式 API 介面基底 `Miiduoa/nuni-prod@9de47b4b`，account service 已與 `security/source.json` 綁定的 `b0a10ac` patch 單檔核對，保留 password 的有效 operator 指派重驗；整份目前部署來源與 migration/grants 未重建核准。
 - 真 session BFF、正式公開來源 reader／包裝註冊、部署與任何免費雲端 provider 帳戶額度均未啟用或實測。
 - 歷史安全掃描 22 筆命中／4 筆權屬未明仍待處理；本切片沒有新增 ignore、縮減掃描或放寬安全閘門。
+
+Web 另有未註冊的 `apps/web/src/lib/nuni/platformPublicAgentGateway.ts` 組裝候選：沿用既有同源、加密平台 session cookie 與 session context 驗證，限制操作和輸入大小，gateway 只呼叫注入 transport 一次。它要求 host 提供經審查的單次 transport 與嚴格 response projector，不選擇或呼叫任何 upstream；不得沿用預設會重試的 `platformRequest`。帳校切換後的回應隔離仍需 UI scope 管理。
