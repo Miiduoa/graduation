@@ -110,3 +110,4 @@ export * from './signedInSocialReads';
 export * from './imports';
 export * from './providenceCampus';
 export * from './puLmsReadonly';
+export * from './academicSections';

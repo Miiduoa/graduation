@@ -8,12 +8,19 @@ const state = vi.hoisted(() => ({
   emitters: [] as Array<{ path: string; emit: () => void; stop: () => void }>,
   paths: [] as string[],
   stopped: [] as string[],
+  search: '',
   campus: {
     status: 'ready' as 'ready' | 'loading' | 'error' | 'unselected',
     schoolId: 'pu' as string | null,
     schoolName: '靜宜大學',
     schoolSearch: '?schoolId=pu&campus=pu',
   },
+}));
+vi.mock('next/navigation', () => ({
+  usePathname: () => '/orders',
+  useRouter: () => ({ push: vi.fn(), replace: vi.fn(), prefetch: vi.fn() }),
+  useSearchParams: () => new URLSearchParams(state.search),
+  useParams: () => ({}),
 }));
 vi.mock('@/components/AuthGuard', () => ({
   useAuth: () => ({ user: state.uid ? { uid: state.uid } : null, loading: false, error: null }),
@@ -76,6 +83,7 @@ beforeEach(() => {
   state.paths = [];
   state.stopped = [];
   state.emitters = [];
+  state.search = '';
   state.campus = {
     status: 'ready',
     schoolId: 'pu',
@@ -293,4 +301,20 @@ it('線上點餐打開、有訂單：區分進行中與已結束，並標明 App
     '/cafeteria?schoolId=pu',
   );
   expect(screen.getByText(/此頁是 App「餐廳」留下的訂單/)).toBeTruthy();
+});
+
+it('帶 orderId 時捲到並標示該筆訂單；點餐關閉仍可看到既有訂單', async () => {
+  state.search = 'orderId=co_waiting_bbb222';
+  render(<OrdersPage />);
+  const focused = await screen.findByRole('article', { current: true });
+  expect(focused.getAttribute('id')).toBe('order-co_waiting_bbb222');
+  expect(focused.getAttribute('data-order-focused')).toBe('true');
+  expect(screen.getByText('取餐號碼 7')).toBeTruthy();
+});
+
+it('orderId 無效時給友善提示且不壞頁', () => {
+  state.search = 'orderId=co_missing_zzz999';
+  render(<OrdersPage />);
+  expect(screen.getByText(/找不到這筆訂單/)).toBeTruthy();
+  expect(screen.getByText('取餐號碼 7')).toBeTruthy();
 });
