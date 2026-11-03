@@ -171,7 +171,7 @@ export default function MyAttendanceHistoryScreen() {
             {current.courses.length === 0 ? (
               <View style={styles.panel}>
                 <Text style={styles.panelTitle}>目前沒有可驗證的課堂點名</Text>
-                <Text style={styles.muted}>這裡只顯示 Campus One 正式課程。外部 LMS 的資料尚未匯入時，不會以範例成績取代。</Text>
+                <Text style={styles.muted}>這裡只顯示 nuni 正式課程。外部 LMS 的資料尚未匯入時，不會以範例成績取代。</Text>
               </View>
             ) : (
               current.courses.map((course) => {

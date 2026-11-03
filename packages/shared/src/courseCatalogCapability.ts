@@ -92,7 +92,7 @@ export function unsupportedCourseCatalogMessage(
     '目前選擇的學校';
   const official = resolveOfficialCourseQueryLink(schoolId);
   if (official) {
-    return `${resolvedName}尚未接入 Campus One 內建課綱查詢。請改以校方「${official.label}」查詢開課資料；App 不會顯示其他學校的課綱。`;
+    return `${resolvedName}尚未接入 nuni 內建課綱查詢。請改以校方「${official.label}」查詢開課資料；App 不會顯示其他學校的課綱。`;
   }
-  return `${resolvedName}尚未接入 Campus One 內建課綱查詢，也尚未登錄可核實的校方課程查詢連結。請改用個人課表或校方官方入口；App 不會套用其他學校的課綱資料。`;
+  return `${resolvedName}尚未接入 nuni 內建課綱查詢，也尚未登錄可核實的校方課程查詢連結。請改用個人課表或校方官方入口；App 不會套用其他學校的課綱資料。`;
 }

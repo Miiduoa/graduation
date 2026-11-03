@@ -12,12 +12,18 @@ export function primaryNavigationSection(
   pathname: string | null | undefined,
 ): PrimaryNavigationSection | null {
   if (!pathname) return null;
-  if (pathname === '/' || pathname === '/today') return 'today';
-  if (pathname === '/life' || pathname === '/hub' || includesRoute(pathname, '/orders'))
+  // /today、/hub 有轉址 page 進首頁；區塊別名仍對應 today／life。
+  if (pathname === '/' || pathname === '/today' || pathname === '/today-v2') return 'today';
+  if (pathname === '/life' || pathname === '/hub') return 'life';
+  if (includesRoute(pathname, '/orders') || includesRoute(pathname, '/food') || pathname === '/shops')
     return 'life';
   if (pathname === '/me') return 'me';
   if (pathname === '/search') return 'more';
-  if (includesRoute(pathname, '/course')) return 'study';
+  if (includesRoute(pathname, '/course') || includesRoute(pathname, '/classroom')) {
+    if (pathname === '/classroom/account' || pathname.startsWith('/classroom/account/')) return 'me';
+    if (pathname === '/classroom/login' || pathname.startsWith('/classroom/login/')) return null;
+    return 'study';
+  }
 
   const service = CAMPUS_SERVICES.filter((item) =>
     includesRoute(pathname, item.href.split(/[?#]/, 1)[0]),
