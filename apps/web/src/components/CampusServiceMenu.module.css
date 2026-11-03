@@ -288,6 +288,23 @@
   min-width: 0;
 }
 
+.serviceEntry {
+  display: grid;
+  gap: 0;
+  min-width: 0;
+}
+
+.secondaryService {
+  min-height: 40px !important;
+  padding: 8px 10px 8px 22px !important;
+  color: var(--muted);
+  font-size: 12px !important;
+}
+
+.secondaryService .serviceName {
+  font-weight: 500;
+}
+
 .menuGroup h2 {
   margin: 0 10px 6px;
   color: var(--muted);

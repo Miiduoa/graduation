@@ -333,7 +333,7 @@ it('opens a provisioned school only after administrator verification and confirm
   );
 });
 
-it('redirects to account login when the Campus One session is gone', async () => {
+it('redirects to account login when the nuni session is gone', async () => {
   const replace = vi.fn();
   vi.stubGlobal('location', { ...window.location, replace });
   fetcher.mockResolvedValue(ok({ error: 'SIGN_IN_REQUIRED' }, 401));

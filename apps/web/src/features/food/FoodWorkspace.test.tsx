@@ -452,6 +452,109 @@ it('requires cancellation confirmation and preserves the same cancellation after
   expect(writes[1][2]).toEqual(writes[0][2]);
 });
 
+it.each([400, 403, 409])(
+  'requires fresh cancellation confirmation after rejection %s',
+  async (status) => {
+    let attempts = 0;
+    mocks.request.mockImplementation((path, context, input) => {
+      if (path.endsWith('/cancel') && ++attempts === 1) {
+        order = { ...order, state: 'accepted' };
+        return Promise.reject(new NuniError(status, 'FOOD_ORDER_CHANGED'));
+      }
+      return respond(path, context, input);
+    });
+    render(<FoodWorkspace initialTenant="campus-one" initialOrder="order-1" />);
+    await screen.findByText('米飯店 · 待付款');
+    fireEvent.change(screen.getByLabelText('取消原因'), { target: { value: 'other' } });
+    fireEvent.change(screen.getByLabelText('取消原因說明'), {
+      target: { value: '取餐時間已變更' },
+    });
+    fireEvent.click(screen.getByLabelText('我確認要取消這筆訂單'));
+    fireEvent.click(button('確認取消訂單'));
+    await screen.findByText('米飯店 · 已接單');
+    const confirmation = screen.getByLabelText('我確認要取消這筆訂單') as HTMLInputElement;
+    await waitFor(() => expect(confirmation.disabled).toBe(false));
+    expect(confirmation.checked).toBe(false);
+    expect(button('確認取消訂單').disabled).toBe(true);
+    expect((screen.getByLabelText('取消原因') as HTMLSelectElement).value).toBe('other');
+    expect((screen.getByLabelText('取消原因說明') as HTMLTextAreaElement).value).toBe(
+      '取餐時間已變更',
+    );
+    expect(loadFoodPending('account-a', 'food:order:campus-one:order-1')).toBeNull();
+    expect(screen.queryByRole('button', { name: '重試同一份操作' })).toBeNull();
+    fireEvent.click(button('確認取消訂單'));
+    expect(attempts).toBe(1);
+    fireEvent.click(confirmation);
+    fireEvent.click(button('確認取消訂單'));
+    await screen.findByText('米飯店 · 已取消');
+    const writes = mocks.request.mock.calls.filter(([path]) => path.endsWith('/cancel'));
+    expect(writes).toHaveLength(2);
+    expect(writes[1][2]).toEqual({
+      ...writes[0][2],
+      idempotencyKey: expect.any(String),
+    });
+    expect(writes[1][2].idempotencyKey).not.toBe(writes[0][2].idempotencyKey);
+  },
+);
+
+it.each([0, 408])('keeps cancellation %s pending for an identical retry', async (status) => {
+  let attempts = 0;
+  mocks.request.mockImplementation((path, context, input) =>
+    path.endsWith('/cancel') && ++attempts === 1
+      ? Promise.reject(new NuniError(status, 'NETWORK_ERROR'))
+      : respond(path, context, input),
+  );
+  render(<FoodWorkspace initialTenant="campus-one" initialOrder="order-1" />);
+  await screen.findByText('米飯店 · 待付款');
+  fireEvent.click(screen.getByLabelText('我確認要取消這筆訂單'));
+  fireEvent.click(button('確認取消訂單'));
+  await screen.findByText(/尚未確認這次操作的結果/);
+  const confirmation = screen.getByLabelText('我確認要取消這筆訂單') as HTMLInputElement;
+  expect(confirmation.checked).toBe(true);
+  expect(confirmation.disabled).toBe(true);
+  expect(button('確認取消訂單').disabled).toBe(true);
+  const pending = loadFoodPending('account-a', 'food:order:campus-one:order-1');
+  expect(pending?.action).toBe('cancel');
+  fireEvent.click(button('重試同一份操作'));
+  await screen.findByText('米飯店 · 已取消');
+  const writes = mocks.request.mock.calls.filter(([path]) => path.endsWith('/cancel'));
+  expect(writes).toHaveLength(2);
+  expect(writes[1][2]).toEqual(writes[0][2]);
+  expect(writes[1][2]).toEqual(pending?.input);
+});
+
+it('keeps an uncertain cancellation pending when its retry receives a conflict', async () => {
+  let attempts = 0;
+  mocks.request.mockImplementation((path, context, input) => {
+    if (path.endsWith('/cancel')) {
+      attempts += 1;
+      if (attempts < 3) return Promise.reject(new NuniError(attempts === 1 ? 502 : 409, 'RETRY'));
+    }
+    return respond(path, context, input);
+  });
+  render(<FoodWorkspace initialTenant="campus-one" initialOrder="order-1" />);
+  await screen.findByText('米飯店 · 待付款');
+  fireEvent.click(screen.getByLabelText('我確認要取消這筆訂單'));
+  fireEvent.click(button('確認取消訂單'));
+  await screen.findByText(/尚未確認這次操作的結果/);
+  const pending = loadFoodPending('account-a', 'food:order:campus-one:order-1');
+  fireEvent.click(button('重試同一份操作'));
+  await waitFor(() => expect(attempts).toBe(2));
+  await waitFor(() => expect(button('重試同一份操作').disabled).toBe(false));
+  expect(loadFoodPending('account-a', 'food:order:campus-one:order-1')).toEqual(pending);
+  expect((screen.getByLabelText('我確認要取消這筆訂單') as HTMLInputElement).checked).toBe(true);
+  expect(button('確認取消訂單').disabled).toBe(true);
+  fireEvent.click(button('重試同一份操作'));
+  await screen.findByText('米飯店 · 已取消');
+  const writes = mocks.request.mock.calls.filter(([path]) => path.endsWith('/cancel'));
+  expect(writes).toHaveLength(3);
+  expect(writes.map(([, , input]) => input)).toEqual([
+    pending?.input,
+    pending?.input,
+    pending?.input,
+  ]);
+});
+
 it('rereads a rejected quote and keeps editable cart contents without offering stale confirmation', async () => {
   mocks.request.mockImplementation((path, context, input) =>
     path.endsWith('/quotes')

@@ -15,6 +15,7 @@ import {
   type AdminSection,
   type SchoolLifecycleFilter,
 } from './adminNav';
+import { AdminAnnouncements } from './AdminAnnouncements';
 import { AdminAudit } from './AdminAudit';
 import { AdminBoards } from './AdminBoards';
 import { AdminOverview } from './AdminOverview';
@@ -28,7 +29,7 @@ import styles from './Admin.module.css';
 
 const navGroups: Array<{ label: string; sections: AdminSection[] }> = [
   { label: '工作概況', sections: ['overview'] },
-  { label: '校園與授權', sections: ['schools', 'people', 'merchants'] },
+  { label: '校園與授權', sections: ['schools', 'people', 'announcements', 'merchants'] },
   { label: '社群與安全', sections: ['boards', 'reports'] },
   { label: '紀錄', sections: ['audit'] },
 ];
@@ -157,7 +158,10 @@ function Workspace({ context, suspended }: { context: string; suspended: boolean
         schoolId:
           patch.schoolId !== undefined
             ? patch.schoolId
-            : patch.section && patch.section !== 'schools' && patch.section !== 'people'
+            : patch.section &&
+                patch.section !== 'schools' &&
+                patch.section !== 'people' &&
+                patch.section !== 'announcements'
               ? null
               : previous.schoolId,
         reportId:
@@ -208,8 +212,12 @@ function Workspace({ context, suspended }: { context: string; suspended: boolean
                       aria-current={location.section === section ? 'page' : undefined}
                       onClick={() => {
                         const keepSchool =
-                          (section === 'schools' || section === 'people') &&
-                          (location.section === 'schools' || location.section === 'people');
+                          (section === 'schools' ||
+                            section === 'people' ||
+                            section === 'announcements') &&
+                          (location.section === 'schools' ||
+                            location.section === 'people' ||
+                            location.section === 'announcements');
                         go({
                           section,
                           schoolId: keepSchool ? location.schoolId : null,
@@ -227,6 +235,7 @@ function Workspace({ context, suspended }: { context: string; suspended: boolean
             <div className={styles.sideSecondary}>
               <p className={styles.sideLabel}>延伸作業</p>
               <a className={styles.link} href="/admin/school-review">接入申請審核</a>
+              <a className={styles.link} href="/admin/announcements">校園公告發佈</a>
               <a className={styles.link} href="/admin/ops?tab=people">校方成員作業</a>
               <a className={styles.link} href="/admin/ops?tab=merchants">店家審核作業</a>
               <a className={styles.link} href="/admin/ops?tab=affiliation">課班掛靠審核</a>
@@ -242,27 +251,44 @@ function Workspace({ context, suspended }: { context: string; suspended: boolean
               </div>
               <div className={styles.mobileSecondary}>
                 <a className={styles.link} href="/admin/school-review">接入審核</a>
+                <a className={styles.link} href="/admin/announcements">校園公告</a>
                 <a className={styles.link} href="/admin/ops?tab=people">校方成員</a>
                 <a className={styles.link} href="/admin/ops?tab=merchants">店家審核</a>
                 <a className={styles.link} href="/admin/ops?tab=affiliation">課班掛靠</a>
               </div>
-              {(location.section === 'schools' || location.section === 'people') &&
+              {(location.section === 'schools' ||
+                location.section === 'people' ||
+                location.section === 'announcements') &&
               location.schoolId ? (
                 <div className={styles.scopeStrip}>
                   <span>目前學校代號：<strong>{location.schoolId}</strong></span>
                   <div className={styles.scopeActions}>
-                    <button
-                      type="button"
-                      className={styles.linkButton}
-                      onClick={() =>
-                        go({
-                          section: location.section === 'schools' ? 'people' : 'schools',
-                          schoolId: location.schoolId,
-                        })
-                      }
-                    >
-                      {location.section === 'schools' ? '查看校方授權' : '查看學校設定'}
-                    </button>
+                    {location.section === 'announcements' ? (
+                      <Link
+                        className={styles.link}
+                        href={
+                          '/admin/announcements?schoolId=' +
+                          encodeURIComponent(location.schoolId) +
+                          '&campus=' +
+                          encodeURIComponent(location.schoolId)
+                        }
+                      >
+                        開啟公告編輯
+                      </Link>
+                    ) : (
+                      <button
+                        type="button"
+                        className={styles.linkButton}
+                        onClick={() =>
+                          go({
+                            section: location.section === 'schools' ? 'people' : 'schools',
+                            schoolId: location.schoolId,
+                          })
+                        }
+                      >
+                        {location.section === 'schools' ? '查看校方授權' : '查看學校設定'}
+                      </button>
+                    )}
                     <Link
                       className={styles.link}
                       href={'/admin/ops?tab=people&school=' + encodeURIComponent(location.schoolId)}
@@ -309,6 +335,8 @@ function Workspace({ context, suspended }: { context: string; suspended: boolean
                   go({ section: 'schools', schoolId, schoolQuery: '', schoolLifecycle: 'all' })
                 }
               />
+            ) : location.section === 'announcements' ? (
+              <AdminAnnouncements schoolId={location.schoolId} />
             ) : location.section === 'merchants' ? (
               <AdminMerchants context={context} suspended={suspended} />
             ) : location.section === 'boards' ? (

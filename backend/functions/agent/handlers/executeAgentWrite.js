@@ -14,6 +14,11 @@ const { assertToolInputBounds } = require('../inputLimits');
 const { assertOnlineOrderingEnabled } = require('../../lib/onlineOrdering');
 const { matchAgentProposal } = require('../actionProposal');
 const { confirmedAgentWrite } = require('../actionReceipt');
+const {
+  assistantWritePermissionDeniedMessage,
+  isAssistantWriteToolAllowed,
+  loadAssistantWritePermissions,
+} = require('../../lib/assistantWritePermissions');
 
 const REGION = 'asia-east1';
 
@@ -95,6 +100,16 @@ module.exports = onCall(
     const schoolId = requestedSchool || userProfile?.schoolId || null;
     if (!schoolId) throw new HttpsError('failed-precondition', 'Missing school membership');
     await assertActiveSchoolMember(schoolId, uid);
+
+    // 使用者自訂助理寫入權限：未設定／關閉／讀取失敗一律擋下（fail closed）。
+    // 須在 claim 交易之前檢查，避免客戶端繞過設定頁仍留下 started claim。
+    const writePermissions = await loadAssistantWritePermissions(db, uid);
+    if (!isAssistantWriteToolAllowed(writePermissions, toolName)) {
+      throw new HttpsError(
+        'permission-denied',
+        assistantWritePermissionDeniedMessage(toolName),
+      );
+    }
 
     const toolCtx = {
       uid,

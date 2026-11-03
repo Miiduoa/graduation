@@ -225,7 +225,14 @@ function createOrderStatusHandlers({ db, sendPushToUser, logger = console }) {
         notification = (await sendPushToUser(
           result.userId,
           orderNotification(status, result.order),
-          { type: 'order', orderId, schoolId, channel: 'orders' },
+          {
+            type: 'order',
+            orderId,
+            schoolId,
+            status,
+            channel: 'orders',
+            click_action: 'OPEN_ORDERS',
+          },
         )) ?? { status: 'unconfirmed' };
       } catch {
         logger.warn('Order status committed; notification delivery failed', { schoolId, orderId });

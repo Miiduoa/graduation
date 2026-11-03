@@ -10,6 +10,7 @@ import {
 } from '@campus/shared/src/creditPlanScenarios';
 import { portableCreditPlanJson } from '../../features/academics/creditPlanRepository';
 import { theme } from '../../ui/theme';
+import { CreditScenarioDeadlineCard } from './CreditScenarioDeadlineCard';
 
 const number = (value: number | null) => value === null ? '未設定' : formatCredits(value);
 function Action({ title, onPress, disabled = false, selected = false }: {
@@ -105,30 +106,8 @@ export function CreditPlanScenarioCard({ plan }: { plan: CreditPlan }) {
         {stale ? <Text accessibilityRole="alert" style={{ color: c.text, lineHeight: 22 }}>原規劃已更新，舊比較不再適用。請以上方按鈕重新開始。</Text> : null}
         {result?.ok === false ? <Text accessibilityRole="alert" style={{ color: c.text }}>{result.message}</Text> : null}
         {comparison ? <>
-          <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 10 }}>
-            {[
-              { title: '原規劃', summary: comparison.before, insight: comparison.beforeInsights },
-              { title: '比較方案', summary: comparison.after, insight: comparison.afterInsights },
-            ].map((item, index) => <View key={item.title} style={{ flex: 1, minWidth: 130, padding: 14, gap: 7,
-              borderRadius: 12, backgroundColor: index ? c.accentSoft : c.surface2 }}>
-              <Text style={{ color: c.text, fontWeight: '700' }}>{item.title}</Text>
-              <Text style={{ color: c.muted, fontSize: 11 }}>全部通過仍缺</Text>
-              <Text style={{ color: c.text, fontSize: 26, fontWeight: '700' }}>{number(item.summary.remaining)}<Text style={{ fontSize: 11 }}> 學分</Text></Text>
-              <Text style={{ color: c.muted, fontSize: 12 }}>已排 {number(item.summary.courseCredits)} 學分</Text>
-              <Text style={{ color: c.muted, fontSize: 11, lineHeight: 18 }}>總量達標：{creditScenarioTargetLabel(item.insight.earliestTargetTerm, item.summary.remaining !== null)}</Text>
-            </View>)}
-          </View>
-          <Text accessibilityLiveRegion="polite" style={{ color: c.text, fontSize: 13, lineHeight: 21 }}>{`不排入 ${comparison.omitted.length} 門、移動 ${comparison.moved.length} 門；總學分缺口變化：${comparison.remainingDelta === null ? '目標尚未完整設定' : (comparison.remainingDelta > 0 ? '+' : '') + formatCredits(comparison.remainingDelta) + ' 學分'}。`}</Text>
-          <Text style={{ color: c.text, fontWeight: '700' }}>每學期負擔：原規劃 → 比較方案</Text>
-          {comparison.terms.map((row) => <View key={row.term} style={{ flexDirection: 'row', justifyContent: 'space-between', gap: 10, minHeight: 40, alignItems: 'center' }}>
-            <Text style={{ color: c.muted, flex: 1 }}>第 {row.term} 學期</Text>
-            <Text style={{ color: c.text, fontVariant: ['tabular-nums'] }}>{formatCredits(row.before)} → {formatCredits(row.after)} 學分</Text>
-          </View>)}
-          <Text style={{ color: c.text, fontWeight: '700' }}>分類缺口：原規劃 → 比較方案</Text>
-          {comparison.categories.map((row) => <View key={row.key} style={{ flexDirection: 'row', justifyContent: 'space-between', gap: 8, minHeight: 36 }}>
-            <Text style={{ color: c.muted }}>{row.label}</Text><Text style={{ color: c.text }}>{number(row.before)} → {number(row.after)}</Text>
-          </View>)}
-          <Text style={{ color: c.muted, fontSize: 11, lineHeight: 19 }}>達標學期只計已排入學期的課程，不把其他預計學分放進某學期。總量達標不等於畢業，也不保證實際開課與先修條件。</Text>
+          <CreditScenarioDeadlineCard before={plan} after={comparison.plan} />
+          <Text style={{ color: c.text, fontSize: 15, fontWeight: '700' }}>調整比較課程</Text>
           <TextInput accessibilityLabel="搜尋比較課程" placeholder="搜尋課程名稱" placeholderTextColor={c.muted}
             value={query} maxLength={80} onChangeText={(value) => { setQuery(value); setLimit(12); }}
             style={{ minHeight: 44, borderWidth: 1, borderColor: c.border, borderRadius: 10, paddingHorizontal: 12, color: c.text }} />
@@ -155,8 +134,33 @@ export function CreditPlanScenarioCard({ plan }: { plan: CreditPlan }) {
           })}
           {!rows.length ? <Text style={{ color: c.muted }}>沒有符合篩選的課程；比較仍包含整份方案。</Text> : null}
           {rows.length > limit ? <Action title="顯示更多比較課程" onPress={() => setLimit((value) => value + 12)} /> : null}
+          <Text style={{ color: c.text, fontSize: 15, fontWeight: '700' }}>完整方案比較（不限期限）</Text>
+          <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 10 }}>
+            {[
+              { title: '原規劃', summary: comparison.before, insight: comparison.beforeInsights },
+              { title: '比較方案', summary: comparison.after, insight: comparison.afterInsights },
+            ].map((item, index) => <View key={item.title} style={{ flex: 1, minWidth: 130, padding: 14, gap: 7,
+              borderRadius: 12, backgroundColor: index ? c.accentSoft : c.surface2 }}>
+              <Text style={{ color: c.text, fontWeight: '700' }}>{item.title}</Text>
+              <Text style={{ color: c.muted, fontSize: 11 }}>全部通過仍缺</Text>
+              <Text style={{ color: c.text, fontSize: 26, fontWeight: '700' }}>{number(item.summary.remaining)}<Text style={{ fontSize: 11 }}> 學分</Text></Text>
+              <Text style={{ color: c.muted, fontSize: 12 }}>已排 {number(item.summary.courseCredits)} 學分</Text>
+              <Text style={{ color: c.muted, fontSize: 11, lineHeight: 18 }}>總量達標：{creditScenarioTargetLabel(item.insight.earliestTargetTerm, item.summary.remaining !== null)}</Text>
+            </View>)}
+          </View>
+          <Text accessibilityLiveRegion="polite" style={{ color: c.text, fontSize: 13, lineHeight: 21 }}>{`不排入 ${comparison.omitted.length} 門、移動 ${comparison.moved.length} 門；總學分缺口變化：${comparison.remainingDelta === null ? '目標尚未完整設定' : (comparison.remainingDelta > 0 ? '+' : '') + formatCredits(comparison.remainingDelta) + ' 學分'}。`}</Text>
+          <Text style={{ color: c.text, fontWeight: '700' }}>每學期負擔：原規劃 → 比較方案</Text>
+          {comparison.terms.map((row) => <View key={row.term} style={{ flexDirection: 'row', justifyContent: 'space-between', gap: 10, minHeight: 40, alignItems: 'center' }}>
+            <Text style={{ color: c.muted, flex: 1 }}>第 {row.term} 學期</Text>
+            <Text style={{ color: c.text, fontVariant: ['tabular-nums'] }}>{formatCredits(row.before)} → {formatCredits(row.after)} 學分</Text>
+          </View>)}
+          <Text style={{ color: c.text, fontWeight: '700' }}>分類缺口：原規劃 → 比較方案</Text>
+          {comparison.categories.map((row) => <View key={row.key} style={{ flexDirection: 'row', justifyContent: 'space-between', gap: 8, minHeight: 36 }}>
+            <Text style={{ color: c.muted }}>{row.label}</Text><Text style={{ color: c.text }}>{number(row.before)} → {number(row.after)}</Text>
+          </View>)}
+          <Text style={{ color: c.muted, fontSize: 11, lineHeight: 19 }}>達標學期只計已排入學期的課程，不把其他預計學分放進某學期。完整方案比較固定以 25 學分提醒，與上方個人每學期負擔提醒無關。總量達標不等於畢業，也不保證實際開課與先修條件。</Text>
           {comparison.afterInsights.possibleRetakes.length ? <Text style={{ color: c.text, lineHeight: 20 }}>此方案有同名課程，可能重複採計，請向系辦核對。</Text> : null}
-          {comparison.afterInsights.workloadCautions.length ? <Text style={{ color: c.text, lineHeight: 20 }}>部分學期超過 25 學分，請核對個人負擔與學校上限；25 只是提醒，不是正式規定。</Text> : null}
+          {comparison.afterInsights.workloadCautions.length ? <Text style={{ color: c.text, lineHeight: 20 }}>部分學期超過 25 學分（完整方案比較固定以 25 提醒，與上方個人負擔無關）；25 不是正式規定。</Text> : null}
           <View style={{ backgroundColor: c.surface2, borderRadius: 12, padding: 14, gap: 10 }}>
             <Text style={{ color: c.text, fontWeight: '700' }}>原規劃仍完整保留</Text>
             <Text style={{ color: c.muted, fontSize: 12, lineHeight: 20 }}>比較不會退選或修改校方紀錄。可分享此方案的 JSON 備份，再由現有匯入流程確認採用；請另外保留原規劃備份。分享完成後仍需自行核對是否確實保存。</Text>
