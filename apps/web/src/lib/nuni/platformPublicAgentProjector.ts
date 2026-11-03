@@ -131,7 +131,10 @@ function operation(value: unknown, input: unknown) {
   }
   if (status === 'failed') {
     const r = row(base, ['status', 'operationId', 'expiresAt', 'failureCode']);
-    if (!['SOURCE_CHANGED', 'INVALID_RESULT', 'EXECUTION_FAILED'].includes(String(r.failureCode)))
+    if (
+      typeof r.failureCode !== 'string' ||
+      !['SOURCE_CHANGED', 'INVALID_RESULT', 'EXECUTION_FAILED'].includes(r.failureCode)
+    )
       return fail();
     return {
       status,
@@ -201,7 +204,11 @@ export function projectPlatformPublicAgent(
   if (action === 'status') {
     if (value === null) return null;
     const r = row(value, ['status', 'operationId']);
-    if (!['pending', 'unknown', 'completed', 'failed'].includes(String(r.status))) return fail();
+    if (
+      typeof r.status !== 'string' ||
+      !['pending', 'unknown', 'completed', 'failed'].includes(r.status)
+    )
+      return fail();
     return { status: r.status, operationId: operationId(r.operationId) };
   }
   if (action === 'ack') {

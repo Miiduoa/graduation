@@ -39,7 +39,8 @@ function parseStatus(value: unknown): Pick<Operation, 'status' | 'operationId'> 
     throw new Error('INVALID_STATUS');
   const v = value as Record<string, unknown>;
   if (
-    !['pending', 'unknown', 'completed', 'failed'].includes(String(v.status)) ||
+    typeof v.status !== 'string' ||
+    !['pending', 'unknown', 'completed', 'failed'].includes(v.status) ||
     typeof v.operationId !== 'string' ||
     !/^pago_[a-f0-9-]{36}$/u.test(v.operationId)
   )
@@ -137,7 +138,7 @@ function Task({ port }: { port: PublicTaskPort }) {
         }
       } else if (mayBeUnsettled.current) setGate({ kind: 'locked', operation: lastAck.current });
       else setGate({ kind: 'clear' });
-    } catch {
+    } catch (failure) {
       if (version === generation.current) {
         setGate((previous) =>
           mayBeUnsettled.current
@@ -148,7 +149,14 @@ function Task({ port }: { port: PublicTaskPort }) {
               }
             : { kind: 'error' },
         );
-        setError('無法確認先前任務狀態，請重新查詢。');
+        setError(
+          failure instanceof Error &&
+            ['PUBLIC_AGENT_SESSION_INVALID', 'PUBLIC_AGENT_SESSION_EXPIRED'].includes(
+              failure.message,
+            )
+            ? '登入已失效，請重新登入後查詢原任務。'
+            : '無法確認先前任務狀態，請重新查詢。',
+        );
       }
     } finally {
       if (version === generation.current) {
@@ -217,7 +225,14 @@ function Task({ port }: { port: PublicTaskPort }) {
           !(failure instanceof Error && failure.message === 'PUBLIC_AGENT_FREE_QUOTA_UNAVAILABLE')
         ) {
           setGate({ kind: 'locked', operation: null });
-          setError('尚未確認執行結果。請查詢原任務，不要重新送出。');
+          setError(
+            failure instanceof Error &&
+              ['PUBLIC_AGENT_SESSION_INVALID', 'PUBLIC_AGENT_SESSION_EXPIRED'].includes(
+                failure.message,
+              )
+              ? '登入已失效，執行結果尚未確認。請重新登入後查詢原任務，不要重新送出。'
+              : '尚未確認執行結果。請查詢原任務，不要重新送出。',
+          );
         } else {
           if (sent) {
             mayBeUnsettled.current = false;

@@ -119,6 +119,7 @@ export function createPlatformPublicAgentGateway(options: {
             'PUBLIC_AGENT_OPERATION_NOT_FOUND',
             'PUBLIC_AGENT_OUTCOME_UNKNOWN',
             'PUBLIC_AGENT_SESSION_INVALID',
+            'PUBLIC_AGENT_SESSION_EXPIRED',
             'PUBLIC_AGENT_SOURCE_CHANGED',
             'PUBLIC_AGENT_INVALID_RESPONSE',
           ].includes(error.code)

@@ -300,3 +300,42 @@ describe('strict response projection', () => {
     expect(JSON.stringify(await bad.json())).not.toContain('must-not-escape');
   });
 });
+
+it('rejects array values that stringify to valid status or failure code', () => {
+  expect(() =>
+    projectPlatformPublicAgent(
+      'status',
+      { status: ['completed'], operationId: op },
+      { task, schoolId },
+    ),
+  ).toThrow();
+  expect(() =>
+    projectPlatformPublicAgent(
+      'execute',
+      { status: 'failed', operationId: op, expiresAt: 456, failureCode: ['SOURCE_CHANGED'] },
+      body,
+    ),
+  ).toThrow();
+});
+it('preserves exact upstream session expiry once, without assuming an already-sent operation failed', async () => {
+  fetcher.mockResolvedValueOnce(json({ code: 'PUBLIC_AGENT_SESSION_EXPIRED' }, 401));
+  const make = () =>
+    new NextRequest('https://nuni.tw/api/nuni/public-agent/execute', {
+      method: 'POST',
+      headers: {
+        Origin: 'https://nuni.tw',
+        'Content-Type': 'application/json',
+        'X-Campus-Session': sessionContext(session),
+        Cookie: `${SESSION_COOKIE}=${sealCookie(SESSION_COOKIE, session)}`,
+      },
+      body: JSON.stringify(body),
+    });
+  const response = await createPlatformPublicAgentGateway({
+    enabled: true,
+    transport: transport(),
+    project: projectPlatformPublicAgent,
+  })(make(), 'execute');
+  expect(response.status).toBe(401);
+  expect(await response.json()).toEqual({ error: 'PUBLIC_AGENT_SESSION_EXPIRED' });
+  expect(fetcher).toHaveBeenCalledTimes(1);
+});
