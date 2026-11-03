@@ -141,6 +141,35 @@ test.each([null, { id: 'missing-name' }, toolCall('invalid-name', 42)])(
   },
 );
 
+test('does not dispatch proposeOrder when write permission is closed even if the model names it', async () => {
+  const dispatch = jest.spyOn(registry, 'runTool').mockResolvedValue({ success: true });
+  const fetchImpl = modelWithCalls([
+    toolCall('order', 'proposeOrder', {
+      cafeteriaId: 'cafe-1',
+      items: [{ menuItemId: 'rice', quantity: 1 }],
+    }),
+  ]);
+
+  const result = await run(fetchImpl);
+
+  const exposed = JSON.parse(fetchImpl.mock.calls[0][1].body).tools;
+  expect(exposed.some((tool) => tool.function.name === 'proposeOrder')).toBe(false);
+  expect(dispatch).not.toHaveBeenCalled();
+  expect(result.toolsInvoked).not.toContain('proposeOrder');
+  expect(result.toolCallsTrace).toEqual([
+    {
+      name: 'proposeOrder',
+      args: {},
+      output: {
+        success: false,
+        error: 'tool not available in this model request',
+        errorCode: 'tool_not_allowed',
+      },
+    },
+  ]);
+  expect(result.cards).toEqual([]);
+});
+
 test('a later model round cannot turn instructions from tool content into an unlisted write', async () => {
   const dispatch = jest.spyOn(registry, 'runTool').mockResolvedValue({
     status: 'available',

@@ -88,6 +88,10 @@ it.each([false, true])('filters readonly destinations from voice results with en
   render(<SchoolLmsReadonlyProvider enabled={enabled}><QuickCampusEntry /></SchoolLmsReadonlyProvider>);
   fireEvent.click(screen.getByText('模擬語音輸入'));
   await screen.findByText('查看作業');
-  expect(Boolean(screen.queryByRole('link', { name: /玩課雲作業與教材/ }))).toBe(enabled);
-  expect(screen.getByRole('link', { name: /課程空間/ }).getAttribute('href')).toContain('/classroom');
+  expect(
+    Boolean(screen.queryByRole('link', { name: (_, el) => el.getAttribute('href') === '/school-lms' })),
+  ).toBe(enabled);
+  expect(
+    screen.getByRole('link', { name: (_, el) => (el.getAttribute('href') || '').startsWith('/classroom') }).getAttribute('href'),
+  ).toContain('/classroom');
 });

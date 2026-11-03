@@ -192,9 +192,13 @@ test('invalid resources, inactive membership and closing accounts never write se
   }
 });
 
-async function proposal(overrides = {}) {
+async function proposal(overrides = {}, { seedLeavePermission = true } = {}) {
   const runId = randomUUID();
   const input = { courseId: 'c1', date: '2026-10-28', type: '病假' };
+  // 此測例需要執行寫入；只開測試用到的請假權限，其餘維持預設關閉。
+  if (seedLeavePermission) {
+    await db.doc('users/alice/settings/assistantPermissions').set({ submitLeaveRequest: true });
+  }
   await db.doc(`users/alice/agentRuns/${runId}`).set({
     runId, userId: 'alice', schoolId: 'pu', status: 'completed', steps: [],
     createdAt: Timestamp.now(), actionProposals: [{ toolName: 'submitLeaveRequest', input }],
@@ -241,5 +245,17 @@ test('a failed Agent write remains claimed and cannot be replayed as success', a
   await assert.rejects(executeAgentWrite.run(action), { code: 'failed-precondition' });
   await assert.rejects(executeAgentWrite.run(action), { code: 'already-exists' });
   assert.equal((await read(`users/alice/agentRuns/${action.data.agentRunId}`)).actionClaims['0'].status, 'unverified');
+  assert.equal((await db.collection('leaveRequests').get()).size, 0);
+});
+
+test('closed assistant write permission denies before claim and leaves no claim', async () => {
+  const action = await proposal({}, { seedLeavePermission: false });
+  await assert.rejects(executeAgentWrite.run(action), (error) => {
+    assert.equal(error.code, 'permission-denied');
+    assert.match(String(error.message || ''), /送出請假申請/);
+    return true;
+  });
+  const run = await read(`users/alice/agentRuns/${action.data.agentRunId}`);
+  assert.equal(run.actionClaims, undefined);
   assert.equal((await db.collection('leaveRequests').get()).size, 0);
 });

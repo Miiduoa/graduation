@@ -50,7 +50,7 @@ export function DashboardTaskPanel(props: Props) {
         </Text>
       </View>
       <View>
-        {action('課程與作業', '查看 Campus One 課程、繳交作業與測驗', props.onOpenCourses)}
+        {action('課程與作業', '查看 nuni 課程、繳交作業與測驗', props.onOpenCourses)}
         {action('校務服務', '查看已連結學校的課表、成績與出缺紀錄', props.onOpenSchool)}
         {action('校園服務', '查找校園地點、活動與生活服務', props.onOpenCampus)}
       </View>
@@ -80,7 +80,7 @@ export function DashboardTaskPanel(props: Props) {
           ))
         ) : (
           <Text style={{ color: theme.colors.textSecondary, lineHeight: 22 }}>
-            目前沒有校務提醒。Campus One 作業與測驗請到「課程與作業」查看。
+            目前沒有校務提醒。nuni 作業與測驗請到「課程與作業」查看。
           </Text>
         )}
       </View>

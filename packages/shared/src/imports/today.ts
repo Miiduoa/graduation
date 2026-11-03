@@ -4,6 +4,7 @@ import { periodProfileForSchool, periodTimes } from '../timetable/schoolPeriods'
 
 export type PersonalTodayEntry = {
   row: PersonalImportRecord;
+  originalDate: string;
   startTime: string;
   endTime: string;
   status: 'ongoing' | 'upcoming' | 'ended';
@@ -79,11 +80,11 @@ export function buildPersonalToday(
       try { validateClassException(item); return true; } catch { return false; }
     });
     const append = (row: PersonalImportRecord, startTime: string, endTime: string,
-      startDate: string, endDate = startDate) => {
+      startDate: string, endDate = startDate, originalDate = startDate) => {
       const startAt = Date.parse(`${startDate}T${startTime}:00+08:00`);
       const endAt = Date.parse(`${endDate}T${endTime}:00+08:00`);
       if (startAt >= midnight + 172800000 || endAt <= midnight - 86400000) return;
-      today.push({ row, startTime, endTime, startAt, endAt, conflict: false,
+      today.push({ row, originalDate, startTime, endTime, startAt, endAt, conflict: false,
         status: options.now.getTime() >= endAt ? 'ended' : options.now.getTime() >= startAt ? 'ongoing' : 'upcoming' });
     };
     for (const offset of [-1, 0, 1]) {
@@ -96,7 +97,7 @@ export function buildPersonalToday(
     }
     for (const item of exceptions.filter((value) => value.kind === 'move')) {
       append({ ...original, location: item.location ?? original.location },
-        item.startTime!, item.endTime!, item.date!, item.endDate || item.date!);
+        item.startTime!, item.endTime!, item.date!, item.endDate || item.date!, item.originalDate);
     }
   }
   // A course entered by hand and later imported is one class when its complete
@@ -105,6 +106,7 @@ export function buildPersonalToday(
   const distinctToday = today.filter((entry) =>
     !entry.row.id.startsWith('manual:') || !today.some((other) =>
       !other.row.id.startsWith('manual:') &&
+      entry.originalDate === other.originalDate &&
       entry.startAt === other.startAt &&
       entry.endAt === other.endAt &&
       sameClassMeeting(entry.row, other.row),

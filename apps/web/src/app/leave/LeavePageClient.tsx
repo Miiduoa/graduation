@@ -205,7 +205,7 @@ function LeaveWorkspace({ uid, schoolId, schoolName, leaveApiEnabled }: {
       idRef.current = newId();
       setDetail('');
       setSelection(null);
-      setNotice('已建立 Campus One 請假紀錄。請記得另外完成校方正式請假程序。');
+      setNotice('已建立 nuni 請假紀錄。請記得另外完成校方正式請假程序。');
       await load();
     } catch (error) {
       if (activeRef.current) setNotice(leaveRequestError(error));
@@ -245,7 +245,7 @@ function LeaveWorkspace({ uid, schoolId, schoolName, leaveApiEnabled }: {
           <div>
             <p className={styles.kicker}>LEAVE REQUESTS</p>
             <h2>一次整理，不再逐門重填。</h2>
-            <p>Campus One 幫你整理缺課日期、課程與站內核閱進度。學校正式准假與出缺席紀錄仍以校方系統為準。</p>
+            <p>nuni 幫你整理缺課日期、課程與站內核閱進度。學校正式准假與出缺席紀錄仍以校方系統為準。</p>
           </div>
           <div className={styles.official}>
             <span>正式請假</span>
@@ -343,7 +343,7 @@ function LeaveWorkspace({ uid, schoolId, schoolName, leaveApiEnabled }: {
                     <p className={styles.help}>請勿在這裡輸入診斷證明、病歷或身分證件等敏感資料。各校假別與應附證明可能不同。</p>
                   </fieldset>
                   <div className={styles.submitArea}>
-                    <div><strong>{formatLeaveRange(startDate, endDate)} · {selectedIds.length} 門課</strong><p>送出的是 Campus One 站內請假紀錄，非校方正式核假。</p></div>
+                    <div><strong>{formatLeaveRange(startDate, endDate)} · {selectedIds.length} 門課</strong><p>送出的是 nuni 站內請假紀錄，非校方正式核假。</p></div>
                     <button className={styles.primary} type="button" disabled={busy || !datesOk || !selectedIds.length || !loaded} onClick={() => void submit()}>{busy ? '處理中…' : '建立請假紀錄'}</button>
                   </div>
                 </div>

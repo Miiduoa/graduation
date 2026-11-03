@@ -53,7 +53,7 @@ self.addEventListener('fetch', (event) => {
 });
 
 self.addEventListener('push', (event) => {
-  let data = { title: 'Campus One', body: '你有新的通知' };
+  let data = { title: 'nuni', body: '你有新的通知' };
   if (event.data) {
     try {
       data = { ...data, ...event.data.json() };

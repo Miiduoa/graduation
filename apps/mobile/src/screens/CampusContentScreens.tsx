@@ -997,7 +997,7 @@ export function CampusEventDetailScreen({ navigation, route }: Props) {
             },
           ],
           'campus-event.ics',
-          'Campus One 活動',
+          'nuni 活動',
         );
       }
     } catch {

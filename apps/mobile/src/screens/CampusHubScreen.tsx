@@ -80,8 +80,8 @@ const sections: Array<{ title: string; items: ServiceItem[] }> = [
       },
       {
         icon: 'ic_tab_today',
-        label: '行事曆',
-        description: '課程與自己的安排',
+        label: '校園行事曆',
+        description: '校園活動與作業截止；個人行程、課表另開',
         screen: 'SmartCalendarScreen',
         keywords: ['今天', '時間', '行程', '日曆'],
       },

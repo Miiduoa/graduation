@@ -4,10 +4,16 @@ import { beforeEach, expect, it, vi } from 'vitest';
 const mocks = vi.hoisted(() => ({
   confirm: vi.fn(),
   watch: vi.fn(),
+  fetchPermissions: vi.fn(),
+  getAuth: vi.fn(),
 }));
 vi.mock('@/lib/campusAssistantClient', () => ({
   confirmCreateOrder: mocks.confirm,
   watchOrderQueueNumber: mocks.watch,
+}));
+vi.mock('@/lib/firebase', () => ({
+  fetchAssistantWritePermissions: (...args: unknown[]) => mocks.fetchPermissions(...args),
+  getAuth: () => mocks.getAuth(),
 }));
 
 import { AgentCardList } from './AgentCards';
@@ -33,6 +39,10 @@ const draft = {
 beforeEach(() => {
   mocks.confirm.mockReset();
   mocks.watch.mockReset();
+  mocks.fetchPermissions.mockReset();
+  mocks.getAuth.mockReset();
+  mocks.getAuth.mockReturnValue({ currentUser: { uid: 'alice' } });
+  mocks.fetchPermissions.mockResolvedValue({ createOrder: true });
 });
 
 it('沒拿到號碼：寫「號碼還沒拿到，請到櫃台確認。」和台灣時間、品項，店家給號碼後換成真的號碼', async () => {
@@ -114,4 +124,15 @@ it('伺服器明確說不成立（菜單變了）：照實轉述，下次換新�
   const [first, second] = mocks.confirm.mock.calls.map(([sent]) => sent.requestId);
   expect(second).not.toBe(first);
   expect(screen.getByText('取餐號碼 2')).toBeTruthy();
+});
+
+it('助理下單卡在餐廳下單關閉時顯示權限文案且不呼叫下單', async () => {
+  mocks.fetchPermissions.mockResolvedValue({ createOrder: false });
+  render(<AgentCardList cards={[draft]} schoolId="pu" />);
+  await act(async () => fireEvent.click(screen.getByText('確認下單')));
+  expect(mocks.confirm).not.toHaveBeenCalled();
+  expect(screen.getByText(/你在設定關閉了「餐廳下單」/)).toBeTruthy();
+  expect(screen.getByRole('link', { name: '前往設定' }).getAttribute('href')).toBe(
+    '/settings?section=assistant',
+  );
 });
