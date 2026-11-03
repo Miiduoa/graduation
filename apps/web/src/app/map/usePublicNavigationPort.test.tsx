@@ -13,13 +13,19 @@ const state = vi.hoisted(() => ({
 }));
 vi.mock('@/features/nuni/Session', () => ({ useOptionalNuniSession: () => state }));
 function View({ school = 'pu' }: { school?: string }) {
-  const { port, needsSignIn, capabilityStatus, retryCapability } = usePublicNavigationPort(
-    school,
-    '靜宜',
-  );
+  const {
+    port,
+    needsSignIn,
+    capabilityStatus,
+    retryCapability,
+    availabilityStatus,
+    retryAvailability,
+  } = usePublicNavigationPort(school, '靜宜');
   return (
     <>
       {needsSignIn && <p>請登入</p>}
+      <p data-testid="availability">{availabilityStatus}</p>
+      {availabilityStatus === 'error' && <button onClick={retryAvailability}>重試服務</button>}
       <p data-testid="capability">{capabilityStatus}</p>
       {capabilityStatus === 'error' && <button onClick={retryCapability}>重新查詢</button>}
       {port && <PublicNavigationTask port={port} />}
@@ -43,7 +49,67 @@ it('leaves the existing map unchanged when the feature is not enabled', async ()
   vi.stubGlobal('fetch', fetcher);
   render(<View />);
   await waitFor(() => expect(fetcher).toHaveBeenCalledOnce());
+  await waitFor(() => expect(screen.getByTestId('availability').textContent).toBe('disabled'));
+  expect(screen.queryByRole('button', { name: '重試服務' })).toBeNull();
   expect(screen.queryByRole('region', { name: '公開校園導航' })).toBeNull();
+  vi.unstubAllGlobals();
+});
+
+it('offers a retry when global availability has a temporary HTTP or network failure', async () => {
+  let attempts = 0;
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(async (url: string) => {
+      if (url.endsWith('/availability')) {
+        attempts++;
+        if (attempts === 1) throw new Error('offline');
+        if (attempts === 2) return new Response('', { status: 503 });
+        return Response.json({ enabled: true });
+      }
+      if (url.endsWith('/capability')) return capability('pu', []);
+      throw new Error('unexpected');
+    }),
+  );
+  render(<View />);
+  await screen.findByRole('button', { name: '重試服務' });
+  fireEvent.click(screen.getByRole('button', { name: '重試服務' }));
+  await screen.findByRole('button', { name: '重試服務' });
+  fireEvent.click(screen.getByRole('button', { name: '重試服務' }));
+  await waitFor(() => expect(screen.getByTestId('availability').textContent).toBe('enabled'));
+  expect(attempts).toBe(3);
+  vi.unstubAllGlobals();
+});
+
+it('times out global availability and rejects an old late response after retry', async () => {
+  const pending: Array<(response: Response) => void> = [];
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(async (url: string) => {
+      if (url.endsWith('/availability'))
+        return await new Promise<Response>((resolve) => pending.push(resolve));
+      if (url.endsWith('/capability')) return capability('pu', []);
+      throw new Error('unexpected');
+    }),
+  );
+  vi.useFakeTimers();
+  render(<View />);
+  expect(pending).toHaveLength(1);
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(12_000);
+  });
+  expect(screen.getByTestId('availability').textContent).toBe('error');
+  fireEvent.click(screen.getByRole('button', { name: '重試服務' }));
+  expect(pending).toHaveLength(2);
+  await act(async () => {
+    pending[0]!(Response.json({ enabled: true }));
+  });
+  expect(screen.getByTestId('availability').textContent).toBe('loading');
+  await act(async () => {
+    pending[1]!(new Response('', { status: 404 }));
+  });
+  expect(screen.getByTestId('availability').textContent).toBe('disabled');
+  expect(screen.queryByRole('region', { name: '公開校園導航' })).toBeNull();
+  vi.useRealTimers();
   vi.unstubAllGlobals();
 });
 it('requires a platform session and creates a scoped single-call BFF port', async () => {

@@ -26,10 +26,14 @@ export default function MapPage(props: {
 }) {
   const searchParams = props.searchParams ? use(props.searchParams) : undefined;
   const { schoolId, schoolName, schoolSearch: q, status } = useCampusBrowseContext(searchParams);
-  const { port, needsSignIn, capabilityStatus, retryCapability } = usePublicNavigationPort(
-    schoolId,
-    schoolName,
-  );
+  const {
+    port,
+    needsSignIn,
+    capabilityStatus,
+    retryCapability,
+    availabilityStatus,
+    retryAvailability,
+  } = usePublicNavigationPort(schoolId, schoolName);
   const route = Array.isArray(searchParams?.route) ? searchParams.route[0] : searchParams?.route;
   const focus = Array.isArray(searchParams?.focus) ? searchParams.focus[0] : searchParams?.focus;
 
@@ -77,6 +81,14 @@ export default function MapPage(props: {
         <section className="card" role="status">
           <p>暫時無法確認此校園的導航服務。</p>
           <button type="button" className="btn secondary" onClick={retryCapability}>
+            重新查詢
+          </button>
+        </section>
+      )}
+      {schoolId && availabilityStatus === 'error' && (
+        <section className="card" role="status">
+          <p>暫時無法確認校園導航服務。</p>
+          <button type="button" className="btn secondary" onClick={retryAvailability}>
             重新查詢
           </button>
         </section>

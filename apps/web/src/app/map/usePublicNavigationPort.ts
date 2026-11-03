@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useOptionalNuniSession } from '@/features/nuni/Session';
 import type { PublicTaskPort } from './PublicNavigationTask';
 
-type Availability = 'loading' | 'enabled' | 'disabled';
+type Availability = 'loading' | 'enabled' | 'disabled' | 'error';
 type CapabilityStatus = 'idle' | 'loading' | 'available' | 'unavailable' | 'error';
 const ACTIONS = new Set([
   'preview',
@@ -22,8 +22,15 @@ const ACTIONS = new Set([
 export function usePublicNavigationPort(schoolId: string | null, schoolName: string) {
   const auth = useOptionalNuniSession();
   const [availability, setAvailability] = useState<Availability>('loading');
+  const [availabilityAttempt, setAvailabilityAttempt] = useState(0);
   useEffect(() => {
     const controller = new AbortController();
+    let current = true;
+    const timer = setTimeout(() => {
+      if (!current) return;
+      controller.abort();
+      setAvailability('error');
+    }, 12_000);
     void fetch('/api/nuni/public-agent/availability', {
       cache: 'no-store',
       credentials: 'same-origin',
@@ -31,14 +38,35 @@ export function usePublicNavigationPort(schoolId: string | null, schoolName: str
       signal: controller.signal,
     })
       .then(async (response) => {
-        const data = response.ok ? await response.json() : null;
-        if (!controller.signal.aborted)
-          setAvailability(data?.enabled === true ? 'enabled' : 'disabled');
+        if (response.status === 404) {
+          if (current && !controller.signal.aborted) setAvailability('disabled');
+          return;
+        }
+        if (!response.ok) throw new Error('AVAILABILITY_UNAVAILABLE');
+        const data: unknown = await response.json();
+        if (
+          !data ||
+          typeof data !== 'object' ||
+          !('enabled' in data) ||
+          typeof data.enabled !== 'boolean'
+        )
+          throw new Error('AVAILABILITY_INVALID');
+        if (current && !controller.signal.aborted)
+          setAvailability(data.enabled ? 'enabled' : 'disabled');
       })
       .catch(() => {
-        if (!controller.signal.aborted) setAvailability('disabled');
-      });
-    return () => controller.abort();
+        if (current && !controller.signal.aborted) setAvailability('error');
+      })
+      .finally(() => clearTimeout(timer));
+    return () => {
+      current = false;
+      clearTimeout(timer);
+      controller.abort();
+    };
+  }, [availabilityAttempt]);
+  const retryAvailability = useCallback(() => {
+    setAvailability('loading');
+    setAvailabilityAttempt((value) => value + 1);
   }, []);
   const context =
     !auth?.loading && !auth?.error && !auth?.pendingLogout ? auth?.session?.context : null;
@@ -159,6 +187,8 @@ export function usePublicNavigationPort(schoolId: string | null, schoolName: str
   return {
     port,
     available: availability === 'enabled',
+    availabilityStatus: availability,
+    retryAvailability,
     capabilityStatus,
     retryCapability,
     needsSignIn:
