@@ -3,8 +3,8 @@ import { SiteShell } from '@/components/SiteShell';
 import styles from '../servicePages.module.css';
 
 export const metadata: Metadata = {
-  title: '隱私政策 | Campus One',
-  description: 'Campus One 隱私政策',
+  title: '隱私政策 | nuni',
+  description: 'nuni 隱私政策',
 };
 
 const sections = [
@@ -18,7 +18,7 @@ const sections = [
   },
   {
     title: '資料保存與刪除',
-    body: '手機版「我的」頁面提供資料匯出與帳號刪除入口。匯出內容依所選項目與結果中的範圍說明為準。刪除你在 Campus One 的資料不會刪除學校帳號、Google 帳號、校方保存的資料或其他服務帳號；已傳送的訊息與共同內容可能仍會保留。操作前請先閱讀頁面列出的處理範圍。',
+    body: '手機版「我的」頁面提供資料匯出與帳號刪除入口。匯出內容依所選項目與結果中的範圍說明為準。刪除你在 nuni 的資料不會刪除學校帳號、Google 帳號、校方保存的資料或其他服務帳號；已傳送的訊息與共同內容可能仍會保留。操作前請先閱讀頁面列出的處理範圍。',
   },
   {
     title: '聯絡方式',
@@ -33,7 +33,7 @@ const sections = [
 
 export default function PrivacyPage() {
   return (
-    <SiteShell title="隱私政策" subtitle="了解 Campus One 使用哪些資料，以及你可以如何管理。">
+    <SiteShell title="隱私政策" subtitle="了解 nuni 使用哪些資料，以及你可以如何管理。">
       <div className={styles.documentLayout}>
         <nav className={styles.contents} aria-label="隱私政策章節">
           <p>本頁內容</p>

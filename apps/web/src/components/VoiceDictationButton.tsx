@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { CampusIcon } from './CampusIcon';
 import styles from './VoiceDictationButton.module.css';
 
@@ -41,6 +41,19 @@ function describeError(error: string): string {
   return '語音辨識未完成，請再試一次或改用文字輸入。';
 }
 
+function releaseRecognition(recognition: SpeechRecognizer, abort = true) {
+  recognition.onresult = null;
+  recognition.onerror = null;
+  recognition.onend = null;
+  if (abort) {
+    try {
+      recognition.abort();
+    } catch {
+      // The session is already invalidated even if the browser cannot abort it.
+    }
+  }
+}
+
 export function VoiceDictationButton({
   onTranscript,
   disabled = false,
@@ -53,8 +66,14 @@ export function VoiceDictationButton({
   const [error, setError] = useState('');
   const [interim, setInterim] = useState('');
   const recognitionRef = useRef<SpeechRecognizer | null>(null);
-  const lastFinalTranscript = useRef('');
   const callback = useRef(onTranscript);
+  const finishCapture = useCallback((recognition: SpeechRecognizer, abort = true) => {
+    if (recognitionRef.current !== recognition) return;
+    recognitionRef.current = null;
+    releaseRecognition(recognition, abort);
+    setListening(false);
+    setInterim('');
+  }, []);
 
   useEffect(() => {
     callback.current = onTranscript;
@@ -65,27 +84,21 @@ export function VoiceDictationButton({
     return () => {
       const recognition = recognitionRef.current;
       recognitionRef.current = null;
-      if (recognition) {
-        recognition.onresult = null;
-        recognition.onerror = null;
-        recognition.onend = null;
-        recognition.abort();
-      }
+      if (recognition) releaseRecognition(recognition);
     };
   }, []);
   useEffect(() => {
-    if (disabled && recognitionRef.current) recognitionRef.current.abort();
-  }, [disabled]);
+    if (disabled && recognitionRef.current) finishCapture(recognitionRef.current);
+  }, [disabled, finishCapture]);
 
   function toggle() {
     if (recognitionRef.current) {
-      recognitionRef.current.stop();
+      finishCapture(recognitionRef.current);
       return;
     }
     const Constructor = browserSpeech();
     if (!Constructor || disabled) return;
     const recognition = new Constructor();
-    lastFinalTranscript.current = '';
     recognitionRef.current = recognition;
     recognition.lang = 'zh-TW';
     recognition.interimResults = true;
@@ -103,34 +116,27 @@ export function VoiceDictationButton({
       }
       if (finished.length) {
         const transcript = finished.join(' ').slice(0, 4000);
-        if (transcript !== lastFinalTranscript.current) {
-          lastFinalTranscript.current = transcript;
-          callback.current(transcript);
-        }
-        setInterim('');
+        finishCapture(recognition);
+        callback.current(transcript);
       } else {
         setInterim(tentative.join(' ').slice(0, 80));
       }
     };
     recognition.onerror = (event) => {
       if (recognitionRef.current !== recognition) return;
+      finishCapture(recognition);
       if (event.error !== 'aborted') setError(describeError(event.error));
-      setInterim('');
     };
     recognition.onend = () => {
-      if (recognitionRef.current !== recognition) return;
-      recognitionRef.current = null;
-      setListening(false);
-      setInterim('');
+      finishCapture(recognition, false);
     };
     try {
-      recognition.start();
       setError('');
       setInterim('');
       setListening(true);
+      recognition.start();
     } catch {
-      recognitionRef.current = null;
-      setListening(false);
+      finishCapture(recognition);
       setError('無法啟動語音辨識，請再試一次或使用鍵盤麥克風。');
     }
   }
@@ -141,7 +147,9 @@ export function VoiceDictationButton({
         type="button"
         className={listening ? styles.listening : styles.button}
         disabled={disabled || !supported}
-        aria-label={!supported ? '此瀏覽器不支援語音辨識' : listening ? '停止語音輸入' : '使用語音輸入'}
+        aria-label={
+          !supported ? '此瀏覽器不支援語音辨識' : listening ? '停止語音輸入' : '使用語音輸入'
+        }
         aria-pressed={listening}
         title={!supported ? '瀏覽器尚不支援；可使用手機鍵盤的語音輸入' : '語音轉文字，不會自動送出'}
         onClick={toggle}
@@ -154,7 +162,11 @@ export function VoiceDictationButton({
           {interim ? interim : '正在聆聽…'}
         </span>
       )}
-      {error && <span className={styles.error} role="alert">{error}</span>}
+      {error && (
+        <span className={styles.error} role="alert">
+          {error}
+        </span>
+      )}
     </div>
   );
 }

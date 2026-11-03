@@ -43,12 +43,12 @@ export function MessagesStack() {
       <Stack.Screen
         name="Inbox"
         component={MessagesLandingScreen}
-        options={{ title: '訊息', headerShown: false }}
+        options={{ title: '私訊', headerShown: false }}
       />
       <Stack.Screen
         name="MessagesHome"
         component={MessagesLandingScreen}
-        options={{ title: '訊息', headerShown: false }}
+        options={{ title: '私訊', headerShown: false }}
       />
       <Stack.Screen name="Groups" component={GroupsScreen} options={{ title: '群組' }} />
       <Stack.Screen name="GroupDetail" component={GroupDetailScreen} options={{ title: '群組' }} />
@@ -89,6 +89,7 @@ export function MessagesStack() {
         component={FollowingListsScreen}
         options={{ title: '追蹤與粉絲' }}
       />
+      {/* 單則送出中／未確認／失敗與重試由 ChatScreen + messagingInboxModel 處理，不在此重構。 */}
       <Stack.Screen name="Chat" component={ChatScreen} options={{ title: '對話' }} />
     </Stack.Navigator>
   );

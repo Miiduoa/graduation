@@ -1,8 +1,15 @@
-export type SettingsSection = 'general' | 'notifications' | 'appearance' | 'privacy' | 'account';
+export type SettingsSection =
+  | 'general'
+  | 'notifications'
+  | 'assistant'
+  | 'appearance'
+  | 'privacy'
+  | 'account';
 
 const sections = new Set<SettingsSection>([
   'general',
   'notifications',
+  'assistant',
   'appearance',
   'privacy',
   'account',

@@ -211,7 +211,7 @@ it('discards a rejected effect replay after Strict Mode has loaded the current c
   expect(screen.getByText('原帳號的學生')).toBeTruthy();
 });
 
-// These retain the new Campus One transport checks while using real closed-session
+// These retain the new nuni transport checks while using real closed-session
 // and roster projection contracts instead of a nonexistent GET makeup-requests.
 it('checks in without a code using JSON and the current account context', async () => {
   fetcher.mockImplementation(async (path: string, init?: RequestInit) => {

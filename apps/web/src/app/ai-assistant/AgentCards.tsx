@@ -2,8 +2,14 @@
 
 import Link from 'next/link';
 import { useEffect, useRef, useState } from 'react';
+import {
+  ASSISTANT_PERMISSIONS_SETTINGS_HREF,
+  assistantWritePermissionDeniedMessage,
+  isAssistantWriteToolAllowed,
+} from '@campus/shared/src/assistantPermissions';
 import type { AgentCard } from '@/lib/campusAssistantClient';
 import { confirmCreateOrder, watchOrderQueueNumber } from '@/lib/campusAssistantClient';
+import { fetchAssistantWritePermissions, getAuth } from '@/lib/firebase';
 import { describePickupNumber, type PickupNumberView } from '@campus/shared/src/ordering/pickupNumber';
 
 const ORDER_NOT_SENT_TEXT = '訂單沒送出去，請再試一次。';
@@ -616,9 +622,12 @@ function OrderDraftCard({
 }) {
   const [paymentMethod, setPaymentMethod] = useState(payload.paymentMethod || 'campus_card');
   const [submitting, setSubmitting] = useState(false);
-  const [result, setResult] = useState<{ ok: boolean; message: string; orderId?: string } | null>(
-    null,
-  );
+  const [result, setResult] = useState<{
+    ok: boolean;
+    message: string;
+    orderId?: string;
+    permissionDenied?: boolean;
+  } | null>(null);
   const [pickup, setPickup] = useState<PickupNumberView | null>(null);
   // 同一張草稿重按沿用同一個送出編號，伺服器不會建出第二筆
   const requestIdRef = useRef<string | null>(null);
@@ -644,44 +653,62 @@ function OrderDraftCard({
     if (inFlightRef.current) return;
     inFlightRef.current = true;
     setSubmitting(true);
-    requestIdRef.current ??=
-      typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
-        ? `web-${crypto.randomUUID()}`
-        : `web-${Date.now()}-${Math.random().toString(36).slice(2)}`;
-    const res = await confirmCreateOrder({
-      schoolId,
-      requestId: requestIdRef.current,
-      cafeteriaId: payload.cafeteriaId,
-      items: payload.confirmAction.input.items,
-      pickupTime: payload.pickupTime,
-      paymentMethod,
-      note: payload.note,
-    });
-    inFlightRef.current = false;
-    setSubmitting(false);
-    if (res.success && res.orderId) {
-      setResult({ ok: true, message: `訂單已建立，訂單號 ${res.orderId}`, orderId: res.orderId });
-      setPickup(
-        describePickupNumber({
-          queueNumber: res.queueNumber,
-          createdAt: res.createdAt,
-          items:
-            res.items ??
-            payload.items.map(item => ({ name: item.name, quantity: item.quantity })),
-        }),
-      );
-      onConfirmed?.({
-        orderId: res.orderId,
-        cafeteria: res.cafeteria || payload.cafeteriaName,
-        total: res.total || payload.total,
+    try {
+      // 助理來源確認卡：先查「餐廳下單」開關，不影響學餐頁一般下單。
+      const uid = getAuth()?.currentUser?.uid;
+      if (!uid) {
+        setResult({ ok: false, message: '請先登入後再確認下單。' });
+        return;
+      }
+      const writePermissions = await fetchAssistantWritePermissions(uid);
+      if (!isAssistantWriteToolAllowed(writePermissions, 'createOrder')) {
+        setResult({
+          ok: false,
+          message: assistantWritePermissionDeniedMessage('createOrder'),
+          permissionDenied: true,
+        });
+        return;
+      }
+      requestIdRef.current ??=
+        typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+          ? `web-${crypto.randomUUID()}`
+          : `web-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+      const res = await confirmCreateOrder({
+        schoolId,
+        requestId: requestIdRef.current,
+        cafeteriaId: payload.cafeteriaId,
+        items: payload.confirmAction.input.items,
+        pickupTime: payload.pickupTime,
+        paymentMethod,
+        note: payload.note,
       });
-    } else {
-      // 伺服器明確說不成立（菜單或金額變了）才照實轉述並換新編號；其他一律用同一個編號再試一次
-      if (res.notCreated) requestIdRef.current = null;
-      setResult({
-        ok: false,
-        message: res.notCreated && res.errorMessage ? res.errorMessage : ORDER_NOT_SENT_TEXT,
-      });
+      if (res.success && res.orderId) {
+        setResult({ ok: true, message: `訂單已建立，訂單號 ${res.orderId}`, orderId: res.orderId });
+        setPickup(
+          describePickupNumber({
+            queueNumber: res.queueNumber,
+            createdAt: res.createdAt,
+            items:
+              res.items ??
+              payload.items.map(item => ({ name: item.name, quantity: item.quantity })),
+          }),
+        );
+        onConfirmed?.({
+          orderId: res.orderId,
+          cafeteria: res.cafeteria || payload.cafeteriaName,
+          total: res.total || payload.total,
+        });
+      } else {
+        // 伺服器明確說不成立（菜單或金額變了）才照實轉述並換新編號；其他一律用同一個編號再試一次
+        if (res.notCreated) requestIdRef.current = null;
+        setResult({
+          ok: false,
+          message: res.notCreated && res.errorMessage ? res.errorMessage : ORDER_NOT_SENT_TEXT,
+        });
+      }
+    } finally {
+      inFlightRef.current = false;
+      setSubmitting(false);
     }
   };
 
@@ -748,7 +775,12 @@ function OrderDraftCard({
       </div>
       {result ? (
         <div className={result.ok ? 'note ok' : 'note err'}>
-          {result.message}
+          <div style={{ whiteSpace: 'pre-line' }}>{result.message}</div>
+          {result.permissionDenied ? (
+            <div className="pickup">
+              <Link href={ASSISTANT_PERMISSIONS_SETTINGS_HREF}>前往設定</Link>
+            </div>
+          ) : null}
           {result.ok && pickup?.state === 'assigned' ? (
             <div className="pickup">
               <strong>{pickup.text}</strong>
@@ -763,7 +795,7 @@ function OrderDraftCard({
           ) : null}
         </div>
       ) : null}
-      {result?.ok ? null : (
+      {result?.ok || result?.permissionDenied ? null : (
         <button type="button" className="confirm" onClick={handleConfirm} disabled={submitting}>
           {submitting ? '下單中…' : result ? '再試一次' : '確認下單'}
         </button>

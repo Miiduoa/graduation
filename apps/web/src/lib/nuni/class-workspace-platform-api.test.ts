@@ -51,7 +51,7 @@ afterEach(() => {
   vi.unstubAllEnvs();
 });
 
-it('rejects classroom-session reads without the Campus One session', async () => {
+it('rejects classroom-session reads without the nuni session', async () => {
   expect(
     (await call(`class-workspaces/${workspaceId}/classroom-sessions`, 'GET', undefined, false))
       .status,

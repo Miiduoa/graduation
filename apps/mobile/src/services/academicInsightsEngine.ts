@@ -1,7 +1,7 @@
 /**
  * 🎓 AI 學業預測引擎 — Academic Insights Engine
  *
- * 靜宜大學 Campus One 獨家功能：
+ * 靜宜大學 nuni 獨家功能：
  * 結合 E校園成績 + TronClass 課程活動 + 出席紀錄，
  * 運用統計模型和機器學習思維進行：
  *
