@@ -135,6 +135,8 @@ beforeEach(() => {
   mockStore = transactionStore([
     ['users/alice', { schoolId: 'pu', role: 'student' }],
     ['users/bob', { schoolId: 'pu', role: 'student' }],
+    ['users/alice/settings/assistantPermissions', { renewBook: true, returnBook: true }],
+    ['users/bob/settings/assistantPermissions', { renewBook: true, returnBook: true }],
     ['schools/pu/members/alice', { status: 'active' }],
     ['schools/pu/members/bob', { status: 'active' }],
     ['schools/ntu/members/alice', { status: 'active' }],
