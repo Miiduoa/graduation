@@ -48,6 +48,27 @@ export function resolveTimetableClassroomNav(input: {
   return { kind: 'search', screen: 'Classroom', params };
 }
 
+/**
+ * Screen + params for today-page course-work presses.
+ * Linked keeps today's CourseHub group params so the hub still resolves the course.
+ */
+export function todayCourseWorkNavigateTarget(destination: TimetableClassroomDestination): {
+  screen: 'CourseHub' | 'Classroom';
+  params: Record<string, unknown>;
+} {
+  if (destination.kind === 'linked') {
+    return {
+      screen: 'CourseHub',
+      params: {
+        courseSpaceId: destination.params.courseId,
+        groupId: destination.params.courseId,
+        section: 'week',
+      },
+    };
+  }
+  return { screen: destination.screen, params: { ...destination.params } };
+}
+
 export function courseSearchKey(value: string): string {
   return value.normalize('NFKC').trim().toLocaleLowerCase('zh-TW');
 }
