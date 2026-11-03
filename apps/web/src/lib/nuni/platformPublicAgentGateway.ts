@@ -111,6 +111,9 @@ export function createPlatformPublicAgentGateway(options: {
         if (
           error instanceof NuniError &&
           [
+            'PUBLIC_AGENT_INVALID_INPUT',
+            'PUBLIC_AGENT_CONFIRMATION_REQUIRED',
+            'PUBLIC_AGENT_DESTINATION_UNCLEAR',
             'PUBLIC_AGENT_FREE_QUOTA_UNAVAILABLE',
             'PUBLIC_AGENT_OPEN_OPERATION',
             'PUBLIC_AGENT_OPERATION_NOT_FOUND',

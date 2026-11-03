@@ -3,7 +3,7 @@
 本機可走完「公開校園導航 → 檢視資料 → 本人確認 → 一次執行 → 來源與路線回執」。
 使用地圖頁的 `PublicNavigationTask` 元件與真實 HTTP handler／service／ledger 程式；
 `serve-local.mjs` 才注入合成平台 session、序列化 SQL protocol fixture 與既有公開地點目錄。
-這不是正式登入、PostgreSQL 或雲端模型驗證。
+這不是正式登入、正式資料庫或雲端模型驗證。候選 SQL 已在全新隔離的合成 PostgreSQL 叢集測試，未套用正式服務。
 
 ```sh
 node scripts/test-platform-public-agent.mjs
@@ -38,7 +38,7 @@ UI 確認前不執行，取消回輸入並恢復焦點；換帳校會卸載舊�
 
 ## 仍未核實／啟用
 
-- 未執行 `schema.candidate.sql`，未新增 GRANT；真 PostgreSQL 鎖、FK、跨程序競態、statement timeout／commit 故障及帳號清理尚待隔離 DB 驗證。
+- `schema.candidate.sql` 已在新建隔離合成 PostgreSQL 測試，未套用正式服務或新增正式 GRANT；正式 DDL、grants、完整 migration 與未覆蓋鎖、statement timeout／commit 故障及帳號清理仍待驗證。
 - fixture 的序列化回滾不是 PostgreSQL 證據。實際 DB transaction 不會因 HTTP abort 自動取消。
 - 確認紀錄上限預設 1000，過期／已耗用也計入；未知操作不刪除。保留及容量清理政策尚未核定。
 - 身分與來源為順序檢查，不是分散式原子快照，最後來源讀取後仍有 TOCTOU 窗口。
