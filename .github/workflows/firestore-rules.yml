@@ -54,7 +54,7 @@ jobs:
 
       - name: Preserve failed emulator diagnostics
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: firestore-rules-failure-logs
           path: |

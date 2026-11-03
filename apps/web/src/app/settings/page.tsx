@@ -17,6 +17,12 @@ import { useAuth } from '@/components/AuthGuard';
 import {
   defaultNotificationPreferences,
   normalizeNotificationPreferences,
+  ASSISTANT_PERMISSIONS_DOC_ID,
+  ASSISTANT_WRITE_PERMISSION_DEFINITIONS,
+  createDefaultAssistantWritePermissions,
+  normalizeAssistantWritePermissions,
+  type AssistantWritePermissionKey,
+  type AssistantWritePermissions,
 } from '@campus/shared/src';
 import {
   AGENT_DELETE_MODEL_ACTION,
@@ -37,6 +43,7 @@ import {
   getDb,
   isFirebaseConfigured,
   saveNotificationPreferences,
+  saveAssistantWritePermissions,
   type NotificationPreferences,
   type UserProfile,
   updateUserProfile,
@@ -81,6 +88,7 @@ const SECTIONS: { id: Section; label: string; description: string }[] = [
   { id: 'general', label: '一般', description: '校園與服務資訊' },
   { id: 'account', label: '帳號', description: '個人資料與登入' },
   { id: 'notifications', label: '通知', description: '接收類型與勿擾時段' },
+  { id: 'assistant', label: '助理權限', description: '助理可執行的寫入動作' },
   { id: 'appearance', label: '外觀', description: '色彩、字級與閱讀方式' },
   { id: 'privacy', label: '隱私', description: '個人資料與存取範圍' },
 ];
@@ -247,13 +255,18 @@ function SettingsContent({
   const [loadingProfile, setLoadingProfile] = useState(true);
   const [savingProfile, setSavingProfile] = useState(false);
   const [savingNotifications, setSavingNotifications] = useState(false);
+  const [savingAssistantPermissions, setSavingAssistantPermissions] = useState(false);
   const [signingOut, setSigningOut] = useState(false);
+  const assistantLock = useRef(false);
   const [profileForm, setProfileForm] = useState<ProfileFormState>(emptyProfileForm(null));
   const [generalPrefs, setGeneralPrefs] = useState(defaultWebPreferences.general);
   const [appearancePrefs, setAppearancePrefs] = useState(defaultWebPreferences.appearance);
   const [privacyPrefs, setPrivacyPrefs] = useState(defaultWebPreferences.privacy);
   const [notificationPrefs, setNotificationPrefs] = useState<NotificationPreferences>(
     defaultNotificationPreferences,
+  );
+  const [assistantWritePrefs, setAssistantWritePrefs] = useState<AssistantWritePermissions>(
+    createDefaultAssistantWritePermissions(),
   );
   const [localPrefsReady, setLocalPrefsReady] = useState(false);
   const [localPrefsSaved, setLocalPrefsSaved] = useState(true);
@@ -336,6 +349,7 @@ function SettingsContent({
 
         setProfileForm(emptyProfileForm(null));
         setNotificationPrefs(defaultNotificationPreferences);
+        setAssistantWritePrefs(createDefaultAssistantWritePermissions());
         setLoadingProfile(false);
         return;
       }
@@ -345,9 +359,12 @@ function SettingsContent({
 
       try {
         if (!isFirebaseConfigured()) throw new Error('Account service is unavailable');
-        const [profileDoc, prefsDoc] = await Promise.all([
+        const [profileDoc, prefsDoc, assistantDoc] = await Promise.all([
           getDocFromServer(doc(getDb(), 'users', user.uid)),
           getDocFromServer(doc(getDb(), 'users', user.uid, 'settings', 'notifications')),
+          getDocFromServer(
+            doc(getDb(), 'users', user.uid, 'settings', ASSISTANT_PERMISSIONS_DOC_ID),
+          ),
         ]);
         if (!active || !isCurrent()) return;
         if (!profileDoc.exists()) throw new Error('Account profile is missing');
@@ -356,6 +373,9 @@ function SettingsContent({
           normalizeNotificationPreferences(
             prefsDoc.exists() ? prefsDoc.data() : defaultNotificationPreferences,
           ),
+        );
+        setAssistantWritePrefs(
+          normalizeAssistantWritePermissions(assistantDoc.exists() ? assistantDoc.data() : null),
         );
       } catch (loadError) {
         if (!active) {
@@ -366,6 +386,7 @@ function SettingsContent({
         setProfileLoadError('暫時無法讀取帳號設定。重新讀取成功後才能儲存變更。');
         setProfileForm(emptyProfileForm(user));
         setNotificationPrefs(defaultNotificationPreferences);
+        setAssistantWritePrefs(createDefaultAssistantWritePermissions());
       } finally {
         if (active) {
           setLoadingProfile(false);
@@ -444,6 +465,55 @@ function SettingsContent({
     } finally {
       notificationLock.current = false;
       if (isCurrent()) setSavingNotifications(false);
+    }
+  };
+
+  const handleSaveAssistantPermissions = async () => {
+    if (!user) {
+      info('請先登入後再儲存助理權限');
+      return;
+    }
+
+    if (!isFirebaseConfigured()) {
+      info('目前無法連線帳號服務，助理權限尚未儲存');
+      return;
+    }
+
+    if (
+      !isCurrent() ||
+      loadingProfile ||
+      profileLoadError ||
+      assistantLock.current ||
+      signOutLock.current
+    )
+      return;
+    assistantLock.current = true;
+    const expected = assistantWritePrefs;
+    setSavingAssistantPermissions(true);
+
+    try {
+      await saveAssistantWritePermissions(user.uid, expected);
+      if (!isCurrent()) return;
+      const saved = await getDocFromServer(
+        doc(getDb(), 'users', user.uid, 'settings', ASSISTANT_PERMISSIONS_DOC_ID),
+      );
+      if (!isCurrent()) return;
+      const actual = saved.exists() ? normalizeAssistantWritePermissions(saved.data()) : null;
+      if (
+        !actual ||
+        JSON.stringify(actual) !== JSON.stringify(normalizeAssistantWritePermissions(expected))
+      )
+        throw new Error('Assistant permission settings were not confirmed');
+      success('助理權限已同步');
+    } catch (saveError) {
+      console.error('Failed to save assistant permissions:', saveError);
+      if (isCurrent()) {
+        setProfileLoadError('助理權限的儲存結果尚未確認。請重新讀取後檢查。');
+        error('助理權限尚未確認', '請重新讀取後檢查，不會自動重送');
+      }
+    } finally {
+      assistantLock.current = false;
+      if (isCurrent()) setSavingAssistantPermissions(false);
     }
   };
 
@@ -737,6 +807,68 @@ function SettingsContent({
             onClick={handleSaveNotifications}
           >
             {savingNotifications ? '儲存中…' : '儲存通知設定'}
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  function renderAssistant() {
+    const updateAssistantPermission = (key: AssistantWritePermissionKey, value: boolean) => {
+      setAssistantWritePrefs((prev) => ({ ...prev, [key]: value }));
+    };
+    return (
+      <div className={styles.stack}>
+        <SectionHeading title="助理權限">
+          控制助理可以代你執行哪些寫入動作。預設全部關閉；開啟後仍需每次確認才會生效。涵蓋需確認的服務寫入、助理餐廳草稿下單，以及拆待辦／設提醒等個人待辦佇列。
+        </SectionHeading>
+        {!user && (
+          <div className={styles.notice}>
+            <h3>登入後設定助理權限</h3>
+            <p>權限會跟著帳號保留，網頁與手機共用同一份設定。</p>
+            <Link href={`/login${schoolSearch}`} className="btn primary">
+              前往登入
+            </Link>
+          </div>
+        )}
+        {user && !isFirebaseConfigured() && (
+          <div className={styles.notice} role="status">
+            <h3>目前無法連線帳號服務</h3>
+            <p>連線恢復後才能讀取與儲存助理權限。</p>
+          </div>
+        )}
+        <div className={styles.notice} role="note">
+          <h3>預設關閉</h3>
+          <p>
+            若你尚未設定過，或後端讀取失敗，一律視為不允許寫入。規劃與執行階段都會檢查；關閉後助理不會提出對應確認卡，直接呼叫也會被擋下。學餐頁一般下單不受「餐廳下單」開關影響。若仍看到舊確認卡，送出時會顯示權限說明並引導至此頁。
+          </p>
+        </div>
+        <section aria-labelledby="assistant-write-permissions">
+          <h3 className={styles.groupHeading} id="assistant-write-permissions">
+            寫入動作
+          </h3>
+          <div className={styles.group}>
+            {ASSISTANT_WRITE_PERMISSION_DEFINITIONS.map((row) => (
+              <SettingRow key={row.key} title={row.label} subtitle={row.description}>
+                <Toggle
+                  label={row.label}
+                  disabled={!cloudEnabled || savingAssistantPermissions}
+                  value={assistantWritePrefs[row.key]}
+                  onChange={(value) => updateAssistantPermission(row.key, value)}
+                />
+              </SettingRow>
+            ))}
+          </div>
+        </section>
+        <div className={styles.actions}>
+          <p>變更後請儲存，才會更新帳號偏好。</p>
+          <button
+            type="button"
+            className="btn primary"
+            disabled={!cloudEnabled || savingAssistantPermissions}
+            onClick={() => void handleSaveAssistantPermissions()}
+          >
+            {savingAssistantPermissions ? '儲存中…' : '儲存助理權限'}
           </button>
         </div>
       </div>
@@ -1123,6 +1255,7 @@ function SettingsContent({
   const contentMap: Record<Section, () => ReactNode> = {
     general: renderGeneral,
     notifications: renderNotifications,
+    assistant: renderAssistant,
     appearance: renderAppearance,
     privacy: renderPrivacy,
     account: renderAccount,

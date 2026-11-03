@@ -3,6 +3,11 @@
 const { z } = require('zod');
 const { getFirestore } = require('firebase-admin/firestore');
 const { isOnlineOrderingEnabled, ONLINE_ORDERING_OFF_MESSAGE } = require('../../lib/onlineOrdering');
+const {
+  assistantWritePermissionDeniedMessage,
+  isAssistantWriteToolAllowed,
+  loadAssistantWritePermissions,
+} = require('../../lib/assistantWritePermissions');
 
 const itemSchema = z.object({
   menuItemId: z.string().min(1),
@@ -37,6 +42,15 @@ async function execute(ctx, rawInput) {
     }
 
     const db = getFirestore();
+    // 與「餐廳下單」同一開關；關閉時不產草稿，避免確認卡繞過設定。
+    const writePermissions = await loadAssistantWritePermissions(db, ctx.uid);
+    if (!isAssistantWriteToolAllowed(writePermissions, 'createOrder')) {
+      return {
+        success: false,
+        errorCode: 'assistant_write_permission_denied',
+        errorMessage: assistantWritePermissionDeniedMessage('createOrder'),
+      };
+    }
     const cafRef = db.collection('schools').doc(schoolId).collection('cafeterias').doc(input.cafeteriaId);
     const cafDoc = await cafRef.get();
     if (!cafDoc.exists) {

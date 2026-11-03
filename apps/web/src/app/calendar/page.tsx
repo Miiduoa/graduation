@@ -9,8 +9,9 @@ import styles from './calendarScope.module.css';
 
 const DESTINATIONS = [
   { href: '/events', label: '校園活動', description: '公開活動與講座' },
-  { href: '/calendar', label: '個人行程', description: '自己新增或匯入的活動與考試' },
+  { href: '/calendar', label: '個人行程', description: '自己新增或匯入的活動、考試與作業截止' },
   { href: '/timetable', label: '我的課表', description: '每週上課時間與教室' },
+  { href: '/', label: '今天', description: '下一堂課、期限與未讀通知' },
 ] as const;
 
 function CalendarScopeNavigation() {
@@ -28,15 +29,9 @@ function CalendarScopeNavigation() {
                 <span className={styles.description}>{description}</span>
               </span>
             ) : (
-              <Link
-                href={campusServiceHref(href, schoolSearch)}
-                className={styles.destination}
-                target="_blank"
-                rel="noopener noreferrer"
-              >
+              <Link href={campusServiceHref(href, schoolSearch)} className={styles.destination}>
                 <span className={styles.label}>{label}</span>
                 <span className={styles.description}>{description}</span>
-                <span className={styles.description}>另開分頁</span>
               </Link>
             )}
           </li>
@@ -50,7 +45,7 @@ export default function CalendarPage() {
   return (
     <SiteShell
       title="個人行事曆"
-      subtitle="手動新增或匯入的活動與考試。上課時間請到「我的課表」查看。"
+      subtitle="手動新增或匯入的活動與考試，並顯示已加入課程的作業截止（與手機版相同）。上課時間請到「我的課表」；今天的下一堂課與通知在「今天」。"
     >
       <CalendarScopeNavigation />
       <PersonalCalendar />

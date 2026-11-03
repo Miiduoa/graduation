@@ -224,6 +224,13 @@ function Workspace({ scopeKey, schoolName, guest, navigation }: {
       if (result.milestoneAdded && latest.milestoneLabel === snapshot.milestoneLabel) setMilestoneLabel('');
     });
   }
+  async function commitScenario(expected: CreditPlan, next: CreditPlan): Promise<CreditPlan | null> {
+    if (!plan || expected !== plan || busy || transfer.current || !session.isCurrent(ticket)) return null;
+    const isCurrent = () => !transfer.current && creditPlanDirtySections(expected, latestInputs.current).length === 0;
+    if (!isCurrent()) throw new Error('請先儲存或取消尚未儲存的輸入，再採用或復原方案。');
+    const result = await save(next, '修課安排已保存在這台裝置。', ticket, { expected, isCurrent });
+    return result && session.isCurrent(result.ticket) ? result.plan : null;
+  }
   function commitGoals() {
     if (!plan || busy) return;
     if (Object.values(goals).some(invalid)) {
@@ -441,7 +448,11 @@ function Workspace({ scopeKey, schoolName, guest, navigation }: {
           </View> : null}
         <Text style={{ color: t.muted, fontSize: 12, lineHeight: 19 }}>假設規劃課程全部通過且可採計，才有上述預估值。已選課不代表已取得，達到總學分也不等於正式畢業。</Text>
       </View>
-      <CreditPlanFeasibilityCard plan={plan} />
+      <CreditPlanFeasibilityCard plan={plan} scenarioWriter={commitScenario}
+        scenarioBlocked={busy ? '正在儲存或處理備份，請完成後再採用方案。'
+          : dirtySections.length
+            ? `請先儲存或取消尚未儲存的輸入（${dirtySections.join('、')}），再採用或復原方案。`
+            : undefined} />
       <Heading title="設定學分目標" subtitle="只填學校已確認採計的學分；未來課程請安排在下方。" />
       <Card>
         <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 12 }}>

@@ -3,6 +3,9 @@
 import Link from 'next/link';
 import { useState } from 'react';
 import {
+  ASSISTANT_PERMISSIONS_SETTINGS_HREF,
+} from '@campus/shared/src/assistantPermissions';
+import {
   executeCampusAgentWrite,
   type AgentWriteResult,
 } from '@/lib/campusAssistantClient';
@@ -59,11 +62,23 @@ function reviewFields(input: Record<string, unknown>) {
   });
 }
 
+function isPermissionDeniedError(error: unknown): boolean {
+  const code = (error as { code?: string } | null)?.code;
+  return code === 'functions/permission-denied' || code === 'permission-denied';
+}
+
+function permissionDeniedMessage(error: unknown): string {
+  const message = String((error as { message?: string } | null)?.message || '').trim();
+  if (message && !/^Firebase:\s*Error/i.test(message)) return message;
+  return '你在設定關閉了此助理寫入動作，可到設定頁開啟。';
+}
+
 export function AgentWritePanel({ proposal, userId, schoolId, groupId, onCompleted }: Props) {
   const [expanded, setExpanded] = useState(false);
   const [attempted, setAttempted] = useState(false);
   const [result, setResult] = useState<AgentWriteResult | null>(null);
   const [uncertain, setUncertain] = useState(false);
+  const [permissionDenied, setPermissionDenied] = useState<string | null>(null);
 
   if (proposal.toolName === 'createOrder' && !isWebOnlineOrderingEnabled()) return null;
 
@@ -71,6 +86,7 @@ export function AgentWritePanel({ proposal, userId, schoolId, groupId, onComplet
     if (attempted) return;
     setAttempted(true);
     setUncertain(false);
+    setPermissionDenied(null);
     try {
       const response = await executeCampusAgentWrite({
         userId,
@@ -82,8 +98,12 @@ export function AgentWritePanel({ proposal, userId, schoolId, groupId, onComplet
       });
       setResult(response);
       if (response.success) onCompleted();
-    } catch {
-      // A timeout is not proof that the backend did not commit the operation.
+    } catch (error) {
+      if (isPermissionDeniedError(error)) {
+        setPermissionDenied(permissionDeniedMessage(error));
+        return;
+      }
+      // 逾時無法證明後端未寫入。
       setUncertain(true);
     }
   }
@@ -123,6 +143,12 @@ export function AgentWritePanel({ proposal, userId, schoolId, groupId, onComplet
               <strong>伺服器已確認執行成功</strong>
               {reference && <p>紀錄編號：{reference}</p>}
               {path && <Link href={path}>前往服務頁面核對紀錄</Link>}
+            </div>
+          ) : permissionDenied ? (
+            <div className={styles.actionWarning} role="alert">
+              <strong>設定已關閉此寫入動作</strong>
+              <p style={{ whiteSpace: 'pre-line' }}>{permissionDenied}</p>
+              <Link href={ASSISTANT_PERMISSIONS_SETTINGS_HREF}>前往設定</Link>
             </div>
           ) : result || uncertain ? (
             <div className={styles.actionWarning} role="alert">
