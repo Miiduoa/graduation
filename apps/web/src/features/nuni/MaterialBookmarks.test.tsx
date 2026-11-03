@@ -9,7 +9,10 @@ import { MaterialBookmarks } from './MaterialBookmarks';
 const state = vi.hoisted(() => ({
   request: vi.fn(), refresh: vi.fn(), push: vi.fn(), account: 0, context: 'session-a', pendingLogout: false,
 }));
-vi.mock('next/navigation', () => ({ useRouter: () => ({ push: state.push }) }));
+vi.mock('next/navigation', () => ({
+  useRouter: () => ({ push: state.push }),
+  useSearchParams: () => new URLSearchParams(window.location.search),
+}));
 vi.mock('./Session', () => ({
   browserRequest: state.request,
   useNuniSession: () => ({
@@ -118,6 +121,57 @@ it('freshly validates before navigation and uses the original material landing U
   await waitFor(() => expect(state.push).toHaveBeenCalledWith(`/classroom/course/${workspace.id}?view=materials#material-${material.id}`));
   expect(state.request).toHaveBeenCalledTimes(2);
   expect(state.request).toHaveBeenLastCalledWith(`class-workspaces/${workspace.id}/materials/page`, 'session-a', undefined);
+});
+
+it('keeps course context through the saved list, original material and empty-list return', async () => {
+  const context = { campus: 'tw-pu', q: '資料庫', courses: 'studying', task: 'feedback', taskCourse: workspace.id };
+  const query = new URLSearchParams({ ...context, view: 'members', returnTo: 'https://example.test' });
+  window.history.replaceState({}, '', `/classroom/material-bookmarks?${query}#old-target`);
+  persist();
+  render(<MaterialBookmarks />);
+  const back = new URL(screen.getByRole('link', { name: '回我的課程' }).getAttribute('href')!, window.location.origin);
+  expect(back.pathname).toBe('/classroom');
+  expect(Object.fromEntries(back.searchParams)).toEqual(context);
+  expect(back.hash).toBe('');
+  fireEvent.click(await screen.findByRole('button', { name: `開啟「${material.title}」原教材` }));
+  await waitFor(() => expect(state.push).toHaveBeenCalledTimes(1));
+  const destination = new URL(state.push.mock.calls[0][0], window.location.origin);
+  expect(destination.pathname).toBe(`/classroom/course/${workspace.id}`);
+  expect(Object.fromEntries(destination.searchParams)).toEqual({ ...context, view: 'materials' });
+  expect(destination.hash).toBe(`#material-${material.id}`);
+  fireEvent.click(screen.getByRole('button', { name: `移除「${material.title}」的此裝置收藏` }));
+  await screen.findByRole('heading', { name: '還沒有收藏的教材' });
+  expect(screen.getByRole('link', { name: '到我的課程找教材' }).getAttribute('href')).toBe(back.pathname + back.search);
+});
+
+it('uses current URL context for return links even when a saved material cannot be read', async () => {
+  window.history.replaceState({}, '', '/classroom/material-bookmarks?q=資料庫&courses=studying');
+  persist();
+  state.request.mockRejectedValue(new NuniError(503, 'UNAVAILABLE'));
+  const view = render(<MaterialBookmarks />);
+  await screen.findByRole('heading', { name: '暫時無法讀取教材' });
+  window.history.replaceState({}, '', '/classroom/material-bookmarks?q=互動&courses=teaching&schoolId=pu');
+  view.rerender(<MaterialBookmarks />);
+  const back = new URL(screen.getByRole('link', { name: '回我的課程' }).getAttribute('href')!, window.location.origin);
+  expect(Object.fromEntries(back.searchParams)).toEqual({ schoolId: 'pu', q: '互動', courses: 'teaching' });
+});
+
+it('discards a late open when history replaces the return context, then opens with the new context', async () => {
+  window.history.replaceState({}, '', '/classroom/material-bookmarks?q=資料庫&courses=studying');
+  persist();
+  let finish!: (value: unknown) => void;
+  state.request.mockResolvedValueOnce(page()).mockImplementationOnce(() => new Promise((resolve) => { finish = resolve; }));
+  const view = render(<MaterialBookmarks />);
+  fireEvent.click(await screen.findByRole('button', { name: `開啟「${material.title}」原教材` }));
+  await waitFor(() => expect(state.request).toHaveBeenCalledTimes(2));
+  window.history.replaceState({}, '', '/classroom/material-bookmarks?q=互動&courses=teaching');
+  view.rerender(<MaterialBookmarks />);
+  await act(async () => finish(page()));
+  expect(state.push).not.toHaveBeenCalled();
+  fireEvent.click(await screen.findByRole('button', { name: `開啟「${material.title}」原教材` }));
+  await waitFor(() => expect(state.push).toHaveBeenCalledTimes(1));
+  const destination = new URL(state.push.mock.calls[0][0], window.location.origin);
+  expect(Object.fromEntries(destination.searchParams)).toEqual({ q: '互動', courses: 'teaching', view: 'materials' });
 });
 
 it('removes stale metadata and refuses navigation when permission is revoked after listing', async () => {

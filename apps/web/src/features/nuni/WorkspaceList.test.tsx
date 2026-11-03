@@ -67,6 +67,21 @@ it('keeps the device bookmark list reachable even with no current courses', asyn
   await waitFor(() => expect(state.request).toHaveBeenCalledTimes(1));
 });
 
+it('carries the current course search and filters into device bookmarks without unrelated parameters', async () => {
+  window.history.replaceState({}, '', '/classroom?campus=tw-pu&q=Data&courses=studying&task=feedback&taskCourse=course-a&view=members&returnTo=https%3A%2F%2Fexample.test');
+  render(<WorkspaceList />);
+  await screen.findByRole('link', { name: /Data 資料庫系統/ });
+  fireEvent.change(screen.getByRole('searchbox', { name: '搜尋課程名稱' }), {
+    target: { value: '資料庫' },
+  });
+  const href = screen.getByRole('link', { name: '查看收藏的教材' }).getAttribute('href')!;
+  const destination = new URL(href, window.location.origin);
+  expect(destination.pathname).toBe('/classroom/material-bookmarks');
+  expect(Object.fromEntries(destination.searchParams)).toEqual({
+    campus: 'tw-pu', q: '資料庫', courses: 'studying', task: 'feedback', taskCourse: 'course-a',
+  });
+});
+
 it('combines role, archive and normalized name search, then clears an empty result back to active courses', async () => {
   render(<WorkspaceList />);
   await screen.findByRole('link', { name: /Data 資料庫系統/ });
@@ -193,13 +208,34 @@ it('hits a unique course when timetable q carries name plus course code', async 
   window.history.replaceState(
     {},
     '',
-    '/classroom?q=%E8%B3%87%E6%96%99%E5%BA%AB%E7%B3%BB%E7%B5%B1%20CS301&from=timetable&code=CS301',
+    '/classroom?q=%E8%B3%87%E6%96%99%E5%BA%AB%E7%B3%BB%E7%B5%B1&from=timetable&code=CS301',
   );
   render(<WorkspaceList />);
   expect(await screen.findByTestId('classroom-query-unique')).toBeTruthy();
   expect(screen.getByRole('link', { name: /資料庫系統/ })).toBeTruthy();
   expect(screen.queryByRole('link', { name: /互動設計/ })).toBeNull();
   expect(screen.getByText(/· 課表對應/)).toBeTruthy();
+});
+
+it('clears timetable attribution copy after the user edits search from from=timetable', async () => {
+  window.history.replaceState(
+    {},
+    '',
+    '/classroom?q=%E4%BA%92%E5%8B%95%E8%A8%AD%E8%A8%88&from=timetable',
+  );
+  render(<WorkspaceList />);
+  expect(await screen.findByTestId('classroom-query-unique')).toBeTruthy();
+  expect(screen.getByText(/· 課表對應/)).toBeTruthy();
+
+  fireEvent.change(screen.getByRole('searchbox', { name: '搜尋課程名稱' }), {
+    target: { value: '不存在的課程' },
+  });
+  const empty = await screen.findByTestId('classroom-query-none');
+  expect(within(empty).getByText('換個課程關鍵字，或清除篩選再找一次。')).toBeTruthy();
+  expect(within(empty).queryByText(/課表上的這門課/)).toBeNull();
+  expect(screen.queryByText(/· 課表對應/)).toBeNull();
+  expect(new URLSearchParams(window.location.search).get('from')).toBeNull();
+  expect(new URLSearchParams(window.location.search).get('code')).toBeNull();
 });
 
 it('restores URL filters and keeps campus, search and task context in course navigation', async () => {
