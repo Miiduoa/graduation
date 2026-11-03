@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   createMaterialBookmarkBatchResolver,
@@ -13,7 +13,7 @@ import { formatTaipeiDateTime } from '@campus/shared/src/taipeiTime';
 import { useMaterialBookmarks } from '@/lib/materialBookmarks';
 import { useClasses } from './CourseUI';
 import { useNuniSession } from './Session';
-import { classroomCourseHref } from './studyNavigation';
+import { classroomContext, classroomCourseHref, classroomDirectoryHref } from './studyNavigation';
 import shared from './NuniApp.module.css';
 import styles from './CourseLearning.module.css';
 
@@ -63,6 +63,9 @@ export function MaterialBookmarks() {
 }
 
 function Bookmarks({ accountId }: { accountId: string }) {
+  const params = useSearchParams();
+  const context = classroomContext(new URLSearchParams(params?.toString() ?? '')).toString();
+  const courseListHref = classroomDirectoryHref(context);
   const currentClasses = useClasses();
   // Bookmarks remounts for every account or session context replacement.
   const [classes] = useState(() => currentClasses);
@@ -129,7 +132,7 @@ function Bookmarks({ accountId }: { accountId: string }) {
       <p className={shared.muted}>
         這份清單只記在此瀏覽器的目前帳號，換裝置不會同步。教材內容仍需連線讀取，清除瀏覽器資料也會清除收藏。
       </p>
-      <Link href="/classroom">回我的課程</Link>
+      <Link href={courseListHref}>回我的課程</Link>
       {bookmarks.loading && <p role="status">正在讀取此裝置收藏…</p>}
       {bookmarks.error && (
         <p role="alert" className={shared.notice}>
@@ -141,7 +144,7 @@ function Bookmarks({ accountId }: { accountId: string }) {
         <div className={styles.bookmarkEmpty}>
           <h2>還沒有收藏的教材</h2>
           <p>在教材卡按「加入此裝置收藏」，下次就能從這裡接著看。</p>
-          <Link className={`${shared.button} ${styles.bookmarkButton}`} href="/classroom">
+          <Link className={`${shared.button} ${styles.bookmarkButton}`} href={courseListHref}>
             到我的課程找教材
           </Link>
         </div>
@@ -152,8 +155,9 @@ function Bookmarks({ accountId }: { accountId: string }) {
             const id = materialBookmarkId(bookmark);
             return (
               <BookmarkEntry
-                key={`${id}:${validation.revision}`}
+                key={`${id}:${validation.revision}:${context}`}
                 bookmark={bookmark}
+                context={context}
                 resolve={validation.resolve}
                 removing={bookmarks.pending.includes(id)}
                 remove={async () => {
@@ -173,11 +177,13 @@ function Bookmarks({ accountId }: { accountId: string }) {
 
 function BookmarkEntry({
   bookmark,
+  context,
   resolve,
   removing,
   remove,
 }: {
   bookmark: MaterialBookmark;
+  context: string;
   resolve: ResolveBookmark;
   removing: boolean;
   remove: () => Promise<boolean>;
@@ -198,7 +204,7 @@ function BookmarkEntry({
     setResult(resolution);
     setOpening(false);
     if (open && resolution.status === 'available') {
-      router.push(classroomCourseHref(bookmark.courseId, '', { kind: 'material', id: bookmark.materialId }));
+      router.push(classroomCourseHref(bookmark.courseId, context, { kind: 'material', id: bookmark.materialId }));
     }
   }
 
@@ -210,7 +216,7 @@ function BookmarkEntry({
     return () => {
       active.current = false;
     };
-    // The entry remounts when the account, saved item, or refresh revision changes.
+    // The entry remounts when the account, saved item, return context, or refresh revision changes.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 

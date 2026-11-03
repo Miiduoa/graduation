@@ -3,7 +3,7 @@ import { fireEvent, render } from '@testing-library/react-native';
 import { LearningNextClassCard, nextLearningClass } from '../components/LearningNextClassCard';
 import { useTodayTimetableData } from '../hooks/useTodayTimetableData';
 import type { TimetableClassroomDestination } from '../hooks/timetableClassroomNav';
-import type { TodayClass } from '@campus/shared/src/pickNextAction';
+import { TODAY_COPY, type TodayClass } from '@campus/shared/src/pickNextAction';
 import { safeNavigate } from '../utils/safeNavigate';
 
 jest.mock('../hooks/useTodayTimetableData', () => ({ useTodayTimetableData: jest.fn() }));
@@ -23,7 +23,7 @@ const now = Date.parse('2026-10-26T00:00:00.000Z');
 
 type ClassRow = TodayClass & {
   courseCode?: string;
-  courseWorkNav: TimetableClassroomDestination;
+  courseWorkNav?: TimetableClassroomDestination;
 };
 
 const upcoming = (
@@ -31,24 +31,28 @@ const upcoming = (
   offsetMinutes: number,
   location = '',
   anchor = Date.now(),
-  extras: Partial<ClassRow> = {},
+  extras: Partial<ClassRow> & { omitCourseWorkNav?: boolean } = {},
 ): ClassRow => {
-  const title = extras.title ?? '課程 ' + id;
-  const courseId = extras.courseId;
-  const courseCode = extras.courseCode;
-  const courseWorkNav =
-    extras.courseWorkNav ??
-    (courseId
-      ? { kind: 'linked', screen: 'CourseHub', params: { courseId } }
-      : {
-          kind: 'search',
-          screen: 'Classroom',
-          params: {
-            q: title,
-            from: 'timetable',
-            ...(courseCode ? { code: courseCode } : {}),
-          },
-        });
+  const { omitCourseWorkNav, ...rest } = extras;
+  const title = rest.title ?? '課程 ' + id;
+  const courseId = rest.courseId;
+  const courseCode = rest.courseCode;
+  const courseWorkNav = omitCourseWorkNav
+    ? undefined
+    : (rest.courseWorkNav ??
+      (courseId
+        ? { kind: 'linked' as const, screen: 'CourseHub' as const, params: { courseId } }
+        : title.trim()
+          ? {
+              kind: 'search' as const,
+              screen: 'Classroom' as const,
+              params: {
+                q: title,
+                from: 'timetable' as const,
+                ...(courseCode ? { code: courseCode } : {}),
+              },
+            }
+          : undefined));
   return {
     id,
     title,
@@ -57,8 +61,8 @@ const upcoming = (
     location,
     courseId,
     courseCode,
-    courseWorkNav,
-    ...extras,
+    ...(courseWorkNav ? { courseWorkNav } : {}),
+    ...rest,
   };
 };
 
@@ -126,7 +130,7 @@ test('empty personal timetables offer import without pretending to provide an of
   expect(view.queryByText(/校方課程已同步/)).toBeNull();
 });
 
-test('作業與教材 opens Classroom search when the next class has no linkedCourseId', () => {
+test('找這門課 opens Classroom search when the next class has no linkedCourseId', () => {
   jest.mocked(useTodayTimetableData).mockReturnValue({
     status: 'ready',
     classes: [upcoming('A', 60, '主顧324', Date.now(), { courseCode: 'CS301', title: '資料結構' })],
@@ -134,7 +138,7 @@ test('作業與教材 opens Classroom search when the next class has no linkedCo
     retry,
   });
   const view = renderCard();
-  fireEvent.press(view.getByText('作業與教材'));
+  fireEvent.press(view.getByText(TODAY_COPY.findCourse));
   expect(safeNavigate).toHaveBeenCalledWith(mockNavigation, 'Classroom', {
     q: '資料結構',
     from: 'timetable',
@@ -164,19 +168,19 @@ test('作業與教材 opens CourseHub when the next class has linkedCourseId', (
   });
 });
 
-test('作業與教材 opens Classroom home when the next class name is blank', () => {
+test('blank course name without pre-seeded courseWorkNav resolves to Classroom home', () => {
   jest.mocked(useTodayTimetableData).mockReturnValue({
     status: 'ready',
     classes: [
       upcoming('A', 60, '主顧324', Date.now(), {
         title: '   ',
-        courseWorkNav: { kind: 'search', screen: 'Classroom', params: {} },
+        omitCourseWorkNav: true,
       }),
     ],
     termKey: '115|1',
     retry,
   });
   const view = renderCard();
-  fireEvent.press(view.getByText('作業與教材'));
+  fireEvent.press(view.getByText(TODAY_COPY.findCourse));
   expect(safeNavigate).toHaveBeenCalledWith(mockNavigation, 'Classroom', {});
 });
