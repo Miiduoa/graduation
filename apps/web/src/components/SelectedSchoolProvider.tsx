@@ -128,6 +128,7 @@ export function SelectedSchoolProvider({
   const storageKey = schoolPreferenceKey(ownerKey);
   const scope = useMemo(() => ({ storageKey, loading }), [storageKey, loading]);
   const activeScope = useRef<typeof scope | null>(null);
+  const pendingEventSchool = useRef<{ storageKey: string; id: string | null; from: string } | null>(null);
   const [preference, setPreference] = useState<{
     scope: typeof scope;
     schoolId: string | null;
@@ -212,6 +213,25 @@ export function SelectedSchoolProvider({
   }
   const pendingSwitch = pendingScope === confirmationScope && pendingSchoolId !== undefined;
 
+  useEffect(() => {
+    const pending = pendingEventSchool.current;
+    if (!pending) return;
+    if (!identityReady || pending.storageKey !== storageKey || (pathname !== pending.from && pathname !== '/events')) {
+      pendingEventSchool.current = null;
+      return;
+    }
+    if (pathname !== '/events' || !ready || unavailable || requestedId !== pending.id) return;
+    pendingEventSchool.current = null;
+    let storageError: string | null = null;
+    try {
+      localStorage.setItem(storageKey, JSON.stringify({ schoolId: pending.id }));
+    } catch {
+      storageError = '此瀏覽器無法儲存校園偏好，仍可使用網址切換校園。';
+    }
+    // Persist only once navigation has left the old campus-scoped event detail.
+    setPreference({ scope, schoolId: pending.id, stored: true, storageError });
+  }, [identityReady, pathname, ready, requestedId, scope, storageKey, unavailable]);
+
   function canCommitSchool(id: string | null) {
     return (
       activeScope.current === scope &&
@@ -222,15 +242,10 @@ export function SelectedSchoolProvider({
 
   function commitSchool(id: string | null): boolean {
     if (!canCommitSchool(id)) return false;
-    let nextStorageError: string | null = null;
-    try {
-      localStorage.setItem(storageKey, JSON.stringify({ schoolId: id }));
-    } catch {
-      nextStorageError = '此瀏覽器無法儲存校園偏好，仍可使用網址切換校園。';
-    }
-    setPreference({ scope, schoolId: id, stored: true, storageError: nextStorageError });
     setPendingSchoolId(undefined);
-    const next = new URLSearchParams(params?.toString());
+    const leaveEventDetail =
+      /^\/events\/[^/]+\/?$/.test(pathname) && (selectedSchool?.id ?? null) !== id;
+    const next = new URLSearchParams(leaveEventDetail ? undefined : params?.toString());
     if (pathname === '/map' && selectedSchool?.id !== id) {
       next.delete('route');
       next.delete('focus');
@@ -246,15 +261,27 @@ export function SelectedSchoolProvider({
       next.delete('school');
       next.set('campus', 'all');
     }
-    router.replace(`${pathname}?${next.toString()}${window.location.hash}`, { scroll: false });
+    const targetPath = leaveEventDetail ? '/events' : pathname;
+    const fragment = leaveEventDetail ? '' : window.location.hash;
+    if (leaveEventDetail) {
+      pendingEventSchool.current = { storageKey, id, from: pathname };
+    } else {
+      pendingEventSchool.current = null;
+      let storageError: string | null = null;
+      try {
+        localStorage.setItem(storageKey, JSON.stringify({ schoolId: id }));
+      } catch {
+        storageError = '此瀏覽器無法儲存校園偏好，仍可使用網址切換校園。';
+      }
+      setPreference({ scope, schoolId: id, stored: true, storageError });
+    }
+    router.replace(`${targetPath}?${next.toString()}${fragment}`, { scroll: false });
     return true;
   }
 
   function selectSchool(id: string | null) {
-    // loading／目錄未就緒時不接受換校，避免略過草稿確認。
-    if (!canCommitSchool(id)) return;
+    if (!canCommitSchool(id) || id === (selectedSchool?.id ?? null)) return;
     if (hasCampusDraftActivity()) {
-      if (id === (selectedSchool?.id ?? null)) return;
       setPendingSchoolId(id);
       return;
     }
