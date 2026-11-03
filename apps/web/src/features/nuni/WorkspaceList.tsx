@@ -62,8 +62,14 @@ export function WorkspaceList() {
   const queryFromUrl = params.get('q') ?? '';
   const filterFromUrl = params.get('courses');
   const taskFromUrl = params.get('task');
-  const fromTimetable = params.get('from') === 'timetable';
+  const fromTimetableParam = params.get('from') === 'timetable';
   const courseCodeFromUrl = (params.get('code') ?? '').trim().slice(0, 40);
+  // replaceState 不會同步 Next.js useSearchParams；記住已清除的歸因鍵，改搜尋後立刻失效。
+  const timetableAttributionKey = `${fromTimetableParam ? '1' : '0'}\0${courseCodeFromUrl}\0${queryFromUrl}`;
+  const [clearedTimetableAttributionKey, setClearedTimetableAttributionKey] = useState<string | null>(
+    null,
+  );
+  const clearedTimetableAttribution = clearedTimetableAttributionKey === timetableAttributionKey;
 
   useLayoutEffect(() => {
     active.current = true;
@@ -111,6 +117,8 @@ export function WorkspaceList() {
     };
   }, [epoch]);
 
+  const fromTimetable = fromTimetableParam && !clearedTimetableAttribution;
+  const courseCode = clearedTimetableAttribution ? '' : courseCodeFromUrl;
   const contextParams = new URLSearchParams(params.toString());
   if (query) contextParams.set('q', query);
   else contextParams.delete('q');
@@ -129,10 +137,11 @@ export function WorkspaceList() {
   const inScope = (items ?? []).filter((item) => inDirectory(item, filter));
   const shown = filterCoursesByClassroomQuery(inScope, query, {
     fromTimetable,
-    courseCode: courseCodeFromUrl || undefined,
+    courseCode: courseCode || undefined,
   });
   const matchKind = classroomQueryMatchKind(shown.length, Boolean(courseSearchKey(query)));
   const clearTimetableAttribution = () => {
+    setClearedTimetableAttributionKey(timetableAttributionKey);
     const url = new URL(window.location.href);
     if (!url.searchParams.has('from') && !url.searchParams.has('code')) return;
     url.searchParams.delete('from');
