@@ -237,10 +237,15 @@ it('lets a pending write leave the dialog without allowing a duplicate or report
   fireEvent.click(trigger);
   expect(screen.queryByRole('dialog')).toBeNull();
   expect(mocks.create).toHaveBeenCalledOnce();
-  fireEvent.click(screen.getByRole('button', { name: '重新讀取看板' }));
-  await waitFor(() => expect(mocks.list).toHaveBeenCalledTimes(2));
+  // 晚到成功不可在重讀清單前解鎖；畫面也不宣稱已建立
   await act(async () => pending.resolve('late-board'));
   expect(screen.queryByText('已建立「讀書討論」看板。')).toBeNull();
+  expect((screen.getByRole('button', { name: /建立看板/ }) as HTMLButtonElement).disabled).toBe(true);
+  fireEvent.click(trigger);
+  expect(screen.queryByRole('dialog')).toBeNull();
+  expect(mocks.create).toHaveBeenCalledOnce();
+  fireEvent.click(screen.getByRole('button', { name: '重新讀取看板' }));
+  await waitFor(() => expect(mocks.list).toHaveBeenCalledTimes(2));
   expect((screen.getByRole('button', { name: /建立看板/ }) as HTMLButtonElement).disabled).toBe(false);
 });
 

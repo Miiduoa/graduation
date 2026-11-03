@@ -101,7 +101,7 @@ function BoardsContent(props: {
     && (access.status === 'allowed' || access.status === 'denied');
   const permissionRechecked = recovery === 'permission' && permissionRetryFinished && access.status === 'allowed';
   const needsRecovery = recovery !== null && !permissionRechecked;
-  const creationBlocked = createPending || needsRecovery || reviewing || loading || !!error;
+  const creationBlocked = createPending || closedPending || needsRecovery || reviewing || loading || !!error;
   const composeVisible = access.status === 'allowed' && composeEpoch === access.authorizationEpoch && !!user;
 
   useEffect(() => {
@@ -140,10 +140,13 @@ function BoardsContent(props: {
     const authorized = access.isAuthorized;
     try {
       const loaded = await refresh();
-      if (confirmResult && mounted.current && loaded && authorized()) {
-        setRecovery((current) => current === 'unconfirmed' ? null : current);
+      if (mounted.current && loaded && authorized()) {
+        // 關閉待決寫入後，必須重讀成功才解除建立阻擋，避免晚到成功後尚未確認清單又再建一筆
         setClosedPending(false);
-        setNotice('已重新讀取清單。請先檢查是否已有剛才的看板，再決定是否建立。');
+        if (confirmResult) {
+          setRecovery((current) => current === 'unconfirmed' ? null : current);
+          setNotice('已重新讀取清單。請先檢查是否已有剛才的看板，再決定是否建立。');
+        }
       }
     } finally {
       reviewLock.current = false;
