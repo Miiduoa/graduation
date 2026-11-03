@@ -3,6 +3,7 @@ import {
   filterCoursesByClassroomQuery,
   resolveTimetableClassroomNav,
   timetableCourseSearchQuery,
+  todayCourseWorkNavigateTarget,
 } from '../hooks/timetableClassroomNav';
 
 describe('timetable classroom navigation', () => {
@@ -39,6 +40,35 @@ describe('timetable classroom navigation', () => {
       screen: 'Classroom',
       params: {},
     });
+  });
+
+  it('maps today linked exits to CourseHub group params and search exits unchanged', () => {
+    expect(
+      todayCourseWorkNavigateTarget(
+        resolveTimetableClassroomNav({
+          linkedCourseId: 'cw_11111111-1111-4111-8111-111111111111',
+          courseName: '資料庫',
+        }),
+      ),
+    ).toEqual({
+      screen: 'CourseHub',
+      params: {
+        courseSpaceId: 'cw_11111111-1111-4111-8111-111111111111',
+        groupId: 'cw_11111111-1111-4111-8111-111111111111',
+        section: 'week',
+      },
+    });
+    expect(
+      todayCourseWorkNavigateTarget(
+        resolveTimetableClassroomNav({ courseName: '資料庫系統', courseCode: 'CS301' }),
+      ),
+    ).toEqual({
+      screen: 'Classroom',
+      params: { q: '資料庫系統', from: 'timetable', code: 'CS301' },
+    });
+    expect(
+      todayCourseWorkNavigateTarget(resolveTimetableClassroomNav({ courseName: '   ' })),
+    ).toEqual({ screen: 'Classroom', params: {} });
   });
 });
 
