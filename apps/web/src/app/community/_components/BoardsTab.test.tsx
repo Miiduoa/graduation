@@ -237,16 +237,47 @@ it('lets a pending write leave the dialog without allowing a duplicate or report
   fireEvent.click(trigger);
   expect(screen.queryByRole('dialog')).toBeNull();
   expect(mocks.create).toHaveBeenCalledOnce();
-  // 晚到成功不可在重讀清單前解鎖；畫面也不宣稱已建立
+  // 晚到成功不可在使用者確認重讀前解鎖；畫面也不宣稱已建立；會再觸發一次清單重讀
   await act(async () => pending.resolve('late-board'));
   expect(screen.queryByText('已建立「讀書討論」看板。')).toBeNull();
   expect((screen.getByRole('button', { name: /建立看板/ }) as HTMLButtonElement).disabled).toBe(true);
   fireEvent.click(trigger);
   expect(screen.queryByRole('dialog')).toBeNull();
   expect(mocks.create).toHaveBeenCalledOnce();
-  fireEvent.click(screen.getByRole('button', { name: '重新讀取看板' }));
   await waitFor(() => expect(mocks.list).toHaveBeenCalledTimes(2));
+  fireEvent.click(screen.getByRole('button', { name: '重新讀取看板' }));
+  await waitFor(() => expect(mocks.list).toHaveBeenCalledTimes(3));
   expect((screen.getByRole('button', { name: /建立看板/ }) as HTMLButtonElement).disabled).toBe(false);
+});
+
+it('keeps creation blocked when a reload races ahead of a late closed success', async () => {
+  allow();
+  const pending = deferred();
+  const earlyRead = deferred<unknown[]>();
+  mocks.create.mockReturnValue(pending.promise);
+  render(<BoardsTab schoolId="pu" schoolSearch="?schoolId=pu" />);
+  const dialog = await openCreate();
+  fireEvent.click(within(dialog).getByRole('button', { name: '建立' }));
+  fireEvent.click(within(dialog).getByText('關閉視窗', { selector: 'button' }));
+  expect(screen.getByText('已關閉視窗，沒有撤回建立要求。請重新讀取看板確認結果。')).toBeTruthy();
+  // 重讀發生在寫入完成前：清單可能仍舊，不可因此清掉 closedPending
+  mocks.list.mockReturnValueOnce(earlyRead.promise);
+  fireEvent.click(screen.getByRole('button', { name: '重新讀取看板' }));
+  await act(async () => earlyRead.resolve([]));
+  expect((screen.getByRole('button', { name: /建立看板/ }) as HTMLButtonElement).disabled).toBe(true);
+  expect(mocks.create).toHaveBeenCalledOnce();
+  expect(mocks.list).toHaveBeenCalledTimes(2);
+  // 晚到成功：重新設回待確認並再觸發清單重讀；不可靜默解鎖再建第二筆
+  mocks.list.mockResolvedValueOnce([]);
+  await act(async () => pending.resolve('late-board'));
+  await waitFor(() => expect(mocks.list).toHaveBeenCalledTimes(3));
+  expect(screen.queryByText('已建立「讀書討論」看板。')).toBeNull();
+  expect(screen.getByText('已關閉視窗，沒有撤回建立要求。請重新讀取看板確認結果。')).toBeTruthy();
+  const trigger = screen.getByRole('button', { name: /建立看板/ });
+  expect((trigger as HTMLButtonElement).disabled).toBe(true);
+  fireEvent.click(trigger);
+  expect(screen.queryByRole('dialog')).toBeNull();
+  expect(mocks.create).toHaveBeenCalledOnce();
 });
 
 it.each(['close', 'escape'] as const)('keeps an unconfirmed result blocked after %s leaves the dialog', async (method) => {

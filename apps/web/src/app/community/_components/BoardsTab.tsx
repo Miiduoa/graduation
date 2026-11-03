@@ -71,6 +71,7 @@ function BoardsContent(props: {
   const recoveryArea = useRef<HTMLElement>(null);
   const recoveryReadError = useRef<HTMLDivElement>(null);
   const reviewLock = useRef(false);
+  const createPendingRef = useRef(false);
   const mounted = useRef(false);
   useEffect(() => {
     mounted.current = true;
@@ -133,14 +134,17 @@ function BoardsContent(props: {
   }
 
   async function reviewBoards(confirmResult = true) {
-    if (reviewLock.current || (confirmResult && createPending)) return;
+    // 未確認結果的恢復流程仍避開與寫入重疊；關閉待決的重讀可進行，但寫入期間發起的重讀不解除阻擋
+    if (reviewLock.current || (confirmResult && createPendingRef.current)) return;
     keepRecoveryFocus();
     reviewLock.current = true;
     setReviewing(true);
     const authorized = access.isAuthorized;
+    const reloadDuringCreate = !confirmResult && createPendingRef.current;
     try {
       const loaded = await refresh();
-      if (mounted.current && loaded && authorized()) {
+      // 寫入期間發起的重讀（或完成時寫入仍在進行）清單可能仍舊：保留 closedPending，須寫入結束後再重讀才解除
+      if (mounted.current && loaded && authorized() && !createPendingRef.current && !reloadDuringCreate) {
         // 關閉待決寫入後，必須重讀成功才解除建立阻擋，避免晚到成功後尚未確認清單又再建一筆
         setClosedPending(false);
         if (confirmResult) {
@@ -243,7 +247,7 @@ function BoardsContent(props: {
       {permissionRetryFinished && <p role="status">{access.status === 'allowed'
         ? '已重新確認管理權限，可以繼續建立看板。'
         : '你目前沒有這所學校的看板管理權限。'}</p>}
-      {closedPending && !needsRecovery && <button type="button" className="btn" disabled={loading} onClick={() => void reviewBoards(false)}>重新讀取看板</button>}
+      {closedPending && !needsRecovery && <button type="button" className="btn" disabled={loading || reviewing} onClick={() => void reviewBoards(false)}>重新讀取看板</button>}
       {needsRecovery && !composeVisible && access.status === 'allowed' && (
         <div>
           <p role="alert">{recovery === 'permission'
@@ -411,7 +415,10 @@ function BoardsContent(props: {
           schoolId={schoolId}
           uid={user.uid}
           isAuthorized={access.isAuthorized}
-          onPendingChange={(pending) => { if (mounted.current) setCreatePending(pending); }}
+          onPendingChange={(pending) => {
+            createPendingRef.current = pending;
+            if (mounted.current) setCreatePending(pending);
+          }}
           onFailure={(kind) => {
             if (!mounted.current) return;
             keepRecoveryFocus();
@@ -441,6 +448,14 @@ function BoardsContent(props: {
             setFocusRecovery((current) => current + 1);
             void refresh();
           }}
+          onClosedSuccess={() => {
+            if (!mounted.current || !access.isAuthorized()) return;
+            // Modal 已關時晚到成功：重新設回待確認並重讀清單（不經 reviewBoards，以免在確認前解鎖）
+            setClosedPending(true);
+            setNotice('已關閉視窗，沒有撤回建立要求。請重新讀取看板確認結果。');
+            setFocusRecovery((current) => current + 1);
+            void refresh();
+          }}
         />
       )}
     </div>
@@ -455,6 +470,7 @@ function CreateBoardModal(props: {
   onPendingChange: (pending: boolean) => void;
   onFailure: (kind: CreationFailure) => void;
   onCreated: (name: string) => void;
+  onClosedSuccess: () => void;
   onRecover: (permissionDenied: boolean) => void;
 }) {
   const [name, setName] = useState('');
@@ -490,6 +506,7 @@ function CreateBoardModal(props: {
     props.onPendingChange(true);
     setBusy(true);
     setValidation('');
+    let created = false;
     try {
       await createBoard({
         schoolId: props.schoolId,
@@ -499,6 +516,7 @@ function CreateBoardModal(props: {
         defaultAnonymous: anon,
         createdBy: props.uid,
       });
+      created = true;
       if (active.current && props.isAuthorized()) props.onCreated(boardName);
     } catch (error) {
       const code = error && typeof error === 'object' && 'code' in error ? error.code : null;
@@ -508,6 +526,8 @@ function CreateBoardModal(props: {
     } finally {
       inFlight.current = false;
       props.onPendingChange(false);
+      // 先清 createPending，再回報關閉後的晚到成功，才能接著觸發清單重讀
+      if (created && !active.current && props.isAuthorized()) props.onClosedSuccess();
       if (active.current && props.isAuthorized()) setBusy(false);
     }
   };
