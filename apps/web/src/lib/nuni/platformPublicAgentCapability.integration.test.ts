@@ -1,10 +1,60 @@
 // @vitest-environment node
 import { EventEmitter } from 'node:events';
-import { afterEach, beforeEach, expect, it, vi } from 'vitest';
+import { spawnSync } from 'node:child_process';
+import { mkdtempSync, readdirSync, realpathSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join, resolve } from 'node:path';
+import { pathToFileURL } from 'node:url';
+import { afterAll, afterEach, beforeAll, beforeEach, expect, it, vi } from 'vitest';
 import { NextRequest } from 'next/server';
 import { handleNuni } from './api';
 import { SESSION_COOKIE, sealCookie, sessionContext } from './server';
-import { registerPlatformPublicTaskRoutes } from '../../../../../deploy/nuni-api/platform-public-agent/fastify-candidate';
+
+type Handler = (request: never, reply: never) => Promise<unknown>;
+let registerPlatformPublicTaskRoutes: (
+  app: { post: (path: string, options: unknown, handler: Handler) => void },
+  options: unknown,
+) => void;
+let compiled: string;
+beforeAll(async () => {
+  const root = resolve(process.cwd(), '../..');
+  const source = join(root, 'deploy/nuni-api/platform-public-agent');
+  compiled = mkdtempSync(join(tmpdir(), 'campus-capability-wire-'));
+  const run = spawnSync(
+    process.execPath,
+    [
+      join(root, 'node_modules/typescript/bin/tsc'),
+      ...readdirSync(source)
+        .filter((name) => name.endsWith('.ts'))
+        .map((name) => join(source, name)),
+      '--strict',
+      '--target',
+      'ES2022',
+      '--module',
+      'commonjs',
+      '--moduleResolution',
+      'node',
+      '--types',
+      'node',
+      '--typeRoots',
+      realpathSync(join(root, 'node_modules/@types')),
+      '--noUncheckedIndexedAccess',
+      '--exactOptionalPropertyTypes',
+      '--skipLibCheck',
+      '--outDir',
+      compiled,
+    ],
+    { encoding: 'utf8' },
+  );
+  if (run.status !== 0) throw new Error(run.stdout + run.stderr);
+  const compiledApi = await import(
+    /* @vite-ignore */ pathToFileURL(join(compiled, 'fastify-candidate.js')).href
+  );
+  registerPlatformPublicTaskRoutes = compiledApi.registerPlatformPublicTaskRoutes;
+});
+afterAll(() => {
+  if (compiled) rmSync(compiled, { recursive: true, force: true });
+});
 
 const session = { sessionHandle: `ps_${'a'.repeat(43)}`, expiresAt: Date.now() + 3_600_000 };
 const catalog = {
@@ -50,7 +100,7 @@ beforeEach(() => {
         },
       },
       accounts: {
-        resolveSession: async (authorization) => {
+        resolveSession: async (authorization: string | undefined) => {
           if (authorization !== `Platform ${session.sessionHandle}`) throw new Error('invalid');
           return {
             platformAccountId: 'pa_00000000-0000-0000-0000-000000000001',
@@ -60,7 +110,7 @@ beforeEach(() => {
         },
       },
       policy: { providerBudgetKey: 'test', providerDailyLimit: 10, accountDailyLimit: 5 },
-      readPublicCatalog: async (schoolId) => {
+      readPublicCatalog: async (schoolId: string) => {
         if (offline) throw new Error('source offline');
         return schoolId === 'pu' ? catalog : null;
       },
