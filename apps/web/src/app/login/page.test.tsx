@@ -21,6 +21,7 @@ const { replace, signIn, state } = vi.hoisted(() => ({
     retryOptions: vi.fn(),
     selectedSchoolId: null as string | null,
     schoolDirectoryLoading: false,
+    requestedUnavailable: false,
     selectSchool: vi.fn(),
   },
 }));
@@ -62,6 +63,7 @@ vi.mock('@/components/SelectedSchoolProvider', () => ({
     selectedSchool: state.selectedSchoolId ? { id: state.selectedSchoolId, name: '校園' } : null,
     loading: state.schoolDirectoryLoading,
     catalogStatus: 'ready',
+    requestedUnavailable: state.requestedUnavailable,
     selectSchool: state.selectSchool,
     schools: [{ id: 'pu', name: '靜宜大學' }, { id: 'ntu', name: '國立臺灣大學' }],
   }),
@@ -86,6 +88,7 @@ beforeEach(() => {
   state.optionsError = false;
   state.selectedSchoolId = null;
   state.schoolDirectoryLoading = false;
+  state.requestedUnavailable = false;
   signIn.mockResolvedValue({ uid: 'one' });
   vi.stubGlobal('location', { ...window.location, replace });
 });
@@ -397,6 +400,16 @@ it('keeps the requested campus while the directory is loading', () => {
   const destination = new URL(screen.getByRole('link', { name: '不登入，繼續瀏覽' }).getAttribute('href')!, 'https://campus.local');
   expect(destination.pathname).toBe('/search');
   expect(destination.searchParams.get('schoolId')).toBe('ntu');
+});
+
+it('keeps an unavailable campus request for the school selector', () => {
+  state.user = null;
+  state.requestedUnavailable = true;
+  state.params = new URLSearchParams({ returnUrl: '/grades', schoolId: 'unknown-campus' });
+  render(<LoginPage />);
+  const destination = new URL(screen.getByRole('link', { name: '不登入，繼續瀏覽' }).getAttribute('href')!, 'https://campus.local');
+  expect(destination.searchParams.get('schoolId')).toBe('unknown-campus');
+  expect(destination.searchParams.has('campus')).toBe(false);
 });
 
 it('offers school verification for an academic task without a misleading Google alternative', () => {
