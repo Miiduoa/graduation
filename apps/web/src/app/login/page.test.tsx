@@ -7,6 +7,10 @@ import {
   TEACHER_LMS_UNAVAILABLE_CODE,
   TEACHER_LMS_UNAVAILABLE_COPY,
 } from '@/lib/schoolLoginErrorCopy';
+import {
+  PU_ECAMPUS_DATA_PAUSED_CODE,
+  PU_ECAMPUS_DATA_PAUSED_MESSAGE,
+} from '@campus/shared/src/puEcampusDataPolicy';
 import { STUDENT_ID_PREPARING_COPY } from '@/lib/signInOptions';
 const { replace, signIn, state } = vi.hoisted(() => ({
   replace: vi.fn(),
@@ -350,6 +354,20 @@ it.each([
     expect(replace).not.toHaveBeenCalled();
   },
 );
+
+it('shows the E-campus pause notice instead of a credential failure', async () => {
+  state.user = null;
+  state.studentId = true;
+  signIn.mockRejectedValue(
+    new SchoolLoginHttpError(503, PU_ECAMPUS_DATA_PAUSED_MESSAGE, PU_ECAMPUS_DATA_PAUSED_CODE),
+  );
+  render(<LoginPage />);
+  fillSchoolLogin();
+  fireEvent.submit(screen.getByLabelText('學號').closest('form')!);
+  expect((await screen.findByRole('alert')).textContent).toBe(PU_ECAMPUS_DATA_PAUSED_MESSAGE);
+  expect(screen.queryByText(/學號或密碼錯誤|登入失敗/)).toBeNull();
+  expect(replace).not.toHaveBeenCalled();
+});
 
 it('shows the teacher LMS notice from the error code even if the server body is unknown', async () => {
   state.user = null;
