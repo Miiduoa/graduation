@@ -80,10 +80,37 @@ it('provider quota failure remains a terminal operation and requires explicit ac
   render(<PublicNavigationTask port={port(call)} />);
   await disclose();
   fireEvent.click(screen.getByRole('button', { name: '同意傳送並取得建議' }));
-  expect((await screen.findByRole('alert')).textContent).toContain('免費額度');
+  expect((await screen.findByRole('alert')).textContent).toContain('使用限制');
   expect(screen.queryByRole('button', { name: '同意傳送並取得建議' })).toBeNull();
   expect(screen.getByRole('button', { name: '結案並開始新任務' })).toBeTruthy();
   expect(call.mock.calls.some((c) => c[0] === 'route')).toBe(false);
+});
+it('keeps the question after a verified free assurance denial and explicit close', async () => {
+  const call = vi.fn(async (action: string) => {
+    if (action === 'status') return null;
+    if (action === 'prepareGroq') return disclosure;
+    if (action === 'confirm') return { confirmationId: 'c' };
+    if (action === 'execute')
+      return {
+        status: 'failed',
+        operationId: op,
+        expiresAt: 123,
+        failureCode: 'FREE_ASSURANCE_UNAVAILABLE',
+      };
+    if (action === 'ack') return { status: 'acknowledged', operationId: op };
+    throw new Error('unexpected');
+  });
+  render(<PublicNavigationTask port={port(call)} />);
+  await disclose();
+  fireEvent.click(screen.getByRole('button', { name: '同意傳送並取得建議' }));
+  expect((await screen.findByRole('alert')).textContent).toContain('沒有傳送給 Groq');
+  fireEvent.click(screen.getByRole('button', { name: '結案並開始新任務' }));
+  fireEvent.click(screen.getByRole('button', { name: '確認結案' }));
+  expect(((await screen.findByLabelText('起點與終點')) as HTMLInputElement).value).toBe(
+    '我在甲樓，想去乙館',
+  );
+  expect(call.mock.calls.filter((args) => args[0] === 'execute')).toHaveLength(1);
+  expect(call.mock.calls.some((args) => args[0] === 'route')).toBe(false);
 });
 it('late plan from old account is discarded and cannot trigger route', async () => {
   let finish!: (value: unknown) => void;

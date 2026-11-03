@@ -6,7 +6,7 @@ import { pathToFileURL } from 'node:url';
 
 const { AbortController, Response } = globalThis;
 
-const { createGroqServerTransport } = await import(
+const { createGroqServerTransport, isFreeAssuranceDenied } = await import(
   pathToFileURL(join(process.env.PLATFORM_AGENT_COMPILED, 'groq-server-transport.js')).href
 );
 const endpoint = 'https://api.groq.com/openai/v1/chat/completions';
@@ -73,15 +73,23 @@ test('missing or declined no-charge guard, cancellation, and errors fail closed 
     calls++;
     throw Error(credential);
   };
-  for (const guard of [
-    async () => false,
-    async () => {
+  const refused = createGroqServerTransport({
+    credential,
+    fetch,
+    freeOnlyGuard: async () => false,
+  });
+  await assert.rejects(
+    refused(endpoint, init(), beforeSend),
+    (error) => isFreeAssuranceDenied(error) && !String(error).includes(credential),
+  );
+  const broken = createGroqServerTransport({
+    credential,
+    fetch,
+    freeOnlyGuard: async () => {
       throw Error(credential);
     },
-  ]) {
-    const transport = createGroqServerTransport({ credential, fetch, freeOnlyGuard: guard });
-    await denied(transport(endpoint, init(), beforeSend));
-  }
+  });
+  await denied(broken(endpoint, init(), beforeSend));
   assert.equal(calls, 0);
   const signal = new AbortController();
   signal.abort();

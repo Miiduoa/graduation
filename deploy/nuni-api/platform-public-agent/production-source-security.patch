@@ -689,12 +689,13 @@ index 0000000..a1dd539
 +}
 diff --git a/apps/api/src/platform-public-agent/groq-navigation-plan.ts b/apps/api/src/platform-public-agent/groq-navigation-plan.ts
 new file mode 100644
-index 0000000..cf83065
+index 0000000..c7f18d2
 --- /dev/null
 +++ b/apps/api/src/platform-public-agent/groq-navigation-plan.ts
-@@ -0,0 +1,330 @@
+@@ -0,0 +1,332 @@
 +import { exactRecord, FREE_MODEL, PublicAgentError } from './contract';
 +import { publicSnapshot, type PublicCatalogReader } from './navigation';
++import { isFreeAssuranceDenied } from './groq-server-transport';
 +
 +// Unregistered candidate: a future trusted transport must add an authorized server
 +// credential for exactly this endpoint. This module reads no credentials or environment.
@@ -971,6 +972,7 @@ index 0000000..cf83065
 +          return await options.fetch!(GROQ_ENDPOINT, request);
 +        } catch (error) {
 +          if (sessionFailed && error === sessionError) throw error;
++          if (options.transport && isFreeAssuranceDenied(error)) throw error;
 +          throw new PublicAgentError('PUBLIC_AGENT_PROVIDER_UNAVAILABLE', 503);
 +        }
 +      });
@@ -1015,7 +1017,7 @@ index 0000000..cf83065
 +      projectSource(input, await readSource());
 +      return plan;
 +    } catch (error) {
-+      if (error instanceof PublicAgentError) throw error;
++      if (error instanceof PublicAgentError || isFreeAssuranceDenied(error)) throw error;
 +      throw new PublicAgentError('PUBLIC_AGENT_PROVIDER_UNAVAILABLE', 503);
 +    } finally {
 +      clearTimeout(timer);
@@ -1025,13 +1027,24 @@ index 0000000..cf83065
 +}
 diff --git a/apps/api/src/platform-public-agent/groq-server-transport.ts b/apps/api/src/platform-public-agent/groq-server-transport.ts
 new file mode 100644
-index 0000000..ba1919c
+index 0000000..76e6f56
 --- /dev/null
 +++ b/apps/api/src/platform-public-agent/groq-server-transport.ts
-@@ -0,0 +1,69 @@
+@@ -0,0 +1,81 @@
 +import { PublicAgentError } from './contract';
 +
 +const ENDPOINT = 'https://api.groq.com/openai/v1/chat/completions';
++// Only this module can create a denial proof, after a definitive guard result
++// and before its provider fetch. It contains no input or credential data.
++const deniedProofs = new WeakSet<object>();
++export function isFreeAssuranceDenied(value: unknown): boolean {
++  return typeof value === 'object' && value !== null && deniedProofs.has(value);
++}
++function assuranceDenied(): Error {
++  const error = new Error('free assurance unavailable');
++  deniedProofs.add(error);
++  return error;
++}
 +type FreeOnlyGuard = (signal: AbortSignal) => Promise<boolean>;
 +type Options = { credential: string; fetch: typeof fetch; freeOnlyGuard: FreeOnlyGuard };
 +const unavailable = (): never => {
@@ -1069,14 +1082,15 @@ index 0000000..ba1919c
 +      return unavailable();
 +    const signal = init.signal;
 +    if (signal.aborted) throw new PublicAgentError('PUBLIC_AGENT_PROVIDER_CANCELLED', 503);
-+    let allowed = false;
++    let allowed: unknown;
 +    try {
-+      allowed = (await options.freeOnlyGuard(signal)) === true;
++      allowed = await options.freeOnlyGuard(signal);
 +    } catch {
 +      return unavailable();
 +    }
 +    if (signal.aborted) throw new PublicAgentError('PUBLIC_AGENT_PROVIDER_CANCELLED', 503);
-+    if (!allowed) return unavailable();
++    if (allowed === false) throw assuranceDenied();
++    if (allowed !== true) return unavailable();
 +    // Recheck the session after the potentially slow guard and immediately before sending.
 +    await beforeSend();
 +    if (signal.aborted) throw new PublicAgentError('PUBLIC_AGENT_PROVIDER_CANCELLED', 503);
@@ -1244,10 +1258,10 @@ index 0000000..cf48c5e
 +}
 diff --git a/apps/api/src/platform-public-agent/ledger.ts b/apps/api/src/platform-public-agent/ledger.ts
 new file mode 100644
-index 0000000..6872452
+index 0000000..3e2a815
 --- /dev/null
 +++ b/apps/api/src/platform-public-agent/ledger.ts
-@@ -0,0 +1,985 @@
+@@ -0,0 +1,987 @@
 +import { createHash, randomBytes, randomUUID, timingSafeEqual } from 'node:crypto';
 +import {
 +  exactRecord,
@@ -1300,6 +1314,7 @@ index 0000000..6872452
 +  | 'INVALID_RESULT'
 +  | 'EXECUTION_FAILED'
 +  | 'FREE_QUOTA_UNAVAILABLE'
++  | 'FREE_ASSURANCE_UNAVAILABLE'
 +  | 'DESTINATION_UNCLEAR'
 +  | 'INVALID_PROVIDER_RESPONSE'
 +  | 'NOT_DISPATCHED';
@@ -1395,6 +1410,7 @@ index 0000000..6872452
 +  value === 'INVALID_RESULT' ||
 +  value === 'EXECUTION_FAILED' ||
 +  value === 'FREE_QUOTA_UNAVAILABLE' ||
++  value === 'FREE_ASSURANCE_UNAVAILABLE' ||
 +  value === 'DESTINATION_UNCLEAR' ||
 +  value === 'INVALID_PROVIDER_RESPONSE' ||
 +  value === 'NOT_DISPATCHED';
@@ -2776,10 +2792,10 @@ index 0000000..d7a259a
 +}
 diff --git a/apps/api/src/platform-public-agent/service.ts b/apps/api/src/platform-public-agent/service.ts
 new file mode 100644
-index 0000000..a5a1c9a
+index 0000000..94149f0
 --- /dev/null
 +++ b/apps/api/src/platform-public-agent/service.ts
-@@ -0,0 +1,548 @@
+@@ -0,0 +1,551 @@
 +import { isDeepStrictEqual } from 'node:util';
 +import { PlatformPublicAdmission, type PlatformSessionResolver } from './admission';
 +import {
@@ -2795,6 +2811,7 @@ index 0000000..a5a1c9a
 +  type PlatformTaskActor,
 +} from './contract';
 +import { PlatformPublicAgentLedger } from './ledger';
++import { isFreeAssuranceDenied } from './groq-server-transport';
 +import {
 +  exactNavigation,
 +  validatedPlan,
@@ -3179,20 +3196,22 @@ index 0000000..a5a1c9a
 +        // Only definitive provider responses may finish the operation. A lost
 +        // database acknowledgement remains unknown and is never retried as work.
 +        const knownFailure =
-+          error instanceof PublicAgentError
-+            ? (
-+                {
-+                  PUBLIC_AGENT_FREE_QUOTA_UNAVAILABLE: 'FREE_QUOTA_UNAVAILABLE',
-+                  PUBLIC_AGENT_DESTINATION_UNCLEAR: 'DESTINATION_UNCLEAR',
-+                  PUBLIC_AGENT_PROVIDER_INVALID_RESPONSE: 'INVALID_PROVIDER_RESPONSE',
-+                } as const
-+              )[
-+                error.code as
-+                  | 'PUBLIC_AGENT_FREE_QUOTA_UNAVAILABLE'
-+                  | 'PUBLIC_AGENT_DESTINATION_UNCLEAR'
-+                  | 'PUBLIC_AGENT_PROVIDER_INVALID_RESPONSE'
-+              ]
-+            : undefined;
++          isFreeAssuranceDenied(error) && task.binding.provider === FREE_PROVIDER
++            ? 'FREE_ASSURANCE_UNAVAILABLE'
++            : error instanceof PublicAgentError
++              ? (
++                  {
++                    PUBLIC_AGENT_FREE_QUOTA_UNAVAILABLE: 'FREE_QUOTA_UNAVAILABLE',
++                    PUBLIC_AGENT_DESTINATION_UNCLEAR: 'DESTINATION_UNCLEAR',
++                    PUBLIC_AGENT_PROVIDER_INVALID_RESPONSE: 'INVALID_PROVIDER_RESPONSE',
++                  } as const
++                )[
++                  error.code as
++                    | 'PUBLIC_AGENT_FREE_QUOTA_UNAVAILABLE'
++                    | 'PUBLIC_AGENT_DESTINATION_UNCLEAR'
++                    | 'PUBLIC_AGENT_PROVIDER_INVALID_RESPONSE'
++                ]
++              : undefined;
 +        if (knownFailure) {
 +          try {
 +            const failed = await this.bounded(undefined, (step) =>

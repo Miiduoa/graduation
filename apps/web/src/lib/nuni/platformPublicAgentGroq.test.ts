@@ -173,6 +173,18 @@ it('distinguishes a proven undelivered operation from an unknown failure code', 
     ),
   ).toThrow();
 });
+it('projects only the known free assurance refusal as a terminal failure', () => {
+  const failed = {
+    status: 'failed',
+    operationId: op,
+    expiresAt: 123,
+    failureCode: 'FREE_ASSURANCE_UNAVAILABLE',
+  };
+  expect(projectPlatformPublicAgent('execute', failed, { confirmationId: 'pagc_test', request })).toEqual(failed);
+  expect(() => projectPlatformPublicAgent('execute', { ...failed, failureCode: 'FREE_ASSURANCE_FAKE' }, {
+    confirmationId: 'pagc_test', request,
+  })).toThrow();
+});
 it('projects reconciliation only when the failed result matches the requested operation', () => {
   const body = { task: 'public-campus-navigation', schoolId: 'pu', operationId: op };
   expect(

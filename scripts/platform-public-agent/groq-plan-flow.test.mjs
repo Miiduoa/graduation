@@ -9,6 +9,7 @@ const load = (name) =>
   import(pathToFileURL(join(process.env.PLATFORM_AGENT_COMPILED, `${name}.js`)).href);
 const { PlatformPublicTaskService } = await load('service');
 const { createGroqNavigationPlanner } = await load('groq-navigation-plan');
+const { createGroqServerTransport, isFreeAssuranceDenied } = await load('groq-server-transport');
 const catalog = () => ({
   schoolId: 'pu',
   updatedAt: '2026-10-19',
@@ -187,6 +188,136 @@ test('model quota refusal is terminal failed, never success or silent fallback',
   });
   assert.equal(state.status, 'failed');
   assert.deepEqual(quotas(f.db), [1, 1]);
+});
+test('a definitive free-only guard refusal records an unsent failure and never invokes provider on replay', async () => {
+  let sent = 0;
+  const transport = createGroqServerTransport({
+    credential: 'synthetic-only',
+    fetch: async () => {
+      sent++;
+      throw new Error('unexpected provider call');
+    },
+    freeOnlyGuard: async () => false,
+  });
+  const f = fixture({ transport });
+  const p = await f.prepare();
+  const c = await f.service.confirm(f.authorization, { approved: true, request: p.request });
+  const body = { confirmationId: c.confirmationId, request: p.request };
+  const result = await f.service.execute(f.authorization, body);
+  assert.equal(result.status, 'failed');
+  assert.equal(result.failureCode, 'FREE_ASSURANCE_UNAVAILABLE');
+  assert.equal(sent, 0);
+  assert.deepEqual(await f.service.execute(f.authorization, body), result);
+  assert.equal(sent, 0);
+  assert.deepEqual(quotas(f.db), [1, 1]);
+});
+test('guard errors and a late denial after timeout stay unknown without provider dispatch', async () => {
+  let sent = 0,
+    release;
+  const held = new Promise((resolve) => {
+    release = resolve;
+  });
+  const transport = createGroqServerTransport({
+    credential: 'synthetic-only',
+    fetch: async () => {
+      sent++;
+      throw new Error('unexpected');
+    },
+    freeOnlyGuard: async () => {
+      await held;
+      return false;
+    },
+  });
+  const f = fixture({ transport, timeoutMs: 20 });
+  const p = await f.prepare();
+  const c = await f.service.confirm(f.authorization, { approved: true, request: p.request });
+  const body = { confirmationId: c.confirmationId, request: p.request };
+  await rejectsCode(f.service.execute(f.authorization, body), 'PUBLIC_AGENT_OUTCOME_UNKNOWN');
+  release();
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal((await f.service.read(f.authorization, p.request)).status, 'unknown');
+  assert.equal((await f.service.execute(f.authorization, body)).status, 'unknown');
+  assert.equal(sent, 0);
+});
+test('lost failure commit acknowledgement stays unknown until durable status is queried', async () => {
+  let sent = 0;
+  const transport = createGroqServerTransport({
+    credential: 'synthetic-only',
+    fetch: async () => {
+      sent++;
+      throw new Error('unexpected');
+    },
+    freeOnlyGuard: async () => false,
+  });
+  const f = fixture({ transport });
+  const p = await f.prepare();
+  const c = await f.service.confirm(f.authorization, { approved: true, request: p.request });
+  f.db.beforeAction = (action, values) => {
+    if (action === 'finalize-operation' && values[7] === 'FREE_ASSURANCE_UNAVAILABLE') {
+      f.db.loseCommitAck = true;
+      f.db.beforeAction = null;
+    }
+  };
+  const body = { confirmationId: c.confirmationId, request: p.request };
+  await rejectsCode(f.service.execute(f.authorization, body), 'PUBLIC_AGENT_OUTCOME_UNKNOWN');
+  const durable = await f.service.read(f.authorization, p.request);
+  assert.equal(durable.status, 'failed');
+  assert.equal(durable.failureCode, 'FREE_ASSURANCE_UNAVAILABLE');
+  assert.equal(sent, 0);
+});
+test('guard exceptions and provider-fetch errors cannot forge an unsent denial', async () => {
+  const denied = createGroqServerTransport({
+    credential: 'synthetic-only',
+    fetch: async () => {
+      throw new Error('unexpected');
+    },
+    freeOnlyGuard: async () => false,
+  });
+  let proof;
+  try {
+    await denied(
+      'https://api.groq.com/openai/v1/chat/completions',
+      {
+        method: 'POST',
+        redirect: 'error',
+        cache: 'no-store',
+        headers: { accept: 'application/json', 'content-type': 'application/json' },
+        body: '{}',
+        signal: new globalThis.AbortController().signal,
+      },
+      async () => {},
+    );
+  } catch (error) {
+    proof = error;
+  }
+  assert.equal(isFreeAssuranceDenied(proof), true);
+  for (const fromGuard of [true, false]) {
+    let sent = 0;
+    const transport = createGroqServerTransport({
+      credential: 'synthetic-only',
+      freeOnlyGuard: async () => {
+        if (fromGuard) throw proof;
+        return true;
+      },
+      fetch: async () => {
+        sent++;
+        throw proof;
+      },
+    });
+    const f = fixture({ transport });
+    const p = await f.prepare();
+    const c = await f.service.confirm(f.authorization, { approved: true, request: p.request });
+    await rejectsCode(
+      f.service.execute(f.authorization, {
+        confirmationId: c.confirmationId,
+        request: p.request,
+      }),
+      'PUBLIC_AGENT_OUTCOME_UNKNOWN',
+    );
+    const state = await f.service.read(f.authorization, p.request);
+    assert.equal(state.status, 'unknown');
+    assert.equal(sent, fromGuard ? 0 : 1);
+  }
 });
 test('timeout after admission stays unknown even when the model returns late', async () => {
   let release,

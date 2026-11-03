@@ -177,6 +177,7 @@ function operation(value: unknown, input: unknown) {
         'INVALID_RESULT',
         'EXECUTION_FAILED',
         'FREE_QUOTA_UNAVAILABLE',
+        'FREE_ASSURANCE_UNAVAILABLE',
         'DESTINATION_UNCLEAR',
         'INVALID_PROVIDER_RESPONSE',
       ].includes(r.failureCode)

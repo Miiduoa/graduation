@@ -178,6 +178,41 @@ try {
       ).statusCode,
       200,
     );
+    guardHook = async () => false;
+    const unavailable = await call('prepareGroq', { ...task, requestId: 'synthetic_guard_01' });
+    const unavailableApproval = await call('confirm', {
+      approved: true,
+      request: unavailable.json().request,
+    });
+    const deniedInput = {
+      confirmationId: unavailableApproval.json().confirmationId,
+      request: unavailable.json().request,
+    };
+    const checksBefore = freeChecks;
+    const guardDenied = await call('execute', deniedInput);
+    assert.equal(guardDenied.statusCode, 200, guardDenied.body);
+    assert.equal(guardDenied.json().status, 'failed');
+    assert.equal(guardDenied.json().failureCode, 'FREE_ASSURANCE_UNAVAILABLE');
+    assert.equal(providerCalls, 2);
+    assert.equal(freeChecks, checksBefore + 1);
+    assert.equal(
+      (await call('execute', deniedInput)).json().operationId,
+      guardDenied.json().operationId,
+    );
+    assert.equal(providerCalls, 2);
+    assert.equal(freeChecks, checksBefore + 1);
+    assert.equal(
+      (
+        await call('ack', {
+          task: 'public-campus-navigation',
+          schoolId: 'pu',
+          operationId: guardDenied.json().operationId,
+          approved: true,
+        })
+      ).statusCode,
+      200,
+    );
+    guardHook = async () => true;
     const otherAccount = `pa_${randomUUID()}`;
     const otherCredential = `pac_${randomUUID()}`;
     const otherToken = `ps_${'B'.repeat(43)}`;

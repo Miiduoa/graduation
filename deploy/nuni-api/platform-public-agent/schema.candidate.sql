@@ -49,7 +49,7 @@ CREATE TABLE platform_public_agent_operations (
     (dispatch_started_at IS NOT NULL AND (failure_code IS NULL OR failure_code<>'NOT_DISPATCHED'))),
   CHECK (result_json IS NULL OR (jsonb_typeof(result_json)='object' AND octet_length(result_json::text)<=32768)),
   CHECK ((status='completed' AND result_json IS NOT NULL AND failure_code IS NULL)
-    OR (status='failed' AND result_json IS NULL AND failure_code IS NOT NULL AND failure_code IN ('SOURCE_CHANGED','INVALID_RESULT','EXECUTION_FAILED','FREE_QUOTA_UNAVAILABLE','DESTINATION_UNCLEAR','INVALID_PROVIDER_RESPONSE','NOT_DISPATCHED'))
+    OR (status='failed' AND result_json IS NULL AND failure_code IS NOT NULL AND failure_code IN ('SOURCE_CHANGED','INVALID_RESULT','EXECUTION_FAILED','FREE_QUOTA_UNAVAILABLE','FREE_ASSURANCE_UNAVAILABLE','DESTINATION_UNCLEAR','INVALID_PROVIDER_RESPONSE','NOT_DISPATCHED'))
     OR (status IN ('running','unknown') AND result_json IS NULL AND failure_code IS NULL)),
   created_at timestamptz NOT NULL DEFAULT now(),
   updated_at timestamptz NOT NULL DEFAULT now(),

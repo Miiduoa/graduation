@@ -1,6 +1,17 @@
 import { PublicAgentError } from './contract';
 
 const ENDPOINT = 'https://api.groq.com/openai/v1/chat/completions';
+// Only this module can create a denial proof, after a definitive guard result
+// and before its provider fetch. It contains no input or credential data.
+const deniedProofs = new WeakSet<object>();
+export function isFreeAssuranceDenied(value: unknown): boolean {
+  return typeof value === 'object' && value !== null && deniedProofs.has(value);
+}
+function assuranceDenied(): Error {
+  const error = new Error('free assurance unavailable');
+  deniedProofs.add(error);
+  return error;
+}
 type FreeOnlyGuard = (signal: AbortSignal) => Promise<boolean>;
 type Options = { credential: string; fetch: typeof fetch; freeOnlyGuard: FreeOnlyGuard };
 const unavailable = (): never => {
@@ -38,14 +49,15 @@ export function createGroqServerTransport(options: Options) {
       return unavailable();
     const signal = init.signal;
     if (signal.aborted) throw new PublicAgentError('PUBLIC_AGENT_PROVIDER_CANCELLED', 503);
-    let allowed = false;
+    let allowed: unknown;
     try {
-      allowed = (await options.freeOnlyGuard(signal)) === true;
+      allowed = await options.freeOnlyGuard(signal);
     } catch {
       return unavailable();
     }
     if (signal.aborted) throw new PublicAgentError('PUBLIC_AGENT_PROVIDER_CANCELLED', 503);
-    if (!allowed) return unavailable();
+    if (allowed === false) throw assuranceDenied();
+    if (allowed !== true) return unavailable();
     // Recheck the session after the potentially slow guard and immediately before sending.
     await beforeSend();
     if (signal.aborted) throw new PublicAgentError('PUBLIC_AGENT_PROVIDER_CANCELLED', 503);

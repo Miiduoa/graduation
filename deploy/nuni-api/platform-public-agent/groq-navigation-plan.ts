@@ -1,5 +1,6 @@
 import { exactRecord, FREE_MODEL, PublicAgentError } from './contract';
 import { publicSnapshot, type PublicCatalogReader } from './navigation';
+import { isFreeAssuranceDenied } from './groq-server-transport';
 
 // Unregistered candidate: a future trusted transport must add an authorized server
 // credential for exactly this endpoint. This module reads no credentials or environment.
@@ -276,6 +277,7 @@ export function createGroqNavigationPlanner(options: Options) {
           return await options.fetch!(GROQ_ENDPOINT, request);
         } catch (error) {
           if (sessionFailed && error === sessionError) throw error;
+          if (options.transport && isFreeAssuranceDenied(error)) throw error;
           throw new PublicAgentError('PUBLIC_AGENT_PROVIDER_UNAVAILABLE', 503);
         }
       });
@@ -320,7 +322,7 @@ export function createGroqNavigationPlanner(options: Options) {
       projectSource(input, await readSource());
       return plan;
     } catch (error) {
-      if (error instanceof PublicAgentError) throw error;
+      if (error instanceof PublicAgentError || isFreeAssuranceDenied(error)) throw error;
       throw new PublicAgentError('PUBLIC_AGENT_PROVIDER_UNAVAILABLE', 503);
     } finally {
       clearTimeout(timer);

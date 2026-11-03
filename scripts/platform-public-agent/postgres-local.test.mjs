@@ -462,6 +462,7 @@ if (!folder) {
   test('explicit provider failures require dispatch fence, never masquerade as NOT_DISPATCHED', async () => {
     for (const code of [
       'FREE_QUOTA_UNAVAILABLE',
+      'FREE_ASSURANCE_UNAVAILABLE',
       'DESTINATION_UNCLEAR',
       'INVALID_PROVIDER_RESPONSE',
     ]) {

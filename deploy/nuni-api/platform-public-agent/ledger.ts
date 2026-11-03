@@ -50,6 +50,7 @@ export type PublicAgentFailureCode =
   | 'INVALID_RESULT'
   | 'EXECUTION_FAILED'
   | 'FREE_QUOTA_UNAVAILABLE'
+  | 'FREE_ASSURANCE_UNAVAILABLE'
   | 'DESTINATION_UNCLEAR'
   | 'INVALID_PROVIDER_RESPONSE'
   | 'NOT_DISPATCHED';
@@ -145,6 +146,7 @@ const failureCode = (value: unknown): value is PublicAgentFailureCode =>
   value === 'INVALID_RESULT' ||
   value === 'EXECUTION_FAILED' ||
   value === 'FREE_QUOTA_UNAVAILABLE' ||
+  value === 'FREE_ASSURANCE_UNAVAILABLE' ||
   value === 'DESTINATION_UNCLEAR' ||
   value === 'INVALID_PROVIDER_RESPONSE' ||
   value === 'NOT_DISPATCHED';

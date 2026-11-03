@@ -13,6 +13,7 @@ import {
   type PlatformTaskActor,
 } from './contract';
 import { PlatformPublicAgentLedger } from './ledger';
+import { isFreeAssuranceDenied } from './groq-server-transport';
 import {
   exactNavigation,
   validatedPlan,
@@ -397,20 +398,22 @@ export class PlatformPublicTaskService {
         // Only definitive provider responses may finish the operation. A lost
         // database acknowledgement remains unknown and is never retried as work.
         const knownFailure =
-          error instanceof PublicAgentError
-            ? (
-                {
-                  PUBLIC_AGENT_FREE_QUOTA_UNAVAILABLE: 'FREE_QUOTA_UNAVAILABLE',
-                  PUBLIC_AGENT_DESTINATION_UNCLEAR: 'DESTINATION_UNCLEAR',
-                  PUBLIC_AGENT_PROVIDER_INVALID_RESPONSE: 'INVALID_PROVIDER_RESPONSE',
-                } as const
-              )[
-                error.code as
-                  | 'PUBLIC_AGENT_FREE_QUOTA_UNAVAILABLE'
-                  | 'PUBLIC_AGENT_DESTINATION_UNCLEAR'
-                  | 'PUBLIC_AGENT_PROVIDER_INVALID_RESPONSE'
-              ]
-            : undefined;
+          isFreeAssuranceDenied(error) && task.binding.provider === FREE_PROVIDER
+            ? 'FREE_ASSURANCE_UNAVAILABLE'
+            : error instanceof PublicAgentError
+              ? (
+                  {
+                    PUBLIC_AGENT_FREE_QUOTA_UNAVAILABLE: 'FREE_QUOTA_UNAVAILABLE',
+                    PUBLIC_AGENT_DESTINATION_UNCLEAR: 'DESTINATION_UNCLEAR',
+                    PUBLIC_AGENT_PROVIDER_INVALID_RESPONSE: 'INVALID_PROVIDER_RESPONSE',
+                  } as const
+                )[
+                  error.code as
+                    | 'PUBLIC_AGENT_FREE_QUOTA_UNAVAILABLE'
+                    | 'PUBLIC_AGENT_DESTINATION_UNCLEAR'
+                    | 'PUBLIC_AGENT_PROVIDER_INVALID_RESPONSE'
+                ]
+              : undefined;
         if (knownFailure) {
           try {
             const failed = await this.bounded(undefined, (step) =>
