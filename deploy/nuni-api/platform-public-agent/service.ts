@@ -446,15 +446,13 @@ export class PlatformPublicTaskService {
     sameActor(actor, await step(() => this.admission.actor(auth)));
     if (operation?.status === 'completed') {
       const scope = { task: task.binding.task, schoolId: task.binding.schoolId };
-      if (task.binding.provider === FREE_PROVIDER) {
-        const active = await step(() => this.options.ledger.status(actor, scope));
-        if (
-          !active ||
-          active.status !== 'completed' ||
-          active.operationId !== operation.operationId
-        )
-          throw new PublicAgentError('PUBLIC_AGENT_OPERATION_NOT_FOUND', 404);
-      }
+      const activeBefore = await step(() => this.options.ledger.status(actor, scope));
+      if (
+        !activeBefore ||
+        activeBefore.status !== 'completed' ||
+        activeBefore.operationId !== operation.operationId
+      )
+        throw new PublicAgentError('PUBLIC_AGENT_OPERATION_NOT_FOUND', 404);
       const snapshot = await step(() => this.source(task, signal));
       const stored = operation.result.receipt;
       const receipt =
@@ -467,15 +465,13 @@ export class PlatformPublicTaskService {
       )
         throw new PublicAgentError('PUBLIC_AGENT_INVALID_RESULT', 502);
       sameActor(actor, await step(() => this.admission.actor(auth)));
-      if (task.binding.provider === FREE_PROVIDER) {
-        const active = await step(() => this.options.ledger.status(actor, scope));
-        if (
-          !active ||
-          active.status !== 'completed' ||
-          active.operationId !== operation.operationId
-        )
-          throw new PublicAgentError('PUBLIC_AGENT_OPERATION_NOT_FOUND', 404);
-      }
+      const activeAfter = await step(() => this.options.ledger.status(actor, scope));
+      if (
+        !activeAfter ||
+        activeAfter.status !== 'completed' ||
+        activeAfter.operationId !== operation.operationId
+      )
+        throw new PublicAgentError('PUBLIC_AGENT_OPERATION_NOT_FOUND', 404);
     }
     return operation;
   }

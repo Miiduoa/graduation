@@ -785,15 +785,18 @@ export class PlatformPublicAgentLedger {
           failure_code: unknown;
           dispatch_started_at: unknown;
           dispatch_fence_version: number;
+          acknowledged_at: unknown;
           unexpired: boolean;
         }>(
-          `SELECT id,status,failure_code,dispatch_started_at,dispatch_fence_version,expires_at>clock_timestamp() AS unexpired
+          `SELECT id,status,failure_code,dispatch_started_at,dispatch_fence_version,acknowledged_at,expires_at>clock_timestamp() AS unexpired
          FROM platform_public_agent_operations WHERE platform_account_id=$1 AND school_id=$2 AND task=$3 AND id=$4 FOR UPDATE`,
           [actor.platformAccountId, schoolId, task, operationId],
         )
       ).rows[0];
       if (!row) return fail('PUBLIC_AGENT_OPERATION_NOT_FOUND', 404);
       if (row.dispatch_fence_version !== 1) return fail('PUBLIC_AGENT_STORE_INVALID', 503);
+      if (row.acknowledged_at === undefined) return fail('PUBLIC_AGENT_STORE_INVALID', 503);
+      if (row.acknowledged_at !== null) return fail('PUBLIC_AGENT_OPERATION_NOT_FOUND', 404);
       if (
         row.status === 'failed' &&
         row.failure_code === 'NOT_DISPATCHED' &&

@@ -1,5 +1,5 @@
 'use client';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import styles from './map.module.css';
 
 export type PublicTaskPort = {
@@ -84,6 +84,19 @@ const message = (error: unknown) => {
   return '目前無法完成，請稍後重試。';
 };
 
+const AUTO_STATUS_INTERVAL_MS = 5_000;
+const AUTO_STATUS_MAX_CHECKS = 12;
+function subscribeVisibility(callback: () => void) {
+  document.addEventListener('visibilitychange', callback);
+  return () => document.removeEventListener('visibilitychange', callback);
+}
+function isVisible() {
+  return document.visibilityState === 'visible';
+}
+function serverVisible() {
+  return true;
+}
+
 /** Transport is supplied only by a reviewed host; the live map does not register one yet. */
 export function PublicNavigationTask({ port }: { port: PublicTaskPort }) {
   return <Task key={`${port.scope}:${port.schoolId}`} port={port} />;
@@ -97,6 +110,9 @@ function Task({ port }: { port: PublicTaskPort }) {
   const [busy, setBusy] = useState(false),
     [error, setError] = useState('');
   const [confirmClose, setConfirmClose] = useState<string | null>(null);
+  const [autoStopped, setAutoStopped] = useState(false);
+  const [autoChecks, setAutoChecks] = useState(0);
+  const visible = useSyncExternalStore(subscribeVisibility, isVisible, serverVisible);
   const pending = useRef<AbortController | null>(null),
     generation = useRef(0),
     running = useRef(false);
@@ -194,6 +210,39 @@ function Task({ port }: { port: PublicTaskPort }) {
       }
     }
   }
+  // Only poll an unresolved operation while the page is visible. Each request
+  // settles before the next timer; no provider execution or acknowledgement occurs.
+  useEffect(() => {
+    const waiting =
+      gate.kind === 'locked' && (!gate.operation || gate.operation.status === 'pending');
+    if (
+      !waiting ||
+      !visible ||
+      busy ||
+      autoStopped ||
+      error ||
+      autoChecks >= AUTO_STATUS_MAX_CHECKS
+    )
+      return;
+    const timer = setTimeout(() => {
+      setAutoChecks((count) => count + 1);
+      void checkStatus();
+    }, AUTO_STATUS_INTERVAL_MS);
+    return () => clearTimeout(timer);
+    // checkStatus reads this render's scope and preview; busy/gate changes reschedule it.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [gate, visible, busy, autoStopped, error, autoChecks, preview]);
+  function pauseAutoStatus() {
+    setAutoStopped(true);
+    invalidate();
+    setBusy(false);
+    setError('已停止自動查詢。原任務仍保留，可手動查詢。');
+  }
+  function resumeAutoStatus() {
+    setAutoChecks(0);
+    setAutoStopped(false);
+    setError('');
+  }
   async function run(action: 'preview' | 'execute') {
     if (running.current || gate.kind !== 'clear') return;
     running.current = true;
@@ -221,6 +270,8 @@ function Task({ port }: { port: PublicTaskPort }) {
           setRouteReceipt(null);
         }
       } else if (preview) {
+        setAutoChecks(0);
+        setAutoStopped(false);
         const confirmation = (await port.call(
           'confirm',
           { approved: true, request: preview.request },
@@ -359,6 +410,8 @@ function Task({ port }: { port: PublicTaskPort }) {
         setRouteReceipt(null);
         setPreview(null);
         setConfirmClose(null);
+        setAutoChecks(0);
+        setAutoStopped(false);
         requestId.current = null;
         if (current) {
           mayBeUnsettled.current = true;
@@ -387,6 +440,7 @@ function Task({ port }: { port: PublicTaskPort }) {
     running.current = false;
     setBusy(false);
     if (mayBeUnsettled.current) {
+      setAutoStopped(true);
       setError('已停止等待，原任務可能仍在處理。請查詢狀態。');
       return;
     }
@@ -587,6 +641,27 @@ function Task({ port }: { port: PublicTaskPort }) {
       )}
       {gate.kind === 'locked' && (
         <>
+          {(!gate.operation || gate.operation.status === 'pending') && (
+            <div>
+              <p>
+                {autoStopped || autoChecks >= AUTO_STATUS_MAX_CHECKS || error
+                  ? '自動查詢已暫停，可手動查詢。'
+                  : !visible
+                    ? '切回此頁後繼續查詢。'
+                    : '正在自動查詢任務狀態。'}
+              </p>
+              {!busy &&
+                (autoStopped || autoChecks >= AUTO_STATUS_MAX_CHECKS || error ? (
+                  <button className="btn secondary" onClick={resumeAutoStatus}>
+                    恢復自動查詢
+                  </button>
+                ) : (
+                  <button className="btn secondary" onClick={pauseAutoStatus}>
+                    停止自動查詢
+                  </button>
+                ))}
+            </div>
+          )}
           <p role="status">
             {terminal
               ? state === 'completed'

@@ -273,6 +273,42 @@ if (!folder) {
     );
     assert.equal(quota.rows[0].used, 1);
   });
+  test('late reconciliation cannot revive an acknowledged operation or alter its successor', async () => {
+    const owner = await actor();
+    const old = binding();
+    const { result: first } = await claim(owner, old);
+    await ledger().markUnknown(owner, old, first.operationId, first.executionToken);
+    const resumed = await secondSession(owner);
+    const oldScope = { ...lookup(old), operationId: first.operationId };
+    assert.deepEqual(await ledger().reconcileNoDispatch(resumed, oldScope), {
+      status: 'failed',
+      operationId: first.operationId,
+    });
+    await ack(resumed, old, first.operationId);
+
+    const next = binding({ payloadHash: hash('different synthetic payload') });
+    const { result: second } = await claim(resumed, next);
+    assert.equal(second.status, 'claimed');
+    const quotas = () =>
+      pool.query(
+        "SELECT budget_kind, used FROM platform_public_agent_quota WHERE (budget_kind='account' AND budget_key=$1) OR (budget_kind='provider' AND budget_key=$2) ORDER BY budget_kind",
+        [owner.platformAccountId, policy.providerBudgetKey],
+      );
+    const before = (await quotas()).rows;
+    assert.deepEqual(
+      before.map((row) => row.budget_kind),
+      ['account', 'provider'],
+    );
+    await assert.rejects(ledger().reconcileNoDispatch(resumed, oldScope), {
+      code: 'PUBLIC_AGENT_OPERATION_NOT_FOUND',
+    });
+    assert.deepEqual(await ledger().status(resumed, lookup(next)), {
+      status: 'pending',
+      operationId: second.operationId,
+    });
+    assert.equal(before.find((row) => row.budget_kind === 'account')?.used, 2);
+    assert.deepEqual((await quotas()).rows, before);
+  });
   test('a fresh process can reconcile only a durable not-dispatched operation', async () => {
     const a = await actor(),
       b = binding(),

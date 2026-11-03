@@ -1359,3 +1359,23 @@ for (const code of ['FREE_QUOTA_UNAVAILABLE', 'DESTINATION_UNCLEAR', 'INVALID_PR
     assert.deepEqual(quotas(f.db), [1, 1]);
   });
 }
+
+test('a late reconciliation cannot resurrect a closed old operation after a new operation starts', async () => {
+  const f = await claimedFixture({ operationTtlMs: 5 }, {}, false);
+  const oldScope = { task: f.b.task, schoolId: f.b.schoolId, operationId: f.claim.operationId };
+  f.db.now += 6;
+  await f.ledger.reconcileNoDispatch(f.actor, oldScope);
+  await f.ledger.ack(f.actor, { ...oldScope, approved: true });
+  const next = binding({ requestId: 'new_operation_123' });
+  const confirmation = await f.ledger.confirm(f.actor, next);
+  const claim = await f.ledger.claim(f.actor, next, confirmation.confirmationId);
+  await rejectsCode(
+    f.ledger.reconcileNoDispatch(f.actor, oldScope),
+    'PUBLIC_AGENT_OPERATION_NOT_FOUND',
+  );
+  assert.deepEqual(await f.ledger.status(f.actor, { task: next.task, schoolId: next.schoolId }), {
+    status: 'pending',
+    operationId: claim.operationId,
+  });
+  assert.deepEqual(quotas(f.db), [2, 2]);
+});

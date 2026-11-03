@@ -29,7 +29,12 @@ export function publicSnapshot(raw: unknown, schoolId: string) {
     return invalid();
   const updatedAt = text(row.updatedAt, 40),
     label = text(row.label, 120);
-  if (!/^\d{4}-\d{2}-\d{2}$/u.test(updatedAt) || !Number.isFinite(Date.parse(updatedAt)))
+  const date = Date.parse(updatedAt);
+  if (
+    !/^\d{4}-\d{2}-\d{2}$/u.test(updatedAt) ||
+    !Number.isFinite(date) ||
+    new Date(date).toISOString().slice(0, 10) !== updatedAt
+  )
     return invalid();
   const ids = new Set<string>();
   const places = row.places

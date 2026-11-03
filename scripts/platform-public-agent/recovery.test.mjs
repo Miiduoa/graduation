@@ -14,6 +14,7 @@ const schoolId = 'pu',
 function setup() {
   const f = admissionFixture();
   let executions = 0;
+  const sourceControl = { beforeRead: null };
   const catalog = {
     schoolId,
     updatedAt: '2026-10-19',
@@ -39,7 +40,10 @@ function setup() {
     accounts: f.options.accounts,
     ledger: f.ledger,
     clock: () => f.db.now,
-    readPublicCatalog: async () => globalThis.structuredClone(catalog),
+    readPublicCatalog: async () => {
+      await sourceControl.beforeRead?.();
+      return globalThis.structuredClone(catalog);
+    },
     execute: async (task, snapshot) => {
       executions++;
       return exactNavigation(task.data.query, snapshot);
@@ -48,7 +52,7 @@ function setup() {
   const preview = async (id) =>
     service.preview(f.authorization, { schoolId, query: '從甲樓到乙館', requestId: id });
   const confirm = async (request) => service.confirm(f.authorization, { approved: true, request });
-  return { ...f, service, preview, confirm, executions: () => executions };
+  return { ...f, service, preview, confirm, sourceControl, executions: () => executions };
 }
 test('reloaded new session sees only scoped terminal state; explicit acknowledgement enables new task', async () => {
   const f = setup(),
@@ -129,4 +133,47 @@ test('HTTP recovery enforces origin, scoped identity and explicit terminal ackno
     422,
   );
   assert.equal(f.executions(), 0);
+});
+
+test('an old deterministic receipt is not delivered after another tab closes it and starts a new task', async () => {
+  const f = setup(),
+    p = await f.preview('old_read_1234'),
+    c = await f.confirm(p.request);
+  const old = await f.service.execute(f.authorization, {
+    confirmationId: c.confirmationId,
+    request: p.request,
+  });
+  const fresh = await f.preview('new_read_1234');
+  let release, started;
+  const waiting = new Promise((resolve) => {
+    started = resolve;
+  });
+  const held = new Promise((resolve) => {
+    release = resolve;
+  });
+  f.sourceControl.beforeRead = async () => {
+    f.sourceControl.beforeRead = null;
+    started();
+    await held;
+  };
+  const late = f.service.read(f.authorization, p.request);
+  await waiting;
+  await f.service.ack(f.authorization, {
+    task,
+    schoolId,
+    operationId: old.operationId,
+    approved: true,
+  });
+  const next = await f.confirm(fresh.request);
+  const nextClaim = await f.service.admission.claim(f.authorization, {
+    confirmationId: next.confirmationId,
+    request: fresh.request,
+  });
+  assert.equal(nextClaim.status, 'claimed');
+  release();
+  await rejectsCode(late, 'PUBLIC_AGENT_OPERATION_NOT_FOUND');
+  assert.equal(
+    (await f.service.status(f.authorization, { task, schoolId })).operationId,
+    nextClaim.operationId,
+  );
 });
