@@ -10,6 +10,15 @@ const load = (name) =>
 const { PlatformPublicTaskService } = await load('service');
 const { createPlatformPublicAgentHandler } = await load('http');
 const { publicSnapshot, exactNavigation } = await load('navigation');
+function assertGoogleRoute(value) {
+  const url = new globalThis.URL(value);
+  assert.equal(url.protocol, 'https:');
+  assert.equal(url.hostname, 'www.google.com');
+  assert.equal(url.port, '');
+  assert.equal(url.username, '');
+  assert.equal(url.password, '');
+  assert.equal(url.pathname, '/maps/dir/');
+}
 const catalog = () => ({
   schoolId: 'pu',
   updatedAt: '2026-10-19',
@@ -67,13 +76,17 @@ test('real service/admission/ledger: independent platform account confirms, exec
   const result = await f.service.execute(f.authorization, input);
   assert.equal(result.status, 'completed');
   assert.equal(result.result.receipt.mode, 'deterministic');
-  assert.match(result.result.receipt.url, /^https:\/\/www.google.com\/maps\/dir\//u);
+  assertGoogleRoute(result.result.receipt.url);
   assert.equal('executionToken' in result, false);
   const again = await f.service.execute(f.authorization, input);
   assert.deepEqual(again, result);
   assert.deepEqual(await f.service.read(f.authorization, input.request), result);
   assert.equal(f.stats.executions, 1);
   assert.deepEqual(quotas(f.db), [1, 1]);
+});
+test('route assertion rejects an adversarial similar hostname', () => {
+  assert.throws(() => assertGoogleRoute('https://wwwXgoogleYcom/maps/dir/?api=1'));
+  assert.throws(() => assertGoogleRoute('https://www.google.com.attacker.test/maps/dir/?api=1'));
 });
 test('not approved and unknown confirmation cannot run executor or spend', async () => {
   const f = fixture(),
