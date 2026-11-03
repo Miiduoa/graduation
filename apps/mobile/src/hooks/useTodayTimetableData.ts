@@ -6,8 +6,17 @@ import { type TodayClass } from '@campus/shared/src/pickNextAction';
 import { usePersonalImportScope } from '../state/personalImportScope';
 import { loadPersonalImports } from '../services/personalImports';
 import { loadPersonalTimetable, personalTimetableRecords } from '../services/personalTimetable';
+import {
+  resolveTimetableClassroomNav,
+  type TimetableClassroomDestination,
+} from './timetableClassroomNav';
 
 export type TodayTimetableStatus = 'loading' | 'ready' | 'error' | 'empty';
+
+export type TodayTimetableClass = TodayClass & {
+  courseCode?: string;
+  courseWorkNav: TimetableClassroomDestination;
+};
 
 type Snapshot = {
   scope: string;
@@ -72,7 +81,7 @@ export function useTodayTimetableData(now: Date) {
       }),
     [visible, scope?.schoolId, now],
   );
-  const classes: TodayClass[] = useMemo(
+  const classes: TodayTimetableClass[] = useMemo(
     () =>
       plan.today.flatMap((entry) => {
         const { startAt, endAt } = entry;
@@ -84,6 +93,12 @@ export function useTodayTimetableData(now: Date) {
             startAt,
             endAt,
             courseId: entry.row.linkedCourseId,
+            courseCode: entry.row.courseCode,
+            courseWorkNav: resolveTimetableClassroomNav({
+              linkedCourseId: entry.row.linkedCourseId,
+              courseName: entry.row.title,
+              courseCode: entry.row.courseCode,
+            }),
           },
         ];
       }),

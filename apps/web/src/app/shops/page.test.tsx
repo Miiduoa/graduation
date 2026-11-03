@@ -6,7 +6,8 @@ vi.mock('next/navigation', () => ({
   redirect: vi.fn(),
 }));
 
-it('sends /shops to the current login page', () => {
+it('sends /shops to the existing dining entry instead of a blank login', () => {
   ShopsPage();
-  expect(redirect).toHaveBeenCalledWith('/login');
+  expect(redirect).toHaveBeenCalledWith('/food');
+  expect(redirect).not.toHaveBeenCalledWith('/login');
 });

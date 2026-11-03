@@ -10,13 +10,17 @@
 
 .sections {
   display: flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   align-items: center;
   gap: 4px;
   min-width: 0;
   margin: 0;
   padding: 0;
   list-style: none;
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+  scrollbar-width: thin;
+  -webkit-overflow-scrolling: touch;
 }
 
 .section,
@@ -37,6 +41,8 @@
 }
 
 .section {
+  flex: 0 0 auto;
+  white-space: nowrap;
   color: var(--muted);
 }
 
@@ -80,8 +86,18 @@
 
 @media (max-width: 600px) {
   .navigation {
+    flex-wrap: nowrap;
     gap: 8px;
     margin-bottom: 20px;
+  }
+
+  .sections {
+    flex: 1 1 auto;
+  }
+
+  .importAction {
+    flex: 0 0 auto;
+    margin-inline-start: 0;
   }
 
   .section {

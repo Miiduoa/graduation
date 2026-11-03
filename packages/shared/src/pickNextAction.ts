@@ -17,6 +17,8 @@ export const TODAY_COPY = {
   nextAssignment: '下一件作業',
   dueToday: '今天截止',
   viewCourse: '看課程',
+  /** Unlinked timetable class → classroom search (not the course shell). */
+  findCourse: '找這門課',
   goSubmit: '去繳交',
   viewWeek: '看這週',
   viewFullTimetable: '看完整課表',

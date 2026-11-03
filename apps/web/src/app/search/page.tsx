@@ -18,6 +18,7 @@ import {
   serviceAccessLabel,
   SERVICE_CATEGORIES,
   searchCampusServices,
+  secondaryCampusServices,
   visibleCampusServices,
   type ServiceCategory,
 } from '@/lib/campusServices';
@@ -62,6 +63,14 @@ function ServiceDirectory() {
   const active = analysis?.scope === semanticScope && analysis.term === term ? analysis : null;
   const semantic = active?.status === 'ready' ? active.result : undefined;
   const matches = searchCampusServices(query, category, schoolLmsEnabled);
+  const browsing = !term;
+  const directoryCount = browsing
+    ? matches.reduce(
+        (total, service) =>
+          total + 1 + secondaryCampusServices(service.href, schoolLmsEnabled).length,
+        0,
+      )
+    : matches.length;
   const suggested = semantic?.status === 'understood'
     ? semantic.destinations.flatMap((href) => {
         const service = visibleCampusServices(schoolLmsEnabled).find((row) => row.href === href);
@@ -226,7 +235,7 @@ function ServiceDirectory() {
         )}
         <div className={styles.resultSummary}>
           <p role="status" aria-live="polite" aria-atomic="true">
-            找到 {matches.length} 項服務
+            找到 {directoryCount} 項服務
           </p>
           {(term || category !== 'all') && (
             <button type="button" onClick={resetFilters}>
@@ -249,22 +258,44 @@ function ServiceDirectory() {
                   <p>{group.description}</p>
                 </div>
                 <div className={styles.services}>
-                  {services.map((service) => (
-                    <Link
-                      key={service.href}
-                      className={styles.service}
-                      href={campusServiceHref(service.href, schoolSearch)}
-                    >
-                      <div>
-                        <h3>{service.name}</h3>
-                        <p>{service.text}</p>
-                        <small className={styles.access}>
-                          {serviceAccessLabel(service.access, options)}
-                        </small>
+                  {services.map((service) => {
+                    const children = browsing
+                      ? secondaryCampusServices(service.href, schoolLmsEnabled)
+                      : [];
+                    return (
+                      <div key={service.href} className={styles.serviceEntry}>
+                        <Link
+                          className={styles.service}
+                          href={campusServiceHref(service.href, schoolSearch)}
+                        >
+                          <div>
+                            <h3>{service.name}</h3>
+                            <p>{service.text}</p>
+                            <small className={styles.access}>
+                              {serviceAccessLabel(service.access, options)}
+                            </small>
+                          </div>
+                          <span aria-hidden="true">→</span>
+                        </Link>
+                        {children.map((child) => (
+                          <Link
+                            key={child.href}
+                            className={`${styles.service} ${styles.secondaryService}`}
+                            href={campusServiceHref(child.href, schoolSearch)}
+                          >
+                            <div>
+                              <h3>{child.name}</h3>
+                              <p>{child.text}</p>
+                              <small className={styles.access}>
+                                {serviceAccessLabel(child.access, options)}
+                              </small>
+                            </div>
+                            <span aria-hidden="true">→</span>
+                          </Link>
+                        ))}
                       </div>
-                      <span aria-hidden="true">→</span>
-                    </Link>
-                  ))}
+                    );
+                  })}
                 </div>
               </section>
             );
