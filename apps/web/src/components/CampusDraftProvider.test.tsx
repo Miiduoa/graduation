@@ -183,3 +183,66 @@ it('restores the confirmed same account after initial identity loading on a new 
   view.rerender(<View uid={uid} identityReady ready />);
   expect(screen.getByTestId('draft').textContent).toBe('跨頁草稿');
 });
+
+for (const uid of [null, campusDraftIdentity(null, 'platform-a')]) {
+  it(`purges every legacy scope before confirming ${uid === null ? 'guest' : 'platform'} identity`, () => {
+    const keys = [
+      'campus.draft.v1:guest:school-a',
+      'campus.draft.v1:guest:school-b',
+      'campus.draft.v1:old-account:school-c',
+    ];
+    for (const key of keys) sessionStorage.setItem(key, JSON.stringify({ assistant: '無法歸屬的草稿' }));
+    sessionStorage.setItem('unrelated', '保留');
+    const view = render(<View uid={null} identityReady={false} />);
+    expect(screen.getByTestId('draft').textContent).toBe('');
+    view.rerender(<View uid={uid} identityReady />);
+    expect(screen.getByTestId('draft').textContent).toBe('');
+    expect(hasCampusDraftActivity()).toBe(false);
+    for (const key of keys) expect(sessionStorage.getItem(key)).toBeNull();
+    expect(sessionStorage.getItem('unrelated')).toBe('保留');
+  });
+}
+
+for (const destination of [null, campusDraftIdentity(null, 'platform-b')]) {
+  it(`purges all v2 schools after a remount confirms a different ${destination === null ? 'guest' : 'account'} identity`, () => {
+    const a = campusDraftIdentity(null, 'platform-a');
+    const first = render(<View uid={a} />);
+    act(() => latest.setText('A 甲校草稿'));
+    first.rerender(<View uid={a} schoolId="school-b" />);
+    act(() => latest.setText('A 乙校草稿'));
+    const marker = sessionStorage.getItem('campus.draft.identity.v2');
+    expect(marker).toMatch(/^[0-9a-f]{64}$/);
+    expect(marker).not.toContain('platform-a');
+    first.unmount();
+    const keys = [
+      scopeStorageKey(a, 'school-a'),
+      scopeStorageKey(a, 'school-b'),
+      scopeStorageKey(null, 'school-c'),
+      scopeStorageKey(destination, 'school-a'),
+    ];
+    for (const key of keys) sessionStorage.setItem(key, JSON.stringify({ assistant: '殘留草稿' }));
+    const next = render(<View uid={null} identityReady={false} ready={false} />);
+    expect(sessionStorage.getItem('campus.draft.identity.v2')).toBe(marker);
+    next.rerender(<View uid={destination} identityReady ready />);
+    expect(screen.getByTestId('draft').textContent).toBe('');
+    expect(hasCampusDraftActivity()).toBe(false);
+    for (const key of keys) expect(sessionStorage.getItem(key)).toBeNull();
+    expect(sessionStorage.getItem('campus.draft.identity.v2')).not.toBe(marker);
+  });
+}
+
+it('preserves the marker and all school drafts when the same account reloads through loading', () => {
+  const uid = campusDraftIdentity(null, 'platform-a');
+  const first = render(<View uid={uid} />);
+  act(() => latest.setText('甲校跨重整'));
+  first.rerender(<View uid={uid} schoolId="school-b" />);
+  act(() => latest.setText('乙校跨重整'));
+  const marker = sessionStorage.getItem('campus.draft.identity.v2');
+  first.unmount();
+  const next = render(<View uid={null} identityReady={false} ready={false} />);
+  next.rerender(<View uid={uid} identityReady ready />);
+  expect(screen.getByTestId('draft').textContent).toBe('甲校跨重整');
+  expect(sessionStorage.getItem('campus.draft.identity.v2')).toBe(marker);
+  next.rerender(<View uid={uid} schoolId="school-b" />);
+  expect(screen.getByTestId('draft').textContent).toBe('乙校跨重整');
+});

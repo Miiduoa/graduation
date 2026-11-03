@@ -469,7 +469,7 @@ it('keeps draft activity across catalog loading so a later switch still asks for
   expect(screen.queryByRole('dialog')).toBeNull();
 });
 
-it('keeps the draft when confirm runs but commitSchool cannot proceed', async () => {
+it('cancels the pending dialog and keeps the draft when identity loading starts', async () => {
   localStorage.setItem(
     schoolPreferenceKey(defaults.ownerKey),
     JSON.stringify({ schoolId: 'school-a' }),
@@ -503,4 +503,26 @@ it('cancels a pending school change when account identity changes', () => {
   view.rerender(<DraftView />);
   expect(screen.queryByRole('dialog')).toBeNull();
   expect(navigation.replace).not.toHaveBeenCalled();
+});
+
+it('keeps the draft when discard is clicked while the catalog prevents committing', () => {
+  localStorage.setItem(
+    schoolPreferenceKey(defaults.ownerKey),
+    JSON.stringify({ schoolId: 'school-a' }),
+  );
+  const view = render(<DraftView />);
+  fireEvent.change(screen.getByLabelText('助理草稿'), { target: { value: '無法換校時保留' } });
+  fireEvent.change(screen.getByLabelText('瀏覽校園'), { target: { value: 'school-b' } });
+  view.rerender(<DraftView catalogStatus="loading" />);
+  expect(screen.getByRole('dialog')).toBeTruthy();
+  fireEvent.click(screen.getByRole('button', { name: '捨棄草稿並切換' }));
+  expect(screen.queryByRole('dialog')).toBeNull();
+  expect((screen.getByLabelText('助理草稿') as HTMLInputElement).value).toBe('無法換校時保留');
+  expect(navigation.replace).not.toHaveBeenCalled();
+  expect(localStorage.getItem(schoolPreferenceKey(defaults.ownerKey))).toBe(
+    JSON.stringify({ schoolId: 'school-a' }),
+  );
+  view.rerender(<DraftView />);
+  expect(screen.getByTestId('selected-school').textContent).toBe('甲校');
+  expect((screen.getByLabelText('助理草稿') as HTMLInputElement).value).toBe('無法換校時保留');
 });

@@ -1,5 +1,7 @@
 'use client';
 
+import { sha256 } from 'js-sha256';
+
 import {
   createContext,
   useCallback,
@@ -13,7 +15,9 @@ import {
 
 export type CampusDraftSlot = 'assistant';
 
-const STORAGE_PREFIX = 'campus.draft.v1:';
+const STORAGE_PREFIX = 'campus.draft.v2:';
+const LEGACY_STORAGE_PREFIX = 'campus.draft.v1:';
+const IDENTITY_MARKER_KEY = 'campus.draft.identity.v2';
 const MAX_DRAFT_LENGTH = 4000;
 
 type DraftMap = Partial<Record<CampusDraftSlot, string>>;
@@ -91,7 +95,11 @@ function writeStoredDrafts(key: string, drafts: DraftMap): void {
 
 export function purgeAccountDrafts(uid: string | null): void {
   if (typeof window === 'undefined') return;
-  const prefix = `${STORAGE_PREFIX}${uid ?? 'guest'}:`;
+  purgeStoredDrafts(`${STORAGE_PREFIX}${uid ?? 'guest'}:`);
+}
+
+function purgeStoredDrafts(prefix: string): void {
+  if (typeof window === 'undefined') return;
   try {
     const keys: string[] = [];
     for (let index = 0; index < sessionStorage.length; index += 1) {
@@ -104,6 +112,23 @@ export function purgeAccountDrafts(uid: string | null): void {
   }
 }
 
+/** 必須在任何草稿讀取之前執行；標記只保存摘要，不保存原始身分。 */
+function confirmStoredIdentity(uid: string | null): boolean {
+  if (typeof window === 'undefined') return false;
+  purgeStoredDrafts(LEGACY_STORAGE_PREFIX);
+  try {
+    const marker = sha256(JSON.stringify(uid));
+    const previous = sessionStorage.getItem(IDENTITY_MARKER_KEY);
+    const changed = previous !== null && previous !== marker;
+    if (changed) purgeStoredDrafts(STORAGE_PREFIX);
+    sessionStorage.setItem(IDENTITY_MARKER_KEY, marker);
+    return changed;
+  } catch {
+    // sessionStorage 不可用時仍可使用記憶體草稿。
+    return false;
+  }
+}
+
 function hasText(drafts: DraftMap): boolean {
   return Object.values(drafts).some((value) => typeof value === 'string' && value.trim().length > 0);
 }
@@ -112,6 +137,7 @@ class DraftStore {
   listeners = new Set<() => void>();
   state: DraftState;
   constructor(uid: string | null, schoolId: string | null, ready: boolean, identityReady: boolean) {
+    if (identityReady) confirmStoredIdentity(uid);
     this.state = {
       uid,
       schoolId,
@@ -139,7 +165,11 @@ class DraftStore {
     // loading 期間 selectedSchoolId 常暫成 null：保留上一所已確定的校，避免清空記憶體草稿。
     const effectiveSchoolId =
       !ready && schoolId === null && old.schoolId !== null ? old.schoolId : schoolId;
-    const identityChanged = old.identityResolved && old.uid !== uid;
+    const storedIdentityChanged =
+      identityReady && (!old.identityReady || old.uid !== uid)
+        ? confirmStoredIdentity(uid)
+        : false;
+    const identityChanged = storedIdentityChanged || (old.identityResolved && old.uid !== uid);
     if (identityChanged) {
       purgeAccountDrafts(old.uid);
       purgeAccountDrafts(null);
