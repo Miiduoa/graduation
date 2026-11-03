@@ -1,10 +1,16 @@
 import {
   classroomQueryMatchKind,
+  courseWorkNavForClass,
   filterCoursesByClassroomQuery,
   resolveTimetableClassroomNav,
   timetableCourseSearchQuery,
   todayCourseWorkNavigateTarget,
 } from '../hooks/timetableClassroomNav';
+import {
+  filterCoursesByClassroomQuery as sharedFilter,
+  timetableClassroomSearchParams,
+  timetableCourseSearchQuery as sharedSearchQuery,
+} from '@campus/shared/src/timetable/classroomCourseQuery';
 
 describe('timetable classroom navigation', () => {
   it('opens CourseHub when linkedCourseId is present', () => {
@@ -70,6 +76,28 @@ describe('timetable classroom navigation', () => {
       todayCourseWorkNavigateTarget(resolveTimetableClassroomNav({ courseName: '   ' })),
     ).toEqual({ screen: 'Classroom', params: {} });
   });
+
+  it('courseWorkNavForClass prefers precomputed nav then resolves from fields', () => {
+    expect(
+      courseWorkNavForClass({
+        title: '忽略',
+        courseWorkNav: {
+          kind: 'search',
+          screen: 'Classroom',
+          params: { q: '預先', from: 'timetable' },
+        },
+      }),
+    ).toEqual({
+      kind: 'search',
+      screen: 'Classroom',
+      params: { q: '預先', from: 'timetable' },
+    });
+    expect(courseWorkNavForClass({ title: '   ' })).toEqual({
+      kind: 'search',
+      screen: 'Classroom',
+      params: {},
+    });
+  });
 });
 
 describe('mobile classroom q filter', () => {
@@ -101,13 +129,42 @@ describe('mobile classroom q filter', () => {
   it('timetable name+code q hits a title that only has the course name', () => {
     const onlyName = [{ id: 'db', title: '資料庫系統' }];
     expect(
-      filterCoursesByClassroomQuery(onlyName, '資料庫系統 CS301', {
+      filterCoursesByClassroomQuery(onlyName, '資料庫系統', {
         fromTimetable: true,
         courseCode: 'CS301',
       }),
     ).toEqual(onlyName);
+  });
+
+  it('does not treat the last token of a multi-word name as a course code without code param', () => {
+    const multiWord = [
+      { id: 'ds', title: '資料 結構' },
+      { id: 'other', title: '程式 結構' },
+    ];
     expect(
-      filterCoursesByClassroomQuery(onlyName, '資料庫系統 CS301', { fromTimetable: true }),
-    ).toEqual(onlyName);
+      filterCoursesByClassroomQuery(multiWord, '資料 結構', { fromTimetable: true }),
+    ).toEqual([multiWord[0]]);
+
+    const english = [
+      { id: 'ml', title: 'Machine Learning' },
+      { id: 'dl', title: 'Deep Learning' },
+    ];
+    expect(
+      filterCoursesByClassroomQuery(english, 'Machine Learning', { fromTimetable: true }),
+    ).toEqual([english[0]]);
+  });
+
+  it('stays aligned with the shared classroomCourseQuery module', () => {
+    const sample = [{ id: 'x', title: '資料 結構' }];
+    const input = { courseName: '資料庫系統', courseCode: 'CS301' };
+    expect(timetableCourseSearchQuery(input)).toBe(sharedSearchQuery(input));
+    expect(timetableClassroomSearchParams(input)).toEqual({
+      q: '資料庫系統',
+      from: 'timetable',
+      code: 'CS301',
+    });
+    expect(
+      filterCoursesByClassroomQuery(sample, '資料 結構', { fromTimetable: true }),
+    ).toEqual(sharedFilter(sample, '資料 結構', { fromTimetable: true }));
   });
 });
