@@ -3,7 +3,7 @@
 本機可走完「公開校園導航 → 檢視資料 → 本人確認 → 一次執行 → 來源與路線回執」。
 使用地圖頁的 `PublicNavigationTask` 元件與真實 HTTP handler／service／ledger 程式；
 `serve-local.mjs` 才注入合成平台 session、序列化 SQL protocol fixture 與既有公開地點目錄。
-這不是正式登入、PostgreSQL 或雲端模型驗證。
+這個頁面使用合成 session／交易 fixture，不是真實登入或雲端模型驗證；另有隔離 PostgreSQL 驗證，見下方。
 
 ```sh
 node scripts/test-platform-public-agent.mjs
@@ -19,7 +19,7 @@ node scripts/platform-public-agent/serve-local.mjs
 ## 組裝邊界
 
 - `PlatformPublicAdmission` 使用既有 `PlatformAccountService.resolveSession` 結構介面，不接受 JSON 身分、角色、學籍或 Firebase uid。
-- `PlatformPublicTaskService` 目前只啟用確定性公開導航，沒有模型呼叫或 fallback；Groq 任務回 executor unavailable。原入場層仍保留兩個公開任務的嚴格契約。
+- `PlatformPublicTaskService` 預設只提供確定性導航；只有 host 明確注入 Groq planner 並在 Fastify 組裝選擇 `freeTierVerified` 才能測試雲端計畫。此布林值不能證明帳戶免費資格，正式部署前須核實。
 - `createPlatformPublicAgentHandler` 預設關閉，沒有在 Next／Fastify 註冊。未新增環境開關、部署或 migration manifest。地圖也未收到 production port，因此正式入口維持不變。
 - 未來 host 須以既有受信 signed HttpOnly cookie／platform session 實作 `resolveHttpSession`，提供固定 origin，不能使用本機 fixture 的測試 header。handler 驗 POST、同源、custom header、session context、8 KiB body、完整期限與回應前 session；不接受跨校／跨帳號身分 JSON。
 - 確認綁任務、內容雜湊、來源 fingerprint、校園、provider/model 與 session。`deterministic/public-poi-exact-match-v1` 與 Groq 是不同綁定；只有公開導航接受前者。
@@ -38,7 +38,7 @@ UI 確認前不執行，取消回輸入並恢復焦點；換帳校會卸載舊�
 
 ## 仍未核實／啟用
 
-- 未執行 `schema.candidate.sql`，未新增 GRANT；真 PostgreSQL 鎖、FK、跨程序競態、statement timeout／commit 故障及帳號清理尚待隔離 DB 驗證。
+- `schema.candidate.sql` 已在自建隔離 PostgreSQL 的合成帳號表執行；未套用至正式服務或新增 GRANT。正式 DDL／grants、所有 lock／statement timeout、帳號清理與部署故障路徑尚未驗證。
 - fixture 的序列化回滾不是 PostgreSQL 證據。實際 DB transaction 不會因 HTTP abort 自動取消。
 - 確認紀錄上限預設 1000，過期／已耗用也計入；未知操作不刪除。保留及容量清理政策尚未核定。
 - 身分與來源為順序檢查，不是分散式原子快照，最後來源讀取後仍有 TOCTOU 窗口。
@@ -57,3 +57,11 @@ Web 另有未註冊的 `apps/web/src/lib/nuni/platformPublicAgentGateway.ts` 組
 本機 PostgreSQL 17 隔離驗證可用 `node scripts/platform-public-agent/postgres-local-run.mjs`（目前 runner 使用 macOS Homebrew 的 `/opt/homebrew/opt/postgresql@17/bin`）。runner 自建私有暫存叢集，禁止 TCP，只在自有 Unix socket 及合成最小帳號表上套用候選 schema；清理僅限它所建叢集。一般 `node scripts/test-platform-public-agent.mjs` 不啟動資料庫，會將 PG 整合項標為 skip。
 
 該 SQL 仍未編號、未註冊、未套到任何連線服務。正式導入前需核現有未結案資料是否與唯一索引衝突並停下處理，不可自動刪除或自動結案；另須核 migration 執行順序、正式帳號 DDL／grants、連線與 lock／statement timeout、備份／保留、未知任務和解及故障恢復。Web gateway 的實際 upstream transport、嚴格回執投影、UI scope 與 session 重新驗證仍未註冊或啟用。
+
+## Groq 公開導航計畫候選（未註冊）
+
+`prepareGroq` 只讀公開校園來源，列出將送出的校園、問題及公開地點 ID／名稱、Groq 與固定模型，並以來源 fingerprint、明確 model 和 payload 綁定確認內容；尚不呼叫供應商。本人明確確認後，`confirm`／`execute` 在 ledger 原子入場並保守扣內部額度，一次呼叫注入的 planner；規劃器最後讀取來源後、外送前重新驗證 session，不處理工具呼叫、不自動重送或 fallback。模型只回傳源內不同地點 ID，plan 存為未結案結果；第二次明確確認並傳同一 operation ID、完整 request 與 ID，`route` 才在重新核對未結案狀態、帳號與公開座標後建立 Google Maps 連結。已結案 plan 不再交付。身分／來源檢查仍非分散式原子保證。
+
+確定收到 429、unclear 或不合 schema 回應時，須成功持久寫入各自的 failed code 後才回 failed，並由本人明確結案；失敗寫入的 commit 回覆遺失、逾時、中止與網路失聯皆回 unknown，不能自動重送。內部共享額度非 Groq 即時餘額；目前 deterministic 與 Groq 使用同一 server budget。未知結果和解的 `beginDispatch`／可信未派送標記尚未接入，不能以此候選自動解除 unknown。
+
+重跑真 Fastify／PostgreSQL 合成整合：在符合 pin integrity 的 Fastify 5.12.7 已安裝目錄執行 `node scripts/platform-public-agent/postgres-local-run.mjs --fastify-root /absolute/path/to/installation`。省略 `--fastify-root` 時該 Fastify 測試明確 skip。測試重建 Fastify 實例與另一 Node 程序的 ledger，模擬 provider fetch，不呼叫 Groq；安裝的 npm transitive 依賴不代表正式 pnpm lock，rate-limit plugin、正式全域守衛與 body parser 期限未覆蓋。
