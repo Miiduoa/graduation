@@ -146,10 +146,65 @@ describe('resolveNotificationDestination', () => {
     ).toMatchObject({ ok: false, code: 'missing_ids' });
   });
 
-  test('unknown type and empty payload explain without destination', () => {
+  test('order opens StudentOrders; live_session opens AttendanceLive', () => {
+    expect(
+      resolveNotificationDestination({
+        data: { type: 'order', orderId: 'ord-1', schoolId: 'pu' },
+      }),
+    ).toMatchObject({
+      ok: true,
+      mode: 'nested',
+      tab: '學習',
+      screen: 'StudentOrders',
+      params: { orderId: 'ord-1', schoolId: 'pu' },
+    });
+    expect(
+      resolveNotificationDestination({
+        data: { type: 'live_session', groupId: 'c1', sessionId: 's1' },
+      }),
+    ).toMatchObject({
+      ok: true,
+      screen: 'AttendanceLive',
+      params: { sessionId: 's1', groupId: 'c1', isTeacher: false },
+    });
+  });
+
+  test('feedback with assignment opens HomeworkSubmit; submission opens TeacherGrading', () => {
+    expect(
+      resolveNotificationDestination({
+        data: {
+          type: 'feedback',
+          groupId: 'c1',
+          assignmentId: 'a1',
+          schoolId: 'pu',
+        },
+      }),
+    ).toMatchObject({
+      ok: true,
+      screen: 'HomeworkSubmit',
+      params: { groupId: 'c1', assignmentId: 'a1' },
+    });
+    expect(
+      resolveNotificationDestination({
+        data: {
+          type: 'assignment_submission',
+          groupId: 'c1',
+          assignmentId: 'a1',
+        },
+      }),
+    ).toMatchObject({
+      ok: true,
+      screen: 'TeacherGrading',
+      params: { groupId: 'c1', assignmentId: 'a1' },
+    });
+  });
+
+  test('unknown type opens notification center; empty payload stays blocked', () => {
     expect(resolveNotificationDestination({ data: { type: 'library_due' } })).toMatchObject({
-      ok: false,
-      code: 'unknown_type',
+      ok: true,
+      mode: 'nested',
+      tab: '我的',
+      screen: 'Notifications',
     });
     expect(resolveNotificationDestination({})).toMatchObject({
       ok: false,

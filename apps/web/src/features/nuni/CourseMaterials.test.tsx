@@ -8,6 +8,9 @@ import { MATERIAL_READ_KEY_PREFIX, markMaterialRead } from '@/lib/courseMaterial
 import { CourseMaterials } from './CourseMaterials';
 
 const state = vi.hoisted(() => ({ context: 'session-a', request: vi.fn(), refresh: vi.fn() }));
+vi.mock('next/navigation', () => ({
+  useSearchParams: () => new URLSearchParams(window.location.search),
+}));
 vi.mock('./Session', () => ({
   browserRequest: state.request,
   useNuniSession: () => ({
@@ -57,6 +60,25 @@ it('renders real reading content and safe links for students without publication
     'session-a',
     undefined,
   );
+});
+
+it('preserves course navigation context but keeps shared material links independent of private filters', async () => {
+  const context = { campus: 'tw-pu', q: '資料庫', courses: 'studying', task: 'feedback' };
+  const query = new URLSearchParams({ ...context, view: 'materials', invite: 'not-for-return-links' });
+  window.history.replaceState({}, '', `/classroom/course/${workspace.id}?${query}#material-${material.id}`);
+  render(<CourseMaterials workspace={{ ...workspace, memberRole: 'student' }} />);
+  await screen.findByRole('heading', { name: material.title });
+  for (const [name, pathname] of [
+    ['回課程首頁', `/classroom/course/${workspace.id}`],
+    ['此裝置收藏', '/classroom/material-bookmarks'],
+  ]) {
+    const destination = new URL(screen.getByRole('link', { name }).getAttribute('href')!, window.location.origin);
+    expect(destination.pathname).toBe(pathname);
+    expect(Object.fromEntries(destination.searchParams)).toEqual(context);
+    expect(destination.hash).toBe('');
+  }
+  expect(screen.getByRole('link', { name: '這份教材的連結' }).getAttribute('href'))
+    .toBe(`/classroom/course/${workspace.id}#material-${material.id}`);
 });
 
 it('publishes only text and links, then displays the confirmed material', async () => {

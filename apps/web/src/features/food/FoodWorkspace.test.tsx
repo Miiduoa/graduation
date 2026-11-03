@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { renderToString } from 'react-dom/server';
 import { hydrateRoot, type Root } from 'react-dom/client';
 import { beforeEach, expect, it, vi } from 'vitest';
@@ -407,10 +407,14 @@ it('keeps historical orders available after all public locations pause and only 
   expect(screen.queryByLabelText('一次性取餐憑證')).toBeNull();
   fireEvent.click(button('出示取餐憑證'));
   expect(screen.getByLabelText('一次性取餐憑證').textContent).toBe('t'.repeat(43));
+  const paper = screen.getByRole('region', { name: '訂單紙本明細' });
+  expect(paper.textContent).not.toContain('t'.repeat(43));
+  expect(within(paper).queryByLabelText('一次性取餐憑證')).toBeNull();
   mocks.request.mockRejectedValueOnce(new NuniError(403, 'FORBIDDEN'));
   fireEvent.click(button('更新這筆訂單'));
   await screen.findByText(/目前無法確認使用權限/);
   expect(screen.queryByLabelText('一次性取餐憑證')).toBeNull();
+  expect(screen.queryByRole('region', { name: '訂單紙本明細' })).toBeNull();
   expect(mocks.request).toHaveBeenCalledWith(
     'food-order-realms',
     'context-a',
@@ -448,6 +452,109 @@ it('requires cancellation confirmation and preserves the same cancellation after
   expect(writes[1][2]).toEqual(writes[0][2]);
 });
 
+it.each([400, 403, 409])(
+  'requires fresh cancellation confirmation after rejection %s',
+  async (status) => {
+    let attempts = 0;
+    mocks.request.mockImplementation((path, context, input) => {
+      if (path.endsWith('/cancel') && ++attempts === 1) {
+        order = { ...order, state: 'accepted' };
+        return Promise.reject(new NuniError(status, 'FOOD_ORDER_CHANGED'));
+      }
+      return respond(path, context, input);
+    });
+    render(<FoodWorkspace initialTenant="campus-one" initialOrder="order-1" />);
+    await screen.findByText('米飯店 · 待付款');
+    fireEvent.change(screen.getByLabelText('取消原因'), { target: { value: 'other' } });
+    fireEvent.change(screen.getByLabelText('取消原因說明'), {
+      target: { value: '取餐時間已變更' },
+    });
+    fireEvent.click(screen.getByLabelText('我確認要取消這筆訂單'));
+    fireEvent.click(button('確認取消訂單'));
+    await screen.findByText('米飯店 · 已接單');
+    const confirmation = screen.getByLabelText('我確認要取消這筆訂單') as HTMLInputElement;
+    await waitFor(() => expect(confirmation.disabled).toBe(false));
+    expect(confirmation.checked).toBe(false);
+    expect(button('確認取消訂單').disabled).toBe(true);
+    expect((screen.getByLabelText('取消原因') as HTMLSelectElement).value).toBe('other');
+    expect((screen.getByLabelText('取消原因說明') as HTMLTextAreaElement).value).toBe(
+      '取餐時間已變更',
+    );
+    expect(loadFoodPending('account-a', 'food:order:campus-one:order-1')).toBeNull();
+    expect(screen.queryByRole('button', { name: '重試同一份操作' })).toBeNull();
+    fireEvent.click(button('確認取消訂單'));
+    expect(attempts).toBe(1);
+    fireEvent.click(confirmation);
+    fireEvent.click(button('確認取消訂單'));
+    await screen.findByText('米飯店 · 已取消');
+    const writes = mocks.request.mock.calls.filter(([path]) => path.endsWith('/cancel'));
+    expect(writes).toHaveLength(2);
+    expect(writes[1][2]).toEqual({
+      ...writes[0][2],
+      idempotencyKey: expect.any(String),
+    });
+    expect(writes[1][2].idempotencyKey).not.toBe(writes[0][2].idempotencyKey);
+  },
+);
+
+it.each([0, 408])('keeps cancellation %s pending for an identical retry', async (status) => {
+  let attempts = 0;
+  mocks.request.mockImplementation((path, context, input) =>
+    path.endsWith('/cancel') && ++attempts === 1
+      ? Promise.reject(new NuniError(status, 'NETWORK_ERROR'))
+      : respond(path, context, input),
+  );
+  render(<FoodWorkspace initialTenant="campus-one" initialOrder="order-1" />);
+  await screen.findByText('米飯店 · 待付款');
+  fireEvent.click(screen.getByLabelText('我確認要取消這筆訂單'));
+  fireEvent.click(button('確認取消訂單'));
+  await screen.findByText(/尚未確認這次操作的結果/);
+  const confirmation = screen.getByLabelText('我確認要取消這筆訂單') as HTMLInputElement;
+  expect(confirmation.checked).toBe(true);
+  expect(confirmation.disabled).toBe(true);
+  expect(button('確認取消訂單').disabled).toBe(true);
+  const pending = loadFoodPending('account-a', 'food:order:campus-one:order-1');
+  expect(pending?.action).toBe('cancel');
+  fireEvent.click(button('重試同一份操作'));
+  await screen.findByText('米飯店 · 已取消');
+  const writes = mocks.request.mock.calls.filter(([path]) => path.endsWith('/cancel'));
+  expect(writes).toHaveLength(2);
+  expect(writes[1][2]).toEqual(writes[0][2]);
+  expect(writes[1][2]).toEqual(pending?.input);
+});
+
+it('keeps an uncertain cancellation pending when its retry receives a conflict', async () => {
+  let attempts = 0;
+  mocks.request.mockImplementation((path, context, input) => {
+    if (path.endsWith('/cancel')) {
+      attempts += 1;
+      if (attempts < 3) return Promise.reject(new NuniError(attempts === 1 ? 502 : 409, 'RETRY'));
+    }
+    return respond(path, context, input);
+  });
+  render(<FoodWorkspace initialTenant="campus-one" initialOrder="order-1" />);
+  await screen.findByText('米飯店 · 待付款');
+  fireEvent.click(screen.getByLabelText('我確認要取消這筆訂單'));
+  fireEvent.click(button('確認取消訂單'));
+  await screen.findByText(/尚未確認這次操作的結果/);
+  const pending = loadFoodPending('account-a', 'food:order:campus-one:order-1');
+  fireEvent.click(button('重試同一份操作'));
+  await waitFor(() => expect(attempts).toBe(2));
+  await waitFor(() => expect(button('重試同一份操作').disabled).toBe(false));
+  expect(loadFoodPending('account-a', 'food:order:campus-one:order-1')).toEqual(pending);
+  expect((screen.getByLabelText('我確認要取消這筆訂單') as HTMLInputElement).checked).toBe(true);
+  expect(button('確認取消訂單').disabled).toBe(true);
+  fireEvent.click(button('重試同一份操作'));
+  await screen.findByText('米飯店 · 已取消');
+  const writes = mocks.request.mock.calls.filter(([path]) => path.endsWith('/cancel'));
+  expect(writes).toHaveLength(3);
+  expect(writes.map(([, , input]) => input)).toEqual([
+    pending?.input,
+    pending?.input,
+    pending?.input,
+  ]);
+});
+
 it('rereads a rejected quote and keeps editable cart contents without offering stale confirmation', async () => {
   mocks.request.mockImplementation((path, context, input) =>
     path.endsWith('/quotes')
@@ -472,6 +579,11 @@ it('keeps placed orders visible and does not invite a new order while online ord
   expect(screen.queryByRole('button', { name: '查看菜單：米飯店' })).toBeNull();
   expect(screen.queryByText('先看菜單與金額，確認後才送出訂單。')).toBeNull();
   await screen.findByText('米飯店 · 待付款');
+  const paper = screen.getByRole('region', { name: '訂單紙本明細' });
+  expect(within(paper).getByText('非統一發票')).toBeTruthy();
+  expect(paper.textContent).not.toMatch(/已付款|已入帳|付款成功/);
+  expect(within(paper).queryByLabelText('一次性取餐憑證')).toBeNull();
+  expect(paper.querySelector('img, canvas, svg')).toBeNull();
   expect(screen.getByRole('link', { name: 'App 餐廳訂單' }).getAttribute('href')).toBe('/orders');
   expect(screen.queryByRole('button', { name: '我的訂單與取餐' })).toBeNull();
   expect(screen.getByRole('button', { name: '重新整理' })).toBeTruthy();
@@ -500,6 +612,11 @@ it('does not invite a second payment while authorization is still settling', asy
   };
   render(<FoodWorkspace initialTenant="campus-one" initialOrder="order-1" />);
   await screen.findByText('付款確認中，請稍候或更新這筆訂單。');
+  expect(screen.getByText('付款進度：等待入帳')).toBeTruthy();
+  expect(screen.queryByText('付款進度：已入帳')).toBeNull();
+  expect(screen.getByRole('region', { name: '訂單紙本明細' }).textContent).not.toMatch(
+    /已付款|已入帳/,
+  );
   expect(screen.queryByRole('button', { name: '信用卡結帳' })).toBeNull();
   expect(screen.queryByRole('link', { name: '前往安全付款頁面' })).toBeNull();
   expect(screen.queryByText(/請選擇付款方式/)).toBeNull();
@@ -706,3 +823,48 @@ it.each([
     }
   },
 );
+
+it.each(['accepted', 'preparing', 'ready', 'fulfilled'] as const)(
+  'shows the paper order detail without inventing payment confirmation for %s',
+  async (state) => {
+    order = { ...readyOrder(), state };
+    render(<FoodWorkspace initialTenant="campus-one" initialOrder="order-1" />);
+    const paper = await screen.findByRole('region', { name: '訂單紙本明細' });
+    expect(within(paper).getByText('非統一發票')).toBeTruthy();
+    expect(paper.textContent).toContain('NT$120');
+    expect(paper.textContent).not.toMatch(/已付款|已入帳|付款成功/);
+    expect(paper.textContent).not.toContain(order.pickup.credential!.token);
+    expect(paper.querySelector('img, canvas, svg')).toBeNull();
+    expect(screen.queryByText('付款進度：已入帳')).toBeNull();
+  },
+);
+
+it('expands paper line items by default for in-progress orders and keeps finished orders collapsed', async () => {
+  order = readyOrder();
+  const view = render(<FoodWorkspace initialTenant="campus-one" initialOrder="order-1" />);
+  const activePaper = await screen.findByRole('region', { name: '訂單紙本明細' });
+  const activeDetails = activePaper.querySelector('details');
+  expect(activeDetails?.open).toBe(true);
+  expect(within(activePaper).getByText('數量 1')).toBeTruthy();
+  expect(within(activePaper).getByRole('heading', { name: '蔬菜便當' })).toBeTruthy();
+
+  order = {
+    ...readyOrder(),
+    state: 'fulfilled',
+    allowedActions: [],
+    pickup: {
+      state: 'fulfilled',
+      displayCode: 'A101',
+      readyAt: future,
+      calls: [],
+      callCount: 0,
+      allowedActions: [],
+    },
+  };
+  view.unmount();
+  render(<FoodWorkspace initialTenant="campus-one" initialOrder="order-1" />);
+  const donePaper = await screen.findByRole('region', { name: '訂單紙本明細' });
+  expect(donePaper.querySelector('details')?.open).toBe(false);
+  expect(within(donePaper).getByText('品項明細 · 1 項')).toBeTruthy();
+  expect(within(donePaper).getByText('NT$120').closest('details')).toBeNull();
+});

@@ -1011,7 +1011,35 @@ async function callAssistantModelWithTools({
   maxRounds = 3,
 }) {
   const { tools, runTool } = require('./agent/tools/registry');
-  const toolDefs = buildToolDefinitions(tools.filter((t) => !t.requiresConfirmation));
+  const {
+    createDefaultAssistantWritePermissions,
+    isAssistantWriteToolAllowed,
+    loadAssistantWritePermissions,
+  } = require('./lib/assistantWritePermissions');
+  let writePermissions = createDefaultAssistantWritePermissions();
+  try {
+    const { getFirestore } = require('firebase-admin/firestore');
+    writePermissions = await loadAssistantWritePermissions(
+      getFirestore(),
+      toolCtx && typeof toolCtx === 'object' ? toolCtx.uid : null,
+    );
+  } catch (error) {
+    // 無 Admin app／讀取失敗：fail closed，不把草稿下單工具暴露給模型。
+    console.warn(
+      '[assistantAgent] write permissions unavailable; denying proposeOrder:',
+      error?.message || error,
+    );
+  }
+  // 需確認寫入工具不給模型；草稿下單另依餐廳下單開關。
+  const toolDefs = buildToolDefinitions(
+    tools.filter((t) => {
+      if (t.requiresConfirmation) return false;
+      if (t.name === 'proposeOrder' && !isAssistantWriteToolAllowed(writePermissions, 'createOrder')) {
+        return false;
+      }
+      return true;
+    }),
+  );
   const { buildCardsFromToolTrace } = require('./agent/cardBuilders');
 
   const toolsInvoked = [];

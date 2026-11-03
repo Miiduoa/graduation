@@ -8,6 +8,7 @@ import ProfileEditAiFirstScreen from './ProfileEditAiFirstScreen';
 import AchievementsAiFirstScreen from './AchievementsAiFirstScreen';
 import SettingsAiFirstScreen from './SettingsAiFirstScreen';
 import { NotificationSettingsScreen } from './NotificationSettingsScreen';
+import { AssistantPermissionsScreen } from './AssistantPermissionsScreen';
 import NotificationsAiFirstScreen from './NotificationsAiFirstScreen';
 import { QRCodeScreen } from './QRCodeScreen';
 import { GlobalSearchScreen } from './GlobalSearchScreen';
@@ -176,7 +177,7 @@ export function MeStack() {
       <Stack.Screen
         name="NuniWorkspace"
         component={NuniWorkspaceScreen}
-        options={{ title: 'Campus One' }}
+        options={{ title: 'nuni' }}
       />
       <Stack.Screen
         name="Notifications"
@@ -187,6 +188,11 @@ export function MeStack() {
         name="NotificationSettings"
         component={NotificationSettingsScreen}
         options={{ title: '通知設定', headerShown: false }}
+      />
+      <Stack.Screen
+        name="AssistantPermissions"
+        component={AssistantPermissionsScreen}
+        options={{ title: '助理權限', headerShown: false }}
       />
       <Stack.Screen
         name="QRCode"

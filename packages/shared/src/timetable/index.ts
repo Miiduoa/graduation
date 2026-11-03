@@ -9,3 +9,4 @@ export * from './friendResend';
 export * from './shareCopy';
 export * from './meetup';
 export * from './classExceptions';
+export * from './classroomCourseQuery';

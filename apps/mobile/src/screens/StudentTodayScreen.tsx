@@ -22,6 +22,11 @@ import { theme } from '../ui/theme';
 import { useThemeStyleSheet } from '../ui/useThemeStyleSheet';
 import { navigateFromInboxTask } from '../services/inboxActions';
 import { hasTCSession } from '../services/tronClassClient';
+import {
+  courseWorkNavForClass,
+  todayCourseWorkNavigateTarget,
+  type TimetableClassroomDestination,
+} from '../hooks/timetableClassroomNav';
 import { useTodayTimetableData } from '../hooks/useTodayTimetableData';
 import {
   formatClassMeta,
@@ -37,6 +42,7 @@ import {
   sortTodayTodos,
   TODAY_COPY,
   type NextAction,
+  type TodayClass,
   type TodayTodo,
 } from '@campus/shared/src/pickNextAction';
 
@@ -177,14 +183,11 @@ export default function StudentTodayScreen() {
     : !updatedAt && (loading || timetableStatus === 'loading');
   const lmsUnconnected = !unsigned && !error && lmsConnected === false && todos.length === 0;
 
-  const openCourse = (courseId?: string) => {
-    if (courseId)
-      safeNavigate(navigation, 'CourseHub', {
-        courseSpaceId: courseId,
-        groupId: courseId,
-        section: 'week',
-      });
-    else rootNavigateNested('學習', 'PersonalTimetable', termKey ? { term: termKey } : undefined);
+  const openCourse = (
+    item: TodayClass & { courseWorkNav?: TimetableClassroomDestination; courseCode?: string },
+  ) => {
+    const target = todayCourseWorkNavigateTarget(courseWorkNavForClass(item));
+    safeNavigate(navigation, target.screen, target.params);
   };
   const openTodo = (row: TodoRow, scrollToSubmit = false) => {
     if (row.task) {
@@ -333,7 +336,7 @@ function NextActionCard({
   timetableReady: boolean;
   now: Date;
   styles: ReturnType<typeof createStyles>;
-  onOpenClass: (courseId?: string) => void;
+  onOpenClass: (item: TodayClass & { courseWorkNav?: TimetableClassroomDestination; courseCode?: string }) => void;
   onOpenTodo: (todo: TodoRow) => void;
   onOpenWeek: () => void;
 }) {
@@ -419,10 +422,11 @@ function NextActionCard({
     );
   }
   if (action.type === 'class') {
+    const classCta = action.class.courseId ? TODAY_COPY.viewCourse : TODAY_COPY.findCourse;
     return (
       <Pressable
         accessibilityRole="button"
-        onPress={() => onOpenClass(action.class.courseId)}
+        onPress={() => onOpenClass(action.class)}
         style={({ pressed }) => [s.card, pressed && s.pressed]}
         testID="next-action"
       >
@@ -431,7 +435,7 @@ function NextActionCard({
           <Text style={s.headline}>{action.class.title}</Text>
           <Text style={s.meta}>{formatClassMeta(action.class)}</Text>
           <View style={s.cardButton}>
-            <Text style={s.cardButtonText}>{TODAY_COPY.viewCourse}</Text>
+            <Text style={s.cardButtonText}>{classCta}</Text>
           </View>
         </Animated.View>
       </Pressable>
@@ -477,11 +481,11 @@ function TodayClassList({
   onImport,
   onOpenTimetable,
 }: {
-  classes: ReturnType<typeof sortTodayClasses>;
+  classes: Array<TodayClass & { courseWorkNav?: TimetableClassroomDestination; courseCode?: string }>;
   status: string;
   now: Date;
   styles: ReturnType<typeof createStyles>;
-  onOpenClass: (courseId?: string) => void;
+  onOpenClass: (item: TodayClass & { courseWorkNav?: TimetableClassroomDestination; courseCode?: string }) => void;
   onRetry: () => void;
   onImport: () => void;
   onOpenTimetable: () => void;
@@ -524,7 +528,7 @@ function TodayClassList({
               <Pressable
                 key={item.id}
                 accessibilityRole="button"
-                onPress={() => onOpenClass(item.courseId)}
+                onPress={() => onOpenClass(item)}
                 style={({ pressed }) => [
                   s.row,
                   index > 0 && s.rowBorder,

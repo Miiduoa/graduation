@@ -464,6 +464,10 @@ importers:
         version: 30.5.2(@types/node@20.19.30)(ts-node@10.9.2(@types/node@20.19.30)(typescript@5.9.3))
 
   packages/shared:
+    dependencies:
+      js-sha256:
+        specifier: 0.11.1
+        version: 0.11.1
     devDependencies:
       typescript:
         specifier: ^5.5.4
@@ -6867,6 +6871,9 @@ packages:
 
   jose@6.2.13:
     resolution: {integrity: sha512-7TIg10ZE1x82YediN+lcrPNvGMKge9yFHQD+Qho/b8y2adfugU3AsvvHfxV0fzyFllT6l9xCjf4RWY9g/Z9PJQ==}
+
+  js-sha256@0.11.1:
+    resolution: {integrity: sha512-o6WSo/LUvY2uC4j7mO50a2ms7E/EAdbP0swigLV+nzHKTTaYnaLIWJ02VdXrsJX0vGedDESQnLsOekr94ryfjg==}
 
   js-tokens@10.0.0:
     resolution: {integrity: sha512-lM/UBzQmfJRo9ABXbPWemivdCW8V2G8FHaHdypQaIy523snUjog0W71ayWXTjiR+ixeMyVHN2XcpnTd/liPg/Q==}
@@ -17829,6 +17836,8 @@ snapshots:
   jose@5.10.0: {}
 
   jose@6.2.13: {}
+
+  js-sha256@0.11.1: {}
 
   js-tokens@10.0.0: {}
 

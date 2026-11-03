@@ -160,3 +160,61 @@ test('a workspace gradebook link retains its data source when other LMS provider
     sourceSystem: 'workspace',
   });
 });
+
+test('separates teaching todos from grading under matching section titles', async () => {
+  jest.mocked(loadTeacherHome).mockResolvedValueOnce({
+    courses: [{ id: 'course-a', groupId: 'course-a', name: '教師 A 的課程', role: 'instructor' }],
+    tasks: [
+      {
+        id: 'live-1',
+        kind: 'live',
+        title: '進行中點名',
+        subtitle: '',
+        groupId: 'course-a',
+        groupName: '教師 A 的課程',
+        sessionId: 'live-1',
+        priority: 1,
+      },
+      {
+        id: 'group-1',
+        kind: 'group',
+        title: '課程動態提醒',
+        subtitle: '',
+        groupId: 'course-a',
+        groupName: '教師 A 的課程',
+        priority: 2,
+      },
+      {
+        id: 'grade-1',
+        kind: 'assignment',
+        title: '作業二待批改',
+        subtitle: '',
+        groupId: 'course-a',
+        groupName: '教師 A 的課程',
+        priority: 3,
+      },
+    ],
+  });
+
+  const view = render(<TeacherTodayScreen />);
+  await view.findByRole('header', { name: '教學待辦' });
+  expect(view.getByRole('header', { name: '待批改' })).toBeTruthy();
+
+  const labels = view
+    .UNSAFE_root.findAllByType(require('react-native').Text)
+    .map((node: { props: { children?: unknown } }) =>
+      typeof node.props.children === 'string' ? node.props.children : null,
+    );
+  const teachingIdx = labels.indexOf('教學待辦');
+  const gradingIdx = labels.indexOf('待批改');
+  const liveIdx = labels.indexOf('進行中點名');
+  const groupIdx = labels.indexOf('課程動態提醒');
+  const assignmentIdx = labels.indexOf('作業二待批改');
+  expect(teachingIdx).toBeGreaterThanOrEqual(0);
+  expect(gradingIdx).toBeGreaterThan(teachingIdx);
+  expect(liveIdx).toBeGreaterThan(teachingIdx);
+  expect(liveIdx).toBeLessThan(gradingIdx);
+  expect(groupIdx).toBeGreaterThan(teachingIdx);
+  expect(groupIdx).toBeLessThan(gradingIdx);
+  expect(assignmentIdx).toBeGreaterThan(gradingIdx);
+});

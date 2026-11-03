@@ -38,7 +38,7 @@ export function buildCampusEventCalendar(event: CampusEvent, detailUrl: string, 
   const lines = [
     'BEGIN:VCALENDAR',
     'VERSION:2.0',
-    'PRODID:-//Campus One//Campus Events//ZH-TW',
+    'PRODID:-//nuni//Campus Events//ZH-TW',
     'CALSCALE:GREGORIAN',
     'BEGIN:VEVENT',
     `UID:${id}@campus-one.local`,
