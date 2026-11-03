@@ -1,5 +1,6 @@
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
+import { browserRequest } from '@/features/nuni/Session';
 import SettingsPage from './page';
 import {
   AGENT_DELETE_MODEL_ACTION,
@@ -481,6 +482,38 @@ it('preserves browser appearance controls for guests and course-only accounts', 
   expect((screen.getByLabelText('自訂色彩') as HTMLInputElement).value).toBe('#41646a');
   expect(state.saveProfile).not.toHaveBeenCalled();
 });
+
+it.each(['Google-only', 'Google+Firebase'])(
+  'preserves the account-tab qualification draft during same-scope refresh for %s',
+  async (accountMode) => {
+    if (accountMode === 'Google-only') state.user = null;
+    state.nuni.session = { platformAccountId: 'pa_a', context: 'a', isPlatformOperator: false };
+    const { rerender } = render(<SettingsPage />);
+    fireEvent.click(screen.getByRole('button', { name: '帳號' }));
+    expect(screen.getByRole('button', { name: '帳號' }).getAttribute('aria-current')).toBe('page');
+    const email = await screen.findByRole('textbox', { name: '學校配發的電子郵件' });
+    fireEvent.change(email, { target: { value: 'draft-a@example.test' } });
+    expect((email as HTMLInputElement).value).toBe('draft-a@example.test');
+
+    state.nuni.loading = true;
+    rerender(<SettingsPage />);
+    expect(screen.queryByRole('form', { name: '申請學校資格' })).toBeNull();
+    expect(screen.queryByRole('textbox', { name: '學校配發的電子郵件' })).toBeNull();
+    expect(screen.queryByRole('button', { name: '送出資格申請' })).toBeNull();
+
+    state.nuni.loading = false;
+    rerender(<SettingsPage />);
+    const restored = await screen.findByRole('textbox', { name: '學校配發的電子郵件' });
+    expect((restored as HTMLInputElement).value).toBe('draft-a@example.test');
+    expect((restored as HTMLInputElement).disabled).toBe(false);
+    expect(vi.mocked(browserRequest).mock.calls.filter((call) => call[2] !== undefined)).toEqual(
+      [],
+    );
+    expect(state.saveProfile).not.toHaveBeenCalled();
+    if (accountMode === 'Google-only') expect(state.read).not.toHaveBeenCalled();
+    else expect(state.read).toHaveBeenCalledWith('users/a');
+  },
+);
 
 it('ends both mixed-account sessions and hides data before either logout finishes', async () => {
   state.nuni.session = { platformAccountId: 'pa_a', context: 'a', isPlatformOperator: true };

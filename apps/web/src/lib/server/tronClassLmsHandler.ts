@@ -294,6 +294,18 @@ async function loadCourseContents(
     announcements = announcementResult.value
       .map((item) => parseAnnouncement(item, 'course', course))
       .filter((item): item is LmsAnnouncementItem => Boolean(item));
+    // The general activities feed can carry announcements absent from the dedicated
+    // endpoint, even when that endpoint succeeds. Preserve both without duplicating
+    // identical course/activity records. Do not merge differing content by title alone.
+    const key = (item: LmsAnnouncementItem) =>
+      JSON.stringify([item.courseId, item.id.split(':').pop(), item.title, item.content]);
+    const seen = new Set(announcements.map(key));
+    for (const item of activityAnnouncements) {
+      const signature = key(item);
+      if (seen.has(signature)) continue;
+      seen.add(signature);
+      announcements.push(item);
+    }
   } else if (activitiesResult.ok) {
     announcements = activityAnnouncements;
     if (announcementResult.status !== 404) {
@@ -448,7 +460,8 @@ export function createTronClassLmsHandler({
       const cached = await cacheRef.get();
       const cacheData = cached.data();
       if (cached.exists) {
-        if (cacheData?.ownerUid !== uid || !cacheStillFresh(cacheData.expiresAt, now()) ||
+        if (cacheData?.ownerUid !== uid || cacheData?.sessionId !== linkedId ||
+          !cacheStillFresh(cacheData.expiresAt, now()) ||
           !publicSnapshot(cacheData.snapshot, uid)) {
           await cacheRef.delete?.();
         } else {
@@ -459,6 +472,7 @@ export function createTronClassLmsHandler({
             try {
               await cacheRef.set?.({
                 ownerUid: uid,
+                sessionId: linkedId,
                 fetchedAt: cacheData.fetchedAt,
                 expiresAt: cacheData.expiresAt,
                 snapshot: homeworkOnlySnapshot(publicSnapshot(cacheData.snapshot, uid)!),
@@ -560,11 +574,25 @@ export function createTronClassLmsHandler({
         }
       }
 
+      // Content requests may still be in flight when the user reconnects or signs out.
+      // Never return or persist results fetched under a superseded LMS session.
+      if (fetchedFromSchool) {
+        await requireAcademicAccount(db, uid);
+        const [latestPortal, latestSession] = await Promise.all([portalSnapshot.ref.get(), sessionRef.get()]);
+        if (!latestPortal.exists || latestPortal.data()?.ownerUid !== uid ||
+          latestPortal.data()?.tronClassSessionId !== linkedId ||
+          !(schoolSessionExpiry(latestPortal.data()?.expiresAt) > now()) ||
+          !latestSession.exists || latestSession.data()?.ownerUid !== uid ||
+          !(schoolSessionExpiry(latestSession.data()?.expiresAt) > now()) ||
+          !schoolSessionCookies(latestSession.data()?.cookies)) reconnect();
+      }
+
       const merged = mergeExtras(homeworkOnlySnapshot(snapshot), extras);
       merged.cache = { hit: !fetchedFromSchool && !refresh, expiresAt: snapshot.cache.expiresAt };
       try {
         await cacheRef.set?.({
           ownerUid: uid,
+          sessionId: linkedId,
           fetchedAt: snapshot.fetchedAt,
           expiresAt: new Date(Date.parse(snapshot.cache.expiresAt)),
           snapshot: homeworkOnlySnapshot(snapshot),
