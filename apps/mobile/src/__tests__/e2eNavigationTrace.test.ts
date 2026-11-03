@@ -80,3 +80,84 @@ test('keeps a bounded recent event buffer with increasing sequence numbers', () 
   const events = scope.__e2eNavTrace as { sequence: number }[];
   expect(events.at(-1)!.sequence - events[0].sequence).toBe(1999);
 });
+
+test('scroll and target observations retain only bounded numbers and fixed target labels', () => {
+  traceNavigation('scroll-end', 'LoginLanding', undefined, undefined, {
+    scroll: {
+      offsetY: -12.5,
+      viewportHeight: 874,
+      contentHeight: 2000,
+      nativeTimestamp: 1234.25,
+      token: 'private fixture',
+    },
+  });
+  traceNavigation('target-measure', 'LoginLanding', undefined, undefined, {
+    target: {
+      name: 'google-heading',
+      trigger: 'scroll-end',
+      requestedAt: 100,
+      x: 47,
+      y: 347,
+      width: 308,
+      height: 26,
+      text: 'private fixture',
+    },
+  });
+  expect(scope.__e2eNavTrace).toEqual([
+    expect.objectContaining({
+      scroll: {
+        offsetY: -12.5,
+        viewportHeight: 874,
+        contentHeight: 2000,
+        nativeTimestamp: 1234.25,
+      },
+    }),
+    expect.objectContaining({
+      target: {
+        name: 'google-heading',
+        trigger: 'scroll-end',
+        requestedAt: 100,
+        x: 47,
+        y: 347,
+        width: 308,
+        height: 26,
+      },
+    }),
+  ]);
+  expect(JSON.stringify((console.info as jest.Mock).mock.calls)).not.toContain('private fixture');
+});
+
+test('invalid geometry and event or route mismatches never expose arbitrary values', () => {
+  const privateValue = 'private fixture';
+  traceNavigation('scroll-offset', 'LoginLanding', undefined, undefined, {
+    scroll: {
+      offsetY: Infinity,
+      viewportHeight: -1,
+      contentHeight: privateValue,
+      nativeTimestamp: NaN,
+    },
+    target: { name: privateValue, trigger: privateValue },
+  });
+  traceNavigation('target-measure', 'LoginLanding', undefined, undefined, {
+    target: {
+      name: 'login-start',
+      trigger: 'layout',
+      requestedAt: 1.5,
+      x: 100001,
+      y: privateValue,
+    },
+  });
+  traceNavigation('target-measure', 'LoginLanding', undefined, undefined, {
+    target: { name: privateValue, trigger: 'layout' },
+  });
+  traceNavigation('press', 'LoginLanding', undefined, undefined, { scroll: { offsetY: 10 } });
+  traceNavigation('scroll-end', 'NuniWorkspace', undefined, undefined, { scroll: { offsetY: 10 } });
+  expect(scope.__e2eNavTrace).toEqual([
+    expect.objectContaining({ scroll: {} }),
+    expect.objectContaining({ target: { name: 'login-start', trigger: 'layout' } }),
+    expect.not.objectContaining({ target: expect.anything() }),
+    expect.not.objectContaining({ scroll: expect.anything() }),
+    expect.not.objectContaining({ scroll: expect.anything() }),
+  ]);
+  expect(JSON.stringify((console.info as jest.Mock).mock.calls)).not.toContain(privateValue);
+});

@@ -39,6 +39,21 @@ const ROUTES = new Set([
   'PersonalTimetable',
   'PersonalCalendar',
 ]);
+const SCROLL_EVENTS = new Set([
+  'scroll-begin',
+  'scroll-end',
+  'momentum-begin',
+  'momentum-end',
+  'scroll-offset',
+]);
+const TARGET_NAMES = new Set(['google-heading', 'login-start']);
+const TARGET_TRIGGERS = new Set([
+  'layout',
+  'scroll-begin',
+  'scroll-end',
+  'momentum-begin',
+  'momentum-end',
+]);
 const EVENTS = new Set([
   'mount',
   'unmount',
@@ -55,6 +70,8 @@ const EVENTS = new Set([
   'auth-error',
   'auth-session',
   'auth-signed-out',
+  ...SCROLL_EVENTS,
+  'target-measure',
 ]);
 
 function debuggerUrl(value) {
@@ -108,6 +125,16 @@ function allowedEvent(value) {
   return !!layout && Math.abs(Number(layout[1])) <= 100_000 && Number(layout[2]) <= 100_000;
 }
 
+function boundedNumbers(value, fields) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
+  const clean = {};
+  for (const [key, min, max] of fields) {
+    const number = value[key];
+    if (Number.isFinite(number) && number >= min && number <= max) clean[key] = number;
+  }
+  return Object.keys(clean).length ? clean : undefined;
+}
+
 function sanitizeTrace(value) {
   if (!Array.isArray(value)) return [];
   return value.slice(-MAX_ENTRIES).flatMap((entry) => {
@@ -136,6 +163,36 @@ function sanitizeTrace(value) {
         clean.state.index = state.index;
       if (Array.isArray(state.routeNames))
         clean.state.routeNames = state.routeNames.slice(0, 40).filter((name) => ROUTES.has(name));
+    }
+    if (entry.route === 'LoginLanding' && SCROLL_EVENTS.has(entry.event)) {
+      const scroll = boundedNumbers(entry.scroll, [
+        ['offsetY', -100_000, 100_000],
+        ['viewportHeight', 0, 100_000],
+        ['contentHeight', 0, 100_000],
+        ['nativeTimestamp', 0, Number.MAX_SAFE_INTEGER],
+      ]);
+      if (scroll) clean.scroll = scroll;
+    }
+    if (
+      entry.route === 'LoginLanding' &&
+      entry.event === 'target-measure' &&
+      entry.target &&
+      !Array.isArray(entry.target) &&
+      TARGET_NAMES.has(entry.target.name) &&
+      TARGET_TRIGGERS.has(entry.target.trigger)
+    ) {
+      clean.target = {
+        name: entry.target.name,
+        trigger: entry.target.trigger,
+        ...boundedNumbers(entry.target, [
+          ['x', -100_000, 100_000],
+          ['y', -100_000, 100_000],
+          ['width', 0, 100_000],
+          ['height', 0, 100_000],
+        ]),
+      };
+      if (Number.isSafeInteger(entry.target.requestedAt) && entry.target.requestedAt >= 0)
+        clean.target.requestedAt = entry.target.requestedAt;
     }
     return [clean];
   });

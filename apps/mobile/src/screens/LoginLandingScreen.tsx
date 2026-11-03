@@ -1,5 +1,6 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import type { NativeScrollEvent, NativeSyntheticEvent } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
 import { safeNavigate } from '../utils/safeNavigate';
@@ -15,7 +16,12 @@ import {
   loadSchoolLoginProviderKinds,
 } from '../services/schoolLoginAvailability';
 
-import { traceNavigation } from '../utils/e2eNavigationTrace';
+import {
+  isE2eNavigationTraceEnabled,
+  traceNavigation,
+  type ScrollTraceEvent,
+  type TargetTraceTrigger,
+} from '../utils/e2eNavigationTrace';
 
 export default function LoginLandingScreen() {
   const navigation = useNavigation();
@@ -24,6 +30,35 @@ export default function LoginLandingScreen() {
   const s = useThemeStyleSheet(createStyles);
   const [, refreshProviders] = useState(0);
   const schoolEntry = isSchoolLoginEntryAvailable(school.id);
+  const traceEnabled = isE2eNavigationTraceEnabled();
+  const headingRef = useRef<Text>(null);
+  const loginRef = useRef<View>(null);
+  const measurementActive = useRef(traceEnabled);
+  const measurementRevision = useRef({ 'google-heading': 0, 'login-start': 0 });
+  const invalidateMeasurements = () => {
+    measurementRevision.current['google-heading']++;
+    measurementRevision.current['login-start']++;
+  };
+  useLayoutEffect(() => {
+    if (!traceEnabled) return;
+    measurementActive.current = true;
+    const blur = navigation.addListener?.('blur', () => {
+      measurementActive.current = false;
+      invalidateMeasurements();
+    });
+    const focus = navigation.addListener?.('focus', () => {
+      measurementActive.current = true;
+    });
+    return () => {
+      measurementActive.current = false;
+      invalidateMeasurements();
+      blur?.();
+      focus?.();
+    };
+  }, [navigation, traceEnabled]);
+  useLayoutEffect(() => {
+    if (traceEnabled) invalidateMeasurements();
+  }, [auth.loading, auth.pendingLogout, auth.error, auth.session, school.id, traceEnabled]);
   useEffect(() => {
     traceNavigation('mount', 'LoginLanding');
     return () => traceNavigation('unmount', 'LoginLanding');
@@ -51,9 +86,54 @@ export default function LoginLandingScreen() {
       active = false;
     };
   }, []);
+  const measureTarget = (name: 'google-heading' | 'login-start', trigger: TargetTraceTrigger) => {
+    if (!traceEnabled || !measurementActive.current) return;
+    const revision = ++measurementRevision.current[name];
+    const requestedAt = Date.now();
+    const target = name === 'google-heading' ? headingRef.current : loginRef.current;
+    try {
+      target?.measureInWindow?.((x, y, width, height) => {
+        if (!measurementActive.current || revision !== measurementRevision.current[name]) return;
+        traceNavigation('target-measure', 'LoginLanding', undefined, undefined, {
+          target: { name, trigger, requestedAt, x, y, width, height },
+        });
+      });
+    } catch {
+      // Diagnostics must not interrupt the native scroll or press handler.
+    }
+  };
+  const traceScroll = (name: ScrollTraceEvent, event: NativeSyntheticEvent<NativeScrollEvent>) => {
+    if (!traceEnabled || !measurementActive.current) return;
+    const { contentOffset, contentSize, layoutMeasurement } = event.nativeEvent;
+    traceNavigation(name, 'LoginLanding', undefined, undefined, {
+      scroll: {
+        offsetY: contentOffset.y,
+        viewportHeight: layoutMeasurement.height,
+        contentHeight: contentSize.height,
+        nativeTimestamp: (event.nativeEvent as NativeScrollEvent & { timestamp?: unknown })
+          .timestamp,
+      },
+    });
+    if (name !== 'scroll-offset') {
+      measureTarget('google-heading', name);
+      measureTarget('login-start', name);
+    }
+  };
   return (
     <SafeAreaView testID="login-landing" style={s.page}>
-      <ScrollView contentContainerStyle={s.content}>
+      <ScrollView
+        contentContainerStyle={s.content}
+        scrollEventThrottle={traceEnabled ? 100 : undefined}
+        onScrollBeginDrag={traceEnabled ? (event) => traceScroll('scroll-begin', event) : undefined}
+        onScrollEndDrag={traceEnabled ? (event) => traceScroll('scroll-end', event) : undefined}
+        onMomentumScrollBegin={
+          traceEnabled ? (event) => traceScroll('momentum-begin', event) : undefined
+        }
+        onMomentumScrollEnd={
+          traceEnabled ? (event) => traceScroll('momentum-end', event) : undefined
+        }
+        onScroll={traceEnabled ? (event) => traceScroll('scroll-offset', event) : undefined}
+      >
         <View style={s.brandRow}>
           <View
             style={s.brandMark}
@@ -115,10 +195,17 @@ export default function LoginLandingScreen() {
           >
             <Text style={s.importButtonText}>匯入課表、成績或活動 →</Text>
           </Pressable>
-          <Text style={s.importHelp}>支援學校網頁 HTML 存檔、截圖、PDF、CSV；先選表格並核對內容，不需要提供校務密碼。</Text>
+          <Text style={s.importHelp}>
+            支援學校網頁 HTML 存檔、截圖、PDF、CSV；先選表格並核對內容，不需要提供校務密碼。
+          </Text>
         </View>
         <View style={s.panel}>
-          <Text accessibilityRole="header" style={s.title}>
+          <Text
+            ref={traceEnabled ? headingRef : undefined}
+            onLayout={traceEnabled ? () => measureTarget('google-heading', 'layout') : undefined}
+            accessibilityRole="header"
+            style={s.title}
+          >
             Google 帳號
           </Text>
           <Text style={s.body}>和網頁版使用同一個帳號，加入課程、繳交作業或管理店家。</Text>
@@ -128,13 +215,15 @@ export default function LoginLandingScreen() {
             </Text>
           ) : null}
           <Pressable
+            ref={traceEnabled ? loginRef : undefined}
             testID="login-start"
-            onLayout={(event) =>
+            onLayout={(event) => {
               traceNavigation(
                 `layout-y:${event.nativeEvent.layout.y}-height:${event.nativeEvent.layout.height}`,
                 'NuniWorkspace',
-              )
-            }
+              );
+              measureTarget('login-start', 'layout');
+            }}
             onPressIn={() => traceNavigation('press-in', 'NuniWorkspace')}
             onPressOut={() => traceNavigation('press-out', 'NuniWorkspace')}
             accessibilityRole="button"

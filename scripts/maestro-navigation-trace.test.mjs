@@ -172,6 +172,156 @@ test('accepts numeric layout records but rejects arbitrary event text and invali
   assert.equal(entries[0].sequence, 20);
 });
 
+test('keeps bounded scroll samples only on the landing scroll events', () => {
+  const scroll = {
+    offsetY: -10.5,
+    viewportHeight: 874,
+    contentHeight: 2400.25,
+    nativeTimestamp: 12345.5,
+  };
+  for (const event of [
+    'scroll-begin',
+    'scroll-end',
+    'momentum-begin',
+    'momentum-end',
+    'scroll-offset',
+  ]) {
+    const entry = { ...row(), event, route: 'LoginLanding' };
+    assert.deepEqual(
+      sanitizeTrace([
+        {
+          ...entry,
+          scroll: { ...scroll, session: 'secret-session', params: { account: 'secret-account' } },
+        },
+      ]),
+      [{ ...entry, scroll }],
+    );
+  }
+  for (const entry of [
+    row(),
+    { ...row(), event: 'scroll-offset' },
+    { ...row(), event: 'target-measure', route: 'LoginLanding' },
+  ])
+    assert.deepEqual(sanitizeTrace([{ ...entry, scroll }]), [entry]);
+});
+
+test('removes invalid scroll values without retaining strings or nested fields', () => {
+  const entry = { ...row(), event: 'scroll-offset', route: 'LoginLanding' };
+  assert.deepEqual(
+    sanitizeTrace([
+      {
+        ...entry,
+        scroll: {
+          offsetY: 100_000,
+          viewportHeight: 0,
+          contentHeight: 100_000,
+          nativeTimestamp: Number.MAX_SAFE_INTEGER,
+        },
+      },
+    ])[0].scroll,
+    {
+      offsetY: 100_000,
+      viewportHeight: 0,
+      contentHeight: 100_000,
+      nativeTimestamp: Number.MAX_SAFE_INTEGER,
+    },
+  );
+  for (const scroll of [
+    {
+      offsetY: -100_001,
+      viewportHeight: -1,
+      contentHeight: 100_001,
+      nativeTimestamp: Number.MAX_SAFE_INTEGER + 1,
+    },
+    { offsetY: Infinity, viewportHeight: NaN, contentHeight: 'secret', nativeTimestamp: -1 },
+    { offsetY: { secret: 'secret-offset' }, contentHeight: [100], nativeTimestamp: null },
+    [],
+    'secret-scroll',
+    null,
+  ])
+    assert.deepEqual(sanitizeTrace([{ ...entry, scroll }]), [entry]);
+  assert.deepEqual(
+    sanitizeTrace([{ ...entry, scroll: { offsetY: -100_000, viewportHeight: 'secret' } }]),
+    [{ ...entry, scroll: { offsetY: -100_000 } }],
+  );
+});
+
+test('keeps only fixed target names, triggers and bounded measurement fields', () => {
+  const entry = { ...row(), event: 'target-measure', route: 'LoginLanding' };
+  for (const name of ['google-heading', 'login-start'])
+    for (const trigger of [
+      'layout',
+      'scroll-begin',
+      'scroll-end',
+      'momentum-begin',
+      'momentum-end',
+    ]) {
+      const measurement = {
+        name,
+        trigger,
+        x: -100_000,
+        y: 100_000,
+        width: 0,
+        height: 100_000,
+        requestedAt: Number.MAX_SAFE_INTEGER,
+      };
+      assert.deepEqual(
+        sanitizeTrace([
+          {
+            ...entry,
+            target: {
+              ...measurement,
+              text: 'secret-text',
+              session: { token: 'secret-token' },
+              params: { account: 'secret-account' },
+            },
+          },
+        ]),
+        [{ ...entry, target: measurement }],
+      );
+    }
+  const nameAndTrigger = { name: 'login-start', trigger: 'scroll-end' };
+  for (const requestedAt of [-1, 1.5, Number.MAX_SAFE_INTEGER + 1, 'secret-time'])
+    assert.deepEqual(
+      sanitizeTrace([
+        {
+          ...entry,
+          target: {
+            ...nameAndTrigger,
+            x: -100_001,
+            y: Infinity,
+            width: { secret: 'secret-width' },
+            height: -1,
+            requestedAt,
+          },
+        },
+      ]),
+      [{ ...entry, target: nameAndTrigger }],
+    );
+});
+
+test('omits target data when the event, route, name or trigger does not match', () => {
+  const measurement = { name: 'google-heading', trigger: 'layout', requestedAt: 0, y: 347 };
+  for (const entry of [
+    row(),
+    { ...row(), event: 'target-measure' },
+    { ...row(), event: 'scroll-end', route: 'LoginLanding' },
+  ])
+    assert.deepEqual(sanitizeTrace([{ ...entry, target: measurement }]), [entry]);
+  const entry = { ...row(), event: 'target-measure', route: 'LoginLanding' };
+  for (const target of [
+    { ...measurement, name: 'secret-name' },
+    { ...measurement, trigger: 'secret-trigger' },
+    { ...measurement, trigger: 'scroll-offset' },
+    { name: 'google-heading' },
+    { trigger: 'layout' },
+    [measurement],
+    null,
+    'secret-target',
+  ])
+    assert.deepEqual(sanitizeTrace([{ ...entry, target }]), [entry]);
+});
+
 test('SIGTERM preserves sanitized trace and ignores arbitrary console and unsolicited replies', async (t) => {
   const dir = output(t);
   const signals = new EventEmitter();
