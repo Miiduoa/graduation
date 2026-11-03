@@ -470,6 +470,7 @@ export function createTronClassLmsHandler({
       const cacheRef = db.doc(`${LMS_CACHE_COLLECTION}/${uid}`);
       let extras: Record<string, CachedCourseContents> = {};
       let cachedHomework: LmsReadonlySnapshot | null = null;
+      let shouldPruneExtras = false;
       const cached = await cacheRef.get();
       const cacheData = cached.data();
       if (cached.exists) {
@@ -481,25 +482,26 @@ export function createTronClassLmsHandler({
           const pruned = readCachedExtras(cacheData.extras, now());
           extras = refresh ? {} : pruned.extras;
           cachedHomework = refresh ? null : homeworkOnlySnapshot(publicSnapshot(cacheData.snapshot, uid)!);
-          if (!refresh && pruned.pruned) {
-            try {
-              await cacheRef.set?.({
-                ownerUid: uid,
-                sessionId: linkedId,
-                fetchedAt: cacheData.fetchedAt,
-                expiresAt: cacheData.expiresAt,
-                snapshot: homeworkOnlySnapshot(publicSnapshot(cacheData.snapshot, uid)!),
-                extras,
-              }, { merge: false });
-            } catch {
-              // 清掉過期 extras 失敗時仍繼續讀取。
-            }
-          }
+          shouldPruneExtras = !refresh && pruned.pruned;
         }
       }
 
       if (cachedHomework && !refresh && (!courseId || extras[String(courseId)])) {
         await verifyLinkedSession();
+        if (shouldPruneExtras) {
+          try {
+            await cacheRef.set?.({
+              ownerUid: uid,
+              sessionId: linkedId,
+              fetchedAt: cacheData!.fetchedAt,
+              expiresAt: cacheData!.expiresAt,
+              snapshot: cachedHomework,
+              extras,
+            }, { merge: false });
+          } catch {
+            // 清掉過期 extras 失敗時仍繼續讀取。
+          }
+        }
         return {
           ...mergeExtras(cachedHomework, extras),
           cache: { hit: true, expiresAt: cachedHomework.cache.expiresAt },

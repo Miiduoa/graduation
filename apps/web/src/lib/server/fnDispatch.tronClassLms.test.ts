@@ -388,6 +388,8 @@ it.each([
   vi.mocked(source.fetchCourses).mockClear();
   vi.mocked(source.fetchHomeworkPage).mockClear();
   vi.mocked(source.fetchActivities).mockClear();
+  vi.mocked(source.fetchCourseAnnouncements).mockClear();
+  vi.mocked(source.fetchSiteAnnouncements).mockClear();
 
   const response = await request(data);
   expect(switched).toBe(true);
@@ -398,14 +400,70 @@ it.each([
   expect(source.fetchCourses).not.toHaveBeenCalled();
   expect(source.fetchHomeworkPage).not.toHaveBeenCalled();
   expect(source.fetchActivities).not.toHaveBeenCalled();
+  expect(source.fetchCourseAnnouncements).not.toHaveBeenCalled();
+  expect(source.fetchSiteAnnouncements).not.toHaveBeenCalled();
   expect(store.docs.get(CACHE)?.sessionId).toBe(LMS_ID);
 });
 
+it.each([
+  'expired extras and reconnect',
+  'invalid extras and reconnect',
+  'deleted LMS session',
+  'expired portal',
+])('rejects a cache hit with %s during cache lookup without writing or calling school sources', async (scenario) => {
+  const { request, source, store } = setup();
+  expect((await request({ courseId: 10001 })).status).toBe(200);
+  const cached = store.docs.get(CACHE)!;
+  if (scenario === 'expired extras and reconnect') {
+    Object.assign((cached.extras as Record<string, object>)['10001'], { expiresAt: new Date(0).toISOString() });
+  } else if (scenario === 'invalid extras and reconnect') {
+    cached.extras = { '10001': { invalid: true } };
+  }
+  const cacheBefore = structuredClone(cached);
+  const writeCache = vi.fn();
+  const originalDoc = store.db.doc.bind(store.db);
+  let changed = false;
+  vi.spyOn(store.db, 'doc').mockImplementation((path) => {
+    const ref = originalDoc(path);
+    if (path !== CACHE) return ref;
+    return {
+      ...ref,
+      set: writeCache,
+      get: async () => {
+        const snapshot = await ref.get();
+        changed = true;
+        if (scenario === 'deleted LMS session') {
+          store.docs.delete(LMS);
+        } else if (scenario === 'expired portal') {
+          Object.assign(store.docs.get(PORTAL)!, { expiresAt: new Date(0) });
+        } else {
+          Object.assign(store.docs.get(PORTAL)!, { tronClassSessionId: 'c'.repeat(32) });
+        }
+        return snapshot;
+      },
+    };
+  });
+  for (const method of Object.values(source)) vi.mocked(method).mockClear();
+
+  const response = await request();
+  expect(changed).toBe(true);
+  expect(response.ok).toBe(false);
+  const body = await response.json();
+  expect(body.error.status).toBe('FAILED_PRECONDITION');
+  expect(body.result).toBeUndefined();
+  expect(writeCache).not.toHaveBeenCalled();
+  expect(store.docs.get(CACHE)).toEqual(cacheBefore);
+  for (const method of Object.values(source)) expect(method).not.toHaveBeenCalled();
+});
+
 it('makes no LMS calls when the read-only feature flag is disabled', async () => {
-  const { request, source } = setup();
+  const { request, source, store } = setup();
+  const doc = vi.spyOn(store.db, 'doc');
   vi.stubEnv('SCHOOL_LMS_READONLY_ENABLED', 'false');
   const response = await request({ courseId: 10001 });
   expect(response.status).toBe(404);
+  expect(doc).not.toHaveBeenCalled();
+  expect(source.fetchSiteAnnouncements).not.toHaveBeenCalled();
   expect(source.fetchCourses).not.toHaveBeenCalled();
   expect(source.fetchHomeworkPage).not.toHaveBeenCalled();
   expect(source.fetchActivities).not.toHaveBeenCalled();
