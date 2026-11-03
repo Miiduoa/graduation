@@ -94,7 +94,7 @@ export class PlatformPublicAdmission {
     });
   }
 
-  private async actor(authorization: string | undefined): Promise<PlatformTaskActor> {
+  async actor(authorization: string | undefined): Promise<PlatformTaskActor> {
     const [scheme, handle, extra] = authorization?.trim().split(/\s+/u) ?? [];
     if (scheme !== 'Platform' || !handle || extra || !/^ps_[A-Za-z0-9_-]{43}$/u.test(handle))
       throw new PublicAgentError('PUBLIC_AGENT_SESSION_INVALID', 401);

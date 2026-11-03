@@ -1,330 +1,42 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import process from 'node:process';
-import { join } from 'node:path';
-import { pathToFileURL } from 'node:url';
-import { createHash } from 'node:crypto';
+import {
+  PlatformPublicAgentLedger,
+  policy,
+  hash,
+  TransactionFixture,
+  fixture,
+  binding,
+  lookup,
+  rejectsCode,
+  quotas,
+  admissionFixture,
+  publicRequest,
+  requestLookup,
+  FREE_MODEL,
+  FREE_PROVIDER,
+  publicOperation,
+} from './fixtures.mjs';
 
-const compiled = process.env.PLATFORM_AGENT_COMPILED;
-assert.ok(compiled, 'Run the repository compile harness; no source or live database fallback.');
-const { PlatformPublicAgentLedger } = await import(pathToFileURL(join(compiled, 'ledger.js')).href);
-const { FREE_MODEL, FREE_PROVIDER } = await import(
-  pathToFileURL(join(compiled, 'contract.js')).href
-);
-const { PlatformPublicAdmission } = await import(
-  pathToFileURL(join(compiled, 'admission.js')).href
-);
-const policy = {
-  providerBudgetKey: 'synthetic-shared-free-budget',
-  providerDailyLimit: 10,
-  accountDailyLimit: 5,
-};
-const hash = (text) => createHash('sha256').update(text).digest('hex');
-const key = (...parts) => JSON.stringify(parts);
-const dbFailure = (code) => Object.assign(new Error('synthetic database failure'), { code });
-
-// A serialized, rollback-capable protocol fixture. It does not execute PostgreSQL SQL,
-// prove its locking/isolation, or provide a production persistence implementation.
-class TransactionFixture {
-  constructor() {
-    this.now = Date.parse('2026-11-03T00:00:00.000Z');
-    this.data = {
-      accounts: new Map(),
-      credentials: new Map(),
-      operatorAssignments: new Map(),
-      sessions: new Map(),
-      confirmations: new Map(),
-      operations: new Map(),
-      quota: new Map(),
-    };
-    this.tail = Promise.resolve();
-    this.events = [];
-    this.nextActor = 0;
-    this.nextTransaction = 0;
-    this.beforeAction = null;
-    this.failAction = null;
-    this.loseCommitAck = false;
-  }
-  actor() {
-    const number = ++this.nextActor;
-    const actor = {
-      platformAccountId: `pa_00000000-0000-0000-0000-${String(number).padStart(12, '0')}`,
-      credentialId: `pac_synthetic_${number}`,
-      sessionHash: hash(`synthetic-session-${number}`),
-      expiresAt: this.now + 3_600_000,
-    };
-    this.data.accounts.set(actor.platformAccountId, { state: 'active' });
-    this.data.credentials.set(actor.credentialId, {
-      account: actor.platformAccountId,
-      state: 'active',
-      method: 'google',
-    });
-    this.data.sessions.set(actor.sessionHash, {
-      account: actor.platformAccountId,
-      credential: actor.credentialId,
-      expiresAt: actor.expiresAt,
-    });
-    return actor;
-  }
-  anotherSession(actor) {
-    const next = { ...actor, sessionHash: hash(`synthetic-extra-${this.data.sessions.size}`) };
-    this.data.sessions.set(next.sessionHash, {
-      account: next.platformAccountId,
-      credential: next.credentialId,
-      expiresAt: next.expiresAt,
-    });
-    return next;
-  }
-  async transaction(run, options) {
-    assert.equal(options?.isolationLevel, 'read committed');
-    const prior = this.tail;
-    let release;
-    this.tail = new Promise((resolve) => {
-      release = resolve;
-    });
-    await prior;
-    const before = globalThis.structuredClone(this.data),
-      tx = ++this.nextTransaction;
-    this.events.push({ tx, action: 'begin' });
-    let result;
-    try {
-      result = await run({ query: (sql, values = []) => this.query(tx, sql, values) });
-      this.events.push({ tx, action: 'commit' });
-    } catch (error) {
-      this.data = before;
-      this.events.push({ tx, action: 'rollback' });
-      release();
-      throw error;
-    }
-    release();
-    if (this.loseCommitAck) {
-      this.loseCommitAck = false;
-      throw new Error('synthetic lost commit response');
-    }
-    return result;
-  }
-  classify(sql) {
-    if (/FROM platform_accounts\b/u.test(sql)) return 'account';
-    if (/FROM platform_account_credentials\b/u.test(sql)) return 'credential';
-    if (/FROM platform_account_sessions\b/u.test(sql)) return 'session';
-    if (/FROM platform_operator_assignments\b/u.test(sql)) return 'operator-assignment';
-    if (/pg_advisory_xact_lock/u.test(sql)) return 'lock';
-    if (/ AS quota_day/u.test(sql)) return 'quota-day';
-    if (/ AS at_capacity/u.test(sql)) return 'confirmation-capacity';
-    for (const [name, table] of [
-      ['confirmation', 'confirmations'],
-      ['operation', 'operations'],
-      ['quota', 'quota'],
-    ]) {
-      if (sql.startsWith(`SELECT `) && sql.includes(`FROM platform_public_agent_${table}`))
-        return `read-${name}`;
-      if (sql.startsWith(`INSERT INTO platform_public_agent_${table}`)) return `insert-${name}`;
-      if (sql.startsWith(`UPDATE platform_public_agent_${table}`)) return `update-${name}`;
-    }
-    throw new Error('Unexpected SQL in bounded fixture');
-  }
-  async query(tx, source, values) {
-    const sql = source.replace(/\s+/gu, ' ').trim(),
-      action = this.classify(sql);
-    this.events.push({ tx, action, values: globalThis.structuredClone(values) });
-    await this.beforeAction?.(action, values);
-    if (this.failAction === action) {
-      this.failAction = null;
-      throw dbFailure('SYNTHETIC_WRITE_FAILURE');
-    }
-    const rows = (list) => ({ rows: globalThis.structuredClone(list) });
-    const live = (row) => ({ ...row, unexpired: new Date(row.expires_at).getTime() > this.now });
-    if (action === 'account') {
-      assert.match(sql, /state='active'.*FOR SHARE/u);
-      return rows(this.data.accounts.get(values[0])?.state === 'active' ? [{ id: values[0] }] : []);
-    }
-    if (action === 'credential') {
-      assert.match(sql, /platform_account_id=\$2.*state='active'.*FOR SHARE/u);
-      const row = this.data.credentials.get(values[0]);
-      return rows(
-        row?.state === 'active' && row.account === values[1]
-          ? [{ id: values[0], ...(sql.includes('method') ? { method: row.method } : {}) }]
-          : [],
-      );
-    }
-    if (action === 'operator-assignment') {
-      assert.match(
-        sql,
-        /platform_account_id=\$1 AND role_key='platform-operator' AND state='active' FOR SHARE/u,
-      );
-      const row = this.data.operatorAssignments.get(values[0]);
-      return rows(
-        row?.role === 'platform-operator' && row.state === 'active'
-          ? [{ platform_account_id: values[0] }]
-          : [],
-      );
-    }
-    if (action === 'session') {
-      assert.match(
-        sql,
-        /platform_account_id=\$2 AND credential_id=\$3 AND expires_at>clock_timestamp\(\).*FOR SHARE/u,
-      );
-      const row = this.data.sessions.get(values[0]);
-      return rows(
-        row && row.account === values[1] && row.credential === values[2] && row.expiresAt > this.now
-          ? [{ expires_at: new Date(row.expiresAt) }]
-          : [],
-      );
-    }
-    if (action === 'lock') return rows([]);
-    if (action === 'quota-day') {
-      assert.match(
-        sql,
-        /to_char\(clock_timestamp\(\) AT TIME ZONE 'UTC','YYYY-MM-DD'\) AS quota_day/u,
-      );
-      return rows([{ quota_day: new Date(this.now).toISOString().slice(0, 10) }]);
-    }
-    if (action === 'confirmation-capacity') {
-      assert.match(sql, /count\(\*\) >= \$2/u);
-      assert.match(sql, /WHERE platform_account_id=\$1$/u);
-      assert.doesNotMatch(sql, /expires_at|consumed_at/u);
-      const count = [...this.data.confirmations.values()].filter(
-        (row) => row.platform_account_id === values[0],
-      ).length;
-      return rows([{ at_capacity: count >= values[1] }]);
-    }
-    if (action === 'read-confirmation') {
-      assert.match(sql, /FOR UPDATE/u);
-      assert.match(sql, /expires_at>clock_timestamp\(\)/u);
-      const row = sql.includes('WHERE id=$1')
-        ? [...this.data.confirmations.values()].find(
-            (item) => item.id === values[0] && item.platform_account_id === values[1],
-          )
-        : this.data.confirmations.get(key(...values));
-      return rows(row ? [live(row)] : []);
-    }
-    if (action === 'read-operation') {
-      assert.match(sql, /FOR UPDATE/u);
-      assert.match(sql, /expires_at>clock_timestamp\(\)/u);
-      const row = this.data.operations.get(key(...values));
-      return rows(row ? [live(row)] : []);
-    }
-    if (action === 'insert-confirmation' || action === 'insert-operation') {
-      const [id, account, credential, session, task, request, school, payload, provider, model] =
-        values;
-      const row = {
-        id,
-        platform_account_id: account,
-        credential_id: credential,
-        session_hash: session,
-        task,
-        request_id: request,
-        school_id: school,
-        payload_hash: payload,
-        provider,
-        model,
-      };
-      const index = key(account, task, request);
-      if (action === 'insert-confirmation') {
-        assert.match(sql, /WHERE \$11::timestamptz>clock_timestamp\(\)/u);
-        if (new Date(values[10]).getTime() <= this.now) return rows([]);
-        if (this.data.confirmations.has(index)) throw dbFailure('23505');
-        row.expires_at = new Date(Math.min(new Date(values[10]).getTime(), this.now + values[11]));
-        row.consumed_at = null;
-        this.data.confirmations.set(index, row);
-      } else {
-        assert.match(
-          sql,
-          /WHERE \$12::timestamptz>clock_timestamp\(\) AND \$13::timestamptz>clock_timestamp\(\)/u,
-        );
-        if (
-          new Date(values[11]).getTime() <= this.now ||
-          new Date(values[12]).getTime() <= this.now
-        )
-          return rows([]);
-        if (this.data.operations.has(index)) throw dbFailure('23505');
-        row.confirmation_id = values[10];
-        row.status = 'running';
-        row.expires_at = new Date(
-          Math.min(
-            new Date(values[11]).getTime(),
-            new Date(values[12]).getTime(),
-            this.now + values[13],
-          ),
-        );
-        this.data.operations.set(index, row);
-      }
-      return rows([{ id, expires_at: row.expires_at }]);
-    }
-    if (action === 'update-confirmation') {
-      assert.match(sql, /consumed_at IS NULL AND expires_at>clock_timestamp\(\) RETURNING id/u);
-      const columns = [
-        'id',
-        'platform_account_id',
-        'credential_id',
-        'session_hash',
-        'task',
-        'request_id',
-        'school_id',
-        'payload_hash',
-        'provider',
-        'model',
-      ];
-      const row = [...this.data.confirmations.values()].find((item) =>
-        columns.every((column, index) => item[column] === values[index]),
-      );
-      if (!row || row.consumed_at !== null || new Date(row.expires_at).getTime() <= this.now)
-        return rows([]);
-      row.consumed_at = new Date(this.now);
-      return rows([{ id: row.id }]);
-    }
-    if (action === 'insert-quota') {
-      assert.match(sql, /ON CONFLICT \(budget_kind,budget_key,window_start\) DO UPDATE/u);
-      assert.match(sql, /WHERE platform_public_agent_quota.used<\$4 RETURNING used/u);
-      const [kind, budget, account, limit, day] = values;
-      const index = key(kind, budget, day),
-        used = this.data.quota.get(index)?.used ?? 0;
-      if (used >= limit) return rows([]);
-      this.data.quota.set(index, { used: used + 1, account });
-      return rows([{ used: used + 1 }]);
-    }
-    if (action === 'update-operation') {
-      assert.match(sql, /platform_account_id=\$2 AND session_hash=\$3 AND payload_hash=\$4/u);
-      assert.match(sql, /status='running'/u);
-      const row = [...this.data.operations.values()].find(
-        (item) =>
-          item.id === values[0] &&
-          item.platform_account_id === values[1] &&
-          item.session_hash === values[2] &&
-          item.payload_hash === values[3] &&
-          item.status === 'running',
-      );
-      if (
-        !row ||
-        (sql.includes('expires_at<=clock_timestamp()') &&
-          new Date(row.expires_at).getTime() > this.now)
-      )
-        return rows([]);
-      row.status = 'unknown';
-      return rows([{ id: row.id }]);
-    }
-    throw new Error('Unimplemented protocol action');
-  }
-}
-function fixture(overrides = {}) {
-  const db = new TransactionFixture(),
-    actor = db.actor();
-  const make = (extra = {}, clock = () => db.now) =>
-    new PlatformPublicAgentLedger(db, { ...policy, ...overrides, ...extra }, clock);
-  return { db, actor, ledger: make(), make };
-}
-const binding = (extra = {}) => ({
-  task: 'public-campus-navigation',
-  requestId: 'request_0001',
-  schoolId: 'pu',
-  payloadHash: hash('synthetic public navigation'),
-  provider: FREE_PROVIDER,
-  model: FREE_MODEL,
-  ...extra,
+const resultFor = (f, b = binding()) => ({
+  task: b.task,
+  schoolId: b.schoolId,
+  sourceFingerprint: hash('public source'),
+  checkedAt: f.db.now,
+  receipt: {
+    from: { id: 'library', name: '圖書館' },
+    to: { id: 'cafeteria', name: '餐廳' },
+    distanceMeters: 120,
+  },
 });
-const lookup = (b) => ({ task: b.task, requestId: b.requestId, schoolId: b.schoolId });
-const rejectsCode = (promise, code) => assert.rejects(promise, (error) => error.code === code);
-const quotas = (db) => [...db.data.quota.values()].map((row) => row.used);
+async function claimedFixture(overrides = {}, change = {}) {
+  const f = fixture(overrides),
+    b = binding(change),
+    confirmation = await f.ledger.confirm(f.actor, b);
+  const claim = await f.ledger.claim(f.actor, b, confirmation.confirmationId);
+  assert.equal(claim.status, 'claimed');
+  return { ...f, b, confirmation, claim };
+}
 
 test('both public tasks admit platform actors without tenant, person, membership or Firebase', async () => {
   const f = fixture();
@@ -334,7 +46,10 @@ test('both public tasks admit platform actors without tenant, person, membership
     const claim = await f.ledger.claim(f.actor, b, confirmation.confirmationId);
     assert.equal(claim.status, 'claimed');
     assert.ok(claim.expiresAt > f.db.now);
-    assert.deepEqual(await f.ledger.read(f.actor, lookup(b)), { ...claim, status: 'pending' });
+    assert.deepEqual(await f.ledger.read(f.actor, lookup(b)), {
+      ...publicOperation(claim),
+      status: 'pending',
+    });
   }
   assert.deepEqual(quotas(f.db), [2, 2]);
 });
@@ -379,7 +94,7 @@ test('consumed and expired confirmations both count, while another account keeps
   );
   await rejectsCode(f.ledger.confirm(f.actor, expired), 'PUBLIC_AGENT_CONFIRMATION_EXPIRED');
   assert.deepEqual(await f.ledger.claim(f.actor, used, first.confirmationId), {
-    ...operation,
+    ...publicOperation(operation),
     status: 'unknown',
   });
   const other = f.db.actor();
@@ -441,7 +156,7 @@ test('a restarted ledger reads and replays the stored operation, without consumi
     confirmation = await f.ledger.confirm(f.actor, b);
   const first = await f.ledger.claim(f.actor, b, confirmation.confirmationId);
   assert.deepEqual(await f.make().claim(f.actor, b, confirmation.confirmationId), {
-    ...first,
+    ...publicOperation(first),
     status: 'pending',
   });
   assert.deepEqual(quotas(f.db), [1, 1]);
@@ -482,7 +197,7 @@ test('a different valid session cannot confirm, claim, read or mark the original
     () => f.ledger.confirm(other, b),
     () => f.ledger.claim(other, b, c.confirmationId),
     () => f.ledger.read(other, lookup(b)),
-    () => f.ledger.markUnknown(other, b, op.operationId),
+    () => f.ledger.markUnknown(other, b, op.operationId, op.executionToken),
   ])
     await rejectsCode(call(), 'PUBLIC_AGENT_REQUEST_CONFLICT');
   assert.deepEqual(quotas(f.db), [1, 1]);
@@ -548,10 +263,10 @@ for (const method of ['claim', 'read'])
       method === 'claim'
         ? await f.ledger.claim(f.actor, b, c.confirmationId)
         : await f.ledger.read(f.actor, lookup(b));
-    assert.deepEqual(result, { ...op, status: 'unknown' });
+    assert.deepEqual(result, { ...publicOperation(op), status: 'unknown' });
     assert.equal([...f.db.data.operations.values()][0].status, 'unknown');
     assert.deepEqual(await f.make().claim(f.actor, b, c.confirmationId), {
-      ...op,
+      ...publicOperation(op),
       status: 'unknown',
     });
     assert.deepEqual(quotas(f.db), [1, 1]);
@@ -562,18 +277,31 @@ test('markUnknown is owner/content/session-bound and cannot introduce a new oper
     c = await f.ledger.confirm(f.actor, b),
     op = await f.ledger.claim(f.actor, b, c.confirmationId);
   await rejectsCode(
-    f.ledger.markUnknown(f.actor, binding({ payloadHash: hash('wrong') }), op.operationId),
+    f.ledger.markUnknown(
+      f.actor,
+      binding({ payloadHash: hash('wrong') }),
+      op.operationId,
+      op.executionToken,
+    ),
     'PUBLIC_AGENT_REQUEST_CONFLICT',
   );
   await rejectsCode(
-    f.ledger.markUnknown(f.actor, b, 'pago_00000000-0000-0000-0000-000000000000'),
+    f.ledger.markUnknown(
+      f.actor,
+      b,
+      'pago_00000000-0000-0000-0000-000000000000',
+      op.executionToken,
+    ),
     'PUBLIC_AGENT_OPERATION_NOT_FOUND',
   );
-  assert.deepEqual(await f.ledger.markUnknown(f.actor, b, op.operationId), {
-    ...op,
+  assert.deepEqual(await f.ledger.markUnknown(f.actor, b, op.operationId, op.executionToken), {
+    ...publicOperation(op),
     status: 'unknown',
   });
-  assert.equal((await f.ledger.markUnknown(f.actor, b, op.operationId)).status, 'unknown');
+  assert.equal(
+    (await f.ledger.markUnknown(f.actor, b, op.operationId, op.executionToken)).status,
+    'unknown',
+  );
   assert.deepEqual(quotas(f.db), [1, 1]);
 });
 test('the final account budget slot admits one concurrent request and rolls back the other consume/provider debit', async () => {
@@ -653,7 +381,7 @@ for (const revoke of ['account', 'credential', 'session'])
       () => f.ledger.confirm(f.actor, b),
       () => f.ledger.claim(f.actor, b, c.confirmationId),
       () => f.ledger.read(f.actor, lookup(b)),
-      () => f.ledger.markUnknown(f.actor, b, op.operationId),
+      () => f.ledger.markUnknown(f.actor, b, op.operationId, op.executionToken),
     ])
       await rejectsCode(call(), 'PUBLIC_AGENT_SESSION_EXPIRED');
     assert.deepEqual(quotas(f.db), [1, 1]);
@@ -794,106 +522,6 @@ test('ledger rejects injected fields, malformed bindings and expired local actor
   assert.equal(f.db.events.length, 0);
 });
 
-// Composition journeys use the real admission and ledger classes with synthetic
-// session/source services and the serialized protocol fixture above, not a real DB or provider.
-function admissionFixture(overrides = {}) {
-  const f = fixture(overrides);
-  const sessions = new Map();
-  const source = { fingerprint: hash('synthetic public source'), calls: [], beforeRead: null };
-  const register = (actor, letter) => {
-    const handle = `ps_${letter.repeat(43)}`;
-    const authorization = `Platform ${handle}`;
-    f.db.data.sessions.delete(actor.sessionHash);
-    actor.sessionHash = hash(handle);
-    f.db.data.sessions.set(actor.sessionHash, {
-      account: actor.platformAccountId,
-      credential: actor.credentialId,
-      expiresAt: actor.expiresAt,
-    });
-    sessions.set(authorization, {
-      platformAccountId: actor.platformAccountId,
-      credentialId: actor.credentialId,
-      expiresAt: actor.expiresAt,
-    });
-    return authorization;
-  };
-  const authorization = register(f.actor, 'a');
-  const admission = new PlatformPublicAdmission({
-    ledger: f.ledger,
-    accounts: {
-      async resolveSession(value) {
-        const actor = sessions.get(value);
-        const credential = actor && f.db.data.credentials.get(actor.credentialId);
-        const assignment = actor && f.db.data.operatorAssignments.get(actor.platformAccountId);
-        if (
-          !actor ||
-          (credential?.method === 'password' &&
-            (assignment?.role !== 'platform-operator' || assignment.state !== 'active'))
-        )
-          throw Object.assign(new Error('synthetic invalid session'), {
-            code: 'PLATFORM_SESSION_INVALID',
-          });
-        return { ...actor };
-      },
-    },
-    async readPublicSourceFingerprint(schoolId, query, signal) {
-      await source.beforeRead?.();
-      source.calls.push({ schoolId, query });
-      assert.equal(signal.aborted, false);
-      return source.fingerprint;
-    },
-  });
-  return { ...f, authorization, admission, source, register };
-}
-function publicRequest(
-  task = 'public-campus-navigation',
-  schoolId = 'pu',
-  requestId = 'composed_request_0001',
-) {
-  if (task === 'campus-service-entry') {
-    const utterance = '我要找校園地圖';
-    return {
-      task,
-      data: {
-        schoolId,
-        utterance,
-        requestId,
-        consent: {
-          version: 1,
-          purpose: task,
-          provider: FREE_PROVIDER,
-          model: FREE_MODEL,
-          schoolId,
-          utterance,
-        },
-      },
-    };
-  }
-  const query = '從圖書館走到餐廳';
-  return {
-    task,
-    data: {
-      task,
-      phase: 'execute',
-      schoolId,
-      query,
-      requestId,
-      consent: {
-        provider: FREE_PROVIDER,
-        version: 1,
-        schoolId,
-        query,
-        fingerprint: hash('synthetic public source'),
-      },
-    },
-  };
-}
-const requestLookup = (request) => ({
-  task: request.task,
-  schoolId: request.data.schoolId,
-  requestId: request.data.requestId,
-});
-
 for (const task of ['campus-service-entry', 'public-campus-navigation']) {
   test(`composed ${task}: confirmation, claim, status and replay share one operation and quota debit`, async () => {
     const f = admissionFixture(),
@@ -905,8 +533,13 @@ for (const task of ['campus-service-entry', 'public-campus-navigation']) {
       request,
     });
     assert.equal(claim.status, 'claimed');
-    assert.deepEqual(Object.keys(claim).sort(), ['expiresAt', 'operationId', 'status']);
-    const pending = { ...claim, status: 'pending' };
+    assert.deepEqual(Object.keys(claim).sort(), [
+      'executionToken',
+      'expiresAt',
+      'operationId',
+      'status',
+    ]);
+    const pending = { ...publicOperation(claim), status: 'pending' };
     assert.deepEqual(await f.admission.read(f.authorization, requestLookup(request)), pending);
     assert.deepEqual(
       await f.admission.claim(f.authorization, {
@@ -934,7 +567,7 @@ test('composed expiry persists unknown and cannot turn a repeated admission into
     request,
   });
   f.db.now += 21;
-  const unknown = { ...claim, status: 'unknown' };
+  const unknown = { ...publicOperation(claim), status: 'unknown' };
   assert.deepEqual(await f.admission.read(f.authorization, requestLookup(request)), unknown);
   assert.deepEqual(
     await f.admission.claim(f.authorization, {
@@ -1077,7 +710,7 @@ test('composed active password session locks its assignment between credential a
     request,
   });
   assert.deepEqual(await f.admission.read(f.authorization, requestLookup(request)), {
-    ...result,
+    ...publicOperation(result),
     status: 'pending',
   });
   for (const begin of f.db.events.filter((event) => event.action === 'begin')) {
@@ -1101,4 +734,295 @@ test('missing credential method cannot bypass the password assignment check', as
     assert.equal(f.db.data.operations.size, 0);
     assert.equal(f.db.data.quota.size, 0);
   }
+});
+
+test('only the first claim returns an execution capability; the stored token is hashed', async () => {
+  const f = await claimedFixture();
+  assert.match(f.claim.executionToken, /^[A-Za-z0-9_-]{43}$/u);
+  const row = [...f.db.data.operations.values()][0];
+  assert.equal(row.execution_token_hash, hash(f.claim.executionToken));
+  for (const value of [
+    await f.ledger.read(f.actor, lookup(f.b)),
+    await f.ledger.readBound(f.actor, f.b),
+    await f.make().claim(f.actor, f.b, f.confirmation.confirmationId),
+  ]) {
+    assert.equal(Object.hasOwn(value, 'executionToken'), false);
+    assert.equal(Object.hasOwn(value, 'execution_token_hash'), false);
+  }
+  assert.equal(
+    JSON.stringify([...f.db.data.operations.values()]).includes(f.claim.executionToken),
+    false,
+  );
+  await rejectsCode(
+    f.ledger.complete(f.actor, f.b, f.claim.operationId, 'x'.repeat(43), resultFor(f)),
+    'PUBLIC_AGENT_EXECUTION_LEASE_INVALID',
+  );
+  await rejectsCode(
+    f.ledger.markUnknown(f.actor, f.b, f.claim.operationId, undefined),
+    'PUBLIC_AGENT_EXECUTION_LEASE_INVALID',
+  );
+  assert.deepEqual(quotas(f.db), [1, 1]);
+});
+
+test('completed result survives the execution deadline, stays bound to the original request and never exposes a lease', async () => {
+  const f = await claimedFixture({ operationTtlMs: 5 });
+  const expected = { ...publicOperation(f.claim), status: 'completed', result: resultFor(f) };
+  assert.deepEqual(
+    await f.ledger.complete(
+      f.actor,
+      f.b,
+      f.claim.operationId,
+      f.claim.executionToken,
+      resultFor(f),
+    ),
+    expected,
+  );
+  f.db.now += 10;
+  assert.deepEqual(await f.make().readBound(f.actor, f.b), expected);
+  assert.deepEqual(await f.ledger.claim(f.actor, f.b, f.confirmation.confirmationId), expected);
+  await rejectsCode(
+    f.ledger.readBound(f.actor, binding({ payloadHash: hash('different query') })),
+    'PUBLIC_AGENT_REQUEST_CONFLICT',
+  );
+  await rejectsCode(
+    f.ledger.readBound(f.actor, binding({ schoolId: 'ntu' })),
+    'PUBLIC_AGENT_REQUEST_CONFLICT',
+  );
+  assert.deepEqual(quotas(f.db), [1, 1]);
+});
+
+for (const method of ['complete', 'fail'])
+  test(`${method}: expiry between locked read and final CAS commits unknown`, async () => {
+    const f = await claimedFixture({ operationTtlMs: 5 });
+    f.db.beforeAction = (action) => {
+      if (action === 'finalize-operation') f.db.now += 5;
+    };
+    const extra = method === 'complete' ? resultFor(f) : 'EXECUTION_FAILED';
+    const observed = await f.ledger[method](
+      f.actor,
+      f.b,
+      f.claim.operationId,
+      f.claim.executionToken,
+      extra,
+    );
+    assert.deepEqual(observed, { ...publicOperation(f.claim), status: 'unknown' });
+    assert.equal([...f.db.data.operations.values()][0].status, 'unknown');
+    assert.equal([...f.db.data.operations.values()][0].result_json, null);
+    assert.equal(f.db.events.at(-1).action, 'commit');
+    assert.equal(
+      (
+        await f.ledger.complete(
+          f.actor,
+          f.b,
+          f.claim.operationId,
+          f.claim.executionToken,
+          resultFor(f),
+        )
+      ).status,
+      'unknown',
+    );
+    assert.deepEqual(quotas(f.db), [1, 1]);
+  });
+
+test('a single terminal transition wins concurrent finalize attempts without overwriting the receipt', async () => {
+  const f = await claimedFixture(),
+    result = resultFor(f);
+  const values = await Promise.all([
+    f.ledger.complete(f.actor, f.b, f.claim.operationId, f.claim.executionToken, result),
+    f.make().fail(f.actor, f.b, f.claim.operationId, f.claim.executionToken, 'EXECUTION_FAILED'),
+    f.make().markUnknown(f.actor, f.b, f.claim.operationId, f.claim.executionToken),
+  ]);
+  assert.ok(values.every((value) => value.status === 'completed'));
+  assert.deepEqual(values[0].result, result);
+  assert.equal(f.db.events.filter((event) => event.action === 'finalize-operation').length, 1);
+  const changed = resultFor(f);
+  changed.receipt.distanceMeters = 999;
+  assert.deepEqual(
+    (await f.ledger.complete(f.actor, f.b, f.claim.operationId, f.claim.executionToken, changed))
+      .result,
+    result,
+  );
+  assert.deepEqual(quotas(f.db), [1, 1]);
+});
+
+test('failed and unknown remain terminal without refund or a new claim', async () => {
+  for (const status of ['failed', 'unknown']) {
+    const f = await claimedFixture();
+    const ended =
+      status === 'failed'
+        ? await f.ledger.fail(
+            f.actor,
+            f.b,
+            f.claim.operationId,
+            f.claim.executionToken,
+            'SOURCE_CHANGED',
+          )
+        : await f.ledger.markUnknown(f.actor, f.b, f.claim.operationId, f.claim.executionToken);
+    assert.equal(ended.status, status);
+    if (status === 'failed') assert.equal(ended.failureCode, 'SOURCE_CHANGED');
+    assert.deepEqual(
+      await f.ledger.complete(
+        f.actor,
+        f.b,
+        f.claim.operationId,
+        f.claim.executionToken,
+        resultFor(f),
+      ),
+      ended,
+    );
+    assert.deepEqual(await f.make().claim(f.actor, f.b, f.confirmation.confirmationId), ended);
+    assert.deepEqual(await f.ledger.readBound(f.actor, f.b), ended);
+    assert.deepEqual(quotas(f.db), [1, 1]);
+  }
+});
+
+test('result validation snapshots nested data before awaiting and returns detached read objects', async () => {
+  const f = await claimedFixture(),
+    input = resultFor(f),
+    expected = globalThis.structuredClone(input);
+  const pending = f.ledger.complete(
+    f.actor,
+    f.b,
+    f.claim.operationId,
+    f.claim.executionToken,
+    input,
+  );
+  input.receipt.from.name = 'changed while waiting';
+  assert.deepEqual((await pending).result, expected);
+  const firstRead = await f.ledger.readBound(f.actor, f.b);
+  firstRead.result.receipt.from.name = 'mutated delivered view';
+  assert.deepEqual((await f.ledger.readBound(f.actor, f.b)).result, expected);
+});
+
+test('invalid or unbounded JSON cannot enter a completed row, and failure text is restricted', async () => {
+  const f = await claimedFixture();
+  let reads = 0;
+  const getter = {};
+  Object.defineProperty(getter, 'name', {
+    get() {
+      reads++;
+      return 'bad';
+    },
+    enumerable: true,
+  });
+  const cyclic = {};
+  cyclic.self = cyclic;
+  for (const receipt of [
+    getter,
+    cyclic,
+    { value: Infinity },
+    { value: undefined },
+    { value: 'x'.repeat(2049) },
+    { value: Array(65).fill(0) },
+    new Date(),
+    { value: Object.create({ inherited: true }) },
+    Object.fromEntries(
+      Array.from({ length: 10 }, (_, index) => [String(index), '漢'.repeat(2000)]),
+    ),
+  ]) {
+    await assert.rejects(
+      f.ledger.complete(f.actor, f.b, f.claim.operationId, f.claim.executionToken, {
+        ...resultFor(f),
+        receipt,
+      }),
+    );
+  }
+  await rejectsCode(
+    f.ledger.complete(f.actor, f.b, f.claim.operationId, f.claim.executionToken, {
+      ...resultFor(f),
+      schoolId: 'ntu',
+    }),
+    'PUBLIC_AGENT_INVALID_RESULT',
+  );
+  await rejectsCode(
+    f.ledger.fail(
+      f.actor,
+      f.b,
+      f.claim.operationId,
+      f.claim.executionToken,
+      'raw provider exception',
+    ),
+    'PUBLIC_AGENT_INVALID_RESULT',
+  );
+  assert.equal(reads, 0);
+  assert.equal([...f.db.data.operations.values()][0].status, 'running');
+  assert.deepEqual(quotas(f.db), [1, 1]);
+});
+
+test('lost completion acknowledgement is recoverable by read and cannot be overwritten with unknown', async () => {
+  const f = await claimedFixture(),
+    result = resultFor(f);
+  f.db.loseCommitAck = true;
+  await assert.rejects(
+    f.ledger.complete(f.actor, f.b, f.claim.operationId, f.claim.executionToken, result),
+    /lost commit response/u,
+  );
+  const stored = await f.make().readBound(f.actor, f.b);
+  assert.equal(stored.status, 'completed');
+  assert.deepEqual(stored.result, result);
+  assert.deepEqual(
+    await f.ledger.markUnknown(f.actor, f.b, f.claim.operationId, f.claim.executionToken),
+    stored,
+  );
+  assert.equal(f.db.events.filter((event) => event.action === 'finalize-operation').length, 1);
+  assert.deepEqual(quotas(f.db), [1, 1]);
+});
+
+test('finalization rechecks session, owner and content while retaining the already used quota', async () => {
+  const f = await claimedFixture(),
+    other = f.db.anotherSession(f.actor);
+  await rejectsCode(
+    f.ledger.complete(other, f.b, f.claim.operationId, f.claim.executionToken, resultFor(f)),
+    'PUBLIC_AGENT_REQUEST_CONFLICT',
+  );
+  await rejectsCode(
+    f.ledger.complete(
+      f.actor,
+      binding({ payloadHash: hash('changed') }),
+      f.claim.operationId,
+      f.claim.executionToken,
+      resultFor(f),
+    ),
+    'PUBLIC_AGENT_REQUEST_CONFLICT',
+  );
+  f.db.data.sessions.delete(f.actor.sessionHash);
+  await rejectsCode(
+    f.ledger.complete(f.actor, f.b, f.claim.operationId, f.claim.executionToken, resultFor(f)),
+    'PUBLIC_AGENT_SESSION_EXPIRED',
+  );
+  assert.equal([...f.db.data.operations.values()][0].status, 'running');
+  assert.deepEqual(quotas(f.db), [1, 1]);
+});
+
+test('only navigation accepts the deterministic execution pair and it retains its configured budget identity', async () => {
+  const f = await claimedFixture(
+    { providerBudgetKey: 'synthetic-deterministic-budget' },
+    { provider: 'deterministic', model: 'public-poi-exact-match-v1' },
+  );
+  assert.equal(
+    (
+      await f.ledger.complete(
+        f.actor,
+        f.b,
+        f.claim.operationId,
+        f.claim.executionToken,
+        resultFor(f, f.b),
+      )
+    ).status,
+    'completed',
+  );
+  for (const change of [
+    { task: 'campus-service-entry' },
+    { model: FREE_MODEL },
+    { provider: FREE_PROVIDER },
+  ])
+    await rejectsCode(
+      f.ledger.confirm(f.actor, { ...f.b, requestId: 'other_request_001', ...change }),
+      'PUBLIC_AGENT_INVALID_INPUT',
+    );
+  assert.ok(
+    [...f.db.data.quota.keys()].some(
+      (value) => JSON.parse(value)[1] === 'synthetic-deterministic-budget',
+    ),
+  );
 });

@@ -1,10 +1,9 @@
-import { randomUUID } from 'node:crypto';
+import { createHash, randomBytes, randomUUID, timingSafeEqual } from 'node:crypto';
 import {
   exactRecord,
   parseOperationLookup,
   PublicAgentError,
-  FREE_MODEL,
-  FREE_PROVIDER,
+  isExecutionPair,
   type PlatformTaskActor,
   type TaskBinding,
   type PublicTaskName,
@@ -30,14 +29,34 @@ export interface PublicAgentPolicy {
   confirmationTtlMs?: number;
   operationTtlMs?: number;
 }
-export type PublicAgentOperation = {
-  status: 'pending' | 'unknown';
-  operationId: string;
-  expiresAt: number;
+export type PublicJson =
+  | null
+  | boolean
+  | number
+  | string
+  | PublicJson[]
+  | { [key: string]: PublicJson };
+export type PublicAgentResult = {
+  task: PublicTaskName;
+  schoolId: string;
+  sourceFingerprint: string;
+  checkedAt: number;
+  receipt: { [key: string]: PublicJson };
 };
-export type PublicAgentClaim = Omit<PublicAgentOperation, 'status'> & {
-  status: 'claimed' | 'pending' | 'unknown';
-};
+export type PublicAgentFailureCode = 'SOURCE_CHANGED' | 'INVALID_RESULT' | 'EXECUTION_FAILED';
+type OperationIdentity = { operationId: string; expiresAt: number };
+export type PublicAgentOperation = OperationIdentity &
+  (
+    | { status: 'pending' | 'unknown' }
+    | { status: 'completed'; result: PublicAgentResult }
+    | { status: 'failed'; failureCode: PublicAgentFailureCode }
+  );
+export type PublicAgentClaim =
+  | PublicAgentOperation
+  | (OperationIdentity & {
+      status: 'claimed';
+      executionToken: string;
+    });
 type BindingRow = {
   platform_account_id: string;
   credential_id: string;
@@ -58,7 +77,10 @@ type ConfirmationRow = BindingRow & {
 type OperationRow = BindingRow & {
   id: string;
   confirmation_id: string;
-  status: 'running' | 'unknown';
+  status: 'running' | 'unknown' | 'completed' | 'failed';
+  execution_token_hash: string;
+  result_json: unknown;
+  failure_code: unknown;
   expires_at: Date | string;
   unexpired: boolean;
 };
@@ -93,8 +115,7 @@ function bindingInput(value: TaskBinding): TaskBinding {
     !validId(row.schoolId, 2, 40) ||
     typeof row.payloadHash !== 'string' ||
     !HASH.test(row.payloadHash) ||
-    row.provider !== FREE_PROVIDER ||
-    row.model !== FREE_MODEL
+    !isExecutionPair(row.provider, row.model, row.task)
   )
     return fail('PUBLIC_AGENT_INVALID_INPUT');
   return Object.freeze({
@@ -102,12 +123,77 @@ function bindingInput(value: TaskBinding): TaskBinding {
     requestId: row.requestId as string,
     schoolId: row.schoolId as string,
     payloadHash: row.payloadHash,
-    provider: FREE_PROVIDER,
-    model: FREE_MODEL,
+    provider: row.provider as TaskBinding['provider'],
+    model: row.model as TaskBinding['model'],
   });
 }
 
-/** Admission only: no provider execution, result storage or completion claim. */
+const failureCode = (value: unknown): value is PublicAgentFailureCode =>
+  value === 'SOURCE_CHANGED' || value === 'INVALID_RESULT' || value === 'EXECUTION_FAILED';
+function resultInput(value: unknown, task: PublicTaskName, schoolId: string): PublicAgentResult {
+  const row = exactRecord(value, ['task', 'schoolId', 'sourceFingerprint', 'checkedAt', 'receipt']);
+  if (
+    row.task !== task ||
+    row.schoolId !== schoolId ||
+    typeof row.sourceFingerprint !== 'string' ||
+    !HASH.test(row.sourceFingerprint) ||
+    !Number.isSafeInteger(row.checkedAt) ||
+    (row.checkedAt as number) < 0
+  )
+    return fail('PUBLIC_AGENT_INVALID_RESULT');
+  let nodes = 0;
+  const clone = (input: unknown, depth: number): PublicJson => {
+    if (++nodes > 256 || depth > 8) return fail('PUBLIC_AGENT_INVALID_RESULT');
+    if (input === null || typeof input === 'boolean') return input;
+    if (typeof input === 'number' && Number.isFinite(input)) return input;
+    if (typeof input === 'string' && input.length <= 2048) return input;
+    if (!input || typeof input !== 'object') return fail('PUBLIC_AGENT_INVALID_RESULT');
+    if (Array.isArray(input)) {
+      if (
+        Object.getPrototypeOf(input) !== Array.prototype ||
+        input.length > 64 ||
+        Reflect.ownKeys(input).length !== input.length + 1
+      )
+        return fail('PUBLIC_AGENT_INVALID_RESULT');
+      return Array.from({ length: input.length }, (_, index) => {
+        const item = Object.getOwnPropertyDescriptor(input, String(index));
+        if (!item || !('value' in item)) return fail('PUBLIC_AGENT_INVALID_RESULT');
+        return clone(item.value, depth + 1);
+      });
+    }
+    const proto = Object.getPrototypeOf(input),
+      keys = Reflect.ownKeys(input);
+    if ((proto !== Object.prototype && proto !== null) || keys.length > 64)
+      return fail('PUBLIC_AGENT_INVALID_RESULT');
+    const output: { [key: string]: PublicJson } = {};
+    for (const key of keys) {
+      if (
+        typeof key !== 'string' ||
+        key.length > 80 ||
+        ['__proto__', 'prototype', 'constructor'].includes(key)
+      )
+        return fail('PUBLIC_AGENT_INVALID_RESULT');
+      const item = Object.getOwnPropertyDescriptor(input, key);
+      if (!item || !('value' in item)) return fail('PUBLIC_AGENT_INVALID_RESULT');
+      output[key] = clone(item.value, depth + 1);
+    }
+    return output;
+  };
+  if (!row.receipt || typeof row.receipt !== 'object' || Array.isArray(row.receipt))
+    return fail('PUBLIC_AGENT_INVALID_RESULT');
+  const result = {
+    task,
+    schoolId,
+    sourceFingerprint: row.sourceFingerprint,
+    checkedAt: row.checkedAt as number,
+    receipt: clone(row.receipt, 0) as { [key: string]: PublicJson },
+  };
+  if (Buffer.byteLength(JSON.stringify(result), 'utf8') > 16_384)
+    return fail('PUBLIC_AGENT_INVALID_RESULT');
+  return result;
+}
+
+/** Persistent task state; execution and task-specific receipt validation belong to the service. */
 export class PlatformPublicAgentLedger {
   private readonly policy: Required<PublicAgentPolicy>;
   constructor(
@@ -251,7 +337,7 @@ export class PlatformPublicAgentLedger {
     ).rows[0];
   }
   private async state(tx: PublicAgentSql, row: OperationRow): Promise<PublicAgentOperation> {
-    if (row.status !== 'running' && row.status !== 'unknown')
+    if (!['running', 'unknown', 'completed', 'failed'].includes(row.status))
       return fail('PUBLIC_AGENT_STORE_INVALID', 503);
     if (typeof row.unexpired !== 'boolean') return fail('PUBLIC_AGENT_STORE_INVALID', 503);
     if (row.status === 'running' && !row.unexpired) {
@@ -266,11 +352,23 @@ export class PlatformPublicAgentLedger {
       if (!updated || updated.id !== row.id) return fail('PUBLIC_AGENT_CONFLICT', 409);
       row = { ...row, status: 'unknown' };
     }
-    return {
-      status: row.status === 'unknown' ? 'unknown' : 'pending',
-      operationId: row.id,
-      expiresAt: expiry(row.expires_at),
-    };
+    const identity = { operationId: row.id, expiresAt: expiry(row.expires_at) };
+    if (row.status === 'completed') {
+      try {
+        return {
+          ...identity,
+          status: 'completed',
+          result: resultInput(row.result_json, row.task, row.school_id),
+        };
+      } catch {
+        return fail('PUBLIC_AGENT_STORE_INVALID', 503);
+      }
+    }
+    if (row.status === 'failed') {
+      if (!failureCode(row.failure_code)) return fail('PUBLIC_AGENT_STORE_INVALID', 503);
+      return { ...identity, status: 'failed', failureCode: row.failure_code };
+    }
+    return { ...identity, status: row.status === 'unknown' ? 'unknown' : 'pending' };
   }
 
   async confirm(
@@ -417,12 +515,14 @@ export class PlatformPublicAgentLedger {
         quotaDay,
       );
       const operationId = `pago_${randomUUID()}`;
+      const executionToken = randomBytes(32).toString('base64url');
+      const tokenHash = createHash('sha256').update(executionToken).digest('hex');
       const row = (
         await tx.query<{ id: string; expires_at: Date | string }>(
           `INSERT INTO platform_public_agent_operations
-        (id,platform_account_id,credential_id,session_hash,task,request_id,school_id,payload_hash,provider,model,confirmation_id,status,expires_at)
+        (id,platform_account_id,credential_id,session_hash,task,request_id,school_id,payload_hash,provider,model,confirmation_id,status,expires_at,execution_token_hash)
         SELECT $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,'running',
-          LEAST($12::timestamptz,$13::timestamptz,clock_timestamp()+($14::double precision*interval '1 millisecond'))
+          LEAST($12::timestamptz,$13::timestamptz,clock_timestamp()+($14::double precision*interval '1 millisecond')),$15
         WHERE $12::timestamptz>clock_timestamp() AND $13::timestamptz>clock_timestamp()
         RETURNING id,expires_at`,
           [
@@ -440,12 +540,18 @@ export class PlatformPublicAgentLedger {
             confirmation.expires_at,
             sessionExpiry,
             this.policy.operationTtlMs,
+            tokenHash,
           ],
         )
       ).rows[0];
       if (!row) return fail('PUBLIC_AGENT_ADMISSION_EXPIRED', 409);
       if (row.id !== operationId) return fail('PUBLIC_AGENT_STORE_INVALID', 503);
-      return { status: 'claimed', operationId: row.id, expiresAt: expiry(row.expires_at) };
+      return {
+        status: 'claimed',
+        operationId: row.id,
+        expiresAt: expiry(row.expires_at),
+        executionToken,
+      };
     });
   }
 
@@ -474,11 +580,31 @@ export class PlatformPublicAgentLedger {
   }
 
   async read(
+    actor: PlatformTaskActor,
+    lookup: { task: PublicTaskName; requestId: string; schoolId: string },
+  ): Promise<PublicAgentOperation | null> {
+    return this.readCurrent(actor, lookup);
+  }
+  async readBound(
+    actor: PlatformTaskActor,
+    rawBinding: TaskBinding,
+  ): Promise<PublicAgentOperation | null> {
+    const binding = bindingInput(rawBinding);
+    return this.readCurrent(
+      actor,
+      { task: binding.task, requestId: binding.requestId, schoolId: binding.schoolId },
+      binding,
+    );
+  }
+
+  private async readCurrent(
     rawActor: PlatformTaskActor,
     rawLookup: { task: PublicTaskName; requestId: string; schoolId: string },
+    rawBinding?: TaskBinding,
   ): Promise<PublicAgentOperation | null> {
     const actor = this.actorInput(rawActor),
-      lookup = parseOperationLookup(rawLookup);
+      lookup = parseOperationLookup(rawLookup),
+      binding = rawBinding === undefined ? undefined : bindingInput(rawBinding);
     return this.transaction(async (tx) => {
       await this.verifyActor(tx, actor);
       await this.lockAccount(tx, actor);
@@ -491,20 +617,69 @@ export class PlatformPublicAgentLedger {
         row.school_id !== lookup.schoolId
       )
         return fail('PUBLIC_AGENT_REQUEST_CONFLICT', 409);
+      if (binding) this.sameBinding(row, actor, binding);
       return this.state(tx, row);
     });
   }
 
-  /** Internal failure acknowledgement. It cannot grant a claim or mark an operation completed. */
+  async complete(
+    actor: PlatformTaskActor,
+    binding: TaskBinding,
+    operationId: string,
+    executionToken: string,
+    result: PublicAgentResult,
+  ): Promise<PublicAgentOperation> {
+    const approved = bindingInput(binding);
+    return this.finalize(
+      actor,
+      approved,
+      operationId,
+      executionToken,
+      'completed',
+      resultInput(result, approved.task, approved.schoolId),
+      null,
+    );
+  }
+
+  async fail(
+    actor: PlatformTaskActor,
+    binding: TaskBinding,
+    operationId: string,
+    executionToken: string,
+    code: PublicAgentFailureCode,
+  ): Promise<PublicAgentOperation> {
+    if (!failureCode(code)) return fail('PUBLIC_AGENT_INVALID_RESULT');
+    return this.finalize(actor, binding, operationId, executionToken, 'failed', null, code);
+  }
+
   async markUnknown(
+    actor: PlatformTaskActor,
+    binding: TaskBinding,
+    operationId: string,
+    executionToken: string,
+  ): Promise<PublicAgentOperation> {
+    return this.finalize(actor, binding, operationId, executionToken, 'unknown', null, null);
+  }
+
+  private async finalize(
     rawActor: PlatformTaskActor,
     rawBinding: TaskBinding,
     operationId: string,
+    executionToken: string,
+    status: 'completed' | 'failed' | 'unknown',
+    result: PublicAgentResult | null,
+    code: PublicAgentFailureCode | null,
   ): Promise<PublicAgentOperation> {
     const actor = this.actorInput(rawActor),
       binding = bindingInput(rawBinding);
-    if (typeof operationId !== 'string' || !/^pago_[a-f0-9-]{36}$/u.test(operationId))
-      return fail('PUBLIC_AGENT_INVALID_INPUT');
+    if (
+      typeof operationId !== 'string' ||
+      !/^pago_[a-f0-9-]{36}$/u.test(operationId) ||
+      typeof executionToken !== 'string' ||
+      !/^[A-Za-z0-9_-]{43}$/u.test(executionToken)
+    )
+      return fail('PUBLIC_AGENT_EXECUTION_LEASE_INVALID', 409);
+    const tokenHash = createHash('sha256').update(executionToken).digest('hex');
     return this.transaction(async (tx) => {
       await this.verifyActor(tx, actor);
       await this.lockAccount(tx, actor);
@@ -512,17 +687,46 @@ export class PlatformPublicAgentLedger {
       const row = await this.operation(tx, actor, binding.task, binding.requestId);
       if (!row || row.id !== operationId) return fail('PUBLIC_AGENT_OPERATION_NOT_FOUND', 404);
       this.sameBinding(row, actor, binding);
-      if (row.status === 'unknown') return this.state(tx, row);
-      if (row.status !== 'running') return fail('PUBLIC_AGENT_STORE_INVALID', 503);
+      if (
+        typeof row.execution_token_hash !== 'string' ||
+        !HASH.test(row.execution_token_hash) ||
+        !timingSafeEqual(
+          Buffer.from(tokenHash, 'hex'),
+          Buffer.from(row.execution_token_hash, 'hex'),
+        )
+      )
+        return fail('PUBLIC_AGENT_EXECUTION_LEASE_INVALID', 409);
+      const current = await this.state(tx, row);
+      if (current.status !== 'pending') return current;
       const changed = (
         await tx.query<{ id: string }>(
-          `UPDATE platform_public_agent_operations SET status='unknown',updated_at=clock_timestamp()
-        WHERE id=$1 AND platform_account_id=$2 AND session_hash=$3 AND payload_hash=$4 AND status='running' RETURNING id`,
-          [operationId, actor.platformAccountId, actor.sessionHash, binding.payloadHash],
+          `UPDATE platform_public_agent_operations
+        SET status=$6,result_json=$7::jsonb,failure_code=$8,updated_at=clock_timestamp()
+        WHERE id=$1 AND platform_account_id=$2 AND session_hash=$3 AND payload_hash=$4
+          AND execution_token_hash=$5 AND status='running' AND expires_at>clock_timestamp() RETURNING id`,
+          [
+            operationId,
+            actor.platformAccountId,
+            actor.sessionHash,
+            binding.payloadHash,
+            tokenHash,
+            status,
+            result === null ? null : JSON.stringify(result),
+            code,
+          ],
         )
       ).rows[0];
-      if (!changed || changed.id !== operationId) return fail('PUBLIC_AGENT_CONFLICT', 409);
-      return { status: 'unknown', operationId, expiresAt: expiry(row.expires_at) };
+      if (!changed) {
+        // The lease can expire between the locked read and this update. Persist unknown,
+        // never roll it back into running or accept the late result as completion.
+        const latest = await this.operation(tx, actor, binding.task, binding.requestId);
+        if (!latest || latest.id !== operationId) return fail('PUBLIC_AGENT_CONFLICT', 409);
+        const observed = await this.state(tx, latest);
+        if (observed.status === 'pending') return fail('PUBLIC_AGENT_CONFLICT', 409);
+        return observed;
+      }
+      if (changed.id !== operationId) return fail('PUBLIC_AGENT_CONFLICT', 409);
+      return this.state(tx, { ...row, status, result_json: result, failure_code: code });
     });
   }
 }

@@ -1,54 +1,47 @@
-# 平台帳號公開任務入場候選
+# 平台帳號公開任務組裝候選
 
-這個切片處理「本人確認 → 一次性任務入場 → 查詢待處理／結果不明狀態」。
-`claimed` 只代表已占用配額及取得一次執行權，不表示模型已執行或 Agent 已完成任務。
-目前沒有 provider、執行 worker、HTTP 路由或前端接線；未加入任何建置／migration manifest。
-`schema.candidate.sql` 沒有正式編號，這輪沒有執行它或更動資料庫權限。
-
-## 身分與資料
-
-- `PlatformPublicAdmission` 使用既有 `PlatformAccountService.resolveSession`，由已驗證的 Platform handle 派生 session hash；不接受 JSON 裡的 owner、角色、學籍、Firebase uid 或校園 revision。
-- 交易內沿用正式 API 的密碼登入條件：password credential 仍須有效的 platform-operator 指派；一般 OAuth credential 不因此要求管理員資格。這不授予任何新角色。
-- 僅接受 `campus-service-entry` 與 `public-campus-navigation`。資料與明確確認須相符，provider 固定為 Groq、model 固定為 `openai/gpt-oss-120b`。這個模型選擇不是帳戶免費額度已驗證的證明。
-- 校園是使用者選定的公開資料範圍，不是學校會員資格。語意入口只是導覽建議，目的頁原權限維持。
-- 導航確認與入場都必須經 server-owned 公開來源讀取器重驗 fingerprint。這裡只有必要介面，沒有用客戶端地點取代真來源，也沒有註冊 Firebase 私人 fetcher。
-- ledger 不保存原文、session handle、個人資料或模型輸出；確認／操作保留內容雜湊、帳號與 session 綁定、校園、任務及期限。
-
-## 一次性入場
-
-`confirm(authorization, { approved: true, request })` 產生有期限的確認識別碼；相同內容重試不延長期限，也不扣配額。
-`claim(authorization, { confirmationId, request })` 必須帶同一份確認內容。
-同一筆交易重驗有效帳號、credential 與真 session，消耗確認，扣帳號及共用 provider budget，建立操作。
-`read(authorization, { task, requestId, schoolId })` 只查既有狀態，不啟動工作。
-
-操作唯一鍵是 `(platform_account_id, task, request_id)`。換 session、校園、模型或內容不能藉同 ID 再執行。
-相同綁定重試只回 pending／unknown，不重新占用配額；running 到期轉 unknown，不回收執行權。
-未知提交回應或取消期間的晚到提交，不可當作「沒有寫入」而自動重送。
-帳號及 provider budget 來自伺服器設定，不接受 request 覆寫；此計數不等於供應商的實際 token／組織額度。
-
-每帳號確認紀錄預設上限 1000 筆（伺服器可設 1–10000），過期及已消耗紀錄也計入；滿額回 429，既有確認重試仍可查回。
-本輪不自動清理紀錄，避免遺忘 request ID 或未知結果。啟用前須決定容量用盡後的保留政策。
-操作仍引用的確認不可單獨刪除；候選外鍵採延後檢查，帳號關閉仍依序刪除操作、確認與帳號配額。
-
-來源與身分是分次檢查，並非跨來源的原子快照。來源最後讀取後仍可改變；未來執行前與結果交付前仍須重驗。
-目前沒有 completed 狀態、任務結果或可對使用者宣稱成功的回執。
-
-## 驗證與啟用前缺口
+本機可走完「公開校園導航 → 檢視資料 → 本人確認 → 一次執行 → 來源與路線回執」。
+使用地圖頁的 `PublicNavigationTask` 元件與真實 HTTP handler／service／ledger 程式；
+`serve-local.mjs` 才注入合成平台 session、序列化 SQL protocol fixture 與既有公開地點目錄。
+這不是正式登入、PostgreSQL 或雲端模型驗證。
 
 ```sh
 node scripts/test-platform-public-agent.mjs
+node scripts/platform-public-agent/serve-local.mjs
+# 開啟 http://127.0.0.1:4319；輸入「從主顧樓到蓋夏圖書館」
 ```
 
-Node 22 runner 先做嚴格 TypeScript 編譯，再用合成 resolver／來源／交易 adapter 測輸入、身分、去重、回滾、配額及逾時。
-測試不連資料庫、不執行 SQL migration、不送 provider。模擬交易通過不能取代 PostgreSQL 跨程序隔離、FK、鎖與提交故障驗收。
+本機只綁 loopback，紀錄在記憶體，重開會消失；不可拿來服務正式帳號。
+地點來自 `packages/shared/src/providenceCampus.ts` 已附 OSM 來源的交叉核對項目。
+目錄日期顯示為 2026-10-19，不宣稱即時通行、定位或校方同步。
+導航只接受「從完整地點名稱到完整地點名稱」的唯一匹配；不理解任意自然語言。
 
-介面來源為 `Miiduoa/nuni-prod` 的固定基底 `9de47b4b3492325e430562c37bcad552867162db`：
-`apps/api/src/database.ts` 與 `accounts/platform-account-service.ts`；並沿用本 repo personal-import-sync 的鎖定順序。
-另以 `security/source.json` 綁定的正式 patch 核對 account service：基底 blob `e0b0b883` 套用該檔兩個 hunks 後得到 `ea74d772`，與正式 patch 一致；包含密碼登入的管理員指派條件。
-這是介面與單檔核對，尚未重建整份正式 API。repo 的正式來源記載為 `be815455`／`b0a10ac`，不能把歷史 v20 manifest 當作本輪正式驗收。
+## 組裝邊界
 
-啟用前仍需核實完整組合來源、真 migration manifest／runtime grants、資料保留與清理政策，以及真 PostgreSQL 交易／逾時設定。
-HTTP 等待期限不會取消已開始的資料庫交易；鎖等待、statement timeout、延後外鍵及帳號關閉 cascade 都尚待真 PostgreSQL 驗證。
-管理員指派的讀取與 row-lock 權限也須核實；本輪未新增 GRANT，已知鎖定順序核對不代表所有正式撤銷路徑皆已驗證。
-還缺受審的公開 POI reader、兩個固定公開 executor、有限公開結果驗證／來源回驗，以及合法免費環境和逐次資料外送同意。
-這個候選不會建立帳號或學籍、配置 key、修改 billing、套用 migration、啟用 route 或部署。
+- `PlatformPublicAdmission` 使用既有 `PlatformAccountService.resolveSession` 結構介面，不接受 JSON 身分、角色、學籍或 Firebase uid。
+- `PlatformPublicTaskService` 目前只啟用確定性公開導航，沒有模型呼叫或 fallback；Groq 任務回 executor unavailable。原入場層仍保留兩個公開任務的嚴格契約。
+- `createPlatformPublicAgentHandler` 預設關閉，沒有在 Next／Fastify 註冊。未新增環境開關、部署或 migration manifest。地圖也未收到 production port，因此正式入口維持不變。
+- 未來 host 須以既有受信 signed HttpOnly cookie／platform session 實作 `resolveHttpSession`，提供固定 origin，不能使用本機 fixture 的測試 header。handler 驗 POST、同源、custom header、session context、8 KiB body、完整期限與回應前 session；不接受跨校／跨帳號身分 JSON。
+- 確認綁任務、內容雜湊、來源 fingerprint、校園、provider/model 與 session。`deterministic/public-poi-exact-match-v1` 與 Groq 是不同綁定；只有公開導航接受前者。
+
+## 執行與回復
+
+確認消耗、共用 budget、帳號 quota 與 operation 在同一交易。只有首次 claimed 取得隨機 execution token，DB 僅存 hash；HTTP 不暴露 token，重試不再取得執行權或扣次數。
+結果須通過公開來源及 canonical 路線驗證才能以 token CAS 完成。completed／failed／unknown 都不能被晚到結果覆寫。
+執行逾時或提交回應遺失保留不明狀態；查詢原任務不會觸發 executor。未知工作不自動補送或退款額度。
+`readBound` 使用完整內容綁定；每次完成回執交付都重驗身分、來源與路線，不直接信任快取。
+JSONB 欄位順序不影響驗證。公開名稱只是資料，不是模型或工具指令。
+
+UI 確認前不執行，取消回輸入並恢復焦點；換帳校會卸載舊工作、清理晚到結果。
+正式導航的同帳同校跨頁草稿保留及換校確認仍須由 host 與既有 Agent 草稿管理接合，本機 selector 只是隔離測試控制項，不是正式切校流程。
+沒有真正的模型推理、任意任務或私人資料寫入。
+
+## 仍未核實／啟用
+
+- 未執行 `schema.candidate.sql`，未新增 GRANT；真 PostgreSQL 鎖、FK、跨程序競態、statement timeout／commit 故障及帳號清理尚待隔離 DB 驗證。
+- fixture 的序列化回滾不是 PostgreSQL 證據。實際 DB transaction 不會因 HTTP abort 自動取消。
+- 確認紀錄上限預設 1000，過期／已耗用也計入；未知操作不刪除。保留及容量清理政策尚未核定。
+- 身分與來源為順序檢查，不是分散式原子快照，最後來源讀取後仍有 TOCTOU 窗口。
+- 正式 API 介面基底 `Miiduoa/nuni-prod@9de47b4b`，account service 已與 `security/source.json` 綁定的 `b0a10ac` patch 單檔核對，保留 password 的有效 operator 指派重驗；整份目前部署來源與 migration/grants 未重建核准。
+- 真 session BFF、正式公開來源 reader／包裝註冊、部署與任何免費雲端 provider 帳戶額度均未啟用或實測。
+- 歷史安全掃描 22 筆命中／4 筆權屬未明仍待處理；本切片沒有新增 ignore、縮減掃描或放寬安全閘門。

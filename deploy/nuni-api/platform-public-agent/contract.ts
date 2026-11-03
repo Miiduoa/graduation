@@ -4,6 +4,16 @@ export const PUBLIC_TASKS = ['campus-service-entry', 'public-campus-navigation']
 export type PublicTaskName = (typeof PUBLIC_TASKS)[number];
 export const FREE_PROVIDER = 'groq' as const;
 export const FREE_MODEL = 'openai/gpt-oss-120b' as const;
+export const DETERMINISTIC_PROVIDER = 'deterministic' as const;
+export const DETERMINISTIC_MODEL = 'public-poi-exact-match-v1' as const;
+export function isExecutionPair(provider: unknown, model: unknown, task: unknown): boolean {
+  return (
+    (provider === FREE_PROVIDER && model === FREE_MODEL) ||
+    (task === 'public-campus-navigation' &&
+      provider === DETERMINISTIC_PROVIDER &&
+      model === DETERMINISTIC_MODEL)
+  );
+}
 
 export class PublicAgentError extends Error {
   constructor(
@@ -25,8 +35,8 @@ export interface TaskBinding {
   requestId: string;
   schoolId: string;
   payloadHash: string;
-  provider: typeof FREE_PROVIDER;
-  model: typeof FREE_MODEL;
+  provider: typeof FREE_PROVIDER | typeof DETERMINISTIC_PROVIDER;
+  model: typeof FREE_MODEL | typeof DETERMINISTIC_MODEL;
 }
 export interface ParsedPublicTask {
   binding: Readonly<TaskBinding>;
@@ -106,7 +116,12 @@ export function parseConfirmedTask(value: unknown): ParsedPublicTask {
       ? ['model', 'provider', 'purpose', 'schoolId', 'utterance', 'version']
       : ['provider', 'version', 'schoolId', 'query', 'fingerprint'],
   );
-  if (consent.provider !== FREE_PROVIDER || consent.version !== 1 || consent.schoolId !== schoolId)
+  const provider =
+    consent.provider === DETERMINISTIC_PROVIDER && task === 'public-campus-navigation'
+      ? DETERMINISTIC_PROVIDER
+      : FREE_PROVIDER;
+  const model = provider === DETERMINISTIC_PROVIDER ? DETERMINISTIC_MODEL : FREE_MODEL;
+  if (consent.provider !== provider || consent.version !== 1 || consent.schoolId !== schoolId)
     return fail();
   let text: string;
   let fingerprint: string | null = null;
@@ -122,7 +137,7 @@ export function parseConfirmedTask(value: unknown): ParsedPublicTask {
       consent: Object.freeze({
         version: 1,
         purpose: task,
-        provider: FREE_PROVIDER,
+        provider,
         model: FREE_MODEL,
         schoolId,
         utterance: text,
@@ -146,7 +161,7 @@ export function parseConfirmedTask(value: unknown): ParsedPublicTask {
       query: text,
       requestId,
       consent: Object.freeze({
-        provider: FREE_PROVIDER,
+        provider,
         version: 1,
         schoolId,
         query: text,
@@ -155,7 +170,7 @@ export function parseConfirmedTask(value: unknown): ParsedPublicTask {
     };
   }
   const payloadHash = createHash('sha256')
-    .update(JSON.stringify([task, schoolId, text, FREE_PROVIDER, FREE_MODEL, 1, fingerprint]))
+    .update(JSON.stringify([task, schoolId, text, provider, model, 1, fingerprint]))
     .digest('hex');
   return Object.freeze({
     binding: Object.freeze({
@@ -163,8 +178,8 @@ export function parseConfirmedTask(value: unknown): ParsedPublicTask {
       requestId,
       schoolId,
       payloadHash,
-      provider: FREE_PROVIDER,
-      model: FREE_MODEL,
+      provider,
+      model,
     }),
     data: Object.freeze(clean),
   });
