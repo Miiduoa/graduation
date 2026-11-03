@@ -5,6 +5,7 @@ import { analyzeCreditPlan } from '@campus/shared/src/creditPlanInsights';
 import { formatCredits, type CreditPlan } from '@campus/shared/src/creditPlanner';
 import styles from './CreditPlanFeasibility.module.css';
 import { CreditPlanScenarios } from './CreditPlanScenarios';
+import type { CreditScenarioWriter } from '@campus/shared/src/creditScenarioAdoption';
 
 function numberOrDash(value: number | null): string {
   return value === null ? '—' : formatCredits(value);
@@ -14,7 +15,9 @@ function numberOrDash(value: number | null): string {
  * A schedule planning assistant based only on user-entered credits.
  * It does not load school records or assert official graduation eligibility.
  */
-export function CreditPlanFeasibility({ plan }: { plan: CreditPlan }) {
+export function CreditPlanFeasibility({ plan, scenarioWriter, scenarioBlocked }: {
+  plan: CreditPlan; scenarioWriter?: CreditScenarioWriter; scenarioBlocked?: string;
+}) {
   const result = useMemo(() => analyzeCreditPlan(plan), [plan]);
   return (
     <section className={styles.panel} aria-labelledby="credit-feasibility-title">
@@ -78,7 +81,7 @@ export function CreditPlanFeasibility({ plan }: { plan: CreditPlan }) {
           </p>
         </div>
       </div>
-      <CreditPlanScenarios plan={plan} />
+      <CreditPlanScenarios plan={plan} scenarioWriter={scenarioWriter} scenarioBlocked={scenarioBlocked} />
     </section>
   );
 }

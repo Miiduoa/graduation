@@ -59,13 +59,11 @@ import { listAcceptedFriends } from '@/lib/timetable/friends';
 import { useAcademicRecords } from '@/lib/useAcademicRecords';
 import type { AcademicCourse } from '@/lib/academicRecords';
 import { Modal } from '@/components/ui/Modal';
-import {
-  resolveTimetableCourseWorkHref,
-  TIMETABLE_COURSE_WORK_LABEL,
-} from '@/lib/todayScreen';
+import { TIMETABLE_COURSE_WORK_LABEL } from '@/lib/todayScreen';
 import { CourseEditor as EditableCourseDialog } from './CourseEditor';
 import { TimetableGrid, UnscheduledCourses } from './TimetableGrid';
 import { validateCourseDraft } from './courseEditorModel';
+import { resolveTimetableCourseWorkExit } from './timetableCourseWorkHref';
 import { planningReadiness } from './timetableMovement';
 import movement from './timetableMovement.module.css';
 
@@ -365,12 +363,13 @@ function TimetableWorkspace({ schoolId }: { schoolId: string }) {
   const planning = planningReadiness(planningCourses, periodTotal, WEEKDAY_LABELS.length);
   const courseWorkHrefFor = (course: PersonalCourse) => {
     const importId = course.id.startsWith('import:') ? course.id.slice('import:'.length) : '';
-    const linked = importId
-      ? imported.records.find((row) => row.id === importId)?.linkedCourseId
+    const importedRow = importId
+      ? imported.records.find((row) => row.id === importId)
       : undefined;
-    return resolveTimetableCourseWorkHref({
-      linkedCourseId: linked,
+    return resolveTimetableCourseWorkExit({
+      linkedCourseId: importedRow?.linkedCourseId,
       courseName: course.name,
+      courseCode: importedRow?.courseCode,
     });
   };
   const openCourse = (course: PersonalCourse) => {
@@ -623,6 +622,12 @@ function TimetableWorkspace({ schoolId }: { schoolId: string }) {
     );
   }
 
+  const timetableEmpty =
+    !imported.loading &&
+    !imported.error &&
+    schoolRecords.state?.status !== 'loading' &&
+    !visibleCourses.length &&
+    !missingImportTimes.length;
   const conflicts = findCourseConflicts(visibleCourses);
   const selected = friends.find((friend) => friend.id === selectedFriend);
   const friendPlanning = selected
@@ -839,33 +844,6 @@ function TimetableWorkspace({ schoolId }: { schoolId: string }) {
           </ul>
         </section>
       )}
-      <PersonalCalendarExport key={`calendar:${schoolId}:${uid}:${activeTerm}`} records={withClassExceptions([...manualClassRecords(timetable), ...imported.records], timetable.classExceptions)} schoolId={schoolId}
-        termKey={!terms.length || activeTerm === 'manual' ? `${timetable.meta.year || '未填'}|${timetable.meta.semester || '未填'}` : activeTerm}
-        disabled={busy || imported.loading || !!imported.error} />
-      <ClassExceptions records={[...manualClassRecords(timetable), ...imported.records]}
-        exceptions={timetable.classExceptions} schoolId={schoolId}
-        termKey={activeTerm === 'manual' ? `${timetable.meta.year || '未填'}|${timetable.meta.semester || '未填'}` : activeTerm}
-        disabled={busy || imported.loading || !!imported.error}
-        onSave={async (classExceptions) => { if (!await persist({ ...timetable, classExceptions }, '這次安排已儲存。')) throw new Error('尚未完成儲存，請重試。'); }} />
-      <p className={styles.notice}>每週基準課表；指定日期的安排請查看上方。</p>
-      <p className={styles.notice}>{TIMETABLE_DEVICE_ONLY_STORED_COPY}</p>
-      {uid ? (
-        <label className={styles.field}>
-          <input
-            type="checkbox"
-            checked={timetable.shareWithFriends !== false}
-            onChange={(event) =>
-              void persist(
-                { ...timetable, shareWithFriends: event.target.checked },
-                event.target.checked
-                  ? '好友加完後看得到這份課表。'
-                  : '已關掉好友課表。對方現在看不到。',
-              )
-            }
-          />
-          讓已接受的好友看這份課表
-        </label>
-      ) : null}
       {notice && (
         <p className={styles.note} role="status">
           {notice}
@@ -875,6 +853,21 @@ function TimetableWorkspace({ schoolId }: { schoolId: string }) {
         <section className={styles.warning} aria-label="衝堂">
           有 {conflicts.length} 組課程時間重疊，仍可先留著，約人時會避開這些時段。
         </section>
+      )}
+      {terms.length > 0 && (
+        <div className={`${styles.toolbar} ${movement.toolbar}`}>
+          <label className={styles.field}>
+            顯示自行匯入的學期
+            <select value={activeTerm} onChange={(event) => setImportTerm(event.target.value)}>
+              <option value="manual">原本的手動課表</option>
+              {terms.map((term) => (
+                <option key={term.key} value={term.key}>
+                  {term.academicYear} 學年度 {term.semester} 學期
+                </option>
+              ))}
+            </select>
+          </label>
+        </div>
       )}
       <div className={`${styles.toolbar} ${movement.toolbar}`}>
         <div className={styles.segment} role="group" aria-label="課表顯示方式">
@@ -940,28 +933,27 @@ function TimetableWorkspace({ schoolId }: { schoolId: string }) {
           {imported.error}
         </p>
       )}
-      {terms.length > 0 && (
-        <div className={`${styles.toolbar} ${movement.toolbar}`}>
-          <label className={styles.field}>
-            顯示自行匯入的學期
-            <select value={activeTerm} onChange={(event) => setImportTerm(event.target.value)}>
-              <option value="manual">原本的手動課表</option>
-              {terms.map((term) => (
-                <option key={term.key} value={term.key}>
-                  {term.academicYear} 學年度 {term.semester} 學期
-                </option>
-              ))}
-            </select>
-          </label>
-          <p className={styles.notice}>
-            自行匯入 {importedCourses.length}{' '}
-            筆。原有手動課表只有在學期相符時一起顯示，也可切換查看。點選可回到匯入頁修改；其他學校與週末課程請查看
-            <Link href={importHref}>個人紀錄</Link>。
-            {savesToManual ? ' 新增課程會儲存至手動課表，儲存後會自動切換。' : ''}
-          </p>
-        </div>
-      )}
-      {view === 'grid' ? (
+      {imported.loading && <p role="status">正在讀取匯入課表…</p>}
+      {schoolRecords.state?.status === 'loading' && <p role="status">正在讀取學校課表…</p>}
+      {timetableEmpty ? (
+        <section className={movement.empty} aria-label="還沒有課表">
+          <h2>還沒有課表</h2>
+          <p>先匯入截圖或檔案，確認後就能查看上課時間與教室。</p>
+          <div className={movement.emptyActions}>
+            <Link className="btn primary" href={importHref}>
+              匯入我的課表
+            </Link>
+            <button
+              type="button"
+              className="btn"
+              disabled={busy}
+              onClick={() => openCourse({ ...cleanCourse({ day, start: 1, end: 1 }), name: '' })}
+            >
+              手動新增課程
+            </button>
+          </div>
+        </section>
+      ) : view === 'grid' ? (
         <TimetableGrid
           courses={visibleCourses}
           disabled={busy}
@@ -1031,6 +1023,66 @@ function TimetableWorkspace({ schoolId }: { schoolId: string }) {
         onEdit={openCourse}
         periodProfile={periodProfile}
       />
+      <p className={styles.notice}>每週基準課表；單次調整可在「調課與停課」查看。</p>
+      <PersonalCalendarExport
+        key={`calendar:${schoolId}:${uid}:${activeTerm}`}
+        records={withClassExceptions(
+          [...manualClassRecords(timetable), ...imported.records],
+          timetable.classExceptions,
+        )}
+        schoolId={schoolId}
+        termKey={
+          !terms.length || activeTerm === 'manual'
+            ? `${timetable.meta.year || '未填'}|${timetable.meta.semester || '未填'}`
+            : activeTerm
+        }
+        disabled={busy || imported.loading || !!imported.error}
+      />
+      <details key={`adjustments:${schoolId}:${uid}:${activeTerm}`} className={movement.secondary}>
+        <summary>調課與停課</summary>
+        <ClassExceptions
+          records={[...manualClassRecords(timetable), ...imported.records]}
+          exceptions={timetable.classExceptions}
+          schoolId={schoolId}
+          termKey={
+            activeTerm === 'manual'
+              ? `${timetable.meta.year || '未填'}|${timetable.meta.semester || '未填'}`
+              : activeTerm
+          }
+          disabled={busy || imported.loading || !!imported.error}
+          onSave={async (classExceptions) => {
+            if (!(await persist({ ...timetable, classExceptions }, '這次安排已儲存。'))) {
+              throw new Error('尚未完成儲存，請重試。');
+            }
+          }}
+        />
+      </details>
+      <p className={styles.notice}>{TIMETABLE_DEVICE_ONLY_STORED_COPY}</p>
+      {uid ? (
+        <label className={styles.field}>
+          <input
+            type="checkbox"
+            checked={timetable.shareWithFriends !== false}
+            onChange={(event) =>
+              void persist(
+                { ...timetable, shareWithFriends: event.target.checked },
+                event.target.checked
+                  ? '好友加完後看得到這份課表。'
+                  : '已關掉好友課表。對方現在看不到。',
+              )
+            }
+          />
+          讓已接受的好友看這份課表
+        </label>
+      ) : null}
+      {terms.length > 0 && (
+        <p className={styles.notice}>
+          自行匯入 {importedCourses.length}{' '}
+          筆。原有手動課表只有在學期相符時一起顯示，也可切換查看。點選可回到匯入頁修改；其他學校與週末課程請查看
+          <Link href={importHref}>個人紀錄</Link>。
+          {savesToManual ? ' 新增課程會儲存至手動課表，儲存後會自動切換。' : ''}
+        </p>
+      )}
       {!uid && <ShareNeedsSchoolAccountNotice schoolId={schoolId} />}
       {courseAction && (
         <Modal
