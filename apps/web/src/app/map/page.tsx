@@ -26,7 +26,10 @@ export default function MapPage(props: {
 }) {
   const searchParams = props.searchParams ? use(props.searchParams) : undefined;
   const { schoolId, schoolName, schoolSearch: q, status } = useCampusBrowseContext(searchParams);
-  const { port, needsSignIn } = usePublicNavigationPort(schoolId, schoolName);
+  const { port, needsSignIn, capabilityStatus, retryCapability } = usePublicNavigationPort(
+    schoolId,
+    schoolName,
+  );
   const route = Array.isArray(searchParams?.route) ? searchParams.route[0] : searchParams?.route;
   const focus = Array.isArray(searchParams?.focus) ? searchParams.focus[0] : searchParams?.focus;
 
@@ -61,11 +64,22 @@ export default function MapPage(props: {
 
       {needsSignIn && schoolId && (
         <p className="card">
-          登入 nuni 帳號後可使用公開校園導航。{' '}
+          登入 nuni 帳號後可查看此校園是否提供公開校園導航。{' '}
           <Link href={`/login?returnUrl=${encodeURIComponent(`/map?campus=${schoolId}`)}`}>
             登入或註冊
           </Link>
         </p>
+      )}
+      {schoolId && capabilityStatus === 'unavailable' && (
+        <p className="card">此校園的雲端導航尚未開放。</p>
+      )}
+      {schoolId && capabilityStatus === 'error' && (
+        <section className="card" role="status">
+          <p>暫時無法確認此校園的導航服務。</p>
+          <button type="button" className="btn secondary" onClick={retryCapability}>
+            重新查詢
+          </button>
+        </section>
       )}
       <div
         style={{

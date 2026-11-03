@@ -50,6 +50,32 @@ afterEach(() => {
   vi.useRealTimers();
 });
 describe('unregistered platform public Agent gateway', () => {
+  it('authorizes capability requests and forwards only the selected school', async () => {
+    const handle = createPlatformPublicAgentGateway({ enabled: true, transport, project });
+    const body = { schoolId: 'pu' };
+    expect((await handle(request({ body, cookie: null }), 'capability')).status).toBe(401);
+    expect((await handle(request({ body, cookie: other }), 'capability')).status).toBe(409);
+    expect(
+      (await handle(request({ body, origin: 'https://other.invalid' }), 'capability')).status,
+    ).toBe(403);
+    expect(
+      (await handle(request({ body: { ...body, owner: 'other' } }), 'capability')).status,
+    ).toBe(422);
+    expect((await handle(request({ body: { schoolId: '../admin' } }), 'capability')).status).toBe(
+      422,
+    );
+    expect(transport).not.toHaveBeenCalled();
+    transport.mockResolvedValue({ schoolId: 'pu', modes: [], source: null });
+    const response = await handle(request({ body }), 'capability');
+    expect(response.status).toBe(200);
+    expect(response.headers.get('cache-control')).toContain('no-store');
+    expect(transport).toHaveBeenCalledTimes(1);
+    expect(transport.mock.calls[0]?.[0]).toMatchObject({
+      action: 'capability',
+      body,
+      session: account,
+    });
+  });
   it('is disabled unless explicitly assembled and invokes no transport', async () => {
     const handle = createPlatformPublicAgentGateway({ transport, project });
     expect((await handle(request(), 'execute')).status).toBe(404);

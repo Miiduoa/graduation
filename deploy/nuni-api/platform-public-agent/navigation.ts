@@ -8,7 +8,11 @@ export type PublicCatalog = {
   label: string;
   places: PublicPlace[];
 };
-export type PublicCatalogReader = (schoolId: string, signal: AbortSignal) => Promise<PublicCatalog>;
+// A server-owned reader returns null only for a known unsupported school; failures throw.
+export type PublicCatalogReader = (
+  schoolId: string,
+  signal: AbortSignal,
+) => Promise<PublicCatalog | null>;
 const invalid = (): never => {
   throw new PublicAgentError('PUBLIC_AGENT_SOURCE_UNAVAILABLE', 503);
 };

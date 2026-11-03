@@ -223,6 +223,31 @@ export function projectPlatformPublicAgent(
   value: unknown,
   input: Row,
 ): unknown {
+  if (action === 'capability') {
+    const r = row(value, ['schoolId', 'modes', 'source']);
+    const schoolId = match(r.schoolId, /^[A-Za-z0-9_-]{2,40}$/u, 40);
+    if (
+      schoolId !== input.schoolId ||
+      !Array.isArray(r.modes) ||
+      r.modes.length > 2 ||
+      r.modes.some((mode) => mode !== 'deterministic' && mode !== 'groq') ||
+      new Set(r.modes).size !== r.modes.length
+    )
+      return fail();
+    let source: { date: string; label: string } | null = null;
+    if (r.source !== null) {
+      const s = row(r.source, ['date', 'label']);
+      const date = match(s.date, /^\d{4}-\d{2}-\d{2}$/u, 10);
+      if (
+        !Number.isFinite(Date.parse(date)) ||
+        new Date(`${date}T00:00:00Z`).toISOString().slice(0, 10) !== date
+      )
+        return fail();
+      source = { date, label: str(s.label, 120) };
+    }
+    if (r.modes.length > 0 && source === null) return fail();
+    return { schoolId, modes: r.modes, source };
+  }
   if (action === 'preview') {
     const r = row(value, ['request', 'receipt', 'checkedAt', 'dataScope', 'execution']);
     const request = taskRequest(r.request);

@@ -69,11 +69,42 @@ export class PlatformPublicTaskService {
   }
   private async snapshot(school: string, signal: AbortSignal) {
     try {
-      return publicSnapshot(await this.options.readPublicCatalog(school, signal), school);
+      const catalog = await this.options.readPublicCatalog(school, signal);
+      if (!catalog) throw new PublicAgentError('PUBLIC_AGENT_SOURCE_UNAVAILABLE', 503);
+      return publicSnapshot(catalog, school);
     } catch (error) {
       if (error instanceof PublicAgentError) throw error;
       throw new PublicAgentError('PUBLIC_AGENT_SOURCE_UNAVAILABLE', 503);
     }
+  }
+  /** Capability is informational; every later operation revalidates source and session. */
+  async capability(auth: string | undefined, raw: unknown, signal?: AbortSignal) {
+    const input = exactRecord(raw, ['schoolId']);
+    if (typeof input.schoolId !== 'string' || !/^[A-Za-z0-9_-]{2,40}$/u.test(input.schoolId))
+      throw new PublicAgentError('PUBLIC_AGENT_INVALID_INPUT');
+    const schoolId = input.schoolId;
+    return this.bounded(signal, async (step, abort) => {
+      const actor = await step(() => this.admission.actor(auth));
+      let catalog;
+      try {
+        catalog = await step(() => this.options.readPublicCatalog(schoolId, abort));
+      } catch (error) {
+        if (error instanceof PublicAgentError) throw error;
+        throw new PublicAgentError('PUBLIC_AGENT_SOURCE_UNAVAILABLE', 503);
+      }
+      const snapshot = catalog === null ? null : publicSnapshot(catalog, schoolId);
+      const names = new Map<string, number>();
+      for (const place of snapshot?.places ?? [])
+        names.set(place.name, (names.get(place.name) ?? 0) + 1);
+      const canNavigate = [...names.values()].filter((count) => count === 1).length >= 2;
+      sameActor(actor, await step(() => this.admission.actor(auth)));
+      return {
+        schoolId,
+        // A configured planner or static flag alone cannot establish a no-spend guarantee.
+        modes: canNavigate ? ['deterministic'] : [],
+        source: snapshot ? { date: snapshot.updatedAt, label: snapshot.label } : null,
+      };
+    });
   }
   private parse(raw: unknown) {
     const task = parseConfirmedTask(raw);

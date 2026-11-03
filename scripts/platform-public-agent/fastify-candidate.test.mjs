@@ -409,3 +409,53 @@ test('malformed session recheck after a committed confirmation reports unknown',
   assert.equal(base.db.data.confirmations.size, 1);
   assert.deepEqual(quotas(base.db), []);
 });
+
+test('capability uses the trusted catalog, distinguishes unsupported and unavailable, and never executes', async () => {
+  let providerCalls = 0;
+  const f = fixture({
+    readPublicCatalog: async (school) => (school === 'pu' ? catalog() : null),
+    freeTierVerified: true,
+    groqPlan: async () => {
+      providerCalls++;
+      throw new Error('must not execute');
+    },
+  });
+  const known = await f.call('capability', { schoolId: 'pu' });
+  assert.equal(known.status, 200);
+  assert.deepEqual(known.body, {
+    schoolId: 'pu',
+    modes: ['deterministic'],
+    source: { date: '2026-10-19', label: '合成公開目錄' },
+  });
+  assert.equal(known.headers['cache-control'], 'no-store');
+  const unknown = await f.call('capability', { schoolId: 'other' });
+  assert.deepEqual(unknown.body, { schoolId: 'other', modes: [], source: null });
+  assert.equal((await f.call('capability', { schoolId: 'pu', accountId: 'bad' })).status, 422);
+  assert.equal(
+    (await f.call('capability', { schoolId: 'pu' }, { origin: 'https://evil.invalid' })).status,
+    403,
+  );
+  assert.equal(
+    (await f.call('capability', { schoolId: 'pu' }, { authorization: undefined })).status,
+    401,
+  );
+  assert.equal(providerCalls, 0);
+  assert.deepEqual(quotas(f.db), []);
+  const unavailable = fixture({
+    readPublicCatalog: async () => {
+      throw new Error('storage failure');
+    },
+  });
+  const result = await unavailable.call('capability', { schoolId: 'pu' });
+  assert.equal(result.status, 503);
+  assert.equal(result.body.code, 'PUBLIC_AGENT_SOURCE_UNAVAILABLE');
+});
+
+test('capability offers no mode for an ambiguous catalog and does not expose an unconfigured provider', async () => {
+  const f = fixture();
+  assert.deepEqual((await f.call('capability', { schoolId: 'pu' })).body.modes, ['deterministic']);
+  const ambiguous = catalog();
+  ambiguous.places[1].name = ambiguous.places[0].name;
+  const limited = fixture({ readPublicCatalog: async () => ambiguous });
+  assert.deepEqual((await limited.call('capability', { schoolId: 'pu' })).body.modes, []);
+});

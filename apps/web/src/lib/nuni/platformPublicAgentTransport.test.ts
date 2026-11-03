@@ -81,6 +81,7 @@ const json = (value: unknown, status = 200) =>
 
 describe('single-attempt candidate platform transport', () => {
   it.each([
+    'capability',
     'preview',
     'prepareGroq',
     'confirm',
@@ -203,6 +204,62 @@ describe('single-attempt candidate platform transport', () => {
     expect(response.status).toBe(422);
     expect(await response.json()).toEqual({ error: 'PUBLIC_AGENT_DESTINATION_UNCLEAR' });
     expect(fetcher).toHaveBeenCalledTimes(1);
+  });
+  it('preserves unavailable source as a retryable failure instead of reporting unsupported', async () => {
+    fetcher.mockResolvedValueOnce(json({ code: 'PUBLIC_AGENT_SOURCE_UNAVAILABLE' }, 503));
+    const handle = createPlatformPublicAgentGateway({
+      enabled: true,
+      transport: transport(),
+      project: projectPlatformPublicAgent,
+    });
+    const req = new NextRequest('https://nuni.tw/api/nuni/public-agent/capability', {
+      method: 'POST',
+      headers: {
+        Origin: 'https://nuni.tw',
+        'Content-Type': 'application/json',
+        'X-Campus-Session': sessionContext(session),
+        Cookie: `${SESSION_COOKIE}=${sealCookie(SESSION_COOKIE, session)}`,
+      },
+      body: JSON.stringify({ schoolId }),
+    });
+    const response = await handle(req, 'capability');
+    expect(response.status).toBe(503);
+    expect(await response.json()).toEqual({ error: 'PUBLIC_AGENT_SOURCE_UNAVAILABLE' });
+    expect(fetcher).toHaveBeenCalledTimes(1);
+  });
+  it('projects only the requested school through the actual gateway and fixed transport', async () => {
+    const handle = createPlatformPublicAgentGateway({
+      enabled: true,
+      transport: transport(),
+      project: projectPlatformPublicAgent,
+    });
+    const call = () =>
+      handle(
+        new NextRequest('https://nuni.tw/api/nuni/public-agent/capability', {
+          method: 'POST',
+          headers: {
+            Origin: 'https://nuni.tw',
+            'Content-Type': 'application/json',
+            'X-Campus-Session': sessionContext(session),
+            Cookie: `${SESSION_COOKIE}=${sealCookie(SESSION_COOKIE, session)}`,
+          },
+          body: JSON.stringify({ schoolId }),
+        }),
+        'capability',
+      );
+    const source = { date: '2026-10-19', label: 'OSM' };
+    fetcher.mockResolvedValueOnce(json({ schoolId, modes: ['deterministic'], source }));
+    let response = await call();
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ schoolId, modes: ['deterministic'], source });
+    expect(fetcher.mock.calls[0]?.[0]).toBe(
+      'https://api.example.test/v1/auth/platform/public-agent/capability',
+    );
+    fetcher.mockResolvedValueOnce(json({ schoolId: 'other', modes: ['deterministic'], source }));
+    response = await call();
+    expect(response.status).toBe(502);
+    expect(await response.json()).toEqual({ error: 'PUBLIC_AGENT_INVALID_RESPONSE' });
+    expect(fetcher).toHaveBeenCalledTimes(2);
   });
   it('aborts and does not fetch if caller signal was already cancelled', async () => {
     const controller = new AbortController();

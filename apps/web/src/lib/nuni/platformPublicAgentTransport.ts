@@ -4,6 +4,7 @@ import type { PublicAgentAction, PublicAgentTransport } from './platformPublicAg
 
 // Candidate contract shared with the unregistered Fastify adapter; not a registered route.
 const PATHS: Record<PublicAgentAction, string> = {
+  capability: '/v1/auth/platform/public-agent/capability',
   preview: '/v1/auth/platform/public-agent/preview',
   prepareGroq: '/v1/auth/platform/public-agent/prepareGroq',
   confirm: '/v1/auth/platform/public-agent/confirm',
@@ -20,6 +21,7 @@ const FAILURES: Record<string, number> = {
   PUBLIC_AGENT_SESSION_INVALID: 401,
   PUBLIC_AGENT_SESSION_EXPIRED: 401,
   PUBLIC_AGENT_SOURCE_CHANGED: 409,
+  PUBLIC_AGENT_SOURCE_UNAVAILABLE: 503,
   PUBLIC_AGENT_DESTINATION_UNCLEAR: 422,
   PUBLIC_AGENT_FREE_QUOTA_UNAVAILABLE: 429,
   PUBLIC_AGENT_OPEN_OPERATION: 409,

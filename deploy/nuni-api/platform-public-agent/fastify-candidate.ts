@@ -10,6 +10,7 @@ import type { PlatformSessionResolver } from './admission';
 
 const prefix = '/v1/auth/platform/public-agent';
 const actions = [
+  'capability',
   'preview',
   'prepareGroq',
   'confirm',

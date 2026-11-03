@@ -1,10 +1,11 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useOptionalNuniSession } from '@/features/nuni/Session';
 import type { PublicTaskPort } from './PublicNavigationTask';
 
 type Availability = 'loading' | 'enabled' | 'disabled';
+type CapabilityStatus = 'idle' | 'loading' | 'available' | 'unavailable' | 'error';
 const ACTIONS = new Set([
   'preview',
   'prepareGroq',
@@ -45,8 +46,78 @@ export function usePublicNavigationPort(schoolId: string | null, schoolName: str
     !auth?.loading && !auth?.error && !auth?.pendingLogout
       ? auth?.session?.platformAccountId
       : null;
+  const scopeKey =
+    availability === 'enabled' && account && context && schoolId
+      ? JSON.stringify([account, context, schoolId])
+      : null;
+  // A new token is created on every scope change, including A→B→A.
+  const scopeToken = useMemo(() => (scopeKey ? { key: scopeKey } : null), [scopeKey]);
+  const [capability, setCapability] = useState<{
+    token: { key: string };
+    status: Exclude<CapabilityStatus, 'idle'>;
+  } | null>(null);
+  const [retry, setRetry] = useState(0);
+  useEffect(() => {
+    if (!scopeToken || !context || !schoolId) return;
+    const controller = new AbortController();
+    let current = true;
+    const timer = setTimeout(() => {
+      if (!current) return;
+      controller.abort();
+      setCapability({ token: scopeToken, status: 'error' });
+    }, 12_000);
+    void fetch('/api/nuni/public-agent/capability', {
+      method: 'POST',
+      cache: 'no-store',
+      credentials: 'same-origin',
+      redirect: 'error',
+      signal: controller.signal,
+      headers: { 'Content-Type': 'application/json', 'X-Campus-Session': context },
+      body: JSON.stringify({ schoolId }),
+    })
+      .then(async (response) => {
+        if (!response.ok) throw new Error('CAPABILITY_UNAVAILABLE');
+        const data: unknown = await response.json();
+        if (!data || typeof data !== 'object' || Array.isArray(data))
+          throw new Error('CAPABILITY_INVALID');
+        const row = data as Record<string, unknown>;
+        if (
+          row.schoolId !== schoolId ||
+          !Array.isArray(row.modes) ||
+          row.modes.some((mode) => mode !== 'groq' && mode !== 'deterministic') ||
+          new Set(row.modes).size !== row.modes.length ||
+          (row.modes.length > 0 && (!row.source || typeof row.source !== 'object'))
+        )
+          throw new Error('CAPABILITY_INVALID');
+        if (current && !controller.signal.aborted)
+          setCapability({
+            token: scopeToken,
+            status: row.modes.includes('groq') ? 'available' : 'unavailable',
+          });
+      })
+      .catch(() => {
+        if (current && !controller.signal.aborted)
+          setCapability({ token: scopeToken, status: 'error' });
+      })
+      .finally(() => clearTimeout(timer));
+    return () => {
+      current = false;
+      clearTimeout(timer);
+      controller.abort();
+    };
+  }, [scopeToken, context, schoolId, retry]);
+  const capabilityStatus: CapabilityStatus = !scopeToken
+    ? 'idle'
+    : capability?.token === scopeToken
+      ? capability.status
+      : 'loading';
+  const retryCapability = useCallback(() => {
+    if (!scopeToken) return;
+    setCapability({ token: scopeToken, status: 'loading' });
+    setRetry((value) => value + 1);
+  }, [scopeToken]);
   const port = useMemo<PublicTaskPort | undefined>(() => {
-    if (availability !== 'enabled' || !context || !account || !schoolId) return undefined;
+    if (capabilityStatus !== 'available' || !context || !account || !schoolId) return undefined;
     return {
       scope: `${account}:${context}`,
       mode: 'groq',
@@ -84,10 +155,12 @@ export function usePublicNavigationPort(schoolId: string | null, schoolName: str
         return data;
       },
     };
-  }, [availability, context, account, schoolId, schoolName]);
+  }, [capabilityStatus, context, account, schoolId, schoolName]);
   return {
     port,
     available: availability === 'enabled',
+    capabilityStatus,
+    retryCapability,
     needsSignIn:
       availability === 'enabled' &&
       !!auth &&

@@ -12,6 +12,7 @@ type Options = {
 };
 const prefix = '/api/platform-public-agent/';
 const actions = [
+  'capability',
   'preview',
   'prepareGroq',
   'confirm',

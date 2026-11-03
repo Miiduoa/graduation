@@ -10,6 +10,7 @@ import {
 } from './server';
 
 export type PublicAgentAction =
+  | 'capability'
   | 'preview'
   | 'prepareGroq'
   | 'confirm'
@@ -52,6 +53,7 @@ export function createPlatformPublicAgentGateway(options: {
       if (options.enabled !== true) throw new NuniError(404, 'NOT_FOUND');
       if (
         ![
+          'capability',
           'preview',
           'prepareGroq',
           'confirm',
@@ -78,24 +80,31 @@ export function createPlatformPublicAgentGateway(options: {
       }
       // Explicit boundaries prevent browser-provided identity or endpoint options.
       const names =
-        action === 'preview' || action === 'prepareGroq'
-          ? ['schoolId', 'query', 'requestId']
-          : action === 'confirm'
-            ? ['approved', 'request']
-            : action === 'execute'
-              ? ['confirmationId', 'request']
-              : action === 'route'
-                ? ['approved', 'operationId', 'request', 'fromId', 'toId']
-                : action === 'status'
-                  ? ['task', 'schoolId']
-                  : action === 'reconcile'
-                    ? ['task', 'schoolId', 'operationId']
-                    : action === 'ack'
-                      ? ['task', 'schoolId', 'operationId', 'approved']
-                      : ['task', 'data'];
+        action === 'capability'
+          ? ['schoolId']
+          : action === 'preview' || action === 'prepareGroq'
+            ? ['schoolId', 'query', 'requestId']
+            : action === 'confirm'
+              ? ['approved', 'request']
+              : action === 'execute'
+                ? ['confirmationId', 'request']
+                : action === 'route'
+                  ? ['approved', 'operationId', 'request', 'fromId', 'toId']
+                  : action === 'status'
+                    ? ['task', 'schoolId']
+                    : action === 'reconcile'
+                      ? ['task', 'schoolId', 'operationId']
+                      : action === 'ack'
+                        ? ['task', 'schoolId', 'operationId', 'approved']
+                        : ['task', 'data'];
       if (
         Object.keys(body).length !== names.length ||
         Object.keys(body).some((key) => !names.includes(key))
+      )
+        throw new NuniError(422, 'INVALID_INPUT');
+      if (
+        action === 'capability' &&
+        (typeof body.schoolId !== 'string' || !/^[A-Za-z0-9_-]{2,40}$/u.test(body.schoolId))
       )
         throw new NuniError(422, 'INVALID_INPUT');
       if (
@@ -149,6 +158,7 @@ export function createPlatformPublicAgentGateway(options: {
             'PUBLIC_AGENT_SESSION_INVALID',
             'PUBLIC_AGENT_SESSION_EXPIRED',
             'PUBLIC_AGENT_SOURCE_CHANGED',
+            'PUBLIC_AGENT_SOURCE_UNAVAILABLE',
             'PUBLIC_AGENT_INVALID_RESPONSE',
           ].includes(error.code)
         )

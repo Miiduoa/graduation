@@ -638,7 +638,10 @@ if (!folder) {
           return result;
         },
       };
-      const readPublicCatalog = async () => globalThis.structuredClone(catalog);
+      const readPublicCatalog = async (school) => {
+        if (school === 'offline') throw new Error('synthetic catalog outage');
+        return school === 'pu' ? globalThis.structuredClone(catalog) : null;
+      };
       const groqPlan = createGroqNavigationPlanner({
         enabled: true,
         readPublicCatalog,
@@ -720,6 +723,17 @@ if (!folder) {
         return { status: res.statusCode, body: res.json() };
       };
       try {
+        const capability = await send('capability', { schoolId: 'pu' });
+        assert.equal(capability.status, 200);
+        assert.deepEqual(capability.body.modes, ['deterministic']);
+        assert.deepEqual(await send('capability', { schoolId: 'other' }), {
+          status: 200,
+          body: { schoolId: 'other', modes: [], source: null },
+        });
+        const offlineCapability = await send('capability', { schoolId: 'offline' });
+        assert.equal(offlineCapability.status, 503);
+        assert.equal(offlineCapability.body.code, 'PUBLIC_AGENT_SOURCE_UNAVAILABLE');
+        assert.equal(calls, 0);
         const input = {
           schoolId: 'pu',
           query: '從入口去圖書館',
