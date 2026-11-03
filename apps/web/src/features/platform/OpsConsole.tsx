@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { SiteShell } from '@/components/SiteShell';
 import { Button } from '@/components/ui/Button';
 import { Input, Select, Textarea } from '@/components/ui/Input';
@@ -323,6 +323,17 @@ function PeopleAddForm({
   const [notice, setNotice] = useState('');
   const captureRequest = useActiveRequest();
   const mutationPending = useRef(false);
+  const [hasRetriedAuthorization, setHasRetriedAuthorization] = useState(false);
+  const authorizationRetryPending = useRef(false);
+  const authorizationRetryButton = useRef<HTMLButtonElement>(null);
+  const authorizationFocusPending = useRef(false);
+  const accountInput = useRef<HTMLInputElement>(null);
+  const addPersonForm = useRef<HTMLFormElement>(null);
+  const attachAuthorizationRetryButton = useCallback((button: HTMLButtonElement | null) => {
+    authorizationFocusPending.current =
+      !button && authorizationRetryButton.current === document.activeElement;
+    authorizationRetryButton.current = button;
+  }, []);
   useEffect(() => {
     if (!requiresProxy || !proxy.value || proxy.value.ended) return;
     const timer = window.setInterval(() => setNow(Date.now()), 1000);
@@ -337,8 +348,24 @@ function PeopleAddForm({
     !!people.value &&
     tenantId !== 'campus-demo' &&
     (!requiresProxy || (!proxy.loading && !proxy.error && proxyActive));
+  const authorizationLoading = people.loading || (requiresProxy && proxy.loading);
+  const authorizationError = people.error || (requiresProxy ? proxy.error : undefined);
+  useLayoutEffect(() => {
+    if (authorizationLoading) return;
+    authorizationRetryPending.current = false;
+    const restoreFocus = authorizationFocusPending.current;
+    authorizationFocusPending.current = false;
+    const isCurrent = captureRequest();
+    if (!authorizationError && restoreFocus && isCurrent()) {
+      const target = ready ? accountInput.current : addPersonForm.current;
+      if (target?.isConnected && document.activeElement === document.body) target.focus();
+    }
+  }, [authorizationError, authorizationLoading, captureRequest, ready]);
   return (
     <form
+      ref={addPersonForm}
+      aria-label="加人"
+      tabIndex={-1}
       className={styles.form}
       onSubmit={(event) => {
         event.preventDefault();
@@ -394,13 +421,29 @@ function PeopleAddForm({
           });
       }}
     >
-      {people.loading || (requiresProxy && proxy.loading) ? (
-        <p role="status">正在確認校方授權…</p>
-      ) : null}
-      {people.error || (requiresProxy && proxy.error) ? (
+      {authorizationLoading ? <p role="status">正在確認校方授權…</p> : null}
+      {authorizationError ? (
         <p role="alert" className={styles.alert}>
-          {people.error || proxy.error}
+          {authorizationError}
         </p>
+      ) : null}
+      {authorizationError || (hasRetriedAuthorization && authorizationLoading) ? (
+        <Button
+          ref={attachAuthorizationRetryButton}
+          type="button"
+          aria-disabled={authorizationLoading || busy}
+          onClick={() => {
+            const isCurrent = captureRequest();
+            if (!isCurrent() || authorizationRetryPending.current || authorizationLoading || busy)
+              return;
+            authorizationRetryPending.current = true;
+            setHasRetriedAuthorization(true);
+            if (people.error) people.reload();
+            if (requiresProxy && proxy.error) proxy.reload();
+          }}
+        >
+          重新確認校方授權
+        </Button>
       ) : null}
       {tenantId === 'campus-demo' ? (
         <p className={styles.notice}>示範學校不開放調整校方授權。</p>
@@ -414,6 +457,7 @@ function PeopleAddForm({
         </div>
       ) : null}
       <Input
+        ref={accountInput}
         label="Google 登入信箱或人員代號"
         value={account}
         onChange={(event) => setAccount(event.target.value)}
