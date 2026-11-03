@@ -81,7 +81,7 @@ jobs:
           python scripts/campus-visual-smoke.py
       - name: Upload screenshots and results
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: timetable-browser
           path: |

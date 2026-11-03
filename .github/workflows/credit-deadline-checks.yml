@@ -48,7 +48,7 @@ jobs:
         run: node scripts/qa/credit-deadline-browser.mjs
       - name: Preserve exact-head reports and screenshots
         if: always()
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
           name: credit-deadline-browser
           path: artifacts/credit-deadline-browser
