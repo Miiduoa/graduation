@@ -691,13 +691,17 @@ index 0000000..dd752d0
 +}
 diff --git a/apps/api/src/platform-public-agent/groq-navigation-plan.ts b/apps/api/src/platform-public-agent/groq-navigation-plan.ts
 new file mode 100644
-index 0000000..33f0c86
+index 0000000..6e1011a
 --- /dev/null
 +++ b/apps/api/src/platform-public-agent/groq-navigation-plan.ts
-@@ -0,0 +1,334 @@
+@@ -0,0 +1,349 @@
 +import { exactRecord, FREE_MODEL, PublicAgentError } from './contract';
 +import { publicSnapshot, type PublicCatalogReader } from './navigation';
-+import { isFreeAssuranceDenied, type FreeAssuranceAttempt } from './groq-server-transport';
++import {
++  isCanonicalGroqTransport,
++  isFreeAssuranceDenied,
++  type FreeAssuranceAttempt,
++} from './groq-server-transport';
 +
 +// Unregistered candidate: a future trusted transport must add an authorized server
 +// credential for exactly this endpoint. This module reads no credentials or environment.
@@ -705,6 +709,10 @@ index 0000000..33f0c86
 +const MAX_RESPONSE_BYTES = 16_384;
 +const MAX_INPUT_BYTES = 32_768;
 +const MAX_CONTENT_BYTES = 4_096;
++const canonicalPlanners = new WeakSet<object>();
++export function isCanonicalGroqPlanner(value: unknown): boolean {
++  return typeof value === 'function' && canonicalPlanners.has(value);
++}
 +type Place = { id: string; name: string };
 +export type PublicPlan = { fromId: string; toId: string };
 +export type PublicPlanInput = { schoolId: string; query: string; fingerprint: string };
@@ -870,7 +878,9 @@ index 0000000..33f0c86
 +  )
 +    return invalid('PUBLIC_AGENT_NOT_CONFIGURED', 503);
 +  const timeoutMs = options.timeoutMs ?? 10_000;
-+  return async (
++  const transport = options.transport;
++  const isCanonicalTransport = isCanonicalGroqTransport(transport);
++  const planner = async (
 +    raw: unknown,
 +    external: AbortSignal | undefined,
 +    beforeSend: (signal: AbortSignal) => Promise<void>,
@@ -970,13 +980,12 @@ index 0000000..33f0c86
 +              ],
 +            }),
 +          };
-+          if (options.transport)
-+            return await options.transport(GROQ_ENDPOINT, request, revalidateSession, attempt);
++          if (transport) return await transport(GROQ_ENDPOINT, request, revalidateSession, attempt);
 +          await revalidateSession();
 +          return await options.fetch!(GROQ_ENDPOINT, request);
 +        } catch (error) {
 +          if (sessionFailed && error === sessionError) throw error;
-+          if (options.transport && isFreeAssuranceDenied(error, attempt)) throw error;
++          if (isCanonicalTransport && isFreeAssuranceDenied(error, attempt)) throw error;
 +          throw new PublicAgentError('PUBLIC_AGENT_PROVIDER_UNAVAILABLE', 503);
 +        }
 +      });
@@ -1021,23 +1030,33 @@ index 0000000..33f0c86
 +      projectSource(input, await readSource());
 +      return plan;
 +    } catch (error) {
-+      if (error instanceof PublicAgentError || isFreeAssuranceDenied(error, attempt)) throw error;
++      if (
++        error instanceof PublicAgentError ||
++        (isCanonicalTransport && isFreeAssuranceDenied(error, attempt))
++      )
++        throw error;
 +      throw new PublicAgentError('PUBLIC_AGENT_PROVIDER_UNAVAILABLE', 503);
 +    } finally {
 +      clearTimeout(timer);
 +      external?.removeEventListener('abort', cancel);
 +    }
 +  };
++  if (isCanonicalTransport) canonicalPlanners.add(planner);
++  return planner;
 +}
 diff --git a/apps/api/src/platform-public-agent/groq-server-transport.ts b/apps/api/src/platform-public-agent/groq-server-transport.ts
 new file mode 100644
-index 0000000..132b84f
+index 0000000..3cf75da
 --- /dev/null
 +++ b/apps/api/src/platform-public-agent/groq-server-transport.ts
-@@ -0,0 +1,139 @@
+@@ -0,0 +1,145 @@
 +import { PublicAgentError } from './contract';
 +
 +const ENDPOINT = 'https://api.groq.com/openai/v1/chat/completions';
++const canonicalTransports = new WeakSet<object>();
++export function isCanonicalGroqTransport(value: unknown): boolean {
++  return typeof value === 'function' && canonicalTransports.has(value);
++}
 +// A proof belongs to one service-created execution attempt. It contains no
 +// input or credential, cannot survive another attempt and can be consumed once.
 +export type FreeAssuranceAttempt = object;
@@ -1117,7 +1136,7 @@ index 0000000..132b84f
 +  )
 +    return unavailable();
 +  const credential = options.credential;
-+  return async (
++  const transport = async (
 +    input: string,
 +    init: RequestInit,
 +    beforeSend: () => Promise<void>,
@@ -1173,6 +1192,8 @@ index 0000000..132b84f
 +      return unavailable();
 +    }
 +  };
++  canonicalTransports.add(transport);
++  return transport;
 +}
 diff --git a/apps/api/src/platform-public-agent/http.ts b/apps/api/src/platform-public-agent/http.ts
 new file mode 100644
@@ -2854,10 +2875,10 @@ index 0000000..d7a259a
 +}
 diff --git a/apps/api/src/platform-public-agent/service.ts b/apps/api/src/platform-public-agent/service.ts
 new file mode 100644
-index 0000000..b35f68a
+index 0000000..562541e
 --- /dev/null
 +++ b/apps/api/src/platform-public-agent/service.ts
-@@ -0,0 +1,570 @@
+@@ -0,0 +1,575 @@
 +import { isDeepStrictEqual } from 'node:util';
 +import { PlatformPublicAdmission, type PlatformSessionResolver } from './admission';
 +import {
@@ -2878,6 +2899,7 @@ index 0000000..b35f68a
 +  consumeFreeAssuranceDenied,
 +  type FreeAssuranceAttempt,
 +} from './groq-server-transport';
++import { isCanonicalGroqPlanner } from './groq-navigation-plan';
 +import {
 +  exactNavigation,
 +  validatedPlan,
@@ -3184,6 +3206,7 @@ index 0000000..b35f68a
 +          operationId: string;
 +          executionToken: string;
 +          attempt: FreeAssuranceAttempt;
++          planner: Options['groqPlan'];
 +        }
 +      | undefined;
 +    let admitted = false;
@@ -3199,11 +3222,13 @@ index 0000000..b35f68a
 +          return this.deliver(auth, actor, task, operation, step, abort);
 +        }
 +        const attempt = createFreeAssuranceAttempt(abort, claim.operationId);
++        const planner = this.options.groqPlan;
 +        executing = {
 +          actor,
 +          operationId: claim.operationId,
 +          executionToken: claim.executionToken,
 +          attempt,
++          planner,
 +        };
 +        sameActor(actor, await step(() => this.admission.actor(auth)));
 +        const snapshot = await step(() => this.source(task, abort));
@@ -3223,7 +3248,7 @@ index 0000000..b35f68a
 +        dispatchAcknowledged = true;
 +        const rawResult = await step(() =>
 +          task.binding.provider === FREE_PROVIDER
-+            ? this.options.groqPlan!(
++            ? planner!(
 +                {
 +                  schoolId: task.binding.schoolId,
 +                  query: task.data.query as string,
@@ -3276,6 +3301,7 @@ index 0000000..b35f68a
 +        // database acknowledgement remains unknown and is never retried as work.
 +        const knownFailure =
 +          task.binding.provider === FREE_PROVIDER &&
++          isCanonicalGroqPlanner(e.planner) &&
 +          consumeFreeAssuranceDenied(error, e.attempt, e.operationId)
 +            ? 'FREE_ASSURANCE_UNAVAILABLE'
 +            : error instanceof PublicAgentError

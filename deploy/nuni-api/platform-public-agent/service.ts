@@ -18,6 +18,7 @@ import {
   consumeFreeAssuranceDenied,
   type FreeAssuranceAttempt,
 } from './groq-server-transport';
+import { isCanonicalGroqPlanner } from './groq-navigation-plan';
 import {
   exactNavigation,
   validatedPlan,
@@ -324,6 +325,7 @@ export class PlatformPublicTaskService {
           operationId: string;
           executionToken: string;
           attempt: FreeAssuranceAttempt;
+          planner: Options['groqPlan'];
         }
       | undefined;
     let admitted = false;
@@ -339,11 +341,13 @@ export class PlatformPublicTaskService {
           return this.deliver(auth, actor, task, operation, step, abort);
         }
         const attempt = createFreeAssuranceAttempt(abort, claim.operationId);
+        const planner = this.options.groqPlan;
         executing = {
           actor,
           operationId: claim.operationId,
           executionToken: claim.executionToken,
           attempt,
+          planner,
         };
         sameActor(actor, await step(() => this.admission.actor(auth)));
         const snapshot = await step(() => this.source(task, abort));
@@ -363,7 +367,7 @@ export class PlatformPublicTaskService {
         dispatchAcknowledged = true;
         const rawResult = await step(() =>
           task.binding.provider === FREE_PROVIDER
-            ? this.options.groqPlan!(
+            ? planner!(
                 {
                   schoolId: task.binding.schoolId,
                   query: task.data.query as string,
@@ -416,6 +420,7 @@ export class PlatformPublicTaskService {
         // database acknowledgement remains unknown and is never retried as work.
         const knownFailure =
           task.binding.provider === FREE_PROVIDER &&
+          isCanonicalGroqPlanner(e.planner) &&
           consumeFreeAssuranceDenied(error, e.attempt, e.operationId)
             ? 'FREE_ASSURANCE_UNAVAILABLE'
             : error instanceof PublicAgentError

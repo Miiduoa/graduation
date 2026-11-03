@@ -1,6 +1,10 @@
 import { PublicAgentError } from './contract';
 
 const ENDPOINT = 'https://api.groq.com/openai/v1/chat/completions';
+const canonicalTransports = new WeakSet<object>();
+export function isCanonicalGroqTransport(value: unknown): boolean {
+  return typeof value === 'function' && canonicalTransports.has(value);
+}
 // A proof belongs to one service-created execution attempt. It contains no
 // input or credential, cannot survive another attempt and can be consumed once.
 export type FreeAssuranceAttempt = object;
@@ -80,7 +84,7 @@ export function createGroqServerTransport(options: Options) {
   )
     return unavailable();
   const credential = options.credential;
-  return async (
+  const transport = async (
     input: string,
     init: RequestInit,
     beforeSend: () => Promise<void>,
@@ -136,4 +140,6 @@ export function createGroqServerTransport(options: Options) {
       return unavailable();
     }
   };
+  canonicalTransports.add(transport);
+  return transport;
 }

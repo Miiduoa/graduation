@@ -457,6 +457,139 @@ test('a denial proof from another operation cannot certify a later task', async 
   assert.equal((await f.service.read(f.authorization, p.request)).status, 'unknown');
   assert.equal(providerCalls, 1);
 });
+test('same-attempt custom transport cannot rethrow a denial after a simulated dispatch', async () => {
+  let dispatched = 0;
+  const canonical = createGroqServerTransport({
+    credential: 'synthetic-only',
+    fetch: async () => {
+      throw new Error('must not call');
+    },
+    freeOnlyGuard: async () => false,
+  });
+  const f = fixture({
+    transport: async (url, init, beforeSend, attempt) => {
+      let proof;
+      try {
+        await canonical(url, init, beforeSend, attempt);
+      } catch (error) {
+        proof = error;
+      }
+      dispatched++;
+      throw proof;
+    },
+  });
+  const p = await f.prepare();
+  const c = await f.service.confirm(f.authorization, { approved: true, request: p.request });
+  await rejectsCode(
+    f.service.execute(f.authorization, {
+      confirmationId: c.confirmationId,
+      request: p.request,
+    }),
+    'PUBLIC_AGENT_OUTCOME_UNKNOWN',
+  );
+  assert.equal(dispatched, 1);
+  assert.equal((await f.service.read(f.authorization, p.request)).status, 'unknown');
+});
+test('same-attempt custom planner cannot rethrow a denial after a simulated dispatch', async () => {
+  let dispatched = 0;
+  const canonical = createGroqServerTransport({
+    credential: 'synthetic-only',
+    fetch: async () => {
+      throw new Error('must not call');
+    },
+    freeOnlyGuard: async () => false,
+  });
+  const f = fixture();
+  const readPublicCatalog = async () => globalThis.structuredClone(f.source.value);
+  const trusted = createGroqNavigationPlanner({
+    enabled: true,
+    transport: canonical,
+    readPublicCatalog,
+  });
+  const serviceOptions = {
+    accounts: f.options.accounts,
+    ledger: f.ledger,
+    clock: () => f.db.now,
+    readPublicCatalog,
+    groqPlan: async (_input, signal, beforeSend, attempt) => {
+      let proof;
+      try {
+        await canonical(
+          'https://api.groq.com/openai/v1/chat/completions',
+          {
+            method: 'POST',
+            redirect: 'error',
+            cache: 'no-store',
+            headers: { accept: 'application/json', 'content-type': 'application/json' },
+            body: '{}',
+            signal,
+          },
+          () => beforeSend(signal),
+          attempt,
+        );
+      } catch (error) {
+        proof = error;
+      }
+      dispatched++;
+      serviceOptions.groqPlan = trusted;
+      throw proof;
+    },
+  };
+  const service = new PlatformPublicTaskService(serviceOptions);
+  const p = await service.prepareGroq(f.authorization, {
+    schoolId: 'pu',
+    query: '從入口走去圖書館',
+    requestId: 'custom_planner_01',
+  });
+  const c = await service.confirm(f.authorization, { approved: true, request: p.request });
+  await rejectsCode(
+    service.execute(f.authorization, {
+      confirmationId: c.confirmationId,
+      request: p.request,
+    }),
+    'PUBLIC_AGENT_OUTCOME_UNKNOWN',
+  );
+  assert.equal(dispatched, 1);
+  assert.equal((await service.read(f.authorization, p.request)).status, 'unknown');
+});
+test('canonical planner captures its transport and ignores later option replacement', async () => {
+  let dispatched = 0;
+  const canonical = createGroqServerTransport({
+    credential: 'synthetic-only',
+    fetch: async () => {
+      throw new Error('must not call');
+    },
+    freeOnlyGuard: async () => false,
+  });
+  const f = fixture();
+  const readPublicCatalog = async () => globalThis.structuredClone(f.source.value);
+  const options = { enabled: true, transport: canonical, readPublicCatalog };
+  const planner = createGroqNavigationPlanner(options);
+  options.transport = async () => {
+    dispatched++;
+    throw new Error('unexpected');
+  };
+  const service = new PlatformPublicTaskService({
+    accounts: f.options.accounts,
+    ledger: f.ledger,
+    clock: () => f.db.now,
+    readPublicCatalog,
+    groqPlan: planner,
+  });
+  const p = await service.prepareGroq(f.authorization, {
+    schoolId: 'pu',
+    query: '從入口走去圖書館',
+    requestId: 'captured_transport_01',
+  });
+  const c = await service.confirm(f.authorization, { approved: true, request: p.request });
+  const result = await service.execute(f.authorization, {
+    confirmationId: c.confirmationId,
+    request: p.request,
+  });
+  assert.equal(result.status, 'failed');
+  assert.equal(result.failureCode, 'FREE_ASSURANCE_UNAVAILABLE');
+  assert.equal(dispatched, 0);
+});
 test('timeout after admission stays unknown even when the model returns late', async () => {
   let release,
     called = 0;

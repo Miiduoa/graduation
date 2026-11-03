@@ -1,6 +1,10 @@
 import { exactRecord, FREE_MODEL, PublicAgentError } from './contract';
 import { publicSnapshot, type PublicCatalogReader } from './navigation';
-import { isFreeAssuranceDenied, type FreeAssuranceAttempt } from './groq-server-transport';
+import {
+  isCanonicalGroqTransport,
+  isFreeAssuranceDenied,
+  type FreeAssuranceAttempt,
+} from './groq-server-transport';
 
 // Unregistered candidate: a future trusted transport must add an authorized server
 // credential for exactly this endpoint. This module reads no credentials or environment.
@@ -8,6 +12,10 @@ const GROQ_ENDPOINT = 'https://api.groq.com/openai/v1/chat/completions';
 const MAX_RESPONSE_BYTES = 16_384;
 const MAX_INPUT_BYTES = 32_768;
 const MAX_CONTENT_BYTES = 4_096;
+const canonicalPlanners = new WeakSet<object>();
+export function isCanonicalGroqPlanner(value: unknown): boolean {
+  return typeof value === 'function' && canonicalPlanners.has(value);
+}
 type Place = { id: string; name: string };
 export type PublicPlan = { fromId: string; toId: string };
 export type PublicPlanInput = { schoolId: string; query: string; fingerprint: string };
@@ -173,7 +181,9 @@ export function createGroqNavigationPlanner(options: Options) {
   )
     return invalid('PUBLIC_AGENT_NOT_CONFIGURED', 503);
   const timeoutMs = options.timeoutMs ?? 10_000;
-  return async (
+  const transport = options.transport;
+  const isCanonicalTransport = isCanonicalGroqTransport(transport);
+  const planner = async (
     raw: unknown,
     external: AbortSignal | undefined,
     beforeSend: (signal: AbortSignal) => Promise<void>,
@@ -273,13 +283,12 @@ export function createGroqNavigationPlanner(options: Options) {
               ],
             }),
           };
-          if (options.transport)
-            return await options.transport(GROQ_ENDPOINT, request, revalidateSession, attempt);
+          if (transport) return await transport(GROQ_ENDPOINT, request, revalidateSession, attempt);
           await revalidateSession();
           return await options.fetch!(GROQ_ENDPOINT, request);
         } catch (error) {
           if (sessionFailed && error === sessionError) throw error;
-          if (options.transport && isFreeAssuranceDenied(error, attempt)) throw error;
+          if (isCanonicalTransport && isFreeAssuranceDenied(error, attempt)) throw error;
           throw new PublicAgentError('PUBLIC_AGENT_PROVIDER_UNAVAILABLE', 503);
         }
       });
@@ -324,11 +333,17 @@ export function createGroqNavigationPlanner(options: Options) {
       projectSource(input, await readSource());
       return plan;
     } catch (error) {
-      if (error instanceof PublicAgentError || isFreeAssuranceDenied(error, attempt)) throw error;
+      if (
+        error instanceof PublicAgentError ||
+        (isCanonicalTransport && isFreeAssuranceDenied(error, attempt))
+      )
+        throw error;
       throw new PublicAgentError('PUBLIC_AGENT_PROVIDER_UNAVAILABLE', 503);
     } finally {
       clearTimeout(timer);
       external?.removeEventListener('abort', cancel);
     }
   };
+  if (isCanonicalTransport) canonicalPlanners.add(planner);
+  return planner;
 }
