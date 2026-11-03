@@ -163,7 +163,7 @@ test('Spark production job deploys rules and indexes only, never Cloud Functions
 test('both successful and failed attempts retain versioned reports without weakening the gate', () => {
   assert.equal(record.if, 'always()');
   assert.equal(upload.if, 'always()');
-  assert.equal(upload.uses, 'actions/upload-artifact@v4');
+  assert.equal(upload.uses, 'actions/upload-artifact@v7');
   assert.ok(upload.with.path.includes('firebase-preflight.json'));
   assert.ok(upload.with.path.includes('firebase-deployment-outcome.json'));
   assert.ok(upload.with.name.includes('github.sha'));
