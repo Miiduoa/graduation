@@ -125,4 +125,32 @@ describe('public navigation task', () => {
       false,
     );
   });
+  it('keeps an unconfirmed result locked when lookup finds no operation yet', async () => {
+    const call = vi.fn(async (action: string) => {
+      if (action === 'preview') return preview;
+      if (action === 'confirm') return { confirmationId: 'id' };
+      if (action === 'execute') throw new Error('PUBLIC_AGENT_OUTCOME_UNKNOWN');
+      return null;
+    });
+    render(<PublicNavigationTask port={port(call)} />);
+    await input();
+    fireEvent.click(screen.getByRole('button', { name: '確認並建立路線' }));
+    fireEvent.click(await screen.findByRole('button', { name: '查詢原任務' }));
+    await waitFor(() => expect(call).toHaveBeenCalledTimes(4));
+    expect(screen.queryByRole('button', { name: '確認並建立路線' })).toBeNull();
+    expect(screen.getByRole('button', { name: '查詢原任務' })).toBeTruthy();
+  });
+  it('reports a definitive quota refusal and allows retry of the same preview', async () => {
+    const call = vi.fn(async (action: string) => {
+      if (action === 'preview') return preview;
+      if (action === 'confirm') return { confirmationId: 'id' };
+      throw new Error('PUBLIC_AGENT_FREE_QUOTA_UNAVAILABLE');
+    });
+    render(<PublicNavigationTask port={port(call)} />);
+    await input();
+    fireEvent.click(screen.getByRole('button', { name: '確認並建立路線' }));
+    expect((await screen.findByRole('alert')).textContent).toContain('次數已用完');
+    expect(screen.getByRole('button', { name: '確認並建立路線' })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: '查詢原任務' })).toBeNull();
+  });
 });

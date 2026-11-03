@@ -96,7 +96,7 @@ function Task({ port }: { port: PublicTaskPort }) {
           setUncertain(false);
         }
       } else if (preview) {
-        let value: Operation;
+        let value: Operation | null;
         if (action === 'execute') {
           // One explicit button confirms this exact preview; ordinary navigation is no approval.
           const confirmation = (await port.call(
@@ -113,16 +113,20 @@ function Task({ port }: { port: PublicTaskPort }) {
             controller.signal,
           )) as Operation;
         } else {
-          value = (await port.call('read', preview.request, controller.signal)) as Operation;
+          value = (await port.call('read', preview.request, controller.signal)) as Operation | null;
         }
         if (version === generation.current) {
           setOperation(value);
-          setUncertain(value?.status === 'pending' || value?.status === 'unknown');
+          setUncertain(value === null || value.status === 'pending' || value.status === 'unknown');
         }
       }
     } catch (failure) {
       if (version === generation.current) {
-        if (action === 'execute' && !executeSent) {
+        if (
+          action === 'execute' &&
+          (!executeSent ||
+            (failure instanceof Error && failure.message === 'PUBLIC_AGENT_FREE_QUOTA_UNAVAILABLE'))
+        ) {
           setUncertain(false);
           setError(message(failure));
           if (failure instanceof Error && failure.message.includes('SOURCE_CHANGED')) {
