@@ -173,6 +173,15 @@ describe('single-attempt candidate platform transport', () => {
     ).rejects.toMatchObject({ code: 'PUBLIC_AGENT_OUTCOME_UNKNOWN' });
     expect(fetcher).toHaveBeenCalledTimes(5);
   });
+  it('preserves unknown outcomes for both reconciliation conflicts and transport failures', async () => {
+    for (const status of [409, 503]) {
+      fetcher.mockResolvedValueOnce(json({ code: 'PUBLIC_AGENT_OUTCOME_UNKNOWN' }, status));
+      await expect(
+        transport()({ action: 'reconcile', session, body, signal: signal() }),
+      ).rejects.toMatchObject({ code: 'PUBLIC_AGENT_OUTCOME_UNKNOWN', status });
+    }
+    expect(fetcher).toHaveBeenCalledTimes(2);
+  });
   it('keeps an exact validation error through the registered-in-tests BFF seam', async () => {
     fetcher.mockResolvedValueOnce(json({ code: 'PUBLIC_AGENT_DESTINATION_UNCLEAR' }, 422));
     const handle = createPlatformPublicAgentGateway({

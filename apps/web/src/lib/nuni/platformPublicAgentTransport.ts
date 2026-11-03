@@ -26,6 +26,12 @@ const FAILURES: Record<string, number> = {
   PUBLIC_AGENT_OPERATION_NOT_FOUND: 404,
   PUBLIC_AGENT_OUTCOME_UNKNOWN: 503,
 };
+function matchesFailure(code: string, status: number): boolean {
+  return (
+    Object.hasOwn(FAILURES, code) &&
+    (FAILURES[code] === status || (code === 'PUBLIC_AGENT_OUTCOME_UNKNOWN' && status === 409))
+  );
+}
 /** Single fetch, server only. Caller must independently provide a reviewed projector. */
 export function createPlatformPublicAgentTransport(timeoutMs = 12_000): PublicAgentTransport {
   if (!Number.isSafeInteger(timeoutMs) || timeoutMs < 1 || timeoutMs > 30_000)
@@ -82,11 +88,7 @@ export function createPlatformPublicAgentTransport(timeoutMs = 12_000): PublicAg
                 : typeof row.error === 'object' && row.error !== null
                   ? nuniRecord(row.error).code
                   : row.error;
-            if (
-              typeof code === 'string' &&
-              Object.hasOwn(FAILURES, code) &&
-              FAILURES[code] === response.status
-            )
+            if (typeof code === 'string' && matchesFailure(code, response.status))
               throw new NuniError(response.status, code);
             throw new NuniError(503, 'PUBLIC_AGENT_OUTCOME_UNKNOWN');
           }
@@ -94,12 +96,7 @@ export function createPlatformPublicAgentTransport(timeoutMs = 12_000): PublicAg
         })(),
       ]);
     } catch (error) {
-      if (
-        error instanceof NuniError &&
-        Object.hasOwn(FAILURES, error.code) &&
-        FAILURES[error.code] === error.status
-      )
-        throw error;
+      if (error instanceof NuniError && matchesFailure(error.code, error.status)) throw error;
       // A POST can have committed after a network or response failure.
       throw new NuniError(503, 'PUBLIC_AGENT_OUTCOME_UNKNOWN');
     } finally {
