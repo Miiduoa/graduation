@@ -475,7 +475,7 @@ it('does not accept a body tenant override or idempotency key for a versioned me
   expect(fetcher).toHaveBeenCalledTimes(1);
 });
 
-it('does not forward operator writes when the Campus One session is missing', async () => {
+it('does not forward operator writes when the nuni session is missing', async () => {
   expect(
     (
       await handlePlatformAdmin(

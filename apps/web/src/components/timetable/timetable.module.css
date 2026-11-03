@@ -111,6 +111,14 @@
 .pendingList { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 220px), 1fr)); gap: 12px; }
 .pendingList .course { margin: 0; }
 .editor { display: grid; gap: 16px; }
+.courseWorkExit {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px 14px;
+  padding-bottom: 4px;
+}
+.courseWorkExit .hint { margin: 0; flex: 1 1 12rem; }
 .fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px; border: 0; padding: 0; margin: 0; min-width: 0; }
 .fullWidth { grid-column: 1 / -1; }
 .field { display: grid; align-content: start; gap: 8px; min-width: 0; color: var(--text); font-size: 14px; }

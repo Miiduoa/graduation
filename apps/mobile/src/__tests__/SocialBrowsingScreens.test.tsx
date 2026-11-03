@@ -3,6 +3,7 @@ import { ActivityIndicator, Alert, FlatList, RefreshControl } from 'react-native
 import { act, fireEvent, render } from '@testing-library/react-native';
 import { HomeFeedScreen } from '../screens/social/HomeFeedScreen';
 import { BoardsScreen } from '../screens/social/BoardsScreen';
+import { CommunityScreen } from '../screens/CommunityScreen';
 import { fetchRecentCampusPosts, toggleCampusPostLike } from '../services/feed';
 import { fetchSchoolDirectoryProfiles } from '../services/memberDirectory';
 import { listBoards, listSubscribedBoardIds } from '../services/boards';
@@ -19,16 +20,41 @@ let savedBookmarks = new Set<string>();
 let mockUser = { uid: 'alice' };
 let mockSchoolId = 'pu';
 let mockAuthLoading = false;
+let mockOffline = false;
+const mockNavigate = jest.fn();
+const mockSetParams = jest.fn();
 const alertSpy = jest.spyOn(Alert, 'alert').mockImplementation(() => {});
+jest.mock('@react-navigation/native', () => {
+  const actualNav = jest.requireActual('@react-navigation/native');
+  return {
+    ...actualNav,
+    useNavigation: () => ({
+      navigate: mockNavigate,
+      goBack: jest.fn(),
+      setOptions: jest.fn(),
+      setParams: mockSetParams,
+    }),
+    useRoute: () => ({ params: {} }),
+    useFocusEffect: jest.fn(),
+  };
+});
 jest.mock('../state/auth', () => ({ useAuth: () => ({ user: mockUser, loading: mockAuthLoading }) }));
 jest.mock('../state/school', () => ({ useSchool: () => ({ school: { id: mockSchoolId } }) }));
 jest.mock('../firebase', () => ({ isFirebaseMockMode: () => false, getDb: () => ({}) }));
 jest.mock('@expo/vector-icons', () => ({ Ionicons: () => null }));
 jest.mock('../ui/components', () => ({
-  EmptyState: ({ title }: { title: string }) => {
-    const { Text } = require('react-native');
-    return <Text>{title}</Text>;
+  EmptyState: ({ title, subtitle }: { title: string; subtitle?: string }) => {
+    const { Text, View } = require('react-native');
+    return (
+      <View>
+        <Text>{title}</Text>
+        {subtitle ? <Text>{subtitle}</Text> : null}
+      </View>
+    );
   },
+}));
+jest.mock('../hooks/useNetworkStatus', () => ({
+  useNetworkStatus: () => ({ isOffline: mockOffline }),
 }));
 jest.mock('../services/feed', () => ({
   fetchRecentCampusPosts: jest.fn(),
@@ -97,7 +123,10 @@ const screens = [
 ];
 
 beforeEach(() => {
+  mockOffline = false;
   jest.clearAllMocks();
+  mockNavigate.mockReset();
+  mockSetParams.mockReset();
   mockSchoolId = 'pu';
   mockUser = { uid: 'alice' };
   mockAuthLoading = false;
@@ -254,6 +283,8 @@ test('the mobile feed switches to latest and searches only loaded school posts',
   const view = render(<HomeFeedScreen />);
   expect(await view.findByText('期中考討論')).toBeTruthy();
   expect(view.getByText('系上活動')).toBeTruthy();
+  expect(view.queryByText(/搜尋範圍：已載入的/)).toBeNull();
+  expect(view.getByText('已載入 2 則 · 顯示 2 則')).toBeTruthy();
 
   fireEvent.press(view.getByText('最新'));
   const list = view.UNSAFE_getByType(FlatList);
@@ -262,8 +293,117 @@ test('the mobile feed switches to latest and searches only loaded school posts',
   fireEvent.changeText(view.getByLabelText('搜尋本校貼文'), '攝影分享');
   expect(view.getByText('系上活動')).toBeTruthy();
   expect(view.queryByText('期中考討論')).toBeNull();
+  expect(view.getByText('搜尋範圍：已載入的 2 篇貼文 · 顯示 1 則')).toBeTruthy();
   fireEvent.press(view.getByLabelText('清除搜尋'));
   expect(view.getByText('期中考討論')).toBeTruthy();
+});
+
+test('empty search results offer load-more, clear-filters and board or realtime recovery', async () => {
+  const rows = Array.from({ length: 60 }, (_, index) => ({
+    ...post,
+    id: `post-${index}`,
+    title: `校園動態 ${index}`,
+    content: '一般內容',
+  }));
+  jest.mocked(fetchRecentCampusPosts).mockResolvedValue(rows);
+  const view = render(<HomeFeedScreen />);
+  expect(await view.findByText('已載入 60 則 · 顯示 60 則')).toBeTruthy();
+
+  fireEvent.changeText(view.getByLabelText('搜尋本校貼文'), '完全找不到');
+  expect(await view.findByText('找不到符合的貼文')).toBeTruthy();
+  expect(view.getByText('搜尋範圍：已載入的 60 篇貼文 · 顯示 0 則')).toBeTruthy();
+  expect(view.getByLabelText('再載入更多後繼續找')).toBeTruthy();
+  expect(view.getByLabelText('前往看板')).toBeTruthy();
+  expect(view.getByLabelText('前往即時')).toBeTruthy();
+  expect(view.getByLabelText('搜尋本校貼文').props.value).toBe('完全找不到');
+
+  fireEvent.press(view.getByLabelText('我訂閱分類'));
+  expect(await view.findByLabelText('清除篩選')).toBeTruthy();
+  await act(async () => {
+    fireEvent.press(view.getByLabelText('清除篩選'));
+  });
+  expect(view.getByLabelText('搜尋本校貼文').props.value).toBe('完全找不到');
+  expect(view.queryByText('找不到符合的貼文')).toBeTruthy();
+});
+
+test('empty search recovery load-more raises the fetch limit and navigation CTAs re-enter', async () => {
+  const page = Array.from({ length: 60 }, (_, index) => ({
+    ...post,
+    id: `post-${index}`,
+    title: `校園動態 ${index}`,
+    content: '一般內容',
+  }));
+  const wider = Array.from({ length: 120 }, (_, index) => ({
+    ...post,
+    id: `post-${index}`,
+    title: `校園動態 ${index}`,
+    content: '一般內容',
+  }));
+  jest.mocked(fetchRecentCampusPosts)
+    .mockResolvedValueOnce(page)
+    .mockResolvedValueOnce(wider);
+  const view = render(<HomeFeedScreen />);
+  expect(await view.findByText('已載入 60 則 · 顯示 60 則')).toBeTruthy();
+  expect(fetchRecentCampusPosts).toHaveBeenLastCalledWith('pu', undefined, 60);
+
+  fireEvent.changeText(view.getByLabelText('搜尋本校貼文'), '完全找不到');
+  expect(await view.findByLabelText('再載入更多後繼續找')).toBeTruthy();
+
+  await act(async () => {
+    fireEvent.press(view.getByLabelText('再載入更多後繼續找'));
+  });
+  expect(fetchRecentCampusPosts).toHaveBeenLastCalledWith('pu', undefined, 120);
+  expect(await view.findByText('搜尋範圍：已載入的 120 篇貼文 · 顯示 0 則')).toBeTruthy();
+
+  await act(async () => {
+    fireEvent.press(view.getByLabelText('前往看板'));
+  });
+  await act(async () => {
+    fireEvent.press(view.getByLabelText('前往看板'));
+  });
+  expect(mockNavigate.mock.calls.filter((call) => call[0] === 'CampusSocialScreen' && call[1]?.initialTab === 'boards')).toHaveLength(2);
+
+  await act(async () => {
+    fireEvent.press(view.getByLabelText('前往即時'));
+  });
+  await act(async () => {
+    fireEvent.press(view.getByLabelText('前往即時'));
+  });
+  expect(mockNavigate.mock.calls.filter((call) => call[0] === 'CampusSocialScreen' && call[1]?.initialTab === 'realtime')).toHaveLength(2);
+});
+
+test('community shell clears initialTab after apply so the same CTA can re-enter', () => {
+  const navigation = { setParams: mockSetParams, navigate: mockNavigate };
+  let route: { params: { initialTab?: string } } = { params: { initialTab: 'boards' } };
+  const view = render(<CommunityScreen navigation={navigation} route={route} />);
+  expect(view.getByLabelText('看板').props.accessibilityState?.selected).toBe(true);
+  expect(mockSetParams).toHaveBeenCalledWith({ initialTab: undefined });
+
+  // 模擬父層吃到 setParams 清空，使用者再手動回動態。
+  route = { params: {} };
+  view.rerender(<CommunityScreen navigation={navigation} route={route} />);
+  fireEvent.press(view.getByLabelText('動態'));
+  expect(view.getByLabelText('動態').props.accessibilityState?.selected).toBe(true);
+
+  // 第二次同值 CTA：params 從空再到 boards，effect 會再切一次。
+  route = { params: { initialTab: 'boards' } };
+  view.rerender(<CommunityScreen navigation={navigation} route={route} />);
+  expect(view.getByLabelText('看板').props.accessibilityState?.selected).toBe(true);
+  expect(mockSetParams).toHaveBeenLastCalledWith({ initialTab: undefined });
+});
+
+test('offline empty search keeps the query and hides load-more', async () => {
+  mockOffline = true;
+  jest.mocked(fetchRecentCampusPosts).mockResolvedValue([post]);
+  const view = render(<HomeFeedScreen />);
+  expect(await view.findByText(post.title)).toBeTruthy();
+  fireEvent.changeText(view.getByLabelText('搜尋本校貼文'), '離線找不到');
+  expect(await view.findByText('離線中，找不到符合的貼文')).toBeTruthy();
+  expect(view.getByText(/關鍵字已保留/)).toBeTruthy();
+  expect(view.getByLabelText('搜尋本校貼文').props.value).toBe('離線找不到');
+  expect(view.queryByLabelText('再載入更多後繼續找')).toBeNull();
+  expect(view.getByLabelText('前往看板')).toBeTruthy();
+  expect(view.getByLabelText('前往即時')).toBeTruthy();
 });
 
 test('the saved filter loads older bookmarked posts outside the latest feed', async () => {

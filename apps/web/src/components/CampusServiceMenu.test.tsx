@@ -72,10 +72,14 @@ it('retains all existing services and search while adding a separate classroom e
     ).toBe(href);
   }
   expect(screen.getByRole('link', { name: /尋找校園服務/ }).getAttribute('href')).toBe('/search');
-  expect(screen.getByRole('link', { name: '課程空間' }).getAttribute('href')).toBe('/classroom');
-  expect(screen.getByRole('link', { name: '課業成績與回饋' }).getAttribute('href')).toBe(
+  expect(screen.getByRole('link', { name: '課程與作業' }).getAttribute('href')).toBe('/classroom');
+  expect(screen.getByRole('link', { name: '成績回饋' }).getAttribute('href')).toBe(
     '/grades?tab=feedback',
   );
+  expect(screen.getByRole('link', { name: '玩課雲課程' }).getAttribute('href')).toBe(
+    '/school-courses',
+  );
+  expect(screen.getByRole('link', { name: '餐廳' }).getAttribute('href')).toBe('/cafeteria');
   expect(screen.queryByRole('link', { name: '跨校交流' })).toBeNull();
   expect(screen.queryByRole('link', { name: '職涯' })).toBeNull();
   expect(screen.getByRole('link', { name: '店家合作' }).getAttribute('href')).toBe('/merchant');
@@ -103,7 +107,7 @@ it('preserves school context without copying unrelated session or return paramet
     expect(target.searchParams.has('session')).toBe(false);
   }
   const feedback = new URL(
-    screen.getByRole('link', { name: '課業成績與回饋' }).getAttribute('href')!,
+    screen.getByRole('link', { name: '成績回饋' }).getAttribute('href')!,
     'https://campus.example',
   );
   expect(feedback.pathname).toBe('/grades');
@@ -146,7 +150,7 @@ it('marks classroom children as part of the added service without selecting exis
   navigation.pathname = '/classroom/course/cw_11111111-1111-4111-8111-111111111111';
   render(<CampusServiceMenu />);
   fireEvent.click(screen.getByText('所有服務'));
-  expect(screen.getByRole('link', { name: '課程空間' }).getAttribute('aria-current')).toBe('page');
+  expect(screen.getByRole('link', { name: '課程與作業' }).getAttribute('aria-current')).toBe('page');
   expect(screen.getByRole('link', { name: '課程與群組' }).getAttribute('aria-current')).toBeNull();
 });
 
@@ -155,7 +159,7 @@ it('marks the feedback tab instead of the general grade service and keeps campus
   navigation.search = 'tab=feedback&campus=nthu';
   const view = render(<CampusServiceMenu />);
   screen.getByText('所有服務').closest('details')!.open = true;
-  const feedback = screen.getByRole('link', { name: '課業成績與回饋' });
+  const feedback = screen.getByRole('link', { name: '成績回饋' });
   expect(feedback.getAttribute('aria-current')).toBe('page');
   expect(screen.getByRole('link', { name: /^成績$/ }).getAttribute('aria-current')).toBeNull();
   const destination = new URL(feedback.getAttribute('href')!, 'https://campus.example');
@@ -177,13 +181,13 @@ it('marks the feedback tab instead of the general grade service and keeps campus
   expect(feedback.getAttribute('aria-current')).toBeNull();
 });
 
-it('keeps the Campus One header and original school login around the complete shared menu', () => {
+it('keeps the nuni header and original school login around the complete shared menu', () => {
   navigation.search = 'schoolId=tw-pu';
   render(<AppHeader />);
   fireEvent.click(screen.getByText('所有服務'));
   for (const [, label] of originalServices)
     expect(screen.getByRole('link', { name: label === '成績' ? /^成績$/ : label })).toBeTruthy();
-  expect(screen.getByRole('link', { name: '課程空間' })).toBeTruthy();
+  expect(screen.getByRole('link', { name: '課程與作業' })).toBeTruthy();
   expect(screen.getByRole('link', { name: '登入' }).getAttribute('href')).toBe(
     '/login?returnUrl=%2Fmap%3FschoolId%3Dtw-pu',
   );
@@ -312,7 +316,7 @@ it('selects only the specific account service and closes its overview link on th
   const view = render(<CampusServiceMenu />);
   screen.getByText('所有服務').closest('details')!.open = true;
   expect(screen.getByRole('link', { name: '學校資格' }).getAttribute('aria-current')).toBe('page');
-  expect(screen.getByRole('link', { name: '課程空間' }).getAttribute('aria-current')).toBeNull();
+  expect(screen.getByRole('link', { name: '課程與作業' }).getAttribute('aria-current')).toBeNull();
   navigation.pathname = '/search';
   view.rerender(<CampusServiceMenu />);
   const menu = screen.getByText('所有服務').closest('details')!;
@@ -434,7 +438,15 @@ it('opens a keyboard-dismissible voice AI entry without leaving the current serv
 
 it('hides readonly homework by default and restores it when enabled', () => {
   const view = render(<CampusServiceMenu />);
-  expect(screen.queryByRole('link', { name: /玩課雲作業與教材/ })).toBeNull();
-  view.rerender(<SchoolLmsReadonlyProvider enabled={true}><CampusServiceMenu /></SchoolLmsReadonlyProvider>);
-  expect(screen.getByRole('link', { name: /玩課雲作業與教材/ }).getAttribute('href')).toContain('/school-lms');
+  fireEvent.click(screen.getByText('所有服務'));
+  expect(screen.queryByRole('link', { name: /^玩課雲作業$/ })).toBeNull();
+  view.rerender(
+    <SchoolLmsReadonlyProvider enabled={true}>
+      <CampusServiceMenu />
+    </SchoolLmsReadonlyProvider>,
+  );
+  fireEvent.click(screen.getByText('所有服務'));
+  expect(screen.getByRole('link', { name: /^玩課雲作業$/ }).getAttribute('href')).toContain(
+    '/school-lms',
+  );
 });

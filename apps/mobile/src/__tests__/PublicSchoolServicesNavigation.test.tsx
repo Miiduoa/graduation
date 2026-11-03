@@ -92,7 +92,7 @@ jest.unmock('@react-navigation/native');
 jest.mock('../screens/NuniWorkspaceScreen', () => ({
   NuniWorkspaceScreen: () => {
     const { Text } = require('react-native');
-    return <Text testID="platform-workspace">Campus One 帳號</Text>;
+    return <Text testID="platform-workspace">nuni 帳號</Text>;
   },
 }));
 jest.mock('../screens/SSOLoginScreen', () => ({
@@ -274,7 +274,7 @@ test('non-PU CourseCatalog does not query PU catalog and opens selected-school o
   const { view, navigation, onUnhandledAction } = renderPublicStack();
   fireEvent.press(await view.findByTestId('public-CourseCatalog'));
   await waitFor(() => expect(navigation.getCurrentRoute()?.name).toBe('CourseCatalog'));
-  expect(view.getByText(/國立成功大學尚未接入 Campus One 內建課綱查詢/)).toBeTruthy();
+  expect(view.getByText(/國立成功大學尚未接入 nuni 內建課綱查詢/)).toBeTruthy();
   expect(queryCatalog).not.toHaveBeenCalled();
   await act(async () => {
     fireEvent.press(view.getByText('開啟成大課程資訊及選課系統'));

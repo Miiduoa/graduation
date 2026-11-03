@@ -5,6 +5,7 @@ import type { PersonalImportRecord } from '@campus/shared';
 import PersonalTimetableScreen from '../screens/PersonalTimetableScreen';
 import { loadPersonalTimetable, loadPersonalTimetableDraft, savePersonalTimetable } from '../services/personalTimetable';
 import { loadPersonalImports } from '../services/personalImports';
+import { safeNavigate } from '../utils/safeNavigate';
 
 let mockUser: { uid: string } | null = null;
 let mockSchool = { id: 'ncku', name: '國立成功大學' };
@@ -33,6 +34,7 @@ jest.mock('../services/friends', () => ({
   listAcceptedFriends: jest.fn(async () => []),
   opponentUidFromFriendship: jest.fn(),
 }));
+jest.mock('../utils/safeNavigate', () => ({ safeNavigate: jest.fn(() => true) }));
 jest.mock('@react-navigation/native', () => ({
   useNavigation: () => mockNavigation,
   useRoute: () => mockRoute,
@@ -101,6 +103,9 @@ afterEach(() => {
 test('the full timetable and editor use NCKU period labels and times, without inheriting a guest timetable', async () => {
   const view = render(<PersonalTimetableScreen />);
   await view.findByText('成大課程');
+  fireEvent.changeText(view.getByLabelText('匯出開始日期'), '2026-11-02');
+  fireEvent.changeText(view.getByLabelText('匯出結束日期'), '2026-11-08');
+  expect(view.getByText('將匯出 1 堂課；略過 0 門時間未確認的課程。')).toBeTruthy();
   expect(view.getByText('星期一 · 08:00–09:50')).toBeTruthy();
   expect(view.queryByText(/09:10–11:00/)).toBeNull();
   expect(loadPersonalTimetable).toHaveBeenCalledWith(null, 'ncku', 'nuni:account-a');
@@ -240,6 +245,41 @@ test('a dated widget link shows the makeup room and date rather than the weekly 
   expect(view.getByLabelText('查看日期').props.value).toBe('2026-11-03');
 });
 
+
+test('作業與教材 opens Classroom search when the imported course has no linkedCourseId', async () => {
+  jest.mocked(loadPersonalImports).mockResolvedValue({
+    version: 1,
+    records: [record({ courseCode: 'CS301' })],
+    batches: [],
+  });
+  const view = render(<PersonalTimetableScreen />);
+  await view.findByText('成大課程');
+  fireEvent.press(view.getByText('作業與教材'));
+  expect(safeNavigate).toHaveBeenCalledWith(mockNavigation, 'Classroom', {
+    q: '成大課程',
+    from: 'timetable',
+    code: 'CS301',
+  });
+});
+
+test('作業與教材 opens CourseHub when the imported course has linkedCourseId', async () => {
+  jest.mocked(loadPersonalImports).mockResolvedValue({
+    version: 1,
+    records: [
+      record({
+        linkedCourseId: 'cw_11111111-1111-4111-8111-111111111111',
+        courseCode: 'CS301',
+      }),
+    ],
+    batches: [],
+  });
+  const view = render(<PersonalTimetableScreen />);
+  await view.findByText('成大課程');
+  fireEvent.press(view.getByText('作業與教材'));
+  expect(safeNavigate).toHaveBeenCalledWith(mockNavigation, 'CourseHub', {
+    courseId: 'cw_11111111-1111-4111-8111-111111111111',
+  });
+});
 
 test('cloud reload and draft preview are explicit and sharing does not edit exceptions', async () => {
   mockUser = { uid: 'synthetic' };
