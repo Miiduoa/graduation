@@ -29,6 +29,7 @@ export type BrowseSchool = {
 
 export type SelectedSchoolProviderProps = {
   ownerKey: string | null;
+  identityReady?: boolean;
   loading: boolean;
   schools: readonly BrowseSchool[];
   catalogStatus: 'loading' | 'ready' | 'error';
@@ -113,6 +114,7 @@ function storedSelection(value: string | null): { present: boolean; schoolId: st
 
 export function SelectedSchoolProvider({
   ownerKey,
+  identityReady = true,
   loading,
   schools,
   catalogStatus,
@@ -202,18 +204,19 @@ export function SelectedSchoolProvider({
     ? (catalog.find((school) => school.id === requestedId) ?? null)
     : null;
   const unavailable = ready && requestedId !== null && selectedSchool === null;
-  const [confirmationOwner, setConfirmationOwner] = useState(storageKey);
   const [pendingSchoolId, setPendingSchoolId] = useState<string | null | undefined>(undefined);
-  if (confirmationOwner !== storageKey) {
-    setConfirmationOwner(storageKey);
+  const confirmationScope = useMemo(() => ({ scope, identityReady }), [scope, identityReady]);
+  const [pendingScope, setPendingScope] = useState(confirmationScope);
+  if (pendingScope !== confirmationScope) {
+    setPendingScope(confirmationScope);
     setPendingSchoolId(undefined);
   }
-  const pendingSwitch = pendingSchoolId !== undefined;
+  const pendingSwitch = pendingScope === confirmationScope && pendingSchoolId !== undefined;
 
   useEffect(() => {
     const pending = pendingEventSchool.current;
     if (!pending) return;
-    if (pending.storageKey !== storageKey || (pathname !== pending.from && pathname !== '/events')) {
+    if (!identityReady || pending.storageKey !== storageKey || (pathname !== pending.from && pathname !== '/events')) {
       pendingEventSchool.current = null;
       return;
     }
@@ -227,7 +230,7 @@ export function SelectedSchoolProvider({
     }
     // Persist only once navigation has left the old campus-scoped event detail.
     setPreference({ scope, schoolId: pending.id, stored: true, storageError });
-  }, [pathname, ready, requestedId, scope, storageKey, unavailable]);
+  }, [identityReady, pathname, ready, requestedId, scope, storageKey, unavailable]);
 
   function canCommitSchool(id: string | null) {
     return (
@@ -305,7 +308,7 @@ export function SelectedSchoolProvider({
         isOpen={pendingSwitch}
         onClose={() => setPendingSchoolId(undefined)}
         onConfirm={() => {
-          if (pendingSchoolId === undefined) return;
+          if (pendingScope !== confirmationScope || pendingSchoolId === undefined) return;
           if (
             pendingSchoolId !== null &&
             !catalog.some((school) => school.id === pendingSchoolId)
