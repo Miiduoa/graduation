@@ -2,11 +2,12 @@
 
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
-import { Suspense, useEffect, useRef, useState, type FormEvent } from 'react';
+import { Suspense, useEffect, useLayoutEffect, useRef, useState, type FormEvent } from 'react';
 import { SiteShell } from '@/components/SiteShell';
 import { VoiceDictationButton } from '@/components/VoiceDictationButton';
 import { SchoolAccountRequired } from '@/components/SchoolAccountRequired';
 import { useAuth } from '@/components/AuthGuard';
+import { useOptionalCampusDraft } from '@/components/CampusDraftProvider';
 import { useCampusBrowseContext } from '@/lib/useCampusBrowseContext';
 import {
   callCampusAssistant,
@@ -62,14 +63,24 @@ function AssistantConversation({
   schoolId: string;
 }) {
   const [messages, setMessages] = useState<Message[]>([]);
-  const [draft, setDraft] = useState(initialDraft);
+  const campusDraft = useOptionalCampusDraft('assistant');
+  const [localDraft, setLocalDraft] = useState(initialDraft);
+  const draft = campusDraft.available ? campusDraft.text : localDraft;
+  const setDraft = campusDraft.available ? campusDraft.setText : setLocalDraft;
   const [pending, setPending] = useState(false);
   const [error, setError] = useState('');
   const [senseRevision, setSenseRevision] = useState(0);
   const sessionId = useRef<string | null>(null);
   const request = useRef<AbortController | null>(null);
   const composer = useRef<HTMLTextAreaElement>(null);
+  const seededUrlDraft = useRef(false);
   const functionsReady = areFunctionsConfigured();
+
+  useLayoutEffect(() => {
+    if (!campusDraft.available || seededUrlDraft.current || campusDraft.text || !initialDraft) return;
+    seededUrlDraft.current = true;
+    campusDraft.setText(initialDraft);
+  }, [campusDraft, initialDraft]);
 
   useEffect(
     () => () => {

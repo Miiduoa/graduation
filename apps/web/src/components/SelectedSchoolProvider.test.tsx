@@ -1,6 +1,7 @@
 import { act, fireEvent, render, screen } from '@testing-library/react';
-import { useEffect } from 'react';
+import { useEffect, type ReactNode } from 'react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
+import { CampusDraftProvider, useCampusDraft } from './CampusDraftProvider';
 import { SchoolSelector } from './SchoolSelector';
 import {
   SelectedSchoolProvider,
@@ -42,6 +43,8 @@ function View(props: Partial<Omit<SelectedSchoolProviderProps, 'children'>> = {}
     </SelectedSchoolProvider>
   );
 }
+const originalShowModal = Object.getOwnPropertyDescriptor(HTMLDialogElement.prototype, 'showModal');
+const originalDialogClose = Object.getOwnPropertyDescriptor(HTMLDialogElement.prototype, 'close');
 beforeEach(() => {
   vi.clearAllMocks();
   navigation.pathname = '/community';
@@ -50,10 +53,27 @@ beforeEach(() => {
     navigation.search = new URL(href, 'https://campus.test').search;
   });
   window.history.replaceState({}, '', '/');
+  sessionStorage.clear();
+  Object.defineProperty(HTMLDialogElement.prototype, 'showModal', {
+    configurable: true,
+    value: function (this: HTMLDialogElement) {
+      this.setAttribute('open', '');
+    },
+  });
+  Object.defineProperty(HTMLDialogElement.prototype, 'close', {
+    configurable: true,
+    value: function (this: HTMLDialogElement) {
+      this.removeAttribute('open');
+    },
+  });
 });
 afterEach(() => {
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
+  if (originalShowModal) Object.defineProperty(HTMLDialogElement.prototype, 'showModal', originalShowModal);
+  else Reflect.deleteProperty(HTMLDialogElement.prototype, 'showModal');
+  if (originalDialogClose) Object.defineProperty(HTMLDialogElement.prototype, 'close', originalDialogClose);
+  else Reflect.deleteProperty(HTMLDialogElement.prototype, 'close');
 });
 
 it('uses only the supplied directory, searches it, and treats selection as browsing preference', () => {
@@ -346,4 +366,83 @@ it('keeps a current-school map link intact when choosing the same campus again',
   const next = new URLSearchParams(navigation.search);
   expect(next.get('route')).toBe('library,gate');
   expect(next.get('focus')).toBe('library');
+});
+
+function DraftField() {
+  const draft = useCampusDraft('assistant');
+  return (
+    <label>
+      助理草稿
+      <input
+        aria-label="助理草稿"
+        value={draft.text}
+        onChange={(event) => draft.setText(event.target.value)}
+      />
+    </label>
+  );
+}
+
+function DraftView(props: Partial<Omit<SelectedSchoolProviderProps, 'children'>> = {}) {
+  return (
+    <SelectedSchoolProvider {...defaults} {...props}>
+      <DraftHost>
+        <Probe />
+        <SchoolSelector />
+        <DraftField />
+      </DraftHost>
+    </SelectedSchoolProvider>
+  );
+}
+
+function DraftHost({ children }: { children: ReactNode }) {
+  const school = useSelectedSchool();
+  return (
+    <CampusDraftProvider
+      uid="alice"
+      schoolId={school.selectedSchoolId}
+      ready={!school.loading && school.catalogStatus === 'ready'}
+    >
+      {children}
+    </CampusDraftProvider>
+  );
+}
+
+it('asks before switching schools when the current campus has an unsaved draft', () => {
+  localStorage.setItem(
+    schoolPreferenceKey(defaults.ownerKey),
+    JSON.stringify({ schoolId: 'school-a' }),
+  );
+  render(<DraftView />);
+  fireEvent.change(screen.getByLabelText('助理草稿'), { target: { value: '甲校未送文字' } });
+  fireEvent.change(screen.getByLabelText('瀏覽校園'), { target: { value: 'school-b' } });
+  expect(screen.getByRole('dialog')).toBeTruthy();
+  expect(screen.getByTestId('selected-school').textContent).toBe('甲校');
+  expect(navigation.replace).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole('button', { name: '保留在原校' }));
+  expect(screen.queryByRole('dialog')).toBeNull();
+  expect((screen.getByLabelText('助理草稿') as HTMLInputElement).value).toBe('甲校未送文字');
+  expect(navigation.replace).not.toHaveBeenCalled();
+  expect(localStorage.getItem(schoolPreferenceKey(defaults.ownerKey))).toBe(
+    JSON.stringify({ schoolId: 'school-a' }),
+  );
+  fireEvent.change(screen.getByLabelText('瀏覽校園'), { target: { value: 'school-b' } });
+  fireEvent.click(screen.getByRole('button', { name: '捨棄草稿並切換' }));
+  expect(screen.getByTestId('selected-school').textContent).toBe('乙校');
+  expect((screen.getByLabelText('助理草稿') as HTMLInputElement).value).toBe('');
+  expect(navigation.replace).toHaveBeenCalledTimes(1);
+  expect(localStorage.getItem(schoolPreferenceKey(defaults.ownerKey))).toBe(
+    JSON.stringify({ schoolId: 'school-b' }),
+  );
+});
+
+it('switches immediately when there is no unsaved draft', () => {
+  localStorage.setItem(
+    schoolPreferenceKey(defaults.ownerKey),
+    JSON.stringify({ schoolId: 'school-a' }),
+  );
+  render(<DraftView />);
+  fireEvent.change(screen.getByLabelText('瀏覽校園'), { target: { value: 'school-b' } });
+  expect(screen.queryByRole('dialog')).toBeNull();
+  expect(screen.getByTestId('selected-school').textContent).toBe('乙校');
+  expect(navigation.replace).toHaveBeenCalledTimes(1);
 });
