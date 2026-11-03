@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, Pressable, RefreshControl, ScrollView, Text, TextInput, View } from 'react-native';
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
+import { STUDENT_ACADEMIC_SECTIONS } from '@campus/shared/src/academicSections';
 import { AIScreen, AIHero, AISection, AICard, AIRow, AIButton, aiTokens } from '../ui/aiFirst';
 import { useAuth } from '../state/auth';
 import { loadStudentHome } from '../data/studentHome';
@@ -10,6 +11,14 @@ import { navigateFromInboxTask } from '../services/inboxActions';
 import { theme } from '../ui/theme';
 import { LearningNextClassCard } from '../components/LearningNextClassCard';
 import { buildLearningWorkspace, describeLearningTask, filterLearningTasks, type LearningTaskFilter } from '../features/learningWorkspace';
+
+const STUDENT_SECTION_SUBTITLE: Record<(typeof STUDENT_ACADEMIC_SECTIONS)[number]['id'], string> = {
+  timetable: '一週、單日、匯入與空堂',
+  coursework: '本頁課程、作業與待辦',
+  grades: '學期成績與課程回饋',
+  credits: '依修課資料檢查畢業條件',
+  calendar: '學校行事曆與自己的安排',
+};
 
 type LearningData = Awaited<ReturnType<typeof loadStudentHome>>;
 
@@ -118,6 +127,16 @@ export default function LearnAiFirstScreen() {
         title="課務"
         subtitle="先看自己的課表，再處理這堂課要做的事。"
       />
+      <AISection title="課務分區">
+        {STUDENT_ACADEMIC_SECTIONS.map((section) => (
+          <AIRow
+            key={section.id}
+            title={section.label}
+            subtitle={STUDENT_SECTION_SUBTITLE[section.id]}
+            onPress={() => safeNavigate(navigation, section.mobileScreen)}
+          />
+        ))}
+      </AISection>
       {workspace ? (
         <View style={{ flexDirection: 'row', marginHorizontal: 16, marginTop: 14, gap: 8 }} accessibilityLabel="課務進度摘要">
           {[
@@ -294,7 +313,7 @@ export default function LearnAiFirstScreen() {
               </View>
             ) : null}
           </AISection>
-          <AISection title="我的課程">
+          <AISection title="課程與作業">
             {visible.data.courses.length ? (
               visible.data.courses.map((course) => (
                 <AICard key={course.groupId} title={course.name}>
@@ -344,18 +363,8 @@ export default function LearnAiFirstScreen() {
           </AISection>
         </>
       ) : null}
-      <AISection title="常用工具">
+      <AISection title="其他入口">
         <AIRow title="匯入我的資料" subtitle="截圖、文字、檔案；課表、成績與行事曆" onPress={() => safeNavigate(navigation, 'PersonalImport')} />
-        <AIRow
-          title="我的課表"
-          subtitle="一週、單日、匯入與空堂"
-          onPress={() => safeNavigate(navigation, 'PersonalTimetable')}
-        />
-        <AIRow
-          title="行事曆"
-          subtitle="學校行事曆與自己的安排"
-          onPress={() => safeNavigate(navigation, 'Calendar')}
-        />
         <AIRow
           title="課程申訴"
           subtitle="看申訴處理到哪"

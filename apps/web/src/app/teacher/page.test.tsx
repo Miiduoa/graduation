@@ -24,7 +24,7 @@ vi.mock('@/components/SelectedSchoolProvider', () => ({ useSelectedSchool: () =>
 vi.mock('@/components/SchoolScopePlaceholder', () => ({
   SchoolScopePlaceholder: () => <p role="status">選擇校園</p>,
 }));
-vi.mock('@/components/AppHeader', () => ({ AppHeader: () => <header>Campus One</header> }));
+vi.mock('@/components/AppHeader', () => ({ AppHeader: () => <header>nuni</header> }));
 vi.mock('@/components/PWAInstallBanner', () => ({ PWAInstallBanner: () => null }));
 
 const rowA = {
@@ -235,6 +235,15 @@ it('null selected school does not call stores with pu', async () => {
   render(<TeacherDeskPage />);
   expect((await screen.findByRole('status')).textContent).toBe('選擇校園');
   expect(store.listTeacherAppeals).not.toHaveBeenCalled();
+});
+
+it('uses the appeal-review title and keeps a visible classroom entry', async () => {
+  render(<TeacherDeskPage />);
+  await screen.findByText(/學生甲.*期中成績A/);
+  expect(screen.getByRole('heading', { name: '課務申訴審核' })).toBeTruthy();
+  expect(screen.getByRole('link', { name: /前往授課課程/ }).getAttribute('href')).toBe(
+    '/classroom',
+  );
 });
 
 it('rejected decision isolates notice/busy from a later school', async () => {

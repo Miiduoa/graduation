@@ -8,6 +8,7 @@ import {
   type CreditScenario, type CreditScenarioPreset,
 } from '@campus/shared/src/creditPlanScenarios';
 import styles from './CreditPlanScenarios.module.css';
+import { CreditScenarioDeadline } from './CreditScenarioDeadline';
 
 const number = (value: number | null) => value === null ? '未設定' : formatCredits(value);
 
@@ -77,6 +78,25 @@ export function CreditPlanScenarios({ plan }: { plan: CreditPlan }) {
         {stale ? <p className={styles.warning} role="alert">原規劃已更新，舊比較不再適用。請按上方按鈕以最新內容重新開始。</p> : null}
         {result?.ok === false ? <p className={styles.warning} role="alert">{result.message}</p> : null}
         {comparison ? <>
+          <CreditScenarioDeadline before={plan} after={comparison.plan} />
+          <h4>調整比較課程</h4>
+          <div className={styles.filters}>
+            <label>搜尋比較課程<input type="search" value={query} maxLength={80} onChange={(event) => { setQuery(event.target.value); setLimit(12); }} placeholder="輸入課程名稱" /></label>
+            <label>原安排學期<select value={term ?? 'all'} onChange={(event) => { setTerm(event.target.value === 'all' ? null : Number(event.target.value)); setLimit(12); }}>
+              <option value="all">全部學期</option>{comparison.before.perTerm.map((row) => <option key={row.term} value={row.term}>第 {row.term} 學期</option>)}
+            </select></label>
+          </div>
+          <p className={styles.note}>顯示 {Math.min(limit, rows.length)}／{rows.length} 門；搜尋與篩選不會排除其他課程的計算。</p>
+          <ul className={styles.courses}>{rows.slice(0, limit).map((course) => {
+            const choice = scenario!.value.choices.find((item) => item.courseId === course.id)!;
+            return <li key={course.id}><div><strong>{course.name}</strong><p>原第 {course.term} 學期 · {formatCredits(course.credits)} 學分 · {course.status === 'registered' ? '已選課（未取得）' : '候選'}</p></div>
+              <label>比較安排<select value={choice.term ?? 'omit'} aria-label={`${course.name}（原第 ${course.term} 學期）的比較安排`} onChange={(event) => change(course.id, event.target.value)}>
+                <option value="omit">此方案不排入</option>{Array.from({ length: 8 }, (_, i) => i + 1).map((value) => <option key={value} value={value}>第 {value} 學期</option>)}
+              </select></label></li>;
+          })}</ul>
+          {!rows.length ? <p className={styles.empty}>沒有符合篩選的課程；比較結果仍包含整份方案。</p> : null}
+          {rows.length > limit ? <button type="button" onClick={() => setLimit((value) => value + 12)}>顯示更多比較課程</button> : null}
+          <h4>完整方案比較（不限期限）</h4>
           <div className={styles.scoreboard}>
             <div><h4>原規劃</h4><span>全部通過仍缺</span><strong>{number(comparison.before.remaining)}<small> 學分</small></strong>
               <p>已排課程 {number(comparison.before.courseCredits)} 學分</p>
@@ -99,23 +119,7 @@ export function CreditPlanScenarios({ plan }: { plan: CreditPlan }) {
               </tbody></table>
             </section>
           </div>
-          <p className={styles.note}>表格單位為學分。達標學期只計已排入學期的課程，不把「其他預計學分」放進某學期。25 學分只是負擔提醒，不是學校上限；總量達標不代表畢業。</p>
-          <div className={styles.filters}>
-            <label>搜尋比較課程<input type="search" value={query} maxLength={80} onChange={(event) => { setQuery(event.target.value); setLimit(12); }} placeholder="輸入課程名稱" /></label>
-            <label>原安排學期<select value={term ?? 'all'} onChange={(event) => { setTerm(event.target.value === 'all' ? null : Number(event.target.value)); setLimit(12); }}>
-              <option value="all">全部學期</option>{comparison.before.perTerm.map((row) => <option key={row.term} value={row.term}>第 {row.term} 學期</option>)}
-            </select></label>
-          </div>
-          <p className={styles.note}>顯示 {Math.min(limit, rows.length)}／{rows.length} 門；搜尋與篩選不會排除其他課程的計算。</p>
-          <ul className={styles.courses}>{rows.slice(0, limit).map((course) => {
-            const choice = scenario!.value.choices.find((item) => item.courseId === course.id)!;
-            return <li key={course.id}><div><strong>{course.name}</strong><p>原第 {course.term} 學期 · {formatCredits(course.credits)} 學分 · {course.status === 'registered' ? '已選課（未取得）' : '候選'}</p></div>
-              <label>比較安排<select value={choice.term ?? 'omit'} aria-label={`${course.name}（原第 ${course.term} 學期）的比較安排`} onChange={(event) => change(course.id, event.target.value)}>
-                <option value="omit">此方案不排入</option>{Array.from({ length: 8 }, (_, i) => i + 1).map((value) => <option key={value} value={value}>第 {value} 學期</option>)}
-              </select></label></li>;
-          })}</ul>
-          {!rows.length ? <p className={styles.empty}>沒有符合篩選的課程；比較結果仍包含整份方案。</p> : null}
-          {rows.length > limit ? <button type="button" onClick={() => setLimit((value) => value + 12)}>顯示更多比較課程</button> : null}
+          <p className={styles.note}>表格單位為學分。達標學期只計已排入學期的課程，不把「其他預計學分」放進某學期。完整方案比較固定以 25 學分提醒，與上方個人每學期負擔提醒無關；25 不是學校上限。總量達標不代表畢業。</p>
           {comparison.afterInsights.possibleRetakes.length ? <p className={styles.warning}>此方案仍有同名課程，可能重複採計。比較沒有把課名相同視為同一門正式課程，請向系辦核對。</p> : null}
           <div className={styles.footer}>
             <strong>原規劃仍完整保留</strong>

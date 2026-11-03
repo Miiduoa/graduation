@@ -2,10 +2,15 @@ import React from 'react';
 import { fireEvent, render } from '@testing-library/react-native';
 import { LearningNextClassCard, nextLearningClass } from '../components/LearningNextClassCard';
 import { useTodayTimetableData } from '../hooks/useTodayTimetableData';
+import type { TimetableClassroomDestination } from '../hooks/timetableClassroomNav';
 import type { TodayClass } from '@campus/shared/src/pickNextAction';
+import { safeNavigate } from '../utils/safeNavigate';
 
 jest.mock('../hooks/useTodayTimetableData', () => ({ useTodayTimetableData: jest.fn() }));
+jest.mock('../utils/safeNavigate', () => ({ safeNavigate: jest.fn(() => true) }));
+const mockNavigation = { navigate: jest.fn() };
 jest.mock('@react-navigation/native', () => ({
+  useNavigation: () => mockNavigation,
   useFocusEffect: (callback: () => void) => require('react').useEffect(callback, [callback]),
 }));
 jest.mock('@expo/vector-icons', () => ({ Ionicons: () => null }));
@@ -15,13 +20,47 @@ const openTimetable = jest.fn();
 const openImport = jest.fn();
 const retry = jest.fn();
 const now = Date.parse('2026-10-26T00:00:00.000Z');
-const upcoming = (id: string, offsetMinutes: number, location = '', anchor = Date.now()): TodayClass => ({
-  id,
-  title: '課程 ' + id,
-  startAt: anchor + offsetMinutes * 60000,
-  endAt: anchor + (offsetMinutes + 50) * 60000,
-  location,
-});
+
+type ClassRow = TodayClass & {
+  courseCode?: string;
+  courseWorkNav: TimetableClassroomDestination;
+};
+
+const upcoming = (
+  id: string,
+  offsetMinutes: number,
+  location = '',
+  anchor = Date.now(),
+  extras: Partial<ClassRow> = {},
+): ClassRow => {
+  const title = extras.title ?? '課程 ' + id;
+  const courseId = extras.courseId;
+  const courseCode = extras.courseCode;
+  const courseWorkNav =
+    extras.courseWorkNav ??
+    (courseId
+      ? { kind: 'linked', screen: 'CourseHub', params: { courseId } }
+      : {
+          kind: 'search',
+          screen: 'Classroom',
+          params: {
+            q: title,
+            from: 'timetable',
+            ...(courseCode ? { code: courseCode } : {}),
+          },
+        });
+  return {
+    id,
+    title,
+    startAt: anchor + offsetMinutes * 60000,
+    endAt: anchor + (offsetMinutes + 50) * 60000,
+    location,
+    courseId,
+    courseCode,
+    courseWorkNav,
+    ...extras,
+  };
+};
 
 function renderCard() {
   return render(
@@ -85,4 +124,59 @@ test('empty personal timetables offer import without pretending to provide an of
   fireEvent.press(view.getByText('匯入課表'));
   expect(openImport).toHaveBeenCalledTimes(1);
   expect(view.queryByText(/校方課程已同步/)).toBeNull();
+});
+
+test('作業與教材 opens Classroom search when the next class has no linkedCourseId', () => {
+  jest.mocked(useTodayTimetableData).mockReturnValue({
+    status: 'ready',
+    classes: [upcoming('A', 60, '主顧324', Date.now(), { courseCode: 'CS301', title: '資料結構' })],
+    termKey: '115|1',
+    retry,
+  });
+  const view = renderCard();
+  fireEvent.press(view.getByText('作業與教材'));
+  expect(safeNavigate).toHaveBeenCalledWith(mockNavigation, 'Classroom', {
+    q: '資料結構',
+    from: 'timetable',
+    code: 'CS301',
+  });
+});
+
+test('作業與教材 opens CourseHub when the next class has linkedCourseId', () => {
+  jest.mocked(useTodayTimetableData).mockReturnValue({
+    status: 'ready',
+    classes: [
+      upcoming('A', 60, '主顧324', Date.now(), {
+        courseId: 'cw_11111111-1111-4111-8111-111111111111',
+        courseCode: 'CS301',
+        title: '資料結構',
+      }),
+    ],
+    termKey: '115|1',
+    retry,
+  });
+  const view = renderCard();
+  fireEvent.press(view.getByText('作業與教材'));
+  expect(safeNavigate).toHaveBeenCalledWith(mockNavigation, 'CourseHub', {
+    courseSpaceId: 'cw_11111111-1111-4111-8111-111111111111',
+    groupId: 'cw_11111111-1111-4111-8111-111111111111',
+    section: 'week',
+  });
+});
+
+test('作業與教材 opens Classroom home when the next class name is blank', () => {
+  jest.mocked(useTodayTimetableData).mockReturnValue({
+    status: 'ready',
+    classes: [
+      upcoming('A', 60, '主顧324', Date.now(), {
+        title: '   ',
+        courseWorkNav: { kind: 'search', screen: 'Classroom', params: {} },
+      }),
+    ],
+    termKey: '115|1',
+    retry,
+  });
+  const view = renderCard();
+  fireEvent.press(view.getByText('作業與教材'));
+  expect(safeNavigate).toHaveBeenCalledWith(mockNavigation, 'Classroom', {});
 });

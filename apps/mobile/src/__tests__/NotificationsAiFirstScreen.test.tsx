@@ -157,21 +157,21 @@ test('manual mark-read failure preserves explanation and unread notice', async (
   mockNotifs.notifications = [
     {
       id: 'bad',
-      type: 'library_due',
-      title: '圖書館催還',
-      body: '請盡快還書',
+      type: 'announcement',
+      title: '殘缺公告',
+      body: '缺少編號',
       read: false,
       data: {},
     },
   ];
   mockNotifs.unreadCount = 1;
   const view = render(<NotificationsAiFirstScreen />);
-  fireEvent.press(view.getByText('圖書館催還'));
-  await waitFor(() => expect(view.getByText(/尚不支援開啟/)).toBeTruthy());
+  fireEvent.press(view.getByText('殘缺公告'));
+  await waitFor(() => expect(view.getByText(/缺少可用的公告編號/)).toBeTruthy());
   mockNotifs.markAsRead.mockResolvedValueOnce(false);
   fireEvent.press(view.getByText('標成已讀'));
   await waitFor(() => expect(view.getByText(/標為已讀失敗/)).toBeTruthy());
-  expect(view.getByText(/尚不支援開啟/)).toBeTruthy();
+  expect(view.getByText(/缺少可用的公告編號/)).toBeTruthy();
   expect(view.getByText('標成已讀')).toBeTruthy();
 });
 
@@ -222,10 +222,10 @@ test('school mismatch on grade notice keeps unread without opening homework', as
   expect(applyNotificationDestination).not.toHaveBeenCalled();
 });
 
-test('unknown or malformed destinations keep unread and offer explicit mark-read', async () => {
+test('unknown type opens notification center and marks read', async () => {
   mockNotifs.notifications = [
     {
-      id: 'bad',
+      id: 'lib1',
       type: 'library_due',
       title: '圖書館催還',
       body: '請盡快還書',
@@ -236,7 +236,26 @@ test('unknown or malformed destinations keep unread and offer explicit mark-read
   mockNotifs.unreadCount = 1;
   const view = render(<NotificationsAiFirstScreen />);
   fireEvent.press(view.getByText('圖書館催還'));
-  await waitFor(() => expect(view.getByText(/尚不支援開啟/)).toBeTruthy());
+  await waitFor(() => expect(mockNotifs.markAsRead).toHaveBeenCalledWith('lib1'));
+  expect(applyNotificationDestination).toHaveBeenCalled();
+  expect(view.queryByText(/尚不支援開啟/)).toBeNull();
+});
+
+test('malformed destinations keep unread and offer explicit mark-read', async () => {
+  mockNotifs.notifications = [
+    {
+      id: 'bad',
+      type: 'announcement',
+      title: '格式錯誤公告',
+      body: '編號無效',
+      read: false,
+      data: { announcementId: '../evil' },
+    },
+  ];
+  mockNotifs.unreadCount = 1;
+  const view = render(<NotificationsAiFirstScreen />);
+  fireEvent.press(view.getByText('格式錯誤公告'));
+  await waitFor(() => expect(view.getByText(/格式無效/)).toBeTruthy());
   expect(mockNotifs.markAsRead).not.toHaveBeenCalled();
   fireEvent.press(view.getByText('標成已讀'));
   await waitFor(() => expect(mockNotifs.markAsRead).toHaveBeenCalledWith('bad'));
@@ -498,3 +517,82 @@ for (const operation of ['single', 'batch'] as const) {
     );
   }
 }
+
+test('unread filter is immediate, scoped to loaded rows and has a way back', () => {
+  mockNotifs.notifications = [{ id: 'read', type: 'system', title: '舊消息', read: true }];
+  mockNotifs.hasMore = true;
+  const view = render(<NotificationsAiFirstScreen />);
+  fireEvent.press(view.getByLabelText('顯示未讀通知'));
+  expect(view.queryByText('舊消息')).toBeNull();
+  expect(view.getByText(/只含已載入的通知/)).toBeTruthy();
+  expect(view.getByText('已載入的通知都已讀，較早的通知尚未載入。')).toBeTruthy();
+  fireEvent.press(view.getByText('載入更早的通知'));
+  expect(mockNotifs.loadMore).toHaveBeenCalled();
+  fireEvent.press(view.getByText('查看全部通知'));
+  expect(view.getByText('舊消息')).toBeTruthy();
+});
+
+test('failed optimistic read remains in unread filter across toggles and successful retry removes it', async () => {
+  const pending = deferred<boolean>();
+  mockNotifs.markAsRead.mockReturnValueOnce(pending.promise);
+  mockNotifs.notifications = [
+    { id: 'm', type: 'message', title: '要保留的訊息', read: false, data: { peerId: 'p' } },
+  ];
+  mockNotifs.unreadCount = 1;
+  const view = render(<NotificationsAiFirstScreen />);
+  fireEvent.press(view.getByLabelText('顯示未讀通知'));
+  fireEvent.press(view.getByText('要保留的訊息'));
+  mockNotifs.notifications[0] = { ...mockNotifs.notifications[0], read: true };
+  mockNotifs.unreadCount = 0;
+  view.rerender(<NotificationsAiFirstScreen />);
+  await act(async () => pending.resolve(false));
+  fireEvent.press(view.getByLabelText('顯示全部通知'));
+  fireEvent.press(view.getByLabelText('顯示未讀通知'));
+  expect(view.getByText('要保留的訊息')).toBeTruthy();
+  expect(view.getByText('未讀（1）')).toBeTruthy();
+  fireEvent.press(view.getByText('重試已讀同步：要保留的訊息'));
+  await waitFor(() => expect(view.queryByText('要保留的訊息')).toBeNull());
+  expect(view.getByText('目前沒有未讀通知。')).toBeTruthy();
+});
+
+test('source labels never borrow the signed-in campus and cross-campus assignment cannot open', async () => {
+  mockNotifs.notifications = [
+    {
+      id: 'x',
+      type: 'assignment',
+      title: '另一校作業',
+      read: false,
+      data: { schoolId: 'other-campus', groupId: 'g', assignmentId: 'a' },
+    },
+  ];
+  const view = render(<NotificationsAiFirstScreen />);
+  expect(view.getByText('校園（other-campus）')).toBeTruthy();
+  expect(view.getByText('作業')).toBeTruthy();
+  fireEvent.press(view.getByText('另一校作業'));
+  await waitFor(() => expect(view.getByText(/這則通知屬於其他學校/)).toBeTruthy());
+  expect(mockNotifs.markAsRead).not.toHaveBeenCalled();
+  expect(applyNotificationDestination).not.toHaveBeenCalled();
+});
+
+test('filter switches retain the scroll container and read state without reloading', async () => {
+  mockNotifs.notifications = [
+    { id: 'r', type: 'system', title: '已讀消息', read: true },
+    { id: 'u', type: 'system', title: '未讀消息', read: false },
+  ];
+  const view = render(<NotificationsAiFirstScreen />);
+  const { ScrollView } = require('react-native');
+  const scroll = view.UNSAFE_getByType(ScrollView);
+  const scrollTo = jest.spyOn(scroll.instance, 'scrollTo');
+  fireEvent.scroll(scroll, { nativeEvent: { contentOffset: { y: 240 } } });
+  fireEvent.press(view.getByLabelText('顯示未讀通知'));
+  expect(view.UNSAFE_getByType(ScrollView)).toBe(scroll);
+  expect(view.queryByText('已讀消息')).toBeNull();
+  await waitFor(() => expect(scrollTo).toHaveBeenCalledWith({ y: 0, animated: false }));
+  fireEvent.scroll(scroll, { nativeEvent: { contentOffset: { y: 80 } } });
+  fireEvent.press(view.getByLabelText('顯示全部通知'));
+  expect(view.UNSAFE_getByType(ScrollView)).toBe(scroll);
+  expect(view.getByText('已讀消息')).toBeTruthy();
+  await waitFor(() => expect(scrollTo).toHaveBeenCalledWith({ y: 240, animated: false }));
+  expect(mockNotifs.reload).not.toHaveBeenCalled();
+  expect(mockNotifs.markAsRead).not.toHaveBeenCalled();
+});

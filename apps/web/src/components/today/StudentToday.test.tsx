@@ -2,8 +2,17 @@ import { fireEvent, render, screen, waitFor, within } from '@testing-library/rea
 import type { ComponentProps } from 'react';
 import { beforeEach, expect, it, vi } from 'vitest';
 import { TODAY_COPY, type TodayClass, type TodayTodo } from '@campus/shared/src/pickNextAction';
+import { TODAY_FLOW_CLASS_TITLE, TODAY_FLOW_WORK_TITLE } from '@/lib/todayCourseWork';
 import { StudentToday } from './StudentToday';
 import styles from './StudentToday.module.css';
+
+vi.mock('./TodayUnreadNotifications', () => ({
+  TodayUnreadNotifications: ({ unsigned }: { unsigned: boolean }) => (
+    <section data-testid="today-notifications">
+      {unsigned ? '未讀通知需登入' : '未讀通知摘要'}
+    </section>
+  ),
+}));
 
 const now = new Date('2026-10-25T09:50:00+08:00');
 
@@ -71,6 +80,22 @@ it('shows the next class on the only solid card', () => {
     '/course/cs-db#week',
   );
   expect(screen.queryByText(/為你推薦|智慧|AI 幫你/)).toBeNull();
+});
+
+it('orders the unified flow as classes, due work, then unread notifications', () => {
+  view({ classes: [klass()], todos: [todo()] });
+  const flow = screen.getByTestId('today-unified-flow');
+  const sections = within(flow)
+    .getAllByRole('heading', { level: 2 })
+    .map((heading) => heading.textContent);
+  expect(sections.slice(0, 2)).toEqual([TODAY_FLOW_CLASS_TITLE, TODAY_FLOW_WORK_TITLE]);
+  expect(within(flow).getByTestId('today-notifications')).toBeTruthy();
+  expect(within(flow).getByTestId('today-classes').querySelector('a')?.getAttribute('href')).toBe(
+    '/course/cs-db#week',
+  );
+  expect(within(flow).getByTestId('today-work-list').querySelector('a')?.getAttribute('href')).toBe(
+    '/course/cs-db#assignment-hw-3',
+  );
 });
 
 it('uses the assignment card when the next class is later and work is due within 24 hours', () => {

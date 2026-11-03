@@ -1,4 +1,4 @@
-import { act, render, screen, waitFor } from '@testing-library/react';
+import { act, render, screen, waitFor, within } from '@testing-library/react';
 import { renderToString } from 'react-dom/server';
 import { hydrateRoot, type Root } from 'react-dom/client';
 import { beforeEach, expect, it, vi } from 'vitest';
@@ -43,7 +43,7 @@ const state = vi.hoisted(() => ({
   },
 }));
 
-vi.mock('@/components/AppHeader', () => ({ AppHeader: () => <header>Campus One</header> }));
+vi.mock('@/components/AppHeader', () => ({ AppHeader: () => <header>nuni</header> }));
 vi.mock('@/components/SiteFooter', () => ({ SiteFooter: () => null }));
 vi.mock('@/lib/usePersonalTodayRecords', () => ({
   usePersonalTodayRecords: () => state.timetable,
@@ -254,11 +254,13 @@ it('does not tell a teacher they have no homework and opens the teaching course 
     unreadCount: 0,
   });
   render(<HomePage />);
-  expect(await screen.findByRole('link', { name: /查看授課課程/ })).toBeTruthy();
-  expect(screen.getByRole('link', { name: /查看授課課程/ }).getAttribute('href')).toBe(
-    '#teaching-courses',
-  );
+  const teacherToday = await screen.findByTestId('teacher-today');
+  expect(within(teacherToday).getByRole('heading', { name: '待批改與授課' })).toBeTruthy();
+  expect(
+    within(teacherToday).getByRole('link', { name: /教學實習/ }).getAttribute('href'),
+  ).toBe('/course/teach');
   expect(screen.queryByRole('heading', { name: /待繳作業/ })).toBeNull();
+  expect(screen.queryByTestId('student-today')).toBeNull();
 });
 
 it('hides all previous Nuni data immediately during session revalidation and ignores a previous context response', async () => {
@@ -422,14 +424,14 @@ it('looks up the school role from the selected school instead of always using pu
   expect(state.schoolRoleCalls.some((call) => call[0] === 'alice' && call[1] === 'nthu')).toBe(
     true,
   );
-  expect(await screen.findByRole('link', { name: /老師工作台/ })).toBeTruthy();
+  expect(await screen.findByRole('link', { name: /課務申訴審核/ })).toBeTruthy();
   state.selectedSchoolId = 'ncku';
   state.schoolRole = null;
   view.rerender(<HomePage />);
   expect(state.schoolRoleCalls.some((call) => call[0] === 'alice' && call[1] === 'ncku')).toBe(
     true,
   );
-  expect(screen.queryByRole('link', { name: /老師工作台/ })).toBeNull();
+  expect(screen.queryByRole('link', { name: /課務申訴審核/ })).toBeNull();
   state.selectedSchoolId = null;
   view.rerender(<HomePage />);
   expect(state.schoolRoleCalls.some((call) => call[0] === 'alice' && call[1] === 'pu')).toBe(true);
@@ -767,15 +769,15 @@ it.each(['nuni', 'school'])(
     );
     render(<HomePage />);
     await screen.findByRole('heading', { name: /授課與協作/ });
-    expect(screen.queryByRole('link', { name: /查看授課課程/ })).toBeNull();
+    expect(screen.queryByTestId('teacher-today')).toBeNull();
     await act(async () => finishSchool(data('學生來源')));
     const today = screen.getByTestId('student-today');
-    expect(screen.queryByRole('link', { name: /查看授課課程/ })).toBeNull();
+    expect(screen.queryByTestId('teacher-today')).toBeNull();
     await act(async () => window.dispatchEvent(new Event('pageshow')));
     expect(screen.getByTestId('student-today')).toBe(today);
     await act(async () => finishSchool({ courses: [], tasks: [], unreadCount: 0 }));
     expect(screen.queryByTestId('student-today')).toBeNull();
-    expect(screen.getByRole('link', { name: /查看授課課程/ })).toBeTruthy();
+    expect(screen.getByTestId('teacher-today')).toBeTruthy();
   },
 );
 
@@ -810,9 +812,9 @@ it.each(['dual', 'student', 'empty'])(
           }),
       );
     render(<HomePage />);
-    await screen.findByRole('link', { name: /查看授課課程/ });
+    await screen.findByTestId('teacher-today');
     await act(async () => window.dispatchEvent(new Event('pageshow')));
-    expect(screen.getByRole('link', { name: /查看授課課程/ })).toBeTruthy();
+    expect(screen.getByTestId('teacher-today')).toBeTruthy();
     const next =
       mode === 'empty'
         ? { courses: [], tasks: [], unreadCount: 0 }
@@ -825,8 +827,7 @@ it.each(['dual', 'student', 'empty'])(
     await act(async () => finish(next));
     expect(loadHomeData).toHaveBeenCalledTimes(2);
     expect(screen.getByTestId('student-today')).toBeTruthy();
-    expect(screen.queryByRole('link', { name: /查看授課課程/ })).toBeNull();
-    expect(screen.queryByText('0 門課正在進行')).toBeNull();
+    expect(screen.queryByTestId('teacher-today')).toBeNull();
     if (mode !== 'empty') expect(screen.getAllByText('新增修課 作業').length).toBeGreaterThan(0);
   },
 );
@@ -845,12 +846,12 @@ it.each(['teacher', 'student'])(
       .mockResolvedValueOnce(previous)
       .mockRejectedValueOnce(new FirebaseError('unavailable', 'offline'));
     render(<HomePage />);
-    if (mode === 'teacher') await screen.findByRole('link', { name: /查看授課課程/ });
+    if (mode === 'teacher') await screen.findByTestId('teacher-today');
     else await screen.findAllByText('保留修課 作業');
     await act(async () => window.dispatchEvent(new Event('pageshow')));
     expect(await screen.findByRole('button', { name: '重試校園課程' })).toBeTruthy();
     if (mode === 'teacher') {
-      expect(screen.getByRole('heading', { name: '1 門課正在進行' })).toBeTruthy();
+      expect(screen.getByTestId('teacher-today')).toBeTruthy();
       expect(document.getElementById('teaching-courses')).toBeTruthy();
     } else expect(screen.getAllByText('保留修課 作業').length).toBeGreaterThan(0);
   },
@@ -873,9 +874,9 @@ it('keeps the teacher mode until both background sources finish, including cours
       });
     });
   render(<HomePage />);
-  await screen.findByRole('link', { name: /查看授課課程/ });
+  await screen.findByTestId('teacher-today');
   await act(async () => window.dispatchEvent(new Event('pageshow')));
-  expect(screen.getByRole('link', { name: /查看授課課程/ })).toBeTruthy();
+  expect(screen.getByTestId('teacher-today')).toBeTruthy();
   await act(async () => finish({ courses: [], tasks: [], unreadCount: 0 }));
   expect(screen.getByTestId('student-today')).toBeTruthy();
   expect(screen.getAllByText('新增修課 作業').length).toBeGreaterThan(0);

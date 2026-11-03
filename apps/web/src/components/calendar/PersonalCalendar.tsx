@@ -2,6 +2,7 @@
 
 import { MonthCalendar } from './MonthCalendar';
 
+import Link from 'next/link';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   buildPersonalEventsCalendar,
@@ -21,6 +22,8 @@ import {
   type PersonalEventDraft,
   type PersonalImportRecord,
 } from '@campus/shared';
+import { useAuth } from '@/components/AuthGuard';
+import { browserRequest, useOptionalNuniSession } from '@/features/nuni/Session';
 import { usePersonalImportScope, usePersonalImports } from '@/lib/usePersonalImports';
 import {
   changePersonalImport,
@@ -28,6 +31,22 @@ import {
   savePersonalImportBatch,
   type PersonalImportScope,
 } from '@/lib/personalImports';
+import { loadHomeData } from '@/lib/homeOverview';
+import {
+  calendarCourseDeadlinesInMonth,
+  calendarCourseDeadlinesOnDate,
+  calendarDeadlinesFromLmsTasks,
+  loadNuniCalendarDeadlines,
+  mergeCalendarCourseDeadlines,
+  type CalendarCourseDeadline,
+} from '@/lib/calendarCourseDeadlines';
+import {
+  CALENDAR_DUE_EMPTY,
+  CALENDAR_DUE_EMPTY_DAY,
+  CALENDAR_DUE_LOAD_ERROR,
+  CALENDAR_DUE_TITLE,
+  CALENDAR_DUE_UNSIGNED,
+} from '@/lib/todayCourseWork';
 import styles from '@/components/imports/PersonalImport.module.css';
 
 function EventFormFields({
@@ -138,16 +157,75 @@ export function PersonalCalendar() {
 
 function PersonalCalendarWorkspace() {
   const context = usePersonalImportScope();
+  const { user, loading: authLoading } = useAuth();
+  const nuni = useOptionalNuniSession();
+  const nuniLoading = nuni?.loading ?? false;
+  const nuniContext = nuni?.session?.context;
+  const nuniAccountId = nuni?.session?.platformAccountId;
+  const signedIn = Boolean(user?.uid || nuniAccountId);
   const scope = context.scope;
   const scopeKey = context.scopeKey;
   const ledger = usePersonalImports(scope, !context.loading);
   const [month, setMonth] = useState(() => emptyPersonalEventDraft().date.slice(0, 7));
   const [calendarView, setCalendarView] = useState<'month' | 'list'>('month');
   const [selectedDate, setSelectedDate] = useState('');
+  const [dueItems, setDueItems] = useState<CalendarCourseDeadline[]>([]);
+  const [dueStatus, setDueStatus] = useState<'idle' | 'loading' | 'ready' | 'error'>('idle');
+  const [dueRetry, setDueRetry] = useState(0);
   const changeMonth = (value: string) => {
     setMonth(value);
     setSelectedDate('');
   };
+
+  useEffect(() => {
+    if (authLoading || nuniLoading || (!user?.uid && !nuniAccountId)) return;
+    let active = true;
+    const uid = user?.uid;
+    const accountId = nuniAccountId;
+    const sessionContext = nuniContext;
+    void Promise.resolve()
+      .then(async () => {
+        if (active) setDueStatus('loading');
+        const [lmsResult, nuniResult] = await Promise.allSettled([
+          uid ? loadHomeData(uid) : Promise.resolve(null),
+          accountId && sessionContext
+            ? loadNuniCalendarDeadlines(
+                (path, input) => browserRequest(path, sessionContext, input),
+                accountId,
+                { cancelled: () => !active },
+              )
+            : Promise.resolve([] as CalendarCourseDeadline[]),
+        ]);
+        if (!active) return;
+        if (nuniResult.status === 'fulfilled' && nuniResult.value === 'cancelled') return;
+        const lms =
+          lmsResult.status === 'fulfilled' && lmsResult.value
+            ? calendarDeadlinesFromLmsTasks(lmsResult.value.tasks)
+            : [];
+        const classroom =
+          nuniResult.status === 'fulfilled' && nuniResult.value !== 'cancelled'
+            ? nuniResult.value
+            : [];
+        const lmsOk = lmsResult.status === 'fulfilled';
+        const nuniOk =
+          nuniResult.status === 'fulfilled' && nuniResult.value !== 'cancelled';
+        if (!lmsOk && !nuniOk) {
+          setDueItems([]);
+          setDueStatus('error');
+          return;
+        }
+        setDueItems(mergeCalendarCourseDeadlines(classroom, lms));
+        setDueStatus('ready');
+      })
+      .catch(() => {
+        if (!active) return;
+        setDueItems([]);
+        setDueStatus('error');
+      });
+    return () => {
+      active = false;
+    };
+  }, [authLoading, nuniLoading, user?.uid, nuniAccountId, nuniContext, dueRetry]);
   const goToday = () => {
     const today = emptyPersonalEventDraft().date;
     setMonth(today.slice(0, 7));
@@ -176,6 +254,13 @@ function PersonalCalendarWorkspace() {
     [ledger.records, month],
   );
   const events = selectedDate ? personalEventsOnDate(monthEvents, selectedDate) : monthEvents;
+  const monthDues = useMemo(
+    () => calendarCourseDeadlinesInMonth(dueItems, month),
+    [dueItems, month],
+  );
+  const visibleDues = selectedDate
+    ? calendarCourseDeadlinesOnDate(dueItems, selectedDate)
+    : monthDues;
   const draftRow = personalEventRowFromDraft(
     draft,
     scope.schoolId,
@@ -320,7 +405,7 @@ function PersonalCalendarWorkspace() {
     <div className={styles.root}>
       <section className={styles.panel}>
         <div className={styles.heading}>
-          <h2>活動、考試與自己的安排</h2>
+          <h2>活動、考試、作業截止與自己的安排</h2>
           <div className={styles.actions}>
             <button
               type="button"
@@ -341,7 +426,7 @@ function PersonalCalendarWorkspace() {
           </div>
         </div>
         <p className={styles.note}>
-          這裡是 {context.schoolName} 的個人行程，不是學校正式紀錄。
+          這裡是 {context.schoolName} 的個人行程，並與手機版一樣顯示已加入課程的作業截止。個人行程不是學校正式紀錄。
           {personalEventPersistenceCopy(ledger.syncEnabled)}
         </p>
         <details className={styles.source}>
@@ -493,8 +578,12 @@ function PersonalCalendarWorkspace() {
           <p role="status">正在讀取行程…</p>
         ) : ledger.error ? null : !events.length ? (
           <p className={styles.empty}>
-            {selectedDate ? '這一天還沒有行程。' : '這個月還沒有行程。'}
-            按「新增行程」直接建立，或從上方「從截圖或檔案匯入」。
+            {selectedDate
+              ? visibleDues.length
+                ? '這一天還沒有行程；下方仍可查看作業截止。'
+                : CALENDAR_DUE_EMPTY_DAY
+              : '這個月還沒有行程。'}
+            {!selectedDate ? '按「新增行程」直接建立，或從上方「從截圖或檔案匯入」。' : null}
           </p>
         ) : calendarView === 'list' || selectedDate ? (
           <ul className={styles.saved}>
@@ -527,6 +616,53 @@ function PersonalCalendarWorkspace() {
             ))}
           </ul>
         ) : null}
+      </section>
+
+      <section className={styles.panel} aria-labelledby="calendar-due-title" data-testid="calendar-due">
+        <div className={styles.heading}>
+          <h2 id="calendar-due-title">{CALENDAR_DUE_TITLE}</h2>
+          <Link className="btn" href="/">
+            回今天看期限
+          </Link>
+        </div>
+        {!signedIn && !authLoading && !nuniLoading ? (
+          <p className={styles.empty}>
+            {CALENDAR_DUE_UNSIGNED} <Link href="/">前往今天</Link>
+          </p>
+        ) : !signedIn || dueStatus === 'loading' || dueStatus === 'idle' || authLoading || nuniLoading ? (
+          <p role="status">正在讀取作業截止…</p>
+        ) : dueStatus === 'error' && visibleDues.length === 0 ? (
+          <>
+            <p className={styles.empty} role="alert">
+              {CALENDAR_DUE_LOAD_ERROR}
+            </p>
+            <button type="button" className="btn" onClick={() => setDueRetry((n) => n + 1)}>
+              重試作業
+            </button>
+          </>
+        ) : visibleDues.length === 0 ? (
+          <p className={styles.empty}>
+            {selectedDate ? CALENDAR_DUE_EMPTY_DAY : CALENDAR_DUE_EMPTY}{' '}
+            <Link href="/">回今天</Link>
+          </p>
+        ) : (
+          <ul className={styles.saved} data-testid="calendar-due-list">
+            {visibleDues.map((item) => (
+              <li key={item.id}>
+                <div>
+                  <time dateTime={item.dueDate}>{item.dueDate}</time>
+                  <h3>{item.title}</h3>
+                  <p>
+                    {item.courseName} · 作業截止 · {item.sourceLabel}
+                  </p>
+                </div>
+                <Link className="btn primary" href={item.href}>
+                  查看作業
+                </Link>
+              </li>
+            ))}
+          </ul>
+        )}
       </section>
     </div>
   );

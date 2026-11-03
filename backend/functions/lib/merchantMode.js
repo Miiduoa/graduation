@@ -8,7 +8,7 @@ const EXTERNAL_ORDER_HONEST_TEXT =
 const MENU_STALE_TEXT = '菜單可能過期，價格以店家頁面為準。';
 const SHOWCASE_ORDER_BUTTON_TEXT = '到店家網站訂餐';
 const SHOWCASE_ORDER_CAPTION =
-  '會開啟店家自己的網站，訂單和付款由店家處理，Campus One 查不到這筆訂單';
+  '會開啟店家自己的網站，訂單和付款由店家處理，nuni 查不到這筆訂單';
 const SHOWCASE_LEAVE_NOTICE = SHOWCASE_ORDER_CAPTION;
 const NATIVE_ORDERING_CLOSED_TEXT = '這間店目前不能在 App 點餐';
 const MENU_STALE_AFTER_HOURS = 24;

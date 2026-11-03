@@ -1,5 +1,5 @@
 /**
- * Model-family chat templates for the GGUF backends supported by Campus One.
+ * Model-family chat templates for the GGUF backends supported by nuni.
  *
  * Keep prompt construction independent of native llama.rn so differences among
  * tokenizers can be regression tested without model downloads or paid APIs.

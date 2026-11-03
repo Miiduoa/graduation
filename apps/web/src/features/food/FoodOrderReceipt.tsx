@@ -25,7 +25,7 @@ export function FoodOrderReceipt({
   return (
     <section className={styles.receipt} aria-label="訂單紙本明細">
       <header className={styles.header}>
-        <h3>Campus One 訂單明細</h3>
+        <h3>nuni 訂單明細</h3>
         <p className={styles.disclaimer}>非統一發票</p>
         <p className={styles.location}>{order.locationName}</p>
       </header>

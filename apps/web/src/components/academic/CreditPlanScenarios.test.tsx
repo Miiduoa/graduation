@@ -64,6 +64,12 @@ describe('網頁修課比較', () => {
     expect(within(screen.getByRole('region', { name: '分類缺口比較' })).getAllByText('未設定')).toHaveLength(8);
   });
 
+  it('states that the full-plan workload caution stays fixed at 25 and is separate from the deadline preference', () => {
+    render(<CreditPlanScenarios plan={sample()} />); open();
+    fireEvent.click(screen.getByRole('button', { name: '以全部課程開始比較' }));
+    expect(screen.getByText(/完整方案比較固定以 25 學分提醒，與上方個人每學期負擔提醒無關/)).toBeTruthy();
+  });
+
   it('downloads a compatible scenario backup only on explicit action and leaves the original untouched', async () => {
     const plan = sample();
     const original = JSON.stringify(plan);

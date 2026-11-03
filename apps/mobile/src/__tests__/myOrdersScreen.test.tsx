@@ -108,3 +108,18 @@ test('沒有訂單：寫還沒有訂單', async () => {
   await act(async () => {});
   expect(view.getByText('還沒有訂單')).toBeTruthy();
 });
+
+test('帶 orderId 時標示該筆訂單', async () => {
+  const view = render(<MyOrdersScreen route={{ params: { orderId: 'co_waiting_bbb222' } }} />);
+  await act(async () => {});
+  expect(view.getByText('通知訂單')).toBeTruthy();
+  expect(view.getByText('號碼還沒拿到，請到櫃台確認。')).toBeTruthy();
+  expect(view.getByText('取餐號碼 7')).toBeTruthy();
+});
+
+test('orderId 無效時給友善提示且不壞頁', async () => {
+  const view = render(<MyOrdersScreen route={{ params: { orderId: 'co_missing_zzz' } }} />);
+  await act(async () => {});
+  expect(view.getByText(/找不到這筆訂單/)).toBeTruthy();
+  expect(view.getByText('取餐號碼 7')).toBeTruthy();
+});

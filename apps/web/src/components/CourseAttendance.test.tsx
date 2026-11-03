@@ -12,7 +12,13 @@ import {
   type CourseAttendance as Data,
 } from '@/lib/courseAttendance';
 
-const auth = vi.hoisted(() => ({ uid: 'student' as string | null }));
+const auth = vi.hoisted(() => ({ uid: 'student' as string | null, search: '' }));
+vi.mock('next/navigation', () => ({
+  usePathname: () => '/course/course/attendance',
+  useRouter: () => ({ push: vi.fn(), replace: vi.fn(), prefetch: vi.fn() }),
+  useSearchParams: () => new URLSearchParams(auth.search),
+  useParams: () => ({ courseId: 'course' }),
+}));
 vi.mock('@/components/SchoolSelector', () => ({ SchoolSelector: () => null }));
 vi.mock('@/features/nuni/Session', () => ({
   useNuniSession: () => ({ session: null, loading: false, pendingLogout: false, logout: vi.fn() }),
@@ -23,6 +29,9 @@ vi.mock('@/lib/signInOptions', () => ({
 }));
 vi.mock('./AuthGuard', () => ({
   useAuth: () => ({ user: auth.uid ? { uid: auth.uid } : null, loading: false }),
+}));
+vi.mock('@/lib/useCourseTodayMeeting', () => ({
+  useCourseTodayMeeting: () => ({ status: 'unlinked' }),
 }));
 vi.mock('./PWAInstallBanner', () => ({ PWAInstallBanner: () => null }));
 vi.mock('qrcode', () => ({
@@ -61,6 +70,7 @@ function data(teacher = false): Data {
 beforeEach(() => {
   vi.clearAllMocks();
   auth.uid = 'student';
+  auth.search = '';
   vi.mocked(loadCourseAttendance).mockResolvedValue(data());
   vi.mocked(watchCourseMembership).mockImplementation((_course, _uid, changed) => {
     changed('member');
@@ -345,4 +355,19 @@ it('過期碼不顯示成功，清除舊碼後可立刻重掃', async () => {
   expect((await screen.findByRole('alert')).textContent).toContain('已過期');
   expect((input as HTMLInputElement).value).toBe('');
   expect(screen.queryByText(/已簽到 ·/)).toBeNull();
+});
+
+it('帶 sessionId 時打開並標示該場點名', async () => {
+  auth.search = 'sessionId=session';
+  render(<CourseAttendance courseId="course" />);
+  const focused = await screen.findByRole('article', { current: true });
+  expect(focused.getAttribute('id')).toBe('attendance-session-session');
+  expect(focused.getAttribute('data-session-focused')).toBe('true');
+});
+
+it('sessionId 無效時給友善提示且不壞頁', async () => {
+  auth.search = 'sessionId=missing-session';
+  render(<CourseAttendance courseId="course" />);
+  expect(await screen.findByText(/找不到這一場點名/)).toBeTruthy();
+  expect(screen.getByRole('heading', { name: '資料結構' })).toBeTruthy();
 });

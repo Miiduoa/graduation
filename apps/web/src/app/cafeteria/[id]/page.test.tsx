@@ -126,7 +126,7 @@ it('lets a regular account open a storefront and leave to the shop order page', 
   );
   expect(screen.getByRole('navigation', { name: '店面內容' })).toBeTruthy();
   expect(
-    screen.getByText('會開啟店家自己的網站，訂單和付款由店家處理，Campus One 查不到這筆訂單'),
+    screen.getByText('會開啟店家自己的網站，訂單和付款由店家處理，nuni 查不到這筆訂單'),
   ).toBeTruthy();
   expect(screen.queryByText('沒串接的店也可以只放訂餐連結。')).toBeNull();
   expect(screen.queryByRole('link', { name: /點餐|下單/ })).toBeNull();
@@ -158,7 +158,7 @@ it('does not show an outbound order button when the shop has no ordering URL', a
   expect(screen.queryByRole('link', { name: /點餐|下單|訂餐/ })).toBeNull();
   expect(screen.queryByText('這間店要到店家自己的頁面訂餐。')).toBeNull();
   expect(
-    screen.queryByText('會開啟店家自己的網站，訂單和付款由店家處理，Campus One 查不到這筆訂單'),
+    screen.queryByText('會開啟店家自己的網站，訂單和付款由店家處理，nuni 查不到這筆訂單'),
   ).toBeNull();
   expect(screen.getByText('還沒有菜單。')).toBeTruthy();
   expect(screen.queryByText('沒串接的店也可以只放訂餐連結。')).toBeNull();

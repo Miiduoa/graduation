@@ -42,7 +42,7 @@ const SAFE_DESTINATIONS = Object.freeze([
 const safeDestinations = new Set(SAFE_DESTINATIONS);
 
 const SYSTEM_PROMPT = [
-  '你是 Campus One 校園服務意圖理解器，專門理解口語和語音轉寫，而非執行命令。',
+  '你是 nuni 校園服務意圖理解器，專門理解口語和語音轉寫，而非執行命令。回覆與自稱使用 nuni；若使用者仍以 Campus One／CampusOne／C1 稱呼本服務，視為同一產品別名。',
   '將使用者一句話中的所有目標理解後，選出最多三個現有服務，順序符合使用者目的。',
   '例如「明天沒課，想找個地方讀書再去吃飯」可選 /timetable、/library、/cafeteria。',
   '「圖書館怎麼走」應選 /map，而不是圖書館館藏 /library。',
