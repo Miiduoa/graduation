@@ -126,6 +126,15 @@ export function WorkspaceList() {
   else contextParams.delete('courses');
   if (taskFilter !== 'pending') contextParams.set('task', taskFilter);
   else contextParams.delete('task');
+  // 歸因已手動清除時，進課程／收藏的 return context 不可再帶回 from／code。
+  if (fromTimetable) {
+    contextParams.set('from', 'timetable');
+    if (courseCode) contextParams.set('code', courseCode);
+    else contextParams.delete('code');
+  } else {
+    contextParams.delete('from');
+    contextParams.delete('code');
+  }
   const context = contextParams.toString();
   const open = (workspace: NuniWorkspace) => {
     if (active.current) router.push(classroomCourseHref(workspace.id, context));
@@ -155,6 +164,8 @@ export function WorkspaceList() {
   const changeFilter = (value: CourseDirectoryFilter) => {
     setFilter(value);
     replaceStudyQuery('courses', value, 'all');
+    // 手動改課程篩選＝離開「課表帶來的那門課」語意，與改搜尋相同立刻清歸因。
+    clearTimetableAttribution();
   };
   const changeQuery = (value: string) => {
     setQuery(value);
@@ -164,6 +175,7 @@ export function WorkspaceList() {
   const changeTaskFilter = (value: StudyAgendaFilter) => {
     setTaskFilter(value);
     replaceStudyQuery('task', value, 'pending');
+    clearTimetableAttribution();
   };
   const resetDirectory = () => {
     changeQuery('');
