@@ -45,7 +45,13 @@ export type PublicAgentResult = {
   checkedAt: number;
   receipt: { [key: string]: PublicJson };
 };
-export type PublicAgentFailureCode = 'SOURCE_CHANGED' | 'INVALID_RESULT' | 'EXECUTION_FAILED';
+export type PublicAgentFailureCode =
+  | 'SOURCE_CHANGED'
+  | 'INVALID_RESULT'
+  | 'EXECUTION_FAILED'
+  | 'FREE_QUOTA_UNAVAILABLE'
+  | 'DESTINATION_UNCLEAR'
+  | 'INVALID_PROVIDER_RESPONSE';
 type OperationIdentity = { operationId: string; expiresAt: number };
 export type PublicAgentOperation = OperationIdentity &
   (
@@ -132,7 +138,12 @@ function bindingInput(value: TaskBinding): TaskBinding {
 }
 
 const failureCode = (value: unknown): value is PublicAgentFailureCode =>
-  value === 'SOURCE_CHANGED' || value === 'INVALID_RESULT' || value === 'EXECUTION_FAILED';
+  value === 'SOURCE_CHANGED' ||
+  value === 'INVALID_RESULT' ||
+  value === 'EXECUTION_FAILED' ||
+  value === 'FREE_QUOTA_UNAVAILABLE' ||
+  value === 'DESTINATION_UNCLEAR' ||
+  value === 'INVALID_PROVIDER_RESPONSE';
 function resultInput(value: unknown, task: PublicTaskName, schoolId: string): PublicAgentResult {
   const row = exactRecord(value, ['task', 'schoolId', 'sourceFingerprint', 'checkedAt', 'receipt']);
   if (

@@ -9,7 +9,16 @@ import type { PublicCatalogReader } from './navigation';
 import type { PlatformSessionResolver } from './admission';
 
 const prefix = '/v1/auth/platform/public-agent';
-const actions = ['preview', 'confirm', 'execute', 'read', 'status', 'ack'] as const;
+const actions = [
+  'preview',
+  'prepareGroq',
+  'confirm',
+  'execute',
+  'read',
+  'status',
+  'ack',
+  'route',
+] as const;
 type Action = (typeof actions)[number];
 /** Minimal structural subset, modelled on the pinned API overlay. */
 type Request = {
@@ -53,6 +62,12 @@ type Options = {
   /** Must be a trusted, server-owned public catalog capability; never pass browser input as rows. */
   readPublicCatalog: PublicCatalogReader;
   timeoutMs?: number;
+  /** Host must separately verify the selected organization is on its free tier. */
+  freeTierVerified?: boolean;
+  groqPlan?: (
+    input: { schoolId: string; query: string; fingerprint: string },
+    signal: AbortSignal,
+  ) => Promise<unknown>;
 };
 const validAction = (action: string): action is Action => actions.some((value) => value === action);
 /** For host authorization review only. This predicate is NOT wired into the API guard. */
@@ -83,6 +98,9 @@ export function registerPlatformPublicTaskRoutes(app: FastifyCandidate, options:
     ledger,
     readPublicCatalog: options.readPublicCatalog,
     ...(options.timeoutMs === undefined ? {} : { timeoutMs: options.timeoutMs }),
+    ...(options.freeTierVerified === true && options.groqPlan
+      ? { groqPlan: options.groqPlan }
+      : {}),
   });
   const routeOptions = {
     bodyLimit: 8192,

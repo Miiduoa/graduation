@@ -11,7 +11,16 @@ type Options = {
   resolveHttpSession: (request: Request) => Promise<HttpSession>;
 };
 const prefix = '/api/platform-public-agent/';
-const actions = ['preview', 'confirm', 'execute', 'read', 'status', 'ack'] as const;
+const actions = [
+  'preview',
+  'prepareGroq',
+  'confirm',
+  'execute',
+  'read',
+  'status',
+  'ack',
+  'route',
+] as const;
 /** No registration or env switch. The host must explicitly assemble this handler. */
 export function createPlatformPublicAgentHandler(options: Options) {
   const origin = new URL(options.origin).origin;

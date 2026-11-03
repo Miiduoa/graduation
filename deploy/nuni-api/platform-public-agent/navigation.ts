@@ -70,13 +70,29 @@ export function exactNavigation(query: string, snapshot: PublicSnapshot) {
   if (pairs.length !== 1) throw new PublicAgentError('PUBLIC_AGENT_DESTINATION_UNCLEAR', 422);
   return pairs[0]!;
 }
-export function navigationReceipt(task: ParsedPublicTask, snapshot: PublicSnapshot, raw: unknown) {
+export function validatedPlan(snapshot: PublicSnapshot, raw: unknown) {
   const result = exactRecord(raw, ['fromId', 'toId']);
-  const expected = exactNavigation(task.data.query as string, snapshot);
-  if (result.fromId !== expected.fromId || result.toId !== expected.toId)
+  if (
+    typeof result.fromId !== 'string' ||
+    typeof result.toId !== 'string' ||
+    result.fromId === result.toId
+  )
     throw new PublicAgentError('PUBLIC_AGENT_INVALID_RESULT', 502);
-  const from = snapshot.places.find((p) => p.id === expected.fromId)!;
-  const to = snapshot.places.find((p) => p.id === expected.toId)!;
+  const from = snapshot.places.find((p) => p.id === result.fromId);
+  const to = snapshot.places.find((p) => p.id === result.toId);
+  if (!from || !to) throw new PublicAgentError('PUBLIC_AGENT_INVALID_RESULT', 502);
+  return {
+    kind: 'navigation-plan',
+    fromId: from.id,
+    toId: to.id,
+    fromName: from.name,
+    toName: to.name,
+  };
+}
+export function confirmedRoute(task: ParsedPublicTask, snapshot: PublicSnapshot, raw: unknown) {
+  const plan = validatedPlan(snapshot, raw);
+  const from = snapshot.places.find((p) => p.id === plan.fromId)!;
+  const to = snapshot.places.find((p) => p.id === plan.toId)!;
   const url = new URL('https://www.google.com/maps/dir/');
   url.searchParams.set('api', '1');
   url.searchParams.set('origin', `${from.lat},${from.lng}`);
@@ -91,4 +107,12 @@ export function navigationReceipt(task: ParsedPublicTask, snapshot: PublicSnapsh
     sourceLabel: snapshot.label,
     mode: task.binding.provider,
   };
+}
+
+export function navigationReceipt(task: ParsedPublicTask, snapshot: PublicSnapshot, raw: unknown) {
+  const result = exactRecord(raw, ['fromId', 'toId']);
+  const expected = exactNavigation(task.data.query as string, snapshot);
+  if (result.fromId !== expected.fromId || result.toId !== expected.toId)
+    throw new PublicAgentError('PUBLIC_AGENT_INVALID_RESULT', 502);
+  return confirmedRoute(task, snapshot, result);
 }

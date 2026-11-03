@@ -2,6 +2,8 @@ import { isDeepStrictEqual } from 'node:util';
 import { PlatformPublicAdmission, type PlatformSessionResolver } from './admission';
 import {
   DETERMINISTIC_PROVIDER,
+  FREE_PROVIDER,
+  FREE_MODEL,
   exactRecord,
   parseConfirmedTask,
   parseRecoveryScope,
@@ -13,6 +15,8 @@ import {
 import { PlatformPublicAgentLedger } from './ledger';
 import {
   exactNavigation,
+  validatedPlan,
+  confirmedRoute,
   navigationReceipt,
   publicSnapshot,
   type PublicCatalogReader,
@@ -25,6 +29,11 @@ type Options = {
   readPublicCatalog: PublicCatalogReader;
   timeoutMs?: number;
   clock?: () => number;
+  /** Explicitly injected, otherwise Groq stays disabled. */
+  groqPlan?: (
+    input: { schoolId: string; query: string; fingerprint: string },
+    signal: AbortSignal,
+  ) => Promise<unknown>;
   /** Controlled injection for tests; no default cloud provider or fallback. */
   execute?: (
     task: ParsedPublicTask,
@@ -69,7 +78,8 @@ export class PlatformPublicTaskService {
     const task = parseConfirmedTask(raw);
     if (
       task.binding.task !== 'public-campus-navigation' ||
-      task.binding.provider !== DETERMINISTIC_PROVIDER
+      (task.binding.provider !== DETERMINISTIC_PROVIDER &&
+        (task.binding.provider !== FREE_PROVIDER || !this.options.groqPlan))
     )
       throw new PublicAgentError('PUBLIC_AGENT_EXECUTOR_UNAVAILABLE', 503);
     return task;
@@ -78,7 +88,8 @@ export class PlatformPublicTaskService {
     const snapshot = await this.snapshot(task.binding.schoolId, signal);
     if (snapshot.fingerprint !== (task.data.consent as { fingerprint: string }).fingerprint)
       throw new PublicAgentError('PUBLIC_AGENT_SOURCE_CHANGED', 409);
-    exactNavigation(task.data.query as string, snapshot);
+    if (task.binding.provider === DETERMINISTIC_PROVIDER)
+      exactNavigation(task.data.query as string, snapshot);
     return snapshot;
   }
   async preview(auth: string | undefined, raw: unknown, signal?: AbortSignal) {
@@ -119,6 +130,82 @@ export class PlatformPublicTaskService {
       };
     });
   }
+  /** Disclosure before the user authorizes sending public query and names to Groq. */
+  async prepareGroq(auth: string | undefined, raw: unknown, signal?: AbortSignal) {
+    if (!this.options.groqPlan)
+      throw new PublicAgentError('PUBLIC_AGENT_EXECUTOR_UNAVAILABLE', 503);
+    const input = exactRecord(raw, ['schoolId', 'query', 'requestId']);
+    return this.bounded(signal, async (step, abort) => {
+      const actor = await step(() => this.admission.actor(auth));
+      if (typeof input.schoolId !== 'string' || !/^[A-Za-z0-9_-]{2,40}$/u.test(input.schoolId))
+        throw new PublicAgentError('PUBLIC_AGENT_INVALID_INPUT');
+      const snapshot = await step(() => this.snapshot(input.schoolId as string, abort));
+      const request = {
+        task: 'public-campus-navigation',
+        data: {
+          task: 'public-campus-navigation',
+          phase: 'execute',
+          ...input,
+          consent: {
+            provider: FREE_PROVIDER,
+            version: 1,
+            schoolId: input.schoolId,
+            query: input.query,
+            fingerprint: snapshot.fingerprint,
+          },
+        },
+      };
+      this.parse(request);
+      sameActor(actor, await step(() => this.admission.actor(auth)));
+      return {
+        request,
+        provider: FREE_PROVIDER,
+        model: FREE_MODEL,
+        dataScope: ['校園', '問題', '公開地點名稱與 ID'],
+        sourceDate: snapshot.updatedAt,
+        sourceLabel: snapshot.label,
+        placeCount: snapshot.places.length,
+      };
+    });
+  }
+  /** Explicit second approval binds the delivered suggestion to this still-open operation. */
+  async route(auth: string | undefined, raw: unknown, signal?: AbortSignal) {
+    const input = exactRecord(raw, ['approved', 'operationId', 'request', 'fromId', 'toId']);
+    if (input.approved !== true)
+      throw new PublicAgentError('PUBLIC_AGENT_CONFIRMATION_REQUIRED', 409);
+    const task = this.parse(input.request);
+    if (task.binding.provider !== FREE_PROVIDER || typeof input.operationId !== 'string')
+      throw new PublicAgentError('PUBLIC_AGENT_INVALID_INPUT');
+    return this.bounded(signal, async (step, abort) => {
+      const actor = await step(() => this.admission.actor(auth));
+      const lookup = { task: task.binding.task, schoolId: task.binding.schoolId };
+      const active = await step(() => this.options.ledger.status(actor, lookup));
+      if (!active || active.status !== 'completed' || active.operationId !== input.operationId)
+        throw new PublicAgentError('PUBLIC_AGENT_OPERATION_NOT_FOUND', 404);
+      const operation = await step(() => this.options.ledger.readBound(actor, task.binding));
+      if (
+        !operation ||
+        operation.status !== 'completed' ||
+        operation.operationId !== active.operationId
+      )
+        throw new PublicAgentError('PUBLIC_AGENT_OPERATION_NOT_FOUND', 404);
+      const snapshot = await step(() => this.source(task, abort));
+      const plan = validatedPlan(snapshot, { fromId: input.fromId, toId: input.toId });
+      if (
+        operation.result.sourceFingerprint !== snapshot.fingerprint ||
+        !isDeepStrictEqual(JSON.parse(JSON.stringify(operation.result.receipt)), plan)
+      )
+        throw new PublicAgentError('PUBLIC_AGENT_INVALID_RESULT', 502);
+      sameActor(actor, await step(() => this.admission.actor(auth)));
+      const current = await step(() => this.options.ledger.status(actor, lookup));
+      if (!current || current.status !== 'completed' || current.operationId !== active.operationId)
+        throw new PublicAgentError('PUBLIC_AGENT_OPERATION_NOT_FOUND', 404);
+      return {
+        operationId: active.operationId,
+        receipt: confirmedRoute(task, snapshot, { fromId: plan.fromId, toId: plan.toId }),
+      };
+    });
+  }
   async confirm(auth: string | undefined, raw: unknown, signal?: AbortSignal) {
     const input = exactRecord(raw, ['approved', 'request']);
     this.parse(input.request);
@@ -156,7 +243,13 @@ export class PlatformPublicTaskService {
       if (
         started &&
         (!(error instanceof PublicAgentError) ||
-          ['PUBLIC_AGENT_TIMEOUT', 'PUBLIC_AGENT_CANCELLED'].includes(error.code))
+          [
+            'PUBLIC_AGENT_TIMEOUT',
+            'PUBLIC_AGENT_CANCELLED',
+            'PUBLIC_AGENT_PROVIDER_TIMEOUT',
+            'PUBLIC_AGENT_PROVIDER_CANCELLED',
+            'PUBLIC_AGENT_PROVIDER_UNAVAILABLE',
+          ].includes(error.code))
       )
         throw new PublicAgentError('PUBLIC_AGENT_OUTCOME_UNKNOWN', 503);
       throw error;
@@ -183,12 +276,24 @@ export class PlatformPublicTaskService {
         sameActor(actor, await step(() => this.admission.actor(auth)));
         const snapshot = await step(() => this.source(task, abort));
         const rawResult = await step(() =>
-          this.options.execute
-            ? this.options.execute(task, snapshot, abort)
-            : Promise.resolve(exactNavigation(task.data.query as string, snapshot)),
+          task.binding.provider === FREE_PROVIDER
+            ? this.options.groqPlan!(
+                {
+                  schoolId: task.binding.schoolId,
+                  query: task.data.query as string,
+                  fingerprint: snapshot.fingerprint,
+                },
+                abort,
+              )
+            : this.options.execute
+              ? this.options.execute(task, snapshot, abort)
+              : Promise.resolve(exactNavigation(task.data.query as string, snapshot)),
         );
         const fresh = await step(() => this.source(task, abort));
-        const receipt = navigationReceipt(task, fresh, rawResult);
+        const receipt =
+          task.binding.provider === FREE_PROVIDER
+            ? validatedPlan(fresh, rawResult)
+            : navigationReceipt(task, fresh, rawResult);
         sameActor(actor, await step(() => this.admission.actor(auth)));
         await step(() =>
           this.options.ledger.complete(
@@ -211,6 +316,43 @@ export class PlatformPublicTaskService {
     } catch (error) {
       if (executing) {
         const e = executing;
+        // Only definitive provider responses may finish the operation. A lost
+        // database acknowledgement remains unknown and is never retried as work.
+        const knownFailure =
+          error instanceof PublicAgentError
+            ? (
+                {
+                  PUBLIC_AGENT_FREE_QUOTA_UNAVAILABLE: 'FREE_QUOTA_UNAVAILABLE',
+                  PUBLIC_AGENT_DESTINATION_UNCLEAR: 'DESTINATION_UNCLEAR',
+                  PUBLIC_AGENT_PROVIDER_INVALID_RESPONSE: 'INVALID_PROVIDER_RESPONSE',
+                } as const
+              )[
+                error.code as
+                  | 'PUBLIC_AGENT_FREE_QUOTA_UNAVAILABLE'
+                  | 'PUBLIC_AGENT_DESTINATION_UNCLEAR'
+                  | 'PUBLIC_AGENT_PROVIDER_INVALID_RESPONSE'
+              ]
+            : undefined;
+        if (knownFailure) {
+          try {
+            const failed = await this.bounded(undefined, (step) =>
+              step(() =>
+                this.options.ledger.fail(
+                  e.actor,
+                  task.binding,
+                  e.operationId,
+                  e.executionToken,
+                  knownFailure,
+                ),
+              ),
+            );
+            if (failed.status !== 'failed' || failed.failureCode !== knownFailure)
+              throw new Error('failure outcome unknown');
+            return failed;
+          } catch {
+            throw new PublicAgentError('PUBLIC_AGENT_OUTCOME_UNKNOWN', 503);
+          }
+        }
         // This best-effort tombstone cannot make an unknown transaction safe to repeat.
         if (
           error instanceof PublicAgentError &&
@@ -234,7 +376,13 @@ export class PlatformPublicTaskService {
       if (
         admitted &&
         (!(error instanceof PublicAgentError) ||
-          ['PUBLIC_AGENT_TIMEOUT', 'PUBLIC_AGENT_CANCELLED'].includes(error.code))
+          [
+            'PUBLIC_AGENT_TIMEOUT',
+            'PUBLIC_AGENT_CANCELLED',
+            'PUBLIC_AGENT_PROVIDER_TIMEOUT',
+            'PUBLIC_AGENT_PROVIDER_CANCELLED',
+            'PUBLIC_AGENT_PROVIDER_UNAVAILABLE',
+          ].includes(error.code))
       )
         throw new PublicAgentError('PUBLIC_AGENT_OUTCOME_UNKNOWN', 503);
       throw error;
@@ -250,18 +398,37 @@ export class PlatformPublicTaskService {
   ) {
     sameActor(actor, await step(() => this.admission.actor(auth)));
     if (operation?.status === 'completed') {
+      const scope = { task: task.binding.task, schoolId: task.binding.schoolId };
+      if (task.binding.provider === FREE_PROVIDER) {
+        const active = await step(() => this.options.ledger.status(actor, scope));
+        if (
+          !active ||
+          active.status !== 'completed' ||
+          active.operationId !== operation.operationId
+        )
+          throw new PublicAgentError('PUBLIC_AGENT_OPERATION_NOT_FOUND', 404);
+      }
       const snapshot = await step(() => this.source(task, signal));
-      const receipt = navigationReceipt(
-        task,
-        snapshot,
-        exactNavigation(task.data.query as string, snapshot),
-      );
+      const stored = operation.result.receipt;
+      const receipt =
+        task.binding.provider === FREE_PROVIDER
+          ? validatedPlan(snapshot, { fromId: stored.fromId, toId: stored.toId })
+          : navigationReceipt(task, snapshot, exactNavigation(task.data.query as string, snapshot));
       if (
         operation.result.sourceFingerprint !== snapshot.fingerprint ||
         !isDeepStrictEqual(JSON.parse(JSON.stringify(operation.result.receipt)), receipt)
       )
         throw new PublicAgentError('PUBLIC_AGENT_INVALID_RESULT', 502);
       sameActor(actor, await step(() => this.admission.actor(auth)));
+      if (task.binding.provider === FREE_PROVIDER) {
+        const active = await step(() => this.options.ledger.status(actor, scope));
+        if (
+          !active ||
+          active.status !== 'completed' ||
+          active.operationId !== operation.operationId
+        )
+          throw new PublicAgentError('PUBLIC_AGENT_OPERATION_NOT_FOUND', 404);
+      }
     }
     return operation;
   }
