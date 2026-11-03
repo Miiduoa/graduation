@@ -1,3 +1,4 @@
+import { traceNavigation } from './src/utils/e2eNavigationTrace';
 import { useClassReminders } from './src/hooks/useClassReminders';
 import { useNextClassWidget } from './src/widgets/useNextClassWidget';
 /* eslint-disable */
@@ -761,6 +762,10 @@ function AppNavigation() {
 }
 
 function PublicNavigation() {
+  useEffect(() => {
+    traceNavigation('mount', 'PublicNavigation');
+    return () => traceNavigation('unmount', 'PublicNavigation');
+  }, []);
   const navTheme = {
     ...DefaultTheme,
     colors: {
@@ -782,8 +787,12 @@ function PublicNavigation() {
       ref={publicNavigationRef}
       theme={navTheme}
       linking={preAuthLinking}
+      onStateChange={(state) => traceNavigation('state', 'PublicNavigation', undefined, state)}
       onReady={() => {
         markPublicNavigationReady();
+        traceNavigation('ready', 'PublicNavigation', undefined, () =>
+          publicNavigationRef.getRootState(),
+        );
       }}
     >
       <View style={{ flex: 1, backgroundColor: theme.colors.bg }}>

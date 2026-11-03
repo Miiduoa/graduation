@@ -15,6 +15,8 @@ import {
   loadSchoolLoginProviderKinds,
 } from '../services/schoolLoginAvailability';
 
+import { traceNavigation } from '../utils/e2eNavigationTrace';
+
 export default function LoginLandingScreen() {
   const navigation = useNavigation();
   const auth = useNuniSession();
@@ -22,6 +24,24 @@ export default function LoginLandingScreen() {
   const s = useThemeStyleSheet(createStyles);
   const [, refreshProviders] = useState(0);
   const schoolEntry = isSchoolLoginEntryAvailable(school.id);
+  useEffect(() => {
+    traceNavigation('mount', 'LoginLanding');
+    return () => traceNavigation('unmount', 'LoginLanding');
+  }, []);
+  useEffect(() => {
+    traceNavigation(
+      auth.loading
+        ? 'auth-loading'
+        : auth.pendingLogout
+          ? 'auth-pending-logout'
+          : auth.error
+            ? 'auth-error'
+            : auth.session
+              ? 'auth-session'
+              : 'auth-signed-out',
+      'LoginLanding',
+    );
+  }, [auth.loading, auth.pendingLogout, auth.error, auth.session]);
   useEffect(() => {
     let active = true;
     void loadSchoolLoginProviderKinds().then(() => {
@@ -59,7 +79,8 @@ export default function LoginLandingScreen() {
             把自己的校園資料，整理在一起
           </Text>
           <Text style={s.body}>
-            選擇學校後，可自行匯入課表、成績與活動；需要平台交流或課班服務時，請使用 Google 帳號登入。校園地圖、公車與公開資訊仍然不必登入。
+            選擇學校後，可自行匯入課表、成績與活動；需要平台交流或課班服務時，請使用 Google
+            帳號登入。校園地圖、公車與公開資訊仍然不必登入。
           </Text>
         </View>
         <SchoolBrowsingControl />
@@ -108,9 +129,21 @@ export default function LoginLandingScreen() {
           ) : null}
           <Pressable
             testID="login-start"
+            onLayout={(event) =>
+              traceNavigation(
+                `layout-y:${event.nativeEvent.layout.y}-height:${event.nativeEvent.layout.height}`,
+                'NuniWorkspace',
+              )
+            }
+            onPressIn={() => traceNavigation('press-in', 'NuniWorkspace')}
+            onPressOut={() => traceNavigation('press-out', 'NuniWorkspace')}
             accessibilityRole="button"
             style={({ pressed }) => [s.button, pressed && s.buttonPressed]}
-            onPress={() => safeNavigate(navigation, 'NuniWorkspace')}
+            onPress={() => {
+              traceNavigation('press', 'NuniWorkspace', undefined, () => navigation.getState?.());
+              const dispatched = safeNavigate(navigation, 'NuniWorkspace');
+              traceNavigation('dispatch-return', 'NuniWorkspace', dispatched);
+            }}
           >
             <Text style={s.buttonText}>
               {auth.session && !auth.loading && !auth.error && !auth.pendingLogout
@@ -148,10 +181,16 @@ export default function LoginLandingScreen() {
             <Pressable
               key={route}
               testID={`public-${route}`}
+              onPressIn={() => traceNavigation('press-in', route)}
+              onPressOut={() => traceNavigation('press-out', route)}
               accessibilityRole="button"
               accessibilityLabel={title}
               style={({ pressed }) => [s.publicButton, pressed && s.rowPressed]}
-              onPress={() => safeNavigate(navigation, route)}
+              onPress={() => {
+                traceNavigation('press', route);
+                const dispatched = safeNavigate(navigation, route);
+                traceNavigation('dispatch-return', route, dispatched);
+              }}
             >
               <Text
                 style={s.serviceNumber}
@@ -322,7 +361,12 @@ const createStyles = () =>
       borderRadius: 8,
       backgroundColor: theme.colors.accent,
     },
-    schoolButtonText: { color: theme.colors.onAccent, textAlign: 'center', fontSize: 15, fontWeight: '600' },
+    schoolButtonText: {
+      color: theme.colors.onAccent,
+      textAlign: 'center',
+      fontSize: 15,
+      fontWeight: '600',
+    },
     importButton: {
       minHeight: 48,
       alignSelf: 'stretch',
@@ -335,7 +379,12 @@ const createStyles = () =>
       borderColor: theme.colors.border,
       backgroundColor: theme.colors.surface,
     },
-    importButtonText: { color: theme.colors.accent, textAlign: 'center', fontSize: 14, fontWeight: '600' },
+    importButtonText: {
+      color: theme.colors.accent,
+      textAlign: 'center',
+      fontSize: 14,
+      fontWeight: '600',
+    },
     importHelp: { color: theme.colors.muted, fontSize: 12, lineHeight: 19 },
     footer: {
       color: theme.colors.muted,

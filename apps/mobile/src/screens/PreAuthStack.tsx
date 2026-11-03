@@ -21,6 +21,8 @@ import type { PreAuthStackParamList } from './preAuthTypes';
 import { createStackScreenOptions } from '../ui/navigationTheme';
 import { useThemeMode } from '../state/theme';
 
+import { traceNavigation } from '../utils/e2eNavigationTrace';
+
 const Stack = createNativeStackNavigator<PreAuthStackParamList, undefined>();
 
 /** Public guest stack may only deep-link into registered PreAuth routes. */
@@ -46,6 +48,10 @@ export function PreAuthStack() {
     <Stack.Navigator
       initialRouteName="LoginLanding"
       screenOptions={createStackScreenOptions()}
+      screenListeners={({ route }) => ({
+        focus: () => traceNavigation('focus', route.name),
+        blur: () => traceNavigation('blur', route.name),
+      })}
       id={undefined}
     >
       <Stack.Screen

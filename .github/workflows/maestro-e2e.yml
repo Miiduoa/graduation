@@ -35,6 +35,7 @@ jobs:
       CI: '1'
       APP_ENV: development
       EXPO_PUBLIC_MAESTRO: '1'
+      EXPO_PUBLIC_E2E_NAV_TRACE: '1'
       EXPO_PUBLIC_ALLOW_LOCAL_MOCK_AUTH: 'false'
       EXPO_PUBLIC_ENABLE_UNIVERSAL_DEV_ACCOUNTS: 'false'
 
@@ -156,6 +157,10 @@ jobs:
         working-directory: apps/mobile
         run: |
           mkdir -p .maestro/results
+          node --test ../../scripts/maestro-navigation-trace.test.mjs
+          node ../../scripts/maestro-navigation-trace.mjs .maestro/results/navigation-trace > .maestro/results/navigation-trace.log 2>&1 &
+          TRACE_PID=$!
+          trap 'kill "$TRACE_PID" 2>/dev/null || true; wait "$TRACE_PID" 2>/dev/null || true' EXIT
           maestro --device "$SIMULATOR_UDID" test .maestro/flows/01_onboarding.yaml \
             --test-output-dir .maestro/screenshots \
             --debug-output .maestro/results/debug \

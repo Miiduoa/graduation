@@ -1,3 +1,4 @@
+import { traceNavigation } from '../utils/e2eNavigationTrace';
 import React, { useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
@@ -358,6 +359,10 @@ export function NuniWorkspaceScreen({
   };
 } = {}) {
   const auth = useNuniSession();
+  useEffect(() => {
+    traceNavigation('mount', 'NuniWorkspace');
+    return () => traceNavigation('unmount', 'NuniWorkspace');
+  }, []);
   const s = useThemeStyleSheet(createStyles);
   const identity = useRef({ key: '', epoch: 0 });
   const identityKey = auth.session
