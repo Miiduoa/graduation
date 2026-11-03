@@ -363,6 +363,22 @@ it('shows the teacher LMS notice from the error code even if the server body is 
   expect((await screen.findByRole('alert')).textContent).toBe(TEACHER_LMS_UNAVAILABLE_COPY);
 });
 
+it('takes a guest from a private task to the service directory for the selected campus', () => {
+  state.user = null;
+  state.selectedSchoolId = 'ntu';
+  const view = render(<LoginPage />);
+  const link = screen.getByRole('link', { name: '不登入，繼續瀏覽' });
+  const destination = new URL(link.getAttribute('href')!, 'https://campus.local');
+  expect(destination.pathname).toBe('/search');
+  expect(destination.searchParams.get('schoolId')).toBe('ntu');
+  state.selectedSchoolId = 'pu';
+  view.rerender(<LoginPage />);
+  const afterSwitch = new URL(link.getAttribute('href')!, 'https://campus.local');
+  expect(afterSwitch.pathname).toBe('/search');
+  expect(afterSwitch.searchParams.get('schoolId')).toBe('pu');
+  expect(replace).not.toHaveBeenCalled();
+});
+
 it('offers school verification for an academic task without a misleading Google alternative', () => {
   state.user = null;
   state.studentId = true;
@@ -372,7 +388,7 @@ it('offers school verification for an academic task without a misleading Google 
   expect(screen.getByRole('button', { name: '連線學校帳號' })).toBeTruthy();
   expect(replace).not.toHaveBeenCalled();
   expect(screen.getByRole('link', { name: '不登入，繼續瀏覽' }).getAttribute('href')).toBe(
-    '/#public-services',
+    '/search',
   );
 });
 
@@ -401,7 +417,7 @@ it('treats lost-found as a school destination under Google-only sign-in options'
     screen.getByText('這個頁面要用學校帳號，Google 帳號無法代替。'),
   ).toBeTruthy();
   expect(screen.getByRole('link', { name: '不登入，繼續瀏覽' }).getAttribute('href')).toBe(
-    '/#public-services',
+    '/search',
   );
   expect(replace).not.toHaveBeenCalled();
 });

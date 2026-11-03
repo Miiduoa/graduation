@@ -87,7 +87,10 @@ function LoginForm({
   const publicDestination = isPublicCampusPath(
     new URL(destination, 'https://campus.local').pathname,
   );
-  const guestDestination = publicDestination ? destination : '/#public-services';
+  const directoryDestination = selectedSchoolId
+    ? `/search?${new URLSearchParams({ schoolId: selectedSchoolId })}`
+    : '/search';
+  const guestDestination = publicDestination ? destination : directoryDestination;
   useEffect(() => {
     const restore = () => {
       if (busyRef.current === 'platform') {
