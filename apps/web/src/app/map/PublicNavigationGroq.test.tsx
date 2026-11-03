@@ -45,6 +45,7 @@ it('requires explicit disclosure consent before model execution and a second con
   await disclose();
   expect(screen.getByText(/模型：openai\/gpt-oss-120b/)).toBeTruthy();
   expect(screen.getByText(/將傳送至 Groq/)).toBeTruthy();
+  expect(screen.getByText(/不會自動附加帳號、課表或定位；請勿在問題中輸入個資/)).toBeTruthy();
   expect(call.mock.calls.map((c) => c[0])).toEqual(['status', 'prepareGroq']);
   fireEvent.click(screen.getByRole('button', { name: '同意傳送並取得建議' }));
   await screen.findByRole('heading', { name: '請確認建議的地點' });

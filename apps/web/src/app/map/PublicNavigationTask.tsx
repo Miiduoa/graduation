@@ -504,7 +504,10 @@ function Task({ port }: { port: PublicTaskPort }) {
         gate.kind === 'clear' &&
         (port.mode === 'groq' ? (
           <>
-            <p>將傳送至 Groq：所選校園、你的問題及公開地點名稱與 ID；不包含帳號、課表或定位。</p>
+            <p>
+              將傳送至 Groq：所選校園、你的問題及公開地點名稱與
+              ID。系統不會自動附加帳號、課表或定位；請勿在問題中輸入個資。
+            </p>
             <p>
               模型：{preview.model}；公開地點來源：{preview.sourceLabel}，資料日期{' '}
               {preview.sourceDate}，共 {preview.placeCount} 筆。
