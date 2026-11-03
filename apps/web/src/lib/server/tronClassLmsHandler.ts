@@ -454,6 +454,19 @@ export function createTronClassLmsHandler({
         reconnect();
       }
 
+      // Cache hits must be revalidated too. The linked LMS session may change
+      // while Firestore is returning a cached snapshot, without any school call.
+      const verifyLinkedSession = async () => {
+        await requireAcademicAccount(db, uid);
+        const [latestPortal, latestSession] = await Promise.all([portalSnapshot.ref.get(), sessionRef.get()]);
+        if (!latestPortal.exists || latestPortal.data()?.ownerUid !== uid ||
+          latestPortal.data()?.tronClassSessionId !== linkedId ||
+          !(schoolSessionExpiry(latestPortal.data()?.expiresAt) > now()) ||
+          !latestSession.exists || latestSession.data()?.ownerUid !== uid ||
+          !(schoolSessionExpiry(latestSession.data()?.expiresAt) > now()) ||
+          !schoolSessionCookies(latestSession.data()?.cookies)) reconnect();
+      };
+
       const cacheRef = db.doc(`${LMS_CACHE_COLLECTION}/${uid}`);
       let extras: Record<string, CachedCourseContents> = {};
       let cachedHomework: LmsReadonlySnapshot | null = null;
@@ -485,13 +498,8 @@ export function createTronClassLmsHandler({
         }
       }
 
-      if (cachedHomework && !refresh && courseId && extras[String(courseId)]) {
-        return {
-          ...mergeExtras(cachedHomework, extras),
-          cache: { hit: true, expiresAt: cachedHomework.cache.expiresAt },
-        };
-      }
-      if (cachedHomework && !refresh && !courseId) {
+      if (cachedHomework && !refresh && (!courseId || extras[String(courseId)])) {
+        await verifyLinkedSession();
         return {
           ...mergeExtras(cachedHomework, extras),
           cache: { hit: true, expiresAt: cachedHomework.cache.expiresAt },
@@ -574,18 +582,9 @@ export function createTronClassLmsHandler({
         }
       }
 
-      // Content requests may still be in flight when the user reconnects or signs out.
-      // Never return or persist results fetched under a superseded LMS session.
-      if (fetchedFromSchool) {
-        await requireAcademicAccount(db, uid);
-        const [latestPortal, latestSession] = await Promise.all([portalSnapshot.ref.get(), sessionRef.get()]);
-        if (!latestPortal.exists || latestPortal.data()?.ownerUid !== uid ||
-          latestPortal.data()?.tronClassSessionId !== linkedId ||
-          !(schoolSessionExpiry(latestPortal.data()?.expiresAt) > now()) ||
-          !latestSession.exists || latestSession.data()?.ownerUid !== uid ||
-          !(schoolSessionExpiry(latestSession.data()?.expiresAt) > now()) ||
-          !schoolSessionCookies(latestSession.data()?.cookies)) reconnect();
-      }
+      // Cache-only and school-fetch responses must both fail closed if the portal
+      // was re-linked or signed out during an asynchronous read.
+      await verifyLinkedSession();
 
       const merged = mergeExtras(homeworkOnlySnapshot(snapshot), extras);
       merged.cache = { hit: !fetchedFromSchool && !refresh, expiresAt: snapshot.cache.expiresAt };
