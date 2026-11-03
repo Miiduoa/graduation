@@ -138,7 +138,7 @@ test('timetable name+code q uniquely hits a title with only the course name', as
   ]);
   const view = render(
     <ClassroomCourseSearch
-      query="資料庫系統 CS301"
+      query="資料庫系統"
       courseCode="CS301"
       navigation={{ navigate: mockNavigate }}
     />,
@@ -146,4 +146,21 @@ test('timetable name+code q uniquely hits a title with only the course name', as
   await waitFor(() => expect(view.getByTestId('classroom-query-unique')).toBeTruthy());
   expect(view.getByLabelText('資料庫系統')).toBeTruthy();
   expect(view.queryByLabelText('互動設計')).toBeNull();
+  expect(view.getByText(/· 課表對應/)).toBeTruthy();
+});
+
+test('editing search after from=timetable clears timetable attribution copy', async () => {
+  const view = render(
+    <ClassroomCourseSearch query="互動設計" navigation={{ navigate: mockNavigate }} />,
+  );
+  await waitFor(() => expect(view.getByTestId('classroom-query-unique')).toBeTruthy());
+  expect(view.getByText(/· 課表對應/)).toBeTruthy();
+  expect(view.getByText(/課表搜尋：/)).toBeTruthy();
+
+  fireEvent.changeText(view.getByLabelText('搜尋課程名稱'), '不存在的課程');
+  await waitFor(() => expect(view.getByTestId('classroom-query-none')).toBeTruthy());
+  expect(view.getByText(/換個課程關鍵字/)).toBeTruthy();
+  expect(view.queryByText(/課表上的這門課/)).toBeNull();
+  expect(view.queryByText(/· 課表對應/)).toBeNull();
+  expect(view.queryByText(/課表搜尋：/)).toBeNull();
 });
