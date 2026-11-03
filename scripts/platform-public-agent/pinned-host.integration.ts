@@ -259,8 +259,8 @@ try {
         payload,
       });
     const body = { schoolId: 'pu', query: '從主顧樓到蓋夏圖書館', requestId: 'synthetic_host_01' };
-    const quotaBefore = await db.query<{ total: number }>(
-      'SELECT count(*)::integer AS total FROM platform_public_agent_quota',
+    const quotaBefore = await db.query(
+      'SELECT budget_kind,budget_key,window_start::text,used FROM platform_public_agent_quota ORDER BY budget_kind,budget_key,window_start',
     );
     const capability = await call('capability', { schoolId: 'pu' });
     assert.equal(capability.statusCode, 200, capability.body);
@@ -280,11 +280,10 @@ try {
         .statusCode,
       401,
     );
-    const quotaAfter = await db.query<{ total: number }>(
-      'SELECT count(*)::integer AS total FROM platform_public_agent_quota',
+    const quotaAfter = await db.query(
+      'SELECT budget_kind,budget_key,window_start::text,used FROM platform_public_agent_quota ORDER BY budget_kind,budget_key,window_start',
     );
-    assert.equal(quotaBefore.rows[0]?.total, 0);
-    assert.equal(quotaAfter.rows[0]?.total, 0);
+    assert.deepEqual(quotaAfter.rows, quotaBefore.rows);
     assert.equal(
       (await call('preview', body, { origin: 'https://example.invalid' })).statusCode,
       403,

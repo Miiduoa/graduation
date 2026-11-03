@@ -16,9 +16,6 @@ import {
 import { createHash } from 'node:crypto';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import process from 'node:process';
-import console from 'node:console';
-
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 if (process.argv.length !== 4 || process.argv[2] !== '--prepared')
   throw Error('Expected --prepared <local-test-checkout>');

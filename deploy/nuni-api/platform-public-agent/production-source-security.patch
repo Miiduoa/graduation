@@ -452,10 +452,10 @@ index 0000000..cbd9dba
 +}
 diff --git a/apps/api/src/platform-public-agent/fastify-candidate.ts b/apps/api/src/platform-public-agent/fastify-candidate.ts
 new file mode 100644
-index 0000000..8d4e80e
+index 0000000..a1dd539
 --- /dev/null
 +++ b/apps/api/src/platform-public-agent/fastify-candidate.ts
-@@ -0,0 +1,230 @@
+@@ -0,0 +1,231 @@
 +import { PublicAgentError, type PlatformTaskActor } from './contract';
 +import {
 +  PlatformPublicAgentLedger,
@@ -468,6 +468,7 @@ index 0000000..8d4e80e
 +
 +const prefix = '/v1/auth/platform/public-agent';
 +const actions = [
++  'capability',
 +  'preview',
 +  'prepareGroq',
 +  'confirm',
@@ -688,10 +689,10 @@ index 0000000..8d4e80e
 +}
 diff --git a/apps/api/src/platform-public-agent/groq-navigation-plan.ts b/apps/api/src/platform-public-agent/groq-navigation-plan.ts
 new file mode 100644
-index 0000000..4b567de
+index 0000000..cf83065
 --- /dev/null
 +++ b/apps/api/src/platform-public-agent/groq-navigation-plan.ts
-@@ -0,0 +1,310 @@
+@@ -0,0 +1,330 @@
 +import { exactRecord, FREE_MODEL, PublicAgentError } from './contract';
 +import { publicSnapshot, type PublicCatalogReader } from './navigation';
 +
@@ -706,7 +707,12 @@ index 0000000..4b567de
 +export type PublicPlanInput = { schoolId: string; query: string; fingerprint: string };
 +type Options = {
 +  enabled?: boolean;
-+  fetch: typeof fetch;
++  fetch?: typeof fetch;
++  transport?: (
++    url: string,
++    init: RequestInit,
++    beforeSend: () => Promise<void>,
++  ) => Promise<Response>;
 +  readPublicCatalog: PublicCatalogReader;
 +  timeoutMs?: number;
 +};
@@ -852,7 +858,7 @@ index 0000000..4b567de
 +export function createGroqNavigationPlanner(options: Options) {
 +  if (
 +    options?.enabled !== true ||
-+    typeof options?.fetch !== 'function' ||
++    (typeof options?.fetch !== 'function' && typeof options?.transport !== 'function') ||
 +    typeof options?.readPublicCatalog !== 'function' ||
 +    !Number.isSafeInteger(options.timeoutMs ?? 10_000) ||
 +    (options.timeoutMs ?? 10_000) < 1 ||
@@ -908,10 +914,20 @@ index 0000000..4b567de
 +      const projected = projectSource(input, await readSource());
 +      // The trusted host revalidates this request's account/session after the
 +      // last source read, immediately before the external request is permitted.
-+      await step(() => beforeSend(controller.signal));
++      let sessionFailed = false;
++      let sessionError: unknown;
++      const revalidateSession = async () => {
++        try {
++          await beforeSend(controller.signal);
++        } catch (error) {
++          sessionFailed = true;
++          sessionError = error;
++          throw error;
++        }
++      };
 +      const response = await step(async () => {
 +        try {
-+          return await options.fetch(GROQ_ENDPOINT, {
++          const request: RequestInit = {
 +            method: 'POST',
 +            redirect: 'error',
 +            cache: 'no-store',
@@ -948,8 +964,13 @@ index 0000000..4b567de
 +                { role: 'user', content: JSON.stringify(projected) },
 +              ],
 +            }),
-+          });
-+        } catch {
++          };
++          if (options.transport)
++            return await options.transport(GROQ_ENDPOINT, request, revalidateSession);
++          await revalidateSession();
++          return await options.fetch!(GROQ_ENDPOINT, request);
++        } catch (error) {
++          if (sessionFailed && error === sessionError) throw error;
 +          throw new PublicAgentError('PUBLIC_AGENT_PROVIDER_UNAVAILABLE', 503);
 +        }
 +      });
@@ -1002,12 +1023,87 @@ index 0000000..4b567de
 +    }
 +  };
 +}
+diff --git a/apps/api/src/platform-public-agent/groq-server-transport.ts b/apps/api/src/platform-public-agent/groq-server-transport.ts
+new file mode 100644
+index 0000000..ba1919c
+--- /dev/null
++++ b/apps/api/src/platform-public-agent/groq-server-transport.ts
+@@ -0,0 +1,69 @@
++import { PublicAgentError } from './contract';
++
++const ENDPOINT = 'https://api.groq.com/openai/v1/chat/completions';
++type FreeOnlyGuard = (signal: AbortSignal) => Promise<boolean>;
++type Options = { credential: string; fetch: typeof fetch; freeOnlyGuard: FreeOnlyGuard };
++const unavailable = (): never => {
++  throw new PublicAgentError('PUBLIC_AGENT_PROVIDER_UNAVAILABLE', 503);
++};
++
++/**
++ * Candidate only. The host must supply an authoritative no-charge guarantee; a
++ * plan-status lookup or an operator-provided boolean cannot make billing atomic.
++ * No runtime configuration in this repository enables this transport.
++ */
++export function createGroqServerTransport(options: Options) {
++  if (
++    typeof options?.credential !== 'string' ||
++    !/^[\x21-\x7e]{1,1024}$/u.test(options.credential) ||
++    typeof options.fetch !== 'function' ||
++    typeof options.freeOnlyGuard !== 'function'
++  )
++    return unavailable();
++  const credential = options.credential;
++  return async (input: string, init: RequestInit, beforeSend: () => Promise<void>) => {
++    const headers = new Headers(init?.headers);
++    if (
++      input !== ENDPOINT ||
++      init?.method !== 'POST' ||
++      init.redirect !== 'error' ||
++      init.cache !== 'no-store' ||
++      typeof init.body !== 'string' ||
++      !init.signal ||
++      typeof beforeSend !== 'function' ||
++      headers.get('content-type') !== 'application/json' ||
++      headers.get('accept') !== 'application/json' ||
++      [...headers.keys()].some((name) => name !== 'accept' && name !== 'content-type')
++    )
++      return unavailable();
++    const signal = init.signal;
++    if (signal.aborted) throw new PublicAgentError('PUBLIC_AGENT_PROVIDER_CANCELLED', 503);
++    let allowed = false;
++    try {
++      allowed = (await options.freeOnlyGuard(signal)) === true;
++    } catch {
++      return unavailable();
++    }
++    if (signal.aborted) throw new PublicAgentError('PUBLIC_AGENT_PROVIDER_CANCELLED', 503);
++    if (!allowed) return unavailable();
++    // Recheck the session after the potentially slow guard and immediately before sending.
++    await beforeSend();
++    if (signal.aborted) throw new PublicAgentError('PUBLIC_AGENT_PROVIDER_CANCELLED', 503);
++    try {
++      return await options.fetch(ENDPOINT, {
++        method: 'POST',
++        redirect: 'error',
++        cache: 'no-store',
++        signal,
++        headers: {
++          accept: 'application/json',
++          'content-type': 'application/json',
++          authorization: `Bearer ${credential}`,
++        },
++        body: init.body,
++      });
++    } catch {
++      return unavailable();
++    }
++  };
++}
 diff --git a/apps/api/src/platform-public-agent/http.ts b/apps/api/src/platform-public-agent/http.ts
 new file mode 100644
-index 0000000..aa8828a
+index 0000000..cf48c5e
 --- /dev/null
 +++ b/apps/api/src/platform-public-agent/http.ts
-@@ -0,0 +1,137 @@
+@@ -0,0 +1,138 @@
 +import { PublicAgentError } from './contract';
 +import { PlatformPublicTaskService } from './service';
 +
@@ -1022,6 +1118,7 @@ index 0000000..aa8828a
 +};
 +const prefix = '/api/platform-public-agent/';
 +const actions = [
++  'capability',
 +  'preview',
 +  'prepareGroq',
 +  'confirm',
@@ -2138,10 +2235,10 @@ index 0000000..6872452
 +}
 diff --git a/apps/api/src/platform-public-agent/navigation.ts b/apps/api/src/platform-public-agent/navigation.ts
 new file mode 100644
-index 0000000..585b597
+index 0000000..5d0ab59
 --- /dev/null
 +++ b/apps/api/src/platform-public-agent/navigation.ts
-@@ -0,0 +1,123 @@
+@@ -0,0 +1,127 @@
 +import { createHash } from 'node:crypto';
 +import { exactRecord, PublicAgentError, type ParsedPublicTask } from './contract';
 +
@@ -2152,7 +2249,11 @@ index 0000000..585b597
 +  label: string;
 +  places: PublicPlace[];
 +};
-+export type PublicCatalogReader = (schoolId: string, signal: AbortSignal) => Promise<PublicCatalog>;
++// A server-owned reader returns null only for a known unsupported school; failures throw.
++export type PublicCatalogReader = (
++  schoolId: string,
++  signal: AbortSignal,
++) => Promise<PublicCatalog | null>;
 +const invalid = (): never => {
 +  throw new PublicAgentError('PUBLIC_AGENT_SOURCE_UNAVAILABLE', 503);
 +};
@@ -2267,7 +2368,7 @@ index 0000000..585b597
 +}
 diff --git a/apps/api/src/platform-public-agent/production-catalog.ts b/apps/api/src/platform-public-agent/production-catalog.ts
 new file mode 100644
-index 0000000..f1518f6
+index 0000000..4f26571
 --- /dev/null
 +++ b/apps/api/src/platform-public-agent/production-catalog.ts
 @@ -0,0 +1,41 @@
@@ -2301,8 +2402,8 @@ index 0000000..f1518f6
 +    'pu',
 +  );
 +  return async (schoolId, signal) => {
-+    if (signal.aborted || schoolId !== 'pu')
-+      throw new PublicAgentError('PUBLIC_AGENT_SOURCE_UNAVAILABLE', 503);
++    if (signal.aborted) throw new PublicAgentError('PUBLIC_AGENT_SOURCE_UNAVAILABLE', 503);
++    if (schoolId !== 'pu') return null;
 +    // Return copies so no caller can alter the source subsequently delivered to another account.
 +    return {
 +      schoolId: snapshot.schoolId,
@@ -2314,22 +2415,33 @@ index 0000000..f1518f6
 +}
 diff --git a/apps/api/src/platform-public-agent/production-host.ts b/apps/api/src/platform-public-agent/production-host.ts
 new file mode 100644
-index 0000000..f8e439c
+index 0000000..2399571
 --- /dev/null
 +++ b/apps/api/src/platform-public-agent/production-host.ts
-@@ -0,0 +1,40 @@
+@@ -0,0 +1,60 @@
 +import {
 +  isPlatformPublicTaskRoute,
 +  registerPlatformPublicTaskRoutes,
 +  type FastifyCandidate,
 +} from './fastify-candidate';
 +import { bindProvidencePublicCatalog } from './production-catalog';
++import { createGroqNavigationPlanner } from './groq-navigation-plan';
++import { createGroqServerTransport } from './groq-server-transport';
 +import type { PlatformSessionResolver } from './admission';
 +import type { PublicAgentDatabase, PublicAgentPolicy } from './ledger';
 +
 +type Source = Parameters<typeof bindProvidencePublicCatalog>[0];
 +type Places = Parameters<typeof bindProvidencePublicCatalog>[1];
-+export type PublicAgentHostOptions = { enabled: true; policy: PublicAgentPolicy };
++export type PublicAgentHostOptions = {
++  enabled: true;
++  policy: PublicAgentPolicy;
++  /** Test-only candidate until a provider-enforced no-charge guarantee is established. */
++  groqCandidate?: {
++    credential: string;
++    fetch: typeof fetch;
++    freeOnlyGuard: (signal: AbortSignal) => Promise<boolean>;
++  };
++};
 +
 +/** Both the authorization exemption and registration must use the same opt-in. */
 +export function hostAllowsPublicTask(
@@ -2340,7 +2452,7 @@ index 0000000..f8e439c
 +  return isPlatformPublicTaskRoute(method, path, options?.enabled === true);
 +}
 +
-+/** Deliberately has no environment flag or provider: the existing API remains disabled by default. */
++/** No runtime flag or credentials are configured here; existing API stays disabled. */
 +export function installPublicTaskHost(
 +  app: FastifyCandidate,
 +  db: PublicAgentDatabase,
@@ -2350,12 +2462,21 @@ index 0000000..f8e439c
 +  options?: PublicAgentHostOptions,
 +): void {
 +  if (options?.enabled !== true) return;
++  const readPublicCatalog = bindProvidencePublicCatalog(source, places);
++  const groqPlan = options.groqCandidate
++    ? createGroqNavigationPlanner({
++        enabled: true,
++        transport: createGroqServerTransport(options.groqCandidate),
++        readPublicCatalog,
++      })
++    : undefined;
 +  registerPlatformPublicTaskRoutes(app, {
 +    enabled: true,
 +    db,
 +    accounts,
 +    policy: options.policy,
-+    readPublicCatalog: bindProvidencePublicCatalog(source, places),
++    readPublicCatalog,
++    ...(groqPlan ? { groqPlan, freeTierVerified: true } : {}),
 +  });
 +}
 diff --git a/apps/api/src/platform-public-agent/providenceCampus.ts b/apps/api/src/platform-public-agent/providenceCampus.ts
@@ -2655,10 +2776,10 @@ index 0000000..d7a259a
 +}
 diff --git a/apps/api/src/platform-public-agent/service.ts b/apps/api/src/platform-public-agent/service.ts
 new file mode 100644
-index 0000000..96d5f49
+index 0000000..a5a1c9a
 --- /dev/null
 +++ b/apps/api/src/platform-public-agent/service.ts
-@@ -0,0 +1,517 @@
+@@ -0,0 +1,548 @@
 +import { isDeepStrictEqual } from 'node:util';
 +import { PlatformPublicAdmission, type PlatformSessionResolver } from './admission';
 +import {
@@ -2730,11 +2851,42 @@ index 0000000..96d5f49
 +  }
 +  private async snapshot(school: string, signal: AbortSignal) {
 +    try {
-+      return publicSnapshot(await this.options.readPublicCatalog(school, signal), school);
++      const catalog = await this.options.readPublicCatalog(school, signal);
++      if (!catalog) throw new PublicAgentError('PUBLIC_AGENT_SOURCE_UNAVAILABLE', 503);
++      return publicSnapshot(catalog, school);
 +    } catch (error) {
 +      if (error instanceof PublicAgentError) throw error;
 +      throw new PublicAgentError('PUBLIC_AGENT_SOURCE_UNAVAILABLE', 503);
 +    }
++  }
++  /** Capability is informational; every later operation revalidates source and session. */
++  async capability(auth: string | undefined, raw: unknown, signal?: AbortSignal) {
++    const input = exactRecord(raw, ['schoolId']);
++    if (typeof input.schoolId !== 'string' || !/^[A-Za-z0-9_-]{2,40}$/u.test(input.schoolId))
++      throw new PublicAgentError('PUBLIC_AGENT_INVALID_INPUT');
++    const schoolId = input.schoolId;
++    return this.bounded(signal, async (step, abort) => {
++      const actor = await step(() => this.admission.actor(auth));
++      let catalog;
++      try {
++        catalog = await step(() => this.options.readPublicCatalog(schoolId, abort));
++      } catch (error) {
++        if (error instanceof PublicAgentError) throw error;
++        throw new PublicAgentError('PUBLIC_AGENT_SOURCE_UNAVAILABLE', 503);
++      }
++      const snapshot = catalog === null ? null : publicSnapshot(catalog, schoolId);
++      const names = new Map<string, number>();
++      for (const place of snapshot?.places ?? [])
++        names.set(place.name, (names.get(place.name) ?? 0) + 1);
++      const canNavigate = [...names.values()].filter((count) => count === 1).length >= 2;
++      sameActor(actor, await step(() => this.admission.actor(auth)));
++      return {
++        schoolId,
++        // A configured planner or static flag alone cannot establish a no-spend guarantee.
++        modes: canNavigate ? ['deterministic'] : [],
++        source: snapshot ? { date: snapshot.updatedAt, label: snapshot.label } : null,
++      };
++    });
 +  }
 +  private parse(raw: unknown) {
 +    const task = parseConfirmedTask(raw);
