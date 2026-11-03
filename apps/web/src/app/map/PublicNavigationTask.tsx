@@ -9,7 +9,16 @@ export type PublicTaskPort = {
   localPreview?: boolean;
   mode?: 'deterministic' | 'groq';
   call: (
-    action: 'preview' | 'prepareGroq' | 'confirm' | 'execute' | 'route' | 'read' | 'status' | 'ack',
+    action:
+      | 'preview'
+      | 'prepareGroq'
+      | 'confirm'
+      | 'execute'
+      | 'route'
+      | 'read'
+      | 'status'
+      | 'reconcile'
+      | 'ack',
     body: unknown,
     signal: AbortSignal,
   ) => Promise<unknown>;
@@ -271,6 +280,48 @@ function Task({ port }: { port: PublicTaskPort }) {
         running.current = false;
         setBusy(false);
         if (refreshStatus) void checkStatus();
+      }
+    }
+  }
+  async function reconcile() {
+    if (running.current || gate.kind !== 'locked' || gate.operation?.status !== 'unknown') return;
+    const id = gate.operation.operationId;
+    running.current = true;
+    setBusy(true);
+    setError('');
+    const controller = new AbortController(),
+      version = ++generation.current;
+    pending.current = controller;
+    try {
+      const value = await port.call('reconcile', { ...scope, operationId: id }, controller.signal);
+      const verified = parseStatus(value);
+      if (!verified || verified.status !== 'failed' || verified.operationId !== id)
+        throw new Error('INVALID_STATUS');
+      const current = parseStatus(await port.call('status', scope, controller.signal));
+      if (!current || current.status !== 'failed' || current.operationId !== id)
+        throw new Error('INVALID_STATUS');
+      let detail: Operation | null = null;
+      if (preview) {
+        const result = (await port.call('read', preview.request, controller.signal)) as Operation;
+        const state = parseStatus(result);
+        if (
+          state?.status !== 'failed' ||
+          state.operationId !== id ||
+          result.failureCode !== 'NOT_DISPATCHED'
+        )
+          throw new Error('INVALID_STATUS');
+        detail = result;
+      }
+      if (version === generation.current) {
+        setGate({ kind: 'locked', operation: current });
+        setOperation(detail);
+      }
+    } catch {
+      if (version === generation.current) setError('仍無法確認是否送出，請保留原任務並稍後再查。');
+    } finally {
+      if (version === generation.current) {
+        running.current = false;
+        setBusy(false);
       }
     }
   }
@@ -542,6 +593,11 @@ function Task({ port }: { port: PublicTaskPort }) {
           </p>
           {terminal && !receipt && !preview && (
             <p>目前無法取得前次回執；確認結案後才能建立新任務。</p>
+          )}
+          {state === 'unknown' && gate.operation && (
+            <button className="btn" disabled={busy} onClick={() => void reconcile()}>
+              確認是否已送出
+            </button>
           )}
           <button className="btn" disabled={busy} onClick={() => void checkStatus()}>
             查詢原任務

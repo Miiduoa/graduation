@@ -173,3 +173,19 @@ it('distinguishes a proven undelivered operation from an unknown failure code', 
     ),
   ).toThrow();
 });
+it('projects reconciliation only when the failed result matches the requested operation', () => {
+  const body = { task: 'public-campus-navigation', schoolId: 'pu', operationId: op };
+  expect(
+    projectPlatformPublicAgent('reconcile', { status: 'failed', operationId: op }, body),
+  ).toEqual({ status: 'failed', operationId: op });
+  expect(() =>
+    projectPlatformPublicAgent('reconcile', { status: 'unknown', operationId: op }, body),
+  ).toThrow();
+  expect(() =>
+    projectPlatformPublicAgent(
+      'reconcile',
+      { status: 'failed', operationId: 'pago_22222222-2222-2222-2222-222222222222' },
+      body,
+    ),
+  ).toThrow();
+});

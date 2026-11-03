@@ -17,6 +17,7 @@ export type PublicAgentAction =
   | 'route'
   | 'read'
   | 'status'
+  | 'reconcile'
   | 'ack';
 export type PublicAgentTransport = (input: {
   action: PublicAgentAction;
@@ -58,6 +59,7 @@ export function createPlatformPublicAgentGateway(options: {
           'route',
           'read',
           'status',
+          'reconcile',
           'ack',
         ].includes(action)
       )
@@ -86,9 +88,11 @@ export function createPlatformPublicAgentGateway(options: {
                 ? ['approved', 'operationId', 'request', 'fromId', 'toId']
                 : action === 'status'
                   ? ['task', 'schoolId']
-                  : action === 'ack'
-                    ? ['task', 'schoolId', 'operationId', 'approved']
-                    : ['task', 'data'];
+                  : action === 'reconcile'
+                    ? ['task', 'schoolId', 'operationId']
+                    : action === 'ack'
+                      ? ['task', 'schoolId', 'operationId', 'approved']
+                      : ['task', 'data'];
       if (
         Object.keys(body).length !== names.length ||
         Object.keys(body).some((key) => !names.includes(key))

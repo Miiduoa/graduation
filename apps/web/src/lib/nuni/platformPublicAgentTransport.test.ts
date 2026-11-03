@@ -88,6 +88,7 @@ describe('single-attempt candidate platform transport', () => {
     'route',
     'read',
     'status',
+    'reconcile',
     'ack',
   ] as PublicAgentAction[])(
     'uses only the fixed %s endpoint with server session',

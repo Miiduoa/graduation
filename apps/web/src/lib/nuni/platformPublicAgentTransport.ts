@@ -11,6 +11,7 @@ const PATHS: Record<PublicAgentAction, string> = {
   route: '/v1/auth/platform/public-agent/route',
   read: '/v1/auth/platform/public-agent/read',
   status: '/v1/auth/platform/public-agent/status',
+  reconcile: '/v1/auth/platform/public-agent/reconcile',
   ack: '/v1/auth/platform/public-agent/ack',
 };
 const FAILURES: Record<string, number> = {

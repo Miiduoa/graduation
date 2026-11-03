@@ -317,6 +317,11 @@ export function projectPlatformPublicAgent(
       return fail();
     return { status: r.status, operationId: operationId(r.operationId) };
   }
+  if (action === 'reconcile') {
+    const r = row(value, ['status', 'operationId']);
+    if (r.status !== 'failed' || r.operationId !== input.operationId) return fail();
+    return { status: 'failed', operationId: operationId(r.operationId) };
+  }
   if (action === 'ack') {
     const r = row(value, ['status', 'operationId']);
     if (r.status !== 'acknowledged' || r.operationId !== input.operationId) return fail();

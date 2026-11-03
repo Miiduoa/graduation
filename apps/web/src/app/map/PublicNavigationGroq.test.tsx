@@ -120,3 +120,81 @@ it('only describes a proven NOT_DISPATCHED result as not sent and requires closu
   expect((await screen.findByRole('alert')).textContent).toContain('未送出');
   expect(screen.getByRole('button', { name: '結案並開始新任務' })).toBeTruthy();
 });
+it('reconciles unknown only on request, avoids duplicate attempts, and requires acknowledgement', async () => {
+  let finish!: (value: unknown) => void;
+  let statusCount = 0;
+  const call = vi.fn(async (action: string) => {
+    if (action === 'status')
+      return { status: statusCount++ ? 'failed' : 'unknown', operationId: op };
+    if (action === 'reconcile')
+      return await new Promise((resolve) => {
+        finish = resolve;
+      });
+    throw new Error('unexpected');
+  });
+  render(<PublicNavigationTask port={port(call)} />);
+  const button = await screen.findByRole('button', { name: '確認是否已送出' });
+  fireEvent.click(button);
+  fireEvent.click(button);
+  expect(call.mock.calls.filter((c) => c[0] === 'reconcile')).toHaveLength(1);
+  await act(async () => finish({ status: 'failed', operationId: op }));
+  expect(await screen.findByRole('button', { name: '結案並開始新任務' })).toBeTruthy();
+  expect(screen.queryByText(/未送出/)).toBeNull();
+  expect(call.mock.calls.some((c) => c[0] === 'ack' || c[0] === 'execute')).toBe(false);
+});
+it.each([{ scope: 'account-b' }, { schoolId: 'other' }])(
+  'discards late reconciliation after account or school change: %j',
+  async (change) => {
+    let finish!: (value: unknown) => void;
+    const call = vi.fn(async (action: string) => {
+      if (action === 'status') return { status: 'unknown', operationId: op };
+      if (action === 'reconcile')
+        return await new Promise((resolve) => {
+          finish = resolve;
+        });
+      throw new Error('unexpected');
+    });
+    const view = render(<PublicNavigationTask port={port(call)} />);
+    fireEvent.click(await screen.findByRole('button', { name: '確認是否已送出' }));
+    view.rerender(<PublicNavigationTask port={{ ...port(call), ...change }} />);
+    await act(async () => finish({ status: 'failed', operationId: op }));
+    expect(screen.queryByRole('button', { name: '結案並開始新任務' })).toBeNull();
+    expect(screen.queryByText(/未送出/)).toBeNull();
+    expect(call.mock.calls.some((c) => c[0] === 'ack' || c[0] === 'execute')).toBe(false);
+  },
+);
+it('does not unlock or claim unsent on an ambiguous reconcile error', async () => {
+  const call = vi.fn(async (action: string) => {
+    if (action === 'status') return { status: 'unknown', operationId: op };
+    throw new Error('PUBLIC_AGENT_OUTCOME_UNKNOWN');
+  });
+  render(<PublicNavigationTask port={port(call)} />);
+  fireEvent.click(await screen.findByRole('button', { name: '確認是否已送出' }));
+  expect((await screen.findByRole('alert')).textContent).toContain('仍無法確認');
+  expect(screen.queryByRole('button', { name: '結案並開始新任務' })).toBeNull();
+  expect(screen.queryByText(/未送出/)).toBeNull();
+});
+it('shows proven unsent only after checking the same operation and reading its bound request', async () => {
+  let reconciled = false;
+  const call = vi.fn(async (action: string) => {
+    if (action === 'status') return reconciled ? { status: 'failed', operationId: op } : null;
+    if (action === 'prepareGroq') return disclosure;
+    if (action === 'confirm') return { confirmationId: 'c' };
+    if (action === 'execute') return { status: 'unknown', operationId: op };
+    if (action === 'reconcile') {
+      reconciled = true;
+      return { status: 'failed', operationId: op };
+    }
+    if (action === 'read')
+      return { status: 'failed', operationId: op, failureCode: 'NOT_DISPATCHED' };
+    throw new Error('unexpected');
+  });
+  render(<PublicNavigationTask port={port(call)} />);
+  await disclose();
+  fireEvent.click(screen.getByRole('button', { name: '同意傳送並取得建議' }));
+  fireEvent.click(await screen.findByRole('button', { name: '確認是否已送出' }));
+  expect((await screen.findByRole('alert')).textContent).toContain('未送出');
+  expect(screen.getByRole('button', { name: '結案並開始新任務' })).toBeTruthy();
+  expect(call.mock.calls.filter((c) => c[0] === 'execute')).toHaveLength(1);
+  expect(call.mock.calls.some((c) => c[0] === 'ack')).toBe(false);
+});

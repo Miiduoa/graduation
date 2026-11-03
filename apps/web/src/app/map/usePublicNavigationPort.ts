@@ -13,6 +13,7 @@ const ACTIONS = new Set([
   'route',
   'read',
   'status',
+  'reconcile',
   'ack',
 ]);
 

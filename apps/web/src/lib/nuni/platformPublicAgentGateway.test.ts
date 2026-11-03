@@ -193,4 +193,19 @@ describe('unregistered platform public Agent gateway', () => {
     );
     expect(transport).toHaveBeenCalledTimes(1);
   });
+  it('allows only the scoped reconciliation shape', async () => {
+    const handle = createPlatformPublicAgentGateway({ enabled: true, transport, project });
+    const body = {
+      task: 'public-campus-navigation',
+      schoolId: 'pu',
+      operationId: 'pago_11111111-1111-1111-1111-111111111111',
+    };
+    expect(
+      (await handle(request({ body: { ...body, accountId: 'other' } }), 'reconcile')).status,
+    ).toBe(422);
+    expect(transport).not.toHaveBeenCalled();
+    transport.mockResolvedValue({ accepted: true });
+    expect((await handle(request({ body }), 'reconcile')).status).toBe(200);
+    expect(transport).toHaveBeenCalledTimes(1);
+  });
 });
