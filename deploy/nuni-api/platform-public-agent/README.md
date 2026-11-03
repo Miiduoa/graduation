@@ -8,6 +8,7 @@
 ## 身分與資料
 
 - `PlatformPublicAdmission` 使用既有 `PlatformAccountService.resolveSession`，由已驗證的 Platform handle 派生 session hash；不接受 JSON 裡的 owner、角色、學籍、Firebase uid 或校園 revision。
+- 交易內沿用正式 API 的密碼登入條件：password credential 仍須有效的 platform-operator 指派；一般 OAuth credential 不因此要求管理員資格。這不授予任何新角色。
 - 僅接受 `campus-service-entry` 與 `public-campus-navigation`。資料與明確確認須相符，provider 固定為 Groq、model 固定為 `openai/gpt-oss-120b`。這個模型選擇不是帳戶免費額度已驗證的證明。
 - 校園是使用者選定的公開資料範圍，不是學校會員資格。語意入口只是導覽建議，目的頁原權限維持。
 - 導航確認與入場都必須經 server-owned 公開來源讀取器重驗 fingerprint。這裡只有必要介面，沒有用客戶端地點取代真來源，也沒有註冊 Firebase 私人 fetcher。
@@ -43,9 +44,11 @@ Node 22 runner 先做嚴格 TypeScript 編譯，再用合成 resolver／來源�
 
 介面來源為 `Miiduoa/nuni-prod` 的固定基底 `9de47b4b3492325e430562c37bcad552867162db`：
 `apps/api/src/database.ts` 與 `accounts/platform-account-service.ts`；並沿用本 repo personal-import-sync 的鎖定順序。
-這是介面核對，尚未重建整份正式 API。repo 的正式來源記載為 `be815455`／`b0a10ac`，不能把歷史 v20 manifest 當作本輪正式驗收。
+另以 `security/source.json` 綁定的正式 patch 核對 account service：基底 blob `e0b0b883` 套用該檔兩個 hunks 後得到 `ea74d772`，與正式 patch 一致；包含密碼登入的管理員指派條件。
+這是介面與單檔核對，尚未重建整份正式 API。repo 的正式來源記載為 `be815455`／`b0a10ac`，不能把歷史 v20 manifest 當作本輪正式驗收。
 
 啟用前仍需核實完整組合來源、真 migration manifest／runtime grants、資料保留與清理政策，以及真 PostgreSQL 交易／逾時設定。
 HTTP 等待期限不會取消已開始的資料庫交易；鎖等待、statement timeout、延後外鍵及帳號關閉 cascade 都尚待真 PostgreSQL 驗證。
+管理員指派的讀取與 row-lock 權限也須核實；本輪未新增 GRANT，已知鎖定順序核對不代表所有正式撤銷路徑皆已驗證。
 還缺受審的公開 POI reader、兩個固定公開 executor、有限公開結果驗證／來源回驗，以及合法免費環境和逐次資料外送同意。
 這個候選不會建立帳號或學籍、配置 key、修改 billing、套用 migration、啟用 route 或部署。

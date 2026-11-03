@@ -183,12 +183,22 @@ export class PlatformPublicAgentLedger {
       [actor.platformAccountId],
     );
     if (!account.rows.length) return fail('PUBLIC_AGENT_SESSION_EXPIRED', 401);
-    const credential = await tx.query(
-      `SELECT id FROM platform_account_credentials
+    const credential = await tx.query<{ id: string; method: string }>(
+      `SELECT id,method FROM platform_account_credentials
       WHERE id=$1 AND platform_account_id=$2 AND state='active' FOR SHARE`,
       [actor.credentialId, actor.platformAccountId],
     );
     if (!credential.rows.length) return fail('PUBLIC_AGENT_SESSION_EXPIRED', 401);
+    if (typeof credential.rows[0]?.method !== 'string' || !credential.rows[0].method)
+      return fail('PUBLIC_AGENT_STORE_INVALID', 503);
+    if (credential.rows[0]?.method === 'password') {
+      const assignment = await tx.query(
+        `SELECT platform_account_id FROM platform_operator_assignments
+        WHERE platform_account_id=$1 AND role_key='platform-operator' AND state='active' FOR SHARE`,
+        [actor.platformAccountId],
+      );
+      if (!assignment.rows.length) return fail('PUBLIC_AGENT_SESSION_EXPIRED', 401);
+    }
     return this.verifySession(tx, actor);
   }
   private async verifySession(

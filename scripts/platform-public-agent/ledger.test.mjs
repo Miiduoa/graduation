@@ -31,6 +31,7 @@ class TransactionFixture {
     this.data = {
       accounts: new Map(),
       credentials: new Map(),
+      operatorAssignments: new Map(),
       sessions: new Map(),
       confirmations: new Map(),
       operations: new Map(),
@@ -56,6 +57,7 @@ class TransactionFixture {
     this.data.credentials.set(actor.credentialId, {
       account: actor.platformAccountId,
       state: 'active',
+      method: 'google',
     });
     this.data.sessions.set(actor.sessionHash, {
       account: actor.platformAccountId,
@@ -105,6 +107,7 @@ class TransactionFixture {
     if (/FROM platform_accounts\b/u.test(sql)) return 'account';
     if (/FROM platform_account_credentials\b/u.test(sql)) return 'credential';
     if (/FROM platform_account_sessions\b/u.test(sql)) return 'session';
+    if (/FROM platform_operator_assignments\b/u.test(sql)) return 'operator-assignment';
     if (/pg_advisory_xact_lock/u.test(sql)) return 'lock';
     if (/ AS quota_day/u.test(sql)) return 'quota-day';
     if (/ AS at_capacity/u.test(sql)) return 'confirmation-capacity';
@@ -138,7 +141,23 @@ class TransactionFixture {
     if (action === 'credential') {
       assert.match(sql, /platform_account_id=\$2.*state='active'.*FOR SHARE/u);
       const row = this.data.credentials.get(values[0]);
-      return rows(row?.state === 'active' && row.account === values[1] ? [{ id: values[0] }] : []);
+      return rows(
+        row?.state === 'active' && row.account === values[1]
+          ? [{ id: values[0], ...(sql.includes('method') ? { method: row.method } : {}) }]
+          : [],
+      );
+    }
+    if (action === 'operator-assignment') {
+      assert.match(
+        sql,
+        /platform_account_id=\$1 AND role_key='platform-operator' AND state='active' FOR SHARE/u,
+      );
+      const row = this.data.operatorAssignments.get(values[0]);
+      return rows(
+        row?.role === 'platform-operator' && row.state === 'active'
+          ? [{ platform_account_id: values[0] }]
+          : [],
+      );
     }
     if (action === 'session') {
       assert.match(
@@ -480,6 +499,7 @@ test('a different valid credential in the same account does not inherit confirma
   f.db.data.credentials.set(other.credentialId, {
     account: other.platformAccountId,
     state: 'active',
+    method: 'google',
   });
   f.db.data.sessions.set(other.sessionHash, {
     account: other.platformAccountId,
@@ -779,7 +799,7 @@ test('ledger rejects injected fields, malformed bindings and expired local actor
 function admissionFixture(overrides = {}) {
   const f = fixture(overrides);
   const sessions = new Map();
-  const source = { fingerprint: hash('synthetic public source'), calls: [] };
+  const source = { fingerprint: hash('synthetic public source'), calls: [], beforeRead: null };
   const register = (actor, letter) => {
     const handle = `ps_${letter.repeat(43)}`;
     const authorization = `Platform ${handle}`;
@@ -803,7 +823,13 @@ function admissionFixture(overrides = {}) {
     accounts: {
       async resolveSession(value) {
         const actor = sessions.get(value);
-        if (!actor)
+        const credential = actor && f.db.data.credentials.get(actor.credentialId);
+        const assignment = actor && f.db.data.operatorAssignments.get(actor.platformAccountId);
+        if (
+          !actor ||
+          (credential?.method === 'password' &&
+            (assignment?.role !== 'platform-operator' || assignment.state !== 'active'))
+        )
           throw Object.assign(new Error('synthetic invalid session'), {
             code: 'PLATFORM_SESSION_INVALID',
           });
@@ -811,6 +837,7 @@ function admissionFixture(overrides = {}) {
       },
     },
     async readPublicSourceFingerprint(schoolId, query, signal) {
+      await source.beforeRead?.();
       source.calls.push({ schoolId, query });
       assert.equal(signal.aborted, false);
       return source.fingerprint;
@@ -993,4 +1020,85 @@ test('composed source change after confirmation rejects before any consume or qu
   assert.equal(f.db.data.operations.size, 0);
   assert.equal(f.db.data.quota.size, 0);
   assert.equal(await f.admission.read(f.authorization, requestLookup(request)), null);
+});
+
+test('composed password role revocation after resolution denies admission before consuming or charging', async () => {
+  const f = admissionFixture(),
+    request = publicRequest();
+  f.db.data.credentials.get(f.actor.credentialId).method = 'password';
+  f.db.data.operatorAssignments.set(f.actor.platformAccountId, {
+    role: 'platform-operator',
+    state: 'active',
+  });
+  const confirmation = await f.admission.confirm(f.authorization, { approved: true, request });
+  // The resolver has accepted this password session before the public source is read.
+  // Revoking the assignment alone does not delete the still-valid session row.
+  f.source.beforeRead = () => {
+    f.db.data.operatorAssignments.get(f.actor.platformAccountId).state = 'revoked';
+  };
+  await rejectsCode(
+    f.admission.claim(f.authorization, { confirmationId: confirmation.confirmationId, request }),
+    'PUBLIC_AGENT_SESSION_EXPIRED',
+  );
+  assert.equal(f.db.data.sessions.has(f.actor.sessionHash), true);
+  assert.equal(f.db.data.confirmations.values().next().value.consumed_at, null);
+  assert.equal(f.db.data.operations.size, 0);
+  assert.equal(f.db.data.quota.size, 0);
+});
+
+test('composed ordinary OAuth session works without an operator assignment or assignment read', async () => {
+  const f = admissionFixture(),
+    request = publicRequest();
+  const confirmation = await f.admission.confirm(f.authorization, { approved: true, request });
+  const result = await f.admission.claim(f.authorization, {
+    confirmationId: confirmation.confirmationId,
+    request,
+  });
+  assert.equal(result.status, 'claimed');
+  assert.equal(f.db.data.operatorAssignments.size, 0);
+  assert.equal(
+    f.db.events.some((event) => event.action === 'operator-assignment'),
+    false,
+  );
+  assert.deepEqual(quotas(f.db), [1, 1]);
+});
+
+test('composed active password session locks its assignment between credential and session', async () => {
+  const f = admissionFixture(),
+    request = publicRequest();
+  f.db.data.credentials.get(f.actor.credentialId).method = 'password';
+  f.db.data.operatorAssignments.set(f.actor.platformAccountId, {
+    role: 'platform-operator',
+    state: 'active',
+  });
+  const confirmation = await f.admission.confirm(f.authorization, { approved: true, request });
+  const result = await f.admission.claim(f.authorization, {
+    confirmationId: confirmation.confirmationId,
+    request,
+  });
+  assert.deepEqual(await f.admission.read(f.authorization, requestLookup(request)), {
+    ...result,
+    status: 'pending',
+  });
+  for (const begin of f.db.events.filter((event) => event.action === 'begin')) {
+    assert.deepEqual(
+      f.db.events
+        .filter((event) => event.tx === begin.tx)
+        .slice(1, 5)
+        .map((event) => event.action),
+      ['account', 'credential', 'operator-assignment', 'session'],
+    );
+  }
+  assert.deepEqual(quotas(f.db), [1, 1]);
+});
+
+test('missing credential method cannot bypass the password assignment check', async () => {
+  for (const method of [undefined, null, '']) {
+    const f = fixture();
+    f.db.data.credentials.get(f.actor.credentialId).method = method;
+    await rejectsCode(f.ledger.confirm(f.actor, binding()), 'PUBLIC_AGENT_STORE_INVALID');
+    assert.equal(f.db.data.confirmations.size, 0);
+    assert.equal(f.db.data.operations.size, 0);
+    assert.equal(f.db.data.quota.size, 0);
+  }
 });
