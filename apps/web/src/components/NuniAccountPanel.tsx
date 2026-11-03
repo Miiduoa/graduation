@@ -93,12 +93,15 @@ function ConfirmedAccountPanel({
       operation.resolve();
     }
   }, [loading, readerVersion, recovery]);
-  if (!loading && !confirmed) setConfirmed(true);
-  if (!loading && recovery === 'settled') {
+  useEffect(() => {
+    if (!loading) setConfirmed(true);
+  }, [loading]);
+  useEffect(() => {
+    if (loading || recovery !== 'settled') return;
     setRecovery('idle');
     setReaderSuppressed(false);
     setReaderVersion((value) => value + 1);
-  }
+  }, [loading, recovery]);
   function recoverMemberships() {
     if (recoveryOperation.current) return recoveryOperation.current.promise;
     if (loading || !mounted.current) {
@@ -188,6 +191,7 @@ function ConfirmedAccountPanel({
             <AccountMemberships
               key={readerVersion}
               context={session.context}
+              paused={loading}
               refreshAccount={recoverMemberships}
             />
           )}

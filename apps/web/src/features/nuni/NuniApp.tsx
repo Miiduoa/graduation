@@ -594,7 +594,9 @@ function AccountMembershipEntry({
   refreshAccount: () => Promise<void>;
 }) {
   const [confirmed, setConfirmed] = useState(!paused);
-  if (!paused && !confirmed) setConfirmed(true);
+  useEffect(() => {
+    if (!paused) setConfirmed(true);
+  }, [paused]);
   return confirmed ? (
     <AccountMemberships context={context} paused={paused} refreshAccount={refreshAccount} />
   ) : null;
